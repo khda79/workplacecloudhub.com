@@ -3,7 +3,7 @@
 .SYNOPSIS
 Offline producer-receipt tests for PowerShell 5.1 and 7. No operational imports.
 .VERSION
-1.0.8
+1.0.9
 #>
 [CmdletBinding()]
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidGlobalVars','',Justification='Synthetic Core globals are saved and restored; no operational module is imported.')]
@@ -49,17 +49,17 @@ function Start-SyntheticReceipt {param($Fixture)
     & $mock {param($p,$r) Start-SmartM365CmdbSourceReceipt -ScriptPath $p -SourceRootPath $r} $Fixture.Producer.Script $Fixture.Directory
 }
 function Complete-SyntheticReceipt {param($Fixture,[bool]$Scope=$true,[string]$Status='Success',[int]$Errors=0)
-    & $mock {param($scope,$qualified,$status,$errors)
+    $result=& $mock {param($scope,$qualified,$status,$errors)
         Set-SmartM365CmdbSourceScope -CompleteScope $qualified -Scope $scope
         Complete-SmartM365CmdbSourceReceipt -Status $status -ErrorCount $errors
-    } $Fixture.Producer.Scope $Scope $Status $Errors | Out-Null
-    return (Get-Content $Fixture.Receipt -Raw | ConvertFrom-Json)
+    } $Fixture.Producer.Scope $Scope $Status $Errors
+    return (Get-Content $result -Raw | ConvertFrom-Json)
 }
 try {
     $fixture=New-SyntheticProducer
     Start-SyntheticReceipt $fixture
-    $running=Get-Content $fixture.Receipt -Raw | ConvertFrom-Json
-    Assert-ReceiptTest ($running.Status -eq 'Running' -and $running.IsPartialInventory) 'Start must invalidate old completion evidence.'
+    $running=Get-Content ($fixture.Receipt -replace '\.current\.json\.txt$','.run.json.txt') -Raw | ConvertFrom-Json
+    Assert-ReceiptTest ($running.Status -eq 'Collecting' -and -not(Test-Path $fixture.Receipt)) 'Start must not fabricate completion evidence.'
     $receipt=Complete-SyntheticReceipt $fixture
     Assert-ReceiptTest ($receipt.Status -eq 'Completed' -and -not $receipt.IsPartialInventory) 'Complete producer rejected.'
     Assert-ReceiptTest ($receipt.Files[0].Rows -eq 1) 'Logical multiline CSV row count is wrong.'
@@ -172,6 +172,10 @@ try {
             $scopeAssignment=$ast.Find({param($a) $a -is [Management.Automation.Language.AssignmentStatementAst] -and $a.Left.Extent.Text -eq '$scope' -and $a.Right.Extent.Text -match 'Get-EACollectionScope'},$true).Extent.Text
             $expression=$helperDefinition+"`n"+$scopeAssignment+"`n"+$expression
         }
+        if ($producer.Script -eq 'SmartM365-Exchange-Local-Mailboxes-Inventory.ps1') {
+            $assignment=$ast.Find({param($a) $a -is [Management.Automation.Language.AssignmentStatementAst] -and $a.Left.Extent.Text -eq '$script:LocalMailboxDailySummaryQualified' -and $a.Right.Extent.Text -match 'DetectAllDomains'},$true).Extent.Text
+            $expression=$assignment+"`n"+$expression
+        }
         Assert-ReceiptTest ([bool](& $scopeModule {param($e,$v) Test-CmdbScopeExpression $e $v} $expression $scopeDefaults)) ('Complete fixture scope rejected: '+$producer.Script)
         if($restricted.ContainsKey($producer.Script)){
             foreach($name in $restricted[$producer.Script].Keys){
@@ -200,8 +204,8 @@ try {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAesvh2pD7dYe8K
-# cuigu5QtcSnwTUZ5tu1wA91u74h6VqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD3XLzpit7/SroJ
+# gh5WHhWSdcNcaM87dNYg+8sdZGwobqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -334,31 +338,31 @@ try {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIGHoHSyDA8DxJOdVNJYF1dd0ix+8gkr9aNYb8Gb/1POgMA0GCSqG
-# SIb3DQEBAQUABIIBgHMq3PgUYhOo5Km8YIvBPLL14+QzLP6avuHrLoP/rdghOZ0+
-# Tdded+4iftie4Y/aZ3O8GX+3ksjm8Rsc06YYHhfmecCK2LQeor5hx/WVhLC5lVeh
-# YtgjwgBL0XfhorqrqvmoDDKfjuU1gACnE69n9sEGiMqcwBD08TaAMR0Cr3q2+OYy
-# jc8GaaDurE7Jk6ZsqWWFgrt0kUCc4cIzfOnp+yQP8s+PJnmWXxvrQuASORidydch
-# 377z01CXVYOjFWcWLIISoXdUeT3IYmgJAVrYqDXDecjBvoBPymnKENjo9KG58xgf
-# GBOGryAUYLZv7awEl6A/o5bhCWQ3cK/wvvQs15RwEaB7rxP6ON0aULhQK573+Zqp
-# 4AqmgbSQPO1V8jGIpfMCj22XaV/Jf6lBHjI9t20uGuGNldi7K7WyBu0/v6grGSbX
-# mMjHGRWATUFTX8BnJN17nB4uYgVgQ00R+BgDQbpHTRSM+JKVUDBY5Wmkjgvk1YP/
-# KQzKs1FYw0oQENe9OaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIIfzX3IwzA3mnoiMNX7LtoVTHBNj+vQaSIU5Unr6JOfPMA0GCSqG
+# SIb3DQEBAQUABIIBgG9BEdLajhUc2Ws6NxNTFmNo3wSx+p305pFEVILA0Y0KG5HB
+# Xt8dVWFCTSo+TxXRTu3VZz38iVQktcPMWd2XH/RE36xUASrSJ+OV7XMTCOnRiwYu
+# s4PeNrrZt38On9dgjTNhYWSjPWgc6HutJcU2ZE+6bXZbNSBnODd8pIq1q4DiHdnp
+# iYoBqgE7xlhfLmGnvoVDw8CIzHVnxzculmVBJKqjAcj8dY8yvOCibRboNqAiXKwf
+# RXGrh4GcsEWb0lnTZyVbz/4JH//6TZue++iUY+cEWfqx5DhOBSUjBTf5cKxj5OcN
+# Z97ze1vNnZRsvVC75xZNfNxHvD+zVoKQtooHDYBs9Aat2/yK2ljbD7E/kVyyTmHy
+# Jp99Rg74Bc4gtIPBLxHQyF9JSWaZglPbmg3fgzd2r0cFytXsBosg1U3vpwPkVIJ7
+# ZKO2WWKRTsg/A4VxcaYdwPTTMR3yerVLVb9yklAzPW+nIEBIcrLUZWbkLyWFCyU5
+# Tsw2b7dQ2Xv+Etgcy6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDYxODA3
-# MThaMC8GCSqGSIb3DQEJBDEiBCCUzRz43trjY69wWQcsjdCYd+qJK1s6C2Cw600V
-# Juz42jANBgkqhkiG9w0BAQEFAASCAgCFQO9E56ZiUu9RcjMKrCjd6Kzq2vWBMVD5
-# FpITrBBon+jc6L3nS/aeaJsEO6k4sYmU+GPM+qf45VFFasOOtq7OHoJ4YApV6Hp5
-# Ax264gz7tuMucJ0SKAp7BKvsOpbouVP+p/MazdcqhM/gAYfo9EkBYsNNNBfEEm7b
-# RJD0Rzr0TlOGr7EIks7jtMOivZacxFEWMi2g0V4V0xlDtc7v2RvliTr/7sW/N7Hk
-# A86pp+HYpx4uMloKpvRoGIjdJgt11fce6BSmDmBogEFL1DwnqEeNMhIwEAUd4vC6
-# EQfkHUTXUHauhcsa7fGB86o5JgYKYIwYDyC9UFb8vdRWeIna1hR8rBeNOHg6Ao4I
-# 7EtlyN0+den+p91qY1thnbPdKCGJVgtP+GoOsX3xjTTj0QtECW48lzMvYR2TMlK+
-# VrCNHlqxuaamLt3ulbnu4ItB/uk3Bf7YrFTHcwLGW2NX2/gPNbtRpvUKpatZaqhs
-# SBgQnRqiGPXEckM4ByD99c+tHuBXlb6NQdN05XI5JSH+R5tDP/Be24ltYNch9Q8l
-# vvgWuv2fne38vF48ErkxoeIyvESF05WzpVlRSGJKPsDOc6gE+AdUiyoN/BP6EV/l
-# W4jM0flASDK2fKxlMF638ieYWL+3rQptmvzAo4jXNdpBwDnkF4c+c0nQDYj/mAMy
-# akYW9+t+LQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDcxMDMx
+# MjRaMC8GCSqGSIb3DQEJBDEiBCCYV8Egufr7qODmzvxfMdd+6emNvvhNm2E/tGzk
+# teWrzDANBgkqhkiG9w0BAQEFAASCAgCm0qiyochLdpwu+uurVdCyBJds+vAuAN03
+# PW4YEsfYRQTKEFVMRSQVWed1HkyBk4SspOV2O70bbThK/99w1zBtSIkge7plSmIT
+# RRqxYx17C3qBpEe/yMzdgDnjmPjcxGLgeSC9LWcJ7T/+pWI+Qe/l/XG5RdzGYVaB
+# 9+NSr/T9QoWYZ9Nl/fTyEVmLXYWGU4Vdd66h7Z18q4zQaV7C1aSRhnfJkrXh2RKS
+# VbLdyzMNcGnBYV2TwnDC8AIzrkbYpJ3fV4jpchsPwYbfNyrL6mDtLoVgfOPAnuGq
+# nYIUSIjGqHSJ2dya9156xBP+6L7tJuiyMDA3qNBonoKpVOfPBWnX8yotwjBRX/AQ
+# F8rv6BqtWx322Q+ucAVmasWyJ/EagTSiVza8z40M6tLyV9UPUnBFs6OtHA1BlY6c
+# Rgygvrd9MliK0bl/HI0dR+8fu5nYjPnp3P/IJ0gXuWG11zIjSk18s3znj+xXTqj0
+# bPzEBFFwbV7PvLZlCosl2mQaGErnJRYCseQe51jyWSrV3ybhscTxCfg8pr2iEpKH
+# xOEj7bEvjqC9itFQaqPqqfyQO5yRgWxKtjvbYfuo1EZmzDDX/Rh0PuPLpRFUUO7s
+# 8xQ/y7JZhzlFc3alODVpZba7USBqc/94J38JuQ7W2Etg4tqa8WsDOrshF2E8O7Gm
+# khMsHwQM2Q==
 # SIG # End signature block

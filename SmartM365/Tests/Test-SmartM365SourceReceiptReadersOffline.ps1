@@ -1,95 +1,78 @@
-﻿@{
-    RootModule = "SmartM365-WindowsPowerShell5.psm1"
-    ModuleVersion = "1.0.52"
-    GUID = "dde15961-7933-412f-8d09-e1dd8a889b65"
-    Author = "Internal automation team"
-    CompanyName = "Internal"
-    Copyright = "(c) 2025 Internal automation team. All rights reserved."
-    Description = "Windows PowerShell 5.1 compatibility module for SmartM365 initialization, logging, cleanup, and cloud session helpers."
-    PowerShellVersion = "5.1"
-    FunctionsToExport = @(
-        "InitializeScriptEnvironment",
-        "RemoveOldFiles",
-        "Remove-SmartM365TimestampedFilesOlderThan",
-        "Remove-SmartM365TimestampedDirectoriesOlderThan",
-        "Remove-OldFiles",
-        "EnsureExchangePSSnapinLoaded",
-        "Format-SmartM365LogLine",
-        "Update-SmartM365TimestampedTranscript",
-        "Get-SmartM365ModuleDiagnosticText",
-        "Write-SmartM365LoadedModuleVersions",
-        "Complete-SmartM365ExecutionContext",
-        "Start-SmartM365CmdbSourceReceipt",
-        "Set-SmartM365CmdbSourceScope",
-        "Start-SmartM365SourceReceipt",
-        "Complete-SmartM365SourceReceipt",
-        "Assert-SmartM365SourcePublication",
-        "Write-SmartM365CompletionBanner",
-        "WriteLog",
-        "Set-SmartM365CoreContext",
-        "Get-SmartM365MaxItemsValue",
-        "Test-SmartM365MaxItemsMode",
-        "Get-SmartM365MaxItemsSuffix",
-        "Set-SmartM365MaxItemsMode",
-        "Add-SmartM365MaxItemsSuffixToCsvPath",
-        "Add-SmartM365MaxItemsSuffixToBaseName",
-        "Add-SmartM365MaxItemsMailBanner",
-        "Add-SmartM365MaxItemsSubjectPrefix",
-        "Get-SmartM365MailTenantName",
-        "Format-SmartM365MailSubject",
-        "Get-SmartM365MailScriptContext",
-        "Add-SmartM365MailExecutionFooter",
-        "Limit-SmartM365RowsForMaxItems",
-        "Get-SmartM365CsvValidationBaseName",
-        "Get-SmartM365CsvValidationRule",
-        "Assert-SmartM365CsvDataCompleteness",
-        "Add-SmartM365CsvValidationRule",
-        "Initialize-SmartM365DefaultCsvValidationRules",
-        "Add-SmartM365TenantKey",
-        "Repair-SmartM365CsvTenantKeySchema",
-        "Write-SmartM365CsvAtomically",
-        "Add-SmartM365CsvRowsAtomically",
-        "Copy-SmartM365FileAtomically",
-        "Write-SmartM365TextAtomically",
-        "Publish-SmartM365Csv",
-        "Export-SmartM365Csv",
-        "Invoke-SmartM365Preflight",
-        "Save-SmartM365WeeklyInventoryHistory",
-        "Add-SmartM365WeeklyHistory",
-        "Send-SmartM365TeamsNotification",
-        "SendFileListEmailReport",
-        "NewTableFilesEmailBody",
-        "ConvertTo-SmartM365EmailHtmlText",
-        "ConvertTo-SmartM365ConfigBoolean",
-        "Get-SmartM365MailBrandingConfig",
-        "ConvertTo-SmartM365MailLogoDataUri",
-        "Add-SmartM365MailBranding",
-        "New-SmartM365EmailBody",
-        "ConvertTo-SmartM365EmailBody",
-        "ExportAndCopyCsv",
-        "ExportAndCopyCsvFromConvert",
-        "ConvertTo-SmartM365SharePointDataRootPath",
-        "Get-SmartM365SharePointRelativeFilePath",
-        "Invoke-SmartM365SharePointCsvUpload",
-        "Remove-SmartM365SharePointFile",
-        "Remove-SmartM365SharePointTimestampedCsvOlderThan",
-        "NewRemoteScheduledTaskAndWait",
-        "SendEmailHtmlReport",
-        "NewSimpleEmailBody",
-        "NewTableEmailBody",
-        "GetFileList",
-        "Connect-SmartM365CloudSession",
-        "Disconnect-SmartM365CloudSession"
-    )
-    VariablesToExport = @()
-    AliasesToExport = @()
+#Requires -Version 7.0
+<#
+.SYNOPSIS
+Offline retained-proof checks for Licensing and the Exchange proxy-address reader.
+.VERSION
+1.0.0
+#>
+[CmdletBinding()]
+param()
+Set-StrictMode -Version Latest
+$ErrorActionPreference='Stop'
+$root=Split-Path $PSScriptRoot -Parent
+. (Join-Path $root 'Modules/SmartM365.Core/SmartM365-CmdbReceipt.ps1')
+$tokens=$null;$errors=$null
+$ast=[Management.Automation.Language.Parser]::ParseFile((Join-Path $root 'SmartInventory/M365Inventory/Licensing/SmartM365-Licences-Inventory.ps1'),[ref]$tokens,[ref]$errors)
+if($errors.Count){throw 'Licensing parser failed.'}
+foreach($name in @('Get-LicensesCsvSource','Import-LicensesSourceCsv')){
+    $node=$ast.Find({param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name},$true)
+    Invoke-Expression $node.Extent.Text
+}
+Import-Module (Join-Path $root 'SmartInventory/ExchangeInventory/OnPremises/Mailboxes/SmartM365.ExchangeProxyMail.psm1') -Force
+$fixture=Join-Path ([IO.Path]::GetTempPath()) ('SmartM365-ReceiptReaders-'+[guid]::NewGuid().ToString('N'))
+New-Item -ItemType Directory -Path $fixture | Out-Null
+$checks=0
+function Check {param([bool]$Condition,[string]$Message) if(-not $Condition){throw $Message};$script:checks++}
+try {
+    $detail=Join-Path $fixture 'Exchange_OnPrem_ProxyAddresses_Check.csv'
+    $summary=Join-Path $fixture 'Exchange_OnPrem_ProxyAddresses_Summary.csv'
+    [pscustomobject]@{TenantKey='synthetic';Name='one';ExpectedAddressSource='Alias';ExpectedAddress='one@synthetic.invalid'} | Export-Csv -LiteralPath $detail -NoTypeInformation
+    @('With expected address present','With expected address missing','Planned address additions if Write is enabled','On-premises mailboxes processed','Remote mailboxes processed','Total recipients processed') |
+        ForEach-Object {[pscustomobject]@{TenantKey='synthetic';Summary=$_;Count=1}} | Export-Csv -LiteralPath $summary -NoTypeInformation
+    $current=Join-Path $fixture 'SmartInventory_SmartM365-Check-ProxyAddresses-Exchange.current.json.txt'
+    $runPath=$current -replace '\.current\.json\.txt$','.run.json.txt'
+    $identity=@{TenantKey='synthetic';OrganizationKey='test';EnvironmentKey='test';TenantId='synthetic-tenant';Producer='SmartM365-Check-ProxyAddresses-Exchange.ps1'}
+    $proof=@{Owner='SmartInventory-SourceReceipt';ContractVersion='1.2';PublicationProtocol=1;Status='Completed';Errors=0;IsPartialInventory=$false;RunId='validated';ScriptVersion='synthetic';StartedAtUtc=[datetimeoffset]::UtcNow.AddMinutes(-5).ToString('o');CompletedAtUtc=[datetimeoffset]::UtcNow.ToString('o');ScopeParameters=@{AddMissingAddress=$false;AllOrganizationalUnit=$true};Files=@()}
+    foreach($key in $identity.Keys){$proof[$key]=$identity[$key]}
+    foreach($path in @($detail,$summary)){$proof.Files+=@(@{File=[IO.Path]::GetFileName($path);RunId='validated';Status='Success';IsPartialInventory=$false;Rows=@(Import-Csv $path).Count;SHA256=(Get-FileHash $path).Hash})}
+    [IO.File]::WriteAllText($current,($proof | ConvertTo-Json -Depth 8))
+    $run=@{Owner='SmartInventory-SourceRun';ContractVersion='1.0';Status='Collecting';RunId='new-attempt';PublicationStarted=$false;UnqualifiedPublication=$false}
+    foreach($key in $identity.Keys){$run[$key]=$identity[$key]}
+    $parameters=@{Folder=$fixture;FileName=[IO.Path]::GetFileName($detail);Columns=@('TenantKey','Name');AsOfUtc=[datetime]::UtcNow;CollectorManifestName=[IO.Path]::GetFileName($current)}
+    foreach($state in @('Collecting','Failed')){
+        $run.Status=$state
+        [IO.File]::WriteAllText($runPath,($run | ConvertTo-Json))
+        $source=Get-LicensesCsvSource @parameters
+        Check ($source.Ready -and @(Import-LicensesSourceCsv -Source $source).Count -eq 1) 'Licensing rejected unchanged validated export during collection or a pre-publication failure.'
+        Check (Get-SmartM365ProxyMailEvidence -LatestCsvFolderPath $fixture -TenantKey synthetic).Available 'Exchange rejected unchanged validated export during collection or pre-publication failure.'
+    }
+    $run.Status='Publishing';$run.PublicationStarted=$true;$run.UnqualifiedPublication=$true
+    [IO.File]::WriteAllText($runPath,($run | ConvertTo-Json))
+    Check (-not (Get-LicensesCsvSource @parameters).Ready) 'Licensing accepted canonical replacement in progress.'
+    Check (-not (Get-SmartM365ProxyMailEvidence -LatestCsvFolderPath $fixture -TenantKey synthetic).Available) 'Exchange accepted canonical replacement in progress.'
+    $run.Status='Failed'
+    [IO.File]::WriteAllText($runPath,($run | ConvertTo-Json))
+    Check (-not (Get-LicensesCsvSource @parameters).Ready) 'Licensing accepted failed replacement.'
+    Check (-not (Get-SmartM365ProxyMailEvidence -LatestCsvFolderPath $fixture -TenantKey synthetic).Available) 'Exchange accepted failed replacement.'
+    $run.Status='Collecting';$run.PublicationStarted=$false;$run.UnqualifiedPublication=$false
+    [IO.File]::WriteAllText($runPath,($run | ConvertTo-Json))
+    $source=Get-LicensesCsvSource @parameters
+    [IO.File]::AppendAllText($detail,"synthetic,two,Alias,two@synthetic.invalid`r`n")
+    $rejected=$false
+    try{Import-LicensesSourceCsv -Source $source | Out-Null}catch{$rejected=$true}
+    Check $rejected 'Licensing accepted a CSV changed after validation.'
+    Check (-not (Get-LicensesCsvSource @parameters).Ready) 'An optional file receipt skipped protocol-1 hash validation.'
+    Check (-not (Get-SmartM365ProxyMailEvidence -LatestCsvFolderPath $fixture -TenantKey synthetic).Available) 'Exchange accepted a CSV differing from its proof.'
+    "PASS: $checks offline source-reader checks. No collectors, tenant calls, uploads or live data."
+} finally {
+    if([IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($fixture)).TrimEnd('\') -eq [IO.Path]::GetTempPath().TrimEnd('\') -and [IO.Path]::GetFileName($fixture) -like 'SmartM365-ReceiptReaders-*'){Remove-Item -LiteralPath $fixture -Recurse -Force}
 }
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCWJG29eC3pY4q5
-# x9BwdZCIlPr56y6z35RtiYRprjb/3qCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCKpe9Ud8ctKvBu
+# ttiblHkBPRhLqMQ8VrHRf3JhqzqSlqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -222,31 +205,31 @@
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIGsaZLN3vY/dnbyrDzEdsJFxDm0yiLBvaHGFmHz3B6MbMA0GCSqG
-# SIb3DQEBAQUABIIBgAvjQEAjbGQ8NNa5xBxwzMiHqSacr9fmHfSJ3quydgsXTJED
-# o9RuSWIxczd6pUJbSbpymW3QDVVDxzk4545Trdt4mvk5MBP/C5zMSnW5ZFAtryij
-# IZFg0gYIbAaLxpxF+vDX4VKWqch4ghMJ7Ygg3J8fxjgnBi6sVN4CohAELH/K1Bw8
-# n+pPovNUzdfHviDrbwqXcKcqxaqTsLiM/hSoZAfP/B2ywrLckANpyKnANldfkbSK
-# 9mEvxG5g/6rQJ24ZF+TnxXWIhKjCURVPBVNX4pkJ1Viq4f4T0xR5REZzCcyfeXJI
-# 5wEMfA44THyMq27yQfIP0qYZ+VPlkfpAHuANGgaWhcTeVv/yMHsKAnNhQad9+3EX
-# i3MPPYLCmrc3ohaRB4nkvyy7upz/W+05dV46/wQuLd/okq8HP/LLOx1qU1Wcx8o+
-# bewkQIxelqspGcdyEAip8njBhPVi4+h0jv+DaPF0y1pq4/Ndjpw0FwDVqrteiymD
-# 3Q28fk4Niz39jQe9eqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIF6N/vvRb9IkvzhloO6T5swHuLaY9mkiuqippcB8xcv2MA0GCSqG
+# SIb3DQEBAQUABIIBgHIrUy1MFQbjC3uL/3TuPaTZ/VDRqC08gudVd5Ozn9A/CgrP
+# sv3NF2+wbluIamFBTBsmiybX66oa6moY61COybRokYOw9OguxhoSVq91lugy1FeC
+# YSGDa1zCkuPlgJ0IMky7SJed5waWIDL5szGW5xjGI/LCfcGqWDT2TfCT3KjDASSe
+# oVq5XWC6i8nwNRFe7af9B5e3XFOIi7+XtTxG0UoKId52xV0oP7maShA4crL2ITHh
+# Na5vdYiZm/eIhiLV5wh+ZzoHU4PsU2XPamSLonzGpzeZamnKsH+SR2IfYIwKucxV
+# EnomCorwDsZOR1x0NkfaAHU6kewoetB9bLPzlaLPv0OsAT0CEXuAvTtKczzxRC73
+# X1onKWha0czz24Vtj2m5HOL2ymCVkAcgur8NHDaA4OpSt4qR2mAk3n2+vsiIU1UJ
+# QgfP2Ofq6O7cqwG6HyFPJlfUztMGh+ki8rwfu1gi5tGWbdwoQ2ENgA31eWYxWBTW
+# YTcb7V422Km3chZe4qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
 # hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDcxMDMx
-# MTlaMC8GCSqGSIb3DQEJBDEiBCACiSLQ72I/YnJSGPB4nMJhMzpPeCAYCSAnyMAp
-# XFP6FTANBgkqhkiG9w0BAQEFAASCAgBSIuNQ2169ARoF9FwY5fwNq5jza2i0U58H
-# Dp4uBgtkQgBQCcio1ntuBp1dznzdZrFPHao/jDtllfmJtbubMsKZJiFCQYorLsTr
-# 1jujjE8Pz/GrhjAw9e4P9uhnwTtplkeDrFLQjHSa1C8YJonv3O81uJpqoA9Dl69s
-# jPadVzXlFPt9suytqTg963+ty6p5VG0F/6CR4WAPd8oCybiChfQIAyunR2TodkE7
-# 3iP15ao6oGVnGYQiaXS/kQjWS340oB3HsiWUntHd4H9E9zHtuiFUoZQEVj/DTgSD
-# rmq7pc0hoHSQOJpsilVeUvhuzZb4TqAL6tfJ0uA2ntrEC+4hXgHfaol+M7LWys+y
-# VY1Xaj+vBugjmuVA6g2VdpOg9nak43ZGGgXt750/AB3jRjTi9klR3h/x3dPoy+OA
-# QQSoMT2bb8Aw/Dwzn+GqZrlehGncZWIS7fuVqKQp7H8zkMttb7og+2Gh/UjKTMwM
-# 8VJJ431YJ+MY9X1HjKQS1/8PggY1SqBPZwTXRYFwgEz67YUpoqSabryKlmHahOfm
-# ZA1C5ih/7A/jZbtSE4UqIGEviOelC2qOFIYWyxjMprawcBfsjeYtyogwE1LrkcGE
-# cXuZepa7jV4vSM6mFmeGzheCKj5plSqlng9fENXPxmYg+xQCLscEv1J+48KyfjBH
-# C4Mj8zKrzQ==
+# MjVaMC8GCSqGSIb3DQEJBDEiBCDndlmfegufctLtFawgI5CXQnblr3QKs8zttczX
+# d7VlRTANBgkqhkiG9w0BAQEFAASCAgCcnusLKY6eWSEviuXmhSkYPK5LdgQ1/sHc
+# ovZAoop7Qtdlvk3F8NlBAkH5WaV/QhdQm6vjC2NX9pJNcgdbcRBX8V0pRGst7xrf
+# pI85kdMrliAUoDvFLE1ip3NWbPcUP/YpkXs/GVC5ZcfwngfUxGe7Pavteh037tEo
+# /oDCsV/3n1KxT/XopEYUXCmwmbnCRbrYpjq/D+nl4di6SQ5OvDCdM6VDwr2cVGr0
+# 7ku//tEKlHroh+3QAlJFib9rw2Gaib6YBRHttNnFIACE7cMTz/iXakqjQ0BRZ1Bj
+# 0ydOKnT11xbHSiQmBmP/fB4PDe+aIkAFFuPJghNHZuS9c8qjZPzxXVpUAQ2yYXjZ
+# Ldg2v7WbDHyBlJU4itcVP/K3TA6YpZ49/4HnWFFv0GT+cajJQR5yDiRhOKHVdkIS
+# Bouc+xm9UHUUqa+JBQwmGvmyVEZPUgUyPmiJfGUg5aAr4lTgtRTNY5CzAGTFEq1t
+# wY9A3ZDfvJG3jAcaXxMNf5DzvqSB9+zokqSmoc2Czs6Xq5QmJiAmp/w3Yfu2suD2
+# HVQUNsALt0lnMRiP+WAyDR+OWmgotFriA6NLOenqkjm6h3QvleYNZGNy0dkMt4iK
+# 0ZG0fdIK1gtczROCMGWb6ZyA/5yAtDmRIa5sV7SwkvrYsUOKFV1DJkA/DLdu8Gtb
+# zrQGO5XTYw==
 # SIG # End signature block

@@ -9,7 +9,7 @@
   BypassLicenseUsersReceipt temporarily accepts the fresh license-users CSV when its file receipt is missing or a new collection is running over a prior CSV.
   ForceLicenseSummaryEmail sends the report again even when it was already sent on the current Europe/Paris day.
 .VERSION
-1.40
+1.41
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication; Microsoft.Graph.Identity.DirectoryManagement; Microsoft.Graph.Users; Microsoft.Graph.Groups; ImportExcel for the report attachment.
@@ -255,7 +255,7 @@ $OrgDomain = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'OrgDom
 # ==========================================================
 $modulePath = & { $d = $PSScriptRoot; while ($d) { $p = Join-Path $d 'Modules\SmartM365.Core\SmartM365.Core.psd1'; if (Test-Path -LiteralPath $p) { return $p }; $parent = Split-Path -Path $d -Parent; if ($parent -eq $d) { break }; $d = $parent }; throw 'SmartM365.Core module not found.' }
 try {
-    Import-Module -Name $modulePath -MinimumVersion '1.0.78' -ErrorAction Stop
+    Import-Module -Name $modulePath -MinimumVersion '1.0.79' -ErrorAction Stop
 } catch {
     Write-Host "Failed to import SmartM365.Core module from '$modulePath' : $_" -ForegroundColor Red
     exit 1
@@ -707,11 +707,12 @@ function Get-LicensesCsvSource {
     [switch]$RequireConsumerScope
   )
   $path = Join-Path -Path $Folder -ChildPath $FileName
-  $source = [pscustomobject]@{ Name=$FileName; Path=$path; Ready=$false; Reason=''; Date=''; ModifiedUtc=$null; Provenance='CSV only'; Forced=$false }
+  $source = [pscustomobject]@{ Name=$FileName; Path=$path; Ready=$false; Reason=''; Date=''; ModifiedUtc=$null; Provenance='CSV only'; Forced=$false; SHA256=''; ReceiptPath=''; ReceiptHash=''; Proof=$null }
   if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { $source.Reason='missing'; return $source }
   $item = Get-Item -LiteralPath $path
   $source.ModifiedUtc = $item.LastWriteTimeUtc
   $source.Date = $item.LastWriteTimeUtc.ToString('yyyy-MM-dd')
+  $source.SHA256=(Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash
   if ($item.LastWriteTimeUtc.Date -lt $AsOfUtc.Date.AddDays(-14)) { $source.Reason='older than 14 days'; return $source }
   $header = Get-Content -LiteralPath $path -TotalCount 1 -ErrorAction Stop
   $foundColumns = @($header.TrimStart([char]0xFEFF).Replace('"','').Split(','))
@@ -722,7 +723,9 @@ function Get-LicensesCsvSource {
     $manifestPath = Join-Path -Path $Folder -ChildPath $CollectorManifestName
     if (Test-Path -LiteralPath $manifestPath -PathType Leaf) {
       try {
+        $manifestHash=(Get-FileHash -LiteralPath $manifestPath -Algorithm SHA256).Hash
         $manifest = Get-Content -LiteralPath $manifestPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        Assert-SmartM365SourcePublication -ReceiptPath $manifestPath -Proof $manifest
         if ([string]$manifest.Status -ne 'Completed' -or [bool]$manifest.IsPartialInventory) {
           $source.Reason = "collector receipt is $($manifest.Status) or partial"
           return $source
@@ -732,7 +735,7 @@ function Get-LicensesCsvSource {
           return $source
         }
         $fileReceipts = @($manifest.Files | Where-Object { [string]$_.File -eq $FileName })
-        if ($RequireFileReceipt -and $fileReceipts.Count -eq 0) {
+        if (($RequireFileReceipt -or $manifest.PSObject.Properties['PublicationProtocol']) -and $fileReceipts.Count -eq 0) {
           $source.Reason = 'file missing from collector receipt'
           return $source
         }
@@ -741,7 +744,7 @@ function Get-LicensesCsvSource {
           $source.Reason = 'file receipt is not a single successful complete export'
           return $source
         }
-        if ($RequireFileReceipt) {
+        if ($RequireFileReceipt -or $manifest.PSObject.Properties['PublicationProtocol']) {
           if (-not [string]$fileReceipts[0].SHA256 -or
               (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash -ne [string]$fileReceipts[0].SHA256) {
             $source.Reason = 'file hash differs from collector receipt'
@@ -749,13 +752,34 @@ function Get-LicensesCsvSource {
           }
         }
         $source.Provenance = 'collector completed'
+        $source.ReceiptPath=$manifestPath
+        $source.ReceiptHash=$manifestHash
+        if ((Get-FileHash -LiteralPath $manifestPath -Algorithm SHA256).Hash -cne $manifestHash) { throw 'collector receipt changed during validation' }
+        $source.Proof=$manifest
       }
       catch { $source.Reason='collector receipt is unreadable'; return $source }
     }
     elseif ($RequireFileReceipt) { $source.Reason='collector receipt is missing'; return $source }
   }
+  if ((Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash -cne $source.SHA256) { $source.Reason='source changed during validation'; return $source }
   $source.Ready = $true
   return $source
+}
+
+function Import-LicensesSourceCsv {
+  param([Parameter(Mandatory)]$Source)
+  if ($Source.ReceiptPath) {
+    Assert-SmartM365SourcePublication -ReceiptPath $Source.ReceiptPath -Proof $Source.Proof
+    if ((Get-FileHash -LiteralPath $Source.ReceiptPath).Hash -cne $Source.ReceiptHash) { throw 'collector receipt changed during read' }
+  }
+  if ((Get-FileHash -LiteralPath $Source.Path).Hash -cne $Source.SHA256) { throw 'source changed before read' }
+  $data=@(Import-Csv -LiteralPath $Source.Path -ErrorAction Stop)
+  if ((Get-FileHash -LiteralPath $Source.Path).Hash -cne $Source.SHA256) { throw 'source changed during read' }
+  if ($Source.ReceiptPath) {
+    Assert-SmartM365SourcePublication -ReceiptPath $Source.ReceiptPath -Proof $Source.Proof
+    if ((Get-FileHash -LiteralPath $Source.ReceiptPath).Hash -cne $Source.ReceiptHash) { throw 'collector receipt changed during read' }
+  }
+  return $data
 }
 
 function Read-LicensesIndexedSource {
@@ -774,7 +798,7 @@ function Read-LicensesIndexedSource {
   $refreshDate = $null
   if (-not $Source.Ready) { return [pscustomobject]@{ Ready=$false; Rows=$index; Duplicates=$duplicates; Source=$Source } }
   try {
-    foreach ($row in (Import-Csv -LiteralPath $Source.Path -ErrorAction Stop)) {
+    foreach ($row in (Import-LicensesSourceCsv -Source $Source)) {
       if ([string]$row.TenantKey -ine $ExpectedTenantKey) { throw 'another tenant is present' }
       if ($PeriodColumn -and ([string]$row.$PeriodColumn).Trim() -ne $ExpectedPeriod) { throw 'unexpected report period' }
       if ($RefreshColumn) {
@@ -823,7 +847,7 @@ function Get-LicensesMailboxGapSummary {
   $unqualifiedUserMailboxIds = @{}
   $unjoinedMailboxRows = 0
   try {
-    foreach ($row in (Import-Csv -LiteralPath $MailboxSource.Path -ErrorAction Stop)) {
+    foreach ($row in (Import-LicensesSourceCsv -Source $MailboxSource)) {
       if ([string]$row.TenantKey -ine $ExpectedTenantKey) { throw 'another tenant is present' }
       $id = ([string]$row.ExternalDirectoryObjectId).Trim().ToLowerInvariant()
       $kind = ([string]$row.RecipientTypeDetails).Trim()
@@ -872,7 +896,7 @@ function Get-LicensesMailboxGapSummary {
       $accounts = @{}
       $duplicateAccounts = @{}
       $accountRows = 0
-      foreach ($row in (Import-Csv -LiteralPath $ActiveSource.Path -ErrorAction Stop)) {
+      foreach ($row in (Import-LicensesSourceCsv -Source $ActiveSource)) {
         $accountRows++
         if (-not $row.PSObject.Properties['UserType']) { throw 'missing UserType column' }
         if ([string]$row.TenantKey -ine $ExpectedTenantKey) { throw 'another tenant is present' }
@@ -904,7 +928,7 @@ function Get-LicensesMailboxGapSummary {
       $onPremConflicts = 0
       $onPremTypeConflicts = 0
       $onPremUnmatched = 0
-      foreach ($row in (Import-Csv -LiteralPath $OnPremSource.Path -ErrorAction Stop)) {
+      foreach ($row in (Import-LicensesSourceCsv -Source $OnPremSource)) {
         if ([string]$row.TenantKey -ine $ExpectedTenantKey) { throw 'another tenant is present in on-premises mailboxes' }
         if (([string]$row.NativeIdentityStatus).Trim() -ne 'Observed') { throw 'on-premises mailbox identity is not observed' }
         $kind = ([string]$row.RecipientType).Trim()
@@ -1085,7 +1109,7 @@ function Get-LicensesFocusedUsageRows {
   }
   if ($licenseSource.Ready) {
     try {
-      foreach ($row in (Import-Csv -LiteralPath $licenseSource.Path -ErrorAction Stop)) {
+      foreach ($row in (Import-LicensesSourceCsv -Source $licenseSource)) {
         if ([string]$row.TenantKey -ine $ExpectedTenantKey) { throw 'another tenant is present' }
         $rowUserId = ([string]$row.UserId).Trim().ToLowerInvariant()
         $rowSku = ([string]$row.SkuPartNumber).Trim().ToUpperInvariant()
@@ -1177,7 +1201,7 @@ function Get-LicensesFocusedUsageRows {
   if ($intuneSource.Ready) {
     try {
       $deviceOwners = @{}
-      foreach ($device in (Import-Csv -LiteralPath $intuneSource.Path -ErrorAction Stop)) {
+      foreach ($device in (Import-LicensesSourceCsv -Source $intuneSource)) {
         if ([string]$device.TenantKey -ine $ExpectedTenantKey) { throw 'another tenant is present' }
         if (([string]$device.OS).Trim() -ine 'Windows') { continue }
         $deviceId = ([string]$device.'Device ID').Trim().ToLowerInvariant()
@@ -1212,7 +1236,7 @@ function Get-LicensesFocusedUsageRows {
   $adDuplicateUpns = @{}
   if ($adSource.Ready) {
     try {
-      Import-Csv -LiteralPath $adSource.Path -ErrorAction Stop | ForEach-Object {
+      Import-LicensesSourceCsv -Source $adSource | ForEach-Object {
         if ([string]$_.TenantKey -ine $ExpectedTenantKey) { throw 'another tenant is present' }
         $immutableId = ([string]$_.ImmutableId_AD).Trim().ToLowerInvariant()
         $upn = ([string]$_.UserPrincipalName).Trim().ToLowerInvariant()
@@ -2554,7 +2578,7 @@ function Publish-LicensesWeeklyHistory {
 # ==========================================================
 # Main
 # ==========================================================
-$ScriptVersion = "1.40"
+$ScriptVersion = "1.41"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LicensesCsvLogFolderPath' -DefaultValue $OutputPath
 $LatestCsvFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ''
@@ -3268,8 +3292,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAuetbyBY8lsW8N
-# ywO1LcgPv/Kp/DaIUEbsLolwtu6ZbqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDF/9y9HpNK/S78
+# iAjmDQdzV3E2uDtE50IqLCoTwQKYWaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -3402,31 +3426,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEICRfVzYiou1qxj5ViAuSMT5urKG407nnqKT3OeIZYKyxMA0GCSqG
-# SIb3DQEBAQUABIIBgGF/XEZLlBXiSgxn+zGeUSu99NhGtXa6+ihdZdzsCgA47sKw
-# x6BKLVMhu8X+s7q67vsXGHq/3hDMo9JKmTRjMKMByD4e6T/MU2/uSijot1IiRwsQ
-# KK+0Ri7R8arSR9UZc4siFVOm3dFY1RStrCcKhvRxD/BvU14ZZ4WmQSi84zOrHJoh
-# sJtAjYHMnZlU0Fn71aZW9eMhzaxEtq7SinlhyixtnZYJRdbWa9mrbh3Ln/MNVuie
-# 30iQ7Kb3mTQcb9SBXsgDEomeD/tiXiwLnS3EeCclCcGUOnnkIguom5j6AvAbEoe8
-# zvc7uFvappRgBnVE79+ne7EZcVlV7qA/klpazZVNbiQNGdc9HhpG7LeC2K2+xXhO
-# gMr/j02cY9x2AwXGEXkgzcE+M/qp7mVX3SPELq0ArTeh6xL8OVBDD81HD/OnG1vv
-# EMwaxYVJudQZdflXdlC4+dRdtbPQW6ijZsPOHlsvFCztqv0+JeYoZzIrKHiOIWxG
-# XXkT/8L3zNfdtiKiQaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIFuDXEOgmNdqKTB8Fbqv8r6UqexF9/W19voa3QxiwghMMA0GCSqG
+# SIb3DQEBAQUABIIBgDlZI26+7jIYw51HyREE1DAkegZF6BCToHQcmHoSbWPMUlrl
+# Q3EwhXjoBkN6gfnFov/i8p0kCL4nFi8Iuvod0shpKJ2FFHBUnpgdh/zSkcX29aco
+# mE6Up59Mssmhd9pJSndqj/ZikvDxJb3oSO6Hfqib+IDVZWmogLEY4sAvXWd1VLpl
+# FmtCQ+xvu+j3V/EREmlvPz1Hlau9BS4OBlIF8MglV0w2p+9ISoOIN9IX23oetLT4
+# Fxukt6A65rrt7GZthzad8kEJYirg2S93X5vWBWxNUxq0b497E24hOi4p9GFxHPA/
+# hjrsv3Q8RpUIWuqz5hAGVZlL0UuMJh95N0Oc3xUSYoMSWAbvjFL7SxCsNn0sSsVp
+# 0w2/ANKJS9hllVbKrflfcDcbTDoFaY8CyL1xIRF7Zdj1+XOjzTUxTgL+xy/JydNi
+# gcM119zPC4HJmosnL6ZGum8FBEqJUcApARA/yPFTkpnONQpQa6UKW3V2VUtQt977
+# kl9Pke3G5DhzuMMaB6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDcwODIx
-# MDJaMC8GCSqGSIb3DQEJBDEiBCCJO3OB2Vcy/yTZnal9JEtknQaxqGGgi1MWEz5k
-# 8IQvsjANBgkqhkiG9w0BAQEFAASCAgAsmzoEYwOuDpzFBGRvCHSNBQzrcyIOxRly
-# QBWZ6QKpajGzgz4fD0ENjjIuMwD891n7SmUTxzAuSSRKP66vc4028kaD4tiCVftO
-# JuyKuKcU6C+92Spt96c+vYk8bFgB0hQGhDVfD+5mLYK2bvmbLNe/wtrvY44fVkVC
-# MDYu+KWhtrkoLqh0TNoBKYGU4tyFbhsQzBJnVrejRQs7c/RvnZg5fS9CjjnNuUc3
-# dWuuoqLro+7PjB+iEYPd5JaNIXwZm1mV9ye4WGOFChgCvgq0Ha/2NKEBxN9IAyAI
-# mFt15MilMlWmOVZnzOUDXPjNsZf7wWb3Di3UpwQAyzQtSdRd0xkfLLqGjrw+F4n7
-# xrWsT2VjzGSQCdNqZrU9rXZ/kHDrqcwyrJQaRMmEWzbqRc/AP9vOBEe6ciPONWLj
-# pgNdK4dfUNj9OBSRjIY7PcSBC+zzCOvtjoN+0PvwxRBAqeYQUaayo1fRt8fLIkUk
-# VvUkPAE2rND9le9m5aFyKq931IYUtNWGUpxH62uBRCIvkikujyySZuiRVbKjVbrm
-# u8QrenvOuOoQeskG7jC9VDz0GxjgKiueJMbNOTB1DEzjwhQMhUPX6jCSg03kI1tn
-# 9cboiHTaZlw3btKb0pJdSeAgZQvJD/jWx7nbkJ5aoGZXGm718epem09pdY98uL4F
-# /Hm+gwOJ0g==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDcxMDMx
+# MjNaMC8GCSqGSIb3DQEJBDEiBCCifcD40d7qTuiDyLzCkCnObVU9X/xdVFnYU6Rv
+# oKu+ZTANBgkqhkiG9w0BAQEFAASCAgA8LkaxD/YL7O9MewijS8EpEbyZSYEypdGx
+# VPUl8IItlJdPJS53qT82yxBuVf/vwthxf5d5zlhwiQep4sW39zlaFMAcE5128N3c
+# bE4x20w2PDrXu1JYMYElIMleWdAKnqeHb0kIj49E6p/AXmY1mCl4fjbHwwQ59Ba8
+# IljrhSyHUDr03Xr7X9hLV0AgFrUyMl5CouZOn1VPAytygyFQIRzD2+4gU4SkSans
+# RYvSdMSC3/fipHX+bUD8aJF8vALq7heJq8KQmSB8cZQTklOnE6wML4y/Ja9SsFXR
+# pMbqyf81IcOOv2RH2S5R7gRSuL/vrq/RYobAueBoXerAuErJ8HUfJ959jhDf5lof
+# 5lUHUaQ3sk4aUZudQZ0KHEgWu7ym/whFEQzdQSa+fq1OPmH/VassHSfRtZlIlmv+
+# Hyfb8QrgwsaIDzW/NdTz6BMC/BpnIp4k3kdcBJit5S7UA4jt8sWlPxdEwdAhzuQB
+# /TDYULXQGQkyGsoOfI/BNRtPHM5tXNiGciT/9P1+oPMhzpPjCBTfWJko0RvnnXbn
+# SenWNexacUo0dHtbyXrA5RTJUHoqpG81g0Dv6JlLbGulW/JL8SGdmz/d462P3Gry
+# 2f7aM+Mj3C9SnlwodnqvssTUUjdCnK7WBBdu3qj03Z6QgZXrVvLZmvtlCdXdzYTA
+# GmlxZ9tQ4Q==
 # SIG # End signature block

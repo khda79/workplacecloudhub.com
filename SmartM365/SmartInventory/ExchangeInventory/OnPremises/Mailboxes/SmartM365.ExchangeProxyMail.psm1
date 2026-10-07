@@ -13,7 +13,9 @@ function Get-SmartM365ProxyMailEvidence {
     $linksPath = Join-Path $LatestCsvFolderPath 'Exchange_OnPrem_ProxyAddresses_MailLinks.csv'
     try {
         if (-not (Test-Path -LiteralPath $receiptPath -PathType Leaf)) { throw 'ProxyAddresses completion receipt is missing.' }
+        $receiptHash=(Get-FileHash -LiteralPath $receiptPath -Algorithm SHA256).Hash
         $receipt = Get-Content -LiteralPath $receiptPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        Assert-SmartM365SourcePublication -ReceiptPath $receiptPath -Proof $receipt
         if ([string]$receipt.Producer -ne 'SmartM365-Check-ProxyAddresses-Exchange.ps1' -or [string]$receipt.Status -ne 'Completed') {
             throw 'ProxyAddresses completion receipt is not successful.'
         }
@@ -78,6 +80,12 @@ function Get-SmartM365ProxyMailEvidence {
                 (Get-FileHash -LiteralPath $linksPath -Algorithm SHA256 -ErrorAction Stop).Hash -ieq [string]$linkRecords[0].SHA256) {
                 $links = @(Import-Csv -LiteralPath $linksPath -ErrorAction Stop | Where-Object { [string]$_.TenantKey -eq $TenantKey })
             }
+        }
+        Assert-SmartM365SourcePublication -ReceiptPath $receiptPath -Proof $receipt
+        if ((Get-FileHash -LiteralPath $receiptPath -Algorithm SHA256).Hash -cne $receiptHash) { throw 'ProxyAddresses receipt changed during read.' }
+        foreach ($record in @($receipt.Files)) {
+            if ($record.File -in @('Exchange_OnPrem_ProxyAddresses_Check.csv','Exchange_OnPrem_ProxyAddresses_Summary.csv','Exchange_OnPrem_ProxyAddresses_MailLinks.csv') -and
+                (Get-FileHash -LiteralPath (Join-Path $LatestCsvFolderPath $record.File) -Algorithm SHA256).Hash -ine $record.SHA256) { throw 'ProxyAddresses output changed during read.' }
         }
         return [pscustomobject]@{
             Available = $true; Reason = ''; CompletedAt = $completedAt; Version = [string]$receipt.ScriptVersion
@@ -160,8 +168,8 @@ Export-ModuleMember -Function Get-SmartM365ProxyMailEvidence, New-SmartM365Proxy
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDdeHv7IYLAA/E2
-# VN3w01sfCT1wt59pcLtBK/SiSUeYeqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBIj8RGw6XmB/wc
+# OPBqUIG4rjMbzaOhgjpP+lX3MVSSjKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -294,31 +302,31 @@ Export-ModuleMember -Function Get-SmartM365ProxyMailEvidence, New-SmartM365Proxy
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIM77H/nfdHzTN+YDbpDtiQLjItH9OqiqP0RL0nRULlmLMA0GCSqG
-# SIb3DQEBAQUABIIBgHFobIdHKHpsTEfd5GgK29lpvaMepPj8JzmKAPd0MjtkEVEY
-# 9S2uJv2vpBuP4ellcwkh3I3wsO8rYpy6wPt9iDPLd8KRIAmXhQOcuTSA3/0nMYoj
-# 5jzf2Bcw40kTiofhFJBpCLfamamtTYHbvFSSpSaO/WS07j+u1iTsZ9kuHWl9zPHr
-# dCzireItPVxfulegwaNWT7pYRYzTxhUR9dZWLaGtE/JlQWq0O6mKkl9Db6Hx+1rm
-# TVgLSUqbZaBO+N1II658/iiaTgOv/2+RUlS6BnhK8Mf8tYhNDKthtS8OQHJ5MPJv
-# K/XyecJqliowW23oaECU0ij7/UcWKzNgAVdO1WHAxmMdlx9MXcpZFCet4zpe/wzT
-# NeIEIkdegApOr8u58wESrNu5AAdrE9ci4/25ZlZy8sHSK6RKt2OM9l8WVOvOhNGs
-# vDNbJNouFMvkDRcIg0DOIGj22OLne9s6FsC+dmCU1X12/9A11VaoezgSv/0X7MlC
-# 0pOhH+3enegic7fIIqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIKMJxMKr9+wwqhgfqhpd1X8iD6gqw44/9XNaTbcVGRZHMA0GCSqG
+# SIb3DQEBAQUABIIBgFf0RfeD8oI5QBfOSR1LY/WZpwqCH5apEmlL3GaE89LBgYfw
+# RovBCZIDRYDxZ1YEkkhaMjvphyHKYBYcfXE+30Ta7NvoRlrQnAe+2wz0Ya7RweKQ
+# ZOnsKacAzH7anqc6UpL7P32KXsKO486vK1dvKhbYjOkqesrIPX0oNV+JZavLKkyv
+# 1Heu2a6k6DvR28u20xee6oQWKEy5tvZAmVVtZvkhW5K57VQnkmMjiTgB+Jd4712V
+# pcgmG6oefxWciGOSjnHFCkaAlTTzDY4jFwTXEBXya7QCyWqZaA2dkc2JRodcR59e
+# k/t+oYyhQp3NMBpm7zSsrKA5X7ZSkGkFHD/1wO9TiakHT1uR83W/wELD9wF3Li1r
+# qb4YSl+IRr+FYH01HyYuEmfZ6lyUzdxT1rqehB4ws43oBHlYK/RpypmhiUVzk/2f
+# SPeJfdp2nREgpNtjxnj333yZ7eh0MrCFnsXrhb7s9aS6rha08mlO5XO39rWZkqhl
+# FGzv+VHcpZxIGnpQiaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDYwOTIz
-# MDFaMC8GCSqGSIb3DQEJBDEiBCA1G4omIy5hB0wvOwmLr9zAkfECmeDnu4XKSsY+
-# uNyc5DANBgkqhkiG9w0BAQEFAASCAgCOrY0AKOb78UwmSBtsBBTlFVDb1xoZncRu
-# sGNhqAivpDD9697t4+A2YTitL8J/NDRb/mPGDm4lYI6/flxRbt+T6OUYQKiwY64p
-# 9Lmqz6A3pfloCJqDJd+Dz6ljN6E0TuvMFkTGOvJhWQgFiXVXWf7rpo/RIze+9+TX
-# BzJGY0XBBO+B+44v36eKLCiuJL57rJXdEHJCxtIvTeHHxv3i/ZlNt9WmzfTWQW2q
-# AucPMq8dAVVxu0hiVotQEo31kCqZC88VTX2Ktuy1DOhmVu2z2/go2X5GIv6tX2/P
-# jaMAyCG8xWt4KRLdUbCaFvmWf9/e/fQJqPmW4Njz5BVH+AmEbshELBLGbV1CPbWP
-# vbDeaC6re7Eyyxz2ETQA1AhoGE5OFSf4MEDhbXE3kohw4+v0Lgb6hCagfn6pQgqp
-# 5n88a3YeHoPDEdJl/H8eHLjU48c3i4tcWd4xyeVujbkCcEwBKHw8/YgNWIGGelGB
-# yl6XFHlT9Tk1kc2b3zlzGq5tXEGsQUJc2F+Mb7ujdXEQGXLCTXf5FoEyo7pauaaT
-# RKm7SyWbs+fpRxugbdJ64LAGmHRZ0KHXXKBQB1SQS7uhf48Yivru04Qh3Q2Ak42S
-# bADMR5qeO4/bj6A0uEDwb3t7CBlrK5s62TaqngXxzJkHxfRF6v+jdJAJcI5A1BzV
-# GM9xaiS4qg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDcxMDMx
+# MjNaMC8GCSqGSIb3DQEJBDEiBCBPCxVttmbZ20pGmkgzAUrUJamvudUTfTdEVYwk
+# CG7lpDANBgkqhkiG9w0BAQEFAASCAgCZ+cgZGaJ/nc//lKVOgYif13ajQZJGJlQy
+# WYqlp0t1Gd4qqokIi3TC5Wnks2xO6wrSzrOgxItjuBO7gr/Fla10o2FPHvlIEn6f
+# Gdd7HINYI1rS3mg01Z3slYOYOIVt/5gMxc3OcyRelTcWBP+cRB2SM9SAc+apImjh
+# SFcd07zR4ZP5hbzAe1cp8OjA2/zBcgpU9Tf5l8NovvWqVDTtT/skRSvztrgzq9OL
+# P31r61p3Rb6xF5BmJ2ltLUkoX9BlAcC2F//pDnUyZ+DnJbzDvtUGPSwyY7KF3K8q
+# ihcHxq+WnkbBW9VD6vywVk774pMktUMlaIL608k7NzRFJ633v8sTuwNslBWbAnsy
+# bfT/03AW4wgIGHMYSoz3ZaDGM6PitKW/zIiwOgMOWpRexLGiimVnNd2og7P8ZFAK
+# 7PeqsxE5cJ6NatuwXGci7j+EBGC4joQ8b4SpKmb4hyfIDnmY6tfTiyIU33zMn8zM
+# z7/XbTS6aBafdp/Mrj6V0fmKN+F33HJZ6SfBRJrXBnYgCD3MtHqGqqheiufP7U8S
+# fH9DOuymvOzva7jL99TnsdA7rEb1gvt3Hdjn3/y58w+x3RXfxF5PEjeEQds4LLDz
+# sMGlxSaI9eTLp4BcYhrvXK/2OkxpTb9gN6TpKOzoQfP5wJRNXkvyKRjSnBd2DF9L
+# JESTRf9zeA==
 # SIG # End signature block

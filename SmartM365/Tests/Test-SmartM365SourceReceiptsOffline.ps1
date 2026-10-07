@@ -3,7 +3,7 @@
 .SYNOPSIS
 Synthetic shared source-receipt qualification. No tenant, API, mail or synchronized data access.
 .VERSION
-1.0.1
+1.0.2
 #>
 [CmdletBinding()]
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidGlobalVars','',Justification='Synthetic Core globals are saved and restored in finally.')]
@@ -50,14 +50,14 @@ function Write-FixtureCsv {param($Fixture,[string]$Name,[string]$Delimiter=',',[
     return $path
 }
 function Finish-Fixture {param($Fixture,[string]$Status='Success',[int]$Errors=0)
-    & $mock {param($s,$e) Complete-SmartM365SourceReceipt -Status $s -ErrorCount $e | Out-Null} $Status $Errors
-    return (Get-Content -LiteralPath $Fixture.Receipt -Raw | ConvertFrom-Json)
+    $result=& $mock {param($s,$e) Complete-SmartM365SourceReceipt -Status $s -ErrorCount $e} $Status $Errors
+    return (Get-Content -LiteralPath $result -Raw | ConvertFrom-Json)
 }
 try {
     foreach($definition in $registry.Producers){
         $fixture=Begin-Fixture $definition ([IO.Path]::GetFileNameWithoutExtension($definition.Script))
-        $running=Get-Content $fixture.Receipt -Raw | ConvertFrom-Json
-        Check ($running.Status -eq 'Running' -and $running.Files.Count -eq 0) 'Receipt was not invalidated before acquisition.'
+        $running=Get-Content ($fixture.Receipt -replace '\.current\.json\.txt$','.run.json.txt') -Raw | ConvertFrom-Json
+        Check ($running.Status -eq 'Collecting' -and -not(Test-Path $fixture.Receipt)) 'First acquisition fabricated completion proof.'
         $delimiter=if($definition.Script -like '*InfrastructureAndReadiness*'){';'}else{','}
         foreach($name in $definition.Files){$null=Write-FixtureCsv $fixture $name $delimiter}
         $null=Write-FixtureCsv $fixture 'AdditionalPublished.csv' $delimiter
@@ -79,6 +79,58 @@ try {
         Check ($ast.Extent.Text -match "1\.0\.72|1\.0\.50|1\.0\.8") ('Required module guard missing: '+$definition.Script)
         Check (@($commands | Where-Object {$_.GetCommandName() -match '^Complete-(Core)?SmartM365(ExecutionContext|EvidenceRuntime|SourceReceipt)$'}).Count -gt 0) ('Completion coverage missing: '+$definition.Script)
     }
+    # Repeated attempts must retain proof bytes and acquisition dates until a qualified replacement.
+    $d=$registry.Producers[0]
+    $f=Begin-Fixture $d 'separated-run'
+    foreach($name in $d.Files){$null=Write-FixtureCsv $f $name}
+    $proof=Finish-Fixture $f
+    $hash=(Get-FileHash $f.Receipt).Hash
+    $f=Begin-Fixture $d 'separated-run'
+    Check ((Get-FileHash $f.Receipt).Hash -ceq $hash) 'Collecting changed previous proof bytes or acquisition timestamps.'
+    & $mock {param($path,$proof) Assert-SmartM365SourcePublication -ReceiptPath $path -Proof $proof} $f.Receipt $proof
+    $blocked=$false
+    try {& $mock {param($path) Start-SmartM365SourceReceipt -ScriptPath 'SmartM365-AD-HealthCheck.ps1' -SourceRootPath $path} $f.Folder}catch{$blocked=$true}
+    Check $blocked 'Overlapping collection was accepted.'
+    $r=Finish-Fixture $f Failed 1
+    Check ($r.Status -eq 'Failed' -and -not $r.PublicationStarted -and (Get-FileHash $f.Receipt).Hash -ceq $hash) 'Pre-publication failure erased previous validated proof.'
+    & $mock {param($path,$proof) Assert-SmartM365SourcePublication -ReceiptPath $path -Proof $proof} $f.Receipt $proof
+    $f=Begin-Fixture $d 'separated-run'
+    & $mock {param($path) Start-SmartM365SourcePublication -Path $path} (Join-Path $f.Folder $d.Files[0])
+    $blocked=$false
+    try {& $mock {param($path,$proof) Assert-SmartM365SourcePublication -ReceiptPath $path -Proof $proof} $f.Receipt $proof}catch{$blocked=$true}
+    Check $blocked 'In-progress canonical replacement was accepted.'
+    $r=Finish-Fixture $f Failed 1
+    Check ($r.UnqualifiedPublication -and (Get-FileHash $f.Receipt).Hash -ceq $hash) 'Failed replacement was not fenced or previous proof was overwritten.'
+    $f=Begin-Fixture $d 'separated-run'
+    $blocked=$false
+    try {& $mock {param($path,$proof) Assert-SmartM365SourcePublication -ReceiptPath $path -Proof $proof} $f.Receipt $proof}catch{$blocked=$true}
+    Check $blocked 'Retry cleared an unqualified replacement fence.'
+    foreach($name in $d.Files){$null=Write-FixtureCsv $f $name}
+    $newProof=Finish-Fixture $f
+    Check ($newProof.RunId -cne $proof.RunId -and $newProof.PublicationProtocol -eq 1) 'Qualified replacement did not advance the proof.'
+    & $mock {param($path,$proof) Assert-SmartM365SourcePublication -ReceiptPath $path -Proof $proof} $f.Receipt $newProof
+    $runPath=$f.Receipt -replace '\.current\.json\.txt$','.run.json.txt'
+    $run=Get-Content $runPath -Raw | ConvertFrom-Json
+    Check ($run.Status -eq 'Completed' -and -not $run.UnqualifiedPublication -and $run.RunId -ceq $newProof.RunId) 'Successful publication did not release its fence.'
+    $f=Begin-Fixture $d 'separated-run'
+    $qualifiedHash=(Get-FileHash $f.Receipt).Hash
+    $null=Finish-Fixture $f Failed 1
+    $uploads=@(& $mock {$script:SmartM365SourceReceiptUploadPaths})
+    Check ($uploads.Count -eq 1 -and $uploads[0] -ceq $runPath) 'Failed attempt re-uploaded a stale completion proof.'
+    Check ((Get-FileHash $f.Receipt).Hash -ceq $qualifiedHash -and @(Get-ChildItem $f.Folder -Filter '*.json.txt').Count -eq 2) 'Source receipt history or duplicate snapshots were created.'
+    $f=Begin-Fixture $d 'fence-write-failure'
+    $runPath=$f.Receipt -replace '\.current\.json\.txt$','.run.json.txt'
+    $savedRun=$runPath+'.fixture-save'
+    Move-Item -LiteralPath $runPath -Destination $savedRun
+    New-Item -ItemType Directory -Path $runPath | Out-Null
+    foreach($attempt in 1..2){
+        $blocked=$false
+        try{& $mock {param($path) Start-SmartM365SourcePublication -Path $path} (Join-Path $f.Folder $d.Files[0])}catch{$blocked=$true}
+        Check ($blocked -and -not (& $mock {$script:SmartM365CmdbSourceContext.PublicationStarted})) 'A failed fence write allowed a subsequent canonical replacement.'
+    }
+    [IO.Directory]::Delete($runPath)
+    Move-Item -LiteralPath $savedRun -Destination $runPath
+    $null=Finish-Fixture $f Failed 1
     $rbac=$registry.Producers | Where-Object Script -eq 'SmartM365-Intune-RBAC-GroupMembers.ps1'
     $f=Begin-Fixture $rbac 'rbac-quoted-semicolon'
     $csv=Join-Path $f.Folder $rbac.Files[0]
@@ -108,6 +160,18 @@ try {
             & $mock ([scriptblock]::Create($definitionText))
         }
         & $mock {
+            $script:CanonicalMoveChecks=0
+            function script:Move-Item {
+                [CmdletBinding()]
+                param([string]$LiteralPath,[string]$Destination,[switch]$Force)
+                $ctx=$script:SmartM365CmdbSourceContext
+                if($ctx -and [IO.Path]::GetDirectoryName($Destination) -ieq $ctx.SourceRoot -and [IO.Path]::GetExtension($Destination) -ieq '.csv'){
+                    $state=Get-Content $ctx.RunPath -Raw | ConvertFrom-Json
+                    if($state.Status -ne 'Publishing' -or -not $state.UnqualifiedPublication){throw 'Canonical rename was not fenced before mutation.'}
+                    $script:CanonicalMoveChecks++
+                }
+                Microsoft.PowerShell.Management\Move-Item @PSBoundParameters
+            }
             function script:Add-SmartM365TenantKeyToCsvData {param($Data,$Columns) return @{Data=$Data;Columns=$Columns}}
             function script:Assert-SmartM365CsvDataCompleteness {param($Data,$Columns,$TimestampedPath,$LatestPath)}
         }
@@ -120,6 +184,7 @@ try {
         & $mock {param($s,$d) Copy-SmartM365FileAtomically -SourcePath $s -DestinationPath $d} $csv (Join-Path $f.Folder $definition.Files[0])
         $r=Finish-Fixture $f
         Check ($r.Status -eq 'Completed' -and $r.Files[0].SHA256 -eq (Get-FileHash $csv).Hash) 'Actual atomic copy did not register current output.'
+        Check ((& $mock {$script:CanonicalMoveChecks}) -eq 2) 'Canonical writer and copier did not each set a pre-mutation fence.'
     }
     $f=Begin-Fixture $definition 'missing-required'
     $old=Write-FixtureCsv $f $definition.Files[0] -NoRegister
@@ -182,8 +247,8 @@ try {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBAcvdOwDiBHINc
-# B/s2HsKMHNoL7vUDpwhwm7KfslcRDKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAqTeXMY8L0Kw8+
+# jwwwWQbIIorWVrsiRa6qFCHXFDVybqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -316,31 +381,31 @@ try {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIM9tVcng5D709AftF/lbmUY/ZxdZ6788CVMY1IZ82Zm1MA0GCSqG
-# SIb3DQEBAQUABIIBgBubLeO1jYltfxLM6notxfVUQKvnZcC5a3XXG4YJ6BgYm3x6
-# HJWXm12zwpY3TmWEC534HERTU6LtnIeQB/flH99I2XqsZltanpL1x1mWzJqRLnau
-# LiO4mwC/KpzGrJDIBE0V8rKpaeHAlvoLg7XIBQQnN+IYXOV+Fa2iNX5l4WrzyOug
-# FAFuq065SPUQZPWksJvYXdA8FLnoF6/pljDDh/D9yymjfn2ipVI7WubsCYsnMquL
-# 98L4sal5L0xq3JC4It79B/5NWyviBSg1/5MC4cnSqkSezInkhxEsQ/vJ2mZK0xy1
-# JEDK6goYgt26E0ZWNQNFzhtnH4Xezx4Lc+ZWpZbvYY2MphZvUY8MpH6FoDrmNHGM
-# ZkRGExcDm6gg1cDAaWyBAutgZIrjLppRlPxTiDeJwr+SVsO2/2ZA0rjDLkr45aiz
-# PXxNo8V/kPhX4l49pb90tds7dSfLV8zQgNdyLFGM+lP2uPvf4enF7XlnNphvsezB
-# c1kgOGARwgRpEPspA6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIE4jhSqgHkwsrK1oNFq7Frt18BNQDQ+UV2PbHxgnBcrYMA0GCSqG
+# SIb3DQEBAQUABIIBgD8ZQ9SsPrpHuyPw7ZrPUacfqbIza53rjGjwjLA1W6Xnxvj5
+# AzFPL0ZLztwgQOjT6aTy0uusgZtfNid3oEKTdgKTMmyWE+e3lJiLGLtU8mrFccTC
+# O+hKHfrhMIT36Vkzg2aotCmHpsn/XQkBV5mUzGB2dgecYcpkUg+iudd1HSh/EMve
+# L9ktYPbSir3fU9i9gOlH4SC6aujzm9Xh1fck2ItGClC5CNG4hRWq0RI42H9bY3HU
+# F8+gOO048Ivk75ENXqOkHiS2c15TacrzGWa+WslsXhmn2SdIfajCIfgvWjLVf/yr
+# VP0k+dCQP+75vVc7czWL5M/H0abaxva0EzkcC0dP6w9EZUr6H0Q2PYYxCXxLceVb
+# TGLX39IHNw38oV7LCxXPfGRx84aWNzgYYmuVUGLpDjfNAJ/pICGrn05xx0Emd1eh
+# ubBNJabWTJLVr0Ih55pIbCa1wAEEP3HPjlVDJQxcMneYHLZh5mgyHQOWk5Bh4BDw
+# 0fYyAEAWL5xutJyEGKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDYxMDUz
-# MjNaMC8GCSqGSIb3DQEJBDEiBCDYjWJGfSlsD71J8EouPT4CFyGHy1Ow+mS2zmih
-# PeTPNjANBgkqhkiG9w0BAQEFAASCAgAHKj9berHLMpXOB9y7iNhOsDv9RzIBU8c6
-# fOytIhsv3wUfZyOw/sTeD3+c9oB++f3FnlKtCbdYIfSC4xNQT9w2daAAExk7yqE/
-# EeIeliqfyrdauBC63bWz+ewG32/izt58Ac9crjEf+KYdiagl1YxHN+oBCjUsd6ob
-# cR9q95Fb1AzfJZCqCcEAKs7AneqVSkAx9Ha3btOIGHbtCeMMAXUwCSWwOILWDE7F
-# eeWu4rr8hzyxBnk6G+Y11fTgMFr0jgEElbG++B95DDgNrtCoLSAO3m1TiQ0e5iE7
-# IdbhQStCe4GrecOxtFrcFzPq4NCg7W1n1r8+8PueOHoLMbxqu57nFcWfYfyJM1c8
-# Dh7SeATBd8r93ajlKMHzOSgq0PeV8Bn+RPQQUaRnsDGYgYbCFcJqwrXS++lVCeiQ
-# MDv2I8D287Q66MLMYiDPruM1E9StkBtj82PWv+CW35j27JFJgyLD9Jcr0M6bvAkH
-# 5RPyVdnF1uncvpG5zzcmCNPddc9kf0G0iokk6u4ntrKV5oewXLAZd5lC9R6j1n84
-# qYonoBUaYJsc1tf5hd8JL8ROQTG9SKZGsY4cIbVBaRZovifhTzwRKMAL7oGj7Xya
-# XjJmY9937smQfNdFD8jsJ4ctuUD3hwz2s6rzxAxX2LPc8GEYFmjjMxhkHDyUQqPK
-# AHHQmQsB4A==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDcxMDMx
+# MjVaMC8GCSqGSIb3DQEJBDEiBCA5yJ+2uJoHlskXC4mM2JDvA37ztzOrECL7t2Is
+# pINGtzANBgkqhkiG9w0BAQEFAASCAgCq/a3/cdBfQYkPqCvFJT+sUAvwneBXJ4rw
+# v++wunoMlmDWH9Buo1sc5R6d64Dp5UGGyJcln9m2FwsSXLO1e/Ku1+6NuSuJXxUY
+# 5t/aqPJlkHja7fksM8P+nbMYdVdLThZsCXB5KOPm3RObGiTTvpH/ue09x/9nqBwk
+# xQOe2kANRgNhQHmQSXtIsumlmptQhjsOPkYVOAaEVz9sCWv/rDOaEBGlF9G4c7WP
+# 7y45QxmxmtgJ6LcFtNkv/BhnqMVhid7/WdgGpUsE6YOckcy6QA1h3AsDV9kF8ZxG
+# djQhh7RUjqbJMPNLpmupks0TUIXKkGELlSzIFDK/u6QJ0QojHvVt0Frmy/LvvdF9
+# jq44wLJdDUkP2H1fks9cZ0YjqX35benaB7uaa8V1lX7gbAQNKKynDiU4Gcqj01K9
+# M3YBV/m3D4XgLfB5JbytdEG3S1zIw49Iw4+ZIeSnrZdXu+TD+j63RnF86097bb19
+# 4EQP/YGgWqsdrnQbOYOUhC2DoCMWCBakttVgScAK/+qC9OgkuQjQU/ZR1iBWy0uz
+# iDnO8+EQhfxXACHnZmTVipVnmbDzza4/qbesVohEFBHJB/f75cdkL3GcP+jElHjV
+# IxiFXAik2+IzrntolBrNWbpb0Ps4IFpsP0XvUHNVrYpgBBtSLbJmsw+wJWOnCvpe
+# GQWDy/0ESw==
 # SIG # End signature block

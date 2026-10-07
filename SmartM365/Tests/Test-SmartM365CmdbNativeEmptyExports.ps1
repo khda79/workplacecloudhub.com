@@ -5,7 +5,7 @@ Offline native CSV projection, empty-export and fail-preserving regression check
 Loads selected AST functions only. Acquisition and publication are mocked.
 All actual writes use one synthetic temporary directory; no collector is run.
 .VERSION
-1.0.8
+1.0.9
 #>
 [CmdletBinding()]
 param()
@@ -59,6 +59,7 @@ function Get-SmartM365CoreContextValue { param([string]$Name,$DefaultValue) $Def
 function Register-SmartM365GeneratedCsv { param([string]$Path) }
 $script:SmartM365CmdbSourceContext=$null
 Import-TestFunction (Read-TestAst 'Modules/SmartM365.Core/SmartM365-CmdbReceipt.ps1') 'Register-SmartM365SourceCsv'
+Import-TestFunction (Read-TestAst 'Modules/SmartM365.Core/SmartM365-CmdbReceipt.ps1') 'Start-SmartM365SourcePublication'
 function Add-SmartM365AdGeneratedCsvPath { param([string]$Path) }
 $FailedInventoryDomains=@() # Full-coverage fixture for the extracted combine function.
 function Invoke-SmartM365AdCsvReadWithRetry { param([string]$Path,[scriptblock]$ReadAction) & $ReadAction }
@@ -439,8 +440,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD04WPbAfGfeQzV
-# Rd9EHBuN5ykpGs4OlelA9313nwP+baCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDQX/spXkhsblzo
+# TNExeItUGRnWE08YCDFXnyqRy3rwtKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -573,31 +574,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIJLP8S6+meIxpkUPm7QtZ866HjxOG9aupqF44Y6769/kMA0GCSqG
-# SIb3DQEBAQUABIIBgGLQk//73muJoqyKuiPiU03ae50ppwHd78vd6SWS5oCH/rKu
-# lz3Z5fN50nHqMfB5o4jQ7akLqAz2OnBce+3Ic9WeFqXutJ6EbqfnTvo4jDv65Tt3
-# PpbD4ryhYRIG7mDNN4lurcgCvatTzeK5pIlglY1nmLZ0XzgXaVN9476mvkLCPJWP
-# mAIbsUjo9ZdlPuu04YOCAqvaRhG31V7E0Q7ipcY7/S/XknlRt53UGl8tHw9fdYfx
-# hDtHya10cmcgGdMlXuIyn9CTvtXzfjuBB/ylb23Vu1glPNzN6+mS9zjTll9+vOrG
-# tltAgY9VdhiNBEV2qzPQBhbv+R/6cEwPTZ316hB+yMKp7dsYCks07PTa8uk7aZEG
-# hQkdrCZZLxDcue/MmUnYbk1hl0G7JtLZsS+GalY2i8q32BkCcAKFM5KiYMN8MG5x
-# uJdo7FooG8Nk6imiuaJN3Chx9aUo/FwWBSLckEgueac39teQ3znW5gBmbFYyqIQJ
-# siTQS6UFbBlH4CO9DqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIP5JUY2Fz0qBYTAPhhobp0mUXV3Lo3IvOnXXqFjv70GpMA0GCSqG
+# SIb3DQEBAQUABIIBgIzj0lfDBhLiXVkj28OzlEb28QaJjv4KRZMJOqd+8d/YvVq6
+# XQ/ny2FNElBTWbY8H6eA/n4BkXaKf5Sakjzr/8ANAompaEIQkyZWc/oKBSiDKg8Y
+# 14iq382M/Uqmx0KtMJ1IpH5dcvavmwxlz5gxxd8uoUpE2D9BQcWPncwvZLTBqDbY
+# Sn3UHxVg2QTPHIlkpN1CZY/708+NjIKwvy3dm+UoUn3Xwh8s3b+TaskqgJU1ej/X
+# 5WuETqQ9LQBfy1YeEZ1zo6WqiM3OBaQAuE4XOE/xu0vvdE5842SsetQDgRKCzhi2
+# VuvMiZOsT3PzmWDEwjbN4ap19K0jwf47jO3UXGEgtpHMS7Q5FyBhZnTAk7MvPJt/
+# sagDhMbNrXmaKBHpa1YuXl3a94+A9ahrGLKQdjmLz8Vf7qOZS54ejBmJsyPVsX0o
+# Yz6WRCpg/KTSEVmO6LGs3hGM66LhaRd4Um5+qDa8JSHUTF3DFzjUf7nTb9HTqQrb
+# C0oYMqDf6S9D6vTGSaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDYxODE2
-# MzlaMC8GCSqGSIb3DQEJBDEiBCAurL6SyIUX0uJIXFa23el3lSMrKObSFkXQFPOZ
-# e35txTANBgkqhkiG9w0BAQEFAASCAgCG8d7NK5oQe9RrixW24FeWYtPDYKHccvmv
-# rFP4Mcb9b/Nr4nvi402Dn1iOO8fxtSqoaoK/iI8c/T4I/imYpND2QnX7IaEh3nnM
-# RsqQj6VLZFC/568hqN9WvXkjDUlRkUQP6pxWd/u2TAuzMnXZji3GekJLdwBiDbLB
-# E54TAX/TIRY2WBjhGS06YuN2aF20uhaoN0k+f3XHhNQJtFJNhfdwqhcBvRhI4enh
-# RuId7xIZqvct+rFi3YH/zXOPWJ065HVDB75lqa+2z/e4dWj1tvlre540wIWzh+6w
-# jCVLTnLRfjG0XoYoKdZeaXEyTIoMG0b0G7IxQIYdxfSnjmZsFS1sDUU91pQZFXhM
-# bBCK9altU1rsgMw2rrqe/2bZx4yDNkh0IC94M8Qeu8PB42D3tcY0GZOGZOYExQHV
-# zBbNL1o19v99NzfiwdS5Xv/f7SxYUbF4bzp039YQVsjC3sE8ck3zez+1OmOfJ8a+
-# zY+DijKWLuc56GfQerHU38RW6x7mGOMQaqPNuQL7UYhlTsEqUcxKWlZkLm2qSZ/c
-# I5n1bI5rbi60qR+eSHfNBjqtx9p0MS1rqoD9byED3iIyMYkeKjU5e2Upi+jfBSTy
-# FfG4t/VFGhAGRAdSnQvSRBEIrznZ1x8DwB45D4pL/dE7eB0V5JuWAmLOeBWnNYYs
-# Fm5uxG7hPw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDcxMDMx
+# MjRaMC8GCSqGSIb3DQEJBDEiBCCUjxWogqZzJq4EP6wP0v59cRP373TsWwtAujcI
+# AyH2lDANBgkqhkiG9w0BAQEFAASCAgAGpxa8bz5bmt8aefmXRNKmOxgH5MleDH37
+# GS7fzc0xGV6ZoMDyHuZEBPIsUSDJYodz6kHbU4ak2mVZllOz4PbSTMQ3SxDDAApe
+# rmmFfhzl6nSQnOsuyxQkv+Z0BEmMI9lOtuPOy8UQeFYC7ZPV1IROrwOW7RI9YvGj
+# vt9CmumEq9FPyITL7+Nks87CDA9C7CWPWkq95jOH5wz9nVazqBPCFL0wV8eOv3O1
+# DlC9xXES7i/yDZUo1YRbpHBbQ2sQ5IOeGdRipGxEoKHZztynhnAc588heAW6263T
+# 0fQ1N9MzFNCOOWFhx73w6ucPj5RFdv95OzxPA07Bs026pPtqme2D1P7NdwAZjx4K
+# zn0o//UIBNfPO5tHgcV8v8HDE73gQJpgXnA4KktzIU+yJFz35cdN1P75bsU1ubyf
+# ajknZLANjRrmGvw2YXk4jaS1Vt9mxHScZyXcgLSXHQ6cbTdO5Z8j5xB2NO9u38N3
+# 50udGjFKHaGhxBAiMdcPTvqateSfPuHXUFCxTX8M5Kneq7aVUec3xz75bnM4b+l/
+# C4Jb34haLkmBA8uHTdM2KdWZ5bfcrkhdbhNo1HcuKsYK1ltdhgFDjRjvwQFf/y1k
+# ZylmsO/6CPDoiBLY/2ffVT8IG04OwOF9RnZIThDpLYE9A3d7nJSx3d/WFkfpiO37
+# zfz1D7FjgA==
 # SIG # End signature block

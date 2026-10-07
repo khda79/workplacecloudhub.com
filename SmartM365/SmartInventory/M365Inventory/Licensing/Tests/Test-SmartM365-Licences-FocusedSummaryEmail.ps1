@@ -1,6 +1,8 @@
 <#
 .SYNOPSIS
   Offline checks for the license overview and recovery email.
+.VERSION
+1.0.0
 #>
 
 [CmdletBinding()]
@@ -15,7 +17,7 @@ $ast = [System.Management.Automation.Language.Parser]::ParseFile($inventoryPath,
 if ($parseErrors.Count -gt 0) { throw ($parseErrors | Out-String) }
 $inventoryText = Get-Content -LiteralPath $inventoryPath -Raw
 $coreModulePath = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..\..\..\Modules\SmartM365.Core\SmartM365.Core.psd1')).Path
-$coreModule = Import-Module -Name $coreModulePath -Force -PassThru -ErrorAction Stop
+$coreModule = Import-Module -Name $coreModulePath -MinimumVersion '1.0.79' -Force -PassThru -ErrorAction Stop
 if (-not (Get-Command -Name Complete-SmartM365CmdbSourceReceipt -Module $coreModule.Name -ErrorAction SilentlyContinue)) {
   throw 'SmartM365.Core must export the source receipt completion command used before the email.'
 }
@@ -28,7 +30,7 @@ if ($inventoryText.IndexOf("Complete-SmartM365CmdbSourceReceipt -Status 'Complet
 $names = @(
   'Get-LicensesFocusedSummaryRows', 'Get-LicensesAdditionalOverviewRows', 'New-LicensesOverviewCardHtml',
   'ConvertTo-LicensesActivityDate', 'ConvertTo-LicensesMailboxSizeGb', 'Get-LicensesCsvSource',
-  'Read-LicensesIndexedSource', 'Get-LicensesMailboxGapSummary', 'Get-LicensesAdAccountActivitySummary', 'Get-LicensesFocusedUsageRows', 'Format-LicensesMetric',
+  'Import-LicensesSourceCsv', 'Read-LicensesIndexedSource', 'Get-LicensesMailboxGapSummary', 'Get-LicensesAdAccountActivitySummary', 'Get-LicensesFocusedUsageRows', 'Format-LicensesMetric',
   'New-LicensesRecoveryWorkbook', 'Write-LicensesDailyMailState', 'Enter-LicensesDailyMailGate',
   'Send-LicensesFocusedSummaryEmail', 'Read-LicensesTenantSnapshot'
 )
@@ -776,8 +778,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDdgDTrORjwFSPE
-# zqE49LUd/XrP0uNmqPW2lR4pNGaLSqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBXCXiNsJG2iFg2
+# jTvG8+s0oxtJeguBac7qpFWfiZbwGqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -910,31 +912,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEILXI0qz9bXqYxGWOg9mH0hYLHbTutPmOk0is4DDndLwuMA0GCSqG
-# SIb3DQEBAQUABIIBgIJCO/odBnAwbqUNf1e1ea4uGS41cRlJYCHYRhE9/cVGKhDd
-# 09zJFjj8HksTN53l3EQr0GrJhpIWf0UFpdw/gFA4qfvemLuiNFkvMnqo3ffFkStG
-# jr5uJQNQOukzMD8hCuDs9haqq797y58JG0R8gFxN3jwBcfOBp9C0eclwpZKBKcDj
-# m1rtcDwmNWt0anyRr1h2kk+Bdkw2O3rXw5WJSKqHeDWt+uucgpRMMCa7cFxWkjqK
-# 8pQmODh6zeNJfXA0WZ1z0Txb2pqFVNxzye9+rLOFsyEF5CUMFTUCnyyTDveNi7+P
-# 5WfWIHDU0WqjYWJ1aTtA1bORX12P4xuUXBsWb1XS4hM1C6JtOXM7G5dhKDGhfMIg
-# y+P1GG0iNnQgDLMvohvQ5EXnYwnqmSixZv86YhgQxHcbGdq0laSKxQeuMmiXl9aM
-# 1m5G9ZwkA2bRnix9yPu3aXlcvvtf3WEwGfsHjgY2bApr/jKFhw6Xmut/T1EDFXVS
-# OYd7/EZHeCi20QPtWqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIN7HUV1kJMAO/gZfIb6wmntOE0XukvXXf22AyDih1VgrMA0GCSqG
+# SIb3DQEBAQUABIIBgAS60UwpdmgIrgqukcp7OA6M6DREgJitrFLNeEfG7tJdxVQS
+# vSAh8nnphgN12sHNLyGWsXIJ8uEqb4DLJXXJ8rGnz8tGuc+GXUBpouisDVAeBPUb
+# XEddVg69ejtk7LpisqIwwiOqdYsdbc1Qn5ngdggBIqLg7ZLKZciCi3crsP/xq029
+# eNnydrfXllV3xQFWODFFiikUqJHPyylgBegcdpRIQPX3y9f6curlWaq2Sdn5FiKu
+# v+8K/2dbr5e2JsNNbSKdhdgYHo7Ix4D1wOnlDDsoSVPWNpOURdXY3nvBMBXJkqX3
+# 5/A9U72z7ALukF87+jEouu5YYGOD+AMRcE5OPtunzylZqSLhP6WXXm6i4H3O+u/r
+# EskXar/e1LBxVhiEatvnjni6MVode5EMtOPzySKcF5YznxvqsrgFFF6OVUfGAe66
+# 4AzAxWcsocIYPNvZEebQSxkUDIyF2M4yd1XtuRtpIwd3AcTS13SEnouZTafh8y7J
+# EpqKki0Twky8GPSWRqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDcwODIx
-# MDNaMC8GCSqGSIb3DQEJBDEiBCCAIh/+ljGLXFhc2eFymVK0H0nIJjrP0vYB+Fl6
-# klWavjANBgkqhkiG9w0BAQEFAASCAgBw45881V+Yo3lOX7a8tGKqUEp/BzMyQqWC
-# y6KDIZIoGif4qJUtyLnAgLhpx/EsFR+U6faiJ5XiaRP2kD3Stz0QDrGkCeRkcDPJ
-# jkhexEHp/sMD/0qEcKCPDb1W3AsUFRkcYTvRTgftohYXS0G9i3xdquhlFDFHVpqD
-# Ar6pBewNkifFv49vuVaoAxUnuXP221stb6r0rmd2OnKTqYdiasyZfLDE8QfhdYME
-# sx8LcA5jNy0/5ua1bdSeoPZqCSdhMWWpiHLywuGqLPvOcOjsDnXf/nrPS2B1/cqn
-# 3ghDP4gKuClHEtjYUlLOcupqctbFgbHuN5bgeAhH9nCCJXmdPaHiYjvJVYVH+KT2
-# RG8R8Z3ntKm5RhJTq6rsL7/Hxj3WCBfswJ3e6lbGiOxxgGwxwgqOqvk4Jlb/9xNn
-# Fs/uiV9B3RwhlNXOkJwYQ4ovX6Jqv2utWKgLMdnR1qB17BDfam3gn4UOYGX+HsIg
-# Y37nREBpyai2wrFBgaHodU5POR2JiVDSVitIhpA4SZ7LbOYB3gp/wz/eiIvj3DGh
-# yFw5ZIdSAOm9QviDPy5VhifqF815F35Jelb8QYAmkjJDW39y6Yy/kmPVM1FKbTXl
-# YU0qNzYV6xdpgCHTGBJ9fGBIDeOrSl5M/OXbumdNDtmKB9RYmn+pyN9++2iBH7oT
-# 8HbU591yaw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDcxMDMx
+# MjRaMC8GCSqGSIb3DQEJBDEiBCBhJ6hlDvoJxRjpEM/Uj/zGx6iZyuoq69894bmp
+# Nu6dUjANBgkqhkiG9w0BAQEFAASCAgA/itjUKtCk6mpvitGdGWcKlaheZPh87Znn
+# gBVaRMLe1EmB+nVL7xKnEWaAN1RcZrMYbGAXOhDwDy7X/PdPSGs4br0D6tiE98v/
+# WvNuPyvIJ5Z3tIGgbCEleFvZLoV15IAaKnkJYBLdw0i+ZXx/Jbd8gkLfxpOW5KIj
+# 92Ju1unYL0ygs6OHvESAxE/nqCb9PTuKZyqBsAZZYFbwaNvNPRaVa0QQAv1lyN0o
+# vvYh5AlV5iS5jnC88OSWzgqJ+LsGf37ihmvE0j3q/xnXpjG/I2ctMDC4rqDoVM5N
+# RAU+qhVnr9mbB06vrgjf1nk27WE42APVi/sZhfeM/WDWIXw/IZ5n52gIDucbDLdx
+# Gzj2k0blij+7LCCzdch2LPRWH4idxKOUvkrholI+2BojzOeJVuBF2f03V1pS0Uib
+# uHI4hzJnsL1SpcD15KcdaTqouinnM90ryb1++cM7oeQkClBAU5g3Wz3ctaDuAdUQ
+# LqyeId5NiDz1Xvc6QTbJ/P0ndh0z1OTV6hn/f3qFKNIWucwviabAr4T1r0bXC5Pi
+# +dpfH6iBrKuws6rcabwWVxDRRgncew57Td05P4xdmv9k2VusYItQAVM9nAK658A4
+# 4W7caQ+P+oIygDBRxBgxo0cA5UJxHuU5PCaSmiamTlwtEzUmMFXp+0+VX4wqkyWs
+# vlaTNgSP5A==
 # SIG # End signature block

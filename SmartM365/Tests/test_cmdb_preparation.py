@@ -265,6 +265,82 @@ class PreparationTests(unittest.TestCase):
     def test_running_producer_blocks_last_output_replacement(self):
         self.unchanged_after(lambda:(self.alter_receipt(Status='Running'),self.prepare()),'Incomplete producer')
 
+    def source_run(self, status='Collecting', unqualified=False, protocol=True):
+        producer=pipeline.load_json(pipeline.REGISTRY)['Producers'][0]
+        path=self.source/producer['Receipt']
+        proof=pipeline.load_json(path)
+        if protocol:
+            proof['PublicationProtocol']=1
+            path.write_text(json.dumps(proof),encoding='utf-8')
+        run={'Owner':'SmartInventory-SourceRun','ContractVersion':'1.0',**IDENTITY,
+             'Producer':producer['Script'],'RunId':'new-attempt','Status':status,
+             'PublicationStarted':unqualified,'UnqualifiedPublication':unqualified}
+        run_path=path.with_name(path.name.replace('.current.json.txt','.run.json.txt'))
+        run_path.write_text(json.dumps(run),encoding='utf-8')
+        return path,run_path,proof,run
+
+    def test_collecting_and_prepublication_failure_preserve_previous_evidence(self):
+        for status in ['Collecting','Failed']:
+            with self.subTest(status=status):
+                self.write_proof()
+                path,run_path,proof,run=self.source_run(status)
+                digest=pipeline.sha(path)
+                records,receipts,_=pipeline.producer_records(self.source,IDENTITY)
+                self.assertTrue(records)
+                self.assertEqual(receipts[0]['RunId'],'synthetic-run')
+                self.assertEqual(pipeline.sha(path),digest)
+                self.assertEqual(receipts[0]['StartedAtUtc'],proof['StartedAtUtc'])
+
+    def test_publishing_failed_replacement_and_retry_are_rejected(self):
+        for status in ['Publishing','Failed','Collecting']:
+            with self.subTest(status=status):
+                self.source_run(status,unqualified=True)
+                with self.assertRaisesRegex(ValueError,'publication is in progress or remains unqualified'):
+                    pipeline.producer_records(self.source,IDENTITY)
+
+    def test_new_attempt_fences_legacy_completed_proof_too(self):
+        self.source_run('Publishing',unqualified=True,protocol=False)
+        with self.assertRaisesRegex(ValueError,'publication is in progress'):
+            pipeline.producer_records(self.source,IDENTITY)
+
+    def test_run_state_cannot_replace_or_fabricate_completion_proof(self):
+        path,_,_,_=self.source_run('Completed')
+        path.unlink()
+        with self.assertRaisesRegex(ValueError,'Missing producer completion proof'):
+            pipeline.producer_records(self.source,IDENTITY)
+
+    def test_missing_corrupt_foreign_and_untyped_run_states_are_rejected(self):
+        for change in ['missing','corrupt','foreign','untyped','unknown']:
+            with self.subTest(change=change):
+                path,run_path,proof,run=self.source_run()
+                if change=='missing': run_path.unlink()
+                elif change=='corrupt': run_path.write_text('{',encoding='utf-8')
+                else:
+                    run.update({'TenantKey':'foreign'} if change=='foreign' else
+                               {'UnqualifiedPublication':'false'} if change=='untyped' else {'Status':'Unknown'})
+                    run_path.write_text(json.dumps(run),encoding='utf-8')
+                with self.assertRaises((ValueError,json.JSONDecodeError)):
+                    pipeline.producer_records(self.source,IDENTITY)
+
+    def test_publication_started_after_validation_blocks_final_recheck(self):
+        path,run_path,proof,run=self.source_run()
+        records,receipts,registry_hash=pipeline.producer_records(self.source,IDENTITY)
+        evidence={'ProducerReceipts':receipts,'RegistrySHA256':registry_hash,'Files':list(records.values())}
+        pipeline.recheck_sources(self.source,evidence,self.contract)
+        run.update(Status='Publishing',PublicationStarted=True,UnqualifiedPublication=True)
+        run_path.write_text(json.dumps(run),encoding='utf-8')
+        with self.assertRaisesRegex(ValueError,'publication is in progress'):
+            pipeline.recheck_sources(self.source,evidence,self.contract)
+
+    def test_collecting_does_not_reset_expired_acquisition_dates(self):
+        self.source_run()
+        records,_,_=pipeline.producer_records(self.source,IDENTITY)
+        record=next(iter(records.values()))
+        self.assertEqual(record['StartedAtUtc'],(NOW-dt.timedelta(minutes=5)).isoformat())
+        expired=NOW+dt.timedelta(hours=self.contract['maxAgeHours']+1)
+        with self.assertRaisesRegex(ValueError,'[Ff]resh|[Aa]ge|[Ee]xpir|[Ss]tale'):
+            pipeline.validate_sources(self.source,self.contract,'synthetic',now=expired,identity=IDENTITY)
+
     def test_foreign_parent_identity_blocks_replacement(self):
         self.unchanged_after(lambda:(self.alter_receipt(TenantId='foreign'),self.prepare()),'tenant identity')
 

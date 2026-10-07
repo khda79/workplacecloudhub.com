@@ -1118,6 +1118,7 @@ function Complete-SmartM365ExecutionContext {
     # Upload run log files after the execution summary is written, so SharePoint keeps the final log content.
     $logUploadCandidates = @($global:LogTextFile, $global:logTranscriptFile)
     if($cmdbReceiptPath){$logUploadCandidates+=$cmdbReceiptPath}
+    $logUploadCandidates+=@($script:SmartM365SourceReceiptUploadPaths)
     if ($global:SmartM365MailHtmlFiles) { $logUploadCandidates += @($global:SmartM365MailHtmlFiles) }
     $logUploadCandidates = $logUploadCandidates |
         Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) -and (Test-Path -LiteralPath $_ -PathType Leaf) } |
@@ -4882,7 +4883,9 @@ function Repair-SmartM365CsvTenantKeySchema {
             $newColumns = @($identityColumns) + @($existingColumns | Where-Object { $identityColumns -inotcontains $_ })
             $newHeader = ($newColumns | ForEach-Object { '"' + ($_ -replace '"', '""') + '"' }) -join ([string]$Delimiter)
             Set-Content -LiteralPath $tempPath -Value $newHeader -Encoding $Encoding -ErrorAction Stop
+            Start-SmartM365SourcePublication -Path $Path
             Move-Item -LiteralPath $tempPath -Destination $Path -Force -ErrorAction Stop
+            Register-SmartM365SourceCsv -Path $Path
         }
         finally { if (Test-Path -LiteralPath $tempPath) { Remove-Item -LiteralPath $tempPath -Force -ErrorAction SilentlyContinue } }
     }
@@ -4942,6 +4945,7 @@ function Write-SmartM365CsvAtomically {
             }
         }
 
+        Start-SmartM365SourcePublication -Path $Path
         Move-Item -LiteralPath $tempPath -Destination $Path -Force -ErrorAction Stop
         Register-SmartM365SourceCsv -Path $Path
     }
@@ -4973,6 +4977,7 @@ function Copy-SmartM365FileAtomically {
     $temporaryPath = Join-Path -Path $destinationParent -ChildPath ("{0}.{1}.tmp" -f $destinationLeaf, [guid]::NewGuid().ToString('N'))
     try {
         Copy-Item -LiteralPath $SourcePath -Destination $temporaryPath -Force -ErrorAction Stop
+        Start-SmartM365SourcePublication -Path $DestinationPath
         Move-Item -LiteralPath $temporaryPath -Destination $DestinationPath -Force -ErrorAction Stop
         Register-SmartM365SourceCsv -Path $DestinationPath
     }
@@ -5020,7 +5025,9 @@ function Add-SmartM365CsvRowsAtomically {
         }
         Copy-Item -LiteralPath $Path -Destination $temporaryPath -Force -ErrorAction Stop
         $appendRows | Export-Csv -LiteralPath $temporaryPath -NoTypeInformation -Encoding $Encoding -Delimiter $Delimiter -Append -ErrorAction Stop
+        Start-SmartM365SourcePublication -Path $Path
         Move-Item -LiteralPath $temporaryPath -Destination $Path -Force -ErrorAction Stop
+        Register-SmartM365SourceCsv -Path $Path
     }
     finally {
         if (Test-Path -LiteralPath $temporaryPath) {
@@ -5047,7 +5054,9 @@ function Write-SmartM365TextAtomically {
     $temporaryPath = Join-Path -Path $parent -ChildPath ("{0}.{1}.tmp" -f $leaf, [guid]::NewGuid().ToString('N'))
     try {
         Set-Content -LiteralPath $temporaryPath -Value $Content -Encoding $Encoding -ErrorAction Stop
+        Start-SmartM365SourcePublication -Path $Path
         Move-Item -LiteralPath $temporaryPath -Destination $Path -Force -ErrorAction Stop
+        Register-SmartM365SourceCsv -Path $Path
     }
     finally {
         if (Test-Path -LiteralPath $temporaryPath) {
@@ -5183,8 +5192,8 @@ function Export-SmartM365Csv {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCrX+uW+0jecvWq
-# Fy6mJISmw/nAh6WMbsxEtd5rYGBnLKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAtaiYBJWHaD78N
+# 6Lz/+vKmQ+dt7RaP2sziNmP2I4kayKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -5317,31 +5326,31 @@ function Export-SmartM365Csv {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIHirkG2aGJ9C3ZG6SE/73DjnVi0wPEI9lvOepz/1VRAaMA0GCSqG
-# SIb3DQEBAQUABIIBgJB6bejHAR6TqUr27S1n6XtRe1AHyLXAfce4OfrdhuTAahHp
-# W3eSWsD0oxCm8FZkgCScgnJ1Vh0Za12h2qxzUdm937tLRbXe+Xfvcxer88Aw7COZ
-# 0Kv2iUB84ZwLQ7Vmj8AtYfNe14A7WMkyz/cJ+BzntqAcG9r97NSgHdypfryZtlWT
-# MsJ8msYdC40sr98cPIoaNeYmvlgCS9QuHbsboWfiEOMSE7StyWk2wQFd/Tn9548H
-# WG8Ruqw+kqvOCrlvYCDINLZ0cHMebIfd9rDkdpNBgEeMXdx0hI2gm01nCHkXNirW
-# MbG0wnnvDw+aA8j3KklgeHyZ4379JNwYZiwqg5MTqOlKS+ws2R4nPlUcmonk4/fD
-# Il+lrIVyV4ybB6OPfZ2M4srHS3Zd82p9qE6IylzvlELD4kALcm1uFpW2D1WmhJDk
-# u8kFMlsV/1I5uuZ/ApF78p2q9BHyd8afMKPHHuet8rum0E4vRULv+vmwdBVcM1cf
-# ewBlB75mxYTB+tj1EKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIEYa7swE6hBCxGTHDAkBaFDuJFmRSkf2Y5jG4PJMh9TxMA0GCSqG
+# SIb3DQEBAQUABIIBgGhPga946K+s4kqnYoUyjTcOgcZ0gUJjhkRWxA9J9GLMizfo
+# urpZfmOwQD2dvgmPvsSRAA6cwERyHib+5Nc7yl80JbDkFDencbClauQmAVLYKLQF
+# CSa3t8ajHRRfa7SOkOn0i7YmIo7V70etBU78tNDufWv6zsS+VXXc+WUdjI5XCsDH
+# 8wWaVLCZgE2ftUnDrNVjBRXhUcEvBamg1KV6AH9/CFp8g+SjNRM43ApamN9BinME
+# QYdSasslRlou3+WwGrx6EYB9XnoJ4Gn10BViFtOL6kcm+PQAOiN6R/U04a11k48u
+# I3DPCUe6QXS1fOeTKjynJbzYGk9ThnLX/obJAr5zGrCtnVo4eGO6n2xk4z1nOGng
+# bvJgy/WHZEsGYAzpnG7yxnTHhO/nYzdiLR3CAX+SKnS97usm+t4q3xTC/ANOe+r2
+# JsJj+Cfvus79KpVPfhjvpMgK444FvZg3wfsHOKWU4ZCfCBzRmNTGCjFgt440OcBi
+# fsYu02ys6a7QIkFKbKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDYyMTIx
-# NTJaMC8GCSqGSIb3DQEJBDEiBCCN+LhZsSxUJ9U1dTSFzkQ33/cGkQQchTmpYd85
-# gxBC8DANBgkqhkiG9w0BAQEFAASCAgCkH1gHQ6sZidlGukCb+fVLEHzZVDUToig1
-# 27EghC5aopgaZnUG3L3AZX59G6DUXKeaEopYa+y/MWM228KltfNvDumCwPPOOYUI
-# LH+5Lx4zlMq1Pd6PyLvNBYtIv9M87EOGwt/0oIB5TO8FLh0ELHyuldXR0IqixJjC
-# mJmIWUlSSxhE01S3AoXtdG4/Uiqov0v9MKGa51RQCqfUWszMvi7mckj6BLzYdv4u
-# cAbvPBNAD+QYXLQ7OJ38/gwZOtxD26x5IhEcr7McHLcOQTSrCabI9D6VVK+ufoqX
-# lp9Czakf2CgohpOeee367SKs3u7PuQEH8Z8eHScJQxF7hEWbPrPVXTp/hY3V/BU8
-# 159CCMcX5V/jPsQc6mDy89fDvbE7PLFtCADVRnreznR4SPHB16e2+b0OlQZrMNPY
-# bNxGqIKCC5SIHG8Rcxh0IW2zYj7BAMIHlQUtewUGdy8RW/AdQOnQXRpnBGL/ka5z
-# 0Na13FkjqMCfwZh2qdBXYxjqhdOtw5QsHZ84LdEruDwmHqfZrJ+B8zobueF3t6IM
-# +VP2E8GWziQKwET7S9OBOp69sZM9RBr3IQK1ajgSbbqfd35TYNiuXDn1dOVEhuf8
-# tb6Gpw6HTJuWLERpY6c0y7exyfQzSxcYTvMbl8wn1iIlE1vdrBuXnYgsvm4ZYKku
-# X3SW2u7obg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDcxMDMx
+# MjBaMC8GCSqGSIb3DQEJBDEiBCAtZmZ1VWHuK+ywTpMCeI0giEVMG2uLf3DkQJmN
+# Vy4OYzANBgkqhkiG9w0BAQEFAASCAgABPwAu0uPhyoDI/4auFxOcvwWQjFpIMfr6
+# 9sQY0hQqm5iIzRcuf2IYOKwMuz1EG50PNP2WGaiT6ksz0uGnQihyWqjgBcP2qzx+
+# 0k8TIVt9VJaphJbm15hrcby2BCQaojbIzDwP9drmoL+RonnOSDlUGiwEqklToxKl
+# cEQbgZtaXOrWJxF7IqjHzpxKxKbEpzCSPL0Hoh/vJiGH+eSrZVQvETIFeFO7kAIa
+# 67+Fqfbxz1Btet/kS/5OlR0Oa4P1T/PVAt7qZUbqCAz1M6jWHtg4zFLO6dXZ+Jym
+# FFnAnniVxEnpv/rEHusicuNdGt7pMF/CINaD74SeFFjrDSSh52DpaCxXCmdldvOU
+# S1Nde7H7HDDx6NACGqqVPuZNBMpuYFF2/uYJEMoXVzuljq95NR+UjELlXL7BM3Oa
+# LddOsOhFEWzrjQkr2VH6nSdzBlTEvczJkfU2FitzWlmaPYgsZf9BI5k5dc+K5MUq
+# r3hPG0Dy49usE7TrUbX1LjmIEnqJYxwfax81DtRU50aUpgi/JyGQsgr++UqK8ohN
+# jMzZMsUGFNF4xGMfZXHvRUnGEm9GCStSivmK/0xrTeSb+PIgyCTyMx+kWPGp5rOy
+# 5JMUdIgZV7AyA0GW7Tfn35szvFHj+0+P2Zh+Vi83FWeFfl/D+kZWzjGYZnzpx6ac
+# 02CZrwFxvA==
 # SIG # End signature block

@@ -17,7 +17,7 @@
     Parameters allow customization of output paths, permission inclusion, and overwrite behavior.
 
 .VERSION
-1.61
+1.62
 .REQUIREMENTS
     Windows PowerShell 5.1 on an Exchange 2016/on-premises management host.
     Modules/snap-ins: SmartM365 WindowsPowerShell5 compatibility module; Exchange Management snap-in; ActiveDirectory module when AD permission export is enabled.
@@ -256,7 +256,7 @@ $global:SharePointTargetFolderPath = Get-ScriptLocalConfigValue -Config $ScriptL
 $script:SharePointUploadDisabledForRun = -not $global:EnableSharePointUpload
 $script:SharePointUploadDisableLogged = $false
 #region Module Import and Initialization
-$ScriptVersion = "1.61"
+$ScriptVersion = "1.62"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $EnableWeeklyHistory = [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'EnableWeeklyHistory' -DefaultValue $true)
 $WeeklyHistoryFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'WeeklyHistoryFolderPath' -DefaultValue ''
@@ -1905,7 +1905,7 @@ function Invoke-SmartM365ExchangeLocalMailboxReport {
 }
 try {
     Write-Host "Loading module SmartM365-WindowsPowerShell5.psd1..."
-    Import-Module -Name (Join-ModulePath 'SmartM365-WindowsPowerShell5.psd1') -MinimumVersion '1.0.48' -ErrorAction Stop
+    Import-Module -Name (Join-ModulePath 'SmartM365-WindowsPowerShell5.psd1') -MinimumVersion '1.0.52' -ErrorAction Stop
 	$InitializeOutputPath = InitializeScriptEnvironment -OutputPath $OutputPath -LogFileName $(($MyInvocation.MyCommand.Name) -replace '\.ps1$','')
 	Start-SmartM365CmdbSourceReceipt -ScriptPath $PSCommandPath -SourceRootPath (Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue '') -ReadOnly:($OnlyADPermission -or $ReportOnly -or $DryRun)
 	Start-Transcript -Path $global:logTranscriptFile -Append
@@ -3736,8 +3736,8 @@ Else
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCCLSsgNI14Mai8
-# HGbHhytebTu6wd9Q0MQr4AN0pI9OE6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCVGWclYIzmaTBr
+# U6nn+ePSYnVEB2P0d8TU2Tv9L9IY6qCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -3870,31 +3870,31 @@ Else
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIMAnTr6Y63zWSLymbg8ZmBIZu1QCfr0NDiXqqlbPbKL2MA0GCSqG
-# SIb3DQEBAQUABIIBgDdtS5pZMRTlr8IPGIq+rousANe5aHIlCs1jkuNHA9RuTtmo
-# pJe2kUZku1TVp3zaLbt45p9ei5+icMPpFmtUNrUPRDXcVViZxwiABgWhTsJsajJt
-# gAck7oeVbbG3GXU5N2x45MGOCx4A1XSJjoxay7bl3wNPTj/YCuMM3A6zLZzhwabW
-# 2OJ3cxCMku4VRGg2ST9vRRM7IWZzN5Kp1f84ye5DHcGLUvd/aU7FDUvxdGSKEUAE
-# 7QUGpNuhtdibNjGkdnH20XAeU26v7S4m8X9UFGdLWm+YgV+ZCTYWzy7bsPrRV+6q
-# VkoYBE/5/xlldo161An7xqfLrbGmflajIrxmJol8KvWh4l9X0XUrGCTfqDlzdPY5
-# cHEkhr7rEu+++IKMu8Nzr79n2z9BnjHPAbQACKrXRUx8G/hv2KjiDPvRZbqjIDX4
-# GRHqqRcQunefY4HboY5eyxw/pqug5zsDriZW799DBc8tpN9/SHzOv0+wl3L6Xq5Q
-# TjHxjYIGJQfs5E35xaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIJ281kSwzC6U5HBEl7C+BBwANxi3Y2Z5hRTnIRshUcrJMA0GCSqG
+# SIb3DQEBAQUABIIBgEOc55hXMWOMFk44tc/eaQNEds/y6hohWJAyDkf3mimysXCB
+# VfJsDMf3bSrBbcRTBG6raLoBEDzrSjHrDirHtdCqhojd+rsxxsWuqB7cFoyYCLC4
+# m9UaAWXaMYuqFevjhBb17Jm8QV2Qx8QypiBJpJJPImxMt46s60/cMcXrQSFCqCCq
+# 5kQD4MBsZwUEV86O9DF9syWMJURz6vIbCXDaujrxdiroukf/jEHVgvmpaqFRDevN
+# CZeWxb9o7L3+BOoWGbwNXgKxjf5LM8/VWMSfAPzyVzwKKKEQyRSN7tGnSyR8xqbV
+# VEJZ+WTLL73RVzVtg3jausBGiXqiMusTwCbAZN+ljToAaRs0gPTq26HnqwshPsQA
+# 9Amq70V/rJVFzLBxHuVeAsCBRTKjMExY8HsvWpX6++co3WSnx7Mhpl4s8BrPlySa
+# ENGntCXlmcILU3x4FcKX3Hjs/lJD5m1LamV+xkbyrNkeNMiwTNkEkzz1LQiYeIXk
+# Si4HYvJ0LAc/P+f41KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDcwOTA5
-# NDNaMC8GCSqGSIb3DQEJBDEiBCDtMUmYtuDZFZfi7LS6EwL5U/ZGvldwnHgPMR/l
-# Df+B1TANBgkqhkiG9w0BAQEFAASCAgCgeuKHrPreC3DbNb3Cuk6uWtbKMmTkY03g
-# hvV7xmvXccyY8g84/wgpMtBvp2XyBv76y3K8tgMabuT8qTDttdM3MwLlvb+1htN1
-# cDCptfcVzWLmZtpYgy+wzuKcrGK2hYDEWHO792mhoG5lDPWdSIbL+fwHMGJgpVLi
-# K6IhV0VOzV5qQ6BRX9vQjgpYwoA6+0be0fmfVqGTRVdExNXoWNZbwTBnXHpfBo13
-# q51kn0QvHmGJhqm3xNOld/VFeaJco+eRg0jzvtvl0ApPpL5w+f6Fe9M+tLxd8fkE
-# ij4JzrrrFQ8oYnlcXMDpaPOy+SV3cutjd+b9xH532mgFB+2zOJQ0p0JFbUyn2yxo
-# kSievLaW6zbfMj+pMPt/0xBOpgmfqIWvDFdDwEQVjrrrp/g+EueZA4t3umusc/iC
-# M635i8DsWqEZWzIh3IA8jcOLHuIo+yOLoBewH6waYJJDydBVlaAPIhSOe53SynhK
-# Ns/HrfZAP+DIEJBFuDBrjHXn9RxvFasTaiwx7X6KtJYx+7kOAXwmbBPArOdRI/27
-# ikbc14lbXaA2JpUI865TbrLd+ZvhKgOYxtLKQYV/SBJBbCj+7mwmCfL1bhlhTX5L
-# kZ/MU3lqZBd3YBOxJhROCk2NyagfpFv7NLw5mPX35hzGGjPjdQHgdMPCljjCWM9z
-# pRgsA2ejFg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDcxMDMx
+# MjJaMC8GCSqGSIb3DQEJBDEiBCBF+gAPfKLIqQ2303tUXncxBJoaYWYMzDH/3qyc
+# fgCacDANBgkqhkiG9w0BAQEFAASCAgCmzphsZKCNGjkmqJYp8f1yjDkFMQG0bzhg
+# BEBfP/kSIfh4JCrE+cJCIKOmhalC3D+EyXo2uBeiXEpk3sFpZU+QQuY6THMfpsSC
+# wPPO4r0GXPZUvET8AdeTtaSRiSrGC4rmTBgj4jJ956IbeMEqWnq7S+eUZz+xy7zz
+# Hx76YUaPAJ4r4DSqvPK47rnlmniliBNUCQYA02FSKWkj+nkGUSVFWpnO6h0H8trT
+# Hg319GRK/lmzkmt6uXSPJx1DO8Wl7Xzp4ISCeOtbzp28blkOWbEJqGfCtMcE28Ma
+# T8dj2pYSOE5zCYtzKeCDkDXXAE5cm+tvV76VGCE1f9Zn8Culrt4XSlKZmRz0hJE2
+# RCqzAjVO8MnGhxEY2DdcHzHOrJnfKl9rwPCGxIXo5hd9q7qmJWnwWDQlD9TiomUU
+# 1U8YHBk0ZRq9y+PuqD0xaX/RPcDoPIjsfU5jq/njsNtqzm9Vb35ybNvxos+eCEc1
+# kW722+Y1rxJr4W/YjqcmBoMlrJTUH47FaJUC8mfRkGzH+FhtYBf4JcwHppuKAOGq
+# DD7pA8d2CvRuamYD2LH1PjBMv5DoWjp6eZp4S++yaPaGD07C5sioz6oG7MpAsqMT
+# +Wcu/7qQJdEFIkWnd4Xv7SxBZP1oUNE1vrMOOZblS4rsVqGrIzh/Gt7FXU7sPsnF
+# TqBHwKYNtw==
 # SIG # End signature block

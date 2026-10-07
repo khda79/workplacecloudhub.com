@@ -15,7 +15,7 @@ import uuid
 from pathlib import Path
 import cmdb_freshness
 
-VERSION = '0.3.9'
+VERSION = '0.3.10'
 OWNER = 'SmartInventory-CMDB-Prepared'
 CONTRACT = Path(__file__).with_name('cmdb-prepared-contract.json.txt')
 REGISTRY = Path(__file__).resolve().parents[2] / 'Modules/SmartM365.Core/SmartM365-CmdbSources.json.txt'
@@ -99,6 +99,28 @@ def check_rows(path, definition, tenant, exact=False, identity=None):
     return count
 
 
+def check_publication(path, proof):
+    """Collecting preserves the previous proof; replacement or failed replacement does not."""
+    run_path = path.with_name(path.name.replace('.current.json.txt', '.run.json.txt'))
+    protocol = proof.get('PublicationProtocol')
+    if protocol is not None and (type(protocol) is not int or protocol != 1):
+        raise ValueError('Unsupported source publication protocol: ' + path.name)
+    if protocol is None and not run_path.exists():
+        return  # Existing completed receipts remain compatible, never fabricated.
+    if run_path == path or run_path.is_symlink() or not run_path.is_file():
+        raise ValueError('Missing or unsafe source run state: ' + path.name)
+    run = load_json(run_path)
+    if (run.get('Owner') != 'SmartInventory-SourceRun' or run.get('ContractVersion') != '1.0'
+            or run.get('Status') not in {'Collecting', 'Publishing', 'Completed', 'Failed'}
+            or not run.get('RunId') or type(run.get('PublicationStarted')) is not bool
+            or type(run.get('UnqualifiedPublication')) is not bool
+            or any(run.get(field) != proof.get(field) for field in
+                   ('TenantKey', 'OrganizationKey', 'EnvironmentKey', 'TenantId', 'Producer'))):
+        raise ValueError('Invalid source run state: ' + path.name)
+    if run['Status'] == 'Publishing' or run['UnqualifiedPublication']:
+        raise ValueError('Canonical source publication is in progress or remains unqualified: ' + path.name)
+
+
 def producer_records(source, identity):
     registry_hash = sha(REGISTRY)
     registry = load_json(REGISTRY)
@@ -117,6 +139,7 @@ def producer_records(source, identity):
             raise ValueError('Missing producer completion proof: ' + context)
         digest = sha(path)
         proof = load_json(path)
+        check_publication(path, proof)
         receipt_kind = (proof.get('Owner'), proof.get('ContractVersion'))
         if receipt_kind not in {('SmartInventory-CmdbSourceReceipt', '1.1'),
                                 ('SmartInventory-SourceReceipt', '1.2')}:
@@ -328,6 +351,7 @@ def recheck_sources(source, evidence, contract):
     if sha(REGISTRY) != evidence['RegistrySHA256']:
         raise ValueError('Producer registry changed during preparation')
     for receipt in evidence['ProducerReceipts']:
+        check_publication(source / receipt['File'], load_json(source / receipt['File']))
         if sha(source / receipt['File']) != receipt['SHA256']:
             raise ValueError('Source proof changed during preparation')
     for record in evidence['Files']:

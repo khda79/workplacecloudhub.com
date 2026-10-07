@@ -1159,6 +1159,7 @@ function Complete-SmartM365ExecutionContext {
     $logUploadCandidates = @($global:LogTextFile)
     if (-not $DeferTranscriptUpload -or $closedTranscriptPath) { $logUploadCandidates += $global:logTranscriptFile }
     if($cmdbReceiptPath){$logUploadCandidates+=$cmdbReceiptPath}
+    $logUploadCandidates+=@($script:SmartM365SourceReceiptUploadPaths)
     if ($global:SmartM365MailHtmlFiles) { $logUploadCandidates += @($global:SmartM365MailHtmlFiles) }
     $logUploadCandidates = $logUploadCandidates |
         Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) -and (Test-Path -LiteralPath $_ -PathType Leaf) } |
@@ -2124,7 +2125,9 @@ function Repair-SmartM365CsvTenantKeySchema {
             $newColumns = @($identityColumns) + @($existingColumns | Where-Object { $identityColumns -inotcontains $_ })
             $newHeader = ($newColumns | ForEach-Object { '"' + ($_ -replace '"', '""') + '"' }) -join ([string]$Delimiter)
             Set-Content -LiteralPath $tempPath -Value $newHeader -Encoding $Encoding -ErrorAction Stop
+            Start-SmartM365SourcePublication -Path $Path
             Move-Item -LiteralPath $tempPath -Destination $Path -Force -ErrorAction Stop
+            Register-SmartM365SourceCsv -Path $Path
         }
         finally { if (Test-Path -LiteralPath $tempPath) { Remove-Item -LiteralPath $tempPath -Force -ErrorAction SilentlyContinue } }
     }
@@ -2204,6 +2207,7 @@ function Write-SmartM365PreparedCsvAtomically {
             $rows | Export-Csv @exportParams -ErrorAction Stop
         }
 
+        Start-SmartM365SourcePublication -Path $Path
         Move-Item -LiteralPath $tempPath -Destination $Path -Force -ErrorAction Stop
         Register-SmartM365SourceCsv -Path $Path
     }
@@ -2248,6 +2252,7 @@ function Copy-SmartM365FileAtomically {
                 throw 'Atomic CSV copy failed SHA-256 verification. The previous destination is preserved.'
             }
         }
+        Start-SmartM365SourcePublication -Path $DestinationPath
         Move-Item -LiteralPath $temporaryPath -Destination $DestinationPath -Force -ErrorAction Stop
         Register-SmartM365SourceCsv -Path $DestinationPath
     }
@@ -2296,7 +2301,9 @@ function Add-SmartM365CsvRowsAtomically {
         }
         Copy-Item -LiteralPath $Path -Destination $temporaryPath -Force -ErrorAction Stop
         $appendRows | Export-Csv -LiteralPath $temporaryPath -NoTypeInformation -Encoding $Encoding -Delimiter $Delimiter -Append -ErrorAction Stop
+        Start-SmartM365SourcePublication -Path $Path
         Move-Item -LiteralPath $temporaryPath -Destination $Path -Force -ErrorAction Stop
+        Register-SmartM365SourceCsv -Path $Path
     }
     finally {
         if (Test-Path -LiteralPath $temporaryPath) {
@@ -2323,7 +2330,9 @@ function Write-SmartM365TextAtomically {
     $temporaryPath = Join-Path -Path $parent -ChildPath ("{0}.{1}.tmp" -f $leaf, [guid]::NewGuid().ToString('N'))
     try {
         Set-Content -LiteralPath $temporaryPath -Value $Content -Encoding $Encoding -ErrorAction Stop
+        Start-SmartM365SourcePublication -Path $Path
         Move-Item -LiteralPath $temporaryPath -Destination $Path -Force -ErrorAction Stop
+        Register-SmartM365SourceCsv -Path $Path
     }
     finally {
         if (Test-Path -LiteralPath $temporaryPath) {
@@ -5423,7 +5432,9 @@ function Export-SmartM365CsvStreamAtomically {
             $Data | Select-Object -Property $selectedColumns.ToArray() | Export-Csv @exportParameters -ErrorAction Stop
         }
 
+        Start-SmartM365SourcePublication -Path $Path
         Move-Item -LiteralPath $temporaryPath -Destination $Path -Force -ErrorAction Stop
+        Register-SmartM365SourceCsv -Path $Path
     }
     finally {
         if (Test-Path -LiteralPath $temporaryPath) {
@@ -6211,7 +6222,7 @@ function Disconnect-SmartM365CloudSession {
 #endregion
 
 Export-ModuleMember -Function `
-    Start-SmartM365CmdbSourceReceipt, Set-SmartM365CmdbSourceScope, Complete-SmartM365CmdbSourceReceipt, Start-SmartM365SourceReceipt, Complete-SmartM365SourceReceipt, `
+    Start-SmartM365CmdbSourceReceipt, Set-SmartM365CmdbSourceScope, Complete-SmartM365CmdbSourceReceipt, Start-SmartM365SourceReceipt, Complete-SmartM365SourceReceipt, Assert-SmartM365SourcePublication, `
     Format-SmartM365LogLine, Update-SmartM365TimestampedTranscript, WriteLog, Write-Log, Get-SmartM365ModuleDiagnosticText, Write-SmartM365LoadedModuleVersions, Write-SmartM365ExecutionContext, Write-SmartM365CompletionBanner, Complete-SmartM365ExecutionContext, Test-FileLocked, RemoveOldFiles, Remove-SmartM365TimestampedFilesOlderThan, Remove-SmartM365TimestampedDirectoriesOlderThan, Remove-OldFiles, EnsureExchangePSSnapinLoaded, `
     Set-SmartM365CoreContext, Get-SmartM365MaxItemsValue, Test-SmartM365MaxItemsMode, Get-SmartM365MaxItemsSuffix, Set-SmartM365MaxItemsMode, Add-SmartM365MaxItemsSuffixToCsvPath, Add-SmartM365MaxItemsSuffixToBaseName, Add-SmartM365MaxItemsMailBanner, Add-SmartM365MaxItemsSubjectPrefix, Get-SmartM365MailTenantName, Format-SmartM365MailSubject, Get-SmartM365MailScriptContext, Add-SmartM365MailExecutionFooter, Limit-SmartM365RowsForMaxItems, Get-SmartM365CsvValidationBaseName, Get-SmartM365CsvValidationRule, Assert-SmartM365CsvDataCompleteness, Add-SmartM365CsvValidationRule, Initialize-SmartM365DefaultCsvValidationRules, Add-SmartM365TenantKey, Repair-SmartM365CsvTenantKeySchema, Write-SmartM365CsvAtomically, Add-SmartM365CsvRowsAtomically, Copy-SmartM365FileAtomically, Write-SmartM365TextAtomically, Publish-SmartM365Csv, Export-SmartM365Csv, Export-SmartM365CsvFromConvert, `
     ConvertTo-SmartM365ConfigBoolean, Get-SmartM365MailBrandingConfig, ConvertTo-SmartM365MailLogoDataUri, Add-SmartM365MailBranding, ConvertToRecipientArray, ConvertTo-SmartM365EmailHtmlText, New-SmartM365EmailBody, ConvertTo-SmartM365EmailBody, Get-SmartM365SharePointUploadRecordForLocalFile, Convert-SmartM365MailBodyLocalPathsToSharePointLinks, NewSimpleEmailBody, ConvertBytesToSizeString, GetFileList, `
@@ -6224,8 +6235,8 @@ Export-ModuleMember -Function `
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD20y+rMvm6Prv8
-# ziqI3DuoTF+0dsDPNVemfPHBI9+56KCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC2TlUwP0XeQ0rv
+# 4V3UrU4RjkY2MDvoW5wmdAmTLNaa9qCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -6358,31 +6369,31 @@ Export-ModuleMember -Function `
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIMpyMdii0+8ZqZLMZiXpoRkxkWDrBRzMWiEyRex4NSLuMA0GCSqG
-# SIb3DQEBAQUABIIBgBkBTlY9ZGL9/vwXfb/vrAyNQ/zVikbh2E8cErdfzlKQMYxF
-# ygCu7y+qYSU9i/D+fDJoQSpqTrEGtlYEkDRHAePmFxTyzWVRDGONGXKMjMnCkzZ8
-# JRf3qwSuPVzqYwEkw21i/24k4X9Zbi+ILeR7hloXZhZ61M0crBngAL3LjaPy7cQd
-# nKfgIVT6BAFipmNKQkkOGBTlC2Rqzdi57ABQe2QXnoCXu0BtKhyiXSX8e3lbaFVE
-# vgtdMV8VIzeDdNtvkYITQ8NtJwSlVuj/9cN5O//ht3ZI26ZRK+la8AWc/HIcsJMW
-# OplZERaDr9auES0cuuHNqCHuZDCJtG3uVQGaxbdOyDZSV7q0R3a/UVHjKbiyk1MI
-# vc1RRJzsCpzeFAMYHqRyYPBWFER8sZfUmwysXXD1kLhS09j4qwbj3Cu4P+Eoj2l+
-# o0SMhH1gk2e+0IH9LMDRKZ+5tI+IzA2fY2J/LgzfbfiRzF7nyJNyTmxRgNcwUP3w
-# bmfeyPL9Sh4GIJapaKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIAPXM2tgL4yi7KSOIoiGDsWkMr9vd6kRvfs6JdT1irUaMA0GCSqG
+# SIb3DQEBAQUABIIBgBA5v2qFUdVyLQxF9TgbFdDw7RjdTCVsd9v0DO0cGn52bYU7
+# B0jN5Wb2pqvYCMVzlVQSSWPz2QLJ5ayfc5sN8DP8Ut8kS+OGuxbOVmWbjSEjc1f0
+# ATrvUgdFJNF2sFhlxeZPpzfzYdMyzH89UwrvKW39IDZ42i6mcI8eiUV0kRESXNVn
+# LY0r3PW+vvLs9uujPi0wSplZ1Zbs61vMr3iNkEzHT/xcIGgXQpmSrpzzYVD5/5sC
+# SD5bjSwJYUAZbSNfbSNELO6+kCftERf8jmK6IbNlhc4xuiBpzpKa2jMb2u4o0ze0
+# e7Mdezw8Withzb2wRzPDsmXjw+LD4RA19HNWiE210rKaf2T0jDChCfk037wshy5y
+# m3UEUQkv9HFWe32egQ+mwjuM26g54njq+oMyKd1wr0I23fbAH4pkIUPN3z89uDwK
+# fIzdXL22+YMstasP1scP9s0Bg5DVSuNL6AULLHo/AulxNR1DGbUw9X09nZ2GDzrb
+# fN7NWYep7OEub5W6+qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDcwODIx
-# MDJaMC8GCSqGSIb3DQEJBDEiBCDFSslTk2qeUWH2hZcdda5r+cIm0MQWySc1/8za
-# Ur2VJzANBgkqhkiG9w0BAQEFAASCAgBOUR2MyTfpE7AzzkxpVS0fP3QftDLc/bC5
-# SRt+bl8y8hTcM737RDoFYKh0b/zsIl/cp/oxbwk6a+oYqlh0cRwsXbp634FaK+9m
-# b+Aezc09g9uC7g0cAAncM4FcWdpnmTomzVRZPFk6EvK6SoOIo9zPBNJcxHUEj8Ee
-# TRt+lxHuJth+U5GoUGxALxryBcHkuoj3exsv4xJJ90+E1+EkaMb3rPIWVUM+5Yon
-# MWz49ZlW6zZ1qJAyz1sqPFYXlQ8gjxP00dKUFwbFvXEFysudQxyKE8+HCUwZGmmr
-# VGUOX8v16MpTokqHSIcn6KQlAjLB6s9x+RkCIONEfai0u+5PjLEOC0FjvfLNR19q
-# scKydz2VYZA3lDi4Yvjmc6JyLIVL+5cZcZWTT+biNnUj1Eh5sdFYi/a0r/GxaoyD
-# D2xzru2pD++56wsNt8UyFWDnSkyU6qDa6IStYzdU1os+k0uHhQRIGpNu7hefoE1R
-# lCReBKPANN+ISeuvX+YJ6sXKkcArUaVK7E8Ydm+DkZez7EsIF9OpkMoY9skDdlJt
-# W+9K2ZgMyGkr2I0mwF+2/odPdC7Pd+SwLzd/9U7ZEHOpcqiCckw4YrFzrvePUQES
-# vCDmJ4NeAFHFsez/LoGhjmRd3NCZC19ue4U96+M9/pU3FwvHuwu6Mh3gl9lfggI9
-# rUnvcBVGtQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDcxMDMx
+# MjJaMC8GCSqGSIb3DQEJBDEiBCD66RG1rq7fU9GwW9AqaPuXlm/r9eZCUigq5WWj
+# GgWE5TANBgkqhkiG9w0BAQEFAASCAgBfDfThHdlxWNR4TfvqRZOCUSSBiuoEjdqG
+# +yJA7p9jLejAmgH9BcII776nX1HTqNWmb2bj1dJpTLK3Aq8ewCwa89LVvUcqFojj
+# hFb/iW3wt/2OrMeMnGEBei+4S2xyTPBUFEZf5vpQd7RLOMBy1pHwQNRlZFmnB9nQ
+# vUMfmLMniCx5yM6F7GaLPiPeTwEOLnAORP0z62ILCKOY+ZJnFV087WqgcLvJ2qRN
+# +dyg+x+XA+wxbabXwumog5QM6h/h0xmqeU34niSp4tMso5/ikHz9x4ag40+w2BjI
+# yyT6/jkaU2jV6ZGEAZebL+GKIu+szT6Yy2QELAC2rodFNr1ZzWpdaUGFRBAwOINs
+# jYT4i81wSgjVZx8/wddyXSifweErZOYDSUbiiWpk1RcYJaASZTSnwok34Ijl7xok
+# XyPz4VTAoLM1kmAEUBMdQRkC46yNB4QB4ievch6CUp/lsq2qGchadEHjUCbJlRzh
+# 6uFSAQDcJZKFyiVj8sOwPU7pLG5pKx8NKySEosHL1wBuFUPsI8JMeqXgUtjXzjhO
+# dT+5u7LuCoI4gp4s7EtooO92SL7VOlJZvdusRbt6ru9lXRYg1RHH6+FCMmGodYn+
+# aew3p4Qvab/bdQwmDEaFnHZU7A1EM2wQ3w4dLo21pDTB3YK+bvgsLG6/A1K9HTch
+# /jgz799dag==
 # SIG # End signature block
