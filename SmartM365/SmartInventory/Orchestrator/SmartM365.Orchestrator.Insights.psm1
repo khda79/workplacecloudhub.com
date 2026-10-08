@@ -161,6 +161,7 @@ function ConvertTo-InsightsClaim {
     [pscustomobject]@{
         Occurrence = [datetime]::ParseExact($File.Name.Substring(0, 19), 'yyyyMMddTHHmmssfffZ', [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::AdjustToUniversal)
         Status = [string](Get-InsightsProperty $document 'Status' '')
+        CreatedUtc = ConvertTo-InsightsUtc (Get-InsightsProperty $document 'CreatedAtUtc' $null)
         UpdatedUtc = ConvertTo-InsightsUtc (Get-InsightsProperty $document 'UpdatedAtUtc' $null)
         OwnerServer = [string](Get-InsightsProperty $document 'OwnerServer' '')
     }
@@ -182,6 +183,20 @@ function Get-InsightsOccurrenceClaim {
     foreach ($name in @("$stem.json.txt", "$stem.json")) {
         $path = Join-Path (Join-Path $ClaimsRoot $JobName) $name
         if (Test-Path -LiteralPath $path -PathType Leaf) { return ConvertTo-InsightsClaim -File (Get-Item -LiteralPath $path) }
+    }
+    return $null
+}
+function Get-InsightsLaterOccurrenceClaim {
+    param([string]$ClaimsRoot, [string]$JobName, [datetime]$ExpectedUtc, [datetime]$NowUtc)
+    foreach ($file in @(Get-InsightsClaimFiles -ClaimsRoot $ClaimsRoot -JobName $JobName)) {
+        $occurrence = [datetime]::ParseExact($file.Name.Substring(0, 19), 'yyyyMMddTHHmmssfffZ', [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::AdjustToUniversal)
+        if ($occurrence -le $ExpectedUtc) { break }
+        if ($occurrence -gt $NowUtc) { continue }
+        $claim = Get-InsightsOccurrenceClaim -ClaimsRoot $ClaimsRoot -JobName $JobName -OccurrenceUtc $occurrence
+        if ($null -eq $claim) { return $null }
+        if ($null -eq $claim.CreatedUtc -or $null -eq $claim.UpdatedUtc -or
+            $claim.CreatedUtc -lt $ExpectedUtc -or $claim.UpdatedUtc -lt $claim.CreatedUtc -or $claim.UpdatedUtc -gt $NowUtc) { return $null }
+        return $claim
     }
     return $null
 }
@@ -236,6 +251,13 @@ function Get-SmartM365OrchestratorDependencyReadiness {
                 $claim = Get-InsightsOccurrenceClaim -ClaimsRoot $claimsRoot -JobName $dependencyName -OccurrenceUtc $expectedUtc
                 $status = if ($null -ne $claim) { $claim.Status } else { '' }
                 $row.Detail = "Latest occurrence $($expected[0].ToString('yyyy-MM-dd HH:mm')): $(if ($status) { $status } else { 'not started' })"
+                if ($null -eq $claim -or $status -in $script:InsightsTerminalFailure) {
+                    $later = Get-InsightsLaterOccurrenceClaim -ClaimsRoot $claimsRoot -JobName $dependencyName -ExpectedUtc $expectedUtc -NowUtc $Now.ToUniversalTime()
+                    if ($null -ne $later) {
+                        $status = $later.Status
+                        $row.Detail = "Latest occurrence $($expected[0].ToString('yyyy-MM-dd HH:mm')); later run $($later.Occurrence.ToLocalTime().ToString('yyyy-MM-dd HH:mm')): $status"
+                    }
+                }
                 $row.State = if ($status -in $script:InsightsTerminalSuccess) { 'Ready' } elseif ($status -in $script:InsightsTerminalFailure) { 'Failed' } else { 'Waiting' }
             }
         }
@@ -389,8 +411,8 @@ Export-ModuleMember -Function @(
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAPgni+0jW0aTQM
-# lqI43rqf9yoGfbVCE/cp6l0zNZQtZaCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDpZLDQf7y7lsFM
+# SWvDrrw/8WyJKrA8J42yxImxDwsy9KCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -420,14 +442,14 @@ Export-ModuleMember -Function @(
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCCjZow4KGTOzZmMsIL3BI6O
-# xTfg2MIR4/v1PBXG3EkgRTANBgkqhkiG9w0BAQEFAASCAYARYMnYc2b0IDJu6rE0
-# swKLj7xwN8078wQTx8U4agvjtVxACe+T5lRPxBKTxledcgx6Ac85kJOuPjGm7BDj
-# Kx0RRURdbfFkjyJfa+X7KIOjVcXrLM9Cf9QwcxbeOA7x8pww3EECuIvot8SZzpI3
-# 80RKnH7iyuE15pgZ4YQBdX//h3/o2t1eyhOBnEPSr/hchxNEgi3lUAEIuR8N8+q8
-# 8lPI9eX5dUsjpYQKaJ/FpASu3bqa6GAYpSXFDdGj0h1Pha31COMZsS8UfG0ELjzT
-# xPc/V0ASgb+0ZrspH+PhCwiMir5de3Vtq5juKWgr1T/C5S/Rf/m1o3MAjT0f2w3+
-# CQQ89tPxFJkZnjSXyGG65/sbAxpiUr5Dr+UF8cLVwfakEvyZ1MFK3N+EmZoEQVRY
-# uaT1Ixrs8DtQt9i79uHILEKVWb1kAKEBPpxBrh84Tn76KALZK4YsicMEtclvtqCn
-# PAMCgHkfWDhklVE/kFak7psnIlHSZlroUsvQn+g839y26q8=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCDF2Fm8LDfXVOg3pizbXln/
+# s15k958hvw5clKa6UVtpszANBgkqhkiG9w0BAQEFAASCAYB3D5BxzwqP7aIEn3nz
+# UjK8ZBkaFuUS3GK6hq4hLtC9dr5iEuj7vNxmVPVpu2otmG+zTsBTB0axyjcpfo31
+# zRVDUx82mDjjixq7G2EujBGXxYMsQoB7N97S8Es7Nqcql0zEvT4SpT7tbi3pKrbT
+# VeosA8FqHqPGuqM9EK5NRpek158DRbiX6KtXjHyIMuxGcyj87xLSikFddXYkbeCR
+# 4xBsTfFJoh1knAXI3hE93YnzIUirXe3GDb4Gz7JEE7Dy93tvuay2jQJ4evpL1L5D
+# imIo60NWufqHeBkqV+10SmI9GMIoOUFirPvCgYqjT+R/pvEMZsKKyX1LsgH0wOti
+# pjq3MFoVtj7AsmeAuY6hYjr4eKn28O3eKRVZhyewaciiC4pZJiPcHLRC9q1bO1MX
+# ykhHwIyZKppQsFgJI3UyRdi0xjgvhciqaCWOj8lOz+SQvfJZ0bMEIeC45WaO3ZsJ
+# eXdfrzJlOQu+fLOLa6KclE3Ful/DJ6NgXf/XViGyOcF/jHU=
 # SIG # End signature block

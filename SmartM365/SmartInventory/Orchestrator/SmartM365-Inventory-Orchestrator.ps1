@@ -113,7 +113,7 @@ lock or launching inventory jobs.
     inside its own child process.
 
 .NOTES
-    Version : 1.5.45
+    Version : 1.5.46
     Author: https://github.com/khda79/workplacecloudhub.com
     Exit codes: 0 = normal end (recycle, DryRun, Once, summary sent), 1 = fatal error or summary send failure,
     2 = configuration or manifest error at startup, 3 = another live instance holds the lock.
@@ -138,7 +138,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$ScriptVersion = "1.5.45"
+$ScriptVersion = "1.5.46"
 $ScriptName = 'SmartM365-Inventory-Orchestrator'
 $global:SmartM365ScriptFileName = [System.IO.Path]::GetFileName($PSCommandPath)
 $global:SmartM365ScriptVersion = $ScriptVersion
@@ -826,6 +826,7 @@ function Write-DependencyWaitLog {
         $shouldLog = $true
         $state = [pscustomobject]@{
             DependencyKey = $dependencyKey
+            Dependencies = $dependencies
             FirstSeen = $Now
             LastLogged = [datetime]::MinValue
         }
@@ -1548,30 +1549,59 @@ function Complete-MaintenanceCatchUpOccurrence {
 
 function Get-OrchestratorSharedDependencyStatus {
     param([Parameter(Mandatory)]$Job,[Parameter(Mandatory)][datetime]$Now)
-    # Require the latest scheduled occurrence, never any older successful run.
+    # The latest scheduled occurrence can also be satisfied by a later manual recovery run.
     $expected = Get-LatestPastOccurrence -Job $Job -Now $Now
     if ($null -eq $expected) { return 'Waiting' }
     $record = Get-SmartM365OrchestratorOccurrenceClaim -ClaimsRootPath $script:Settings.ElectionClaimsPath -JobName $Job.Name -Occurrence $expected
-    if ($null -eq $record -or $null -eq $record.Claim) {
-        if (-not (Test-OrchestratorOccurrenceCoveredByOverlap -Job $Job -ExpectedOccurrence $expected -Now $Now)) { return 'Waiting' }
+    $status = 'Waiting'
+    if ($null -ne $record -and $null -ne $record.Claim) {
+        $claim = $record.Claim
+        if ([string]$claim.JobName -ne [string]$Job.Name -or
+            ([datetime]$claim.OccurrenceUtc).ToUniversalTime() -ne $expected.ToUniversalTime()) {
+            throw 'Dependency claim identity or scheduled occurrence mismatch.'
+        }
+        if ([string]$claim.Status -in @('Success','CompletedWithWarnings')) { $status = 'Ready' }
+        elseif ([string]$claim.Status -in @('Failed','TimedOut','Interrupted')) { $status = 'Failed' }
+    }
+    if ($status -eq 'Failed' -or $null -eq $record -or $null -eq $record.Claim) {
+        $laterStatus = Get-OrchestratorLaterDependencyClaimStatus -Job $Job -ExpectedOccurrence $expected -Now $Now
+        if ($null -ne $laterStatus) { $status = $laterStatus }
+        elseif ($null -eq $record -or $null -eq $record.Claim) {
+            if (Test-OrchestratorOccurrenceCoveredByOverlap -Job $Job -ExpectedOccurrence $expected -Now $Now) { $status = 'Ready' }
+        }
+    }
+    if ($status -eq 'Ready') {
         if ($Job.PSObject.Properties['ConcurrencyKey'] -and $Job.ConcurrencyKey) {
             $lease = Get-SmartM365OrchestratorConcurrencyLease -LeasesRootPath $script:Settings.ConcurrencyLeasesPath -ConcurrencyKey $Job.ConcurrencyKey
             if ($null -ne $lease -and $null -ne $lease.Lease -and [string]$lease.Lease.JobName -eq [string]$Job.Name) { return 'Waiting' }
         }
-        return 'Ready'
     }
+    return $status
+}
+
+function Get-OrchestratorLaterDependencyClaimStatus {
+    param([Parameter(Mandatory)]$Job,[Parameter(Mandatory)][datetime]$ExpectedOccurrence,[Parameter(Mandatory)][datetime]$Now)
+    $expectedUtc = $ExpectedOccurrence.ToUniversalTime()
+    $nowUtc = $Now.ToUniversalTime()
+    $folder = Join-Path $script:Settings.ElectionClaimsPath ([string]$Job.Name)
+    if (-not (Test-Path -LiteralPath $folder -PathType Container)) { return $null }
+    $occurrences = @(Get-ChildItem -LiteralPath $folder -File -ErrorAction Stop |
+        ForEach-Object { Get-OrchestratorClaimOccurrenceUtc -FileName $_.Name } |
+        Where-Object { $null -ne $_ -and $_ -gt $expectedUtc -and $_ -le $nowUtc } |
+        Sort-Object -Unique -Descending)
+    if ($occurrences.Count -eq 0) { return $null }
+    $record = Get-SmartM365OrchestratorOccurrenceClaim -ClaimsRootPath $script:Settings.ElectionClaimsPath -JobName $Job.Name -Occurrence $occurrences[0]
+    if ($null -eq $record -or $null -eq $record.Claim) { return 'Waiting' }
     $claim = $record.Claim
     if ([string]$claim.JobName -ne [string]$Job.Name -or
-        ([datetime]$claim.OccurrenceUtc).ToUniversalTime() -ne $expected.ToUniversalTime()) {
-        throw 'Dependency claim identity or scheduled occurrence mismatch.'
+        ([datetime]$claim.OccurrenceUtc).ToUniversalTime() -ne $occurrences[0]) {
+        throw 'Later dependency claim identity or occurrence mismatch.'
     }
-    if ([string]$claim.Status -in @('Success','CompletedWithWarnings')) {
-        if ($Job.PSObject.Properties['ConcurrencyKey'] -and $Job.ConcurrencyKey) {
-            $lease = Get-SmartM365OrchestratorConcurrencyLease -LeasesRootPath $script:Settings.ConcurrencyLeasesPath -ConcurrencyKey $Job.ConcurrencyKey
-            if ($null -ne $lease -and $null -ne $lease.Lease -and [string]$lease.Lease.JobName -eq [string]$Job.Name) { return 'Waiting' }
-        }
-        return 'Ready'
-    }
+    $created = ConvertTo-OrchestratorUtcTime -Value $claim.CreatedAtUtc
+    $updated = ConvertTo-OrchestratorUtcTime -Value $claim.UpdatedAtUtc
+    if ($null -eq $created -or $null -eq $updated -or $created.UtcDateTime -lt $expectedUtc -or
+        $updated.UtcDateTime -lt $created.UtcDateTime -or $updated.UtcDateTime -gt $nowUtc) { return 'Waiting' }
+    if ([string]$claim.Status -in @('Success','CompletedWithWarnings')) { return 'Ready' }
     if ([string]$claim.Status -in @('Failed','TimedOut','Interrupted')) { return 'Failed' }
     return 'Waiting'
 }
@@ -6688,8 +6718,8 @@ exit $script:ExitCode
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAbRo/WokDqxJqM
-# 8/msjNnVu+2oCNirl6bGA5BJ3opvbKCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDZEMTg2srq6o8L
+# HAOFA+DCvELRFDKkqIu/UNChbI5aqKCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -6719,14 +6749,14 @@ exit $script:ExitCode
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCB5J67v1JxoIiyEQ2uRb/SV
-# sPHwbDoCGTAl+/IlI3+NJzANBgkqhkiG9w0BAQEFAASCAYAqf4tCbA1C3WRX2G29
-# YYJ+ozwXD74JFYl0Lpm09S1Db45/yLFAjoRdw8Mtcj4rdAdf0bY3hMWgmOh+WJzh
-# UGHeBQEHL28x8Mp/oRnRX6LBhLEYj5kFWgKiYs1mMrxClvF8VrPjSZ/gSNjtM5bS
-# 34VDngvUJjJk+Kp8xbdWGA8I7EBliU5ryBZ9N2m8v2F3GYyqkDMOzomVaKrMaH22
-# NuQMFdZl3ffim6iQLHaV3fmeCJ/9Mk2iyxmK9qknwCYhM8RCMEjF9u8Fkwl3FpgA
-# N55rkaIic4ceMKh0D1P7m71FlVK48wvbOPMIVBsojD6LUl0X3nMgIuMyD+NCs+tB
-# 3vSRoih7QWRojo7wMfs4cZKBpoam3buzlnFgd7THSBr9SZHO8vZUh53yU29ot7Hk
-# eg9DPORvepkq6ZHIUOGtnYDhXrNe+p8nfL4EyV9uWLTYstPvtLpJUAkVXAeKwhjL
-# pYEhwv2ZF/lC1iIft6ZoEQQPCmFS6Jwq/PHqa4H4yFk5jiY=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCCW6h/7Kz43fm2UC+6u1hPg
+# Fax2oPgpGjxs3XyiMf5YgzANBgkqhkiG9w0BAQEFAASCAYCdWhCzqMe4r4DjSwdo
+# TjZmNItX6AaeNf5YH3Rdd+HGGtz0hDCWLP77CHI+4pLh/WSnaUp4zb+WxN6DMDid
+# d0NYBNmmGcmBvnliHpqnLZs0tiNXjc0Vv/CR+xUlOZve+EYsILesIbYdCM5Y0AmI
+# 7Ooi1p2KVpMUa5pXAVR3izIIC3p0tUnb6xtdgmxDl0C/pnDoolRMNrYOHv7xo82B
+# zxr1fGZF0vmmVNxSrvWGzZrbGoRBP/NYzr7E5DsonphtNPhmJcY++ZAnrrE0lqi2
+# GLHfBI1dCPfT95YbCWEiY178u5QavvciWwZruzUGhUyt0nIjjCMmkYgPDRTen+FB
+# oJ/nn0cZKemMSYy0mPmwOs24qKCyUSEwyqCRlKfv/8zfui2vHD58HQ2ynYi5utip
+# 4zdMONic/vg69GJj8XLuzeyIfUY/F9GGF+CRcXOJ85OWzdMBvyq0BNc24AZYrgwD
+# n8nlzFwIXyaQaris76L871jEDkzciR6aq1vnA02HW8cZ/so=
 # SIG # End signature block
