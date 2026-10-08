@@ -101,7 +101,7 @@ detailed tables for the last 24 hours and 7 days, then exits without acquiring t
 lock or launching inventory jobs.
 
 .VERSION
-1.5.48
+1.5.49
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -114,7 +114,7 @@ lock or launching inventory jobs.
     inside its own child process.
 
 .NOTES
-    Version : 1.5.48
+    Version : 1.5.49
     Author: https://github.com/khda79/workplacecloudhub.com
     Exit codes: 0 = normal end (recycle, DryRun, Once, summary sent), 1 = fatal error or summary send failure,
     2 = configuration or manifest error at startup, 3 = another live instance holds the lock.
@@ -139,7 +139,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$ScriptVersion = "1.5.48"
+$ScriptVersion = "1.5.49"
 $ScriptName = 'SmartM365-Inventory-Orchestrator'
 $global:SmartM365ScriptFileName = [System.IO.Path]::GetFileName($PSCommandPath)
 $global:SmartM365ScriptVersion = $ScriptVersion
@@ -3634,6 +3634,8 @@ function Start-InventoryJob {
     $logFolder = $script:Settings.JobLogFolderPath
     if (-not (Test-Path -LiteralPath $logFolder)) { New-Item -ItemType Directory -Path $logFolder -Force | Out-Null }
     $logPath = Join-Path -Path $logFolder -ChildPath ("Job-{0}_{1}_{2}.log" -f $Job.Name, $env:COMPUTERNAME, $startTime.ToString('yyyyMMdd_HHmmss'))
+    $runId = [guid]::NewGuid().ToString('N')
+    $resultPath = '{0}.{1}.result.json.txt' -f $logPath, $runId
 
     if (-not (Test-Path -LiteralPath $scriptFullPath)) {
         Write-OrchestratorLog -Message ("Job {0}: script not found: {1}" -f $Job.Name, $scriptFullPath) -Level ERROR
@@ -3693,6 +3695,7 @@ function Start-InventoryJob {
         }
     }
     $engine = Get-JobEngine -Job $Job
+    $escapedEnginePath = $engine.Path.Replace("'", "''")
     # Out-File:Encoding pins the *>> redirection to UTF-8: Windows PowerShell 5.1
     # would otherwise append UTF-16 output to the UTF-8 job log.
     if ($useLauncher) {
@@ -3703,16 +3706,26 @@ function Start-InventoryJob {
             "`$PSDefaultParameterValues['Out-File:Encoding'] = 'utf8'; " +
             "& `$env:ComSpec /d /c '" + $escapedCmdLine + "' *>> '" + $escapedLog + "'; " +
             "`$commandSucceeded = `$?; `$nativeExitCode = `$LASTEXITCODE; " +
-            "if (`$null -ne `$nativeExitCode) { exit `$nativeExitCode } elseif (-not `$commandSucceeded) { exit 1 } else { exit 0 }"
+            "if (`$null -ne `$nativeExitCode) { `$resultExitCode = [int]`$nativeExitCode } elseif (-not `$commandSucceeded) { `$resultExitCode = 1 } else { `$resultExitCode = 0 }"
     }
     else {
         $command = "`$env:SMARTM365_ORCHESTRATOR_TENANT = '" + $escapedTenant + "'; " +
             "`$ErrorActionPreference = 'Continue'; " +
             "`$PSDefaultParameterValues['Out-File:Encoding'] = 'utf8'; " +
-            "& '" + $escapedScript + "'" + $argumentPart + " -Tenant '" + $escapedTenant + "'" + $connectPart + " *>> '" + $escapedLog + "'; " +
+            # A separate child keeps the supervisor alive if the collector calls exit.
+            "& '" + $escapedEnginePath + "' -NoProfile -ExecutionPolicy Bypass -File '" + $escapedScript + "'" + $argumentPart + " -Tenant '" + $escapedTenant + "'" + $connectPart + " *>> '" + $escapedLog + "'; " +
             "`$commandSucceeded = `$?; `$nativeExitCode = `$LASTEXITCODE; " +
-            "if (`$null -ne `$nativeExitCode) { exit `$nativeExitCode } elseif (-not `$commandSucceeded) { exit 1 } else { exit 0 }"
+            "if (`$null -ne `$nativeExitCode) { `$resultExitCode = [int]`$nativeExitCode } elseif (-not `$commandSucceeded) { `$resultExitCode = 1 } else { `$resultExitCode = 0 }"
     }
+    $escapedResultPath = $resultPath.Replace("'", "''")
+    $escapedRunId = $runId.Replace("'", "''")
+    $escapedJobName = ([string]$Job.Name).Replace("'", "''")
+    $command += "; try { " +
+        "`$resultPath = '" + $escapedResultPath + "'; `$temporaryResultPath = `$resultPath + '.tmp.' + `$PID; " +
+        "`$result = @{ RunId = '" + $escapedRunId + "'; JobName = '" + $escapedJobName + "'; ProcessId = `$PID; ExitCode = `$resultExitCode; CompletedAtUtc = [datetime]::UtcNow.ToString('o') }; " +
+        "[System.IO.File]::WriteAllText(`$temporaryResultPath, (`$result | ConvertTo-Json -Compress), [System.Text.UTF8Encoding]::new(`$false)); " +
+        "[System.IO.File]::Move(`$temporaryResultPath, `$resultPath) " +
+        "} catch { ('Result marker write failed: ' + `$_.Exception.Message) | Out-File -FilePath '" + $escapedLog + "' -Append }; exit `$resultExitCode"
     $command = "`$env:SMARTM365_ORCHESTRATOR_SHARED_DATA_FOLDER = '" + $escapedMaintenanceRoot + "'; " + $command
     $encodedCommand = [Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($command))
 
@@ -3746,6 +3759,8 @@ function Start-InventoryJob {
         StartTime = $processStart
         Occurrence = $Occurrence
         LogPath = $logPath
+        RunId = $runId
+        ResultPath = $resultPath
         Attempt = $Attempt
         TimeoutMinutes = $Job.TimeoutMinutes
         ProcessName = $engine.ProcessName
@@ -3760,6 +3775,8 @@ function Start-InventoryJob {
         StartTime = ConvertTo-StateTime -Value $processStart
         ScheduledOccurrence = ConvertTo-StateTime -Value $Occurrence
         LogPath = $logPath
+        RunId = $runId
+        ResultPath = $resultPath
         Attempt = $Attempt
         TimeoutMinutes = $Job.TimeoutMinutes
         ProcessName = $engine.ProcessName
@@ -3989,6 +4006,39 @@ function Complete-JobRun {
         foreach ($key in $details.Keys) { $detailsHashtable[$key] = $details[$key] }
         Send-JobResultEmail -JobName $JobName -Status $status -Details $detailsHashtable -LogPath ([string]$RunInfo.LogPath)
     }
+    if ($RunInfo.ContainsKey('ResultPath') -and -not [string]::IsNullOrWhiteSpace([string]$RunInfo.ResultPath)) {
+        try { Remove-Item -LiteralPath ([string]$RunInfo.ResultPath) -Force -ErrorAction Stop }
+        catch { if (Test-Path -LiteralPath ([string]$RunInfo.ResultPath)) { Write-OrchestratorLog -Message ("Job {0}: completed result marker could not be removed: {1}" -f $JobName, $_.Exception.Message) -Level WARN } }
+    }
+}
+
+function Get-CompletedJobResult {
+    param([Parameter(Mandatory = $true)][string]$JobName, [Parameter(Mandatory = $true)]$Record, [Parameter(Mandatory = $true)][datetime]$ExpectedStart)
+
+    if (-not $Record.ContainsKey('RunId') -or -not $Record.ContainsKey('ResultPath') -or
+        [string]::IsNullOrWhiteSpace([string]$Record.RunId) -or [string]::IsNullOrWhiteSpace([string]$Record.ResultPath)) { return $null }
+    if (-not (Test-Path -LiteralPath ([string]$Record.ResultPath) -PathType Leaf)) { return $null }
+    try {
+        $result = Get-Content -LiteralPath ([string]$Record.ResultPath) -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        $completedUtc = [datetime]::MinValue
+        $exitCode = 0
+        if ([string]$result.RunId -cne [string]$Record.RunId -or [string]$result.JobName -cne $JobName -or
+            [int]$result.ProcessId -ne [int]$Record.Pid) { throw 'Result marker identity does not match the recorded run.' }
+        if (-not [int]::TryParse([string]$result.ExitCode, [ref]$exitCode)) { throw 'Result marker exit code is invalid.' }
+        $hasCompletionTime = if ($result.CompletedAtUtc -is [datetime]) {
+            $completedUtc = [datetime]$result.CompletedAtUtc
+            $true
+        }
+        else { [datetime]::TryParse([string]$result.CompletedAtUtc, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind, [ref]$completedUtc) }
+        if (-not $hasCompletionTime -or
+            $completedUtc.ToUniversalTime() -lt $ExpectedStart.ToUniversalTime().AddSeconds(-5) -or
+            $completedUtc.ToUniversalTime() -gt [datetime]::UtcNow.AddMinutes(5)) { throw ("Result marker completion time is invalid: marker={0}, start={1}." -f $completedUtc.ToUniversalTime().ToString('o'), $ExpectedStart.ToUniversalTime().ToString('o')) }
+        return [pscustomobject]@{ ExitCode = $exitCode; CompletedAt = $completedUtc.ToLocalTime() }
+    }
+    catch {
+        Write-OrchestratorLog -Message ("Job {0}: result marker is invalid or unreadable: {1}" -f $JobName, $_.Exception.Message) -Level WARN
+        return $null
+    }
 }
 
 function Get-RunningJobTimeoutWindow {
@@ -4141,6 +4191,11 @@ function Update-RunningJobs {
             try { $exitCode = $process.ExitCode } catch { }
             $endTime = $Now
             try { $endTime = $process.ExitTime } catch { }
+            if ($null -eq $exitCode -and $info.ContainsKey('RunId') -and $info.ContainsKey('ResultPath')) {
+                $resultRecord = @{ RunId = $info.RunId; ResultPath = $info.ResultPath; Pid = $process.Id }
+                $completedResult = Get-CompletedJobResult -JobName $name -Record $resultRecord -ExpectedStart ([datetime]$info.StartTime)
+                if ($null -ne $completedResult) { $exitCode = $completedResult.ExitCode; $endTime = $completedResult.CompletedAt }
+            }
             $statusHint = if ($info.ContainsKey('TimeoutRequested') -and $info.TimeoutRequested) { 'TimedOut' } else { 'Exited' }
             if ($statusHint -eq 'TimedOut') { $exitCode = $null }
             Complete-JobRun -JobName $name -RunInfo $info -StatusHint $statusHint -ExitCode $exitCode -EndTime $endTime
@@ -4233,6 +4288,8 @@ function Restore-RunningJobs {
             StartTime = $expectedStart
             Occurrence = ConvertFrom-StateTime -Text ([string]$record.ScheduledOccurrence)
             LogPath = [string]$record.LogPath
+            RunId = if ($record.ContainsKey('RunId')) { [string]$record.RunId } else { '' }
+            ResultPath = if ($record.ContainsKey('ResultPath')) { [string]$record.ResultPath } else { '' }
             Attempt = [int]$record.Attempt
             TimeoutMinutes = [int]$record.TimeoutMinutes
             TimeoutRequested = $record.ContainsKey('TimeoutRequested') -and [bool]$record.TimeoutRequested
@@ -4395,8 +4452,15 @@ function Restore-RunningJobs {
         }
         else {
             $statusHint = if ($runInfo.OperatorStopRequested) { 'Cancelled' } elseif ($runInfo.TimeoutRequested) { 'TimedOut' } else { 'Interrupted' }
-            Write-OrchestratorLog -Message ("Job {0}: recorded PID {1} is gone or does not match; the run is marked {2}." -f $jobName, $recordedPid, $statusHint) -Level WARN
-            Complete-JobRun -JobName $jobName -RunInfo $runInfo -StatusHint $statusHint -ExitCode $null -EndTime (Get-Date) -ErrorText 'The orchestrator restart found no matching process for this run.'
+            $completedResult = Get-CompletedJobResult -JobName $jobName -Record $record -ExpectedStart $expectedStart
+            if ($null -ne $completedResult -and -not $runInfo.TimeoutRequested) {
+                Write-OrchestratorLog -Message ("Job {0}: recovered completed exit code {1} for recorded PID {2}." -f $jobName, $completedResult.ExitCode, $recordedPid)
+                Complete-JobRun -JobName $jobName -RunInfo $runInfo -StatusHint Exited -ExitCode $completedResult.ExitCode -EndTime $completedResult.CompletedAt
+            }
+            else {
+                Write-OrchestratorLog -Message ("Job {0}: recorded PID {1} is gone or does not match; the run is marked {2}." -f $jobName, $recordedPid, $statusHint) -Level WARN
+                Complete-JobRun -JobName $jobName -RunInfo $runInfo -StatusHint $statusHint -ExitCode $null -EndTime (Get-Date) -ErrorText 'The orchestrator restart found no matching process or valid completion result for this run.'
+            }
         }
     }
 
@@ -6846,8 +6910,8 @@ exit $script:ExitCode
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCApTWW66+Josds1
-# CTfNDrs5H6L7z0XfPUR8megbXPOBiqCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDGiFMVqU9UzHMb
+# 7LkvTWAEUnckrsjuIrfE2VXuLRJyeKCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -6877,14 +6941,14 @@ exit $script:ExitCode
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCBHKPvjOu6AfxdtD3aiGCc7
-# LyEOtVyzV+lnaRKUk/9D6DANBgkqhkiG9w0BAQEFAASCAYCCcnmbnBvqDy5C+iTW
-# 03nl3wOuJOnIwRJravDc9Yx0CZ1XovzLSvV7Z1sLwXbEO1uUqH5CfPc37Q6FqUUZ
-# yTjX03eq3JqmN8CbMaBPQzr+mIOqgWPutIOXZZVLhx8MC5FwWuIcFTzT2DYqIeCe
-# oeEeb3iPqLy+1QkF7QXtEuFrDbIEzDBH8LlbvmEylFe8YGCk5egFMSSGGo/WQa7S
-# ZhFXWWrHBSXuoUEzsi2gbSv9fyBrJ9SuQ69VIdu+vhazV6QjBxdTRZ4TiYFT3Y2s
-# FOUF0UK8XEeGqA6HUeOG686qtZ7VKgaaB1mZ0eISiW2l85QBfNt8P+PXxPbtTLLd
-# wtT7jx+zVpTBD1FjMWVdioXcH7F9KdGTrRJWTU4NbJ3hvb6/x7wB4Jl5igbUD4ar
-# MIheujvlkn+OI2bsIZwxmiwnTHUYizy9t7/qe21lHGjJtERtKdkZhVEWwjRu6fST
-# n4i7CpRDJlkjfiEolwjgGWDSPFHmJI14W9O0hZ9KR7/64So=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCBpivI92vpJGSlziWc9qvzO
+# CNLPI0DUulOEwgMdlpMkqzANBgkqhkiG9w0BAQEFAASCAYCsdaNN91qw4AHyYCws
+# Hvuih7hgbQ2vcHYCeFTqgnmL/oYOKzOfSDuvNoJ6N0QR85anhwAcktY5nr4mZlxZ
+# DLdz6c1/1biYFiDOdhOYOYGIMSHmYIK8sE4x1CrN4afndTdTSllINJTuUp6YwuoF
+# VLl3J/dzc96iqwEoNChrH6C3Y7G6fbCHaSW7/XWR3ThfuYc7W5ufSaAutlF3JzRL
+# LR7zKJ5QPfm2q0ZTpUlcQ2fbUUgK1TfOE6dKznqPDljU0bwt+on4bBtjmpMG1Lg5
+# CCOqyYTZ0eDsmCoQu5GjheRCAVy3i5+1Afy7bfcB/3Vw8Kks8GNa6OtbF1+/Ex0e
+# LtSStLeboIktVThcbWBAlskFy0XhSJFaiqkE1eTwCPzKV5ZOkfmZPJxdVxbPnysX
+# 75F7KcCXFL/syJ2poVTs+N2nDsT+qM0cH8qr32kocDB/mK0Tu0/sGOdEVSa/sWw5
+# eAweGzhXVMvxpzLL/8SqWNa1fsO9nBSvz25G0KQKO4s6vOY=
 # SIG # End signature block

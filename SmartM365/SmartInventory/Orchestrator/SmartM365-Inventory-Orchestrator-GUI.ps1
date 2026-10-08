@@ -30,7 +30,7 @@ Loads the complete WPF data model without showing the splash or main window.
 Intended only for isolated tests with SharedDataFolderPath pointing to a temporary folder.
 
 .VERSION
-1.3.10
+1.3.11
 #>
 [CmdletBinding()]
 param(
@@ -43,7 +43,7 @@ param(
 
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
-$script:AppVersion = '1.3.10'
+$script:AppVersion = '1.3.11'
 $script:StartupClock = [Diagnostics.Stopwatch]::StartNew()
 $script:Snapshot = $null
 $script:DraftJobs = $null
@@ -63,7 +63,14 @@ $script:CancellationContext = [pscustomobject]@{
     Worker = $null; Progress = [hashtable]::Synchronized(@{ Message = '' })
     Input = $null; Clock = [Diagnostics.Stopwatch]::new()
 }
-$script:HistoryFailureStatuses = @('Failed', 'TimedOut', 'Interrupted')
+$script:RefreshContext = [pscustomobject]@{
+    Worker = $null; Progress = [hashtable]::Synchronized(@{ Message = '' })
+    Input = $null; Clock = [Diagnostics.Stopwatch]::new()
+}
+$script:RefreshTimer = $null
+$script:PendingRefreshRequest = $null
+$script:LastSuccessfulRefresh = $null
+$script:HistoryFailureStatuses = @('Failed', 'TimedOut', 'Interrupted', 'BlockedDependencyFailed', 'BlockedDependencyTimeout')
 $script:Controls = $null
 $script:GuiLogPath = ''
 $script:GuiLogWriteWarningShown = $false
@@ -233,6 +240,7 @@ $xaml = @'
                             <DataGrid x:Name="OperationsRunningGrid" Grid.Row="1">
                                 <DataGrid.Columns>
                                     <DataGridTextColumn Header="Server" Binding="{Binding Server}" Width="130"/>
+                                    <DataGridTextColumn Header="Server state" Binding="{Binding ServerState}" Width="90"/>
                                     <DataGridTextColumn Header="Job" Binding="{Binding Job}" Width="*"/>
                                     <DataGridTextColumn Header="PID" Binding="{Binding Pid}" Width="65"/>
                                     <DataGridTextColumn Header="Started" Binding="{Binding Started}" Width="120"/>
@@ -245,6 +253,7 @@ $xaml = @'
                             <DataGrid x:Name="OperationsPendingGrid">
                                 <DataGrid.Columns>
                                     <DataGridTextColumn Header="Server" Binding="{Binding Server}" Width="110"/>
+                                    <DataGridTextColumn Header="Server state" Binding="{Binding ServerState}" Width="90"/>
                                     <DataGridTextColumn Header="Job" Binding="{Binding Job}" Width="165"/>
                                     <DataGridTextColumn Header="Reason" Binding="{Binding Reason}" Width="125"/>
                                     <DataGridTextColumn Header="Waiting (min)" Binding="{Binding WaitingMinutes}" Width="85"/>
@@ -406,6 +415,7 @@ $xaml = @'
                     </Grid>
                     <DataGrid x:Name="HistoryGrid" Grid.Row="1" Margin="0,10,0,0">
                         <DataGrid.Columns>
+                            <DataGridTextColumn Header="Event time" Binding="{Binding EventTime}" Width="145"/>
                             <DataGridTextColumn Header="Start" Binding="{Binding StartTime}" Width="145"/>
                             <DataGridTextColumn Header="Server" Binding="{Binding Server}" Width="150"/>
                             <DataGridTextColumn Header="Job" Binding="{Binding JobName}" Width="250"/>
@@ -833,7 +843,8 @@ function Update-ScheduleDaysControlState {
 }
 
 function Refresh-PlanningView {
-    $owners = Get-ElectionOwners
+    param([AllowNull()]$Owners = $null)
+    $owners = if ($null -ne $Owners) { $Owners } else { Get-ElectionOwners }
     $rows = foreach ($job in @($script:DraftJobs.Jobs)) {
         $mode = if ($job.PSObject.Properties['AssignmentMode']) { [string]$job.AssignmentMode } else { 'Legacy' }
         $allowedServers = @(Get-OrchestratorGuiPropertyValue -Object $job -Name 'AllowedServers' -DefaultValue @())
@@ -868,7 +879,9 @@ function Refresh-PlanningView {
 }
 
 function Refresh-ServersView {
-    $servers = @(Get-SmartM365OrchestratorServerStatus -SharedDataFolderPath $script:SharedDataFolderPath -ClusterDocument $script:DraftCluster)
+    param([AllowNull()]$Servers = $null)
+    if ($null -eq $Servers) { $Servers = @(Get-SmartM365OrchestratorServerStatus -SharedDataFolderPath $script:SharedDataFolderPath -ClusterDocument $script:DraftCluster) }
+    $servers = @($Servers)
     $script:Controls.DashboardGrid.ItemsSource = $servers
     $script:Controls.ServersGrid.ItemsSource = $servers
     $script:Controls.PinnedServerCombo.ItemsSource = @($script:DraftCluster.ExpectedOrchestratorServers)
@@ -877,21 +890,13 @@ function Refresh-ServersView {
 }
 
 function Refresh-HistoryView {
-    $from = if ($script:Controls.HistoryFromPicker.SelectedDate) { [datetime]$script:Controls.HistoryFromPicker.SelectedDate } else { (Get-Date).AddDays(-7) }
-    $to = if ($script:Controls.HistoryToPicker.SelectedDate) { ([datetime]$script:Controls.HistoryToPicker.SelectedDate).Date.AddDays(1).AddTicks(-1) } else { Get-Date }
-    $server = Get-ComboText -Combo $script:Controls.HistoryServerCombo
-    $job = Get-ComboText -Combo $script:Controls.HistoryJobCombo
-    $status = Get-ComboText -Combo $script:Controls.HistoryStatusCombo
-    if ($server -eq 'All') { $server = '' }
-    if ($job -eq 'All') { $job = '' }
-    if ($status -eq 'All') { $status = '' }
-    $script:HistoryRows = @(Get-SmartM365OrchestratorHistory -SharedDataFolderPath $script:SharedDataFolderPath -From $from -To $to -Server $server -JobName $job -Status $status)
-    $script:Controls.HistoryGrid.ItemsSource = $script:HistoryRows
-    Write-GuiActivity -Message ("History refreshed: {0} run(s)." -f $script:HistoryRows.Count)
+    Start-GuiRefresh -Mode History
 }
 
 function Update-JobHealth {
-    $script:RecentRuns = @(Get-SmartM365OrchestratorRecentRuns -SharedDataFolderPath $script:SharedDataFolderPath -Days 21)
+    param([AllowNull()]$Runs = $null)
+    if ($null -eq $Runs) { $Runs = @(Get-SmartM365OrchestratorRecentRuns -SharedDataFolderPath $script:SharedDataFolderPath -Days 21) }
+    $script:RecentRuns = @($Runs)
     $script:HealthByName = @{}
     foreach ($health in @(Get-SmartM365OrchestratorJobHealth -JobsDocument $script:DraftJobs -Runs $script:RecentRuns)) { $script:HealthByName[[string]$health.Name] = $health }
 }
@@ -982,7 +987,7 @@ function Set-GuiMaintenance {
     }
     $result = Set-SmartM365OrchestratorMaintenance -SharedDataFolderPath $script:SharedDataFolderPath -Enabled $Enabled -ExpectedRevision $script:MaintenanceViewState.Revision -Reason $reason -CatchUpMissedOccurrences:$catchUp
     Write-GuiActivity -Message ("Maintenance transition published: revision={0}; enabled={1}; catchUpAll={2}; reason={3}. Awaiting server acknowledgement." -f $result.Revision, $result.Enabled, $result.CatchUpAll, $result.Reason)
-    [void](Refresh-OperationsView)
+    Invoke-AutoRefresh
 }
 
 function Update-SelectedPipelineRequest {
@@ -1172,11 +1177,7 @@ function Receive-GuiPipelineCancellation {
 
 function Invoke-AutoRefresh {
     if ($script:CancellationBusy) { return }
-    [void](Refresh-OperationsView)
-    Refresh-RequestsView
-    if ($script:InitialHistoryLoaded -and $null -ne $script:Controls.MainTabs.SelectedItem -and
-        [string]$script:Controls.MainTabs.SelectedItem.Header -eq 'History') { Refresh-HistoryView }
-    $script:Controls.LastRefreshText.Text = 'Live refresh: ' + (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
+    Start-GuiRefresh -Mode Live
 }
 
 function Show-SelectedJobDependencies {
@@ -1245,12 +1246,177 @@ function Show-FailuresLast24Hours {
     $script:Controls.HistoryServerCombo.SelectedIndex = 0
     $script:Controls.HistoryJobCombo.SelectedIndex = 0
     $script:Controls.HistoryStatusCombo.SelectedIndex = 0
-    $script:HistoryRows = @(Get-SmartM365OrchestratorHistory -SharedDataFolderPath $script:SharedDataFolderPath -From $from -To (Get-Date) | Where-Object { $_.Status -in $script:HistoryFailureStatuses })
-    $script:Controls.HistoryGrid.ItemsSource = $script:HistoryRows
-    Write-GuiActivity -Message ("Failures in the last 24 h: {0} run(s)." -f $script:HistoryRows.Count)
+    Start-GuiRefresh -Mode History -HistoryFrom $from -HistoryTo (Get-Date) -OnlyFailures
+}
+
+function Get-GuiRefreshWork {
+    return {
+        param($Progress, $InputData)
+        $ErrorActionPreference = 'Stop'
+        Set-StrictMode -Version 2.0
+        Import-Module $InputData.ManagementModulePath -ErrorAction Stop
+        Import-Module $InputData.InsightsModulePath -ErrorAction Stop
+        $root = [string]$InputData.Root
+        if (-not (Test-Path -LiteralPath $root -PathType Container)) { throw "Shared data folder is unavailable: $root" }
+        if ($InputData.Mode -eq 'History') {
+            $rows = @(Get-SmartM365OrchestratorHistory -SharedDataFolderPath $root -From $InputData.HistoryFrom -To $InputData.HistoryTo -Server $InputData.HistoryServer -JobName $InputData.HistoryJob -Status $InputData.HistoryStatus)
+            if ($InputData.OnlyFailures) { $rows = @($rows | Where-Object { $_.Status -in @('Failed', 'TimedOut', 'Interrupted', 'BlockedDependencyFailed', 'BlockedDependencyTimeout') }) }
+            return [pscustomobject]@{ Mode = 'History'; History = $rows; ReadAt = Get-Date }
+        }
+        $snapshot = $null; $recentRuns = @(); $servers = @(); $history = @(); $versions = @(); $owners = @{}
+        if ($InputData.Mode -eq 'Full') {
+            $Progress.Message = 'Reading configuration and history...'
+            $snapshot = Get-SmartM365OrchestratorConfigurationSnapshot -SharedDataFolderPath $root
+            $recentRuns = @(Get-SmartM365OrchestratorRecentRuns -SharedDataFolderPath $root -Days 21)
+            $servers = @(Get-SmartM365OrchestratorServerStatus -SharedDataFolderPath $root -ClusterDocument $snapshot.Cluster)
+            foreach ($server in $servers) {
+                foreach ($jobName in @([string]$server.AssignedJobNames -split ', ' | Where-Object { $_ })) { $owners[$jobName] = [string]$server.Server }
+            }
+            $history = @(Get-SmartM365OrchestratorHistory -SharedDataFolderPath $root -From $InputData.HistoryFrom -To $InputData.HistoryTo)
+            $versions = @(Get-SmartM365OrchestratorConfigurationVersions -SharedDataFolderPath $root)
+        }
+        $Progress.Message = 'Reading live operations and requests...'
+        $publishedCluster = Read-SmartM365OrchestratorJson -Path (Join-Path $root 'Config/Orchestrator-Cluster.json')
+        $operations = Get-SmartM365OrchestratorOperations -SharedDataFolderPath $root -ClusterDocument $publishedCluster -MailFolderPath $InputData.MailFolderPath -MailHours 24
+        $requests = @(Get-SmartM365OrchestratorRecentPipelineRuns -SharedDataFolderPath $root -Count 30)
+        return [pscustomobject]@{
+            Mode = $InputData.Mode; Snapshot = $snapshot; RecentRuns = $recentRuns; Servers = $servers
+            Owners = $owners; History = $history; Versions = $versions; Operations = $operations
+            Requests = $requests; ReadAt = Get-Date
+        }
+    }
+}
+
+function Start-GuiRefresh {
+    param([ValidateSet('Full', 'Live', 'History')][string]$Mode = 'Live', [datetime]$HistoryFrom = [datetime]::MinValue, [datetime]$HistoryTo = [datetime]::MinValue, [switch]$OnlyFailures)
+    if ($null -ne $script:RefreshContext.Worker) {
+        if ($Mode -eq 'Full' -or $null -eq $script:PendingRefreshRequest -or $script:PendingRefreshRequest.Mode -ne 'Full') {
+            $script:PendingRefreshRequest = @{ Mode = $Mode; HistoryFrom = $HistoryFrom; HistoryTo = $HistoryTo; OnlyFailures = [bool]$OnlyFailures }
+        }
+        return
+    }
+    $now = Get-Date
+    $from = if ($Mode -eq 'History' -and $script:Controls.HistoryFromPicker.SelectedDate) { [datetime]$script:Controls.HistoryFromPicker.SelectedDate } else { $now.AddDays(-7).Date }
+    $to = if ($Mode -eq 'History' -and $script:Controls.HistoryToPicker.SelectedDate) { ([datetime]$script:Controls.HistoryToPicker.SelectedDate).Date.AddDays(1).AddTicks(-1) } else { $now }
+    if ($HistoryFrom -ne [datetime]::MinValue) { $from = $HistoryFrom }
+    if ($HistoryTo -ne [datetime]::MinValue) { $to = $HistoryTo }
+    $server = ''; $job = ''; $status = ''
+    if ($Mode -eq 'History') {
+        $server = Get-ComboText -Combo $script:Controls.HistoryServerCombo
+        $job = Get-ComboText -Combo $script:Controls.HistoryJobCombo
+        $status = Get-ComboText -Combo $script:Controls.HistoryStatusCombo
+        if ($server -eq 'All') { $server = '' }; if ($job -eq 'All') { $job = '' }; if ($status -eq 'All') { $status = '' }
+    }
+    $inputData = [pscustomobject]@{
+        Mode = $Mode; Root = $script:SharedDataFolderPath; MailFolderPath = $script:MailFolderPath
+        ManagementModulePath = (Join-Path $PSScriptRoot 'SmartM365.Orchestrator.Management.psm1')
+        InsightsModulePath = (Join-Path $PSScriptRoot 'SmartM365.Orchestrator.Insights.psm1')
+        HistoryFrom = $from; HistoryTo = $to; HistoryServer = $server; HistoryJob = $job; HistoryStatus = $status; OnlyFailures = [bool]$OnlyFailures
+    }
+    $script:RefreshContext.Input = $inputData
+    $script:RefreshContext.Progress.Message = ''
+    $script:RefreshContext.Clock.Restart()
+    if ($Mode -eq 'Full') {
+        $script:Controls.MainTabs.IsEnabled = $false
+        $script:Controls.PublishButton.IsEnabled = $false
+    }
+    if ($Mode -eq 'History') { $script:Controls.StatusText.Text = 'Refreshing history...' }
+    else { $script:Controls.LastRefreshText.Text = 'Refreshing ' + $Mode.ToLowerInvariant() + '... last successful: ' + $(if ($script:LastSuccessfulRefresh) { $script:LastSuccessfulRefresh.ToString('yyyy-MM-dd HH:mm:ss') } else { 'never' }) }
+    try { [void](Start-SmartM365OrchestratorGuiWorker -Context $script:RefreshContext -Work (Get-GuiRefreshWork) -InputObject $inputData) }
+    catch {
+        $script:Controls.MainTabs.IsEnabled = $null -ne $script:Snapshot
+        $script:Controls.LastRefreshText.Text = 'Refresh failed: ' + $_.Exception.Message
+        Write-GuiException -Context 'Background refresh could not start' -ErrorRecord $_
+    }
+}
+
+function Set-GuiOperations {
+    param([Parameter(Mandatory = $true)]$Operations)
+    Refresh-MaintenanceView -Operations $Operations
+    $script:Controls.OperationsServersGrid.ItemsSource = @($Operations.Servers)
+    $script:Controls.OperationsRunningGrid.ItemsSource = @($Operations.Running)
+    $script:Controls.StopRunningJobButton.IsEnabled = $false
+    $script:Controls.OperationsPendingGrid.ItemsSource = @($Operations.Pending)
+    $script:Controls.OperationsIncidentsGrid.ItemsSource = @($Operations.Incidents)
+    $script:Controls.OperationsMailsGrid.ItemsSource = @($Operations.Mails)
+}
+
+function Receive-GuiRefresh {
+    $received = Receive-SmartM365OrchestratorGuiWorker -Context $script:RefreshContext
+    if ($null -eq $received) { return }
+    $mode = [string]$script:RefreshContext.Input.Mode
+    try {
+        if ($received.Error) { throw $received.Error }
+        $result = @($received.Output | Select-Object -First 1)[0]
+        if ($null -eq $result) { throw 'The refresh worker returned no data.' }
+        if ($mode -eq 'Full') {
+            $script:Snapshot = $result.Snapshot
+            $script:DraftJobs = Copy-JsonDocument -Document $script:Snapshot.Jobs
+            $script:DraftCluster = Copy-JsonDocument -Document $script:Snapshot.Cluster
+            Update-JobHealth -Runs $result.RecentRuns
+            Refresh-PlanningView -Owners $result.Owners
+            $servers = @(Refresh-ServersView -Servers $result.Servers)
+            $script:Controls.HistoryServerCombo.ItemsSource = @('All') + @($script:DraftCluster.ExpectedOrchestratorServers)
+            $script:Controls.HistoryServerCombo.SelectedIndex = 0
+            $script:Controls.HistoryJobCombo.ItemsSource = @('All') + @($script:DraftJobs.Jobs.Name | Sort-Object)
+            $script:Controls.HistoryJobCombo.SelectedIndex = 0
+            $script:HistoryRows = @($result.History)
+            $script:Controls.HistoryGrid.ItemsSource = $script:HistoryRows
+            $script:InitialHistoryLoaded = $true
+            $script:Controls.JobsCountText.Text = [string]@($script:DraftJobs.Jobs).Count
+            $script:Controls.EnabledCountText.Text = [string]@($script:DraftJobs.Jobs | Where-Object Enabled).Count
+            $script:Controls.SuccessCountText.Text = [string]@($result.History | Where-Object Status -eq 'Success').Count
+            $script:Controls.FailureCountText.Text = [string]@($result.History | Where-Object { $_.Status -in $script:HistoryFailureStatuses }).Count
+            $script:Controls.VersionsGrid.ItemsSource = @($result.Versions)
+            $script:Controls.ConnectionText.Text = "Tenant: $Tenant"
+            $script:Controls.StatusText.Text = 'Shared configuration loaded'
+            Write-GuiActivity -Message ("Configuration loaded: {0} jobs, {1} servers in {2} ms." -f @($script:DraftJobs.Jobs).Count, $servers.Count, $script:RefreshContext.Clock.ElapsedMilliseconds) -Level SUCCESS
+        }
+        if ($mode -eq 'History') {
+            $script:HistoryRows = @($result.History)
+            $script:Controls.HistoryGrid.ItemsSource = $script:HistoryRows
+        }
+        else {
+            Set-GuiOperations -Operations $result.Operations
+            if (-not $script:CancellationBusy) { Set-GuiRequestRows -Rows @($result.Requests) }
+        }
+        if ($mode -eq 'History') {
+            $script:Controls.StatusText.Text = "History refreshed: $(@($script:HistoryRows).Count) row(s)."
+        }
+        else {
+            $script:LastSuccessfulRefresh = [datetime]$result.ReadAt
+            $script:Controls.LastRefreshText.Text = 'Refreshed: ' + $script:LastSuccessfulRefresh.ToString('yyyy-MM-dd HH:mm:ss')
+        }
+    }
+    catch {
+        $lastGood = if ($script:LastSuccessfulRefresh) { $script:LastSuccessfulRefresh.ToString('yyyy-MM-dd HH:mm:ss') } else { 'never' }
+        if ($mode -ne 'History') { $script:Controls.LastRefreshText.Text = "STALE - last successful refresh: $lastGood" }
+        $script:Controls.StatusText.Text = 'Shared data refresh failed: ' + $_.Exception.Message
+        if ($mode -ne 'History') {
+            $script:Controls.OperationsRunningGrid.ItemsSource = @()
+            $script:Controls.OperationsPendingGrid.ItemsSource = @()
+            $script:Controls.StopRunningJobButton.IsEnabled = $false
+        }
+        Write-GuiException -Context 'Background refresh failed' -ErrorRecord $_
+    }
+    finally {
+        if ($mode -eq 'Full') {
+            $script:Controls.MainTabs.IsEnabled = $null -ne $script:Snapshot
+            $script:Controls.PublishButton.IsEnabled = $null -ne $script:Snapshot
+        }
+        if ($script:PendingRefreshRequest) {
+            $nextRequest = $script:PendingRefreshRequest
+            $script:PendingRefreshRequest = $null
+            Start-GuiRefresh @nextRequest
+        }
+    }
 }
 
 function Refresh-AllViews {
+    Start-GuiRefresh -Mode Full
+}
+
+function Refresh-AllViewsSync {
     try {
         $script:Snapshot = Get-SmartM365OrchestratorConfigurationSnapshot -SharedDataFolderPath $script:SharedDataFolderPath
         $script:DraftJobs = Copy-JsonDocument -Document $script:Snapshot.Jobs
@@ -1271,7 +1437,7 @@ function Refresh-AllViews {
         $script:Controls.JobsCountText.Text = [string]@($script:DraftJobs.Jobs).Count
         $script:Controls.EnabledCountText.Text = [string]@($script:DraftJobs.Jobs | Where-Object Enabled).Count
         $script:Controls.SuccessCountText.Text = [string]@($history7 | Where-Object { $_.StartTime -ge $historyFrom -and $_.StartTime -le $historyNow -and $_.Status -eq 'Success' }).Count
-        $script:Controls.FailureCountText.Text = [string]@($history7 | Where-Object { $_.StartTime -ge $historyFrom -and $_.StartTime -le $historyNow -and $_.Status -in $script:HistoryFailureStatuses }).Count
+        $script:Controls.FailureCountText.Text = [string]@($history7 | Where-Object { $_.EventTime -ge $historyFrom -and $_.EventTime -le $historyNow -and $_.Status -in $script:HistoryFailureStatuses }).Count
         [void](Refresh-OperationsView)
         Refresh-RequestsView
         $script:Controls.VersionsGrid.ItemsSource = @(Get-SmartM365OrchestratorConfigurationVersions -SharedDataFolderPath $script:SharedDataFolderPath)
@@ -1539,7 +1705,7 @@ $script:Controls.FooterText.Text = 'Shared changes are validated, versioned and 
 $script:Controls.VersionText.Text = "v$($script:AppVersion)"
 $script:Controls.HistoryFromPicker.SelectedDate = (Get-Date).AddDays(-7).Date
 $script:Controls.HistoryToPicker.SelectedDate = (Get-Date).Date
-$script:Controls.HistoryStatusCombo.ItemsSource = @('All', 'Success', 'CompletedWithWarnings', 'Failed', 'TimedOut', 'Interrupted', 'Cancelled', 'Retried')
+$script:Controls.HistoryStatusCombo.ItemsSource = @('All', 'Success', 'CompletedWithWarnings', 'Failed', 'TimedOut', 'Interrupted', 'BlockedDependencyFailed', 'BlockedDependencyTimeout', 'Skipped', 'Cancelled', 'Retried')
 $script:Controls.HistoryStatusCombo.SelectedIndex = 0
 
 $script:Controls.ScheduleTypeCombo.Add_SelectionChanged({ Update-ScheduleDaysControlState })
@@ -1696,18 +1862,21 @@ $script:Controls.ExportHtmlButton.Add_Click({
     $dialog.Filter = 'HTML files (*.html)|*.html'
     $dialog.FileName = 'SmartM365-Orchestrator-History-{0}.html' -f (Get-Date).ToString('yyyyMMdd-HHmmss')
     if ($dialog.ShowDialog()) {
-        $body = $script:HistoryRows | Select-Object StartTime, Server, JobName, Status, DurationSec, ExitCode, RetryCount, LogPath | ConvertTo-Html -Title 'SmartM365 Orchestrator history' -PreContent '<h1>SmartM365 Orchestrator history</h1>'
+        $body = $script:HistoryRows | Select-Object EventTime, StartTime, Server, JobName, Status, DurationSec, ExitCode, RetryCount, LogPath | ConvertTo-Html -Title 'SmartM365 Orchestrator history' -PreContent '<h1>SmartM365 Orchestrator history</h1>'
         [System.IO.File]::WriteAllText($dialog.FileName, ($body -join [Environment]::NewLine), [System.Text.UTF8Encoding]::new($false))
         Write-GuiActivity -Message "History exported to $($dialog.FileName)." -Level SUCCESS
     }
 })
 
-Refresh-AllViews
-Write-GuiActivity -Message ('Startup initial views loaded after {0} ms.' -f $script:StartupClock.ElapsedMilliseconds)
-$script:Controls.HistoryServerCombo.ItemsSource = @('All') + @($script:DraftCluster.ExpectedOrchestratorServers)
-$script:Controls.HistoryServerCombo.SelectedIndex = 0
-$script:Controls.HistoryJobCombo.ItemsSource = @('All') + @($script:DraftJobs.Jobs.Name | Sort-Object)
-$script:Controls.HistoryJobCombo.SelectedIndex = 0
+if ($SmokeTest) {
+    Refresh-AllViewsSync
+    $script:Controls.HistoryServerCombo.ItemsSource = @('All') + @($script:DraftCluster.ExpectedOrchestratorServers)
+    $script:Controls.HistoryServerCombo.SelectedIndex = 0
+    $script:Controls.HistoryJobCombo.ItemsSource = @('All') + @($script:DraftJobs.Jobs.Name | Sort-Object)
+    $script:Controls.HistoryJobCombo.SelectedIndex = 0
+}
+else { Refresh-AllViews }
+Write-GuiActivity -Message ('Startup initial refresh dispatched after {0} ms.' -f $script:StartupClock.ElapsedMilliseconds)
 if ($SmokeTest) {
     $planningNames = @($script:PlanningRows | ForEach-Object { [string]$_.Name })
     $sortedPlanningNames = @($planningNames | Sort-Object)
@@ -1826,6 +1995,10 @@ $script:CancellationTimer = [System.Windows.Threading.DispatcherTimer]::new()
 $script:CancellationTimer.Interval = [TimeSpan]::FromMilliseconds(150)
 $script:CancellationTimer.Add_Tick({ Receive-GuiPipelineCancellation })
 $script:CancellationTimer.Start()
+$script:RefreshTimer = [System.Windows.Threading.DispatcherTimer]::new()
+$script:RefreshTimer.Interval = [TimeSpan]::FromMilliseconds(150)
+$script:RefreshTimer.Add_Tick({ Receive-GuiRefresh })
+$script:RefreshTimer.Start()
 $script:AutoRefreshTimer = [System.Windows.Threading.DispatcherTimer]::new()
 $script:AutoRefreshTimer.Interval = [TimeSpan]::FromSeconds(60)
 $script:AutoRefreshTimer.Add_Tick({
@@ -1842,6 +2015,7 @@ $window.Add_ContentRendered({
 })
 $window.Add_Closed({
     if ($script:AutoRefreshTimer) { $script:AutoRefreshTimer.Stop() }
+    if ($script:RefreshTimer) { $script:RefreshTimer.Stop() }
     if ($script:CancellationTimer) { $script:CancellationTimer.Stop() }
     Write-GuiActivity -Message 'GUI session closed.'
     if ($script:GuiSplash) { Close-SmartM365GuiSplash -Splash $script:GuiSplash }
@@ -1858,8 +2032,8 @@ $window.Add_Closing({
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAWg+gqB5TdJl75
-# lB28xgQ48FBvWZBw0TIG1bTxHZJ1d6CCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAasC9u8U92c+V8
+# avwSjV4vUxY48o1iz1lwelidJIkPsaCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1889,14 +2063,14 @@ $window.Add_Closing({
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCDpOm8Z9duRIBDMpUuxHNLB
-# 1Vlqcue9JZ9BCj7vTfcEvjANBgkqhkiG9w0BAQEFAASCAYAwOlSIVMzygcYrtb9R
-# eC2Rm1Hn1lWUC46F3rSGVLBGz+thiYKXxEm5krhcwORZACez1xeKP5asgRrs+G+9
-# iOItnu5m5l1ZQ8ldUncWHfFBCFErOfL3YWLh2mmC1MmOpMV6iUPzXGAj31X/5uDV
-# INh68k63NDgBxbV/UXLXjeZ0zc3+gBWKxfcg+gumviueyCVpdmKpSFY70/pH/1zW
-# AHLOnibOwJjmvfHY07TR7H+oM7KUq/yhSjrgdvDap3AwRykkAgv7zeG6aWuKqqxN
-# R/1Oc5n4aOGAXaHKUtbNTUNWsZCVqMB1h36MyKOM+wMXno0ff5URvYHxS+rafDWJ
-# 2N7y8lt8u++tTt8mMovkS3ylvX66u8Osvi+P+Wa3rm1iHmNI6ntnLsg/Bs/SoMDl
-# I7cWQkJIuzP/YiWbVQyyIo0NZzKJ+ygUpXao8Z5WMjcuz5Yr3pncDtx9141c8vIu
-# Le8bhDZR3nYKDWfYPT1mbABd56nuat5aCo1hxhxheW+vnB0=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCC/O9A/cwANa8Gs3PA1BdHV
+# /EebLr0Fh57QlbrndVoqljANBgkqhkiG9w0BAQEFAASCAYBB6sp/kDf52pNT4Y3p
+# Ok2UaLNc7IRMVZyUE8rD/QzVOfkw0oNYmaOfH47lMU05MC0ZsNNHkNNrgo9J7HGD
+# MQgXpPuzALEolYmv4DUw9xa9ZG1+t1lk4sizfq0RrHHh/+pMwTxHapq7NlVp15jQ
+# Cx1xJDj0OAAmmnxbVof4jiAaI7H8h3G8jYMAzUKRKX2+p1akvVGRDMFyDEsSG39S
+# WF6vO8SWsU2ty8hXZo5zZK5HE6ryS/SsVt61bEy2t1Biaqp0Rw/+zjnfY3ecrTOG
+# yypUC/ZfLWOmR3bko2GjQ3bMJGy6I6B7TX5ait/99UsEFAaQlNYjuYXMl9s7sQlu
+# RcVC6gZbasjP2ntOp3jSXryb0rwI0NYGAHRCz1gi/C2dZ2BVVNUPYojytzAfHgLn
+# xJahoMXNL4bRo4cOTtgMm8KML4/edkAIOcvQOgpxkLQuMlsaeyzCDQzMUFEyojca
+# h3NHkiQ8QQRbxUMpj+y8VSKDXNoyM4Fvpu6WyzCo7cTgjSw=
 # SIG # End signature block

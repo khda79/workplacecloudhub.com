@@ -290,7 +290,7 @@ function Get-SmartM365OrchestratorOperations {
         $deadline = ConvertTo-InsightsUtc (Get-InsightsProperty $heartbeat 'LifetimeDeadline' $null)
         $jobsRunning = @(Get-InsightsProperty $heartbeat 'RunningJobs' @())
         $jobsPending = @(Get-InsightsProperty $heartbeat 'PendingJobs' @())
-        $state = if ($null -eq $heartbeat) { 'No heartbeat' } elseif ($lifecycle -eq 'Recycling') { 'Recycling' } elseif ($lifecycle -eq 'Starting') { 'Starting' } elseif ($age -gt $staleMinutes) { 'Stale' } else { 'Online' }
+        $state = if ($null -eq $heartbeat) { 'No heartbeat' } elseif ($null -eq $age) { 'No timestamp' } elseif ($age -gt $staleMinutes) { 'Stale' } elseif ($lifecycle -eq 'Recycling') { 'Recycling' } elseif ($lifecycle -eq 'Starting') { 'Starting' } else { 'Online' }
         $recycleIn = ''
         if ($null -ne $deadline) {
             $remaining = $deadline - $Now.ToUniversalTime()
@@ -310,7 +310,7 @@ function Get-SmartM365OrchestratorOperations {
             $start = ConvertTo-InsightsUtc $rawStart
             $startText = if ($rawStart -is [datetime] -or $rawStart -is [datetimeoffset]) { $rawStart.ToString('o') } else { [string]$rawStart }
             $running.Add([pscustomobject]@{
-                Server = $serverName; Job = [string](Get-InsightsProperty $job 'Name' ''); Pid = [string](Get-InsightsProperty $job 'Pid' '')
+                Server = $serverName; ServerState = $state; HeartbeatAgeMinutes = $age; Job = [string](Get-InsightsProperty $job 'Name' ''); Pid = [string](Get-InsightsProperty $job 'Pid' '')
                 StartTime = $startText
                 StopSupported = $state -eq 'Online' -and [int](Get-InsightsProperty $heartbeat 'JobStopProtocol' 0) -ge 1
                 Started = if ($null -ne $start) { $start.ToLocalTime().ToString('yyyy-MM-dd HH:mm') } else { '' }
@@ -321,7 +321,7 @@ function Get-SmartM365OrchestratorOperations {
         foreach ($job in $jobsPending) {
             $firstSeen = ConvertTo-InsightsUtc (Get-InsightsProperty $job 'FirstSeen' $null)
             $pending.Add([pscustomobject]@{
-                Server = $serverName; Job = [string](Get-InsightsProperty $job 'Name' ''); Reason = [string](Get-InsightsProperty $job 'Reason' '')
+                Server = $serverName; ServerState = $state; HeartbeatAgeMinutes = $age; Job = [string](Get-InsightsProperty $job 'Name' ''); Reason = [string](Get-InsightsProperty $job 'Reason' '')
                 WaitingMinutes = if ($null -ne $firstSeen) { [math]::Round(($Now.ToUniversalTime() - $firstSeen).TotalMinutes, 0) } else { $null }
                 Occurrence = [string](Get-InsightsProperty $job 'ScheduledOccurrence' ''); Details = [string](Get-InsightsProperty $job 'Details' '')
             })
@@ -417,8 +417,8 @@ Export-ModuleMember -Function @(
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDaAhwIaA/oZ/79
-# l3zdl2dkAizY52Z96bF6ZYitVCQSH6CCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBsN6K5Ze1sQqtO
+# suHKp76xPi4eAaGnstkB8lxgbuKoZ6CCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -448,14 +448,14 @@ Export-ModuleMember -Function @(
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCCdRHfYkhxqS7HUfKOIrtkR
-# wkMKZHhP7PInXCufjxTD4DANBgkqhkiG9w0BAQEFAASCAYCvqZmUpgBrUEj7+g97
-# 2RFxZgV3mygxuEfBkMBBOyKvBPr5Kci6kSQUBo1CSThNRgrAAUdJJGMCvQWrGRY1
-# vPSmV3AWRa3vgvsqpIs+K1dm/a5E0Uxxx5fQyWt1ofGOTZMjX2u+8lGjNtfVyp5M
-# DqNTzUYvHAzs0B4DPBsVTDEbWMdwg7LlCZTNNPN08h79eYYkSsEWTf6BD0fj9cuE
-# k8/3Nk8UcC757KrEwBzJxfLEGIXBQpFKBjW5kxAfKogaaDv3YgnDA4HCQ4uDaMsZ
-# h5ZJCFugSewaLiFJE52W7bKjd9IGzQ6/UaRAiVSS8g6iEmuopI4E8Pbk5aTQX/ol
-# iKaCOJAgXyqzPh5js5TJ/HFAGmCJ/W1A23i5cnQw0lfCpIST4bI17Fk7pi/1517z
-# S/pzMwrSfqGoUBnthCUMyOd64dpFjfAIyd222yDbOADnF3ISKIflAO6WM3bc+sHN
-# s/XINysrgkJ9IqwB2dq6hRKFzgTiaX/j4LA6Hyh+CaZWz+8=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCCdCTGOqUjPHa+xWT2ppoq1
+# /WpXfP/ySsgRAv+KdGduEDANBgkqhkiG9w0BAQEFAASCAYBCGuY6wpHuNZk+qhVx
+# 3FAmnsQ2m34wAq061H+KgApImBCBGi5VTEGdOmwgdo+V8aWYMNLpBI8Vma28oorr
+# IjUrquNg5S0EJ4XFqpHjifN8slNNzZQlM7v26SO/NJJfVwVdVbbjYYxz29iHzr8Q
+# bMBt9SxDHfacQ6xpwPIxO/BAJxDKPVbY59+RNwv1R3MxKP23Buo7kBqHxdqWw8ub
+# loWedzMP7el5c6EgtBHvH2FY6wO8tieKOKerLn9LjL0jKANMrUKh+N7Eux9FTlnz
+# EK4032KQDfaTgLQT7x44eLaOcDl/f/q+KrlgGAlvmqTMx2oBGIv/avnEpPNBanLq
+# z3b3725c466iDFLEGbeaTEdFsvJau4VauWmsTNRdOzVok1YvDLp5odJ0aeaw/XjS
+# bTS+2IDrz05fZk1Y9YtQx7rnNtLti/VEriEEmCS3gXzuIOZNAk+7sXXQ5udKJHGc
+# /y3s6Y2AEdrS9YGLhdnTJtKFifkpWZSpo+dXT7wVyFl9kKg=
 # SIG # End signature block
