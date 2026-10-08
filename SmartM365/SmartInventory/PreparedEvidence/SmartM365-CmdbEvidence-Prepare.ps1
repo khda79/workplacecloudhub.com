@@ -3,7 +3,7 @@
 .SYNOPSIS
 Prepare the current-only CMDB reporting tables from proven SmartInventory CSVs.
 .VERSION
-0.3.12
+0.3.13
 .NOTES
 Local preparation by default. -Publish explicitly transfers the newly validated
 snapshot through the existing SharePoint publisher. -ValidateOnly never uploads.
@@ -15,7 +15,7 @@ No collector, history or Power BI refresh is invoked.
 param([string]$Tenant='test',[string]$SourceRootPath,[switch]$ValidateOnly,[switch]$Publish)
 Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
-$script:Version='0.3.12'
+$script:Version='0.3.13'
 $failure=$null; $runtimeInitialized=$false; $transcriptStarted=$false
 $core=$null; $previousTeamsGuard=$false; $teamsGuardInstalled=$false
 $savedOfflineGlobals=@{}; $preparationWarning=$false; $logUploadEnabled=$false
@@ -56,6 +56,34 @@ function Invoke-SmartM365CmdbPreparedPublication {
         throw 'CMDB SharePoint publication failed. Prepared local output is retained; no upload success is inferred.'
     }
 }
+function Resolve-SmartM365CmdbPreparationSourcePath {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][System.Management.Automation.PSModuleInfo]$CoreModule,
+          [AllowEmptyString()][string]$SourceRootPath,
+          [Parameter(Mandatory)][System.Collections.IDictionary]$Configuration,
+          [AllowEmptyString()][string]$LatestCsvFolderPath)
+    # Explicit override, then local configuration, then the effective tenant profile.
+    # Resolve inherited tokens before GetFullPath can anchor them to the current directory.
+    $candidate=$SourceRootPath
+    if([string]::IsNullOrWhiteSpace($candidate)){
+        $localPath=[string]$Configuration['LatestCsvFolderPath']
+        $candidate=if(-not [string]::IsNullOrWhiteSpace($localPath) -and
+            $localPath.Trim() -notin @('__USE_GLOBAL__','USE_GLOBAL')){
+            $localPath
+        }else{$LatestCsvFolderPath}
+    }
+    $resolved=[string](& $CoreModule {param($value) Resolve-SmartM365ConfigValue -Value $value} $candidate)
+    $resolved=$resolved.Trim()
+    if([string]::IsNullOrWhiteSpace($resolved) -or $resolved -in @('__USE_GLOBAL__','USE_GLOBAL') -or
+       $resolved -match '\{\{|\}\}' -or -not [IO.Path]::IsPathFullyQualified($resolved)){
+        throw 'CMDB preparation requires a fully resolved absolute DATA-LAST source path; no source or output directory was created.'
+    }
+    $source=[IO.Path]::GetFullPath($resolved).TrimEnd([char[]]@('\','/'))
+    if((Split-Path $source -Leaf) -ne 'DATA-LAST'){
+        throw 'Use the authoritative SmartInventory DATA-LAST, not DATA-POWERBI.'
+    }
+    return $source
+}
 function Resolve-SmartM365CmdbPreparationLogPath {
     [CmdletBinding()]
     param([Parameter(Mandatory)][System.Management.Automation.PSModuleInfo]$CoreModule,
@@ -84,13 +112,7 @@ try {
     $teamsGuardInstalled=$true
     $config=Read-SmartM365JsonConfig -Path (Join-Path $PSScriptRoot 'SmartM365-CmdbEvidence-Prepare.local.json.txt') -Required
     $logUploadEnabled=Get-SmartM365CmdbLogUploadEnabled -CoreModule $core -Configuration $config -ValidateOnly:$ValidateOnly
-    if (-not $SourceRootPath) {
-        $SourceRootPath=if($config['LatestCsvFolderPath'] -and $config['LatestCsvFolderPath'] -notin @('__USE_GLOBAL__','USE_GLOBAL')){
-            [string]$config['LatestCsvFolderPath']
-        }else{[string]$effective.LatestCsvFolderPath}
-    }
-    $source=[IO.Path]::GetFullPath($SourceRootPath)
-    if ((Split-Path $source -Leaf) -ne 'DATA-LAST') {throw 'Use the authoritative SmartInventory DATA-LAST, not DATA-POWERBI.'}
+    $source=Resolve-SmartM365CmdbPreparationSourcePath -CoreModule $core -SourceRootPath $SourceRootPath -Configuration $config -LatestCsvFolderPath ([string]$effective.LatestCsvFolderPath)
     $output=Join-Path (Split-Path $source -Parent) 'DATA-POWERBI-CMDB'
     $pythonName=if($config['PythonCommand']){[string]$config['PythonCommand']}else{'python'}
     # Keep logs in LOG-ALL; initialization must not create the protected output.
@@ -189,8 +211,8 @@ try {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDqDuUJRt5nt6uE
-# 5iDXvZ7Bmt8Z+Jgh9oDAlWmRB2lryKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDy/O9MUx3jxCjh
+# gEvOGnD4rd+7ibVRs36/t17CUHEUQqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -323,31 +345,31 @@ try {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIPdTn295At8set9GGBKhts1g9aQUpKBGWLa7RqA6XvYHMA0GCSqG
-# SIb3DQEBAQUABIIBgAOZmBJhe7EF+bZ3iKVKp3Y5gz3f217oGRgwjXxBPrcsp6y6
-# t1k3pws1Wsky1Ps8W4Dj6GGNsqeiXepfnRStVK2R48r/wNlbZA+T9iLgF2+HIEJp
-# jdE7ID/3jTvMh3vyut0sin+Sa5FMwzNP3HL2MNFVVeFHYX2COoe84BlIbV1LXyMf
-# RSem/svdig8uTZzM0CnLJTyu41Swut+HK/Xo6ijifClPlhJnDK4XN5qhxiGmvamt
-# emFC813Og82L1KP1x/wGji5qNnZT8EJUzpB2dsFXmfrY7j8ZDMmQjTFYp8on8heI
-# IMj/LAmdRjpmV9BOLxoi1WFiY4fucQ+78j4oHjMkLwwDvmVQeIcrc/AE0u3I48OP
-# G5FwXTWl6fc4WZu1Y0U/xgSsJcfxlgP0V3LtQcKoucfqET95LGsxTx3FhdivvG04
-# n4vnc4ZTUvLvOAYvH3JYLjHTkMqC+sc4M2EnpONAcyu4FSAF0jrnxnB/IU4vF4w7
-# MpLhj+VyWvd9OXGBEqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIKPc07Kjg5PSENm8PUFbOlA8RXYLnC3yFcmuYBPk7jgnMA0GCSqG
+# SIb3DQEBAQUABIIBgCkbMJH3iuzNOgV4vI2fKgZ9IEm7mQaLqc6iD7jm0lg8NZ8A
+# nSjJOceZx39/gsT4z9ruh2ZSfW71c9i7354lGZcbUo7t7cQe4kllEUcFcJ56f4/H
+# /xhLhM2h5Vs5xeNWm3qytBVviI3hpNKw0CSzgFOQdtqRVL3j2fYZhMcAx9THPDg8
+# R+VBpVL+ee7kul/ZScvWWmzErYxFqLMdowPdLUqBOESyUHKXutiCWzGoewMx0pml
+# VQ4YdDXXpIdknMP98/BjFMJ1d0oWmAwhHpPeem5uuNnrVOFpdM1W92sUelTg1vtb
+# 3plL2JOmYi3OnzS6jI9ZmNHf0Rly86ynNloB1g70XNuu8I7R7uczCLT5bpSBsgam
+# E9cBB+XrdKRajTcFbdSrm6vJ8CZmdOZF7ShuFSS81UTmACLfJgieFmTeu1E8gT6L
+# Ph2jfN32xlKDygqV79jllsZEhap/WYuTNKg2cZ+8ZeTarqNwQIKTB7f4lOGi7zap
+# JwgnUF0N4K6sX7F9xqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDgwNzQ1
-# NDdaMC8GCSqGSIb3DQEJBDEiBCA2h2obpFvbVmzQ6ojF7MB4n9d6GVq9bR4xyPo5
-# SkAsyTANBgkqhkiG9w0BAQEFAASCAgALTk19UdiDwM4M+LUaIZgXCsx/WKNSk0gO
-# QeOLOEylL2oyf3pZ1IX6w04RWJubNBz146ONUmDLPitrTNnoIuxoCKP7gPfejYaR
-# mWBkGxYtdIy/Zyu6ZylaZSNnPss0sfoZiWzM19gVB8V2c2FzyaM/W7faYHZR1uCC
-# raHvefJYKr++YyUN4/RNzGDicmL6fc8J2vhoGAgYIUaXwJC8/sjHV9yd3ziffBN+
-# INOGosbbHzKVBVY0HOnX4GwqrEbmSCg0MYG/1MzFkTO8rZEeR+0G7unpSF2tCQdM
-# K+e1g6GL/WA08PoXIw2v8VSk7CfZUM0adfDr2gMDAZw20XbUBASp5ueyCYM6IP/I
-# 5AbARp0xVSrwBAgY5DCk6whQakwMu4dplgtGhhL4PQi2HnbK1QkNDjqjRneXPv7g
-# qcF10nagTyg9qpvUZWXjkqv1TkbsDW32aeZUfVoj8kBzMHu/YlsDfnyS81nXSBKt
-# Lj8vJZgo7IXZa4U43R2pJ0mUOMxcxQtadG0BD5o8rzMuEPHDOxPgNXWWPAtsY+X3
-# YOCXx57JWTl9riWIe8+vh9h9zZlyeGtkcEpwChLcF/ACdjlrON/8Hbv8jtqnZouM
-# c/CFGIzyWICC4spsdzOkdfHDek2BEIInceZ73WZXmzR6m8vqLiZol4y7lkJAzt/t
-# ca4thH2beQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDgwOTI4
+# NThaMC8GCSqGSIb3DQEJBDEiBCAd6F5BC6nv6a7eWgmPawHWbC093XZIG2DkS35T
+# jIEmkDANBgkqhkiG9w0BAQEFAASCAgCm0LKwoUoSxB24o24DhD6Z4sGaSPFfDRpY
+# jSzdcARMok1/2Zwic68BuPllRQGwpbUK9GBzVuyfLFj5P72OOkc1JsPgSHKoFvM/
+# Kszm60hKPVIkNrBdgF+yQsKkDmyhdVHY1VbbvdjQUHPLwpMX4fkHpLHTUtUQ+if6
+# rXzQHvDsCr8jU4wseuk4V5I0QeMdkeuhf/bOeDh6TbMLxw0jS+rFZEN27jRhvs67
+# sN9NMPm7wmYjiMLevndtZdkjDcw/98M+09JNPn6QPVKSGbT+Z+zlJJ1CEpyE1zb8
+# 5NrMHr7w3JBmA8ugmMmSZcARLu6q2VOyD9XoknkBNaTFrkW03qBwrUwifgaDcO/T
+# 77FIbiF3TxiX0O+UJUYRT+nZy9sKV0IM8xFcQlOo7V6gayAIAXhPOz0ciu0wH3ze
+# +dIYzfCv/oMJNJszViIz/QYqh8pfAmLubVf24v9yfTlF9jSbZDZf/28rFx1GZAuV
+# GfD7oe/M9xOd3LzBAeD2au5RTteIKcZYdKyQBDYRXIY3JERq+g9VyKEwZgKTxyMr
+# mvmnjfNk0roEFCQ77gw8+KuBikgSxTtBcFsYrau3idliV0VrJgVtjGTEaQWLCDTD
+# Q2PIgbFoiwY4ktrk6auvFPuZDMKbmzRdD2gYz5fscaEZ3BW6hM+V0IQsI6RHpO0c
+# Had/boeGpw==
 # SIG # End signature block
