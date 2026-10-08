@@ -25,5 +25,6 @@
   "EnableWeeklyHistory": true,
   "WeeklyHistoryFolderPath": "{{DataAllRootPath}}\\Exchange\\OnPrem\\ServersAndStorage\\WeeklyHistory",
   "WeeklyHistoryRetentionWeeks": 52,
+  "ExcludedServers": [],
   "OutputRoot": "{{DataAllRootPath}}\\Exchange\\OnPrem\\ServersAndStorage"
 }

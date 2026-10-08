@@ -22,7 +22,7 @@
     - WinRM / PowerShell Remoting
 
 .VERSION
-1.6.6
+1.6.8
 .REQUIREMENTS
     Windows PowerShell 5.1 on an Exchange 2016/on-premises management host.
     Modules/snap-ins: SmartM365 WindowsPowerShell5 compatibility module; Exchange Management snap-in.
@@ -30,7 +30,7 @@
     Conditional: Mail.Send is required only when Graph mail is used; Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
     Script Name : SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory.ps1
-    Version     : 1.6.3
+    Version     : 1.6.8
     Requirements:
       - Windows PowerShell 5.1 with Exchange 2016 Management Tools
       - Exchange 2016 read RBAC for Get-ExchangeServer, Get-MailboxDatabase,
@@ -41,6 +41,9 @@
       - PowerShell 5.1 or later
 
 .CHANGELOG
+    1.6.8
+      - Excludes configured servers from per-server collection and labels them exclut in the HTML email.
+
     1.6.3
       - Renders per-server ERROR status values in red in the HTML report and email body.
 
@@ -170,7 +173,7 @@ $tenantContextPath = & {
 . $tenantContextPath
 
 $ScriptName = "SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory"
-$ScriptVersion = "1.6.7"
+$ScriptVersion = "1.6.8"
 $RunId = (Get-Date).ToString("yyyyMMdd-HHmmss")
 
 $script:SmartM365EffectiveConfig = Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot
@@ -346,6 +349,24 @@ function Get-SmartM365EffectiveConfigValue {
     }
 
     return $DefaultValue
+}
+
+function Get-ConfiguredExcludedServers {
+    $property = $script:SmartM365EffectiveConfig.PSObject.Properties['ExcludedServers']
+    if ($null -eq $property -or $null -eq $property.Value) { return @() }
+    $value = $property.Value
+    if ($value -isnot [array]) {
+        throw "ExcludedServers must be a JSON array of server names."
+    }
+
+    $names = foreach ($item in $value) {
+        if ($item -isnot [string] -or [string]::IsNullOrWhiteSpace($item)) {
+            throw "ExcludedServers must contain only non-empty server names."
+        }
+        $item.Trim()
+    }
+
+    return @($names | Sort-Object -Unique)
 }
 
 function Import-SmartM365CoreModule {
@@ -1334,7 +1355,13 @@ function New-HtmlExecutiveSummary {
         [string]$Path
     )
 
-    $rowsHtml = foreach ($row in ($PerServerSummary | Sort-Object ExchangeServerName)) {
+    $excludedServerNames = @()
+    $excludedServersProperty = $Summary.PSObject.Properties['ExcludedServers']
+    if ($null -ne $excludedServersProperty -and -not [string]::IsNullOrWhiteSpace([string]$excludedServersProperty.Value)) {
+        $excludedServerNames = @(([string]$excludedServersProperty.Value -split ';') | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    }
+
+    $rowsHtml = @(foreach ($row in ($PerServerSummary | Sort-Object ExchangeServerName)) {
         $computeStatus = [string]$row.ComputeCollectionStatus
         $statusClass = switch ($computeStatus) {
             'ERROR' { 'status-error'; break }
@@ -1347,7 +1374,13 @@ function New-HtmlExecutiveSummary {
             default { '#047857' }
         }
         "<tr><td>$(Format-HtmlValue $row.ExchangeServerName)</td><td>$(Format-HtmlValue $row.ServerRole)</td><td class='num'>$(Format-HtmlValue $row.LogicalProcessorCount)</td><td class='num'>$(Format-HtmlValue $row.MemoryGB)</td><td class='num'>$(Format-HtmlValue $row.DiskDriveCount)</td><td class='num'>$(Format-HtmlValue $row.DiskDriveTotalSizeGB)</td><td class='status $statusClass' style='font-weight:700;color:$statusColor;'>$(Format-HtmlValue $computeStatus)</td></tr>"
+    })
+    foreach ($serverName in $excludedServerNames) {
+        $rowsHtml += "<tr><td>$(Format-HtmlValue $serverName)</td><td>N/A</td><td class='num'>N/A</td><td class='num'>N/A</td><td class='num'>N/A</td><td class='num'>N/A</td><td class='status' style='font-weight:700;color:#64748b;'>exclut</td></tr>"
     }
+    $exclusionNote = if ($excludedServerNames.Count -gt 0) {
+        "<div class='summary'>Excluded by configuration: <strong>$(Format-HtmlValue $excludedServerNames.Count)</strong> server(s). Their status is <strong>exclut</strong>; no per-server collection was attempted.</div>"
+    } else { '' }
 
     $readinessRows = @($ReadinessInventory)
     $readinessErrorCount = @($readinessRows | Where-Object { $_.CollectionStatus -eq "ERROR" -or $_.Importance -eq "Error" }).Count
@@ -1557,7 +1590,7 @@ td.num, th.num { text-align: right; }
     <div class="content" style="padding:24px 28px;">
       <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:separate;border-spacing:10px;border:0;margin:0 0 22px 0;font-size:12px;">
         <tr>
-          <td style="width:20%;vertical-align:top;border:1px solid #dbe3ef;border-radius:8px;padding:14px;background:#f8fafc;color:#334155;"><div style="font-size:11px;text-transform:uppercase;color:#64748b;font-weight:800;">Exchange VMs</div><div style="font-size:28px;font-weight:800;margin-top:4px;color:#0f172a;">$(Format-HtmlValue $Summary.ExchangeServersCount)</div><div style="font-size:12px;color:#64748b;margin-top:2px;">servers identified</div></td>
+          <td style="width:20%;vertical-align:top;border:1px solid #dbe3ef;border-radius:8px;padding:14px;background:#f8fafc;color:#334155;"><div style="font-size:11px;text-transform:uppercase;color:#64748b;font-weight:800;">Exchange VMs</div><div style="font-size:28px;font-weight:800;margin-top:4px;color:#0f172a;">$(Format-HtmlValue $Summary.ExchangeServersCount)</div><div style="font-size:12px;color:#64748b;margin-top:2px;">servers collected</div></td>
           <td style="width:20%;vertical-align:top;border:1px solid #bfdbfe;border-radius:8px;padding:14px;background:#eff6ff;color:#334155;"><div style="font-size:11px;text-transform:uppercase;color:#64748b;font-weight:800;">vCPU</div><div style="font-size:28px;font-weight:800;margin-top:4px;color:#1d4ed8;">$(Format-HtmlValue $Summary.TotalLogicalProcessorCount)</div><div style="font-size:12px;color:#64748b;margin-top:2px;">logical processors</div></td>
           <td style="width:20%;vertical-align:top;border:1px solid #bbf7d0;border-radius:8px;padding:14px;background:#f0fdf4;color:#334155;"><div style="font-size:11px;text-transform:uppercase;color:#64748b;font-weight:800;">RAM</div><div style="font-size:28px;font-weight:800;margin-top:4px;color:#166534;">$(Format-HtmlValue $Summary.TotalMemoryGB)</div><div style="font-size:12px;color:#64748b;margin-top:2px;">GB</div></td>
           <td style="width:20%;vertical-align:top;border:1px solid #fed7aa;border-radius:8px;padding:14px;background:#fff7ed;color:#334155;"><div style="font-size:11px;text-transform:uppercase;color:#64748b;font-weight:800;">Disks</div><div style="font-size:28px;font-weight:800;margin-top:4px;color:#9a3412;">$(Format-HtmlValue $Summary.TotalDiskDriveCount)</div><div style="font-size:12px;color:#64748b;margin-top:2px;">WMI disk drives</div></td>
@@ -1565,8 +1598,9 @@ td.num, th.num { text-align: right; }
         </tr>
       </table>
       <div class="summary">
-        The current Exchange on-premises footprint represents <strong>$(Format-HtmlValue $Summary.ExchangeServersCount) virtual machines</strong>, <strong>$(Format-HtmlValue $Summary.TotalLogicalProcessorCount) vCPU</strong>, <strong>$(Format-HtmlValue $Summary.TotalMemoryGB) GB RAM</strong>, and <strong>$(Format-HtmlValue $Summary.TotalDiskDriveCount) disks</strong>. The full readiness section below supports Exchange SE preparation, Exchange Online coexistence, dependency review, and decommissioning sign-off.
+        The collected Exchange on-premises footprint represents <strong>$(Format-HtmlValue $Summary.ExchangeServersCount) virtual machines</strong>, <strong>$(Format-HtmlValue $Summary.TotalLogicalProcessorCount) vCPU</strong>, <strong>$(Format-HtmlValue $Summary.TotalMemoryGB) GB RAM</strong>, and <strong>$(Format-HtmlValue $Summary.TotalDiskDriveCount) disks</strong>. The full readiness section below supports Exchange SE preparation, Exchange Online coexistence, dependency review, and decommissioning sign-off.
       </div>
+      $exclusionNote
 
       <h2>Per-server infrastructure summary</h2>
       <table>
@@ -1691,18 +1725,30 @@ try {
     }
     Write-Log "Collection method: WMI/DCOM only"
 
+    $configuredExcludedServers = @(Get-ConfiguredExcludedServers)
+
     Import-SmartM365CoreModule
-    Start-CoreSmartM365SourceReceipt -ScriptPath $PSCommandPath -SourceRootPath ([string](Get-SmartM365EffectiveConfigValue -Name 'LatestCsvFolderPath' -DefaultValue '')) -ScopeParameters @{IncludeServicesHealth=$IncludeServicesHealth;IncludeMailboxDatabasePaths=$IncludeMailboxDatabasePaths}
+    Start-CoreSmartM365SourceReceipt -ScriptPath $PSCommandPath -SourceRootPath ([string](Get-SmartM365EffectiveConfigValue -Name 'LatestCsvFolderPath' -DefaultValue '')) -ScopeParameters @{IncludeServicesHealth=$IncludeServicesHealth;IncludeMailboxDatabasePaths=$IncludeMailboxDatabasePaths;ExcludedServers=($configuredExcludedServers -join ';')}
     Invoke-CoreSmartM365Preflight -ScriptName $ScriptName -OutputPaths @($OutputFolder,$LogFolder) | Out-Null
 
     Test-ExchangeShell
     Invoke-CoreSmartM365Preflight -ScriptName $ScriptName -RequireExchangeOnPrem | Out-Null
 
     Write-Log "Collecting Exchange servers."
-    $exchangeServers = @(Get-ExchangeServer | Sort-Object Name)
+    $discoveredExchangeServers = @(Get-ExchangeServer | Sort-Object Name)
 
-    if ($exchangeServers.Count -eq 0) {
+    if ($discoveredExchangeServers.Count -eq 0) {
         throw "No Exchange servers were returned by Get-ExchangeServer."
+    }
+
+    $excludedSet = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+    foreach ($serverName in $configuredExcludedServers) { [void]$excludedSet.Add($serverName) }
+    $excludedExchangeServers = @($discoveredExchangeServers | Where-Object { $excludedSet.Contains([string]$_.Name) -or $excludedSet.Contains([string]$_.Fqdn) })
+    $exchangeServers = @($discoveredExchangeServers | Where-Object { -not ($excludedSet.Contains([string]$_.Name) -or $excludedSet.Contains([string]$_.Fqdn)) })
+    Write-Log ("Exchange servers discovered: {0}; excluded by configuration: {1}; included in collection: {2}." -f $discoveredExchangeServers.Count, $excludedExchangeServers.Count, $exchangeServers.Count)
+    foreach ($serverName in $configuredExcludedServers) { Write-Log ("Configured exclusion: {0} (exclut)" -f $serverName) }
+    if ($exchangeServers.Count -eq 0) {
+        throw "No Exchange servers remain after applying ExcludedServers."
     }
 
     $serverInventory = foreach ($server in $exchangeServers) {
@@ -1864,6 +1910,9 @@ try {
         RunId                            = $RunId
         ExecutionDate                    = Get-Date
         OutputFolder                     = $OutputFolder
+        DiscoveredExchangeServersCount   = $discoveredExchangeServers.Count
+        ExcludedServersCount             = $excludedExchangeServers.Count
+        ExcludedServers                  = $configuredExcludedServers -join ';'
         ExchangeServersCount             = $exchangeServers.Count
         ComputeRowsCount                 = $computeRows.Count
         ComputeCollectionErrors          = $failedComputeRows.Count
@@ -1935,8 +1984,8 @@ finally {
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCLgszvVt+0EJ9F
-# lLgApUfuHk91Urmie4OC5FciuogEOaCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBPkOG9XcNfHCYD
+# ENGENNbNU1U4BIvnRN3IPo4LoSPT8qCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1966,14 +2015,14 @@ finally {
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCDYIraq430ri6lIaPvnK3ym
-# SH3a0hsjGCtJZeUQY1HTHzANBgkqhkiG9w0BAQEFAASCAYAbvauxIcF5gfCoTrbS
-# 9k+jYXK0Hmpxp/AZDXtdfZ03lBavszedTnMXiliBr0ITEdkDGy4i30+BD6o+lAzw
-# HN2OU7wqUDkjeb5rZ1899e/Hzdoy/hI9LqYHP+Ps+l5g1VEBzdZsemrJTYf/nTwt
-# 1XBlCTS+5M+dMNNSNFJc/7dO+P9roFJE9wF8gxTBRnABMaYFkLEA4vntDlWrUbT7
-# 8++2SXg3JmZ+V8DnJEAFdtwzcCFcno+bbQ6TPnFvRZH7c13WNY5tVhY2uuwyg8O6
-# KpPaXS3hmJpGiNIOUxTJUcyU8uHnwUrhdTSOcLHNEMkai0cyUu3QPZblBGKsNmi+
-# KNEuKe5rlLPIKW5dOy5sMm5RfHSjJLdkTuo/Ce51TSV1QNDBmwcTW0Z95uBUzgFa
-# A4Nv+6gklvXjw29E285uxxduMMwWRIGijkN/JAcNp2K59/x5BOxLIq0kZSPKBPp+
-# vX+BY5QVcUJ0OQfmwBLWIVxMR3/K6aaXq1hqeJcnMSvNKW8=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCBEqwWWihYks+VVdGVsPMJk
+# j4r06H+dTmzuLwJny6EqYDANBgkqhkiG9w0BAQEFAASCAYCroHQI+y2zo2no4Gqe
+# scx24+NO80cyXDhlFpDAS7bg8QtMWeab5FkQcNvzEys1XpQV44G8RifX5IDem0Uf
+# KZrLQRPdU/UvsiFjNF27NG58yvPUx8t1ht7JReFj2VA+HHGuVpwprsIYJK4aBm3g
+# /blNyNGOQ7BVrmRMj4PKUXaGmEIbatXTJ+hWERp4lS/x6J2n1o8CphX8uc5Rec9K
+# lrW2u6d6fu61ODZw35dCKPo3S0qTupvajcJfo3zEC2baPoWLxxChdq9U1731o9Sv
+# UrOVvMxpKcLBDRCWLKRdgy8HjFwPNJMCFbUDv3lhmrHpmoiCgBII+nT6+wNBfmi3
+# eun+TRHg60rT7kGau0rVC0hcnwGRdJPgcFQMyFPEqx8hrv9jneUm3zkS7FpmRea0
+# dY+MibkuYyF/emkcqzUAkBdeMtRZn/YohtDjsoMqeYnkftmUYd/XcLUe58/7PFNO
+# 5+zyQL9LZwdbdd17ghkBAi4uCLtY91Ap3F9Olx05kvzclPc=
 # SIG # End signature block
