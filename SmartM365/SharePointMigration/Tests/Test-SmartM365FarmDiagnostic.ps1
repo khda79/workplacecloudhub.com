@@ -2,7 +2,7 @@
 .SYNOPSIS
     Offline contract tests for the read-only farm diagnostic.
 .VERSION
-    1.0.2
+    1.0.4
 #>
 #Requires -Version 5.1
 [CmdletBinding()]
@@ -21,6 +21,11 @@ function Assert-Equal {
 
 try {
     [void](New-Item -ItemType Directory -Path $root -Force)
+    $logStart = $script:FarmDiagLog.Count
+    Write-FarmDiagLog "First diagnostic action`nSecond diagnostic action"
+    $logged = @($script:FarmDiagLog | Select-Object -Skip $logStart)
+    Assert-Equal $logged.Count 2 'Multiline console actions have separate timestamps'
+    if (@($logged | Where-Object { $_ -notmatch '^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\] ' }).Count) { throw 'Console action is missing a timestamp.' }
     $zone = [TimeZoneInfo]::FindSystemTimeZoneById('Romance Standard Time')
     $center = [datetime]::SpecifyKind([datetime]'2026-10-03T00:00:00',[DateTimeKind]::Unspecified)
     $windows = @(Get-FarmDiagWindows -Mode Around -Center $center -Minutes 30 -Zone $zone)
@@ -65,6 +70,7 @@ WindowUtc,Lines,Items,Source,Destination,Undetermined
     Assert-Equal $inventory.Pools[0].CpuAction 'Throttle' 'CPU action'
     Assert-Equal $inventory.Pools[0].RecycleSchedule '00:00:00' 'Recycle schedule'
     Assert-Equal $inventory.Sites[0].Pool 'ContentPool' 'Site pool mapping'
+    Assert-Equal $inventory.Sites[0].LogPeriod 'Daily' 'Default IIS log period'
 
     $logRoot = Join-Path $root 'IIS'
     $logFolder = Join-Path $logRoot 'W3SVC7'
@@ -80,12 +86,42 @@ WindowUtc,Lines,Items,Source,Destination,Undetermined
         $writer.WriteLine('2026-10-02 22:00:30 10.0.0.1 GET /_vti_bin/client.svc robot 10.0.0.3 401 1 0 MS+Search+6.0+Robot')
     }
     finally { $writer.Dispose() }
-    $result = Get-FarmDiagIisRequests 'LOCAL' $inventory.Sites $windows $true $zone
-    Assert-Equal $result.Rows.Count 2 'Relevant IIS groups'
+    $header = '#Fields: date time s-ip cs-method cs-uri-stem cs-username c-ip sc-status sc-substatus sc-win32-status cs(User-Agent)'
+    @($header,'2026-09-24 10:00:00 10.0.0.1 GET /_vti_bin/client.svc old 10.0.0.4 401 1 0 Browser') | Set-Content -LiteralPath (Join-Path $logFolder 'u_ex260924.log')
+    @($header,'2026-10-02 22:00:40 10.0.0.1 GET /_vti_bin/client.svc current 10.0.0.5 401 1 0 Browser') | Set-Content -LiteralPath (Join-Path $logFolder 'u_ex261002.log')
+    @($header,'2026-10-02 22:00:50 10.0.0.1 GET /_vti_bin/client.svc rollover 10.0.0.6 401 1 0 Browser') | Set-Content -LiteralPath (Join-Path $logFolder 'u_ex261001.log')
+    $progressMessages = New-Object 'System.Collections.Generic.List[string]'
+    $result = Get-FarmDiagIisRequests 'LOCAL' $inventory.Sites $windows $true $zone { param($message) $progressMessages.Add($message) | Out-Null }
+    Assert-Equal $result.Rows.Count 4 'Relevant IIS groups'
     Assert-Equal $result.ExcludedRobot 1 'Robot exclusion'
-    Assert-Equal $result.LinesRead 5004 'Streaming line count'
+    Assert-Equal $result.FilesRead 3 'Relevant dated files and unknown names are opened'
+    Assert-Equal $result.FilesSkipped 1 'Old daily IIS file is skipped'
+    Assert-Equal $result.LinesRead 5008 'Streaming line count'
+    if (-not (@($progressMessages | Where-Object { $_ -match 'selected 3 of 4 log files' }).Count)) { throw 'IIS selection progress was not reported.' }
+    if (-not (@($progressMessages | Where-Object { $_ -match 'listing .*W3SVC7' }).Count)) { throw 'IIS folder action was not reported.' }
+    if (-not (@($progressMessages | Where-Object { $_ -match 'closed u_ex261002.log' }).Count)) { throw 'IIS file completion was not reported.' }
     Assert-Equal @($result.Rows | Where-Object Win32Meaning -EQ 'SEC_E_NO_CREDENTIALS').Count 1 'SSPI interpretation'
     if ($result.DurationSeconds -lt 0) { throw 'Negative IIS read duration.' }
+    $inventory.Sites[0].LogPeriod = 'Monthly'
+    $monthlyResult = Get-FarmDiagIisRequests 'LOCAL' $inventory.Sites $windows $true $zone
+    Assert-Equal $monthlyResult.FilesSkipped 0 'Non-daily IIS rotation does not skip files'
+    Assert-Equal $monthlyResult.LinesRead 5010 'Non-daily IIS rotation scans all files'
+    $inventory.Sites[0].LogPeriod = 'Daily'
+    $missingFolder = Join-Path $logRoot 'W3SVC8'
+    [void](New-Item -ItemType Directory -Path $missingFolder -Force)
+    @($header,'2026-09-24 10:00:00 10.0.0.1 GET /_vti_bin/client.svc old 10.0.0.4 401 1 0 Browser') | Set-Content -LiteralPath (Join-Path $missingFolder 'u_ex260924.log')
+    $missingSite = [pscustomobject]@{ Site='Old'; SiteId='8'; LogDirectory=$logRoot; LogFormat='W3C'; LogPeriod='Daily'; Pool='ContentPool' }
+    $missingResult = Get-FarmDiagIisRequests 'LOCAL' @($missingSite) $windows $true $zone
+    Assert-Equal $missingResult.FilesRead 0 'No out-of-window IIS file is opened'
+    Assert-Equal $missingResult.MissingPaths.Count 1 'No candidate IIS file is reported missing'
+    $hourlyFolder = Join-Path $logRoot 'W3SVC9'
+    [void](New-Item -ItemType Directory -Path $hourlyFolder -Force)
+    @($header,'2026-10-02 22:00:00 10.0.0.1 GET /_vti_bin/client.svc hourly 10.0.0.7 401 1 0 Browser') | Set-Content -LiteralPath (Join-Path $hourlyFolder 'u_ex26100222.log')
+    @($header,'2026-09-24 10:00:00 10.0.0.1 GET /_vti_bin/client.svc old 10.0.0.4 401 1 0 Browser') | Set-Content -LiteralPath (Join-Path $hourlyFolder 'u_ex26092410.log')
+    $hourlySite = [pscustomobject]@{ Site='Hourly'; SiteId='9'; LogDirectory=$logRoot; LogFormat='W3C'; LogPeriod='Hourly'; Pool='ContentPool' }
+    $hourlyResult = Get-FarmDiagIisRequests 'LOCAL' @($hourlySite) $windows $true $zone
+    Assert-Equal $hourlyResult.FilesRead 1 'Hourly IIS file in the requested window is opened'
+    Assert-Equal $hourlyResult.FilesSkipped 1 'Old hourly IIS file is skipped'
 
     function Get-WinEvent {
         param([string]$ComputerName,[hashtable]$FilterHashtable,[string]$ErrorAction)
@@ -96,9 +132,16 @@ WindowUtc,Lines,Items,Source,Destination,Undetermined
         $event | Add-Member -MemberType ScriptMethod -Name ToXml -Value { '<Event><System><TimeCreated SystemTime="2026-10-02T22:00:00.0000000Z"/></System></Event>' }
         return $event
     }
-    $rpcEvents = @(Get-FarmDiagEvents 'WFE02' 'System' @(5210) $windows $zone 7)
+    $eventProgress = New-Object 'System.Collections.Generic.List[string]'
+    $rpcEvents = @(Get-FarmDiagEvents 'WFE02' 'System' @(5210) $windows $zone 7 -Progress { param($message) $eventProgress.Add($message) | Out-Null })
     Assert-Equal $rpcEvents.Count 2 'Targeted and other WAS events through RPC'
     Assert-Equal @($rpcEvents | Where-Object EventId -EQ 5199).Count 1 'Other WAS event in window'
+    if (-not (@($eventProgress | Where-Object { $_ -match 'RPC query IDs=5210' }).Count)) { throw 'RPC event query was not reported.' }
+    if (-not (@($eventProgress | Where-Object { $_ -match 'peak window 1/1 returned 1 WAS records' }).Count)) { throw 'WAS peak window result was not reported.' }
+    $eventProgress.Clear()
+    $securityEvents = @(Get-FarmDiagEvents 'WFE02' 'Security' @(4625) $windows $zone -Progress { param($message) $eventProgress.Add($message) | Out-Null })
+    Assert-Equal $securityEvents.Count 1 'Security RPC query with progress callback'
+    if (-not (@($eventProgress | Where-Object { $_ -match 'retained 1 records' }).Count)) { throw 'Security event result was not reported.' }
 
     function Get-SPLogEvent {
         param([string]$Directory,[datetime]$StartTime,[datetime]$EndTime,[string]$ErrorAction)
@@ -106,9 +149,13 @@ WindowUtc,Lines,Items,Source,Destination,Undetermined
         [pscustomobject]@{ Timestamp=[datetime]'2026-10-03T00:00:01'; Level='High'; Category='Authentication'; Process='w3wp'; Message='Application Authentication Pipeline Failure' }
         [pscustomobject]@{ Timestamp=[datetime]'2026-10-03T00:00:02'; Level='Critical'; Category='Config Cache'; Process='w3wp'; Message='synthetic' }
     }
-    $ulsResult = Get-FarmDiagUls 'LOCAL' $root $windows $zone 1 $true
+    $ulsProgress = New-Object 'System.Collections.Generic.List[string]'
+    $ulsResult = Get-FarmDiagUls 'LOCAL' $root $windows $zone 1 $true { param($message) $ulsProgress.Add($message) | Out-Null }
     Assert-Equal $ulsResult.Rows.Count 1 'ULS event cap'
     Assert-Equal $ulsResult.Truncated $true 'ULS truncation marker'
+    if (-not (@($ulsProgress | Where-Object { $_ -match 'checking .*farm-diagnostic-test-' }).Count)) { throw 'ULS directory check was not reported.' }
+    if (-not (@($ulsProgress | Where-Object { $_ -match 'window 1/1: querying ' }).Count)) { throw 'ULS window query was not reported.' }
+    if (-not (@($ulsProgress | Where-Object { $_ -match 'window 1/1 completed:' }).Count)) { throw 'ULS window completion was not reported.' }
 
     $events = @(
         [pscustomobject]@{ Server='WFE02'; EventId=5210; Utc='2026-09-30T22:00:00Z'; Local='2026-10-01 00:00:00'; InPeakWindow=$false },
@@ -120,10 +167,10 @@ WindowUtc,Lines,Items,Source,Destination,Undetermined
     Assert-Equal $recurrences[0].Nights 3 'Distinct nights'
     $correlation = @(Get-FarmDiagCorrelation $windows $events @() $result.Rows @() $zone)
     Assert-Equal $correlation[0].WasEvents 1 'WAS in peak'
-    Assert-Equal $correlation[0].Iis401Count 1 'IIS 401 in peak'
+    Assert-Equal $correlation[0].Iis401Count 3 'IIS 401 in peak'
     Assert-Equal $correlation[0].StartLocal '2026-10-02 23:30:00' 'Local correlation start'
     $timeline = @(Get-FarmDiagTimeline $events @() $result.Rows @())
-    Assert-Equal $timeline.Count 3 'Window timeline rows'
+    Assert-Equal $timeline.Count 5 'Window timeline rows'
     $risks = @(Get-FarmDiagPoolRisks $inventory.Pools $windows $zone)
     Assert-Equal @($risks | Where-Object Risk -EQ 'CpuThrottle').Count 1 'CPU throttle risk'
     Assert-Equal @($risks | Where-Object Risk -EQ 'ScheduledRecycleNearWindow').Count 1 'Recycling window risk'
@@ -141,10 +188,10 @@ finally {
 }
 
 # SIG # Begin signature block
-# MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
+# MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCvOV073VX4X7Kr
-# apOzv/nfdUlU307jHmDbzGIxW7MedaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDZTJyZxBkytpFl
+# +92EA3Lef8Cx1wWVZrh40qAK8Bf/5aCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -169,139 +216,19 @@ finally {
 # PI5wrVTjV/pR7IrtSIfq8UladlrSZJyyDn3NV2ATvIZ6wNxbTmPFcE0uMg/EYzwd
 # Tek+CgXL3TxUKeldJM4YDWPimNBRhOPXzBDiOQIj6WNswt/KM1oDLnA00CNtciPN
 # dn+dXlneMvTEUah9wyt8o8tkLpoBw+KN+Bq/K0O1qPtS7umi70l45pPiej+mwbwq
-# ztcaoVD7a8ggHP1Vdp/rnafM4GtyCAE6b7U9Yzgvp1/a1kh7XffmqVhRRjCCBY0w
-# ggR1oAMCAQICEA6bGI750C3n79tQ4ghAGFowDQYJKoZIhvcNAQEMBQAwZTELMAkG
-# A1UEBhMCVVMxFTATBgNVBAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRp
-# Z2ljZXJ0LmNvbTEkMCIGA1UEAxMbRGlnaUNlcnQgQXNzdXJlZCBJRCBSb290IENB
-# MB4XDTIyMDgwMTAwMDAwMFoXDTMxMTEwOTIzNTk1OVowYjELMAkGA1UEBhMCVVMx
-# FTATBgNVBAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRpZ2ljZXJ0LmNv
-# bTEhMB8GA1UEAxMYRGlnaUNlcnQgVHJ1c3RlZCBSb290IEc0MIICIjANBgkqhkiG
-# 9w0BAQEFAAOCAg8AMIICCgKCAgEAv+aQc2jeu+RdSjwwIjBpM+zCpyUuySE98orY
-# WcLhKac9WKt2ms2uexuEDcQwH/MbpDgW61bGl20dq7J58soR0uRf1gU8Ug9SH8ae
-# FaV+vp+pVxZZVXKvaJNwwrK6dZlqczKU0RBEEC7fgvMHhOZ0O21x4i0MG+4g1ckg
-# HWMpLc7sXk7Ik/ghYZs06wXGXuxbGrzryc/NrDRAX7F6Zu53yEioZldXn1RYjgwr
-# t0+nMNlW7sp7XeOtyU9e5TXnMcvak17cjo+A2raRmECQecN4x7axxLVqGDgDEI3Y
-# 1DekLgV9iPWCPhCRcKtVgkEy19sEcypukQF8IUzUvK4bA3VdeGbZOjFEmjNAvwjX
-# WkmkwuapoGfdpCe8oU85tRFYF/ckXEaPZPfBaYh2mHY9WV1CdoeJl2l6SPDgohIb
-# Zpp0yt5LHucOY67m1O+SkjqePdwA5EUlibaaRBkrfsCUtNJhbesz2cXfSwQAzH0c
-# lcOP9yGyshG3u3/y1YxwLEFgqrFjGESVGnZifvaAsPvoZKYz0YkH4b235kOkGLim
-# dwHhD5QMIR2yVCkliWzlDlJRR3S+Jqy2QXXeeqxfjT/JvNNBERJb5RBQ6zHFynIW
-# IgnffEx1P2PsIV/EIFFrb7GrhotPwtZFX50g/KEexcCPorF+CiaZ9eRpL5gdLfXZ
-# qbId5RsCAwEAAaOCATowggE2MA8GA1UdEwEB/wQFMAMBAf8wHQYDVR0OBBYEFOzX
-# 44LScV1kTN8uZz/nupiuHA9PMB8GA1UdIwQYMBaAFEXroq/0ksuCMS1Ri6enIZ3z
-# bcgPMA4GA1UdDwEB/wQEAwIBhjB5BggrBgEFBQcBAQRtMGswJAYIKwYBBQUHMAGG
-# GGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBDBggrBgEFBQcwAoY3aHR0cDovL2Nh
-# Y2VydHMuZGlnaWNlcnQuY29tL0RpZ2lDZXJ0QXNzdXJlZElEUm9vdENBLmNydDBF
-# BgNVHR8EPjA8MDqgOKA2hjRodHRwOi8vY3JsMy5kaWdpY2VydC5jb20vRGlnaUNl
-# cnRBc3N1cmVkSURSb290Q0EuY3JsMBEGA1UdIAQKMAgwBgYEVR0gADANBgkqhkiG
-# 9w0BAQwFAAOCAQEAcKC/Q1xV5zhfoKN0Gz22Ftf3v1cHvZqsoYcs7IVeqRq7IviH
-# GmlUIu2kiHdtvRoU9BNKei8ttzjv9P+Aufih9/Jy3iS8UgPITtAq3votVs/59Pes
-# MHqai7Je1M/RQ0SbQyHrlnKhSLSZy51PpwYDE3cnRNTnf+hZqPC/Lwum6fI0POz3
-# A8eHqNJMQBk1RmppVLC4oVaO7KTVPeix3P0c2PR3WlxUjG/voVA9/HYJaISfb8rb
-# II01YBwCA8sgsKxYoA5AY8WYIsGyWfVVa88nq2x2zm8jLfR+cWojayL/ErhULSd+
-# 2DrZ8LaHlv1b0VysGMNNn3O3AamfV6peKOK5lDCCBrQwggScoAMCAQICEA3HrFcF
-# /yGZLkBDIgw6SYYwDQYJKoZIhvcNAQELBQAwYjELMAkGA1UEBhMCVVMxFTATBgNV
-# BAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRpZ2ljZXJ0LmNvbTEhMB8G
-# A1UEAxMYRGlnaUNlcnQgVHJ1c3RlZCBSb290IEc0MB4XDTI1MDUwNzAwMDAwMFoX
-# DTM4MDExNDIzNTk1OVowaTELMAkGA1UEBhMCVVMxFzAVBgNVBAoTDkRpZ2lDZXJ0
-# LCBJbmMuMUEwPwYDVQQDEzhEaWdpQ2VydCBUcnVzdGVkIEc0IFRpbWVTdGFtcGlu
-# ZyBSU0E0MDk2IFNIQTI1NiAyMDI1IENBMTCCAiIwDQYJKoZIhvcNAQEBBQADggIP
-# ADCCAgoCggIBALR4MdMKmEFyvjxGwBysddujRmh0tFEXnU2tjQ2UtZmWgyxU7UNq
-# EY81FzJsQqr5G7A6c+Gh/qm8Xi4aPCOo2N8S9SLrC6Kbltqn7SWCWgzbNfiR+2fk
-# HUiljNOqnIVD/gG3SYDEAd4dg2dDGpeZGKe+42DFUF0mR/vtLa4+gKPsYfwEu7EE
-# bkC9+0F2w4QJLVSTEG8yAR2CQWIM1iI5PHg62IVwxKSpO0XaF9DPfNBKS7Zazch8
-# NF5vp7eaZ2CVNxpqumzTCNSOxm+SAWSuIr21Qomb+zzQWKhxKTVVgtmUPAW35xUU
-# FREmDrMxSNlr/NsJyUXzdtFUUt4aS4CEeIY8y9IaaGBpPNXKFifinT7zL2gdFpBP
-# 9qh8SdLnEut/GcalNeJQ55IuwnKCgs+nrpuQNfVmUB5KlCX3ZA4x5HHKS+rqBvKW
-# xdCyQEEGcbLe1b8Aw4wJkhU1JrPsFfxW1gaou30yZ46t4Y9F20HHfIY4/6vHespY
-# MQmUiote8ladjS/nJ0+k6MvqzfpzPDOy5y6gqztiT96Fv/9bH7mQyogxG9QEPHrP
-# V6/7umw052AkyiLA6tQbZl1KhBtTasySkuJDpsZGKdlsjg4u70EwgWbVRSX1Wd4+
-# zoFpp4Ra+MlKM2baoD6x0VR4RjSpWM8o5a6D8bpfm4CLKczsG7ZrIGNTAgMBAAGj
-# ggFdMIIBWTASBgNVHRMBAf8ECDAGAQH/AgEAMB0GA1UdDgQWBBTvb1NK6eQGfHrK
-# 4pBW9i/USezLTjAfBgNVHSMEGDAWgBTs1+OC0nFdZEzfLmc/57qYrhwPTzAOBgNV
-# HQ8BAf8EBAMCAYYwEwYDVR0lBAwwCgYIKwYBBQUHAwgwdwYIKwYBBQUHAQEEazBp
-# MCQGCCsGAQUFBzABhhhodHRwOi8vb2NzcC5kaWdpY2VydC5jb20wQQYIKwYBBQUH
-# MAKGNWh0dHA6Ly9jYWNlcnRzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRS
-# b290RzQuY3J0MEMGA1UdHwQ8MDowOKA2oDSGMmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0
-# LmNvbS9EaWdpQ2VydFRydXN0ZWRSb290RzQuY3JsMCAGA1UdIAQZMBcwCAYGZ4EM
-# AQQCMAsGCWCGSAGG/WwHATANBgkqhkiG9w0BAQsFAAOCAgEAF877FoAc/gc9EXZx
-# ML2+C8i1NKZ/zdCHxYgaMH9Pw5tcBnPw6O6FTGNpoV2V4wzSUGvI9NAzaoQk97fr
-# PBtIj+ZLzdp+yXdhOP4hCFATuNT+ReOPK0mCefSG+tXqGpYZ3essBS3q8nL2UwM+
-# NMvEuBd/2vmdYxDCvwzJv2sRUoKEfJ+nN57mQfQXwcAEGCvRR2qKtntujB71WPYA
-# gwPyWLKu6RnaID/B0ba2H3LUiwDRAXx1Neq9ydOal95CHfmTnM4I+ZI2rVQfjXQA
-# 1WSjjf4J2a7jLzWGNqNX+DF0SQzHU0pTi4dBwp9nEC8EAqoxW6q17r0z0noDjs6+
-# BFo+z7bKSBwZXTRNivYuve3L2oiKNqetRHdqfMTCW/NmKLJ9M+MtucVGyOxiDf06
-# VXxyKkOirv6o02OoXN4bFzK0vlNMsvhlqgF2puE6FndlENSmE+9JGYxOGLS/D284
-# NHNboDGcmWXfwXRy4kbu4QFhOm0xJuF2EZAOk5eCkhSxZON3rGlHqhpB/8MluDez
-# ooIs8CVnrpHMiD2wL40mm53+/j7tFaxYKIqL0Q4ssd8xHZnIn/7GELH3IdvG2XlM
-# 9q7WP/UwgOkw/HQtyRN62JK4S1C8uw3PdBunvAZapsiI5YKdvlarEvf8EA+8hcpS
-# M9LHJmyrxaFtoza2zNaQ9k+5t1wwggbtMIIE1aADAgECAhAIT9wzT35FTtvDD4/5
-# khg1MA0GCSqGSIb3DQEBCwUAMGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdp
-# Q2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3Rh
-# bXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTEwHhcNMjYwODA1MDAwMDAwWhcN
-# MzcxMTA0MjM1OTU5WjBjMQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQs
-# IEluYy4xOzA5BgNVBAMTMkRpZ2lDZXJ0IFNIQTI1NiBSU0E0MDk2IFRpbWVzdGFt
-# cCBSZXNwb25kZXIgMjAyNiAxMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKC
-# AgEAtnum8sn+zUr41JtMZbP9OMYw+HwJDpG5xkIu/lqcfNYmMX81YmsUiHLbh9yk
-# peWBGKTLhYBrAN9Tdg/QEzG32XcObmgIblnr0CoQ3WSAeDZ6nH6X6VkFyYkJw3QB
-# JREwvm4UhLzSxmwPA7cFKRTEOMsmEEj6qJk/dqLEAL+oQYuOwE2UuiX1Vnul8YRe
-# IyWd4kgLn9gq6LNXM0UplkR6jL/QHxmb6fMoGBJYbnaUI7XD6cKDpekK2SVMld4i
-# DbzeHDtOaaxldH5IxuNusQ69nd8/ZXEiB5Hbxj3RlK13cX1W4DlFXKdv/CEhM8Cj
-# 1vvlmvhNroyPdRGbbpBlgyf8Wdu5N6ByhFwURn0U6ozlPoxN22v+fviUhP+6DR54
-# 7OZnpBMWDfei1f5sVGwiiW/KQTWOK97g+4RJpPzPNV4VYMAwO2jM2Aty2QYPVmOQ
-# TJm0msuXnJrSbl2gf9JylpkJlWXqk1Q4LJsxz+TELoQCZIljbgvTJgoPU2R12ydv
-# 8i1UqL/adelA0y7U9Pmmtbze9Xx3rtajC5SzQd1jgfwAwsa90v9YcSPdmeoyoBBA
-# /27cCL237l5DTYYPDLQ4ON3OLTGWnvRb6jDrf/T75gMRfUzSLCBQfBusm9+mSWRl
-# C/Df6S/e9Q8i13CuhzOT2Jx+V/nlbXM4QoBwlUAhelwwJT0CAwEAAaOCAZUwggGR
-# MAwGA1UdEwEB/wQCMAAwHQYDVR0OBBYEFBTJY4owLtRK+26U8+bjQH717M3iMB8G
-# A1UdIwQYMBaAFO9vU0rp5AZ8esrikFb2L9RJ7MtOMA4GA1UdDwEB/wQEAwIHgDAW
-# BgNVHSUBAf8EDDAKBggrBgEFBQcDCDCBlQYIKwYBBQUHAQEEgYgwgYUwJAYIKwYB
-# BQUHMAGGGGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBdBggrBgEFBQcwAoZRaHR0
-# cDovL2NhY2VydHMuZGlnaWNlcnQuY29tL0RpZ2lDZXJ0VHJ1c3RlZEc0VGltZVN0
-# YW1waW5nUlNBNDA5NlNIQTI1NjIwMjVDQTEuY3J0MF8GA1UdHwRYMFYwVKBSoFCG
-# Tmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRHNFRpbWVT
-# dGFtcGluZ1JTQTQwOTZTSEEyNTYyMDI1Q0ExLmNybDAgBgNVHSAEGTAXMAgGBmeB
-# DAEEAjALBglghkgBhv1sBwEwDQYJKoZIhvcNAQELBQADggIBAI3FOmEenVIK35ms
-# CYB+fShAsWvSYvLBItoNdAgQ2jIqrGsVsluXMJU/+mRebBc52s6lbKAvOVPXaizm
-# KkMLLflEEKDZQx4CkS2t8aHPjkXha3hYZ010htFa3dhNgmalH5vuWvh3tTCf4frT
-# S7gPtGc4Z/xaPhQ2AB1mR8eEe/WbH0RWHvVIl6VwQ3+g5FKNfN2N/DWJkf13w2H+
-# 2GfqEfbd35Ww8CvoYBjLNIDTadcPWdgsjsiOaK/7EsKJgLjUNIVgvcaFOLLQ/Glr
-# A+0ZHJoFUbOr5SJN8zykPspXIXlpDJY/gqFUZRROeab9GVgmhbdOJcD/63RhxPah
-# FUGbckRONqMe6DYAv6/mOG0pWd3cPStsdcS7buj5DyniwRY8yooMH6ptx5vpP/pZ
-# zBPBeZD2U4IsthyxB5Jaa8qrOkB5z160TXiM5ADMspZ0TfD9MJoq0tFpFPssKRFh
-# WeEDYPvcUuN7U7lvcdHl4ezQ3NT/7Ffs1sR1yh/LRbdZ3B3Vc6q2WmD8mDC0p9kz
-# l2o73iVtS946IkEj7FkRsZGww1teYxERROC745xrtjvcw9ZyyUjHZWGRIpJeMNsP
-# quCDf0fkyHtB+J4AiNZqCQk23rxh+KbpyMTNVKItJ5l92Svl20U9NbqMBOVYl1h5
-# 4NEYLJq1/xHWFKPNK903zJZA9P2DMYIFvjCCBboCAQEwYjBOMR4wHAYDVQQDDBV3
-# b3JrcGxhY2VjbG91ZGh1Yi5jb20xLDAqBgkqhkiG9w0BCQEWHWNvbnRhY3RAd29y
-# a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
-# AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
-# CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIN4/TBjiPQR+hWZZl+SqgkeBzAkQ5GsBm/uz3gv4liHvMA0GCSqG
-# SIb3DQEBAQUABIIBgHshhgW3fvk0sAkWEmwTat2aLw4ZvNVnlEAH6hYcaqXjW7p1
-# /m5mZ5/b5hguQ1XcMnfDY5+iK4TD5qjhJbCOWifZPBzmQ9ceO8LPFNHEmoEXIwgn
-# uCUSKZUK9uKlEwFvFo7z8ClIyidwYIMsl3kvncjRHGd+SZJDFQY+ac7flEbj+DC1
-# 5XXLR9QYRmipZMyqmGG+XDpG8Co7bcktFLYiM7sjJg4wcF2O5l6ah0OlI22oaBux
-# P0A+VW4P/WQocaboBEceQToKl0xduMWTpjgaqCEq/tvk6mlJ1xIFJlTesM9pnDRN
-# W/k/xv3Oo3m2b3bWPwwNSKIFYl8I5PYz8Optt7ZFoL/Jg80j2Sv3Oz5sWvVWubDV
-# s/c2g1m2TRo7C/lLG4DwjPAlBHISLeobgq6y6ikozgEBxcoRXFRjq8VhRvfCLRd9
-# lD+MbyMLECEPbL8Xw+JIomikHi/sIryRk/pYqDlb3yD1qlSDc5P/06xJd1MEylTN
-# eoq4lkXKKmtQk2uZKaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
-# CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
-# RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
-# MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMxMzMx
-# NTVaMC8GCSqGSIb3DQEJBDEiBCBKmOSYQ/Qv0fbIHyPT2uNvcI4FYBYsJFrCMMDl
-# KfP37zANBgkqhkiG9w0BAQEFAASCAgAUquKu1xCbc/fI7RigDJoJqT/JrNeM3y7j
-# j+LqNsd2OvQJosdsWs7EEIx06REvsUTBZYP9Ha7fzIn0HRQb4QbhrReZbWwsDQyJ
-# 9qp2dlZnLbdsUTDusaeniQY98UY6AvYde4uRx9UXQMCgRmP32GYQoUHU11H8guaD
-# Oc4hApvodG5+qVxMacOVuglPnCYQHavKBRTOH88kwKdT83ZAN1RsLX4GnCBsiAFa
-# d4TY9zqNq3NzuNI6+uYe7q+gcsOqqteYLc+EpQxAgCWA2lzeiXvJTJl34JfsdU9S
-# b2qG9OzMepu6ruP5LVDAw8STo+EkueT9/xvzFBkqOTveo5Rf3BNNMHe7iALD+hhZ
-# 6aCVJj7MAIL/VNurDuRo/3joo6WPp5cY2xKtdzeVsXMwxWYXDYaRNLVfu9RkITt5
-# UuE2r6WnNAbOuDWLwQjuvi9SM9MBXsR+VbJtQurJDfx/5mOlLC0/d1fNPmsHd6jM
-# uYsSh4KRvLC4fe4M90UujDCN+Sg6oJd3c/u3fR2lHBSuEsYvviutI5OiObHHOnhx
-# NQsetT17ioG3ZXFxM37c/wY0IQGbYOxrGgObl2bp5vJ4uQn8afa/HQBaqraC7FP3
-# cg7qI4AhUcrEomh4nCeTTMX/R4HIt8rIMLJ/Bb91RVC/APXtMbc0jaof8OQdPo3B
-# asUR4ZExWQ==
+# ztcaoVD7a8ggHP1Vdp/rnafM4GtyCAE6b7U9Yzgvp1/a1kh7XffmqVhRRjGCApQw
+# ggKQAgEBMGIwTjEeMBwGA1UEAwwVd29ya3BsYWNlY2xvdWRodWIuY29tMSwwKgYJ
+# KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
+# 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
+# gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCDvtvTEftqinKzVeapY6tXd
+# 34VU2i9qxn8nVjQJN0kwZTANBgkqhkiG9w0BAQEFAASCAYBCaOB9liijEWHDDfP0
+# xMSt0V9W1/ay8Hf+L0gOgfieHYa6C4dzd/nPu71R+zovvE/N09Mq2geksmAEfyd4
+# yZcGQ7Te21P2g2OWC4ST+xcTjbLPG3oA33QVM1RC41WA5ANGi6Gpy5pZ8HZdZ0Ef
+# t9S8i5Bxjja3BmcuPWt0ne14tMXcPZNzOQOeuGwlEA6idk5HbAj5peoLPuNTPPI/
+# ZBxUJPoqwKuamKRxhXPQAXASh5ul5HNSum38lbj7oFVaP4snTH03dTNVEVC3ek//
+# SxW633piFbbOru/bte8P6dt2ACOLV6jImUQwxtwsmHT0SaiD6/4fpb4XDHrY6Jri
+# xnjKvCWQF+xZQPv+CQEy4knCNOPhs3rmklcdM1OJEdl6sBWyacoOGEytcQVJGKbL
+# GR3DfSHHgcvx23Zm+ciXrwQddS6phDcSlyuRvBIJZGzlT8Mf994/RB59RubyI4tl
+# SMEbq8sGV5KkD1z3RT3znNDhE8x0i6AK++uwm4pEVykXJqc=
 # SIG # End signature block

@@ -2,7 +2,7 @@
 .SYNOPSIS
     Collect read-only SharePoint farm diagnostics and correlate them with ShareGate peaks.
 .VERSION
-    1.0.4
+    1.0.6
 #>
 #Requires -Version 5.1
 [CmdletBinding(DefaultParameterSetName='Peaks')]
@@ -24,7 +24,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$script:FarmDiagVersion = '1.0.4'
+$script:FarmDiagVersion = '1.0.6'
 $script:FarmDiagScriptPath = $PSCommandPath
 $script:FarmDiagMode = $PSCmdlet.ParameterSetName
 $script:FarmDiagToolkitRoot = if ($ToolkitRoot) { $ToolkitRoot } else { [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..')) }
@@ -34,9 +34,11 @@ $script:FarmDiagLog = New-Object 'System.Collections.Generic.List[string]'
 
 function Write-FarmDiagLog {
     param([string]$Message)
-    $line = '[{0}] {1}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $Message
-    [void]$script:FarmDiagLog.Add($line)
-    Microsoft.PowerShell.Utility\Write-Host $line
+    foreach ($part in [regex]::Split($Message,'\r?\n')) {
+        $line = '[{0}] {1}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $part
+        [void]$script:FarmDiagLog.Add($line)
+        Microsoft.PowerShell.Utility\Write-Host $line
+    }
 }
 
 function Add-FarmDiagCoverage {
@@ -190,33 +192,98 @@ function Get-FarmDiagIisInventory {
         $format = [string]$site.logFile.logFormat
         if (-not $format) { $format = [string]$root.sites.siteDefaults.logFile.logFormat }
         if (-not $format) { $format = 'W3C' }
-        $sites.Add([pscustomobject]@{ Server=$Server; Site=$site.name; SiteId=[string]$site.id; Bindings=$bindings; Pool=($sitePool -join ''); LogDirectory=$directory; LogFormat=$format })
+        $period = [string]$site.logFile.period
+        if (-not $period) { $period = [string]$root.sites.siteDefaults.logFile.period }
+        if (-not $period) { $period = 'Daily' }
+        $sites.Add([pscustomobject]@{ Server=$Server; Site=$site.name; SiteId=[string]$site.id; Bindings=$bindings; Pool=($sitePool -join ''); LogDirectory=$directory; LogFormat=$format; LogPeriod=$period })
     }
     return [pscustomobject]@{ Sites=$sites.ToArray(); Pools=$pools.ToArray() }
 }
 
+function Get-FarmDiagIisCandidateDates {
+    param([object[]]$Windows)
+    $dates = @{}
+    foreach ($window in $Windows) {
+        $day = $window.StartUtc.Date.AddDays(-1)
+        $last = $window.EndUtc.Date.AddDays(1)
+        while ($day -le $last) {
+            $dates[$day.ToString('yyMMdd',[Globalization.CultureInfo]::InvariantCulture)] = $true
+            $day = $day.AddDays(1)
+        }
+    }
+    return $dates
+}
+
 function Get-FarmDiagIisRequests {
-    param([string]$Server,[object[]]$Sites,[object[]]$Windows,[bool]$IsLocal,[TimeZoneInfo]$Zone)
-    $rows = @{}; $excluded = 0; $filesRead = 0; $linesRead = 0
+    param([string]$Server,[object[]]$Sites,[object[]]$Windows,[bool]$IsLocal,[TimeZoneInfo]$Zone,[scriptblock]$Progress)
+    $rows = @{}; $excluded = 0; $filesRead = 0; $filesSkipped = 0; $linesRead = 0
     $missing = New-Object 'System.Collections.Generic.List[string]'
     $watch = [Diagnostics.Stopwatch]::StartNew()
+    $candidateDates = Get-FarmDiagIisCandidateDates $Windows
+    $nextProgress = 30.0
     foreach ($site in $Sites) {
-        if (-not $site.LogDirectory -or -not $site.SiteId) { continue }
-        if ($site.LogFormat -ne 'W3C') { $missing.Add("$($site.Site): IIS log format '$($site.LogFormat)' is not W3C."); continue }
+        if (-not $site.LogDirectory -or -not $site.SiteId) {
+            $missing.Add("$($site.Site): IIS log directory or site ID is missing.")
+            if ($Progress) { & $Progress ("IIS $Server site $($site.Site): skipped; log directory or site ID is missing.") }
+            continue
+        }
+        if ($site.LogFormat -ne 'W3C') {
+            $missing.Add("$($site.Site): IIS log format '$($site.LogFormat)' is not W3C.")
+            if ($Progress) { & $Progress ("IIS $Server site $($site.Site): skipped; log format '$($site.LogFormat)' is not W3C.") }
+            continue
+        }
         $root = if ($IsLocal) { $site.LogDirectory.Replace('%SystemDrive%','C:').Replace('%SystemRoot%','C:\Windows') } else { ConvertTo-FarmDiagUncPath $Server $site.LogDirectory }
         $folder = Join-Path $root ('W3SVC' + $site.SiteId)
-        if (-not (Test-Path -LiteralPath $folder -PathType Container)) { $missing.Add($folder); continue }
+        if ($Progress) { & $Progress ("IIS $Server site $($site.Site): listing $folder (rotation=$($site.LogPeriod)).") }
+        if (-not (Test-Path -LiteralPath $folder -PathType Container)) {
+            $missing.Add($folder)
+            if ($Progress) { & $Progress ("IIS $Server site $($site.Site): log directory is inaccessible: $folder") }
+            continue
+        }
         try { $files = @(Get-ChildItem -LiteralPath $folder -File -Filter '*.log' -ErrorAction Stop) }
-        catch { $missing.Add($folder + ': ' + $_.Exception.Message); continue }
-        if (-not $files.Count) { $missing.Add($folder + ': no W3C log files'); continue }
+        catch {
+            $missing.Add($folder + ': ' + $_.Exception.Message)
+            if ($Progress) { & $Progress ("IIS $Server site $($site.Site): listing failed: $($_.Exception.Message)") }
+            continue
+        }
+        if (-not $files.Count) {
+            $missing.Add($folder + ': no W3C log files')
+            if ($Progress) { & $Progress ("IIS $Server site $($site.Site): no W3C log files found.") }
+            continue
+        }
+        $selectedFiles = New-Object 'System.Collections.Generic.List[object]'
         foreach ($file in $files) {
+            if ($site.LogPeriod -in @('Daily','Hourly') -and $file.Name -match '^u_ex(\d{6})(?:\d{2})?\.log$' -and -not $candidateDates.ContainsKey($Matches[1])) {
+                $filesSkipped++
+                continue
+            }
+            $selectedFiles.Add($file)
+        }
+        if ($Progress) { & $Progress ("IIS $Server site $($site.Site): selected $($selectedFiles.Count) of $($files.Count) log files; skipped $($files.Count - $selectedFiles.Count) outside the window.") }
+        if (-not $selectedFiles.Count) {
+            $missing.Add($folder + ': no IIS log files for the requested window')
+            if ($Progress) { & $Progress ("IIS $Server site $($site.Site): no files match the requested window.") }
+            continue
+        }
+        foreach ($file in $selectedFiles) {
             $filesRead++
+            $fileLinesStart = $linesRead
+            $fileWatch = [Diagnostics.Stopwatch]::StartNew()
+            if ($Progress) { & $Progress ("IIS $Server reading $($file.Name) ($([math]::Round($file.Length / 1MB,1)) MiB).") }
             try { $reader = New-Object IO.StreamReader($file.FullName) }
-            catch { $missing.Add($file.FullName + ': ' + $_.Exception.Message); continue }
+            catch {
+                $missing.Add($file.FullName + ': ' + $_.Exception.Message)
+                if ($Progress) { & $Progress ("IIS $Server could not open $($file.Name): $($_.Exception.Message)") }
+                continue
+            }
             try {
                 $fields = @(); $index = @{}; $sawFields = $false
                 while (-not $reader.EndOfStream) {
                     $line = $reader.ReadLine(); $linesRead++
+                    if ($Progress -and $watch.Elapsed.TotalSeconds -ge $nextProgress) {
+                        & $Progress ("IIS $Server reading $($file.Name): $linesRead lines in $([math]::Round($watch.Elapsed.TotalSeconds,1)) seconds.")
+                        $nextProgress = $watch.Elapsed.TotalSeconds + 30.0
+                    }
                     if ($line.StartsWith('#Fields:')) {
                         $fields = @($line.Substring(8).Trim() -split '\s+')
                         $sawFields = $true
@@ -248,31 +315,50 @@ function Get-FarmDiagIisRequests {
                     }
                     $rows[$key].Count++
                 }
-                if (-not $sawFields) { $missing.Add($file.FullName + ': W3C #Fields header missing') }
+                if (-not $sawFields) {
+                    $missing.Add($file.FullName + ': W3C #Fields header missing')
+                    if ($Progress) { & $Progress ("IIS $Server $($file.Name): W3C #Fields header missing.") }
+                }
             }
-            finally { $reader.Dispose() }
+            finally {
+                $reader.Dispose()
+                $fileWatch.Stop()
+                if ($Progress) { & $Progress ("IIS $Server closed $($file.Name): $($linesRead - $fileLinesStart) lines read in $([math]::Round($fileWatch.Elapsed.TotalSeconds,1)) seconds.") }
+            }
         }
     }
     $watch.Stop()
-    return [pscustomobject]@{ Rows=@($rows.Values); ExcludedRobot=$excluded; FilesRead=$filesRead; LinesRead=$linesRead; DurationSeconds=$watch.Elapsed.TotalSeconds; MissingPaths=$missing.ToArray() }
+    return [pscustomobject]@{ Rows=@($rows.Values); ExcludedRobot=$excluded; FilesRead=$filesRead; FilesSkipped=$filesSkipped; LinesRead=$linesRead; DurationSeconds=$watch.Elapsed.TotalSeconds; MissingPaths=$missing.ToArray() }
 }
 
 function Get-FarmDiagEvents {
-    param([string]$Server,[string]$LogName,[int[]]$Ids,[object[]]$Windows,[TimeZoneInfo]$Zone,[int]$NightDays = 0)
+    param([string]$Server,[string]$LogName,[int[]]$Ids,[object[]]$Windows,[TimeZoneInfo]$Zone,[int]$NightDays = 0,[scriptblock]$Progress)
     $from = @($Windows | ForEach-Object StartUtc | Sort-Object | Select-Object -First 1)[0]
     $to = @($Windows | ForEach-Object EndUtc | Sort-Object -Descending | Select-Object -First 1)[0]
     if ($NightDays -gt 0) { $from = $from.AddDays(-$NightDays) }
     $filter = @{ LogName=$LogName; Id=$Ids; StartTime=$from.ToLocalTime(); EndTime=$to.ToLocalTime() }
+    if ($Progress) { & $Progress ("Events $Server/$LogName`: RPC query IDs=$($Ids -join ',') from $($from.ToString('o')) to $($to.ToString('o')).") }
     try { $events = @(Get-WinEvent -ComputerName $Server -FilterHashtable $filter -ErrorAction Stop) }
     catch {
         if ($_.FullyQualifiedErrorId -match 'NoMatchingEventsFound' -or $_.Exception.Message -match 'No events were found') { $events = @() }
         else { throw }
     }
+    if ($Progress) { & $Progress ("Events $Server/$LogName`: primary RPC query returned $($events.Count) records.") }
     if ($LogName -eq 'System') {
+        $windowNumber = 0
         foreach($window in $Windows) {
+            $windowNumber++
             $allWasFilter = @{ LogName='System'; StartTime=$window.StartUtc.ToLocalTime(); EndTime=$window.EndUtc.ToLocalTime() }
-            try { $events += @(Get-WinEvent -ComputerName $Server -FilterHashtable $allWasFilter -ErrorAction Stop | Where-Object { [string]$_.ProviderName -match '(?i)WAS' }) }
-            catch { if ($_.FullyQualifiedErrorId -notmatch 'NoMatchingEventsFound' -and $_.Exception.Message -notmatch 'No events were found') { throw } }
+            if ($Progress) { & $Progress ("Events $Server/System: scanning WAS provider in peak window $windowNumber/$($Windows.Count).") }
+            try {
+                $windowEvents = @(Get-WinEvent -ComputerName $Server -FilterHashtable $allWasFilter -ErrorAction Stop | Where-Object { [string]$_.ProviderName -match '(?i)WAS' })
+                $events += $windowEvents
+                if ($Progress) { & $Progress ("Events $Server/System: peak window $windowNumber/$($Windows.Count) returned $($windowEvents.Count) WAS records.") }
+            }
+            catch {
+                if ($_.FullyQualifiedErrorId -notmatch 'NoMatchingEventsFound' -and $_.Exception.Message -notmatch 'No events were found') { throw }
+                if ($Progress) { & $Progress ("Events $Server/System: peak window $windowNumber/$($Windows.Count) returned no WAS records.") }
+            }
         }
     }
     $rows = New-Object 'System.Collections.Generic.List[object]'
@@ -288,6 +374,7 @@ function Get-FarmDiagEvents {
         if ($NightDays -eq 0 -and -not (Test-FarmDiagInWindow $utc $Windows)) { continue }
         $rows.Add([pscustomobject]@{ Server=$Server; Log=$LogName; RecordId=$event.RecordId; EventId=$event.Id; Provider=$event.ProviderName; Utc=$utc.ToString('o'); Local=(ConvertTo-FarmDiagLocal $utc $Zone).ToString('yyyy-MM-dd HH:mm:ss'); InPeakWindow=(Test-FarmDiagInWindow $utc $Windows); Message=([string]$event.Message -replace '\r?\n',' ') })
     }
+    if ($Progress) { & $Progress ("Events $Server/$LogName`: retained $($rows.Count) records after provider and window filtering.") }
     return $rows.ToArray()
 }
 
@@ -376,17 +463,22 @@ function Get-FarmDiagPoolRisks {
 }
 
 function Get-FarmDiagUls {
-    param([string]$Server,[string]$LogLocation,[object[]]$Windows,[TimeZoneInfo]$Zone,[int]$MaxEvents,[bool]$IsLocal)
+    param([string]$Server,[string]$LogLocation,[object[]]$Windows,[TimeZoneInfo]$Zone,[int]$MaxEvents,[bool]$IsLocal,[scriptblock]$Progress)
     if (-not $LogLocation) { throw 'Farm diagnostic configuration did not provide LogLocation.' }
     $directory = Get-FarmDiagUlsDirectory $Server $LogLocation $IsLocal
+    if ($Progress) { & $Progress ("ULS $Server checking $directory.") }
     if (-not (Test-Path -LiteralPath $directory -PathType Container)) { throw "ULS directory is inaccessible: $directory" }
     $rows = New-Object 'System.Collections.Generic.List[object]'
     $seen = @{}
     $truncated = $false
     $ambiguous = 0
+    $windowNumber = 0
     foreach ($window in $Windows) {
+        $windowNumber++
         $localStart = ConvertTo-FarmDiagLocal $window.StartUtc $Zone
         $localEnd = ConvertTo-FarmDiagLocal $window.EndUtc $Zone
+        $windowWatch = [Diagnostics.Stopwatch]::StartNew()
+        if ($Progress) { & $Progress ("ULS $Server window $windowNumber/$($Windows.Count): querying $directory from $($localStart.ToString('yyyy-MM-dd HH:mm:ss')) to $($localEnd.ToString('yyyy-MM-dd HH:mm:ss')) ($($Zone.Id)).") }
         $candidates = @(Get-SPLogEvent -Directory $directory -StartTime $localStart -EndTime $localEnd -ErrorAction Stop | Where-Object {
             [string]$_.Level -match '(?i)High|Critical|Unexpected' -or ([string]$_.Message + ' ' + [string]$_.Category) -match '(?i)authenticat|w3wp|config.?cache|process.*start'
         } | Select-Object -First ($MaxEvents + 1))
@@ -401,6 +493,8 @@ function Get-FarmDiagUls {
             $seen[$key] = $true
             $rows.Add([pscustomobject]@{ Server=$Server; Utc=$utc.ToString('o'); Local=$localStamp.ToString('yyyy-MM-dd HH:mm:ss'); Level=$level; Category=$category; Process=[string]$entry.Process; Message=($message -replace '\r?\n',' ') })
         }
+        $windowWatch.Stop()
+        if ($Progress) { & $Progress ("ULS $Server window $windowNumber/$($Windows.Count) completed: candidates=$($candidates.Count); retained=$($rows.Count); duration=$([math]::Round($windowWatch.Elapsed.TotalSeconds,1)) seconds.") }
         if ($truncated) { break }
     }
     return [pscustomobject]@{ Rows=$rows.ToArray(); Truncated=$truncated; AmbiguousTimestamps=$ambiguous; Directory=$directory }
@@ -495,6 +589,7 @@ function Invoke-FarmDiagnostic {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
     $principal = New-Object Security.Principal.WindowsPrincipal($identity)
     if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { throw 'Run Windows PowerShell as Administrator on a farm server.' }
+    Write-FarmDiagLog 'Checking the SharePoint PowerShell module and farm access.'
     try { $Host.Runspace.ThreadOptions = 'ReuseThread' } catch { Write-FarmDiagLog 'ReuseThread could not be enabled; continuing.' }
     if (-not (Get-PSSnapin Microsoft.SharePoint.PowerShell -ErrorAction SilentlyContinue)) {
         try { Add-PSSnapin Microsoft.SharePoint.PowerShell -ErrorAction Stop }
@@ -504,6 +599,7 @@ function Invoke-FarmDiagnostic {
     $farmServers = @(Get-SPServer -ErrorAction Stop)
     $instances = @(Get-SPServiceInstance -ErrorAction Stop)
     $diagnosticConfig = Get-SPDiagnosticConfig -ErrorAction Stop
+    Write-FarmDiagLog ("Farm discovery completed: servers=$($farmServers.Count); service instances=$($instances.Count); ULS location=$([string]$diagnosticConfig.LogLocation).")
     $zone = if ($TimeZone) { [TimeZoneInfo]::FindSystemTimeZoneById($TimeZone) } else { [TimeZoneInfo]::Local }
     $windows = @(Get-FarmDiagWindows -Mode $script:FarmDiagMode -Start $StartTime -End $EndTime -Center $Around -Minutes $WindowMinutes -PeaksPath $ShareGatePeaksCsv -Zone $zone)
     $selected = @(Get-FarmDiagEligibleServers $farmServers)
@@ -516,6 +612,7 @@ function Invoke-FarmDiagnostic {
         $selected = @($selected | Where-Object { $_.Address -in $Servers })
     }
     if (-not $selected.Count) { throw 'No SharePoint application server was discovered.' }
+    Write-FarmDiagLog ("Collection scope: $($selected.Count) SharePoint servers; $($windows.Count) UTC windows; diagnostic mode=$(if ($DryRun) { 'DryRun' } else { 'Run' }).")
     $output = Get-FarmDiagOutput -ProjectName $Project -Override $OutputPath -Preview ([bool]$DryRun)
     $script:FarmDiagOutputPath = $output.Path
     Write-FarmDiagLog "Output: $($output.Path)"
@@ -547,58 +644,115 @@ function Invoke-FarmDiagnostic {
     $security = New-Object 'System.Collections.Generic.List[object]'
     $iis = New-Object 'System.Collections.Generic.List[object]'
     $uls = New-Object 'System.Collections.Generic.List[object]'
+    $serverNumber = 0
     foreach ($server in $selected) {
+        $serverNumber++
         $name = [string]$server.Address; $local = $name -ieq $env:COMPUTERNAME -or $name.Split('.')[0] -ieq $env:COMPUTERNAME
+        $serverWatch = [Diagnostics.Stopwatch]::StartNew()
+        Write-FarmDiagLog "Server $serverNumber/$($selected.Count): collecting $name ($([string]$server.Role)); access=$(if ($local) { 'local' } else { 'remote UNC/RPC' })."
         $webService = @($instances | Where-Object { [string]$_.Server.Address -ieq $name -and [string]$_.TypeName -match '(?i)Microsoft SharePoint Foundation Web Application' -and [string]$_.Status -eq 'Online' }).Count -gt 0
         $serverZone = ''
-        try { $serverZone = Get-FarmDiagServerTimeZone $name $local; Add-FarmDiagCoverage $name 'Time zone' 'Complete' $serverZone }
-        catch { Add-FarmDiagCoverage $name 'Time zone' 'Missing' $_.Exception.Message }
+        Write-FarmDiagLog "Time zone $name`: reading $(if ($local) { 'local settings' } else { 'remote registry via WMI' })."
+        try {
+            $serverZone = Get-FarmDiagServerTimeZone $name $local
+            Add-FarmDiagCoverage $name 'Time zone' 'Complete' $serverZone
+            Write-FarmDiagLog "Time zone $name completed: $serverZone."
+        }
+        catch {
+            Add-FarmDiagCoverage $name 'Time zone' 'Missing' $_.Exception.Message
+            Write-FarmDiagLog "Time zone $name missing: $($_.Exception.Message)"
+        }
         $topology.Add([pscustomobject]@{ Server=$name; Role=[string]$server.Role; Type=[string]$server.Type; EffectiveWfe=$webService; FarmTimeZone=$zone.Id; ServerTimeZone=$serverZone; IsLocal=$local })
         if ($serverZone -and $serverZone -ne $zone.Id) { Write-FarmDiagLog "Time zone mismatch on $name`: server=$serverZone; farm=$($zone.Id)." }
+        $configPath = if ($local) { Join-Path $env:windir 'System32\inetsrv\config\applicationHost.config' } else { '\\{0}\c$\Windows\System32\inetsrv\config\applicationHost.config' -f $name }
+        Write-FarmDiagLog "IIS configuration $name`: reading $configPath."
+        $iisConfigWatch = [Diagnostics.Stopwatch]::StartNew()
         try {
                 $config = Get-FarmDiagIisConfig $name $local
                 $inventory = Get-FarmDiagIisInventory $config $name
                 foreach($row in $inventory.Sites){ $sites.Add($row) }
                 foreach($row in $inventory.Pools){ $pools.Add($row) }
                 Add-FarmDiagCoverage $name 'IIS configuration' 'Complete' ('Sites='+$inventory.Sites.Count)
+                $iisConfigWatch.Stop()
+                Write-FarmDiagLog ("IIS configuration $name completed: sites=$($inventory.Sites.Count); pools=$($inventory.Pools.Count); duration=$([math]::Round($iisConfigWatch.Elapsed.TotalSeconds,1)) seconds.")
                 try {
-                    $result = Get-FarmDiagIisRequests $name $inventory.Sites $windows $local $zone
+                    Write-FarmDiagLog "IIS logs $name`: scanning site folders for the requested UTC windows."
+                    $result = Get-FarmDiagIisRequests $name $inventory.Sites $windows $local $zone { param($message) Write-FarmDiagLog $message }
                     foreach($row in $result.Rows){ $iis.Add($row) }
                     $iisStatus = if($result.MissingPaths.Count -and -not $result.FilesRead){'Missing'}elseif($result.MissingPaths.Count){'Partial'}else{'Complete'}
-                    Add-FarmDiagCoverage $name 'IIS logs' $iisStatus ("Files=$($result.FilesRead); Lines=$($result.LinesRead); RobotExcluded=$($result.ExcludedRobot); Missing=$($result.MissingPaths -join ';')") $result.DurationSeconds
+                    Add-FarmDiagCoverage $name 'IIS logs' $iisStatus ("Files=$($result.FilesRead); Skipped=$($result.FilesSkipped); Lines=$($result.LinesRead); RobotExcluded=$($result.ExcludedRobot); Missing=$($result.MissingPaths -join ';')") $result.DurationSeconds
+                    Write-FarmDiagLog ("IIS $name completed: files=$($result.FilesRead); skipped=$($result.FilesSkipped); lines=$($result.LinesRead); duration=$([math]::Round($result.DurationSeconds,1)) seconds; status=$iisStatus.")
                 }
-                catch { Add-FarmDiagCoverage $name 'IIS logs' 'Missing' $_.Exception.Message }
+                catch {
+                    Add-FarmDiagCoverage $name 'IIS logs' 'Missing' $_.Exception.Message
+                    Write-FarmDiagLog "IIS logs $name missing: $($_.Exception.Message)"
+                }
             }
-        catch { Add-FarmDiagCoverage $name 'IIS configuration' 'Missing' $_.Exception.Message; Add-FarmDiagCoverage $name 'IIS logs' 'Missing' 'IIS configuration was unavailable.' }
+        catch {
+            $iisConfigWatch.Stop()
+            Add-FarmDiagCoverage $name 'IIS configuration' 'Missing' $_.Exception.Message
+            Add-FarmDiagCoverage $name 'IIS logs' 'Missing' 'IIS configuration was unavailable.'
+            Write-FarmDiagLog ("IIS configuration $name missing after $([math]::Round($iisConfigWatch.Elapsed.TotalSeconds,1)) seconds: $($_.Exception.Message)")
+        }
+        Write-FarmDiagLog "WAS $name`: querying System events via RPC (IDs 5210, 5074, 5075, 5011, 5009, 5002, 5186, 5117; nightly scan=$NightlyScanDays days)."
+        $wasWatch = [Diagnostics.Stopwatch]::StartNew()
         try {
-            $rows = @(Get-FarmDiagEvents $name 'System' @(5210,5074,5075,5011,5009,5002,5186,5117) $windows $zone $NightlyScanDays)
+            $rows = @(Get-FarmDiagEvents $name 'System' @(5210,5074,5075,5011,5009,5002,5186,5117) $windows $zone $NightlyScanDays -Progress { param($message) Write-FarmDiagLog $message })
             foreach($row in $rows){ $was.Add($row) }
             Add-FarmDiagCoverage $name 'WAS events' 'Complete' ("Events=$($rows.Count)")
+            $wasWatch.Stop()
+            Write-FarmDiagLog ("WAS $name completed: events=$($rows.Count); duration=$([math]::Round($wasWatch.Elapsed.TotalSeconds,1)) seconds; status=Complete.")
         }
-        catch { Add-FarmDiagCoverage $name 'WAS events' 'Missing' $_.Exception.Message }
+        catch {
+            $wasWatch.Stop()
+            Add-FarmDiagCoverage $name 'WAS events' 'Missing' $_.Exception.Message
+            Write-FarmDiagLog ("WAS $name missing after $([math]::Round($wasWatch.Elapsed.TotalSeconds,1)) seconds: $($_.Exception.Message)")
+        }
+        Write-FarmDiagLog "Security $name`: checking audit policy, then querying event IDs 4625, 4771, 4776 via RPC."
+        $securityWatch = [Diagnostics.Stopwatch]::StartNew()
         try {
             $audit = Get-FarmDiagAuditStatus $name $local
-            $rows = @(Get-FarmDiagEvents $name 'Security' @(4625,4771,4776) $windows $zone)
+            Write-FarmDiagLog "Security $name audit policy: $audit."
+            $rows = @(Get-FarmDiagEvents $name 'Security' @(4625,4771,4776) $windows $zone -Progress { param($message) Write-FarmDiagLog $message })
             foreach($row in $rows){ $security.Add($row) }
             $auditState = if($audit -like 'Inactive*'){'NotApplicable'}elseif($audit -like 'Unknown*' -and -not $rows.Count){'Partial'}else{'Complete'}
             Add-FarmDiagCoverage $name 'Security events' $auditState ("Events=$($rows.Count); Audit=$audit")
+            $securityWatch.Stop()
+            Write-FarmDiagLog ("Security $name completed: events=$($rows.Count); duration=$([math]::Round($securityWatch.Elapsed.TotalSeconds,1)) seconds; status=$auditState.")
         }
-        catch { Add-FarmDiagCoverage $name 'Security events' 'Missing' $_.Exception.Message }
+        catch {
+            $securityWatch.Stop()
+            Add-FarmDiagCoverage $name 'Security events' 'Missing' $_.Exception.Message
+            Write-FarmDiagLog ("Security $name missing after $([math]::Round($securityWatch.Elapsed.TotalSeconds,1)) seconds: $($_.Exception.Message)")
+        }
+        Write-FarmDiagLog "ULS $name`: collecting diagnostic events (maximum $MaxUlsEvents retained)."
+        $ulsWatch = [Diagnostics.Stopwatch]::StartNew()
         try {
-            $result = Get-FarmDiagUls $name ([string]$diagnosticConfig.LogLocation) $windows $zone $MaxUlsEvents $local
+            $result = Get-FarmDiagUls $name ([string]$diagnosticConfig.LogLocation) $windows $zone $MaxUlsEvents $local { param($message) Write-FarmDiagLog $message }
             foreach($row in $result.Rows){ $uls.Add($row) }
-            Add-FarmDiagCoverage $name 'ULS' $(if($result.Truncated -or $result.AmbiguousTimestamps){'Partial'}else{'Complete'}) ("Events=$($result.Rows.Count); AmbiguousTimestamps=$($result.AmbiguousTimestamps); Directory=$($result.Directory)")
+            $ulsStatus = if($result.Truncated -or $result.AmbiguousTimestamps){'Partial'}else{'Complete'}
+            Add-FarmDiagCoverage $name 'ULS' $ulsStatus ("Events=$($result.Rows.Count); AmbiguousTimestamps=$($result.AmbiguousTimestamps); Directory=$($result.Directory)")
+            $ulsWatch.Stop()
+            Write-FarmDiagLog ("ULS $name completed: events=$($result.Rows.Count); duration=$([math]::Round($ulsWatch.Elapsed.TotalSeconds,1)) seconds; status=$ulsStatus.")
         }
-        catch { Add-FarmDiagCoverage $name 'ULS' 'Missing' $_.Exception.Message }
+        catch {
+            $ulsWatch.Stop()
+            Add-FarmDiagCoverage $name 'ULS' 'Missing' $_.Exception.Message
+            Write-FarmDiagLog ("ULS $name missing after $([math]::Round($ulsWatch.Elapsed.TotalSeconds,1)) seconds: $($_.Exception.Message)")
+        }
         if (@($script:FarmDiagCoverage | Where-Object { $_.Server -eq $name -and $_.Status -eq 'Missing' }).Count -and -not $local) {
             Add-FarmDiagCoverage $name 'Local rerun' 'Action' ((Get-FarmDiagRerunCommand $name $zone.Id $true) + ' | ' + (Get-FarmDiagRerunCommand $name $zone.Id $false))
             Write-FarmDiagLog "Local DryRun on $name`: $(Get-FarmDiagRerunCommand $name $zone.Id $true)"
             Write-FarmDiagLog "Local run on $name`: $(Get-FarmDiagRerunCommand $name $zone.Id $false)"
         }
+        $serverWatch.Stop()
+        $serverGaps = @($script:FarmDiagCoverage | Where-Object { $_.Server -eq $name -and $_.Status -in @('Missing','Partial') }).Count
+        Write-FarmDiagLog ("Server $serverNumber/$($selected.Count) $name completed in $([math]::Round($serverWatch.Elapsed.TotalSeconds,1)) seconds; incomplete sources=$serverGaps.")
     }
     $prefix = 'Farm-'
+    Write-FarmDiagLog "Writing farm CSV results to $($output.Path)."
     Write-FarmDiagCsv $output.Path ($prefix+'Topology.csv') @('Server','Role','Type','EffectiveWfe','FarmTimeZone','ServerTimeZone','IsLocal') $topology.ToArray() | Out-Null
-    Write-FarmDiagCsv $output.Path ($prefix+'IisSites.csv') @('Server','Site','SiteId','Bindings','Pool','LogDirectory','LogFormat') $sites.ToArray() | Out-Null
+    Write-FarmDiagCsv $output.Path ($prefix+'IisSites.csv') @('Server','Site','SiteId','Bindings','Pool','LogDirectory','LogFormat','LogPeriod') $sites.ToArray() | Out-Null
     Write-FarmDiagCsv $output.Path ($prefix+'IisPools.csv') @('Server','Pool','CpuLimitPercent','CpuAction','CpuResetInterval','RecycleTime','RecycleSchedule','MemoryKb','PrivateMemoryKb','IdleTimeout') $pools.ToArray() | Out-Null
     Write-FarmDiagCsv $output.Path ($prefix+'WasEvents.csv') @('Server','Log','RecordId','EventId','Provider','Utc','Local','InPeakWindow','Message') $was.ToArray() | Out-Null
     Write-FarmDiagCsv $output.Path ($prefix+'SecurityEvents.csv') @('Server','Log','RecordId','EventId','Provider','Utc','Local','InPeakWindow','Message') $security.ToArray() | Out-Null
@@ -615,6 +769,7 @@ function Invoke-FarmDiagnostic {
     Write-FarmDiagCsv $output.Path ($prefix+'Coverage.csv') @('Server','Source','Status','Detail','DurationSeconds') $script:FarmDiagCoverage.ToArray() | Out-Null
     $status = if(@($script:FarmDiagCoverage | Where-Object { $_.Status -in @('Missing','Partial') }).Count){'Partial'}else{'Complete'}
     $summary = [pscustomobject]@{ SchemaVersion=1; Project=$Project; Status=$status; GeneratedAtUtc=[datetime]::UtcNow.ToString('o'); TimeZone=$zone.Id; Windows=$windows; PeakCount=$windows.Count; Coverage=$script:FarmDiagCoverage.ToArray(); Correlation=$correlation; Recurrences=$recurrences; OutputDirectory=$output.Path; ReportPath=(Join-Path $output.Path 'Farm-Report.html') }
+    Write-FarmDiagLog "Writing HTML report and summary; collection status=$status."
     Write-FarmDiagHtml $summary.ReportPath $summary $pools.ToArray() $was.ToArray() $iis.ToArray() $correlation $recurrences $timeline $risks
     if ($output.Fallback) {
         Write-FarmDiagLog ('Copy command: powershell.exe -NoProfile -ExecutionPolicy Bypass -File "{0}" -Project "{1}" -CopyResultsFrom "{2}"' -f $script:FarmDiagScriptPath,$Project,$output.Path)
@@ -638,10 +793,10 @@ if ($MyInvocation.InvocationName -ne '.') {
 }
 
 # SIG # Begin signature block
-# MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
+# MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAI98mguDMOc4Yz
-# pwGWxqqwA8RB1MuWvxALiLqOkoVTn6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDSb/y/zBDeRaS+
+# Z7qr0FiEbR7jQeicgl5hkD121pc9GqCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -666,139 +821,19 @@ if ($MyInvocation.InvocationName -ne '.') {
 # PI5wrVTjV/pR7IrtSIfq8UladlrSZJyyDn3NV2ATvIZ6wNxbTmPFcE0uMg/EYzwd
 # Tek+CgXL3TxUKeldJM4YDWPimNBRhOPXzBDiOQIj6WNswt/KM1oDLnA00CNtciPN
 # dn+dXlneMvTEUah9wyt8o8tkLpoBw+KN+Bq/K0O1qPtS7umi70l45pPiej+mwbwq
-# ztcaoVD7a8ggHP1Vdp/rnafM4GtyCAE6b7U9Yzgvp1/a1kh7XffmqVhRRjCCBY0w
-# ggR1oAMCAQICEA6bGI750C3n79tQ4ghAGFowDQYJKoZIhvcNAQEMBQAwZTELMAkG
-# A1UEBhMCVVMxFTATBgNVBAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRp
-# Z2ljZXJ0LmNvbTEkMCIGA1UEAxMbRGlnaUNlcnQgQXNzdXJlZCBJRCBSb290IENB
-# MB4XDTIyMDgwMTAwMDAwMFoXDTMxMTEwOTIzNTk1OVowYjELMAkGA1UEBhMCVVMx
-# FTATBgNVBAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRpZ2ljZXJ0LmNv
-# bTEhMB8GA1UEAxMYRGlnaUNlcnQgVHJ1c3RlZCBSb290IEc0MIICIjANBgkqhkiG
-# 9w0BAQEFAAOCAg8AMIICCgKCAgEAv+aQc2jeu+RdSjwwIjBpM+zCpyUuySE98orY
-# WcLhKac9WKt2ms2uexuEDcQwH/MbpDgW61bGl20dq7J58soR0uRf1gU8Ug9SH8ae
-# FaV+vp+pVxZZVXKvaJNwwrK6dZlqczKU0RBEEC7fgvMHhOZ0O21x4i0MG+4g1ckg
-# HWMpLc7sXk7Ik/ghYZs06wXGXuxbGrzryc/NrDRAX7F6Zu53yEioZldXn1RYjgwr
-# t0+nMNlW7sp7XeOtyU9e5TXnMcvak17cjo+A2raRmECQecN4x7axxLVqGDgDEI3Y
-# 1DekLgV9iPWCPhCRcKtVgkEy19sEcypukQF8IUzUvK4bA3VdeGbZOjFEmjNAvwjX
-# WkmkwuapoGfdpCe8oU85tRFYF/ckXEaPZPfBaYh2mHY9WV1CdoeJl2l6SPDgohIb
-# Zpp0yt5LHucOY67m1O+SkjqePdwA5EUlibaaRBkrfsCUtNJhbesz2cXfSwQAzH0c
-# lcOP9yGyshG3u3/y1YxwLEFgqrFjGESVGnZifvaAsPvoZKYz0YkH4b235kOkGLim
-# dwHhD5QMIR2yVCkliWzlDlJRR3S+Jqy2QXXeeqxfjT/JvNNBERJb5RBQ6zHFynIW
-# IgnffEx1P2PsIV/EIFFrb7GrhotPwtZFX50g/KEexcCPorF+CiaZ9eRpL5gdLfXZ
-# qbId5RsCAwEAAaOCATowggE2MA8GA1UdEwEB/wQFMAMBAf8wHQYDVR0OBBYEFOzX
-# 44LScV1kTN8uZz/nupiuHA9PMB8GA1UdIwQYMBaAFEXroq/0ksuCMS1Ri6enIZ3z
-# bcgPMA4GA1UdDwEB/wQEAwIBhjB5BggrBgEFBQcBAQRtMGswJAYIKwYBBQUHMAGG
-# GGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBDBggrBgEFBQcwAoY3aHR0cDovL2Nh
-# Y2VydHMuZGlnaWNlcnQuY29tL0RpZ2lDZXJ0QXNzdXJlZElEUm9vdENBLmNydDBF
-# BgNVHR8EPjA8MDqgOKA2hjRodHRwOi8vY3JsMy5kaWdpY2VydC5jb20vRGlnaUNl
-# cnRBc3N1cmVkSURSb290Q0EuY3JsMBEGA1UdIAQKMAgwBgYEVR0gADANBgkqhkiG
-# 9w0BAQwFAAOCAQEAcKC/Q1xV5zhfoKN0Gz22Ftf3v1cHvZqsoYcs7IVeqRq7IviH
-# GmlUIu2kiHdtvRoU9BNKei8ttzjv9P+Aufih9/Jy3iS8UgPITtAq3votVs/59Pes
-# MHqai7Je1M/RQ0SbQyHrlnKhSLSZy51PpwYDE3cnRNTnf+hZqPC/Lwum6fI0POz3
-# A8eHqNJMQBk1RmppVLC4oVaO7KTVPeix3P0c2PR3WlxUjG/voVA9/HYJaISfb8rb
-# II01YBwCA8sgsKxYoA5AY8WYIsGyWfVVa88nq2x2zm8jLfR+cWojayL/ErhULSd+
-# 2DrZ8LaHlv1b0VysGMNNn3O3AamfV6peKOK5lDCCBrQwggScoAMCAQICEA3HrFcF
-# /yGZLkBDIgw6SYYwDQYJKoZIhvcNAQELBQAwYjELMAkGA1UEBhMCVVMxFTATBgNV
-# BAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRpZ2ljZXJ0LmNvbTEhMB8G
-# A1UEAxMYRGlnaUNlcnQgVHJ1c3RlZCBSb290IEc0MB4XDTI1MDUwNzAwMDAwMFoX
-# DTM4MDExNDIzNTk1OVowaTELMAkGA1UEBhMCVVMxFzAVBgNVBAoTDkRpZ2lDZXJ0
-# LCBJbmMuMUEwPwYDVQQDEzhEaWdpQ2VydCBUcnVzdGVkIEc0IFRpbWVTdGFtcGlu
-# ZyBSU0E0MDk2IFNIQTI1NiAyMDI1IENBMTCCAiIwDQYJKoZIhvcNAQEBBQADggIP
-# ADCCAgoCggIBALR4MdMKmEFyvjxGwBysddujRmh0tFEXnU2tjQ2UtZmWgyxU7UNq
-# EY81FzJsQqr5G7A6c+Gh/qm8Xi4aPCOo2N8S9SLrC6Kbltqn7SWCWgzbNfiR+2fk
-# HUiljNOqnIVD/gG3SYDEAd4dg2dDGpeZGKe+42DFUF0mR/vtLa4+gKPsYfwEu7EE
-# bkC9+0F2w4QJLVSTEG8yAR2CQWIM1iI5PHg62IVwxKSpO0XaF9DPfNBKS7Zazch8
-# NF5vp7eaZ2CVNxpqumzTCNSOxm+SAWSuIr21Qomb+zzQWKhxKTVVgtmUPAW35xUU
-# FREmDrMxSNlr/NsJyUXzdtFUUt4aS4CEeIY8y9IaaGBpPNXKFifinT7zL2gdFpBP
-# 9qh8SdLnEut/GcalNeJQ55IuwnKCgs+nrpuQNfVmUB5KlCX3ZA4x5HHKS+rqBvKW
-# xdCyQEEGcbLe1b8Aw4wJkhU1JrPsFfxW1gaou30yZ46t4Y9F20HHfIY4/6vHespY
-# MQmUiote8ladjS/nJ0+k6MvqzfpzPDOy5y6gqztiT96Fv/9bH7mQyogxG9QEPHrP
-# V6/7umw052AkyiLA6tQbZl1KhBtTasySkuJDpsZGKdlsjg4u70EwgWbVRSX1Wd4+
-# zoFpp4Ra+MlKM2baoD6x0VR4RjSpWM8o5a6D8bpfm4CLKczsG7ZrIGNTAgMBAAGj
-# ggFdMIIBWTASBgNVHRMBAf8ECDAGAQH/AgEAMB0GA1UdDgQWBBTvb1NK6eQGfHrK
-# 4pBW9i/USezLTjAfBgNVHSMEGDAWgBTs1+OC0nFdZEzfLmc/57qYrhwPTzAOBgNV
-# HQ8BAf8EBAMCAYYwEwYDVR0lBAwwCgYIKwYBBQUHAwgwdwYIKwYBBQUHAQEEazBp
-# MCQGCCsGAQUFBzABhhhodHRwOi8vb2NzcC5kaWdpY2VydC5jb20wQQYIKwYBBQUH
-# MAKGNWh0dHA6Ly9jYWNlcnRzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRS
-# b290RzQuY3J0MEMGA1UdHwQ8MDowOKA2oDSGMmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0
-# LmNvbS9EaWdpQ2VydFRydXN0ZWRSb290RzQuY3JsMCAGA1UdIAQZMBcwCAYGZ4EM
-# AQQCMAsGCWCGSAGG/WwHATANBgkqhkiG9w0BAQsFAAOCAgEAF877FoAc/gc9EXZx
-# ML2+C8i1NKZ/zdCHxYgaMH9Pw5tcBnPw6O6FTGNpoV2V4wzSUGvI9NAzaoQk97fr
-# PBtIj+ZLzdp+yXdhOP4hCFATuNT+ReOPK0mCefSG+tXqGpYZ3essBS3q8nL2UwM+
-# NMvEuBd/2vmdYxDCvwzJv2sRUoKEfJ+nN57mQfQXwcAEGCvRR2qKtntujB71WPYA
-# gwPyWLKu6RnaID/B0ba2H3LUiwDRAXx1Neq9ydOal95CHfmTnM4I+ZI2rVQfjXQA
-# 1WSjjf4J2a7jLzWGNqNX+DF0SQzHU0pTi4dBwp9nEC8EAqoxW6q17r0z0noDjs6+
-# BFo+z7bKSBwZXTRNivYuve3L2oiKNqetRHdqfMTCW/NmKLJ9M+MtucVGyOxiDf06
-# VXxyKkOirv6o02OoXN4bFzK0vlNMsvhlqgF2puE6FndlENSmE+9JGYxOGLS/D284
-# NHNboDGcmWXfwXRy4kbu4QFhOm0xJuF2EZAOk5eCkhSxZON3rGlHqhpB/8MluDez
-# ooIs8CVnrpHMiD2wL40mm53+/j7tFaxYKIqL0Q4ssd8xHZnIn/7GELH3IdvG2XlM
-# 9q7WP/UwgOkw/HQtyRN62JK4S1C8uw3PdBunvAZapsiI5YKdvlarEvf8EA+8hcpS
-# M9LHJmyrxaFtoza2zNaQ9k+5t1wwggbtMIIE1aADAgECAhAIT9wzT35FTtvDD4/5
-# khg1MA0GCSqGSIb3DQEBCwUAMGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdp
-# Q2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3Rh
-# bXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTEwHhcNMjYwODA1MDAwMDAwWhcN
-# MzcxMTA0MjM1OTU5WjBjMQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQs
-# IEluYy4xOzA5BgNVBAMTMkRpZ2lDZXJ0IFNIQTI1NiBSU0E0MDk2IFRpbWVzdGFt
-# cCBSZXNwb25kZXIgMjAyNiAxMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKC
-# AgEAtnum8sn+zUr41JtMZbP9OMYw+HwJDpG5xkIu/lqcfNYmMX81YmsUiHLbh9yk
-# peWBGKTLhYBrAN9Tdg/QEzG32XcObmgIblnr0CoQ3WSAeDZ6nH6X6VkFyYkJw3QB
-# JREwvm4UhLzSxmwPA7cFKRTEOMsmEEj6qJk/dqLEAL+oQYuOwE2UuiX1Vnul8YRe
-# IyWd4kgLn9gq6LNXM0UplkR6jL/QHxmb6fMoGBJYbnaUI7XD6cKDpekK2SVMld4i
-# DbzeHDtOaaxldH5IxuNusQ69nd8/ZXEiB5Hbxj3RlK13cX1W4DlFXKdv/CEhM8Cj
-# 1vvlmvhNroyPdRGbbpBlgyf8Wdu5N6ByhFwURn0U6ozlPoxN22v+fviUhP+6DR54
-# 7OZnpBMWDfei1f5sVGwiiW/KQTWOK97g+4RJpPzPNV4VYMAwO2jM2Aty2QYPVmOQ
-# TJm0msuXnJrSbl2gf9JylpkJlWXqk1Q4LJsxz+TELoQCZIljbgvTJgoPU2R12ydv
-# 8i1UqL/adelA0y7U9Pmmtbze9Xx3rtajC5SzQd1jgfwAwsa90v9YcSPdmeoyoBBA
-# /27cCL237l5DTYYPDLQ4ON3OLTGWnvRb6jDrf/T75gMRfUzSLCBQfBusm9+mSWRl
-# C/Df6S/e9Q8i13CuhzOT2Jx+V/nlbXM4QoBwlUAhelwwJT0CAwEAAaOCAZUwggGR
-# MAwGA1UdEwEB/wQCMAAwHQYDVR0OBBYEFBTJY4owLtRK+26U8+bjQH717M3iMB8G
-# A1UdIwQYMBaAFO9vU0rp5AZ8esrikFb2L9RJ7MtOMA4GA1UdDwEB/wQEAwIHgDAW
-# BgNVHSUBAf8EDDAKBggrBgEFBQcDCDCBlQYIKwYBBQUHAQEEgYgwgYUwJAYIKwYB
-# BQUHMAGGGGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBdBggrBgEFBQcwAoZRaHR0
-# cDovL2NhY2VydHMuZGlnaWNlcnQuY29tL0RpZ2lDZXJ0VHJ1c3RlZEc0VGltZVN0
-# YW1waW5nUlNBNDA5NlNIQTI1NjIwMjVDQTEuY3J0MF8GA1UdHwRYMFYwVKBSoFCG
-# Tmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRHNFRpbWVT
-# dGFtcGluZ1JTQTQwOTZTSEEyNTYyMDI1Q0ExLmNybDAgBgNVHSAEGTAXMAgGBmeB
-# DAEEAjALBglghkgBhv1sBwEwDQYJKoZIhvcNAQELBQADggIBAI3FOmEenVIK35ms
-# CYB+fShAsWvSYvLBItoNdAgQ2jIqrGsVsluXMJU/+mRebBc52s6lbKAvOVPXaizm
-# KkMLLflEEKDZQx4CkS2t8aHPjkXha3hYZ010htFa3dhNgmalH5vuWvh3tTCf4frT
-# S7gPtGc4Z/xaPhQ2AB1mR8eEe/WbH0RWHvVIl6VwQ3+g5FKNfN2N/DWJkf13w2H+
-# 2GfqEfbd35Ww8CvoYBjLNIDTadcPWdgsjsiOaK/7EsKJgLjUNIVgvcaFOLLQ/Glr
-# A+0ZHJoFUbOr5SJN8zykPspXIXlpDJY/gqFUZRROeab9GVgmhbdOJcD/63RhxPah
-# FUGbckRONqMe6DYAv6/mOG0pWd3cPStsdcS7buj5DyniwRY8yooMH6ptx5vpP/pZ
-# zBPBeZD2U4IsthyxB5Jaa8qrOkB5z160TXiM5ADMspZ0TfD9MJoq0tFpFPssKRFh
-# WeEDYPvcUuN7U7lvcdHl4ezQ3NT/7Ffs1sR1yh/LRbdZ3B3Vc6q2WmD8mDC0p9kz
-# l2o73iVtS946IkEj7FkRsZGww1teYxERROC745xrtjvcw9ZyyUjHZWGRIpJeMNsP
-# quCDf0fkyHtB+J4AiNZqCQk23rxh+KbpyMTNVKItJ5l92Svl20U9NbqMBOVYl1h5
-# 4NEYLJq1/xHWFKPNK903zJZA9P2DMYIFvjCCBboCAQEwYjBOMR4wHAYDVQQDDBV3
-# b3JrcGxhY2VjbG91ZGh1Yi5jb20xLDAqBgkqhkiG9w0BCQEWHWNvbnRhY3RAd29y
-# a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
-# AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
-# CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEICDCh0CPgJFyPEKJD9MlWEn/LZxUgiq920iHmBER+BNkMA0GCSqG
-# SIb3DQEBAQUABIIBgBSIHo80FsH0PgmEuoDlv07nIDZwmHQj/VGrFiOG/7fdm8eI
-# nP9DOz7dnwrxQVX9nrJ1Lz0KfEUHU/FtvpngqP5olILJL4bh4+5bTqQKakEBHiS5
-# h7cMazgtsYBxhl9ZhgjQtgk4v9Hl16ktYHJZuGnPjNixfJIw/IK2spdJy4sILWXz
-# H16uUYwc7DeIe59bsx5G0hla9qP+7QvvnA/sOH52Q1MnmW9xJx0hkmiJy2JF767c
-# Ip1WMpd+vBx4hdkeMfIZwSuXZt780fQXyzmwIi5ErveOVgfkswK4sreo887jJSSE
-# uOQWyR8BA3s351YaCEjMijpw8snGbIgl9qdLYftOqfPq3XriYaIpva1s1WxCnqWX
-# 9RMqTJ1cEk7dPxvHr1RV28L0m5ekHxMTZtyBCtXfzzjsF9hZ0Kthn8bc5t66GCqY
-# q0FpknWb0OXbDBH71KhsxabhRaYpvpyBIUQERBdv6H1YQvg5tmoxx7Eum8gtKkPT
-# S6jQnMTEvZHkF6/aOqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
-# CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
-# RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
-# MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMxNDA3
-# NTdaMC8GCSqGSIb3DQEJBDEiBCCNpvoycav19CryWNrK9sv4nNymVzuOaUOoKAwX
-# spJ/WjANBgkqhkiG9w0BAQEFAASCAgCrr5yThDW0Xg1PdKaVlWmaEqSCWHp44Pfm
-# vROh7Q+kWm1pE/UlhKSMIPMmqmCGCD4mlRiFWhogN8IYUo5L+JPAQuIUaqhE9HD5
-# HNHAuyefZeZakU6lbDB7nLGaZGWuYTAslRrVRUjqJYf2fb217n8AiBJ8YI6HWQpl
-# uCJssKQbAZNZ6PlsIhopofvnQbDIZTeegYzLDIhV6uF+P3XJduL3zMe3AVEf48tq
-# bxMc1dq/JD/xGDGSx8DLq7abL6Lkje2yEbt9pEkJk8iIDGKU6kZUwv0ZO+A8aAlC
-# 8aj8SbolHVYjNuijk57rTsas4wxErGfNJ3oxGWPlEs1aKd1+wYibZ1O58z0Phy1q
-# 9Fz5B/nJr5rDxLgOl+w3BOGWnsZtAAV5KP4BVIqNO7lV5+PpQPQpXcTrJLkVgMUh
-# CDd75YScqtr71eaHDzigVoa4OAHqyPuDiVMoqSvMBhr/VF9Dc/tn6pRl9BsTUqhj
-# 1vz8llb6tH0eHsumJFJd5E8eiPoR8YR5q2wvM8MbMsJ5FKY3LqMzjNs1qc7YEMej
-# EISaDoRbjtNJ0vDRrbLUhaR97eFHMbEmu+x5+8mJYN6atMKL2DN9XvxWAEQ28ibU
-# 2NiqBcw/n1Q0Z7TTwGsG8HVD941VeOL8ZdiAZv0Xj7tkZwmcpiSKhxlAtkBA7EoG
-# +M0urFbwDg==
+# ztcaoVD7a8ggHP1Vdp/rnafM4GtyCAE6b7U9Yzgvp1/a1kh7XffmqVhRRjGCApQw
+# ggKQAgEBMGIwTjEeMBwGA1UEAwwVd29ya3BsYWNlY2xvdWRodWIuY29tMSwwKgYJ
+# KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
+# 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
+# gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCDSGbz3P5bisgwZuc0MzFYD
+# 9qi84MJZMqfR2Sf6J+mHHDANBgkqhkiG9w0BAQEFAASCAYCTPAzNlx3lf7foj7E1
+# n7eBx1WA19S/dkC9BSg/wVJ/10iRyAZprfOdZIyz7fbFAHf0jEqt9OKYcwhIiXVJ
+# wUCgDOMLyeVQMhS3xQKkWWRAVGlN3Wbdjcs+55esOSoMylFMnVacZc53HcSpxfe5
+# nfMPLIQSWJUS8PG8arWfw7Q8B4B0fxzfOGopHBYoqqAxmTFftCmgpmnR9dJ49A1l
+# xrX/srv/mrVn7NR1gK9PCsGiChK5nwKFC/KrK7Zz+DbFoESLFmvx99Jx9IUldT0d
+# sog9YSjK/2tohNYMskUNCq/a6Nohp+n/kDX+psu93N1E4Qyb/HopG/lE+CKIwkgl
+# 5ZGnanr1YBAq3NOCiyk6LqQ3MA9BzFjyffh1zgC5j7SAzlgyRy9kr2OHUWrxYmXK
+# nYGQOCZaHwa/+2jFCgNYW9akcaVXlP/ctdIm/FvbdWwfMLBCuph7O15K1EYRhYLW
+# 5ayj40nrH9A9rcWrQIcwtZonq+Mw9JvslQRkQ5qiUJQXuAk=
 # SIG # End signature block
