@@ -1,0 +1,19 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/pagesMetadata/1.1.0/schema.json",
+  "pageOrder": [
+    "overview",
+    "risk",
+    "lifecycle",
+    "licenses",
+    "licensereportoverview",
+    "aace971bf2969643f860",
+    "91854328e335a70970cd",
+    "devices",
+    "users",
+    "businessservices",
+    "device360",
+    "user360",
+    "group360"
+  ],
+  "activePageName": "91854328e335a70970cd"
+}

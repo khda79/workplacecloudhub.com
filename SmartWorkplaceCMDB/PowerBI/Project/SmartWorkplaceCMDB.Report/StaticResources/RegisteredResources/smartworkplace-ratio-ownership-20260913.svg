@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Corporate and personal ownership">
+  <circle cx="32" cy="32" r="29" fill="#EEF8F7"/>
+  <rect x="9" y="22" width="46" height="29" rx="5" fill="#FFFFFF" stroke="#2A8C8C" stroke-width="2.5"/>
+  <path d="M23 22v-5c0-3 2-5 5-5h8c3 0 5 2 5 5v5M9 34h46" fill="none" stroke="#2A8C8C" stroke-width="2.5"/>
+  <rect x="28" y="31" width="8" height="7" rx="2" fill="#6DB7B7"/>
+</svg>

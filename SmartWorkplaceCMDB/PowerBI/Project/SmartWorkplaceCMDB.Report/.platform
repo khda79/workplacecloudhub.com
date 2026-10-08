@@ -1,0 +1,11 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/gitIntegration/platformProperties/2.0.0/schema.json",
+  "metadata": {
+    "type": "Report",
+    "displayName": "SmartWorkplaceCMDB"
+  },
+  "config": {
+    "version": "2.0",
+    "logicalId": "674f8957-484e-4a5e-bb58-ef4569097513"
+  }
+}

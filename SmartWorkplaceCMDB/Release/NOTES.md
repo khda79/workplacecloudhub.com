@@ -1,18 +1,20 @@
-# 1.2.0 — prepared CMDB consumer and collector retirement
+# Release notes
 
-- Retire duplicate CMDB acquisition/normalization/runtime/scheduler/mail scripts,
-  their launchers, and the report-sidecar preparation route.
-- Add immutable validated loopback consumption of 46 prepared SmartInventory
-  tables, independent expected identity, hash/schema/key/lineage/freshness checks,
-  and source-specific weekly Apps freshness without relaxing core deadlines.
-- Add a signed guided refresh launcher and ignored local configuration template.
-  Native Desktop parameter application/refresh/save remain user actions; no
-  external model processing, automatic PBIP modification or persistent CSV copy.
-- Add strict native M date mapping tests. Wall-clock support is opt-in for eight
-  fields, and the minimum-date sentinel becomes null only for Autopilot contact.
-- Preserve SmartInventory, synchronized SmartM365 data, current licensing snapshot
-  and the private migrated Power BI project. Report-page functional validation
-  was waived; no global live qualification or Fabric deployment is claimed.
+## 1.3.0
 
-Historical design utilities remain developer-only. This change does not create a
-GitHub Release/tag or silently uninstall old tasks on remote servers.
+- Version the generic 13-page PBIP/PBIR and existing BIM model with neutral
+  identity/session/source parameters, without imported data or caches.
+- Separate active Scripts, Launchers, Config, Tests, Docs and Release files
+  from the ignored private project/configuration under .local/.
+- Remove retired generators, collector schemas/fixtures and obsolete audit,
+  design and release documents, retaining reader/date/privacy checks.
+- Rewrite the README for the current SmartM365-prepared CMDB and the separate
+  published license report source.
+- No new collection, model redesign, XMLA refresh or Fabric publication.
+  Offline verification remains distinct from tenant operational acceptance.
+
+## 1.2.0
+
+Retired duplicate CMDB collectors and introduced the foreground immutable
+reader for native Desktop refresh, strict source validation, synthetic
+protocol/date regressions and public package closure checks.

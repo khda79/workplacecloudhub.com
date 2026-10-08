@@ -260,13 +260,12 @@ SmartCitrix/Data/**
 SmartFinOps/Data/**
 !SmartFinOps/SmartFinOps-Workplace.Release.json
 # SmartWorkplaceCMDB private tenant/runtime and Power BI artifacts.
-# Keep source generators and synthetic JSON fixtures versionable, but never
-# stage collected exports, local PBIP/PBIX projects, semantic-model caches or
-# copied ReportData from a private qualification.
+# Version only the reviewed generic project, never private working
+# projects, exports, caches or copied ReportData.
 SmartWorkplaceCMDB/Data/**
 SmartWorkplaceCMDB/PowerBI/CMDB-REPORTS/**
-# Public generic candidates only; never expose the private report/model.
-!SmartWorkplaceCMDB/PowerBI/Queries/prepared-measures-candidate.dax
+# Reusable reader functions and test-only semantic references.
+!SmartWorkplaceCMDB/Tests/References/*.dax
 !SmartWorkplaceCMDB/PowerBI/Queries/prepared-read-session.pq
 !SmartWorkplaceCMDB/PowerBI/Queries/prepared-types-candidate.pq
 !SmartWorkplaceCMDB/Tests/prepared_dates.query.pq
@@ -274,6 +273,9 @@ SmartWorkplaceCMDB/**/ReportData/**
 SmartWorkplaceCMDB/**/.pbi/**
 SmartWorkplaceCMDB/**/*.pbix
 SmartWorkplaceCMDB/**/*.pbip
+!SmartWorkplaceCMDB/PowerBI/Project/**
+SmartWorkplaceCMDB/PowerBI/Project/**/.pbi/**
+SmartWorkplaceCMDB/PowerBI/Project/**/localSettings.json
 SmartWorkplaceCMDB/**/*.abf
 SmartWorkplaceCMDB/**/*.csv
 SmartWorkplaceCMDB/**/*.parquet
@@ -297,6 +299,7 @@ SmartWorkplaceCMDB/**/*-AUDIT.md
 SmartWorkplaceCMDB/**/LOCAL-REVIEW*.md
 SmartWorkplaceCMDB/**/*-LOCAL-REVIEW.md
 SmartWorkplaceCMDB/.local-review/**
+SmartWorkplaceCMDB/.local/**
 
 # Local SmartInventory audit evidence
 /SmartM365/SmartInventory/AUDIT-*.md

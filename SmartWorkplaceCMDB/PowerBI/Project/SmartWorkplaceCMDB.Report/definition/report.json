@@ -1,0 +1,178 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/report/3.3.0/schema.json",
+  "themeCollection": {},
+  "objects": {
+    "outspacePane": [
+      {
+        "properties": {
+          "expanded": {
+            "expr": {
+              "Literal": {
+                "Value": "false"
+              }
+            }
+          }
+        }
+      }
+    ]
+  },
+  "resourcePackages": [
+    {
+      "name": "RegisteredResources",
+      "type": "RegisteredResources",
+      "items": [
+        {
+          "name": "smartworkplace-device-20260913.svg",
+          "path": "smartworkplace-device-20260913.svg",
+          "type": "Image"
+        },
+        {
+          "name": "smartworkplace-health-20260913.svg",
+          "path": "smartworkplace-health-20260913.svg",
+          "type": "Image"
+        },
+        {
+          "name": "smartworkplace-kpi-analytics-20260913.svg",
+          "path": "smartworkplace-kpi-analytics-20260913.svg",
+          "type": "Image"
+        },
+        {
+          "name": "smartworkplace-kpi-compliance-20260913.svg",
+          "path": "smartworkplace-kpi-compliance-20260913.svg",
+          "type": "Image"
+        },
+        {
+          "name": "smartworkplace-kpi-devices-20260913.svg",
+          "path": "smartworkplace-kpi-devices-20260913.svg",
+          "type": "Image"
+        },
+        {
+          "name": "smartworkplace-kpi-licenses-20260913.svg",
+          "path": "smartworkplace-kpi-licenses-20260913.svg",
+          "type": "Image"
+        },
+        {
+          "name": "smartworkplace-kpi-mailboxes-20260913.svg",
+          "path": "smartworkplace-kpi-mailboxes-20260913.svg",
+          "type": "Image"
+        },
+        {
+          "name": "smartworkplace-kpi-quality-20260913.svg",
+          "path": "smartworkplace-kpi-quality-20260913.svg",
+          "type": "Image"
+        },
+        {
+          "name": "smartworkplace-kpi-relationships-20260913.svg",
+          "path": "smartworkplace-kpi-relationships-20260913.svg",
+          "type": "Image"
+        },
+        {
+          "name": "smartworkplace-kpi-users-20260913.svg",
+          "path": "smartworkplace-kpi-users-20260913.svg",
+          "type": "Image"
+        },
+        {
+          "name": "smartworkplace-license-assignments-20261008.svg",
+          "path": "smartworkplace-license-assignments-20261008.svg",
+          "type": "Image"
+        },
+        {
+          "name": "smartworkplace-license-evidence-20261008.svg",
+          "path": "smartworkplace-license-evidence-20261008.svg",
+          "type": "Image"
+        },
+        {
+          "name": "smartworkplace-license-overview-20261008.svg",
+          "path": "smartworkplace-license-overview-20261008.svg",
+          "type": "Image"
+        },
+        {
+          "name": "smartworkplace-license-recovery-20261008.svg",
+          "path": "smartworkplace-license-recovery-20261008.svg",
+          "type": "Image"
+        },
+        {
+          "name": "smartworkplace-lifecycle-20260913.svg",
+          "path": "smartworkplace-lifecycle-20260913.svg",
+          "type": "Image"
+        },
+        {
+          "name": "smartworkplace-overview-20260913.svg",
+          "path": "smartworkplace-overview-20260913.svg",
+          "type": "Image"
+        },
+        {
+          "name": "smartworkplace-people-20260913.svg",
+          "path": "smartworkplace-people-20260913.svg",
+          "type": "Image"
+        },
+        {
+          "name": "smartworkplace-ratio-accounts-20260913.svg",
+          "path": "smartworkplace-ratio-accounts-20260913.svg",
+          "type": "Image"
+        },
+        {
+          "name": "smartworkplace-ratio-formfactor-20260913.svg",
+          "path": "smartworkplace-ratio-formfactor-20260913.svg",
+          "type": "Image"
+        },
+        {
+          "name": "smartworkplace-ratio-mailboxes-20260913.svg",
+          "path": "smartworkplace-ratio-mailboxes-20260913.svg",
+          "type": "Image"
+        },
+        {
+          "name": "smartworkplace-ratio-ownership-20260913.svg",
+          "path": "smartworkplace-ratio-ownership-20260913.svg",
+          "type": "Image"
+        },
+        {
+          "name": "smartworkplace-ratio-windows-20260913.svg",
+          "path": "smartworkplace-ratio-windows-20260913.svg",
+          "type": "Image"
+        },
+        {
+          "name": "smartworkplace-section-activity-20260913.svg",
+          "path": "smartworkplace-section-activity-20260913.svg",
+          "type": "Image"
+        },
+        {
+          "name": "smartworkplace-section-enrollment-20260913.svg",
+          "path": "smartworkplace-section-enrollment-20260913.svg",
+          "type": "Image"
+        },
+        {
+          "name": "smartworkplace-section-findings-20260913.svg",
+          "path": "smartworkplace-section-findings-20260913.svg",
+          "type": "Image"
+        },
+        {
+          "name": "smartworkplace-section-hardware-20260913.svg",
+          "path": "smartworkplace-section-hardware-20260913.svg",
+          "type": "Image"
+        },
+        {
+          "name": "smartworkplace-section-identity-20260913.svg",
+          "path": "smartworkplace-section-identity-20260913.svg",
+          "type": "Image"
+        },
+        {
+          "name": "smartworkplace-services-20260913.svg",
+          "path": "smartworkplace-services-20260913.svg",
+          "type": "Image"
+        }
+      ]
+    }
+  ],
+  "settings": {
+    "defaultDrillFilterOtherVisuals": true,
+    "useEnhancedTooltips": false,
+    "pagesPosition": "Bottom"
+  },
+  "annotations": [
+    {
+      "name": "defaultPage",
+      "value": "overview"
+    }
+  ]
+}

@@ -1,20 +1,20 @@
-﻿<#
+<#
 .SYNOPSIS
 Validates a prepared batch and holds an ephemeral reader for native Desktop refresh.
 .VERSION
-1.0.0
+1.1.0
 #>
 [CmdletBinding()]
 param(
-    [string]$ConfigurationPath = (Join-Path $PSScriptRoot '../Config/refresh.local.json'),
+    [string]$ConfigurationPath = (Join-Path $PSScriptRoot '../.local/Config/refresh.local.json'),
     [string]$PythonPath = 'python',
     [switch]$ValidateOnly
 )
-$ScriptVersion = '1.0.0'
+$ScriptVersion = '1.1.0'
 $ErrorActionPreference = 'Stop'
-$entry = Join-Path $PSScriptRoot '../PowerBI/refresh_prepared_report.py'
+$entry = Join-Path $PSScriptRoot '../Scripts/refresh_prepared_report.py'
 if (-not (Test-Path -LiteralPath $ConfigurationPath -PathType Leaf)) {
-    throw 'Refresh configuration missing. Copy Config/refresh.local.json.template to Config/refresh.local.json and set the independent expected identity.'
+    throw 'Refresh configuration missing. Copy Config/refresh.local.json.template to .local/Config/refresh.local.json and set the independent expected identity.'
 }
 if (-not (Test-Path -LiteralPath $entry -PathType Leaf)) { throw 'Refresh entry point missing.' }
 $arguments = @('-B', $entry, '--config', $ConfigurationPath)
@@ -25,8 +25,8 @@ if ($LASTEXITCODE -ne 0) { throw "Refresh launcher failed with exit code $LASTEX
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA5hws9qzTY1qZ7
-# adwLrlh+OKZU54qSLcLHgg4xqP7IW6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCj9hkG9zZxhCdf
+# mlQ3fAY9wy+IzUZgX4L35H3LH+NvzqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -159,31 +159,31 @@ if ($LASTEXITCODE -ne 0) { throw "Refresh launcher failed with exit code $LASTEX
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIO9rmioQuqFwXj31jeWvagztMjcDXh9gsbQ3mqRJmdqJMA0GCSqG
-# SIb3DQEBAQUABIIBgHGZle3xWshz01ptiNUi/vbzL5U/VNoPMl+X9cBM/shWL8yE
-# wuO/8NGbu68ZSGtxNVdQs7vHTsBfj19subrk1SAjBMhlQTg1lYnkojSrHZxYrFfW
-# GQAphAYRRTolVqs/0/MBwOdAB+uE9VGzYvgsYP5ltkZ/JMjGK3B0VOVY/SuT6OYf
-# QB18ZM29cidiDgvXOlmZaMxZ9cfTSp7ZhQJgknD/Lw9tsYqgI29GCjh7YUDRGEcJ
-# G7oEfarrWzWJ3b5tUeFSH48ALqqiZUwjQagOfJjQ6f08ddSIaGTJb0cMkTLTrryJ
-# 7o6BgJdCA6Y84AZmv9R1N2NphC2Fed2mEicwwiMkZ1ojQ8bFbByAmNrFhRXoHJER
-# sJybVDffkBZ4sS4I6V1Rim/q28XmRpLUrChgeH3q+Mm13QhUj88sW/XYtjv9fE/B
-# SqdQ7s8kKvTbO7NbckjYXA4jtajtogf0+zWLp06H0wIhmBY47V+Fdt1o7jvgxfQ5
-# KTj7sOsY9l7BIsUcsqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIDp33pWQf4OY37JqDcsH0QAo+bQBKGe3SdPWIj1kol2fMA0GCSqG
+# SIb3DQEBAQUABIIBgF1xO7MSWUUIgmpSv1LvDczjx7FWQXv8xDJ3IXG19eQUfxNa
+# 7ViHFUlk+wA21v+xJfqCisHdmu2QAp2dRp41pAvGh78qTX6yGVkqRNQBYIPF6aF3
+# XVVM5VP0nyUg0b5gRjgrCiF6QmDghZ06S9F4vEy3xVmu9RgpOeLG8nBHWmJsZs+R
+# Mndq9tMdaqLQtQUypzfWsk/c8CSjZy4fv3NoqPe1Yq56Nd2JL2Shkw4I/5OrYWpK
+# f71JUl6vlVld0WD4JPGkhDgMpjHtaUScUvYVe9QA2aT7iXVV3j4hcTtU1JUu/Imn
+# V4VcwuL43YFqkKt7v1MKZGucPGuipd92it2OuAA9uF8KcLV3N9yyOaomQH0X+HTJ
+# AfknZncTf6U2/wgFwdgs7bJ7qlQe6C5Xt+6M813an1AA3BvZ3e7Q0PM0teBU73na
+# ilvUkg1AR8NxDU/p3cYGHnm3QNu8bw1kORcyKO01FDpqIcGAleRloZC+hESO+GMM
+# kJOKmCp/ttR+63oLvKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDgwMjE5
-# MDdaMC8GCSqGSIb3DQEJBDEiBCCGmGPlZk40nr0f8NwXQxKERyR44TkuTYwVZc70
-# ebXXkzANBgkqhkiG9w0BAQEFAASCAgA8rajUdUY1/aJZjRgjt+FeMwRHZsgJeFvs
-# fXIHfjyK0RHf1zwtmw1jWVV+lDOpqg8M9OtigAZa4CFBiShrG00qJEgBFPqmJNFf
-# kOkIWYkwYSvmPk1gmPaCLtkmo57GskWKn9GxNZYPGEkABdOJixn9T2vzNin2kwLa
-# /Z9Ow/TGPeYrNyPZmXzpkpdDBtIRCl/O74m1G3jNfJsXs7yWj7LnHnb9Hp6wOyUy
-# 0/XXzYj7ZxkuyAX83t7n3HXm4n2R3yPQ1cDSJ28xgF0pR+6NeKPn+R3+akB4g/7w
-# 7ahJAnX2uIRJmBgSrf9OZ3nrxyswXaFtWqcmO/7owe86eTJ6N40U4cD5a63uiYF3
-# OqjKB0Baf+BlzOiif8HOBVK0ztO6VqAruYNuMR4Jm36ZGJa7klHYhOUZleqk+4rO
-# 9dpz8QXJVGTVBETrJ6igFBx7658ItMzarhG1S3pdMb5O4fUAUufMJi3g2+UNuz6V
-# axyx5sYHIHK2JwFy5ZC8wBCSxFgJB77i1TjKjBaCVDykgIZviaG3eIvXIzHKkiKi
-# OGxSrv7wsAlnSH13oK8ZfZlxmrw+mMJs9PwoTyPuDiFYnf8yfEvMWfYWPhaY4DP3
-# e9qs82e2UuUsx0cv7VM/SAPGu20G6rIHolfd45EvFAMab8YhFYII91kbdsFYyb1Y
-# g1AcgK6AIA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDgwNzA2
+# NTNaMC8GCSqGSIb3DQEJBDEiBCA4bmMlI/qYRLhcrrcmb7Zm3GPMtM+KBhCpyTRa
+# 2crQJDANBgkqhkiG9w0BAQEFAASCAgBax/rmHk64AX/p9YRaQZzNV4Ef2bF0y6r1
+# AMPNPHvdfTl44mMTJcHw6Qf/WzziC6JTgKkeKVe1TisN5VO5Sa04ci+kHRaTNXfD
+# EWDIjhwUwBUzJz3mYTQnwO+bbOlneC6qbW1rsZoitqGsx5OnSvzEGLSn40sa9HOr
+# rmH8QRlqSCW6W2pQnl947ekB4sgB4OeM6tBk30BTMH/XbUci4kSJmxcMnTOSu1Us
+# 9EGerm2+ELVjEHkNeewIL8+/NFeY2A/UWl9nhrJ0uMS3QPtqDIw3VedQEafM4pMC
+# ftkvBZ7pDP8sFbvN50X6mzv+BIDCNfFJal+hGEL6up4CjujpZEyIX2VI9tq+WmMv
+# WqYPrpPAazSP6D16fpX7J/JlNFxRnI10rwC+ujILnIsCdWXb1q5nuPHgb1m9SBR7
+# fkX1yum2Y+FjqDhWqKWbQMnYE8m/aE1bMxNVczU17FANXNx6g7uriV5Ig0ftytQl
+# KODSGoLqlRJ4yTiz/h30xp90axhiQ0WASKGROCoFVM7L91KOCpNMGqJaZg8YRwRC
+# I572wU1qMiksc0rNNoIS5qCGAJ+Jnwyi65CydilGEywIobud1d3ujVuvL6ZrVIKe
+# fBHxHOiUuWMXpTl54XEL3hntjk9h50t/UFrfguxcyNcM7AZ0JJFmitO5IameiUTP
+# 9ju9fgSm9w==
 # SIG # End signature block

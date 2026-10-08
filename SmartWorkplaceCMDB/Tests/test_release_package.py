@@ -19,10 +19,13 @@ class ReleasePackageTests(unittest.TestCase):
 
     def test_allowlist_excludes_private_runtime_artifacts(self):
         forbidden = re.compile(
-            r'(?:^|/)(?:Data|DATA-[^/]*|LOG-ALL|CMDB-REPORTS|\.local-review|\.pbi)(?:/|$)'
-            r'|\.(?:pbip|pbix|bim|csv|log|transcript\.txt)$'
+            r'(?:^|/)(?:Data|DATA-[^/]*|LOG-ALL|CMDB-REPORTS|\.local|\.local-review|\.pbi)(?:/|$)'
+            r'|\.(?:pbix|abf|csv|log|transcript\.txt)$'
             r'|\.local\.json$|(?:^|/)AUDIT-[^/]*\.md$', re.IGNORECASE)
         self.assertEqual([p for p in load_allowlist() if forbidden.search(p)], [])
+        for path in load_allowlist():
+            if path.endswith(('.pbip', '.bim')):
+                self.assertTrue(path.startswith('PowerBI/Project/'))
 
     def test_retired_collection_chain_absent(self):
         entries = load_allowlist()
@@ -35,8 +38,8 @@ class ReleasePackageTests(unittest.TestCase):
 
     def test_refresh_dependencies_are_allowlisted(self):
         expected = {'Launchers/Start-SmartWorkplaceCMDB-Refresh.ps1',
-                    'Config/refresh.local.json.template', 'PowerBI/refresh_prepared_report.py',
-                    'PowerBI/prepared_read_session.py', 'PowerBI/load_prepared_snapshot.py',
+                    'Config/refresh.local.json.template', 'Scripts/refresh_prepared_report.py',
+                    'Scripts/prepared_read_session.py', 'Scripts/load_prepared_snapshot.py',
                     'PowerBI/Queries/prepared-read-session.pq', 'PowerBI/Queries/prepared-types-candidate.pq'}
         self.assertEqual(sorted(expected - set(load_allowlist())), [])
 
@@ -55,6 +58,20 @@ class ReleasePackageTests(unittest.TestCase):
         release = json.loads((PRODUCT / 'RELEASE.json').read_text(encoding='utf-8-sig'))
         self.assertFalse(release['liveQualified'])
         self.assertRegex(release['version'], r'^\d+\.\d+\.\d+$')
+
+    def test_project_and_privacy_guard_are_allowlisted(self):
+        entries = set(load_allowlist())
+        for path in ('PowerBI/Project/SmartWorkplaceCMDB.pbip',
+                     'PowerBI/Project/SmartWorkplaceCMDB.SemanticModel/model.bim',
+                     'Scripts/check_public_project.py', 'Tests/test_public_project.py'):
+            self.assertIn(path, entries)
+
+    def test_test_references_preserved_outside_runtime(self):
+        entries = set(load_allowlist())
+        for path in ('Tests/reference_semantics.py', 'Tests/reference_license_snapshot.py',
+                     'Tests/References/expected-measures.dax', 'Tests/test_model_semantics.py',
+                     'Tests/test_license_snapshot.py'):
+            self.assertIn(path, entries)
 
 
 if __name__ == '__main__':

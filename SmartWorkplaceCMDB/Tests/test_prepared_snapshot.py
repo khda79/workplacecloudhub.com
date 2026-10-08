@@ -14,7 +14,7 @@ import uuid
 import shutil
 from unittest.mock import patch
 
-POWERBI = Path(__file__).resolve().parents[1] / 'PowerBI'
+POWERBI = Path(__file__).resolve().parents[1] / 'Scripts'
 sys.path.insert(0, str(POWERBI))
 import load_prepared_snapshot as consumer
 

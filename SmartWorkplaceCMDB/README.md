@@ -1,63 +1,100 @@
 # Smart Workplace CMDB
 
-CMDB is now a read-only consumer of prepared SmartInventory evidence. Version
-1.2.0 retires its duplicate collectors, normalizers, collection modules, mail
-reports, standalone scheduler and their launchers. Do not reinstall that chain.
-The SmartM365/SmartInventory collectors and orchestrator are not removed.
+SmartWorkplaceCMDB is a workplace inventory and decision-support solution.
+It brings identities, devices, applications, Microsoft 365 licenses and
+messaging into one Power BI report, with source lineage and qualification
+visible alongside the business indicators.
 
-## Current production boundary
+It helps workplace, identity and operations teams answer practical questions:
+which devices are managed, where compliance or lifecycle gaps exist, how AD
+and cloud identities relate, how licenses are assigned, and which candidates
+deserve a license recovery review. Findings support investigation; they do not
+automatically authorize deleting an object or removing a license.
 
-SmartInventory acquisition → DATA-LAST → CmdbEvidence-Prepare →
-DATA-POWERBI-CMDB (46 CSVs + current.json.txt) → ephemeral loopback reader →
-native Power BI Desktop refresh.
+## How it works
 
-The four licensing report tables use the separately published SmartM365
-DATA-LAST licensing snapshot. They are not among the 46 prepared tables and
-are not an atomic part of that batch. No claim of perfectly synchronized
-collection times across producers is made.
+1. **SmartM365 SmartInventory collects the evidence.** This product no longer
+   runs a second set of AD, Graph or Exchange collectors.
+2. **SmartM365 prepares a CMDB batch.** Its preparation contract defines the
+   tables, tenant identity, lineage, integrity and source-specific freshness.
+3. **The CMDB reader validates and pins that batch.** Power BI receives the
+   same retained bytes throughout the read session, even if synchronized
+   source files change during the refresh.
+4. **Power BI Desktop refreshes the model natively.** The foreground launcher
+   keeps the private loopback reader alive; it does not process the model
+   through XMLA, collect new evidence, upload data or save the report.
 
-The private migrated project has 13 report pages. Its 46 prepared-table row
-counts and the scoped date conversion fixes were checked in Desktop. Final
-page-by-page functional qualification was explicitly waived; it is not recorded
-as passed. No Fabric deployment or scheduled unattended Desktop refresh is
-included in this change. Release metadata keeps liveQualified=false.
+The license recovery pages additionally read the four published SmartM365
+license report CSVs and their snapshot descriptor. They represent the
+published license report, not a recalculation from an unrelated CMDB batch.
 
-## Refresh
+## Report coverage
 
-Use [PowerBI/README.md](PowerBI/README.md) and the signed launcher
-Launchers/Start-SmartWorkplaceCMDB-Refresh.ps1. Validation holds one complete
-batch in memory before starting a loopback listener. An expired or inconsistent
-batch is rejected, never replaced by historical data. This is a guided native
-Desktop workflow, not a one-click model update: set the three private session
-parameters and refresh in Desktop while the launcher remains open.
+| Pages | Purpose |
+|---|---|
+| 01 Executive Overview | Shared workplace, identity, messaging and licensing context |
+| 02 Workplace Health | Compliance, data quality and investigation priorities |
+| 03 Transformation & Lifecycle | OS adoption, upgrade readiness and Autopilot |
+| 04 Licensing & Assignments | License assignments and their observed paths |
+| 04A License Overview | Recovery indicators first, followed by license capacity |
+| 04B License Recovery | Candidates to review, not automatic removal instructions |
+| 04C License Evidence | Identity/mailbox gaps, source freshness and qualification |
+| 05 Fleet, Hardware & Apps | Device inventory, hardware and observed applications |
+| 06 People & Messaging | Users, account context and mailbox hosting |
+| 07 Services & Impact | Observed relationships and available service context |
+| 08 Device 360 / 09 User 360 / 10 Group 360 | Focused entity investigation and drillthrough |
 
-Python 3.11+ and the matching SmartM365 prepared contract, registry and freshness
-module from this repository are required. The CMDB-only archive is not a
-standalone collector distribution. No Graph, Exchange, AD, certificate-based
-collection credential, pandas or installed reader service is required.
+## Repository layout
 
-## Retirement and data
+```text
+SmartWorkplaceCMDB/
+  README.md
+  RELEASE.json
+  PowerBI/
+    Project/       Generic PBIP, PBIR resources and BIM semantic model
+    Queries/       Reusable prepared reader and type-conversion functions
+  Scripts/         Batch validation, ephemeral reader and refresh guidance
+  Launchers/       Signed PowerShell foreground refresh entry point
+  Config/          Public configuration template only
+  Tests/           Synthetic reader, protocol, date and public-project checks
+  Docs/            Current architecture and refresh/deployment instructions
+  Release/         Public file allowlist, packager and concise release notes
+  .local/          Ignored private Power BI working project and configuration
+```
 
-Old DATA-ALL, DATA-LAST and LOG-ALL under the independently owned Smart-CMDB
-collection root are obsolete. Removing those data/history files is permanent
-from this workstation; cloud recovery depends on the provider's retention.
-Never target the protected SmartM365 synchronized DATA folder or the private
-PBIP, model, report, current licensing snapshot or prepared batch.
+The public project has neutral parameters and **no imported data or model
+cache**. Do not refresh it against production directly. Create a private
+working copy under `.local/PowerBI`, configure its expected identity and
+license report source, and use a validated private reader session.
 
-Before removing old files on another host, disable only scheduled tasks whose
-Actions reference the retired SmartWorkplaceCMDB orchestrator/collectors and
-verify no such collector is running. The current SmartM365 orchestrator is
-unrelated and must remain enabled. Local cleanup does not prove remote cleanup.
+The private project remains outside Git. Updating the generic project does
+not overwrite an existing tenant working copy or its unsaved changes.
 
-Historical PowerBI builders, schema documentation and synthetic fixtures remain
-as developer tools. Do not regenerate the migrated private PBIP with them.
-They are not invoked by the current refresh launcher.
+## Getting started
 
-## Public/private boundary
+- Use this product within the WorkplaceCloudHub repository: its reader needs
+  the matching SmartM365 preparation contract, source registry and freshness
+  implementation. A standalone product ZIP is not a self-contained collector.
+- Copy `Config/refresh.local.json.template` to
+  `.local/Config/refresh.local.json`. Configure the prepared-batch directory
+  and independently known tenant identity; never infer identity from the
+  files being validated.
+- Run `Launchers/Start-SmartWorkplaceCMDB-Refresh.ps1 -ValidateOnly` with a
+  Python 3.11+ executable. This verifies the batch, not a Power BI refresh.
+- Follow [Refresh and deployment](Docs/REFRESH.md) to create a private project,
+  configure Power Query and refresh/save in Desktop.
 
-Git contains reusable code, templates, source contracts and synthetic tests.
-Tenant configuration, tokens, real exports, logs, cache, PBIP/BIM and private
-qualification evidence remain ignored. Native date parsing permits exact source
-wall-clock values only for the eight explicitly mapped fields; the Autopilot
-minimum-date sentinel is blank only in its contact field. No source CSV was
-rewritten to mask conversion failures.
+See [Architecture and boundaries](Docs/ARCHITECTURE.md) for the source flows,
+weekly application evidence policy and qualification limitations.
+
+## Safety and release status
+
+- This is an analytical inventory, not a transactional CMDB master or an
+  instantaneous, perfectly synchronized view of every source.
+- Application evidence is weekly. Unresolved relations are retained without
+  inventing missing parents; available device context can differ in age.
+- Missing or unqualified evidence must not be presented as a verified zero.
+- Native refresh, structural tests, Git publication and tenant operational
+  acceptance are different checks. The release metadata does not claim
+  universal production qualification.
+- There is no automatic license removal, device deletion or Fabric deployment.

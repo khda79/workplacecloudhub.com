@@ -7,7 +7,7 @@ import sys
 import unittest
 from unittest.mock import patch, Mock
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'PowerBI'))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'Scripts'))
 import refresh_prepared_report as refresh
 import prepared_read_session as session_reader
 import test_prepared_snapshot as fixtures
