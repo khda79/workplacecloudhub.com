@@ -91,7 +91,8 @@ try {
     $manual=[pscustomobject]@{Name='ManualRecoveryParent';ConcurrencyKey='ManualRecoveryParent';Schedule=[pscustomobject]@{Type='Daily';Times=@('00:10');DaysOfWeek=@()}}
     $manualNow=[datetime]::new(2026,10,8,16,0,0,[DateTimeKind]::Local)
     $scheduled=$manualNow.Date.AddMinutes(10)
-    $recovery=$manualNow.Date.AddHours(2).AddMinutes(58)
+    # Pipeline claim JSON keeps 100 ns, while the filename keeps only milliseconds.
+    $recovery=$manualNow.Date.AddHours(2).AddMinutes(58).AddSeconds(48).AddMilliseconds(320).AddTicks(7090)
     $manualFolder=Join-Path $claims $manual.Name
     New-Item -ItemType Directory $manualFolder -Force|Out-Null
     function ManualStatus { & $gate {param($j,$n) Get-OrchestratorSharedDependencyStatus -Job $j -Now $n} $manual $manualNow }
@@ -163,8 +164,8 @@ try {
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB82VTRBnKkpl5J
-# ZNUF+VZ/wBrXmKHLcH2rowve1oXH9KCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBWbtbjQsYIWtp/
+# mcspBdWCGyygRDAKxLk+0XxS/u5Y3KCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -194,14 +195,14 @@ try {
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCAF2GY3aD9giLF9BLnDF0xt
-# a07+otAxycjQk1eQ+t3L0jANBgkqhkiG9w0BAQEFAASCAYBa6aqnzQokO1VmjBR5
-# o/ZIesILf72HPel7ccFju/d/27qbeutbThNiIec6bXGJrYFUmJaL5Kr4roQ/Ziqu
-# DhNyTlRj77OUuxIJ+mU/sYV4AdbB/C55lcaOzZOvKB7v25er3Kb+K451Pq/mv8I/
-# CGwuXP0/ycLNSyLZ1Sx/VdI6dzIT7FBPJ7P0gAz74jK0j84L2MSViYiuMZ0dXCQR
-# MAPvkCBffpR8NqifVSwHKzFcnbFO+Jx3Yunp4Idggj4+Vg5gx0i3NgaUFD0sjZSL
-# CKkhX+EuM5rE+JdK6eQXj4aQTEgxMhDMbbPcFb9fNH6f/hU/o0AFYjUHcWt3EFYv
-# DX1e6PCrBar51Zf0DXT94vFmHgSWBi6FidO2hZT6fOXWHnYqGjVviEifCwK7ta5I
-# sWwBGHagjC2nD5/JIdzJu83Lar/8u8V0QSJcLhVSshVGVDAjj12K27DDk+71GywF
-# xtuZD4JtF99lIpo7XU52DNbYPLZvQnz3+M+ApaXSAXhU+oc=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCDAPXZkfwDe+AsfJdfKjIhr
+# 0Zt6BvfqybLgwT8crYaJMDANBgkqhkiG9w0BAQEFAASCAYA+nxBxfNeMz8FWKbl4
+# CLIm/icw0xcIyWYMYG2c2DtiJv3teMCh8w0vfxUIVQVVi4izCGPX4qQ3jiIlBgAH
+# 4v6o4ybLY17tMiiDbeolfuP8yksvdTIa0OzbN8aB8VHvxKKVRzeQ7QMir6h3ebMA
+# 5hC3kDxTbvryX7sBAwNNlqat4woS+Us7CO4AfX+IfJ0Gd+pKHboqOU2BbyMfJVPT
+# 4YciS0uMCxLQCd0HKOWoIRj/bArNa/2gr3fm10XNVtd/w/W/6aQx2nzgQlDpwiYi
+# y4Y5nz9YpNGpvi8ceHTXyxtFBvNEvLu1JriAZGQ1yAvCRWAvT/NRceCLx7fcox9c
+# X6SiL3JcQJ756/xReXMVF86fpAoZdJSDcx4Zy+hiM2JeKhZ6JBna8jR79Wt6s0jo
+# DRcImRu9iHxi9mIRgcKHt5wHeuvsRXOlN03sMs/xAXkMBn+08v1OtO3am7AygdDD
+# 7NTKFDjfQWbPxNyIGjRjAvf4EoPfgjxbU5IMncr3C3m/gYM=
 # SIG # End signature block

@@ -113,7 +113,7 @@ lock or launching inventory jobs.
     inside its own child process.
 
 .NOTES
-    Version : 1.5.46
+    Version : 1.5.47
     Author: https://github.com/khda79/workplacecloudhub.com
     Exit codes: 0 = normal end (recycle, DryRun, Once, summary sent), 1 = fatal error or summary send failure,
     2 = configuration or manifest error at startup, 3 = another live instance holds the lock.
@@ -138,7 +138,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$ScriptVersion = "1.5.46"
+$ScriptVersion = "1.5.47"
 $ScriptName = 'SmartM365-Inventory-Orchestrator'
 $global:SmartM365ScriptFileName = [System.IO.Path]::GetFileName($PSCommandPath)
 $global:SmartM365ScriptVersion = $ScriptVersion
@@ -1593,8 +1593,12 @@ function Get-OrchestratorLaterDependencyClaimStatus {
     $record = Get-SmartM365OrchestratorOccurrenceClaim -ClaimsRootPath $script:Settings.ElectionClaimsPath -JobName $Job.Name -Occurrence $occurrences[0]
     if ($null -eq $record -or $null -eq $record.Claim) { return 'Waiting' }
     $claim = $record.Claim
+    $claimOccurrenceUtc = ConvertTo-OrchestratorUtcTime -Value $claim.OccurrenceUtc
+    # Claim filenames retain milliseconds; claim JSON retains finer DateTime ticks.
+    $fileStamp = $occurrences[0].ToString('yyyyMMddTHHmmssfffZ', [Globalization.CultureInfo]::InvariantCulture)
     if ([string]$claim.JobName -ne [string]$Job.Name -or
-        ([datetime]$claim.OccurrenceUtc).ToUniversalTime() -ne $occurrences[0]) {
+        $null -eq $claimOccurrenceUtc -or
+        $claimOccurrenceUtc.UtcDateTime.ToString('yyyyMMddTHHmmssfffZ', [Globalization.CultureInfo]::InvariantCulture) -cne $fileStamp) {
         throw 'Later dependency claim identity or occurrence mismatch.'
     }
     $created = ConvertTo-OrchestratorUtcTime -Value $claim.CreatedAtUtc
@@ -6718,8 +6722,8 @@ exit $script:ExitCode
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDZEMTg2srq6o8L
-# HAOFA+DCvELRFDKkqIu/UNChbI5aqKCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB9zG8NpDm5kpmA
+# UtujVVH1lBqU+A5yye1Ax/SPanv+WKCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -6749,14 +6753,14 @@ exit $script:ExitCode
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCCW6h/7Kz43fm2UC+6u1hPg
-# Fax2oPgpGjxs3XyiMf5YgzANBgkqhkiG9w0BAQEFAASCAYCdWhCzqMe4r4DjSwdo
-# TjZmNItX6AaeNf5YH3Rdd+HGGtz0hDCWLP77CHI+4pLh/WSnaUp4zb+WxN6DMDid
-# d0NYBNmmGcmBvnliHpqnLZs0tiNXjc0Vv/CR+xUlOZve+EYsILesIbYdCM5Y0AmI
-# 7Ooi1p2KVpMUa5pXAVR3izIIC3p0tUnb6xtdgmxDl0C/pnDoolRMNrYOHv7xo82B
-# zxr1fGZF0vmmVNxSrvWGzZrbGoRBP/NYzr7E5DsonphtNPhmJcY++ZAnrrE0lqi2
-# GLHfBI1dCPfT95YbCWEiY178u5QavvciWwZruzUGhUyt0nIjjCMmkYgPDRTen+FB
-# oJ/nn0cZKemMSYy0mPmwOs24qKCyUSEwyqCRlKfv/8zfui2vHD58HQ2ynYi5utip
-# 4zdMONic/vg69GJj8XLuzeyIfUY/F9GGF+CRcXOJ85OWzdMBvyq0BNc24AZYrgwD
-# n8nlzFwIXyaQaris76L871jEDkzciR6aq1vnA02HW8cZ/so=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCAIkFGINivU4vsLSxTL/vdS
+# X3VtWj584CFKSYKsDLVLDzANBgkqhkiG9w0BAQEFAASCAYAGOagFNmTozBL6B3aK
+# LKcbeBreCR6jH4w5QT1H5RJwvOuL735purcWWaaAXMdTIeqEDLQ98bK5riKOBno2
+# M3kTSTZ2SoxBUZODf7/wiRDwRwQ9hFbVIHX/MvHpPc9dS9f2fOAD0OqiOXqhOjCq
+# qe9+BqHGbaDzNvue5V2qz4jMxhATGq7S/hOWpoiq7yyze24B3JLid8iK3RqmdR0s
+# Z0HxKthxAzfgoSY56Ln40/orhLsN5UKY2jvk82Y1cVKc2/shPY6kBl9EFgXj0JfK
+# OPPBobcOHsQ1wGE6BEFF7kXGpxyUFHfEMpYWzLOYQE/INnq2q26H156KK6jv41J0
+# 7h+wPkeWqj5wkMh5rq3obvgPqpN0ho1xCtp6U/LKkxFiwF08cOFIvX5dvRSU0Ltw
+# y2EIiImrNQuHjLWcBieCZx/kHTqxSo5S5fQcAMEZa6XHLn1Xw8ZFWnEGcHIRGhTA
+# fgYg9prXQIc7AsZm0fdbphrWzW8gke/58WZGODExgbFl7h0=
 # SIG # End signature block
