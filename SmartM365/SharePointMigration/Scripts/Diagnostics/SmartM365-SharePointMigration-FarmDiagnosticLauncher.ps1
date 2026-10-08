@@ -5,7 +5,7 @@
     Lists migration projects when -Project is omitted, then finds the selected
     project's latest ShareGate five-minute access CSV. DryRun is the default.
 .VERSION
-    1.0.5
+    1.0.6
 #>
 #Requires -Version 5.1
 [CmdletBinding()]
@@ -32,8 +32,10 @@ function Write-FarmLauncherInfo {
 function Get-FarmLauncherPeakCount {
     param([string]$Path)
     $count = 0
+    $unparsed = 0
     foreach ($row in @(Import-Csv -LiteralPath $Path -ErrorAction Stop)) {
-        if (-not $row.WindowUtc -or $row.WindowUtc -eq '(unparsed timestamp)') { continue }
+        if ($row.WindowUtc -eq '(unparsed timestamp)') { $unparsed++; continue }
+        if (-not $row.WindowUtc) { continue }
         $stamp = [datetime]::MinValue
         $value = ([string]$row.WindowUtc -replace '\s+UTC$','')
         if (-not [datetime]::TryParseExact($value,'yyyy-MM-dd HH:mm',[Globalization.CultureInfo]::InvariantCulture,[Globalization.DateTimeStyles]::None,[ref]$stamp)) {
@@ -41,6 +43,7 @@ function Get-FarmLauncherPeakCount {
         }
         $count++
     }
+    if ($count -eq 0 -and $unparsed) { throw 'CSV has no UTC windows: ShareGate report dates were not converted from the exporter time zone.' }
     if ($count -eq 0) { throw "No valid five-minute UTC window in ShareGate CSV: $Path" }
     return $count
 }
@@ -68,7 +71,7 @@ function Get-FarmLauncherProjectInfo {
         $info.Usable = $true
     }
     catch {
-        $info.Status = 'CSV invalid or inaccessible'
+        $info.Status = if ($_.Exception.Message -like 'CSV has no UTC windows:*') { 'CSV has no UTC windows' } else { 'CSV invalid or inaccessible' }
     }
     return $info
 }
@@ -127,7 +130,7 @@ try {
     }
     $script:FarmLauncherLifecycle.Migration = $Project
     if (-not $selected.Usable -and -not $ShareGatePeaksCsv) {
-        throw "Project $Project cannot run: $($selected.Status)."
+        throw "Project $Project cannot run: $($selected.Status). CSV: $($selected.CsvPath)"
     }
     $diagnosticScript = Join-Path $root 'Scripts\Diagnostics\SmartM365-SharePointMigration-FarmDiagnostic.ps1'
     if (-not (Test-Path -LiteralPath $diagnosticScript -PathType Leaf)) {
@@ -178,8 +181,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCM6azA5y1MJT7E
-# ithLgSjxsw0DvxgMYl48+bgK7P8KgaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDb7+7n4P0j2tHp
+# RUf+7P2hcJbtEIgx85DTRzoEPMh0jKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -312,31 +315,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIPDoxQWtCNtkjQPbMdy/1rwKld4TGel0TBZNVL8DVBOnMA0GCSqG
-# SIb3DQEBAQUABIIBgBHG+8iAMZqvCRJOwlGCsuTelXb2G937D/K6zYIj2vRq7Zey
-# 6QgEiDmPCctkB5BF1frS2Zw0wQ0Mw4IUX72y421NJ2bHVahq9YgnumMJGuDdipxy
-# rRnS3X5lPurdNzY6lEWBaLpFo8dWwLSIpPnfTwIrr9DMQokxw4WCKuaDc5ecT2c/
-# rJYQYR8jNrwWaEp3sqBwpkW1uyE5lDCmBGqLkQ/Ieeqfq/ZXKfGTMJ9d+QMs2OdL
-# W3lbCWbZeSmbdrLIFpytZsFf/4abmVtQnpCIN97fSO+fIyNvHMfx/wtb6Le7FfBH
-# Xr3S6QdrFDerDvhfaIXMpB0lBCdn6SXT+vEeV/DVErubHjtgQAlXvbsT0IcmWipS
-# CRFzy6A8xvFKUjXWRaF3dzH12rjMnkwFiw3hwo+bhEtJ51ZJm5r95hpKMwwclcq2
-# 1n+WlM7DDYxxJ4jhXwyrOdwPJuNj/cNFyOJXVWI8GRYGsGtbqHnW4ocQoob1YIQZ
-# QRgDjN9uVeIItCQw0aGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIEYNmvciJDApd7JpwGw4u1VP8KcO7xAqJAYmsC3XCq+5MA0GCSqG
+# SIb3DQEBAQUABIIBgDf10GDRn/kJP1FAco1wdaNHdKbMw36isoEhnpCCWS2sAsFI
+# XO7bSfZyh75IgkmVBUyepI7AeCK1tTsBO5lvopbzyribNcoOtMnTpmykuG63g4v4
+# T9A3sHIgKud3TD7bLJOmO4cVM/RdejrPPkg7J3FWO4b4OP6+eQSVBKzpQa8fPQpw
+# PFvLsi7I5J6mF3+/ZelYo+YGovfuxW94cKKarN9X9RrwW2NayULmfHXZqEa2WNgC
+# 9+mw4eDc6Ipapol94ecpaetOiFBcL3ZKCVVYUTR65nboLlMttcNpIEw7U0zC1k1F
+# 8LVIZsubTFgZGRhvkz1KxJTNrMhZXYvgpvepX905q3zeUoAQHcESi2uYBpEtRUys
+# rvRhRbgxzk+T+s6Ykcgza3zIhqSGCZwNktGFgMdRWj3hD+xIZwcbLncK4UO/mgBn
+# 9Mm1zeA3Tqqdt4ap2pnMjjQlMFqkvhBTb4Ez6ZNIgQi2WeOAjSlq0Acz4hQ0hIR3
+# apVYTn0zEJQuBTEhm6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMxNDA3
-# NTdaMC8GCSqGSIb3DQEJBDEiBCBCzW57NONBjKANDgwaxvb8MAQ10nOFyCDhmdyj
-# RgLuuDANBgkqhkiG9w0BAQEFAASCAgA/FYhFf0Y/jcj04xOktDl08GmPtVWKvdFo
-# gJ72WMo9NRmZwFkq6N5FQKlHSiFHs+QyIYHV0D5wrzDtgErypVa1pHboZFnvolBw
-# NcAL1lEnuYtRxQ2GwDGjDg4B+nwCWbuz+Xp2tkTdvGOo8MDULtoyWh7qJ3OkDgbA
-# LVloGdHKwLOOARkDp9pdKSrDKu+xGqWXeiB1/zOgwwfrwgyJzCiBZy8YENdbiOOp
-# ul4RUMoWiY9YFuifbkM0/oXovzjKkG5QOqCb4kmknTApJUPzaJJ7okKXfhaFxJ3M
-# y7zC88bbJLdoNtJgpq+QmRSzEprYX7jNOCquJ09x1zv6MjctA5CDnlgVQlfio/eO
-# bz9W/ln9hXw/AfShXysOqn2GSGE3F3XHH6O/sR1AAEEHggfckwtMEqvHYmKwr6E/
-# XaoneQKU33EcH4ecGH+w7J4iMb+tuid/qDX521RSKYSCA85X9Qrmha7bGlsMvpVn
-# /mb1BB6yh5fxXK3D/+b64z2wm7n4Y7CgLOvSWdtt/8+cT0a7aJcGiTdgjwXYal0n
-# +RFQZlklvrRqKYRgZrYG1REJItLfFKktOs/y4bQfP1iVKWdVBjogIvh9xGis6WnK
-# XoYqkd0TSj9bDWZ2cm0c47Z/G/8DwN+HhuXIk5MAbWPwPB3Ez8EJ3py7BpQHnOOm
-# nKEXcXqbjw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDgxNjA4
+# MDhaMC8GCSqGSIb3DQEJBDEiBCCSZjVS/1PTB55VeIf6U9I/is0gX6QLzOm05fqs
+# YnN5azANBgkqhkiG9w0BAQEFAASCAgAi0HwT/rzfl2q/szGCQ20Di/kpGUrp4/DY
+# btcjDZuI3O1M/Hz7c369hibHukOBPdyWMYXTGQMnjkwOZK0Je5HpwAoKTqLwB9Oa
+# 7Ei7RiRD13jzlYaxhP2adh6UjUMqR4XCLtjy+790rFo2QO6s4ik1tKbCINkQbGw8
+# kFls2mZ8P2+u64IPrSDfcpwSUMJGDxf8Owvfn1v4OCfKS/1HjTXW6L4YtLNWjQQ6
+# ntM4SuAN8s6T1mg4O+Wu/dm7+fogl77fcD2kGOBFc07BkqByH+bR5UMFHACchfNu
+# yynohhaKYZE7qrOr94HCLpIXmCv5mIkXNSA558bXZ/fcZxf7CmQ//mLmbHxnZySI
+# wEFm1U8EqyFA7frweW6IJ5gcqVz1DFvjSXItbPZXEJtmG9tExVqmUVpij8XPSrrU
+# R0fQjCnLW5EMfGA1ViKVQt42d4/iF8jkueplRHZfLVBSTrWOkf1RTrZyONQsjM74
+# tmKwQZi9JGCUa1VdGC2feSXRKMzLEbFpuYvabGmMDKrBKbo+/tE77BmeHJifm+uA
+# pQ3FP8oNSgjn82K9AIgG/811OgTsCv9Nhcs76A882uyhcokbOn4LK6XvSelniePU
+# YwbmymhwNrV3hUtcrE3pXcwW3VOMNa+PqpPxikqsLPkvKXmxkyRVMQAyk0LQ4u4/
+# Kd9nMrH8zA==
 # SIG # End signature block

@@ -210,6 +210,37 @@ class ShareGateDiagnosticsTests(unittest.TestCase):
                      "Message": "401 Unauthorized. WebUri : 'https://same.example/source/_vti_bin/client.svc'", "Details": ""}
         self.assertEqual(DIAG.failing_endpoint(ambiguous)[0], "Undetermined")
 
+    def test_local_sharegate_dates_require_explicit_exporter_zone(self):
+        report = self.root / "local-dates.csv"
+        with report.open("w", encoding="utf-8", newline="") as stream:
+            writer = csv.writer(stream)
+            writer.writerow(["Session ID", "ID", "Date", "Status", "Type", "Title", "Source site address", "Errors"])
+            writer.writerow(["s1", "1", "24/09/2026 11:34:37", "Error", "File", "One",
+                             "https://source.example/sites/a", "Access denied"])
+            writer.writerow(["s1", "2", "24/01/2026 11:34:37", "Error", "File", "Two",
+                             "https://source.example/sites/a", "Access denied"])
+        DIAG.analyze([report], self.output, self.project, report_time_zone="Romance Standard Time")
+        summary = json.loads((self.output / "Summary.json.txt").read_text(encoding="utf-8"))
+        self.assertEqual(summary["ReportTimeZoneId"], "Romance Standard Time")
+        self.assertEqual(summary["LocalTimestampConversions"], 2)
+        self.assertEqual([row["WindowUtc"] for row in summary["AccessTimeBuckets"]],
+                         ["2026-01-24 10:30 UTC", "2026-09-24 09:30 UTC"])
+        with (self.output / "ClassifiedRows.csv").open(encoding="utf-8-sig", newline="") as stream:
+            rows = list(csv.DictReader(stream))
+        self.assertEqual(rows[0]["Timestamp"], "24/09/2026 11:34:37")
+        self.assertEqual(rows[0]["TimestampUtc"], "2026-09-24T09:34:37.0000000Z")
+
+    def test_ambiguous_local_sharegate_date_is_rejected(self):
+        report = self.root / "ambiguous.csv"
+        with report.open("w", encoding="utf-8", newline="") as stream:
+            writer = csv.writer(stream)
+            writer.writerow(["Session ID", "ID", "Date", "Status", "Type", "Title", "Source site address", "Errors"])
+            writer.writerow(["s1", "1", "25/10/2026 02:30:00", "Error", "File", "One",
+                             "https://source.example/sites/a", "Access denied"])
+        with self.assertRaisesRegex(ValueError, "Ambiguous or invalid"):
+            DIAG.analyze([report], self.output, self.project, report_time_zone="Romance Standard Time")
+        self.assertFalse((self.output / "Summary.json.txt").exists())
+
 
 if __name__ == "__main__":
     unittest.main()

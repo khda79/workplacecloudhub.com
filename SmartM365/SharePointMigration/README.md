@@ -773,6 +773,14 @@ mixed or ambiguous failing hosts stay Undetermined. The HTML and three CSVs
 show access failures by five-minute UTC window, source site/list, and both
 dimensions together. A time cluster is a clue about authentication, not proof
 of its cause.
+When ShareGate exports local dates without a UTC offset, analysis converts
+access-failure timestamps using the analysis machine's Windows time zone. If
+the export came from another machine, pass its zone with
+`-ReportTimeZoneId 'Romance Standard Time'` to
+`SmartM365-SharePointMigration-Diagnostics.ps1`. The summary records the zone
+and conversion count; `ClassifiedRows.csv` keeps both `Timestamp` and
+`TimestampUtc`. Ambiguous or invalid clock-change times stop the analysis.
+Re-run phase 2a after selecting the correct zone before starting farm diagnostics.
 
 ## ShareGate item pre-check (phase 2b-bis)
 

@@ -1,119 +1,50 @@
 <#
 .SYNOPSIS
-    Offline Windows PowerShell 5.1 farm diagnostic launcher routing test.
+    Convert ShareGate report wall-clock dates to UTC using a Windows time zone.
 .VERSION
-    1.0.1
+    1.0.0
 #>
 #Requires -Version 5.1
 [CmdletBinding()]
-param()
+param([Parameter(Mandatory)][string]$TimeZoneId)
 
 $ErrorActionPreference = 'Stop'
-$toolkit = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
-$launcher = Join-Path $toolkit 'Start-SmartM365-SharePointMigration-FarmDiagnostic.cmd'
-$runLauncher = Join-Path $toolkit 'Start-SmartM365-SharePointMigration-FarmDiagnostic-Run.cmd'
-$root = Join-Path $PSScriptRoot ('.farm-launcher-test-' + [guid]::NewGuid().ToString('N'))
-if (-not $root.StartsWith($PSScriptRoot + [IO.Path]::DirectorySeparatorChar,[StringComparison]::OrdinalIgnoreCase)) {
-    throw 'Unsafe test path.'
-}
 try {
-    $project = Join-Path $root 'Migrations\Synthetic'
-    $older = Join-Path $project 'ShareGate\Diagnostics\Analysis-old'
-    $newer = Join-Path $project 'ShareGate\Diagnostics\Analysis-new'
-    $alpha = Join-Path $root 'Migrations\Alpha\ShareGate\Diagnostics\Analysis'
-    $missing = Join-Path $root 'Migrations\Missing'
-    $logs = Join-Path $root 'Migrations\logs'
-    $reports = Join-Path $root 'Migrations\reports'
-    $template = Join-Path $root 'Migrations\_Template\ShareGate\Diagnostics\Analysis'
-    $invalidCsv = Join-Path $root 'Migrations\Z-Invalid\ShareGate\Diagnostics\Analysis'
-    $unparsedDirectory = Join-Path $root 'Migrations\Z-Unparsed\ShareGate\Diagnostics\Analysis'
-    $scripts = Join-Path $root 'Scripts\Diagnostics'
-    [void](New-Item -ItemType Directory -Path $older,$newer,$alpha,$missing,$logs,$reports,$template,$invalidCsv,$unparsedDirectory,$scripts -Force)
-    $oldCsv = Join-Path $older 'AccessFailures-5min.csv'
-    $newCsv = Join-Path $newer 'AccessFailures-5min.csv'
-    $newline = [Environment]::NewLine
-    ('WindowUtc,Lines' + $newline + '2026-10-02 20:00 UTC,1') | Set-Content -LiteralPath $oldCsv -Encoding UTF8
-    ('WindowUtc,Lines' + $newline + '2026-10-02 22:00 UTC,9' + $newline + '2026-10-02 22:05 UTC,4') | Set-Content -LiteralPath $newCsv -Encoding UTF8
-    ('WindowUtc,Lines' + $newline + '2026-10-02 21:00 UTC,2') | Set-Content -LiteralPath (Join-Path $alpha 'AccessFailures-5min.csv') -Encoding UTF8
-    ('WindowUtc,Lines' + $newline + '2026-10-02 23:00 UTC,3') | Set-Content -LiteralPath (Join-Path $template 'AccessFailures-5min.csv') -Encoding UTF8
-    ('WindowUtc,Lines' + $newline + 'invalid,1') | Set-Content -LiteralPath (Join-Path $invalidCsv 'AccessFailures-5min.csv') -Encoding UTF8
-    ('WindowUtc,Lines' + $newline + '(unparsed timestamp),1') | Set-Content -LiteralPath (Join-Path $unparsedDirectory 'AccessFailures-5min.csv') -Encoding UTF8
-    (Get-Item -LiteralPath $oldCsv).LastWriteTimeUtc = [datetime]::UtcNow.AddHours(-2)
-    (Get-Item -LiteralPath $newCsv).LastWriteTimeUtc = [datetime]::UtcNow
-    $fake = Join-Path $scripts 'SmartM365-SharePointMigration-FarmDiagnostic.ps1'
-    @'
-[CmdletBinding()]
-param([string]$Project,[string]$ToolkitRoot,[string]$ShareGatePeaksCsv,[int]$WindowMinutes,[switch]$DryRun)
-$value = '{0}|{1}|{2}|{3}' -f $Project,$ShareGatePeaksCsv,$WindowMinutes,[bool]$DryRun
-[IO.File]::WriteAllText((Join-Path $ToolkitRoot 'invoked.txt'),$value)
-if (Test-Path -LiteralPath (Join-Path $ToolkitRoot 'force-error.txt')) { Write-Host 'Simulated diagnostic failure.'; exit 23 }
-'@ | Set-Content -LiteralPath $fake -Encoding UTF8
-    $marker = Join-Path $root 'invoked.txt'
-
-    $preview = @(& $launcher -Project Synthetic -ToolkitRoot $root -PreviewOnly 2>&1)
-    if ($LASTEXITCODE -ne 0) { throw "Launcher preview failed: $($preview -join ' ')" }
-    if (Test-Path -LiteralPath $marker) { throw 'PreviewOnly executed the diagnostic.' }
-    if (($preview -join ' ') -notmatch 'Host: Windows PowerShell 5\.1' -or ($preview -join ' ') -notmatch '2 UTC windows') {
-        throw 'Launcher did not select Windows PowerShell 5.1 and both CSV windows.'
+    $zone = [TimeZoneInfo]::FindSystemTimeZoneById($TimeZoneId)
+    $inputJson = [Console]::In.ReadToEnd()
+    $values = ConvertFrom-Json -InputObject $inputJson -ErrorAction Stop
+    $converted = @{}
+    $formats = @('d/M/yyyy H:mm:ss','d/M/yyyy H:mm')
+    foreach ($value in $values) {
+        $text = [string]$value
+        $local = [datetime]::MinValue
+        $parsed = $false
+        foreach ($format in $formats) {
+            if ([datetime]::TryParseExact($text,$format,[Globalization.CultureInfo]::InvariantCulture,[Globalization.DateTimeStyles]::None,[ref]$local)) {
+                $parsed = $true
+                break
+            }
+        }
+        if (-not $parsed) {
+            throw "Unsupported ShareGate report date: $text"
+        }
+        if ($zone.IsInvalidTime($local) -or $zone.IsAmbiguousTime($local)) {
+            throw "Ambiguous or invalid ShareGate report date in $TimeZoneId`: $text"
+        }
+        $converted[$text] = [TimeZoneInfo]::ConvertTimeToUtc($local,$zone).ToString('o',[Globalization.CultureInfo]::InvariantCulture)
     }
-    if (-not ($preview -join ' ').Contains($newCsv)) { throw 'Latest ShareGate CSV was not selected.' }
-    $unparsedCsv = Join-Path $root 'unparsed.csv'
-    ('WindowUtc,Lines' + $newline + '(unparsed timestamp),1') | Set-Content -LiteralPath $unparsedCsv -Encoding UTF8
-    $unparsedResult = @(& $launcher -Project Synthetic -ToolkitRoot $root -ShareGatePeaksCsv $unparsedCsv -PreviewOnly 2>&1)
-    if ($LASTEXITCODE -eq 0 -or ($unparsedResult -join ' ') -notmatch 'CSV has no UTC windows') {
-        throw 'The launcher did not explain the unparsed ShareGate timestamps.'
-    }
-    $prompted = @('3' | & $launcher -ToolkitRoot $root -PreviewOnly 2>&1)
-    $menuText = $prompted -join ' '
-    if ($LASTEXITCODE -ne 0 -or -not $menuText.Contains('Project: Synthetic')) {
-        throw "Prompted project selection failed: $($prompted -join ' ')"
-    }
-    if ($menuText -notmatch 'Available migration projects:' -or $menuText -notmatch '1\. Alpha \| CSV .* \(1 window\)' -or $menuText -notmatch '2\. Missing \| CSV missing' -or $menuText -notmatch '3\. Synthetic' -or $menuText -notmatch '4\. Z-Invalid \| CSV invalid or inaccessible' -or $menuText -notmatch '5\. Z-Unparsed \| CSV has no UTC windows' -or $menuText -notmatch '0\. Cancel' -or $menuText -match '_Template' -or $menuText -match '\d+\.\s+(logs|reports)\s+\|') {
-        throw 'The project menu was not ordered, annotated or filtered correctly.'
-    }
-    $launcherSource = [IO.File]::ReadAllText((Join-Path $toolkit 'Scripts\Diagnostics\SmartM365-SharePointMigration-FarmDiagnosticLauncher.ps1'))
-    if (-not $launcherSource.Contains('Select a project number')) { throw 'The interactive prompt is not in English.' }
-    $cancelled = @('0' | & $runLauncher -ToolkitRoot $root 2>&1)
-    if ($LASTEXITCODE -ne 0 -or -not ($cancelled -join ' ').Contains('Selection cancelled') -or (Test-Path -LiteralPath $marker)) {
-        throw 'Cancellation did not stop the Run launcher before collection.'
-    }
-    $unavailable = @('2' | & $runLauncher -ToolkitRoot $root 2>&1)
-    if ($LASTEXITCODE -eq 0 -or -not ($unavailable -join ' ').Contains('CSV missing') -or (Test-Path -LiteralPath $marker)) {
-        throw 'A project without ShareGate CSV was accepted.'
-    }
-    $invalid = @(@('99','99','99') | & $launcher -ToolkitRoot $root -PreviewOnly 2>&1)
-    if ($LASTEXITCODE -eq 0 -or -not ($invalid -join ' ').Contains('No valid project number') -or (Test-Path -LiteralPath $marker)) {
-        throw 'Invalid menu choices were accepted.'
-    }
-
-    $dry = @(& $launcher -Project Synthetic -ToolkitRoot $root 2>&1)
-    if ($LASTEXITCODE -ne 0) { throw "Launcher DryRun failed: $($dry -join ' ')" }
-    if ((Get-Content -LiteralPath $marker -Raw) -cne ('Synthetic|{0}|30|True' -f $newCsv)) {
-        throw 'DryRun did not forward the project, latest CSV and window margin.'
-    }
-    $real = @('3' | & $runLauncher -ToolkitRoot $root 2>&1)
-    if ($LASTEXITCODE -ne 0) { throw "Dedicated Run launcher failed: $($real -join ' ')" }
-    if ((Get-Content -LiteralPath $marker -Raw) -cne ('Synthetic|{0}|30|False' -f $newCsv)) {
-        throw 'Dedicated Run launcher did not remove DryRun.'
-    }
-    [IO.File]::WriteAllText((Join-Path $root 'force-error.txt'),'1')
-    $failed = @(& $launcher -Project Synthetic -ToolkitRoot $root 2>&1)
-    if ($LASTEXITCODE -eq 0 -or ($failed -join ' ').Contains('Farm diagnostic completed.') -or -not ($failed -join ' ').Contains('exit code 23')) {
-        throw 'The launcher reported success after the diagnostic failed.'
-    }
-    Write-Output 'Farm diagnostic launcher offline host and routing tests passed.'
+    [Console]::Out.WriteLine(($converted | ConvertTo-Json -Compress -Depth 3))
 }
-finally {
-    if ((Test-Path -LiteralPath $root) -and $root.StartsWith($PSScriptRoot + [IO.Path]::DirectorySeparatorChar,[StringComparison]::OrdinalIgnoreCase)) {
-        Remove-Item -LiteralPath $root -Recurse -Force
-    }
+catch {
+    [Console]::Error.WriteLine($_.Exception.Message)
+    exit 1
 }
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBEbtLVN/JWlZ0N
-# 8yXjo3I+gRCsC2NdByinQOljW4xJ0aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBvZXaQ9lWntYGJ
+# PXCJaJ+FBFMxxGlbaHsThBx6y6C9U6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -246,31 +177,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIPZVuAU8UEtYm1z1xty7VyChKXL792Pu9cuzMoe20WURMA0GCSqG
-# SIb3DQEBAQUABIIBgGAi701S3GYGoRy7y9Bi3izbG/wkjvTPMIvDaUSGoWcN9fAY
-# 43XTwb3gC2uKBe2xbnpWnKuaoC88mnYLrBjVQeB0tVcpahmY7ku2wcbeR/q1LHJ0
-# koqHXuWpB8eEcyowTeDNIN46Dkoi9zMkhMECC3KAhpI3qpBsbjVi2iOQfeKy+PBt
-# p0JHJazzr+z4/vLN+kEkLkSIOMdFPsK6ahyzwvQotPkrSof5AC9NvzUMgt5DbAcd
-# 9M0rWbcHYytmdgFLb93uODJ7ag9E51LgwJPwQ4LLqmUOXctP2vUzUqg8FlLeW8gL
-# 68m5+WXSH5zSSJZEz5f1VhlI6rfeNOS5TvyQJTz2L3eiD0UPmyafbZQzZ4MxFfDY
-# 3nsAVI/V2QjbUVthM4NoMCbO55VjxnMMxCEainYsRNPvk9b9hDZ9W7iycPiMOAhw
-# KRKQm9nrfGlOKaKsXGM7zH84FPnPkGlfUZgtMW4LUi9MZGXRdQ/VyPMGdz3GJYrh
-# uM1KAv8bSF2ey28u+6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIFGCXsp9I8vU6U4XDlfKquct1/2D9NDQRStV2MwKhTonMA0GCSqG
+# SIb3DQEBAQUABIIBgCwKFXoP0BOHwDUYXnv8f8fsU14cHJREysqWE35nNyI/O7t5
+# eolnvNtYV134Le6vOvk7gTEtm5cWsHwR6uC8YBQezA+SCM2LUU52ygk2tSrJhxB1
+# iaSsTF1C1vtpgucWm7ezcfSKSFyPe11pVuED7dMTVyILT4XXCP582uVCdIy56xCj
+# Asoq9ac8FtMpub1W6KqCZ8JUIS/3HBtNLLmUFB9JUw1EmBN3ECLDh+yXZ+T8fdt9
+# katy7i8nAZ+hwng3GkBO/7+P43BTjJMdvzCQ/xQKdUPDYiBZzwq0puZehP9uv19o
+# TcA3nrIPW6PRDaN152BnmxOlSlAH4fH8rZwSQKFaYHrm35Dh3aYUUPcj7gYZJX7W
+# d+jXLMcZVhzWb+bJ0aNc+q8qHTntJDQcGPk+VDMSsa+kvpYwND57x6mPgszi2jAB
+# HlwZUosvLH5tpIUkhKMWi9eJAYhSkC8Qo0a+VpOGXZdA9lvrByNOsXjv4bHpVD2u
+# HSx+JHHusINO1JSfG6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDgxNjEw
-# MzFaMC8GCSqGSIb3DQEJBDEiBCDrp6qjqobBh4FDtfAvtsg5egM+ceCbLHgDw8zY
-# uiaf6zANBgkqhkiG9w0BAQEFAASCAgCN6pKEf/tWBjNRFvyFdb75N0RJlvTzDpuO
-# Gz2m2wlbQbFswRBhxRCODv71NpxPx0Eu08+F5Cn2zCMrZ/UsV692dTG/iuv5/7IU
-# wPAiX8Mm3xq5YTd/hXSJcKTIY+M2yAQzBC+swl18+F9tG5jQWBc0w9LQAjVbT0j7
-# 91tQRFizfcqLrqr5JkkZ6qNrycwFYnrpCXpSyiWL6CrhHWUKzFOj1S6FoQ3lTgm4
-# NeTq8fRBVrdMoNrG641EWr3/80k4AK/T/XWmTxVYXWWqT61fs65caTzCiskisQjy
-# uv8qsbQgBrt3TriXv2/E7SxIS+qG8U/W+Q6F+QE1igLqcc67+WbXb5PQUr9JYEli
-# BaNpVgcaoBTQ6+sS2FAaVUsdZn1S3WeNA3/fwbHvMAOsq2lhJpYzi9vpUG/JaAF8
-# v2czSlthgbwDRG7yfN1Z8ozXyhrvwfNw4w6cuwJg51EJ3anMgBWaXtFi55RPxRwu
-# jWYFxrs16cAKVcOOKEAGQRlwuAtF1BiZ4e8GuVfJA3iiX6FYi5sFZ8a2HtDZdrSd
-# DLqjHiXrmnkSGdc/ZIq0NBM1zNWuSiiPaeq3QI9p+QV1ZW5hkgH0B5pIfL1MAS6B
-# qlfhnGu47EPt8pazf6LshiKpFjKJYxmb5BoUk6fopkwJ6k54zYVNXoqr9ivkFigx
-# 6aEc5iuZyw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDgxNjA4
+# MDlaMC8GCSqGSIb3DQEJBDEiBCBDuUXEyPa/TQxCyaCmpq/AvhwFTA9t/9kYJ6Jp
+# wqlbzTANBgkqhkiG9w0BAQEFAASCAgCtL/Y3a6+pWQauj3M5Jhry5FzD9RGvAetX
+# jYIMketo4UQWUk4qGdAqtNKJ0JL8zPpZNfK75w5IRAFXjnKqYagAmSXPmYOBft3A
+# G+XAbcARR/b/qhhU0hsoCeTMN9JFesW+Zleje2uduANhtbt0dnTuvsvN6p9Tztds
+# fVJ75a0FXVQQpuAeSjjhZOmrOLHV+v3kXzbls2ZWKd8mFBz0EijdP6lrpbkSue50
+# Fn1PAyfonNynn+DzrGDiVqaIMClB1mEdWlzoLbtQL/os8/FCP7yXZY0LqRtj+7t4
+# 75v7mhuFQ9kbC8Kic9oGHu9CLX+H+aRJXt5HBCnk1el2A/A4NbEs/32ySebYA+52
+# PvGk5++Vnj1lyTm3EF0nXvEL2k9T/qPIFbrdMJ4O2p7Bc0yvi2M49D+cereLTAkA
+# 6bNJJdJOAn58IrDSMNt4E/mjSdRulzmTKn4HDTPIiJPS33DzT4/aEi5cmJuMxkSW
+# ihyi382P1Hm9nO7tqDIKBiD7JyAEQIqqPR5K43DJIJfqUKAv9T1E0wrUs7RaSGDt
+# r6RoG36xju3nfIDDSva/JU7+cPBFlH3NlVJ6nv29CavPcQWXHtL3U7jzwPruymcn
+# P1E65TxWwMI9fRtZDrzRJj5HcsUPnnZcP6ixL987FxyWbnBUpvZ0fwkw6cemGorR
+# lrLx42srkA==
 # SIG # End signature block

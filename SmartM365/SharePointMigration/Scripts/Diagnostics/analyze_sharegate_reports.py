@@ -1,6 +1,6 @@
 """Read-only ShareGate report analysis and private HTML/CSV output."""
 
-__version__ = "1.0.6"
+__version__ = "1.0.7"
 
 import argparse
 import collections
@@ -11,6 +11,7 @@ import json
 import os
 from pathlib import Path
 import re
+import subprocess
 import sys
 import uuid
 from contextlib import contextmanager
@@ -132,6 +133,30 @@ def parse_timestamp_utc(value):
     if parsed.tzinfo is None:
         return None
     return parsed.astimezone(dt.timezone.utc)
+
+
+def convert_local_access_timestamps(rows, time_zone_id):
+    """Resolve ShareGate wall-clock dates using the exporter's Windows time zone."""
+    candidates = sorted({row["Timestamp"].strip() for row in rows
+                         if row.get("RuleId") in ACCESS_RULES
+                         and re.fullmatch(r"\d{1,2}/\d{1,2}/\d{4} \d{1,2}:\d{2}(?::\d{2})?", row["Timestamp"].strip())})
+    if not candidates or not time_zone_id:
+        return 0
+    helper = Path(__file__).with_name("Convert-ShareGateReportTimestamps.ps1")
+    result = subprocess.run(
+        ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(helper),
+         "-TimeZoneId", time_zone_id],
+        input=json.dumps(candidates), text=True, capture_output=True, check=False,
+    )
+    if result.returncode:
+        raise ValueError("Cannot convert ShareGate report dates with time zone "
+                         f"{time_zone_id}: {result.stderr.strip()}")
+    converted = json.loads(result.stdout)
+    for row in rows:
+        value = row["Timestamp"].strip()
+        if row.get("RuleId") in ACCESS_RULES and value in converted:
+            row["TimestampUtc"] = converted[value]
+    return sum(1 for row in rows if row.get("TimestampUtc"))
 
 
 def resolve_columns(headers, aliases):
@@ -320,7 +345,7 @@ def access_breakdowns(rows):
     by_window_site_list = collections.defaultdict(list)
     access_rows = [row for row in rows if row.get("RuleId") in ACCESS_RULES]
     for row in access_rows:
-        timestamp = parse_timestamp_utc(row["Timestamp"])
+        timestamp = parse_timestamp_utc(row.get("TimestampUtc") or row["Timestamp"])
         window = timestamp.replace(minute=timestamp.minute - timestamp.minute % 5, second=0, microsecond=0).strftime("%Y-%m-%d %H:%M UTC") if timestamp else "(unparsed timestamp)"
         site = row["SourceUrl"] or "(unknown source site)"
         list_name = row["SourceList"] or "(site-level)"
@@ -502,7 +527,8 @@ def file_sha256(path):
     return digest.hexdigest()
 
 
-def analyze(inputs, output_dir, project_root, selected_session="", source_labels=None, source_snapshots=None):
+def analyze(inputs, output_dir, project_root, selected_session="", source_labels=None, source_snapshots=None,
+            report_time_zone=""):
     if source_labels is None:
         source_labels = inputs
     if len(source_labels) != len(inputs):
@@ -544,8 +570,11 @@ def analyze(inputs, output_dir, project_root, selected_session="", source_labels
             rows.append(row)
     if not rows:
         raise ValueError("No ShareGate report rows were found.")
+    converted_timestamps = convert_local_access_timestamps(rows, report_time_zone)
     summary = summarize(rows, duplicates, conflicts, source_labels, project_root)
     summary["SelectedSessionId"] = selected_session or ""
+    summary["ReportTimeZoneId"] = report_time_zone
+    summary["LocalTimestampConversions"] = converted_timestamps
     evidence = []
     for label, start_stat, expected_hash in zip(source_labels, source_stats, snapshot_hashes):
         source = Path(label)
@@ -560,7 +589,7 @@ def analyze(inputs, output_dir, project_root, selected_session="", source_labels
                          "Sha256": digest})
     summary["InputEvidence"] = evidence
     output_dir.mkdir(parents=True, exist_ok=True)
-    fields = ["SessionId", "RowId", "Timestamp", "Status", "ObjectType", "ItemName", "SourceUrl", "SourceList", "SourceListId", "SourceItemId", "DestinationUrl", "DestinationList", "Message", "Details", "HelpLinks", "CopyOptions", "ImportStatus", "ThrottlingStatistics", "ItemKey", "PatternKey", "Pattern", "Category", "RuleId", "State", "Action", "AccessSide", "AccessEvidence", "InputFile"]
+    fields = ["SessionId", "RowId", "Timestamp", "TimestampUtc", "Status", "ObjectType", "ItemName", "SourceUrl", "SourceList", "SourceListId", "SourceItemId", "DestinationUrl", "DestinationList", "Message", "Details", "HelpLinks", "CopyOptions", "ImportStatus", "ThrottlingStatistics", "ItemKey", "PatternKey", "Pattern", "Category", "RuleId", "State", "Action", "AccessSide", "AccessEvidence", "InputFile"]
     raw_fields = ["Raw: " + header for header in raw_headers]
     atomic_csv(output_dir / "ClassifiedRows.csv", fields + raw_fields,
                [{**{field: row.get(field, "") for field in fields}, **{"Raw: " + name: row["Raw"].get(name, "") for name in raw_headers}} for row in rows])
@@ -611,6 +640,7 @@ def main():
     parser.add_argument("--source-snapshot", action="append", type=Path)
     parser.add_argument("--output-dir", type=Path)
     parser.add_argument("--project-root", type=Path)
+    parser.add_argument("--report-time-zone", default="", help="Windows time zone of the ShareGate report exporter for local dates")
     parser.add_argument("--set-state", choices=sorted(STATES))
     parser.add_argument("--pattern-key")
     parser.add_argument("--expected-state", default="")
@@ -634,7 +664,8 @@ def main():
     else:
         if not args.project_root or not args.input or not args.output_dir:
             parser.error("--project-root, --input and --output-dir are required for analysis")
-        analyze(args.input, args.output_dir, args.project_root, args.session, args.source_label, args.source_snapshot)
+        analyze(args.input, args.output_dir, args.project_root, args.session, args.source_label,
+                args.source_snapshot, args.report_time_zone)
 
 
 if __name__ == "__main__":
