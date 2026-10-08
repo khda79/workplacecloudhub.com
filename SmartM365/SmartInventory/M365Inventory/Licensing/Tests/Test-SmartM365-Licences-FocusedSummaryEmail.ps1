@@ -31,7 +31,7 @@ $names = @(
   'Get-LicensesFocusedSummaryRows', 'Get-LicensesAdditionalOverviewRows', 'New-LicensesOverviewCardHtml',
   'ConvertTo-LicensesActivityDate', 'ConvertTo-LicensesMailboxSizeGb', 'Get-LicensesCsvSource',
   'Import-LicensesSourceCsv', 'Read-LicensesIndexedSource', 'Get-LicensesMailboxGapSummary', 'Get-LicensesAdAccountActivitySummary', 'Get-LicensesFocusedUsageRows', 'Format-LicensesMetric',
-  'New-LicensesRecoveryWorkbook', 'Publish-LicensesReportCsv', 'Publish-LicensesReportSnapshot', 'Write-LicensesDailyMailState', 'Enter-LicensesDailyMailGate',
+  'Get-LicensesAlertSummary', 'New-LicensesRecoveryWorkbook', 'Publish-LicensesReportCsv', 'Publish-LicensesReportSnapshot', 'Write-LicensesDailyMailState', 'Enter-LicensesDailyMailGate',
   'Send-LicensesFocusedSummaryEmail', 'Read-LicensesTenantSnapshot'
 )
 $definitions = @($ast.FindAll({
@@ -142,6 +142,9 @@ Assert-Equal $script:SentMail[0].BookCandidates.Count 0 'Workbook with unavailab
 Assert-Equal (Test-Path -LiteralPath $script:SentMail[0].AttachmentPath) $false 'Temporary attachment removed after send'
 Assert-Equal $script:SentMail[0].MailPurpose 'Report' 'Mail purpose'
 Assert-Equal $script:SentMail[0].To 'reports@example.invalid' 'Report recipient'
+if ($script:SentMail[0].BodyHtml -notmatch '(?s)License alerts.*>N/D</div>.*Awaiting capacity.*F1 N/D · F3 N/D · E3 N/D · E5 N/D.*>N/D</div>.*Licensing errors.*F1 N/D · F3 N/D · E3 N/D · E5 N/D') {
+  throw 'Unqualified assignment sources must show N/D in both top alert cards.'
+}
 foreach ($product in @('F1','F3','E3','E5')) {
   if ($script:SentMail[0].BodyHtml -notmatch ('>' + $product + '</td>')) { throw "Missing product '$product' in mail body." }
 }
@@ -575,14 +578,14 @@ try {
   }
   $overviewBody = $script:SentMail[0].BodyHtml
   if ($overviewBody.IndexOf('>License overview</h2>') -lt 0 -or
-      $overviewBody -notmatch '(?s)>License overview</h2>\s*<h2[^>]*>License recovery overview</h2>' -or
+      $overviewBody -notmatch '(?s)>License overview</h2>\s*<h3[^>]*>License alerts</h3>.*<h2[^>]*>License recovery overview</h2>' -or
       $overviewBody.IndexOf('>License recovery overview</h2>') -ge $overviewBody.IndexOf('MICROSOFT 365 SUITES') -or
       $overviewBody.IndexOf('Recovery candidates F3/F1') -ge $overviewBody.IndexOf('MICROSOFT 365 SUITES') -or
       $overviewBody.IndexOf('MICROSOFT 365 SUITES') -ge $overviewBody.IndexOf('COPILOT, DYNAMICS 365 AND POWER BI') -or
       $overviewBody.IndexOf('COPILOT, DYNAMICS 365 AND POWER BI') -ge $overviewBody.IndexOf('01 &nbsp; License capacity') -or
       $overviewBody -notlike '*MICROSOFT 365 SUITES*' -or
       $overviewBody -notlike '*COPILOT, DYNAMICS 365 AND POWER BI*') {
-    throw 'Recovery KPIs are not immediately below License overview and above the license bands.'
+    throw 'License alerts and recovery KPIs are not above the license bands.'
   }
   foreach ($label in @('F1','F3','E3','E5','Copilot','Dynamics 365','Power BI')) {
     if ($overviewBody -notmatch ('>' + [regex]::Escape($label) + '</div>')) { throw "Missing overview card '$label'." }
@@ -845,8 +848,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBXQBqnRsHS50Fq
-# PRrztNmUcKMU6II15Ndb90zv4y30QaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDTM3+CuCRQTEGy
+# wR7X++YewKMpf9sd0IOJ3A1xwUTuhqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -979,31 +982,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEINO7CI7zvrjsqB0aAa+NW6wFaLQmlMg+E/KLtGEewHwJMA0GCSqG
-# SIb3DQEBAQUABIIBgFWQJUrnrf0ffnP0qkTmf9mXrkCFzGbHEdehYuhYph+C+y4T
-# LPe0SoHDyrlIPt1XaogYVemBd1vidg7+hrbRmKJ3BtBrO3nuRhPw2wLfOR+aFZIu
-# XE6ZSKSmOKL0mhttMHswuzx/3gP8F7ifF9x52hvXeUZpm9YWfGmHic+x0BRh/+yO
-# YN+WGA3wVZDAHhcDLOCOkcPYVP0ri4UECZ7oTDfu/OUowSsLQoybsmD8nw0Ktu34
-# sWPoYBAL1nZP1ba1OAZ3QmjJuY1RJnVAonz8bjwqagHcrWGKHsqgCm9EyQ7VsFFs
-# XnsMrYy9JZ0UJ1RRgoJI7emmMFpux1L3HXz25Q2yout6ZuUc1h2AO/Kn+3xRa7i3
-# iLjMjYzs6/Mz0MjKibjiTVwAfffPetLcZzarvlcrHGVGqB6YCgeF+x8zJlG1eFv5
-# Pl3q3jLpIjcF7qmUlotRpN1omaBV5HVjACWwYwHGHYRYV9XGDRWcD2sM8LEsWpqn
-# BF8idI27Hwn1ea0QcaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIFkWh61moPLHg2rD3f3YCem3RWs/tCOJlHl9bgqdP3R+MA0GCSqG
+# SIb3DQEBAQUABIIBgCRF+djnH4CCVl5fsd5Atqdbdea/2nrbRW41QELNqUoTDhrv
+# X/Wye1gyKtbNnDOAVuVxWzVtCo5+ccn6TDUDjMeBmGPusJ75jgczVJzdjPMN4IdL
+# LJvfUUsZfpZjHwQyW5dAhPYC93LVe2dcajwaHWNElLsCvjzxiIJKc0DVl52XzrIk
+# pHRX08iDJGzhaBuZft7KoPP3L5xNxIStnoOEA49wKBJnO9qku8PjRdB0W7p9ov/W
+# hZS4rFRb2FLFgaWR44rXL8FBIF6dyVlEePTx539jelFhqNF5e/rtrmaqzrH29Qx0
+# 8VO0dixfcupg4FN7s6ttjagUIXtxXKqYgwbvWxAac21BGUIRFtKANUFYvL1VBqv3
+# FGOup18BkJRluMwYbrCpOyl9ONAhEeXkjAFrH0IektvUr1lcxVwl8OyAQqLLgCxJ
+# tgyF5uCcfw2eXFXMLkWDRB8KiBm//xyqGkTD3h6A7fyin1eekgB1ZQfAk0XDmZUf
+# aRfdF6S9QdBRqwVaMaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDcyMDI5
-# NDdaMC8GCSqGSIb3DQEJBDEiBCA4HLRRZkJmDumf9qO5gyZfV3iesvJrJEkVjtGi
-# 8VsIfTANBgkqhkiG9w0BAQEFAASCAgCvj7zJpeKN/1YwxJPTh165gJjIaDrdZx7y
-# Qp+3qcBWiXAkXzJCeoMs5uTIg8V7LsJz3+nBgwQ+e3R8/C5lpoWUU7n1U7+vxayJ
-# MVi7O/wEH3Zgad8HbILotw8Cv++I8eYBpniWLaVdxnA1B7W5RskHOHCZADSklM7N
-# +fYIxKZSYR0ELy4k/KVGlv9XWed4yjL4VIyV6samzuwW3hVoo4tqsAsYhZitw8UL
-# e91otmoeTgn2bexam0XW5XGBf0MO0i1pIDXPv4g1W6sSW9mXVa4UifikXBeHxCre
-# lInnExAiLZ2qgKlGQhmoIMeV9ebWAAXlWHevF0tf66BfndrYqDYUUSL2/zMYCEIZ
-# JNvvO2woSyaqivcl3rfzB5FXt+M/ZpYbi30J3CVd2YK0nvN1LWRbYk+O8TEL8gGC
-# 4xLt6bSVIJZ/GMUPKVRJW4Ehr8I2R03/f8VkgFDWCfvuGqQ71b4y6oyoTCV1d2oI
-# P2OZPTTMYKO6pzNpZO6bt+welESbeA4CMixbT3e3sVzf1H55GxbUyLkLfBpbtYAK
-# pGD0G7JcLSDPFumZXC4jkhAYFPua5RRoBSIK9t4Vv01umdUenOlgvHOOEEvMrMd/
-# HsY4N5RQB3ETPAlZnkuoqrx+8bexS8+R2NyaxrHa54xYPBCMakohLSwBHYHuH/j7
-# vxQeVLY17Q==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDgxMTIy
+# MDlaMC8GCSqGSIb3DQEJBDEiBCD6/n67c3JQPcxR2xKq6ljbdkOrbXYc20YVewoC
+# kaAwijANBgkqhkiG9w0BAQEFAASCAgBIExmMNTnfLRdGR+x7ywqtAdc1DyaWsrt3
+# svUFIb4qMD7yHk8Ow+ReFYes1dGw8TFIXc9qqFNaNAjPM+ca9ThO7sRZB8/Maro3
+# keCjTpufDjeL3scclvqlaN+vDVgcB/hstVof/YqawaZaUFeMBmW+ENIUV7krRUr7
+# /WqD8dsj1zr4XBSlNnINRSfsWzabi8oJmMeZ/pmfjoqRXSdK3wimu1c9EL4/omFn
+# odiHGiwcxFSk6TSv2p4jgbe/+7IOvxbgcINZ628H66kK8+qGdtlkXUWWyU1SLBV1
+# EnphtrRRErvmsxKivAfGZDn6hAZqhqurNpp+njuG17SXTOWI7QOjoH0aZD0NX5xP
+# uj0sSU2ABz89ff8FlHziWhG9H8Q8nQHT0OWI0NrGKsDUv6H5H8sA2eMHyik8khAZ
+# nWgG3ETzzzy9fcU/j6y41j99I3bns2A5uacNkBquEAiOOqtgEeX5EjZmPQbLm60X
+# YHs2TOgFi3blqEw+CdX9fznHfgOzFRzmjgkiW49XQQGp7wfSBpglQfFGvSn06afq
+# SI08rZYBEOWnBJrzH+qNRRDP180lLnD2EEPyIYdgmxFLIx0dCGTcetYgNe093GD6
+# iV3zsDszTuyoQRjX5H705BWGrlA52Ufv2N80J+cqOvgyfs5Mrvin0SN3p3gjtKTS
+# cQN+gZxaPQ==
 # SIG # End signature block

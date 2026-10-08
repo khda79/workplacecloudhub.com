@@ -8,8 +8,9 @@
   ForceAdCsvAnalysis uses a fresh, structurally valid AD CSV for this email when only its collector receipt is rejected.
   BypassLicenseUsersReceipt temporarily accepts the fresh license-users CSV when its file receipt is missing or a new collection is running over a prior CSV.
   ForceLicenseSummaryEmail sends the report again even when it was already sent on the current Europe/Paris day.
+  The report also lists target-suite users awaiting license capacity and other assignment errors from qualified existing CSVs.
 .VERSION
- 1.43
+ 1.44
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication; Microsoft.Graph.Identity.DirectoryManagement; Microsoft.Graph.Users; Microsoft.Graph.Groups; ImportExcel for the report attachment.
@@ -17,7 +18,7 @@
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
   Author: https://github.com/khda79/workplacecloudhub.com
-     Version : 1.43
+     Version : 1.44
   PowerShell: PowerShell 7+
   Minimum application permissions: Directory.Read.All, User.Read.All, Group.Read.All
   Requires: Microsoft.Graph.Authentication
@@ -1570,11 +1571,164 @@ function Format-LicensesMetric {
   return "$value (N/D: $unknown)"
 }
 
+function Get-LicensesAssignmentIssues {
+  param(
+    [Parameter(Mandatory)][string]$Folder,
+    [Parameter(Mandatory)][string]$TenantKey,
+    [Parameter(Mandatory)][object[]]$TenantRows,
+    [Parameter(Mandatory)][datetimeoffset]$LicenseSnapshotUtc,
+    [datetime]$AsOfUtc = [datetime]::UtcNow
+  )
+  $productParts = [ordered]@{
+    'Microsoft 365 F1' = @('M365_F1','M365_F1_COMM')
+    'Microsoft 365 F3' = @('SPE_F1')
+    'Microsoft 365 E3' = @('SPE_E3')
+    'Microsoft 365 E5' = @('SPE_E5')
+  }
+  $counts = [ordered]@{}
+  foreach ($product in $productParts.Keys) { $counts[$product] = [ordered]@{ CapacityWait=0; OtherErrors=0 } }
+  $specs = @(
+    @{File='M365_Licenses_AssignmentPaths.csv'; Columns=@('TenantKey','UserId','SkuId','AssignedByGroupId','AssignmentRoute','AssignmentState','AssignmentError','LastUpdatedDateTime'); Receipt='SmartInventory_SmartM365-Licences-Inventory.current.json.txt'},
+    @{File='M365_Licenses_Users.csv'; Columns=@('TenantKey','UserId','SkuPartNumber'); Receipt='SmartInventory_SmartM365-Licences-Inventory.current.json.txt'},
+    @{File='M365_Users_Active.csv'; Columns=@('TenantKey','Object Id','User principal name','Display name','AccountEnabled','UserType'); Receipt='SmartInventory_SmartM365-ActiveUsers-Inventory.current.json.txt'},
+    @{File='M365_EntraGroups_All.csv'; Columns=@('TenantKey','GroupId','DisplayName'); Receipt='SmartInventory_SmartM365-Licences-Inventory.current.json.txt'}
+  )
+  $sources = [System.Collections.Generic.List[object]]::new()
+  foreach ($spec in $specs) {
+    $source = Get-LicensesCsvSource -Folder $Folder -FileName $spec.File -Columns $spec.Columns -AsOfUtc $AsOfUtc -CollectorManifestName $spec.Receipt -RequireFileReceipt
+    if ($source.Ready -and $spec.File -ne 'M365_Users_Active.csv' -and
+        [math]::Abs(($source.ModifiedUtc - $LicenseSnapshotUtc.UtcDateTime).TotalHours) -gt 24) {
+      $source.Ready = $false
+      $source.Reason = 'assignment source does not match the tenant snapshot date (over 24 hours apart)'
+    }
+    $sources.Add($source)
+  }
+  $result = [pscustomobject]@{ Available=$false; Reason=''; Counts=$counts; Rows=@(); Sources=$sources.ToArray() }
+  $rejected = @($sources | Where-Object { -not $_.Ready })
+  if ($rejected.Count -gt 0) {
+    $result.Reason = (@($rejected | ForEach-Object { '{0}: {1}' -f $_.Name,$_.Reason }) -join '; ')
+    return $result
+  }
+  $runIds = @($sources | Where-Object { $_.Name -ne 'M365_Users_Active.csv' } | ForEach-Object { [string]$_.Proof.RunId } | Sort-Object -Unique)
+  if ($runIds.Count -ne 1 -or [string]::IsNullOrWhiteSpace($runIds[0])) {
+    $result.Reason = 'license assignment files do not share one completed collection run'
+    return $result
+  }
+  try {
+    $skuProduct = @{}
+    foreach ($tenantRow in $TenantRows) {
+      $part = ([string]$tenantRow.TenantSkuPartNumber).Trim().ToUpperInvariant()
+      foreach ($product in $productParts.Keys) {
+        if ($part -notin $productParts[$product]) { continue }
+        $skuId = ([string]$tenantRow.Id).Trim().ToLowerInvariant()
+        if (-not $skuId) { throw "Tenant SKU ID is missing for $product." }
+        if ($skuProduct.ContainsKey($skuId) -and $skuProduct[$skuId] -ne $product) { throw "Tenant SKU ID maps to multiple target suites: $skuId" }
+        $skuProduct[$skuId] = $product
+      }
+    }
+    $effective = @{}
+    foreach ($row in (Import-LicensesSourceCsv -Source $sources[1])) {
+      if ([string]$row.TenantKey -ine $TenantKey) { throw 'another tenant is present in effective license assignments' }
+      $userId = ([string]$row.UserId).Trim().ToLowerInvariant()
+      $part = ([string]$row.SkuPartNumber).Trim().ToUpperInvariant()
+      if (-not $userId) { throw 'effective license assignment has no UserId' }
+      foreach ($product in $productParts.Keys) {
+        if ($part -in $productParts[$product]) { $effective["$userId|$product"] = $true; break }
+      }
+    }
+    $paths = @{}
+    $wantedUsers = @{}
+    foreach ($row in (Import-LicensesSourceCsv -Source $sources[0])) {
+      if ([string]$row.TenantKey -ine $TenantKey) { throw 'another tenant is present in license assignment paths' }
+      $skuId = ([string]$row.SkuId).Trim().ToLowerInvariant()
+      if (-not $skuProduct.ContainsKey($skuId)) { continue }
+      $state = ([string]$row.AssignmentState).Trim()
+      $errorCode = ([string]$row.AssignmentError).Trim()
+      if ($state -notin @('Error','ActiveWithError') -and $errorCode -in @('','None')) { continue }
+      $userId = ([string]$row.UserId).Trim().ToLowerInvariant()
+      if (-not $userId) { throw 'failed license assignment has no UserId' }
+      $groupId = ([string]$row.AssignedByGroupId).Trim()
+      $route = ([string]$row.AssignmentRoute).Trim()
+      if (($groupId -and $route -ne 'Group') -or (-not $groupId -and $route -ne 'Direct')) { throw 'failed license assignment route differs from its group ID' }
+      $product = $skuProduct[$skuId]
+      $hasEffective = $effective.ContainsKey("$userId|$product")
+      $category = if ($errorCode -eq 'CountViolation' -and -not $hasEffective) { 'Capacity wait' } else { 'Licensing error' }
+      $key = "$userId|$product|$category|$errorCode"
+      if (-not $paths.ContainsKey($key)) { $paths[$key] = [System.Collections.Generic.List[object]]::new() }
+      $paths[$key].Add([pscustomobject]@{ UserId=$userId; Product=$product; SkuId=$skuId; Category=$category; ErrorCode=$errorCode; State=$state; GroupId=$groupId; Route=$route; Updated=[string]$row.LastUpdatedDateTime; HasEffective=$hasEffective })
+      $wantedUsers[$userId] = $true
+    }
+    $users = Read-LicensesIndexedSource -Source $sources[2] -ExpectedTenantKey $TenantKey -KeyColumn 'Object Id' -WantedKeys $wantedUsers -AsOfUtc $AsOfUtc
+    if (-not $users.Ready) { throw "Active user source: $($users.Source.Reason)" }
+    $groups = @{}
+    foreach ($row in (Import-LicensesSourceCsv -Source $sources[3])) {
+      if ([string]$row.TenantKey -ine $TenantKey) { throw 'another tenant is present in licensing groups' }
+      $groupId = ([string]$row.GroupId).Trim().ToLowerInvariant()
+      if (-not $groupId -or $groups.ContainsKey($groupId)) { throw 'licensing group ID is missing or duplicated' }
+      $groups[$groupId] = [string]$row.DisplayName
+    }
+    $rows = foreach ($key in ($paths.Keys | Sort-Object)) {
+      $items = @($paths[$key])
+      $first = $items[0]
+      $identity = if ($users.Rows.ContainsKey($first.UserId) -and -not $users.Duplicates.ContainsKey($first.UserId)) { $users.Rows[$first.UserId] } else { $null }
+      $groupIds = @($items.GroupId | Where-Object { $_ } | Sort-Object -Unique)
+      $groupNames = @($groupIds | ForEach-Object { if ($groups.ContainsKey($_.ToLowerInvariant())) { $groups[$_.ToLowerInvariant()] } else { 'N/D' } })
+      [pscustomobject][ordered]@{
+        Product=$first.Product; Category=$first.Category; UserId=$first.UserId
+        UserPrincipalName=if ($identity) { [string]$identity.'User principal name' } else { '' }
+        DisplayName=if ($identity) { [string]$identity.'Display name' } else { '' }
+        IdentityStatus=if ($users.Duplicates.ContainsKey($first.UserId)) { 'Ambiguous' } elseif ($identity) { 'Matched' } else { 'Not found' }
+        AccountEnabled=if ($identity) { [string]$identity.AccountEnabled } else { '' }
+        UserType=if ($identity) { [string]$identity.UserType } else { '' }
+        SkuIds=(@($items.SkuId | Sort-Object -Unique) -join ';')
+        AssignmentStates=(@($items.State | Sort-Object -Unique) -join ';')
+        AssignmentError=$first.ErrorCode; AssignmentRoutes=(@($items.Route | Sort-Object -Unique) -join ';')
+        AssignedByGroupIds=($groupIds -join ';'); AssignedByGroupNames=($groupNames -join ';')
+        HasEffectiveTargetSuite=[bool]$first.HasEffective
+        LastUpdatedDateTime=(@($items.Updated | Where-Object { $_ } | Sort-Object -Descending | Select-Object -First 1) -join '')
+        AssignmentPaths=$items.Count
+      }
+    }
+    foreach ($product in $productParts.Keys) {
+      $counts[$product].CapacityWait = @($rows | Where-Object { $_.Product -eq $product -and $_.Category -eq 'Capacity wait' } | Select-Object -ExpandProperty UserId -Unique).Count
+      $counts[$product].OtherErrors = @($rows | Where-Object { $_.Product -eq $product -and $_.Category -eq 'Licensing error' } | Select-Object -ExpandProperty UserId -Unique).Count
+    }
+    $result.Available = $true
+    $result.Rows = @($rows)
+  }
+  catch { $result.Reason = $_.Exception.Message; $result.Rows = @() }
+  return $result
+}
+
+function Get-LicensesAlertSummary {
+  param([AllowNull()]$AssignmentIssues)
+  $products = [ordered]@{ F1='Microsoft 365 F1'; F3='Microsoft 365 F3'; E3='Microsoft 365 E3'; E5='Microsoft 365 E5' }
+  $result = [pscustomobject]@{
+    AwaitingCapacity='N/D'; LicensingErrors='N/D'
+    AwaitingBreakdown='F1 N/D · F3 N/D · E3 N/D · E5 N/D'
+    ErrorsBreakdown='F1 N/D · F3 N/D · E3 N/D · E5 N/D'
+  }
+  if (-not $AssignmentIssues -or -not $AssignmentIssues.Available) { return $result }
+
+  $waitingUsers = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+  $errorUsers = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+  foreach ($row in @($AssignmentIssues.Rows)) {
+    if ($row.Category -eq 'Capacity wait') { [void]$waitingUsers.Add([string]$row.UserId) }
+    elseif ($row.Category -eq 'Licensing error') { [void]$errorUsers.Add([string]$row.UserId) }
+  }
+  $result.AwaitingCapacity = [string]$waitingUsers.Count
+  $result.LicensingErrors = [string]$errorUsers.Count
+  $result.AwaitingBreakdown = (@(foreach ($label in $products.Keys) { '{0} {1}' -f $label,[long]$AssignmentIssues.Counts[$products[$label]].CapacityWait }) -join ' · ')
+  $result.ErrorsBreakdown = (@(foreach ($label in $products.Keys) { '{0} {1}' -f $label,[long]$AssignmentIssues.Counts[$products[$label]].OtherErrors }) -join ' · ')
+  return $result
+}
+
 function New-LicensesRecoveryWorkbook {
   param(
     [Parameter(Mandatory)][string]$Path,
     [Parameter(Mandatory)][object[]]$SummaryRows,
     [AllowNull()]$Usage,
+    [AllowNull()]$AssignmentIssues,
     [Parameter(Mandatory)][string]$CollectedAtUtc
   )
 
@@ -1604,6 +1758,8 @@ function New-LicensesRecoveryWorkbook {
       RecoveryCandidates = if ($available) { $expected } else { 'N/D' }
       UnknownUsers = if ($available) { [long]$metric.Counts.RecoveryUnknown } else { 'N/D' }
       E3toF3ReviewCandidates = if ($product.Product -ne 'Microsoft 365 E3') { 'N/A' } elseif ($downgradeReview -and $downgradeReview.Available) { [long]$downgradeReview.Candidates } else { 'N/D' }
+      AwaitingLicense = if ($AssignmentIssues -and $AssignmentIssues.Available) { [long]$AssignmentIssues.Counts[$product.Product].CapacityWait } else { 'N/D' }
+      LicensingErrors = if ($AssignmentIssues -and $AssignmentIssues.Available) { [long]$AssignmentIssues.Counts[$product.Product].OtherErrors } else { 'N/D' }
       Qualification = if (-not $available) { 'Source not qualified' } elseif ($Usage.LicenseSourceForced) { 'Provisional: license receipt bypassed' } else { 'Qualified' }
       LicenseSnapshotUtc = $CollectedAtUtc
     }
@@ -1681,6 +1837,49 @@ function New-LicensesRecoveryWorkbook {
     }
     finally { Close-ExcelPackage -ExcelPackage $package -ErrorAction Stop }
   }
+  foreach ($category in @('Capacity wait','Licensing error')) {
+    $sheetName = if ($category -eq 'Capacity wait') { 'Awaiting licenses' } else { 'Licensing errors' }
+    $tableName = if ($category -eq 'Capacity wait') { 'LicenseCapacityWait' } else { 'LicenseAssignmentErrors' }
+    $issueRows = @(if ($AssignmentIssues -and $AssignmentIssues.Available) { $AssignmentIssues.Rows | Where-Object Category -eq $category })
+    if ($issueRows.Count -gt 0) {
+      $safeRows = foreach ($item in ($issueRows | Sort-Object Product,UserPrincipalName,UserId)) {
+        $upn = [string]$item.UserPrincipalName
+        $display = [string]$item.DisplayName
+        $groupNames = [string]$item.AssignedByGroupNames
+        if ($upn -match '^\s*[=+\-@]') { $upn = "'$upn" }
+        if ($display -match '^\s*[=+\-@]') { $display = "'$display" }
+        if ($groupNames -match '^\s*[=+\-@]') { $groupNames = "'$groupNames" }
+        $updated = ([string]$item.LastUpdatedDateTime).Trim()
+        [pscustomobject][ordered]@{
+          Product=$item.Product; UserId=$item.UserId; UserPrincipalName=$upn; DisplayName=$display
+          AccountEnabled=$item.AccountEnabled; UserType=$item.UserType; IdentityStatus=$item.IdentityStatus
+          AssignmentError=$item.AssignmentError; AssignmentStates=$item.AssignmentStates
+          AssignmentRoutes=$item.AssignmentRoutes; AssignedByGroupNames=$groupNames; AssignedByGroupIds=$item.AssignedByGroupIds
+          HasEffectiveTargetSuite=$item.HasEffectiveTargetSuite
+          LastUpdatedDateTime=if ($updated) { [datetimeoffset]::Parse($updated,[Globalization.CultureInfo]::InvariantCulture).UtcDateTime } else { $null }
+          AssignmentPaths=$item.AssignmentPaths
+        }
+      }
+      $safeRows | Export-Excel -Path $Path -WorksheetName $sheetName -TableName $tableName -Append -AutoSize -FreezeTopRow -BoldTopRow -AutoFilter -ErrorAction Stop
+      $package = Open-ExcelPackage -Path $Path -ErrorAction Stop
+      try {
+        $sheet = $package.Workbook.Worksheets[$sheetName]
+        $sheet.Cells[2,14,$sheet.Dimension.End.Row,14].Style.Numberformat.Format = 'yyyy-mm-dd hh:mm:ss'
+      }
+      finally { Close-ExcelPackage -ExcelPackage $package -ErrorAction Stop }
+    }
+    else {
+      $package = Open-ExcelPackage -Path $Path -ErrorAction Stop
+      try {
+        $sheet = $package.Workbook.Worksheets.Add($sheetName)
+        $headers = @('Product','UserId','UserPrincipalName','DisplayName','AccountEnabled','UserType','IdentityStatus','AssignmentError','AssignmentStates','AssignmentRoutes','AssignedByGroupNames','AssignedByGroupIds','HasEffectiveTargetSuite','LastUpdatedDateTime','AssignmentPaths')
+        for ($column=0; $column -lt $headers.Count; $column++) { $sheet.Cells[1,($column+1)].Value = $headers[$column] }
+        $sheet.Cells[1,1,1,$headers.Count].Style.Font.Bold = $true
+        $sheet.View.FreezePanes(2,1)
+      }
+      finally { Close-ExcelPackage -ExcelPackage $package -ErrorAction Stop }
+    }
+  }
   $file = Get-Item -LiteralPath $Path -ErrorAction Stop
   if ($file.Length -gt 3MB) {
     throw ('Recovery workbook is {0:N1} MB; Graph mail attachments must be at most 3 MB.' -f ($file.Length / 1MB))
@@ -1693,8 +1892,9 @@ function Publish-LicensesReportCsv {
     [Parameter(Mandatory)][string]$Folder,
     [Parameter(Mandatory)]$Snapshot
   )
-  $summaryColumns = @('SnapshotId','TenantKey','GeneratedAtUtc','LicenseCollectedAtUtc','Product','Category','EnabledUnits','ConsumedUnits','AvailableUnits','Subscribed','AssignedUsers','RecoveryCandidates','RecoveryUnknown','DisabledUsers','DisabledUnknown','NoM365Activity','NoM365ActivityUnknown','MultipleTargetSuites','MultipleTargetSuitesUnknown','MultipleAssignedSkus','MultipleAssignedSkusUnknown','NoAdOrEntraActivity','NoAdOrEntraActivityUnknown','NoMailboxActivity','NoMailboxActivityUnknown','NoLocalAppsUse','NoLocalAppsUseUnknown','CandidatesPrimaryIntunePc','CandidatesPrimaryIntunePcUnknown','SharedMailboxesLicensed','SharedUnder50Gb','SharedRemovalCandidates','SharedUnknown','E3ToF3ReviewAssigned','E3ToF3ReviewCandidates','E3ToF3ReviewUnknown','E3ToF3ReviewExcluded','E3ToF3ReviewRecoveryExcluded','EvidenceStatus','WorkbookQualification')
+  $summaryColumns = @('SnapshotId','TenantKey','GeneratedAtUtc','LicenseCollectedAtUtc','Product','Category','EnabledUnits','ConsumedUnits','AvailableUnits','Subscribed','AssignedUsers','AssignmentCapacityWait','AssignmentOtherErrors','AssignmentEvidenceStatus','RecoveryCandidates','RecoveryUnknown','DisabledUsers','DisabledUnknown','NoM365Activity','NoM365ActivityUnknown','MultipleTargetSuites','MultipleTargetSuitesUnknown','MultipleAssignedSkus','MultipleAssignedSkusUnknown','NoAdOrEntraActivity','NoAdOrEntraActivityUnknown','NoMailboxActivity','NoMailboxActivityUnknown','NoLocalAppsUse','NoLocalAppsUseUnknown','CandidatesPrimaryIntunePc','CandidatesPrimaryIntunePcUnknown','SharedMailboxesLicensed','SharedUnder50Gb','SharedRemovalCandidates','SharedUnknown','E3ToF3ReviewAssigned','E3ToF3ReviewCandidates','E3ToF3ReviewUnknown','E3ToF3ReviewExcluded','E3ToF3ReviewRecoveryExcluded','EvidenceStatus','WorkbookQualification')
   $candidateColumns = @('SnapshotId','TenantKey','CandidateType','Product','UserId','TenantUserKey','IdentityJoinStatus','UserPrincipalName','DisplayName','Reason','LastAdActivityDate','LastM365ActivityDate','PrimaryOnIntuneWindowsPc','TargetSuites','MailboxSizeGB','OneDriveUsedGB','OneDriveUsedBytes','ArchiveStatus','LitigationHoldEnabled','RetentionHoldEnabled','WindowsAppsUse180d','MacAppsUse180d')
+  $assignmentColumns = @('SnapshotId','TenantKey','Product','Category','UserId','UserPrincipalName','DisplayName','IdentityStatus','AccountEnabled','UserType','SkuIds','AssignmentStates','AssignmentError','AssignmentRoutes','AssignedByGroupIds','AssignedByGroupNames','HasEffectiveTargetSuite','LastUpdatedDateTime','AssignmentPaths')
   $gapColumns = @('SnapshotId','TenantKey','Section','Metric','Value','EvidenceStatus')
   $sourceColumns = @('SnapshotId','TenantKey','Name','Ready','Provisional','Date','Reason','SHA256')
   $provisional = @($Snapshot.Sources | Where-Object Provisional).Count -gt 0
@@ -1711,6 +1911,9 @@ function Publish-LicensesReportCsv {
           Product=$product.Product; Category=$category; EnabledUnits=$product.Enabled; ConsumedUnits=$product.Consumed
           AvailableUnits=([long]$product.Enabled - [long]$product.Consumed); Subscribed=[bool]$product.Subscribed
           AssignedUsers=(& $count 'Assigned'); RecoveryCandidates=(& $count 'RecoveryCandidates'); RecoveryUnknown=(& $count 'RecoveryUnknown')
+          AssignmentCapacityWait=if ($category -eq 'Suite' -and $Snapshot.AssignmentIssues.Available) { $Snapshot.AssignmentIssues.Counts[$product.Product].CapacityWait } else { $null }
+          AssignmentOtherErrors=if ($category -eq 'Suite' -and $Snapshot.AssignmentIssues.Available) { $Snapshot.AssignmentIssues.Counts[$product.Product].OtherErrors } else { $null }
+          AssignmentEvidenceStatus=if ($category -ne 'Suite') { 'N/A' } elseif ($Snapshot.AssignmentIssues.Available) { 'Qualified' } else { 'N/D' }
           DisabledUsers=(& $count 'Disabled'); DisabledUnknown=(& $count 'DisabledUnknown')
           NoM365Activity=(& $count 'M365Inactive'); NoM365ActivityUnknown=(& $count 'M365Unknown')
           MultipleTargetSuites=(& $count 'Multiple'); MultipleTargetSuitesUnknown=(& $count 'MultipleUnknown')
@@ -1753,6 +1956,16 @@ function Publish-LicensesReportCsv {
       }
     }
   )
+  $assignmentIssues = @($Snapshot.AssignmentIssues.Rows | ForEach-Object {
+    [pscustomobject][ordered]@{
+      SnapshotId=$Snapshot.SnapshotId; TenantKey=$Snapshot.TenantKey; Product=$_.Product; Category=$_.Category
+      UserId=$_.UserId; UserPrincipalName=$_.UserPrincipalName; DisplayName=$_.DisplayName; IdentityStatus=$_.IdentityStatus
+      AccountEnabled=$_.AccountEnabled; UserType=$_.UserType; SkuIds=$_.SkuIds; AssignmentStates=$_.AssignmentStates
+      AssignmentError=$_.AssignmentError; AssignmentRoutes=$_.AssignmentRoutes; AssignedByGroupIds=$_.AssignedByGroupIds
+      AssignedByGroupNames=$_.AssignedByGroupNames; HasEffectiveTargetSuite=$_.HasEffectiveTargetSuite
+      LastUpdatedDateTime=$_.LastUpdatedDateTime; AssignmentPaths=$_.AssignmentPaths
+    }
+  })
   $gapMetrics = [ordered]@{
     UserMailboxes=@('Total','Universe','OtherSkus','NoSkus','Unknown','EntraEnabled','EntraDisabled','EntraStateUnknown')
     NoUserMailbox=@('Total','Universe','OtherSkus','NoSkus','Unknown','Guests','MemberEnabled','MemberDisabled')
@@ -1771,13 +1984,24 @@ function Publish-LicensesReportCsv {
   $sources = @($Snapshot.Sources | ForEach-Object {
     [pscustomobject][ordered]@{ SnapshotId=$Snapshot.SnapshotId; TenantKey=$Snapshot.TenantKey; Name=$_.Name; Ready=$_.Ready; Provisional=$_.Provisional; Date=$_.Date; Reason=$_.Reason; SHA256=$_.SHA256 }
   })
+  if ($Snapshot.AssignmentIssues.Available) {
+    foreach ($product in @($Snapshot.Products)) {
+      foreach ($check in @(@{Category='Capacity wait';Field='CapacityWait'},@{Category='Licensing error';Field='OtherErrors'})) {
+        $actual = @($assignmentIssues | Where-Object { $_.Product -eq $product.Product -and $_.Category -eq $check.Category } | Select-Object -ExpandProperty UserId -Unique).Count
+        $expected = [long]$Snapshot.AssignmentIssues.Counts[$product.Product][$check.Field]
+        if ($actual -ne $expected) { throw "License assignment issue CSV does not reconcile with $($product.Product) $($check.Category): $actual versus $expected." }
+      }
+    }
+  }
   if (@($summary).Count -ne 7 -or @($candidates | Where-Object CandidateType -eq 'Recovery').Count -ne @($Snapshot.RecoveryCandidates).Count -or
-      @($candidates | Where-Object CandidateType -eq 'E3 to F3 review').Count -ne @($Snapshot.DowngradeCandidates).Count -or @($gaps).Count -ne 25) {
+      @($candidates | Where-Object CandidateType -eq 'E3 to F3 review').Count -ne @($Snapshot.DowngradeCandidates).Count -or
+      @($assignmentIssues).Count -ne @($Snapshot.AssignmentIssues.Rows).Count -or @($gaps).Count -ne 25) {
     throw 'License report CSV rows do not reconcile with the mail snapshot.'
   }
   foreach ($spec in @(
     @{ Name='M365_Licenses_ReportSummary.csv'; Columns=$summaryColumns; Rows=$summary },
     @{ Name='M365_Licenses_ReportCandidates.csv'; Columns=$candidateColumns; Rows=$candidates },
+    @{ Name='M365_Licenses_ReportAssignmentIssues.csv'; Columns=$assignmentColumns; Rows=$assignmentIssues },
     @{ Name='M365_Licenses_ReportGaps.csv'; Columns=$gapColumns; Rows=$gaps },
     @{ Name='M365_Licenses_ReportSources.csv'; Columns=$sourceColumns; Rows=$sources }
   )) {
@@ -1810,7 +2034,8 @@ function Publish-LicensesReportSnapshot {
     [Parameter(Mandatory)][string]$CollectedAtUtc,
     [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$SummaryRows,
     [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$AdditionalRows,
-    [AllowNull()]$Usage
+    [AllowNull()]$Usage,
+    [AllowNull()]$AssignmentIssues
   )
   $snapshotId = [guid]::NewGuid().ToString('N')
   $metricByProduct = @{}
@@ -1866,8 +2091,13 @@ function Publish-LicensesReportSnapshot {
     throw 'Tenant license CSV changed during report snapshot preparation.'
   }
   $sources.Add([ordered]@{ Name='M365_Licenses_Tenant.csv'; Ready=$true; Provisional=$false; Date=$tenantSource.CollectedAtUtc; Reason=''; SHA256=$tenantHashBefore })
-  if ($Usage) {
-    foreach ($source in @($Usage.Sources)) {
+  $seenSources = @{}
+  $reportSources = [System.Collections.Generic.List[object]]::new()
+  if ($Usage) { foreach ($source in @($Usage.Sources)) { $reportSources.Add($source) } }
+  if ($AssignmentIssues) { foreach ($source in @($AssignmentIssues.Sources)) { $reportSources.Add($source) } }
+  foreach ($source in $reportSources) {
+      if ($seenSources.ContainsKey([string]$source.Name)) { continue }
+      $seenSources[[string]$source.Name] = $true
       $hash = ''
       if ($source.Ready) {
         if (-not (Test-Path -LiteralPath $source.Path -PathType Leaf)) { throw "Qualified source disappeared before snapshot publication: $($source.Name)" }
@@ -1886,7 +2116,6 @@ function Publish-LicensesReportSnapshot {
         }
       }
       $sources.Add([ordered]@{ Name=[string]$source.Name; Ready=[bool]$source.Ready; Provisional=[bool]$source.Forced; Date=[string]$source.Date; Reason=[string]$source.Reason; SHA256=$hash })
-    }
   }
   $gap = $null
   if ($Usage -and $Usage.MailboxGap) {
@@ -1923,6 +2152,7 @@ function Publish-LicensesReportSnapshot {
   }
   $recovery = @(if ($Usage) { $Usage.RecoveryDetails })
   $downgrade = @(if ($Usage) { $Usage.DowngradeDetails })
+  $assignment = if ($AssignmentIssues) { $AssignmentIssues } else { [pscustomobject]@{ Available=$false; Reason='assignment issues not analyzed'; Counts=@{}; Rows=@() } }
   foreach ($product in $products) {
     if ($product.UsageAvailable -and @($recovery | Where-Object License -eq $product.Product).Count -ne $product.Counts.RecoveryCandidates) {
       throw "Recovery detail does not reconcile with $($product.Product)."
@@ -1931,8 +2161,8 @@ function Publish-LicensesReportSnapshot {
   if ($Usage -and $Usage.DowngradeReview -and $Usage.DowngradeReview.Available -and
       $downgrade.Count -ne [long]$Usage.DowngradeReview.Candidates) { throw 'Downgrade detail does not reconcile with its KPI.' }
   $snapshot = [ordered]@{
-    SchemaVersion = 1
-    LogicVersion = '1.43'
+    SchemaVersion = 2
+    LogicVersion = '1.44'
     SnapshotId = $snapshotId
     TenantKey = $TenantKey
     GeneratedAtUtc = [datetimeoffset]::UtcNow.ToString('o')
@@ -1945,6 +2175,8 @@ function Publish-LicensesReportSnapshot {
     AdGapActivity = $adGap
     RecoveryCandidates = $recovery
     DowngradeCandidates = $downgrade
+    AssignmentIssues = [ordered]@{ Available=[bool]$assignment.Available; Reason=[string]$assignment.Reason
+      Counts=if ($assignment.Available) { $assignment.Counts } else { $null }; Rows=@($assignment.Rows) }
     Sources = $sources.ToArray()
   }
   $path = Join-Path $Folder 'M365_Licenses_ReportSnapshot.json.txt'
@@ -2092,8 +2324,15 @@ function Send-LicensesFocusedSummaryEmail {
       }
       catch { WriteLog -Message ("Focused license usage metrics unavailable: {0}" -f $_.Exception.Message) 'WARNING' }
     }
+    $assignmentIssues = $null
+    if ($CsvFolderPath -and $ExpectedTenantKey) {
+      try {
+        $assignmentIssues = Get-LicensesAssignmentIssues -Folder $CsvFolderPath -TenantKey $ExpectedTenantKey -TenantRows $TenantRows -LicenseSnapshotUtc ([datetimeoffset]::Parse($CollectedAtUtc,[Globalization.CultureInfo]::InvariantCulture))
+      }
+      catch { WriteLog -Message ("License assignment issues unavailable: {0}" -f $_.Exception.Message) 'WARNING' }
+    }
     $reportSnapshot = if ($CsvFolderPath) {
-      Publish-LicensesReportSnapshot -Folder $CsvFolderPath -TenantKey $ExpectedTenantKey -CollectedAtUtc $CollectedAtUtc -SummaryRows $summaryRows -AdditionalRows $additionalRows -Usage $usage
+      Publish-LicensesReportSnapshot -Folder $CsvFolderPath -TenantKey $ExpectedTenantKey -CollectedAtUtc $CollectedAtUtc -SummaryRows $summaryRows -AdditionalRows $additionalRows -Usage $usage -AssignmentIssues $assignmentIssues
     } else { [pscustomobject]@{ Id='N/D' } }
     $usageByProduct = @{}
     if ($usage) { foreach ($usageRow in $usage.Rows) { $usageByProduct[$usageRow.Product] = $usageRow } }
@@ -2112,6 +2351,7 @@ function Send-LicensesFocusedSummaryEmail {
       foreach ($key in @('Assigned','RecoveryCandidates','RecoveryUnknown')) { $f3F1Counts[$key] += [long]$usageByProduct[$name].Counts[$key] }
     }
     $topRecoveryF3F1 = Format-LicensesMetric -Counts $f3F1Counts -ValueName 'RecoveryCandidates' -UnknownName 'RecoveryUnknown' -Available $f3F1Available
+    $licenseAlerts = Get-LicensesAlertSummary -AssignmentIssues $assignmentIssues
     $suiteColors = @('#0f766e','#2563eb','#6d28d9','#475569')
     $suiteCards = for ($index=0; $index -lt $summaryRows.Count; $index++) {
       New-LicensesOverviewCardHtml -Row $summaryRows[$index] -Width 25 -Accent $suiteColors[$index]
@@ -2123,6 +2363,7 @@ function Send-LicensesFocusedSummaryEmail {
     }
     $percentCulture = [Globalization.CultureInfo]::InvariantCulture
     $capacityRows = @()
+    $assignmentRows = @()
     $recoveryRows = @()
     $activityRows = @()
     foreach ($row in $summaryRows) {
@@ -2150,6 +2391,9 @@ function Send-LicensesFocusedSummaryEmail {
       $cell = 'padding:10px 8px;border-bottom:1px solid #e2e8f0;font-size:12px;line-height:17px;color:#334155;vertical-align:top;'
       $lead = 'padding:10px 8px;border-bottom:1px solid #e2e8f0;font-size:12px;line-height:17px;color:#0f172a;font-weight:700;vertical-align:top;'
       $capacityRows += '<tr><td style="{0}">{1}</td><td style="{2}">{3}</td><td style="{2}">{4}</td><td style="{2}">{5}</td><td style="{2}">{6}</td><td style="{2}">{7}</td></tr>' -f $lead,$license,$cell,$row.Enabled,$consumedCapacity,$availableCapacity,$assigned,$status
+      $capacityWait = if ($assignmentIssues -and $assignmentIssues.Available) { [string]$assignmentIssues.Counts[$row.Product].CapacityWait } else { 'N/D' }
+      $otherErrors = if ($assignmentIssues -and $assignmentIssues.Available) { [string]$assignmentIssues.Counts[$row.Product].OtherErrors } else { 'N/D' }
+      $assignmentRows += '<tr><td style="{0}">{1}</td><td style="{2}">{3}</td><td style="{2}">{4}</td></tr>' -f $lead,$license,$cell,$capacityWait,$otherErrors
       $recoveryRows += '<tr><td style="{0}">{1}</td><td style="{2}font-weight:700;color:#0f766e;">{3}</td><td style="{2}">{4}</td><td style="{2}">{5}</td><td style="{2}">{6}</td><td style="{2}">{7}</td></tr>' -f $lead,$license,$cell,$recovery,$disabled,$m365,$recoveryPrimaryPc,$multiple
       $activityRows += '<tr><td style="{0}">{1}</td><td style="{2}">{3}</td><td style="{2}">{4}</td><td style="{2}">{5}</td><td style="{2}">{6}</td></tr>' -f $lead,$license,$cell,$adEntra,$mailbox,$apps,$multipleAll
     }
@@ -2225,6 +2469,9 @@ function Send-LicensesFocusedSummaryEmail {
     $adOverrideNote = if ($usage -and $usage.AdSourceForced) { '<div style="margin:0 0 16px;padding:11px 14px;background:#fff7ed;border-left:4px solid #d97706;font-size:12px;line-height:18px;color:#7c2d12;"><strong>Provisional AD/Entra indicator.</strong> The AD CSV was analyzed despite a rejected collector receipt. Confirm AD inventory completeness before using its inactivity counts for a license decision.</div>' } else { '' }
     $licenseOverrideNote = if ($usage -and $usage.LicenseSourceForced) { '<div style="margin:0 0 16px;padding:11px 14px;background:#fff7ed;border-left:4px solid #d97706;font-size:12px;line-height:18px;color:#7c2d12;"><strong>Provisional license assignment indicators.</strong> The license-users CSV has no current completed file receipt. Confirm a new complete licensing collection before using recovery counts for a license decision.</div>' } else { '' }
     $subject = 'Microsoft 365 license overview and recovery'
+    $assignmentStatusNote = if ($assignmentIssues -and -not $assignmentIssues.Available -and $assignmentIssues.Reason) {
+      '<p style="margin:5px 0 14px;font-size:11px;color:#b45309;">Assignment issues N/D: {0}</p>' -f [System.Net.WebUtility]::HtmlEncode([string]$assignmentIssues.Reason)
+    } else { '' }
     $tableStyle = 'width:100%;border-collapse:collapse;table-layout:fixed;font-family:Segoe UI,Arial,sans-serif;font-size:12px;line-height:17px;color:#334155;'
     $headStyle = 'padding:9px 8px;background:#eaf1f8;border-bottom:2px solid #cbd5e1;text-align:left;font-size:11px;line-height:15px;color:#334155;vertical-align:bottom;'
     $bodyHtml = @"
@@ -2235,6 +2482,14 @@ function Send-LicensesFocusedSummaryEmail {
   $adOverrideNote
   $licenseOverrideNote
   <h2 style="margin:0 0 10px;font-size:18px;line-height:24px;color:#0f172a;">License overview</h2>
+  <h3 style="margin:0 0 7px;font-size:14px;line-height:20px;color:#0f172a;">License alerts</h3>
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;background:#fff7ed;border:1px solid #fed7aa;">
+    <tr>
+      <td width="50%" style="width:50%;padding:6px;vertical-align:top;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#ffffff;border-left:4px solid #d97706;"><tr><td style="padding:12px 10px;"><div style="font-size:22px;line-height:27px;font-weight:700;color:#b45309;">$($licenseAlerts.AwaitingCapacity)</div><div style="font-size:12px;line-height:17px;color:#334155;">Awaiting capacity</div><div style="margin-top:5px;font-size:11px;line-height:16px;color:#64748b;">$($licenseAlerts.AwaitingBreakdown)</div></td></tr></table></td>
+      <td width="50%" style="width:50%;padding:6px;vertical-align:top;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#ffffff;border-left:4px solid #dc2626;"><tr><td style="padding:12px 10px;"><div style="font-size:22px;line-height:27px;font-weight:700;color:#b91c1c;">$($licenseAlerts.LicensingErrors)</div><div style="font-size:12px;line-height:17px;color:#334155;">Licensing errors</div><div style="margin-top:5px;font-size:11px;line-height:16px;color:#64748b;">$($licenseAlerts.ErrorsBreakdown)</div></td></tr></table></td>
+    </tr>
+  </table>
+  <p style="margin:7px 0 18px;font-size:11px;line-height:16px;color:#64748b;">Each alert total counts distinct users across F1/F3/E3/E5; the suite breakdown may count a user more than once. Alerts come from the collected assignment snapshot and are separate from recovery candidates. N/D means the assignment sources could not be qualified.</p>
   <h2 style="margin:14px 0 10px;font-size:18px;line-height:24px;color:#0f172a;">License recovery overview</h2>
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;background:#eff6f8;border:1px solid #cbdfe2;">
     <tr>
@@ -2252,6 +2507,10 @@ function Send-LicensesFocusedSummaryEmail {
   <p style="margin:7px 0 17px;font-size:11px;line-height:16px;color:#64748b;">Enabled and used counts come from the tenant subscription snapshot. Used means consumed license units, not measured app activity. Percent used = used / enabled; N/A means no enabled units. Dynamics 365 and Power BI add SKU units, not distinct users. Copilot covers Microsoft 365 Copilot; Dynamics 365 excludes sandbox, trial and preview SKUs; Power BI covers Pro and Premium Per User, excluding free Standard.</p>
   <h2 style="margin:0 0 8px;font-size:16px;line-height:22px;color:#0f172a;">01 &nbsp; License capacity</h2>
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="$tableStyle"><thead><tr><th style="$headStyle">License</th><th style="$headStyle">Enabled units</th><th style="$headStyle">Consumed (used %)</th><th style="$headStyle">Available (free %)</th><th style="$headStyle">Assigned users</th><th style="$headStyle">Status</th></tr></thead><tbody>$($capacityRows -join "`n")</tbody></table>
+  <h3 style="margin:18px 0 7px;font-size:14px;line-height:20px;color:#0f172a;">License assignment issues</h3>
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="$tableStyle"><thead><tr><th style="$headStyle">License</th><th style="$headStyle">Awaiting capacity</th><th style="$headStyle">Other licensing errors</th></tr></thead><tbody>$($assignmentRows -join "`n")</tbody></table>
+  <p style="margin:6px 0 16px;font-size:11px;line-height:16px;color:#64748b;">Awaiting capacity counts distinct users with a CountViolation assignment path and no effective F1/F3/E3/E5 suite of the same product. Other errors include different Graph assignment failures and failed paths where another route already grants the suite. The Excel tabs Awaiting licenses and Licensing errors list the affected users, error codes and assigning groups. These counts reflect the collected Graph snapshot and can differ from the live admin center.</p>
+  $assignmentStatusNote
   <h2 style="margin:22px 0 8px;font-size:16px;line-height:22px;color:#0f172a;">02 &nbsp; Recovery by license</h2>
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="$tableStyle"><thead><tr><th style="$headStyle">License</th><th style="$headStyle">Recovery candidates</th><th style="$headStyle">Disabled users</th><th style="$headStyle">No M365 activity (90d)</th><th style="$headStyle">Candidates primary on Intune PC</th><th style="$headStyle">Multiple target suites</th></tr></thead><tbody>$($recoveryRows -join "`n")</tbody></table>
   <p style="margin:7px 0 0;font-size:11px;line-height:16px;color:#64748b;">The attached Excel workbook lists each qualified recovery candidate once per license, with the recovery reason, Intune primary-PC indicator, last AD logon date and last M365 activity date. Its Summary sheet reconciles with this table. Activity dates are sortable Excel dates; an empty date cell means no qualified date was observed. AD LastLogonDate is replicated and approximate. Dates are not populated for identified shared mailboxes.</p>
@@ -2287,7 +2546,7 @@ function Send-LicensesFocusedSummaryEmail {
     $executionFooter = 'Host: {0} | Generated: {1} | Snapshot: {2}' -f [string]$env:COMPUTERNAME, (Get-Date).ToString('yyyy-MM-dd HH:mm:ss zzz'), $reportSnapshot.Id
     $mailBody = New-SmartM365EmailBody -Title $subject -Category 'SmartM365' -HostName '' -GeneratedAt '' -BodyHtml $bodyRow -Footer $executionFooter
     $attachmentPath = Join-Path ([System.IO.Path]::GetTempPath()) ("M365_Licenses_RecoveryCandidates_{0}_{1}.xlsx" -f (Get-Date -Format 'yyyyMMdd_HHmmss'),[guid]::NewGuid().ToString('N').Substring(0,8))
-    [void](New-LicensesRecoveryWorkbook -Path $attachmentPath -SummaryRows $summaryRows -Usage $usage -CollectedAtUtc $CollectedAtUtc)
+    [void](New-LicensesRecoveryWorkbook -Path $attachmentPath -SummaryRows $summaryRows -Usage $usage -AssignmentIssues $assignmentIssues -CollectedAtUtc $CollectedAtUtc)
     $sendStarted = $true
     [void](Send-SmartM365Mail -From $mailFrom -To $mailTo -Subject $subject -BodyHtml $mailBody -MailPurpose Report -Attachments @($attachmentPath) -AllowAttachments -SuppressAttachmentLinks)
     $sentState = [ordered]@{ TenantKey=$ExpectedTenantKey; LocalDate=$mailGate.Day; Status='Sent'; SentAtUtc=[datetimeoffset]::UtcNow.ToString('o') }
@@ -2899,7 +3158,7 @@ function Publish-LicensesWeeklyHistory {
 # ==========================================================
 # Main
 # ==========================================================
-$ScriptVersion = "1.43"
+$ScriptVersion = "1.44"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LicensesCsvLogFolderPath' -DefaultValue $OutputPath
 $LatestCsvFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ''
@@ -3613,8 +3872,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBqm9h00d23U8of
-# wL34EdOECcYALRyNrc3+sGEeHPLPl6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAQvkNNkGddcGRM
+# EctYEINNlz/N5bzcZeriO+V3MYyfYKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -3747,31 +4006,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEICdoefTb+SCZjyvxGTk5QJv5nSnl0JrIIFMXVas78QXLMA0GCSqG
-# SIb3DQEBAQUABIIBgKtskZu8TZq+rSHBzbcimpjzvifNQCBwoHoVwG/J3M1NZjlL
-# 08liQjeq2CgXSZlrXSLnlO/XPg9NBQ0PD+ntFq+6Is30oqVvt0iK2ljMzZePY00A
-# xTdkCxSqlEnofhysWywBRxQfU2F2tQh55VXJMvGZDH/7DqyWNKS//UjTE2ivl/pu
-# jE+84T07IbC85Y/jt05Oo7XmxKL8zUojlXUBj6bR9Jgp0OUWIRlXFDmP/8lAIPnG
-# FYrT3p6tHWsM4k28sEhp4E7k7Lh+QlGWoeLCaIvx2sdAniR7dl3qC69biqbNEek4
-# r9dY6E3kkkHA9Gm5Iv2pGaScJB9itHXxK5O8T52w6rd6bk4t2DpuZzrgFL9BhDO4
-# LJRQchtaI6zaP9lL4P7jldzOkuOZKCtXOzvMUduHfVx/MJy0ibSUWXeJiXtkCfyn
-# edxYc8GTCt5DCP/lL/oQZmNWSUb4EKQXB9JSEKKDWi0IooEgPvVHyrtW2cKkAeWz
-# LmAnO/GDXoht3lqCAaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEILXR6/JR16S95kwNR1xxWUfyZZB8UVMQpxh6CjIjnP6mMA0GCSqG
+# SIb3DQEBAQUABIIBgDfAgFQQq28BAo22f+6Yk9lZ7TRT6tvcK1bzDgvp5pt4aLNG
+# aZJ4ST5BAXWI4w4Ll0hss7dxxHpG3YoGz2xH2yGZcVSl0wZs1e9hdXFf5gYzLzwq
+# NyYCH4yBHe5Nbsr895mDoYDxQtpriZ570Wc4/UPJ7ncPU8Kz6CMbWE+Lebinw1XS
+# r/sjV+/VHIi1RJ4jHWL5U9JoyyBEG4lLh1KPPN0Na1SnWCEEO60ZHo+ZVGcvSE3U
+# FGCo8AS6cO+/sPKGPgsdbDnZzl405DdiNYdP7KZ1+qsF7IF5aXcNawWWt4AzpNGA
+# duTISMtfa4Y6SfsLH80Yu3kKTtDQQLhVd59MJjd96VOfT14g4lXnJVgYlzBCIkfw
+# C2iN0tCwrWw9qD0yq4/HL8xGJkcgO/7jFhBFkXVKDLMPQovtI4mABOOwFXJ3UsP2
+# HY52gzeQIacJLMZIJAmpdpyyFDIoYlzcyDbHOi/q/ZLTp6MltcskMugYVCpHf9Lf
+# 2q1vBDBxdgdfLIxz+qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDcyMDI5
-# NDZaMC8GCSqGSIb3DQEJBDEiBCCYWiW/mA9KZabxu74YnLZIvOqiJ/C1x7JX0xiU
-# 4ucPxTANBgkqhkiG9w0BAQEFAASCAgB8S7n+BatcKSzW44Zl/sr5udV+Iktm+5cj
-# KALFFvCzbHbK4ZPs8qI4AB3tECeNEcB5lXBi7hKXt3xRgeVQ0fdZP/Mf6amlr1zp
-# zA+OPcZVN/V9772cOWq+1QTm6AYNPS/F4InEXk216+Sl62vuuJTGFD0sUWqeQk1C
-# g+iSYD3M6QHFFXSZ5AE3qhYzvZIJKkbYRBNCS/52qhMhYbr481n1kSfT1rR16qZ2
-# 5xMNxnXul9zOqZ7gWB4xJG/uPSEBnqxVXLWkqAVFcb4NcPI4zbyE243jVCtdzFPw
-# NHWl/w8XzMmErMd0QR4NyMToNeaIRj01C3JnouVdks/mfBBn4GVrcaRTN4m/R1wG
-# eRYES1M1ylT1OlQZrrd6luSBxmgEsgkBLo5KivRHeL7EM/ONR2CnUwFdnPlD6M91
-# 26IytbQjT64q8U3W8KaY1dDXigl+VGXqr/T/l/CisQjjXhv4OTzsTI6dQPuZmTtg
-# KUjcZAFRHos/cZz0PBSAm5+cC6N38JAC1LjFMlR0fYZy3tHVkFw83yRd4DqAMPWb
-# Vz5J5cyhsLippK47bR+v3mFzTlDemdl0yF56zqAMhOvXYcC8tDV6D/vrS/Bn3yFg
-# BqsSqTJvkQH/G8p8Bs4a6m54BZ8slv//zwvqL/4XLCwqqmPN2+J9+ZtQjeeMFMjP
-# 0e03KU3Psg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDgxMTIy
+# MDhaMC8GCSqGSIb3DQEJBDEiBCCmvmshrzi4J/9DV7UzlKqAe7d4sW61QGACbty2
+# xu/WSzANBgkqhkiG9w0BAQEFAASCAgAq0Q5Q8p/DCpwyb7953aCSKhYkU+D6dxSn
+# B6we060cN6GX3bqB38nSmFm0jrYNWP0ngOQrKu3MxZ5Bg7BIcQ2JBSmLOF/qMw1N
+# fwg9BN4YQ5VivTyg//CYwdY0LzNazsefXFy9yymEP1SbGXANclex3bKFh+sN7wjS
+# 2oKRuNmy2Xulug1Ax1Hjl49KTppRdifqBtRTHV5OCvnk09iGD3jpPiUA08oVUhPc
+# BiRuuwQQ7Sabg1eNQ18E9dGxZKNw2TC7FH1wRZCGKs59J/gQtW8MEvcQXiSIjANz
+# 1UR/BlQ2tRO3BUxCWW8HnmMDSPBjiq22MPugJy6smVOqUBtfgt7TJu25K1EGXwkx
+# DTRXIuMU98F5USlvgSW0OMxCalqiAKsiIg19fGNXao7c3MVclORiRkgD4HOhiNh+
+# mjUs0RIY7Q+B8Stp4bNAsAvH3WQJUmR6pOnfdWa4LzRSPnTF6UzfflOUQsLQmmaZ
+# i7mscZ5kb74UFeATdjZji82yt1NjvTmR3xWDUdEF5fm83znBdggXNfwViIwUL3zb
+# GFAVNbR82EhWqY2oRnsVKT47xg/Sa5hrRgklfVRin1cph4v0YmcWJZzpDngJH5rX
+# lmwLYA+qI006d00NwuL8kImANW9DT9K7JmHDdleCED1IaJ4WMoN6C3pRCIMNNfJW
+# DovDI6Xjog==
 # SIG # End signature block
