@@ -292,8 +292,8 @@ Intelligence contracts/history keys and existing reports remain unchanged.
 
 ## Weekly application freshness
 
-DiscoveredApps is weekly; the runtime manifest sets the actual occurrence.
-Keep its complete
+DiscoveredApps is weekly (template: Saturday 20:00; the runtime manifest sets
+the actual occurrence). Keep its complete
 `-DeviceDetailMode All -FreshDeviceDetails` acquisition; no sampling or relation
 cache reuse is introduced. The two Apps CSVs form one explicit freshness group:
 acquisition age up to 168 hours is within target; strictly above 168 hours emits
@@ -437,7 +437,7 @@ batches before refreshing.
 ## Business semantics and remaining qualification
 
 - Device identity uses native Entra/Intune correlation IDs. Same-name devices
-  and all platforms remain separate. All Intune source candidates are retained;
+  and all platforms remain separate. All Intune source records are retained;
   selection uses qualified sync/enrollment time, then the native ID.
 - AD workstation coverage uses unique native SID to Entra device ID to Intune
   device ID. Missing/ambiguous SID matches remain explicit evidence gaps, not
@@ -534,12 +534,12 @@ pipeline, launch collectors, change maintenance, or edit Intelligence output.
 Default execution only validates the proposed configuration and logs its plan.
 Use `-Apply` after deployment prerequisites and actual Power BI qualification.
 
-### Proposed defaults
+### Activation-helper defaults
 
 | Job | Default schedule | Timeout | Action |
 | --- | --- | --- | --- |
-| M365-WorkplaceScope-Inventory | Daily 00:05 | 720 minutes | Native groups/membership/configuration collection |
-| CmdbEvidence-Prepare | Daily 07:30 | 180 minutes | Prepare 46 CSVs, then verified SharePoint publication |
+| M365-WorkplaceScope-Inventory | Daily 22:00 | 720 minutes | Native groups/membership/configuration collection |
+| CmdbEvidence-Prepare | Daily 09:30 | 180 minutes in activation helper; 120 in template | Prepare 46 CSVs, then verified SharePoint publication |
 
 These are reviewable operating defaults, not measured duration guarantees.
 `-ScopeTime` and `-PreparationTime` accept local `HH:mm` times. Both use
@@ -565,6 +565,12 @@ generation checks current source receipts and acquisition ages: core sources
 relations retain their approved nonblocking coverage warnings. No acquisition
 timestamp is reset just by preparation or upload.
 
+Mailbox acquisition depends on daily `EXO-Mailboxes-Inventory-Fast`, which runs
+the same unrestricted mailbox-detail collector without live statistics. Weekly
+live statistics are not a prerequisite for daily CMDB preparation. Snapshot
+statistics retain their own acquisition age; daily mailbox collection does not
+make those statistics fresh. Permissions-only runs remain unsuitable here.
+
 The existing DiscoveredApps weekly schedule and arguments are not changed by
 this helper. No application collector is launched by preparation. When Apps
 passes its maximum age, a completed native collection is needed before a new
@@ -589,8 +595,28 @@ entries are rejected; existing native WorkplaceScope configuration is preserved.
 Other jobs and cluster configuration are retained. Publication uses the snapshot
 hashes to refuse concurrent configuration edits and verifies the resulting
 configuration by read-back. Repeating an identical application skips publication.
-This is an explicit deployment helper, not an automatically enabled repository
-template. Private server names and paths belong in private runtime arguments.
+The repository jobs template now carries both entries disabled, elected and
+marked `RequiresExplicitActivation`. No private worker name is stored there.
+The explicit helper can activate these marked entries on a verified pinned
+worker; an unmarked disabled WorkplaceScope job remains a review error.
+Private server names and paths belong in private runtime arguments.
+
+The template runs Teams at 03:30, SharePoint at 03:45 and Autopilot at 04:00
+daily to fit their unchanged 48-hour CMDB source-age limit. DiscoveredApps
+remains weekly (Saturday 20:00), with the existing 168-hour warning and 240-hour maximum.
+Disabled CMDB template preparation has one occurrence, 09:30, with `-Publish`;
+the deployment helper defaults to the same time. Intelligence preparation is
+separate at 09:00. Core sources, readiness and hybrid-identity analysis each
+have one daily occurrence; SyncHealth runs every two hours. See the complete
+[daily schedule plan](../../Orchestrator/DAILY-SCHEDULE.md).
+Existing operational schedules are never replaced by
+the normal template merge. Apply runtime schedule changes through the shared
+configuration publication API, not by overwriting live files.
+
+The license manifest fallback estimate is 90 minutes, rounded from a qualified
+full source collection lasting about 84 minutes. It is not a mail-only timing.
+The election engine prefers successful orchestrator-run duration medians when
+available; manually launched mail-only invocations do not create those records.
 
 ### Preparation and publication
 
@@ -598,8 +624,8 @@ template. Private server names and paths belong in private runtime arguments.
 pwsh -NoProfile -ExecutionPolicy Bypass -File .\SmartM365\SmartInventory\PreparedEvidence\SmartM365-CmdbEvidence-Prepare.ps1 -Tenant test -Publish
 ```
 
-`-ValidateOnly` always remains nonpublishing. Without `-Publish`, generation stays
-local. With it, the separate publisher verifies and reads back all 46 CSVs, then
+`-ValidateOnly` transfers neither logs nor data. Without `-Publish`, prepared data
+stays local; normal configured run-log upload is independent. With it, the separate publisher verifies and reads back all 46 CSVs, then
 publishes `current.json.txt` last. A transport failure fails the job, retaining
 the local prepared output for investigation/retry. Flat-folder cloud replacement
 is not atomic: consumers must validate every manifest-bound hash and must not
@@ -620,6 +646,9 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\SmartM365\Tests\Test-SmartM365Cm
 
 Offline success does not prove resident-account access, actual scheduling,
 SharePoint throughput/synchronization, or Power BI rendering.
+`cmdb-orchestrator-integration.json.txt` is a review specification, not a runtime
+manifest or an automatically consumed schedule. Do not copy it over the live
+configuration. Disabled entries cannot be requested until explicitly activated.
 
 ## Exchange local acquisition and recipient quality
 

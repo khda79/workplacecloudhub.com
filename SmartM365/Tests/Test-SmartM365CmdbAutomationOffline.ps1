@@ -3,7 +3,7 @@
 .SYNOPSIS
 Offline activation merge and preparation-to-publication boundary tests.
 .VERSION
-1.0.0
+1.0.2
 .NOTES
 Extracts helpers only; no tenant initialization, collections, authentication,
 SharePoint transport or shared configuration publication. Temporary fixtures only.
@@ -28,10 +28,33 @@ function Import-Helper {
 }
 Import-Helper (Join-Path $preparedRoot 'SmartM365-CmdbEvidence-Prepare.ps1') 'Invoke-SmartM365CmdbPreparedPublication'
 Import-Helper (Join-Path $preparedRoot 'SmartM365-CmdbEvidence-Orchestrator.ps1') 'New-SmartM365CmdbOrchestratorJobsDocument'
-$original=Get-Content (Join-Path $smartRoot 'SmartInventory/Orchestrator/Orchestrator-Jobs.json.template') -Raw | ConvertFrom-Json
+$template=Get-Content (Join-Path $smartRoot 'SmartInventory/Orchestrator/Orchestrator-Jobs.json.template') -Raw | ConvertFrom-Json
+$optInNames=@('M365-WorkplaceScope-Inventory','CmdbEvidence-Prepare')
+foreach($name in $optInNames){
+    $entries=@($template.Jobs | Where-Object Name -eq $name)
+    Assert-True ($entries.Count -eq 1 -and -not $entries[0].Enabled -and $entries[0].RequiresExplicitActivation) 'Template must not silently activate CMDB jobs.'
+}
+foreach($name in @('M365-Teams-Inventory','M365-SPO-Inventory','Intune-WindowsAutopilot-Inventory')){
+    $entry=@($template.Jobs | Where-Object Name -eq $name)[0]
+    Assert-True ($entry.Schedule.Type -eq 'Daily') 'A core CMDB producer exceeds its 48-hour cadence.'
+}
+$original=$template | ConvertTo-Json -Depth 50 | ConvertFrom-Json
+$original.Jobs=@($original.Jobs | Where-Object Name -notin $optInNames)
 $candidate=Get-Content (Join-Path $preparedRoot 'cmdb-orchestrator-integration.json.txt') -Raw | ConvertFrom-Json
 $before=$original | ConvertTo-Json -Depth 50 -Compress
 $arguments=@{JobsDocument=$original;ProposedJobs=$candidate.ProposedJobs;ExecutionServers=@('WORKER-TEST');PrepareTime='07:30';WorkplaceScopeTime='00:05'}
+$templateBefore=$template | ConvertTo-Json -Depth 50 -Compress
+$activated=New-SmartM365CmdbOrchestratorJobsDocument -JobsDocument $template -ProposedJobs $candidate.ProposedJobs -ExecutionServers WORKER-TEST -PrepareTime '07:30' -WorkplaceScopeTime '00:05'
+Assert-True ($activated.Jobs.Count -eq $template.Jobs.Count) 'Activation duplicated opt-in template entries.'
+Assert-True (($template | ConvertTo-Json -Depth 50 -Compress) -ceq $templateBefore) 'Activation changed input template.'
+foreach($name in $optInNames){
+    $entry=@($activated.Jobs | Where-Object Name -eq $name)[0]
+    Assert-True ($entry.Enabled -and $entry.AssignmentMode -eq 'Pinned' -and -not $entry.PSObject.Properties['RequiresExplicitActivation']) 'Template entry was not explicitly qualified for the selected worker.'
+}
+Assert-True (@($activated.Jobs | Where-Object Name -eq 'M365-WorkplaceScope-Inventory')[0].Arguments -ceq '-EnableConfiguredExternalActions') 'Activation removed configured native uploads.'
+$unmarked=$template | ConvertTo-Json -Depth 50 | ConvertFrom-Json
+@($unmarked.Jobs | Where-Object Name -eq 'M365-WorkplaceScope-Inventory')[0].PSObject.Properties.Remove('RequiresExplicitActivation')
+Assert-Rejected {New-SmartM365CmdbOrchestratorJobsDocument -JobsDocument $unmarked -ProposedJobs $candidate.ProposedJobs -ExecutionServers WORKER-TEST -PrepareTime '07:30' -WorkplaceScopeTime '00:05'} 'A deliberately disabled native job was activated without review.'
 $merged=New-SmartM365CmdbOrchestratorJobsDocument @arguments
 Assert-True (($original | ConvertTo-Json -Depth 50 -Compress) -ceq $before) 'Input document changed.'
 Assert-True ($merged.Jobs.Count -eq $original.Jobs.Count+2) 'Unexpected job count.'
@@ -47,6 +70,7 @@ foreach($job in @($prepare,$scope)){
 }
 Assert-True ($prepare.Arguments -ceq '-Publish' -and $prepare.RequiredGraphAppRoles -contains 'Sites.Selected' -and $prepare.RequiredCapabilities -contains 'Graph') 'Verified publication requirements missing.'
 Assert-True ($prepare.DependsOn.Count -eq 17 -and $prepare.DependencyMode -eq 'FreshSuccess' -and $prepare.DependencyMaxAgeHours -eq 240) 'Dependency gates changed.'
+Assert-True ($prepare.DependsOn -contains 'EXO-Mailboxes-Inventory-Fast' -and $prepare.DependsOn -notcontains 'EXO-Mailboxes-Inventory') 'Preparation waits for weekly stats instead of daily mailbox acquisition.'
 Assert-True ($prepare.Schedule.Times[0] -eq '07:30' -and $scope.Schedule.Times[0] -eq '00:05') 'Daily schedule changed.'
 $again=New-SmartM365CmdbOrchestratorJobsDocument -JobsDocument $merged -ProposedJobs $candidate.ProposedJobs -ExecutionServers WORKER-TEST -PrepareTime '07:30' -WorkplaceScopeTime '00:05'
 Assert-True (($merged | ConvertTo-Json -Depth 50 -Compress) -ceq ($again | ConvertTo-Json -Depth 50 -Compress)) 'Merge is not idempotent.'
@@ -122,8 +146,8 @@ Write-Output "PASS: $testCount CMDB automation offline checks. No collections or
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCdraM8msLkpu5Q
-# PyeP/fUMMYTJ8CQDtYJ+g0ca2m8L5aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDlZoVB7X1yXoHo
+# FUpC1YB6pLN3eYdhAOeFzqwFDjptyqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -256,31 +280,31 @@ Write-Output "PASS: $testCount CMDB automation offline checks. No collections or
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEILVvF9spg+Xi8OnS7BiujxoIGWMr3RTWD4XOQIfoNQVzMA0GCSqG
-# SIb3DQEBAQUABIIBgC/SvjNARiK/axE+DdaqoqHGxcAUA1vpBQ1/AF4z5quFxyGm
-# O7k9IZsgP+Ki9HW92ge9KZfLP9eMke4OG8ZCLzFvsMbCGvyVDdU6L3p6aT5ehxmM
-# Adn0KKDy7k6crBELfEubUH8uo5k/SvIGLiUtOUYjotr4jGsAogfUU1SPZgwG9KVl
-# bauVwrOenhY1o5c9If3rcucsMfYg+alQX1qsKByO49JzVZNODxLMvgyoPWm22IB5
-# xwPH74o0lCvlqkk7PZlab0f2lvOZT8KCD5CHnEKQD9kstr1aAARgk73L2leymYsm
-# FW3ZyA35m9yZD9MK2257mGQthI1moWZb1juL6WNbn0CKNu/IGpQ2bN60gjOtKBCn
-# 1hD+C4Vcnf10M2ivtfD07ldegcQduQpS5YH6qcMRstnY0gqAwvgvM2+7KmYe1u9i
-# eYSg/7NKpOM/s52U3oUxZKsX/QBko9rIweyRdBIpUXnRjR4VSloTUlfVHm2EPF6Z
-# T4dofJ4dHoNNQUfSYKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEICxD5emOuLLjLt0fh66voUx+wHVTcj0xQaMOHp8JMvOZMA0GCSqG
+# SIb3DQEBAQUABIIBgGjvwwEp2Q+wwvn9T/T70tBbclVeaHkOnmSQSvooRTCdS26X
+# fgNlKBZpUED3EyulX0sNAMKUpc0kICgaslD7jAxZ/3pqscfmthAUPWcsHCjf76tM
+# kZJdCGulj6pHseMdkDqV7lIZ5LhfBk3dE2WH1ZgGoXidJIFCSW0yiAqOR8HZiMED
+# Hqwc6AI5w0EKBMo/W/jN8mJAWZN63hlgxZ2K47AInf8Qf/V37j/Hx/ICvvDFX5Vk
+# v5KBspIAA9u1p0hMq5bV6zGX09tvoS7N/iyIQ+4rGGZshItlTv2w+IkMH3Gg6l7J
+# r7D7uSbBDVucswfWTbm9mlpoWQL0ZFbwWrcHC5BeCOX5+Xkmd7gv+VVuslFoLjaH
+# 9w+RucZAaZqvbFV1CDephogRxUBJs/EVCen75UWsPUAkqlhHHsbzcZKGkqykPrEr
+# CCtFo09CArikhJY8qKQL0BPWuTet0IL76SBcQlrkDPZJ6RwgWQua2WID6RB6iqfy
+# 5UPwgBljYcQHxyzUYKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDcwOTAw
-# NDJaMC8GCSqGSIb3DQEJBDEiBCC0DNtqcmA3IzhjL1HvTJry29qNmxIHESxB4UXI
-# J80yVjANBgkqhkiG9w0BAQEFAASCAgA63utp1+QvPO4/j0MaevKt9SKCMJkUDGNA
-# 1a5qeK4eF99sx5x7fSVZWaKr9bqpvCETGALTWmUhzxONQDXOWstajFmU9UTthjwr
-# 5rWcBMZoiBijOOUaNJpNHO7Xl998B4NKEWrUjPEWx4j1u3pc2lDAxVeIcaWEAx0b
-# cwy19GsA15MMbh8j74EPbJiNVaD2nbl2wj1DJUPhb3O3nc5mw+5q0AgQ9G/lppdY
-# eOeataIe23KWu3DUd3BW1hp+/2qpa7oK0vtJ26uS7DaRY+5rybWKddOqaDINHID+
-# t3gSfmQTu5/wc9kB6wD9GdPqWiQSPnrBGEnWd1fLFKF1NGcaAWTvZOto4P5T8K3q
-# m+Hbuzrme6Ud0n7FseEe5ZgnZu6/lL6Xy0LJUMgYUDJzZJ5CQE0coK5PLfuzj+sc
-# dSt7QtimZr2tacF8ZAuq2jgGH9ZsNvj+4Bik38i0C8LZLGmPwbwH6qkmawmt90wh
-# XJWii277FkeFAuuW7VBGdT6X3Qjn495wKmM5quvY4tpEW/vvPeLqO83gADgmJIND
-# C6BaAT5+yffc7SI3CTxPfpDJQHyvWfya+Y4Z8KbI+HY13SBHElHLabWIGxPNNNvd
-# 4m9/m6CAil92PEaraacZcyJwVkZXzZDWXEuZvNha+TRADprZvKo1htdCH/0zyL0Z
-# p6yAY0cR1w==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDcxNDQ1
+# NDlaMC8GCSqGSIb3DQEJBDEiBCB43lqlb91is5+GMvlt7B/6uihiqaHNn9Mr3rVH
+# AEAfSjANBgkqhkiG9w0BAQEFAASCAgBEVFeY93tqM9LyHWr9eQEH7ZQT30Mfilu5
+# V9UD/I4r7Ku8ly1J2++OIruQdYMIPrvRyp4d6P+SmsczYvfjmMPopr6UBfl/WbBI
+# M78TL87N5KpvTlkrihYTAgKH/YcxZENoTRCCzmLhdNh776piz1CoW1XVg+3WxkQM
+# To8/2cfcYsCzCsWWMXRSNKygO1bePj/PEzLPrX1uPQKH6BCoRrbXAage3mueZgEL
+# crehRmDt8OxMXi3YaEmDVPBO+IazKZ2ng7B9yjVTejBhnQS4mcjP3tTQgNX2f6YQ
+# 7ZmGYDFDnwk9YUU7nQXcFkp75FTF5/H+mKPgqc89Kgw/bZc/fwa23poyZsuPVPB2
+# WDLrChqUhdDdwaJh4vhpVzxqa66OnM2sXPDwPOl6D2kaLnxuuGHidIP77NMlfBF6
+# +xoVTRNe7s6veUMPD8jntiplkyeEpdztuYvSBUX7OskMEuyunIJ+plY5/CgOdHA5
+# j7UhWdY4EeiA1cEI3EEtfICTamXVLDEWZdrikc/Fyf3x+DMV1TVbyDtlTtaztSAO
+# /Bwz+w1i50+SSOXTZYvOyORS2KqgTJ+brDXNUHH23xjq6aY5PFznKoT/bqVGsP9F
+# XTnrf6FUiIjdhkXTlnpYM4zpXIfWm40Gwvb5mTHLViGWsQHNlOWYn3TXBRHVTFtU
+# s7kJAKnQWA==
 # SIG # End signature block

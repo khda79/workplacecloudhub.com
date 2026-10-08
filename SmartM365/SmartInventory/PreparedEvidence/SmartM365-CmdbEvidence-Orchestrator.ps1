@@ -3,7 +3,7 @@
 .SYNOPSIS
 Review or explicitly activate current-only CMDB preparation and publication.
 .VERSION
-1.0.0
+1.0.2
 .NOTES
 Default is validation only. -Apply publishes the two reviewed job entries through
 the existing optimistic configuration API. No collection or pipeline is requested.
@@ -14,13 +14,13 @@ param(
     [string]$Tenant='test',
     [Parameter(Mandatory)][string]$SharedDataFolderPath,
     [Parameter(Mandatory)][ValidateCount(1,1)][string[]]$AllowedServers,
-    [ValidatePattern('^([01][0-9]|2[0-3]):[0-5][0-9]$')][string]$PreparationTime='07:30',
-    [ValidatePattern('^([01][0-9]|2[0-3]):[0-5][0-9]$')][string]$ScopeTime='00:05',
+    [ValidatePattern('^([01][0-9]|2[0-3]):[0-5][0-9]$')][string]$PreparationTime='09:30',
+    [ValidatePattern('^([01][0-9]|2[0-3]):[0-5][0-9]$')][string]$ScopeTime='22:00',
     [switch]$Apply
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
-$ScriptVersion='1.0.0'
+$ScriptVersion='1.0.2'
 $failure=$null; $initialized=$false
 $core=$null; $guardInstalled=$false; $previousGuard=$false; $saved=@{}
 
@@ -46,13 +46,30 @@ function New-SmartM365CmdbOrchestratorJobsDocument {
         $matches=@($copy.Jobs | Where-Object Name -eq $definition.Name)
         if($matches.Count -gt 1){throw "Duplicate integration job: $($definition.Name)."}
         if($matches.Count -eq 1 -and $definition.Name -eq 'M365-WorkplaceScope-Inventory'){
-            if($matches[0].ScriptPath -cne $definition.ScriptPath -or -not $matches[0].Enabled){
+            if($matches[0].ScriptPath -cne $definition.ScriptPath){
                 throw 'Existing WorkplaceScope job requires separate review; it was not overwritten.'
             }
-            continue # Preserve an already operational native job byte-for-byte in the document.
+            if($matches[0].Enabled){
+                continue # Preserve an already operational native job byte-for-byte in the document.
+            }
+            # Only the disabled opt-in template is eligible for this explicit activation.
+            if(-not $matches[0].PSObject.Properties['RequiresExplicitActivation'] -or
+               $matches[0].RequiresExplicitActivation -ne $true -or
+               $matches[0].AssignmentMode -ne 'Elected' -or
+               @($matches[0].AllowedServers).Count -ne 0 -or
+               @($matches[0].DependsOn).Count -ne 0 -or
+               [string]$matches[0].Arguments -cne '-EnableConfiguredExternalActions' -or
+               (@($matches[0].RequiredCapabilities | Sort-Object) -join '|') -cne
+                   (@($definition.RequiredCapabilities | Sort-Object) -join '|') -or
+               (@($matches[0].RequiredGraphAppRoles | Sort-Object) -join '|') -cne
+                   (@($definition.RequiredGraphAppRoles | Sort-Object) -join '|')){
+                throw 'Existing disabled WorkplaceScope job requires separate review; it was not overwritten.'
+            }
+            $copy.Jobs=@($copy.Jobs | Where-Object Name -ne $definition.Name)
         }
         $job=$definition | ConvertTo-Json -Depth 25 | ConvertFrom-Json
         $job.PSObject.Properties.Remove('ConditionalGraphAppRoles')
+        $job.PSObject.Properties.Remove('RequiresExplicitActivation')
         $job.Enabled=$true
         # Elected mode ignores AllowedServers. Pin these two new jobs to the
         # explicitly verified PS7/Python account rather than implying a filter.
@@ -61,6 +78,9 @@ function New-SmartM365CmdbOrchestratorJobsDocument {
         $job | Add-Member TimeoutMinutes $(if($job.Name -eq 'CmdbEvidence-Prepare'){180}else{720}) -Force
         $job | Add-Member EstimatedDurationMinutes $(if($job.Name -eq 'CmdbEvidence-Prepare'){45}else{300}) -Force
         $job | Add-Member Schedule ([pscustomobject]@{Type='Daily';Times=@($(if($job.Name -eq 'CmdbEvidence-Prepare'){$PrepareTime}else{$WorkplaceScopeTime}));MissedRunPolicy='RunOnce'}) -Force
+        if($job.Name -eq 'M365-WorkplaceScope-Inventory' -and $matches.Count -eq 1){
+            $job.Arguments=[string]$matches[0].Arguments
+        }
         if($job.Name -eq 'CmdbEvidence-Prepare'){
             $job.Arguments='-Publish'
             $job.RequiredCapabilities=@('Graph','SharedRuntime')
@@ -160,8 +180,8 @@ try {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBBEcMGCXm1xj/I
-# e1ddb7t8/D8GAsyXR0VxVJv39f7sOqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDu5wpRp1/Vz0Fd
+# vUN/SutnQpnYV8TjDi7GnKKMgXpmn6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -294,31 +314,31 @@ try {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIFDcGAui6vXRx1wH2wXYMtU5/kGeYWGfxVutx+zZVHBvMA0GCSqG
-# SIb3DQEBAQUABIIBgHUNiO3YMaf/wgV9HHceaAKiLVeJrROpIYp20z0AWfFteWAI
-# oNTFNMUv39nowbtJBFyUGqHzBqscO1JDJAacToAbiru4Curg3QRylDuqEks5byZr
-# HwwWxDDFI+czYjymz9lEOYTknMgpxfFxjXUw/NTJsiDrR80yM+CAfR9F0WJIas94
-# 4qLp3fTAK8/yek+1sbk1M/K5fZ6/XI/8IKLQ8zRInd6BK2ZCNV4rD5imRKFGwxFA
-# PDnDfop5kNE/J2/whWQsjZX3YtcGuKONeDlUz4jYysY1qbuNENeYaUTXG8YQd6dv
-# kJSioh4RtDTT5H1yFj0FwG6cMqzwAkLaLJJ094svKDpYsp+iJrgJ6kMcXl6DVNf5
-# el5MeYxcAZq4QdarkdXQBnTznD2CPvEoB+eAyaP2Y/E+X81c26fk4GPZdipJ6hlD
-# IO+4HIXk6hx9RraQYp+ay6O47gllQVZztWvKpTnAHX159yC0x/bcoO9GTJG38fwg
-# gLO3ISZLiMWEBnHTuKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIBqExo8+GXuPkAHSPfHBTMV9ZhNSrPbntZqif0/xfusvMA0GCSqG
+# SIb3DQEBAQUABIIBgH2RWAvhsYpXI+eLOCBkuQG4JoSq6rNI7AXakJSCMLeM46R+
+# 0cHU1SlmuiC/jjy5PVa+sd6w8btq5vrvXM3pGTPS8OxWeFxJbV2fGS4myaZrWeR1
+# DNjXetfUrMKLX9DOmFC7TSvgIdAUpclCx8TSkxf4jHOs1o4oFKty6nVskOme9ELm
+# dy4goic3JmXVv/hKNXqHy8I2NbcvC5Fpo16WZGQsn0ybaFbul2YRJ9UDUfcS/jFR
+# vfm7Qr1vqN6W40WW0v/c7xYPr/i8k3OsLENflPk0l2/uD1cGrfzgip0Z/Kpvia6W
+# z92XR08nXtVAuKv+Tufe6Ssg39SJnVC7aVZBykm3fa5Qaqfo93igjQ8VxowkKBdF
+# zPb9VMZ3wtYNslHVQq7Zt9CKqjRMnKYgYR3nrbIOw78YmYJnlDRRwQ8dY+zxc+8h
+# i9jz8fNPmpl/3lYipEiMBUXP96t8G2/PKthSh01AEmls1sX85U2QHCDvKuE+w+6h
+# tOzK5oNPCxWGA4KlpaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDcwOTAw
-# NDBaMC8GCSqGSIb3DQEJBDEiBCC/zaNkNYc0ug2RPZCNN2pknkQRedlwsxy7X8j2
-# ApiJxTANBgkqhkiG9w0BAQEFAASCAgBR4jHH3mB4uirPV/J0l5++t1ZlpgvEhj7X
-# KU9K6nIWOI26HIXAe2ln5Js0jttXHJay8ZXMCA+F8/sdLtys24UjSwxIjkBTYR3a
-# 8TePBDtzSbZcujNcsVEZZrrsqu3ulmoqwsghVyVIGHcPAXidpnQQT/tik0FdVtTa
-# +UuE5DKmZ3eDBBwVXPvyIkDafdKm3n2Qf+bk6hDK/kQFoWMWJI+BBamyCYOYKLns
-# 33JbNrIAr6vkGy4cUyVe2FnZ43L4IY+bwknb+zMpJPBn6NoWZs0+7U3UrXQFL2fy
-# erUjx4Inf0NiPA1LVnCVLOD3xHRIplMwl45zAoN1yEMufxar4RWePPRLz1093RQL
-# jBiVvq2UsEsB3yxTpEDfCZpJ4a18y+y7Is03r6p+ph4IP2XVvnExl6QuLq7Gb0GH
-# QtjP45OkcSaRYaBLcJSbDuFoUV26QytAlVQE2jomZoDWV1yOdSGP12aHCwpGhX5v
-# x3fkreLp6JrERJDfLcSkkv7FrBWhp3rz1iKHyzeA8WmppBersms5JZb/Bt8Qovzs
-# Y9/Q+VibFoVL5xPfgSPt+5gT8GTCysSWKaj7JzOgId8vyZcipJhsm9t4t3lxdqgJ
-# 7rFwxfJJr4iE/4hXzXCIVVvpylF8SLqLXRnBSzoqVshrGuL0C/zfBWDC/sa/vRHC
-# I8SaqLnkAA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDcxNDQ1
+# NDlaMC8GCSqGSIb3DQEJBDEiBCAZzsR7FP8lfjV0XH/zl9icdZYIT+00YJLyhbv6
+# UdTw1zANBgkqhkiG9w0BAQEFAASCAgANx9Bn6F+5up7FRpHyELCgvzWS0miYKDz3
+# XtxBmUYadx1eJRnGWy9OxsmJOGxdn2Mb3nUodMY/9goiBumzjbtnDKKbXmx2dCUj
+# tFflCX89kMKaQYLtVQUCeC8ABPQYMWBlHrupyLKZKzpGiCSCzNoZQjG7xHL46FxU
+# 7vwJV4daBjsFKZA/lN2cgJfp28BHY7yw/Bpmf8rmSmNGQi+tF6eynaSUXQmQp5Bn
+# aVWICrRetDum2lHK5NLO3wpDQNV+0QxMUpC+JpCJQjKHDUpFPCkzhi8LoY6wPIhe
+# 3bWNPBscMIqvskyoN7etJUyYd9e8NhloFwHLzES2lIlnjpXR9tNFzjbGEO+MjKrx
+# lFGlHPYGFUo6jA7ShiTOuj92+IyLYrAmslL5xXfFXQMeneM74eHv4KCdCg/TF1Bc
+# WYVTCI/j3hVOOmGmayY7uL2SxKnxG1Eop3ez3TDVlgj8gLf5N282HLsjaLjGyTC4
+# boVwZXNgfvd16gib9oEJqkp2fY0R5U2kdgOP5vvcl8UtdhyyM7Ao1VNDsQBlLvwz
+# XWhr2qcNa3yKr0Jfhs0xOA991QGa5vM1gzcflgJ51TUQeqwMyEUzkDa48x5hIQnp
+# ekvgpanFp0ejL+UGprotSOlvUTfmw30sRK7ahuqtqPRUrIMjMB2hFMF/w4BmfEkU
+# YekwwTu9Og==
 # SIG # End signature block

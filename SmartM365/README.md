@@ -15,6 +15,8 @@ SmartM365 is organized as a set of independent but consistent projects. Some scr
 
 Local tenant configuration files are not committed. Use the committed templates to create local profiles before running tenant-based inventory or setup scripts.
 
+The SmartInventory orchestrator template uses a [single daily inventory cycle](SmartInventory/Orchestrator/DAILY-SCHEDULE.md): overnight core collection, morning analysis and preparation, two-hour SyncHealth monitoring and weekly long-running exceptions. Existing shared schedules require explicit configuration publication; template changes do not reschedule them automatically. CMDB integration entries remain disabled until explicitly qualified and activated.
+
 ## Content
 
 - Smart Inventory scripts under `SmartInventory/` for Active Directory, Exchange, Microsoft 365, Entra, and Intune data collection. These exports can feed Power BI datasets and other reporting or operational consumers.

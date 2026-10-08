@@ -15,13 +15,10 @@
       "Schedule": {
         "Type": "Daily",
         "Times": [
-          "00:00",
-          "08:00",
-          "11:00",
-          "14:00",
-          "17:00"
+          "00:10"
         ],
-        "MissedRunPolicy": "Skip"
+        "MissedRunPolicy": "Skip",
+        "DaysOfWeek": []
       },
       "LauncherPath": "Launchers\\OnPremises\\Start-SmartM365-ActiveDirectory-Inventory.cmd",
       "AssignmentMode": "Elected",
@@ -30,7 +27,7 @@
         "SharedRuntime"
       ],
       "RequiredGraphAppRoles": [],
-      "EstimatedDurationMinutes": 5
+      "EstimatedDurationMinutes": 120
     },
     {
       "Name": "M365-ActiveUsers-Inventory",
@@ -47,13 +44,10 @@
       "Schedule": {
         "Type": "Daily",
         "Times": [
-          "00:00",
-          "08:00",
-          "11:00",
-          "14:00",
-          "17:00"
+          "00:15"
         ],
-        "MissedRunPolicy": "Skip"
+        "MissedRunPolicy": "Skip",
+        "DaysOfWeek": []
       },
       "AssignmentMode": "Elected",
       "RequiredCapabilities": [
@@ -82,13 +76,10 @@
       "Schedule": {
         "Type": "Daily",
         "Times": [
-          "00:00",
-          "08:00",
-          "11:00",
-          "14:00",
-          "17:00"
+          "00:25"
         ],
-        "MissedRunPolicy": "Skip"
+        "MissedRunPolicy": "Skip",
+        "DaysOfWeek": []
       },
       "AssignmentMode": "Elected",
       "RequiredCapabilities": [
@@ -116,13 +107,10 @@
       "Schedule": {
         "Type": "Daily",
         "Times": [
-          "00:00",
-          "08:00",
-          "11:00",
-          "14:00",
-          "17:00"
+          "00:35"
         ],
-        "MissedRunPolicy": "Skip"
+        "MissedRunPolicy": "Skip",
+        "DaysOfWeek": []
       },
       "AssignmentMode": "Elected",
       "RequiredCapabilities": [
@@ -150,9 +138,10 @@
       "Schedule": {
         "Type": "Daily",
         "Times": [
-          "00:00"
+          "00:05"
         ],
-        "MissedRunPolicy": "RunOnce"
+        "MissedRunPolicy": "RunOnce",
+        "DaysOfWeek": []
       },
       "AssignmentMode": "Elected",
       "RequiredCapabilities": [
@@ -177,9 +166,10 @@
       "Schedule": {
         "Type": "Daily",
         "Times": [
-          "00:00"
+          "00:10"
         ],
-        "MissedRunPolicy": "RunOnce"
+        "MissedRunPolicy": "RunOnce",
+        "DaysOfWeek": []
       },
       "AssignmentMode": "Elected",
       "RequiredCapabilities": [
@@ -204,9 +194,10 @@
       "Schedule": {
         "Type": "Daily",
         "Times": [
-          "00:15"
+          "00:45"
         ],
-        "MissedRunPolicy": "RunOnce"
+        "MissedRunPolicy": "RunOnce",
+        "DaysOfWeek": []
       },
       "AssignmentMode": "Elected",
       "RequiredCapabilities": [
@@ -218,7 +209,7 @@
         "User.Read.All",
         "Group.Read.All"
       ],
-      "EstimatedDurationMinutes": 135
+      "EstimatedDurationMinutes": 90
     },
     {
       "Name": "Exchange2016-Local-Mailboxes-Inventory",
@@ -237,9 +228,10 @@
       "Schedule": {
         "Type": "Daily",
         "Times": [
-          "01:00"
+          "00:35"
         ],
-        "MissedRunPolicy": "RunOnce"
+        "MissedRunPolicy": "RunOnce",
+        "DaysOfWeek": []
       },
       "LauncherPath": "Launchers\\OnPremises\\Start-SmartM365-Exchange-Local-Mailboxes-InventoryWithADPermissions.cmd",
       "AssignmentMode": "Elected",
@@ -249,7 +241,7 @@
         "SharedRuntime"
       ],
       "RequiredGraphAppRoles": [],
-      "EstimatedDurationMinutes": 5
+      "EstimatedDurationMinutes": 150
     },
     {
       "Name": "Intune-Devices-BIOS-Inventory",
@@ -266,9 +258,10 @@
       "Schedule": {
         "Type": "Daily",
         "Times": [
-          "00:30"
+          "00:55"
         ],
-        "MissedRunPolicy": "RunOnce"
+        "MissedRunPolicy": "RunOnce",
+        "DaysOfWeek": []
       },
       "AssignmentMode": "Elected",
       "RequiredCapabilities": [
@@ -293,9 +286,10 @@
       "Schedule": {
         "Type": "Daily",
         "Times": [
-          "00:35"
+          "01:15"
         ],
-        "MissedRunPolicy": "RunOnce"
+        "MissedRunPolicy": "RunOnce",
+        "DaysOfWeek": []
       },
       "AssignmentMode": "Elected",
       "RequiredCapabilities": [
@@ -324,9 +318,10 @@
       "Schedule": {
         "Type": "Daily",
         "Times": [
-          "00:40"
+          "01:30"
         ],
-        "MissedRunPolicy": "RunOnce"
+        "MissedRunPolicy": "RunOnce",
+        "DaysOfWeek": []
       },
       "AssignmentMode": "Elected",
       "RequiredCapabilities": [
@@ -355,9 +350,10 @@
       "Schedule": {
         "Type": "Daily",
         "Times": [
-          "00:45"
+          "01:45"
         ],
-        "MissedRunPolicy": "RunOnce"
+        "MissedRunPolicy": "RunOnce",
+        "DaysOfWeek": []
       },
       "AssignmentMode": "Elected",
       "RequiredCapabilities": [
@@ -384,16 +380,11 @@
       "RetryDelaySeconds": 600,
       "ContinueOnError": false,
       "Schedule": {
-        "Type": "Weekly",
+        "Type": "Daily",
         "Times": [
-          "01:00"
+          "03:15"
         ],
-        "DaysOfWeek": [
-          "Sunday",
-          "Monday",
-          "Wednesday",
-          "Friday"
-        ],
+        "DaysOfWeek": [],
         "MissedRunPolicy": "RunOnce"
       },
       "AssignmentMode": "Elected",
@@ -403,7 +394,7 @@
         "SharedRuntime"
       ],
       "RequiredGraphAppRoles": "User.Read.All",
-      "EstimatedDurationMinutes": 5
+      "EstimatedDurationMinutes": 90
     },
     {
       "Name": "EXO-Mailboxes-Inventory",
@@ -427,8 +418,6 @@
           "20:00"
         ],
         "DaysOfWeek": [
-          "Monday",
-          "Wednesday",
           "Friday"
         ],
         "MissedRunPolicy": "RunOnce"
@@ -440,7 +429,7 @@
         "SharedRuntime"
       ],
       "RequiredGraphAppRoles": "User.Read.All",
-      "EstimatedDurationMinutes": 5
+      "EstimatedDurationMinutes": 1200
     },
     {
       "Name": "EXO-Mailboxes-Permissions",
@@ -459,9 +448,10 @@
       "Schedule": {
         "Type": "Daily",
         "Times": [
-          "02:30"
+          "05:00"
         ],
-        "MissedRunPolicy": "RunOnce"
+        "MissedRunPolicy": "RunOnce",
+        "DaysOfWeek": []
       },
       "AssignmentMode": "Elected",
       "RequiredCapabilities": [
@@ -469,7 +459,7 @@
         "SharedRuntime"
       ],
       "RequiredGraphAppRoles": [],
-      "EstimatedDurationMinutes": 5
+      "EstimatedDurationMinutes": 150
     },
     {
       "Name": "Intune-WinUpdate-Status",
@@ -488,9 +478,10 @@
       "Schedule": {
         "Type": "Daily",
         "Times": [
-          "01:00"
+          "02:00"
         ],
-        "MissedRunPolicy": "RunOnce"
+        "MissedRunPolicy": "RunOnce",
+        "DaysOfWeek": []
       },
       "AssignmentMode": "Elected",
       "RequiredCapabilities": [
@@ -528,20 +519,19 @@
       "Schedule": {
         "Type": "Daily",
         "Times": [
-          "01:30",
-          "08:45",
-          "11:45",
-          "14:45",
-          "17:45"
+          "07:00"
         ],
-        "MissedRunPolicy": "Skip"
+        "MissedRunPolicy": "RunOnce",
+        "DaysOfWeek": []
       },
       "AssignmentMode": "Elected",
       "RequiredCapabilities": [
         "SharedRuntime"
       ],
       "RequiredGraphAppRoles": [],
-      "EstimatedDurationMinutes": 5
+      "EstimatedDurationMinutes": 5,
+      "DependencyMode": "FreshSuccess",
+      "DependencyMaxAgeHours": 48
     },
     {
       "Name": "Exchange2016-ProxyAddresses-Check",
@@ -559,9 +549,10 @@
       "Schedule": {
         "Type": "Daily",
         "Times": [
-          "00:00"
+          "03:15"
         ],
-        "MissedRunPolicy": "RunOnce"
+        "MissedRunPolicy": "RunOnce",
+        "DaysOfWeek": []
       },
       "LauncherPath": "Launchers\\OnPremises\\Start-SmartM365-Check-ProxyAddresses-Exchange-ReadOnly.cmd",
       "AssignmentMode": "Elected",
@@ -590,9 +581,10 @@
       "Schedule": {
         "Type": "Daily",
         "Times": [
-          "03:00"
+          "00:00"
         ],
-        "MissedRunPolicy": "RunOnce"
+        "MissedRunPolicy": "RunOnce",
+        "DaysOfWeek": []
       },
       "LauncherPath": "Launchers\\OnPremises\\Start-SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory.cmd",
       "AssignmentMode": "Elected",
@@ -621,7 +613,7 @@
       "Schedule": {
         "Type": "Weekly",
         "Times": [
-          "03:45"
+          "04:00"
         ],
         "DaysOfWeek": [
           "Monday",
@@ -656,9 +648,10 @@
       "Schedule": {
         "Type": "Daily",
         "Times": [
-          "03:00"
+          "02:00"
         ],
-        "MissedRunPolicy": "RunOnce"
+        "MissedRunPolicy": "RunOnce",
+        "DaysOfWeek": []
       },
       "AssignmentMode": "Elected",
       "RequiredCapabilities": [
@@ -683,9 +676,10 @@
       "Schedule": {
         "Type": "Daily",
         "Times": [
-          "03:05"
+          "02:10"
         ],
-        "MissedRunPolicy": "RunOnce"
+        "MissedRunPolicy": "RunOnce",
+        "DaysOfWeek": []
       },
       "AssignmentMode": "Elected",
       "RequiredCapabilities": [
@@ -710,9 +704,10 @@
       "Schedule": {
         "Type": "Daily",
         "Times": [
-          "03:10"
+          "02:20"
         ],
-        "MissedRunPolicy": "RunOnce"
+        "MissedRunPolicy": "RunOnce",
+        "DaysOfWeek": []
       },
       "AssignmentMode": "Elected",
       "RequiredCapabilities": [
@@ -737,9 +732,10 @@
       "Schedule": {
         "Type": "Daily",
         "Times": [
-          "03:15"
+          "02:30"
         ],
-        "MissedRunPolicy": "RunOnce"
+        "MissedRunPolicy": "RunOnce",
+        "DaysOfWeek": []
       },
       "AssignmentMode": "Elected",
       "RequiredCapabilities": [
@@ -764,9 +760,10 @@
       "Schedule": {
         "Type": "Daily",
         "Times": [
-          "03:20"
+          "02:45"
         ],
-        "MissedRunPolicy": "RunOnce"
+        "MissedRunPolicy": "RunOnce",
+        "DaysOfWeek": []
       },
       "AssignmentMode": "Elected",
       "RequiredCapabilities": [
@@ -791,9 +788,10 @@
       "Schedule": {
         "Type": "Daily",
         "Times": [
-          "03:30"
+          "03:10"
         ],
-        "MissedRunPolicy": "RunOnce"
+        "MissedRunPolicy": "RunOnce",
+        "DaysOfWeek": []
       },
       "AssignmentMode": "Elected",
       "RequiredCapabilities": [
@@ -822,9 +820,10 @@
       "Schedule": {
         "Type": "Daily",
         "Times": [
-          "03:35"
+          "04:15"
         ],
-        "MissedRunPolicy": "RunOnce"
+        "MissedRunPolicy": "RunOnce",
+        "DaysOfWeek": []
       },
       "AssignmentMode": "Elected",
       "RequiredCapabilities": [
@@ -852,9 +851,10 @@
       "Schedule": {
         "Type": "Daily",
         "Times": [
-          "03:40"
+          "04:30"
         ],
-        "MissedRunPolicy": "RunOnce"
+        "MissedRunPolicy": "RunOnce",
+        "DaysOfWeek": []
       },
       "AssignmentMode": "Elected",
       "RequiredCapabilities": [
@@ -992,9 +992,10 @@
       "Schedule": {
         "Type": "Daily",
         "Times": [
-          "04:50"
+          "04:45"
         ],
-        "MissedRunPolicy": "RunOnce"
+        "MissedRunPolicy": "RunOnce",
+        "DaysOfWeek": []
       },
       "AssignmentMode": "Elected",
       "RequiredCapabilities": [
@@ -1019,9 +1020,10 @@
       "Schedule": {
         "Type": "Daily",
         "Times": [
-          "05:05"
+          "05:00"
         ],
-        "MissedRunPolicy": "RunOnce"
+        "MissedRunPolicy": "RunOnce",
+        "DaysOfWeek": []
       },
       "AssignmentMode": "Elected",
       "RequiredCapabilities": [
@@ -1046,9 +1048,10 @@
       "Schedule": {
         "Type": "Daily",
         "Times": [
-          "05:25"
+          "05:15"
         ],
-        "MissedRunPolicy": "RunOnce"
+        "MissedRunPolicy": "RunOnce",
+        "DaysOfWeek": []
       },
       "AssignmentMode": "Elected",
       "RequiredCapabilities": [
@@ -1079,7 +1082,8 @@
         "Times": [
           "05:30"
         ],
-        "MissedRunPolicy": "RunOnce"
+        "MissedRunPolicy": "RunOnce",
+        "DaysOfWeek": []
       },
       "AssignmentMode": "Elected",
       "RequiredCapabilities": [
@@ -1112,20 +1116,19 @@
       "Schedule": {
         "Type": "Daily",
         "Times": [
-          "05:00",
-          "08:45",
-          "11:45",
-          "14:45",
-          "17:45"
+          "08:00"
         ],
-        "MissedRunPolicy": "Skip"
+        "MissedRunPolicy": "RunOnce",
+        "DaysOfWeek": []
       },
       "AssignmentMode": "Elected",
       "RequiredCapabilities": [
         "SharedRuntime"
       ],
       "RequiredGraphAppRoles": [],
-      "EstimatedDurationMinutes": 5
+      "EstimatedDurationMinutes": 5,
+      "DependencyMode": "FreshSuccess",
+      "DependencyMaxAgeHours": 48
     },
     {
       "Name": "Mailboxes-PermissionsByUser-Report",
@@ -1145,9 +1148,10 @@
       "Schedule": {
         "Type": "Daily",
         "Times": [
-          "05:00"
+          "08:30"
         ],
-        "MissedRunPolicy": "RunOnce"
+        "MissedRunPolicy": "RunOnce",
+        "DaysOfWeek": []
       },
       "AssignmentMode": "Elected",
       "RequiredCapabilities": [
@@ -1171,9 +1175,10 @@
       "Schedule": {
         "Type": "Daily",
         "Times": [
-          "05:30"
+          "05:00"
         ],
-        "MissedRunPolicy": "RunOnce"
+        "MissedRunPolicy": "RunOnce",
+        "DaysOfWeek": []
       },
       "LauncherPath": "Launchers\\OnPremises\\Start-SmartM365-ActiveDirectory-HealthCheck.cmd",
       "AssignmentMode": "Elected",
@@ -1228,9 +1233,10 @@
       "Schedule": {
         "Type": "Daily",
         "Times": [
-          "06:30"
+          "09:00"
         ],
-        "MissedRunPolicy": "RunOnce"
+        "MissedRunPolicy": "RunOnce",
+        "DaysOfWeek": []
       },
       "AssignmentMode": "Elected",
       "RequiredCapabilities": [
@@ -1260,9 +1266,10 @@
       "Schedule": {
         "Type": "Daily",
         "Times": [
-          "07:30"
+          "08:15"
         ],
-        "MissedRunPolicy": "RunOnce"
+        "MissedRunPolicy": "RunOnce",
+        "DaysOfWeek": []
       },
       "LauncherPath": "Launchers\\Cloud\\Start-SmartM365-EXO-QuarantineMessages-Report.cmd",
       "AssignmentMode": "Elected",
@@ -1289,31 +1296,20 @@
         "Type": "Daily",
         "Times": [
           "00:20",
-          "01:20",
           "02:20",
-          "03:20",
           "04:20",
-          "05:20",
           "06:20",
-          "07:20",
           "08:20",
-          "09:20",
           "10:20",
-          "11:20",
           "12:20",
-          "13:20",
           "14:20",
-          "15:20",
           "16:20",
-          "17:20",
           "18:20",
-          "19:20",
           "20:20",
-          "21:20",
-          "22:20",
-          "23:20"
+          "22:20"
         ],
-        "MissedRunPolicy": "Skip"
+        "MissedRunPolicy": "Skip",
+        "DaysOfWeek": []
       },
       "AssignmentMode": "Elected",
       "RequiredCapabilities": [
@@ -1342,7 +1338,8 @@
           "12:00",
           "18:00"
         ],
-        "MissedRunPolicy": "Skip"
+        "MissedRunPolicy": "Skip",
+        "DaysOfWeek": []
       },
       "AssignmentMode": "Elected",
       "RequiredCapabilities": [
@@ -1367,12 +1364,11 @@
       "Schedule": {
         "Type": "Weekly",
         "Times": [
-          "21:00"
+          "20:00"
         ],
         "DaysOfWeek": [
           "Tuesday",
-          "Thursday",
-          "Saturday"
+          "Thursday"
         ],
         "MissedRunPolicy": "RunOnce"
       },
@@ -1382,7 +1378,7 @@
         "SharedRuntime"
       ],
       "RequiredGraphAppRoles": [],
-      "EstimatedDurationMinutes": 5
+      "EstimatedDurationMinutes": 480
     },
     {
       "Name": "Intune-DiscoveredApps-Inventory",
@@ -1399,10 +1395,10 @@
       "Schedule": {
         "Type": "Weekly",
         "Times": [
-          "00:00"
+          "20:00"
         ],
         "DaysOfWeek": [
-          "Sunday"
+          "Saturday"
         ],
         "MissedRunPolicy": "RunOnce"
       },
@@ -1415,7 +1411,7 @@
         "DeviceManagementApps.Read.All",
         "DeviceManagementManagedDevices.Read.All"
       ],
-      "EstimatedDurationMinutes": 5
+      "EstimatedDurationMinutes": 1500
     },
     {
       "Name": "M365-Teams-Inventory",
@@ -1430,13 +1426,11 @@
       "RetryDelaySeconds": 300,
       "ContinueOnError": true,
       "Schedule": {
-        "Type": "Weekly",
+        "Type": "Daily",
         "Times": [
-          "04:00"
+          "03:30"
         ],
-        "DaysOfWeek": [
-          "Sunday"
-        ],
+        "DaysOfWeek": [],
         "MissedRunPolicy": "RunOnce"
       },
       "AssignmentMode": "Elected",
@@ -1467,13 +1461,11 @@
       "RetryDelaySeconds": 600,
       "ContinueOnError": true,
       "Schedule": {
-        "Type": "Weekly",
+        "Type": "Daily",
         "Times": [
-          "04:10"
+          "03:45"
         ],
-        "DaysOfWeek": [
-          "Sunday"
-        ],
+        "DaysOfWeek": [],
         "MissedRunPolicy": "RunOnce"
       },
       "AssignmentMode": "Elected",
@@ -1501,13 +1493,11 @@
       "RetryDelaySeconds": 300,
       "ContinueOnError": true,
       "Schedule": {
-        "Type": "Weekly",
+        "Type": "Daily",
         "Times": [
-          "04:20"
+          "04:00"
         ],
-        "DaysOfWeek": [
-          "Sunday"
-        ],
+        "DaysOfWeek": [],
         "MissedRunPolicy": "RunOnce"
       },
       "AssignmentMode": "Elected",
@@ -1520,6 +1510,93 @@
         "Device.Read.All"
       ],
       "EstimatedDurationMinutes": 5
+    },
+    {
+      "Name": "M365-WorkplaceScope-Inventory",
+      "RequiresExplicitActivation": true,
+      "ScriptPath": "M365Inventory\\WorkplaceScope\\SmartM365-WorkplaceScope-Inventory.ps1",
+      "Arguments": "-EnableConfiguredExternalActions",
+      "Enabled": false,
+      "Group": "M365",
+      "DependsOn": [],
+      "AssignmentMode": "Elected",
+      "AllowedServers": [],
+      "PowerShellEdition": "PowerShell7",
+      "RequiredCapabilities": [
+        "Graph",
+        "SharedRuntime"
+      ],
+      "RequiredGraphAppRoles": [
+        "Group.Read.All",
+        "DeviceManagementConfiguration.Read.All"
+      ],
+      "ContinueOnError": false,
+      "MaxRetries": 1,
+      "RetryDelaySeconds": 600,
+      "ConcurrencyKey": "M365-WorkplaceScope-Inventory",
+      "TimeoutMinutes": 720,
+      "EstimatedDurationMinutes": 270,
+      "Schedule": {
+        "Type": "Daily",
+        "Times": [
+          "22:00"
+        ],
+        "DaysOfWeek": [],
+        "MissedRunPolicy": "RunOnce"
+      }
+    },
+    {
+      "Name": "CmdbEvidence-Prepare",
+      "RequiresExplicitActivation": true,
+      "ScriptPath": "PreparedEvidence\\SmartM365-CmdbEvidence-Prepare.ps1",
+      "Arguments": "-Publish",
+      "Enabled": false,
+      "Group": "PreparedEvidence",
+      "DependsOn": [
+        "M365-ActiveUsers-Inventory",
+        "AD-Inventory",
+        "M365-WorkplaceScope-Inventory",
+        "M365-EntraDevices-Inventory",
+        "Intune-Devices-Inventory",
+        "Intune-DiscoveredApps-Inventory",
+        "M365-Licences-Inventory",
+        "EXO-Mailboxes-Inventory-Fast",
+        "Exchange2016-Local-Mailboxes-Inventory",
+        "M365-SPO-Inventory",
+        "M365-Teams-Inventory",
+        "M365-VerifiedDomains-Inventory",
+        "Intune-WindowsAutopilot-Inventory",
+        "Intune-EndpointAnalytics-Inventory",
+        "Intune-Devices-UpgradeEligibility",
+        "Intune-AutopatchAlerts-Inventory",
+        "M365-Usage-Inventory"
+      ],
+      "AssignmentMode": "Elected",
+      "AllowedServers": [],
+      "PowerShellEdition": "PowerShell7",
+      "RequiredCapabilities": [
+        "Graph",
+        "SharedRuntime"
+      ],
+      "RequiredGraphAppRoles": [
+        "Sites.Selected"
+      ],
+      "ContinueOnError": false,
+      "MaxRetries": 0,
+      "RetryDelaySeconds": 0,
+      "ConcurrencyKey": "CmdbEvidence-Prepare",
+      "DependencyMode": "FreshSuccess",
+      "DependencyMaxAgeHours": 240,
+      "TimeoutMinutes": 120,
+      "EstimatedDurationMinutes": 10,
+      "Schedule": {
+        "Type": "Daily",
+        "Times": [
+          "09:30"
+        ],
+        "DaysOfWeek": [],
+        "MissedRunPolicy": "RunOnce"
+      }
     }
   ]
 }

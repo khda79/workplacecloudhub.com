@@ -6,7 +6,7 @@ Offline contract and dependency tests for the inactive CMDB integration candidat
 Reads repository contracts, merges jobs in memory and calls the real pipeline
 selector. No tenant configuration, API, submission, scheduling or file write.
 .VERSION
-1.0.1
+1.0.2
 #>
 [CmdletBinding()]
 param()
@@ -40,11 +40,13 @@ Test-Case 'Inactive specification cannot replace or activate the real manifest' 
     foreach ($job in $candidate.ProposedJobs) {
         Assert-True (-not $job.Enabled -and $job.AssignmentMode -eq 'Elected') 'Job activated or misleadingly Manual.'
         Assert-True (-not $job.PSObject.Properties['Schedule'] -and -not $job.PSObject.Properties['TimeoutMinutes']) 'Unqualified schedule/timeout.'
-        Assert-True (@($originalJobs.Jobs | Where-Object Name -eq $job.Name).Count -eq 0) 'Job added to automatic template.'
+        $optIn = @($originalJobs.Jobs | Where-Object Name -eq $job.Name)
+        Assert-True ($optIn.Count -eq 1 -and -not $optIn[0].Enabled -and $optIn[0].RequiresExplicitActivation) 'Template integration job can activate without explicit review.'
         Assert-True (Test-Path -LiteralPath (Join-Path $inventoryRoot $job.ScriptPath) -PathType Leaf) 'Candidate script missing.'
     }
 }
 $merged = $originalJobs | ConvertTo-Json -Depth 30 | ConvertFrom-Json
+$merged.Jobs = @($merged.Jobs | Where-Object Name -notin @($candidate.ProposedJobs.Name))
 $merged.Jobs = @($merged.Jobs) + @($candidate.ProposedJobs | ConvertTo-Json -Depth 15 | ConvertFrom-Json)
 $prepare = @($merged.Jobs | Where-Object Name -eq 'CmdbEvidence-Prepare')[0]
 Test-Case 'All 17 native producers have exactly one dependency' {
@@ -58,7 +60,7 @@ Test-Case 'All 17 native producers have exactly one dependency' {
     foreach ($producer in $producers) {
         Assert-True (@($dependencies | Where-Object { [IO.Path]::GetFileName($_.ScriptPath) -eq $producer.Script }).Count -eq 1) "Producer coverage: $($producer.Script)"
     }
-    Assert-True ($prepare.DependsOn -contains 'EXO-Mailboxes-Inventory' -and $prepare.DependsOn -notcontains 'EXO-Mailboxes-Permissions') 'Permissions-only used for mailbox acquisition.'
+    Assert-True ($prepare.DependsOn -contains 'EXO-Mailboxes-Inventory-Fast' -and $prepare.DependsOn -notcontains 'EXO-Mailboxes-Inventory' -and $prepare.DependsOn -notcontains 'EXO-Mailboxes-Permissions') 'CMDB acquisition must use daily mailbox details, not weekly stats or permissions-only.'
     Assert-True ($prepare.DependencyMode -eq 'FreshSuccess' -and $prepare.DependencyMaxAgeHours -eq 240) 'Weekly Apps scheduler gate differs.'
     $contract=Get-Content -LiteralPath (Join-Path $inventoryRoot 'PreparedEvidence/cmdb-prepared-contract.json.txt') -Raw | ConvertFrom-Json
     Assert-True ($contract.maxAgeHours -eq 48 -and $contract.maxCollectionSpanHours -eq 48) 'Core acquisition gates weakened.'
@@ -77,7 +79,7 @@ Test-Case 'Synthetic enabled copy selects preparation and all 17 producers' {
     foreach ($name in $prepare.DependsOn) { Assert-True (@($selection.SelectedJobs | Where-Object Name -eq $name).Count -eq 1) "Not selected: $name" }
 }
 Test-Case 'Existing jobs and Intelligence dependencies unchanged; fresh arguments explicit' {
-    foreach ($original in $originalJobs.Jobs) {
+    foreach ($original in @($originalJobs.Jobs | Where-Object Name -notin @($candidate.ProposedJobs.Name))) {
         $copy = @($merged.Jobs | Where-Object Name -eq $original.Name)[0]
         Assert-True (($original | ConvertTo-Json -Depth 15 -Compress) -eq ($copy | ConvertTo-Json -Depth 15 -Compress)) "Original job changed: $($original.Name)"
     }
@@ -110,8 +112,8 @@ Write-Output "CMDB integration candidate tests: $testCount passed. No requests o
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCB9ZjHWDYR23wH
-# SPK0CQcFi+w1gED8807x8tNxhWkKiqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDUKoOBRvvnJ68l
+# VFSde0RbfH18uhPZPep6ehDjq+WnxaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -244,31 +246,31 @@ Write-Output "CMDB integration candidate tests: $testCount passed. No requests o
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIHQa+yaKCekUFZaslRuSziPPIn7SXIzRvEAo6hUyjZQfMA0GCSqG
-# SIb3DQEBAQUABIIBgCWFh4U4QMfedxFfnajZ8PoSSe7uVyj7PqpJzFA+Jgm1+zjb
-# 97WCZ2/yNxiAdklr2bm3xTh4y+UZcT6dAL9toTdvm2+q0Zcg1cKxHSadkuLvQe1R
-# /5q5ACwgXvwAirR9oC98I6fzxc+380lTyxqZ4ekVvtq7nRSPOD7XGY+t6rZrJpTd
-# XFBUU0+zSjkhkh0QN7oK4ii3i7pHDbvcn9WAysesYjsfFCO3T+OaTVRfInYR5AgP
-# H2yN316cGxnj0TkTvAFi1MC41w5yAXemxZppnX70WsN3BiIzmN5k2FXYa24T0Tq8
-# cBGuBOtuFUQOs/rs8B05DiiXAf34IXCKHHZgietRUMnSqlKxJpYNzMLU4M76Xl8h
-# V2n+JI8JR9TVHjs4BHB6Ods+BjRgTTz2wIdUGcUVMlqlQsAaSpLXpYtPB5/C3pN5
-# Q/mjGu89WURruhGdtOKkDdTx4ZekUU3ka1WC/dCjtVd/dti1EK74L6eDGPd4QLXc
-# ssmfA3OSAjudUzGNt6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIG4QIvV9nUlMGYwIYlM4VhzL5oyb2BrUPKKK6Ol4LVHgMA0GCSqG
+# SIb3DQEBAQUABIIBgCvswpO1Q9DL2uLhYVjKqef5Rh5ZPTgQtX3cRz5AkCVTZ2BI
+# cOYB1v5uaCVCHgerefOKvmsQvjLkGuorav4EkUa3mv1/8ObMAryAnXjVA9OmfXfM
+# 5kOO9cvnDO/bntssSsqojGVo+rdF7Z9EOa4cV1Ys6kmT52M7KWjXS64++RjPDpsO
+# JeBz8wiJiKf3iAqDh1H4QkOr8efD2rsyacTP36f+tyrmhOGp1nIMyfH2z4pPqsZ7
+# m/bnoB6GPQ6O25IGyyNduGa5U+Mi8YPa3wYgIB+hqIAt7cyR8VGsYkVHN13TtXkD
+# alV322J+0zLYvdSKXehN+TJS3N/cLIkl4LF/6iU8Qe1a0CGE6j9GjYhd7kJ5pRvL
+# 5vhdn0XvtwUF20BqkIQ8txtfsiI3JmrTi1Ww/wocQ775jKEhm+gwentWkAG9tPWp
+# dSc/0Zs46F8Ui+sOuwyNPJaOyfLMNID+589Fu6uba8PauiX8YvkI6CqD+VsnaMUc
+# XuPny1kNvizPTwjSvKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDUyMDA4
-# NDlaMC8GCSqGSIb3DQEJBDEiBCBOFeNeahLFtEIp1iSj/nfEUWJO5Gxf8e2LO44Z
-# y6OjiTANBgkqhkiG9w0BAQEFAASCAgA14+cWgqO8h0FG+anUGvlR3KHEXTqnYpaS
-# SExS+A/qhy0k4ExvgLGPOArjQMtdyBw4JQcQ1NxoBlqgOPxL9oIFyJdrZDioJbOB
-# elqR8NAIK1DP5e1E/hPYbPk1HiSGYOwOjBAn+PZeZvjC8/SD0sSQ856Ei9BcuUSr
-# KPMPZzqxajS2DuvRbnBiTXydQsO+A/sIhBbJyiP9v47fn59lMUgl8uE7fX3W2J8H
-# 1fXx8OkEiQyjlDIvUva759vz6n8DiyFQ8GJFGoqh5ETXshsBncDshhTN2JcA4FEE
-# 3LmTvg5kTHEcr/oYOly5l+YddvAkg4BCAVkWA03rssC0aItJnikDCYaAfa785pM9
-# vuOKPS6qHPMpoPrGabnhbhUVRAtq2yVzgMURPPfta0cOdXcjzVkrKty4+IbPEKRt
-# nk49gU12losJGjmj63TOqM0XqMhiAFHZztbEtWpSSIaqeVXJ5PTMpMVwCtPr5xlB
-# RvTrM2IFx9wc2rMMMGEkfyUr7CYLVoOZQt0zKtmlAZzJ20vz4VRVCh4w9NFdq9XW
-# GDHmnhAlaKlaBPzKoZmgr3HvFI1Wu3lOVtBeb3F4Frg0X3dc56MZGs3OohCWe8ks
-# pb37KIO37DhYk5sENkA92i8qEm3lgwQlr3qtkBJ2IbWOraa+7LvIdAT36HtvlCSP
-# U9XAE4qjMw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDcxNDQ1
+# NDlaMC8GCSqGSIb3DQEJBDEiBCCaCEXpiQ5k67OG08j2UmWaHQqpq4oMwwRYAHdV
+# RNLt3zANBgkqhkiG9w0BAQEFAASCAgCDAinNTnEw0VDC0SmPT82X8QSHnoZJg8HH
+# UFqmgxEmWtfoq2ZggRx+SE6CKfOjHo4H1aXVXctS5KWZx2GK/qBMOCUQByFRV8SP
+# eqEvQ6GEfhMymuU8Z5OpNJrZttv37OuZYwoLuXp1ujsMF0s7PRmg0g0AAXADtOCf
+# xIU4NVWVWrtlqI9/gzyqBJ8oG3dmUTDFQyM8JU6021KjdF8xEDynLtLCJ4uiyuC1
+# sUJg+tuORhDCHsoaNImEYChGszoL8RVyfki1hi4j2FNKZFKR/Ldy3t+UsUSFRTjT
+# VtGJm5Kl6h+3V8eKmnHER3yxXHWmzVOLHP/YTkX8UTbb8nz3Jf0IQsuR3H2rKADA
+# L2aBBVG4pvheheixTxmYOLdZ1S0PNFrYJKF+Jd1abnpzr6R5+JAzH9yx/dABEXGH
+# 3jn8VMpWdWFscPJHyzRB768vn1aVRUxcOxMmfE2VNaAQFaSPlWJRBgewDXd/grKf
+# BBOkiQWp5mFfWR8lmWVuanLEl+EdY/sADv5804FzOtrvdyxVTq3PitbI0vCWYi4W
+# JB3M+zhap6AGijs0TiKDP9bNl1Lbkj418ZOG+3RSy6klfnLirYH5F2bhGEePY4Ly
+# oX864JlgpxYglqlpQbXl5RoRH6a7jykSRwsJJ0d11xgvDT5Q3wQuX4C+Hp5Fh+vB
+# FOWGVe1/YQ==
 # SIG # End signature block

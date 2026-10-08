@@ -1,5 +1,5 @@
 {
-  "Version": "0.1.1",
+  "Version": "0.1.2",
   "CandidateOnly": true,
   "Description": "Review-only integration specification, not an executable jobs manifest or an automatic template merge.",
   "ActivationRequires": [
@@ -52,7 +52,7 @@
         "Intune-Devices-Inventory",
         "Intune-DiscoveredApps-Inventory",
         "M365-Licences-Inventory",
-        "EXO-Mailboxes-Inventory",
+        "EXO-Mailboxes-Inventory-Fast",
         "Exchange2016-Local-Mailboxes-Inventory",
         "M365-SPO-Inventory",
         "M365-Teams-Inventory",
