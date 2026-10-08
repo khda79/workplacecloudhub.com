@@ -26,9 +26,12 @@ The working source after release 1.0.64 includes these review corrections:
   site collection. Membership lookup failures produce error evidence and block
   final inventory publication. Transient failures receive bounded retries;
   denied access and other permanent failures stop immediately.
-- Permission page enumeration resumes after the last fully processed item ID
-  following a transient transport failure, preserving streaming and avoiding
-  duplicate exports. Role-assignment collections also use bounded read retries.
+- Destination permission inventory 1.1.8 uses SharePoint's native list-page
+  continuation with recursive coverage and at most 2,000 items per page. It
+  removes the unbounded `ID > ...` filter that caused list-view threshold errors
+  on large libraries. Transient failures retry only the unread page, preserving
+  completed exports. Persistent failures still block final CSV publication.
+  Role-assignment collections also use bounded read retries.
 - SPO discovery and inventory reuse connections only for the exact web URL
   within the same scan execution and authentication configuration.
 - Optional token diagnostics retrieve the SharePoint token through the supported

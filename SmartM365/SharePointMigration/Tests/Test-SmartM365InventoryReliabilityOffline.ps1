@@ -2,7 +2,7 @@
 .SYNOPSIS
     Regression checks for inventory data fidelity, paged reads and workbook snapshots.
 .VERSION
-    1.0.3
+    1.0.4
 #>
 #Requires -Version 7.4
 $ErrorActionPreference = 'Stop'
@@ -35,7 +35,7 @@ foreach ($file in Get-ChildItem (Join-Path $root 'Scripts/Inventory') -Filter '*
     }
 }
 $permission=Join-Path $root 'Scripts/Inventory/SmartM365-SharePointTarget-PermissionInventory.ps1'
-Import-TestFunction $permission @('Connect-ToSPOWeb','Get-PnPGroupTitle','Get-AssociatedWebGroupNames','Invoke-SPORead','Get-SPOExceptionDetails','Get-SPORoleAssignmentIdentity','Get-RoleAssignmentRows','Get-PrincipalInfo','Get-PrincipalMembershipInfo','Get-EmptyPrincipalMembershipInfo','Add-SPOInheritanceRead','Get-SPOPageInheritance','Write-SPOItemError','Export-SPOPermissionPage','Export-ItemPermissionInventory','Write-InventoryError')
+Import-TestFunction $permission @('Connect-ToSPOWeb','Get-PnPGroupTitle','Get-AssociatedWebGroupNames','Invoke-SPORead','Get-SPOExceptionDetails','Get-SPORoleAssignmentIdentity','Get-RoleAssignmentRows','Get-PrincipalInfo','Get-PrincipalMembershipInfo','Get-EmptyPrincipalMembershipInfo','Add-SPOInheritanceRead','Get-SPOPageInheritance','Write-SPOItemError','Get-SPOPermissionListPage','Export-SPOPermissionPage','Export-ItemPermissionInventory','Write-InventoryError')
 $script:SPOPermissionConnection='fixture'
 $script:SPOInheritanceLoad=$null; $script:SPOInheritanceItemType=$null
 $script:AssociatedWebGroupCache=@{}
@@ -148,6 +148,40 @@ try {
 using System;
 using System.Linq.Expressions;
 using System.Collections.Generic;
+namespace Microsoft.SharePoint.Client {
+ public class ListItemCollectionPosition { public string PagingInfo {get;set;} }
+ public class CamlQuery {
+  public string ViewXml {get;set;}
+  public ListItemCollectionPosition ListItemCollectionPosition {get;set;}
+ }
+}
+public class ReliabilityPage : List<ReliabilityItem> {
+ public Microsoft.SharePoint.Client.ListItemCollectionPosition ListItemCollectionPosition {get;set;}
+}
+public class ReliabilityPageList {
+ public List<ReliabilityItem> Items=new List<ReliabilityItem>();
+ public ReliabilityPage GetItems(Microsoft.SharePoint.Client.CamlQuery query) {
+  var xml=new System.Xml.XmlDocument(); xml.LoadXml(query.ViewXml);
+  if(xml.SelectSingleNode("//Where")!=null && Items.Count>5000) throw new Exception("The attempted operation is prohibited because it exceeds the list view threshold.");
+  if(xml.SelectSingleNode("/View").Attributes["Scope"].Value!="RecursiveAll") throw new Exception("Recursive scope lost");
+  if(xml.SelectSingleNode("//OrderBy").Attributes["Override"].Value!="TRUE") throw new Exception("Default view order retained");
+  int limit=int.Parse(xml.SelectSingleNode("//RowLimit").InnerText);
+  if(limit>2000 || xml.SelectSingleNode("//RowLimit").Attributes["Paged"].Value!="TRUE") throw new Exception("Page limit lost");
+  foreach(string field in new[]{"ID","FileRef","FileLeafRef","FSObjType","UniqueId"})
+   if(xml.SelectSingleNode("//ViewFields/FieldRef[@Name='"+field+"']")==null) throw new Exception("Field lost: "+field);
+  int after=query.ListItemCollectionPosition==null?0:int.Parse(query.ListItemCollectionPosition.PagingInfo.Split('=')[2]);
+  var page=new ReliabilityPage();
+  foreach(var item in Items) { if(item.Id<=after) continue; if(page.Count==limit) break; page.Add(item); }
+  if(page.Count>0 && page[page.Count-1].Id<Items[Items.Count-1].Id)
+   page.ListItemCollectionPosition=new Microsoft.SharePoint.Client.ListItemCollectionPosition { PagingInfo="Paged=TRUE&p_ID="+page[page.Count-1].Id };
+  return page;
+ }
+}
+public class ReliabilityPageContext {
+ public int Queries;
+ public void Load(object items) { if(!(items is ReliabilityPage)) throw new Exception("Unexpected collection"); }
+ public void ExecuteQuery() { Queries++; }
+}
 public class ReliabilityItem {
  public int Id {get;set;}
  public bool HasUniqueRoleAssignments {get;set;}
@@ -196,18 +230,35 @@ public class ReliabilityContext {
         $item.FieldValues['FileRef']="/sites/a/Docs/$id.txt"; $item.FieldValues['FileLeafRef']="$id.txt"
         $item.FieldValues['UniqueId']=[string]$id; $item.FieldValues['FSObjType']='0'; $item
     })
-    function Get-PnPListItem {
-        [CmdletBinding()] param($List,[int]$PageSize,[string[]]$Fields,[string]$Query,$Connection,[scriptblock]$ScriptBlock,[int]$Id)
-        if ($Id) { throw 'Item does not exist. Existence probe.' }
-        if ($script:LargePages) {
-            & $ScriptBlock $script:Items[0..1999]
-            Assert-True ($script:Exported.Count -eq 1000) 'Large first page was not exported before fetching the final page.'
-            & $ScriptBlock @($script:Items[2000])
-            return
+    function Get-PnPListItem { [CmdletBinding()] param($List,[int]$Id,$Connection) throw 'Item does not exist. Existence probe.' }
+    $savedPageReader=${function:Get-SPOPermissionListPage}
+    # Exercise the real page reader against a threshold-enforcing CSOM fixture.
+    $fixtureList=[ReliabilityPageList]::new()
+    foreach($id in 1..6001) { $item=[ReliabilityItem]::new(); $item.Id=$id*3; $fixtureList.Items.Add($item) }
+    $script:Context=[ReliabilityPageContext]::new()
+    $position=$null; $seen=[Collections.Generic.List[int]]::new()
+    do {
+        $page=Get-SPOPermissionListPage -List $fixtureList -PagingInfo $position -PageSize 8000
+        foreach($item in $page.Items) { $seen.Add($item.Id) }
+        $position=$page.NextPagingInfo
+    } while($position)
+    Assert-True ($seen.Count -eq 6001 -and ($seen -join ',') -eq ($fixtureList.Items.Id -join ',') -and $script:Context.Queries -eq 4) 'Threshold-safe continuation lost sparse IDs or the final singleton page.'
+    $fixtureList.Items.Clear()
+    $page=Get-SPOPermissionListPage -List $fixtureList -PageSize 2000
+    Assert-True ($page.Items.Count -eq 0 -and -not $page.NextPagingInfo) 'An empty library did not finish as an empty page.'
+    $script:Context=[ReliabilityContext]::new()
+    function Get-SPOPermissionListPage {
+        param($List,[string]$PagingInfo,[int]$PageSize)
+        if (-not $PagingInfo) {
+            $end = if ($script:LargePages) { 1999 } else { 1 }
+            return [pscustomobject]@{ Items=$script:Items[0..$end]; NextPagingInfo='Paged=TRUE&p_ID=next' }
         }
-        & $ScriptBlock $script:Items[0..1]
+        if ($script:LargePages) {
+            Assert-True ($script:Exported.Count -eq 1000) 'Large first page was not exported before fetching the final page.'
+            return [pscustomobject]@{ Items=@($script:Items[2000]); NextPagingInfo=$null }
+        }
         Assert-True ($script:Exported.Count -eq 1) 'First page was not processed before fetching the second page.'
-        & $ScriptBlock $script:Items[2..3]
+        return [pscustomobject]@{ Items=$script:Items[2..3]; NextPagingInfo=$null }
     }
     $list=[pscustomobject]@{ Title='Docs'; BaseTemplate=101; BaseType='DocumentLibrary'; RootFolder=[pscustomobject]@{ServerRelativeUrl='/sites/a/Docs'} }
     $PageSize=2
@@ -217,30 +268,28 @@ public class ReliabilityContext {
     Export-ItemPermissionInventory -Web $web -List $list -CsvPath 'fixture.csv' -ProgressInterval 2
     Assert-True ($script:CollectionAttempts -eq 3 -and ($script:Exported.ItemId -join ',') -eq '2,4' -and -not $script:ErrorCsvCreated -and ($script:Delays -join ',') -eq '5,15') 'Role-assignment collection retry lost item permissions or recorded a recoverable failure.'
     $script:CollectionFault=$false
-    # A lost next-page response resumes after the completed page, including gaps in IDs.
+    # A lost next-page response retries that continuation, including gaps in IDs.
     $script:Context=[ReliabilityContext]::new(); $script:Exported.Clear(); $script:Delays.Clear()
     $script:PageAttempts=0; $script:ResumeQueries=[Collections.Generic.List[string]]::new(); $script:TerminalPageFailure=$false
-    $savedListItem=${function:Get-PnPListItem}
-    function Get-PnPListItem {
-        [CmdletBinding()] param($List,[int]$PageSize,[string]$Query,$Connection,[scriptblock]$ScriptBlock,[int]$Id,[string[]]$Fields)
-        $script:PageAttempts++; $script:ResumeQueries.Add($Query)
-        if ($Id) { throw 'Item does not exist.' }
-        if ($Query -match "<Value Type='Counter'>0</Value>") {
-            & $ScriptBlock $script:Items[0..1]
-            throw 'Response ended prematurely.'
+    $savedMockPageReader=${function:Get-SPOPermissionListPage}
+    function Get-SPOPermissionListPage {
+        param($List,[int]$PageSize,[string]$PagingInfo)
+        $script:PageAttempts++; $script:ResumeQueries.Add($PagingInfo)
+        if (-not $PagingInfo) {
+            return [pscustomobject]@{ Items=$script:Items[0..1]; NextPagingInfo='Paged=TRUE&p_ID=7' }
         }
-        if ($script:TerminalPageFailure) { throw 'Response ended prematurely.' }
-        & $ScriptBlock $script:Items[2..3]
+        if ($script:TerminalPageFailure -or $script:PageAttempts -eq 2) { throw 'Response ended prematurely.' }
+        return [pscustomobject]@{ Items=$script:Items[2..3]; NextPagingInfo=$null }
     }
     $script:Items[1].Id=7; $script:Items[2].Id=13; $script:Items[3].Id=18
     Export-ItemPermissionInventory -Web $web -List $list -CsvPath 'fixture.csv' -ProgressInterval 2
-    Assert-True ($script:PageAttempts -eq 2 -and $script:ResumeQueries[1] -match "<Value Type='Counter'>7</Value>" -and ($script:Exported.ItemId -join ',') -eq '18' -and $script:SPOPermissionPageState.Processed -eq 4 -and -not $script:ErrorCsvCreated) 'Next-page retry duplicated or skipped completed pages.'
+    Assert-True ($script:PageAttempts -eq 3 -and $script:ResumeQueries[1] -eq 'Paged=TRUE&p_ID=7' -and $script:ResumeQueries[2] -eq $script:ResumeQueries[1] -and ($script:Exported.ItemId -join ',') -eq '18' -and $script:SPOPermissionPageState.Processed -eq 4 -and -not $script:ErrorCsvCreated) 'Next-page retry duplicated or skipped completed pages.'
     $script:Context=[ReliabilityContext]::new(); $script:Exported.Clear(); $script:PageAttempts=0; $script:TerminalPageFailure=$true; $script:Delays.Clear()
     Export-ItemPermissionInventory -Web $web -List $list -CsvPath 'fixture.csv' -ProgressInterval 2
-    Assert-True ($script:PageAttempts -eq 3 -and $script:ErrorCsvCreated -and $script:SPOPermissionPageState.Processed -eq 2 -and ($script:Delays -join ',') -eq '5,15') 'Terminal page failure was published or retried without a bound.'
+    Assert-True ($script:PageAttempts -eq 4 -and $script:ErrorCsvCreated -and $script:SPOPermissionPageState.Processed -eq 2 -and ($script:Delays -join ',') -eq '5,15') 'Terminal page failure was published or retried without a bound.'
     Remove-Item $script:ErrorPath; $script:ErrorCsvCreated=$false
     foreach($i in 0..3) { $script:Items[$i].Id=$i+1 }
-    Set-Item function:Get-PnPListItem $savedListItem
+    Set-Item function:Get-SPOPermissionListPage $savedMockPageReader
     $script:Missing=$true; $script:Context.Missing=$true
     $inheritance=Get-SPOPageInheritance -PageItems $script:Items[2..3] -Web $web -List $list -ListUrl 'https://example.test/sites/a/Docs'
     $record=@(Import-Csv $script:ErrorPath -Delimiter ';')
@@ -328,8 +377,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCKG4LOJKWufbrF
-# 479ucyqZu5C0PT4Q72MQ/qKwP9ps8qCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA8rFIL4aZGuy1U
+# mzcQsXYIW0AscUJR2JDwlJd6dYQNLaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -462,31 +511,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIL8pqCOCJ8ePWU6M7By/7KKj16uwDm7OuceWr1AvULdoMA0GCSqG
-# SIb3DQEBAQUABIIBgFc7L8XGmPem5Lml6/eLYVMN1ZMz4WWQHSdOb5ksNj8raP/B
-# sJk/UIGRFOsJb/nOcm+dEtcSUdn2YTqvPcC5uU9+PB3tnAK6v9lW0LOMMf+FJpC5
-# 16JB51kAIkf3QTVn1KXFq2/FGUKZnMrvkgBlmfJZWDuUD9oGMmlVr/4kaQoL9+zz
-# y24k28R153zoDB8JlbTBMiCDA4jGniAXiyMBYD6DepLWSUXOiBVPJ90emcoM/slU
-# AH64f2MmcxuSr86kp5MZCDjimRDnK+gsG0Qze2KNDHD8ykqTzMk6feq9jQhGNkQ8
-# qCJnHRH1ya1ReHyrrImTiGTRBzzn2zMwQTFMktK7qfHjAZon/gfeEK/AsA4mCZ7r
-# vMzuaSq1XmtrMeH91486FnhBY53SKP78mJhpmdg5wGIby16XBgvih0XaGZYB7fLX
-# WxUykeELOQkPaekxujgXFJJj5sqiF1GET2qsYXbB5FHvKw75oJmH1OgbRBoimW0I
-# Pq+GM+fXvn0RHVuXI6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEID6uCF7BJ2f4tIZz99Q8VITuBVoRwA+B8XRX3ek19YKMMA0GCSqG
+# SIb3DQEBAQUABIIBgDaQK5hE7rwJOxvRbSKxVlS9UvECYCGGGe7u2PRjd3gETkwP
+# rqkSlKgwStlmES136hD/deVz4dvJeayRyJjsfYbO+mc2Gdq1Bj8OJFIUQS8jeXaq
+# eoT6kCyyfsXcFMFcIN0FXdI/Nhar+IKHeJDHMPX1vzo19D5jf5Ed5BSEz7lN2jLt
+# mqFO85KL2UY5KA0uNftUOYRqPTiIfguFdoO+lYt/QJV7MmDYqYOZbk5GI/fhb45p
+# 6HPIwpxtmdAyZId4pZkRMu2nKktOeyr4r3y9RtbQ77G4tjUF/bSStw1YInjCPfyW
+# B0/6xKAlZKCJFVDV7igjD4Nyp6sAmiQqNfHXv/ObtFtumX2FpXDZYT/PfIrqqxT5
+# HDiosPuemPBOzGWHvWAyADEHNsE73hNl3eJWUr2k6jwJkWyrj1D0SxBV9pD3fVQB
+# 6zuILhJ0wbACTi0K3uAyHfsvhnW0/PUZKQk2SrhB/ThiXE2odafw5BoLqDACGgSD
+# lLBticzUbx+ulgfvAaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDgxNDU4
-# MjVaMC8GCSqGSIb3DQEJBDEiBCDLXn2Fzi+DLC4Rxa6Yvs9XcWLoT6cFzsQpgQHB
-# HNr5SzANBgkqhkiG9w0BAQEFAASCAgAgzEaa9qd5T4zOVz8c0QSjJ5yRPYhIF6DG
-# FoIOQbde1NfMOraNiDVp7hkYX51Olor98mz8fHBxY2WZJxJe8rLE6lGOnB3JGhX7
-# xN5IHISicKdnXETQSBquhTGkRVhk1HOonONUkyXJmjzFIC9PhypTWaSEAhMtmR95
-# QbpwSL3IDXg2mlhrwRlp12buTi/3C7CHuj3O//nR6cs1aOkvcoc57UkKeYwBGfxR
-# 9L4prdtCGxpTJm0y2WCKiLozOij5EYlO/HgbbA+zXY4psabejXGfz2vXrmOEjT5l
-# 2Y3lJL/mqMbCJQLkk7qZPNrEhKMUirq7tzCRwwElYdeAmbZFRQ9uo4LoaJJJfe6D
-# VQJi/GFo3S8MreaHz7Rd2ap1w8Jiacj5tNebFzASyyHOBc3jggzFPFzbzU1xPBcW
-# yetfzah2iksV/gopzr3Uvog8x+DCnNRR2beAMlQSxDnZLRr6K6QW1E4RDgayh5Y5
-# sm/ZTuVqYQgCCOj5J0XqhUUpf2ZmI95/M/CsCXrp/8keyms3tjbIopmuQ9cMB6iA
-# wSCWPSPiFvoVwnAOUkd5G+0sdNogczweHtyitRxbK1mr8JKOxsU/CUh+S0Wyfj8P
-# KBIw/mecd41HpCdeEzMUrp0oJ7Y6CYF6nzw6rUKO1Qyy2qravgVun+J+LRvbEg5h
-# nkegI1w88A==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDgxNzAw
+# MzdaMC8GCSqGSIb3DQEJBDEiBCAuuUpSOQBlNWl/ZFh3/8pYFyOSB078imKbdj22
+# LR+89jANBgkqhkiG9w0BAQEFAASCAgBO071Rs0EFOvGvote9rgr22SXhQPo5V3uR
+# ygfbqqLtwWoDVkEH+WuffGi9dkkgIKPcUIS0bNRK3SvebIelcwQ9euPZmY4wo9JC
+# tBxi1meO35pEmmApL2Dbmb1oNmMZbDwbWEYGYa+g0UBvpOaEREBWtOGcOJqHa4m9
+# 8OSRofcE7902q0Ec/x5Rb3bKz0iEyEyUzEnXYDBF8idhmZhBnPJEB8u8wLdoSVFT
+# 8gGX3uyH0xttGlsp9fbYQgsYk3s0WTgseVa3U6ZrDv33LvjPCu/1/Gf1wlBQU7lF
+# kFQZ5yBnXONEEsPJvTknq5dIvT053ux2L6FtZCSqAGFMT0/+DgspCpaCnzrbZCic
+# /6hNEpQ1Bsw1pNmmHXFXWRaTXVWLC13jBkQi16cEyIKkI0C39nbfyEqVyTwKTdHI
+# n6rhTQUa63KsTRYC52MxUj1PPOLQ5WbDQA3rMmPSKAgUxfZix3l3qm0kG+pnqNmS
+# XDL1XtGnCAkKjnC8yJg6VUCNgmgRa2nAPwwfjtYWNd38hiv/aTiCoE4xt5tLyrUK
+# aI/vnF8hh8zpzbH3vwmZPlNEtYLLkN48zJptOAr+U0s+qlstZ/JqZba6zHlQwN9a
+# 7L2lcOydBHPLr7GuIyEaT4YEpFU5SQED8pY0mN49kKch9IqLlhtWdx17zxGz+nTT
+# YErq/zKO/A==
 # SIG # End signature block

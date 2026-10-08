@@ -10,7 +10,7 @@
     as possible so both inventories can be compared.
 
 .VERSION
-    1.1.7
+    1.1.8
 #>
 
 [CmdletBinding(DefaultParameterSetName = 'WebUrlsFile')]
@@ -738,27 +738,22 @@ function Export-ItemPermissionInventory {
     $listUrl = ConvertTo-AbsoluteSharePointUrl -WebUrl $Web.Url -ServerRelativeUrl $rootFolder.ServerRelativeUrl
     $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
 
-    $state = @{ Processed=0; Unique=0; Exported=0; LastItem='<none>'; LastCompletedItemId=0 }
+    $state = @{ Processed=0; Unique=0; Exported=0; LastItem='<none>' }
     $script:SPOPermissionPageState = $state
-    $script:SPOPermissionPageWeb = $Web
-    $script:SPOPermissionPageList = $List
-    $script:SPOPermissionPageCsv = $CsvPath
-    $script:SPOPermissionPageInterval = $ProgressInterval
-    $script:SPOPermissionPageStopwatch = $stopwatch
     try {
-        # Retry enumeration from the last fully processed page. The indexed ID order
-        # prevents duplicate exports even when the next HTTP response fails.
-        Invoke-SPORead -Label ("items in list '{0}' ({1})" -f $List.Title, $listUrl) -Operation {
-            $cursor = [int]$script:SPOPermissionPageState.LastCompletedItemId
-            $query = "<View Scope='RecursiveAll'><Query><Where><Gt><FieldRef Name='ID'/><Value Type='Counter'>$cursor</Value></Gt></Where><OrderBy><FieldRef Name='ID' Ascending='TRUE'/></OrderBy></Query><ViewFields><FieldRef Name='ID'/><FieldRef Name='FileRef'/><FieldRef Name='FileLeafRef'/><FieldRef Name='FSObjType'/><FieldRef Name='UniqueId'/></ViewFields><RowLimit Paged='TRUE'>$PageSize</RowLimit></View>"
-            Get-PnPListItem -List $List -PageSize $PageSize -Query $query -Connection $script:SPOPermissionConnection -ScriptBlock {
-                param($PageItems)
-                Export-SPOPermissionPage -PageItems $PageItems -Web $script:SPOPermissionPageWeb -List $script:SPOPermissionPageList -CsvPath $script:SPOPermissionPageCsv -State $script:SPOPermissionPageState -ProgressInterval $script:SPOPermissionPageInterval -Stopwatch $script:SPOPermissionPageStopwatch
-                foreach ($pageItem in $PageItems) {
-                    $script:SPOPermissionPageState.LastCompletedItemId = [Math]::Max([int]$script:SPOPermissionPageState.LastCompletedItemId, [int]$pageItem.Id)
-                }
-            } -ErrorAction Stop | Out-Null
-        } | Out-Null
+        # Resume using SharePoint's continuation, without an unbounded ID filter.
+        # Retry only the read; advance after exporting the entire successful page.
+        $pagingInfo = $null
+        do {
+            $page = Invoke-SPORead -Label ("items in list '{0}' ({1}), after {2} processed items" -f $List.Title, $listUrl, $state.Processed) -Operation {
+                Get-SPOPermissionListPage -List $List -PagingInfo $pagingInfo -PageSize $PageSize
+            }
+            if ($page.NextPagingInfo -and $page.NextPagingInfo -eq $pagingInfo) {
+                throw 'SharePoint returned an unchanged list continuation; inventory is incomplete.'
+            }
+            Export-SPOPermissionPage -PageItems $page.Items -Web $Web -List $List -CsvPath $CsvPath -State $state -ProgressInterval $ProgressInterval -Stopwatch $stopwatch
+            $pagingInfo = $page.NextPagingInfo
+        } while ($pagingInfo)
     }
     catch {
         Write-ConsoleWarning -Message ("Failed to enumerate items for list '{0}' in web '{1}': {2}" -f $List.Title, $Web.Url, $_.Exception.Message)
@@ -766,6 +761,25 @@ function Export-ItemPermissionInventory {
     }
     finally { $stopwatch.Stop() }
     Write-ItemPermissionHeartbeat -WebUrl $Web.Url -ListTitle $List.Title -ProcessedItems $state.Processed -UniquePermissionItems $state.Unique -ExportedRows $state.Exported -Elapsed $stopwatch.Elapsed -LastItem $state.LastItem
+}
+
+function Get-SPOPermissionListPage {
+    param($List, [string]$PagingInfo, [int]$PageSize)
+    $limit = [Math]::Max(1, [Math]::Min(2000, $PageSize))
+    $query = New-Object Microsoft.SharePoint.Client.CamlQuery
+    $query.ViewXml = "<View Scope='RecursiveAll'><Query><OrderBy Override='TRUE'><FieldRef Name='ID' Ascending='TRUE'/></OrderBy></Query><ViewFields><FieldRef Name='ID'/><FieldRef Name='FileRef'/><FieldRef Name='FileLeafRef'/><FieldRef Name='FSObjType'/><FieldRef Name='UniqueId'/></ViewFields><RowLimit Paged='TRUE'>$limit</RowLimit></View>"
+    if ($PagingInfo) {
+        $position = New-Object Microsoft.SharePoint.Client.ListItemCollectionPosition
+        $position.PagingInfo = $PagingInfo
+        $query.ListItemCollectionPosition = $position
+    }
+    $context = Get-PnPContext -Connection $script:SPOPermissionConnection
+    $items = $List.GetItems($query)
+    $context.Load($items)
+    $context.ExecuteQuery()
+    $next = $null
+    if ($null -ne $items.ListItemCollectionPosition) { $next = $items.ListItemCollectionPosition.PagingInfo }
+    return [pscustomobject]@{ Items = @($items); NextPagingInfo = $next }
 }
 
 function Export-SPOPermissionPage {
@@ -1272,8 +1286,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDUqJYeIC9n7Tq5
-# 7dTjTHTxXKrfvsZaICdZTTtpYCpZfqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCY7RSMMKErxhE5
+# yhdI221QdaH2MK4XEnxfHmBGNK8isaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1406,31 +1420,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIFYm/fh5dMONZm4jMfPcjy9YW+TylDlOu0rZdYyt2QX6MA0GCSqG
-# SIb3DQEBAQUABIIBgB0NDIe2Z73GBoMlKPtSlLM9jQ+6kpg+ATQr4g/bD87New5C
-# PX8mOyP+O+RJGOTCwTVFEj/lfYwQwCA9JChBLxG0P0uGn274BeXpTvaP2nc0f6wn
-# b7CFmScSvpS3YgcxydYoWKstoFRFgNVjn0UPcbX7A7ffErNiVt6rG2roZYjTYYmO
-# Md9i/AR4ssBQTkt2Ck1QhwPgIBAwdOthiiz4ZNGw8ZlUX1zBQB4MykUOEy4UX6Uq
-# A9D6mwMu/jUrC/wJntpV9B63K+oX0FeL9BHEWMclo0JOFW9CA6ra74iEZBriObQw
-# i7OWpqwxmRW9kon8wm+/ispgswAzKVSYSZq+BfyRlYIAqlia1g2kr6IUZDu4etlL
-# AiTK0F5ICNIeftoWLnrdj2555QVk/rmWeGppDqC2NjnUXVCJ3rx5IdmjjQCyPA5z
-# amDEfIy85EUheCTXAnvbsBTRLuKLicpyTI410D5JIesupKht90QISpyZ+mXIaJKi
-# D18UFGKsdkw74/D/VKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEINhZnlogyl1Pitz43gJuEpN8JNNw7c6kV8Xk3WeoeMJaMA0GCSqG
+# SIb3DQEBAQUABIIBgKCtrf1Lf/Sx4k+MePopzUWt6dCxTwcXiMIOdfQsKOYEqIKF
+# daLzVVwb3yNSrBiYA34Gmew1mkLWQEOaZ2S1wjMx+eWhS1EmU23IVdjJnWFJ3Lwt
+# dLeiU6nJYuRWj+6+IFWAPWxRVwLvtoPgHZJ9wYDj2mdobpoM1Odoq46EaXLrNc9/
+# TwVguORrVo3bC87sPw6rsVUOeqjnlmBAYAhPRi70nzqod2XNvz2ctsIPD3yYqySD
+# BU1PA6LwYuxqs6BSZZVGh9/GulfMN/bnRIUF4vUfizB2XKM2RwJhwUT9h1F0TSa3
+# /HpOH3eooWN8Ev035cN9fr9HbqSB00bvv419JJmdWwz2gHsk58iYGIFaL/gF2PIR
+# zHza0JQDqNHkk7bK/Ey6YvEL4jCNwOgL9J46A/hGrjag7KVrCdrxl5DWfYZdI23k
+# 5JJZz2CTyH10otjL4o/9LziDc+oOO3OKsypKnUeHq222uJBRejlW/jXi0wjXb1ez
+# As4g2fbpHXtKgWZ7l6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDgxNDU4
-# MjRaMC8GCSqGSIb3DQEJBDEiBCCS4XNeGwgyL1yOmqFFaeROFsON0sDu9zHDw1Yb
-# JNputDANBgkqhkiG9w0BAQEFAASCAgB4iUFx/LPOFXxnxw/v2sc2PMkY3lwl1vBV
-# c1rEu2S989Ek6Bd1sO/yoOBp2ypW1AjVpu0dkCZOEyhaFFRFe+7w+PxQ3zfKDGqT
-# JmRZDida9rfmsMDRznZAp5o4l6/11gPaM0MQ9/dH5G8z2dv/3tEd0R8BjmuukpAX
-# vNHjNVQdc+I2Rri/V1QYV3nuRsZ+gXWHW2ZbPkoTTAcOZFHMIuombFBc5JkPJ9g8
-# nXinKKW8sWGKCqsi/aJ7AV76ddKi4ZMfUwLscFKLbbw8WKOgj7ovQ9sEh/5K7Dox
-# Os8T5V/ubC+1ffbtAz2jXnmgi8xzBeJhIZ36+9ZAjzGj9kYegdZMHdA4/E9u44vi
-# GegYfLRHIq9q5WaNmsxSMbMwbWHGqBKHjGUQSoJAijyz6lGn0jnSwSeYDpf0X+HL
-# FqjpeiaGmw/rPSxKVsBrltKvl24c6QVs5/qUzEBUWL8kas9cQGMUNmJKpk+bchu0
-# QMTasVOS4S9x7HwpvMje5A3Rm+OBi9E4DB7EDrYQBGKRm1ldRk4I6FH4hGuYlZ1d
-# A78co7bHCGPPlBmw3RgXkf9UFbbLQPTUGUxrEhYaBsvFHEXq80fqpCcwsl4EgCQz
-# ylR9kFwAxidcpOFZzvYxEz9Q1KCgm6SSAGMrRO4pgVRxHcFxv5lI00WNIWhrQaDG
-# 7necgpOgfQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDgxNzAw
+# MzZaMC8GCSqGSIb3DQEJBDEiBCCcqqTCo8DuC2x0hwWNuQqgfDnRo+Jt3ZPrnhwx
+# luu49jANBgkqhkiG9w0BAQEFAASCAgAR2iKAVumgKQmHQkyotjwNJU87yTFm+cU5
+# AdpUYNcAmkNyzZ9nivTPfw1+HRcmrKJsMgVKYIJ9BABxU59iZfHnx3ThARGMr9PZ
+# K9AdOG8WdnAs4JWTYTGjA7Nt4775aWeY4YU1qoCnE5N4jHaQjhdS2Ol+E3pxYGFB
+# z32NNjTvhuf7qrBEM5eR53Hf9yHEJmhMfXikNBDDckSNoESuBUarKENkvOWJF2RD
+# EufKyyWh9js8RCf6SUhyIsw0Ue8Au+6gskiuNAxBkKcu7qOTiFKLGA4/1VFwNKIS
+# ygjJDl8v+SDwUHtAv4awTnb8tzuF1C0dLHfHZ2O55Nu34UKVdbedGbOdx7eBDto9
+# ifnpv/EpdpctnaqLhrQfOEYfz4NJcs3GNHEOW5HrlePz1SYsZEombCTgjc+hpdxv
+# GcigeExEvgvXinwhsa2CPsh6KvbIogltQyk4B9PpuLLiNqTDqXLTDYt7y7qNb/KI
+# rRzLIpmaEEb59z2cpbNmrd1S0CirjqfsbnuKtLamy3SNNOfB2C62KVhfmo/6f1/z
+# eVkZ13jbOgSUR8vY7d+PCh84OCnGfHnMQirIaEIBW25xycCP1fY8S3oEiWGKakJm
+# OrC9aF1gBuXFJUm5BJ1w8m4E5Q44EvldZTyq1S0+5R+LLZ8gEqkpU+VZWy3llywQ
+# mzH4xwsqDg==
 # SIG # End signature block
