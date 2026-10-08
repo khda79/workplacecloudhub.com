@@ -2,7 +2,7 @@
 .SYNOPSIS
     Regression checks for inventory data fidelity, paged reads and workbook snapshots.
 .VERSION
-    1.0.1
+    1.0.2
 #>
 #Requires -Version 7.4
 $ErrorActionPreference = 'Stop'
@@ -22,7 +22,8 @@ function Import-TestFunction {
 }
 function Assert-True { param([bool]$Condition,[string]$Message) if (-not $Condition) { throw $Message } }
 function Write-ConsoleWarning { param([string]$Message) }
-function Write-SPOReadRetry { param([string]$Message) }
+$script:RetryMessages=[Collections.Generic.List[string]]::new()
+function Write-SPOReadRetry { param([string]$Message) $script:RetryMessages.Add($Message) }
 function Write-DiagnosticPhase { param([string]$State,[string]$Message) }
 $script:Delays=[Collections.Generic.List[int]]::new()
 function Start-Sleep { param([int]$Seconds,[int]$Milliseconds) $script:Delays.Add($Seconds) }
@@ -34,20 +35,36 @@ foreach ($file in Get-ChildItem (Join-Path $root 'Scripts/Inventory') -Filter '*
     }
 }
 $permission=Join-Path $root 'Scripts/Inventory/SmartM365-SharePointTarget-PermissionInventory.ps1'
-Import-TestFunction $permission @('Connect-ToSPOWeb','Get-PnPGroupTitle','Get-AssociatedWebGroupNames','Invoke-SPORead','Add-SPOInheritanceRead','Get-SPOPageInheritance','Write-SPOItemError','Export-SPOPermissionPage','Export-ItemPermissionInventory','Write-InventoryError')
+Import-TestFunction $permission @('Connect-ToSPOWeb','Get-PnPGroupTitle','Get-AssociatedWebGroupNames','Invoke-SPORead','Get-SPOExceptionDetails','Get-SPORoleAssignmentIdentity','Get-RoleAssignmentRows','Get-PrincipalInfo','Get-PrincipalMembershipInfo','Get-EmptyPrincipalMembershipInfo','Add-SPOInheritanceRead','Get-SPOPageInheritance','Write-SPOItemError','Export-SPOPermissionPage','Export-ItemPermissionInventory','Write-InventoryError')
 $script:SPOPermissionConnection='fixture'
 $script:SPOInheritanceLoad=$null; $script:SPOInheritanceItemType=$null
 $script:AssociatedWebGroupCache=@{}
 $script:PropertyCalls=0; $script:GroupFail=$false
 function Get-PnPProperty {
-    [CmdletBinding()] param($ClientObject,[string]$Property,$Connection)
+    [CmdletBinding()] param($ClientObject,[string[]]$Property,$Connection)
     $script:PropertyCalls++
+    if ($Property.Count -gt 1) {
+        Assert-True (($Property -join ',') -eq 'Member,RoleDefinitionBindings') 'Role properties were not loaded together.'
+        $id = [int]$ClientObject.PrincipalId
+        $script:RoleCalls[$id]++
+        if ($id -eq 17) {
+            switch ($script:RoleFault) {
+                'Recover' { if ($script:RoleCalls[$id] -lt 3) { throw [System.Net.Http.HttpRequestException]::new('Error while copying content to a stream.', [IO.IOException]::new("Transport connection reset.`r`nFixture details for item 403.")) } }
+                'Persistent' { throw [System.Net.Http.HttpRequestException]::new('Error while copying content to a stream.', [IO.IOException]::new('Transport connection reset.')) }
+                'Denied' { throw 'Access denied.' }
+                'WrappedDenied' { throw [System.Net.Http.HttpRequestException]::new('Error while copying content to a stream.', [UnauthorizedAccessException]::new('Access is denied.')) }
+                'Missing' { throw 'Item does not exist.' }
+                'Unknown' { throw 'Unexpected fixture failure.' }
+            }
+        }
+        return
+    }
     if ($Property -eq 'Title') { if ($script:GroupFail) { throw 'Group access denied.' }; return $ClientObject.Title }
     if ($Property -eq 'HasUniqueRoleAssignments') {
         if (($ClientObject.Id -eq 3 -and $script:Missing) -or $ClientObject.Id -eq $script:MissingId) { throw 'Item does not exist.' }
         return ($ClientObject.Id % 2 -eq 0)
     }
-    return $ClientObject.$Property
+    return $ClientObject.($Property[0])
 }
 $temp=Join-Path ([IO.Path]::GetTempPath()) ('SmartM365-ReliabilityTest-'+[guid]::NewGuid().ToString('N'))
 [void](New-Item -ItemType Directory -Path $temp)
@@ -88,6 +105,40 @@ try {
     $script:Attempts=0; $failed=$false
     try { Invoke-SPORead -Label 'timeout' -Operation { $script:Attempts++; throw 'HttpClient.Timeout' } } catch { $failed=$true }
     Assert-True ($failed -and $script:Attempts -eq 3) 'Persistent timeout did not stop after three attempts.'
+
+    $roles = @(17,18 | ForEach-Object {
+        [pscustomobject]@{ PrincipalId=$_; Member=[pscustomobject]@{ Id=$_; Title="Principal $_"; LoginName="user$_@example.test"; PrincipalType='User' }; RoleDefinitionBindings=@([pscustomobject]@{Name='Read'},[pscustomobject]@{Name='Contribute'}) }
+    })
+    foreach ($case in @(
+        @{Fault='None'; Calls=1; Rows=2; Errors=0},
+        @{Fault='Recover'; Calls=3; Rows=2; Errors=0},
+        @{Fault='Persistent'; Calls=3; Rows=1; Errors=1},
+        @{Fault='Denied'; Calls=1; Rows=1; Errors=1},
+        @{Fault='WrappedDenied'; Calls=1; Rows=1; Errors=1},
+        @{Fault='Missing'; Calls=1; Rows=1; Errors=1},
+        @{Fault='Unknown'; Calls=1; Rows=1; Errors=1}
+    )) {
+        if (Test-Path $script:ErrorPath) { Remove-Item $script:ErrorPath }
+        $script:ErrorCsvCreated=$false; $script:Delays.Clear(); $script:RetryMessages.Clear()
+        $script:RoleCalls=@{17=0;18=0}; $script:RoleFault=$case.Fault
+        $rows=@(Get-RoleAssignmentRows -ObjectScope 'Item' -ObjectUrl 'https://example.test/sites/a/docs/folder' -ObjectTitle 'Fixture folder' -ItemId 501 -RoleAssignments $roles)
+        Assert-True ($script:RoleCalls[17] -eq $case.Calls -and $script:RoleCalls[18] -eq 1) "Unexpected read count for $($case.Fault)."
+        Assert-True ($rows.Count -eq $case.Rows -and @($rows.PrincipalId | Sort-Object -Unique).Count -eq $case.Rows) "Missing or duplicate role rows for $($case.Fault)."
+        Assert-True (@($rows | Where-Object PermissionLevels -ne 'Read|Contribute').Count -eq 0) 'Grouped loading changed permission levels.'
+        $expectedDelays=if ($case.Calls -eq 3) { '5,15' } else { '' }
+        Assert-True (($script:Delays -join ',') -eq $expectedDelays) "Unexpected retry delays for $($case.Fault)."
+        if ($case.Calls -eq 3) {
+            Assert-True ($script:RetryMessages.Count -eq 2 -and $script:RetryMessages[0] -match 'role assignment #1.*docs/folder.*principal ID=17.*HttpRequestException.*IOException' -and $script:RetryMessages[0] -notmatch '[\r\n]') 'Retry diagnostics lost path, principal or inner exception context.'
+        }
+        Assert-True ($script:ErrorCsvCreated -eq [bool]$case.Errors) "Incomplete inventory marker changed for $($case.Fault)."
+        if ($case.Errors) {
+            $errors=@(Import-Csv $script:ErrorPath -Delimiter ';')
+            Assert-True ($errors.Count -eq 1 -and $errors[0].Scope -eq 'Item RoleAssignment' -and $errors[0].ItemId -eq '501' -and $errors[0].ItemUrl -eq 'https://example.test/sites/a/docs/folder') 'Terminal error lost its object context.'
+            Assert-True ($errors[0].Message -match 'principal ID=17.*user17@example.test' -and $errors[0].Message -notmatch '[\r\n]') 'Principal identity or single-line diagnostics were lost.'
+            if ($case.Fault -eq 'Persistent') { Assert-True ($errors[0].Message -match 'HttpRequestException.*IOException.*Transport connection reset') 'Inner transport exception was lost.' }
+        }
+    }
+    Remove-Item $script:ErrorPath; $script:ErrorCsvCreated=$false
 
     Add-Type @'
 using System;
@@ -235,19 +286,18 @@ public class ReliabilityContext {
     Write-LauncherRunResult
     $receipt=Get-Content $RunResultPath -Raw | ConvertFrom-Json
     Assert-True ($receipt.Status -eq 'FAILED' -and -not $receipt.OutputCsv -and $receipt.LogPath -eq $script:LauncherRunLogPath) 'Failed scan receipt advertises a nonexistent published inventory.'
-    'PASS: durations, group fidelity/cache, token contexts, bounded reads, size-limited streamed inheritance, missing-item evidence, stable workbook snapshots and batch receipts.'
+    'PASS: durations, group fidelity/cache, token contexts, grouped role reads/retries/diagnostics, bounded reads, size-limited streamed inheritance, missing-item evidence, stable workbook snapshots and batch receipts.'
 }
 finally {
     Get-ChildItem -LiteralPath $temp -File | Remove-Item -Force
     Remove-Item -LiteralPath $temp
 }
 
-
 # SIG # Begin signature block
-# MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
+# MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDqMlwKvN9L6tQx
-# 9NJ7yM9uXDuKY2GwlY8J14xxtgzUh6CCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCz4acxD/NGC/nl
+# uAufmTtlZfk/fbk+uAVVDl2qhK3keqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -272,19 +322,139 @@ finally {
 # PI5wrVTjV/pR7IrtSIfq8UladlrSZJyyDn3NV2ATvIZ6wNxbTmPFcE0uMg/EYzwd
 # Tek+CgXL3TxUKeldJM4YDWPimNBRhOPXzBDiOQIj6WNswt/KM1oDLnA00CNtciPN
 # dn+dXlneMvTEUah9wyt8o8tkLpoBw+KN+Bq/K0O1qPtS7umi70l45pPiej+mwbwq
-# ztcaoVD7a8ggHP1Vdp/rnafM4GtyCAE6b7U9Yzgvp1/a1kh7XffmqVhRRjGCApQw
-# ggKQAgEBMGIwTjEeMBwGA1UEAwwVd29ya3BsYWNlY2xvdWRodWIuY29tMSwwKgYJ
-# KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
-# 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
-# gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCCvRVNTHy9nHIqrAerh7Rqy
-# aPp6sql5AvLk6AatfsoKmjANBgkqhkiG9w0BAQEFAASCAYCZlDxwbI89G+nGTg7H
-# Lcnup49g7iD+VnqnJFaiFz54Ymw3nitSg8LlYMLGatvs4woDnPsPyXjXGZ2V5JbV
-# S87BbbeEoejlO1rrV3gLe/1FvpkJPZRbS8sHU0lFc97dKBkBzjVjbRu8Luv/ny1v
-# EQBu6KFj+Gxy2RQ81HIYTObhQUYbNe0U0oY254Hwj8oDCFu91JINk7cehXLKDGKu
-# vx6PIn3ZbwCrvqzZctPtLso2+zBpTaRyiBEVQg8pqe0RRI53eg84tj0fkDGgOqIN
-# m9AsBqWheNQaIOb9Z26vrdLlVjactGzdjf4+SJyGdOyZYFqUtcebaPGtaEUHQRE5
-# 6IPS1TFG/F+aGsgMt02Ba8SfTKUYsGhgcDBhDgG8d+ACXbq2Z52G8OidL62JTqoV
-# gha0gCpLTsgG4jBOhSWOru/fBDw1nRtuzY0nsPYhi5OLDVFUwpEHNjcITh4vrjSb
-# 0bKc45qPr5ZPnNqgGKeewMSWxE9YsNILfZ1okfg8b+ezm9Q=
+# ztcaoVD7a8ggHP1Vdp/rnafM4GtyCAE6b7U9Yzgvp1/a1kh7XffmqVhRRjCCBY0w
+# ggR1oAMCAQICEA6bGI750C3n79tQ4ghAGFowDQYJKoZIhvcNAQEMBQAwZTELMAkG
+# A1UEBhMCVVMxFTATBgNVBAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRp
+# Z2ljZXJ0LmNvbTEkMCIGA1UEAxMbRGlnaUNlcnQgQXNzdXJlZCBJRCBSb290IENB
+# MB4XDTIyMDgwMTAwMDAwMFoXDTMxMTEwOTIzNTk1OVowYjELMAkGA1UEBhMCVVMx
+# FTATBgNVBAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRpZ2ljZXJ0LmNv
+# bTEhMB8GA1UEAxMYRGlnaUNlcnQgVHJ1c3RlZCBSb290IEc0MIICIjANBgkqhkiG
+# 9w0BAQEFAAOCAg8AMIICCgKCAgEAv+aQc2jeu+RdSjwwIjBpM+zCpyUuySE98orY
+# WcLhKac9WKt2ms2uexuEDcQwH/MbpDgW61bGl20dq7J58soR0uRf1gU8Ug9SH8ae
+# FaV+vp+pVxZZVXKvaJNwwrK6dZlqczKU0RBEEC7fgvMHhOZ0O21x4i0MG+4g1ckg
+# HWMpLc7sXk7Ik/ghYZs06wXGXuxbGrzryc/NrDRAX7F6Zu53yEioZldXn1RYjgwr
+# t0+nMNlW7sp7XeOtyU9e5TXnMcvak17cjo+A2raRmECQecN4x7axxLVqGDgDEI3Y
+# 1DekLgV9iPWCPhCRcKtVgkEy19sEcypukQF8IUzUvK4bA3VdeGbZOjFEmjNAvwjX
+# WkmkwuapoGfdpCe8oU85tRFYF/ckXEaPZPfBaYh2mHY9WV1CdoeJl2l6SPDgohIb
+# Zpp0yt5LHucOY67m1O+SkjqePdwA5EUlibaaRBkrfsCUtNJhbesz2cXfSwQAzH0c
+# lcOP9yGyshG3u3/y1YxwLEFgqrFjGESVGnZifvaAsPvoZKYz0YkH4b235kOkGLim
+# dwHhD5QMIR2yVCkliWzlDlJRR3S+Jqy2QXXeeqxfjT/JvNNBERJb5RBQ6zHFynIW
+# IgnffEx1P2PsIV/EIFFrb7GrhotPwtZFX50g/KEexcCPorF+CiaZ9eRpL5gdLfXZ
+# qbId5RsCAwEAAaOCATowggE2MA8GA1UdEwEB/wQFMAMBAf8wHQYDVR0OBBYEFOzX
+# 44LScV1kTN8uZz/nupiuHA9PMB8GA1UdIwQYMBaAFEXroq/0ksuCMS1Ri6enIZ3z
+# bcgPMA4GA1UdDwEB/wQEAwIBhjB5BggrBgEFBQcBAQRtMGswJAYIKwYBBQUHMAGG
+# GGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBDBggrBgEFBQcwAoY3aHR0cDovL2Nh
+# Y2VydHMuZGlnaWNlcnQuY29tL0RpZ2lDZXJ0QXNzdXJlZElEUm9vdENBLmNydDBF
+# BgNVHR8EPjA8MDqgOKA2hjRodHRwOi8vY3JsMy5kaWdpY2VydC5jb20vRGlnaUNl
+# cnRBc3N1cmVkSURSb290Q0EuY3JsMBEGA1UdIAQKMAgwBgYEVR0gADANBgkqhkiG
+# 9w0BAQwFAAOCAQEAcKC/Q1xV5zhfoKN0Gz22Ftf3v1cHvZqsoYcs7IVeqRq7IviH
+# GmlUIu2kiHdtvRoU9BNKei8ttzjv9P+Aufih9/Jy3iS8UgPITtAq3votVs/59Pes
+# MHqai7Je1M/RQ0SbQyHrlnKhSLSZy51PpwYDE3cnRNTnf+hZqPC/Lwum6fI0POz3
+# A8eHqNJMQBk1RmppVLC4oVaO7KTVPeix3P0c2PR3WlxUjG/voVA9/HYJaISfb8rb
+# II01YBwCA8sgsKxYoA5AY8WYIsGyWfVVa88nq2x2zm8jLfR+cWojayL/ErhULSd+
+# 2DrZ8LaHlv1b0VysGMNNn3O3AamfV6peKOK5lDCCBrQwggScoAMCAQICEA3HrFcF
+# /yGZLkBDIgw6SYYwDQYJKoZIhvcNAQELBQAwYjELMAkGA1UEBhMCVVMxFTATBgNV
+# BAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRpZ2ljZXJ0LmNvbTEhMB8G
+# A1UEAxMYRGlnaUNlcnQgVHJ1c3RlZCBSb290IEc0MB4XDTI1MDUwNzAwMDAwMFoX
+# DTM4MDExNDIzNTk1OVowaTELMAkGA1UEBhMCVVMxFzAVBgNVBAoTDkRpZ2lDZXJ0
+# LCBJbmMuMUEwPwYDVQQDEzhEaWdpQ2VydCBUcnVzdGVkIEc0IFRpbWVTdGFtcGlu
+# ZyBSU0E0MDk2IFNIQTI1NiAyMDI1IENBMTCCAiIwDQYJKoZIhvcNAQEBBQADggIP
+# ADCCAgoCggIBALR4MdMKmEFyvjxGwBysddujRmh0tFEXnU2tjQ2UtZmWgyxU7UNq
+# EY81FzJsQqr5G7A6c+Gh/qm8Xi4aPCOo2N8S9SLrC6Kbltqn7SWCWgzbNfiR+2fk
+# HUiljNOqnIVD/gG3SYDEAd4dg2dDGpeZGKe+42DFUF0mR/vtLa4+gKPsYfwEu7EE
+# bkC9+0F2w4QJLVSTEG8yAR2CQWIM1iI5PHg62IVwxKSpO0XaF9DPfNBKS7Zazch8
+# NF5vp7eaZ2CVNxpqumzTCNSOxm+SAWSuIr21Qomb+zzQWKhxKTVVgtmUPAW35xUU
+# FREmDrMxSNlr/NsJyUXzdtFUUt4aS4CEeIY8y9IaaGBpPNXKFifinT7zL2gdFpBP
+# 9qh8SdLnEut/GcalNeJQ55IuwnKCgs+nrpuQNfVmUB5KlCX3ZA4x5HHKS+rqBvKW
+# xdCyQEEGcbLe1b8Aw4wJkhU1JrPsFfxW1gaou30yZ46t4Y9F20HHfIY4/6vHespY
+# MQmUiote8ladjS/nJ0+k6MvqzfpzPDOy5y6gqztiT96Fv/9bH7mQyogxG9QEPHrP
+# V6/7umw052AkyiLA6tQbZl1KhBtTasySkuJDpsZGKdlsjg4u70EwgWbVRSX1Wd4+
+# zoFpp4Ra+MlKM2baoD6x0VR4RjSpWM8o5a6D8bpfm4CLKczsG7ZrIGNTAgMBAAGj
+# ggFdMIIBWTASBgNVHRMBAf8ECDAGAQH/AgEAMB0GA1UdDgQWBBTvb1NK6eQGfHrK
+# 4pBW9i/USezLTjAfBgNVHSMEGDAWgBTs1+OC0nFdZEzfLmc/57qYrhwPTzAOBgNV
+# HQ8BAf8EBAMCAYYwEwYDVR0lBAwwCgYIKwYBBQUHAwgwdwYIKwYBBQUHAQEEazBp
+# MCQGCCsGAQUFBzABhhhodHRwOi8vb2NzcC5kaWdpY2VydC5jb20wQQYIKwYBBQUH
+# MAKGNWh0dHA6Ly9jYWNlcnRzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRS
+# b290RzQuY3J0MEMGA1UdHwQ8MDowOKA2oDSGMmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0
+# LmNvbS9EaWdpQ2VydFRydXN0ZWRSb290RzQuY3JsMCAGA1UdIAQZMBcwCAYGZ4EM
+# AQQCMAsGCWCGSAGG/WwHATANBgkqhkiG9w0BAQsFAAOCAgEAF877FoAc/gc9EXZx
+# ML2+C8i1NKZ/zdCHxYgaMH9Pw5tcBnPw6O6FTGNpoV2V4wzSUGvI9NAzaoQk97fr
+# PBtIj+ZLzdp+yXdhOP4hCFATuNT+ReOPK0mCefSG+tXqGpYZ3essBS3q8nL2UwM+
+# NMvEuBd/2vmdYxDCvwzJv2sRUoKEfJ+nN57mQfQXwcAEGCvRR2qKtntujB71WPYA
+# gwPyWLKu6RnaID/B0ba2H3LUiwDRAXx1Neq9ydOal95CHfmTnM4I+ZI2rVQfjXQA
+# 1WSjjf4J2a7jLzWGNqNX+DF0SQzHU0pTi4dBwp9nEC8EAqoxW6q17r0z0noDjs6+
+# BFo+z7bKSBwZXTRNivYuve3L2oiKNqetRHdqfMTCW/NmKLJ9M+MtucVGyOxiDf06
+# VXxyKkOirv6o02OoXN4bFzK0vlNMsvhlqgF2puE6FndlENSmE+9JGYxOGLS/D284
+# NHNboDGcmWXfwXRy4kbu4QFhOm0xJuF2EZAOk5eCkhSxZON3rGlHqhpB/8MluDez
+# ooIs8CVnrpHMiD2wL40mm53+/j7tFaxYKIqL0Q4ssd8xHZnIn/7GELH3IdvG2XlM
+# 9q7WP/UwgOkw/HQtyRN62JK4S1C8uw3PdBunvAZapsiI5YKdvlarEvf8EA+8hcpS
+# M9LHJmyrxaFtoza2zNaQ9k+5t1wwggbtMIIE1aADAgECAhAIT9wzT35FTtvDD4/5
+# khg1MA0GCSqGSIb3DQEBCwUAMGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdp
+# Q2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3Rh
+# bXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTEwHhcNMjYwODA1MDAwMDAwWhcN
+# MzcxMTA0MjM1OTU5WjBjMQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQs
+# IEluYy4xOzA5BgNVBAMTMkRpZ2lDZXJ0IFNIQTI1NiBSU0E0MDk2IFRpbWVzdGFt
+# cCBSZXNwb25kZXIgMjAyNiAxMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKC
+# AgEAtnum8sn+zUr41JtMZbP9OMYw+HwJDpG5xkIu/lqcfNYmMX81YmsUiHLbh9yk
+# peWBGKTLhYBrAN9Tdg/QEzG32XcObmgIblnr0CoQ3WSAeDZ6nH6X6VkFyYkJw3QB
+# JREwvm4UhLzSxmwPA7cFKRTEOMsmEEj6qJk/dqLEAL+oQYuOwE2UuiX1Vnul8YRe
+# IyWd4kgLn9gq6LNXM0UplkR6jL/QHxmb6fMoGBJYbnaUI7XD6cKDpekK2SVMld4i
+# DbzeHDtOaaxldH5IxuNusQ69nd8/ZXEiB5Hbxj3RlK13cX1W4DlFXKdv/CEhM8Cj
+# 1vvlmvhNroyPdRGbbpBlgyf8Wdu5N6ByhFwURn0U6ozlPoxN22v+fviUhP+6DR54
+# 7OZnpBMWDfei1f5sVGwiiW/KQTWOK97g+4RJpPzPNV4VYMAwO2jM2Aty2QYPVmOQ
+# TJm0msuXnJrSbl2gf9JylpkJlWXqk1Q4LJsxz+TELoQCZIljbgvTJgoPU2R12ydv
+# 8i1UqL/adelA0y7U9Pmmtbze9Xx3rtajC5SzQd1jgfwAwsa90v9YcSPdmeoyoBBA
+# /27cCL237l5DTYYPDLQ4ON3OLTGWnvRb6jDrf/T75gMRfUzSLCBQfBusm9+mSWRl
+# C/Df6S/e9Q8i13CuhzOT2Jx+V/nlbXM4QoBwlUAhelwwJT0CAwEAAaOCAZUwggGR
+# MAwGA1UdEwEB/wQCMAAwHQYDVR0OBBYEFBTJY4owLtRK+26U8+bjQH717M3iMB8G
+# A1UdIwQYMBaAFO9vU0rp5AZ8esrikFb2L9RJ7MtOMA4GA1UdDwEB/wQEAwIHgDAW
+# BgNVHSUBAf8EDDAKBggrBgEFBQcDCDCBlQYIKwYBBQUHAQEEgYgwgYUwJAYIKwYB
+# BQUHMAGGGGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBdBggrBgEFBQcwAoZRaHR0
+# cDovL2NhY2VydHMuZGlnaWNlcnQuY29tL0RpZ2lDZXJ0VHJ1c3RlZEc0VGltZVN0
+# YW1waW5nUlNBNDA5NlNIQTI1NjIwMjVDQTEuY3J0MF8GA1UdHwRYMFYwVKBSoFCG
+# Tmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRHNFRpbWVT
+# dGFtcGluZ1JTQTQwOTZTSEEyNTYyMDI1Q0ExLmNybDAgBgNVHSAEGTAXMAgGBmeB
+# DAEEAjALBglghkgBhv1sBwEwDQYJKoZIhvcNAQELBQADggIBAI3FOmEenVIK35ms
+# CYB+fShAsWvSYvLBItoNdAgQ2jIqrGsVsluXMJU/+mRebBc52s6lbKAvOVPXaizm
+# KkMLLflEEKDZQx4CkS2t8aHPjkXha3hYZ010htFa3dhNgmalH5vuWvh3tTCf4frT
+# S7gPtGc4Z/xaPhQ2AB1mR8eEe/WbH0RWHvVIl6VwQ3+g5FKNfN2N/DWJkf13w2H+
+# 2GfqEfbd35Ww8CvoYBjLNIDTadcPWdgsjsiOaK/7EsKJgLjUNIVgvcaFOLLQ/Glr
+# A+0ZHJoFUbOr5SJN8zykPspXIXlpDJY/gqFUZRROeab9GVgmhbdOJcD/63RhxPah
+# FUGbckRONqMe6DYAv6/mOG0pWd3cPStsdcS7buj5DyniwRY8yooMH6ptx5vpP/pZ
+# zBPBeZD2U4IsthyxB5Jaa8qrOkB5z160TXiM5ADMspZ0TfD9MJoq0tFpFPssKRFh
+# WeEDYPvcUuN7U7lvcdHl4ezQ3NT/7Ffs1sR1yh/LRbdZ3B3Vc6q2WmD8mDC0p9kz
+# l2o73iVtS946IkEj7FkRsZGww1teYxERROC745xrtjvcw9ZyyUjHZWGRIpJeMNsP
+# quCDf0fkyHtB+J4AiNZqCQk23rxh+KbpyMTNVKItJ5l92Svl20U9NbqMBOVYl1h5
+# 4NEYLJq1/xHWFKPNK903zJZA9P2DMYIFvjCCBboCAQEwYjBOMR4wHAYDVQQDDBV3
+# b3JrcGxhY2VjbG91ZGh1Yi5jb20xLDAqBgkqhkiG9w0BCQEWHWNvbnRhY3RAd29y
+# a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
+# AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
+# CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
+# hvcNAQkEMSIEIHCr3WTeETb9ad82dxRO/aUcYx5EJ4d6onlwSPw2H6j4MA0GCSqG
+# SIb3DQEBAQUABIIBgICB+A1tT5rkANkigJH/cpBazzVkFMVNw9wa520fPPCN6nic
+# 4OIHBGnarAKQ2tKTUEZRQwAsKHRDpNLwIS+HpaOmTxfy/q6P1sSnJvdbhle13XB8
+# 0OHrbMoYxQbLapiQMgo0Nqbodjij7j8wDRV7HYOjc9k2J4Nh+7kbJESjPVZZLeUj
+# ihEJU8D7XAqb/rdGI9AG8DV2sfoGI5xyQzORV0ZINXtqJjRkJOn5Kg9CjAH322eR
+# daenZH5nopuGjojEAj5f5YW+V3mecLHpdAgGM3+bQWW/7ZRwS86qm2VJ2W5JVvfL
+# E4La0a5bwvqdQ9AW78GlXDOJu8xLoyzoPtH3CfmTsvcf1TTVQaN8vqMtEM+fnHpa
+# xsCEmVZEECEP2YABLqMdBE4Ze9gwClyO3vidppJXKOsO63C6X/4TPdmI7nTKC+b5
+# VtpQyPjBEq3qaoAz/2VIhJ2sEYlMYNYn2cLEtQ8TYpAM2rZum0788LmONaELi+N4
+# sxFTWX0U12YgUXG+UqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
+# RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
+# MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDgxMzEw
+# MjFaMC8GCSqGSIb3DQEJBDEiBCApOxGHVexv4QYedkaLpz+n/O+QvIRcGFvKWbzf
+# 17SuczANBgkqhkiG9w0BAQEFAASCAgBMY0N3LixHywX+IgNpjt6meclVsyUTzoHl
+# T+5a4UxlJvdZnPV+EMvv1HugJwneE5iwTvgODwFNMjScLUdxgsrCEC1hc4P5+nDy
+# cZdLD1x80fXvRnkxZgJArl0PztfKwpY5SdfcB0hNKOfsao7OJCOH6Y3qlgPc1xg8
+# siOU4a2w6MsD5sWp35r/gGIIZzNC8ysDYqSFoDodUGGj+vFDJsFSER9+9LrMhC/Z
+# Kw/RKzAjL/wW9BlTmf5VGuBNNwM9TdF/xhHsKe0+zLpStgEIPam8WOtKlPLRsPbk
+# NlbmuLLJidwKAoG7MQrxcMh/ndgXYFlCDlIwKIMy2FsSTlKLEYYxjGJpAISW2Ur/
+# fESy82uLjFktQZcJ2kMC78l0Ea9Cb3mG1MBk7kRYmkAJ5B0kkY5TenVC6mc51fOj
+# rnTfmbkCkpjDaoDKUmLCWcnUyeU8QSkLjCZNzJDSIF8cHIqr/rfAZAXVo57QbNpY
+# BK2HoyS6du1d0yggQQjsUWGmM3BI6tG6a1kEKSjilqdmrOrhaOKHMsoV+MXRcmfR
+# 8XpIoJ6vF9+Q1EFjwkeEPL38d0khU+Pv9TCOWnvc6t/pnD8PhlHql337lQYkjvSd
+# 8vD5imk5CIwGIWPp+qcy/npkiWNIk27htzp0RisEHMK5gLH+sYCXd9Pw4BhgXfgL
+# xFJmLouh7w==
 # SIG # End signature block

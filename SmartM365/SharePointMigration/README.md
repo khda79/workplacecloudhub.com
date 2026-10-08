@@ -1039,6 +1039,10 @@ pwsh -NoProfile -File .\Tests\Test-SmartM365BatchGuiOffline.ps1
 - Transient web, subsite and library discovery reads use at most three attempts,
   with waits of 5 and 15 seconds. Access errors are not retried. Token diagnostics
   appear once per host, account and authentication configuration during the run.
+- Role assignment reads load Member and RoleDefinitionBindings together, with
+  the same three-attempt limit for transient transport failures. Persistent errors
+  retain principal identity, object path and inner exception details in the log
+  and error CSV, and prevent final inventory publication.
 - All four inventory scripts format elapsed durations without rounding hours.
 - ShareGate XLSX analysis uses a verified local snapshot, with up to three
   attempts when an export is locked, changing or incomplete. Generated evidence

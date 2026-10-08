@@ -10,7 +10,7 @@
     as possible so both inventories can be compared.
 
 .VERSION
-    1.1.5
+    1.1.6
 #>
 
 [CmdletBinding(DefaultParameterSetName = 'WebUrlsFile')]
@@ -666,10 +666,18 @@ function Get-RoleAssignmentRows {
         $RoleAssignments
     )
 
+    $assignmentIndex = 0
     foreach ($roleAssignment in $RoleAssignments) {
+        $assignmentIndex++
         try {
-            $member = Get-PnPProperty -ClientObject $roleAssignment -Property Member -Connection $script:SPOPermissionConnection
-            $bindings = @(Get-PnPProperty -ClientObject $roleAssignment -Property RoleDefinitionBindings -Connection $script:SPOPermissionConnection)
+            $label = "role assignment #{0} on '{1}' ({2})" -f $assignmentIndex, $ObjectUrl, (Get-SPORoleAssignmentIdentity $roleAssignment)
+            $properties = Invoke-SPORead -Label $label -Operation {
+                Get-PnPProperty -ClientObject $roleAssignment -Property Member,RoleDefinitionBindings -Connection $script:SPOPermissionConnection -ErrorAction Stop | Out-Null
+                # Multiple-property loads populate the client object without returning values.
+                [pscustomobject]@{ Member = $roleAssignment.Member; Bindings = @($roleAssignment.RoleDefinitionBindings) }
+            }
+            $member = $properties.Member
+            $bindings = @($properties.Bindings)
             $permissionLevels = @($bindings | ForEach-Object { $_.Name })
             if ($permissionLevels.Count -eq 0) {
                 continue
@@ -714,8 +722,9 @@ function Get-RoleAssignmentRows {
             }
         }
         catch {
-            Write-ConsoleWarning -Message ("Failed to read role assignment on '{0}': {1}" -f $ObjectUrl, $_.Exception.Message)
-            Write-InventoryError -Scope "$ObjectScope RoleAssignment" -Url $ObjectUrl -Name $ObjectTitle -ItemId ([string]$ItemId) -ItemUrl $(if ($ObjectScope -eq 'Item') { $ObjectUrl } else { '' }) -Message $_.Exception.Message
+            $details = "Assignment #{0}; {1}; {2}" -f $assignmentIndex, (Get-SPORoleAssignmentIdentity $roleAssignment), (Get-SPOExceptionDetails $_.Exception)
+            Write-ConsoleWarning -Message ("Failed to read role assignment on '{0}': {1}" -f $ObjectUrl, $details)
+            Write-InventoryError -Scope "$ObjectScope RoleAssignment" -Url $ObjectUrl -Name $ObjectTitle -ItemId ([string]$ItemId) -ItemUrl $(if ($ObjectScope -eq 'Item') { $ObjectUrl } else { '' }) -Message $details
         }
     }
 }
@@ -1028,6 +1037,33 @@ function Get-WebUrlsFromFile {
 
 function Write-SPOReadRetry { param([string]$Message) Write-ConsoleWarning -Message $Message }
 
+function Get-SPOExceptionDetails {
+    param([System.Exception]$Exception)
+    $messages = New-Object 'System.Collections.Generic.List[string]'
+    while ($null -ne $Exception) {
+        $messages.Add(("{0}: {1}" -f $Exception.GetType().FullName, ($Exception.Message -replace '\s+', ' ').Trim()))
+        $Exception = $Exception.InnerException
+    }
+    return ($messages -join ' --> ')
+}
+
+function Get-SPORoleAssignmentIdentity {
+    param($RoleAssignment)
+    $principalId = '<unavailable>'
+    $principalName = '<unavailable>'
+    # These getters inspect loaded values only; missing CSOM properties may throw.
+    try { $principalId = [string]$RoleAssignment.PrincipalId } catch { }
+    try {
+        $member = $RoleAssignment.Member
+        if ($null -ne $member) {
+            $principalId = [string]$member.Id
+            $principalName = [string]$member.LoginName
+            if ([string]::IsNullOrWhiteSpace($principalName)) { $principalName = [string]$member.Title }
+        }
+    } catch { }
+    return ("principal ID={0}; name='{1}'" -f $principalId, ($principalName -replace '\s+', ' '))
+}
+
 function Invoke-SPORead {
     param([scriptblock]$Operation, [string]$Label, [int]$Attempts = 3)
     for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
@@ -1038,10 +1074,11 @@ function Invoke-SPORead {
         }
         catch {
             $message = $_.Exception.ToString()
-            $transient = $message -match '(?i)HttpClient.Timeout|timed? out|timeout|\b429\b|\b503\b|TooManyRequests|temporarily unavailable|connection.*(closed|reset)'
+            $permanent = $message -match '(?i)access (is )?denied|unauthori[sz]ed|forbidden|\((401|403)\)|\b(HTTP|status( code)?)[: =]+(401|403)\b|item does not exist|cannot access a disposed object'
+            $transient = -not $permanent -and $message -match '(?i)HttpClient.Timeout|timed? out|timeout|\b429\b|\b503\b|TooManyRequests|temporarily unavailable|connection.*(closed|reset)|error while copying content to a stream|response ended prematurely|unable to read data from the transport connection'
             if (-not $transient -or $attempt -eq $Attempts) { throw }
             $delay = if ($attempt -eq 1) { 5 } else { 15 }
-            Write-SPOReadRetry -Message ("Retrying {0} after a transient read failure ({1}/{2}); waiting {3}s: {4}" -f $Label, $attempt, $Attempts, $delay, $_.Exception.Message)
+            Write-SPOReadRetry -Message ("Retrying {0} after a transient read failure ({1}/{2}); waiting {3}s: {4}" -f $Label, $attempt, $Attempts, $delay, (Get-SPOExceptionDetails $_.Exception))
             Start-Sleep -Seconds $delay
         }
     }
@@ -1228,12 +1265,11 @@ finally {
     Complete-SmartM365MigrationConsoleLifecycle -Context $script:ConsoleLifecycleContext -Failure $script:ConsoleLifecycleFailure -Status $script:ConsoleLifecycleStatus
 }
 
-
 # SIG # Begin signature block
-# MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
+# MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDnSnH4NF1vhMVt
-# HDb4zyzoCG7c6k3bYwyGNndrfnp0U6CCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCARCDnU5/ZH9mu
+# AWlXZ/SUVP1caVBSXSIEQfX+lUhjcqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1258,19 +1294,139 @@ finally {
 # PI5wrVTjV/pR7IrtSIfq8UladlrSZJyyDn3NV2ATvIZ6wNxbTmPFcE0uMg/EYzwd
 # Tek+CgXL3TxUKeldJM4YDWPimNBRhOPXzBDiOQIj6WNswt/KM1oDLnA00CNtciPN
 # dn+dXlneMvTEUah9wyt8o8tkLpoBw+KN+Bq/K0O1qPtS7umi70l45pPiej+mwbwq
-# ztcaoVD7a8ggHP1Vdp/rnafM4GtyCAE6b7U9Yzgvp1/a1kh7XffmqVhRRjGCApQw
-# ggKQAgEBMGIwTjEeMBwGA1UEAwwVd29ya3BsYWNlY2xvdWRodWIuY29tMSwwKgYJ
-# KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
-# 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
-# gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCAr0ltXNXDkPfKcXG6mygvS
-# KspO7lRCnS2yOIC6AykdCzANBgkqhkiG9w0BAQEFAASCAYBvVGFyKFMTWxITjbtz
-# zxPeGVLgYOStzcJWzNEOooxpHlU7SptrkQrUXYKb8B5HH4j723fY2hIRLqXNo3rP
-# Ipoixfz6Fi/mUPnM1VgsE1XsWuAG26efMRVxo/pBEhFkhWx47Y55bU4um0s+vDHl
-# k4sFS/cxrez32BCH2Ea5RdEvUhs8kyFpvAcqGPu5Nx11u0zKS6OaN/qwzuTHO382
-# /bxR3cG8EQY3bJsgYHGdcG9a3TlwhagEtVpEt4I70cY1ju6UBaRRhtWRdg+rzRGM
-# 8z5MKfP8GeHinB7xj0P/YQupC6hm8T4uls+LT1uNi7zZZWRNW5g4BunYudS7xTM4
-# ISNJBXmNSebjce8Z1Yj35Euj8+obmDlF0EgBj4JCfTuvB7JaeYDvsNxL0VELMGfr
-# SqzMqjFQsTf9aGz0g23kAdjIPNrbey2CbZEsxjYx8RJMCaqbNQcIXXpU3bHl0w6x
-# EgMfjwOX91TC3rH5ceDTQbiGGroZWYipWTKsXjijd8Vt/Dg=
+# ztcaoVD7a8ggHP1Vdp/rnafM4GtyCAE6b7U9Yzgvp1/a1kh7XffmqVhRRjCCBY0w
+# ggR1oAMCAQICEA6bGI750C3n79tQ4ghAGFowDQYJKoZIhvcNAQEMBQAwZTELMAkG
+# A1UEBhMCVVMxFTATBgNVBAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRp
+# Z2ljZXJ0LmNvbTEkMCIGA1UEAxMbRGlnaUNlcnQgQXNzdXJlZCBJRCBSb290IENB
+# MB4XDTIyMDgwMTAwMDAwMFoXDTMxMTEwOTIzNTk1OVowYjELMAkGA1UEBhMCVVMx
+# FTATBgNVBAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRpZ2ljZXJ0LmNv
+# bTEhMB8GA1UEAxMYRGlnaUNlcnQgVHJ1c3RlZCBSb290IEc0MIICIjANBgkqhkiG
+# 9w0BAQEFAAOCAg8AMIICCgKCAgEAv+aQc2jeu+RdSjwwIjBpM+zCpyUuySE98orY
+# WcLhKac9WKt2ms2uexuEDcQwH/MbpDgW61bGl20dq7J58soR0uRf1gU8Ug9SH8ae
+# FaV+vp+pVxZZVXKvaJNwwrK6dZlqczKU0RBEEC7fgvMHhOZ0O21x4i0MG+4g1ckg
+# HWMpLc7sXk7Ik/ghYZs06wXGXuxbGrzryc/NrDRAX7F6Zu53yEioZldXn1RYjgwr
+# t0+nMNlW7sp7XeOtyU9e5TXnMcvak17cjo+A2raRmECQecN4x7axxLVqGDgDEI3Y
+# 1DekLgV9iPWCPhCRcKtVgkEy19sEcypukQF8IUzUvK4bA3VdeGbZOjFEmjNAvwjX
+# WkmkwuapoGfdpCe8oU85tRFYF/ckXEaPZPfBaYh2mHY9WV1CdoeJl2l6SPDgohIb
+# Zpp0yt5LHucOY67m1O+SkjqePdwA5EUlibaaRBkrfsCUtNJhbesz2cXfSwQAzH0c
+# lcOP9yGyshG3u3/y1YxwLEFgqrFjGESVGnZifvaAsPvoZKYz0YkH4b235kOkGLim
+# dwHhD5QMIR2yVCkliWzlDlJRR3S+Jqy2QXXeeqxfjT/JvNNBERJb5RBQ6zHFynIW
+# IgnffEx1P2PsIV/EIFFrb7GrhotPwtZFX50g/KEexcCPorF+CiaZ9eRpL5gdLfXZ
+# qbId5RsCAwEAAaOCATowggE2MA8GA1UdEwEB/wQFMAMBAf8wHQYDVR0OBBYEFOzX
+# 44LScV1kTN8uZz/nupiuHA9PMB8GA1UdIwQYMBaAFEXroq/0ksuCMS1Ri6enIZ3z
+# bcgPMA4GA1UdDwEB/wQEAwIBhjB5BggrBgEFBQcBAQRtMGswJAYIKwYBBQUHMAGG
+# GGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBDBggrBgEFBQcwAoY3aHR0cDovL2Nh
+# Y2VydHMuZGlnaWNlcnQuY29tL0RpZ2lDZXJ0QXNzdXJlZElEUm9vdENBLmNydDBF
+# BgNVHR8EPjA8MDqgOKA2hjRodHRwOi8vY3JsMy5kaWdpY2VydC5jb20vRGlnaUNl
+# cnRBc3N1cmVkSURSb290Q0EuY3JsMBEGA1UdIAQKMAgwBgYEVR0gADANBgkqhkiG
+# 9w0BAQwFAAOCAQEAcKC/Q1xV5zhfoKN0Gz22Ftf3v1cHvZqsoYcs7IVeqRq7IviH
+# GmlUIu2kiHdtvRoU9BNKei8ttzjv9P+Aufih9/Jy3iS8UgPITtAq3votVs/59Pes
+# MHqai7Je1M/RQ0SbQyHrlnKhSLSZy51PpwYDE3cnRNTnf+hZqPC/Lwum6fI0POz3
+# A8eHqNJMQBk1RmppVLC4oVaO7KTVPeix3P0c2PR3WlxUjG/voVA9/HYJaISfb8rb
+# II01YBwCA8sgsKxYoA5AY8WYIsGyWfVVa88nq2x2zm8jLfR+cWojayL/ErhULSd+
+# 2DrZ8LaHlv1b0VysGMNNn3O3AamfV6peKOK5lDCCBrQwggScoAMCAQICEA3HrFcF
+# /yGZLkBDIgw6SYYwDQYJKoZIhvcNAQELBQAwYjELMAkGA1UEBhMCVVMxFTATBgNV
+# BAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRpZ2ljZXJ0LmNvbTEhMB8G
+# A1UEAxMYRGlnaUNlcnQgVHJ1c3RlZCBSb290IEc0MB4XDTI1MDUwNzAwMDAwMFoX
+# DTM4MDExNDIzNTk1OVowaTELMAkGA1UEBhMCVVMxFzAVBgNVBAoTDkRpZ2lDZXJ0
+# LCBJbmMuMUEwPwYDVQQDEzhEaWdpQ2VydCBUcnVzdGVkIEc0IFRpbWVTdGFtcGlu
+# ZyBSU0E0MDk2IFNIQTI1NiAyMDI1IENBMTCCAiIwDQYJKoZIhvcNAQEBBQADggIP
+# ADCCAgoCggIBALR4MdMKmEFyvjxGwBysddujRmh0tFEXnU2tjQ2UtZmWgyxU7UNq
+# EY81FzJsQqr5G7A6c+Gh/qm8Xi4aPCOo2N8S9SLrC6Kbltqn7SWCWgzbNfiR+2fk
+# HUiljNOqnIVD/gG3SYDEAd4dg2dDGpeZGKe+42DFUF0mR/vtLa4+gKPsYfwEu7EE
+# bkC9+0F2w4QJLVSTEG8yAR2CQWIM1iI5PHg62IVwxKSpO0XaF9DPfNBKS7Zazch8
+# NF5vp7eaZ2CVNxpqumzTCNSOxm+SAWSuIr21Qomb+zzQWKhxKTVVgtmUPAW35xUU
+# FREmDrMxSNlr/NsJyUXzdtFUUt4aS4CEeIY8y9IaaGBpPNXKFifinT7zL2gdFpBP
+# 9qh8SdLnEut/GcalNeJQ55IuwnKCgs+nrpuQNfVmUB5KlCX3ZA4x5HHKS+rqBvKW
+# xdCyQEEGcbLe1b8Aw4wJkhU1JrPsFfxW1gaou30yZ46t4Y9F20HHfIY4/6vHespY
+# MQmUiote8ladjS/nJ0+k6MvqzfpzPDOy5y6gqztiT96Fv/9bH7mQyogxG9QEPHrP
+# V6/7umw052AkyiLA6tQbZl1KhBtTasySkuJDpsZGKdlsjg4u70EwgWbVRSX1Wd4+
+# zoFpp4Ra+MlKM2baoD6x0VR4RjSpWM8o5a6D8bpfm4CLKczsG7ZrIGNTAgMBAAGj
+# ggFdMIIBWTASBgNVHRMBAf8ECDAGAQH/AgEAMB0GA1UdDgQWBBTvb1NK6eQGfHrK
+# 4pBW9i/USezLTjAfBgNVHSMEGDAWgBTs1+OC0nFdZEzfLmc/57qYrhwPTzAOBgNV
+# HQ8BAf8EBAMCAYYwEwYDVR0lBAwwCgYIKwYBBQUHAwgwdwYIKwYBBQUHAQEEazBp
+# MCQGCCsGAQUFBzABhhhodHRwOi8vb2NzcC5kaWdpY2VydC5jb20wQQYIKwYBBQUH
+# MAKGNWh0dHA6Ly9jYWNlcnRzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRS
+# b290RzQuY3J0MEMGA1UdHwQ8MDowOKA2oDSGMmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0
+# LmNvbS9EaWdpQ2VydFRydXN0ZWRSb290RzQuY3JsMCAGA1UdIAQZMBcwCAYGZ4EM
+# AQQCMAsGCWCGSAGG/WwHATANBgkqhkiG9w0BAQsFAAOCAgEAF877FoAc/gc9EXZx
+# ML2+C8i1NKZ/zdCHxYgaMH9Pw5tcBnPw6O6FTGNpoV2V4wzSUGvI9NAzaoQk97fr
+# PBtIj+ZLzdp+yXdhOP4hCFATuNT+ReOPK0mCefSG+tXqGpYZ3essBS3q8nL2UwM+
+# NMvEuBd/2vmdYxDCvwzJv2sRUoKEfJ+nN57mQfQXwcAEGCvRR2qKtntujB71WPYA
+# gwPyWLKu6RnaID/B0ba2H3LUiwDRAXx1Neq9ydOal95CHfmTnM4I+ZI2rVQfjXQA
+# 1WSjjf4J2a7jLzWGNqNX+DF0SQzHU0pTi4dBwp9nEC8EAqoxW6q17r0z0noDjs6+
+# BFo+z7bKSBwZXTRNivYuve3L2oiKNqetRHdqfMTCW/NmKLJ9M+MtucVGyOxiDf06
+# VXxyKkOirv6o02OoXN4bFzK0vlNMsvhlqgF2puE6FndlENSmE+9JGYxOGLS/D284
+# NHNboDGcmWXfwXRy4kbu4QFhOm0xJuF2EZAOk5eCkhSxZON3rGlHqhpB/8MluDez
+# ooIs8CVnrpHMiD2wL40mm53+/j7tFaxYKIqL0Q4ssd8xHZnIn/7GELH3IdvG2XlM
+# 9q7WP/UwgOkw/HQtyRN62JK4S1C8uw3PdBunvAZapsiI5YKdvlarEvf8EA+8hcpS
+# M9LHJmyrxaFtoza2zNaQ9k+5t1wwggbtMIIE1aADAgECAhAIT9wzT35FTtvDD4/5
+# khg1MA0GCSqGSIb3DQEBCwUAMGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdp
+# Q2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3Rh
+# bXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTEwHhcNMjYwODA1MDAwMDAwWhcN
+# MzcxMTA0MjM1OTU5WjBjMQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQs
+# IEluYy4xOzA5BgNVBAMTMkRpZ2lDZXJ0IFNIQTI1NiBSU0E0MDk2IFRpbWVzdGFt
+# cCBSZXNwb25kZXIgMjAyNiAxMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKC
+# AgEAtnum8sn+zUr41JtMZbP9OMYw+HwJDpG5xkIu/lqcfNYmMX81YmsUiHLbh9yk
+# peWBGKTLhYBrAN9Tdg/QEzG32XcObmgIblnr0CoQ3WSAeDZ6nH6X6VkFyYkJw3QB
+# JREwvm4UhLzSxmwPA7cFKRTEOMsmEEj6qJk/dqLEAL+oQYuOwE2UuiX1Vnul8YRe
+# IyWd4kgLn9gq6LNXM0UplkR6jL/QHxmb6fMoGBJYbnaUI7XD6cKDpekK2SVMld4i
+# DbzeHDtOaaxldH5IxuNusQ69nd8/ZXEiB5Hbxj3RlK13cX1W4DlFXKdv/CEhM8Cj
+# 1vvlmvhNroyPdRGbbpBlgyf8Wdu5N6ByhFwURn0U6ozlPoxN22v+fviUhP+6DR54
+# 7OZnpBMWDfei1f5sVGwiiW/KQTWOK97g+4RJpPzPNV4VYMAwO2jM2Aty2QYPVmOQ
+# TJm0msuXnJrSbl2gf9JylpkJlWXqk1Q4LJsxz+TELoQCZIljbgvTJgoPU2R12ydv
+# 8i1UqL/adelA0y7U9Pmmtbze9Xx3rtajC5SzQd1jgfwAwsa90v9YcSPdmeoyoBBA
+# /27cCL237l5DTYYPDLQ4ON3OLTGWnvRb6jDrf/T75gMRfUzSLCBQfBusm9+mSWRl
+# C/Df6S/e9Q8i13CuhzOT2Jx+V/nlbXM4QoBwlUAhelwwJT0CAwEAAaOCAZUwggGR
+# MAwGA1UdEwEB/wQCMAAwHQYDVR0OBBYEFBTJY4owLtRK+26U8+bjQH717M3iMB8G
+# A1UdIwQYMBaAFO9vU0rp5AZ8esrikFb2L9RJ7MtOMA4GA1UdDwEB/wQEAwIHgDAW
+# BgNVHSUBAf8EDDAKBggrBgEFBQcDCDCBlQYIKwYBBQUHAQEEgYgwgYUwJAYIKwYB
+# BQUHMAGGGGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBdBggrBgEFBQcwAoZRaHR0
+# cDovL2NhY2VydHMuZGlnaWNlcnQuY29tL0RpZ2lDZXJ0VHJ1c3RlZEc0VGltZVN0
+# YW1waW5nUlNBNDA5NlNIQTI1NjIwMjVDQTEuY3J0MF8GA1UdHwRYMFYwVKBSoFCG
+# Tmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRHNFRpbWVT
+# dGFtcGluZ1JTQTQwOTZTSEEyNTYyMDI1Q0ExLmNybDAgBgNVHSAEGTAXMAgGBmeB
+# DAEEAjALBglghkgBhv1sBwEwDQYJKoZIhvcNAQELBQADggIBAI3FOmEenVIK35ms
+# CYB+fShAsWvSYvLBItoNdAgQ2jIqrGsVsluXMJU/+mRebBc52s6lbKAvOVPXaizm
+# KkMLLflEEKDZQx4CkS2t8aHPjkXha3hYZ010htFa3dhNgmalH5vuWvh3tTCf4frT
+# S7gPtGc4Z/xaPhQ2AB1mR8eEe/WbH0RWHvVIl6VwQ3+g5FKNfN2N/DWJkf13w2H+
+# 2GfqEfbd35Ww8CvoYBjLNIDTadcPWdgsjsiOaK/7EsKJgLjUNIVgvcaFOLLQ/Glr
+# A+0ZHJoFUbOr5SJN8zykPspXIXlpDJY/gqFUZRROeab9GVgmhbdOJcD/63RhxPah
+# FUGbckRONqMe6DYAv6/mOG0pWd3cPStsdcS7buj5DyniwRY8yooMH6ptx5vpP/pZ
+# zBPBeZD2U4IsthyxB5Jaa8qrOkB5z160TXiM5ADMspZ0TfD9MJoq0tFpFPssKRFh
+# WeEDYPvcUuN7U7lvcdHl4ezQ3NT/7Ffs1sR1yh/LRbdZ3B3Vc6q2WmD8mDC0p9kz
+# l2o73iVtS946IkEj7FkRsZGww1teYxERROC745xrtjvcw9ZyyUjHZWGRIpJeMNsP
+# quCDf0fkyHtB+J4AiNZqCQk23rxh+KbpyMTNVKItJ5l92Svl20U9NbqMBOVYl1h5
+# 4NEYLJq1/xHWFKPNK903zJZA9P2DMYIFvjCCBboCAQEwYjBOMR4wHAYDVQQDDBV3
+# b3JrcGxhY2VjbG91ZGh1Yi5jb20xLDAqBgkqhkiG9w0BCQEWHWNvbnRhY3RAd29y
+# a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
+# AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
+# CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
+# hvcNAQkEMSIEIJXDGLmzDKVzE9AW0Uw+ofWipQkUq2op99x8FHntce1xMA0GCSqG
+# SIb3DQEBAQUABIIBgGTgsRraLolUtHVLj5iuyclFkbCgTQleROTyyLYsFuTRQzqe
+# 1EpAXmEta8XAUf+QNmob2TPJMpRoKAM4LT0MDsL8Di0P8rNiuJp6/4w6HD9+DznG
+# c9/nXYc8Vr0I4A6xhPiW9lXMcKx5u08JacanRS81WllR2mRUbSlnlbWabbkdc5xJ
+# K1GU/6pJs4qdGU5dMo5Qd3TkmG9BW+DFt/PMDtwiROEtIYATeJ6JeBIfYqra70Uf
+# DL5b7zMyZ2QtEU/Vpm/ttPSdDyetCx+fpPhPkn7Agieh+ePaEzlghn3+f+XYlz1g
+# Ymw9+f+hNFkP/t50J+31oYLmYPSrY6s2gfJAE1BBjDA6AwRUcsRNBcq8VG61cNmS
+# FkjZC+LrumKmfcWQNVff1Q1x515pwzJ5+MR8Hkg4qD2Pi451WIs0dTf/HnFYQJ7g
+# QZ2Ip2U9+MwT7QOZGyzivW4JrHi0r1VBkF3tFyJegEt7LrwnDjkBHvDLSwGsgTsc
+# X1ySMe06zZM1gfGzyKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
+# RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
+# MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDgxMzEw
+# MjBaMC8GCSqGSIb3DQEJBDEiBCDSKJQxgdXOmki56XBAFJHtZkZYui1feekGGXDb
+# 1O9GpDANBgkqhkiG9w0BAQEFAASCAgBHWRtlK/Ss2DB6qi5S7VuuG7Ho7dJGk526
+# MrqU/cWT/2zQDcNj5jhfS+BQ0triPyj9GBgFfLjNc5oGjHMmsqZ9X339pWMp18jr
+# W75aqTkBG4ToYlZuYzGyYJSTT0LRXjrFw1JJjz4spjY2O3UTf9PrBuk4PkQq/ggQ
+# 7ed5CRGrksymlLCH1l8iBsD1TXogc/U6Mki2jF/e+ulbWY526+FFlpUh3Ulbi1cY
+# YQiK6+oNPUdN5Yy354zDBnwjpSD29BZPUNSuXJ3/CysdnsVx/lSST3r1FbKxkWn0
+# oYXgdVj2lraYD0J0hI6fV8qKR+pI7nxhYpez7nS5MDEyUo1n2zpPttt1GA1TGprk
+# q2zB95AiGboOs2b9Zb72ddz8ZUOYeQqsSJNOvV/PM458iBhvxIodblYUyDunHc+I
+# OWhe9Tlp4I/Y30sqW1kbR7HIaMVvgrAatW5b24Lley4xLTCQP2hyJZpCHH6wNhKH
+# Vtujngzb7X5YG/rwtKiZxWi5A5eMedsY7fkAqGGgPVefT7iy2I+wmShraoVnn7bJ
+# iLQOkPdi1ShBmTdTdxrLaYfWa5+XWDVO3kHx3J7zOuMBHlvPzxqHNfsYPrc/gBGn
+# SX4QF7rF7Eq1d0CddG/5fSym7WxgxnXIzIqrIZVM5/LHAGI0kfvF+KyQiyMp+uu2
+# ACaEEsJ2PA==
 # SIG # End signature block
