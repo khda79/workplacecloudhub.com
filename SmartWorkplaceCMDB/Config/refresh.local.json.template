@@ -1,0 +1,11 @@
+{
+  "PreparedRoot": "C:\\SmartM365\\DATA\\DATA-POWERBI-CMDB",
+  "ExpectedIdentity": {
+    "TenantKey": "example-prod",
+    "OrganizationKey": "example",
+    "EnvironmentKey": "prod",
+    "TenantId": "00000000-0000-0000-0000-000000000001"
+  },
+  "LifetimeSeconds": 7200,
+  "MaxBytes": 4294967296
+}

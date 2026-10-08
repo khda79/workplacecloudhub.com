@@ -1,3 +1,6 @@
+> Historical developer reference. The standalone CMDB collection chain is retired.
+> Use the product README and PowerBI/README.md for the current prepared consumer.
+
 # Smart Workplace CMDB V1 — release report
 
 Report date: 2026-09-12

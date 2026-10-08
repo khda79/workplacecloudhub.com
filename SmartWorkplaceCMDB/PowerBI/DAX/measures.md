@@ -1,3 +1,6 @@
+> Historical developer reference. The standalone CMDB collection chain is retired.
+> Use the product README and PowerBI/README.md for the current prepared consumer.
+
 # SmartWorkplaceCMDB DAX Measures
 
 Initial measures to implement in the Power BI model:

@@ -1,3 +1,6 @@
+> Historical developer reference. The standalone CMDB collection chain is retired.
+> Use the product README and PowerBI/README.md for the current prepared consumer.
+
 # Smart Workplace CMDB — DSI cockpit contract (V1)
 
 `report_cockpit.py` maintains the reviewed PBIR definition in place. It does

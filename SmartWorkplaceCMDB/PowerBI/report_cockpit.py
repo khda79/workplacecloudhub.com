@@ -1308,7 +1308,7 @@ def enrich_semantic_model(
     if any(item.get("name") == "CMDBReportDataRoot" for item in model.get("expressions", [])):
         raise ValueError(
             "This report reads the current DATA-LAST plus a validated Derived sidecar. "
-            "Rebuild that sidecar with prepare_current_report_data.py; the frozen-snapshot "
+            "This historical builder requires its original sidecar; use the prepared refresh launcher for the migrated model. The frozen-snapshot "
             "cockpit rewriter must not be run on this model."
         )
     data_dir = resolve_report_data_dir(report, model, report_data_override)

@@ -1,3 +1,6 @@
+> Historical developer reference. The standalone CMDB collection chain is retired.
+> Use the product README and PowerBI/README.md for the current prepared consumer.
+
 # Hardware reporting — V1
 
 The canonical report presents fleet composition and hardware coverage on the

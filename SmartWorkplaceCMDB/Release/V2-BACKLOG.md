@@ -1,3 +1,6 @@
+> Historical developer reference. The standalone CMDB collection chain is retired.
+> Use the product README and PowerBI/README.md for the current prepared consumer.
+
 # Smart Workplace CMDB — V2 backlog
 
 V1 is frozen. The following items are intentionally excluded until their data,

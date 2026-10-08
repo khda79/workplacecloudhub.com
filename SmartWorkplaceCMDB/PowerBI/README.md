@@ -1,305 +1,76 @@
-# SmartWorkplaceCMDB Power BI — V1
+# Smart Workplace CMDB — prepared snapshot refresh
 
-The canonical DSI cockpit is maintained in place with `report_cockpit.py`.
-The approved V1 navigation exposes seven decision pages and three visible 360
-detail/drill-through pages. The transformation preserves the three stable
-drill-through identifiers, consolidates overlapping content and retires six
-redundant presentation pages.
-All visible release labels and the canonical project name are V1; the project
-is stored as `PowerBI/CMDB-REPORTS/SmartWorkplaceCMDB.pbip`. See
-[COCKPIT-DSI.md](COCKPIT-DSI.md) for metric and source boundaries.
+## One-time setup
 
-## Canonical report: current collection
+1. Use the migrated private SmartWorkplaceCMDB.pbip project. This repository does
+   not redistribute that tenant model or its cache.
+2. Copy Config/refresh.local.json.template to Config/refresh.local.json. Set the
+   absolute synchronized DATA-POWERBI-CMDB path and the four independently known
+   expected identity values. Never derive the expected tenant from the batch
+   being validated. The local configuration is ignored by Git.
+3. Install Python 3.11+ or supply its executable with -PythonPath. Keep the
+   matching SmartM365 prepared contract, registry and cmdb_freshness.py in the
+   same repository checkout. No permanent Windows service is installed.
 
-The maintained ten-page PBIP is different from a newly generated frozen report.
-Its semantic model imports 20 unchanged-schema tables directly from
-`CMDBDataRoot\PowerBI` (where `CMDBDataRoot` points to the synchronized
-`DATA-LAST` collection). Nineteen enriched/report-only tables come from a
-private `CMDBReportDataRoot` directory. Neither folder belongs in Git. When
-`ReportData.Enabled` is configured, the Full pipeline builds this directory
-under `DATA-LAST\PowerBI\Report` after the 28-table contract build. It does
-not replace or modify the collection's own CSVs. The previous directory is
-retained only during validation and removed after successful promotion.
+From the repository root, test without starting a listener or editing the model:
 
-Set `ReportData.Enabled=true` and
-`ReportData.SmartInventoryLatestOutputRootPath` to the directory containing
-`Exchange_OnPrem_Mailboxes_AllDomains.csv` and
-`Exchange_OnPrem_RemoteMailboxes_AllDomains.csv` in the private tenant config.
-When that same SmartInventory `DATA-LAST` contains
-`M365_Licenses_ReportSnapshot.json.txt`, the report-data step also validates its
-tenant and candidate counts, then writes `LicenseReportSummary.csv`,
-`LicenseReportCandidates.csv`, and `LicenseReportGaps.csv` into the frozen
-`PowerBI/Report` directory. These rows copy the daily license email's results;
-the CMDB preparation does not recalculate recovery or downgrade eligibility.
-Candidate `UserId` joins to `DimUser.SourceUserId` for context, preserving
-unmatched candidates with an explicit join status. Source hash and snapshot ID
-are recorded in `report-data.manifest.json.txt` and checked by validation.
-Until the SmartInventory snapshot is first published, the existing CMDB report
-build continues without these optional tables. The maintained private PBIP
-must import the three tables before their KPIs can appear in visuals.
-Python 3.10+ is required on the machine running Full. The report-data step
-exports validated CI hardware evidence, builds the 19 CSVs, verifies the
-collection build, tenant identity, source and output hashes, and publishes a
-single current `Report` directory. A failure preserves the previous report
-directory and fails the pipeline; no inferred mailbox or hardware values are
-substituted. Do not refresh Desktop during an active collection or while the
-synchronized files are still changing.
+~~~powershell
+pwsh -NoProfile -ExecutionPolicy AllSigned -File .\SmartWorkplaceCMDB\Launchers\Start-SmartWorkplaceCMDB-Refresh.ps1 -ValidateOnly
+~~~
 
-Point `CMDBDataRoot` at the local synchronized `DATA-LAST` and
-`CMDBReportDataRoot` at its `PowerBI\Report` subdirectory after a completed
-Full run. Refresh in Power BI Desktop, inspect all ten pages and key
-totals/filters, then save. The legacy `report_cockpit.py` rewriter intentionally
-rejects a model containing `CMDBReportDataRoot`: it assumes a frozen
-`ReportData` copy and must not rewrite the maintained direct-source model.
+## Every refresh
 
-The following builder instructions apply to creating a separate new report,
-not to refreshing this canonical PBIP.
+Run the same command without -ValidateOnly. Initial validation may take several
+minutes and substantial RAM for application relations: the 4 GiB default is a
+retained-binary budget, not a total process-memory limit. Never truncate a batch.
 
-Power BI is a native deliverable of SmartWorkplaceCMDB. The report builder
-creates six English pages: Overview, Devices and compliance, Users and
-relationships, Licenses and assignments, Mailboxes, and Quality and coverage.
-All report labels, measure names and descriptions, generated status values,
-and operator instructions are English. The model culture is en-US. Business
-data such as names and department values retain their original source text.
+When ready, the console prints private CMDBReadBaseUrl, CMDBReadToken and
+CMDBReadBatch values. In Desktop, use Transform data → Edit parameters to set
+those three text parameters. Apply, then perform the native Desktop refresh.
+If prompted, use anonymous credentials for the loopback URL. Leave the console
+open during the complete refresh, then save after success and press Enter in
+the console to stop the reader. Ctrl+C also stops it. Do not record the token in
+shared transcripts, screenshots, public logs or Git.
 
-Add `--include-360` to generate nine pages, including Device 360, User 360 and
-Group 360 from existing local raw and CMDB exports. This optional enrichment
-requires the sibling `report_360.py`; the default six-page build remains
-compatible with existing curated-only inputs.
+There is no automatic Desktop parameter write, model export or XMLA processing.
+The launcher does not claim refresh success or save the PBIP. An old session
+stored in the project is intentionally unusable after stopping its reader.
+A new refresh requires a new validation and all three new values. Do not click
+Refresh after closing the reader; do not substitute File.Contents queries.
 
-## Local report preparation
+The lifetime is at most two hours and can end earlier at the earliest source
+expiry. If it expires mid-refresh, reject that refresh and start a fresh session
+with a valid prepared batch. A recent preparation does not refresh old inputs.
+DiscoveredApps targets a weekly 168-hour age, warning thereafter, with a hard
+240-hour limit; core source evidence retains its 48-hour limit.
 
-Run PowerBI/build_report.py with Python 3.10 or later; only the standard library
-is required. The builder reads a frozen DATA-LAST directory and creates a new
-private PBIP project. It never connects to a tenant, installs dependencies,
-collects data, publishes a report or overwrites an existing destination.
+## Qualification boundaries
 
-The following paths are **fictional placeholders**. Replace them with authorized
-local paths. Run from the repository root:
+The privately migrated model loaded all 46 prepared tables with matching row
+counts. Eight opt-in wall-clock date mappings and the one Autopilot contact
+sentinel were verified using native M tests and a targeted native Desktop
+refresh. Strict UTC parsing is unchanged elsewhere. No source files were edited.
 
-    python .\SmartWorkplaceCMDB\PowerBI\build_report.py --data-root ".\SmartWorkplaceCMDB\Data\Tenants\prod\DATA-LAST" --output ".\SmartWorkplaceCMDB\PowerBI\CMDB-REPORTS-NEW"
+Four License Report tables independently read the published SmartM365 licensing
+snapshot from DATA-LAST. Retain that path/configuration; their freshness and
+publication identity are separate from the prepared batch. The 13-page report's
+final functional page review was waived, not passed. This launcher does not
+publish a report to Fabric, guarantee unattended scheduled refresh or restart
+Power BI after a crash.
 
-For the 360 version (the paths are still fictional placeholders):
+## Offline checks
 
-    python .\SmartWorkplaceCMDB\PowerBI\build_report.py --include-360 --data-root ".\SmartWorkplaceCMDB\Data\Tenants\prod\DATA-LAST" --output ".\SmartWorkplaceCMDB\PowerBI\CMDB-REPORTS-NEW"
+~~~powershell
+python -B -m unittest discover -s SmartWorkplaceCMDB/Tests -p 'test_prepared*.py'
+python -B -m unittest discover -s SmartWorkplaceCMDB/Tests -p test_refresh_prepared_report.py
+python -B -m unittest discover -s SmartWorkplaceCMDB/Tests -p test_release_package.py
+~~~
 
-The output must be a new directory outside the source DATA-LAST. Open the
-generated `.pbip` in Power BI Desktop, refresh the local CSV files, check all
-generated pages, then save a `.pbix` if that distribution form is required. Preserve the previous
-PBIX until the replacement has been validated; replace it when previous
-versions are no longer needed. The modeling MCP cannot save the report as a PBIX; that Desktop step
-requires the operator. Computer Use is not required.
+Tests/prepared_dates.query.pq is a synthetic native-M query against
+Queries/prepared-types-candidate.pq. Run with the Microsoft Power Query SDK
+PQTest run-compare, an inert test extension, -q for the query and -pa for the
+function. This is offline parsing proof, not a real producer or tenant run.
 
-ReportData is a frozen copy for this report. Refresh only rereads those local
-files; it does not collect new tenant data or follow changes in the original
-DATA-LAST. Generate a new output folder for a new authorized collection.
-If a generated project is moved, update and validate its Power Query source
-paths before opening it in Desktop.
-
-## Model and source contract
-
-Each curated table except DimDate starts with TenantKey, OrganizationKey,
-EnvironmentKey and TenantId. Relationships use tenant-scoped keys such as
-TenantUserKey, TenantDeviceKey and TenantSkuKey. The builder checks contracts,
-all four identity fields, unique keys, types and all six relationships.
-Power Query rechecks headers and tenant identity on import. Blank values stay
-null; timestamp fields require a timezone and are converted to UTC.
-
-The eleven business tables are retained. Mailbox and quality details are joined
-from matching CMDB CSV rows. SourceHealth adds a disconnected source-evidence
-table. No CSV source contract is changed. Per-source status evidence keeps
-priority and is verified against local CSV hashes and row counts. When those
-sidecars are absent, a completed full-orchestrator run is accepted only if its
-contract-build timestamp matches the current build manifest; otherwise the CSV
-remains explicitly without collection evidence.
-SourceHealth ignores finding filters. DimDate and DimTenant remain hidden and
-disconnected: no historical trend, global tenant selector or RLS is claimed.
-
-## Readability
-
-Cards, chart data labels and axes use explicit full-number display units.
-Cards use the supported value.labelDisplayUnits property set to 1 (None),
-not the discarded value.displayUnits property. Internal card outlines are
-disabled and content margins are explicit. Textboxes have zero container
-padding, larger fonts and enough space for their estimated line count.
-Table values and headers wrap onto multiple lines.
-
-Display-only Label columns render missing text as Not provided. Original
-columns, nulls, numeric types, keys and all 23 measure formulas remain
-unchanged. Source rows and timestamps also have readable display columns.
-Charts and slicers exclude only the synthetic blank relationship member;
-every physical row has a nonblank display label, so missing source values
-remain visible as Not provided. This prevents a zero-count blank category
-from appearing as a localized empty label. No global data filter is added.
-
-Official schema and data checks do not replace an operator check of Desktop
-rendering. Review full numbers, long labels, all six pages and a Not provided
-selection after opening and refreshing the prepared project.
-
-## Device, User and Group 360
-
-The optional enrichment adds three report-owned tables, for 15 tables and 13
-single-direction relationships. It preserves the eleven business tables,
-SourceHealth and the original 23 measure definitions. Sixteen additional
-measures count source/assignment paths or gate detail tables to one selected
-entity. These tables are local report transformations, not new collector CSV
-contracts or new tenant queries.
-
-- Device 360 shows identity, compliance, the associated account and its link
-  status, source identifiers, management agent, enrollment, source-specific
-  activity dates and entity-linked findings. Repeated Intune source candidates
-  remain visible; selection follows the existing normalizer's ordering and is
-  checked against its output. All source candidates are retained.
-- User 360 shows job title, department, account creation text, associated
-  devices/mailboxes and every license assignment path, including group origin,
-  state, errors, last update and disabled plan IDs. These are assignment paths,
-  not unique user/SKU pairs or evidence of effective usage.
-- Group 360 shows identity and observed license paths, plus a coverage filter
-  to find groups with exported paths. Cloud members and owners remain Not
-  collected. No observed path never means unused or safe to delete.
-
-Search the unique selector on each 360 page. Single selection is enabled, and
-detail measures use ALLSELECTED to avoid displaying all objects when there is
-no single selected entity. Names alone are never keys. Right-click the unique
-selection column in the device/user inventories to drill through. The User 360
-device table can open Device 360; its group selection column can open Group
-360; the Group 360 user selection can open User 360. Page tabs return to the
-overview. Native navigation still requires operator validation in Desktop.
-
-New timestamp columns preserve the original text beside a qualified UTC value
-and status. Dates without an explicit timezone stay unqualified, and pre-1900
-sentinels stay unknown. No local-culture guess or activity threshold is used.
-Existing source columns remain unchanged. Collection time and activity time
-are separate. Account creation text without a timezone cannot establish an
-exact instant. Assignment last updated is not an initial assignment date.
-
-Missing associations, unresolved references and missing collection are distinct
-states. Only exact tenant-qualified entity mappings link quality findings;
-dataset findings and other entity types remain on the global quality page.
-ConfidenceScore remains the unmodified configuration value, not a measured
-trust percentage. No change journal, hardware enrichment, membership inventory
-or business dependency graph is introduced in this increment.
-
-The enriched build fails before creating output if required local source files
-are absent, source identity differs, source keys are duplicated, entity sets
-drift, selected Intune evidence disagrees with CMDB, or assignment paths cannot
-reconcile to the existing user/SKU summary. Source hashes are checked before
-writing the generated project. Raw IDs and names remain private in ReportData.
-
-## Metric definitions and filters
-
-- Enabled accounts do not prove activity or sign-ins. Unknown account status
-  is not classified as disabled.
-- Users with assignments include all assignment states. This is not a count
-  of active or used licenses.
-- A normalized license assignment whose user is absent from the same Entra
-  snapshot is retained only when a matching `OrphanUserLicenseAssignment`
-  quality finding exists. It remains unresolved through the user relationship,
-  is included in global assignment totals and does not create a synthetic user.
-- Capacity is displayed only for a single SKU. Do not sum different products
-  as a count of people. The assignment-state filter does not filter capacity.
-- Compliant device share is explicitly compliant devices divided by all
-  filtered devices, including unknown states in the denominator. Missing
-  compliance is not classified as noncompliant.
-- User and device filters propagate through the six single-direction
-  relationships. Charts and long tables use native scrolling.
-- A DiscoveryMailbox without an external identifier may produce an
-  informational finding under the corroborated local quality rule. That
-  finding remains visible with its stable key.
-- Complete means the collector reported complete coverage for the granted
-  permissions. It does not certify tenant completeness or AD access.
-
-REPORT-MANIFEST.json includes all 23 measure definitions, CSV-derived expected
-values and input/output hashes. VALIDATION-MEASURES.dax uses DEFINE MEASURE to
-check those calculations without changing the imported model.
-
-## Validation and handling
-
-The hardware reporting adapter and the canonical cockpit's hardware pages are
-documented in [HARDWARE-REPORT.md](HARDWARE-REPORT.md). Hardware evidence is joined
-through native CI/device keys and retains separate source dates. The current
-pilot includes a validated real hardware snapshot. Devices without a matching
-hardware record still show an explicit unavailable message. The generic six/nine-page generator below remains
-separate from this additive hardware page.
-
-For an already-finalized cockpit, add `--data-only` to `report_hardware.py`
-to refresh the two validated hardware CSV inputs without rebuilding report
-pages or model payloads. The output must remain a new private directory and
-must be reviewed before it replaces the prior frozen `ReportData` copy.
-
-The canonical cockpit integrates hardware into `05  Fleet & Hardware` and
-`08  Device 360`. The report and its visible context labels use V1 and no page
-title contains BETA. Fleet
-coverage uses filtered `DimDevice` rows as its denominator and removes direct
-manufacturer/model/serial/storage filters from its numerator. The distribution
-charts and anomaly cards remain in hardware-record scope. Missing attributes,
-source-reported zero storage and repeated reported serial values are separate
-checks; none proves identity, ownership, physical capacity or a safe merge.
-Manufacturer/model charts use native scrolling, and the fleet detail table
-retains the DeviceSelection field for the existing Device 360 drillthrough.
-
-The canonical private snapshot has passed prior native Desktop reload and
-screenshot review. A fresh post-finalization reload is required before release
-closure. Rendering evidence qualifies only the reviewed snapshot; screenshots
-do not qualify native clicks.
-When performing an operator check, target only the exact canonical PBIP/PID and
-verify page filters, chart cross-filtering, table scrolling and the three 360
-drill-through targets. Device 360 includes hardware equipment and source-date
-evidence. Preserve the current detail selection unless the operator explicitly
-changes it.
-
-Run the synthetic offline suite without network access:
-
-    python -B -m unittest discover -s .\SmartWorkplaceCMDB\Tests -p "test_report*.py" -v
-
-Apply the cockpit only to an authorized private PBIR folder after making a
-backup. The following path is a fictional placeholder:
-
-    python .\SmartWorkplaceCMDB\PowerBI\report_cockpit.py --report ".\SmartWorkplaceCMDB\PowerBI\CMDB-REPORTS\SmartWorkplaceCMDB.Report"
-
-When preparing a replacement snapshot outside the configured `CMDBDataRoot`,
-pass its exact private folder with `--report-data`. This explicit directory
-takes precedence over automatic parameter discovery and prevents derived CSVs
-from being written into the previous frozen snapshot. Without that override,
-the cockpit requires the configured `CMDBDataRoot` and fails if its `ReportData`
-folder is missing; it never falls back to an old local copy beside the PBIP.
-
-If fresh local Exchange recipient evidence is unavailable, an explicitly
-reviewed prior `FactMailboxHosting.csv` may be supplied with
-`--mailbox-hosting-baseline`. Only unmatched On-premises rows are retained by
-their address-derived hashed key; current Exchange Online evidence always wins.
-This is dated continuity evidence, not proof of current local completeness.
-
-Schema validation and DAX checks do not prove Desktop rendering. After import,
-check every generated page, visual errors, exact unfiltered totals and one filter on
-each applicable page. Stop on import errors, unexpected sources, another
-tenant or unexplained totals. Preserve evidence before changing anything.
-
-For 360 pages, validate with an actual filter on DeviceSelection,
-UserSelection or GroupSelection and group by every column in each detail
-visual. Filtering an entire dimension row is not an equivalent regression
-test: it previously concealed an ALLSELECTED key-column defect that returned
-blank detail measures despite a valid selector choice. Detail gates now use
-ALLSELECTED on the whole dimension. Test one selection, two selections and
-no selection; only a single selected entity may show detail records. Missing
-related records must remain empty. Report projections set displayName for
-English captions; nativeQueryRef alone does not rename a visible header.
-Dropdown containers reserve room for a full row below their titles.
-
-The 360 layout uses taller profiles, fixed business-column widths and no
-table totals. Detail gates and long navigation/path keys remain in the
-visual query as hidden projections, preserving selection logic and row
-identity. Names and accounts are displayed beside those hidden navigation
-fields. Hiding a field is presentation only, not a security boundary.
-Check the rendered rows and cross-page drillthrough in Desktop before
-replacing the PBIX; schema and DAX validation do not validate the UI.
-
-The CSV, model, PBIP, PBIX and caches contain personal data. Keep them in the
-authorized private folder, outside Git and publishing/sharing workflows.
-Hiding technical keys in the model is not data security. Keep ReportData while
-the project is in use. After retention is agreed, cleanup must target only
-the approved review folder with Desktop closed; preserve original snapshots.
-
-The V1 generators, tests and documentation are included in the stable local
-release allowlist. No report, dataset or private source data is published by
-the build or by this finalization workflow.
+Historical build_report.py, report_360.py, report_cockpit.py, report_hardware.py
+and restyle_report.py are developer design utilities using legacy fixtures.
+They are not a supported refresh/rebuild route for the migrated private model.

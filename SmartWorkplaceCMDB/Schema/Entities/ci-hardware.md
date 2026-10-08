@@ -1,3 +1,6 @@
+> Historical developer reference. The standalone CMDB collection chain is retired.
+> Use the product README and PowerBI/README.md for the current prepared consumer.
+
 # CI hardware context — V1
 
 The optional `-HardwareInputPath` adapter validates a completed Intune hardware

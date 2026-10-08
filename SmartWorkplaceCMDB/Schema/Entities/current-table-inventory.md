@@ -1,3 +1,6 @@
+> Historical developer reference. The standalone CMDB collection chain is retired.
+> Use the product README and PowerBI/README.md for the current prepared consumer.
+
 # Current CSV contracts — V1
 
 This inventory is generated from the supported schema JSON contracts as of

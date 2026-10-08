@@ -1,3 +1,6 @@
+> Historical developer reference. The standalone CMDB collection chain is retired.
+> Use the product README and PowerBI/README.md for the current prepared consumer.
+
 # Power Query Notes
 
 Power BI should load CSV files from the tenant Power BI output folder:

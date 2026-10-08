@@ -1,0 +1,94 @@
+// CANDIDATE ONLY. Preserve existing measures until a validated model migration.
+// Product key comes from the validated read-session model projection, not AppId.
+// Country uses explicit TREATAS because DimDevice currently has no Country relationship.
+// Device ownership and Device 360 filters flow through the existing managed-device bridge.
+DEFINE
+    MEASURE 'DimDevice'[Imported devices candidate] =
+        VAR _countries = VALUES ( 'DimCountry'[CountryLabel] )
+        RETURN IF ( ISCROSSFILTERED ( 'DimCountry' ),
+            CALCULATE ( DISTINCTCOUNT ( 'DimDevice'[TenantDeviceKey] ),
+                KEEPFILTERS ( TREATAS ( _countries, 'DimDevice'[CountryLabel] ) ) ),
+            DISTINCTCOUNT ( 'DimDevice'[TenantDeviceKey] ) )
+
+    MEASURE 'DimDevice'[Imported Intune managed devices candidate] =
+        VAR _countries = VALUES ( 'DimCountry'[CountryLabel] )
+        RETURN IF ( ISCROSSFILTERED ( 'DimCountry' ),
+            CALCULATE ( DISTINCTCOUNT ( 'DimIntuneManagedDevice'[TenantDeviceKey] ),
+                KEEPFILTERS ( TREATAS ( _countries, 'DimDevice'[CountryLabel] ) ) ),
+            DISTINCTCOUNT ( 'DimIntuneManagedDevice'[TenantDeviceKey] ) )
+
+    MEASURE 'DimDevice'[Imported device Intune coverage candidate] =
+        DIVIDE ( [Imported Intune managed devices candidate], [Imported devices candidate] )
+
+    MEASURE 'DimDetectedApplication'[Installed product devices candidate] =
+        VAR _countries = VALUES ( 'DimCountry'[CountryLabel] )
+        RETURN
+            IF ( ISCROSSFILTERED ( 'DimCountry' ),
+                CALCULATE ( DISTINCTCOUNT ( 'FactDeviceApplication'[ManagedDeviceId] ),
+                    KEEPFILTERS ( TREATAS ( _countries, 'DimDevice'[CountryLabel] ) ) ),
+                DISTINCTCOUNT ( 'FactDeviceApplication'[ManagedDeviceId] ) )
+
+    MEASURE 'DimDetectedApplication'[Installed application products candidate] =
+        VAR _countries = VALUES ( 'DimCountry'[CountryLabel] )
+        RETURN IF ( ISCROSSFILTERED ( 'DimCountry' ),
+            VAR _countryApps = CALCULATETABLE ( VALUES ( 'FactDeviceApplication'[TenantApplicationKey] ),
+                KEEPFILTERS ( TREATAS ( _countries, 'DimDevice'[CountryLabel] ) ) )
+            RETURN CALCULATE ( DISTINCTCOUNT ( 'DimDetectedApplication'[Application product key] ),
+                KEEPFILTERS ( TREATAS ( _countryApps, 'DimDetectedApplication'[TenantApplicationKey] ) ) ),
+            VAR _scopeApps = VALUES ( 'FactDeviceApplication'[TenantApplicationKey] )
+            RETURN CALCULATE ( DISTINCTCOUNT ( 'DimDetectedApplication'[Application product key] ),
+                KEEPFILTERS ( TREATAS ( _scopeApps, 'DimDetectedApplication'[TenantApplicationKey] ) ) ) )
+
+    MEASURE 'DimDetectedApplication'[Application Top 5 candidate] =
+        VAR _current = SELECTEDVALUE ( 'DimDetectedApplication'[Application product key] )
+        VAR _scored = CALCULATETABLE (
+            SUMMARIZECOLUMNS ( 'DimDetectedApplication'[Application product key],
+                "DeviceCount", [Installed product devices candidate] ),
+            ALLSELECTED ( 'DimDetectedApplication' ) )
+        VAR _top = TOPN ( 5, FILTER ( _scored, [DeviceCount] > 0 ),
+            [DeviceCount], DESC, 'DimDetectedApplication'[Application product key], ASC )
+        RETURN IF ( NOT ISBLANK ( _current ),
+            INT ( CONTAINS ( _top, 'DimDetectedApplication'[Application product key], _current ) ) )
+
+    // Global AD object coverage: NOT a count of active physical corporate PCs.
+    // AD-only objects have no proven Country/Ownership. Do not exclude them via DimDevice.
+    MEASURE 'ADComputerSource'[AD objects without DNS candidate] =
+        COUNTROWS ( FILTER ( 'ADComputerSource',
+            ISBLANK ( 'ADComputerSource'[DNSHostName] ) || TRIM ( 'ADComputerSource'[DNSHostName] ) = "" ) )
+
+    MEASURE 'FactADIntuneCoverage'[Enabled AD Windows objects candidate] =
+        COUNTROWS ( FILTER ( 'FactADIntuneCoverage',
+            VAR _os = LOWER ( COALESCE ( 'FactADIntuneCoverage'[OperatingSystem], "" ) )
+            RETURN 'FactADIntuneCoverage'[Enabled] = TRUE ()
+                && NOT CONTAINSSTRING ( _os, "server" )
+                && ( CONTAINSSTRING ( _os, "windows 7" ) || CONTAINSSTRING ( _os, "windows 8" )
+                    || CONTAINSSTRING ( _os, "windows 10" ) || CONTAINSSTRING ( _os, "windows 11" ) ) ) )
+
+    MEASURE 'FactADIntuneCoverage'[Managed AD Windows objects candidate] =
+        CALCULATE ( [Enabled AD Windows objects candidate],
+            KEEPFILTERS ( 'FactADIntuneCoverage'[CoverageState] = "Managed in Intune" ) )
+
+    MEASURE 'FactADIntuneCoverage'[AD Windows object Intune coverage candidate] =
+        DIVIDE ( [Managed AD Windows objects candidate],
+            CALCULATE ( [Enabled AD Windows objects candidate],
+                REMOVEFILTERS ( 'FactADIntuneCoverage'[CoverageState] ) ) )
+
+    MEASURE 'ADComputerSource'[Selected device AD objects candidate] =
+        IF ( HASONEVALUE ( 'DimDevice'[TenantDeviceKey] ),
+            CALCULATE ( COUNTROWS ( 'ADComputerSource' ),
+                TREATAS ( VALUES ( 'DimDevice'[TenantDeviceKey] ), 'ADComputerSource'[TenantDeviceKey] ) ) )
+
+    MEASURE 'ADUserSource'[Selected user AD objects candidate] =
+        IF ( HASONEVALUE ( 'DimUser'[TenantUserKey] ),
+            CALCULATE ( COUNTROWS ( 'ADUserSource' ),
+                TREATAS ( VALUES ( 'DimUser'[TenantUserKey] ), 'ADUserSource'[TenantUserKey] ) ) )
+
+    // Score is 0..100. Format 0.0, or divide by 100 before a 0.0% format.
+    MEASURE 'FactEndpointAnalyticsDevice'[Endpoint Analytics score candidate] =
+        AVERAGEX ( FILTER ( 'FactEndpointAnalyticsDevice',
+            NOT ISBLANK ( 'FactEndpointAnalyticsDevice'[EndpointAnalyticsScore] )
+                && 'FactEndpointAnalyticsDevice'[EndpointAnalyticsScore] >= 0
+                && 'FactEndpointAnalyticsDevice'[EndpointAnalyticsScore] <= 100 ),
+            'FactEndpointAnalyticsDevice'[EndpointAnalyticsScore] )
+
+EVALUATE ROW ( "CandidateOnly", TRUE () )

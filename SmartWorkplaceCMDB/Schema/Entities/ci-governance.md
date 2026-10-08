@@ -1,3 +1,6 @@
+> Historical developer reference. The standalone CMDB collection chain is retired.
+> Use the product README and PowerBI/README.md for the current prepared consumer.
+
 # CI source evidence and governance — V1
 
 The common registry preserves existing `Cmdb*Id` values as `CI_ID`. Optional raw

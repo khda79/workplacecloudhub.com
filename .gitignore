@@ -265,6 +265,11 @@ SmartFinOps/Data/**
 # copied ReportData from a private qualification.
 SmartWorkplaceCMDB/Data/**
 SmartWorkplaceCMDB/PowerBI/CMDB-REPORTS/**
+# Public generic candidates only; never expose the private report/model.
+!SmartWorkplaceCMDB/PowerBI/Queries/prepared-measures-candidate.dax
+!SmartWorkplaceCMDB/PowerBI/Queries/prepared-read-session.pq
+!SmartWorkplaceCMDB/PowerBI/Queries/prepared-types-candidate.pq
+!SmartWorkplaceCMDB/Tests/prepared_dates.query.pq
 SmartWorkplaceCMDB/**/ReportData/**
 SmartWorkplaceCMDB/**/.pbi/**
 SmartWorkplaceCMDB/**/*.pbix
