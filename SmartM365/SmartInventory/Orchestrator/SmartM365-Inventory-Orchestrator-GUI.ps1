@@ -30,7 +30,7 @@ Loads the complete WPF data model without showing the splash or main window.
 Intended only for isolated tests with SharedDataFolderPath pointing to a temporary folder.
 
 .VERSION
-1.3.9
+1.3.10
 #>
 [CmdletBinding()]
 param(
@@ -43,7 +43,7 @@ param(
 
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
-$script:AppVersion = '1.3.9'
+$script:AppVersion = '1.3.10'
 $script:StartupClock = [Diagnostics.Stopwatch]::StartNew()
 $script:Snapshot = $null
 $script:DraftJobs = $null
@@ -572,12 +572,20 @@ Import-Module -Name (Join-Path $PSScriptRoot 'SmartM365.Orchestrator.GuiWorker.p
 
 if ($ValidateOnly) {
     $validationWindow = ConvertFrom-OrchestratorGuiXaml -Text $xaml
-    foreach ($controlName in @('PlanningGrid', 'HistoryGrid', 'ServersGrid', 'VersionsGrid', 'PublishButton', 'RebalanceButton', 'ApplyJobButton', 'ApplyServerButton', 'RollbackButton', 'DaysPanel', 'MondayCheck', 'TuesdayCheck', 'WednesdayCheck', 'ThursdayCheck', 'FridayCheck', 'SaturdayCheck', 'SundayCheck',
+    foreach ($controlName in @('MainTabs', 'PlanningGrid', 'HistoryGrid', 'ServersGrid', 'VersionsGrid', 'PublishButton', 'RebalanceButton', 'ApplyJobButton', 'ApplyServerButton', 'RollbackButton', 'DaysPanel', 'MondayCheck', 'TuesdayCheck', 'WednesdayCheck', 'ThursdayCheck', 'FridayCheck', 'SaturdayCheck', 'SundayCheck',
         'AutoRefreshCheck', 'OperationsServersGrid', 'OperationsRunningGrid', 'JobStopReasonBox', 'StopRunningJobButton', 'OperationsPendingGrid', 'OperationsIncidentsGrid', 'OperationsMailsGrid',
         'DependsOnBox', 'DependencyModeCombo', 'DependencyMaxAgeBox', 'DependentsText', 'ReadinessGrid', 'IncludeDependenciesCheck', 'RequestRunButton',
         'Failures24hButton', 'RequestsGrid', 'RequestJobsGrid', 'CancellationReasonBox', 'CancellationProgressText', 'CancelRequestButton', 'CancelAllRequestsButton', 'MaintenanceBannerText', 'MaintenanceDetailText',
         'MaintenanceReasonBox', 'EnableMaintenanceButton', 'DisableMaintenanceButton')) {
         if (-not $validationWindow.FindName($controlName)) { throw "Required XAML control not found: $controlName" }
+    }
+    $source = [IO.File]::ReadAllText($PSCommandPath)
+    $registration = [regex]::Match($source, '(?s)foreach \(\$name in @\((?<Names>.*?)\)\) \{\s*\$script:Controls\[\$name\]')
+    if (-not $registration.Success) { throw 'GUI control registration list could not be inspected.' }
+    $registeredNames = @([regex]::Matches($registration.Groups['Names'].Value, "'(?<Name>[A-Za-z][A-Za-z0-9_]*)'") | ForEach-Object { $_.Groups['Name'].Value })
+    $referencedNames = @([regex]::Matches($source, '\$script:Controls\.(?<Name>[A-Za-z][A-Za-z0-9_]*)') | ForEach-Object { $_.Groups['Name'].Value } | Sort-Object -Unique)
+    foreach ($controlName in $referencedNames) {
+        if ($controlName -notin $registeredNames) { throw "GUI control referenced but not registered: $controlName" }
     }
     $jobsTemplate = Read-SmartM365OrchestratorJson -Path (Join-Path $PSScriptRoot 'Orchestrator-Jobs.json.template')
     $clusterTemplate = Read-SmartM365OrchestratorJson -Path (Join-Path $PSScriptRoot 'Orchestrator-Cluster.json.template')
@@ -1501,7 +1509,7 @@ Write-GuiActivity -Message ('Startup timing (ms): splash={0}; context={1}; log={
 $window = ConvertFrom-OrchestratorGuiXaml -Text $xaml
 $script:Controls = @{}
 foreach ($name in @(
-    'HeaderLogo', 'SharedPathText', 'ConnectionText', 'LastRefreshText', 'StatusText', 'RefreshButton', 'ValidateButton', 'RebalanceButton', 'PublishButton',
+    'MainTabs', 'HeaderLogo', 'SharedPathText', 'ConnectionText', 'LastRefreshText', 'StatusText', 'RefreshButton', 'ValidateButton', 'RebalanceButton', 'PublishButton',
     'JobsCountText', 'EnabledCountText', 'OnlineServersText', 'SuccessCountText', 'FailureCountText', 'DashboardGrid',
     'PlanningGrid', 'SelectedJobText', 'JobEnabledCheck', 'ScheduleTypeCombo', 'TimesBox', 'DaysPanel',
     'MondayCheck', 'TuesdayCheck', 'WednesdayCheck', 'ThursdayCheck', 'FridayCheck', 'SaturdayCheck', 'SundayCheck', 'MissedPolicyCombo',
@@ -1850,8 +1858,8 @@ $window.Add_Closing({
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDGf1GwjwoO5ksX
-# 4IALQE5ppZ9I3i+9ETQqQVhCHIB9BKCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAWg+gqB5TdJl75
+# lB28xgQ48FBvWZBw0TIG1bTxHZJ1d6CCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1881,14 +1889,14 @@ $window.Add_Closing({
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCDziFJwYZrJpOv33EHK6UYG
-# Pm1suTB0VHjdTEPESjWb6TANBgkqhkiG9w0BAQEFAASCAYBTy0Hhahdr/gqkYfIE
-# Gw1TtnynKumywUmqHJJD5OJXhHoHiot434l6yctEfRUhLVGSsMf4AWXE6+luhSgH
-# Rk41mu+ZLI5KF20aCSKWIGMkBZYgJyqBF8+qjWMxRbSIza/ioDEnT5hWqgKtvAPH
-# Bfsqz4yForl8eBTbV25Q/XWAUh/VvKi8WdJYGXX0qDrEOxgVkkiPxS6Fp+yjwVS5
-# g8X89BJSdq6oFi6fPtE+ZetYhq+AbQEmcNZqfPpZnxmDXhbc1Ci7HolftsUncROH
-# qUuRK+x+VYM9XdTjCYa+kTM0HC+2O2cw1kjYC0DCY4jJUUNjM5iysT1VyRlsgVKP
-# P2mPkWVSbM9q4I6Ggx2VjitmANtPu3obaekMOv8f1FHrKbEDyVgZNu04Cvp81VDi
-# YehvAbKXfGDDIauRSfw6hYmVMJrC26tiqa9UE2kIXbby3qYpLipNnOWdNnVwGsAZ
-# uHZHzpYAPB7A9W0olWyO5X8pW9l2LYBfnvUxqUxI5oeAvGc=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCDpOm8Z9duRIBDMpUuxHNLB
+# 1Vlqcue9JZ9BCj7vTfcEvjANBgkqhkiG9w0BAQEFAASCAYAwOlSIVMzygcYrtb9R
+# eC2Rm1Hn1lWUC46F3rSGVLBGz+thiYKXxEm5krhcwORZACez1xeKP5asgRrs+G+9
+# iOItnu5m5l1ZQ8ldUncWHfFBCFErOfL3YWLh2mmC1MmOpMV6iUPzXGAj31X/5uDV
+# INh68k63NDgBxbV/UXLXjeZ0zc3+gBWKxfcg+gumviueyCVpdmKpSFY70/pH/1zW
+# AHLOnibOwJjmvfHY07TR7H+oM7KUq/yhSjrgdvDap3AwRykkAgv7zeG6aWuKqqxN
+# R/1Oc5n4aOGAXaHKUtbNTUNWsZCVqMB1h36MyKOM+wMXno0ff5URvYHxS+rafDWJ
+# 2N7y8lt8u++tTt8mMovkS3ylvX66u8Osvi+P+Wa3rm1iHmNI6ntnLsg/Bs/SoMDl
+# I7cWQkJIuzP/YiWbVQyyIo0NZzKJ+ygUpXao8Z5WMjcuz5Yr3pncDtx9141c8vIu
+# Le8bhDZR3nYKDWfYPT1mbABd56nuat5aCo1hxhxheW+vnB0=
 # SIG # End signature block
