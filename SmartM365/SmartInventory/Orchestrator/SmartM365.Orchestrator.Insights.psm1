@@ -8,7 +8,7 @@ Import-Module (Join-Path $PSScriptRoot 'SmartM365.Orchestrator.Maintenance.psm1'
 Import-Module (Join-Path $PSScriptRoot 'SmartM365.Orchestrator.Distributed.psm1') -ErrorAction Stop
 
 $script:InsightsTerminalSuccess = @('Success', 'CompletedWithWarnings')
-$script:InsightsTerminalFailure = @('Failed', 'TimedOut', 'Interrupted')
+$script:InsightsTerminalFailure = @('Failed', 'TimedOut', 'Interrupted', 'Cancelled')
 # Same lists as SmartM365.Orchestrator.Pipeline.psm1 (Get-SmartM365OrchestratorPipelineRunStatus).
 $script:InsightsPipelineFailure = @('Failed', 'TimedOut', 'Interrupted', 'BlockedDependencyFailed', 'BlockedDependencyTimeout', 'Rejected', 'MissingStatus')
 $script:InsightsPipelineTerminal = @('Success', 'CompletedWithWarnings', 'Cancelled') + $script:InsightsPipelineFailure
@@ -306,9 +306,13 @@ function Get-SmartM365OrchestratorOperations {
             StatePersistence = if ([bool](Get-InsightsProperty $heartbeat 'StatePersistenceHealthy' $true)) { 'OK' } else { 'Launches paused: ' + [string](Get-InsightsProperty $heartbeat 'StatePersistenceLastError' '') }
         })
         foreach ($job in $jobsRunning) {
-            $start = ConvertTo-InsightsUtc (Get-InsightsProperty $job 'StartTime' $null)
+            $rawStart = Get-InsightsProperty $job 'StartTime' $null
+            $start = ConvertTo-InsightsUtc $rawStart
+            $startText = if ($rawStart -is [datetime] -or $rawStart -is [datetimeoffset]) { $rawStart.ToString('o') } else { [string]$rawStart }
             $running.Add([pscustomobject]@{
                 Server = $serverName; Job = [string](Get-InsightsProperty $job 'Name' ''); Pid = [string](Get-InsightsProperty $job 'Pid' '')
+                StartTime = $startText
+                StopSupported = $state -eq 'Online' -and [int](Get-InsightsProperty $heartbeat 'JobStopProtocol' 0) -ge 1
                 Started = if ($null -ne $start) { $start.ToLocalTime().ToString('yyyy-MM-dd HH:mm') } else { '' }
                 DurationMinutes = if ($null -ne $start) { [math]::Round(($Now.ToUniversalTime() - $start).TotalMinutes, 0) } else { $null }
                 Occurrence = [string](Get-InsightsProperty $job 'ScheduledOccurrence' '')
@@ -369,15 +373,17 @@ function Get-SmartM365OrchestratorRecentPipelineRuns {
             }
         })
         $pendingCount = @($jobRows | Where-Object { $_.Status -notin $script:InsightsPipelineTerminal }).Count
-        $failedCount = @($jobRows | Where-Object { $_.Status -in $script:InsightsPipelineFailure }).Count
-        $warningCount = @($jobRows | Where-Object { $_.Status -eq 'CompletedWithWarnings' }).Count
         $cancellationRequested = $null -ne (Get-InsightsProperty $request 'Cancellation' $null)
+        $cancelledCount = @($jobRows | Where-Object Status -eq 'Cancelled').Count
+        $failedCount = @($jobRows | Where-Object { $_.Status -in $script:InsightsPipelineFailure }).Count
+        if (-not $cancellationRequested) { $failedCount += $cancelledCount }
+        $warningCount = @($jobRows | Where-Object { $_.Status -eq 'CompletedWithWarnings' }).Count
         $created = ConvertTo-InsightsUtc (Get-InsightsProperty $request 'CreatedAtUtc' $null)
         [pscustomobject]@{
             BatchId = $folder.Name; Selection = [string](Get-InsightsProperty $request 'Pipeline' '')
             Created = if ($null -ne $created) { $created.ToLocalTime().ToString('yyyy-MM-dd HH:mm') } else { '' }
             Status = if ($pendingCount -gt 0) { if ($cancellationRequested) { 'Cancelling' } else { 'Running' } } elseif ($failedCount -gt 0) { 'Failed' } elseif ($cancellationRequested) { 'Cancelled' } elseif ($warningCount -gt 0) { 'CompletedWithWarnings' } else { 'Success' }
-            Cancelled = @($jobRows | Where-Object Status -eq 'Cancelled').Count
+            Cancelled = $cancelledCount
             Jobs = $jobRows.Count; Pending = $pendingCount; Failed = $failedCount
             RequestedBy = [string](Get-InsightsProperty $request 'RequestedBy' ''); JobRows = $jobRows
         }
@@ -411,8 +417,8 @@ Export-ModuleMember -Function @(
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDpZLDQf7y7lsFM
-# SWvDrrw/8WyJKrA8J42yxImxDwsy9KCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDaAhwIaA/oZ/79
+# l3zdl2dkAizY52Z96bF6ZYitVCQSH6CCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -442,14 +448,14 @@ Export-ModuleMember -Function @(
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCDF2Fm8LDfXVOg3pizbXln/
-# s15k958hvw5clKa6UVtpszANBgkqhkiG9w0BAQEFAASCAYB3D5BxzwqP7aIEn3nz
-# UjK8ZBkaFuUS3GK6hq4hLtC9dr5iEuj7vNxmVPVpu2otmG+zTsBTB0axyjcpfo31
-# zRVDUx82mDjjixq7G2EujBGXxYMsQoB7N97S8Es7Nqcql0zEvT4SpT7tbi3pKrbT
-# VeosA8FqHqPGuqM9EK5NRpek158DRbiX6KtXjHyIMuxGcyj87xLSikFddXYkbeCR
-# 4xBsTfFJoh1knAXI3hE93YnzIUirXe3GDb4Gz7JEE7Dy93tvuay2jQJ4evpL1L5D
-# imIo60NWufqHeBkqV+10SmI9GMIoOUFirPvCgYqjT+R/pvEMZsKKyX1LsgH0wOti
-# pjq3MFoVtj7AsmeAuY6hYjr4eKn28O3eKRVZhyewaciiC4pZJiPcHLRC9q1bO1MX
-# ykhHwIyZKppQsFgJI3UyRdi0xjgvhciqaCWOj8lOz+SQvfJZ0bMEIeC45WaO3ZsJ
-# eXdfrzJlOQu+fLOLa6KclE3Ful/DJ6NgXf/XViGyOcF/jHU=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCCdRHfYkhxqS7HUfKOIrtkR
+# wkMKZHhP7PInXCufjxTD4DANBgkqhkiG9w0BAQEFAASCAYCvqZmUpgBrUEj7+g97
+# 2RFxZgV3mygxuEfBkMBBOyKvBPr5Kci6kSQUBo1CSThNRgrAAUdJJGMCvQWrGRY1
+# vPSmV3AWRa3vgvsqpIs+K1dm/a5E0Uxxx5fQyWt1ofGOTZMjX2u+8lGjNtfVyp5M
+# DqNTzUYvHAzs0B4DPBsVTDEbWMdwg7LlCZTNNPN08h79eYYkSsEWTf6BD0fj9cuE
+# k8/3Nk8UcC757KrEwBzJxfLEGIXBQpFKBjW5kxAfKogaaDv3YgnDA4HCQ4uDaMsZ
+# h5ZJCFugSewaLiFJE52W7bKjd9IGzQ6/UaRAiVSS8g6iEmuopI4E8Pbk5aTQX/ol
+# iKaCOJAgXyqzPh5js5TJ/HFAGmCJ/W1A23i5cnQw0lfCpIST4bI17Fk7pi/1517z
+# S/pzMwrSfqGoUBnthCUMyOd64dpFjfAIyd222yDbOADnF3ISKIflAO6WM3bc+sHN
+# s/XINysrgkJ9IqwB2dq6hRKFzgTiaX/j4LA6Hyh+CaZWz+8=
 # SIG # End signature block

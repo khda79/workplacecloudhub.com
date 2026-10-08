@@ -30,7 +30,7 @@ Loads the complete WPF data model without showing the splash or main window.
 Intended only for isolated tests with SharedDataFolderPath pointing to a temporary folder.
 
 .VERSION
-1.3.8
+1.3.9
 #>
 [CmdletBinding()]
 param(
@@ -43,7 +43,7 @@ param(
 
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
-$script:AppVersion = '1.3.8'
+$script:AppVersion = '1.3.9'
 $script:StartupClock = [Diagnostics.Stopwatch]::StartNew()
 $script:Snapshot = $null
 $script:DraftJobs = $null
@@ -223,14 +223,23 @@ $xaml = @'
                     <Grid Grid.Row="2" Margin="0,10,0,0">
                         <Grid.ColumnDefinitions><ColumnDefinition Width="9*"/><ColumnDefinition Width="11*"/></Grid.ColumnDefinitions>
                         <GroupBox Header="Running jobs" Margin="0,0,6,0">
-                            <DataGrid x:Name="OperationsRunningGrid">
+                            <Grid>
+                                <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                                <StackPanel Orientation="Horizontal" Margin="6,4,6,5">
+                                    <TextBlock Text="Stop reason" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                                    <TextBox x:Name="JobStopReasonBox" Width="260" MaxLength="1000" ToolTip="Required. Select one running job, then request its owner to stop it."/>
+                                    <Button x:Name="StopRunningJobButton" Content="Stop selected job" IsEnabled="False" Margin="8,0,0,0" Background="#FDE7E9" ToolTip="The owning orchestrator verifies the selected process and records the stop. The job is not retried automatically."/>
+                                </StackPanel>
+                            <DataGrid x:Name="OperationsRunningGrid" Grid.Row="1">
                                 <DataGrid.Columns>
                                     <DataGridTextColumn Header="Server" Binding="{Binding Server}" Width="130"/>
                                     <DataGridTextColumn Header="Job" Binding="{Binding Job}" Width="*"/>
+                                    <DataGridTextColumn Header="PID" Binding="{Binding Pid}" Width="65"/>
                                     <DataGridTextColumn Header="Started" Binding="{Binding Started}" Width="120"/>
                                     <DataGridTextColumn Header="Duration (min)" Binding="{Binding DurationMinutes}" Width="100"/>
                                 </DataGrid.Columns>
                             </DataGrid>
+                            </Grid>
                         </GroupBox>
                         <GroupBox Grid.Column="1" Header="Pending jobs (why they wait)" Margin="6,0,0,0">
                             <DataGrid x:Name="OperationsPendingGrid">
@@ -555,6 +564,7 @@ if (-not $ValidateOnly -and -not $SmokeTest) {
 $script:SplashReadyMs = $script:StartupClock.ElapsedMilliseconds
 $managementModulePath = Join-Path -Path $PSScriptRoot -ChildPath 'SmartM365.Orchestrator.Management.psm1'
 Import-Module -Name $managementModulePath -Force -ErrorAction Stop
+Import-Module -Name (Join-Path $PSScriptRoot 'SmartM365.Orchestrator.JobStop.psm1') -Force -ErrorAction Stop
 Import-Module -Name (Join-Path -Path $PSScriptRoot -ChildPath 'SmartM365.Orchestrator.Insights.psm1') -Force -ErrorAction Stop
 Import-Module -Name (Join-Path $PSScriptRoot 'SmartM365.Orchestrator.Maintenance.psm1') -ErrorAction Stop
 Import-Module -Name (Join-Path $PSScriptRoot 'SmartM365.Orchestrator.Pipeline.psm1') -ErrorAction Stop
@@ -563,7 +573,7 @@ Import-Module -Name (Join-Path $PSScriptRoot 'SmartM365.Orchestrator.GuiWorker.p
 if ($ValidateOnly) {
     $validationWindow = ConvertFrom-OrchestratorGuiXaml -Text $xaml
     foreach ($controlName in @('PlanningGrid', 'HistoryGrid', 'ServersGrid', 'VersionsGrid', 'PublishButton', 'RebalanceButton', 'ApplyJobButton', 'ApplyServerButton', 'RollbackButton', 'DaysPanel', 'MondayCheck', 'TuesdayCheck', 'WednesdayCheck', 'ThursdayCheck', 'FridayCheck', 'SaturdayCheck', 'SundayCheck',
-        'AutoRefreshCheck', 'OperationsServersGrid', 'OperationsRunningGrid', 'OperationsPendingGrid', 'OperationsIncidentsGrid', 'OperationsMailsGrid',
+        'AutoRefreshCheck', 'OperationsServersGrid', 'OperationsRunningGrid', 'JobStopReasonBox', 'StopRunningJobButton', 'OperationsPendingGrid', 'OperationsIncidentsGrid', 'OperationsMailsGrid',
         'DependsOnBox', 'DependencyModeCombo', 'DependencyMaxAgeBox', 'DependentsText', 'ReadinessGrid', 'IncludeDependenciesCheck', 'RequestRunButton',
         'Failures24hButton', 'RequestsGrid', 'RequestJobsGrid', 'CancellationReasonBox', 'CancellationProgressText', 'CancelRequestButton', 'CancelAllRequestsButton', 'MaintenanceBannerText', 'MaintenanceDetailText',
         'MaintenanceReasonBox', 'EnableMaintenanceButton', 'DisableMaintenanceButton')) {
@@ -885,6 +895,7 @@ function Refresh-OperationsView {
         Refresh-MaintenanceView -Operations $operations
         $script:Controls.OperationsServersGrid.ItemsSource = @($operations.Servers)
         $script:Controls.OperationsRunningGrid.ItemsSource = @($operations.Running)
+        $script:Controls.StopRunningJobButton.IsEnabled = $false
         $script:Controls.OperationsPendingGrid.ItemsSource = @($operations.Pending)
         $script:Controls.OperationsIncidentsGrid.ItemsSource = @($operations.Incidents)
         $script:Controls.OperationsMailsGrid.ItemsSource = @($operations.Mails)
@@ -895,6 +906,19 @@ function Refresh-OperationsView {
         Write-GuiException -Context 'Operations refresh failed' -ErrorRecord $_
         return $null
     }
+}
+
+function Request-SelectedRunningJobStop {
+    $row = $script:Controls.OperationsRunningGrid.SelectedItem
+    if ($null -eq $row -or -not $row.StopSupported) { throw 'Select a running job on an online server that supports job stop requests.' }
+    $reason = $script:Controls.JobStopReasonBox.Text.Trim()
+    if ($reason.Length -lt 3) { throw 'Enter a stop reason (at least 3 characters).' }
+    $message = "Stop this running job?`n`nJob: $($row.Job)`nServer: $($row.Server)`nPID: $($row.Pid)`nStarted: $($row.Started)`n`nReason: $reason`n`nThe owning orchestrator will verify this exact process, stop its process tree, and record Cancelled. This occurrence will not be retried automatically."
+    if ([System.Windows.MessageBox]::Show($message, 'Stop running job', 'YesNo', 'Warning') -ne 'Yes') { return }
+    $request = Request-SmartM365OrchestratorJobStop -SharedDataFolderPath $script:SharedDataFolderPath -Server ([string]$row.Server) -JobName ([string]$row.Job) -ProcessId ([int]$row.Pid) -StartTime ([string]$row.StartTime) -Reason $reason -Tenant $Tenant
+    Write-GuiActivity -Message ("Job stop requested: job={0}; server={1}; PID={2}; request={3}; reason={4}." -f $row.Job, $row.Server, $row.Pid, $request.RequestId, $reason) -Level WARN
+    $script:Controls.JobStopReasonBox.Clear()
+    [System.Windows.MessageBox]::Show("Stop request $($request.RequestId) was submitted. The owning orchestrator will process it on its next cycle. Refresh Operations or History to verify the final status.", 'Stop requested', 'OK', 'Information') | Out-Null
 }
 
 function Refresh-MaintenanceView {
@@ -1486,7 +1510,7 @@ foreach ($name in @(
     'ExportCsvButton', 'ExportHtmlButton', 'HistoryGrid', 'ServersGrid', 'NewServerBox', 'AddServerButton', 'RemoveServerButton',
     'SelectedServerText', 'ServerWeightBox', 'ServerPolicyCombo', 'ApplyServerButton', 'VersionsGrid', 'RollbackButton',
     'ActivityBox', 'FooterText', 'VersionText',
-    'AutoRefreshCheck', 'OperationsServersGrid', 'OperationsRunningGrid', 'OperationsPendingGrid', 'OperationsIncidentsGrid', 'OperationsMailsGrid',
+    'AutoRefreshCheck', 'OperationsServersGrid', 'OperationsRunningGrid', 'JobStopReasonBox', 'StopRunningJobButton', 'OperationsPendingGrid', 'OperationsIncidentsGrid', 'OperationsMailsGrid',
     'DependsOnBox', 'DependencyModeCombo', 'DependencyMaxAgeBox', 'DependentsText', 'ReadinessGrid', 'IncludeDependenciesCheck', 'RequestRunButton',
     'Failures24hButton', 'RequestsGrid', 'RequestJobsGrid', 'CancellationReasonBox', 'CancellationProgressText', 'CancelRequestButton', 'CancelAllRequestsButton', 'MaintenanceBannerText', 'MaintenanceDetailText',
     'MaintenanceReasonBox', 'EnableMaintenanceButton', 'DisableMaintenanceButton'
@@ -1503,11 +1527,11 @@ if (Test-Path -LiteralPath $logoPath) {
     $script:Controls.HeaderLogo.Source = $bitmap
 }
 $script:Controls.SharedPathText.Text = $script:SharedDataFolderPath
-$script:Controls.FooterText.Text = 'Shared changes are validated, versioned and audited. Run requests are executed by the orchestrators; this GUI never starts or stops a process.'
+$script:Controls.FooterText.Text = 'Shared changes are validated, versioned and audited. Run and stop requests are executed by the owning orchestrators.'
 $script:Controls.VersionText.Text = "v$($script:AppVersion)"
 $script:Controls.HistoryFromPicker.SelectedDate = (Get-Date).AddDays(-7).Date
 $script:Controls.HistoryToPicker.SelectedDate = (Get-Date).Date
-$script:Controls.HistoryStatusCombo.ItemsSource = @('All', 'Success', 'CompletedWithWarnings', 'Failed', 'TimedOut', 'Interrupted', 'Retried')
+$script:Controls.HistoryStatusCombo.ItemsSource = @('All', 'Success', 'CompletedWithWarnings', 'Failed', 'TimedOut', 'Interrupted', 'Cancelled', 'Retried')
 $script:Controls.HistoryStatusCombo.SelectedIndex = 0
 
 $script:Controls.ScheduleTypeCombo.Add_SelectionChanged({ Update-ScheduleDaysControlState })
@@ -1581,6 +1605,14 @@ $script:Controls.EnableMaintenanceButton.Add_Click({
 $script:Controls.DisableMaintenanceButton.Add_Click({
     try { Set-GuiMaintenance -Enabled $false }
     catch { Write-GuiException -Context 'Disable maintenance failed' -ErrorRecord $_; [System.Windows.MessageBox]::Show($_.Exception.Message, 'Maintenance', 'OK', 'Error') | Out-Null; Refresh-MaintenanceView }
+})
+$script:Controls.OperationsRunningGrid.Add_SelectionChanged({
+    $row = $script:Controls.OperationsRunningGrid.SelectedItem
+    $script:Controls.StopRunningJobButton.IsEnabled = $null -ne $row -and [bool]$row.StopSupported
+})
+$script:Controls.StopRunningJobButton.Add_Click({
+    try { Request-SelectedRunningJobStop }
+    catch { Write-GuiException -Context 'Job stop request failed' -ErrorRecord $_; [System.Windows.MessageBox]::Show($_.Exception.Message, 'Stop request failed', 'OK', 'Error') | Out-Null }
 })
 $script:Controls.RequestRunButton.Add_Click({
     try { [void](Request-SelectedJobRun) }
@@ -1818,8 +1850,8 @@ $window.Add_Closing({
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAAyMSOVXZFSMG5
-# hARVjjIBHgQVlnJ/JrpcekbLQW3guKCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDGf1GwjwoO5ksX
+# 4IALQE5ppZ9I3i+9ETQqQVhCHIB9BKCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1849,14 +1881,14 @@ $window.Add_Closing({
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCDdnaoSzyKRM0W8TrpjpSBq
-# 2h4FKujnpooGyi0vMca+IDANBgkqhkiG9w0BAQEFAASCAYCXIm7cG0ZCjMopHcNj
-# Poxu9frHT5Pxbpdd2dkHRean9m3Gu+cSJhlhmHuY3hDV/z+6v1o0FMFUj/KEcd2l
-# Kcv0bKS02Bi6y3KvTm8BaighOHNmZ0+DD0AvRIbtEEoPeoBpW0wP5S7tx4f/dud2
-# Ua/Fl2f4A9eByv2g1omAeqZLEpXP6t4+iNQXN48Vh8+UG+yG82T2fY0nfxtM8WXA
-# QCHOAqD9S6qDdNtyfj4Y9ReD18IcuVuSb3SNr9lasAfHD9RdCVhRBgqEcUaO1siW
-# yt4YhXKjix72CS1jNvMkM3P0SXbrOodz8H7GBuEICGbEwRLVyki7qNuZQiNh+l27
-# YSywsrAqB3EfE44ESqwaBKJTsbvzE0Pz2HQyCrrSSMGqmp7PlIGI9SxUdY+Ftt3s
-# yZKWkiBCvgf+CYjruqZ5FxCwr9LGRZaRtwMbAbWv04UDlBRkEqrdgECcW+pyevue
-# e4T4VImk2OI6SNCodx+C3ZHYrWuWnhd37WgsHVha/W2lyLE=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCDziFJwYZrJpOv33EHK6UYG
+# Pm1suTB0VHjdTEPESjWb6TANBgkqhkiG9w0BAQEFAASCAYBTy0Hhahdr/gqkYfIE
+# Gw1TtnynKumywUmqHJJD5OJXhHoHiot434l6yctEfRUhLVGSsMf4AWXE6+luhSgH
+# Rk41mu+ZLI5KF20aCSKWIGMkBZYgJyqBF8+qjWMxRbSIza/ioDEnT5hWqgKtvAPH
+# Bfsqz4yForl8eBTbV25Q/XWAUh/VvKi8WdJYGXX0qDrEOxgVkkiPxS6Fp+yjwVS5
+# g8X89BJSdq6oFi6fPtE+ZetYhq+AbQEmcNZqfPpZnxmDXhbc1Ci7HolftsUncROH
+# qUuRK+x+VYM9XdTjCYa+kTM0HC+2O2cw1kjYC0DCY4jJUUNjM5iysT1VyRlsgVKP
+# P2mPkWVSbM9q4I6Ggx2VjitmANtPu3obaekMOv8f1FHrKbEDyVgZNu04Cvp81VDi
+# YehvAbKXfGDDIauRSfw6hYmVMJrC26tiqa9UE2kIXbby3qYpLipNnOWdNnVwGsAZ
+# uHZHzpYAPB7A9W0olWyO5X8pW9l2LYBfnvUxqUxI5oeAvGc=
 # SIG # End signature block

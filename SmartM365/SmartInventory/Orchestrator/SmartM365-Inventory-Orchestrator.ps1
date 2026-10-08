@@ -101,19 +101,20 @@ detailed tables for the last 24 hours and 7 days, then exits without acquiring t
 lock or launching inventory jobs.
 
 .VERSION
-1.5.44
+1.5.48
 
 .REQUIREMENTS
     PowerShell 7+.
     Config/SmartM365-TenantContext.ps1 (SmartM365 tenant context helper).
     SmartM365.Core, SmartM365.Orchestrator.Distributed.psm1,
-    SmartM365.Orchestrator.Management.psm1 and SmartM365.Orchestrator.Pipeline.psm1. Microsoft Graph modules
+    SmartM365.Orchestrator.Management.psm1, SmartM365.Orchestrator.Pipeline.psm1 and
+    SmartM365.Orchestrator.JobStop.psm1. Microsoft Graph modules
     are required when capability probes or the orchestrator mail
     transport is Graph or Both; each job script manages its own inventory connections
     inside its own child process.
 
 .NOTES
-    Version : 1.5.47
+    Version : 1.5.48
     Author: https://github.com/khda79/workplacecloudhub.com
     Exit codes: 0 = normal end (recycle, DryRun, Once, summary sent), 1 = fatal error or summary send failure,
     2 = configuration or manifest error at startup, 3 = another live instance holds the lock.
@@ -138,7 +139,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$ScriptVersion = "1.5.47"
+$ScriptVersion = "1.5.48"
 $ScriptName = 'SmartM365-Inventory-Orchestrator'
 $global:SmartM365ScriptFileName = [System.IO.Path]::GetFileName($PSCommandPath)
 $global:SmartM365ScriptVersion = $ScriptVersion
@@ -1561,7 +1562,7 @@ function Get-OrchestratorSharedDependencyStatus {
             throw 'Dependency claim identity or scheduled occurrence mismatch.'
         }
         if ([string]$claim.Status -in @('Success','CompletedWithWarnings')) { $status = 'Ready' }
-        elseif ([string]$claim.Status -in @('Failed','TimedOut','Interrupted')) { $status = 'Failed' }
+        elseif ([string]$claim.Status -in @('Failed','TimedOut','Interrupted','Cancelled')) { $status = 'Failed' }
     }
     if ($status -eq 'Failed' -or $null -eq $record -or $null -eq $record.Claim) {
         $laterStatus = Get-OrchestratorLaterDependencyClaimStatus -Job $Job -ExpectedOccurrence $expected -Now $Now
@@ -1606,7 +1607,7 @@ function Get-OrchestratorLaterDependencyClaimStatus {
     if ($null -eq $created -or $null -eq $updated -or $created.UtcDateTime -lt $expectedUtc -or
         $updated.UtcDateTime -lt $created.UtcDateTime -or $updated.UtcDateTime -gt $nowUtc) { return 'Waiting' }
     if ([string]$claim.Status -in @('Success','CompletedWithWarnings')) { return 'Ready' }
-    if ([string]$claim.Status -in @('Failed','TimedOut','Interrupted')) { return 'Failed' }
+    if ([string]$claim.Status -in @('Failed','TimedOut','Interrupted','Cancelled')) { return 'Failed' }
     return 'Waiting'
 }
 
@@ -2481,6 +2482,7 @@ function Write-OrchestratorHeartbeat {
         MaintenanceProtocol = 1
         MaintenanceCatchUpProtocol = 1
         PipelineCancellationProtocol = 1
+        JobStopProtocol = 1
         MaintenanceHealthy = [bool]$script:MaintenanceHealthy
         MaintenanceRevision = if ($null -ne $script:MaintenanceControl) { $script:MaintenanceControl.Revision } else { -1 }
         MaintenanceEnabled = if ($null -ne $script:MaintenanceControl) { $script:MaintenanceControl.Enabled } else { $false }
@@ -2777,7 +2779,7 @@ function Get-OrchestratorPeerHealthSnapshot {
                 $claimRecord = Get-SmartM365OrchestratorOccurrenceClaim -ClaimsRootPath $script:Settings.ElectionClaimsPath -JobName ([string]$job.Name) -Occurrence $expectedOccurrence
                 if ($null -ne $claimRecord -and $null -ne $claimRecord.Claim) {
                     $claimStatus = [string]$claimRecord.Claim.Status
-                    if ($claimStatus -in @('Success', 'CompletedWithWarnings', 'Failed', 'TimedOut', 'Interrupted')) { continue }
+                    if ($claimStatus -in @('Success', 'CompletedWithWarnings', 'Failed', 'TimedOut', 'Interrupted', 'Cancelled')) { continue }
                     if ($claimStatus -in @('Claimed', 'Running', 'RetryScheduled') -and $claimRecord.Claim.PSObject.Properties['SafeUntilUtc']) {
                         $claimSafeUntilUtc = ConvertTo-OrchestratorUtcTime -Value $claimRecord.Claim.SafeUntilUtc
                         if ($null -ne $claimSafeUntilUtc -and ([datetimeoffset]$Now).ToUniversalTime() -le $claimSafeUntilUtc) { continue }
@@ -3200,6 +3202,7 @@ function Get-OrchestratorRuntimeSnapshot {
     $managementModulePath = [string]$script:Settings.ManagementModulePath
     $pipelineModulePath = [string]$script:Settings.PipelineModulePath
     $maintenanceModulePath = Join-Path (Split-Path $scriptPath -Parent) 'SmartM365.Orchestrator.Maintenance.psm1'
+    $jobStopModulePath = Join-Path (Split-Path $scriptPath -Parent) 'SmartM365.Orchestrator.JobStop.psm1'
     $maintenanceTokens=$null; $maintenanceErrors=$null
     [void][Management.Automation.Language.Parser]::ParseFile($maintenanceModulePath,[ref]$maintenanceTokens,[ref]$maintenanceErrors)
     if (@($maintenanceErrors).Count -gt 0) { throw ('Maintenance module parser validation failed: ' + (($maintenanceErrors | ForEach-Object Message) -join '; ')) }
@@ -3227,6 +3230,11 @@ function Get-OrchestratorRuntimeSnapshot {
         $pipelineParseSummary = @($pipelineParseErrors | ForEach-Object { $_.Message }) -join '; '
         throw "Pipeline orchestrator module parser validation failed: $pipelineParseSummary"
     }
+    $jobStopTokens = $null; $jobStopParseErrors = $null
+    [void][Management.Automation.Language.Parser]::ParseFile($jobStopModulePath, [ref]$jobStopTokens, [ref]$jobStopParseErrors)
+    if (@($jobStopParseErrors).Count -gt 0) {
+        throw ('Job stop module parser validation failed: ' + (($jobStopParseErrors | ForEach-Object Message) -join '; '))
+    }
 
     $tokens = $null
     $parseErrors = $null
@@ -3252,7 +3260,8 @@ function Get-OrchestratorRuntimeSnapshot {
     $managementModuleFingerprint = Get-OrchestratorFileFingerprint -Path $managementModulePath
     $pipelineModuleFingerprint = Get-OrchestratorFileFingerprint -Path $pipelineModulePath
     $maintenanceModuleFingerprint = Get-OrchestratorFileFingerprint -Path $maintenanceModulePath
-    $scriptFingerprint = $scriptFileFingerprint + '|' + $distributedModuleFingerprint + '|' + $managementModuleFingerprint + '|' + $pipelineModuleFingerprint + '|' + $maintenanceModuleFingerprint
+    $jobStopModuleFingerprint = Get-OrchestratorFileFingerprint -Path $jobStopModulePath
+    $scriptFingerprint = $scriptFileFingerprint + '|' + $distributedModuleFingerprint + '|' + $managementModuleFingerprint + '|' + $pipelineModuleFingerprint + '|' + $maintenanceModuleFingerprint + '|' + $jobStopModuleFingerprint
     $coreManifestFingerprint = Get-OrchestratorFileFingerprint -Path $coreManifestPath
     $coreModuleFingerprint = Get-OrchestratorFileFingerprint -Path $coreModulePath
     $scriptVersionOnDisk = [version]$versionMatch.Groups['Version'].Value
@@ -3270,6 +3279,8 @@ function Get-OrchestratorRuntimeSnapshot {
         PipelineModuleFingerprint = $pipelineModuleFingerprint
         MaintenanceModulePath = $maintenanceModulePath
         MaintenanceModuleFingerprint = $maintenanceModuleFingerprint
+        JobStopModulePath = $jobStopModulePath
+        JobStopModuleFingerprint = $jobStopModuleFingerprint
         CoreManifestPath = $coreManifestPath
         CoreModulePath = $coreModulePath
         CoreVersion = $coreVersionOnDisk
@@ -3833,7 +3844,7 @@ function Complete-JobRun {
     param(
         [Parameter(Mandatory = $true)][string]$JobName,
         [Parameter(Mandatory = $true)][hashtable]$RunInfo,
-        [Parameter(Mandatory = $true)][ValidateSet('Exited', 'TimedOut', 'Interrupted', 'LaunchFailed')][string]$StatusHint,
+        [Parameter(Mandatory = $true)][ValidateSet('Exited', 'TimedOut', 'Interrupted', 'LaunchFailed', 'Cancelled')][string]$StatusHint,
         [AllowNull()]$ExitCode,
         [Parameter(Mandatory = $true)][datetime]$EndTime,
         [string]$ErrorText = ''
@@ -3847,6 +3858,7 @@ function Complete-JobRun {
     switch ($StatusHint) {
         'TimedOut' { $status = 'TimedOut' }
         'Interrupted' { $status = 'Interrupted' }
+        'Cancelled' { $status = 'Cancelled' }
         'LaunchFailed' { $status = 'Failed' }
         'Exited' {
             if ($null -eq $ExitCode) {
@@ -3881,7 +3893,7 @@ function Complete-JobRun {
             Write-OrchestratorLog -Level ERROR -Message "Pipeline cancellation control could not be read; automatic retry suppressed: $($_.Exception.Message)"
         }
     }
-    if (-not $pipelineCancelled -and $status -notin @('Success', 'CompletedWithWarnings') -and $null -ne $manifestJob -and $attempt -lt $manifestJob.MaxRetries) {
+    if (-not $pipelineCancelled -and $status -notin @('Success', 'CompletedWithWarnings', 'Cancelled') -and $null -ne $manifestJob -and $attempt -lt $manifestJob.MaxRetries) {
         $notBefore = $EndTime.AddSeconds($manifestJob.RetryDelaySeconds)
         $state.PendingRetry = @{
             NotBefore = ConvertTo-StateTime -Value $notBefore
@@ -3897,7 +3909,7 @@ function Complete-JobRun {
         $pipelineStatus = if ($retryScheduled) { 'RetryScheduled' } else { $status }
         $pipelineAttempt = if ($retryScheduled) { $attempt + 1 } else { $attempt }
         $pipelineNotBeforeUtc = if ($retryScheduled) { $notBefore.ToUniversalTime().ToString('o') } else { '' }
-        Set-OrchestratorPipelineJobStatus -BatchId ([string]$RunInfo.PipelineBatchId) -JobName $JobName -Status $pipelineStatus -Attempt $pipelineAttempt -Detail $ErrorText -NotBeforeUtc $pipelineNotBeforeUtc
+        Set-OrchestratorPipelineJobStatus -BatchId ([string]$RunInfo.PipelineBatchId) -JobName $JobName -Status $pipelineStatus -Attempt $pipelineAttempt -Detail $ErrorText -NotBeforeUtc $pipelineNotBeforeUtc -AllowRunningCancellation:($status -eq 'Cancelled')
     }
 
     if ($RunInfo.ContainsKey('ClaimPath') -and -not [string]::IsNullOrWhiteSpace([string]$RunInfo.ClaimPath)) {
@@ -3930,12 +3942,20 @@ function Complete-JobRun {
     $state.LastRunEnd = ConvertTo-StateTime -Value $EndTime
     $state.LastExitCode = $ExitCode
     $state.LastStatus = $status
+    if ($RunInfo.ContainsKey('OperatorStopRequestId') -and $RunInfo.OperatorStopRequestId) {
+        $state.LastOperatorStopRequestId = [string]$RunInfo.OperatorStopRequestId
+    }
     $state.Running = $null
     if ($script:RunningJobs.ContainsKey($JobName)) { $script:RunningJobs.Remove($JobName) }
     Save-OrchestratorState
     $csvStatus = $status
     if ($retryScheduled) { $csvStatus = 'Retried' }
     Add-JobRunCsvRow -JobName $JobName -ScheduledTime $RunInfo.Occurrence -StartTime $RunInfo.StartTime -EndTime $EndTime -DurationSec $durationSec -ExitCode $ExitCode -Status $csvStatus -RetryCount $attempt -LogPath ([string]$RunInfo.LogPath)
+    if ($RunInfo.ContainsKey('OperatorStopRequestPath') -and $RunInfo.OperatorStopRequestPath) {
+        $stopResult = if ($status -eq 'Cancelled') { 'Stopped' } else { 'AlreadyExited' }
+        try { Set-SmartM365OrchestratorJobStopRequestStatus -Path ([string]$RunInfo.OperatorStopRequestPath) -Status $stopResult -Detail ("Final run status: {0}. {1}" -f $status, $ErrorText) }
+        catch { Write-OrchestratorLog -Message ("Job {0}: stop request result could not be saved: {1}" -f $JobName, $_.Exception.Message) -Level ERROR }
+    }
 
 
     Invoke-OrchestratorSharePointUpload -LocalFilePath ([string]$RunInfo.LogPath) -Reason ("job {0} log" -f $JobName) -Force | Out-Null
@@ -4026,6 +4046,75 @@ function Sync-RunningJobConcurrencyLease {
     }
 }
 
+function Update-OrchestratorJobStopRequests {
+    $requests = @()
+    try { $requests = @(Get-SmartM365OrchestratorJobStopRequests -SharedDataFolderPath $script:Settings.SharedDataFolderPath -Server $env:COMPUTERNAME) }
+    catch { Write-OrchestratorLog -Message ("Job stop request scan failed: {0}" -f $_.Exception.Message) -Level ERROR; return }
+    foreach ($entry in $requests) {
+        try {
+        $request = $entry.Document
+        $name = [string]$request.JobName
+        $reason = [string]$request.Reason
+        $requestedAt = ConvertTo-SmartM365OrchestratorJobStopUtc $request.RequestedAtUtc
+        $start = ConvertTo-SmartM365OrchestratorJobStopUtc $request.StartTime
+        $valid = $request.SchemaVersion -eq 1 -and [string]$request.Server -ieq $env:COMPUTERNAME -and
+            [string]$request.Tenant -eq $Tenant -and $name -and $reason -and [int]$request.ProcessId -gt 0 -and
+            $null -ne $requestedAt -and $null -ne $start -and
+            ([datetimeoffset]::UtcNow - $requestedAt).TotalHours -le 24 -and
+            ($requestedAt - [datetimeoffset]::UtcNow).TotalMinutes -le 5
+        if (-not $valid) {
+            try { Set-SmartM365OrchestratorJobStopRequestStatus -Path $entry.Path -Status Rejected -Detail 'Invalid or expired job stop request.' }
+            catch { Write-OrchestratorLog -Message ("Job stop rejection could not be saved: {0}" -f $_.Exception.Message) -Level ERROR }
+            continue
+        }
+        if (-not $script:RunningJobs.ContainsKey($name)) {
+            $lastState = Get-JobState -JobName $name
+            $result = if ([string]$lastState.LastOperatorStopRequestId -eq [string]$request.RequestId -and [string]$lastState.LastStatus -eq 'Cancelled') { 'Stopped' } else { 'AlreadyExited' }
+            try { Set-SmartM365OrchestratorJobStopRequestStatus -Path $entry.Path -Status $result -Detail 'The selected process is no longer running.' }
+            catch { Write-OrchestratorLog -Message ("Job stop result could not be saved: {0}" -f $_.Exception.Message) -Level ERROR }
+            continue
+        }
+        $info = $script:RunningJobs[$name]
+        if ($info.ContainsKey('RecoveryPending') -and $info.RecoveryPending) { continue }
+        $sameRun = $null -ne $info.Process -and [int]$info.Process.Id -eq [int]$request.ProcessId -and
+            (ConvertTo-SmartM365OrchestratorJobStopUtc $info.StartTime).Ticks -eq $start.Ticks
+        if (-not $sameRun) {
+            try { Set-SmartM365OrchestratorJobStopRequestStatus -Path $entry.Path -Status Rejected -Detail 'The process identity no longer matches the selected run.' }
+            catch { Write-OrchestratorLog -Message ("Job stop rejection could not be saved: {0}" -f $_.Exception.Message) -Level ERROR }
+            continue
+        }
+        if ($info.ContainsKey('OperatorStopRequested') -and $info.OperatorStopRequested) {
+            if ([string]$info.OperatorStopRequestId -ne [string]$request.RequestId) {
+                try { Set-SmartM365OrchestratorJobStopRequestStatus -Path $entry.Path -Status Rejected -Detail 'A stop request is already in progress for this run.' }
+                catch { Write-OrchestratorLog -Message ("Job stop rejection could not be saved: {0}" -f $_.Exception.Message) -Level ERROR }
+            }
+            continue
+        }
+        $intent = @{
+            OperatorStopRequested = $true
+            OperatorStopRequestId = [string]$request.RequestId
+            OperatorStopRequestPath = [string]$entry.Path
+            OperatorStopBy = ('{0} on {1}' -f $request.RequestedBy, $request.RequestedFrom)
+            OperatorStopReason = $reason
+        }
+        $state = Get-JobState -JobName $name
+        foreach ($key in @('OperatorStopRequested', 'OperatorStopRequestId', 'OperatorStopRequestPath', 'OperatorStopBy', 'OperatorStopReason')) {
+            $state.Running[$key] = $intent[$key]
+        }
+        Save-OrchestratorState
+        if (-not (Test-OrchestratorStatePersistenceReady)) { continue }
+        foreach ($key in $intent.Keys) { $info[$key] = $intent[$key] }
+        try { Set-SmartM365OrchestratorJobStopRequestStatus -Path $entry.Path -Status Stopping -Detail ("Accepted by {0}; process stop pending." -f $env:COMPUTERNAME) }
+        catch { Write-OrchestratorLog -Message ("Job {0}: stop acknowledgement could not be saved: {1}" -f $name, $_.Exception.Message) -Level ERROR }
+        }
+        catch {
+            Write-OrchestratorLog -Message ("Job stop request {0} could not be processed: {1}" -f $entry.Path, $_.Exception.Message) -Level ERROR
+            try { Set-SmartM365OrchestratorJobStopRequestStatus -Path $entry.Path -Status Rejected -Detail 'Malformed job stop request.' }
+            catch { }
+        }
+    }
+}
+
 function Update-RunningJobs {
     param([Parameter(Mandatory = $true)][datetime]$Now)
 
@@ -4055,6 +4144,33 @@ function Update-RunningJobs {
             $statusHint = if ($info.ContainsKey('TimeoutRequested') -and $info.TimeoutRequested) { 'TimedOut' } else { 'Exited' }
             if ($statusHint -eq 'TimedOut') { $exitCode = $null }
             Complete-JobRun -JobName $name -RunInfo $info -StatusHint $statusHint -ExitCode $exitCode -EndTime $endTime
+            continue
+        }
+
+        if ($info.ContainsKey('OperatorStopRequested') -and $info.OperatorStopRequested) {
+            Sync-RunningJobConcurrencyLease -JobName $name -RunInfo $info -Now $Now
+            if (-not (Test-OrchestratorStatePersistenceReady)) { continue }
+            $identity = $null
+            try { $identity = Test-ProcessMatchesRecord -RecordedPid $process.Id -ExpectedStartTime ([datetime]$info.StartTime) -ExpectedProcessName ([string]$info.ProcessName) }
+            catch { Write-OrchestratorLog -Message ("Job {0}: stop deferred because process identity could not be verified: {1}" -f $name, $_.Exception.Message) -Level ERROR; continue }
+            if ($null -eq $identity) {
+                Write-OrchestratorLog -Message ("Job {0}: stop deferred because PID {1} no longer matches its recorded start time." -f $name, $process.Id) -Level ERROR
+                continue
+            }
+            if ([math]::Abs(($identity.StartTime - [datetime]$info.StartTime).TotalSeconds) -gt 1) {
+                Write-OrchestratorLog -Message ("Job {0}: stop deferred because the process start time differs from the selected run." -f $name) -Level ERROR
+                continue
+            }
+            Write-OrchestratorLog -Message ("Job {0}: operator {1} requested stop of PID {2}; reason: {3}" -f $name, $info.OperatorStopBy, $process.Id, $info.OperatorStopReason) -Level WARN
+            Stop-ProcessTree -TargetPid $process.Id
+            try { $process.WaitForExit(30000) | Out-Null } catch { }
+            $stillRunning = $true
+            try { $process.Refresh(); $stillRunning = -not $process.HasExited } catch { }
+            if ($stillRunning) {
+                Write-OrchestratorLog -Message ("Job {0}: PID {1} is still running after the operator stop request; supervision is retained." -f $name, $process.Id) -Level ERROR
+                continue
+            }
+            Complete-JobRun -JobName $name -RunInfo $info -StatusHint Cancelled -ExitCode $null -EndTime (Get-Date) -ErrorText ("Stopped by {0}: {1}" -f $info.OperatorStopBy, $info.OperatorStopReason)
             continue
         }
 
@@ -4120,6 +4236,11 @@ function Restore-RunningJobs {
             Attempt = [int]$record.Attempt
             TimeoutMinutes = [int]$record.TimeoutMinutes
             TimeoutRequested = $record.ContainsKey('TimeoutRequested') -and [bool]$record.TimeoutRequested
+            OperatorStopRequested = $record.ContainsKey('OperatorStopRequested') -and [bool]$record.OperatorStopRequested
+            OperatorStopRequestId = if ($record.ContainsKey('OperatorStopRequestId')) { [string]$record.OperatorStopRequestId } else { '' }
+            OperatorStopBy = if ($record.ContainsKey('OperatorStopBy')) { [string]$record.OperatorStopBy } else { '' }
+            OperatorStopReason = if ($record.ContainsKey('OperatorStopReason')) { [string]$record.OperatorStopReason } else { '' }
+            OperatorStopRequestPath = if ($record.ContainsKey('OperatorStopRequestPath')) { [string]$record.OperatorStopRequestPath } else { '' }
             ClaimPath = if ($record.ContainsKey('ClaimPath')) { [string]$record.ClaimPath } else { '' }
             ConcurrencyLeasePath = if ($record.ContainsKey('ConcurrencyLeasePath')) { [string]$record.ConcurrencyLeasePath } else { '' }
             ConcurrencyLeaseId = if ($record.ContainsKey('ConcurrencyLeaseId')) { [string]$record.ConcurrencyLeaseId } else { '' }
@@ -4273,7 +4394,7 @@ function Restore-RunningJobs {
             Write-OrchestratorLog -Message ("Job {0}: re-adopted running PID {1} (started {2}); supervision resumed with the original timeout window." -f $jobName, $recordedPid, $expectedStart.ToString('yyyy-MM-dd HH:mm:ss'))
         }
         else {
-            $statusHint = if ($runInfo.TimeoutRequested) { 'TimedOut' } else { 'Interrupted' }
+            $statusHint = if ($runInfo.OperatorStopRequested) { 'Cancelled' } elseif ($runInfo.TimeoutRequested) { 'TimedOut' } else { 'Interrupted' }
             Write-OrchestratorLog -Message ("Job {0}: recorded PID {1} is gone or does not match; the run is marked {2}." -f $jobName, $recordedPid, $statusHint) -Level WARN
             Complete-JobRun -JobName $jobName -RunInfo $runInfo -StatusHint $statusHint -ExitCode $null -EndTime (Get-Date) -ErrorText 'The orchestrator restart found no matching process for this run.'
         }
@@ -4294,11 +4415,12 @@ function Set-OrchestratorPipelineJobStatus {
         [Parameter(Mandatory = $true)][string]$Status,
         [int]$Attempt = 0,
         [string]$Detail = '',
-        [string]$NotBeforeUtc = ''
+        [string]$NotBeforeUtc = '',
+        [switch]$AllowRunningCancellation
     )
 
     try {
-        Set-SmartM365OrchestratorPipelineJobStatus -SharedDataFolderPath $script:Settings.SharedDataFolderPath -BatchId $BatchId -JobName $JobName -Status $Status -Attempt $Attempt -OwnerServer $env:COMPUTERNAME -Detail $Detail -NotBeforeUtc $NotBeforeUtc | Out-Null
+        Set-SmartM365OrchestratorPipelineJobStatus -SharedDataFolderPath $script:Settings.SharedDataFolderPath -BatchId $BatchId -JobName $JobName -Status $Status -Attempt $Attempt -OwnerServer $env:COMPUTERNAME -Detail $Detail -NotBeforeUtc $NotBeforeUtc -AllowRunningCancellation:$AllowRunningCancellation | Out-Null
     }
     catch {
         Write-OrchestratorLog -Message ("Pipeline {0}, job {1}: shared status could not be set to {2}: {3}" -f $BatchId, $JobName, $Status, $_.Exception.Message) -Level ERROR
@@ -4318,7 +4440,7 @@ function Repair-OrchestratorPipelineOrphanStatus {
 
     $orphans = @($Run.Jobs | Where-Object { [string]$_.Status -in @('Starting', 'Running') -and [string]$_.OwnerServer -ieq $env:COMPUTERNAME })
     if ($orphans.Count -eq 0) { return }
-    $terminalStatuses = @('Success', 'CompletedWithWarnings', 'Failed', 'TimedOut', 'Interrupted')
+    $terminalStatuses = @('Success', 'CompletedWithWarnings', 'Failed', 'TimedOut', 'Interrupted', 'Cancelled')
     $occurrenceText = $Occurrence.ToString('yyyy-MM-dd HH:mm:ss')
     $runRows = $null
     foreach ($jobStatus in $orphans) {
@@ -4373,7 +4495,7 @@ function Repair-OrchestratorPipelineOrphanStatus {
             $finalStatus = 'Interrupted'
             $source = 'no supervised process and no recorded result after the timeout window'
         }
-        Set-OrchestratorPipelineJobStatus -BatchId $Run.BatchId -JobName $name -Status $finalStatus -Attempt ([int]$jobStatus.Attempt) -Detail ("Reconciled from {0}; the final shared status had not been recorded." -f $source)
+        Set-OrchestratorPipelineJobStatus -BatchId $Run.BatchId -JobName $name -Status $finalStatus -Attempt ([int]$jobStatus.Attempt) -Detail ("Reconciled from {0}; the final shared status had not been recorded." -f $source) -AllowRunningCancellation:($finalStatus -eq 'Cancelled')
         Write-OrchestratorLog -Message ("Pipeline {0}, job {1}: orphan {2} status reconciled to {3} from {4}." -f $Run.BatchId, $name, $jobStatus.Status, $finalStatus, $source) -Level WARN
     }
 }
@@ -4488,7 +4610,7 @@ function Get-OrchestratorExternalDependencyStatus {
     $dependencyState = Get-JobState -JobName $DependencyName
     if ($null -ne $dependencyState.PendingRetry) { return 'Waiting' }
     if ([string]$dependencyState.LastStatus -in @('Success', 'CompletedWithWarnings')) { return 'Ready' }
-    if ([string]$dependencyState.LastStatus -in @('Failed', 'TimedOut', 'Interrupted') -and -not $dependencyJob.ContinueOnError) { return 'Failed' }
+    if ([string]$dependencyState.LastStatus -in @('Failed', 'TimedOut', 'Interrupted', 'Cancelled') -and -not $dependencyJob.ContinueOnError) { return 'Failed' }
     return 'Waiting'
 }
 
@@ -4836,7 +4958,7 @@ function Get-OrchestratorPeerOccurrenceClaimState {
     $claim = $record.Claim
     if (-not $claim.PSObject.Properties['OwnerServer'] -or [string]$claim.OwnerServer -ieq $env:COMPUTERNAME) { return $none }
 
-    if ([string]$claim.Status -in @('Success', 'CompletedWithWarnings', 'Failed', 'TimedOut', 'Interrupted')) {
+    if ([string]$claim.Status -in @('Success', 'CompletedWithWarnings', 'Failed', 'TimedOut', 'Interrupted', 'Cancelled')) {
         return [pscustomobject]@{ State = 'Terminal'; Claim = $claim }
     }
     $safeUntilUtc = if ($claim.PSObject.Properties['SafeUntilUtc']) { ConvertTo-OrchestratorUtcTime -Value $claim.SafeUntilUtc } else { $null }
@@ -4854,7 +4976,7 @@ function Set-OccurrenceHandledByPeer {
     )
 
     $claimStatus = [string]$Claim.Status
-    if ($claimStatus -notin @('Success', 'CompletedWithWarnings', 'Failed', 'TimedOut', 'Interrupted')) {
+    if ($claimStatus -notin @('Success', 'CompletedWithWarnings', 'Failed', 'TimedOut', 'Interrupted', 'Cancelled')) {
         throw "Claim status '$claimStatus' is not terminal."
     }
     $claimEnd = Get-Date
@@ -5146,7 +5268,7 @@ function Invoke-LaunchPhase {
                 $dependencyStatus = Get-OrchestratorPipelineDependencyStatus -BatchId ([string]$pipelineInfo.BatchId) -JobName $dep
                 $dependencyJob = if ($script:Manifest.JobsByName.ContainsKey($dep)) { $script:Manifest.JobsByName[$dep] } else { $null }
                 if ($dependencyStatus -in @('Success', 'CompletedWithWarnings')) { continue }
-                if ($dependencyStatus -in @('Failed', 'TimedOut', 'Interrupted', 'BlockedDependencyFailed', 'BlockedDependencyTimeout', 'Rejected', 'MissingStatus')) {
+                if ($dependencyStatus -in @('Failed', 'TimedOut', 'Interrupted', 'Cancelled', 'BlockedDependencyFailed', 'BlockedDependencyTimeout', 'Rejected', 'MissingStatus')) {
                     if ($null -eq $dependencyJob -or -not $dependencyJob.ContinueOnError) { $pipelineBlockedDependency = $dep; break }
                     continue
                 }
@@ -5230,7 +5352,7 @@ function Invoke-LaunchPhase {
                         $blockingDependencies.Add($dep)
                         continue
                     }
-                    if ($depState.LastStatus -in @('Failed', 'TimedOut', 'Interrupted') -and -not $depJob.ContinueOnError) {
+                    if ($depState.LastStatus -in @('Failed', 'TimedOut', 'Interrupted', 'Cancelled') -and -not $depJob.ContinueOnError) {
                         $depOccurrence = ConvertFrom-StateTime -Text ([string]$depState.LastScheduledOccurrence)
                         if ($null -ne $depOccurrence -and $depOccurrence -eq $occurrence) { $blockedByParent = $true; $blockedDependency = $dep; break }
                     }
@@ -5340,7 +5462,7 @@ function Invoke-LaunchPhase {
                     catch {
                         Write-OrchestratorLog -Message ("Job {0}: failed to release ConcurrencyKey '{1}' after occurrence claim refusal: {2}" -f $name, $job.ConcurrencyKey, $_.Exception.Message) -Level ERROR
                     }
-                    $terminalClaim = $null -ne $claim.Claim -and [string]$claim.Claim.Status -in @('Success', 'CompletedWithWarnings', 'Failed', 'TimedOut', 'Interrupted')
+                    $terminalClaim = $null -ne $claim.Claim -and [string]$claim.Claim.Status -in @('Success', 'CompletedWithWarnings', 'Failed', 'TimedOut', 'Interrupted', 'Cancelled')
                     if ($terminalClaim) {
                         if ($reason -eq 'maintenance-catch-up') { Complete-MaintenanceCatchUpOccurrence -State $state -Occurrence $occurrence }
                         else { Set-OccurrenceHandledByPeer -JobName $name -Occurrence $occurrence -Claim $claim.Claim }
@@ -5504,7 +5626,7 @@ function Get-OrchestratorJobRunsForWindow {
 function Get-OrchestratorJobRunStatistics {
     param([Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$Rows)
 
-    $failureStatuses = @('Failed', 'TimedOut', 'Interrupted', 'BlockedDependencyFailed', 'BlockedDependencyTimeout')
+    $failureStatuses = @('Failed', 'TimedOut', 'Interrupted', 'Cancelled', 'BlockedDependencyFailed', 'BlockedDependencyTimeout')
     $warningStatuses = @('CompletedWithWarnings', 'Retried', 'Skipped')
     return [pscustomobject]@{
         Total = @($Rows).Count
@@ -5520,7 +5642,7 @@ function Get-OrchestratorJobSummaryRows {
         [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$Rows7Days
     )
 
-    $failureStatuses = @('Failed', 'TimedOut', 'Interrupted', 'BlockedDependencyFailed', 'BlockedDependencyTimeout')
+    $failureStatuses = @('Failed', 'TimedOut', 'Interrupted', 'Cancelled', 'BlockedDependencyFailed', 'BlockedDependencyTimeout')
     $warningStatuses = @('CompletedWithWarnings', 'Retried', 'Skipped')
     $summaryRows = [System.Collections.Generic.List[object]]::new()
 
@@ -5566,7 +5688,7 @@ function New-OrchestratorJobRunsTableHtml {
     foreach ($row in $Rows) {
         $color = '#1F2937'
         if ($row.Status -eq 'Success') { $color = '#107C10' }
-        elseif ($row.Status -in @('Failed', 'TimedOut', 'Interrupted', 'BlockedDependencyFailed', 'BlockedDependencyTimeout')) { $color = '#D13438' }
+        elseif ($row.Status -in @('Failed', 'TimedOut', 'Interrupted', 'Cancelled', 'BlockedDependencyFailed', 'BlockedDependencyTimeout')) { $color = '#D13438' }
         elseif ($row.Status -in @('CompletedWithWarnings', 'Skipped', 'Retried')) { $color = '#FF8C00' }
 
         $tableRows += "<tr>" +
@@ -5609,7 +5731,7 @@ function New-OrchestratorJobSummaryTableHtml {
         [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$Rows7Days
     )
 
-    $failureStatuses = @('Failed', 'TimedOut', 'Interrupted', 'BlockedDependencyFailed', 'BlockedDependencyTimeout')
+    $failureStatuses = @('Failed', 'TimedOut', 'Interrupted', 'Cancelled', 'BlockedDependencyFailed', 'BlockedDependencyTimeout')
     $warningStatuses = @('Retried', 'Skipped')
     $cellStyle = 'padding:3px 7px;border:1px solid #DDDDDD;'
     $tableRows = ''
@@ -5893,7 +6015,7 @@ function Invoke-OrchestratorClaimRetention {
     $lock = Enter-OrchestratorSharePointMirrorLock -Path $lockPath -StaleMinutes 120
     if ($null -eq $lock) { return }
 
-    $terminalStatuses = @('Success', 'CompletedWithWarnings', 'Failed', 'TimedOut', 'Interrupted')
+    $terminalStatuses = @('Success', 'CompletedWithWarnings', 'Failed', 'TimedOut', 'Interrupted', 'Cancelled')
     $cutoffUtc = $Now.ToUniversalTime().AddDays(-1 * $retentionDays)
     $deadline = (Get-Date).AddSeconds([int]$script:Settings.ElectionClaimRetentionMaxSecondsPerRun)
     $removedClaims = 0
@@ -6131,6 +6253,7 @@ try {
     $managementModulePath = Join-Path -Path $PSScriptRoot -ChildPath 'SmartM365.Orchestrator.Management.psm1'
     Import-Module (Join-Path $PSScriptRoot 'SmartM365.Orchestrator.Maintenance.psm1') -ErrorAction Stop
     Import-Module -Name $managementModulePath -Force -ErrorAction Stop
+    Import-Module (Join-Path $PSScriptRoot 'SmartM365.Orchestrator.JobStop.psm1') -Force -ErrorAction Stop
     $pipelineModulePath = Join-Path -Path $PSScriptRoot -ChildPath 'SmartM365.Orchestrator.Pipeline.psm1'
     Import-Module -Name $pipelineModulePath -Force -ErrorAction Stop
     . $tenantContextPath
@@ -6604,6 +6727,7 @@ try {
         Update-JobsManifestIfChanged
         Update-OrchestratorServerCapabilities
         Update-OrchestratorElectionPlan
+        Update-OrchestratorJobStopRequests
         Update-RunningJobs -Now $now
         Update-OrchestratorMaintenance -Now $now
         try {
@@ -6722,8 +6846,8 @@ exit $script:ExitCode
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB9zG8NpDm5kpmA
-# UtujVVH1lBqU+A5yye1Ax/SPanv+WKCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCApTWW66+Josds1
+# CTfNDrs5H6L7z0XfPUR8megbXPOBiqCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -6753,14 +6877,14 @@ exit $script:ExitCode
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCAIkFGINivU4vsLSxTL/vdS
-# X3VtWj584CFKSYKsDLVLDzANBgkqhkiG9w0BAQEFAASCAYAGOagFNmTozBL6B3aK
-# LKcbeBreCR6jH4w5QT1H5RJwvOuL735purcWWaaAXMdTIeqEDLQ98bK5riKOBno2
-# M3kTSTZ2SoxBUZODf7/wiRDwRwQ9hFbVIHX/MvHpPc9dS9f2fOAD0OqiOXqhOjCq
-# qe9+BqHGbaDzNvue5V2qz4jMxhATGq7S/hOWpoiq7yyze24B3JLid8iK3RqmdR0s
-# Z0HxKthxAzfgoSY56Ln40/orhLsN5UKY2jvk82Y1cVKc2/shPY6kBl9EFgXj0JfK
-# OPPBobcOHsQ1wGE6BEFF7kXGpxyUFHfEMpYWzLOYQE/INnq2q26H156KK6jv41J0
-# 7h+wPkeWqj5wkMh5rq3obvgPqpN0ho1xCtp6U/LKkxFiwF08cOFIvX5dvRSU0Ltw
-# y2EIiImrNQuHjLWcBieCZx/kHTqxSo5S5fQcAMEZa6XHLn1Xw8ZFWnEGcHIRGhTA
-# fgYg9prXQIc7AsZm0fdbphrWzW8gke/58WZGODExgbFl7h0=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCBHKPvjOu6AfxdtD3aiGCc7
+# LyEOtVyzV+lnaRKUk/9D6DANBgkqhkiG9w0BAQEFAASCAYCCcnmbnBvqDy5C+iTW
+# 03nl3wOuJOnIwRJravDc9Yx0CZ1XovzLSvV7Z1sLwXbEO1uUqH5CfPc37Q6FqUUZ
+# yTjX03eq3JqmN8CbMaBPQzr+mIOqgWPutIOXZZVLhx8MC5FwWuIcFTzT2DYqIeCe
+# oeEeb3iPqLy+1QkF7QXtEuFrDbIEzDBH8LlbvmEylFe8YGCk5egFMSSGGo/WQa7S
+# ZhFXWWrHBSXuoUEzsi2gbSv9fyBrJ9SuQ69VIdu+vhazV6QjBxdTRZ4TiYFT3Y2s
+# FOUF0UK8XEeGqA6HUeOG686qtZ7VKgaaB1mZ0eISiW2l85QBfNt8P+PXxPbtTLLd
+# wtT7jx+zVpTBD1FjMWVdioXcH7F9KdGTrRJWTU4NbJ3hvb6/x7wB4Jl5igbUD4ar
+# MIheujvlkn+OI2bsIZwxmiwnTHUYizy9t7/qe21lHGjJtERtKdkZhVEWwjRu6fST
+# n4i7CpRDJlkjfiEolwjgGWDSPFHmJI14W9O0hZ9KR7/64So=
 # SIG # End signature block

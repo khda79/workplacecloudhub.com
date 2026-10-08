@@ -695,7 +695,7 @@ function Enter-SmartM365OrchestratorOccurrenceClaim {
                 return [pscustomobject]@{ Acquired = $true; Reused = $true; ClaimPath = $claimPath; Claim = $existing; Reason = 'Existing non-terminal claim belongs to this server.' }
             }
 
-            $terminal = [string]$existing.Status -in @('Success', 'CompletedWithWarnings', 'Failed', 'TimedOut', 'Interrupted')
+            $terminal = [string]$existing.Status -in @('Success', 'CompletedWithWarnings', 'Failed', 'TimedOut', 'Interrupted', 'Cancelled')
             $safeUntilUtc = [datetime]::MaxValue
             try { $safeUntilUtc = ([datetime]$existing.SafeUntilUtc).ToUniversalTime() } catch { $safeUntilUtc = [datetime]::MaxValue }
             if (-not $terminal -and [datetime]::UtcNow -gt $safeUntilUtc -and -not [string]::IsNullOrWhiteSpace($HeartbeatRootPath)) {
@@ -719,7 +719,7 @@ function Enter-SmartM365OrchestratorOccurrenceClaim {
                         $confirmed = (Read-SmartM365JsonDocument $claimPath).Document
                         $confirmedSafeUntilUtc = ([datetime]$confirmed.SafeUntilUtc).ToUniversalTime()
                         if ([string]$confirmed.ClaimId -eq [string]$existing.ClaimId -and
-                            [string]$confirmed.Status -notin @('Success', 'CompletedWithWarnings', 'Failed', 'TimedOut', 'Interrupted') -and
+                            [string]$confirmed.Status -notin @('Success', 'CompletedWithWarnings', 'Failed', 'TimedOut', 'Interrupted', 'Cancelled') -and
                             [datetime]::UtcNow -gt $confirmedSafeUntilUtc) {
                             $archivePath = '{0}.stale.{1}.json' -f (Get-SmartM365JsonNames $claimPath).Legacy, [string]$confirmed.ClaimId
                             if ((Get-SmartM365JsonTransportPolicy).Mode -eq 'JsonText') { $archivePath += '.txt' }
@@ -753,7 +753,7 @@ function Set-SmartM365OrchestratorOccurrenceClaim {
     param(
         [Parameter(Mandatory = $true)][string]$ClaimPath,
         [Parameter(Mandatory = $true)][string]$OwnerServer,
-        [Parameter(Mandatory = $true)][ValidateSet('Claimed', 'Running', 'RetryScheduled', 'Success', 'CompletedWithWarnings', 'Failed', 'TimedOut', 'Interrupted')][string]$Status,
+        [Parameter(Mandatory = $true)][ValidateSet('Claimed', 'Running', 'RetryScheduled', 'Success', 'CompletedWithWarnings', 'Failed', 'TimedOut', 'Interrupted', 'Cancelled')][string]$Status,
         [int]$Attempt = 0,
         [int]$SafeMinutes = 60,
         [string]$Detail = ''
@@ -1080,8 +1080,8 @@ Export-ModuleMember -Function @(
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCElrs50scqPLFS
-# pooEjqA9Z8RxnMOm76AGANVykWDW/qCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCCM7NxUxaYXUmN
+# 9IoJ1x9z58xudkK11uMUiHXZkB4aJ6CCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1111,14 +1111,14 @@ Export-ModuleMember -Function @(
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCDpxzGLzmbvpjvXxzSbWoux
-# JOSD/k6hnUTjxIEkpHr+czANBgkqhkiG9w0BAQEFAASCAYCohfZbLHZo3WqMJiYL
-# 3f+6Sl3ZEoRIfv4f7zW9xooWItaOOI1cCCSMdQH91GwU9BqhjP4IpqzAg3UleRLQ
-# 58shLTrKYj0l5JrExlp80MvRWWDmYO/UcAwLgz4VL8rDUxr6PYAvCv6Cf7i6niWQ
-# zUGNqdm+gwS0ALPFi+ODd2nQVAYZUxzTFoxbIL1kdEuwdiVHDYs6T+HNkqP0etUE
-# XovM8r4JV9EYNTKbZowXj2APaAFu7eb0gcjwbKqruKdrY7F/sxU/KD5ly7MfG4rT
-# 3AM8BpflF2T8IbhK6ZP+vjVEK0EheB39a6Zl+4BfmNZ6ZCBPD8Jh1gZyQqJFHcVv
-# vuG9wJaD2LM/Ag+pBIAFHHPw/iwR8bsCAPv5i8mzcv3hhQ7fZnE6bDRistJuot3Z
-# GdWz24BnZgFA9oBhMTrcT8dk0/H/Q5gAm2X/bAu9XK28lv9nvJ4CBi2Ykgkq/bh+
-# bOJzLG3MmSYX7jagGV1TsfFOSCWzItCXA9sKLADZFlDYBd4=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCAudjyGEmoV+/kxhxSxBPki
+# o0g9MwUbhIWv7hAxhRgqWDANBgkqhkiG9w0BAQEFAASCAYBZO4jvC/kxuCThEQW1
+# U6c6Uq8OnFikPWTdUKBKaQ78crQtWH2G5vQcEYkToSvv2LEtmr7BMNqtvRHjkaEN
+# UBf6p4542x4sQA+mH7RD5ZI0aB1otxKTahteVFegrvyMeVXU1BMzys57S+0EG5+w
+# F2eTFQgYsEXVsLgGggPHYX59BSEYYg9ssvGGSBFqX6QdjA9qaZvMubypUg/MyIAg
+# aZlT+pk/FqmMxpMMT27/0QebPV60Q7CwhvGDjBWtr3f/QIBjqxQ8ouA+juVAHPFJ
+# 44x9mrkxdVFsZwuu3BZ/Em214j+0prgm2s8VA7KfGNkZs0MgVBNA2ERVZjRxJyeY
+# jCHg+I/6kXpbr9ZPPy79YA8ybl8O8vetahRXyqbTbTB7wJGod9If5WqXf2fK9IQQ
+# Oam9GWrDx2QWROPCqtDMZ/HSoEK1sux1bQfRpOSzb20F+sFvfoE7AMdN8UH3NWRY
+# Qewu9xfkflwSqFKgDsHiWGDPyTqZBDaqzCmY06RlDcxK8NI=
 # SIG # End signature block
