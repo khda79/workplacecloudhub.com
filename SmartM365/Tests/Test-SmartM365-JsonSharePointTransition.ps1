@@ -14,7 +14,7 @@ function Check([bool]$Value,[string]$Message){if(!$Value){throw $Message};$scrip
 function Reject([scriptblock]$Action,[string]$Message){$failed=$false;try{& $Action|Out-Null}catch{$failed=$true};Check $failed $Message}
 function Reset-Fixture([string]$Name) {
     $script:items=@{};$script:patches=0;$script:interrupt=$false;$script:etagConflict=$false;$script:forbidden=$false
-    $script:pagination=$false;$script:badPageUri='';$script:versionPages=0;$script:alterAfterDownload=$false
+    $script:pagination=$false;$script:badPageUri='';$script:versionPages=0;$script:alterAfterDownload=$false;$script:nullOnMissing=$false
     $script:local=Join-Path $root ($Name+'.json.txt')
     [IO.File]::WriteAllText($script:local,'{"Generation":2}')
 }
@@ -41,7 +41,7 @@ $request={
         $item=$script:items[$Matches[1]]
         if($item -and $Matches[2]){return [pscustomobject]@{value=@($item.Versions)}}
     } else {throw "Unexpected mock URI: $uri"}
-    if(!$item){$e=[IO.IOException]::new('Synthetic missing');$e.Data['StatusCode']=404;throw $e}
+    if(!$item){if($script:nullOnMissing){return $null};$e=[IO.IOException]::new('Synthetic missing');$e.Data['StatusCode']=404;throw $e}
     if($method -eq 'GET'){return [pscustomobject]@{id=$item.id;name=$item.name;eTag=$item.eTag;file=$item.file}}
     if($script:etagConflict){$item.eTag='changed'}
     if($headers['If-Match'] -ne $item.eTag){$e=[IO.IOException]::new('Synthetic stale eTag');$e.Data['StatusCode']=412;throw $e}
@@ -130,6 +130,15 @@ try {
     Reject {Read-Fixture} 'Invalid new remote file fell back.'
     Reset-Fixture readmissing
     Reject {Read-Fixture} 'Absent download succeeded.'
+    $script:nullOnMissing=$true
+    Reject {Read-Fixture} 'Two quietly absent names were accepted.'
+    Add-Remote new 'state.json.txt' '{"Generation":2}'
+    Check ([Text.Encoding]::UTF8.GetString((Read-Fixture)) -eq '{"Generation":2}') 'Quiet legacy absence blocked preferred download.'
+    Reset-Fixture quietold;$script:nullOnMissing=$true;Add-Remote old 'state.json' '{"Generation":1}'
+    Check ([Text.Encoding]::UTF8.GetString((Read-Fixture)) -eq '{"Generation":1}') 'Quiet preferred absence blocked legacy download.'
+    Reset-Fixture quiettransition;$script:nullOnMissing=$true
+    & $module { function script:Get-SmartM365JsonTransportPolicy { @{Mode='JsonText';QualifiedSharePointDrives=@('synthetic')} } }
+    Check ((Invoke-Fixture).Status -eq 'NoLegacy') 'Quiet absent names blocked new upload transition.'
     $script:forbidden=$true
     Reject {Read-Fixture} 'Read authorization error treated as absence.'
     Check ($script:patches -eq 0) 'Reading performed remote mutations.'
@@ -154,8 +163,8 @@ try {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA57qPc5CxseW7E
-# snx14s51j/n8qHxjpbY4+20duXzgR6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAFSw4lduIzmC48
+# DEas/99Hi5gCTWoqjAoA86JPumJgvKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -288,31 +297,31 @@ try {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIN1gHd9dGhIbU0RTSlzZIOFOLMpw/x8uHIuTuiTa41lrMA0GCSqG
-# SIb3DQEBAQUABIIBgEvJZ+SmViOaoOsteY1NR1iKEyiG8Jld/wD17DSGUwa1bR5x
-# SCoDB7aEc9VJsYtgnWL+IHrqiJbEqK0at0zmslolYrk1zGvpC5AXLN+qitP1iY7X
-# 7chAYd5yFoMC9XSwFuXLyePK/AsXO/VQpZHVNGhfkfBs/KZjeGT/SPjCcSj1pwfx
-# /tJtGn36+HgjxzFv0Ha7Pbo4zAC9hX3qbC7ZOwxMjVcWFzSHMOycagkPvDVzZmXH
-# B+HoZ1hwXLxcC2Q20IXE0mpESPS7ONGOWvhGBDhf1vakJ3JnRgS04NzKPDlnH+Md
-# isUn7nqylH1WT1P2efODfpY28mlugbu5uyN2vjn/n5e0y4T7xFIWqNji/2kh5bjf
-# Uaki34zy58UPXna4dwXyTLOrmh/+l36BUtGYZZol9i6pvLftjavByhbmdMPYJNXS
-# 0RMz3UQJ1VzFN9y1cxTaIFNBU/xm8/W88qTYv8bw2zaxIKcHsP4J9cg9SsBesTxB
-# xIg4aiWeRV0oej7eVKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEILGG8U9XZRDJXxbt0pRUz4QvV1tO7jV5U61pZONN0CIfMA0GCSqG
+# SIb3DQEBAQUABIIBgETK5dgL2PvQRZdJ/P2rimN7WcerHbP8/Q+4JileWQcrCjCw
+# 6abOpnPzLaalre2yr3g8QPaZkushuyaMNNsu2MfzI5XwDMCoX0YJ6SabBuvvJ0Mg
+# hLRTyZbymPzmZqSD3SVGjoAWWCDfi3cKU5NVlI5qKsY/717hFWf2Z20Xl1T3CN0y
+# IOGRuE+KwA9pHEVpLdv/duVjVMJMM0E3gPEek9m2mM58TvioxeY74agYYKIFb5DZ
+# 8X+yg2hjC/ZA1dL2ONyezu/iCgeMNJHxZClJg81w2aW97PYlcau6TDzNIRP/wJhy
+# yhD4jU/SehXdzw7lHHrXE4UrX47Iw8TG4beKpz2Nzx7FllEkhRKO1O1SgshoOjwg
+# QcH2tmsfE+5vzKV9FeFdR08OLl9V1AjyI9hssBTPTVXRvUukIGnkfG3U4Ks2dREc
+# 3nV5o2lxqPhAwf8kLJqvcBsKI8HvESizMQCMwRWC0yzNQ459BfwASaDjTtU5hRX3
+# u0X3wvymmfL8XeBOqKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDcxMTM2
-# NTFaMC8GCSqGSIb3DQEJBDEiBCDKiPCwtXmm/wOq7n/lD/0jR1J6qpepBoz5Yvfk
-# GlUF4jANBgkqhkiG9w0BAQEFAASCAgBsyND1ahOw3Apxx4ERNZ9zq02IIbpxYKIn
-# sVNB8/SZStzq9wsSs1V3TGkWYPRWgf9zlNg0qPdzackx7PZCfslUnGpURAcMBBkn
-# 7n04jM0vAlAMVXyvYqFP3ub3Y6br6twr2M422YuF8QZiTDzVGKx1CuRy/wgE/6b6
-# B3mTAaOUv2vBZfytzhBbWjPaFRyxqdr8sbKcg0I6VLXWNsObPAaPGehf0aHesIWn
-# nQ72QbQ0KJEGcPOOHI6Q9VaO+cXlb56icOPV3ziBBVAVr5UthW2Xq0O0mY40t0gT
-# QQh6gLnaWH56nL/8xy0PVFJD+6OyU/411EJsVi+cM7DCVj+gEl4ub1fB7QkbzbyF
-# 6/qJb7Oym8WRSakVtiwVm/Z8hwmjG2WDVEI8aTIZG65RfDJ4NqSqhwF7H8CfA+1o
-# knaIVXkYsUhfE2i8PXRjcTVtPjgWSNwAIqkL8T3yB4RHA4VLCfcbxskG9b+akRuj
-# AVLdG7oXqIoIVTBJrY6ZW5PPvY0/E7ZvT7XWPHq9ne8RhlydCPYRnp6piKcRBuNz
-# tkbiBEfT3TstuP2rTOA2bUYXD9X0LRTgQNpHXPNY53SmQgAfzUhtslifu/RLLjPL
-# M+p5zMaCxJHXo5Q3vtLk9DlkXl1cbCxfjDGZwU976FsIw7x4TrNfqE9K7lt0eEBH
-# +fHjxNYCOA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDgxMzIw
+# MTRaMC8GCSqGSIb3DQEJBDEiBCBVtINqWOE0LBUwmYfdX2P+q4/yc+bMSRI4a/Dh
+# CwhllDANBgkqhkiG9w0BAQEFAASCAgCkcAJpv4hTCVOKXLspg1zddI4EzjneugTr
+# Iqn2+Qj77A0SZNwkMNic1fM+63iF2xByukVQN8hgtaNKOGKBV1r7zb4drPbjm2qN
+# HFCtUzF/WvAeBwxJKbiK6eifJ9klDqxjPslGExZtwn91iiJlf4q0xKeW7m+6SjHz
+# zUXXgCUATZRVf9lZdOvEApilb+PmqdGT93/nlCzZIcr+5uJWWExn1wuQppZHHMlQ
+# 0ZRTLP8X3UBOzwb7bBg30mIDMuGthzr0Qtao1KFtlcAEm/zvcEsSmRdP2atpuh8f
+# DDcKxQw7pQ6wrBL94R4RM7m3zK96z8o4gEGz6aFuwOSj1XeikoLWDOfczr5CcVfZ
+# a1n2xyf9dsIM0R6YLUpZ6YKrhuz+eO5yBnJ7hzxypqBu6OQyNt6YJNrsoUGMMckN
+# aZtbsYriJthuLoWddvvBGsu4UQEZdjhMfGRox68UdsiGcSwmt3WedrMeNZUSey2q
+# j8Yl0Hw1Q/Q8O/rdXxMRk4wtE8CuVA90WiXtmhMuRP5q4/gewBUa7HP0oBhVOzcI
+# lkHNgri++lWRBxge+AWhsnkRp4seChl8nQvGspd7HpCuat+1qRriXFvtmn8xHmQa
+# +xi6CHGpzqiNWWSymbbhdT6SE9EJOclJdMNJ320LRHwbiD5zLDmMX37FxQZ6Yz9z
+# xjzoO2fcmw==
 # SIG # End signature block

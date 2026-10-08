@@ -1,4 +1,4 @@
-﻿Import-Module (Join-Path $PSScriptRoot 'SmartM365.SharePointJsonTransition.psd1') -MinimumVersion '1.0.3' -Global -ErrorAction Stop
+﻿Import-Module (Join-Path $PSScriptRoot 'SmartM365.SharePointJsonTransition.psd1') -MinimumVersion '1.0.4' -Global -ErrorAction Stop
 Import-Module (Join-Path $PSScriptRoot 'SmartM365.JsonTransport.psd1') -MinimumVersion '1.0.2' -Global -ErrorAction Stop
 . (Join-Path $PSScriptRoot 'SmartM365-CmdbReceipt.ps1')
 . (Join-Path $PSScriptRoot 'SmartM365-MailMaintenance.ps1')
@@ -4353,9 +4353,13 @@ function Invoke-SmartM365GraphRestWithRetry {
         [int]$DefaultRetrySeconds = 15,
         [int]$MaximumRetrySeconds = 300,
         [string]$Operation = 'Graph request',
-        [hashtable]$AdditionalHeaders = @{}
+        [hashtable]$AdditionalHeaders = @{},
+        [switch]$AllowMissingJsonMetadata
     )
 
+    if ($AllowMissingJsonMetadata -and ($Method -ne 'GET' -or $Uri -notmatch '^https://graph\.microsoft\.com/v1\.0/drives/[^/]+/root:/[^?]+\.json(?:\.txt)?$')) {
+        throw 'Optional absence is limited to exact SharePoint JSON metadata lookups.'
+    }
     for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
         try {
             $token = Get-SmartM365GraphAccessToken -Purpose $Operation
@@ -4372,6 +4376,18 @@ function Invoke-SmartM365GraphRestWithRetry {
             }
             if ($null -ne $Body) { $params.Body = $Body }
             if (-not [string]::IsNullOrWhiteSpace($ContentType)) { $params.ContentType = $ContentType }
+            if ($AllowMissingJsonMetadata) {
+                # PS7 status inspection avoids recording an expected 404 as a terminating error.
+                $reply = Invoke-WebRequest @params -SkipHttpErrorCheck
+                if ([int]$reply.StatusCode -eq 404) { return $null }
+                if ([int]$reply.StatusCode -lt 200 -or [int]$reply.StatusCode -ge 300) {
+                    $httpFailure = [Microsoft.PowerShell.Commands.HttpResponseException]::new(('HTTP {0}: {1}' -f $reply.StatusCode, $reply.Content), $reply.BaseResponse)
+                    throw $httpFailure
+                }
+                $metadata = ConvertFrom-Json -InputObject ([string]$reply.Content) -ErrorAction Stop
+                if ($null -eq $metadata) { throw 'Empty SharePoint JSON metadata response.' }
+                return $metadata
+            }
             return Invoke-RestMethod @params
         }
         catch {
@@ -4782,7 +4798,7 @@ function Invoke-SmartM365SharePointCsvUpload {
             $null = Read-SmartM365JsonDocument -Path $fileInfo.FullName
             $transition = Invoke-SmartM365SharePointJsonNameTransition -LocalFilePath $fileInfo.FullName -DriveId $driveId -EncodedTargetPath $targetPath -StateFolderPath $JsonTransitionStateFolderPath -Request {
                 param($method,$uri,$body,$headers)
-                Invoke-SmartM365GraphRestWithRetry -Method $method -Uri $uri -Body $body -AdditionalHeaders $headers -Operation 'Transition SharePoint JSON name'
+                Invoke-SmartM365GraphRestWithRetry -Method $method -Uri $uri -Body $body -AdditionalHeaders $headers -Operation 'Transition SharePoint JSON name' -AllowMissingJsonMetadata:($method -eq 'GET' -and $uri -match '/root:/')
             } -Download {
                 param($uri,$destination)
                 Invoke-SmartM365GraphFileDownloadWithRetry -Uri $uri -OutputFilePath $destination -Operation 'Verify SharePoint JSON rename' | Out-Null
@@ -5139,7 +5155,7 @@ function Invoke-SmartM365SharePointFileDownload {
         if($targetPath -match '\.json(?:\.txt)?$'){
             $bytes=Receive-SmartM365SharePointJsonBytes -DriveId $driveId -EncodedTargetPath $targetPath -Request {
                 param($method,$requestUri,$body,$headers)
-                Invoke-SmartM365GraphRestWithRetry -Method $method -Uri $requestUri -Operation 'Resolve JSON download'
+                Invoke-SmartM365GraphRestWithRetry -Method $method -Uri $requestUri -Operation 'Resolve JSON download' -AllowMissingJsonMetadata:($method -eq 'GET' -and $requestUri -match '/root:/')
             } -Download {
                 param($downloadUri,$temporaryPath)
                 Invoke-SmartM365GraphFileDownloadWithRetry -Uri $downloadUri -OutputFilePath $temporaryPath -Operation 'Download JSON bytes'
@@ -6236,8 +6252,8 @@ Export-ModuleMember -Function `
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAazlFeDp79pbuv
-# Ll0EO+CodU++JBbFpyi05jePJUtuO6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB3EWkd8RckTXVm
+# iy5LPu8One9o92ueP0slOTdObUyk+qCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -6370,31 +6386,31 @@ Export-ModuleMember -Function `
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIGk3p9lMUVTJaSB7iy3rVhSTfRhEZnGyjXrVACMWhWfTMA0GCSqG
-# SIb3DQEBAQUABIIBgBgusC8PYClU+SwY6ak71SUD03dGrpVnB1awW217f/YvZyVj
-# oZy5cm7OHB6PPUMK8zYm1BC6xw6fm2ueCUxyW4dKFrvbgik9lDSbvinjEWDqNBOX
-# y+BwpXVy1xizvwsn8drcLFXSVeYkeQBx7eUHQPh4bDhkNq1Y7wPwWrcn9YM6IGj5
-# ZUq/f2MQxyjiE8CztyBVsZlUaHVtTu3CmVPZdQdWa1c37rT3jq+zvWrmLBO6Fq6u
-# /OiFcktvSTJdUfZkYMOFe5newsQT1hhHZ3cC1y/sWdmwIuQShxSPsjbtlRiTTXdJ
-# n8gXkHl4fTYjJ0Vgf8rqEKTxyQ9WwfD5wXFpToAlxHN0xD57UEdZU+yQJLwtGY3B
-# 1COEBFRlMGEXzrDskatoshCAf6PF3P/JrRkhXpeeWqt5qj4C5qZZccRjUtjzYnj8
-# Oc1mtKHwZpnyRZJ5PKZtcI9pz5pYBVLBwf1hNcLQ3WQmFCnWD/Wra6ip923rDlbD
-# wUiAVf5tbE3YXIV9rqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIEYVNeyqarcb9ytULOhb8jJV1q2xqOw0RMmUxuV0jUWWMA0GCSqG
+# SIb3DQEBAQUABIIBgJQwIHQyF6IJeSlORuZIvbYn9/FCCPg44DqN3L3f/VrkDFMp
+# ApgwTdpgEQxmR+CZU56/p1btAYI+PczN5RzLRRGrjUGpITXyFKfb17c8xoXvkAoc
+# TUGfDqBvJkLdm+JQ8oBmOAqK6VmIFpiI16ncMw+TZcogOHRhgnH3rFdUp7ZvGRFH
+# WJZPKIftKr/3LaVSwFeyS69vtLQjNCnkLrf/XGEtet4doZU0XpFwfjwibKus6ddz
+# oxbnnCcluKBEjqSOpt5FH07Z+tQ0VDNkp+h3SjeS7v5KDMTTCC2cz2qqNNcg8uPj
+# kMrzadyq6QwtDr5obit6qDUqu1aVeKkLFqImj1XUSrJ/jeLSfeKQMe/cUjKHVyKU
+# CuE1KiwlNRjFm3TBV8TCOZFJCzByUCFjvMqrGok4XVNEngkiWns7uvT1tqDRgL8u
+# /QuLsN8a6sRNZ7kcs8gCMZoLFA5t8OcoAIYEek4V6nOqErLqWtVFlK8Maz90R58g
+# TlzPF69hIHBaldggL6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDcxMTM2
-# NTBaMC8GCSqGSIb3DQEJBDEiBCAfR9TpT8kmqW5aEk/tL9gPtZD7ZdFW3wir1HoN
-# HOE2LzANBgkqhkiG9w0BAQEFAASCAgAJNA20B5KeKvuYEyg3SJohujOcy9LHG/DZ
-# P3ZowXCXnP9eWsgw1Y9gpqdcqba476MYF6TRzFEr3pt0sbcUkiQ3oCwcIasv10FJ
-# es+4aU/N5sBXYU3QYaIl0wijnb4Eq731/bVccUITdPvfLj+XNTvD3F+8LYxiz5gz
-# IFgiDJWtpqE8GTLEHNcftsnAvsYLMy/T9R7quNPgjg9fsr4YxuCekG95qTtjOq6r
-# k4svqr+/Tw05KY0be+agomKFNbAB8bUvaQ8vHMkDIO0djC/LodMiXUIwvCqMiBGZ
-# Sr9plvkxh9qmPTQ9Mf/6ohTnHf88nquhscxYQdMu9qWj9KtrXRfqpfTqk08Jckfd
-# /0sWw5VxdlOm7U+/5wXoLNgWgMX7hrVXqn5HfRhcdhce23BqOPFIz1HolSwobkpU
-# 28MbHxM3oseKI7y5OnJze/Uo051sDrfIKW9qcZmdmDXUCdk2Y6meR5+iYULYyUCi
-# OsXJokAPK7F8A4Qza2D/5qzvqitxItXurq95ArVPUEMQxnbaY5N+Pp3JsM0CG3qo
-# ckgTIRo23m9HpH9hGTN9NI6Pog2cAaVY+sHJZ3GlQyFTLT0M/Aczk+Sfng3L7O+3
-# W7QwLXQtcxVV18KplH7k5AJ3gAmR8AfyzAE/BYGexzwTDsC/R3Ki9rH7CIj2ZmEj
-# wK6GB6VVXQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDgxMzIw
+# MTJaMC8GCSqGSIb3DQEJBDEiBCB4FyG7fcz6yZ4g6i37ZMLwjCo+kywksU0w2e6I
+# pkDNQzANBgkqhkiG9w0BAQEFAASCAgCSeEm0ybnylqU00AOlbml7i6alh8LRNDBT
+# WCJ32hV3KLsbIERAc5Rosw78xf3ardLV2JeORvau9gbF5VxaYoyQHdh6c5PodMI6
+# b5gLb0Vrx1FbFQWeYjh82lp9/9asi/rEpKRglWxc+3+2TMqBsr4QuzkB5pUmTZrn
+# OJf6JlxkX3wPAlNe7UmMS/WYY6bNsZw+YxgJpw5BV5QeJD6tn1yh3rhrCPjO0MhS
+# IbaQ75UoJeLIOqp8cgfJ1O0MTxGc0qwD0Hq2Kec5HkwRbkhNvknPgksznPwHclni
+# k3/Y5eYqlr/H3Kvb6iXAyqLpKD0DoIpup+AyJz6scAI35yH3BlO+Q0OPnyoJtkpL
+# ZXIuD4Bar90i1/tdX7bQvp1BFSuWeeBbU7nY7bUMd9Aw5ivkj/PezQXvul1rJ0BM
+# UZZ7cTediJlXsRcGl8q9L6rhu2AZ2S2gN3JmWUP2qP3ojhjVRIJRrkA5zkZLKYZc
+# 9yOPHljZE7FyBbOK/Eh8St/OrAYX92tuMk7nIZm+BoBbCLPNSdrqFM+sNxVVK2Mu
+# hetphTSQ0VrNBQSt2nbnsZEGCiaH8hNVTdVUS+ZKqr5xgH2v85FECHZ+5Z9Vr0BY
+# YGQa1Eoq119puXdeULJh1mccZfAknH/0jG8MhJ8tJf4gBusr0B6GTEnZX5wbItg7
+# J+gJ2F3ktA==
 # SIG # End signature block
