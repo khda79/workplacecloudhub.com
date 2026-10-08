@@ -3,10 +3,11 @@
 .SYNOPSIS
 Prepare the current-only CMDB reporting tables from proven SmartInventory CSVs.
 .VERSION
-0.3.11
+0.3.12
 .NOTES
 Local preparation by default. -Publish explicitly transfers the newly validated
 snapshot through the existing SharePoint publisher. -ValidateOnly never uploads.
+Normal run logs follow EnableSharePointUpload independently of the prepared batch.
 No collector, history or Power BI refresh is invoked.
 #>
 [CmdletBinding()]
@@ -14,10 +15,25 @@ No collector, history or Power BI refresh is invoked.
 param([string]$Tenant='test',[string]$SourceRootPath,[switch]$ValidateOnly,[switch]$Publish)
 Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
-$script:Version='0.3.11'
+$script:Version='0.3.12'
 $failure=$null; $runtimeInitialized=$false; $transcriptStarted=$false
 $core=$null; $previousTeamsGuard=$false; $teamsGuardInstalled=$false
-$savedOfflineGlobals=@{}; $preparationWarning=$false
+$savedOfflineGlobals=@{}; $preparationWarning=$false; $logUploadEnabled=$false
+function Get-SmartM365CmdbLogUploadEnabled {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][System.Management.Automation.PSModuleInfo]$CoreModule,
+          [Parameter(Mandatory)][System.Collections.IDictionary]$Configuration,
+          [switch]$ValidateOnly)
+    if($ValidateOnly){return $false}
+    $value=& $CoreModule {
+        param($config)
+        Get-ModuleLocalConfigValue -Config ([pscustomobject]$config) -Name 'EnableSharePointUpload' -DefaultValue $false
+    } $Configuration
+    if($value -is [bool]){return $value}
+    $parsed=$false
+    if([bool]::TryParse([string]$value,[ref]$parsed)){return $parsed}
+    throw 'EnableSharePointUpload must resolve to a Boolean for CMDB run logs.'
+}
 function Invoke-SmartM365CmdbPreparedPublication {
     [CmdletBinding()]
     param([Parameter(Mandatory)][object]$PreparationResult,
@@ -55,9 +71,9 @@ try {
     $smartRoot=Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
     . (Join-Path $smartRoot 'Config/SmartM365-TenantContext.ps1')
     $effective=Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot
-    Import-Module (Join-Path $smartRoot 'Modules/SmartM365.Core/SmartM365.Core.psd1') -MinimumVersion '1.0.66' -ErrorAction Stop
+    Import-Module (Join-Path $smartRoot 'Modules/SmartM365.Core/SmartM365.Core.psd1') -MinimumVersion '1.0.80' -ErrorAction Stop
     # WriteLog can notify Teams using module-local settings, independent of the
-    # global toggle. Suppress its existing callback for this offline invocation.
+    # global toggle. Suppress its existing callback for this preparation invocation.
     # This is in-memory only: no module/config file is changed.
     $core=Get-Module SmartM365.Core
     $previousTeamsGuard=& $core {
@@ -67,6 +83,7 @@ try {
     & $core { $script:SmartM365TeamsNotificationInProgress=$true }
     $teamsGuardInstalled=$true
     $config=Read-SmartM365JsonConfig -Path (Join-Path $PSScriptRoot 'SmartM365-CmdbEvidence-Prepare.local.json.txt') -Required
+    $logUploadEnabled=Get-SmartM365CmdbLogUploadEnabled -CoreModule $core -Configuration $config -ValidateOnly:$ValidateOnly
     if (-not $SourceRootPath) {
         $SourceRootPath=if($config['LatestCsvFolderPath'] -and $config['LatestCsvFolderPath'] -notin @('__USE_GLOBAL__','USE_GLOBAL')){
             [string]$config['LatestCsvFolderPath']
@@ -77,19 +94,33 @@ try {
     $output=Join-Path (Split-Path $source -Parent) 'DATA-POWERBI-CMDB'
     $pythonName=if($config['PythonCommand']){[string]$config['PythonCommand']}else{'python'}
     # Keep logs in LOG-ALL; initialization must not create the protected output.
-    foreach($name in @('EnableSharePointUpload','EnableTeamsNotifications','SmtpServer','From','To','ErrorMailTo')){
+    foreach($name in @('EnableSharePointUpload','EnableTeamsNotifications','SmtpServer','From','To','ErrorMailTo',
+            'SharePointSiteHostname','SharePointSitePath','SharePointLibraryDisplayName','SharePointTargetFolderPath',
+            'AppId','TenantId','Thumb','Thumbprint')){
         $variable=Get-Variable -Name $name -Scope Global -ErrorAction SilentlyContinue
         $savedOfflineGlobals[$name]=@{Exists=($null -ne $variable);Value=$(if($null -ne $variable){$variable.Value}else{$null})}
     }
     $global:EnableSharePointUpload=$false
     $global:EnableTeamsNotifications=$false
     $global:SmtpServer=''; $global:From=''; $global:To=''; $global:ErrorMailTo=''
+    if($logUploadEnabled){
+        foreach($name in @('SharePointSiteHostname','SharePointSitePath','SharePointLibraryDisplayName','SharePointTargetFolderPath','AppId','Thumb')){
+            $value=& $core {
+                param($config,$key)
+                Get-ModuleLocalConfigValue -Config ([pscustomobject]$config) -Name $key -DefaultValue ''
+            } $config $name
+            Set-Variable -Name $name -Scope Global -Value ([string]$value)
+        }
+        $global:TenantId=[string]$effective.TenantId
+        $global:Thumbprint=$global:Thumb
+    }
     $logBase=Resolve-SmartM365CmdbPreparationLogPath -CoreModule $core -LogRootPath ([string]$effective.LogAllRootPath)
     InitializeScriptEnvironment -OutputPathInit $logBase -LogFileName 'SmartM365-CmdbEvidence-Prepare' -CallerScriptPath $PSCommandPath | Out-Null
     $runtimeInitialized=$true
     Start-Transcript -Path $global:logTranscriptFile -Append | Out-Null
     $transcriptStarted=$true
     WriteLog -Message "CMDB preparation $script:Version. Source='$source'; Output='$output'; ValidateOnly=$ValidateOnly; Publish=$Publish. ValidateOnly never uploads." -Level INFO
+    WriteLog -Message "Run log SharePoint upload enabled: $logUploadEnabled; prepared batch publication requires -Publish and successful generation." -Level INFO
     if(-not $ValidateOnly){
         Import-Module (Join-Path $PSScriptRoot 'SmartM365-CmdbSharePointTransfer.psm1') -Force
         $identity=@{}
@@ -132,11 +163,16 @@ try {
         Invoke-SmartM365CmdbPreparedPublication -PreparationResult $result -PreparedRoot $output -TenantProfile $Tenant -PublisherInvoker $publisherInvoker
         WriteLog -Message 'CMDB preparation and verified SharePoint publication completed. No collection, history or Power BI refresh.' -Level SUCCESS
     } else {
-        WriteLog -Message 'CMDB local preparation completed. No collection, history, report switch or publication.' -Level SUCCESS
+        WriteLog -Message 'CMDB local preparation completed. No collection, history, report switch or prepared-batch publication.' -Level SUCCESS
     }
 } catch { $failure=$_; throw } finally {
     try {
-        if($runtimeInitialized){Complete-SmartM365ExecutionContext -Status $(if($failure){'Failed'}elseif($preparationWarning){'CompletedWithWarnings'}else{'Success'}) -ErrorRecord $failure -FailureStage 'CmdbPreparation'}
+        if($runtimeInitialized){
+            # Enable only completion-time traces; the prepared batch has its own publisher.
+            $global:EnableSharePointUpload=$logUploadEnabled -and -not $ValidateOnly
+            Complete-SmartM365ExecutionContext -Status $(if($failure){'Failed'}elseif($preparationWarning){'CompletedWithWarnings'}else{'Success'}) -ErrorRecord $failure -FailureStage 'CmdbPreparation' -CloseTranscriptBeforeUpload
+            $transcriptStarted=$false
+        }
     } finally {
         try {if($transcriptStarted){Stop-Transcript | Out-Null}}
         finally {
@@ -153,8 +189,8 @@ try {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBg546cIO2Pz2Et
-# e4KvHJEtvrulZs+PqUBEA4UOKEVsN6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDqDuUJRt5nt6uE
+# 5iDXvZ7Bmt8Z+Jgh9oDAlWmRB2lryKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -287,31 +323,31 @@ try {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIM9ExLQ9VSi1SfezPAlmeoj33ReMpyLpUwEzJDSdnopWMA0GCSqG
-# SIb3DQEBAQUABIIBgKsmkGgVB7FkACeMG+4c8WW0O1k8uSi/OKUor4osDWeSpnkb
-# KZbLOIT0LiN+PKk2YnO3OUw+nlAfqL8yv0PG2a8cmxMXNOGHxsJs3iIY0yFsGN3L
-# MFNvQPTvRA+NSkj34H0iAyfMyHEH3cLiId1vlRjOrxBmvW/ZeEPj8+vni+rOsLAx
-# uZQ0YomphBP9+f7skysrjATKN1gK1Ac36xvl1zwyo7bcUY/TRj+dNDde2JVWZM4E
-# J0/ILDPpcbP70kurAF7/mnWsoelUGPJ1mguto8zALRJTlP7sZykq4ercyR0dViY+
-# fEXMI/Rkwe/e0PDCX6nbgE3gQ7CLKXusefpefbZnDjfy3dyqUNzQ7k0Lf2YmDpk0
-# KJYiYJH0W4TS6RHPtWmB/Ns6NqF8uNiKfmuPNwYDwQ8hy0hH5UdxpQ48+YNQpEXP
-# WeOpz5m3uB31abq1h669/5cKDiEtURuDkyUZmDNqUzNbHG+y1texIRgiOpluljH8
-# 9ixp1OvLuZ2QxtbRf6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIPdTn295At8set9GGBKhts1g9aQUpKBGWLa7RqA6XvYHMA0GCSqG
+# SIb3DQEBAQUABIIBgAOZmBJhe7EF+bZ3iKVKp3Y5gz3f217oGRgwjXxBPrcsp6y6
+# t1k3pws1Wsky1Ps8W4Dj6GGNsqeiXepfnRStVK2R48r/wNlbZA+T9iLgF2+HIEJp
+# jdE7ID/3jTvMh3vyut0sin+Sa5FMwzNP3HL2MNFVVeFHYX2COoe84BlIbV1LXyMf
+# RSem/svdig8uTZzM0CnLJTyu41Swut+HK/Xo6ijifClPlhJnDK4XN5qhxiGmvamt
+# emFC813Og82L1KP1x/wGji5qNnZT8EJUzpB2dsFXmfrY7j8ZDMmQjTFYp8on8heI
+# IMj/LAmdRjpmV9BOLxoi1WFiY4fucQ+78j4oHjMkLwwDvmVQeIcrc/AE0u3I48OP
+# G5FwXTWl6fc4WZu1Y0U/xgSsJcfxlgP0V3LtQcKoucfqET95LGsxTx3FhdivvG04
+# n4vnc4ZTUvLvOAYvH3JYLjHTkMqC+sc4M2EnpONAcyu4FSAF0jrnxnB/IU4vF4w7
+# MpLhj+VyWvd9OXGBEqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDcyMjU4
-# MzNaMC8GCSqGSIb3DQEJBDEiBCDeKupN9EGSh/QKmesRbSRyMMn927u1eyHJrgNm
-# RWi1pzANBgkqhkiG9w0BAQEFAASCAgBsOpIWvcdFFIveBiTob4ZAVcYWJ1C5WjNz
-# TfvyYB6Rlo7EHBwBsGqAK44/p800IqZ1zfoojjeQAxH5C4/wz8juBMBfikIw1vG9
-# +3oQq5Ve5N1R3Aql5MY05GFeLya04WpCUVCpnMjjELrOsKGPyRBh0uF8rWYGRBS2
-# ek9NmhHEXRCv2gfz1WM/tZXMQC/RoO1qSrqk5ZtPKJusB1152Ux19pipnoerXQ9i
-# LOz4trSaba18ypaMQEKBmxVYuaKjGHfTDa5kLHcvLeBHwXX46fvpDAsRfc86MFN5
-# 940/xcW8Gvn8HfPRAwRaP22pzwcjb+YQ+6Kk1Nhh4CcvA7MIABNJPV4dnd5H+oa2
-# /sk7ri5J9CJ5FG1/h5jdxewsuetMxgVkPPXxUIyPXRzrjrRT/LEqVcAd5sRXn69R
-# ray7d1JW/B420NGBMdiiUQ8aRxJXlQhzQMFBB7ujjUCrrjZ80NUFsRwbwaHwEX4F
-# AqkiryQiaG2cG2adp+VCy/WeFvU0fgKpdgxdLYPXLYv3jv0S++dWewQE4BDZMGAI
-# Ig4aPxu16Icryvk8N+52g8KDNgejFjZdtZjDD739iM/fsKLJT3PZhdHtEvxC2mTw
-# zKZqb7ODGdsVNB4yLj2oejXdfJr2hZCHgEJVDwxe5bITJpot3xZbSrmgXf2f9oWQ
-# ZoF4qU6/mQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDgwNzQ1
+# NDdaMC8GCSqGSIb3DQEJBDEiBCA2h2obpFvbVmzQ6ojF7MB4n9d6GVq9bR4xyPo5
+# SkAsyTANBgkqhkiG9w0BAQEFAASCAgALTk19UdiDwM4M+LUaIZgXCsx/WKNSk0gO
+# QeOLOEylL2oyf3pZ1IX6w04RWJubNBz146ONUmDLPitrTNnoIuxoCKP7gPfejYaR
+# mWBkGxYtdIy/Zyu6ZylaZSNnPss0sfoZiWzM19gVB8V2c2FzyaM/W7faYHZR1uCC
+# raHvefJYKr++YyUN4/RNzGDicmL6fc8J2vhoGAgYIUaXwJC8/sjHV9yd3ziffBN+
+# INOGosbbHzKVBVY0HOnX4GwqrEbmSCg0MYG/1MzFkTO8rZEeR+0G7unpSF2tCQdM
+# K+e1g6GL/WA08PoXIw2v8VSk7CfZUM0adfDr2gMDAZw20XbUBASp5ueyCYM6IP/I
+# 5AbARp0xVSrwBAgY5DCk6whQakwMu4dplgtGhhL4PQi2HnbK1QkNDjqjRneXPv7g
+# qcF10nagTyg9qpvUZWXjkqv1TkbsDW32aeZUfVoj8kBzMHu/YlsDfnyS81nXSBKt
+# Lj8vJZgo7IXZa4U43R2pJ0mUOMxcxQtadG0BD5o8rzMuEPHDOxPgNXWWPAtsY+X3
+# YOCXx57JWTl9riWIe8+vh9h9zZlyeGtkcEpwChLcF/ACdjlrON/8Hbv8jtqnZouM
+# c/CFGIzyWICC4spsdzOkdfHDek2BEIInceZ73WZXmzR6m8vqLiZol4y7lkJAzt/t
+# ca4thH2beQ==
 # SIG # End signature block

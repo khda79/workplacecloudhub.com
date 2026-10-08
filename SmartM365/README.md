@@ -126,6 +126,11 @@ publication in that run. The candidate preparation consumes these receipts and
 replace Intelligence's `DATA-POWERBI`. No scheduler or production report switch
 is made by this change. See `SmartInventory/PreparedEvidence/CMDB-PREPARATION.md`.
 
+CMDB preparation uploads its closed run log and transcript according to
+`EnableSharePointUpload`, independently of the prepared batch's explicit
+`-Publish` switch. `-ValidateOnly` transfers neither logs nor data. Logs stay in
+`LOG-ALL/SmartM365-CmdbEvidence-Prepare`; no new Graph permissions are required.
+
 `Intune/Remediation/GUI/SmartM365-IntuneRemediation-GUI.ps1` is intentionally interactive only. It administers Intune remediation packages through Microsoft Graph `deviceHealthScripts` with delegated `DeviceManagementScripts.ReadWrite.All`, uses the tenant selected during interactive sign-in, and also requests `DeviceManagementConfiguration.Read.All` for execution-report export jobs and `Group.Read.All` to enrich assignment exports with group names. It does not use SmartM365 app-only certificate authentication. The current repository does not contain a separate remediation CLI.
 
 See `Setup/SmartM365-AppRegistration-Permissions.md` for the permission-by-permission rationale and the scripts that use each permission.

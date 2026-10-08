@@ -1,6 +1,6 @@
 # Current-only CMDB preparation
 
-Generator version: 0.3.11. PowerShell entry point: 0.3.11. Prepared contract: 0.3.7.
+Generator version: 0.3.11. PowerShell entry point: 0.3.12. Prepared contract: 0.3.7.
 Status: explicit automation available; activation and Power BI qualification remain deployment steps.
 
 ## Scope and execution boundaries
@@ -23,8 +23,13 @@ The log initialization path is resolved through Core's existing configuration
 resolver before directory creation. Blank, relative or unresolved paths are
 rejected instead of creating directories containing literal configuration tokens.
 Core's automatic Teams log callback is suppressed in memory during this
-local preparation invocation, and automatic log upload is disabled. No local module or
-tenant configuration is changed to disable notifications permanently.
+local preparation invocation. Normal runs upload the closed transcript and run log
+through Core completion when the script's `EnableSharePointUpload` is enabled;
+`__USE_GLOBAL__` inherits the tenant/global setting. This flag controls run logs,
+not prepared-batch publication. `-ValidateOnly` never transfers logs or data, even
+with `-Publish`. No module or tenant settings are permanently changed to suppress
+notifications. Existing local configuration values are preserved; the new template
+key is merged by the standard configuration loader.
 
 `-ValidateOnly` validates acquisition proof, raw CSV contracts, and native license
 assignment/service-plan coverage. Separately collected snapshots may contain a

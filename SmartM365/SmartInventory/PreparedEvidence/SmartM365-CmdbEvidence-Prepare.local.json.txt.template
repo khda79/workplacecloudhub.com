@@ -1,4 +1,5 @@
 {
   "LatestCsvFolderPath": "__USE_GLOBAL__",
-  "PythonCommand": "python"
+  "PythonCommand": "python",
+  "EnableSharePointUpload": "__USE_GLOBAL__"
 }
