@@ -1,8 +1,8 @@
 # SmartInventory to SmartWorkplaceCMDB source contract
 
-Status: migration candidate, not a qualified replacement for the CMDB collection pipeline.
-Contract version: 0.5.0.
-Executable preparation contract: 0.3.1 (`cmdb-prepared-contract.json.txt`).
+This is the native source/metric reference, not a private deployment qualification record.
+Executable preparation contract: 0.3.7 (`../cmdb-prepared-contract.json.txt`),
+with 34 sources and 46 reporting tables. See [CMDB preparation](CMDB-PREPARATION.md).
 
 ## Ownership and boundaries
 
@@ -30,7 +30,7 @@ logs, audits, models containing data, and local configurations remain private.
 | Entra users | `M365_Users_Active.csv` | Tenant + `Object Id` | The filename does not imply enabled-only. Retain disabled accounts and guests. UPN is an attribute, not identity. |
 | AD users | `AD_Users_AllDomains.csv` | Tenant + `ObjectGUID` | Include users without UPN. Preserve SID, immutable ID, domain, primary group, and classification separately. Do not infer human status from enabled status. |
 | AD workplace computers | `AD_Computers_AllDomains.csv` | Tenant + `ObjectGUID` | Keep explicit workplace scope. Do not claim this Windows-workstation export is all AD computer objects. |
-| AD domains | `AD_Domains_AllDomains.csv` | Tenant + `DNSRoot` | Preserve domain SID, NetBIOS name, forest, DN, mode and directory roles. A failed domain query blocks the full run. |
+| AD domains | `AD_Domains_AllDomains.csv` | Tenant + `DNSRoot` | Preserve domain SID, NetBIOS name, forest, DN, mode and directory roles. Only explicitly tolerated connectivity failures may qualify with declared incomplete domain coverage; other failures block qualification. |
 | AD groups | `AD_Groups_AllDomains.csv` | Tenant + `ObjectGUID` | Retain direct member DNs; resolve identity from native keys. Unresolved/external members stay evidence gaps, not silent drops. |
 | AD object identities | `AD_DirectoryObjects_AllDomains.csv` | Tenant + `ObjectGUID` | Minimal native GUID/SID/DN/class evidence includes no-UPN users, servers, contacts and foreign security principals. This is not a full server hardware inventory. |
 | AD memberships | `AD_GroupMemberships_AllDomains.csv` | Tenant + group GUID + member DN + membership kind | Resolve direct members from MembersJson, which preserves semicolons in DNs; keep unresolved/external evidence. PrimaryGroup membership is separate from direct member-list evidence. |
@@ -58,17 +58,17 @@ logs, audits, models containing data, and local configurations remain private.
 | Team memberships | `M365_Teams_Members.csv` | Tenant + `TeamId` + `UserId` + `Role` | Preserve guests and orphan-user evidence. Do not multiply team counts through child joins. |
 | User activity | `M365_Users_Activity.csv` and user sign-in evidence | Tenant + observed native user identity / qualified UPN match | Preserve workload/report date. Missing sign-in history does not prove a user never connected or wasted a license. |
 
-## Current source-export additions
+## Source-export requirements
 
-The candidate adds full-device, full-group, domain, license-path and capacity
+The contract includes full-device, full-group, domain, license-path and capacity
 evidence, plus successful-sign-in evidence. Legacy diagnostic device exports
 remain Windows-filtered for their existing consumers; those outputs are not the
 source of full CMDB fleet counts.
 
 New source exports use strict immutable-key completeness and uniqueness gates.
 The legacy Windows inventory also retains every managed-device ID instead of
-discarding same-name devices. This corrects a coverage loss: Intelligence's
-device counts and joins require requalification before deploying the candidate.
+discarding same-name devices. Counts and joins require verification against the actual native population,
+not totals from an older filtered export.
 A per-user license-resolution failure blocks licensing CSV publication rather
 than publishing a misleading complete run. Identical readiness IDs may be
 collapsed; duplicate names cannot determine which physical device is kept.
@@ -94,19 +94,19 @@ membership type/status, Teams member-count, and update-alert provenance/key
 headers. Missing headers block preparation; blank legitimately unavailable values
 remain separate from missing schema, zero population and successful collection.
 
-The WorkplaceScope collector remains a non-scheduled candidate. Its four exports
-are validated after all required Graph families succeed. The shared Core helper
-now integrates current completion receipts into 17 producers for the 33 required
-CMDB source CSVs. The public registry declares exact producer/file/scope ownership.
+WorkplaceScope's four exports are validated after required Graph families succeed;
+its runtime job determines scheduling. The shared Core helper integrates current
+completion receipts into 17 producers for the 34 required CMDB source CSVs. The public registry declares exact producer/file/scope ownership.
 Every receipt records full tenant identity, native scope, run/version, acquisition
 interval and actual logical CSV row counts/SHA-256 hashes. Running, failed,
 restricted, reused and unavailable acquisitions cannot claim completed full scope.
 There is no CMDB receipt history or global all-collector transaction. Preparation
 assembles the 17 validated current receipts; no extra raw aggregate is required.
 
-Applications now cover all Intune platforms. Complete current product/device
-footprint requires All-mode relations and per-app count agreement; Top/None
-evidence cannot supply this metric. All-mode does not reuse the previous-run
+Applications now cover all Intune platforms. Observed weekly product/device
+footprint requires All-mode relations; Top/None evidence cannot supply this metric.
+Reported/observed count differences and unresolved current parents remain
+explicit nonblocking qualifications, not invented matches or zeroes. All-mode does not reuse the previous-run
 cache. A resumed run remains labelled ReusedEvidence; preparation must qualify
 its acquisition interval rather than relabel it as a fresh collection. MaxApps
 and MaxItems outputs cannot replace canonical complete filenames.
@@ -158,29 +158,28 @@ Metric requirements:
 - Application product footprint counts distinct managed-device IDs across versions.
 - Mailbox hosting and mailbox recipient type are separate measures.
 
-## Promotion gates still required
+## Qualification boundaries
 
-1. Qualify the integrated producer freshness/completion verification on the
-   collection host. Static, synthetic and PowerShell interoperability tests are
-   not proof that all real native families, privileges and empty cases qualify.
-   Do not trust old CSV timestamps or fabricate receipts for previous exports.
-2. Qualify candidate SDK commands, permissions, production volumes and native
-   export semantics on the collection host. Local synthetic Intelligence and
-   source regression checks pass; real historical/source equivalence is pending.
-3. Qualify the candidate current-only preparation job on complete native producer
-   proof. The local engine now prepares 46 flat tables from 33 raw sources,
-   validates the current manifest and uses fail-preserving local replacement.
-   See [CMDB preparation](CMDB-PREPARATION.md) for execution boundaries, receipt
-   requirements, semantic differences and remaining equivalence checks.
-4. Adapt the CMDB semantic model to the single final output root. Verify all ten
-   pages, slicers, joins and measures in Desktop without tenant publication.
-5. Run one consolidated real collection/qualification campaign on the collection
-   host. Compare source/result populations, joins, coverage and quality findings.
-6. Only after acceptance, retire the CMDB collectors and obsolete configuration;
-   perform approved Git publication and private-data cleanup separately.
+Every cohort requires current producer proof, declared scope, tenant identity,
+native keys, schemas and exact receipt/file hashes. Core sources retain their
+48-hour acquisition limit; weekly Apps use a 168-hour target and 240-hour maximum.
+Preparation does not make independent source snapshots simultaneous.
 
-Offline tests and successful parsing are not real tenant qualification. Do not
-switch the production report or remove the working collectors before these gates.
+Explicitly tolerated AD connectivity outages retain expected/collected/unavailable
+domain coverage. Weekly Apps and native licensing children may retain unresolved
+current parents under the preparation rules. Required identities, SKU/plan parents,
+hashes and integrity remain blocking; missing evidence never becomes an invented
+object or zero.
+
+Verify sources, prepared/transferred files and the consuming model against a
+specific deployed revision and cohort. Revalidate native populations, joins,
+quality findings, slicers and all current report pages after relevant changes.
+Synthetic tests, scheduler success and Git publication do not prove live
+tenant completeness, cloud transfer or Desktop/Service refresh.
+
+Legacy CMDB collectors are not prerequisites. Do not restart them or substitute
+their old outputs for canonical SmartInventory evidence. Code deployment never
+authorizes unrelated private-data cleanup.
 
 ## Native API references
 

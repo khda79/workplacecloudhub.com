@@ -1,7 +1,8 @@
 # Current-only CMDB preparation
 
 Generator version: 0.3.11. PowerShell entry point: 0.3.12. Prepared contract: 0.3.7.
-Status: explicit automation available; activation and Power BI qualification remain deployment steps.
+This guide describes supported behavior, not the qualification status of a private deployment.
+See [deployment and operation](DEPLOYMENT.md) for shared prerequisites and logs.
 
 ## Scope and execution boundaries
 
@@ -57,7 +58,7 @@ fails the combined job rather than reporting preparation as upload success.
 is requested by this switch. Required acquisition proof is never fabricated
 from existing files or their timestamps.
 
-For reviewed scheduler activation, see [CMDB automation](CMDB-AUTOMATION.md).
+For scheduler activation, see [Automation and scheduling](#automation-and-scheduling).
 Qualify the report against a complete transferred cohort before applying it.
 
 ## Native license user link qualification (contract 0.3.7)
@@ -234,9 +235,9 @@ These small current lock files are not uploaded. Receipts use atomic local
 replacement and the existing configured SharePoint artifact transport on
 completion. No external transport is invoked by the offline test suite.
 
-Full-scope prerequisites include unrestricted AD forest collection; local
-mailboxes with `-IncludeRemoteMailboxes`, fresh overwrite and no collection
-issues; all-mode fresh application relations without cache/resume reuse;
+Full-scope prerequisites include declared AD forest/domain coverage; local
+mailboxes with `-IncludeRemoteMailboxes`, fresh overwrite and no blocking
+acquisition issues; all-mode fresh application relations without cache/resume reuse;
 both EADevicePerformanceV2 and EADeviceScoresV2; successful device-level
 readiness rather than summary-only fallback; feature and quality update
 alerts; the Office365ActiveUserDetail activity report; unrestricted Teams
@@ -245,10 +246,12 @@ usage-report scope (OneDrive inclusion is not a claim of full site discovery).
 Read-only and MAXITEMS runs do not create canonical completion evidence.
 Optional workload enrichment is not silently reclassified as full evidence.
 
-DiscoveredApps 1.30 provides the explicit non-destructive `-FreshDeviceDetails`
-option for this acquisition gate. The inactive integration specification and
-remaining cadence/deployment approvals are described in `CMDB-INTEGRATION.md`.
-The active orchestrator manifest/template is not changed by that specification.
+DiscoveredApps provides the explicit non-destructive `-FreshDeviceDetails`
+option for this acquisition gate. It requires `-DeviceDetailMode All`, no
+MaxApps/MaxItems limit and no `-ResetResume`. Fresh mode preserves the previous
+owned checkpoint before acquiring new evidence; repeating a fresh run starts
+over rather than relabelling resumed relations as fresh proof.
+See [Automation and scheduling](#automation-and-scheduling) for job configuration.
 
 Every required filename must have its own file record in its producer's receipt; the example is not a
 complete proof. `Rows` counts parsed logical CSV records, not physical lines.
@@ -289,7 +292,8 @@ Intelligence contracts/history keys and existing reports remain unchanged.
 
 ## Weekly application freshness
 
-The DiscoveredApps job is already weekly (Sunday 00:00). Keep its complete
+DiscoveredApps is weekly; the runtime manifest sets the actual occurrence.
+Keep its complete
 `-DeviceDetailMode All -FreshDeviceDetails` acquisition; no sampling or relation
 cache reuse is introduced. The two Apps CSVs form one explicit freshness group:
 acquisition age up to 168 hours is within target; strictly above 168 hours emits
@@ -495,8 +499,9 @@ batches before refreshing.
 - The current calendar covers the preparation year. Temporal model behavior,
   real source equivalence, joins, quality finding completeness and production volume
   still require qualification before the existing CMDB report can be replaced.
-- Native tuple-derived keys differ from legacy CMDB keys. Bookmarks, joins,
-  slicers, measures and all ten report pages need separate model/Desktop tests.
+- Native tuple-derived keys must agree with the consuming model. Bookmarks,
+  joins, slicers, measures and every current report page require tests against
+  the deployed revision and selected cohort.
 
 ## Offline verification
 
@@ -520,3 +525,159 @@ establish production data equivalence or Graph permission completeness.
 The source and output inventories are defined in
 `cmdb-prepared-contract.json.txt`; do not relax its checks merely to get an
 existing incomplete export through preparation.
+
+## Automation and scheduling
+
+`SmartM365-CmdbEvidence-Orchestrator.ps1` reviews or explicitly applies
+two jobs through the existing shared configuration API. It does not submit a
+pipeline, launch collectors, change maintenance, or edit Intelligence output.
+Default execution only validates the proposed configuration and logs its plan.
+Use `-Apply` after deployment prerequisites and actual Power BI qualification.
+
+### Proposed defaults
+
+| Job | Default schedule | Timeout | Action |
+| --- | --- | --- | --- |
+| M365-WorkplaceScope-Inventory | Daily 00:05 | 720 minutes | Native groups/membership/configuration collection |
+| CmdbEvidence-Prepare | Daily 07:30 | 180 minutes | Prepare 46 CSVs, then verified SharePoint publication |
+
+These are reviewable operating defaults, not measured duration guarantees.
+`-ScopeTime` and `-PreparationTime` accept local `HH:mm` times. Both use
+`RunOnce` for a missed occurrence. The preparation job has two retries, 15
+minutes apart. The scheduler's existing locks and concurrency keys still apply.
+An existing enabled WorkplaceScope job is preserved without rescheduling it.
+
+Both new jobs are pinned to the single explicitly supplied `-AllowedServers`
+worker. Elected mode ignores that property, so it is not used as an apparent
+eligibility filter. Verify PowerShell 7, Python 3.10+, required SDK modules,
+certificate access, raw/private configuration paths, Graph permissions and
+SharePoint `Sites.Selected` write access **under the resident account** first.
+Hidden groups additionally need the collector's hidden-membership permission.
+This helper validates manifest structure, cluster membership and consistency;
+it does not prove those live prerequisites or install them.
+
+### Dependency and freshness boundaries
+
+Preparation keeps all 17 native producer dependencies. Its `FreshSuccess`
+scheduler gate is 240 hours to accommodate weekly DiscoveredApps. Independently,
+generation checks current source receipts and acquisition ages: core sources
+48 hours; Apps maximum 240 hours, warning after 168 hours. Weekly application
+relations retain their approved nonblocking coverage warnings. No acquisition
+timestamp is reset just by preparation or upload.
+
+The existing DiscoveredApps weekly schedule and arguments are not changed by
+this helper. No application collector is launched by preparation. When Apps
+passes its maximum age, a completed native collection is needed before a new
+cohort can be published.
+
+Manual source receipts do not create orchestrator success records. In particular,
+the first scheduled preparation can wait for the newly registered WorkplaceScope
+job, or another dependency with no fresh scheduler success. Inspect the existing
+GUI's pending-job reasons; do not fabricate success records or automatically
+recollect all sources to clear the gate. Maintenance continues to block scheduled
+launches, including these jobs; manual preparation remains separately available.
+
+### Review and activation
+
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\SmartM365\SmartInventory\PreparedEvidence\SmartM365-CmdbEvidence-Orchestrator.ps1 -Tenant test -SharedDataFolderPath '<absolute authoritative Orchestrator path>' -AllowedServers '<verified PS7 worker>'
+# After qualification, repeat the exact reviewed command with -Apply.
+```
+
+Only the two integration entries can be added/replaced. Conflicting existing
+entries are rejected; existing native WorkplaceScope configuration is preserved.
+Other jobs and cluster configuration are retained. Publication uses the snapshot
+hashes to refuse concurrent configuration edits and verifies the resulting
+configuration by read-back. Repeating an identical application skips publication.
+This is an explicit deployment helper, not an automatically enabled repository
+template. Private server names and paths belong in private runtime arguments.
+
+### Preparation and publication
+
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\SmartM365\SmartInventory\PreparedEvidence\SmartM365-CmdbEvidence-Prepare.ps1 -Tenant test -Publish
+```
+
+`-ValidateOnly` always remains nonpublishing. Without `-Publish`, generation stays
+local. With it, the separate publisher verifies and reads back all 46 CSVs, then
+publishes `current.json.txt` last. A transport failure fails the job, retaining
+the local prepared output for investigation/retry. Flat-folder cloud replacement
+is not atomic: consumers must validate every manifest-bound hash and must not
+refresh during a transfer. See [publication boundaries](#separate-current-only-sharepoint-publication).
+
+The only prepared target is `DATA-POWERBI-CMDB`. Intelligence's `DATA-POWERBI`,
+raw `DATA-LAST`, and the old CMDB collection tree are not rewritten by preparation.
+There is no additional CMDB history and no automatic Power BI Desktop refresh.
+The report must load all 46 tables from one verified current cohort.
+
+Offline verification:
+
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\SmartM365\Tests\Test-SmartM365CmdbAutomationOffline.ps1
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\SmartM365\Tests\Test-SmartM365CmdbIntegrationCandidate.ps1
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\SmartM365\Tests\Test-SmartM365CmdbPreparationOffline.ps1
+```
+
+Offline success does not prove resident-account access, actual scheduling,
+SharePoint throughput/synchronization, or Power BI rendering.
+
+## Exchange local acquisition and recipient quality
+
+Exchange local collection qualifies full acquisition separately from recipient health.
+Every discovered domain is queried at its domain DN, including the forest-root
+containers (not only first-level OUs). Required queries are terminating on error.
+Their projections must preserve the exact native object-GUID population; missing,
+empty, repeated or substituted identities fail. The RemoteMailbox projection is
+checked against its unrestricted native query as well.
+
+Known recipient validation findings and unavailable statistics, quotas or mobile
+fields remain in the native issue CSV. Five additive columns declare Severity,
+CollectionImpact, BlocksCmdbQualification, ObjectGuid and NativeRecordRetained.
+An explicit category/operation
+allowlist distinguishes RecipientDataQuality and FieldUnavailable from blocking
+acquisition failures. Unknown warnings are retained and blocking; no wildcard
+exception or fabricated zero replaces missing evidence. Recipient findings are
+nonblocking only when their exact native Identity/DN/GUID resolves to one returned
+object; absent or ambiguous warning targets remain blocking. Complete query and
+projection evidence remains mandatory even when all issues are nonblocking.
+
+SMTP conflicts are reported without deleting or rewriting native records; they
+block qualification because address-based reconciliation is ambiguous. An empty
+SMTP remains a retained object-GUID record, not a duplicate blank address or a
+proven EXO match. The receipt includes aggregate qualification notes; the issue
+CSV keeps the detailed evidence. Existing failed receipts are never repaired or
+stamped retroactively: a new acquisition is required.
+
+The base mailbox/RemoteMailbox CSV schemas and Intelligence history keys are
+unchanged. Supplemental field failures still appear as Error/N/A in the existing
+exports, never as measured zero. Preparation does not activate jobs or change collection arguments.
+
+## Publication state and interrupted-transfer artifacts
+
+The current CMDB cohort remains exactly 46 CSVs plus current.json.txt. Hash,
+identity, completeness and acquisition-age checks are unchanged.
+
+CMDB publication directs the shared SharePoint JSON transition guard and durable
+recovery journal to the configured LOG-ALL/Publication/CMDB/SharePointTransition
+directory. No CSV or manifest copy is required. Other inventory uploads retain
+their existing default behavior when the optional state directory is omitted.
+
+Before real preparation or publication, legacy current.json.txt transition
+artifacts are relocated to that directory under the CMDB publication lock.
+The manifest must have the expected owner and full tenant identity. Each legacy
+file must be unlinked and exclusively available for relocation; the legacy lock
+must be empty. Files are preserved, not deleted. Existing destinations are never
+overwritten. Active locks, unknown cohort files, identity mismatches or conflicting
+recovery state fail closed. ValidateOnly does not relocate files.
+
+Run Test-SmartM365CmdbTransitionStateOffline.ps1 for synthetic fault checks and
+two successive real generation/mock publication cycles. These tests do not
+qualify live SharePoint publication, synchronization or Power BI refresh.
+Additional offline checks, from the repository root:
+
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\SmartM365\Tests\Test-SmartM365CmdbTransitionStateOffline.ps1
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\SmartM365\Tests\Test-SmartM365CmdbLogPolicyOffline.ps1
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\SmartM365\Tests\Test-SmartM365DiscoveredAppsFreshOffline.ps1
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\SmartM365\Tests\Test-SmartM365ExchangeLocalQualificationOffline.ps1
+```

@@ -115,16 +115,16 @@ cached evidence is labeled in the summary. Intelligence retains the numerical
 definition of legacy application history and labels its Windows scope; current
 product identity includes normalized name, publisher and platform, excluding version.
 Product/device footprint is distinct, while version-install observations remain
-separate. See `SmartInventory/PreparedEvidence/CMDB-SOURCE-CONTRACT.md` for migration gates.
+separate. See [CMDB source contract](SmartInventory/PreparedEvidence/docs/CMDB-SOURCE-CONTRACT.md) for source and qualification rules.
 
 The CMDB migration candidate adds current completion receipts to 17 existing
 SmartInventory producers, through SmartM365.Core 1.0.65 (Windows PowerShell 5
 compatibility 1.0.47). The receipts qualify source acquisition scope, not tenant
 health. They use `.json.txt`, preserve native CSV schemas, and require actual
 publication in that run. The candidate preparation consumes these receipts and
-33 raw CSVs into 46 tables in a separate current-only `DATA-POWERBI-CMDB`; it does not read or
+34 raw CSVs into 46 tables in a separate current-only `DATA-POWERBI-CMDB`; it does not read or
 replace Intelligence's `DATA-POWERBI`. No scheduler or production report switch
-is made by this change. See `SmartInventory/PreparedEvidence/CMDB-PREPARATION.md`.
+is made by this change. See [CMDB preparation](SmartInventory/PreparedEvidence/docs/CMDB-PREPARATION.md).
 
 CMDB preparation uploads its closed run log and transcript according to
 `EnableSharePointUpload`, independently of the prepared batch's explicit
