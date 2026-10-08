@@ -1,5 +1,5 @@
 """Build a local, source-only release candidate from an explicit Git file list."""
-__version__ = "1.0.3"
+__version__ = "1.0.4"
 import argparse
 import hashlib
 import json
@@ -10,9 +10,7 @@ import zipfile
 PROJECT = Path(__file__).resolve().parents[1]
 REPO = PROJECT.parents[1]
 PREFIX = 'SmartM365/SharePointMigration/'
-VERSION = '1.0.8'
-NEW_FILES = ['RELEASE-NOTES-1.0.8.md', 'Tests/Test-SharePointMigration.ps1',
-             'Tests/Test-LauncherHosts.ps1', 'Tests/test_comparisons.py', 'Tools/build_release.py']
+VERSION = '1.0.64'
 ROOT_FILES = ['LICENSE', 'NOTICE', 'Install-WorkplaceCloudHub-CodeSigningCertificate.cmd',
               'Install-WorkplaceCloudHub-CodeSigningCertificate.ps1',
               'Certificates/workplacecloudhub.com-CodeSigning-D70ECB7B00377EBFB76B304C08DFC6620584E114.cer']
@@ -28,7 +26,13 @@ def main():
     if archive.exists():
         raise SystemExit(f'Refusing to replace an existing candidate: {archive}')
     tracked = subprocess.check_output(['git', '-C', str(REPO), 'ls-files', '-z', '--', PREFIX], text=True).split('\0')
-    files = {p for p in tracked if p} | {PREFIX + p for p in NEW_FILES} | set(ROOT_FILES)
+    files = {p for p in tracked if p} | set(ROOT_FILES)
+    required_notes = PREFIX + f'RELEASE-NOTES-{VERSION}.md'
+    if required_notes not in files:
+        raise SystemExit(f'Release notes must be committed: {required_notes}')
+    if subprocess.check_output(
+            ['git', '-C', str(REPO), 'status', '--porcelain', '--untracked-files=all', '--', PREFIX, *ROOT_FILES], text=True).strip():
+        raise SystemExit('Release inputs must be clean and committed before packaging.')
     records = []
     excluded_workspace_markers = []
     for relative in sorted(files):
@@ -37,6 +41,11 @@ def main():
         if relative.startswith(PREFIX):
             if '.local.' in product_relative or '__pycache__' in product_relative or product_relative.startswith(('Tools/Python/', 'Output/')):
                 raise SystemExit(f'Runtime/private file rejected: {relative}')
+            if product_relative in ('Migrations/.gitkeep', 'ArchivedMigrations/.gitkeep'):
+                excluded_workspace_markers.append(relative)
+                continue
+            if product_relative.startswith('ArchivedMigrations/'):
+                raise SystemExit(f'Archived migration rejected: {relative}')
             if product_relative.startswith('Migrations/'):
                 parts = Path(product_relative).parts
                 if len(parts) >= 4 and parts[0] == 'Migrations' and parts[2:] in (

@@ -11,13 +11,13 @@ date is older than the source, so a copied file that is not at the latest source
 version is visible in the comparison workbook.
 
 The toolkit validates and reconciles evidence; it does not copy or migrate content.
-The dashboard component is **1.0.8** and the generic launcher is **1.0.19**.
-See [release notes](RELEASE-NOTES-1.0.8.md) for the changes and validation boundary.
+Release **1.0.64** includes dashboard **1.0.64** and generic launcher **1.0.28**.
+See [release notes](RELEASE-NOTES-1.0.64.md) for the changes and validation boundary.
 
 ## Install, Start, and Update
 
-Version **1.0.8** is distributed through the
-[GitHub release](https://github.com/khda79/workplacecloudhub.com/releases/tag/sharepoint-migration-toolkit-v1.0.8)
+Version **1.0.64** is distributed through the
+[GitHub release](https://github.com/khda79/workplacecloudhub.com/releases/tag/sharepoint-migration-toolkit-v1.0.64)
 and the [existing source folder](https://github.com/khda79/workplacecloudhub.com/tree/main/SmartM365/SharePointMigration).
 Download the release ZIP together with its `.sha256` and `.manifest.json` assets.
 Verify the ZIP with `Get-FileHash -Algorithm SHA256` before extracting it, then open
@@ -28,7 +28,7 @@ No PowerShell Gallery package is published for this toolkit; do not use `Install
 Obtain the repository and keep the entire `SmartM365/SharePointMigration` folder;
 copying just the GUI script omits required helpers, assets and templates. Launch
 `Start-SmartM365-SharePointMigration-GUI.cmd` on Windows. The dashboard provides
-Overview, Files & Permissions, Operations, Migration Diagnostics, Logs and Config tabs; it discovers configured
+Overview, Files & Permissions, Migration Diagnostics, Batch runs, Operations, Logs and Config tabs; it discovers configured
 migration folders and displays the most recent output paths. An output timestamp
 or an available Open button is not proof that the whole scan succeeded: inspect
 the run log and any error CSV before accepting its results.
