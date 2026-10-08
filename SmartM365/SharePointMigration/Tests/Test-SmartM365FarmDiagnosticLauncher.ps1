@@ -2,7 +2,7 @@
 .SYNOPSIS
     Offline Windows PowerShell 5.1 farm diagnostic launcher routing test.
 .VERSION
-    1.0.1
+    1.0.2
 #>
 #Requires -Version 5.1
 [CmdletBinding()]
@@ -47,6 +47,8 @@ param([string]$Project,[string]$ToolkitRoot,[string]$ShareGatePeaksCsv,[int]$Win
 $value = '{0}|{1}|{2}|{3}' -f $Project,$ShareGatePeaksCsv,$WindowMinutes,[bool]$DryRun
 [IO.File]::WriteAllText((Join-Path $ToolkitRoot 'invoked.txt'),$value)
 if (Test-Path -LiteralPath (Join-Path $ToolkitRoot 'force-error.txt')) { Write-Host 'Simulated diagnostic failure.'; exit 23 }
+if (Test-Path -LiteralPath (Join-Path $ToolkitRoot 'force-incomplete.txt')) { return }
+$env:SPMIG_FARM_DIAG_COMPLETED_ID = $env:SPMIG_FARM_DIAG_EXPECTED_ID
 '@ | Set-Content -LiteralPath $fake -Encoding UTF8
     $marker = Join-Path $root 'invoked.txt'
 
@@ -96,6 +98,13 @@ if (Test-Path -LiteralPath (Join-Path $ToolkitRoot 'force-error.txt')) { Write-H
     if ((Get-Content -LiteralPath $marker -Raw) -cne ('Synthetic|{0}|30|False' -f $newCsv)) {
         throw 'Dedicated Run launcher did not remove DryRun.'
     }
+    [IO.File]::WriteAllText((Join-Path $root 'force-incomplete.txt'),'1')
+    $interrupted = @(& $runLauncher -Project Synthetic -ToolkitRoot $root 2>&1)
+    $interruptedText = $interrupted -join ' '
+    if ($LASTEXITCODE -ne 130 -or $interruptedText -notmatch 'Status\s+: CANCELLED' -or $interruptedText -match 'Status\s+: SUCCESS' -or $interruptedText -notmatch 'stopped before completion') {
+        throw "An incomplete diagnostic was not reported as cancelled: $interruptedText"
+    }
+    Remove-Item -LiteralPath (Join-Path $root 'force-incomplete.txt') -Force
     [IO.File]::WriteAllText((Join-Path $root 'force-error.txt'),'1')
     $failed = @(& $launcher -Project Synthetic -ToolkitRoot $root 2>&1)
     if ($LASTEXITCODE -eq 0 -or ($failed -join ' ').Contains('Farm diagnostic completed.') -or -not ($failed -join ' ').Contains('exit code 23')) {
@@ -112,8 +121,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBEbtLVN/JWlZ0N
-# 8yXjo3I+gRCsC2NdByinQOljW4xJ0aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBYa97vXCEJA6xz
+# ErsnmZFqeCkGr/csya2XhG6vm2dSMqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -246,31 +255,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIPZVuAU8UEtYm1z1xty7VyChKXL792Pu9cuzMoe20WURMA0GCSqG
-# SIb3DQEBAQUABIIBgGAi701S3GYGoRy7y9Bi3izbG/wkjvTPMIvDaUSGoWcN9fAY
-# 43XTwb3gC2uKBe2xbnpWnKuaoC88mnYLrBjVQeB0tVcpahmY7ku2wcbeR/q1LHJ0
-# koqHXuWpB8eEcyowTeDNIN46Dkoi9zMkhMECC3KAhpI3qpBsbjVi2iOQfeKy+PBt
-# p0JHJazzr+z4/vLN+kEkLkSIOMdFPsK6ahyzwvQotPkrSof5AC9NvzUMgt5DbAcd
-# 9M0rWbcHYytmdgFLb93uODJ7ag9E51LgwJPwQ4LLqmUOXctP2vUzUqg8FlLeW8gL
-# 68m5+WXSH5zSSJZEz5f1VhlI6rfeNOS5TvyQJTz2L3eiD0UPmyafbZQzZ4MxFfDY
-# 3nsAVI/V2QjbUVthM4NoMCbO55VjxnMMxCEainYsRNPvk9b9hDZ9W7iycPiMOAhw
-# KRKQm9nrfGlOKaKsXGM7zH84FPnPkGlfUZgtMW4LUi9MZGXRdQ/VyPMGdz3GJYrh
-# uM1KAv8bSF2ey28u+6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIBXrDeV2PNGpSvcxJ5brRCPWuOJfLhudJBLJBOU0E3sMMA0GCSqG
+# SIb3DQEBAQUABIIBgCEhFHRr9ig2IUq5NTYd0gV8DYaOGDcTT0dmJwD/yCntrB7L
+# 0Toy4mllXmNmLiRb7KxP3EVraQ3oywRHnteLpSj3LNKH2DXnvfhxaHH4FeU38JcK
+# AdOSYCkgC/dJyu97flUoOO6oqALhlVa4BoujpzxAjtM1NZoK9t7MT5hofhWTF3+P
+# voZZkPfTsyPwRpfgqKElNOY7gisFe0EZxt2CJelt/suAt9tYyVqZAZbR4hSH/Inj
+# 29DnXK1RN7X4mZkMnvzxlfOM7uVnqtqF+Y+8oLSPPJc6wveVMgveaP0V28K6ZnEl
+# CxuFFcKlbL4HAOCOMxJsr53kstCxK3bGbQC0POIeImwuUlZei0A89XyaXEEk4zpC
+# caZixJdPrpnaGYhM3aRMZeUWPbZJd1xbZ2gwD65bzQ46927TcHXiSrhAQ/+8be7v
+# ik/mU1QbmCeBpdu+7phN7y9PzjkOZJTWpe1ftiLssOMg0hNarEcV7ZYT6VCOpns1
+# aU2wc28gASS87kerHqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDgxNjEw
-# MzFaMC8GCSqGSIb3DQEJBDEiBCDrp6qjqobBh4FDtfAvtsg5egM+ceCbLHgDw8zY
-# uiaf6zANBgkqhkiG9w0BAQEFAASCAgCN6pKEf/tWBjNRFvyFdb75N0RJlvTzDpuO
-# Gz2m2wlbQbFswRBhxRCODv71NpxPx0Eu08+F5Cn2zCMrZ/UsV692dTG/iuv5/7IU
-# wPAiX8Mm3xq5YTd/hXSJcKTIY+M2yAQzBC+swl18+F9tG5jQWBc0w9LQAjVbT0j7
-# 91tQRFizfcqLrqr5JkkZ6qNrycwFYnrpCXpSyiWL6CrhHWUKzFOj1S6FoQ3lTgm4
-# NeTq8fRBVrdMoNrG641EWr3/80k4AK/T/XWmTxVYXWWqT61fs65caTzCiskisQjy
-# uv8qsbQgBrt3TriXv2/E7SxIS+qG8U/W+Q6F+QE1igLqcc67+WbXb5PQUr9JYEli
-# BaNpVgcaoBTQ6+sS2FAaVUsdZn1S3WeNA3/fwbHvMAOsq2lhJpYzi9vpUG/JaAF8
-# v2czSlthgbwDRG7yfN1Z8ozXyhrvwfNw4w6cuwJg51EJ3anMgBWaXtFi55RPxRwu
-# jWYFxrs16cAKVcOOKEAGQRlwuAtF1BiZ4e8GuVfJA3iiX6FYi5sFZ8a2HtDZdrSd
-# DLqjHiXrmnkSGdc/ZIq0NBM1zNWuSiiPaeq3QI9p+QV1ZW5hkgH0B5pIfL1MAS6B
-# qlfhnGu47EPt8pazf6LshiKpFjKJYxmb5BoUk6fopkwJ6k54zYVNXoqr9ivkFigx
-# 6aEc5iuZyw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDgyMDQx
+# MTBaMC8GCSqGSIb3DQEJBDEiBCAvr6UZk0IQgiOdDZJ/Z1QsiLATeyg0iOZ19oZx
+# b/DlDzANBgkqhkiG9w0BAQEFAASCAgBCjDkjKSP13L8EKZD374cHgk/85eb7abFH
+# l1qUCgLtrJW1tzzxAh8g/HByV3dsVrzcKvqcx0Y0uNcNMaAMCFqdaOayHM2GBoTR
+# C9W4K+PX5nlrqUDlfLJGAJC8PQ5O/D7pSGvKPqOG0TERYposIh4fU8Qxg5kG4HCw
+# fnEl49agIVmkpTUzdOmhE8YoKVAixKWq4Y748/zflfNvY64FRj97ckt9YWagMaSJ
+# nVVDLp898wix77969ZuRx8r/g+ldC5OOaZhSkVkn2aLpKpFraG9yzlAfchw1ohq8
+# W8r294qPR5+ski+pK/k1ib0Iw4e3EOAgKSWjNhwX6vEiQSF7KfX8Q+vAmuAPCzD7
+# eoRiT/dCYyi22S/pIqSDYOHvR2LTNmG3CfH5PNc296YbMp3Q+W78YduFH0ysO4SO
+# 6DZgBdd+ghsyNv/j2Amg+5x4jcJUJTkGr7UZuGjKUC+Rwht4jpLu5f5vg2z+Tcn0
+# PY9l7H8k/fTmwzOACJEk3QVnj0f5oH6DKERobrKFLtxDfM1lHpVCe2fq2CXmB66v
+# zL/pT590S/g+1InbuogDs6FflpbM14iUgigflMxDr4B8de5ZS2Yocc/lP7uQsrzz
+# jLwemAZq7xj4Al9yVJZTUcAHe02FFX5ebvoRlsRVco4mfybdg1itTlDIL8FDGUmZ
+# d9TGNC3Tgg==
 # SIG # End signature block
