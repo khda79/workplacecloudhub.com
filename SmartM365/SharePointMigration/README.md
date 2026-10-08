@@ -14,6 +14,41 @@ The toolkit validates and reconciles evidence; it does not copy or migrate conte
 Release **1.0.64** includes dashboard **1.0.64** and generic launcher **1.0.28**.
 See [release notes](RELEASE-NOTES-1.0.64.md) for the changes and validation boundary.
 
+## Working source reliability updates
+
+The working source after release 1.0.64 includes these review corrections:
+
+- Overview, inventory selectors and generic launchers order completed scans by
+  receipt completion time, then legacy filename time. Synchronization or copy
+  times do not make an older scan the latest. Error sidecars and invalid receipts
+  are excluded; selecting a receipt does not recompute its inventory hash.
+- Source and destination SharePoint group membership caches are scoped to the
+  site collection. Membership lookup failures produce error evidence and block
+  final inventory publication. Transient failures receive bounded retries;
+  denied access and other permanent failures stop immediately.
+- Permission page enumeration resumes after the last fully processed item ID
+  following a transient transport failure, preserving streaming and avoiding
+  duplicate exports. Role-assignment collections also use bounded read retries.
+- SPO discovery and inventory reuse connections only for the exact web URL
+  within the same scan execution and authentication configuration.
+- Optional token diagnostics retrieve the SharePoint token through the supported
+  PnP command, tolerate unavailable details and never print the token.
+- Receipt row counts support comma, semicolon and tab CSVs, including quoted
+  fields that span multiple lines.
+- Global file and permission reports retain historical comparison rates and
+  expose `ComparisonFreshness`: `Uses latest scans`, `Recalculate`,
+  `Scan unavailable`, or `Review scan freshness`. Scan dates prefer the recorded
+  comparison completion times, then receipt times, then labelled legacy
+  filenames. Current scan gap/age columns and configured age/gap limits make
+  freshness distinct from the historical comparison time.
+
+Offline regression checks cover copy-time inversions, invalid/error receipts,
+site collections sharing group IDs, failed and recovered membership reads,
+optional token claims, connection reuse, resumed pages with nonconsecutive IDs,
+terminal retry failures, multiline CSVs and global report freshness. These checks
+are separate from qualification on a SharePoint farm or SPO tenant. Existing
+inventories must be renewed to benefit from the membership collection fixes.
+
 ## Install, Start, and Update
 
 Version **1.0.64** is distributed through the
@@ -47,7 +82,9 @@ refresh checkbox. Refresh keeps unsaved configuration edits and the selected
 log; turn the checkbox off to stop automatic updates.
 Overview shows every configured migration, including those without a completed
 comparison. It displays the mapped source and destination, with separate file
-and permission scan dates in each source and target scan cell. The displayed gap
+and permission scan dates in each source and target scan cell. Each date appears
+green when the scan is from today, independently for files and permissions on
+both sides. The displayed gap
 in decimal days compares the file scans. Rates and comparison dates are separate
 for files and permissions. The file rate is matched
 files divided by source unique keys;

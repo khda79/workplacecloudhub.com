@@ -1,5 +1,5 @@
 """Create a portable, copy-resistant receipt for a completed inventory CSV."""
-__version__ = "1.0.0"
+__version__ = "1.0.1"
 
 import argparse
 import csv
@@ -29,7 +29,13 @@ def inspect_csv(path):
         for block in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(block)
     with path.open("r", encoding="utf-8-sig", newline="") as handle:
-        reader = csv.reader(handle)
+        header = handle.readline()
+        handle.seek(0)
+        try:
+            dialect = csv.Sniffer().sniff(header, delimiters=",;\t")
+        except csv.Error:
+            dialect = csv.excel
+        reader = csv.reader(handle, dialect=dialect)
         columns = next(reader, [])
         rows = sum(1 for _ in reader)
     if not columns:

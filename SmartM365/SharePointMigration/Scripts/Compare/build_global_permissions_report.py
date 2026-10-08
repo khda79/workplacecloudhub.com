@@ -1,5 +1,5 @@
 """Summarize the latest available permission comparison for each migration, offline."""
-__version__ = "1.0.0"
+__version__ = "1.0.1"
 
 import argparse
 import csv
@@ -12,7 +12,7 @@ from urllib.parse import quote
 from uuid import uuid4
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from build_global_report import download_bar, roots, stamp, write_global_workbook
+from build_global_report import comparison_scan_evidence, download_bar, roots, stamp, write_global_workbook
 from report_html import metric_card, render_report
 
 
@@ -77,8 +77,8 @@ def collect(migrations_root):
         target_keys = count(summary, "TargetUniqueKeys")
         matched = count(summary, "MatchedPermissions")
         compared_at = stamp(path.parent.name)
-        source_at = stamp(summary.get("SourceCsv", ""))
-        target_at = stamp(summary.get("TargetCsv", ""))
+        scan_dates, freshness, date_notes, current_gap, current_age = comparison_scan_evidence(migration, summary, "permissions")
+        source_at, target_at = [value.astimezone().strftime("%Y-%m-%d %H:%M:%S") if value else "Unknown" for value in scan_dates]
         if "Unknown" not in (compared_at, source_at, target_at):
             compared_dt, source_dt, target_dt = (datetime.strptime(value, "%Y-%m-%d %H:%M:%S")
                                                  for value in (compared_at, source_at, target_at))
@@ -95,22 +95,20 @@ def collect(migrations_root):
         concerns = []
         if not source_keys or not target_keys:
             concerns.append("Empty inventory")
-        if scan_gap is None:
-            concerns.append("Scan date unknown")
-        else:
-            if scan_gap > 24:
-                concerns.append("Scan gap >24h")
-            if oldest_age > 48:
-                concerns.append("Scan age >48h at comparison")
         if summary.get("ScopeWarning"):
             concerns.append("Scope warning")
-        concerns.append("Filename date only in overview")
+        concerns.extend(date_notes)
+        if freshness != "Uses latest scans":
+            concerns.append(freshness)
         detail = next(path.parent.glob("*-summary-*.html"), None)
         row = {
             "Migration": migration.name,
             "SuccessPercent": f"{matched / source_keys * 100:.2f}%" if source_keys and target_keys else "N/A",
             "ValidationStatus": validation,
             "EvidenceNotes": "; ".join(concerns),
+            "ComparisonFreshness": freshness,
+            "LatestScanGapHours": f"{current_gap:.1f}" if current_gap is not None else "",
+            "OldestScanAgeNowHours": f"{current_age:.1f}" if current_age is not None else "",
             "ComparedAt": compared_at, "SourceScannedAt": source_at, "TargetScannedAt": target_at,
             "ScanGapHours": f"{scan_gap:.1f}" if scan_gap is not None else "",
             "OldestScanAgeAtCompareHours": f"{oldest_age:.1f}" if oldest_age is not None else "",
@@ -134,7 +132,7 @@ def collect(migrations_root):
 
 
 FIELDS = [
-    "Migration", "SuccessPercent", "ValidationStatus", "EvidenceNotes", "ComparedAt",
+    "Migration", "SuccessPercent", "ValidationStatus", "ComparisonFreshness", "EvidenceNotes", "ComparedAt",
     "SourceScannedAt", "TargetScannedAt", "ScanGapHours", "OldestScanAgeAtCompareHours",
     "Source", "Destination", "SourceRootPath", "TargetRootPath", "ScopeWarning",
     "SourceRows", "TargetRows", "SourceKeys", "TargetKeys", "MatchedPermissions",
@@ -142,16 +140,16 @@ FIELDS = [
     "TargetHasLessPermissions", "PermissionLevelDifferent", "SourceLimitedAccessOnlyIgnored",
     "TargetLimitedAccessOnlyIgnored", "SourceUsersNotInEntraIgnored", "SourceDuplicateKeysIgnored",
     "TargetDuplicateKeysIgnored", "EntraUserAliasesLoaded", "DisabledEntraUsersLoaded",
-    "SharePointGroupMappingsLoaded", "ComparisonReport",
+    "SharePointGroupMappingsLoaded", "ComparisonReport", "LatestScanGapHours", "OldestScanAgeNowHours",
 ]
 HEADINGS = [
-    "Migration", "Success %", "Status", "Evidence", "Compared", "Source scan", "Target scan",
+    "Migration", "Success %", "Status", "Freshness", "Evidence", "Compared", "Source scan", "Target scan",
     "Gap (h)", "Oldest age (h)", "Source", "Destination", "Source root", "Target root", "Scope warning",
     "Source rows", "Target rows", "Source keys", "Target keys", "Matched", "Missing in SPO",
     "Disabled users missing", "Extra in SPO", "Target more", "Target less", "Different levels",
     "Source limited access ignored", "Target limited access ignored", "Source users not in Entra",
     "Source duplicate keys", "Target duplicate keys", "Entra aliases", "Disabled Entra users",
-    "SharePoint group mappings", "Detail",
+    "SharePoint group mappings", "Detail", "Latest gap (h)", "Oldest age now (h)",
 ]
 
 
@@ -169,8 +167,8 @@ def build(migrations_root, output_directory):
     write_global_workbook(rows, FIELDS, HEADINGS, xlsx_path, count_fields=COUNT_FIELDS,
                           definitions=[
                               ("Success %", "Matched permissions / source unique permission keys in the compared scope."),
-                              ("Scan dates", "Derived from inventory CSV filenames in this overview; verify scan receipts before migration acceptance."),
-                              ("Evidence alerts", "The overview flags scan gaps above 24 hours and an oldest scan above 48 hours at comparison."),
+                              ("Scan dates", "Recorded comparison completion times, then current scan receipts, then legacy filenames. Selection does not re-hash receipts."),
+                              ("Evidence alerts", "Current scan freshness uses the configured permission limits (defaults: gap 24h, age 48h). Historic comparison rates require recalculation when newer scans exist."),
                               ("Scope warning", "Review the source comparison report when this field is populated."),
                           ], sheet_name="Latest permissions")
     body_rows = []
@@ -187,7 +185,7 @@ def build(migrations_root, output_directory):
             cells.append(f"<td>{value}</td>")
         body_rows.append("<tr>" + "".join(cells) + "</tr>")
     table = '<section class="section"><div class="section-heading"><h2>Latest permission comparisons</h2></div>'
-    table += '<p>One row per migration uses the newest top-level permission Summary.csv. Success % = matched permissions / source unique permission keys. Scan dates come from filenames and require receipt verification. Review ignored principals and scope warnings before accepting results.</p>'
+    table += '<p>One row per migration uses the newest top-level permission Summary.csv. Success % = matched permissions / source unique permission keys. Scan dates use recorded completion times, receipts or labelled legacy filenames. Freshness uses the newest complete inventories; historic rates may require recalculation. Receipt hashes are not recalculated in this overview. Review ignored principals and scope warnings before accepting results.</p>'
     table += '<div class="table-scroll" role="region" tabindex="0"><table><thead><tr>'
     table += "".join(f'<th scope="col">{escape(item)}</th>' for item in HEADINGS) + '</tr></thead><tbody>'
     table += "".join(body_rows) if body_rows else f'<tr><td colspan="{len(FIELDS)}">No permission comparisons available.</td></tr>'

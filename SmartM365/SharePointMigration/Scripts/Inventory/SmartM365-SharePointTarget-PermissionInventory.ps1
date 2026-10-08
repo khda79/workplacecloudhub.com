@@ -10,7 +10,7 @@
     as possible so both inventories can be compared.
 
 .VERSION
-    1.1.6
+    1.1.7
 #>
 
 [CmdletBinding(DefaultParameterSetName = 'WebUrlsFile')]
@@ -312,6 +312,16 @@ function Connect-ToSPOWeb {
         [string]$Url
     )
 
+    if (-not (Get-Variable -Name SPOPermissionConnections -Scope Script -ErrorAction SilentlyContinue)) { $script:SPOPermissionConnections = @{} }
+    $connectionKey = $Url.TrimEnd('/')
+    if ($script:SPOPermissionConnections.ContainsKey($connectionKey)) {
+        $cached = $script:SPOPermissionConnections[$connectionKey]
+        $script:SPOPermissionConnection = $cached.Connection
+        $script:SPOConnectedAccount = $cached.Account
+        Write-ConsoleMessage -Message ("Reusing this scan's connection to: {0}" -f $Url)
+        return
+    }
+
     Write-ConsoleMessage -Message ("Connecting to: {0}" -f $Url)
 
     $parameters = @{
@@ -361,6 +371,7 @@ function Connect-ToSPOWeb {
     $connection = Connect-PnPOnline @parameters
     $script:SPOPermissionConnection = $connection
     Write-SPOConnectionIdentity -Connection $connection -Url $Url
+    $script:SPOPermissionConnections[$connectionKey] = [pscustomobject]@{ Connection=$connection; Account=$script:SPOConnectedAccount }
     $tokenContext = '{0}|{1}|{2}|{3}|{4}|{5}|{6}' -f ([uri]$Url).Host, $Tenant, $TenantId, $ClientId, $Thumbprint, [bool]$DeviceLogin, $script:SPOConnectedAccount
     if ($script:TokenSummaryContexts.Add($tokenContext)) { Write-PnPTokenSummary -Connection $connection }
 }
@@ -405,47 +416,25 @@ function ConvertFrom-Base64Url {
 }
 
 function Write-PnPTokenSummary {
-    param(
-        $Connection
-    )
-
+    param($Connection)
     try {
-        $sharePointScopes = @(Get-PnPAccessToken -ResourceTypeName SharePoint -ListPermissionScopes -Connection $Connection -ErrorAction Stop)
-        if ($sharePointScopes.Count -gt 0) {
-            Write-ConsoleMessage -Message ("PnP SharePoint token scopes: {0}" -f ($sharePointScopes -join ' ')) -ForegroundColor DarkCyan
+        $token = Get-PnPAccessToken -ResourceTypeName SharePoint -Connection $Connection -ErrorAction Stop
+        if ($token -is [Security.SecureString]) {
+            $pointer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($token)
+            try { $token = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($pointer) }
+            finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($pointer) }
         }
-        else {
-            Write-ConsoleMessage -Message "PnP SharePoint token scopes: <none returned>" -ForegroundColor DarkYellow
-        }
+        if ($token -isnot [string] -or $token.Split('.').Count -ne 3) { throw 'Token details are unavailable.' }
+        $payload = ConvertFrom-Json -InputObject (ConvertFrom-Base64Url -Value $token.Split('.')[1]) -ErrorAction Stop
+        $appId = '<none>'; $scopes = '<none>'; $roles = '<none>'
+        if ($payload.PSObject.Properties['appid']) { $appId = $payload.appid }
+        elseif ($payload.PSObject.Properties['azp']) { $appId = $payload.azp }
+        if ($payload.PSObject.Properties['scp']) { $scopes = $payload.scp }
+        if ($payload.PSObject.Properties['roles']) { $roles = $payload.roles -join ' ' }
+        Write-ConsoleMessage -Message ("PnP token app id: {0}; scopes: {1}; roles: {2}" -f $appId, $scopes, $roles) -ForegroundColor DarkCyan
     }
-    catch {
-        Write-ConsoleWarning -Message ("Could not list SharePoint token scopes: {0}" -f $_.Exception.Message)
-    }
-
-    try {
-        if ($null -eq $Connection -or [string]::IsNullOrWhiteSpace($Connection.AccessToken)) {
-            Write-ConsoleMessage -Message "PnP token details: <not available>" -ForegroundColor DarkYellow
-            return
-        }
-
-        $parts = $Connection.AccessToken.Split('.')
-        if ($parts.Count -lt 2) {
-            Write-ConsoleMessage -Message "PnP token details: <unrecognized token format>" -ForegroundColor DarkYellow
-            return
-        }
-
-        $payload = ConvertFrom-Json -InputObject (ConvertFrom-Base64Url -Value $parts[1])
-        $appId = if ($payload.appid) { $payload.appid } elseif ($payload.azp) { $payload.azp } else { '<none>' }
-        $scopes = if ($payload.scp) { $payload.scp } else { '<none>' }
-        $roles = if ($payload.roles) { ($payload.roles -join ' ') } else { '<none>' }
-
-        Write-ConsoleMessage -Message ("PnP token app id: {0}" -f $appId) -ForegroundColor DarkCyan
-        Write-ConsoleMessage -Message ("PnP token scopes: {0}" -f $scopes) -ForegroundColor DarkCyan
-        Write-ConsoleMessage -Message ("PnP token roles: {0}" -f $roles) -ForegroundColor DarkCyan
-    }
-    catch {
-        Write-ConsoleWarning -Message ("Could not decode PnP token details: {0}" -f $_.Exception.Message)
-    }
+    catch { Write-ConsoleMessage -Message 'PnP token details: unavailable (optional diagnostic).' -ForegroundColor DarkCyan }
+    finally { $token = $null; $payload = $null }
 }
 
 function Get-SiteCollectionUrlFromWebUrl {
@@ -489,7 +478,7 @@ function Test-SystemList {
         $List
     )
 
-    $rootFolder = Get-PnPProperty -ClientObject $List -Property RootFolder -Connection $script:SPOPermissionConnection
+    $rootFolder = Invoke-SPORead -Label "RootFolder collection" -Operation { Get-PnPProperty -ClientObject $List -Property RootFolder -Connection $script:SPOPermissionConnection -ErrorAction Stop }
     $systemUrls = @(
         '_catalogs/masterpage',
         '_catalogs/wp',
@@ -565,6 +554,7 @@ function Get-AssociatedWebGroupNames {
 }
 
 $script:AssociatedWebGroupCache = @{}
+$script:SPOPermissionConnections = @{}
 $script:TokenSummaryContexts = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
 $script:SPOInheritanceLoad = $null
 $script:SPOInheritanceItemType = $null
@@ -600,7 +590,8 @@ function Get-EmptyPrincipalMembershipInfo {
 function Get-PrincipalMembershipInfo {
     param(
         $Member,
-        [string]$PrincipalType
+        [string]$PrincipalType,
+        [string]$SiteCollectionUrl
     )
 
     if ($PrincipalType -ne 'SharePointGroup') {
@@ -609,16 +600,18 @@ function Get-PrincipalMembershipInfo {
 
     $groupIdentity = if (-not [string]::IsNullOrWhiteSpace([string]$Member.Title)) { [string]$Member.Title } else { [string]$Member.LoginName }
     if ([string]::IsNullOrWhiteSpace($groupIdentity)) {
-        return Get-EmptyPrincipalMembershipInfo -Status 'Skipped: group identity is empty'
+        Write-InventoryError -Scope 'GroupMembership' -Url $SiteCollectionUrl -Name ([string]$Member.Id) -Message 'Group identity is empty.'
+        return Get-EmptyPrincipalMembershipInfo -Status 'Failed: group identity is empty'
     }
 
     $cacheKey = if ($null -ne $Member.Id) { [string]$Member.Id } else { $groupIdentity.ToLowerInvariant() }
+    $cacheKey = $SiteCollectionUrl.TrimEnd('/').ToLowerInvariant() + '|' + $cacheKey
     if ($script:SharePointGroupMembershipCache.ContainsKey($cacheKey)) {
         return $script:SharePointGroupMembershipCache[$cacheKey]
     }
 
     try {
-        $members = @(Get-PnPGroupMember -Group $groupIdentity -ErrorAction Stop -Connection $script:SPOPermissionConnection)
+        $members = @(Invoke-SPORead -Label ("membership of group '{0}' in '{1}'" -f $groupIdentity, $SiteCollectionUrl) -Operation { Get-PnPGroupMember -Group $groupIdentity -ErrorAction Stop -Connection $script:SPOPermissionConnection })
         $loginNames = @($members | ForEach-Object { $_.LoginName })
         $displayNames = @($members | ForEach-Object { $_.Title })
         $domainGroupMembers = @($members | Where-Object { [string]$_.PrincipalType -match 'SecurityGroup|DistributionList|SharePointGroup' })
@@ -634,7 +627,10 @@ function Get-PrincipalMembershipInfo {
         }
     }
     catch {
-        $info = Get-EmptyPrincipalMembershipInfo -Status ("Failed: {0}" -f $_.Exception.Message)
+        $message = Get-SPOExceptionDetails $_.Exception
+        Write-ConsoleWarning -Message ("Failed group membership collection in '{0}': {1}" -f $SiteCollectionUrl, $message)
+        Write-InventoryError -Scope 'GroupMembership' -Url $SiteCollectionUrl -Name $groupIdentity -Message $message
+        return Get-EmptyPrincipalMembershipInfo -Status ("Failed: {0}" -f $message)
     }
 
     $script:SharePointGroupMembershipCache[$cacheKey] = $info
@@ -684,7 +680,7 @@ function Get-RoleAssignmentRows {
             }
 
             $principal = Get-PrincipalInfo -Member $member
-            $membership = Get-PrincipalMembershipInfo -Member $member -PrincipalType $principal.PrincipalType
+            $membership = Get-PrincipalMembershipInfo -Member $member -PrincipalType $principal.PrincipalType -SiteCollectionUrl $SiteCollectionUrl
             [pscustomobject]@{
                 SiteCollectionUrl        = $SiteCollectionUrl
                 WebUrl                   = $WebUrl
@@ -738,11 +734,11 @@ function Export-ItemPermissionInventory {
     )
 
     $associatedGroups = Get-AssociatedWebGroupNames -Web $Web
-    $rootFolder = Get-PnPProperty -ClientObject $List -Property RootFolder -Connection $script:SPOPermissionConnection
+    $rootFolder = Invoke-SPORead -Label "RootFolder collection" -Operation { Get-PnPProperty -ClientObject $List -Property RootFolder -Connection $script:SPOPermissionConnection -ErrorAction Stop }
     $listUrl = ConvertTo-AbsoluteSharePointUrl -WebUrl $Web.Url -ServerRelativeUrl $rootFolder.ServerRelativeUrl
     $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
 
-    $state = @{ Processed=0; Unique=0; Exported=0; LastItem='<none>' }
+    $state = @{ Processed=0; Unique=0; Exported=0; LastItem='<none>'; LastCompletedItemId=0 }
     $script:SPOPermissionPageState = $state
     $script:SPOPermissionPageWeb = $Web
     $script:SPOPermissionPageList = $List
@@ -750,11 +746,19 @@ function Export-ItemPermissionInventory {
     $script:SPOPermissionPageInterval = $ProgressInterval
     $script:SPOPermissionPageStopwatch = $stopwatch
     try {
-        # Process the callback before the next page is fetched; do not retain the whole library.
-        Get-PnPListItem -List $List -PageSize $PageSize -Fields 'FileRef','FileLeafRef','FSObjType','UniqueId','ID' -Connection $script:SPOPermissionConnection -ScriptBlock {
-            param($PageItems)
-            Export-SPOPermissionPage -PageItems $PageItems -Web $script:SPOPermissionPageWeb -List $script:SPOPermissionPageList -CsvPath $script:SPOPermissionPageCsv -State $script:SPOPermissionPageState -ProgressInterval $script:SPOPermissionPageInterval -Stopwatch $script:SPOPermissionPageStopwatch
-        } -ErrorAction Stop | Out-Null
+        # Retry enumeration from the last fully processed page. The indexed ID order
+        # prevents duplicate exports even when the next HTTP response fails.
+        Invoke-SPORead -Label ("items in list '{0}' ({1})" -f $List.Title, $listUrl) -Operation {
+            $cursor = [int]$script:SPOPermissionPageState.LastCompletedItemId
+            $query = "<View Scope='RecursiveAll'><Query><Where><Gt><FieldRef Name='ID'/><Value Type='Counter'>$cursor</Value></Gt></Where><OrderBy><FieldRef Name='ID' Ascending='TRUE'/></OrderBy></Query><ViewFields><FieldRef Name='ID'/><FieldRef Name='FileRef'/><FieldRef Name='FileLeafRef'/><FieldRef Name='FSObjType'/><FieldRef Name='UniqueId'/></ViewFields><RowLimit Paged='TRUE'>$PageSize</RowLimit></View>"
+            Get-PnPListItem -List $List -PageSize $PageSize -Query $query -Connection $script:SPOPermissionConnection -ScriptBlock {
+                param($PageItems)
+                Export-SPOPermissionPage -PageItems $PageItems -Web $script:SPOPermissionPageWeb -List $script:SPOPermissionPageList -CsvPath $script:SPOPermissionPageCsv -State $script:SPOPermissionPageState -ProgressInterval $script:SPOPermissionPageInterval -Stopwatch $script:SPOPermissionPageStopwatch
+                foreach ($pageItem in $PageItems) {
+                    $script:SPOPermissionPageState.LastCompletedItemId = [Math]::Max([int]$script:SPOPermissionPageState.LastCompletedItemId, [int]$pageItem.Id)
+                }
+            } -ErrorAction Stop | Out-Null
+        } | Out-Null
     }
     catch {
         Write-ConsoleWarning -Message ("Failed to enumerate items for list '{0}' in web '{1}': {2}" -f $List.Title, $Web.Url, $_.Exception.Message)
@@ -767,7 +771,7 @@ function Export-ItemPermissionInventory {
 function Export-SPOPermissionPage {
     param($PageItems, $Web, $List, [string]$CsvPath, [hashtable]$State, [int]$ProgressInterval, $Stopwatch)
     $associatedGroups = Get-AssociatedWebGroupNames -Web $Web
-    $rootFolder = Get-PnPProperty -ClientObject $List -Property RootFolder -Connection $script:SPOPermissionConnection
+    $rootFolder = Invoke-SPORead -Label "RootFolder collection" -Operation { Get-PnPProperty -ClientObject $List -Property RootFolder -Connection $script:SPOPermissionConnection -ErrorAction Stop }
     $listUrl = ConvertTo-AbsoluteSharePointUrl -WebUrl $Web.Url -ServerRelativeUrl $rootFolder.ServerRelativeUrl
     $inheritance = Get-SPOPageInheritance -PageItems $PageItems -Web $Web -List $List -ListUrl $listUrl
     foreach ($item in $PageItems) {
@@ -779,7 +783,7 @@ function Export-SPOPermissionPage {
             }
             if (-not $inheritance.ContainsKey([int]$item.Id) -or -not $inheritance[[int]$item.Id]) { continue }
             $State.Unique++
-            $roleAssignments = Get-PnPProperty -ClientObject $item -Property RoleAssignments -Connection $script:SPOPermissionConnection
+            $roleAssignments = Invoke-SPORead -Label "RoleAssignments collection" -Operation { Get-PnPProperty -ClientObject $item -Property RoleAssignments -Connection $script:SPOPermissionConnection -ErrorAction Stop }
             $serverRelativeUrl = [string]$item.FieldValues.FileRef
             $absoluteUrl = ConvertTo-AbsoluteSharePointUrl -WebUrl $Web.Url -ServerRelativeUrl $serverRelativeUrl
             $fsObjType = if ([string]$item.FieldValues.FSObjType -eq '1') { 'Folder' } else { 'FileOrItem' }
@@ -902,7 +906,7 @@ function Export-WebPermissionInventory {
     $associatedGroups = Get-AssociatedWebGroupNames -Web $web
 
     try {
-        $webRoleAssignments = Get-PnPProperty -ClientObject $web -Property RoleAssignments -Connection $script:SPOPermissionConnection
+        $webRoleAssignments = Invoke-SPORead -Label "RoleAssignments collection" -Operation { Get-PnPProperty -ClientObject $web -Property RoleAssignments -Connection $script:SPOPermissionConnection -ErrorAction Stop }
         $rows = @(Get-RoleAssignmentRows `
                 -SiteCollectionUrl $siteCollectionUrl `
                 -WebUrl $web.Url `
@@ -947,7 +951,7 @@ function Export-WebPermissionInventory {
         $listUrl = $web.Url
 
         try {
-            $rootFolder = Get-PnPProperty -ClientObject $list -Property RootFolder -Connection $script:SPOPermissionConnection
+            $rootFolder = Invoke-SPORead -Label "RootFolder collection" -Operation { Get-PnPProperty -ClientObject $list -Property RootFolder -Connection $script:SPOPermissionConnection -ErrorAction Stop }
             $listTitle = $list.Title
             $listUrl = ConvertTo-AbsoluteSharePointUrl -WebUrl $web.Url -ServerRelativeUrl $rootFolder.ServerRelativeUrl
 
@@ -968,7 +972,7 @@ function Export-WebPermissionInventory {
 
             $isDocumentLibrary = ([string]$list.BaseType -eq 'DocumentLibrary')
             $listBaseType = if ($isDocumentLibrary) { 'DocumentLibrary' } else { '' }
-            $roleAssignments = Get-PnPProperty -ClientObject $list -Property RoleAssignments -Connection $script:SPOPermissionConnection
+            $roleAssignments = Invoke-SPORead -Label "RoleAssignments collection" -Operation { Get-PnPProperty -ClientObject $list -Property RoleAssignments -Connection $script:SPOPermissionConnection -ErrorAction Stop }
             $rows = @(Get-RoleAssignmentRows `
                     -SiteCollectionUrl $siteCollectionUrl `
                     -WebUrl $web.Url `
@@ -1268,8 +1272,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCARCDnU5/ZH9mu
-# AWlXZ/SUVP1caVBSXSIEQfX+lUhjcqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDUqJYeIC9n7Tq5
+# 7dTjTHTxXKrfvsZaICdZTTtpYCpZfqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1402,31 +1406,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIJXDGLmzDKVzE9AW0Uw+ofWipQkUq2op99x8FHntce1xMA0GCSqG
-# SIb3DQEBAQUABIIBgGTgsRraLolUtHVLj5iuyclFkbCgTQleROTyyLYsFuTRQzqe
-# 1EpAXmEta8XAUf+QNmob2TPJMpRoKAM4LT0MDsL8Di0P8rNiuJp6/4w6HD9+DznG
-# c9/nXYc8Vr0I4A6xhPiW9lXMcKx5u08JacanRS81WllR2mRUbSlnlbWabbkdc5xJ
-# K1GU/6pJs4qdGU5dMo5Qd3TkmG9BW+DFt/PMDtwiROEtIYATeJ6JeBIfYqra70Uf
-# DL5b7zMyZ2QtEU/Vpm/ttPSdDyetCx+fpPhPkn7Agieh+ePaEzlghn3+f+XYlz1g
-# Ymw9+f+hNFkP/t50J+31oYLmYPSrY6s2gfJAE1BBjDA6AwRUcsRNBcq8VG61cNmS
-# FkjZC+LrumKmfcWQNVff1Q1x515pwzJ5+MR8Hkg4qD2Pi451WIs0dTf/HnFYQJ7g
-# QZ2Ip2U9+MwT7QOZGyzivW4JrHi0r1VBkF3tFyJegEt7LrwnDjkBHvDLSwGsgTsc
-# X1ySMe06zZM1gfGzyKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIFYm/fh5dMONZm4jMfPcjy9YW+TylDlOu0rZdYyt2QX6MA0GCSqG
+# SIb3DQEBAQUABIIBgB0NDIe2Z73GBoMlKPtSlLM9jQ+6kpg+ATQr4g/bD87New5C
+# PX8mOyP+O+RJGOTCwTVFEj/lfYwQwCA9JChBLxG0P0uGn274BeXpTvaP2nc0f6wn
+# b7CFmScSvpS3YgcxydYoWKstoFRFgNVjn0UPcbX7A7ffErNiVt6rG2roZYjTYYmO
+# Md9i/AR4ssBQTkt2Ck1QhwPgIBAwdOthiiz4ZNGw8ZlUX1zBQB4MykUOEy4UX6Uq
+# A9D6mwMu/jUrC/wJntpV9B63K+oX0FeL9BHEWMclo0JOFW9CA6ra74iEZBriObQw
+# i7OWpqwxmRW9kon8wm+/ispgswAzKVSYSZq+BfyRlYIAqlia1g2kr6IUZDu4etlL
+# AiTK0F5ICNIeftoWLnrdj2555QVk/rmWeGppDqC2NjnUXVCJ3rx5IdmjjQCyPA5z
+# amDEfIy85EUheCTXAnvbsBTRLuKLicpyTI410D5JIesupKht90QISpyZ+mXIaJKi
+# D18UFGKsdkw74/D/VKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDgxMzEw
-# MjBaMC8GCSqGSIb3DQEJBDEiBCDSKJQxgdXOmki56XBAFJHtZkZYui1feekGGXDb
-# 1O9GpDANBgkqhkiG9w0BAQEFAASCAgBHWRtlK/Ss2DB6qi5S7VuuG7Ho7dJGk526
-# MrqU/cWT/2zQDcNj5jhfS+BQ0triPyj9GBgFfLjNc5oGjHMmsqZ9X339pWMp18jr
-# W75aqTkBG4ToYlZuYzGyYJSTT0LRXjrFw1JJjz4spjY2O3UTf9PrBuk4PkQq/ggQ
-# 7ed5CRGrksymlLCH1l8iBsD1TXogc/U6Mki2jF/e+ulbWY526+FFlpUh3Ulbi1cY
-# YQiK6+oNPUdN5Yy354zDBnwjpSD29BZPUNSuXJ3/CysdnsVx/lSST3r1FbKxkWn0
-# oYXgdVj2lraYD0J0hI6fV8qKR+pI7nxhYpez7nS5MDEyUo1n2zpPttt1GA1TGprk
-# q2zB95AiGboOs2b9Zb72ddz8ZUOYeQqsSJNOvV/PM458iBhvxIodblYUyDunHc+I
-# OWhe9Tlp4I/Y30sqW1kbR7HIaMVvgrAatW5b24Lley4xLTCQP2hyJZpCHH6wNhKH
-# Vtujngzb7X5YG/rwtKiZxWi5A5eMedsY7fkAqGGgPVefT7iy2I+wmShraoVnn7bJ
-# iLQOkPdi1ShBmTdTdxrLaYfWa5+XWDVO3kHx3J7zOuMBHlvPzxqHNfsYPrc/gBGn
-# SX4QF7rF7Eq1d0CddG/5fSym7WxgxnXIzIqrIZVM5/LHAGI0kfvF+KyQiyMp+uu2
-# ACaEEsJ2PA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDgxNDU4
+# MjRaMC8GCSqGSIb3DQEJBDEiBCCS4XNeGwgyL1yOmqFFaeROFsON0sDu9zHDw1Yb
+# JNputDANBgkqhkiG9w0BAQEFAASCAgB4iUFx/LPOFXxnxw/v2sc2PMkY3lwl1vBV
+# c1rEu2S989Ek6Bd1sO/yoOBp2ypW1AjVpu0dkCZOEyhaFFRFe+7w+PxQ3zfKDGqT
+# JmRZDida9rfmsMDRznZAp5o4l6/11gPaM0MQ9/dH5G8z2dv/3tEd0R8BjmuukpAX
+# vNHjNVQdc+I2Rri/V1QYV3nuRsZ+gXWHW2ZbPkoTTAcOZFHMIuombFBc5JkPJ9g8
+# nXinKKW8sWGKCqsi/aJ7AV76ddKi4ZMfUwLscFKLbbw8WKOgj7ovQ9sEh/5K7Dox
+# Os8T5V/ubC+1ffbtAz2jXnmgi8xzBeJhIZ36+9ZAjzGj9kYegdZMHdA4/E9u44vi
+# GegYfLRHIq9q5WaNmsxSMbMwbWHGqBKHjGUQSoJAijyz6lGn0jnSwSeYDpf0X+HL
+# FqjpeiaGmw/rPSxKVsBrltKvl24c6QVs5/qUzEBUWL8kas9cQGMUNmJKpk+bchu0
+# QMTasVOS4S9x7HwpvMje5A3Rm+OBi9E4DB7EDrYQBGKRm1ldRk4I6FH4hGuYlZ1d
+# A78co7bHCGPPlBmw3RgXkf9UFbbLQPTUGUxrEhYaBsvFHEXq80fqpCcwsl4EgCQz
+# ylR9kFwAxidcpOFZzvYxEz9Q1KCgm6SSAGMrRO4pgVRxHcFxv5lI00WNIWhrQaDG
+# 7necgpOgfQ==
 # SIG # End signature block

@@ -1,9 +1,10 @@
 """Summarize the latest available file comparison for each migration, offline."""
-__version__ = "1.0.0"
+__version__ = "1.0.1"
 
 import argparse
 import csv
-from datetime import datetime
+import json
+from datetime import datetime, timezone
 from html import escape
 from io import StringIO
 import os
@@ -40,7 +41,7 @@ COUNT_FIELDS = {
     "ChangedVersion", "SourceFilteredRows", "TargetFilteredRows", "SourceExcludedRows", "TargetExcludedRows",
 }
 DATE_FIELDS = {"ComparedAt", "SourceScannedAt", "TargetScannedAt"}
-DECIMAL_FIELDS = {"ScanGapHours", "OldestScanAgeAtCompareHours"}
+DECIMAL_FIELDS = {"ScanGapHours", "OldestScanAgeAtCompareHours", "LatestScanGapHours", "OldestScanAgeNowHours"}
 
 
 def write_global_workbook(rows, fields, headings, xlsx_path, *, count_fields=None, decimal_fields=None,
@@ -76,8 +77,8 @@ def write_global_workbook(rows, fields, headings, xlsx_path, *, count_fields=Non
     if definitions is None:
         definitions = [
         ("Success %", "Matched files / source unique keys in the compared scope. Extra target files are separate."),
-        ("Scan dates", "Derived from inventory CSV filenames in this overview; verify scan receipts before migration acceptance."),
-        ("Evidence alerts", "The overview flags scan gaps above 12 hours and an oldest scan above 24 hours at comparison."),
+        ("Scan dates", "Recorded comparison completion times, then current scan receipts, then legacy filenames. Selection does not re-hash receipts."),
+        ("Evidence alerts", "Current scan freshness uses the configured file limits (defaults: gap 12h, age 24h). Historic comparison rates require recalculation when newer scans exist."),
         ("Filtered rows", "A 100% success rate does not cover source or destination rows excluded by the scope filter."),
         ]
     note_sheet = StringIO()
@@ -132,6 +133,98 @@ def stamp(value):
         return datetime.strptime("".join(found.groups()), "%Y%m%d%H%M%S").strftime("%Y-%m-%d %H:%M:%S")
     except ValueError:
         return "Unknown"
+
+
+def scan_metadata(path):
+    """Read selection metadata only; this does not re-hash inventory contents."""
+    if not path.is_file() or path.name.lower().endswith("-errors.csv") or path.with_name(path.stem + "-Errors.csv").is_file():
+        return None
+    receipt = Path(str(path) + ".manifest.json.txt")
+    if receipt.is_file():
+        try:
+            data = json.loads(receipt.read_text(encoding="utf-8-sig"))
+            if (data.get("SchemaVersion") != 1 or data.get("InventoryFile") != path.name
+                    or not re.fullmatch(r"[a-fA-F0-9]{64}", data.get("Sha256", ""))
+                    or int(data["Rows"]) < 0):
+                return None
+            when = datetime.fromisoformat(data["CompletedAtUtc"]).astimezone(timezone.utc)
+            return path, when, "Scan receipt (hash not recalculated)"
+        except (ValueError, TypeError, KeyError, OSError):
+            return None
+    value = stamp(path.name)
+    if value != "Unknown":
+        when = datetime.strptime(value, "%Y-%m-%d %H:%M:%S").astimezone(timezone.utc)
+        return path, when, "CSV filename (legacy scan)"
+    return path, datetime.fromtimestamp(path.stat().st_mtime, timezone.utc), "File timestamp (unverified)"
+
+
+def comparison_scan_evidence(migration, summary, kind):
+    """Separate dates of the compared inputs from the freshness of current scans."""
+    scans, dates, notes = [], [], []
+    for side in ("Source", "Target"):
+        folder = migration / "scans" / side.lower() / kind
+        candidates = []
+        if folder.is_dir():
+            for path in folder.rglob("*.csv"):
+                metadata = scan_metadata(path)
+                if metadata:
+                    candidates.append(metadata)
+        candidates.sort(key=lambda item: (item[1], item[0].name), reverse=True)
+        latest = candidates[0] if candidates else None
+        name = Path(str(summary.get(side + "Csv", "")).replace("\\", "/")).name
+        referenced = next((item for item in candidates if item[0].name.lower() == name.lower()), None)
+        recorded = summary.get(side + "ScanCompletedUtc", "")
+        when = None
+        if recorded:
+            try:
+                parsed = datetime.fromisoformat(recorded)
+                if parsed.tzinfo is not None:
+                    when = parsed.astimezone(timezone.utc)
+                    notes.append(side + ": recorded completion time")
+            except ValueError:
+                pass
+        if when is None and referenced:
+            when = referenced[1]
+            notes.append(side + ": " + referenced[2])
+        if when is None:
+            value = stamp(name)
+            if value != "Unknown":
+                when = datetime.strptime(value, "%Y-%m-%d %H:%M:%S").astimezone(timezone.utc)
+            notes.append(side + ": CSV filename (legacy scan)" if when else side + ": scan date unknown")
+        dates.append(when)
+        scans.append((latest, referenced))
+    if any(not latest for latest, _ in scans):
+        freshness = "Scan unavailable"
+    elif any(not referenced for _, referenced in scans):
+        freshness = "Recalculate"
+        notes.append("Referenced historic input unavailable or incomplete")
+    elif any(latest[0].name.lower() != referenced[0].name.lower() for latest, referenced in scans):
+        freshness = "Recalculate"
+    else:
+        freshness = "Uses latest scans"
+    current_dates = [latest[1] for latest, _ in scans if latest]
+    gap = age = None
+    if len(current_dates) == 2:
+        gap = abs((current_dates[0] - current_dates[1]).total_seconds()) / 3600
+        age = (datetime.now(timezone.utc) - min(current_dates)).total_seconds() / 3600
+        max_age, max_gap = (24, 12) if kind == "files" else (48, 24)
+        prefix = "" if kind == "files" else "Permission"
+        config = (migration / "migration.config.psd1").read_text(encoding="utf-8-sig")
+        config = "\n".join(line.split("#", 1)[0] for line in config.splitlines())
+        for key, default in ((prefix + "MaxScanAgeHours", max_age), (prefix + "MaxScanAgeDifferenceHours", max_gap)):
+            match = re.search(r"(?m)\b" + key + r"\s*=\s*([0-9]+(?:\.[0-9]+)?)\s*(?:;|$)", config)
+            value = float(match[1]) if match and float(match[1]) > 0 else default
+            if key.endswith("DifferenceHours"):
+                max_gap = value
+            else:
+                max_age = value
+        future = any((datetime.now(timezone.utc) - date).total_seconds() / 3600 < -0.25 for date in current_dates)
+        unverified = any("unverified" in latest[2] for latest, _ in scans)
+        if gap > max_gap or age > max_age or future or unverified:
+            notes.append("Current scan freshness/provenance needs review")
+            if freshness == "Uses latest scans":
+                freshness = "Review scan freshness"
+    return dates, freshness, notes, gap, age
 
 
 def roots(mapping):
@@ -190,8 +283,8 @@ def collect(migrations_root):
         percent = f"{matched / source_count * 100:.2f}%" if source_count and (target_count or target_empty_verified) else "N/A"
         html_report = next(path.parent.glob("*-summary-*.html"), None)
         compared_at = stamp(path.parent.name)
-        source_at = stamp(summary.get("SourceCsv", ""))
-        target_at = stamp(summary.get("TargetCsv", ""))
+        scan_dates, freshness, date_notes, current_gap, current_age = comparison_scan_evidence(migration, summary, "files")
+        source_at, target_at = [value.astimezone().strftime("%Y-%m-%d %H:%M:%S") if value else "Unknown" for value in scan_dates]
         if "Unknown" not in (compared_at, source_at, target_at):
             compared_dt, source_dt, target_dt = (datetime.strptime(value, "%Y-%m-%d %H:%M:%S")
                                                  for value in (compared_at, source_at, target_at))
@@ -213,19 +306,17 @@ def collect(migrations_root):
             concerns.append("Verified empty target")
         if filtered:
             concerns.append("Filtered rows")
-        if scan_gap is None:
-            concerns.append("Scan date unknown")
-        else:
-            if scan_gap > 12:
-                concerns.append("Scan gap >12h")
-            if oldest_age > 24:
-                concerns.append("Scan age >24h at comparison")
-        concerns.append("Filename date only in overview")
+        concerns.extend(date_notes)
+        if freshness != "Uses latest scans":
+            concerns.append(freshness)
         rows.append({
             "Migration": migration.name,
             "SuccessPercent": percent,
             "ValidationStatus": validation,
             "EvidenceNotes": "; ".join(concerns),
+            "ComparisonFreshness": freshness,
+            "LatestScanGapHours": f"{current_gap:.1f}" if current_gap is not None else "",
+            "OldestScanAgeNowHours": f"{current_age:.1f}" if current_age is not None else "",
             "ComparedAt": compared_at,
             "SourceScannedAt": source_at,
             "TargetScannedAt": target_at,
@@ -252,16 +343,16 @@ def build(migrations_root, output_directory):
     csv_path = output_directory / (name + ".csv")
     html_path = output_directory / (name + ".html")
     xlsx_path = output_directory / (name + ".xlsx")
-    fields = ["Migration", "SuccessPercent", "ValidationStatus", "EvidenceNotes", "ComparedAt", "SourceScannedAt", "TargetScannedAt", "ScanGapHours", "OldestScanAgeAtCompareHours",
+    fields = ["Migration", "SuccessPercent", "ValidationStatus", "ComparisonFreshness", "EvidenceNotes", "ComparedAt", "SourceScannedAt", "TargetScannedAt", "ScanGapHours", "OldestScanAgeAtCompareHours",
               "Source", "Destination", "SourceKeys", "TargetKeys", "MatchedFiles", "MissingInTarget", "ExtraInTarget",
               "ExtraFoldersInTarget", "DifferentSize", "ChangedModifiedDate", "TargetOlderThanSource", "ChangedVersion",
-              "SourceFilteredRows", "TargetFilteredRows", "SourceExcludedRows", "TargetExcludedRows", "ComparisonReport"]
+              "SourceFilteredRows", "TargetFilteredRows", "SourceExcludedRows", "TargetExcludedRows", "ComparisonReport", "LatestScanGapHours", "OldestScanAgeNowHours"]
     with csv_path.open("w", encoding="utf-8-sig", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=fields, delimiter=";")
         writer.writeheader(); writer.writerows(rows)
-    headings = ["Migration", "Success %", "Status", "Evidence", "Compared", "Source scan", "Target scan", "Gap (h)", "Oldest age (h)", "Source", "Destination",
+    headings = ["Migration", "Success %", "Status", "Freshness", "Evidence", "Compared", "Source scan", "Target scan", "Gap (h)", "Oldest age (h)", "Source", "Destination",
                 "Source keys", "Target keys", "Matched", "Missing", "Extra", "Extra folders", "Size", "Modified", "Target older",
-                "Version", "Source filtered", "Target filtered", "Source excluded", "Target excluded", "Detail"]
+                "Version", "Source filtered", "Target filtered", "Source excluded", "Target excluded", "Detail", "Latest gap (h)", "Oldest age now (h)"]
     write_global_workbook(rows, fields, headings, xlsx_path)
     body_rows = []
     for row in rows:
@@ -277,7 +368,7 @@ def build(migrations_root, output_directory):
             cells.append(f"<td>{value}</td>")
         body_rows.append("<tr>" + "".join(cells) + "</tr>")
     table = '<section class="section"><div class="section-heading"><h2>Latest file comparisons</h2></div>'
-    table += '<p>Each row uses the newest available Summary.csv by comparison timestamp. Scan dates come from CSV filenames and are not verified by a receipt in this overview. Evidence notes flag a gap above 12 hours or an oldest scan above 24 hours at comparison. Success % = matched files / source keys in scope; extra target files and filtered rows are separate.</p>'
+    table += '<p>Each row uses the newest available Summary.csv by comparison timestamp. Scan dates use recorded completion times, receipts or labelled legacy filenames. Freshness compares the referenced scans with the newest complete inventories; historic rates may require recalculation. Receipt hashes are not recalculated in this overview. Success % = matched files / source keys in scope; extra target files and filtered rows are separate.</p>'
     table += '<div class="table-scroll" role="region" tabindex="0"><table><thead><tr>'
     table += "".join(f"<th scope=\"col\">{escape(item)}</th>" for item in headings) + "</tr></thead><tbody>"
     table += "".join(body_rows) if body_rows else f'<tr><td colspan="{len(fields)}">No file comparisons available.</td></tr>'

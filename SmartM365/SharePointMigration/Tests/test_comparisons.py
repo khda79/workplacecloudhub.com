@@ -295,7 +295,7 @@ class HtmlReportTests(unittest.TestCase):
                 sheet = ET.fromstring(package.read('xl/worksheets/sheet1.xml'))
                 self.assertEqual(sheet.find(".//x:c[@r='B2']/x:v", namespace).text, '0.8')
                 self.assertEqual(sheet.find(".//x:c[@r='B2']", namespace).get('s'), '2')
-                self.assertEqual(sheet.find(".//x:c[@r='E2']", namespace).get('s'), '1')
+                self.assertEqual(sheet.find(".//x:c[@r='F2']", namespace).get('s'), '1')
 
     def test_global_report_preserves_verified_empty_target_rate(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -365,6 +365,87 @@ class HtmlReportTests(unittest.TestCase):
             path.write_text('Name,Value\nchanged,1\n', encoding='utf-8')
             with self.assertRaises(ValueError):
                 EVIDENCE.describe_pair(path, path)
+
+    def test_manifest_multiline_rows_with_all_supported_delimiters(self):
+        for delimiter in (",", ";", "\t"):
+            with self.subTest(delimiter=delimiter), tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / "scan.csv"
+                with path.open("w", encoding="utf-8-sig", newline="") as handle:
+                    writer = csv.writer(handle, delimiter=delimiter)
+                    writer.writerow(["Name", "Description"])
+                    writer.writerow(["group", "line 1\nline 2\nline 3"])
+                data = json.loads(EVIDENCE.write_manifest(path, "Source", "Permission", "fixture").read_text())
+                self.assertEqual(data["Rows"], 1)
+                self.assertEqual(EVIDENCE.read_scan_time(path)[1], "Manifest")
+
+    def test_global_evidence_uses_receipts_and_marks_newer_scans(self):
+        from datetime import datetime, timedelta, timezone
+        for kind, engine, match_field in (("files", GLOBAL, "MatchedKeys"), ("permissions", GLOBAL_PERMISSIONS, "MatchedPermissions")):
+            with self.subTest(kind=kind), tempfile.TemporaryDirectory() as directory:
+                migration = Path(directory) / "Example"
+                migration.mkdir()
+                (migration / "migration.config.psd1").write_text("@{Comparison=@{MaxScanAgeHours=24; PermissionMaxScanAgeHours=48}}")
+                inputs = []
+                now = datetime.now(timezone.utc).replace(microsecond=0)
+                for side in ("source", "target"):
+                    folder = migration / "scans" / side / kind
+                    folder.mkdir(parents=True)
+                    path = folder / (side + "-20200101-010000.csv")
+                    path.write_text("Name;Value\nfile;1\n")
+                    receipt = EVIDENCE.write_manifest(path, side.title(), "File" if kind == "files" else "Permission", "fixture")
+                    data = json.loads(receipt.read_text())
+                    data["CompletedAtUtc"] = (now - timedelta(hours=1)).isoformat()
+                    receipt.write_text(json.dumps(data))
+                    inputs.append(path)
+                summary = {"SourceCsv": "\\\\another-host\\copied\\" + inputs[0].name,
+                           "TargetCsv": inputs[1].name, "SourceUniqueKeys": "1", "TargetUniqueKeys": "1", match_field: "1"}
+                dates, freshness, notes, gap, age = GLOBAL.comparison_scan_evidence(migration, summary, kind)
+                self.assertEqual(dates, [now - timedelta(hours=1)] * 2)
+                self.assertEqual(freshness, "Uses latest scans")
+                self.assertIn("receipt", " ".join(notes))
+                # Recorded completion takes priority over the date encoded in the CSV name.
+                summary["SourceScanCompletedUtc"] = now.isoformat()
+                dates, _, _, _, _ = GLOBAL.comparison_scan_evidence(migration, summary, kind)
+                self.assertEqual(dates[0], now)
+                new_scan = inputs[0].with_name("source-20200102-010000.csv")
+                new_scan.write_text("Name;Value\nfile;1\n")
+                receipt = EVIDENCE.write_manifest(new_scan, "Source", "File", "fixture")
+                data = json.loads(receipt.read_text()); data["CompletedAtUtc"] = now.isoformat(); receipt.write_text(json.dumps(data))
+                self.assertEqual(GLOBAL.comparison_scan_evidence(migration, summary, kind)[1], "Recalculate")
+                historic = dict(summary, SourceCsv="retired-20200101-010000.csv")
+                self.assertEqual(GLOBAL.comparison_scan_evidence(migration, historic, kind)[1], "Recalculate")
+                # A failed newer scan cannot displace the last complete scan.
+                new_scan.with_name(new_scan.stem + "-Errors.csv").write_text("Scope;Message\nfixture;denied\n")
+                self.assertEqual(GLOBAL.comparison_scan_evidence(migration, summary, kind)[1], "Uses latest scans")
+                inputs[1].with_name(inputs[1].stem + "-Errors.csv").write_text("Scope;Message\nfixture;denied\n")
+                self.assertEqual(GLOBAL.comparison_scan_evidence(migration, summary, kind)[1], "Scan unavailable")
+                comparison = migration / "comparisons" / kind / ("Example-" + kind + "-" + now.astimezone().strftime("%Y%m%d-%H%M%S"))
+                comparison.mkdir(parents=True)
+                with (comparison / "Summary.csv").open("w", newline="") as handle:
+                    writer = csv.DictWriter(handle, fieldnames=list(summary), delimiter=";")
+                    writer.writeheader(); writer.writerow(summary)
+                output = engine.build(migration.parent, migration.parent / "out")
+                with output.with_suffix(".csv").open(encoding="utf-8-sig") as handle:
+                    row = next(csv.DictReader(handle, delimiter=";"))
+                self.assertEqual(row["ComparisonFreshness"], "Scan unavailable")
+                self.assertEqual(row["SourceScannedAt"], now.astimezone().strftime("%Y-%m-%d %H:%M:%S"))
+
+    def test_global_freshness_uses_configured_age_and_rejects_invalid_receipts(self):
+        from datetime import datetime, timedelta, timezone
+        with tempfile.TemporaryDirectory() as directory:
+            migration = Path(directory)
+            (migration / "migration.config.psd1").write_text("@{\nComparison = @{\n MaxScanAgeHours = 1\n MaxScanAgeDifferenceHours = 12\n}\n}")
+            summary = {}
+            for side in ("Source", "Target"):
+                folder = migration / "scans" / side.lower() / "files"; folder.mkdir(parents=True)
+                path = folder / (side + "-20200101-010000.csv"); path.write_text("Name,Value\nfile,1\n")
+                receipt = EVIDENCE.write_manifest(path, side, "File", "fixture")
+                data = json.loads(receipt.read_text()); data["CompletedAtUtc"] = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat(); receipt.write_text(json.dumps(data))
+                summary[side + "Csv"] = path.name
+            self.assertEqual(GLOBAL.comparison_scan_evidence(migration, summary, "files")[1], "Review scan freshness")
+            data["InventoryFile"] = "other.csv"; receipt.write_text(json.dumps(data))
+            self.assertIsNone(GLOBAL.scan_metadata(path))
+            self.assertEqual(GLOBAL.comparison_scan_evidence(migration, summary, "files")[1], "Scan unavailable")
 
     def test_comparators_find_adjacent_report_module_with_portable_python(self):
         with tempfile.TemporaryDirectory() as directory:

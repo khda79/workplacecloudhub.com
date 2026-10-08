@@ -2,7 +2,7 @@
 .SYNOPSIS
     Regression checks for inventory data fidelity, paged reads and workbook snapshots.
 .VERSION
-    1.0.2
+    1.0.3
 #>
 #Requires -Version 7.4
 $ErrorActionPreference = 'Stop'
@@ -39,7 +39,7 @@ Import-TestFunction $permission @('Connect-ToSPOWeb','Get-PnPGroupTitle','Get-As
 $script:SPOPermissionConnection='fixture'
 $script:SPOInheritanceLoad=$null; $script:SPOInheritanceItemType=$null
 $script:AssociatedWebGroupCache=@{}
-$script:PropertyCalls=0; $script:GroupFail=$false
+$script:PropertyCalls=0; $script:GroupFail=$false; $script:CollectionFault=$false; $script:CollectionAttempts=0
 function Get-PnPProperty {
     [CmdletBinding()] param($ClientObject,[string[]]$Property,$Connection)
     $script:PropertyCalls++
@@ -58,6 +58,10 @@ function Get-PnPProperty {
             }
         }
         return
+    }
+    if ($Property -eq 'RoleAssignments' -and $script:CollectionFault -and $ClientObject.Id -eq 4) {
+        $script:CollectionAttempts++
+        if ($script:CollectionAttempts -lt 3) { throw 'HTTP 503 temporarily unavailable.' }
     }
     if ($Property -eq 'Title') { if ($script:GroupFail) { throw 'Group access denied.' }; return $ClientObject.Title }
     if ($Property -eq 'HasUniqueRoleAssignments') {
@@ -193,7 +197,7 @@ public class ReliabilityContext {
         $item.FieldValues['UniqueId']=[string]$id; $item.FieldValues['FSObjType']='0'; $item
     })
     function Get-PnPListItem {
-        [CmdletBinding()] param($List,[int]$PageSize,[string[]]$Fields,$Connection,[scriptblock]$ScriptBlock,[int]$Id)
+        [CmdletBinding()] param($List,[int]$PageSize,[string[]]$Fields,[string]$Query,$Connection,[scriptblock]$ScriptBlock,[int]$Id)
         if ($Id) { throw 'Item does not exist. Existence probe.' }
         if ($script:LargePages) {
             & $ScriptBlock $script:Items[0..1999]
@@ -209,6 +213,34 @@ public class ReliabilityContext {
     $PageSize=2
     Export-ItemPermissionInventory -Web $web -List $list -CsvPath 'fixture.csv' -ProgressInterval 2
     Assert-True ($script:Context.Queries -eq 2 -and ($script:Exported.ItemId -join ',') -eq '2,4' -and -not $script:ErrorCsvCreated) 'Inheritance was not loaded once per page, or unique items were lost.'
+    $script:Context=[ReliabilityContext]::new(); $script:Exported.Clear(); $script:Delays.Clear(); $script:CollectionFault=$true
+    Export-ItemPermissionInventory -Web $web -List $list -CsvPath 'fixture.csv' -ProgressInterval 2
+    Assert-True ($script:CollectionAttempts -eq 3 -and ($script:Exported.ItemId -join ',') -eq '2,4' -and -not $script:ErrorCsvCreated -and ($script:Delays -join ',') -eq '5,15') 'Role-assignment collection retry lost item permissions or recorded a recoverable failure.'
+    $script:CollectionFault=$false
+    # A lost next-page response resumes after the completed page, including gaps in IDs.
+    $script:Context=[ReliabilityContext]::new(); $script:Exported.Clear(); $script:Delays.Clear()
+    $script:PageAttempts=0; $script:ResumeQueries=[Collections.Generic.List[string]]::new(); $script:TerminalPageFailure=$false
+    $savedListItem=${function:Get-PnPListItem}
+    function Get-PnPListItem {
+        [CmdletBinding()] param($List,[int]$PageSize,[string]$Query,$Connection,[scriptblock]$ScriptBlock,[int]$Id,[string[]]$Fields)
+        $script:PageAttempts++; $script:ResumeQueries.Add($Query)
+        if ($Id) { throw 'Item does not exist.' }
+        if ($Query -match "<Value Type='Counter'>0</Value>") {
+            & $ScriptBlock $script:Items[0..1]
+            throw 'Response ended prematurely.'
+        }
+        if ($script:TerminalPageFailure) { throw 'Response ended prematurely.' }
+        & $ScriptBlock $script:Items[2..3]
+    }
+    $script:Items[1].Id=7; $script:Items[2].Id=13; $script:Items[3].Id=18
+    Export-ItemPermissionInventory -Web $web -List $list -CsvPath 'fixture.csv' -ProgressInterval 2
+    Assert-True ($script:PageAttempts -eq 2 -and $script:ResumeQueries[1] -match "<Value Type='Counter'>7</Value>" -and ($script:Exported.ItemId -join ',') -eq '18' -and $script:SPOPermissionPageState.Processed -eq 4 -and -not $script:ErrorCsvCreated) 'Next-page retry duplicated or skipped completed pages.'
+    $script:Context=[ReliabilityContext]::new(); $script:Exported.Clear(); $script:PageAttempts=0; $script:TerminalPageFailure=$true; $script:Delays.Clear()
+    Export-ItemPermissionInventory -Web $web -List $list -CsvPath 'fixture.csv' -ProgressInterval 2
+    Assert-True ($script:PageAttempts -eq 3 -and $script:ErrorCsvCreated -and $script:SPOPermissionPageState.Processed -eq 2 -and ($script:Delays -join ',') -eq '5,15') 'Terminal page failure was published or retried without a bound.'
+    Remove-Item $script:ErrorPath; $script:ErrorCsvCreated=$false
+    foreach($i in 0..3) { $script:Items[$i].Id=$i+1 }
+    Set-Item function:Get-PnPListItem $savedListItem
     $script:Missing=$true; $script:Context.Missing=$true
     $inheritance=Get-SPOPageInheritance -PageItems $script:Items[2..3] -Web $web -List $list -ListUrl 'https://example.test/sites/a/Docs'
     $record=@(Import-Csv $script:ErrorPath -Delimiter ';')
@@ -296,8 +328,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCz4acxD/NGC/nl
-# uAufmTtlZfk/fbk+uAVVDl2qhK3keqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCKG4LOJKWufbrF
+# 479ucyqZu5C0PT4Q72MQ/qKwP9ps8qCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -430,31 +462,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIHCr3WTeETb9ad82dxRO/aUcYx5EJ4d6onlwSPw2H6j4MA0GCSqG
-# SIb3DQEBAQUABIIBgICB+A1tT5rkANkigJH/cpBazzVkFMVNw9wa520fPPCN6nic
-# 4OIHBGnarAKQ2tKTUEZRQwAsKHRDpNLwIS+HpaOmTxfy/q6P1sSnJvdbhle13XB8
-# 0OHrbMoYxQbLapiQMgo0Nqbodjij7j8wDRV7HYOjc9k2J4Nh+7kbJESjPVZZLeUj
-# ihEJU8D7XAqb/rdGI9AG8DV2sfoGI5xyQzORV0ZINXtqJjRkJOn5Kg9CjAH322eR
-# daenZH5nopuGjojEAj5f5YW+V3mecLHpdAgGM3+bQWW/7ZRwS86qm2VJ2W5JVvfL
-# E4La0a5bwvqdQ9AW78GlXDOJu8xLoyzoPtH3CfmTsvcf1TTVQaN8vqMtEM+fnHpa
-# xsCEmVZEECEP2YABLqMdBE4Ze9gwClyO3vidppJXKOsO63C6X/4TPdmI7nTKC+b5
-# VtpQyPjBEq3qaoAz/2VIhJ2sEYlMYNYn2cLEtQ8TYpAM2rZum0788LmONaELi+N4
-# sxFTWX0U12YgUXG+UqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIL8pqCOCJ8ePWU6M7By/7KKj16uwDm7OuceWr1AvULdoMA0GCSqG
+# SIb3DQEBAQUABIIBgFc7L8XGmPem5Lml6/eLYVMN1ZMz4WWQHSdOb5ksNj8raP/B
+# sJk/UIGRFOsJb/nOcm+dEtcSUdn2YTqvPcC5uU9+PB3tnAK6v9lW0LOMMf+FJpC5
+# 16JB51kAIkf3QTVn1KXFq2/FGUKZnMrvkgBlmfJZWDuUD9oGMmlVr/4kaQoL9+zz
+# y24k28R153zoDB8JlbTBMiCDA4jGniAXiyMBYD6DepLWSUXOiBVPJ90emcoM/slU
+# AH64f2MmcxuSr86kp5MZCDjimRDnK+gsG0Qze2KNDHD8ykqTzMk6feq9jQhGNkQ8
+# qCJnHRH1ya1ReHyrrImTiGTRBzzn2zMwQTFMktK7qfHjAZon/gfeEK/AsA4mCZ7r
+# vMzuaSq1XmtrMeH91486FnhBY53SKP78mJhpmdg5wGIby16XBgvih0XaGZYB7fLX
+# WxUykeELOQkPaekxujgXFJJj5sqiF1GET2qsYXbB5FHvKw75oJmH1OgbRBoimW0I
+# Pq+GM+fXvn0RHVuXI6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDgxMzEw
-# MjFaMC8GCSqGSIb3DQEJBDEiBCApOxGHVexv4QYedkaLpz+n/O+QvIRcGFvKWbzf
-# 17SuczANBgkqhkiG9w0BAQEFAASCAgBMY0N3LixHywX+IgNpjt6meclVsyUTzoHl
-# T+5a4UxlJvdZnPV+EMvv1HugJwneE5iwTvgODwFNMjScLUdxgsrCEC1hc4P5+nDy
-# cZdLD1x80fXvRnkxZgJArl0PztfKwpY5SdfcB0hNKOfsao7OJCOH6Y3qlgPc1xg8
-# siOU4a2w6MsD5sWp35r/gGIIZzNC8ysDYqSFoDodUGGj+vFDJsFSER9+9LrMhC/Z
-# Kw/RKzAjL/wW9BlTmf5VGuBNNwM9TdF/xhHsKe0+zLpStgEIPam8WOtKlPLRsPbk
-# NlbmuLLJidwKAoG7MQrxcMh/ndgXYFlCDlIwKIMy2FsSTlKLEYYxjGJpAISW2Ur/
-# fESy82uLjFktQZcJ2kMC78l0Ea9Cb3mG1MBk7kRYmkAJ5B0kkY5TenVC6mc51fOj
-# rnTfmbkCkpjDaoDKUmLCWcnUyeU8QSkLjCZNzJDSIF8cHIqr/rfAZAXVo57QbNpY
-# BK2HoyS6du1d0yggQQjsUWGmM3BI6tG6a1kEKSjilqdmrOrhaOKHMsoV+MXRcmfR
-# 8XpIoJ6vF9+Q1EFjwkeEPL38d0khU+Pv9TCOWnvc6t/pnD8PhlHql337lQYkjvSd
-# 8vD5imk5CIwGIWPp+qcy/npkiWNIk27htzp0RisEHMK5gLH+sYCXd9Pw4BhgXfgL
-# xFJmLouh7w==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDgxNDU4
+# MjVaMC8GCSqGSIb3DQEJBDEiBCDLXn2Fzi+DLC4Rxa6Yvs9XcWLoT6cFzsQpgQHB
+# HNr5SzANBgkqhkiG9w0BAQEFAASCAgAgzEaa9qd5T4zOVz8c0QSjJ5yRPYhIF6DG
+# FoIOQbde1NfMOraNiDVp7hkYX51Olor98mz8fHBxY2WZJxJe8rLE6lGOnB3JGhX7
+# xN5IHISicKdnXETQSBquhTGkRVhk1HOonONUkyXJmjzFIC9PhypTWaSEAhMtmR95
+# QbpwSL3IDXg2mlhrwRlp12buTi/3C7CHuj3O//nR6cs1aOkvcoc57UkKeYwBGfxR
+# 9L4prdtCGxpTJm0y2WCKiLozOij5EYlO/HgbbA+zXY4psabejXGfz2vXrmOEjT5l
+# 2Y3lJL/mqMbCJQLkk7qZPNrEhKMUirq7tzCRwwElYdeAmbZFRQ9uo4LoaJJJfe6D
+# VQJi/GFo3S8MreaHz7Rd2ap1w8Jiacj5tNebFzASyyHOBc3jggzFPFzbzU1xPBcW
+# yetfzah2iksV/gopzr3Uvog8x+DCnNRR2beAMlQSxDnZLRr6K6QW1E4RDgayh5Y5
+# sm/ZTuVqYQgCCOj5J0XqhUUpf2ZmI95/M/CsCXrp/8keyms3tjbIopmuQ9cMB6iA
+# wSCWPSPiFvoVwnAOUkd5G+0sdNogczweHtyitRxbK1mr8JKOxsU/CUh+S0Wyfj8P
+# KBIw/mecd41HpCdeEzMUrp0oJ7Y6CYF6nzw6rUKO1Qyy2qravgVun+J+LRvbEg5h
+# nkegI1w88A==
 # SIG # End signature block
