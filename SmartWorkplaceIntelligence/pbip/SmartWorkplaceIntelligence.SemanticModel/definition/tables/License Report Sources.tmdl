@@ -1,0 +1,54 @@
+/// Source freshness and provisional status from the same mail snapshot.
+table 'License Report Sources'
+	lineageTag: 1bc5cb0d-c3f8-4586-8e37-5b26a4bf6ad3
+
+	column 'Snapshot ID'
+		dataType: string
+		lineageTag: b9bc11e0-46d0-450a-ae1d-8f0217a25218
+		sourceColumn: Snapshot ID
+
+	column 'Tenant Key'
+		dataType: string
+		lineageTag: 5eb14e8c-1514-4375-8787-f6cf692bdbad
+		sourceColumn: Tenant Key
+
+	column Name
+		dataType: string
+		lineageTag: a595cfff-d381-4fed-9a39-65f40bccdac1
+		sourceColumn: Name
+
+	column Ready
+		dataType: string
+		lineageTag: 41a9f977-030c-4aa0-b5a7-4359df61a36c
+		sourceColumn: Ready
+
+	column Provisional
+		dataType: string
+		lineageTag: 19aa6989-d172-4d64-80a9-8a84cb874c22
+		sourceColumn: Provisional
+
+	column Date
+		dataType: string
+		lineageTag: 8c9486b2-29e4-45a2-91cb-64e1231f3b2c
+		sourceColumn: Date
+
+	column Reason
+		dataType: string
+		lineageTag: f5cce89c-ce3a-40eb-9453-860cb0d06545
+		sourceColumn: Reason
+
+	column SHA256
+		dataType: string
+		lineageTag: 73e3a05c-09f2-46a5-98c7-999e52aa99c1
+		sourceColumn: SHA256
+
+	partition 'License Report Sources Import' = m
+		mode: import
+		source =
+				let
+					Raw = GetLicenseReportCsv("M365_Licenses_ReportSources.csv", {"SnapshotId", "TenantKey", "Name", "Ready", "Provisional", "Date", "Reason", "SHA256"}),
+					Checked = if Table.RowCount(Raw) >= 1 then Raw else error "License report source freshness CSV is empty",
+					Result = Table.RenameColumns(Checked, {{"SnapshotId", "Snapshot ID"}, {"TenantKey", "Tenant Key"}})
+				in
+					Result
+

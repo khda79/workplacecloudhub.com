@@ -1,54 +1,192 @@
 /// Mailbox and AD gap counts from the daily SmartInventory email; missing evidence remains blank.
 table 'License Report Gaps'
+	lineageTag: 897d635b-1235-42f6-ab04-e21f019a4ddb
 
 	measure 'License Report User Mailboxes Without Suite' = IF([License Report Snapshot Consistent] = 1, CALCULATE(SUM('License Report Gaps'[Value]), 'License Report Gaps'[Section] = "UserMailboxes", 'License Report Gaps'[Metric] = "Total"))
 		formatString: #,0
 		displayFolder: Licensing | Mail parity
+		lineageTag: 4838f9d1-54d6-4b7d-8f8c-6b24dc40723e
 
 	measure 'License Report Accounts Without Mailbox Or Suite' = IF([License Report Snapshot Consistent] = 1, CALCULATE(SUM('License Report Gaps'[Value]), 'License Report Gaps'[Section] = "NoUserMailbox", 'License Report Gaps'[Metric] = "Total"))
 		formatString: #,0
 		displayFolder: Licensing | Mail parity
+		lineageTag: 354e2469-fbec-4a10-826e-1b76f31865c1
+
+	measure 'License Report Gap UserMailboxes Total' = IF([License Report Snapshot Consistent] = 1, CALCULATE(MAX('License Report Gaps'[Value]), 'License Report Gaps'[Section] = "UserMailboxes", 'License Report Gaps'[Metric] = "Total"))
+		formatString: #,0
+		displayFolder: Licensing | Mail parity
+		lineageTag: d8a3af98-3630-4920-a58c-09aaf2e650fa
+
+	measure 'License Report Gap UserMailboxes Universe' = IF([License Report Snapshot Consistent] = 1, CALCULATE(MAX('License Report Gaps'[Value]), 'License Report Gaps'[Section] = "UserMailboxes", 'License Report Gaps'[Metric] = "Universe"))
+		formatString: #,0
+		displayFolder: Licensing | Mail parity
+		lineageTag: 7cbf2445-a59a-4f28-9bb7-bf61e6df5db5
+
+	measure 'License Report Gap UserMailboxes OtherSkus' = IF([License Report Snapshot Consistent] = 1, CALCULATE(MAX('License Report Gaps'[Value]), 'License Report Gaps'[Section] = "UserMailboxes", 'License Report Gaps'[Metric] = "OtherSkus"))
+		formatString: #,0
+		displayFolder: Licensing | Mail parity
+		lineageTag: 9700ba28-784e-41ef-91ae-95804b060cd9
+
+	measure 'License Report Gap UserMailboxes NoSkus' = IF([License Report Snapshot Consistent] = 1, CALCULATE(MAX('License Report Gaps'[Value]), 'License Report Gaps'[Section] = "UserMailboxes", 'License Report Gaps'[Metric] = "NoSkus"))
+		formatString: #,0
+		displayFolder: Licensing | Mail parity
+		lineageTag: 61e72cd4-0f6b-4a26-bc19-387291243652
+
+	measure 'License Report Gap UserMailboxes Unknown' = IF([License Report Snapshot Consistent] = 1, CALCULATE(MAX('License Report Gaps'[Value]), 'License Report Gaps'[Section] = "UserMailboxes", 'License Report Gaps'[Metric] = "Unknown"))
+		formatString: #,0
+		displayFolder: Licensing | Mail parity
+		lineageTag: ca2c743f-c46d-499e-ac37-75ad36653d0d
+
+	measure 'License Report Gap UserMailboxes EntraEnabled' = IF([License Report Snapshot Consistent] = 1, CALCULATE(MAX('License Report Gaps'[Value]), 'License Report Gaps'[Section] = "UserMailboxes", 'License Report Gaps'[Metric] = "EntraEnabled"))
+		formatString: #,0
+		displayFolder: Licensing | Mail parity
+		lineageTag: 622d0e4b-e087-4cd0-97a8-9c40e8882fae
+
+	measure 'License Report Gap UserMailboxes EntraDisabled' = IF([License Report Snapshot Consistent] = 1, CALCULATE(MAX('License Report Gaps'[Value]), 'License Report Gaps'[Section] = "UserMailboxes", 'License Report Gaps'[Metric] = "EntraDisabled"))
+		formatString: #,0
+		displayFolder: Licensing | Mail parity
+		lineageTag: 6857798c-8f68-417f-848e-54fa9d97188e
+
+	measure 'License Report Gap UserMailboxes EntraStateUnknown' = IF([License Report Snapshot Consistent] = 1, CALCULATE(MAX('License Report Gaps'[Value]), 'License Report Gaps'[Section] = "UserMailboxes", 'License Report Gaps'[Metric] = "EntraStateUnknown"))
+		formatString: #,0
+		displayFolder: Licensing | Mail parity
+		lineageTag: 375dddf4-3fc3-4053-bc1a-108c505a191c
+
+	measure 'License Report Gap NoUserMailbox Total' = IF([License Report Snapshot Consistent] = 1, CALCULATE(MAX('License Report Gaps'[Value]), 'License Report Gaps'[Section] = "NoUserMailbox", 'License Report Gaps'[Metric] = "Total"))
+		formatString: #,0
+		displayFolder: Licensing | Mail parity
+		lineageTag: b338b26b-b578-4e06-9d32-714c66f6ca72
+
+	measure 'License Report Gap NoUserMailbox Universe' = IF([License Report Snapshot Consistent] = 1, CALCULATE(MAX('License Report Gaps'[Value]), 'License Report Gaps'[Section] = "NoUserMailbox", 'License Report Gaps'[Metric] = "Universe"))
+		formatString: #,0
+		displayFolder: Licensing | Mail parity
+		lineageTag: cbdd5df8-342c-426f-aaf6-f81d2e73a1cf
+
+	measure 'License Report Gap NoUserMailbox OtherSkus' = IF([License Report Snapshot Consistent] = 1, CALCULATE(MAX('License Report Gaps'[Value]), 'License Report Gaps'[Section] = "NoUserMailbox", 'License Report Gaps'[Metric] = "OtherSkus"))
+		formatString: #,0
+		displayFolder: Licensing | Mail parity
+		lineageTag: 0e932f42-081b-4eea-b89c-8d8667d01f56
+
+	measure 'License Report Gap NoUserMailbox NoSkus' = IF([License Report Snapshot Consistent] = 1, CALCULATE(MAX('License Report Gaps'[Value]), 'License Report Gaps'[Section] = "NoUserMailbox", 'License Report Gaps'[Metric] = "NoSkus"))
+		formatString: #,0
+		displayFolder: Licensing | Mail parity
+		lineageTag: 1a1981a2-28d7-464f-843d-f612dfd7a644
+
+	measure 'License Report Gap NoUserMailbox Unknown' = IF([License Report Snapshot Consistent] = 1, CALCULATE(MAX('License Report Gaps'[Value]), 'License Report Gaps'[Section] = "NoUserMailbox", 'License Report Gaps'[Metric] = "Unknown"))
+		formatString: #,0
+		displayFolder: Licensing | Mail parity
+		lineageTag: 632b8932-e3be-4d8f-9b2e-719186892014
+
+	measure 'License Report Gap NoUserMailbox Guests' = IF([License Report Snapshot Consistent] = 1, CALCULATE(MAX('License Report Gaps'[Value]), 'License Report Gaps'[Section] = "NoUserMailbox", 'License Report Gaps'[Metric] = "Guests"))
+		formatString: #,0
+		displayFolder: Licensing | Mail parity
+		lineageTag: bf40a600-698e-4d22-aece-b2127170562e
+
+	measure 'License Report Gap NoUserMailbox MemberEnabled' = IF([License Report Snapshot Consistent] = 1, CALCULATE(MAX('License Report Gaps'[Value]), 'License Report Gaps'[Section] = "NoUserMailbox", 'License Report Gaps'[Metric] = "MemberEnabled"))
+		formatString: #,0
+		displayFolder: Licensing | Mail parity
+		lineageTag: 8f14bf31-f177-433f-b017-8ded74155e80
+
+	measure 'License Report Gap NoUserMailbox MemberDisabled' = IF([License Report Snapshot Consistent] = 1, CALCULATE(MAX('License Report Gaps'[Value]), 'License Report Gaps'[Section] = "NoUserMailbox", 'License Report Gaps'[Metric] = "MemberDisabled"))
+		formatString: #,0
+		displayFolder: Licensing | Mail parity
+		lineageTag: 187c9500-0aeb-4ebe-a8af-50d7ccdb9bd0
+
+	measure 'License Report Gap AdGapActivity Members' = IF([License Report Snapshot Consistent] = 1, CALCULATE(MAX('License Report Gaps'[Value]), 'License Report Gaps'[Section] = "AdGapActivity", 'License Report Gaps'[Metric] = "Members"))
+		formatString: #,0
+		displayFolder: Licensing | Mail parity
+		lineageTag: beb2cffa-803a-448c-886c-c3b0916de1b3
+
+	measure 'License Report Gap AdGapActivity AdObserved' = IF([License Report Snapshot Consistent] = 1, CALCULATE(MAX('License Report Gaps'[Value]), 'License Report Gaps'[Section] = "AdGapActivity", 'License Report Gaps'[Metric] = "AdObserved"))
+		formatString: #,0
+		displayFolder: Licensing | Mail parity
+		lineageTag: 61e78aa0-3ebd-4521-be0f-140a82debfad
+
+	measure 'License Report Gap AdGapActivity NoObservedMatch' = IF([License Report Snapshot Consistent] = 1, CALCULATE(MAX('License Report Gaps'[Value]), 'License Report Gaps'[Section] = "AdGapActivity", 'License Report Gaps'[Metric] = "NoObservedMatch"))
+		formatString: #,0
+		displayFolder: Licensing | Mail parity
+		lineageTag: 153556f3-a84f-4250-8f3b-a79f4e2e6f16
+
+	measure 'License Report Gap AdGapActivity Ambiguous' = IF([License Report Snapshot Consistent] = 1, CALCULATE(MAX('License Report Gaps'[Value]), 'License Report Gaps'[Section] = "AdGapActivity", 'License Report Gaps'[Metric] = "Ambiguous"))
+		formatString: #,0
+		displayFolder: Licensing | Mail parity
+		lineageTag: 174a01e8-8dd5-48d5-9b8f-df060e494e90
+
+	measure 'License Report Gap AdGapActivity AdEnabledRecent' = IF([License Report Snapshot Consistent] = 1, CALCULATE(MAX('License Report Gaps'[Value]), 'License Report Gaps'[Section] = "AdGapActivity", 'License Report Gaps'[Metric] = "AdEnabledRecent"))
+		formatString: #,0
+		displayFolder: Licensing | Mail parity
+		lineageTag: 95f34aff-9cd5-4355-8497-3a10fd91cad3
+
+	measure 'License Report Gap AdGapActivity AdEnabledInactive' = IF([License Report Snapshot Consistent] = 1, CALCULATE(MAX('License Report Gaps'[Value]), 'License Report Gaps'[Section] = "AdGapActivity", 'License Report Gaps'[Metric] = "AdEnabledInactive"))
+		formatString: #,0
+		displayFolder: Licensing | Mail parity
+		lineageTag: de84a58d-a791-4014-bbec-b5d5a659c6ec
+
+	measure 'License Report Gap AdGapActivity AdEnabledNoDate' = IF([License Report Snapshot Consistent] = 1, CALCULATE(MAX('License Report Gaps'[Value]), 'License Report Gaps'[Section] = "AdGapActivity", 'License Report Gaps'[Metric] = "AdEnabledNoDate"))
+		formatString: #,0
+		displayFolder: Licensing | Mail parity
+		lineageTag: 0914bd8c-27d0-466e-a693-6674c826c822
+
+	measure 'License Report Gap AdGapActivity AdDisabled' = IF([License Report Snapshot Consistent] = 1, CALCULATE(MAX('License Report Gaps'[Value]), 'License Report Gaps'[Section] = "AdGapActivity", 'License Report Gaps'[Metric] = "AdDisabled"))
+		formatString: #,0
+		displayFolder: Licensing | Mail parity
+		lineageTag: 8bde521b-ce10-4a5b-b010-0e32586194a1
+
+	measure 'License Report Gap AdGapActivity AdEnabledUnknown' = IF([License Report Snapshot Consistent] = 1, CALCULATE(MAX('License Report Gaps'[Value]), 'License Report Gaps'[Section] = "AdGapActivity", 'License Report Gaps'[Metric] = "AdEnabledUnknown"))
+		formatString: #,0
+		displayFolder: Licensing | Mail parity
+		lineageTag: ccf01f82-bf19-4f25-8421-949403ef0ef4
+
+	measure 'License Report Gap UserMailboxes (%)' = DIVIDE([License Report Gap UserMailboxes Total], [License Report Gap UserMailboxes Universe])
+		formatString: 0.0%
+		displayFolder: Licensing | Mail parity
+		lineageTag: c519dfd1-1459-439e-8cd3-0ff824b73a23
+
+	measure 'License Report Gap NoUserMailbox (%)' = DIVIDE([License Report Gap NoUserMailbox Total], [License Report Gap NoUserMailbox Universe])
+		formatString: 0.0%
+		displayFolder: Licensing | Mail parity
+		lineageTag: da492571-cfae-4b6e-a932-53084c55901a
 
 	column 'Snapshot ID'
 		dataType: string
+		lineageTag: 8ce253c7-3a1e-48d7-8708-297325c75143
 		sourceColumn: Snapshot ID
 
 	column 'Tenant Key'
 		dataType: string
+		lineageTag: 21fc26ce-4113-47ac-9564-cf196bcf0fc9
 		sourceColumn: Tenant Key
 
 	column Section
 		dataType: string
+		lineageTag: 59ce47e5-d7f4-4596-a5e2-d6b6253a7e24
 		sourceColumn: Section
 
 	column Metric
 		dataType: string
+		lineageTag: b92de73c-a0be-47e3-899f-4daadba82c1f
 		sourceColumn: Metric
 
 	column Value
 		dataType: int64
+		lineageTag: a16f16a3-26fb-4635-b318-9bfb66ec8884
 		sourceColumn: Value
 
 	column 'Evidence Status'
 		dataType: string
+		lineageTag: a7d713f4-2ea8-4c3c-b707-107823de88c8
 		sourceColumn: Evidence Status
 
 	partition 'License Report Gaps Import' = m
 		mode: import
 		source =
 				let
-				    Snapshot = GetLicenseReportSnapshot(),
-				    Gap = Snapshot[MailboxGap],
-				    Entries = {
-				        [Section="UserMailboxes", Data=if Gap = null then null else Gap[UserMailboxes], Keys={"Total","Universe","OtherSkus","NoSkus","Unknown","EntraEnabled","EntraDisabled","EntraStateUnknown"}],
-				        [Section="NoUserMailbox", Data=if Gap = null then null else Gap[NoUserMailbox], Keys={"Total","Universe","OtherSkus","NoSkus","Unknown","Guests","MemberEnabled","MemberDisabled"}],
-				        [Section="AdGapActivity", Data=Snapshot[AdGapActivity], Keys={"Members","AdObserved","NoObservedMatch","Ambiguous","AdEnabledRecent","AdEnabledInactive","AdEnabledNoDate","AdDisabled","AdEnabledUnknown"}]
-				    },
-				    Rows = List.Combine(List.Transform(Entries, (entry) => List.Transform(entry[Keys], (metric) =>
-				        let available = entry[Data] <> null and Record.FieldOrDefault(entry[Data], "Available", false),
-				            value = if available then Record.FieldOrDefault(entry[Data], metric, null) else null
-				        in [#"Snapshot ID"=Snapshot[SnapshotId], #"Tenant Key"=Snapshot[TenantKey], Section=entry[Section], Metric=metric,
-				            Value=value, #"Evidence Status"=if value = null then "N/D" else if Record.FieldOrDefault(entry[Data], "Provisional", false) then "Provisional" else "Qualified"]))),
-				    Result = Table.FromRecords(Rows, type table [#"Snapshot ID"=text, #"Tenant Key"=text, Section=text, Metric=text, Value=nullable number, #"Evidence Status"=text])
+				    Raw = GetLicenseReportCsv("M365_Licenses_ReportGaps.csv", {"SnapshotId", "TenantKey", "Section", "Metric", "Value", "EvidenceStatus"}),
+				    RowCheck = if Table.RowCount(Raw) >= 25 then Raw else error "License report CSV has too few rows",
+				    NonBlank = Table.ReplaceValue(RowCheck, "", null, Replacer.ReplaceValue, {"Value"}),
+				    Renamed = Table.RenameColumns(NonBlank, {{"SnapshotId", "Snapshot ID"}, {"TenantKey", "Tenant Key"}, {"EvidenceStatus", "Evidence Status"}}),
+				    Selected = Renamed,
+				    Typed = Table.TransformColumnTypes(Selected, {{"Value", Int64.Type}}, "en-US")
 				in
-				    Result
+				    Typed
+

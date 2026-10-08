@@ -1,94 +1,141 @@
 /// Qualified recovery and E3 to F3 review users from the same SmartInventory snapshot as the daily email.
 table 'License Report Candidates'
+	lineageTag: 3df217b3-0cf3-4102-a298-07053d2d1e7f
 
-	measure 'License Report Recovery Detail Rows' = CALCULATE(COUNTROWS('License Report Candidates'), 'License Report Candidates'[Candidate Type] = "Recovery")
+	measure 'License Report Recovery Detail Rows' = IF([License Report Snapshot Consistent] = 1, COALESCE(CALCULATE(COUNTROWS('License Report Candidates'), 'License Report Candidates'[Candidate Type] = "Recovery"), 0))
 		formatString: #,0
 		displayFolder: Licensing | Mail parity
+		lineageTag: 7ad0534c-1a70-4275-a9ac-958bac69e491
 
-	measure 'License Report Downgrade Detail Rows' = CALCULATE(COUNTROWS('License Report Candidates'), 'License Report Candidates'[Candidate Type] = "E3 to F3 review")
+	measure 'License Report Downgrade Detail Rows' = IF([License Report Snapshot Consistent] = 1, COALESCE(CALCULATE(COUNTROWS('License Report Candidates'), 'License Report Candidates'[Candidate Type] = "E3 to F3 review"), 0))
 		formatString: #,0
 		displayFolder: Licensing | Mail parity
+		lineageTag: 6019a7c9-b466-4b7d-b262-a0089cb469b1
 
 	column 'Snapshot ID'
 		dataType: string
+		lineageTag: 8e3e690b-e064-467a-aaf7-bbcecfdb079c
 		sourceColumn: Snapshot ID
 
 	column 'Tenant Key'
 		dataType: string
+		lineageTag: 76335bbb-6cf1-413d-a4de-bbec0603c06a
 		sourceColumn: Tenant Key
 
 	column 'Candidate Type'
 		dataType: string
+		lineageTag: 450f9b6c-c0d3-4f1a-8c06-8cced8902416
 		sourceColumn: Candidate Type
 
 	column Product
 		dataType: string
+		lineageTag: 3f478015-a980-4710-9067-7ab2c7c962b4
 		sourceColumn: Product
 
 	column 'User ID'
 		dataType: string
+		lineageTag: 838ae90d-25eb-471b-806b-4b05cabedeed
 		sourceColumn: User ID
 
 	column 'User Principal Name'
 		dataType: string
+		lineageTag: a363c0bb-958d-4563-9ba4-29dd0d0c77ed
 		sourceColumn: User Principal Name
 
 	column 'Display Name'
 		dataType: string
+		lineageTag: bcb249c1-031f-4966-8b48-10bb220be935
 		sourceColumn: Display Name
 
 	column Reason
 		dataType: string
+		lineageTag: 0f9bfeb6-45e5-4af8-8674-208eb711d375
 		sourceColumn: Reason
 
 	column 'Last AD Activity Date'
 		dataType: dateTime
+		formatString: yyyy-MM-dd
+		lineageTag: edf738e8-cff4-4cea-9b35-ee6589f9d750
 		sourceColumn: Last AD Activity Date
 
 	column 'Last M365 Activity Date'
 		dataType: dateTime
+		formatString: yyyy-MM-dd
+		lineageTag: 2537c44a-00a7-4847-92b8-d15f90f521ee
 		sourceColumn: Last M365 Activity Date
 
 	column 'Primary On Intune PC'
 		dataType: string
+		lineageTag: ad8f1e67-a29f-4958-95ad-a7b0a8966eb8
 		sourceColumn: Primary On Intune PC
 
 	column 'Target Suites'
 		dataType: string
+		lineageTag: 36181e88-798e-46c4-8506-1ab9de127543
 		sourceColumn: Target Suites
 
 	column 'Mailbox Size GB'
 		dataType: decimal
+		lineageTag: 10a4f507-8493-4a76-bc6d-b77d782fba29
 		sourceColumn: Mailbox Size GB
 
 	column 'OneDrive Used GB'
 		dataType: decimal
+		lineageTag: 4be98eed-80fb-4ca0-8003-273f83a404be
 		sourceColumn: OneDrive Used GB
+
+	/// Detail from the E3 to F3 review worksheet; blank for recovery candidates.
+	column 'OneDrive Used Bytes'
+		dataType: int64
+		lineageTag: d28abf72-1262-4a09-87cc-f8b73d076e55
+		summarizeBy: none
+		sourceColumn: OneDrive Used Bytes
+
+	/// Detail from the E3 to F3 review worksheet; blank for recovery candidates.
+	column 'Archive Status'
+		dataType: string
+		lineageTag: 1a512c23-d30b-479c-8d36-d78ca75658c2
+		summarizeBy: none
+		sourceColumn: Archive Status
+
+	/// Detail from the E3 to F3 review worksheet; blank for recovery candidates.
+	column 'Litigation Hold Enabled'
+		dataType: string
+		lineageTag: 37a96c9b-14db-4252-ba80-b9fc7241ed04
+		summarizeBy: none
+		sourceColumn: Litigation Hold Enabled
+
+	/// Detail from the E3 to F3 review worksheet; blank for recovery candidates.
+	column 'Retention Hold Enabled'
+		dataType: string
+		lineageTag: 96ace6f6-001c-434a-b70c-9662e4d7d24f
+		summarizeBy: none
+		sourceColumn: Retention Hold Enabled
+
+	/// Detail from the E3 to F3 review worksheet; blank for recovery candidates.
+	column 'Windows Apps Use 180d'
+		dataType: string
+		lineageTag: 5523a1f1-34b1-41cd-92c7-a355a1e0f613
+		summarizeBy: none
+		sourceColumn: Windows Apps Use 180d
+
+	/// Detail from the E3 to F3 review worksheet; blank for recovery candidates.
+	column 'Mac Apps Use 180d'
+		dataType: string
+		lineageTag: d37d37b3-f194-4a1b-8307-7a75159ae869
+		summarizeBy: none
+		sourceColumn: Mac Apps Use 180d
 
 	partition 'License Report Candidates Import' = m
 		mode: import
 		source =
 				let
-				    Snapshot = GetLicenseReportSnapshot(),
-				    DateOrNull = (value as any) => try DateTime.From(Date.FromText(Text.From(value), [Format="yyyy-MM-dd", Culture="en-US"])) otherwise null,
-				    Recovery = List.Transform(Snapshot[RecoveryCandidates], each
-				        [#"Snapshot ID"=Snapshot[SnapshotId], #"Tenant Key"=Snapshot[TenantKey], #"Candidate Type"="Recovery",
-				         Product=_[License], #"User ID"=_[UserId], #"User Principal Name"=_[UserPrincipalName],
-				         #"Display Name"=_[DisplayName], Reason=_[RecoveryReason],
-				         #"Last AD Activity Date"=DateOrNull(_[LastAdActivityDate]), #"Last M365 Activity Date"=DateOrNull(_[LastM365ActivityDate]),
-				         #"Primary On Intune PC"=_[PrimaryOnIntuneWindowsPc], #"Target Suites"=_[TargetSuites],
-				         #"Mailbox Size GB"=null, #"OneDrive Used GB"=null]),
-				    Downgrade = List.Transform(Snapshot[DowngradeCandidates], each
-				        [#"Snapshot ID"=Snapshot[SnapshotId], #"Tenant Key"=Snapshot[TenantKey], #"Candidate Type"="E3 to F3 review",
-				         Product="Microsoft 365 E3", #"User ID"=_[UserId], #"User Principal Name"=_[UserPrincipalName],
-				         #"Display Name"=_[DisplayName], Reason="Manual downgrade review", #"Last AD Activity Date"=null,
-				         #"Last M365 Activity Date"=null, #"Primary On Intune PC"=null, #"Target Suites"="Microsoft 365 E3",
-				         #"Mailbox Size GB"=_[MailboxSizeGB], #"OneDrive Used GB"=_[OneDriveUsedGB]]),
-				    Rows = Recovery & Downgrade,
-				    Result = Table.FromRecords(Rows, type table [#"Snapshot ID"=text, #"Tenant Key"=text, #"Candidate Type"=text,
-				        Product=text, #"User ID"=text, #"User Principal Name"=text, #"Display Name"=text, Reason=text,
-				        #"Last AD Activity Date"=nullable datetime, #"Last M365 Activity Date"=nullable datetime,
-				        #"Primary On Intune PC"=nullable text, #"Target Suites"=nullable text,
-				        #"Mailbox Size GB"=nullable number, #"OneDrive Used GB"=nullable number])
+				    Raw = GetLicenseReportCsv("M365_Licenses_ReportCandidates.csv", {"SnapshotId", "TenantKey", "CandidateType", "Product", "UserId", "TenantUserKey", "IdentityJoinStatus", "UserPrincipalName", "DisplayName", "Reason", "LastAdActivityDate", "LastM365ActivityDate", "PrimaryOnIntuneWindowsPc", "TargetSuites", "MailboxSizeGB", "OneDriveUsedGB", "OneDriveUsedBytes", "ArchiveStatus", "LitigationHoldEnabled", "RetentionHoldEnabled", "WindowsAppsUse180d", "MacAppsUse180d"}),
+				    RowCheck = if Table.RowCount(Raw) >= 0 then Raw else error "License report CSV has too few rows",
+				    NonBlank = Table.ReplaceValue(RowCheck, "", null, Replacer.ReplaceValue, {"OneDriveUsedBytes", "MailboxSizeGB", "OneDriveUsedGB", "LastAdActivityDate", "LastM365ActivityDate"}),
+				    Renamed = Table.RenameColumns(NonBlank, {{"SnapshotId", "Snapshot ID"}, {"TenantKey", "Tenant Key"}, {"CandidateType", "Candidate Type"}, {"UserId", "User ID"}, {"UserPrincipalName", "User Principal Name"}, {"DisplayName", "Display Name"}, {"LastAdActivityDate", "Last AD Activity Date"}, {"LastM365ActivityDate", "Last M365 Activity Date"}, {"PrimaryOnIntuneWindowsPc", "Primary On Intune PC"}, {"TargetSuites", "Target Suites"}, {"MailboxSizeGB", "Mailbox Size GB"}, {"OneDriveUsedGB", "OneDrive Used GB"}, {"OneDriveUsedBytes", "OneDrive Used Bytes"}, {"ArchiveStatus", "Archive Status"}, {"LitigationHoldEnabled", "Litigation Hold Enabled"}, {"RetentionHoldEnabled", "Retention Hold Enabled"}, {"WindowsAppsUse180d", "Windows Apps Use 180d"}, {"MacAppsUse180d", "Mac Apps Use 180d"}}),
+				    Selected = Table.RemoveColumns(Renamed, {"TenantUserKey", "IdentityJoinStatus"}),
+				    Typed = Table.TransformColumnTypes(Selected, {{"OneDrive Used Bytes", Int64.Type}, {"Mailbox Size GB", type number}, {"OneDrive Used GB", type number}, {"Last AD Activity Date", type datetime}, {"Last M365 Activity Date", type datetime}}, "en-US")
 				in
-				    Result
+				    Typed
+

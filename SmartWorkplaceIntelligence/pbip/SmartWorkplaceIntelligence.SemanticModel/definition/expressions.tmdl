@@ -133,4 +133,33 @@ expression GetLicenseReportSnapshot =
 		        then Snapshot else error "Invalid SmartInventory license report snapshot"
 		in
 		    Checked
+	lineageTag: 62c7ccc9-3b11-4ab8-aeda-9be8e172c2d3
+
+/// Read SmartM365 CSVs produced with the same snapshot as the email and workbook.
+expression GetLicenseReportCsv =
+		(fileName as text, expectedColumns as list) as table =>
+		let
+		    Allowed = {"M365_Licenses_ReportSummary.csv", "M365_Licenses_ReportCandidates.csv", "M365_Licenses_ReportGaps.csv", "M365_Licenses_ReportSources.csv"},
+		    Content = if not List.Contains(Allowed, fileName) then error "Unexpected license report CSV"
+		        else if PreparedSourceMode = "Local" then GetSmartInventoryFile({"DATA-LAST"}, fileName)[Content]
+		        else if PreparedSourceMode = "SharePoint" then
+		            let
+		                Root = SharePoint.Contents(SharePointSiteUrl, [ApiVersion=15]),
+		                Segments = {SharePointLibraryName} & List.Select(Text.Split(SharePointDataFolder & "/DATA-LAST", "/"), each _ <> ""),
+		                Folder = List.Accumulate(Segments, Root, (parent, segment) =>
+		                    let matches = Table.SelectRows(parent, each [Name] = segment)
+		                    in if Table.RowCount(matches) = 1 then matches{0}[Content] else error "License report CSV folder missing or ambiguous"),
+		                Matches = Table.SelectRows(Folder, each [Name] = fileName)
+		            in if Table.RowCount(Matches) = 1 then Matches{0}[Content] else error "License report CSV missing or ambiguous"
+		        else error "PreparedSourceMode must be Local or SharePoint",
+		    Raw = Csv.Document(Binary.Buffer(Content), [Delimiter=",", Columns=List.Count(expectedColumns), Encoding=65001, QuoteStyle=QuoteStyle.Csv, ExtraValues=ExtraValues.Error]),
+		    Rows = Table.PromoteHeaders(Raw, [PromoteAllScalars=true]),
+		    HeadersChecked = if Table.ColumnNames(Rows) = expectedColumns then Rows else error "License report CSV schema differs from the SmartM365 contract",
+		    Snapshot = GetLicenseReportSnapshot(),
+		    IdentityChecked = if Table.RowCount(HeadersChecked) = 0 or
+		        (List.Distinct(HeadersChecked[SnapshotId]) = {Snapshot[SnapshotId]} and List.Distinct(HeadersChecked[TenantKey]) = {Snapshot[TenantKey]})
+		        then HeadersChecked else error "License report CSV and email snapshot identities differ"
+		in
+		    IdentityChecked
+	lineageTag: a2931804-2243-4d2a-bf3d-3a271daf2f71
 

@@ -1,183 +1,436 @@
 /// Daily SmartInventory license email totals. One row per displayed product and one immutable snapshot ID per refresh.
 table 'License Report Summary'
+	lineageTag: 54624a36-4980-4d5d-a998-3fbe66b7b61a
 
 	/// The snapshot that produced the displayed email and recovery workbook.
-	measure 'License Report Snapshot ID' = SELECTEDVALUE('License Report Summary'[Snapshot ID])
+	measure 'License Report Snapshot ID' = IF([License Report Snapshot Consistent] = 1, SELECTEDVALUE('License Report Summary'[Snapshot ID]))
 		formatString: @
 		displayFolder: Licensing | Mail parity
+		lineageTag: be28d81d-de4f-4b7f-b6ef-e11bc268c7df
 
-	/// Blocks totals if summary and candidate detail were refreshed from different daily snapshots.
-	measure 'License Report Snapshot Consistent' = VAR _summary = CALCULATE(SELECTEDVALUE('License Report Summary'[Snapshot ID]), REMOVEFILTERS('License Report Summary')) VAR _details = CALCULATE(COUNTROWS('License Report Candidates'), REMOVEFILTERS('License Report Candidates')) VAR _candidate = CALCULATE(SELECTEDVALUE('License Report Candidates'[Snapshot ID]), REMOVEFILTERS('License Report Candidates')) VAR _gaps = CALCULATE(SELECTEDVALUE('License Report Gaps'[Snapshot ID]), REMOVEFILTERS('License Report Gaps')) RETURN IF(NOT ISBLANK(_summary) && _summary = _gaps && (_details = 0 || _summary = _candidate), 1, 0)
+	/// 1 when the snapshot IDs and candidate row counts match the daily email; an empty candidate table is valid only when both counts are zero.
+	measure 'License Report Snapshot Consistent' =
+			VAR _summary = CALCULATE(SELECTEDVALUE('License Report Summary'[Snapshot ID]), REMOVEFILTERS('License Report Summary'))
+			VAR _detailRows = COALESCE(CALCULATE(COUNTROWS('License Report Candidates'), REMOVEFILTERS('License Report Candidates')), 0)
+			VAR _detailSnapshot = CALCULATE(SELECTEDVALUE('License Report Candidates'[Snapshot ID]), REMOVEFILTERS('License Report Candidates'))
+			VAR _gaps = CALCULATE(SELECTEDVALUE('License Report Gaps'[Snapshot ID]), REMOVEFILTERS('License Report Gaps'))
+			VAR _sources = CALCULATE(SELECTEDVALUE('License Report Sources'[Snapshot ID]), REMOVEFILTERS('License Report Sources'))
+			VAR _recoveryKpi = CALCULATE(SUM('License Report Summary'[Recovery Candidates]), REMOVEFILTERS('License Report Summary'))
+			VAR _recoveryRows = COALESCE(CALCULATE(COUNTROWS('License Report Candidates'), REMOVEFILTERS('License Report Candidates'), 'License Report Candidates'[Candidate Type] = "Recovery"), 0)
+			VAR _reviewKpi = CALCULATE(MAX('License Report Summary'[E3 to F3 Review Candidates]), REMOVEFILTERS('License Report Summary'))
+			VAR _reviewRows = COALESCE(CALCULATE(COUNTROWS('License Report Candidates'), REMOVEFILTERS('License Report Candidates'), 'License Report Candidates'[Candidate Type] = "E3 to F3 review"), 0)
+			RETURN IF(NOT ISBLANK(_summary) && _summary = _gaps && _summary = _sources &&
+			    (_detailRows = 0 || _summary = _detailSnapshot) &&
+			    COALESCE(_recoveryKpi, 0) = _recoveryRows &&
+			    COALESCE(_reviewKpi, 0) = _reviewRows, 1, 0)
 		formatString: 0
 		displayFolder: Licensing | Mail parity
+		lineageTag: 753b1ab6-8d65-4aa2-b6b6-a6ad99e81658
 
 	measure 'License Report Enabled Units' = IF([License Report Snapshot Consistent] = 1, SUM('License Report Summary'[Enabled Units]))
 		formatString: #,0
 		displayFolder: Licensing | Mail parity
+		lineageTag: 15aa42e1-e71d-4bcf-b785-540f41cdb909
 
 	measure 'License Report Consumed Units' = IF([License Report Snapshot Consistent] = 1, SUM('License Report Summary'[Consumed Units]))
 		formatString: #,0
 		displayFolder: Licensing | Mail parity
+		lineageTag: ab8c1825-c6c8-42f6-8f21-3fcb69eed007
 
 	measure 'License Report Used (%)' = DIVIDE([License Report Consumed Units], [License Report Enabled Units])
 		formatString: 0.0%
 		displayFolder: Licensing | Mail parity
+		lineageTag: 8382036e-b394-4db9-9920-25a09ea7938f
 
-	/// Qualified recovery assignments across F1, F3, E3 and E5. BLANK means the source was not qualified.
-	measure 'License Report Recovery Candidates' = IF([License Report Snapshot Consistent] = 1, SUM('License Report Summary'[Recovery Candidates]))
+	/// Qualified recovery assignments for the current product or selected suites. BLANK when any selected suite is unqualified or snapshot counts differ.
+	measure 'License Report Recovery Candidates' =
+			VAR _unqualified = COALESCE(CALCULATE(COUNTROWS('License Report Summary'), KEEPFILTERS('License Report Summary'[Category] = "Suite"), ISBLANK('License Report Summary'[Recovery Candidates])), 0)
+			RETURN IF([License Report Snapshot Consistent] = 1 && _unqualified = 0, SUM('License Report Summary'[Recovery Candidates]))
 		formatString: #,0
 		displayFolder: Licensing | Mail parity
+		lineageTag: 5dd25974-be2b-4f4b-8524-fd13b21de91b
 
 	measure 'License Report F1 Recovery Candidates' = CALCULATE([License Report Recovery Candidates], 'License Report Summary'[Product] = "Microsoft 365 F1")
 		formatString: #,0
 		displayFolder: Licensing | Mail parity
+		lineageTag: eed4d524-55e0-4f34-8e84-f129f49cdb45
 
 	measure 'License Report F3 Recovery Candidates' = CALCULATE([License Report Recovery Candidates], 'License Report Summary'[Product] = "Microsoft 365 F3")
 		formatString: #,0
 		displayFolder: Licensing | Mail parity
+		lineageTag: 2a51fb02-684c-4f3f-8c00-3211d7193b97
 
 	measure 'License Report E3 Recovery Candidates' = CALCULATE([License Report Recovery Candidates], 'License Report Summary'[Product] = "Microsoft 365 E3")
 		formatString: #,0
 		displayFolder: Licensing | Mail parity
+		lineageTag: 412cf394-5428-4cdf-8ee5-64f49363d2dc
 
 	measure 'License Report E5 Recovery Candidates' = CALCULATE([License Report Recovery Candidates], 'License Report Summary'[Product] = "Microsoft 365 E5")
 		formatString: #,0
 		displayFolder: Licensing | Mail parity
+		lineageTag: 3cead677-b0ac-429a-a3b1-b824dfa21fc6
 
 	/// Manual E3 to F3 review candidates, excluding E3 assignments already counted for recovery.
 	measure 'License Report E3 to F3 Review' = IF([License Report Snapshot Consistent] = 1, SUM('License Report Summary'[E3 to F3 Review Candidates]))
 		formatString: #,0
 		displayFolder: Licensing | Mail parity
+		lineageTag: 81cef6dd-5b61-4414-a4a4-49c351f35731
+
+	measure 'License Report F1 Used (%)' = CALCULATE([License Report Used (%)], 'License Report Summary'[Product] = "Microsoft 365 F1")
+		formatString: 0.0%
+		displayFolder: Licensing | Mail parity
+		lineageTag: ad374c99-22f5-4d9e-83c6-435567d78307
+
+	measure 'License Report F3 Used (%)' = CALCULATE([License Report Used (%)], 'License Report Summary'[Product] = "Microsoft 365 F3")
+		formatString: 0.0%
+		displayFolder: Licensing | Mail parity
+		lineageTag: 5ab0d983-fcf3-44a4-aa90-749cb9a7ee70
+
+	measure 'License Report E3 Used (%)' = CALCULATE([License Report Used (%)], 'License Report Summary'[Product] = "Microsoft 365 E3")
+		formatString: 0.0%
+		displayFolder: Licensing | Mail parity
+		lineageTag: a1baef00-1faf-45d3-8141-1a00744ff87b
+
+	measure 'License Report E5 Used (%)' = CALCULATE([License Report Used (%)], 'License Report Summary'[Product] = "Microsoft 365 E5")
+		formatString: 0.0%
+		displayFolder: Licensing | Mail parity
+		lineageTag: f3e45d40-8489-41c2-8b16-4365d308a914
+
+	measure 'License Report Copilot Used (%)' = CALCULATE([License Report Used (%)], 'License Report Summary'[Product] = "Microsoft 365 Copilot")
+		formatString: 0.0%
+		displayFolder: Licensing | Mail parity
+		lineageTag: cf17a59e-2879-4075-b22c-b92103b2eb20
+
+	measure 'License Report Dynamics 365 Used (%)' = CALCULATE([License Report Used (%)], 'License Report Summary'[Product] = "Dynamics 365")
+		formatString: 0.0%
+		displayFolder: Licensing | Mail parity
+		lineageTag: 641dac0f-b310-44ff-88dd-e1c822e08fdb
+
+	measure 'License Report Power BI Used (%)' = CALCULATE([License Report Used (%)], 'License Report Summary'[Product] = "Power BI")
+		formatString: 0.0%
+		displayFolder: Licensing | Mail parity
+		lineageTag: 2f795946-9760-41a7-a57f-412742d2d88a
+
+	measure 'License Report F3/F1 Recovery Candidates' =
+			VAR _f1 = [License Report F1 Recovery Candidates]
+			VAR _f3 = [License Report F3 Recovery Candidates]
+			RETURN IF(ISBLANK(_f1) || ISBLANK(_f3), BLANK(), _f1 + _f3)
+		formatString: #,0
+		displayFolder: Licensing | Mail parity
+		lineageTag: 31918156-9dac-4ed4-adda-78b691f9a0bf
+
+	measure 'License Report Evidence Status' =
+			VAR _unknown = CALCULATE(COUNTROWS('License Report Summary'), 'License Report Summary'[Evidence Status] = "N/D")
+			VAR _provisional = CALCULATE(COUNTROWS('License Report Summary'), 'License Report Summary'[Evidence Status] = "Provisional")
+			RETURN IF([License Report Snapshot Consistent] <> 1, "Snapshot mismatch", IF(_unknown > 0, "N/D", IF(_provisional > 0, "Provisional", "Qualified")))
+		formatString: @
+		displayFolder: Licensing | Mail parity
+		lineageTag: cd6bc4f5-85ed-4561-892a-ba65a3c8ad2a
+
+	measure 'License Report Available (%)' = IF([License Report Snapshot Consistent] = 1, DIVIDE(SUM('License Report Summary'[Available Units]), SUM('License Report Summary'[Enabled Units])))
+		formatString: 0.0%
+		displayFolder: Licensing | Mail parity
+		lineageTag: dc0fa845-d6b0-40da-8047-d59f75db04cf
+
+	measure 'License Report Subscription Status' = IF(SELECTEDVALUE('License Report Summary'[Subscribed]) = "True", "Subscribed", "Not subscribed")
+		formatString: @
+		displayFolder: Licensing | Mail parity
+		lineageTag: 8e9dfa99-7972-4620-9798-fabda752d721
+
+	measure 'License Report F1 Utilization Label' =
+			VAR _enabled = CALCULATE(SUM('License Report Summary'[Enabled Units]), 'License Report Summary'[Product] = "Microsoft 365 F1")
+			VAR _used = [License Report F1 Used (%)]
+			RETURN IF([License Report Snapshot Consistent] <> 1, "N/D", IF(_enabled <= 0, "N/A", FORMAT(_used, "0.0%")))
+		formatString: @
+		displayFolder: Licensing | Mail parity
+		lineageTag: 97b9d398-d6a5-4274-8907-f123798a815f
+
+	measure 'License Report F3 Utilization Label' =
+			VAR _enabled = CALCULATE(SUM('License Report Summary'[Enabled Units]), 'License Report Summary'[Product] = "Microsoft 365 F3")
+			VAR _used = [License Report F3 Used (%)]
+			RETURN IF([License Report Snapshot Consistent] <> 1, "N/D", IF(_enabled <= 0, "N/A", FORMAT(_used, "0.0%")))
+		formatString: @
+		displayFolder: Licensing | Mail parity
+		lineageTag: 30410184-b1eb-41a0-a729-9f8b9739f58b
+
+	measure 'License Report E3 Utilization Label' =
+			VAR _enabled = CALCULATE(SUM('License Report Summary'[Enabled Units]), 'License Report Summary'[Product] = "Microsoft 365 E3")
+			VAR _used = [License Report E3 Used (%)]
+			RETURN IF([License Report Snapshot Consistent] <> 1, "N/D", IF(_enabled <= 0, "N/A", FORMAT(_used, "0.0%")))
+		formatString: @
+		displayFolder: Licensing | Mail parity
+		lineageTag: 7e7ee33b-fc75-435f-9e58-d72c5de90e0f
+
+	measure 'License Report E5 Utilization Label' =
+			VAR _enabled = CALCULATE(SUM('License Report Summary'[Enabled Units]), 'License Report Summary'[Product] = "Microsoft 365 E5")
+			VAR _used = [License Report E5 Used (%)]
+			RETURN IF([License Report Snapshot Consistent] <> 1, "N/D", IF(_enabled <= 0, "N/A", FORMAT(_used, "0.0%")))
+		formatString: @
+		displayFolder: Licensing | Mail parity
+		lineageTag: 1e25cfaf-b789-48d4-bbbe-506532e1b1bf
+
+	measure 'License Report Copilot Utilization Label' =
+			VAR _enabled = CALCULATE(SUM('License Report Summary'[Enabled Units]), 'License Report Summary'[Product] = "Microsoft 365 Copilot")
+			VAR _used = [License Report Copilot Used (%)]
+			RETURN IF([License Report Snapshot Consistent] <> 1, "N/D", IF(_enabled <= 0, "N/A", FORMAT(_used, "0.0%")))
+		formatString: @
+		displayFolder: Licensing | Mail parity
+		lineageTag: 45a9803e-339b-4195-9328-130b546026e0
+
+	measure 'License Report Dynamics 365 Utilization Label' =
+			VAR _enabled = CALCULATE(SUM('License Report Summary'[Enabled Units]), 'License Report Summary'[Product] = "Dynamics 365")
+			VAR _used = [License Report Dynamics 365 Used (%)]
+			RETURN IF([License Report Snapshot Consistent] <> 1, "N/D", IF(_enabled <= 0, "N/A", FORMAT(_used, "0.0%")))
+		formatString: @
+		displayFolder: Licensing | Mail parity
+		lineageTag: 3820496a-9578-4a0c-8ace-9476a2bbd297
+
+	measure 'License Report Power BI Utilization Label' =
+			VAR _enabled = CALCULATE(SUM('License Report Summary'[Enabled Units]), 'License Report Summary'[Product] = "Power BI")
+			VAR _used = [License Report Power BI Used (%)]
+			RETURN IF([License Report Snapshot Consistent] <> 1, "N/D", IF(_enabled <= 0, "N/A", FORMAT(_used, "0.0%")))
+		formatString: @
+		displayFolder: Licensing | Mail parity
+		lineageTag: 27e22d88-04d0-446c-b43a-143c19561317
+
+	measure 'License Report E5 Recovery Label' =
+			VAR _count = [License Report E5 Recovery Candidates]
+			VAR _unknown = CALCULATE(SUM('License Report Summary'[Recovery Unknown]), 'License Report Summary'[Product] = "Microsoft 365 E5")
+			RETURN IF(ISBLANK(_count), "N/D", FORMAT(_count, "#,0") & IF(_unknown > 0, " (N/D: " & FORMAT(_unknown, "#,0") & ")", ""))
+		formatString: @
+		displayFolder: Licensing | Mail parity
+		lineageTag: 265e0df2-e7a1-4ea2-96a5-b0ca937e396e
+
+	measure 'License Report E3 Recovery Label' =
+			VAR _count = [License Report E3 Recovery Candidates]
+			VAR _unknown = CALCULATE(SUM('License Report Summary'[Recovery Unknown]), 'License Report Summary'[Product] = "Microsoft 365 E3")
+			RETURN IF(ISBLANK(_count), "N/D", FORMAT(_count, "#,0") & IF(_unknown > 0, " (N/D: " & FORMAT(_unknown, "#,0") & ")", ""))
+		formatString: @
+		displayFolder: Licensing | Mail parity
+		lineageTag: 57f24426-f0ba-4240-9714-198a73f65abd
+
+	measure 'License Report F3/F1 Recovery Label' =
+			VAR _count = [License Report F3/F1 Recovery Candidates]
+			VAR _unknown = CALCULATE(SUM('License Report Summary'[Recovery Unknown]), 'License Report Summary'[Product] IN {"Microsoft 365 F1", "Microsoft 365 F3"})
+			RETURN IF(ISBLANK(_count), "N/D", FORMAT(_count, "#,0") & IF(_unknown > 0, " (N/D: " & FORMAT(_unknown, "#,0") & ")", ""))
+		formatString: @
+		displayFolder: Licensing | Mail parity
+		lineageTag: 07b0b2fc-102e-45d4-9146-b189024b8e0c
 
 	column 'Snapshot ID'
 		dataType: string
+		lineageTag: 39db6443-fe08-4820-8bd9-842d4d0ae30a
 		sourceColumn: Snapshot ID
 
 	column 'Tenant Key'
 		dataType: string
+		lineageTag: 7e8890ba-4d64-4bca-a41f-3e1683c41a47
 		sourceColumn: Tenant Key
 
 	column Product
 		dataType: string
+		lineageTag: fcf9806f-f8b1-4100-b49d-9ea583b53812
 		sourceColumn: Product
 
 	column Category
 		dataType: string
+		lineageTag: a564967b-ceae-4bf3-acd3-e1c2f1bdd99c
 		sourceColumn: Category
 
 	column 'Enabled Units'
 		dataType: int64
+		lineageTag: 91ad2e37-0d42-44e5-bff8-126d51b1e5cf
 		sourceColumn: Enabled Units
 
 	column 'Consumed Units'
 		dataType: int64
+		lineageTag: 5869ea45-2ec1-4438-a907-de0e7f920178
 		sourceColumn: Consumed Units
 
 	column 'Assigned Users'
 		dataType: int64
+		lineageTag: d87a5a5a-0931-40f4-909f-7f5ea3a0affa
 		sourceColumn: Assigned Users
 
 	column 'Recovery Candidates'
 		dataType: int64
+		lineageTag: 51ee3202-6d5b-4a81-bcaa-09e33ca4e599
 		sourceColumn: Recovery Candidates
 
 	column 'Recovery Unknown'
 		dataType: int64
+		lineageTag: 31b31c7d-52d9-497f-bf46-3ca1604cdb51
 		sourceColumn: Recovery Unknown
 
 	column 'Disabled Users'
 		dataType: int64
+		lineageTag: 2333ca2c-b828-406c-9ba6-cf255665d377
 		sourceColumn: Disabled Users
 
 	column 'No M365 Activity'
 		dataType: int64
+		lineageTag: 78ae2f67-e4bd-40d3-8dea-f034dd672fb4
 		sourceColumn: No M365 Activity
 
 	column 'No AD or Entra Activity'
 		dataType: int64
+		lineageTag: a0630df4-de94-428a-9321-8c75835af625
 		sourceColumn: No AD or Entra Activity
 
 	column 'No Mailbox Activity'
 		dataType: int64
+		lineageTag: 13f0e353-b3c3-4739-b7a9-44fac0a3e85d
 		sourceColumn: No Mailbox Activity
 
 	column 'No Local Apps Use'
 		dataType: int64
+		lineageTag: 44afe711-1a39-4114-9fe6-de1def47f004
 		sourceColumn: No Local Apps Use
 
 	column 'Candidates Primary Intune PC'
 		dataType: int64
+		lineageTag: 69075857-6fb6-4227-a99a-b0a89ae5efd7
 		sourceColumn: Candidates Primary Intune PC
 
 	column 'Shared Mailboxes Licensed'
 		dataType: int64
+		lineageTag: f64d71ca-3f02-4868-8ed1-4e16218e3767
 		sourceColumn: Shared Mailboxes Licensed
 
 	column 'Shared Under 50 GB'
 		dataType: int64
+		lineageTag: b5b34bd7-d50d-4b66-8569-c96cc957211b
 		sourceColumn: Shared Under 50 GB
 
 	column 'Multiple Target Suites'
 		dataType: int64
+		lineageTag: c7de259a-b4d0-4a30-ba0f-fa323a6ee3e5
 		sourceColumn: Multiple Target Suites
 
 	column 'Multiple Assigned SKUs'
 		dataType: int64
+		lineageTag: 867b275b-d0bc-4a53-9277-423f5d91ca0c
 		sourceColumn: Multiple Assigned SKUs
 
 	column 'Shared Removal Candidates'
 		dataType: int64
+		lineageTag: d7848ef1-e4a3-4c5d-a131-7c15420cb510
 		sourceColumn: Shared Removal Candidates
 
 	column 'E3 to F3 Review Candidates'
 		dataType: int64
+		lineageTag: 662d3bc2-6e88-44e8-8145-182d1b4a24fa
 		sourceColumn: E3 to F3 Review Candidates
 
 	column 'E3 to F3 Review Unknown'
 		dataType: int64
+		lineageTag: 54831751-df07-4e7c-9e33-61623b5ca711
 		sourceColumn: E3 to F3 Review Unknown
 
 	column 'Evidence Status'
 		dataType: string
+		lineageTag: a68eb922-c013-40b4-98cc-edc28422e473
 		sourceColumn: Evidence Status
 
 	column 'Generated At UTC'
 		dataType: dateTime
+		lineageTag: ec022d40-92be-4fee-b06e-0d683ecaed14
 		sourceColumn: Generated At UTC
+
+	/// Exact Qualification value in the attached email workbook Summary sheet.
+	column 'Workbook Qualification'
+		dataType: string
+		lineageTag: a35554d5-2f85-49b7-a4d0-e1dc7753ec9f
+		summarizeBy: none
+		sourceColumn: Workbook Qualification
+
+	/// Exact LicenseSnapshotUtc value in the email workbook Summary sheet.
+	column 'License Snapshot UTC'
+		dataType: string
+		lineageTag: 4ddc0c80-a32f-48e1-80d9-f969a575af94
+		summarizeBy: none
+		sourceColumn: License Snapshot UTC
+
+	column 'Available Units'
+		dataType: int64
+		lineageTag: 93028660-7756-4121-8d6d-1476346b1512
+		sourceColumn: Available Units
+
+	column Subscribed
+		dataType: string
+		lineageTag: d76eb8e4-7647-4466-a131-31e3783ac57f
+		sourceColumn: Subscribed
+
+	column 'Disabled Unknown'
+		dataType: int64
+		lineageTag: 4c6ea812-4e0a-4e21-8b0c-4251e0da2954
+		sourceColumn: Disabled Unknown
+
+	column 'No M365 Activity Unknown'
+		dataType: int64
+		lineageTag: dcac5d89-054f-488c-b632-d8ee6efb578c
+		sourceColumn: No M365 Activity Unknown
+
+	column 'Multiple Target Suites Unknown'
+		dataType: int64
+		lineageTag: bef4d504-1f6b-4edf-885b-a4fd5b4e36d7
+		sourceColumn: Multiple Target Suites Unknown
+
+	column 'Multiple Assigned SKUs Unknown'
+		dataType: int64
+		lineageTag: 3f08ec12-cdf6-4b59-864d-c4b002fd9c12
+		sourceColumn: Multiple Assigned SKUs Unknown
+
+	column 'No AD or Entra Activity Unknown'
+		dataType: int64
+		lineageTag: 0f9e3679-87b7-4491-bbe6-63496d943aa9
+		sourceColumn: No AD or Entra Activity Unknown
+
+	column 'No Mailbox Activity Unknown'
+		dataType: int64
+		lineageTag: 27ce4321-e175-4d21-8710-66840864dfd7
+		sourceColumn: No Mailbox Activity Unknown
+
+	column 'No Local Apps Use Unknown'
+		dataType: int64
+		lineageTag: 132aa66f-e202-4afe-8cf2-a20a682b7299
+		sourceColumn: No Local Apps Use Unknown
+
+	column 'Candidates Primary Intune PC Unknown'
+		dataType: int64
+		lineageTag: 98bf3033-873e-4f27-a6ac-f0d3b7edbf07
+		sourceColumn: Candidates Primary Intune PC Unknown
+
+	column 'Shared Unknown'
+		dataType: int64
+		lineageTag: 5ce126b3-cca6-429b-9b2f-3fca86bcf49d
+		sourceColumn: Shared Unknown
+
+	column 'E3 to F3 Review Assigned'
+		dataType: int64
+		lineageTag: d3abaf03-963c-4d63-9553-12c0f539cb35
+		sourceColumn: E3 to F3 Review Assigned
+
+	column 'E3 to F3 Review Excluded'
+		dataType: int64
+		lineageTag: ce7b9f33-8851-4808-a8a9-074ca433c764
+		sourceColumn: E3 to F3 Review Excluded
+
+	column 'E3 to F3 Review Recovery Excluded'
+		dataType: int64
+		lineageTag: 7e3f205d-d42b-4052-9de5-dfb71aba3784
+		sourceColumn: E3 to F3 Review Recovery Excluded
 
 	partition 'License Report Summary Import' = m
 		mode: import
 		source =
 				let
-				    Snapshot = GetLicenseReportSnapshot(),
-				    Recovery = Snapshot[RecoveryCandidates],
-				    Downgrade = Snapshot[DowngradeCandidates],
-				    IsProvisional = List.AnyTrue(List.Transform(Snapshot[Sources], each Record.FieldOrDefault(_, "Provisional", false))),
-				    MakeRow = (item as record, category as text) as record =>
-				        let
-				            Counts = Record.FieldOrDefault(item, "Counts", null),
-				            Value = (key as text) => if Counts = null then null else Record.FieldOrDefault(Counts, key, null),
-				            Review = if item[Product] = "Microsoft 365 E3" then Snapshot[E3ToF3Review] else null,
-				            ReviewValue = if Review <> null and Review[Available] then Review[Candidates] else null,
-				            ReviewUnknown = if Review <> null and Review[Available] then Review[Unknown] else null,
-				            RecoveryRows = List.Count(List.Select(Recovery, each _[License] = item[Product])),
-				            Valid = if category = "Suite" and item[UsageAvailable] and Value("RecoveryCandidates") <> RecoveryRows then error "License recovery detail differs from the email KPI" else true
-				        in
-				            [#"Snapshot ID"=Snapshot[SnapshotId], #"Tenant Key"=Snapshot[TenantKey], Product=item[Product], Category=category,
-				             #"Enabled Units"=item[Enabled], #"Consumed Units"=item[Consumed], #"Assigned Users"=Value("Assigned"),
-				             #"Recovery Candidates"=if Valid then Value("RecoveryCandidates") else null,
-				             #"Recovery Unknown"=Value("RecoveryUnknown"), #"Disabled Users"=Value("Disabled"),
-				             #"No M365 Activity"=Value("M365Inactive"), #"No AD or Entra Activity"=Value("AdEntraInactive"),
-				             #"No Mailbox Activity"=Value("MailboxInactive"), #"No Local Apps Use"=Value("LocalAppsInactive"),
-				             #"Candidates Primary Intune PC"=Value("RecoveryPrimaryPc"),
-				             #"Shared Mailboxes Licensed"=Value("SharedLicensed"), #"Shared Under 50 GB"=Value("SharedUnder50"),
-				             #"Multiple Target Suites"=Value("Multiple"),
-				             #"Multiple Assigned SKUs"=Value("MultipleAll"), #"Shared Removal Candidates"=Value("SharedEligible"),
-				             #"E3 to F3 Review Candidates"=ReviewValue, #"E3 to F3 Review Unknown"=ReviewUnknown,
-				             #"Evidence Status"=if category = "Other paid product" then "Capacity only" else if not item[UsageAvailable] then "N/D" else if IsProvisional then "Provisional" else "Qualified",
-				             #"Generated At UTC"=DateTimeZone.RemoveZone(DateTimeZone.FromText(Snapshot[GeneratedAtUtc]))],
-				    ReviewCheck = if Snapshot[E3ToF3Review] <> null and Snapshot[E3ToF3Review][Available] and Snapshot[E3ToF3Review][Candidates] <> List.Count(Downgrade) then error "License downgrade detail differs from the email KPI" else true,
-				    Rows = if ReviewCheck then List.Transform(Snapshot[Products], each MakeRow(_, "Suite")) & List.Transform(Snapshot[OtherProducts], each MakeRow(_, "Other paid product")) else {},
-				    Result = Table.FromRecords(Rows, type table [#"Snapshot ID"=text, #"Tenant Key"=text, Product=text, Category=text, #"Enabled Units"=Int64.Type, #"Consumed Units"=Int64.Type, #"Assigned Users"=nullable number, #"Recovery Candidates"=nullable number, #"Recovery Unknown"=nullable number, #"Disabled Users"=nullable number, #"No M365 Activity"=nullable number, #"No AD or Entra Activity"=nullable number, #"No Mailbox Activity"=nullable number, #"No Local Apps Use"=nullable number, #"Candidates Primary Intune PC"=nullable number, #"Shared Mailboxes Licensed"=nullable number, #"Shared Under 50 GB"=nullable number, #"Multiple Target Suites"=nullable number, #"Multiple Assigned SKUs"=nullable number, #"Shared Removal Candidates"=nullable number, #"E3 to F3 Review Candidates"=nullable number, #"E3 to F3 Review Unknown"=nullable number, #"Evidence Status"=text, #"Generated At UTC"=datetime])
+				    Raw = GetLicenseReportCsv("M365_Licenses_ReportSummary.csv", {"SnapshotId", "TenantKey", "GeneratedAtUtc", "LicenseCollectedAtUtc", "Product", "Category", "EnabledUnits", "ConsumedUnits", "AvailableUnits", "Subscribed", "AssignedUsers", "RecoveryCandidates", "RecoveryUnknown", "DisabledUsers", "DisabledUnknown", "NoM365Activity", "NoM365ActivityUnknown", "MultipleTargetSuites", "MultipleTargetSuitesUnknown", "MultipleAssignedSkus", "MultipleAssignedSkusUnknown", "NoAdOrEntraActivity", "NoAdOrEntraActivityUnknown", "NoMailboxActivity", "NoMailboxActivityUnknown", "NoLocalAppsUse", "NoLocalAppsUseUnknown", "CandidatesPrimaryIntunePc", "CandidatesPrimaryIntunePcUnknown", "SharedMailboxesLicensed", "SharedUnder50Gb", "SharedRemovalCandidates", "SharedUnknown", "E3ToF3ReviewAssigned", "E3ToF3ReviewCandidates", "E3ToF3ReviewUnknown", "E3ToF3ReviewExcluded", "E3ToF3ReviewRecoveryExcluded", "EvidenceStatus", "WorkbookQualification"}),
+				    RowCheck = if Table.RowCount(Raw) >= 7 then Raw else error "License report CSV has too few rows",
+				    NonBlank = Table.ReplaceValue(RowCheck, "", null, Replacer.ReplaceValue, {"EnabledUnits", "ConsumedUnits", "AvailableUnits", "AssignedUsers", "RecoveryCandidates", "RecoveryUnknown", "DisabledUsers", "DisabledUnknown", "NoM365Activity", "NoM365ActivityUnknown", "MultipleTargetSuites", "MultipleTargetSuitesUnknown", "MultipleAssignedSkus", "MultipleAssignedSkusUnknown", "NoAdOrEntraActivity", "NoAdOrEntraActivityUnknown", "NoMailboxActivity", "NoMailboxActivityUnknown", "NoLocalAppsUse", "NoLocalAppsUseUnknown", "CandidatesPrimaryIntunePc", "CandidatesPrimaryIntunePcUnknown", "SharedMailboxesLicensed", "SharedUnder50Gb", "SharedRemovalCandidates", "SharedUnknown", "E3ToF3ReviewAssigned", "E3ToF3ReviewCandidates", "E3ToF3ReviewUnknown", "E3ToF3ReviewExcluded", "E3ToF3ReviewRecoveryExcluded", "GeneratedAtUtc"}),
+				    Renamed = Table.RenameColumns(NonBlank, {{"SnapshotId", "Snapshot ID"}, {"TenantKey", "Tenant Key"}, {"GeneratedAtUtc", "Generated At UTC"}, {"LicenseCollectedAtUtc", "License Snapshot UTC"}, {"EnabledUnits", "Enabled Units"}, {"ConsumedUnits", "Consumed Units"}, {"AvailableUnits", "Available Units"}, {"AssignedUsers", "Assigned Users"}, {"RecoveryCandidates", "Recovery Candidates"}, {"RecoveryUnknown", "Recovery Unknown"}, {"DisabledUsers", "Disabled Users"}, {"DisabledUnknown", "Disabled Unknown"}, {"NoM365Activity", "No M365 Activity"}, {"NoM365ActivityUnknown", "No M365 Activity Unknown"}, {"MultipleTargetSuites", "Multiple Target Suites"}, {"MultipleTargetSuitesUnknown", "Multiple Target Suites Unknown"}, {"MultipleAssignedSkus", "Multiple Assigned SKUs"}, {"MultipleAssignedSkusUnknown", "Multiple Assigned SKUs Unknown"}, {"NoAdOrEntraActivity", "No AD or Entra Activity"}, {"NoAdOrEntraActivityUnknown", "No AD or Entra Activity Unknown"}, {"NoMailboxActivity", "No Mailbox Activity"}, {"NoMailboxActivityUnknown", "No Mailbox Activity Unknown"}, {"NoLocalAppsUse", "No Local Apps Use"}, {"NoLocalAppsUseUnknown", "No Local Apps Use Unknown"}, {"CandidatesPrimaryIntunePc", "Candidates Primary Intune PC"}, {"CandidatesPrimaryIntunePcUnknown", "Candidates Primary Intune PC Unknown"}, {"SharedMailboxesLicensed", "Shared Mailboxes Licensed"}, {"SharedUnder50Gb", "Shared Under 50 GB"}, {"SharedRemovalCandidates", "Shared Removal Candidates"}, {"SharedUnknown", "Shared Unknown"}, {"E3ToF3ReviewAssigned", "E3 to F3 Review Assigned"}, {"E3ToF3ReviewCandidates", "E3 to F3 Review Candidates"}, {"E3ToF3ReviewUnknown", "E3 to F3 Review Unknown"}, {"E3ToF3ReviewExcluded", "E3 to F3 Review Excluded"}, {"E3ToF3ReviewRecoveryExcluded", "E3 to F3 Review Recovery Excluded"}, {"EvidenceStatus", "Evidence Status"}, {"WorkbookQualification", "Workbook Qualification"}}),
+				    Selected = Renamed,
+				    Typed = Table.TransformColumnTypes(Selected, {{"Enabled Units", Int64.Type}, {"Consumed Units", Int64.Type}, {"Available Units", Int64.Type}, {"Assigned Users", Int64.Type}, {"Recovery Candidates", Int64.Type}, {"Recovery Unknown", Int64.Type}, {"Disabled Users", Int64.Type}, {"Disabled Unknown", Int64.Type}, {"No M365 Activity", Int64.Type}, {"No M365 Activity Unknown", Int64.Type}, {"Multiple Target Suites", Int64.Type}, {"Multiple Target Suites Unknown", Int64.Type}, {"Multiple Assigned SKUs", Int64.Type}, {"Multiple Assigned SKUs Unknown", Int64.Type}, {"No AD or Entra Activity", Int64.Type}, {"No AD or Entra Activity Unknown", Int64.Type}, {"No Mailbox Activity", Int64.Type}, {"No Mailbox Activity Unknown", Int64.Type}, {"No Local Apps Use", Int64.Type}, {"No Local Apps Use Unknown", Int64.Type}, {"Candidates Primary Intune PC", Int64.Type}, {"Candidates Primary Intune PC Unknown", Int64.Type}, {"Shared Mailboxes Licensed", Int64.Type}, {"Shared Under 50 GB", Int64.Type}, {"Shared Removal Candidates", Int64.Type}, {"Shared Unknown", Int64.Type}, {"E3 to F3 Review Assigned", Int64.Type}, {"E3 to F3 Review Candidates", Int64.Type}, {"E3 to F3 Review Unknown", Int64.Type}, {"E3 to F3 Review Excluded", Int64.Type}, {"E3 to F3 Review Recovery Excluded", Int64.Type}, {"Generated At UTC", type datetime}}, "en-US")
 				in
-				    Result
+				    Typed
+
