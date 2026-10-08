@@ -1,6 +1,6 @@
 """Read-only ShareGate report analysis and private HTML/CSV output."""
 
-__version__ = "1.0.7"
+__version__ = "1.0.8"
 
 import argparse
 import collections
@@ -92,9 +92,12 @@ def status_of(value):
     return values.get(value, "Unknown")
 
 
-def normalize_message(value):
+def normalize_message(value, *, legacy_metadata=False):
     value = str(value or "")
-    value = re.split(r"(?:={8,}|\bVersion\s+\d+\.\d+|\n\s*at\s+[A-Za-z])", value, maxsplit=1, flags=re.I)[0]
+    # Reported item versions are message content; runtime metadata is a separate line.
+    metadata = (r"(?:={8,}|\bVersion\s+\d+\.\d+|\n\s*at\s+[A-Za-z])" if legacy_metadata else
+                r"(?:={8,}|^[ \t]*Version[ \t]+\d+(?:\.\d+)+(?:[ \t]+\((?:Assembly|Build)\b|[ \t]*\r?$)|\n[ \t]*at[ \t]+[A-Za-z])")
+    value = re.split(metadata, value, maxsplit=1, flags=re.I | (0 if legacy_metadata else re.M))[0]
     value = URL.sub("<url>", value)
     value = GUID.sub("<guid>", value)
     value = EMAIL.sub("<account>", value)
@@ -328,6 +331,11 @@ def classify(row, rules, project_root):
     pattern = normalize_message(row["Message"] or row["Details"])
     key = hashlib.sha256((found["Id"] + "|" + pattern.casefold()).encode("utf-8")).hexdigest()
     state = state_for(project_root, key, found.get("DefaultState", "To fix"))
+    if not state_path(project_root, key).exists():
+        legacy_pattern = normalize_message(row["Message"] or row["Details"], legacy_metadata=True)
+        legacy_key = hashlib.sha256((found["Id"] + "|" + legacy_pattern.casefold()).encode("utf-8")).hexdigest()
+        if legacy_key != key and state_path(project_root, legacy_key).exists():
+            state = state_for(project_root, legacy_key, state)
     if was_unknown_access and found["Id"] != "SG-ACCESS-UNKNOWN" and not state_path(project_root, key).exists():
         prior_key = hashlib.sha256(("SG-ACCESS-UNKNOWN|" + pattern.casefold()).encode("utf-8")).hexdigest()
         if state_path(project_root, prior_key).exists():

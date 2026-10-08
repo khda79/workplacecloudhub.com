@@ -36,6 +36,10 @@ The working source after release 1.0.64 includes these review corrections:
   within the same scan execution and authentication configuration.
 - Optional token diagnostics retrieve the SharePoint token through the supported
   PnP command, tolerate unavailable details and never print the token.
+- ShareGate analysis 1.0.8 preserves messages beginning with `Warning for version`
+  or `Error for version`; only separate runtime version metadata is removed.
+  Corrected patterns inherit a saved review state from their previous key when
+  no state has been saved for the new key. Existing review files are retained.
 - Receipt row counts support comma, semicolon and tab CSVs, including quoted
   fields that span multiple lines.
 - Global file and permission reports retain historical comparison rates and

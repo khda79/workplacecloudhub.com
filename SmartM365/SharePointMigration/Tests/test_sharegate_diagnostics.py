@@ -1,6 +1,6 @@
 """Offline contract checks for ShareGate CSV diagnostics."""
 
-__version__ = "1.0.6"
+__version__ = "1.0.7"
 
 import csv
 import hashlib
@@ -74,6 +74,46 @@ class ShareGateDiagnosticsTests(unittest.TestCase):
             writer = csv.writer(stream)
             writer.writerow(fields)
             writer.writerows(records)
+
+    def test_item_version_warning_preserves_message_and_drops_runtime_trace(self):
+        message = ("Warning for version 16.0: The modern web part 'Quick links' references another site collection.\r\n"
+                   "Version 26.9.5 (Assembly 26.9.5.0, Build 956)\n=========================\ntrace details")
+        pattern = DIAG.normalize_message(message)
+        self.assertIn("references another site collection", pattern)
+        self.assertIn("Warning for version <number>.<number>:", pattern)
+        self.assertNotIn("Assembly", pattern)
+        self.assertNotIn("trace details", pattern)
+        self.assertEqual(DIAG.normalize_message(message, legacy_metadata=True), "Warning for")
+        self.assertNotEqual(pattern, DIAG.normalize_message(message.replace("references another site collection", "could not be found")))
+        self.assertEqual(pattern, DIAG.normalize_message(message.replace("16.0", "23.1")))
+        for newline in ("\n", "\r\n"):
+            self.assertEqual(DIAG.normalize_message("Useful warning" + newline + "Version 26.9.5" + newline + "trace"), "Useful warning")
+        for text in ("Error for version 2.0: Property 'Shortcut URL' is unsupported.",
+                     "Version 2.0 of this item could not be copied."):
+            self.assertIn("<number>.<number>", DIAG.normalize_message(text))
+            self.assertNotEqual(DIAG.normalize_message(text), "Error for")
+
+    def test_corrected_warning_pattern_preserves_saved_review_and_new_override(self):
+        warning = "Warning for version 1.0: Feature unavailable.\nVersion 26.9.5 (Assembly 26.9.5.0, Build 956)"
+        rows, headers = DIAG.read_csv(self.report)
+        rows[2]["Warnings"] = warning
+        with self.report.open("w", encoding="utf-8", newline="") as stream:
+            writer = csv.DictWriter(stream, fieldnames=headers)
+            writer.writeheader()
+            writer.writerows(rows)
+        legacy_key = hashlib.sha256(b"FEATURE|warning for").hexdigest()
+        DIAG.set_state(self.project, legacy_key, "Fixed")
+        saved = DIAG.state_path(self.project, legacy_key).read_bytes()
+        DIAG.analyze([self.report], self.output, self.project)
+        summary = json.loads((self.output / "Summary.json.txt").read_text(encoding="utf-8"))
+        pattern = next(value for value in summary["Patterns"] if value["RuleId"] == "FEATURE")
+        self.assertNotEqual(pattern["PatternKey"], legacy_key)
+        self.assertEqual(pattern["State"], "Fixed")
+        self.assertEqual(DIAG.state_path(self.project, legacy_key).read_bytes(), saved)
+        DIAG.set_state(self.project, pattern["PatternKey"], "Accepted")
+        DIAG.analyze([self.report], self.output, self.project)
+        summary = json.loads((self.output / "Summary.json.txt").read_text(encoding="utf-8"))
+        self.assertEqual(next(value for value in summary["Patterns"] if value["RuleId"] == "FEATURE")["State"], "Accepted")
 
     def test_duplicate_rows_item_versions_and_persistent_state(self):
         DIAG.analyze([self.report, self.report], self.output, self.project)
