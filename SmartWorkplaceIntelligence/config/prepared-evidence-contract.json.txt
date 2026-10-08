@@ -758,6 +758,14 @@
           "type": "int64"
         },
         {
+          "name": "Excluded Endpoint Analytics Score Devices",
+          "type": "int64"
+        },
+        {
+          "name": "Excluded Endpoint Analytics Score Rows",
+          "type": "int64"
+        },
+        {
           "name": "Evidence Status",
           "type": "string"
         }

@@ -6,9 +6,9 @@ Reject ambiguous Endpoint Analytics device evidence before current or trend outp
 .NOTES
 Current and individual weekly inputs must have nonblank TenantKey, ReportName and
 DeviceId, with one tenant and a unique trimmed, case-insensitive report/device key.
-Different reports for one device remain valid. Repeated rows, including equal
-rows or different dates, fail before either consumer writes any output. Neither
-consumer repairs input, skips a conflicted week or changes the historyKey contract.
+Different reports for one device remain valid. The weekly trend excludes every
+row for duplicated historical EADeviceScoresV2 keys before calling this guard;
+all other ambiguous rows still fail. Source CSVs and history keys are unchanged.
 Deploy this module beside the Intelligence generators; no external module is needed.
 #>
 Set-StrictMode -Version Latest
@@ -40,8 +40,8 @@ Export-ModuleMember -Function Assert-EndpointAnalyticsDeviceGrain
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBru1ZMlXIcVFSJ
-# dcsaHeKCIsFY2nar8FUPNiOrhpUz2qCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCu6OShP70M15tX
+# uPW3084tIYeQiJAGrvJMzCwtLSzTi6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -174,31 +174,31 @@ Export-ModuleMember -Function Assert-EndpointAnalyticsDeviceGrain
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEILQkIhXY82Tz/bpzM7FCAXgzNZIg+tyMET8ayRADsVZ6MA0GCSqG
-# SIb3DQEBAQUABIIBgIMkUFVwr1n9ImJKiTA0zgIbQZtYy1JwzNxggyD3iozOFXLe
-# Icx1dTBeowjyWfYN9Bl1SfnZD5VmCcf6oXxyuH28EpdH8agipGureiQ947vYMzP5
-# jv2JEyqE6lhmxaqFPDR+hUAbjozHMtNARaeZdpHo/490ohrnwYi8WqO/GGUy6ANP
-# ZIbg3W1ebggrL3UE36PCd8ioxp/kW7nCC9t2Mh5Qiv3Fn0kgzU3xiNK3nLbVULm2
-# iZvr44tYdoO06BUnrtDQxzQhOju+7HsHEqomTDj2nR2xPkQvdI+R5BOWhuqNgZe/
-# CEczuLDBrKWXWuXlGnM8I7Ruhb1Be/NykVi/UMo75xtcqBIbzLAlbC107m/M0TmZ
-# qIMR/txUBhSa7c2TW7n4C2ehER835791upJ/i97FSl0n2AXaJDUrS/s7GkwKVSW0
-# d4XdU9pLPn8momAc/BLKBszmoYnw3C9YfCZLpa2Qdd9KuRr1dcUwO7I1UG3I52yK
-# eL6es4KRJpjvv+zlzKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIAuy20l8HGoyXBx8VMofWP/HedAdeRkkI6yCaQgYhYLpMA0GCSqG
+# SIb3DQEBAQUABIIBgIM+a/oNkdhtvMbcJ09LWyCrqCu0hj3HrVfdwr8//n+apJDm
+# n/mT9v26bjaDnwuegckmfgd8htInLCrF1gVbBNgMV9gMcOM2jsH/l6cIbemOxDof
+# GjoKexDCuLAaTgG7j/YakRZrlo0LMiPrNIkD4mq7394HRTrhQZPe7cIFzu5dw0jD
+# X7wSF5DFyLVqWuFZ/ocd3JqwGdtGq/TyN3lRxUPvP8FqE+wiaJTMEs4qOUXnDdRc
+# UgdH/Ho/aaMaBzQ2p5VhDesyA6e2G9kOgUGRJ1AuBQp7fOBWe3ZWTp0jqx6bfCeB
+# ANYUTCjrYaRdrRKRt2GXk+l0dTwixPCW2Zo98IOjRfu+yPRl3+BteyliFaIEXZMi
+# 9D9mg13hFD8tGhIlQVqn36e0GYFkZJxDcTFkhicj06ZsVl7LgC6WflCrwSx92WKr
+# gJDCHx429fsclTu8Bc94Jpx+1trBTnHN48+2o7gY+GoNJiBPt6i+TTY+clWvMsCY
+# W6znTdrcVAaHPJQ6fqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMyMjM3
-# NDZaMC8GCSqGSIb3DQEJBDEiBCBI0A/i1/z7uBref7OrTBbyNYZP1ntIyQDCzldS
-# o/imAzANBgkqhkiG9w0BAQEFAASCAgBtTp0fkYuwSnzgbE59VK47XqdKIQKoqV+g
-# W4AqNpU4E0lbE4ypFUUZ36YP0TW3qAZtHglhCErSnVCJZ3kGct5zEFeAoHuOfRzy
-# fhl4bh/aLtZKq7mh+u5zCvaaO0mfiYslFSt4HYYetqjF26WbB1SW394wG45N/4n1
-# oon6RTakP6iEDRM4dmtoeKyGll4jUjYisi5dbzTP4454ksFHKQ4xAtcqkGrTHFsb
-# ybQ9gVUAPwa5G9XyMhjZUhHM0a/roXbL7KdhbFBdEAjKhmCHqL+ocxbAlqHc+nT9
-# xoiProP1yGUiDvF2QTkgQwwz6WSl4ZwW4maP+VV/g//QloBWm7LjcbT8zecPFw9w
-# 3XwBSOwHFrLHq9Z09QCLOWZN6ezRyUJyi6KHgeYWSbR6c83+at9Kgb0hNOdX1/Ti
-# c0pm4jMohb9kgzynZIIR3SGP983cFfWmCU1k4+w0MrK8NyCXqd+D/JYEwDhzxEyr
-# +rd8UtCn0Kk97zq8L0rEpkDpxj6w3R8SE50PbkrL63cr2ewQRsrlJ9/9lUNU064H
-# DnKRUBUxcz6GbqnDqV6+tzpPKig28VZSZ6CTZdUJEhU+ILhaaGLWJOZ7+mQsgFmn
-# R8mkrZQ7mSVKjwkvkyy4uqTAr7DIDFFc+c9mvIi/LnHfKpxGuxdOUK11dXHfMujq
-# voTqmdisxQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDgxMTMw
+# MDNaMC8GCSqGSIb3DQEJBDEiBCBnradAQ6qv88EBwuW6lEJyVgzBZB7BC3V+vsz1
+# rnOWbDANBgkqhkiG9w0BAQEFAASCAgAwtlM63twZcAWyLTmDgygH5/gSF6tV4U6E
+# z/llqZJnc4a/SrNwaRTsuPmPKjd1vF+sPy0Hr/RtyQAN8fmvQR+qvo0J8zkFBJPK
+# uYrcybu2GWfWJuuwybm+0nD5hHeILTe/ZqVMicU1DeFn413cKAkb+44fYHdS5GM5
+# GA1hVwfas67BU1kCswjxmrKvkYDl9ylmdHCGv0etUvsNM7Iw3vQgQoWruhgqowRL
+# u1ueCB5Pw/Oi/y11wrXPMZGVmRt+bvxmyrpKO7BE/iuEXnGIcKnHB7cmFf3eRG/m
+# 7ofGhvH8GaQsH9KKSQt/P4tpMV4ylxBTrF4X8MekWvMAkylYaui6svyrN37aXzBT
+# sNGs7E3RjZAmdjEGs36D2MDPluyuIcNiaha/gVJwLXpWQYqtd59UzR+rjTNcQvJa
+# xRfX9fcIF/C2xLtTNlYHXGd4YNPXVPttkJZXPO7PjjmE/LIiTcKlS6fjiurOgV/s
+# EaRtd96BRfdtWb65NlAKQ1qOPNJAzux9LAvLldgQ4zodDU24xBrc9wyoUaUulqfl
+# tts/I5lglo+MqPzFhRWgq2rsrVG+YVJ+T8LdKCyF3utnWAWSoDjn7FADA2sj5mOK
+# KL/LDE1mGkxuyOnzvjZFsRj9sdyzKO5F7lNQpGbQcLZKqVQa7FFq3TEmbfXQvHSA
+# rG4uUBoH4w==
 # SIG # End signature block

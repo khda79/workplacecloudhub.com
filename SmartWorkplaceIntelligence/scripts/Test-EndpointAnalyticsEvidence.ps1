@@ -3,7 +3,7 @@
 .SYNOPSIS
 Offline current and weekly Endpoint Analytics ambiguity and missing-score tests.
 .VERSION
-1.0.1
+1.0.2
 .NOTES
 Uses synthetic CSVs only; no connected data, Power BI, collection or publication.
 #>
@@ -68,7 +68,7 @@ Assert-Test ($true) 'Empty evidence and distinct reports/devices are accepted.'
 
 $currentPath=Join-Path $PSScriptRoot 'New-DeviceInventoryEvidence.ps1'
 $trendPath=Join-Path $PSScriptRoot 'New-DeviceLifecycleExperienceTrendEvidence.ps1'
-$definitions=@(Get-TestDefinitions $currentPath @('Get-NormalizedKey','Convert-ToDateTimeOrNull','Get-PreferredLatestIndex')) + @(Get-TestDefinitions $trendPath @('Get-LatestRowsByDevice'))
+$definitions=@(Get-TestDefinitions $currentPath @('Get-NormalizedKey','Convert-ToDateTimeOrNull','Get-PreferredLatestIndex')) + @(Get-TestDefinitions $trendPath @('Get-LatestRowsByDevice','Get-QualifiedWeeklyPerformance'))
 $module=New-Module -Name SyntheticEndpointSelectors -ScriptBlock {
     param($Definitions,$HelperPath)
     Import-Module $HelperPath -Force -ErrorAction Stop
@@ -86,6 +86,16 @@ try {
         Assert-Test ($selected['synthetic-secret-device'].EndpointAnalyticsScore -eq '71') 'Valid score-bearing report preference changed.'
         $selected=@(& $module { param($Rows) Get-LatestRowsByDevice -Rows $Rows -PreferredProperty EndpointAnalyticsScore } $rows.Rows)
         Assert-Test ($selected.Count -eq 1 -and $selected[0].EndpointAnalyticsScore -eq '71') 'Valid trend report preference changed.'
+    }
+    $qualified=& $module { param($Rows) Get-QualifiedWeeklyPerformance -Rows $Rows } @($first,$second,$appOnly)
+    Assert-Test ($qualified.ExcludedDevices -eq 1 -and $qualified.ExcludedRows -eq 2 -and $qualified.Rows.Count -eq 1 -and $qualified.Rows[0].ReportName -eq 'EADevicePerformanceV2') 'Weekly score exclusion changed the collector policy or independent report.'
+    foreach ($rows in @(
+        [pscustomobject]@{Rows=@($first,$second,$otherTenant)},
+        [pscustomobject]@{Rows=@($first,$second,(New-TestRow -Device ''))},
+        [pscustomobject]@{Rows=@($appOnly,$appOnly)}
+    )) {
+        $failure=Get-TestFailure { & $module { param($Rows) Get-QualifiedWeeklyPerformance -Rows $Rows } $rows.Rows }
+        Assert-Test ($failure.Exception.Message -match 'evidence rejected') 'Weekly exclusion concealed a tenant, identity or non-score conflict.'
     }
 } finally { Remove-Module $module -ErrorAction SilentlyContinue }
 
@@ -130,13 +140,17 @@ try {
     $result=(& $trendPath -DataRoot $testRoot -WindowsOutputPath $windowsOutput -EndpointOutputPath $endpointOutput) | ConvertFrom-Json
     $trend=@(Import-Csv -LiteralPath $endpointOutput)
     Assert-Test ($result.EndpointSnapshots -eq 2 -and $trend.Count -eq 2 -and $trend[0].'Endpoint Analytics Covered Devices' -eq '1' -and $trend[0].'Endpoint Analytics Score' -eq '71.0') 'Healthy weekly generator changed its coverage or scores.'
+    @($first,$second,$appOnly) | Export-Csv -LiteralPath (Join-Path $endpointWeek 'Intune_EndpointAnalytics_DevicePerformance.csv') -NoTypeInformation -Encoding utf8NoBOM
+    $sourceHash=(Get-FileHash -LiteralPath (Join-Path $endpointWeek 'Intune_EndpointAnalytics_DevicePerformance.csv')).Hash
+    $result=(& $trendPath -DataRoot $testRoot -WindowsOutputPath $windowsOutput -EndpointOutputPath $endpointOutput -WarningAction SilentlyContinue) | ConvertFrom-Json
+    $trend=@(Import-Csv -LiteralPath $endpointOutput)
+    Assert-Test ($result.EndpointSnapshots -eq 2 -and $trend[1].'Snapshot Week' -eq '2026-W02') 'Weekly score exclusion skipped or shortened history.'
+    Assert-Test ($trend[1].'Endpoint Analytics Covered Devices' -eq '0' -and $trend[1].'Endpoint Analytics Score' -eq '' -and $trend[1].'App Reliability Score' -eq '90.0') 'Weekly exclusion selected an ambiguous score or discarded valid app evidence.'
+    Assert-Test ($trend[1].'Excluded Endpoint Analytics Score Devices' -eq '1' -and $trend[1].'Excluded Endpoint Analytics Score Rows' -eq '2' -and $trend[1].'Evidence Status' -eq 'ObservedWithExclusions') 'Weekly score exclusion counts or qualification are missing.'
+    Assert-Test ($trend[0].'Excluded Endpoint Analytics Score Devices' -eq '0' -and $trend[0].'Excluded Endpoint Analytics Score Rows' -eq '0' -and $trend[0].'Evidence Status' -eq 'Observed') 'Healthy weekly snapshot was marked as excluded.'
+    Assert-Test ((Get-FileHash -LiteralPath (Join-Path $endpointWeek 'Intune_EndpointAnalytics_DevicePerformance.csv')).Hash -eq $sourceHash) 'Generator rewrote the ambiguous historical input.'
     $windowsHash=(Get-FileHash -LiteralPath $windowsOutput).Hash
     $endpointHash=(Get-FileHash -LiteralPath $endpointOutput).Hash
-    @($first,$second) | Export-Csv -LiteralPath (Join-Path $endpointWeek 'Intune_EndpointAnalytics_DevicePerformance.csv') -NoTypeInformation -Encoding utf8NoBOM
-    $failure=Get-TestFailure { & $trendPath -DataRoot $testRoot -WindowsOutputPath $windowsOutput -EndpointOutputPath $endpointOutput }
-    Assert-Test ($failure.Exception.Message -match 'evidence rejected') 'Full weekly generator failed for an unrelated reason.'
-    Assert-Test ((Get-FileHash -LiteralPath $windowsOutput).Hash -eq $windowsHash -and (Get-FileHash -LiteralPath $endpointOutput).Hash -eq $endpointHash) 'Conflict replaced, skipped or shortened historical output.'
-    Assert-Test (@(Import-Csv -LiteralPath (Join-Path $endpointWeek 'Intune_EndpointAnalytics_DevicePerformance.csv')).Count -eq 2) 'Generator rewrote the ambiguous input.'
     @($first,$appOnly) | Export-Csv -LiteralPath (Join-Path $endpointWeek 'Intune_EndpointAnalytics_DevicePerformance.csv') -NoTypeInformation -Encoding utf8NoBOM
     $startupConflict | Export-Csv -LiteralPath (Join-Path $endpointWeek 'Intune_EndpointAnalytics_StartupDevices.csv') -NoTypeInformation -Encoding utf8NoBOM
     $failure=Get-TestFailure { & $trendPath -DataRoot $testRoot -WindowsOutputPath $windowsOutput -EndpointOutputPath $endpointOutput }
@@ -195,8 +209,8 @@ try {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAyuTyQ/k/wp9kp
-# aSC9kMBeiUCZ8zKG4MSHbglBQE8rq6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB7lr0OyEcOd84p
+# aMZGBibfnaTjlR0R39puZ4V4uqY/PaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -329,31 +343,31 @@ try {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIBwEFBaKjV3Y/OdLLDH6Axlm696N0FHzBgo1L5rpOZqiMA0GCSqG
-# SIb3DQEBAQUABIIBgERYw1AlS84IzJz63CdK14TLfc1mtJfkJunPhyJnY3AA9UT8
-# XhYl5LsqCapf7L6oT6Ivark1OoM0Lr3aDNIrGlTjqRE26ZuHou0j8innqzZ7EDE4
-# G0ofEAWmDan05Okc2PqiCtgTCkIb44EYmsAwMa6ywJTYeJOHt40tmy79jeDdIVit
-# k6yRf79CmxslIBDN9ACTOdPTAb87LmMtPIYIcs9BVt3arQgNjVbMNWDTbMxjdvmv
-# 2hpvREBwRQA/iRk8WHPxwsTjrJ4fWvw1SEc3jGI+sKCBfUHhQZdLQFU4ppBcvWov
-# rhBBknGodKjzMc9aRit+tYKdMhpEDosQ8fJo1ZLjHpiEOErINpgHMqDQz0/G7hWd
-# 0i48rud2zV1pcxBXjyBkcovUIZrYdTSnWaLgqd1yTpOooKfXKvd2v1mM5+FeP07t
-# hXYEtyhFSc8r4KdiG1wa0zB6nUJDr9rKsu/8vdzA6PGBy2ifpbvXqg+1nSf8veEQ
-# PdNbK9v/WeixxSUBKqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEICrv+0HDnQ4WQux1joRrxlA2S89KkG9dLryUCzg8QCYCMA0GCSqG
+# SIb3DQEBAQUABIIBgGnkbSmOBVQ+TCy5vYYmhhtd58rfOVReMPIeOyomYLoUJt5O
+# OUlY/VA3N1RbXBc44ifCN6JbBA6vBaisBv3y8/EafBl5KmnLCGFKIpkM3Bx9Ld2D
+# rkYO2lG4V+yjGYykAM0So3HLZri4AmETzFFc0Ri1LoFY3/VtSEqH/17sISO9iSpC
+# 0pMR7/n9WxyMfiNP+s/soWwAEJflqAemotj5slR4FKo8jby2w963yf1PJCi2R1k9
+# 9NmiMuqr+4F/wg+GyICXhuSqDJLhA8vV7wUroaUA+aFdG36iEQ5se5/AtkXwq0dB
+# 9/WjQRNGyHIk/VFTyg/OctPCBZ0+ldERkpNsXF80PXdOYf9iwX+2wiVQhvYzzuHD
+# xt+JgYInL6k60n8q8rm9ysaoLnAJWphB3fGK4Fg+AodXYFKgGEr5ybJFiIhCuzpg
+# B/jFrrn8OtO2+94TUMVOdr6q5otjQ9R6xRwPE+t9VlmoO0lAFgn26Oqgt6P5eFYb
+# YkYd8I8ZdFmPjn2xxaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDQyMTAx
-# NTdaMC8GCSqGSIb3DQEJBDEiBCDqfrEwtE1sM6VTh/Q7EPQBaYXQLxJhdWk2fTdQ
-# rhJ45DANBgkqhkiG9w0BAQEFAASCAgCW8L9gm3ruiYKmvJymBOWa9jTOWqm3fImS
-# 8YOh0qyjYFZdc72/IwZoSshbwUWelLnd9DdFHXU9Qb1AF+0isJCPO/t8l1hnGvOw
-# t6n53Nby/wbethG8zG+YwAi/u7CkfaeLmVb48xM+chKhsVAxJRPuAk87A/wXaH3p
-# IyruPaPRcpH2EuO+cNBZoOruFjI/rUCXIHppTXutY0uovJq0j7k4e56RQNc5Fb/q
-# izPZcrKeMVab6W1orzSF41hfS1tNTTqKCGrfxaUHuZQDfi0TminLE6CpQmKBp7rs
-# FpFMVvoPeaXObxfLav9rDU6Lf2H5qPW/40eueAVr68Hvzx1YFaTIJuqIhffhjJ1F
-# OBTFJ0amQhMKUjsIAMpZcKKiC6IzmvEIqjfIIg40WYUc1EeiUEKJm4DE5KRsXZhM
-# /UxgIEaWk7imitGHc9XdWdTRz/z8GercOmstYl0YgRxqnnhLfS/SU+dgdhbHLibD
-# g22yqlsIYxW1cfSxbV0bzwTicTLGJFPxhrNx6qe6E3wTuSqdEKDCJhjzhuxAhvVF
-# /5XRcGJHlvuivMTEZwgPuVC6w6fTRuP0vnRDGFXvdZwtkIQAM/CTJ2bEJ/vqQ+8H
-# dUHjSW3tFDJkBHgaCRcl5NqaT99o2vko6u2rqE3EXYTdldvwktsKPlaBHXJYxmJw
-# f6b1PrZfhw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDgxMTMw
+# MDRaMC8GCSqGSIb3DQEJBDEiBCCxvyij7e68MEx1qZnY2j714qlPerAlcG5RLJ2P
+# oTP+UDANBgkqhkiG9w0BAQEFAASCAgAMP0+DEwglEDZkppvbCzJxTnwQJoYiZcTv
+# gzZ4MkNmTbAwecn4rUlPqz7JV9fKhm5LRspL7gChFP2EZG0Y07UYllOpOxcaXxWb
+# qEo3EoHPGbbqkexsHKUjk2rhfCbHkhzc6IxeKnPejQMQcZXsa32Z5IcXwra5mJlM
+# hWzcG3+CzrQ4G6Jigic8VS0aaKuxap/NCZKk9MkxuA2yWybdD+bJ2znYfjGuOtCD
+# Omljk6bPsruWjsX/J1mjZx4CuVBsO6ePDmo4hmpvW/tnFxa48J/6doU3FAnS6w+T
+# c9In2scMBwlo+voaPhbIPuqafX9xkVQFD1m8c+/hW4uW+QddM4p/ncXuB7RQ2XTm
+# EqXgQ8u1LaRf4ABBbf0nlqrvovwD5EbRQfsx/AYMeym1vA6Y1IXaTLhnDHzaPGqV
+# 9cRCge+QK1PTwifvgirCJw2g+iWnoU8Po1pCsgaE5Ctbt3q4MIqIPSw7f8lMEZt7
+# HNWI6bGtTf1jj/G4SO2zgGY1v2KZDAPL3itOe1TWeIY4XgaMnwieJaJj1/uw5lQD
+# LYEEnLS/S/FAHs2FQnP1LcKRLJCppDI3FBO7zYp9g0kakQyrMy/ga/2ScqaB3xGG
+# jOFPJVMCqy6o0AY5rVgdcMyoILU0JvcJBkJcnbFRMfbKNhx1PQHoEkLAxtefzChb
+# 0lbpjJvzXg==
 # SIG # End signature block
