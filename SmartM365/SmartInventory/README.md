@@ -35,16 +35,18 @@ successful required publication and row/hash/tenant checks. Failed runs preserve
 native CSVs but invalidate completion evidence. Caches, temporary files, archives
 and the remediation-script run bundles are not `DATA-LAST` publications.
 
-The 17 CMDB source producers keep their explicit consumer-scope checks. The 28
+The 17 CMDB source producers keep their explicit consumer-scope checks. The 30
 other `DATA-LAST` producers declare their required and optional outputs in
 `Modules/SmartM365.Core/SmartM365-SourceReceipts.json.txt`. Additional current-run
 exports are also recorded; absent optional outputs are not replaced by old CSVs.
 Effective selection parameters are included where applicable. For these producers,
 `ScopeQualification=ConfiguredOutputsOnly` and `IsPartialInventory=null` mean
 that whole-tenant exhaustiveness is **not established**, not that it succeeded.
-The SharePoint on-prem Content producer can explicitly publish observed rows with
-`IsPartialInventory=true` when its coverage CSV records gaps; this qualifies the
-current files and marks their inventory scope partial.
+The SharePoint on-prem Content producer publishes observed rows and a separate
+`SharePoint_OnPrem_CollectionCoverage.csv` when coverage gaps occur. Its source
+receipt verifies current file identity, rows, and hashes only; the coverage CSV,
+run log, and warning exit code identify an incomplete collection. The generic
+configured-output receipt does not qualify farm-wide completeness.
 No receipt claims `FullInventoryQualified=true`. Derived reports remain derived;
 creating their receipt does not refresh their upstream inputs.
 
