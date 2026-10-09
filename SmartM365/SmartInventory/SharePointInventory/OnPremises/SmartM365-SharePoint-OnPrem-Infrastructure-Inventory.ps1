@@ -2,7 +2,7 @@
 .SYNOPSIS
     Read-only SharePoint Server 2016/2019 farm infrastructure inventory.
 .VERSION
-    1.0.5
+    1.0.6
 .REQUIREMENTS
     Windows PowerShell 5.1 x64 on a SharePoint farm server; SharePoint Shell access.
 #>
@@ -139,6 +139,29 @@ function Get-ObservedProperty {
     if ($null -eq $property) { return '' }
     try { if ($null -eq $property.Value) { return '' }; return $property.Value }
     catch { throw "Cannot read $Name`: $($_.Exception.Message)" }
+}
+
+function Get-FarmConfigurationDatabaseName {
+    param($Farm)
+    $directName = [string](Get-ObservedProperty (Get-ObservedProperty $Farm 'ConfigurationDatabase') 'Name')
+    if (-not [string]::IsNullOrWhiteSpace($directName)) { return $directName }
+    try {
+        $configurationDatabases = @(Get-SPDatabase -ErrorAction Stop | Where-Object { [string](Get-ObservedProperty $_ 'Type') -eq 'Configuration Database' })
+        if ($configurationDatabases.Count -ne 1) {
+            WriteLog -Message ("Farm configuration database lookup returned {0} candidates; expected one." -f $configurationDatabases.Count) -Level WARNING
+            return ''
+        }
+        $name = [string](Get-ObservedProperty $configurationDatabases[0] 'Name')
+        if ([string]::IsNullOrWhiteSpace($name)) {
+            WriteLog -Message 'Farm configuration database name is unavailable.' -Level WARNING
+            return ''
+        }
+        WriteLog -Message 'Farm configuration database name resolved through Get-SPDatabase.' -Level INFO
+        return $name
+    } catch {
+        WriteLog -Message ("Farm configuration database lookup failed: {0}" -f $_.Exception.Message) -Level WARNING
+        return ''
+    }
 }
 
 function Write-RunCsv {
@@ -280,7 +303,7 @@ try {
     $farmBuild = Get-ObservedProperty $farm 'BuildVersion'
     $farmRow['FarmVersion'] = [string](Get-ObservedProperty $farmBuild 'Major')
     $farmRow['BuildVersion'] = [string]$farmBuild
-    $farmRow['ConfigurationDatabase'] = [string](Get-ObservedProperty (Get-ObservedProperty $farm 'ConfigurationDatabase') 'Name')
+    $farmRow['ConfigurationDatabase'] = Get-FarmConfigurationDatabaseName -Farm $farm
     $farmRow['ServerCount'] = if (@($failures | Where-Object { $_ -like 'Servers:*' }).Count) { '' } else { $servers.Count }
     $farmRow['ServiceApplicationCount'] = if (@($failures | Where-Object { $_ -like 'ServiceApplications:*' }).Count) { '' } else { $serviceApplications.Count }
     if ($servers.Count -eq 0) { $failures.Add('Servers: no farm server was returned') }
@@ -375,6 +398,7 @@ try {
         $runPaths.Add((Write-RunCsv -Name $name -Rows $rows[$kind].ToArray() -Columns $schemas[$kind] -Folder $runFolder))
     }
     if ($failures.Count -gt 0) {
+        foreach ($failure in $failures) { WriteLog -Message ("Infrastructure coverage detail: {0}" -f $failure) -Level WARNING }
         WriteLog -Message ("Infrastructure coverage is incomplete: {0} failure(s). DATA-LAST was not updated." -f $failures.Count) -Level ERROR
         Complete-SmartM365ExecutionContext -Status Failed
         $script:Completed = $true
@@ -425,8 +449,8 @@ try {
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCKWyH08wp4uvUM
-# udOSk3GHE/ulqcerwiCyP+wOb44GpaCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBBhSgfeVa1eZ+V
+# U78Mzwo6NFxSvIA12eHBwV9i9Bt1yqCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -456,14 +480,14 @@ try {
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCBwMTOUOhK/QSKsj1bwN6oC
-# WZ0jSuF338zedxvE/JKxNjANBgkqhkiG9w0BAQEFAASCAYA2S0sIp7aaWdPDbjxV
-# gyljuJXnKjguK0+6hMtyLjYF1G81dWgJJlmLWbSZm6IEdss/j2ZdueKiJ/qQm5kr
-# cnm5IddxE8K/EO8D2pPj2gtnPAYaz0AKyh/NC54Sjvzg3S+Y48yHprI98YsJoSES
-# a6LyS4tjhN09BfoHQNVqbw7MK33/YZd9LCwLp5dXYnO/FDL5wSfyXkKa99WmuwgV
-# F4cFSj/JFTMi8JOFiFIIUh07vurb+x03v615jvsuGMKuUeoaR9L+FYNXwLW0RqRn
-# LnZZXL6LtBmF3vnckcxJQTDM/x7BV+mM71cRMWnVDwc35s1kkRfVF4yhrX61e/qE
-# RBnEXqdN1c+BH3ksehRPEZipoNOdOyKVDoB1uIHGWahh+jKulMfu9hvw1MVyGOJX
-# QniVjJXIBDoqEB0j/T243DFzuxtpATj45/fFc1fSC4+2nVxx5ZtGwdoxgcTGDxmE
-# vfyQ37ddq/WQri5jIg/9oaaQL0IuFKyNHTM3HLsYCJ5tBAc=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCDlqElUQIi6hJKABhQK2b4Q
+# hK2Cjm63N5qufgPbz2RRIjANBgkqhkiG9w0BAQEFAASCAYBOzak3q13d+BTQRA00
+# pAEdVOhgnfpRT8fCyy+a2WNc7EmuWPxZfjeQLv8rte87r8ThggMCVModjvDF7+Ro
+# Uzfgi+mV0xe96ShhB+dNZkmrj2EEfnqKQuZg2JH9ax11y5WMgwKMySDcv7qb4G1/
+# QTfhO6nwAWER2PwEw7AGkCj+C5SF7GdX4pddZr1uMFctw1ZLwsLqyNTf9Lyl7mOs
+# GZhccXCUujP9w2J6vDSckn0uXg0zFDqOJ2o4hD4GKWs5wo3yee3Z96KtXiFYj5yW
+# AMUMTsWWGpitt2yE5CrVEsObTjjtQ1SLAZxkQPB0sKtJAyS3W4aYnq2HTbC90nYY
+# cSFbyx8vJlEHvFvch8F+/EdoX0QB7lJVoYcnLOaU5WGn+o2i/7TqwU//mV1tTlV0
+# ZXp1Vtgp1rDkcEqvy5EFyTHwoTt+hhZyndcGTrElq3b0o9o7c7iapmLdp6L7SoYY
+# AE5j1TtcgoB9INB81EyIMJwO9sRF8mnmj7XoenLTXz/P+5o=
 # SIG # End signature block

@@ -10,7 +10,7 @@ $tokens = $null
 $errors = $null
 $ast = [Management.Automation.Language.Parser]::ParseFile($scriptPath, [ref]$tokens, [ref]$errors)
 if (@($errors).Count) { throw "Infrastructure parser errors: $($errors.Count)" }
-if ($ast.Extent.Text -notmatch '(?s)\.VERSION\s+1\.0\.5') { throw 'Infrastructure version was not updated for Graph bootstrap and mail.' }
+if ($ast.Extent.Text -notmatch '(?s)\.VERSION\s+1\.0\.6') { throw 'Infrastructure version was not updated for configuration database fallback.' }
 $firstUploadConfigRead = $ast.Extent.Text.IndexOf('$global:SharePointSiteHostname =', [StringComparison]::Ordinal)
 $resolverDefinition = @($ast.FindAll({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Resolve-InventoryConfigTokens' }, $true))
 if ($firstUploadConfigRead -lt 0 -or $resolverDefinition.Count -ne 1 -or $resolverDefinition[0].Extent.EndOffset -ge $firstUploadConfigRead) { throw 'Infrastructure reads upload configuration before the token resolver is defined.' }
@@ -21,7 +21,7 @@ $producer = @($registry.Producers | Where-Object Script -eq 'SmartM365-SharePoin
 if ($producer.Count -ne 1 -or $producer[0].Files.Count -ne 6) { throw 'Infrastructure source receipt registration is invalid.' }
 if ($ast.Extent.Text -match '(?im)^\s*(Set-SPSite|Set-SPWeb|Set-SPContentDatabase|Add-SPShellAdmin|Remove-SPSite)\b') { throw 'A SharePoint write command was found.' }
 if ($ast.Extent.Text -notmatch '-Rows\s+\$rows\[\$kind\]\.ToArray\(\)') { throw 'Infrastructure CSV buffers must be converted to arrays for Windows PowerShell 5.1.' }
-foreach ($name in @('Get-InventoryConfigValue','Resolve-InventoryConfigTokens','Assert-InventoryPath','Get-ConfiguredWebApplications','Write-RunCsv','Ensure-GraphAuthenticationModule','Invoke-DailySummaryMail','Send-InventorySummaryMail','Publish-QualifiedCsvUploads')) {
+foreach ($name in @('Get-InventoryConfigValue','Resolve-InventoryConfigTokens','Assert-InventoryPath','Get-ConfiguredWebApplications','Get-ObservedProperty','Get-FarmConfigurationDatabaseName','Write-RunCsv','Ensure-GraphAuthenticationModule','Invoke-DailySummaryMail','Send-InventorySummaryMail','Publish-QualifiedCsvUploads')) {
     $functionAst = @($ast.FindAll({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name }, $true))
     if ($functionAst.Count -ne 1) { throw "Missing function: $name" }
     . ([scriptblock]::Create($functionAst[0].Extent.Text))
@@ -78,6 +78,17 @@ try {
     $marker = Join-Path $tempRoot 'Infrastructure-DailySummary.sent'
     $script:sendCount = 0
     function WriteLog { param($Message, $Level) }
+    $script:databaseProbeCount = 0
+    $script:mockDatabases = @([pscustomobject]@{Type='Content Database';Name='Content_A'},[pscustomobject]@{Type='Configuration Database';Name='Config_A'})
+    function Get-SPDatabase { [CmdletBinding()] param() $script:databaseProbeCount++; $script:mockDatabases }
+    $directFarm = [pscustomobject]@{ConfigurationDatabase=[pscustomobject]@{Name='Direct_Config'}}
+    if ((Get-FarmConfigurationDatabaseName -Farm $directFarm) -ne 'Direct_Config' -or $script:databaseProbeCount -ne 0) { throw 'Direct configuration database name was not used.' }
+    if ((Get-FarmConfigurationDatabaseName -Farm ([pscustomobject]@{})) -ne 'Config_A' -or $script:databaseProbeCount -ne 1) { throw 'Configuration database fallback failed.' }
+    $script:mockDatabases = @([pscustomobject]@{Type='Content Database';Name='Content_A'})
+    if ((Get-FarmConfigurationDatabaseName -Farm ([pscustomobject]@{})) -ne '') { throw 'A missing configuration database was accepted.' }
+    $script:mockDatabases = @([pscustomobject]@{Type='Configuration Database';Name='Config_A'},[pscustomobject]@{Type='Configuration Database';Name='Config_B'})
+    if ((Get-FarmConfigurationDatabaseName -Farm ([pscustomobject]@{})) -ne '') { throw 'Ambiguous configuration databases were accepted.' }
+    Remove-Item Function:\Get-SPDatabase
     $sendAction = { $script:sendCount++ }
     if (-not (Invoke-DailySummaryMail -MarkerPath $marker -SendAction $sendAction)) { throw 'First infrastructure email was skipped.' }
     if (Invoke-DailySummaryMail -MarkerPath $marker -SendAction $sendAction) { throw 'Same-day infrastructure email was repeated.' }
@@ -119,13 +130,13 @@ try {
         Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
     }
 }
-Write-Output 'PASS: infrastructure parser, nested configuration, persistent paths, filtering, read-only commands, PS5 buffered CSV, receipts, upload policy, daily mail gate and routing.'
+Write-Output 'PASS: infrastructure parser, configuration database fallback, nested configuration, persistent paths, filtering, read-only commands, PS5 buffered CSV, receipts, upload policy, daily mail gate and routing.'
 
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA/rrN1iuxVZMDr
-# 1W/twTeglGrrsWjn7MENOZ71R8KOtKCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDD8Gy/QqPiYj/2
+# /42WSgXfSrzV7ZQG+B8lje1sXezpwaCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -155,14 +166,14 @@ Write-Output 'PASS: infrastructure parser, nested configuration, persistent path
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCCnOU64ocnWvwSCyqrDiQJC
-# 59roYA5Ck1PzEbm48CIMcTANBgkqhkiG9w0BAQEFAASCAYAdxDrZwymqGPnyIlwz
-# NARkGASeL8Ys5IZnVqVM8hZ/bCYFap20uC4LTjIEumWt40BwX18ByDfJakzeTRWM
-# vYphWJFoQeSBZiEqSojXmrNQMqFdml3hZKfT6SmxhUczNKYI3ixcEP1xrfXGWNCt
-# o7c3NBLWYXHyJLiKPoaF0r40uKrv+lwumb7mvH985MsWSeDkeKEyu2jJGGRN/JOk
-# WCvvbDhoD0yt9WsOxTMwv0F1fqTt5GeMgw+cZmOlqGrU5/jm+1d+xIREcxK7ByLZ
-# y9INnvEjvaQ5YqOSEu9yqOow6RzrpWhSSqjt8+70DM0k82VSwdBNbQ9tTnGFm/g4
-# 3Ll0IO2ehPmHvd5a7Yu0ttNrus/KrV0cFrnbY59o7heg4z1AjQpkVs21NLZN1OxC
-# eAZWgMzC7yOqKhpE4jeJlImPWQkShkRLm9Adn4ZBlj8LZs13vl4VXntYtpO/R3LV
-# YlLBF2fc2ZUHC68sIWV6GBnDE0Au/VE2lXkr0+wfZexoanM=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCDP56lCfXksa72eO5D6qwjX
+# eR7rYGkyEArKv8fFwNFR8jANBgkqhkiG9w0BAQEFAASCAYCsNHxwI/XJHWh2P03m
+# 2eZrPyL6hj6Ln11YM/pVZDk8hSbd2rBbdd1PA+vTJTATctcfY+E4y2fWS5vuq7O+
+# XUc4g8xK0xs0xZD2FxDDRRY66BNtkFvda6eZuxdYfDx0TQV8B5pQnb9Ay/FSunJo
+# LWfBiL3JrjR8BOYjM/DsKxLJ9GNPrVz+shVRMBke3Vgp4WPfZ98KEAncernPO9t3
+# IrLOTGoZcsH4lXpHLCNW5zVzig/R3TSW9/W4/Vz/MY723s1mXg7s5TbFi3wp35yP
+# rBaYYzYOgbUt0XAbvGwyzQQ88yIgDDjH8wAWQgkCNDq9Asup0+hJ9kQSDeVPIaYN
+# +chrr44e1FFsluDP2wb3NweFQA9+0pJIzNwNmwDp2gVaiCqYnnaKwd+MYY3/J5fP
+# 0l4Cbh4TFKPc+WqLMxZPXLG0pp8rknpGbgp9z5PjXOzUZxRoVbeQqiXIcsg3D2Fb
+# 9I389rrz9B/FlrPIVvELAjKf9fzxg28WYm/fG/aMUcTJi50=
 # SIG # End signature block
