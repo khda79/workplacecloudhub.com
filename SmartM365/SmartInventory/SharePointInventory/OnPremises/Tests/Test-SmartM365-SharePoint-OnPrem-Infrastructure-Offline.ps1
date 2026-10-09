@@ -10,7 +10,7 @@ $tokens = $null
 $errors = $null
 $ast = [Management.Automation.Language.Parser]::ParseFile($scriptPath, [ref]$tokens, [ref]$errors)
 if (@($errors).Count) { throw "Infrastructure parser errors: $($errors.Count)" }
-if ($ast.Extent.Text -notmatch '(?s)\.VERSION\s+1\.0\.6') { throw 'Infrastructure version was not updated for configuration database fallback.' }
+if ($ast.Extent.Text -notmatch '(?s)\.VERSION\s+1\.0\.7') { throw 'Infrastructure version was not updated for publication diagnostics.' }
 $firstUploadConfigRead = $ast.Extent.Text.IndexOf('$global:SharePointSiteHostname =', [StringComparison]::Ordinal)
 $resolverDefinition = @($ast.FindAll({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Resolve-InventoryConfigTokens' }, $true))
 if ($firstUploadConfigRead -lt 0 -or $resolverDefinition.Count -ne 1 -or $resolverDefinition[0].Extent.EndOffset -ge $firstUploadConfigRead) { throw 'Infrastructure reads upload configuration before the token resolver is defined.' }
@@ -135,8 +135,8 @@ Write-Output 'PASS: infrastructure parser, configuration database fallback, nest
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDD8Gy/QqPiYj/2
-# /42WSgXfSrzV7ZQG+B8lje1sXezpwaCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCRi1Jmoj+ZOWJ3
+# lfYgfWimDoUZhinKPywXtcjrNRnGbKCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -166,14 +166,14 @@ Write-Output 'PASS: infrastructure parser, configuration database fallback, nest
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCDP56lCfXksa72eO5D6qwjX
-# eR7rYGkyEArKv8fFwNFR8jANBgkqhkiG9w0BAQEFAASCAYCsNHxwI/XJHWh2P03m
-# 2eZrPyL6hj6Ln11YM/pVZDk8hSbd2rBbdd1PA+vTJTATctcfY+E4y2fWS5vuq7O+
-# XUc4g8xK0xs0xZD2FxDDRRY66BNtkFvda6eZuxdYfDx0TQV8B5pQnb9Ay/FSunJo
-# LWfBiL3JrjR8BOYjM/DsKxLJ9GNPrVz+shVRMBke3Vgp4WPfZ98KEAncernPO9t3
-# IrLOTGoZcsH4lXpHLCNW5zVzig/R3TSW9/W4/Vz/MY723s1mXg7s5TbFi3wp35yP
-# rBaYYzYOgbUt0XAbvGwyzQQ88yIgDDjH8wAWQgkCNDq9Asup0+hJ9kQSDeVPIaYN
-# +chrr44e1FFsluDP2wb3NweFQA9+0pJIzNwNmwDp2gVaiCqYnnaKwd+MYY3/J5fP
-# 0l4Cbh4TFKPc+WqLMxZPXLG0pp8rknpGbgp9z5PjXOzUZxRoVbeQqiXIcsg3D2Fb
-# 9I389rrz9B/FlrPIVvELAjKf9fzxg28WYm/fG/aMUcTJi50=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCBMmrhSe8OzjGLaM9jUeLxS
+# FbhpDfj/yUq6jOxLewWYHjANBgkqhkiG9w0BAQEFAASCAYAjVO46KJSC0mVdlLq4
+# nHt1+eu0yyWODw/2gN8LR4sT3IM/1YL7xv3nAqPqPsi+xUbIQH4ya9xbKcs8oiPf
+# C89m5fja0DcMOhbJUmbs9D4dVkQKInu91iMfmpApiPAM2ZFiLl3rIIsVPTBe2nL8
+# PoZ+JOqfaFuPuVOSKQ7Bgo4dlNfOt3rgOtmoLPpnDpV3VPNl5h5D7iQ/+2RX8Isu
+# 4OU1Mbchi5c7lXuX1HniOxA3pJKlSgOsMVf/KeNq4uza7TOq2K7OEyTnTHTM3pbe
+# auF3tsSKar/UoV9FcHYkqzPmkGQXogUNYWfNNW4rEjixyziQQ0swIYHq4RDliv18
+# k4nGmLUzHwgOKU8ZC2hMk6i4ldesGXxbrKEcUygvofMOrrR94F5B3WEvutWziak4
+# koVHaeJW5Sw7SoYCmYHK/UBEXow4btjKON0ZhvZigA8ppIcry57zR6uMzPfqAFVy
+# vXmdSk95w0Zx+OQyub3T/lv4JG5o41wMUwKrNynuF/xdRe8=
 # SIG # End signature block

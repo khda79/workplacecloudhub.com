@@ -2,7 +2,7 @@
 .SYNOPSIS
     Read-only SharePoint Server 2016/2019 farm infrastructure inventory.
 .VERSION
-    1.0.6
+    1.0.7
 .REQUIREMENTS
     Windows PowerShell 5.1 x64 on a SharePoint farm server; SharePoint Shell access.
 #>
@@ -263,6 +263,8 @@ $runFolder = Join-Path $outputBase ((Get-Date -Format 'yyyyMMdd_HHmmss') + '_' +
 $script:StartedAt = Get-Date
 $script:ReceiptStarted = $false
 $script:Completed = $false
+$script:CurrentStage = 'Initialization'
+$script:CurrentStagePath = ''
 try {
     $null = InitializeScriptEnvironment -OutputPath $runFolder -LogFileName $script:ScriptName -CallerScriptPath $PSCommandPath
     WriteLog -Message ("SharePoint infrastructure inventory starting. SharePoint upload enabled for this run: {0}." -f $global:EnableSharePointUpload)
@@ -406,16 +408,23 @@ try {
     }
     if ([bool](Get-InventoryConfigValue -Name 'EnableWeeklyHistory' -DefaultValue $true)) {
         $historyRoot = Assert-InventoryPath -Path (Get-InventoryConfigValue 'WeeklyHistoryFolderPath') -Name 'WeeklyHistoryFolderPath'
+        $script:CurrentStage = 'WeeklyHistory'
+        $script:CurrentStagePath = $historyRoot
+        WriteLog -Message ("Saving weekly infrastructure history in {0}." -f $historyRoot)
         Add-SmartM365WeeklyHistory -SourceCsvPaths @($runPaths) -HistoryRootPath $historyRoot -RetentionWeeks ([int](Get-InventoryConfigValue 'WeeklyHistoryRetentionWeeks' 52)) -HistoryLabel 'SharePoint on-prem infrastructure' | Out-Null
     }
+    $script:CurrentStage = 'CurrentCsvPublication'
     $qualifiedCsvPaths = New-Object 'System.Collections.Generic.List[string]'
     foreach ($path in $runPaths) {
         $latestPath = Join-Path $latestRoot (Split-Path $path -Leaf)
+        $script:CurrentStagePath = $latestPath
         Copy-SmartM365FileAtomically -SourcePath $path -DestinationPath $latestPath
         [void]$global:csvGeneratedPaths.Add($latestPath)
         $qualifiedCsvPaths.Add($path)
         $qualifiedCsvPaths.Add($latestPath)
     }
+    $script:CurrentStage = 'SourceReceipt'
+    $script:CurrentStagePath = $latestRoot
     $receiptPath = Complete-SmartM365SourceReceipt -Status Success -ErrorCount 0
     if (-not $receiptPath -or $receiptPath -notlike '*.current.json.txt') { throw 'Infrastructure source receipt qualification failed.' }
     WriteLog -Message 'Infrastructure collection and current publication completed.'
@@ -441,16 +450,25 @@ try {
     Complete-SmartM365ExecutionContext -Status Success
     $script:Completed = $true
 } catch {
-    try { WriteLog -Message ("Infrastructure inventory failed: {0}" -f $_.Exception.Message) -Level ERROR } catch { Write-Error $_ }
-    if (-not $script:Completed) { try { Complete-SmartM365ExecutionContext -Status Failed -ErrorRecord $_ -FailureStage 'InfrastructureInventory' } catch {} }
+    $failure = $_
+    try {
+        WriteLog -Message ("Infrastructure inventory failed during {0} at {1}: {2}" -f $script:CurrentStage, $script:CurrentStagePath, $failure.Exception.Message) -Level ERROR
+        if ($failure.InvocationInfo -and $failure.InvocationInfo.PositionMessage) {
+            WriteLog -Message ("Infrastructure failure location: {0}" -f ($failure.InvocationInfo.PositionMessage.Trim() -replace '\r?\n', ' | ')) -Level ERROR
+        }
+        if ($failure.ScriptStackTrace) {
+            WriteLog -Message ("Infrastructure failure stack: {0}" -f ($failure.ScriptStackTrace -replace '\r?\n', ' | ')) -Level ERROR
+        }
+    } catch { Write-Error $failure }
+    if (-not $script:Completed) { try { Complete-SmartM365ExecutionContext -Status Failed -ErrorRecord $failure -FailureStage 'InfrastructureInventory' } catch {} }
     throw
 }
 
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBBhSgfeVa1eZ+V
-# U78Mzwo6NFxSvIA12eHBwV9i9Bt1yqCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDniG0e7KJC2olu
+# O6OEkQT1MIiJmj2DP/KJJliJAIHqf6CCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -480,14 +498,14 @@ try {
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCDlqElUQIi6hJKABhQK2b4Q
-# hK2Cjm63N5qufgPbz2RRIjANBgkqhkiG9w0BAQEFAASCAYBOzak3q13d+BTQRA00
-# pAEdVOhgnfpRT8fCyy+a2WNc7EmuWPxZfjeQLv8rte87r8ThggMCVModjvDF7+Ro
-# Uzfgi+mV0xe96ShhB+dNZkmrj2EEfnqKQuZg2JH9ax11y5WMgwKMySDcv7qb4G1/
-# QTfhO6nwAWER2PwEw7AGkCj+C5SF7GdX4pddZr1uMFctw1ZLwsLqyNTf9Lyl7mOs
-# GZhccXCUujP9w2J6vDSckn0uXg0zFDqOJ2o4hD4GKWs5wo3yee3Z96KtXiFYj5yW
-# AMUMTsWWGpitt2yE5CrVEsObTjjtQ1SLAZxkQPB0sKtJAyS3W4aYnq2HTbC90nYY
-# cSFbyx8vJlEHvFvch8F+/EdoX0QB7lJVoYcnLOaU5WGn+o2i/7TqwU//mV1tTlV0
-# ZXp1Vtgp1rDkcEqvy5EFyTHwoTt+hhZyndcGTrElq3b0o9o7c7iapmLdp6L7SoYY
-# AE5j1TtcgoB9INB81EyIMJwO9sRF8mnmj7XoenLTXz/P+5o=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCC9WqMHRPHexdkaoc4srAYA
+# IlvSyGTCC+WNGFP5WjrQWDANBgkqhkiG9w0BAQEFAASCAYBDLu9EuXCPPyNX8n1+
+# zR/kozfACgB7RUUWwmmp0edtZLASHuZWA2U5tjRiQfv5WS8jtYfCJGU8WXRGfhUN
+# ne607sKB+A/ztM5NUBtDNv9p6/gmQoCoQfUpIpCWwsxcR8wK4zQaMMDpY8liHPQz
+# 6FY4MV5g7ksLDHkS6PplrbbLUcfcithXPKGk0HBVU7aRIzNggkSaJtwqAtVnPkVb
+# d9Xk5ru7ii/UOvgNsYedn0D9TaVkXhLl8iWtrdS3yBT7VoBtF/c+WvedU6NX0jOv
+# QyKBie1qFYk4jHf4SLWU7rB9K33Jq+WvDkTTTj1hCSGChEZCrP3Tw139ONLdeH9O
+# JCakn7rd+afvBsqkIE+heNxpskB/mjCs48Rypg10/p0BWC+NVlVJIOLtstsjDf4t
+# oHqkuEWZRpSzYduXpjBpWmYMdqvVCdLh/cCIEv1p+lrgxdgUiWjcRBW5bW8OjqEV
+# d5/XTSQYo56v+kjZohRmcrTYBUk9xt9xjuHfFwh5zkLoFsc=
 # SIG # End signature block
