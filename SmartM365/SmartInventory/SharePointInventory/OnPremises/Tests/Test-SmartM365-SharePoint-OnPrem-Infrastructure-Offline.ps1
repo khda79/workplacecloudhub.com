@@ -10,13 +10,15 @@ $tokens = $null
 $errors = $null
 $ast = [Management.Automation.Language.Parser]::ParseFile($scriptPath, [ref]$tokens, [ref]$errors)
 if (@($errors).Count) { throw "Infrastructure parser errors: $($errors.Count)" }
+if ($ast.Extent.Text -notmatch '(?s)\.VERSION\s+1\.0\.2') { throw 'Infrastructure version was not updated for the CSV and upload fixes.' }
 $template = Get-Content $templatePath -Raw | ConvertFrom-Json
-if ($template.EnableSharePointUpload -ne $false -or $template.EnableWeeklyHistory -ne $true) { throw 'Infrastructure template policy is invalid.' }
+if ($template.EnableSharePointUpload -ne $true -or $template.EnableWeeklyHistory -ne $true) { throw 'Infrastructure template policy is invalid.' }
 $registry = Get-Content $registryPath -Raw | ConvertFrom-Json
 $producer = @($registry.Producers | Where-Object Script -eq 'SmartM365-SharePoint-OnPrem-Infrastructure-Inventory.ps1')
 if ($producer.Count -ne 1 -or $producer[0].Files.Count -ne 6) { throw 'Infrastructure source receipt registration is invalid.' }
 if ($ast.Extent.Text -match '(?im)^\s*(Set-SPSite|Set-SPWeb|Set-SPContentDatabase|Add-SPShellAdmin|Remove-SPSite)\b') { throw 'A SharePoint write command was found.' }
-foreach ($name in @('Get-InventoryConfigValue','Resolve-InventoryConfigTokens','Assert-InventoryPath','Get-ConfiguredWebApplications','Write-RunCsv','Invoke-DailySummaryMail','Send-InventorySummaryMail')) {
+if ($ast.Extent.Text -notmatch '-Rows\s+\$rows\[\$kind\]\.ToArray\(\)') { throw 'Infrastructure CSV buffers must be converted to arrays for Windows PowerShell 5.1.' }
+foreach ($name in @('Get-InventoryConfigValue','Resolve-InventoryConfigTokens','Assert-InventoryPath','Get-ConfiguredWebApplications','Write-RunCsv','Invoke-DailySummaryMail','Send-InventorySummaryMail','Publish-QualifiedCsvUploads')) {
     $functionAst = @($ast.FindAll({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name }, $true))
     if ($functionAst.Count -ne 1) { throw "Missing function: $name" }
     . ([scriptblock]::Create($functionAst[0].Extent.Text))
@@ -52,6 +54,11 @@ try {
     $path = Write-RunCsv -Name 'Empty.csv' -Rows @() -Columns @('TenantKey','FarmId','CollectionStatus') -Folder $tempRoot
     $text = [IO.File]::ReadAllText($path)
     if ($text -notmatch 'TenantKey.*;.*FarmId.*;.*CollectionStatus' -or @(Import-Csv $path -Delimiter ';').Count -ne 0) { throw 'Empty infrastructure CSV contract failed.' }
+    $buffers = @{ Farms = (New-Object 'System.Collections.Generic.List[object]') }
+    $buffers.Farms.Add([pscustomobject]@{ TenantKey='OFFLINE'; FarmId='FARM'; CollectionStatus='Collected' })
+    $bufferedPath = Write-RunCsv -Name 'Buffered.csv' -Rows $buffers['Farms'].ToArray() -Columns @('TenantKey','FarmId','CollectionStatus') -Folder $tempRoot
+    $bufferedRows = @(Import-Csv -LiteralPath $bufferedPath -Delimiter ';')
+    if ($bufferedRows.Count -ne 1 -or $bufferedRows[0].FarmId -ne 'FARM') { throw 'Windows PowerShell 5.1 infrastructure buffer serialization failed.' }
     $latest = Join-Path $tempRoot 'DATA-LAST'
     Start-SmartM365SourceReceipt -ScriptPath $scriptPath -SourceRootPath $latest
     foreach ($name in $producer[0].Files) {
@@ -80,18 +87,24 @@ try {
     $script:EffectiveConfig = [pscustomobject]@{ From='sender@example.test'; To=''; ErrorMailTo='recipient@example.test'; SmtpServer='smtp.example.test'; SmtpPort=25; SendMailMode='SMTP'; Cc='' }
     Send-InventorySummaryMail -Subject 'Offline summary' -BodyHtml '<p>Summary</p>'
     if ($script:mailParameters.To -ne 'recipient@example.test' -or $script:mailParameters.From -ne 'sender@example.test' -or $script:mailParameters.ContainsKey('Attachments')) { throw 'Infrastructure mail routing or attachment policy failed.' }
+    $script:uploadCalls = New-Object 'System.Collections.Generic.List[string]'
+    function Invoke-SmartM365SharePointCsvUpload { param($LocalFilePath) $script:uploadCalls.Add($LocalFilePath); if ($LocalFilePath -eq 'failed.csv') { return }; return [pscustomobject]@{ LocalFilePath=$LocalFilePath } }
+    $global:EnableSharePointUpload = $false
+    if ((Publish-QualifiedCsvUploads -Paths @('run.csv','latest.csv')) -ne 0 -or $script:uploadCalls.Count -ne 0) { throw 'Disabled infrastructure upload was attempted.' }
+    $global:EnableSharePointUpload = $true
+    if ((Publish-QualifiedCsvUploads -Paths @('run.csv','latest.csv','run.csv','failed.csv')) -ne 1 -or $script:uploadCalls.Count -ne 3) { throw 'Infrastructure upload qualification failed.' }
 } finally {
     if ([IO.Path]::GetFullPath($tempRoot).StartsWith([IO.Path]::GetFullPath([IO.Path]::GetTempPath()),[StringComparison]::OrdinalIgnoreCase)) {
         Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
     }
 }
-Write-Output 'PASS: infrastructure parser, nested configuration, persistent paths, filtering, read-only commands, empty CSV, receipts, daily mail gate and routing.'
+Write-Output 'PASS: infrastructure parser, nested configuration, persistent paths, filtering, read-only commands, PS5 buffered CSV, receipts, upload policy, daily mail gate and routing.'
 
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBZVdh3ggwNnjm9
-# 2wRZKC4FRmzh4hePJ8BQcNVHpeeLpKCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCACG5l9Id/VMACK
+# iAxsre7jVpZOr+8V1ypufP2vrVKOaKCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -121,14 +134,14 @@ Write-Output 'PASS: infrastructure parser, nested configuration, persistent path
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCAHwljY1AF2HeG2lFfgCT14
-# EBoqsDbZxnYm43JB3iVSwzANBgkqhkiG9w0BAQEFAASCAYAHewTaE1tHI967uw1X
-# kjBqLip6tBg00AIPYn7LGohauFK079LFSTY/U1tRUbKO6jaY1VxHQjepremODGvr
-# mlVeb19vJLAQRtRL7u1MXpCQpAdul+gtGnWY6cVC5A30bztRNivdAMCtP8ODGvCi
-# ZqhbZy5LGO2nSx2su+yZYfwYYvd7wDaJRH035FpUgeiJSW2cxjODLj9KvANZEIBf
-# RzCS96BNqTes0CPp4SENZ1YeykgSWzQHYvZgSaT9+8xzmJ2xBs52cqnStuTWmfwd
-# iyb7Vo9Zx+uObKfOZzlXgqGDiPzDPjEHiNKK2FnK5thr0tsoUSDl5mJjeDZlRpKn
-# A+DpA2aAxOslvnjZkj5bSquzeH3G5YCrJdRYwWrX2qV2+WDtOoOoger1GKklHbWJ
-# ItX10hHCZbqXf1DgvzPkseqsaHYp99Dea9zJy5CJZjKyeWgA4QwtSPNB8M2rqZ66
-# fgG4JQ2yt6jV9j+SoyjcDhl5f6ONn8ASsesS5csLpwUDCKo=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCDUsLeRpXiIeXw0GoLjkQ/S
+# PbgOImKh8mMFBURISeiGTzANBgkqhkiG9w0BAQEFAASCAYB19q85qmS6hE7sRY3m
+# LR5/JmEovEwm08p2ak7VeYFAQKpurEY09zTLwlkZ8t1hCnP+thma9oJIO8f6r5z1
+# DS5PlJpW+kUVKz9tAWfYEghPPlpf4TDPzv1hH8J1DqM0wgINvU4+Pgmqyk8/7+fL
+# xFRdGCvTgasdPgwvX2q/0I7yzXipVYqMUDrrzO5lzNjOlpvRoigRdVZf/7yyXXWL
+# 3lolQss4o0xnTWQpdgpzVw56d7cy3VOgmduzR8QNdMHc/iJ1QrmwukM63rtcyrQD
+# 6o6PwCgwb7GtH49CemAzyC1hrDWsdYob3UWTETkv72FlVxUvr3ZFW9YkrI1ViXIk
+# /2rGNH0yVQZ4kuw0May3zvLq+EYPl32i6t/DJv/KSodhwBg+hookKx2xqgL3kxyq
+# uznojr/kle7sRDyDgft8t7F3vYyXScVS1XnwekSXV1jGxt+/5BMKeCu4+PJjD8Cd
+# y3R6yy0HBb4JOcuDUHQizawg5w6MBS3D2oSCOCBGsB60ZbY=
 # SIG # End signature block

@@ -2,7 +2,7 @@
 .SYNOPSIS
     Read-only SharePoint Server 2016/2019 farm infrastructure inventory.
 .VERSION
-    1.0.0
+    1.0.2
 .REQUIREMENTS
     Windows PowerShell 5.1 x64 on a SharePoint farm server; SharePoint Shell access.
 #>
@@ -35,11 +35,10 @@ foreach ($key in $localConfig.Keys) {
     if ($value -is [string] -and ($value -eq '' -or $value -in @('__USE_GLOBAL__','USE_GLOBAL'))) { continue }
     $merged[$key] = $value
 }
-# This collector never transfers data automatically, including through Core completion.
-$merged['EnableSharePointUpload'] = $false
+if ($null -eq $merged['EnableSharePointUpload']) { $merged['EnableSharePointUpload'] = $true }
 $script:EffectiveConfig = [pscustomobject]$merged
 $global:SmartM365GlobalConfig = $script:EffectiveConfig
-$global:EnableSharePointUpload = $false
+$global:EnableSharePointUpload = [bool]$merged['EnableSharePointUpload'] -and -not $ValidateOnly
 
 function Get-InventoryConfigValue {
     param([string]$Name, $DefaultValue = $null)
@@ -50,6 +49,14 @@ function Get-InventoryConfigValue {
     if ($value -isnot [string]) { return $value }
     return Resolve-InventoryConfigTokens -Value $value -Name $Name
 }
+
+$global:SharePointSiteHostname = [string](Get-InventoryConfigValue 'SharePointSiteHostname' '')
+$global:SharePointSitePath = [string](Get-InventoryConfigValue 'SharePointSitePath' '')
+$global:SharePointLibraryDisplayName = [string](Get-InventoryConfigValue 'SharePointLibraryDisplayName' 'Documents')
+$global:SharePointTargetFolderPath = [string](Get-InventoryConfigValue 'SharePointTargetFolderPath' '')
+$global:AppId = [string](Get-InventoryConfigValue 'AppId' '')
+$global:TenantId = [string](Get-InventoryConfigValue 'TenantId' '')
+$global:Thumbprint = [string](Get-InventoryConfigValue 'Thumbprint' (Get-InventoryConfigValue 'Thumb' ''))
 
 function Resolve-InventoryConfigTokens {
     param([string]$Value, [string]$Name)
@@ -187,6 +194,21 @@ function Send-InventorySummaryMail {
     WriteLog -Message "Daily infrastructure summary email sent to $to."
 }
 
+function Publish-QualifiedCsvUploads {
+    param([string[]]$Paths)
+    if (-not $global:EnableSharePointUpload) { return 0 }
+    $failures = 0
+    foreach ($path in @($Paths | Sort-Object -Unique)) {
+        try {
+            if (-not (Invoke-SmartM365SharePointCsvUpload -LocalFilePath $path)) { throw 'No upload receipt was returned.' }
+        } catch {
+            $failures++
+            WriteLog -Message ("SharePoint CSV upload incomplete for {0}: {1}" -f $path, $_.Exception.Message) -Level WARNING
+        }
+    }
+    return $failures
+}
+
 $coreManifest = Join-Path $root 'Modules\SmartM365.Core\Compatibility\WindowsPowerShell5\SmartM365-WindowsPowerShell5.psd1'
 Import-Module -Name $coreManifest -MinimumVersion '1.0.50' -ErrorAction Stop
 $outputBase = if ($PSBoundParameters.ContainsKey('OutputRoot')) { Resolve-InventoryConfigTokens -Value $OutputRoot -Name 'OutputRoot' } else { Get-InventoryConfigValue -Name 'OutputRoot' }
@@ -198,7 +220,7 @@ $script:ReceiptStarted = $false
 $script:Completed = $false
 try {
     $null = InitializeScriptEnvironment -OutputPath $runFolder -LogFileName $script:ScriptName -CallerScriptPath $PSCommandPath
-    WriteLog -Message 'SharePoint infrastructure inventory starting. Automatic upload is disabled.'
+    WriteLog -Message ("SharePoint infrastructure inventory starting. SharePoint upload enabled for this run: {0}." -f $global:EnableSharePointUpload)
     $farm = Test-SharePointPrerequisites
     $webApplications = @(Get-ConfiguredWebApplications)
     WriteLog -Message ("Farm {0}: {1} selected content web applications." -f $farm.Id, $webApplications.Count)
@@ -324,7 +346,7 @@ try {
     $runPaths = New-Object 'System.Collections.Generic.List[string]'
     foreach ($kind in $schemas.Keys) {
         $name = "SharePoint_OnPrem_$kind.csv"
-        $runPaths.Add((Write-RunCsv -Name $name -Rows @($rows[$kind]) -Columns $schemas[$kind] -Folder $runFolder))
+        $runPaths.Add((Write-RunCsv -Name $name -Rows $rows[$kind].ToArray() -Columns $schemas[$kind] -Folder $runFolder))
     }
     if ($failures.Count -gt 0) {
         WriteLog -Message ("Infrastructure coverage is incomplete: {0} failure(s). DATA-LAST was not updated." -f $failures.Count) -Level ERROR
@@ -336,22 +358,31 @@ try {
         $historyRoot = Assert-InventoryPath -Path (Get-InventoryConfigValue 'WeeklyHistoryFolderPath') -Name 'WeeklyHistoryFolderPath'
         Add-SmartM365WeeklyHistory -SourceCsvPaths @($runPaths) -HistoryRootPath $historyRoot -RetentionWeeks ([int](Get-InventoryConfigValue 'WeeklyHistoryRetentionWeeks' 52)) -HistoryLabel 'SharePoint on-prem infrastructure' | Out-Null
     }
+    $qualifiedCsvPaths = New-Object 'System.Collections.Generic.List[string]'
     foreach ($path in $runPaths) {
         $latestPath = Join-Path $latestRoot (Split-Path $path -Leaf)
         Copy-SmartM365FileAtomically -SourcePath $path -DestinationPath $latestPath
+        $qualifiedCsvPaths.Add($path)
+        $qualifiedCsvPaths.Add($latestPath)
     }
     $receiptPath = Complete-SmartM365SourceReceipt -Status Success -ErrorCount 0
     if (-not $receiptPath -or $receiptPath -notlike '*.current.json.txt') { throw 'Infrastructure source receipt qualification failed.' }
     WriteLog -Message 'Infrastructure collection and current publication completed.'
+    $uploadFailures = Publish-QualifiedCsvUploads -Paths $qualifiedCsvPaths.ToArray()
     try {
         $farmVersion = [System.Net.WebUtility]::HtmlEncode([string]$rows.Farms[0].FarmVersion)
-        $body = "<h2>SharePoint on-prem infrastructure inventory</h2><p>Qualified run: $($script:RunId)</p><p>Farm version: $farmVersion</p><table><tr><th>Servers</th><th>Service applications</th><th>Web applications</th><th>Content databases</th></tr><tr><td>$($rows.Servers.Count)</td><td>$($rows.ServiceApplications.Count)</td><td>$($rows.WebApplications.Count)</td><td>$($rows.ContentDatabases.Count)</td></tr></table>"
+        $body = "<h2>SharePoint on-prem infrastructure inventory</h2><p>Qualified run: $($script:RunId)</p><p>Farm version: $farmVersion</p><p>SharePoint upload failures: $uploadFailures</p><table><tr><th>Servers</th><th>Service applications</th><th>Web applications</th><th>Content databases</th></tr><tr><td>$($rows.Servers.Count)</td><td>$($rows.ServiceApplications.Count)</td><td>$($rows.WebApplications.Count)</td><td>$($rows.ContentDatabases.Count)</td></tr></table>"
         $mailMarkerPath = Join-Path $outputBase 'SmartM365-SharePoint-OnPrem-Infrastructure-DailySummary.sent'
         $null = Invoke-DailySummaryMail -MarkerPath $mailMarkerPath -Force:$ForceSendDailySummary -SendAction {
             Send-InventorySummaryMail -Subject 'SharePoint on-prem infrastructure inventory' -BodyHtml $body
         }
     } catch {
         WriteLog -Message ("Daily infrastructure summary email failed: {0}" -f $_.Exception.Message) -Level ERROR
+        Complete-SmartM365ExecutionContext -Status CompletedWithWarnings
+        $script:Completed = $true
+        exit 3
+    }
+    if ($uploadFailures -gt 0) {
         Complete-SmartM365ExecutionContext -Status CompletedWithWarnings
         $script:Completed = $true
         exit 3
@@ -367,8 +398,8 @@ try {
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC/rGEPOP+WmDcl
-# VoMdBscHqg6ZRwS00SPqPIUw0euSBqCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC2xMPgpaObqcF8
+# gxz57r9KjDZl2gvfxUe3neKL+nWhsqCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -398,14 +429,14 @@ try {
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCBfp0p9ra2kn7mctDD7AB82
-# +5Z6SqBhqeBLi6u6RWmQ9TANBgkqhkiG9w0BAQEFAASCAYCRHCVHm05ks2boWE/F
-# HgfP5642mXuncpZsjIq0EzOlTMfLqX99+9iFtjWRWm8tYyxY3CvYeHkJ2FI89H6d
-# RhrGaukbfGcE3FaYnvCZe9V3niXYhJeYuHhlJ3PHaRye1rtmz26pNh/O1kSXC4yF
-# 0S1ee2hAKfXbQFUzpxRkR0xXwoqmRkBthRLjOHoRvnuKkv0X7yDc92dYVPZNZKFz
-# jz7egjIxP5xmkeKLdYZ1/2d/+bwwkIRklYczus6BSrwiecZhR9pFYDV0v4W0jsB6
-# BtIHBjbOTEOT+WNLDWXM0705ohAmm5vl71bTOX22A9pf5oCpynVD+nuCEGlLEsxT
-# o1/UjKOZ07Te4ts0Nq0JsgG4Kr588vgLgqlpD8vKQI3M1kd/P4F5xhdclI5ATtIz
-# cQbe6IuHsNay8CMQs7nmlwP8nBTNyV+2SuS+5QtdtK4sQupTU3912fEuJVAXvtba
-# LWpn6kCDfUCnw2ARpTxJzGp0lG10E6lxCkSr/3tWWVCJRiM=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCC1jauKAkh4GTLeLLorSX/O
+# H3TkgEqOOXMIrBFXYGBptTANBgkqhkiG9w0BAQEFAASCAYAQASvzIOd2Bdrknnx7
+# cDWSpjjR71DBCxSKevFJ/qRKfXHzJ77KbUcvdkfkCjja72UtP2EYyLA10bAepXPp
+# Pf2TnXQIQPf82xeUpRoroktsyIyqhYpP5rfsDYIFvjWaNxF2KNmXP4a7+jDiQoYw
+# yS+kfO/aUR5LvfQFs4wjZDYM1bIzhTHWHnekLt8WxL5Iu0A60PiuhL+589VUPjfM
+# gx5e9JjeUiuixETqb+uS0Sb5PC0seO9gw2a2md1OT3OhLXXQ42cRQcYzD/DmiOoO
+# DEe/Nlul22bIJALvi577FpYW/S3x7Tqq4eRIaj54T3vkW0itykM6faNCvUOdJPMv
+# riIyWaWoYV+1+n49ZRvZLnIfX7UQ9Lj9nrfC1/xMzVeqTYlzCGGM2SSH91QyCe0L
+# kZVe3K21ecKlBmzPQnAxTHysPHXPZMzplPSSaZb686KK3T3zDEjb9ASsJQsRV32r
+# urQcPW2KFm4sYSPrjB2Mn75nbqYXsj8o3soz1rw4utGxn08=
 # SIG # End signature block

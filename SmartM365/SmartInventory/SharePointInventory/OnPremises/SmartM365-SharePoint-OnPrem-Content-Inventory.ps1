@@ -2,7 +2,7 @@
 .SYNOPSIS
     Read-only SharePoint Server 2016/2019 site collection and web inventory.
 .VERSION
-    1.0.0
+    1.0.1
 .REQUIREMENTS
     Windows PowerShell 5.1 x64 on a SharePoint farm server; SharePoint Shell and content read access.
 #>
@@ -40,10 +40,10 @@ foreach ($key in $localConfig.Keys) {
     if ($value -is [string] -and ($value -eq '' -or $value -in @('__USE_GLOBAL__','USE_GLOBAL'))) { continue }
     $merged[$key] = $value
 }
-$merged['EnableSharePointUpload'] = $false
+if ($null -eq $merged['EnableSharePointUpload']) { $merged['EnableSharePointUpload'] = $true }
 $script:EffectiveConfig = [pscustomobject]$merged
 $global:SmartM365GlobalConfig = $script:EffectiveConfig
-$global:EnableSharePointUpload = $false
+$global:EnableSharePointUpload = [bool]$merged['EnableSharePointUpload'] -and -not $ValidateOnly -and $MaxItems -eq 0
 
 function Get-InventoryConfigValue {
     param([string]$Name, $DefaultValue = $null)
@@ -54,6 +54,14 @@ function Get-InventoryConfigValue {
     if ($value -isnot [string]) { return $value }
     return Resolve-InventoryConfigTokens -Value $value -Name $Name
 }
+
+$global:SharePointSiteHostname = [string](Get-InventoryConfigValue 'SharePointSiteHostname' '')
+$global:SharePointSitePath = [string](Get-InventoryConfigValue 'SharePointSitePath' '')
+$global:SharePointLibraryDisplayName = [string](Get-InventoryConfigValue 'SharePointLibraryDisplayName' 'Documents')
+$global:SharePointTargetFolderPath = [string](Get-InventoryConfigValue 'SharePointTargetFolderPath' '')
+$global:AppId = [string](Get-InventoryConfigValue 'AppId' '')
+$global:TenantId = [string](Get-InventoryConfigValue 'TenantId' '')
+$global:Thumbprint = [string](Get-InventoryConfigValue 'Thumbprint' (Get-InventoryConfigValue 'Thumb' ''))
 
 function Resolve-InventoryConfigTokens {
     param([string]$Value, [string]$Name)
@@ -257,6 +265,21 @@ function Send-InventorySummaryMail {
     WriteLog -Message "Daily content summary email sent to $to."
 }
 
+function Publish-QualifiedCsvUploads {
+    param([string[]]$Paths)
+    if (-not $global:EnableSharePointUpload) { return 0 }
+    $failures = 0
+    foreach ($path in @($Paths | Sort-Object -Unique)) {
+        try {
+            if (-not (Invoke-SmartM365SharePointCsvUpload -LocalFilePath $path)) { throw 'No upload receipt was returned.' }
+        } catch {
+            $failures++
+            WriteLog -Message ("SharePoint CSV upload incomplete for {0}: {1}" -f $path, $_.Exception.Message) -Level WARNING
+        }
+    }
+    return $failures
+}
+
 function Flush-RunRows {
     param([string]$Kind, [hashtable]$Buffers, [hashtable]$Paths, [int]$MinimumCount = 1)
     $buffer = $Buffers[$Kind]
@@ -275,7 +298,7 @@ $runFolder = Join-Path $runBase ((Get-Date -Format 'yyyyMMdd_HHmmss') + '_' + $s
 $script:Completed = $false
 try {
     $null = InitializeScriptEnvironment -OutputPath $runFolder -LogFileName $script:ScriptName -CallerScriptPath $PSCommandPath
-    WriteLog -Message 'SharePoint content inventory starting. Automatic upload is disabled.'
+    WriteLog -Message ("SharePoint content inventory starting. SharePoint upload enabled for this run: {0}." -f $global:EnableSharePointUpload)
     $farm = Test-SharePointPrerequisites
     $webApplications = @(Get-ConfiguredWebApplications)
     $databaseGroups = New-Object 'System.Collections.Generic.List[object]'
@@ -511,20 +534,30 @@ try {
         $historyRoot = Assert-InventoryPath -Path (Get-InventoryConfigValue 'WeeklyHistoryFolderPath') -Name 'WeeklyHistoryFolderPath'
         Add-SmartM365WeeklyHistory -SourceCsvPaths @($runPaths) -HistoryRootPath $historyRoot -RetentionWeeks ([int](Get-InventoryConfigValue 'WeeklyHistoryRetentionWeeks' 52)) -HistoryLabel 'SharePoint on-prem content' | Out-Null
     }
+    $qualifiedCsvPaths = New-Object 'System.Collections.Generic.List[string]'
     foreach ($path in $runPaths) {
-        Copy-SmartM365FileAtomically -SourcePath $path -DestinationPath (Join-Path $latestRoot (Split-Path $path -Leaf))
+        $latestPath = Join-Path $latestRoot (Split-Path $path -Leaf)
+        Copy-SmartM365FileAtomically -SourcePath $path -DestinationPath $latestPath
+        $qualifiedCsvPaths.Add($path)
+        $qualifiedCsvPaths.Add($latestPath)
     }
     $receiptPath = Complete-SmartM365SourceReceipt -Status Success -ErrorCount 0
     if (-not $receiptPath -or $receiptPath -notlike '*.current.json.txt') { throw 'Content source receipt qualification failed.' }
     WriteLog -Message 'Content collection and current publication completed.'
+    $uploadFailures = Publish-QualifiedCsvUploads -Paths $qualifiedCsvPaths.ToArray()
     try {
-        $body = "<h2>SharePoint on-prem content inventory</h2><p>Qualified run: $($script:RunId)</p><table><tr><th>Web applications</th><th>Content databases</th><th>Site collections</th></tr><tr><td>$($webApplications.Count)</td><td>$($databaseGroups.Count)</td><td>$processed</td></tr></table>"
+        $body = "<h2>SharePoint on-prem content inventory</h2><p>Qualified run: $($script:RunId)</p><p>SharePoint upload failures: $uploadFailures</p><table><tr><th>Web applications</th><th>Content databases</th><th>Site collections</th></tr><tr><td>$($webApplications.Count)</td><td>$($databaseGroups.Count)</td><td>$processed</td></tr></table>"
         $mailMarkerPath = Join-Path $outputBase 'SmartM365-SharePoint-OnPrem-Content-DailySummary.sent'
         $null = Invoke-DailySummaryMail -MarkerPath $mailMarkerPath -Force:$ForceSendDailySummary -SendAction {
             Send-InventorySummaryMail -Subject 'SharePoint on-prem content inventory' -BodyHtml $body
         }
     } catch {
         WriteLog -Message ("Daily content summary email failed: {0}" -f $_.Exception.Message) -Level ERROR
+        Complete-SmartM365ExecutionContext -Status CompletedWithWarnings
+        $script:Completed = $true
+        exit 3
+    }
+    if ($uploadFailures -gt 0) {
         Complete-SmartM365ExecutionContext -Status CompletedWithWarnings
         $script:Completed = $true
         exit 3
@@ -540,8 +573,8 @@ try {
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDY4SiI14PLPmHG
-# 4F73mPIxaqYoNGlVm+ns8DWy+SCY2KCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDi/yiyHJRb6nb6
+# yozlMZp50ICHD7nstiwRosdwnqpmCqCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -571,14 +604,14 @@ try {
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCAHpnrK81vRdxGaQ6KCQqt6
-# mkgv4kdSs3qAjbPl1J2SwDANBgkqhkiG9w0BAQEFAASCAYB7h/J66BP8BwBE4LBF
-# UAW+Hv9F4jkjgDVmlMXdu29DYyeSBRjYBUwe0sf7gTIN3HgHwHbN0iioPhAmozLr
-# CKkzX+PGPgzVRq1AhBqBEzRNAewhRJ4M3h9DgD///H4O+M4/WmbBpmYDR4wA8DZv
-# WTygbhgMDvlO8MGkLoKYX+DosEIdgkJwA/4z0acDRGmcmXHI8KxLpwQBxRNfhOQW
-# HNDhL9LJUsyVAKkJ4cT3H0I8N1xBabkcqCmhV5lK/kQPVWZHS2GReNlB4xnwS6gn
-# BKCBLXwIITMoQRp6JKrZnMVRSkjyv2fPanxXRNhc5toc1srJvYYpb8akIoMn3kWU
-# pNFAsiMh0/Vw5OxiGQjuGH7tPVhbs/GfilJd2A47nGqbBtlUbxO7sY+CeWez3CWU
-# DZxOTeOO7iyO1oyxYA1Lcvf2gUYpsndeWr548NjpMwVOhvyq7bMF37NxdQmt2KlZ
-# /gPPZUTXq9NiVOKSMx657tSuI4LiQrmfq3grPGf7Y7OHsRk=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCBUnBBcBnVuZ+PM0QNu7+zj
+# 455ygVH3Q0Xcw2u8yXhb2DANBgkqhkiG9w0BAQEFAASCAYBZkaE+PO8+g+E+44xk
+# 4lle46dGrKmYYEkwY0dpe2w1KzleMRat9dmvbMrP7ZrJJ8bW6TTfAKfeA9tsODn8
+# OiLjetKhyNn43bJ25TjvJ4Juw7D079fQ+js67NJoThtWXJNy2Wq/OkgVGweoceEm
+# TeWXHdJL1pT18GcEiQ27l+1i7U0CMO4yFzMHbHjXTVLcfNxRe9AmTQ+EXaKNOVy7
+# o03yEMEcdb2kBjWcGLy6tWXcBaaPsAe+OIIaRQ7zCy/qoa2brrwJMax9AA5W49pE
+# TOmNqBaXpAurZDGPOZnGoo+/uxViACg06yvojhxrp3imSJ/Hecg4+Dlr1BVTenbW
+# R3VYielRhLRTGP5ZLHq2LuQVtTyBtHRSsWndYp+jrC72UilHkN5lBCbaXgDzUPNt
+# O8rVvQEsXumMDilu+9gKpeAPTIJnBXSsk1P9PZ+psenqtj4yeI6uSGgX0EsRxZVX
+# IayRYrLi/DmSeW+PqGPxrj544ijtc5z5QJ2JPuJlKcPUyrY=
 # SIG # End signature block
