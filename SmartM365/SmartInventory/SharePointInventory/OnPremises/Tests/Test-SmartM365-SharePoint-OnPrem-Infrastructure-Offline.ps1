@@ -10,7 +10,7 @@ $tokens = $null
 $errors = $null
 $ast = [Management.Automation.Language.Parser]::ParseFile($scriptPath, [ref]$tokens, [ref]$errors)
 if (@($errors).Count) { throw "Infrastructure parser errors: $($errors.Count)" }
-if ($ast.Extent.Text -notmatch '(?s)\.VERSION\s+1\.0\.8') { throw 'Infrastructure version was not updated for the mail and database contract.' }
+if ($ast.Extent.Text -notmatch '(?s)\.VERSION\s+1\.0\.9') { throw 'Infrastructure version was not updated for the mail correction.' }
 foreach ($column in @('DatabaseSizeBytes','DatabaseSizeStatus','NeedsUpgradeIncludeChildren','NeedsUpgradeStatus')) {
     if ($ast.Extent.Text -notmatch [regex]::Escape("'$column'")) { throw "Content database schema lacks $column" }
 }
@@ -142,17 +142,24 @@ try {
 
     $reportRows = @{
         Farms=@([pscustomobject]@{BuildVersion='16.0.10417.20198'})
-        Servers=@([pscustomobject]@{ServerName='S1';Role='Application';Status='Offline'})
+        Servers=@(
+            [pscustomobject]@{ServerName='S1';Role='Application';Status='Offline'},
+            [pscustomobject]@{ServerName='SQL1';Role='Invalid';Status='Online'},
+            [pscustomobject]@{ServerName='SMTP1';Role='Invalid';Status='Online'}
+        )
         ServiceApplications=@([pscustomobject]@{Name='Search';Status='Stopped'})
         WebApplications=@([pscustomobject]@{WebApplicationId='W1';DefaultUrl='https://example.test';ApplicationPool='Pool';ContentDatabaseCount=1})
         WebApplicationZones=@([pscustomobject]@{WebApplicationId='W1';Zone='Default';AuthenticationMode='Forms'})
         ContentDatabases=@([pscustomobject]@{Name='DB1';DatabaseServer='SQL1';Status='Offline';IsReadOnly='True';NeedsUpgradeIncludeChildren='True';NeedsUpgradeStatus='Collected';DatabaseSizeBytes='';DatabaseSizeStatus='Unavailable'})
     }
     $reportHtml = New-InfrastructureMailHtml -Status Qualified -Rows $reportRows -UploadFailures 2 -PreviousCounts @{Servers=0;ServiceApplications=1;WebApplications=1;ContentDatabases=1} -TenantName 'offline' -Duration ([timespan]::FromSeconds(31))
-    foreach ($expected in @('SMARTM365 SHAREPOINT ONPREM','QUALIFIED','Duration: 00:00:31','Servers','1 (+1)','Alerts','Server not online','Service application not started','Content database read-only','Content database needs upgrade','Authentication by zone','Default: Forms','2019','16.0.10417.20198')) {
+    foreach ($expected in @('SMARTM365 SHAREPOINT ONPREM','QUALIFIED','Duration: 00:00:31','Servers','1 (+1)','2 external','Alerts','Server not online','Service application not started','Content database read-only','Content database needs upgrade','Authentication by zone','Default: Forms','2019','16.0.10417.20198','SharePoint_OnPrem_Servers.csv')) {
         if ($reportHtml -notmatch [regex]::Escape($expected)) { throw "Infrastructure mail lacks $expected" }
     }
-    if ($reportHtml -match 'Farm build</div>|Files / rows</div>|>Files</div>') { throw 'Redundant build or file summary card/section is still present.' }
+    if ($reportHtml -match 'Farm build</div>|Files / rows</div>|>Invalid</td>') { throw 'Redundant card or raw invalid server role is still present.' }
+    if ($reportHtml -notmatch '>Files<' -or $reportHtml -notmatch '(?s)SharePoint_OnPrem_Servers\.csv</td>\s*<td[^>]*>3</td>') { throw 'CSV file and raw row counts are absent from Files.' }
+    if ($reportHtml.IndexOf('>S1</td>') -gt $reportHtml.IndexOf('>SQL1</td>') -or $reportHtml.IndexOf('>S1</td>') -gt $reportHtml.IndexOf('>SMTP1</td>') -or $reportHtml.IndexOf('>External</td>') -lt 0) { throw 'External servers were not shown last with the External role.' }
+    if ($reportHtml -notmatch '<td nowrap="nowrap"[^>]*>https://example\.test</td>' -or $reportHtml -notmatch '<td nowrap="nowrap"[^>]*>Pool</td>') { throw 'Web application URL or pool may break within a word.' }
     if ($reportHtml -notmatch '(?s)>Farm edition</div>\s*<div[^>]*>2019</div>\s*<div[^>]*>16\.0\.10417\.20198</div>') { throw 'Farm build is not the small detail below the edition.' }
     if ($reportHtml -match 'Top 5 largest content databases') { throw 'Top-five size ranking was shown without measured sizes.' }
     $reportRows.ContentDatabases[0].DatabaseSizeBytes = '1024'
@@ -162,10 +169,10 @@ try {
     $reportRows.ContentDatabases[0].DatabaseSizeBytes = ''
     $reportRows.ContentDatabases[0].DatabaseSizeStatus = 'Unavailable'
     $unknownHtml = New-InfrastructureMailHtml -Status Failed -Rows $null -TenantName 'offline'
-    if ($unknownHtml -notmatch 'FAILED' -or $unknownHtml -notmatch 'n/a' -or $unknownHtml -match 'Files / rows') { throw 'Failed-run mail misrepresented unavailable data.' }
+    if ($unknownHtml -notmatch 'FAILED' -or $unknownHtml -notmatch 'n/a' -or $unknownHtml -match '>Files<') { throw 'Failed-run mail misrepresented unavailable CSV files.' }
     $reportRows.Servers = @()
     $partialHtml = New-InfrastructureMailHtml -Status Partial -Rows $reportRows -Failures @('Servers: Access is denied') -TenantName 'offline'
-    if ($partialHtml -notmatch 'PARTIAL' -or $partialHtml -notmatch 'Access is denied' -or $partialHtml -notmatch 'n/a') { throw 'Partial-run mail hid inaccessible server data.' }
+    if ($partialHtml -notmatch 'PARTIAL' -or $partialHtml -notmatch 'Access is denied' -or $partialHtml -notmatch 'n/a' -or $partialHtml -match '>Files<') { throw 'Partial-run mail misrepresented unavailable CSV files.' }
     $reportRows.Servers = @([pscustomobject]@{ServerName='S1';Role='Application';Status='Offline'})
     $serverBuffer = New-Object 'System.Collections.Generic.List[object]'
     $serverBuffer.Add([pscustomobject]@{ServerName='S1';Role='Application';Status='Online'})
@@ -204,16 +211,25 @@ try {
     foreach ($kind in @('Farms','Servers','ServiceApplications','WebApplications','WebApplicationZones','ContentDatabases')) {
         $fileName = "SharePoint_OnPrem_$kind.csv"
         $filePath = Join-Path $comparisonRoot $fileName
-        Write-SmartM365CsvAtomically -Data @([pscustomobject]@{TenantKey='OFFLINE';FarmId='FARM';RunId='PRIOR'}) -Path $filePath -Columns @('TenantKey','FarmId','RunId') -Delimiter ';' -NoTenantKey
-        $comparisonFiles += [pscustomobject]@{File=$fileName;RunId='PRIOR';Status='Success';Rows=1;SHA256=(Get-FileHash -LiteralPath $filePath -Algorithm SHA256).Hash}
+        $comparisonData = if ($kind -eq 'Servers') {
+            @([pscustomobject]@{TenantKey='OFFLINE';FarmId='FARM';RunId='PRIOR';Role='WebFrontEnd'},[pscustomobject]@{TenantKey='OFFLINE';FarmId='FARM';RunId='PRIOR';Role='Invalid'})
+        } else { @([pscustomobject]@{TenantKey='OFFLINE';FarmId='FARM';RunId='PRIOR'}) }
+        $comparisonColumns = if ($kind -eq 'Servers') { @('TenantKey','FarmId','RunId','Role') } else { @('TenantKey','FarmId','RunId') }
+        Write-SmartM365CsvAtomically -Data $comparisonData -Path $filePath -Columns $comparisonColumns -Delimiter ';' -NoTenantKey
+        $comparisonFiles += [pscustomobject]@{File=$fileName;RunId='RECEIPT';Status='Success';Rows=@($comparisonData).Count;SHA256=(Get-FileHash -LiteralPath $filePath -Algorithm SHA256).Hash}
     }
-    $comparisonReceipt = [pscustomobject]@{Owner='SmartInventory-SourceReceipt';Status='Completed';RunId='PRIOR';Files=$comparisonFiles}
+    $comparisonReceipt = [pscustomobject]@{Owner='SmartInventory-SourceReceipt';Status='Completed';RunId='RECEIPT';Files=$comparisonFiles}
     $comparisonReceipt | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $comparisonRoot 'SmartInventory_SmartM365-SharePoint-OnPrem-Infrastructure-Inventory.current.json.txt')
     $previous = Get-QualifiedPreviousInfrastructureCounts -LatestRoot $comparisonRoot -FarmId 'FARM' -TenantKey 'OFFLINE'
-    if ($null -eq $previous -or $previous.ContentDatabases -ne 1) { throw 'Verified prior-run delta input was rejected.' }
+    if ($null -eq $previous -or $previous.ContentDatabases -ne 1 -or $previous.Servers -ne 1) { throw 'Verified prior-run delta input or external server count was rejected.' }
     if ($null -ne (Get-QualifiedPreviousInfrastructureCounts -LatestRoot $comparisonRoot -FarmId 'OTHER' -TenantKey 'OFFLINE')) { throw 'Delta accepted a different farm.' }
     Add-Content -LiteralPath (Join-Path $comparisonRoot 'SharePoint_OnPrem_ContentDatabases.csv') -Value 'tampered'
     if ($null -ne (Get-QualifiedPreviousInfrastructureCounts -LatestRoot $comparisonRoot -FarmId 'FARM' -TenantKey 'OFFLINE')) { throw 'Delta accepted a tampered CSV.' }
+    $databasePath = Join-Path $comparisonRoot 'SharePoint_OnPrem_ContentDatabases.csv'
+    Write-SmartM365CsvAtomically -Data @([pscustomobject]@{TenantKey='OFFLINE';FarmId='FARM';RunId='OTHER'}) -Path $databasePath -Columns @('TenantKey','FarmId','RunId') -Delimiter ';' -NoTenantKey
+    $comparisonFiles[-1].SHA256 = (Get-FileHash -LiteralPath $databasePath -Algorithm SHA256).Hash
+    $comparisonReceipt | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $comparisonRoot 'SmartInventory_SmartM365-SharePoint-OnPrem-Infrastructure-Inventory.current.json.txt')
+    if ($null -ne (Get-QualifiedPreviousInfrastructureCounts -LatestRoot $comparisonRoot -FarmId 'FARM' -TenantKey 'OFFLINE')) { throw 'Delta accepted inconsistent CSV run IDs.' }
 } finally {
     if ([IO.Path]::GetFullPath($tempRoot).StartsWith([IO.Path]::GetFullPath([IO.Path]::GetTempPath()),[StringComparison]::OrdinalIgnoreCase)) {
         Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
@@ -224,8 +240,8 @@ Write-Output 'PASS: infrastructure parser, PS5 CSV, receipts, daily mail gate/ro
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCk45bDERcBvfME
-# qwpDHClz8MyZ6oL/mFCFM9br6YIkq6CCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBXbyz7i88zvAJp
+# UTWlq1wV1Tiw980Uu0NVQE4aOgSwXqCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -255,14 +271,14 @@ Write-Output 'PASS: infrastructure parser, PS5 CSV, receipts, daily mail gate/ro
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCDLNN5D6kWnFEyrTenGp7kV
-# rp6xmbYmqdfQh+E/e7VmzjANBgkqhkiG9w0BAQEFAASCAYBzkO9I5BgIOdnwHKh5
-# Nn2P3e9E2Zs5U9N4PoJpiv9zRt/rQE92MRYCkP9g9TiBP1TaYdFffWLf2ja5q/SL
-# vEuCvgfU+cW/5M7d2kyN/MOvXbQy57aZxXtELpfyoIve2tOlghRkc45ddi9ZcAcg
-# RDCBph/mfDGl1CnaqjEbCEBra1vf6EB4/W/g99dpfeLUO6CKjUG7MX8OHwG6CNAb
-# Om9Me27nj4BnjRiDH/PFJkwxjcb9QKK/6fFFF0a13ZrfjmqmIkgSAhgHuNx2NaEJ
-# pJ1znmzQlW/1edU5KBiF6jbU96yrf15GgcWffRPD2H5VLGE50y9cMM7wy6g+7zq3
-# 0CxeGeMOj4BlXF91hioulEoC6ObPXtmHa7tOVwwiuZO41Hr44DsYokvyHx5UCaFw
-# lzpKCt1LplXviEyjvTewQ8kAy4hwcNDO34rTkJUP9c2ErX2qCt5mkDGquMx9RRcg
-# 2KkLlIn7tXezehACynNbh75uhRJTb/4kVLjl0Ctw0ibbtYw=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCC7uu/Sg13781kT+EGXvfvE
+# 72Bcn4ViTUWoqYQej0y6djANBgkqhkiG9w0BAQEFAASCAYBYdlDWnRerZy4RuqHM
+# 2uWCfJJDW2U0lOnDikIUyoUvTyTcEC09ZptGRot/4JrlyVK9B70d8QBXtMtZk8A5
+# nDXGvJwfWHPHaJSo9Uznxn38/va2pRq4X5u02O0UJorzHppS4bur9pDMO9J1a9ql
+# TivgGtYsCHpauUCrALYwXyzMSmhrIqoFVAX6AuAbpm5wqwuB3Sc+mMcRTXJxiA8h
+# tIpotb8W15vGFmB992GqOKC/ZnD/VuPV61+dRsLTgtIfwgSpkALtJyrL803dQT/V
+# 1f0jCWCMdEpz/OjY+qAVdfenu3cXiFpnZo+DUb58cj/ZqXFTW9/2i+X+avfOwtMo
+# E1kRH8NWlioKXmxib2qTJO0wnPKr28Yq3NZ9psfXmEzKCTv7VJA+36l7RseJxzLZ
+# cobafX+9JmBKWnNLqSaV13EU8Yq03VtkO4fK2SgsVrTiK1sfYPZ+42Giyk7fdzY+
+# WgpJx4VcL8UD8RNvTkNor/ssnQYJ13dDYIIbXxJu+uj1Yjs=
 # SIG # End signature block
