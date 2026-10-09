@@ -2,7 +2,7 @@
 .SYNOPSIS
     Read-only SharePoint Server 2016/2019 site collection and web inventory.
 .VERSION
-    1.0.8
+    1.0.10
 .REQUIREMENTS
     Windows PowerShell 5.1 x64 on a SharePoint farm server; SharePoint Shell and content read access.
 #>
@@ -11,7 +11,7 @@ param(
     [string]$Tenant = 'test',
     [string]$OutputRoot,
     [switch]$ValidateOnly,
-    [switch]$ForceSendDailySummary,
+    [Alias('ForceMail')][switch]$ForceSendDailySummary,
     [ValidateRange(0, [int]::MaxValue)][int]$MaxItems = 0,
     [ValidateRange(1, 10080)][int]$GlobalTimeoutMinutes = 720,
     [ValidateRange(1, 1440)][int]$CollectionTimeoutMinutes = 60
@@ -334,6 +334,71 @@ function Send-InventorySummaryMail {
     WriteLog -Message "Daily content summary email sent to $to."
 }
 
+function New-ContentMailHtml {
+    param([string]$Status, [hashtable]$Stats, [string[]]$Failures = @(), [int]$UploadFailures = 0, [string]$TenantName = '', [Nullable[timespan]]$Duration = $null, [string]$HostName = $env:COMPUTERNAME)
+    $specs = @(
+        @('Web applications','WebApplications','#f8fafc','#dbe3ef','#0f172a'),
+        @('Content databases','ContentDatabases','#eff6ff','#bfdbfe','#1d4ed8'),
+        @('Site collections','SiteCollections','#f0fdf4','#bbf7d0','#166534'),
+        @('Webs','Webs','#faf5ff','#e9d5ff','#7e22ce'),
+        @('Coverage issues','CoverageIssues','#fff7ed','#fed7aa','#9a3412'),
+        @('Read-only collections','ReadOnlyCollections','#f0fdfa','#99f6e4','#0f766e'),
+        @('Unverified locks','UnverifiedLocks','#fef2f2','#fecaca','#b91c1c'),
+        @('Upload failures','UploadFailures','#eef2ff','#c7d2fe','#4338ca')
+    )
+    $cards = New-Object 'System.Collections.Generic.List[object]'
+    foreach ($spec in $specs) {
+        $value = if ($spec[1] -eq 'UploadFailures') { if ($Status -eq 'Failed') { 'n/a' } else { [string]$UploadFailures } }
+                 elseif ($null -eq $Stats -or $null -eq $Stats[$spec[1]]) { 'n/a' } else { [string]$Stats[$spec[1]] }
+        $detail = if ($spec[1] -eq 'UploadFailures' -and $Status -eq 'Failed') { 'not attempted' } elseif ($value -eq 'n/a') { 'not observed' } else { 'observed rows' }
+        $cards.Add([pscustomobject]@{Label=$spec[0];Value=$value;Detail=$detail;Background=$spec[2];Border=$spec[3];Accent=$spec[4];Span=1})
+    }
+    $sections = New-Object 'System.Collections.Generic.List[object]'
+    $sections.Add([pscustomobject]@{Title='Summary';Html=(New-SmartM365EmailKpiGridHtml -Cards $cards.ToArray() -RowSizes @(4,4))})
+    $alerts = New-Object 'System.Collections.Generic.List[object]'
+    foreach ($failure in $Failures) { $alerts.Add(@('Run failure',[string]$failure,'')) }
+    if ($Stats -and $null -ne $Stats.CoverageIssues -and $Stats.CoverageIssues -gt 0) { $alerts.Add(@('Coverage incomplete',"$($Stats.CoverageIssues) issue(s)",'See CollectionCoverage.csv')) }
+    if ($Stats -and $null -ne $Stats.ReadOnlyCollections -and $Stats.ReadOnlyCollections -gt 0) { $alerts.Add(@('Read-only collections',"$($Stats.ReadOnlyCollections) collection(s)",'See SiteCollections.csv')) }
+    if ($Stats -and $null -ne $Stats.UnverifiedLocks -and $Stats.UnverifiedLocks -gt 0) { $alerts.Add(@('Lock state unverified',"$($Stats.UnverifiedLocks) collection(s)",'See SiteCollections.csv')) }
+    if ($UploadFailures -gt 0) { $alerts.Add(@('SharePoint upload incomplete',"$UploadFailures file(s)",'')) }
+    if ($alerts.Count -gt 0) { $sections.Add([pscustomobject]@{Title='Alerts';Html=(New-SmartM365EmailTableHtml -Headers @('Issue','Object','Detail') -Rows $alerts.ToArray())}) }
+    if ($Stats -and $Stats.CoverageSamples.Count -gt 0) {
+        $issueRows = New-Object 'System.Collections.Generic.List[object]'
+        foreach ($item in $Stats.CoverageSamples) { $issueRows.Add(@([string]$item.Status,[string]$item.Url,[string]$item.ErrorMessage)) }
+        $sections.Add([pscustomobject]@{Title='Collection coverage examples';Html=(New-SmartM365EmailTableHtml -Headers @('Status','Collection or database','Detail') -Rows $issueRows.ToArray())})
+    }
+    if ($Stats -and $Stats.ReadOnlySamples.Count -gt 0) {
+        $readOnlyRows = New-Object 'System.Collections.Generic.List[object]'
+        foreach ($item in $Stats.ReadOnlySamples) { $readOnlyRows.Add(@([string]$item.Url,[string]$item.LockState,[string]$item.ContentDatabaseIsReadOnly)) }
+        $sections.Add([pscustomobject]@{Title='Read-only collection examples';Html=(New-SmartM365EmailTableHtml -Headers @('URL','Lock state','Database read-only') -Rows $readOnlyRows.ToArray() -NoWrapColumns @(0))})
+    }
+    if ($Stats -and $Status -in @('Qualified','Partial') -and $null -ne $Stats.SiteCollections) {
+        $fileRows = New-Object 'System.Collections.Generic.List[object]'
+        foreach ($item in @(@('SiteCollections',$Stats.SiteCollections),@('SiteAdministrators',$Stats.SiteAdministrators),@('Webs',$Stats.Webs),@('CollectionCoverage',$Stats.CollectionCoverageRows))) {
+            $fileRows.Add(@("SharePoint_OnPrem_$($item[0]).csv",[string]$item[1]))
+        }
+        $sections.Add([pscustomobject]@{Title='Files';Html=(New-SmartM365EmailTableHtml -Headers @('CSV file','Rows') -Rows $fileRows.ToArray())})
+    }
+    $severity = switch ($Status) { 'Qualified' {'Success'} 'Partial' {'Warning'} default {'Error'} }
+    $durationText = if ($null -ne $Duration) { ([timespan]$Duration).ToString('hh\:mm\:ss') } else { '' }
+    $message = if ($Status -eq 'Failed') { 'SharePoint on-premises content inventory stopped before full publication. Values below reflect observations made before the failure.' } else { 'SharePoint on-premises content inventory summary generated from the current SmartM365 CSV outputs.' }
+    return New-SmartM365EmailBody -Title 'SharePoint content inventory summary' -Category 'SmartM365 SharePoint OnPrem' -Severity $severity -Tenant $TenantName -HostName $HostName -StatusBadge $Status.ToUpperInvariant() -Duration $durationText -Message $message -Sections $sections.ToArray() -Footer 'This automated message was generated by SmartM365 from SharePoint on-premises content inventory data.'
+}
+
+function Send-ContentRunMail {
+    param([string]$Status, [string[]]$Failures = @(), [int]$UploadFailures = 0)
+    try {
+        $markerName = if ($Status -eq 'Qualified') { 'SmartM365-SharePoint-OnPrem-Content-DailySummary.sent' } else { 'SmartM365-SharePoint-OnPrem-Content-IssueDailySummary.sent' }
+        $markerPath = Join-Path $outputBase $markerName
+        $duration = (Get-Date) - $script:StartedAt
+        $body = New-ContentMailHtml -Status $Status -Stats $script:MailStats -Failures $Failures -UploadFailures $UploadFailures -TenantName $Tenant -Duration $duration
+        $null = Invoke-DailySummaryMail -MarkerPath $markerPath -Force:$ForceSendDailySummary -SendAction { Send-InventorySummaryMail -Subject 'SharePoint on-prem content inventory' -BodyHtml $body }
+    } catch {
+        try { WriteLog -Message ("Content summary email failed without affecting inventory qualification: {0}" -f $_.Exception.Message) -Level WARNING }
+        catch { [Console]::Error.WriteLine('Content summary email failed; its warning could not be logged.') }
+    }
+}
+
 function Publish-QualifiedCsvUploads {
     param([string[]]$Paths)
     if (-not $global:EnableSharePointUpload) { return 0 }
@@ -364,7 +429,15 @@ $outputBase = Assert-InventoryPath -Path $outputBase -Name 'OutputRoot'
 $latestRoot = Assert-InventoryPath -Path (Get-InventoryConfigValue -Name 'LatestCsvFolderPath') -Name 'LatestCsvFolderPath'
 $runBase = if ($MaxItems -gt 0) { Join-Path $outputBase 'TEST' } else { $outputBase }
 $runFolder = Join-Path $runBase ((Get-Date -Format 'yyyyMMdd_HHmmss') + '_' + $script:RunId.Substring(0,8))
+$script:StartedAt = Get-Date
+$script:MailStats = @{
+    WebApplications=$null; ContentDatabases=$null; SiteCollections=$null; SiteAdministrators=$null
+    Webs=$null; CollectionCoverageRows=$null; CoverageIssues=$null; ReadOnlyCollections=$null
+    UnverifiedLocks=$null; CoverageSamples=(New-Object 'System.Collections.Generic.List[object]')
+    ReadOnlySamples=(New-Object 'System.Collections.Generic.List[object]')
+}
 $script:Completed = $false
+$script:FailureHandled = $false
 try {
     $null = InitializeScriptEnvironment -OutputPath $runFolder -LogFileName $script:ScriptName -CallerScriptPath $PSCommandPath
     WriteLog -Message ("SharePoint content inventory starting. SharePoint upload enabled for this run: {0}." -f $global:EnableSharePointUpload)
@@ -374,12 +447,14 @@ try {
     }
     $farm = Test-SharePointPrerequisites
     $webApplications = @(Get-ConfiguredWebApplications)
+    $script:MailStats.WebApplications = $webApplications.Count
     $databaseGroups = New-Object 'System.Collections.Generic.List[object]'
     foreach ($webApplication in $webApplications) {
         foreach ($database in @(Get-SPContentDatabase -WebApplication $webApplication -ErrorAction Stop)) {
             $databaseGroups.Add([pscustomobject]@{ WebApplication=$webApplication; ContentDatabase=$database })
         }
     }
+    $script:MailStats.ContentDatabases = $databaseGroups.Count
     WriteLog -Message ("Farm {0}: {1} web applications and {2} content databases selected." -f $farm.Id, $webApplications.Count, $databaseGroups.Count)
     if ($ValidateOnly) {
         WriteLog -Message 'ValidateOnly completed. No site collection was traversed and no CSV or receipt was published.'
@@ -411,6 +486,7 @@ try {
         $runPaths.Add($path)
         $spoolPaths[$kind] = $path
     }
+    foreach ($name in @('SiteCollections','SiteAdministrators','Webs','CollectionCoverageRows','CoverageIssues','ReadOnlyCollections','UnverifiedLocks')) { $script:MailStats[$name] = 0 }
     $failureCount = 0
     $processed = 0
     $lockObservedCount = 0
@@ -436,6 +512,7 @@ try {
             $processSite = {
                 $site = $_
                 $processed++
+                $script:MailStats.SiteCollections++
                 $collectionDeadline = [datetime]::UtcNow.AddMinutes($CollectionTimeoutMinutes)
                 $siteId = ''
                 $siteUrl = ''
@@ -461,6 +538,7 @@ try {
                     if ($databaseLockLookup.States.ContainsKey($siteId)) { $filteredLockState = [string]$databaseLockLookup.States[$siteId] }
                     $lock = Resolve-SiteLockObservation -Site $site -ContentDatabase $database -FilteredLockState $filteredLockState -FilteredLockConflict $databaseLockLookup.Conflicts.ContainsKey($siteId)
                     if ($lock.LockStatus -eq 'Observed') { $lockObservedCount++ } else { $lockUnverifiedCount++ }
+                    if ($lock.LockStatus -ne 'Observed') { $script:MailStats.UnverifiedLocks++ }
                     $rootWeb = $site.RootWeb
                     try {
                         $collection = New-InventoryRow $farmId
@@ -490,6 +568,10 @@ try {
                         }
                         $siteRow = [pscustomobject]$collection
                         $rows.SiteCollections.Add($siteRow)
+                        if ($lock.LockState -eq 'ReadOnly' -or $lock.IsReadOnly -eq 'True' -or $lock.ContentDatabaseIsReadOnly -eq 'True') {
+                            $script:MailStats.ReadOnlyCollections++
+                            if ($script:MailStats.ReadOnlySamples.Count -lt 5) { $script:MailStats.ReadOnlySamples.Add([pscustomobject]@{Url=$siteUrl;LockState=$lock.LockState;ContentDatabaseIsReadOnly=$lock.ContentDatabaseIsReadOnly}) }
+                        }
                         $administrators = Get-ObservedProperty $rootWeb 'SiteAdministrators'
                         if (Test-MissingObservation $administrators) { throw 'Site administrator collection is unavailable.' }
                         $administratorCount = 0
@@ -504,6 +586,7 @@ try {
                             $adminRow['IsPrimary'] = if ($collection['OwnerLogin']) { [string]($adminRow['AdministratorLogin'] -ieq $collection['OwnerLogin']) } else { '' }
                             $adminRow['IsSecondary'] = if ($collection['SecondaryOwnerLogin']) { [string]($adminRow['AdministratorLogin'] -ieq $collection['SecondaryOwnerLogin']) } else { '' }
                             $rows.SiteAdministrators.Add([pscustomobject]$adminRow)
+                            $script:MailStats.SiteAdministrators++
                             $administratorCount++
                             Flush-RunRows -Kind SiteAdministrators -Buffers $rows -Paths $spoolPaths -MinimumCount 500
                         }
@@ -537,6 +620,7 @@ try {
                                 if (-not $coverage['ErrorStage']) { $coverage['ErrorStage'] = 'WebMetadata'; $coverage['ErrorMessage'] = 'A web has missing identity, template, language or permission observations.' }
                             }
                             $rows.Webs.Add([pscustomobject]$webRow)
+                            $script:MailStats.Webs++
                             Flush-RunRows -Kind Webs -Buffers $rows -Paths $spoolPaths -MinimumCount 500
                             $coverage['WebsCollected'] = [int]$coverage['WebsCollected'] + 1
                         } finally { if ($null -ne $web) { $web.Dispose() } }
@@ -569,6 +653,8 @@ try {
                     if ($message -eq 'GlobalTimeout') { $globalTimedOut = $true }
                 } finally {
                     $rows.CollectionCoverage.Add([pscustomobject]$coverage)
+                    $script:MailStats.CollectionCoverageRows++
+                    if ($coverage['Status'] -ne 'Collected' -and $script:MailStats.CoverageSamples.Count -lt 5) { $script:MailStats.CoverageSamples.Add([pscustomobject]@{Status=$coverage['Status'];Url=$coverage['Url'];ErrorMessage=$coverage['ErrorMessage']}) }
                     Flush-RunRows -Kind SiteCollections -Buffers $rows -Paths $spoolPaths -MinimumCount 1
                     Flush-RunRows -Kind SiteAdministrators -Buffers $rows -Paths $spoolPaths -MinimumCount 1
                     Flush-RunRows -Kind Webs -Buffers $rows -Paths $spoolPaths -MinimumCount 1
@@ -599,6 +685,8 @@ try {
             $coverage['ErrorStage'] = 'ContentDatabase'
             $coverage['ErrorMessage'] = $_.Exception.Message
             $rows.CollectionCoverage.Add([pscustomobject]$coverage)
+            $script:MailStats.CollectionCoverageRows++
+            if ($script:MailStats.CoverageSamples.Count -lt 5) { $script:MailStats.CoverageSamples.Add([pscustomobject]@{Status=$coverage['Status'];Url=([string]$database.Id);ErrorMessage=$coverage['ErrorMessage']}) }
             Flush-RunRows -Kind CollectionCoverage -Buffers $rows -Paths $spoolPaths -MinimumCount 1
             if ($coverage['Status'] -in @('DatabaseCountUnavailable','DatabaseCoverageMismatch')) {
                 WriteLog -Message ("Content database {0} coverage incomplete: {1}" -f $database.Id, $_.Exception.Message) -Level WARNING
@@ -610,6 +698,7 @@ try {
     }
     if ($MaxItems -gt 0 -and $processed -ge $MaxItems) { $limited = $true }
     if ([datetime]::UtcNow -ge $script:GlobalDeadlineUtc) { $globalTimedOut = $true }
+    $script:MailStats.CoverageIssues = $failureCount
     foreach ($kind in $schemas.Keys) { Flush-RunRows -Kind $kind -Buffers $rows -Paths $spoolPaths -MinimumCount 1 }
     WriteLog -Message ("Lock observation: observed={0}; unverifiedOrConflicting={1}." -f $lockObservedCount,$lockUnverifiedCount)
     $coverageLevel = if ($globalTimedOut) { 'ERROR' } elseif ($failureCount -gt 0) { 'WARNING' } else { 'INFO' }
@@ -628,6 +717,7 @@ try {
     }
     if ($publicationDecision -eq 'Blocked') {
         WriteLog -Message 'Content collection timed out globally. DATA-LAST and source receipt were not updated.' -Level ERROR
+        Send-ContentRunMail -Status Failed -Failures @('Global collection timeout; current CSVs and source receipt were not promoted.')
         Complete-SmartM365ExecutionContext -Status Failed
         $script:Completed = $true
         exit 1
@@ -652,19 +742,8 @@ try {
     if (-not $receiptPath -or $receiptPath -notlike '*.current.json.txt') { throw 'Content source receipt qualification failed.' }
     WriteLog -Message $(if ($partialInventory) { 'Partial content collection and current publication completed.' } else { 'Content collection and current publication completed.' })
     $uploadFailures = Publish-QualifiedCsvUploads -Paths $publishedCsvPaths.ToArray()
-    try {
-        $runStatus = if ($partialInventory) { 'Partial' } else { 'Qualified' }
-        $body = "<h2>SharePoint on-prem content inventory</h2><p>$runStatus run: $($script:RunId)</p><p>Coverage or metadata issues: $failureCount. Details: SharePoint_OnPrem_CollectionCoverage.csv.</p><p>SharePoint upload failures: $uploadFailures</p><table><tr><th>Web applications</th><th>Content databases</th><th>Site collections</th></tr><tr><td>$($webApplications.Count)</td><td>$($databaseGroups.Count)</td><td>$processed</td></tr></table>"
-        $mailMarkerPath = Join-Path $outputBase 'SmartM365-SharePoint-OnPrem-Content-DailySummary.sent'
-        $null = Invoke-DailySummaryMail -MarkerPath $mailMarkerPath -Force:$ForceSendDailySummary -SendAction {
-            Send-InventorySummaryMail -Subject 'SharePoint on-prem content inventory' -BodyHtml $body
-        }
-    } catch {
-        WriteLog -Message ("Daily content summary email failed: {0}" -f $_.Exception.Message) -Level ERROR
-        Complete-SmartM365ExecutionContext -Status CompletedWithWarnings
-        $script:Completed = $true
-        exit 3
-    }
+    $runStatus = if ($partialInventory) { 'Partial' } else { 'Qualified' }
+    Send-ContentRunMail -Status $runStatus -UploadFailures $uploadFailures
     if ($partialInventory -or $uploadFailures -gt 0) {
         Complete-SmartM365ExecutionContext -Status CompletedWithWarnings
         $script:Completed = $true
@@ -673,16 +752,26 @@ try {
     Complete-SmartM365ExecutionContext -Status Success
     $script:Completed = $true
 } catch {
+    $script:FailureHandled = $true
+    if (-not $ValidateOnly -and $MaxItems -eq 0 -and -not $script:Completed) { Send-ContentRunMail -Status Failed -Failures @($_.Exception.Message) }
     try { WriteLog -Message ("Content inventory failed: {0}" -f $_.Exception.Message) -Level ERROR } catch { Write-Error $_ }
     if (-not $script:Completed) { try { Complete-SmartM365ExecutionContext -Status Failed -ErrorRecord $_ -FailureStage 'ContentInventory' } catch {} }
     throw
+} finally {
+    if (-not $script:Completed -and -not $script:FailureHandled) {
+        $global:EnableSharePointUpload = $false
+        try { WriteLog -Message ("Content inventory interrupted by Ctrl+C. RunId={0}; no further publication or mail will be attempted." -f $script:RunId) -Level WARNING }
+        catch { [Console]::Error.WriteLine('Content inventory interrupted; the run log could not be updated.') }
+        try { Complete-SmartM365ExecutionContext -Status Failed -FailureStage 'Interrupted' }
+        catch { [Console]::Error.WriteLine('Content inventory interrupted; execution cleanup failed: ' + $_.Exception.Message) }
+    }
 }
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBM/yUc/Uox8mpJ
-# pfgq6PvG1lIYoWvFbBrbYFbQ3z2Rz6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB5I2YvqtMQPGZ+
+# oj+wZ88mFX5h0KmGw7OMF2ZtydU2bqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -815,31 +904,31 @@ try {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIJOfJVxQNsIfHZEyUe9zy078/ofqEMCj97imfJZGrAh4MA0GCSqG
-# SIb3DQEBAQUABIIBgE3JgEkNnQhMbzVFXjRKKp5/d8whk7BtWluR2nWbxxp/kX38
-# jF5BLkoYQ2T9HoU9umUZpizYx/oQUdp6k/fTvgAOn8qZVXgZ8Yk8y5Ulrf72PbIv
-# OlL/HEFDs8OKzkw0Nj+SD9PP5Mhpj9MmBrmfk1nGG0EqVpDp0B16LMvs1+4OAl92
-# CX7Pd5U+CeaX1LIEs+6C5WgW+MS4IUrN759JTbfjc5ov7Bn0GCrdwDSCopAO8bju
-# K1+4PILdKDQcqOiyZo7cLiYyx0Vx4pcPfIj3sWf7G+MkR21jvowwzqxnDS8go7fO
-# En0JKThbQcXjmKNP17jm/oJghAZ2weYBfr1g3hnb8EVgltiUh69AqNGe0sLnsjiN
-# QLtLCL3HYdqxHtMyU0gvtG8dGigK4LzZ+AAt/CPxFOcnVcJ8K/3PsycAfXw7KDPe
-# ZOOifOKyJfQx6FSxMEiQRR7lvGPlVH+fEeZiRWrXdM0vJq/P+MoqWviGYlV4Jh+q
-# DDcaSApusUqIZmWh9KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEINm75eLDC8nkyC7IY/T2nOsePiX5Fhab1cDrx5s1tmzPMA0GCSqG
+# SIb3DQEBAQUABIIBgA+9po9setn5+aXuS7H3hMZ7SgG0fFnPhDvDAZVxIz5wA/Gb
+# YC3U9S+7ROTK5+RRJaWrDb21rinGTv0Sx0E8hLCDjzCxe91QgFcv2A0cXZ0CsqqH
+# WYqWM3lCLL33lAZa+wOCCzA09eEE1JFKV46Qap8+lnV2/RirxQIPUfu/utagT7VY
+# aOFsZsu+IAmTpjV2S0nVYqzyv9fi01ytFjotNjOimy3aXxPSRfJnozCaRJR0IIqA
+# L+E+tThP+pYAgXcG4I/S/zQnKcObPTPldWVjjt1V+XkZYfwtWqvlkMnIZu//4oF3
+# XCZjj2NXNXcjxErleV4Wbt/77Nl++Wjj+zCDFxefh/4pvoJYM0KIFuEGjg9+zOcY
+# GUcbcSWVw8K145DeUkJgINZfCWIHonTGqHArhmzESkF5YdGqfkca24dxePXx6yjR
+# 5ssD1LvgQbPxAVozEo8f9Qn1qlnPMMsDuWZ3GBU76aaIpwCojyxsvI5FXg0HIE8r
+# ohuKe1OXHwNC/07poaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDkyMjA0
-# MTRaMC8GCSqGSIb3DQEJBDEiBCC3AbPRN2QWWLGGovIyEmx7ukAQHQ3Ex8f0E4Q6
-# uxa5HTANBgkqhkiG9w0BAQEFAASCAgBbkymSEE+oJ1yOeG2Bn3KqTNjhK/rhimFh
-# wCha54uMyctL861wdiBWFptcXP93fS9UWhmMMBiAvYB+HjHpFu2o29lMzCR0QqVO
-# ckV+1FtC7Agfxh2Y4C7sBFCQcVk1yerIrV9aTl0NReXnN73/wcn0xN0UDdp5yq9F
-# IgKobC60c0XC5Q5QZs2M7LOMJLzK/5kFWI6eWSyt4TneRzfEOghN9XKoI95IO3N0
-# e2tvAnpd99HuyDOiKHnz9PXFWW4pQbKJThBSXBHLu5YxtyOu7o3CJv4o+2M/lRe/
-# 4eWNAyC7lGjPMh8go5mSRyl7E+T+v+5Wr+TjAwAmGla9CKiDyd6tQdTp+plEvpVn
-# tfLkXkrwCznJvgAQLgQZjRwMZV9Wnuh67lpQuKyDjweQenIZ2S08z0dnI0EuhEL3
-# ygg3IUde3fBTrjxknRv3yZXORYC+bzYb/N4wrYq7EiBHZLx1vOvlRRQfr9khNh6S
-# yw1rdFSo/h0Eh0V7fNVWAvRNmGCOUYxSXzgizvhEmyQh010GrqxIRDGatnLgLTgI
-# DiGUwEe07FOhI4W8pgLW5hgEF5u239nI6IVIYcOlf7MtBocjcVDBEYEF/uKZ+7ik
-# oJb4buXqP4t7jFBb81mdehqP1qPFL5H1MCm+fah199icW1zGpxUhgkXuvF7WkLrF
-# qwubCxUgwA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDkyMjM4
+# MzlaMC8GCSqGSIb3DQEJBDEiBCCHBWDF48V25OWBrcDPkz9Asha8Xkd5SvKQi2sp
+# SFQxojANBgkqhkiG9w0BAQEFAASCAgBsX0aaD51wdHGH+yYIIqTsphS/RTRi9xFZ
+# FuHNW4ByP7DipXRD6dZIa2bSncGsBmH8U3Oo+QtqGUEQgOYpk0p518YubFJT2XRP
+# ixvF2mninHL0ozKTuM2+Iss6Q9lccUfcYLjRtSlQvZ4RNNtAqzhSsVigJEU8LaYE
+# m1vXipOyGMGpi/jIX4KFYUBRcrPQCTd2fnL2rLoze2DSxK7xJyVK/ADbL33O+iXF
+# cJoGNhD9eLYr2Zml72PMpsgZcmiA5fAFUNOdPaU2n1JyHOSIftu+G15sRVPBjih+
+# GPMbcNAySx9ojhchmSeVa6RkgMooLV/3CsKMD/Bhm35iDL39J4qNk4y664YW6e6O
+# gh3FbqssD7qhaDfTYLQb72Rz+r6bkwgSS243ZrZ3VcYyLwRX5dlpnOo9pctmEsrw
+# A/GRSzk5cz9qIDoaoM3XHD+dmEUkdy6lA/q/rKfk3m5nfjK8DHcnp8o8s4iQMxqj
+# YbvGz32cdpBM3CZJbxQOYDvbA+IAnISQk0RjnuJa62D1qMBCrYa69mcj6TB9xhMd
+# A7S9wfIaOFsUnzihmeb6yuNOCvUavcQ97REuQB9fmXZ3uyH9TnaGQrD1V276SocZ
+# 2HNNJrPmkWWhlTH6O//vK3WjqIpwXAgsKvMmq4UjYA2GzjN76PhrAQ3GFa/6aEHH
+# G5WgUVQP7g==
 # SIG # End signature block

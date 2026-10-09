@@ -12,7 +12,8 @@ $ast = [Management.Automation.Language.Parser]::ParseFile($scriptPath, [ref]$tok
 if (@($errors).Count) { throw "Content parser errors: $($errors.Count)" }
 $template = Get-Content $templatePath -Raw | ConvertFrom-Json
 if ($template.EnableSharePointUpload -ne $true -or $template.EnableWeeklyHistory -ne $true -or $template.SendMailMode -ne 'Graph') { throw 'Content template policy is invalid.' }
-if ($ast.Extent.Text -notmatch '(?s)\.VERSION\s+1\.0\.8') { throw 'Content version was not updated for observed-row publication.' }
+$versionMatch = [regex]::Match($ast.Extent.Text, '(?s)\.VERSION\s+([0-9.]+)')
+if (-not $versionMatch.Success -or [version]$versionMatch.Groups[1].Value -lt [version]'1.0.10') { throw 'Content version was not updated for summary email and interruption cleanup.' }
 if ($ast.Extent.Text -match 'Complete-SmartM365SourceReceipt[^\r\n]*-PartialInventory') { throw 'Content must not extend the shared source receipt with SharePoint-specific partial state.' }
 if ($ast.Extent.Text -notmatch '\$coverageLevel\s*=\s*if\s*\(\$globalTimedOut\).*?elseif\s*\(\$failureCount\s*-gt\s*0\).*?WARNING' -or $ast.Extent.Text -notmatch 'Collection coverage:[^\r\n]+-Level\s+\$coverageLevel') { throw 'Content coverage logging can misclassify a partial run.' }
 $firstUploadConfigRead = $ast.Extent.Text.IndexOf('$global:SharePointSiteHostname =', [StringComparison]::Ordinal)
@@ -26,7 +27,7 @@ if ($ast.Extent.Text -match '(?im)^\s*Get-SPSiteAdministration\b') { throw 'Lock
 if ($ast.Extent.Text -notmatch '(?m)^\s*\$site\s*=\s*\$_\s*$' -or $ast.Extent.Text -match '(?m)^\s*param\(\$site\)') { throw 'Streaming site pipeline input is not bound to the current site.' }
 if ($ast.Extent.Text -notmatch '\$runBase\s*=\s*if\s*\(\$MaxItems\s*-gt\s*0\).*?TEST' -or $ast.Extent.Text -notmatch 'Select-Object\s+-First\s+\$remaining' -or $ast.Extent.Text -notmatch 'Flush-RunRows\s+-Kind\s+CollectionCoverage') { throw 'Limited or per-site coverage path is missing.' }
 if ($ast.Extent.Text -notmatch '\$databaseLockLookup\s*=\s*Get-LockStateLookup\s+-ContentDatabase\s+\$database' -or $ast.Extent.Text -match 'Get-LockStateLookup\s+[^\r\n]*-SiteUrl') { throw 'Limited runs must use the database-scoped lock-state lookup.' }
-foreach ($name in @('Get-InventoryConfigValue','Resolve-InventoryConfigTokens','Assert-InventoryPath','Get-ObservedProperty','Test-MissingObservation','Resolve-SiteLockObservation','Get-LockStateLookup','Assert-Deadline','Get-CollectionFailureStatus','Get-DatabaseCoverageStatus','Get-ContentPublicationDecision','Write-RunCsv','Flush-RunRows','Ensure-GraphAuthenticationModule','Invoke-DailySummaryMail','Send-InventorySummaryMail','Publish-QualifiedCsvUploads')) {
+foreach ($name in @('Get-InventoryConfigValue','Resolve-InventoryConfigTokens','Assert-InventoryPath','Get-ObservedProperty','Test-MissingObservation','Resolve-SiteLockObservation','Get-LockStateLookup','Assert-Deadline','Get-CollectionFailureStatus','Get-DatabaseCoverageStatus','Get-ContentPublicationDecision','Write-RunCsv','Flush-RunRows','Ensure-GraphAuthenticationModule','Invoke-DailySummaryMail','Send-InventorySummaryMail','New-ContentMailHtml','Send-ContentRunMail','Publish-QualifiedCsvUploads')) {
     $functionAst = @($ast.FindAll({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name }, $true))
     if ($functionAst.Count -ne 1) { throw "Missing function: $name" }
     . ([scriptblock]::Create($functionAst[0].Extent.Text))
@@ -172,10 +173,44 @@ try {
     catch { if ($_.Exception.Message -ne 'Simulated SMTP failure') { throw } }
     if (Test-Path -LiteralPath $failedMarker) { throw 'Failed content email wrote a marker.' }
     $script:mailParameters = $null
-    function SendEmailHtmlReport { [CmdletBinding()] param($From,$To,$Subject,$BodyHtml,$MailPurpose,$SmtpServer,$SmtpPort,$SendMailMode,$Cc) $script:mailParameters = $PSBoundParameters }
+    $script:mailCalls = 0
+    $script:mailShouldFail = $false
+    function SendEmailHtmlReport { [CmdletBinding()] param($From,$To,$Subject,$BodyHtml,$MailPurpose,$SmtpServer,$SmtpPort,$SendMailMode,$Cc) if ($script:mailShouldFail) { throw 'Simulated Graph mail failure' }; $script:mailParameters = $PSBoundParameters; $script:mailCalls++ }
     $script:EffectiveConfig = [pscustomobject]@{ From='sender@example.test'; To=''; ErrorMailTo='recipient@example.test'; SmtpServer='smtp.example.test'; SmtpPort=25; SendMailMode='SMTP'; Cc='' }
     Send-InventorySummaryMail -Subject 'Offline summary' -BodyHtml '<p>Summary</p>'
     if ($script:mailParameters.To -ne 'recipient@example.test' -or $script:mailParameters.From -ne 'sender@example.test' -or $script:mailParameters.SendMailMode -ne 'Graph' -or $script:mailParameters.ContainsKey('Attachments') -or $script:mailParameters.ContainsKey('SmtpServer')) { throw 'Content Graph mail routing or attachment policy failed.' }
+    $sampleStats = @{
+        WebApplications=2;ContentDatabases=3;SiteCollections=4;SiteAdministrators=5;Webs=6
+        CollectionCoverageRows=5;CoverageIssues=1;ReadOnlyCollections=1;UnverifiedLocks=1
+        CoverageSamples=@([pscustomobject]@{Status='AccessDenied';Url='https://example.test/failed';ErrorMessage='Access is denied'})
+        ReadOnlySamples=@([pscustomobject]@{Url='https://example.test/readonly';LockState='ReadOnly';ContentDatabaseIsReadOnly='False'})
+    }
+    $html = New-ContentMailHtml -Status Partial -Stats $sampleStats -UploadFailures 1 -TenantName 'offline' -Duration ([timespan]::FromSeconds(35)) -HostName 'TEST-HOST'
+    foreach ($expected in @('SMARTM365 SHAREPOINT ONPREM','PARTIAL','Duration: 00:00:35','Coverage issues','Read-only collections','Unverified locks','Upload failures','Collection coverage examples','Read-only collection examples','https://example.test/failed','https://example.test/readonly','SharePoint_OnPrem_CollectionCoverage.csv')) {
+        if ($html -notmatch [regex]::Escape($expected)) { throw "Content summary email lacks $expected" }
+    }
+    $earlyStats = @{WebApplications=2;ContentDatabases=3;SiteCollections=$null;SiteAdministrators=$null;Webs=$null;CollectionCoverageRows=$null;CoverageIssues=$null;ReadOnlyCollections=$null;UnverifiedLocks=$null;CoverageSamples=@();ReadOnlySamples=@()}
+    $failedHtml = New-ContentMailHtml -Status Failed -Stats $earlyStats -Failures @('Receipt lock is in use') -TenantName 'offline'
+    if ($failedHtml -notmatch 'FAILED' -or $failedHtml -notmatch 'Receipt lock is in use' -or $failedHtml -notmatch '>n/a</div>') { throw 'Early content failure was not rendered without fabricated zeroes.' }
+    $outputBase = $tempRoot
+    $Tenant = 'offline'
+    $script:StartedAt = Get-Date
+    $script:MailStats = $sampleStats
+    $ForceSendDailySummary = $false
+    Send-ContentRunMail -Status Qualified
+    Send-ContentRunMail -Status Failed -Failures @('Receipt lock is in use')
+    if ($script:mailCalls -ne 3) { throw 'Content qualified and issue emails did not use independent daily markers.' }
+    Send-ContentRunMail -Status Partial
+    if ($script:mailCalls -ne 3) { throw 'Same-day content issue email was repeated.' }
+    $ForceSendDailySummary = $true
+    Send-ContentRunMail -Status Partial
+    if ($script:mailCalls -ne 4) { throw 'Forced content issue email was skipped.' }
+    $ForceSendDailySummary = $false
+    $outputBase = Join-Path $tempRoot 'MailFailure'
+    $script:mailShouldFail = $true
+    Send-ContentRunMail -Status Failed -Failures @('Mock failure')
+    if (Test-Path -LiteralPath (Join-Path $outputBase 'SmartM365-SharePoint-OnPrem-Content-IssueDailySummary.sent')) { throw 'Failed content mail consumed the issue marker.' }
+    $script:mailShouldFail = $false
     $script:graphAvailable = $false
     $script:graphInstallerAvailable = $true
     $script:graphInstallCount = 0
@@ -209,8 +244,8 @@ Write-Output 'PASS: content parser, nested configuration, persistent paths, lock
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBYr7+N2oRok6os
-# D4pQ3XGrPLC0e9qC0zVvzKqsyPSu3qCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB2lzJ8Ez9x2nsY
+# qDO1ZBTfquLW9S91Nc9OSoX3xV9XaqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -343,31 +378,31 @@ Write-Output 'PASS: content parser, nested configuration, persistent paths, lock
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIAXE2xhAGjHGz8ed54mb2l5AdXpq5hHap3LuyZh17PBoMA0GCSqG
-# SIb3DQEBAQUABIIBgBus5fnFK9WXv4j66LT2gHX1nSWrx8xh4c+8Hyami4vxVr++
-# rI0Dd4kmTU8Z+ILFQtJE65a3n2Sb/7qMeWSVCmZGQHG1Qhvyke11xWUeSzb1/ERD
-# tBF5eKonw1LD54hyDNqM1Ungbskj+xnHg2w6hO5JA1kyavGJrLwm48H1cZTWNydN
-# DEdzOlMgI0rqQm13NR0EBjxM9F4ssqbeeVtbdYlz/AhccypsUnTW4h1VCyZY5Aln
-# 3xvli1gH6hGFyNLDH4EBhmqW8zRWIa1nPkVWBcSTFYYm3SDA/9zj0BX2dERxF59A
-# mugq19jLTfeaRiXSZD0wOYBVAqaFcRD5gIWgNgZDztRDgRZyDwHPdN4H3YO6w1yT
-# CCifd34oL5Cp9Aj1bBVs1/wWuVvdrOyUFyliZIJZrBKBSJe3LB4dUReDIpE4QN4E
-# ZJZHdn3ySTb0cbBFde9vZsg/Almbc8oBTqNMwcBw61L1YDLyrBd9768y2OELksRj
-# ZMwaNq0GxMg3ddbxEqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIN2UuOkWIF9XbmmOKuT4ULHwOKAgDc0ohoHjXAD61VBPMA0GCSqG
+# SIb3DQEBAQUABIIBgH/2L3ca8/wP14Qq7wCyPoop+1RiSbYfvnfIWa7BwTLu21EA
+# ZWTRTaou346rNKwE/FK5zwqnX4Elin9msAFGuMzP0UzF86Lw6qvMe9rFq/Aa5O6P
+# Trap+dyUULjUyo5hUoL+ai0GQb4/8GFl7HoLgGW7u1Y9KzEQYQ4+Z6hBQ/9z6I0R
+# uW4tVProfor36kpfFioERVQHAwUxmbIWzOdka1gF5GUF7Bm7WpmbZ9iMi3QuS6fF
+# oaIZ6G4NQaov/7/YzGQxvLy2WO8TXnrfNE5CUFjX/q8DBcVap+vFTojn79FfioH7
+# CAZW2b7SLMRNSbR/M+/lTJx2bsVQwpHE7iKohYqIjT7pVApdMA8nWwJNyooFp+9l
+# /Rwgz44Z4FT3arqUviqv+uBEtSNica+SxKPb6k4/lmsVbEWDcMtz5Wc9hrFztinq
+# NO9lEozpB4m2DGFz3yQni+iYCLGF4sNNjwKGJtZ/14N14QC8ZjgkEFTtLk3jMM4f
+# 112Uy69RaSaH09IrZKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDkyMjA0
-# MTRaMC8GCSqGSIb3DQEJBDEiBCBc4TZtoIDz2amfOUfsLj+hL2lfHg0e2/nvsyQ/
-# Bbs2QDANBgkqhkiG9w0BAQEFAASCAgAZCCA7IroyuHWtrES4xfhA8lV0ZpwSRVlA
-# PykzawZZRm/gSFqi6RDVPeCyPtVhBhPD2gKHxchJVLWvIOjkefzbUUGl3A8XTh6P
-# 6Gv7kbPHpb77eZ4ZoPDDB+QDzzTb88iJwR5XSjdlj2OdrZiOLAboY0XR0PpnnsGo
-# A0nPgKbwFR4gU3kYwazHO9/Ru1kQbmycP9/zbeJMv/zfLDYdiL2zZk1Jx4zT3w4D
-# Nw2+ad1Pnw7RC2TFsyXDbVCj+Wl4FozBaIc/PJXbs9aHQeITmza2vcnTw4oV1m9/
-# Otqakv9dDeF94HSyoVeXmNZAm592A7f88lzfGzTX0gQfsR50479UgWylAhFy5JiU
-# 4bXJHY2UDxeX0iPxG+v/LywfHypewL/muqJHOB3gnEdhJ2LtB3dudbA5ytDkzN7x
-# 9XAztEaF3hdDsEokKgj9+GGN9vHftn/DRIQn0ifV4K4tkyJCcMQ/Fy20X6LR1xXH
-# 9/oC3oKU4cCYjFLm5ZC09oiEdSFvFNSqZiIor4nqw4drHvfnmTyNojC4oqD8o8cN
-# usftmvPlJyK+lnkcGlJyFDm8UzgMnzcvKZVKhtU7fNai+wYJBAmQKg3/OC6wbkm9
-# vdZ6573OrqJ8gplvsel2891Ct3ApfKpESjffGT02FrSPtMqoHF8jFNBGweTQ18T7
-# UysJ45gZwg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDkyMjM4
+# NDBaMC8GCSqGSIb3DQEJBDEiBCBvP5YbijjZmUQWEagAx7S+hqMmMKVVDrORqgPm
+# DFe6yjANBgkqhkiG9w0BAQEFAASCAgCTjD2XQnXLdx7V0VmRm7m83n7luomX+0GI
+# GpFqv/aMtd898Q3pUTO+13pWKoD4D900zawnWwBRSxT7Fp1igAK6OXZiDLf/fHhf
+# CF7WtF16nJXrnxXyKFggOs2J4j84sOkF68kWeEzeQ//gZcW8iFHDE/KOE7MXrlP4
+# 3OHKS9ExRFDkaPJ6dfQs/DROeZLsxSAJJkYkzHx/LkcgFqtKUc5i44fJR1Y7wlAG
+# G4+30e0FXNWax8jz0WvS78ulsUtIZpYRyPdTmzm6wfaKSNm09aSJ7RZ5wj2tOXsE
+# 1HtK5ErwD65L6xT8zZBPQcHcnnDZ1CfT4ZdM+IwEeYbKRPOacf597QEOcdHucnSl
+# HFvOLtplyL+wMeRttO+rqUuPcjLqhz883OGF9XdwnJnQRr+VzZuFRye1b3LQgdCh
+# 36xZ+YJEM063rOlnsXxiyhwAmloulX0hFrA43TM9ie/sUZXCB8E+T/Fj0efg4Ish
+# 1IQMP9xHyjBGAC+N7MFEyCVmkL7c0xVH5ozj8pq7qcWU3I8ADv6bvVKQekKlpwhO
+# Yk2HE6hiz/yntqxhTFi94kXNAMb9Yf2zYCBOi8iqnnrLxO1jfFIAQpQPEwm3z8SK
+# 59rsmT1yUJZ7uLxv39tCWUar1WJg7qVeRFzVq2lOQL9SVgr00KAweJO/fn8oUL7o
+# OUd2UiIFrg==
 # SIG # End signature block
