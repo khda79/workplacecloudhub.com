@@ -2,7 +2,7 @@
 .SYNOPSIS
     Read-only SharePoint Server 2016/2019 site collection and web inventory.
 .VERSION
-    1.0.6
+    1.0.7
 .REQUIREMENTS
     Windows PowerShell 5.1 x64 on a SharePoint farm server; SharePoint Shell and content read access.
 #>
@@ -251,6 +251,14 @@ function Get-DatabaseCoverageStatus {
     return 'Collected'
 }
 
+function Get-ContentPublicationDecision {
+    param([int]$FailureCount, [bool]$GlobalTimedOut, [int]$MaxItems)
+    if ($MaxItems -gt 0) { return 'TestOnly' }
+    if ($GlobalTimedOut) { return 'Blocked' }
+    if ($FailureCount -gt 0) { return 'Partial' }
+    return 'Complete'
+}
+
 function Write-RunCsv {
     param([string]$Name, [object[]]$Rows, [string[]]$Columns, [string]$Folder)
     $path = Join-Path $Folder $Name
@@ -350,7 +358,7 @@ function Flush-RunRows {
 }
 
 $coreManifest = Join-Path $root 'Modules\SmartM365.Core\Compatibility\WindowsPowerShell5\SmartM365-WindowsPowerShell5.psd1'
-Import-Module -Name $coreManifest -MinimumVersion '1.0.50' -ErrorAction Stop
+Import-Module -Name $coreManifest -MinimumVersion '1.0.55' -ErrorAction Stop
 $outputBase = if ($PSBoundParameters.ContainsKey('OutputRoot')) { Resolve-InventoryConfigTokens -Value $OutputRoot -Name 'OutputRoot' } else { Get-InventoryConfigValue -Name 'OutputRoot' }
 $outputBase = Assert-InventoryPath -Path $outputBase -Name 'OutputRoot'
 $latestRoot = Assert-InventoryPath -Path (Get-InventoryConfigValue -Name 'LatestCsvFolderPath') -Name 'LatestCsvFolderPath'
@@ -592,7 +600,11 @@ try {
             $coverage['ErrorMessage'] = $_.Exception.Message
             $rows.CollectionCoverage.Add([pscustomobject]$coverage)
             Flush-RunRows -Kind CollectionCoverage -Buffers $rows -Paths $spoolPaths -MinimumCount 1
-            WriteLog -Message ("Content database {0} enumeration failed: {1}" -f $database.Id, $_.Exception.Message) -Level ERROR
+            if ($coverage['Status'] -in @('DatabaseCountUnavailable','DatabaseCoverageMismatch')) {
+                WriteLog -Message ("Content database {0} coverage incomplete: {1}" -f $database.Id, $_.Exception.Message) -Level WARNING
+            } else {
+                WriteLog -Message ("Content database {0} enumeration failed: {1}" -f $database.Id, $_.Exception.Message) -Level ERROR
+            }
         }
         if ($globalTimedOut) { break }
     }
@@ -600,9 +612,10 @@ try {
     if ([datetime]::UtcNow -ge $script:GlobalDeadlineUtc) { $globalTimedOut = $true }
     foreach ($kind in $schemas.Keys) { Flush-RunRows -Kind $kind -Buffers $rows -Paths $spoolPaths -MinimumCount 1 }
     WriteLog -Message ("Lock observation: observed={0}; unverifiedOrConflicting={1}." -f $lockObservedCount,$lockUnverifiedCount)
-    $coverageLevel = if ($failureCount -gt 0 -or $globalTimedOut) { 'ERROR' } else { 'INFO' }
+    $coverageLevel = if ($globalTimedOut) { 'ERROR' } elseif ($failureCount -gt 0) { 'WARNING' } else { 'INFO' }
     WriteLog -Message ("Collection coverage: processed={0}; failed={1}; limited={2}; globalTimeout={3}." -f $processed,$failureCount,$limited,$globalTimedOut) -Level $coverageLevel
-    if ($MaxItems -gt 0) {
+    $publicationDecision = Get-ContentPublicationDecision -FailureCount $failureCount -GlobalTimedOut $globalTimedOut -MaxItems $MaxItems
+    if ($publicationDecision -eq 'TestOnly') {
         if ($failureCount -gt 0 -or $globalTimedOut) {
             WriteLog -Message 'Limited content run has collection or coverage failures.' -Level ERROR
             Complete-SmartM365ExecutionContext -Status Failed
@@ -613,30 +626,35 @@ try {
         $script:Completed = $true
         exit 3
     }
-    if ($failureCount -gt 0 -or $globalTimedOut) {
-        WriteLog -Message 'Content coverage is incomplete. DATA-LAST and source receipt were not updated.' -Level ERROR
+    if ($publicationDecision -eq 'Blocked') {
+        WriteLog -Message 'Content collection timed out globally. DATA-LAST and source receipt were not updated.' -Level ERROR
         Complete-SmartM365ExecutionContext -Status Failed
         $script:Completed = $true
         exit 1
     }
-    if ([bool](Get-InventoryConfigValue 'EnableWeeklyHistory' $true)) {
+    $partialInventory = $publicationDecision -eq 'Partial'
+    if ($partialInventory) {
+        WriteLog -Message ("Partial content inventory: {0} coverage or metadata issue(s) are recorded in CollectionCoverage.csv. Current CSVs will be published with a partial source receipt; weekly history will be skipped." -f $failureCount) -Level WARNING
+    }
+    if (-not $partialInventory -and [bool](Get-InventoryConfigValue 'EnableWeeklyHistory' $true)) {
         $historyRoot = Assert-InventoryPath -Path (Get-InventoryConfigValue 'WeeklyHistoryFolderPath') -Name 'WeeklyHistoryFolderPath'
         Add-SmartM365WeeklyHistory -SourceCsvPaths @($runPaths) -HistoryRootPath $historyRoot -RetentionWeeks ([int](Get-InventoryConfigValue 'WeeklyHistoryRetentionWeeks' 52)) -HistoryLabel 'SharePoint on-prem content' | Out-Null
     }
-    $qualifiedCsvPaths = New-Object 'System.Collections.Generic.List[string]'
+    $publishedCsvPaths = New-Object 'System.Collections.Generic.List[string]'
     foreach ($path in $runPaths) {
         $latestPath = Join-Path $latestRoot (Split-Path $path -Leaf)
         Copy-SmartM365FileAtomically -SourcePath $path -DestinationPath $latestPath
         [void]$global:csvGeneratedPaths.Add($latestPath)
-        $qualifiedCsvPaths.Add($path)
-        $qualifiedCsvPaths.Add($latestPath)
+        $publishedCsvPaths.Add($path)
+        $publishedCsvPaths.Add($latestPath)
     }
-    $receiptPath = Complete-SmartM365SourceReceipt -Status Success -ErrorCount 0
+    $receiptPath = Complete-SmartM365SourceReceipt -Status Success -ErrorCount 0 -PartialInventory:$partialInventory
     if (-not $receiptPath -or $receiptPath -notlike '*.current.json.txt') { throw 'Content source receipt qualification failed.' }
-    WriteLog -Message 'Content collection and current publication completed.'
-    $uploadFailures = Publish-QualifiedCsvUploads -Paths $qualifiedCsvPaths.ToArray()
+    WriteLog -Message $(if ($partialInventory) { 'Partial content collection and current publication completed.' } else { 'Content collection and current publication completed.' })
+    $uploadFailures = Publish-QualifiedCsvUploads -Paths $publishedCsvPaths.ToArray()
     try {
-        $body = "<h2>SharePoint on-prem content inventory</h2><p>Qualified run: $($script:RunId)</p><p>SharePoint upload failures: $uploadFailures</p><table><tr><th>Web applications</th><th>Content databases</th><th>Site collections</th></tr><tr><td>$($webApplications.Count)</td><td>$($databaseGroups.Count)</td><td>$processed</td></tr></table>"
+        $runStatus = if ($partialInventory) { 'Partial' } else { 'Qualified' }
+        $body = "<h2>SharePoint on-prem content inventory</h2><p>$runStatus run: $($script:RunId)</p><p>Coverage or metadata issues: $failureCount. Details: SharePoint_OnPrem_CollectionCoverage.csv.</p><p>SharePoint upload failures: $uploadFailures</p><table><tr><th>Web applications</th><th>Content databases</th><th>Site collections</th></tr><tr><td>$($webApplications.Count)</td><td>$($databaseGroups.Count)</td><td>$processed</td></tr></table>"
         $mailMarkerPath = Join-Path $outputBase 'SmartM365-SharePoint-OnPrem-Content-DailySummary.sent'
         $null = Invoke-DailySummaryMail -MarkerPath $mailMarkerPath -Force:$ForceSendDailySummary -SendAction {
             Send-InventorySummaryMail -Subject 'SharePoint on-prem content inventory' -BodyHtml $body
@@ -647,7 +665,7 @@ try {
         $script:Completed = $true
         exit 3
     }
-    if ($uploadFailures -gt 0) {
+    if ($partialInventory -or $uploadFailures -gt 0) {
         Complete-SmartM365ExecutionContext -Status CompletedWithWarnings
         $script:Completed = $true
         exit 3
@@ -663,8 +681,8 @@ try {
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD1g6OEUVZ0qSc4
-# cE0Cu2k5Fs0SyszOtx46v/LGMK+TvaCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAKs7+WIZ2mIv39
+# zuQbmZTBWsSWqIkkjolnh2oE/lNU4qCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -694,14 +712,14 @@ try {
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCBDcYQbe/+mLHBBevyvqNyl
-# s+xOzwXGjw/hCrhazq/NcjANBgkqhkiG9w0BAQEFAASCAYACz17lzziK6mdvh0Ly
-# EGrQO8gUdVmSuSqfo8boH1mz6j8snjk2DYA6jxPHvjY+gzJq4luC4Q0hdynsHnso
-# 8R17YJAeZHOMBRNC3L5usC+Y79ymP8Zi7wvPFl+poKF5SKd4g+333rDTj3aeRzH5
-# rugMwsfRtnmtWBUmRb5S79p4Vz6E/9KIuAXUPlBSNnm8BL9U7JJlGheGnZa3wjKc
-# U3+Ixq3ImIY5+mHlz5nuJ+Gf+XK0/OXPCISuP8EBh3ZBd5yg6DZrBTjmTk0OaKWc
-# WVd0nnh75WrpBWQu2O+TAnrAlhpFCiyC2mqoqidhFhMVtqyahg0JX+Qea8BSNOty
-# NUJAL/tDypyzUYp09Yc16lyOpKXYmPVVqghGbPNNabE/dg5E9qJ9hOKGiflBwr7D
-# 3yXI4pfnjclCM0TNwWjxmq1Bx9gPfVF49ggPUmrBooizZqhuUjxduxX7wLlHp62K
-# 9pJWBM/zsS7ZOV1xNFUTBAhif++kdz0d9xolW45hRCPlDDw=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCAATR8yd4D/ZW3o9Ht7j3NO
+# BQd+D4Hg+JM9PlJBCzTZtzANBgkqhkiG9w0BAQEFAASCAYCog0qmOg0icMLIwdpM
+# YlHi0iPeUCnrZU9J/RHqPiePnEoCk7PQzvxq9+ErRMO5QdjWP/R5zYU3R1241UVi
+# C1u9UDsxRr4pCNE1N655m8WdB916E60pZ960AOr+UmQqskdOR9Km7Ii/acxPiqm4
+# o3vn8+BsFbiknzhtBwHBmkfR2R5UxiDOwTaRRsns3UdPOJIlCpZC+9htrYvKSitW
+# kOg+2l/vesW7cS9zc8eZ1MIrGZKq++saM32RNqgKDSuFrzFjpDRY2PO69xZQ4pzA
+# N8YvMoDUGx07Ceok5uLKWqAwg0qBFDNBt3e/jvHUuNSzJeeX8+mTNDV2o+R3VqXk
+# u7zSFc4HtdV0NS59skpoxCpCMygjfeLOxHVO6eAZrtM9W2eBnn8aPdXJcv7OrBFb
+# 27if9Vw/lGY7c0Q/MkXixBuN1DSVYx3WjcQpcguRzYOLKJyMNMpcV+a7B1gUfca7
+# tOdJV4H1/DI70j2b8IFc3SXtgLp53QillFzz5YGyBDKBjHg=
 # SIG # End signature block

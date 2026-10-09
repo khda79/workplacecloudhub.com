@@ -12,8 +12,8 @@ $ast = [Management.Automation.Language.Parser]::ParseFile($scriptPath, [ref]$tok
 if (@($errors).Count) { throw "Content parser errors: $($errors.Count)" }
 $template = Get-Content $templatePath -Raw | ConvertFrom-Json
 if ($template.EnableSharePointUpload -ne $true -or $template.EnableWeeklyHistory -ne $true -or $template.SendMailMode -ne 'Graph') { throw 'Content template policy is invalid.' }
-if ($ast.Extent.Text -notmatch '(?s)\.VERSION\s+1\.0\.6') { throw 'Content version was not updated for Graph bootstrap and mail.' }
-if ($ast.Extent.Text -notmatch '\$coverageLevel\s*=\s*if\s*\(\$failureCount\s*-gt\s*0\s*-or\s*\$globalTimedOut\)' -or $ast.Extent.Text -notmatch 'Collection coverage:[^\r\n]+-Level\s+\$coverageLevel') { throw 'Content coverage logging can misclassify failed=0.' }
+if ($ast.Extent.Text -notmatch '(?s)\.VERSION\s+1\.0\.7') { throw 'Content version was not updated for partial publication.' }
+if ($ast.Extent.Text -notmatch '\$coverageLevel\s*=\s*if\s*\(\$globalTimedOut\).*?elseif\s*\(\$failureCount\s*-gt\s*0\).*?WARNING' -or $ast.Extent.Text -notmatch 'Collection coverage:[^\r\n]+-Level\s+\$coverageLevel') { throw 'Content coverage logging can misclassify a partial run.' }
 $firstUploadConfigRead = $ast.Extent.Text.IndexOf('$global:SharePointSiteHostname =', [StringComparison]::Ordinal)
 $resolverDefinition = @($ast.FindAll({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Resolve-InventoryConfigTokens' }, $true))
 if ($firstUploadConfigRead -lt 0 -or $resolverDefinition.Count -ne 1 -or $resolverDefinition[0].Extent.EndOffset -ge $firstUploadConfigRead) { throw 'Content reads upload configuration before the token resolver is defined.' }
@@ -25,7 +25,7 @@ if ($ast.Extent.Text -match '(?im)^\s*Get-SPSiteAdministration\b') { throw 'Lock
 if ($ast.Extent.Text -notmatch '(?m)^\s*\$site\s*=\s*\$_\s*$' -or $ast.Extent.Text -match '(?m)^\s*param\(\$site\)') { throw 'Streaming site pipeline input is not bound to the current site.' }
 if ($ast.Extent.Text -notmatch '\$runBase\s*=\s*if\s*\(\$MaxItems\s*-gt\s*0\).*?TEST' -or $ast.Extent.Text -notmatch 'Select-Object\s+-First\s+\$remaining' -or $ast.Extent.Text -notmatch 'Flush-RunRows\s+-Kind\s+CollectionCoverage') { throw 'Limited or per-site coverage path is missing.' }
 if ($ast.Extent.Text -notmatch '\$databaseLockLookup\s*=\s*Get-LockStateLookup\s+-ContentDatabase\s+\$database' -or $ast.Extent.Text -match 'Get-LockStateLookup\s+[^\r\n]*-SiteUrl') { throw 'Limited runs must use the database-scoped lock-state lookup.' }
-foreach ($name in @('Get-InventoryConfigValue','Resolve-InventoryConfigTokens','Assert-InventoryPath','Get-ObservedProperty','Test-MissingObservation','Resolve-SiteLockObservation','Get-LockStateLookup','Assert-Deadline','Get-CollectionFailureStatus','Get-DatabaseCoverageStatus','Write-RunCsv','Flush-RunRows','Ensure-GraphAuthenticationModule','Invoke-DailySummaryMail','Send-InventorySummaryMail','Publish-QualifiedCsvUploads')) {
+foreach ($name in @('Get-InventoryConfigValue','Resolve-InventoryConfigTokens','Assert-InventoryPath','Get-ObservedProperty','Test-MissingObservation','Resolve-SiteLockObservation','Get-LockStateLookup','Assert-Deadline','Get-CollectionFailureStatus','Get-DatabaseCoverageStatus','Get-ContentPublicationDecision','Write-RunCsv','Flush-RunRows','Ensure-GraphAuthenticationModule','Invoke-DailySummaryMail','Send-InventorySummaryMail','Publish-QualifiedCsvUploads')) {
     $functionAst = @($ast.FindAll({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name }, $true))
     if ($functionAst.Count -ne 1) { throw "Missing function: $name" }
     . ([scriptblock]::Create($functionAst[0].Extent.Text))
@@ -94,6 +94,10 @@ if ($conflictLookup.States.Count -ne 0 -or $conflictLookup.Conflicts.Count -ne 2
 Remove-Item Function:\Get-SPSite
 if ((Get-CollectionFailureStatus 'Access is denied') -ne 'AccessDenied' -or (Get-CollectionFailureStatus 'CollectionTimeout') -ne 'TimedOut' -or (Get-CollectionFailureStatus 'unexpected') -ne 'Failed') { throw 'Per-collection failure classification failed.' }
 if ((Get-DatabaseCoverageStatus -ExpectedCount 2 -ObservedCount 2) -ne 'Collected' -or (Get-DatabaseCoverageStatus -ExpectedCount 2 -ObservedCount 1) -ne 'DatabaseCoverageMismatch' -or (Get-DatabaseCoverageStatus -ExpectedCount '' -ObservedCount 0) -ne 'DatabaseCountUnavailable') { throw 'Database coverage qualification failed.' }
+if ((Get-ContentPublicationDecision -FailureCount 0 -GlobalTimedOut $false -MaxItems 0) -ne 'Complete' -or
+    (Get-ContentPublicationDecision -FailureCount 8 -GlobalTimedOut $false -MaxItems 0) -ne 'Partial' -or
+    (Get-ContentPublicationDecision -FailureCount 8 -GlobalTimedOut $true -MaxItems 0) -ne 'Blocked' -or
+    (Get-ContentPublicationDecision -FailureCount 0 -GlobalTimedOut $false -MaxItems 2) -ne 'TestOnly') { throw 'Content publication decision did not preserve full, partial, timeout and limited-run boundaries.' }
 $script:GlobalDeadlineUtc = [datetime]::UtcNow.AddMinutes(-1)
 $timedOut = $false
 try { Assert-Deadline ([datetime]::UtcNow.AddMinutes(1)) } catch { $timedOut = $_.Exception.Message -eq 'GlobalTimeout' }
@@ -136,6 +140,21 @@ try {
     Start-SmartM365SourceReceipt -ScriptPath $scriptPath -SourceRootPath $latest
     $null = Complete-SmartM365SourceReceipt -Status Failed -ErrorCount 1
     if ((Get-FileHash $proofPath -Algorithm SHA256).Hash -ne $proofHash) { throw 'A failed run changed the preceding content receipt.' }
+    $partialLatest = Join-Path $tempRoot 'PARTIAL-DATA-LAST'
+    Start-SmartM365SourceReceipt -ScriptPath $scriptPath -SourceRootPath $partialLatest -ScopeParameters @{MaxItems=0}
+    foreach ($name in $producer[0].Files) {
+        Write-SmartM365CsvAtomically -Data @([pscustomobject]@{TenantKey='OFFLINE';FarmId='FARM'}) -Path (Join-Path $partialLatest $name) -Columns @('TenantKey','FarmId') -Delimiter ';' -NoTenantKey
+    }
+    $partialPath = Complete-SmartM365SourceReceipt -Status Success -ErrorCount 0 -PartialInventory
+    $partialProof = Get-Content -LiteralPath $partialPath -Raw | ConvertFrom-Json
+    $partialRun = Get-Content -LiteralPath ($partialPath -replace '\.current\.json\.txt$','.run.json.txt') -Raw | ConvertFrom-Json
+    if ($partialProof.Status -ne 'Completed' -or $partialProof.IsPartialInventory -ne $true -or $partialProof.FullInventoryQualified -ne $false -or $partialProof.Qualifications -notcontains 'PartialCoverage' -or @($partialProof.Files | Where-Object { $_.IsPartialInventory -ne $true }).Count -gt 0 -or $partialRun.Status -ne 'Completed' -or $partialRun.IsPartialInventory -ne $true) { throw 'Partial current publication was misrepresented as complete or did not qualify its CSV files.' }
+    $incompleteRoot = Join-Path $tempRoot 'INCOMPLETE-PARTIAL'
+    Start-SmartM365SourceReceipt -ScriptPath $scriptPath -SourceRootPath $incompleteRoot -ScopeParameters @{MaxItems=0}
+    Write-SmartM365CsvAtomically -Data @([pscustomobject]@{TenantKey='OFFLINE';FarmId='FARM'}) -Path (Join-Path $incompleteRoot $producer[0].Files[0]) -Columns @('TenantKey','FarmId') -Delimiter ';' -NoTenantKey
+    $rejectedPartialPath = Complete-SmartM365SourceReceipt -Status Success -ErrorCount 0 -PartialInventory
+    $rejectedPartial = Get-Content -LiteralPath $rejectedPartialPath -Raw | ConvertFrom-Json
+    if ($rejectedPartial.Status -ne 'Failed' -or (Test-Path -LiteralPath (Join-Path $incompleteRoot $producer[0].Receipt))) { throw 'Partial inventory bypassed required current CSV validation.' }
     $marker = Join-Path $tempRoot 'Content-DailySummary.sent'
     $script:sendCount = 0
     function WriteLog { param($Message, $Level) }
@@ -185,8 +204,8 @@ Write-Output 'PASS: content parser, nested configuration, persistent paths, lock
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBKwb7AIkianj1A
-# d6XTgFoiBxp/JZRBRrouN3qBlNkiZqCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDKKDPqte3JBuuk
+# 70PyAWbPwbrP7+JbV/WS7nERKfZ3HqCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -216,14 +235,14 @@ Write-Output 'PASS: content parser, nested configuration, persistent paths, lock
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCCXuddNftidu9XCELM4iFIL
-# Kv4Hn4K6ol8vvfnihuS/QTANBgkqhkiG9w0BAQEFAASCAYAX+QTD+Ev3Wqc4v1T5
-# 2R7UA2rnrUiXTA5IQWb+3an0d70wvXC73J3rZGEmT6cjXrL+JW/p3srIRl0TV9h4
-# GTXx4pRPREInUUdFe9Pu7xSebl7Z+cxR9UGN+mK0tpImmh1X6tBPXIfxAOlA+9qv
-# FUMxUtCJsCParQ9265xdmrdwWR8jEk2O8zCs/iG2jS0H8yN0AjS2zcNchVAWXljv
-# 90lTdNBCFKmSwl+bW2pING7FZ8/TBHvB4fMHu3Uk7sHJyD8t77QjcM2n3Y77L1j2
-# 8AfKxo/leoif7mdJm+q0lQFLMfEM9consiTlmaP5iIwMUJyaYyj9FAhs0MTCgqKd
-# wmr+Q2eaLFORW9MHSUzjSTm4sqthdqzk0nFEbBl8+tVlssOwWPrUPv21X/MFai5k
-# TrlVAnDCca8nLzYmZswvHDBCqT8301tYC9vPU6FsOErolD9EqPG+xRVguLRTsMy+
-# fVez+RKOvILI9cKosdTJ9yhRigCRPjLJUVPw6mWmII/AKTA=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCBPDwUVgypLRLjRgR64gMg+
+# mIPtmdCyxJVarP4ejWwG+DANBgkqhkiG9w0BAQEFAASCAYBmK31MfL8dYkFn4jj1
+# Cw3UbPM7Ocsn6u46jwE04dZCnNFLPnxVeN88wIySZIrPgaQ8n90EfMpcD0IOYFHc
+# eSp/CGF/RzTB2ZSL5xxU9ugVFWXN5WyBziOn1h96SuZleJF6/RBHtarxRhdD7t+U
+# 1z05l0VpjAGLYYy5O6I8DAkhL2zAHTCQTYWagQpANOiXBEBnirFuv0oNy2jzrXNM
+# sEnwhucX8gEtSOG4f0AFDVg78ei7UAZQqfCGxxcyd3sA5FKlnA0/ob0biFcqpTi1
+# X2sIfw2i2fOz1NpcyDg3RQ6dPgBnSeEz2FlXh/mEorXL7MlZIO2n1l+sZ+T41CmU
+# oh02iFvJNmZ3wfaDWKgw1lLjVi1yRKETg08pW/EA2W3tS9UCYdOuLNyQqsMt31Su
+# Rb5erXScaQdi+v9COyNn4aUA6eqDGY28OcXKVSMJkvngbWLsg3Tl//o3IvPlmqT5
+# Syl2Zp8K+2DfLGrhbebH2co4coE590a7q6iHD+F7rKPeBpM=
 # SIG # End signature block

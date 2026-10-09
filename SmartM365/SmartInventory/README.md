@@ -42,6 +42,9 @@ exports are also recorded; absent optional outputs are not replaced by old CSVs.
 Effective selection parameters are included where applicable. For these producers,
 `ScopeQualification=ConfiguredOutputsOnly` and `IsPartialInventory=null` mean
 that whole-tenant exhaustiveness is **not established**, not that it succeeded.
+The SharePoint on-prem Content producer can explicitly publish observed rows with
+`IsPartialInventory=true` when its coverage CSV records gaps; this qualifies the
+current files and marks their inventory scope partial.
 No receipt claims `FullInventoryQualified=true`. Derived reports remain derived;
 creating their receipt does not refresh their upstream inputs.
 
