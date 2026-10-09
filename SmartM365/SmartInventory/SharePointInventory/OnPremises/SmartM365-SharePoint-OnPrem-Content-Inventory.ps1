@@ -2,7 +2,7 @@
 .SYNOPSIS
     Read-only SharePoint Server 2016/2019 site collection and web inventory.
 .VERSION
-    1.0.4
+    1.0.5
 .REQUIREMENTS
     Windows PowerShell 5.1 x64 on a SharePoint farm server; SharePoint Shell and content read access.
 #>
@@ -255,6 +255,10 @@ function Write-RunCsv {
     param([string]$Name, [object[]]$Rows, [string[]]$Columns, [string]$Folder)
     $path = Join-Path $Folder $Name
     Write-SmartM365CsvAtomically -Data @($Rows) -Path $path -Columns $Columns -Delimiter ';' -NoTenantKey
+    if (-not (Get-Variable -Name csvGeneratedPaths -Scope Global -ErrorAction SilentlyContinue)) {
+        $global:csvGeneratedPaths = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+    }
+    [void]$global:csvGeneratedPaths.Add($path)
     return $path
 }
 
@@ -574,7 +578,8 @@ try {
     if ([datetime]::UtcNow -ge $script:GlobalDeadlineUtc) { $globalTimedOut = $true }
     foreach ($kind in $schemas.Keys) { Flush-RunRows -Kind $kind -Buffers $rows -Paths $spoolPaths -MinimumCount 1 }
     WriteLog -Message ("Lock observation: observed={0}; unverifiedOrConflicting={1}." -f $lockObservedCount,$lockUnverifiedCount)
-    WriteLog -Message ("Collection coverage: processed={0}; failed={1}; limited={2}; globalTimeout={3}." -f $processed,$failureCount,$limited,$globalTimedOut)
+    $coverageLevel = if ($failureCount -gt 0 -or $globalTimedOut) { 'ERROR' } else { 'INFO' }
+    WriteLog -Message ("Collection coverage: processed={0}; failed={1}; limited={2}; globalTimeout={3}." -f $processed,$failureCount,$limited,$globalTimedOut) -Level $coverageLevel
     if ($MaxItems -gt 0) {
         if ($failureCount -gt 0 -or $globalTimedOut) {
             WriteLog -Message 'Limited content run has collection or coverage failures.' -Level ERROR
@@ -600,6 +605,7 @@ try {
     foreach ($path in $runPaths) {
         $latestPath = Join-Path $latestRoot (Split-Path $path -Leaf)
         Copy-SmartM365FileAtomically -SourcePath $path -DestinationPath $latestPath
+        [void]$global:csvGeneratedPaths.Add($latestPath)
         $qualifiedCsvPaths.Add($path)
         $qualifiedCsvPaths.Add($latestPath)
     }
@@ -635,8 +641,8 @@ try {
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA2DLx9VEZ37plI
-# 0Qr5Lb9E9S/bzo6bjfaedjgthQ0Cg6CCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC2E9IaJBstBbzD
+# o0fcaAjj+JwCbCLz/325/38VSK5lNKCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -666,14 +672,14 @@ try {
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCAuXQiKzi0CFSVOT25hk5Dn
-# t9Di5lfrEA9ZpIR+5EswLTANBgkqhkiG9w0BAQEFAASCAYBkkYx2uScc2dfUwExW
-# T18ZGuec70P6rIYfE2wrFOCigC/NQH6m+nkzEpe9eE6ut3C4DuBy7o+CZ70SUJG9
-# YijjWiRmS+w7ZQykuHcGdCZGDa7tV9EtL0J8Rfsjbdq4V6lNjzJloqDQz89l6abW
-# l2SctSnLCh56IXVyuLIyBI7WISe2KBPpcOcV5FajXqkdJtUEVmj5x4kZMptIFbBp
-# GBKQNpLAcF5n5092t+mSGW+PAwEhVsg8MwqZBT6eEgZfQh9iq4RDiKnoiCM06Mxu
-# M1/em5y2o1P2f6u7FdXcQ2getKeN9SBpiRu06flAnSq5E5FTnHj5jv1fFZgumJfp
-# ub1BGAfu1LRmdw40Qk7/EbznQDSyRGco/4mYAVwj8h6vMyarK3N0X09KCcIEHqG7
-# v/lSCe9NBQfEwajgL2J3IpSg9ocFgjUMZgc0QiZPTqQlSXfW5lLV3qqjqyqkxh12
-# ZB25BrDALNSAtZtErkcdyFryIHly/U4CaWgwQGcu0/PJ7Hw=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCBOnk/mI52R7+tJoxhu2STT
+# A9mevv3lRw0RRBdO727c9jANBgkqhkiG9w0BAQEFAASCAYBtlQxwSfUCbwDYr+7x
+# cO4oCbLra7bdt8Ie+j7Q/scQjIebb+lhnd21ZZievZuCuQGr1ArkDD0Lt//Tlhtp
+# LdMnrW2Bk5Wq+VizwdG6j/iZcJlw1TtA/YVaHmdhGWCTyfd4OjzeRZiMYaVkK+TT
+# 4GgOWycIj+HeSZFJhwCz2Uftmawg3SuA1UvJYMjSlyiQK6SWByTdz1KESXna3Dl1
+# +g/ZsfCKI6m0tIFFgZ+bXeFNx2Rpvag+xacilNmqalf674H0llq9n1b0e/2594U1
+# OAqD4M6G5m/C3skn5P005gWUamhplbRhnqOhjI9lIuGhYz8Npclt/mN4K/gtZDis
+# EOixoPf/vNMHwy+/arQ4TolxlJU7Zo01KwuO61ADRO98QI4QN0t183MNwy7MT2Jg
+# 1CBdOo0ayyQgsoGhVKO0EAp6gklUgaTF527AKlTmXBtKANX+15gW4TWgL0P9dzhB
+# MpMyp3LOqaaecY8MbrLaBE5YgvJHvkggrIX+D1suwUS5KE4=
 # SIG # End signature block

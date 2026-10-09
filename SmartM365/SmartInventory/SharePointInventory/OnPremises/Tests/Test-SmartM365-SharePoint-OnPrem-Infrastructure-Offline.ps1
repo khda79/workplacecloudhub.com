@@ -10,7 +10,7 @@ $tokens = $null
 $errors = $null
 $ast = [Management.Automation.Language.Parser]::ParseFile($scriptPath, [ref]$tokens, [ref]$errors)
 if (@($errors).Count) { throw "Infrastructure parser errors: $($errors.Count)" }
-if ($ast.Extent.Text -notmatch '(?s)\.VERSION\s+1\.0\.3') { throw 'Infrastructure version was not updated for the startup order fix.' }
+if ($ast.Extent.Text -notmatch '(?s)\.VERSION\s+1\.0\.4') { throw 'Infrastructure version was not updated for CSV execution accounting.' }
 $firstUploadConfigRead = $ast.Extent.Text.IndexOf('$global:SharePointSiteHostname =', [StringComparison]::Ordinal)
 $resolverDefinition = @($ast.FindAll({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Resolve-InventoryConfigTokens' }, $true))
 if ($firstUploadConfigRead -lt 0 -or $resolverDefinition.Count -ne 1 -or $resolverDefinition[0].Extent.EndOffset -ge $firstUploadConfigRead) { throw 'Infrastructure reads upload configuration before the token resolver is defined.' }
@@ -55,6 +55,7 @@ $tempRoot = Join-Path ([IO.Path]::GetTempPath()) ('SmartM365-SPInfra-Test-' + [g
 try {
     New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
     $path = Write-RunCsv -Name 'Empty.csv' -Rows @() -Columns @('TenantKey','FarmId','CollectionStatus') -Folder $tempRoot
+    if (-not $global:csvGeneratedPaths.Contains($path)) { throw 'Infrastructure run CSV was not registered for execution summary.' }
     $text = [IO.File]::ReadAllText($path)
     if ($text -notmatch 'TenantKey.*;.*FarmId.*;.*CollectionStatus' -or @(Import-Csv $path -Delimiter ';').Count -ne 0) { throw 'Empty infrastructure CSV contract failed.' }
     $buffers = @{ Farms = (New-Object 'System.Collections.Generic.List[object]') }
@@ -106,8 +107,8 @@ Write-Output 'PASS: infrastructure parser, nested configuration, persistent path
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAZZfCPZSxBFE4N
-# AcZkDzkYzfg9mDLozWhRKcJiZL1cnqCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB5Rs+O4XGX/h9X
+# 5tABkF9CIHnY9IWoEEHZeE/byzTjFaCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -137,14 +138,14 @@ Write-Output 'PASS: infrastructure parser, nested configuration, persistent path
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCAXTJiOIvJyWh6SL+PqKhwo
-# CGV9elzdLyV1067tb7VmNTANBgkqhkiG9w0BAQEFAASCAYBE1ejnhDy3ljca9zjh
-# pI9CBwVOD7rds160rb6pc71HwCroxhcoAx7U2bUlyzK8MX5XvzRi+nhCOTLOMjwi
-# 2becLgS1V81pnu1K6iq3fki5YoBwCaG2JYnOZu7YII9WRo/8j1j3DbtUtW0wR5GV
-# 6D8/BEgrAL4fHl26QXyTscal0H+law7+sy3oXHCAxVwBVSJCYqtB9h449PCEJYbM
-# g3g5nTRbzE6DPwIQHWK2y1dPM/mwrcNw9ua+SW4ndJ/XYaYKmAE7mp8BaNlDitTE
-# dXqXm6yueXJucmvagbr5VT+SG0VAmU7WHhi1lE8WXkW4xo7ttnmBpigxNHixi2dg
-# 78ZjkNcaAhkKQtjMB60drqCSAe3ihujCNSQ6/0rTFcJgMga0vxofHK4TsZiDvNEs
-# GvuczDaLdaXuXqZRDN9fk2/wpEyQXXkrxeF2yLmq+HXpI/RJYPUc8x+LeRCP/yJn
-# SZKd+sgoAu6P9062gi8jpBE7WTHv3qCY9KvDj07fm5vcXD4=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCDFV2O4Nf/F5q0wBI0ZFtiv
+# CiZyFe63X7ndzY/KqA4n0DANBgkqhkiG9w0BAQEFAASCAYCZrehrW60At55mVL3S
+# w33Pw/KlXx7LCRQEwzVpqqzfURA2CBi5HyLBUCEDSsKoyIWIYdW4Gxkdfv7V6ft8
+# 0WzTaS+c2mJOenyfLFSx4wztMt82TnTJbmBDVuWhfNrJArZagHQSqkXsSvIAROLR
+# 4IFK4JwllzAJNPk/2tOxVQzrBa4B+1sHcUx/Ygy3X99BbnyYQ8NkHbvnMqqiQvQF
+# voXdoKZ2COEr0lcHao3mKI9Kc+ND3rYaK0XHEqXbSpsHeMah4UeWVKhfS6qeDwhl
+# TTcHbhxL8ammnb5XU1DHkMNCSg5838ycnXJS0Tz6nWT2Cefx2guWEkbDhe8vPIYl
+# vSKNyxLPhQK7r3eoLfT6zjRD/MPd5DN7DD4RvFBuWsexFCMXfhB3JlNcf+GoXKQZ
+# XqyMdTf/P+Ktk4hQMT9i8qdzarHe0ILennlfeI2kRgYV2bA4WkyrzDJQFOwaW1p7
+# KS+WKCcAaYfp4KzcO2rCDkIZTWyN26VfEnfa+EuuIo6RpPk=
 # SIG # End signature block

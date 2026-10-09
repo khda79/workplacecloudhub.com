@@ -12,7 +12,8 @@ $ast = [Management.Automation.Language.Parser]::ParseFile($scriptPath, [ref]$tok
 if (@($errors).Count) { throw "Content parser errors: $($errors.Count)" }
 $template = Get-Content $templatePath -Raw | ConvertFrom-Json
 if ($template.EnableSharePointUpload -ne $true -or $template.EnableWeeklyHistory -ne $true) { throw 'Content template policy is invalid.' }
-if ($ast.Extent.Text -notmatch '(?s)\.VERSION\s+1\.0\.4') { throw 'Content version was not updated for the database-scoped lock filter.' }
+if ($ast.Extent.Text -notmatch '(?s)\.VERSION\s+1\.0\.5') { throw 'Content version was not updated for the coverage logging fix.' }
+if ($ast.Extent.Text -notmatch '\$coverageLevel\s*=\s*if\s*\(\$failureCount\s*-gt\s*0\s*-or\s*\$globalTimedOut\)' -or $ast.Extent.Text -notmatch 'Collection coverage:[^\r\n]+-Level\s+\$coverageLevel') { throw 'Content coverage logging can misclassify failed=0.' }
 $firstUploadConfigRead = $ast.Extent.Text.IndexOf('$global:SharePointSiteHostname =', [StringComparison]::Ordinal)
 $resolverDefinition = @($ast.FindAll({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Resolve-InventoryConfigTokens' }, $true))
 if ($firstUploadConfigRead -lt 0 -or $resolverDefinition.Count -ne 1 -or $resolverDefinition[0].Extent.EndOffset -ge $firstUploadConfigRead) { throw 'Content reads upload configuration before the token resolver is defined.' }
@@ -107,6 +108,7 @@ $tempRoot = Join-Path ([IO.Path]::GetTempPath()) ('SmartM365-SPContent-Test-' + 
 try {
     New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
     $path = Write-RunCsv -Name 'Empty.csv' -Rows @() -Columns @('TenantKey','FarmId','LockState') -Folder $tempRoot
+    if (-not $global:csvGeneratedPaths.Contains($path)) { throw 'Content run CSV was not registered for execution summary.' }
     $text = [IO.File]::ReadAllText($path)
     if ($text -notmatch 'TenantKey.*;.*FarmId.*;.*LockState' -or @(Import-Csv $path -Delimiter ';').Count -ne 0) { throw 'Empty content CSV contract failed.' }
     $buffers = @{ SiteCollections = (New-Object 'System.Collections.Generic.List[object]') }
@@ -166,8 +168,8 @@ Write-Output 'PASS: content parser, nested configuration, persistent paths, lock
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAKhE154g3IviCz
-# PfRpUNQPpKOn217HykIvL+Z7ZepPs6CCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBsIGJIv1esaF2M
+# 5uuodPIeq4pgDosKTp4dAZXDxkktjaCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -197,14 +199,14 @@ Write-Output 'PASS: content parser, nested configuration, persistent paths, lock
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCAlPgJSOtYrNBti/64p2fU1
-# N1KwgctMnU/5xp6XqIeaEjANBgkqhkiG9w0BAQEFAASCAYAWKC4VpCHuau6sfLsM
-# Eo5mjGKv+gUQ3kRLsWPYqUpK9zVdChUbtGzP2g63Iv2X9ncQP488OIBApzPaHBra
-# 7FUK12TbJXywLD3A5tkPFTDQzn0btNlVHMfuB7Ju9D27rDnXD4hlIseBxqvyJVPB
-# X9fNs3y4UsoeIEQhmnNQOyv3qWnpM/Bqe8RPdLm4sGWVaOiPk+EShiQdWGHsgJTq
-# R6WY3slmwikZtT7pvPVCz7+msUZkYSqUvKNJH6lkvqk5bIaZYS6yjhSyRFK0yWwb
-# JszjLoiIzV7VWDWC580yfJSyhu4d4oZAz39MuKadYx0iJ8Afe+KAtqI8Ziu2htAi
-# aJeNF3tla3YHJoiSH/KZnTedFHUjYv6q1tC/Kd9QjCTlOZWTo4i/GX28kA/PZUZ+
-# 4jZxiMqLlBUy0KTcOBYiVsp5B/KAVNeqdTdhRpw3WkoqU8lbkHCnmo6DAmfkxsyu
-# iX5VvvhTxLw7VhwYqZvPlSg0co2htS3tGr2IA1D4raCOHqQ=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCDcuRN8NjCTfAMsXS6+oxWw
+# jAZIXlMcbMQ3SdLffZa7xzANBgkqhkiG9w0BAQEFAASCAYBS+3g5XrsZ4nCHkApC
+# /yyXdRDtCFKtUe7fGqXnwrwVMhnEuMJzmO7Ttt6tqjoObIdwC8qsFMToTktR7gZz
+# +xnTpQBKMnpON0Oi495QdqWUEvTE6mBmkFKYFPtMwp8pa460aH/KUIozxjbtxuxm
+# VYAqvoaQkdA6C78hkCwYFHs6XBzEiYX3wBMHPYonMJ5fgInGSq9hKVylvSbA8inx
+# 9/05Ld9vq9w3JtCxxWCfOaoAolsVWFj3BceNCZya+d0Uauzphv4J85dEKpyJrgy8
+# z79baXsuJDU+h5O10rSLUiYFC0dTMXDrfztD4eT3+AId+KalYEjRyjnLFkA3YCjn
+# SBaXmUtEVeIet5I4Qhp4xN0HR74YOlgFgZ9pZ/MMUGO5WCOpikTsqwoctvWxgYM3
+# dsP80X12XI9/pqbM0Bt2ewvzK5iXgEGAu72zVEiQ+K1zgRSflim/GYM1o6aivEBp
+# M0SPrcBN937L8bQiGGR69eseSbJEmHww73N+E3Yr76FCDgk=
 # SIG # End signature block

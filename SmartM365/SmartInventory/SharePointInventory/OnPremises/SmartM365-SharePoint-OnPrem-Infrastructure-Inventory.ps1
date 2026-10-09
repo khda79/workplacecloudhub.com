@@ -2,7 +2,7 @@
 .SYNOPSIS
     Read-only SharePoint Server 2016/2019 farm infrastructure inventory.
 .VERSION
-    1.0.3
+    1.0.4
 .REQUIREMENTS
     Windows PowerShell 5.1 x64 on a SharePoint farm server; SharePoint Shell access.
 #>
@@ -145,6 +145,10 @@ function Write-RunCsv {
     param([string]$Name, [object[]]$Rows, [string[]]$Columns, [string]$Folder)
     $path = Join-Path $Folder $Name
     Write-SmartM365CsvAtomically -Data @($Rows) -Path $path -Columns $Columns -Delimiter ';' -NoTenantKey
+    if (-not (Get-Variable -Name csvGeneratedPaths -Scope Global -ErrorAction SilentlyContinue)) {
+        $global:csvGeneratedPaths = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+    }
+    [void]$global:csvGeneratedPaths.Add($path)
     return $path
 }
 
@@ -362,6 +366,7 @@ try {
     foreach ($path in $runPaths) {
         $latestPath = Join-Path $latestRoot (Split-Path $path -Leaf)
         Copy-SmartM365FileAtomically -SourcePath $path -DestinationPath $latestPath
+        [void]$global:csvGeneratedPaths.Add($latestPath)
         $qualifiedCsvPaths.Add($path)
         $qualifiedCsvPaths.Add($latestPath)
     }
@@ -398,8 +403,8 @@ try {
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDP3AbCdSvmYOO8
-# Rz+cnanlG0V9fb8DTxqW18UwA20L/6CCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD5eqOh9cNo5kjP
+# gtBiGQrJ4KrLveXBR+Ad5NbKUbz736CCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -429,14 +434,14 @@ try {
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCDkUsDnRI8A6cDbHu5vWkIC
-# XwTXF+FlVZAMv/QO4PH2kzANBgkqhkiG9w0BAQEFAASCAYAxIA+vcm7yIQSLG7St
-# TzLZ3rs4oWt004ZT781HWY2qs2zfZgh/inQ5luyvHp9rMjGkuk4uI6w7P3oO2Jdi
-# rDkH8hOKSAI/y5cIy949ftIsO+eAeCt7D+5xlaQ1pSx2yRcyZ/uxMYNZUXxScBHz
-# Wk+fKLMK2VZvsSf7AEk7P72TFbicToDtCJ+VoJ7/CIrtZHjOJZkDQDoGK+bgos7X
-# MsOj76eKRU++blMBsDbMibRc6KvRn68vIKD1RAvG6DNMVGDg31MT6zeYoNrNhj3k
-# W1GAdBIZWGJdLuBn4HgeCzGPwQwPXKL4YOkj2bCEolfBrxv4sGJllAQjfB5dcBVI
-# HDwiZ3mbxoBtALojqKvTm/Umz+KoX/hGyYbGYqxnrHd0CEk3uMQVyoxALxOmjRsh
-# yB5wQDsolzBxiYGcnBWaTjOMbMFnN2u08OaoF7YstfMiJGIi9seYmpM5W+5IL7Wk
-# OtnvNH5Cn+F4LAIDleR1V3v72qGo75M3QR0x9Y5o/3NuEsc=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCDsvlNrpV+5I9i5Od1RHYDL
+# UdWXnobVAQm0+Rksx1Gp3DANBgkqhkiG9w0BAQEFAASCAYBb2pzohqH4Xj88QSVO
+# eHBsYvgjr9iNp+8tcdAoqWIZfwC6ICGPBRzGlK0lIyQTkTRU84SKDPNeQctVqavm
+# rhSv7QEnVObeZhkd2XLhWyWcqX+yNBjA4gMZfUFLD3qQschzr11YnY5zH/+JIvEe
+# aWRk0v+/NREk3D8u84AZKDMU+9h9jXSWNui/qaR67oJGGGT0jXAevj2/gRzVGJgL
+# tmPizzn7AXgPlLFaYE5H1S1afKamcU3wAGnq3mXaID6GC9KlcDNw7S1XQmKlUhTg
+# l3QuZ4p7rPvnwhuPOuXJMlssq/yydyKJFItz4RTGGBAGriQ10eNAjo9J52sO6K2W
+# r0Cy7n66pB/nlapMsLvPIQhREH3TKi1fm41pZusGRsm9XP2xjnVXlHiTjINGAO5l
+# rCEhtKp06rNIZy1ziH1zl/sKNaw3O/zmWpwVlU6Ja1LSB8BLbflZ1cbyLA9sJUKY
+# pioC/bIgh5iNuhUrMrWUJZ1qBD/iXSa77TpLFVKcQx18XfA=
 # SIG # End signature block
