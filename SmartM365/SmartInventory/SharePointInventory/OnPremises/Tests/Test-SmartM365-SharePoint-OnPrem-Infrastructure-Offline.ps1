@@ -16,7 +16,7 @@ $registry = Get-Content $registryPath -Raw | ConvertFrom-Json
 $producer = @($registry.Producers | Where-Object Script -eq 'SmartM365-SharePoint-OnPrem-Infrastructure-Inventory.ps1')
 if ($producer.Count -ne 1 -or $producer[0].Files.Count -ne 6) { throw 'Infrastructure source receipt registration is invalid.' }
 if ($ast.Extent.Text -match '(?im)^\s*(Set-SPSite|Set-SPWeb|Set-SPContentDatabase|Add-SPShellAdmin|Remove-SPSite)\b') { throw 'A SharePoint write command was found.' }
-foreach ($name in @('Get-InventoryConfigValue','Get-ConfiguredWebApplications','Write-RunCsv')) {
+foreach ($name in @('Get-InventoryConfigValue','Get-ConfiguredWebApplications','Write-RunCsv','Invoke-DailySummaryMail','Send-InventorySummaryMail')) {
     $functionAst = @($ast.FindAll({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name }, $true))
     if ($functionAst.Count -ne 1) { throw "Missing function: $name" }
     . ([scriptblock]::Create($functionAst[0].Extent.Text))
@@ -49,18 +49,34 @@ try {
     Start-SmartM365SourceReceipt -ScriptPath $scriptPath -SourceRootPath $latest
     $null = Complete-SmartM365SourceReceipt -Status Failed -ErrorCount 1
     if ((Get-FileHash $proofPath -Algorithm SHA256).Hash -ne $proofHash) { throw 'A failed run changed the preceding infrastructure receipt.' }
+    $marker = Join-Path $tempRoot 'Infrastructure-DailySummary.sent'
+    $script:sendCount = 0
+    function WriteLog { param($Message, $Level) }
+    $sendAction = { $script:sendCount++ }
+    if (-not (Invoke-DailySummaryMail -MarkerPath $marker -SendAction $sendAction)) { throw 'First infrastructure email was skipped.' }
+    if (Invoke-DailySummaryMail -MarkerPath $marker -SendAction $sendAction) { throw 'Same-day infrastructure email was repeated.' }
+    if (-not (Invoke-DailySummaryMail -MarkerPath $marker -SendAction $sendAction -Force) -or $script:sendCount -ne 2) { throw 'Forced infrastructure email failed.' }
+    $failedMarker = Join-Path $tempRoot 'Infrastructure-Failed.sent'
+    try { $null = Invoke-DailySummaryMail -MarkerPath $failedMarker -SendAction { throw 'Simulated SMTP failure' }; throw 'Mail failure was ignored.' }
+    catch { if ($_.Exception.Message -ne 'Simulated SMTP failure') { throw } }
+    if (Test-Path -LiteralPath $failedMarker) { throw 'Failed infrastructure email wrote a marker.' }
+    $script:mailParameters = $null
+    function SendEmailHtmlReport { [CmdletBinding()] param($From,$To,$Subject,$BodyHtml,$MailPurpose,$SmtpServer,$SmtpPort,$SendMailMode,$Cc) $script:mailParameters = $PSBoundParameters }
+    $script:EffectiveConfig = [pscustomobject]@{ From='sender@example.test'; To=''; ErrorMailTo='recipient@example.test'; SmtpServer='smtp.example.test'; SmtpPort=25; SendMailMode='SMTP'; Cc='' }
+    Send-InventorySummaryMail -Subject 'Offline summary' -BodyHtml '<p>Summary</p>'
+    if ($script:mailParameters.To -ne 'recipient@example.test' -or $script:mailParameters.From -ne 'sender@example.test' -or $script:mailParameters.ContainsKey('Attachments')) { throw 'Infrastructure mail routing or attachment policy failed.' }
 } finally {
     if ([IO.Path]::GetFullPath($tempRoot).StartsWith([IO.Path]::GetFullPath([IO.Path]::GetTempPath()),[StringComparison]::OrdinalIgnoreCase)) {
         Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
     }
 }
-Write-Output 'PASS: infrastructure parser, template, filtering, read-only commands, empty CSV, completed/failed receipts.'
+Write-Output 'PASS: infrastructure parser, template, filtering, read-only commands, empty CSV, receipts, daily mail gate and routing.'
 
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDTeqNWgXJc9CyH
-# 4MnoT+eKgkXRH+cXG5gH0U62ESjt+6CCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDxtFT3F1jNT7Au
+# 2m7bpUDwu3luiBOFTNlWadaTgQEsKKCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -90,14 +106,14 @@ Write-Output 'PASS: infrastructure parser, template, filtering, read-only comman
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCBVpzXyeDn39t5jNxi/g/mO
-# oG6rcxSIZghUDvQTZVBhxTANBgkqhkiG9w0BAQEFAASCAYCVso7CQctPWfzC9Iko
-# uo3eEXFu/In5ZlVTYl95ZtN+3HbIm8ec1ApjzJUGSTad+ujbdBQ5fecOnPG3cB03
-# p5H/WyKoFLdwJt2BPb0HA8hxBEK7YSSgutU5OPftAS23uzhk42z8GI0EJc5ba6oY
-# xZlROeG9NahadxLWa3S9bTqHl4eSJ3lEIZ9aGOdKlTU55jyDbGPxHzeCzFGxCCLS
-# sSLIDa4fyR4PylQ7MGn/r//qKipT5Htb7mEn5DTDoJCkQQYl9ncGMvE4IoLnRSPl
-# zrt/MUbCPHxAGefAmAvNc8cYYt3nXiv6WEVG683wicHY9x07C2gwjqoDjKCGbsdD
-# hAa4+Rx1gXqCDKg9ochEjleg+lYZifH0dmYhVyFSv4Q0QSgc4Hh7bkWCO6KhlqI5
-# jrZ9SNcNh8eB0uOwBJYSr9ULXv5bzHIkCdGstdLV4dUAm1580cvW/VjnmhVLliDb
-# EOzwfBExt1FPn7aT3q8rcPrca6Z9JoJv9y/7Mk9Jzid8Qtc=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCD7HexgP07YlV49XGih2DEw
+# KZayyGClb7vUWQunPkTrJzANBgkqhkiG9w0BAQEFAASCAYCZNaMfnDNLMiVIHxDe
+# dkSZ/7eRrP2V97maIvBnMivEPcqN2ZHAovMS2AsBJeqXeNARjwZJ0yUHA7UeAFyc
+# v0vBXrAZOdltYKLvey65DQ4KWFWLGdNdYEpJzj0DD/cAq+0ncaikKz0XL/8vJvrc
+# mt4F5kOyyntUpxL+AKl+8w+iZX081zsNh8Vh0eLb8WXNWjHdKx93868SzmvN3C2d
+# JPD0jmTxhH2AObEzUzla3FReqSHcx2EChB4bGFE+xiG9tI72eTEvul5BcvussBk+
+# m7Ni6RTMdDSFkwPTYu2AqJfDLaIo7TngDI7hvb80d9Gj0RpW5Ow3V1A2UKfzB8GD
+# IphT/+xCCwpompTAPJxnkyOYchtg/nznC8JxLa6XcwPgA1LoNeeteFVtjApBfNEw
+# lhfbNZZ6gvQpRm1Sk+dJW8OSCCQPS3knjga4qH4w1Jnv05TcEAGAFkKCF+DXAeQX
+# p9JOjuisGcJWXWMp7p5hBrzPflm4+7y0AwfXuwhwSKyPtMo=
 # SIG # End signature block

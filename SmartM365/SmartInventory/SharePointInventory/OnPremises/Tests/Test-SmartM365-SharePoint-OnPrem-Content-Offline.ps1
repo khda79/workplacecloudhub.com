@@ -19,7 +19,7 @@ if ($ast.Extent.Text -match '(?im)^\s*(Set-SPSite|Set-SPWeb|Set-SPContentDatabas
 if ($ast.Extent.Text -match '(?im)^\s*Get-SPSiteAdministration\b') { throw 'Lock inspection must use SPSite and SPContentDatabase only.' }
 if ($ast.Extent.Text -notmatch '(?m)^\s*\$site\s*=\s*\$_\s*$' -or $ast.Extent.Text -match '(?m)^\s*param\(\$site\)') { throw 'Streaming site pipeline input is not bound to the current site.' }
 if ($ast.Extent.Text -notmatch '\$runBase\s*=\s*if\s*\(\$MaxItems\s*-gt\s*0\).*?TEST' -or $ast.Extent.Text -notmatch 'Select-Object\s+-First\s+\$remaining' -or $ast.Extent.Text -notmatch 'Flush-RunRows\s+-Kind\s+CollectionCoverage') { throw 'Limited or per-site coverage path is missing.' }
-foreach ($name in @('Get-ObservedProperty','Test-MissingObservation','Resolve-SiteLockObservation','Assert-Deadline','Get-CollectionFailureStatus','Get-DatabaseCoverageStatus','Write-RunCsv','Flush-RunRows')) {
+foreach ($name in @('Get-InventoryConfigValue','Get-ObservedProperty','Test-MissingObservation','Resolve-SiteLockObservation','Assert-Deadline','Get-CollectionFailureStatus','Get-DatabaseCoverageStatus','Write-RunCsv','Flush-RunRows','Invoke-DailySummaryMail','Send-InventorySummaryMail')) {
     $functionAst = @($ast.FindAll({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name }, $true))
     if ($functionAst.Count -ne 1) { throw "Missing function: $name" }
     . ([scriptblock]::Create($functionAst[0].Extent.Text))
@@ -77,18 +77,34 @@ try {
     Start-SmartM365SourceReceipt -ScriptPath $scriptPath -SourceRootPath $latest
     $null = Complete-SmartM365SourceReceipt -Status Failed -ErrorCount 1
     if ((Get-FileHash $proofPath -Algorithm SHA256).Hash -ne $proofHash) { throw 'A failed run changed the preceding content receipt.' }
+    $marker = Join-Path $tempRoot 'Content-DailySummary.sent'
+    $script:sendCount = 0
+    function WriteLog { param($Message, $Level) }
+    $sendAction = { $script:sendCount++ }
+    if (-not (Invoke-DailySummaryMail -MarkerPath $marker -SendAction $sendAction)) { throw 'First content email was skipped.' }
+    if (Invoke-DailySummaryMail -MarkerPath $marker -SendAction $sendAction) { throw 'Same-day content email was repeated.' }
+    if (-not (Invoke-DailySummaryMail -MarkerPath $marker -SendAction $sendAction -Force) -or $script:sendCount -ne 2) { throw 'Forced content email failed.' }
+    $failedMarker = Join-Path $tempRoot 'Content-Failed.sent'
+    try { $null = Invoke-DailySummaryMail -MarkerPath $failedMarker -SendAction { throw 'Simulated SMTP failure' }; throw 'Mail failure was ignored.' }
+    catch { if ($_.Exception.Message -ne 'Simulated SMTP failure') { throw } }
+    if (Test-Path -LiteralPath $failedMarker) { throw 'Failed content email wrote a marker.' }
+    $script:mailParameters = $null
+    function SendEmailHtmlReport { [CmdletBinding()] param($From,$To,$Subject,$BodyHtml,$MailPurpose,$SmtpServer,$SmtpPort,$SendMailMode,$Cc) $script:mailParameters = $PSBoundParameters }
+    $script:EffectiveConfig = [pscustomobject]@{ From='sender@example.test'; To=''; ErrorMailTo='recipient@example.test'; SmtpServer='smtp.example.test'; SmtpPort=25; SendMailMode='SMTP'; Cc='' }
+    Send-InventorySummaryMail -Subject 'Offline summary' -BodyHtml '<p>Summary</p>'
+    if ($script:mailParameters.To -ne 'recipient@example.test' -or $script:mailParameters.From -ne 'sender@example.test' -or $script:mailParameters.ContainsKey('Attachments')) { throw 'Content mail routing or attachment policy failed.' }
 } finally {
     if ([IO.Path]::GetFullPath($tempRoot).StartsWith([IO.Path]::GetFullPath([IO.Path]::GetTempPath()),[StringComparison]::OrdinalIgnoreCase)) {
         Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
     }
 }
-Write-Output 'PASS: content parser, template, lock mapping, timeouts, per-site errors, empty CSV, limited/completed/failed receipts.'
+Write-Output 'PASS: content parser, template, lock mapping, timeouts, per-site errors, empty CSV, receipts, daily mail gate and routing.'
 
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBwY045yfs6gc70
-# pPxMOo03pDFDBWgy1AaVod4z4G4UraCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCH2H+FpSBIJa2M
+# h4DLd22BkhnAyDJZ1DMU376DYpRZt6CCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -118,14 +134,14 @@ Write-Output 'PASS: content parser, template, lock mapping, timeouts, per-site e
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCCgjhcrjly8HBXbbPy6OuCQ
-# 70AJImVQ2DhXbcfC+507uzANBgkqhkiG9w0BAQEFAASCAYCqBYp77Q9vvSbdCqEh
-# nenkbuMClstDfUZub3qqlbyF8oK5NYwVeVyJ8ehWz7xxXwA4h+Asbcysh8jju6w1
-# FHOfxxIf0ifIPEds877M96gUDxQHND+NA6GSUmITazMty3vgacrsdzS0LDMKi7j1
-# 2Zsqt5JxgtZqdB/zdRSo3oanZDjMBWfU0EOG+v+L01rllgWMPVBFVr+AH3jezUPk
-# 4pof1saZwhm2kh27SvtotdAnEFiAIT+/esr37Z1vcNxjxK8EQb4cD31MfqwotfkL
-# ZQrkCbAW5bbWsDcqjDmIVJbzmstXAkKJulAgwDu8xkTrd4zrgiFJ5gaxo0+vjU7B
-# YvLszsa91CSJBukMdBJXtcSOyQTHzkknk+g20wU8TdYY3z+knXAXMWDlOcdFC6b4
-# IQiieErtKlWW5oicVyH7t5gKu6mM4tR8nfXjo3rFiJq6XRy3Okz57N4U9hkR+aTu
-# vzm8NSj+pCVq4a4RkjQU8qB9Wfn2gIUcr6fJF9s8h42+k2c=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCBl9pBvVcmRGS4xyDDry7Bb
+# j55mNRlRtyNh9DEaAu41AzANBgkqhkiG9w0BAQEFAASCAYCO3LzE2N+U0N5lm8Hu
+# MBLrnyR+9n+UALMoQCMDI4STpej6BgylAO1AtzGhiOfsJfqnltdYTlzkc+vQX6C7
+# 3R/UGANVdf9UbXbKfZlyYfyVMGXYYf76GHSv/3CMyJiyzvCIL6+9XAsQ6p9nTgqR
+# RQIILSjrxyHLw7J8RnpINwCupPTE+3k4HCvKzH5LrEztmzLq+7ZEfRZNkdiMEkUS
+# VabLli1NcRtMvTuX0/8ah9ZfEG3kjJs2jtVDlR5SItgMuG2nmN02Jr3mByEZZT4a
+# 5DE9+nNFfspBpQ3TY2G8BRjKdJyCHDy5XEhuDeQXaOYhSwvs6m6CC4NZjxMpUqvc
+# 6+KQAjNWhnAaoyeryufCtONBWkogmBDzSBdaaJCBct96rmrNvLgSxx+7/6JXliS3
+# jpTLCyFHSp2ZY/vm1ts/QS+SxbVYh0X8NS54HdhHelIq3Kf7y3Ye2TvaqjHuxG1/
+# 92n7eYMS+Sfx99PbIlJ2hMBCD8Jg4dY4lRuuGKUiEQEbt+4=
 # SIG # End signature block

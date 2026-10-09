@@ -10,7 +10,8 @@
 param(
     [string]$Tenant = 'test',
     [string]$OutputRoot,
-    [switch]$ValidateOnly
+    [switch]$ValidateOnly,
+    [switch]$ForceSendDailySummary
 )
 
 Set-StrictMode -Version Latest
@@ -115,6 +116,52 @@ function Write-RunCsv {
     $path = Join-Path $Folder $Name
     Write-SmartM365CsvAtomically -Data @($Rows) -Path $path -Columns $Columns -Delimiter ';' -NoTenantKey
     return $path
+}
+
+function Invoke-DailySummaryMail {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$MarkerPath, [Parameter(Mandatory)][scriptblock]$SendAction, [switch]$Force)
+    $today = (Get-Date).ToString('yyyy-MM-dd', [Globalization.CultureInfo]::InvariantCulture)
+    $markerParent = Split-Path -Path $MarkerPath -Parent
+    if (-not (Test-Path -LiteralPath $markerParent -PathType Container)) {
+        New-Item -Path $markerParent -ItemType Directory -Force | Out-Null
+    }
+    $lockStream = $null
+    try {
+        try { $lockStream = [IO.File]::Open("$MarkerPath.lock", [IO.FileMode]::OpenOrCreate, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None) }
+        catch [IO.IOException] {
+            WriteLog -Message 'Daily infrastructure summary email is being evaluated by another run; email skipped.' -Level INFO
+            return $false
+        }
+        $lastSentDate = if (Test-Path -LiteralPath $MarkerPath -PathType Leaf) { [string](Get-Content -LiteralPath $MarkerPath -Raw -ErrorAction Stop) } else { '' }
+        if (-not $Force -and $lastSentDate.Trim() -eq $today) {
+            WriteLog -Message "Daily infrastructure summary email already sent for $today; email skipped." -Level INFO
+            return $false
+        }
+        $null = & $SendAction
+        [IO.File]::WriteAllText($MarkerPath, $today, [Text.UTF8Encoding]::new($false))
+        return $true
+    } finally {
+        if ($null -ne $lockStream) { $lockStream.Dispose() }
+    }
+}
+
+function Send-InventorySummaryMail {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Subject, [Parameter(Mandatory)][string]$BodyHtml)
+    $from = [string](Get-InventoryConfigValue 'From' '')
+    $to = [string](Get-InventoryConfigValue 'To' '')
+    if ([string]::IsNullOrWhiteSpace($to)) { $to = [string](Get-InventoryConfigValue 'ErrorMailTo' '') }
+    if ([string]::IsNullOrWhiteSpace($from) -or [string]::IsNullOrWhiteSpace($to)) { throw 'Daily summary email requires From and To or ErrorMailTo.' }
+    $mailParams = @{ From=$from; To=$to; Subject=$Subject; BodyHtml=$BodyHtml; MailPurpose='Report'; ErrorAction='Stop' }
+    foreach ($name in @('SmtpServer','SendMailMode','Cc')) {
+        $value = [string](Get-InventoryConfigValue $name '')
+        if (-not [string]::IsNullOrWhiteSpace($value)) { $mailParams[$name] = $value }
+    }
+    $smtpPort = Get-InventoryConfigValue 'SmtpPort' $null
+    if ($null -ne $smtpPort -and [string]$smtpPort -ne '') { $mailParams['SmtpPort'] = [int]$smtpPort }
+    $null = SendEmailHtmlReport @mailParams
+    WriteLog -Message "Daily infrastructure summary email sent to $to."
 }
 
 $coreManifest = Join-Path $root 'Modules\SmartM365.Core\Compatibility\WindowsPowerShell5\SmartM365-WindowsPowerShell5.psd1'
@@ -273,6 +320,19 @@ try {
     $receiptPath = Complete-SmartM365SourceReceipt -Status Success -ErrorCount 0
     if (-not $receiptPath -or $receiptPath -notlike '*.current.json.txt') { throw 'Infrastructure source receipt qualification failed.' }
     WriteLog -Message 'Infrastructure collection and current publication completed.'
+    try {
+        $farmVersion = [System.Net.WebUtility]::HtmlEncode([string]$rows.Farms[0].FarmVersion)
+        $body = "<h2>SharePoint on-prem infrastructure inventory</h2><p>Qualified run: $($script:RunId)</p><p>Farm version: $farmVersion</p><table><tr><th>Servers</th><th>Service applications</th><th>Web applications</th><th>Content databases</th></tr><tr><td>$($rows.Servers.Count)</td><td>$($rows.ServiceApplications.Count)</td><td>$($rows.WebApplications.Count)</td><td>$($rows.ContentDatabases.Count)</td></tr></table>"
+        $mailMarkerPath = Join-Path $outputBase 'SmartM365-SharePoint-OnPrem-Infrastructure-DailySummary.sent'
+        $null = Invoke-DailySummaryMail -MarkerPath $mailMarkerPath -Force:$ForceSendDailySummary -SendAction {
+            Send-InventorySummaryMail -Subject 'SharePoint on-prem infrastructure inventory' -BodyHtml $body
+        }
+    } catch {
+        WriteLog -Message ("Daily infrastructure summary email failed: {0}" -f $_.Exception.Message) -Level ERROR
+        Complete-SmartM365ExecutionContext -Status CompletedWithWarnings
+        $script:Completed = $true
+        exit 3
+    }
     Complete-SmartM365ExecutionContext -Status Success
     $script:Completed = $true
 } catch {
@@ -284,8 +344,8 @@ try {
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAdvs2Ousz2eEBE
-# Xhy0DxQAThqbx4VktITG3CplSwOlB6CCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAD76NIICb/2Ng1
+# F0cm530gvtk9/m7Av8LMmbW02rWpp6CCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -315,14 +375,14 @@ try {
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCDV+zlT40CQa76gr4B3K7ex
-# nvGIwGT5iZQYQ3zGENeO9jANBgkqhkiG9w0BAQEFAASCAYA1JmC1PI7FHZRVUD1O
-# aBigcQi7RybBCyyI0tD5vPMQTkMCdqEkIwqNQF2/B3NOEimfI0OhsTrqtYEactCF
-# /Cg1bc9YVsb5tdBNp/ZtfrlWw+zTcU5n34GmsokfDhgqktsiaG8n/7eAkHZV4mab
-# Og288EzJlSkh2hPpGNwovlu+ZKR2xMv7Pf1YphrNUF5YZqG/Puyb1mnJllQ1wlQC
-# Cgrv/6522/De0coB3Wf/Jgb9zEik2UaiSLpF4sTTpM0x3aTZ96K/Ybs2dKA1Jasc
-# EOBbpEadEk9n6iZppVPaRrXKcQu+bhUZRVzkCqCxFiDXxNV1SFfK/wMA3DoBPc7l
-# X2qkBhCZfwbxuA2te7a/hwj0J3u/+YN6RuAOmXoM7JYz0hbSom4PGH8gbN+s4HgW
-# BWkOo/LhpBF4i0pTihDTTD+j9p2vJ+l6HkVzMT18sG0In8I7cMHUicI34Jagh5+4
-# ieCbTLYAorfrWQoZuyu3RQoL4Y+O/yJ1tzbsdRSZmsjuDgA=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCD2xIjwpcTviG4mCOHiDbyY
+# pNf0twyX5XkpLVbdnuGQuTANBgkqhkiG9w0BAQEFAASCAYBYe2/WsJloQVBYSU+P
+# PZeWUc+zb4STBMNN48TQ6mETDTzT2RXm5WY4P4J2p+/DmC0XBrD2LHSO5YHUZWfC
+# z7kW5esZoSlXQx9WqycOjfiSX/ZsxOsYolIVcceiWBYH0gI+TpsLtTA9aurZm2gw
+# eza6eW9HFu+FcAUGn9hRMZqH2MjJWm7w4ZBwje+iCC0D2K4aoR20qAxMB/3dg3N+
+# 47vT0Z5XuZJJWOXTVSvH16lmH+TvH8ogm/9Syh1b12xolR0mgcO2SzTaH0Yi13qp
+# iCZJPseqfJSqELdKgMibPG7BhHUp3QzY+fbpwAM672C6N8yBRULOmSKVxMR9YBI+
+# wi74GXOyK3+qU3WzBBu/WiHmulVTOLkw5lKhLVPxLtXtPc2BpFyh5B1iFatzOHVR
+# JV+8bdNogqXCifeINNDoTCaiYtK11IOINu1Z7QSPqbeeDuWLFFdmXkNi80I5q+YY
+# nHLA/Y4iSUPGSuXL1k6WcqpcmcRessdoUhY0T57QI28wm2A=
 # SIG # End signature block

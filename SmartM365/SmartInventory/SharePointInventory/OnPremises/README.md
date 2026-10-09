@@ -10,6 +10,8 @@ Two independent, read-only Windows PowerShell 5.1 x64 collectors run on a ShareP
 - `Get-SPWebApplication` selects content applications by default and excludes Central Administration. `IncludedWebApplicationUrls` and `ExcludedWebApplicationUrls` in each local JSON narrow the scope. Empty inclusion means all content applications.
 - Both templates set `EnableSharePointUpload=false`. The scripts also force upload off at runtime; CSVs, receipts, logs, and history are never transferred automatically.
 
+Each qualified full run sends a compact HTML summary email with counts and run ID, without CSV attachments or owner/administrator logins. Each collector has an independent daily marker in its tenant-specific `OutputRoot`, protected by an exclusive file lock, so later successful runs on the same local calendar day skip the email. `-ForceSendDailySummary` sends again after a qualified full run even when that day's marker exists. It does not make `-ValidateOnly`, limited `-MaxItems`, or failed coverage runs send mail. A failed mail attempt leaves the marker unchanged, logs the error, and completes the qualified inventory run with warnings (exit code 3); the current CSVs and receipt remain published. The mail transport follows the Exchange collectors through `SmartM365.Core` `SendEmailHtmlReport`. Set `From`, `To` (or `ErrorMailTo`), and the required `SmtpServer` / `SendMailMode` values in the tenant or collector `local.json` before a full run. The marker and lock files are local output metadata, not SharePoint changes.
+
 Every CSV includes `TenantKey`, `FarmId`, `RunId`, and `CollectedAtUtc`. Infrastructure files contain farm build and counts (`Farms`), server identity/role/status (`Servers`), service application identity/type/pool (`ServiceApplications`), application URL/pool/database count (`WebApplications`), zone URL/authentication (`WebApplicationZones`), and database identity/server/site count/read-only status (`ContentDatabases`). Content files contain collection identity, owner, size, quota, modification, template, language and lock observations (`SiteCollections`); administrator logins and owner flags (`SiteAdministrators`); web identity, template, list/library counts and permission inheritance (`Webs`); and one coverage result per attempted collection or database failure (`CollectionCoverage`). The exact column lists are declared in each collector's `$schemas` block.
 
 ## Publication and qualification
@@ -36,6 +38,8 @@ Copy each `*.local.json.template` to the same basename ending in `.local.json`, 
 & "<SmartM365Root>\SmartInventory\Launchers\OnPremises\Start-SmartM365-SharePoint-OnPrem-Infrastructure-Inventory.cmd"
 & "<SmartM365Root>\SmartInventory\Launchers\OnPremises\Start-SmartM365-SharePoint-OnPrem-Content-Inventory.cmd" -MaxItems 2
 & "<SmartM365Root>\SmartInventory\Launchers\OnPremises\Start-SmartM365-SharePoint-OnPrem-Content-Inventory.cmd"
+& "<SmartM365Root>\SmartInventory\Launchers\OnPremises\Start-SmartM365-SharePoint-OnPrem-Infrastructure-Inventory.cmd" -ForceSendDailySummary
+& "<SmartM365Root>\SmartInventory\Launchers\OnPremises\Start-SmartM365-SharePoint-OnPrem-Content-Inventory.cmd" -ForceSendDailySummary
 ```
 
 Run each collector on 2016 and 2019 separately. Inspect the two `-ValidateOnly` results before limited or full runs. The `-MaxItems 2` run is not a complete-farm qualification.
