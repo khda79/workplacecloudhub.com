@@ -19,4 +19,4 @@ By default, output is written under:
 
 Use `-OutputRoot` to override the root folder for a specific run.
 
-Set `ExcludedServers` in the script's local JSON to an array of server names that the collection host must not contact. The committed template uses an empty array. Configured names are skipped for per-server inventory and certificate collection; the HTML report and email list them in the per-server table with status `exclut` and no measured values. The global summary CSV records both the discovered and collected server counts and the configured exclusions.
+Set `ExcludedServers` in the script's local JSON to an array of server names that the collection host must not contact. The committed template uses an empty array. Configured names are skipped for per-server inventory and certificate collection; the HTML report and email list them in the per-server table with status `Excluded` and no measured values. The global summary CSV records both the discovered and collected server counts and the configured exclusions.
