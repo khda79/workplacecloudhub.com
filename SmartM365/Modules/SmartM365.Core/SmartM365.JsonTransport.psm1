@@ -18,8 +18,131 @@ function Get-SmartM365JsonNames {
     [pscustomobject]@{ Legacy = $legacy; Preferred = $legacy + '.txt'; Lock = $legacy + '.transport.lock'; Journal = $legacy + '.migration.log' }
 }
 
-function Assert-SmartM365JsonUnlinkedPath {
+function ConvertTo-SmartM365JsonQualifiedRoot {
     param([Parameter(Mandatory)][string]$Path)
+    if ($Path -notmatch '^[A-Za-z]:\\[^\\]' -or $Path -match '[*?{}]' -or
+        $Path.Substring(2).Contains(':') -or $Path.Contains('/') -or
+        @($Path.Split('\') | Where-Object { $_ -in @('.', '..') -or ($_ -and $_ -match '[. ]$') }).Count) {
+        throw 'Qualified local data roots must be exact absolute local directory paths.'
+    }
+    [IO.Path]::GetFullPath($Path).TrimEnd('\')
+}
+
+function Get-SmartM365JsonPathNode {
+    param([Parameter(Mandatory)][string]$Path)
+    if (-not ('SmartM365.JsonTransport.PathTagsV1' -as [type])) {
+        Add-Type -TypeDefinition @'
+using System;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+namespace SmartM365.JsonTransport {
+    public static class PathTagsV1 {
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+        public struct FindData {
+            public uint Attributes;
+            public System.Runtime.InteropServices.ComTypes.FILETIME Creation, Access, Write;
+            public uint SizeHigh, SizeLow, Tag, Reserved;
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 260)] public string Name;
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 14)] public string Alternate;
+        }
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern IntPtr FindFirstFileW(string path, out FindData data);
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool FindClose(IntPtr handle);
+        public static FindData? Read(string path) {
+            FindData data;
+            IntPtr handle = FindFirstFileW(path, out data);
+            if (handle == new IntPtr(-1)) {
+                int error = Marshal.GetLastWin32Error();
+                if (error == 2 || error == 3) return null;
+                throw new Win32Exception(error, "Cannot inspect JSON path: " + path);
+            }
+            try { return data; } finally { FindClose(handle); }
+        }
+    }
+}
+'@ -ErrorAction Stop
+    }
+    [SmartM365.JsonTransport.PathTagsV1]::Read($Path)
+}
+
+function Test-SmartM365JsonCloudTag {
+    param([uint32]$Tag)
+    # Only IO_REPARSE_TAG_CLOUD and CLOUD_1..F; never a name-surrogate tag.
+    ($Tag -band [uint32]4294905855) -eq [uint32]2415919130
+}
+
+function Assert-SmartM365JsonQualifiedChain {
+    param([string]$Path, [string]$CloudRoot, [string]$JunctionRoot = '', [string]$JunctionTarget = '')
+    $cursor = [IO.Path]::GetFullPath($Path).TrimEnd('\')
+    $volumeRoot = [IO.Path]::GetPathRoot($cursor).TrimEnd('\')
+    while ($cursor -and $cursor -ne $volumeRoot) {
+        $node = Get-SmartM365JsonPathNode $cursor
+        if ($null -ne $node -and ($node.Attributes -band [uint32]1024)) {
+            if ($cursor.Equals($JunctionRoot, [StringComparison]::OrdinalIgnoreCase)) {
+                if ($node.Tag -ne [uint32]2684354563) { throw "Approved data alias is not a junction: $cursor" }
+                $targets = @((Get-Item -LiteralPath $cursor -Force -ErrorAction Stop).Target)
+                if ($targets.Count -ne 1 -or
+                    -not (ConvertTo-SmartM365JsonQualifiedRoot ([string]$targets[0])).Equals($JunctionTarget, [StringComparison]::OrdinalIgnoreCase)) {
+                    throw "Approved data junction target changed: $cursor"
+                }
+            } else {
+                $inCloudChain = $CloudRoot -and ($cursor.Equals($CloudRoot, [StringComparison]::OrdinalIgnoreCase) -or
+                    $cursor.StartsWith($CloudRoot + '\', [StringComparison]::OrdinalIgnoreCase) -or
+                    $CloudRoot.StartsWith($cursor + '\', [StringComparison]::OrdinalIgnoreCase))
+                if (-not $inCloudChain -or -not (Test-SmartM365JsonCloudTag $node.Tag)) {
+                    throw "Unqualified reparse point in JSON path: $cursor"
+                }
+            }
+        }
+        $cursor = [IO.Path]::GetDirectoryName($cursor)
+    }
+}
+
+function Assert-SmartM365JsonQualifiedDataPath {
+    param([string]$Path, [object[]]$Qualifications)
+    $full = [IO.Path]::GetFullPath($Path)
+    $matches = @($Qualifications | Where-Object {
+        $full.StartsWith($_.Root + '\', [StringComparison]::OrdinalIgnoreCase) -or
+        $full.StartsWith($_.Target + '\', [StringComparison]::OrdinalIgnoreCase)
+    })
+    if ($matches.Count -gt 1) { throw 'Overlapping qualified local data roots are not permitted.' }
+    if ($matches.Count -eq 0) {
+        Assert-SmartM365JsonQualifiedChain -Path $full -CloudRoot ''
+        return
+    }
+    $qualification = $matches[0]
+    $root = $qualification.Root; $target = $qualification.Target
+    $targetNode = Get-SmartM365JsonPathNode $target
+    if ($null -eq $targetNode -or -not ($targetNode.Attributes -band [uint32]16)) { throw 'Qualified data target directory is missing.' }
+    Assert-SmartM365JsonQualifiedChain -Path $target -CloudRoot $target
+    if ($root.Equals($target, [StringComparison]::OrdinalIgnoreCase)) {
+        Assert-SmartM365JsonQualifiedChain -Path $full -CloudRoot $target
+        return
+    }
+    if (-not $root.Equals($target, [StringComparison]::OrdinalIgnoreCase)) {
+        $rootNode = Get-SmartM365JsonPathNode $root
+        if ($null -eq $rootNode -or $rootNode.Tag -ne [uint32]2684354563) { throw 'Qualified data alias junction is missing or changed.' }
+        Assert-SmartM365JsonQualifiedChain -Path $root -CloudRoot '' -JunctionRoot $root -JunctionTarget $target
+    }
+    if ($full.StartsWith($root + '\', [StringComparison]::OrdinalIgnoreCase)) {
+        $physical = $target + $full.Substring($root.Length)
+        Assert-SmartM365JsonQualifiedChain -Path $physical -CloudRoot $target
+        Assert-SmartM365JsonQualifiedChain -Path $full -CloudRoot $root -JunctionRoot $root -JunctionTarget $target
+    } else {
+        Assert-SmartM365JsonQualifiedChain -Path $full -CloudRoot $target
+    }
+}
+
+function Assert-SmartM365JsonUnlinkedPath {
+    param([Parameter(Mandatory)][string]$Path, [switch]$AllowQualifiedDataRoot)
+    if ($AllowQualifiedDataRoot) {
+        $qualifications = @((Get-SmartM365JsonTransportPolicy).QualifiedLocalDataRoots)
+        if ($qualifications.Count) {
+            Assert-SmartM365JsonQualifiedDataPath -Path $Path -Qualifications $qualifications
+            return
+        }
+    }
     $cursor = [IO.Path]::GetFullPath($Path)
     $volumeRoot = [IO.Path]::GetPathRoot($cursor).TrimEnd('\', '/')
     while ($cursor) {
@@ -200,12 +323,13 @@ function Get-SmartM365JsonTransportPolicy {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw 'JSON transport deployment policy missing. Incomplete deployment.' }
     $policy = Import-PowerShellDataFile -LiteralPath $path -ErrorAction Stop
     if ($policy.Mode -notin @('Readers', 'JsonText')) { throw 'Unsupported JSON transport deployment mode.' }
+    $policy.QualifiedLocalDataRoots = @()
     # Deployment-specific qualifications are private data, never executable policy.
     $localPath = Join-Path $PSScriptRoot '../../Config/SmartM365-JsonTransport.policy.local.json'
     if (Get-SmartM365JsonReadPath -Path $localPath -Optional) {
         $local = (Read-SmartM365JsonDocument -Path $localPath).Document
         foreach ($property in $local.PSObject.Properties) {
-            if ($property.Name -notin @('QualifiedUncRoots','QualifiedSharePointDrives')) { throw 'Unsupported local JSON transport policy setting.' }
+            if ($property.Name -notin @('QualifiedUncRoots','QualifiedSharePointDrives','QualifiedLocalDataRoots')) { throw 'Unsupported local JSON transport policy setting.' }
         }
         foreach ($name in @('QualifiedUncRoots','QualifiedSharePointDrives')) {
             if (-not $local.PSObject.Properties[$name]) { continue }
@@ -216,6 +340,20 @@ function Get-SmartM365JsonTransportPolicy {
                 if ($name -eq 'QualifiedUncRoots' -and @($value.Split('\') | Where-Object { $_ -in @('.','..') }).Count) { throw 'Qualified UNC destination cannot contain traversal segments.' }
             }
             $policy[$name] = @($values | Select-Object -Unique)
+        }
+        if ($local.PSObject.Properties['QualifiedLocalDataRoots']) {
+            $roots = @()
+            foreach ($entry in @($local.QualifiedLocalDataRoots)) {
+                if ($null -eq $entry -or $entry -isnot [pscustomobject] -or
+                    @($entry.PSObject.Properties).Count -ne 2 -or
+                    -not $entry.PSObject.Properties['Root'] -or -not $entry.PSObject.Properties['Target'] -or
+                    $entry.Root -isnot [string] -or $entry.Target -isnot [string]) { throw 'Invalid qualified local data root entry.' }
+                $roots += [pscustomobject]@{
+                    Root = ConvertTo-SmartM365JsonQualifiedRoot $entry.Root
+                    Target = ConvertTo-SmartM365JsonQualifiedRoot $entry.Target
+                }
+            }
+            $policy.QualifiedLocalDataRoots = $roots
         }
     }
     return $policy
@@ -235,7 +373,7 @@ function Write-SmartM365JsonBytesAtomically {
     $names = Get-SmartM365JsonNames $Path
     # Caller chooses the deployment-phase path. Serialization is never performed here.
     $target = [IO.Path]::GetFullPath($Path)
-    foreach ($candidate in @($target, $names.Lock)) { Assert-SmartM365JsonUnlinkedPath $candidate }
+    foreach ($candidate in @($target, $names.Lock)) { Assert-SmartM365JsonUnlinkedPath $candidate -AllowQualifiedDataRoot }
     $null = ConvertFrom-SmartM365JsonBytes -Bytes $Bytes -Validate $Validate
     $lock = Enter-SmartM365JsonTransportLock $names.Lock $LockTimeoutSeconds
     $temporary = $target + '.' + [guid]::NewGuid().ToString('N') + '.pending'
@@ -243,6 +381,7 @@ function Write-SmartM365JsonBytesAtomically {
     $restoreAttributes = $null
     $published = $false
     try {
+        foreach ($candidate in @($target, $names.Lock, $temporary, $backup)) { Assert-SmartM365JsonUnlinkedPath $candidate -AllowQualifiedDataRoot }
         $legacyHash = ''
         if ($RetireLegacyAfterPublication) {
             if ($target -ne $names.Preferred -or [string]::IsNullOrWhiteSpace($Owner)) { throw 'Replacement retirement requires a preferred target and an explicit owner.' }
@@ -281,6 +420,7 @@ function Write-SmartM365JsonBytesAtomically {
             }
         }
         while ($true) {
+            foreach ($candidate in @($target, $temporary, $backup)) { Assert-SmartM365JsonUnlinkedPath $candidate -AllowQualifiedDataRoot }
             try {
                 if ([IO.File]::Exists($target)) {
                     # No non-atomic emulation when the filesystem cannot replace atomically.
@@ -479,8 +619,8 @@ Export-ModuleMember -Function Get-SmartM365JsonNames, Get-SmartM365JsonReadPath,
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCJ/4XEJFk924/J
-# iph2bghrJTiNOst152aUkAyIjGk4BKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBpDTcWybKZCbkW
+# x/ewR5TFHx9W3D2JqwMIy5SduoWY3KCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -613,31 +753,31 @@ Export-ModuleMember -Function Get-SmartM365JsonNames, Get-SmartM365JsonReadPath,
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIFZUF7HSmOkZtbnf1ZgRa94tlCfFnyBTw8Y7VBgv3D9EMA0GCSqG
-# SIb3DQEBAQUABIIBgK1NY1VjKX6aDRCbbbaUmx8Jj6vHVaapsOtKYWlGQyPoewiU
-# 421QnSQZ2sDqacj2FvgDG/QRo8ujMHOPPTlcxNFi1PoU4kbKtLaceG7kOckl2CjO
-# Ug9lvLVRcft8Nq21s0DZ/BczL1j2qHVlB6F9snv5hUxokRBf+pd3ctV4aD4fjAx5
-# sob4DxhzVuvNJEvESHa9/VCSFre6IHk2KhRmyQh0e6qbwxWTj7M/+InwcOexlq+i
-# +z7ateH0JD/joZDRgRatDEP8cdQIHpFvL8rhcZm/ZlsHSoS1RSXLCl7PaJqCC2Oa
-# oI9ld8DxDL0tnXUGUEqyLRngFCswnVUU4YUr2bBQoIJjoizUKBMLzWBu2veGTUBb
-# fQ9HJuppfaLV+WN4or/5mJD3joA2y+w0rnw4oYJMXQSRlkKJdxolnM1dOBVzcK3i
-# ug4/jYjJcf+7Ta0k/s7SgYJRv0UnRSxxrbTKcNDO7mHhgtks+FTWyIP0JEGEMTBD
-# S6BnpGF9amtzT3i1WqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIIZJH8aOwZbUocCfCAoJMww1xVTDwXesaqNrt5SUZkUKMA0GCSqG
+# SIb3DQEBAQUABIIBgJ9Cz4V7BhFwT7JtXbO6NgCXRgf3frWWm5IatJHOmfwnUaXm
+# Z9fB1U8SYhgdpHeBdG2dzynBeBXFpXwNnX33q+W2LLpcwVYsdVo8VOwqTaVwHaN4
+# 54VhO6gl7BDZEWlbsAbFd66t/kqLY6rP8XcofQgA4VdBYhhbJnQ3ki/5SSQ0PtA1
+# 1vESiQI0fZkXv80pckc5MKcG1Kdib5gRRXH9B+hl/9Sj+4Snx10VEGm6I4eSZJc8
+# cQEmBbz+gB2u41OHilh5SYSrn3EFc4MwFLiUFdZOeaScKsEXBv5AIrGqV+6rhGuP
+# mG2jM0Kp8zVMwIphqAQnAHzUeFS6dY5BFC6tXh2t/JX6UNg2AKS3GTBTwSNlIw2g
+# LbYORhhqAyxHkUeH7bM4+2RtQGE9Ri18ytaiqvRcCeg10GgUW1iGSMS7/JYSBlMJ
+# Bf9+673XPuXCqnXrf59mIzchbOfwvQ9DFPpksGcIIrIulsr3wB9+g8zvHf9gn06E
+# YXETXAH4eIGu7dl4MqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjkwODEz
-# MTNaMC8GCSqGSIb3DQEJBDEiBCAiL+goWhyPR5NXRi4a5nC76X3UMQ0/JixnAM1+
-# 9qWtozANBgkqhkiG9w0BAQEFAASCAgCIYBAZtdN0QAV6/yfN+wsV7MjdMIobCb0Q
-# kOiJXOCKRrONF0wAnCJ3o4X4N3DMQQRpx/86rwDU6TxwamssW1ODxUpYMOMimOSw
-# wtTaqRGGpPsMl2PMayKp1aJ4gkg1Rb+HlvPCEk+RyYiSpnbSD2e9VfhH5O1WW0r6
-# nVLDiunPEC3kmGamOiZOAppY32ya9FKjIHhy/MkX+y7Kod0AgIpvWbRseaiNiHjC
-# k4eR4TP76+rwFE148ZCjdjmnEI1thDi5qjoQUQ2kLNepO9mDWYKOwFi1JvKbwk4A
-# 81bFlrz1q5Pgz6EI24te6cZFdnmIeffx14OllnHlbaSuxhXyOXRiDN9WwXO1xkiz
-# /Ih5PaHTrzkMDICzWoQLoc3kkuV9z+dlIHjuxryTLMgTfWnhk/Qb2NTykVY4AkwU
-# sFBnbCBZAuCnMuk93YHMmPaiz/xpe33olSRKWM/wsouGWhyiif3hXqNAF0u2vhsQ
-# i1P0ENiw1x0IP3tazv1qDzet8sVRgvsy755kJLB0X23Nz5dj0ZHx1OvHrbATJ+dN
-# xRJpfBI0zIwyd0WxSzTU466HpQCM1yZBjxyt9JI/WxrxVhxMlg8aLhlGXMFnKqjz
-# TaC9DsjbEx4zu0LQQEwPzDZLn0069zvt63dvWZVuIkonnyFNZ1ICz3g9fIAYldkx
-# hncvrWzRmw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDkxNjM0
+# MjlaMC8GCSqGSIb3DQEJBDEiBCBtAjg8lzNc3+7oz+lU0ONVuUjY6FtReoCzUJT3
+# PKSMDDANBgkqhkiG9w0BAQEFAASCAgBf6HSK/NyVkzKYD7IWIpO3Y2SaBuMFv4OW
+# rUD7YUVCbgy+erP7ZmuyQkrHp/KUb7l/5nY+lmpa4wHpjdtrrFfn/B3QOQlmPSjC
+# 7swDEvvOQuJQyPMe17W+nNjLIiVGvbfqQRtNGs7h2lVSifIULonrW+9GMatzGyhs
+# hphulX0DLgvT73FS9IBLkcauFwSFnbuu7Js0V5fBFks+AVpug7HtmZWshFp05Efr
+# aOhpPqDyyp90xdtMdFehKPQlyiIgoqqrvNNFUoeBkXNq4j2ijrfGfunYYoe6EnEH
+# zI1lltgxvonF6jp0yHduyvKVY0SNBRHZPVmab/73dCoI+f63Y68BElTcy03sn0b3
+# A5uGo0+3/Riu5kicp3i4xeWW+/6s6ZD1ybNLIaxVhLrOhiMfpj8T4G+rtnwTxJTt
+# x5V9TNA/sNGTmlqJl+VAHCSItj4ESrKpUh0DVvK2egQn3oIlU7oIZOiPIs3G8rre
+# np70fTYim92RuEPLHa6oepVe9vJW57kuVtsz2LTiNyTa+DWtO/hbCpvNXf56cqbQ
+# pZGJ8OMwYVi9fi6e+iXZ6shRNZl5tHyq26CDZvydL8jOBKc8EbIwvbSjlI5zC5zA
+# 3hRwnlKxYI1+xZnwD0+dlNEbwdQsexeVclev3FxTOlHfWpRq1b92t9IYPfujXsSx
+# sEDDke820g==
 # SIG # End signature block
