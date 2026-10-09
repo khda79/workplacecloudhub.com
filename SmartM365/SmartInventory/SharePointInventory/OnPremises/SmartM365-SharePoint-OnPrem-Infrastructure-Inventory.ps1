@@ -48,12 +48,27 @@ function Get-InventoryConfigValue {
     $value = $property.Value
     if ($value -is [string] -and ($value -in @('', '__USE_GLOBAL__', 'USE_GLOBAL'))) { return $DefaultValue }
     if ($value -isnot [string]) { return $value }
-    foreach ($token in @('DataAllRootPath','LatestCsvFolderPath','LogAllRootPath','WorkspaceRootPath')) {
-        $source = $script:EffectiveConfig.PSObject.Properties[$token]
-        if ($source) { $value = $value.Replace("{{$token}}", [string]$source.Value) }
+    return Resolve-InventoryConfigTokens -Value $value -Name $Name
+}
+
+function Resolve-InventoryConfigTokens {
+    param([string]$Value, [string]$Name)
+    $resolved = $Value
+    for ($pass = 0; $pass -lt 10; $pass++) {
+        $tokens = [regex]::Matches($resolved, '\{\{(?<Name>[A-Za-z0-9_.-]+)\}\}')
+        if ($tokens.Count -eq 0) { break }
+        $previous = $resolved
+        foreach ($token in $tokens) {
+            $property = $script:EffectiveConfig.PSObject.Properties[$token.Groups['Name'].Value]
+            if ($null -eq $property -or $null -eq $property.Value) { throw "Unresolved configuration value: $Name" }
+            $replacement = [string]$property.Value
+            if ([string]::IsNullOrWhiteSpace($replacement) -or $replacement -in @('__USE_GLOBAL__','USE_GLOBAL')) { throw "Unresolved configuration value: $Name" }
+            $resolved = $resolved.Replace($token.Value, $replacement)
+        }
+        if ($resolved -eq $previous) { break }
     }
-    if ($value -match '\{\{|__USE_GLOBAL__') { throw "Unresolved configuration value: $Name" }
-    return $value
+    if ($resolved -match '\{\{' -or $resolved -in @('__USE_GLOBAL__','USE_GLOBAL')) { throw "Unresolved configuration value: $Name" }
+    return $resolved
 }
 
 function Assert-InventoryPath {
@@ -166,7 +181,7 @@ function Send-InventorySummaryMail {
 
 $coreManifest = Join-Path $root 'Modules\SmartM365.Core\Compatibility\WindowsPowerShell5\SmartM365-WindowsPowerShell5.psd1'
 Import-Module -Name $coreManifest -MinimumVersion '1.0.50' -ErrorAction Stop
-$outputBase = if ($PSBoundParameters.ContainsKey('OutputRoot')) { $OutputRoot } else { Get-InventoryConfigValue -Name 'OutputRoot' }
+$outputBase = if ($PSBoundParameters.ContainsKey('OutputRoot')) { Resolve-InventoryConfigTokens -Value $OutputRoot -Name 'OutputRoot' } else { Get-InventoryConfigValue -Name 'OutputRoot' }
 $outputBase = Assert-InventoryPath -Path $outputBase -Name 'OutputRoot'
 $latestRoot = Assert-InventoryPath -Path (Get-InventoryConfigValue -Name 'LatestCsvFolderPath') -Name 'LatestCsvFolderPath'
 $runFolder = Join-Path $outputBase ((Get-Date -Format 'yyyyMMdd_HHmmss') + '_' + $script:RunId.Substring(0,8))
@@ -344,8 +359,8 @@ try {
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAD76NIICb/2Ng1
-# F0cm530gvtk9/m7Av8LMmbW02rWpp6CCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAgDn7BZe/NLuG9
+# 6unWtT9FndCqCrQg/HmkHRkW96YRpaCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -375,14 +390,14 @@ try {
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCD2xIjwpcTviG4mCOHiDbyY
-# pNf0twyX5XkpLVbdnuGQuTANBgkqhkiG9w0BAQEFAASCAYBYe2/WsJloQVBYSU+P
-# PZeWUc+zb4STBMNN48TQ6mETDTzT2RXm5WY4P4J2p+/DmC0XBrD2LHSO5YHUZWfC
-# z7kW5esZoSlXQx9WqycOjfiSX/ZsxOsYolIVcceiWBYH0gI+TpsLtTA9aurZm2gw
-# eza6eW9HFu+FcAUGn9hRMZqH2MjJWm7w4ZBwje+iCC0D2K4aoR20qAxMB/3dg3N+
-# 47vT0Z5XuZJJWOXTVSvH16lmH+TvH8ogm/9Syh1b12xolR0mgcO2SzTaH0Yi13qp
-# iCZJPseqfJSqELdKgMibPG7BhHUp3QzY+fbpwAM672C6N8yBRULOmSKVxMR9YBI+
-# wi74GXOyK3+qU3WzBBu/WiHmulVTOLkw5lKhLVPxLtXtPc2BpFyh5B1iFatzOHVR
-# JV+8bdNogqXCifeINNDoTCaiYtK11IOINu1Z7QSPqbeeDuWLFFdmXkNi80I5q+YY
-# nHLA/Y4iSUPGSuXL1k6WcqpcmcRessdoUhY0T57QI28wm2A=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCBTqfnpBX34v3xcK625xiLp
+# cCG9eRs1rpkTssc6/2Fr0zANBgkqhkiG9w0BAQEFAASCAYCMbOmbv+zSzcf1x/nz
+# NkwNYVLB1lKLiFferpA6bGtRcqsE6wLe6VTn4khFPVY1vht2EluXQzL7mrk88MmP
+# W2lbekd4XmxdDwjDaviwRDCbujieDWggtbNf4ptAHZaqmm5D+gkISC/1mtqzx/2d
+# /mucnyRW2a/M5zF8z+bER0BO6L4qJmBPPjJu55h4vYMwCamI8t42Eiok/HoRhWir
+# PnhFtyArhnTiXOHA+z8cybmaWfyT+k9oOQ6l+5R6sQdCWOrEzKQqhOCuw/K6ccBC
+# sgHNlw+VndoEc4xcqTPqf48YbFU69flQbvgMoMpXP8Jw1vsWykpBQj2fdwjw4HNe
+# xlQ1HY/ijo+1Ji8cApFOx3YCa5nYO+nZVdXrHCK3i/mV1otfKZ6QuciSrm7KUhvR
+# Epj3g92fw5Wf76ZKv/4AKVvdCnSTrUP+Lz0j6mBF5msL9EjPTgaKPCBey9JxUv/x
+# VBmJShROoLK8XwhnE7OVz8E8mOmc2650iiiCLJHn9n2voKM=
 # SIG # End signature block

@@ -19,11 +19,22 @@ if ($ast.Extent.Text -match '(?im)^\s*(Set-SPSite|Set-SPWeb|Set-SPContentDatabas
 if ($ast.Extent.Text -match '(?im)^\s*Get-SPSiteAdministration\b') { throw 'Lock inspection must use SPSite and SPContentDatabase only.' }
 if ($ast.Extent.Text -notmatch '(?m)^\s*\$site\s*=\s*\$_\s*$' -or $ast.Extent.Text -match '(?m)^\s*param\(\$site\)') { throw 'Streaming site pipeline input is not bound to the current site.' }
 if ($ast.Extent.Text -notmatch '\$runBase\s*=\s*if\s*\(\$MaxItems\s*-gt\s*0\).*?TEST' -or $ast.Extent.Text -notmatch 'Select-Object\s+-First\s+\$remaining' -or $ast.Extent.Text -notmatch 'Flush-RunRows\s+-Kind\s+CollectionCoverage') { throw 'Limited or per-site coverage path is missing.' }
-foreach ($name in @('Get-InventoryConfigValue','Get-ObservedProperty','Test-MissingObservation','Resolve-SiteLockObservation','Assert-Deadline','Get-CollectionFailureStatus','Get-DatabaseCoverageStatus','Write-RunCsv','Flush-RunRows','Invoke-DailySummaryMail','Send-InventorySummaryMail')) {
+foreach ($name in @('Get-InventoryConfigValue','Resolve-InventoryConfigTokens','Get-ObservedProperty','Test-MissingObservation','Resolve-SiteLockObservation','Assert-Deadline','Get-CollectionFailureStatus','Get-DatabaseCoverageStatus','Write-RunCsv','Flush-RunRows','Invoke-DailySummaryMail','Send-InventorySummaryMail')) {
     $functionAst = @($ast.FindAll({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name }, $true))
     if ($functionAst.Count -ne 1) { throw "Missing function: $name" }
     . ([scriptblock]::Create($functionAst[0].Extent.Text))
 }
+$script:EffectiveConfig = [pscustomobject]@{
+    SmartM365RootPath='C:\SmartM365'; WorkspaceRootPath='{{SmartM365RootPath}}'; ProfileKey='prod'
+    DataAllRootPath='{{WorkspaceRootPath}}\Data\Tenants\{{ProfileKey}}\DATA-ALL'
+    OutputRoot='{{DataAllRootPath}}\SharePoint\OnPrem\Content'
+    WeeklyHistoryFolderPath='{{DataAllRootPath}}\SharePoint\OnPrem\Content\WeeklyHistory'
+}
+if ((Get-InventoryConfigValue 'OutputRoot') -ne 'C:\SmartM365\Data\Tenants\prod\DATA-ALL\SharePoint\OnPrem\Content') { throw 'Nested content OutputRoot tokens were not resolved.' }
+if ((Get-InventoryConfigValue 'WeeklyHistoryFolderPath') -ne 'C:\SmartM365\Data\Tenants\prod\DATA-ALL\SharePoint\OnPrem\Content\WeeklyHistory') { throw 'Nested content history tokens were not resolved.' }
+$script:EffectiveConfig.OutputRoot = '{{MissingPath}}\SharePoint'
+try { $null = Get-InventoryConfigValue 'OutputRoot'; throw 'Missing token was accepted.' }
+catch { if ($_.Exception.Message -ne 'Unresolved configuration value: OutputRoot') { throw } }
 $site = [pscustomobject]@{ ReadOnly=$false; ReadLocked=$false; WriteLocked=$false; LockIssue='' }
 $database = [pscustomobject]@{ IsReadOnly=$false }
 $unknown = Resolve-SiteLockObservation -Site $site -ContentDatabase $database
@@ -98,13 +109,13 @@ try {
         Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
     }
 }
-Write-Output 'PASS: content parser, template, lock mapping, timeouts, per-site errors, empty CSV, receipts, daily mail gate and routing.'
+Write-Output 'PASS: content parser, nested configuration, lock mapping, timeouts, per-site errors, empty CSV, receipts, daily mail gate and routing.'
 
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCH2H+FpSBIJa2M
-# h4DLd22BkhnAyDJZ1DMU376DYpRZt6CCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDIcDD5ZvwtVerv
+# z6zL1OWFBiMLDQWFhsiHJUFFR9Ye5qCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -134,14 +145,14 @@ Write-Output 'PASS: content parser, template, lock mapping, timeouts, per-site e
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCBl9pBvVcmRGS4xyDDry7Bb
-# j55mNRlRtyNh9DEaAu41AzANBgkqhkiG9w0BAQEFAASCAYCO3LzE2N+U0N5lm8Hu
-# MBLrnyR+9n+UALMoQCMDI4STpej6BgylAO1AtzGhiOfsJfqnltdYTlzkc+vQX6C7
-# 3R/UGANVdf9UbXbKfZlyYfyVMGXYYf76GHSv/3CMyJiyzvCIL6+9XAsQ6p9nTgqR
-# RQIILSjrxyHLw7J8RnpINwCupPTE+3k4HCvKzH5LrEztmzLq+7ZEfRZNkdiMEkUS
-# VabLli1NcRtMvTuX0/8ah9ZfEG3kjJs2jtVDlR5SItgMuG2nmN02Jr3mByEZZT4a
-# 5DE9+nNFfspBpQ3TY2G8BRjKdJyCHDy5XEhuDeQXaOYhSwvs6m6CC4NZjxMpUqvc
-# 6+KQAjNWhnAaoyeryufCtONBWkogmBDzSBdaaJCBct96rmrNvLgSxx+7/6JXliS3
-# jpTLCyFHSp2ZY/vm1ts/QS+SxbVYh0X8NS54HdhHelIq3Kf7y3Ye2TvaqjHuxG1/
-# 92n7eYMS+Sfx99PbIlJ2hMBCD8Jg4dY4lRuuGKUiEQEbt+4=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCAmNyJIFQrtirgxIZKkpegG
+# RNA1D7/tOgEMCerIo2AYbDANBgkqhkiG9w0BAQEFAASCAYCnvy3sMpEvn1qtxDU7
+# Liy6WD3AoxbA9dzg0TEgEu6Xq+RCC6pMkNrGRzePaEIwEnWIvrKkFGyAuejwPdy1
+# 90j9tQxdR3GpA8+Bf+tqT6nk2vz/VIort3UOGd/lPDcbjvRsxXCM0ywZlBC65UZl
+# Q4nNoXVyPqJsvghfXcf8uWvBiOrOK8XvFdAmegTvDfVaz2q/Uj5xzfm6fLo+mMM8
+# gSCm21t2SuYiDU+mlhPCt3kxBpCLhWpNmNk+uE0S0GPfsdC63iRqorittdolWOI4
+# ZNmgbR5962l5rKe7MCEguONFcZD8/iuKJkTWE/Rc1jIuwkX65vJSBgaOzSEKfyB9
+# s2FdTdzXYoqufWzWcA/g90gEKOzDLf1urB4+438WpFsS51PyoDGpywfN8VumnL3F
+# JzUiTJGD1q0Lb771ac/ZkhMdUk7fljzW0MO+NH0N5h+1DnPiXi99jkJGj+fcp3vO
+# bbE/5doQ8EoB45kOvDe9/2WRoUeyBbZ0pmiGC7BzU+CDQic=
 # SIG # End signature block
