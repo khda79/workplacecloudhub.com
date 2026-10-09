@@ -10,7 +10,10 @@ $tokens = $null
 $errors = $null
 $ast = [Management.Automation.Language.Parser]::ParseFile($scriptPath, [ref]$tokens, [ref]$errors)
 if (@($errors).Count) { throw "Infrastructure parser errors: $($errors.Count)" }
-if ($ast.Extent.Text -notmatch '(?s)\.VERSION\s+1\.0\.2') { throw 'Infrastructure version was not updated for the CSV and upload fixes.' }
+if ($ast.Extent.Text -notmatch '(?s)\.VERSION\s+1\.0\.3') { throw 'Infrastructure version was not updated for the startup order fix.' }
+$firstUploadConfigRead = $ast.Extent.Text.IndexOf('$global:SharePointSiteHostname =', [StringComparison]::Ordinal)
+$resolverDefinition = @($ast.FindAll({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Resolve-InventoryConfigTokens' }, $true))
+if ($firstUploadConfigRead -lt 0 -or $resolverDefinition.Count -ne 1 -or $resolverDefinition[0].Extent.EndOffset -ge $firstUploadConfigRead) { throw 'Infrastructure reads upload configuration before the token resolver is defined.' }
 $template = Get-Content $templatePath -Raw | ConvertFrom-Json
 if ($template.EnableSharePointUpload -ne $true -or $template.EnableWeeklyHistory -ne $true) { throw 'Infrastructure template policy is invalid.' }
 $registry = Get-Content $registryPath -Raw | ConvertFrom-Json
@@ -103,8 +106,8 @@ Write-Output 'PASS: infrastructure parser, nested configuration, persistent path
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCACG5l9Id/VMACK
-# iAxsre7jVpZOr+8V1ypufP2vrVKOaKCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAZZfCPZSxBFE4N
+# AcZkDzkYzfg9mDLozWhRKcJiZL1cnqCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -134,14 +137,14 @@ Write-Output 'PASS: infrastructure parser, nested configuration, persistent path
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCDUsLeRpXiIeXw0GoLjkQ/S
-# PbgOImKh8mMFBURISeiGTzANBgkqhkiG9w0BAQEFAASCAYB19q85qmS6hE7sRY3m
-# LR5/JmEovEwm08p2ak7VeYFAQKpurEY09zTLwlkZ8t1hCnP+thma9oJIO8f6r5z1
-# DS5PlJpW+kUVKz9tAWfYEghPPlpf4TDPzv1hH8J1DqM0wgINvU4+Pgmqyk8/7+fL
-# xFRdGCvTgasdPgwvX2q/0I7yzXipVYqMUDrrzO5lzNjOlpvRoigRdVZf/7yyXXWL
-# 3lolQss4o0xnTWQpdgpzVw56d7cy3VOgmduzR8QNdMHc/iJ1QrmwukM63rtcyrQD
-# 6o6PwCgwb7GtH49CemAzyC1hrDWsdYob3UWTETkv72FlVxUvr3ZFW9YkrI1ViXIk
-# /2rGNH0yVQZ4kuw0May3zvLq+EYPl32i6t/DJv/KSodhwBg+hookKx2xqgL3kxyq
-# uznojr/kle7sRDyDgft8t7F3vYyXScVS1XnwekSXV1jGxt+/5BMKeCu4+PJjD8Cd
-# y3R6yy0HBb4JOcuDUHQizawg5w6MBS3D2oSCOCBGsB60ZbY=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCAXTJiOIvJyWh6SL+PqKhwo
+# CGV9elzdLyV1067tb7VmNTANBgkqhkiG9w0BAQEFAASCAYBE1ejnhDy3ljca9zjh
+# pI9CBwVOD7rds160rb6pc71HwCroxhcoAx7U2bUlyzK8MX5XvzRi+nhCOTLOMjwi
+# 2becLgS1V81pnu1K6iq3fki5YoBwCaG2JYnOZu7YII9WRo/8j1j3DbtUtW0wR5GV
+# 6D8/BEgrAL4fHl26QXyTscal0H+law7+sy3oXHCAxVwBVSJCYqtB9h449PCEJYbM
+# g3g5nTRbzE6DPwIQHWK2y1dPM/mwrcNw9ua+SW4ndJ/XYaYKmAE7mp8BaNlDitTE
+# dXqXm6yueXJucmvagbr5VT+SG0VAmU7WHhi1lE8WXkW4xo7ttnmBpigxNHixi2dg
+# 78ZjkNcaAhkKQtjMB60drqCSAe3ihujCNSQ6/0rTFcJgMga0vxofHK4TsZiDvNEs
+# GvuczDaLdaXuXqZRDN9fk2/wpEyQXXkrxeF2yLmq+HXpI/RJYPUc8x+LeRCP/yJn
+# SZKd+sgoAu6P9062gi8jpBE7WTHv3qCY9KvDj07fm5vcXD4=
 # SIG # End signature block

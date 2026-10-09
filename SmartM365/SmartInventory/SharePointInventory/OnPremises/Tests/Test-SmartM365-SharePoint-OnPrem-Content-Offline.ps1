@@ -12,7 +12,10 @@ $ast = [Management.Automation.Language.Parser]::ParseFile($scriptPath, [ref]$tok
 if (@($errors).Count) { throw "Content parser errors: $($errors.Count)" }
 $template = Get-Content $templatePath -Raw | ConvertFrom-Json
 if ($template.EnableSharePointUpload -ne $true -or $template.EnableWeeklyHistory -ne $true) { throw 'Content template policy is invalid.' }
-if ($ast.Extent.Text -notmatch '(?s)\.VERSION\s+1\.0\.2') { throw 'Content version was not updated for lock-state verification.' }
+if ($ast.Extent.Text -notmatch '(?s)\.VERSION\s+1\.0\.3') { throw 'Content version was not updated for the startup order fix.' }
+$firstUploadConfigRead = $ast.Extent.Text.IndexOf('$global:SharePointSiteHostname =', [StringComparison]::Ordinal)
+$resolverDefinition = @($ast.FindAll({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Resolve-InventoryConfigTokens' }, $true))
+if ($firstUploadConfigRead -lt 0 -or $resolverDefinition.Count -ne 1 -or $resolverDefinition[0].Extent.EndOffset -ge $firstUploadConfigRead) { throw 'Content reads upload configuration before the token resolver is defined.' }
 $registry = Get-Content $registryPath -Raw | ConvertFrom-Json
 $producer = @($registry.Producers | Where-Object Script -eq 'SmartM365-SharePoint-OnPrem-Content-Inventory.ps1')
 if ($producer.Count -ne 1 -or $producer[0].Files.Count -ne 4) { throw 'Content source receipt registration is invalid.' }
@@ -162,8 +165,8 @@ Write-Output 'PASS: content parser, nested configuration, persistent paths, lock
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBapBSJ46cIsgAy
-# ppBUw7bHxHBUBjnV8PwmyMWdFRfTAaCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC4hUQZAlb244JP
+# 2pw9KUKqHuyi++ocUu16UvRJEbb5KaCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -193,14 +196,14 @@ Write-Output 'PASS: content parser, nested configuration, persistent paths, lock
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCDGHYbazpNfVOlsCcZqYzid
-# UNidJPXkBOGWfApmIfpNjDANBgkqhkiG9w0BAQEFAASCAYARBTXHrf++D/qsDzw3
-# cyfLMijO9BeRtpReg9rXZ5lgx5WjAGg83IxhE/eDWqnibatVKoOFVBE8jwS1DzZy
-# S4XpSeJ7TbRq6FrjXCsKZTYZ4g9hKMj9OvHF6YUK5cPZBaA44v+p9miCH8d/a+Hr
-# GTo2HweOjeldE7AAsPzAaeeYcK1EFYPEUt1tc6w7hpwmGur3ay7f1LYh58rh951+
-# JP8Re6qcq1vjKOBYsEAm5oTBeOfslQw3ndZYPkuEI+h6Kvv05LJuJWwjPUhw9WGk
-# 4gEEm5wxn/CS7+Q3Xt424qsXtpa3m0ARXk4SwswWF7miwzH7qvSk2i6dbniZUK1c
-# U/n7wV9P6Z5I+Ftda9k+kkQXGd/LCcsQOumwDwVuW3s1a1I7X5J1Nyg53fRHrHOw
-# lrqANqwYxotIyfTpqKrDeVSu6SkUdSk73vGcAyLHjwXG+gEPAJhtXzf1lmEwpQpP
-# 88jjV2n6xJMSVThKsQMlsf64RTe1mLpQO4HkAMSvWMBSblU=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCCedsqG8tqURb8Gnxb5jT+m
+# kJvRgOgo99P7aJEKXAYqjTANBgkqhkiG9w0BAQEFAASCAYB2pmQThHzUiwk7Blcs
+# er1Qo4MHrFF5H6oq/ScTpdtQh/jUUNHPNNUWLZF8h37AFFMOUSQ3sR0QGdaeBVXb
+# yKEXmShnuKFQGVxd9GIEacURCQCte+tsuVMO1yBRSdIqUzjvzPLezhG+jDOspaDg
+# NA5U6AhrXeHBSTRiDrH+49GRiAOpv0NSQAm0++q4fyJbCbbQHBIri08YaC3VbwaK
+# 5QNF3CM5lBPA9HTDy1g2jyKoBP3J4Pf86sFssfQQnjiAtrMBbVwXeUiBjrFZjn4w
+# taHyOyUUvqYLyH2CoIRryW0H0quxvmn2Oktb5GrdNY1ddrFKIscjRTC+o+ILxIuM
+# BEXDdxEQe6yyrilTMPMqffAtr7cGLNh9i1wHe50bxoFF6rYI65vUAcctJs58rFWe
+# accrIO/dx9XgkA7odocTvEKkiscJrwM2hOUGVNN2yhClo6/WRO2FZ1Zzy5mPheuo
+# R4rJncC+NPVZeAxhVttDF7hghk5N5fYuugcfZHk//l8WKGI=
 # SIG # End signature block

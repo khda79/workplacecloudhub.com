@@ -2,7 +2,7 @@
 .SYNOPSIS
     Read-only SharePoint Server 2016/2019 farm infrastructure inventory.
 .VERSION
-    1.0.2
+    1.0.3
 .REQUIREMENTS
     Windows PowerShell 5.1 x64 on a SharePoint farm server; SharePoint Shell access.
 #>
@@ -50,14 +50,6 @@ function Get-InventoryConfigValue {
     return Resolve-InventoryConfigTokens -Value $value -Name $Name
 }
 
-$global:SharePointSiteHostname = [string](Get-InventoryConfigValue 'SharePointSiteHostname' '')
-$global:SharePointSitePath = [string](Get-InventoryConfigValue 'SharePointSitePath' '')
-$global:SharePointLibraryDisplayName = [string](Get-InventoryConfigValue 'SharePointLibraryDisplayName' 'Documents')
-$global:SharePointTargetFolderPath = [string](Get-InventoryConfigValue 'SharePointTargetFolderPath' '')
-$global:AppId = [string](Get-InventoryConfigValue 'AppId' '')
-$global:TenantId = [string](Get-InventoryConfigValue 'TenantId' '')
-$global:Thumbprint = [string](Get-InventoryConfigValue 'Thumbprint' (Get-InventoryConfigValue 'Thumb' ''))
-
 function Resolve-InventoryConfigTokens {
     param([string]$Value, [string]$Name)
     $resolved = $Value
@@ -77,6 +69,14 @@ function Resolve-InventoryConfigTokens {
     if ($resolved -match '\{\{' -or $resolved -in @('__USE_GLOBAL__','USE_GLOBAL')) { throw "Unresolved configuration value: $Name" }
     return $resolved
 }
+
+$global:SharePointSiteHostname = [string](Get-InventoryConfigValue 'SharePointSiteHostname' '')
+$global:SharePointSitePath = [string](Get-InventoryConfigValue 'SharePointSitePath' '')
+$global:SharePointLibraryDisplayName = [string](Get-InventoryConfigValue 'SharePointLibraryDisplayName' 'Documents')
+$global:SharePointTargetFolderPath = [string](Get-InventoryConfigValue 'SharePointTargetFolderPath' '')
+$global:AppId = [string](Get-InventoryConfigValue 'AppId' '')
+$global:TenantId = [string](Get-InventoryConfigValue 'TenantId' '')
+$global:Thumbprint = [string](Get-InventoryConfigValue 'Thumbprint' (Get-InventoryConfigValue 'Thumb' ''))
 
 function Assert-InventoryPath {
     param([string]$Path, [string]$Name)
@@ -398,8 +398,8 @@ try {
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC2xMPgpaObqcF8
-# gxz57r9KjDZl2gvfxUe3neKL+nWhsqCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDP3AbCdSvmYOO8
+# Rz+cnanlG0V9fb8DTxqW18UwA20L/6CCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -429,14 +429,14 @@ try {
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCC1jauKAkh4GTLeLLorSX/O
-# H3TkgEqOOXMIrBFXYGBptTANBgkqhkiG9w0BAQEFAASCAYAQASvzIOd2Bdrknnx7
-# cDWSpjjR71DBCxSKevFJ/qRKfXHzJ77KbUcvdkfkCjja72UtP2EYyLA10bAepXPp
-# Pf2TnXQIQPf82xeUpRoroktsyIyqhYpP5rfsDYIFvjWaNxF2KNmXP4a7+jDiQoYw
-# yS+kfO/aUR5LvfQFs4wjZDYM1bIzhTHWHnekLt8WxL5Iu0A60PiuhL+589VUPjfM
-# gx5e9JjeUiuixETqb+uS0Sb5PC0seO9gw2a2md1OT3OhLXXQ42cRQcYzD/DmiOoO
-# DEe/Nlul22bIJALvi577FpYW/S3x7Tqq4eRIaj54T3vkW0itykM6faNCvUOdJPMv
-# riIyWaWoYV+1+n49ZRvZLnIfX7UQ9Lj9nrfC1/xMzVeqTYlzCGGM2SSH91QyCe0L
-# kZVe3K21ecKlBmzPQnAxTHysPHXPZMzplPSSaZb686KK3T3zDEjb9ASsJQsRV32r
-# urQcPW2KFm4sYSPrjB2Mn75nbqYXsj8o3soz1rw4utGxn08=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCDkUsDnRI8A6cDbHu5vWkIC
+# XwTXF+FlVZAMv/QO4PH2kzANBgkqhkiG9w0BAQEFAASCAYAxIA+vcm7yIQSLG7St
+# TzLZ3rs4oWt004ZT781HWY2qs2zfZgh/inQ5luyvHp9rMjGkuk4uI6w7P3oO2Jdi
+# rDkH8hOKSAI/y5cIy949ftIsO+eAeCt7D+5xlaQ1pSx2yRcyZ/uxMYNZUXxScBHz
+# Wk+fKLMK2VZvsSf7AEk7P72TFbicToDtCJ+VoJ7/CIrtZHjOJZkDQDoGK+bgos7X
+# MsOj76eKRU++blMBsDbMibRc6KvRn68vIKD1RAvG6DNMVGDg31MT6zeYoNrNhj3k
+# W1GAdBIZWGJdLuBn4HgeCzGPwQwPXKL4YOkj2bCEolfBrxv4sGJllAQjfB5dcBVI
+# HDwiZ3mbxoBtALojqKvTm/Umz+KoX/hGyYbGYqxnrHd0CEk3uMQVyoxALxOmjRsh
+# yB5wQDsolzBxiYGcnBWaTjOMbMFnN2u08OaoF7YstfMiJGIi9seYmpM5W+5IL7Wk
+# OtnvNH5Cn+F4LAIDleR1V3v72qGo75M3QR0x9Y5o/3NuEsc=
 # SIG # End signature block
