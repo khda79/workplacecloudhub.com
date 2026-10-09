@@ -1,0 +1,5 @@
+{
+  "schemaVersion": 1,
+  "anchorPolicyNamePattern": "^Windows Autopatch - Feature Update Anchor Policy(?: - .+)?$",
+  "windows11PolicyName": "Windows 11 24H2"
+}

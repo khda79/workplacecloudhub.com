@@ -1,4 +1,4 @@
-﻿[CmdletBinding()]
+[CmdletBinding()]
 param([Parameter(Mandatory)][string]$TestRoot)
 $ErrorActionPreference='Stop'
 Import-Module (Join-Path $PSScriptRoot 'PreparedEvidencePipeline.psm1') -Force
@@ -42,6 +42,11 @@ $next=Publish-PreparedEvidenceBatch @argsForPublish
 $pointer=Get-Content (Join-Path $output 'current.json.txt') -Raw | ConvertFrom-Json
 if ($pointer.PreviousBatchId -ne $first.BatchId -or -not(Test-Path $first.BatchPath)) {throw 'Previous version lost.'}
 Write-Host 'PASS: complete replacement retains previous batch.'
+ExpectFailure 'Changed base batch during staging' { Publish-PreparedEvidenceBatch @argsForPublish -ExpectedPreviousBatchId $first.BatchId } '*Published batch changed*'
+$guarded = Publish-PreparedEvidenceBatch @argsForPublish -ExpectedPreviousBatchId $next.BatchId -SkipRetention
+if (-not (Test-Path -LiteralPath $first.BatchPath) -or -not (Test-Path -LiteralPath $next.BatchPath)) { throw 'SkipRetention removed a prior batch.' }
+$next = $guarded
+Write-Host 'PASS: guarded publication retains all prior batches when requested.'
 function Contract([int]$KeyVersion) {
     @{tables=@(@{table='Test Trend';file='Trend.csv';historyKey=@('Date');historyKeyVersion=$KeyVersion;uniqueKey=@('Date');columns=@(@{name='Date';type='dateTime'},@{name='Value';type='int64'},@{name='Note';type='string'})})} | ConvertTo-Json -Depth 8 | Set-Content $contract
 }
@@ -107,11 +112,28 @@ WeekFixture @([pscustomobject]@{'Snapshot Date'='2026-09-24';'Week Label'='2026-
 ExpectFailure 'History table without a declared key' { Publish-PreparedEvidenceBatch @argsForPublish } '*No historical comparison key*'
 Write-Host 'All synthetic publication tests passed. No tenant API or Power BI access.'
 
+# An observed Windows 10 population can legitimately become empty. This explicit
+# per-table contract does not weaken the existing unexpected-empty protection.
+$zeroRoot=Join-Path $root 'qualified-zero'
+$staging=Join-Path $zeroRoot 'staging';$output=Join-Path $zeroRoot 'DATA-POWERBI'
+New-Item -ItemType Directory -Path $staging -Force | Out-Null
+$contract=Join-Path $zeroRoot 'contract.json.txt'
+$zeroContract=@{tables=@(@{table='Windows Migration Evidence';file='WindowsMigrationEvidence.csv';allowEmpty=$true;uniqueKey=@('Device Source ID');columns=@(@{name='Device Source ID';type='string'})})}
+$zeroContract | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $contract
+[IO.File]::WriteAllText((Join-Path $staging 'WindowsMigrationEvidence.csv'),'"Device Source ID"'+[Environment]::NewLine)
+$argsForPublish=@{StagingRoot=$staging;OutputRoot=$output;TenantKey='synthetic-test';Provenance=@{Mode='SyntheticTest'};ContractPath=$contract}
+$zero=Publish-PreparedEvidenceBatch @argsForPublish
+if((Get-Content -LiteralPath (Join-Path $zero.BatchPath 'batch.json.txt') -Raw | ConvertFrom-Json).Files[0].Rows -ne 0){throw 'Qualified zero publication failed.'}
+Write-Host 'PASS: explicit migration zero allowed with a header, validation and tenant receipt.'
+$zeroContract.tables[0].allowEmpty='true'
+$zeroContract | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $contract
+ExpectFailure 'Non-boolean empty-table allowance' { Publish-PreparedEvidenceBatch @argsForPublish } '*Unexpected empty output*'
+
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDPvPi66+wH0iK1
-# qxSH83sAaJCTWrAs5A5HAI1b5wMmpqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCIxuYqBB8EXHS+
+# cpytPEX4uLjyx+GIYlTtBiHCFOyD66CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -244,31 +266,31 @@ Write-Host 'All synthetic publication tests passed. No tenant API or Power BI ac
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIIJVOweVPQkhuWQsfT+yWRF10TEfFOBEw5yOfhwexzevMA0GCSqG
-# SIb3DQEBAQUABIIBgD39VKHY+oz5SuXAX6yTF2SHl5hyeAyd508e/SIveV4T+bCI
-# i7jO/PGBRHwHj2p14wx7yShsmzf8F1/6HSn+qjLQjsc3KGHtNod+8Lz1Z6XA/hPj
-# WMvIGrgBqbqH0P2IwFLsQQ7r3mJZjK+VArdGdgrf/cM/SsUz8nmX2kqh9+F/U6i/
-# Kc+En/xrRggY09hbo8dfTnuG4lIzwZuv1UPLA2IAp0viRyEM1ATahnfEKvhfYSbD
-# ui2go03wLJu6HtqOU7xGUsFcl4ZJzf13QJli8Qb7adk7m8J/DV4VwhagkpvRrtNk
-# dCTFPLFQgTJx7G4N1t4Ca7yBM0tXNDGSrE+5QKRpn3jYJ8dlcCJvKOoQHptWP2gR
-# xOOgKUf9K/ocQmyNYsBGSKcYHAbx41BNXwwMJqxzS2CZjjCbW87spyk7NTwnPSIz
-# kqaIKqnqawxaKY0VREFgaxb+UhsFyisyjnwJQkQ9lQ6SgcE77NuJ175ktjnj2j5D
-# i+F5OGh5IFHMXqIjFaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIHTj19idu7Fdg4xWfHlc7DKY1rBxqZiJ74q0VKyi0Cv0MA0GCSqG
+# SIb3DQEBAQUABIIBgIxdmppEgLLovyE8I33RD2EPkdfMu/FeIV5Vhbvtq/OJE+Bj
+# n1rI2nVOCWWIMneaul6Jc76f9LZ8j3/k1cOhQjJFX1+3X/ihlgEt7KNtoMxRWdwc
+# UTAe+rPXyH9sxev6rmcWup/prBi3LQUBh3mF+LJWuIgvgmRiFHznQ7UxAqILn3ON
+# scXyOLY075FFEH0KhZslnhsvm2WUDVXi69zGqQnfWXCJL8YGWCe66FkaiF1V02vD
+# X5voUUXwx7LTvF2lcG5hNyDru5m2PU3ZYBLvUAS4xP1GlQMhkGrMzWBexTyJ9vQ0
+# T7Wwbt9kI1YSuO6rH/IRcNrSFpixPIo/rLuPZxk3kJhx5fwBkVCVXF/mvt99wq0d
+# C1b+YpoCoxABn0JfiAT4rK1NlGcEnCrUiFBhRz1TFyM1aFpu3qIVz0pMsIRw1CBE
+# l63RjNMsJlzsBULgULlzgz+1/CFBLKF8HA1LuOKXWOdhvPvMnZGDZQ2MJkKrxSIS
+# D8fi2RIHZmuddREcQaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDIwODQ1
-# NDdaMC8GCSqGSIb3DQEJBDEiBCBeS/9ACetYrSDFAFN7HFl7ns3ukqiGdPnNaEAt
-# lCRfmDANBgkqhkiG9w0BAQEFAASCAgBdI62iIeZvFoibKbXSUox9RO4c8i5KaEPC
-# ikw75eHpfaQWNedodUEpyTvThUNCcLAtDRYVfIFqXMJUHlw08WNbUVb7YBqYJk8q
-# 5ghuXmQc5IpFW/3D+AoSen3bXcn9+BSUloTwirggOqjFkFz2RrNYSHpvSoGPZGcD
-# Sdp9rsWdnI6GMpRnB/gXzXUjukCKpBn/S5pDjmhqBR0R3KGZJ1N3wW7qknQlDV7n
-# CW01OZVrCFqRx++Q7OjMp4N2NVAPLIOUKuQijWxnN48TTmO3Z6rr89CNVwO0iCou
-# rCgoQ661E47jpjngKKo3rQ3LjlgeUqRL46W1CuEWoD7sVWW3D+6qvpTtjC7801j+
-# Tdpt2oVVYFi7HzGHvhOGg7FxDjrDBW/pdYxKQ0HI71wIBXMqWaUFWHEtl/g+AJwn
-# 6Rx3ayS3UTLmEnc7o/UYzSI6omZtrVDAoJBPgjipvCWRKLoMGv1CJvHlcZZvPPbc
-# VA4ThF0UfKhDyQO8mJkjkfVFiMHKWEmVba5YoleSi7iU+6XMpgWGpJafYB1cbHcY
-# C73OEJ+X2VahxIO5SkXwxawm905cgsGE7xBbfeRv5iDORTdBqwGaPymsJEzu0k9o
-# wBZ5qEOXqTCZNTRqTY8VNetgSDpW1E+cQj9hLW13AHCQVT7cZpcA91tuI8OnFBME
-# juLuMo+4Ww==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDkxNDI1
+# MTZaMC8GCSqGSIb3DQEJBDEiBCAYfw3Tm8G8lC1RAV+vCRQEyNQm8cQdgyKUncSR
+# RZDp8TANBgkqhkiG9w0BAQEFAASCAgBYD7TDIexP3Dky/CelFcGe+2bUEGa3YldS
+# FteUg94DwbTm6wg+TpR0pWLY5SJuGlV0p1dDtzhxoPAHR2Ni2ecXmgb7+WMoY3+Z
+# SnYQuDZ/qTyeMKXvuCcFzTUoEkVVyqmctHtAjR+TLuQIaZdg44T3QU+wY1aYuFxa
+# l9liraZcHL80BY9e8XBXgQDctn+BLpYAgJgYCBvH9PcOOkpvY3SbZn2P3xqSTqSZ
+# AUSc9pfShk9+t1KP9HQNUN3cFNuhtf3Lx1xx3qVZE9kIxsyZkDTuBMt6AgHOWppf
+# XW6FsdfQsCwX2P2zDvAaMcC51YtB+TGK2wFZyXTrA5viym3HZLhr83bj/7jfodBW
+# WiPabRjQJo5OJayDuFgq+Rexg9tbucusdVadZ1esaTYuJW0fTZYZabZGCdRCG4X2
+# Abpukx69NsT7HxKGiY7IFmy3x2ZIRqXTJjh2G8L8WN5sPrLDKbL3r7dartd6nH41
+# mZe7l92NnwWSuXyluOMke33zJYju7oOnYtrgJ1TW+3rtw3rkkJv2y692ftbni99h
+# dFfdACpzpI68/0H1uHkoAhGhDGsezXiY7GT0W4RWmCCHBy5goLhfTEb0uAMaPK4I
+# jilZL4DqihqD5qvocegMX7JfXBz2aUUS08LaSqKrWVLfjx+49cvLRsoVoGOblpRZ
+# kuNtF8stmw==
 # SIG # End signature block

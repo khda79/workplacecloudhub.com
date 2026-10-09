@@ -1,4 +1,4 @@
-﻿Set-StrictMode -Version Latest
+Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
 Import-Module (Join-Path $PSScriptRoot '../../SmartM365/Modules/SmartM365.Core/SmartM365.JsonTransport.psd1') -Global
 
@@ -12,9 +12,22 @@ function Initialize-PreparedMetadataNames {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$OutputRoot,[Parameter(Mandatory)][string]$TenantKey)
     if((Get-SmartM365JsonTransportPolicy).Mode -ne 'JsonText'){return}
-    if(Get-SmartM365JsonReadPath (Join-Path $OutputRoot 'current.json') -Optional){
-        Convert-PreparedMetadataNames -OutputRoot $OutputRoot -TenantKey $TenantKey -Apply | Out-Null
+    if(-not(Get-SmartM365JsonReadPath (Join-Path $OutputRoot 'current.json') -Optional)){return}
+    # An already converted feed needs no rename operation. Publication validates
+    # the current batch separately; do not run the legacy migration on cloud
+    # placeholder directories when none of its owned legacy filenames remain.
+    $needsConversion=Test-Path -LiteralPath (Join-Path $OutputRoot 'current.json')
+    foreach($family in 'batches','retired','failed'){
+        $folder=Join-Path $OutputRoot $family
+        if(-not(Test-Path -LiteralPath $folder -PathType Container)){continue}
+        foreach($entry in Get-ChildItem -LiteralPath $folder -Directory){
+            if($entry.Name -notmatch '^\d{8}T\d{9}Z-[a-f0-9]{8}$'){continue}
+            foreach($name in 'batch','current','validation','failure'){
+                if(Test-Path -LiteralPath (Join-Path $entry.FullName ($name+'.json'))){$needsConversion=$true}
+            }
+        }
     }
+    if($needsConversion){Convert-PreparedMetadataNames -OutputRoot $OutputRoot -TenantKey $TenantKey -Apply | Out-Null}
 }
 
 function Assert-PreparedUnlinkedPath([string]$Path){
@@ -191,8 +204,8 @@ Export-ModuleMember -Function Get-PreparedMetadataPath,Convert-PreparedMetadataN
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBim3LDfzK9bu2w
-# yifzuPMwR39/Yv2sCvGU3o6Q+FFznqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAgPM31T0gdyIde
+# 6ZDZGYS0BOfoXw20sozxXJfO3vQv2KCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -325,31 +338,31 @@ Export-ModuleMember -Function Get-PreparedMetadataPath,Convert-PreparedMetadataN
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIOYcE9XOBYfi1oyJt5hEGEr/Mumrs+8UtzZBDABUPpU8MA0GCSqG
-# SIb3DQEBAQUABIIBgIro6fre7tMIyFikwzk47XC6nvAjeRPuucBEHPGJSCiM96aw
-# RUqeQmgjzHkcgL1jT7KNswVLajr6Rhc8eQrDJzQ4pQTS9kCf+TISzTGwpsvTZ7iR
-# vJO6Fdu+7tfzFE+tzDA9H6NLFFLxsz7hd5+ws++WrXak2YmwpBpWizJBfN7hD0lj
-# L2Vkv4Mirhp1xslUUE6ZqErNi1RLFAuu4DtUA+7tLs9cLte3vbCRAtgtXVESgMVc
-# Z238z0UlubOnLhem2g+xr8zXgyfNko5xusRp7FozIJ99M/mvfs6BNFFulQdNBqoH
-# kR7zvdMARldFjEgUHGSmlmx6gtNpSkqyZA32NaBEcLVhoPKvqhB0dwSAJwYxeNw+
-# 8Qsbj4HsNbRsjl4MJSqI5YxfFOlBXA7GNuSCasdBCjKBNK7J5o/dfGRkRDSzoEvX
-# wAgfM4cOVkQO15j+Tt035WFzQNpUviAO00Ikln85MAAOgxqRV9Mnhza2seZA5mrP
-# hfp0AsyXRdUQlBrFqqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEILHwg8lOsyCLRya4HS5hIugnreSrJ2YFFlkrbcTYO68/MA0GCSqG
+# SIb3DQEBAQUABIIBgEhkXKnhmSQVowgAFXL0NIbO8mfMQ8KVH+3ioSgXu2Coh+Lt
+# hR4sQna+IcSZz2ns98hOt8+AZ2ysAbPJTdVGwgJJemcGIWrYcQxqhNz6b+AA+YYF
+# G769is1EtIwynblPW6kCQhQcEdBaLFjfx2diDJA9Gnb5Ys6Epb/FWhLjyECLwZHQ
+# jwzAhDWdAywMcWDPP5Utte00xWjajJU6Dye6br6p+qC+b5axmn7Zb2noilWG/plF
+# B5ZC6RygJb2yDUrNovq3kuv4FJspmzaMj6SuOuFUdXGbbkS6yF0pr0VTGI5QK/TU
+# EBJBgLAVnsgVty6AnWZbBTJSbP7btwGnUR3SJLG3Yctq+ifEKf6lHXmhOPfFIoxZ
+# iNN0EWek2B/qYmiEA2gWqmTzR8jtopBC2mkO6TuO22UCfsWstYN85LW5ABneSk7J
+# dm7eEZuqCrm7HjlYKh7Pjo6G1HLE2sktvCUMTQmxkJXliTKQ8809Y/SD/nj9D/xq
+# BLhPutdnZ3ERSLvyKaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcxNjU3
-# NTlaMC8GCSqGSIb3DQEJBDEiBCCsRjGY/crD7Y2ZoRZVswwS1Mc1qYMB1nQFPkW2
-# IkQaXDANBgkqhkiG9w0BAQEFAASCAgCs9mh1QSsUmel/Hdf2nj1z1e1S7qvC1uo6
-# USz1KnyEI2aeGQiqioHPGZgcf3LCn4kglGxUx5YCYjzNcJOKRfQIxi0H+S7LqcAZ
-# cx4gTvNRzYOk8D1lb45yoCt+shnbQQadTOFKtIm+8BF/I7VBgP9m8G6Etifsw8Ub
-# 7y7Q1MtHyF6i+cF6PXsGugeJ5YkXPjrMutEb/2LNXpT0lGEYjkZ34azARdQL5eJE
-# xNOtuLkGx6daaTJONByqwTYPbvr0eWfXiceQnY6AfurxN9XIuJu550EbkJHavBWF
-# +NyV9ZS3X0g+whrLxRyvdONU4qLkbAluH+QRiKGwyPGNMRDK7uvqr+WeBJN67YUJ
-# kOjOYUvZqVIJ76HTFmooCCh79TPGwsqW0Yk+9lc1wG4HhTiESD3bdtvauXPZ8Iud
-# wPFxnK4z64AfZnnRXlSlp8+hqFHrcmLr8wfmIKvhmOxpSDG2sUFgi7xy3jQG2i5C
-# aNiRRY9Clmaqx4w1IL4HW98NeYpnDwmx46+yVl3x2dEY6HHtEuL70zS1xTSe0d/Q
-# soukbvfWUFaaAbw/+qEBzRPdUVo+5qOUa9niPerm6u3sx7KBiXYb+J6QKSc5qe0a
-# oUo+0eRa2gsWhLJWvA4bGwq1PZ3wVBJVZJhvvdCeA80OcnzArLFUgPDzzU5P1Ikp
-# XlvboA+nMw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDkxNDQx
+# MDJaMC8GCSqGSIb3DQEJBDEiBCBu5LCRoksq4N0N9O1bXYvY2Cy6WmE6pt63tN+C
+# 60FRfDANBgkqhkiG9w0BAQEFAASCAgBJEJF+QzW5w8FaxcwkUsEkB4371KBuuDZ7
+# 6udghfAdhIMFY3qRf0bbg7JPvohCMt5+mzcpuHalr7A3XWWEjg6F9ZkLjLPx4jd2
+# SuUdYOZUYlo8UHswqhp3WH+apCx9ib/AyzuUPrtQ4D1t7v3kVfHKak3gaTECJ7H1
+# ik7b8IGF7mZABjpcf3O97JPCUlZx5DXfLo/3bgruEAm6Sh9cRxVMMzMNMU42biaa
+# XAdCcPnrePINzVU9+BorIukcgW5NeitkOR/hJLDPqYAkVfOu/N1H621mxnJLcHlb
+# 1nyfy9ZOUTj27Z3Hi7Kcdwyjh/0nqQbI0WrkAKBmY/wIkLo+ZwSchJa59/mIERaE
+# eBoJier+Fo0PN/k7NawuLe9h6D68m5ehx6jarVBOGJCM6wftOUYy8czl30I7VliV
+# agI0lUYi3qSydSYupvmyUoweYMQBHvLUYN8Xes3WtCCCf6hwVzFrbwdFhhANAulE
+# 8Us5tj37vIXBsQ1aLsOgMsaSnd/r1JMwOzW8KGxjmQLxUCnQV1FNfQQdvZW+ruuo
+# NgtguLjNXCuc7hRu0t1qu761qL1Vo4wylxy++DB89ikbcasDoVRZobbxfC4HtifN
+# jDZD1vxdq1Ff/y/VoErzsSqekaI8Ag8VokeMyAEeX7zKzCw3FTMvIpxJN1uqfxNA
+# QpwYsSR5Dw==
 # SIG # End signature block

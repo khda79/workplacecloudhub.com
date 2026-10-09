@@ -1,63 +1,54 @@
 [CmdletBinding()]
-param(
-    [Parameter(Mandatory)][string]$DataRoot,
-    [Parameter(Mandatory)][string]$OutputRoot,
-    [ValidateSet('All','Workforce','Devices','Applications','Collaboration','Content','Mailbox','Licensing','Security','Backup','Trust','Executive')]
-    [string]$Only = 'All',
-    [switch]$SkipWorkforceHistory,
-    [switch]$ReuseStagedWorkforce,
-    [string]$AccountClassificationConfigPath
-)
-
-# Offline preparation only. No collection, upload, Desktop control or promotion.
-# Each child process releases its memory before the next domain starts.
-$ErrorActionPreference = 'Stop'
-$DataRoot = (Resolve-Path -LiteralPath $DataRoot).ProviderPath
-$last = Join-Path $DataRoot 'DATA-LAST'
-if (-not (Test-Path -LiteralPath $last -PathType Container)) { throw 'DATA-LAST is required.' }
-$OutputRoot = [IO.Path]::GetFullPath($OutputRoot)
-if ($OutputRoot.TrimEnd('\') -eq $DataRoot.TrimEnd('\') -or $OutputRoot.TrimEnd('\') -eq $last.TrimEnd('\')) {
-    throw 'Outputs must use a dedicated staging directory, never the raw source root.'
+param([Parameter(Mandatory)][string]$TestRoot)
+# Synthetic file-level checks; run entirely below the supplied private test root.
+$ErrorActionPreference='Stop'
+$root=Join-Path ([IO.Path]::GetFullPath($TestRoot)) ([guid]::NewGuid().ToString('N'))
+$last=Join-Path $root 'source/DATA-LAST';$output=Join-Path $root 'candidate'
+New-Item -ItemType Directory -Path $last -Force | Out-Null
+$inventory=[pscustomobject]@{TenantKey='test';'Device ID'='id1';'Device name'='BE-PC1';'OS version'='10.0.19045.1'}
+$inventory | Export-Csv -LiteralPath (Join-Path $last 'Intune_Devices_Inventory.csv') -NoTypeInformation
+$prepared=[pscustomobject]@{'Device Source ID'='id1';'Device Name'='BE-PC1';'Operating System Version'='10.0.19045.1';'Windows Generation'='Windows 10';'Windows 11 Upgrade Eligibility'='Unknown';Country='FR';'Free Disk Space (GB)'='';'Windows Update State'='Not observed';'Windows Update Action Code'='None';'Last Sync DateTime'=''}
+$preparedPath=Join-Path $root 'DeviceInventoryEvidence.csv';$prepared | Export-Csv -LiteralPath $preparedPath -NoTypeInformation
+[pscustomobject]@{TenantKey='test';ObjectGUID='ad1';Name='BE-AD1';Enabled='True';OperatingSystemShortName='Windows 10';DomainName='be.example.test';IntuneDeviceId='';operatingSystemVersion='10.0 (19045)'} | Export-Csv -LiteralPath (Join-Path $last 'AD_Computers_AllDomains.csv') -NoTypeInformation
+$readiness=Join-Path $last 'Intune_Devices_UpgradeEligibility.csv'
+[IO.File]::WriteAllText($readiness,'"TenantKey","GraphId","DeviceName","NormalizedDeviceName","OSVersion","ExportDateTime"'+[Environment]::NewLine)
+[IO.File]::WriteAllText((Join-Path $last 'Intune_WindowsUpdate_Status.csv'),'"TenantKey","PolicyId","PolicyName","DeviceId","AggregateState","BlockingReason","ExportDateTime"'+[Environment]::NewLine)
+$invoke=@{DataRoot=(Join-Path $root 'source');PreparedInventoryPath=$preparedPath;OutputRoot=$output}
+$shell=(Get-Process -Id $PID).Path
+function Build { & $shell -NoProfile -File (Join-Path $PSScriptRoot 'New-WindowsMigrationEvidence.ps1') @invoke; if($LASTEXITCODE){throw 'Candidate build failed.'} }
+Build | Out-Null
+$rows=@(Import-Csv -LiteralPath (Join-Path $output 'WindowsMigrationEvidence.csv'))
+if($rows.Count -ne 2 -or $rows[0].'Free Disk GB' -ne '' -or $rows[1].Country -ne 'Unknown'){throw 'Empty context / disk / AD country failed.'}
+Write-Host 'PASS: header-only readiness/policy sources, missing disk and AD Unknown supported.'
+function RejectBuild([string]$Name) {
+    $before=@{};foreach($n in 'WindowsMigrationEvidence.csv','WindowsMigrationADObservations.csv','WindowsMigrationAudit.json.txt'){$before[$n]=(Get-FileHash -LiteralPath (Join-Path $output $n)).Hash}
+    $failed=$false;try{Build | Out-Null}catch{$failed=$true}
+    if(-not $failed){throw "Invalid source accepted: $Name"}
+    foreach($n in $before.Keys){if((Get-FileHash -LiteralPath (Join-Path $output $n)).Hash -ne $before[$n]){throw 'Failed build overwrote last good candidate.'}}
+    Write-Host "PASS: $Name rejected; last good staging files preserved."
 }
-New-Item -ItemType Directory -Path $OutputRoot -Force | Out-Null
-$shell = (Get-Process -Id $PID).Path
-if ($PSVersionTable.PSVersion.Major -lt 7) { throw 'PowerShell 7 is required.' }
-function OutPath([string]$Name) { Join-Path $OutputRoot ($Name + '.csv') }
-function Run([string]$Domain, [string]$Script, [object[]]$Arguments) {
-    if ($Only -ne 'All' -and $Only -ne $Domain) { return }
-    $started = [datetime]::UtcNow
-    Write-Host ('[{0:O}] Starting {1}' -f $started, $Domain)
-    & $shell -NoProfile -File (Join-Path $PSScriptRoot $Script) @Arguments
-    if ($LASTEXITCODE -ne 0) { throw "Preparation failed: $Domain (exit $LASTEXITCODE). Nothing was published." }
-    Write-Host ('[{0:O}] Completed {1}: {2:n1} seconds' -f [datetime]::UtcNow, $Domain, ([datetime]::UtcNow - $started).TotalSeconds)
-}
-$wf = @('-DataRoot',$DataRoot,'-UserOutputPath',(OutPath 'UserInventoryEvidence'),'-HistoryOutputPath',(OutPath 'UserActivityHistoryEvidence'),'-TrendOutputPath',(OutPath 'WorkforceTrendEvidence'),'-IdentityOutputPath',(OutPath 'IdentityReconciliationEvidence'),'-SignalsOutputPath',(OutPath 'WorkforceOperationalSignals'))
-if ($AccountClassificationConfigPath) { $wf += @('-AccountClassificationConfigPath',$AccountClassificationConfigPath) }
-if ($SkipWorkforceHistory) { $wf += '-SkipHistory' }
-if ($ReuseStagedWorkforce) {
-    foreach ($name in @('UserInventoryEvidence','IdentityReconciliationEvidence','WorkforceOperationalSignals')) {
-        if (-not (Test-Path -LiteralPath (OutPath $name))) { throw "Missing staged workforce output: $name" }
-    }
-} else { Run 'Workforce' 'New-WorkforceIdentityEvidence.ps1' $wf }
-Run 'Devices' 'New-DeviceInventoryEvidence.ps1' @('-DataRoot',$DataRoot,'-OutputPath',(OutPath 'DeviceInventoryEvidence'),'-SignalsOutputPath',(OutPath 'DeviceRiskEvidenceSummary'),'-DirectorySummaryOutputPath',(OutPath 'DeviceDirectorySummary'))
-Run 'Devices' 'New-WindowsMigrationEvidence.ps1' @('-DataRoot',$DataRoot,'-PreparedInventoryPath',(OutPath 'DeviceInventoryEvidence'),'-OutputRoot',$OutputRoot)
-Run 'Devices' 'New-DeviceLifecycleExperienceTrendEvidence.ps1' @('-DataRoot',$DataRoot,'-WindowsOutputPath',(OutPath 'WindowsLifecycleTrendEvidence'),'-EndpointOutputPath',(OutPath 'EndpointExperienceTrendEvidence'))
-Run 'Applications' 'New-ApplicationInventoryEvidence.ps1' @('-DataRoot',$DataRoot,'-InventoryOutputPath',(OutPath 'ApplicationInventoryEvidence'),'-TrendOutputPath',(OutPath 'ApplicationTrendEvidence'))
-Run 'Collaboration' 'New-CollaborationEvidence.ps1' @('-DataRoot',$DataRoot,'-AdoptionOutputPath',(OutPath 'CollaborationAdoptionEvidence'),'-ObjectOutputPath',(OutPath 'CollaborationObjectEvidence'),'-TrendOutputPath',(OutPath 'CollaborationTrendEvidence'))
-Run 'Content' 'New-ContentStorageEvidence.ps1' @('-DataRoot',$DataRoot,'-ObjectOutputPath',(OutPath 'ContentStorageEvidence'),'-TrendOutputPath',(OutPath 'ContentStorageTrendEvidence'))
-Run 'Mailbox' 'New-MailboxEvidence.ps1' @('-DataRoot',$last,'-UserEvidencePath',(OutPath 'UserInventoryEvidence'),'-OutputPath',(OutPath 'MailboxEvidence'))
-Run 'Licensing' 'New-LicensingEvidence.ps1' @('-DataRoot',$last,'-UserEvidencePath',(OutPath 'UserInventoryEvidence'),'-MailboxEvidencePath',(OutPath 'MailboxEvidence'),'-OutputPath',(OutPath 'LicenseEvidence'),'-OptimizationOutputPath',(OutPath 'LicenseOptimizationEvidence'))
-Run 'Security' 'New-SecurityEvidence.ps1' @('-DataRoot',$last,'-ExtendedEvidenceRoot',$last,'-UserEvidencePath',(OutPath 'UserInventoryEvidence'),'-DeviceEvidencePath',(OutPath 'DeviceInventoryEvidence'),'-OutputPath',(OutPath 'SecurityControlEvidence'))
-Run 'Backup' 'New-BackupResilienceEvidence.ps1' @('-DataRoot',$last,'-OutputRoot',$OutputRoot)
-Run 'Trust' 'New-DataTrustEvidence.ps1' @('-DataRoot',$DataRoot,'-OutputPath',(OutPath 'DataTrustEvidence'))
-Run 'Executive' 'New-ExecutiveTrendEvidence.ps1' @('-DataRoot',$DataRoot,'-OutputPath',(OutPath 'ExecutiveKPITrends'))
-Write-Host 'Preparation finished. Outputs are staging only; schema/data validation and promotion are separate steps.'
+[IO.File]::WriteAllText($readiness,'"TenantKey","GraphId","DeviceName","NormalizedDeviceName","OSVersion","ExportDateTime"'+[Environment]::NewLine+'"test","id1"'+[Environment]::NewLine)
+RejectBuild 'Truncated CSV record'
+[IO.File]::WriteAllText($readiness,'"TenantKey","GraphId","DeviceName","NormalizedDeviceName","OSVersion","GraphId"'+[Environment]::NewLine)
+RejectBuild 'Duplicate / missing header'
+[IO.File]::WriteAllText($readiness,'"TenantKey","GraphId","DeviceName","NormalizedDeviceName","OSVersion","ExportDateTime"'+[Environment]::NewLine+'"other","id1","BE-PC1","be-pc1","10.0.19045.1","2026-10-09"'+[Environment]::NewLine)
+RejectBuild 'Foreign readiness tenant'
+[IO.File]::WriteAllText($readiness,'"TenantKey","GraphId","DeviceName","NormalizedDeviceName","OSVersion","ExportDateTime"'+[Environment]::NewLine)
+$inventory.'OS version'='10.0.22631.1';$inventory | Export-Csv -LiteralPath (Join-Path $last 'Intune_Devices_Inventory.csv') -NoTypeInformation
+RejectBuild 'Raw/prepared snapshot mismatch'
+$inventory.'OS version'='10.0.19045.1';$inventory | Export-Csv -LiteralPath (Join-Path $last 'Intune_Devices_Inventory.csv') -NoTypeInformation
+$prepared.'Device Name'="BE-PC1`nquoted, text";$inventory.'Device name'=$prepared.'Device Name'
+$prepared | Export-Csv -LiteralPath $preparedPath -NoTypeInformation
+$inventory | Export-Csv -LiteralPath (Join-Path $last 'Intune_Devices_Inventory.csv') -NoTypeInformation
+Build | Out-Null
+if((Import-Csv -LiteralPath (Join-Path $output 'WindowsMigrationEvidence.csv'))[0].'Device Name' -cne $prepared.'Device Name'){throw 'CSV multiline quoting roundtrip failed.'}
+Write-Host 'PASS: quoted multiline records roundtrip. Six file-level checks; raw tenant data untouched.'
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBrWjBoMOX+hXky
-# jwufEPHPnw8fsuzcVDX4rwNR3CtB7KCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBCygVxYKsTLcSw
+# cIHAo7F3zr9wEYG1kjpjSEpwPiBWTaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -190,31 +181,31 @@ Write-Host 'Preparation finished. Outputs are staging only; schema/data validati
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEINMca/AT7NKAvlxyURRe66Dp3ooMB8g9qbPWVrYUDluDMA0GCSqG
-# SIb3DQEBAQUABIIBgEEPtCArydDvZ6ZZ18qN0wj2hbuQvwgmWm1v3h4U2V8Hozpm
-# u11p451Q3HyhR9KN3L8Pq23zDsL6mcSDKi+EFYGXiiuCciEQQrO2KeitavjJOMZ3
-# yRMPbJAUGnixWS6b86k5oSNDAsqUmi9yupXj4ytsyuveKLsr/qy/29CPX6VQUfpn
-# 06Oe+9zeLaqXCs9H6VQePVGB52HC0a41UgHDsAZ0HE0Plm9kECJdhd6BIEbUkhAk
-# srLQV+gSVN/i3jW+Ttu3kMSrzHb3EGO13fXSLtFNe36nBpCWP/JcdkwI5O7OzEK9
-# ViUWsFY+deCGAPovBwzvCvFeW5YxfrgswFakr3HuTKD0QBJHW75pCeS+T9IwD42U
-# CKGjUzgyskiafP2g0S7nTSqh0JpZnCi9/pcRiHBcQlvPQr0jnOrUCubgzWpMuCgC
-# Xf5mlbw/pZNCrv1rLIIoFkT/lVekgm6aMJWHNnjW7QcseU0lx9k1QF+TpQ5muBfc
-# e2++E0cZLqVP9he6fKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIA6MHVIs+XcYzT3PZXTQUmPa9fSBHPDaHbn1eQheAUAgMA0GCSqG
+# SIb3DQEBAQUABIIBgIkeAYRPsR0T689yytDwoCXOny9BMnF/RUB30CjIxWBumFMc
+# mf6SyA3ahwRgbiw0NRJD7y6KoSSge1T4xqit3Ht3b6oU0m9eiU4+bErYysGFR1QG
+# xQ8pNsfOe7GSQZOkYx1q1Mj0qQdlamJN6rv49+EUynJAN+kpFvvoKnE9EqCejNiF
+# ds9waIQn98KEp9JRV2/lTNbqICZjXWByobhZKNdOo5IoGeHQANmzBNmXuoCH/3Or
+# KF7uzAMd7UVNNYxec9FyFlnhIemYNcOVcMqzzzgX/S9SmzfyObmvQyk7h+GUzEoq
+# bsuQp8RFd91tTbwkw6N4fTxdUxcP8ibcjqatWeVCF1KFolTKPrLbzuCzeWLJi2Y+
+# 405AQnGtM4F4wxSFH930xQG7amJuyrFIFztnS09OWhUH2fsd+ANkwQMJkg7L75+w
+# OvC7vtweoRQs8ADFky1FuTXKldMhuqwY4D7LVInwLL52gHAi/v6fRWL/DWFYLHtv
+# POBIoXpyEJHt8ASW/qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
 # hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDkxNDA4
-# MzdaMC8GCSqGSIb3DQEJBDEiBCAczzkN1HP06CUShOcgAk6Nh9/IEy0qpo5HeWJB
-# Fi03SzANBgkqhkiG9w0BAQEFAASCAgBMh//L61wLyZgJT687Ooyv6MmeOXNjlbUA
-# ODnGEAyOI83dWqX/zDOLxJ2Ge0tBjqIHqE24CBGll5+fiC3GKNekGinAvAzX8WD2
-# BpK7zIPVFeRxkTCHeZ4Wxpl1b2bewpieFOnX8a3+r6gt/cHwbSP/k0UNtaLQBui8
-# 16advmCCsiPu3CwSsIHe0RGjj9RD0X0VK/aq8oX8lKBbV0VOxfnbQwYIYSM7IWNE
-# hVHHCs8HGbVCCzolw9AOA4qxGOKcsBaiNBjGE3wV5MTnxjf6Wkx92EpNgxz2gEh/
-# Iv7yZzaRV1E6t+29yp2k7ydImUMWcbrWhePONiZiCoHNSjubmcQAyJK6ywFG+xdW
-# CPe79lxE6jDOyENpcRX7Waeqq+vzm3GXpCiL8kYpOJny+AIXEGfW16TIVHIQnniF
-# 7AeL40HzipwZ1FU/QCjkDFHT4s098rg1zOHqyeStbz6Ani6AbUMRiLcptLgwOmQC
-# WpCGbWCLkN7DdsYrQUpfVEt/togVTzDsQWVismdfFGGYTbXq57bE9x/SkRYicUpN
-# SwODr2YVWWuz1m9y4bEcIXEfeXbQEaM7MGT2CvXASLYb3Wq+FeuMD1TJ395/Lsn6
-# /M6FZ9DZf5ZwB0/gZLIZ2eNyU4H4Qql7+3oBjnaGDxkjxOPASvkgc6BBSlap8WkV
-# wqeWRTFGBw==
+# MzZaMC8GCSqGSIb3DQEJBDEiBCDrQsKkNX84UTAodpgurecWYGCckJNkBf/t5Ev1
+# IVPVpTANBgkqhkiG9w0BAQEFAASCAgCjlZGpPcC/lwGD90yOQdz/yUmimGIz3nqN
+# jBImp+2ZWd0055qZr6RJMy28TjKwXaswIOlph6NE0z/yXPkxDslDBhgnOOyYkBcF
+# Uh8lr/DemPXfXmjWZ9c87q/zf8Ay5viwsnIjR82dBTH+vmaR8r7J5SXGpcNKwZWV
+# UYh/P6TR90dBW0yBwuI2f3GeDW1vfCTK61FywdG8lucRdSptT4i/am/sQKhMYjFM
+# 7Wnvw6MKlpWb3Uo54yddnqw9odL2kY2CQCFmT22Rjchq5BzriUrfhrRpG03NYAfo
+# TOoHpAyMIAoO9i6ArW0grWPToKOKciMpQLwZXWY049dEBGh7y+VEkYa8E8HoD57X
+# ed7+F+zXCOdizswXkxMjJ5pvn4xhxTXPUp/69Vf50L84fKFGc2tiY6V35BSFChjJ
+# uqIIymMPpkZxcsknmJRRLM6qQcy6u1gDS8HGbPGjs8NGBWLgdUx9FOqjIzo37Gzj
+# JYb4wbv3+MW2TD+SifRlW3SF9dFxYnGanhOxOhH7gSmqCPS/199q8ZYoqzwF6vGW
+# zc23dDSMVFapGdGs03CsN/7FKj+/1Gi0j686U1b+Q7C6Uiwna86/yg6vaUawJ+/5
+# Z17LrcVJg8drugeX/m+vVvAANT4WKHDvzIlxju/K1e2chFwio1YkBRxg9pgto8nl
+# UyvPfwozFg==
 # SIG # End signature block

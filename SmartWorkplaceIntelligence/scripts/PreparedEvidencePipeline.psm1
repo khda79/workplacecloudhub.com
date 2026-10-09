@@ -1,4 +1,4 @@
-﻿# Offline, single-tenant preparation and versioned local publication. No tenant APIs.
+# Offline, single-tenant preparation and versioned local publication. No tenant APIs.
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $script:ProductRoot = Split-Path -Parent $PSScriptRoot
@@ -316,7 +316,9 @@ function Publish-PreparedEvidenceBatch {
         [Parameter(Mandatory)][ValidatePattern('^[A-Za-z0-9][A-Za-z0-9_.-]+$')][string]$TenantKey,
         [Parameter(Mandatory)]$Provenance,
         [string]$ContractPath = (Join-Path $script:ProductRoot 'config/prepared-evidence-contract.json'),
-        [string[]]$AllowEmptyTables = @())
+        [string[]]$AllowEmptyTables = @(),
+        [string]$ExpectedPreviousBatchId,
+        [switch]$SkipRetention)
     if ($PSVersionTable.PSVersion.Major -lt 7) { throw 'PowerShell 7 is required.' }
     $output = [IO.Path]::GetFullPath($OutputRoot)
     $staging = (Resolve-Path -LiteralPath $StagingRoot).ProviderPath
@@ -332,6 +334,7 @@ function Publish-PreparedEvidenceBatch {
         if (Test-Path -LiteralPath (Join-Path $output 'current.json')) { throw 'Legacy prepared metadata is preserved while JSON transport policy is Readers. Activate the approved JsonText deployment before publication.' }
         $previousPath = Get-PreparedMetadataPath $output 'current' -Optional
         $previous = if ($previousPath) { Get-Content -LiteralPath $previousPath -Raw | ConvertFrom-Json } else { $null }
+        if ($ExpectedPreviousBatchId -and (-not $previous -or $previous.BatchId -ne $ExpectedPreviousBatchId)) { throw 'Published batch changed since staging; no publication performed.' }
         if ($previous -and $previous.TenantKey -ne $TenantKey) { throw 'Output root belongs to another tenant.' }
         $contractReceipt = Read-SmartM365JsonDocument $ContractPath
         $ContractPath = $contractReceipt.Path
@@ -368,7 +371,8 @@ function Publish-PreparedEvidenceBatch {
         $validation = Get-Content -LiteralPath $validationPath -Raw | ConvertFrom-Json
         foreach ($entry in $validation.Files) {
             $table = $contract.tables | Where-Object file -EQ $entry.File
-            if ($entry.Rows -eq 0 -and $table.table -notin $AllowEmptyTables) { throw "Unexpected empty output: $($entry.File)" }
+            $contractAllowsEmpty = $table.PSObject.Properties['allowEmpty'] -and $table.allowEmpty -is [bool] -and $table.allowEmpty
+            if ($entry.Rows -eq 0 -and -not $contractAllowsEmpty -and $table.table -notin $AllowEmptyTables) { throw "Unexpected empty output: $($entry.File)" }
         }
         $historyTables = @($contract.tables | Where-Object { $_.table -match 'History|Trend' })
         $historyKeyVersions = [ordered]@{}
@@ -427,7 +431,7 @@ function Publish-PreparedEvidenceBatch {
         Write-PreparedJson (Join-Path $batch 'current.json.txt') $pointer
         Move-PreparedFile -Source $pointerTemp -Destination $currentPath -Overwrite
         $committed=$true
-        try { Remove-PreparedObsoleteBatches $output $pointer } catch { Write-Warning "Batch published; retention incomplete: $($_.Exception.Message)" }
+        if (-not $SkipRetention) { try { Remove-PreparedObsoleteBatches $output $pointer } catch { Write-Warning "Batch published; retention incomplete: $($_.Exception.Message)" } }
         [pscustomobject]@{BatchId=$batchId;BatchPath=$batch;Files=$validation.Files.Count;CurrentPath=$currentPath}
     } catch {
         if ($batch -and -not $committed) {
@@ -495,6 +499,7 @@ function Invoke-PreparedEvidencePipeline {
             ForEach-Object { foreach ($line in ([string]$_ -split '\r?\n')) { $message='[{0:yyyy-MM-dd HH:mm:ss}] {1}' -f (Get-Date),$line; $message | Add-Content -LiteralPath $log; Write-Host $message } }
         if ($LASTEXITCODE -ne 0) { throw "Preparation failed. Retained diagnostics: $run" }
         $provenance = @{Mode='RebuiltFromSnapshot';CapturePolicy='PerFileVerified';SelectedUtc=$selectedUtc;Sources=$plan;OptionalSourceIssues=$optionalIssues.ToArray();TenantValidation=$identity;LegacyTenantlessAllowed=$false;AccountRulesSHA256=(Get-FileHash $rules).Hash;Scripts=@(Get-ChildItem $PSScriptRoot -File | Where-Object Extension -In '.ps1','.psm1' | ForEach-Object { @{File=$_.Name;SHA256=(Get-FileHash $_.FullName).Hash} })}
+        $provenance.WindowsMigration = (Get-Content -LiteralPath (Join-Path $staging 'WindowsMigrationAudit.json.txt') -Raw | ConvertFrom-Json)
         Publish-PreparedEvidenceBatch -StagingRoot $staging -OutputRoot $OutputRoot -TenantKey $TenantKey -Provenance $provenance -AllowEmptyTables $AllowEmptyTables
     } catch {
         if ($run) { try { Write-PreparedJson (Join-Path $run 'failure.json') @{Error=$_.Exception.Message;Utc=[datetime]::UtcNow.ToString('O')} } catch { Write-Warning 'Could not write run failure diagnostic.' } }
@@ -509,8 +514,8 @@ Export-ModuleMember -Function Get-PreparedSourcePlan, Invoke-PreparedEvidencePip
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCE/gn+Smkqr8gr
-# xOcG/+Sjn8fuTzEdYTY3r/9fEOMki6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDLE+EOSp0vYT5T
+# bwzHr33PNS9+3EiNd858Gs1JBfCnbKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -643,31 +648,31 @@ Export-ModuleMember -Function Get-PreparedSourcePlan, Invoke-PreparedEvidencePip
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIKy3wlsFG5KADSAUrIrMbcQCuAh7o7pXCNYrSZ2zWuaHMA0GCSqG
-# SIb3DQEBAQUABIIBgFtQ+jKME2UAdn49ULJrgM3BbSN5swjPhXqxvJyP7OTA/QLs
-# 9gJotDhcUOAzTRKvVJxwUNZeCfwcLwl2cDCq65oOfxgwEnRiUt0m96QoWw0VNGvb
-# V9Z47foC66SfMfvoURIJeNlg/KDKzAI8gsUbgWTv33+NGYkCDJNY3dCUcFTj6wP7
-# w1KQR7sRaxbeil4hzoIibYXGh8Xgk/SqsXrrOd08TYJv56OPybq2cRYM91ce7hzP
-# EK4PYDVXJX8e0qnPnyW6a0K0KfY6cEp0a9DMvPakoqd4A9Sd5VnK/EKM3mYd4O7R
-# hLqbLpoyXMsP2w8ztcCJ82DPdb1NPnJvUntcdOrO+XXhXzyEvvOOiN7tE6BdPO4j
-# xk19dWDnvq+deOBwA9HoqK3FVraoO+gA05nbPplR4ILN2p6tU7Si0PHg+L4uSOSp
-# 8+zJsaH9f5sOxdPPd3BaZqtUXykeRubxRA2b5vqVVn7rTEPxpmUZwLID28K0e/xM
-# s52TJaKCDoMefd4q+KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIHyM/0iaBu7lQT0/Lpe0nFAgj5HWecbAvGLtMvsb98JMMA0GCSqG
+# SIb3DQEBAQUABIIBgAlkENupQuKmmomSw6rLeSbgwD/9Jft6G3rp8LiP2Wh5hTj3
+# WFsdpqYeeaVXjBRL+N4Gmyma8vyRLcReWbm0Wrk74e4+gg56jTQsIB4mPXdTkykz
+# k/6HjaZj60b8R5xwkYRkJLoYF1nRL1/hPPoAEODiG6ylu54rvX0IG1inrXEecGiC
+# MKSx6ZLDx25anzB+pK3jtCYv7o3NXQT9MM69rCJIEmhXP2lrI8JZkd2EmR0G28EE
+# 3+hLph2OtHqyOw9rocvFQ+G3l8X33jvqZmS4y+t40tXged2OupSGpBWpV7mhBCzL
+# GJBQtnbk4fLPsLGyCXHsjsQKINeGkoGUh4WWAEU78NCQ5rqLHb0QPU/sYiP0RSct
+# 0eBuCKJuQZyjLBPiTRt9yLyFDZx1qNZmtHysTdbqmdgZiE4djeO2W49rd3w8+IMj
+# 8yejACPYvUR9gCUaNmIZxNrxwASJN9M6jOC2g/FYAwkwHIvfh1cnWKB3qkXnt19Z
+# eJ53iZampXH0oXBRdaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDcxNjMz
-# MzZaMC8GCSqGSIb3DQEJBDEiBCANS7j76k20Pc9q4NzCgV6AZ6OpcfZHT2mafdwk
-# +8rf3TANBgkqhkiG9w0BAQEFAASCAgBLkFF/V6NLSblNu+ujPxD+YoOyihrFyRBu
-# 35HumAV3vpauFlx+b/aRaC67yvOETIw+hcH3dBhJ6tvhD8Xs7fXFVqU/f23RkeRV
-# A1nWULMXps/jMiUrjhZL/NV4IzSjjCdczCwRL77soqVpBT+Tx9YVfuj6kygc4Cmt
-# hiYCSQEqTuX1RiuRMbmvO4HYMz5xPFR0fnYjn+cQusJ8H8JPRkUscGaEhejYtmAB
-# l3tD8+YgSMfp6au7kg5Y4M2FYmdhDJRT9OQdBMVu2Zj/EY3Go5hOgzNYJ8QTL7in
-# E0cI1eaiEzUUFX/cd1MOYJ4YV+YFySHeCeg9d/+oGTWxGtgE3l9wDBi7r0m2KCs0
-# 98kmVLhIC3B3TSE+qwlYOmpxXYmaNvp2N9o1ErOZCyMCivGSeyMTkmiulaQ9nQOc
-# OTWtP5KDQp1OtUIlURDbH9bsJu+BdON5Xzoc6oVoRjYveV302pqnozi/JNn0IJ5K
-# OQh5/9ufmcXM1KPVgSr3MAnsfDxInshTDh9IqUC7tN6K+IZ7oi6CsUWm5h/HxBUj
-# ySWPkDgTwM4j1gP3fH7gqyuEEqTsIJx90XpVVkMK8pJIaf9yCcB8KZQeepJF8Vht
-# PqoCwmruhYsMkxCYq09TIlx5epq5RVxU63kKWmZv/j12I4SDzvkynkDJ1jh7M4SU
-# uISfgLttqw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDkxNDI1
+# MTZaMC8GCSqGSIb3DQEJBDEiBCAWQNpMFKy2i37telSgWipy9VEu+v1rKhsNbYIL
+# psRjcjANBgkqhkiG9w0BAQEFAASCAgBwY9D7WAz7sb41zX6YOO6IEuq2DAj+Z6on
+# FhgJBPqK9LJArqvsQbcLJTi7CxBDE8fkjLUlyla0RtuJUUOcwiTKsKlWQPpIF0AI
+# U/PeMAR3+HEkxcfUGwh7YBP0z9KR0R/GB/dhIdWVSGm5yCXO4PfnST8qN9jZnRmz
+# EoHGoHs5ra84ZC9EVbyY6BlOLnXdGxKKbKlwyoYWP5VErszq0vOeHv+hes3ZSDli
+# CPU9xcSKW2ANDL59xXlejEN5iP7n9dmkI/B1fxdY4+ze2KvBaST3evbXZxgrCLSE
+# wkk1IyA8ZssKBCMaget4w+r4lOcV82b1EeP21HBmDUQqa/OCqYHAwljpGigAvgvP
+# Cxk7T9k8yHQ32E51I1M53bhfd3EBZsPCSZffBgOqVvCxKjLsW5GqLXcKVhiUKsWM
+# iiqTlZTD3RERBRl38GJum+KPDhiruKjsXAOGJSlNksDh+2YZw6McK7paq4JCRpX9
+# vC/j8yQW/jC0mB3VDGYkaeP46AuPB9R0pl7fpocauh3NBkUNc/AT6BKJPUkoAKI5
+# k5l599yaUNUU7hU1Ah3WbQVYSI38TNcKKZJEHyTQCXWTPpaR80U1Y1UsI5Q3/kEv
+# c8gpLrsuGDREEMpx0GIyCA4XArgQtCYlgPzirWVzupmwaqj76h1tntUsxwNvxOqg
+# 5qntIk0AFg==
 # SIG # End signature block

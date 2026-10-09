@@ -2,6 +2,46 @@
   "schemaVersion": 1,
   "tables": [
     {
+      "table": "Windows Migration Evidence",
+      "file": "WindowsMigrationEvidence.csv",
+      "uniqueKey": ["Device Source ID"],
+      "allowEmpty": true,
+      "columns": [
+        {"name":"Device Source ID","type":"string"}, {"name":"Device Name","type":"string"},
+        {"name":"Country","type":"string"}, {"name":"Primary User UPN","type":"string"},
+        {"name":"OS Version","type":"string"}, {"name":"Windows Release","type":"string"},
+        {"name":"Intune State","type":"string"}, {"name":"Autopatch Registration","type":"string"},
+        {"name":"Upgrade Eligibility","type":"string"}, {"name":"Hardware Reasons","type":"string"},
+        {"name":"Free Disk GB","type":"double"}, {"name":"Disk Review","type":"string"},
+        {"name":"Legacy Build Review","type":"string"}, {"name":"Update State","type":"string"},
+        {"name":"Update Action","type":"string"}, {"name":"Last Intune Sync","type":"string"},
+        {"name":"Migration Status","type":"string"}, {"name":"Risk Priority","type":"string"},
+        {"name":"Next Action","type":"string"}, {"name":"Evidence Date","type":"string"},
+        {"name":"Country Basis","type":"string"}, {"name":"AD Domain","type":"string"},
+        {"name":"AD Domain Match Status","type":"string"}, {"name":"Inventory Source","type":"string"},
+        {"name":"Inventory Observation Date","type":"string"}, {"name":"Eligibility Observation Date","type":"string"},
+        {"name":"Eligibility OS Version","type":"string"}, {"name":"Eligibility Match Status","type":"string"},
+        {"name":"Autopatch Policy State","type":"string"}, {"name":"Autopatch Device Status","type":"string"},
+        {"name":"Autopatch Blocking Reason","type":"string"}, {"name":"Autopatch Alert","type":"string"},
+        {"name":"Autopatch Observation Date","type":"string"}, {"name":"Windows 11 Policy State","type":"string"},
+        {"name":"Windows 11 Device Status","type":"string"}, {"name":"Windows 11 Blocking Reason","type":"string"},
+        {"name":"Windows 11 Alert","type":"string"}, {"name":"Windows 11 Observation Date","type":"string"}
+      ]
+    },
+    {
+      "table": "Windows Migration AD Observations",
+      "file": "WindowsMigrationADObservations.csv",
+      "uniqueKey": ["AD Object GUID"],
+      "allowEmpty": true,
+      "columns": [
+        {"name":"AD Object GUID","type":"string"}, {"name":"Device Name","type":"string"},
+        {"name":"Source Domain","type":"string"}, {"name":"OS Version","type":"string"},
+        {"name":"Intune Evidence","type":"string"}, {"name":"Autopatch Evidence","type":"string"},
+        {"name":"Country","type":"string"}, {"name":"Qualification","type":"string"},
+        {"name":"Next Action","type":"string"}
+      ]
+    },
+    {
       "table": "Device Inventory Evidence",
       "file": "DeviceInventoryEvidence.csv",
       "uniqueKey": [

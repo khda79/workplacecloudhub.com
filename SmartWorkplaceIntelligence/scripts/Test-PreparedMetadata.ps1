@@ -1,4 +1,4 @@
-﻿[CmdletBinding()]
+[CmdletBinding()]
 param([Parameter(Mandatory)][string]$TestRoot)
 Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
@@ -102,6 +102,13 @@ try{
     }
     $auto=Fixture 'automatic';Initialize-PreparedMetadataNames -OutputRoot $auto.Root -TenantKey synthetic
     Check (Test-Path (Join-Path $auto.Root 'current.json.txt')) 'Owner initialization did not integrate conversion'
+    $canonicalPointerHash=(Get-FileHash (Join-Path $auto.Root 'current.json.txt')).Hash
+    $canonicalLock=[IO.File]::Open((Join-Path $auto.Root '.publication.lock'),'OpenOrCreate','ReadWrite','None')
+    try{Initialize-PreparedMetadataNames -OutputRoot $auto.Root -TenantKey synthetic}finally{$canonicalLock.Dispose()}
+    Check ((Get-FileHash (Join-Path $auto.Root 'current.json.txt')).Hash -eq $canonicalPointerHash) 'Canonical feed initialization unnecessarily entered metadata conversion'
+    Move-Item -LiteralPath (Join-Path $auto.Folder 'batch.json.txt') -Destination (Join-Path $auto.Folder 'batch.json')
+    Initialize-PreparedMetadataNames -OutputRoot $auto.Root -TenantKey synthetic
+    Check (-not(Test-Path (Join-Path $auto.Folder 'batch.json'))) 'Canonical root hid legacy batch metadata'
 }finally{
     & $transport {param($p)Set-Item Function:script:Get-SmartM365JsonTransportPolicy $p} $originalPolicy
     & $metadata {Remove-Item Function:script:Get-SmartM365JsonTransportPolicy -ErrorAction SilentlyContinue}
@@ -112,6 +119,10 @@ try{
     function Get-Item {param([string]$LiteralPath,[switch]$Force) $script:seen.Add($LiteralPath);[pscustomobject]@{Attributes=[IO.FileAttributes]::Directory}}
     Assert-PreparedUnlinkedPath '\\synthetic-server\synthetic-share\DATA\DATA-POWERBI'
     if($script:seen.Count -ne 3 -or $script:seen[-1] -ne '\\synthetic-server\synthetic-share'){throw 'UNC traversal escaped share root'}
+    function Get-Item {param([string]$LiteralPath,[switch]$Force) [pscustomobject]@{Attributes=[IO.FileAttributes]::ReparsePoint}}
+    $linkedRejected=$false
+    try{Assert-PreparedUnlinkedPath 'C:\synthetic\DATA-POWERBI'}catch{$linkedRejected=$_.Exception.Message -eq 'Metadata conversion refuses linked paths.'}
+    if(-not $linkedRejected){throw 'Legacy conversion link guard was weakened'}
 }
 $script:checks++
 Write-Host "PASS: $script:checks metadata conversion, compatibility, integrity, preview, idempotence and safety checks. Synthetic data only."
@@ -119,8 +130,8 @@ Write-Host "PASS: $script:checks metadata conversion, compatibility, integrity, 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD1+iO4uemRThEt
-# WRB0RN4NUeGWNTiSo/qvh4DxDvqQ+qCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBVNyInEveoQTBg
+# 0GSCWL9Ld4vfKlvfCgmNjfWsA6NLzaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -253,31 +264,31 @@ Write-Host "PASS: $script:checks metadata conversion, compatibility, integrity, 
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIGhFCrJVt5bVusqz3FXQK7e0OytN98QpGbbmIC9QPl/TMA0GCSqG
-# SIb3DQEBAQUABIIBgDntLp4kR3a2lAZzWT4GT7EduG3NFVm6HlwIC/BazL+9xjGE
-# 6zu8aO+xL5t1ASY3EWcxC4ZP1EUEs438mQ++74UaDuAdaloVtPv/fHVfPnlzCKBM
-# 1eGBopieQTKaKvrosaCGPmYGrOsGLhDEo58ACFDVHofzRNN6r9iicdoL7dFvVzYU
-# frlrpfsDK0aD4Rv5dPgnVPJFTglgvEijfvJevkMfN6cGcgJxiL7ONjbSUgQ0QhmR
-# KSanq589Ab3X9fBCaJKELjX9+SxvW9jIvDPIVarRhv8EN89t4EyqggwoJriFQTLg
-# 2Y1YHurOtfaUdnezZj7OpmWGe+UfXiAQDSJXB/gbIxpKoCE4I6dRMIdoXFnvVrGM
-# LxfMWEnAQSGDMxoSXuW3ErnadXb3ENB9YeNqK6ZB3Nv6uEwiyfrIWFGcOM8l9NJC
-# jHn4ygkR30IxpnhwrxtELmvRLqVtdSYrsi6wRxsyomdU4v/0XC2GOmCCmw2JDpDk
-# xezvweFI2aU1NwnakaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIMQN/8hKD0VP8TLPzSuokXFFrrq2VduUO6HnzCL4lc0XMA0GCSqG
+# SIb3DQEBAQUABIIBgHo+dOLXtIhbxv+3eEdHbwg2Xbmtsz46YNtQRY8sz3cc3hwZ
+# 1lPdtBFpXYeqWChLnmekTc4lnbGjnjLtI09S/LliL9KPFAvzvJmJapd4s5L+Qg2j
+# hk+NXfFsl+4+naECPA7beOE9uV4IG+Y2q9E1O8gBdw5rVahYm+bYOsxxwcfs4we3
+# 5Xhf4HuHsHPk6YPH4fili11OYIL0EZnaaZuQAKvdZjKoAx4cpLgm6fk4NPDzVCFy
+# tr3HVoqCmj5SvyJfzsHslHITD8zbL5wnMdERzgnlYDYzuiz1/x7zhZ2rcXn9MQFy
+# aXJPVd9cFmUikBufzvuryplcRY44An/hKxTE/Ovpkvjwh2JbWVHDw17bhQI3tUKP
+# JpkzCFY8O+CTF7amMqEJN0vI+sDfpxkNFqSvEJ05ilW+Fl/3pIbkxsEFZ58UASvN
+# f8PBWNVEvLtvLyhWfPOBMVyoOY8O+vSQzyRmR2VulHQBYzRJuRnibWkU1rod2xqr
+# zGUNRPs9+xoHcPxwyKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcxNjU4
-# MDBaMC8GCSqGSIb3DQEJBDEiBCDVJTVvN5HZi4zePSJfCTEhouPQrc0mybIuWK0i
-# qTbHrzANBgkqhkiG9w0BAQEFAASCAgCsUoagmp01Ulw/YHbi/NK8svfxahgZYCj6
-# HgCqEEBOn7R/H8efuNPykXj1Gxb+RwTyKTnXiK07wRTGf2blx1l8v/DeCvYegghS
-# IYSuIM+M2Rb49YlkQGxkBHbFxujtS5fMZCHL71p2xWowpt9bnDGIniYDg/NbCRPS
-# GdQu68nLcdgrFq9sG/JKrbEgQoMiqchmim8ZEFMT0RmbKCybyJEZDAqC0I/cqVcR
-# u7qCqqxJx5LIzFtpnP9hyAfpL1s7c1y2Urfs/KHjPFGoFZJgr306Vl4Fx5Pdl2Gp
-# S6wbRV1P2uhWcYz8pkokNXUKxHa4TFH7+RVgIrFXe9s7sw4tc8ese+6uvoXkDgqr
-# zq+5ZbZS9JSqR3UQvXZ4ZRFNYZqLigkZWz8zhjU+rYTn9d0GVZExgzke5Y7l7/7V
-# 7L6NKfp1bW0esrsKH3Kpe7wadMtz685hNzD0Aszb8B1KYejmHFudYS8T54MeO0a9
-# u+9d51qtPD2vAZ/Beko2SOaTMNpbE1+qzJb1a9Z/0p6LeWV/Vszv/ewXdXU4xtzf
-# DOQGGHHGTlM/U0JzUATllt50dpAdfIJmnuaIJQNSqxH3qcVv+q9OfOFr/3invbh3
-# y1NIkQL6vPfDMasuRKsFR6s4vuXJSr7o77SNAoLf0RSkAp1pCHbDn8T1E0I3339+
-# hH+HzLVftQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDkxNDQx
+# MDJaMC8GCSqGSIb3DQEJBDEiBCBA5SFzT2X3pmW/S7VCDDzIOtKXPaDugLFBRI05
+# ZiAtmDANBgkqhkiG9w0BAQEFAASCAgBUQYefx2I19yhmBhHKLg1pr4KpLYvFNCgD
+# lY2qTFv0NcUsmFkiR/DF2/MTzzVkTpH3AY+3SlcxjbfP//84h18loIOblZhGViee
+# 9FRZChCFVaKGUCMefDrMvMVGvRkcCw4M55dJGtefyY6lDhQUx0PJc/5jO9ZqD5G/
+# xiFE0HHcbulcBPctb1Yr4J355Q7K2nyBS1sc6xtrXZDiajw8WsHFfBNKieBb+v0L
+# bYJW1Fwfob3mGiAy2w2e8UrgvCTXMZTZJO/L7Vh0LEBRpKwn9R5KP0dUxIDvjz9V
+# UfmkZ5ps3n7LiXWKveTf8Tkx/bEDwdlUmlZ0q/xoKlsox6pzqY4q4fiXaRI3tfuz
+# MzhAfZM5+3OGEOMimMIjmDfPV2hiAFaqHwPPe6sNJRWMvwGrCqeTP83QXD45/qhC
+# p74Od9ZY69DuPxbtziBicewvHYpFr/QQfARfwK8//lXl46687QEz94POtSzZNqxT
+# MPWowtUHAYHAI+M+wfF6HRTDiOnwO8JBknkgRKtTaIw07oR0rZSpFTwR+mvkMge/
+# ru8t/OXObHxnCcM9nDL/rKjaVtoVKOLNaqpiT0Xvi7GtUU0M4Dp5JmRezpFhZptt
+# yYQituhBhJC+2c7QEPHjpKI3IRvYVCAZIhx90kjP4R8XMWkbo/k8ON5b4JsbG6Zp
+# ClbMg8YXUQ==
 # SIG # End signature block
