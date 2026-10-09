@@ -11,6 +11,8 @@ $cards = @(
 )
 $grid = New-SmartM365EmailKpiGridHtml -Cards $cards -RowSizes @(2)
 $table = New-SmartM365EmailTableHtml -Headers @('Name','Status') -Rows @(@('A&B','Online'),@('C','Offline'))
+$nowrapTable = New-SmartM365EmailTableHtml -Headers @('URL','Pool') -Rows @(,@('https://example.test/a','Pool Name')) -NoWrapColumns @(0,1)
+if ($nowrapTable -notmatch '<td nowrap="nowrap"[^>]*>https://example\.test/a</td>' -or $nowrapTable -notmatch '<td nowrap="nowrap"[^>]*>Pool Name</td>') { throw 'Column-specific no-wrap rendering failed.' }
 $html = New-SmartM365EmailBody -Title 'Layout fixture' -Category 'SmartM365 Fixture' -Severity Warning -Tenant 'fixture' -HostName 'fixture-host' -GeneratedAt '2026-10-09 00:00:00 +02:00' -StatusBadge 'PARTIAL' -Duration '00:00:31' -Message 'Fixture message.' -Sections @([pscustomobject]@{Title='Summary';Html=$grid},[pscustomobject]@{Title='Objects';Html=$table})
 foreach ($expected in @('background:#0f172a','Tenant: fixture','Host: fixture-host','PARTIAL','Duration: 00:00:31','A&amp;B','16.0.10417.20198','border-collapse:collapse')) {
     if (-not $html.Contains($expected)) { throw "Email layout lacks $expected" }
@@ -23,8 +25,8 @@ Write-Output "PASS: $($PSVersionTable.PSEdition) email layout, SHA256=$hash"
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA8ilx7smQYz5g5
-# gcsquJVfTAMGYULJubYTDz9e0mcDP6CCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAs5/38CC50m5TL
+# F+E712d0Xw3s+6fZculpcFUBuil1NqCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -54,14 +56,14 @@ Write-Output "PASS: $($PSVersionTable.PSEdition) email layout, SHA256=$hash"
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCBGxX41+tcYAKLkTqN/jZFo
-# tbA12RpGjrdD7Y//Oa4FyDANBgkqhkiG9w0BAQEFAASCAYCHF4sa22Mx/Myi2e7N
-# u0Ze/ztbp77ZyRg/NLrgjIWdRBMKH3PenhStE6fc5bkwqrKgx5o4EEftaBcjCtsU
-# OsSsA8GeOXUu/WBPe7tE8O0oCD1x9SfsvuwjKhb9+g3McvUHeS0JGsB/bCTQkYjR
-# nDsbOKdtAatUKGRSKtQmBvN4P5FxTYN/8gTE95LFuRxZS0ziicMGPne2WJZQzMn7
-# QeMlAmDJK8fe1QbT0ca0YZKcbe8dzueC7yY0u7Fg+0QFURCmT/I7R5qUlVpN/2UV
-# KTZCYoX3yvUFfRORb34Uu/TUg+CHWMze393qY8qFgY89Dg2mxf6omusnkvFMIsGJ
-# lG8EmNsMbaOhIp9scdOJrCKN0Lx3eLMpcI6Q+pQUTocdYWkrMO51xa+tgojfjkme
-# uwXreEcECY54WyzdUutS5NWoN/mE8uqa7Ic8GoS3Xh7GiEiWCnm9wKyPMSZThCsk
-# 45RpHqLkjW/UhNzjq8RQdrvzs8vv2dzkaJRXzBfqe3ZAu4U=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCCW1X/B4Zdx6dzIxfiGke/l
+# FVOLn4KubOr+/FYaGbyBujANBgkqhkiG9w0BAQEFAASCAYAnl6RpbNyPfNQOteej
+# 7Qd+LkSnejMBrhcMpua0IFS+Oc1/8p0C6PMxZFKXSVKI/m1KkBMDrDf7FBahzUeQ
+# Qa0acbUazlCkquIc9GezVSdwOqEUDmPxezXmgOo7UTlak580+TM1aqqPmaOiLVNX
+# WPTiRdYLpxZC5CmrzCRyOBStVbuQo5HjXjuD1aMCT50oJyVguQPk7aEDbULZycQF
+# IL/iUci8uXlGreb/G+KOPvWDwwlKE3vfXAq4DrZ1sZuPagxhwSdSMsQV0TbZCxXE
+# WFqWLyLFJyyiwCO8QKHh44Yzz9ToXs+qKyqwBMTn+d2Tkn0+wTrKAvtCHfIOaWRX
+# hugMmQXdkLq8ztd2taPEtP1ajuvMLUMo2te3MZTQsrtzMq7w20ctz9e3d05GKc9S
+# v30yxBtcxEurZy1tJBhcrmbtk+PTqZ3zQLth/Aab4QPxn3739nJjwYAW3NS8R9dd
+# zSQy8alKgsATzJGHATdS/hTfspOQVgE8LumIHJI7iF4RvFA=
 # SIG # End signature block

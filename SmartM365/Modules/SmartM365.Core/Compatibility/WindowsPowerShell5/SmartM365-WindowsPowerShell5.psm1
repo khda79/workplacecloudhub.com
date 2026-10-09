@@ -2309,10 +2309,20 @@ $($rows.ToArray() -join "`r`n")
 
 function New-SmartM365EmailTableHtml {
     [CmdletBinding()]
-    param([Parameter(Mandatory)][string[]]$Headers, [Parameter(Mandatory)][object[]]$Rows)
+    param([Parameter(Mandatory)][string[]]$Headers, [Parameter(Mandatory)][object[]]$Rows, [int[]]$NoWrapColumns = @())
     $head = @($Headers | ForEach-Object { '<th align="left" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px;color:#475569;text-transform:uppercase;">{0}</th>' -f (ConvertTo-SmartM365EmailHtmlText $_) }) -join "`r`n"
     $body = foreach ($row in $Rows) {
-        $cells = @($row | ForEach-Object { '<td style="border-bottom:1px solid #eef2f7;padding:9px 10px;color:#334155;word-break:break-word;">{0}</td>' -f (ConvertTo-SmartM365EmailHtmlText $_) }) -join "`r`n"
+        if ($NoWrapColumns.Count -eq 0) {
+            $cells = @($row | ForEach-Object { '<td style="border-bottom:1px solid #eef2f7;padding:9px 10px;color:#334155;word-break:break-word;">{0}</td>' -f (ConvertTo-SmartM365EmailHtmlText $_) }) -join "`r`n"
+        } else {
+            $renderedCells = New-Object 'System.Collections.Generic.List[string]'
+            $rowValues = @($row)
+            for ($column = 0; $column -lt $rowValues.Count; $column++) {
+                $cellStyle = if ($NoWrapColumns -contains $column) { ' nowrap="nowrap" style="border-bottom:1px solid #eef2f7;padding:9px 10px;color:#334155;white-space:nowrap;word-break:normal;"' } else { ' style="border-bottom:1px solid #eef2f7;padding:9px 10px;color:#334155;word-break:break-word;"' }
+                $renderedCells.Add(('<td{0}>{1}</td>' -f $cellStyle,(ConvertTo-SmartM365EmailHtmlText $rowValues[$column])))
+            }
+            $cells = $renderedCells.ToArray() -join "`r`n"
+        }
         "<tr>$cells</tr>"
     }
     return "<table role=`"presentation`" cellpadding=`"0`" cellspacing=`"0`" style=`"width:100%;border-collapse:collapse;border:1px solid #d9e2ec;font-size:12px;`"><tr>$head</tr>$($body -join "`r`n")</table>"
@@ -5247,8 +5257,8 @@ function Export-SmartM365Csv {
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAsr1zP6BQ0rCLC
-# mOoLBrzpe8oSo6bsJc2PAXVrbRDbOqCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDBx9EMsig4sTb2
+# GHra6cdVMlHXhh+3GCR/uWl1aane2KCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -5278,14 +5288,14 @@ function Export-SmartM365Csv {
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCDE5Fv3w/lsuMM2mrnuWjlO
-# 243Y/rWctr/emqVCNXHNFzANBgkqhkiG9w0BAQEFAASCAYB6WT6++wYx203qplna
-# TV+auhLjgqLvXrgoEkf0gLAPK1aH9Epr4bsCWYqDORWsBRXOinfm8G12TFw87PzD
-# /6vLYqeqM4AdAOpkN36P37Y+VVhZfdD16t+y1GaDdWyrrWW/j4egrhpHHdqbcmo3
-# zrn+gSEoW1PtJnX4V2FTFbqtpIPs4HGqHe/7dHbpCS+Hlsm7VYTys13GHZOt6Oot
-# MaEiPjkE+TbSynQz6ZnkfPy1SkrybWQvq+UhlD15yMGHsVk5ZY9453LWegnkKjWR
-# uYg3Mh6tHjj5Kx80O3UkGAQzK6sjB08gy83b2ezQDV4QP0cFF3f7x34GcAAylT8x
-# lQBluiDtamsNq+hhTgYZOvOwIxzZSR9rs3jFJxUvRfQghP7+xje+pDVNMv5zDACE
-# ZWV68oJe7TYI8cEVQO5KDwWV5wtgrpE3oZ1xFw1Tq/N1E+3Cgq290vvCmC7UxKxW
-# nacN/FU+1eSiCIqlae2TG1cJIuO2KQZFvEBcAOVcEbOsyUc=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCAPspZYpI7mWSPQfZ7XSjPY
+# e2UakmTaCoXqLMgs16S/ZTANBgkqhkiG9w0BAQEFAASCAYAZxB4svoIsZPRkjeRS
+# 1Q1FZ+cpIu/X6vqLwSVvFxqz+7y/RxCyYojRZ+A0QZtw/Q1HW16avTMGimOpVfOS
+# Z9t+40HXjbW/GCSSS7MYuxlWsrd1XSKHkORVSpMKX/xuwfrkCnJ8LAd15kcPXMkO
+# cezJKdgw65lkUvK7KLIVm3t/3Sr9l9GUBraaYomT2FlSTKT3JjxOmPuTlrBh8YpI
+# asPT/i3oWvnD7jitSa8otm5FlM72ONQw1Nw6uYUrd0oPu82ibrMVcp7YDzNzvz+i
+# UXsmc5WVYUHHtnzeDqk18Yb0Cv+iV1g0SG7swLQ5IMlPmWz6wYV9vlFPDKktFTC6
+# dvnFED7ikTo4GpPhEd11zHwDylN3ma3D1Twk++sJ9xFkBjHZhLwRJ/UBTm9/weuO
+# yHL8SbuHHV51LhHPqkGxBVRFYOeYoRP7R5YUFMekG1fHjuA4WXTjVBvMr8d2ZF2t
+# 7sop4OJ+IVR7GpvnBNXYYq7ifCyN0oVLAK3rkS6EaaO4wGM=
 # SIG # End signature block

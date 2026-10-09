@@ -3285,10 +3285,20 @@ $($rows.ToArray() -join "`r`n")
 
 function New-SmartM365EmailTableHtml {
     [CmdletBinding()]
-    param([Parameter(Mandatory)][string[]]$Headers, [Parameter(Mandatory)][object[]]$Rows)
+    param([Parameter(Mandatory)][string[]]$Headers, [Parameter(Mandatory)][object[]]$Rows, [int[]]$NoWrapColumns = @())
     $head = @($Headers | ForEach-Object { '<th align="left" style="background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:10px;color:#475569;text-transform:uppercase;">{0}</th>' -f (ConvertTo-SmartM365EmailHtmlText $_) }) -join "`r`n"
     $body = foreach ($row in $Rows) {
-        $cells = @($row | ForEach-Object { '<td style="border-bottom:1px solid #eef2f7;padding:9px 10px;color:#334155;word-break:break-word;">{0}</td>' -f (ConvertTo-SmartM365EmailHtmlText $_) }) -join "`r`n"
+        if ($NoWrapColumns.Count -eq 0) {
+            $cells = @($row | ForEach-Object { '<td style="border-bottom:1px solid #eef2f7;padding:9px 10px;color:#334155;word-break:break-word;">{0}</td>' -f (ConvertTo-SmartM365EmailHtmlText $_) }) -join "`r`n"
+        } else {
+            $renderedCells = New-Object 'System.Collections.Generic.List[string]'
+            $rowValues = @($row)
+            for ($column = 0; $column -lt $rowValues.Count; $column++) {
+                $cellStyle = if ($NoWrapColumns -contains $column) { ' nowrap="nowrap" style="border-bottom:1px solid #eef2f7;padding:9px 10px;color:#334155;white-space:nowrap;word-break:normal;"' } else { ' style="border-bottom:1px solid #eef2f7;padding:9px 10px;color:#334155;word-break:break-word;"' }
+                $renderedCells.Add(('<td{0}>{1}</td>' -f $cellStyle,(ConvertTo-SmartM365EmailHtmlText $rowValues[$column])))
+            }
+            $cells = $renderedCells.ToArray() -join "`r`n"
+        }
         "<tr>$cells</tr>"
     }
     return "<table role=`"presentation`" cellpadding=`"0`" cellspacing=`"0`" style=`"width:100%;border-collapse:collapse;border:1px solid #d9e2ec;font-size:12px;`"><tr>$head</tr>$($body -join "`r`n")</table>"
@@ -6307,8 +6317,8 @@ Export-ModuleMember -Function `
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDQoMZ+CcH7+ZMM
-# np1Pgn8BmsQCTMDDwOQOmD4dP0iCfqCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDO5PqmdqZISMnw
+# j+Qjva7x8fGM8dpyJN7SeUeCIgAhtKCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -6338,14 +6348,14 @@ Export-ModuleMember -Function `
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCBPJpozlYvDkvraF3zlMyep
-# 9EIEVwa6jqbkEDmvSZ/pyzANBgkqhkiG9w0BAQEFAASCAYBbSMYpWxT6Z9ewpzAT
-# iMISwYJHMC6QMYwn+TxntavnunH+dAqaqiTxQ+vTQgRtPXtG8dIMJIjolUv6iCTt
-# edBdjTFAeL2AgIxoZkGMHn5g3dhN3QLSMHxpeWqCT5cTPS2wZZAm2m+UcXC/9ZhI
-# Dc45U9oo6lmSXngsS6bpidBifP3JJMW2a+btI057o4uvbh/JNtwISpIxj2Nx9UCO
-# NaRSoB7aBYr6kOb/mD+BGWvcsMfcKUAxTo1d/e2l9MMK//n0AxCQGsaf9oX/kc7N
-# z2AH75FJCnIBy9IYtYJvz8L9NMWDwI7YfTrMIGm/zpEr9dzvUXvYDtE8gMvAhB9o
-# G4/t0I8AQ53oj+kyRVEqp+8jnPuycClxh6hffYdUhBHSWrvGmmjYAPutlARO+e8V
-# X0WdbOAZE45IOdDumwJ4Uy9YhkMej3bz6AUnTu18QeuTWg5mbKuu0ePoAx2I4ayz
-# mxKUtccgEwBlMUFxURYQ1hNSptf6lY4orefT2FlwVAQeb5s=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCCoMCV3xfCFtQiVjxQumjXz
+# RkQSVN9U3/OYv4JDQlnbLjANBgkqhkiG9w0BAQEFAASCAYBNQvJCe08Iy9vkaZzy
+# yOXDyKVvabK3WLU+ahq10gtwoLe8xdOkyDy0DDstP3dicvdLejt+/3VKEBXLw8cK
+# nANBFz3foWp0gFJYxAa5QZiCNMkNbyMlOqfyV/K0V89kGEqhIBwRsFxkuiGe9dkj
+# Ff9Bv0IZNCWAyIoKt9c3CY2Ydi4aR/Xwg57mLVp+QEY4KTP/0ktKBYQbtwsMpaj0
+# bk60sT85hjdY8w8DiPGaRVkkQiX1MlXFEqk4tPjMrMbKI+E+TPehvw6oShm8nYLd
+# 7H0opHwRHDrgf2qXFhmmm3peh5GwSkfnva56soyu1Lepw3jbr2ReVryLeku3KuUR
+# oH0ZuSd8QzHK0/0Is9DUvcTLzcgblOf2GYqMtDJH6Nti+0RkVG0P+V8INfJcUV43
+# tfuYZpvHsoH70d+Tq+Jc++wscBPf/gDOJ9KGdEDKCGsCwspfslDV8hyRvrND9dU/
+# gqX9JZNCsO2FLxHaFQl3kpZxtuYslypPdIvIOT62LXUR7xQ=
 # SIG # End signature block
