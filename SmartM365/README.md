@@ -221,3 +221,7 @@ Scripts should call `Send-SmartM365TeamsNotification` from `Modules/SmartM365.Co
 - `-Channel Alerts` or `-Channel Infos` can be used when a script must force a destination.
 - `-ResultSummary` should be provided for every `Infos` notification when the script has meaningful counters or output details. If omitted, the module adds a `Result summary` fact from the message text as a fallback.
 - `-HelpUrl` should point to a prefilled AI troubleshooting prompt when reporting a detailed script error.
+
+## SharePoint Server on-premises inventory
+
+`SmartInventory/SharePointInventory/OnPremises/` contains two read-only SharePoint Server 2016/2019 collectors. Run them with Windows PowerShell 5.1 x64 on a farm server after an administrator has granted SharePoint Shell and required content read access. Infrastructure and Content have separate current CSVs and source receipts. Automatic SharePoint upload and orchestrator scheduling are disabled in this first lot. See the folder README for scope, lock-state caveats, and manual commands.

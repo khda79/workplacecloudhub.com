@@ -1,0 +1,17 @@
+{
+  "WorkspaceRootPath": "__USE_GLOBAL__",
+  "DataAllRootPath": "__USE_GLOBAL__",
+  "LatestCsvFolderPath": "__USE_GLOBAL__",
+  "LogAllRootPath": "__USE_GLOBAL__",
+  "RetentionMaxCSV": "__USE_GLOBAL__",
+  "RetentionMaxLogs": "__USE_GLOBAL__",
+  "ErrorMailTo": "__USE_GLOBAL__",
+  "EnableTeamsNotifications": "__USE_GLOBAL__",
+  "EnableSharePointUpload": false,
+  "IncludedWebApplicationUrls": [],
+  "ExcludedWebApplicationUrls": [],
+  "OutputRoot": "{{DataAllRootPath}}\\SharePoint\\OnPrem\\Content",
+  "EnableWeeklyHistory": true,
+  "WeeklyHistoryFolderPath": "{{DataAllRootPath}}\\SharePoint\\OnPrem\\Content\\WeeklyHistory",
+  "WeeklyHistoryRetentionWeeks": 52
+}

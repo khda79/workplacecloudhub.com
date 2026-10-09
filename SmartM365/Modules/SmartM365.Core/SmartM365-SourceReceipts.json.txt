@@ -125,6 +125,32 @@
       ]
     },
     {
+      "Script": "SmartM365-SharePoint-OnPrem-Infrastructure-Inventory.ps1",
+      "Receipt": "SmartInventory_SmartM365-SharePoint-OnPrem-Infrastructure-Inventory.current.json.txt",
+      "Scope": "ConfiguredOutputs",
+      "Files": [
+        "SharePoint_OnPrem_Farms.csv",
+        "SharePoint_OnPrem_Servers.csv",
+        "SharePoint_OnPrem_ServiceApplications.csv",
+        "SharePoint_OnPrem_WebApplications.csv",
+        "SharePoint_OnPrem_WebApplicationZones.csv",
+        "SharePoint_OnPrem_ContentDatabases.csv"
+      ],
+      "OptionalFiles": []
+    },
+    {
+      "Script": "SmartM365-SharePoint-OnPrem-Content-Inventory.ps1",
+      "Receipt": "SmartInventory_SmartM365-SharePoint-OnPrem-Content-Inventory.current.json.txt",
+      "Scope": "ConfiguredOutputs",
+      "Files": [
+        "SharePoint_OnPrem_SiteCollections.csv",
+        "SharePoint_OnPrem_SiteAdministrators.csv",
+        "SharePoint_OnPrem_Webs.csv",
+        "SharePoint_OnPrem_CollectionCoverage.csv"
+      ],
+      "OptionalFiles": []
+    },
+    {
       "Script": "SmartM365-Mailboxes-AllSources-PermissionsByUserReport.ps1",
       "Receipt": "SmartInventory_SmartM365-Mailboxes-AllSources-PermissionsByUserReport.current.json.txt",
       "Scope": "ConfiguredOutputs",

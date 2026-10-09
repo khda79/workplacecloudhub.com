@@ -66,6 +66,7 @@ device-status date. A policy modification date is not substituted for it.
 - `ActiveDirectoryInventory/`: Active Directory inventory and reporting.
 - `ExchangeInventory/`: Exchange Online and Exchange on-premises inventory.
 - `M365Inventory/`: Microsoft 365, Entra, Power BI, and Microsoft Fabric inventory.
+- `SharePointInventory/OnPremises/`: independent SharePoint Server 2016/2019 infrastructure and content collectors; manual farm-server execution, no orchestrator job or automatic upload.
 - `M365Inventory/IntuneInventory/`: Intune inventory, Windows Update reporting, Autopilot, RBAC, applications, and remediation export utilities.
 - `M365Inventory/IntuneInventory/EndpointAnalytics/`: standard Endpoint Analytics score, startup, app reliability, and work-from-anywhere exports without Advanced Analytics.
 - `M365Inventory/Security/`: Secure Score, authentication-method registration, and Conditional Access configuration evidence.
