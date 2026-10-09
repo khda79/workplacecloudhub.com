@@ -12,7 +12,7 @@ $ast = [Management.Automation.Language.Parser]::ParseFile($scriptPath, [ref]$tok
 if (@($errors).Count) { throw "Content parser errors: $($errors.Count)" }
 $template = Get-Content $templatePath -Raw | ConvertFrom-Json
 if ($template.EnableSharePointUpload -ne $true -or $template.EnableWeeklyHistory -ne $true) { throw 'Content template policy is invalid.' }
-if ($ast.Extent.Text -notmatch '(?s)\.VERSION\s+1\.0\.3') { throw 'Content version was not updated for the startup order fix.' }
+if ($ast.Extent.Text -notmatch '(?s)\.VERSION\s+1\.0\.4') { throw 'Content version was not updated for the database-scoped lock filter.' }
 $firstUploadConfigRead = $ast.Extent.Text.IndexOf('$global:SharePointSiteHostname =', [StringComparison]::Ordinal)
 $resolverDefinition = @($ast.FindAll({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Resolve-InventoryConfigTokens' }, $true))
 if ($firstUploadConfigRead -lt 0 -or $resolverDefinition.Count -ne 1 -or $resolverDefinition[0].Extent.EndOffset -ge $firstUploadConfigRead) { throw 'Content reads upload configuration before the token resolver is defined.' }
@@ -23,6 +23,7 @@ if ($ast.Extent.Text -match '(?im)^\s*(Set-SPSite|Set-SPWeb|Set-SPContentDatabas
 if ($ast.Extent.Text -match '(?im)^\s*Get-SPSiteAdministration\b') { throw 'Lock inspection must use SPSite and SPContentDatabase only.' }
 if ($ast.Extent.Text -notmatch '(?m)^\s*\$site\s*=\s*\$_\s*$' -or $ast.Extent.Text -match '(?m)^\s*param\(\$site\)') { throw 'Streaming site pipeline input is not bound to the current site.' }
 if ($ast.Extent.Text -notmatch '\$runBase\s*=\s*if\s*\(\$MaxItems\s*-gt\s*0\).*?TEST' -or $ast.Extent.Text -notmatch 'Select-Object\s+-First\s+\$remaining' -or $ast.Extent.Text -notmatch 'Flush-RunRows\s+-Kind\s+CollectionCoverage') { throw 'Limited or per-site coverage path is missing.' }
+if ($ast.Extent.Text -notmatch '\$databaseLockLookup\s*=\s*Get-LockStateLookup\s+-ContentDatabase\s+\$database' -or $ast.Extent.Text -match 'Get-LockStateLookup\s+[^\r\n]*-SiteUrl') { throw 'Limited runs must use the database-scoped lock-state lookup.' }
 foreach ($name in @('Get-InventoryConfigValue','Resolve-InventoryConfigTokens','Assert-InventoryPath','Get-ObservedProperty','Test-MissingObservation','Resolve-SiteLockObservation','Get-LockStateLookup','Assert-Deadline','Get-CollectionFailureStatus','Get-DatabaseCoverageStatus','Write-RunCsv','Flush-RunRows','Invoke-DailySummaryMail','Send-InventorySummaryMail','Publish-QualifiedCsvUploads')) {
     $functionAst = @($ast.FindAll({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name }, $true))
     if ($functionAst.Count -ne 1) { throw "Missing function: $name" }
@@ -67,6 +68,8 @@ $script:MockIgnoreFilter = $false
 function Get-SPSite {
     [CmdletBinding()]
     param([string]$Identity, $ContentDatabase, [scriptblock]$Filter, [string]$Limit)
+    if ($Identity) { throw 'Identity cannot be combined with the lock-state filter.' }
+    if ($null -eq $ContentDatabase -or $Limit -ne 'All') { throw 'The lock-state query must cover the content database.' }
     if ($Filter.ToString() -notmatch "'(Unlock|NoAdditions|ReadOnly|NoAccess)'") { throw 'An unsupported lock-state filter was used.' }
     $requestedState = $Matches[1]
     if ($requestedState -eq $script:MockFailState) { throw 'MockFilterFailure' }
@@ -80,8 +83,6 @@ function Get-SPSite {
 }
 $lookup = Get-LockStateLookup -ContentDatabase $database
 if ($lookup.States.Count -ne 2 -or $lookup.States['site-a'] -ne 'Unlock' -or $lookup.States['site-b'] -ne 'NoAdditions' -or $lookup.Errors.Count -ne 0) { throw 'Database lock-state lookup failed.' }
-$limitedLookup = Get-LockStateLookup -ContentDatabase $database -SiteUrl 'https://example.test/a'
-if ($limitedLookup.States.Count -ne 1 -or $limitedLookup.States['site-a'] -ne 'Unlock') { throw 'Limited lock-state lookup traversed the wrong site.' }
 $script:MockFailState = 'NoAccess'
 $failedLookup = Get-LockStateLookup -ContentDatabase $database
 if ($failedLookup.Errors.Count -ne 1 -or $failedLookup.States.Count -ne 2) { throw 'Lock-state query failure was hidden.' }
@@ -165,8 +166,8 @@ Write-Output 'PASS: content parser, nested configuration, persistent paths, lock
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC4hUQZAlb244JP
-# 2pw9KUKqHuyi++ocUu16UvRJEbb5KaCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAKhE154g3IviCz
+# PfRpUNQPpKOn217HykIvL+Z7ZepPs6CCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -196,14 +197,14 @@ Write-Output 'PASS: content parser, nested configuration, persistent paths, lock
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCCedsqG8tqURb8Gnxb5jT+m
-# kJvRgOgo99P7aJEKXAYqjTANBgkqhkiG9w0BAQEFAASCAYB2pmQThHzUiwk7Blcs
-# er1Qo4MHrFF5H6oq/ScTpdtQh/jUUNHPNNUWLZF8h37AFFMOUSQ3sR0QGdaeBVXb
-# yKEXmShnuKFQGVxd9GIEacURCQCte+tsuVMO1yBRSdIqUzjvzPLezhG+jDOspaDg
-# NA5U6AhrXeHBSTRiDrH+49GRiAOpv0NSQAm0++q4fyJbCbbQHBIri08YaC3VbwaK
-# 5QNF3CM5lBPA9HTDy1g2jyKoBP3J4Pf86sFssfQQnjiAtrMBbVwXeUiBjrFZjn4w
-# taHyOyUUvqYLyH2CoIRryW0H0quxvmn2Oktb5GrdNY1ddrFKIscjRTC+o+ILxIuM
-# BEXDdxEQe6yyrilTMPMqffAtr7cGLNh9i1wHe50bxoFF6rYI65vUAcctJs58rFWe
-# accrIO/dx9XgkA7odocTvEKkiscJrwM2hOUGVNN2yhClo6/WRO2FZ1Zzy5mPheuo
-# R4rJncC+NPVZeAxhVttDF7hghk5N5fYuugcfZHk//l8WKGI=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCAlPgJSOtYrNBti/64p2fU1
+# N1KwgctMnU/5xp6XqIeaEjANBgkqhkiG9w0BAQEFAASCAYAWKC4VpCHuau6sfLsM
+# Eo5mjGKv+gUQ3kRLsWPYqUpK9zVdChUbtGzP2g63Iv2X9ncQP488OIBApzPaHBra
+# 7FUK12TbJXywLD3A5tkPFTDQzn0btNlVHMfuB7Ju9D27rDnXD4hlIseBxqvyJVPB
+# X9fNs3y4UsoeIEQhmnNQOyv3qWnpM/Bqe8RPdLm4sGWVaOiPk+EShiQdWGHsgJTq
+# R6WY3slmwikZtT7pvPVCz7+msUZkYSqUvKNJH6lkvqk5bIaZYS6yjhSyRFK0yWwb
+# JszjLoiIzV7VWDWC580yfJSyhu4d4oZAz39MuKadYx0iJ8Afe+KAtqI8Ziu2htAi
+# aJeNF3tla3YHJoiSH/KZnTedFHUjYv6q1tC/Kd9QjCTlOZWTo4i/GX28kA/PZUZ+
+# 4jZxiMqLlBUy0KTcOBYiVsp5B/KAVNeqdTdhRpw3WkoqU8lbkHCnmo6DAmfkxsyu
+# iX5VvvhTxLw7VhwYqZvPlSg0co2htS3tGr2IA1D4raCOHqQ=
 # SIG # End signature block

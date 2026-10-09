@@ -2,7 +2,7 @@
 .SYNOPSIS
     Read-only SharePoint Server 2016/2019 site collection and web inventory.
 .VERSION
-    1.0.3
+    1.0.4
 .REQUIREMENTS
     Windows PowerShell 5.1 x64 on a SharePoint farm server; SharePoint Shell and content read access.
 #>
@@ -195,7 +195,7 @@ function Resolve-SiteLockObservation {
 }
 
 function Get-LockStateLookup {
-    param($ContentDatabase, [string]$SiteUrl = '')
+    param($ContentDatabase)
     $filters = [ordered]@{
         Unlock = { $_.LockState -eq 'Unlock' }
         NoAdditions = { $_.LockState -eq 'NoAdditions' }
@@ -207,9 +207,7 @@ function Get-LockStateLookup {
     $queryErrors = New-Object 'System.Collections.Generic.List[string]'
     foreach ($state in $filters.Keys) {
         Assert-Deadline ([datetime]::MaxValue)
-        $query = @{ Filter=$filters[$state]; Limit='All'; ErrorAction='Stop' }
-        if ($SiteUrl) { $query['Identity'] = $SiteUrl; $query['Limit'] = '1' }
-        else { $query['ContentDatabase'] = $ContentDatabase }
+        $query = @{ ContentDatabase=$ContentDatabase; Filter=$filters[$state]; Limit='All'; ErrorAction='Stop' }
         try {
             Get-SPSite @query | ForEach-Object {
                 $candidate = $_
@@ -394,15 +392,12 @@ try {
         $remaining = if ($MaxItems -gt 0) { $MaxItems - $processed } else { 0 }
         try {
             $databaseSiteCount = Get-ObservedProperty $database 'CurrentSiteCount'
-            $databaseLockLookup = $null
-            if ($MaxItems -eq 0) {
-                $databaseLockLookup = Get-LockStateLookup -ContentDatabase $database
-                foreach ($queryError in $databaseLockLookup.Errors) {
-                    WriteLog -Message ("Content database {0} lock-state filter failed: {1}" -f $database.Id, $queryError) -Level WARNING
-                }
-                if ($databaseLockLookup.Conflicts.Count -gt 0) {
-                    WriteLog -Message ("Content database {0} returned {1} conflicting lock-state filter result(s)." -f $database.Id, $databaseLockLookup.Conflicts.Count) -Level WARNING
-                }
+            $databaseLockLookup = Get-LockStateLookup -ContentDatabase $database
+            foreach ($queryError in $databaseLockLookup.Errors) {
+                WriteLog -Message ("Content database {0} lock-state filter failed: {1}" -f $database.Id, $queryError) -Level WARNING
+            }
+            if ($databaseLockLookup.Conflicts.Count -gt 0) {
+                WriteLog -Message ("Content database {0} returned {1} conflicting lock-state filter result(s)." -f $database.Id, $databaseLockLookup.Conflicts.Count) -Level WARNING
             }
             $processSite = {
                 $site = $_
@@ -428,16 +423,9 @@ try {
                     $coverage['SiteCollectionId'] = $siteId
                     $coverage['Url'] = $siteUrl
                     if ([string]::IsNullOrWhiteSpace($siteId) -or [string]::IsNullOrWhiteSpace($siteUrl)) { throw 'Site collection identity is unavailable.' }
-                    $lockLookup = $databaseLockLookup
-                    if ($MaxItems -gt 0) {
-                        $lockLookup = Get-LockStateLookup -ContentDatabase $database -SiteUrl $siteUrl
-                        foreach ($queryError in $lockLookup.Errors) {
-                            WriteLog -Message ("Site collection {0} lock-state filter failed: {1}" -f $siteId, $queryError) -Level WARNING
-                        }
-                    }
                     $filteredLockState = ''
-                    if ($lockLookup.States.ContainsKey($siteId)) { $filteredLockState = [string]$lockLookup.States[$siteId] }
-                    $lock = Resolve-SiteLockObservation -Site $site -ContentDatabase $database -FilteredLockState $filteredLockState -FilteredLockConflict $lockLookup.Conflicts.ContainsKey($siteId)
+                    if ($databaseLockLookup.States.ContainsKey($siteId)) { $filteredLockState = [string]$databaseLockLookup.States[$siteId] }
+                    $lock = Resolve-SiteLockObservation -Site $site -ContentDatabase $database -FilteredLockState $filteredLockState -FilteredLockConflict $databaseLockLookup.Conflicts.ContainsKey($siteId)
                     if ($lock.LockStatus -eq 'Observed') { $lockObservedCount++ } else { $lockUnverifiedCount++ }
                     $rootWeb = $site.RootWeb
                     try {
@@ -647,8 +635,8 @@ try {
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBBGrXUSdFYNzm8
-# 1dutIT+gQohV/g/uf/Ivy5qyca1eyKCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA2DLx9VEZ37plI
+# 0Qr5Lb9E9S/bzo6bjfaedjgthQ0Cg6CCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -678,14 +666,14 @@ try {
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCB6s0e24xM2JQSNdXPojmSu
-# xPa1TVHLjLumwrIWm1Rz/zANBgkqhkiG9w0BAQEFAASCAYB89WNLS3us0JuPR17i
-# khpCJbqwNC7NnNfmHAfC4Y7R1k/lGndKVs17cEDtjFsRs6PfIHsmpkgVlV/zljds
-# s5U2fN/pOnaJ/8UlT9cqPTp5kaDs9+VaUFCRw9UPQjv0w/EWGqjBTsTUPb03JdjC
-# A4HQmw+wkzrrZwXw21rLrBwalycx7+yvI0b1pj4UCvEJY7xkcgmiucBDYn0A3HJ5
-# vjcLrqk/F8+bkwe4CEZZjeXyjx3rmFRgcfTbpRcxT3AtHRN0Ic8mMZrmRwsAmSVu
-# j5OlwBurN1UL1bUeDzf52p/gStJhrH1pHYdukGfC+qXUM/W3oH6YL9hbbwpj+GNI
-# oECtDqTFhZglyN46VIMYstJ7lZe6NwnvwZJd+km60Z7OCT5QHeZe72GmFueOm+rg
-# ylmRxD2yXR1hfceBh/TdUEDaD8JsbP4yJYNwQL20BAxyOItSGW+JhImjFgTaqinX
-# pej7Wc20l/cAPq15H0gRsq6hgPjL2/A3hFKKC5QEjvMpYvE=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCAuXQiKzi0CFSVOT25hk5Dn
+# t9Di5lfrEA9ZpIR+5EswLTANBgkqhkiG9w0BAQEFAASCAYBkkYx2uScc2dfUwExW
+# T18ZGuec70P6rIYfE2wrFOCigC/NQH6m+nkzEpe9eE6ut3C4DuBy7o+CZ70SUJG9
+# YijjWiRmS+w7ZQykuHcGdCZGDa7tV9EtL0J8Rfsjbdq4V6lNjzJloqDQz89l6abW
+# l2SctSnLCh56IXVyuLIyBI7WISe2KBPpcOcV5FajXqkdJtUEVmj5x4kZMptIFbBp
+# GBKQNpLAcF5n5092t+mSGW+PAwEhVsg8MwqZBT6eEgZfQh9iq4RDiKnoiCM06Mxu
+# M1/em5y2o1P2f6u7FdXcQ2getKeN9SBpiRu06flAnSq5E5FTnHj5jv1fFZgumJfp
+# ub1BGAfu1LRmdw40Qk7/EbznQDSyRGco/4mYAVwj8h6vMyarK3N0X09KCcIEHqG7
+# v/lSCe9NBQfEwajgL2J3IpSg9ocFgjUMZgc0QiZPTqQlSXfW5lLV3qqjqyqkxh12
+# ZB25BrDALNSAtZtErkcdyFryIHly/U4CaWgwQGcu0/PJ7Hw=
 # SIG # End signature block
