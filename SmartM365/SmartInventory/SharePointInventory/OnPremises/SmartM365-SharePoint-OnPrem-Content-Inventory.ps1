@@ -2,7 +2,7 @@
 .SYNOPSIS
     Read-only SharePoint Server 2016/2019 site collection and web inventory.
 .VERSION
-    1.0.1
+    1.0.2
 .REQUIREMENTS
     Windows PowerShell 5.1 x64 on a SharePoint farm server; SharePoint Shell and content read access.
 #>
@@ -158,25 +158,31 @@ function Convert-ToUtcText {
 }
 
 function Resolve-SiteLockObservation {
-    param($Site, $ContentDatabase)
-    $raw = Get-ObservedProperty $Site 'LockState'
-    $rawText = [string]$raw
-    $state = switch -Regex ($rawText) {
+    param($Site, $ContentDatabase, [string]$FilteredLockState = '', [bool]$FilteredLockConflict = $false)
+    $rawText = [string](Get-ObservedProperty $Site 'LockState')
+    $directState = switch -Regex ($rawText) {
         '^(Unlock|Unlocked)$' { 'Unlock'; break }
         '^(NoAdditions|Content)$' { 'NoAdditions'; break }
         '^(ReadOnly|Readonly)$' { 'ReadOnly'; break }
         '^(NoAccess|Noaccess)$' { 'NoAccess'; break }
         default { '' }
     }
+    $filteredState = switch -Regex ($FilteredLockState) {
+        '^(Unlock|Unlocked)$' { 'Unlock'; break }
+        '^(NoAdditions|Content)$' { 'NoAdditions'; break }
+        '^(ReadOnly|Readonly)$' { 'ReadOnly'; break }
+        '^(NoAccess|Noaccess)$' { 'NoAccess'; break }
+        default { '' }
+    }
+    $conflict = $FilteredLockConflict -or ($directState -and $filteredState -and $directState -ne $filteredState)
+    $state = if ($conflict) { '' } elseif ($filteredState) { $filteredState } else { $directState }
     $readLocked = Get-ObservedProperty $Site 'ReadLocked'
     $writeLocked = Get-ObservedProperty $Site 'WriteLocked'
     $isReadOnly = Get-ObservedProperty $Site 'ReadOnly'
     if (Test-MissingObservation $isReadOnly) { $isReadOnly = Get-ObservedProperty $Site 'IsReadOnly' }
     $issue = Get-ObservedProperty $Site 'LockIssue'
     $databaseReadOnly = Get-ObservedProperty $ContentDatabase 'IsReadOnly'
-    # Boolean properties cannot distinguish Unlock from NoAdditions on all builds.
-    if (-not $state -and -not (Test-MissingObservation $readLocked) -and [bool]$readLocked) { $state = 'NoAccess' }
-    if (-not $state -and ((-not (Test-MissingObservation $isReadOnly) -and [bool]$isReadOnly) -or (-not (Test-MissingObservation $writeLocked) -and [bool]$writeLocked))) { $state = 'ReadOnly' }
+    # Boolean properties cannot safely distinguish all four SharePoint lock states.
     return [pscustomobject]@{
         LockState = $state
         IsReadOnly = if (Test-MissingObservation $isReadOnly) { '' } else { [string][bool]$isReadOnly }
@@ -184,8 +190,43 @@ function Resolve-SiteLockObservation {
         WriteLocked = if (Test-MissingObservation $writeLocked) { '' } else { [string][bool]$writeLocked }
         LockIssue = [string]$issue
         ContentDatabaseIsReadOnly = if (Test-MissingObservation $databaseReadOnly) { '' } else { [string][bool]$databaseReadOnly }
-        LockStatus = if ($state) { 'Observed' } else { 'Unverified' }
+        LockStatus = if ($conflict) { 'Conflict' } elseif ($state) { 'Observed' } else { 'Unverified' }
     }
+}
+
+function Get-LockStateLookup {
+    param($ContentDatabase, [string]$SiteUrl = '')
+    $filters = [ordered]@{
+        Unlock = { $_.LockState -eq 'Unlock' }
+        NoAdditions = { $_.LockState -eq 'NoAdditions' }
+        ReadOnly = { $_.LockState -eq 'ReadOnly' }
+        NoAccess = { $_.LockState -eq 'NoAccess' }
+    }
+    $states = @{}
+    $conflicts = @{}
+    $queryErrors = New-Object 'System.Collections.Generic.List[string]'
+    foreach ($state in $filters.Keys) {
+        Assert-Deadline ([datetime]::MaxValue)
+        $query = @{ Filter=$filters[$state]; Limit='All'; ErrorAction='Stop' }
+        if ($SiteUrl) { $query['Identity'] = $SiteUrl; $query['Limit'] = '1' }
+        else { $query['ContentDatabase'] = $ContentDatabase }
+        try {
+            Get-SPSite @query | ForEach-Object {
+                $candidate = $_
+                try {
+                    $id = [string](Get-ObservedProperty $candidate 'Id')
+                    if (-not $id) { throw 'The filtered site collection ID is unavailable.' }
+                    if (-not $conflicts.ContainsKey($id)) {
+                        if ($states.ContainsKey($id) -and $states[$id] -ne $state) {
+                            $states.Remove($id)
+                            $conflicts[$id] = $true
+                        } else { $states[$id] = $state }
+                    }
+                } finally { if ($null -ne $candidate) { $candidate.Dispose() } }
+            }
+        } catch { $queryErrors.Add(("{0}: {1}" -f $state, $_.Exception.Message)) }
+    }
+    return [pscustomobject]@{ States=$states; Conflicts=$conflicts; Errors=$queryErrors.ToArray() }
 }
 
 function Assert-Deadline {
@@ -340,6 +381,8 @@ try {
     }
     $failureCount = 0
     $processed = 0
+    $lockObservedCount = 0
+    $lockUnverifiedCount = 0
     $limited = $MaxItems -gt 0
     $globalTimedOut = $false
     foreach ($group in $databaseGroups) {
@@ -351,6 +394,16 @@ try {
         $remaining = if ($MaxItems -gt 0) { $MaxItems - $processed } else { 0 }
         try {
             $databaseSiteCount = Get-ObservedProperty $database 'CurrentSiteCount'
+            $databaseLockLookup = $null
+            if ($MaxItems -eq 0) {
+                $databaseLockLookup = Get-LockStateLookup -ContentDatabase $database
+                foreach ($queryError in $databaseLockLookup.Errors) {
+                    WriteLog -Message ("Content database {0} lock-state filter failed: {1}" -f $database.Id, $queryError) -Level WARNING
+                }
+                if ($databaseLockLookup.Conflicts.Count -gt 0) {
+                    WriteLog -Message ("Content database {0} returned {1} conflicting lock-state filter result(s)." -f $database.Id, $databaseLockLookup.Conflicts.Count) -Level WARNING
+                }
+            }
             $processSite = {
                 $site = $_
                 $processed++
@@ -375,7 +428,17 @@ try {
                     $coverage['SiteCollectionId'] = $siteId
                     $coverage['Url'] = $siteUrl
                     if ([string]::IsNullOrWhiteSpace($siteId) -or [string]::IsNullOrWhiteSpace($siteUrl)) { throw 'Site collection identity is unavailable.' }
-                    $lock = Resolve-SiteLockObservation -Site $site -ContentDatabase $database
+                    $lockLookup = $databaseLockLookup
+                    if ($MaxItems -gt 0) {
+                        $lockLookup = Get-LockStateLookup -ContentDatabase $database -SiteUrl $siteUrl
+                        foreach ($queryError in $lockLookup.Errors) {
+                            WriteLog -Message ("Site collection {0} lock-state filter failed: {1}" -f $siteId, $queryError) -Level WARNING
+                        }
+                    }
+                    $filteredLockState = ''
+                    if ($lockLookup.States.ContainsKey($siteId)) { $filteredLockState = [string]$lockLookup.States[$siteId] }
+                    $lock = Resolve-SiteLockObservation -Site $site -ContentDatabase $database -FilteredLockState $filteredLockState -FilteredLockConflict $lockLookup.Conflicts.ContainsKey($siteId)
+                    if ($lock.LockStatus -eq 'Observed') { $lockObservedCount++ } else { $lockUnverifiedCount++ }
                     $rootWeb = $site.RootWeb
                     try {
                         $collection = New-InventoryRow $farmId
@@ -392,9 +455,16 @@ try {
                         $collection['LanguageLcid'] = [string](Get-ObservedProperty $rootWeb 'Language')
                         foreach ($name in @('LockState','IsReadOnly','ReadLocked','WriteLocked','LockIssue','ContentDatabaseIsReadOnly','LockStatus')) { $collection[$name] = $lock.$name }
                         $collection['CollectionStatus'] = 'Collected'
-                        if ($lock.LockStatus -ne 'Observed' -or $collection['StorageBytes'] -eq '' -or $collection['QuotaLimitBytes'] -eq '' -or $collection['LastContentModifiedUtc'] -eq '' -or $collection['OwnerLogin'] -eq '' -or $collection['RootWebTemplate'] -eq '' -or $collection['LanguageLcid'] -eq '' -or $lock.IsReadOnly -eq '' -or $lock.ReadLocked -eq '' -or $lock.WriteLocked -eq '' -or $lock.ContentDatabaseIsReadOnly -eq '') {
+                        $missingFields = New-Object 'System.Collections.Generic.List[string]'
+                        if ($lock.LockStatus -ne 'Observed') { $missingFields.Add('LockState') }
+                        foreach ($field in @('StorageBytes','QuotaLimitBytes','LastContentModifiedUtc','OwnerLogin','RootWebTemplate','LanguageLcid','IsReadOnly','ReadLocked','WriteLocked','ContentDatabaseIsReadOnly')) {
+                            if (Test-MissingObservation $collection[$field]) { $missingFields.Add($field) }
+                        }
+                        if ($missingFields.Count -gt 0) {
                             $collection['CollectionStatus'] = 'MetadataIncomplete'
                             $coverage['Status'] = 'MetadataIncomplete'
+                            $coverage['ErrorStage'] = 'SiteCollectionMetadata'
+                            $coverage['ErrorMessage'] = 'Missing or unverified observations: ' + ($missingFields -join ', ')
                         }
                         $siteRow = [pscustomobject]$collection
                         $rows.SiteCollections.Add($siteRow)
@@ -440,7 +510,10 @@ try {
                             $webRow['ListCount'] = $listCount
                             $webRow['LibraryCount'] = $libraryCount
                             $webRow['HasUniqueRoleAssignments'] = [string](Get-ObservedProperty $web 'HasUniqueRoleAssignments')
-                            if (-not $webRow['WebId'] -or -not $webRow['Url'] -or -not $webRow['WebTemplate'] -or -not $webRow['LanguageLcid'] -or -not $webRow['HasUniqueRoleAssignments']) { $coverage['Status'] = 'MetadataIncomplete' }
+                            if (-not $webRow['WebId'] -or -not $webRow['Url'] -or -not $webRow['WebTemplate'] -or -not $webRow['LanguageLcid'] -or -not $webRow['HasUniqueRoleAssignments']) {
+                                $coverage['Status'] = 'MetadataIncomplete'
+                                if (-not $coverage['ErrorStage']) { $coverage['ErrorStage'] = 'WebMetadata'; $coverage['ErrorMessage'] = 'A web has missing identity, template, language or permission observations.' }
+                            }
                             $rows.Webs.Add([pscustomobject]$webRow)
                             Flush-RunRows -Kind Webs -Buffers $rows -Paths $spoolPaths -MinimumCount 500
                             $coverage['WebsCollected'] = [int]$coverage['WebsCollected'] + 1
@@ -489,17 +562,17 @@ try {
             }
             if ($MaxItems -eq 0) {
                 $databaseCoverageStatus = Get-DatabaseCoverageStatus -ExpectedCount $databaseSiteCount -ObservedCount ($processed - $processedBeforeDatabase)
-                if ($databaseCoverageStatus -ne 'Collected') { throw $databaseCoverageStatus }
+                if ($databaseCoverageStatus -ne 'Collected') { throw ("{0}: expected={1}; observed={2}" -f $databaseCoverageStatus,$databaseSiteCount,($processed - $processedBeforeDatabase)) }
             }
         } catch {
-            if ($globalTimedOut -and $_.Exception.Message -eq 'GlobalTimeout') { break }
+            if ($_.Exception.Message -eq 'GlobalTimeout') { $globalTimedOut = $true; break }
             $failureCount++
             $coverage = New-InventoryRow $farmId
             $coverage['WebApplicationId'] = [string]$webApplication.Id
             $coverage['ContentDatabaseId'] = [string]$database.Id
             $coverage['SiteCollectionId'] = ''
             $coverage['Url'] = ''
-            $coverage['Status'] = if ($_.Exception.Message -in @('DatabaseCountUnavailable','DatabaseCoverageMismatch')) { $_.Exception.Message } else { 'DatabaseEnumerationFailed' }
+            $coverage['Status'] = if ($_.Exception.Message -match '^(DatabaseCountUnavailable|DatabaseCoverageMismatch):') { $Matches[1] } else { 'DatabaseEnumerationFailed' }
             $coverage['WebsCollected'] = ''
             $coverage['ErrorStage'] = 'ContentDatabase'
             $coverage['ErrorMessage'] = $_.Exception.Message
@@ -512,6 +585,7 @@ try {
     if ($MaxItems -gt 0 -and $processed -ge $MaxItems) { $limited = $true }
     if ([datetime]::UtcNow -ge $script:GlobalDeadlineUtc) { $globalTimedOut = $true }
     foreach ($kind in $schemas.Keys) { Flush-RunRows -Kind $kind -Buffers $rows -Paths $spoolPaths -MinimumCount 1 }
+    WriteLog -Message ("Lock observation: observed={0}; unverifiedOrConflicting={1}." -f $lockObservedCount,$lockUnverifiedCount)
     WriteLog -Message ("Collection coverage: processed={0}; failed={1}; limited={2}; globalTimeout={3}." -f $processed,$failureCount,$limited,$globalTimedOut)
     if ($MaxItems -gt 0) {
         if ($failureCount -gt 0 -or $globalTimedOut) {
@@ -573,8 +647,8 @@ try {
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDi/yiyHJRb6nb6
-# yozlMZp50ICHD7nstiwRosdwnqpmCqCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCip5FFYJ4k4APg
+# h001cppsuxMEijEyP9i2gXYwMY6kaKCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -604,14 +678,14 @@ try {
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCBUnBBcBnVuZ+PM0QNu7+zj
-# 455ygVH3Q0Xcw2u8yXhb2DANBgkqhkiG9w0BAQEFAASCAYBZkaE+PO8+g+E+44xk
-# 4lle46dGrKmYYEkwY0dpe2w1KzleMRat9dmvbMrP7ZrJJ8bW6TTfAKfeA9tsODn8
-# OiLjetKhyNn43bJ25TjvJ4Juw7D079fQ+js67NJoThtWXJNy2Wq/OkgVGweoceEm
-# TeWXHdJL1pT18GcEiQ27l+1i7U0CMO4yFzMHbHjXTVLcfNxRe9AmTQ+EXaKNOVy7
-# o03yEMEcdb2kBjWcGLy6tWXcBaaPsAe+OIIaRQ7zCy/qoa2brrwJMax9AA5W49pE
-# TOmNqBaXpAurZDGPOZnGoo+/uxViACg06yvojhxrp3imSJ/Hecg4+Dlr1BVTenbW
-# R3VYielRhLRTGP5ZLHq2LuQVtTyBtHRSsWndYp+jrC72UilHkN5lBCbaXgDzUPNt
-# O8rVvQEsXumMDilu+9gKpeAPTIJnBXSsk1P9PZ+psenqtj4yeI6uSGgX0EsRxZVX
-# IayRYrLi/DmSeW+PqGPxrj544ijtc5z5QJ2JPuJlKcPUyrY=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCCXQfjP6kJAxhbcNCu0J1W/
+# K8haSRT7cUM+99rC75thMjANBgkqhkiG9w0BAQEFAASCAYBD3GNNxm8Llwa10lbY
+# 9SfI1kOc+t5h5DK3v7W4EEGMmbTNqOocdwJFJsvIe06Wfm67DMv0a7FupjErUDPg
+# uGyn2dlCqh3rtwo0gSJ8zoJnlsrpUku7yAX6hosGvLHSuzyvFPTVT0P6bUfiO1+8
+# pBxo+1TbEmogUR6DkQq/N5eYO9vV73rC9KufYdrv6/GPq4/TxJEsqFxBMcNRlc/2
+# 0pl4fwUXvXHyQ4nkkcIqTiYp+zXFdhpzK6kXBUfedvibFFiSm797reLongRYm6aE
+# DkGn4HlyXFnol0caGYI93/C2jxfHgZw/XBQ41jwJ3rWcACR2eLXNojrcyOg5+Cpo
+# SxYHYVquRmUUSfiqEgUmngXf1WJ0SjqqOxBUem4Sjvb7oLct56J30ASl2TYfd1e1
+# jIeLyA+6FoxC2YATcRdYl3M6/AKMH5utQfwIYIeqo65FBqZamq9xcuzLsCGhyO6N
+# oVI9NleU6KcaXDWKeJPZmNZ9oWqmIERuInqM5wv6UuUgyZ8=
 # SIG # End signature block

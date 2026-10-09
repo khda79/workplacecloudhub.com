@@ -12,7 +12,7 @@ $ast = [Management.Automation.Language.Parser]::ParseFile($scriptPath, [ref]$tok
 if (@($errors).Count) { throw "Content parser errors: $($errors.Count)" }
 $template = Get-Content $templatePath -Raw | ConvertFrom-Json
 if ($template.EnableSharePointUpload -ne $true -or $template.EnableWeeklyHistory -ne $true) { throw 'Content template policy is invalid.' }
-if ($ast.Extent.Text -notmatch '(?s)\.VERSION\s+1\.0\.1') { throw 'Content version was not updated for the upload change.' }
+if ($ast.Extent.Text -notmatch '(?s)\.VERSION\s+1\.0\.2') { throw 'Content version was not updated for lock-state verification.' }
 $registry = Get-Content $registryPath -Raw | ConvertFrom-Json
 $producer = @($registry.Producers | Where-Object Script -eq 'SmartM365-SharePoint-OnPrem-Content-Inventory.ps1')
 if ($producer.Count -ne 1 -or $producer[0].Files.Count -ne 4) { throw 'Content source receipt registration is invalid.' }
@@ -20,7 +20,7 @@ if ($ast.Extent.Text -match '(?im)^\s*(Set-SPSite|Set-SPWeb|Set-SPContentDatabas
 if ($ast.Extent.Text -match '(?im)^\s*Get-SPSiteAdministration\b') { throw 'Lock inspection must use SPSite and SPContentDatabase only.' }
 if ($ast.Extent.Text -notmatch '(?m)^\s*\$site\s*=\s*\$_\s*$' -or $ast.Extent.Text -match '(?m)^\s*param\(\$site\)') { throw 'Streaming site pipeline input is not bound to the current site.' }
 if ($ast.Extent.Text -notmatch '\$runBase\s*=\s*if\s*\(\$MaxItems\s*-gt\s*0\).*?TEST' -or $ast.Extent.Text -notmatch 'Select-Object\s+-First\s+\$remaining' -or $ast.Extent.Text -notmatch 'Flush-RunRows\s+-Kind\s+CollectionCoverage') { throw 'Limited or per-site coverage path is missing.' }
-foreach ($name in @('Get-InventoryConfigValue','Resolve-InventoryConfigTokens','Assert-InventoryPath','Get-ObservedProperty','Test-MissingObservation','Resolve-SiteLockObservation','Assert-Deadline','Get-CollectionFailureStatus','Get-DatabaseCoverageStatus','Write-RunCsv','Flush-RunRows','Invoke-DailySummaryMail','Send-InventorySummaryMail','Publish-QualifiedCsvUploads')) {
+foreach ($name in @('Get-InventoryConfigValue','Resolve-InventoryConfigTokens','Assert-InventoryPath','Get-ObservedProperty','Test-MissingObservation','Resolve-SiteLockObservation','Get-LockStateLookup','Assert-Deadline','Get-CollectionFailureStatus','Get-DatabaseCoverageStatus','Write-RunCsv','Flush-RunRows','Invoke-DailySummaryMail','Send-InventorySummaryMail','Publish-QualifiedCsvUploads')) {
     $functionAst = @($ast.FindAll({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name }, $true))
     if ($functionAst.Count -ne 1) { throw "Missing function: $name" }
     . ([scriptblock]::Create($functionAst[0].Extent.Text))
@@ -48,8 +48,45 @@ foreach ($state in @('Unlock','NoAdditions','ReadOnly','NoAccess')) {
     $result = Resolve-SiteLockObservation -Site ([pscustomobject]@{ LockState=$state; ReadOnly=$false; ReadLocked=$false; WriteLocked=$false; LockIssue='' }) -ContentDatabase $database
     if ($result.LockState -ne $state -or $result.LockStatus -ne 'Observed') { throw "Lock state mapping failed: $state" }
 }
-$readLocked = Resolve-SiteLockObservation -Site ([pscustomobject]@{ReadLocked=$true;WriteLocked=$true;ReadOnly=$true}) -ContentDatabase $database
-if ($readLocked.LockState -ne 'NoAccess') { throw 'Read lock mapping failed.' }
+$writeLocked = Resolve-SiteLockObservation -Site ([pscustomobject]@{ReadLocked=$false;WriteLocked=$true;ReadOnly=$false}) -ContentDatabase $database
+if ($writeLocked.LockState -ne '' -or $writeLocked.LockStatus -ne 'Unverified') { throw 'WriteLocked alone was misclassified as ReadOnly.' }
+$noAdditions = Resolve-SiteLockObservation -Site ([pscustomobject]@{ReadLocked=$false;WriteLocked=$true;ReadOnly=$false}) -ContentDatabase $database -FilteredLockState 'NoAdditions'
+if ($noAdditions.LockState -ne 'NoAdditions' -or $noAdditions.LockStatus -ne 'Observed') { throw 'Filtered NoAdditions mapping failed.' }
+$conflicting = Resolve-SiteLockObservation -Site ([pscustomobject]@{LockState='ReadOnly';ReadLocked=$false;WriteLocked=$true;ReadOnly=$false}) -ContentDatabase $database -FilteredLockState 'NoAdditions'
+if ($conflicting.LockState -ne '' -or $conflicting.LockStatus -ne 'Conflict') { throw 'Conflicting lock-state observations were accepted.' }
+$script:GlobalDeadlineUtc = [datetime]::UtcNow.AddMinutes(1)
+$script:MockLockSites = @(
+    [pscustomobject]@{Id='site-a';Url='https://example.test/a';State='Unlock'},
+    [pscustomobject]@{Id='site-b';Url='https://example.test/b';State='NoAdditions'}
+)
+$script:MockFailState = ''
+$script:MockIgnoreFilter = $false
+function Get-SPSite {
+    [CmdletBinding()]
+    param([string]$Identity, $ContentDatabase, [scriptblock]$Filter, [string]$Limit)
+    if ($Filter.ToString() -notmatch "'(Unlock|NoAdditions|ReadOnly|NoAccess)'") { throw 'An unsupported lock-state filter was used.' }
+    $requestedState = $Matches[1]
+    if ($requestedState -eq $script:MockFailState) { throw 'MockFilterFailure' }
+    foreach ($entry in $script:MockLockSites) {
+        if ($Identity -and $entry.Url -ne $Identity) { continue }
+        if (-not $script:MockIgnoreFilter -and $entry.State -ne $requestedState) { continue }
+        $result = [pscustomobject]@{ Id=$entry.Id }
+        $result | Add-Member -MemberType ScriptMethod -Name Dispose -Value { }
+        $result
+    }
+}
+$lookup = Get-LockStateLookup -ContentDatabase $database
+if ($lookup.States.Count -ne 2 -or $lookup.States['site-a'] -ne 'Unlock' -or $lookup.States['site-b'] -ne 'NoAdditions' -or $lookup.Errors.Count -ne 0) { throw 'Database lock-state lookup failed.' }
+$limitedLookup = Get-LockStateLookup -ContentDatabase $database -SiteUrl 'https://example.test/a'
+if ($limitedLookup.States.Count -ne 1 -or $limitedLookup.States['site-a'] -ne 'Unlock') { throw 'Limited lock-state lookup traversed the wrong site.' }
+$script:MockFailState = 'NoAccess'
+$failedLookup = Get-LockStateLookup -ContentDatabase $database
+if ($failedLookup.Errors.Count -ne 1 -or $failedLookup.States.Count -ne 2) { throw 'Lock-state query failure was hidden.' }
+$script:MockFailState = ''
+$script:MockIgnoreFilter = $true
+$conflictLookup = Get-LockStateLookup -ContentDatabase $database
+if ($conflictLookup.States.Count -ne 0 -or $conflictLookup.Conflicts.Count -ne 2) { throw 'Conflicting filter results were accepted.' }
+Remove-Item Function:\Get-SPSite
 if ((Get-CollectionFailureStatus 'Access is denied') -ne 'AccessDenied' -or (Get-CollectionFailureStatus 'CollectionTimeout') -ne 'TimedOut' -or (Get-CollectionFailureStatus 'unexpected') -ne 'Failed') { throw 'Per-collection failure classification failed.' }
 if ((Get-DatabaseCoverageStatus -ExpectedCount 2 -ObservedCount 2) -ne 'Collected' -or (Get-DatabaseCoverageStatus -ExpectedCount 2 -ObservedCount 1) -ne 'DatabaseCoverageMismatch' -or (Get-DatabaseCoverageStatus -ExpectedCount '' -ObservedCount 0) -ne 'DatabaseCountUnavailable') { throw 'Database coverage qualification failed.' }
 $script:GlobalDeadlineUtc = [datetime]::UtcNow.AddMinutes(-1)
@@ -125,8 +162,8 @@ Write-Output 'PASS: content parser, nested configuration, persistent paths, lock
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCxENXlq9j0+xPc
-# ZV8ZPoSMKOqx1tdPvlqkcBteELRT5qCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBapBSJ46cIsgAy
+# ppBUw7bHxHBUBjnV8PwmyMWdFRfTAaCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -156,14 +193,14 @@ Write-Output 'PASS: content parser, nested configuration, persistent paths, lock
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCB3p4FSOLAZLHZE1QgsPLCa
-# LocFtX7bm6dZ2Rn3gTo7HTANBgkqhkiG9w0BAQEFAASCAYBw4RA71zqRald/FucH
-# +kagBbvJ9YG9H1vis+UAROay1AVxOIBxRUHISX+qm6xET4936tXrDUXw+K4Dbj5Q
-# rYQOfiFdWPzcTDfIQk5MKt5zeWbu5vtPuE2xpYHL8EpdUpAqnhHpH1g8QoydRkpp
-# S58N4u6FicYDX2RWreqrgy4tobb4bZgzzuXCYXqerbOK1IZRimVZue1YKhXjEnry
-# bWNjhdxmmrF0SRh+fA1/cDo9xBzSBQAotU0J4akb462LRpqJdNdPRlHai5ciS5cQ
-# s0y1tqTRNC6ixFuDmAzGCMl678gtNiDOm9U/YcC1JlBjFIAKwq9jHz7ax8bo6DRC
-# QqJ2stW5qbf7tl1Ym3PKiXaZswmL/Kg6KX5rtieOc+zU85exNYzcT/1gf29N1r/y
-# X7dvp1/FL3+oq3kXo4/NGx6nV4V4ctj1iKqRELOscSVJ6yJ7GQM21oQ6jSMV9Juz
-# MEcuY1rj8y9REW+PtOUevSmh8exJkFAeG3W7SV4IbnsieLI=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCDGHYbazpNfVOlsCcZqYzid
+# UNidJPXkBOGWfApmIfpNjDANBgkqhkiG9w0BAQEFAASCAYARBTXHrf++D/qsDzw3
+# cyfLMijO9BeRtpReg9rXZ5lgx5WjAGg83IxhE/eDWqnibatVKoOFVBE8jwS1DzZy
+# S4XpSeJ7TbRq6FrjXCsKZTYZ4g9hKMj9OvHF6YUK5cPZBaA44v+p9miCH8d/a+Hr
+# GTo2HweOjeldE7AAsPzAaeeYcK1EFYPEUt1tc6w7hpwmGur3ay7f1LYh58rh951+
+# JP8Re6qcq1vjKOBYsEAm5oTBeOfslQw3ndZYPkuEI+h6Kvv05LJuJWwjPUhw9WGk
+# 4gEEm5wxn/CS7+Q3Xt424qsXtpa3m0ARXk4SwswWF7miwzH7qvSk2i6dbniZUK1c
+# U/n7wV9P6Z5I+Ftda9k+kkQXGd/LCcsQOumwDwVuW3s1a1I7X5J1Nyg53fRHrHOw
+# lrqANqwYxotIyfTpqKrDeVSu6SkUdSk73vGcAyLHjwXG+gEPAJhtXzf1lmEwpQpP
+# 88jjV2n6xJMSVThKsQMlsf64RTe1mLpQO4HkAMSvWMBSblU=
 # SIG # End signature block
