@@ -2,7 +2,7 @@
 .SYNOPSIS
     Read-only SharePoint Server 2016/2019 farm infrastructure inventory.
 .VERSION
-    1.0.7
+    1.0.8
 .REQUIREMENTS
     Windows PowerShell 5.1 x64 on a SharePoint farm server; SharePoint Shell access.
 #>
@@ -11,7 +11,7 @@ param(
     [string]$Tenant = 'test',
     [string]$OutputRoot,
     [switch]$ValidateOnly,
-    [switch]$ForceSendDailySummary
+    [Alias('ForceSendDailySummary')][switch]$ForceMail
 )
 
 Set-StrictMode -Version Latest
@@ -19,6 +19,7 @@ $ErrorActionPreference = 'Stop'
 $script:ScriptName = 'SmartM365-SharePoint-OnPrem-Infrastructure-Inventory'
 $script:RunId = [guid]::NewGuid().ToString('N')
 $script:CollectedAtUtc = [datetime]::UtcNow.ToString('o')
+$script:BuildEditionMapPath = Join-Path $PSScriptRoot 'SharePoint-OnPrem-BuildEditions.psd1'
 
 $root = $PSScriptRoot
 while ($root -and -not (Test-Path -LiteralPath (Join-Path $root 'Config\SmartM365-TenantContext.ps1'))) {
@@ -239,6 +240,133 @@ function Send-InventorySummaryMail {
     WriteLog -Message "Daily infrastructure summary email sent to $to."
 }
 
+function Get-InfrastructureFarmEdition {
+    param([string]$BuildVersion)
+    try {
+        $mapping = Import-PowerShellDataFile -Path $script:BuildEditionMapPath -ErrorAction Stop
+        if ($mapping.Builds.ContainsKey($BuildVersion) -and $mapping.Builds[$BuildVersion] -in @('2016','2019')) { return [string]$mapping.Builds[$BuildVersion] }
+    } catch { WriteLog -Message ("Farm edition mapping unavailable: {0}" -f $_.Exception.Message) -Level WARNING }
+    return 'Unknown'
+}
+
+function Get-ContentDatabaseExtendedFields {
+    param($Database)
+    $result = [ordered]@{ DatabaseSizeBytes=''; DatabaseSizeStatus='Unavailable'; NeedsUpgradeIncludeChildren=''; NeedsUpgradeStatus='PropertyUnavailable' }
+    # SPContentDatabase.DiskSizeRequired estimates backup space, not database size.
+    # The actual byte size has no approved SharePoint object-model source in this lot.
+    try {
+        $upgrade = Get-ObservedProperty $Database 'NeedsUpgradeIncludeChildren'
+        if ($upgrade -is [bool]) {
+            $result['NeedsUpgradeIncludeChildren'] = [string]$upgrade
+            $result['NeedsUpgradeStatus'] = 'Collected'
+        }
+    } catch { $result['NeedsUpgradeStatus'] = 'ReadFailed'; WriteLog -Message ("Content database upgrade-state read failed: {0}" -f $_.Exception.Message) -Level WARNING }
+    return [pscustomobject]$result
+}
+
+function Get-QualifiedPreviousInfrastructureCounts {
+    param([string]$LatestRoot, [string]$FarmId, [string]$TenantKey)
+    $receiptPath = Join-Path $LatestRoot 'SmartInventory_SmartM365-SharePoint-OnPrem-Infrastructure-Inventory.current.json.txt'
+    $names = @('Farms','Servers','ServiceApplications','WebApplications','WebApplicationZones','ContentDatabases')
+    try {
+        $receipt = Get-Content -LiteralPath $receiptPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        if ($receipt.Owner -ne 'SmartInventory-SourceReceipt' -or $receipt.Status -ne 'Completed' -or -not $receipt.RunId) { return $null }
+        $counts = @{}
+        foreach ($name in $names) {
+            $fileName = "SharePoint_OnPrem_$name.csv"
+            $fileReceipts = @($receipt.Files | Where-Object { $_.File -eq $fileName -and $_.Status -eq 'Success' -and $_.RunId -eq $receipt.RunId })
+            if ($fileReceipts.Count -ne 1) { return $null }
+            $path = Join-Path $LatestRoot $fileName
+            if ((Get-FileHash -LiteralPath $path -Algorithm SHA256 -ErrorAction Stop).Hash -ne $fileReceipts[0].SHA256) { return $null }
+            $csvRows = @(Import-Csv -LiteralPath $path -Delimiter ';' -ErrorAction Stop)
+            if ($csvRows.Count -ne [int]$fileReceipts[0].Rows) { return $null }
+            foreach ($csvRow in $csvRows) {
+                if ($csvRow.RunId -ne $receipt.RunId -or $csvRow.FarmId -ne $FarmId -or $csvRow.TenantKey -ne $TenantKey) { return $null }
+            }
+            $counts[$name] = $csvRows.Count
+        }
+        if ($counts.Farms -ne 1) { return $null }
+        return $counts
+    } catch {
+        WriteLog -Message ("Previous qualified infrastructure run is unavailable for comparison: {0}" -f $_.Exception.Message) -Level INFO
+        return $null
+    }
+}
+
+function New-InfrastructureMailHtml {
+    param([string]$Status, $Rows, [string[]]$Failures = @(), [int]$UploadFailures = 0, $PreviousCounts = $null, [string]$TenantName = '', [Nullable[timespan]]$Duration = $null, [string]$HostName = $env:COMPUTERNAME)
+    $kinds = @('Farms','Servers','ServiceApplications','WebApplications','WebApplicationZones','ContentDatabases')
+    $counts = @{}
+    foreach ($kind in $kinds) { $counts[$kind] = if ($Rows -and $Rows.ContainsKey($kind)) { [int]$Rows[$kind].Count } else { $null } }
+    $farmBuild = if ($Rows -and $counts.Farms -gt 0) { [string]$Rows.Farms[0].BuildVersion } else { '' }
+    $edition = Get-InfrastructureFarmEdition -BuildVersion $farmBuild
+    $cardSpecs = @(
+        @('Servers','Servers','#f8fafc','#dbe3ef','#0f172a'),
+        @('Service applications','ServiceApplications','#eff6ff','#bfdbfe','#1d4ed8'),
+        @('Web applications','WebApplications','#f0fdf4','#bbf7d0','#166534'),
+        @('Content databases','ContentDatabases','#faf5ff','#e9d5ff','#7e22ce')
+    )
+    $cards = New-Object 'System.Collections.Generic.List[object]'
+    foreach ($spec in $cardSpecs) {
+        $failurePrefix = switch ($spec[1]) { 'Servers' {'Servers:'} 'ServiceApplications' {'ServiceApplications:'} 'WebApplications' {'WebApplication:'} 'ContentDatabases' {'ContentDatabase:'} }
+        $areaFailed = @($Failures | Where-Object { $_.StartsWith($failurePrefix, [StringComparison]::OrdinalIgnoreCase) }).Count -gt 0
+        $value = if ($null -eq $counts[$spec[1]] -or ($counts[$spec[1]] -eq 0 -and $areaFailed)) { 'n/a' } else { [string]$counts[$spec[1]] }
+        if ($null -ne $PreviousCounts -and $value -ne 'n/a' -and $PreviousCounts.ContainsKey($spec[1])) {
+            $delta = [int]$counts[$spec[1]] - [int]$PreviousCounts[$spec[1]]
+            $value += (' ({0}{1})' -f $(if ($delta -ge 0) { '+' } else { '' }), $delta)
+        }
+        $cards.Add([pscustomobject]@{ Label=$spec[0]; Value=$value; Detail=$(if ($Status -eq 'Qualified') { 'inventory rows' } else { 'observed rows' }); Background=$spec[2]; Border=$spec[3]; Accent=$spec[4]; Span=1 })
+    }
+    $cards.Add([pscustomobject]@{Label='Farm edition';Value=$edition;Detail=$(if ($farmBuild) { $farmBuild } else { 'build unavailable' });Background='#f0fdfa';Border='#99f6e4';Accent='#0f766e';Span=2})
+    $uploadValue = if ($Status -eq 'Qualified') { [string]$UploadFailures } else { 'n/a' }
+    $cards.Add([pscustomobject]@{Label='Upload failures';Value=$uploadValue;Detail=$(if ($Status -eq 'Qualified') { 'SharePoint upload' } else { 'not attempted' });Background='#eef2ff';Border='#c7d2fe';Accent='#4338ca';Span=2})
+    $sections = New-Object 'System.Collections.Generic.List[object]'
+    $sections.Add([pscustomobject]@{Title='Summary';Html=(New-SmartM365EmailKpiGridHtml -Cards $cards.ToArray() -RowSizes @(4,2))})
+
+    $alerts = New-Object 'System.Collections.Generic.List[object]'
+    if ($Rows) {
+        foreach ($server in $Rows.Servers) { if ($server.Status -and $server.Status -ne 'Online') { $alerts.Add(@('Server not online',[string]$server.ServerName,[string]$server.Status)) } }
+        foreach ($service in $Rows.ServiceApplications) { if ($service.Status -and $service.Status -notin @('Online','Started')) { $alerts.Add(@('Service application not started',[string]$service.Name,[string]$service.Status)) } }
+        foreach ($database in $Rows.ContentDatabases) {
+            if ($database.Status -and $database.Status -ne 'Online') { $alerts.Add(@('Content database not online',[string]$database.Name,[string]$database.Status)) }
+            if ($database.IsReadOnly -eq 'True') { $alerts.Add(@('Content database read-only',[string]$database.Name,'True')) }
+            if ((Get-ObservedProperty $database 'NeedsUpgradeIncludeChildren') -eq 'True' -and (Get-ObservedProperty $database 'NeedsUpgradeStatus') -eq 'Collected') { $alerts.Add(@('Content database needs upgrade',[string]$database.Name,'True')) }
+        }
+        $unverifiedUpgradeCount = @($Rows.ContentDatabases | Where-Object { (Get-ObservedProperty $_ 'NeedsUpgradeStatus') -notin @('Collected','') }).Count
+        if ($unverifiedUpgradeCount -gt 0) { $alerts.Add(@('Upgrade state unavailable',"$unverifiedUpgradeCount content databases",'Check NeedsUpgradeStatus in CSV')) }
+    }
+    foreach ($failure in $Failures) { $alerts.Add(@('Collection issue',[string]$failure,'')) }
+    if ($alerts.Count -gt 0) { $sections.Add([pscustomobject]@{Title='Alerts';Html=(New-SmartM365EmailTableHtml -Headers @('Issue','Object','Status') -Rows $alerts.ToArray())}) }
+    if ($Rows) {
+        $serverRows = @($Rows.Servers | Sort-Object ServerName | ForEach-Object { ,@([string]$_.ServerName,[string]$_.Role,[string]$_.Status) })
+        if ($serverRows.Count -gt 0) { $sections.Add([pscustomobject]@{Title='Servers';Html=(New-SmartM365EmailTableHtml -Headers @('Name','Role','Status') -Rows $serverRows)}) }
+        $webRows = foreach ($web in ($Rows.WebApplications | Sort-Object DefaultUrl)) {
+            $zones = @($Rows.WebApplicationZones | Where-Object { $_.WebApplicationId -eq $web.WebApplicationId } | Sort-Object Zone | ForEach-Object { '{0}: {1}' -f $_.Zone,$_.AuthenticationMode }) -join '; '
+            ,@([string]$web.DefaultUrl,[string]$web.ApplicationPool,[string]$web.ContentDatabaseCount,[string]$zones)
+        }
+        if (@($webRows).Count -gt 0) { $sections.Add([pscustomobject]@{Title='Web applications';Html=(New-SmartM365EmailTableHtml -Headers @('URL','Application pool','Content databases','Authentication by zone') -Rows @($webRows))}) }
+        $sized = @($Rows.ContentDatabases | Where-Object { (Get-ObservedProperty $_ 'DatabaseSizeStatus') -eq 'Collected' -and (Get-ObservedProperty $_ 'DatabaseSizeBytes') -match '^\d+$' } | Sort-Object @{Expression={[decimal]$_.DatabaseSizeBytes};Descending=$true} | Select-Object -First 5)
+        if ($sized.Count -gt 0) {
+            $sizeRows = @($sized | ForEach-Object { ,@([string]$_.Name,[string]$_.DatabaseServer,[string]$_.DatabaseSizeBytes) })
+            $sections.Add([pscustomobject]@{Title='Top 5 largest content databases';Html=(New-SmartM365EmailTableHtml -Headers @('Name','Server','Size (bytes)') -Rows $sizeRows)})
+        }
+    }
+    $severity = switch ($Status) { 'Qualified' {'Success'} 'Partial' {'Warning'} 'Preview' {'Info'} default {'Error'} }
+    $durationText = if ($null -ne $Duration) { ([timespan]$Duration).ToString('hh\:mm\:ss') } else { '' }
+    return New-SmartM365EmailBody -Title 'SharePoint infrastructure inventory summary' -Category 'SmartM365 SharePoint OnPrem' -Severity $severity -Tenant $TenantName -HostName $HostName -StatusBadge $Status.ToUpperInvariant() -Duration $durationText -Message 'SharePoint on-premises infrastructure inventory summary generated from the latest SmartM365 CSV outputs.' -Sections $sections.ToArray() -Footer 'This automated message was generated by SmartM365 from SharePoint on-premises infrastructure inventory data.'
+}
+
+function Send-InfrastructureRunMail {
+    param([string]$Status, $Rows, [string[]]$Failures = @(), [int]$UploadFailures = 0, $PreviousCounts = $null)
+    try {
+        $markerName = if ($Status -eq 'Qualified') { 'SmartM365-SharePoint-OnPrem-Infrastructure-DailySummary.sent' } else { 'SmartM365-SharePoint-OnPrem-Infrastructure-IssueDailySummary.sent' }
+        $markerPath = Join-Path $outputBase $markerName
+        $duration = (Get-Date) - $script:StartedAt
+        $body = New-InfrastructureMailHtml -Status $Status -Rows $Rows -Failures $Failures -UploadFailures $UploadFailures -PreviousCounts $PreviousCounts -TenantName $Tenant -Duration $duration
+        $null = Invoke-DailySummaryMail -MarkerPath $markerPath -Force:$ForceMail -SendAction { Send-InventorySummaryMail -Subject 'SharePoint on-prem infrastructure inventory' -BodyHtml $body }
+    } catch { WriteLog -Message ("Infrastructure summary email failed without affecting inventory qualification: {0}" -f $_.Exception.Message) -Level WARNING }
+}
+
 function Publish-QualifiedCsvUploads {
     param([string[]]$Paths)
     if (-not $global:EnableSharePointUpload) { return 0 }
@@ -255,7 +383,7 @@ function Publish-QualifiedCsvUploads {
 }
 
 $coreManifest = Join-Path $root 'Modules\SmartM365.Core\Compatibility\WindowsPowerShell5\SmartM365-WindowsPowerShell5.psd1'
-Import-Module -Name $coreManifest -MinimumVersion '1.0.50' -ErrorAction Stop
+Import-Module -Name $coreManifest -MinimumVersion '1.0.53' -ErrorAction Stop
 $outputBase = if ($PSBoundParameters.ContainsKey('OutputRoot')) { Resolve-InventoryConfigTokens -Value $OutputRoot -Name 'OutputRoot' } else { Get-InventoryConfigValue -Name 'OutputRoot' }
 $outputBase = Assert-InventoryPath -Path $outputBase -Name 'OutputRoot'
 $latestRoot = Assert-InventoryPath -Path (Get-InventoryConfigValue -Name 'LatestCsvFolderPath') -Name 'LatestCsvFolderPath'
@@ -285,6 +413,7 @@ try {
     Start-SmartM365SourceReceipt -ScriptPath $PSCommandPath -SourceRootPath $latestRoot -ScopeParameters @{ IncludedWebApplicationUrls=@(Get-InventoryConfigValue 'IncludedWebApplicationUrls' @()); ExcludedWebApplicationUrls=@(Get-InventoryConfigValue 'ExcludedWebApplicationUrls' @()) }
     $script:ReceiptStarted = $true
     $farmId = [string]$farm.Id
+    $previousCounts = Get-QualifiedPreviousInfrastructureCounts -LatestRoot $latestRoot -FarmId $farmId -TenantKey $global:SmartM365TenantKey
     $rows = @{
         Farms = New-Object 'System.Collections.Generic.List[object]'
         Servers = New-Object 'System.Collections.Generic.List[object]'
@@ -361,6 +490,11 @@ try {
                     $dbRow['Status'] = [string](Get-ObservedProperty $database 'Status')
                     $dbRow['SiteCollectionCount'] = [string](Get-ObservedProperty $database 'CurrentSiteCount')
                     $dbRow['IsReadOnly'] = [string](Get-ObservedProperty $database 'IsReadOnly')
+                    $extended = Get-ContentDatabaseExtendedFields -Database $database
+                    $dbRow['DatabaseSizeBytes'] = $extended.DatabaseSizeBytes
+                    $dbRow['DatabaseSizeStatus'] = $extended.DatabaseSizeStatus
+                    $dbRow['NeedsUpgradeIncludeChildren'] = $extended.NeedsUpgradeIncludeChildren
+                    $dbRow['NeedsUpgradeStatus'] = $extended.NeedsUpgradeStatus
                     $dbRow['CollectionStatus'] = if (-not $dbRow['ContentDatabaseId'] -or -not $dbRow['Name'] -or -not $dbRow['DatabaseServer'] -or -not $dbRow['Status'] -or $dbRow['SiteCollectionCount'] -eq '' -or $dbRow['IsReadOnly'] -eq '') { 'PropertyUnavailable' } else { 'Collected' }
                     if ($dbRow['CollectionStatus'] -ne 'Collected') { $failures.Add("ContentDatabaseProperty: $($dbRow['ContentDatabaseId'])") }
                     $rows.ContentDatabases.Add([pscustomobject]$dbRow)
@@ -392,7 +526,7 @@ try {
         ServiceApplications = @('TenantKey','FarmId','RunId','CollectedAtUtc','ServiceApplicationId','Name','TypeName','Status','ApplicationPool','CollectionStatus')
         WebApplications = @('TenantKey','FarmId','RunId','CollectedAtUtc','WebApplicationId','Name','DefaultUrl','ApplicationPool','ContentDatabaseCount','CollectionStatus')
         WebApplicationZones = @('TenantKey','FarmId','RunId','CollectedAtUtc','WebApplicationId','Zone','PublicUrl','AuthenticationMode','ClaimsAuthentication','AuthenticationProviders','CollectionStatus')
-        ContentDatabases = @('TenantKey','FarmId','RunId','CollectedAtUtc','WebApplicationId','ContentDatabaseId','Name','DatabaseServer','Status','SiteCollectionCount','IsReadOnly','CollectionStatus')
+        ContentDatabases = @('TenantKey','FarmId','RunId','CollectedAtUtc','WebApplicationId','ContentDatabaseId','Name','DatabaseServer','Status','SiteCollectionCount','IsReadOnly','CollectionStatus','DatabaseSizeBytes','DatabaseSizeStatus','NeedsUpgradeIncludeChildren','NeedsUpgradeStatus')
     }
     $runPaths = New-Object 'System.Collections.Generic.List[string]'
     foreach ($kind in $schemas.Keys) {
@@ -402,6 +536,7 @@ try {
     if ($failures.Count -gt 0) {
         foreach ($failure in $failures) { WriteLog -Message ("Infrastructure coverage detail: {0}" -f $failure) -Level WARNING }
         WriteLog -Message ("Infrastructure coverage is incomplete: {0} failure(s). DATA-LAST was not updated." -f $failures.Count) -Level ERROR
+        Send-InfrastructureRunMail -Status Partial -Rows $rows -Failures $failures.ToArray()
         Complete-SmartM365ExecutionContext -Status Failed
         $script:Completed = $true
         exit 1
@@ -429,19 +564,7 @@ try {
     if (-not $receiptPath -or $receiptPath -notlike '*.current.json.txt') { throw 'Infrastructure source receipt qualification failed.' }
     WriteLog -Message 'Infrastructure collection and current publication completed.'
     $uploadFailures = Publish-QualifiedCsvUploads -Paths $qualifiedCsvPaths.ToArray()
-    try {
-        $farmVersion = [System.Net.WebUtility]::HtmlEncode([string]$rows.Farms[0].FarmVersion)
-        $body = "<h2>SharePoint on-prem infrastructure inventory</h2><p>Qualified run: $($script:RunId)</p><p>Farm version: $farmVersion</p><p>SharePoint upload failures: $uploadFailures</p><table><tr><th>Servers</th><th>Service applications</th><th>Web applications</th><th>Content databases</th></tr><tr><td>$($rows.Servers.Count)</td><td>$($rows.ServiceApplications.Count)</td><td>$($rows.WebApplications.Count)</td><td>$($rows.ContentDatabases.Count)</td></tr></table>"
-        $mailMarkerPath = Join-Path $outputBase 'SmartM365-SharePoint-OnPrem-Infrastructure-DailySummary.sent'
-        $null = Invoke-DailySummaryMail -MarkerPath $mailMarkerPath -Force:$ForceSendDailySummary -SendAction {
-            Send-InventorySummaryMail -Subject 'SharePoint on-prem infrastructure inventory' -BodyHtml $body
-        }
-    } catch {
-        WriteLog -Message ("Daily infrastructure summary email failed: {0}" -f $_.Exception.Message) -Level ERROR
-        Complete-SmartM365ExecutionContext -Status CompletedWithWarnings
-        $script:Completed = $true
-        exit 3
-    }
+    Send-InfrastructureRunMail -Status Qualified -Rows $rows -UploadFailures $uploadFailures -PreviousCounts $previousCounts
     if ($uploadFailures -gt 0) {
         Complete-SmartM365ExecutionContext -Status CompletedWithWarnings
         $script:Completed = $true
@@ -451,6 +574,10 @@ try {
     $script:Completed = $true
 } catch {
     $failure = $_
+    if (-not $ValidateOnly -and -not $script:Completed) {
+        $mailRows = if (Get-Variable -Name rows -ErrorAction SilentlyContinue) { $rows } else { $null }
+        Send-InfrastructureRunMail -Status Failed -Rows $mailRows -Failures @($failure.Exception.Message)
+    }
     try {
         WriteLog -Message ("Infrastructure inventory failed during {0} at {1}: {2}" -f $script:CurrentStage, $script:CurrentStagePath, $failure.Exception.Message) -Level ERROR
         if ($failure.InvocationInfo -and $failure.InvocationInfo.PositionMessage) {
@@ -467,8 +594,8 @@ try {
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDniG0e7KJC2olu
-# O6OEkQT1MIiJmj2DP/KJJliJAIHqf6CCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAsbGrGe7/T80Xt
+# arfvGl1dTbAzgc1+rvfUzkEs1XDByaCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -498,14 +625,14 @@ try {
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCC9WqMHRPHexdkaoc4srAYA
-# IlvSyGTCC+WNGFP5WjrQWDANBgkqhkiG9w0BAQEFAASCAYBDLu9EuXCPPyNX8n1+
-# zR/kozfACgB7RUUWwmmp0edtZLASHuZWA2U5tjRiQfv5WS8jtYfCJGU8WXRGfhUN
-# ne607sKB+A/ztM5NUBtDNv9p6/gmQoCoQfUpIpCWwsxcR8wK4zQaMMDpY8liHPQz
-# 6FY4MV5g7ksLDHkS6PplrbbLUcfcithXPKGk0HBVU7aRIzNggkSaJtwqAtVnPkVb
-# d9Xk5ru7ii/UOvgNsYedn0D9TaVkXhLl8iWtrdS3yBT7VoBtF/c+WvedU6NX0jOv
-# QyKBie1qFYk4jHf4SLWU7rB9K33Jq+WvDkTTTj1hCSGChEZCrP3Tw139ONLdeH9O
-# JCakn7rd+afvBsqkIE+heNxpskB/mjCs48Rypg10/p0BWC+NVlVJIOLtstsjDf4t
-# oHqkuEWZRpSzYduXpjBpWmYMdqvVCdLh/cCIEv1p+lrgxdgUiWjcRBW5bW8OjqEV
-# d5/XTSQYo56v+kjZohRmcrTYBUk9xt9xjuHfFwh5zkLoFsc=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCApiSppOBoH20nNYK/GuoO3
+# aqAnCabpeBL0icmjNs0JEzANBgkqhkiG9w0BAQEFAASCAYBhMsjAA6ql84SF5cNq
+# PwINjAHpAvflLTogxVhaUITb0Fze9iCrZLlI+f4HOOTMweb5rrHGQEhjKHWr7THm
+# 7mNNTJ+GKKhqjQ0DlqPT+Iy5jIlmjvrOZ1rHZiDObDrgb9Re6thImoRW9eRKBTvD
+# TLnYZnIv9rgl+BVHkd1BoQcPD70Qt/JOKiV+igStdC94x6uHgUBO17XdqtJXwHLk
+# C9jxLPa3WDNqpWo903M4KTmWtcqaxbqETaelOKxFqpD6KMBfx5OIbm7vW6Lkmp6y
+# cYmc8di9CFLENSqHoIPaNXTrshD9RYVGDCMtCel4NelSZihf7Wh1TLYs1pu1Fs2C
+# 1MQM7+hx+hfDWOm8X7HUTIRtQf2SzRgJHyZlRjUIZXJcQFMo2zuOY+doOBXXMmnp
+# iU7d6mgkRRTatcEcJTo2lgOiM32vYcfgfmbQoyIbpJdnC5skPl0CpEVQ4zcy1lSJ
+# P/rw8TE1A2/uQ6t0Z0wQJl2bRzqjn+yO8jjTXUMOXdYXJrQ=
 # SIG # End signature block

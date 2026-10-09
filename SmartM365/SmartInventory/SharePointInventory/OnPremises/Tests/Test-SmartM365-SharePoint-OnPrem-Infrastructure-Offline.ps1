@@ -10,7 +10,11 @@ $tokens = $null
 $errors = $null
 $ast = [Management.Automation.Language.Parser]::ParseFile($scriptPath, [ref]$tokens, [ref]$errors)
 if (@($errors).Count) { throw "Infrastructure parser errors: $($errors.Count)" }
-if ($ast.Extent.Text -notmatch '(?s)\.VERSION\s+1\.0\.7') { throw 'Infrastructure version was not updated for publication diagnostics.' }
+if ($ast.Extent.Text -notmatch '(?s)\.VERSION\s+1\.0\.8') { throw 'Infrastructure version was not updated for the mail and database contract.' }
+foreach ($column in @('DatabaseSizeBytes','DatabaseSizeStatus','NeedsUpgradeIncludeChildren','NeedsUpgradeStatus')) {
+    if ($ast.Extent.Text -notmatch [regex]::Escape("'$column'")) { throw "Content database schema lacks $column" }
+}
+if ($ast.Extent.Text -notmatch "\[Alias\('ForceSendDailySummary'\)\]\[switch\]\`$ForceMail") { throw 'ForceMail alias is missing.' }
 $firstUploadConfigRead = $ast.Extent.Text.IndexOf('$global:SharePointSiteHostname =', [StringComparison]::Ordinal)
 $resolverDefinition = @($ast.FindAll({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Resolve-InventoryConfigTokens' }, $true))
 if ($firstUploadConfigRead -lt 0 -or $resolverDefinition.Count -ne 1 -or $resolverDefinition[0].Extent.EndOffset -ge $firstUploadConfigRead) { throw 'Infrastructure reads upload configuration before the token resolver is defined.' }
@@ -21,7 +25,7 @@ $producer = @($registry.Producers | Where-Object Script -eq 'SmartM365-SharePoin
 if ($producer.Count -ne 1 -or $producer[0].Files.Count -ne 6) { throw 'Infrastructure source receipt registration is invalid.' }
 if ($ast.Extent.Text -match '(?im)^\s*(Set-SPSite|Set-SPWeb|Set-SPContentDatabase|Add-SPShellAdmin|Remove-SPSite)\b') { throw 'A SharePoint write command was found.' }
 if ($ast.Extent.Text -notmatch '-Rows\s+\$rows\[\$kind\]\.ToArray\(\)') { throw 'Infrastructure CSV buffers must be converted to arrays for Windows PowerShell 5.1.' }
-foreach ($name in @('Get-InventoryConfigValue','Resolve-InventoryConfigTokens','Assert-InventoryPath','Get-ConfiguredWebApplications','Get-ObservedProperty','Get-FarmConfigurationDatabaseName','Write-RunCsv','Ensure-GraphAuthenticationModule','Invoke-DailySummaryMail','Send-InventorySummaryMail','Publish-QualifiedCsvUploads')) {
+foreach ($name in @('Get-InventoryConfigValue','Resolve-InventoryConfigTokens','Assert-InventoryPath','Get-ConfiguredWebApplications','Get-ObservedProperty','Get-FarmConfigurationDatabaseName','Get-ContentDatabaseExtendedFields','Get-InfrastructureFarmEdition','Get-QualifiedPreviousInfrastructureCounts','New-InfrastructureMailHtml','Send-InfrastructureRunMail','Write-RunCsv','Ensure-GraphAuthenticationModule','Invoke-DailySummaryMail','Send-InventorySummaryMail','Publish-QualifiedCsvUploads')) {
     $functionAst = @($ast.FindAll({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name }, $true))
     if ($functionAst.Count -ne 1) { throw "Missing function: $name" }
     . ([scriptblock]::Create($functionAst[0].Extent.Text))
@@ -47,6 +51,7 @@ $selected = @(Get-ConfiguredWebApplications)
 if ($selected.Count -ne 1 -or $selected[0].Url -ne 'https://content-a/') { throw 'Web application filtering failed.' }
 $coreManifest = Join-Path $folder '..\..\..\Modules\SmartM365.Core\Compatibility\WindowsPowerShell5\SmartM365-WindowsPowerShell5.psd1'
 Import-Module $coreManifest -Force -ErrorAction Stop
+$script:BuildEditionMapPath = Join-Path $folder 'SharePoint-OnPrem-BuildEditions.psd1'
 $global:SmartM365TenantKey = 'OFFLINE'
 $global:SmartM365OrganizationKey = 'OFFLINE'
 $global:SmartM365EnvironmentKey = 'TEST'
@@ -98,7 +103,8 @@ try {
     catch { if ($_.Exception.Message -ne 'Simulated SMTP failure') { throw } }
     if (Test-Path -LiteralPath $failedMarker) { throw 'Failed infrastructure email wrote a marker.' }
     $script:mailParameters = $null
-    function SendEmailHtmlReport { [CmdletBinding()] param($From,$To,$Subject,$BodyHtml,$MailPurpose,$SmtpServer,$SmtpPort,$SendMailMode,$Cc) $script:mailParameters = $PSBoundParameters }
+    $script:mailSendCount = 0
+    function SendEmailHtmlReport { [CmdletBinding()] param($From,$To,$Subject,$BodyHtml,$MailPurpose,$SmtpServer,$SmtpPort,$SendMailMode,$Cc) $script:mailParameters = $PSBoundParameters; $script:mailSendCount++ }
     $script:EffectiveConfig = [pscustomobject]@{ From='sender@example.test'; To=''; ErrorMailTo='recipient@example.test'; SmtpServer='smtp.example.test'; SmtpPort=25; SendMailMode='SMTP'; Cc='' }
     Send-InventorySummaryMail -Subject 'Offline summary' -BodyHtml '<p>Summary</p>'
     if ($script:mailParameters.To -ne 'recipient@example.test' -or $script:mailParameters.From -ne 'sender@example.test' -or $script:mailParameters.SendMailMode -ne 'Graph' -or $script:mailParameters.ContainsKey('Attachments') -or $script:mailParameters.ContainsKey('SmtpServer')) { throw 'Infrastructure Graph mail routing or attachment policy failed.' }
@@ -125,18 +131,101 @@ try {
     if ((Publish-QualifiedCsvUploads -Paths @('run.csv','latest.csv')) -ne 0 -or $script:uploadCalls.Count -ne 0) { throw 'Disabled infrastructure upload was attempted.' }
     $global:EnableSharePointUpload = $true
     if ((Publish-QualifiedCsvUploads -Paths @('run.csv','latest.csv','run.csv','failed.csv')) -ne 1 -or $script:uploadCalls.Count -ne 3) { throw 'Infrastructure upload qualification failed.' }
+
+    $extended = Get-ContentDatabaseExtendedFields -Database ([pscustomobject]@{NeedsUpgradeIncludeChildren=$true;DiskSizeRequired=999999})
+    if ($extended.DatabaseSizeBytes -ne '' -or $extended.DatabaseSizeStatus -ne 'Unavailable' -or $extended.NeedsUpgradeIncludeChildren -ne 'True' -or $extended.NeedsUpgradeStatus -ne 'Collected') { throw 'Read-only content database extended fields are incorrect.' }
+    $missingExtended = Get-ContentDatabaseExtendedFields -Database ([pscustomobject]@{})
+    if ($missingExtended.NeedsUpgradeIncludeChildren -ne '' -or $missingExtended.NeedsUpgradeStatus -ne 'PropertyUnavailable') { throw 'Missing upgrade property was treated as false.' }
+    $falseExtended = Get-ContentDatabaseExtendedFields -Database ([pscustomobject]@{NeedsUpgradeIncludeChildren=$false})
+    if ($falseExtended.NeedsUpgradeIncludeChildren -ne 'False' -or $falseExtended.NeedsUpgradeStatus -ne 'Collected') { throw 'Observed false upgrade state was lost.' }
+    if ((Get-InfrastructureFarmEdition '16.0.10417.20198') -ne '2019' -or (Get-InfrastructureFarmEdition '16.0.5565.1001') -ne '2016' -or (Get-InfrastructureFarmEdition '16.0.99999.0') -ne 'Unknown') { throw 'Farm edition mapping failed.' }
+
+    $reportRows = @{
+        Farms=@([pscustomobject]@{BuildVersion='16.0.10417.20198'})
+        Servers=@([pscustomobject]@{ServerName='S1';Role='Application';Status='Offline'})
+        ServiceApplications=@([pscustomobject]@{Name='Search';Status='Stopped'})
+        WebApplications=@([pscustomobject]@{WebApplicationId='W1';DefaultUrl='https://example.test';ApplicationPool='Pool';ContentDatabaseCount=1})
+        WebApplicationZones=@([pscustomobject]@{WebApplicationId='W1';Zone='Default';AuthenticationMode='Forms'})
+        ContentDatabases=@([pscustomobject]@{Name='DB1';DatabaseServer='SQL1';Status='Offline';IsReadOnly='True';NeedsUpgradeIncludeChildren='True';NeedsUpgradeStatus='Collected';DatabaseSizeBytes='';DatabaseSizeStatus='Unavailable'})
+    }
+    $reportHtml = New-InfrastructureMailHtml -Status Qualified -Rows $reportRows -UploadFailures 2 -PreviousCounts @{Servers=0;ServiceApplications=1;WebApplications=1;ContentDatabases=1} -TenantName 'offline' -Duration ([timespan]::FromSeconds(31))
+    foreach ($expected in @('SMARTM365 SHAREPOINT ONPREM','QUALIFIED','Duration: 00:00:31','Servers','1 (+1)','Alerts','Server not online','Service application not started','Content database read-only','Content database needs upgrade','Authentication by zone','Default: Forms','2019','16.0.10417.20198')) {
+        if ($reportHtml -notmatch [regex]::Escape($expected)) { throw "Infrastructure mail lacks $expected" }
+    }
+    if ($reportHtml -match 'Farm build</div>|Files / rows</div>|>Files</div>') { throw 'Redundant build or file summary card/section is still present.' }
+    if ($reportHtml -notmatch '(?s)>Farm edition</div>\s*<div[^>]*>2019</div>\s*<div[^>]*>16\.0\.10417\.20198</div>') { throw 'Farm build is not the small detail below the edition.' }
+    if ($reportHtml -match 'Top 5 largest content databases') { throw 'Top-five size ranking was shown without measured sizes.' }
+    $reportRows.ContentDatabases[0].DatabaseSizeBytes = '1024'
+    $reportRows.ContentDatabases[0].DatabaseSizeStatus = 'Collected'
+    $sizedHtml = New-InfrastructureMailHtml -Status Qualified -Rows $reportRows -TenantName 'offline'
+    if ($sizedHtml -notmatch 'Top 5 largest content databases' -or $sizedHtml -notmatch '1024') { throw 'Measured database size was not ranked.' }
+    $reportRows.ContentDatabases[0].DatabaseSizeBytes = ''
+    $reportRows.ContentDatabases[0].DatabaseSizeStatus = 'Unavailable'
+    $unknownHtml = New-InfrastructureMailHtml -Status Failed -Rows $null -TenantName 'offline'
+    if ($unknownHtml -notmatch 'FAILED' -or $unknownHtml -notmatch 'n/a' -or $unknownHtml -match 'Files / rows') { throw 'Failed-run mail misrepresented unavailable data.' }
+    $reportRows.Servers = @()
+    $partialHtml = New-InfrastructureMailHtml -Status Partial -Rows $reportRows -Failures @('Servers: Access is denied') -TenantName 'offline'
+    if ($partialHtml -notmatch 'PARTIAL' -or $partialHtml -notmatch 'Access is denied' -or $partialHtml -notmatch 'n/a') { throw 'Partial-run mail hid inaccessible server data.' }
+    $reportRows.Servers = @([pscustomobject]@{ServerName='S1';Role='Application';Status='Offline'})
+    $serverBuffer = New-Object 'System.Collections.Generic.List[object]'
+    $serverBuffer.Add([pscustomobject]@{ServerName='S1';Role='Application';Status='Online'})
+    $serverBuffer.Add([pscustomobject]@{ServerName='S2';Role='WebFrontEnd';Status='Online'})
+    $reportRows.Servers = $serverBuffer
+    $bufferedHtml = New-InfrastructureMailHtml -Status Qualified -Rows $reportRows -TenantName 'offline'
+    if ($bufferedHtml -notmatch '(?s)>Servers</div>\s*<div[^>]*>2</div>') { throw 'Generic-list run buffers were not counted correctly in email.' }
+    $reportRows.Servers = @([pscustomobject]@{ServerName='S1';Role='Application';Status='Offline'})
+    $outputBase = Join-Path $tempRoot 'mail-gates'
+    $script:StartedAt = Get-Date
+    $Tenant = 'offline'
+    $ForceMail = $false
+    $beforeMail = $script:mailSendCount
+    Send-InfrastructureRunMail -Status Partial -Rows $reportRows
+    Send-InfrastructureRunMail -Status Failed -Rows $reportRows
+    Send-InfrastructureRunMail -Status Qualified -Rows $reportRows
+    Send-InfrastructureRunMail -Status Qualified -Rows $reportRows
+    if ($script:mailSendCount -ne ($beforeMail + 2)) { throw 'Qualified and issue daily mail counters were not independent.' }
+    $ForceMail = $true
+    Send-InfrastructureRunMail -Status Qualified -Rows $reportRows
+    if ($script:mailSendCount -ne ($beforeMail + 3)) { throw 'ForceMail did not bypass the qualified daily counter.' }
+    $ForceMail = $false
+    function SendEmailHtmlReport { throw 'Simulated Graph mail failure' }
+    $ForceMail = $true
+    Send-InfrastructureRunMail -Status Failed -Rows $reportRows
+    $ForceMail = $false
+    if (Test-Path -LiteralPath (Join-Path $outputBase 'SmartM365-SharePoint-OnPrem-Infrastructure-IssueDailySummary.sent') -PathType Leaf) {
+        # The prior successful issue mail owns this marker; failed forced sends must not change it.
+        $markerDate = (Get-Content -LiteralPath (Join-Path $outputBase 'SmartM365-SharePoint-OnPrem-Infrastructure-IssueDailySummary.sent') -Raw).Trim()
+        if ($markerDate -ne (Get-Date).ToString('yyyy-MM-dd')) { throw 'Issue mail marker changed unexpectedly.' }
+    }
+
+    $comparisonRoot = Join-Path $tempRoot 'comparison'
+    New-Item -ItemType Directory -Path $comparisonRoot -Force | Out-Null
+    $comparisonFiles = @()
+    foreach ($kind in @('Farms','Servers','ServiceApplications','WebApplications','WebApplicationZones','ContentDatabases')) {
+        $fileName = "SharePoint_OnPrem_$kind.csv"
+        $filePath = Join-Path $comparisonRoot $fileName
+        Write-SmartM365CsvAtomically -Data @([pscustomobject]@{TenantKey='OFFLINE';FarmId='FARM';RunId='PRIOR'}) -Path $filePath -Columns @('TenantKey','FarmId','RunId') -Delimiter ';' -NoTenantKey
+        $comparisonFiles += [pscustomobject]@{File=$fileName;RunId='PRIOR';Status='Success';Rows=1;SHA256=(Get-FileHash -LiteralPath $filePath -Algorithm SHA256).Hash}
+    }
+    $comparisonReceipt = [pscustomobject]@{Owner='SmartInventory-SourceReceipt';Status='Completed';RunId='PRIOR';Files=$comparisonFiles}
+    $comparisonReceipt | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $comparisonRoot 'SmartInventory_SmartM365-SharePoint-OnPrem-Infrastructure-Inventory.current.json.txt')
+    $previous = Get-QualifiedPreviousInfrastructureCounts -LatestRoot $comparisonRoot -FarmId 'FARM' -TenantKey 'OFFLINE'
+    if ($null -eq $previous -or $previous.ContentDatabases -ne 1) { throw 'Verified prior-run delta input was rejected.' }
+    if ($null -ne (Get-QualifiedPreviousInfrastructureCounts -LatestRoot $comparisonRoot -FarmId 'OTHER' -TenantKey 'OFFLINE')) { throw 'Delta accepted a different farm.' }
+    Add-Content -LiteralPath (Join-Path $comparisonRoot 'SharePoint_OnPrem_ContentDatabases.csv') -Value 'tampered'
+    if ($null -ne (Get-QualifiedPreviousInfrastructureCounts -LatestRoot $comparisonRoot -FarmId 'FARM' -TenantKey 'OFFLINE')) { throw 'Delta accepted a tampered CSV.' }
 } finally {
     if ([IO.Path]::GetFullPath($tempRoot).StartsWith([IO.Path]::GetFullPath([IO.Path]::GetTempPath()),[StringComparison]::OrdinalIgnoreCase)) {
         Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
     }
 }
-Write-Output 'PASS: infrastructure parser, configuration database fallback, nested configuration, persistent paths, filtering, read-only commands, PS5 buffered CSV, receipts, upload policy, daily mail gate and routing.'
+Write-Output 'PASS: infrastructure parser, PS5 CSV, receipts, daily mail gate/routing, edition mapping, database status, alerts, safe delta and HTML.'
 
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCRi1Jmoj+ZOWJ3
-# lfYgfWimDoUZhinKPywXtcjrNRnGbKCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCk45bDERcBvfME
+# qwpDHClz8MyZ6oL/mFCFM9br6YIkq6CCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -166,14 +255,14 @@ Write-Output 'PASS: infrastructure parser, configuration database fallback, nest
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCBMmrhSe8OzjGLaM9jUeLxS
-# FbhpDfj/yUq6jOxLewWYHjANBgkqhkiG9w0BAQEFAASCAYAjVO46KJSC0mVdlLq4
-# nHt1+eu0yyWODw/2gN8LR4sT3IM/1YL7xv3nAqPqPsi+xUbIQH4ya9xbKcs8oiPf
-# C89m5fja0DcMOhbJUmbs9D4dVkQKInu91iMfmpApiPAM2ZFiLl3rIIsVPTBe2nL8
-# PoZ+JOqfaFuPuVOSKQ7Bgo4dlNfOt3rgOtmoLPpnDpV3VPNl5h5D7iQ/+2RX8Isu
-# 4OU1Mbchi5c7lXuX1HniOxA3pJKlSgOsMVf/KeNq4uza7TOq2K7OEyTnTHTM3pbe
-# auF3tsSKar/UoV9FcHYkqzPmkGQXogUNYWfNNW4rEjixyziQQ0swIYHq4RDliv18
-# k4nGmLUzHwgOKU8ZC2hMk6i4ldesGXxbrKEcUygvofMOrrR94F5B3WEvutWziak4
-# koVHaeJW5Sw7SoYCmYHK/UBEXow4btjKON0ZhvZigA8ppIcry57zR6uMzPfqAFVy
-# vXmdSk95w0Zx+OQyub3T/lv4JG5o41wMUwKrNynuF/xdRe8=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCDLNN5D6kWnFEyrTenGp7kV
+# rp6xmbYmqdfQh+E/e7VmzjANBgkqhkiG9w0BAQEFAASCAYBzkO9I5BgIOdnwHKh5
+# Nn2P3e9E2Zs5U9N4PoJpiv9zRt/rQE92MRYCkP9g9TiBP1TaYdFffWLf2ja5q/SL
+# vEuCvgfU+cW/5M7d2kyN/MOvXbQy57aZxXtELpfyoIve2tOlghRkc45ddi9ZcAcg
+# RDCBph/mfDGl1CnaqjEbCEBra1vf6EB4/W/g99dpfeLUO6CKjUG7MX8OHwG6CNAb
+# Om9Me27nj4BnjRiDH/PFJkwxjcb9QKK/6fFFF0a13ZrfjmqmIkgSAhgHuNx2NaEJ
+# pJ1znmzQlW/1edU5KBiF6jbU96yrf15GgcWffRPD2H5VLGE50y9cMM7wy6g+7zq3
+# 0CxeGeMOj4BlXF91hioulEoC6ObPXtmHa7tOVwwiuZO41Hr44DsYokvyHx5UCaFw
+# lzpKCt1LplXviEyjvTewQ8kAy4hwcNDO34rTkJUP9c2ErX2qCt5mkDGquMx9RRcg
+# 2KkLlIn7tXezehACynNbh75uhRJTb/4kVLjl0Ctw0ibbtYw=
 # SIG # End signature block
