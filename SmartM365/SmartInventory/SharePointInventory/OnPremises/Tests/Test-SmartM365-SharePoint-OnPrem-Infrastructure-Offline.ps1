@@ -16,7 +16,7 @@ $registry = Get-Content $registryPath -Raw | ConvertFrom-Json
 $producer = @($registry.Producers | Where-Object Script -eq 'SmartM365-SharePoint-OnPrem-Infrastructure-Inventory.ps1')
 if ($producer.Count -ne 1 -or $producer[0].Files.Count -ne 6) { throw 'Infrastructure source receipt registration is invalid.' }
 if ($ast.Extent.Text -match '(?im)^\s*(Set-SPSite|Set-SPWeb|Set-SPContentDatabase|Add-SPShellAdmin|Remove-SPSite)\b') { throw 'A SharePoint write command was found.' }
-foreach ($name in @('Get-InventoryConfigValue','Resolve-InventoryConfigTokens','Get-ConfiguredWebApplications','Write-RunCsv','Invoke-DailySummaryMail','Send-InventorySummaryMail')) {
+foreach ($name in @('Get-InventoryConfigValue','Resolve-InventoryConfigTokens','Assert-InventoryPath','Get-ConfiguredWebApplications','Write-RunCsv','Invoke-DailySummaryMail','Send-InventorySummaryMail')) {
     $functionAst = @($ast.FindAll({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name }, $true))
     if ($functionAst.Count -ne 1) { throw "Missing function: $name" }
     . ([scriptblock]::Create($functionAst[0].Extent.Text))
@@ -32,6 +32,10 @@ if ((Get-InventoryConfigValue 'LatestCsvFolderPath') -ne 'C:\SmartM365\Data\Tena
 $script:EffectiveConfig.OutputRoot = '{{MissingPath}}\SharePoint'
 try { $null = Get-InventoryConfigValue 'OutputRoot'; throw 'Missing token was accepted.' }
 catch { if ($_.Exception.Message -ne 'Unresolved configuration value: OutputRoot') { throw } }
+$root = 'C:\ProgramData\SmartM365\LauncherCache\SharePointInfrastructure\SmartM365'
+try { $null = Assert-InventoryPath -Path (Join-Path $root 'Data\Tenants\prod\DATA-ALL') -Name 'OutputRoot'; throw 'Disposable infrastructure output path was accepted.' }
+catch { if ($_.Exception.Message -notlike 'OutputRoot resolves inside the disposable launcher cache.*') { throw } }
+if ((Assert-InventoryPath -Path 'C:\SmartM365\DATA' -Name 'OutputRoot') -ne 'C:\SmartM365\DATA') { throw 'Persistent infrastructure output path was rejected.' }
 $script:EffectiveConfig = [pscustomobject]@{ IncludedWebApplicationUrls=@('https://content-a'); ExcludedWebApplicationUrls=@('https://content-b') }
 function Get-SPWebApplication { @([pscustomobject]@{Url='https://content-a/'},[pscustomobject]@{Url='https://content-b/'}) }
 $selected = @(Get-ConfiguredWebApplications)
@@ -81,13 +85,13 @@ try {
         Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
     }
 }
-Write-Output 'PASS: infrastructure parser, nested configuration, filtering, read-only commands, empty CSV, receipts, daily mail gate and routing.'
+Write-Output 'PASS: infrastructure parser, nested configuration, persistent paths, filtering, read-only commands, empty CSV, receipts, daily mail gate and routing.'
 
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAS7pQrjbZXeDFc
-# Jmgf4DagLo+tMPZTH+3+FlmGx6HO56CCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBZVdh3ggwNnjm9
+# 2wRZKC4FRmzh4hePJ8BQcNVHpeeLpKCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -117,14 +121,14 @@ Write-Output 'PASS: infrastructure parser, nested configuration, filtering, read
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCBK84QoWJ26fOKiOEw5ve2Y
-# B94xKd9jlJnq8nMU1OJ2GzANBgkqhkiG9w0BAQEFAASCAYCdxTS2RkSu8CvECN7H
-# sNuWMDV9BujkExZD31QgBh87jGrqKnBP6zeCo4GMEsE+8nUCCY/oiL4abi2ZTxLs
-# yUl9rOiwfLCt3L5lE+4uLd7vGd4hk6Kaqzly97P9pXk5wSAOPQwRq309pBAMZEGq
-# nrXX17Bv58xgJ5u9bv5x/SymeTcNpImYdMtHg8FhJKI0CRDkvVA0aSQXdD0242gR
-# k2NekvJ8UBfBQD9/KmnB4Q+2K2jlmpj5l2QjsYgLwvZi3VEh0b1MO7NP8RektIa0
-# t1MkNsmT/gWOSrR3gXMg+7eet/dLdJYHx4EPg+BExDBG3AkeX1rbTlzAzSUmHshr
-# +/2kGhHj3v7TudZg/eS3S2Xf1+rQ9B/qIJQVjqKtAHsGjuyMn22hGVaRpLfC8yEN
-# ACmsTr9cF/feFTdkPGgFPABQIBlab5Y/PNstGX2ZpLVrqAmVNo6+cS6Bubi4a1jg
-# cjMH+X5fXug6LYikgcms+o9T7AQawd9Fx5Bbgfm4awm6Efk=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCAHwljY1AF2HeG2lFfgCT14
+# EBoqsDbZxnYm43JB3iVSwzANBgkqhkiG9w0BAQEFAASCAYAHewTaE1tHI967uw1X
+# kjBqLip6tBg00AIPYn7LGohauFK079LFSTY/U1tRUbKO6jaY1VxHQjepremODGvr
+# mlVeb19vJLAQRtRL7u1MXpCQpAdul+gtGnWY6cVC5A30bztRNivdAMCtP8ODGvCi
+# ZqhbZy5LGO2nSx2su+yZYfwYYvd7wDaJRH035FpUgeiJSW2cxjODLj9KvANZEIBf
+# RzCS96BNqTes0CPp4SENZ1YeykgSWzQHYvZgSaT9+8xzmJ2xBs52cqnStuTWmfwd
+# iyb7Vo9Zx+uObKfOZzlXgqGDiPzDPjEHiNKK2FnK5thr0tsoUSDl5mJjeDZlRpKn
+# A+DpA2aAxOslvnjZkj5bSquzeH3G5YCrJdRYwWrX2qV2+WDtOoOoger1GKklHbWJ
+# ItX10hHCZbqXf1DgvzPkseqsaHYp99Dea9zJy5CJZjKyeWgA4QwtSPNB8M2rqZ66
+# fgG4JQ2yt6jV9j+SoyjcDhl5f6ONn8ASsesS5csLpwUDCKo=
 # SIG # End signature block

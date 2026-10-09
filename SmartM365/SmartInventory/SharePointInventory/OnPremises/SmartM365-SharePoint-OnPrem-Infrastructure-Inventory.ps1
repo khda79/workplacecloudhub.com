@@ -76,7 +76,15 @@ function Assert-InventoryPath {
     if ([string]::IsNullOrWhiteSpace($Path) -or -not [IO.Path]::IsPathRooted($Path) -or $Path -match '\{\{') {
         throw "$Name must be an absolute resolved path."
     }
-    return [IO.Path]::GetFullPath($Path)
+    $resolved = [IO.Path]::GetFullPath($Path)
+    if ($root -match '[\\/]LauncherCache[\\/]') {
+        $cacheScriptRoot = [IO.Path]::GetFullPath($root).TrimEnd([char[]]@('\','/'))
+        if ($resolved.Equals($cacheScriptRoot, [StringComparison]::OrdinalIgnoreCase) -or
+            $resolved.StartsWith(($cacheScriptRoot + [IO.Path]::DirectorySeparatorChar), [StringComparison]::OrdinalIgnoreCase)) {
+            throw "$Name resolves inside the disposable launcher cache. Configure a persistent tenant path outside LauncherCache."
+        }
+    }
+    return $resolved
 }
 
 function Get-ConfiguredWebApplications {
@@ -359,8 +367,8 @@ try {
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAgDn7BZe/NLuG9
-# 6unWtT9FndCqCrQg/HmkHRkW96YRpaCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC/rGEPOP+WmDcl
+# VoMdBscHqg6ZRwS00SPqPIUw0euSBqCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -390,14 +398,14 @@ try {
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCBTqfnpBX34v3xcK625xiLp
-# cCG9eRs1rpkTssc6/2Fr0zANBgkqhkiG9w0BAQEFAASCAYCMbOmbv+zSzcf1x/nz
-# NkwNYVLB1lKLiFferpA6bGtRcqsE6wLe6VTn4khFPVY1vht2EluXQzL7mrk88MmP
-# W2lbekd4XmxdDwjDaviwRDCbujieDWggtbNf4ptAHZaqmm5D+gkISC/1mtqzx/2d
-# /mucnyRW2a/M5zF8z+bER0BO6L4qJmBPPjJu55h4vYMwCamI8t42Eiok/HoRhWir
-# PnhFtyArhnTiXOHA+z8cybmaWfyT+k9oOQ6l+5R6sQdCWOrEzKQqhOCuw/K6ccBC
-# sgHNlw+VndoEc4xcqTPqf48YbFU69flQbvgMoMpXP8Jw1vsWykpBQj2fdwjw4HNe
-# xlQ1HY/ijo+1Ji8cApFOx3YCa5nYO+nZVdXrHCK3i/mV1otfKZ6QuciSrm7KUhvR
-# Epj3g92fw5Wf76ZKv/4AKVvdCnSTrUP+Lz0j6mBF5msL9EjPTgaKPCBey9JxUv/x
-# VBmJShROoLK8XwhnE7OVz8E8mOmc2650iiiCLJHn9n2voKM=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCBfp0p9ra2kn7mctDD7AB82
+# +5Z6SqBhqeBLi6u6RWmQ9TANBgkqhkiG9w0BAQEFAASCAYCRHCVHm05ks2boWE/F
+# HgfP5642mXuncpZsjIq0EzOlTMfLqX99+9iFtjWRWm8tYyxY3CvYeHkJ2FI89H6d
+# RhrGaukbfGcE3FaYnvCZe9V3niXYhJeYuHhlJ3PHaRye1rtmz26pNh/O1kSXC4yF
+# 0S1ee2hAKfXbQFUzpxRkR0xXwoqmRkBthRLjOHoRvnuKkv0X7yDc92dYVPZNZKFz
+# jz7egjIxP5xmkeKLdYZ1/2d/+bwwkIRklYczus6BSrwiecZhR9pFYDV0v4W0jsB6
+# BtIHBjbOTEOT+WNLDWXM0705ohAmm5vl71bTOX22A9pf5oCpynVD+nuCEGlLEsxT
+# o1/UjKOZ07Te4ts0Nq0JsgG4Kr588vgLgqlpD8vKQI3M1kd/P4F5xhdclI5ATtIz
+# cQbe6IuHsNay8CMQs7nmlwP8nBTNyV+2SuS+5QtdtK4sQupTU3912fEuJVAXvtba
+# LWpn6kCDfUCnw2ARpTxJzGp0lG10E6lxCkSr/3tWWVCJRiM=
 # SIG # End signature block
