@@ -11,7 +11,7 @@
   "Cc": "__USE_GLOBAL__",
   "SmtpServer": "__USE_GLOBAL__",
   "SmtpPort": "__USE_GLOBAL__",
-  "SendMailMode": "__USE_GLOBAL__",
+  "SendMailMode": "Graph",
   "EnableTeamsNotifications": "__USE_GLOBAL__",
   "EnableSharePointUpload": true,
   "SharePointSiteHostname": "__USE_GLOBAL__",

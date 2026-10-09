@@ -10,18 +10,18 @@ $tokens = $null
 $errors = $null
 $ast = [Management.Automation.Language.Parser]::ParseFile($scriptPath, [ref]$tokens, [ref]$errors)
 if (@($errors).Count) { throw "Infrastructure parser errors: $($errors.Count)" }
-if ($ast.Extent.Text -notmatch '(?s)\.VERSION\s+1\.0\.4') { throw 'Infrastructure version was not updated for CSV execution accounting.' }
+if ($ast.Extent.Text -notmatch '(?s)\.VERSION\s+1\.0\.5') { throw 'Infrastructure version was not updated for Graph bootstrap and mail.' }
 $firstUploadConfigRead = $ast.Extent.Text.IndexOf('$global:SharePointSiteHostname =', [StringComparison]::Ordinal)
 $resolverDefinition = @($ast.FindAll({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Resolve-InventoryConfigTokens' }, $true))
 if ($firstUploadConfigRead -lt 0 -or $resolverDefinition.Count -ne 1 -or $resolverDefinition[0].Extent.EndOffset -ge $firstUploadConfigRead) { throw 'Infrastructure reads upload configuration before the token resolver is defined.' }
 $template = Get-Content $templatePath -Raw | ConvertFrom-Json
-if ($template.EnableSharePointUpload -ne $true -or $template.EnableWeeklyHistory -ne $true) { throw 'Infrastructure template policy is invalid.' }
+if ($template.EnableSharePointUpload -ne $true -or $template.EnableWeeklyHistory -ne $true -or $template.SendMailMode -ne 'Graph') { throw 'Infrastructure template policy is invalid.' }
 $registry = Get-Content $registryPath -Raw | ConvertFrom-Json
 $producer = @($registry.Producers | Where-Object Script -eq 'SmartM365-SharePoint-OnPrem-Infrastructure-Inventory.ps1')
 if ($producer.Count -ne 1 -or $producer[0].Files.Count -ne 6) { throw 'Infrastructure source receipt registration is invalid.' }
 if ($ast.Extent.Text -match '(?im)^\s*(Set-SPSite|Set-SPWeb|Set-SPContentDatabase|Add-SPShellAdmin|Remove-SPSite)\b') { throw 'A SharePoint write command was found.' }
 if ($ast.Extent.Text -notmatch '-Rows\s+\$rows\[\$kind\]\.ToArray\(\)') { throw 'Infrastructure CSV buffers must be converted to arrays for Windows PowerShell 5.1.' }
-foreach ($name in @('Get-InventoryConfigValue','Resolve-InventoryConfigTokens','Assert-InventoryPath','Get-ConfiguredWebApplications','Write-RunCsv','Invoke-DailySummaryMail','Send-InventorySummaryMail','Publish-QualifiedCsvUploads')) {
+foreach ($name in @('Get-InventoryConfigValue','Resolve-InventoryConfigTokens','Assert-InventoryPath','Get-ConfiguredWebApplications','Write-RunCsv','Ensure-GraphAuthenticationModule','Invoke-DailySummaryMail','Send-InventorySummaryMail','Publish-QualifiedCsvUploads')) {
     $functionAst = @($ast.FindAll({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name }, $true))
     if ($functionAst.Count -ne 1) { throw "Missing function: $name" }
     . ([scriptblock]::Create($functionAst[0].Extent.Text))
@@ -90,7 +90,24 @@ try {
     function SendEmailHtmlReport { [CmdletBinding()] param($From,$To,$Subject,$BodyHtml,$MailPurpose,$SmtpServer,$SmtpPort,$SendMailMode,$Cc) $script:mailParameters = $PSBoundParameters }
     $script:EffectiveConfig = [pscustomobject]@{ From='sender@example.test'; To=''; ErrorMailTo='recipient@example.test'; SmtpServer='smtp.example.test'; SmtpPort=25; SendMailMode='SMTP'; Cc='' }
     Send-InventorySummaryMail -Subject 'Offline summary' -BodyHtml '<p>Summary</p>'
-    if ($script:mailParameters.To -ne 'recipient@example.test' -or $script:mailParameters.From -ne 'sender@example.test' -or $script:mailParameters.ContainsKey('Attachments')) { throw 'Infrastructure mail routing or attachment policy failed.' }
+    if ($script:mailParameters.To -ne 'recipient@example.test' -or $script:mailParameters.From -ne 'sender@example.test' -or $script:mailParameters.SendMailMode -ne 'Graph' -or $script:mailParameters.ContainsKey('Attachments') -or $script:mailParameters.ContainsKey('SmtpServer')) { throw 'Infrastructure Graph mail routing or attachment policy failed.' }
+    $script:graphAvailable = $false
+    $script:graphInstallerAvailable = $true
+    $script:graphInstallCount = 0
+    $script:graphImportCount = 0
+    function Get-Module { [CmdletBinding()] param([switch]$ListAvailable,[string]$Name) if ($script:graphAvailable -and $Name -eq 'Microsoft.Graph.Authentication') { [pscustomobject]@{Name=$Name;Version=[version]'2.0.0'} } }
+    function Get-Command { [CmdletBinding()] param([string]$Name) if (($Name -eq 'Install-Module' -and $script:graphInstallerAvailable) -or ($Name -in @('Connect-MgGraph','Get-MgContext','Invoke-MgGraphRequest') -and $script:graphAvailable)) { [pscustomobject]@{Name=$Name} } }
+    function Install-Module { [CmdletBinding()] param([string]$Name,[string]$Scope,[string]$Repository,[switch]$Force,[switch]$AllowClobber) if ($Name -ne 'Microsoft.Graph.Authentication' -or $Scope -ne 'CurrentUser' -or $Repository -ne 'PSGallery' -or -not $Force -or -not $AllowClobber) { throw 'Unexpected Graph installation parameters.' }; $script:graphInstallCount++; $script:graphAvailable = $true }
+    function Import-Module { [CmdletBinding()] param([string]$Name) if ($Name -ne 'Microsoft.Graph.Authentication') { throw 'Unexpected Graph import.' }; $script:graphImportCount++ }
+    $originalProtocol = [Net.ServicePointManager]::SecurityProtocol
+    Ensure-GraphAuthenticationModule
+    Ensure-GraphAuthenticationModule
+    if ($script:graphInstallCount -ne 1 -or $script:graphImportCount -ne 2 -or [Net.ServicePointManager]::SecurityProtocol -ne $originalProtocol) { throw 'Infrastructure Graph bootstrap was not idempotent or changed the process TLS policy.' }
+    $script:graphAvailable = $false
+    $script:graphInstallerAvailable = $false
+    try { Ensure-GraphAuthenticationModule; throw 'Missing Graph installer was accepted.' }
+    catch { if ($_.Exception.Message -ne 'Install-Module is unavailable.') { throw } }
+    Remove-Item Function:\Get-Module,Function:\Get-Command,Function:\Install-Module,Function:\Import-Module
     $script:uploadCalls = New-Object 'System.Collections.Generic.List[string]'
     function Invoke-SmartM365SharePointCsvUpload { param($LocalFilePath) $script:uploadCalls.Add($LocalFilePath); if ($LocalFilePath -eq 'failed.csv') { return }; return [pscustomobject]@{ LocalFilePath=$LocalFilePath } }
     $global:EnableSharePointUpload = $false
@@ -107,8 +124,8 @@ Write-Output 'PASS: infrastructure parser, nested configuration, persistent path
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB5Rs+O4XGX/h9X
-# 5tABkF9CIHnY9IWoEEHZeE/byzTjFaCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA/rrN1iuxVZMDr
+# 1W/twTeglGrrsWjn7MENOZ71R8KOtKCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -138,14 +155,14 @@ Write-Output 'PASS: infrastructure parser, nested configuration, persistent path
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCDFV2O4Nf/F5q0wBI0ZFtiv
-# CiZyFe63X7ndzY/KqA4n0DANBgkqhkiG9w0BAQEFAASCAYCZrehrW60At55mVL3S
-# w33Pw/KlXx7LCRQEwzVpqqzfURA2CBi5HyLBUCEDSsKoyIWIYdW4Gxkdfv7V6ft8
-# 0WzTaS+c2mJOenyfLFSx4wztMt82TnTJbmBDVuWhfNrJArZagHQSqkXsSvIAROLR
-# 4IFK4JwllzAJNPk/2tOxVQzrBa4B+1sHcUx/Ygy3X99BbnyYQ8NkHbvnMqqiQvQF
-# voXdoKZ2COEr0lcHao3mKI9Kc+ND3rYaK0XHEqXbSpsHeMah4UeWVKhfS6qeDwhl
-# TTcHbhxL8ammnb5XU1DHkMNCSg5838ycnXJS0Tz6nWT2Cefx2guWEkbDhe8vPIYl
-# vSKNyxLPhQK7r3eoLfT6zjRD/MPd5DN7DD4RvFBuWsexFCMXfhB3JlNcf+GoXKQZ
-# XqyMdTf/P+Ktk4hQMT9i8qdzarHe0ILennlfeI2kRgYV2bA4WkyrzDJQFOwaW1p7
-# KS+WKCcAaYfp4KzcO2rCDkIZTWyN26VfEnfa+EuuIo6RpPk=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCCnOU64ocnWvwSCyqrDiQJC
+# 59roYA5Ck1PzEbm48CIMcTANBgkqhkiG9w0BAQEFAASCAYAdxDrZwymqGPnyIlwz
+# NARkGASeL8Ys5IZnVqVM8hZ/bCYFap20uC4LTjIEumWt40BwX18ByDfJakzeTRWM
+# vYphWJFoQeSBZiEqSojXmrNQMqFdml3hZKfT6SmxhUczNKYI3ixcEP1xrfXGWNCt
+# o7c3NBLWYXHyJLiKPoaF0r40uKrv+lwumb7mvH985MsWSeDkeKEyu2jJGGRN/JOk
+# WCvvbDhoD0yt9WsOxTMwv0F1fqTt5GeMgw+cZmOlqGrU5/jm+1d+xIREcxK7ByLZ
+# y9INnvEjvaQ5YqOSEu9yqOow6RzrpWhSSqjt8+70DM0k82VSwdBNbQ9tTnGFm/g4
+# 3Ll0IO2ehPmHvd5a7Yu0ttNrus/KrV0cFrnbY59o7heg4z1AjQpkVs21NLZN1OxC
+# eAZWgMzC7yOqKhpE4jeJlImPWQkShkRLm9Adn4ZBlj8LZs13vl4VXntYtpO/R3LV
+# YlLBF2fc2ZUHC68sIWV6GBnDE0Au/VE2lXkr0+wfZexoanM=
 # SIG # End signature block

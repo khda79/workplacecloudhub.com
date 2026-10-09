@@ -2,7 +2,7 @@
 .SYNOPSIS
     Read-only SharePoint Server 2016/2019 site collection and web inventory.
 .VERSION
-    1.0.5
+    1.0.6
 .REQUIREMENTS
     Windows PowerShell 5.1 x64 on a SharePoint farm server; SharePoint Shell and content read access.
 #>
@@ -262,6 +262,26 @@ function Write-RunCsv {
     return $path
 }
 
+function Ensure-GraphAuthenticationModule {
+    $moduleName = 'Microsoft.Graph.Authentication'
+    if (-not (Get-Module -ListAvailable -Name $moduleName)) {
+        if (-not (Get-Command -Name Install-Module -ErrorAction SilentlyContinue)) { throw 'Install-Module is unavailable.' }
+        $previousProtocol = [Net.ServicePointManager]::SecurityProtocol
+        try {
+            [Net.ServicePointManager]::SecurityProtocol = $previousProtocol -bor [Net.SecurityProtocolType]::Tls12
+            WriteLog -Message 'Installing Microsoft.Graph.Authentication from PSGallery for CurrentUser.' -Level INFO
+            Install-Module -Name $moduleName -Scope CurrentUser -Repository PSGallery -Force -AllowClobber -ErrorAction Stop
+        } finally {
+            [Net.ServicePointManager]::SecurityProtocol = $previousProtocol
+        }
+    }
+    Import-Module -Name $moduleName -ErrorAction Stop
+    foreach ($commandName in @('Connect-MgGraph','Get-MgContext','Invoke-MgGraphRequest')) {
+        if (-not (Get-Command -Name $commandName -ErrorAction SilentlyContinue)) { throw "Graph Authentication command is unavailable: $commandName" }
+    }
+    WriteLog -Message 'Microsoft.Graph.Authentication is ready for SharePoint upload and Graph mail.' -Level INFO
+}
+
 function Invoke-DailySummaryMail {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$MarkerPath, [Parameter(Mandatory)][scriptblock]$SendAction, [switch]$Force)
@@ -297,13 +317,11 @@ function Send-InventorySummaryMail {
     $to = [string](Get-InventoryConfigValue 'To' '')
     if ([string]::IsNullOrWhiteSpace($to)) { $to = [string](Get-InventoryConfigValue 'ErrorMailTo' '') }
     if ([string]::IsNullOrWhiteSpace($from) -or [string]::IsNullOrWhiteSpace($to)) { throw 'Daily summary email requires From and To or ErrorMailTo.' }
-    $mailParams = @{ From=$from; To=$to; Subject=$Subject; BodyHtml=$BodyHtml; MailPurpose='Report'; ErrorAction='Stop' }
-    foreach ($name in @('SmtpServer','SendMailMode','Cc')) {
+    $mailParams = @{ From=$from; To=$to; Subject=$Subject; BodyHtml=$BodyHtml; MailPurpose='Report'; SendMailMode='Graph'; ErrorAction='Stop' }
+    foreach ($name in @('Cc')) {
         $value = [string](Get-InventoryConfigValue $name '')
         if (-not [string]::IsNullOrWhiteSpace($value)) { $mailParams[$name] = $value }
     }
-    $smtpPort = Get-InventoryConfigValue 'SmtpPort' $null
-    if ($null -ne $smtpPort -and [string]$smtpPort -ne '') { $mailParams['SmtpPort'] = [int]$smtpPort }
     $null = SendEmailHtmlReport @mailParams
     WriteLog -Message "Daily content summary email sent to $to."
 }
@@ -342,6 +360,10 @@ $script:Completed = $false
 try {
     $null = InitializeScriptEnvironment -OutputPath $runFolder -LogFileName $script:ScriptName -CallerScriptPath $PSCommandPath
     WriteLog -Message ("SharePoint content inventory starting. SharePoint upload enabled for this run: {0}." -f $global:EnableSharePointUpload)
+    if (-not $ValidateOnly -and $MaxItems -eq 0) {
+        try { Ensure-GraphAuthenticationModule }
+        catch { WriteLog -Message ("Graph Authentication bootstrap incomplete; local inventory will continue: {0}" -f $_.Exception.Message) -Level WARNING }
+    }
     $farm = Test-SharePointPrerequisites
     $webApplications = @(Get-ConfiguredWebApplications)
     $databaseGroups = New-Object 'System.Collections.Generic.List[object]'
@@ -641,8 +663,8 @@ try {
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC2E9IaJBstBbzD
-# o0fcaAjj+JwCbCLz/325/38VSK5lNKCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD1g6OEUVZ0qSc4
+# cE0Cu2k5Fs0SyszOtx46v/LGMK+TvaCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -672,14 +694,14 @@ try {
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCBOnk/mI52R7+tJoxhu2STT
-# A9mevv3lRw0RRBdO727c9jANBgkqhkiG9w0BAQEFAASCAYBtlQxwSfUCbwDYr+7x
-# cO4oCbLra7bdt8Ie+j7Q/scQjIebb+lhnd21ZZievZuCuQGr1ArkDD0Lt//Tlhtp
-# LdMnrW2Bk5Wq+VizwdG6j/iZcJlw1TtA/YVaHmdhGWCTyfd4OjzeRZiMYaVkK+TT
-# 4GgOWycIj+HeSZFJhwCz2Uftmawg3SuA1UvJYMjSlyiQK6SWByTdz1KESXna3Dl1
-# +g/ZsfCKI6m0tIFFgZ+bXeFNx2Rpvag+xacilNmqalf674H0llq9n1b0e/2594U1
-# OAqD4M6G5m/C3skn5P005gWUamhplbRhnqOhjI9lIuGhYz8Npclt/mN4K/gtZDis
-# EOixoPf/vNMHwy+/arQ4TolxlJU7Zo01KwuO61ADRO98QI4QN0t183MNwy7MT2Jg
-# 1CBdOo0ayyQgsoGhVKO0EAp6gklUgaTF527AKlTmXBtKANX+15gW4TWgL0P9dzhB
-# MpMyp3LOqaaecY8MbrLaBE5YgvJHvkggrIX+D1suwUS5KE4=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCBDcYQbe/+mLHBBevyvqNyl
+# s+xOzwXGjw/hCrhazq/NcjANBgkqhkiG9w0BAQEFAASCAYACz17lzziK6mdvh0Ly
+# EGrQO8gUdVmSuSqfo8boH1mz6j8snjk2DYA6jxPHvjY+gzJq4luC4Q0hdynsHnso
+# 8R17YJAeZHOMBRNC3L5usC+Y79ymP8Zi7wvPFl+poKF5SKd4g+333rDTj3aeRzH5
+# rugMwsfRtnmtWBUmRb5S79p4Vz6E/9KIuAXUPlBSNnm8BL9U7JJlGheGnZa3wjKc
+# U3+Ixq3ImIY5+mHlz5nuJ+Gf+XK0/OXPCISuP8EBh3ZBd5yg6DZrBTjmTk0OaKWc
+# WVd0nnh75WrpBWQu2O+TAnrAlhpFCiyC2mqoqidhFhMVtqyahg0JX+Qea8BSNOty
+# NUJAL/tDypyzUYp09Yc16lyOpKXYmPVVqghGbPNNabE/dg5E9qJ9hOKGiflBwr7D
+# 3yXI4pfnjclCM0TNwWjxmq1Bx9gPfVF49ggPUmrBooizZqhuUjxduxX7wLlHp62K
+# 9pJWBM/zsS7ZOV1xNFUTBAhif++kdz0d9xolW45hRCPlDDw=
 # SIG # End signature block
