@@ -13,7 +13,7 @@ if (@($errors).Count) { throw "Content parser errors: $($errors.Count)" }
 $template = Get-Content $templatePath -Raw | ConvertFrom-Json
 if ($template.EnableSharePointUpload -ne $true -or $template.EnableWeeklyHistory -ne $true -or $template.SendMailMode -ne 'Graph') { throw 'Content template policy is invalid.' }
 $versionMatch = [regex]::Match($ast.Extent.Text, '(?s)\.VERSION\s+([0-9.]+)')
-if (-not $versionMatch.Success -or [version]$versionMatch.Groups[1].Value -lt [version]'1.0.10') { throw 'Content version was not updated for summary email and interruption cleanup.' }
+if (-not $versionMatch.Success -or [version]$versionMatch.Groups[1].Value -lt [version]'1.0.11') { throw 'Content version was not updated for partial weekly history.' }
 if ($ast.Extent.Text -match 'Complete-SmartM365SourceReceipt[^\r\n]*-PartialInventory') { throw 'Content must not extend the shared source receipt with SharePoint-specific partial state.' }
 if ($ast.Extent.Text -notmatch '\$coverageLevel\s*=\s*if\s*\(\$globalTimedOut\).*?elseif\s*\(\$failureCount\s*-gt\s*0\).*?WARNING' -or $ast.Extent.Text -notmatch 'Collection coverage:[^\r\n]+-Level\s+\$coverageLevel') { throw 'Content coverage logging can misclassify a partial run.' }
 $firstUploadConfigRead = $ast.Extent.Text.IndexOf('$global:SharePointSiteHostname =', [StringComparison]::Ordinal)
@@ -27,7 +27,7 @@ if ($ast.Extent.Text -match '(?im)^\s*Get-SPSiteAdministration\b') { throw 'Lock
 if ($ast.Extent.Text -notmatch '(?m)^\s*\$site\s*=\s*\$_\s*$' -or $ast.Extent.Text -match '(?m)^\s*param\(\$site\)') { throw 'Streaming site pipeline input is not bound to the current site.' }
 if ($ast.Extent.Text -notmatch '\$runBase\s*=\s*if\s*\(\$MaxItems\s*-gt\s*0\).*?TEST' -or $ast.Extent.Text -notmatch 'Select-Object\s+-First\s+\$remaining' -or $ast.Extent.Text -notmatch 'Flush-RunRows\s+-Kind\s+CollectionCoverage') { throw 'Limited or per-site coverage path is missing.' }
 if ($ast.Extent.Text -notmatch '\$databaseLockLookup\s*=\s*Get-LockStateLookup\s+-ContentDatabase\s+\$database' -or $ast.Extent.Text -match 'Get-LockStateLookup\s+[^\r\n]*-SiteUrl') { throw 'Limited runs must use the database-scoped lock-state lookup.' }
-foreach ($name in @('Get-InventoryConfigValue','Resolve-InventoryConfigTokens','Assert-InventoryPath','Get-ObservedProperty','Test-MissingObservation','Resolve-SiteLockObservation','Get-LockStateLookup','Assert-Deadline','Get-CollectionFailureStatus','Get-DatabaseCoverageStatus','Get-ContentPublicationDecision','Write-RunCsv','Flush-RunRows','Ensure-GraphAuthenticationModule','Invoke-DailySummaryMail','Send-InventorySummaryMail','New-ContentMailHtml','Send-ContentRunMail','Publish-QualifiedCsvUploads')) {
+foreach ($name in @('Get-InventoryConfigValue','Resolve-InventoryConfigTokens','Assert-InventoryPath','Get-ObservedProperty','Test-MissingObservation','Resolve-SiteLockObservation','Get-LockStateLookup','Assert-Deadline','Get-CollectionFailureStatus','Get-DatabaseCoverageStatus','Get-ContentPublicationDecision','Save-ContentWeeklyHistory','Write-RunCsv','Flush-RunRows','Ensure-GraphAuthenticationModule','Invoke-DailySummaryMail','Send-InventorySummaryMail','New-ContentMailHtml','Send-ContentRunMail','Publish-QualifiedCsvUploads')) {
     $functionAst = @($ast.FindAll({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name }, $true))
     if ($functionAst.Count -ne 1) { throw "Missing function: $name" }
     . ([scriptblock]::Create($functionAst[0].Extent.Text))
@@ -155,6 +155,23 @@ try {
     $partialProof = Get-Content -LiteralPath $partialPath -Raw | ConvertFrom-Json
     $coverageRows = @(Import-Csv -LiteralPath (Join-Path $partialLatest 'SharePoint_OnPrem_CollectionCoverage.csv') -Delimiter ';')
     if ($partialProof.Status -ne 'Completed' -or $partialProof.Files.Count -ne 4 -or $null -ne $partialProof.IsPartialInventory -or $partialProof.FullInventoryQualified -ne $false -or $partialProof.ConsumerScopeQualified -ne $false -or $coverageRows.Count -ne 1 -or $coverageRows[0].Status -ne 'DatabaseCoverageMismatch') { throw 'Observed rows or their coverage issue were not published with file-integrity evidence.' }
+    function WriteLog { param($Message, $Level) }
+    $global:EnableSharePointUpload = $false
+    $historyRoot = Join-Path $tempRoot 'WeeklyHistory'
+    $partialCsvPaths = @($producer[0].Files | ForEach-Object { Join-Path $partialLatest $_ })
+    $partialHistoryRoot = Save-ContentWeeklyHistory -RunPaths $partialCsvPaths -HistoryRoot $historyRoot -RetentionWeeks 2 -Partial $true
+    if ($partialHistoryRoot -ne (Join-Path $historyRoot 'Partial')) { throw 'Partial history was not isolated from qualified history.' }
+    $partialWeeks = @(Get-ChildItem -LiteralPath $partialHistoryRoot -Directory)
+    if ($partialWeeks.Count -ne 1) { throw 'Partial weekly snapshot was not created.' }
+    $partialFiles = @(Get-ChildItem -LiteralPath $partialWeeks[0].FullName -File -Filter '*.csv')
+    $manifestPath = Join-Path $partialWeeks[0].FullName 'manifest.json'
+    if ($partialFiles.Count -ne 4) { throw 'Partial weekly snapshot lacks its four CSVs.' }
+    $manifestDocument = (Read-SmartM365JsonDocument -Path $manifestPath).Document
+    $historyCoverage = @(Import-Csv -LiteralPath (Join-Path $partialWeeks[0].FullName 'SharePoint_OnPrem_CollectionCoverage.csv') -Delimiter ';')
+    if ($manifestDocument.HistoryLabel -notmatch 'partial; incomplete coverage' -or $manifestDocument.Files.Count -ne 4 -or $historyCoverage[0].Status -ne 'DatabaseCoverageMismatch') { throw 'Partial weekly history concealed its incomplete coverage.' }
+    $qualifiedCsvPaths = @($producer[0].Files | ForEach-Object { Join-Path $latest $_ })
+    $qualifiedHistoryRoot = Save-ContentWeeklyHistory -RunPaths $qualifiedCsvPaths -HistoryRoot $historyRoot -RetentionWeeks 2 -Partial $false
+    if ($qualifiedHistoryRoot -ne $historyRoot -or @(Get-ChildItem -LiteralPath $historyRoot -Directory | Where-Object Name -Match '^\d{4}-W\d{2}$').Count -ne 1) { throw 'A partial snapshot blocked standard weekly history.' }
     $incompleteRoot = Join-Path $tempRoot 'INCOMPLETE-PARTIAL'
     Start-SmartM365SourceReceipt -ScriptPath $scriptPath -SourceRootPath $incompleteRoot -ScopeParameters @{MaxItems=0}
     Write-SmartM365CsvAtomically -Data @([pscustomobject]@{TenantKey='OFFLINE';FarmId='FARM'}) -Path (Join-Path $incompleteRoot $producer[0].Files[0]) -Columns @('TenantKey','FarmId') -Delimiter ';' -NoTenantKey
@@ -163,7 +180,6 @@ try {
     if ($rejectedPartial.Status -ne 'Failed' -or (Test-Path -LiteralPath (Join-Path $incompleteRoot $producer[0].Receipt))) { throw 'Partial inventory bypassed required current CSV validation.' }
     $marker = Join-Path $tempRoot 'Content-DailySummary.sent'
     $script:sendCount = 0
-    function WriteLog { param($Message, $Level) }
     $sendAction = { $script:sendCount++ }
     if (-not (Invoke-DailySummaryMail -MarkerPath $marker -SendAction $sendAction)) { throw 'First content email was skipped.' }
     if (Invoke-DailySummaryMail -MarkerPath $marker -SendAction $sendAction) { throw 'Same-day content email was repeated.' }
@@ -239,13 +255,13 @@ try {
         Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
     }
 }
-Write-Output 'PASS: content parser, nested configuration, persistent paths, lock mapping, timeouts, per-site errors, empty CSV, receipts, upload policy, daily mail gate and routing.'
+Write-Output 'PASS: content parser, nested configuration, persistent paths, lock mapping, timeouts, per-site errors, empty CSV, partial and qualified weekly history, receipts, upload policy, daily mail gate and routing.'
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB2lzJ8Ez9x2nsY
-# qDO1ZBTfquLW9S91Nc9OSoX3xV9XaqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBFqTHgfGRVpRup
+# CggfQpi8M1gu5gGvYE6gX4a2x7jgAKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -378,31 +394,31 @@ Write-Output 'PASS: content parser, nested configuration, persistent paths, lock
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIN2UuOkWIF9XbmmOKuT4ULHwOKAgDc0ohoHjXAD61VBPMA0GCSqG
-# SIb3DQEBAQUABIIBgH/2L3ca8/wP14Qq7wCyPoop+1RiSbYfvnfIWa7BwTLu21EA
-# ZWTRTaou346rNKwE/FK5zwqnX4Elin9msAFGuMzP0UzF86Lw6qvMe9rFq/Aa5O6P
-# Trap+dyUULjUyo5hUoL+ai0GQb4/8GFl7HoLgGW7u1Y9KzEQYQ4+Z6hBQ/9z6I0R
-# uW4tVProfor36kpfFioERVQHAwUxmbIWzOdka1gF5GUF7Bm7WpmbZ9iMi3QuS6fF
-# oaIZ6G4NQaov/7/YzGQxvLy2WO8TXnrfNE5CUFjX/q8DBcVap+vFTojn79FfioH7
-# CAZW2b7SLMRNSbR/M+/lTJx2bsVQwpHE7iKohYqIjT7pVApdMA8nWwJNyooFp+9l
-# /Rwgz44Z4FT3arqUviqv+uBEtSNica+SxKPb6k4/lmsVbEWDcMtz5Wc9hrFztinq
-# NO9lEozpB4m2DGFz3yQni+iYCLGF4sNNjwKGJtZ/14N14QC8ZjgkEFTtLk3jMM4f
-# 112Uy69RaSaH09IrZKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIBoaWw/oxtPvP5rINNWKTYk3/bBztbmow0pk4b0hsT+3MA0GCSqG
+# SIb3DQEBAQUABIIBgBhE1pnmLmnIgMu+spPn7pawS4beKjycFS50HRe0Lo3UxbSV
+# /mwP0duH2nLx1mEiOHiXPS4jWGUVKGEc5vnMZui4SdJb8YKZC+J9VJiTVmScaNeq
+# hrgUf8esTWH7pB8Hc3kh6zYx5oac8oGhU0TVD6nDDceCe7WoIMYIAUwQY2blozb/
+# wOoW5GwzB9RR4efKGwIC+s30O/3RocSJzXJAuRoAwkgSaXAmoI/tYFyzv4DcfjFz
+# sX0RZeBJ/CP01Wikuhc+1xjUAN8Am9eQEsV81prvrqYFBGX47mTjm0+NhKSPsPD5
+# g4DoVU8d1+8/SbQnG0AQrAC0pmNIOA4Py3P1vi+dBU0XxfundqOvyTVX/KnX+vSz
+# 6YzIka3UCRsbGYAL7R2HlD+KXSJDj576zPfKWy67xDWgLpetV9W/0aN3D87ij2F9
+# 44oxDLGPS3zi0Ohkt5NRX8edf5x/WmSirPCGKL73jY45EW/MN1t048Tll0HEAISb
+# 9gtFNOnz0o8YOxTzR6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDkyMjM4
-# NDBaMC8GCSqGSIb3DQEJBDEiBCBvP5YbijjZmUQWEagAx7S+hqMmMKVVDrORqgPm
-# DFe6yjANBgkqhkiG9w0BAQEFAASCAgCTjD2XQnXLdx7V0VmRm7m83n7luomX+0GI
-# GpFqv/aMtd898Q3pUTO+13pWKoD4D900zawnWwBRSxT7Fp1igAK6OXZiDLf/fHhf
-# CF7WtF16nJXrnxXyKFggOs2J4j84sOkF68kWeEzeQ//gZcW8iFHDE/KOE7MXrlP4
-# 3OHKS9ExRFDkaPJ6dfQs/DROeZLsxSAJJkYkzHx/LkcgFqtKUc5i44fJR1Y7wlAG
-# G4+30e0FXNWax8jz0WvS78ulsUtIZpYRyPdTmzm6wfaKSNm09aSJ7RZ5wj2tOXsE
-# 1HtK5ErwD65L6xT8zZBPQcHcnnDZ1CfT4ZdM+IwEeYbKRPOacf597QEOcdHucnSl
-# HFvOLtplyL+wMeRttO+rqUuPcjLqhz883OGF9XdwnJnQRr+VzZuFRye1b3LQgdCh
-# 36xZ+YJEM063rOlnsXxiyhwAmloulX0hFrA43TM9ie/sUZXCB8E+T/Fj0efg4Ish
-# 1IQMP9xHyjBGAC+N7MFEyCVmkL7c0xVH5ozj8pq7qcWU3I8ADv6bvVKQekKlpwhO
-# Yk2HE6hiz/yntqxhTFi94kXNAMb9Yf2zYCBOi8iqnnrLxO1jfFIAQpQPEwm3z8SK
-# 59rsmT1yUJZ7uLxv39tCWUar1WJg7qVeRFzVq2lOQL9SVgr00KAweJO/fn8oUL7o
-# OUd2UiIFrg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTAwMDUy
+# MzVaMC8GCSqGSIb3DQEJBDEiBCATDOjp31tt5lYyXfS2Q+Ykw/U8Z+TzyxT+Us7P
+# KQJRLTANBgkqhkiG9w0BAQEFAASCAgA8q/fTHp+2BWT0cVC+F0qsCQXK2Gk3yrBR
+# w0PYhpozz9u4RsYR8eXOX2c2RpEu7lwSPqOpRnyKX/mprOXZsxhmkE5I98Jd+cJd
+# 1xSDrtlRWrUuS6D/EMGeUYcmMQErbCFBN/Kmul64EQK3k50GljP5EaVjDmNcPAf3
+# PDaTG3FJgjOXkEvpFKIbANlpteVcT0oYWk5TsYW2IUq6tnqpgHWFZxx0PJK1P6Ae
+# RM/e34nM76GHEJrpl6J7cvuwTgpQwXE6FEKXiralPQtImcWdBVq3MxSNyJ/mcG6u
+# vNs4IHq++y71t3w7LNyp24T3kJDvoRc74gPupmhiSYYKv+8JmLM5g2PSFzJaZcmS
+# ZLfObPHMy974/ywqdp8A2s8YYe1s0wuRGhfq+tSJeBD3hOyoTtGmheK0o2S9yt0K
+# z70vEIb8pX0MBxj+n6YUEWhpx4hNGVEEr7BMEAtxxPbXXE/k9au3mfTrdYUyz/0x
+# Qg7xTiNe5ruqVCVswbqIEUiYveI/k2t+brFbtjpuRZg2nIjJKiQCKaPJvB05ewXt
+# cZa9FO0WanESlruYidBHQAMMRqTPenknvPktoNh8E6wKeMslqDCWf1ola/+YTJY4
+# 9eTF4bvaXh7lrjurv8VYxKzsCcvMNDHSVxlsNdKuqh9aWjDeYpF3aRTgPAHdypPr
+# trHNaFOfUw==
 # SIG # End signature block

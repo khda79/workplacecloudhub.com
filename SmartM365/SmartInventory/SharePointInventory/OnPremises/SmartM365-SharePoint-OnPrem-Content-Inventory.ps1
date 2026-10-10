@@ -2,7 +2,7 @@
 .SYNOPSIS
     Read-only SharePoint Server 2016/2019 site collection and web inventory.
 .VERSION
-    1.0.10
+    1.0.11
 .REQUIREMENTS
     Windows PowerShell 5.1 x64 on a SharePoint farm server; SharePoint Shell and content read access.
 #>
@@ -257,6 +257,15 @@ function Get-ContentPublicationDecision {
     if ($GlobalTimedOut) { return 'Blocked' }
     if ($FailureCount -gt 0) { return 'Partial' }
     return 'Complete'
+}
+
+function Save-ContentWeeklyHistory {
+    param([string[]]$RunPaths, [string]$HistoryRoot, [int]$RetentionWeeks, [bool]$Partial)
+    $destinationRoot = if ($Partial) { Join-Path $HistoryRoot 'Partial' } else { $HistoryRoot }
+    $label = if ($Partial) { 'SharePoint on-prem content (partial; incomplete coverage)' } else { 'SharePoint on-prem content' }
+    WriteLog -Message ("Saving {0} weekly history in {1}." -f $label, $destinationRoot)
+    Add-SmartM365WeeklyHistory -SourceCsvPaths $RunPaths -HistoryRootPath $destinationRoot -RetentionWeeks $RetentionWeeks -HistoryLabel $label | Out-Null
+    return $destinationRoot
 }
 
 function Write-RunCsv {
@@ -724,11 +733,16 @@ try {
     }
     $partialInventory = $publicationDecision -eq 'Partial'
     if ($partialInventory) {
-        WriteLog -Message ("Partial content inventory: {0} coverage or metadata issue(s) are recorded in CollectionCoverage.csv. Current CSVs will be published with a partial source receipt; weekly history will be skipped." -f $failureCount) -Level WARNING
+        WriteLog -Message ("Partial content inventory: {0} coverage or metadata issue(s) are recorded in CollectionCoverage.csv. Current CSVs will be published with a partial source receipt and a separate partial weekly snapshot." -f $failureCount) -Level WARNING
     }
-    if (-not $partialInventory -and [bool](Get-InventoryConfigValue 'EnableWeeklyHistory' $true)) {
+    if ([bool](Get-InventoryConfigValue 'EnableWeeklyHistory' $true)) {
         $historyRoot = Assert-InventoryPath -Path (Get-InventoryConfigValue 'WeeklyHistoryFolderPath') -Name 'WeeklyHistoryFolderPath'
-        Add-SmartM365WeeklyHistory -SourceCsvPaths @($runPaths) -HistoryRootPath $historyRoot -RetentionWeeks ([int](Get-InventoryConfigValue 'WeeklyHistoryRetentionWeeks' 52)) -HistoryLabel 'SharePoint on-prem content' | Out-Null
+        try {
+            Save-ContentWeeklyHistory -RunPaths @($runPaths) -HistoryRoot $historyRoot -RetentionWeeks ([int](Get-InventoryConfigValue 'WeeklyHistoryRetentionWeeks' 52)) -Partial $partialInventory | Out-Null
+        } catch {
+            if (-not $partialInventory) { throw }
+            WriteLog -Message ("Partial weekly history could not be saved or uploaded; current CSV publication will continue: {0}" -f $_.Exception.Message) -Level WARNING
+        }
     }
     $publishedCsvPaths = New-Object 'System.Collections.Generic.List[string]'
     foreach ($path in $runPaths) {
@@ -770,8 +784,8 @@ try {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB5I2YvqtMQPGZ+
-# oj+wZ88mFX5h0KmGw7OMF2ZtydU2bqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAnGdBSMmQxeGs8
+# HGhmpuGPsmG7dGkq06UR+Rcvn1nYI6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -904,31 +918,31 @@ try {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEINm75eLDC8nkyC7IY/T2nOsePiX5Fhab1cDrx5s1tmzPMA0GCSqG
-# SIb3DQEBAQUABIIBgA+9po9setn5+aXuS7H3hMZ7SgG0fFnPhDvDAZVxIz5wA/Gb
-# YC3U9S+7ROTK5+RRJaWrDb21rinGTv0Sx0E8hLCDjzCxe91QgFcv2A0cXZ0CsqqH
-# WYqWM3lCLL33lAZa+wOCCzA09eEE1JFKV46Qap8+lnV2/RirxQIPUfu/utagT7VY
-# aOFsZsu+IAmTpjV2S0nVYqzyv9fi01ytFjotNjOimy3aXxPSRfJnozCaRJR0IIqA
-# L+E+tThP+pYAgXcG4I/S/zQnKcObPTPldWVjjt1V+XkZYfwtWqvlkMnIZu//4oF3
-# XCZjj2NXNXcjxErleV4Wbt/77Nl++Wjj+zCDFxefh/4pvoJYM0KIFuEGjg9+zOcY
-# GUcbcSWVw8K145DeUkJgINZfCWIHonTGqHArhmzESkF5YdGqfkca24dxePXx6yjR
-# 5ssD1LvgQbPxAVozEo8f9Qn1qlnPMMsDuWZ3GBU76aaIpwCojyxsvI5FXg0HIE8r
-# ohuKe1OXHwNC/07poaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIObX4DA8A+qOmYBeByNAHyYJXF1XFwBpZhr9vi0I55OzMA0GCSqG
+# SIb3DQEBAQUABIIBgBQGGh4sxIuYBxzuQ9XRALK7eYdD9BKYzxTe1Thp8GZvs2rC
+# TbO3Gf1Bg/rTbmz1xMDPPgVPORugqXDVEHcvuv1VAOrcC3C2Iu1q/NANpl4uJdYp
+# Rk7J61C9zNOPNadAhTtfdIeLIJ2Bhvn1pPQQsmW6AiYFqSiRic82RjWJHdhxw3eg
+# e5kToTvfHRhTDFrcHkmgAyEWK7aSDnFWnQUb9H+nRuaRk9BfGSIOrZeoiSKmNrPl
+# n6ozZfOkWEZIroWqpT6ocrzyGOsupFGaxwy3H8mrrJQmkDbndhP/2I6WqrR0rWLy
+# BcE+Zp8hF1IJYIQDm21RfpFdHvm+ofFeSEmTS/5fOH+OGxTBY1OSXL1ux/CrqLak
+# lvgcVel3hMZ8Skf48Jv4NDY7Cwwf7tWYyZnoOm/cszzhPGlPhpJ3a4BW/Ck7zB9M
+# RqOQuf83/6UOi+qb1fLCY4Vs88CTS1xO0eIL9B242TrqvAgEknHD3tJJTXeXRJol
+# 78FFgrDJPW7vRGUrVqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDkyMjM4
-# MzlaMC8GCSqGSIb3DQEJBDEiBCCHBWDF48V25OWBrcDPkz9Asha8Xkd5SvKQi2sp
-# SFQxojANBgkqhkiG9w0BAQEFAASCAgBsX0aaD51wdHGH+yYIIqTsphS/RTRi9xFZ
-# FuHNW4ByP7DipXRD6dZIa2bSncGsBmH8U3Oo+QtqGUEQgOYpk0p518YubFJT2XRP
-# ixvF2mninHL0ozKTuM2+Iss6Q9lccUfcYLjRtSlQvZ4RNNtAqzhSsVigJEU8LaYE
-# m1vXipOyGMGpi/jIX4KFYUBRcrPQCTd2fnL2rLoze2DSxK7xJyVK/ADbL33O+iXF
-# cJoGNhD9eLYr2Zml72PMpsgZcmiA5fAFUNOdPaU2n1JyHOSIftu+G15sRVPBjih+
-# GPMbcNAySx9ojhchmSeVa6RkgMooLV/3CsKMD/Bhm35iDL39J4qNk4y664YW6e6O
-# gh3FbqssD7qhaDfTYLQb72Rz+r6bkwgSS243ZrZ3VcYyLwRX5dlpnOo9pctmEsrw
-# A/GRSzk5cz9qIDoaoM3XHD+dmEUkdy6lA/q/rKfk3m5nfjK8DHcnp8o8s4iQMxqj
-# YbvGz32cdpBM3CZJbxQOYDvbA+IAnISQk0RjnuJa62D1qMBCrYa69mcj6TB9xhMd
-# A7S9wfIaOFsUnzihmeb6yuNOCvUavcQ97REuQB9fmXZ3uyH9TnaGQrD1V276SocZ
-# 2HNNJrPmkWWhlTH6O//vK3WjqIpwXAgsKvMmq4UjYA2GzjN76PhrAQ3GFa/6aEHH
-# G5WgUVQP7g==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTAwMDUy
+# MzVaMC8GCSqGSIb3DQEJBDEiBCBMQ2o58IYL51os5tM07iOxWjAnTQGyLbWb0xNs
+# 38ImJDANBgkqhkiG9w0BAQEFAASCAgBz+/L/+dY69099yBuLRis5tRkxwTY0LRzy
+# jMOKVmS9MkYtqF6DCIPAdbIyNkc1HMpYW7ErFSQ8hsv+Av5SOb86OXROfV86eFby
+# RRtj8ZqyrohZUmVLvG/UbLO8qyv72vVU2TisEAN4BJne9K/+JyIXcPK++EySdLig
+# 60Nc6+W1ChSPEWPR/uGyv0Rwsn6WURgGhKr+HKwtxiboo2iCmZfx6BGxf/AhMh6u
+# NOUk0UDSLQ7OTNYc9ze/nhT4ZgG6eF6X34YZzqTSodAyjm0kMBYsFRfKP8JWKxKt
+# 64jZKEGe/a8fCkDp8Cr8UsblCgT2o0dZb7OSvMdiUH72s7hYoSORQEU7Pn7x5XQn
+# Ita5AlcaJ9WkOjxhVP84WVpGhQyDMUontb8PSI/weKxOwA1yHM7Wl5v7CSnKW5ou
+# pAPkLZbghF6Vhz6fg65SAPvBzu35Ch+4FNTjv6sMZJ/kpN9TH/9EtiftZsZttrma
+# sgMwIj9SNnHTzv4mW373vKCU5b8Dsv5Vgh7/C1rRwfcI2tHEle/wpA4SX4AfE+IM
+# /ouhOdfebdtT7Xbz7C2lEMS6T7hGnAIOjyDKnUPWeh+PADLp/3QkZVjFr0+LfCRH
+# elK6TVeS8YZW+x8CNOhdB7OdcHeYSxAb6l/Jc0K67aBdNd/EUtBF2hF3PlkpRRez
+# pGEE4uUmJw==
 # SIG # End signature block
