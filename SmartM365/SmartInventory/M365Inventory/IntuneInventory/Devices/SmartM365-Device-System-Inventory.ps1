@@ -5,7 +5,7 @@
 .DESCRIPTION
     Connects to Microsoft Graph Beta and retrieves:
     - Hardware security fields from hardwareInformation (TPM, encryption, DeviceGuard)
-    - SecureBoot status, BIOS version and firmware type from a deployed Platform Script
+    - SecureBoot, BIOS, firmware, and Windows Security Center antivirus registration from a deployed Platform Script
       via deviceManagementScripts/deviceRunStates
 
     It:
@@ -27,7 +27,7 @@
 
 .PARAMETER PlatformScriptId
     The GUID of the Intune Platform Script (SmartM365-Detect-DeviceSystemInfo) deployed to devices.
-    Required to retrieve SecureBoot/BIOS/FirmwareType/LastBootUpTime results from deviceRunStates.
+    Required to retrieve SecureBoot/BIOS/FirmwareType/LastBootUpTime/ThirdPartyAV results from deviceRunStates.
 
 .PARAMETER RunStatePageSize
     Number of deviceRunStates requested per Graph page. Default: 500. Allowed range: 1-1000.
@@ -39,7 +39,7 @@
 .PARAMETER ManagedDevicePagePauseMilliseconds
     Delay between managed-device Graph pages in milliseconds. Default: 500.
 .VERSION
-2.9
+2.10
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication.
@@ -543,7 +543,7 @@ function Parse-PlatformScriptStdout {
     <#
     .SYNOPSIS
         Parses the pipe-delimited stdout from the SmartM365-Detect-DeviceSystemInfo Platform Script.
-        Format: SecureBoot:<value>|BIOSVersion:<value>|BIOSDate:<value>|FirmwareType:<value>|LastBootUpTime:<value>
+        Format: SecureBoot:<value>|BIOSVersion:<value>|BIOSDate:<value>|FirmwareType:<value>|LastBootUpTime:<value>|ThirdPartyAVStatus:<value>|ThirdPartyAVProducts:<value>
         Returns a hashtable with each key/value pair.
     #>
     [CmdletBinding()]
@@ -559,6 +559,8 @@ function Parse-PlatformScriptStdout {
         BIOSDate       = $null
         FirmwareType   = $null
         LastBootUpTime = $null
+        ThirdPartyAVStatus   = 'NotCollected'
+        ThirdPartyAVProducts = $null
     }
 
     if ([string]::IsNullOrWhiteSpace($ResultMessage)) {
@@ -567,7 +569,7 @@ function Parse-PlatformScriptStdout {
 
     $parts = $ResultMessage.Trim().Split('|')
     foreach ($part in $parts) {
-        if ($part -match '^([^:]+):(.+)$') {
+        if ($part -match '^([^:]+):(.*)$') {
             $key   = $Matches[1].Trim()
             $value = $Matches[2].Trim()
             if ($result.ContainsKey($key)) {
@@ -582,7 +584,7 @@ function Parse-PlatformScriptStdout {
 # ==========================================================
 # Initialization via SmartM365.Core
 # ==========================================================
-$ScriptVersion = "2.9"
+$ScriptVersion = "2.10"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'DeviceSystemCsvLogFolderPath' -DefaultValue $OutputPath
 try {
@@ -712,7 +714,7 @@ try {
     }
     else {
         WriteLog -Message "Phase 2: Skipped (no -PlatformScriptId provided). SecureBoot column will be empty." "WARNING"
-        WriteLog -Message "To populate SecureBoot/BIOS/FirmwareType/LastBootUpTime, deploy the SmartM365-Detect-DeviceSystemInfo Platform Script and pass its GUID via -PlatformScriptId." "WARNING"
+        WriteLog -Message "To populate SecureBoot/BIOS/FirmwareType/LastBootUpTime/ThirdPartyAV, deploy the SmartM365-Detect-DeviceSystemInfo Platform Script and pass its GUID via -PlatformScriptId." "WARNING"
     }
 
     # ======================================================
@@ -725,8 +727,8 @@ try {
     foreach ($device in $allDevices) {
         $hw = $device.hardwareInformation
 
-        # Platform Script data (SecureBoot, BIOSVersion, FirmwareType)
-        $psData = @{ SecureBoot = $null; BIOSVersion = $null; BIOSDate = $null; FirmwareType = $null; LastBootUpTime = $null }
+        # Platform Script data (system information and antivirus registration)
+        $psData = @{ SecureBoot = $null; BIOSVersion = $null; BIOSDate = $null; FirmwareType = $null; LastBootUpTime = $null; ThirdPartyAVStatus = 'NotCollected'; ThirdPartyAVProducts = $null }
         $psLastUpdate = $null
         if ($secureBootMap.ContainsKey($device.id)) {
             $runState = $secureBootMap[$device.id]
@@ -755,6 +757,8 @@ try {
             ManagementState                   = $device.managementState
             ComplianceState                   = $device.complianceState
             LastSyncDateTime                  = $device.lastSyncDateTime
+            ThirdPartyAVStatus                = $psData.ThirdPartyAVStatus
+            ThirdPartyAVProducts              = $psData.ThirdPartyAVProducts
         }
 
         $results.Add($record)
@@ -856,8 +860,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAI8UYgaQs2GjWX
-# 6hXpIurNxBzjfBNhgB03zZQT+T3UaaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB/2YBJtqmNBGF8
+# yImaYmzTmSJuMg7XSsMIcT5Bx5JRfKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -990,31 +994,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIMMbtIK5DFoaj4qm1r5Nii8ONNs+mh+Unu72/jdIj4jnMA0GCSqG
-# SIb3DQEBAQUABIIBgKiSjjSYqpnxKAV0HZvbaOdRbQt68e9aCevl5zmbUqOUfkJi
-# WgJOy13ArcwgFKYqPPHvoPqpJ3EokNkbCfeOJVrr5K40obPPFOHTHj0VPrOBJydM
-# yCjTayvArhAlIPPhhzqMljM4D3bKflo1fVy6cTA76smjM7ERydlm5YLfxBLaSLfi
-# 64/fIAzkVQdpiAlbXACdMpv12b0chCmbazQ3q4fWUSV3CtRVzH3u6+ZOEJf2fDdi
-# PYm1Kameeov6aahDwUWLenJlLAwVv2ADSU9+wAVijcokAQ6OedPwsBvgfQYdJFg0
-# Z4O8LsGh6+VEnrsnr1g2oK6tOCH20NAe5zhosLOApXNvU5/ex7xkmeMHSgg59lXn
-# ciY7mpyAKDCi+7Y3wiokIgrCiqpmNBon4I8lDKgFQLiAvo/PXO55toay2kHUDo20
-# rY4FAwpJghMI0kb4BPOy3OXMR3TRQqVgQS77tNiiSmvdY/1+Ziza2kK+aQOKt17D
-# IBN9Qo/L6lnQ4jEx06GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIOYiXETqn5ZwwCC5O9u6QgPDiUxraxnzlC9yo7CZx3hOMA0GCSqG
+# SIb3DQEBAQUABIIBgF5FxyFHXwkeyUwHdrLCq44SKoQMG+4Z9Ep1SnzzxzfcV2YP
+# BO5MmAuzIxIOEhGJwHX+5RGjCZCrGoIJfK5d6ieO+l9JMoya5mDxXvtDcL2FwFGj
+# nL8NM3Vvq8AztvO8AjDv9sUfchkhMPoYpCrZdwz5+K4kSttKrVRS6a052rl73xPk
+# RWUxmcDCPg1dHJ3dYHhuzCxvwNmGbAbncvXAncJMbhkehgUVczAV2uNk/Uth1qMx
+# 8kN3rMZWkAMHGAWGRu5Z7mB3M+5tvjZVog8o8nTBR/+dHUBrLstX13Y1d4u4z8+m
+# 7v5862g8mwaMHs7qSDcQUYTUDSy46SFVEJ196b2JWyls7wmxE8zvFtHxzSoLbFEK
+# Vyl5D8WDydf61Bf2Il30no/nrAndpgEfqB5OeZxTsRkEM1k6kphqtZtknh4w+6N0
+# ekgGKq8SWACHE7UPCnnbcRd3XHMFzNqPkgwV5Aktu+AtONYyMdki/z/xQAYKOlIW
+# 5TmAseX+1n1XPWQJa6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDUxOTAx
-# NDdaMC8GCSqGSIb3DQEJBDEiBCDqEC/jIQoliK+hrzx3B/M118tXCjpTtKwuztny
-# hDIzzDANBgkqhkiG9w0BAQEFAASCAgB+V34Zw7EUmKRDnvBKMG7oTs8eZeswuc5i
-# /d2+CmL6lqm2b50YARrd5+s1VufUzovJTw8CQ6+YCkg4R1jVc5f7rGZc0Aryk+el
-# TUCO8q7WYXEwEA5s7U0RhtztPDApSNdcXwE913KOPnFVwRWhMjlc7sN3tmyxmf0F
-# 4My+TlCMD0VUIDz495oO4I/0f1fe4NqIKbX4X/pPyzq7Ow5A0f4fOQ6ZnD3729xI
-# +fcNRjtYitdsDwh+Itx/gpJq0SyZ+HdPUoaJv1m26JuXV+U3YSR40Byk7bR657JT
-# pHTQCR0sMjjA+VxZa3+NHqH7uVxcqbteNHrOo0RK35ihyx0uIwshe1eqyTLTiRlB
-# OBS0IOZ11lZfoXbsnAYNhyhRr5qLw04DVtKPs5mFUG6EZRz2TXs5cbGMoM7mwbp+
-# GDEvWsOpRqw6hHwUOPGaR5Z/GhF9SkRiUwAhYiYauT8yO7ykHW+PRR6xtcbHmuxl
-# 9m15Ef9fJZatWDHpcBF+K2UZlnkh2fElbH4MdqEOns7S4jOUcG97SSTHCW0QHuxR
-# 2LO8ttgXhY7ZO+IMVWiBiWKxhmf6TcHeSrLXjo29LD+CGuLOZYSUW6vxWWVzuAKd
-# AgEQPDH4qJtZGMEIbs71QQsk77Xo9B42XwYUFw4aeJClM5q+KmeeVpfgTH3W5FHm
-# aAVq5sK9Cw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTAyMTM3
+# NDFaMC8GCSqGSIb3DQEJBDEiBCCbF6V8fDbagrZkIrQXJCofuYuCVHj8EI00sd2s
+# D1wA8DANBgkqhkiG9w0BAQEFAASCAgCZkPAx6jrYsN1zk66/UqX8XFVESTBvt5vf
+# zWDCQVYStui7NgiJ8L2y6PkYQ7OquPhjatBKTKb/8EYkcjZvhVjKxRuY5RfOBSyr
+# uiysZtDx9yHB/FgEIuez+JADdJ0W6TeEUWXX+f3wqZ5wlVriigw8R1HuNkAB5LB3
+# o/AzE1CG4llqAXyDyNJFaL27AK7a632jlEnKX0gn6xnkf4F7+FxClk+bf0o7vpd9
+# hYbLwkHvV3pYiW0UBcexOXS3TH3iL74nnnNSShF3hCObhYPsLUieV8GSBc4RAjkf
+# zs+QylFs+zH2SsnBG17YyQBbVxvnzDadivPf3Un51UnXfhWGTbrwgL2aRwCtFci3
+# sfqr8z/5bK0nQjfvBhrR3dQuvFDLipemrIWmEOC2c2XGhL2CZSkhg73shdlRpmLU
+# hbzj4qQErHvHu32S9dxOmNc2bVMj0m+3c0oWMsiPuBojuGvjZ3vyH+PRqEuRMajB
+# er7thWaoKWDs0+fLaeLzhQFgVaYpWlW9M2q+s9t2KDM7Hu+mYAX8R2caACebS+xR
+# yEp0UEyVs2DyfMea4e25kGduA82mU21wAAwyQTGP66SBfu2lF9rwgzdSrDN38AWR
+# v1dyaus0WcR1TT1LdAQQUZWVe1wK577WhwgeSxpGfUHSiW5AuyE6yg9akxnSeeYK
+# gjr6fm2zPA==
 # SIG # End signature block
