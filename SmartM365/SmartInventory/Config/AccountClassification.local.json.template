@@ -81,7 +81,7 @@
     "NamedAccount": {
       "MinimumGivenNamePrefixLength": 2,
       "MinimumSurnamePrefixLength": 3,
-      "LongSamNumericSuffixPattern": "^[A-Z]{6}[0-9]{4}"
+      "LongSamNumericSuffixPattern": ""
     }
   },
   "DirectoryRules": {
