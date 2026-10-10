@@ -11,7 +11,7 @@ $errors = $null
 $ast = [Management.Automation.Language.Parser]::ParseFile($scriptPath, [ref]$tokens, [ref]$errors)
 if (@($errors).Count) { throw "Infrastructure parser errors: $($errors.Count)" }
 $versionMatch = [regex]::Match($ast.Extent.Text, '(?s)\.VERSION\s+([0-9.]+)')
-if (-not $versionMatch.Success -or [version]$versionMatch.Groups[1].Value -lt [version]'1.0.10') { throw 'Infrastructure version was not updated for interruption cleanup.' }
+if (-not $versionMatch.Success -or [version]$versionMatch.Groups[1].Value -lt [version]'1.0.11') { throw 'Infrastructure version was not updated for zone URLs and server counts.' }
 foreach ($column in @('DatabaseSizeBytes','DatabaseSizeStatus','NeedsUpgradeIncludeChildren','NeedsUpgradeStatus')) {
     if ($ast.Extent.Text -notmatch [regex]::Escape("'$column'")) { throw "Content database schema lacks $column" }
 }
@@ -26,7 +26,7 @@ $producer = @($registry.Producers | Where-Object Script -eq 'SmartM365-SharePoin
 if ($producer.Count -ne 1 -or $producer[0].Files.Count -ne 6) { throw 'Infrastructure source receipt registration is invalid.' }
 if ($ast.Extent.Text -match '(?im)^\s*(Set-SPSite|Set-SPWeb|Set-SPContentDatabase|Add-SPShellAdmin|Remove-SPSite)\b') { throw 'A SharePoint write command was found.' }
 if ($ast.Extent.Text -notmatch '-Rows\s+\$rows\[\$kind\]\.ToArray\(\)') { throw 'Infrastructure CSV buffers must be converted to arrays for Windows PowerShell 5.1.' }
-foreach ($name in @('Get-InventoryConfigValue','Resolve-InventoryConfigTokens','Assert-InventoryPath','Get-ConfiguredWebApplications','Get-ObservedProperty','Get-FarmConfigurationDatabaseName','Get-ContentDatabaseExtendedFields','Get-InfrastructureFarmEdition','Get-QualifiedPreviousInfrastructureCounts','New-InfrastructureMailHtml','Send-InfrastructureRunMail','Write-RunCsv','Ensure-GraphAuthenticationModule','Invoke-DailySummaryMail','Send-InventorySummaryMail','Publish-QualifiedCsvUploads')) {
+foreach ($name in @('Get-InventoryConfigValue','Resolve-InventoryConfigTokens','Assert-InventoryPath','Get-ConfiguredWebApplications','Get-ObservedProperty','Get-SharePointServerCount','Get-WebApplicationZonePublicUrl','Get-FarmConfigurationDatabaseName','Get-ContentDatabaseExtendedFields','Get-InfrastructureFarmEdition','Get-QualifiedPreviousInfrastructureCounts','New-InfrastructureMailHtml','Send-InfrastructureRunMail','Write-RunCsv','Ensure-GraphAuthenticationModule','Invoke-DailySummaryMail','Send-InventorySummaryMail','Publish-QualifiedCsvUploads')) {
     $functionAst = @($ast.FindAll({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name }, $true))
     if ($functionAst.Count -ne 1) { throw "Missing function: $name" }
     . ([scriptblock]::Create($functionAst[0].Extent.Text))
@@ -84,6 +84,20 @@ try {
     $marker = Join-Path $tempRoot 'Infrastructure-DailySummary.sent'
     $script:sendCount = 0
     function WriteLog { param($Message, $Level) }
+    $farmServers = @(
+        [pscustomobject]@{Role='WebFrontEnd'},
+        [pscustomobject]@{Role='ApplicationWithSearch'},
+        [pscustomobject]@{Role='Invalid'},
+        [pscustomobject]@{Role='Invalid'}
+    )
+    if ((Get-SharePointServerCount -Servers $farmServers) -ne 2) { throw 'Farm server count includes external entries.' }
+    $zoneWebApplication = [pscustomobject]@{Id='WEB-1'}
+    $zoneWebApplication | Add-Member -MemberType ScriptMethod -Name GetResponseUri -Value { param($zone) if ($zone -eq 'Default') { return [uri]'https://public.example.test/' }; return $null }
+    if ((Get-WebApplicationZonePublicUrl -WebApplication $zoneWebApplication -Zone 'Default') -ne 'https://public.example.test/') { throw 'Zone public URL was not read from the response URI.' }
+    if ((Get-WebApplicationZonePublicUrl -WebApplication $zoneWebApplication -Zone 'Intranet') -ne '') { throw 'A missing zone public URL was not left empty.' }
+    $invalidZoneWebApplication = [pscustomobject]@{Id='WEB-2'}
+    $invalidZoneWebApplication | Add-Member -MemberType ScriptMethod -Name GetResponseUri -Value { param($zone) return 'Microsoft.SharePoint.Administration.SPAlternateUrl' }
+    if ((Get-WebApplicationZonePublicUrl -WebApplication $invalidZoneWebApplication -Zone 'Default') -ne '') { throw 'An object type name was accepted as a zone public URL.' }
     $script:databaseProbeCount = 0
     $script:mockDatabases = @([pscustomobject]@{Type='Content Database';Name='Content_A'},[pscustomobject]@{Type='Configuration Database';Name='Config_A'})
     function Get-SPDatabase { [CmdletBinding()] param() $script:databaseProbeCount++; $script:mockDatabases }
@@ -241,8 +255,8 @@ Write-Output 'PASS: infrastructure parser, PS5 CSV, receipts, daily mail gate/ro
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC5ALnQQsh5n096
-# 1AflcGEYE9QvXxxcTWWtF/Gi2SbovaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBBAyyPsyksXA2z
+# i4LYLYsGZOZLRj4axHJMS0dduzLg1aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -375,31 +389,31 @@ Write-Output 'PASS: infrastructure parser, PS5 CSV, receipts, daily mail gate/ro
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIN0xTsrPHvSxm5f6QFCKEKC2cyn9vjVARNvG1gRpFhJRMA0GCSqG
-# SIb3DQEBAQUABIIBgA/OkwYIP2YH/hzuI6zKNM83WpLAYpmbBxybuF6HEqt0FVat
-# b8KShL/hFn4zthL5jvqkD2qvfccpAU3e2jSOv9rjyva3HbUNQH3hi8wIWByr5iLE
-# HQ7806BDpWPd4l/9slDgFp5JuddyjjIwgG783BRMaPJkclDltW7yIzWDt0vAtnRe
-# w4EPKzvgY2ZwFFZY59C6fYHRSd6xhstai8KWLGaPbZlK0BSsrQ4KfT3qJZHRpKOd
-# nuoY8rCNgRic2Kz8haBa6BhO4jpZnhF64BbI5OUt3dI2UNQmu4VT5jVKNzKifEH0
-# a3O5iTtcfW/y+SqCAcCYRaqzvNTrd4Qcv2HYa7TV2c5P/YiIyffkgsUH3YlcGsZW
-# x1mBTfkemOJXdIwEzqOXQftHnVsUhXw0llJoQCjymeNiQReZwpAY2APwN3/1Y6/x
-# 21VzQgdFxOtCPQHQ1aeOj2EnyUPUDO5BFfezfHPMkN2FxLx01ffL3yKZZ4yhsL8f
-# lMyuqDtqj0zOqrbETKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIArjxw3ajCoJDgadUe7TU71eQkIK3Wdi5IZVwK0zZ5P3MA0GCSqG
+# SIb3DQEBAQUABIIBgIQW5ym4gslhGZq+ArHUuQP3vAEm7FmG3mFK97AAmyyyIqYa
+# QRVwbFFV8Emu8odY07+jlRWt6C4HdG5OV/mdGVKfZLJfacSVA7REAnyiKXokpZYu
+# lNV8eTrRObUCziNnQHnUI0f+Gl9ZLRpsQggZZTczdykYzGDPVJWAA9WehHdhTGqY
+# 8D5OSQsoLNQoliIaMkGqj0Pu84vZpdYQ7Db6MZyYqhSvy8Hy2thnYSOzCvFuu3/X
+# QQhMGicixlmIkCokreuCeJH9zUPmhfO3JgnLVMPJAR29D3Z8Ow0iYHSghn2IPb15
+# Yi6KaO2n3Bb77+fvmLqxnZUVj8HasOjYw9kws/d8EFZxOqlJ+1mvW4HOt0kRtCZs
+# dGkLZhuGYbGGKRPYpJmexCdM1hrlzb6bJeZ7GaDi02DT5/+Ai9/BNtSOkcAEEERU
+# AOK0y2xvyEKNdpzTVYx73hS+d7oV+caaBe7w6l9VI/NVkuDRJWywoTtetDRi7DIv
+# bjjxOecPG+HK/uNdTqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDkyMjMx
-# NThaMC8GCSqGSIb3DQEJBDEiBCDo6fLWdUcFnYjWrF2qaaeEhc4h5qRibjUXXOuB
-# duu2+zANBgkqhkiG9w0BAQEFAASCAgAjJge539WG+DoBLVgmW7hhufY6Pio3DmLH
-# VpMHNMOaEVYF7K6aFF85IMBEm/yZX/dkrcTnjuLbgLY7n5Oxt5oWejh1kRFEdUog
-# rMbWoNQb9/cqnO7GcMD4wOKLdmkpRlkjXYfL9l5AoE+1QMoTzihnPr63XtkrbtLn
-# 4fg71ViFx0GiCpkB78yVHqJQr+DNWC09CNlkKFjNaF6/+1u4dJ8keCSOX49JiVkD
-# G3ENTFXdDVkMJ508MJ7YmeC2E8q18mwGxVAp2Ai11TY0sAML4iVGmOJrBwX3dw+5
-# NbpUq2H9Vr7Ekdy+Z3oG/AUoiG3Yr/lgkakUH+k0Podh07PnUFl9oT+CDEKMy+vV
-# +SZHt8U7PyKScS1OfURd18vMiFbBnT8bKNTbP+PoXCnEcoW7SmHcgCtBg/Bh54SG
-# Fio2LpUrAnM2ZWiUIs7G5hEIYGm5lqBRz9hPtixz02bQn5/YI/Tq8BAN/YJxicmu
-# LsnDeAgXae3eIzHPQVbkYySP8TBW9fFBZguPn7qn5Q/OpeZPY0kwDWQfvb7B2Tjx
-# 1OKPkOQQWudjMIRkYjp0rE8q2LeOZS9ox2MvTjKGgAvmJT2883ceWc8nHmtGZYjE
-# aMUkI4ilx5yzKPk02oxTT896wplJo3iYLUTqw4e1DIyhyaJuT6MLLH2QbPhCkW6A
-# r6YvrKRh9g==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTAwNzI2
+# MDhaMC8GCSqGSIb3DQEJBDEiBCBt8mUVRdmWIWifbaiUViQ4ULMhilzzW+ls909j
+# 3/M0qTANBgkqhkiG9w0BAQEFAASCAgBBpbV0SP77LcVSHlCHZN44/ckfBuHd/Cem
+# D22eM26XhgdIdbeoBELlFnrZ36fldRn44sRI+T3V7uSNEozX07Vohkx64vIwNIA6
+# IayYYF9Bv7PSG09XnYWc673yXJxSfFFyUzAJjrdRfFDGXazEX/PQdPoqQbqm/unL
+# doEg6vs5vrDjqJXlco25rX95PeU57yIvCLoi2bBq0zGjHcHCNP8A0fb0UtqkrqDA
+# x/Rk6SGKjzPLLtmlBoY0oojcKU7skW5HvNNlgqHuj1SEJkNL4GGaJ4xmQajH+BIm
+# wdOtt04S5de4sRVB3Ts3EIMxm+n88MAe/SdOgNawal0cfwWUmSQdEoubntGVroY2
+# RYjw5WN4qRkwoggIoy7l84TmtMqf4i2wt5RMN767Qy43haoNnlZ9UEXej1CzU6tN
+# +GVecghT0DnxyKOaHaB5eS6N4Wovg7uCJOI7/ViR7qRsNYNi3v7Yxe/fhbU7NmZP
+# wRMKTc/gU7nRHH5cU7QULUweuMNbvvPiN+SHh+Wxlm7lf+tTgtJ4g8+4pXesScW8
+# MUNbyFydWfGygS2B9vJUczAaCKg4GFH7VPqQNia/9qu4Pu2mh8reVtfvbLod/UBB
+# VBC3X51GUNWEfrKaCYGTj5Y1My1TXlpMCIkf87nS2N52978ranW0jaZdr4FbXILQ
+# Z1CaT/ujqw==
 # SIG # End signature block

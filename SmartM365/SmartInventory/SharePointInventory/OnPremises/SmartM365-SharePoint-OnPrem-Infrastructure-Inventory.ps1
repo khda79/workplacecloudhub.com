@@ -2,7 +2,7 @@
 .SYNOPSIS
     Read-only SharePoint Server 2016/2019 farm infrastructure inventory.
 .VERSION
-    1.0.10
+    1.0.11
 .REQUIREMENTS
     Windows PowerShell 5.1 x64 on a SharePoint farm server; SharePoint Shell access.
 #>
@@ -140,6 +140,25 @@ function Get-ObservedProperty {
     if ($null -eq $property) { return '' }
     try { if ($null -eq $property.Value) { return '' }; return $property.Value }
     catch { throw "Cannot read $Name`: $($_.Exception.Message)" }
+}
+
+function Get-SharePointServerCount {
+    param([object[]]$Servers)
+    return @($Servers | Where-Object { [string](Get-ObservedProperty $_ 'Role') -ne 'Invalid' }).Count
+}
+
+function Get-WebApplicationZonePublicUrl {
+    param($WebApplication, $Zone)
+    try {
+        $responseUri = $WebApplication.GetResponseUri($Zone)
+        if ($null -eq $responseUri) { return '' }
+        $uri = [uri]$responseUri
+        if (-not $uri.IsAbsoluteUri -or $uri.Scheme -notin @('http','https')) { return '' }
+        return $uri.AbsoluteUri
+    } catch {
+        WriteLog -Message ("Web application zone response URI is unavailable for {0}/{1}: {2}" -f $WebApplication.Id, $Zone, $_.Exception.Message) -Level WARNING
+        return ''
+    }
 }
 
 function Get-FarmConfigurationDatabaseName {
@@ -452,7 +471,7 @@ try {
     $farmRow['FarmVersion'] = [string](Get-ObservedProperty $farmBuild 'Major')
     $farmRow['BuildVersion'] = [string]$farmBuild
     $farmRow['ConfigurationDatabase'] = Get-FarmConfigurationDatabaseName -Farm $farm
-    $farmRow['ServerCount'] = if (@($failures | Where-Object { $_ -like 'Servers:*' }).Count) { '' } else { $servers.Count }
+    $farmRow['ServerCount'] = if (@($failures | Where-Object { $_ -like 'Servers:*' }).Count) { '' } else { Get-SharePointServerCount -Servers $servers }
     $farmRow['ServiceApplicationCount'] = if (@($failures | Where-Object { $_ -like 'ServiceApplications:*' }).Count) { '' } else { $serviceApplications.Count }
     if ($servers.Count -eq 0) { $failures.Add('Servers: no farm server was returned') }
     if (-not $farmRow['FarmVersion'] -or -not $farmRow['BuildVersion'] -or -not $farmRow['ConfigurationDatabase']) { $failures.Add('Farm: required metadata is unavailable') }
@@ -523,7 +542,7 @@ try {
                     $zoneRow = New-InventoryRow $farmId
                     $zoneRow['WebApplicationId'] = $webApplicationId
                     $zoneRow['Zone'] = [string]$zone
-                    $zoneRow['PublicUrl'] = [string]$webApplication.AlternateUrls.GetResponseUrl($zone)
+                    $zoneRow['PublicUrl'] = Get-WebApplicationZonePublicUrl -WebApplication $webApplication -Zone $zone
                     $zoneRow['AuthenticationMode'] = [string](Get-ObservedProperty $iis 'AuthenticationMode')
                     $zoneRow['ClaimsAuthentication'] = [string](Get-ObservedProperty $iis 'UseClaimsAuthentication')
                     $providers = @(Get-SPAuthenticationProvider -WebApplication $webApplication -Zone $zone -ErrorAction Stop)
@@ -620,8 +639,8 @@ try {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA5n/BCtsyzT5hM
-# Nk3upIzeigz2vrJC1oTp6bSdVnrJ5qCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAi8ukxhDuf1YMS
+# 8eQTaN0jTk+V+/UDA8FcofNqbdQ/VaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -754,31 +773,31 @@ try {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEINLu9Ts1FE1cCY4AsvX7JFxcwtRJxn63DiYiq7YbTnonMA0GCSqG
-# SIb3DQEBAQUABIIBgGIH6zpFM19ir2hv0EtdP5pCaOAUJYbhm3cRYgkgJLBssK6I
-# cDGS2SWOv67AL+Emxk4vwI/ghiqimrKG6D/X+YHu10PxqfqZytf5BlCoYE9y6Ka0
-# pqTmms8IaVkc84mwgt/cQLoOJ12dOAlWy2w08b9W0rsifJ3Yancr9LY5P8NApbu1
-# Pi5rftjEmZxJxXf4bWDx0PxDb4iiNTVyYuViyU2riBXkXBCLoYQGZn360b4wiA1/
-# PdVCa3cfxLGC/d0JafV5lrxjn47hqpbPgzpV0TrLQrHpnpoAVcp7XG2JwFRjqD2o
-# KcqH930CKfWMcLVSVrqUabP8MrXdatMvp74qyknenbvIYQn6TzrfK9XdjdRvTH3i
-# TvXpvWCl9jvzw3Ei1wm6Et6Eq4JBKt8iT7Pti2y8f/3Jv+JIJEv9mX4m+Z+sxoff
-# ATylCKLLsdVtrRB2R/pB2n8gyIlK7grMPCJo1GJAgNWFc74ztmJ/9QwNPQQ/1SbF
-# ny5sxxrdlLBrPGBY4qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIPJx7imZu4tv7rD4Q2v1SuBPg5MsR+sDv41738R5DKOqMA0GCSqG
+# SIb3DQEBAQUABIIBgA8ATHQfDV1iogDZaox82t7Hwl8GippcspWTX0ZJfCBOLC16
+# p3WKO/ILWlbvHxBIh8l0U6D8AKQThy8gdQwk5P9OC6kBKsB7D13VIAf+Qo0et5p0
+# ik4O7aoyV1L7s7TZ0cnb6dvw1tE0hoZxocy4mLoozvITRtpPFlCEOe5PQiZXBhC4
+# AN57lw9QRfaKx3X3V+hSr0c4n9j+A2xoinc2u7Rnoi7yKRxaadmDqNoiP/imo0K+
+# 2UxxnaLd0WPRdyMBIU7aFiFa0F4eplaHM0zg+Yg4CbMZ80caxCMHZ9Ksa6dXCAr6
+# L7ehIgQJbvi/apTIZG1WXKH2+ZFoi9bbxECIY/srMryg8Sf74LfnimqAMSxsPZkr
+# csujYzkeELxDPVS7kMKByX6qzx7LCSbKuE+69xL2SgN9RCpTBJwgw5LBxhFKOpRk
+# FUCoT2oyiw8VvSfym0JQSEm1TEMK+lSOLz7OpRIQuL30D1qwQ8vYmf9IXaOqIyJk
+# iC8StmWh2+bz8Ya3gKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDkyMjMx
-# NTdaMC8GCSqGSIb3DQEJBDEiBCBXOtwf2CsMHU1gITnHgZTp57wF/OJlEJMzi6zN
-# kCw0NDANBgkqhkiG9w0BAQEFAASCAgBYdLxd8nXtaeCgnkjm/smGKSQJoPYCZLT8
-# 5pJq7FNtUol885+fsAtARH1AFlghuDspRoEXvotjjXbI69OJC0QtdxIejsdQ6Y7O
-# nrh6KusZZpNn2ooeFHd28yW+all37UL8CEujfEZa7hik91+NYyhyNC+npJm4GnoQ
-# UISP8+9ugOGEZ4rtlZJBSfb4zjlxmUeyTP27gD66Kd9Yel3+xJ3MKHhGX8JuIEO8
-# t/HOt9wG+6C3GoVr3jn9HtFtPlky3uFQSVJJHl/Hsk2WZazGUV1Rx/u2F1ampJIB
-# 8sPHyyURsHLVXcbiYKamLkIskRTF6t/oI0hiOiqtNpM1y6wxd2koWci5HJBAkY9B
-# 7+qDFd3GOxMGI2GBhDstN6j9zAyNJrmKrcaXTnfLQwkEVKFytkia0qNmyso/SHRg
-# IQTXoQTTuKPShIzUyeig7g4082wIXNIUqID53iNvaTK2OzvO38zdWPLZUzpkhm/X
-# +2ETaWtAoob46s/KiMvD9Y9DY2MvRpRfyu08ba6tjmA8pCwkxRGfgaD6eyEdMjy/
-# Jkb/p0GRHiBnhZKcrw/BC69xdzSaD2+Mgj/F8UrYejlei6C847WCUL1A1srXFJKZ
-# 4k6+PGXVnZydA1lN94VVXEiLmycDqzSVhsRLilCiVPXDC6V/Zvo9YcKolGMrX16t
-# l/Tp+ql7zA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTAwNzI2
+# MDhaMC8GCSqGSIb3DQEJBDEiBCAvOqxSGK2ue+p+j3IU50khHFF5XD7nZPC7qARP
+# oM/+fzANBgkqhkiG9w0BAQEFAASCAgB6b3pUx/fE3kigXq8qAIOoC28X0zI3i7o0
+# ZI1bacCmLF668fv2Bz2PX9EdiJVqehXuFGp12JxtSnpnIv5ojCC3NY6wEQSC/eY1
+# 9bmywilfqiJnDIqnqlavr05IUMYjukUURQjmUnvB+b6oM47Z7iLLIh7f90ZjE4UE
+# mWEIulZNNCfUh7sXaDfLiiVd6OqsqPhkgO5mYg49uAbObdmpI4BdiuRIcWYPoXTF
+# ZUSpPIOQuyxU2oNOltwAyFzfLt1ozKp7rEQQ56PWPyTJ+R2/hqFMHQTka6n36n2d
+# 7WIEBzbGLoE8P3t8Vx8Ss87Z8wYDm4SM55M8hpEPqPbh30lmaTA4YPUFML+QTh2x
+# UDrUqNATmgxqWu4DoG2g1tJYRk+gymAwHJre9m83V07/zJD8yAAXBKfupNLd5K21
+# 1hTG4tktkJyfnr4ro8msXQuiQcclAVeQLyTibr820Ayv9zihMWCmDTQpzrjr3LT6
+# RjGmM6rWndrZ+IYwxvD98OoRcxFh1poA4dFhqvY1oDtlxQQ7quVewdqIhGUy8lOX
+# 2et0+DYwEJ56+PbkRZBkfJY21+ZToc3G0nDPn/edcJAt/NccfRA3A2SIZ84Zgd88
+# Q7l+WhCI1jShUDCXVXhTDu5PwZD0NlIHM4G4Mzivettuff/rO9I/tqCnQuAQAZVX
+# VIkoAw0SDw==
 # SIG # End signature block
