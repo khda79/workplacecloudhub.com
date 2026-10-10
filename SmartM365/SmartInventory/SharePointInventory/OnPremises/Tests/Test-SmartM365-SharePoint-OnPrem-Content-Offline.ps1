@@ -13,7 +13,14 @@ if (@($errors).Count) { throw "Content parser errors: $($errors.Count)" }
 $template = Get-Content $templatePath -Raw | ConvertFrom-Json
 if ($template.EnableSharePointUpload -ne $true -or $template.EnableWeeklyHistory -ne $true -or $template.SendMailMode -ne 'Graph') { throw 'Content template policy is invalid.' }
 $versionMatch = [regex]::Match($ast.Extent.Text, '(?s)\.VERSION\s+([0-9.]+)')
-if (-not $versionMatch.Success -or [version]$versionMatch.Groups[1].Value -lt [version]'1.0.11') { throw 'Content version was not updated for partial weekly history.' }
+if (-not $versionMatch.Success -or [version]$versionMatch.Groups[1].Value -lt [version]'1.0.12') { throw 'Content version was not updated for category and quota usage.' }
+if ($null -eq $template.PSObject.Properties['MySiteHostNames'] -or $null -eq $template.MySiteHostNames) { throw 'Content template lacks MySiteHostNames.' }
+if ($template.ExcludePersonalSiteCollections -ne $true) { throw 'Personal collection exclusion must be enabled in the template.' }
+if ($ast.Extent.Text -notmatch '\$rootWebTemplate\s*-ieq\s*''SPSPERS''' -or
+    $ast.Extent.Text -notmatch '\$coverage\[''Status''\]\s*=\s*''ExcludedPersonal''' -or
+    $ast.Extent.Text -notmatch 'excludedPersonalCount\+\+' -or
+    $ast.Extent.Text -notmatch "'ExcludedPersonal'\)" -or
+    $ast.Extent.Text -notmatch 'ExcludePersonalSiteCollections=\$excludePersonalCollections') { throw 'Auditable personal collection exclusion path is incomplete.' }
 if ($ast.Extent.Text -match 'Complete-SmartM365SourceReceipt[^\r\n]*-PartialInventory') { throw 'Content must not extend the shared source receipt with SharePoint-specific partial state.' }
 if ($ast.Extent.Text -notmatch '\$coverageLevel\s*=\s*if\s*\(\$globalTimedOut\).*?elseif\s*\(\$failureCount\s*-gt\s*0\).*?WARNING' -or $ast.Extent.Text -notmatch 'Collection coverage:[^\r\n]+-Level\s+\$coverageLevel') { throw 'Content coverage logging can misclassify a partial run.' }
 $firstUploadConfigRead = $ast.Extent.Text.IndexOf('$global:SharePointSiteHostname =', [StringComparison]::Ordinal)
@@ -27,7 +34,7 @@ if ($ast.Extent.Text -match '(?im)^\s*Get-SPSiteAdministration\b') { throw 'Lock
 if ($ast.Extent.Text -notmatch '(?m)^\s*\$site\s*=\s*\$_\s*$' -or $ast.Extent.Text -match '(?m)^\s*param\(\$site\)') { throw 'Streaming site pipeline input is not bound to the current site.' }
 if ($ast.Extent.Text -notmatch '\$runBase\s*=\s*if\s*\(\$MaxItems\s*-gt\s*0\).*?TEST' -or $ast.Extent.Text -notmatch 'Select-Object\s+-First\s+\$remaining' -or $ast.Extent.Text -notmatch 'Flush-RunRows\s+-Kind\s+CollectionCoverage') { throw 'Limited or per-site coverage path is missing.' }
 if ($ast.Extent.Text -notmatch '\$databaseLockLookup\s*=\s*Get-LockStateLookup\s+-ContentDatabase\s+\$database' -or $ast.Extent.Text -match 'Get-LockStateLookup\s+[^\r\n]*-SiteUrl') { throw 'Limited runs must use the database-scoped lock-state lookup.' }
-foreach ($name in @('Get-InventoryConfigValue','Resolve-InventoryConfigTokens','Assert-InventoryPath','Get-ObservedProperty','Test-MissingObservation','Resolve-SiteLockObservation','Get-LockStateLookup','Assert-Deadline','Get-CollectionFailureStatus','Get-DatabaseCoverageStatus','Get-ContentPublicationDecision','Save-ContentWeeklyHistory','Write-RunCsv','Flush-RunRows','Ensure-GraphAuthenticationModule','Invoke-DailySummaryMail','Send-InventorySummaryMail','New-ContentMailHtml','Send-ContentRunMail','Publish-QualifiedCsvUploads')) {
+foreach ($name in @('Get-InventoryConfigValue','Resolve-InventoryConfigTokens','Assert-InventoryPath','Get-MySiteHostNames','Get-ObservedProperty','Test-MissingObservation','Resolve-SiteCategory','Resolve-QuotaUsage','Resolve-SiteLockObservation','Get-LockStateLookup','Assert-Deadline','Get-CollectionFailureStatus','Get-DatabaseCoverageStatus','Get-ContentPublicationDecision','Save-ContentWeeklyHistory','Write-RunCsv','Flush-RunRows','Ensure-GraphAuthenticationModule','Invoke-DailySummaryMail','Send-InventorySummaryMail','New-ContentMailHtml','Send-ContentRunMail','Publish-QualifiedCsvUploads')) {
     $functionAst = @($ast.FindAll({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name }, $true))
     if ($functionAst.Count -ne 1) { throw "Missing function: $name" }
     . ([scriptblock]::Create($functionAst[0].Extent.Text))
@@ -37,6 +44,43 @@ $script:EffectiveConfig = [pscustomobject]@{
     DataAllRootPath='{{WorkspaceRootPath}}\Data\Tenants\{{ProfileKey}}\DATA-ALL'
     OutputRoot='{{DataAllRootPath}}\SharePoint\OnPrem\Content'
     WeeklyHistoryFolderPath='{{DataAllRootPath}}\SharePoint\OnPrem\Content\WeeklyHistory'
+    MySiteHostNames=@('My.Example.Test','my.example.test')
+}
+if ((Get-InventoryConfigValue -Name 'ExcludePersonalSiteCollections' -DefaultValue $true) -ne $true) { throw 'Missing personal exclusion setting did not default to true.' }
+$script:EffectiveConfig | Add-Member -NotePropertyName ExcludePersonalSiteCollections -NotePropertyValue $false
+if ((Get-InventoryConfigValue -Name 'ExcludePersonalSiteCollections' -DefaultValue $true) -ne $false) { throw 'Explicit false personal exclusion setting was ignored.' }
+$script:EffectiveConfig.PSObject.Properties.Remove('ExcludePersonalSiteCollections')
+if (@(Get-MySiteHostNames).Count -ne 1 -or @(Get-MySiteHostNames)[0] -ne 'my.example.test') { throw 'My Site host normalization failed.' }
+$script:EffectiveConfig.MySiteHostNames = @('https://my.example.test')
+try { $null = @(Get-MySiteHostNames); throw 'A URL was accepted as a My Site host name.' }
+catch { if ($_.Exception.Message -notlike 'MySiteHostNames must contain host names*') { throw } }
+$script:EffectiveConfig.MySiteHostNames = @('my.example.test')
+foreach ($case in @(
+    @{Url='https://my.example.test/personal/a';Template='SPSPERS';Hosts=@();Category='Personal';Status='Observed'},
+    @{Url='https://my.example.test/teams';Template='STS';Hosts=@('my.example.test');Category='OtherOnMyHost';Status='Observed'},
+    @{Url='https://team.example.test/';Template='STS';Hosts=@('my.example.test');Category='Other';Status='Observed'},
+    @{Url='https://team.example.test/';Template='STS';Hosts=@();Category='';Status='HostListUnconfigured'},
+    @{Url='invalid';Template='STS';Hosts=@('my.example.test');Category='';Status='InvalidUrl'},
+    @{Url='https://team.example.test/';Template='';Hosts=@('my.example.test');Category='';Status='TemplateUnavailable'}
+)) {
+    $result = Resolve-SiteCategory -Url $case.Url -RootWebTemplate $case.Template -MySiteHostNames $case.Hosts
+    if ($result.Category -ne $case.Category -or $result.Status -ne $case.Status) { throw "Site category failed: $($case.Url), $($case.Template)" }
+}
+foreach ($case in @(
+    @{Storage='50';Quota='200';Percent='25';Status='Observed'},
+    @{Storage='250';Quota='200';Percent='125';Status='Observed'},
+    @{Storage='200';Quota='0';Percent='';Status='NoQuota'},
+    @{Storage='';Quota='200';Percent='';Status='StorageUnavailable'},
+    @{Storage='200';Quota='';Percent='';Status='QuotaUnavailable'},
+    @{Storage='-1';Quota='200';Percent='';Status='InvalidStorage'},
+    @{Storage='200';Quota='-1';Percent='';Status='InvalidQuota'}
+)) {
+    $result = Resolve-QuotaUsage -StorageBytes $case.Storage -QuotaLimitBytes $case.Quota
+    if ($result.Percent -ne $case.Percent -or $result.Status -ne $case.Status) { throw "Quota usage failed: $($case.Storage)/$($case.Quota)" }
+}
+$collectionSchema = [regex]::Match($ast.Extent.Text, 'SiteCollections\s*=\s*@\([^\r\n]+\)').Value
+foreach ($column in @('QuotaUsagePercent','QuotaUsageStatus','SiteCategory','SiteCategoryStatus')) {
+    if ($collectionSchema -notmatch [regex]::Escape("'$column'")) { throw "Content CSV schema lacks $column." }
 }
 if ((Get-InventoryConfigValue 'OutputRoot') -ne 'C:\SmartM365\Data\Tenants\prod\DATA-ALL\SharePoint\OnPrem\Content') { throw 'Nested content OutputRoot tokens were not resolved.' }
 if ((Get-InventoryConfigValue 'WeeklyHistoryFolderPath') -ne 'C:\SmartM365\Data\Tenants\prod\DATA-ALL\SharePoint\OnPrem\Content\WeeklyHistory') { throw 'Nested content history tokens were not resolved.' }
@@ -260,8 +304,8 @@ Write-Output 'PASS: content parser, nested configuration, persistent paths, lock
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBFqTHgfGRVpRup
-# CggfQpi8M1gu5gGvYE6gX4a2x7jgAKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDY5xu2RRNZmZkp
+# Y37nQLP83YfxI35HPn94EtHWfUnmuKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -394,31 +438,31 @@ Write-Output 'PASS: content parser, nested configuration, persistent paths, lock
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIBoaWw/oxtPvP5rINNWKTYk3/bBztbmow0pk4b0hsT+3MA0GCSqG
-# SIb3DQEBAQUABIIBgBhE1pnmLmnIgMu+spPn7pawS4beKjycFS50HRe0Lo3UxbSV
-# /mwP0duH2nLx1mEiOHiXPS4jWGUVKGEc5vnMZui4SdJb8YKZC+J9VJiTVmScaNeq
-# hrgUf8esTWH7pB8Hc3kh6zYx5oac8oGhU0TVD6nDDceCe7WoIMYIAUwQY2blozb/
-# wOoW5GwzB9RR4efKGwIC+s30O/3RocSJzXJAuRoAwkgSaXAmoI/tYFyzv4DcfjFz
-# sX0RZeBJ/CP01Wikuhc+1xjUAN8Am9eQEsV81prvrqYFBGX47mTjm0+NhKSPsPD5
-# g4DoVU8d1+8/SbQnG0AQrAC0pmNIOA4Py3P1vi+dBU0XxfundqOvyTVX/KnX+vSz
-# 6YzIka3UCRsbGYAL7R2HlD+KXSJDj576zPfKWy67xDWgLpetV9W/0aN3D87ij2F9
-# 44oxDLGPS3zi0Ohkt5NRX8edf5x/WmSirPCGKL73jY45EW/MN1t048Tll0HEAISb
-# 9gtFNOnz0o8YOxTzR6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIG0VatRrFaR0jpO0mdmTOwOje14oUmHqMYHYbQqMLEv9MA0GCSqG
+# SIb3DQEBAQUABIIBgH2HkyfnvPnJoNHLdpL6l9AHKxBga2iNUD7PZqKqXpPUi99o
+# 5otjGFPC4ARIY0r0EPpJ+Fu6xFS0vuYTCOi2umgvqHPcnWunqw1mD/5QJhQH8ffV
+# cL5iTVuN8DRuZs9mgYVrs0autrDSPwbGAKJY1lij61uVu99FQkQvxi6YQveU3MLP
+# vtV59lQWYjO+VOFi79+zoa5lFuxqytWNsI05Wuli8ig0XqeaeMHYt0LntsxaZQn2
+# /pxLvSDEWCep43xwiU09NPQtdODF6O9UyV1WYEKCN8i7/69LdHQknOxkRz/g1l2i
+# EyBm8eRC6ufOkUeQKdJ6iB7nlbcIMXenURGnKsxlt8Ezx9Aot1ODG5Hxqw4NAZ8r
+# Ez2vC/ZroMwA7f1uQt+9fYYJgKOabxcJYTxkCFcIwJEAIT/j2NvTz68PVWzvKW7A
+# nEv0WWozqexgh7rBlPl4QAH0dtOYT+9zNfpuowazdlBJZtvdc9LPXZARfQq9Gi7X
+# zzE9xEQvT5/z0g9VIKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTAwMDUy
-# MzVaMC8GCSqGSIb3DQEJBDEiBCATDOjp31tt5lYyXfS2Q+Ykw/U8Z+TzyxT+Us7P
-# KQJRLTANBgkqhkiG9w0BAQEFAASCAgA8q/fTHp+2BWT0cVC+F0qsCQXK2Gk3yrBR
-# w0PYhpozz9u4RsYR8eXOX2c2RpEu7lwSPqOpRnyKX/mprOXZsxhmkE5I98Jd+cJd
-# 1xSDrtlRWrUuS6D/EMGeUYcmMQErbCFBN/Kmul64EQK3k50GljP5EaVjDmNcPAf3
-# PDaTG3FJgjOXkEvpFKIbANlpteVcT0oYWk5TsYW2IUq6tnqpgHWFZxx0PJK1P6Ae
-# RM/e34nM76GHEJrpl6J7cvuwTgpQwXE6FEKXiralPQtImcWdBVq3MxSNyJ/mcG6u
-# vNs4IHq++y71t3w7LNyp24T3kJDvoRc74gPupmhiSYYKv+8JmLM5g2PSFzJaZcmS
-# ZLfObPHMy974/ywqdp8A2s8YYe1s0wuRGhfq+tSJeBD3hOyoTtGmheK0o2S9yt0K
-# z70vEIb8pX0MBxj+n6YUEWhpx4hNGVEEr7BMEAtxxPbXXE/k9au3mfTrdYUyz/0x
-# Qg7xTiNe5ruqVCVswbqIEUiYveI/k2t+brFbtjpuRZg2nIjJKiQCKaPJvB05ewXt
-# cZa9FO0WanESlruYidBHQAMMRqTPenknvPktoNh8E6wKeMslqDCWf1ola/+YTJY4
-# 9eTF4bvaXh7lrjurv8VYxKzsCcvMNDHSVxlsNdKuqh9aWjDeYpF3aRTgPAHdypPr
-# trHNaFOfUw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTAwMDQz
+# MzdaMC8GCSqGSIb3DQEJBDEiBCCR7mno5Wy4OXA8ysl3Ma68hoLvYoHr6PWm9Tfi
+# 45XU3zANBgkqhkiG9w0BAQEFAASCAgCkYkMbKc/PNZr073L1ejwqE83MQhRSdHOm
+# rGlmC69/BaiKvGxLXP337S/CWlHmw7tfEs8pLzRzyyepXaGlBBlyBgU1KVfveqxi
+# bRiWLUZdgNzrzwHd+3GiziS6/+shIQ1qdjVE48okAe8/EnuvIUfuRM7yVISORgNB
+# WoeGSnGnQMEEBYM1W5wc5/GUmpFBqTssYQEWULWSaBmjM7/SRUFG9AIjLtIAdQj/
+# k/yYnd/iHeHiR8ymiRzPCVJaldBzCtUV7QehqfWA65/yXq3ahSpfB3eKO50p+hiH
+# jJGnxrBklKDNfq8cFOqG9tCYQUB6WQLFP17ETz7ATD7/jp2fXfxr0/EZECAXqx73
+# /AJXT4OW417jgRJnX+WWUWhxlgQOVUseH4aGXHKcP1aoBflYAOQkI5HVeoXjX050
+# 8/j9wjbOEoYLGb07BluHQObLEvZbIA617fRtpPYZ4zIR7JhIoAux2D6qWSv1PcgV
+# xDh077tJ6cn/6chCcSwEzZBlJcucbPj1sDflewEfmtMJzcZZ75meYKiBViV7mP7g
+# YlLW5+GIIaRjdFNdPf1OAYOKaNUK/t+nOmYD5gVqp9+UsVsF6q416QKQYSiLPwkD
+# nhKOZRoAtmREWoiNQKEhcjCKPiT78099kaLERmPtz7CSULlIFUmpatiiQlsPmAD+
+# sH3OUTdl9g==
 # SIG # End signature block

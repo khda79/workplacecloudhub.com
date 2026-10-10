@@ -2,7 +2,7 @@
 .SYNOPSIS
     Read-only SharePoint Server 2016/2019 site collection and web inventory.
 .VERSION
-    1.0.11
+    1.0.12
 .REQUIREMENTS
     Windows PowerShell 5.1 x64 on a SharePoint farm server; SharePoint Shell and content read access.
 #>
@@ -120,6 +120,21 @@ function Get-ConfiguredWebApplications {
     return $selected
 }
 
+function Get-MySiteHostNames {
+    $seen = @{}
+    foreach ($entry in @(Get-InventoryConfigValue -Name 'MySiteHostNames' -DefaultValue @())) {
+        if ($entry -isnot [string] -or [string]::IsNullOrWhiteSpace($entry) -or $entry -ne $entry.Trim() -or
+            [uri]::CheckHostName($entry) -eq [UriHostNameType]::Unknown) {
+            throw 'MySiteHostNames must contain host names without a scheme, port, path or whitespace.'
+        }
+        $hostName = $entry.ToLowerInvariant()
+        if (-not $seen.ContainsKey($hostName)) {
+            $seen[$hostName] = $true
+            $hostName
+        }
+    }
+}
+
 function Test-SharePointPrerequisites {
     if ($PSVersionTable.PSVersion.Major -ne 5 -or -not [Environment]::Is64BitProcess) {
         throw 'Windows PowerShell 5.1 x64 is required on a SharePoint farm server.'
@@ -149,6 +164,41 @@ function Get-ObservedProperty {
 function Test-MissingObservation {
     param($Value)
     return ($null -eq $Value -or ($Value -is [string] -and $Value.Length -eq 0))
+}
+
+function Resolve-SiteCategory {
+    param([string]$Url, [string]$RootWebTemplate, [string[]]$MySiteHostNames)
+    if ($RootWebTemplate -ieq 'SPSPERS') { return [pscustomobject]@{ Category='Personal'; Status='Observed' } }
+    if ([string]::IsNullOrWhiteSpace($RootWebTemplate)) { return [pscustomobject]@{ Category=''; Status='TemplateUnavailable' } }
+    $siteUri = $null
+    if (-not [uri]::TryCreate($Url, [UriKind]::Absolute, [ref]$siteUri) -or
+        $siteUri.Scheme -notin @('http','https') -or [string]::IsNullOrWhiteSpace($siteUri.Host)) {
+        return [pscustomobject]@{ Category=''; Status='InvalidUrl' }
+    }
+    if (@($MySiteHostNames).Count -eq 0) { return [pscustomobject]@{ Category=''; Status='HostListUnconfigured' } }
+    foreach ($hostName in $MySiteHostNames) {
+        if ($siteUri.Host -ieq $hostName) { return [pscustomobject]@{ Category='OtherOnMyHost'; Status='Observed' } }
+    }
+    return [pscustomobject]@{ Category='Other'; Status='Observed' }
+}
+
+function Resolve-QuotaUsage {
+    param($StorageBytes, $QuotaLimitBytes)
+    if (Test-MissingObservation $StorageBytes) { return [pscustomobject]@{ Percent=''; Status='StorageUnavailable' } }
+    if (Test-MissingObservation $QuotaLimitBytes) { return [pscustomobject]@{ Percent=''; Status='QuotaUnavailable' } }
+    [decimal]$storage = 0
+    [decimal]$quota = 0
+    $numberStyle = [Globalization.NumberStyles]::Integer
+    $culture = [Globalization.CultureInfo]::InvariantCulture
+    if (-not [decimal]::TryParse([string]$StorageBytes, $numberStyle, $culture, [ref]$storage) -or $storage -lt 0) {
+        return [pscustomobject]@{ Percent=''; Status='InvalidStorage' }
+    }
+    if (-not [decimal]::TryParse([string]$QuotaLimitBytes, $numberStyle, $culture, [ref]$quota) -or $quota -lt 0) {
+        return [pscustomobject]@{ Percent=''; Status='InvalidQuota' }
+    }
+    if ($quota -eq 0) { return [pscustomobject]@{ Percent=''; Status='NoQuota' } }
+    $percent = ($storage * 100 / $quota).ToString('0.########', $culture)
+    return [pscustomobject]@{ Percent=$percent; Status='Observed' }
 }
 
 function Convert-ToUtcText {
@@ -456,6 +506,11 @@ try {
     }
     $farm = Test-SharePointPrerequisites
     $webApplications = @(Get-ConfiguredWebApplications)
+    $mySiteHostNames = @(Get-MySiteHostNames)
+    $excludePersonalCollections = Get-InventoryConfigValue -Name 'ExcludePersonalSiteCollections' -DefaultValue $true
+    if ($excludePersonalCollections -isnot [bool]) { throw 'ExcludePersonalSiteCollections must be a JSON boolean.' }
+    if ($mySiteHostNames.Count -eq 0) { WriteLog -Message 'MySiteHostNames is empty; non-personal site category will remain unclassified.' -Level WARNING }
+    WriteLog -Message ("ExcludePersonalSiteCollections={0}." -f $excludePersonalCollections)
     $script:MailStats.WebApplications = $webApplications.Count
     $databaseGroups = New-Object 'System.Collections.Generic.List[object]'
     foreach ($webApplication in $webApplications) {
@@ -474,7 +529,7 @@ try {
     if ($MaxItems -gt 0) {
         WriteLog -Message ("MaxItems={0}: test run; DATA-LAST, weekly history and source receipt will not be changed." -f $MaxItems) -Level WARNING
     }
-    Start-SmartM365SourceReceipt -ScriptPath $PSCommandPath -SourceRootPath $latestRoot -ReadOnly:($MaxItems -gt 0) -ScopeParameters @{ IncludedWebApplicationUrls=@(Get-InventoryConfigValue 'IncludedWebApplicationUrls' @()); ExcludedWebApplicationUrls=@(Get-InventoryConfigValue 'ExcludedWebApplicationUrls' @()); MaxItems=$MaxItems }
+    Start-SmartM365SourceReceipt -ScriptPath $PSCommandPath -SourceRootPath $latestRoot -ReadOnly:($MaxItems -gt 0) -ScopeParameters @{ IncludedWebApplicationUrls=@(Get-InventoryConfigValue 'IncludedWebApplicationUrls' @()); ExcludedWebApplicationUrls=@(Get-InventoryConfigValue 'ExcludedWebApplicationUrls' @()); MySiteHostNames=$mySiteHostNames; ExcludePersonalSiteCollections=$excludePersonalCollections; MaxItems=$MaxItems }
     $farmId = [string]$farm.Id
     $rows = @{
         SiteCollections = New-Object 'System.Collections.Generic.List[object]'
@@ -483,7 +538,7 @@ try {
         CollectionCoverage = New-Object 'System.Collections.Generic.List[object]'
     }
     $schemas = [ordered]@{
-        SiteCollections = @('TenantKey','FarmId','RunId','CollectedAtUtc','WebApplicationId','ContentDatabaseId','SiteCollectionId','Url','OwnerLogin','SecondaryOwnerLogin','StorageBytes','QuotaLimitBytes','LastContentModifiedUtc','RootWebTemplate','LanguageLcid','LockState','IsReadOnly','ReadLocked','WriteLocked','LockIssue','ContentDatabaseIsReadOnly','LockStatus','CollectionStatus')
+        SiteCollections = @('TenantKey','FarmId','RunId','CollectedAtUtc','WebApplicationId','ContentDatabaseId','SiteCollectionId','Url','OwnerLogin','SecondaryOwnerLogin','StorageBytes','QuotaLimitBytes','QuotaUsagePercent','QuotaUsageStatus','LastContentModifiedUtc','RootWebTemplate','SiteCategory','SiteCategoryStatus','LanguageLcid','LockState','IsReadOnly','ReadLocked','WriteLocked','LockIssue','ContentDatabaseIsReadOnly','LockStatus','CollectionStatus')
         SiteAdministrators = @('TenantKey','FarmId','RunId','CollectedAtUtc','WebApplicationId','ContentDatabaseId','SiteCollectionId','AdministratorLogin','IsPrimary','IsSecondary')
         Webs = @('TenantKey','FarmId','RunId','CollectedAtUtc','WebApplicationId','ContentDatabaseId','SiteCollectionId','WebId','Url','Title','WebTemplate','LanguageLcid','ListCount','LibraryCount','HasUniqueRoleAssignments')
         CollectionCoverage = @('TenantKey','FarmId','RunId','CollectedAtUtc','WebApplicationId','ContentDatabaseId','SiteCollectionId','Url','Status','WebsCollected','ErrorStage','ErrorMessage')
@@ -498,6 +553,7 @@ try {
     foreach ($name in @('SiteCollections','SiteAdministrators','Webs','CollectionCoverageRows','CoverageIssues','ReadOnlyCollections','UnverifiedLocks')) { $script:MailStats[$name] = 0 }
     $failureCount = 0
     $processed = 0
+    $excludedPersonalCount = 0
     $lockObservedCount = 0
     $lockUnverifiedCount = 0
     $limited = $MaxItems -gt 0
@@ -550,6 +606,13 @@ try {
                     if ($lock.LockStatus -ne 'Observed') { $script:MailStats.UnverifiedLocks++ }
                     $rootWeb = $site.RootWeb
                     try {
+                        $rootWebTemplate = [string](Get-ObservedProperty $rootWeb 'WebTemplate')
+                        if ($excludePersonalCollections -and $rootWebTemplate -ieq 'SPSPERS') {
+                            $coverage['Status'] = 'ExcludedPersonal'
+                            $script:MailStats.SiteCollections--
+                            $excludedPersonalCount++
+                            return
+                        }
                         $collection = New-InventoryRow $farmId
                         $collection['WebApplicationId'] = [string]$webApplication.Id
                         $collection['ContentDatabaseId'] = [string]$database.Id
@@ -559,8 +622,14 @@ try {
                         $collection['SecondaryOwnerLogin'] = [string](Get-ObservedProperty (Get-ObservedProperty $site 'SecondaryContact') 'LoginName')
                         $collection['StorageBytes'] = [string](Get-ObservedProperty (Get-ObservedProperty $site 'Usage') 'Storage')
                         $collection['QuotaLimitBytes'] = [string](Get-ObservedProperty (Get-ObservedProperty $site 'Quota') 'StorageMaximumLevel')
+                        $quotaUsage = Resolve-QuotaUsage -StorageBytes $collection['StorageBytes'] -QuotaLimitBytes $collection['QuotaLimitBytes']
+                        $collection['QuotaUsagePercent'] = $quotaUsage.Percent
+                        $collection['QuotaUsageStatus'] = $quotaUsage.Status
                         $collection['LastContentModifiedUtc'] = Convert-ToUtcText (Get-ObservedProperty $site 'LastContentModifiedDate')
-                        $collection['RootWebTemplate'] = [string](Get-ObservedProperty $rootWeb 'WebTemplate')
+                        $collection['RootWebTemplate'] = $rootWebTemplate
+                        $category = Resolve-SiteCategory -Url $siteUrl -RootWebTemplate $collection['RootWebTemplate'] -MySiteHostNames $mySiteHostNames
+                        $collection['SiteCategory'] = $category.Category
+                        $collection['SiteCategoryStatus'] = $category.Status
                         $collection['LanguageLcid'] = [string](Get-ObservedProperty $rootWeb 'Language')
                         foreach ($name in @('LockState','IsReadOnly','ReadLocked','WriteLocked','LockIssue','ContentDatabaseIsReadOnly','LockStatus')) { $collection[$name] = $lock.$name }
                         $collection['CollectionStatus'] = 'Collected'
@@ -569,6 +638,8 @@ try {
                         foreach ($field in @('StorageBytes','QuotaLimitBytes','LastContentModifiedUtc','OwnerLogin','RootWebTemplate','LanguageLcid','IsReadOnly','ReadLocked','WriteLocked','ContentDatabaseIsReadOnly')) {
                             if (Test-MissingObservation $collection[$field]) { $missingFields.Add($field) }
                         }
+                        if ($quotaUsage.Status -in @('InvalidStorage','InvalidQuota')) { $missingFields.Add('QuotaUsagePercent') }
+                        if ($category.Status -eq 'InvalidUrl') { $missingFields.Add('SiteCategory') }
                         if ($missingFields.Count -gt 0) {
                             $collection['CollectionStatus'] = 'MetadataIncomplete'
                             $coverage['Status'] = 'MetadataIncomplete'
@@ -652,7 +723,9 @@ try {
                         $fallback['ContentDatabaseId'] = [string]$database.Id
                         $fallback['SiteCollectionId'] = $siteId
                         $fallback['Url'] = $siteUrl
-                        foreach ($name in @('OwnerLogin','SecondaryOwnerLogin','StorageBytes','QuotaLimitBytes','LastContentModifiedUtc','RootWebTemplate','LanguageLcid','LockState','IsReadOnly','ReadLocked','WriteLocked','LockIssue','ContentDatabaseIsReadOnly','LockStatus')) { $fallback[$name] = '' }
+                        foreach ($name in @('OwnerLogin','SecondaryOwnerLogin','StorageBytes','QuotaLimitBytes','QuotaUsagePercent','LastContentModifiedUtc','RootWebTemplate','SiteCategory','LanguageLcid','LockState','IsReadOnly','ReadLocked','WriteLocked','LockIssue','ContentDatabaseIsReadOnly','LockStatus')) { $fallback[$name] = '' }
+                        $fallback['QuotaUsageStatus'] = 'NotCollected'
+                        $fallback['SiteCategoryStatus'] = 'NotCollected'
                         if ($null -ne $lock) { foreach ($name in @('LockState','IsReadOnly','ReadLocked','WriteLocked','LockIssue','ContentDatabaseIsReadOnly','LockStatus')) { $fallback[$name] = $lock.$name } }
                         $fallback['CollectionStatus'] = $coverage['Status']
                         $rows.SiteCollections.Add([pscustomobject]$fallback)
@@ -663,7 +736,7 @@ try {
                 } finally {
                     $rows.CollectionCoverage.Add([pscustomobject]$coverage)
                     $script:MailStats.CollectionCoverageRows++
-                    if ($coverage['Status'] -ne 'Collected' -and $script:MailStats.CoverageSamples.Count -lt 5) { $script:MailStats.CoverageSamples.Add([pscustomobject]@{Status=$coverage['Status'];Url=$coverage['Url'];ErrorMessage=$coverage['ErrorMessage']}) }
+                    if ($coverage['Status'] -notin @('Collected','ExcludedPersonal') -and $script:MailStats.CoverageSamples.Count -lt 5) { $script:MailStats.CoverageSamples.Add([pscustomobject]@{Status=$coverage['Status'];Url=$coverage['Url'];ErrorMessage=$coverage['ErrorMessage']}) }
                     Flush-RunRows -Kind SiteCollections -Buffers $rows -Paths $spoolPaths -MinimumCount 1
                     Flush-RunRows -Kind SiteAdministrators -Buffers $rows -Paths $spoolPaths -MinimumCount 1
                     Flush-RunRows -Kind Webs -Buffers $rows -Paths $spoolPaths -MinimumCount 1
@@ -711,7 +784,7 @@ try {
     foreach ($kind in $schemas.Keys) { Flush-RunRows -Kind $kind -Buffers $rows -Paths $spoolPaths -MinimumCount 1 }
     WriteLog -Message ("Lock observation: observed={0}; unverifiedOrConflicting={1}." -f $lockObservedCount,$lockUnverifiedCount)
     $coverageLevel = if ($globalTimedOut) { 'ERROR' } elseif ($failureCount -gt 0) { 'WARNING' } else { 'INFO' }
-    WriteLog -Message ("Collection coverage: processed={0}; failed={1}; limited={2}; globalTimeout={3}." -f $processed,$failureCount,$limited,$globalTimedOut) -Level $coverageLevel
+    WriteLog -Message ("Collection coverage: processed={0}; excludedPersonal={1}; failed={2}; limited={3}; globalTimeout={4}." -f $processed,$excludedPersonalCount,$failureCount,$limited,$globalTimedOut) -Level $coverageLevel
     $publicationDecision = Get-ContentPublicationDecision -FailureCount $failureCount -GlobalTimedOut $globalTimedOut -MaxItems $MaxItems
     if ($publicationDecision -eq 'TestOnly') {
         if ($failureCount -gt 0 -or $globalTimedOut) {
@@ -784,8 +857,8 @@ try {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAnGdBSMmQxeGs8
-# HGhmpuGPsmG7dGkq06UR+Rcvn1nYI6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB82KYV/qAELib6
+# Rr8Yjqf9ArwIH9HjytLEX8/nCoWA/6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -918,31 +991,31 @@ try {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIObX4DA8A+qOmYBeByNAHyYJXF1XFwBpZhr9vi0I55OzMA0GCSqG
-# SIb3DQEBAQUABIIBgBQGGh4sxIuYBxzuQ9XRALK7eYdD9BKYzxTe1Thp8GZvs2rC
-# TbO3Gf1Bg/rTbmz1xMDPPgVPORugqXDVEHcvuv1VAOrcC3C2Iu1q/NANpl4uJdYp
-# Rk7J61C9zNOPNadAhTtfdIeLIJ2Bhvn1pPQQsmW6AiYFqSiRic82RjWJHdhxw3eg
-# e5kToTvfHRhTDFrcHkmgAyEWK7aSDnFWnQUb9H+nRuaRk9BfGSIOrZeoiSKmNrPl
-# n6ozZfOkWEZIroWqpT6ocrzyGOsupFGaxwy3H8mrrJQmkDbndhP/2I6WqrR0rWLy
-# BcE+Zp8hF1IJYIQDm21RfpFdHvm+ofFeSEmTS/5fOH+OGxTBY1OSXL1ux/CrqLak
-# lvgcVel3hMZ8Skf48Jv4NDY7Cwwf7tWYyZnoOm/cszzhPGlPhpJ3a4BW/Ck7zB9M
-# RqOQuf83/6UOi+qb1fLCY4Vs88CTS1xO0eIL9B242TrqvAgEknHD3tJJTXeXRJol
-# 78FFgrDJPW7vRGUrVqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIGPfKXwtLdp8J7CQSCS379kXnQOcvDtctwG6QJczBAQ4MA0GCSqG
+# SIb3DQEBAQUABIIBgIFELt1Dr78UgPGmc6SEIn6HkUOia+mP76ZfG1OkRvZz5M/C
+# VkcmS9JeE3VibYFXJcLBUHRErmUkYQlOl3r9eDL0PHQEqdeiUu7O+60TLNB9Fg62
+# dI/e2brzpfW1fA0YswZ5oinHdCLPQnT/obX2/SFcAduDYcvYJWCoZ3oIrrBfy+B6
+# jisJCspD2w7ujoX64yLsOkT89lVwIAy9V72/S5fkUWqbH9/VYd4FAd3atiV15fDO
+# Mh6uYkqlBJQEav7NT1wU/38jP9stLVKN8aGQRefWsN6XNeUPdYEBXxdZlo3BHP7I
+# S9GJprWFLOC2B+oKRaSlMmWWaU83xbNmW8mooblHwrFNE5/yS4vgESFGm+SFidJa
+# 4inJEHiIyX0wMv80x+M/eCOug2c/D8arF0m/UOsSFN/mc+Z8OUMH2uJXpFNmA7Xg
+# mzYtQ2dmVfeeg2Vtirte4jDDSBhTZP5q5IsSqgI0B9cbml46Uc20K8BmzcIE+zi8
+# 2WKTs4GTaAvycV8hEaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTAwMDUy
-# MzVaMC8GCSqGSIb3DQEJBDEiBCBMQ2o58IYL51os5tM07iOxWjAnTQGyLbWb0xNs
-# 38ImJDANBgkqhkiG9w0BAQEFAASCAgBz+/L/+dY69099yBuLRis5tRkxwTY0LRzy
-# jMOKVmS9MkYtqF6DCIPAdbIyNkc1HMpYW7ErFSQ8hsv+Av5SOb86OXROfV86eFby
-# RRtj8ZqyrohZUmVLvG/UbLO8qyv72vVU2TisEAN4BJne9K/+JyIXcPK++EySdLig
-# 60Nc6+W1ChSPEWPR/uGyv0Rwsn6WURgGhKr+HKwtxiboo2iCmZfx6BGxf/AhMh6u
-# NOUk0UDSLQ7OTNYc9ze/nhT4ZgG6eF6X34YZzqTSodAyjm0kMBYsFRfKP8JWKxKt
-# 64jZKEGe/a8fCkDp8Cr8UsblCgT2o0dZb7OSvMdiUH72s7hYoSORQEU7Pn7x5XQn
-# Ita5AlcaJ9WkOjxhVP84WVpGhQyDMUontb8PSI/weKxOwA1yHM7Wl5v7CSnKW5ou
-# pAPkLZbghF6Vhz6fg65SAPvBzu35Ch+4FNTjv6sMZJ/kpN9TH/9EtiftZsZttrma
-# sgMwIj9SNnHTzv4mW373vKCU5b8Dsv5Vgh7/C1rRwfcI2tHEle/wpA4SX4AfE+IM
-# /ouhOdfebdtT7Xbz7C2lEMS6T7hGnAIOjyDKnUPWeh+PADLp/3QkZVjFr0+LfCRH
-# elK6TVeS8YZW+x8CNOhdB7OdcHeYSxAb6l/Jc0K67aBdNd/EUtBF2hF3PlkpRRez
-# pGEE4uUmJw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTAwMDQy
+# NTNaMC8GCSqGSIb3DQEJBDEiBCAWCci6dnkhACrbg4bKWSf5kO7zFgNVwXjJgCe4
+# CZrqgDANBgkqhkiG9w0BAQEFAASCAgB7Kdd7ZePGQdgmUYryn+qkFgZoQjeu7OFm
+# 7kkrotKdXvdz7QqkkTESiJKvwwWVxE/beRLTelIQNbRlApY4SgQmVQQuO3UHie4w
+# RvnUafzBL84gitDQ1APrMzASnOjNU8vJ9faIzNsdPErvfYklsshb/HvHSbh33W54
+# lr/I2T49Qf43L23+gGe56FcAGJKxMWYt/EAvEQOwEnKZicLynG3dU3CdCBMcx2pt
+# KCB05CMQ6dUG/x8iANFFc9a7A15jaaF/mbKqbItA9DKjg8KPHikwQmCKqfEQEEuL
+# UrYmDPOktn2Jh3IyevN8PRQwFg2NEY+Lm69vNpC7N9dMJMVLtw3npPjOXDjmXDi2
+# fpQdxbsrmlDzhYx5zSYeHMlKQNBB5enXkDk4Fjnv4sVH6Oh6kA5S5ysGJCeetu0Y
+# wTv+60BZ/WT3Hxk7a6ztSOoWk3PxZXvy8ruEZeZd2U5EXq7z87ER+f3bzh7uZlGk
+# ACduhGY+cSvneZDbpJjG2/bOX/8KrNOQiAVeKFkkERT4EeumdBqVA2hwGfJ0PL5u
+# rkm3VWVxlIghqnPUVtravoi9hAoWDgefugvfQ27hmLcHl5hSBkLhH7Uzh58iOMuz
+# fG+/jo5C6qNQClLZXQm9mYFqkRt+V7+3GnV9DkJbyaCME+eIlmd6Mr9327khLgTz
+# U7xDvPoTag==
 # SIG # End signature block

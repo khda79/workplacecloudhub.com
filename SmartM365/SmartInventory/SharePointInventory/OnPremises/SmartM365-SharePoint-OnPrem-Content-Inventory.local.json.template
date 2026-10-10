@@ -23,6 +23,8 @@
   "Thumbprint": "__USE_GLOBAL__",
   "IncludedWebApplicationUrls": [],
   "ExcludedWebApplicationUrls": [],
+  "MySiteHostNames": [],
+  "ExcludePersonalSiteCollections": true,
   "OutputRoot": "{{DataAllRootPath}}\\SharePoint\\OnPrem\\Content",
   "EnableWeeklyHistory": true,
   "WeeklyHistoryFolderPath": "{{DataAllRootPath}}\\SharePoint\\OnPrem\\Content\\WeeklyHistory",
