@@ -5,15 +5,16 @@
 .DESCRIPTION
     This script is intended to be deployed as an Intune Platform Script on Windows devices.
     It collects Secure Boot status, BIOS information, firmware type, and the operating system
-    last boot time, and third-party antivirus products registered in Windows Security Center.
+    last boot time, third-party antivirus products registered in Windows Security Center,
+    Windows Update reboot requirement, and operating-system volume BitLocker state.
     Results are written to stdout in a pipe-delimited format for retrieval
     through Microsoft Graph deviceManagementScripts/deviceRunStates.
 
     Output format:
-    SecureBoot:<value>|BIOSVersion:<value>|BIOSDate:<value>|FirmwareType:<value>|LastBootUpTime:<value>|ThirdPartyAVStatus:<value>|ThirdPartyAVProducts:<value>
+    SecureBoot:<value>|BIOSVersion:<value>|BIOSDate:<value>|FirmwareType:<value>|LastBootUpTime:<value>|ThirdPartyAVStatus:<value>|ThirdPartyAVProducts:<value>|WindowsUpdateRebootRequired:<value>|BitLockerOSProtectionStatus:<value>|BitLockerOSConversionStatus:<value>
 
 .NOTES
-    Version: 1.3.0
+    Version: 1.4.0
     Author: https://github.com/khda79/workplacecloudhub.com
     Deploy via: Intune > Devices > Scripts > Platform scripts (Windows)
     Run as: System
@@ -91,14 +92,60 @@ catch {
     $outputParts += 'ThirdPartyAVProducts:'
 }
 
+# Windows Update Agent reports only update-related reboot requirements.
+try {
+    $updateSystemInfo = New-Object -ComObject Microsoft.Update.SystemInfo -ErrorAction Stop
+    $outputParts += if ($updateSystemInfo.RebootRequired) { 'WindowsUpdateRebootRequired:True' } else { 'WindowsUpdateRebootRequired:False' }
+}
+catch {
+    $outputParts += 'WindowsUpdateRebootRequired:Error'
+}
+
+# Local operating-system volume state; recovery keys are never queried or emitted.
+try {
+    $systemDrive = [string]$env:SystemDrive
+    $osVolume = @(Get-CimInstance -Namespace 'root/CIMV2/Security/MicrosoftVolumeEncryption' -ClassName Win32_EncryptableVolume -ErrorAction Stop |
+        Where-Object { $_.DriveLetter -eq $systemDrive })
+    if ($osVolume.Count -ne 1) {
+        $outputParts += 'BitLockerOSProtectionStatus:Unknown'
+        $outputParts += 'BitLockerOSConversionStatus:Unknown'
+    }
+    else {
+        $protectionStatus = if ($null -eq $osVolume[0].ProtectionStatus) { 'Unknown' } else {
+            switch ([int]$osVolume[0].ProtectionStatus) {
+                0 { 'Off' }
+                1 { 'On' }
+                default { 'Unknown' }
+            }
+        }
+        $conversionStatus = if ($null -eq $osVolume[0].ConversionStatus) { 'Unknown' } else {
+            switch ([int]$osVolume[0].ConversionStatus) {
+                0 { 'FullyDecrypted' }
+                1 { 'FullyEncrypted' }
+                2 { 'EncryptionInProgress' }
+                3 { 'DecryptionInProgress' }
+                4 { 'EncryptionPaused' }
+                5 { 'DecryptionPaused' }
+                default { 'Unknown' }
+            }
+        }
+        $outputParts += "BitLockerOSProtectionStatus:$protectionStatus"
+        $outputParts += "BitLockerOSConversionStatus:$conversionStatus"
+    }
+}
+catch {
+    $outputParts += 'BitLockerOSProtectionStatus:Error'
+    $outputParts += 'BitLockerOSConversionStatus:Error'
+}
+
 Write-Output ($outputParts -join '|')
 exit 0
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCACafscutWXsrAM
-# Vs7U0f3ppZQ1ELbjh/bEGE3VsVoDeaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCsAFO9Xw86shBW
+# MKrnCWhl8WvdE0wmfw1xj7n88ee8W6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -231,31 +278,31 @@ exit 0
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIGMeGzyyi2Psee3qug6/iP659iA2sKOUd+zeF3LKdOnTMA0GCSqG
-# SIb3DQEBAQUABIIBgFR8zcPPUCU/m2ZiBxJziTHygTU3lRgXXN4y4N+XfG1an6vp
-# QlJfUfkrsiuan/2pJsHP2RD6dErINugIXrg3GWJleeY7X3AtqmGG+UqwvwtBjvM0
-# n6fcx2bl8dWS2zFP8W6C706UKbIJAO28rdvTesrwGrcNxQJZYisrRs/pnXQeQPvo
-# T3X77E1E7UfOAz/H9B9puBoYaPg6gDaVr8ghisXinxNXS1Bw84NRjyV/Z0vqp+bc
-# 1Q0HJaQgqjrnurVDDfDOHtMqmMB/x0LyrcqTRdtsgoB3BGPbubWXbEvwbdMCksXw
-# +KFfOVZzOc3mPWcRXlvbipHaDTjQ0tqw7vvPcF4DkmzZnXKTjtmM4yNWKJL3NhQy
-# bJr93UwQi//fyT2n//V2D+H/uT0LpEnQIXrdHS4z97ziON2btjGAtL42fxXhwU/Q
-# f11a10ntiMJsZUZW4yoBB5iEzXlj5ZV2gfgzFPg7Qub5pgDbE92HCBHH3S1hisc1
-# o+6Apl+zoCpRA1iiRaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIDeVIPgxj1827+7C8ncHaNu/O+8mr6Oxt30C135NJihuMA0GCSqG
+# SIb3DQEBAQUABIIBgEweJU2CwgsGMkwjrCzv0NDfyDA4+D3RiPX7YQTlIZo5pmZE
+# J5EV90Br5tDFOW2BPNtw/D+OTSUb0qZlGE6miWvnffXwyR/NKAFsYFrEKhRT3e3t
+# 7vwkyqhxOpEzX9pjcu4hpOtpY+MROt9K4BGX6edZmdA4LjqjEJwPTW8H3UrIWY/J
+# /icCxckASza3SxCF/sOygL4A8f4b9H4s0yqzg31IgjWC9T+aeqLxtj5TafK2w+3l
+# YeoSsOmiSA9tdIcBZC/alb6pool8YC2Phxi5/NXbp4ELt7+z3KYi8ZLCAUGFhZG/
+# Umdmg1yjIY+7uV2R4Luq3RwEKtyUgcSq4Fy5X6SmqKXvMM/ohrlD7nqg/7Km6btE
+# RTt1rAfMpw/jqKHruINvQYqf7d5j95J7V9QH3ELRUOabn+AwJBmjMs5wa/GUPZLs
+# 0ZT8/a7w3UCAmWNBSLupjM/6wOblbjWqXe7Mesii7b16q6W72+pO4q91yPBF2ofB
+# nPwdcgLrKXv3E3HyVqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTAyMTM3
-# NDFaMC8GCSqGSIb3DQEJBDEiBCDgq6i9IDWM/OBRwhv7eKYb4b2rzjUlPKTYNsG4
-# 7JOjSTANBgkqhkiG9w0BAQEFAASCAgCRXIP4La+TqVPHZH+kDsykebIG0+Ik9kBv
-# Mextmil8P8haCRW3+zd4hZBfVWFEoct2mj4gd3cjvMMi9nGokipDU24/nZ4h413F
-# 4eiW40mdOtG/FstpsPEldX5WLbWLGnU5CBOtEKaFDLXCGSlcYe9xGnKw7Ta45hV4
-# jwK/5cy+0HXM0jYNvkU13cGsIqj2yqJi42KpnwqNBCCPLeKE1s4F21GKRIHLOO8g
-# Nc1PrxpcnbuolxkZApK3ngfDoRU35dzVybNmsSzxcSjEvsyzDwzTm8UticV7VUSM
-# SGkdOl5YSh4MY08Xy5hfPKzpLiBe2PWbXhtzpqMqvKIIJ2f2M9c1N7I7NrNvLUCQ
-# Avjdd/IKg4IrUlduKx/hZgkv/jYPwwVsXrtdmoc95eJQMlfjLrCY6Jx7TtYh5rz9
-# WQ/VEWBpYwKkMj4uMbizC9YmSKCS1r+5ZSPbPCyMlKtM2OO97+oBWntnWrM2ooVu
-# /W276OeL5bOijH0yyYfpoOoWIGUhrk7LjwWe2hYVfDxsBVq3vwja5pnjuLs4Y2ss
-# cdAgY9KgAFV9sjf5NPEgBCr8M8ZmBWV8TR8QCXd3HCWi3XdTHvEd2gKiHPqa1Ci7
-# 6MvYknHawtHTm+oIpf5QNfH/CZe5SIj7V9nNDC3x6Bixei8MPOxCGHaD6UygrIOB
-# N6Y7R5uhHQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTAyMjA1
+# MjhaMC8GCSqGSIb3DQEJBDEiBCB5cu/sQIa/jz2XQ4/cVrw2ziGGujxKjf5V3Gmi
+# D44noDANBgkqhkiG9w0BAQEFAASCAgAaYhXFihikGrsIPXtt6Y5j+f80zg0s+VI2
+# 7k7L52C/oig5KEV6M7YkEz4eh94w5hfmVYVGfRJvWcc5Sz8Cu0lwObRrnmCJDGYb
+# iIv9Xe7ODOlImA7BOW0RuyH9Ygesq8cz4Qu1vdbyn9vNvUJlhMTacOBW++j6aaVe
+# IK5ejYe5V4A8QMjcBr/VKwLbv+LxwIGCnpuzjX8aik8crTmC3e2wDrb8zA7rkZak
+# 7guaGMVC98VNyWL5ETY886RnxUrQxmA2jA8fGbXgqKQfhdX4i8HDm4wUmaN3yBHM
+# FxnXT5eNP7ysFcsqhGfU/ly9XfSl2OPeeytQDE5YonhWfYOyO7FvZ140NCs01hiV
+# 6cGB+w1IAymrpV9VVoxkrw5xDDLBC5nHA0db57JelWQ0/gFoBHfbeZ0IxcwJ2JLd
+# BQQ6w2UOD6vYDiz2L8Seuy+EHf4QcR4eG8bDzw5x7y41TZGT7HsI9dbGWaU1ufNX
+# SGvh+1IWqe1bXKGUO03vW4m1Qg56jjXEulYit1utxloYVnznZwVUVtDpHcW4Ln5q
+# FkB+Tel4nNTVobYEIfzcoHnFlvHTILbjPJREHmpue2O1y1jlXZz1GwJIorixLsIL
+# 3UgfrcYIY2wi19rt0NKPbwilki6QFGuF5oFtBE5r+HynEucPEMx61fQlVqPTGOY3
+# DI76yc1tmA==
 # SIG # End signature block

@@ -118,6 +118,6 @@ match the effective key.
 
 `EndpointAnalytics/SmartM365-EndpointAnalytics-Inventory.ps1` exports standard Endpoint Analytics reports through Microsoft Graph `deviceManagement/reports/exportJobs`. Microsoft currently requires `DeviceManagementManagedDevices.ReadWrite.All` to create the temporary export-job resource, although the collector performs no device, policy, baseline, assignment, or remediation change.
 
-Battery Health (`BR*`), Resource Performance (`EAResourcePerf*`), Anomalies (`EAAnomaly*`), Device Timeline, and Device Query are intentionally excluded.
+Battery Health device details (`BRDeviceBatteryAgg`) are optional via `-IncludeBatteryHealth`; other Battery Health reports, Resource Performance (`EAResourcePerf*`), Anomalies (`EAAnomaly*`), Device Timeline, and Device Query remain excluded.
 
 See `EndpointAnalytics/README.md` for report names, mappings, CSV grains, API-version rationale, and validation examples.

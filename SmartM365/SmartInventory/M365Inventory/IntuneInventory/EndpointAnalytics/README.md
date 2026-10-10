@@ -1,23 +1,25 @@
 # Microsoft Intune Endpoint Analytics Inventory
 
-`SmartM365-EndpointAnalytics-Inventory.ps1` is a read-only SmartInventory collector for Microsoft Intune Endpoint Analytics reports available with a standard Intune license.
+`SmartM365-EndpointAnalytics-Inventory.ps1` is a read-only SmartInventory collector for Microsoft Intune Endpoint Analytics reports available with a standard Intune license. Battery Health can be included explicitly when the tenant has access to that report.
 
 It does not enable data collection, create policies or baselines, change assignments, run remediations, or calculate financial/productivity estimates.
 
 ## Licensing and excluded scope
 
-The collector requires a valid Microsoft Intune license and existing Endpoint Analytics data. It does not require Intune Advanced Analytics, Intune Plan 2, or Intune Suite.
+The default collection requires a valid Microsoft Intune license and existing Endpoint Analytics data. It does not require Intune Advanced Analytics, Intune Plan 2, or Intune Suite. `-IncludeBatteryHealth` additionally requests `BRDeviceBatteryAgg` from the Battery Health report and requires that report to be available to the SmartM365 app.
 
 The executable catalogue deliberately excludes:
 
-- every `BR*` Battery Health report;
+- `BRBatteryByModel`, `BRBatteryByOs`, and `BREnergyUsage`; `BRDeviceBatteryAgg` is available only with `-IncludeBatteryHealth`;
 - every `EAResourcePerf*` Resource Performance report;
 - every `EAAnomaly*` report;
 - Device Timeline;
 - Device Query;
 - Advanced score columns such as `ResourcePerfScore` and `OverviewBatteryHealthScore`.
 
-`IsAdvancedAnalytics` is always `False` in DataQuality.
+`IsAdvancedAnalytics` is `True` only for `BRDeviceBatteryAgg` rows in DataQuality.
+
+Battery Health is published to `Intune_EndpointAnalytics_BatteryHealth.csv` at the report's source grain. `DeviceId` identifies the Intune device; `BatteryId` distinguishes batteries when supplied. Multiple rows for a device remain separate. The export retains battery health, capacity, runtime scores, maximum capacity, cycle count, design and full charge capacities, attention flag, and source refresh date. It does not infer a score for devices absent from the report.
 
 ## Microsoft Graph API version and permission
 
@@ -100,6 +102,7 @@ guard. Advanced score columns remain excluded.
 - `Intune_EndpointAnalytics_AppReliability.csv`
 - `Intune_EndpointAnalytics_OSReliability.csv`
 - `Intune_EndpointAnalytics_WorkFromAnywhere.csv`
+- `Intune_EndpointAnalytics_BatteryHealth.csv` when `-IncludeBatteryHealth` selects `BRDeviceBatteryAgg`
 - `Intune_EndpointAnalytics_DataQuality.csv`
 
 Historical files use `{{DataAllRootPath}}\Intune\EndpointAnalytics`; current files use `LatestCsvFolderPath`. SmartM365.Core injects `TenantKey` first, creates stable empty-schema CSVs, applies retention, handles weekly history and optional SharePoint upload, and adds MAXITEMS suffixes in test mode.

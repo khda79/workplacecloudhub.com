@@ -5,7 +5,7 @@ Collects Microsoft Intune Endpoint Analytics standard reports through Microsoft 
 
 .DESCRIPTION
 Read-only SmartInventory collector for Endpoint Analytics features included with a valid
-Microsoft Intune license. Advanced Analytics report families are deliberately excluded.
+Microsoft Intune license. Battery Health is an explicit optional Advanced Analytics report.
 
 The Endpoint Analytics report names used by this script are currently documented only in
 the Microsoft Intune beta report catalogue, so the exportJobs calls use Microsoft Graph beta.
@@ -16,10 +16,15 @@ is created or changed.
 SmartM365 tenant profile key. Defaults to test.
 
 .PARAMETER Reports
-All, Scores, Startup, ApplicationReliability, WorkFromAnywhere, or exact supported report names.
+All, Scores, Startup, ApplicationReliability, WorkFromAnywhere, BatteryHealth when enabled,
+or exact supported report names.
 
 .PARAMETER IncludeStartupProcesses
 Includes EAStartupPerfDeviceProcesses and publishes StartupProcesses.
+
+.PARAMETER IncludeBatteryHealth
+Includes the BRDeviceBatteryAgg device and battery report. Requires Battery Health access
+in the tenant; no recovery keys or device-side battery data are collected.
 
 .PARAMETER OutputPath
 Historical output folder. Defaults to {{DataAllRootPath}}\Intune\EndpointAnalytics.
@@ -58,8 +63,11 @@ pwsh -File .\SmartM365-EndpointAnalytics-Inventory.ps1 -Tenant test -ValidateOnl
 .EXAMPLE
 pwsh -File .\SmartM365-EndpointAnalytics-Inventory.ps1 -Tenant test -Reports All -Connect
 
+.EXAMPLE
+pwsh -File .\SmartM365-EndpointAnalytics-Inventory.ps1 -Tenant test -Reports All -IncludeBatteryHealth -ValidateOnly -Connect
+
 .VERSION
-1.0.14
+1.1.0
 .REQUIREMENTS
 PowerShell 7+.
 Modules: SmartM365.Core 1.0.69+; Microsoft.Graph.Authentication.
@@ -77,6 +85,7 @@ param(
     [string]$Tenant = 'test',
     [string[]]$Reports = @('All'),
     [switch]$IncludeStartupProcesses,
+    [switch]$IncludeBatteryHealth,
     [string]$OutputPath,
     [string]$LatestCsvFolderPath,
     [switch]$Connect,
@@ -99,7 +108,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-$script:ScriptVersion = '1.0.14'
+$script:ScriptVersion = '1.1.0'
 $script:ScriptName = [System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
 $script:RunId = [guid]::NewGuid().Guid
 $script:CollectedAtUtc = [datetime]::UtcNow.ToString('o')
@@ -275,7 +284,7 @@ function Initialize-EARuntime {
 }
 
 function Get-EAReportCatalog {
-    return @(
+    $reports = @(
         [pscustomobject]@{ Name='EADevicePerformanceV2'; Group='Scores'; Output='DevicePerformance'; Grain='Device'; ApiVersion='beta'; Aliases=@(); Select=@('DeviceAppHealthScore','DeviceId','DeviceManufacturer','DeviceModel','DeviceName','MeanTimeToFailure','MemaTimeGenerated','ProcessedDateTime','TotalAppCrashes') },
         [pscustomobject]@{ Name='EADeviceModelPerformanceV2'; Group='Scores'; Output='ModelPerformance'; Grain='Model'; ApiVersion='beta'; Aliases=@(); Select=@('ActiveDevices','DeviceManufacturer','DeviceModel','MeanTimeToFailure','MemaTimeGenerated','ModelAppHealthScore') },
         [pscustomobject]@{ Name='EADeviceScoresV2'; Group='Scores'; Output='DevicePerformance'; Grain='Device'; ApiVersion='beta'; Aliases=@(); Select=@('AppReliabilityScore','DeviceId','DeviceName','DeviceScopeIds','EndpointAnalyticsScore','HealthStatus','Manufacturer','Model','PartnerFeaturesBitmask','StartupPerformanceScore','WorkFromAnywhereScore') },
@@ -289,6 +298,10 @@ function Get-EAReportCatalog {
         [pscustomobject]@{ Name='EAWFAPerDevicePerformance'; Group='WorkFromAnywhere'; Output='WorkFromAnywhere'; Grain='Device'; ApiVersion='beta'; Aliases=@(); Select=@('CloudManagementScore','DeviceId','DeviceName','Manufacturer','MemaTimeGenerated','Model','WindowsScore','WorkFromAnywhereScore') },
         [pscustomobject]@{ Name='EAWFAModelPerformance'; Group='WorkFromAnywhere'; Output='WorkFromAnywhere'; Grain='Model'; ApiVersion='beta'; Aliases=@(); Select=@('CloudManagementScore','Manufacturer','MemaTimeGenerated','Model','ModelDeviceCount','WindowsScore','WorkFromAnywhereScore') }
     )
+    if ($IncludeBatteryHealth) {
+        $reports += [pscustomobject]@{ Name='BRDeviceBatteryAgg'; Group='BatteryHealth'; Output='BatteryHealth'; Grain='Battery'; ApiVersion='beta'; Aliases=@(); Select=@('BatteryId','DeviceId','DeviceName','DeviceManufacturer','DeviceModel','BatteryHealthScore','BatteryCapacityScore','BatteryRuntimeScore','MaximumCapacity','CycleCount','DesignCapacity','FullChargeCapacity','DeviceBatteryCount','NeedsAttention','MemaTimeGeneratedTimeStamp') }
+    }
+    return $reports
 }
 
 function Get-EAOutputSchemas {
@@ -301,6 +314,7 @@ function Get-EAOutputSchemas {
         AppReliability=@('RunId','ReportName','ReportRefreshDate','ApplicationName','Publisher','AppReliabilityScore','CrashCount','UsageDuration','MeanTimeToFailure')
         OSReliability=@('RunId','ReportName','ReportRefreshDate','OSVersion','AppReliabilityScore','MeanTimeToFailure')
         WorkFromAnywhere=@('RunId','ReportName','ReportRefreshDate','DeviceId','DeviceName','Manufacturer','Model','OSVersion','WorkFromAnywhereScore','CloudManagementScore','WindowsScore')
+        BatteryHealth=@('RunId','ReportName','ReportRefreshDate','DeviceId','DeviceName','Manufacturer','Model','BatteryId','BatteryCount','BatteryHealthScore','BatteryCapacityScore','BatteryRuntimeScore','MaximumCapacity','CycleCount','DesignCapacity','FullChargeCapacity','NeedsAttention')
         DataQuality=@('RunId','ReportName','ApiVersion','Status','RowCount','ExportJobStatus','IsAdvancedAnalytics','RequiredPermission','ErrorCode','ErrorMessage','CollectedAtUtc','RawRowCount','ExcludedRowCount','ExcludedDeviceCount')
     }
 }
@@ -310,7 +324,7 @@ function Resolve-EAReportSelection {
     $requested = @($RequestedReports | ForEach-Object { [string]$_ } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
     if ($requested.Count -eq 0) { $requested = @('All') }
     foreach ($name in $requested) {
-        if ($name -match $script:AdvancedReportPattern) { throw "Advanced Analytics report '$name' is excluded by design." }
+        if ($name -match $script:AdvancedReportPattern -and -not ($IncludeBatteryHealth -and $name -eq 'BRDeviceBatteryAgg')) { throw "Advanced Analytics report '$name' is excluded by design." }
     }
     if ($requested -contains 'All') { return @($Catalog) }
     $selected = New-Object System.Collections.Generic.List[object]
@@ -329,7 +343,7 @@ function Test-EAStaticContract {
     param([Parameter(Mandatory)][object[]]$Catalog, [Parameter(Mandatory)][System.Collections.IDictionary]$Schemas)
     $failures = New-Object System.Collections.Generic.List[string]
     foreach ($report in $Catalog) {
-        if ($report.Name -match $script:AdvancedReportPattern) { $failures.Add("Advanced Analytics report present: $($report.Name)") }
+        if ($report.Name -match $script:AdvancedReportPattern -and -not ($IncludeBatteryHealth -and $report.Name -eq 'BRDeviceBatteryAgg')) { $failures.Add("Advanced Analytics report present: $($report.Name)") }
         if ($report.ApiVersion -ne 'beta') { $failures.Add("Undocumented API version: $($report.Name)") }
         if (@($report.Select).Count -eq 0) { $failures.Add("No explicit select list: $($report.Name)") }
         if (-not $Schemas.Contains($report.Output)) { $failures.Add("Missing output schema: $($report.Output)") }
@@ -395,7 +409,7 @@ function Invoke-EAGraphRequest {
 
 function Start-EAExportJob {
     param([Parameter(Mandatory)][object]$Report, [string]$EffectiveReportName=$Report.Name)
-    if ($EffectiveReportName -match $script:AdvancedReportPattern) { throw "Advanced Analytics report '$EffectiveReportName' is excluded by design." }
+    if ($EffectiveReportName -match $script:AdvancedReportPattern -and -not ($IncludeBatteryHealth -and $EffectiveReportName -eq 'BRDeviceBatteryAgg')) { throw "Advanced Analytics report '$EffectiveReportName' is excluded by design." }
     $body = [ordered]@{ reportName=$EffectiveReportName; select=@($Report.Select); format='csv'; localizationType='replaceLocalizableValues' }
     $uri = '{0}/{1}/deviceManagement/reports/exportJobs' -f $script:GraphApiBase,$Report.ApiVersion
     Write-EALog ("Creating Endpoint Analytics export job: {0} ({1})" -f $EffectiveReportName,$Report.ApiVersion)
@@ -484,9 +498,18 @@ function New-EANormalizedRow {
     $base = [ordered]@{
         RunId=$script:RunId
         ReportName=$ReportName
-        ReportRefreshDate=(Get-EARawValue $RawRow @('MemaTimeGenerated','ProcessedDateTime','InsertedDate'))
+        ReportRefreshDate=(Get-EARawValue $RawRow @('MemaTimeGenerated','MemaTimeGeneratedTimeStamp','ProcessedDateTime','InsertedDate'))
     }
     switch ($ReportName) {
+        'BRDeviceBatteryAgg' {
+            $base.DeviceId=Get-EARawValue $RawRow @('DeviceId'); $base.DeviceName=Get-EARawValue $RawRow @('DeviceName')
+            $base.Manufacturer=Get-EARawValue $RawRow @('DeviceManufacturer'); $base.Model=Get-EARawValue $RawRow @('DeviceModel')
+            $base.BatteryId=Get-EARawValue $RawRow @('BatteryId'); $base.BatteryCount=Get-EARawValue $RawRow @('DeviceBatteryCount')
+            $base.BatteryHealthScore=Get-EARawValue $RawRow @('BatteryHealthScore'); $base.BatteryCapacityScore=Get-EARawValue $RawRow @('BatteryCapacityScore')
+            $base.BatteryRuntimeScore=Get-EARawValue $RawRow @('BatteryRuntimeScore'); $base.MaximumCapacity=Get-EARawValue $RawRow @('MaximumCapacity')
+            $base.CycleCount=Get-EARawValue $RawRow @('CycleCount'); $base.DesignCapacity=Get-EARawValue $RawRow @('DesignCapacity')
+            $base.FullChargeCapacity=Get-EARawValue $RawRow @('FullChargeCapacity'); $base.NeedsAttention=Get-EARawValue $RawRow @('NeedsAttention')
+        }
         'EADevicePerformanceV2' {
             $base.DeviceId=Get-EARawValue $RawRow @('DeviceId'); $base.DeviceName=Get-EARawValue $RawRow @('DeviceName')
             $base.Manufacturer=Get-EARawValue $RawRow @('DeviceManufacturer'); $base.Model=Get-EARawValue $RawRow @('DeviceModel')
@@ -568,7 +591,7 @@ function New-EADataQualityRow {
     )
     return [pscustomobject][ordered]@{
         RunId=$script:RunId; ReportName=$ReportName; ApiVersion=$ApiVersion; Status=$Status; RowCount=$RowCount
-        ExportJobStatus=$ExportJobStatus; IsAdvancedAnalytics=$false; RequiredPermission=$script:RequiredPermission
+        ExportJobStatus=$ExportJobStatus; IsAdvancedAnalytics=($ReportName -eq 'BRDeviceBatteryAgg'); RequiredPermission=$script:RequiredPermission
         ErrorCode=$ErrorCode; ErrorMessage=$ErrorMessage; CollectedAtUtc=$script:CollectedAtUtc
         RawRowCount=$(if ($RawRowCount -lt 0) { $RowCount } else { $RawRowCount })
         ExcludedRowCount=$ExcludedRowCount; ExcludedDeviceCount=$ExcludedDeviceCount
@@ -805,6 +828,7 @@ function Publish-EAOutputs {
         AppReliability='Intune_EndpointAnalytics_AppReliability.csv'
         OSReliability='Intune_EndpointAnalytics_OSReliability.csv'
         WorkFromAnywhere='Intune_EndpointAnalytics_WorkFromAnywhere.csv'
+        BatteryHealth='Intune_EndpointAnalytics_BatteryHealth.csv'
         DataQuality='Intune_EndpointAnalytics_DataQuality.csv'
     }
     # Validate every device-grain output before the first canonical CSV write.
@@ -822,6 +846,7 @@ function Publish-EAOutputs {
     $stamp = Get-Date -Format 'yyyyMMdd_HHmmss'
     foreach ($key in $fileNames.Keys) {
         if ($key -eq 'StartupProcesses' -and -not $IncludeStartupProcesses) { continue }
+        if ($key -eq 'BatteryHealth' -and -not $script:BatteryHealthSelected) { continue }
         $baseName = [System.IO.Path]::GetFileNameWithoutExtension($fileNames[$key])
         $timestampedPath = Join-Path $script:OutputPath ("{0}_{1}.csv" -f $baseName,$stamp)
         $latestPath = Join-Path $script:LatestCsvFolderPath $fileNames[$key]
@@ -876,6 +901,13 @@ function Invoke-EASelfTest {
     if ($materializedOutputRows.Count -ne 1 -or $materializedOutputRows[0].DeviceId -ne 'device-1') { throw 'Generic output-list materialization failed.' }
     if ($schemas.DataQuality[0] -ne 'RunId') { throw 'Schema simulation failed.' }
     if ('EAResourcePerfAggByDevice' -notmatch $script:AdvancedReportPattern) { throw 'Advanced Analytics guard failed.' }
+    if ($IncludeBatteryHealth) {
+        $batteryReports = @(Resolve-EAReportSelection $catalog @('BatteryHealth'))
+        if ($batteryReports.Count -ne 1 -or $batteryReports[0].Name -ne 'BRDeviceBatteryAgg') { throw 'Battery Health report selection simulation failed.' }
+        $batteryRow = New-EANormalizedRow BRDeviceBatteryAgg ([pscustomobject]@{DeviceId='device-1';BatteryId='battery-1';BatteryHealthScore=74;MaximumCapacity=71;CycleCount=350})
+        if ($batteryRow.BatteryId -ne 'battery-1' -or $batteryRow.MaximumCapacity -ne 71) { throw 'Battery Health normalization simulation failed.' }
+        if (-not (New-EADataQualityRow BRDeviceBatteryAgg beta StaticValidated).IsAdvancedAnalytics) { throw 'Battery Health quality classification simulation failed.' }
+    }
     if ((@('TenantKey') + $schemas.DevicePerformance)[0] -ne 'TenantKey') { throw 'TenantKey simulation failed.' }
     if ($MaxItems -gt 0 -and "x_MAXITEMS_$MaxItems.csv" -notmatch '_MAXITEMS_\d+\.csv$') { throw 'MAXITEMS simulation failed.' }
     Write-EALog 'Self-test passed: completed, failed, throttled, schemas, report-group selection, TenantKey, MAXITEMS, normalization, output-list materialization, permission, and Advanced Analytics guard.' SUCCESS
@@ -896,6 +928,7 @@ try {
     $schemas=Get-EAOutputSchemas
     Test-EAStaticContract $catalog $schemas | Out-Null
     $selectedReports=@(Resolve-EAReportSelection $catalog $Reports)
+    $script:BatteryHealthSelected=@($selectedReports | Where-Object Name -eq 'BRDeviceBatteryAgg').Count -gt 0
 
     if (-not $IncludeStartupProcesses -and @($selectedReports | Where-Object Name -eq 'EAStartupPerfDeviceProcesses').Count -gt 0) {
         $selectedReports=@($selectedReports | Where-Object Name -ne 'EAStartupPerfDeviceProcesses')
@@ -959,6 +992,7 @@ try {
     if ($ValidateOnly) {
         $script:DataQualityRows | Format-Table ReportName,ApiVersion,Status,ExportJobStatus,ErrorCode
         if (@($script:DataQualityRows | Where-Object Status -eq AccessDenied).Count -gt 0) { throw 'Endpoint Analytics permission or report access is missing.' }
+        if ($script:BatteryHealthSelected -and @($script:DataQualityRows | Where-Object { $_.ReportName -eq 'BRDeviceBatteryAgg' -and $_.Status -notin @('Available','AliasUsed') }).Count -gt 0) { throw 'Battery Health report is unavailable to the SmartM365 app.' }
         if (@($script:DataQualityRows | Where-Object Status -in @('Available','AliasUsed')).Count -eq 0) {
             throw 'Endpoint Analytics availability validation failed because no requested standard report completed successfully.'
         }
@@ -967,6 +1001,9 @@ try {
     }
     if (@($script:DataQualityRows | Where-Object Status -eq AccessDenied).Count -gt 0) {
         throw "Endpoint Analytics collection stopped: required permission or access is missing. Required: $($script:RequiredPermission)."
+    }
+    if ($script:BatteryHealthSelected -and @($script:DataQualityRows | Where-Object { $_.ReportName -eq 'BRDeviceBatteryAgg' -and $_.Status -notin @('Collected','AliasUsed','CollectedWithExclusions') }).Count -gt 0) {
+        throw 'Endpoint Analytics collection stopped because the requested Battery Health report is unavailable. No canonical CSV files were published.'
     }
     $terminalFailures = @($script:DataQualityRows | Where-Object Status -eq Failed)
     if ($terminalFailures.Count -gt 0) {
@@ -982,7 +1019,8 @@ try {
     Remove-CoreSmartM365TimestampedFilesOlderThan -FolderPath $script:OutputPath -FilePattern '*.csv' -RetentionDays 7 -LogFile $global:LogTextFile
     $collectedCount=@($script:DataQualityRows | Where-Object Status -in @('Collected','AliasUsed','CollectedWithExclusions')).Count
     $unavailableCount=@($script:DataQualityRows | Where-Object Status -eq UnavailableInTenant).Count
-    $resultSummary="Endpoint Analytics standard reports collected: $collectedCount; unavailable: $unavailableCount; Advanced Analytics reports: 0."
+    $batteryCollected=@($script:DataQualityRows | Where-Object { $_.ReportName -eq 'BRDeviceBatteryAgg' -and $_.Status -in @('Collected','AliasUsed','CollectedWithExclusions') }).Count
+    $resultSummary="Endpoint Analytics reports collected: $collectedCount; unavailable: $unavailableCount; Battery Health reports collected: $batteryCollected."
     if ($script:ScoreExclusions.Count -gt 0) {
         $script:CompletionStatus = 'CompletedWithWarnings'
         $excludedCount = ($script:ScoreExclusions | Measure-Object ExcludedRowCount -Sum).Sum
@@ -1027,8 +1065,8 @@ exit (Get-EAExitCode)
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDSxEcAosaqyiOM
-# nwDZjACM35539enu8MJdEGtHkHp+56CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBeiPNmjWYmlh93
+# 60x89IFZrFyXaue6M/s3VimlIs4kiKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1161,31 +1199,31 @@ exit (Get-EAExitCode)
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIL98GDbpXTIeUNeiXOlhtEQk3drF80IDVZ/7wFhzmkubMA0GCSqG
-# SIb3DQEBAQUABIIBgJORsn8YVKeA7a/TZ+8iVVnNE/KpxLR3kELrdgF4H9AxujzV
-# sqfLWyRUE432nj7IUezxBu5m1M5z6e257ORkYFmsVmQ/ooeqP76zCGdL/8IudDCR
-# TO4AMQfv1DlCVc2xnFBlPDv1nDH+NSWjryytz+SM/1KeEhi/wWJCSLe8Q5fsK9B7
-# st6g5kYkrVRLWblBbmN3XoaN789IO0EKjT7MAKnLIl3RouRJm4OzqmIFslRCs2q6
-# SmA94EbB0ADw59rNwuJT2s5W14gE7o5wWy5+NgeFpC06iChMEFmIvnEj1pcP1mzB
-# ojktG4nDKFZZrcpMyBrQJh7HLNOZm+rNoiSOwAdumMR5AG2irCIL4MWsjq8eC+fC
-# CGYjtydGZW5Jj1uoc/cm/xl+Y7CmSrJWghwip99E9wacVd3IcHmPvqLC5Wh1p/1M
-# 9RczLf1sUtHm+Ox7LT9KyWYzO64Cs1B6ynVuMDYo+/q4a4JHt843K2j2GKKWziRN
-# 3hvC3UGAEhUijmVAlKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIIvxD7hlV+Yap1T1F4wjCgv2xAshxNgOeRdawWMrxj64MA0GCSqG
+# SIb3DQEBAQUABIIBgAVXLcrcH1ki8HIL5WBxmN3XAi2OvTPDYs6NrjbDqu+ANhQc
+# SNT3x1flXUvUb6YRx998Mv/lZ2AXSX9sjUZ/sWwIQUv3ACQOvGTfnmOsQorQ3vjm
+# NEwhdGr9Hxd6SkUCaVfvLkA7I8zEv9JrJ/k+yM4taZxCroVr0i49BWC7/B77ySGn
+# KEfgRU2FDFZzi6KgFQ+sAARwznj+0ixHEz+NXIZPlCIc1lqwPH2jZtmhZenVb7Ji
+# mrDOR8UV7vtajbI6M4EoEZNHyzygBnSwuDHp+krlzrYnPNkLsjOxGaZLbSaaWUuH
+# nGbe97s/T9GPWiMt6SyyEvyvLpEn5TrZ6e+dzSwh4Oco50FriWIKxL5ETtACpunE
+# 3HAO9FxNkseHYZ77sVp0y9HxeNJcTZ9M4f4/GfxEfgI33wNUilpL9IawEvOVZ+I3
+# d7DAIwIsinVA/QMjZf7yGUplQyD6tLCSYqiC/74eHGisFg4MVzl4sZMCVK+VgoaL
+# 9vr7CKnFfDC/ql7bjqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDQyMjQ1
-# NTNaMC8GCSqGSIb3DQEJBDEiBCCsc0R6yxOpLYI3Kdqxzx/oZ6BoLE04mj6jXMjF
-# 8oSCcDANBgkqhkiG9w0BAQEFAASCAgBcKhEX4daUDiBBDM0htVJqNfDtL7dDiOnk
-# GXl6uG26Nlf5UGGfeybEcYob91ZrhaGwrzilT541DT6qEUMFoiide64JAzF52Cr/
-# nJl5xMuTKPbiclMA0/9XwhHgYcQnvES+Q3CLeLWX7noYH+BrRK10l8eYaDSyQIQs
-# EJ1Xcm3lJxwfHkqqU+irYAJF4A3PxMTICEFiLFZtLRzVX68t6smlHEDqUMwb8sJy
-# ShFGNhcNCnKPxKYd1Xd2LH3NFjhSP1CZsIoOcY7wanNs5CC/T4gBcyOrN+FIMAkM
-# X7o2m7qnQyvzHvO0PPBD/dlCDheEgkfonIppMDmecOIUdSUt7pxoKWjK84G3VFhK
-# hB7tsPT/LTMMnjwEwgYHgSPMo9xVDT5qkwiU9fmPdhhsKW1P16E8+nqgS5CyjKin
-# /GldqZJu4SR4xtfp1+wYCaw9vPNydjVpR1YyD1e9f9E7g1Rl57Wbk67FkzaHto6K
-# pMuf6u2oEzTnR4z0dzJ+bGObfbW3aIFmNRMB5d74IrqvTgYGYKD4DfYLXomW3BBF
-# 2U5yZRsd6McqgxA6wPA7SXMPezk9TohgQ0WKTGSWcv7+GcFM8WEEXDyQp2PD8kEG
-# Sj3tNzr82eyxszzstQClr08cSTcW9RK4fu9sf4nA1LZKLrVED/9JQjtz4UDDiul6
-# L1Paj6fwFw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTAyMjA1
+# MjhaMC8GCSqGSIb3DQEJBDEiBCAqj0AC5krKJWKPuhMhhch70MKcSfm0UJ0A8W2c
+# bFvvJDANBgkqhkiG9w0BAQEFAASCAgBt5kt2QIsyoRW32aKzi5d/6tMEETeOnmnp
+# F9IOuOgKuW9eqRVZxoPr9K1Cb8Tt7oeTdrMp2qSMoJDQtlzRH4pVXidkLXi0/Xw+
+# eTajBogsDQ8rcmkrrIReQ6ybdKnxEdeZmhdlszhxRbS6CDxx7f0sDoKMcI+ChhgR
+# MaxGMtIwA4tBJaZbVlNT073KyVKCo1AFDs4Z0THT72ZwdabGFFHtXm0nAH1YneKa
+# Py136ZA2Ue7b4fMc2Lo8pOHO6rtehTXWoaOqpoNf3SGMIYqKL67QI2zOFGQgMRhi
+# kEcmRT8qiqlfoTDJYgOCtxOu2cdZfVM2cNE+eR8awu3QhZU8DdRDD/l/0362VoME
+# CQMiusNT4muo3EafEDnv6AzVyAFBP+CtNGDUMNn9nMdFbmvDH26uU3lRtxN0g2Jq
+# 5spr2TsLM5la0pK/u9rCH+qfxlf5trxR00o1SiLy0mim0yynAYFnh5pUyKAWjkgG
+# mHpVDEVE78fa/EAnFKrWYBju6Ft8FJl9q09OrRAkIIMAylEhohWPYlNsWJJvB94Z
+# kGIFo1aJ1CWC+Uo3yciPgzLlLfpQTpUJvhJYj+lhrhL58zcE8s6Old0OV+ZTsQoq
+# lvJ44Ly/NuH3lwlWvngXSMWHuwkWWI8CPRtVRTOQArxfwYF1H+eKTWaf5G3NqaCg
+# Z43uXOQaNA==
 # SIG # End signature block
