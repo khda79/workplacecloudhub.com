@@ -67,12 +67,17 @@ param([string]$SiteUrl, [string]$TenantAdminUrl, [string]$LockState)
     Remove-Item function:Read-Host -ErrorAction SilentlyContinue
 
     $global:SiteLockTestUrl = 'https://farm.example/sites/source'
+    $global:SiteLockTestId = [guid]::NewGuid()
     $global:SiteLockTestState = 'Unlock'
     $global:SiteLockTestSetCalls = 0
-    function global:Get-SPSiteAdministration {
+    function global:Get-SPSite {
         param([string]$Identity)
+        return [pscustomobject]@{ Url = $global:SiteLockTestUrl; ID = $global:SiteLockTestId }
+    }
+    function global:Get-SPSiteAdministration {
+        param([guid]$Identity)
+        if ($Identity -ne $global:SiteLockTestId) { throw 'Site administration lookup used the wrong site collection ID.' }
         return [pscustomobject]@{
-            Url = $global:SiteLockTestUrl
             ReadLocked = ($global:SiteLockTestState -eq 'NoAccess')
             ReadOnly = ($global:SiteLockTestState -eq 'ReadOnly')
             WriteLocked = ($global:SiteLockTestState -eq 'NoAdditions')
@@ -101,9 +106,10 @@ param([string]$SiteUrl, [string]$TenantAdminUrl, [string]$LockState)
 }
 finally {
     Remove-Item function:Read-Host -ErrorAction SilentlyContinue
+    Remove-Item function:Get-SPSite -ErrorAction SilentlyContinue
     Remove-Item function:Get-SPSiteAdministration -ErrorAction SilentlyContinue
     Remove-Item function:Set-SPSite -ErrorAction SilentlyContinue
-    Remove-Variable SiteLockTestAnswers,SiteLockTestUrl,SiteLockTestState,SiteLockTestSetCalls -Scope Global -ErrorAction SilentlyContinue
+    Remove-Variable SiteLockTestAnswers,SiteLockTestUrl,SiteLockTestId,SiteLockTestState,SiteLockTestSetCalls -Scope Global -ErrorAction SilentlyContinue
     $resolved = [IO.Path]::GetFullPath($fixture)
     $tempRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\') + '\'
     if ($resolved.StartsWith($tempRoot, [StringComparison]::OrdinalIgnoreCase) -and
@@ -115,8 +121,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBWbDIdEs6PL8QL
-# 0BfpuhmVsWRPU3SqOxY0wNg754I5qKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBIrmGk8d/xpnFT
+# JHkAYjurV0OTEFejzXAIQbnR3rh0OKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -249,31 +255,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIFMQ1WnppJA5zEDM6zwgC3mbea6mUNejHGwU7cCUr/XUMA0GCSqG
-# SIb3DQEBAQUABIIBgIaGV0Q9c7oamFJrW+0mLTTUGa28Re1vajnAKBnIC90TRkFd
-# dbfTOt7zrahLDdqQZSw1bXpuhM5NR99Iypv7Ia/29zhj72+eFwG2eoRTMyeb5Dzx
-# AxCtm1QLVPh5YWAMOSHFH2hY/KUAsMf8RqleE7FbJgq6Y37v2ZxDipbQlXu8rAFm
-# yipA2Dlh9uEE7Zkhby3GqSQJjPkaL4wkhpwa2rUN+/jl+d2WJZ9Q4yJ+2V7Uq6es
-# ftWsI3y7CmscUjbt6BJCTjOJOu9Uj266ZLw5oBbqRu5rO7LpzVpDmnedJP8wcYUD
-# 8k3I/6D/avNMkoCgCxLc/pGF5UrzAdbEoSipcW9/xE0nW+pzv1/uAVSd8auBrWFx
-# WW9muQKX+4qtiJKbFMQ4o0IhfmEVHot7FFWEfIdfAYHiwfc1gMnEYK6C3TSc6U3v
-# 69CmZIjrH7PF/FSk6G1TO27jzl63bJf/jzxUiGY6rR6eWS39fhZM15a433YmheUG
-# wVjFOPOx7oMGDHgsO6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEICHh9VXVTYYVcpgPKyyoWiInrM3qdfLe07t3dEp+z/kJMA0GCSqG
+# SIb3DQEBAQUABIIBgIeC2fA8H0b2A/F9kl1MAigWUHwSDGBKpKY5cZ9wX61d98zh
+# QV/aZrnnkUbBaj9tbck3XM/i4kDh2pEMmLTc39k9YozSNHolTltOoWb7+7LqOE5B
+# 1B0AnNoTcFPEXSbEVU5j+vJAWKAIBTmHhY4UxHAl3a10i2TEWFM2sQRyHHOrtNkx
+# 9ncXntvsjlCYdIGDYKj24VNRn/S/oJ6jq18fCEJ9kWHhD8lUXf0WUqHl89etIZnB
+# ln6IaTLQapIvRBND+fMRfg9PX3Y3U/tAEU/DazUE7qQ2Esx5iyeFNvwofbH+NMZh
+# BiQlFa/Fixhwwv8rXUJ9cNBd9QjIE+WlBe3fsC/7mcyAjo/BPdDoKI3pFidHSSEz
+# Oh4+0/qjbqKu7HS08W3pifXzgaIFqXscBF7hH44qtreitiZ4uMqoXX01YGfmrJDr
+# DDr6/v7WiBg6LpS0YsaP40xfFEjsBAUwaND57WtVz7TGAhgEFC2Hb3BQGu4Azpcz
+# hbiQ4hcS5WFd4zT7jqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTExMDA0
-# MzdaMC8GCSqGSIb3DQEJBDEiBCC7pg7WveS5dsYxTu+HuKXdrLklbNj7JYcOVGR1
-# SFsc9zANBgkqhkiG9w0BAQEFAASCAgBN00YMTikXB5Mx92D0dg6gPUS18JB67K4i
-# kcJ37GXqxpTKmX4SCAThr7/r21kYhgRC51wSiD2k7AdFO/UrEi2q429Xzaxjif9C
-# S7cmwVl2gPqC0iiX9Lt/rNAdlb10HZGm6gMmAScbQ5GYVASPUo+rKMMW77mccM9S
-# mRzUWriPO9JkFNSCD33jG6YeT9j89IjTBVAdI8Ce+owQ5jnBoIsV45n64vNhjjN3
-# 85UL37Ug1GTWtN4dAnx/fJzKBYNNuAXc7IuCV5lNXTKD8F3ScYYdAAhapOklX0xB
-# YWvAY+y5DT4Sklo/lJKwGK7/2opGl4b2A+c/GxcLAHIToYYjP/q7lOEStMo7XHlp
-# TeZU0YPMkqAfEi6Ky1AePHlSPeZLtJA643puI5KKMyFUYf9YSau9WID7rijMB/l8
-# LyeG85b6XHI7rCNm6+wRA+QxQJYYYVxnJY32WMwb1Zd5jqCJb7fod/DyVlfF6GU6
-# mR68y1HGzkdNl7/kcJAfL3cdjq+/WbjVb91v4GmLmkqHufIif7mP3wIQgy+yGSOK
-# R+CFLEj0GWQh/kHRzjHm4MdqWiO4QO0nhMh/Sw3WBosyKaYVdf3aVUrUaTEA3kqD
-# oQf/yPO4eeSNDhxZpNQFqq/2RDQat1UzIv6gvk8jzyv2IygS7s7hurzfkJfXNgCB
-# tQRDi7H25A==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTExMDE0
+# NDlaMC8GCSqGSIb3DQEJBDEiBCBmcd2+sK9YTzPxZ9ShszqtrBot7rwOc6NnkuRr
+# ViWPGDANBgkqhkiG9w0BAQEFAASCAgCjXC4QP5vfqkZ1lNcfjGCxN9O3uVxNIPf5
+# exDJztFyt0KkK8Jy7zOSUA2qtlHci0s/G9HK72sck+CQoyZQHA7rzbS3Mh43bnuP
+# jvsIl1PLUaq9cbZQXHTceRmvjAsY1oGh3MHkuQD/EA6oBOHtBq56DU9CF0x3G/bh
+# MwNVG1NKKtq+kzZmwNMWLDhdroeOqbx6Q4Y3zS/2Tujx7l69UYkLe1vPMjBSH4nt
+# /7pccdcDCx8+x86h4JTMlrSBAuoPVoTsbEqBbD1rsu8VBW1NQzJ0gG6Ny+oSCem8
+# mlY3yd127u4A5egDIwEDIN8crUydyy3bpBSxY7lSaYZKqO/qPJ3cPWYGyv+wkuHZ
+# cKpg04BWHyAUPVMIchaSwz7zUgJivuNQPYDqM1wRW0Ws6eJglZxgW3Jl4rGUxHuO
+# Odei25jbFAfVkCFoG6ZLK5T6GJipiZvf/fd1QW2ETqo7ZTWjr+lzZfWhYCO0CPd2
+# jpK0QI196H70kJZyKw9uROhZD6wFIFnydwio2YkbUwM26dEi6NBrN5UknBmqq8Ez
+# SL54czXVo27e6hOrNzMuaStAdDw+eQNq9jlegQeg3wVxFcPQMWXZnmfW0MLiom6F
+# PS1uSVclAoBwVUsMXwWO/imhRU1GT/M6Za+WosDYBkPCRMoxvrLcKz6omKAKPHYK
+# df1RY+V1nQ==
 # SIG # End signature block
