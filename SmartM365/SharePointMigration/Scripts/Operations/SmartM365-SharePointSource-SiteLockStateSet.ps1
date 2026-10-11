@@ -6,7 +6,7 @@
     URL must exactly match the resolved site collection URL. WhatIfMode reads
     and reports the current state without changing it.
 .VERSION
-    1.0.0
+    1.0.1
 #>
 #Requires -Version 5.1
 [CmdletBinding()]
@@ -48,7 +48,7 @@ function Write-SourceLockLog {
 
 function Get-ExactSiteLockState {
     param([string]$Url)
-    $site = Get-SPSite -Identity $Url -ErrorAction Stop
+    $site = Get-SPSiteAdministration -Identity $Url -ErrorAction Stop
     if ($null -eq $site) { throw "Site collection was not found: $Url" }
     try {
         $actualUrl = ([uri][string]$site.Url).AbsoluteUri.TrimEnd('/')
@@ -56,7 +56,15 @@ function Get-ExactSiteLockState {
         if (-not [string]::Equals($actualUrl, $requestedUrl, [StringComparison]::OrdinalIgnoreCase)) {
             throw "Selected URL is not the exact site collection URL. Selected: $requestedUrl; collection: $actualUrl"
         }
-        return [string]$site.LockState
+        foreach ($property in @('ReadLocked', 'ReadOnly', 'WriteLocked')) {
+            if ($null -eq $site.PSObject.Properties[$property]) {
+                throw "Site administration object does not expose '$property'; lock state cannot be verified."
+            }
+        }
+        if ($site.ReadLocked) { return 'NoAccess' }
+        if ($site.ReadOnly) { return 'ReadOnly' }
+        if ($site.WriteLocked) { return 'NoAdditions' }
+        return 'Unlock'
     }
     finally {
         if ($site -is [IDisposable]) { $site.Dispose() }
@@ -71,10 +79,10 @@ try {
     if ($PSVersionTable.PSEdition -ne 'Desktop' -or $PSVersionTable.PSVersion.Major -ne 5) {
         throw 'Run this operation with Windows PowerShell 5.1 on a SharePoint Server farm host.'
     }
-    if (-not (Get-Command Get-SPSite -ErrorAction SilentlyContinue)) {
+    if (-not (Get-Command Get-SPSiteAdministration -ErrorAction SilentlyContinue)) {
         Add-PSSnapin Microsoft.SharePoint.PowerShell -ErrorAction Stop
     }
-    if (-not (Get-Command Get-SPSite -ErrorAction SilentlyContinue) -or
+    if (-not (Get-Command Get-SPSiteAdministration -ErrorAction SilentlyContinue) -or
         -not (Get-Command Set-SPSite -ErrorAction SilentlyContinue)) {
         throw 'SharePoint Server PowerShell cmdlets are unavailable on this host.'
     }
@@ -126,8 +134,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCArWCvmXXWwAgGd
-# Wozy/NvzKoB6hFX4z9aYlJjShZcmN6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAWqTeajxpqlvB6
+# QqG9wNBWRBiWuEa4LLNQTwe+cByBmKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -260,31 +268,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIC3zRefbufVkYuO0CUf30dF8c3QfF1ygVWVuXano2jbHMA0GCSqG
-# SIb3DQEBAQUABIIBgH0m9ZdijZm0ZITSXE/bT9qsbzsLd8Zf5IxNRriK5QmnKwNq
-# hbzqQp+42fwv5AP0UqpcWT3AggD2wHz1Mxhh2NLN7Oyoxxe/az5yb2O7C4n/QfO5
-# fXjgXkhEO8MURgm1Py1uIusJztnkdkeqlEuDE+VFNiaFxlKaVsGH5bD/cq5U0Mit
-# QR/FFc4a01CcCtUmmiwt7VFxvu5onk4kT0aa/UHewKD+iAHL0xTTtW8R6wLnLbZr
-# X+Mha4xYxCz8JZRAVlixW44O3sG3XSGBOnmd6MiU2FgBZQ7XJZ8CcfIKu/WoIh4Q
-# cNlzY6cagsbBEt+GHPafYbTPXFS40npHwfArFiyR/CQTGR/iOKADYEaRwh+bo1NR
-# yJ6we9Fqme7fReCDBq8l2EuJnE2/OldN42KM+GtroxwQwMgqptDiBUk4dEe94sld
-# bqn/Pjsf73/ORbE0Qdpqlb+iuixfTN+atcWi4gvHE7xNCg3R+UflrUrbHnh2yE6n
-# oFdUrk1RB3sSTbgDHKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIFNzpOdUwTloLRd2nGnJ9kW+LkWANkEqxc4Sg6s/chHOMA0GCSqG
+# SIb3DQEBAQUABIIBgEIfIvG8rF4n94VnRUbE5H95cWntV8qP2tL/LA3TMmZw3bBj
+# xTP+1DR3AlzrbtBb3d3sVQHFCvyiqWy9QyjtD/olG2KrHgE7EmHYqQBo4KM8cWJU
+# fiXTlO9vmWYMKqfKyWyYInvpj40/g1PT1aPGtl/9YQ1bvEb1xCS51ADaIS40esQQ
+# NsArvWXmNZ26jTqhKNj66QiobHQwuy56woainSrNF8Vi9EdtP9wV5OpsFCpu+LFq
+# 0juq3SnRoJrWIEfAN8iqadz1DMII2DRfpUsjf+KZfw23Yg4U93bS6oBwH+75BKt7
+# trF5XgKN/5w5WurUDa/6tusN6taHOpENhrDd0Au1JzybqoeZjQxknXmWTKyHDt22
+# vAb4UfPHunnzU0C5ajdMfSm/jfKAtFlE6glGqicRxZYFxSy62w0kOslJOrbI8Xiz
+# rxQS54QDwnMrOyOAtCvTQAuEe9PzNketTnRxUR/vgGYoYallSvK6/U2GtVWhe5co
+# 2rGYbnnaGLfwlGp1maGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTEwODU4
-# NDdaMC8GCSqGSIb3DQEJBDEiBCCiiFIk08NERI2GgjwYDbJRt0x8I5hPpnoof/PG
-# fRLy8jANBgkqhkiG9w0BAQEFAASCAgBlaA5G1aHN/mvJRMWAo0J8fwwfjcJVT1ES
-# YACNqKYwhSyMF5K2LRgTXsnGo/8qz2ar0uHBjPP5dN/UrV4vSucjQOTJUyMSBpjp
-# CJ9SewAaSGz2ulanXHocnEba5YzhtNxXQRRUs7Bpu3L/IvgopiNvprmOrjeDIrbH
-# 2IN53N7xmn4McZCX/DDGzsT25Be+Dr/5C7ujXuBt4MxsE2xjiwLTOmGa4PR17uEc
-# 1d3hkAPsyET5WXrDNM9pow0CxfBx589N/kzrAsZiTeJ/Zl+R7mUdcmwLxOVANgtc
-# CIVw4vD9U5CKxNmMQcKH7GWB/LysUDe+NpMet2T8Bi5bFSdI7VB0HCKUyMG1iDY1
-# I0r8ogEDjz4WGfnrOO5MoyZRvp9jX9fh9dzux2C0Z+jPVSmCIlobFtkd4/A9KWFo
-# pPfjM909t+yqeGqO8kcOyzXGBTaRY/x56cblis7NbTErs/dApbAQGQXEkEIcra8E
-# x/eD6QUg4K5ww1dZB9yCOmbm51DEq1rLuVGhthipNJ8XAVJFam49jtU5VIKZoMS9
-# KCkV2mVs8n6URkPtsIy7gIjiSgPRsXgNw6gP+w6SEKdtHCYDLZjWtlrY5uPQNWUN
-# IzA/m0SkXsGLRfDgWJJOxsgwPhbfRjPxJLGak1H1aOkqR3wPistlSRE5iwSf6287
-# nNUal49Ewg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTExMDA1
+# NDhaMC8GCSqGSIb3DQEJBDEiBCCM7Ff7R0Ut+8CG5iLIKTh6j+Gm/icNPehvSP9F
+# ftT7gjANBgkqhkiG9w0BAQEFAASCAgATumV12xtzM/6gkYetcE5CsQI6si1zCuRD
+# rL5lSsaPFHHPfEYHRJbTofTBDnH4uV4W/syNTQm4vibs65u+o9+tdZYFGN7N5w+Y
+# dzSYJJFNomQ8UgkqFzPyFyd37wuY9CUniXndSiYaDZGN9nS0OuxRoyFoy+fZMNdj
+# q6SPDNuaNAgyj8lR35B2B0T0XgXmjEwJywCrWJO9F8UlTIYKJgPlTibx+xI/qw3P
+# /YCT/9dP7prvMt3E7A8nLdPBzJQE0jIoniwq5Vtwi+tqfQbu1qsZPA58bR3AO1y3
+# eQf7fj/jHE49bLhyKDp2d8jpGh3vSCweZckdKj1YkB7HeJtE/ZFPTEk6H3yBX72t
+# gsjs8mniaULcBzPYg5EJCftFsE+O0wZtSDKoeDlnSG8x/w31fI8lXvE6baHuhpyo
+# 660nwAiibyT4+i7ogunKKaGaB9QWUIGYVElhP2SG3UsDqcsQpi5BHF8pPRdn9KPt
+# fV1ZWasLIuXn8xm2LB9H/Y4nJZL4derrNy6fo6XuVbjFMB/YTDXhb5VjVwzHCwO5
+# +g9CfT6E7tz+t0wlKmA5F+V6bUOziWPYkbPKjNRMtOclmt6SGOZ+uIo1g2M252FP
+# UGZbGEOP/lr6mLMSAZTOeUJtLIjb9dFUiR7FZ8yLu+DsBbi1GgCxmjlB2iBlkb5+
+# L/wqkHumwA==
 # SIG # End signature block
