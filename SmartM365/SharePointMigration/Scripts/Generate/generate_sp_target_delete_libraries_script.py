@@ -11,6 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "Export"))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "Compare"))
 from comparison_artifacts import find_artifact
+from generated_ps7_launcher import remove_ps7_launcher, write_ps7_launcher
 
 from export_libraries_to_delete_excel import build_delete_rows
 
@@ -574,6 +575,7 @@ def main():
     if not rows:
         if output_ps1.exists():
             output_ps1.unlink()
+        remove_ps7_launcher(output_ps1)
         print("Deletion script generation skipped.")
         print("Reason: no libraries with extra files were found in LibrarySummary.csv.")
         print(f"PowerShell file not created: {output_ps1}")
@@ -581,8 +583,10 @@ def main():
 
     content = SCRIPT_HEADER + render_library_array(rows) + SCRIPT_FOOTER
     output_ps1.write_text(content, encoding="utf-8")
+    launcher = write_ps7_launcher(output_ps1)
 
     print(f"PowerShell file created: {output_ps1}")
+    print(f"PowerShell 7 launcher created: {launcher}")
     print(f"Libraries embedded: {len(rows)}")
     return 0
 

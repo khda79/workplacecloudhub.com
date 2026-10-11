@@ -10,6 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "Export"))
 
 from export_folders_to_delete_excel import build_delete_folder_rows
+from generated_ps7_launcher import remove_ps7_launcher, write_ps7_launcher
 
 
 def print(*args, **kwargs):
@@ -479,6 +480,7 @@ def main():
     if not rows:
         if output_ps1.exists():
             output_ps1.unlink()
+        remove_ps7_launcher(output_ps1)
         print("Folder deletion script generation skipped.")
         print("Reason: no SPO folder path was found missing from the SP2019 source file paths.")
         print(f"PowerShell file not created: {output_ps1}")
@@ -487,8 +489,10 @@ def main():
     output_ps1.parent.mkdir(parents=True, exist_ok=True)
     content = SCRIPT_HEADER + render_folder_array(rows) + SCRIPT_FOOTER
     output_ps1.write_text(content, encoding="utf-8")
+    launcher = write_ps7_launcher(output_ps1)
 
     print(f"PowerShell file created: {output_ps1}")
+    print(f"PowerShell 7 launcher created: {launcher}")
     print(f"Folders embedded: {len(rows)}")
 
 

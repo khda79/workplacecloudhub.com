@@ -61,6 +61,13 @@ filename prefix, for example `Example-Summary.csv` and
 `Example-MissingInTarget.csv`. Excel and HTML reports use the same prefix.
 Generated PowerShell cleanup scripts retain the required `SmartM365-` start,
 for example `SmartM365-Example-SharePointTarget-ExtraFilesRemove-...ps1`.
+Each generated file, library or folder cleanup script has a same-name `.cmd`
+launcher. The launcher requires PowerShell 7.4 or later, shows the selected
+script and runs it with `-Execute`. The generated script then requires typing
+`DELETE` before deletion. The launcher does not pass `-Force` or user arguments.
+For an older generated `.ps1`, run
+`python Scripts/Generate/generated_ps7_launcher.py "<path-to-generated-ps1>"`
+from this directory to add its companion `.cmd`.
 Existing unprefixed comparison folders remain readable by exports and reports.
 
 ## Install, Start, and Update
@@ -1054,9 +1061,11 @@ typing `YES`; `-Force` is an explicit warned override after review.
 The shipped template retains `AllowDuplicateKeysForDeleteScript = $true` for
 compatibility. This permits generation despite duplicate keys; review
 `DuplicateKeys.csv` and prefer setting it to `$false` when ambiguity must block
-generation. Generation is not authorization to execute. Generated file cleanup
-defaults to dry-run; `-Execute` permanently deletes unless `-Recycle` is also
-chosen. Read every generated script and target before running it.
+generation. Generation is not authorization to execute. Running a generated
+`.ps1` directly defaults to dry-run; `-Execute` permanently deletes unless
+`-Recycle` is also chosen. Its companion `.cmd` runs with `-Execute` and requires
+typing `DELETE` before deletion. Read every generated script and target before
+running it.
 
 ## Offline Validation
 
