@@ -67,16 +67,17 @@ param([string]$SiteUrl, [string]$TenantAdminUrl, [string]$LockState)
     Remove-Item function:Read-Host -ErrorAction SilentlyContinue
 
     $global:SiteLockTestUrl = 'https://farm.example/sites/source'
-    $global:SiteLockTestId = [guid]::NewGuid()
     $global:SiteLockTestState = 'Unlock'
     $global:SiteLockTestSetCalls = 0
     function global:Get-SPSite {
         param([string]$Identity)
-        return [pscustomobject]@{ Url = $global:SiteLockTestUrl; ID = $global:SiteLockTestId }
+        return [pscustomobject]@{ Url = $global:SiteLockTestUrl }
     }
     function global:Get-SPSiteAdministration {
-        param([guid]$Identity)
-        if ($Identity -ne $global:SiteLockTestId) { throw 'Site administration lookup used the wrong site collection ID.' }
+        param($Identity)
+        if ($Identity -isnot [string] -or $Identity -cne $global:SiteLockTestUrl) {
+            throw 'Site administration lookup requires the exact site collection URL as a string.'
+        }
         return [pscustomobject]@{
             ReadLocked = ($global:SiteLockTestState -eq 'NoAccess')
             ReadOnly = ($global:SiteLockTestState -eq 'ReadOnly')
@@ -85,6 +86,7 @@ param([string]$SiteUrl, [string]$TenantAdminUrl, [string]$LockState)
     }
     function global:Set-SPSite {
         param([string]$Identity, [string]$LockState, [switch]$Confirm)
+        if ($Identity -cne $global:SiteLockTestUrl) { throw 'Set-SPSite used the wrong site collection URL.' }
         $global:SiteLockTestSetCalls++
         $global:SiteLockTestState = $LockState
     }
@@ -109,7 +111,7 @@ finally {
     Remove-Item function:Get-SPSite -ErrorAction SilentlyContinue
     Remove-Item function:Get-SPSiteAdministration -ErrorAction SilentlyContinue
     Remove-Item function:Set-SPSite -ErrorAction SilentlyContinue
-    Remove-Variable SiteLockTestAnswers,SiteLockTestUrl,SiteLockTestId,SiteLockTestState,SiteLockTestSetCalls -Scope Global -ErrorAction SilentlyContinue
+    Remove-Variable SiteLockTestAnswers,SiteLockTestUrl,SiteLockTestState,SiteLockTestSetCalls -Scope Global -ErrorAction SilentlyContinue
     $resolved = [IO.Path]::GetFullPath($fixture)
     $tempRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\') + '\'
     if ($resolved.StartsWith($tempRoot, [StringComparison]::OrdinalIgnoreCase) -and
@@ -121,8 +123,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBIrmGk8d/xpnFT
-# JHkAYjurV0OTEFejzXAIQbnR3rh0OKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDD2cwaxa7FRBnU
+# aYmdjniC23NifHIIHP1zFRHRQIEN2qCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -255,31 +257,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEICHh9VXVTYYVcpgPKyyoWiInrM3qdfLe07t3dEp+z/kJMA0GCSqG
-# SIb3DQEBAQUABIIBgIeC2fA8H0b2A/F9kl1MAigWUHwSDGBKpKY5cZ9wX61d98zh
-# QV/aZrnnkUbBaj9tbck3XM/i4kDh2pEMmLTc39k9YozSNHolTltOoWb7+7LqOE5B
-# 1B0AnNoTcFPEXSbEVU5j+vJAWKAIBTmHhY4UxHAl3a10i2TEWFM2sQRyHHOrtNkx
-# 9ncXntvsjlCYdIGDYKj24VNRn/S/oJ6jq18fCEJ9kWHhD8lUXf0WUqHl89etIZnB
-# ln6IaTLQapIvRBND+fMRfg9PX3Y3U/tAEU/DazUE7qQ2Esx5iyeFNvwofbH+NMZh
-# BiQlFa/Fixhwwv8rXUJ9cNBd9QjIE+WlBe3fsC/7mcyAjo/BPdDoKI3pFidHSSEz
-# Oh4+0/qjbqKu7HS08W3pifXzgaIFqXscBF7hH44qtreitiZ4uMqoXX01YGfmrJDr
-# DDr6/v7WiBg6LpS0YsaP40xfFEjsBAUwaND57WtVz7TGAhgEFC2Hb3BQGu4Azpcz
-# hbiQ4hcS5WFd4zT7jqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEILBo/T8C8w3JYxfIjdLdnAyJezjhy3adVjtxPzwZgAWDMA0GCSqG
+# SIb3DQEBAQUABIIBgI17A7fw00YiUbHWJZPnA88ITwC+aNG8+j2NKAgzatqsTf2L
+# feXqzDxrab4vVWe7OSBamX1Jb3BP8zi8f3zWjWROW05yP9O8PrTuywTITUNs18gn
+# QwFhIcBE6ihra8GGbpjBBtVDGNTIZOdvRMRA+OiOaReh/si4jJgodWEcVrMz9Lo5
+# u+7WowAXL/qkzirI6SVPTPqa9vfa53fKW28Abn2MTQkJsmadbL/J45ryK1AJp4Ud
+# 4MyuExXD2n03tzQoM/rjb8wSzaadzeUTYlIpmwoYC1N1+Tmwt1MrNlZ/ZQfVbdsb
+# 0YSBEqkTwE3FpyzoUdKYEsUnqyCF4BvUw/xHnPEP6mTIxBVEcE2YWMTmDzLL0FKS
+# +pfS2kKb1PLwGO+AtcRzQ62KchiFDsKLP8pSfby2DXqvog2C6NWnTUuD7h56IaZb
+# jTUc70k2soGOFw0utO79JLXDzRyGHoa5d40ZJ/VzxLcHI4t7uRAMX4r7CAVeIQ4E
+# 4MwYnAlVh8sjVdpQnKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTExMDE0
-# NDlaMC8GCSqGSIb3DQEJBDEiBCBmcd2+sK9YTzPxZ9ShszqtrBot7rwOc6NnkuRr
-# ViWPGDANBgkqhkiG9w0BAQEFAASCAgCjXC4QP5vfqkZ1lNcfjGCxN9O3uVxNIPf5
-# exDJztFyt0KkK8Jy7zOSUA2qtlHci0s/G9HK72sck+CQoyZQHA7rzbS3Mh43bnuP
-# jvsIl1PLUaq9cbZQXHTceRmvjAsY1oGh3MHkuQD/EA6oBOHtBq56DU9CF0x3G/bh
-# MwNVG1NKKtq+kzZmwNMWLDhdroeOqbx6Q4Y3zS/2Tujx7l69UYkLe1vPMjBSH4nt
-# /7pccdcDCx8+x86h4JTMlrSBAuoPVoTsbEqBbD1rsu8VBW1NQzJ0gG6Ny+oSCem8
-# mlY3yd127u4A5egDIwEDIN8crUydyy3bpBSxY7lSaYZKqO/qPJ3cPWYGyv+wkuHZ
-# cKpg04BWHyAUPVMIchaSwz7zUgJivuNQPYDqM1wRW0Ws6eJglZxgW3Jl4rGUxHuO
-# Odei25jbFAfVkCFoG6ZLK5T6GJipiZvf/fd1QW2ETqo7ZTWjr+lzZfWhYCO0CPd2
-# jpK0QI196H70kJZyKw9uROhZD6wFIFnydwio2YkbUwM26dEi6NBrN5UknBmqq8Ez
-# SL54czXVo27e6hOrNzMuaStAdDw+eQNq9jlegQeg3wVxFcPQMWXZnmfW0MLiom6F
-# PS1uSVclAoBwVUsMXwWO/imhRU1GT/M6Za+WosDYBkPCRMoxvrLcKz6omKAKPHYK
-# df1RY+V1nQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTExMDE4
+# NTFaMC8GCSqGSIb3DQEJBDEiBCDh7Yd4+i/3tzK42entqzj7FR9AE8NSp0KaqCsd
+# LgdMBDANBgkqhkiG9w0BAQEFAASCAgASniyvE6DZz6AqEpPvsNP03dUiYJ0+FcF9
+# 6YUrgQuXxNC/qAcuEHN3SpbadDJ6DqRY3ERM84z6DZLHgjHMVkd/8AZXnPTEAHQ9
+# WF9KNHlV6tlAaV7yTcZJX76L6jYAKsVaPFZrQugSQgsrRNskGDDb19+rOdYK7+F+
+# JVPFX5kAOe9G5fJDQ2HbT6kM7phWonQDexr8aR1N0u6IkGfvDtcbtkMdg+P/PgEo
+# dpGkmf8VjHcnAWVNnJnmPcseqx42/jjOTaRlw3gqM4kHwmwCfUKuqE56GbvG8N87
+# BpBTXhZdbuJWYqUf/TUogqG7mXazfV8yVw8JzYwTPFPhBcqtQloRzC3O8FtzLMwg
+# ybV7gAGiWddE/tfM49dHUhlR4cEtrUoFsZSIM4YQZQFSaCaGl4rEkV6LlJae0ad/
+# 2VTKBsz4ahGV86Nuf6pR3mdDUGimk0oiXTAYEY/UT0kw49c/DwSp1YzUmmIzgmMs
+# 069DZDoR+1mAK8Akz7aBS5gI//bI9ze/00wNb6777jB/piV8rhsbz15QysTmbCd6
+# LHAtjda0b8r5vMzgvySlWtnBegn9sMR3B/cDD2g1v1EsLflc4NdQsBHZmp5csowJ
+# yOdhgiCuvjrcTMz4+cl/n1Rkyb8pl5vs0xhzCOLZdW5qgzK5xauNAaEqCJdPxtqJ
+# Jsx1sXieUw==
 # SIG # End signature block

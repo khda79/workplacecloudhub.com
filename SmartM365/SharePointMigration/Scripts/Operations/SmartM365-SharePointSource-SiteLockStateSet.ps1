@@ -6,7 +6,7 @@
     URL must exactly match the resolved site collection URL. WhatIfMode reads
     and reports the current state without changing it.
 .VERSION
-    1.0.2
+    1.0.3
 #>
 #Requires -Version 5.1
 [CmdletBinding()]
@@ -46,7 +46,7 @@ function Write-SourceLockLog {
     Add-Content -LiteralPath $logPath -Value $line -Encoding UTF8
 }
 
-function Get-ExactSiteId {
+function Get-ExactSiteUrl {
     param([string]$Url)
     $site = Get-SPSite -Identity $Url -ErrorAction Stop
     if ($null -eq $site) { throw "Site collection was not found: $Url" }
@@ -59,10 +59,7 @@ function Get-ExactSiteId {
         if (-not [string]::Equals($actualUrl, $requestedUrl, [StringComparison]::OrdinalIgnoreCase)) {
             throw "Selected URL is not the exact site collection URL. Selected: $requestedUrl; collection: $actualUrl"
         }
-        if ($null -eq $site.ID -or [guid]$site.ID -eq [guid]::Empty) {
-            throw "Site collection ID was not returned for: $Url"
-        }
-        return [guid]$site.ID
+        return $actualUrl
     }
     finally {
         if ($site -is [IDisposable]) { $site.Dispose() }
@@ -70,9 +67,9 @@ function Get-ExactSiteId {
 }
 
 function Get-SiteLockState {
-    param([guid]$SiteId)
-    $site = Get-SPSiteAdministration -Identity $SiteId -ErrorAction Stop
-    if ($null -eq $site) { throw "Site administration object was not found for: $SiteId" }
+    param([string]$Url)
+    $site = Get-SPSiteAdministration -Identity $Url -ErrorAction Stop
+    if ($null -eq $site) { throw "Site administration object was not found for: $Url" }
     try {
         foreach ($property in @('ReadLocked', 'ReadOnly', 'WriteLocked')) {
             if ($null -eq $site.PSObject.Properties[$property]) {
@@ -106,8 +103,8 @@ try {
         throw 'SharePoint Server PowerShell cmdlets are unavailable on this host.'
     }
 
-    $siteId = Get-ExactSiteId -Url $SiteUrl
-    $before = Get-SiteLockState -SiteId $siteId
+    $exactSiteUrl = Get-ExactSiteUrl -Url $SiteUrl
+    $before = Get-SiteLockState -Url $exactSiteUrl
     $result.PreviousLockState = $before
     Write-SourceLockLog "Current lock state: $before"
     if ($before -ieq $LockState) {
@@ -122,8 +119,8 @@ try {
     }
     else {
         Write-SourceLockLog "Setting site collection lock state to '$LockState'."
-        Set-SPSite -Identity $SiteUrl -LockState $LockState -Confirm:$false -ErrorAction Stop
-        $after = Get-SiteLockState -SiteId $siteId
+        Set-SPSite -Identity $exactSiteUrl -LockState $LockState -Confirm:$false -ErrorAction Stop
+        $after = Get-SiteLockState -Url $exactSiteUrl
         $result.NewLockState = $after
         if ($after -ine $LockState) {
             throw "Lock state read-back failed. Requested '$LockState'; observed '$after'."
@@ -154,8 +151,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD0FwqsGyLuMsGC
-# QbIoBuAmiQdU2Vhy585TkshI5wFnLqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAI8grpfx9AtkSq
+# Tr4RdzVw409elVJH+ncK1dYXnQ0Lk6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -288,31 +285,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIK4BOv6u0jrPyFoX+zkdJpjNT1ZvWOBPKJueDaXNAVrhMA0GCSqG
-# SIb3DQEBAQUABIIBgCeS5lnNvIUBS/tbKL9W/7vMEY0jSc60zs6YsndbubxkghpK
-# 3c4sf06UiYtqW5oiJ6fkRlXZ5cB7XLRxjpcMNRUfgqpfOaG9MOAlTdV0amHur2Bg
-# re0DAM6X/lo6Y8WIDbkKdyw9IAAchTL4PoEZ5GG/mIjtU6AzHHEEZlYgWysh+n9V
-# kB/Iswb8KjmIl1Bu1ssA+HfEKYB/579cVs1YANMJinQa6fqoiejQiD64H3QK8HNQ
-# yFXog8nkYjyBWWRWU9exMZ7jzzkOegA2QFSIn6kXJUGIsBnsUvH8NRu+1o+J+8QZ
-# lmpj9KHg7AwQj1EtwHIAUAY4OlZ+iIM7G82l7ekUVXnGEzr7KOCMJMeXywGBAsgP
-# bqCeuxe3FsXL7jhWuio6pJ6t3kxq4YIpWoR9T4SUe+gOn8zwCLVHpcWcwHMrLNb+
-# BfVrcKmONbcpb8Ipn0zWHFBbugmvvZs1Hwm+p9ZQB+o1za9ciJ1ljFRsNMdQxiDP
-# DeL+uXTUqEBaO9z6YKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIIazriLMcgNpAaq/Z/AtzAU12Y0ef9nmyRNnzQuxXy1wMA0GCSqG
+# SIb3DQEBAQUABIIBgEHjzF8HIUBUNa56TfTuD8LfisPmXCGMGHPnvNSjef45h2tT
+# Yq5dkLYxxvVufL0cbHRkdeKD7xoiHc2oQCUSnjuAUo48pB9UI/8STL9yAnH9RVf5
+# Q5WBTCBdVfOP0lzud0i1+Q+Aygl8GDAFB4L7vXkXDoV3L47/SIR/0y9Yr8ZIF3e5
+# ISr8AyGd/yULxiUkTfwDEqeyZ0RAxop+D4NWiGSTWqG3hUaKDt1+wOD8OqLxgtYo
+# aiJjjc33whiNsnUi9VrlU+Ye7ftMJdjJ3ZAXo/p3Mob9ItbSmzL0Fyu5IQAFYIiu
+# JHRyamVDtyb+KZy/coUpWwvrLNsafMyB0ue+7K7pt3+ETcnTxpu4uazvkdRDfwAn
+# zds4YZhS4kcl+GAuywgfTpYvlDIeGJNTB5L2ZsDm0QMG4QnRHxRHzXRt/p/Db2Fn
+# gldYhpRRpFL+lwpOVEED6ffyAn7MTeu/McN4c6DTAsy1rUbWY6OIj2phrK7wytuF
+# rb9eeazXxV6t1GeoYqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTExMDE0
-# NDlaMC8GCSqGSIb3DQEJBDEiBCCP9WByVvp33/Ktp0nAa0/GIRdcCHEkMkEUUTvD
-# 7ozOmTANBgkqhkiG9w0BAQEFAASCAgC1WuKsc9e0HwIy1HbwGfnDA5zxkQPmI7Lm
-# /umMFyjF1k6gm0PpoxMViRQKC3BmmJ+tC5AkCyqdNohrr1BE1b+DsmXMMhVzX7Iu
-# wEZI3GRRqjlXuubmBqYynAn7P/eeYIjzfhUf/MdW4ii/fV36pRyPucJwWN6ywx0X
-# hHf24x676sR4l4FEgDZPGROuPjQJq4W51ITM1QK0+jBgTLHCT0eOT9fNDnhyGhUu
-# 0EPF+ZifqABhPgv5d36P9tsPh0gO09woOeBcQ4NWgJROpT2BgU4sKdRulRlwhRcx
-# bmSguSrnRbjnbChSrfnCYjLJs0PduP7pOGw3mOflaBQk07Y4UZNiBuSJkeKLfp/B
-# DkQ/xDnenEuOXiWapw48IeS0179bCAJ6bsjmLI17mdl5QISUCGg6y+W02AebwKII
-# 1CDR8xjgd1ev2yYhNTme20aHbp0Idv8hufs4p7eJHiafKC9Pyu3xpgd2mdFnc9pC
-# LI0BTFK+6ErsbD/q+arGgqAjwdRzSyqIyYBBHxM+rbzoh6s5cP+KgHzM+3gZPIBD
-# gQ7htkP6W3OwegjHcC7qkw1OkdOthwvoMMKijEIt6DGdSV61PPMO9xMPSyoesrMN
-# CklmBHo2q6Cg2DGnoheUgeViinIjl/EZNTwgAjZBAvvNfIRRoxZev7NEhB4CwX5y
-# m9+F63oL4Q==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTExMDE4
+# NTFaMC8GCSqGSIb3DQEJBDEiBCAsRNiyVEgpy+/mbk0FzxSnPLFWIdQLb2U6QvQ9
+# oceFUjANBgkqhkiG9w0BAQEFAASCAgBl8h/RiIPuDiMUAv06crWQLc5WTEAie/jd
+# GnPTni/8UjFKo4ejRRX1QN2lr9FwM8L4qSIj9mKrS5OXEHZyYD1ZH1tnriVaIr7Q
+# TkmonOOAWlpkYh+XfiedltB6D2pmKQ8Ht0E7PnfWizVfK3t8zdMXRSmvyX+byVXx
+# 8wi9uwiO03dd6fZGB+EhcfUsQJpUOyF3hSSLdw0S2w/NwqEJgFnHyKp4xGhlpTpj
+# 93VwR51indI+sVt9lz15lPc8Mi2ZxW9IjNDmPlHylQa1rqeeFyaUNW0hj3kUYemn
+# 4uw/NmaIg2gygZNCH4QeLhVxKOvJTSGAy/ITPi6oZrVlO5unNvZ0Qo66RPDZcwhd
+# CFMUc8fOcWBdvWW7mh1iOwgN3+b8Yfl2xCwcbttw9p8n6U+C3OhBBI9m87fSJN45
+# w1e0b3pMmxbzg2m5M5BNXqjf/Lq3jFfUSCJhG8aq79hLWh77Uj3KD8IOvD3gj2Rq
+# PHDmrxthpYp+CKJc7Ug26p2/vqN/J+r+lyH9Dg3/VZpjJP7x6c8nZCM8yPoMeBiP
+# PNI1nmHIp7rUC77o/+ohMj8rPxHlOAB0dDc2LeLc9JlUPxWc2RtcBZ4LssJnF3wt
+# JndqrLeASXDz/UfSXw1n1/7AYTiUhpxHPhD1NRlJs7/3PK3Xrp4/bL6uDv++/pkQ
+# zljMvjKtKw==
 # SIG # End signature block
