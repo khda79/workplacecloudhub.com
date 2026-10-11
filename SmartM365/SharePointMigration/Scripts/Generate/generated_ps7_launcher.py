@@ -23,7 +23,7 @@ if errorlevel 1 (
 )
 
 "%PWSH%" -NoProfile -Command "Write-Host ('[{0}] Script: {1}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $env:TARGET_SCRIPT); Write-Host ('[{0}] Mode: EXECUTE. The script will request explicit confirmation before deletion.' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'))"
-"%PWSH%" -NoProfile -File "%TARGET_SCRIPT%" -Execute
+"%PWSH%" -NoProfile -ExecutionPolicy Bypass -File "%TARGET_SCRIPT%" -Execute
 exit /b %ERRORLEVEL%
 '''
 

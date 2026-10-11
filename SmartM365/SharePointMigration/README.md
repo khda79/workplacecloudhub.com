@@ -63,8 +63,9 @@ Generated PowerShell cleanup scripts retain the required `SmartM365-` start,
 for example `SmartM365-Example-SharePointTarget-ExtraFilesRemove-...ps1`.
 Each generated file, library or folder cleanup script has a same-name `.cmd`
 launcher. The launcher requires PowerShell 7.4 or later, shows the selected
-script and runs it with `-Execute`. The generated script then requires typing
-`DELETE` before deletion. The launcher does not pass `-Force` or user arguments.
+script and runs it with process-only `ExecutionPolicy Bypass` and `-Execute`.
+The generated script still requires typing `DELETE` before deletion. The
+launcher does not pass `-Force` or user arguments.
 For an older generated `.ps1`, run
 `python Scripts/Generate/generated_ps7_launcher.py "<path-to-generated-ps1>"`
 from this directory to add its companion `.cmd`.

@@ -51,7 +51,7 @@ class GeneratedLauncherTests(unittest.TestCase):
                 self.assertTrue(launcher.is_file())
                 content = launcher.read_text(encoding="ascii")
                 self.assertIn("%~dpn0.ps1", content)
-                self.assertIn('"%TARGET_SCRIPT%" -Execute', content)
+                self.assertIn('-ExecutionPolicy Bypass -File "%TARGET_SCRIPT%" -Execute', content)
                 self.assertNotIn("-Force", content)
                 self.assertNotIn("%*", content)
 
@@ -80,12 +80,14 @@ class GeneratedLauncherTests(unittest.TestCase):
             )
             self.assertEqual(backfill.returncode, 0, backfill.stdout + backfill.stderr)
             launcher = script.with_suffix(".cmd")
+            restrictive_env = os.environ.copy()
+            restrictive_env["PSExecutionPolicyPreference"] = "AllSigned"
             denied = subprocess.run(["cmd.exe", "/d", "/c", str(launcher)], input="NO\n",
-                                    capture_output=True, text=True, timeout=30)
+                                    capture_output=True, text=True, timeout=30, env=restrictive_env)
             self.assertEqual(denied.returncode, 3, denied.stdout + denied.stderr)
             self.assertFalse(marker.exists())
             accepted = subprocess.run(["cmd.exe", "/d", "/c", str(launcher)], input="DELETE\n",
-                                      capture_output=True, text=True, timeout=30)
+                                      capture_output=True, text=True, timeout=30, env=restrictive_env)
             self.assertEqual(accepted.returncode, 0, accepted.stdout + accepted.stderr)
             self.assertEqual(marker.read_text(encoding="utf-8").strip(), "done")
 
