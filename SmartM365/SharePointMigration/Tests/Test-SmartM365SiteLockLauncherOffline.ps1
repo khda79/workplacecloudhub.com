@@ -68,10 +68,14 @@ param([string]$SiteUrl, [string]$TenantAdminUrl, [string]$LockState)
 
     $global:SiteLockTestUrl = 'https://farm.example/sites/source'
     $global:SiteLockTestState = 'Unlock'
+    $global:SiteLockTestAdminState = 'Unlock'
     $global:SiteLockTestSetCalls = 0
     function global:Get-SPSite {
         param([string]$Identity)
-        return [pscustomobject]@{ Url = $global:SiteLockTestUrl }
+        return [pscustomobject]@{
+            Url = $global:SiteLockTestUrl
+            ReadOnly = ($global:SiteLockTestState -eq 'ReadOnly')
+        }
     }
     function global:Get-SPSiteAdministration {
         param($Identity)
@@ -79,9 +83,9 @@ param([string]$SiteUrl, [string]$TenantAdminUrl, [string]$LockState)
             throw 'Site administration lookup requires the exact site collection URL as a string.'
         }
         return [pscustomobject]@{
-            ReadLocked = ($global:SiteLockTestState -eq 'NoAccess')
-            ReadOnly = ($global:SiteLockTestState -eq 'ReadOnly')
-            WriteLocked = ($global:SiteLockTestState -eq 'NoAdditions')
+            ReadLocked = ($global:SiteLockTestAdminState -eq 'NoAccess')
+            ReadOnly = ($global:SiteLockTestAdminState -eq 'ReadOnly')
+            WriteLocked = ($global:SiteLockTestAdminState -eq 'NoAdditions')
         }
     }
     function global:Set-SPSite {
@@ -100,9 +104,15 @@ param([string]$SiteUrl, [string]$TenantAdminUrl, [string]$LockState)
     Assert-Test ($global:SiteLockTestSetCalls -eq 0) 'WhatIfMode changed the mocked site.'
     & $sourceOperation -SiteUrl $global:SiteLockTestUrl -LockState ReadOnly 6>&1 | Out-Null
     Assert-Test ($global:SiteLockTestSetCalls -eq 1 -and $global:SiteLockTestState -eq 'ReadOnly') 'Exact site collection did not pass the mocked operation and read-back.'
+    Assert-Test ($global:SiteLockTestAdminState -eq 'Unlock') 'The administration mock did not preserve the stale state.'
+    & $sourceOperation -SiteUrl $global:SiteLockTestUrl -LockState ReadOnly 6>&1 | Out-Null
+    Assert-Test ($global:SiteLockTestSetCalls -eq 1) 'An already read-only site was changed again.'
     $reports = @(Get-ChildItem -LiteralPath (Join-Path $operations 'Output') -Filter '*.csv')
-    Assert-Test ($reports.Count -eq 3) 'Expected one CSV for each source operation attempt.'
+    Assert-Test ($reports.Count -eq 4) 'Expected one CSV for each source operation attempt.'
     Assert-Test (@($reports | ForEach-Object { (Import-Csv -LiteralPath $_.FullName -Delimiter ';').Status }) -contains 'Success') 'Successful read-back was not recorded.'
+    Assert-Test (@($reports | ForEach-Object { (Import-Csv -LiteralPath $_.FullName -Delimiter ';').Status }) -contains 'AlreadySet') 'An already read-only site was not recognized.'
+    Assert-Test (@(Get-ChildItem -LiteralPath (Join-Path $operations 'logs') -Filter '*.log' |
+        Select-String -Pattern 'AdminReadOnly=False; AdminWriteLocked=False; SiteReadOnly=True').Count -gt 0) 'Divergent lock indicators were not logged.'
 
     Write-Host 'Site lock launcher offline tests passed.'
 }
@@ -111,7 +121,7 @@ finally {
     Remove-Item function:Get-SPSite -ErrorAction SilentlyContinue
     Remove-Item function:Get-SPSiteAdministration -ErrorAction SilentlyContinue
     Remove-Item function:Set-SPSite -ErrorAction SilentlyContinue
-    Remove-Variable SiteLockTestAnswers,SiteLockTestUrl,SiteLockTestState,SiteLockTestSetCalls -Scope Global -ErrorAction SilentlyContinue
+    Remove-Variable SiteLockTestAnswers,SiteLockTestUrl,SiteLockTestState,SiteLockTestAdminState,SiteLockTestSetCalls -Scope Global -ErrorAction SilentlyContinue
     $resolved = [IO.Path]::GetFullPath($fixture)
     $tempRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\') + '\'
     if ($resolved.StartsWith($tempRoot, [StringComparison]::OrdinalIgnoreCase) -and
@@ -123,8 +133,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDD2cwaxa7FRBnU
-# aYmdjniC23NifHIIHP1zFRHRQIEN2qCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAkjO80KkGP+qKe
+# k/Xo9W5JHHJVGm9Al6JhbXjy2H95yKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -257,31 +267,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEILBo/T8C8w3JYxfIjdLdnAyJezjhy3adVjtxPzwZgAWDMA0GCSqG
-# SIb3DQEBAQUABIIBgI17A7fw00YiUbHWJZPnA88ITwC+aNG8+j2NKAgzatqsTf2L
-# feXqzDxrab4vVWe7OSBamX1Jb3BP8zi8f3zWjWROW05yP9O8PrTuywTITUNs18gn
-# QwFhIcBE6ihra8GGbpjBBtVDGNTIZOdvRMRA+OiOaReh/si4jJgodWEcVrMz9Lo5
-# u+7WowAXL/qkzirI6SVPTPqa9vfa53fKW28Abn2MTQkJsmadbL/J45ryK1AJp4Ud
-# 4MyuExXD2n03tzQoM/rjb8wSzaadzeUTYlIpmwoYC1N1+Tmwt1MrNlZ/ZQfVbdsb
-# 0YSBEqkTwE3FpyzoUdKYEsUnqyCF4BvUw/xHnPEP6mTIxBVEcE2YWMTmDzLL0FKS
-# +pfS2kKb1PLwGO+AtcRzQ62KchiFDsKLP8pSfby2DXqvog2C6NWnTUuD7h56IaZb
-# jTUc70k2soGOFw0utO79JLXDzRyGHoa5d40ZJ/VzxLcHI4t7uRAMX4r7CAVeIQ4E
-# 4MwYnAlVh8sjVdpQnKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIENOKewvkqtEwULb0JkOVez/1HL0TGRt68BKlH9VZEmGMA0GCSqG
+# SIb3DQEBAQUABIIBgItMAKlSXNi+yDZygC8UCX7tXgvzKA06UUVEBaT+bJNqyM5x
+# ELIBHEvssHO24Ax01azOLSUiIFrHUluVFwi/99qi7GlUEvzXCY7mSom3Zd3SAIrt
+# Iz1wgu/6HdDyEqkRQ0w+Wq8+Ipavxt9meygeCH9VI8G+eAHTV5NtZQgC+xC/3P8a
+# OFxpkTUBKWmdIsuJQtiOyCbJi/Th8wwHszhfPY/YeAmHqX673q1eH4W7TEkNnwUf
+# J6VAEaF+3AW0vWmgL2wLhQp9Et70DpaBgwO80X0y3xYero+i/2TSnoQobJJIn/U7
+# h5Q9oMlsx2mgw6CMVbxphersKIBZrBrFRAQe5qPaNQh6a27XXNmY7rrxKyvOYNBu
+# mEzNSoueYAGmaQTjHUV4QDHGC4bF/wWCQDrKDbRBs7i+3xGfnEZPfD42sdXKxg8O
+# 4lC0UE4FowFpHTtpLmknrNIGYtzb8y/PQ7ui9RKHDi3yCJxQ5ARKkI0zWN2BWyqq
+# VM9gcWnNb3O4rKaxlaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTExMDE4
-# NTFaMC8GCSqGSIb3DQEJBDEiBCDh7Yd4+i/3tzK42entqzj7FR9AE8NSp0KaqCsd
-# LgdMBDANBgkqhkiG9w0BAQEFAASCAgASniyvE6DZz6AqEpPvsNP03dUiYJ0+FcF9
-# 6YUrgQuXxNC/qAcuEHN3SpbadDJ6DqRY3ERM84z6DZLHgjHMVkd/8AZXnPTEAHQ9
-# WF9KNHlV6tlAaV7yTcZJX76L6jYAKsVaPFZrQugSQgsrRNskGDDb19+rOdYK7+F+
-# JVPFX5kAOe9G5fJDQ2HbT6kM7phWonQDexr8aR1N0u6IkGfvDtcbtkMdg+P/PgEo
-# dpGkmf8VjHcnAWVNnJnmPcseqx42/jjOTaRlw3gqM4kHwmwCfUKuqE56GbvG8N87
-# BpBTXhZdbuJWYqUf/TUogqG7mXazfV8yVw8JzYwTPFPhBcqtQloRzC3O8FtzLMwg
-# ybV7gAGiWddE/tfM49dHUhlR4cEtrUoFsZSIM4YQZQFSaCaGl4rEkV6LlJae0ad/
-# 2VTKBsz4ahGV86Nuf6pR3mdDUGimk0oiXTAYEY/UT0kw49c/DwSp1YzUmmIzgmMs
-# 069DZDoR+1mAK8Akz7aBS5gI//bI9ze/00wNb6777jB/piV8rhsbz15QysTmbCd6
-# LHAtjda0b8r5vMzgvySlWtnBegn9sMR3B/cDD2g1v1EsLflc4NdQsBHZmp5csowJ
-# yOdhgiCuvjrcTMz4+cl/n1Rkyb8pl5vs0xhzCOLZdW5qgzK5xauNAaEqCJdPxtqJ
-# Jsx1sXieUw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTExMDI0
+# NTBaMC8GCSqGSIb3DQEJBDEiBCCiMwHWUEXZVChkh8qpXx6VSU6VH7LcryCXJvM3
+# Y/UjZjANBgkqhkiG9w0BAQEFAASCAgBTof/8Mtgh5YblLnBoIJk6QmSP/Mhb9YST
+# ckRzt+FbaNDYsZPLravzzcDRLfjCchLhB7LMFcUCaB0l/SgUVZ1Qt0B9ZIeDD/nm
+# xKfoME5/5N9tNF0Ph/s0ex3PX2tG0tk8L7JoEcMKnh5V3unsdpZexFAh5o1+6pHR
+# yDqdikMG93y65WLooP/LD2LtHgKg3bR30ymLHRFw7TdJSysQN+CJj5TJlsManp7v
+# zGK7pHU9CeN/UzG0wjoQkCSZPhxXkbEdoiIqsbvpOZ43/DqV5UyotdW22768Y3qv
+# y4TatgkUkQHXzuD4N/2QlfpqQ2Pc0syB8bRMb/YAsyLsZtbsOnrY3DAk2lPFDyxU
+# x3z9JlU5Ye/mXdmpSWUE9RYAJlkxE2LiLCMKIlZkslLsAlM8E2wyPPxALES/+bu8
+# V+SnmWuNSKVLyWRlX/jVyIJndvZDtULJ9ON/qrnDRs6DraR2XV5MLne2wgz+c//C
+# gnJPTWCrd+6w6Ydiaf1XNCoUOg0e2JfASoeyUwmX0rXDB55R18WkD07JgHMbUkMp
+# lGL6L2PL35EJ3vTw0CsVcDhdJK1dvqKdQCzjvqiNc/OO5S2Q99TmJVC4hJh70YvF
+# l4ezyihmn9+qcLIBA2HdGs31e4FO5bd0O2ztKH3gXCehZFyhyAftDZwSz3EBS5K3
+# A3E8z9jiyg==
 # SIG # End signature block
