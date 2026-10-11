@@ -235,6 +235,19 @@ missing fields and extra fields are rejected rather than silently narrowing the
 scope. Review all mappings before scans or comparisons; URL overrides must use
 the same intended scope.
 
+To change a site collection lock state, run
+`Start-SmartM365-SharePointMigration-SiteLockState.cmd` from the toolkit root.
+Select a migration, a mapped Source or Destination URL, then `ReadOnly`,
+`Unlock`, or `NoAccess`. The launcher shows the exact URL and requires typing
+`EXECUTE` before it calls the operation. All other answers cancel. A
+SharePoint Online selection uses `Set-SPOSite` and the selected side's
+`TenantAdminUrl`. A SharePoint Server selection uses `Set-SPSite` and must run
+on a server in that farm. The server operation refuses a mapped subsite URL
+unless it is exactly the site collection URL, because the lock applies to the
+whole collection. Use `-PreviewOnly` for a menu and configuration check that
+does not contact SharePoint. The operations record their result under
+`Scripts/Operations/logs` and `Scripts/Operations/Output`.
+
 ```text
 https://source.workplacecloudhub.com/SOURCE https://workplacecloudhub.sharepoint.com/sites/Example
 ```
@@ -1132,6 +1145,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Tests\Test-SmartM365Sh
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Tests\Test-SmartM365ShareGatePilot.ps1
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Tests\Test-SmartM365ShareGatePathCorrectionPilot.ps1
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Tests\Test-SmartM365SharePointTransientOffline.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Tests\Test-SmartM365SiteLockLauncherOffline.ps1
 python -B -m unittest discover -s .\Tests -p test_comparisons.py
 ```
 
