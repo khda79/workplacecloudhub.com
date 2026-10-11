@@ -279,12 +279,6 @@ function Write-DeleteStatus {
         'WouldDelete' {
             Write-Host ("DRY RUN Would delete library: {0} | {1}" -f $WebUrl, $TargetLibraryTitle) -ForegroundColor DarkCyan
         }
-        'ProtectedHomePage' {
-            Write-Host ("SKIP Library contains Home.aspx: {0} | {1}" -f $WebUrl, $TargetLibraryTitle) -ForegroundColor Yellow
-        }
-        'ProtectedCheckFailed' {
-            Write-Warning ("SKIP Cannot verify Home.aspx protection for {0} | {1}: {2}" -f $WebUrl, $TargetLibraryTitle, $Message)
-        }
         'SkippedByShouldProcess' {
             Write-Host ("SKIP ShouldProcess: {0} | {1}" -f $WebUrl, $TargetLibraryTitle) -ForegroundColor Yellow
         }
@@ -292,14 +286,6 @@ function Write-DeleteStatus {
             Write-Warning ("FAILED {0} | {1}: {2}" -f $WebUrl, $TargetLibraryTitle, $Message)
         }
     }
-}
-
-function Test-LibraryContainsHomePage {
-    param($Connection, $List)
-
-    $query = "<View Scope='RecursiveAll'><ViewFields><FieldRef Name='FileLeafRef'/></ViewFields><Query><Where><Eq><FieldRef Name='FileLeafRef'/><Value Type='Text'>Home.aspx</Value></Eq></Where></Query><RowLimit>1</RowLimit></View>"
-    $matches = @(Get-PnPListItem -List $List.Id -Query $query -Connection $Connection -ErrorAction Stop)
-    return ($matches.Count -gt 0)
 }
 
 function Find-TargetList {
@@ -434,37 +420,21 @@ foreach ($group in ($LibrariesToDelete | Group-Object TargetWebUrl)) {
             $actionStatus = $match.Status
         }
         elseif ($Execute) {
-            try {
-                $containsHomePage = Test-LibraryContainsHomePage -Connection $connection -List $list
-            }
-            catch {
-                $actionStatus = 'ProtectedCheckFailed'
-                $message = $_.Exception.Message
-            }
-
-            if ($actionStatus -ne 'ProtectedCheckFailed') {
-                if ($containsHomePage) {
-                    $actionStatus = 'ProtectedHomePage'
-                    $message = 'Library contains Home.aspx; no deletion was attempted.'
+            $targetName = "{0} | {1}" -f $webUrl, $list.Title
+            $operation = if ($Recycle) { 'Recycle SharePoint Online document library' } else { 'Permanently delete SharePoint Online document library' }
+            if ($PSCmdlet.ShouldProcess($targetName, $operation)) {
+                try {
+                    Remove-PnPList -Identity $list.Id -Recycle:$Recycle -Force -Connection $connection -ErrorAction Stop
+                    $actionStatus = if ($Recycle) { 'Recycled' } else { 'PermanentlyDeleted' }
+                    $message = if ($Recycle) { 'Library moved to recycle bin.' } else { 'Library permanently deleted.' }
                 }
-                else {
-                    $targetName = "{0} | {1}" -f $webUrl, $list.Title
-                    $operation = if ($Recycle) { 'Recycle SharePoint Online document library' } else { 'Permanently delete SharePoint Online document library' }
-                    if ($PSCmdlet.ShouldProcess($targetName, $operation)) {
-                        try {
-                            Remove-PnPList -Identity $list.Id -Recycle:$Recycle -Force -Connection $connection -ErrorAction Stop
-                            $actionStatus = if ($Recycle) { 'Recycled' } else { 'PermanentlyDeleted' }
-                            $message = if ($Recycle) { 'Library moved to recycle bin.' } else { 'Library permanently deleted.' }
-                        }
-                        catch {
-                            $actionStatus = 'DeleteFailed'
-                            $message = $_.Exception.Message
-                        }
-                    }
-                    else {
-                        $actionStatus = 'SkippedByShouldProcess'
-                    }
+                catch {
+                    $actionStatus = 'DeleteFailed'
+                    $message = $_.Exception.Message
                 }
+            }
+            else {
+                $actionStatus = 'SkippedByShouldProcess'
             }
         }
         else {

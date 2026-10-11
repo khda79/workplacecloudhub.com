@@ -65,13 +65,13 @@ Each generated file, library or folder cleanup script has a same-name `.cmd`
 launcher. It requires PowerShell 7.4 or later and runs with process-only
 `ExecutionPolicy Bypass`, `-Execute`, and `-Recycle`; the script requires typing
 `RECYCLE`. Generated scripts also recycle by default when run directly with
-`-Execute`. File cleanup skips every `Home.aspx`; library cleanup skips any
-library containing `Home.aspx` and fails closed if that check cannot complete.
+`-Execute`. Only file-by-file cleanup skips `Home.aspx`; library cleanup does
+not filter libraries by their file names.
 The launcher does not pass `-Force` or user arguments. Older generated `.ps1`
 files must be regenerated with the current toolkit: adding a new `.cmd` to an
 old script will fail the launcher safety check.
 The direct `Scripts/Operations/SmartM365-SharePointTarget-ExtraLibrariesRemove.ps1`
-operation uses the same recycle default and Home.aspx library guard.
+operation uses the same recycle default.
 Existing unprefixed comparison folders remain readable by exports and reports.
 
 ## Install, Start, and Update

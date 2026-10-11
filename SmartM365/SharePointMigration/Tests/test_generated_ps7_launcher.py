@@ -15,26 +15,21 @@ GENERATE = ROOT / "Scripts" / "Generate"
 
 class GeneratedLauncherTests(unittest.TestCase):
     @unittest.skipUnless(os.name == "nt", "PowerShell 7 on Windows")
-    def test_direct_library_operation_has_recycle_default_and_home_guard(self):
+    def test_direct_library_operation_has_recycle_default_without_file_guard(self):
         operation = ROOT / "Scripts" / "Operations" / "SmartM365-SharePointTarget-ExtraLibrariesRemove.ps1"
         content = operation.read_text(encoding="utf-8")
         self.assertIn("[switch]$Recycle = $true", content)
         self.assertIn("Remove-PnPList -Identity $list.Id -Recycle:$Recycle", content)
-        self.assertIn("$actionStatus = 'ProtectedHomePage'", content)
-        self.assertIn("$actionStatus = 'ProtectedCheckFailed'", content)
+        self.assertNotIn("Test-LibraryContainsHomePage", content)
+        self.assertNotIn("ProtectedHomePage", content)
         environment = os.environ.copy()
         environment["LIBRARY_OPERATION"] = str(operation)
         parsed = subprocess.run(
             ["pwsh.exe", "-NoProfile", "-Command", r"""
 $tokens = $null
 $errors = $null
-$ast = [System.Management.Automation.Language.Parser]::ParseFile($env:LIBRARY_OPERATION, [ref]$tokens, [ref]$errors)
+[void][System.Management.Automation.Language.Parser]::ParseFile($env:LIBRARY_OPERATION, [ref]$tokens, [ref]$errors)
 if ($errors.Count -gt 0) { $errors | ForEach-Object { Write-Error $_.Message }; exit 1 }
-$function = $ast.Find({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Test-LibraryContainsHomePage' }, $true)
-if ($null -eq $function) { throw 'Library Home.aspx guard is missing.' }
-Invoke-Expression $function.Extent.Text
-function Get-PnPListItem { param($List, $Query, $Connection, $ErrorAction) [pscustomobject]@{ Id = 1 } }
-if (-not (Test-LibraryContainsHomePage -Connection $null -List ([pscustomobject]@{ Id = [guid]::NewGuid() }))) { throw 'Home.aspx was not protected.' }
 exit 0
 """],
             capture_output=True, text=True, env=environment, timeout=30,
@@ -142,37 +137,8 @@ exit 0
                         self.assertEqual(probe.returncode, 0, probe.stdout + probe.stderr)
                 if kind == "libraries":
                     self.assertIn("Remove-PnPList -Identity $list.Id -Recycle:$Recycle", generated)
-                    self.assertIn("Test-LibraryContainsHomePage", generated)
-                    if os.name == "nt":
-                        environment = os.environ.copy()
-                        environment["GENERATED_PS1"] = str(script)
-                        probe = subprocess.run(
-                            ["pwsh.exe", "-NoProfile", "-Command", r"""
-$tokens = $null
-$errors = $null
-$ast = [System.Management.Automation.Language.Parser]::ParseFile($env:GENERATED_PS1, [ref]$tokens, [ref]$errors)
-$function = $ast.Find({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Test-LibraryContainsHomePage' }, $true)
-if ($null -eq $function) { throw 'Library Home.aspx guard is missing.' }
-Invoke-Expression $function.Extent.Text
-$script:ProbeMode = 'Found'
-function Get-PnPListItem {
-    param($List, $Query, $Connection, $ErrorAction)
-    if ($Query -notmatch 'FileLeafRef' -or $Query -notmatch 'Home.aspx') { throw 'Unsafe library query.' }
-    if ($script:ProbeMode -eq 'Found') { return [pscustomobject]@{ Id = 1 } }
-    if ($script:ProbeMode -eq 'Error') { throw 'Library query failed.' }
-}
-$list = [pscustomobject]@{ Id = [guid]::NewGuid() }
-if (-not (Test-LibraryContainsHomePage -Connection $null -List $list)) { throw 'Existing Home.aspx was missed.' }
-$script:ProbeMode = 'Missing'
-if (Test-LibraryContainsHomePage -Connection $null -List $list) { throw 'Absent Home.aspx was reported present.' }
-$script:ProbeMode = 'Error'
-try { Test-LibraryContainsHomePage -Connection $null -List $list; throw 'Query error was swallowed.' }
-catch { if ($_.Exception.Message -eq 'Query error was swallowed.') { throw } }
-exit 0
-"""],
-                            capture_output=True, text=True, env=environment, timeout=30,
-                        )
-                        self.assertEqual(probe.returncode, 0, probe.stdout + probe.stderr)
+                    self.assertNotIn("Test-LibraryContainsHomePage", generated)
+                    self.assertNotIn("ProtectedHomePage", generated)
 
                 write_csv(False)
                 generate()

@@ -9,8 +9,7 @@
     interactive PnP authentication only.
 
     By default, this script is a dry run. Add -Execute to recycle the libraries.
-    Use -Recycle:$false only for an explicit permanent deletion. Libraries
-    containing Home.aspx are always skipped.
+    Use -Recycle:$false only for an explicit permanent deletion.
 
 .EXAMPLE
     .\SmartM365-SharePointTarget-ExtraLibrariesRemove.ps1 -ComparisonDirectory ".\Migrations\MyMigration\comparisons\files\Migration-files-20260603-214544"
@@ -233,14 +232,6 @@ function Connect-InteractiveOnly {
     }
 
     Connect-PnPOnline @parameters
-}
-
-function Test-LibraryContainsHomePage {
-    param($Connection, $List)
-
-    $query = "<View Scope='RecursiveAll'><ViewFields><FieldRef Name='FileLeafRef'/></ViewFields><Query><Where><Eq><FieldRef Name='FileLeafRef'/><Value Type='Text'>Home.aspx</Value></Eq></Where></Query><RowLimit>1</RowLimit></View>"
-    $matches = @(Get-PnPListItem -List $List.Id -Query $query -Connection $Connection -ErrorAction Stop)
-    return ($matches.Count -gt 0)
 }
 
 function Find-TargetList {
@@ -469,40 +460,22 @@ foreach ($group in ($items | Group-Object TargetWebUrl)) {
             $actionStatus = $match.Status
         }
         elseif ($Execute) {
-            try {
-                $containsHomePage = Test-LibraryContainsHomePage -Connection $connection -List $list
-            }
-            catch {
-                $actionStatus = 'ProtectedCheckFailed'
-                $message = $_.Exception.Message
-                Write-Warning ("Cannot verify Home.aspx protection for library '{0}' in web '{1}': {2}" -f $list.Title, $webUrl, $message)
-            }
-
-            if ($actionStatus -ne 'ProtectedCheckFailed') {
-                if ($containsHomePage) {
-                    $actionStatus = 'ProtectedHomePage'
-                    $message = 'Library contains Home.aspx; no deletion was attempted.'
-                    Write-Warning ("Skipping library containing Home.aspx: {0} | {1}" -f $webUrl, $list.Title)
+            $targetName = "{0} | {1}" -f $webUrl, $list.Title
+            $operation = if ($Recycle) { 'Recycle SharePoint Online document library' } else { 'Permanently delete SharePoint Online document library' }
+            if ($PSCmdlet.ShouldProcess($targetName, $operation)) {
+                try {
+                    Remove-PnPList -Identity $list.Id -Recycle:$Recycle -Force -Connection $connection -ErrorAction Stop
+                    $actionStatus = if ($Recycle) { 'Recycled' } else { 'PermanentlyDeleted' }
+                    $message = if ($Recycle) { 'Library moved to recycle bin.' } else { 'Library permanently deleted.' }
                 }
-                else {
-                    $targetName = "{0} | {1}" -f $webUrl, $list.Title
-                    $operation = if ($Recycle) { 'Recycle SharePoint Online document library' } else { 'Permanently delete SharePoint Online document library' }
-                    if ($PSCmdlet.ShouldProcess($targetName, $operation)) {
-                        try {
-                            Remove-PnPList -Identity $list.Id -Recycle:$Recycle -Force -Connection $connection -ErrorAction Stop
-                            $actionStatus = if ($Recycle) { 'Recycled' } else { 'PermanentlyDeleted' }
-                            $message = if ($Recycle) { 'Library moved to recycle bin.' } else { 'Library permanently deleted.' }
-                        }
-                        catch {
-                            $actionStatus = 'DeleteFailed'
-                            $message = $_.Exception.Message
-                            Write-Warning ("Failed to delete library '{0}' in web '{1}': {2}" -f $list.Title, $webUrl, $_.Exception.Message)
-                        }
-                    }
-                    else {
-                        $actionStatus = 'SkippedByShouldProcess'
-                    }
+                catch {
+                    $actionStatus = 'DeleteFailed'
+                    $message = $_.Exception.Message
+                    Write-Warning ("Failed to delete library '{0}' in web '{1}': {2}" -f $list.Title, $webUrl, $_.Exception.Message)
                 }
+            }
+            else {
+                $actionStatus = 'SkippedByShouldProcess'
             }
         }
         else {
@@ -552,8 +525,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCnupcARZDEulz0
-# 7K3DJYfOjjFSvW2s0/9van/VCDgD4aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAxwKJh8+kO/YEF
+# gwwArPcGajSaPfPLdDFs27QOAO7r/6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -686,31 +659,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEICroVe1tAphT0EmTQ+9x7S/PjPS5YT8MFN+SvBHjUrJLMA0GCSqG
-# SIb3DQEBAQUABIIBgDaRQAG7+DOdGUkfkBA1iss9Q0ZzTHx40FJDHlwPWN7uEl2t
-# W2hZM7miB/e59fT1bEu8Eui4tu+oUelB8KhQzewL7kc+hrnqJtijjv73MiuFKsnF
-# zfrKS6wI052f49wJzHPQfbLZ3J7L/1pweEvDXHWKAvAgSpOSxTxdIde2FEXokwU6
-# ESiN09PLL5ksfl6hbfgxNo6oY10lAuPFDogpkm/eluJXMGvFZ6G6d9jj5LdK+AYx
-# YpBZnM4meDK+icbn10wRZ4TSpG98xqmAeLIvuRJnOtn3QVMI8OkxZZlWDE9L5Hkm
-# iPTlVKD9QQs8bdaOzoC63NSl2YkXmtzwp2KF6ArmJj7WyI+4a+G4RDsJQOduPpcE
-# ZDuGmF6O1w9rPcsvD8O4Pr4CvpgJmUGzRhsjqWDjIpFZh3BqPwAIs7JFkSjUgVme
-# 1E21/S4txRWh7J1ktA6rWTJl/VId/ZBqD4ISK62WBluWL2gBxbMTR3iU4DBLRwDk
-# CIb/sEzXA7JyMqOYzqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIDEW0PUcVB36E9I8/Yj3DG3Ntl1s94ZCZh4vGHCGoeKzMA0GCSqG
+# SIb3DQEBAQUABIIBgFvNYUIk08tbHb2Sr8c0/j8NMmSOmttDEIYSlPnPDvbJB/ZA
+# emIcHA9RvGEBjUgetlU3NTpfOokAwhAhyD2RK08UXxSsmOHFQCpFhwlbimdVG1wK
+# VE4mtZ/P9EPdN0zNFxBRVL7A0KHhWyfv9kdPzBKofs+BHaHh5bOAFY3Vowonbb3J
+# e6amMYRTD6WBM+K0BU0BpRdmCxQkazoS/sYcHb3mywfOismltYQmwbJIuqnWp8CZ
+# 8nqOHPLkhkYx3w6uB3PCPjXP7/Vh/dtyWFdgO87Em+Jx3OKufm+BX8UYMRGbWPrW
+# R9alXTr6dgHuzZcaN/QbRUI3x4C+yEqoGXzZb40BpQWZwZyg3SqbiP+28gv+oLsj
+# RuGuaAj/52eJ3L7eV4CP8ZisNmnYXgk9BCTlJLOCCK1bWeF+h0gEWlFITb1fqWa9
+# aUAnSJGmAIZxNQq5L5L1whLhh0YHniRCZALeMkDX/smYOUlAGjknrgI7/wGQX326
+# BDTspwVCH4GwX/9EAqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTExNTE3
-# NTBaMC8GCSqGSIb3DQEJBDEiBCDsjGvfdzNfzp6s0kZF5i074rx1mcpujMT+rtIx
-# NxDk7zANBgkqhkiG9w0BAQEFAASCAgAZZjBcmlFfqgxXiHt9rlFlAXMl5aWQAxh1
-# XylSvM6cLGZP6/ISHPQ6j9pCJxQ6bMNQMNssp1PbM+900GWruevF7L6a2Sr/7T0x
-# yalgqIRpvxp71BNRWpCsXKmBymVexcdkpvnv9GJeU3osLGaOfqGopUTI51igx1xx
-# bRVeKo4EhEwIo2qw73IMLOqsa4sF1rg8cZI6j86hKTz8P4tknx2G5HlZ5T1MqkXn
-# ELytrZrzNS5jNW7Soyyqh8SLEPTCMygOp1MSLwTXa+ciswRBShXNd3ZxDhyxvdl7
-# R489uiNTgStNzWn28fxNfQweqTBIXY71S5WrA34zua3VWPPvhSrqbu6uWVYK8Ows
-# jJHsvhDDU6rm3hW8rA1GME8C8NuYefa314z8sTLLwcAYwtx0moPKqommS4Ilkal+
-# D7qS4FIL60ATnPx25LElygUtqc12s7clk6IXYaba8VwuFeQUiMrlHskHGmYLQxBv
-# GSF6wAuMus9OUPpa0yLbPCAcky7IdU0xu7Pegu9lAZmSangiEidyAB4RlJiMgFX5
-# Ybk0SdvbMTAPecOzDH1f+vgTUvGcc1pUK+t443vt/U3s958wKYDYOEqRDedrumKy
-# wHMqA6kGRg2pzxd1JUAycwzfqPyVP6EhuC3hFCCQ7CZTEBkcnVxTLnW5NFhXPSHB
-# wiw+shQC8Q==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTExNTI3
+# NTBaMC8GCSqGSIb3DQEJBDEiBCDZAL8ROHIFWpIpr+1SSn2Be6609D5dvQ7xE/lH
+# kiGoHDANBgkqhkiG9w0BAQEFAASCAgBctvFDN8c+PrYeHvxY7u05ff3n0ubOUBJP
+# hXw48rUjgSltooqksD54Zpe83KIygwi5rVURapzXzGID/2nafMPhZiO1sXd1bPLt
+# HPlYLrnM4YzrFDBTcwShzbc2IBn+ymjwS3v9tZeao+oDOo1Utl9IACYJ1P7VVA7z
+# iK6ndgUkW3/qOrQ/eJrUzxBw/BQcl4ss86pVpsgFvxqkAFJ1P0iFm8OlwXAmoCQa
+# VVrRCGEa3lW8zS+FewXR/oJ7O3xw6YuDwwsXoqAIgGDHM0uKeFqTu4bkW1tMuP+H
+# 6/sgsxK6D4GT8BvPkH+WCvij7o+Ow/ywGMbyHtV9UDCnzaVoafiGiwvZbgzLV1Ql
+# p1b+jv3kZkfHhelN5fBallIkorwNJtjnKNp1g3HpEZgP1faPo3JKRdmk1CiMc/rg
+# VB/FjsWI9t3gHblZbeesjyY+0N7gzWlIpuCFfHIV+ATYbvZgFlBMhhLn4h8zUC2F
+# vVpqf09H3UtzYxf6XG2k5UL4AiIrE9/tf6rTK3oZiT/1ZMkNxCpXF+8KI4TJpoOd
+# e3tGOTx5OCgNqtsF6m2Wg0IejJsOiUh0GHY1q6qH++gDffjkQXlrvT167Q4sIL1j
+# f8vs2TdlDDQ/jC9eFw6cnPYDrj+HPEHMsQIpUBaZFIvdZbm+3SztTx4lFM/p+I+L
+# x1LU1XNEwA==
 # SIG # End signature block
