@@ -23,6 +23,7 @@
   "SharePointLibraryDisplayName": "__USE_GLOBAL__",
   "SharePointTargetFolderPath": "__USE_GLOBAL__",
   "DeviceSystemCsvLogFolderPath": "{{DataAllRootPath}}\\Intune\\Devices\\System",
+  "ExpectedThirdPartyAV": "__USE_GLOBAL__",
   "EnableWeeklyHistory": true,
   "WeeklyHistoryFolderPath": "{{DataAllRootPath}}\\Intune\\Devices\\System\\WeeklyHistory",
   "WeeklyHistoryRetentionWeeks": 52

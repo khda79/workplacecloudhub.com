@@ -11,6 +11,7 @@
     It:
     - Retrieves all managed devices with hardwareInformation in bulk
     - Correlates SecureBoot stdout from the Platform Script deviceRunStates
+    - Compares registered third-party antivirus names with the tenant's ExpectedThirdPartyAV configuration
     - Exports results to CSV via ExportAndCopyCsv
     - Uses the shared framework (SmartM365.Core / InitializeScriptEnvironment)
     - Logs to text + transcript
@@ -39,14 +40,14 @@
 .PARAMETER ManagedDevicePagePauseMilliseconds
     Delay between managed-device Graph pages in milliseconds. Default: 500.
 .VERSION
-2.10
+2.12
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication.
     Minimum Graph application permissions: DeviceManagementManagedDevices.Read.All; DeviceManagementConfiguration.Read.All; DeviceManagementScripts.Read.All.
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
-    Version : 2.11
+    Version : 2.12
     Author: https://github.com/khda79/workplacecloudhub.com
     Requires: SmartM365.Core module (logging, init, CSV, cleanup, cloud connectivity)
     Scopes: DeviceManagementManagedDevices.Read.All, DeviceManagementConfiguration.Read.All
@@ -133,7 +134,8 @@ function Get-ScriptLocalConfig {
     }
 
     try {
-        return Get-Content -LiteralPath $configPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        $config = Get-Content -LiteralPath $configPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        return Sync-SmartM365JsonConfigWithTemplate -Config $config -Path $configPath
     }
     catch {
         throw ("Failed to read local configuration '{0}': {1}" -f $configPath, $_.Exception.Message)
@@ -301,7 +303,8 @@ function Get-ScriptLocalConfig {
     }
 
     try {
-        return Get-Content -LiteralPath $configPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        $config = Get-Content -LiteralPath $configPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        return Sync-SmartM365JsonConfigWithTemplate -Config $config -Path $configPath
     }
     catch {
         throw ("Failed to read local configuration '{0}': {1}" -f $configPath, $_.Exception.Message)
@@ -375,6 +378,69 @@ $AppId = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'AppId' -De
 $TenantId = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'TenantId' -DefaultValue '00000000-0000-0000-0000-000000000000'
 $Thumb = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'Thumb' -DefaultValue '0000000000000000000000000000000000000000'
 $OrgDomain = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'OrgDomain' -DefaultValue 'contoso.onmicrosoft.com'
+
+function Resolve-ExpectedThirdPartyAVConfiguration {
+    [CmdletBinding()]
+    param([AllowNull()][object]$Value)
+
+    $notConfigured = [pscustomobject]@{ DisplayName = ''; RegisteredNames = @(); IsConfigured = $false }
+    if ($null -eq $Value) { return $notConfigured }
+    if ($Value -isnot [pscustomobject] -and $Value -isnot [System.Collections.IDictionary]) {
+        throw 'ExpectedThirdPartyAV must be an object with DisplayName and RegisteredNames.'
+    }
+
+    $displayName = ([string]$Value.DisplayName).Trim()
+    $rawNames = $Value.RegisteredNames
+    if ($null -ne $rawNames -and $rawNames -isnot [array]) {
+        throw 'ExpectedThirdPartyAV.RegisteredNames must be a JSON array.'
+    }
+
+    $names = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($rawName in @($rawNames)) {
+        $name = ([string]$rawName).Trim()
+        if (-not $name) { throw 'ExpectedThirdPartyAV.RegisteredNames cannot contain empty names.' }
+        [void]$names.Add($name)
+    }
+
+    if (-not $displayName -and $names.Count -eq 0) { return $notConfigured }
+    if (-not $displayName -or $names.Count -eq 0) {
+        throw 'ExpectedThirdPartyAV requires both DisplayName and at least one RegisteredNames value.'
+    }
+
+    return [pscustomobject]@{
+        DisplayName = $displayName
+        RegisteredNames = @($names)
+        IsConfigured = $true
+    }
+}
+
+function Get-ExpectedThirdPartyAVStatus {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][object]$Configuration,
+        [Parameter(Mandatory)][object]$PlatformScriptData
+    )
+
+    if (-not $Configuration.IsConfigured) { return 'NotConfigured' }
+    switch ([string]$PlatformScriptData.ThirdPartyAVStatus) {
+        'NotCollected' { return 'NotCollected' }
+        'Unknown' { return 'Unknown' }
+        'Error' { return 'Error' }
+        'NotDetected' { return 'NotDetected' }
+        'Detected' {
+            if ([string]::IsNullOrWhiteSpace([string]$PlatformScriptData.ThirdPartyAVProducts)) {
+                return 'Unknown'
+            }
+            foreach ($product in ([string]$PlatformScriptData.ThirdPartyAVProducts).Split(';')) {
+                if ($Configuration.RegisteredNames -icontains $product.Trim()) { return 'Detected' }
+            }
+            return 'NotDetected'
+        }
+        default { return 'Unknown' }
+    }
+}
+
+$ExpectedThirdPartyAV = Resolve-ExpectedThirdPartyAVConfiguration -Value (Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ExpectedThirdPartyAV' -DefaultValue $null)
 
 # ==========================================================
 # Import SmartM365.Core module (psd1)
@@ -587,7 +653,7 @@ function Parse-PlatformScriptStdout {
 # ==========================================================
 # Initialization via SmartM365.Core
 # ==========================================================
-$ScriptVersion = "2.11"
+$ScriptVersion = "2.12"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'DeviceSystemCsvLogFolderPath' -DefaultValue $OutputPath
 try {
@@ -762,6 +828,8 @@ try {
             LastSyncDateTime                  = $device.lastSyncDateTime
             ThirdPartyAVStatus                = $psData.ThirdPartyAVStatus
             ThirdPartyAVProducts              = $psData.ThirdPartyAVProducts
+            ExpectedThirdPartyAVName          = $ExpectedThirdPartyAV.DisplayName
+            ExpectedThirdPartyAVStatus        = Get-ExpectedThirdPartyAVStatus -Configuration $ExpectedThirdPartyAV -PlatformScriptData $psData
             WindowsUpdateRebootRequired       = $psData.WindowsUpdateRebootRequired
             BitLockerOSProtectionStatus       = $psData.BitLockerOSProtectionStatus
             BitLockerOSConversionStatus       = $psData.BitLockerOSConversionStatus
@@ -866,8 +934,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA7UN5VSDALN/44
-# wbdz/wE6VrGw9m22KAAlv4bN5erb9KCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCeds/If8F2a+BM
+# QzszOxHNDQwczJU5rLuu9pHYF6QVcqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1000,31 +1068,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIPas0RC6LI+IDENZJU3DsoW0KlmETKEVl3I3DGD5L4tAMA0GCSqG
-# SIb3DQEBAQUABIIBgKYF1wqxXPbysF5sFRjPx+f7oNr6xzMx95OcABJo30fdGuh8
-# 7Ms2XO1NPxOB+NkU8O3ra1NbyOJZuHD/dEglVnPP8TyB34f4v0JBAgN+Sxp92yfG
-# NlHCAOm+JX9wG3dgTPJRFzXKYpGUrVAbk234Flwka5x1J9LZ43PzmYxenxcagP2F
-# nLayCl4QrxKWAK13VkYZ3TqJDT51Y46QG7PupfBv6II+f2Zo54BL1jJepOP3jfC0
-# Ane85t9AUERk1wWqS72dECXKlougW8J2Aji/GkvlQe6fTY3cncJZxe8I9oknP9G3
-# eZiraePci1KU38Qvk1jx9DEE5fgf+IMyNcEYXVqN+11qnivX3+DhQ1sXIxQnbHg5
-# DJhVFPYEv1A6GojXQtI2+XeBKZ0pH9vSwrutZDrx2Ycuf3xMM5k43iw9KJZz4Rsd
-# ofvlTW/A7FQLfn29yRgclo8b+QmwmDkTDgFWjqechi8Gv9jx8SAU0KT94+2yMOzK
-# B44zXxSUO47b9O5f0qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEINp3QpzP27J768Wqn07F/HIbI7J9mDqUYNA2g4PYx+QJMA0GCSqG
+# SIb3DQEBAQUABIIBgHLyC67WYE3shFE3LktB6N6BVFuPSzJBXqaeaejo7cu+vMB3
+# YFB+gfKt2d6lxcHglv2WbRB54sVJiYVFIQNQtPtFEzr/5UZk5tgNWGtfdCdKSv2h
+# Mq5crp2TDdVl4T+Sp9V2LBTXSH+oT5/SW6mFoNz9avKDpftDHLykLEimSOYVK+rg
+# uchUP3ykTCCmZ3P9B2iiIhzQeY2fLSaUFJGaIP0OGLrGb1bJsPIup9hS/nZRXEvJ
+# AGpZw1PNkZplbw12D1A1apsGwQ6Q5JLVEaKrppZHv8jq73usQRgK7QICX/c6MsM4
+# YXjG14h1C+8cMY+5madHEhRHsgOQiUUlWTf8UcRk6ImqLsJYJrOf31BF9pNUz+AM
+# 3VWlTyAjy85nDtg3yyDbJI1YMowueV2KvB8W316Z48sZwKOlasjLjqJZlkE9rbaZ
+# FrNE5HLLFrBnUZdCd8b0szo1CsZGyuyRAULgM/3krySN+ZsvOXyLeyFEY9A0ZTd6
+# kTOltRFDXxT86fCR36GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTAyMjAz
-# MzJaMC8GCSqGSIb3DQEJBDEiBCCBM+7KOU1Gy3ZE/FSObh9Ypyg0IWvDKKJcwE7C
-# D1sQIzANBgkqhkiG9w0BAQEFAASCAgCP3UF1akFn/Tw/os4u/rchpcuu44O7wV8+
-# fv/uEePnqqjsv7SJoW+BCYM8vGpjvHQF9+VaJIWY8P/I6MFE+EJduT7acW1y5qVs
-# 4K2xY2vIffbgUEC4JggttCLrq9PVxFIZ5NMnpIPBg5LvwW9L+ifsZ7DwE4KHP2r1
-# xGTBL5Ixow6boGkEIMvtg/D7qi2Pe3SXEW5mbZV5B1bptLVyeNNFAs1+vVUBGC8k
-# 0BBJ6vKM7+1sCxOOn87FCzroEnkXlCcVcv0lbqGMbN9Ga9jiVqOcll1+MkkL/6GC
-# VjRZrE6ndj/bTgl9d7EPq3SfXJ8A4Jln65k+3YInU48IvNYrWn7Kw0JACsY/B5IG
-# ZNEPP2CJxoP1OVGpbkyq4tYzExigMK6avs5bu1mZdh4wP7oSsCKqtONn5gB7B1h/
-# VuiePdBqkgnUI0PFou9PQICM2LDmzGCClmKQHCJ54bURqMmLm6BVUQRtBRPhkP/9
-# AioTDcNICmY1It/+lTS/2w40JUlnehwqSoI3IQGxJO9roTABiyQ/VgQ/boF3SYwm
-# jc+cnvmIWTfmyRWxBjcjP7V/wRCk0UYSho4aCZzHlCv6gXOKT1kTmW7mh3PHAKJH
-# pTOIDJWxKnzu+rWwe+0qpnPaDrupgL8ILDwkP+4jwAyfR89hmSlBm1bEuX70Rnt6
-# eYfie6mNmg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTAyMzUw
+# MTNaMC8GCSqGSIb3DQEJBDEiBCC4kZjSxFSQ9QPYx4dKQvglkZjG8aAXwKrdWNv9
+# wKP8vzANBgkqhkiG9w0BAQEFAASCAgBhnah08pxkFmxunmTVpoaMybGXYjOc1Dw+
+# IQRtHJ7uxqYvpJGlEuCgGp9YuMHcty8oHmazUBRitEVz6Bn/agZupb+1TJtLW7a6
+# BEasooVWmkWzUzU9pqXRXFsmGTPHu9EUmalSXbKwwsoPu9vEpOdhoBfZOaDh0sC7
+# 56lFMw6z2qy8w2187Xoq4cnMyShIxQlsvkq4kFskj87f8naF5VjIQ7TOrvRWFo71
+# oHNcVBfFnRXxpoZQex1krRHrENRumk/aa5ToBnhDqm+BOpeheZmq2+h7KFnhQyaB
+# guT+YBYm7r55diQRM4HM/ic6PoXicurH1aVaViRbkMmupJpExEPE6TU75ZvznUVQ
+# WACzznfPjT33KmuwOueZZz5aRD6ShExtQ3jJVHzRKYRpiiaD7gMGV+Qjj0YKj09y
+# nJxql0/PGTJMBw3DHBPZJuJHqMVuLpxl5i7IAxtxAXMsMbVNeA+8gh9UfNvMqD5v
+# 6Z0EjpA0dn0TORiUKD2UtaGDJxrmUYMxkwSom/Qb7hfifZwA33mTGA1Z1XrLWkhl
+# N85HQXZyOWbpcMcvQnG1NIxgwoGM0GEArT08zYhsv4flD7EKxczGLW8rzWId1k4c
+# nBwlZE1l6HiB7KOn9Ubq68NpkFkp+OYex2jsrjySO+I9DmHwMIMsHArEOxVS2bt4
+# Vzvk/+gk/w==
 # SIG # End signature block
