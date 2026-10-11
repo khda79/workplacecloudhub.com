@@ -249,7 +249,9 @@ def newest_summary(migration):
     if not comparison_root.is_dir():
         return None
     candidates = []
-    for path in comparison_root.rglob("Summary.csv"):
+    for path in comparison_root.rglob("*.csv"):
+        if path.name != "Summary.csv" and not path.name.endswith("-Summary.csv"):
+            continue
         when = stamp(path.parent.name)
         candidates.append((when if when != "Unknown" else "", path))
     for _, path in sorted(candidates, key=lambda entry: (entry[0], str(entry[1])), reverse=True):

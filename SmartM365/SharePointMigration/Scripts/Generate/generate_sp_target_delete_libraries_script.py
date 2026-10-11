@@ -9,6 +9,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "Export"))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "Compare"))
+from comparison_artifacts import find_artifact
 
 from export_libraries_to_delete_excel import build_delete_rows
 
@@ -486,7 +488,7 @@ def detect_csv_dialect(handle):
 
 
 def duplicate_key_count(comparison_directory):
-    summary_path = comparison_directory / "Summary.csv"
+    summary_path = find_artifact(comparison_directory, "Summary.csv")
     if not summary_path.exists():
         return 0
 
@@ -549,15 +551,15 @@ def main():
     args = parser.parse_args()
 
     comparison_directory = Path(args.comparison_directory)
-    library_summary_path = comparison_directory / "LibrarySummary.csv"
+    library_summary_path = find_artifact(comparison_directory, "LibrarySummary.csv")
     if not library_summary_path.exists():
         raise FileNotFoundError(f"LibrarySummary.csv not found: {library_summary_path}")
 
     output_ps1 = Path(args.output_ps1) if args.output_ps1 else comparison_directory / "SmartM365-SharePointTarget-ExtraLibrariesRemove-Custom.ps1"
     duplicate_count = duplicate_key_count(comparison_directory)
     if duplicate_count > 0 and not args.allow_duplicate_keys:
-        duplicate_path = comparison_directory / "DuplicateKeys.csv"
-        duplicate_excel_path = comparison_directory / "DuplicateKeys.xlsx"
+        duplicate_path = find_artifact(comparison_directory, "DuplicateKeys.csv")
+        duplicate_excel_path = find_artifact(comparison_directory, "DuplicateKeys.xlsx")
         print("")
         print("Deletion script generation skipped.")
         print("Reason: duplicate inventory keys were found.")

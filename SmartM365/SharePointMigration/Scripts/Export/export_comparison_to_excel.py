@@ -9,6 +9,10 @@ import uuid
 import zipfile
 from datetime import datetime
 from pathlib import Path
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "Compare"))
+from comparison_artifacts import find_artifact
 
 
 def print(*args, **kwargs):
@@ -479,7 +483,7 @@ def export_workbook(comparison_directory, output_path, sheets=None):
     temp_prefix = f"{output_path.stem}-{uuid.uuid4().hex}"
     try:
         for index, (sheet_name, csv_name) in enumerate(sheets, start=1):
-            csv_path = comparison_directory / csv_name
+            csv_path = find_artifact(comparison_directory, csv_name)
             if not csv_path.exists():
                 continue
             xml_path = temp_directory / f"{temp_prefix}-sheet{index}.xml.tmp"

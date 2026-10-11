@@ -130,13 +130,13 @@ class FileComparisonTests(unittest.TestCase):
             (root / 'source.txt').write_text('https://example.com/source', encoding='utf-8')
             (root / 'target.txt').write_text('https://example.com/target', encoding='utf-8')
 
-            def compare(output):
+            def compare(output, prefix=''):
                 run = subprocess.run([sys.executable, str(COMPARE_DIR / 'compare_sp_source_target_file_inventories.py'),
                     '--source-csv', str(source), '--target-csv', str(target), '--output-directory', str(output),
                     '--path-mapping-file', str(root / 'mapping.txt'), '--source-web-urls-file', str(root / 'source.txt'),
-                    '--target-web-urls-file', str(root / 'target.txt')], capture_output=True, text=True)
+                    '--target-web-urls-file', str(root / 'target.txt'), '--artifact-prefix', prefix], capture_output=True, text=True)
                 self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
-                with (output / 'Summary.csv').open(encoding='utf-8-sig', newline='') as handle:
+                with (output / f'{prefix + "-" if prefix else ""}Summary.csv').open(encoding='utf-8-sig', newline='') as handle:
                     return next(csv.DictReader(handle, delimiter=';'))
 
             summary = compare(root / 'verified')
@@ -146,6 +146,18 @@ class FileComparisonTests(unittest.TestCase):
             self.assertEqual(summary['SuccessPercent'], '0.00%')
             self.assertEqual(summary['ValidationStatus'], 'ReviewNeeded')
             self.assertIn('0.00%', Path(summary['HtmlSummary']).read_text(encoding='utf-8'))
+
+            prefixed = root / 'prefixed'
+            prefixed_summary = compare(prefixed, 'Example')
+            self.assertEqual(prefixed_summary['MissingInTarget'], '1')
+            self.assertTrue((prefixed / 'Example-MissingInTarget.csv').is_file())
+            self.assertTrue((prefixed / 'Example-LibrarySummary.csv').is_file())
+            self.assertTrue(Path(prefixed_summary['HtmlSummary']).name.startswith('Example-'))
+            workbook = prefixed / 'Example-Comparison.xlsx'
+            exported = subprocess.run([sys.executable, str(ROOT / 'Scripts' / 'Export' / 'export_comparison_to_excel.py'),
+                '--comparison-directory', str(prefixed), '--output-xlsx', str(workbook)], capture_output=True, text=True)
+            self.assertEqual(exported.returncode, 0, exported.stdout + exported.stderr)
+            self.assertTrue(workbook.is_file())
 
             EVIDENCE.manifest_path(target).unlink()
             unverified = compare(root / 'unverified')
@@ -229,6 +241,12 @@ class PermissionComparisonTests(unittest.TestCase):
             self.assertTrue(report['Html'].is_file())
             with zipfile.ZipFile(report['Excel']) as package:
                 self.assertIsNone(package.testzip())
+            prefixed = PERMISSIONS.write_permission_comparison_report(source, target, Path(directory) / 'prefixed',
+                'Synthetic', '/source', '/target', path_mappings=[('/source','/target')],
+                entra_user_aliases=aliases, disabled_entra_users={'disabled@workplacecloudhub.com'},
+                artifact_prefix='Example')
+            self.assertEqual(prefixed['Summary'].name, 'Example-Summary.csv')
+            self.assertTrue(prefixed['Html'].name.startswith('Example-'))
 
 
 class HtmlReportTests(unittest.TestCase):
@@ -270,7 +288,8 @@ class HtmlReportTests(unittest.TestCase):
             for stamp, matched in [('20261001-100000', '5'), ('20261002-100000', '8')]:
                 folder = migration / 'comparisons' / 'files' / ('Example-files-' + stamp)
                 folder.mkdir(parents=True)
-                with (folder / 'Summary.csv').open('w', encoding='utf-8', newline='') as handle:
+                summary_name = 'Example-Summary.csv' if matched == '8' else 'Summary.csv'
+                with (folder / summary_name).open('w', encoding='utf-8', newline='') as handle:
                     writer = csv.DictWriter(handle, fieldnames=['SourceCsv', 'TargetCsv', 'SourceUniqueKeys', 'TargetUniqueKeys', 'MatchedKeys', 'MissingInTarget', 'ExtraInTarget'], delimiter=';')
                     writer.writeheader()
                     writer.writerow({'SourceCsv': 'SP2019-FileInventory-Example-20261002-080000.csv', 'TargetCsv': 'SPO-FileInventory-Example-20261002-090000.csv',
@@ -330,7 +349,8 @@ class HtmlReportTests(unittest.TestCase):
             for run_stamp, matched in [('20261001-100000', '5'), ('20261002-100000', '8')]:
                 folder = migration / 'comparisons' / 'permissions' / ('Example-permissions-' + run_stamp)
                 folder.mkdir(parents=True)
-                with (folder / 'Summary.csv').open('w', encoding='utf-8', newline='') as handle:
+                summary_name = 'Example-Summary.csv' if matched == '8' else 'Summary.csv'
+                with (folder / summary_name).open('w', encoding='utf-8', newline='') as handle:
                     writer = csv.DictWriter(handle, fieldnames=['SourceCsv', 'TargetCsv', 'SourceUniqueKeys', 'TargetUniqueKeys', 'MatchedPermissions', 'MissingInSPO', 'ExtraInSPO'])
                     writer.writeheader()
                     writer.writerow({'SourceCsv': 'SP2019-PermissionInventory-Example-20261002-080000.csv',
@@ -451,6 +471,7 @@ class HtmlReportTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             shutil.copy2(COMPARE_DIR / 'report_html.py', Path(directory) / 'report_html.py')
             shutil.copy2(COMPARE_DIR / 'scan_evidence.py', Path(directory) / 'scan_evidence.py')
+            shutil.copy2(COMPARE_DIR / 'comparison_artifacts.py', Path(directory) / 'comparison_artifacts.py')
             shutil.copy2(ROOT / 'Scripts' / 'console_lifecycle.py', Path(directory) / 'console_lifecycle.py')
             portable_python = ROOT / 'Tools' / 'Python' / 'python.exe'
             executable = str(portable_python if portable_python.is_file() else sys.executable)

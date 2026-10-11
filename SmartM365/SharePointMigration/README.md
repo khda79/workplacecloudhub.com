@@ -56,6 +56,13 @@ terminal retry failures, multiline CSVs and global report freshness. These check
 are separate from qualification on a SharePoint farm or SPO tenant. Existing
 inventories must be renewed to benefit from the membership collection fixes.
 
+Comparison outputs created by the launcher use the migration folder name as a
+filename prefix, for example `Example-Summary.csv` and
+`Example-MissingInTarget.csv`. Excel and HTML reports use the same prefix.
+Generated PowerShell cleanup scripts retain the required `SmartM365-` start,
+for example `SmartM365-Example-SharePointTarget-ExtraFilesRemove-...ps1`.
+Existing unprefixed comparison folders remain readable by exports and reports.
+
 ## Install, Start, and Update
 
 Version **1.0.64** is distributed through the

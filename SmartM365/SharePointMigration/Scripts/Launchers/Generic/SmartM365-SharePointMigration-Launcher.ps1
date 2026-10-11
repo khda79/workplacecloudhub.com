@@ -949,7 +949,7 @@ function Invoke-FileComparison {
     $logPath = New-MigrationLogPath -Action 'CompareFiles' -Timestamp $timestamp
     $sourceDirectory = Resolve-MigrationPath $Config.Output.SourceFileScans
     $targetDirectory = Resolve-MigrationPath $Config.Output.TargetFileScans
-    $outputDirectory = Join-Path -Path (Resolve-MigrationPath $Config.Output.FileComparisons) -ChildPath ("{0}-files-{1}" -f $Config.Name, $timestamp)
+    $outputDirectory = Join-Path -Path (Resolve-MigrationPath $Config.Output.FileComparisons) -ChildPath ("{0}-files-{1}" -f $MigrationName, $timestamp)
     New-Item -ItemType Directory -Path $outputDirectory -Force | Out-Null
     Start-Transcript -Path $logPath -Force -WhatIf:$false | Out-Null
 
@@ -984,6 +984,7 @@ function Invoke-FileComparison {
             '--source-web-urls-file', (Resolve-MigrationUrlsFile -Side 'Source'),
             '--target-web-urls-file', (Resolve-MigrationUrlsFile -Side 'Target'),
             '--comparison-name', ("{0}-{1}-vs-{2}" -f $Config.Name, (Get-MigrationEndpointType -Side 'Source'), (Get-MigrationEndpointType -Side 'Target')),
+            '--artifact-prefix', $MigrationName,
             '--size-tolerance-bytes', ([string]$Config.Comparison.SizeToleranceBytes),
             '--max-scan-age-difference-hours', ([string]$maxScanAgeDifferenceHours),
             '--max-scan-age-hours', ([string]$maxScanAgeHours),
@@ -1004,19 +1005,19 @@ function Invoke-FileComparison {
 
         Invoke-PythonScript -Script (Join-Path $ProjectRoot 'Scripts\Export\export_comparison_to_excel.py') -Arguments @(
             '--comparison-directory', $outputDirectory,
-            '--output-xlsx', (Join-Path $outputDirectory ("{0}-{1}-vs-{2}-Comparison-{3}.xlsx" -f $Config.Name, (Get-MigrationEndpointType -Side 'Source'), (Get-MigrationEndpointType -Side 'Target'), $timestamp))
+            '--output-xlsx', (Join-Path $outputDirectory ("{0}-{1}-vs-{2}-Comparison-{3}.xlsx" -f $MigrationName, (Get-MigrationEndpointType -Side 'Source'), (Get-MigrationEndpointType -Side 'Target'), $timestamp))
         )
         Invoke-PythonScript -Script (Join-Path $ProjectRoot 'Scripts\Export\export_duplicate_keys_to_excel.py') -Arguments @(
             '--comparison-directory', $outputDirectory,
-            '--output-xlsx', (Join-Path $outputDirectory ("DuplicateKeys-{0}.xlsx" -f $timestamp))
+            '--output-xlsx', (Join-Path $outputDirectory ("{0}-DuplicateKeys-{1}.xlsx" -f $MigrationName, $timestamp))
         )
         Invoke-PythonScript -Script (Join-Path $ProjectRoot 'Scripts\Export\export_libraries_to_delete_excel.py') -Arguments @(
             '--comparison-directory', $outputDirectory,
-            '--output-xlsx', (Join-Path $outputDirectory ("Libraries-To-Delete-{0}.xlsx" -f $timestamp))
+            '--output-xlsx', (Join-Path $outputDirectory ("{0}-Libraries-To-Delete-{1}.xlsx" -f $MigrationName, $timestamp))
         )
         Invoke-PythonScript -Script (Join-Path $ProjectRoot 'Scripts\Export\export_files_to_delete_excel.py') -Arguments @(
             '--comparison-directory', $outputDirectory,
-            '--output-xlsx', (Join-Path $outputDirectory ("Files-To-Delete-{0}.xlsx" -f $timestamp))
+            '--output-xlsx', (Join-Path $outputDirectory ("{0}-Files-To-Delete-{1}.xlsx" -f $MigrationName, $timestamp))
         )
 
         $deleteScriptArguments = @('--comparison-directory', $outputDirectory)
@@ -1024,14 +1025,14 @@ function Invoke-FileComparison {
             $deleteScriptArguments += '--allow-duplicate-keys'
         }
         Invoke-PythonScript -Script (Join-Path $ProjectRoot 'Scripts\Generate\generate_sp_target_delete_libraries_script.py') -Arguments ($deleteScriptArguments + @(
-            '--output-ps1', (Join-Path $outputDirectory ("SmartM365-SharePointTarget-ExtraLibrariesRemove-{0}.ps1" -f $timestamp))
+            '--output-ps1', (Join-Path $outputDirectory ("SmartM365-{0}-SharePointTarget-ExtraLibrariesRemove-{1}.ps1" -f $MigrationName, $timestamp))
         ))
         Invoke-PythonScript -Script (Join-Path $ProjectRoot 'Scripts\Generate\generate_sp_target_delete_files_script.py') -Arguments ($deleteScriptArguments + @(
-            '--output-ps1', (Join-Path $outputDirectory ("SmartM365-SharePointTarget-ExtraFilesRemove-{0}.ps1" -f $timestamp))
+            '--output-ps1', (Join-Path $outputDirectory ("SmartM365-{0}-SharePointTarget-ExtraFilesRemove-{1}.ps1" -f $MigrationName, $timestamp))
         ))
         Invoke-PythonScript -Script (Join-Path $ProjectRoot 'Scripts\Generate\generate_sp_target_delete_folders_script.py') -Arguments @(
             '--comparison-directory', $outputDirectory,
-            '--output-ps1', (Join-Path $outputDirectory ("SmartM365-SharePointTarget-ExtraFoldersRemove-{0}.ps1" -f $timestamp))
+            '--output-ps1', (Join-Path $outputDirectory ("SmartM365-{0}-SharePointTarget-ExtraFoldersRemove-{1}.ps1" -f $MigrationName, $timestamp))
         )
 
         Write-Info ("File comparison completed: {0}" -f $outputDirectory) Green
@@ -1161,7 +1162,7 @@ function Invoke-PermissionComparison {
     $logPath = New-MigrationLogPath -Action 'ComparePermissions' -Timestamp $timestamp
     $sourceDirectory = Resolve-MigrationPath $Config.Output.SourcePermissionScans
     $targetDirectory = Resolve-MigrationPath $Config.Output.TargetPermissionScans
-    $outputDirectory = Join-Path -Path (Resolve-MigrationPath $Config.Output.PermissionComparisons) -ChildPath ("{0}-permissions-{1}" -f $Config.Name, $timestamp)
+    $outputDirectory = Join-Path -Path (Resolve-MigrationPath $Config.Output.PermissionComparisons) -ChildPath ("{0}-permissions-{1}" -f $MigrationName, $timestamp)
     New-Item -ItemType Directory -Path $outputDirectory -Force | Out-Null
     Start-Transcript -Path $logPath -Force -WhatIf:$false | Out-Null
 
@@ -1197,6 +1198,7 @@ function Invoke-PermissionComparison {
             '--target-root-path', $Config.Target.PermissionRootPath,
             '--sharegate-replacement-character', ([string]$Config.Comparison.ShareGateReplacementCharacter),
             '--comparison-name', ("{0}-{1}-vs-{2}-Permissions" -f $Config.Name, (Get-MigrationEndpointType -Side 'Source'), (Get-MigrationEndpointType -Side 'Target')),
+            '--artifact-prefix', $MigrationName,
             '--max-scan-age-difference-hours', ([string]$maxScanAgeDifferenceHours),
             '--max-scan-age-hours', ([string]$maxScanAgeHours)
         )
@@ -1244,7 +1246,7 @@ function Invoke-FileHistoryComparison {
     $scriptPath = Join-Path -Path $ProjectRoot -ChildPath 'Scripts\Compare\SmartM365-SharePointSource-FileInventoryHistoryCompare.ps1'
     $endpointType = Get-MigrationEndpointType -Side $Side
     $scanDirectory = if ($Side -eq 'Source') { Resolve-MigrationPath $Config.Output.SourceFileScans } else { Resolve-MigrationPath $Config.Output.TargetFileScans }
-    $outputDirectory = Join-Path -Path (Get-FileHistoryComparisonRoot) -ChildPath ("{0}-{1}-Changes-{2}" -f $Config.Name, $endpointType, $timestamp)
+    $outputDirectory = Join-Path -Path (Get-FileHistoryComparisonRoot) -ChildPath ("{0}-{1}-Changes-{2}" -f $MigrationName, $endpointType, $timestamp)
 
     $parameters = @{
         ScanDirectory = $scanDirectory
@@ -1253,6 +1255,7 @@ function Invoke-FileHistoryComparison {
         OutputDirectory = $outputDirectory
         LogPath = (New-MigrationLogPath -Action $LogAction -Timestamp $timestamp)
         ComparisonName = ("{0}-{1}-history" -f $Config.Name, $endpointType)
+        ArtifactPrefix = $MigrationName
         EndpointType = $endpointType
         Side = $Side
         SizeToleranceBytes = [long]$Config.Comparison.SizeToleranceBytes
@@ -1315,7 +1318,7 @@ function Invoke-PermissionHistoryComparison {
         Resolve-MigrationPath $Config.Output.PermissionHistoryComparisons
     } else { Resolve-MigrationPath 'comparisons\permission-scan-history' }
     $timestamp = New-MigrationRunTimestamp
-    $outputDirectory = Join-Path $historyRoot ('{0}-{1}-PermissionChanges-{2}' -f $Config.Name, $endpointType, $timestamp)
+    $outputDirectory = Join-Path $historyRoot ('{0}-{1}-PermissionChanges-{2}' -f $MigrationName, $endpointType, $timestamp)
     $logPath = New-MigrationLogPath -Action 'ComparePermissionScanHistory' -Timestamp $timestamp
     New-Item -ItemType Directory -Path $outputDirectory -Force | Out-Null
     Start-Transcript -Path $logPath -Force -WhatIf:$false | Out-Null
@@ -1325,7 +1328,8 @@ function Invoke-PermissionHistoryComparison {
         Invoke-PythonScript -Script (Join-Path $ProjectRoot 'Scripts\Compare\compare_sp_permission_inventory_history.py') `
             -Arguments @('--old-csv', $older, '--new-csv', $newer,
                 '--output-directory', $outputDirectory,
-                '--comparison-name', ('{0}-{1}-permission-history' -f $Config.Name, $endpointType))
+                '--comparison-name', ('{0}-{1}-permission-history' -f $Config.Name, $endpointType),
+                '--artifact-prefix', $MigrationName)
         Write-Info ("Permission scan history comparison completed: {0}" -f $outputDirectory) Green
         if (-not $script:LauncherNonInteractive) { Open-DirectoryInExplorer -Path $outputDirectory }
     }
@@ -1392,8 +1396,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBf7A8bRKTjNXK4
-# 4GBmVvsGKmhlQ9eTgWj8RQwh3a7036CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDI05RkMdFou2KU
+# uTIeOV3N+axJUnJcOsWd8/agW8JvcqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1526,31 +1530,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIOnICheEMthnACNo3R0wn0TnLFFcW5mq0nPnEVwcvobDMA0GCSqG
-# SIb3DQEBAQUABIIBgCRBNWNnXYSrWq97r9F9XMYgRyd2dpi93kWHU7+6AFtVESsE
-# TBhJySVLooQpViqzywdZ71GkiC5SJg6C7umdIaZ1npA31EPTwZXTGs0hYxhe3mVS
-# PrNqWwldtqWdppAWax16Lrwf5RK+FFSeGPpoSgpIGmN32f/cqtalX58FIrKS9s3a
-# j662w/Jh7dC6ufiR+sGq5ZDujplfUNHd/kGq+2iiS6terAIngcayNl0ccw60rOWK
-# fGrmIGPYQATvLUcFcxgq7TnkiEb4M62vlvR0KM+jV1yqoVepR5Xp8YiFCTJoI9uo
-# IsSHezYyDNzHuy/4YLJ6jEXMz16ur/F36Nb1ojWNeypd/8soSutmVkF8VGer7WWA
-# 4q/BvhfDoqmwo9g4fCXBC2xmTClL9bvuoOOZPlzVbqM6TfcMaFsKAUVYwmCCWpu9
-# MSW8lK2mjcPxZSmHvJlYiHV38vr6wD4QNK7/BWlHPooHPlHUk0ZPLiyOKFPY+d/0
-# rnDxzIsaXw1qkYdoaKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIHZRr9FsEcLT2AudNMy8O9ShkVAD3P3Q9PEGj0pUPehSMA0GCSqG
+# SIb3DQEBAQUABIIBgFDc3rOSKojDeAIxJ/Tm/MgVUMqX5KZXg7i6UhS45m2hsHgC
+# SB74k0FTqtE+B5EMafhr0EqVpzAPkEmoFYUJpxs/0gThxiyR1BwKg77yc9tn0GZj
+# OEXVVipSqm9qRqyGh0llJVtIhFj3oyA0VL9fLfvQpLw7cvNPzD+xsS6vARlehvKz
+# a7gb9K8bSg39vnA84uhw+ZJ9DA5lxM4HfxyopQo+DAHqOKcYojJ2v0JeCXGpQbSM
+# sfHHu30uAZpLEybSgyk2VtZ1dGB4al4KZNX3XiTyXH/Yv0Ypn7YFIv2XhSjOpsZY
+# N+2+/nnbOhHbGvoMrmIYPEHUrLvFqIW4dhXbfSABk2pwDh9EymFuNXTrKdHvH5uh
+# b7hvuZmgK2A2SbLwpeo3GAv1ghB+SF75CE4dnC9AaszXaXG2q/Z2Yi/G8ZZjUiuN
+# mMIVBki/anGu3zQz7ngJX8X8F4ZIHco4FMoNNHomYM33IZHsq9O8/xMKP3SXvLds
+# rpGe7IRurXKTo8/wgaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDgxNDU4
-# MjNaMC8GCSqGSIb3DQEJBDEiBCCs9bsskaxyEv00tlLGSHcpBg5qwn6pSq6ajx9B
-# rF3yLDANBgkqhkiG9w0BAQEFAASCAgCU6S9s3Gk19BubtZnCK7RTd1n7NLlBECBm
-# TmG6SMLYRF3sp7/c+PGJ2s6wctEPNiea3qu1AHC9qCWkhz46q110z3gmilm029pZ
-# OFOyDnyFKtbN4ESHfQ1BpjM2qMQUYHQzdha7y8iIYmLI7beUNeHIoliO//BTsJBk
-# k12oqwyQUEVHAK/ARXOiqHFHxHZ6rzPG1SWLmHhBhYFOOzoBqPgM+YgtuMmUVfFf
-# 138fkZ9WuiMq1guafVdIfUj1vvTpyk+H9viTG3l/cfYYZPSbT00RbxrRBVIomLCx
-# zmuJK1zPXRdq0xzNv2+C/JGND/RTrjEuBI8BBIZOiWiEer+nF0p3gB1P6GCTkAK5
-# KjyjJfKDa9tWAshZ50NAqgZwfta8W3dYxk7RFuz7bir9POOWLr8xlTy2WiaV9A6I
-# 9EtmIzTMYlYD/sCNREJcvKCitL8u5K6Vca1jJwsZ9DjV3oSu59s0xi4t/I10PoYy
-# P6rCIrlb4t1QZge4r/mHWsMiWJPP9rO0YgDKVydxC1ITo0pJ547I4NQ7WAp9/Kn9
-# G5eNe1vGplTtkgYTyJznzPsFv1bOks0uLx99psFWgTdZYWm/REKJtkXOkht4xDHY
-# wRMQOu9jNbOCiUj2pPxcCa2Gb+NLW0t8pYqLFvr93Gzfmfndzvbpz2SkuL+ywZCP
-# SH8VPOK3yQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTEwOTM1
+# NDRaMC8GCSqGSIb3DQEJBDEiBCBPZgTYZDYb5h+qhF84h1oIPDdU7zvT1MlMuzho
+# k+g5yDANBgkqhkiG9w0BAQEFAASCAgAQgIJv8HYDBR3ThHeH2VWzhKKubpoqw5Ay
+# 7EGDrWac2c4v5GqmypkQJsxalunVlPh0rOMKFhEsOxTFiEjOSkkogCrniCtEEi9f
+# Ivstym/LGjB7XbkxMgFoKMaXTtWBRCECqNJQ+F2QNwFwJqMU9ynbOSbBOCeFJorh
+# LgHHfR4e71MWOHctInMTS6Sf5ieM9ThmhS2Y70gX9M8wVBzEYo3n+MPs7qsb5VW1
+# 9luG2a+N45ZOqndwwhq914rzZ38CRHNzjJy0wzItvzV99KlW4c9e3QFaSaGpE9Tk
+# VNDL+5808uWZaj8857Lr7PNRhwCahYsxtn31lTbZhBNNL0h9NvW6y2IMwNsYtz7O
+# 7IYcAYc6DsF/ziC5nBP73+u/Wpw6vphuZAsii5idKs69g1JUX/EVMqwXf9PLSOnu
+# PIh4WGKP6ukS2fq/+T3ED9kAAE1jxxsTDagvTYr/PGj4Lr8oQwvLTV1a50jEvGhr
+# bVwBmd/MCxupC3OwX1jhIJ/V6QmVXGXjWfAf95Puyjp5i7WlnKGHssuOQx4oL1p7
+# EYmO2cyFkINaMryBJhA0KJsqQIJIlnVKzvahNXGAm7pUn44Zs2uXwisB8qgPBK3P
+# natYq5mweqxLV8blBSUvvMIArmM6WSzBTwBNB6mpT8URuIclBkjPvyjFkhA/JKaD
+# AQ9jtUujxQ==
 # SIG # End signature block

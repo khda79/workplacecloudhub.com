@@ -15,6 +15,7 @@ from urllib.parse import urlparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from report_html import metric_card, render_report
+from comparison_artifacts import artifact_name
 
 
 DETAIL_FIELDS = (
@@ -165,7 +166,7 @@ def write_csv(path: Path, columns: tuple[str, ...], rows: list[dict[str, str]]) 
         temporary.unlink(missing_ok=True)
 
 
-def make_report(name: str, previous: Path, current: Path, rows: list[dict[str, str]], counts: Counter) -> str:
+def make_report(name: str, previous: Path, current: Path, rows: list[dict[str, str]], counts: Counter, artifact_prefix: str = "") -> str:
     changed = [row for row in rows if row["Status"] != "Unchanged"]
     cards = "".join(metric_card(label, counts[label], tone) for label, tone in (
         ("Unchanged", "ok"), ("Added", "note"), ("Removed", "bad"),
@@ -185,14 +186,16 @@ def make_report(name: str, previous: Path, current: Path, rows: list[dict[str, s
         '<div class="table-scroll"><table><thead><tr><th>Status</th><th>Scope</th><th>Object URL</th>'
         '<th>Principal</th><th>Changed fields</th></tr></thead><tbody>' + table_rows + '</tbody></table></div></section>'
     )
-    download = '<div class="download-bar"><strong>Complete results</strong><a class="download-primary" href="PermissionChanges.csv">Download permission changes CSV</a><a class="download-secondary" href="Summary.csv">Summary CSV</a></div>'
+    download = ('<div class="download-bar"><strong>Complete results</strong>'
+                f'<a class="download-primary" href="{artifact_name("PermissionChanges.csv", artifact_prefix)}">Download permission changes CSV</a>'
+                f'<a class="download-secondary" href="{artifact_name("Summary.csv", artifact_prefix)}">Summary CSV</a></div>')
     return render_report(name, "Permission scan history", datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                          "Review changes" if changed else "No changes", "note" if changed else "ok",
                          cards, body, "Read-only comparison of two permission inventory CSV files",
                          download_html=download)
 
 
-def run(previous: Path, current: Path, output: Path, name: str) -> Counter:
+def run(previous: Path, current: Path, output: Path, name: str, artifact_prefix: str = "") -> Counter:
     if previous.resolve() == current.resolve():
         raise ValueError("Previous and current scans must be different files")
     if scan_stamp(previous) >= scan_stamp(current):
@@ -201,7 +204,7 @@ def run(previous: Path, current: Path, output: Path, name: str) -> Counter:
     current_rows = read_inventory(current)
     rows, counts = compare(previous_rows, current_rows)
     output.mkdir(parents=True, exist_ok=True)
-    write_csv(output / "PermissionChanges.csv", OUTPUT_COLUMNS, rows)
+    write_csv(output / artifact_name("PermissionChanges.csv", artifact_prefix), OUTPUT_COLUMNS, rows)
     summary = {
         "ComparisonName": name,
         "PreviousCsv": str(previous), "CurrentCsv": str(current),
@@ -210,12 +213,13 @@ def run(previous: Path, current: Path, output: Path, name: str) -> Counter:
         "CurrentUniqueGrants": len(index_grants(current_rows)),
         **{status: counts[status] for status in ("Unchanged", "Added", "Removed", "Changed", "Ambiguous")},
     }
-    write_csv(output / "Summary.csv", tuple(summary), [summary])
-    report = make_report(name, previous, current, rows, counts)
-    temporary = output / "PermissionHistory-Report.html.tmp"
+    write_csv(output / artifact_name("Summary.csv", artifact_prefix), tuple(summary), [summary])
+    report = make_report(name, previous, current, rows, counts, artifact_prefix)
+    report_path = output / artifact_name("PermissionHistory-Report.html", artifact_prefix)
+    temporary = report_path.with_suffix(".html.tmp")
     try:
         temporary.write_text(report, encoding="utf-8")
-        os.replace(temporary, output / "PermissionHistory-Report.html")
+        os.replace(temporary, report_path)
     finally:
         temporary.unlink(missing_ok=True)
     return counts
@@ -227,11 +231,12 @@ def main() -> None:
     parser.add_argument("--new-csv", type=Path, required=True)
     parser.add_argument("--output-directory", type=Path, required=True)
     parser.add_argument("--comparison-name", required=True)
+    parser.add_argument("--artifact-prefix", default="")
     args = parser.parse_args()
-    counts = run(args.old_csv, args.new_csv, args.output_directory, args.comparison_name)
+    counts = run(args.old_csv, args.new_csv, args.output_directory, args.comparison_name, args.artifact_prefix)
     print(f"{datetime.now():%Y-%m-%d %H:%M:%S} Permission history: "
           + "; ".join(f"{status}={counts[status]}" for status in ("Unchanged", "Added", "Removed", "Changed", "Ambiguous")))
-    print(f"{datetime.now():%Y-%m-%d %H:%M:%S} Report: {args.output_directory / 'PermissionHistory-Report.html'}")
+    print(f"{datetime.now():%Y-%m-%d %H:%M:%S} Report: {args.output_directory / artifact_name('PermissionHistory-Report.html', args.artifact_prefix)}")
 
 
 if __name__ == "__main__":

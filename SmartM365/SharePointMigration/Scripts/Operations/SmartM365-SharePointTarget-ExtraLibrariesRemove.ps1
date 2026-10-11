@@ -296,9 +296,19 @@ function Find-TargetList {
     }
 }
 
+function Resolve-ComparisonArtifactPath {
+    param([string]$Directory, [string]$Name)
+    $legacy = Join-Path -Path $Directory -ChildPath $Name
+    if (Test-Path -LiteralPath $legacy -PathType Leaf) { return $legacy }
+    $matches = @(Get-ChildItem -LiteralPath $Directory -File -Filter "*-$Name" -ErrorAction SilentlyContinue)
+    if ($matches.Count -gt 1) { throw "Multiple comparison artifacts match $Name in $Directory" }
+    if ($matches.Count -eq 1) { return $matches[0].FullName }
+    return $legacy
+}
+
 if ([string]::IsNullOrWhiteSpace($ComparisonDirectory) -and [string]::IsNullOrWhiteSpace($LibrarySummaryPath)) {
     $scriptDirectory = if ($PSScriptRoot) { $PSScriptRoot } else { (Get-Location).Path }
-    $localLibrarySummaryPath = Join-Path -Path $scriptDirectory -ChildPath 'LibrarySummary.csv'
+    $localLibrarySummaryPath = Resolve-ComparisonArtifactPath -Directory $scriptDirectory -Name 'LibrarySummary.csv'
     if (Test-Path -LiteralPath $localLibrarySummaryPath) {
         $ComparisonDirectory = $scriptDirectory
     }
@@ -308,7 +318,7 @@ if ([string]::IsNullOrWhiteSpace($ComparisonDirectory) -and [string]::IsNullOrWh
 }
 
 if ([string]::IsNullOrWhiteSpace($LibrarySummaryPath)) {
-    $LibrarySummaryPath = Join-Path -Path $ComparisonDirectory -ChildPath 'LibrarySummary.csv'
+    $LibrarySummaryPath = Resolve-ComparisonArtifactPath -Directory $ComparisonDirectory -Name 'LibrarySummary.csv'
 }
 
 if (-not (Test-Path -LiteralPath $LibrarySummaryPath)) {
@@ -388,10 +398,12 @@ function Get-ComparisonDuplicateKeyCount {
     return ([int]$summary.SourceDuplicateKeysIgnored + [int]$summary.TargetDuplicateKeysIgnored)
 }
 
-$summaryPath = Join-Path -Path (Split-Path -Path $LibrarySummaryPath -Parent) -ChildPath 'Summary.csv'
+$summaryDirectory = Split-Path -Path $LibrarySummaryPath -Parent
+$summaryName = [IO.Path]::GetFileName($LibrarySummaryPath) -replace 'LibrarySummary\.csv$', 'Summary.csv'
+$summaryPath = Join-Path -Path $summaryDirectory -ChildPath $summaryName
 $duplicateKeyCount = Get-ComparisonDuplicateKeyCount -SummaryPath $summaryPath
 if ($duplicateKeyCount -gt 0 -and -not $AllowDuplicateKeys) {
-    $duplicatePath = Join-Path -Path (Split-Path -Path $LibrarySummaryPath -Parent) -ChildPath 'DuplicateKeys.csv'
+    $duplicatePath = Join-Path -Path $summaryDirectory -ChildPath ($summaryName -replace 'Summary\.csv$', 'DuplicateKeys.csv')
     throw "Deletion blocked because duplicate inventory keys were found. Duplicate keys ignored: $duplicateKeyCount. Review $duplicatePath first, or rerun with -AllowDuplicateKeys after validation."
 }
 
@@ -502,8 +514,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAUpsfm6HuXb2TV
-# ux/rBRvWRNnUWTOsAu/Uh6j8ljBQb6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCHKPpJN4I/GnXf
+# H0LUPrKLrmbFKBm6V2RmJIhjEc1J1aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -636,31 +648,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIKubLO6PXyQVCvBvJtUnW0K/o5Vkqt0tQDGKPQHZTTh8MA0GCSqG
-# SIb3DQEBAQUABIIBgGmIvmr3v2stzmQ5PJIoA7CwzYNfLrQ6z+MqMWyafqeRuHv9
-# NZLV2Ho42bU0PpORDqg4xJDUz6dFrm0ocLTN7AsbtxRrUVMtX3uxDIkpncCH1j3m
-# y1cHQMsspG9JfQMSt1XN8QkxAv6MJU0+l1ZN/UFyPNveSbeDYxoCUZuLdH0L9jmy
-# VR+pDCd3Pp3ctqj7sLZl8wj3mxQ6wjvqveP0gMwTCdH+PbFjuj+T20Z+9K1TBHDi
-# BXA91g7EIbXv6VgC2lEm3VdRZGWga/fvNdKSlpGXCUjLutkaSqtwJfT9+8uyf7EQ
-# 9lvjestCJCnAlnRHbjxPmTvhDY9lRPeiBV4h079RCtgOEFq6y+DMrV83XL/r2dLc
-# j51RCYstVp0nmn6+HBVx7AqabhbiqMlD+mHH0oxdNAcHqg7txK8j9LEZXc0gd10V
-# mutteZvmS2kA3kKATirWAJg8pJNPl1QotHqXwI5/0NgxL5DapU06Quo1VJTxwpV6
-# gv3V2zHvYBKt0c9nl6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIPoSvBu6z5lvkTxU2Sz3euCY+3P3uzpb6iT5iWrVxrppMA0GCSqG
+# SIb3DQEBAQUABIIBgJpKoq6FGZvjSj1k8oFI8gJ8hZaoZEZHqXfoT6V8SpI+/QTA
+# Z5chduX/Zcih/+tA5J2zrRzzATuaiBcPQ6HxXSFPuw/rAJzMf/xbW5n8FAZFySm6
+# /hLaKZTqZR7EbW3Zfb5O+uB5hgI6CY5rDFcwpviA24xgcSs7OIMol2ZDSGJXDrfU
+# mj1HiGsUxB02Zt3TXw4pNAywJryIsGIulnV83n/RCBYW4x2VVO1hRP3VLlWciF4Y
+# OVvZH57SuwldITb4VVoW3dCxbg4lBuw2j3wY6Zd7nMXf628aYJ5BbEvOiIym/0Ln
+# QX46BvDCFuvbaMK6gAOsasbeHXEBTNxuEiYiyjsgdhFa5bPTy4Y3r3j7tUimfD2P
+# /jvmLEkrEoWgArgM9TJD31TH8saTunuEYYpt8cSEjt4fXd+2BbHwoaQYJZaRjFm0
+# 3gcdTOhPP8tWR1fanD2l+/sMLErH+/2OLwwcD4yu7NEp0CIsLNJ7CSh19xMBkuUX
+# ctEUhRnsHHDoQk5opKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMxNDA4
-# MzFaMC8GCSqGSIb3DQEJBDEiBCA46Mzo0VMFLW2EHSEUiQmrDSZr6zdQHd/86tu+
-# +1blOzANBgkqhkiG9w0BAQEFAASCAgCAUD2d2XSFfjD2gW64sYfjVWrvBU/03zTQ
-# 8237wLqMZ0dNAPLrPMxzsmzncE/hcidQI0a2LhM9ONYw4VKai5onzE3BBqqkQ+T2
-# I6EmOa/nb95cZevYzVy7/GbF70UTMJNwOxD4PFXp8Dgn6dhNU12xaK/Kp0IzsmCt
-# xD/HEXXfuoBFs1hN+01LfZ6UAQCIVXuicdhTEdVWmaLLA2ulUr4LyYl0PzmrX874
-# o6OsYV7J2c201Avb5jSNQV0+tE4xCN0Y0s4AegtigTDUpq4mmaJSxaaVvCRNj1X0
-# 68xquegpXebv7itGNa3UxBHaJJnydNnX/+2uif4ZvQZ0XE8wcPyzzKPhZIWmptLb
-# QiEkLsO9Deo1/IxsnbMTHPnFjGVPbYLLwmCAFxETlKHPwrHpHwWWYPk9tw+B/S1L
-# B3ikkj9q0mnLyj5zqS3EBTNzHPUGtoelOwPC2AIcsE6OfTz29UnR2+3rW+wM6FkP
-# akjRVedZ3C5U2jhjAzi38bLvPsdergktBX1bxZlnUw8jgcYr7bOK7jj26xuAc3Tq
-# hbAmja1wPrZUlGVLtl3x/xYYmajUIeeJZ6PhV15j+tOVb1wHUX+bF2+Fbats5Xgd
-# Unf2YDuLItWfkBkEkjYoybNdn5G7grL0Za/VpNLIF24Msx5EwbgXbWIjIl9/KbKh
-# LfkbEqwKeQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTEwOTM1
+# NDdaMC8GCSqGSIb3DQEJBDEiBCBmddcoC1mf8BDfqTo0piBWAyvBdqMtJxuwixf3
+# K1N+bDANBgkqhkiG9w0BAQEFAASCAgAFtR4B0XHjWkhEEGJwHVl+w5TDZ3m/5JUc
+# MJP9u49TL9EJrjT47690MJqvZo94pU8oIzPWYEs08R3YYzRxvUteHg2HFC8amjPu
+# +FjiskDyzA4l4EuJCsc5RheyQGrq4FyTl1liW/tAmD60Gm1p9vfhPLatVeFKleDL
+# GnfVmgjX2tfKzz6LorvU4pyXTc2NkTvmdjZ+XdDp4wNjn3fYl2NQSnS3z5fDOfbh
+# 26N9IJ/AlHD0HfuNHPdEpgcQoOl0kSK0vfponpHydMEmCTUQViWXGzDJsC+YUsSD
+# aNtfUmTvgWworiA8J/LCDAGFxsXGFdYbirwYz/kdm3eSDxJXRZg6zWq6lOmz+iJc
+# nD/9IaUBYiuYd6qhMdkCN5cQnipyiMOwg13AlJzHwMSMq7NZFHGZuPizjGIXrYnW
+# 9A5dBMMqt20p5IyVnkB36wv/baO1KOvkyNFlzD8D5clNLOsiWyPQZzZp4y67L0p4
+# r5VyTiMhObZ9JqjcDCHPDZNV3cmq/tqktvtOOXZPSp8pi8lu/yILPBShstcWLc9p
+# hMUr55L9iVNqmUrHGWX0lV+v6gtO24/CYNQVJoE32tyYr5Axj0qXP4182xMzj7R1
+# dBHx5O/xy2eFpyy9s/0M8LkGNRim+wA3ubml5xS4WMPnYbaVIySrW2z39kXn+NQj
+# 7ORXqGr2Dw==
 # SIG # End signature block

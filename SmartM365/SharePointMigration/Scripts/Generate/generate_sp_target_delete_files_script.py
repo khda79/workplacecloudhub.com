@@ -9,6 +9,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "Export"))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "Compare"))
+from comparison_artifacts import find_artifact
 
 from export_files_to_delete_excel import build_delete_file_rows
 from export_libraries_to_delete_excel import as_int
@@ -548,7 +550,7 @@ if ($script:TranscriptStarted) {
 
 
 def duplicate_key_count(comparison_directory):
-    summary_path = comparison_directory / "Summary.csv"
+    summary_path = find_artifact(comparison_directory, "Summary.csv")
     if not summary_path.exists():
         return 0
 
@@ -575,15 +577,15 @@ def main():
     args = parser.parse_args()
 
     comparison_directory = Path(args.comparison_directory)
-    extra_in_target_path = comparison_directory / "ExtraInTarget.csv"
+    extra_in_target_path = find_artifact(comparison_directory, "ExtraInTarget.csv")
     if not extra_in_target_path.exists():
         raise FileNotFoundError(f"ExtraInTarget.csv not found: {extra_in_target_path}")
 
     output_ps1 = Path(args.output_ps1) if args.output_ps1 else comparison_directory / "SmartM365-SharePointTarget-ExtraFilesRemove-Custom.ps1"
     duplicate_count = duplicate_key_count(comparison_directory)
     if duplicate_count > 0 and not args.allow_duplicate_keys:
-        duplicate_path = comparison_directory / "DuplicateKeys.csv"
-        duplicate_excel_path = comparison_directory / "DuplicateKeys.xlsx"
+        duplicate_path = find_artifact(comparison_directory, "DuplicateKeys.csv")
+        duplicate_excel_path = find_artifact(comparison_directory, "DuplicateKeys.xlsx")
         print("")
         print("File deletion script generation skipped.")
         print("Reason: duplicate inventory keys were found.")

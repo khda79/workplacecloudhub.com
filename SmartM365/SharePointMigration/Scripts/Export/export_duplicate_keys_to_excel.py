@@ -10,6 +10,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "Compare"))
+from comparison_artifacts import find_artifact
 
 from export_comparison_to_excel import (
     content_types,
@@ -76,7 +77,7 @@ def main():
     args = parser.parse_args()
 
     comparison_directory = Path(args.comparison_directory)
-    duplicate_keys_csv = comparison_directory / "DuplicateKeys.csv"
+    duplicate_keys_csv = find_artifact(comparison_directory, "DuplicateKeys.csv")
     if not duplicate_keys_csv.exists():
         raise FileNotFoundError(f"DuplicateKeys.csv not found: {duplicate_keys_csv}")
 

@@ -55,6 +55,12 @@ class PermissionHistoryTests(unittest.TestCase):
             self.assertIn("PermissionLevels", next(row for row in rows if row["Principal"] == "bob")["ChangedFields"])
             self.assertIn("PrincipalMemberLoginNames", next(row for row in rows if row["Principal"] == "dave")["ChangedFields"])
             self.assertIn("href=\"PermissionChanges.csv\"", (output / "PermissionHistory-Report.html").read_text(encoding="utf-8"))
+            prefixed = root / "prefixed"
+            run(old, new, prefixed, "Fixture history", "Example")
+            self.assertTrue((prefixed / "Example-PermissionChanges.csv").is_file())
+            self.assertTrue((prefixed / "Example-Summary.csv").is_file())
+            self.assertIn('href="Example-PermissionChanges.csv"',
+                          (prefixed / "Example-PermissionHistory-Report.html").read_text(encoding="utf-8"))
 
     def test_reversed_scans_are_rejected(self):
         with self.temporary_directory() as directory:

@@ -13,6 +13,7 @@ from urllib.parse import quote
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "Compare"))
+from comparison_artifacts import find_artifact
 
 from export_comparison_to_excel import (
     cell_xml,
@@ -232,7 +233,7 @@ def main():
     args = parser.parse_args()
 
     comparison_directory = Path(args.comparison_directory)
-    library_summary_path = comparison_directory / "LibrarySummary.csv"
+    library_summary_path = find_artifact(comparison_directory, "LibrarySummary.csv")
     if not library_summary_path.exists():
         raise FileNotFoundError(f"LibrarySummary.csv not found: {library_summary_path}")
 

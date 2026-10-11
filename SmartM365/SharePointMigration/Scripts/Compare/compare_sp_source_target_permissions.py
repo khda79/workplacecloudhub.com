@@ -17,6 +17,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from report_html import metric_card, render_report
 from scan_evidence import assert_inventory_complete, describe_pair
+from comparison_artifacts import artifact_name
 
 
 def print(*args, **kwargs):
@@ -1506,6 +1507,7 @@ def write_permission_comparison_report(
     disabled_entra_users=None,
     sharepoint_group_mappings=None,
     sharepoint_group_mapping_rows=None,
+    artifact_prefix="",
 ):
     output_dir.mkdir(parents=True, exist_ok=True)
     sharepoint_group_mappings = sharepoint_group_mappings or {}
@@ -1627,22 +1629,22 @@ def write_permission_comparison_report(
     ]
     permission_summary_rows = build_permission_summary(source_by_key, target_by_key, matched_keys, disabled_entra_missing_keys, missing_keys, extra_keys, target_has_more_pairs, target_has_less_pairs, permission_level_different_pairs)
 
-    summary_csv = output_dir / "Summary.csv"
-    scope_csv = output_dir / "ScopeSummary.csv"
-    permission_summary_csv = output_dir / "PermissionSummary.csv"
-    missing_csv = output_dir / "MissingInSPO.csv"
-    disabled_entra_missing_csv = output_dir / "DisabledEntraUsersNotInSPO.csv"
-    extra_csv = output_dir / "ExtraInSPO.csv"
-    target_has_more_csv = output_dir / "TargetHasMorePermissions.csv"
-    target_has_less_csv = output_dir / "TargetHasLessPermissions.csv"
-    permission_level_different_csv = output_dir / "PermissionLevelDifferent.csv"
-    matched_csv = output_dir / "Matched.csv"
-    duplicate_source_csv = output_dir / "DuplicateKeys-Source.csv"
-    duplicate_target_csv = output_dir / "DuplicateKeys-Target.csv"
-    limited_access_source_csv = output_dir / "LimitedAccessOnly-Source.csv"
-    limited_access_target_csv = output_dir / "LimitedAccessOnly-Target.csv"
-    source_users_not_in_entra_csv = output_dir / "SourceUsersNotInEntra.csv"
-    sharepoint_group_mappings_csv = output_dir / "SharePointGroupMappings.csv"
+    summary_csv = output_dir / artifact_name("Summary.csv", artifact_prefix)
+    scope_csv = output_dir / artifact_name("ScopeSummary.csv", artifact_prefix)
+    permission_summary_csv = output_dir / artifact_name("PermissionSummary.csv", artifact_prefix)
+    missing_csv = output_dir / artifact_name("MissingInSPO.csv", artifact_prefix)
+    disabled_entra_missing_csv = output_dir / artifact_name("DisabledEntraUsersNotInSPO.csv", artifact_prefix)
+    extra_csv = output_dir / artifact_name("ExtraInSPO.csv", artifact_prefix)
+    target_has_more_csv = output_dir / artifact_name("TargetHasMorePermissions.csv", artifact_prefix)
+    target_has_less_csv = output_dir / artifact_name("TargetHasLessPermissions.csv", artifact_prefix)
+    permission_level_different_csv = output_dir / artifact_name("PermissionLevelDifferent.csv", artifact_prefix)
+    matched_csv = output_dir / artifact_name("Matched.csv", artifact_prefix)
+    duplicate_source_csv = output_dir / artifact_name("DuplicateKeys-Source.csv", artifact_prefix)
+    duplicate_target_csv = output_dir / artifact_name("DuplicateKeys-Target.csv", artifact_prefix)
+    limited_access_source_csv = output_dir / artifact_name("LimitedAccessOnly-Source.csv", artifact_prefix)
+    limited_access_target_csv = output_dir / artifact_name("LimitedAccessOnly-Target.csv", artifact_prefix)
+    source_users_not_in_entra_csv = output_dir / artifact_name("SourceUsersNotInEntra.csv", artifact_prefix)
+    sharepoint_group_mappings_csv = output_dir / artifact_name("SharePointGroupMappings.csv", artifact_prefix)
 
     write_csv(summary_csv, summary_rows, list(summary_rows[0].keys()))
     write_csv(scope_csv, scope_rows, ["ObjectScope", "Status", "Count"])
@@ -1676,7 +1678,7 @@ def write_permission_comparison_report(
     write_csv(sharepoint_group_mappings_csv, sharepoint_group_mapping_rows, ["MappingSourceWebPath", "MappingTargetWebPath", "MappingSourceObjectPath", "MappingRole", "MappingSourcePrincipalName", "MappingTargetPrincipalName", "MappingTargetComparisonPrincipal", "MappingMethod"])
 
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    xlsx_path = output_dir / f"{comparison_name}-{timestamp}.xlsx"
+    xlsx_path = output_dir / artifact_name(f"{comparison_name}-{timestamp}.xlsx", artifact_prefix)
     create_xlsx(
         xlsx_path,
         [
@@ -1699,7 +1701,7 @@ def write_permission_comparison_report(
         ],
     )
 
-    html_path = output_dir / f"{comparison_name}-summary-{timestamp}.html"
+    html_path = output_dir / artifact_name(f"{comparison_name}-summary-{timestamp}.html", artifact_prefix)
     create_permission_html_summary(
         html_path,
         f"{comparison_name} - {report_scope}",
@@ -1745,6 +1747,7 @@ def main():
     parser.add_argument("--path-mapping-file")
     parser.add_argument("--sharegate-replacement-character", default="_")
     parser.add_argument("--comparison-name", default="SP2019-vs-SPO-Permissions")
+    parser.add_argument("--artifact-prefix", default="")
     parser.add_argument("--max-scan-age-difference-hours", type=float, default=24)
     parser.add_argument("--max-scan-age-hours", type=float, default=48)
     parser.add_argument("--source-scan-document-libraries-only", action="store_true")
@@ -1897,22 +1900,22 @@ def main():
     ]
     permission_summary_rows = build_permission_summary(source_by_key, target_by_key, matched_keys, disabled_entra_missing_keys, missing_keys, extra_keys, target_has_more_pairs, target_has_less_pairs, permission_level_different_pairs)
 
-    summary_csv = output_dir / "Summary.csv"
-    scope_csv = output_dir / "ScopeSummary.csv"
-    permission_summary_csv = output_dir / "PermissionSummary.csv"
-    missing_csv = output_dir / "MissingInSPO.csv"
-    disabled_entra_missing_csv = output_dir / "DisabledEntraUsersNotInSPO.csv"
-    extra_csv = output_dir / "ExtraInSPO.csv"
-    target_has_more_csv = output_dir / "TargetHasMorePermissions.csv"
-    target_has_less_csv = output_dir / "TargetHasLessPermissions.csv"
-    permission_level_different_csv = output_dir / "PermissionLevelDifferent.csv"
-    matched_csv = output_dir / "Matched.csv"
-    duplicate_source_csv = output_dir / "DuplicateKeys-Source.csv"
-    duplicate_target_csv = output_dir / "DuplicateKeys-Target.csv"
-    limited_access_source_csv = output_dir / "LimitedAccessOnly-Source.csv"
-    limited_access_target_csv = output_dir / "LimitedAccessOnly-Target.csv"
-    source_users_not_in_entra_csv = output_dir / "SourceUsersNotInEntra.csv"
-    sharepoint_group_mappings_csv = output_dir / "SharePointGroupMappings.csv"
+    summary_csv = output_dir / artifact_name("Summary.csv", args.artifact_prefix)
+    scope_csv = output_dir / artifact_name("ScopeSummary.csv", args.artifact_prefix)
+    permission_summary_csv = output_dir / artifact_name("PermissionSummary.csv", args.artifact_prefix)
+    missing_csv = output_dir / artifact_name("MissingInSPO.csv", args.artifact_prefix)
+    disabled_entra_missing_csv = output_dir / artifact_name("DisabledEntraUsersNotInSPO.csv", args.artifact_prefix)
+    extra_csv = output_dir / artifact_name("ExtraInSPO.csv", args.artifact_prefix)
+    target_has_more_csv = output_dir / artifact_name("TargetHasMorePermissions.csv", args.artifact_prefix)
+    target_has_less_csv = output_dir / artifact_name("TargetHasLessPermissions.csv", args.artifact_prefix)
+    permission_level_different_csv = output_dir / artifact_name("PermissionLevelDifferent.csv", args.artifact_prefix)
+    matched_csv = output_dir / artifact_name("Matched.csv", args.artifact_prefix)
+    duplicate_source_csv = output_dir / artifact_name("DuplicateKeys-Source.csv", args.artifact_prefix)
+    duplicate_target_csv = output_dir / artifact_name("DuplicateKeys-Target.csv", args.artifact_prefix)
+    limited_access_source_csv = output_dir / artifact_name("LimitedAccessOnly-Source.csv", args.artifact_prefix)
+    limited_access_target_csv = output_dir / artifact_name("LimitedAccessOnly-Target.csv", args.artifact_prefix)
+    source_users_not_in_entra_csv = output_dir / artifact_name("SourceUsersNotInEntra.csv", args.artifact_prefix)
+    sharepoint_group_mappings_csv = output_dir / artifact_name("SharePointGroupMappings.csv", args.artifact_prefix)
 
     write_csv(summary_csv, summary_rows, list(summary_rows[0].keys()))
     write_csv(scope_csv, scope_rows, ["ObjectScope", "Status", "Count"])
@@ -1946,7 +1949,7 @@ def main():
     write_csv(sharepoint_group_mappings_csv, sharepoint_group_mapping_rows, ["MappingSourceWebPath", "MappingTargetWebPath", "MappingSourceObjectPath", "MappingRole", "MappingSourcePrincipalName", "MappingTargetPrincipalName", "MappingTargetComparisonPrincipal", "MappingMethod"])
 
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    xlsx_path = output_dir / f"{args.comparison_name}-{timestamp}.xlsx"
+    xlsx_path = output_dir / artifact_name(f"{args.comparison_name}-{timestamp}.xlsx", args.artifact_prefix)
     create_xlsx(
         xlsx_path,
         [
@@ -1969,7 +1972,7 @@ def main():
         ],
     )
 
-    html_path = output_dir / f"{args.comparison_name}-summary-{timestamp}.html"
+    html_path = output_dir / artifact_name(f"{args.comparison_name}-summary-{timestamp}.html", args.artifact_prefix)
     create_permission_html_summary(
         html_path,
         args.comparison_name,
@@ -2009,6 +2012,7 @@ def main():
         disabled_entra_users=disabled_entra_users,
         sharepoint_group_mappings=sharepoint_group_mappings,
         sharepoint_group_mapping_rows=sharepoint_group_mapping_rows,
+        artifact_prefix=args.artifact_prefix,
     )
     other_scope_report = write_permission_comparison_report(
         [row for row in source_rows if not is_document_library_permission(row)],
@@ -2025,6 +2029,7 @@ def main():
         disabled_entra_users=disabled_entra_users,
         sharepoint_group_mappings=sharepoint_group_mappings,
         sharepoint_group_mapping_rows=sharepoint_group_mapping_rows,
+        artifact_prefix=args.artifact_prefix,
     )
     print(f"Comparison completed.")
     print(f"Matched permissions: {len(matched_keys)}")

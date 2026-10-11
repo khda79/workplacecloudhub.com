@@ -16,6 +16,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from report_html import metric_card, render_report
 from scan_evidence import describe_pair, manifest_path
+from comparison_artifacts import artifact_name
 
 
 def verified_empty_target_scan(path, target_rows):
@@ -1330,6 +1331,7 @@ def main():
     parser.add_argument("--source-web-urls-file")
     parser.add_argument("--target-web-urls-file")
     parser.add_argument("--comparison-name", default="SharePointInventoryComparison")
+    parser.add_argument("--artifact-prefix", default="")
     parser.add_argument("--size-tolerance-bytes", type=int, default=10240)
     parser.add_argument("--max-scan-age-difference-hours", type=float, default=12)
     parser.add_argument("--max-scan-age-hours", type=float, default=24)
@@ -1365,16 +1367,16 @@ def main():
     output_directory.mkdir(parents=True, exist_ok=True)
     compare_modified_dates = args.modified_date_tolerance_minutes >= 0
 
-    missing_path = output_directory / "MissingInTarget.csv"
-    missing_diagnostics_path = output_directory / "MissingDiagnostics.csv"
-    extra_path = output_directory / "ExtraInTarget.csv"
-    extra_folders_path = output_directory / "ExtraFoldersInTarget.csv"
-    different_size_path = output_directory / "DifferentSize.csv"
-    changed_modified_date_path = output_directory / "ChangedModifiedDate.csv"
-    target_older_than_source_path = output_directory / "TargetOlderThanSource.csv"
-    changed_version_path = output_directory / "ChangedVersion.csv"
-    duplicate_keys_path = output_directory / "DuplicateKeys.csv"
-    summary_path = output_directory / "Summary.csv"
+    missing_path = output_directory / artifact_name("MissingInTarget.csv", args.artifact_prefix)
+    missing_diagnostics_path = output_directory / artifact_name("MissingDiagnostics.csv", args.artifact_prefix)
+    extra_path = output_directory / artifact_name("ExtraInTarget.csv", args.artifact_prefix)
+    extra_folders_path = output_directory / artifact_name("ExtraFoldersInTarget.csv", args.artifact_prefix)
+    different_size_path = output_directory / artifact_name("DifferentSize.csv", args.artifact_prefix)
+    changed_modified_date_path = output_directory / artifact_name("ChangedModifiedDate.csv", args.artifact_prefix)
+    target_older_than_source_path = output_directory / artifact_name("TargetOlderThanSource.csv", args.artifact_prefix)
+    changed_version_path = output_directory / artifact_name("ChangedVersion.csv", args.artifact_prefix)
+    duplicate_keys_path = output_directory / artifact_name("DuplicateKeys.csv", args.artifact_prefix)
+    summary_path = output_directory / artifact_name("Summary.csv", args.artifact_prefix)
 
     source_index = {}
     source_folder_keys = set()
@@ -1789,7 +1791,7 @@ def main():
                     missing_diagnostic_count += 1
 
     report_timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    html_summary_path = output_directory / f"{args.comparison_name}-summary-{report_timestamp}.html"
+    html_summary_path = output_directory / artifact_name(f"{args.comparison_name}-summary-{report_timestamp}.html", args.artifact_prefix)
 
     scan_description = describe_pair(source_csv, target_csv, args.max_scan_age_difference_hours, args.max_scan_age_hours)
     target_empty_verified = verified_empty_target_scan(target_csv, target_total_rows) if not target_seen else False
@@ -1858,7 +1860,7 @@ def main():
         ):
             writer.writerow({column: entry.get(column, "") for column in EXTRA_FOLDER_COLUMNS})
 
-    library_summary_path = output_directory / "LibrarySummary.csv"
+    library_summary_path = output_directory / artifact_name("LibrarySummary.csv", args.artifact_prefix)
     library_summary_rows = []
     with library_summary_path.open("w", encoding="utf-8", newline="") as library_summary_handle:
         writer = csv.DictWriter(library_summary_handle, fieldnames=LIBRARY_SUMMARY_COLUMNS, delimiter=CSV_OUTPUT_DELIMITER)

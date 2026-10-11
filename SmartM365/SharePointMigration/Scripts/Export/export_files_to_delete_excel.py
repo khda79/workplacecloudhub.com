@@ -11,6 +11,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "Compare"))
+from comparison_artifacts import find_artifact
 
 from export_comparison_to_excel import (
     cell_xml,
@@ -180,7 +181,7 @@ def main():
     args = parser.parse_args()
 
     comparison_directory = Path(args.comparison_directory)
-    extra_in_target_path = comparison_directory / "ExtraInTarget.csv"
+    extra_in_target_path = find_artifact(comparison_directory, "ExtraInTarget.csv")
     if not extra_in_target_path.exists():
         raise FileNotFoundError(f"ExtraInTarget.csv not found: {extra_in_target_path}")
 

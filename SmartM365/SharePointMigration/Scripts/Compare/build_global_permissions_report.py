@@ -14,6 +14,7 @@ from uuid import uuid4
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from build_global_report import comparison_scan_evidence, download_bar, roots, stamp, write_global_workbook
 from report_html import metric_card, render_report
+from comparison_artifacts import find_artifact
 
 
 COUNT_FIELDS = {
@@ -47,7 +48,7 @@ def latest_summary(migration):
     runs = sorted((item for item in root.iterdir() if item.is_dir()),
                   key=lambda item: (stamp(item.name), item.name), reverse=True)
     for run in runs:
-        path = run / "Summary.csv"
+        path = find_artifact(run, "Summary.csv")
         if not path.is_file():
             continue
         row = read_summary(path)

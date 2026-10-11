@@ -56,6 +56,8 @@ param(
     [ValidateNotNullOrEmpty()]
     [string]$ComparisonName = 'InventoryHistory',
 
+    [string]$ArtifactPrefix = '',
+
     [long]$SizeToleranceBytes = 10240,
 
     [ValidateRange(0, [double]::MaxValue)]
@@ -415,6 +417,7 @@ $compareArguments = @(
     '--target-csv', $NewCsv,
     '--output-directory', $OutputDirectory,
     '--comparison-name', $ComparisonName,
+    '--artifact-prefix', $ArtifactPrefix,
     '--size-tolerance-bytes', $SizeToleranceBytes,
     '--modified-date-tolerance-minutes', $ModifiedDateToleranceMinutes
 )
@@ -425,7 +428,8 @@ if (-not [string]::IsNullOrWhiteSpace($WebUrlsFile)) {
 
 Invoke-LoggedPythonCommand -Arguments $compareArguments -FailureMessage 'Python comparison'
 
-$comparisonXlsx = Join-Path -Path $OutputDirectory -ChildPath ("{0}-{1}-Changes-{2}.xlsx" -f $Side, $EndpointType, $comparisonTimestampText)
+$artifactPrefixText = if ($ArtifactPrefix) { "$ArtifactPrefix-" } else { '' }
+$comparisonXlsx = Join-Path -Path $OutputDirectory -ChildPath ("{0}{1}-{2}-Changes-{3}.xlsx" -f $artifactPrefixText, $Side, $EndpointType, $comparisonTimestampText)
 $comparisonExcelArguments = @(
     $comparisonExcelScript,
     '--comparison-directory', $OutputDirectory,
@@ -434,7 +438,7 @@ $comparisonExcelArguments = @(
 )
 Invoke-LoggedPythonCommand -Arguments $comparisonExcelArguments -FailureMessage 'Excel export'
 
-$duplicateKeysXlsx = Join-Path -Path $OutputDirectory -ChildPath ("{0}-{1}-DuplicateKeys-{2}.xlsx" -f $Side, $EndpointType, $comparisonTimestampText)
+$duplicateKeysXlsx = Join-Path -Path $OutputDirectory -ChildPath ("{0}{1}-{2}-DuplicateKeys-{3}.xlsx" -f $artifactPrefixText, $Side, $EndpointType, $comparisonTimestampText)
 $duplicateKeysExcelArguments = @(
     $duplicateKeysExcelScript,
     '--comparison-directory', $OutputDirectory,
@@ -460,8 +464,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA4q71GJZL4jYTZ
-# 7yzObej4oB+3C56ah6hNF8XOQGbrHKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAKyzySOwhZvU2c
+# BF+TI1/nUOrhPadhbljc6LsSt+9NzKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -594,31 +598,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIIw+3ANNMm/CQ7WpXuuO1jiQmEMrGrj3999hcVNniRMvMA0GCSqG
-# SIb3DQEBAQUABIIBgKvHqLlpNJT0vU9i7S2dRCRZfQxKokEiEFLWKuE80w6yGc1Z
-# /jREm8PBDf1RhD+6byQRQfz0vj8lBTpHYN62VvgeIgHYeu2XbkWIZYcJ0GuZE6Rz
-# lpgrOudgpJQpUnkJm1o2Yus0FPVMupxQ4EXgStLIA9rgSjLANu3w8N0qw1khJd18
-# Kan429AoGwNrebJD1CSdjoTAQoA0g1T9I2YxMKonPZhvgArJJJlN8U4qLQdSBL6s
-# gZdbd3zIDbhM+wrRD11hdx4ow02ypdAvxeaLWVb3is2FpDE3FYO5HnBfFcwBFfEL
-# saQwMgEsED2c0PHr72fTMRJzSzrs66E1i3mklbibNzWG/XzdgwXDsoyPc5I43Xir
-# YIt8N/hBuGS+7LFnbo+RUqBKM0OZ5ktviad02OLLLL6yPuNBCu3WLuRTChQtaLp2
-# Xu2SBaRTNfp3fNEXZGT6TIGvz2PEFqzqOIiEumrM+C7qJlOJrcbfoGg8xfsYMFnl
-# 8vQqQ/T1uOpdNT7WdqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIKEZkVAHSiE7M83IvXYjmCQIeAnnTeGWJDDslbSKELYhMA0GCSqG
+# SIb3DQEBAQUABIIBgBz8W5v2rUQ5SrV/sZdjs40LUoWQgXXR7yt5lhTdBzx3wyE2
+# WlolTQmGlrZ0jlds20MSFS0Bgts4hP1MoHN0VVRyziMaJZQz0hmyHXzZwME2/6Dz
+# LOCRRdALotpr7PwK0K9PynE56kAvMga9Et45HyTwxmxiUXJC3+ch8rcoajhsqqO/
+# nzudzDQUIVih41yB+DWNr9jQDVhXB1Nh1CdU1/kYOYBc17ARRf/h5AwpQQbkGRK5
+# 5auiYZ+lIVM3iu5bnv9DwDFg7cjgTNZPD+kvpPEdC7SLl5OQ+BtvJFFy8A+Lf9tc
+# Nq4FjpX9+shDgadP+h5nSG2EEHdZ0CXMqm2pdhxxnwaLPKCO9Mf4E73Hzan3PT0K
+# X7KzAfAKVo+hbqPrrp/GlO8e9X2zu+QbXpdPCwb0uTJkeQcRAQt9f0yIV69bTjdC
+# qb+hDhUya+e6wstXpsTyrnttFUaEk2/01tAYPv5VRiv2vuq+nRn5XrlB/CE4wGwW
+# vqXnINp3u2Kn5H20yKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMxNDA3
-# NTZaMC8GCSqGSIb3DQEJBDEiBCDWSGu6ZmCceb6O6pv3cxF6B/lifY1UXAax1xE4
-# 5kPH2zANBgkqhkiG9w0BAQEFAASCAgAwuQE8jD03v4DKiYUZHflSHToDSdajeS2N
-# cBS0kz7JzdqECuZVJdj23jT/Uh9SKJPOyRptTYji05B7IfgHsTFhj1mapkok3MhK
-# TdH6/U4BGKAkDGnipW5oYL6HUvthVEQc84e9h4ZbqNJ3RQQI5z3d8q+TiyC+R0Rt
-# GDS2iuaCo7muIdRMGvjGrFfCXULwSH32/xBMKgc5U5PH9yHoWnG1fwC3kYdowNqN
-# s3SDBaz5mnUy9xWWAXlV9lBsQdrNCwEVUbpbUF/tvnaN+NbgkS5M2MxcoSmyXnKj
-# ltbR7mAHyMQoDzKAfntORCejIPAghQwN/z2c4mnSv97tvUgYTsLKG4h21kZ0d3tp
-# WXp9XTtuJSsTKD/y84LTG8xCRO63eXztyPhYrPoPYaXZbK+td1EnJEhmjfillt5z
-# p8wDZGCppJF/Pjt2CDKQxgjmFyUsINuCnjIBi9k7VC9Tsfnu224bUaNImyEW3R9/
-# 9hYPBlhXccRKLJlYUwYPOAKNVArIzmAkw6sYlr9PeDGsPxYGX8Gci5oUfUGx53lR
-# Gzvek/cyYJLCvn2ayZMqi5k0T/j7nV+532fih71inIUMzmdILpcpfqqbfVYjvyxy
-# RO9x9usj9DstEpMkYq0TRYsC5HAc1GxYD7q0gt58yCUaX+YEVropPQCpi8K4yiYe
-# gBoYeyeMew==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTEwOTM1
+# NDVaMC8GCSqGSIb3DQEJBDEiBCCwp42FcsFV35QuQ1APSyS6vAfDfjn7izh+u1St
+# KK1WazANBgkqhkiG9w0BAQEFAASCAgAt4DQb1j0kiwX6RsDSRUgMDSSGmhBNWcyo
+# CuYagcKXxEn3W7WtqQRVorrl1EH1cXVFZw/yMlX0fYnkG53kftpEstETKnsl/qEb
+# +MonyDkkRsBotaer6/JL5qAQtWlJnc3EQveFoNzGgazd+NBZk+fRqdEmy+HAx50U
+# 2dEakeRUc9g6jcaEO/j5kFrJXhPbRF+qoYveL7vWCKHsoKPkG44V6BRylfgF2Jdc
+# s4nHUvgx3OHorqodAHa2F4m1T+1JFUpYEHXhJ3/3DFGoQ0q72YFZbGqMe8LUZIxo
+# ticIHss8CJaP7/jj11eoeiVBtbqV67GCBOWb4E5vK2KsqKc5t5OraVt491sLFiJW
+# Dk1gbUwh5mB5humF4/M5+NM2jT50Zo4KLkiea0ADEgXJzk2EQUFybtebai5RvI8W
+# KqrVlI1vh7NjWRRqMOV6k0BOCXSXshUNe42hJeSZfAdqL5qPVTe6QR4WJV4RzDFM
+# wpw+NKP30HLOPxxAXLqgcjzVWbjOS4UMXaEbSk/JoYYofmcrjdSpqoPfyjcVsDvk
+# MQlXQDK27EOVa90G0QBBcuOg+RNrznQt0LTlGdoc79wWhO8ka5T8nOGba4b+C7+Z
+# YPlTUVlHWZcqs9IbqbltLiKn9gPwvol/QHgjWxpbQZ3/gmsodXHfMtbOEMAk0zt2
+# JnKypGofGQ==
 # SIG # End signature block
