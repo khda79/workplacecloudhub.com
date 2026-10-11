@@ -11,6 +11,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "Compare"))
+from comparison_artifacts import find_artifact
 
 from export_comparison_to_excel import (
     cell_xml,
@@ -62,7 +63,7 @@ NUMERIC_COLUMNS = {
 
 
 def build_delete_folder_rows(comparison_directory):
-    extra_folders_path = Path(comparison_directory) / "ExtraFoldersInTarget.csv"
+    extra_folders_path = find_artifact(Path(comparison_directory), "ExtraFoldersInTarget.csv")
     if not extra_folders_path.exists():
         raise FileNotFoundError(f"ExtraFoldersInTarget.csv not found: {extra_folders_path}")
 
