@@ -9,8 +9,9 @@
   BypassLicenseUsersReceipt temporarily accepts the fresh license-users CSV when its file receipt is missing or a new collection is running over a prior CSV.
   ForceLicenseSummaryEmail sends the report again even when it was already sent on the current Europe/Paris day.
   The report also lists target-suite users awaiting license capacity and other assignment errors from qualified existing CSVs.
+  Qualified PartialAccepted AD coverage is usable but remains provisional; available allowlisted domains remain included.
 .VERSION
- 1.44
+ 1.45
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication; Microsoft.Graph.Identity.DirectoryManagement; Microsoft.Graph.Users; Microsoft.Graph.Groups; ImportExcel for the report attachment.
@@ -18,7 +19,7 @@
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
   Author: https://github.com/khda79/workplacecloudhub.com
-     Version : 1.44
+     Version : 1.45
   PowerShell: PowerShell 7+
   Minimum application permissions: Directory.Read.All, User.Read.All, Group.Read.All
   Requires: Microsoft.Graph.Authentication
@@ -697,6 +698,53 @@ function ConvertTo-LicensesMailboxSizeGb {
   return $null
 }
 
+function Get-LicensesQualifiedPartialAdCoverage {
+  param([Parameter(Mandatory)]$Manifest, [Parameter(Mandatory)]$FileRecord)
+  $adScope = 'CMDB:ad_users,ad_computers,ad_domains,ad_groups,ad_objects,ad_members'
+  if ($Manifest.Producer -cne 'SmartM365-ActiveDirectory-Inventory.ps1' -or
+      $Manifest.Status -cne 'Completed' -or $Manifest.Scope -cne $adScope -or
+      $Manifest.ScopeQualification -cne 'ConsumerScope' -or $Manifest.Errors -ne 0 -or
+      $Manifest.ConsumerScopeQualified -isnot [bool] -or -not $Manifest.ConsumerScopeQualified -or
+      $Manifest.IsPartialInventory -isnot [bool] -or -not $Manifest.IsPartialInventory -or
+      $Manifest.FullInventoryQualified -isnot [bool] -or $Manifest.FullInventoryQualified -or
+      $FileRecord.File -cne 'AD_Users_AllDomains.csv' -or $FileRecord.Status -cne 'Success' -or
+      $FileRecord.Errors -ne 0 -or $FileRecord.Scope -cne $adScope -or
+      $FileRecord.IsPartialInventory -isnot [bool] -or -not $FileRecord.IsPartialInventory -or
+      @($Manifest.RequiredFiles) -notcontains 'AD_Users_AllDomains.csv') {
+    throw 'Partial AD producer/file identity, status or consumer scope is not qualified.'
+  }
+  $sets = @{}
+  foreach ($coverage in @($Manifest.DomainCoverage, $FileRecord.DomainCoverage)) {
+    if ($coverage.Kind -cne 'ADDomainCoverage' -or $coverage.Status -cne 'PartialAccepted' -or
+        $coverage.Reason -cne 'NonBlockingDomainErrors') { throw 'Accepted AD domain coverage is missing.' }
+    $current = @{}
+    foreach ($field in @('ExpectedDomains','CollectedDomains','UnavailableDomains','NonBlockingDomainErrors')) {
+      $set = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+      foreach ($domain in @($coverage.$field)) {
+        if ($domain -isnot [string] -or $domain -notmatch '^[a-zA-Z0-9](?:[a-zA-Z0-9.-]*[a-zA-Z0-9])?$' -or
+            -not $set.Add($domain)) { throw "Invalid or duplicate AD coverage domain: $field" }
+      }
+      $current[$field] = $set
+    }
+    if (-not $current.ExpectedDomains.Count -or -not $current.CollectedDomains.Count -or
+        -not $current.UnavailableDomains.Count -or
+        $current.CollectedDomains.Overlaps($current.UnavailableDomains) -or
+        -not $current.UnavailableDomains.IsSubsetOf($current.NonBlockingDomainErrors)) {
+      throw 'Partial AD domains are empty, overlapping or not explicitly tolerated.'
+    }
+    $union = [Collections.Generic.HashSet[string]]::new($current.CollectedDomains, [StringComparer]::OrdinalIgnoreCase)
+    $union.UnionWith($current.UnavailableDomains)
+    if (-not $union.SetEquals($current.ExpectedDomains)) { throw 'AD coverage does not account for every expected domain.' }
+    if ($sets.Count) {
+      foreach ($field in $current.Keys) {
+        if (-not $sets[$field].SetEquals($current[$field])) { throw 'AD file and producer domain coverage differ.' }
+      }
+    }
+    else { $sets = $current }
+  }
+  return $Manifest.DomainCoverage
+}
+
 function Get-LicensesCsvSource {
   param(
     [Parameter(Mandatory)][string]$Folder,
@@ -705,10 +753,11 @@ function Get-LicensesCsvSource {
     [Parameter(Mandatory)][datetime]$AsOfUtc,
     [string]$CollectorManifestName = '',
     [switch]$RequireFileReceipt,
-    [switch]$RequireConsumerScope
+    [switch]$RequireConsumerScope,
+    [switch]$AllowQualifiedPartialAdScope
   )
   $path = Join-Path -Path $Folder -ChildPath $FileName
-  $source = [pscustomobject]@{ Name=$FileName; Path=$path; Ready=$false; Reason=''; Date=''; ModifiedUtc=$null; Provenance='CSV only'; Forced=$false; SHA256=''; ReceiptPath=''; ReceiptHash=''; Proof=$null }
+  $source = [pscustomobject]@{ Name=$FileName; Path=$path; Ready=$false; Reason=''; Date=''; ModifiedUtc=$null; Provenance='CSV only'; Forced=$false; PartialScopeAccepted=$false; DomainCoverage=$null; SHA256=''; ReceiptPath=''; ReceiptHash=''; Proof=$null }
   if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { $source.Reason='missing'; return $source }
   $item = Get-Item -LiteralPath $path
   $source.ModifiedUtc = $item.LastWriteTimeUtc
@@ -727,7 +776,17 @@ function Get-LicensesCsvSource {
         $manifestHash=(Get-FileHash -LiteralPath $manifestPath -Algorithm SHA256).Hash
         $manifest = Get-Content -LiteralPath $manifestPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
         Assert-SmartM365SourcePublication -ReceiptPath $manifestPath -Proof $manifest
-        if ([string]$manifest.Status -ne 'Completed' -or [bool]$manifest.IsPartialInventory) {
+        $partialAdCoverage = $null
+        if ($AllowQualifiedPartialAdScope -and $FileName -ceq 'AD_Users_AllDomains.csv' -and [bool]$manifest.IsPartialInventory) {
+          try {
+            $adFile = @($manifest.Files | Where-Object { $_.File -ceq $FileName })
+            if ($adFile.Count -ne 1) { throw 'Exactly one AD file receipt is required.' }
+            $partialAdCoverage = Get-LicensesQualifiedPartialAdCoverage -Manifest $manifest -FileRecord $adFile[0]
+            if ($foundColumns -notcontains 'DomainName') { throw 'Partial AD CSV requires DomainName.' }
+          }
+          catch { $source.Reason = "collector receipt partial AD scope is not qualified: $($_.Exception.Message)"; return $source }
+        }
+        if ([string]$manifest.Status -ne 'Completed' -or ([bool]$manifest.IsPartialInventory -and -not $partialAdCoverage)) {
           $source.Reason = "collector receipt is $($manifest.Status) or partial"
           return $source
         }
@@ -741,11 +800,11 @@ function Get-LicensesCsvSource {
           return $source
         }
         if ($fileReceipts.Count -gt 1 -or ($fileReceipts.Count -eq 1 -and
-            ([string]$fileReceipts[0].Status -ne 'Success' -or [bool]$fileReceipts[0].IsPartialInventory))) {
+            ([string]$fileReceipts[0].Status -ne 'Success' -or ([bool]$fileReceipts[0].IsPartialInventory -and -not $partialAdCoverage)))) {
           $source.Reason = 'file receipt is not a single successful complete export'
           return $source
         }
-        if ($RequireFileReceipt -or $manifest.PSObject.Properties['PublicationProtocol']) {
+        if ($RequireFileReceipt -or $partialAdCoverage -or $manifest.PSObject.Properties['PublicationProtocol']) {
           if (-not [string]$fileReceipts[0].SHA256 -or
               (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash -ne [string]$fileReceipts[0].SHA256) {
             $source.Reason = 'file hash differs from collector receipt'
@@ -753,6 +812,13 @@ function Get-LicensesCsvSource {
           }
         }
         $source.Provenance = 'collector completed'
+        if ($partialAdCoverage) {
+          $source.PartialScopeAccepted = $true
+          $source.DomainCoverage = $partialAdCoverage
+          $source.Reason = 'Qualified partial AD scope: {0}/{1} domains collected; tolerated unavailable domains: {2}. Full inventory coverage is not qualified.' -f
+            @($partialAdCoverage.CollectedDomains).Count, @($partialAdCoverage.ExpectedDomains).Count, (@($partialAdCoverage.UnavailableDomains) -join ', ')
+          $source.Provenance = $source.Reason
+        }
         $source.ReceiptPath=$manifestPath
         $source.ReceiptHash=$manifestHash
         if ((Get-FileHash -LiteralPath $manifestPath -Algorithm SHA256).Hash -cne $manifestHash) { throw 'collector receipt changed during validation' }
@@ -1025,9 +1091,9 @@ function Get-LicensesAdAccountActivitySummary {
     [Parameter(Mandatory)][datetime]$Cutoff
   )
   $result = [pscustomobject]@{
-    Available=$false; Provisional=[bool]$AdSource.Forced; Members=0; AdObserved=0
+    Available=$false; Provisional=([bool]$AdSource.Forced -or ($AdSource.PSObject.Properties['PartialScopeAccepted'] -and $AdSource.PartialScopeAccepted)); Members=0; AdObserved=0
     AdEnabledRecent=0; AdEnabledInactive=0; AdEnabledNoDate=0; AdEnabledUnknown=0
-    AdDisabled=0; Ambiguous=0; NoObservedMatch=0; Reason=''
+    AdDisabled=0; Ambiguous=0; NoObservedMatch=0; UnmatchedScopeUnknown=0; Reason=''
   }
   if (-not $MailboxGap.NoUserMailbox.Available) {
     $result.Reason = [string]$MailboxGap.NoUserMailbox.Reason
@@ -1049,7 +1115,11 @@ function Get-LicensesAdAccountActivitySummary {
       continue
     }
     $ad = if ($byImmutable) { $byImmutable } else { $byUpn }
-    if (-not $ad) { $result.NoObservedMatch++; continue }
+    if (-not $ad) {
+      if ($AdSource.PSObject.Properties['PartialScopeAccepted'] -and $AdSource.PartialScopeAccepted) { $result.UnmatchedScopeUnknown++ }
+      else { $result.NoObservedMatch++ }
+      continue
+    }
     $result.AdObserved++
     $enabled = ([string]$ad.Enabled).Trim().ToLowerInvariant()
     if ($enabled -eq 'false') { $result.AdDisabled++; continue }
@@ -1059,11 +1129,15 @@ function Get-LicensesAdAccountActivitySummary {
     elseif ($lastLogon -ge $Cutoff) { $result.AdEnabledRecent++ }
     else { $result.AdEnabledInactive++ }
   }
-  if ($result.AdObserved + $result.Ambiguous + $result.NoObservedMatch -ne $result.Members -or
+  if ($result.AdObserved + $result.Ambiguous + $result.NoObservedMatch + $result.UnmatchedScopeUnknown -ne $result.Members -or
       $result.AdEnabledRecent + $result.AdEnabledInactive + $result.AdEnabledNoDate + $result.AdEnabledUnknown + $result.AdDisabled -ne $result.AdObserved) {
     throw 'AD account activity categories do not reconcile with section 07 members.'
   }
   $result.Available = $true
+  if ($AdSource.PSObject.Properties['PartialScopeAccepted'] -and $AdSource.PartialScopeAccepted) {
+    $result.NoObservedMatch = $null
+    $result.Reason = $AdSource.Reason + " $($result.UnmatchedScopeUnknown) unmatched section 07 member(s) remain unassessed; their AD domain cannot be inferred from their UPN. Members retains the Entra section 07 population, not an exhaustive AD population."
+  }
   return $result
 }
 
@@ -1249,7 +1323,7 @@ function Get-LicensesFocusedUsageRows {
     }
   }
 
-  $adSource = Get-LicensesCsvSource -Folder $CsvFolderPath -FileName 'AD_Users_AllDomains.csv' -Columns @('TenantKey','ImmutableId_AD','UserPrincipalName','Enabled','LastLogonDate') -AsOfUtc $AsOfUtc -CollectorManifestName 'SmartInventory_SmartM365-ActiveDirectory-Inventory.current.json.txt'
+  $adSource = Get-LicensesCsvSource -Folder $CsvFolderPath -FileName 'AD_Users_AllDomains.csv' -Columns @('TenantKey','ImmutableId_AD','UserPrincipalName','Enabled','LastLogonDate') -AsOfUtc $AsOfUtc -CollectorManifestName 'SmartInventory_SmartM365-ActiveDirectory-Inventory.current.json.txt' -AllowQualifiedPartialAdScope
   $adReceiptReason = ''
   if ($ForceAdCsvAnalysis -and -not $adSource.Ready -and $adSource.Reason -match '^(collector receipt|file receipt)') {
     $adReceiptReason = [string]$adSource.Reason
@@ -1263,6 +1337,9 @@ function Get-LicensesFocusedUsageRows {
     try {
       Import-LicensesSourceCsv -Source $adSource | ForEach-Object {
         if ([string]$_.TenantKey -ine $ExpectedTenantKey) { throw 'another tenant is present' }
+        if ($adSource.PartialScopeAccepted -and ([string]$_.DomainName).Trim() -notin @($adSource.DomainCoverage.CollectedDomains)) {
+          throw 'AD CSV row is outside the qualified collected domains.'
+        }
         $immutableId = ([string]$_.ImmutableId_AD).Trim().ToLowerInvariant()
         $upn = ([string]$_.UserPrincipalName).Trim().ToLowerInvariant()
         $adValue = [pscustomobject]@{ LastLogonDate=$_.LastLogonDate; Enabled=if ($_.PSObject.Properties['Enabled']) { [string]$_.Enabled } else { '' } }
@@ -1276,7 +1353,7 @@ function Get-LicensesFocusedUsageRows {
         }
       }
     }
-    catch { $adSource.Ready=$false; $adSource.Reason=$_.Exception.Message; $adByImmutable=@{}; $adByUpn=@{} }
+    catch { $adSource.Ready=$false; $adSource.PartialScopeAccepted=$false; $adSource.Reason=$_.Exception.Message; $adByImmutable=@{}; $adByUpn=@{} }
   }
   if ($adSource.Ready -and $adReceiptReason) {
     $adSource.Forced = $true
@@ -2115,7 +2192,9 @@ function Publish-LicensesReportSnapshot {
           }
         }
       }
-      $sources.Add([ordered]@{ Name=[string]$source.Name; Ready=[bool]$source.Ready; Provisional=[bool]$source.Forced; Date=[string]$source.Date; Reason=[string]$source.Reason; SHA256=$hash })
+      $sourceMetadata = [ordered]@{ Name=[string]$source.Name; Ready=[bool]$source.Ready; Provisional=([bool]$source.Forced -or ($source.PSObject.Properties['PartialScopeAccepted'] -and $source.PartialScopeAccepted)); Date=[string]$source.Date; Reason=[string]$source.Reason; SHA256=$hash }
+      if ($source.PSObject.Properties['PartialScopeAccepted'] -and $source.PartialScopeAccepted) { $sourceMetadata.DomainCoverage = $source.DomainCoverage }
+      $sources.Add($sourceMetadata)
   }
   $gap = $null
   if ($Usage -and $Usage.MailboxGap) {
@@ -2146,8 +2225,9 @@ function Publish-LicensesReportSnapshot {
     $adGap = [ordered]@{ Available=[bool]$ad.Available; Provisional=[bool]$ad.Provisional; Reason=[string]$ad.Reason }
     if ($ad.Available) {
       foreach ($key in @('Members','AdObserved','NoObservedMatch','Ambiguous','AdEnabledRecent','AdEnabledInactive','AdEnabledNoDate','AdDisabled','AdEnabledUnknown')) {
-        $adGap[$key] = [long]$ad.$key
+        $adGap[$key] = if ($null -eq $ad.$key) { $null } else { [long]$ad.$key }
       }
+      $adGap.UnmatchedScopeUnknown = [long]$ad.UnmatchedScopeUnknown
     }
   }
   $recovery = @(if ($Usage) { $Usage.RecoveryDetails })
@@ -2432,7 +2512,7 @@ function Send-LicensesFocusedSummaryEmail {
     $adGapReady = ($adGap -and $adGap.Available)
     $adGapMembers = if ($adGapReady) { [string]$adGap.Members } else { 'N/D' }
     $adGapObserved = if ($adGapReady) { [string]$adGap.AdObserved } else { 'N/D' }
-    $adGapNoMatch = if ($adGapReady) { [string]$adGap.NoObservedMatch } else { 'N/D' }
+    $adGapNoMatch = if ($adGapReady -and $null -ne $adGap.NoObservedMatch) { [string]$adGap.NoObservedMatch } else { 'N/D' }
     $adGapAmbiguous = if ($adGapReady) { [string]$adGap.Ambiguous } else { 'N/D' }
     $adGapRecent = if ($adGapReady) { [string]$adGap.AdEnabledRecent } else { 'N/D' }
     $adGapInactive = if ($adGapReady) { [string]$adGap.AdEnabledInactive } else { 'N/D' }
@@ -2457,9 +2537,12 @@ function Send-LicensesFocusedSummaryEmail {
       $gapNotes += '<p style="margin:7px 0 0;font-size:11px;color:#9a3412;">Section 06 Entra state N/D: {0}</p>' -f `
         [System.Net.WebUtility]::HtmlEncode([string]$gap05.EntraStateReason)
     }
+    if ($adGapReady -and $adGap.Provisional -and $adGap.Reason) {
+      $gapNotes += '<p style="margin:7px 0 0;font-size:11px;color:#9a3412;">AD activity scope: {0}</p>' -f [System.Net.WebUtility]::HtmlEncode([string]$adGap.Reason)
+    }
     $sourceRows = if ($usage) {
       foreach ($source in $usage.Sources) {
-        $state = if ($source.Ready -and $source.Forced) { "PROVISIONAL ($($source.Date); $($source.Provenance))" }
+        $state = if ($source.Ready -and ($source.Forced -or ($source.PSObject.Properties['PartialScopeAccepted'] -and $source.PartialScopeAccepted))) { "PROVISIONAL ($($source.Date); $($source.Provenance))" }
                  elseif ($source.Ready) { "Ready ($($source.Date); $($source.Provenance))" }
                  else { "N/D ($($source.Reason))" }
         '<li>{0}: {1}</li>' -f [System.Net.WebUtility]::HtmlEncode($source.Name), [System.Net.WebUtility]::HtmlEncode($state)
@@ -3872,8 +3955,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAQvkNNkGddcGRM
-# EctYEINNlz/N5bzcZeriO+V3MYyfYKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAAKdhBzGEHebjI
+# n08OIidK5p4O7rbOKIZKiB8IokeuP6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -4006,31 +4089,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEILXR6/JR16S95kwNR1xxWUfyZZB8UVMQpxh6CjIjnP6mMA0GCSqG
-# SIb3DQEBAQUABIIBgDfAgFQQq28BAo22f+6Yk9lZ7TRT6tvcK1bzDgvp5pt4aLNG
-# aZJ4ST5BAXWI4w4Ll0hss7dxxHpG3YoGz2xH2yGZcVSl0wZs1e9hdXFf5gYzLzwq
-# NyYCH4yBHe5Nbsr895mDoYDxQtpriZ570Wc4/UPJ7ncPU8Kz6CMbWE+Lebinw1XS
-# r/sjV+/VHIi1RJ4jHWL5U9JoyyBEG4lLh1KPPN0Na1SnWCEEO60ZHo+ZVGcvSE3U
-# FGCo8AS6cO+/sPKGPgsdbDnZzl405DdiNYdP7KZ1+qsF7IF5aXcNawWWt4AzpNGA
-# duTISMtfa4Y6SfsLH80Yu3kKTtDQQLhVd59MJjd96VOfT14g4lXnJVgYlzBCIkfw
-# C2iN0tCwrWw9qD0yq4/HL8xGJkcgO/7jFhBFkXVKDLMPQovtI4mABOOwFXJ3UsP2
-# HY52gzeQIacJLMZIJAmpdpyyFDIoYlzcyDbHOi/q/ZLTp6MltcskMugYVCpHf9Lf
-# 2q1vBDBxdgdfLIxz+qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIGpWXnUHL4IO43oQgypBIFyxZpQeKksX4kibwsmpYDNjMA0GCSqG
+# SIb3DQEBAQUABIIBgEoicjoN+ZXzCyezr6+OgHY+14PT0aTNVLHXsamrbyQniUY3
+# jpEGjxWS7xa0f/zaGw+Ud9H7D6QBv3nqZMxX3d76uP5z11R+s2XMYWgTQS+Xip4Q
+# HQmIq6FYU3NA2sYT08+YWRXtaHRdu1Gk4Ep5pE7JQtp/Y0Z3X9A32QYM5Q2I83fw
+# EK18GlZMsp98TS9zmPYjkAhl7BUBJz21pwqRY2kvoQcEU8zIj6YNCM30AanUiDLT
+# bG3XkYJnQlXf92BAJbZbPNAjp0schLJ5kQMKZ42st2O1lHDv/9IcqscYfHjRH409
+# HqE/BetN00yKsaBcE5GgPaCfVsfMuwpFVe/FZUjvPIguzWUcLX4FUcuUJM3EHABb
+# fGpzgnlH+OSHEuK5DI0LAoOD/0Oohr/c/yLoK4JuiAYa3zwFtAIQ9EiFbtBJvj0a
+# /MC8mEwpMvgVbE8/+Fjnr76OyczCr5JNUgCWXsEBBH2ulIL/JXM9yvS4zMDPu490
+# Keu7N0eOLfC06foN4KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDgxMTIy
-# MDhaMC8GCSqGSIb3DQEJBDEiBCCmvmshrzi4J/9DV7UzlKqAe7d4sW61QGACbty2
-# xu/WSzANBgkqhkiG9w0BAQEFAASCAgAq0Q5Q8p/DCpwyb7953aCSKhYkU+D6dxSn
-# B6we060cN6GX3bqB38nSmFm0jrYNWP0ngOQrKu3MxZ5Bg7BIcQ2JBSmLOF/qMw1N
-# fwg9BN4YQ5VivTyg//CYwdY0LzNazsefXFy9yymEP1SbGXANclex3bKFh+sN7wjS
-# 2oKRuNmy2Xulug1Ax1Hjl49KTppRdifqBtRTHV5OCvnk09iGD3jpPiUA08oVUhPc
-# BiRuuwQQ7Sabg1eNQ18E9dGxZKNw2TC7FH1wRZCGKs59J/gQtW8MEvcQXiSIjANz
-# 1UR/BlQ2tRO3BUxCWW8HnmMDSPBjiq22MPugJy6smVOqUBtfgt7TJu25K1EGXwkx
-# DTRXIuMU98F5USlvgSW0OMxCalqiAKsiIg19fGNXao7c3MVclORiRkgD4HOhiNh+
-# mjUs0RIY7Q+B8Stp4bNAsAvH3WQJUmR6pOnfdWa4LzRSPnTF6UzfflOUQsLQmmaZ
-# i7mscZ5kb74UFeATdjZji82yt1NjvTmR3xWDUdEF5fm83znBdggXNfwViIwUL3zb
-# GFAVNbR82EhWqY2oRnsVKT47xg/Sa5hrRgklfVRin1cph4v0YmcWJZzpDngJH5rX
-# lmwLYA+qI006d00NwuL8kImANW9DT9K7JmHDdleCED1IaJ4WMoN6C3pRCIMNNfJW
-# DovDI6Xjog==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTEyMjMw
+# NDhaMC8GCSqGSIb3DQEJBDEiBCC/8IufTu9HUoSJGA3ZYl8aM0pXkGRSNB5OgCIT
+# 8vzQVTANBgkqhkiG9w0BAQEFAASCAgBFQyuBDjikl5smgm0I2X71lzsqBLAp9Z0P
+# iPww5hQvM37PMtSixYf/IenPtKEK24tlUDrge85XSP9zxzUROIHY2R+WufiQd6eY
+# FOlAm9HyHNB6Tl4PPOP72DbvZ2ueGuWGT5Oioi51+2NUfAD2igm3rJdb8e5xeqIJ
+# qT2kVNyTaWCDK5653V8A5ZPRO7N96qnQXtHCDmTqkhTL5FoY9jHvaLXjv2v/Sb1n
+# xHNPs0oEIhXexQX3lPm+MZ18XOvz/9XcL1q2g6rIBh1xZ/UJjiehkyIi0Dbv47p/
+# lPvg62Hv2kOsxPfiu0VL92LuBEnd2Da+V9JDVoqXUOphBibiOptcHIisrzc7Ixex
+# ZtzAO8r/2m0IGzNPxq6SeCRNiPiabxpTIznv+XTycREnfEY1sXanaanm2H55Kooj
+# +JziWtNL0gO8KbKNJV35pEXxXsTyq9TQ9XsDvCGX+kQWRYMGi7BtIk6lm3rMBeI/
+# JmhVzrUSsQJZso44+jNUC7TWG3B6blAlzPPSCzY7G+H6MHeE/DUTwvPHY1pzy4Dd
+# X0K2IJj07hs9cm4OC7YwQAnQbzCSuwQqwhBC/qOMMzr/+9o2a4c/VVgNSGL931+t
+# liRu4Fdq4gvSNO0k1hYcBJYFiv9ItwkyF+8IY0INpYJUBWqXbIkU+pCjGp31AQZ8
+# yXoloTbyrg==
 # SIG # End signature block

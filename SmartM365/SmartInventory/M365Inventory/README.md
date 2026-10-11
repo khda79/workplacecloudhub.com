@@ -18,7 +18,7 @@ Microsoft 365 and Entra inventory scripts outside the Intune-specific surface.
 
 ## Microsoft 365 Licensing
 
-`Licensing/SmartM365-Licences-Inventory.ps1` 1.43 publishes normalized license and
+`Licensing/SmartM365-Licences-Inventory.ps1` 1.45 publishes normalized license and
 service-plan data without repeating user and product labels on every service-plan
 assignment.
 
@@ -49,6 +49,21 @@ access control as the existing license-user exports.
 The full collector completes and qualifies its source receipt before sending
 the email. A receipt failure stops the email instead of publishing unqualified
 recovery KPIs.
+The licensing consumer accepts AD `PartialAccepted` coverage only from a completed,
+error-free AD producer with `ConsumerScopeQualified=true`, matching successful
+file/domain proofs and an unchanged CSV hash. All expected domains must be accounted
+for, at least one domain must be collected, and every unavailable domain must be
+explicitly covered by `NonBlockingDomainErrors`. Available domains in that allowlist
+remain included: it is a connectivity-failure tolerance, not a permanent exclusion.
+Other source readers retain their existing strict partial-receipt rejection.
+Accepted partial AD evidence is `Provisional`, not an automatic `ForceAdCsvAnalysis`
+bypass. Its collected/expected counts and tolerated unavailable domains remain
+visible in the email and source CSV reason; the private snapshot also retains the
+structured domain coverage. Full coverage is never claimed. In section 07, `Members`
+retains the Entra member population. Unmatched members remain unassessed when AD
+coverage is partial; `NoObservedMatch` is then JSON null / CSV N/D, not zero or
+confirmed AD absence. `UnmatchedScopeUnknown` records that limitation in the private
+snapshot. An AD domain is never inferred from a user's UPN suffix.
 Section 06 splits UserMailbox accounts without F1/F3/E3/E5 into Entra enabled,
 disabled and unqualified account states. The three counts reconcile with the
 section total when the Entra source is qualified. The top recovery KPI band also
