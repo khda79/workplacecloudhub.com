@@ -14,6 +14,33 @@ GENERATE = ROOT / "Scripts" / "Generate"
 
 
 class GeneratedLauncherTests(unittest.TestCase):
+    @unittest.skipUnless(os.name == "nt", "PowerShell 7 on Windows")
+    def test_direct_library_operation_has_recycle_default_and_home_guard(self):
+        operation = ROOT / "Scripts" / "Operations" / "SmartM365-SharePointTarget-ExtraLibrariesRemove.ps1"
+        content = operation.read_text(encoding="utf-8")
+        self.assertIn("[switch]$Recycle = $true", content)
+        self.assertIn("Remove-PnPList -Identity $list.Id -Recycle:$Recycle", content)
+        self.assertIn("$actionStatus = 'ProtectedHomePage'", content)
+        self.assertIn("$actionStatus = 'ProtectedCheckFailed'", content)
+        environment = os.environ.copy()
+        environment["LIBRARY_OPERATION"] = str(operation)
+        parsed = subprocess.run(
+            ["pwsh.exe", "-NoProfile", "-Command", r"""
+$tokens = $null
+$errors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseFile($env:LIBRARY_OPERATION, [ref]$tokens, [ref]$errors)
+if ($errors.Count -gt 0) { $errors | ForEach-Object { Write-Error $_.Message }; exit 1 }
+$function = $ast.Find({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Test-LibraryContainsHomePage' }, $true)
+if ($null -eq $function) { throw 'Library Home.aspx guard is missing.' }
+Invoke-Expression $function.Extent.Text
+function Get-PnPListItem { param($List, $Query, $Connection, $ErrorAction) [pscustomobject]@{ Id = 1 } }
+if (-not (Test-LibraryContainsHomePage -Connection $null -List ([pscustomobject]@{ Id = [guid]::NewGuid() }))) { throw 'Home.aspx was not protected.' }
+exit 0
+"""],
+            capture_output=True, text=True, env=environment, timeout=30,
+        )
+        self.assertEqual(parsed.returncode, 0, parsed.stdout + parsed.stderr)
+
     def test_each_cleanup_generator_creates_and_removes_companion_launcher(self):
         cases = (
             ("files", "ExtraInTarget.csv", ["WebUrl", "ServerRelativeUrl", "FileName"],
@@ -51,9 +78,101 @@ class GeneratedLauncherTests(unittest.TestCase):
                 self.assertTrue(launcher.is_file())
                 content = launcher.read_text(encoding="ascii")
                 self.assertIn("%~dpn0.ps1", content)
-                self.assertIn('-ExecutionPolicy Bypass -File "%TARGET_SCRIPT%" -Execute', content)
+                self.assertIn('-ExecutionPolicy Bypass -File "%TARGET_SCRIPT%" -Execute -Recycle', content)
                 self.assertNotIn("-Force", content)
                 self.assertNotIn("%*", content)
+                generated = script.read_text(encoding="utf-8")
+                self.assertIn("SmartM365-CleanupSafety: RecycleDefault", generated)
+                self.assertIn("[switch]$Recycle = $true", generated)
+                if os.name == "nt":
+                    environment = os.environ.copy()
+                    environment["GENERATED_PS1"] = str(script)
+                    parsed = subprocess.run(
+                        ["pwsh.exe", "-NoProfile", "-Command", r"""
+$tokens = $null
+$errors = $null
+[void][System.Management.Automation.Language.Parser]::ParseFile($env:GENERATED_PS1, [ref]$tokens, [ref]$errors)
+if ($errors.Count -gt 0) { $errors | ForEach-Object { Write-Error $_.Message }; exit 1 }
+"""],
+                        capture_output=True, text=True, env=environment, timeout=30,
+                    )
+                    self.assertEqual(parsed.returncode, 0, parsed.stdout + parsed.stderr)
+                if kind == "files":
+                    self.assertIn("SmartM365-CleanupSafety: HomeAspxProtected", generated)
+                    self.assertIn("$actionStatus = 'ProtectedHomePage'", generated)
+                    if os.name == "nt":
+                        environment = os.environ.copy()
+                        environment["GENERATED_PS1"] = str(script)
+                        probe = subprocess.run(
+                            ["pwsh.exe", "-NoProfile", "-Command", r"""
+$tokens = $null
+$errors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseFile($env:GENERATED_PS1, [ref]$tokens, [ref]$errors)
+if ($errors.Count -gt 0) { throw 'Generated script has PowerShell parse errors.' }
+$function = $ast.Find({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Test-ProtectedHomePage' }, $true)
+if ($null -eq $function) { throw 'Home.aspx guard function is missing.' }
+Invoke-Expression $function.Extent.Text
+$removeFunction = $ast.Find({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Remove-TargetFile' }, $true)
+if ($null -eq $removeFunction) { throw 'File deletion function is missing.' }
+Invoke-Expression $removeFunction.Extent.Text
+$cases = @(
+    @{ Path = '/sites/a/SitePages/Home.aspx'; Expected = $true },
+    @{ Path = '/sites/a/SitePages/%48ome.aspx'; Expected = $true },
+    @{ Path = '/sites/a/SitePages/home.aspx?web=1'; Expected = $true },
+    @{ Path = '/sites/a/Docs/MyHome.aspx'; Expected = $false }
+)
+foreach ($case in $cases) {
+    $item = [pscustomobject]@{ TargetServerRelativeUrl = $case.Path; TargetFileUrl = ''; FileName = '' }
+    if ((Test-ProtectedHomePage -Item $item) -ne $case.Expected) { throw "Unexpected guard result for $($case.Path)" }
+}
+$item = [pscustomobject]@{ TargetServerRelativeUrl = '/sites/a/Docs/other.aspx'; TargetFileUrl = ''; FileName = 'HOME.ASPX' }
+if (-not (Test-ProtectedHomePage -Item $item)) { throw 'FileName guard failed.' }
+$script:RemoveCalled = $false
+function Remove-PnPFile { $script:RemoveCalled = $true }
+try {
+    Remove-TargetFile -Connection ([pscustomobject]@{}) -ServerRelativeUrl '/sites/a/SitePages/Home.aspx' -Recycle
+    throw 'Home.aspx deletion was allowed.'
+}
+catch { if ($_.Exception.Message -eq 'Home.aspx deletion was allowed.') { throw } }
+if ($script:RemoveCalled) { throw 'Remove-PnPFile was called for Home.aspx.' }
+exit 0
+"""],
+                            capture_output=True, text=True, env=environment, timeout=30,
+                        )
+                        self.assertEqual(probe.returncode, 0, probe.stdout + probe.stderr)
+                if kind == "libraries":
+                    self.assertIn("Remove-PnPList -Identity $list.Id -Recycle:$Recycle", generated)
+                    self.assertIn("Test-LibraryContainsHomePage", generated)
+                    if os.name == "nt":
+                        environment = os.environ.copy()
+                        environment["GENERATED_PS1"] = str(script)
+                        probe = subprocess.run(
+                            ["pwsh.exe", "-NoProfile", "-Command", r"""
+$tokens = $null
+$errors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseFile($env:GENERATED_PS1, [ref]$tokens, [ref]$errors)
+$function = $ast.Find({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Test-LibraryContainsHomePage' }, $true)
+if ($null -eq $function) { throw 'Library Home.aspx guard is missing.' }
+Invoke-Expression $function.Extent.Text
+$script:ProbeMode = 'Found'
+function Get-PnPListItem {
+    param($List, $Query, $Connection, $ErrorAction)
+    if ($Query -notmatch 'FileLeafRef' -or $Query -notmatch 'Home.aspx') { throw 'Unsafe library query.' }
+    if ($script:ProbeMode -eq 'Found') { return [pscustomobject]@{ Id = 1 } }
+    if ($script:ProbeMode -eq 'Error') { throw 'Library query failed.' }
+}
+$list = [pscustomobject]@{ Id = [guid]::NewGuid() }
+if (-not (Test-LibraryContainsHomePage -Connection $null -List $list)) { throw 'Existing Home.aspx was missed.' }
+$script:ProbeMode = 'Missing'
+if (Test-LibraryContainsHomePage -Connection $null -List $list) { throw 'Absent Home.aspx was reported present.' }
+$script:ProbeMode = 'Error'
+try { Test-LibraryContainsHomePage -Connection $null -List $list; throw 'Query error was swallowed.' }
+catch { if ($_.Exception.Message -eq 'Query error was swallowed.') { throw } }
+exit 0
+"""],
+                            capture_output=True, text=True, env=environment, timeout=30,
+                        )
+                        self.assertEqual(probe.returncode, 0, probe.stdout + probe.stderr)
 
                 write_csv(False)
                 generate()
@@ -67,10 +186,10 @@ class GeneratedLauncherTests(unittest.TestCase):
             script = root / "SmartM365-SharePointTarget-ExtraFilesRemove-20261011-102759-example.ps1"
             marker = root / "executed.txt"
             script.write_text(
-                "param([switch]$Execute)\n"
-                "if (-not $Execute) { exit 2 }\n"
-                "$answer = Read-Host 'Type DELETE to continue'\n"
-                "if ($answer -ne 'DELETE') { exit 3 }\n"
+                "param([switch]$Execute, [switch]$Recycle)\n"
+                "if (-not $Execute -or -not $Recycle) { exit 2 }\n"
+                "$answer = Read-Host 'Type RECYCLE to continue'\n"
+                "if ($answer -ne 'RECYCLE') { exit 3 }\n"
                 "Set-Content -LiteralPath (Join-Path $PSScriptRoot 'executed.txt') -Value 'done'\n",
                 encoding="utf-8",
             )
@@ -82,11 +201,23 @@ class GeneratedLauncherTests(unittest.TestCase):
             launcher = script.with_suffix(".cmd")
             restrictive_env = os.environ.copy()
             restrictive_env["PSExecutionPolicyPreference"] = "AllSigned"
+            unsafe = subprocess.run(["cmd.exe", "/d", "/c", str(launcher)], input="RECYCLE\n",
+                                    capture_output=True, text=True, timeout=30, env=restrictive_env)
+            self.assertEqual(unsafe.returncode, 1, unsafe.stdout + unsafe.stderr)
+            self.assertIn("Cleanup safety checks are missing", unsafe.stdout)
+            self.assertFalse(marker.exists())
+
+            script.write_text(
+                "# SmartM365-CleanupSafety: RecycleDefault\n"
+                "# SmartM365-CleanupSafety: HomeAspxProtected\n"
+                + script.read_text(encoding="utf-8"),
+                encoding="utf-8",
+            )
             denied = subprocess.run(["cmd.exe", "/d", "/c", str(launcher)], input="NO\n",
                                     capture_output=True, text=True, timeout=30, env=restrictive_env)
             self.assertEqual(denied.returncode, 3, denied.stdout + denied.stderr)
             self.assertFalse(marker.exists())
-            accepted = subprocess.run(["cmd.exe", "/d", "/c", str(launcher)], input="DELETE\n",
+            accepted = subprocess.run(["cmd.exe", "/d", "/c", str(launcher)], input="RECYCLE\n",
                                       capture_output=True, text=True, timeout=30, env=restrictive_env)
             self.assertEqual(accepted.returncode, 0, accepted.stdout + accepted.stderr)
             self.assertEqual(marker.read_text(encoding="utf-8").strip(), "done")

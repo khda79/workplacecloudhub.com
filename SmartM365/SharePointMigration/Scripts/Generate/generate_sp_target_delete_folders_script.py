@@ -30,11 +30,14 @@ SCRIPT_HEADER = r'''<#
     This script is generated for one comparison result. The target folders are
     embedded directly in the $FoldersToDelete array.
 
-    By default, this script is a dry run. Add -Execute to delete folders.
+    By default, this script is a dry run. Add -Execute to recycle empty folders.
+    Use -Recycle:$false only for an explicit permanent deletion.
     It always checks that each folder is empty before deletion.
     Run this after deleting extra files.
     Authentication is interactive only.
 #>
+
+# SmartM365-CleanupSafety: RecycleDefault
 
 [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'High')]
 param(
@@ -44,7 +47,7 @@ param(
 
     [switch]$Execute,
 
-    [switch]$Recycle,
+    [switch]$Recycle = $true,
 
     [switch]$ForceAuthentication,
 
@@ -239,7 +242,7 @@ function Remove-TargetFolderIfEmpty {
         [Parameter(Mandatory = $true)]
         [string]$ServerRelativeUrl,
 
-        [switch]$Recycle
+        [switch]$Recycle = $true
     )
 
     try {

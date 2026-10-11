@@ -62,13 +62,16 @@ filename prefix, for example `Example-Summary.csv` and
 Generated PowerShell cleanup scripts retain the required `SmartM365-` start,
 for example `SmartM365-Example-SharePointTarget-ExtraFilesRemove-...ps1`.
 Each generated file, library or folder cleanup script has a same-name `.cmd`
-launcher. The launcher requires PowerShell 7.4 or later, shows the selected
-script and runs it with process-only `ExecutionPolicy Bypass` and `-Execute`.
-The generated script still requires typing `DELETE` before deletion. The
-launcher does not pass `-Force` or user arguments.
-For an older generated `.ps1`, run
-`python Scripts/Generate/generated_ps7_launcher.py "<path-to-generated-ps1>"`
-from this directory to add its companion `.cmd`.
+launcher. It requires PowerShell 7.4 or later and runs with process-only
+`ExecutionPolicy Bypass`, `-Execute`, and `-Recycle`; the script requires typing
+`RECYCLE`. Generated scripts also recycle by default when run directly with
+`-Execute`. File cleanup skips every `Home.aspx`; library cleanup skips any
+library containing `Home.aspx` and fails closed if that check cannot complete.
+The launcher does not pass `-Force` or user arguments. Older generated `.ps1`
+files must be regenerated with the current toolkit: adding a new `.cmd` to an
+old script will fail the launcher safety check.
+The direct `Scripts/Operations/SmartM365-SharePointTarget-ExtraLibrariesRemove.ps1`
+operation uses the same recycle default and Home.aspx library guard.
 Existing unprefixed comparison folders remain readable by exports and reports.
 
 ## Install, Start, and Update
@@ -1063,10 +1066,10 @@ The shipped template retains `AllowDuplicateKeysForDeleteScript = $true` for
 compatibility. This permits generation despite duplicate keys; review
 `DuplicateKeys.csv` and prefer setting it to `$false` when ambiguity must block
 generation. Generation is not authorization to execute. Running a generated
-`.ps1` directly defaults to dry-run; `-Execute` permanently deletes unless
-`-Recycle` is also chosen. Its companion `.cmd` runs with `-Execute` and requires
-typing `DELETE` before deletion. Read every generated script and target before
-running it.
+`.ps1` directly defaults to dry-run; `-Execute` moves candidates to the recycle
+bin and requires typing `RECYCLE`. Permanent deletion requires the explicit
+`-Recycle:$false` override and `DELETE` confirmation. Read every generated
+script and target before running it.
 
 ## Offline Validation
 

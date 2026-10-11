@@ -22,8 +22,14 @@ if errorlevel 1 (
     exit /b 1
 )
 
-"%PWSH%" -NoProfile -Command "Write-Host ('[{0}] Script: {1}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $env:TARGET_SCRIPT); Write-Host ('[{0}] Mode: EXECUTE. The script will request explicit confirmation before deletion.' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'))"
-"%PWSH%" -NoProfile -ExecutionPolicy Bypass -File "%TARGET_SCRIPT%" -Execute
+"%PWSH%" -NoProfile -Command "$content = [IO.File]::ReadAllText($env:TARGET_SCRIPT); $required = @('SmartM365-CleanupSafety: RecycleDefault'); if ($env:TARGET_SCRIPT -match 'ExtraFilesRemove') { $required += 'SmartM365-CleanupSafety: HomeAspxProtected' }; if (@($required | Where-Object { -not $content.Contains($_) }).Count -gt 0) { exit 1 }" >nul 2>&1
+if errorlevel 1 (
+    powershell.exe -NoProfile -Command "Write-Host ('[{0}] Cleanup safety checks are missing. Regenerate the PowerShell script with the current toolkit.' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'))"
+    exit /b 1
+)
+
+"%PWSH%" -NoProfile -Command "Write-Host ('[{0}] Script: {1}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $env:TARGET_SCRIPT); Write-Host ('[{0}] Mode: EXECUTE - RECYCLE. The script will request explicit confirmation.' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'))"
+"%PWSH%" -NoProfile -ExecutionPolicy Bypass -File "%TARGET_SCRIPT%" -Execute -Recycle
 exit /b %ERRORLEVEL%
 '''
 

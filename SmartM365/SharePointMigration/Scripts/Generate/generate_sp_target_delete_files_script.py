@@ -35,10 +35,14 @@ SCRIPT_HEADER = r'''<#
     This script is generated for one comparison result. The target files are
     embedded directly in the $FilesToDelete array.
 
-    By default, this script is a dry run. Add -Execute to permanently delete
-    the files. Add -Recycle only if files must be moved to the recycle bin.
+    By default, this script is a dry run. Add -Execute to move files to the
+    recycle bin. Use -Recycle:$false only for an explicit permanent deletion.
+    Files named Home.aspx are always skipped.
     Authentication is interactive only.
 #>
+
+# SmartM365-CleanupSafety: RecycleDefault
+# SmartM365-CleanupSafety: HomeAspxProtected
 
 [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'High')]
 param(
@@ -48,7 +52,7 @@ param(
 
     [switch]$Execute,
 
-    [switch]$Recycle,
+    [switch]$Recycle = $true,
 
     [switch]$ForceAuthentication,
 
@@ -68,6 +72,25 @@ $ErrorActionPreference = 'Stop'
 $script:TranscriptStarted = $false
 $script:DeletionResults = $null
 $script:DeletionResultPath = $null
+
+function Test-ProtectedHomePage {
+    param([object]$Item)
+
+    foreach ($candidate in @($Item.TargetServerRelativeUrl, $Item.TargetFileUrl, $Item.FileName)) {
+        if ([string]::IsNullOrWhiteSpace([string]$candidate)) {
+            continue
+        }
+
+        $path = (([string]$candidate) -split '[?#]', 2)[0]
+        $path = [Uri]::UnescapeDataString($path).Replace('\', '/')
+        $leafName = ($path.TrimEnd('/') -split '/')[-1]
+        if ($leafName -ieq 'Home.aspx') {
+            return $true
+        }
+    }
+
+    return $false
+}
 
 function Get-ConsoleTimestamp {
     return (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
@@ -317,8 +340,12 @@ function Remove-TargetFile {
         [Parameter(Mandatory = $true)]
         [string]$ServerRelativeUrl,
 
-        [switch]$Recycle
+        [switch]$Recycle = $true
     )
+
+    if (Test-ProtectedHomePage -Item ([pscustomobject]@{ TargetServerRelativeUrl = $ServerRelativeUrl; TargetFileUrl = ''; FileName = '' })) {
+        throw 'Home.aspx is protected; no deletion was attempted.'
+    }
 
     $removeParameters = @{
         ServerRelativeUrl = $ServerRelativeUrl
@@ -393,6 +420,9 @@ function Write-DeleteStatus {
         'WouldDelete' {
             Write-Host ("DRY RUN Would delete: {0} | {1}" -f $WebUrl, $ServerRelativeUrl) -ForegroundColor DarkCyan
         }
+        'ProtectedHomePage' {
+            Write-Host ("SKIP Protected Home.aspx: {0} | {1}" -f $WebUrl, $ServerRelativeUrl) -ForegroundColor Yellow
+        }
         'SkippedByShouldProcess' {
             Write-Host ("SKIP ShouldProcess: {0} | {1}" -f $WebUrl, $ServerRelativeUrl) -ForegroundColor Yellow
         }
@@ -439,6 +469,10 @@ if ($PSBoundParameters.ContainsKey('Test')) {
 }
 
 Write-Host ("Files embedded: {0}" -f $FilesToDelete.Count)
+$protectedCount = @($FilesToDelete | Where-Object { Test-ProtectedHomePage -Item $_ }).Count
+if ($protectedCount -gt 0) {
+    Write-Warning ("Protected Home.aspx files will be skipped: {0}" -f $protectedCount)
+}
 $modeText = $(if ($Execute) { if ($Recycle) { 'EXECUTE - files will be recycled' } else { 'EXECUTE - files will be permanently deleted' } } else { 'DRY RUN - no deletion' })
 $modeColor = $(if ($Execute) { if ($Recycle) { 'Yellow' } else { 'Red' } } else { 'DarkCyan' })
 Write-Host ("Mode: {0}" -f $modeText) -ForegroundColor $modeColor
@@ -484,9 +518,14 @@ foreach ($group in ($FilesToDelete | Group-Object TargetWebUrl)) {
 
     foreach ($item in $group.Group) {
         $actionStatus = if ($Execute) { if ($Recycle) { 'PendingRecycle' } else { 'PendingPermanentDelete' } } else { 'WouldDelete' }
+        $deleteMethod = if ($Execute) { 'NotRun' } else { 'DryRun' }
         $message = ''
 
-        if ([string]::IsNullOrWhiteSpace($item.TargetServerRelativeUrl)) {
+        if (Test-ProtectedHomePage -Item $item) {
+            $actionStatus = 'ProtectedHomePage'
+            $message = 'Home.aspx is protected; no deletion was attempted.'
+        }
+        elseif ([string]::IsNullOrWhiteSpace($item.TargetServerRelativeUrl)) {
             $actionStatus = 'MissingServerRelativeUrl'
             $message = 'Target server relative URL is empty.'
         }

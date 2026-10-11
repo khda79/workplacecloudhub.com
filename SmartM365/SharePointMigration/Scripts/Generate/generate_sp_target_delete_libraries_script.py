@@ -33,9 +33,12 @@ SCRIPT_HEADER = r'''<#
     This script is generated for one comparison result. The target libraries are
     embedded directly in the $LibrariesToDelete array.
 
-    By default, this script is a dry run. Add -Execute to delete the libraries.
+    By default, this script is a dry run. Add -Execute to recycle libraries.
+    Use -Recycle:$false only for an explicit permanent deletion.
     Authentication is interactive only.
 #>
+
+# SmartM365-CleanupSafety: RecycleDefault
 
 [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'High')]
 param(
@@ -44,6 +47,8 @@ param(
     [string]$Tenant = $env:SPO_INVENTORY_TENANT,
 
     [switch]$Execute,
+
+    [switch]$Recycle = $true,
 
     [switch]$ForceAuthentication,
 
@@ -265,11 +270,20 @@ function Write-DeleteStatus {
     )
 
     switch ($Status) {
-        'Deleted' {
-            Write-Host ("OK Deleted library: {0} | {1}" -f $WebUrl, $TargetLibraryTitle) -ForegroundColor Green
+        'Recycled' {
+            Write-Host ("OK Recycled library: {0} | {1}" -f $WebUrl, $TargetLibraryTitle) -ForegroundColor Green
+        }
+        'PermanentlyDeleted' {
+            Write-Host ("OK Permanently deleted library: {0} | {1}" -f $WebUrl, $TargetLibraryTitle) -ForegroundColor Green
         }
         'WouldDelete' {
             Write-Host ("DRY RUN Would delete library: {0} | {1}" -f $WebUrl, $TargetLibraryTitle) -ForegroundColor DarkCyan
+        }
+        'ProtectedHomePage' {
+            Write-Host ("SKIP Library contains Home.aspx: {0} | {1}" -f $WebUrl, $TargetLibraryTitle) -ForegroundColor Yellow
+        }
+        'ProtectedCheckFailed' {
+            Write-Warning ("SKIP Cannot verify Home.aspx protection for {0} | {1}: {2}" -f $WebUrl, $TargetLibraryTitle, $Message)
         }
         'SkippedByShouldProcess' {
             Write-Host ("SKIP ShouldProcess: {0} | {1}" -f $WebUrl, $TargetLibraryTitle) -ForegroundColor Yellow
@@ -278,6 +292,14 @@ function Write-DeleteStatus {
             Write-Warning ("FAILED {0} | {1}: {2}" -f $WebUrl, $TargetLibraryTitle, $Message)
         }
     }
+}
+
+function Test-LibraryContainsHomePage {
+    param($Connection, $List)
+
+    $query = "<View Scope='RecursiveAll'><ViewFields><FieldRef Name='FileLeafRef'/></ViewFields><Query><Where><Eq><FieldRef Name='FileLeafRef'/><Value Type='Text'>Home.aspx</Value></Eq></Where></Query><RowLimit>1</RowLimit></View>"
+    $matches = @(Get-PnPListItem -List $List.Id -Query $query -Connection $Connection -ErrorAction Stop)
+    return ($matches.Count -gt 0)
 }
 
 function Find-TargetList {
@@ -367,8 +389,8 @@ if (-not $LibrariesToDelete -or $LibrariesToDelete.Count -eq 0) {
 }
 
 Write-Host ("Libraries embedded: {0}" -f $LibrariesToDelete.Count)
-$modeText = $(if ($Execute) { 'EXECUTE - libraries will be deleted' } else { 'DRY RUN - no deletion' })
-$modeColor = $(if ($Execute) { 'Red' } else { 'DarkCyan' })
+$modeText = $(if ($Execute) { if ($Recycle) { 'EXECUTE - libraries will be recycled' } else { 'EXECUTE - libraries will be permanently deleted' } } else { 'DRY RUN - no deletion' })
+$modeColor = $(if ($Execute) { if ($Recycle) { 'Yellow' } else { 'Red' } } else { 'DarkCyan' })
 Write-Host ("Mode: {0}" -f $modeText) -ForegroundColor $modeColor
 Write-Host ("Result CSV: {0}" -f $ResultPath) -ForegroundColor DarkCyan
 if ($Execute) {
@@ -376,9 +398,16 @@ if ($Execute) {
 }
 
 if ($Execute -and -not $Force) {
-    Write-Warning "This will delete SharePoint Online document libraries. Deleted libraries should be restored only through SharePoint recycle bin or by rerunning migration."
-    $confirmation = Read-Host "Type DELETE to continue"
-    if ($confirmation -ne 'DELETE') {
+    if ($Recycle) {
+        Write-Warning "This will move SharePoint Online document libraries to the recycle bin."
+        $expectedConfirmation = 'RECYCLE'
+    }
+    else {
+        Write-Warning "This will permanently delete SharePoint Online document libraries. Recovery may not be possible."
+        $expectedConfirmation = 'DELETE'
+    }
+    $confirmation = Read-Host ("Type {0} to continue" -f $expectedConfirmation)
+    if ($confirmation -ne $expectedConfirmation) {
         throw "Deletion cancelled."
     }
 }
@@ -398,27 +427,44 @@ foreach ($group in ($LibrariesToDelete | Group-Object TargetWebUrl)) {
     foreach ($item in $group.Group) {
         $match = Find-TargetList -Connection $connection -Item $item
         $list = $match.List
-        $actionStatus = if ($Execute) { 'PendingDelete' } else { 'WouldDelete' }
+        $actionStatus = if ($Execute) { if ($Recycle) { 'PendingRecycle' } else { 'PendingPermanentDelete' } } else { 'WouldDelete' }
         $message = $match.Message
 
         if ($null -eq $list) {
             $actionStatus = $match.Status
         }
         elseif ($Execute) {
-            $targetName = "{0} | {1}" -f $webUrl, $list.Title
-            if ($PSCmdlet.ShouldProcess($targetName, 'Delete SharePoint Online document library')) {
-                try {
-                    Remove-PnPList -Identity $list.Id -Force -Connection $connection -ErrorAction Stop
-                    $actionStatus = 'Deleted'
-                    $message = 'Library deleted.'
-                }
-                catch {
-                    $actionStatus = 'DeleteFailed'
-                    $message = $_.Exception.Message
-                }
+            try {
+                $containsHomePage = Test-LibraryContainsHomePage -Connection $connection -List $list
             }
-            else {
-                $actionStatus = 'SkippedByShouldProcess'
+            catch {
+                $actionStatus = 'ProtectedCheckFailed'
+                $message = $_.Exception.Message
+            }
+
+            if ($actionStatus -ne 'ProtectedCheckFailed') {
+                if ($containsHomePage) {
+                    $actionStatus = 'ProtectedHomePage'
+                    $message = 'Library contains Home.aspx; no deletion was attempted.'
+                }
+                else {
+                    $targetName = "{0} | {1}" -f $webUrl, $list.Title
+                    $operation = if ($Recycle) { 'Recycle SharePoint Online document library' } else { 'Permanently delete SharePoint Online document library' }
+                    if ($PSCmdlet.ShouldProcess($targetName, $operation)) {
+                        try {
+                            Remove-PnPList -Identity $list.Id -Recycle:$Recycle -Force -Connection $connection -ErrorAction Stop
+                            $actionStatus = if ($Recycle) { 'Recycled' } else { 'PermanentlyDeleted' }
+                            $message = if ($Recycle) { 'Library moved to recycle bin.' } else { 'Library permanently deleted.' }
+                        }
+                        catch {
+                            $actionStatus = 'DeleteFailed'
+                            $message = $_.Exception.Message
+                        }
+                    }
+                    else {
+                        $actionStatus = 'SkippedByShouldProcess'
+                    }
+                }
             }
         }
         else {
