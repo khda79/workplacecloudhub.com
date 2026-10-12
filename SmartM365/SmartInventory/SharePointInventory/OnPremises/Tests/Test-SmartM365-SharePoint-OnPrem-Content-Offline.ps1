@@ -13,7 +13,7 @@ if (@($errors).Count) { throw "Content parser errors: $($errors.Count)" }
 $template = Get-Content $templatePath -Raw | ConvertFrom-Json
 if ($template.EnableSharePointUpload -ne $true -or $template.EnableWeeklyHistory -ne $true -or $template.SendMailMode -ne 'Graph') { throw 'Content template policy is invalid.' }
 $versionMatch = [regex]::Match($ast.Extent.Text, '(?s)\.VERSION\s+([0-9.]+)')
-if (-not $versionMatch.Success -or [version]$versionMatch.Groups[1].Value -lt [version]'1.0.12') { throw 'Content version was not updated for category and quota usage.' }
+if (-not $versionMatch.Success -or [version]$versionMatch.Groups[1].Value -lt [version]'1.0.13') { throw 'Content version was not updated for the combined summary email.' }
 if ($null -eq $template.PSObject.Properties['MySiteHostNames'] -or $null -eq $template.MySiteHostNames) { throw 'Content template lacks MySiteHostNames.' }
 if ($template.ExcludePersonalSiteCollections -ne $true) { throw 'Personal collection exclusion must be enabled in the template.' }
 if ($ast.Extent.Text -notmatch '\$rootWebTemplate\s*-ieq\s*''SPSPERS''' -or
@@ -34,7 +34,7 @@ if ($ast.Extent.Text -match '(?im)^\s*Get-SPSiteAdministration\b') { throw 'Lock
 if ($ast.Extent.Text -notmatch '(?m)^\s*\$site\s*=\s*\$_\s*$' -or $ast.Extent.Text -match '(?m)^\s*param\(\$site\)') { throw 'Streaming site pipeline input is not bound to the current site.' }
 if ($ast.Extent.Text -notmatch '\$runBase\s*=\s*if\s*\(\$MaxItems\s*-gt\s*0\).*?TEST' -or $ast.Extent.Text -notmatch 'Select-Object\s+-First\s+\$remaining' -or $ast.Extent.Text -notmatch 'Flush-RunRows\s+-Kind\s+CollectionCoverage') { throw 'Limited or per-site coverage path is missing.' }
 if ($ast.Extent.Text -notmatch '\$databaseLockLookup\s*=\s*Get-LockStateLookup\s+-ContentDatabase\s+\$database' -or $ast.Extent.Text -match 'Get-LockStateLookup\s+[^\r\n]*-SiteUrl') { throw 'Limited runs must use the database-scoped lock-state lookup.' }
-foreach ($name in @('Get-InventoryConfigValue','Resolve-InventoryConfigTokens','Assert-InventoryPath','Get-MySiteHostNames','Get-ObservedProperty','Test-MissingObservation','Resolve-SiteCategory','Resolve-QuotaUsage','Resolve-SiteLockObservation','Get-LockStateLookup','Assert-Deadline','Get-CollectionFailureStatus','Get-DatabaseCoverageStatus','Get-ContentPublicationDecision','Save-ContentWeeklyHistory','Write-RunCsv','Flush-RunRows','Ensure-GraphAuthenticationModule','Invoke-DailySummaryMail','Send-InventorySummaryMail','New-ContentMailHtml','Send-ContentRunMail','Publish-QualifiedCsvUploads')) {
+foreach ($name in @('Get-InventoryConfigValue','Resolve-InventoryConfigTokens','Assert-InventoryPath','Get-MySiteHostNames','Get-ObservedProperty','Test-MissingObservation','Resolve-SiteCategory','Resolve-QuotaUsage','Resolve-SiteLockObservation','Get-LockStateLookup','Assert-Deadline','Get-CollectionFailureStatus','Get-DatabaseCoverageStatus','Get-ContentPublicationDecision','Save-ContentWeeklyHistory','Write-RunCsv','Flush-RunRows','Ensure-GraphAuthenticationModule','Invoke-DailySummaryMail','Send-InventorySummaryMail','Get-ContentMailFarmEdition','Get-VerifiedInfrastructureMailData','New-ContentMailHtml','Send-ContentRunMail','Publish-QualifiedCsvUploads')) {
     $functionAst = @($ast.FindAll({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name }, $true))
     if ($functionAst.Count -ne 1) { throw "Missing function: $name" }
     . ([scriptblock]::Create($functionAst[0].Extent.Text))
@@ -239,6 +239,49 @@ try {
     $script:EffectiveConfig = [pscustomobject]@{ From='sender@example.test'; To=''; ErrorMailTo='recipient@example.test'; SmtpServer='smtp.example.test'; SmtpPort=25; SendMailMode='SMTP'; Cc='' }
     Send-InventorySummaryMail -Subject 'Offline summary' -BodyHtml '<p>Summary</p>'
     if ($script:mailParameters.To -ne 'recipient@example.test' -or $script:mailParameters.From -ne 'sender@example.test' -or $script:mailParameters.SendMailMode -ne 'Graph' -or $script:mailParameters.ContainsKey('Attachments') -or $script:mailParameters.ContainsKey('SmtpServer')) { throw 'Content Graph mail routing or attachment policy failed.' }
+    $script:BuildEditionMapPath = Join-Path $folder 'SharePoint-OnPrem-BuildEditions.psd1'
+    $infraRoot = Join-Path $tempRoot 'CombinedMailInfrastructure'
+    New-Item -ItemType Directory -Path $infraRoot -Force | Out-Null
+    $now = [datetime]::UtcNow
+    function New-InfraMailTestRow {
+        param([hashtable]$Fields)
+        $row = @{TenantKey='offline';FarmId='FARM';RunId='CSV-RUN';CollectedAtUtc=$now.ToString('o')}
+        foreach ($key in $Fields.Keys) { $row[$key] = $Fields[$key] }
+        return [pscustomobject]$row
+    }
+    $infraTestRows = @{
+        Farms = @(New-InfraMailTestRow @{BuildVersion='16.0.10417.20198';ServerCount='2'})
+        Servers = @((New-InfraMailTestRow @{ServerName='SP1';Role='WebFrontEnd';Status='Online'}),(New-InfraMailTestRow @{ServerName='SP2';Role='Application';Status='Offline'}),(New-InfraMailTestRow @{ServerName='SQL1';Role='Invalid';Status='Online'}))
+        ServiceApplications = @(New-InfraMailTestRow @{Name='Search';Status='Stopped'})
+        WebApplications = @(New-InfraMailTestRow @{WebApplicationId='WEB';DefaultUrl='https://example.test';ApplicationPool='Pool';ContentDatabaseCount='1'})
+        WebApplicationZones = @(New-InfraMailTestRow @{WebApplicationId='WEB';Zone='Default';AuthenticationMode='Claims'})
+        ContentDatabases = @(New-InfraMailTestRow @{Name='Content';DatabaseServer='SQL1';Status='Online';IsReadOnly='True';NeedsUpgradeIncludeChildren='True';NeedsUpgradeStatus='Collected';DatabaseSizeBytes='';DatabaseSizeStatus='Unavailable'})
+    }
+    $infraProofs = @()
+    foreach ($name in @('Farms','Servers','ServiceApplications','WebApplications','WebApplicationZones','ContentDatabases')) {
+        $fileName = "SharePoint_OnPrem_$name.csv"
+        $path = Join-Path $infraRoot $fileName
+        $infraTestRows[$name] | Export-Csv -LiteralPath $path -Delimiter ';' -NoTypeInformation -Encoding UTF8
+        $infraProofs += [pscustomobject]@{File=$fileName;Status='Success';RunId='RECEIPT-RUN';Rows=@($infraTestRows[$name]).Count;SHA256=(Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash}
+    }
+    $infraReceiptPath = Join-Path $infraRoot 'SmartInventory_SmartM365-SharePoint-OnPrem-Infrastructure-Inventory.current.json.txt'
+    [pscustomobject]@{Owner='SmartInventory-SourceReceipt';Status='Completed';TenantKey='offline';RunId='RECEIPT-RUN';CompletedAtUtc=$now.AddMinutes(-20).ToString('o');Files=$infraProofs} |
+        ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $infraReceiptPath
+    $verifiedInfra = Get-VerifiedInfrastructureMailData -LatestRoot $infraRoot -FarmId 'FARM' -TenantKey 'offline' -NowUtc $now
+    if ($verifiedInfra.Status -ne 'Qualified' -or $verifiedInfra.Rows.Servers.Count -ne 3) { throw 'Combined mail rejected a valid infrastructure receipt.' }
+    if ((Get-ContentMailFarmEdition -BuildVersion '16.0.0.0') -ne 'Unknown') { throw 'An unlisted farm build was assigned an edition.' }
+    if ((Get-VerifiedInfrastructureMailData -LatestRoot $infraRoot -FarmId 'OTHER' -TenantKey 'offline' -NowUtc $now).Status -ne 'Unavailable') { throw 'Combined mail accepted another farm.' }
+    if ((Get-VerifiedInfrastructureMailData -LatestRoot $infraRoot -FarmId 'FARM' -TenantKey 'offline' -ExpectedWebApplicationIds @('OTHER') -NowUtc $now).Status -ne 'Unavailable') { throw 'Combined mail accepted different web application scopes.' }
+    if ((Get-VerifiedInfrastructureMailData -LatestRoot $infraRoot -FarmId 'FARM' -TenantKey 'offline' -NowUtc $now.AddHours(25)).Status -ne 'Stale') { throw 'Combined mail accepted stale infrastructure.' }
+    $farmCsvPath = Join-Path $infraRoot 'SharePoint_OnPrem_Farms.csv'
+    $originalFarmCsv = [IO.File]::ReadAllBytes($farmCsvPath)
+    [IO.File]::AppendAllText($farmCsvPath, 'tampered')
+    if ((Get-VerifiedInfrastructureMailData -LatestRoot $infraRoot -FarmId 'FARM' -TenantKey 'offline' -NowUtc $now).Status -ne 'Unavailable') { throw 'Combined mail accepted a changed CSV.' }
+    [IO.File]::WriteAllBytes($farmCsvPath, $originalFarmCsv)
+    $infraRunPath = Join-Path $infraRoot 'SmartInventory_SmartM365-SharePoint-OnPrem-Infrastructure-Inventory.run.json.txt'
+    [pscustomobject]@{Status='Failed';StartedAtUtc=$now.AddMinutes(-1).ToString('o')} | ConvertTo-Json | Set-Content -LiteralPath $infraRunPath
+    if ((Get-VerifiedInfrastructureMailData -LatestRoot $infraRoot -FarmId 'FARM' -TenantKey 'offline' -NowUtc $now).Status -ne 'Stale') { throw 'Combined mail ignored a newer failed infrastructure run.' }
+    Remove-Item -LiteralPath $infraRunPath
     $sampleStats = @{
         WebApplications=2;ContentDatabases=3;SiteCollections=4;SiteAdministrators=5;Webs=6
         CollectionCoverageRows=5;CoverageIssues=1;ReadOnlyCollections=1;UnverifiedLocks=1
@@ -249,6 +292,13 @@ try {
     foreach ($expected in @('SMARTM365 SHAREPOINT ONPREM','PARTIAL','Duration: 00:00:35','Coverage issues','Read-only collections','Unverified locks','Upload failures','Collection coverage examples','Read-only collection examples','https://example.test/failed','https://example.test/readonly','SharePoint_OnPrem_CollectionCoverage.csv')) {
         if ($html -notmatch [regex]::Escape($expected)) { throw "Content summary email lacks $expected" }
     }
+    $combinedHtml = New-ContentMailHtml -Status Partial -ContentStatus Partial -Infrastructure $verifiedInfra -Stats $sampleStats -TenantName 'offline' -HostName 'TEST-HOST'
+    foreach ($expected in @('Source status','Infrastructure','SharePoint servers','Service applications','Farm edition','16.0.10417.20198','Server not online','Service application not started','Content database read-only','Content database needs upgrade','SharePoint_OnPrem_Farms.csv','SharePoint_OnPrem_CollectionCoverage.csv')) {
+        if ($combinedHtml -notmatch [regex]::Escape($expected)) { throw "Combined summary email lacks $expected" }
+    }
+    if ($combinedHtml -match '>SQL1</td>' -or $combinedHtml -match 'Top 5 largest content databases') { throw 'Combined mail exposed external servers or an unmeasured database size.' }
+    $staleHtml = New-ContentMailHtml -Status Partial -ContentStatus Qualified -Infrastructure ([pscustomobject]@{Status='Stale';Detail='Older than 24 hours';CollectedAtUtc='';Rows=$null}) -Stats $sampleStats -TenantName 'offline'
+    if ($staleHtml -notmatch 'Infrastructure data unavailable' -or $staleHtml -match '>SharePoint servers<') { throw 'Unavailable infrastructure was presented as observed.' }
     $earlyStats = @{WebApplications=2;ContentDatabases=3;SiteCollections=$null;SiteAdministrators=$null;Webs=$null;CollectionCoverageRows=$null;CoverageIssues=$null;ReadOnlyCollections=$null;UnverifiedLocks=$null;CoverageSamples=@();ReadOnlySamples=@()}
     $failedHtml = New-ContentMailHtml -Status Failed -Stats $earlyStats -Failures @('Receipt lock is in use') -TenantName 'offline'
     if ($failedHtml -notmatch 'FAILED' -or $failedHtml -notmatch 'Receipt lock is in use' -or $failedHtml -notmatch '>n/a</div>') { throw 'Early content failure was not rendered without fabricated zeroes.' }
@@ -256,8 +306,13 @@ try {
     $Tenant = 'offline'
     $script:StartedAt = Get-Date
     $script:MailStats = $sampleStats
+    $script:farm = [pscustomobject]@{Id='FARM'}
+    $script:webApplications = @([pscustomobject]@{Id='WEB'})
+    $latestRoot = $infraRoot
+    $global:SmartM365TenantKey = 'offline'
     $ForceSendDailySummary = $false
     Send-ContentRunMail -Status Qualified
+    if (-not (Test-Path -LiteralPath (Join-Path $outputBase 'SmartM365-SharePoint-OnPrem-Content-DailySummary.sent')) -or $script:mailParameters.BodyHtml -notmatch 'SharePoint servers') { throw 'Qualified combined mail was not sent with infrastructure.' }
     Send-ContentRunMail -Status Failed -Failures @('Receipt lock is in use')
     if ($script:mailCalls -ne 3) { throw 'Content qualified and issue emails did not use independent daily markers.' }
     Send-ContentRunMail -Status Partial
@@ -266,6 +321,9 @@ try {
     Send-ContentRunMail -Status Partial
     if ($script:mailCalls -ne 4) { throw 'Forced content issue email was skipped.' }
     $ForceSendDailySummary = $false
+    $outputBase = Join-Path $tempRoot 'UploadIssue'
+    Send-ContentRunMail -Status Qualified -UploadFailures 1
+    if (-not (Test-Path -LiteralPath (Join-Path $outputBase 'SmartM365-SharePoint-OnPrem-Content-IssueDailySummary.sent')) -or (Test-Path -LiteralPath (Join-Path $outputBase 'SmartM365-SharePoint-OnPrem-Content-DailySummary.sent')) -or $script:mailParameters.BodyHtml -notmatch 'PARTIAL') { throw 'Content upload failure did not produce a separate partial combined mail.' }
     $outputBase = Join-Path $tempRoot 'MailFailure'
     $script:mailShouldFail = $true
     Send-ContentRunMail -Status Failed -Failures @('Mock failure')
@@ -299,13 +357,13 @@ try {
         Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
     }
 }
-Write-Output 'PASS: content parser, nested configuration, persistent paths, lock mapping, timeouts, per-site errors, empty CSV, partial and qualified weekly history, receipts, upload policy, daily mail gate and routing.'
+Write-Output 'PASS: content parser, nested configuration, persistent paths, lock mapping, timeouts, per-site errors, empty CSV, weekly history, receipts, combined HTML, verified infrastructure, upload policy, and independent daily mail markers.'
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDY5xu2RRNZmZkp
-# Y37nQLP83YfxI35HPn94EtHWfUnmuKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAUjlM+pJAuYsm3
+# tCCF8vgmfXeGn4aB/h3lL+7bbxYZj6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -438,31 +496,31 @@ Write-Output 'PASS: content parser, nested configuration, persistent paths, lock
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIG0VatRrFaR0jpO0mdmTOwOje14oUmHqMYHYbQqMLEv9MA0GCSqG
-# SIb3DQEBAQUABIIBgH2HkyfnvPnJoNHLdpL6l9AHKxBga2iNUD7PZqKqXpPUi99o
-# 5otjGFPC4ARIY0r0EPpJ+Fu6xFS0vuYTCOi2umgvqHPcnWunqw1mD/5QJhQH8ffV
-# cL5iTVuN8DRuZs9mgYVrs0autrDSPwbGAKJY1lij61uVu99FQkQvxi6YQveU3MLP
-# vtV59lQWYjO+VOFi79+zoa5lFuxqytWNsI05Wuli8ig0XqeaeMHYt0LntsxaZQn2
-# /pxLvSDEWCep43xwiU09NPQtdODF6O9UyV1WYEKCN8i7/69LdHQknOxkRz/g1l2i
-# EyBm8eRC6ufOkUeQKdJ6iB7nlbcIMXenURGnKsxlt8Ezx9Aot1ODG5Hxqw4NAZ8r
-# Ez2vC/ZroMwA7f1uQt+9fYYJgKOabxcJYTxkCFcIwJEAIT/j2NvTz68PVWzvKW7A
-# nEv0WWozqexgh7rBlPl4QAH0dtOYT+9zNfpuowazdlBJZtvdc9LPXZARfQq9Gi7X
-# zzE9xEQvT5/z0g9VIKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIIFovz222pLw/A+l++Aga4/7aSuYZ+kZJh8li+qg5RIMMA0GCSqG
+# SIb3DQEBAQUABIIBgIGFG9UVr7Dxs3C7DY03X5rysnwK2XdgCu4dw1c5iPJYQr23
+# EIBEaj7eGq6Up035mI/UTCkw3fgTF+h4GMZQdQ8XANPGzgI8YJ8N7Vayp7IVL2hZ
+# Omz0OFDt8Q8n1I+wpROjwlKLcOqY6nIaqD4ECLJgDTvzUVvPuGigXpK27l7TdVVI
+# qu/uDzGLA5ra8AV8PTp57Pplrpis2oW3T/62778c3S/htMnQ7VIyymgoWlcYVam1
+# TzuLhlcX+WIIbM0FNMcJnuYz3YWMuaEaM3YJ7R7zoaO7hlPmCKjFNrBs9RBRAjVB
+# k+HkM7djo1KIt1BSmM9bscTaHNSYMlmhe9XmXKjlNtQNAwNKfF4OPl4Sy8UbZ3IS
+# HGl3fTRFyvDwVgqyFoyf5gCemRpPXh1ZjLB3sdd/VcfDKFayzZKK/04aPmtTT4mR
+# JMA44f3ot5Zdt90M+WjS/Wqp4dsl8UR2er1Gut+QQ0XnVWjW83oVxHg8+CNf+S1L
+# 89QxA+DoGWnOth9k0KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTAwMDQz
-# MzdaMC8GCSqGSIb3DQEJBDEiBCCR7mno5Wy4OXA8ysl3Ma68hoLvYoHr6PWm9Tfi
-# 45XU3zANBgkqhkiG9w0BAQEFAASCAgCkYkMbKc/PNZr073L1ejwqE83MQhRSdHOm
-# rGlmC69/BaiKvGxLXP337S/CWlHmw7tfEs8pLzRzyyepXaGlBBlyBgU1KVfveqxi
-# bRiWLUZdgNzrzwHd+3GiziS6/+shIQ1qdjVE48okAe8/EnuvIUfuRM7yVISORgNB
-# WoeGSnGnQMEEBYM1W5wc5/GUmpFBqTssYQEWULWSaBmjM7/SRUFG9AIjLtIAdQj/
-# k/yYnd/iHeHiR8ymiRzPCVJaldBzCtUV7QehqfWA65/yXq3ahSpfB3eKO50p+hiH
-# jJGnxrBklKDNfq8cFOqG9tCYQUB6WQLFP17ETz7ATD7/jp2fXfxr0/EZECAXqx73
-# /AJXT4OW417jgRJnX+WWUWhxlgQOVUseH4aGXHKcP1aoBflYAOQkI5HVeoXjX050
-# 8/j9wjbOEoYLGb07BluHQObLEvZbIA617fRtpPYZ4zIR7JhIoAux2D6qWSv1PcgV
-# xDh077tJ6cn/6chCcSwEzZBlJcucbPj1sDflewEfmtMJzcZZ75meYKiBViV7mP7g
-# YlLW5+GIIaRjdFNdPf1OAYOKaNUK/t+nOmYD5gVqp9+UsVsF6q416QKQYSiLPwkD
-# nhKOZRoAtmREWoiNQKEhcjCKPiT78099kaLERmPtz7CSULlIFUmpatiiQlsPmAD+
-# sH3OUTdl9g==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTIwOTUx
+# NThaMC8GCSqGSIb3DQEJBDEiBCA6vVeSce2TTCfAIYd+HN25p4hG0haDlw/l8xyi
+# 1GUqYjANBgkqhkiG9w0BAQEFAASCAgAuqt6r17/7SqnNDh6BzkebALuijHvseHey
+# 3NBpjtp6vobDdtdpNgDoNFP9+eVv2XQJeYHoMCSGvgflGdyoV3QW78ATCzJ2vblK
+# xQ903UtXB5OrQOe+hpMLQyeBXDYvz8whl+bhCLI54MG9/TRhBq411+Rkbrud166D
+# 8i+QYeej30ewJgX/wUyrn9ap3pVK2FILGviXs8OnYpkWAwnF+vloJ5v87AAk88JL
+# VTtOO0adVYNsf97rJ7W+gF0a2wJ3Ud+tlOThFedNrNLsOPBPGkP0UVlwasn7lCMQ
+# UkwDGiZ5qZ4JRTrhuoT0P23+ucObo+Q6Q9eQ5Wcj1tKIKC4M4sQ12aHtcLvzftGx
+# 3q2VAbZc9cB6HfbU7B/hUs2QZvZAbK3Ddnn6VSYaxbvVleF+J6IcHxYIBC01V16c
+# AB/Pd5hBonF+JTDSjRWNLrPjh8XD246X5hS7IfbWKUyY4HkfyXkR87xktdMdooxE
+# O6GRKXCXf779FqRYONyvN7sAP2GsuyMFey8Xncde6nS7eAZ1rtucRJP5Jk3XXadc
+# tabXp1X2RtKgwTDyDSMk/89tcM92WDBPMJuKfUZU7e3lJqJxFCrOz/jKAvvaMpvS
+# EEQpB9jEB0CxEFgNksInqYIOQmqsjmgUptckh34oQYhzNRCqUSf/Rnym90z9z/TX
+# CIX8bEnUDQ==
 # SIG # End signature block

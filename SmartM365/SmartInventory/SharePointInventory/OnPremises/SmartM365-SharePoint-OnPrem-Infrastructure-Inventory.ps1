@@ -2,7 +2,7 @@
 .SYNOPSIS
     Read-only SharePoint Server 2016/2019 farm infrastructure inventory.
 .VERSION
-    1.0.11
+    1.0.12
 .REQUIREMENTS
     Windows PowerShell 5.1 x64 on a SharePoint farm server; SharePoint Shell access.
 #>
@@ -432,6 +432,7 @@ $script:CurrentStagePath = ''
 try {
     $null = InitializeScriptEnvironment -OutputPath $runFolder -LogFileName $script:ScriptName -CallerScriptPath $PSCommandPath
     WriteLog -Message ("SharePoint infrastructure inventory starting. SharePoint upload enabled for this run: {0}." -f $global:EnableSharePointUpload)
+    if ($ForceMail) { WriteLog -Message 'ForceMail is retained for command compatibility; the combined summary email is sent by the Content collector.' -Level INFO }
     if (-not $ValidateOnly) {
         try { Ensure-GraphAuthenticationModule }
         catch { WriteLog -Message ("Graph Authentication bootstrap incomplete; local inventory will continue: {0}" -f $_.Exception.Message) -Level WARNING }
@@ -449,7 +450,6 @@ try {
     Start-SmartM365SourceReceipt -ScriptPath $PSCommandPath -SourceRootPath $latestRoot -ScopeParameters @{ IncludedWebApplicationUrls=@(Get-InventoryConfigValue 'IncludedWebApplicationUrls' @()); ExcludedWebApplicationUrls=@(Get-InventoryConfigValue 'ExcludedWebApplicationUrls' @()) }
     $script:ReceiptStarted = $true
     $farmId = [string]$farm.Id
-    $previousCounts = Get-QualifiedPreviousInfrastructureCounts -LatestRoot $latestRoot -FarmId $farmId -TenantKey $global:SmartM365TenantKey
     $rows = @{
         Farms = New-Object 'System.Collections.Generic.List[object]'
         Servers = New-Object 'System.Collections.Generic.List[object]'
@@ -572,7 +572,6 @@ try {
     if ($failures.Count -gt 0) {
         foreach ($failure in $failures) { WriteLog -Message ("Infrastructure coverage detail: {0}" -f $failure) -Level WARNING }
         WriteLog -Message ("Infrastructure coverage is incomplete: {0} failure(s). DATA-LAST was not updated." -f $failures.Count) -Level ERROR
-        Send-InfrastructureRunMail -Status Partial -Rows $rows -Failures $failures.ToArray()
         Complete-SmartM365ExecutionContext -Status Failed
         $script:Completed = $true
         exit 1
@@ -600,7 +599,6 @@ try {
     if (-not $receiptPath -or $receiptPath -notlike '*.current.json.txt') { throw 'Infrastructure source receipt qualification failed.' }
     WriteLog -Message 'Infrastructure collection and current publication completed.'
     $uploadFailures = Publish-QualifiedCsvUploads -Paths $qualifiedCsvPaths.ToArray()
-    Send-InfrastructureRunMail -Status Qualified -Rows $rows -UploadFailures $uploadFailures -PreviousCounts $previousCounts
     if ($uploadFailures -gt 0) {
         Complete-SmartM365ExecutionContext -Status CompletedWithWarnings
         $script:Completed = $true
@@ -611,10 +609,6 @@ try {
 } catch {
     $script:FailureHandled = $true
     $failure = $_
-    if (-not $ValidateOnly -and -not $script:Completed) {
-        $mailRows = if (Get-Variable -Name rows -ErrorAction SilentlyContinue) { $rows } else { $null }
-        Send-InfrastructureRunMail -Status Failed -Rows $mailRows -Failures @($failure.Exception.Message)
-    }
     try {
         WriteLog -Message ("Infrastructure inventory failed during {0} at {1}: {2}" -f $script:CurrentStage, $script:CurrentStagePath, $failure.Exception.Message) -Level ERROR
         if ($failure.InvocationInfo -and $failure.InvocationInfo.PositionMessage) {
@@ -639,8 +633,8 @@ try {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAi8ukxhDuf1YMS
-# 8eQTaN0jTk+V+/UDA8FcofNqbdQ/VaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBAjig62lP00pMT
+# 6nWi/kmKHw0n1zm+1RuNecns0wAyPaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -773,31 +767,31 @@ try {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIPJx7imZu4tv7rD4Q2v1SuBPg5MsR+sDv41738R5DKOqMA0GCSqG
-# SIb3DQEBAQUABIIBgA8ATHQfDV1iogDZaox82t7Hwl8GippcspWTX0ZJfCBOLC16
-# p3WKO/ILWlbvHxBIh8l0U6D8AKQThy8gdQwk5P9OC6kBKsB7D13VIAf+Qo0et5p0
-# ik4O7aoyV1L7s7TZ0cnb6dvw1tE0hoZxocy4mLoozvITRtpPFlCEOe5PQiZXBhC4
-# AN57lw9QRfaKx3X3V+hSr0c4n9j+A2xoinc2u7Rnoi7yKRxaadmDqNoiP/imo0K+
-# 2UxxnaLd0WPRdyMBIU7aFiFa0F4eplaHM0zg+Yg4CbMZ80caxCMHZ9Ksa6dXCAr6
-# L7ehIgQJbvi/apTIZG1WXKH2+ZFoi9bbxECIY/srMryg8Sf74LfnimqAMSxsPZkr
-# csujYzkeELxDPVS7kMKByX6qzx7LCSbKuE+69xL2SgN9RCpTBJwgw5LBxhFKOpRk
-# FUCoT2oyiw8VvSfym0JQSEm1TEMK+lSOLz7OpRIQuL30D1qwQ8vYmf9IXaOqIyJk
-# iC8StmWh2+bz8Ya3gKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIJmZM7qn6iFM9aE+myKmhTKtnyI7LJRVdnWmN6ZBBIMoMA0GCSqG
+# SIb3DQEBAQUABIIBgGVy+o0ALskxD1vPIW76mA7UtXv60Uh+N4m2v3FgiYJ0SQ4W
+# GYTTU/6ajeGocgmdaa2Wli6qJTJf1a6IbhOzdfH2Hzdb7+4LosZMfq12XWDf0oS8
+# nHpdtv1Tr7tTaNwIqlBFsWdlrw3OPt3HDXLPw9AW1YNZmNLOzth4r/Awqn3crj5a
+# anjfcVGP3hJ8/mdkCP+4Kn7YGp0K6q1khYZPPghfmO1b6oBS3X4VcYARGcReHaqB
+# MTR0NSeG3KQGPiw8wOWFx55hoKBECEROVXRYbk90UewNWi/jmoukuimzS+WktD9z
+# v4S1PiXSR5J6q2HavjZDZOM3vO/QV5elExbqY9RaqsulQuohCOvilzTMbagnctcg
+# tJFRWAZvkuFsDSBK68jkkOF3QvtM1PrfkmFYEmqIPLQc16KqJxDKohHdcMO+2Qw3
+# WbyBroRHNxI/eQYoBezckMx6vg6IILV8YyTVPNRt4dJZPxaYPfLeOsz/xO2ozGvN
+# vktOn3744aSJlwO8y6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTAwNzI2
-# MDhaMC8GCSqGSIb3DQEJBDEiBCAvOqxSGK2ue+p+j3IU50khHFF5XD7nZPC7qARP
-# oM/+fzANBgkqhkiG9w0BAQEFAASCAgB6b3pUx/fE3kigXq8qAIOoC28X0zI3i7o0
-# ZI1bacCmLF668fv2Bz2PX9EdiJVqehXuFGp12JxtSnpnIv5ojCC3NY6wEQSC/eY1
-# 9bmywilfqiJnDIqnqlavr05IUMYjukUURQjmUnvB+b6oM47Z7iLLIh7f90ZjE4UE
-# mWEIulZNNCfUh7sXaDfLiiVd6OqsqPhkgO5mYg49uAbObdmpI4BdiuRIcWYPoXTF
-# ZUSpPIOQuyxU2oNOltwAyFzfLt1ozKp7rEQQ56PWPyTJ+R2/hqFMHQTka6n36n2d
-# 7WIEBzbGLoE8P3t8Vx8Ss87Z8wYDm4SM55M8hpEPqPbh30lmaTA4YPUFML+QTh2x
-# UDrUqNATmgxqWu4DoG2g1tJYRk+gymAwHJre9m83V07/zJD8yAAXBKfupNLd5K21
-# 1hTG4tktkJyfnr4ro8msXQuiQcclAVeQLyTibr820Ayv9zihMWCmDTQpzrjr3LT6
-# RjGmM6rWndrZ+IYwxvD98OoRcxFh1poA4dFhqvY1oDtlxQQ7quVewdqIhGUy8lOX
-# 2et0+DYwEJ56+PbkRZBkfJY21+ZToc3G0nDPn/edcJAt/NccfRA3A2SIZ84Zgd88
-# Q7l+WhCI1jShUDCXVXhTDu5PwZD0NlIHM4G4Mzivettuff/rO9I/tqCnQuAQAZVX
-# VIkoAw0SDw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTIwOTUx
+# NThaMC8GCSqGSIb3DQEJBDEiBCCCPG/G8uTZ0y6EyY2AXz1qKQLExRf0aZ1GLn+J
+# fN/eiTANBgkqhkiG9w0BAQEFAASCAgCWsA/0xRmRwiEm3HmUmnGWZ/4plAoqj6ft
+# XT7GSH24+o4B1xHsOM4nTIVWn/Q8xplAV7e4D80TxPjq3ReUKO6EULegHeJuRo5T
+# PHPwyoS6sYCrAfJgmaEh3nSR3ja9ZGt6xHgh/wldBaw8sAfP89+TUiDf7KugAQCy
+# ae40eVl6r+9YUarGiTViYfA0B3/tWVC1+zVQUh06JI9WXo7DKb1VIYbIjfqnMM1c
+# J8GlhMotK7wbBUSLE2nVGIHaOYBc8EDL3O00AQ4w/XQMSvBdV2vhK6W/03J7oPck
+# LwPytbovunBomC4BL1qNI7KBhg74MxaCAOVlhUAweZMfRZxClu2ui1fH0sAxOdpW
+# TRAZ+jiZ8iAaTqU5tsmwVT5RInDEzNkBx4YRnHWx1ZC1beTdVuYYXWmWaA1QnPnh
+# TCJ5yfulyGDJaDt4Oyhy0WVdxLcuYQC3e81w1jBuBX4D05jtBEZzlgnXYBBM7ZXc
+# d5ZgoFiKBTH8R9++rGKfB4wQwbNkABVnZB8zBGvP3Fvrg6t/LQ3p56CfAljc8GTz
+# vuM5E05apBwX/aNB83cXDoGyRTpvTjw3Mc/0qupeiws00F1MpLDKEpTts2p6lFUN
+# oxV/dcvyMYMzO2uOFRr/mcnQnTgD/nf9qOEp12Y+VbuHjzvFvncVULA2a0sSZWUk
+# ggClIYUy7g==
 # SIG # End signature block

@@ -11,7 +11,9 @@ $errors = $null
 $ast = [Management.Automation.Language.Parser]::ParseFile($scriptPath, [ref]$tokens, [ref]$errors)
 if (@($errors).Count) { throw "Infrastructure parser errors: $($errors.Count)" }
 $versionMatch = [regex]::Match($ast.Extent.Text, '(?s)\.VERSION\s+([0-9.]+)')
-if (-not $versionMatch.Success -or [version]$versionMatch.Groups[1].Value -lt [version]'1.0.11') { throw 'Infrastructure version was not updated for zone URLs and server counts.' }
+if (-not $versionMatch.Success -or [version]$versionMatch.Groups[1].Value -lt [version]'1.0.12') { throw 'Infrastructure version was not updated for the combined mail policy.' }
+if (@($ast.FindAll({ param($node) $node -is [Management.Automation.Language.CommandAst] -and $node.GetCommandName() -eq 'Send-InfrastructureRunMail' }, $true)).Count -ne 0) { throw 'Infrastructure still sends a separate summary email.' }
+if ($ast.Extent.Text -notmatch 'ForceMail is retained for command compatibility') { throw 'Legacy ForceMail behavior is not explained.' }
 foreach ($column in @('DatabaseSizeBytes','DatabaseSizeStatus','NeedsUpgradeIncludeChildren','NeedsUpgradeStatus')) {
     if ($ast.Extent.Text -notmatch [regex]::Escape("'$column'")) { throw "Content database schema lacks $column" }
 }
@@ -250,13 +252,13 @@ try {
         Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
     }
 }
-Write-Output 'PASS: infrastructure parser, PS5 CSV, receipts, daily mail gate/routing, edition mapping, database status, alerts, safe delta and HTML.'
+Write-Output 'PASS: infrastructure parser, PS5 CSV, receipts, disabled operational mail, edition mapping, database status, and legacy HTML helpers.'
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBBAyyPsyksXA2z
-# i4LYLYsGZOZLRj4axHJMS0dduzLg1aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAwdlflqk3Udq/W
+# MEGSIB2BlR3zkuxU0heF86DLcJrGPKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -389,31 +391,31 @@ Write-Output 'PASS: infrastructure parser, PS5 CSV, receipts, daily mail gate/ro
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIArjxw3ajCoJDgadUe7TU71eQkIK3Wdi5IZVwK0zZ5P3MA0GCSqG
-# SIb3DQEBAQUABIIBgIQW5ym4gslhGZq+ArHUuQP3vAEm7FmG3mFK97AAmyyyIqYa
-# QRVwbFFV8Emu8odY07+jlRWt6C4HdG5OV/mdGVKfZLJfacSVA7REAnyiKXokpZYu
-# lNV8eTrRObUCziNnQHnUI0f+Gl9ZLRpsQggZZTczdykYzGDPVJWAA9WehHdhTGqY
-# 8D5OSQsoLNQoliIaMkGqj0Pu84vZpdYQ7Db6MZyYqhSvy8Hy2thnYSOzCvFuu3/X
-# QQhMGicixlmIkCokreuCeJH9zUPmhfO3JgnLVMPJAR29D3Z8Ow0iYHSghn2IPb15
-# Yi6KaO2n3Bb77+fvmLqxnZUVj8HasOjYw9kws/d8EFZxOqlJ+1mvW4HOt0kRtCZs
-# dGkLZhuGYbGGKRPYpJmexCdM1hrlzb6bJeZ7GaDi02DT5/+Ai9/BNtSOkcAEEERU
-# AOK0y2xvyEKNdpzTVYx73hS+d7oV+caaBe7w6l9VI/NVkuDRJWywoTtetDRi7DIv
-# bjjxOecPG+HK/uNdTqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIPb5jCfq0cbAny5aZHEU908+nMMlYUwaLEHLF8g5qNxeMA0GCSqG
+# SIb3DQEBAQUABIIBgDd9dqq5Hc+WkvyLaTDWT0oRNGkaiyd01OQAYzoQx/9fLr14
+# UUd5Pa5Lgeyl8T3InSb3ou4yY4LRYVhp+jolN6bNfAl15uoRlE3BdtenKuyz0Qjz
+# P7qAmkFumaU3EC2VG0QYSbvrHmufLt20eba5gzjNQ22k4MR8Gzw8ChErR62n9g7s
+# HisQIh/gm2lzozqL8jbPomoN8LVXUuYgQ450311Lit1IeXH0NWHYERJKl63vqA7M
+# qTls5kl+XWEYcAskMVU7VMLCTI9fucKbjDFAfRF6NUX8SCj1RyxjqO6Z/b3cWJLP
+# yIGR5solR4aLnfxmlZqB/IYtR7Mm37BjNoBgkbJLbYlN0J8BwwemHZ1s4gh6MdwK
+# 1tAJNyOE/D/AyyfihTQd/8Vgx02YyLSGma3vCuXtXQCb+DG8Y9dP0gSg2wT9m9ro
+# wmDd+p0s1bcBNz9JiSb2RRtQardD8aGcCeR69/uxbwdYsS2fBOmtPzZczKyVZyDn
+# exfPU1H604wnDETQM6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTAwNzI2
-# MDhaMC8GCSqGSIb3DQEJBDEiBCBt8mUVRdmWIWifbaiUViQ4ULMhilzzW+ls909j
-# 3/M0qTANBgkqhkiG9w0BAQEFAASCAgBBpbV0SP77LcVSHlCHZN44/ckfBuHd/Cem
-# D22eM26XhgdIdbeoBELlFnrZ36fldRn44sRI+T3V7uSNEozX07Vohkx64vIwNIA6
-# IayYYF9Bv7PSG09XnYWc673yXJxSfFFyUzAJjrdRfFDGXazEX/PQdPoqQbqm/unL
-# doEg6vs5vrDjqJXlco25rX95PeU57yIvCLoi2bBq0zGjHcHCNP8A0fb0UtqkrqDA
-# x/Rk6SGKjzPLLtmlBoY0oojcKU7skW5HvNNlgqHuj1SEJkNL4GGaJ4xmQajH+BIm
-# wdOtt04S5de4sRVB3Ts3EIMxm+n88MAe/SdOgNawal0cfwWUmSQdEoubntGVroY2
-# RYjw5WN4qRkwoggIoy7l84TmtMqf4i2wt5RMN767Qy43haoNnlZ9UEXej1CzU6tN
-# +GVecghT0DnxyKOaHaB5eS6N4Wovg7uCJOI7/ViR7qRsNYNi3v7Yxe/fhbU7NmZP
-# wRMKTc/gU7nRHH5cU7QULUweuMNbvvPiN+SHh+Wxlm7lf+tTgtJ4g8+4pXesScW8
-# MUNbyFydWfGygS2B9vJUczAaCKg4GFH7VPqQNia/9qu4Pu2mh8reVtfvbLod/UBB
-# VBC3X51GUNWEfrKaCYGTj5Y1My1TXlpMCIkf87nS2N52978ranW0jaZdr4FbXILQ
-# Z1CaT/ujqw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTIwOTUx
+# NTlaMC8GCSqGSIb3DQEJBDEiBCBm/UCwyeILnjHY8vfJvzgX+V2gpxIWwn7ztKlX
+# TwpruTANBgkqhkiG9w0BAQEFAASCAgBBsWv/gFqL9w4VkF3dKs30OsC8FR9buwl9
+# GS4nP8XRW1j13hazm2yF8Q5R8l1VSD35gxji9OLiH+PbIuh/6I2gNmZMKVUOtfP0
+# Lyt70hnubhux59sdcgsp8kZ2Tr3W0fudDTUrEdrIal7d2J2k4BSRkHiILhw2yctn
+# zrUB2kpqjVOg0g6x2bscxp5q4R3+4HAp6ZxkJNTWVDBFy4yFBdU0q+77nCGkc0kf
+# u3DmBGyWWKJtD1mC6BIKG1ZaNbtq4Oz4XVxwGLEZES67VIUboj6qb3dFqDFCRwLK
+# Pzh43CcCXl4rvT055DfYXYhL2eI4nrbjR8Hnadqw1zZRwE989mGSZQkAyKLZUKBg
+# wgVJRa+sAICOHJP91M9YI8UhGVffEeEtPBjptsFClmbGWNdoBaE+Upd8ZOzHwEYE
+# TzmFYfcm1JvFf/F6rT979uKWaUzwY7aI3JwzsbMGRP8uZbHybAob020FwyK6zWw/
+# sVDU1mdut61LMmomiKa44AR3FwJSZIuGOmh5gal0tKPiJ4833zaxASO48AXnmtUy
+# s/Ve1Qr1yqdXh76R30R4Xqs4vhdpkItSJDIi9qA2Yx1oKscgS6+3COAQ5hbdOzVA
+# hfFYvCGhdvIi+4GxSv8UMBEw9MlHa0ja+8+uNiKC6oZR8OohxR7X8I3JZTJc2H20
+# HEPZ2jThoA==
 # SIG # End signature block
