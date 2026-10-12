@@ -8,7 +8,11 @@ param(
 
     [string]$SignalsOutputPath = (Join-Path (Split-Path -Parent $PSScriptRoot) '_private\DeviceRiskEvidenceSummary.csv'),
 
-    [string]$DirectorySummaryOutputPath = (Join-Path (Split-Path -Parent $PSScriptRoot) '_private\DeviceDirectorySummary.csv')
+    [string]$DirectorySummaryOutputPath = (Join-Path (Split-Path -Parent $PSScriptRoot) '_private\DeviceDirectorySummary.csv'),
+
+    [string]$SystemEvidenceOutputPath,
+    [Nullable[double]]$DeviceSystemMaxObservationAgeHours,
+    [string]$DeviceSystemOffsetlessGraphTimeZoneId
 )
 
 Set-StrictMode -Version Latest
@@ -363,7 +367,7 @@ $evidence = @(foreach ($device in $intune) {
     $tenureYears = if ($null -ne $observedSince) { [math]::Round(($now - $observedSince).TotalDays / 365.25, 1) } else { $null }
     $tenureBucket = if ($null -eq $tenureYears) { 'Unknown' } elseif ($tenureYears -lt 1) { '< 1 year' } elseif ($tenureYears -lt 2) { '1-2 years' } elseif ($tenureYears -lt 4) { '2-4 years' } else { '4+ years' }
     $tenureConfidence = switch ($observedDates.Count) { 3 { 'High' } 2 { 'Medium' } 1 { 'Low' } default { 'Unknown' } }
-    $country = if ($null -ne $userRow -and -not [string]::IsNullOrWhiteSpace($userRow.'Usage location')) { $userRow.'Usage location'.Trim().ToUpperInvariant() } elseif ($null -ne $userRow -and -not [string]::IsNullOrWhiteSpace($userRow.CountryOrRegion)) { $userRow.CountryOrRegion.Trim() } else { 'Unknown' }
+    $country = if ($null -ne $userRow -and -not [string]::IsNullOrWhiteSpace($userRow.CountryOrRegion) -and $userRow.CountryOrRegion.Trim() -ne 'Unknown') { $userRow.CountryOrRegion.Trim() } elseif ($null -ne $userRow -and -not [string]::IsNullOrWhiteSpace($userRow.'Usage location') -and $userRow.'Usage location'.Trim() -ne 'Unknown') { $userRow.'Usage location'.Trim().ToUpperInvariant() } else { 'Unknown' }
     $sourceScope = @('Intune')
     if ($null -ne $entraRow) { $sourceScope += 'Entra device' }
     if ($null -ne $adRow) { $sourceScope += 'AD computer' }
@@ -441,6 +445,22 @@ if (-not (Test-Path -LiteralPath $outputDirectory -PathType Container)) {
 
 $evidence | Sort-Object 'Device Source ID' | Export-Csv -LiteralPath $OutputPath -NoTypeInformation -Encoding utf8NoBOM
 
+if ($SystemEvidenceOutputPath) {
+    Import-Module (Join-Path $PSScriptRoot 'DeviceSystemEvidence.psm1') -Force -ErrorAction Stop
+    $systemPath=Get-RequiredCsv 'DATA-LAST\Intune_Devices_LocalSystem.csv'
+    Assert-DeviceSystemCsvSchema -Path $systemPath
+    $systemRows=@(Import-Csv -LiteralPath $systemPath)
+    $systemEvidence=@(New-DeviceSystemEvidence -SystemRows $systemRows -InventoryRows $intune -UserRows $users -PreparedInventoryRows $evidence -MaxObservationAgeHours $DeviceSystemMaxObservationAgeHours -OffsetlessGraphTimeZoneId $DeviceSystemOffsetlessGraphTimeZoneId)
+    New-Item -ItemType Directory -Path (Split-Path -Parent ([IO.Path]::GetFullPath($SystemEvidenceOutputPath))) -Force | Out-Null
+    if ($systemEvidence.Count) {
+        $systemEvidence | Export-Csv -LiteralPath $SystemEvidenceOutputPath -NoTypeInformation -Encoding utf8NoBOM
+    } else {
+        $empty=[ordered]@{}; foreach ($column in Get-DeviceSystemEvidenceColumns) {$empty[$column]=''}
+        $header=([pscustomobject]$empty | ConvertTo-Csv -NoTypeInformation)[0]
+        [IO.File]::WriteAllText([IO.Path]::GetFullPath($SystemEvidenceOutputPath),$header+[Environment]::NewLine,[Text.UTF8Encoding]::new($false))
+    }
+}
+
 $enabledAdWindowsPcs = @($ad | Where-Object {
     (Get-NormalizedKey $_.Enabled) -eq 'true' -and
     ([string]$_.OperatingSystem -match '(?i)windows') -and
@@ -496,7 +516,7 @@ $directorySummary = [pscustomobject][ordered]@{
     'AD Windows 10 Ambiguous Intune Matches' = $ambiguousWindows10Matches
     'Intune Windows 10 Eligibility Undetermined' = $intuneWindows10Undetermined
     'Windows 10 Eligibility Undetermined' = $intuneWindows10Undetermined + $adOnlyWindows10
-    'Country Definition' = 'Managed-device country uses the primary user UsageLocation or CountryOrRegion.'
+    'Country Definition' = 'Managed-device country uses the primary user CountryOrRegion first, then UsageLocation as fallback; it is not physical device location.'
     'Evidence Status' = 'Observed'
 }
 $directorySummary | Export-Csv -LiteralPath $DirectorySummaryOutputPath -NoTypeInformation -Encoding utf8NoBOM
@@ -542,7 +562,7 @@ $summary = [ordered]@{
     AdWindows10AmbiguousIntuneMatches = $ambiguousWindows10Matches
     Windows10EligibilityUndeterminedAllSources = $intuneWindows10Undetermined + $adOnlyWindows10
     SecondWaveSignals = @($signalEvidence | ForEach-Object { [ordered]@{ Signal = $_.Signal; AffectedDevices = $_.'Affected Devices'; CoveredDevices = $_.'Covered Devices'; ManagedDevicesAffected = $_.'Managed Devices Affected'; ManagedDevicesCovered = $_.'Managed Devices Covered'; SourceFindings = $_.'Source Findings' } })
-    SourceFiles = @($intunePath, $usersPath, $entraPath, $adPath, $upgradeEligibilityPath, $windowsUpdatePath, $endpointPerformancePath, $endpointStartupPath, $hardwareConflictPath, $removalCandidatePath)
+    SourceFiles = @($intunePath, $usersPath, $entraPath, $adPath, $upgradeEligibilityPath, $windowsUpdatePath, $endpointPerformancePath, $endpointStartupPath, $hardwareConflictPath, $removalCandidatePath) + $(if ($SystemEvidenceOutputPath) {@($systemPath)} else {@()})
 }
 
 [pscustomobject]$summary | ConvertTo-Json -Depth 3
@@ -550,8 +570,8 @@ $summary = [ordered]@{
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB5W9A0JC9MSN8n
-# qMtYLzB8O0eco4Qy5fagXauf6oA2UqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC1FBIaNXjIlAZQ
+# ksQYXG6Gm5Z3MojZK3KFuoq71JfwXaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -684,31 +704,31 @@ $summary = [ordered]@{
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIC7aZUT0tqYF9pJLQpfXXz/qVhQ4fQBS46VGMQJP4qYxMA0GCSqG
-# SIb3DQEBAQUABIIBgBF+/JfCJDPSZEYQQY2waa/UtFLNqOJycuunHirQg9KmVoUM
-# g4GZirvLd1wod5LnYcNPZN84udDMmzLEe9Mh3YV6MaW9LIhM3hKC878UFPrKEkTq
-# Jh/Efy9z/AQ9fcCWruFmmWTNbC0V0An4ixLfB0L3nm97puwh4zqVqK+xsC5+SjEL
-# b2hpVZJu5sFrrqdfW1ELjn44/ysyrEp2+THoPywfAXQy0/tG5195Q0cRiNgtQ8kM
-# nOvjg+wMRke+tcg4i0jfB7KBe4nNd7rCWyQeuOH1HPV9YqRN4R+4mlzsWrktNmV6
-# laZ7KMRqhupV2D8Hty1RVyeVlyE2n7H4ult2bvNFmLoYe1EwrVY/9EYUR63mIFM2
-# 4n1rqX2NEqJFZMgV02HJ3MJq6VKUlQyGb2syGF71lgNQIVpEctw8A8tQNdu/wK8M
-# gQmjA2X56/Dqw4S4RR2MPEyyY5w66UEsKucZWcE37/OvzNC+s5WbfVPQwdlHE5Pk
-# jlSyDqFVdXh8Fuv5JaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIG4nwGzLxR3nipEoCtZKZzCZkLIASTzrQuI8Yj2kYkGeMA0GCSqG
+# SIb3DQEBAQUABIIBgBEr1+zWCs+0+y5dFfs9QV0QqE6Jbn1hk5kUu+AEZFE5mjv3
+# 1ysYQnxnybKdOeWGsAUo+LeUmp+bsw0wXUaw8kLTQXCnqfWsNkMf7rrm90a7I4Br
+# hALdIRr8c/hzfBRHFZD2bKiSTZFlA5VsoXQqt4+hIXWi9x5BgHzNOHawd5NbjRqF
+# mcwRTywviGuDoA2HUBBqFPfhUm61wmRFyg7khGWnpmp86/weKEwyXMGakf3Az3d0
+# s7bqV562f/6SWFUiJqUsJYA4wmBY/xpgTQTaOB3v1lpwvBvOlsxUmFwWZbfuYCG8
+# 3LQ/mipBZBG9jU1wyCbv54yK8FvallhDuhCRFGcHNrI+5vu86+im4nJHPiF5p9aS
+# ma97Zcqcn8b/xgiuiJ0M1b45pb9r79Hw6g15J2Us0o8D01EkI81yR3k5dQEza7wl
+# Ev8fycXIOFqEZyNqjzqpO0K+l4Whq+K4kI4yPxJ6ise6QtUvVwFd30Fd7Bcv9TlY
+# x8QX+hJ2u+gpU4DoX6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDQyMTAx
-# NTdaMC8GCSqGSIb3DQEJBDEiBCC3niD/m8KMv3n6SJOjvhXPIPe17XX9x0oT6ZJQ
-# ZGclrjANBgkqhkiG9w0BAQEFAASCAgC1ipy7G7GB/4mTIMzpHwOf1d5OeFjNWCzP
-# VRYkPCCa5LKrPtRGxWn1O5gxdka/mlqZsiWidE2LslDZEYcg+QG46mt4QfiXfmpJ
-# CmK934IA4xt1FrFbL0W2s0fe4ut+ImojIKwHXDXABHdNtOKVe+tosjqeZgn0tYQp
-# 36K/gmrxjS9fWC9IQSstHLzq+w7lP2NJM9aTXWzUvIfJfJCEw8mhpbRMpQKr8s5F
-# 7USBgLFI557z1MzdEIYgB2JJg4Xzagdy/KpOQy4U9hGk4vH+5yL1mWhdUU2lJhDk
-# lFKMuOB9fKvOQ7z/OfIcz3t6+MjQ6Hgvk6tvR8S+q7CYKqpb2XZGFBtCorh/0UYK
-# uRVACy1Cnpb49fEizvWfNp84Dtqi84EIBiSc59UCyVphFwg33AOkfzetD6zvzMDD
-# UvDXJ63vzW0DN/zBxCAcRwrSFTFfcyqHGHL6D0RtFm6sLe2bmOtGQ5HtjpHFZ2IB
-# vfbVRr41S4CSni3SA+mAoz5qa5Txeov/d67xSDG/5BL4+PgFH2dAYaIokXxDZlaZ
-# YqP0SizdW+yDr2fOCfiwEiVbkLtKeJ1RvpsUe7Psw1Be4qkKUSJ2hJ4rmCbtv0RJ
-# y7pg9lVFkeQMKNdNZXTDKDrwj4DYgQgmXES30zAFlcJP+MmVkAu/PccJRGo69lnL
-# LMFPp1vnHw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTIyMDE4
+# MjlaMC8GCSqGSIb3DQEJBDEiBCC4XwGAkpYMUfC+eTrCE33pMnpjLvQBsJXl3G/H
+# it/0aTANBgkqhkiG9w0BAQEFAASCAgBOSKsBubK0T7psqbQu51wCjMU07R+Repu2
+# Xy+6slUxyQZhLdTC9f7Irl381g0JyLbrnAY6b7Sem3vjLZyJiqZoHCA1axSGui4W
+# T6yUQZvfp1XxMJY8KUGAG0P3Ojy+GHHpWW+H7HSk2sv4tvB9pqpX65L849X1MQkj
+# /qX7psfOe+TzypRyKyfBMfB34Z6tRM0Qv+i1MM/D9yqIYb4Z7EfiAYtJ73N0fV5N
+# 2G9RXyDLvT0PpwuuFTqgXgngtigY4S2wZvGn+a3fkgaVHQWCHsrkmeleQBuffl5e
+# 3ZhlUTnfBECGimMW6qh4dYV2W3/G/wpeVlMNdm1Gvq525A7I3+WiWcCXA7WtQ2lU
+# nmLHYY3X1asCgIIxTzZVxtvcOmSIVihrv283z3w0zl4dw1BkM7kmDf22mYv60p6i
+# egHqHhbDR9Xki5TC6fVneEFYPxgxFOyDXREEn+RnTIL0wBYkMooxojs5EMd1ZQuy
+# Nybd/6DnWcEEqRY3WqpMH46h96votGygPlooLBD7R94B2R/1LebwkpShijywNipY
+# wLiJGGmyg9W8pL/0F2rVQbspeNZge1eYXIbEue9uEzVIUFla5+3NC/EhjpInBgCH
+# dgZHtdIna9keyrJrYqUG5XKnTXNp6fBKVHr2HxEa5ZiGj1XbtLlVdZIYnNLeJkV3
+# 7OrV7i1IjA==
 # SIG # End signature block

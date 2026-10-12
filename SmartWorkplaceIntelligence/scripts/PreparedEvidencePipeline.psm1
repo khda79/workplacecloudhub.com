@@ -3,6 +3,8 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $script:ProductRoot = Split-Path -Parent $PSScriptRoot
 Import-Module (Join-Path $PSScriptRoot 'PreparedMetadata.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'AdCountryEvidence.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'EndpointProtectionEvidence.psm1') -Force
 
 function Get-PreparedChildPath([string]$Root, [string]$Relative) {
     $base = [IO.Path]::GetFullPath($Root).TrimEnd([IO.Path]::DirectorySeparatorChar)
@@ -71,7 +73,7 @@ function Clear-PreparedRunPayload([string]$WorkRoot, [string]$RunId, [string]$Da
             Resolve-SmartM365OwnedJsonPath -Path $path -Owner 'WorkplaceEvidence-Prepare/run' -Validate {param($document) if($document -isnot [pscustomobject]){throw 'Invalid prepared run audit.'}} | Out-Null
         }
     }
-    foreach ($name in 'source','prepared','AccountClassification.psd1','AccountClassification.json.txt') { Remove-PreparedOwnedPath $WorkRoot "$RunId/$name" }
+    foreach ($name in 'source','prepared','AccountClassification.psd1','AccountClassification.json.txt','AdCountryRules.json.txt','EndpointProtectionPolicy.json.txt','PreparedEndpointContract.json.txt') { Remove-PreparedOwnedPath $WorkRoot "$RunId/$name" }
 }
 
 function Copy-PreparedStableSource {
@@ -318,6 +320,8 @@ function Publish-PreparedEvidenceBatch {
         [string]$ContractPath = (Join-Path $script:ProductRoot 'config/prepared-evidence-contract.json'),
         [string[]]$AllowEmptyTables = @(),
         [string]$ExpectedPreviousBatchId,
+        [string]$PreservePublishedFilesFrom,
+        [string[]]$ReplacePublishedFiles = @(),
         [switch]$SkipRetention)
     if ($PSVersionTable.PSVersion.Major -lt 7) { throw 'PowerShell 7 is required.' }
     $output = [IO.Path]::GetFullPath($OutputRoot)
@@ -339,27 +343,73 @@ function Publish-PreparedEvidenceBatch {
         $contractReceipt = Read-SmartM365JsonDocument $ContractPath
         $ContractPath = $contractReceipt.Path
         $contract = $contractReceipt.Document
+        $preservedFiles = @{}
+        $previousPointerHash = if ($previousPath) { (Get-FileHash -LiteralPath $previousPath).Hash } else { $null }
+        if ($ReplacePublishedFiles.Count -and -not $PreservePublishedFilesFrom) { throw 'Targeted replacements require predecessor preservation.' }
+        if (@($ReplacePublishedFiles | Sort-Object -Unique).Count -ne $ReplacePublishedFiles.Count) { throw 'Duplicate targeted replacement file.' }
+        if ($PreservePublishedFilesFrom) {
+            if (-not $previous -or -not $ExpectedPreviousBatchId) { throw 'Preserving published files requires an expected current batch.' }
+            $previousBatchPath = Get-PreparedChildPath $output "batches/$($previous.BatchId)"
+            $preservePath = (Resolve-Path -LiteralPath $PreservePublishedFilesFrom).ProviderPath
+            if ([IO.Path]::GetFullPath($preservePath).TrimEnd('\') -ne [IO.Path]::GetFullPath($previousBatchPath).TrimEnd('\')) { throw 'Only the current predecessor batch can be preserved.' }
+            $preserveManifestPath = Join-Path $preservePath 'batch.json.txt'
+            if ((Get-FileHash -LiteralPath $preserveManifestPath).Hash -ne $previous.ManifestSHA256) { throw 'Predecessor manifest hash mismatch.' }
+            $preserveManifest = Get-Content -LiteralPath $preserveManifestPath -Raw | ConvertFrom-Json
+            if ($preserveManifest.BatchId -ne $previous.BatchId -or $preserveManifest.TenantKey -ne $TenantKey) { throw 'Predecessor manifest identity mismatch.' }
+            foreach ($entry in $preserveManifest.Files) {
+                if ($entry.File -notin $contract.tables.file -or $preservedFiles.ContainsKey($entry.File)) { throw 'Predecessor file is absent from the contract or duplicated.' }
+                $null = Get-PreparedChildPath $preservePath $entry.File
+                $preservedFiles[$entry.File] = $entry
+            }
+            foreach ($name in $ReplacePublishedFiles) {
+                if (-not $preservedFiles.ContainsKey($name)) { throw 'Targeted replacement is absent from predecessor manifest.' }
+                $entry = $preservedFiles[$name]
+                $source = Get-PreparedChildPath $preservePath $name
+                if ((Get-Item -LiteralPath $source).Length -ne $entry.Bytes -or (Get-FileHash -LiteralPath $source).Hash -ne $entry.SHA256) { throw "Predecessor file hash or size mismatch: $name" }
+                $preservedFiles.Remove($name)
+            }
+        }
         foreach ($name in $AllowEmptyTables) { if ($name -notin $contract.tables.table) { throw "Unknown empty-table exception: $name" } }
         $batchId = [datetime]::UtcNow.ToString('yyyyMMddTHHmmssfffZ') + '-' + [guid]::NewGuid().ToString('N').Substring(0,8)
         $batch = Get-PreparedChildPath $output "batches/$batchId"
         New-Item -ItemType Directory -Path $batch -Force | Out-Null
         foreach ($table in $contract.tables) {
-            $source = Get-PreparedChildPath $staging $table.file
             $destination = Get-PreparedChildPath $batch $table.file
+            if ($preservedFiles.ContainsKey($table.file)) {
+                $entry = $preservedFiles[$table.file]
+                $source = Get-PreparedChildPath $preservePath $table.file
+                if ((Get-Item -LiteralPath $source).Length -ne $entry.Bytes -or (Get-FileHash -LiteralPath $source).Hash -ne $entry.SHA256) { throw "Predecessor file hash or size mismatch: $($table.file)" }
+                Copy-Item -LiteralPath $source -Destination $destination
+                if ((Get-FileHash -LiteralPath $destination).Hash -ne $entry.SHA256 -or (Get-FileHash -LiteralPath $source).Hash -ne $entry.SHA256) { throw "Preserved file changed during publication: $($table.file)" }
+                continue
+            }
+            $source = Get-PreparedChildPath $staging $table.file
             $sourceHash = (Get-FileHash -LiteralPath $source).Hash
             # Retain the original header for a valid header-only empty export.
             $reader = [IO.StreamReader]::new($source)
             $temp = $destination + '.tenant.tmp'
+            $stagingTenant=$false
+            if ($table.PSObject.Properties['stagingIncludesTenantKey']) {
+                if ($table.stagingIncludesTenantKey -isnot [bool]) {throw 'stagingIncludesTenantKey must be a JSON boolean.'}
+                $stagingTenant=$table.stagingIncludesTenantKey
+            }
             try {
                 $header = $reader.ReadLine()
-                if ($header -match '^"?TenantKey"?,') { throw 'Staging must not contain a published TenantKey prefix.' }
+                if (-not $stagingTenant -and $header -match '^"?TenantKey"?,') { throw 'Staging must not contain a published TenantKey prefix.' }
+                if ($stagingTenant -and $header -notmatch '^"?TenantKey"?,') {throw 'Tenant-aware staging must start with TenantKey.'}
             } finally { $reader.Dispose() }
-            # Stream records; prepared files are modest compared with source inventories.
-            Import-Csv -LiteralPath $source | Select-Object @{n='TenantKey';e={$TenantKey}},* |
-                Export-Csv -LiteralPath $temp -NoTypeInformation -Encoding utf8
-            # Header-only files need explicit schema preservation.
-            if ((Get-Item -LiteralPath $temp).Length -eq 0) {
-                [IO.File]::WriteAllText($temp, '"TenantKey",' + $header + [Environment]::NewLine,[Text.UTF8Encoding]::new($false))
+            if ($stagingTenant) {
+                # Only explicitly declared tenant-aware tables may retain this prefix.
+                $null=Test-PreparedTenant -Path $source -TenantKey $TenantKey
+                Copy-Item -LiteralPath $source -Destination $temp
+            } else {
+                # Stream records; prepared files are modest compared with source inventories.
+                Import-Csv -LiteralPath $source | Select-Object @{n='TenantKey';e={$TenantKey}},* |
+                    Export-Csv -LiteralPath $temp -NoTypeInformation -Encoding utf8
+                # Header-only files need explicit schema preservation.
+                if ((Get-Item -LiteralPath $temp).Length -eq 0) {
+                    [IO.File]::WriteAllText($temp, '"TenantKey",' + $header + [Environment]::NewLine,[Text.UTF8Encoding]::new($false))
+                }
             }
             if ((Get-FileHash -LiteralPath $source).Hash -ne $sourceHash) { throw "Staging changed during publication: $($table.file)" }
             # The batch file does not exist yet: a plain rename, never a replacement of a file just written.
@@ -429,6 +479,7 @@ function Publish-PreparedEvidenceBatch {
         Write-PreparedJson $pointerTemp $pointer
         # Immutable copy used by a delayed/cloud transfer; never upload a newer run's pointer.
         Write-PreparedJson (Join-Path $batch 'current.json.txt') $pointer
+        if ($PreservePublishedFilesFrom -and (Get-FileHash -LiteralPath $currentPath).Hash -ne $previousPointerHash) { throw 'Current pointer changed during preserved-file validation; no publication performed.' }
         Move-PreparedFile -Source $pointerTemp -Destination $currentPath -Overwrite
         $committed=$true
         if (-not $SkipRetention) { try { Remove-PreparedObsoleteBatches $output $pointer } catch { Write-Warning "Batch published; retention incomplete: $($_.Exception.Message)" } }
@@ -456,7 +507,22 @@ function Invoke-PreparedEvidencePipeline {
         [Parameter(Mandatory)][string]$WorkRoot, [Parameter(Mandatory)][string]$TenantKey,
         [Parameter(Mandatory)][string]$AccountClassificationConfigPath,
         [int]$MaxSourceAgeHours=168, [hashtable]$AgeOverrides=@{}, [switch]$AllowLegacyTenantless,
-        [string[]]$AllowEmptyTables=@(), [switch]$ValidateOnly, [string]$MappingRoot)
+        [string[]]$AllowEmptyTables=@(), [switch]$ValidateOnly, [string]$MappingRoot,$AdCountryConfiguration,
+        [Nullable[double]]$DeviceSystemMaxObservationAgeHours, [string]$DeviceSystemOffsetlessGraphTimeZoneId)
+    # Read only the two non-secret preparation settings from the effective tenant profile.
+    if ($null -eq $DeviceSystemMaxObservationAgeHours -and $null -ne $AdCountryConfiguration) {
+        $policyValue=if ($AdCountryConfiguration -is [Collections.IDictionary]) {$AdCountryConfiguration['DeviceSystemMaxObservationAgeHours']} else {$property=$AdCountryConfiguration.PSObject.Properties['DeviceSystemMaxObservationAgeHours']; if($null -ne $property){$property.Value}}
+        if ($null -ne $policyValue -and [string]$policyValue -notin @('','__USE_GLOBAL__','USE_GLOBAL')) {$DeviceSystemMaxObservationAgeHours=[double]$policyValue}
+    }
+    if (-not $DeviceSystemOffsetlessGraphTimeZoneId -and $null -ne $AdCountryConfiguration) {
+        $zoneValue=if ($AdCountryConfiguration -is [Collections.IDictionary]) {$AdCountryConfiguration['DeviceSystemOffsetlessGraphTimeZoneId']} else {$property=$AdCountryConfiguration.PSObject.Properties['DeviceSystemOffsetlessGraphTimeZoneId']; if($null -ne $property){$property.Value}}
+        if ([string]$zoneValue -notin @('','__USE_GLOBAL__','USE_GLOBAL')) {$DeviceSystemOffsetlessGraphTimeZoneId=[string]$zoneValue}
+    }
+    if ($null -ne $DeviceSystemMaxObservationAgeHours -and ($DeviceSystemMaxObservationAgeHours -le 0 -or [double]::IsNaN($DeviceSystemMaxObservationAgeHours) -or [double]::IsInfinity($DeviceSystemMaxObservationAgeHours))) {throw 'Device System observation age policy must be a finite positive number.'}
+    if ($DeviceSystemOffsetlessGraphTimeZoneId) {$null=[TimeZoneInfo]::FindSystemTimeZoneById($DeviceSystemOffsetlessGraphTimeZoneId)}
+    if($null -eq $AdCountryConfiguration){$AdCountryConfiguration=@{TenantKey=$TenantKey}}
+    $endpointPolicy=ConvertTo-EndpointProtectionPolicy -Configuration $AdCountryConfiguration -TenantKey $TenantKey
+    $adCountryRules=New-AdCountryRules -Configuration $AdCountryConfiguration -ExpectedTenantKey $TenantKey
     if ($AllowLegacyTenantless) { throw 'Global tenantless bypass is no longer supported. Repair reviewed historical sources instead.' }
     $root = (Resolve-Path -LiteralPath $DataRoot).ProviderPath
     $work = [IO.Path]::GetFullPath($WorkRoot)
@@ -495,13 +561,34 @@ function Invoke-PreparedEvidencePipeline {
         }
         $rules = Join-Path $run 'AccountClassification.json.txt'
         Copy-Item -LiteralPath $AccountClassificationConfigPath -Destination $rules
+        # Copy only country rules, never credentials or the complete private tenant profile.
+        $countryRulesPath=Join-Path $run 'AdCountryRules.json.txt'
+        Write-PreparedJson $countryRulesPath @{TenantKey=$TenantKey;AdDomainCountryMappings=$adCountryRules.Domains;AdComputerNameCountryPrefixes=$adCountryRules.Prefixes}
         $log = Join-Path $run 'preparation.log'
-        & (Get-Process -Id $PID).Path -NoProfile -File (Join-Path $PSScriptRoot 'Invoke-PreparedEvidenceBuild.ps1') -DataRoot $snapshot -OutputRoot $staging -AccountClassificationConfigPath $rules 2>&1 |
+        $systemPolicyArgs=@()
+        $endpointContractArgs=@{}; $endpointPolicyPath=$null
+        if ($endpointPolicy.Enabled) {
+            # Only normalized non-secret policy fields cross into the preparation child process.
+            $endpointPolicyPath=Join-Path $run 'EndpointProtectionPolicy.json.txt'
+            Write-PreparedJson $endpointPolicyPath $endpointPolicy
+            $systemPolicyArgs+=@('-EndpointProtectionPolicyPath',$endpointPolicyPath)
+            $baseContract=Get-Content -LiteralPath (Get-SmartM365JsonReadPath (Join-Path $script:ProductRoot 'config/prepared-evidence-contract.json')) -Raw | ConvertFrom-Json
+            $extensionContract=Get-Content -LiteralPath (Join-Path $script:ProductRoot 'config/endpoint-protection-contract.json.txt') -Raw | ConvertFrom-Json
+            $effectiveContractPath=Join-Path $run 'PreparedEndpointContract.json.txt'
+            Write-PreparedJson $effectiveContractPath (Merge-EndpointProtectionContract $baseContract $extensionContract)
+            $endpointContractArgs=@{ContractPath=$effectiveContractPath}
+        }
+        if ($null -ne $DeviceSystemMaxObservationAgeHours) {$systemPolicyArgs+=@('-DeviceSystemMaxObservationAgeHours',$DeviceSystemMaxObservationAgeHours)}
+        if ($DeviceSystemOffsetlessGraphTimeZoneId) {$systemPolicyArgs+=@('-DeviceSystemOffsetlessGraphTimeZoneId',$DeviceSystemOffsetlessGraphTimeZoneId)}
+        & (Get-Process -Id $PID).Path -NoProfile -File (Join-Path $PSScriptRoot 'Invoke-PreparedEvidenceBuild.ps1') -DataRoot $snapshot -OutputRoot $staging -AccountClassificationConfigPath $rules -AdCountryRulesPath $countryRulesPath @systemPolicyArgs 2>&1 |
             ForEach-Object { foreach ($line in ([string]$_ -split '\r?\n')) { $message='[{0:yyyy-MM-dd HH:mm:ss}] {1}' -f (Get-Date),$line; $message | Add-Content -LiteralPath $log; Write-Host $message } }
         if ($LASTEXITCODE -ne 0) { throw "Preparation failed. Retained diagnostics: $run" }
         $provenance = @{Mode='RebuiltFromSnapshot';CapturePolicy='PerFileVerified';SelectedUtc=$selectedUtc;Sources=$plan;OptionalSourceIssues=$optionalIssues.ToArray();TenantValidation=$identity;LegacyTenantlessAllowed=$false;AccountRulesSHA256=(Get-FileHash $rules).Hash;Scripts=@(Get-ChildItem $PSScriptRoot -File | Where-Object Extension -In '.ps1','.psm1' | ForEach-Object { @{File=$_.Name;SHA256=(Get-FileHash $_.FullName).Hash} })}
         $provenance.WindowsMigration = (Get-Content -LiteralPath (Join-Path $staging 'WindowsMigrationAudit.json.txt') -Raw | ConvertFrom-Json)
-        Publish-PreparedEvidenceBatch -StagingRoot $staging -OutputRoot $OutputRoot -TenantKey $TenantKey -Provenance $provenance -AllowEmptyTables $AllowEmptyTables
+        $provenance.AdCountryRulesSHA256=(Get-FileHash -LiteralPath $countryRulesPath).Hash
+        $provenance.DeviceSystemPolicy=@{MaxObservationAgeHours=$DeviceSystemMaxObservationAgeHours;OffsetlessGraphTimeZoneId=$DeviceSystemOffsetlessGraphTimeZoneId;HardwareFreshness='Platform timestamp is context only; not hardware collection time.'}
+        if ($endpointPolicy.Enabled) {$provenance.EndpointProtectionPolicy=@{PolicyVersion=$endpointPolicy.PolicyVersion;SHA256=(Get-FileHash -LiteralPath $endpointPolicyPath).Hash;Qualification='Antivirus and EDR evaluated separately; unknown is not healthy.'}}
+        Publish-PreparedEvidenceBatch -StagingRoot $staging -OutputRoot $OutputRoot -TenantKey $TenantKey -Provenance $provenance -AllowEmptyTables $AllowEmptyTables @endpointContractArgs
     } catch {
         if ($run) { try { Write-PreparedJson (Join-Path $run 'failure.json') @{Error=$_.Exception.Message;Utc=[datetime]::UtcNow.ToString('O')} } catch { Write-Warning 'Could not write run failure diagnostic.' } }
         throw
@@ -515,8 +602,8 @@ Export-ModuleMember -Function Get-PreparedSourcePlan, Invoke-PreparedEvidencePip
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD3jsjUuRFZMxTn
-# Z28mknWJATTLAwM0TgPyl2DUvUZfsaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAMfA9Dr/0Vypvj
+# /+jwzdR6xtlTfutx3axc8lMtDW1jW6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -649,31 +736,31 @@ Export-ModuleMember -Function Get-PreparedSourcePlan, Invoke-PreparedEvidencePip
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIPSgOnQ3Mzthe0KjAvk3Cxe6bDAadxehgE62CtCWw2jxMA0GCSqG
-# SIb3DQEBAQUABIIBgCY9c8V12/qB/XZA4cua5slAq5T5hWsZ38CzNfmwV2fDavxy
-# WZHQM1cEex6EHgZYEnOcVZSaroIvxGbMj6CDiupfP5Awnj7DX+jpQy3OTIGDerYp
-# 8xXTFktwtcVbv1cbqlBK+DgXovbt43K/KPl4KSKA8pPIEQrpt48a3LI9qBk5tjRS
-# glgVi1RqBLq12r09TspSrnoNpwtFnIzP7VcBub5N8pEQn3JooF/qeinUK2Mq9NWI
-# F680eX7+NiAuLQUnXdgM9m+25A15+xnjiDWry7BEHjlhW8J6W+6VCzpwxGOQbT/0
-# YojxkSI01xoQCtPhjZWpfkkNJVzUlNOROkXGwkocUEXq5S3dhE274/hwfBhmJDFe
-# ZpFLqwSX++2/wDKQXO04XNL54yAIIRO0sWyQNqihpyCwFbzzx5LXWsRaeyyjQ/Kj
-# raZFWFwV01SINCW6LNquQPM+eqOgv2SUREig4K6KPt979F00z1u0FOsOH4CeX9ri
-# 6F/C16e8aKwjTYrZl6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIBdYWIbLjmuFw3JL8usOtxBRmHw3HNBzzMKJmwn5dlPpMA0GCSqG
+# SIb3DQEBAQUABIIBgIbD+QWxB/k/FsuE4BincQUA23ecR09QtU3oZ2IviGU6hbJa
+# DgsKa/a7B3nY7+hQIGNEnWo2Epe5Wz8GrG5fcQGIRkU8BwyVmnNgjDxxPp6tT3en
+# EFe5JfhMygg8WsMlAIcef55vEUBAldzBinc+RNp47kIbtD2S1JzoTJ64rGxLqfL/
+# 74HFbQ9bmSpbuFGlASrcFKQvkd5aawikHI8w9swLPfEitwf3JOfnwtXQVriQ7QTV
+# mwMTRqIIAETyZpOVWG21RpGEh1B8sGAtiIzr+DhUBY/jsTXkxTD37eD2zdKoywO/
+# 6AVM4pAYvUxP8wuJ/RuXw2pXiRKbi08/9N1ncmKylUXwQqwyG0r+9NXPrsww+eyj
+# GofI/QDtqMwMidQyCTJT1qYtIMUrCSAjDyMN2VDKHTg3xP57vfuwuNPjhdRwFCj3
+# 1VYz0FInzwWfMaPom5jYk2lXYhPanPWh5hfqZ5oAyrmeZI7+aNdvVy9liRLiTwYf
+# nU9GqOZxLZum7rrHF6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTIxMjEw
-# MjNaMC8GCSqGSIb3DQEJBDEiBCBj8ntbem8oJPidp+cTrk0hcN7aqjw65Hnuv6WI
-# DENybDANBgkqhkiG9w0BAQEFAASCAgA9ZxPgJH+3Yk5YGFtbQPHzO31sC2O69l8C
-# a4+ArPtDYvXViOAW/d60zSCR3wmSaARXplNDWdnZ343EmCgvgCR4DSHwzCO14ABf
-# bikX6S1DUPDCR3OGmYnzmxuUB4uB4uwkgJRlZbiW0dw856y84BSvrfDLxULBzWlU
-# dyGdXml8dKq9GUEmIF3A14k9ufcqZLgnNGTg7hVzGI5eKMvTqcjv9YKx/+SbZk3i
-# 6fd8DSnL6ISehUNx9K6xMzv71aOzW6G47j2ydZqbiYZakvEO26G4GNNOJ2ngaWmf
-# LQ4PmY/BTECbbe5cibEj7uK1NcEiK8kBH7h+9ZZtHMq3QXHaKjV6DMJiqMWQS0RB
-# Uqlu8NmrnewhrE63p/N23cUTEDaF8hiUUKBApqDCoVrnbR/kQuIF33eZh3t3muc0
-# YVSAA2jGj57L5aCSA+JV2zGJAbUQ3dNKB5socX3FcsRR/fTXLavWRLPck4VK64k4
-# od5ubTjlMXPhsSEqyvWSAL1euoqfHk031Yuyo2dhN6pITm84UApbqckkzMm7SeAV
-# gNaR76COTg7qOEqbofEMZDMdVv0jBNjsymL4+gcWzm41kECFzHWupBhr9o7a4iWI
-# 1K1NdfrJPr34lhxQoOuqdVn2JSKIyfRN+/I35msPSJokmKmbCYVwmS4An94sfNLN
-# zy57bzh4vA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTIyMDE4
+# MzBaMC8GCSqGSIb3DQEJBDEiBCCX49eGVjyRh2S9kSZeO/dDhNln8THW0ipnfpC/
+# dH5RYjANBgkqhkiG9w0BAQEFAASCAgAAej4h2R16mfkHuF+xBXqCs28HEzn4TkD5
+# HaQkt++7WXSzao/ctE1dSy7w5cCfzJfyCiFOM84ekIcqCDYkj7NUGj5WOkoFkJDu
+# JFjC2a4EVLQ9N52Fg1rzoL8Nxhg1HfxvTO+JCEMfdEO+ayM5ukIRK+PhckbVGgcG
+# SxekXlhWz8blc5NCV3dVuYkNpbzM6Po+9XgSSheqsrx0yadEFLxUB5OoJek+i7Ic
+# XTUvMVUJq7LyLbk9L6l6Xe9rhXbk46iDzwQP4petMJsX0DHT25YG7onhz6k4y93x
+# 9OUFXViF/vYJ4CHVLoUkTO9rJTmidbSx3xvZJ/waS8JfCh3UUCwLN7XW6nE35T4t
+# WzSJfjNZFgQJSARc8DWqWcTmHgxfDZNzImS0zv8lHTTY2bJtL+YmmRP0UgBfiFVe
+# 40xREelac+jsr+MNqFMIVgscjMeNm91vK0OKFMxVLhs3CnaPQcyz/oV6gD6OGDGj
+# d73tuZSM5G+h2mpB0rbYDXBMdo5wZoZEXUDDlHsO2BrQMv0XcLSq432hlzfvtW7d
+# 2/RwUHKOI22IrkoNrSTQFysvUOdTi37DW0GSW/fTJ3+z8p11ygXiGldMBUrqxKF5
+# BzS/DTkJLolfqfEdOg6EbotBaoC57Tx67m1oUtNAKGRkmR5qPQeuw5WqyMqy7/z6
+# MX+EJGrH+w==
 # SIG # End signature block

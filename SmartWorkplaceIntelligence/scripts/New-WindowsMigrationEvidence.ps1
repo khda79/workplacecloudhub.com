@@ -3,13 +3,15 @@ param(
     [Parameter(Mandatory)][string]$DataRoot,
     [Parameter(Mandatory)][string]$PreparedInventoryPath,
     [Parameter(Mandatory)][string]$OutputRoot,
-    [string]$PolicySelectorsPath = (Join-Path (Split-Path $PSScriptRoot -Parent) 'config/windows-migration-policy-selectors.json.txt')
+    [string]$PolicySelectorsPath = (Join-Path (Split-Path $PSScriptRoot -Parent) 'config/windows-migration-policy-selectors.json.txt'),
+    [string]$AdCountryRulesPath
 )
 # Staging only. No collection, publication, upload or Power BI refresh.
 Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
 if ($PSVersionTable.PSVersion.Major -lt 7) { throw 'PowerShell 7 is required.' }
 Import-Module (Join-Path $PSScriptRoot 'WindowsMigrationEvidence.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'AdCountryEvidence.psm1') -Force
 $data=(Resolve-Path -LiteralPath $DataRoot).ProviderPath
 $last=Join-Path $data 'DATA-LAST'
 $output=[IO.Path]::GetFullPath($OutputRoot).TrimEnd('\','/')
@@ -49,13 +51,15 @@ $tenants=@($inventory | Select-Object -ExpandProperty TenantKey -Unique)
 if ($tenants.Count -ne 1 -or [string]::IsNullOrWhiteSpace($tenants[0])) { throw 'A non-empty single-tenant Intune inventory is required.' }
 $selectorBytes=[IO.File]::ReadAllBytes((Resolve-Path -LiteralPath $PolicySelectorsPath).ProviderPath)
 $selectors=[Text.Encoding]::UTF8.GetString($selectorBytes).TrimStart([char]0xfeff) | ConvertFrom-Json
-$result=New-WindowsMigrationProjection -Inventory $inventory -Prepared $prepared -AD $ad -Readiness $readiness -Policy $policy -TenantKey $tenants[0] -IntunePublicationUtc $sources[0].PublicationUtc -ADPublicationUtc $sources[2].PublicationUtc -PolicySelectors $selectors
+$countryRules=Read-AdCountryRules -Path $AdCountryRulesPath -ExpectedTenantKey $tenants[0]
+$result=New-WindowsMigrationProjection -Inventory $inventory -Prepared $prepared -AD $ad -Readiness $readiness -Policy $policy -TenantKey $tenants[0] -IntunePublicationUtc $sources[0].PublicationUtc -ADPublicationUtc $sources[2].PublicationUtc -PolicySelectors $selectors -AdCountryRules $countryRules
 # Confirm caller did not feed a changing source set; normal pipeline uses verified copies.
 foreach ($source in $sources) {
     $now=Get-Item -LiteralPath $source.Path
     if ($now.Length -ne $source.Bytes -or $now.LastWriteTimeUtc.ToString('yyyy-MM-ddTHH:mm:ss.fffZ') -cne $source.PublicationUtc -or (Get-FileHash -LiteralPath $source.Path).Hash -ne $source.SHA256) { throw 'Source changed during migration preparation. No outputs committed.' }
 }
 New-Item -ItemType Directory -Path $output -Force | Out-Null
+if($AdCountryRulesPath -and (Get-FileHash -LiteralPath $AdCountryRulesPath).Hash -cne $countryRules.SourceSHA256){throw 'AD country rules changed during migration preparation. No outputs committed.'}
 function Export-Projection([string]$Name,$Rows,[string[]]$Columns) {
     $destination=Join-Path $output $Name
     $temporary=$destination+'.'+[guid]::NewGuid().ToString('N')+'.tmp'
@@ -71,15 +75,15 @@ function Export-Projection([string]$Name,$Rows,[string[]]$Columns) {
 }
 Export-Projection 'WindowsMigrationEvidence.csv' $result.Windows $result.Columns
 Export-Projection 'WindowsMigrationADObservations.csv' $result.ADOnly $result.ADColumns
-$audit=[ordered]@{SchemaVersion=1;CreatedUtc=[datetime]::UtcNow.ToString('O');Projection=$result.Audit;Sources=$sources.ToArray();PolicySelectorsSHA256=[Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($selectorBytes));Publication=$false}
+$audit=[ordered]@{SchemaVersion=1;CreatedUtc=[datetime]::UtcNow.ToString('O');Projection=$result.Audit;Sources=$sources.ToArray();PolicySelectorsSHA256=[Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($selectorBytes));AdCountryRulesSHA256=$(if($AdCountryRulesPath){(Get-FileHash -LiteralPath $AdCountryRulesPath).Hash}else{''});Publication=$false}
 [IO.File]::WriteAllText((Join-Path $output 'WindowsMigrationAudit.json.txt'),($audit | ConvertTo-Json -Depth 10),[Text.UTF8Encoding]::new($false))
 $result.Audit | ConvertTo-Json -Depth 6
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAlkH5QKhBvaK2F
-# kLEIC+GH5tHfngFuTC+SQQxmPe+JYKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBZTiL4eAhqMlkS
+# dgUlnuoJWzrFy8YgUk2Yrtu8Oej406CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -212,31 +216,31 @@ $result.Audit | ConvertTo-Json -Depth 6
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIPXbxwN1NQanuHOCEKCJf1LmDBngZ7poEbe8346wDlZVMA0GCSqG
-# SIb3DQEBAQUABIIBgCyiiLn7yFwJwGWxco6cEfne/FPUD42eLWJEn4iCO+y+6Ndf
-# tFn6RDaFCr2ztpXMe2dcoGJJzX/UPP3uS9nmb20ZWRY3An4MfBUPvwJCgVe/V1na
-# yPfxhMmybXJ0ys/ovx14WR0ShcbHlxMPsjdX3/LuIVwajsRHgPQVutS6HjuRqUQN
-# XsmxReGrDrFd+EAOQh3huXDICgiRyhY3Ga5fiitj1vvTpcz9lzdu+Eg2oPjw3sng
-# IIJGQ7mdbNqORQB6wwtK19oXOedtLVsCLTWp2ATmYrQudMobSRQatkYsbZ8eF4Ho
-# CxxaD1qbCMxqcAXqn1IembKOd9r6RxWfCk9uceGhPqudkJoF3LrKM5C6Nv6zRGjq
-# u/UFwZZ+Q/NT1kPuEzivhdEpg/7W723miBXE1I0RueP6jxjh0/3EPUQHaCvzOCrD
-# epDM5t7zszxT/b9xsp1ZSiKxFAzDhjpf7DtTQRJcMMaLgMLSILulGD6mkPKEy3Eo
-# azu3eFq0sVFEv/tN3KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIMhFInH6isTTOkDl5ErBUfOsI4WzE3YN7Rzfd3LmHEuiMA0GCSqG
+# SIb3DQEBAQUABIIBgKwZwWxAVh4HnxOg5N0iT/9BwcsrqYrEYKn9s+uPcv8xUiFJ
+# bmIwsZQmD6ES0aCxSxBvzAhkn8wLgtsI+5GnngSTAUyF08jE2h/qbJkUTZaGDE2k
+# kxVJh+PxLAzpCxEJnj37ITIsR/IZSMYPVu10PSjSf6lKzkbeaa5EkWC0RIoIoCTj
+# 7n9fzDr3KaCkiyqLE/qrKKy/Cy0ziT6Mf2Y4iMSQY/rtYyf7Hzgn36R0geS9b2Z/
+# EB68N1CsWJp9JqtUXOAk4PKBTbKi0cTU95s8UdRo3frCzqI94E8rprP3oM0PABmE
+# KQJPjkgr8LSwrF95Ra3GkyXkqo/aZr+ZLPkWRXj4AXhoA2fesTLxIy2tYaTZx+Jp
+# pG67KJwqq3egZF6ahYH0lbi7pYi+YHkJMqlg4sJCh1gRwbw51DiOT810VdCm5uB9
+# FKAXPRp9VxiDNugdNgS1JoL+NQCDUNMexlbKA1CyfSFzCLXE0RDBBlnKN/owhrob
+# SzV4BCwtTnHWn6VF8qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDkxNDA4
-# MzZaMC8GCSqGSIb3DQEJBDEiBCDrldt/AbffOQu8wLwwziS2HxhUCIr9HVsK7TO2
-# uwORbTANBgkqhkiG9w0BAQEFAASCAgCTNB+SCPbWtuIRoW6wLpMLvZGMIeYE/6WY
-# WKJlcGMc9hDmndPLQuT1JM0iPSL9U7oA0cxnkmbLEEnoAru+KeA5QNB86NMyAWlV
-# mf05EU+uJcrA74O9sx3d7CIcsIJPNsMl6BJE8EiHFttcPxQXD+MWGd61Bd/WrWa9
-# wAGOX86Z6OqyKngLFKe1QmG/hQHM8kzJwmd9b8Fxcq/oHmKNdoKf46jfoJvwx0eR
-# YP35NQ5Uy8mO+nzF+E7H4pNT+9WWsUkNU5cqMnsa2PL0cs9UXmI5y12KWUM4k59F
-# T01kE5y9F6rKoyhP9eNOZXM/BmIWxmIwOFHxbxtz2oA3lCHaOrzosmYu1stsNidp
-# 2IHTUHWU7/B7qbEaYT+cqledvR7G5kFL6rrhvs2wr/KL1pI5ZH4ZkAaZCgLYpvaA
-# Wl65iqhtEnWqLDjgCzC6n+mpFk+E9dFFl4Cj7YhXCsIB65VuPXdxN5CN9u3UuEuu
-# uVE/4xSUkoK9ryninealyw+cODK3uyLydVp3k0ysJhoqQGfDWecS1XEpQ2YU9V3x
-# gH7Uiq3OavL4cf7GFmQG168tD3VbgVmPK1hdAQ6NTWXYkuGjaFOeneoUg8T3uNaS
-# m9gieJ2c2G3+pOBUZlyNISHDQ6bIR5QBMXU8EneymLaOAl2mZFrfN3KWHmszLSgP
-# 8Au7wGmcmg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTIyMDE4
+# MzBaMC8GCSqGSIb3DQEJBDEiBCB4jJnzwIBc1/ag7M3rBLWrd05YdAPFK4bMWGVS
+# 71/RGDANBgkqhkiG9w0BAQEFAASCAgArTi28Nhuj3og7sZnbB7Gt7khyie2yTxcq
+# OJLRcLiCX2lE5DP3xR2UzjajcVxVLENPD/WEmZWi8sNBXEr83JwD35Kk1ONPzLIg
+# Uex2i0v87JaHy0IzVsdjvGdQTOhH2pftiUaLcmEebDJ7mtrryGnmw6K+Su4rD3OZ
+# SER4IaNSIEud9ztUvmZfLO8MQ4gGcXW2paFspy8q5evtJ0MJnze7Y2MSPbTqLnLY
+# 6KSv2WcHk8q8Rha5u/LVugNRMa6FDlgmOYS2RfCObCDqDr9Vhx3OGvyMJjjZjMrq
+# wq9ARMAtN39NUO9Nmx0CDiLhRn4PIbyOIHYML4pLREpf3T+jdJrDHisJ7lzwOdry
+# ADCnUObY8WoTpR6uBkBRrgiP6hm5bDLH2bxYe8CYiL9FIUJyW0pslE2a2W/Lpi6v
+# cDW8ntcD8JU5Sun1/dpjmdvnJLyBsbReAXwrgrOHUPwsdJtSnAs1al9r5Tmwg/SS
+# gKGABKSinL/uMKHkqE+ELybBhN2EC8P0MTvcc2ZDg7fgJWbA4HbJoSWtWZST4U0r
+# I54aPjUuhx4JrbBwc1zFppuilr2Ei91tBrRkSzIY2Dn2Ss0wgwhU5RY4uAr066e9
+# Wxf2HWs8N91oDlt6JshdLF1lhDRBEZwSAw5AQELmhyuaGtRaMj538JWv8iSav3sB
+# M/ZAYmr1bA==
 # SIG # End signature block

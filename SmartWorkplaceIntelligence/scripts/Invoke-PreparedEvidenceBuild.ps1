@@ -2,11 +2,15 @@
 param(
     [Parameter(Mandatory)][string]$DataRoot,
     [Parameter(Mandatory)][string]$OutputRoot,
-    [ValidateSet('All','Workforce','Devices','Applications','Collaboration','Content','Mailbox','Licensing','Security','Backup','Trust','Executive')]
+    [ValidateSet('All','Estate','Workforce','Devices','Applications','Collaboration','Content','Mailbox','Licensing','Security','Backup','Trust','Executive')]
     [string]$Only = 'All',
     [switch]$SkipWorkforceHistory,
     [switch]$ReuseStagedWorkforce,
-    [string]$AccountClassificationConfigPath
+    [string]$AccountClassificationConfigPath,
+    [string]$AdCountryRulesPath,
+    [string]$EndpointProtectionPolicyPath,
+    [Nullable[double]]$DeviceSystemMaxObservationAgeHours,
+    [string]$DeviceSystemOffsetlessGraphTimeZoneId
 )
 
 # Offline preparation only. No collection, upload, Desktop control or promotion.
@@ -31,6 +35,8 @@ function Run([string]$Domain, [string]$Script, [object[]]$Arguments) {
     if ($LASTEXITCODE -ne 0) { throw "Preparation failed: $Domain (exit $LASTEXITCODE). Nothing was published." }
     Write-Host ('[{0:O}] Completed {1}: {2:n1} seconds' -f [datetime]::UtcNow, $Domain, ([datetime]::UtcNow - $started).TotalSeconds)
 }
+$countryArgs=@();if($AdCountryRulesPath){$countryArgs=@('-AdCountryRulesPath',$AdCountryRulesPath)}
+Run 'Estate' 'New-EnterpriseEstateEvidence.ps1' (@('-DataRoot',$DataRoot,'-OutputRoot',$OutputRoot)+$countryArgs)
 $wf = @('-DataRoot',$DataRoot,'-UserOutputPath',(OutPath 'UserInventoryEvidence'),'-HistoryOutputPath',(OutPath 'UserActivityHistoryEvidence'),'-TrendOutputPath',(OutPath 'WorkforceTrendEvidence'),'-IdentityOutputPath',(OutPath 'IdentityReconciliationEvidence'),'-SignalsOutputPath',(OutPath 'WorkforceOperationalSignals'))
 if ($AccountClassificationConfigPath) { $wf += @('-AccountClassificationConfigPath',$AccountClassificationConfigPath) }
 if ($SkipWorkforceHistory) { $wf += '-SkipHistory' }
@@ -39,8 +45,14 @@ if ($ReuseStagedWorkforce) {
         if (-not (Test-Path -LiteralPath (OutPath $name))) { throw "Missing staged workforce output: $name" }
     }
 } else { Run 'Workforce' 'New-WorkforceIdentityEvidence.ps1' $wf }
-Run 'Devices' 'New-DeviceInventoryEvidence.ps1' @('-DataRoot',$DataRoot,'-OutputPath',(OutPath 'DeviceInventoryEvidence'),'-SignalsOutputPath',(OutPath 'DeviceRiskEvidenceSummary'),'-DirectorySummaryOutputPath',(OutPath 'DeviceDirectorySummary'))
-Run 'Devices' 'New-WindowsMigrationEvidence.ps1' @('-DataRoot',$DataRoot,'-PreparedInventoryPath',(OutPath 'DeviceInventoryEvidence'),'-OutputRoot',$OutputRoot)
+$deviceArgs=@('-DataRoot',$DataRoot,'-OutputPath',(OutPath 'DeviceInventoryEvidence'),'-SignalsOutputPath',(OutPath 'DeviceRiskEvidenceSummary'),'-DirectorySummaryOutputPath',(OutPath 'DeviceDirectorySummary'),'-SystemEvidenceOutputPath',(OutPath 'DeviceSystemEvidence'))
+if ($null -ne $DeviceSystemMaxObservationAgeHours) { $deviceArgs+=@('-DeviceSystemMaxObservationAgeHours',$DeviceSystemMaxObservationAgeHours) }
+if ($DeviceSystemOffsetlessGraphTimeZoneId) { $deviceArgs+=@('-DeviceSystemOffsetlessGraphTimeZoneId',$DeviceSystemOffsetlessGraphTimeZoneId) }
+Run 'Devices' 'New-DeviceInventoryEvidence.ps1' $deviceArgs
+if ($EndpointProtectionPolicyPath) {
+    Run 'Devices' 'New-EndpointProtectionEvidence.ps1' @('-DataRoot',$DataRoot,'-InventoryEvidencePath',(OutPath 'DeviceInventoryEvidence'),'-SystemEvidencePath',(OutPath 'DeviceSystemEvidence'),'-PolicyPath',$EndpointProtectionPolicyPath,'-OutputRoot',$OutputRoot)
+}
+Run 'Devices' 'New-WindowsMigrationEvidence.ps1' (@('-DataRoot',$DataRoot,'-PreparedInventoryPath',(OutPath 'DeviceInventoryEvidence'),'-OutputRoot',$OutputRoot)+$countryArgs)
 Run 'Devices' 'New-DeviceLifecycleExperienceTrendEvidence.ps1' @('-DataRoot',$DataRoot,'-WindowsOutputPath',(OutPath 'WindowsLifecycleTrendEvidence'),'-EndpointOutputPath',(OutPath 'EndpointExperienceTrendEvidence'))
 Run 'Applications' 'New-ApplicationInventoryEvidence.ps1' @('-DataRoot',$DataRoot,'-InventoryOutputPath',(OutPath 'ApplicationInventoryEvidence'),'-TrendOutputPath',(OutPath 'ApplicationTrendEvidence'))
 Run 'Collaboration' 'New-CollaborationEvidence.ps1' @('-DataRoot',$DataRoot,'-AdoptionOutputPath',(OutPath 'CollaborationAdoptionEvidence'),'-ObjectOutputPath',(OutPath 'CollaborationObjectEvidence'),'-TrendOutputPath',(OutPath 'CollaborationTrendEvidence'))
@@ -56,8 +68,8 @@ Write-Host 'Preparation finished. Outputs are staging only; schema/data validati
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBrWjBoMOX+hXky
-# jwufEPHPnw8fsuzcVDX4rwNR3CtB7KCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBddOlYEX7RYrs4
+# AD3dcXighe8uO3sGPBvLhc0PCjyr6aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -190,31 +202,31 @@ Write-Host 'Preparation finished. Outputs are staging only; schema/data validati
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEINMca/AT7NKAvlxyURRe66Dp3ooMB8g9qbPWVrYUDluDMA0GCSqG
-# SIb3DQEBAQUABIIBgEEPtCArydDvZ6ZZ18qN0wj2hbuQvwgmWm1v3h4U2V8Hozpm
-# u11p451Q3HyhR9KN3L8Pq23zDsL6mcSDKi+EFYGXiiuCciEQQrO2KeitavjJOMZ3
-# yRMPbJAUGnixWS6b86k5oSNDAsqUmi9yupXj4ytsyuveKLsr/qy/29CPX6VQUfpn
-# 06Oe+9zeLaqXCs9H6VQePVGB52HC0a41UgHDsAZ0HE0Plm9kECJdhd6BIEbUkhAk
-# srLQV+gSVN/i3jW+Ttu3kMSrzHb3EGO13fXSLtFNe36nBpCWP/JcdkwI5O7OzEK9
-# ViUWsFY+deCGAPovBwzvCvFeW5YxfrgswFakr3HuTKD0QBJHW75pCeS+T9IwD42U
-# CKGjUzgyskiafP2g0S7nTSqh0JpZnCi9/pcRiHBcQlvPQr0jnOrUCubgzWpMuCgC
-# Xf5mlbw/pZNCrv1rLIIoFkT/lVekgm6aMJWHNnjW7QcseU0lx9k1QF+TpQ5muBfc
-# e2++E0cZLqVP9he6fKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIAKjljsHUMbSIKn2CfBylG1Tkz5kGLDNYFkRa+P19NbbMA0GCSqG
+# SIb3DQEBAQUABIIBgBII3StZmMNSKWDdvsezxpFLcjdRCL1kBqkHj47mRA5btgv2
+# 9/UjcJo0s91BMLiaU5pS1hkx1qvWz/6vZTmwOP2rQnNP8W6FulaIKG45t9CeWh1y
+# WvTxpcKHJjB9zB4eS53YFPDO4DOr6EScoag6fdRJ63Pm9bF3a3yVusjXhPjnrUE/
+# pa9dK1nZNEUCS/TrOaz7xz0i8UKKuREj8F31netuHrjPR53A+Ql1/xozhnkMvZUU
+# /B/k1GQGHTFP8FGAlWtNc9okKIpjObqX2cGnvr+Ny3lcGEP8Q8LnjUEHr0+CsauS
+# ryI/HUaWAMCZh7IjqBz1QvcvSXAb7ks6CuMle4IjpZPEawOiOt1xSi/34jpJOsXt
+# RlRYLtSuE9ddvAqfcKV169k6behEr1yagOkZ1oVwdmSxQucALbqvbuO/anr5cWea
+# tfbvbvWHUBkqEpJMPzHKHSwF6yMEFjpcLdVt9gbwFH9LkMr19M49OK+Gx2541QPU
+# S4moQM/nuiX7q94o2qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDkxNDA4
-# MzdaMC8GCSqGSIb3DQEJBDEiBCAczzkN1HP06CUShOcgAk6Nh9/IEy0qpo5HeWJB
-# Fi03SzANBgkqhkiG9w0BAQEFAASCAgBMh//L61wLyZgJT687Ooyv6MmeOXNjlbUA
-# ODnGEAyOI83dWqX/zDOLxJ2Ge0tBjqIHqE24CBGll5+fiC3GKNekGinAvAzX8WD2
-# BpK7zIPVFeRxkTCHeZ4Wxpl1b2bewpieFOnX8a3+r6gt/cHwbSP/k0UNtaLQBui8
-# 16advmCCsiPu3CwSsIHe0RGjj9RD0X0VK/aq8oX8lKBbV0VOxfnbQwYIYSM7IWNE
-# hVHHCs8HGbVCCzolw9AOA4qxGOKcsBaiNBjGE3wV5MTnxjf6Wkx92EpNgxz2gEh/
-# Iv7yZzaRV1E6t+29yp2k7ydImUMWcbrWhePONiZiCoHNSjubmcQAyJK6ywFG+xdW
-# CPe79lxE6jDOyENpcRX7Waeqq+vzm3GXpCiL8kYpOJny+AIXEGfW16TIVHIQnniF
-# 7AeL40HzipwZ1FU/QCjkDFHT4s098rg1zOHqyeStbz6Ani6AbUMRiLcptLgwOmQC
-# WpCGbWCLkN7DdsYrQUpfVEt/togVTzDsQWVismdfFGGYTbXq57bE9x/SkRYicUpN
-# SwODr2YVWWuz1m9y4bEcIXEfeXbQEaM7MGT2CvXASLYb3Wq+FeuMD1TJ395/Lsn6
-# /M6FZ9DZf5ZwB0/gZLIZ2eNyU4H4Qql7+3oBjnaGDxkjxOPASvkgc6BBSlap8WkV
-# wqeWRTFGBw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTIyMDE4
+# MjlaMC8GCSqGSIb3DQEJBDEiBCC6+UwfUbL4hQ9HmY6MHOqFxW8J/+eM2wOGRJZ8
+# uLlINjANBgkqhkiG9w0BAQEFAASCAgBshH69neOB0sdlYojwYGf9w9F2MU7V42N/
+# aH3qvmB/V+7CfPtWXNmO+Gx+rMRZ64vFzsIQ5JnwnNsKd6nWr9owVT+dsPMBPN9R
+# xrUGBpgb+agEJYC/PjCjor9RMVdCTZ32SHcwJXyiWQbLExiMp784uvRwMc/Yi7xh
+# IF3bKVKsU1R+6XnyUS3R/bKKk0/+azJWZ0d7VMdC/BjT7G07KTI6WZN6bKCl1eI/
+# khFHwvm/wIJQbmaWjorgxvscslfXVjv5EK4metlFXBQmtqU99qRAHYR9tv2TzuAK
+# 2V5GPM2uBW8+0Au+zXLl4OvhOmEb28ijwEhuSkq0EDXrPmNXDOMArhQpavb1SJkY
+# zHR5Ummf6rbA5NfxjCYfzvWbMat/DlUB7kGy0t0qNcClGk0H76rDNjRkRpgT0Hs2
+# fB92Vs5OUDVUJ1e2Ci8BRtt3lRLbGWefL1cDE0pD1j+5ZeU1pAG5oZjMwzwornEn
+# Os61u3KWFPXL2AYMrcc+ay7Hu7Bzy9QprnY0CYiDB2wDH6Dg1W9dy00ca7tAYWza
+# eDykDmOxENX5bfI6+Yi4itSfp2OLbb7sVZPnSdHKsbZgL8X509FO4Y6OMxRlCsWR
+# x8DeGzE02y0x/T5mI5vN4Yg1ZsQis0f3u6mQSF0GYfldMewUKO/ZwAvDRc2qkkpz
+# eXgMNdiPiQ==
 # SIG # End signature block

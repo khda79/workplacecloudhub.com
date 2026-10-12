@@ -8,9 +8,20 @@
   "TenantId": "00000000-0000-0000-0000-000000000000",
   "OrgDomain": "contoso.onmicrosoft.com",
   "RemoteRoutingDomain": "",
+  "AdComputerNameCountryPrefixes": {},
+  "AdDomainCountryMappings": {},
+  "DeviceSystemMaxObservationAgeHours": null,
+  "DeviceSystemOffsetlessGraphTimeZoneId": "",
   "ExpectedThirdPartyAV": {
     "DisplayName": "",
     "RegisteredNames": []
+  },
+  "EndpointProtectionPolicy": {
+    "Enabled": false,
+    "PolicyVersion": "",
+    "MaxObservationAgeHours": null,
+    "Requirements": [],
+    "ScopeRules": []
   },
   "Thumb": "0000000000000000000000000000000000000000",
   "Thumbprint": "0000000000000000000000000000000000000000",

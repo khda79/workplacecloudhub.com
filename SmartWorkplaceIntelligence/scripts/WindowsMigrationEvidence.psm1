@@ -1,6 +1,7 @@
 # Offline migration projection. Inputs are caller-owned, tenant-qualified snapshots.
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+Import-Module (Join-Path $PSScriptRoot 'AdCountryEvidence.psm1') -Force
 function Key($Value) { ([string]$Value).Trim().ToLowerInvariant() }
 function DeviceNameKey($Value) { (Key $Value).TrimEnd('$').Split('.')[0] }
 function Value($Row, [string]$Column, [string]$Default = '') {
@@ -32,7 +33,9 @@ function New-WindowsMigrationProjection {
         [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Policy,
         [Parameter(Mandatory)][string]$TenantKey,
         [Parameter(Mandatory)][string]$IntunePublicationUtc, [Parameter(Mandatory)][string]$ADPublicationUtc,
-        [Parameter(Mandatory)]$PolicySelectors)
+        [Parameter(Mandatory)]$PolicySelectors,$AdCountryRules)
+    if($null -eq $AdCountryRules){$AdCountryRules=New-AdCountryRules -Configuration @{TenantKey=$TenantKey} -ExpectedTenantKey $TenantKey}
+    if($AdCountryRules.TenantKey -cne $TenantKey){throw 'AD country rules tenant differs from migration sources.'}
     foreach ($rows in @($Inventory,$AD,$Readiness,$Policy)) {
         foreach ($r in $rows) { if ((Value $r 'TenantKey') -cne $TenantKey) { throw 'Missing or incompatible source TenantKey.' } }
     }
@@ -132,15 +135,16 @@ function New-WindowsMigrationProjection {
     foreach ($r in $adOnly) {
         $gid = Key (Value $r 'ObjectGUID'); $nm = Value $r 'Name' (Value $r 'SamAccountName'); $domain = Key (Value $r 'DomainName' 'Unknown')
         $out = [ordered]@{}; foreach ($c in $columns) { $out[$c]='Not observed' }
-        $out['Device Source ID']="ad:${TenantKey}:$gid"; $out['Device Name']=$nm; $out['Country']='Unknown'; $out['OS Version']=Value $r 'operatingSystemVersion' 'Unknown'
+        $country=Resolve-AdComputerCountry -Domain $domain -ComputerName $nm -Rules $AdCountryRules
+        $out['Device Source ID']="ad:${TenantKey}:$gid"; $out['Device Name']=$nm; $out['Country']=$country.Country; $out['OS Version']=Value $r 'operatingSystemVersion' 'Unknown'
         $out['Windows Release']=Value $r 'OperatingSystemDisplayName' 'Windows 10'; $out['Intune State']='Not observed in current Intune export'
         $out['Autopatch Registration']='Unknown - no qualified Intune match'; $out['Upgrade Eligibility']='Not assessed'; $out['Hardware Reasons']='Not assessed'
         $out['Free Disk GB']=$null; $out['Disk Review']='Unknown'; $out['Legacy Build Review']='Unknown - AD only'; $out['Update Action']='COLLECT_INTUNE_EVIDENCE'
         $out['Migration Status']='AD only - no current Intune match'; $out['Risk Priority']='Review'; $out['Next Action']='Validate AD device activity and enroll in Intune if appropriate'
-        $out['Evidence Date']=$ADPublicationUtc.Substring(0,10); $out['Country Basis']='Not available; never inferred from AD domain or device name'
+        $out['Evidence Date']=$ADPublicationUtc.Substring(0,10); $out['Country Basis']=$country.Basis
         $out['AD Domain']=$domain; $out['AD Domain Match Status']='AD source record'; $out['Inventory Source']='AD only'; $out['Inventory Observation Date']=$ADPublicationUtc
         $out['Eligibility Match Status']='Not assessed - AD only'; $windows.Add([pscustomobject]$out)
-        $adRows.Add([pscustomobject][ordered]@{'AD Object GUID'=$gid; 'Device Name'=$nm; 'Source Domain'=$domain; 'OS Version'=$out['OS Version']; 'Intune Evidence'='No match in current local Intune export'; 'Autopatch Evidence'='Unknown'; 'Country'='Unknown'; 'Qualification'='Enabled AD Windows 10; unique AD GUID/name; no Intune ID or unique-name match'; 'Next Action'='Validate activity and management; absence from export is not proof of non-enrollment'})
+        $adRows.Add([pscustomobject][ordered]@{'AD Object GUID'=$gid; 'Device Name'=$nm; 'Source Domain'=$domain; 'OS Version'=$out['OS Version']; 'Intune Evidence'='No match in current local Intune export'; 'Autopatch Evidence'='Unknown'; 'Country'=$country.Country; 'Qualification'=('Enabled AD Windows 10; unique AD GUID/name; no Intune ID or unique-name match; '+$country.Basis); 'Next Action'='Validate activity and management; absence from export is not proof of non-enrollment'})
     }
     $unionIds = Index $windows { param($r) Key $r.'Device Source ID' }
     if ($unionIds.Count -ne $windows.Count) { throw 'Duplicate union identity.' }
@@ -151,7 +155,7 @@ function New-WindowsMigrationProjection {
             Hardware=@($windows | Where-Object { $_.'Upgrade Eligibility' -eq 'Not capable' }).Count; AnchorObserved=@($windows | Where-Object { $_.'Autopatch Policy State' -in 'Success','InProgress','Error' }).Count
             Dates='Inventory dates are source file publication times, not device events. Readiness/policy dates are record export times.'
             Scope='Intune plus enabled AD Windows 10 with unique AD GUID/name and no qualified local Intune match. Absence is not proof of non-enrollment.'
-            Country='Primary-user proxy for Intune; Unknown for AD only; never inferred from device name or AD domain.'; History='Unchanged Intune-only historical scope.' }
+            Country='Primary-user proxy for Intune; configured exact AD domain, then configured name prefix for AD only; conflicting rules yield Unknown, not verified physical location.'; History='Unchanged Intune-only historical scope.' }
     }
 }
 Export-ModuleMember -Function New-WindowsMigrationProjection
@@ -159,8 +163,8 @@ Export-ModuleMember -Function New-WindowsMigrationProjection
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDVojUmwpbIqV5t
-# 9WM1R2Ue7ZcEvpBrtf3I6nN5j7kGpqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA3zO6EX7goADnd
+# UBqNcj8UvNcI6BthriMVZF/DMBCw2aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -293,31 +297,31 @@ Export-ModuleMember -Function New-WindowsMigrationProjection
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIOU5xIec/ncIEYe4kDx9vS/lBj6iYGEhfBnFnAPb9UlmMA0GCSqG
-# SIb3DQEBAQUABIIBgEG1FRl/ot+LZcQwyw3n13uExz2FtM/qypOZuX9peouQ55Xb
-# SjFLyh4JQ5UsULia4LBQDG0Caod0SH65TFsVKzoc9RtMb+FqhRtqoS/LjmEzITy3
-# qHUqhkgQrdjKhv8/Dys8yO2dZambvUUg3xi7CH28XVJhRH+O80QJGfXDXfR31KiK
-# B3TQLl0OaeMgEEspvanfR0qI8NFe63NgMnudUTdHj1RLqBPA4GbDhSIMPbLLZ9il
-# VTbViRmopRuXBbCTsRZP4FSCdE4QpTm31H6KhQ2pOqf5vX2908GGS0Nm61uA65a6
-# 8uD/k3K7Stn2XsXhTm8GmaajmABHtucwVDqVmx7sSdw8OeHWLYeh7EXwciLsz6U5
-# PcYmKTWVjU5DAphSlLKMpmH6PSSIYQZ8fhsrvTkuXPJg0iPMUF+FA8QXIWck6qu0
-# ZhfOtU7OQhVTJtmHOAEe557BrgsiLz19TLboXmRcAigCnxCdUsAfotLGTdXfpKg9
-# hhHSa5h75mJiGEfNQKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIAcaiWy1FOCbN7s17ZCiIS0m/USFAWyASVRX9lhxv+slMA0GCSqG
+# SIb3DQEBAQUABIIBgE6QreZaxEeL6P4rr0sxPIUMbzkV1aXMP4VED1re1Y1o1Oos
+# f0ZrkY0Yp/JMuvrD5iguLD6WaH6QLcAvve67xaUkHe1kSH0POCdBvxdmZiL/5UyJ
+# Mr+sEyClbYB6Bnnx2cG55s69CD6hnD60BA3Kw8ZPRezhXsrtD1zD6p6V33chRMyh
+# 1G333wBl4dN+PmR+70NELsiRokxprdwJr99cy5SZt/C3lK+QB21ir5pv7TnWloig
+# dJCg926dvYfCx43OtVniiIXT03C9wEspXOq7BghFNQH6M1AGzreU/EZJvhLcua+o
+# whnkunJeUR3sLZi+RX3kA4RqzNiwzBm8D9pwNkup3QsrEq3bFYCC8WmctKyAHUh2
+# 18hCbY12XE5IUwJrDWse4OVBchNFUVIuoU+Oh2su3IbbKgtbaecS8uQC9tMGh85W
+# EqO5KudBaIi70DRyjVnLE0XhJ54ajWqXElJq7vv0fCnqqlGh08n0UCL+r9/BOeHd
+# JR+80A3gVmelbE4tm6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDkxNDA4
-# MzVaMC8GCSqGSIb3DQEJBDEiBCA7LdEfOH5tQdYHVTIzSj8OdyQr8K9/QpEu5NOp
-# bJzLBjANBgkqhkiG9w0BAQEFAASCAgAKgBMW8ORbVyfQJyBIju3HNADMc5HKEJQL
-# B2FruhVaIgF99ubZFjpurRmhyhd1cOlKWzhQqTGfyzQomUadSpz7k8z+SSO5SF/+
-# UYhpyj70EgY2btXZCxzykWMn3IrtDEVP3YVQySkKW2Sr8yUnJtVA5ubF3wzXpqF1
-# ueDG+il/q1ku4dw/yh5gIT0HjKUdR1MrXikr52mgEMIglwSaDj6pe8pbVF/2CHqM
-# 1ssb7l/JbNRi/0qFuMdA0VjD2T/5kQiUCdOyOfoSil4KRwuXBuDzAauFOfLyXC9Q
-# ejd5yB8IrzwCnQ7bSr2N80HXKn+p40oBwLrpghh+TW9T9klT1aA8W2ESiMlT+edc
-# H4gFL34HJ6A/FNqnAuSONqunsBzk/MCWVsdpvdtgiOT7/WE9DHF43nx3DMlYXBsR
-# ZqluV5zefCR0RkmGS2CO7ZHsTcpnVc+1gvjvyK5Vmk65kZLesN4Ftfk9npK47xbN
-# n2/gIJdF4kLHYNL177a0EG8rTSvvZKrN6p7zzBnlYewWQQR0QZPF1udZb8/rsMqF
-# W8mX8+owJxPmwIT+eOEF1jGQT9aFn3rU/UqIe990mrXE6NgyTTrwQloiOaybbJ3B
-# lvQXQW4kuvOjo6t1r7h3SAESIoFQSUDCxbtKPIjDdSe0Mp26Q9fNEXFKdN/+qp5p
-# 7IsjjZ+9OA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTIyMDE4
+# MzFaMC8GCSqGSIb3DQEJBDEiBCDLRO5HCf9ihg/3pXRlKN173pAd3cQCLFD4yyJv
+# pMS0TDANBgkqhkiG9w0BAQEFAASCAgASH7ekvhKEx4GRkBbwX6RW4CKMFOUDiRB/
+# JNxQjExjjilypV54AxmLA+DoH3ykjkW1FZDunZwZMnxkG3qohpe5gqgVZ8PfiybG
+# 9xBXFb3pkRjEk9KcDJmDTTBFMhVNRA+QCSQRJy9bs1ytx8ISfSsosWqk2GxDoFXw
+# lsmUOE0lIoBTolJkJB+u2cN+OmttyVqGe9pGWPSzRUJFbW1HANDPkHiEUlJeSdQU
+# 3Luw7mOIpywrHlAeZEXwq0k71iMpWiTaNwjtQtU545DblxgIwbZ2HU5X7cu3MOl5
+# yXUnkJGroitzxwjiUNTilXlrCDqo38yTsFw5Kv3nQocPKfUMjEMStOv6eBbOobjg
+# /SS0pNiXQ1mgcsolzzyYmAIEIUh684yy9mAU6yavI2KKt+MZ/ivGXW38LGEvpVtb
+# 7Hhwqbx1w6vgD3uhPoKd62i6T72X5v4KdZyYBxp0IrFchmwEwQRwOS1OTkQU+25k
+# ek//zmVa8t8U8Dij2ZJNkQJOcgc52HPNStdOxYVcB3CJYqovNHrxYOneCOiQaGjT
+# 5qLXsvComGtQp5dw4H0toySsIB8vPHSipq7ak3xv4ANvDNfd/n6gbflFfnrBBRG3
+# 7N+OM2w124fcW8ABtrDtvVAY8Ecgxdb/elNhHN996Wzw3hpJAi2pWWwI9QMOThX6
+# RCVY90qSww==
 # SIG # End signature block

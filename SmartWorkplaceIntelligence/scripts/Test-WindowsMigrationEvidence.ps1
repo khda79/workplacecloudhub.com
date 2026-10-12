@@ -20,6 +20,14 @@ $x=Run $i $d $a
 Check 'Union / matched Windows 11 / disabled excluded' ($x.Audit.Total -eq 2 -and $x.Audit.ADOnly -eq 1 -and $x.Audit.MatchedADIntuneWindows11 -eq 1)
 Check 'Country independent of domain / AD Unknown' ($x.Windows[0].Country -eq 'FR' -and $x.Windows[0].'AD Domain' -eq 'be.example.test' -and $x.Windows[1].Country -eq 'Unknown')
 Check 'AD no invented disk/policy/eligibility' ($null -eq $x.Windows[1].'Free Disk GB' -and $x.Windows[1].'Autopatch Policy State' -eq 'Not observed' -and $x.Windows[1].'Upgrade Eligibility' -eq 'Not assessed')
+Import-Module (Join-Path $PSScriptRoot 'AdCountryEvidence.psm1') -Force
+$rules=New-AdCountryRules -Configuration @{TenantKey='test';AdDomainCountryMappings=@{'be.example.test'='BE'};AdComputerNameCountryPrefixes=@{BE='Belgium'}} -ExpectedTenantKey 'test'
+$mapped=New-WindowsMigrationProjection -Inventory $i -Prepared $d -AD $a -Readiness @() -Policy @() -TenantKey 'test' -IntunePublicationUtc '2026-10-08T00:00:00.000Z' -ADPublicationUtc '2026-10-09T00:00:00.000Z' -PolicySelectors $selectors -AdCountryRules $rules
+Check 'Rules change AD-only country, not managed-device primary-user country' ($mapped.Windows[0].Country -eq 'FR' -and $mapped.Windows[1].Country -eq 'Belgium' -and $mapped.ADOnly[0].Country -eq 'Belgium')
+Check 'Rules preserve migration population and readiness' ($mapped.Audit.Total -eq $x.Audit.Total -and $mapped.Audit.Unknown -eq $x.Audit.Unknown -and $mapped.Audit.Hardware -eq $x.Audit.Hardware)
+$conflictRules=New-AdCountryRules -Configuration @{TenantKey='test';AdDomainCountryMappings=@{'be.example.test'='BE'};AdComputerNameCountryPrefixes=@{OR='France'}} -ExpectedTenantKey 'test'
+$conflict=New-WindowsMigrationProjection -Inventory $i -Prepared $d -AD $a -Readiness @() -Policy @() -TenantKey 'test' -IntunePublicationUtc '2026-10-08T00:00:00.000Z' -ADPublicationUtc '2026-10-09T00:00:00.000Z' -PolicySelectors $selectors -AdCountryRules $conflictRules
+Check 'Country conflict is visible and is not an OS eligibility conflict' ($conflict.Windows[1].Country -eq 'Unknown' -and $conflict.Windows[1].'Country Basis' -like 'Conflict:*' -and $conflict.Audit.Conflicting -eq $x.Audit.Conflicting)
 Check 'Disk / error state retained' ($x.Windows[0].'Disk Review' -eq 'Below 20 GB planning guardrail' -and $x.Windows[0].'Update State' -eq 'Error')
 Reject 'Duplicate Intune ID' { Run @($i[0],$i[0]) @($d[0],$d[0]) }
 $foreign=Inventory 'c' 'FOREIGN';$foreign.TenantKey='other'
@@ -59,8 +67,8 @@ Write-Host "PASS: $script:checks offline migration checks. No collection, public
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCVeEjMiasfsS69
-# 6mu6nIU9LBaopsT3SI9Y7mL4YV2P1aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDCWFAF3yVE498q
+# ZoqArOr7W3sp/Ws9xeSGwoBPx4LuX6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -193,31 +201,31 @@ Write-Host "PASS: $script:checks offline migration checks. No collection, public
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIIURThu/dlGZY0K+RM/rxLgA4q8fricvYiiUjtQ3f1uqMA0GCSqG
-# SIb3DQEBAQUABIIBgHzmCuMqyo96rTlB4O9HsoQk0WkZpX6fbw2yih2y+Bl7qiRR
-# g/8uezHVyfi81vqQW+nPoNT1rW88DOMGs1wyESRfYNoL8w6QR4yq7ZTGOtX0wxIa
-# 6aky730cWSH+dsN3d0i3I+M+3PYzAUu4ZphsyUqj2ousmCNCLcLbUI/7UCU0OmEV
-# x9DJYv3TL+HuLQMx1/eam8sbEvDql4peT7yXm2/mJtJpxExFBl8b9lKF+MErCrzQ
-# VL2+S7ojniH6FncHzsOzEyqNN8/oFfvanm+qHR6EZMg+IgQTqc7uG4YM5KytzehV
-# /q14yO4yhC8RBRANj9DyDuZub2x8acUSisHTvwKgEK4J7ZGzLz/kLxHcVMw0ScSu
-# lhP11cckW1T3cXsRQdmE4fIS408nFrC4Wwm/2G4oKKRMmPjP35w3+tu6HENMOvPr
-# 2EIWj9m7dehqBxcEmJZ9bpcVGm0EgZWRQS94hS3gRwg5WRsHzCu9H0WUw50pAvl5
-# K4anqysuQeNsKeaMg6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIO64HDZ9EF50C3bNGJcrlKJuYSNfFJcO5ENbvkd/hf1+MA0GCSqG
+# SIb3DQEBAQUABIIBgH2ctZdugb7id40Dhr5OI8adOclECPXbuWJ5qV0Nbgp/v1r/
+# r8TnhC5B4UGpS4jPY85w7EPuZ1LXP8pY088bvIx8m4Zd00M3UTRnyr+HsdhNnCwc
+# 94xjPOJVMDq3GOdb5niGzoGnGxLKYnAKDVZfABTjJP+Q9ZTm16TaFniv63iI8OBD
+# ZaQFRwFoJPOvvvSfMGaVzyYftEKcSOW/lKvwlQjiVvao10fUu0OrkmdosGNSMsHT
+# j+8pL3HARcYLfB1bm7ggB9P6V6xp8yCBIRbm/wdb2MCSG8umDlF7CzgHlFNy+ekE
+# Jo0i3kOlJaeqWiExsGfrMYUPZNEF0sr82yZl69SBd5i4A8NQF3yvuTa7umHRu9NX
+# xGl+7sQeUDl4Zov1N2S0+cS1YOjtY9rsDcOFxRC7PMHAB3xiRfRQLXiOri8K5xpA
+# HB9eimsO6bl2QWxasiJlHz/YXExDSJHPYZNBfLggFGZ2XI6ZDK/l+V9HaDOIeLA/
+# dBegMSZ9p2oM5tErhKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDkxNDA4
-# MzZaMC8GCSqGSIb3DQEJBDEiBCCanjXQQkQktrpQCTw82KsMmCEY0rmjbZdfFcUc
-# c5JenzANBgkqhkiG9w0BAQEFAASCAgCZLtfx1LQVKw6i8tfB+hOorRsGw/Q02mGH
-# jN4BDXVW68H33YF4MwgMija7KnH2wuRusSyH1KT9+hnIpM7S9QjRbdOOoNlRyhfe
-# zWXGYHMYMfjrk1U+VQxP4znArilPoCBtK3GdbehqVkTdmAQFD09dB1L/sLTljJ6J
-# RwEVUJW+OpE6e/EAIN9umSOYYJb2tUMe1a6tVdj47rda4c6voFBsv/XR/Z6tWnnf
-# CUcCvc1nMlZVrYq0mHF7BJpSXmJgs3UBtnznu1/4ffN1IHnvJQFW4Rpx6gKIJmAe
-# EbiuwmKYob8HY8bUD6UQhA7VU+KwG9Zz0skF8cMzXrvt5tWGcQobhMaGnDphgZlf
-# j8mWCgi0qx4bCxMQM+h3trmIFOX7U8Bf7NyP8bRwxCntekmpxblDDefGfpeS9+2f
-# T0J3doU58XO4I7nCs/ZSqF5mfH3xMYEJ3qb1guukV3poW3na5k3sOvjlhxH/4pxD
-# bSPL/JXySPK4J9ueK4QQxNYpwVOIoqTJkl+yUbPMKbVB0UTEIuWSsQgof6m8z6sZ
-# dA2++7dGLnGWahMiHuTTyH4PkZ9Am1UtVqI3R+zWzIYUKMlcqPMdw61x3fN6KV2D
-# 6Ni12VH0xyfAZ0mEorhWSCCTfqnE1rsLqL5UWYPLkWpiSk1b2xC+XUkqXyLo4JnW
-# njgc8b51rQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTIyMDE4
+# MzFaMC8GCSqGSIb3DQEJBDEiBCBQ2Li9YYNwDaKe6bAQVKh2sZDGKw8z76+KNK5i
+# xfkMUDANBgkqhkiG9w0BAQEFAASCAgAxo2613wYkF0eLk1GnqSNmrMiC2clRymTo
+# zyIf5lxiLu9u7s/UJY3w7gKfSWuNg8eNzZssGrXiZGjvoZwlrXoOm8z+0R7lLJd/
+# Rvy4LgLJvt3FxUzY74mbs+r9RRQG0Ebzs3xX211YHPoPxZtLnn1rXw63JIu/IRM5
+# kxrYqHMZaUkGAkH88T7a0LlFXqGaus6X6BKw/tBhK0FV3VyzJ8VZHuQcCbaj008o
+# 3z6jEO+ktZDadYGi+Mb8/U4afEHVd/QsKtgJldsiPIZZD6kjs0V3EVaEap6r9J7D
+# 9ql7Xpif+z9G68h13S9tAltLd2YW2/kUTEQWqSGBpwzojAphu2s6GvzvlRO1fqol
+# nLdt7KJ7aoxXavC4RjURVN7pCQLgftd3sWCLxu+9eoW+3EeM9Ek6KVnNOB0nAzao
+# raxukKXFt1nt7w/UOzPBIyT+S4AxRgMaABV6jTd4viXGficZQx8DSUpluCaNBra/
+# WZAsfIA8vJkdS39mox0iwRQxP0mWPLkG3uLsV5Y3K0QFZoCMuVUAhsc/AkVaMyxg
+# zh7tcsZ8I27ux/rqpsdptSNsdzyN5pyZyiXUHeooXYLj/7LJp6nZxWfvES69bTq1
+# g3x+T+IeHfQ4XOyL+PbTG5j3bP3uKC36ZOH6Fu58sOAkqN5jkO0O+rgriWiRYYDQ
+# o11d5oyFKA==
 # SIG # End signature block

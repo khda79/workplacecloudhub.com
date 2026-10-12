@@ -2,6 +2,72 @@
   "schemaVersion": 1,
   "tables": [
     {
+      "table": "Device System Evidence",
+      "file": "DeviceSystemEvidence.csv",
+      "stagingIncludesTenantKey": true,
+      "uniqueKey": ["Device System Key"],
+      "allowEmpty": true,
+      "columns": [
+        {"name":"TenantKey","type":"string"}, {"name":"Device System Key","type":"string"},
+        {"name":"Device Source ID","type":"string"}, {"name":"Device Name","type":"string"},
+        {"name":"Azure AD Device ID","type":"string"}, {"name":"Primary User UPN","type":"string"},
+        {"name":"Country","type":"string"}, {"name":"Country Basis","type":"string"},
+        {"name":"Inventory Match","type":"string"}, {"name":"Prepared Inventory Match","type":"string"},
+        {"name":"Observation Raw","type":"string"}, {"name":"Observation UTC","type":"dateTime"},
+        {"name":"Observation Time Basis","type":"string"}, {"name":"Observation Age Hours","type":"double"},
+        {"name":"Freshness","type":"string"}, {"name":"Freshness Max Age Hours","type":"double"},
+        {"name":"Prepared UTC","type":"dateTime"}, {"name":"Secure Boot State","type":"string"},
+        {"name":"Secure Boot Raw","type":"string"}, {"name":"BIOS Version","type":"string"},
+        {"name":"BIOS Date","type":"string"}, {"name":"BIOS Date Quality","type":"string"},
+        {"name":"Firmware Type","type":"string"}, {"name":"Firmware Raw","type":"string"},
+        {"name":"Last Boot Time","type":"string"}, {"name":"Last Boot Quality","type":"string"},
+        {"name":"Local Encryption State","type":"string"}, {"name":"Inventory Encryption State","type":"string"},
+        {"name":"Encryption Comparison","type":"string"}, {"name":"VBS State","type":"string"},
+        {"name":"VBS Raw","type":"string"}, {"name":"VBS Hardware Requirements","type":"string"},
+        {"name":"VBS Hardware Raw","type":"string"}, {"name":"Credential Guard State","type":"string"},
+        {"name":"Credential Guard Raw","type":"string"}, {"name":"Management State","type":"string"},
+        {"name":"Management Raw","type":"string"}, {"name":"Compliance State","type":"string"},
+        {"name":"Compliance Raw","type":"string"}, {"name":"Inventory Compliance State","type":"string"},
+        {"name":"Compliance Comparison","type":"string"}, {"name":"Last Sync Raw","type":"string"},
+        {"name":"Last Sync UTC","type":"dateTime"}, {"name":"Last Sync Time Basis","type":"string"},
+        {"name":"Third Party AV State","type":"string"}, {"name":"Third Party AV Raw","type":"string"},
+        {"name":"Third Party AV Products","type":"string"}, {"name":"Expected AV Name","type":"string"},
+        {"name":"Expected AV State","type":"string"}, {"name":"Expected AV Raw","type":"string"},
+        {"name":"AV Qualification","type":"string"}, {"name":"AV Comparison","type":"string"},
+        {"name":"Windows Update Reboot Required","type":"string"}, {"name":"Windows Update Reboot Raw","type":"string"},
+        {"name":"BitLocker OS Protection","type":"string"}, {"name":"BitLocker OS Protection Raw","type":"string"},
+        {"name":"BitLocker OS Conversion","type":"string"}, {"name":"BitLocker OS Conversion Raw","type":"string"},
+        {"name":"Data Quality Issues","type":"string"}
+      ]
+    },
+    {
+      "table": "All Accounts Evidence",
+      "file": "AllAccountsEvidence.csv",
+      "uniqueKey": ["Account Key"],
+      "columns": [
+        {"name":"Account Key","type":"string"}, {"name":"Inventory Source","type":"string"},
+        {"name":"Account Kind","type":"string"}, {"name":"AD Object GUID","type":"string"},
+        {"name":"Entra Object ID","type":"string"}, {"name":"AD State","type":"string"},
+        {"name":"Entra State","type":"string"}, {"name":"Entra User Type","type":"string"},
+        {"name":"Country","type":"string"}, {"name":"Country Basis","type":"string"},
+        {"name":"Match Basis","type":"string"}, {"name":"UPN Comparison","type":"string"},
+        {"name":"AD Observation UTC","type":"string"}, {"name":"Entra Observation UTC","type":"string"}
+      ]
+    },
+    {
+      "table": "All Devices Evidence",
+      "file": "AllDevicesEvidence.csv",
+      "uniqueKey": ["Device Key"],
+      "columns": [
+        {"name":"Device Key","type":"string"}, {"name":"Inventory Source","type":"string"},
+        {"name":"AD Object GUID","type":"string"}, {"name":"Intune Device ID","type":"string"},
+        {"name":"Azure AD Device ID","type":"string"}, {"name":"Platform","type":"string"},
+        {"name":"Country","type":"string"}, {"name":"Country Basis","type":"string"},
+        {"name":"Match Basis","type":"string"}, {"name":"AD Observation UTC","type":"string"},
+        {"name":"Intune Observation UTC","type":"string"}
+      ]
+    },
+    {
       "table": "Windows Migration Evidence",
       "file": "WindowsMigrationEvidence.csv",
       "uniqueKey": ["Device Source ID"],

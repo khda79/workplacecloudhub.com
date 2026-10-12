@@ -112,9 +112,9 @@ $compliant = @($knownCompliance | Where-Object 'Compliance State' -eq 'Compliant
 $noncompliant = @($knownCompliance | Where-Object { $_.'Compliance State' -in @('Noncompliant','In Grace Period') })
 $controls.Add((New-ControlRow 1 'Device security' 'Device compliance' 'Observed' $knownCompliance.Count $compliant.Count $noncompliant.Count 'Devices' 'Intune device inventory' 'Remediate noncompliant devices and validate grace-period exceptions.' $snapshotDate))
 
-$secureBootCovered = @($devices | Where-Object { $_.'Secure Boot State' -in @('Enabled','Disabled','Error') })
+$secureBootCovered = @($devices | Where-Object { $_.'Secure Boot State' -in @('Enabled','Disabled') })
 $secureBootHealthy = @($secureBootCovered | Where-Object 'Secure Boot State' -eq 'Enabled')
-$secureBootAffected = @($secureBootCovered | Where-Object { $_.'Secure Boot State' -in @('Disabled','Error') })
+$secureBootAffected = @($secureBootCovered | Where-Object 'Secure Boot State' -eq 'Disabled')
 $controls.Add((New-ControlRow 2 'Device security' 'Secure Boot' 'Observed' $secureBootCovered.Count $secureBootHealthy.Count $secureBootAffected.Count 'Devices' 'AD computer inventory reconciled to Intune' 'Enable Secure Boot on supported devices and investigate collection errors.' $snapshotDate))
 
 function Get-DevicePolicyState {
@@ -185,7 +185,7 @@ if ($defenderPath) {
     $defenderHealthy = @($defender | Where-Object { (Test-TrueValue $_.MalwareProtectionEnabled) -and (Test-TrueValue $_.RealTimeProtectionEnabled) -and -not (Test-TrueValue $_.SignatureUpdateOverdue) })
     $defenderAffected = @($defender | Where-Object { -not ((Test-TrueValue $_.MalwareProtectionEnabled) -and (Test-TrueValue $_.RealTimeProtectionEnabled) -and -not (Test-TrueValue $_.SignatureUpdateOverdue)) })
     $defenderDate = (Get-Item -LiteralPath $defenderPath).LastWriteTime.Date.ToString('yyyy-MM-dd')
-    $controls.Add((New-ControlRow 9 'Endpoint protection' 'Defender protection active' 'Observed' ([int64]$defender.Count) ([int64]$defenderHealthy.Count) ([int64]$defenderAffected.Count) 'Devices' 'Intune endpoint security Defender agents' 'Restore malware and real-time protection, then update overdue signatures.' $defenderDate))
+    $controls.Add((New-ControlRow 9 'Endpoint protection' 'Defender protection active' 'Observed' ([int64]$defender.Count) ([int64]$defenderHealthy.Count) ([int64]$defenderAffected.Count) 'Devices' 'Intune endpoint security Defender agents' 'Verify approved EDR coverage; where Defender is required, restore real-time protection and address overdue signatures.' $defenderDate))
 } else {
     $controls.Add((New-ControlRow 9 'Endpoint protection' 'Defender protection active' 'Not collected' $null $null $null 'Devices' 'Not collected' 'Collect endpoint protection health evidence before assessing Defender coverage.' $snapshotDate))
 }
@@ -230,8 +230,8 @@ $controls | Sort-Object 'Control Sort' | Export-Csv -LiteralPath $OutputPath -No
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDOW5Yi231hCcNX
-# Dejljrncc7JqBe+6UzxlLtSFzdgpXqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBB72/GHzijB6E7
+# gxybD9NTJNQfc4lIlkwAXedHkiGoaaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -364,31 +364,31 @@ $controls | Sort-Object 'Control Sort' | Export-Csv -LiteralPath $OutputPath -No
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEII+M1nW5WJXqpjMo7dngJsefB11geIO7X58zl95lFcy9MA0GCSqG
-# SIb3DQEBAQUABIIBgJYk/oEqtIggLUNFPxLRhZ1GGJzr3nwcCGw+gw2De8kpOj1M
-# 2BnTqq8u0fGBBG4ZOczCMNIKA5db3NlPjcQoO7Jje/WIIVojlptvTkte82sAgAQo
-# wgoU5AM/QlG1y/quuCXJ0ImZN7hbat/jEOVeNSYA6CfWLeYIDPyh5QxdgdyzUjoP
-# L5emy0brW3YTza/qp6PvfgXhac7I4F+MsMqGJhcDDNm/gaF2DYLY8ELULjJx3Fvq
-# 5Ft4Eve4J0e9Hu8DpfzPmvURkNKQZ/g2rfMe5LhQU78VOoKJgmbeokoH8eOoP5wF
-# Ij48BmDOaT7ExI/FwAodb8+OgEb1zvO9JRzfxSuWhoNd2Pf7AAGCEUkfGOBUwweG
-# e/RYyiFw/qfvMXPX4zTkxAVKxkjk4PwJpISGa+T+8wAEwNvpu1IDPlWfXn4BgzX9
-# /5pwbzWdC1ie2eiCxieC3FlKRTDN9/hSStsoGRzS7Jg3yBF6E9tmub4SAYpq62nw
-# /QB9bXq7KGzSuKBgS6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIIpKPfgH9DGvfoKHtNcAIs5/wPY+VcDaWz8I7XWfndL2MA0GCSqG
+# SIb3DQEBAQUABIIBgAZEvDpTpC+jCe2dyA6trGc6S2T9jSUQv8L5S9KYTfQ5I+0D
+# zsrJgORfy+4VIAxgPwvW3zAD7T4uU6nmevKlu1hxnKtatoWzDPu4AI0hXnChL5Bi
+# qOUYdXdJ9jGRtomoIEO6dYQ3PJgZehqK9YDZ4QahAf1MsSY7IRQmii34KkQTkf4s
+# yjMRDtcx+Mri8whcFEOS32TP4S49EEfr/EtrcywYBzLkG8FyXfpuqe+d+wKCVWo7
+# fXixSLkE0sFn8uuWdR6hRIiwbcsvOQlZfbSRCI4DWmBX7ca9I1hPwj2FgyR8lDY+
+# z31Gw1q+tohNZlJ0vMtAghy5y2YEyyNBm4m3IWT1WFYdF5aIdcTWg/KLxahk/D9f
+# 2mhRLcFZuFP5i8g2ewqwtjxcD8s6ANX0aROguX7z1lLbIliHa8JQ8zcXRJvx+CMf
+# YsDOSIVmwHif1VnUkuYTYpr3ZDr9r3FVsha9wbJy4NlX0i3AOwFMGA1ZXJnkFGN0
+# zWaqIp2YQZ4wQLxGsaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDcxNjMz
-# MzZaMC8GCSqGSIb3DQEJBDEiBCALgfJG7RfirdALjgL0nc/x12/GortRgoZhLR8E
-# fbayizANBgkqhkiG9w0BAQEFAASCAgAqpucjMb/cSxDLxATD9UPjYXsH3VUysF/+
-# o18Ws+ohcZUQGbWnaUAU+uhll9pMr1NySObQe3Y97/jCzACd9cwd1lAPgHubLpUi
-# O9wm6oNP1n6gPWCUfr0hxbZseQ20K4P1BxXwXBTLuZAdIj4kYpzf72DxWGNEEfC8
-# TSc+Ra2e/FBT2DpfQin6rvWb0VsVbycILeCy4bKi0NYDPivvy8zeD64QtP5gEUcr
-# 1HGuIIOvWeibcSXxd/cjsBnTs/yca6ZrbXhKE7X6VluTFEAezvuyLod3bYVJy0oH
-# Sg0hIkCebRNllJknXWpMvB5Uxf97ZdTRZo4vATu1Bvoxpen6jCi7lLFdp+uh1pHq
-# pD70XubPvaR7FUJLQBfN800cxrTY8XC68+fUyR8WZnfquV7EHr50udoCdIiM8ygB
-# Qv0C8tM94YQyCEq63vcUmLb8m/+zvRON0EtRui7LlBCKnPVtja8zOOshWJbjtzMR
-# o3lk5hsoaX2NxXH3gkx5sCONUJWsYF7tfoTwwv3e3jt6Qwr7EFzT/LihHcK2mr4n
-# ZWLikgkAE66YRpk80KB1tnbR/SEB6KUrDM3I+qdT5Yd7UkExDjIQuFBG3l5rdXpr
-# WV8PX6aoLohb3j2Hg012o4Ihxi8sxBv6V3H6WvPCeBfujqWbH7rqkxVftyddH/xa
-# suaPNOiYdA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTIyMDE4
+# MzBaMC8GCSqGSIb3DQEJBDEiBCDOtK61Zs6+FDZ9sfenYuN0B4MlcegdHPltLpQr
+# mvuoKzANBgkqhkiG9w0BAQEFAASCAgBwLc1pUzy57Fl7AyloQmMrExNm/A1HsS0d
+# w+DWyg6zWKR09hT38Z6WhgznVWy4ja2XJU7RBozLVgOqIr/KEuWEJ/PFUFcQ56EU
+# 8/RZwEgMZiBvbd1GtMMCv5BNlbjRpRBH6fRA68+m3JZ1iQzT/ftWJ0W9KYTuCpwd
+# sPGw2VXnsxbYEPafLKxEUP1YCRNfdtZV+628mnQnU0LoQHiA1mAN/CeOWd9UtZfi
+# Iy2SROGrXNX6L5+qvU/PK3Z/Q1j//tXokuH+rlWKryjksa7dpbtYe4CyLTcfnSDt
+# mFM8fOrQjRvJ3I2yQsQ5yYD3wRUf5mEwQvDxRExagKP9S/1ZROd3wQUBpg2C9oIg
+# 2TK2abTEcWj9fWdTG2l4BzAIVaoiG/VV6PkGCerdzYFuYUQtcsgZXdh/FPYJw/QO
+# cD6k3Iir2FXRv4JpPXKaLxhRum+2aRcew4t+4OgN1prg0upmVoGQsZYzvGndN03T
+# 1vmi92yssVd9ZcPJaYspyEvLQmewpFtPJyMe7766/YsYlRaCPdNTrOcrLLA3JsXV
+# RIlxgd/a/WHIXFWbxN1hwv3HmU/Un/nyMsT2zsVsStxxxoUxqCUNBZcI7zYsHFmN
+# argNWZCKaIHgi56cofB5PqWc1ytPF7QXrS1Ndf1lrqBOc+JGYCg9ztJMAFiIPpC+
+# hTFByr4z0w==
 # SIG # End signature block

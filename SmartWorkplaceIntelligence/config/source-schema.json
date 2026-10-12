@@ -1267,7 +1267,14 @@
         "DeviceGuardCredentialGuardState",
         "ManagementState",
         "ComplianceState",
-        "LastSyncDateTime"
+        "LastSyncDateTime",
+        "ThirdPartyAVStatus",
+        "ThirdPartyAVProducts",
+        "ExpectedThirdPartyAVName",
+        "ExpectedThirdPartyAVStatus",
+        "WindowsUpdateRebootRequired",
+        "BitLockerOSProtectionStatus",
+        "BitLockerOSConversionStatus"
       ]
     },
     "Intune_Devices_UpgradeEligibility.csv": {

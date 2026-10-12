@@ -2,10 +2,10 @@
 .SYNOPSIS
     Prepare a validated, versioned SmartWorkplaceIntelligence batch after raw collectors.
 .VERSION
-    0.1.14
+    0.1.16
 .NOTES
     PowerShell 7. SharePoint mapping reads use the tenant configuration unless Offline.
-    Deployment must include the sibling SmartWorkplaceIntelligence/scripts and config folders.
+    Deployment must include the sibling SmartWorkplaceIntelligence/scripts, config and reference folders.
 #>
 [CmdletBinding()]
 param([string]$Tenant='test', [switch]$ValidateOnly, [switch]$Offline, [switch]$WorkforceDiagnostic,
@@ -86,6 +86,16 @@ try {
     if (-not (Test-Path -LiteralPath $pipeline)) { throw 'Deploy SmartWorkplaceIntelligence scripts/config beside SmartM365, or configure WorkplaceIntelligenceRootPath.' }
     Import-Module (Join-Path $smartRoot 'Modules/SmartM365.Core/SmartM365.Core.psd1') -MinimumVersion '1.0.58' -ErrorAction Stop
     $coreLoaded=$true
+    # Refuse a stale sibling product before downloading mappings or preparing a batch.
+    if (-not ($TransferOnly -or $ConvertMetadata -or $RepairLegacyHistory -or $WorkforceDiagnostic)) {
+        $productContract = (Read-SmartM365JsonDocument (Join-Path $product 'config/prepared-evidence-contract.json')).Document
+        $requiredEstateFiles = @('AllAccountsEvidence.csv','AllDevicesEvidence.csv','DeviceSystemEvidence.csv')
+        foreach ($requiredFile in $requiredEstateFiles) {
+            if (@($productContract.tables | Where-Object file -EQ $requiredFile).Count -ne 1) {
+                throw "Prepared product contract is incomplete: $requiredFile. Deploy the reviewed SmartWorkplaceIntelligence scripts/config/reference alongside SmartM365. No preparation started."
+            }
+        }
+    }
     # Prepared batch transfer: explicit TransferOnly, or a normal run with EnableSharePointUpload (default true).
     $batchUploadEnabled = $TransferOnly -or (-not ($Offline -or $ValidateOnly -or $WorkforceDiagnostic) -and [bool](ConfigValue 'EnableSharePointUpload'))
     # Run logs and transcript are uploaded by the shared completion step in every mode except Offline,
@@ -196,6 +206,7 @@ try {
     $params = @{
         DataRoot=$data;OutputRoot=$output;WorkRoot=$work;TenantKey=$effective.TenantKey
         AccountClassificationConfigPath=$accountClassificationPath
+        AdCountryConfiguration=$effective
         MaxSourceAgeHours=[int](ConfigValue 'PreparedMaxSourceAgeHours')
         AgeOverrides=(ConvertTo-PreparedAgeOverrides (ConfigValue 'PreparedSourceAgeOverrides'))
         AllowLegacyTenantless=[bool](ConfigValue 'PreparedAllowLegacyTenantless')
@@ -246,8 +257,8 @@ if ($failure) { exit 1 }
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDauGa8+rfE0uzl
-# MK6K2ExaoGFUfdsaRttUucH58szF1aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAYG1DJjOqyD8ek
+# jqCGKrOIHzf90l378cwRRZLuTiqCaKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -380,31 +391,31 @@ if ($failure) { exit 1 }
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIAsf1Mz/FfnSbjzKRek3U3RN9kkn2/8FGVXqqtUVzIvIMA0GCSqG
-# SIb3DQEBAQUABIIBgFcQocvB5axTYer+SAZMbvVRGWGIXGj0GEvUdpX67VT4Jwxb
-# lIgkC93HxQRvatkfiYwPaXL7MVlGxNdW8G65WzwoT4Ogg00fdmoxcDOIONIx3i1e
-# EV9F0PNU5vZ0c8L3Mq3vMo8rW6oQIBpF3GZ4AI3w0ffTQ90Z7AxVraVNgosuw59p
-# BeuqIRb9T6Ek8kr6M6iuAicj5D4Mtur3oPL2NWxfAILZsX8cvpwgElx0cw5nNeeO
-# V70z25hgFrEBDRSBOZFKOEitc7ntEuifkfCnMvB10AV6ENV8LT3a4bfNuDl3faUj
-# yZG7acfJZQtSotmHicnyhsnXlRMW86AyQZd4cbZ40aKCJ99dcCD+UO0rxRYnpYwU
-# inGOo48Qrv1XOqM0a9PFtQhgquMHysjS5D+h19IaBs3LJEHdujscacoRB2SMLd3g
-# /SD5PjwejjAQA0IPIFVWZ5F7xNuJ6HuneXIydlxnaWSLv6ShZR2VyKtPBXEzyT2k
-# fPhvvSjEn6janzW9+KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIJRPjRwaqBrrj97jJQsawy7V/CDEW5OdIiVSur/w5i9/MA0GCSqG
+# SIb3DQEBAQUABIIBgC6x2s32OlA3O4D0xxWYwZdqBcKSx+vRn0RtwJgtTM0zRdfN
+# amg9REXHuanaZ+H9WXNgVKl+1bcO/2oCZkTCI2SAY6neSbKWOO6t0KPn/UI9gKnS
+# ZZbSy3MVGiP1yn420SsYH6ufMixKaYbdZzPfgGiMMQ8/KAmzPqRO2pm7jNsq3lkz
+# dK51nSosAKDiOygKvxvnk+JxK+1KyT4EYwCUwEIywsJ7Oi3o6rtt/4U8mafMZCKT
+# UdF2HNZM15jlUPzGB9q2f2+HY6oKhBfbbygsnc99vhRcIhzp3mj4/rbuyfobBgEb
+# e76+yh00r5xz1uYc/lbYhwqQb+AK/e0rqAs+WEIndz0GTvD3GUEIWv+gqJpdSLgH
+# CIs26I5GDZuz0KnixBllgCnKaHngcrGxokmqC1rK8mdr22oALrso61Zxgy9NxBpk
+# wNdvkQXCzNitXt+8gXevpSfyvWlvlGybOl8gPR/Y3nvLe1nn6gZRXNKrjs83M9vS
+# cXHwM9vvCd/LXRdUKqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTIxMjA5
-# NTNaMC8GCSqGSIb3DQEJBDEiBCCggkZxHUXBqi7rPGHDLQ4ak7hWoAJ7OFN67Cc0
-# UDrXqjANBgkqhkiG9w0BAQEFAASCAgAxCxXxOpQqdWZk4Km+yfhh3FlciJ9egP7Z
-# ZgTcvlwhEr1LZ6QBPjF38UBv4161A70yjcfL23nbmJJe+qFZ7sKg89V6bpLbfBIl
-# hia2zOe5lE2iUzbqMeaR8WA7/1qaZf3w6oqn0D5sGQzVVDtcEv3kT1O5bp2SJBKl
-# 4OIMHzQ5IEvekZFSEfXYdxIenZt/11ksWUW5LojrWsNLSATK0pNo58J+agiNvTVt
-# 8MoySBZjYejLR5nc/bePpYH5GmSqRf65uvG29jks7k3A7WJ0OW+DtOdxUewdd6rC
-# 5SDjgeNKZvSUaS+8+DcGDuO+xnZn/cEAy1Qc+J3G5CGqWuTL9QbeWV7hoKyPhWzk
-# m6YnmABSuHF1hEGoQr2eJ6NufeHPjrUNePIAgxMeVGvyHuO1a8Ek41qJIoVo+AtU
-# /w449/CjgZzBCZDu2kULfQNL7pOAvmzvS4Ru3iyxON61gjvjIF6aLKWRBpp1sPYC
-# yA+fRm2/5JqauCXsWRvv7gW6/GCogC3XIXio1y3Yd5aEhM7mYagiET1+9SjOLqO1
-# fxy7ov0dUyJsAzkUypSLG9thMFjSHaQxFSrA4kpF5oM2Oac7kwYFbF054UDqVM9L
-# htj92qFw2TQDZQSN7LhxoaYKLVI/Gp/M5FoQJZUshmyyL7h6Ppaw66/Bs+Q+DgfW
-# jPNvUUUEUQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTIxMTQ4
+# NDNaMC8GCSqGSIb3DQEJBDEiBCDTVJZJ5rR02hKGBYPh5UQBMp5L1KQkYFjPl68l
+# yiPRCjANBgkqhkiG9w0BAQEFAASCAgAvu9zOBGvOQKO0NMRJ0IghoKmp5WKGT66n
+# y+kTxO9gdobhKUmflUfY7FdzeVZQZVSa46p90GUS6RqdFOLvM1TsfHoZumhUwn9B
+# eN8d4MxghhxApteBt11vr+qzm7eqslD53HlevnsyjimxlwHEMlicmFOFbTfT0xuQ
+# jF24lanHR1RPJeQ8izgAO/Gk86CgzJcQP64akKhqbRgpC2f2gI7TQFGvw9uQMYbQ
+# L5clOXyHt7U6sqHp/v/03swUVCY/hcZjB3Z4i9mtPWCHOC16cd3QxjQxlLR4tZRc
+# 9j0Fy+3c8rgXgL30iPLwokqgBGP1w0eMhEdIYATm1LIhaOrrQJ6otVD1dPhHABnf
+# F8zl3na30h4bMqA69KMcgPAakjG4CagURqKmuKQi8FGZyvyHnbt56mfOUpx55jxj
+# W0I82aqSbOhOKcJ5/IBIeRS0LSqNmXFzZ78dQMpBIqN0kt4rXbG8DOWqyQBuqNgQ
+# Rk6ZG0aQiP8Ll9Q41C6dVivPhcGfdlKeeihTyVasmzwGK8phey8t9wYvWnCqkVyX
+# lA/CHATzUMrKjDi/WhO0sO12UFbqOhB70CPVqKJvXmSkMIDCuMieEhx9i9Tf+uZ4
+# v+VmdDh53pG/EB4urnHsE3pVsozUGqBkZQ0aFYc2MrayDDBZFSHRA6CR6sX/wIQ+
+# p1w4kvjkMw==
 # SIG # End signature block
