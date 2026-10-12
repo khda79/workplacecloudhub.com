@@ -23,7 +23,7 @@
   "SharePointLibraryDisplayName": "__USE_GLOBAL__",
   "SharePointTargetFolderPath": "__USE_GLOBAL__",
   "EnableWeeklyHistory": true,
-  "MaxReportRefreshAgeDays": 3,
+  "ReportRefreshWarningAgeDays": 3,
   "WeeklyHistoryFolderPath": "{{DataAllRootPath}}\\M365\\Usage\\WeeklyHistory",
   "WeeklyHistoryRetentionWeeks": 52,
   "OutputPath": "{{DataAllRootPath}}\\M365\\Usage"
