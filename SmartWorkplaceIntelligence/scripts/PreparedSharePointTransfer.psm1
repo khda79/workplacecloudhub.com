@@ -113,13 +113,56 @@ function Send-PreparedEvidenceBatch {
         }finally{$lock.Dispose()}
     }
 }
-Export-ModuleMember -Function Resolve-PreparedSharePointFolder,Send-PreparedEvidenceBatch
+function Send-PreparedFailureAudit {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$OutputRoot,[Parameter(Mandatory)][string]$TenantKey,
+        [Parameter(Mandatory)][string]$BatchId,[Parameter(Mandatory)][string]$WorkRoot,
+        [Parameter(Mandatory)][scriptblock]$UploadFile,[Parameter(Mandatory)][scriptblock]$DownloadFile)
+    if ($BatchId -notmatch '^\d{8}T\d{9}Z-[a-f0-9]{8}$') { throw 'Invalid failure audit batch ID.' }
+    $root=(Resolve-Path -LiteralPath $OutputRoot).ProviderPath.TrimEnd('\','/')
+    if ((Split-Path $root -Leaf) -ne 'DATA-POWERBI') { throw 'Failure audit transfer requires DATA-POWERBI.' }
+    Assert-TransferPath $root
+    $folder=Join-Path $root ('failed/'+$BatchId)
+    Assert-TransferPath $folder
+    $failurePath=Join-Path $folder 'failure.json.txt'
+    Assert-TransferPath $failurePath
+    $failure=Get-Content -LiteralPath $failurePath -Raw | ConvertFrom-Json
+    if ($failure.BatchId -cne $BatchId -or $failure.TenantKey -cne $TenantKey) { throw 'Failure audit identity mismatch.' }
+    $files=@($failurePath)
+    $validationPath=Join-Path $folder 'validation.json.txt'
+    if (Test-Path -LiteralPath $validationPath -PathType Leaf) { Assert-TransferPath $validationPath; $files+= $validationPath }
+    $scratch=[IO.Path]::GetFullPath($WorkRoot).TrimEnd('\','/')
+    $data=Split-Path $root -Parent
+    if ($scratch -eq $data -or $scratch.StartsWith($data+'\',[StringComparison]::OrdinalIgnoreCase) -or $data.StartsWith($scratch+'\',[StringComparison]::OrdinalIgnoreCase)) {
+        throw 'Failure audit scratch must be outside the tenant DATA tree.'
+    }
+    New-Item -ItemType Directory -Path $scratch -Force | Out-Null
+    Assert-TransferPath $scratch
+    $temp=Join-Path $scratch ('failure-readback-'+[guid]::NewGuid().ToString('N')+'.tmp')
+    try {
+        foreach ($path in $files) {
+            $relative='failed/'+$BatchId+'/'+[IO.Path]::GetFileName($path)
+            $hash=(Get-FileHash -LiteralPath $path).Hash
+            $bytes=(Get-Item -LiteralPath $path).Length
+            if (-not (& $UploadFile $path $relative)) { throw "Failure audit upload failed: $relative" }
+            if (-not (& $DownloadFile $temp $relative)) { throw "Failure audit read-back failed: $relative" }
+            Assert-TransferPath $temp
+            if ((Get-Item -LiteralPath $temp).Length -ne $bytes -or (Get-FileHash -LiteralPath $temp).Hash -ne $hash) { throw "Failure audit read-back mismatch: $relative" }
+            Remove-Item -LiteralPath $temp -Force
+        }
+        [pscustomobject]@{BatchId=$BatchId;VerifiedFiles=$files.Count;PointerChanged=$false}
+    } finally {
+        if (Test-Path -LiteralPath $temp) { Assert-TransferPath $temp; Remove-Item -LiteralPath $temp -Force }
+    }
+}
+
+Export-ModuleMember -Function Resolve-PreparedSharePointFolder,Send-PreparedEvidenceBatch,Send-PreparedFailureAudit
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBBG3mWGr1QaKBM
-# 9rXO30gOG79vWSAtTxvMpNMnkgz8/aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCChFIDeniUPCujU
+# kgcO37ZSCf7gTzrm8EnJ4JEhL0/o3aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -252,31 +295,31 @@ Export-ModuleMember -Function Resolve-PreparedSharePointFolder,Send-PreparedEvid
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIF1F1D9Z1Wz4m92Bfgs4CBT7qFABU6SoOxMaf72DRKt/MA0GCSqG
-# SIb3DQEBAQUABIIBgDezYLphTMnQhDlHdvcww3cwGBJYRBRSLB3tZaZuPP6Ez14o
-# 01saFJYerGj7881+7x+E0lIoFqAt8gXZ2noaQbvcG68NIFRNlQRwKTdxx1DGzSdi
-# kDoNvZO+3DcnQFwVMYRhXC2ND3Q33waTc38YBdr5SHOTJ3eWvkWF2sFp41k36jvV
-# m1Ch/icMYX2BCPvH2Q5/qmGZuJ0us0HV/f9njtU5w1+SLBmHf1tWH0nyf9PYg/NI
-# ueEpUAgoCguokego/c5WnFGBj12Hh+xsv12GGVsJ+6QM1jtz7ewpC7kUudEGiGYD
-# 9NvWX50Zz6u1GPx54g4LKzH/wyztxLBGyHLMAdxqFEMdqhshUUaPOY2HbSAM7MTf
-# y2iGbkoAxwKuaEkM75G4iLEGlLMQ9KsCTm12O6hwv6HlljkcbZWE7pa0L53+arks
-# LKeNdQ5o3Kt3dsI5JkZVUV5MAzX0m0ANVQSdUYmQbzmZlKNwCJxFHTl1jQO2zXz/
-# B8AO/HzDs1DlHezj1qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIFqKB0d3k5teH7XQPtEBJLPLrl/qXFW70T9ImrDlY59CMA0GCSqG
+# SIb3DQEBAQUABIIBgBpedGyLwFVvZiYu9iFN/OfmMJgD7+rCrwZ6Ue5UEIn23/op
+# 7WNADs374U28wgIJCt94ckympr/wyVI6Yuk00CQggKLEAdgoLXO16QoDL0s6kHu/
+# zjIt3tOgWCWEv9L1S5g38L5ooXFgeMmnH3aHKiPGyRcwjB6vGfOvVChjdIzNIsmq
+# rs98Xl7an8R7LpE3Ae+u2iQl5vovfBftpDE6A+2X2ytHGMo2N8Oq+rL8IUZNrYLw
+# EnybpWiPZwm+wqeMALHSTx2uxte9Pva4H6JzqWW+fs6ydjon7ZwL4l/TOcDBMv9w
+# kus8242WZZB0vZNQxPUQQciE2oikPcN0+hKvITBNEs+ZLUXoGRWT84Y9nog0K+6c
+# Svo0FVz7Qy1UCa1bfk3HbQ+79OfWu22A0aQGl5625UbH0MKbdIO+UO/h5hdf4v7h
+# QrdPyboU2XVUmBto1w5QkRQwWpTktb9DumfRR+lBTh58USvjH6qqg5OT2cmnyBwU
+# ncqmHHB7Mow1He0WAKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcxNjU3
-# NTlaMC8GCSqGSIb3DQEJBDEiBCD7o687jpk+nzjq3Vsj00br/OWMA9aD2fvRzmiL
-# dIqNMTANBgkqhkiG9w0BAQEFAASCAgBdU4lrpzYT+PMOfuDtCtws1Aysx4Unp8pZ
-# tTwOMfdtzZS5EcLyBxt1rjVhAz5ZVQ4fOaCII2bqiRujESt4zpljDmna7a5iT6q9
-# fkelv/C9xh9ldq3mYJMGntmIoTtP75dZlzqVOsu0r2Bl3k8i7v3LATGBVVhBnvkc
-# xD1OWXnBn4EwdVdIb4VqghEzUHgSSGLpfilkVk+cqMZLRLxe19WDmdCbUhtKNrNo
-# YQo4hM3TlZ9DJsV0srwppDnnGTme+KYGrlkvzF+UaM5T7Y1N8nHOGFeKspQx6n/J
-# 8lk7CH+a9vCLFUOZ4acCyCqqcJh99zDngeIspoJCQztfk2c0Ze9qkvAC9vDsPYhZ
-# +Jir2T+2Vso6qBNTWUuXCe+32LMNPwX0EMuu/bsQQOrJ+T+yFc9Y/INoFyYjGa1C
-# kpiKM2/fjDs+mlVyaBA+JVRGRgoi2BnWaPRlLIiIzJW9O7jRox5ZMZ3vzegckbcm
-# igLW3qQ2JTiFk/L19z7lv9U61zv1Jz9XQBpo28ae04PqfvItQnyVrPdJtNwRxbLe
-# kc4UyV6DO9/RMeKt+iONZhSeZMhnSW8KnJM2/2bGVVCLl5ImDbnTj6JVgU1XBAC0
-# S+lMwtv1yxMtc2SZARXs3GKrfeDRcgeGXROapEyHebVROrO9+aon6cEx1B6qpb7u
-# 3Bb+D09MGw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTIxMTQ4
+# NDNaMC8GCSqGSIb3DQEJBDEiBCDwKik/gLBqXoVSsnI6GLlpQFnS58KrrVqPONth
+# AXNQyDANBgkqhkiG9w0BAQEFAASCAgCm4Yqtb+eepzr9ys/syYJye6ufM4C8dqwb
+# fhltPiJBQz3NrNhgx2AKIj1XF8PYbqGthvH6Z+dsDm3Z2O5tmH5a2hAcROob7FWn
+# RMitEoKLdehh+br5m0vha+uLGXE8qpbw3X85rMStm2L8Q/O0+jEu8wAjojspoY8l
+# znbQI6TTQv8L7LJuUHf/RKBVjgQnLIHK1FKug6w9WL/pf2RdeLpAF5hGPQEF++aX
+# khPRFiD8Rr/5V2dVeLdvOIh+/2B5XQmsrSBx8hSCeM0YSh7zMetabFr3VmyT5bWe
+# NpMZ+WlM4DdhzyjOTo7Pw53eukm+vuM9UyN8Lns7HnLAuCCVDTiG0R7UM7gu70hm
+# hU1d+uK+Xeg3kvCj8o22Vz4D3ho6mnfbv8h5YeeSMTlcER9FhWmH83JToc5wcz8Y
+# KsG2q1O23IrEioULqpJSNkLADX+pkIU0BEvr7zZFzl4vc1ggZp4LKUeSElxToGfa
+# me3EF9+2QWtQyllPL6r18PeupjNMpx63VCKLk+dbJA1NAWo1vcrCT2eqkvzEJfV/
+# DDImzVjGa35CMbQzQJ7bGtnxIwelW+FCcEjJm2TtqHHp2s8KNLOxLwGIqYOPuhSA
+# 5ecSDCxYzDKm/rMYRQi2xhsvjk/MN66RMNZpe+Su0JBNOF2c2F7RcBiPqtmHrMXz
+# jLrSrFY97Q==
 # SIG # End signature block
