@@ -1,11 +1,11 @@
 <#
 .SYNOPSIS
-    Deletes SharePoint Online libraries that contain extra files compared with SP2019.
+    Recycles SharePoint Online libraries that contain file paths absent from SP2019.
 
 .DESCRIPTION
     Reads LibrarySummary.csv from a comparison folder and selects only libraries
-    where ExtraInTarget is greater than zero. DifferentSize is ignored because
-    ShareGate updates changed files during the final copy. The script uses
+    where FileAbsentInTarget is greater than zero. Version differences and
+    zero-byte targets alone do not qualify. The script uses
     interactive PnP authentication only.
 
     By default, this script is a dry run. Add -Execute to recycle the libraries.
@@ -410,12 +410,16 @@ if ($duplicateKeyCount -gt 0 -and -not $AllowDuplicateKeys) {
     throw "Deletion blocked because duplicate inventory keys were found. Duplicate keys ignored: $duplicateKeyCount. Review $duplicatePath first, or rerun with -AllowDuplicateKeys after validation."
 }
 
-$items = @(Import-Csv -LiteralPath $LibrarySummaryPath -Delimiter (Get-CsvDelimiter -Path $LibrarySummaryPath) |
-    Where-Object { [int]$_.ExtraInTarget -gt 0 } |
+$libraryRows = @(Import-Csv -LiteralPath $LibrarySummaryPath -Delimiter (Get-CsvDelimiter -Path $LibrarySummaryPath))
+if ($libraryRows.Count -gt 0 -and 'FileAbsentInTarget' -notin $libraryRows[0].PSObject.Properties.Name) {
+    throw 'LibrarySummary.csv has no FileAbsentInTarget column. Rerun the file comparison before deleting libraries.'
+}
+$items = @($libraryRows |
+    Where-Object { [int]$_.FileAbsentInTarget -gt 0 } |
     Sort-Object TargetWebUrl, TargetLibraryTitle)
 
 if ($items.Count -eq 0) {
-    Write-Host "No libraries with ExtraInTarget > 0 were found."
+    Write-Host "No libraries with FileAbsentInTarget > 0 were found."
     if ($script:TranscriptStarted) {
         Stop-TimestampedTranscript -Path $LogPath
     }
@@ -479,7 +483,7 @@ foreach ($group in ($items | Group-Object TargetWebUrl)) {
             }
         }
         else {
-            Write-Host ("Would delete: {0} | {1} | ExtraInTarget={2}" -f $webUrl, $item.TargetLibraryTitle, $item.ExtraInTarget)
+            Write-Host ("Would delete: {0} | {1} | FileAbsentInTarget={2}" -f $webUrl, $item.TargetLibraryTitle, $item.FileAbsentInTarget)
         }
 
         $results.Add([pscustomobject]@{
@@ -493,6 +497,7 @@ foreach ($group in ($items | Group-Object TargetWebUrl)) {
                 MatchedListUrl       = if ($list) { $list.RootFolder.ServerRelativeUrl } else { $null }
                 ExpectedLibraryPath  = $match.TargetPath
                 ExtraInTarget        = $item.ExtraInTarget
+                FileAbsentInTarget   = $item.FileAbsentInTarget
                 ExtraInTargetBytes   = $item.ExtraInTargetBytes
                 TargetFiles          = $item.TargetFiles
                 TargetBytes          = $item.TargetBytes
@@ -525,8 +530,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAxwKJh8+kO/YEF
-# gwwArPcGajSaPfPLdDFs27QOAO7r/6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCnJ7ZMtCXYqWwI
+# n8vY0L7bwmbUMSrpVRJxeyAdcWx8bqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -659,31 +664,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIDEW0PUcVB36E9I8/Yj3DG3Ntl1s94ZCZh4vGHCGoeKzMA0GCSqG
-# SIb3DQEBAQUABIIBgFvNYUIk08tbHb2Sr8c0/j8NMmSOmttDEIYSlPnPDvbJB/ZA
-# emIcHA9RvGEBjUgetlU3NTpfOokAwhAhyD2RK08UXxSsmOHFQCpFhwlbimdVG1wK
-# VE4mtZ/P9EPdN0zNFxBRVL7A0KHhWyfv9kdPzBKofs+BHaHh5bOAFY3Vowonbb3J
-# e6amMYRTD6WBM+K0BU0BpRdmCxQkazoS/sYcHb3mywfOismltYQmwbJIuqnWp8CZ
-# 8nqOHPLkhkYx3w6uB3PCPjXP7/Vh/dtyWFdgO87Em+Jx3OKufm+BX8UYMRGbWPrW
-# R9alXTr6dgHuzZcaN/QbRUI3x4C+yEqoGXzZb40BpQWZwZyg3SqbiP+28gv+oLsj
-# RuGuaAj/52eJ3L7eV4CP8ZisNmnYXgk9BCTlJLOCCK1bWeF+h0gEWlFITb1fqWa9
-# aUAnSJGmAIZxNQq5L5L1whLhh0YHniRCZALeMkDX/smYOUlAGjknrgI7/wGQX326
-# BDTspwVCH4GwX/9EAqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEICfogkeI5esV1l9rWf6MY2WfB1FqrQjsamUHRPTAYGrBMA0GCSqG
+# SIb3DQEBAQUABIIBgG7bMlOxPjzgWws8zxF1InsEphvIizIS05qaTzqmJZSlIIn7
+# gIiAujSmUzk3OhfD28WGJrI+/7A+HsvEx2CqODPzfXGaeY5og6vd2Mph0E4O85On
+# xE43PEfWsTprdgsV+DImr8XX58olDo/D+grFqNwAMCnx99KVO0ixMHCdpA4p2Zak
+# BGiy9JnLYbVd5DbpbrP4ffc9wp4IXGZDF+hvY0mU7G5WCRYmFvJxrNxfHLIyqWme
+# Z8A/lqKWzj9wvIzFAtV0/WM2B7IsAwLeo1f2M9x2HWFsYjX8ikNoWtUMWSJIEbOW
+# 4cznGsO2yvwB1vwYYgSJ/FlDzf+L4RnYnet6savJkHi074HEinr/ExX+8Elnwsa2
+# WjHKyiBcsCwY8PHMmyauCWVLIIRfRWD09J4WFeCegABd7osSEtpLyKhvRxoVYDCV
+# kB7WizlPsd7ELnFRHXy2nRYlti13i/TioAncjbWIg8gEQDChD01NZQtjLb9VQ4MO
+# MHbpgTf9PElM/8KLdqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTExNTI3
-# NTBaMC8GCSqGSIb3DQEJBDEiBCDZAL8ROHIFWpIpr+1SSn2Be6609D5dvQ7xE/lH
-# kiGoHDANBgkqhkiG9w0BAQEFAASCAgBctvFDN8c+PrYeHvxY7u05ff3n0ubOUBJP
-# hXw48rUjgSltooqksD54Zpe83KIygwi5rVURapzXzGID/2nafMPhZiO1sXd1bPLt
-# HPlYLrnM4YzrFDBTcwShzbc2IBn+ymjwS3v9tZeao+oDOo1Utl9IACYJ1P7VVA7z
-# iK6ndgUkW3/qOrQ/eJrUzxBw/BQcl4ss86pVpsgFvxqkAFJ1P0iFm8OlwXAmoCQa
-# VVrRCGEa3lW8zS+FewXR/oJ7O3xw6YuDwwsXoqAIgGDHM0uKeFqTu4bkW1tMuP+H
-# 6/sgsxK6D4GT8BvPkH+WCvij7o+Ow/ywGMbyHtV9UDCnzaVoafiGiwvZbgzLV1Ql
-# p1b+jv3kZkfHhelN5fBallIkorwNJtjnKNp1g3HpEZgP1faPo3JKRdmk1CiMc/rg
-# VB/FjsWI9t3gHblZbeesjyY+0N7gzWlIpuCFfHIV+ATYbvZgFlBMhhLn4h8zUC2F
-# vVpqf09H3UtzYxf6XG2k5UL4AiIrE9/tf6rTK3oZiT/1ZMkNxCpXF+8KI4TJpoOd
-# e3tGOTx5OCgNqtsF6m2Wg0IejJsOiUh0GHY1q6qH++gDffjkQXlrvT167Q4sIL1j
-# f8vs2TdlDDQ/jC9eFw6cnPYDrj+HPEHMsQIpUBaZFIvdZbm+3SztTx4lFM/p+I+L
-# x1LU1XNEwA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTIwOTM5
+# MjNaMC8GCSqGSIb3DQEJBDEiBCASS/5EtgbgVpx1Kb6ghb3IgLfT8Qyni0/PKVH/
+# daNyeTANBgkqhkiG9w0BAQEFAASCAgBKn8j1AqzoFnfEqc9lI64OZnqZdRAaXUa/
+# sfPtm/XPWXEmq602+Uz3w+G7f94c/MvfwLeiWKuze/w0r9f3xS3jIXuQHHpZjjCJ
+# V79eSOxavXJ2sjaRslDzxR4RlshIpRPRK5VVjM15PQuepYdjjkNW9Nblx3WbxFU1
+# dyP08lh3XHHqJrICsvgQ7Hbb1DZ1g83kqP98BVl2djQQcsHeVtpNEOnCGodyxXBZ
+# c94TnIgim8VsPjnP4b6QA6/9N/8gqL2tfvtBwjOHRYxSvjFPKYWOkmDGKTouLo20
+# lSzg8weUXVS8mXnthS1+4+PXffmbJ0cSN9hZBrhOBqKUo0WiVIAuglcyKUve1udl
+# 12WSc9/2tvUX+F0JhtGgvZyoCCFvqnMfCMcBkCEzQi5pUkk4DKBEku3qp09pvkgI
+# Io6XAebVqVaEBSI9sEn7ome26p11ZwdtJeapQu1R+np9ebRTOXSLC9uSlJ5xf8ZU
+# vFx/2SgfsWN/7dQ7RIZSoYlgCMsUDEMt6Nr5Cc8ILd8LS3vUrbXN7V1v/HdY5IJJ
+# msva/Y1ehS+I+eWCxdHd56IH4usrvE5DO9NIEHdBhryj+XAxvRaeRs1QUfKCOLng
+# tuk81f2DwtFq5RlogqKI5fAXkeRV7/UpRsVnfMi1//BMUWLDWYE3zi4qmoyIwgeE
+# bxda+sh/Vg==
 # SIG # End signature block

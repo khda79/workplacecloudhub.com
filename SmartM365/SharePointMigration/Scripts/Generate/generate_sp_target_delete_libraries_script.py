@@ -456,6 +456,7 @@ foreach ($group in ($LibrariesToDelete | Group-Object TargetWebUrl)) {
                 MatchedListId                  = if ($list) { $list.Id } else { $null }
                 MatchedListUrl                 = if ($list) { $list.RootFolder.ServerRelativeUrl } else { $null }
                 ExtraInTarget                  = $item.ExtraInTarget
+                FileAbsentInTarget             = $item.FileAbsentInTarget
                 ExtraInTargetPercent           = $item.ExtraInTargetPercent
                 ExtraInTargetBytes             = $item.ExtraInTargetBytes
                 ExtraInTargetGB                = $item.ExtraInTargetGB
@@ -540,6 +541,7 @@ def render_library_array(rows):
         lines.append(f"        TargetLibraryUrl               = '{ps_string(row.get('TargetLibraryUrl'))}'")
         lines.append(f"        TargetLibraryServerRelativeUrl = '{ps_string(build_target_server_relative_url(row))}'")
         lines.append(f"        ExtraInTarget                  = {int(row.get('ExtraInTarget') or 0)}")
+        lines.append(f"        FileAbsentInTarget             = {int(row.get('FileAbsentInTarget') or 0)}")
         lines.append(f"        ExtraInTargetPercent           = {float(row.get('ExtraInTargetPercent') or 0)}")
         lines.append(f"        ExtraInTargetBytes             = {int(row.get('ExtraInTargetBytes') or 0)}")
         lines.append(f"        ExtraInTargetGB                = {float(row.get('ExtraInTargetGB') or 0)}")
@@ -593,7 +595,7 @@ def main():
             output_ps1.unlink()
         remove_ps7_launcher(output_ps1)
         print("Deletion script generation skipped.")
-        print("Reason: no libraries with extra files were found in LibrarySummary.csv.")
+        print("Reason: no libraries with FileAbsentInTarget > 0 were found in LibrarySummary.csv.")
         print(f"PowerShell file not created: {output_ps1}")
         return 0
 

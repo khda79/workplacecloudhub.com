@@ -642,7 +642,7 @@ def main():
             output_ps1.unlink()
         remove_ps7_launcher(output_ps1)
         print("File deletion script generation skipped.")
-        print("Reason: no extra files were found in ExtraInTarget.csv.")
+        print("Reason: no FileAbsent deletion candidates were found in ExtraInTarget.csv.")
         print(f"PowerShell file not created: {output_ps1}")
         return 0
 

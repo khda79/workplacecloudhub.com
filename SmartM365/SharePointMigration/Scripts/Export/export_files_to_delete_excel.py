@@ -75,7 +75,18 @@ def bytes_to_mb(value):
 def build_delete_file_rows(extra_in_target_path):
     rows = []
     with extra_in_target_path.open("r", encoding="utf-8-sig", newline="") as handle:
-        for row in csv.DictReader(handle, dialect=detect_csv_dialect(handle)):
+        reader = csv.DictReader(handle, dialect=detect_csv_dialect(handle))
+        if not reader.fieldnames or "ExtraReason" not in reader.fieldnames:
+            raise ValueError(
+                "ExtraInTarget.csv has no ExtraReason column. Rerun the file comparison "
+                "before generating deletion candidates."
+            )
+        for row in reader:
+            reason = (row.get("ExtraReason") or "").strip()
+            if reason not in {"FileAbsent", "VersionMismatch", "TargetZeroBytes"}:
+                raise ValueError(f"Unsupported ExtraReason {reason!r}; deletion candidates were not generated.")
+            if reason != "FileAbsent":
+                continue
             target_web_url = row.get("WebUrl", "").strip()
             server_relative_url = row.get("ServerRelativeUrl", "").strip()
             file_url = row.get("FileUrl", "").strip()
@@ -87,8 +98,8 @@ def build_delete_file_rows(extra_in_target_path):
 
             rows.append(
                 {
-                    "Action": "Delete SPO file permanently, then rerun ShareGate incremental copy if needed",
-                    "Reason": "SPO contains this file but it does not exist in the SP2019 source",
+                    "Action": "Move SPO file to the recycle bin after review",
+                    "Reason": "SPO file path is absent from the normalized SP2019 source inventory",
                     "TargetWebUrl": target_web_url,
                     "TargetLibraryTitle": row.get("LibraryTitle", ""),
                     "FileName": row.get("FileName", ""),
@@ -191,7 +202,7 @@ def main():
         if output_xlsx.exists():
             output_xlsx.unlink()
         print("Files-To-Delete Excel export skipped.")
-        print("Reason: no extra files were found in ExtraInTarget.csv.")
+        print("Reason: no FileAbsent deletion candidates were found in ExtraInTarget.csv.")
         print(f"Excel file not created: {output_xlsx}")
         return
 

@@ -49,6 +49,7 @@ DELETE_COLUMNS = [
     "TargetSizeBytes",
     "TargetSizeGB",
     "ExtraInTarget",
+    "FileAbsentInTarget",
     "ExtraInTargetPercent",
     "ExtraInTargetBytes",
     "ExtraInTargetGB",
@@ -69,6 +70,7 @@ NUMERIC_COLUMNS = {
     "TargetSizeBytes",
     "TargetSizeGB",
     "ExtraInTarget",
+    "FileAbsentInTarget",
     "ExtraInTargetBytes",
     "ExtraInTargetGB",
     "MissingInTarget",
@@ -115,9 +117,18 @@ def build_target_library_url(target_web_url, web_path, library_path):
 def build_delete_rows(library_summary_path):
     rows = []
     with library_summary_path.open("r", encoding="utf-8-sig", newline="") as handle:
-        for row in csv.DictReader(handle, dialect=detect_csv_dialect(handle)):
-            # ShareGate updates changed files during the final copy; only extra SPO files trigger deletion.
-            if as_int(row.get("ExtraInTarget")) <= 0:
+        reader = csv.DictReader(handle, dialect=detect_csv_dialect(handle))
+        if not reader.fieldnames or "FileAbsentInTarget" not in reader.fieldnames:
+            raise ValueError(
+                "LibrarySummary.csv has no FileAbsentInTarget column. Rerun the file comparison "
+                "before generating library deletion candidates."
+            )
+        for row in reader:
+            file_absent = as_int(row.get("FileAbsentInTarget"))
+            extra = as_int(row.get("ExtraInTarget"))
+            if file_absent < 0 or file_absent > extra:
+                raise ValueError("Invalid FileAbsentInTarget count in LibrarySummary.csv.")
+            if file_absent == 0:
                 continue
 
             target_web_url = row.get("TargetWebUrl", "").strip()
@@ -134,8 +145,8 @@ def build_delete_rows(library_summary_path):
 
             rows.append(
                 {
-                    "Action": "Delete SPO library, then rerun ShareGate copy",
-                    "Reason": "SPO contains files that do not exist in the SP2019 source",
+                    "Action": "Move SPO library to the recycle bin after review, then rerun ShareGate copy",
+                    "Reason": "SPO library contains file paths absent from the normalized SP2019 source inventory",
                     "TargetWebUrl": target_web_url,
                     "TargetLibraryTitle": row.get("TargetLibraryTitle", ""),
                     "TargetLibraryUrl": target_library_url,
@@ -143,6 +154,7 @@ def build_delete_rows(library_summary_path):
                     "TargetSizeBytes": row.get("TargetBytes", ""),
                     "TargetSizeGB": bytes_to_gb(row.get("TargetBytes")),
                     "ExtraInTarget": row.get("ExtraInTarget", ""),
+                    "FileAbsentInTarget": row.get("FileAbsentInTarget", ""),
                     "ExtraInTargetPercent": row.get("ExtraInTargetPercent", ""),
                     "ExtraInTargetBytes": row.get("ExtraInTargetBytes", ""),
                     "ExtraInTargetGB": bytes_to_gb(row.get("ExtraInTargetBytes")),
@@ -243,7 +255,7 @@ def main():
         if output_xlsx.exists():
             output_xlsx.unlink()
         print("Libraries-To-Delete Excel export skipped.")
-        print("Reason: no libraries with extra files were found in LibrarySummary.csv.")
+        print("Reason: no libraries with FileAbsentInTarget > 0 were found in LibrarySummary.csv.")
         print(f"Excel file not created: {output_xlsx}")
         return
 

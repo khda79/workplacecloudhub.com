@@ -38,10 +38,10 @@ exit 0
 
     def test_each_cleanup_generator_creates_and_removes_companion_launcher(self):
         cases = (
-            ("files", "ExtraInTarget.csv", ["WebUrl", "ServerRelativeUrl", "FileName"],
-             ["https://target.example/sites/a", "/sites/a/Docs/extra.txt", "extra.txt"]),
-            ("libraries", "LibrarySummary.csv", ["TargetWebUrl", "WebPath", "LibraryPath", "ExtraInTarget"],
-             ["https://target.example/sites/a", "sites/a", "sites/a/Docs", "1"]),
+            ("files", "ExtraInTarget.csv", ["WebUrl", "ServerRelativeUrl", "FileName", "ExtraReason"],
+             ["https://target.example/sites/a", "/sites/a/Docs/extra.txt", "extra.txt", "FileAbsent"]),
+            ("libraries", "LibrarySummary.csv", ["TargetWebUrl", "WebPath", "LibraryPath", "ExtraInTarget", "FileAbsentInTarget"],
+             ["https://target.example/sites/a", "sites/a", "sites/a/Docs", "1", "1"]),
             ("folders", "ExtraFoldersInTarget.csv", ["TargetWebUrl", "TargetFolderServerRelativeUrl", "Depth"],
              ["https://target.example/sites/a", "/sites/a/Docs/Extra", "1"]),
         )

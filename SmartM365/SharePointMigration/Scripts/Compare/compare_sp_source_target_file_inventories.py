@@ -66,6 +66,8 @@ INVENTORY_COLUMNS = [
     "VersionsCount",
 ]
 
+EXTRA_IN_TARGET_COLUMNS = INVENTORY_COLUMNS + ["ExtraReason"]
+
 DUPLICATE_KEY_COLUMNS = ["Side"] + INVENTORY_COLUMNS
 
 MISSING_IN_TARGET_COLUMNS = INVENTORY_COLUMNS + [
@@ -198,6 +200,7 @@ LIBRARY_SUMMARY_COLUMNS = [
     "MissingInTarget",
     "MissingInTargetPercent",
     "ExtraInTarget",
+    "FileAbsentInTarget",
     "ExtraInTargetPercent",
     "ExtraInTargetBytes",
     "SourceWebUrl",
@@ -940,6 +943,7 @@ def ensure_library_summary(stats, key, web_path, library_path=""):
             "MissingInTarget": 0,
             "MissingInTargetPercent": 0,
             "ExtraInTarget": 0,
+            "FileAbsentInTarget": 0,
             "ExtraInTargetPercent": 0,
             "ExtraInTargetBytes": 0,
             "DifferentSize": 0,
@@ -1479,7 +1483,7 @@ def main():
         ) as target_older_handle, changed_version_path.open(
             "w", encoding="utf-8", newline=""
         ) as changed_version_handle, target_csv.open("r", encoding="utf-8-sig", newline="") as target_handle:
-            extra_writer = csv.DictWriter(extra_handle, fieldnames=INVENTORY_COLUMNS, delimiter=CSV_OUTPUT_DELIMITER)
+            extra_writer = csv.DictWriter(extra_handle, fieldnames=EXTRA_IN_TARGET_COLUMNS, delimiter=CSV_OUTPUT_DELIMITER)
             diff_writer = csv.DictWriter(diff_handle, fieldnames=DIFFERENT_SIZE_COLUMNS, delimiter=CSV_OUTPUT_DELIMITER)
             changed_modified_writer = csv.DictWriter(
                 changed_modified_handle,
@@ -1542,7 +1546,7 @@ def main():
                     extra_library_entry = ensure_library_summary(library_stats, target_lib_key, target_web_path, target_library_path)
                     extra_library_entry["ExtraInTarget"] += 1
                     extra_library_entry["ExtraInTargetBytes"] += target_effective_size
-                    extra_writer.writerow(target_record)
+                    extra_writer.writerow({**target_record, "ExtraReason": "TargetZeroBytes"})
                     continue
 
                 if source_record is None:
@@ -1551,6 +1555,8 @@ def main():
                     extra_library_entry["ExtraInTarget"] += 1
                     extra_library_entry["ExtraInTargetBytes"] += target_effective_size
                     source_path_records = source_path_index.get(path_key, [])
+                    if not source_path_records:
+                        extra_library_entry["FileAbsentInTarget"] += 1
                     source_version_record = next(
                         (
                             candidate
@@ -1588,7 +1594,10 @@ def main():
                             }
                         )
                     update_extra_folder_candidates(extra_folder_candidates, source_folder_keys, row, path_key, target_effective_size)
-                    extra_writer.writerow(target_record)
+                    extra_writer.writerow({
+                        **target_record,
+                        "ExtraReason": "VersionMismatch" if source_path_records else "FileAbsent",
+                    })
                     continue
 
                 target_valid_seen.add(key)

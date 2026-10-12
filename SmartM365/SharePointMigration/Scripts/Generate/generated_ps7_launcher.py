@@ -2,8 +2,10 @@
 
 import argparse
 import re
+import sys
 from pathlib import Path
 
+__version__ = "1.0.0"
 
 LAUNCHER_CONTENT = r'''@echo off
 setlocal
@@ -48,7 +50,7 @@ def remove_ps7_launcher(script_path: Path) -> None:
     launcher_path(script_path).unlink(missing_ok=True)
 
 
-if __name__ == "__main__":
+def main():
     parser = argparse.ArgumentParser(description="Add a PS7 launcher to an existing generated cleanup script.")
     parser.add_argument("script", type=Path)
     args = parser.parse_args()
@@ -59,3 +61,10 @@ if __name__ == "__main__":
     ):
         parser.error("Expected an existing generated SharePoint target cleanup .ps1 script.")
     print(f"PowerShell 7 launcher created: {write_ps7_launcher(args.script)}")
+
+
+if __name__ == "__main__":
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from console_lifecycle import run_console_script
+
+    run_console_script(main, __file__, __version__)

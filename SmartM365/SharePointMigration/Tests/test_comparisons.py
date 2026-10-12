@@ -85,6 +85,108 @@ class MappingTests(unittest.TestCase):
 
 
 class FileComparisonTests(unittest.TestCase):
+    def test_delete_candidates_require_source_path_absence(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            fields = ['WebUrl', 'LibraryTitle', 'LibraryRootFolderUrl', 'FileName',
+                      'ServerRelativeUrl', 'SizeBytes', 'Modified', 'Version']
+
+            def row(name, side, version='1.0', size='100', library='Docs'):
+                path = f'/{side}/{library}/{name}'
+                return dict(zip(fields, [f'https://example.com/{side}', library,
+                    f'/{side}/{library}', name, path, size, '2026-10-12 10:00:00', version]))
+
+            source_rows = [row('older.docx', 'source', '2.0'),
+                           row('newer.docx', 'source'), row('zero.docx', 'source')]
+            target_rows = [row('older.docx', 'target'),
+                           row('newer.docx', 'target', '2.0'),
+                           row('zero.docx', 'target', size='0'),
+                           row('extra.docx', 'target', library='ExtraDocs')]
+            for side, rows in [('source', source_rows), ('target', target_rows)]:
+                path = root / f'{side}.csv'
+                with path.open('w', newline='', encoding='utf-8') as handle:
+                    writer = csv.DictWriter(handle, fieldnames=fields)
+                    writer.writeheader()
+                    writer.writerows(rows)
+                EVIDENCE.write_manifest(path, side.title(), 'File', f'https://example.com/{side}')
+                (root / f'{side}.txt').write_text(f'https://example.com/{side}', encoding='utf-8')
+            (root / 'mapping.txt').write_text('/source /target', encoding='utf-8')
+            output = root / 'comparison'
+            compare = subprocess.run([sys.executable, str(COMPARE_DIR / 'compare_sp_source_target_file_inventories.py'),
+                '--source-csv', str(root / 'source.csv'), '--target-csv', str(root / 'target.csv'),
+                '--output-directory', str(output), '--path-mapping-file', str(root / 'mapping.txt'),
+                '--source-web-urls-file', str(root / 'source.txt'), '--target-web-urls-file', str(root / 'target.txt')],
+                capture_output=True, text=True)
+            self.assertEqual(compare.returncode, 0, compare.stdout + compare.stderr)
+            extra_path = output / 'ExtraInTarget.csv'
+            with extra_path.open(encoding='utf-8-sig', newline='') as handle:
+                extras = list(csv.DictReader(handle, delimiter=';'))
+            self.assertEqual({row['FileName']: row['ExtraReason'] for row in extras},
+                {'older.docx': 'VersionMismatch', 'newer.docx': 'VersionMismatch',
+                 'zero.docx': 'TargetZeroBytes', 'extra.docx': 'FileAbsent'})
+            with (output / 'LibrarySummary.csv').open(encoding='utf-8-sig', newline='') as handle:
+                libraries = list(csv.DictReader(handle, delimiter=';'))
+            self.assertEqual({row['TargetLibraryTitle']: row['FileAbsentInTarget'] for row in libraries},
+                             {'Docs': '0', 'ExtraDocs': '1'})
+
+            exporter = ROOT / 'Scripts/Export/export_files_to_delete_excel.py'
+            generator = ROOT / 'Scripts/Generate/generate_sp_target_delete_files_script.py'
+            workbook = root / 'delete.xlsx'
+            script = root / 'delete.ps1'
+            export_args = [sys.executable, str(exporter), '--comparison-directory', str(output),
+                           '--output-xlsx', str(workbook)]
+            generate_args = [sys.executable, str(generator), '--comparison-directory', str(output),
+                             '--output-ps1', str(script)]
+            export_result = subprocess.run(export_args, capture_output=True, text=True)
+            self.assertEqual(export_result.returncode, 0, export_result.stdout + export_result.stderr)
+            self.assertIn('Files to delete: 1', export_result.stdout)
+            generate_result = subprocess.run(generate_args, capture_output=True, text=True)
+            self.assertEqual(generate_result.returncode, 0, generate_result.stdout + generate_result.stderr)
+            script_text = script.read_text(encoding='utf-8-sig')
+            self.assertIn('/target/ExtraDocs/extra.docx', script_text)
+            for name in ('older.docx', 'newer.docx', 'zero.docx'):
+                self.assertNotIn(f'/target/Docs/{name}', script_text)
+
+            library_exporter = ROOT / 'Scripts/Export/export_libraries_to_delete_excel.py'
+            library_generator = ROOT / 'Scripts/Generate/generate_sp_target_delete_libraries_script.py'
+            library_script = root / 'libraries.ps1'
+            library_generate = subprocess.run([sys.executable, str(library_generator),
+                '--comparison-directory', str(output), '--output-ps1', str(library_script)],
+                capture_output=True, text=True)
+            self.assertEqual(library_generate.returncode, 0, library_generate.stdout + library_generate.stderr)
+            self.assertIn('Libraries embedded: 1', library_generate.stdout)
+            self.assertIn('ExtraDocs', library_script.read_text(encoding='utf-8-sig'))
+            library_export = subprocess.run([sys.executable, str(library_exporter),
+                '--comparison-directory', str(output), '--output-xlsx', str(root / 'libraries.xlsx')],
+                capture_output=True, text=True)
+            self.assertEqual(library_export.returncode, 0, library_export.stdout + library_export.stderr)
+            self.assertIn('Libraries to delete: 1', library_export.stdout)
+
+            with extra_path.open('w', encoding='utf-8', newline='') as handle:
+                writer = csv.DictWriter(handle, fieldnames=[field for field in extras[0] if field != 'ExtraReason'],
+                                        delimiter=';')
+                writer.writeheader()
+                writer.writerows({key: value for key, value in row.items() if key != 'ExtraReason'} for row in extras)
+            for command in (export_args, generate_args):
+                result = subprocess.run(command, capture_output=True, text=True)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn('ExtraReason', result.stdout + result.stderr)
+
+            library_summary_path = output / 'LibrarySummary.csv'
+            with library_summary_path.open('w', encoding='utf-8', newline='') as handle:
+                writer = csv.DictWriter(handle,
+                    fieldnames=[field for field in libraries[0] if field != 'FileAbsentInTarget'], delimiter=';')
+                writer.writeheader()
+                writer.writerows({key: value for key, value in row.items() if key != 'FileAbsentInTarget'}
+                                 for row in libraries)
+            for command in ([sys.executable, str(library_exporter), '--comparison-directory', str(output),
+                             '--output-xlsx', str(root / 'libraries.xlsx')],
+                            [sys.executable, str(library_generator), '--comparison-directory', str(output),
+                             '--output-ps1', str(library_script)]):
+                result = subprocess.run(command, capture_output=True, text=True)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn('FileAbsentInTarget', result.stdout + result.stderr)
+
     def test_missing_diagnostics_uses_matching_target_candidates(self):
         source = {'FileName': 'report.docx', 'SizeBytes': '100', 'Version': '2.0',
                   'Modified': '2026-10-03 12:00:00', 'LibraryTitle': 'Docs'}
@@ -192,6 +294,8 @@ class FileComparisonTests(unittest.TestCase):
                     return list(csv.DictReader(handle, delimiter=';'))
 
             self.assertEqual(len(read('ChangedVersion.csv')), 1)
+            extras = {record['FileName']: record['ExtraReason'] for record in read('ExtraInTarget.csv')}
+            self.assertEqual(extras, {'old.docx': 'VersionMismatch', 'extra.docx': 'FileAbsent'})
             summary = read('Summary.csv')[0]
             self.assertEqual(summary['SuccessPercent'], '75.00%')
             self.assertIn('75.00%', Path(summary['HtmlSummary']).read_text(encoding='utf-8'))
@@ -208,6 +312,8 @@ class FileComparisonTests(unittest.TestCase):
             text = (root / 'delete.ps1').read_text(encoding='utf-8-sig')
             self.assertIn('WhatIf', text)
             self.assertIn('Execute', text)
+            self.assertIn('/target/Docs/extra.docx', text)
+            self.assertNotIn('/target/Docs/old.docx', text)
             workbook = root / 'comparison.xlsx'
             exported = subprocess.run([sys.executable, str(ROOT / 'Scripts/Export/export_comparison_to_excel.py'),
                 '--comparison-directory', str(output), '--output-xlsx', str(workbook)], capture_output=True, text=True)
