@@ -15,7 +15,7 @@
     the directory containing this GUI when launched from the shared toolkit.
 
 .VERSION
-    1.0.67
+    1.0.68
 #>
 
 #Requires -Version 7.4
@@ -28,7 +28,7 @@ param(
 )
 
 $script:AppName    = 'Smart SharePoint Migration'
-$script:AppVersion = '1.0.67'
+$script:AppVersion = '1.0.68'
 $script:ScriptRoot = $PSScriptRoot
 $script:FarmToolkitRoot = if ($FarmToolkitRoot) { $FarmToolkitRoot } else { $PSScriptRoot }
 $script:SummaryLastGoodRows = @{}
@@ -782,30 +782,157 @@ function New-FarmDiagnosticsWindow {
 
         <!-- ARCHIVED MIGRATIONS -->
         <StackPanel x:Name="panelArchivedOverview" Margin="18,14" Visibility="Collapsed">
-          <TextBlock Text="ARCHIVED MIGRATIONS" Style="{StaticResource SectionLabel}"/>
-          <TextBlock Text="Read-only view of folders in ArchivedMigrations. Archived migrations are excluded from active actions and batch selection."
+          <TextBlock Text="ARCHIVED MIGRATION OVERVIEW" Style="{StaticResource SectionLabel}"/>
+          <TextBlock Text="Read-only view of ArchivedMigrations. Files: matches / source keys. Permissions: matches / source permission keys. Global: (files % + permissions %) / 2. Select a row to open its folder."
                      FontSize="12" Foreground="#5F6B7A" Margin="0,0,0,10" TextWrapping="Wrap"/>
-          <Button x:Name="btnOpenArchivedFolder" Content="Open selected folder" Style="{StaticResource BtnGhost}"
-                  Width="150" HorizontalAlignment="Left" Margin="0,0,0,10" IsEnabled="False"/>
+          <Grid Margin="0,0,0,12">
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="260"/>
+            </Grid.ColumnDefinitions>
+            <Border Grid.Column="0" Style="{StaticResource StepCard}" Margin="0,0,5,0" Background="#EFF7FF">
+              <StackPanel>
+                <TextBlock Text="MIGRATIONS" Style="{StaticResource SectionLabel}"/>
+                <TextBlock x:Name="lblArchivedMigrations" Text="—" FontSize="22" FontWeight="SemiBold" Foreground="#17324D"/>
+                <TextBlock Text="Source: archived migrations" FontSize="10" Foreground="#5F6B7A"/>
+              </StackPanel>
+            </Border>
+            <Border Grid.Column="1" Style="{StaticResource StepCard}" Margin="5,0,5,0" Background="#EFF7FF">
+              <StackPanel>
+                <TextBlock Text="FILES COMPARED" Style="{StaticResource SectionLabel}"/>
+                <TextBlock x:Name="lblArchivedFilesCompared" Text="—" FontSize="22" FontWeight="SemiBold" Foreground="#17324D"/>
+                <TextBlock Text="Source: file comparisons" FontSize="10" Foreground="#5F6B7A"/>
+              </StackPanel>
+            </Border>
+            <Border Grid.Column="2" Style="{StaticResource StepCard}" Margin="5,0,5,0" Background="#F0FBF8">
+              <StackPanel>
+                <TextBlock Text="PERMISSIONS COMPARED" Style="{StaticResource SectionLabel}"/>
+                <TextBlock x:Name="lblArchivedPermissionsCompared" Text="—" FontSize="22" FontWeight="SemiBold" Foreground="#17324D"/>
+                <TextBlock Text="Source: permission comparisons" FontSize="10" Foreground="#5F6B7A"/>
+              </StackPanel>
+            </Border>
+            <Border Grid.Column="3" Style="{StaticResource StepCard}" Margin="5,0,5,0" Background="#FFF8EB">
+              <StackPanel>
+                <TextBlock Text="GLOBAL COMPARED" Style="{StaticResource SectionLabel}"/>
+                <TextBlock x:Name="lblArchivedGlobalCompared" Text="—" FontSize="22" FontWeight="SemiBold" Foreground="#8B5E00"/>
+                <TextBlock Text="Files and permissions available" FontSize="10" Foreground="#5F6B7A"/>
+              </StackPanel>
+            </Border>
+            <Border Grid.Column="4" Style="{StaticResource StepCard}" Margin="5,0,0,0" Background="#FFF2F2">
+              <StackPanel>
+                <TextBlock Text="EVIDENCE ERRORS" Style="{StaticResource SectionLabel}"/>
+                <TextBlock x:Name="lblArchivedRefreshErrors" Text="—" FontSize="22" FontWeight="SemiBold" Foreground="#A4262C"/>
+                <TextBlock Text="Unreadable config or evidence" FontSize="10" Foreground="#5F6B7A"/>
+              </StackPanel>
+            </Border>
+            <Border Grid.Column="5" Style="{StaticResource StepCard}" Margin="10,0,0,0">
+              <StackPanel>
+                <TextBlock Text="ARCHIVED FOLDER" Style="{StaticResource SectionLabel}"/>
+                <Button x:Name="btnOpenArchivedFolder" Content="Open selected folder"
+                        Style="{StaticResource Btn}" FontSize="11" Padding="6,0" HorizontalAlignment="Stretch" Height="28" Margin="0,2,0,0" IsEnabled="False"/>
+              </StackPanel>
+            </Border>
+          </Grid>
           <Border Style="{StaticResource StepCard}" Padding="0">
             <DataGrid x:Name="gridArchivedOverview" AutoGenerateColumns="False" IsReadOnly="True"
                       CanUserAddRows="False" CanUserDeleteRows="False" CanUserSortColumns="True"
                       SelectionMode="Single" SelectionUnit="FullRow" HeadersVisibility="Column"
-                      GridLinesVisibility="None" RowHeight="42" ColumnHeaderHeight="36"
-                      AlternatingRowBackground="#F5F8FB" Background="White" BorderThickness="0"
-                      HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled"
-                      EnableRowVirtualization="True">
+                      GridLinesVisibility="None" RowHeight="68" ColumnHeaderHeight="36"
+                      AlternatingRowBackground="#F5F8FB" Background="White"
+                      BorderThickness="0" HorizontalScrollBarVisibility="Auto"
+                      VerticalScrollBarVisibility="Disabled" EnableRowVirtualization="True"
+                      FrozenColumnCount="6">
+              <DataGrid.RowStyle>
+                <Style TargetType="DataGridRow">
+                  <Setter Property="ToolTip" Value="{Binding StatusTooltip}"/>
+                </Style>
+              </DataGrid.RowStyle>
               <DataGrid.Columns>
-                <DataGridTextColumn Header="Migration" Binding="{Binding Migration}" Width="140"/>
-                <DataGridTextColumn Header="Source" Binding="{Binding Source}" Width="180"/>
-                <DataGridTextColumn Header="Destination" Binding="{Binding Destination}" Width="180"/>
-                <DataGridTextColumn Header="Source scans" Binding="{Binding SourceScansDisplay}" Width="155"/>
-                <DataGridTextColumn Header="Target scans" Binding="{Binding TargetScansDisplay}" Width="155"/>
-                <DataGridTextColumn Header="Files comparison" Binding="{Binding ComparisonDisplay}" Width="175"/>
-                <DataGridTextColumn Header="Permissions comparison" Binding="{Binding PermissionComparisonDisplay}" Width="175"/>
-                <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="150">
+                <DataGridTextColumn Header="Migration" Binding="{Binding Migration}" Width="110">
                   <DataGridTextColumn.ElementStyle>
-                    <Style TargetType="TextBlock"><Setter Property="ToolTip" Value="{Binding StatusDetail}"/></Style>
+                    <Style TargetType="TextBlock"><Setter Property="VerticalAlignment" Value="Center"/></Style>
+                  </DataGridTextColumn.ElementStyle>
+                </DataGridTextColumn>
+                <DataGridTemplateColumn Header="Gap (days)" Width="80" SortMemberPath="ScanGapDays">
+                  <DataGridTemplateColumn.CellTemplate><DataTemplate>
+                    <Border Style="{StaticResource PortfolioBadge}" Background="{Binding ScanGapVisual.Background}" ToolTip="{Binding ScanGapTooltip}">
+                      <TextBlock Text="{Binding ScanGapText}" Foreground="{Binding ScanGapVisual.Color}" FontSize="12" FontWeight="SemiBold" HorizontalAlignment="Center"/>
+                    </Border>
+                  </DataTemplate></DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
+                <DataGridTemplateColumn Header="Status" Width="115" SortMemberPath="Status">
+                  <DataGridTemplateColumn.CellTemplate><DataTemplate>
+                    <Border Style="{StaticResource PortfolioStatusBadge}" ToolTip="{Binding StatusTooltip}">
+                      <TextBlock Text="{Binding Status}" FontSize="11" FontWeight="SemiBold" TextWrapping="Wrap" TextAlignment="Center" HorizontalAlignment="Center"/>
+                    </Border>
+                  </DataTemplate></DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
+                <DataGridTemplateColumn Header="▣ Files comparison" Width="150" SortMemberPath="ComparisonRate">
+                  <DataGridTemplateColumn.CellTemplate><DataTemplate>
+                    <ContentControl Content="{Binding ComparisonVisual}" ContentTemplate="{StaticResource PortfolioRateTemplate}" ToolTip="{Binding ComparisonTooltip}" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch"/>
+                  </DataTemplate></DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
+                <DataGridTemplateColumn Header="◆ Permissions comparison" Width="180" SortMemberPath="PermissionComparisonRate">
+                  <DataGridTemplateColumn.CellTemplate><DataTemplate>
+                    <ContentControl Content="{Binding PermissionComparisonVisual}" ContentTemplate="{StaticResource PortfolioRateTemplate}" ToolTip="{Binding PermissionComparisonTooltip}" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch"/>
+                  </DataTemplate></DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
+                <DataGridTemplateColumn Header="◉ Global comparison" Width="150" SortMemberPath="GlobalComparisonRate">
+                  <DataGridTemplateColumn.CellTemplate><DataTemplate>
+                    <ContentControl Content="{Binding GlobalComparisonVisual}" ContentTemplate="{StaticResource PortfolioRateTemplate}" ToolTip="{Binding GlobalComparisonTooltip}" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch"/>
+                  </DataTemplate></DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
+                <DataGridTextColumn Header="Source" Binding="{Binding Source}" Width="*" MinWidth="140">
+                  <DataGridTextColumn.ElementStyle>
+                    <Style TargetType="TextBlock">
+                      <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
+                      <Setter Property="ToolTip" Value="{Binding SourceTooltip}"/>
+                    </Style>
+                  </DataGridTextColumn.ElementStyle>
+                </DataGridTextColumn>
+                <DataGridTemplateColumn Header="Source scans" Width="135" SortMemberPath="SourceScansSortDate">
+                  <DataGridTemplateColumn.CellTemplate><DataTemplate>
+                    <StackPanel VerticalAlignment="Center" ToolTip="{Binding SourceScansTooltip}">
+                      <TextBlock FontSize="10.5">
+                        <TextBlock.Style><Style TargetType="TextBlock"><Style.Triggers><DataTrigger Binding="{Binding SourceFileScanIsToday}" Value="True"><Setter Property="Foreground" Value="#087F5B"/></DataTrigger></Style.Triggers></Style></TextBlock.Style>
+                        <Run Text="Files "/><Run Text="{Binding SourceScan}"/>
+                      </TextBlock>
+                      <TextBlock FontSize="10.5">
+                        <TextBlock.Style><Style TargetType="TextBlock"><Style.Triggers><DataTrigger Binding="{Binding SourcePermissionScanIsToday}" Value="True"><Setter Property="Foreground" Value="#087F5B"/></DataTrigger></Style.Triggers></Style></TextBlock.Style>
+                        <Run Text="Perms "/><Run Text="{Binding SourcePermissionScan}"/>
+                      </TextBlock>
+                    </StackPanel>
+                  </DataTemplate></DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
+                <DataGridTextColumn Header="Source inventory" Binding="{Binding SourceInventoryDisplay}" Width="160">
+                  <DataGridTextColumn.ElementStyle>
+                    <Style TargetType="TextBlock"><Setter Property="FontSize" Value="10.5"/><Setter Property="VerticalAlignment" Value="Center"/><Setter Property="TextWrapping" Value="Wrap"/><Setter Property="ToolTip" Value="{Binding SourceInventoryTooltip}"/></Style>
+                  </DataGridTextColumn.ElementStyle>
+                </DataGridTextColumn>
+                <DataGridTextColumn Header="Destination" Binding="{Binding Destination}" Width="1.3*" MinWidth="160">
+                  <DataGridTextColumn.ElementStyle>
+                    <Style TargetType="TextBlock">
+                      <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
+                      <Setter Property="ToolTip" Value="{Binding DestinationTooltip}"/>
+                    </Style>
+                  </DataGridTextColumn.ElementStyle>
+                </DataGridTextColumn>
+                <DataGridTemplateColumn Header="Target scans" Width="135" SortMemberPath="TargetScansSortDate">
+                  <DataGridTemplateColumn.CellTemplate><DataTemplate>
+                    <StackPanel VerticalAlignment="Center" ToolTip="{Binding TargetScansTooltip}">
+                      <TextBlock FontSize="10.5">
+                        <TextBlock.Style><Style TargetType="TextBlock"><Style.Triggers><DataTrigger Binding="{Binding TargetFileScanIsToday}" Value="True"><Setter Property="Foreground" Value="#087F5B"/></DataTrigger></Style.Triggers></Style></TextBlock.Style>
+                        <Run Text="Files "/><Run Text="{Binding TargetScan}"/>
+                      </TextBlock>
+                      <TextBlock FontSize="10.5">
+                        <TextBlock.Style><Style TargetType="TextBlock"><Style.Triggers><DataTrigger Binding="{Binding TargetPermissionScanIsToday}" Value="True"><Setter Property="Foreground" Value="#087F5B"/></DataTrigger></Style.Triggers></Style></TextBlock.Style>
+                        <Run Text="Perms "/><Run Text="{Binding TargetPermissionScan}"/>
+                      </TextBlock>
+                    </StackPanel>
+                  </DataTemplate></DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
+                <DataGridTextColumn Header="Target inventory" Binding="{Binding TargetInventoryDisplay}" Width="160">
+                  <DataGridTextColumn.ElementStyle>
+                    <Style TargetType="TextBlock"><Setter Property="FontSize" Value="10.5"/><Setter Property="VerticalAlignment" Value="Center"/><Setter Property="TextWrapping" Value="Wrap"/><Setter Property="ToolTip" Value="{Binding TargetInventoryTooltip}"/></Style>
                   </DataGridTextColumn.ElementStyle>
                 </DataGridTextColumn>
               </DataGrid.Columns>
@@ -1695,6 +1822,11 @@ $panelArchivedOverview = ctrl 'panelArchivedOverview'
 $gridArchivedOverview = ctrl 'gridArchivedOverview'
 $lblArchivedStatus = ctrl 'lblArchivedStatus'
 $btnOpenArchivedFolder = ctrl 'btnOpenArchivedFolder'
+$lblArchivedMigrations = ctrl 'lblArchivedMigrations'
+$lblArchivedFilesCompared = ctrl 'lblArchivedFilesCompared'
+$lblArchivedPermissionsCompared = ctrl 'lblArchivedPermissionsCompared'
+$lblArchivedGlobalCompared = ctrl 'lblArchivedGlobalCompared'
+$lblArchivedRefreshErrors = ctrl 'lblArchivedRefreshErrors'
 $lblPortfolioMigrations = ctrl 'lblPortfolioMigrations'
 $lblPortfolioFilesCompared = ctrl 'lblPortfolioFilesCompared'
 $lblPortfolioPermissionsCompared = ctrl 'lblPortfolioPermissionsCompared'
@@ -2852,37 +2984,54 @@ function Refresh-PortfolioSummary {
 function Get-ArchivedOverviewRows {
     $rows = [System.Collections.Generic.List[object]]::new()
     foreach ($migration in @(Get-MigrationFolders -DirectoryName 'ArchivedMigrations' -IncludeInvalid)) {
-        $row = [ordered]@{
+        $message = 'The archived folder has no readable migration.config.psd1.'
+        $row = [pscustomobject]@{
             Migration = $migration.Name; FolderPath = $migration.Root
-            Source = '—'; Destination = '—'; SourceScansDisplay = '—'
-            TargetScansDisplay = '—'; ComparisonDisplay = '—'
-            PermissionComparisonDisplay = '—'; Status = 'Config unavailable'
-            StatusDetail = 'The archived folder has no readable migration.config.psd1.'
+            Source = '—'; SourceTooltip = ''; Destination = '—'; DestinationTooltip = ''
+            SourceScan = '—'; SourcePermissionScan = '—'; SourceScansSortDate = [datetime]::MinValue
+            SourceScansTooltip = $message; SourceInventoryDisplay = '—'; SourceInventoryTooltip = $message
+            SourceFileScanIsToday = $false; SourcePermissionScanIsToday = $false
+            TargetScan = '—'; TargetPermissionScan = '—'; TargetScansSortDate = [datetime]::MinValue
+            TargetScansTooltip = $message; TargetInventoryDisplay = '—'; TargetInventoryTooltip = $message
+            TargetFileScanIsToday = $false; TargetPermissionScanIsToday = $false
+            ScanGapDays = $null; ScanGapText = '—'; ScanGapTooltip = $message
+            ScanGapVisual = Get-SmartM365PortfolioGapVisual -Days $null
+            ComparisonRate = $null; ComparisonDate = '—'; ComparisonDisplay = '—'; ComparisonTooltip = $message
+            ComparisonVisual = Get-SmartM365PortfolioRateVisual -Rate $null
+            PermissionComparisonRate = $null; PermissionComparisonDate = '—'
+            PermissionComparisonDisplay = '—'; PermissionComparisonTooltip = $message
+            PermissionComparisonVisual = Get-SmartM365PortfolioRateVisual -Rate $null
+            GlobalComparisonRate = $null; GlobalComparisonTooltip = $message
+            GlobalComparisonVisual = Get-SmartM365PortfolioRateVisual -Rate $null -Caption 'Equal weighting'
+            Status = 'Config unavailable'; StatusTooltip = $message; StatusDetail = $message
         }
         if ($migration.Config) {
             try {
                 $source = Get-MigrationScope $migration 'Source'
                 $target = Get-MigrationScope $migration 'Target'
-                $row.Source = $source.Text
-                $row.Destination = $target.Text
                 $evidence = Get-SmartM365PortfolioRow -Migration $migration `
                     -SourceScope $source.Text -SourceTooltip $source.Tooltip `
                     -TargetScope $target.Text -TargetTooltip $target.Tooltip `
                     -SourceType (Get-MigrationEndpointType $migration.Config 'Source') `
                     -TargetType (Get-MigrationEndpointType $migration.Config 'Target')
-                foreach ($property in @('Source', 'Destination', 'SourceScansDisplay',
-                    'TargetScansDisplay', 'ComparisonDisplay', 'PermissionComparisonDisplay')) {
-                    $row[$property] = $evidence.$property
-                }
-                $row.Status = 'Archived'
-                $row.StatusDetail = 'Read-only archived migration.'
+                Update-PortfolioInventoryRow -Row $evidence
+                $evidence | Add-Member -NotePropertyName FolderPath -NotePropertyValue $migration.Root
+                $evidence.ComparisonVisual = Get-SmartM365PortfolioRateVisual -Rate $evidence.ComparisonRate -Caption $evidence.ComparisonDate
+                $evidence.PermissionComparisonVisual = Get-SmartM365PortfolioRateVisual -Rate $evidence.PermissionComparisonRate -Caption $evidence.PermissionComparisonDate
+                $evidence.GlobalComparisonVisual = Get-SmartM365PortfolioRateVisual -Rate $evidence.GlobalComparisonRate -Caption 'Equal weighting'
+                $previousStatus = $evidence.Status
+                $evidence.Status = 'Archived'
+                $evidence.StatusTooltip = "Read-only archived migration. Evidence status: $previousStatus."
+                $evidence | Add-Member -NotePropertyName StatusDetail -NotePropertyValue $evidence.StatusTooltip
+                $row = $evidence
             }
             catch {
                 $row.Status = 'Evidence unavailable'
                 $row.StatusDetail = $_.Exception.Message
+                $row.StatusTooltip = $_.Exception.Message
             }
         }
-        $rows.Add([pscustomobject]$row)
+        $rows.Add($row)
     }
     return $rows.ToArray()
 }
@@ -2890,9 +3039,19 @@ function Get-ArchivedOverviewRows {
 function Refresh-ArchivedOverview {
     try {
         $rows = @(Get-ArchivedOverviewRows)
+        $fileCount = @($rows | Where-Object { $_.ComparisonDate -ne '—' }).Count
+        $permissionCount = @($rows | Where-Object { $_.PermissionComparisonDate -ne '—' }).Count
+        $globalCount = @($rows | Where-Object { $null -ne $_.GlobalComparisonRate }).Count
+        $errors = @($rows | Where-Object { $_.Status -eq 'Evidence unavailable' -or $_.Status -eq 'Config unavailable' })
+        $lblArchivedMigrations.Text = [string]$rows.Count
+        $lblArchivedFilesCompared.Text = '{0} / {1}' -f $fileCount, $rows.Count
+        $lblArchivedPermissionsCompared.Text = '{0} / {1}' -f $permissionCount, $rows.Count
+        $lblArchivedGlobalCompared.Text = '{0} / {1}' -f $globalCount, $rows.Count
+        $lblArchivedRefreshErrors.Text = [string]$errors.Count
+        $lblArchivedRefreshErrors.ToolTip = if ($errors.Count) { ($errors | ForEach-Object { '{0}: {1}' -f $_.Migration, $_.StatusDetail }) -join "`n" } else { 'No evidence errors.' }
         $gridArchivedOverview.ItemsSource = $rows
         $btnOpenArchivedFolder.IsEnabled = $false
-        $lblArchivedStatus.Text = ('{0} archived migrations · Updated {1}' -f $rows.Count, (Get-Date -Format 'HH:mm:ss'))
+        $lblArchivedStatus.Text = ('{0} archived migrations · {1} evidence errors · Updated {2}' -f $rows.Count, $errors.Count, (Get-Date -Format 'HH:mm:ss'))
     }
     catch {
         $lblArchivedStatus.Text = 'Archived overview refresh failed: ' + $_.Exception.Message
@@ -4301,8 +4460,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAjgkjp6GC3gzOK
-# jsE5Satqgs+CaTzgBmy8dFuaEnLC2KCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAZbdZucGiZ4xr6
+# A1sUl4skAiG0gO6vRGSiM9kCVcR1W6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -4435,31 +4594,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIBjXLioZdvJ3sdk0fCZc4Wqq7EOt+B0SBvu0sPxI4KMlMA0GCSqG
-# SIb3DQEBAQUABIIBgF6FnFRgThI1DAf9HltLEhmuaFmMcI3vjlcv/CxYsH9M5waj
-# FpWI+OOu1LW06sK2DyztIEqlU703MmAufLgwchm1htyzMm79N/G+etQqYFDsiaVg
-# 83dcV/pk7QR+xa6g309K6p0+dtP+1tDDQfuJVonNjVvkDGVil6Amk2hGYhB+5VEZ
-# 7zy0ZAk80IHWIIEN3QRVUcBSacZf/IWgog4seSiP7GGh4RtsiqgOIHRyeNrLTrpd
-# mCiY48QsVVrVCa1B83Uqw6Gt1SsDPIixBIowrtIvr5fcGIUN7At8TpMkcEbCVE/4
-# 92I8FBB6aqCtNWyBfHSbrVwksavAJjwRZZNiCSs7guBJrI9deUqSoZzEKiIMGRc3
-# X0t5tDTCSHb3Juo3FqeFPLwIsRtt044ti/iXqJ73uNG1UHaG6mR5822iybXfBmnt
-# T31iLOQFo8q+ni1cYgRVvuz/Ov3gQi8jziX9eUsPu53SnD0OAzc5uSCqLFzHloRl
-# dqMXHGGPUDku0PIInqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIGdYKOBI2kpn8wG18KCiraOhDhm83tv89a5vQERPeCJzMA0GCSqG
+# SIb3DQEBAQUABIIBgId7BjzTwqt9L1/PwAymRokq6vQpkbXqLf5i3GwHNRDdhL+k
+# zszI9gzPoUCjfG14oeI3JRJcppavS9xJHT3kQZzIGbTrdthFcsyeuqpMGGO0AlKA
+# kqNorCHghqCLEEy3J6dJJG1NCON5Lt3qYW3PwQS1N9S6ll4bYUApNSO88BvrEhBS
+# aAjP3NOh87VC2ymJWCdpbzsh5/zPO6K245tmZsVFYoeFSPMAnDFO6Mxaw5qgaDz0
+# EbT0ZKAowp6wWTeMcLOrGCb+3Y3Rx4yE7LPZBfNiDcIEz9U5zqLrOmjUqXZxG2nh
+# zVh77iKmwHKPT00OuxXyobcC/OvMOy4cN6oBD9J7Pd1fz+Vw35OXlej93H4o2RCn
+# OQfLYTQO1T/97gbHHBfQbuBub9J31o/i/tp8jj4GCQcdQ+YF+ZD7QMwArV5GrlPZ
+# pj/5VlJbiOmRv02h7KxP25fc36eBEnK2nr4VEPcBAqttWZLxSBaL5h9xYIDUDOxb
+# jO31L6VpuUWD2dAWrqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTIwODMw
-# MjhaMC8GCSqGSIb3DQEJBDEiBCCsfS+5uOmilaXJi8Ttpuzln2UoHbkuPecOMA0T
-# ut5OKDANBgkqhkiG9w0BAQEFAASCAgBQd8KRvpg4FM3rwKXe8fwBilmkg0JMPYWk
-# b/nqsXzY+yuHXArLuhF4grwwb1tAIA5rgTtyZQQ6FaXx6Qg0xENCg3Mbq5z/78ft
-# zkCidCQ/DmGVPzVCgdMUJ5H0fDCbnKT4Dz4A/4UsDtYu1PGUa2cRjbL5i0uZtCm2
-# yTxeJfSMt5kIAnpyXsK3l88iFPyVOLm+dsWdhmzmrUFGBz5LZBcyT35gDCYihfQH
-# igTgNtlyPLCUEVOsqoChgluMSUYSA+x+xpuFQBRje2ekGkrp32OjNFgvKBAYbLLx
-# 1KXdJbEnyel7cNNmo4LD8K8HjX0dvTaj4sI9Q/YZoz0T8rNDS0Pe7NcdGZ4RlcXB
-# 5vvD2Ptnu/OOQQs7A02wKgLvH6tjyVIaFLsM6XuewqF1gOINMxuuni8TqZAtnfcl
-# c9KzUA8zZn9lDfvo2AZqsc4u/Y0Z+uj+PypzyH76QFYfOtP0l/a18weFOhKxIaf2
-# PxQ/40xBPzxSUNntwwsKA0dmvNnrSgmuDWqE37vzjPyx3TnvIvmzoWYnr/kTupFg
-# oIcP29ZbOtgbo9p2jY2/zX/Ja3A4+sFsZUxbzqcL6G4sva2gjXeVRzE+X3tPNKaC
-# FPjOLOJ4gUzTSDk6efqyi9LKVayGz/OR8kmBRitwn+yU2ROG4TELqLiW4J0B435C
-# s+MOhLUOiA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTIxMjIx
+# NTlaMC8GCSqGSIb3DQEJBDEiBCAImNnFfrrD5sJxgWAh8cO39Zm8uQhZPSzVq4Bg
+# RNtCwjANBgkqhkiG9w0BAQEFAASCAgCyWeLINsc3tx83t8n4LZ9mfbmVlIcMroOe
+# eW+PUK6hcyBAFOyJFVmCso1yBkcU6qnW7/bDb2iYDcxeQR0tZJTpcz6Si3tZOtBY
+# HqaoWrQwBC0EEmBV4qB7+sZcmrFkBi6u0LxPlnTPAnZ0m6Q0RWoY/PHUjtp/f7DP
+# 7s3d/MSP+8VlYbtZXPqzOVz/GW1z5riXBZ8zf6MJxpRN1EOKvuKPZXSazuhdbjeC
+# 55tQzs123PfSmLFpv/5sGDl1caFPcDT1jsVD0BSKnV6BWmR9k/X8U/Pqm8z9qk+f
+# GS33NyYKSUevA00SQu3sePPgKJUlTv0yLolzLhV66V0+bOGI9C1ZQLqKH5V7G8Ew
+# TcxLwuJ1eyYM7wSUOgr5yv5PzDvQbm9Vk2c0fbRZMz3TLsv1DYoKqttDiTCcgXwQ
+# kwG3PvT/rtD6+mNAgDmFPcrVB0FcpX8Jg5mw2zetmKCn7VbqSbBJ91cp+1SOREM7
+# roJiJjwp5+4KqqvNO6k/K7xsTgh1hJOla0XyfCAHT3z7qsAlR2DolLxu2FFX8ZgJ
+# QB0mUahc/OR4MIEi6S3P5cF0Dlr+8Ee9p2orTwRbKsml4PZy8r7rAN1xO5V/Whdj
+# Q2HFXM1utNhJ8MBrNuRevx+sJxkBd7SuV6mLucTxSvXP/wl8kzF+4PaGIhRK7qxu
+# VHTDTts3Rw==
 # SIG # End signature block

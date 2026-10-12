@@ -17,6 +17,19 @@ foreach ($name in @('Get-MigrationFolders', 'Move-MigrationToArchive',
     Set-Item -Path "function:script:$name" -Value $definition.Body.GetScriptBlock()
 }
 function Assert-Archive { param([bool]$Condition, [string]$Message) if (-not $Condition) { throw $Message } }
+$guiText = Get-Content -LiteralPath $guiPath -Raw
+$activeGrid = [regex]::Match($guiText, '(?s)<DataGrid x:Name="gridSummary".*?</DataGrid>').Value
+$archivedGrid = [regex]::Match($guiText, '(?s)<DataGrid x:Name="gridArchivedOverview".*?</DataGrid>').Value
+$columnsPattern = '<DataGrid(?:Text|Template)Column Header="([^"]+)"'
+$activeColumns = @([regex]::Matches($activeGrid, $columnsPattern) | ForEach-Object { $_.Groups[1].Value })
+$archivedColumns = @([regex]::Matches($archivedGrid, $columnsPattern) | ForEach-Object { $_.Groups[1].Value })
+Assert-Archive ($activeColumns.Count -eq 12 -and
+    [string]::Join('|', $activeColumns) -eq [string]::Join('|', $archivedColumns)) `
+    'ArchivedOverview columns no longer match Overview.'
+foreach ($control in @('lblArchivedMigrations', 'lblArchivedFilesCompared',
+    'lblArchivedPermissionsCompared', 'lblArchivedGlobalCompared', 'lblArchivedRefreshErrors')) {
+    Assert-Archive ($guiText.Contains(('x:Name="{0}"' -f $control))) "Missing archived overview card: $control"
+}
 function Get-MigrationScope {
     param($Migration, [string]$Side)
     return [pscustomobject]@{ Text = "$Side scope"; Tooltip = '' }
@@ -24,10 +37,28 @@ function Get-MigrationScope {
 function Get-SmartM365PortfolioRow {
     param($Migration, $SourceScope, $SourceTooltip, $TargetScope, $TargetTooltip, $SourceType, $TargetType)
     return [pscustomobject]@{
-        Source = $SourceScope; Destination = $TargetScope
+        Migration = $Migration.Name
+        Source = $SourceScope; SourceTooltip = $SourceTooltip
+        Destination = $TargetScope; DestinationTooltip = $TargetTooltip
         SourceScansDisplay = 'Files 2026-01-01'; TargetScansDisplay = 'Files 2026-01-02'
-        ComparisonDisplay = '2026-01-03'; PermissionComparisonDisplay = '2026-01-04'
+        ComparisonDisplay = '2026-01-03'; ComparisonDate = '2026-01-03'
+        ComparisonRate = 99.0; ComparisonVisual = $null
+        PermissionComparisonDisplay = '2026-01-04'; PermissionComparisonDate = '2026-01-04'
+        PermissionComparisonRate = 98.0; PermissionComparisonVisual = $null
+        GlobalComparisonRate = 98.5; GlobalComparisonVisual = $null
+        Status = 'Review needed'; StatusTooltip = 'Review the comparison.'
+        SourceInventoryDisplay = '—'; TargetInventoryDisplay = '—'
     }
+}
+function Update-PortfolioInventoryRow {
+    param($Row)
+    $Row.SourceInventoryDisplay = 'Files 10 · folders 2'
+    $Row.TargetInventoryDisplay = 'Files 10 · folders 2'
+}
+function Get-SmartM365PortfolioGapVisual { param($Days) [pscustomobject]@{ Band = 'Unavailable' } }
+function Get-SmartM365PortfolioRateVisual {
+    param($Rate, $Date, [string]$Notice = '', [string]$Caption = '')
+    [pscustomobject]@{ Percent = if ($null -ne $Rate) { "$Rate %" } else { '—' }; Notice = $Notice; Caption = $Caption }
 }
 
 $tempRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\', '/')
@@ -51,7 +82,11 @@ try {
         'An archived migration remains in active discovery.'
     $archivedRows = @(Get-ArchivedOverviewRows)
     Assert-Archive ($archivedRows.Count -eq 1 -and $archivedRows[0].Migration -eq 'Alpha' -and
-        $archivedRows[0].Status -eq 'Archived' -and $archivedRows[0].ComparisonDisplay -eq '2026-01-03') `
+        $archivedRows[0].Status -eq 'Archived' -and $archivedRows[0].ComparisonDisplay -eq '2026-01-03' -and
+        $archivedRows[0].GlobalComparisonRate -eq 98.5 -and
+        $archivedRows[0].SourceInventoryDisplay -eq 'Files 10 · folders 2' -and
+        $archivedRows[0].ComparisonVisual.Notice -eq '' -and
+        $archivedRows[0].FolderPath -eq $destination) `
         'ArchivedOverview did not display the archived migration and its evidence.'
 
     $invalid = New-Item -ItemType Directory -Path (Join-Path $archiveRoot.FullName 'Unconfigured')
@@ -88,8 +123,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBEacn/plpkl0Gd
-# Kv+oaNkht208SdLrdqA7E3cbIR8ubKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCb5Jsc5rJYlaRs
+# uqZyzQma0MeOV0XuZooycVw5J9RYnaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -222,31 +257,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIIYv4CsbXNLfdcQ1R++hQIGw5v3UF494Fkm2S5exGvHjMA0GCSqG
-# SIb3DQEBAQUABIIBgEVbKz63UYZ8CQzOM+y6hM9LQQzgegklxQmlhS6Hcku3JYhA
-# WSUCfVWqU/qLP26rVoGD5nYu4XzefOWNI7/qjrvK5xtx1pDU99Lwe/+ppLXAQ6kt
-# 9Fbf7RD7vZiT3gxTlMGcWmnhvpqyJTDqgKVF/nAoRg2xZKKN8d02ubwMgVJ9h4hR
-# acS74yKm0hvF+SaSHZRKgg08MdRZRwwUYvwbafZLKj8hmSYVDdJ7OrMvZb1ulEKx
-# LIaFeNf9AX6sbiOjnFBIikQMU0Cof4bpGG9s7FMrK87X2lzdSq9SMABD+UO363oI
-# hepdYKm2k6J+1JVMtL7qvBLdptSfL572SrfnCWXLxVBxg3LWzCQofCFVEt2l1iU+
-# tT5oS92gd2KAgINWiKeK7/TYSHZDV/sYYEfmFfNho9YJTcuwO2cCyqWxZkzY9Yim
-# bJI0Te+R3LX+kt5VUHDArH1eAnmFmuwJw6VDtf1KmjtckHBVCd2jGcoZdcbjnUcN
-# wfYotvltDUDi0eA0vaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIGmXLVlJ0PD++SfSwdybRtQp2UDLztcP5K86ht07DL/BMA0GCSqG
+# SIb3DQEBAQUABIIBgDxUz+FoVadD3g3DPX/16eH2vktOtZXpmwSpGdPEvKoRYgFQ
+# mvqUnBvGV0lcwKDq8S3ABklKrymTESHPnJHwFtvqUTPP8VxyJcn+iiMbvlbo2UBv
+# MwRvlgt3bxBLW5npirrmvVTFm7f5A+cVmn4rH0uoLLSyibOrsHSPtSuJJYbQ6w6V
+# cgZH8scw68miHac7lgo5/ooB29cce+RcNSQmwHApXzhHP7CCPqaPbBkGjyldGufC
+# WW7IdIKuZapiHGwm5kd7beHbCAH3q5ksizj7UGum3NBQp1zt01C9s54ukdZ1z20s
+# 9YkcoCDedFTIKpcNfuJvJQ3ywCHEi/MShDQ8kYgTfVJcuB2REJOGGZnacIRBRsVf
+# cHyhXGoluv6dgWQRvsz/tVSZp0g2DUE7q4SbrS/pQXjDxd/taSF0UIJA7o46WpTo
+# kuCFALSex6fM9xsRFvGEb3KyAQHtln6EUuXQ/FpSSckCAnnTJtHV+AFiTJhsI4OM
+# oOr2B2XzQXRsc1AO+aGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTIxMTUy
-# MDNaMC8GCSqGSIb3DQEJBDEiBCAuZucO9bgYJ4lksmGEmCXEP20MWnoo+BoiE5Ds
-# Y51DYTANBgkqhkiG9w0BAQEFAASCAgBIvv4P2fuGxe+DFq6Me7qOt925q1xBDWvf
-# 8P/qpUzhwfs9y2T/a0N4JMTbRGnST1BBgHS3j5KSiX9DaxnNtSMtGYMZjKR3am6+
-# 6uSDgVfHwQ2CkDCBMXFsCsuZdGzu7IG/6ZrLrXxaFbTQFIBkvJNvxKTIaeDUsgCC
-# FVBtFmy7ytZRNqtu200fNbhPBXk2ojmFftR7mzR+R0mo1ZPglSv7OEgmvaGs0ITl
-# SJ2Xc7HxtrBxbRqdjDFM/k/LRxl/abkg7xbuyvBJqYX8akt4DsnTHjTVp4lhKcna
-# uOMtK0a3sbJ1qh5M+MpTziKGCPinhkQUfxF2UWrFOBtASVCCEMsAkCtPF/qKnMYy
-# eV9RLcJt/0bCxg/19FskWH09bpDrS9vvtlAlx+Pwf0q+hok5OGOc/a1Mz4zgcwk8
-# txXCUO0J52l4/eUStYVdC3bWXcw8+5sIPksnPKB7c8sRjT6YND/X0YeEeGHWYrxM
-# AZ1e/Ild1IgJe0pmVlbcagLyum9/ajhuornbu7QEvSE/65MEL43CY+EPgQ4e06SO
-# 0AC8FxWuybuAm1HnqWP+/qJUvp2OqGjjTIDwnQi9le+eYm9ECesLUUvob9SnUz4j
-# KByeqnjyxkSfjVymAZ0PsZuemLunmGHl0OxljaLjXYJ768OAjv+xmMMFiD3gW8t6
-# PGaWmEKA8A==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTIxMjIz
+# NDRaMC8GCSqGSIb3DQEJBDEiBCCHyVk36KVSU7HUgj3EFu0lnlMWkG8oIr+U3nYz
+# T9U1yzANBgkqhkiG9w0BAQEFAASCAgAcG2Gr/wDOtr4ZH2gZalzIfTmJN/HZW4I8
+# cXbYZgyShjwtK4mf7/MA99ICczj3wLi2nRCBXVpxW3gZ/bX3/S755JVpTuu+W3SA
+# RDLrxjl78BQGlm1FJ0JEXsSRVA2h8e6HL1iAd559J7FPmfkZh+fLVudky1iCyLcO
+# hWmKrOeSfa2lkq8Wyv0FisgkcZG49WodZJC0UWB7K3q35jP9ahJKncRLb7WTW2FI
+# RETMeJZrwR6bEFPmxrptJJl7GXGVyITuEybkERsGdJXA26p+TFGqxwk0BPoaO1Jl
+# cxKyMEKZS2loOWpmsXkZs3j/qKUuDOa6YowgD/IIBAEKUf+fiYtymGv+OP0voqR+
+# PnkV0EwshKS89JNzdW2YinKSY/ZyBRkn7I4p2xYcfS6Hv5vNhwgBoxjZPt4gBA5F
+# ditnuZsPiwzF6YEM6CEDQP6zxymJgdmromDtdfUBKjiSVqP4pWmiqfxaCO87EygR
+# jicwnqAO27lq0v/IpdlhG4hLDZYloIK8ggmmQAAHfZcH4AnakpRKo0i+k/4SFfUP
+# xSdLgxJrIwNgJF2xDg9iQgPX2utudbgSGul0TYnks0Kg6RWPE3xOwKfN+BARb8KW
+# kn+xrUVzcSzj9/2W2BIiqSw/JQQkSWPULrl4GqNalOCAtvVzXnwNupUIyMI+X4Sc
+# jNPhmTE8OA==
 # SIG # End signature block
