@@ -3,7 +3,7 @@
 .SYNOPSIS
     Microsoft Teams tenant inventory with CSV exports and HTML alert summary.
 .VERSION
-0.38
+ 0.40
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication; ImportExcel.
@@ -24,6 +24,7 @@ param(
     [int]$MaxTeams=0,
     [switch]$DryRun,
     [switch]$AlwaysSend,
+    [switch]$MailOnly,
     [switch]$AppendHistory,
     [double]$QuotaCriticalPercent=90,
     [int]$MinOwners=2,
@@ -45,7 +46,7 @@ if ($PSBoundParameters.ContainsKey('MaxItems') -and $MaxItems -gt 0) {
     }
 }
 $ErrorActionPreference='Stop'; Set-StrictMode -Version Latest
-$ScriptVersion="0.38"
+$ScriptVersion="0.40"
 $ScriptBaseName = [System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
 $TaskName = $ScriptBaseName
 $RunStarted=Get-Date; $RunDateUtc=$RunStarted.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ',[Globalization.CultureInfo]::InvariantCulture); $RunId=[guid]::NewGuid().ToString(); $CurrentOperation='Initialize'
@@ -102,7 +103,8 @@ function Invoke-TeamsDailySummaryMail {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string]$MarkerPath,
-        [Parameter(Mandatory)][scriptblock]$SendAction
+        [Parameter(Mandatory)][scriptblock]$SendAction,
+        [switch]$ForceSend
     )
 
     $today = (Get-Date).ToString('yyyy-MM-dd', [Globalization.CultureInfo]::InvariantCulture)
@@ -126,7 +128,7 @@ function Invoke-TeamsDailySummaryMail {
             [string](Get-Content -LiteralPath $MarkerPath -Raw -ErrorAction SilentlyContinue)
         }
         else { '' }
-        if ($lastSentDate.Trim() -eq $today) {
+        if ($lastSentDate.Trim() -eq $today -and -not $ForceSend) {
             WriteLog -Message "Daily Teams summary email already sent for $today; email skipped." -Level INFO
             return $false
         }
@@ -449,6 +451,44 @@ function Get-TeamsCsvColumnNames {
     finally { $parser.Dispose() }
 }
 
+function Import-TeamsMailCsvSet {
+    param([Parameter(Mandatory)][string]$Folder,[Parameter(Mandatory)][string]$ExpectedTenantKey)
+    $names=@('Teams','Members','Channels','Guests')
+    $sets=@{}; $files=New-Object 'System.Collections.Generic.List[object]'
+    $sourceRunId=''; $sourceRunDate=''; $sourceTenantId=''; $primaryWriteTime=$null
+    foreach($name in $names){
+        $path=Join-Path $Folder "M365_Teams_$name.csv"
+        if(-not(Test-Path -LiteralPath $path -PathType Leaf)){throw "MailOnly requires the latest CSV: $path"}
+        $headers=@(Get-TeamsCsvColumnNames -Path $path)
+        $requiredColumns=@('TenantKey','RunId','RunDateUtc')
+        if($name -eq 'Teams'){$requiredColumns+=@('TeamId','TeamDisplayName','OwnerCount','GuestCount','InactiveDays','StorageQuotaPercent','IsArchived','Visibility','Status','Details','Threshold','ActivityEvidenceStatus','StorageCollectionStatus')}
+        foreach($required in $requiredColumns){if($headers -notcontains $required){throw "MailOnly CSV $path is missing $required."}}
+        $beforeHash=(Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash
+        $rows=@(Import-Csv -LiteralPath $path -ErrorAction Stop)
+        $afterHash=(Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash
+        if($beforeHash -ne $afterHash){throw "MailOnly CSV changed while being read: $path"}
+        $sets[$name]=$rows
+        $file=Get-Item -LiteralPath $path
+        if($name -eq 'Teams'){
+            if($rows.Count -eq 0){throw 'MailOnly requires at least one Teams row to establish the source run.'}
+            $primaryWriteTime=$file.LastWriteTimeUtc
+        }
+        $files.Add([pscustomobject]@{Path=$path;WorksheetName=$name;TableName="Teams$name";LastWriteTimeUtc=$file.LastWriteTimeUtc;Empty=($rows.Count -eq 0);Sha256=$afterHash})
+        foreach($row in $rows){
+            $key=[string]$row.TenantKey; $id=[string]$row.RunId; $date=[string]$row.RunDateUtc
+            if([string]::IsNullOrWhiteSpace($key) -or $key -ine $ExpectedTenantKey -or [string]::IsNullOrWhiteSpace($id) -or [string]::IsNullOrWhiteSpace($date)){throw "MailOnly CSV $path contains a row with missing or unexpected tenant/run identity."}
+            if(-not $sourceRunId){$sourceRunId=$id; $sourceRunDate=$date; $sourceTenantId=[string]$row.TenantId}
+            if($id -ne $sourceRunId -or $date -ne $sourceRunDate -or ([string]$row.TenantId -ne $sourceTenantId)){throw "MailOnly CSV files do not belong to one source run: $path"}
+        }
+    }
+    foreach($file in $files){
+        if($file.Empty -and [math]::Abs(($file.LastWriteTimeUtc-$primaryWriteTime).TotalMinutes) -gt 30){throw "MailOnly empty CSV is not timestamp-consistent with the Teams CSV: $($file.Path)"}
+    }
+    $parsedDate=[datetimeoffset]::MinValue
+    if(-not [datetimeoffset]::TryParse($sourceRunDate,[Globalization.CultureInfo]::InvariantCulture,[Globalization.DateTimeStyles]::AssumeUniversal,[ref]$parsedDate)){throw "MailOnly source RunDateUtc is invalid: $sourceRunDate"}
+    [pscustomobject]@{Rows=$sets;Files=$files.ToArray();RunId=$sourceRunId;RunDateUtc=$sourceRunDate;Started=$parsedDate.UtcDateTime}
+}
+
 function Ensure-TeamsImportExcelModule {
     [CmdletBinding()]
     param()
@@ -544,23 +584,68 @@ function New-TeamsSharePointLinksHtml {
     return "<div class='card'><h2>Timestamped exports</h2><p>SharePoint links for this run:</p><ul>$($links -join '')</ul></div>"
 }
 function ConvertTo-HtmlReport {
-    param([object[]]$AlertRows,[hashtable]$Summary,[string]$Worst,[datetime]$Started,[datetime]$Ended,[string]$FileLinksHtml='')
+    param([object[]]$AlertRows,[object[]]$TeamRows=@(),[hashtable]$Summary,[string]$Worst,[datetime]$Started,[datetime]$Ended,[string]$FileLinksHtml='',[string]$SourceNote='')
     $color=@{OK='#107c10';Warning='#ff8c00';Critical='#d13438'}
-    $sb=[Text.StringBuilder]::new()
-    [void]$sb.AppendLine('<!doctype html><html><head><meta charset="utf-8"><style>body{font-family:Segoe UI,Arial;background:#f5f8fb;color:#1f2937;padding:24px}.card{background:#fff;border:1px solid #dde7f0;border-radius:8px;padding:16px;margin:0 0 16px}.pill{color:#fff;border-radius:999px;padding:4px 10px;font-weight:600}.kpi{border-collapse:collapse;width:100%}.kpi td{padding:10px;border:1px solid #dde7f0;background:#f8fafc}.kpiLabel{font-size:11px;color:#64748b;text-transform:uppercase}.kpiValue{font-size:20px;font-weight:700;color:#0f172a}.muted{font-size:12px;color:#64748b}</style></head><body>')
-    [void]$sb.AppendLine(("<div class='card'><h1>Microsoft Teams Inventory <span class='pill' style='background:{0}'>{1}</span></h1><p>The detailed inventory and {2} findings are in the attached Excel workbook.</p></div>" -f $color[$Worst],$Worst,@($AlertRows).Count))
-    $priorityKpis=@(@('Teams inventoried','TotalTeams'),@('Without owner','OwnerlessTeams'),@('Inactive','InactiveTeams'),@('Storage above threshold','HighQuotaTeams'))
-    $secondaryKpis=@(@('Active teams','ActiveTeams'),@('Archived teams','ArchivedTeams'),@('Public teams','PublicTeams'),@('Teams with guests','TeamsWithGuests'),@('Object-level critical findings','CriticalCount'),@('Object-level warning findings','WarningCount'))
-    $priorityCells=@($priorityKpis|ForEach-Object{"<td width='25%' style='padding:10px;border:1px solid #b9ddf7;background:#e6f4ff;vertical-align:top;'><div style='font-size:11px;color:#475569;text-transform:uppercase'>{0}</div><div style='font-size:20px;font-weight:700;color:#0f172a'>{1}</div></td>" -f $_[0],$Summary[$_[1]]})
-    $secondaryRows=New-Object 'System.Collections.Generic.List[string]'
-    for($i=0;$i -lt $secondaryKpis.Count;$i+=4){
-        $cells=for($j=$i;$j -lt [Math]::Min($i+4,$secondaryKpis.Count);$j++){"<td width='25%' style='padding:10px;border:1px solid #dde7f0;background:#f8fafc;vertical-align:top;'><div style='font-size:11px;color:#64748b;text-transform:uppercase'>{0}</div><div style='font-size:18px;font-weight:700;color:#0f172a'>{1}</div></td>" -f $secondaryKpis[$j][0],$Summary[$secondaryKpis[$j][1]]}
-        for($j=$cells.Count;$j -lt 4;$j++){$cells+= "<td width='25%' style='border:1px solid #dde7f0;background:#f8fafc;'>&nbsp;</td>"}
-        $secondaryRows.Add("<tr>$($cells -join '')</tr>")
+    $affected=@($AlertRows|Where-Object{-not[string]::IsNullOrWhiteSpace([string]$_.TeamId)}|Select-Object -ExpandProperty TeamId -Unique).Count
+    $activityUnavailable=@($TeamRows|Where-Object{$_.ActivityEvidenceStatus -ne 'Observed'}).Count
+    $storageUnavailable=@($TeamRows|Where-Object{$_.StorageCollectionStatus -ne 'Collected'}).Count
+    $refreshDates=@($TeamRows|Where-Object{-not[string]::IsNullOrWhiteSpace([string]$_.ActivityReportRefreshDate)}|ForEach-Object{[string]$_.ActivityReportRefreshDate}|Sort-Object -Unique)
+    $refreshText=if($refreshDates.Count -eq 0){'Not available'}elseif($refreshDates.Count -eq 1){$refreshDates[0]}else{"$($refreshDates[0]) to $($refreshDates[-1])"}
+    $categories=@(
+        @{Check='Owners';Priority='High';Label='No owner';Action='Assign owners';Text='NoOwner'},
+        @{Check='Owners';Priority='Review';Label='Owners below minimum';Action='Add another owner';Text='LowOwnerCount'},
+        @{Check='StorageQuotaPercent';Priority='High';Label='Storage above threshold';Action='Review storage and quota'},
+        @{Check='Inactivity';Priority='Review';Label='Inactive team';Action='Confirm use before archiving'},
+        @{Check='GuestCount';Priority='Review';Label='Guest count above threshold';Action='Review membership'},
+        @{Check='PublicSensitiveLabel';Priority='Review';Label='Public team with sensitivity label';Action='Review visibility and label'},
+        @{Check='MissingSensitivityLabel';Priority='Review';Label='Missing sensitivity label';Action='Review labeling'}
+    )
+    $categoryRows=foreach($category in $categories){
+        $categoryAlerts=@($AlertRows|Where-Object{$_.Check -eq $category.Check -and (-not $category.ContainsKey('Text') -or $_.TextValue -eq $category.Text)})
+        if($categoryAlerts.Count -gt 0){
+            $label=$category.Label
+            if($category.Check -eq 'StorageQuotaPercent' -and [string]$categoryAlerts[0].Threshold -match '(?<value>[\d.]+) percent'){$label="Storage above $($Matches.value)%"}
+            if($category.Check -eq 'Inactivity' -and [string]$categoryAlerts[0].Threshold -match '(?<value>\d+) days'){$label="Inactive for over $($Matches.value) days"}
+            ,@($category.Priority,$label,$categoryAlerts.Count,$category.Action)
+        }
     }
-    [void]$sb.AppendLine(("<div class='card'><h2>Global summary</h2><h3 style='font-size:13px;margin:0 0 6px;'>Priority KPIs</h3><table role='presentation' width='100%' style='border-collapse:collapse;table-layout:fixed;margin-bottom:14px;'><tr>{0}</tr></table><h3 style='font-size:13px;margin:0 0 6px;'>Additional KPIs</h3><table role='presentation' width='100%' style='border-collapse:collapse;table-layout:fixed;'>{1}</table></div>" -f ($priorityCells -join ''),($secondaryRows -join '')))
+    $categoryHtml=if(@($categoryRows).Count -gt 0){New-SmartM365EmailTableHtml -Headers @('Priority','Finding','Teams','Suggested review') -Rows @($categoryRows)}else{'<p>No action was flagged by the configured checks.</p>'}
+    $rankedAlerts=@($AlertRows|Sort-Object @{Expression={if($_.Status -eq 'Critical'){0}else{1}}},@{Expression={switch($_.Check){'Owners'{0}'StorageQuotaPercent'{1}'Inactivity'{2}default{3}}}},TeamDisplayName)
+    $topAlerts=New-Object 'System.Collections.Generic.List[object]'
+    $seenTeams=@{}
+    foreach($alert in $rankedAlerts){
+        $key=[string]$alert.TeamId
+        if($seenTeams.ContainsKey($key)){continue}
+        $seenTeams[$key]=$true
+        $topAlerts.Add($alert)
+        if($topAlerts.Count -eq 5){break}
+    }
+    $topRows=foreach($alert in $topAlerts){
+        $finding=switch([string]$alert.Check){'Owners'{if($alert.TextValue -eq 'NoOwner'){'No owner'}else{'Owners below minimum'}}'StorageQuotaPercent'{'Storage above threshold'}'Inactivity'{'Inactive team'}'GuestCount'{'Guest count above threshold'}'PublicSensitiveLabel'{'Public team with sensitivity label'}'MissingSensitivityLabel'{'Missing sensitivity label'}default{[string]$alert.Check}}
+        $measured=if(-not[string]::IsNullOrWhiteSpace([string]$alert.NumericValue)){[string]$alert.NumericValue}else{[string]$alert.TextValue}
+        ,@([string]$alert.TeamDisplayName,$finding,$measured,[string]$alert.Threshold)
+    }
+    $topHtml=if($topRows){New-SmartM365EmailTableHtml -Headers @('Team','Finding','Measured','Threshold') -Rows @($topRows)}else{'<p>No priority team to review.</p>'}
+    $cards=@(
+        [pscustomobject]@{Label='Teams inventoried';Value=([int]$Summary.TotalTeams).ToString('N0');Detail='teams processed';Background='#f8fafc';Border='#dbe3ef';Accent='#0f172a';Span=1},
+        [pscustomobject]@{Label='Teams to review';Value=$affected.ToString('N0');Detail='distinct teams';Background='#eff6ff';Border='#bfdbfe';Accent='#1d4ed8';Span=1},
+        [pscustomobject]@{Label='Without owner';Value=([int]$Summary.OwnerlessTeams).ToString('N0');Detail='owner required';Background='#fff7ed';Border='#fed7aa';Accent='#9a3412';Span=1},
+        [pscustomobject]@{Label='Above storage threshold';Value=([int]$Summary.HighQuotaTeams).ToString('N0');Detail='measured quotas';Background='#faf5ff';Border='#e9d5ff';Accent='#7e22ce';Span=1},
+        [pscustomobject]@{Label='Inactive teams';Value=([int]$Summary.InactiveTeams).ToString('N0');Detail='dated activity';Background='#f0fdfa';Border='#99f6e4';Accent='#0f766e';Span=1},
+        [pscustomobject]@{Label='Teams with guests';Value=([int]$Summary.TeamsWithGuests).ToString('N0');Detail='guest members';Background='#f0fdf4';Border='#bbf7d0';Accent='#166534';Span=1},
+        [pscustomobject]@{Label='Activity unavailable';Value=$activityUnavailable.ToString('N0');Detail='no activity report row';Background='#eef2ff';Border='#c7d2fe';Accent='#4338ca';Span=2}
+    )
+    $sb=[Text.StringBuilder]::new()
+    [void]$sb.AppendLine('<!doctype html><html><head><meta charset="utf-8"></head><body style="font-family:Segoe UI,Arial,sans-serif;background:#f5f8fb;color:#1f2937;padding:24px;">')
+    [void]$sb.AppendLine(("<div style='background:#fff;border:1px solid #dde7f0;border-radius:8px;padding:16px;margin-bottom:16px;'><h1>Microsoft Teams Inventory <span style='color:#fff;border-radius:999px;padding:4px 10px;background:{0};font-size:14px;'>{1}</span></h1><p>{2} teams processed; {3} distinct teams require review. Findings can overlap. The complete detail is in the attached workbook.</p></div>" -f $color[$Worst],$Worst,$Summary.TotalTeams,$affected))
+    [void]$sb.AppendLine("<div style='background:#fff;border:1px solid #dde7f0;border-radius:8px;padding:16px;margin-bottom:16px;'><h2>Action required</h2>$categoryHtml<h3>First teams to review</h3>$topHtml</div>")
+    [void]$sb.AppendLine("<div style='background:#fff;border:1px solid #dde7f0;border-radius:8px;padding:16px;margin-bottom:16px;'><h2>Summary</h2>$(New-SmartM365EmailKpiGridHtml -Cards $cards -RowSizes @(4,3))</div>")
+    [void]$sb.AppendLine(("<div style='background:#fff;border:1px solid #dde7f0;border-radius:8px;padding:16px;margin-bottom:16px;'><h2>Evidence coverage</h2><p>Activity report refresh: {0}<br>Teams without an activity row: {1}<br>Teams without measured storage: {2}<br>{3}</p></div>" -f [Net.WebUtility]::HtmlEncode($refreshText),$activityUnavailable,$storageUnavailable,[Net.WebUtility]::HtmlEncode($SourceNote)))
     if (-not [string]::IsNullOrWhiteSpace($FileLinksHtml)) { [void]$sb.AppendLine($FileLinksHtml) }
-    [void]$sb.AppendLine(("<div class='card muted'><b>Run details</b><br>RunId: {0}<br>Machine: {1}<br>Started UTC: {2}<br>Ended UTC: {3}<br>Duration: {4}<br>Teams processed: {5}</div>" -f $RunId,[Net.WebUtility]::HtmlEncode($env:COMPUTERNAME),(IsoUtc $Started),(IsoUtc $Ended),((New-TimeSpan -Start $Started -End $Ended).ToString()),$Summary.TotalTeams))
+    $runMachine=if($SourceNote){'Not recorded in CSV'}else{$env:COMPUTERNAME}
+    $runEnd=if($SourceNote){'Not recorded in CSV'}else{IsoUtc $Ended}
+    $runDuration=if($SourceNote){'Not recorded in CSV'}else{(New-TimeSpan -Start $Started -End $Ended).ToString()}
+    [void]$sb.AppendLine(("<div style='background:#fff;border:1px solid #dde7f0;border-radius:8px;padding:16px;color:#64748b;font-size:12px;'><b>Run details</b><br>RunId: {0}<br>Machine: {1}<br>Started UTC: {2}<br>Ended UTC: {3}<br>Duration: {4}<br>Teams processed: {5}</div>" -f [Net.WebUtility]::HtmlEncode([string]$RunId),[Net.WebUtility]::HtmlEncode($runMachine),(IsoUtc $Started),[Net.WebUtility]::HtmlEncode($runEnd),[Net.WebUtility]::HtmlEncode($runDuration),$Summary.TotalTeams))
     [void]$sb.AppendLine('</body></html>')
     $sb.ToString()
 }
@@ -579,6 +664,44 @@ $channelColumns=@('RunId','RunDateUtc','TenantName','TeamId','TeamDisplayName','
 $guestColumns=@('RunId','RunDateUtc','TenantName','TeamId','TeamDisplayName','UserId','DisplayName','UserPrincipalName','Mail','Status','NumericValue','TextValue','Threshold','Details')
 try{
  $CurrentOperation='Initialize script environment'; $OutputPath=InitializeScriptEnvironment -OutputPathInit $OutputPath -LogFileName $ScriptBaseName; Start-Transcript -Path $global:logTranscriptFile -Append|Out-Null; Write-SmartM365LoadedModuleVersions; WriteLog -Message "Starting $TaskName"
+ if($MailOnly){
+  $CurrentOperation='Validate existing Teams CSVs'
+  if($MaxTeams -gt 0 -or $MaxItems -gt 0){throw 'MailOnly cannot be combined with MaxTeams or MaxItems.'}
+  $tenantKey=if($TenantContext.PSObject.Properties['TenantKey']){[string]$TenantContext.TenantKey}else{$Tenant}
+  $snapshot=Import-TeamsMailCsvSet -Folder $LatestCsvFolderPath -ExpectedTenantKey $tenantKey
+  $teamArray=@($snapshot.Rows.Teams); $memberArray=@($snapshot.Rows.Members); $channelArray=@($snapshot.Rows.Channels); $guestArray=@($snapshot.Rows.Guests)
+  $RunId=$snapshot.RunId; $RunStarted=$snapshot.Started
+  $thresholdText=[string]$teamArray[0].Threshold
+  $sourceInactiveDays=if($thresholdText -match 'inactive <= (?<value>\d+) days'){[int]$Matches.value}else{$InactiveDays}
+  $sourceQuotaPercent=if($thresholdText -match 'storage <= (?<value>[\d.]+) percent'){[double]::Parse($Matches.value,[Globalization.CultureInfo]::InvariantCulture)}else{$QuotaCriticalPercent}
+  foreach($row in $teamArray){
+   $flags=@([string]$row.Details -split '; ')
+   if($flags -contains 'No owner'){Add-Alert $row.TeamId $row.TeamDisplayName Critical Owners $row.OwnerCount 'NoOwner' $row.Threshold 'Team has no owner.'}
+   if($flags -contains 'Owner count below threshold'){Add-Alert $row.TeamId $row.TeamDisplayName Warning Owners $row.OwnerCount 'LowOwnerCount' $row.Threshold 'Team has too few owners.'}
+   if($flags -contains 'Inactive team'){Add-Alert $row.TeamId $row.TeamDisplayName Warning Inactivity $row.InactiveDays $row.LastActivityDateUtc $row.Threshold 'Team is a candidate for archival.'}
+   if($flags -contains 'Storage quota critical'){Add-Alert $row.TeamId $row.TeamDisplayName Critical StorageQuotaPercent $row.StorageQuotaPercent $row.StorageUsedGB $row.Threshold 'SharePoint storage quota usage is above threshold.'}
+   if($flags -contains 'High guest count'){Add-Alert $row.TeamId $row.TeamDisplayName Warning GuestCount $row.GuestCount 'Guests' $row.Threshold 'Team has many external guests.'}
+   if($flags -contains 'Public team with sensitivity label'){Add-Alert $row.TeamId $row.TeamDisplayName Warning PublicSensitiveLabel 1 $row.SensitivityLabel $row.Threshold 'Public team has a sensitivity/classification label.'}
+   if($flags -contains 'Missing sensitivity label'){Add-Alert $row.TeamId $row.TeamDisplayName Warning MissingSensitivityLabel 0 'NoLabel' $row.Threshold 'Tenant policy expects labels.'}
+  }
+  $alertArray=$Alerts.ToArray()
+  $summary=@{TotalTeams=$teamArray.Count;ActiveTeams=@($teamArray|Where-Object{$_.IsArchived-ne'True' -and ([string]::IsNullOrWhiteSpace([string]$_.InactiveDays)-or [double]$_.InactiveDays-le$sourceInactiveDays)}).Count;InactiveTeams=@($teamArray|Where-Object{-not[string]::IsNullOrWhiteSpace([string]$_.InactiveDays)-and [double]$_.InactiveDays-gt$sourceInactiveDays}).Count;ArchivedTeams=@($teamArray|Where-Object{$_.IsArchived-eq'True'}).Count;PublicTeams=@($teamArray|Where-Object{$_.Visibility-eq'Public'}).Count;PrivateTeams=@($teamArray|Where-Object{$_.Visibility-eq'Private'}).Count;TeamsWithGuests=@($teamArray|Where-Object{[int]$_.GuestCount-gt 0}).Count;OwnerlessTeams=@($teamArray|Where-Object{[int]$_.OwnerCount-eq 0}).Count;HighQuotaTeams=@($teamArray|Where-Object{-not[string]::IsNullOrWhiteSpace([string]$_.StorageQuotaPercent)-and [double]$_.StorageQuotaPercent-gt$sourceQuotaPercent}).Count;CriticalCount=@($alertArray|Where-Object Status -eq Critical).Count;WarningCount=@($alertArray|Where-Object Status -eq Warning).Count;MemberRows=$memberArray.Count;ChannelRows=$channelArray.Count;GuestRows=$guestArray.Count}
+  $worst=Get-TeamsMailStatus -Summary $summary -PartialInventory $true
+  $CurrentOperation='Build Teams mail from existing CSVs'
+  Ensure-TeamsImportExcelModule
+  $stamp='{0}_{1}' -f (Get-Date).ToUniversalTime().ToString('yyyyMMdd_HHmmss_fff',[Globalization.CultureInfo]::InvariantCulture),[guid]::NewGuid().ToString('N').Substring(0,8)
+  $workbookPath=Join-Path $OutputPath "M365_Teams_Inventory_MailOnly_$stamp.xlsx"
+  New-TeamsTimestampedWorkbook -CsvFiles $snapshot.Files -Path $workbookPath|Out-Null
+  foreach($file in $snapshot.Files){if((Get-FileHash -LiteralPath $file.Path -Algorithm SHA256).Hash -ne $file.Sha256){throw "MailOnly CSV changed before the email was prepared: $($file.Path)"}}
+  Add-TeamsWorkbookOverview -Path $workbookPath -Summary $summary -Alerts $alertArray -Status $worst
+  $sourceNote="Mail reconstructed from existing CSVs collected $($snapshot.RunDateUtc). No new inventory collection; source scope and freshness were not reverified."
+  $subject="[SNAPSHOT][$($worst.ToUpperInvariant())] Microsoft Teams Inventory | $($summary.OwnerlessTeams) ownerless | $($summary.HighQuotaTeams) above storage threshold"
+  $html=ConvertTo-HtmlReport -AlertRows $alertArray -TeamRows $teamArray -Summary $summary -Worst $worst -Started $RunStarted -Ended $RunStarted -SourceNote $sourceNote
+  if($DryRun){WriteLog -Message 'DryRun enabled: MailOnly summary email skipped.' -Level INFO}else{$dailySummaryMarkerPath=Join-Path (Split-Path $global:LogTextFile -Parent) "$ScriptBaseName-DailySummary-LastSent.txt"; $dailySummarySent=Invoke-TeamsDailySummaryMail -MarkerPath $dailySummaryMarkerPath -ForceSend:$AlwaysSend -SendAction {Send-SmartM365Mail -Subject $subject -BodyHtml $html -Attachments @($workbookPath) -AllowAttachments -SuppressAttachmentLinks}; if($dailySummarySent){WriteLog -Message "MailOnly Teams summary email sent from source run $RunId." -Level SUCCESS}}
+  try{Stop-Transcript|Out-Null; Update-SmartM365TimestampedTranscript -Path $global:logTranscriptFile}catch{$null=$_}
+  Complete-SmartM365ExecutionContext -Status Success
+  return
+ }
  Start-SmartM365CmdbSourceReceipt -ScriptPath $PSCommandPath -SourceRootPath $LatestCsvFolderPath -ReadOnly:$DryRun
  $CurrentOperation='Connect Microsoft Graph'; Disconnect-SmartM365CloudSession -ExchangeOnline:$false -Graph:$true -VerboseDisconnect:$true; $conn=Connect-SmartM365CloudSession -ExchangeOnline:$false -Graph:$true -AppId $AppId -Thumbprint $Thumb -TenantId $TenantId -Organization $OrgDomain -GraphScopes @('Team.ReadBasic.All','TeamMember.Read.All','Channel.ReadBasic.All','Group.Read.All','Reports.Read.All'); if(-not$conn.GraphConnected){throw 'Microsoft Graph app-only connection failed.'}
  $CurrentOperation='Ensure ImportExcel module'; Ensure-TeamsImportExcelModule
@@ -638,8 +761,8 @@ try{
  Add-TeamsWorkbookOverview -Path $workbookPath -Summary $summary -Alerts $alertArray -Status $worst
  if(-not$DryRun){$workbookUpload=Invoke-SmartM365SharePointCsvUpload -LocalFilePath $workbookPath; if($workbookUpload){Remove-SmartM365SharePointTimestampedCsvOlderThan -TimestampedPath $workbookPath -RetentionDays 7|Out-Null}}
  $mailFileLinks=if($ShowMailLinks){New-TeamsSharePointLinksHtml -Paths (@($timestampedCsvFiles.Path)+@($workbookPath))}else{''}
- $subject="[$($worst.ToUpperInvariant())] Microsoft Teams Inventory"; $html=ConvertTo-HtmlReport -AlertRows $alertArray -Summary $summary -Worst $worst -Started $RunStarted -Ended (Get-Date) -FileLinksHtml $mailFileLinks
- if($DryRun){WriteLog -Message 'DryRun enabled: daily summary email skipped.' -Level INFO}else{$dailySummaryMarkerPath=Join-Path -Path (Split-Path -Path $global:LogTextFile -Parent) -ChildPath "$ScriptBaseName-DailySummary-LastSent.txt"; $dailySummarySent=Invoke-TeamsDailySummaryMail -MarkerPath $dailySummaryMarkerPath -SendAction {Send-SmartM365Mail -Subject $subject -BodyHtml $html -Attachments @($workbookPath) -AllowAttachments -SuppressAttachmentLinks}; if($dailySummarySent){WriteLog -Message ("Daily Teams summary email sent: {0}" -f $subject) -Level SUCCESS}}
+  $subject="[$($worst.ToUpperInvariant())] Microsoft Teams Inventory | $($summary.OwnerlessTeams) ownerless | $($summary.HighQuotaTeams) above storage threshold"; $html=ConvertTo-HtmlReport -AlertRows $alertArray -TeamRows $teamArray -Summary $summary -Worst $worst -Started $RunStarted -Ended (Get-Date) -FileLinksHtml $mailFileLinks
+ if($DryRun){WriteLog -Message 'DryRun enabled: daily summary email skipped.' -Level INFO}else{$dailySummaryMarkerPath=Join-Path -Path (Split-Path -Path $global:LogTextFile -Parent) -ChildPath "$ScriptBaseName-DailySummary-LastSent.txt"; $dailySummarySent=Invoke-TeamsDailySummaryMail -MarkerPath $dailySummaryMarkerPath -ForceSend:$AlwaysSend -SendAction {Send-SmartM365Mail -Subject $subject -BodyHtml $html -Attachments @($workbookPath) -AllowAttachments -SuppressAttachmentLinks}; if($dailySummarySent){WriteLog -Message ("Daily Teams summary email sent: {0}" -f $subject) -Level SUCCESS}}
  Set-SmartM365CmdbSourceScope -CompleteScope ($MaxTeams -eq 0 -and $MaxItems -eq 0) -Scope 'CMDB:teams,team_members'
  $result="Teams=$($summary.TotalTeams); Critical=$($summary.CriticalCount); Warnings=$($summary.WarningCount); Members=$($memberArray.Count); Channels=$($channelArray.Count); Guests=$($guestArray.Count)"; try{Stop-Transcript|Out-Null; Update-SmartM365TimestampedTranscript -Path $global:logTranscriptFile}catch{$null=$_}; WriteLog -Message ("Result summary: $result") -Level INFO; Write-Host "Teams inventory completed. Status=$worst; $result"; Complete-SmartM365ExecutionContext -Status $(if($worst-eq'OK'){'Success'}else{'CompletedWithWarnings'})
 }catch{ $err=$_; try{WriteLog -Message ("Teams inventory failed during {0}: {1}" -f $CurrentOperation,$err.Exception.Message) -Level ERROR}catch{$null=$_}; try{Stop-Transcript|Out-Null; Update-SmartM365TimestampedTranscript -Path $global:logTranscriptFile}catch{$null=$_}; try{Complete-SmartM365ExecutionContext -Status Failed -ErrorRecord $err -FailureStage $CurrentOperation}catch{$null=$_}; throw }
@@ -647,8 +770,8 @@ try{
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBpUZWPTejBZLb1
-# Mb12S8lQdAvqaW2mFKW6Q34v2fHKeqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC/PVwgUETyxKpj
+# to6XYqb7uz+zYBubleH4NiweLB778KCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -781,31 +904,31 @@ try{
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIHBeMWcxTFzJbyD5M7AxnJQ2x3NXFOhuIxsFVCCtuRrWMA0GCSqG
-# SIb3DQEBAQUABIIBgAlT+m5PDYuvR0Ns9fKVGgFg0hqQk5qfrDEwErC37KgFks9R
-# dTqGBjKCe9CRSa+5K4EO5gWEzqmNPbId7745OmUNXAzacHKOgx9UG2d9OMA0hnj1
-# FHSvQsLBfQDsjcoEQLMclnndhWEOdxJkvhrBqrW7WFO/d7pHn9yI0rurxNXG7E9l
-# /kc4oOoqTbxPjxXeUoQWOAYABxq3lkoMMIpgHR05UFMfdwbM8dvRM1ye1wN/vbx6
-# jn1xbI7ZeHSJ+Whogazu3qDP5p5VWFZcsz/Z/+0cL7MnBvtf06XJIvNou4DCsYhp
-# 1Z72iHodlf6ELy49GboOV+7M41jdh44LpT3eeGkZqLZpniBPlTOI0/4NKSo1qF4L
-# pa1ly4vUTp7UgfYOJfNTjx39feAfZjIpYpv/DJ2TwHkFEXnCSmiswQiQ2AHTJwFa
-# VtUgODVGyZa7Z8oRGABeX9XFxDJv4ciu4AFMb+Ou2rjBO2a7/S9hWNPRKjhTm45A
-# ozU554JqJlWDUWsTW6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIIol/XYdyQLGADa8Ari7ZU5e2wpL342NBytU7ya9e+/GMA0GCSqG
+# SIb3DQEBAQUABIIBgKuXruZl/gqFAConai5buoouWZy4R6gAnmu9g9unBjNTlnMk
+# bmaT89C77GsToL5TJvv5aBzjjOa4NofGMnbKV09rFx9ji6YFASj3HQOk/MB3gGKC
+# Mj8Ju6GYrNs1pKgAYOnl4+X9sO1DuKh/d6WmUBJvdzR0a07779lUqzCuVPQt+7e+
+# GNjwzxk89OH4zegCK/SgThflJQM/O+Xvie564I0t7axXLUMg9WU0/bPpuwbCWYFe
+# t0g1s9cbk78sbI/NPVRfVmc5584FY92Ta30gpscePDEzh/mDeJi9P1RysRc5npGm
+# va9njmNo1+V+DcaFOY2SP6RZYr0kz32cmLUVPgHsL/gv04VPErLCaLYJbfG8NvGM
+# EcWP1skobK+Pn/v/rMEJSFJ5JvkePc6ewgZITqlTJBSIJ9CM71yioYshQ5YUFCaN
+# CW5sxh3Gh3RD6vRbHIXVp+Ah3sdFswLULNs9UIgj1oYCL8y1VQi702hdN7tAduDX
+# n5zhf1mVTegJNDvgN6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDYxMDA3
-# MDRaMC8GCSqGSIb3DQEJBDEiBCDZdJmYUgPqUXQHNop0gbMb5qOqRDXtXFv6nl5/
-# GBY9JDANBgkqhkiG9w0BAQEFAASCAgABFjUDWXGZ3JwDSEpSTmnEbbQrApz9QKfa
-# Wtxf5mVCiLPb42h1aWVzYF8nogwP1T+Jk033mB4owt/wfcGfKVyQpcuxKcmSNB3J
-# y1y5UY9I2tPo2LHkMgsLcA05tfQp6UFMx1w9Acz7vE+tepij/wkDSPh6AjxwQ5K4
-# G7MNPf9NIEe39B9VBVoTsqipsqogYsni9M3q+TpwtsyRzdMYV13Ita9XxIMzNFSU
-# IDF+BZTytxBpa3QDVHZIvR7OwSsZc5XkjJ7wjKaL8/nWP/YI9RbGfTl6S9m22FBV
-# yKFAIzxjYqEUPaBFaO8KquKY27PsC+9d2DQhoAARDz8FlCkNLP5dTUNaZMi19C0J
-# h7GCLR2tBawzvrSjSMg4tRm4kroupn/sDnVcNz3sJZUqkQsOGG6mUtoRGwc1z+cT
-# 1bvQJTlvB5tYIKl7WjcigQh96agZnczR9TM/KFFt/Kl9ggmZPVwep2YtY4rvJ4hl
-# zA1tZohZAE58qBUgMfV+B/XSgBMdqaKSYVfFRtNkq8rHESW3nzHgheOUpPklLUnr
-# G8sCndaT+Wec12wZv+3QQbgPjbr86yj7cjpZXjZXP+DjWhdQMpx7Zuko/51F57sU
-# P4TLznUq5VAWEiwii22DsHriBYUIy1ccHuuLmDZEC8QXXGrUXVeOP/gbgndcXmOd
-# 0fmhvtNFrw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTIxMDQx
+# MjNaMC8GCSqGSIb3DQEJBDEiBCCskaXzSe9b22mIGEVz2F2VBOq/qTzdBKiJhOxC
+# 3DhCsjANBgkqhkiG9w0BAQEFAASCAgAA77uYaL0B+xEjGPJGDJLDod2s4EXYPZxf
+# VBgWdk/swtMnsDTDMlfJIl+Nen4v6T9TCm09BABwg0LWNiajX+3dJYnQDcCp5Pie
+# rHE8FBSxIGzJlS2lU4t1iqnLyMkpBEBkodoh08or/krsTVIRyUv8tnGhbAaT7oeP
+# 5kopNtse4CNfBcpQwusNafOmgx+r406eHPM7i5viZ7daeing4arAedOsUjuNF1e9
+# MWP/CZSPJQjqsARxlkWD6IPB6YP4Zvb2Ako56lYSEF+a8i8fwSVNXzazGQcMmcEE
+# bIwW44DYfw1xSUzTmchrC3r6d9BBYEQu8O/EWSl8ydVqOGL7turPeQ2xESe+ni8r
+# AZ11ApPLjECgHIckgxWhp1n/GHynCmMsq+FEtj3PDXHgbOyERwz1YgIHjFlSNnh+
+# B+/JAigXAHlNYnXhsF5baSfOrSkdudHPQN6a9QtEA2SjTjGMbcFUHmBnCJ3cQEge
+# SObDOjhxiOtcdJCCzUe0mt0ZN835N3HqtGTxIAVRYqbXoIByaCf1OXvv1sqFR8SF
+# KG5CyV2R9WyJ3OW2lGi88hT5WLZf/4h1xI5tGwAtRhoKwXuh+1XC5UI0mln1sxtD
+# FWS0IAdcvfns5BD4qf0g6BluWTlrLvUIvRE6oiGAJZfJsUIkylTLnWzx6wfkHIQG
+# DhtSWk2lWQ==
 # SIG # End signature block

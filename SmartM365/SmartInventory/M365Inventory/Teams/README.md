@@ -2,9 +2,11 @@
 
 `SmartM365-Teams-Inventory.ps1` inventories Microsoft Teams through Microsoft Graph app-only authentication and exports Power BI-ready CSV files for Teams, Members, Channels, and Guests.
 
-The daily email attaches one timestamped `M365_Teams_Inventory_yyyyMMdd_HHmmss.xlsx` workbook. It includes the four CSV data worksheets plus `Summary` and `Findings`. The mail body shows two KPI bands: four priority counts (inventoried, without owner, inactive, storage above threshold), then active, archived, public, guest, critical-finding, and warning-finding counts. Run details appear at the bottom. The CSV exports, latest copies, weekly history, and SharePoint uploads remain available to downstream consumers.
+The daily email attaches one timestamped `M365_Teams_Inventory_yyyyMMdd_HHmmss.xlsx` workbook. It includes the four CSV data worksheets plus `Summary` and `Findings`. Immediately after the status, the mail shows a prioritized action table and the first five teams to review. The seven-card KPI grid then uses the Exchange local-mailbox style: four cards on the first row and three on the second, with the last card spanning two columns. It shows inventoried teams, distinct teams requiring review, ownerless teams, teams above the storage threshold, inactive teams, teams with guests, and teams without an activity-report row. Activity-report freshness, unavailable storage measurements, and run details follow. Findings can overlap; the affected-team count is deduplicated by TeamId. The CSV exports, latest copies, weekly history, and SharePoint uploads remain available to downstream consumers.
 
 `ShowMailLinks` in the script's local JSON configuration defaults to `false`. Set it to `true` to show this run's SharePoint export links in the email. The default hides export and attachment links from the mail body; the shared branded footer remains. The mail status is `Critical` only when at least 10% of inventoried teams have no owner or exceed the configured storage quota threshold in a full inventory. Individual findings keep their existing severity in the CSV and workbook. Graph mail attachments larger than 3 MB require a different delivery path and cause a clear send error.
+
+`-MailOnly` builds the same summary and a new workbook from the four existing `DATA-LAST/M365_Teams_*.csv` files. It does not connect to Graph for inventory, collect data, publish CSVs, upload to SharePoint, or append weekly history. The email is labeled `[SNAPSHOT]` and shows the source run date. The mode rejects missing files, a tenant or run mismatch, a changing file, and an empty Teams primary CSV. An empty supporting CSV must have a write time within 30 minutes of the Teams CSV. `-DryRun` prepares the workbook but skips mail. `-AlwaysSend` bypasses the daily sent marker in either mode while keeping the exclusive send lock; use it only when another mail is intended that day.
 
 Since v0.34 these links stay valid for seven days: after each successful upload, older timestamped copies of the same CSV or workbook are deleted from the SharePoint folder, as on the server (SmartM365.Core 1.0.62 or later required).
 
@@ -63,6 +65,8 @@ Examples:
 .\SmartM365-Teams-Inventory.ps1 -Tenant prod
 .\SmartM365-Teams-Inventory.ps1 -Tenant prod -MaxTeams 10 -DryRun
 .\SmartM365-Teams-Inventory.ps1 -Tenant prod -InactiveDays 180 -AlwaysSend
+.\SmartM365-Teams-Inventory.ps1 -Tenant prod -MailOnly
+.\SmartM365-Teams-Inventory.ps1 -Tenant prod -MailOnly -AlwaysSend
 .\SmartM365-Teams-Inventory.ps1 -Tenant prod -AppendHistory -IncludeChannelOwners
 ```
 
