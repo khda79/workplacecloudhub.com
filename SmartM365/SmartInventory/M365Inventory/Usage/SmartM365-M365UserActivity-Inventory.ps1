@@ -8,7 +8,7 @@ report, and publishes stable CSV files into the tenant DATA-LAST folder for
 SmartFinOps and downstream inventory analysis.
 
 .VERSION
-1.29
+1.30
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication; Microsoft.Graph.Reports.
@@ -47,7 +47,7 @@ if ($PSBoundParameters.ContainsKey('MaxItems') -and $MaxItems -gt 0) {
 }
 
 $ErrorActionPreference = 'Stop'
-$ScriptVersion = "1.29"
+$ScriptVersion = "1.30"
 $TaskName = "SmartM365-M365UserActivity-Inventory v$ScriptVersion"
 $runId = Get-Date -Format 'yyyyMMdd_HHmmss'
 
@@ -451,20 +451,21 @@ function Assert-M365UsageReportRefreshDate {
     return $date.Date
 }
 
-function Assert-M365UsageWeeklySnapshotDate {
+function Test-M365UsageWeeklySnapshotDate {
     [CmdletBinding()]
     param([Parameter(Mandatory)][datetime]$RefreshDate,[Parameter(Mandatory)][string]$HistoryRootPath,
         [Parameter(Mandatory)][string]$FileName,
         [datetime]$WeekDate = (Get-Date))
 
-    if (-not (Test-Path -LiteralPath $HistoryRootPath -PathType Container)) { return }
+    if (-not (Test-Path -LiteralPath $HistoryRootPath -PathType Container)) { return $true }
     # Match the week label used by Save-SmartM365WeeklyInventoryHistory.
     $calendar = [Globalization.CultureInfo]::InvariantCulture.Calendar
     $dayOfWeek = $calendar.GetDayOfWeek($WeekDate)
     if ($dayOfWeek -ge [DayOfWeek]::Monday -and $dayOfWeek -le [DayOfWeek]::Wednesday) { $WeekDate = $WeekDate.AddDays(3) }
     $week = $calendar.GetWeekOfYear($WeekDate,[Globalization.CalendarWeekRule]::FirstFourDayWeek,[DayOfWeek]::Monday)
     $currentWeek = '{0}-W{1:00}' -f $WeekDate.Year,$week
-    foreach ($folder in Get-ChildItem -LiteralPath $HistoryRootPath -Directory) {
+    $repeatedWeek = ''
+    foreach ($folder in (Get-ChildItem -LiteralPath $HistoryRootPath -Directory | Sort-Object Name -Descending)) {
         if ($folder.Name -notmatch '^\d{4}-W\d{2}$') { continue }
         $path = Join-Path $folder.FullName $FileName
         if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { continue }
@@ -476,11 +477,18 @@ function Assert-M365UsageWeeklySnapshotDate {
         if (-not [datetime]::TryParseExact($value,'yyyy-MM-dd',[Globalization.CultureInfo]::InvariantCulture,[Globalization.DateTimeStyles]::None,[ref]$previousDate)) {
             throw "Weekly history has an invalid Report Refresh Date: $($folder.Name)/$FileName ($value)."
         }
-        if (($folder.Name -cne $currentWeek -and $RefreshDate.Date -le $previousDate.Date) -or
-            ($folder.Name -ceq $currentWeek -and $RefreshDate.Date -lt $previousDate.Date)) {
-            throw "Graph report date $($RefreshDate.ToString('yyyy-MM-dd')) for $FileName cannot follow weekly history $($folder.Name) dated $value. No CSV or WeeklyHistory publication started."
+        if ($RefreshDate.Date -lt $previousDate.Date) {
+            throw "Graph report date $($RefreshDate.ToString('yyyy-MM-dd')) for $FileName is older than weekly history $($folder.Name) dated $value. No CSV or WeeklyHistory publication started."
+        }
+        if ($folder.Name -cne $currentWeek -and $RefreshDate.Date -eq $previousDate.Date) {
+            if (-not $repeatedWeek) { $repeatedWeek = $folder.Name }
         }
     }
+    if ($repeatedWeek) {
+        WriteLog "Graph report date has not advanced since weekly history: $FileName=$($RefreshDate.ToString('yyyy-MM-dd')); history=$repeatedWeek/$FileName. Current CSV will be published; duplicate WeeklyHistory snapshot will be skipped." 'WARNING'
+        return $false
+    }
+    return $true
 }
 
 function Export-M365UsageReport {
@@ -518,6 +526,7 @@ function Export-M365UsageReport {
 
     [pscustomobject]@{
         ReportName = $ReportDefinition.Name
+        FileName = "$($ReportDefinition.BaseFileName).csv"
         Rows = $normalizedRows.Count
         LatestPath = $exportResult.LatestPath
         PublishedPath = $exportResult.PublishedPath
@@ -545,7 +554,7 @@ function Publish-M365UsageWeeklyHistory {
             Sort-Object -Unique
     )
     if ($sourceFiles.Count -eq 0) {
-        WriteLog 'Consolidated WeeklyHistory publication skipped: no published CSV file found.' 'WARNING'
+        WriteLog 'Consolidated WeeklyHistory publication skipped: no eligible CSV file was provided.' 'WARNING'
         return
     }
 
@@ -671,7 +680,6 @@ try {
     $reportRefreshWarningAgeDays = [int](Get-SmartM365ConfigValue -Name 'ReportRefreshWarningAgeDays' -DefaultValue (Get-SmartM365ConfigValue -Name 'MaxReportRefreshAgeDays' -DefaultValue 3))
     if ($reportRefreshWarningAgeDays -lt 1) { throw 'ReportRefreshWarningAgeDays must be a positive integer.' }
     $downloadedReports = New-Object System.Collections.Generic.List[object]
-    $weeklyRefreshSnapshots = New-Object System.Collections.Generic.List[object]
     foreach ($reportDefinition in $selectedReports) {
         $requestedPeriod = if ($reportDefinition.PSObject.Properties['PeriodOverride']) { [string]$reportDefinition.PeriodOverride } else { $Period }
         $rawPath = Join-Path -Path $runOutputRoot -ChildPath ("{0}_Raw_{1}_{2}.csv" -f $reportDefinition.BaseFileName,$requestedPeriod,$runId)
@@ -679,25 +687,32 @@ try {
         WriteLog ("Downloading {0}. Period={1}" -f $reportDefinition.Name,$effectivePeriod) 'INFO'
         Invoke-M365UsageReportDownload -ReportDefinition $reportDefinition -RawPath $rawPath
         $refreshDate = Assert-M365UsageReportRefreshDate -RawPath $rawPath -ReportName $reportDefinition.Name -WarningAgeDays $reportRefreshWarningAgeDays
-        $weeklyRefreshSnapshots.Add([pscustomobject]@{RefreshDate=$refreshDate;FileName="$($reportDefinition.BaseFileName).csv"}) | Out-Null
-        $downloadedReports.Add([pscustomobject]@{Definition=$reportDefinition;RawPath=$rawPath}) | Out-Null
+        $downloadedReports.Add([pscustomobject]@{Definition=$reportDefinition;RawPath=$rawPath;RefreshDate=$refreshDate;FileName="$($reportDefinition.BaseFileName).csv"}) | Out-Null
     }
-    if ($weeklyRefreshSnapshots.Count -gt 0 -and -not (Test-SmartM365MaxItemsMode) -and [bool](Get-SmartM365ConfigValue -Name 'EnableWeeklyHistory' -DefaultValue $true)) {
+    $weeklyHistoryFileNames = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    $unchangedHistoryReports = New-Object System.Collections.Generic.List[string]
+    $checkWeeklyHistory = -not (Test-SmartM365MaxItemsMode) -and [bool](Get-SmartM365ConfigValue -Name 'EnableWeeklyHistory' -DefaultValue $true)
+    if ($checkWeeklyHistory) {
         $historyRootPath = [string](Get-SmartM365ConfigValue -Name 'WeeklyHistoryFolderPath' -DefaultValue '')
         if ([string]::IsNullOrWhiteSpace($historyRootPath)) { $historyRootPath = Join-Path $OutputPath 'WeeklyHistory' }
-        foreach ($snapshot in $weeklyRefreshSnapshots) {
-            Assert-M365UsageWeeklySnapshotDate -RefreshDate $snapshot.RefreshDate -FileName $snapshot.FileName -HistoryRootPath $historyRootPath
+    }
+    foreach ($download in $downloadedReports) {
+        if ($checkWeeklyHistory -and -not (Test-M365UsageWeeklySnapshotDate -RefreshDate $download.RefreshDate -FileName $download.FileName -HistoryRootPath $historyRootPath)) {
+            $unchangedHistoryReports.Add("$($download.Definition.Name)=$($download.RefreshDate.ToString('yyyy-MM-dd'))") | Out-Null
+            continue
         }
+        $null = $weeklyHistoryFileNames.Add($download.FileName)
     }
     $reportResults = New-Object System.Collections.Generic.List[object]
     foreach ($download in $downloadedReports) {
         $reportResults.Add((Export-M365UsageReport -ReportDefinition $download.Definition -RawPath $download.RawPath)) | Out-Null
     }
-    Publish-M365UsageWeeklyHistory -ReportResults @($reportResults.ToArray())
+    $weeklyHistoryResults = @($reportResults | Where-Object { $weeklyHistoryFileNames.Contains($_.FileName) })
+    Publish-M365UsageWeeklyHistory -ReportResults $weeklyHistoryResults
 
     $summaryParts = @($reportResults | ForEach-Object { "{0}={1}" -f $_.ReportName, $_.Rows })
-    $summary = "Tenant=$Tenant; Period=$Period; Reports=$($summaryParts -join '; '); LatestFolder=$LatestCsvFolderPath"
-    WriteLog ("Microsoft 365 usage reports inventory completed. {0}" -f $summary) 'SUCCESS'
+    $summary = "Tenant=$Tenant; Period=$Period; Published=$($summaryParts -join '; '); HistorySkippedUnchanged=$($unchangedHistoryReports -join '; '); LatestFolder=$LatestCsvFolderPath"
+    WriteLog ("Microsoft 365 usage reports inventory completed. {0}" -f $summary) $(if ($unchangedHistoryReports.Count -gt 0) { 'WARNING' } else { 'SUCCESS' })
     Send-SmartM365TeamsNotification -Level SUCCESS -Channel Infos -Title 'SmartM365 M365 usage reports inventory completed' -Message $summary -ResultSummary $summary -Facts @{
         Tenant = $Tenant
         Period = $Period
@@ -755,8 +770,8 @@ finally {
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBj7s4FE1+5To0Z
-# tMOCsrRLd1IQ+L4XfKpp6Kzm42UOTqCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD/LPw5TRHnlvlo
+# nCNfSiyszHvyvdGgBGfDGhEWfV3lFqCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -786,14 +801,14 @@ finally {
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCDcXVCODFHx713PYlYqin+s
-# OSHkUMkhEILZogxOaNa4NzANBgkqhkiG9w0BAQEFAASCAYBVmR4TFkauVELH4Wda
-# 3XmGr9SbgccvoLQUrj4Cl7GS7Vhxuv2JCMovyI4tg75hk58/KsoiqqrQ7tKukX8p
-# UCu8Hz1CeWfqNTYcvBJ1ALMX+iA7YOpdeRxQz+bVuMoLeodX+GgNtf+mS6out0g6
-# Rt1jFz8E8t4yT5W0Jdtqsyk7JcWpgVkPWSCxOH4YFMIsMtHvvooFFD57IzPJOXRJ
-# rDr4zthfJN8jmR1iMVblaTUBCdYl+QBDLvc+GZ8Bq85D81i4nEr8qT2s0iSAXaY2
-# Wl0cR/ge1bJcOIiqjAFBxGSe7O79umpUEI9NEoAat6K9KA5A7T9EJ25VpOXCruFE
-# 5z7Ez2MrZttMaMZz+t9vloCHD/M44LKZPoofwUC+zCHBYIBlvooiGVbMWFYrA6kz
-# 1yvyNFsUchtdhTX35ltqQ+s9EHhMI5t0A4d+NoWq0OHf5RLGhVk+EMoAF65k//8K
-# l2AfNqEqFDtxJIhhkBUemtfKOPlT9gh6FmwrMYYUfNTx2pw=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCB8httPtXxd1CpSoc2OyHyE
+# G0hxgq4yzsG7ocha29q7FzANBgkqhkiG9w0BAQEFAASCAYA3W8mPJE+zFCd+A6Nz
+# /yx1me3QofGAToK/O4+XDPddCpIB8uj0QkUv3K9e66raY7n70fTmhVVh0YVJN6aQ
+# 63CtqlOxYGV1rG3sh9x01Rzew/j/SIPCyK7tSI0/RZGwm56V3kLr7QvP2R7YyTYZ
+# 2sPoDbIZpA28+LxijaIQrMB2HPPYUKjLQHepe8jbeX+Renrf3D+K1R7X98pZmz09
+# uuzDo5ub02tgiLyArsbU13+AdRnCWoYDUSDfFhFK8leN/G8kYgY8Exj3BYTywxCf
+# X+z3GBdD6ZspG91mIYA/FS0mMSW3G1gjF9+9Tj8zL47U6zqsne0wg+Yl/T2i7ehP
+# YhXDs6XOCg9V9CPzCVU1oZBqlDtrvV3Whs7+nbaWK61j2wob8IigwyeyMmyIT01m
+# z3B2dibE1dTjJW/TbfmkLKPP2B+9hTTdSQfPeVc6TpxKTr+kjo1AoFxriJ4xrziW
+# lmbMxhQEu1H7fpc6EUfuti8TcgZmCqfSwmBW/mRUMc6TFj4=
 # SIG # End signature block

@@ -181,7 +181,7 @@ calculations or collection algorithms.
 
 `Usage/SmartM365-M365UserActivity-Inventory.ps1` exports Microsoft Graph Reports data and publishes stable CSV files to the tenant `DATA-LAST` folder.
 
-Default behavior is intentionally unchanged: without `-Reports`, the script exports only `Office365ActiveUserDetail` as `M365_Users_Activity.csv`.
+Without `-Reports`, the script exports `Office365ActiveUserDetail`, `M365AppUserDetailD30`, and `M365AppUserDetailD180`.
 
 Supported report selections:
 
@@ -193,6 +193,8 @@ Supported report selections:
 | `SharePointSiteUsageDetail` | `M365_SharePoint_SiteUsage.csv` | SharePoint site storage, file/page activity, owner/site metadata from Graph reports. |
 | `SharePointActivityUserDetail` | `M365_SharePoint_UserActivity.csv` | SharePoint file viewing/editing, sync, internal/external sharing, and page visits by user. |
 | `Office365ActivationUserDetail` | `M365_Apps_Activations.csv` | Microsoft 365 Apps / Office activations by user and platform; no period parameter. |
+| `M365AppUserDetailD30` | `M365_Apps_Usage_30D.csv` | Microsoft 365 Apps user activity for D30. |
+| `M365AppUserDetailD180` | `M365_Apps_Usage_180D.csv` | Microsoft 365 Apps user activity for D180. |
 | `TeamsUserActivityUserDetail` | `M365_Teams_UserActivity.csv` | Detailed Teams user activity. |
 | `TeamsDeviceUsageUserDetail` | `M365_Teams_DeviceUsage.csv` | Teams client device and operating system usage by user. |
 | `EmailActivityUserDetail` | `M365_Email_Activity.csv` | Exchange email send/read/receive activity. |
@@ -212,9 +214,13 @@ Required Microsoft Graph permission: `Reports.Read.All`.
 `Reports.Read.All` permission. They do not require another app registration,
 permission, or local configuration value.
 
-For multi-report runs, DATA-ALL and DATA-LAST files are uploaded per report, while
-the cumulative WeeklyHistory snapshot is built and uploaded once after all selected
-reports complete successfully.
+For multi-report runs, DATA-ALL and DATA-LAST files are uploaded per report. A
+`Report Refresh Date` older than three days is a warning. If a report repeats a
+date already archived in another week, its current CSV is still published with
+the actual refresh date, but no duplicate snapshot is added to the new week's
+WeeklyHistory. The run completes with warnings. A report date that moves backward
+or has invalid/mixed values still fails before any CSV publication. Eligible
+WeeklyHistory files are published together after the date checks.
 
 Since v1.19 the weekly history is written to `DATA-ALL\M365\Usage\WeeklyHistory`. Up to v1.18
 the script wrote it under each run folder (`M365\Usage\<yyyyMMdd_HHmmss>\WeeklyHistory`), so no
