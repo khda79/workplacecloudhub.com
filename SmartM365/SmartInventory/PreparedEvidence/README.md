@@ -57,6 +57,13 @@ Cloud launchers under `SmartInventory/Launchers/Cloud` select the existing prod 
 Unlike CMDB validation, Intelligence `-ValidateOnly` reads SharePoint mappings
 and can upload execution logs. See the deployment guide before running.
 
+The protected mailbox, SharePoint site, and OneDrive account exports come from
+interactive Backup collectors. They are optional inputs with a 168-hour freshness
+limit: missing or older files are excluded from the prepared snapshot and reported
+in optional source diagnostics. Mailbox protection is then marked unknown instead
+of treating unverified mailboxes as unprotected. The noninteractive BackupPolicyScope
+exports remain required and must pass the normal publication-age check.
+
 Deploy reviewed code without replacing private configuration, sources or data.
 Template merging adds missing keys while preserving existing values. Git updates
 do not activate jobs or reschedule the runtime manifest. Preparation, read-back,

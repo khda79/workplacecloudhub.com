@@ -54,13 +54,14 @@ $paths = @{
     Members   = Join-Path $DataRoot 'M365_BackupPolicyScope_GroupMembers.csv'
 }
 
-foreach ($path in $paths.Values) {
+foreach ($path in @($paths.Coverage, $paths.Members)) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
         throw "Required private evidence file was not found: $path"
     }
 }
 
-$protected = @(Import-Csv -LiteralPath $paths.Protected)
+$protectedAvailable = Test-Path -LiteralPath $paths.Protected -PathType Leaf
+$protected = if ($protectedAvailable) { @(Import-Csv -LiteralPath $paths.Protected) } else { @() }
 $coverage = @(Import-Csv -LiteralPath $paths.Coverage)
 $members = @(Import-Csv -LiteralPath $paths.Members)
 
@@ -139,6 +140,13 @@ foreach ($row in $coverage) {
             $recommendedAction = 'Maintain policy coverage and refresh evidence on schedule.'
         }
     }
+    elseif (-not $protectedAvailable) {
+        $protectionState = 'Unknown'
+        $reconciliationState = 'Protection inventory unavailable'
+        $riskPriority = 'Unknown'
+        $riskSignal = 'Interactive protected-mailbox inventory is missing or stale'
+        $recommendedAction = 'Run the protected-mailbox inventory interactively before assessing protection gaps.'
+    }
     else {
         $protectionState = 'Not protected'
         $reconciliationState = 'Expected not protected'
@@ -183,8 +191,8 @@ foreach ($row in $coverage) {
         'Protection Evidence Age Days' = Get-AgeDays $protectionSnapshot
         'Policy Evidence Age Days' = Get-AgeDays $policySnapshot
         'Evidence Age Days' = $evidenceAgeDays
-        'Freshness State' = Get-FreshnessState $evidenceAgeDays
-        'Evidence Status' = 'Observed'
+        'Freshness State' = if ($protectedAvailable) { Get-FreshnessState $evidenceAgeDays } else { 'Unknown' }
+        'Evidence Status' = if ($protectedAvailable) { 'Observed' } else { 'Not measured' }
     })
 }
 
@@ -236,6 +244,7 @@ $summary = [pscustomobject]@{
     ExpectedMailboxes = @($evidence | Where-Object { $_.'Expected Scope State' -eq 'In expected scope' -and $_.'Reconciliation State' -ne 'Scope member without mailbox' }).Count
     ExpectedAndProtected = @($evidence | Where-Object { $_.'Reconciliation State' -eq 'Expected and protected' }).Count
     ExpectedNotProtected = @($evidence | Where-Object { $_.'Reconciliation State' -eq 'Expected not protected' }).Count
+    ProtectionInventoryUnavailable = @($evidence | Where-Object { $_.'Reconciliation State' -eq 'Protection inventory unavailable' }).Count
     ScopeMembersWithoutMailbox = @($evidence | Where-Object { $_.'Reconciliation State' -eq 'Scope member without mailbox' }).Count
     ProtectedOutsideExpectedScope = @($evidence | Where-Object { $_.'Reconciliation State' -eq 'Protected outside expected scope' }).Count
     DisabledScopeMembers = @($evidence | Where-Object { $_.'Expected Scope State' -eq 'In expected scope' -and $_.'Account State' -eq 'Disabled' }).Count
@@ -248,8 +257,8 @@ $summary | Format-List
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBuumMQ6PjCQzR+
-# TnHy1bO2iAEFn+yX4DY3WKv1NPNeTaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBXxLrw4iztKYty
+# MuIlPErGRyaw3fkvs+J7EANgHMEGrKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -382,31 +391,31 @@ $summary | Format-List
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIMuLyD3mf8Iop12789riXhFa6g2UdTqxHKkImAMraTGaMA0GCSqG
-# SIb3DQEBAQUABIIBgF5n5bP1jq7KoRLuPieZ6fdmZiEmeuLxrA27tWlnKHpjxCur
-# nyKLiJRPUcXf0rkIDaz1fCk29eDAP0HzqB/OKDpp33iMS1LYNYrjW8uiKEjXe7wE
-# CZK+areN+tquF0+mCta4OPd7bGEmWiLHbc8zjfw6qltwds/NI7Eq8zXGtfi5bgZF
-# dMcgZBhn2pJjtqPVYpwV0O/9Np0ahL8pH4anV/ihPaDWwRCcVsqkBcKe8bLQFrRk
-# BHvzQj+L+ni/BuljHoNIYZK9/bpws+O1Nktu3Jsog3AbZTKDGkPl6n8C7egdIs1/
-# haOXBCskA/Chro6mS/L14isM6eOLi2WbHOYqtis7UoHt4hA03Yb46+rsy70MKHNy
-# 1KNkyC9Aus3uIqSqgdhEXiOUx8RWoGWtHo0+I0BykLYlHoV7yz4H4yTV+zYVQCF7
-# nBq6fVoX0My371Kyci8uGHKWEDNAuNgOo50bGrJgFzUn+Lh68rUKxR3Pb0XgvBIb
-# qqAp2wupqrHOqT/VTKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEICo/uUJcRmuUeOoZLawBi1tPYo4bySnA2QmZxtZz8KmxMA0GCSqG
+# SIb3DQEBAQUABIIBgFPFeGSUduECe6jcWpMNMVJML1alwlY0VPhXtsYeoJX0YcUW
+# mC65MRLUaXY5J8tg2T/7qBBJN4B1MFrVj8ONCwhX/JLWKjXAiuLS9QH+iqkGtv5I
+# kLy14TvA450VOstwX+pOtidhaO8XzzFgT7rXxG/0bHMVfbSwd4d3IKd0n/DV0V+L
+# +VAyqHcHgBtH7RhFRdi55GyfUEto68mOnmVUob8pKhb8CZwEaATxZZcOGmj2zifS
+# q6sF1hPmUPh7csZxD2iIUQ1o9NT+qgQ/sOr26aZu6vRldqdgE5wvptP3ED2Fs1cT
+# LQ6A2pbg2Ix23YYZrU/B/jmzdC4En9UbqT4exhmt9r50hDuF4rmWlAjWDV8QKhsu
+# 2XmDFiGlgkMFAW7uCyD3P9iVA1wUKYYr1Dymfwkd55f4ZTO27O6fyu/xk5u8Jkkd
+# MQiQPcGxSUb23TPVrJMtEOCviPQufnxlsBLl8OtGxJ9BXhcEuduXkVOVh/4LdPAD
+# Ehhs2DDXoQ5gVhGk0aGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjkxOTEx
-# MjhaMC8GCSqGSIb3DQEJBDEiBCBECMrSRpmyN/EVX7/wgR/BFvlPcBZhwKWWJXSo
-# ZPeLpDANBgkqhkiG9w0BAQEFAASCAgBmZRbppvjiOuFIO5TSrbT+1cySpobUaCUJ
-# HVBPqfH3BTUuF5HuquhUTKa7TbkqPiuOQdObYba0cV3pPy0owWGrQc8FsVF6fBD5
-# BGXAKeRCFq8HN7Jp2h+sIxc9FnfPh3CEr+nT+t9NmOR5rPmprOlXyFHAf9oxML2c
-# CP1m2lw/nTaizR1lW1jDRER+G9pJzxqM1MmSBcRPVCkbimiMiZKhYnXEAzOvq+vX
-# 3mHIh5Zb0KLhqRN/He59znynOp6faei37mjMafwruU1A3uKGavRws/ZQoaqllpYB
-# GOHIXlDh7s6ZQjZNucQfD4Ee79+QoGZIaLyCHmGd7aFlyvbTkjqE99JO7zrucSBt
-# 5wUn575s3zi8njJEqm6bz4Am61u6rFY0pFypHig4zoLtum1RmfIkINALLwlVVXo2
-# Ac3j7crOkEwW48iz5au0Tl92IPleyDPHOGpeBVZJw/LDfrYwKdNIqqatqzJpMGsB
-# 0n1xo4rexNEvQ1khHNfZXmg7en2YYsTpyuIZkR+cnaLoklNbst5fi6ny5d2SjFmw
-# 7b4gDAHIzpKZ3I3Hu5vYK+1yQh/QycsJZv82l3nATMYRuucin0sJDfEyyk8b+WhH
-# VM8Nxo5h2Bb1gZQH+iKVeCKhWhvLkgRgA1Uv64JHVrthCQaMBmtEYlUAWriVEwHV
-# OknrWmU33g==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTIxOTQ0
+# MDVaMC8GCSqGSIb3DQEJBDEiBCBuShPhsEu3f7K283gQx11kxfvx/yFHBvmgwbe6
+# 6z2DbDANBgkqhkiG9w0BAQEFAASCAgByZ+qOuFM5i39N4MTjE0+1sebtjqoBOGnZ
+# LHaBX15VzHDNP+V30aJAG+cxdBgT/wfSYFYCrk4g79cym1ut3H2jm60dFcY3Klrf
+# t1wu5SzAbKQaCT2rmeszugD/Xi676JiAYTCECuj2zjBTcfkckCZjSWStASgypvOt
+# pAjbmIljWhDlVDXSo4+kIzQrsXr+cnrw3ck2/MlNWyBZjEzlnXj1bvxOOpJamFCG
+# KeYIpbb5ucoEwN9Gm/LUTqLuF3tEXtofE/A7R94bAzL6SNixOWE8Ag/t5Du5lPT3
+# +cBpEBfP1R5WfXfC93UNlTc2dfvFXqYrc9+HF6PoFDybk5IQ7V1xbrnXGF0QNmKL
+# nbYAXS4rXTfm+qjV5ECNSV+7H0GdXZFmVKyoHMX5VGobE2yf1+Va0ymGyOd7LlI/
+# i1cjcJSHstxdTnpmngF49nrBAbNo3N55NY4AOwinuSshiwaFc6Hb/OS3kjO+pDOu
+# wWuRcF+Ma2pp76fk963xAC1F86AZuq9iy5MPNGLp2j94kOoptbYtH+eUMRkPA4XN
+# e4hjGoIJqIKt5yLiC+5X302NMZO/ccaYn61FukehEjspyhwGD0HjizioxedYXSLs
+# UYAy3OlnndJZS453wH6nb+Lrsi5ThEknVmjVFeo/87tpIFBoiqaOOiYHc5jh3tdf
+# AXBRppSxHg==
 # SIG # End signature block

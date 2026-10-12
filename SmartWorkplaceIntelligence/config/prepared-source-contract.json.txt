@@ -19,11 +19,15 @@
     "M365_Entra_AzureADConnect_SyncHealth.csv",
     "M365_Entra_ConditionalAccessPolicies.csv", "M365_Entra_ConditionalAccessPolicyTargets.csv",
     "Intune_EndpointSecurity_DefenderAgents.csv", "Intune_EndpointSecurity_FirewallStatus.csv",
-    "M365_Security_SecureScore.csv", "M365_Backup_ProtectedMailboxes.csv",
-    "M365_Backup_ProtectedSharePointSites.csv", "M365_Backup_ProtectedOneDriveAccounts.csv",
+    "M365_Security_SecureScore.csv",
     "M365_BackupPolicyScope_MailboxCoverage.csv", "M365_BackupPolicyScope_GroupMembers.csv"
   ],
-  "optionalCurrentFiles": [{"file":"AD_HealthCheck.csv", "maxAgeHours":48}],
+  "optionalCurrentFiles": [
+    {"file":"AD_HealthCheck.csv", "maxAgeHours":48},
+    {"file":"M365_Backup_ProtectedMailboxes.csv", "maxAgeHours":168},
+    {"file":"M365_Backup_ProtectedSharePointSites.csv", "maxAgeHours":168},
+    {"file":"M365_Backup_ProtectedOneDriveAccounts.csv", "maxAgeHours":168}
+  ],
   "mappingFiles": ["SmartWorkplaceIntelligence-PersonaClassification.xlsx", "SmartWorkplaceIntelligence-SiteClassification.xlsx"],
   "dailyFiles": ["DATA-ALL/ActiveDirectory/Inventory/AD_Users_DailyStats.csv", "DATA-ALL/ActiveDirectory/Inventory/AD_Computers_DailyStats.csv"],
   "history": [
