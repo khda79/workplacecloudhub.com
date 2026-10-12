@@ -15,7 +15,7 @@
     the directory containing this GUI when launched from the shared toolkit.
 
 .VERSION
-    1.0.66
+    1.0.67
 #>
 
 #Requires -Version 7.4
@@ -28,7 +28,7 @@ param(
 )
 
 $script:AppName    = 'Smart SharePoint Migration'
-$script:AppVersion = '1.0.66'
+$script:AppVersion = '1.0.67'
 $script:ScriptRoot = $PSScriptRoot
 $script:FarmToolkitRoot = if ($FarmToolkitRoot) { $FarmToolkitRoot } else { $PSScriptRoot }
 $script:SummaryLastGoodRows = @{}
@@ -66,17 +66,24 @@ if (-not $ValidateOnly) {
 # ---------------------------------------------------------------------------
 
 function Get-MigrationFolders {
-    $root = Join-Path $script:ScriptRoot 'Migrations'
+    param(
+        [ValidateSet('Migrations', 'ArchivedMigrations')][string]$DirectoryName = 'Migrations',
+        [switch]$IncludeInvalid
+    )
+    $root = Join-Path $script:ScriptRoot $DirectoryName
     if (-not (Test-Path -LiteralPath $root -PathType Container)) { return @() }
     $results = [System.Collections.Generic.List[object]]::new()
     foreach ($dir in (Get-ChildItem -LiteralPath $root -Directory)) {
         if ($dir.Name -like '.new-*') { continue }
         $cfgPath = Join-Path $dir.FullName 'migration.config.psd1'
-        if (-not (Test-Path -LiteralPath $cfgPath -PathType Leaf)) { continue }
-        try {
-            $cfg = Import-PowerShellDataFile -LiteralPath $cfgPath
-        } catch { continue }
-        if ($cfg.Name -eq 'NewMigration') { continue }
+        $cfg = $null
+        if (Test-Path -LiteralPath $cfgPath -PathType Leaf) {
+            try { $cfg = Import-PowerShellDataFile -LiteralPath $cfgPath }
+            catch { if (-not $IncludeInvalid) { continue } }
+        }
+        elseif (-not $IncludeInvalid) { continue }
+        if ($cfg -and $cfg.Name -eq 'NewMigration') { continue }
+        if (-not $cfg -and -not $IncludeInvalid) { continue }
         $results.Add([pscustomobject]@{
             Name       = $dir.Name
             Root       = $dir.FullName
@@ -85,6 +92,39 @@ function Get-MigrationFolders {
         })
     }
     return $results.ToArray()
+}
+
+function Move-MigrationToArchive {
+    param([Parameter(Mandatory)]$Migration, [Parameter(Mandatory)][string]$ProjectRoot)
+    $activeRoot = [IO.Path]::GetFullPath((Join-Path $ProjectRoot 'Migrations'))
+    $archiveRoot = [IO.Path]::GetFullPath((Join-Path $ProjectRoot 'ArchivedMigrations'))
+    $source = [IO.Path]::GetFullPath([string]$Migration.Root)
+    $expectedSource = [IO.Path]::GetFullPath((Join-Path $activeRoot ([string]$Migration.Name)))
+    if (-not [string]::Equals($source, $expectedSource, [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'The selected migration is not a direct child of Migrations.'
+    }
+    if (-not (Test-Path -LiteralPath $source -PathType Container)) {
+        throw 'The selected migration folder no longer exists.'
+    }
+    if ((Get-Item -LiteralPath $source).Attributes -band [IO.FileAttributes]::ReparsePoint) {
+        throw 'A linked migration folder cannot be archived.'
+    }
+    if (-not (Test-Path -LiteralPath $archiveRoot -PathType Container)) {
+        [void](New-Item -ItemType Directory -Path $archiveRoot -ErrorAction Stop)
+    }
+    if ((Get-Item -LiteralPath $archiveRoot).Attributes -band [IO.FileAttributes]::ReparsePoint) {
+        throw 'The archive root must not be a linked folder.'
+    }
+    $destination = Join-Path $archiveRoot ([string]$Migration.Name)
+    if (Test-Path -LiteralPath $destination) {
+        throw "An archived migration with the name '$($Migration.Name)' already exists."
+    }
+    [IO.Directory]::Move($source, $destination)
+    if (-not (Test-Path -LiteralPath $destination -PathType Container) -or
+        (Test-Path -LiteralPath $source)) {
+        throw 'The archive move could not be verified. Check both folders before retrying.'
+    }
+    return $destination
 }
 
 function Get-LatestCsvFile {
@@ -511,6 +551,8 @@ function New-FarmDiagnosticsWindow {
           <TextBlock Text="Migration" FontSize="11" Foreground="#5F6B7A" VerticalAlignment="Center" Margin="0,0,7,0"/>
           <ComboBox x:Name="cmbMigration" Width="140" Height="30" FontSize="13" VerticalContentAlignment="Center"/>
           <Button x:Name="btnNewMigration" Content="+ New"    Style="{StaticResource BtnGhost}" Width="58" Margin="8,0,0,0"/>
+          <Button x:Name="btnArchiveMigration" Content="Archive" Style="{StaticResource BtnGhost}" Width="66" Margin="6,0,0,0"
+                  IsEnabled="False" ToolTip="Move the selected migration folder to ArchivedMigrations"/>
           <Button x:Name="btnRefresh"      Content="Refresh"  Style="{StaticResource BtnGhost}" Width="62" Margin="6,0,0,0"/>
           <CheckBox x:Name="chkAutoRefresh" Content="Auto 30s" IsChecked="True" Margin="10,0,0,0"
                     VerticalAlignment="Center" FontSize="11" Foreground="#5F6B7A"/>
@@ -559,6 +601,7 @@ function New-FarmDiagnosticsWindow {
     <Border Grid.Row="2" Background="White" BorderBrush="#DDE7F0" BorderThickness="0,0,0,1">
       <StackPanel Orientation="Horizontal" Margin="10,0">
         <ToggleButton x:Name="tabSummary"     Content="Overview"    Style="{StaticResource Tab}" IsChecked="True"/>
+        <ToggleButton x:Name="tabArchivedOverview" Content="ArchivedOverview" Style="{StaticResource Tab}"/>
         <ToggleButton x:Name="tabFiles"       Content="Files &amp; Permissions" Style="{StaticResource Tab}"/>
         <ToggleButton x:Name="tabDiagnostics" Content="Migration Diagnostics" Style="{StaticResource Tab}"/>
         <ToggleButton x:Name="tabBatches" Content="Batch runs" Style="{StaticResource Tab}"/>
@@ -735,6 +778,40 @@ function New-FarmDiagnosticsWindow {
             </DataGrid>
           </Border>
           <TextBlock x:Name="lblSummaryStatus" FontSize="11" Foreground="#5F6B7A" Margin="0,3,0,0"/>
+        </StackPanel>
+
+        <!-- ARCHIVED MIGRATIONS -->
+        <StackPanel x:Name="panelArchivedOverview" Margin="18,14" Visibility="Collapsed">
+          <TextBlock Text="ARCHIVED MIGRATIONS" Style="{StaticResource SectionLabel}"/>
+          <TextBlock Text="Read-only view of folders in ArchivedMigrations. Archived migrations are excluded from active actions and batch selection."
+                     FontSize="12" Foreground="#5F6B7A" Margin="0,0,0,10" TextWrapping="Wrap"/>
+          <Button x:Name="btnOpenArchivedFolder" Content="Open selected folder" Style="{StaticResource BtnGhost}"
+                  Width="150" HorizontalAlignment="Left" Margin="0,0,0,10" IsEnabled="False"/>
+          <Border Style="{StaticResource StepCard}" Padding="0">
+            <DataGrid x:Name="gridArchivedOverview" AutoGenerateColumns="False" IsReadOnly="True"
+                      CanUserAddRows="False" CanUserDeleteRows="False" CanUserSortColumns="True"
+                      SelectionMode="Single" SelectionUnit="FullRow" HeadersVisibility="Column"
+                      GridLinesVisibility="None" RowHeight="42" ColumnHeaderHeight="36"
+                      AlternatingRowBackground="#F5F8FB" Background="White" BorderThickness="0"
+                      HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled"
+                      EnableRowVirtualization="True">
+              <DataGrid.Columns>
+                <DataGridTextColumn Header="Migration" Binding="{Binding Migration}" Width="140"/>
+                <DataGridTextColumn Header="Source" Binding="{Binding Source}" Width="180"/>
+                <DataGridTextColumn Header="Destination" Binding="{Binding Destination}" Width="180"/>
+                <DataGridTextColumn Header="Source scans" Binding="{Binding SourceScansDisplay}" Width="155"/>
+                <DataGridTextColumn Header="Target scans" Binding="{Binding TargetScansDisplay}" Width="155"/>
+                <DataGridTextColumn Header="Files comparison" Binding="{Binding ComparisonDisplay}" Width="175"/>
+                <DataGridTextColumn Header="Permissions comparison" Binding="{Binding PermissionComparisonDisplay}" Width="175"/>
+                <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="150">
+                  <DataGridTextColumn.ElementStyle>
+                    <Style TargetType="TextBlock"><Setter Property="ToolTip" Value="{Binding StatusDetail}"/></Style>
+                  </DataGridTextColumn.ElementStyle>
+                </DataGridTextColumn>
+              </DataGrid.Columns>
+            </DataGrid>
+          </Border>
+          <TextBlock x:Name="lblArchivedStatus" FontSize="11" Foreground="#5F6B7A" Margin="0,3,0,0"/>
         </StackPanel>
 
         <!-- FILES AND PERMISSIONS -->
@@ -1583,6 +1660,7 @@ function ctrl { param([string]$n) $script:Window.FindName($n) }
 
 # Header
 $cmbMigration    = ctrl 'cmbMigration'
+$btnArchiveMigration = ctrl 'btnArchiveMigration'
 $btnRefresh      = ctrl 'btnRefresh'
 $chkAutoRefresh = ctrl 'chkAutoRefresh'
 $lblLastRefresh = ctrl 'lblLastRefresh'
@@ -1601,6 +1679,7 @@ $btnOpenConfig = ctrl 'btnOpenConfig'
 
 # Tabs
 $tabSummary     = ctrl 'tabSummary'
+$tabArchivedOverview = ctrl 'tabArchivedOverview'
 $tabFiles       = ctrl 'tabFiles'
 $tabOperations  = ctrl 'tabOperations'
 $tabDiagnostics = ctrl 'tabDiagnostics'
@@ -1612,6 +1691,10 @@ $tabConfig      = ctrl 'tabConfig'
 $panelSummary     = ctrl 'panelSummary'
 $gridSummary      = ctrl 'gridSummary'
 $lblSummaryStatus = ctrl 'lblSummaryStatus'
+$panelArchivedOverview = ctrl 'panelArchivedOverview'
+$gridArchivedOverview = ctrl 'gridArchivedOverview'
+$lblArchivedStatus = ctrl 'lblArchivedStatus'
+$btnOpenArchivedFolder = ctrl 'btnOpenArchivedFolder'
 $lblPortfolioMigrations = ctrl 'lblPortfolioMigrations'
 $lblPortfolioFilesCompared = ctrl 'lblPortfolioFilesCompared'
 $lblPortfolioPermissionsCompared = ctrl 'lblPortfolioPermissionsCompared'
@@ -2278,6 +2361,7 @@ function Invoke-MigrationAction {
 function Switch-Tab {
     param([string]$Tab)
     $tabSummary.IsChecked     = ($Tab -eq 'Summary')
+    $tabArchivedOverview.IsChecked = ($Tab -eq 'ArchivedOverview')
     $tabFiles.IsChecked       = ($Tab -eq 'Files')
     $tabOperations.IsChecked  = ($Tab -eq 'Operations')
     $tabDiagnostics.IsChecked = ($Tab -eq 'Diagnostics')
@@ -2286,6 +2370,7 @@ function Switch-Tab {
     $tabConfig.IsChecked      = ($Tab -eq 'Config')
 
     $panelSummary.Visibility     = if ($Tab -eq 'Summary')     { 'Visible' } else { 'Collapsed' }
+    $panelArchivedOverview.Visibility = if ($Tab -eq 'ArchivedOverview') { 'Visible' } else { 'Collapsed' }
     $panelWorkflows.Visibility   = if ($Tab -eq 'Files')       { 'Visible' } else { 'Collapsed' }
     $panelOperations.Visibility  = if ($Tab -eq 'Operations')  { 'Visible' } else { 'Collapsed' }
     $panelDiagnostics.Visibility = if ($Tab -eq 'Diagnostics') { 'Visible' } else { 'Collapsed' }
@@ -2764,6 +2849,56 @@ function Refresh-PortfolioSummary {
     $lblSummaryStatus.ToolTip = if ($errors.Count) { $errors -join "`n" } else { $null }
 }
 
+function Get-ArchivedOverviewRows {
+    $rows = [System.Collections.Generic.List[object]]::new()
+    foreach ($migration in @(Get-MigrationFolders -DirectoryName 'ArchivedMigrations' -IncludeInvalid)) {
+        $row = [ordered]@{
+            Migration = $migration.Name; FolderPath = $migration.Root
+            Source = '—'; Destination = '—'; SourceScansDisplay = '—'
+            TargetScansDisplay = '—'; ComparisonDisplay = '—'
+            PermissionComparisonDisplay = '—'; Status = 'Config unavailable'
+            StatusDetail = 'The archived folder has no readable migration.config.psd1.'
+        }
+        if ($migration.Config) {
+            try {
+                $source = Get-MigrationScope $migration 'Source'
+                $target = Get-MigrationScope $migration 'Target'
+                $row.Source = $source.Text
+                $row.Destination = $target.Text
+                $evidence = Get-SmartM365PortfolioRow -Migration $migration `
+                    -SourceScope $source.Text -SourceTooltip $source.Tooltip `
+                    -TargetScope $target.Text -TargetTooltip $target.Tooltip `
+                    -SourceType (Get-MigrationEndpointType $migration.Config 'Source') `
+                    -TargetType (Get-MigrationEndpointType $migration.Config 'Target')
+                foreach ($property in @('Source', 'Destination', 'SourceScansDisplay',
+                    'TargetScansDisplay', 'ComparisonDisplay', 'PermissionComparisonDisplay')) {
+                    $row[$property] = $evidence.$property
+                }
+                $row.Status = 'Archived'
+                $row.StatusDetail = 'Read-only archived migration.'
+            }
+            catch {
+                $row.Status = 'Evidence unavailable'
+                $row.StatusDetail = $_.Exception.Message
+            }
+        }
+        $rows.Add([pscustomobject]$row)
+    }
+    return $rows.ToArray()
+}
+
+function Refresh-ArchivedOverview {
+    try {
+        $rows = @(Get-ArchivedOverviewRows)
+        $gridArchivedOverview.ItemsSource = $rows
+        $btnOpenArchivedFolder.IsEnabled = $false
+        $lblArchivedStatus.Text = ('{0} archived migrations · Updated {1}' -f $rows.Count, (Get-Date -Format 'HH:mm:ss'))
+    }
+    catch {
+        $lblArchivedStatus.Text = 'Archived overview refresh failed: ' + $_.Exception.Message
+    }
+}
+
 function Refresh-GuiState {
     try {
         if (-not (Test-Path -LiteralPath (Join-Path $script:ScriptRoot 'Migrations') -PathType Container)) {
@@ -2771,6 +2906,7 @@ function Refresh-GuiState {
         }
         Load-Migrations
         if ($tabSummary.IsChecked) { Refresh-PortfolioSummary }
+        if ($tabArchivedOverview.IsChecked) { Refresh-ArchivedOverview }
         if ($script:CurrentMigration -and $tabDiagnostics.IsChecked) { Refresh-DiagnosticInventoryMetrics }
         Refresh-TransientResults
         try { Invoke-ActivityLogRetention }
@@ -2941,7 +3077,19 @@ function Load-Migrations {
     Sync-SmartM365BatchMigrations -Names @($script:Migrations | ForEach-Object Name)
     $cmbMigration.Items.Clear()
     foreach ($m in $script:Migrations) { [void]$cmbMigration.Items.Add($m.Name) }
-    if ($script:Migrations.Count -eq 0) { return }
+    $hasActive = ($script:Migrations.Count -gt 0)
+    $btnArchiveMigration.IsEnabled = $hasActive
+    $btnOpenConfig.IsEnabled = $hasActive
+    foreach ($tab in @($tabFiles, $tabOperations, $tabDiagnostics, $tabConfig)) {
+        $tab.IsEnabled = $hasActive
+    }
+    if ($script:Migrations.Count -eq 0) {
+        $script:CurrentMigration = $null
+        $script:CurrentStatus = $null
+        $lblSourceUrl.Text = '—'
+        $lblTargetUrl.Text = '—'
+        return
+    }
     $idx = if ($prev) { $cmbMigration.Items.IndexOf($prev) } else { -1 }
     $cmbMigration.SelectedIndex = if ($idx -ge 0) { $idx } else { 0 }
 }
@@ -2951,6 +3099,7 @@ function Load-Migrations {
 # ---------------------------------------------------------------------------
 
 $tabSummary.Add_Click({     Switch-Tab 'Summary'; Refresh-PortfolioSummary })
+$tabArchivedOverview.Add_Click({ Switch-Tab 'ArchivedOverview'; Refresh-ArchivedOverview })
 $tabFiles.Add_Click({       Switch-Tab 'Files' })
 $tabOperations.Add_Click({  Switch-Tab 'Operations' })
 $tabDiagnostics.Add_Click({ Switch-Tab 'Diagnostics'; Refresh-DiagnosticInventoryMetrics; Refresh-DiagnosticCrossCheck })
@@ -2966,6 +3115,16 @@ $gridSummary.Add_SelectionChanged({
         if ($script:CurrentMigration -and $script:CurrentMigration.Name -eq $migrationName) {
             Switch-Tab 'Files'
         }
+    }
+})
+
+$gridArchivedOverview.Add_SelectionChanged({
+    $btnOpenArchivedFolder.IsEnabled = [bool]$gridArchivedOverview.SelectedItem
+})
+$btnOpenArchivedFolder.Add_Click({
+    $selected = $gridArchivedOverview.SelectedItem
+    if ($selected -and (Test-Path -LiteralPath $selected.FolderPath -PathType Container)) {
+        Open-InExplorer $selected.FolderPath
     }
 })
 
@@ -3001,6 +3160,52 @@ $cmbMigration.Add_SelectionChanged({
 
 $btnRefresh.Add_Click({
     Refresh-GuiState
+})
+
+$btnArchiveMigration.Add_Click({
+    $migration = $script:CurrentMigration
+    if (-not $migration) { return }
+    if ($script:ConfigEditorDirty) {
+        [System.Windows.MessageBox]::Show(
+            'Save or discard the unsaved configuration changes before archiving.',
+            $script:AppName, 'OK', 'Warning') | Out-Null
+        return
+    }
+    if ($script:DiagProcess -or $script:CrossCheckJob -or
+        ($script:BatchGui -and $script:BatchGui.Active.Count -gt 0)) {
+        [System.Windows.MessageBox]::Show(
+            'Wait for the GUI analysis or batch action to finish before archiving.',
+            $script:AppName, 'OK', 'Warning') | Out-Null
+        return
+    }
+    $answer = [System.Windows.MessageBox]::Show(
+        "Archive '$($migration.Name)'? Its complete folder will move from Migrations to ArchivedMigrations. Ensure no scan or migration is running for this folder. The GUI has no restore action.",
+        $script:AppName, 'YesNo', 'Warning')
+    if ($answer -ne [System.Windows.MessageBoxResult]::Yes) { return }
+    $btnArchiveMigration.IsEnabled = $false
+    try {
+        $destination = Move-MigrationToArchive -Migration $migration -ProjectRoot $script:ScriptRoot
+        $script:CurrentMigration = $null
+        $script:CurrentStatus = $null
+        [void]$script:SummaryLastGoodRows.Remove($migration.Name)
+        [void]$script:SummaryLastErrorMessages.Remove($migration.Name)
+        try {
+            $activity = New-SmartM365GuiActivity -ProjectRoot $script:ScriptRoot `
+                -Migration $migration.Name -Action 'ArchiveMigration'
+            Write-SmartM365GuiActivityEvent -Path $activity -Status 'Succeeded' -ExitCode 0 `
+                -Detail "Moved migration folder to $destination."
+        }
+        catch { Microsoft.PowerShell.Utility\Write-Warning ('{0} Archive activity log failed: {1}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $_.Exception.Message) }
+        Switch-Tab 'ArchivedOverview'
+        Refresh-GuiState
+        $gridArchivedOverview.SelectedItem = @($gridArchivedOverview.ItemsSource | Where-Object { $_.Migration -eq $migration.Name } | Select-Object -First 1)[0]
+    }
+    catch {
+        [System.Windows.MessageBox]::Show("Could not archive '$($migration.Name)':`n$($_.Exception.Message)",
+            $script:AppName, 'OK', 'Error') | Out-Null
+        Refresh-GuiState
+    }
+    finally { $btnArchiveMigration.IsEnabled = [bool]$script:CurrentMigration }
 })
 
 $btnNewMigration.Add_Click({
@@ -4096,8 +4301,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAX+G/4G4NuxaUA
-# e/0/Uzo3QmRghoOUolPLJGYlVR0SoKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAjgkjp6GC3gzOK
+# jsE5Satqgs+CaTzgBmy8dFuaEnLC2KCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -4230,31 +4435,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEII83Pk7FkmMf6CGDKV0Hv8famB9LWVYqw6SPoSogyNEDMA0GCSqG
-# SIb3DQEBAQUABIIBgDHmXtEhn3iBQgsz5mtuI35YlTUoOhpAeG6kylngU0Mdt/ad
-# 4g5JdsDxpuPPkPXA0BdCiKSsf5X0ZDMJx17gwq7p1TDsGAWYXo1zl7uMmFXSUt/S
-# wi7/aeH9SzWH0ypNO8C3z2uxbQvYliT8n2ccLEIy6SQApYMylLQTdSmLn9ZQPOuf
-# JE+Z7bpmaI1yj4stj2ZoVZIAxkySVczl2EM6rvzqoeAjOwu59tDASxMI62dcF1bD
-# Idk9KnHcuJlLNIKPMz4Xse/NivI8UkUaq7q2fHxHFMjIVwj03gDDVj/2AgvvnsvT
-# bR7u/IY/Cw9zNzsav6LQomlzjMhv5YjEXNG2Rbibp6rV9Um0X2NbSCgygniZ83nS
-# KAEpoVyTpbi9XUnbaTJgqJwMvLr7Js7obLeHi6WRX401rMa5ZrTEfZbyEHJD22re
-# Y++ZOj4z4LdFRCYEReFxiXoOJzW+IBwiSIdUrIK7oMgTbiK32ilTv35B11EHssEC
-# MSkxTVwmmLwge/MMA6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIBjXLioZdvJ3sdk0fCZc4Wqq7EOt+B0SBvu0sPxI4KMlMA0GCSqG
+# SIb3DQEBAQUABIIBgF6FnFRgThI1DAf9HltLEhmuaFmMcI3vjlcv/CxYsH9M5waj
+# FpWI+OOu1LW06sK2DyztIEqlU703MmAufLgwchm1htyzMm79N/G+etQqYFDsiaVg
+# 83dcV/pk7QR+xa6g309K6p0+dtP+1tDDQfuJVonNjVvkDGVil6Amk2hGYhB+5VEZ
+# 7zy0ZAk80IHWIIEN3QRVUcBSacZf/IWgog4seSiP7GGh4RtsiqgOIHRyeNrLTrpd
+# mCiY48QsVVrVCa1B83Uqw6Gt1SsDPIixBIowrtIvr5fcGIUN7At8TpMkcEbCVE/4
+# 92I8FBB6aqCtNWyBfHSbrVwksavAJjwRZZNiCSs7guBJrI9deUqSoZzEKiIMGRc3
+# X0t5tDTCSHb3Juo3FqeFPLwIsRtt044ti/iXqJ73uNG1UHaG6mR5822iybXfBmnt
+# T31iLOQFo8q+ni1cYgRVvuz/Ov3gQi8jziX9eUsPu53SnD0OAzc5uSCqLFzHloRl
+# dqMXHGGPUDku0PIInqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDgxNDU4
-# MjJaMC8GCSqGSIb3DQEJBDEiBCDDk8IS+bfgPebOeOx4yWiaulZo8ZA5zSHVyN1C
-# 7CM1LDANBgkqhkiG9w0BAQEFAASCAgBhPFCw/iB65N07hspmyy+vnxYyIwn3fACB
-# FrIx8RsWJMzAPmumaR7LmXunNrXl8Ss4wqUWmbGJE5fRVuZuP8NTjZ4x01CSnn98
-# ELF77x3TZZubQMvTpsom7f08Pwth+vbwk5PZRQSOjoHPZi4MZOXosj0PBreAuZB6
-# K1cDNYdX86NuBvK/TrmHNaDKmTmwwzac7bwrmqzjiPHHHHlcHKJrwZ7hcLCpM56M
-# rrvAGHSs4kNZZAI8Qmx02tHi+uFYJaT42B3KqSov5ULoOr34/z2sYvsIJpWVx9JQ
-# m189+UG79MPaBrLINcNCZerW6tPvbMnBOcWhjMtgnRQu/OcGEZg3BMXSoWvYUaSM
-# 0OkBo+XCF7chcbcuHKOgQF8Kfov5383vyoZ+v5dJIq2dd1CEZN8SrO0tV9mEEdDN
-# D5htanrsC/MekaN0gSdbhMGS2/BY5XDJslXLvYAVqMIaKnLkdhM4GglR8mbG0GaJ
-# tnQ7N2OQVgpV3YZfyB9mdJficdoixAL4v22Wp7KKSEc7mp5JldvL6jbwsB2C86wr
-# 6f/d5Izf5T9PlZncF1kZJueop9qCGDMGAcPrmby6cCBJc/R5t5eqA6htMtAJaubY
-# kWr09IDthGSOjJQ/AqZSZVoCSzHwgYerAK8DNdXql2w7xADDU4mbhor+Llih1WGm
-# 2AYCgcRsfg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTIwODMw
+# MjhaMC8GCSqGSIb3DQEJBDEiBCCsfS+5uOmilaXJi8Ttpuzln2UoHbkuPecOMA0T
+# ut5OKDANBgkqhkiG9w0BAQEFAASCAgBQd8KRvpg4FM3rwKXe8fwBilmkg0JMPYWk
+# b/nqsXzY+yuHXArLuhF4grwwb1tAIA5rgTtyZQQ6FaXx6Qg0xENCg3Mbq5z/78ft
+# zkCidCQ/DmGVPzVCgdMUJ5H0fDCbnKT4Dz4A/4UsDtYu1PGUa2cRjbL5i0uZtCm2
+# yTxeJfSMt5kIAnpyXsK3l88iFPyVOLm+dsWdhmzmrUFGBz5LZBcyT35gDCYihfQH
+# igTgNtlyPLCUEVOsqoChgluMSUYSA+x+xpuFQBRje2ekGkrp32OjNFgvKBAYbLLx
+# 1KXdJbEnyel7cNNmo4LD8K8HjX0dvTaj4sI9Q/YZoz0T8rNDS0Pe7NcdGZ4RlcXB
+# 5vvD2Ptnu/OOQQs7A02wKgLvH6tjyVIaFLsM6XuewqF1gOINMxuuni8TqZAtnfcl
+# c9KzUA8zZn9lDfvo2AZqsc4u/Y0Z+uj+PypzyH76QFYfOtP0l/a18weFOhKxIaf2
+# PxQ/40xBPzxSUNntwwsKA0dmvNnrSgmuDWqE37vzjPyx3TnvIvmzoWYnr/kTupFg
+# oIcP29ZbOtgbo9p2jY2/zX/Ja3A4+sFsZUxbzqcL6G4sva2gjXeVRzE+X3tPNKaC
+# FPjOLOJ4gUzTSDk6efqyi9LKVayGz/OR8kmBRitwn+yU2ROG4TELqLiW4J0B435C
+# s+MOhLUOiA==
 # SIG # End signature block
