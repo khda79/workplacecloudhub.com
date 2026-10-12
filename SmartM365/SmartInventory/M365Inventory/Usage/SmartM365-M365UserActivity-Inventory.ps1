@@ -8,7 +8,7 @@ report, and publishes stable CSV files into the tenant DATA-LAST folder for
 SmartFinOps and downstream inventory analysis.
 
 .VERSION
-1.28
+1.29
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication; Microsoft.Graph.Reports.
@@ -47,7 +47,7 @@ if ($PSBoundParameters.ContainsKey('MaxItems') -and $MaxItems -gt 0) {
 }
 
 $ErrorActionPreference = 'Stop'
-$ScriptVersion = "1.28"
+$ScriptVersion = "1.29"
 $TaskName = "SmartM365-M365UserActivity-Inventory v$ScriptVersion"
 $runId = Get-Date -Format 'yyyyMMdd_HHmmss'
 
@@ -582,7 +582,7 @@ $logFolder = Join-Path -Path $logAllRoot -ChildPath $logFileBaseName
 $logPath = Join-Path -Path $logFolder -ChildPath ("{0}_{1}.log" -f $logFileBaseName,$runId)
 
 $modulePath = Join-Path -Path ([string](Get-SmartM365ConfigValue -Name 'SmartM365RootPath' -DefaultValue (Split-Path -Path $PSScriptRoot -Parent))) -ChildPath 'Modules\SmartM365.Core\SmartM365.Core.psd1'
-Import-Module -Name $modulePath -MinimumVersion '1.0.65' -Force -ErrorAction Stop
+Import-Module -Name $modulePath -MinimumVersion '1.0.85' -Force -ErrorAction Stop
 
 $global:RetentionMaxCSV = [int](Get-SmartM365ConfigValue -Name 'RetentionMaxCSV' -DefaultValue 30)
 $global:RetentionMaxLogs = [int](Get-SmartM365ConfigValue -Name 'RetentionMaxLogs' -DefaultValue 30)
@@ -616,6 +616,7 @@ $selectedReports = Resolve-M365UsageReportSelection -RequestedReports $Reports
 $selectedReportCommands = @($selectedReports | ForEach-Object { $_.Command })
 $requiredReportCommands = @(($selectedReportCommands + @('Invoke-MgGraphRequest')) | Sort-Object -Unique)
 $failureStage = 'M365UsageInventory'
+$runFinalized = $false
 
 try {
     foreach ($folder in @($runOutputRoot, $LatestCsvFolderPath, $logFolder)) {
@@ -663,6 +664,7 @@ try {
 
     if ($ValidateOnly) {
         WriteLog "Validation completed. Tenant=$Tenant; Period=$Period; Reports=$(($selectedReports.Name -join ',')); OutputPath=$runOutputRoot; LatestCsvFolderPath=$LatestCsvFolderPath" 'SUCCESS'
+        $runFinalized = $true
         return
     }
 
@@ -706,6 +708,10 @@ try {
     Stop-SmartM365UsageTranscript
     Set-SmartM365CmdbSourceScope -CompleteScope ($MaxItems -eq 0 -and @($selectedReports | Where-Object Name -eq 'Office365ActiveUserDetail').Count -eq 1) -Scope 'CMDB:activity' -Qualifications @("M365 usage report period=$Period; acquisition time is not the workload report refresh date.")
     Complete-SmartM365ExecutionContext -Status Auto
+    $runFinalized = $true
+}
+catch [System.Management.Automation.PipelineStoppedException] {
+    throw
 }
 catch {
     $failureRecord = $_
@@ -724,20 +730,33 @@ catch {
     catch { WriteLog ("Teams alert notification failed: {0}" -f $_.Exception.Message) 'WARNING' }
     Stop-SmartM365UsageTranscript
     try { Complete-SmartM365ExecutionContext -Status Failed -ErrorRecord $failureRecord -FailureStage $failureStage } catch {}
+    $runFinalized = $true
     throw
 }
 
 finally {
-    try { Remove-SmartM365TimestampedFilesOlderThan -FolderPath $runOutputRoot -FilePattern '*.csv' -RetentionDays 7 -RequireCurrentRunPublication -LogFile $global:LogTextFile } catch {}
-    try { RemoveOldFiles -Path $logFolder -Filter '*.log' -KeepCount $global:RetentionMaxLogs -LogFile $global:LogTextFile } catch {}
+    if (-not $runFinalized) {
+        try { WriteLog "Microsoft 365 usage reports inventory cancelled by operator during $failureStage. Remaining publication stopped." 'WARNING' } catch {}
+        try { Complete-SmartM365CmdbSourceReceipt -Status Cancelled -ErrorCount 1 | Out-Null } catch {}
+        Stop-SmartM365UsageTranscript
+        $global:SmartM365ExecutionStatus = 'Cancelled'
+        try {
+            Write-SmartM365CompletionBanner -Status Cancelled -ScriptName $TaskName -StartedAt $global:SmartM365ExecutionStartTime -EndedAt (Get-Date) -WarningCount ([int]$global:SmartM365WarningCount) -ErrorCount ([int]$global:SmartM365ErrorCount) -GeneratedCsvFiles (@($global:csvGeneratedPaths).Count) -LogPath $global:LogTextFile -ClosedTranscriptPath $global:logTranscriptFile -Force
+        } catch {}
+        [Environment]::ExitCode = 130
+    }
+    else {
+        try { Remove-SmartM365TimestampedFilesOlderThan -FolderPath $runOutputRoot -FilePattern '*.csv' -RetentionDays 7 -RequireCurrentRunPublication -LogFile $global:LogTextFile } catch {}
+        try { RemoveOldFiles -Path $logFolder -Filter '*.log' -KeepCount $global:RetentionMaxLogs -LogFile $global:LogTextFile } catch {}
+    }
     try { Stop-SmartM365UsageTranscript } catch {}
 }
 
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC+Q2KizPZED4G5
-# M6eaeG4GxWsI9GFsefEle6LIyEqbfKCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBj7s4FE1+5To0Z
+# tMOCsrRLd1IQ+L4XfKpp6Kzm42UOTqCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -767,14 +786,14 @@ finally {
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCCFUZCC4MnAz52MAmoTTRrC
-# v0G+KO//7VH7PopSMwDNkTANBgkqhkiG9w0BAQEFAASCAYA5qCWRlY3Nvs//5To8
-# ICAQviSLnMYYiiJjxa2nHGBJ7nC3ZpFbqOmFURi8Q906A2D6uBxm2LhYE3zSL6zs
-# eyQdUCs/O4AYfO0LRRQHGiBWk1lYVQFbnoLLPlr7XQwEbLcnghd9JSyx2prF9uIe
-# SrNsVf1hkBWfXfgIgIMUVl8k69sB3oXc/10lzU+qhkMi2cx8tM2eNCdBe7dsLRSk
-# akNhaS6UpOM3eXgafcSAKeXOKJhZS7FLHOSDHWBpUSrZthCIOOalvSO0Ycjz5yOf
-# fuV+KhYEgRNnXscglWnBsZMNSjjGE0qmgW6Z5RQYbLpLeKnAtE9u3GuW3rRKB3k+
-# 0Je0Xhl3VeItqp7bXva6WEsTKm2F0lV87JUFfiozMSaboFvGHxspHny/1P1/hsNG
-# uuSDkMT2UJQACtKXLAl4ZOSphaZ4LOJLfhiG3PTWMnN4fntp62B4TRWRLi7oR94Z
-# 6AAPUs8Pu0vQLsWQdMMlhqALzJrzFspgLOAq2TUYCHADAmU=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCDcXVCODFHx713PYlYqin+s
+# OSHkUMkhEILZogxOaNa4NzANBgkqhkiG9w0BAQEFAASCAYBVmR4TFkauVELH4Wda
+# 3XmGr9SbgccvoLQUrj4Cl7GS7Vhxuv2JCMovyI4tg75hk58/KsoiqqrQ7tKukX8p
+# UCu8Hz1CeWfqNTYcvBJ1ALMX+iA7YOpdeRxQz+bVuMoLeodX+GgNtf+mS6out0g6
+# Rt1jFz8E8t4yT5W0Jdtqsyk7JcWpgVkPWSCxOH4YFMIsMtHvvooFFD57IzPJOXRJ
+# rDr4zthfJN8jmR1iMVblaTUBCdYl+QBDLvc+GZ8Bq85D81i4nEr8qT2s0iSAXaY2
+# Wl0cR/ge1bJcOIiqjAFBxGSe7O79umpUEI9NEoAat6K9KA5A7T9EJ25VpOXCruFE
+# 5z7Ez2MrZttMaMZz+t9vloCHD/M44LKZPoofwUC+zCHBYIBlvooiGVbMWFYrA6kz
+# 1yvyNFsUchtdhTX35ltqQ+s9EHhMI5t0A4d+NoWq0OHf5RLGhVk+EMoAF65k//8K
+# l2AfNqEqFDtxJIhhkBUemtfKOPlT9gh6FmwrMYYUfNTx2pw=
 # SIG # End signature block

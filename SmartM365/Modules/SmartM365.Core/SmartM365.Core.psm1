@@ -860,7 +860,7 @@ function Write-SmartM365BrandBanner {
 function Write-SmartM365CompletionBanner {
     [CmdletBinding()]
     param(
-        [ValidateSet('Auto', 'Success', 'Failed', 'CompletedWithWarnings')]
+        [ValidateSet('Auto', 'Success', 'Failed', 'CompletedWithWarnings', 'Cancelled')]
         [string]$Status = 'Auto',
         [string]$ScriptName = '',
         [AllowNull()][Nullable[datetime]]$StartedAt = $null,
@@ -898,16 +898,19 @@ function Write-SmartM365CompletionBanner {
 
     $statusLabel = switch ($Status) {
         'Failed' { 'FAILED' }
+        'Cancelled' { 'CANCELLED' }
         'CompletedWithWarnings' { 'COMPLETED WITH WARNINGS' }
         default { 'SUCCESS' }
     }
     $title = switch ($Status) {
         'Failed' { 'Execution failed' }
+        'Cancelled' { 'Execution cancelled' }
         'CompletedWithWarnings' { 'Execution completed with warnings' }
         default { 'Execution completed' }
     }
     $statusColor = switch ($Status) {
         'Failed' { 'Red' }
+        'Cancelled' { 'Yellow' }
         'CompletedWithWarnings' { 'Yellow' }
         default { 'Green' }
     }
@@ -6317,8 +6320,8 @@ Export-ModuleMember -Function `
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDO5PqmdqZISMnw
-# j+Qjva7x8fGM8dpyJN7SeUeCIgAhtKCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA2gyEUcg+oI8MN
+# 0PEg7Cvpyu3Vz2F+9yz/j8VBSfQRd6CCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -6348,14 +6351,14 @@ Export-ModuleMember -Function `
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCCoMCV3xfCFtQiVjxQumjXz
-# RkQSVN9U3/OYv4JDQlnbLjANBgkqhkiG9w0BAQEFAASCAYBNQvJCe08Iy9vkaZzy
-# yOXDyKVvabK3WLU+ahq10gtwoLe8xdOkyDy0DDstP3dicvdLejt+/3VKEBXLw8cK
-# nANBFz3foWp0gFJYxAa5QZiCNMkNbyMlOqfyV/K0V89kGEqhIBwRsFxkuiGe9dkj
-# Ff9Bv0IZNCWAyIoKt9c3CY2Ydi4aR/Xwg57mLVp+QEY4KTP/0ktKBYQbtwsMpaj0
-# bk60sT85hjdY8w8DiPGaRVkkQiX1MlXFEqk4tPjMrMbKI+E+TPehvw6oShm8nYLd
-# 7H0opHwRHDrgf2qXFhmmm3peh5GwSkfnva56soyu1Lepw3jbr2ReVryLeku3KuUR
-# oH0ZuSd8QzHK0/0Is9DUvcTLzcgblOf2GYqMtDJH6Nti+0RkVG0P+V8INfJcUV43
-# tfuYZpvHsoH70d+Tq+Jc++wscBPf/gDOJ9KGdEDKCGsCwspfslDV8hyRvrND9dU/
-# gqX9JZNCsO2FLxHaFQl3kpZxtuYslypPdIvIOT62LXUR7xQ=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCDzBwuhVtSsrCsKjs6hKsnI
+# koQuDshIwMxtNCDX67L+CDANBgkqhkiG9w0BAQEFAASCAYBYXG2HfN9RJO+WfSJh
+# KDo8EZ/SGYHQmoSiTuomjnF2NBwWi1lYMZ7YBtElpopes4kGja2yruwpoSqUrkrP
+# 8F8B8nON/uHzOTC2urWXSGy2FtHAg1//scvdJmEvGRDrQhb3CWe22ijJEELwge/5
+# rUA+xkMncSjnyhsK2gN44KmAPipYRdoz3bz7MENjPCWkdyrd1nPz0vB8P3SWrkG3
+# 6GUBWL2CCTQ6sEIVWMmMc9qf3sVoHG/WCnIiBq5awO3xYkFxvUGmZd8OonBJ8XFf
+# 1kCuhvWuW6QY0iuUcEGhSpm+R7ZXvBof6W+hHCvPeQpN0oEp5I/E3lIWtYfHIeUi
+# DjEVNdri0hoEKvSRP6oErMOwndb8j8r3ssOVBduX1ZuNCKzH1UIscgblNQ/pi1p5
+# /YM46+pLhRYUlojquS/2PNs7zXTXFLHyDONmPP8+2/ny0A5+b7hwIx0Kpf9tQL/S
+# 4izxLWkBoEFOBVb2YtmyHtDLSIY0Yj9t7G6S12bkeowdqyM=
 # SIG # End signature block
