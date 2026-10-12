@@ -8,7 +8,7 @@ report, and publishes stable CSV files into the tenant DATA-LAST folder for
 SmartFinOps and downstream inventory analysis.
 
 .VERSION
-1.27
+1.28
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication; Microsoft.Graph.Reports.
@@ -47,7 +47,7 @@ if ($PSBoundParameters.ContainsKey('MaxItems') -and $MaxItems -gt 0) {
 }
 
 $ErrorActionPreference = 'Stop'
-$ScriptVersion = "1.27"
+$ScriptVersion = "1.28"
 $TaskName = "SmartM365-M365UserActivity-Inventory v$ScriptVersion"
 $runId = Get-Date -Format 'yyyyMMdd_HHmmss'
 
@@ -676,10 +676,8 @@ try {
         $effectivePeriod = if ($reportDefinition.SupportsPeriod) { $requestedPeriod } else { 'not applicable' }
         WriteLog ("Downloading {0}. Period={1}" -f $reportDefinition.Name,$effectivePeriod) 'INFO'
         Invoke-M365UsageReportDownload -ReportDefinition $reportDefinition -RawPath $rawPath
-        if ($reportDefinition.Name -in @('Office365ActiveUserDetail','M365AppUserDetailD30','M365AppUserDetailD180')) {
-            $refreshDate = Assert-M365UsageReportRefreshDate -RawPath $rawPath -ReportName $reportDefinition.Name -WarningAgeDays $reportRefreshWarningAgeDays
-            $weeklyRefreshSnapshots.Add([pscustomobject]@{RefreshDate=$refreshDate;FileName="$($reportDefinition.BaseFileName).csv"}) | Out-Null
-        }
+        $refreshDate = Assert-M365UsageReportRefreshDate -RawPath $rawPath -ReportName $reportDefinition.Name -WarningAgeDays $reportRefreshWarningAgeDays
+        $weeklyRefreshSnapshots.Add([pscustomobject]@{RefreshDate=$refreshDate;FileName="$($reportDefinition.BaseFileName).csv"}) | Out-Null
         $downloadedReports.Add([pscustomobject]@{Definition=$reportDefinition;RawPath=$rawPath}) | Out-Null
     }
     if ($weeklyRefreshSnapshots.Count -gt 0 -and -not (Test-SmartM365MaxItemsMode) -and [bool](Get-SmartM365ConfigValue -Name 'EnableWeeklyHistory' -DefaultValue $true)) {
@@ -738,8 +736,8 @@ finally {
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBTwwYZMK4SxORS
-# QmmJ+nAaPBh1KCHDCq8y5CzqsqXT6KCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC+Q2KizPZED4G5
+# M6eaeG4GxWsI9GFsefEle6LIyEqbfKCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -769,14 +767,14 @@ finally {
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCCHgwkOxGPg+qUQR7jpPJkM
-# AxA4MYFrZdF3S21H77a0yjANBgkqhkiG9w0BAQEFAASCAYCUraA5hyjtYWaHcH6L
-# fnLYXfC9T3Z0R6MiUuoE37NKqKxXQCT/6Q09zBGma9A1sHel3FvuXvCg7S5bCc/m
-# /jHCLPzJVJ7zQ2TBEl5u4M7zGuNHK0cbsrVyIOiO+g9kLu2ZcWvyWFxdskYYsxdG
-# AORDs2DAjSFWDdAMECSNtas6LBUHiG0EJ8SqKFLmn50HQP1xdxnItSjfCHYa2YQB
-# /T2U8L2Rqh5d9DTHZ3d9S5zMq5xJkw1qyuYOMohm+M7dMv/b5xDEpJIYW378pbnc
-# KEeVlgkn4GcLzDcWAgH03wbGwMQg+zfBJvMq0goSm7CBnGHcsFPln3qxEwGBVZVP
-# 35DXqdI/GJNTVeHOe3yLfiN3dCcKN/GCy5CsoUUtWXH2mWqAe5b34anle72ljmKY
-# 0Kn28qOA37Lu3k2QHEnq7q5PIT7h8Z01AwtXZvgaaMGzcY8AxydHha68/WqPv5J2
-# ajGDBkdet0ZFnLAnXUZNgjmZj+/q/xCbjeuBqzCRi5SGw3I=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCCFUZCC4MnAz52MAmoTTRrC
+# v0G+KO//7VH7PopSMwDNkTANBgkqhkiG9w0BAQEFAASCAYA5qCWRlY3Nvs//5To8
+# ICAQviSLnMYYiiJjxa2nHGBJ7nC3ZpFbqOmFURi8Q906A2D6uBxm2LhYE3zSL6zs
+# eyQdUCs/O4AYfO0LRRQHGiBWk1lYVQFbnoLLPlr7XQwEbLcnghd9JSyx2prF9uIe
+# SrNsVf1hkBWfXfgIgIMUVl8k69sB3oXc/10lzU+qhkMi2cx8tM2eNCdBe7dsLRSk
+# akNhaS6UpOM3eXgafcSAKeXOKJhZS7FLHOSDHWBpUSrZthCIOOalvSO0Ycjz5yOf
+# fuV+KhYEgRNnXscglWnBsZMNSjjGE0qmgW6Z5RQYbLpLeKnAtE9u3GuW3rRKB3k+
+# 0Je0Xhl3VeItqp7bXva6WEsTKm2F0lV87JUFfiozMSaboFvGHxspHny/1P1/hsNG
+# uuSDkMT2UJQACtKXLAl4ZOSphaZ4LOJLfhiG3PTWMnN4fntp62B4TRWRLi7oR94Z
+# 6AAPUs8Pu0vQLsWQdMMlhqALzJrzFspgLOAq2TUYCHADAmU=
 # SIG # End signature block
