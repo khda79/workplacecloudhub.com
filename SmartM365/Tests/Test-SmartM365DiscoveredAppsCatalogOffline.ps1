@@ -17,8 +17,9 @@ $ast = [Management.Automation.Language.Parser]::ParseFile($sourcePath, [ref]$tok
 if ($parseErrors.Count) { throw ($parseErrors | Out-String) }
 foreach ($name in @('Get-ShortGraphErrorMessage','Get-DiscoveredAppsGraphHttpErrorMessage','Get-GraphRetryDelaySeconds',
     'Invoke-GraphPagedRequest','ConvertTo-DiscoveredAppsCatalogSnapshot','Get-DiscoveredAppsStableCatalog',
-    'Assert-DiscoveredAppsCatalogRelationScope','Get-DiscoveredAppsValidatedDeviceIds',
-    'Get-DiscoveredAppDeviceRelationBatchMap','ConvertTo-DiscoveredAppsAppDeviceRelationRecord','Update-DiscoveredAppsSummaryDeviceCounts')) {
+    'Assert-DiscoveredAppsCatalogRelationScope','Get-DiscoveredAppsValidatedDeviceIds','Get-DiscoveredAppsStableDeviceIds',
+    'Get-DiscoveredAppDeviceRelationBatchMap','ConvertTo-DiscoveredAppsAppDeviceRelationRecord','Update-DiscoveredAppsSummaryDeviceCounts',
+    'Assert-DiscoveredAppsVerifiedFreshCheckpoint')) {
     $node = $ast.Find({param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name}, $true)
     if ($null -eq $node) { throw "Missing collector helper: $name" }
     Invoke-Expression $node.Extent.Text
@@ -264,6 +265,50 @@ Test-Case 'Batch final page without nextLink remains complete' {
     $ids = @(Get-DiscoveredAppsValidatedDeviceIds -AppId app-a -Devices $map['app-a'])
     Assert-True ($ids.Count -eq 1) 'Valid terminal batch page rejected.'
 }
+Test-Case 'Repeated prefetched relation accepts two matching clean full reads' {
+    Add-Page @([pscustomobject]@{id='device-a'},[pscustomobject]@{id='device-b'})
+    Add-Page @([pscustomobject]@{id='device-b'},[pscustomobject]@{id='device-a'})
+    $ids = @(Get-DiscoveredAppsStableDeviceIds -Devices @([pscustomobject]@{id='device-a'},[pscustomobject]@{id='DEVICE-A'}) -AppId app-a -InitialUri relations)
+    Assert-True ($ids.Count -eq 2 -and $script:requests.Count -eq 2) 'Two stable fresh reads were not required.'
+}
+Test-Case 'Repeated identity in every fresh read still fails closed' {
+    for ($i=0; $i -lt 4; $i++) { Add-Page @([pscustomobject]@{id='device-a'},[pscustomobject]@{id='device-a'}) }
+    Assert-Rejected { Get-DiscoveredAppsStableDeviceIds -Devices @([pscustomobject]@{id='device-a'},[pscustomobject]@{id='device-a'}) -AppId app-a -InitialUri relations } 'coverage cannot be qualified'
+    Assert-True ($script:requests.Count -eq 4) 'Fresh read retry bound changed.'
+}
+Test-Case 'Invalid identity remains terminal even when a duplicate occurs first' {
+    Assert-Rejected { Get-DiscoveredAppsStableDeviceIds -Devices @([pscustomobject]@{id='device-a'},[pscustomobject]@{id='device-a'},[pscustomobject]@{id=' '}) -AppId app-a -InitialUri relations } 'Invalid app/device relation identity'
+    Assert-True ($script:requests.Count -eq 0) 'Invalid relation triggered a retry.'
+}
+Test-Case 'Repeated prefetched relation can recover to two matching empty reads' {
+    Add-Page @()
+    Add-Page @()
+    $ids = @(Get-DiscoveredAppsStableDeviceIds -Devices @([pscustomobject]@{id='device-a'},[pscustomobject]@{id='device-a'}) -AppId app-a -InitialUri relations)
+    Assert-True ($ids.Count -eq 0 -and $script:requests.Count -eq 2) 'Two matching empty reads were not accepted.'
+}
+Test-Case 'Verified fresh checkpoint validates hashes, tenant, per-app rows and duplicate pairs' {
+    $testRoot = Join-Path $env:TEMP ('SmartM365-DAppsRecovery-' + [guid]::NewGuid().ToString('N'))
+    $null = New-Item -Path $testRoot -ItemType Directory
+    try {
+        $partial = Join-Path $testRoot 'relations.partial.csv'
+        $checkpoint = Join-Path $testRoot 'relations.resume.json.txt'
+        Set-Content -LiteralPath $partial -Encoding UTF8 -Value @('"TenantKey","AppId","DeviceId"','"tenant-test","app-a","device-a"','"tenant-test","app-a","device-b"')
+        Set-Content -LiteralPath $checkpoint -Value 'synthetic checkpoint' -Encoding UTF8
+        $state = [pscustomobject]@{ TargetCount=2; ProcessedCount=1; SkippedCount=1; DeviceDetailRows=2; Updated=(Get-Date).ToString('o');
+            PartialPath=$partial; PartialLength=(Get-Item -LiteralPath $partial).Length;
+            ProcessedAppIds=@('app-a'); ActualDeviceCounts=[pscustomobject]@{'app-a'=2} }
+        $checkpointHash = (Get-FileHash -LiteralPath $checkpoint -Algorithm SHA256).Hash
+        $partialHash = (Get-FileHash -LiteralPath $partial -Algorithm SHA256).Hash
+        Assert-DiscoveredAppsVerifiedFreshCheckpoint -State $state -CheckpointPath $checkpoint -CheckpointSha256 $checkpointHash -PartialSha256 $partialHash -TargetAppIds @('app-a','app-b') -TenantKey 'tenant-test'
+        Assert-Rejected { Assert-DiscoveredAppsVerifiedFreshCheckpoint -State $state -CheckpointPath $checkpoint -CheckpointSha256 ('0' * 64) -PartialSha256 $partialHash -TargetAppIds @('app-a','app-b') -TenantKey 'tenant-test' } 'checkpoint SHA-256'
+        Assert-Rejected { Assert-DiscoveredAppsVerifiedFreshCheckpoint -State $state -CheckpointPath $checkpoint -CheckpointSha256 $checkpointHash -PartialSha256 $partialHash -TargetAppIds @('app-a','app-b') -TenantKey 'another-tenant' } 'invalid tenant'
+        Set-Content -LiteralPath $partial -Encoding UTF8 -Value @('"TenantKey","AppId","DeviceId"','"tenant-test","app-a","device-a"','"tenant-test","app-a","device-a"')
+        $duplicateHash = (Get-FileHash -LiteralPath $partial -Algorithm SHA256).Hash
+        Assert-Rejected { Assert-DiscoveredAppsVerifiedFreshCheckpoint -State $state -CheckpointPath $checkpoint -CheckpointSha256 $checkpointHash -PartialSha256 $duplicateHash -TargetAppIds @('app-a','app-b') -TenantKey 'tenant-test' } 'repeated app/device pair'
+    } finally {
+        if (Test-Path -LiteralPath $testRoot) { Remove-Item -LiteralPath $testRoot -Recurse -Force }
+    }
+}
 Test-Case 'Batch malformed collection and nextLink fail before output' {
     $script:responses.Enqueue([pscustomobject]@{Status=200;Body=[pscustomobject]@{responses=@([pscustomobject]@{id='1';status=200;body=[pscustomobject]@{value=[pscustomobject]@{id='device-a'}}})}})
     Assert-Rejected { Get-DiscoveredAppDeviceRelationBatchMap -Apps @((New-App)) } 'must be an array'
@@ -301,15 +346,17 @@ Test-Case 'Runtime guards execute before limits, checkpoints and publication' {
     $gate = $text.IndexOf('Assert-DiscoveredAppsCatalogRelationScope -RequiresFreshRelations')
     Assert-True ($gate -gt 0 -and $gate -lt $text.IndexOf('# Apply MaxApps limit') -and $gate -lt $text.IndexOf('if ($streamingEnabled -and $ResetResume)')) 'Catalog gate runs too late.'
     Assert-True ($text.IndexOf('$validatedDeviceIds = @(') -lt $text.IndexOf('$actualDeviceCountsByAppId[[string]$app.id] = $appRows.Count')) 'Counts precede validation.'
-    Assert-True ($text -match 'Stat_DetailAppsFromCache -eq 0 -and \$script:Stat_DetailAppsSkippedByResume -eq 0') 'Fresh receipt guard weakened.'
+    Assert-True ($text -match 'Stat_DetailAppsFromCache -eq 0 -and \$script:Stat_AppsSkipped -eq 0 -and \$script:Stat_AppsProcessed -eq \$script:Stat_DetailAppsTargeted -and \(\$script:Stat_DetailAppsSkippedByResume -eq 0 -or \$ResumeVerifiedFreshCheckpoint\)') 'Fresh receipt guard weakened.'
+    Assert-True ($text -match 'Stat_DetailAppsSkippedByResume -gt 0\) \{ ''ReusedEvidence'' \}') 'Recovered rows are not marked as reused evidence.'
+    Assert-True ($text.IndexOf('Assert-DiscoveredAppsVerifiedFreshCheckpoint -State $resumeState') -lt $text.IndexOf('if ($resumeStateCompatible) {')) 'Recovery validation runs after checkpoint reuse.'
 }
 Write-Output "Discovered application catalog offline tests: $testCount passed. No external actions."
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBm32jDEMB78RJJ
-# aeUnZBH7sJ3LXDPhu0AZH5Mz03MAhKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAw+J8i9bWn9G4e
+# tPZPZmqnin9LeQz6CfKWOep3c6NnhqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -442,31 +489,31 @@ Write-Output "Discovered application catalog offline tests: $testCount passed. N
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIPJ+vsqX9SKVeIRe9xVo2I1YDMRN1G4skMXxiJhXOc/JMA0GCSqG
-# SIb3DQEBAQUABIIBgF8Z/HbldjJtXoSAWfC8HwnsK4MW8MVfiGU+CUNAtgpUHb3Y
-# QQ7skTkVnKBRdBEnjgkeCG4jiQqI17lbhyyiPos8elum84pOT3Ol4wEq0TdC080k
-# eVu1wt0MzeUlRpxEVMVdyaKxZQM5y2aGAp+gNulTZPUHnHNHNLPvvvtbrm8RTrFl
-# XnUYsG4jv+mgjNfhv3MQHaEaWXCnOd0YrjDYa7jyyihLsaS5pXlxiTzhoqhAVJzH
-# b6ZQB5BHrBdlDP+stako5wXqM9Q0pT9n/g3PiJRcOLq6WNyjs50Tema7X4x3AO/f
-# QKew+drYS8Gd2Pnm53/24+3GkqfQbsEhufVsq1XN4i+9NdhJ57NzZPumoM8OnXJ9
-# E+H0VLUktOO6r1mWt2Y0GzM0cnGrei6aTz0nLe7bsdFPPN73ljGJulWlm5E/HSAR
-# bf2VaowiB6DtvWFz+LGBmrhEftGsYLu/WbhiBdsttawOOjSh6XMogXAyHpn9so1C
-# zGqHUm65MxZL/ZwQoKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEINJK8QhKjiXtwlFpgMQvz4LmtbV6JNzfIlzK67Iu2bsRMA0GCSqG
+# SIb3DQEBAQUABIIBgCUDU/94tIaQvDP1NntrY3jSVNt0R7Clh60u977sQVyJoKxr
+# GKtoVEdNIA5CCAtnLPg1ELvF6vIvdNnP/QkaI6xDz4pK3jxSFPUp7FyU5hzkiYLi
+# nTKq7ujlde5c9IzWVgomvF6fsc0o7/VMtFvYfKFm02GRBTrY0huqRDdIYK1GGhfc
+# MbGRo4fvaJcSpB+dPPMszLdFB04mfSK/ljgnOoSjBaUyIZJmt1br0HGNT1giJHiR
+# MlSNagC06nwjtT4D4rvml/SNzkHqjwMrWT3O8LtlvqSjHyOy+QNopIWWcXWcNzV+
+# fsYrsDXJmCIJ7sN6RTxHZDymR7g/u4HkIFqPU/H/SxLUpibAArhcanfSQfTozhHI
+# pxQbHmIz4vhYYGgRGvEGWEDcQz/FKjnERccDk1JNnpGB+46NY/kh4QUzxVWVNS+p
+# Kwb7h7lX9fsz/pjfLHZSYVzyzrWzZuXsmBfoLqhlTpbdQoFh5WbJCAprZfvVwf36
+# 7zC7QZtHm98onewgBKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDUwNzE2
-# MzJaMC8GCSqGSIb3DQEJBDEiBCCFSrKSvXr+2NGw55t+f8tsOulkwM3zbeP8e0Nd
-# Usi7NDANBgkqhkiG9w0BAQEFAASCAgCJJt2vyJ5QmlqfCu8s8Q05X4z0kCgOygpp
-# pa0N+6iwkviuMIyjqvGd5BpKMpvr/GgGJeOvnY4Q0gR+w4vPTccUi65sd8lUZ6ZI
-# rZJ9IfYRdyACJcDfDPRWqiVu+1iNb3YVNmOeNoCo+J5okgYf6YiFCFfDkhMrXtYj
-# ckBrfl9D0wjOip6utK7i/1KyTzMuc6oESFUgKMGw1wTp7KSXDzRzffYm+B+jeG/M
-# IIaXLuq6RqBNBpwDR2M8S+odUiSe7k/BZZvV0mBetTKrNIKs97Zlp66bUFUlNv4/
-# pUGjLXKJFlNPjul4mFpiwl+7XjjASqJ7t5DwyYUKgJt9pWcn5DHw9fx/ruifDv1j
-# Ta6/MC+dQL3uYu8SVOXkFpolv7NEtaKrrYy3s6N9ghaLPqT6Azp/McNqMEgk6UKL
-# l3SkoUaxPl3NUCj2DusQYDJHGJl5LN7tmlMQlZ8rW2b2FgwGqfVy3MuL1tHfBGET
-# ezzXosSjsHAnv/IjOdTfIBmYkLB6RbrE1/CIQFU+ScFnC7pzscvfA32G3sO/vr2P
-# c+OUWhINI+5QDUaMLbbxh+DdHwKj1GmoTGHTecWweuVYpLvXgAzqNCy+5TXx8Z7l
-# s3fEBgGja15RJDZxUe1d3ZTNdtk6ZsK83qz93peVusloH0AmWD3uHezmtXNsBems
-# TRJya1N+kA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTMwODA1
+# NDlaMC8GCSqGSIb3DQEJBDEiBCB/f4qFZfIUJo/5/kwrXB7k+UC+VD5VJhrMTA9/
+# PWoZqjANBgkqhkiG9w0BAQEFAASCAgAtUGBbuPHIeG7UNE06Jt4qpQ0KrqdRUI8C
+# LEegiQ8MXoTEzgL6PzzKhSedbyS12AVcLY1T1rbTGpuBQPJI0tOILfQVPmQGt6+9
+# O7a8A/+edKtE32Z0xqkS153utw2sInx51DIBJXWBTAnn56gfuH81x0dI3EtdC3A6
+# QpYWCu6eu+1IFezSUHJhGf7gGNbnfuP69M7itNcSzy4kUMzRVq1d+O5owvFekiqJ
+# Q/i3PKKaDvE4fyKoZq6DkxKMAb8OmXnRPeaDSIflfEzehMrOvhLWC9e098okai/Y
+# 9EDm/1tmDk+BdxbOTPHHYqPEkh3U28FaODdqFNudQ6Pl1J33TwnUDOWtEI7XObFO
+# GkkbDXjvhpSTeUEjt5fJsT1x2fsZLk8KMiv6MA16L/ZTYP7af0zE179piozmu54a
+# Y68fnUpPisNDFuPLctzbsPdM6Ta5DCsWc/XjDGAIjuCK8yO68RscvoRE/rirapH0
+# sBaA47qeNgNW8Tem+ZJ5diVaQm3vhM25Ba4BXphWkIYGyIsCg3ZRR0p5oXYjj1F1
+# NEoLB2YH5tw9HBJ7d7gV2Jc/JeuXak/poRUBTOfu49OkXKYqHFXHbsuPxh3ht+nU
+# VZNFaXdRxX8jyZuWJ/8A/u5Rm/t8Y8vHL2nTULC1Ep+EX+S80OWKAxJB0ZJHudCu
+# lUr5mrSOAQ==
 # SIG # End signature block

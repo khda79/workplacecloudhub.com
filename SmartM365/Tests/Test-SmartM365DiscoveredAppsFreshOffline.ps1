@@ -49,10 +49,18 @@ foreach ($mode in @('None','Top','NonZero')) {
 Test-Case 'Fresh mode rejects app limits' { Assert-Rejected @{FreshDeviceDetails=$true; Mode='All'; MaxApps=1; MaxItems=0} }
 Test-Case 'Fresh mode rejects item limits' { Assert-Rejected @{FreshDeviceDetails=$true; Mode='All'; MaxApps=0; MaxItems=1} }
 Test-Case 'Fresh mode rejects destructive reset' { Assert-Rejected @{FreshDeviceDetails=$true; Mode='All'; MaxApps=0; MaxItems=0; ResetResume=$true} }
+Test-Case 'Verified fresh recovery requires both hashes and full fresh mode' {
+    $hash = 'A' * 64
+    Assert-DiscoveredAppsFreshDeviceDetailsOptions -FreshDeviceDetails -ResumeVerifiedFreshCheckpoint -ExpectedResumeCheckpointSha256 $hash -ExpectedResumePartialSha256 $hash -Mode All -MaxApps 0 -MaxItems 0
+    Assert-Rejected @{ResumeVerifiedFreshCheckpoint=$true; ExpectedResumeCheckpointSha256=$hash; ExpectedResumePartialSha256=$hash; Mode='All'; MaxApps=0; MaxItems=0}
+    Assert-Rejected @{FreshDeviceDetails=$true; ResumeVerifiedFreshCheckpoint=$true; ExpectedResumeCheckpointSha256=$hash; Mode='All'; MaxApps=0; MaxItems=0}
+    Assert-Rejected @{FreshDeviceDetails=$true; ResumeVerifiedFreshCheckpoint=$true; ExpectedResumeCheckpointSha256=$hash; ExpectedResumePartialSha256=$hash; Mode='All'; MaxApps=0; MaxItems=0; DryRun=$true}
+}
 
-$testRoot = Join-Path $env:TEMP ('SmartM365-FreshApps-' + [guid]::NewGuid().ToString('N'))
+$testBase = Join-Path (Split-Path $smartRoot -Parent) '.codex-work'
+$testRoot = Join-Path $testBase ('SmartM365-FreshApps-' + [guid]::NewGuid().ToString('N'))
 try {
-    $null = New-Item -ItemType Directory -Path $testRoot
+    $null = New-Item -ItemType Directory -Path $testRoot -Force
     $oldPartial = Join-Path $testRoot 'old.partial.csv'
     $oldCompleted = Join-Path $testRoot 'old.csv'
     Write-DiscoveredAppsCsvRows -Path $oldPartial -Rows @()
@@ -71,6 +79,9 @@ try {
     }
     Test-Case 'Fresh switch refuses even an identical compatible app set' {
         Assert-True (-not (Test-DiscoveredAppsResumeStateCompatible -State $resumeState -Mode All -TargetCount 2 -TargetAppIdsHash 'same-set' -ResumeContractVersion 6 -FreshDeviceDetails)) 'Old relations reused.'
+    }
+    Test-Case 'Recovery selection rejects catalog drift' {
+        Assert-True (-not (Test-DiscoveredAppsResumeStateCompatible -State $resumeState -Mode All -TargetCount 2 -TargetAppIdsHash 'changed-set' -ResumeContractVersion 6)) 'A changed app set was accepted.'
     }
     $branch = $ast.Find({param($n) $n -is [Management.Automation.Language.IfStatementAst] -and $n.Clauses[0].Item1.Extent.Text -eq '$resumeStateCompatible'}, $true)
     if ($null -eq $branch) { throw 'Resume selection branch not found.' }
@@ -97,17 +108,35 @@ try {
         $archive = Join-Path (Join-Path $testRoot 'ResumeHistory') ($oldHashes[$script:DeviceDetailResumePath] + '.json.txt')
         Assert-True ((Get-FileHash -LiteralPath $archive).Hash -eq $oldHashes[$script:DeviceDetailResumePath]) 'Original checkpoint lost.'
     }
+    Test-Case 'Verified recovery copies the partial and preserves the source checkpoint' {
+        $resumeState = Get-DiscoveredAppsResumeState -Path $script:DeviceDetailResumePath
+        $sourcePartial = [string]$resumeState.PartialPath
+        $sourceCheckpointHash = (Get-FileHash -LiteralPath $script:DeviceDetailResumePath).Hash
+        $ExpectedResumePartialSha256 = (Get-FileHash -LiteralPath $sourcePartial).Hash
+        $resumeStateCompatible = $true
+        $ResumeVerifiedFreshCheckpoint = $true
+        $detailTimestamp = 'verified-recovery'
+        $processedAppIds = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+        $actualDeviceCountsByAppId = @{}
+        Invoke-Expression $branch.Extent.Text
+        Assert-True ($script:DeviceDetailPartialPath -ne $sourcePartial) 'Recovery modified the source partial.'
+        Assert-True ((Get-FileHash -LiteralPath $sourcePartial).Hash -eq $ExpectedResumePartialSha256) 'Source partial changed.'
+        Assert-True ((Get-FileHash -LiteralPath $script:DeviceDetailPartialPath).Hash -eq $ExpectedResumePartialSha256) 'Recovery copy differs.'
+        Assert-True ((Get-FileHash -LiteralPath $script:DeviceDetailResumePath).Hash -eq $sourceCheckpointHash) 'Source checkpoint changed.'
+        Assert-True ($script:Stat_AppsProcessed -eq 1 -and $script:Stat_AppsSkipped -eq 0 -and $processedAppIds.Contains('app-new')) 'Recovery counters or processed IDs are wrong.'
+    }
     Test-Case 'Runtime binds fresh option before acquisition and keeps strict receipt gate' {
         $text = $ast.Extent.Text
         Assert-True ($text -match '-FreshDeviceDetails:\$FreshDeviceDetails') 'Runtime fresh binding missing.'
+        Assert-True ($text -match '-FreshDeviceDetails:\(\$FreshDeviceDetails -and -not \$ResumeVerifiedFreshCheckpoint\)') 'Verified recovery is not bound to the compatibility check.'
         Assert-True ($text.IndexOf('Assert-DiscoveredAppsFreshDeviceDetailsOptions -FreshDeviceDetails') -lt $text.IndexOf('if ($streamingEnabled -and $ResetResume)')) 'Destructive path runs before option validation.'
-        Assert-True ($text -match 'Stat_DetailAppsFromCache -eq 0 -and \$script:Stat_DetailAppsSkippedByResume -eq 0') 'Full fresh scope gate weakened.'
+        Assert-True ($text -match 'Stat_DetailAppsFromCache -eq 0 -and \$script:Stat_AppsSkipped -eq 0 -and \$script:Stat_AppsProcessed -eq \$script:Stat_DetailAppsTargeted -and \(\$script:Stat_DetailAppsSkippedByResume -eq 0 -or \$ResumeVerifiedFreshCheckpoint\)') 'Full fresh scope gate weakened.'
         Assert-True ($text -match 'UsePreviousDeviceDetailCache = -not \$RefreshDeviceDetailCache -and \$DeviceDetailMode -ne ''All''') 'All mode can reuse cache.'
     }
     Write-Output "Fresh application offline tests: $testCount passed. No external actions."
 } finally {
     $resolvedTestRoot = [IO.Path]::GetFullPath($testRoot)
-    $tempPrefix = [IO.Path]::GetFullPath($env:TEMP).TrimEnd('\') + '\'
+    $tempPrefix = [IO.Path]::GetFullPath($testBase).TrimEnd('\') + '\'
     if (-not $resolvedTestRoot.StartsWith($tempPrefix, [StringComparison]::OrdinalIgnoreCase) -or [IO.Path]::GetFileName($resolvedTestRoot) -notlike 'SmartM365-FreshApps-*') { throw 'Unsafe test cleanup target.' }
     if (Test-Path -LiteralPath $resolvedTestRoot) { Remove-Item -LiteralPath $resolvedTestRoot -Recurse -Force }
 }
@@ -115,8 +144,8 @@ try {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC+jTkInft8OnQO
-# CrQ6+YmCB+5cCf1q/5mTfsX6gWHUHKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCrHrZbfLbRb/oH
+# MCPfYHzgm8OsWL3hcdNIW5X2wVRoCKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -249,31 +278,31 @@ try {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIOvEoGEmm1HEDxCOg4BjMB2+Ts4BuMHIPyIoHM8XoDz7MA0GCSqG
-# SIb3DQEBAQUABIIBgA9TYyROWz1a0xsVUgfImu3tC8arcuB9v95t1NmchR2dI1LO
-# XbuFfnEj/HwdFCC6mFytDhipcTLgVRw72ro+Z6QM1sGlkjBhP3YlL5tdyzv0MUh1
-# 0YClV2VFTPwXaXlBjIqBA43N8aiopsS1ZgHfAb/Y1AfaxBTb36LnImBaC9Dc8uA8
-# KzYLVCmc1KfUMj7Kb+swk6ON9rtQPQ4BAca3hLC/adTuOJkr2TJEBNlIxtn19HnF
-# pr5Nz+rYA4if74Jvxux0Dcj9HMbUX6k+3ElkK/iZCpPMdHXy9yVI+D4Md/JiWD57
-# yx+9bjh+i6BWxDo+AepgLzFv+3r19dOooGEUqQ71w6sK9r8yVWDDkuBWvwvwPNKZ
-# H07MEoJNZFQinMEMe+Uo4FwobZN4r3g4ZVUlDrk23yILc6e6Mag4ZZPMJKzFGLMi
-# V3dFGHTrbgvA3yPa0AAnxaNpSJXSoQWhjFQrdXyNFFoPeCQWfT0qt/JhNeAebjQV
-# r+ufaEkDmedlL4exKqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIAUYTi+/2aD1E6XB8MpUdrBSciMNJbefaAi1hce//uPHMA0GCSqG
+# SIb3DQEBAQUABIIBgBtuvlHVwCqOrVAavgQsmIjlOSOu7r8IiR/8ONe2QcdAUgx+
+# Nwmzi+VvLfR1Vt0KxlFj/sM4nf4fL8GTU7QDM9SGW1d3pIai+oeLSf6xvmXXw59/
+# 6XTh2bfRsajo3pHy++bwXbqiEXpJYAQrFgwd6UarHxkrHqXcJT7lNb9ZPjL9OGet
+# lS9A/5oILFTj/JWVOmyO9V3Iesvzrdzck1lzaYGxb8UG2Ukdvz/V+XPwV8QlNWTx
+# Ty1Qqg9PbZwPGvTCpsgLTPeIyOgYnFvzYvAlkviprNLMLS21waMgpZhm8AY55j0Q
+# luk6ePaiX/GONMAjzGrumjxSis9csZG4iAcnh/Junvj7SRRUV4n7GmIZYVgA0nJ9
+# p1FzVEpeM+DkZ45QmqpdCJdwTIVD4PEMVoyWEE2qGCgESHmaJZkHq2dtMqadm5QT
+# MxdE4xP50/fe85kU7verPAG9TS9RKQkGAV2k7P0xLts+DGEfMPqZ9z5VjwW+t18V
+# bVHvsd2BPV6C7IGOyKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMwNjU3
-# MzZaMC8GCSqGSIb3DQEJBDEiBCDEv0G2OT08oPb+qiR74RQ4KS1HlYqSBWGJ0VHW
-# I0Kd1DANBgkqhkiG9w0BAQEFAASCAgB90Z5E2VIQ7oE0GiU+T1ELOK5i9DwEzIxF
-# 0OO2B3/YEW5L7gS48FHk7FbFBmk7DiKSNr9phhFffBLIGRvlqIvqH/+FuGlzB9vQ
-# UR78xg0ZmqExotrcn0Wi0TAf8jRc0VzK2h1KH/CllqRpb8H6fwHwHCNekL8p34Fh
-# NOYhtqveYIpg6TcrSx9ywNG0D5WCyqoRwa6VmHTRyTSfzGrd91pU7hSzIgZg7RBk
-# Uf26ddLuT0ey2w1pUq11rVCENrjj9JgvU0Gi16ts+rM0OCj5tZjlWVJAmbpDx74W
-# 4nQZzZszDU/nqi1kNUIM64qLkjFR/gBaDKh8lJiIFM9dnRjCwvFBY6r94mRHARzj
-# Y2tXizGAdIcRxiZZauQ2f0fvpLjK8skvy94Wk2wUgjROjfIenSUkvNj0DxAePreQ
-# z7VgxKjGO8lEzUAf4LIqgeMNwuN2id0iB//WQ2R0EG1it2pVljylipedzI5snsFJ
-# JWXV9mgO174aYNnMZxAnhx4JK1i5gNv5MOYyxns5o2dqDxzgqx+BhagTsj9DxXhq
-# nnF0Dw6kal9AcHkrYwbcuMv8KdKB4Ij95+C6UB6WeGfNIf8aV8jWtByE7jjPDtrs
-# K3btM9K7zjboxUg41lazjovRUsRcqCVDAIOnqfxHbq0yGCG9n7OHhS7TFmHJYbmr
-# q1ZqppgsOw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTMwODA1
+# NTBaMC8GCSqGSIb3DQEJBDEiBCAhX/lLwfu9UyK0a9EQKE2Kfcy4VkkGu/xOkGfl
+# dwYZKzANBgkqhkiG9w0BAQEFAASCAgCgGg+Ko4WAElqdMS1SwTRDAgR02RhoMUoE
+# i5GzMS0YJz8Juw/EVqvzMjE4ZHYPMu8WOrtndHxLNB+eiP3sRNHoT5K15hOWBKJi
+# q1qtmm/MuP+QIyLJaaUZXTCkYNaF2n4aNd3itZDUeB1+JZprN6zxvK/L3bPvsaCR
+# 6Vr2MQKwspNWf4pms75oNOetWnxyDT/LB6tDhBCZqoRfeogG79yfBS9/8SeyFuYr
+# DRrddVvfDUyzQ0baJjbYdsehNiFDvqwVgXEpxeId7cWiqM2a1p0aBA6UPwZAzFhO
+# /atVj8bNvEcz8qxDlAyef19Qd8pVbwXkUVVJc22BUt1V41oMrdm8+KLmoifb3Dhg
+# DKiTxZMCC2eaybAErgqGu0Nl6MeFUaypSyIa5uCX7vgUxGL66XIae3jn6iDlsTOD
+# qR9oB4FWmgealzqNAzHePu6iDAfKm7WGmZitOtZIx1MyY2MR5M2G1BklT69uhZ+A
+# E1yKg/pxykxzQxTaIzrFl3XUGlg38n7wMrHqqE8iidzsNiqStflrPVREbLhylIv+
+# lrvGT9I+abHl9b+tlunU4oAykVgCE/929hKa68lAUiRqxm2VRVneWdkePmw2flio
+# uLkIyEVhgbxPYJfhFT8KX4JMilBVsaACjySPGLVAjteYH2JmohYFx2l5XEfo/gWk
+# OwGPaiyc9w==
 # SIG # End signature block

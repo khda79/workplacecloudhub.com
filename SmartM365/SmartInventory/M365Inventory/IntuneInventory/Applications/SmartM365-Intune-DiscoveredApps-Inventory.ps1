@@ -33,13 +33,18 @@
     Preserves previous checkpoint bytes and partial CSVs. Requires All mode and
     no item/app limit; cannot be combined with the destructive ResetResume switch.
 
+.PARAMETER ResumeVerifiedFreshCheckpoint
+    Explicitly resumes one verified full fresh checkpoint. Requires FreshDeviceDetails
+    and the SHA-256 hashes of the checkpoint and its partial CSV. The old files are
+    preserved; any mismatch stops before relation acquisition or publication.
+
 .PARAMETER DelayMs
     Milliseconds to wait between each managedDevices Graph call to avoid throttling.
     Default: 300. Increase if 429 errors persist (e.g. 500 or 1000).
-    Version : 1.31
+    Version : 1.32
 
 .VERSION
-1.31
+1.32
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication.
@@ -48,7 +53,7 @@
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
     Script  : Intune-DiscoveredApps-Inventory
-    Version : 1.31
+    Version : 1.32
     Requires: Microsoft.Graph.Authentication module
               SmartM365.Core module (Modules\SmartM365.Core\SmartM365.Core.psd1)
     Local configuration: DiscoveredAppsCsvLogFolderPath -> output folder (DATA-ALL\M365-Inventory\Output-Windows-Discovered apps)
@@ -86,6 +91,15 @@ param(
 
     [Parameter(Mandatory = $false)]
     [switch]$FreshDeviceDetails,
+
+    [Parameter(Mandatory = $false)]
+    [switch]$ResumeVerifiedFreshCheckpoint,
+
+    [Parameter(Mandatory = $false)]
+    [string]$ExpectedResumeCheckpointSha256,
+
+    [Parameter(Mandatory = $false)]
+    [string]$ExpectedResumePartialSha256,
 
     [Parameter(Mandatory = $false)]
     [switch]$RefreshDeviceDetailCache,
@@ -316,7 +330,7 @@ try {
 # ==========================================================
 # Script metadata
 # ==========================================================
-$ScriptVersion = "1.31"
+$ScriptVersion = "1.32"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion"
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'DiscoveredAppsCsvLogFolderPath' -DefaultValue $OutputPath
 if (-not $PSBoundParameters.ContainsKey('DelayMs')) {
@@ -330,14 +344,26 @@ if ($DeviceDetailMode -notin @('All', 'None', 'NonZero', 'Top')) {
 }
 function Assert-DiscoveredAppsFreshDeviceDetailsOptions {
     [CmdletBinding()]
-    param([switch]$FreshDeviceDetails, [string]$Mode, [int]$MaxApps, [int]$MaxItems, [switch]$ResetResume)
+    param([switch]$FreshDeviceDetails, [string]$Mode, [int]$MaxApps, [int]$MaxItems, [switch]$ResetResume,
+        [switch]$ResumeVerifiedFreshCheckpoint, [string]$ExpectedResumeCheckpointSha256, [string]$ExpectedResumePartialSha256,
+        [switch]$DryRun)
+    if ($ResumeVerifiedFreshCheckpoint) {
+        if (-not $FreshDeviceDetails -or $DryRun -or $ResetResume) {
+            throw 'ResumeVerifiedFreshCheckpoint requires FreshDeviceDetails and forbids DryRun and ResetResume.'
+        }
+        if ($ExpectedResumeCheckpointSha256 -cnotmatch '^[0-9A-Fa-f]{64}$' -or $ExpectedResumePartialSha256 -cnotmatch '^[0-9A-Fa-f]{64}$') {
+            throw 'ResumeVerifiedFreshCheckpoint requires both 64-character SHA-256 hashes.'
+        }
+    } elseif ($ExpectedResumeCheckpointSha256 -or $ExpectedResumePartialSha256) {
+        throw 'Resume hashes require ResumeVerifiedFreshCheckpoint.'
+    }
     if (-not $FreshDeviceDetails) { return }
     if ($ResetResume) { throw 'FreshDeviceDetails cannot be combined with ResetResume; previous state must be preserved.' }
     if ($Mode -ne 'All' -or $MaxApps -ne 0 -or $MaxItems -ne 0) {
         throw 'FreshDeviceDetails requires DeviceDetailMode=All, MaxApps=0 and MaxItems=0.'
     }
 }
-Assert-DiscoveredAppsFreshDeviceDetailsOptions -FreshDeviceDetails:$FreshDeviceDetails -Mode $DeviceDetailMode -MaxApps $MaxApps -MaxItems $MaxItems -ResetResume:$ResetResume
+Assert-DiscoveredAppsFreshDeviceDetailsOptions -FreshDeviceDetails:$FreshDeviceDetails -Mode $DeviceDetailMode -MaxApps $MaxApps -MaxItems $MaxItems -ResetResume:$ResetResume -ResumeVerifiedFreshCheckpoint:$ResumeVerifiedFreshCheckpoint -ExpectedResumeCheckpointSha256 $ExpectedResumeCheckpointSha256 -ExpectedResumePartialSha256 $ExpectedResumePartialSha256 -DryRun:$DryRun
 if (-not $PSBoundParameters.ContainsKey('TopAppsByDeviceCount')) {
     $TopAppsByDeviceCount = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'TopAppsByDeviceCount' -DefaultValue 500)
 }
@@ -399,6 +425,7 @@ try {
     WriteLog -Message "RefreshDeviceDetailCache: $RefreshDeviceDetailCache"
     WriteLog -Message "ResetResume        : $ResetResume"
     WriteLog -Message "FreshDeviceDetails : $FreshDeviceDetails"
+    WriteLog -Message "ResumeVerifiedFreshCheckpoint: $ResumeVerifiedFreshCheckpoint"
 } catch {
     Write-Host "Initialization failed: $_" -ForegroundColor Red
     exit 1
@@ -710,12 +737,53 @@ function Get-DiscoveredAppsValidatedDeviceIds {
             $device.id -isnot [string] -or [string]::IsNullOrWhiteSpace($device.id) -or $device.id -cne $device.id.Trim()) {
             throw "Invalid app/device relation identity: AppId=$AppId; refusing to silently drop a device."
         }
-        if (-not $seen.Add($device.id)) {
-            throw "Repeated device identity in app relation pages: AppId=$AppId; coverage cannot be qualified."
-        }
         $ids.Add($device.id)
     }
+    foreach ($id in $ids) {
+        if (-not $seen.Add($id)) {
+            throw "Repeated device identity in app relation pages: AppId=$AppId; coverage cannot be qualified."
+        }
+    }
     return $ids.ToArray()
+}
+function Get-DiscoveredAppsStableDeviceIds {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Devices,
+        [Parameter(Mandatory)][string]$AppId,
+        [Parameter(Mandatory)][string]$InitialUri,
+        [ValidateRange(2, 6)][int]$MaxFreshReads = 4
+    )
+    try {
+        return @(Get-DiscoveredAppsValidatedDeviceIds -Devices $Devices -AppId $AppId)
+    } catch {
+        if ($_.Exception.Message -notlike 'Repeated device identity in app relation pages:*') { throw }
+        WriteLog -Message ("Repeated device identity for AppId={0}; rereading the complete relation from its first page." -f $AppId) 'WARNING'
+    }
+    $previousIds = @()
+    $hasPrevious = $false
+    for ($read = 1; $read -le $MaxFreshReads; $read++) {
+        try {
+            $ids = @(Get-DiscoveredAppsValidatedDeviceIds -Devices @(Invoke-GraphPagedRequest -InitialUri $InitialUri) -AppId $AppId)
+        } catch {
+            if ($_.Exception.Message -notlike 'Repeated device identity in app relation pages:*') { throw }
+            $hasPrevious = $false
+            WriteLog -Message ("Repeated device identity in fresh relation read {0}/{1}: AppId={2}." -f $read, $MaxFreshReads, $AppId) 'WARNING'
+            continue
+        }
+        if ($hasPrevious) {
+            $previousSet = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+            foreach ($id in $previousIds) { [void]$previousSet.Add([string]$id) }
+            if ($previousSet.Count -eq $ids.Count -and $previousSet.SetEquals([string[]]$ids)) {
+                WriteLog -Message ("Stable complete relation reads accepted: AppId={0}; Devices={1}; FreshReads={2}." -f $AppId, $ids.Count, $read) 'INFO'
+                return $ids
+            }
+            WriteLog -Message ("Fresh relation reads disagree: AppId={0}; attempt={1}/{2}; no relation rows accepted yet." -f $AppId, $read, $MaxFreshReads) 'WARNING'
+        }
+        $previousIds = $ids
+        $hasPrevious = $true
+    }
+    throw "Repeated or drifting device identities persisted after $MaxFreshReads complete fresh reads: AppId=$AppId; coverage cannot be qualified."
 }
 
 function Stop-DiscoveredAppsTranscript {
@@ -1419,6 +1487,111 @@ function Test-DiscoveredAppsResumeStateCompatible {
 
     return $true
 }
+function Assert-DiscoveredAppsVerifiedFreshCheckpoint {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$State,
+        [Parameter(Mandatory)][string]$CheckpointPath,
+        [Parameter(Mandatory)][string]$CheckpointSha256,
+        [Parameter(Mandatory)][string]$PartialSha256,
+        [Parameter(Mandatory)][string[]]$TargetAppIds,
+        [Parameter(Mandatory)][string]$TenantKey
+    )
+
+    if ((Get-FileHash -LiteralPath $CheckpointPath -Algorithm SHA256).Hash -ne $CheckpointSha256) {
+        throw 'Verified fresh recovery rejected: checkpoint SHA-256 differs from the operator-approved value.'
+    }
+    if (-not $State.PSObject.Properties['Updated'] -or [string]::IsNullOrWhiteSpace([string]$State.Updated)) {
+        throw 'Verified fresh recovery rejected: checkpoint update time is missing.'
+    }
+    if ([int]$State.SkippedCount -ne 1 -or [int]$State.ProcessedCount -ne [int]$State.TargetCount - 1) {
+        throw 'Verified fresh recovery requires exactly one previously failed application.'
+    }
+    $partialPath = [string]$State.PartialPath
+    $partialItem = Get-Item -LiteralPath $partialPath -ErrorAction Stop
+    if ([int64]$partialItem.Length -ne [int64]$State.PartialLength -or
+        (Get-FileHash -LiteralPath $partialPath -Algorithm SHA256).Hash -ne $PartialSha256) {
+        throw 'Verified fresh recovery rejected: partial CSV length or SHA-256 differs from the operator-approved evidence.'
+    }
+    $header = ([string](Get-Content -LiteralPath $partialPath -TotalCount 1 -ErrorAction Stop)).TrimStart([char]0xFEFF)
+    if ($header -cne '"TenantKey","AppId","DeviceId"') {
+        throw 'Verified fresh recovery rejected: unexpected partial CSV header.'
+    }
+
+    $targetIds = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($id in $TargetAppIds) {
+        if ([string]::IsNullOrWhiteSpace($id) -or -not $targetIds.Add($id)) {
+            throw 'Verified fresh recovery rejected: target application IDs are missing or repeated.'
+        }
+    }
+    $processedIds = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($id in @($State.ProcessedAppIds)) {
+        if ([string]::IsNullOrWhiteSpace([string]$id) -or -not $targetIds.Contains([string]$id) -or
+            -not $processedIds.Add([string]$id)) {
+            throw 'Verified fresh recovery rejected: processed application IDs are invalid or repeated.'
+        }
+    }
+    if ($targetIds.Count -ne [int]$State.TargetCount -or $processedIds.Count -ne [int]$State.ProcessedCount) {
+        throw 'Verified fresh recovery rejected: target or processed application count differs from the checkpoint.'
+    }
+    $expectedCounts = @{}
+    $expectedRows = [int64]0
+    foreach ($property in @($State.ActualDeviceCounts.PSObject.Properties)) {
+        $appId = [string]$property.Name
+        $count = [int64]$property.Value
+        if (-not $processedIds.Contains($appId) -or $count -lt 0) {
+            throw 'Verified fresh recovery rejected: actual device counts do not match processed applications.'
+        }
+        $expectedCounts[$appId] = $count
+        $expectedRows += $count
+    }
+    if ($expectedCounts.Count -ne $processedIds.Count -or $expectedRows -ne [int64]$State.DeviceDetailRows) {
+        throw 'Verified fresh recovery rejected: checkpoint device counts or total rows are inconsistent.'
+    }
+
+    $closedApps = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    $currentApp = ''
+    $currentDevices = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    $currentCount = [int64]0
+    $physicalRows = [int64]0
+    Import-Csv -LiteralPath $partialPath -ErrorAction Stop | ForEach-Object {
+        $row = $_
+        $appId = [string]$row.AppId
+        $deviceId = [string]$row.DeviceId
+        if (@($row.PSObject.Properties).Count -ne 3 -or [string]$row.TenantKey -cne $TenantKey -or -not $processedIds.Contains($appId) -or
+            [string]::IsNullOrWhiteSpace($deviceId) -or $deviceId -cne $deviceId.Trim()) {
+            throw 'Verified fresh recovery rejected: partial CSV has an invalid tenant, application or device identity.'
+        }
+        if ($appId -cne $currentApp) {
+            if ($currentApp) {
+                if ($currentCount -ne [int64]$expectedCounts[$currentApp]) {
+                    throw 'Verified fresh recovery rejected: partial CSV app count differs from the checkpoint.'
+                }
+                [void]$closedApps.Add($currentApp)
+            }
+            if ($closedApps.Contains($appId)) {
+                throw 'Verified fresh recovery rejected: an application appears in noncontiguous CSV blocks.'
+            }
+            $currentApp = $appId
+            $currentCount = 0
+            $currentDevices.Clear()
+        }
+        if (-not $currentDevices.Add($deviceId)) {
+            throw 'Verified fresh recovery rejected: repeated app/device pair in partial CSV.'
+        }
+        $currentCount++
+        $physicalRows++
+    }
+    if ($currentApp -and $currentCount -ne [int64]$expectedCounts[$currentApp]) {
+        throw 'Verified fresh recovery rejected: final partial CSV app count differs from the checkpoint.'
+    }
+    if ($physicalRows -ne $expectedRows -or
+        (Get-FileHash -LiteralPath $partialPath -Algorithm SHA256).Hash -ne $PartialSha256 -or
+        (Get-FileHash -LiteralPath $CheckpointPath -Algorithm SHA256).Hash -ne $CheckpointSha256) {
+        throw 'Verified fresh recovery rejected: partial CSV row count or source hashes changed during validation.'
+    }
+    WriteLog -Message ("Verified fresh checkpoint accepted: ProcessedApps={0}; MissingApps=1; VerifiedRows={1}; CheckpointSHA256={2}; PartialSHA256={3}; CheckpointUpdated={4}." -f $processedIds.Count, $physicalRows, $CheckpointSha256, $PartialSha256, [string]$State.Updated) 'INFO'
+}
 function Repair-DiscoveredAppsResumePartialCsv {
     [CmdletBinding()]
     param(
@@ -1833,11 +2006,34 @@ try {
         }
 
         $resumeState = if ($streamingEnabled) { Get-DiscoveredAppsResumeState -Path $script:DeviceDetailResumePath } else { $null }
-        $resumeStateCompatible = Test-DiscoveredAppsResumeStateCompatible -State $resumeState -Mode $DeviceDetailMode -TargetCount $script:Stat_DetailAppsTargeted -TargetAppIdsHash $detailTargetAppIdsHash -ResumeContractVersion $script:DeviceDetailResumeContractVersion -FreshDeviceDetails:$FreshDeviceDetails
+        $resumeStateCompatible = Test-DiscoveredAppsResumeStateCompatible -State $resumeState -Mode $DeviceDetailMode -TargetCount $script:Stat_DetailAppsTargeted -TargetAppIdsHash $detailTargetAppIdsHash -ResumeContractVersion $script:DeviceDetailResumeContractVersion -FreshDeviceDetails:($FreshDeviceDetails -and -not $ResumeVerifiedFreshCheckpoint)
+        if ($ResumeVerifiedFreshCheckpoint) {
+            if (-not $resumeStateCompatible) {
+                throw 'Verified fresh recovery rejected: checkpoint, partial CSV or current catalog is incompatible. Existing files are preserved.'
+            }
+            Assert-DiscoveredAppsVerifiedFreshCheckpoint -State $resumeState -CheckpointPath $script:DeviceDetailResumePath `
+                -CheckpointSha256 $ExpectedResumeCheckpointSha256 -PartialSha256 $ExpectedResumePartialSha256 `
+                -TargetAppIds @($detailApps | ForEach-Object { [string]$_.id }) -TenantKey ([string]$global:SmartM365TenantKey)
+        }
+
         if ($resumeStateCompatible) {
-            $script:DeviceDetailPartialPath = [string]$resumeState.PartialPath
-            $script:DeviceDetailTimestampedPath = [string]$resumeState.TimestampedPath
-            Repair-DiscoveredAppsResumePartialCsv -Path $script:DeviceDetailPartialPath -CheckpointLength ([int64]$resumeState.PartialLength) | Out-Null
+            if ($ResumeVerifiedFreshCheckpoint) {
+                $null = Save-DiscoveredAppsPreviousCheckpoint -Path $script:DeviceDetailResumePath
+                $script:DeviceDetailPartialPath = Join-Path -Path $OutputPath -ChildPath "$detailBaseFileName`_$detailTimestamp.partial.csv"
+                $script:DeviceDetailTimestampedPath = Join-Path -Path $OutputPath -ChildPath "$detailBaseFileName`_$detailTimestamp.csv"
+                if (Test-Path -LiteralPath $script:DeviceDetailPartialPath) {
+                    throw 'Verified fresh recovery copy path already exists; existing files are preserved.'
+                }
+                Copy-Item -LiteralPath ([string]$resumeState.PartialPath) -Destination $script:DeviceDetailPartialPath -ErrorAction Stop
+                if ((Get-FileHash -LiteralPath $script:DeviceDetailPartialPath -Algorithm SHA256).Hash -ne $ExpectedResumePartialSha256) {
+                    throw 'Verified fresh recovery copy SHA-256 differs from the approved partial CSV.'
+                }
+                WriteLog -Message "Verified fresh recovery uses a separate partial CSV copy: $script:DeviceDetailPartialPath" 'INFO'
+            } else {
+                $script:DeviceDetailPartialPath = [string]$resumeState.PartialPath
+                $script:DeviceDetailTimestampedPath = [string]$resumeState.TimestampedPath
+                Repair-DiscoveredAppsResumePartialCsv -Path $script:DeviceDetailPartialPath -CheckpointLength ([int64]$resumeState.PartialLength) | Out-Null
+            }
             foreach ($id in @($resumeState.ProcessedAppIds)) {
                 if (-not [string]::IsNullOrWhiteSpace([string]$id)) { [void]$processedAppIds.Add([string]$id) }
             }
@@ -1845,7 +2041,7 @@ try {
                 $actualDeviceCountsByAppId[[string]$property.Name] = [int]$property.Value
             }
             $script:Stat_AppsProcessed = [int]$resumeState.ProcessedCount
-            $script:Stat_AppsSkipped = [int]$resumeState.SkippedCount
+            $script:Stat_AppsSkipped = if ($ResumeVerifiedFreshCheckpoint) { 0 } else { [int]$resumeState.SkippedCount }
             $script:Stat_DeviceDetailRows = [int]$resumeState.DeviceDetailRows
             WriteLog -Message "Resuming DeviceDetail export from $($processedAppIds.Count) processed app ids; partial CSV: $script:DeviceDetailPartialPath" "INFO"
         } else {
@@ -1961,7 +2157,7 @@ try {
                 }
 
                 $appRows = [System.Collections.Generic.List[psobject]]::new()
-                $validatedDeviceIds = @(Get-DiscoveredAppsValidatedDeviceIds -Devices @($devices) -AppId $app.id)
+                $validatedDeviceIds = @(Get-DiscoveredAppsStableDeviceIds -Devices @($devices) -AppId $app.id -InitialUri $devicesUri)
                 foreach ($deviceId in $validatedDeviceIds) {
                     $pairKey = '{0}|{1}' -f $app.id, $deviceId
                     if (-not $seenAppDevicePairs.Add($pairKey)) { throw "Repeated app/device pair during acquisition: AppId=$($app.id); refusing to silently drop a relation." }
@@ -2250,7 +2446,7 @@ $($global:LogTextFile)
     try {
         Stop-DiscoveredAppsTranscript
         $summaryStatus = if ($script:RunError) { 'Failed' } else { 'Auto' }
-        Set-SmartM365CmdbSourceScope -CompleteScope ($DeviceDetailMode -eq 'All' -and $MaxApps -eq 0 -and $MaxItems -eq 0 -and $script:Stat_DetailAppsFromCache -eq 0 -and $script:Stat_DetailAppsSkippedByResume -eq 0) -Scope 'CMDB:apps,app_relations'
+        Set-SmartM365CmdbSourceScope -CompleteScope ($DeviceDetailMode -eq 'All' -and $MaxApps -eq 0 -and $MaxItems -eq 0 -and $script:Stat_DetailAppsFromCache -eq 0 -and $script:Stat_AppsSkipped -eq 0 -and $script:Stat_AppsProcessed -eq $script:Stat_DetailAppsTargeted -and ($script:Stat_DetailAppsSkippedByResume -eq 0 -or $ResumeVerifiedFreshCheckpoint)) -Scope 'CMDB:apps,app_relations'
         Complete-SmartM365ExecutionContext -Status $summaryStatus -ErrorRecord $script:RunError
     } catch {
         WriteLog -Message ("Failed to write execution summary: {0}" -f $_) "WARNING"
@@ -2260,8 +2456,8 @@ $($global:LogTextFile)
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC/XpPiQrxnPipd
-# aJZLOQiVLpIiXQRqodz25/H3gVt1/KCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBQYrocXbsEjuPc
+# tp2o/cT4Q4MY0/gY/V9EYLut5HT1jKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -2394,31 +2590,31 @@ $($global:LogTextFile)
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIFCsTImsvik5dPjQiG+xd0qGxrpqpUOdUitIwIgqQauuMA0GCSqG
-# SIb3DQEBAQUABIIBgFVlVdAcetns4iNjGfV2qnSMwMnk35azRkG/0zoTmkhh+PzL
-# WX18j14Hn2pTJLTLf68jwhFFtWUFqBp0r77Fx9CPvuzbQoCQxIhK7SSQhkbdId7m
-# zaOHfbmWZWih70Gup0GvftciR2RwcxzE3jBMY6r+9kaIKreriX777F6Pxtr9B4av
-# e0LCJi3rpXPr45cM7+WnQHMMUZWkVyIVUe3nGLsEotQmVdLdASgF3GqTaMR19QK9
-# 6liUMoYK+aAqhA4BG1yAzWeacDYI0iSUYkLMnSO32RhKdAQ+9rjlESXoLtwxIn3C
-# nbL44wHyYC4He4SLBWXsK/5ffKypePb1tJjPy+6ZyIvfX1UYpflg8xOi9ue01i5y
-# UtKCYbUp+frmBkjHLWMg8/dMNnRVbAZyho6rS72GY5VojYotlr7CcTUQrJNrpd6a
-# zrZJZSHowlzrZY678wBg42Lt9GDhbYOXxZFkGcqe6foaS96X54qCUBH9FAPRmEc3
-# qrtAiSTjb5NIN25bcqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEICLvsYa868ND+5Z9VC+qAz8Xj63FjUvAR3bdigCpr/0UMA0GCSqG
+# SIb3DQEBAQUABIIBgFrexfW+MI+iNTfS9NhGY+S1kNrLpaNNiTz21WEQwr++oW4I
+# f3i0LDLOU6PV1A8IZN/xr5JQpZAssFKtTiVvnbMvmvPtByKNpRxTd3dZs2Cj0FBL
+# iRbTf7P85dmaUsK/Hg4OQpu9hHI5A63xQCjWc860Tf60/TPyY/zwGg1W8b8OIw/1
+# 13hVgpSgaE2h+tW4oHLacKoPJ5isN192S2VsaZMD6de59U9j1P2dH+U3AMxp0q3M
+# KeL/qjHy6jLZv9PKnocjrp0KAii4pAywcObrIqpcPg2ic3W54YStCB9b45pRO9Za
+# 892w7vnS10819u7oz1e5WIozryYYvytffaev89sXPWxjHnaveFU3IGdCWACplTi3
+# rp0zR5sO2PKWanOI415gNBXZoQ73ktPnClwKZlMu5AzTa1a/hrJyuxzzGwASbysQ
+# MQ23pb1LnquYyVj+4fZDU0XTRh/2/mG1aNPMP9XVYwSQSNDYYTRLKDM5jX6+R5gm
+# tbFmaFiBCwHINq9SoqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDUwNzE2
-# MzFaMC8GCSqGSIb3DQEJBDEiBCAHf+6y41lPM2Wtnvb/6F0hsMt53EzCvzUEK6sW
-# vRnhADANBgkqhkiG9w0BAQEFAASCAgCutUeP+gfB0+VGlMS2lyGr+aOTcIm1PO3u
-# 5qP9pGPF9W2hBRa9vzt7wT9xAiqlRwJ9+IYh2vNSbyGWsbSENofNE15uYnnBpbZI
-# xyITetCjVozXSKr+EsLElumPxCA20py3i8lxdCLphLXCQDKSb9kUZGejBNoW1jWh
-# 1cTONhJCU+XrfGgktefK5/LJFV2EuK4xQu+JI4/Q4IoGCgz+/FTwWab0kqcXHnSD
-# rEsjtr7yfeR2Tb8IbO4WrD9AVI80HBdEepz92SoSnKo/+9MIwAsjZgIPlxJN7197
-# WiZVVSTIwF6plOxjC0Do8dZVRer5H/vAa3RgRmJHXFGEsiFJDrZ0jm0tUl6MkoNC
-# d8MAij5DNctKXg/uUyYcfLBnurJgoMjFAD4U1D+NpEQ58tcOn8Uxps5daSVGS4HZ
-# YOS1YAzDTUF6mTRzVT4rrX6wg/JUl18NiXfG8LR8UUrULWZDc8FVPWtMV/qEJPbW
-# fn0tG6UAuCDH0WNk0Gaj813YTBBXP1NfdLYJb5piEnKt8XyrAzzatb2tmyJsxkcF
-# F31IZ3V5T5ZThRGGN6FOrlOshCXfoPUHKzh2nRXagYI0XQzEx2o7IgzAwzkFKMJG
-# Gmwf76FnqHSbXndUS3ar2nIb8rsw/Ohr/KK2NdHYEtnjVJxF3/R/mGnEhTaoMrHx
-# qHDwt39x1w==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTMwODA1
+# NDVaMC8GCSqGSIb3DQEJBDEiBCBLctf8iFkVs9dRqbjRqNsfgdHQGAUy1XDEvzMK
+# QYdSLzANBgkqhkiG9w0BAQEFAASCAgBcR8k2AiQ+HGc9HKuQ/xUT4bzOm/rwNOyL
+# 25QNl6WQGmVrGkG+ACk8LMrP6cuJq5C+YlzRtwLSJimuh9GAid4++LCNxIsSqiWb
+# PQ3G0tQ5YvgjY4hAYBF2/uYuud/L+JQsgbmBIhsoU+cbo+pBBhv+4rg7NWZcrMmo
+# Lmj2kAEXh1y3y/gnY9pXTgr+w+iuGrckD2u/31UsW5SDd8ON2GiLJb+2w+yO+ixc
+# JjatLTejfgLZorrufyCwj2zJaM6F9SAJEuZF7jyz/rpjyMy7EpaRnjrs/qy4sE2t
+# Cwbr6Frf9UPrp+rO9qKXBQUtf8JDLoGaIxa1A6S9UZbbvePvnZ50rR5pzs2csUX3
+# u0+qFTbZzJpnAuescsFc9it3E/RaRWY2a0rKYU9gFypG2slEjRKCJ2Xbo0kd+DKH
+# 1YWWKBDlmpHAOJwF991PswxjT0d6UmwfQCE4ZA2++NT0hQAi7KM/lvKsLcvnqbaj
+# rlluJgPzbrnCaJhBYk8ts0E6VDJjxkFGHXMpiHtMCj1eBm5zT7LU2qojebgvDQrJ
+# g4zjgfqmzfbkbaLbbZosRkdrC+1cKDPB/HTHlT8oagPSGALFHdduZ5sQQFTxeb8N
+# znC8K9vSbId589rmVWfhxRBLFOI2UsI2SRSMcWmJi/0jZuIH1jntaC0UAm8nDP8f
+# C6sZ/LLFIQ==
 # SIG # End signature block
