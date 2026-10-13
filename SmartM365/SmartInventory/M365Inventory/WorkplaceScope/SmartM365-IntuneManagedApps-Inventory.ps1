@@ -3,7 +3,7 @@
 .SYNOPSIS
 Collects Intune managed apps, assignments, and reported installation states.
 .VERSION
-1.1.0
+1.2.0
 #>
 [CmdletBinding()]
 param(
@@ -33,11 +33,68 @@ function Get-IntuneManagedAppDeploymentState {
     }
 }
 
+function Get-IntuneManagedAppInstallStates {
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Apps,
+        [Parameter(Mandatory)][string]$RunId,
+        [Parameter(Mandatory)][string]$CollectedAtUtc,
+        [int]$ExportTimeoutSeconds=1200,
+        [int]$MaxItems=0,
+        [ValidateRange(0,60)][int]$PauseSeconds=3,
+        [scriptblock]$ExportReport
+    )
+    $states = [Collections.Generic.List[object]]::new()
+    $reportColumns = @('ApplicationId','DeviceId','UserPrincipalName','AppVersion','Platform','InstallState','InstallStateDetail','ErrorCode','LastModifiedDateTime','AppInstallState','AppInstallStateDetails','HexErrorCode')
+    for ($index=0; $index -lt $Apps.Count; $index++) {
+        $appId = [string]$Apps[$index].ApplicationId
+        $parsedId = [guid]::Empty
+        if (-not [guid]::TryParse($appId,[ref]$parsedId)) { throw "Invalid managed app id in catalog: $appId" }
+        if ($index -gt 0 -and $PauseSeconds -gt 0) { Start-Sleep -Seconds $PauseSeconds }
+        $filter = "(ApplicationId eq '$($parsedId.ToString('D'))')"
+        try {
+            $reportRows = if ($ExportReport) {
+                @(& $ExportReport $appId $filter)
+            } else {
+                @(Invoke-SmartM365EvidenceExportReport -ReportName 'DeviceInstallStatusByApp' -Filter $filter -Select $reportColumns -ApiVersion beta -TimeoutSeconds $ExportTimeoutSeconds -MaxItems $MaxItems)
+            }
+        } catch {
+            Write-SmartM365EvidenceLog "DeviceInstallStatusByApp export failed for app $appId ($($index+1)/$($Apps.Count))." -Level ERROR
+            throw
+        }
+        foreach ($row in $reportRows) {
+            $rowAppId = [string](Get-SmartM365EvidenceProperty $row @('ApplicationId'))
+            if ($rowAppId -ine $appId) { throw "DeviceInstallStatusByApp returned an absent or mismatched ApplicationId for app $appId." }
+            $installState = [string](Get-SmartM365EvidenceProperty $row @('InstallState'))
+            if ([string]::IsNullOrWhiteSpace($installState)) { $installState = [string](Get-SmartM365EvidenceProperty $row @('AppInstallState')) }
+            $installStateDetail = [string](Get-SmartM365EvidenceProperty $row @('InstallStateDetail'))
+            if ([string]::IsNullOrWhiteSpace($installStateDetail)) { $installStateDetail = [string](Get-SmartM365EvidenceProperty $row @('AppInstallStateDetails')) }
+            $errorCode = [string](Get-SmartM365EvidenceProperty $row @('ErrorCode'))
+            if ([string]::IsNullOrWhiteSpace($errorCode)) { $errorCode = [string](Get-SmartM365EvidenceProperty $row @('HexErrorCode')) }
+            $states.Add([pscustomobject][ordered]@{
+                ApplicationId=$rowAppId; DeviceId=[string](Get-SmartM365EvidenceProperty $row @('DeviceId'))
+                UserPrincipalName=[string](Get-SmartM365EvidenceProperty $row @('UserPrincipalName'))
+                AppVersion=[string](Get-SmartM365EvidenceProperty $row @('AppVersion'))
+                Platform=[string](Get-SmartM365EvidenceProperty $row @('Platform'))
+                InstallState=$installState
+                ReportedDeploymentState=Get-IntuneManagedAppDeploymentState $installState
+                InstallStateDetail=$installStateDetail
+                ErrorCode=$errorCode
+                LastModifiedDateTime=[string](Get-SmartM365EvidenceProperty $row @('LastModifiedDateTime'))
+                RunId=$RunId; CollectedAtUtc=$CollectedAtUtc
+            })
+        }
+        if ((($index+1) % 10 -eq 0) -or ($index+1 -eq $Apps.Count)) {
+            Write-SmartM365EvidenceLog "Managed app installation reports completed: $($index+1)/$($Apps.Count); deviceStateRows=$($states.Count)."
+        }
+    }
+    return $states.ToArray()
+}
+
 try {
     $smartRoot = Split-Path (Split-Path (Split-Path $PSScriptRoot -Parent) -Parent) -Parent
     . (Join-Path $smartRoot 'Config/SmartM365-TenantContext.ps1')
     $effective = Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot
-    Import-Module (Join-Path $smartRoot 'SmartInventory/Common/SmartM365.EvidenceCollector.Common.psd1') -MinimumVersion '1.0.8' -Force
+    Import-Module (Join-Path $smartRoot 'SmartInventory/Common/SmartM365.EvidenceCollector.Common.psd1') -MinimumVersion '1.0.9' -Force
     $script:Runtime = Initialize-SmartM365EvidenceRuntime -ScriptPath $PSCommandPath -EffectiveConfig $effective `
         -DefaultOutputRelativePath 'Intune/WorkplaceScope/ManagedApps' -OutputPath $OutputPath `
         -LatestCsvFolderPath $LatestCsvFolderPath -ValidateOnly:$ValidateOnly `
@@ -90,24 +147,8 @@ try {
             })
         }
     }
-    $deviceRaw = @(Invoke-SmartM365EvidenceExportReport -ReportName 'OrgDeviceInstallStatus' -ApiVersion v1.0 -TimeoutSeconds $ExportTimeoutSeconds -MaxItems $MaxItems)
-    $deviceStates = @($deviceRaw | ForEach-Object {
-        $id = [string](Get-SmartM365EvidenceProperty $_ @('ApplicationId'))
-        if (-not $id) { throw 'App device installation status lacks ApplicationId.' }
-        $installState = [string](Get-SmartM365EvidenceProperty $_ @('InstallState'))
-        [pscustomobject][ordered]@{
-            ApplicationId=$id; DeviceId=[string](Get-SmartM365EvidenceProperty $_ @('DeviceId'))
-            UserPrincipalName=[string](Get-SmartM365EvidenceProperty $_ @('UserPrincipalName'))
-            AppVersion=[string](Get-SmartM365EvidenceProperty $_ @('AppVersion'))
-            Platform=[string](Get-SmartM365EvidenceProperty $_ @('Platform'))
-            InstallState=$installState
-            ReportedDeploymentState=Get-IntuneManagedAppDeploymentState $installState
-            InstallStateDetail=[string](Get-SmartM365EvidenceProperty $_ @('InstallStateDetail'))
-            ErrorCode=[string](Get-SmartM365EvidenceProperty $_ @('ErrorCode'))
-            LastModifiedDateTime=[string](Get-SmartM365EvidenceProperty $_ @('LastModifiedDateTime'))
-            RunId=$script:Runtime.RunId; CollectedAtUtc=$script:Runtime.CollectedAtUtc
-        }
-    })
+    Write-SmartM365EvidenceLog "Managed app catalog collected: apps=$($apps.Count); assignments=$($assignments.Count). Starting one installation report per app."
+    $deviceStates = @(Get-IntuneManagedAppInstallStates -Apps $apps.ToArray() -RunId $script:Runtime.RunId -CollectedAtUtc $script:Runtime.CollectedAtUtc -ExportTimeoutSeconds $ExportTimeoutSeconds -MaxItems $MaxItems)
     $statusByApp = [Collections.Generic.Dictionary[string,object]]::new([StringComparer]::OrdinalIgnoreCase)
     foreach ($app in $apps) {
         $statusByApp[$app.ApplicationId] = [ordered]@{ ReportedInstalledRows=0; ReportedFailureRows=0; ReportedNotInstalledRows=0; PendingRows=0; NotApplicableRows=0; UnknownRows=0; ObservedRows=0; InCollectedCatalog=$true }
@@ -132,7 +173,7 @@ try {
         [pscustomobject][ordered]@{
             ApplicationId=$_
             InCollectedCatalog=$counts.InCollectedCatalog
-            StatusSource=if ($counts.ObservedRows -gt 0) { 'OrgDeviceInstallStatus' } else { 'NoReportRows' }
+            StatusSource=if ($counts.ObservedRows -gt 0) { 'DeviceInstallStatusByApp' } else { 'NoReportRows' }
             ObservedRows=$counts.ObservedRows
             ReportedInstalledRows=$counts.ReportedInstalledRows
             ReportedFailureRows=$counts.ReportedFailureRows
@@ -163,8 +204,13 @@ try {
         @{Name='Intune_ManagedAppDeviceStates';Rows=$deviceStates;Columns=@('ApplicationId','DeviceId','UserPrincipalName','AppVersion','Platform','InstallState','ReportedDeploymentState','InstallStateDetail','ErrorCode','LastModifiedDateTime','RunId','CollectedAtUtc')}
     )
     foreach ($export in $exports) { Assert-SmartM365CsvDataCompleteness -Data $export.Rows -BaseFileName $export.Name -Columns $export.Columns | Out-Null }
-    foreach ($export in $exports) { Export-SmartM365EvidenceDataset $script:Runtime $export.Name $export.Rows $export.Columns | Out-Null }
-    Write-SmartM365EvidenceLog "Managed apps collected: apps=$($apps.Count); assignments=$($assignments.Count); statusSummary=$($aggregate.Count); deviceStateRows=$($deviceStates.Count). Summary counts are report rows, not unique devices." -Level SUCCESS
+    $deviceStateCount = $deviceStates.Count
+    $deviceStates = $null
+    foreach ($export in $exports) {
+        Export-SmartM365EvidenceDataset $script:Runtime $export.Name $export.Rows $export.Columns -SingleSerialization | Out-Null
+        $export.Rows = $null
+    }
+    Write-SmartM365EvidenceLog "Managed apps collected: apps=$($apps.Count); assignments=$($assignments.Count); statusSummary=$($aggregate.Count); deviceStateRows=$deviceStateCount. Summary counts are report rows, not unique devices." -Level SUCCESS
 } catch { $failure = $_; throw } finally {
     try { Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null } catch {}
     if ($script:Runtime) { Complete-SmartM365EvidenceRuntime -Status $(if ($failure) {'Failed'} else {'Success'}) -ErrorRecord $failure -FailureStage 'IntuneManagedAppsInventory' }
@@ -173,8 +219,8 @@ try {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAOUy4deFs72c1Y
-# tBUazkr+IdUoEASnz3CoFvBiHs6ljqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDo7+HJbxJ5tMy6
+# EIL3JPlvk8J9IFAoz/0XNUcxnS+eiaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -307,31 +353,31 @@ try {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIOeAE2JLmTN7AP2Cf5hjWlVuEay/pbSn6g0OGd4JxzYHMA0GCSqG
-# SIb3DQEBAQUABIIBgA9fWpfhFBIeRdMuIdWsVil43LGehV7wZHBtHwNHmUU7xbwl
-# G/4oSGs7iMUNs1xQ1i4fHj40/qUHpE1RKv9AGqrN86HVBrf0UJaZL1Nxz8YO9Waa
-# 65N+tLWvqehMqHagrBQJ775iN8Ji3LsO84E7EAnlaD6kyh5LEEHbltvxjen7GGKV
-# 7bLAALqwNr5EIRseMcfagxwbQglUiYvTbuxotWHIpyJg6uJV2l5fa23RL7Pxi4Bh
-# KVGjtStmihkOI18N8ZdHHEn2EUnJKfBHNsGP0Smkpu1hdEGH6yNIbNasGWKf+2Nc
-# B7infxQDBPX24osUNArY5Sq0fjRncX2ZMGNAUUORrk04XpLKjUIZT+ByJ/5AR1ob
-# d0iZz3u5eQns833xioTugR3A3OsVi6J6bsuUZKBN3FDpjofT7a21UkxoAzYByGwX
-# YVRrlcgNKnR4yTGDjb3Ci5n6VZSbwrGYY1yYHOr0dS98kTkjfy9DOpvr5pXO6Gkz
-# HeBKcJ4YzLm6+M+CqqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIFhhdGChaiI4ybWEp+m8HHojQQUMNFYoBWzJbqitUWcOMA0GCSqG
+# SIb3DQEBAQUABIIBgEBxJJ5WeYEoSd0INngOXUe7yca+4TZgf8Ezn5qOrsvNYITv
+# nv4bPSAYec4hiMiIG3vClwNY/oH7AHdZgqtpkuyV6Z1DMXmIOf5N5GBOwoWv3Mr3
+# 9t4HlAVGzrdDvbssCrW/UZZpsrzW0W77WeI5NME1v1/C0OttQHUGBAxnQ8O87V8e
+# SbDUaCBIhxITLMVJD5j8KetiwqZltrePaILrhgPsyriepmw/LiX0Wo/mH2gOkmlR
+# SbBBMnbSCOwKMp/OpXmqH4L5tJupdk2xMCEH4zWk5kQGd81Dp+OYQdJoezIEvnPv
+# UA5OIt/3MJOdHIIQKJGg3r/1DhcyDCQ3veNz8MFUPvwtU/hi2mB8WqSlD7473Nm1
+# i0XwnbkTcnt48Mswmw2B5BM/uEklqESYXUVe3hfUZj/6Wg70d8sd50wsJclXn4+J
+# DgdTP2onSnTwnDbOH9QKv//p5coq6+EmUupUcTfEbsSA2VN5UmNRf/NijSQkTGHH
+# w/TAM6UtlbbyFDnjWKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTMxNTM4
-# NDJaMC8GCSqGSIb3DQEJBDEiBCAmZ4P4wabcm5qrfXaFO57x6gmzOFqDBECdYDN4
-# dtOVdzANBgkqhkiG9w0BAQEFAASCAgBzI88TQTmedMZHWa45Jp2oIgVLoNDioBAz
-# bWPCLXLmcl0J6jbsocXvir2mMu8sqJ/glNngSGwa6RKaCyuCymAbpnaIAF+HHgDe
-# uxhw53+0wvF0Qr5W30GcocoZa84gEhNI4D95MORl44yVJXvwpTm1niqSrIu7SFXU
-# 4qDm4SABydShm/JtQSr//MQBhsLRAR/Bz6hWBXyIGFdAf/ICoW6lqffGthxF6FQ3
-# /mLByrvFRGQOqGjnzFKO1wzuTXBJIbiwqdULoNfZ3w/bBfVzoi7L9ZRfvMJWNJ5e
-# 03Ehl0YLMLih49efE2U8fXgAv6zGhQoF69aeWxCRH0Lt0l1iuDoMiPfp8tNHGkaM
-# JjU6mmmmfXPaKs/ufGbzjRMApxb1byeQzCv7f2RlLq8q0uNQcyBl1dFccaIEjCN7
-# scNvOO2hQQEuwp+R8OHIZ5btkT9l5EgkqCR2cone8Nuym6IMRQL9PJbQ+guKAqLX
-# woK5Qc8DsSz/R6C4YP29YDatpxyoNM+0SHJflGVbKXuaso7s8BQqp6GotKSxaq2R
-# mfxqby4EvJcDIvU8lq/oB5iaBhOQbbgR4oI6SIlGIpj8rlf7UkrOYm9RRYSRQPA2
-# Xo7KK32yk/L9a+gvPU8AFVWW8mcvr/arh1lTZ+HTtKtJWovXSGdiLLKA+qX6+0n/
-# z1cWgNP4tw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTMxOTIz
+# NTRaMC8GCSqGSIb3DQEJBDEiBCCl1sDdfnjkES316TKguFynKiITNMQOyF2yOoRP
+# vAN+WjANBgkqhkiG9w0BAQEFAASCAgAK3sG3wQkZratzrt/TUZvUS/vVs2dLNZWm
+# 9DR9K5aFhOCnHIhyV9ny3P88IsEDNSEm6qmM7d5YqWi33C1XbYbwwAgHYho4lxv5
+# 4+pSNFEzXFm3sDrifZdhbS8oKcQZ0fQcz1LK16IFIVnaSXypYkBGHQU5jjfVJ2MH
+# uma55cdj1QEAVQYovUqmxUMnmr4JI8QqyQiy6xxjkjbLhYl3bEWCHhdKGC7Gay1t
+# 7qG90n0baw9WU0UqzDNyQ4xCjn+bhb/40zyOvs6UE95hQKv6ELNAmLnmt7R3RFCU
+# EfI1P0twp3CDGuBYurGhzWTQn+dEi4Kcl3bKaXrrcWRVpUBIVk+y9IvlIsrWNfT6
+# TsxAQyXKsp5bOm5ahPa2yQkPs/v6NparDMg8oUOX4VwLsDA1iaafv2Lm0YhvVFJC
+# JxKQkfXIYGGhxXiV+Q35X9DzaNGjtY2J2nfdveVVI0Y5uFLA0Iz4P5/5sFMpqGSh
+# x+mOlz1RlZzYFS51/3fsTPSJ6YlqPGE6xwH6gZqvWuSVMuNC7IaU8OsUBNv7kfIN
+# NFJu2curgzuQZqCK1VKsEBKeAEw6P03p5nopOrPVUSKkI+MozJDEYCq53k5tfHvt
+# v7ku2EI09HtIry9wCmuQl1Pc/+4y3PeiCecCeXAAe//0xWr0tIMZkxOVkQ8RL2ql
+# x6Z6tT3Hbw==
 # SIG # End signature block

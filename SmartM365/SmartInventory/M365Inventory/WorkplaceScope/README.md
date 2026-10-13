@@ -8,7 +8,7 @@ producer dependency set.
 | Collector | Source | Canonical DATA-LAST files |
 | --- | --- | --- |
 | `SmartM365-IntuneConfigurations-Inventory.ps1` | Graph beta policy families, assignments and Settings Catalog setting definitions; `DeviceAssignmentStatusByConfigurationPolicyV3` and `DeviceStatusesByConfigurationProfileV3` export jobs | `Intune_ConfigurationPolicies.csv`, `Intune_ConfigurationSettings.csv`, `Intune_ConfigurationAssignments.csv`, `Intune_ConfigurationAssignmentStates.csv`, `Intune_ConfigurationDeviceStates.csv`, `Intune_ConfigurationDeviceCurrentStates.csv`, `Intune_ConfigurationStatusCoverage.csv` |
-| `SmartM365-IntuneManagedApps-Inventory.ps1` | Graph v1.0 `mobileApps` and assignments; `OrgDeviceInstallStatus` export job | `Intune_ManagedApps.csv`, `Intune_ManagedAppAssignments.csv`, `Intune_ManagedAppInstallSummary.csv`, `Intune_ManagedAppDeviceStates.csv` |
+| `SmartM365-IntuneManagedApps-Inventory.ps1` | Graph v1.0 `mobileApps` and assignments; Graph beta `DeviceInstallStatusByApp` export job for each app | `Intune_ManagedApps.csv`, `Intune_ManagedAppAssignments.csv`, `Intune_ManagedAppInstallSummary.csv`, `Intune_ManagedAppDeviceStates.csv` |
 | `SmartM365-IntuneEnrollmentFailures-Inventory.ps1` | Graph v1.0 enrollment troubleshooting events | `Intune_EnrollmentFailures.csv` |
 
 All collectors use tenant-specific certificate authentication, preflight, Core
@@ -29,8 +29,11 @@ the assignment-status report returned rows. A zero-row assignment-status report
 when policy assignments exist does not qualify per-device assignment status.
 An assignment is not proof of application.
 The managed-app collector covers applications published in Intune, not apps
-detected on devices. `OrgDeviceInstallStatus` is required for installation
-states; the summary counts observed report rows, not unique devices or users.
+detected on devices. `DeviceInstallStatusByApp` requires an `ApplicationId`
+filter; every catalog app is queried, including apps with no assignments. A
+failed or mismatched app report stops publication for the run. Reports are paced
+to limit Graph requests and retain the shared retry handling for throttling.
+The summary counts observed report rows, not unique devices or users.
 `NoReportRows` means unobserved, not failed or not installed. `ReportedInstalled`
 requires an explicit installed state from Intune. Enrollment failures come from
 `enrollmentTroubleshootingEvent` records; their optional device identifiers are
