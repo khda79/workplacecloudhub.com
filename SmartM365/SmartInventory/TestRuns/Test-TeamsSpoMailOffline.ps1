@@ -28,7 +28,7 @@ Import-Module -Name (Join-Path $smartM365Root 'Modules/SmartM365.Core/SmartM365.
 $teamsPath = Join-Path $inventoryRoot 'M365Inventory/Teams/SmartM365-Teams-Inventory.ps1'
 $spoPath = Join-Path $inventoryRoot 'M365Inventory/SharePoint/SmartM365-SPO-Inventory.ps1'
 Import-ScriptFunction -Path $teamsPath -Names @('IsoUtc','Get-TeamsCsvColumnNames','Import-TeamsMailCsvSet','Invoke-TeamsDailySummaryMail','New-TeamsTimestampedWorkbook','Add-TeamsWorkbookOverview','Get-TeamsMailStatus','ConvertTo-HtmlReport')
-Import-ScriptFunction -Path $spoPath -Names @('ConvertTo-SpoHtml','Get-SpoCsvColumnNames','Import-SpoMailCsvSet','Invoke-SpoDailySummaryMail','New-SpoTimestampedWorkbook','Add-SpoWorkbookOverview','Get-SpoMailStatus','New-SpoHtmlSummary')
+Import-ScriptFunction -Path $spoPath -Names @('ConvertTo-SpoHtml','Get-SpoCsvColumnNames','Get-SpoLicenseCapacityEstimate','Add-SpoLicenseEstimateToSummary','Import-SpoMailCsvSet','Invoke-SpoDailySummaryMail','New-SpoTimestampedWorkbook','Add-SpoWorkbookOverview','Get-SpoMailStatus','New-SpoHtmlSummary')
 function WriteLog { param($Message,$Level) }
 function Write-SpoLog { param($Message,$Level) }
 
@@ -65,7 +65,7 @@ if ($teamsHtml -notmatch 'Teams to review' -or $teamsHtml -notmatch '2 distinct 
 if ($teamsHtml -notmatch 'Example &amp; One' -or $teamsHtml -match 'Example & One' -or $teamsHtml -match '<a\s') { throw 'Teams mail escaping or default link behavior is invalid.' }
 if ([regex]::Matches($teamsHtml,'Example &amp; One').Count -ne 1) { throw 'Teams priority table must list each team only once.' }
 if ($teamsHtml -notmatch 'no activity report row' -or $teamsHtml -notmatch 'Teams without measured storage: 1') { throw 'Teams evidence coverage is missing.' }
-if ($teamsHtml.IndexOf('Action required') -gt $teamsHtml.IndexOf('<h2>Summary</h2>') -or $teamsHtml.IndexOf('Run details') -lt $teamsHtml.IndexOf('Action required')) { throw 'Teams mail section order is invalid.' }
+if ($teamsHtml.IndexOf('<h2>Summary</h2>') -gt $teamsHtml.IndexOf('Action required') -or $teamsHtml.IndexOf('Run details') -lt $teamsHtml.IndexOf('Action required')) { throw 'Teams mail section order is invalid.' }
 if ($teamsHtml -notmatch 'Priority' -or $teamsHtml -notmatch 'Storage above 90%') { throw 'Teams priority table or source threshold is missing.' }
 if ($teamsHtml -notmatch 'colspan="2"' -or $teamsHtml -notmatch 'background:#eef2ff') { throw 'Teams KPI grid does not use the Exchange-style wide card.' }
 $teamsHtmlWithLinks = ConvertTo-HtmlReport -AlertRows @() -Summary $teamsSummary -Worst 'OK' -Started (Get-Date).AddMinutes(-1) -Ended (Get-Date) -FileLinksHtml '<a href="https://example.invalid/export">Export</a>'
@@ -83,15 +83,20 @@ $spoSites = @(
 )
 $spoSummary.IncludeOneDrive=$false
 $spoSummary.DeepSharingScan=$false
-$spoSummary.TenantCapacitySource='NotCollectedGraphOnly'
+$spoSummary.TenantCapacitySource='Get-PnPTenantUnauthorized'
+$spoSummary.EstimatedTenantCapacityGB=91024
+$spoSummary.CapacityEstimateEligibleUnits=9000
+$spoSummary.CapacityEstimateAsOfUtc='2026-10-13T02:00:00Z'
+$statusFromEstimate = [ordered]@{SitesProcessed=100;OwnerlessSites=0;HighQuotaSites=0;CriticalAlerts=0;WarningAlerts=0;TenantStorageUtilizationPercent='';EstimatedTenantCapacityGB=91024}
+Assert-Equal (Get-SpoMailStatus -Summary $statusFromEstimate -PartialInventory $false) 'OK' 'Estimated capacity cannot change mail status'
 $spoHtml = New-SpoHtmlSummary -WorstStatus 'Warning' -Alerts $spoAlerts -SiteRows $spoSites -Summary $spoSummary
 if ($spoHtml -notmatch 'Sites to review' -or $spoHtml -notmatch 'Action required' -or $spoHtml -notmatch 'Usage-report sites') { throw 'SPO mail summary is missing.' }
 if ($spoHtml -notmatch 'List &amp; One' -or $spoHtml -match 'List & One' -or $spoHtml -match '<a\s') { throw 'SPO mail escaping or default link behavior is invalid.' }
 if ([regex]::Matches($spoHtml,'https://example.invalid/a').Count -ne 1 -or $spoHtml -notmatch 'Inactive with date</div>\s*<div[^>]*>1') { throw 'SPO priority or dated-inactivity count is invalid.' }
 if ($spoHtml -notmatch 'Sites without an activity date: 1' -or $spoHtml -notmatch 'Sites without Graph enrichment: 1') { throw 'SPO evidence coverage is missing.' }
-if ($spoHtml -notmatch 'Tenant utilization</div>\s*<div[^>]*>Not measured' -or $spoHtml -notmatch 'Capacity: Not measured') { throw 'SPO must disclose unmeasured tenant capacity.' }
+if ($spoHtml -notmatch 'Tenant capacity \(estimated\)' -or $spoHtml -notmatch 'License estimate: 1 TB \+ 10 GB x 9000' -or $spoHtml -match 'Not measured') { throw 'SPO must label the license estimate and avoid an unmeasured card.' }
 if ($spoHtml -notmatch 'colspan="2"' -or $spoHtml -notmatch 'background:#eef2ff') { throw 'SPO KPI grid does not use the Exchange-style wide card.' }
-if ($spoHtml.IndexOf('Action required') -gt $spoHtml.IndexOf('<h2>Summary</h2>') -or $spoHtml -notmatch 'Priority' -or $spoHtml -notmatch 'Site storage above 90%' -or $spoHtml -notmatch 'No activity recorded for over 180 days') { throw 'SPO action summary must precede the KPI grid and show source thresholds.' }
+if ($spoHtml.IndexOf('<h2>Summary</h2>') -gt $spoHtml.IndexOf('Action required') -or $spoHtml -notmatch 'Priority' -or $spoHtml -notmatch 'Site storage above 90%' -or $spoHtml -notmatch 'No activity recorded for over 180 days') { throw 'SPO KPI grid must precede the action summary, which shows source thresholds.' }
 $spoSummary.TenantStorageCapacityGB = 1000
 $spoSummary.TenantStorageUtilizationPercent = 50
 $spoHtmlMeasured = New-SpoHtmlSummary -WorstStatus 'Warning' -Alerts @() -SiteRows $spoSites -Summary $spoSummary
@@ -109,6 +114,20 @@ $spoSummary.InventoryMode='GraphOnly'
 $temporaryRoot = Join-Path ([IO.Path]::GetTempPath()) ("SmartM365-MailOffline-{0}" -f [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $temporaryRoot -Force | Out-Null
 try {
+    $licenseDate = [datetimeoffset]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ',[Globalization.CultureInfo]::InvariantCulture)
+    $licensePath = Join-Path $temporaryRoot 'M365_Licenses_Tenant.csv'
+    @(
+        [pscustomobject]@{TenantKey='prod';TenantId='tenant-synthetic';TenantSkuPartNumber='SPE_E3';TenantPrepaidEnabled='100';CapabilityStatus='Enabled';AppliesTo='User';CollectedAtUtc=$licenseDate},
+        [pscustomobject]@{TenantKey='prod';TenantId='tenant-synthetic';TenantSkuPartNumber='SPE_F1';TenantPrepaidEnabled='200';CapabilityStatus='Enabled';AppliesTo='User';CollectedAtUtc=$licenseDate}
+    ) | Export-Csv -LiteralPath $licensePath -NoTypeInformation
+    $estimate = Get-SpoLicenseCapacityEstimate -Folder $temporaryRoot -ExpectedTenantKey 'prod' -ExpectedTenantId 'tenant-synthetic' -ReferenceDateUtc $licenseDate
+    Assert-Equal $estimate.CapacityGB 2024 'Eligible E3 seats add 10 GB each; F1 seats do not'
+    Assert-Equal (Get-SpoLicenseCapacityEstimate -Folder $temporaryRoot -ExpectedTenantKey 'other' -ExpectedTenantId 'tenant-synthetic' -ReferenceDateUtc $licenseDate).Available $false 'License estimate tenant isolation'
+    Assert-Equal (Get-SpoLicenseCapacityEstimate -Folder $temporaryRoot -ExpectedTenantKey 'prod' -ExpectedTenantId 'tenant-synthetic' -ReferenceDateUtc '2026-01-01T00:00:00Z').Available $false 'License estimate freshness'
+    $estimateSummary = [ordered]@{TenantStorageCapacityGB='';TenantStorageUtilizationPercent=''}
+    Add-SpoLicenseEstimateToSummary -Summary $estimateSummary -Folder $temporaryRoot -ExpectedTenantKey 'prod' -ExpectedTenantId 'tenant-synthetic' -ReferenceDateUtc $licenseDate
+    Assert-Equal $estimateSummary.EstimatedTenantCapacityGB 2024 'License estimate added to mail summary'
+
     $teamsFiles = @()
     foreach ($name in @('Teams','Members','Channels','Guests')) {
         $path = Join-Path $temporaryRoot "$name.csv"
@@ -138,7 +157,7 @@ try {
     New-SpoTimestampedWorkbook -CsvFiles $spoFiles -Path $spoBook | Out-Null
     Add-SpoWorkbookOverview -Path $spoBook -Summary $spoSummary -Alerts @([pscustomobject]@{Severity='Critical';Category='Ownership';SiteUrl='https://example.invalid';ObjectName='';Metric='Owner';Value='';Threshold='Valid owner';Details='No owner'}) -Status 'Warning'
     $book = Open-ExcelPackage -Path $spoBook
-    try { Assert-Equal $book.Workbook.Worksheets.Count 7 'SPO worksheet count'; Assert-Equal $book.Workbook.Worksheets['Findings'].Cells[2,1].Text 'Critical' 'SPO findings worksheet'; Assert-Equal $book.Workbook.Worksheets['Summary'].Cells[11,2].Text 'Not measured' 'Unmeasured SPO tenant capacity in workbook' }
+    try { Assert-Equal $book.Workbook.Worksheets.Count 7 'SPO worksheet count'; Assert-Equal $book.Workbook.Worksheets['Findings'].Cells[2,1].Text 'Critical' 'SPO findings worksheet'; Assert-Equal $book.Workbook.Worksheets['Summary'].Cells[11,2].Text '91024' 'Estimated SPO tenant capacity in workbook' }
     finally { Close-ExcelPackage -ExcelPackage $book -NoSave }
     $spoEmptyBook = Join-Path $temporaryRoot 'SPO-empty.xlsx'
     New-SpoTimestampedWorkbook -CsvFiles $spoFiles -Path $spoEmptyBook | Out-Null
@@ -214,8 +233,8 @@ Write-Host 'Teams/SPO mail and workbook offline checks passed.'
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC1Bz92OYgX3bJl
-# SFfAbP+dmIZOJ2fMoczEsAjcGX8uwKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAEsqzb2MY3FNH3
+# 7cyeGZ5AjWJPX8vrP21k/m+VWyeUE6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -348,31 +367,31 @@ Write-Host 'Teams/SPO mail and workbook offline checks passed.'
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIKPFdsTr2PjyWpTnuqsb8sXFeTG5scXfqeAmCEG83o/BMA0GCSqG
-# SIb3DQEBAQUABIIBgDxHh/BXI9fY5FM7D/L93k6pyJEqn+AU/SQClobIryRhkfwg
-# 9xORU6yNChDVrK/aMuazIegnoH8OX+pmdf3cUdKineBq7FYAgygOJhSlbMpK8TuV
-# uAtSNTsjrYz4Au/YA4juFG6u757aMpQ4rhzBVtcbD5AQN5NTYGYcsPDVLT++zjQf
-# c1hbu4Fcpdo21y2ulVvKDJpbbYwcF/iBnXNJjuTyIpzEplrFfdKYtqMKSnGqoK1l
-# wiJgVf1F/8ewcTgdpv9+tJF6IsMqW3uyYdqH4XUHen/zGUH6iTdO5uNtBiNcT6Ff
-# 1DKS7+oEzcURRLkSoLDoi2AtKTUOY1rmfn4u1ZHh0PTw0oyKafVu6A4oJ1mY8Jrm
-# 2RbqN1UAaJCxMBhQCqzIkzynmUGrkGpsCyMzGwCT1aj8mjoXqJ5KDPgPDckTw+tl
-# isvrOldcPGovX49lgv5Hs6BpBIw3MTjVUvfAz/Rh2F9mMzt7KOv074CgxK4k2IIL
-# uZuGYtK8YzwoWHXfP6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIHgfI7z7UY2XE7TNq2zxnSBi7sv2EZh5xUBQLFaT98XzMA0GCSqG
+# SIb3DQEBAQUABIIBgIjw5p3oKhwjrJ6zSxkB0d9P6Z4ljtG9INgJIH4EGrXKauwG
+# PBLCcaMdBUkUObjrbTLYC40OB3cDq2u5Pss1Gn71w3bLv/bUen5l586/9oPNplY8
+# GL0AmcLwRWMIVI8/ILNbXDErDM5KB4zq7epimmGq1qitEYeamA7968YQPj49zrvB
+# cTcZd2wRY0IqyXNK/PhfMleNAht3Ny72A3Fea7wR0G687QFUW3d4HFDusPN7xGKb
+# dVzq7aa4h5YWIb+6FVwux3GhDYf8l6UBKTPBNUJ27kytUTx9s7rZ0udUnEVBfmCK
+# dbQgk27tUe81gwq1uwR5oYNM8iZw8NFEmB+wMlZZ0Dgu1ID8M888SLRXmRhsHUMN
+# wd9LYCEOpJuREs8n3lmcPDoezwvzSZ+/Svw2JzsgqLpV2gj8zamx7Pcc8Eq8nPYo
+# ty+bbqFgTX7r2F4SaPWoawJzaFy5oGObo/uZKrsm56T9TL5coARDTz2PzgLwDKvK
+# +nG6tQTWjIGQobVmuqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTIxMDQx
-# MjRaMC8GCSqGSIb3DQEJBDEiBCDeOm71WjHrXczfoIBp3+YGUOQVUem+EG6CJ2Wl
-# PwkB+zANBgkqhkiG9w0BAQEFAASCAgCEnakggoHMLHBw4+CDEN7TfLKrBpu7STI1
-# qSJqb0yfnvp+4b/6jNmM3QLMsNj6T3az2WIJmUf2WyIIIvyPOksYNoPYgfTRvnG8
-# D9+M+AtPXMlRYeBH65U+u7heTABLl6VVpFLlQblzxO4drlyrxSssHBwnYeYnZLiL
-# VWCIIY5FW2x4vnPJTRrjP+TP5SMcrZZuUcX5z0cNV8aBIvG0bLGVI+NvLPWNaatO
-# 1qo35/PEah4yPvnnpi0kHnpPbH3Umn/p1+CIEsrkNXGQ/cDk1wI2h78or8uwXbYd
-# /5SXvkybtrdoJRcrAIe9kbjg/sJ157UKecpDNPy9YiZhnqFtrb1T5PzDic4WqHtF
-# z+sbYZdLBuJ5DQb9rmRMEihtNQpaeImTf98tCRal+7V+CDKv6W7aiQYeHurtyNkb
-# yLUT3738gmNdy7vDQRdXv25OFTDJg30iyLzk+sxBKZaJ3tR3j2fS+mZgNvYoidzz
-# 06cRrCOgoe/yaD1ebwMO9061iPBjeC4Kc3cJ+bPLdFOEnwJSdiM5EibbJK6Ql6EX
-# YaH3vJwF2/M7E+hAbgDb0CgjWzS5OZWZAJFocZymgC28fTLDKffOTg5CnqxRcvJQ
-# W85+5Hc0E0/RbMQPgPmPiQ3uezegUJIQATkCWH+pbDMefodLsMk+vkegio1Xh1yn
-# RV9pWoSeXg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTMwNzM4
+# MDNaMC8GCSqGSIb3DQEJBDEiBCCeUkV3z9ozQBy+PVzrMi1b1f+F2mDRtiFfsdno
+# mdBpUzANBgkqhkiG9w0BAQEFAASCAgAOqSCpYOWhGoxzOpaar77Smud32WRdyMI/
+# Xhp45HQ4l6TUuMLjYiegs6PE2XHTTsv2B29pLX/ucZpJ6UMWu2xzh3R0IPhx0e8B
+# 6nf1TuV5+5JWi7Fk8aBMJ+O90637N5cRdoMEk6BdfkjbgscJz/my3vZjqhiIRFBc
+# UeM2xp7qs4dohH/Q56qwuFCE2tE77MlXtthh9LV9IH5wHebqJJKlAeP7RQ43UMt1
+# /lvzFvcTSS7WcTjH5IULB7vu3SGEj6eFHVLpiGuvDJFzcLEqEktLT6gWUUNqGDVF
+# XTfKKRs7F3Gu+j5mFl7ku7hSVwAlA3E2WiYBVCP59CwylIg5xfVqD9LB/rGi/92v
+# tz9zUO2fHitAxe2R9X6xBtufq2qurTbtjVhuKA1jO8B8uvbGtrIA6pN8jxAYgiVi
+# VMi/GM2NrAh8hwmM5a+Q0EODoVOP4MXzIQ6Ja6vswpbhFyqM0le/LBtxbvOS4bYV
+# HuijUNIwrcQ7ICARK6sCoNrKhsTfJdGs2h9oC/48wtarC7oX14cLwzbfpHH8ddiv
+# XosRnYI6l3WTNrtgm66+o+Yne6n0E1f/SFWeu3Gwp0hNupPqjf2REfxDftBt/t59
+# 7gaXmxNwQoyfCDArJvdVr/wJplq/YaAFqdkvTeRpY2I5d/iCySOiBL5twLrWBLGB
+# EM3Z06fDyQ==
 # SIG # End signature block

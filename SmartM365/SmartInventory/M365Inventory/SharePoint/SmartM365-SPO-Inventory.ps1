@@ -1,4 +1,4 @@
-﻿#Requires -Version 7.0
+#Requires -Version 7.0
 <#
 .SYNOPSIS
     SharePoint Online tenant inventory with CSV exports and HTML alert summary.
@@ -7,8 +7,8 @@
     Uses Microsoft Graph app-only authentication by default to inventory
     SharePoint Online sites, storage, activity, lists where Graph allows access,
     owner signals, inactive sites, orphaned sites, and tenant-level summary
-    statistics. The default collection is Graph-only. PnP.PowerShell tenant
-    capacity and deep sharing scans remain explicit optional features.
+    statistics. Tenant capacity is also queried through PnP.PowerShell when
+    available; deep sharing scans remain an explicit optional feature.
 
 .PARAMETER Tenant
     Tenant profile key to load from Config/Tenants. Defaults to test.
@@ -47,29 +47,28 @@
     Enables optional PnP.PowerShell per-site sharing scans. This is best-effort and may require broader SharePoint permissions than the default Graph inventory.
 
 .PARAMETER UsePnPTenantCapacity
-    Optionally collects the licensed SharePoint tenant storage capacity through
-    Get-PnPTenant. Disabled by default. SharePointAdminUrl is derived automatically
-    when omitted.
+    Requests the licensed SharePoint tenant storage capacity through Get-PnPTenant.
+    This is also attempted by default when PnP.PowerShell is installed.
+    SharePointAdminUrl is derived automatically when omitted.
 
 .PARAMETER SkipPnPTenantCapacity
-    Retained for backward compatibility. Tenant capacity is already disabled by
-    default unless -UsePnPTenantCapacity is specified.
+    Skips the optional Get-PnPTenant call and uses the license-based mail estimate.
 
 .PARAMETER InteractiveAuth
     Uses delegated interactive Graph authentication instead of app-only certificate authentication.
 
 .VERSION
- 0.37
+ 0.38
 .REQUIREMENTS
     PowerShell 7+.
-    Modules: SmartM365.Core; Microsoft.Graph.Authentication; ImportExcel. PnP.PowerShell is required only for optional PnP features.
+    Modules: SmartM365.Core; Microsoft.Graph.Authentication; ImportExcel. PnP.PowerShell enables tenant capacity collection and optional sharing scans.
     Minimum Graph application permissions for default inventory: Reports.Read.All; Sites.Read.All; Directory.Read.All.
     Optional PnP deep sharing scan may require SharePoint site-level access for scanned sites.
     Conditional: Mail.Send is required only when Graph mail is used; Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
     Requires: PowerShell 7+, Microsoft.Graph.Authentication, ImportExcel, SmartM365.Core.psd1
-    PnP.PowerShell is used only with -UsePnPTenantCapacity or -UsePnPDeepScan.
+    PnP.PowerShell is used for capacity when installed, unless -SkipPnPTenantCapacity is set.
     Minimum Microsoft Graph application permissions for default inventory:
       - Reports.Read.All for SharePoint and OneDrive usage reports.
       - Sites.Read.All for site and list inventory.
@@ -77,7 +76,7 @@
     Optional PnP deep sharing scan may require SharePoint site-level access for the scanned sites.
     Optional unattended tenant capacity collection requires the SharePoint API application permission Sites.FullControl.All with administrator consent.
     Microsoft Graph Sites.Read.All does not authorize Get-PnPTenant.
-    The default Graph-only mode does not require SharePoint Administrator or Sites.FullControl.All.
+    The Graph site/list inventory does not require SharePoint Administrator or Sites.FullControl.All.
 #>
 
 [CmdletBinding()]
@@ -118,8 +117,8 @@ Set-StrictMode -Version Latest
 [System.Threading.Thread]::CurrentThread.CurrentUICulture = [System.Globalization.CultureInfo]::InvariantCulture
 $ErrorActionPreference = 'Stop'
 $MaximumFunctionCount = 32768
-$ScriptVersion = "0.37"
-$TenantCapacityEnabled = [bool]$UsePnPTenantCapacity -and -not [bool]$SkipPnPTenantCapacity
+$ScriptVersion = "0.38"
+$TenantCapacityEnabled = -not [bool]$SkipPnPTenantCapacity -and ([bool]$UsePnPTenantCapacity -or [bool](Get-Module -ListAvailable PnP.PowerShell | Select-Object -First 1))
 $CurrentOperation = 'Initialize'
 
 $tenantContextPath = & {
@@ -321,6 +320,72 @@ function Get-SpoCsvColumnNames {
     finally { $parser.Dispose() }
 }
 
+function Get-SpoLicenseCapacityEstimate {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Folder,
+        [Parameter(Mandatory)][string]$ExpectedTenantKey,
+        [Parameter(Mandatory)][AllowEmptyString()][string]$ExpectedTenantId,
+        [Parameter(Mandatory)][string]$ReferenceDateUtc
+    )
+
+    $unavailable = [pscustomobject]@{Available=$false;CapacityGB='';EligibleUnits=0;AsOfUtc='';Reason='A current, matching license snapshot is unavailable.'}
+    $path = Join-Path $Folder 'M365_Licenses_Tenant.csv'
+    if ([string]::IsNullOrWhiteSpace($ExpectedTenantId) -or -not (Test-Path -LiteralPath $path -PathType Leaf)) { return $unavailable }
+    try {
+        $required = @('TenantKey','TenantId','TenantSkuPartNumber','TenantPrepaidEnabled','CapabilityStatus','AppliesTo','CollectedAtUtc')
+        $headers = @(Get-SpoCsvColumnNames -Path $path)
+        if (@($required | Where-Object { $headers -notcontains $_ }).Count -gt 0) { return $unavailable }
+        $beforeHash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash
+        $rows = @(Import-Csv -LiteralPath $path -ErrorAction Stop)
+        $afterHash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash
+        if ($beforeHash -ne $afterHash -or $rows.Count -eq 0) { return $unavailable }
+        if (@($rows | Where-Object { [string]$_.TenantKey -ine $ExpectedTenantKey -or [string]$_.TenantId -ine $ExpectedTenantId }).Count -gt 0) { return $unavailable }
+        $dates = @($rows | ForEach-Object { [string]$_.CollectedAtUtc } | Sort-Object -Unique)
+        if ($dates.Count -ne 1) { return $unavailable }
+        $collected = [datetimeoffset]::MinValue
+        $reference = [datetimeoffset]::MinValue
+        if (-not [datetimeoffset]::TryParse($dates[0],[Globalization.CultureInfo]::InvariantCulture,[Globalization.DateTimeStyles]::AssumeUniversal,[ref]$collected) -or
+            -not [datetimeoffset]::TryParse($ReferenceDateUtc,[Globalization.CultureInfo]::InvariantCulture,[Globalization.DateTimeStyles]::AssumeUniversal,[ref]$reference)) { return $unavailable }
+        if ([math]::Abs(($collected - $reference).TotalHours) -gt 48 -or ($collected - [datetimeoffset]::UtcNow).TotalMinutes -gt 10) { return $unavailable }
+
+        # Only known SharePoint-entitled purchased seats contribute to this conservative estimate.
+        $eligibleSkus = @('SPE_E3','SPE_E5','ENTERPRISEPACK','ENTERPRISEPREMIUM','STANDARDPACK','SHAREPOINTSTANDARD','SHAREPOINTENTERPRISE','SPB','O365_BUSINESS_PREMIUM','O365_BUSINESS_ESSENTIALS')
+        $eligibleUnits = [long]0
+        foreach ($row in $rows) {
+            if ([string]$row.TenantSkuPartNumber -notin $eligibleSkus -or [string]$row.CapabilityStatus -ine 'Enabled' -or [string]$row.AppliesTo -ine 'User') { continue }
+            $units = [long]0
+            if (-not [long]::TryParse([string]$row.TenantPrepaidEnabled,[Globalization.NumberStyles]::Integer,[Globalization.CultureInfo]::InvariantCulture,[ref]$units) -or $units -lt 0) { return $unavailable }
+            $eligibleUnits += $units
+        }
+        if ($eligibleUnits -le 0) { return $unavailable }
+        return [pscustomobject]@{Available=$true;CapacityGB=(1024 + 10 * $eligibleUnits);EligibleUnits=$eligibleUnits;AsOfUtc=$collected.UtcDateTime.ToString('yyyy-MM-ddTHH:mm:ssZ',[Globalization.CultureInfo]::InvariantCulture);Reason='Base allocation plus known eligible purchased licenses; additional storage is excluded.'}
+    }
+    catch { return $unavailable }
+}
+
+function Add-SpoLicenseEstimateToSummary {
+    param(
+        [Parameter(Mandatory)][System.Collections.IDictionary]$Summary,
+        [Parameter(Mandatory)][string]$Folder,
+        [Parameter(Mandatory)][string]$ExpectedTenantKey,
+        [Parameter(Mandatory)][AllowEmptyString()][string]$ExpectedTenantId,
+        [Parameter(Mandatory)][string]$ReferenceDateUtc
+    )
+    $Summary['EstimatedTenantCapacityGB'] = ''
+    $Summary['CapacityEstimateEligibleUnits'] = 0
+    $Summary['CapacityEstimateAsOfUtc'] = ''
+    if (-not [string]::IsNullOrWhiteSpace([string]$Summary.TenantStorageCapacityGB)) { return }
+    $estimate = Get-SpoLicenseCapacityEstimate -Folder $Folder -ExpectedTenantKey $ExpectedTenantKey -ExpectedTenantId $ExpectedTenantId -ReferenceDateUtc $ReferenceDateUtc
+    if (-not $estimate.Available) {
+        Write-SpoLog -Message $estimate.Reason -Level WARNING
+        return
+    }
+    $Summary['EstimatedTenantCapacityGB'] = $estimate.CapacityGB
+    $Summary['CapacityEstimateEligibleUnits'] = $estimate.EligibleUnits
+    $Summary['CapacityEstimateAsOfUtc'] = $estimate.AsOfUtc
+}
+
 function Import-SpoMailCsvSet {
     param([Parameter(Mandatory)][string]$Folder,[Parameter(Mandatory)][string]$ExpectedTenantKey)
     $names=@('Sites','Lists','Permissions','ExternalSharing','Tenant')
@@ -432,7 +497,7 @@ function Add-SpoWorkbookOverview {
         [pscustomobject]@{Metric='OneDrive sites';Value=$Summary.OneDriveSites}
         [pscustomobject]@{Metric='Lists inventoried';Value=$Summary.ListsProcessed}
         [pscustomobject]@{Metric='Storage used GB';Value=$Summary.StorageUsedGB}
-        [pscustomobject]@{Metric='Tenant capacity GB';Value=if([string]::IsNullOrWhiteSpace([string]$Summary.TenantStorageCapacityGB)){'Not measured'}else{$Summary.TenantStorageCapacityGB}}
+        [pscustomobject]@{Metric=if(-not[string]::IsNullOrWhiteSpace([string]$Summary.TenantStorageCapacityGB)){'Tenant capacity measured GB'}elseif(-not[string]::IsNullOrWhiteSpace([string]$Summary.EstimatedTenantCapacityGB)){'Tenant capacity estimated from licenses GB'}else{'Tenant capacity'};Value=if(-not[string]::IsNullOrWhiteSpace([string]$Summary.TenantStorageCapacityGB)){$Summary.TenantStorageCapacityGB}elseif(-not[string]::IsNullOrWhiteSpace([string]$Summary.EstimatedTenantCapacityGB)){$Summary.EstimatedTenantCapacityGB}else{'Estimate unavailable'}}
         [pscustomobject]@{Metric='Tenant storage utilization percent';Value=$Summary.TenantStorageUtilizationPercent}
         [pscustomobject]@{Metric='Object-level critical findings';Value=$Summary.CriticalAlerts}
         [pscustomobject]@{Metric='Object-level warning findings';Value=$Summary.WarningAlerts}
@@ -486,8 +551,28 @@ function New-SpoHtmlSummary {
     $refreshDates=@($SiteRows|Where-Object{-not[string]::IsNullOrWhiteSpace([string]$_.ReportRefreshDate)}|ForEach-Object{[string]$_.ReportRefreshDate}|Sort-Object -Unique)
     $refreshText=if($refreshDates.Count -eq 0){'Not available'}elseif($refreshDates.Count -eq 1){$refreshDates[0]}else{"$($refreshDates[0]) to $($refreshDates[-1])"}
     $listWarnings=@($Alerts|Where-Object{$_.Category -eq 'ListViewThreshold'}).Count
-    $capacityText=if([string]::IsNullOrWhiteSpace([string]$Summary.TenantStorageCapacityGB)){'Not measured'}else{"$($Summary.TenantStorageCapacityGB) GB"}
-    $utilizationText=if([string]::IsNullOrWhiteSpace([string]$Summary.TenantStorageUtilizationPercent)){'Not measured'}else{"$($Summary.TenantStorageUtilizationPercent)%"}
+    $measuredCapacity = -not [string]::IsNullOrWhiteSpace([string]$Summary.TenantStorageCapacityGB)
+    $estimatedCapacity = -not [string]::IsNullOrWhiteSpace([string]$Summary.EstimatedTenantCapacityGB)
+    if ($measuredCapacity -and -not [string]::IsNullOrWhiteSpace([string]$Summary.TenantStorageUtilizationPercent)) {
+        $capacityLabel = 'Tenant utilization'
+        $capacityValue = "$($Summary.TenantStorageUtilizationPercent)%"
+        $capacityDetail = "Measured capacity: $($Summary.TenantStorageCapacityGB) GB"
+    }
+    elseif ($measuredCapacity) {
+        $capacityLabel = 'Tenant capacity (measured)'
+        $capacityValue = "$($Summary.TenantStorageCapacityGB) GB"
+        $capacityDetail = 'Utilization unavailable for this run'
+    }
+    elseif ($estimatedCapacity) {
+        $capacityLabel = 'Tenant capacity (estimated)'
+        $capacityValue = '≈ ' + ([double]$Summary.EstimatedTenantCapacityGB).ToString('N0') + ' GB'
+        $capacityDetail = "Licenses as of $($Summary.CapacityEstimateAsOfUtc); excludes extra storage"
+    }
+    else {
+        $capacityLabel = 'Tenant capacity'
+        $capacityValue = 'Estimate unavailable'
+        $capacityDetail = 'Current matching license evidence is unavailable'
+    }
     $cards=@(
         [pscustomobject]@{Label='Sites inventoried';Value=([int]$Summary.SitesProcessed).ToString('N0');Detail='usage-report sites';Background='#f8fafc';Border='#dbe3ef';Accent='#0f172a';Span=1},
         [pscustomobject]@{Label='Sites to review';Value=$affectedSites.ToString('N0');Detail='distinct sites';Background='#eff6ff';Border='#bfdbfe';Accent='#1d4ed8';Span=1},
@@ -495,7 +580,7 @@ function New-SpoHtmlSummary {
         [pscustomobject]@{Label='Above storage threshold';Value=([int]$Summary.HighQuotaSites).ToString('N0');Detail='site quotas';Background='#faf5ff';Border='#e9d5ff';Accent='#7e22ce';Span=1},
         [pscustomobject]@{Label='Inactive with date';Value=$inactiveWithDate.ToString('N0');Detail='recorded activity';Background='#f0fdfa';Border='#99f6e4';Accent='#0f766e';Span=1},
         [pscustomobject]@{Label='Large lists';Value=$listWarnings.ToString('N0');Detail='above item threshold';Background='#f0fdf4';Border='#bbf7d0';Accent='#166534';Span=1},
-        [pscustomobject]@{Label='Tenant utilization';Value=$utilizationText;Detail="Capacity: $capacityText";Background='#eef2ff';Border='#c7d2fe';Accent='#4338ca';Span=2}
+        [pscustomobject]@{Label=$capacityLabel;Value=$capacityValue;Detail=$capacityDetail;Background='#eef2ff';Border='#c7d2fe';Accent='#4338ca';Span=2}
     )
     $siteThreshold=if(@($SiteRows).Count -gt 0){[string]$SiteRows[0].Threshold}else{''}
     $storageLabel=if($siteThreshold -match '^(?<value>[\d.]+)%'){"Site storage above $($Matches.value)%"}else{'Site storage above threshold'}
@@ -529,8 +614,9 @@ function New-SpoHtmlSummary {
     $oneDrive=if($Summary.InventoryMode -eq 'CSVSnapshot' -and -not $Summary.IncludeOneDrive){'Not verifiable from CSV'}elseif($Summary.IncludeOneDrive){'Yes'}else{'No'}
     $sharing=if($Summary.InventoryMode -eq 'CSVSnapshot'){'Not verifiable from CSV'}elseif($Summary.DeepSharingScan){'Enabled'}else{'Not enabled'}
     $capacitySource=if([string]::IsNullOrWhiteSpace([string]$Summary.TenantCapacitySource)){'Unavailable'}else{[string]$Summary.TenantCapacitySource}
+    $estimateEvidence=if($estimatedCapacity -and -not $measuredCapacity){"<br>License estimate: 1 TB + 10 GB x $($Summary.CapacityEstimateEligibleUnits) known eligible purchased licenses; extra storage excluded. License snapshot: $(ConvertTo-SpoHtml $Summary.CapacityEstimateAsOfUtc)."}else{''}
     $technical = 'RunId: {0}<br>Duration: {1}<br>Mode: {2}<br>Sites processed: {3}' -f (ConvertTo-SpoHtml $Summary.RunId),(ConvertTo-SpoHtml $Summary.Duration),(ConvertTo-SpoHtml $Summary.InventoryMode),(ConvertTo-SpoHtml $Summary.SitesProcessed)
-    return "<div style='font-family:Segoe UI,Arial,sans-serif;color:#1f2937;'><div style='background:#fff;border:1px solid #dde7f0;border-radius:8px;padding:16px;margin-bottom:16px;'><h1>SharePoint Online Inventory <span style='display:inline-block;border-radius:999px;background:$statusBg;color:$statusColor;border:1px solid $statusColor;padding:4px 12px;font-size:14px;'>$WorstStatus</span></h1><p>$($Summary.SitesProcessed) sites processed from usage reports; $affectedSites distinct sites require review. Findings can overlap. The complete detail is in the attached workbook.</p></div><div style='background:#fff;border:1px solid #dde7f0;border-radius:8px;padding:16px;margin-bottom:16px;'><h2>Action required</h2>$categoriesHtml<h3>First objects to review</h3>$topHtml</div><div style='background:#fff;border:1px solid #dde7f0;border-radius:8px;padding:16px;margin-bottom:16px;'><h2>Summary</h2>$(New-SmartM365EmailKpiGridHtml -Cards $cards -RowSizes @(4,3))</div><div style='background:#fff;border:1px solid #dde7f0;border-radius:8px;padding:16px;margin-bottom:16px;'><h2>Evidence coverage</h2><p>Scope: $scope<br>OneDrive included: $oneDrive<br>SharePoint sites: $($Summary.SharePointSites); OneDrive sites: $($Summary.OneDriveSites)<br>Usage report refresh: $(ConvertTo-SpoHtml $refreshText)<br>Sites without an activity date: $unknownActivity<br>Sites without Graph enrichment: $graphUnavailable<br>Tenant capacity source: $(ConvertTo-SpoHtml $capacitySource)<br>Deep sharing scan: $sharing<br>$(ConvertTo-SpoHtml $SourceNote)</p></div>$FileLinksHtml<div style='margin-top:18px;padding:14px;border:1px solid #d9e2ec;color:#64748b;font-size:12px;'><b>Run details</b><br>$technical</div></div>"
+    return "<div style='font-family:Segoe UI,Arial,sans-serif;color:#1f2937;'><div style='background:#fff;border:1px solid #dde7f0;border-radius:8px;padding:16px;margin-bottom:16px;'><h1>SharePoint Online Inventory <span style='display:inline-block;border-radius:999px;background:$statusBg;color:$statusColor;border:1px solid $statusColor;padding:4px 12px;font-size:14px;'>$WorstStatus</span></h1><p>$($Summary.SitesProcessed) sites processed from usage reports; $affectedSites distinct sites require review. Findings can overlap. The complete detail is in the attached workbook.</p></div><div style='background:#fff;border:1px solid #dde7f0;border-radius:8px;padding:16px;margin-bottom:16px;'><h2>Summary</h2>$(New-SmartM365EmailKpiGridHtml -Cards $cards -RowSizes @(4,3))</div><div style='background:#fff;border:1px solid #dde7f0;border-radius:8px;padding:16px;margin-bottom:16px;'><h2>Action required</h2>$categoriesHtml<h3>First objects to review</h3>$topHtml</div><div style='background:#fff;border:1px solid #dde7f0;border-radius:8px;padding:16px;margin-bottom:16px;'><h2>Evidence coverage</h2><p>Scope: $scope<br>OneDrive included: $oneDrive<br>SharePoint sites: $($Summary.SharePointSites); OneDrive sites: $($Summary.OneDriveSites)<br>Usage report refresh: $(ConvertTo-SpoHtml $refreshText)<br>Sites without an activity date: $unknownActivity<br>Sites without Graph enrichment: $graphUnavailable<br>Tenant capacity source: $(ConvertTo-SpoHtml $capacitySource)$estimateEvidence<br>Deep sharing scan: $sharing<br>$(ConvertTo-SpoHtml $SourceNote)</p></div>$FileLinksHtml<div style='margin-top:18px;padding:14px;border:1px solid #d9e2ec;color:#64748b;font-size:12px;'><b>Run details</b><br>$technical</div></div>"
 }
 
 function Connect-SpoGraph {
@@ -923,7 +1009,7 @@ function Get-SpoTenantCapacityRow {
     $allocatedMb = $null
     $capacitySource = 'NotCollectedGraphOnly'
     $status = 'OK'
-    $details = 'Licensed tenant capacity is not collected in Graph-only mode. Power BI estimates capacity from M365_Licenses_Tenant.csv.'
+    $details = 'Licensed tenant capacity was not collected through PnP. The email and workbook may show a separate estimate from M365_Licenses_Tenant.csv.'
 
     if ($Enabled) {
         try {
@@ -1104,6 +1190,7 @@ try {
             TenantStorageCapacityGB=[string]$tenantCapacity.StorageCapacityGB; TenantStorageUtilizationPercent=[string]$tenantCapacity.StorageUtilizationPercent; TenantCapacitySource=[string]$tenantCapacity.CapacitySource
             IncludeOneDrive=@($siteArray|Where-Object{[string]$_.IsOneDrive -eq 'True'}).Count -gt 0; DeepSharingScan=$false; SharingScanItemLimitPerSite=0
         }
+        Add-SpoLicenseEstimateToSummary -Summary $summary -Folder $latestFolder -ExpectedTenantKey $tenantKey -ExpectedTenantId ([string]$tenantCapacity.TenantId) -ReferenceDateUtc $snapshot.RunDateUtc
         $worstStatus = Get-SpoMailStatus -Summary $summary -PartialInventory:$partialInventory
         $CurrentOperation = 'Build SPO mail from existing CSVs'
         $stamp = '{0}_{1}' -f (Get-Date).ToUniversalTime().ToString('yyyyMMdd_HHmmss_fff',[Globalization.CultureInfo]::InvariantCulture),[guid]::NewGuid().ToString('N').Substring(0,8)
@@ -1354,6 +1441,9 @@ try {
         DeepSharingScan = $DeepSharingScanEnabled
         SharingScanItemLimitPerSite = $SharingScanItemLimitPerSite
     }
+    $tenantKey = [string]$script:SmartM365GlobalConfig.TenantKey
+    $tenantId = [string]$script:SmartM365GlobalConfig.TenantId
+    Add-SpoLicenseEstimateToSummary -Summary $summary -Folder $latestFolder -ExpectedTenantKey $tenantKey -ExpectedTenantId $tenantId -ReferenceDateUtc $RunDateUtc
 
     $worstStatus = Get-SpoMailStatus -Summary $summary -PartialInventory ($MaxSites -gt 0 -or (Test-SmartM365MaxItemsMode))
     Add-SpoWorkbookOverview -Path $workbookPath -Summary $summary -Alerts $alertArray -Status $worstStatus
@@ -1405,8 +1495,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB1umrt2P2d0x2D
-# /uHR6bDXbxJr+cKWrtnG94wuHQbsmKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDybeLrju3PVdNa
+# q8kaG4kPWCqdyEFVKkUfKX1ZQo8buqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1539,31 +1629,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIAru8ZQ0f2JBLxiGSHdF6SKXo9Tua6OqXD02IsfKjoU0MA0GCSqG
-# SIb3DQEBAQUABIIBgGyU0Nt6hKpdhpYnyxku1OIWcuB40S42mNRQVnFQ0m3aZZXK
-# CH7aLxyVenIYe4eyHxhIf5p8BIb/WdOc4BUFsTvjVK3Sqom098VD/ak2ypO4XNq9
-# fFeZg24lVG1+IyZ/jOCT7/9vVoPtRpCKNBKNJ+Gi/OL9XGBnWj9BnRfyJodvitLQ
-# 0Zdx9vvbkCL7g+J//WHRgMlNAMntNRW7VR9uZP9oWgJVlFSh2bmGfopmVPQGmrKG
-# 5f5ueT2J5BchxAqS4TE4d9P29gK8qTBQqDLsLrufgPwvq0pOFf4qBPatWQSQZOEI
-# L2sq9xvCj0/q5JHdEmDy46fRakHKbKO4iDBE0Ef6WvIVPjegCHXHZCNpGSHpW1c4
-# mB9MlsywZl455CzVsiD33COE+1SKYVnVynwXOBYVGt5VDCgyKIHfV6qtRCWOpeo2
-# CCEd4HDx6UN1UYI1Bb0UR0vjdrxiOl1PVnsC1kCVDBv3EOYhdZFGKGXucVsUyMa8
-# jObM/78eIbZ9R9u55qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEICUITujzF30dP/ifphAVqSKx1pRUg6YNaTtoubEPA+tkMA0GCSqG
+# SIb3DQEBAQUABIIBgHmHP5n9f2XLlZ4mWxfYkN4Q+iemD88C8ettxeyDfpsbLMPF
+# 90VwtN7az29Stsqo8oDhhcMXb0mFS0bKmd91IDuHZG+gIbHRrYfQmmPQWHxM/BQG
+# deIZFOXizpIT+kZ18b6pMTeAGqjXhtfU5YIFVo4wFQhBrWK3V4IVNi6Nr4QkKwti
+# qDvsHL/dEc0wpVsHU5osTgrTNdGobaZ9EIdQS+5//9aP8DW1k6M1ur3pN9tmXwyy
+# jAPkiIFmFUAVBZYgbPQZWpus7C5Yu5XcRKO2J9gI2CODd4f5fjr3czwj3/ZuGCLl
+# 6xl22/kWTBy4UUAGVbv8M7lONUB+hCOSxX8VlzsUfDi4RgIDFEj1sohABIlrImOl
+# LhjkLeP6+laQJXs0xd99NO73xDbkB+w0pCPRkYX9f2wiMTD7NEHcG2PFGiQs4HDo
+# lDkPzslL26OtzWrYBB30XFDOiP4zaZhQJudEnPOpgnH0Ry5ljB+3xjyxweWp3MjG
+# qhk7SX5b9z7OGYihyKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTIxMDQx
-# MjNaMC8GCSqGSIb3DQEJBDEiBCBhEg52mspVfw4F4d3iSKYVKpUUhRDRUQQnZRKC
-# XeabFTANBgkqhkiG9w0BAQEFAASCAgCcPnTxwKkAPuOjYLqto3IJ1T0+SCYYMILm
-# siwIV03ScqxwnNQq/1OYDaEd2tJQZdBy1Qus+fl98N8GfszB27vKxsojMwev/XeY
-# r1cqnF0Y9i3kW8t13TcQVj9rHbogwYr8MTDgItYmWLjLXXMl3znv8XrWnDO24SCn
-# aC+5N4kcAZCl4zoVap4mRTRqlWKLenZ8p5DOuCVDJdMIGRRf2t4H/n70aJi1l9eV
-# gdUmeTLsTfsZG3jC/CP6ttARFfRdRS3GquM5vBcP/M2FmLe/Cb27k7TGo3IGWc0I
-# jCmW9sRNlMp73ns7VCHGnyFl+xh9irGEDM08tiAcg5TE4sFHG5J4g6HtbrtFDSn4
-# DdW3G4h4VbexYAqNsgqulpPIDFY6rec/x/TsIF4XZLlPp9xulmt1IJUtQ1drk4yt
-# hOv6+51oS2ivtR0O0oFPGbJrZ7jkq6PeXtLY69YTtytymMk58ejTk/gIBCXhtsDw
-# a4S/INBgZ947GUEub7QZsA94fuAM/uHW9rNM9yjB1We1pYaq8Qcgx/M203ilrI/B
-# Le4+1UpLGBeJgjml1rx/Oc3yt7kE3GKVpPBEH8L3RdAeLt2vghSunUoi09wPfE2M
-# c3Nm9Jq77rt9nTyxHrzNNn/AewXkDb01GSr4IS7HTlybT6OeK4HxhcWSIUFwgADe
-# E/QMHbivBQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTMwNzM4
+# MDNaMC8GCSqGSIb3DQEJBDEiBCD3Lpsp19u1lb+4alRHQMFyrKBK4QHSwrI1+8g+
+# bX/s/TANBgkqhkiG9w0BAQEFAASCAgAeZJOqXfGvNdjRc/PHpNOGoXxZ+KKjuDlW
+# sFKqOdNHsHvDRAuybozACE1xM94r591pyJ4QF0dX3UCzyn5g/b353hhppzxuZcRz
+# wz2g4cxpZtAlbbpP6SK7+XG8+tlSZdtQucVrOLkvC8LeB1KQNULN5CUwUuxxDzhJ
+# adjPhalxL3ofjGyTer3GD8HfKpIt1Lf9BkclOdsj8K/vWflSqTGeel++38kh+mVs
+# uU7pwuYGEo2OJ2rPPvThrWDB5AkUGBfLao6Qnz9ivwhdX8LoCgMYXIoxgilaFM+o
+# DUKaw9JHrod+YEdBTx0GCGMi2hFXCwBwFcKcpFhUpgwgI3R0XxEvGgpa+YGouMm4
+# VPGK0kvLul6spfCwcVsPo7ABJuYKFhegTCTigj1u2zD19oCeoQNsnklgYTGHps0h
+# 4AGpab1JgmC4zBoDAjTOqiUpySSO7lq9KRT/d936oYB3xNnoFUOL1AKs+V+3r7Hk
+# ggi+MWj+RoPEtByze+C+tLB7o++uLZKp75DGavTujqHxhyL0TeODFQ3cKyTvtO5k
+# eKh0EK8l2JNqwxXpNcFLqHmH9k7vc1FE+dp/hKJXrjar846QKxn04pWPxwzIybhI
+# jQ/hxQzalHctpxCM8lyOh9U9puz63+c0DsqJAWBTUmvNSWJSIQ0nj0EWkoQ9zGGs
+# usqEOkPPhA==
 # SIG # End signature block

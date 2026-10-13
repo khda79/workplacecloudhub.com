@@ -638,8 +638,8 @@ function ConvertTo-HtmlReport {
     $sb=[Text.StringBuilder]::new()
     [void]$sb.AppendLine('<!doctype html><html><head><meta charset="utf-8"></head><body style="font-family:Segoe UI,Arial,sans-serif;background:#f5f8fb;color:#1f2937;padding:24px;">')
     [void]$sb.AppendLine(("<div style='background:#fff;border:1px solid #dde7f0;border-radius:8px;padding:16px;margin-bottom:16px;'><h1>Microsoft Teams Inventory <span style='color:#fff;border-radius:999px;padding:4px 10px;background:{0};font-size:14px;'>{1}</span></h1><p>{2} teams processed; {3} distinct teams require review. Findings can overlap. The complete detail is in the attached workbook.</p></div>" -f $color[$Worst],$Worst,$Summary.TotalTeams,$affected))
-    [void]$sb.AppendLine("<div style='background:#fff;border:1px solid #dde7f0;border-radius:8px;padding:16px;margin-bottom:16px;'><h2>Action required</h2>$categoryHtml<h3>First teams to review</h3>$topHtml</div>")
     [void]$sb.AppendLine("<div style='background:#fff;border:1px solid #dde7f0;border-radius:8px;padding:16px;margin-bottom:16px;'><h2>Summary</h2>$(New-SmartM365EmailKpiGridHtml -Cards $cards -RowSizes @(4,3))</div>")
+    [void]$sb.AppendLine("<div style='background:#fff;border:1px solid #dde7f0;border-radius:8px;padding:16px;margin-bottom:16px;'><h2>Action required</h2>$categoryHtml<h3>First teams to review</h3>$topHtml</div>")
     [void]$sb.AppendLine(("<div style='background:#fff;border:1px solid #dde7f0;border-radius:8px;padding:16px;margin-bottom:16px;'><h2>Evidence coverage</h2><p>Activity report refresh: {0}<br>Teams without an activity row: {1}<br>Teams without measured storage: {2}<br>{3}</p></div>" -f [Net.WebUtility]::HtmlEncode($refreshText),$activityUnavailable,$storageUnavailable,[Net.WebUtility]::HtmlEncode($SourceNote)))
     if (-not [string]::IsNullOrWhiteSpace($FileLinksHtml)) { [void]$sb.AppendLine($FileLinksHtml) }
     $runMachine=if($SourceNote){'Not recorded in CSV'}else{$env:COMPUTERNAME}
@@ -770,8 +770,8 @@ try{
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC/PVwgUETyxKpj
-# to6XYqb7uz+zYBubleH4NiweLB778KCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBjZIZ4QwC/LGCB
+# miQYrzFyVuRteXoML6/43WixmjWq/6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -904,31 +904,31 @@ try{
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIIol/XYdyQLGADa8Ari7ZU5e2wpL342NBytU7ya9e+/GMA0GCSqG
-# SIb3DQEBAQUABIIBgKuXruZl/gqFAConai5buoouWZy4R6gAnmu9g9unBjNTlnMk
-# bmaT89C77GsToL5TJvv5aBzjjOa4NofGMnbKV09rFx9ji6YFASj3HQOk/MB3gGKC
-# Mj8Ju6GYrNs1pKgAYOnl4+X9sO1DuKh/d6WmUBJvdzR0a07779lUqzCuVPQt+7e+
-# GNjwzxk89OH4zegCK/SgThflJQM/O+Xvie564I0t7axXLUMg9WU0/bPpuwbCWYFe
-# t0g1s9cbk78sbI/NPVRfVmc5584FY92Ta30gpscePDEzh/mDeJi9P1RysRc5npGm
-# va9njmNo1+V+DcaFOY2SP6RZYr0kz32cmLUVPgHsL/gv04VPErLCaLYJbfG8NvGM
-# EcWP1skobK+Pn/v/rMEJSFJ5JvkePc6ewgZITqlTJBSIJ9CM71yioYshQ5YUFCaN
-# CW5sxh3Gh3RD6vRbHIXVp+Ah3sdFswLULNs9UIgj1oYCL8y1VQi702hdN7tAduDX
-# n5zhf1mVTegJNDvgN6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIPOR/ak3xad9v8X5xzlmaqwCllHK6DjEpPC+a84QgbGEMA0GCSqG
+# SIb3DQEBAQUABIIBgFxUDPGUeVevcyCbSzycmXkqvGd9Irxoi4GxRJ4alywqUxOA
+# xaaUhYM6GoO3PcfZO3h89/nIDQjkXJXiRbhmSMz/Dk32YZF7bIkV3UO2b5oit6DW
+# vGYRPIebBEgUXDpBwY5JEfR38Jwc6htwQ+4mrACh2WyHA5pZirvGDFU4MlPgdKxv
+# krlGtzBcw+VeYQBqGqAENeoNymnqKrDVIe/KECmZ8CGck9/rVu/MbNtZjqC+Myur
+# jV8f/J7i6EfY7EzDtNXhqJfws/EjYxoxuc6IFYZqelvdC5/a9wnswc7h3XJCXZh4
+# tZdeMEyAG+fN7EJ7fjGdr/MuGK4yGso1rObkPzdsmE6Nv33b7tUFf+7E8AFDX35l
+# 0z8SUt+wchbXy0ERlYGa08VM6QUky30v8mnPJSi9SNQ3Do34gYMIqi17i2Jk+EX7
+# x1Xs97jMiorUwj9T99XhLV8UQ5MOcTUOYv5YFx3LSCNupl7Ld6vvW5FdgEicpMxv
+# y6UrwQ8HP1AF+zm5tqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTIxMDQx
-# MjNaMC8GCSqGSIb3DQEJBDEiBCCskaXzSe9b22mIGEVz2F2VBOq/qTzdBKiJhOxC
-# 3DhCsjANBgkqhkiG9w0BAQEFAASCAgAA77uYaL0B+xEjGPJGDJLDod2s4EXYPZxf
-# VBgWdk/swtMnsDTDMlfJIl+Nen4v6T9TCm09BABwg0LWNiajX+3dJYnQDcCp5Pie
-# rHE8FBSxIGzJlS2lU4t1iqnLyMkpBEBkodoh08or/krsTVIRyUv8tnGhbAaT7oeP
-# 5kopNtse4CNfBcpQwusNafOmgx+r406eHPM7i5viZ7daeing4arAedOsUjuNF1e9
-# MWP/CZSPJQjqsARxlkWD6IPB6YP4Zvb2Ako56lYSEF+a8i8fwSVNXzazGQcMmcEE
-# bIwW44DYfw1xSUzTmchrC3r6d9BBYEQu8O/EWSl8ydVqOGL7turPeQ2xESe+ni8r
-# AZ11ApPLjECgHIckgxWhp1n/GHynCmMsq+FEtj3PDXHgbOyERwz1YgIHjFlSNnh+
-# B+/JAigXAHlNYnXhsF5baSfOrSkdudHPQN6a9QtEA2SjTjGMbcFUHmBnCJ3cQEge
-# SObDOjhxiOtcdJCCzUe0mt0ZN835N3HqtGTxIAVRYqbXoIByaCf1OXvv1sqFR8SF
-# KG5CyV2R9WyJ3OW2lGi88hT5WLZf/4h1xI5tGwAtRhoKwXuh+1XC5UI0mln1sxtD
-# FWS0IAdcvfns5BD4qf0g6BluWTlrLvUIvRE6oiGAJZfJsUIkylTLnWzx6wfkHIQG
-# DhtSWk2lWQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTMwNjMy
+# NTNaMC8GCSqGSIb3DQEJBDEiBCDea/FWXt9px1BhuqbeFkAl4wxR5hm91FGkQCZy
+# OACRAzANBgkqhkiG9w0BAQEFAASCAgCePy5gRd14mj3ZnSdeqGmJ9bZWwuUjN7T3
+# OGqjyaij4iJNomsvJFfNpz8z2USC/hnxmNc5rtmr+2YOo1fN6SI9cCd6VTzhOdrM
+# RRL1Pw+LPxeKPdOt8XZ4CrNqbIAgcBzA2usCoD7YuTUdx3+47Id/y99W710z1vsH
+# 1mU1gc0mSpICjZRZaHd1uxQtefabUJKojIkIHmMrcRDCKQX2QcTnXCdPZAqpywFq
+# UJYIm1n0Q3qaUoKzzCqa+txc2gd9BzpXuNIH7K7+vvEAQjU7UfSAivu1m7B6EfFL
+# Vv0OUbW/lkEt8na9EnODmboFWBjfoMTOaQlD0f0tVW2rS9LcNOE4RJH6bi1Kw5H6
+# jOLyV7TaLiSCqugNT3/1G+KiYEjP2Of3kQLvO0MZZpywgWW5NBtrvQOgIZ5vqEiK
+# cuvtwUZm4JkGEtm6wSHAS77Ugj6y8lqoEChXMUZ7kLtt1yiWFUqLRfnlcaZLPQbC
+# zW4uQ9ICU/dT71cZ9gsKyPiTY+SxS+56+i3Waw7XW1TWLHb6uhtfPyGBftxLRyYw
+# sMLugsrNvRzJVA31XykaflaYpGM9dXcmb0wZAOuDyKAaNfLLwI4Izpr6JknSJPdn
+# ojCaeTlhQHW0AFf+NbeMrM5VKTFTz1nra+V0aLIuAgnHfll3ZsWvGa+8qW119ecP
+# rMn79SvAFw==
 # SIG # End signature block
