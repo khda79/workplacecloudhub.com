@@ -39,7 +39,12 @@ to limit Graph requests and use bounded retries for transient Graph errors,
 including `ServiceUnavailable`, with `Retry-After` when provided.
 The summary counts observed report rows, not unique devices or users.
 `NoReportRows` means unobserved, not failed or not installed. `ReportedInstalled`
-requires an explicit installed state from Intune. Enrollment failures come from
+requires an explicit installed state from Intune. `ReportedDeploymentState`
+uses `AppInstallState` when present; `InstallState` retains the raw report value,
+which can be numeric. An absent `AppInstallState` falls back to `InstallState`.
+Unmapped values remain `Unknown` and are summarized without device or user
+identities in the run log. If every device row is `Unknown`, publication stops.
+Enrollment failures come from
 `enrollmentTroubleshootingEvent` records; their optional device identifiers are
 retained only when Graph provides them. `EventDateTime` is exported as ISO 8601
 UTC; a source value without a time zone stops the run before publication.

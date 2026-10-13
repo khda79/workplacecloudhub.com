@@ -3,7 +3,7 @@
 .SYNOPSIS
 Collects Intune managed apps, assignments, and reported installation states.
 .VERSION
-1.2.1
+1.2.2
 #>
 [CmdletBinding()]
 param(
@@ -61,6 +61,9 @@ function Get-IntuneManagedAppInstallStates {
         [scriptblock]$ExportReport
     )
     $states = [Collections.Generic.List[object]]::new()
+    $unknownStateCounts = [Collections.Generic.Dictionary[string,int]]::new([StringComparer]::Ordinal)
+    $unknownStateRows = 0
+    $unknownStateOverflow = 0
     $reportColumns = @('ApplicationId','DeviceId','UserPrincipalName','AppVersion','Platform','InstallState','InstallStateDetail','ErrorCode','LastModifiedDateTime','AppInstallState','AppInstallStateDetails','HexErrorCode')
     for ($index=0; $index -lt $Apps.Count; $index++) {
         $appId = [string]$Apps[$index].ApplicationId
@@ -82,7 +85,20 @@ function Get-IntuneManagedAppInstallStates {
             $rowAppId = [string](Get-SmartM365EvidenceProperty $row @('ApplicationId'))
             if ($rowAppId -ine $appId) { throw "DeviceInstallStatusByApp returned an absent or mismatched ApplicationId for app $appId." }
             $installState = [string](Get-SmartM365EvidenceProperty $row @('InstallState'))
-            if ([string]::IsNullOrWhiteSpace($installState)) { $installState = [string](Get-SmartM365EvidenceProperty $row @('AppInstallState')) }
+            $appInstallState = [string](Get-SmartM365EvidenceProperty $row @('AppInstallState'))
+            $stateForClassification = if ([string]::IsNullOrWhiteSpace($appInstallState)) { $installState } else { $appInstallState }
+            $reportedState = Get-IntuneManagedAppDeploymentState $stateForClassification
+            if ($reportedState -eq 'Unknown') {
+                $unknownStateRows++
+                $appValue = if ([string]::IsNullOrWhiteSpace($appInstallState)) { '<empty>' } else { ($appInstallState -replace '[\r\n\t]',' ').Trim() }
+                $installValue = if ([string]::IsNullOrWhiteSpace($installState)) { '<empty>' } else { ($installState -replace '[\r\n\t]',' ').Trim() }
+                if ($appValue.Length -gt 60) { $appValue = $appValue.Substring(0,60) + '...' }
+                if ($installValue.Length -gt 60) { $installValue = $installValue.Substring(0,60) + '...' }
+                $stateKey = "AppInstallState='$appValue', InstallState='$installValue'"
+                if ($unknownStateCounts.ContainsKey($stateKey)) { $unknownStateCounts[$stateKey]++ }
+                elseif ($unknownStateCounts.Count -lt 20) { $unknownStateCounts[$stateKey] = 1 }
+                else { $unknownStateOverflow++ }
+            }
             $installStateDetail = [string](Get-SmartM365EvidenceProperty $row @('InstallStateDetail'))
             if ([string]::IsNullOrWhiteSpace($installStateDetail)) { $installStateDetail = [string](Get-SmartM365EvidenceProperty $row @('AppInstallStateDetails')) }
             $errorCode = [string](Get-SmartM365EvidenceProperty $row @('ErrorCode'))
@@ -93,7 +109,7 @@ function Get-IntuneManagedAppInstallStates {
                 AppVersion=[string](Get-SmartM365EvidenceProperty $row @('AppVersion'))
                 Platform=[string](Get-SmartM365EvidenceProperty $row @('Platform'))
                 InstallState=$installState
-                ReportedDeploymentState=Get-IntuneManagedAppDeploymentState $installState
+                ReportedDeploymentState=$reportedState
                 InstallStateDetail=$installStateDetail
                 ErrorCode=$errorCode
                 LastModifiedDateTime=[string](Get-SmartM365EvidenceProperty $row @('LastModifiedDateTime'))
@@ -103,6 +119,10 @@ function Get-IntuneManagedAppInstallStates {
         if ((($index+1) % 10 -eq 0) -or ($index+1 -eq $Apps.Count)) {
             Write-SmartM365EvidenceLog "Managed app installation reports completed: $($index+1)/$($Apps.Count); deviceStateRows=$($states.Count)."
         }
+    }
+    if ($unknownStateRows -gt 0) {
+        $examples = @($unknownStateCounts.GetEnumerator() | Sort-Object Value -Descending | Select-Object -First 5 | ForEach-Object { "$($_.Key): $($_.Value)" }) -join '; '
+        Write-SmartM365EvidenceLog "Unmapped managed-app installation states: rows=$unknownStateRows; values=$examples; otherRows=$unknownStateOverflow." -Level WARNING
     }
     return $states.ToArray()
 }
@@ -239,8 +259,8 @@ try {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB4KEZFP20n7I5l
-# LJ7XG2AoUAlWSG+Us23M9xtbM13fFqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCriylbZDpnHMUX
+# ZdcVeA8Q/C4IgGoSRHIQhaeJY47fkKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -373,31 +393,31 @@ try {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIEB/WTL0CFACkCxhhAakVEe4s361c6iUChLG11smuyF+MA0GCSqG
-# SIb3DQEBAQUABIIBgK472fZ9cOp19rWlcJZyFVgtwoRnvm8xwKCsoouiA4DezyR1
-# obHtmVOgfBX1h+BN8ih2T/w1BpIN5Dz7tivoxgQoGmVKT0UrsZnyqlk8ZY346cPe
-# uu+Yzuc8I0CkJTvhu+14U3vMymBmbuEKSJwoAm4Gy6vRMhe9PL3KvRPmdP970c20
-# 0ICxLlE9yjUyffOvWAllIGb0+Xn4gGclGZCabQuC5YE0T6JfuxxzUGnUmIF4eXXn
-# RMYZFC0ANrtNyJG2VVJvSU7n9Hrz3m3VgbYvEcndkIwYp4UoA9CA5+k75Yqt/HnI
-# uCS+EaQzw0vVo1IybeOVHGYNs9M+2+FE5hIQOujujoI3JWtsxfV/hDMqEjGY7eSb
-# QDDO/6axCajOvTnvZE8+dkW9pXbKdRjkJFTZ/PSu6KhTZ2KSugvKawJLrtBab8DI
-# ZIbeFmk67FgeumUHO8LATQ7oWcKfI96GZaWrrd118MbVcSM5RKpVmLd3KXtlW1R/
-# 0T8Srj6mVVS3hfomBKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIC3hiiMbDFWtDwSxbka8ZihGuVRpYYmmWgIXt6ibC7QWMA0GCSqG
+# SIb3DQEBAQUABIIBgDFjmNC7EZOa2GG56iAl4n11DklBUQY3mPN0ucwqSD8zdSwu
+# iMYIv20RGB5R7ExEdqfkS2D/HNhxS9SJGAmLH2faOpcWcyT+t2sq0nfHRNcZfmgx
+# HpGlwPDh7tIW6IRE42FfzdEKSijEh9hXNiP2uoJMzz/u51AqlhqsshJ5/h2EpZVs
+# 8JPDP4KfWC3EOie/O03rVeNNKYHQKp6zGrnnFeuZHkeLmf0Q8BtSpDlIq0oVd3LC
+# TOjG7hXOEFcu3a1UjBbvnwM92wprCKd9Oc2BWEvm2dsNKRNh3kEoDHS3W6QydnXF
+# hOjpzMsJaTaxSmg3YDje8xy9qV2GKaRth1FzcSDoX3y5/pxb0ckwt1pJ5cJ0MC0G
+# AXO0nnFbBtW+4nD8l9azSsF/uQOYJX+7JHGuxIKpw0xsLjIE121YRUJrqWasMOOm
+# TXo3nbdhuP6qnZuAA4LmBoB0N6FUuYfNkkZmhr/W8VfzI6hMw2ReYwKNZmYIE6Mf
+# DGDTeE2PlPbuFI51P6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTMyMDE0
-# MDNaMC8GCSqGSIb3DQEJBDEiBCAWfLkI9EezR0k3Vg+G4AGT1pY39levXaCOt0DN
-# Rcnc/zANBgkqhkiG9w0BAQEFAASCAgCjFp7wSvWyV2/TZCE/fVpBQFO4RzKQ3miN
-# 6oMh/sNR5mexz8Xz0SPVo8zrd+y8Q/c/I21JXE9VSBDR63gZ6PEJW0agkHEIwCWk
-# QHAT9oOh4/S9Wu5tYwyf6SuJ+KGlFH7aL8gzIc52w5P9ROCmNMirZJXH7dJjKNf5
-# Oxw5ckLrm2wGy7iG9LjiG0Dl3o2EjptGzwkFv6OdH+YQVdrtvq9uiF+3oVy4L/RT
-# PvsHkCE/7gANUy8IuLQpqhnSyEQiQ1nZ6Hw7Ie+3QUx2XjbnhQdOhVksVWL8Hc9d
-# MAJRSyDlJ/o8NfACPXF5iNyr5frVdAR/xGZC5ZiH2g0uUFu9L95+n2rSW11ZUaQG
-# Y/QNsj+lZELF/pTPkmd7TXLznCteNXW55azMM+WyrfqQsqeKn3Lkk5lP2247t79H
-# 6vG8OE9rAXAxW/gVT8dzNam7nk8nEDp0p5k22p7XUst0SMQhjOg+kHZnp6eHi4Bq
-# JojdudUtUaKvZlbQmJfCVRbiuSHmRhtxioL5eisCdBcyeZo002w0jgNUYdAIAlkO
-# hXfzwiK8tc9fl1WOcKqq0frFKfEo+kOJ/mdaqS+x6+hf7/FwkF3GjaaDe1KsQRB9
-# SwnitotZ2CtstkpKYcskRcWx5DUHGKVMcXF9OS2JH3adyGLrRvlli6sPYaBDsbeQ
-# 4F6HEViJWA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTMyMTAy
+# MDVaMC8GCSqGSIb3DQEJBDEiBCDlR+B0DN6yR8rKYG9o6yG9/TUuspJLmgHxxxEa
+# 4/zf5zANBgkqhkiG9w0BAQEFAASCAgA0b74W8NNRxQd4/EKT0Ax4JD3Kb1U1j2yl
+# s2Y4wWRSOpmQmkdVl9ij8J5dXOi9lRDRKnrGojFDwG5mIICQbFDvze74uc37pBrh
+# bP9r71OTXsslvhBhMWdXhX6Ggxpd5Bh0UhMW9TVgDJ+V3VqufHcHmPWFJUV+5kgB
+# 9PbLVBpH10ltr2BSU1pZ2q9DJs487QH+nUazZ985PxV0pDpOXOLpjbJou3VDUW/i
+# lufkFdf/YznX/wTcQIMuRWwsumCj/oHw2EKLSpqPDKH2ChqDH7kk+5v3GFLqjLjZ
+# RAXaeD51vJRUy/1W3sY/qbhsip8CFo5fHiRHTwBjMz7IGqr1x7zsTN6wTt40cVFn
+# kmp88nJ6Uox7blVlO5iX21OwILoICWlAIZBrllEdk2LhigQlXk/4AT98SnH6lzhe
+# BLTBrsJAGVi+h9Pn7yJTpCKdn/h7o6HjyEBVSLSirNZJCL2v92zyxfy5I+Dwo9Yp
+# Oe/ptkdIvFCssdatgc59VdUw1ridPoGCS0fxpgx2lxURCSm8YG2upY5XFbfZD6ZF
+# PC76h9TYsGAOLD0XBLworQu1fOtODKpLOdOCDfdrkWdqge2po+BlxToih3DRvTDB
+# J0xDOw1vI5jHDfWe3QgSDGs31UEPX2fgxjFzifXOq9sMZSeh0JC3nUipOHT7d194
+# dsKJ4EeWlw==
 # SIG # End signature block

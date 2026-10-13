@@ -3,7 +3,7 @@
 .SYNOPSIS
 Verifies managed-app report filters and assigned-app status collection without Graph access.
 .VERSION
-1.1.0
+1.1.1
 #>
 [CmdletBinding()]
 param()
@@ -58,7 +58,8 @@ $definitions = @(
 )
 $collectorModule = New-Module -ScriptBlock ([scriptblock]::Create($definitions -join "`n"))
 & $collectorModule {
-    function script:Write-SmartM365EvidenceLog { param($Message,$Level) }
+    $script:Warnings = [Collections.Generic.List[string]]::new()
+    function script:Write-SmartM365EvidenceLog { param($Message,$Level) if ($Level -eq 'WARNING') { $script:Warnings.Add([string]$Message) } }
     $ids = @(
         '11111111-1111-1111-1111-111111111111',
         '22222222-2222-2222-2222-222222222222',
@@ -103,13 +104,19 @@ $collectorModule = New-Module -ScriptBlock ([scriptblock]::Create($definitions -
         param($appId,$filter)
         $script:Seen.Add($appId)
         if ($filter -cne "(ApplicationId eq '$appId')") { throw 'Per-app filter does not match the requested catalog id.' }
-        if ($appId -eq $ids[0]) { return [pscustomobject]@{ ApplicationId=$appId; DeviceId='device-1'; InstallState='installed' } }
+        if ($appId -eq $ids[0]) { return [pscustomobject]@{ ApplicationId=$appId; DeviceId='device-1'; InstallState='3'; AppInstallState='Not installed' } }
         if ($appId -eq $ids[2]) { return [pscustomobject]@{ ApplicationId=$appId; DeviceId='device-3'; AppInstallState='failed'; HexErrorCode='0x1' } }
     }
     $rows = @(Get-IntuneManagedAppInstallStates -Apps $assignedApps -RunId 'run-1' -CollectedAtUtc '2026-10-13T00:00:00Z' -PauseSeconds 0 -ExportReport $exporter)
     if ($script:Seen.Count -ne 2 -or (@($script:Seen) -join ',') -cne (@($ids[0],$ids[2]) -join ',')) { throw 'An assigned app was skipped or an unassigned app was queried.' }
-    if ($rows.Count -ne 2 -or $rows[0].ReportedDeploymentState -ne 'ReportedInstalled' -or $rows[1].ReportedDeploymentState -ne 'ReportedFailure' -or $rows[1].ErrorCode -ne '0x1') {
+    if ($rows.Count -ne 2 -or $rows[0].ReportedDeploymentState -ne 'ReportedNotInstalled' -or $rows[0].InstallState -cne '3' -or $rows[1].ReportedDeploymentState -ne 'ReportedFailure' -or $rows[1].ErrorCode -ne '0x1' -or $script:Warnings.Count -ne 0) {
         throw 'Per-app device status mapping is wrong.'
+    }
+    $unknownExporter = { param($appId,$filter) [pscustomobject]@{ ApplicationId=$appId; InstallState='99'; AppInstallState='S99' } }
+    $unknownRows = @(Get-IntuneManagedAppInstallStates -Apps $assignedApps -RunId 'run-1' -CollectedAtUtc '2026-10-13T00:00:00Z' -PauseSeconds 0 -ExportReport $unknownExporter)
+    if ($unknownRows.Count -ne 2 -or @($unknownRows | Where-Object { $_.ReportedDeploymentState -ne 'Unknown' }).Count -gt 0 -or
+        $script:Warnings.Count -ne 1 -or $script:Warnings[0] -notlike '*rows=2*' -or $script:Warnings[0] -notlike "*AppInstallState='S99', InstallState='99': 2*") {
+        throw 'Unmapped source states were not kept Unknown and logged without row identities.'
     }
     $badExporter = { param($appId,$filter) [pscustomobject]@{ ApplicationId='99999999-9999-9999-9999-999999999999'; InstallState='installed' } }
     try { Get-IntuneManagedAppInstallStates -Apps $assignedApps -RunId 'run-1' -CollectedAtUtc '2026-10-13T00:00:00Z' -PauseSeconds 0 -ExportReport $badExporter | Out-Null; throw 'Expected app identity failure.' }
@@ -119,13 +126,13 @@ $collectorModule = New-Module -ScriptBlock ([scriptblock]::Create($definitions -
     catch { if ($_.Exception.Message -ne 'Synthetic report failure') { throw } }
 }
 
-Write-Output 'PASS: assigned app selection, status source, export filter body, device states, identity mismatch, and report failure (offline).'
+Write-Output 'PASS: assigned app selection, status source, export filter body, state precedence, unknown diagnostics, identity mismatch, and report failure (offline).'
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAqOgKp3dM9UEDd
-# marpB0Ne9YYWnzWMgELbjPtiC4WtRKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCArntfchGLKSLm/
+# 2hW+tDSKs0LXejzYTLbR7NuN67hnbKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -258,31 +265,31 @@ Write-Output 'PASS: assigned app selection, status source, export filter body, d
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIGfFKOZDeJr8hpH2bWejW1KM5gsiiLXeVLN7qRhgROJdMA0GCSqG
-# SIb3DQEBAQUABIIBgC6gQsIE+id5NPEsIvKB551m/Z3ro0Ls4RjuEejXUdgAXL1A
-# ay8EOW/ki49BtkDfkrV46vEmqKkcyF+bnGcwSTAagSLcjC8jNn8dtnxuiTPArFAK
-# /r1FyPo0E8eeHkiDpK1Irn0noyQxnbCGd13Hxspy8JMYLgvLMJHigxnwWjXmlg7F
-# 5JxSNEd151ZCdUSAvVHRBLmKwApcrHOygwWc59UZz3CZzLE7zCC1Jv3BFnt6EX6X
-# Zm71dRPch8eTu63t/mu8VmmDmWMkFoxLQJJ6ctECaNw2QSzMlpsufChpSE7ak+r8
-# 7qSZxDbN/6/WIlmTaPHmi36b3ymHXZ/kJb9d8UF86U7i+1VJC/HgUJft509edPwn
-# 7Pehfyiqb4ek8zQOUrV+DjACqtSYW+IMK0XLrDmNttgInFlbC85XGLO9K5EKhsuS
-# 7GWgP3VlVd0UnPAM3PXZYCCtDcNcHSgvOxX7xeOQFn4yTk5akwAirEdt6eIbVg59
-# p/SK+eMBPTtzVl/6MaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIGGUrrIhWI4eTi//JaWlEL5fjORvgtGGy6gVvlikeoNhMA0GCSqG
+# SIb3DQEBAQUABIIBgKM27jXuKD4WI4sq4ClpOmAsOgX5qVFJ8mpWj+Q7LkseVOTf
+# MJgfChErOi7ehAVNh4lJSPzIUKtd1dKWRQW7k4Kf+56+zzMzkhrbo7Jr+XOMZjml
+# 6JAWaRJwy+anExn55NI/QA1roRhZdc+c7zCoJWT3j44dMFz7tx2pYWc3Rd4YKMX0
+# I4jGvyYU20ZNB2JZPl0mPqxmTyMBBr0Jv516e/vYlUqAizNVZXKCYCrO488/Wm1Y
+# 8AX74ePeT/GKBwcHPRlgzrCmiE+QvaT/4YrTebH3QhVJgKa9cNKkLL9oeAHZX30L
+# z/h3DfbnzaXAaWptQ+s2rQaAUrpb1qDoD+zK7SyswdlM8iQQO3lx6jZ7EJY7EuvG
+# QjDl+oSCowyo0qeNBuY0tnG4Gb+YTGj9CuMpIhvzvdn5F7NBaoIbfB+h9Z9fpTvY
+# kKlOgVVXFdg79EUgI4JXI7UH42P/76FAVCuiqAy6ur6HkxgIeWdscRMLnQwkRKmE
+# 9TyEInyyiwagdXzVsKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTMyMDE0
-# MDRaMC8GCSqGSIb3DQEJBDEiBCCtbJTMBIyMAavXepKltI93kA4RyyGSx1MM0DAe
-# I2OOkjANBgkqhkiG9w0BAQEFAASCAgATNadhVgnHr8axIgitNon4hoym5/bx96hh
-# sayKAUI6nERrDfL2IBbxZb2loIG5nHr5UbPa3cesUXtC+7CKRTWnjKPsprkR6Hks
-# 8OfEfhWabRJjwYIJt8Vay2eLw+s7tHByZt3bdOgoZwM1x1nte2ab+ZTTrj9IC31D
-# dlw0eLC8djNmxRoaV8Kl07rwZCmZ0A2r9q6Bm9hpkwIcS+PWmdSxdNrTm3Elyzcw
-# 0KAhfJb2zAbNwbbGr+ruiDkx6R9hPcT42jMmHG5ghuTfEy2m27xkT/sQijQ8sQTM
-# FS0scOZWBidFQfjk+kLSaS9xyFsT9r7xHz75tyQEdtBXde75OwC9ADU3e7ZWNUpu
-# +s58mrNXXkq+0aZKRTBm8Qy/Kk4sevSEwiju0VTZHQGiUN6l7cn0NGgqHBMbGZvn
-# XzRFyzNCKt6YGbq2PTYBNtD1J+LWTXqTPStXD9eMcM3x7AHWo4hrHVs01qoH7U/S
-# d9I3r9FfiK0iJjJmRRpWGXBHNJG6beQvRzmHzAJfuZP3jAZ4Kq80vszKlwbEN+qr
-# t09I/hKFrO+RuqaLotuKu76z63eR5Vs42zOD1/fH2pt/ekP007wUhI+etANwdeaD
-# BTE6AfLSNB1DMfKXSqJjof4iCSrDcJ+1oSXtjHqrRJTL8O/iw0Fl7EePuZ0JgiCO
-# FT15XHJ9Mw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTMyMTAy
+# MDVaMC8GCSqGSIb3DQEJBDEiBCAsA81Z+KdWblaF//dmAABEeCnHjpfQUQ0xRxim
+# E6bpPDANBgkqhkiG9w0BAQEFAASCAgCOoG9b/ivBEwMD24G6Hy6jTdHopwgjAIQ1
+# A/TPrKeCM4ECIJuHAWsdxWZh9TKNrfF/vEaZgJMuAe8ZJI0+48acrcwR6ljgJ5TX
+# BPNPNiv7EMVVJ6cA/2Ie8C+aHQW+SP5ugwJ38vH7xLUmCSQGIDio3/oOQbfmBxZf
+# a2/NG2009DqnUl7p6bboz3cQwn+ZuJHhLNxG7vsSmgVjOLa/uAfsrzO9cV7UwLG6
+# L//sCEKTfUv+P0c8+8OeaWpjfrtElpbyE1BkW1GeKfLMDhMzUtyC4kgy5kA2l1pa
+# dxWtWcopKFvD5NfgRTUpcM8jcEj53/M5lEkVBY3dT6CbEIEMNkt6IWdkBsi0Mg2c
+# 2nT3gZPpO7QrlgfyVR3Ds7kMWbKS7XEBvB8l5B4bt3xrQndNoH3EDaIR/Q3LlUIF
+# 5ATrtBDk98C46ftMBRtvcQzGs+Ee0XCYFJqG6Av9E1HywrVTcEC/6xmUvNH0Y5kW
+# 6FXpP0IlKD2CzbLEUs1KIuHPu07c9WXyyv+xCj6i+JCQLE99G3utrPdghtTwpPta
+# F5smTeJo1hap4g+xCrhbOUL6vv+TeRrdgBxnoCcc2LDTu1z7BE2USCCtWm925CtG
+# aLqUyEQ2RtimABmMRlif2AWdumj05ysajO2dmwuVrqKX5yxlFIHD7yF+IXLagwOF
+# RudEMGsYYQ==
 # SIG # End signature block
