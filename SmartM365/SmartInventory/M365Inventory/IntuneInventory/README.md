@@ -20,11 +20,19 @@ Run `SmartInventory/Launchers/Cloud/Start-SmartM365-Create-DeviceSystemRemediati
 to create the package in the `prod` tenant profile with interactive Graph sign-in.
 The standalone script also accepts `-Tenant test` and requires the delegated
 `DeviceManagementScripts.ReadWrite.All` permission. It refuses to update a
-package with the same name, prints the new package GUID, and verifies that the
-package has zero assignments. Creation does not define a schedule or target
-any device or user. The launcher does not run the inventory collector.
-When run from an isolated worktree, pass `-ConfigRoot` pointing to the
-operational SmartM365 root that contains the private tenant profile.
+package with the same name, prints the new package GUID, verifies zero
+assignments, and saves the GUID as `DeviceHealthScriptId` in the Device System
+collector's private `.local.json.txt` file under the same SmartM365 root.
+Creation does not define a schedule or target any device or user. The launcher
+does not run the inventory collector. When run from an isolated worktree, pass
+`-ConfigRoot` pointing to the operational SmartM365 root that contains both the
+private tenant profile and the collector configuration.
+
+For an already-created package, run the same launcher on the operational host
+with `-ExistingDeviceHealthScriptId <GUID>`. It verifies the package in Intune
+and saves its ID without creating a second package or changing assignments.
+An existing different collector ID is never overwritten. Git mirrors do not
+carry the ignored `.local.json.txt` file, so run this on the collector's host.
 
 `Devices/SmartM365-Detect-DeviceSystemInfo.ps1` is the detection script for a
 detection-only Intune Remediations package. Assign it to the intended Windows
@@ -41,10 +49,9 @@ personal data through Remediations, so assess this deployment before assignment.
 If Intune signature enforcement is enabled, the signing certificate must be
 trusted on the devices.
 
-After Intune has reported pilot results, set `DeviceHealthScriptId` in the
-private Device System `.local.json` configuration to the package GUID. The
-collector then reads only that package's `deviceRunStates`; it does not fall
-back to the older Platform Script for missing devices. `LocalObservationUtc`,
+After Intune has reported pilot results, the collector reads the saved package
+ID from its private configuration and reads only that package's `deviceRunStates`;
+it does not fall back to the older Platform Script for missing devices. `LocalObservationUtc`,
 `LocalDataSource`, and `LocalDataFreshness` make the source and age explicit.
 `PlatformScriptLastUpdate` remains a compatibility alias for prepared evidence.
 The collector continues to read the legacy Platform Script until the new ID is

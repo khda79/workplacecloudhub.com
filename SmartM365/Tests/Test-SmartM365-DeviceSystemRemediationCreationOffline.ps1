@@ -17,7 +17,8 @@ function Assert([bool]$Condition, [string]$Message) { $script:checks++; if (-not
 $tokens = $null; $errors = $null
 $ast = [Management.Automation.Language.Parser]::ParseFile($creatorPath, [ref]$tokens, [ref]$errors)
 Assert ($errors.Count -eq 0) 'The creator does not parse.'
-foreach ($name in @('Get-GraphProperty','Get-GraphCollection','Get-DeviceSystemPackageBody','Invoke-CreateDeviceSystemPackage')) {
+foreach ($name in @('Get-GraphProperty','Get-GraphCollection','Get-DeviceSystemPackageBody','Invoke-CreateDeviceSystemPackage',
+    'Get-DeviceSystemCollectorConfigPath','Get-ConfiguredDeviceHealthScriptId','Set-DeviceSystemCollectorPackageId','Confirm-ExistingDeviceSystemPackage')) {
     $definition = $ast.Find({ param($node)
         $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name
     }, $true)
@@ -97,10 +98,68 @@ $failed = $false
 try { $null = Invoke-CreateDeviceSystemPackage -Body $body -GraphRoot 'https://graph.microsoft.com/beta/deviceManagement/deviceHealthScripts' } catch { $failed = $_.Exception.Message -match 'assignment' }
 Assert $failed 'An unexpected assignment was not reported.'
 
+$existingId = '00000000-0000-0000-0000-000000000333'
+$script:requests.Clear()
+$script:existingPackage = @{id=$existingId;displayName='Synthetic Device System';publisher='SmartM365 by WorkplaceCloudHub'}
+function Invoke-MgGraphRequest {
+    param($Method,$Uri,$Body,$ContentType,$ErrorAction)
+    $script:requests.Add([pscustomobject]@{Method=$Method;Uri=$Uri;Body=$Body})
+    return $script:existingPackage
+}
+Confirm-ExistingDeviceSystemPackage -GraphRoot 'https://graph.microsoft.com/beta/deviceManagement/deviceHealthScripts' -PackageId $existingId -Name 'Synthetic Device System'
+Assert ($script:requests.Count -eq 1 -and $script:requests[0].Method -eq 'GET') 'Existing-package registration changed Intune.'
+$script:existingPackage.displayName = 'Different package'
+$failed = $false
+try { Confirm-ExistingDeviceSystemPackage -GraphRoot 'https://graph.microsoft.com/beta/deviceManagement/deviceHealthScripts' -PackageId $existingId -Name 'Synthetic Device System' } catch { $failed = $true }
+Assert $failed 'A mismatched existing package was accepted.'
+
+function Resolve-SmartM365JsonConfigurationPath { param($Path) return "$Path.txt" }
+function Read-SmartM365JsonDocument {
+    param($Path,$Validate)
+    $document = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+    if ($Validate) { & $Validate $document }
+    return [pscustomobject]@{Path=$Path;Document=$document;SHA256=(Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash}
+}
+$script:configWrites = 0
+function Write-SmartM365JsonBytesAtomically {
+    param($Path,$Bytes,$ExpectedSHA256,$Validate)
+    if ((Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash -ne $ExpectedSHA256) { throw 'Synthetic lost update.' }
+    $document = [Text.Encoding]::UTF8.GetString($Bytes) | ConvertFrom-Json
+    if ($Validate) { & $Validate $document }
+    [IO.File]::WriteAllBytes($Path, $Bytes)
+    $script:configWrites++
+}
+$tempDir = Join-Path $PSScriptRoot ('.device-system-config-test-' + [guid]::NewGuid().ToString('N'))
+$configPath = Join-Path $tempDir 'SmartInventory\M365Inventory\IntuneInventory\Devices\SmartM365-Device-System-Inventory.local.json.txt'
+try {
+    [void][IO.Directory]::CreateDirectory((Split-Path $configPath -Parent))
+    [IO.File]::WriteAllText($configPath, '{"Keep":"value"}', [Text.UTF8Encoding]::new($false))
+    Assert ((Get-DeviceSystemCollectorConfigPath -Root $tempDir) -eq $configPath) 'The creator did not select the collector JSON text file under ConfigRoot.'
+    Set-DeviceSystemCollectorPackageId -Path $configPath -PackageId $existingId
+    $saved = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
+    Assert ($saved.DeviceHealthScriptId -eq $existingId -and $saved.Keep -eq 'value') 'Package ID was not saved in the collector JSON text file.'
+    Assert ((Get-ConfiguredDeviceHealthScriptId -Path $configPath) -eq $existingId) 'Collector package ID read-back failed.'
+    $beforeHash = (Get-FileHash -LiteralPath $configPath -Algorithm SHA256).Hash
+    Set-DeviceSystemCollectorPackageId -Path $configPath -PackageId $existingId
+    Assert ((Get-FileHash -LiteralPath $configPath -Algorithm SHA256).Hash -eq $beforeHash -and $script:configWrites -eq 1) 'Registering the same package changed the configuration.'
+    $failed = $false
+    try { Set-DeviceSystemCollectorPackageId -Path $configPath -PackageId '00000000-0000-0000-0000-000000000444' } catch { $failed = $true }
+    Assert ($failed -and (Get-FileHash -LiteralPath $configPath -Algorithm SHA256).Hash -eq $beforeHash) 'A different collector package ID was overwritten.'
+}
+finally {
+    $resolvedTempDir = [IO.Path]::GetFullPath($tempDir)
+    $resolvedTempRoot = [IO.Path]::GetFullPath($PSScriptRoot).TrimEnd('\') + '\'
+    if ($resolvedTempDir.StartsWith($resolvedTempRoot, [StringComparison]::OrdinalIgnoreCase) -and
+        [IO.Path]::GetFileName($resolvedTempDir) -like '.device-system-config-test-*') {
+        [IO.Directory]::Delete($resolvedTempDir, $true)
+    }
+}
+
 $source = Get-Content -LiteralPath $creatorPath -Raw
 Assert ($source -match 'Connect-MgGraph -TenantId \$tenantId -Scopes' -and $source -match 'DeviceManagementScripts.ReadWrite.All') 'Delegated interactive authentication was not requested.'
 Assert ($source -match 'Invoke-MgGraphRequest -Method POST -Uri \$GraphRoot' -and $source -notmatch 'Invoke-MgGraphRequest -Method POST -Uri .*\/assign') 'The creator calls an assignment action.'
 Assert ($source -match '\$GraphRoot/\$createdId/assignments' -and $source -match '\$assignments.Count -ne 0') 'Post-creation zero-assignment verification is missing.'
+Assert ($source -match 'Set-DeviceSystemCollectorPackageId -Path \$collectorConfigPath -PackageId \$packageId') 'Package creation does not register the collector ID.'
 $launcher = Get-Content -LiteralPath $launcherPath -Raw
 Assert ($launcher -match 'SmartM365-Create-DeviceSystemRemediation.ps1' -and $launcher -match '-Tenant prod') 'The production launcher does not target the creator.'
 $launcherScript = [regex]::Match($launcher, 'set "SCRIPT=%~dp0([^\"]+)"').Groups[1].Value
@@ -111,8 +170,8 @@ Assert ([IO.File]::Exists([IO.Path]::GetFullPath((Join-Path (Split-Path $launche
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCpltAYeRghAT67
-# MVXt/6/mCzFtwjQisYRVBqowxPJIcKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCByjAlrnYcE2n83
+# NsG3zQS5lk3UHpvYuSaWyIrPAr7jHaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -245,31 +304,31 @@ Assert ([IO.File]::Exists([IO.Path]::GetFullPath((Join-Path (Split-Path $launche
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIKrlsvLnFF5N32r8qOoV4/mobuMIMcl+4DVXRFdmQnPcMA0GCSqG
-# SIb3DQEBAQUABIIBgIKQeMK9YOi8VamtwNxIedx8p/nYGmYERB/XMNWW/NpL272V
-# +O9iYNIbnX2iZWAp78iYw7MQ+0A6btvdYL022uHXgacd1AQ3ivKh33namiDRxpc1
-# rzcFZhl80pwX+udCYXSKb9zFj/sal85FhB4J+TxNHmb/1yAQPXB3vJjT+8M5pX+a
-# UR0NuwamRcWSdb3d2hWu+FNjfiC5N095gbqktnHhT94xFwKTkm1+q75Ua8VN1yck
-# qB/voeM2zrrRgBhedr+I2DOnVPgtKVsQRFEy9OzTUD9k8Lkez3Wk2bpwZINRoBj+
-# slWCZjtL6QGFbkZRFFZlPMNG70IKQ9dciEwsEyLEFB9rJAXSG3VFb52hXpISYccc
-# i47pgrd2vrmVlKoGgtBdOfdMRj6R9zET4AoXbs85rRYJLwSvi4n+aFXOJquXCQDA
-# tO1vuCUZhvl17zNgp6iu+bwVe4F78P+XmDjzmxWmazX66cG8UvUEBLvk5Ile0A9t
-# TpwTMeAhU14mJQ2GyaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIDQJI9VPtGqoEn/dj0kTKP0mrXrNIkMx/aQl2vvAiwelMA0GCSqG
+# SIb3DQEBAQUABIIBgEao+rUsFmplOuRyuBBoaiTSCUE1T2qrwqjX/phCwmyXtNUQ
+# sNxOS6uPmyKxvZ6LuyophYgDeJe8iOWzgoAO27RneJoVgAUmayME1B2nXWHKIkTk
+# c2HeI9c5oDAxbmZlQReinmgADDM96Nc1I4qa5iRTgOKV+qqUXYQnhzc0bwaDUcmB
+# Ll+hxnY34uuDo/wKmd0UNjYGLP9VkUrjlzI25MGzmyGo+DBY2lmPmdvMV0z/jgeB
+# GLTtdNeCSr8bGPfZsftA/QnUMFMBbpS1csmONUiHXyUPQ3XQ198dEKdnwrKk7BMp
+# nEBwqohcALCtBEBef7ijIPbuoAQfVV515k+eZeNUH/xZGkfOPDLGI3RZa2zJMzT9
+# v3jTHXOGN1vrpW2psw3KZaPNEt9JfBlt4gtuTDNPCSEEDYDelZa5pG1MTVwgElED
+# HUSp4GUILPvrA/71RAFoMgA+PSlpSmPJ1gp5sNYimfRfI22AZT46DPGyxl+I3T3i
+# w+8XbWD6w5HMm6YJgaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTMxMzIz
-# MzZaMC8GCSqGSIb3DQEJBDEiBCAqOrP3WFp9K/zS5pA4UpOjf80Edic4Yv7qVK6T
-# jK2MqzANBgkqhkiG9w0BAQEFAASCAgBN5DbJz5c3R774kbQvZoiv1KNTVDhG+IeL
-# G2Q3exjzHVeDIdyZwPUMW7QWWEq7VIkwKoMbUJDhswNep+M4mfCPpji+w3GItAtS
-# N3spcvlkrUAdvRl+1mOsKHPIixaWuOPtUtIbzrCf6X1a751Hz/QxpmFcS2yctJXp
-# NtV72mMwAnmNcAMrjt/Wcs4aoGCoITVRzBCKdLS1AWCx5nHDYozq86j6bxBufW91
-# W2I5OKZy9aHowqxaBX5rzSA76Amu/KlLCrjuFeBh8Qpfi/wNieQF1ysxfqfgKtWY
-# kyPdAKrkS+BucRNZoeQx9AXASCOXLEzUkjp8/VZhK56sFLZLoA+y5Ct7gut3lUP8
-# SQuYbfJ7US9abK7mG7g/L1aGo4MSQQ/aPcn6W2owJkr/DEtA+Nbw2DaGKXW4aPl7
-# Zy7odDqVbhwHlarJVrNBXy+0l34UEtCCX1GGXSCwXMRFGKlzaHG8BszedhpH8NQP
-# qhrfZ+zAzPmYRcvaXO0aBXAsaiOFTT4WLwSo1aAi4b9xlGEVyco/38TH5b4LlZOt
-# 1+LtssEi0w1zhVYGlzTGUlaAKB97NYR/T+r73fVdrxAkUuxnqWMSxtUtTYQSsTE4
-# 1x1B5bEqvoMfbBUOrSnVzzPWn3FQbFddjnfoF0Ld5wXDW5W7P816wT54vwqr2cIP
-# Fobr4boDbg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTMxNDEx
+# MjVaMC8GCSqGSIb3DQEJBDEiBCCC3W5Y4Gl6dgbDrhvz/erA3ZPvtYs0AIV49Tki
+# k/HfDTANBgkqhkiG9w0BAQEFAASCAgA9XivZ/hqCyqOnsrUeex5PeeEFhmmJF4+p
+# 1Q4hLNAAev1/8qed3a5vRveUl4e4Lcfb82XzXhqQ11Pt9V76ZDKd5Ui0QDk5FYES
+# aEwDHzdMT2agCzaSIFPhUwDjKD50Ngq6XLis6s1PBY8Z7ZWO/UMnMhATDqxJaYF/
+# DXc/eotC4AR9FzJhovx8VJD6qy8ex55GF0S63T0lPr98GCOYezNucWMQ+uzcnhTB
+# Xs3hT8KwSmoegSD4juJO5Zy8+HcTGf9xGNiO64oLGwByXFtiB1vCc8697DdWs0KU
+# sGn8xLwF3Uk3MpU/jd1gc3QCyUDFrj8vo3zYNYPRhmk1YEiA6MCDO0IOWZshfE+2
+# 7/qqyL4s094JpKWr8LXaeHBNGPc4FAe8hfFiZs8GlyuZMTbUXv1Zm27D0DZZbWmd
+# BgbK+aLsfuugoFUdTZ2Ds1OK6V7XEWLTfdePIvVdo0fPeruyd41mr5mOsxgBnHgt
+# Ma1GsSPvIMnteDVhK/86yQi3h5r/usuCyJAa5sfFoLISdZmzg5hR5kENYd4CywsJ
+# t7omMdeTum8fERFJ5AmqPsb9aJehj6U4Br7pnL42UdncEC6ZtRDJMHQt2FqyZIpn
+# IfAp092PmZbVTJbxiRDgDInAZiJxEZZJD9IKw3GdaQaomigsp3wTqamW9TQMh0DT
+# Ha8cNLsV9A==
 # SIG # End signature block

@@ -6,7 +6,8 @@
 .DESCRIPTION
     Uses delegated interactive Microsoft Graph authentication and the selected
     SmartM365 tenant profile. Creates the package without any assignment or run
-    schedule. A second run refuses to overwrite an existing package.
+    schedule, then records its ID in the collector's local configuration.
+    Create mode refuses to overwrite an existing package.
 
 .PARAMETER Tenant
     SmartM365 tenant profile key. Defaults to test; use prod explicitly for production.
@@ -15,15 +16,19 @@
     Name of the new Intune Remediation package.
 
 .PARAMETER ConfigRoot
-    SmartM365 root containing the local tenant profile. Useful when running
-    this script from an isolated Git worktree on the same machine.
+    SmartM365 root containing the local tenant profile and Device System
+    collector configuration. Use the operational mirror's root on its host.
+
+.PARAMETER ExistingDeviceHealthScriptId
+    Verify an already-created package and register its ID in the collector's
+    local configuration without creating or changing the Intune package.
 
 .PARAMETER EnforceSignatureCheck
     Require trusted Authenticode signatures on assigned devices. The bundled
     detection file is signed, but the signer must also be trusted by each device.
 
 .NOTES
-    Version: 1.0.0
+    Version: 1.1.0
     Delegated Graph permission: DeviceManagementScripts.ReadWrite.All.
 #>
 [CmdletBinding()]
@@ -31,6 +36,8 @@ param(
     [string]$Tenant = 'test',
     [ValidateNotNullOrEmpty()][string]$DisplayName = 'SmartM365 - Device System Inventory',
     [string]$ConfigRoot = '',
+    [ValidatePattern('^[0-9a-fA-F]{8}(-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}$')]
+    [string]$ExistingDeviceHealthScriptId = '',
     [switch]$EnforceSignatureCheck
 )
 
@@ -134,6 +141,73 @@ function Invoke-CreateDeviceSystemPackage {
     return $createdId
 }
 
+function Get-DeviceSystemCollectorConfigPath {
+    param([Parameter(Mandatory)][string]$Root)
+    $path = Join-Path $Root 'SmartInventory\M365Inventory\IntuneInventory\Devices\SmartM365-Device-System-Inventory.local.json'
+    $path = Resolve-SmartM365JsonConfigurationPath -Path $path
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+        Initialize-SmartM365LocalJsonFromTemplate -Path $path -ConfigDescription 'Device System collector configuration' | Out-Null
+    }
+    return $path
+}
+
+function Get-ConfiguredDeviceHealthScriptId {
+    param([Parameter(Mandatory)][string]$Path)
+    $read = Read-SmartM365JsonDocument -Path $Path -Validate {
+        param($document)
+        if ($document -isnot [pscustomobject]) { throw 'Device System collector configuration must be a JSON object.' }
+    }
+    return [string](Get-GraphProperty -InputObject $read.Document -Name 'DeviceHealthScriptId')
+}
+
+function Set-DeviceSystemCollectorPackageId {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$PackageId
+    )
+    $read = Read-SmartM365JsonDocument -Path $Path -Validate {
+        param($document)
+        if ($document -isnot [pscustomobject]) { throw 'Device System collector configuration must be a JSON object.' }
+    }
+    $config = $read.Document
+    $configuredId = [string](Get-GraphProperty -InputObject $config -Name 'DeviceHealthScriptId')
+    if ($configuredId -and $configuredId -ine $PackageId) {
+        throw "The Device System collector already references a different remediation ID ($configuredId). No configuration was changed."
+    }
+    if ($configuredId -ieq $PackageId) {
+        Write-Step "Collector configuration already references package $PackageId."
+        return
+    }
+    if ($config.PSObject.Properties['DeviceHealthScriptId']) {
+        $config.DeviceHealthScriptId = $PackageId
+    } else {
+        $config | Add-Member -NotePropertyName DeviceHealthScriptId -NotePropertyValue $PackageId
+    }
+    $bytes = [Text.UTF8Encoding]::new($false).GetBytes(($config | ConvertTo-Json -Depth 100) + [Environment]::NewLine)
+    Write-SmartM365JsonBytesAtomically -Path $read.Path -Bytes $bytes -ExpectedSHA256 $read.SHA256 -Validate {
+        param($document)
+        if ($document -isnot [pscustomobject]) { throw 'Device System collector configuration must remain a JSON object.' }
+    } | Out-Null
+    $verifiedId = Get-ConfiguredDeviceHealthScriptId -Path $read.Path
+    if ($verifiedId -ine $PackageId) { throw 'Device System collector configuration read-back did not match the package ID.' }
+    Write-Step "Saved DeviceHealthScriptId to $($read.Path)."
+}
+
+function Confirm-ExistingDeviceSystemPackage {
+    param(
+        [Parameter(Mandatory)][string]$GraphRoot,
+        [Parameter(Mandatory)][string]$PackageId,
+        [Parameter(Mandatory)][string]$Name
+    )
+    $package = Invoke-MgGraphRequest -Method GET -Uri "$GraphRoot/$PackageId" -ErrorAction Stop
+    if ([string](Get-GraphProperty -InputObject $package -Name 'id') -ine $PackageId -or
+        [string](Get-GraphProperty -InputObject $package -Name 'displayName') -cne $Name -or
+        [string](Get-GraphProperty -InputObject $package -Name 'publisher') -cne 'SmartM365 by WorkplaceCloudHub') {
+        throw 'The existing remediation does not match the requested Device System package. No configuration was changed.'
+    }
+    Write-Step "Verified existing Device System package $PackageId."
+}
+
 try {
     $configRootPath = if ($ConfigRoot) { [IO.Path]::GetFullPath($ConfigRoot) } else {
         [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..\..\..'))
@@ -147,7 +221,15 @@ try {
         throw "Tenant profile '$Tenant' has no valid TenantId."
     }
 
-    $body = Get-DeviceSystemPackageBody -ScriptPath $detectionPath -Name $DisplayName.Trim() -CheckSignature ([bool]$EnforceSignatureCheck)
+    $collectorConfigPath = Get-DeviceSystemCollectorConfigPath -Root $configRootPath
+    $configuredId = Get-ConfiguredDeviceHealthScriptId -Path $collectorConfigPath
+    if ($configuredId -and $configuredId -ine $ExistingDeviceHealthScriptId) {
+        throw "The Device System collector already references remediation $configuredId. No package was created or changed."
+    }
+
+    if (-not $ExistingDeviceHealthScriptId) {
+        $body = Get-DeviceSystemPackageBody -ScriptPath $detectionPath -Name $DisplayName.Trim() -CheckSignature ([bool]$EnforceSignatureCheck)
+    }
     Import-Module Microsoft.Graph.Authentication -ErrorAction Stop
     if (Get-MgContext) { Disconnect-MgGraph -ErrorAction Stop | Out-Null }
     Write-Step "Connecting interactively to tenant profile '$Tenant' ($tenantId)."
@@ -160,7 +242,18 @@ try {
     }
     Write-Step "Authenticated as $($context.Account)."
 
-    $createdId = Invoke-CreateDeviceSystemPackage -Body $body -GraphRoot $graphRoot
+    if ($ExistingDeviceHealthScriptId) {
+        Confirm-ExistingDeviceSystemPackage -GraphRoot $graphRoot -PackageId $ExistingDeviceHealthScriptId -Name $DisplayName.Trim()
+        $packageId = $ExistingDeviceHealthScriptId
+    } else {
+        $packageId = Invoke-CreateDeviceSystemPackage -Body $body -GraphRoot $graphRoot
+    }
+    try {
+        Set-DeviceSystemCollectorPackageId -Path $collectorConfigPath -PackageId $packageId
+    }
+    catch {
+        throw "Package $packageId exists, but its ID was not saved to the Device System collector configuration: $($_.Exception.Message)"
+    }
     $completed = $true
 }
 finally {
@@ -176,8 +269,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBgdij4YS1Fj/V/
-# y2UxvWUhUGY+uc7tFJf7lLE0dGdzc6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCNF5aIloO+9KBW
+# JU9Z7lZ9ACYUwZ7yJbww3ftCk2UPs6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -310,31 +403,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEICLGbkw9zelfL01MZKgL4jk53ILaISKqheHOytP1lA9uMA0GCSqG
-# SIb3DQEBAQUABIIBgIUzEG7REluBiAgHmYgkdsSI3RcGkDN0+W9fohsfW7ewij/R
-# VfsuRACj3sAGzlGkvWVjUO0gqwVmmK4xrE3CW6uiyfHPKk8j51HtGIf9Xc8GVQfz
-# l3xL89YvzihZJ+GUK7YixrLZQduTAdU2pJdmqIGbFS6STJVcwvP52dw41yvikguw
-# XiTKZISI8B03ChSSHrm1rX9VGxH49urleUCZ2NRf/lzwO0zGfXRkC7T+n68/uUhq
-# 5IrfbK9LouFSmHLB1qq+UxsSt5NP6dukUzvfMU67QQgo7fkfZtjeJCdBtH3wFy+G
-# njhJ1NWJvKEm8NFV+8u9zZMNM196i9YKqfQHYcOwlM+NLXtROrdBxhPWanbuIz9V
-# ShdZwwor5FZDEGzD+EgZmeGaS4vIutA7irFW2JR7PVaFBVBKUhJzNwffDQEMqvCu
-# nlcvWjyhiIck/YeEVdvAFsuOaoWvy8rgE+ifpRKPwotiB7I4b12bR9sgCzqXxLtM
-# hZ1FRF2eVSkrGZSRdaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIK2Q74oaPgHN/dw4OXq+7lWSuqDDmOBddQ+N5cN9/zL/MA0GCSqG
+# SIb3DQEBAQUABIIBgFJuOo6pi0D+NK9zJf3ceJkFGS8HosEHVk3g8+8XD8IBPc++
+# s54euPZnD4d6rvFHd0Yj+8jHZOodUA+HOBfnk89Ugbt8mGG8o2UnLGtIrMONOP4O
+# 4reogzXYWWBHRwleiq84FEBgK0qvRiDyKgXHn6XnufDLwolUDT6PqXXcjJVp+uvu
+# KJ1UfHQusTpdsWkO0DNFhwoNGkOTgFNSon5/UXP9U5w0tAF9LPPDImpqNj57MRRw
+# cnUHTdF9aacLnvzj+qrfutws/SdSx8ZkLtNtbv1/kKDGTexCBV7Vz77T36WSxmM6
+# vid9Dj1jMG5czqvyv3bEWxWDWZZU5h2kRdfg2EX8R1avAJOPVnoD/kkHKBDKcdaj
+# hBZ2Uoc9Kf7BtvWvbYIj3uEO1xOSERUoXa9Q/DMITdHIkb/EmGfpB+GlO7pu8ijm
+# NK/4XL0dUEvlRJ/A+E2DJ2XrvQYGfgx0qHOMJuDPHVwDYVuY9bZkZy407mSHd7Mj
+# aJ9X0qbdn/eNOcbZ8KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTMxMzIz
-# MzZaMC8GCSqGSIb3DQEJBDEiBCChCopPCuKx9GwTGibhNY+8L/aX/ZnquSExxlor
-# ynHrGjANBgkqhkiG9w0BAQEFAASCAgCDI/eJiIU92OMJTgz+OjSMynXP8lDsMiTy
-# DHjchbwfuW1qavbMUpKH9w4gAahUHNT6Jdc7i6z05l3nZByIB0hQ9OszfthXRKxf
-# OcW4nP4HO9te17YlCwIQm7tqSknThENDYMNSSe1wPPx9y8IonmfqkIeAcYClXjV5
-# 9pr/5+XTA82YfBtQ8a1d+dws2B/4U3IxzV8GKv/iglStHLqJe2GWCblgoBRtai5H
-# MCcjZFUCdRhoTCwF8fc+Xa5ehagBN7A9jqQb9POlgAVZW032F+BYGOvDFPNg40eu
-# SuAzBqCn8+4+YClKdKNIBfCGosS4YQcBXEvl+iSFfWEHaeFSOmI7jhb9A6LPvH2d
-# WWz6T3c/89DmYctKFFyjuMyasAeqYFnYnhNxudVoebj443ria9MHByh710IPe1xl
-# 4jb5KgR8HdljFaKzzMNE1GTpbz850GXgRvO9c9aoCcJcBMaDmQYKfYEGWSTjLRgJ
-# Bn5BeupuqvM0BsxquNYim9G0GVRelW36vrfOoxtW8H4khae5tnLArGHrECOECvaT
-# 4zf+dhK2GUXCNa+rlua+53yMaPupiYUQDpA1KkMF+Tq2SruiCBypw5N+Gko9BbX/
-# L7JE4QsVuvmKUDhfKDTIEv0J1vpPVDX2FYMgh4Uwo7TyBpw8NNBP1AXVY/wLIiQS
-# PQS/12DXSQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTMxNDEy
+# MTJaMC8GCSqGSIb3DQEJBDEiBCD8gRB89NOb19TCRfnJ5nywsRupu2VALOpZKfzK
+# wwJ8bTANBgkqhkiG9w0BAQEFAASCAgB28cI+UUZqZeKB45TlRkIhZ5UpPbt9+2rz
+# ixJWix1ta0+kV6Z+E/mPtXrH3jASusLDgVZNSVM1urj/LQDS4tmJS4jspImsXK5h
+# aFe08eehzmCK3F7Vlt/6FSkqIN4BRBM2WT1XtdVsBBUQuVuEkSSYSR/6/xjYIAb6
+# f9TfOiaoHA6JB3QdxaPDXpdFgmWvG5j0olKrusPz6DT0by4EIDiql4GPMJ2pjkxZ
+# HHLVt+cvaCaBoKALECJXqQBnab9dOzEvdsKw2sjyFG0ZywLjky+d4dvZxccyf20l
+# EfhFE+ix7W2CMExG6ccNGP3k7lECy9cCCpfXWkDY7jaJPZ3YkGNuQHCfqp/VIlIU
+# zCrTsiZBRpqJI9y6cIzFrhtl5EdPME4uVUNVnuYN2NpaKIGbvSRTSRQ2NNf6A9Ut
+# J5doqoQbwgKS5Jlc/eRzKVuIg2FIo/LQrVkeaR+mYzwnvBTjsTpuERTqt5yD5D1+
+# bBdxx4icDJ2W2p8tsogf+KB4GnYL2Qd6XlzPIMATAG1b/wwL5+nw6iEYrc4E1Ujj
+# baeEqU+ciPwIXdSAB8ULUBPSAhg5NDW0A5yfWmS+Rx87g3sN4woTgBJWgG84v3mF
+# oVDpSPFVnc+hi+0kQsHyMe4ZwLAZAi0JzQt0ddZ5OjVWM3lLjYjVJB8jWJ3+PGTY
+# w6g9qHRpWQ==
 # SIG # End signature block
