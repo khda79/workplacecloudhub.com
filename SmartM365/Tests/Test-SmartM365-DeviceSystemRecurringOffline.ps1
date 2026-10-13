@@ -69,7 +69,20 @@ Assert (-not (Test-DeviceSystemRecurringPayload ($completePayload -replace '\|De
 $asOf = [datetimeoffset]'2026-10-13T12:00:00Z'
 Assert ((Get-DeviceSystemLocalFreshness -ObservationUtc '2026-10-13T10:00:00Z' -IsRecurring $true -HasOutput $true -DetectionState success -AsOfUtc $asOf) -eq 'Fresh') 'Fresh recurring evidence was rejected.'
 Assert ((Get-DeviceSystemLocalFreshness -ObservationUtc '2026-10-01T10:00:00Z' -IsRecurring $true -HasOutput $true -DetectionState success -AsOfUtc $asOf) -eq 'Stale') 'Stale recurring evidence was accepted.'
-Assert ((Get-DeviceSystemLocalFreshness -ObservationUtc '2026-10-13T10:00:00Z' -IsRecurring $true -HasOutput $true -DetectionState scriptError -AsOfUtc $asOf) -eq 'Error') 'A failed run was accepted.'
+foreach ($case in @(@('pending','Pending'),@('notApplicable','NotApplicable'),@('unknown','Unknown'),
+    @('unknownFutureValue','Unknown'),@('future-state','Unknown'),@('fail','Failed'),@('scriptError','ScriptError'))) {
+    foreach ($hasOutput in @($false,$true)) {
+        $state=Get-DeviceSystemLocalFreshness -ObservationUtc '2026-10-13T10:00:00Z' -IsRecurring $true -HasOutput $hasOutput -DetectionState $case[0] -AsOfUtc $asOf
+        Assert ($state -eq $case[1]) "Detection state $($case[0]) was misclassified."
+    }
+}
+Assert ((Get-DeviceSystemLocalFreshness -ObservationUtc '2026-10-13T10:00:00Z' -IsRecurring $true -HasOutput $true -DetectionState ' PENDING ' -AsOfUtc $asOf) -eq 'Pending') 'Case or whitespace altered pending classification.'
+Assert ((Get-DeviceSystemLocalFreshness -ObservationUtc '' -IsRecurring $true -HasOutput $true -DetectionState '' -AsOfUtc $asOf) -eq 'Unknown') 'Output without a detection verdict was qualified.'
+Assert ((Get-DeviceSystemLocalFreshness -ObservationUtc '' -IsRecurring $true -HasOutput $false -DetectionState success -AsOfUtc $asOf) -eq 'NotCollected') 'Success without output became usable evidence.'
+Assert ((Get-DeviceSystemLocalFreshness -ObservationUtc '' -IsRecurring $true -HasOutput $true -DetectionState success -AsOfUtc $asOf) -eq 'InvalidTimestamp') 'Success without an observation time became fresh.'
+Assert ((Get-DeviceSystemLocalFreshness -ObservationUtc '2026-10-13T13:00:00Z' -IsRecurring $true -HasOutput $true -DetectionState success -AsOfUtc $asOf) -eq 'FutureObservation') 'A future successful observation became fresh.'
+$collectorSource=Get-Content -LiteralPath $collectorPath -Raw
+Assert ($collectorSource -match '(?m)^\.VERSION\s*\r?\n\s+2\.16' -and $collectorSource -match 'Version : 2\.16' -and $collectorSource -match '\$ScriptVersion = "2\.16"') 'Collector version metadata disagrees.'
 Assert ((Get-DeviceSystemLocalFreshness -ObservationUtc '2026-10-13T10:00:00Z' -IsRecurring $true -HasOutput $true -DetectionState success -PayloadValid $false -AsOfUtc $asOf) -eq 'InvalidOutput') 'A truncated output was accepted.'
 Assert ((Get-DeviceSystemLocalFreshness -ObservationUtc '' -IsRecurring $true -HasOutput $false -DetectionState '' -AsOfUtc $asOf) -eq 'NotCollected') 'Missing output was accepted.'
 Assert ((Get-DeviceSystemLocalFreshness -ObservationUtc '2026-10-13T10:00:00Z' -IsRecurring $false -HasOutput $true -DetectionState '' -AsOfUtc $asOf) -eq 'LegacySnapshot') 'Legacy output was mislabelled recurring.'
@@ -130,8 +143,8 @@ Assert $failed 'An empty recurring collection could replace the existing CSV.'
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBTIPdgbLB5DDKM
-# W9mWCAol97ZvJtU7J6C938cx1XT6+qCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAmFKUk/LDjlzZ3
+# tekyPP8aQkEgXQRY7njHrCtwZT2fy6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -264,31 +277,31 @@ Assert $failed 'An empty recurring collection could replace the existing CSV.'
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIDLRR4AKkFxxx4lO2iDe6ER1p0QtdH1wAF4k2KXrjEENMA0GCSqG
-# SIb3DQEBAQUABIIBgJc2Clu+RGMndFH3exN7e+qNFEqYj9Q/Dh3Ox6KsO9Ap7b/7
-# 0OZ691s5krwy/Dc2pENj//8EOCHIulio1FvVtTKfnh9AYRV6p7fO3YXokzl/XSMC
-# i5dqwqNLDI2/1rLPklR2ZJr/Xd2F9HcVEf61Z2p+mtZhZolKE2kUdSnG8MKQlmgH
-# X0gpQ/3oGHxRrczxQ9JcJXgYkozhAlpxI3x2Wd6F7YpC7tJIjxUj5sx5Vatq4BKJ
-# LA+8Mi7lV/ZwwUGZad9VusG3134CcAh0UecZZXl1etGzVT/3V03f7UH82DNzoU+l
-# 0LqgSRo8hYBCryr5/bkfAQG7c1PmZdYl3U99QkZBmRVtyIK3ausy5r6w8F7w/+2R
-# ChNJOtLp9MRLMVup8nZbu9y9+YizzCmu/q/GXjp6dpcDJmJpSRkh0+G4Xv2fVZi0
-# tU3sR0sFSk4r4Nj28Pybn9Utl7+F5ehtkqGfLBAJZUz+Cp69FWlUljlkTFam2hWZ
-# 17dxOwFmlUrOhWujRqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIAA0tuVF0tZ/JiwcJkVd7T87ENdCtBAbAYIC+ZZF0YWqMA0GCSqG
+# SIb3DQEBAQUABIIBgDu+NDBmuhla6SkbbMttjnyCqT3+uduECzr6OWpp0/fXehJX
+# rOe9LNP3ZoUO5CWZngTaIg5QIJZk2PntqLYFZQb9Ko4h23Idqx+FOZHFwtQjwpZ4
+# 5RPzXwCW8o/nNMVTPoiov75dMo1Rcq13Atwv2xjqk8Y50LFNCmN5cKrrFNE9JsXm
+# mGzC2By+gbOgmMAwRmfYoUyhRs/BVZE0RW3yzaUgVAkBwWLDKySvcVzpt/r78XAe
+# SZQr2zJmui4qqcarN4/5yCecXMYOZs0YYa8t+mp4HdpTcKT/cX2T1zhU5X+P7naz
+# EZ0JqDVsBjpMgQz0ZwewOJaH36iOQGoffDa7eXN8coO1SRkwWtAWee34dkcwgKA3
+# HIrm4QG0S2DsAnc2M1pz2B4aaULcKBnQ/CHtE2jGtPoqpDwV5BpFdyev+DHrtvuO
+# JWYo29Aemndrrfrihjr1PFPNTv0q8xDtLo0V00HFtx2eR8Y4TGFwBlzYgZ0G+pHr
+# aj0NGPB7J5Am7c85v6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTMxNTQy
-# MTRaMC8GCSqGSIb3DQEJBDEiBCAc8wY6KzuHDejFGmhW37rMxq3wZ5khYSmfiLn0
-# xV7eVzANBgkqhkiG9w0BAQEFAASCAgAAN0Jedof7t48U1oCpjRxx0kQbiLLRtNku
-# UUzPhHgU9utvmRYprcPpmO6gdE0vwqt35JzIC3ylxJ2zQsaKdi7R9PZaOOmxBMcL
-# 0gDPNWgvQkH7wrbQUxnCify6soxoauLoo8niqIh9C9mZJStHmesbBSpNJHdXaESh
-# +iUW12ApGVjomjzu80/IxcyowGCZCWxGao9jLj99Yzadj5r/X1pKxC6v++6kqems
-# 6iWo86K2ctEafHJAlCjkCTsYg25j/Xo/gohMMSKwC5kV2TIINDiwQu5oZaA9W/EO
-# 0Mb50bKHVjgqpIqEjFXd06n2sTnO81zky/91PNDrZE7qnY9ddHRmKKG9h+4Rm+0S
-# 9E1NsWMhVmvoMfY12aXeyUMaiWaEG5mNWvgOOdnhNWP4Yci27qjdJnuo8kyAnp5W
-# 4JBmw9+s/KU710RvPop+lwfwQIKY62WzYYzhFkifiU1kD/QmGz3aEZwaznh1mf5A
-# wUJu1kv/cnH88oo/VaOom1asxdvBGG7rw119dsKIGjQCLgV+HEMhHyWbCpBNNNO8
-# eq92MvRlqar/DOKSSnpcIH5IeHG8N4ev29m8ON1y7cqKP88MpdUGw3SirfOl+lgT
-# 7EnG4MRj08FPc5JZzQVMiGEhFi5+scmitWP3wtwRh6A476chHdo9SoBWG6Vu29Cb
-# +FPUmeh+Ng==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTMxNzMx
+# MzhaMC8GCSqGSIb3DQEJBDEiBCA2K+gmRGSmI6Bw0eK3oGinQ4kVtyBc2xPAYVDt
+# CFZ08jANBgkqhkiG9w0BAQEFAASCAgCP2ugy2PS/GT5MQMg6mdKBFjZcx0I3FSyM
+# rHhqZvvE2lbMc+XL1IhxOJmnsOFEaPyBwi0kudu/D3E1Kc1q/XDHAWsjtFC/fbKm
+# CDRxLuByC3ol+YRyBi5sxY/gV44jjEf93noKNCeJ1YNIfuwX8y3pqsr6o10xr9ox
+# hJ1LE8NmRu1NXsuES36/u485o65PSfve2CytcaWCbvMth4CRD4vvipQPhFy1pkdS
+# 8dZvaPW2wp7KjZq4RGlWwopw17xH3OCQ0JWT2shSTlNxmaZ7zjfyESR0CnqrU+LA
+# q67kToHGA4WFIb5QcFaL3Yx4ENqW0ZhyCh5Z94ykmXzjKlsVYIdC1P9XhObuPhwH
+# vJY5+p+TVN3VrDN3EHJnusiG3TO9Ii4M+L79iY0eQLkOId7Iw4aJk2WcRi9NIaC6
+# wE7DDiw0H291yb6bG2fO/YBz0tHOXqRSpaMzbQwmRL2q6wH1AJhuOgCsu5zEnQR0
+# vXmHGvm3OD8lvcMNGUC4kbseeJf6jYHM3eKMX2ssfs6cgNhmP5Wb6lSJ/kSajr4c
+# rDYnT1R3tObA3c9qlPEzja2ZzQUrP/HUzS7nAzb+kLbeE0sFsxRDs6g13rTzCb45
+# wYkXyuikvK0E8YioNANsfX0kLndjZBE+FsWZ1lYb1U2lsXUErNnBaxQjyJTcOeAh
+# 8Xynoe+fXg==
 # SIG # End signature block

@@ -21,7 +21,7 @@ Assert-Test ($activity.Utc -eq [datetimeoffset]'2026-10-11T09:00:00Z') 'Qualifie
 $other=New-ConsoleRow 'device-two';$other.'Last Console Logon UTC'='2026-10-12T09:00:00Z'
 $activity=Get-ConsoleActivityForAdUser -Index (Build -Rows @((New-ConsoleRow),$other)) -AdRow $ad
 Assert-Test ($activity.DeviceCount -eq 2 -and $activity.Utc.Day -eq 12) 'Latest activity across devices was not selected.'
-foreach($state in @('NotCollected','Stale','Error','Unknown','InvalidOutput')) {
+foreach($state in @('NotCollected','Stale','Error','Unknown','Pending','NotApplicable','Failed','ScriptError','InvalidOutput','InvalidTimestamp','FutureObservation')) {
     $row=New-ConsoleRow;$row.'Local Data Freshness'=$state
     Assert-Test ((Build -Rows @($row)).ByAdSid.Count -eq 0) 'Unavailable local collection became activity.'
 }
@@ -104,8 +104,8 @@ Assert-Test ($provenance.WorkforceActivity.DefinitionVersion -eq 'AD-M365-Consol
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBW4tg9ABASZcIq
-# bkApihowtcWLXLdDMfbWAScNjRR5M6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD0EcLIN97Gi9GJ
+# M4NyQQWw0qRWDXUlCi24ehy5h8LjhKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -238,31 +238,31 @@ Assert-Test ($provenance.WorkforceActivity.DefinitionVersion -eq 'AD-M365-Consol
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIOS8OB/0231JDOBeSQZWQnrUlaIaejEGQWIJXr/SbAOaMA0GCSqG
-# SIb3DQEBAQUABIIBgB4IB6fy/O/q5VR3w3+qkSFiRykRnf5MSzJzsBXXnnTbNDqE
-# ly5rK++5ASkaOXSL7yHwF/9b6g7Ei7bA4iMRm5+d//Eg4xCWzugWcRYQLS8g422y
-# +v/RS/WJRs+mqfnR01ph+4u+LbWdMr/azdTcDlcrCwhTlzHMAT+hxpjavpHsvVgz
-# IpAmLVCsmV4qvZNlGGVS/90g0DRn3fiH8ha1Ld84p/U1/CyC8LTrJ/dnfR588Gpt
-# h9m0XpbL3qL8yHFjhfX8QPTBdur6IWCw/YYcvpWBFrPjICaPqHEpO2vB3xGtq0Rc
-# RCC9DuJGJ36wf8UlbbxdKDncLGjR3X7ckQXza2a5LITKfX/mRCmsZLNSkcQbiniU
-# W20yjdAbOkyrGU/+91Kt8b1ScDOdNJ6AHoLRL2EtDZ88DTT3FDI7fyw+wHRVk6H9
-# rI1rv+sWazCLlnXYNlWcOasVt152EiylAyjeIID/S7471C888IkR5z0MBY1TP47o
-# ee+MkybdhtZbgq9aBqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIAHQKRICg6eKijLZqDvoKea1UMx3JVKK5HjWSIb4ucKuMA0GCSqG
+# SIb3DQEBAQUABIIBgGv0RqWIgEVKhV3Ul1Nq/eltCip9l9b7G817yl9l4Ck8QGDI
+# +qlOLThOB+XjE9NA9P+N2p75/IBLT5top7zGwGnUNPUmONS9SERSUBvLvcVm3bE7
+# +TqxUR8ykZQH5In9GMMNSUyWBD0UuGP8Kdbr6nXDmqZotpgXZ4lotsgIfokMx/TA
+# wAoARsuYMQCv8/WpfykKgTK7lg7OdZRjxwWBpKy4BKqNfRwYCtgZroPVa/HdGutm
+# L4N0jdH10r1lcvOM+Al5LMWDtz/310xRgWUek0uX3rYc1yQWos6RVXaaMJbKjyeo
+# mhdMJuqgc6JKo7FFnT8rWb5ZetOQog6NaAb+g0x7+riKPWL+TTE9wfnB5hxTFF1j
+# atf2ZSgcVLwzWRglfwCrzhzABIqSiXCjFc34H/JC80LkywMza89qXPBAHOuA4TI1
+# 3jcBw2t2B+SjBRvAncayD7uIU1SUXVfaiylUAnt/dwcKo0d8HzmNetHP8ujj2gdW
+# 34hXMVFekNQWqC1N1qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTMxNjA2
-# MjZaMC8GCSqGSIb3DQEJBDEiBCDh3Xa7ouKKUzCPpUlkW+9z1w4XvMuFe1bfichU
-# 66OaczANBgkqhkiG9w0BAQEFAASCAgCaeaRBjl6HNlUzuci/CG57oXWjDXo8W5BY
-# uIrLldnq21/Oc9T/YaQCUGYiHgtiIonTkenNiL2r7fOX7BATxb7d35+Y8hhkw5J+
-# P+c6ZLL9iqc2JbLfvc+yIOlG4jv3+xCUQ78VetkcFiowHP8czaIL7eQnok0WpwnC
-# 5i3DuaC97kvUl+r/xkGicDFt7MvO2Hh1Ay4ly4Au8xQEJXErE3+J9orp5TXCx5Jf
-# sXDuhCyiQM50qSVUIpBPD0DAbUwFolMi59iJ9/T2/961iPgh33zr+SoOusr4T4T1
-# G+DbRd4WPc7a5HQMv75vn4QVwz95c4/JkZ0hLX/61sTw0UcOn1/Qx4dV5zk6rQMr
-# 30oV0c2JVvmcRnwb8cdemGbETnvk/4D3x2z8J1xZeWODES00GBv3YW4Pe50n8ikI
-# t3Vwdgt4w+7JGR9EWncvACaefl4hQm2gYi35fCBHTst2mKqUjOGOPFvKYRMwZDGe
-# ZC80hXv1WzeYOp4WYhyucCU3q8cRcPymjMaAT/C7nrj3I+HbRxZJ+VEki8lg9gi7
-# jlXHolVH3mOpojyxOPd/KJ22Mrb5cuaPFmABsIix+oE4EvQu/MSCqVSqY4o8mA1K
-# z+Zh0ht9FrCd3SYsn3Xpbdlvq6P58yQhUrF5A+kx0nGyse4kmOxsT3uqbXFG00+6
-# NRVj/a3OzQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTMxNzMx
+# MzlaMC8GCSqGSIb3DQEJBDEiBCCqtm74qUVrxljX3AGbypr7T7+PB+BXpU4BRzAx
+# XLk8dTANBgkqhkiG9w0BAQEFAASCAgCJwmMZ/Z7r9mVL4Nb31Z9hfrWY7sRflres
+# jbINv63LLYBT7edntvpyDRBlwi2QzbYFib2fryCUVocf5JyjeJ2OQFDB7CgTLaf7
+# O4LYTOOGHbknTnnpSNo5FFUnmDpvwXcppMz3V1BapJjXouiNGCrk7Uwb1MevfNdW
+# Dos0vHtuJ/UB4NAbAe4H+w63VQvznGNrkr3A47ggLwu4W6l0TDJbEhmaceLsVvcy
+# 4yI3ZN+RVuDFfhDwV1445DiZBo+xznqNAYEpmS5V0D9l0Z1oo9Kac1AiJ9i2zj4I
+# CK4u7EX/e31mDTipWZmj20Gxh5oz4+LBEXvGmUThmZqm4c1c1IrKPUBHlY5miNpu
+# zhj7zw/hFJ1Y1M1Cuk6TRRZPM2d5/J3kXZmJx5736zRxqe8p+7bM9VVvRXPzZK8+
+# o39mJHS6voPG5Xrrix/YUee8R6pAApziNUU9JtgT0NPJf0Dqc6hsAAra6rlE7hAc
+# KRycfGsJl4kmsrcJduEylWTb2Kirl+bVCKw1ZlcmWHylvwvtpvt3btLK0y2tzvxW
+# 6Y2y0Qryk9C4JKAZxT9kou1nwUcLmcm3Nuh2e6rwvamUahOOCsCq3iWmuL2gQB0R
+# yzeTkx0IszhDkkYzTEMA9X16hbtc/GdRLTY6fcHrLplBQipAESEhBm3DLF3M0pqH
+# pTEnf4RjIw==
 # SIG # End signature block

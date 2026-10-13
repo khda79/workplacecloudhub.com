@@ -43,14 +43,14 @@
 .PARAMETER ManagedDevicePagePauseMilliseconds
     Delay between managed-device Graph pages in milliseconds. Default: 500.
 .VERSION
-    2.14
+    2.16
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication.
     Minimum Graph application permissions: DeviceManagementManagedDevices.Read.All; DeviceManagementConfiguration.Read.All; DeviceManagementScripts.Read.All.
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
-    Version : 2.15
+    Version : 2.16
     Author: https://github.com/khda79/workplacecloudhub.com
     Requires: SmartM365.Core module (logging, init, CSV, cleanup, cloud connectivity)
     Scopes: DeviceManagementManagedDevices.Read.All, DeviceManagementConfiguration.Read.All
@@ -772,8 +772,19 @@ function Get-DeviceSystemLocalFreshness {
           [AllowNull()][string]$DetectionState, [bool]$PayloadValid = $true, [int]$MaxAgeHours = 192,
           [datetimeoffset]$AsOfUtc = [datetimeoffset]::UtcNow)
     if (-not $IsRecurring) { return 'LegacySnapshot' }
-    if (-not $HasOutput -and -not $DetectionState) { return 'NotCollected' }
-    if ($DetectionState -ine 'success') { return 'Error' }
+    if ([string]::IsNullOrWhiteSpace($DetectionState)) {
+        if (-not $HasOutput) { return 'NotCollected' }
+        return 'Unknown'
+    }
+    # Pending and non-applicable runs are not technical script failures.
+    switch ($DetectionState.Trim().ToLowerInvariant()) {
+        'success' { }
+        'pending' { return 'Pending' }
+        'notapplicable' { return 'NotApplicable' }
+        'fail' { return 'Failed' }
+        'scripterror' { return 'ScriptError' }
+        default { return 'Unknown' }
+    }
     if (-not $HasOutput) { return 'NotCollected' }
     if (-not $PayloadValid) { return 'InvalidOutput' }
     if (-not $ObservationUtc) { return 'InvalidTimestamp' }
@@ -789,7 +800,7 @@ function Get-DeviceSystemLocalFreshness {
 # ==========================================================
 # Initialization via SmartM365.Core
 # ==========================================================
-$ScriptVersion = "2.15"
+$ScriptVersion = "2.16"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'DeviceSystemCsvLogFolderPath' -DefaultValue $OutputPath
 try {
@@ -1038,11 +1049,10 @@ try {
     $filteredResults = if ($UseRecurringDeviceSystem) { @($results) } else {
         @($results | Where-Object { -not [string]::IsNullOrWhiteSpace($_.SecureBootStatus) })
     }
-    WriteLog -Message ("Exportable results: {0} devices; recurring={1}; local Fresh={2}; Stale={3}; NotCollected={4}; Error={5}" -f $filteredResults.Count, $UseRecurringDeviceSystem,
-        @($results | Where-Object LocalDataFreshness -eq 'Fresh').Count,
-        @($results | Where-Object LocalDataFreshness -eq 'Stale').Count,
-        @($results | Where-Object LocalDataFreshness -eq 'NotCollected').Count,
-        @($results | Where-Object LocalDataFreshness -eq 'Error').Count) 'INFO'
+    $localStateSummary = (@($filteredResults | Group-Object LocalDataFreshness | Sort-Object Name |
+        ForEach-Object { '{0}={1}' -f $_.Name, $_.Count }) -join '; ')
+    WriteLog -Message ("Exportable results: {0} devices; recurring={1}; local states: {2}" -f
+        $filteredResults.Count, $UseRecurringDeviceSystem, $localStateSummary) 'INFO'
 
     if ($filteredResults.Count -eq 0) {
         WriteLog -Message "No devices with local Device System data to export. CSV will not be generated." "WARNING"
@@ -1104,8 +1114,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA7Uh89f5jGCT/r
-# yvz8nylQK1y3SA5+SSdM+PhpNJGEKKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDBMUt4MELXZ+Is
+# DYhjynYHsDjRZgA4lAddE5STXqjhcaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1238,31 +1248,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIF0OoPlCIG4YNDDeLC3sO9Be9nDANIEPJ3hphuHtDKggMA0GCSqG
-# SIb3DQEBAQUABIIBgCJTs20582MDsJin6CtPlwUMLm43dYwj3uXLuPw7umhJndiL
-# aX7P7sqJKbK+6RekE7aCJPV2bMewsabrU01ukwtibb8ChBXxIISjKLB60nQHLX7Y
-# 8VZlJ5BcdcgfWyCMJopQ5Dkvg+QcI6nU/VPbZxJy5XQzOvuFnLl5EoSBteMM/PqR
-# n8kBkktz9WHXgPS5xw231jeRb9jiiZnzt/iZDzvl1tjPZxXRFROX7HiCOUpJlFkO
-# /ut9xTlg+BUPjhBZ73ZJxRN6k0CJbXcPex8LcIo95d+4guYWhUKSD6tJs4Gcm/r+
-# QLMO8cUs73UDXW2m4h3teRLPzWfCSCfM2GylC1cg2ymHkishiojG6QtKh2i3rN1h
-# /j84ql4jj5XzwHLJJoEQYhSK9OwA4H7yn4JAUlfuA1aLVxzAX01ujrlDhuTGf17M
-# qhMEfLzX7GcRa04rlV109DCbi2UlkTzXhymt6q5UOLCOuTOetEDlPf0vQDpq2+AW
-# VdeJLwscPFfCvbwK+KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIP+JbjhnDrITtAOhpV9KdLtIyY+jmotHNBpZA1oIS5tNMA0GCSqG
+# SIb3DQEBAQUABIIBgDmSrl15smk4GFWz9Ir/P7wZpDX2+ipkg48IhGtyy3sejRxs
+# rf9t7svvx5A2PMa2Kk37zQK2q7Ojk3zFtZwJR5f3cD8FqN5vxGe4jShzcIZ/Id6J
+# dQgm3IYaZ7B1Js1BjlfJWGzquZ+IwGXNGsj9E/C1jNjKyWmDjBQqzqzRqRbVOMuk
+# /LbxzhOnACgVvjNnhoy8QWq5LEuD9R0mz+CBQwgcelBcFjO/JSy1i1RUb1D1u9/s
+# nhn19KRd9zOorTagH5NNu+zn0AGJrTsELOfBp8IgCEQCDKlNFLeAnMCYnQXI/GTA
+# Duwwp7Dycu3HtRF9lAjMxSZMova5Sh87hRMtCakvaNrhaD5XujsrhGGBQHvC589a
+# 3oXmCJxuUfXisZ3gzmjShMlBYamfPEqsrxDJMq2jc20xkkvXVFQ3ZZ90ka6b0CXT
+# GlSjoUcyv7W2CSrcaT5fQtKcG3xctfSoMMeLqxJrq53XdpbYZTD9KhEpqkCZ6quz
+# qcBmE5yXcnZlucPEMqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTMxNTQy
-# MTRaMC8GCSqGSIb3DQEJBDEiBCAKMs8pot/lkzFJnUd66OOOFWENuLMv/2pqjXL+
-# 2lihWDANBgkqhkiG9w0BAQEFAASCAgAuoSmUbo0bjNaPFfPvSfNjR7b4N1re5h3N
-# xGX2fQYhZIt/f2uRsqIUYwDY9K94RW8SqAWEg7SBVthNjD8fOMJY6I8lQGZSwGvp
-# nhK5DHNXN8SxQj6LU5SsYk8b9MuWYSadSexMRCJwnKPe8y7VZJLJkf8J5/Wcs2ks
-# pHyt1XN+4WZnOp+jHNqfvPBlI8yrDe0+3VYMvwxg26Fp+cr2zQZYRAOe7RGW9uj4
-# bADOjOzmKeoQiZYZc1GFe3m1fJfsj0ppXDHP6DWTnh4ni6a32kjIVsSc1e4N7UvR
-# NZ18sF9k/nrUs4+RQ/e91n4YXC1GpFf3SQkcAaquol20sS/TmTCu2NjrWN3ZmYae
-# oxW5D4kZvK9EnGmSxEAjex+j+RAfnj3bENO8mufSfxdCIJR36VpEZh5Gs7/Xp+oY
-# d/R9spE3Z6sfShrVXV8eutIfOhEu35PRtItqg3jDk8c74N2tIMskWXQo/mSj90uT
-# FM6grSc6LfZsDqaNpvQm/CJsSUXcfC5Z1EaHBcOjqB4aW9uucsgszygPFWNyzx8f
-# Z6IA6F7xcaMHV8QrB3hblIeeTRk9N4TaNiP1olFpjbSqspG/W0YlXnNxcV/RDW62
-# XDHImTlhgROfd1JrwyxFvlRtPI5I94fJHcE8gdLciLaOi+xEurcH01uYuqCzpZYR
-# syA9SGqlWw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTMxNzMx
+# MzdaMC8GCSqGSIb3DQEJBDEiBCDvbs33zpVesCb4HPl05DPzhJG5UPfoZpTu/NVb
+# nQqt6zANBgkqhkiG9w0BAQEFAASCAgCnappC4VcQO3ml09mhVNkMFeRj5I3UcbK5
+# soKtWCRBE6WA8oU5mjhbTJ7RzhqZoPJHQk+46W6csTeyyqMpmEpyEijQlYN867YL
+# OAjOVuiUO8l7+6FY9H8+f+MAao6mRK9KzASSTsR6KNxQTNCkkQIKkzV8GkUfHtXf
+# mepaByfcoUdTXxiNLtjUFL54ytK/z7XR3XBO1KDLbyuhlmEgR8fMvfPi9rNXND34
+# H9dPXLUVwPh/TZenYvZfHLAHFe/ClvlAvaxTRnBS/Zsukbi1M5impEnkTP9ugNlo
+# uL00S0gPRQ9H33u9bC+GncnW4E2U+lxGf4dwPzVcij3YpDXEv2rjWE6YZ7Zksg8A
+# W87K2CefFJtLFvg6o8eiBTHsYBCJ6Q5D/kW83xnuiBxbO9BrPP3hQ2Nbk/sTMRFT
+# c+9+7MTDhrmoVslw6rVxl3WSCjkfUuchVl5XeyxU6tihKWsRn9YT1qYtEd1HP52e
+# mAnwnaSSlqaaRHPDg4R+mnoBIln6RNOgWiZyed8Z8i+7+A5wb9z1r9U30hURKLGC
+# BbOV2RMWrMDGxWOWvZIsrpVnSnJKrof9dEy/a79ZYrRtkZeM3CyHkz3E+EEhlrWN
+# ltiuddjIqLIacQTlx7gqfK27QeNdxW1rkC9NBR+xj4NHs4eBBYVAzZY2OjiITWXf
+# 2ZD8+mUqSw==
 # SIG # End signature block

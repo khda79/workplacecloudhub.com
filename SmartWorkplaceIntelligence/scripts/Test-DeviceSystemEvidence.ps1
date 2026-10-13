@@ -87,10 +87,14 @@ $r=New-RecurringSystem; $r.LastConsoleLogonSid='not-a-sid'
 Assert-Test ((Invoke-Synthetic -System @($r))[0].'Last Console Logon SID' -eq '') 'An invalid console SID was exposed.'
 $r=New-RecurringSystem; $r.LastConsoleLogonStatus='Error'
 Assert-Test ((Invoke-Synthetic -System @($r))[0].'Last Console Logon SID' -eq '') 'An error exposed an attributed console SID.'
-foreach ($state in @('NotCollected','Stale','Error','Unknown','unexpected')) {
+foreach ($state in @('NotCollected','Stale','Error','Unknown','Pending','NotApplicable','Failed','ScriptError','InvalidOutput','InvalidTimestamp','FutureObservation','unexpected')) {
     $r=New-RecurringSystem; $r.LocalDataFreshness=$state
     $e=(Invoke-Synthetic -System @($r))[0]
     Assert-Test ($e.Freshness -ne 'Within policy' -and $e.'Last Console Logon User' -eq '' -and $e.'Last Console Logon Status' -ne 'Observed') 'Unqualified collection became current console evidence.'
+    if ($state -ne 'unexpected') {
+        Assert-Test ($e.'Local Data Freshness' -eq $state -and $e.Freshness -eq $state) 'The local collection state was lost in prepared evidence.'
+    }
+    Assert-Test ($e.'Last Console Logon SID' -eq '' -and $e.'Last Console Logon UTC' -eq '') 'An unavailable collection exposed console identity or time.'
 }
 $r=New-RecurringSystem; $r.LocalObservationUtc='2026-01-02T02:00:00+02:00'
 Assert-Test ((Invoke-Synthetic -System @($r))[0].Freshness -eq 'Within policy') 'Equivalent observation aliases conflict.'
@@ -135,8 +139,8 @@ foreach($case in $schemaCases) {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDp2n7A5jphqgbG
-# XsNkNUXgDTYiwDhewW6wuXoy1fKobqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD4SMkK7MjI9jGR
+# gWuT2kF9eKn+rObIjx0IA8QV2Hlg4KCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -269,31 +273,31 @@ foreach($case in $schemaCases) {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIH96SKg8nvq5r3A86E240x7oePu4SprVIqnya3+RqGeSMA0GCSqG
-# SIb3DQEBAQUABIIBgHbrNjfwzC7zmmW7igWpzo0Cq48nH7Vd66PX237zr/NlQoXf
-# R27jhw7lNhoKlgC2Ozviz0AeBrMsQj/T49T9tluuX20j7l0tRJwDRbEswZXXScH7
-# 7uNgYNYa2ytGUoO+jpexJ9gQ5ndDbXuPyDoFNypgOauQWlysZK/poZaiVt0H6pib
-# 9cbg4vyaAZzR5aKOKK1pvK2spRUcsMz47qijkaKmHA8SLb8Osj1v8r3Ii4aWDzfp
-# 7xGHvAeqZ8mjKypuACWQ2Y1Qa7OvvFmFtIoX7rNl417FIsZ87oAYzGxfEJAvDoA2
-# 0scj7eULmtXjgm3/4Lhe8Oh3kf2LcXLXAMZhn78V6OHHktMKUfpJGdZUz4nzthKq
-# wHvDZnr/qblS1iXEsOtwZECLAxvUlBlvUe1kIbqRXzWEsxyfqXWB8sGeL69MPeDl
-# yQFReabOkPGRkImjU7yggRKWKJAqUrtwHK50BTYECnUOJUklyZzfYcnZt8dUDT5/
-# FUPYG9Q2xSYB93lpL6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIBAe7WJ0E76mRvuGSfIirVkE7jHuiMzwlGAZLr5qkbe4MA0GCSqG
+# SIb3DQEBAQUABIIBgI8afJWdUHGwsenbwd1Qom+eQ2BT6Fy/xAkr2OZ6z3348aNW
+# lKyqHpF+l8/JlDM1btNPyRkOOIvGX6qndXlNbXz2S8DvFjVG/sNfwLd0mQyN8t4R
+# EmrnWPFjrAtuqC4NgkX+tbHtNwZNhNf9ZAAFWlY1sR9VXKC6E037rvPkWVsu3vny
+# d27mYuw9i2dBgsaqwehvjTYPPVE2NfIRwTJBgeTUL0X3VMJTqhGeUOKcAxXWAR4S
+# iymMjgHI8doJA7+mwc5u5tcV4kV/5IDAWz2MgNNVt3qpUqbjtas3vmc0OiQe5J8y
+# +cqsKo0A4za/rDR0fTDACOh3GTDVB4D9wsaKrMvpt96uNcPbYJ3e+VKA5uLUZqCu
+# ohve1Hx9iVDoQSD0tVTDDbfMALh/KsSGvrlyi0aKFu/UFhv2KITwgsfgfGGopIJI
+# uAhJ/SF0fJL6YUhc54V7ZHbUmXxrufDDSBrWwHXOnZtUi1/sWJhYMDUBgyGRY++7
+# phLpOY9BFxXfTpjN1qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTMxNTQy
-# MTZaMC8GCSqGSIb3DQEJBDEiBCDszT+CKe53gfMX+zaTCRSioY2hgiqNWLt0QsA6
-# 5H0IPzANBgkqhkiG9w0BAQEFAASCAgCoMsvjGrS4Ja49yAIGt15dEG2oiuH38Lmc
-# kjONMxqmFcpY0zCvylw5fruIXZkuFsDklW00yzNBJol8mTbwiJzuuqcu1nJ6XM/h
-# zIHM9feI3e6xykumKIwkQk36Y2TFUbyZduK64fURnE4hSkDknBZOtTu1tSHj26Um
-# B/ByIr62+Diu5u7TSko4oFICfw5cJWVJXy03W5LL+Ngh80baJWz9oEPGgoXvzL+h
-# MbZnJ6vmhXDodUGa6UAQ8EMwzUy5mGYAzfPcSgwshXCnna6Qzv2N9FM5TltUw9RU
-# ZRFl4nxdEl6qDHv6L7PLriw6MmYeSv9buv2TR1Q0N7fzGJujXp6NO74ddO8bUdx/
-# CzLnlZciT9QJxUpJx7PpeyzPD0hFhqV+xIyJToWIjlanN0IKqOcPTRLtQPSu+vzL
-# nYpteLl9nAzH0Th+ZsO/1/hlaqt8agI06zslpyuG0TR4udoiCv0tdVeS5oI1De3+
-# sh6ZtoLxbzRBJo8nQgrTdSKf61pnIkpntaydHoAJIOUUtEvEffL7ajJjMq2DTlDc
-# yhnejt4GzQkgntwcyZn0sGr+BEnFNci2kd/q4Ou2rKds1lWoOlksH5pS05oTBhet
-# opUgXUmhGTCK495kt9oHJoCR+dJLSevPTaSOnRx0qVDJFyNJMJuF/mm9Do7c5XTA
-# rrxit6FTAw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTMxNzMx
+# MzhaMC8GCSqGSIb3DQEJBDEiBCDibiwLjc/jw23w4h6oGwuXiKa4Kx30bkfFNH3y
+# P3uD7TANBgkqhkiG9w0BAQEFAASCAgAS5l2i04btgeBfTcQOTFgAIbvYGnxERnA8
+# d91mHf6rqDnYRtRYSIHtaLdiAJhblJyDRvUaoHD/B5A6hF7Wv1b07IpiMxNUnYLh
+# FzYJ6t/rqpsd9WYnEGhRTr/3QRw1XNms1F6zErrpBAnZ0ic3eEWDaF7eWhElGR4e
+# qGqRQ3+/z6zBGD0kpBfXxvJIhR9XDmAngfNxRfhz4Q1Ya9C7mUjoMSXUD0rKxD2H
+# F+aboL8abVLto821O7FWrjvUPeocS/XpcFbEPTZpE1Ah5jn53z4blKSbqedoV0Y+
+# /ZRJ8BPnCM4nCKhPcPM3Uu3i6FZnglCTqF1gmvLhVz2rrYllu3HMjOWHuBXYFXh+
+# 6fJKwnz+3nzkLJihRXxERrunZksIpzZck3YMS3hFKu7hYCCWKfoXslAtiyGyUNy6
+# E74JzvIvcsznXnbj8KppcUFfIGmNjMaa1NqNwcEDrhCSkRlkRuHnT21gNToo1Hxy
+# qRnJr39PlI3U0agMcU6Ec1MQCxseZ7bkVk2hTqaiOGerqRT1Zfs5OI09PSpVRvRT
+# ejoo3xkOYOgD9mwiibQCrwMbL2UOpblmh6FQa/x5inkOYoGIhbo3x0Di92LI5Srv
+# SFm+cJNH5mFjQUiVs85AWo/sPwo2bJFIJg3cpNqyfoWlvdtyzK95QJzd0K0J3fzi
+# q/A0NBJ6bA==
 # SIG # End signature block

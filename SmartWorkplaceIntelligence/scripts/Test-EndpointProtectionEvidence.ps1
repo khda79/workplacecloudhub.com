@@ -70,13 +70,16 @@ foreach ($field in @('AV Qualification','AV Comparison','Prepared Inventory Matc
     $s=New-System; $s.$field=if ($field -eq 'AV Comparison') {'Conflict'} else {''}
     Assert-EP ((Evaluate -Policy $third -System @($s))[0].'Registration State' -eq 'Unknown') "Unqualified registration exposed as detected: $field"
 }
-foreach ($collectionState in @('Fresh','Stale','NotCollected','Error','Unknown','')) {
+foreach ($collectionState in @('Fresh','Stale','NotCollected','Error','Unknown','Pending','NotApplicable','Failed','ScriptError','InvalidOutput','InvalidTimestamp','FutureObservation','')) {
     $s=New-System
     $s | Add-Member 'Local Data Source' 'IntuneRemediation'
     $s | Add-Member 'Local Data Freshness' $collectionState
     $result=Evaluate -Policy $third -System @($s)
     Assert-EP ($result[0].'Evaluation State' -eq 'Unknown') 'Recurring registration claimed product health.'
     Assert-EP ($result[0].'Registration State' -eq $(if($collectionState -eq 'Fresh'){'Detected'}else{'Unknown'})) 'Unqualified recurring collection exposed a positive registration.'
+    if ($collectionState -in @('Pending','NotApplicable','Failed','ScriptError','InvalidOutput','InvalidTimestamp','FutureObservation')) {
+        Assert-EP ($result[0].Freshness -eq $collectionState) 'Endpoint protection lost the local collection qualifier.'
+    }
 }
 $s=New-System; $s.'Expected AV Name'='Legacy display'
 Assert-EP ((Evaluate -Policy $third -System @($s))[0].'Registration State' -eq 'Unknown') 'Implicit provider alias guessed.'
@@ -194,8 +197,8 @@ Write-Host "PASS: $script:checks endpoint protection checks. Synthetic scratch: 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAn4sX1GwGrmTpO
-# c8DjWMkZUvMeADG5kBZt+bZ9ALuZIqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBSUAD6I2me2SY3
+# t3CbOmQXeRDxo4YNMfcwicDNfHIHQaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -328,31 +331,31 @@ Write-Host "PASS: $script:checks endpoint protection checks. Synthetic scratch: 
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIDS5vB1a51N/Peyy5BKjQipTaqSQeAY9DGNaOTNLGMKvMA0GCSqG
-# SIb3DQEBAQUABIIBgGdUO/fJ4hwwClTkUFSaA82ZR1nZt0SRn2cw6oQScmX58jLW
-# QTa2DWwztmeTQwHHIv/uSFdcyb3EUafep0oZz2un8nCgogSzO3LPWeFORqDdIInj
-# aldM78SPMDLBBEUrltCyU1LZ1b2DuBz3FNr2Mv2tJFyb/8dsUvZQbtU8EbdhJFeX
-# ht4wIA/duJvvAwNSq/22tpn9gQ7a2Ba5sgGvMkfNZtYOcjX7Uo+7Fq54Y8x9LstQ
-# NQ6R3imeGTrM/LNIB8Ug5QOxAmGhgF5iP7k7rD03104BaB7OK4DxrULhGWb0wvp9
-# lv8xwIlco9rq4EMuOgBiVbI8c+6GoCJMLHM0xvLzfS8UIiX1LFEALOcCpiTrZsb2
-# vhEhc/yjaOHgG/BZE+jsLnMbhWCwaNKHYc/4LjPcfBPnKGTiboaCv2wBzUNfAiI0
-# l+5Xl44WuZ8XVpQnsshMznuWTDjnV7dCwvNlvcFfs5eInGdhleux1urZ5lahWNTu
-# L4bD6NiemJtUExNhTaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIM04nWPwQ2IrGwhlXXllQdaqowng0kH11kNa0s/YsQM3MA0GCSqG
+# SIb3DQEBAQUABIIBgK3B0C2e0Od+FXgygwrhCb7oWisQX6ijshyOXI7WjnMudTQy
+# Nk3uQGrldTmTz84/mwaBB5mhEiAfgGYk6ImVXP/srkQO2uxNeTIvYm8HaLZ7z4kW
+# 2sJOooQ5frzRHdypyn5Xu5911KPpLX+KNhstgncs/8L6QBFV1q6S7fU5WFPNN0Hk
+# 7JTBaFum+2BUDekSKnMteClkv0pK9yoc0pWMSoInmJw2lBwAOoTsXViyOWF3RIoU
+# CWvABHGGQZEnXhInqSK183xPvx0U48/m8KcaWLN1OVe6vjmNCahYLS+7k/7PrVxU
+# r+4+WgHPLOP5Paf2msjcARHAqOivkU7UcE8Vu4WxEcx/++RZxe2exaLj+iJTXkZq
+# Lmj9Qg1Zt9+PwRXe9fY1o137KxpN/wQ93zwHxawNc3PjzpKURa05Fnaqo/05ODVd
+# YPkg25qmIsdSmWNexm+KDvlpyIzo95NmVxC6+RIybqrjgVzs/s/FW4TYtcZttQ4/
+# 33vdqyNfX4jIgHkE6qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTMxNTEy
-# MzdaMC8GCSqGSIb3DQEJBDEiBCB2JNkIPRLLBMNpqyCQVaOynk74+iaEcyrHDbYY
-# SeI5PTANBgkqhkiG9w0BAQEFAASCAgB8oSnRvbUkBhSM3FPDnN5YWjdphUEPAkc7
-# r4nkVJI2PowkSxvCgmFNX2y4737hCKBJSTmSybeZKN6/8lTKbKHaZmLDaLGT4JYH
-# jt0t5U78LJcJ7TE3ZQxX+NswQsl6YD/6FdUR9HyGYCCZBsXFsTXOZy34/B4T/KK5
-# AoKG0DVsxfeP1jB18M8BWhMAz0Rgu7LBzTtsrY26vFZpXgWYw6CDoR7tjeBARoQW
-# tPgI4oupfK2iTWgX1FRvziMfK+pOtEPO0NYwjV0DmWcIoe08ZmFBZ2gCOEdzHNtx
-# Yj9W447Wv+gWRTX1fn+F8SIYpTQkJWqEnVAM8fwyeTDE2SOcCLO8ozV8cS/byAwp
-# Y1V0QBlnPARkn3znphEXNM/SzlF8C1RCGqFLMm/Lgll2nt9UqAPW0E/vQUSi5Z0k
-# fONUVwiNVPeMLc+1So9rQdnfoA7VPQbSavpt9cv82xDSBuie9Qi2GqNckgBaiuq8
-# 2VndlbbwUP/ET9cqcmGY0UrfxkbVAGac7dk16OTSi111DL5P5wc+R6rbD96bYwNm
-# Od2nj48I1XjATtaXveta/8IvGwdAq1BR7YuZSNZH3wiaxQb6VU052XXRyoyhDxdk
-# RWe1jOBcMqy1eZ+9D8qXi4DR+WH0pg2MHJJCxh94ylVzSPPigEJhTrKaxvF3YwiG
-# oxtytvhgCw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTMxNzMx
+# MzlaMC8GCSqGSIb3DQEJBDEiBCBvp3FIu2IBNYn38nC0u6XOcV5zdjk83kfy4ocN
+# WDvnsTANBgkqhkiG9w0BAQEFAASCAgCmAjHwSYYAGHWn67NnlUBKSpIwzyPPlijd
+# WkIZRxMK+DN3LFIa0YIMAIybWHYANOBfkxMyz7egGH2ZLPoNtkv2QMPGFD+0Wsro
+# ppts0jtJyN1O6Dpjq8ndD7J/k26i1nJA9DFeIkXCDDoPkwyFXj1C6wMr8wSlpNWE
+# RCWOu3FOffjZE5BzzZ5UVghlRg24s1KSyLbZttI/bj+0mz7kW6sf9TKM7ZesfsDU
+# z1rr/pg/8/v2IdmBPbuBPyZjrGiTpqAQLmqNLqn3YSBukUUbvwh1wF6bgHDdi+lO
+# v6NrQm6+1b5p/J7WNtVqsG173sc8x2qZLRhVWI2wG2sjA0Lo7JbA37w7kvQvg/vl
+# ftELcDC5e4iG3Y8RQclHt/3LdpdFhF+e7r4brcnnbLW2ZRi7m56VaJoh1z9rcKcD
+# qYhCdRaj0KbYDoVIKGGh7lLTdsOg0YcXSW5YhWNhwZUXBbiBDiGm3OfZxm9UwlkT
+# XsulAR6p8tsjgXjnXlrSlumu0LLyKn7xLQUCpR7699Z+sSWQ+FavydLrGnEmJK9J
+# 57ob++kg/rDZJuPdc/6Aam8ZGP23BHh0DaDng9ym7wn6Bh8INrgytckjcfxF72Fo
+# rFW3OVgvtoQOnXYiBGQmFcGYmLJtBWoFtcTvK2t9P3Tbq6nGKrL06FcvJl0Wr2uA
+# RM+HuaxyvQ==
 # SIG # End signature block
