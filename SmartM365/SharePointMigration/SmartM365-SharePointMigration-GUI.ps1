@@ -15,7 +15,7 @@
     the directory containing this GUI when launched from the shared toolkit.
 
 .VERSION
-    1.0.68
+    1.0.69
 #>
 
 #Requires -Version 7.4
@@ -28,7 +28,7 @@ param(
 )
 
 $script:AppName    = 'Smart SharePoint Migration'
-$script:AppVersion = '1.0.68'
+$script:AppVersion = '1.0.69'
 $script:ScriptRoot = $PSScriptRoot
 $script:FarmToolkitRoot = if ($FarmToolkitRoot) { $FarmToolkitRoot } else { $PSScriptRoot }
 $script:SummaryLastGoodRows = @{}
@@ -1606,6 +1606,7 @@ function New-FarmDiagnosticsWindow {
               <StackPanel Orientation="Horizontal" Margin="0,0,0,7">
                 <TextBox x:Name="txtDiagRowFilter" Width="250" Height="27" VerticalContentAlignment="Center" ToolTip="Filter selected pattern rows by item, message, source or destination"/>
                 <Button x:Name="btnDiagRowFilter" Content="Filter rows" Style="{StaticResource BtnGhost}" Width="82" Margin="6,0,0,0"/>
+                <Button x:Name="btnDiagCopyMessage" Content="Copy message" Style="{StaticResource BtnGhost}" Width="105" Margin="6,0,0,0" IsEnabled="False" ToolTip="Select a report row to copy its full message"/>
               </StackPanel>
               <DataGrid x:Name="gridDiagRows" Height="180" AutoGenerateColumns="False" IsReadOnly="True" SelectionMode="Single" CanUserAddRows="False" HeadersVisibility="Column">
                 <DataGrid.Columns>
@@ -1971,6 +1972,7 @@ $gridDiagPatterns = ctrl 'gridDiagPatterns'
 $gridDiagRows = ctrl 'gridDiagRows'
 $txtDiagRowFilter = ctrl 'txtDiagRowFilter'
 $btnDiagRowFilter = ctrl 'btnDiagRowFilter'
+$btnDiagCopyMessage = ctrl 'btnDiagCopyMessage'
 $txtDiagRaw = ctrl 'txtDiagRaw'
 $cmbDiagState = ctrl 'cmbDiagState'
 $btnDiagSaveState = ctrl 'btnDiagSaveState'
@@ -3546,13 +3548,21 @@ function Refresh-DiagnosticPatterns {
     $gridDiagPatterns.ItemsSource = $matching
     $gridDiagRows.ItemsSource = $null
     $txtDiagRaw.Text = ''
+    $btnDiagCopyMessage.IsEnabled = $false
+    $btnDiagCopyMessage.Content = 'Copy message'
     $btnDiagSaveState.IsEnabled = $false
     $btnDiagHelp.IsEnabled = $false
 }
 
 function Refresh-DiagnosticRows {
     $pattern = $gridDiagPatterns.SelectedItem
-    if (-not $pattern) { $gridDiagRows.ItemsSource = $null; $txtDiagRaw.Text = ''; return }
+    if (-not $pattern) {
+        $gridDiagRows.ItemsSource = $null
+        $txtDiagRaw.Text = ''
+        $btnDiagCopyMessage.IsEnabled = $false
+        $btnDiagCopyMessage.Content = 'Copy message'
+        return
+    }
     $search = [string]$txtDiagRowFilter.Text
     $gridDiagRows.ItemsSource = @($script:DiagRows | Where-Object {
         $_.PatternKey -eq $pattern.PatternKey -and
@@ -3562,6 +3572,8 @@ function Refresh-DiagnosticRows {
             $_.DestinationUrl.Contains($search, [System.StringComparison]::OrdinalIgnoreCase))
     })
     $txtDiagRaw.Text = ''
+    $btnDiagCopyMessage.IsEnabled = $false
+    $btnDiagCopyMessage.Content = 'Copy message'
 }
 
 function Clear-DiagnosticResult {
@@ -3573,6 +3585,8 @@ function Clear-DiagnosticResult {
     $gridDiagPatterns.ItemsSource = $null
     $gridDiagRows.ItemsSource = $null
     $txtDiagRaw.Text = ''
+    $btnDiagCopyMessage.IsEnabled = $false
+    $btnDiagCopyMessage.Content = 'Copy message'
     $lblDiagKpis.Text = 'No analysis for the latest report yet.'
     $lblDiagKpis.Visibility = 'Visible'
     $panelDiagMetrics.Visibility = 'Collapsed'
@@ -4262,7 +4276,24 @@ $gridDiagPatterns.Add_SelectionChanged({
     Refresh-DiagnosticRows
 })
 $gridDiagRows.Add_SelectionChanged({
-    if ($gridDiagRows.SelectedItem) { $txtDiagRaw.Text = ($gridDiagRows.SelectedItem | ConvertTo-Json -Depth 4) }
+    $row = $gridDiagRows.SelectedItem
+    $txtDiagRaw.Text = if ($row) { $row | ConvertTo-Json -Depth 4 } else { '' }
+    $btnDiagCopyMessage.IsEnabled = ($null -ne $row -and -not [string]::IsNullOrEmpty([string]$row.Message))
+    $btnDiagCopyMessage.Content = 'Copy message'
+    $btnDiagCopyMessage.ToolTip = 'Copy the full message of the selected report row'
+})
+$btnDiagCopyMessage.Add_Click({
+    $row = $gridDiagRows.SelectedItem
+    if (-not $row -or [string]::IsNullOrEmpty([string]$row.Message)) { return }
+    try {
+        [System.Windows.Clipboard]::SetText([string]$row.Message)
+        $btnDiagCopyMessage.Content = 'Copied'
+        $btnDiagCopyMessage.ToolTip = 'Message copied to clipboard'
+    }
+    catch {
+        $btnDiagCopyMessage.Content = 'Copy failed'
+        $btnDiagCopyMessage.ToolTip = $_.Exception.Message
+    }
 })
 $btnDiagHelp.Add_Click({
     $pattern = $gridDiagPatterns.SelectedItem
@@ -4460,8 +4491,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAZbdZucGiZ4xr6
-# A1sUl4skAiG0gO6vRGSiM9kCVcR1W6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBU87nhHlGYqMWV
+# vZaqUM2xdIV0vqXvoX1Ua3y3ewnOW6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -4594,31 +4625,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIGdYKOBI2kpn8wG18KCiraOhDhm83tv89a5vQERPeCJzMA0GCSqG
-# SIb3DQEBAQUABIIBgId7BjzTwqt9L1/PwAymRokq6vQpkbXqLf5i3GwHNRDdhL+k
-# zszI9gzPoUCjfG14oeI3JRJcppavS9xJHT3kQZzIGbTrdthFcsyeuqpMGGO0AlKA
-# kqNorCHghqCLEEy3J6dJJG1NCON5Lt3qYW3PwQS1N9S6ll4bYUApNSO88BvrEhBS
-# aAjP3NOh87VC2ymJWCdpbzsh5/zPO6K245tmZsVFYoeFSPMAnDFO6Mxaw5qgaDz0
-# EbT0ZKAowp6wWTeMcLOrGCb+3Y3Rx4yE7LPZBfNiDcIEz9U5zqLrOmjUqXZxG2nh
-# zVh77iKmwHKPT00OuxXyobcC/OvMOy4cN6oBD9J7Pd1fz+Vw35OXlej93H4o2RCn
-# OQfLYTQO1T/97gbHHBfQbuBub9J31o/i/tp8jj4GCQcdQ+YF+ZD7QMwArV5GrlPZ
-# pj/5VlJbiOmRv02h7KxP25fc36eBEnK2nr4VEPcBAqttWZLxSBaL5h9xYIDUDOxb
-# jO31L6VpuUWD2dAWrqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIP+41KenQJH5VOkmNK1rnwCX4NKP2BAMDR4aGM5f6KkeMA0GCSqG
+# SIb3DQEBAQUABIIBgGLtN7yO3PPaAdi+O4GrFr7OXvqcV8PviEJBnh9DpIvnQ8bV
+# StRFEiZg4NqOfwlj8Zmu9ag5vV5ebsmhSwgXJA4o/rT9xuOhzEps6tkJ1WKiJheQ
+# hcBN/x7a1UwMibqkqPx2z69EKdXSW+/Y+68LHazrGYSGyr9ABjjgHKPJ+911+Qaq
+# 4VHhFUKA2lujPFfX+ZdYCBxvyKn8zxeHOfI5kbdWcoXelZeDed6dG+MvBhsPNAPy
+# 89i9IbRvGpXQoOdYYIstUZvO52mkgTLarnhCVaZ0TKALzV4bCs83N5gaIJyGK6st
+# m01KUFTMmONO0mxggsxUrX6jHlm9je/DaIXqvaQWn7xPLP+nTBNDkci+AmLuIEZt
+# sO1e/oQl0IaF/auZ2jujWHL8Z6CTYdIskPmYFxgJv7jAXIyYa8lzW2CBD1jbi/Zw
+# I0uqzrqytSf2pnue99M9euTqD5hHgVdpwbb9G/myQLWUxKlm7P2Xjsy/Mit/HyWL
+# rkYdnMtaL6eMjgBbHaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTIxMjIx
-# NTlaMC8GCSqGSIb3DQEJBDEiBCAImNnFfrrD5sJxgWAh8cO39Zm8uQhZPSzVq4Bg
-# RNtCwjANBgkqhkiG9w0BAQEFAASCAgCyWeLINsc3tx83t8n4LZ9mfbmVlIcMroOe
-# eW+PUK6hcyBAFOyJFVmCso1yBkcU6qnW7/bDb2iYDcxeQR0tZJTpcz6Si3tZOtBY
-# HqaoWrQwBC0EEmBV4qB7+sZcmrFkBi6u0LxPlnTPAnZ0m6Q0RWoY/PHUjtp/f7DP
-# 7s3d/MSP+8VlYbtZXPqzOVz/GW1z5riXBZ8zf6MJxpRN1EOKvuKPZXSazuhdbjeC
-# 55tQzs123PfSmLFpv/5sGDl1caFPcDT1jsVD0BSKnV6BWmR9k/X8U/Pqm8z9qk+f
-# GS33NyYKSUevA00SQu3sePPgKJUlTv0yLolzLhV66V0+bOGI9C1ZQLqKH5V7G8Ew
-# TcxLwuJ1eyYM7wSUOgr5yv5PzDvQbm9Vk2c0fbRZMz3TLsv1DYoKqttDiTCcgXwQ
-# kwG3PvT/rtD6+mNAgDmFPcrVB0FcpX8Jg5mw2zetmKCn7VbqSbBJ91cp+1SOREM7
-# roJiJjwp5+4KqqvNO6k/K7xsTgh1hJOla0XyfCAHT3z7qsAlR2DolLxu2FFX8ZgJ
-# QB0mUahc/OR4MIEi6S3P5cF0Dlr+8Ee9p2orTwRbKsml4PZy8r7rAN1xO5V/Whdj
-# Q2HFXM1utNhJ8MBrNuRevx+sJxkBd7SuV6mLucTxSvXP/wl8kzF+4PaGIhRK7qxu
-# VHTDTts3Rw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTMxMDEx
+# MzhaMC8GCSqGSIb3DQEJBDEiBCD3/W13S6k8gONEewPr2td1FpNK9bXALkNkLcHI
+# 9UAVITANBgkqhkiG9w0BAQEFAASCAgCT9faWS5VE3qi9ivEySvdt3AgD2sdP2lJ9
+# a4rR+7bFWBYXNex/H1wHWOQg4EjV+1qIowaO2fSN4tpHYGDO2ZrB/XUlMbtztDr3
+# YbTGb+JogJJmIns9s1seSMfS/zBgPa8De8Y/TFRbAN+Fek1X7C6NkEYk6Fsyxqam
+# IoN+zO/Gx8Dc1VTEripKw6CEyZUMD3f+Kcg8fBFi6KBP5SuhukRmV3hLbQIFhN26
+# CErz1ZBuRpAjDlvAMga3/K2w4OaISxR8Y4xwL8u22Vy9AOXS0JiIurPRMrZ+stdy
+# Vdt6Zx1dLvGhae/r4+tNVJhOdZn31FN/vrT91mR6NjeMKPCZwRZYoOLfjYhtoqlp
+# nYXXstgPpN2rAASiekvk5NPNYUpR7woEdvuGL+KxVu4tHMIBMON7YYFDGBXpspIR
+# odOFW6JvrmpNk7q0MVv2q/B/Tap71W1f2Rce/d5mEBeVT9abysFP0s4g/4SbOciL
+# WZLCxN83URr5Ln2omHDy9bLL8g3ro9dt24fvENQGIMFHfxQ+r6u4yTUmfVbxz0si
+# PryZelAk4mwwzKLpAgrIbat76Mh57suDw/+7YIT4AQIaab8TxiI+xZmj1qnqrvDO
+# wZMMpqKKZ3gaKvFXJ2gQ/eXHwjx8WGImQhCgxiU9SOyYLj6CXSY2LHNEB6UsB550
+# d1FzqM8yPw==
 # SIG # End signature block

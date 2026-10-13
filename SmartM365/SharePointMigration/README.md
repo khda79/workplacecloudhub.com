@@ -638,6 +638,8 @@ files are deduplicated by session and row ID; conflicting duplicates are
 counted and flagged for review. A session selector can restrict a manual analysis
 to one session. **Issue review** and **Raw report rows** use the full tab width.
 Selecting an issue pattern displays its matching raw report rows immediately.
+Select a raw report row and click **Copy message** to copy its full message,
+including line breaks, to the clipboard.
 
 The `ShareGate 401 retry results` card appears only when a previous reviewed
 batch result exists. It summarizes historical retries; it does not start one.
