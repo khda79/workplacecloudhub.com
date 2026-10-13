@@ -41,9 +41,15 @@ The summary counts observed report rows, not unique devices or users.
 `NoReportRows` means unobserved, not failed or not installed. `ReportedInstalled`
 requires an explicit installed state from Intune. Enrollment failures come from
 `enrollmentTroubleshootingEvent` records; their optional device identifiers are
-retained only when Graph provides them. This source differs from the Intune
-admin-center export report, and its retention and coverage must be checked in
-the tenant. Its weekly snapshots must not be summed as distinct failure events.
+retained only when Graph provides them. `EventDateTime` is exported as ISO 8601
+UTC; a source value without a time zone stops the run before publication.
+`ManagedDeviceIdentifier` preserves the Graph value, while
+`HasManagedDeviceIdentifier` is false for a missing value or an all-zero GUID.
+The source differs from the Intune admin-center Enrollment failures report.
+To assess coverage, export that report for the same period, align its displayed
+time zone with UTC, and compare event counts by time, user and failure reason.
+Record unexplained differences; matching counts do not prove identical scope or
+retention. Its weekly snapshots must not be summed as distinct failure events.
 
 The jobs are enabled in `Orchestrator-Jobs.json.template` at 04:30, 05:00 and
 05:30. Their duration estimates are initial scheduler values and need review
