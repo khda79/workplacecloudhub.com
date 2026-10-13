@@ -1,9 +1,9 @@
 #Requires -Version 7.0
 <#
 .SYNOPSIS
-Verifies managed-app report filters and full-catalog status collection without Graph access.
+Verifies managed-app report filters and assigned-app status collection without Graph access.
 .VERSION
-1.0.0
+1.1.0
 #>
 [CmdletBinding()]
 param()
@@ -52,6 +52,8 @@ $requestModule = New-Module -ScriptBlock ([scriptblock]::Create($reportText))
 $definitions = @(
     (Get-FunctionText $commonPath 'Get-SmartM365EvidenceProperty'),
     (Get-FunctionText $collectorPath 'Get-IntuneManagedAppDeploymentState'),
+    (Get-FunctionText $collectorPath 'Get-IntuneAssignedManagedApps'),
+    (Get-FunctionText $collectorPath 'Get-IntuneManagedAppStatusSource'),
     (Get-FunctionText $collectorPath 'Get-IntuneManagedAppInstallStates')
 )
 $collectorModule = New-Module -ScriptBlock ([scriptblock]::Create($definitions -join "`n"))
@@ -63,6 +65,24 @@ $collectorModule = New-Module -ScriptBlock ([scriptblock]::Create($definitions -
         '33333333-3333-3333-3333-333333333333'
     )
     $apps = @($ids | ForEach-Object { [pscustomobject]@{ ApplicationId=$_ } })
+    $assignments = @(
+        [pscustomobject]@{ ApplicationId=$ids[0] },
+        [pscustomobject]@{ ApplicationId=$ids[0] },
+        [pscustomobject]@{ ApplicationId=$ids[2] }
+    )
+    $assignedApps = @(Get-IntuneAssignedManagedApps -Apps $apps -Assignments $assignments)
+    if ($assignedApps.Count -ne 2 -or $assignedApps[0].ApplicationId -ne $ids[0] -or $assignedApps[1].ApplicationId -ne $ids[2]) {
+        throw 'Assigned apps were not selected uniquely in catalog order.'
+    }
+    $unassignedOnly = @(Get-IntuneAssignedManagedApps -Apps $apps -Assignments @())
+    if ($unassignedOnly.Count -ne 0) { throw 'An empty assignment set must not trigger installation reports.' }
+    $assignedIds = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($app in $assignedApps) { [void]$assignedIds.Add($app.ApplicationId) }
+    if ((Get-IntuneManagedAppStatusSource -ApplicationId $ids[0] -ObservedRows 1 -AssignedIds $assignedIds) -ne 'DeviceInstallStatusByApp' -or
+        (Get-IntuneManagedAppStatusSource -ApplicationId $ids[2] -ObservedRows 0 -AssignedIds $assignedIds) -ne 'NoReportRows' -or
+        (Get-IntuneManagedAppStatusSource -ApplicationId $ids[1] -ObservedRows 0 -AssignedIds $assignedIds) -ne 'NotAssigned') {
+        throw 'Managed app status source does not distinguish assignment from absent report rows.'
+    }
     $script:ProductionCalls = [Collections.Generic.List[object]]::new()
     function script:Invoke-SmartM365EvidenceExportReport {
         param($ReportName,$Filter,$Select,$ApiVersion,$TimeoutSeconds,$MaxItems)
@@ -70,13 +90,13 @@ $collectorModule = New-Module -ScriptBlock ([scriptblock]::Create($definitions -
         $id = $Filter -replace "^\(ApplicationId eq '([0-9a-f-]+)'\)$",'$1'
         return [pscustomobject]@{ ApplicationId=$id; DeviceId='device-1'; InstallState='installed' }
     }
-    $productionRows = @(Get-IntuneManagedAppInstallStates -Apps $apps -RunId 'run-1' -CollectedAtUtc '2026-10-13T00:00:00Z' -PauseSeconds 0)
-    if ($productionRows.Count -ne 3 -or $script:ProductionCalls.Count -ne 3 -or
+    $productionRows = @(Get-IntuneManagedAppInstallStates -Apps $assignedApps -RunId 'run-1' -CollectedAtUtc '2026-10-13T00:00:00Z' -PauseSeconds 0)
+    if ($productionRows.Count -ne 2 -or $script:ProductionCalls.Count -ne 2 -or
         @($script:ProductionCalls | Where-Object { $_.ReportName -ne 'DeviceInstallStatusByApp' -or $_.ApiVersion -ne 'beta' -or @($_.Select).Count -lt 9 -or @($_.Select) -notcontains 'ApplicationId' -or @($_.Select) -notcontains 'InstallState' }).Count -gt 0) {
-        throw 'Production report path did not query every catalog app with the required report and API version.'
+        throw 'Production report path did not query every assigned app with the required report and API version.'
     }
-    for ($index=0; $index -lt $ids.Count; $index++) {
-        if ($script:ProductionCalls[$index].Filter -cne "(ApplicationId eq '$($ids[$index])')") { throw 'Production report filter does not match the catalog app.' }
+    for ($index=0; $index -lt $assignedApps.Count; $index++) {
+        if ($script:ProductionCalls[$index].Filter -cne "(ApplicationId eq '$($assignedApps[$index].ApplicationId)')") { throw 'Production report filter does not match the assigned app.' }
     }
     $script:Seen = [Collections.Generic.List[string]]::new()
     $exporter = {
@@ -86,26 +106,26 @@ $collectorModule = New-Module -ScriptBlock ([scriptblock]::Create($definitions -
         if ($appId -eq $ids[0]) { return [pscustomobject]@{ ApplicationId=$appId; DeviceId='device-1'; InstallState='installed' } }
         if ($appId -eq $ids[2]) { return [pscustomobject]@{ ApplicationId=$appId; DeviceId='device-3'; AppInstallState='failed'; HexErrorCode='0x1' } }
     }
-    $rows = @(Get-IntuneManagedAppInstallStates -Apps $apps -RunId 'run-1' -CollectedAtUtc '2026-10-13T00:00:00Z' -PauseSeconds 0 -ExportReport $exporter)
-    if ($script:Seen.Count -ne 3 -or (@($script:Seen) -join ',') -cne ($ids -join ',')) { throw 'A catalog app was skipped or queried twice.' }
+    $rows = @(Get-IntuneManagedAppInstallStates -Apps $assignedApps -RunId 'run-1' -CollectedAtUtc '2026-10-13T00:00:00Z' -PauseSeconds 0 -ExportReport $exporter)
+    if ($script:Seen.Count -ne 2 -or (@($script:Seen) -join ',') -cne (@($ids[0],$ids[2]) -join ',')) { throw 'An assigned app was skipped or an unassigned app was queried.' }
     if ($rows.Count -ne 2 -or $rows[0].ReportedDeploymentState -ne 'ReportedInstalled' -or $rows[1].ReportedDeploymentState -ne 'ReportedFailure' -or $rows[1].ErrorCode -ne '0x1') {
         throw 'Per-app device status mapping is wrong.'
     }
     $badExporter = { param($appId,$filter) [pscustomobject]@{ ApplicationId='99999999-9999-9999-9999-999999999999'; InstallState='installed' } }
-    try { Get-IntuneManagedAppInstallStates -Apps $apps -RunId 'run-1' -CollectedAtUtc '2026-10-13T00:00:00Z' -PauseSeconds 0 -ExportReport $badExporter | Out-Null; throw 'Expected app identity failure.' }
+    try { Get-IntuneManagedAppInstallStates -Apps $assignedApps -RunId 'run-1' -CollectedAtUtc '2026-10-13T00:00:00Z' -PauseSeconds 0 -ExportReport $badExporter | Out-Null; throw 'Expected app identity failure.' }
     catch { if ($_.Exception.Message -notlike '*mismatched ApplicationId*') { throw } }
     $failedExporter = { param($appId,$filter) if ($appId -eq $ids[2]) { throw 'Synthetic report failure' } }
-    try { Get-IntuneManagedAppInstallStates -Apps $apps -RunId 'run-1' -CollectedAtUtc '2026-10-13T00:00:00Z' -PauseSeconds 0 -ExportReport $failedExporter | Out-Null; throw 'Expected report failure.' }
+    try { Get-IntuneManagedAppInstallStates -Apps $assignedApps -RunId 'run-1' -CollectedAtUtc '2026-10-13T00:00:00Z' -PauseSeconds 0 -ExportReport $failedExporter | Out-Null; throw 'Expected report failure.' }
     catch { if ($_.Exception.Message -ne 'Synthetic report failure') { throw } }
 }
 
-Write-Output 'PASS: export filter body, full catalog, device states, identity mismatch, and report failure (offline).'
+Write-Output 'PASS: assigned app selection, status source, export filter body, device states, identity mismatch, and report failure (offline).'
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCgXC2ivlRnBhv6
-# OzuhEVe/r0WFf7p4KeKbQS3zvm+tNaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAqOgKp3dM9UEDd
+# marpB0Ne9YYWnzWMgELbjPtiC4WtRKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -238,31 +258,31 @@ Write-Output 'PASS: export filter body, full catalog, device states, identity mi
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIEYtO4NhWaxhFO5vWFTN+Pfg5X7OyYokcmHJAmo9k+OdMA0GCSqG
-# SIb3DQEBAQUABIIBgBL3M04iEOFzJ749iEgPkmWy3e/csDf8Wf/xL8Ewtc1sJQ1z
-# tffeAObNtX2I1RrJFOwoq0GODjnNG1/N3600VxUdZc5Tg0vV6rOXU/ORpfVxI6hM
-# L827qscc9VpA+YHtVn60WtsuFG/wXNcXZFtwKqv/MkSuJXXQcd1A4PzIcX28gB8R
-# HOrwOBdiBKdmdMhsl80iMmjSB6tyMVsxgl+OQIWJSwrusy1h064yHre++XyHHls0
-# F3Y9Uk2AExAs1+EOqSA9QJgTwC9MpUnW1WyONix9uuCq28Kh6YMVH/S+ehVSnZIH
-# KH6aADY7yfSlEN/ys+9q7WIUEKkrqTipAgCWiMOWTjewrs6BG7FK1eGTr3vYXvXc
-# yidKQxQYgTQLAvLeCY+IcxWfAwLo3jpgig7Xtd7W8faA9em4FQrtNS9R/O8MH3Rr
-# IqidWNPGMrtpkl9LB+5WStLBca4+tVkM9RRnKMAmA35k4ULEmMBkKTsdQV1dS0q2
-# oSZIOKf8Z/N73izYyaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIGfFKOZDeJr8hpH2bWejW1KM5gsiiLXeVLN7qRhgROJdMA0GCSqG
+# SIb3DQEBAQUABIIBgC6gQsIE+id5NPEsIvKB551m/Z3ro0Ls4RjuEejXUdgAXL1A
+# ay8EOW/ki49BtkDfkrV46vEmqKkcyF+bnGcwSTAagSLcjC8jNn8dtnxuiTPArFAK
+# /r1FyPo0E8eeHkiDpK1Irn0noyQxnbCGd13Hxspy8JMYLgvLMJHigxnwWjXmlg7F
+# 5JxSNEd151ZCdUSAvVHRBLmKwApcrHOygwWc59UZz3CZzLE7zCC1Jv3BFnt6EX6X
+# Zm71dRPch8eTu63t/mu8VmmDmWMkFoxLQJJ6ctECaNw2QSzMlpsufChpSE7ak+r8
+# 7qSZxDbN/6/WIlmTaPHmi36b3ymHXZ/kJb9d8UF86U7i+1VJC/HgUJft509edPwn
+# 7Pehfyiqb4ek8zQOUrV+DjACqtSYW+IMK0XLrDmNttgInFlbC85XGLO9K5EKhsuS
+# 7GWgP3VlVd0UnPAM3PXZYCCtDcNcHSgvOxX7xeOQFn4yTk5akwAirEdt6eIbVg59
+# p/SK+eMBPTtzVl/6MaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTMxOTI1
-# MjhaMC8GCSqGSIb3DQEJBDEiBCA+HGe6mJdL9hG0Zbxf/VCdpC2o+VBHZy46/nOE
-# IKVa+jANBgkqhkiG9w0BAQEFAASCAgAWwfK+hJ0plo6PBdddpYxbMMs+QWxrcrfe
-# whK92PfjLuYBTkG33ghGF0BEEWt7uX0lCrT/6vrq9XyTY4bHdMfWbpPYEFOfgyWT
-# Iaf1Y5N/Hg2DHEmGLeolIJiGc0EbeEmA6Hso7bhtWbv6kn83vY9xCTzr3mpHZqH8
-# LSeOyxLxKMzMKBPKaI4phxBP96urOxqRaWBtNbdqkn9x+rQm6e25EmU1diknPfxR
-# pGSh4tTVlkqW0pb9Mv0bP0KbB+9Opn+JGYKIUQVbolP1igyiiZE+ZU/wMhkrqwA0
-# kv3IFfoB0WnfmnGgbL/2V5mdSEWoRFkmZVNgXOelkg3h5mja5hU/zKntEq3ktIOh
-# Z0kkvvTk0mc4NgkQJwS267QVC4ifMS6PSERIrowyYHNWh7McS0Xm9FtWdmdjNWgs
-# ltW8IMnUvKFoxAM/ivV5hVCq2niufSJnjqCEeyQ72PzEUMjM/vRUWzgyTu1dsz4h
-# XwWxzvDqZ/E5OZTK7bx0R0xhLCmFofCp/ZtOP1mat8F+MbuIlWwe/bNLfzmI6P7x
-# YjfPjlfizRP9j2M/bw0vF59UF6TC4IwchovlBN56MhRJuHrWDpKIZHSwCY/pLDlx
-# yY64jGijmPd12lJWu+CxMbhkLnbM6uoBYfq2I33sey4OMic63hDOMsY9QQbKb7pY
-# bEzK7WlMGw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTMyMDE0
+# MDRaMC8GCSqGSIb3DQEJBDEiBCCtbJTMBIyMAavXepKltI93kA4RyyGSx1MM0DAe
+# I2OOkjANBgkqhkiG9w0BAQEFAASCAgATNadhVgnHr8axIgitNon4hoym5/bx96hh
+# sayKAUI6nERrDfL2IBbxZb2loIG5nHr5UbPa3cesUXtC+7CKRTWnjKPsprkR6Hks
+# 8OfEfhWabRJjwYIJt8Vay2eLw+s7tHByZt3bdOgoZwM1x1nte2ab+ZTTrj9IC31D
+# dlw0eLC8djNmxRoaV8Kl07rwZCmZ0A2r9q6Bm9hpkwIcS+PWmdSxdNrTm3Elyzcw
+# 0KAhfJb2zAbNwbbGr+ruiDkx6R9hPcT42jMmHG5ghuTfEy2m27xkT/sQijQ8sQTM
+# FS0scOZWBidFQfjk+kLSaS9xyFsT9r7xHz75tyQEdtBXde75OwC9ADU3e7ZWNUpu
+# +s58mrNXXkq+0aZKRTBm8Qy/Kk4sevSEwiju0VTZHQGiUN6l7cn0NGgqHBMbGZvn
+# XzRFyzNCKt6YGbq2PTYBNtD1J+LWTXqTPStXD9eMcM3x7AHWo4hrHVs01qoH7U/S
+# d9I3r9FfiK0iJjJmRRpWGXBHNJG6beQvRzmHzAJfuZP3jAZ4Kq80vszKlwbEN+qr
+# t09I/hKFrO+RuqaLotuKu76z63eR5Vs42zOD1/fH2pt/ekP007wUhI+etANwdeaD
+# BTE6AfLSNB1DMfKXSqJjof4iCSrDcJ+1oSXtjHqrRJTL8O/iw0Fl7EePuZ0JgiCO
+# FT15XHJ9Mw==
 # SIG # End signature block

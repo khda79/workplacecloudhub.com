@@ -3,7 +3,7 @@
 .SYNOPSIS
 Collects Intune managed apps, assignments, and reported installation states.
 .VERSION
-1.2.0
+1.2.1
 #>
 [CmdletBinding()]
 param(
@@ -31,6 +31,23 @@ function Get-IntuneManagedAppDeploymentState {
         'notapplicable' { return 'NotApplicable' }
         default { return 'Unknown' }
     }
+}
+
+function Get-IntuneAssignedManagedApps {
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Apps,
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Assignments
+    )
+    $assignedIds = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($assignment in $Assignments) { [void]$assignedIds.Add([string]$assignment.ApplicationId) }
+    return @($Apps | Where-Object { $assignedIds.Contains([string]$_.ApplicationId) })
+}
+
+function Get-IntuneManagedAppStatusSource {
+    param([Parameter(Mandatory)][string]$ApplicationId,[int]$ObservedRows,[Parameter(Mandatory)]$AssignedIds)
+    if (-not $AssignedIds.Contains($ApplicationId)) { return 'NotAssigned' }
+    if ($ObservedRows -gt 0) { return 'DeviceInstallStatusByApp' }
+    return 'NoReportRows'
 }
 
 function Get-IntuneManagedAppInstallStates {
@@ -94,7 +111,7 @@ try {
     $smartRoot = Split-Path (Split-Path (Split-Path $PSScriptRoot -Parent) -Parent) -Parent
     . (Join-Path $smartRoot 'Config/SmartM365-TenantContext.ps1')
     $effective = Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot
-    Import-Module (Join-Path $smartRoot 'SmartInventory/Common/SmartM365.EvidenceCollector.Common.psd1') -MinimumVersion '1.0.9' -Force
+    Import-Module (Join-Path $smartRoot 'SmartInventory/Common/SmartM365.EvidenceCollector.Common.psd1') -MinimumVersion '1.0.10' -Force
     $script:Runtime = Initialize-SmartM365EvidenceRuntime -ScriptPath $PSCommandPath -EffectiveConfig $effective `
         -DefaultOutputRelativePath 'Intune/WorkplaceScope/ManagedApps' -OutputPath $OutputPath `
         -LatestCsvFolderPath $LatestCsvFolderPath -ValidateOnly:$ValidateOnly `
@@ -147,8 +164,11 @@ try {
             })
         }
     }
-    Write-SmartM365EvidenceLog "Managed app catalog collected: apps=$($apps.Count); assignments=$($assignments.Count). Starting one installation report per app."
-    $deviceStates = @(Get-IntuneManagedAppInstallStates -Apps $apps.ToArray() -RunId $script:Runtime.RunId -CollectedAtUtc $script:Runtime.CollectedAtUtc -ExportTimeoutSeconds $ExportTimeoutSeconds -MaxItems $MaxItems)
+    $assignedApps = @(Get-IntuneAssignedManagedApps -Apps $apps.ToArray() -Assignments $assignments.ToArray())
+    $assignedIds = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($app in $assignedApps) { [void]$assignedIds.Add([string]$app.ApplicationId) }
+    Write-SmartM365EvidenceLog "Managed app catalog collected: apps=$($apps.Count); assignments=$($assignments.Count); assignedApps=$($assignedApps.Count); unassignedApps=$($apps.Count-$assignedApps.Count). Starting installation reports for assigned apps."
+    $deviceStates = @(Get-IntuneManagedAppInstallStates -Apps $assignedApps -RunId $script:Runtime.RunId -CollectedAtUtc $script:Runtime.CollectedAtUtc -ExportTimeoutSeconds $ExportTimeoutSeconds -MaxItems $MaxItems)
     $statusByApp = [Collections.Generic.Dictionary[string,object]]::new([StringComparer]::OrdinalIgnoreCase)
     foreach ($app in $apps) {
         $statusByApp[$app.ApplicationId] = [ordered]@{ ReportedInstalledRows=0; ReportedFailureRows=0; ReportedNotInstalledRows=0; PendingRows=0; NotApplicableRows=0; UnknownRows=0; ObservedRows=0; InCollectedCatalog=$true }
@@ -173,7 +193,7 @@ try {
         [pscustomobject][ordered]@{
             ApplicationId=$_
             InCollectedCatalog=$counts.InCollectedCatalog
-            StatusSource=if ($counts.ObservedRows -gt 0) { 'DeviceInstallStatusByApp' } else { 'NoReportRows' }
+            StatusSource=Get-IntuneManagedAppStatusSource -ApplicationId $_ -ObservedRows $counts.ObservedRows -AssignedIds $assignedIds
             ObservedRows=$counts.ObservedRows
             ReportedInstalledRows=$counts.ReportedInstalledRows
             ReportedFailureRows=$counts.ReportedFailureRows
@@ -188,7 +208,7 @@ try {
         throw 'Every managed-app device state is Unknown; source install-state values require qualification before publication.'
     }
     if ($MaxItems -gt 0) {
-        Write-SmartM365EvidenceLog "Sample complete: apps=$($apps.Count); assignments=$($assignments.Count); statusSummary=$($aggregate.Count); deviceStateRows=$($deviceStates.Count). No canonical CSV published."
+        Write-SmartM365EvidenceLog "Sample complete: apps=$($apps.Count); assignments=$($assignments.Count); assignedApps=$($assignedApps.Count); statusSummary=$($aggregate.Count); deviceStateRows=$($deviceStates.Count). No canonical CSV published."
         return
     }
     $rules = $global:SmartM365CsvValidationRules
@@ -210,7 +230,7 @@ try {
         Export-SmartM365EvidenceDataset $script:Runtime $export.Name $export.Rows $export.Columns -SingleSerialization | Out-Null
         $export.Rows = $null
     }
-    Write-SmartM365EvidenceLog "Managed apps collected: apps=$($apps.Count); assignments=$($assignments.Count); statusSummary=$($aggregate.Count); deviceStateRows=$deviceStateCount. Summary counts are report rows, not unique devices." -Level SUCCESS
+    Write-SmartM365EvidenceLog "Managed apps collected: apps=$($apps.Count); assignments=$($assignments.Count); assignedApps=$($assignedApps.Count); unassignedApps=$($apps.Count-$assignedApps.Count); statusSummary=$($aggregate.Count); deviceStateRows=$deviceStateCount. Summary counts are report rows, not unique devices." -Level SUCCESS
 } catch { $failure = $_; throw } finally {
     try { Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null } catch {}
     if ($script:Runtime) { Complete-SmartM365EvidenceRuntime -Status $(if ($failure) {'Failed'} else {'Success'}) -ErrorRecord $failure -FailureStage 'IntuneManagedAppsInventory' }
@@ -219,8 +239,8 @@ try {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDo7+HJbxJ5tMy6
-# EIL3JPlvk8J9IFAoz/0XNUcxnS+eiaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB4KEZFP20n7I5l
+# LJ7XG2AoUAlWSG+Us23M9xtbM13fFqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -353,31 +373,31 @@ try {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIFhhdGChaiI4ybWEp+m8HHojQQUMNFYoBWzJbqitUWcOMA0GCSqG
-# SIb3DQEBAQUABIIBgEBxJJ5WeYEoSd0INngOXUe7yca+4TZgf8Ezn5qOrsvNYITv
-# nv4bPSAYec4hiMiIG3vClwNY/oH7AHdZgqtpkuyV6Z1DMXmIOf5N5GBOwoWv3Mr3
-# 9t4HlAVGzrdDvbssCrW/UZZpsrzW0W77WeI5NME1v1/C0OttQHUGBAxnQ8O87V8e
-# SbDUaCBIhxITLMVJD5j8KetiwqZltrePaILrhgPsyriepmw/LiX0Wo/mH2gOkmlR
-# SbBBMnbSCOwKMp/OpXmqH4L5tJupdk2xMCEH4zWk5kQGd81Dp+OYQdJoezIEvnPv
-# UA5OIt/3MJOdHIIQKJGg3r/1DhcyDCQ3veNz8MFUPvwtU/hi2mB8WqSlD7473Nm1
-# i0XwnbkTcnt48Mswmw2B5BM/uEklqESYXUVe3hfUZj/6Wg70d8sd50wsJclXn4+J
-# DgdTP2onSnTwnDbOH9QKv//p5coq6+EmUupUcTfEbsSA2VN5UmNRf/NijSQkTGHH
-# w/TAM6UtlbbyFDnjWKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIEB/WTL0CFACkCxhhAakVEe4s361c6iUChLG11smuyF+MA0GCSqG
+# SIb3DQEBAQUABIIBgK472fZ9cOp19rWlcJZyFVgtwoRnvm8xwKCsoouiA4DezyR1
+# obHtmVOgfBX1h+BN8ih2T/w1BpIN5Dz7tivoxgQoGmVKT0UrsZnyqlk8ZY346cPe
+# uu+Yzuc8I0CkJTvhu+14U3vMymBmbuEKSJwoAm4Gy6vRMhe9PL3KvRPmdP970c20
+# 0ICxLlE9yjUyffOvWAllIGb0+Xn4gGclGZCabQuC5YE0T6JfuxxzUGnUmIF4eXXn
+# RMYZFC0ANrtNyJG2VVJvSU7n9Hrz3m3VgbYvEcndkIwYp4UoA9CA5+k75Yqt/HnI
+# uCS+EaQzw0vVo1IybeOVHGYNs9M+2+FE5hIQOujujoI3JWtsxfV/hDMqEjGY7eSb
+# QDDO/6axCajOvTnvZE8+dkW9pXbKdRjkJFTZ/PSu6KhTZ2KSugvKawJLrtBab8DI
+# ZIbeFmk67FgeumUHO8LATQ7oWcKfI96GZaWrrd118MbVcSM5RKpVmLd3KXtlW1R/
+# 0T8Srj6mVVS3hfomBKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTMxOTIz
-# NTRaMC8GCSqGSIb3DQEJBDEiBCCl1sDdfnjkES316TKguFynKiITNMQOyF2yOoRP
-# vAN+WjANBgkqhkiG9w0BAQEFAASCAgAK3sG3wQkZratzrt/TUZvUS/vVs2dLNZWm
-# 9DR9K5aFhOCnHIhyV9ny3P88IsEDNSEm6qmM7d5YqWi33C1XbYbwwAgHYho4lxv5
-# 4+pSNFEzXFm3sDrifZdhbS8oKcQZ0fQcz1LK16IFIVnaSXypYkBGHQU5jjfVJ2MH
-# uma55cdj1QEAVQYovUqmxUMnmr4JI8QqyQiy6xxjkjbLhYl3bEWCHhdKGC7Gay1t
-# 7qG90n0baw9WU0UqzDNyQ4xCjn+bhb/40zyOvs6UE95hQKv6ELNAmLnmt7R3RFCU
-# EfI1P0twp3CDGuBYurGhzWTQn+dEi4Kcl3bKaXrrcWRVpUBIVk+y9IvlIsrWNfT6
-# TsxAQyXKsp5bOm5ahPa2yQkPs/v6NparDMg8oUOX4VwLsDA1iaafv2Lm0YhvVFJC
-# JxKQkfXIYGGhxXiV+Q35X9DzaNGjtY2J2nfdveVVI0Y5uFLA0Iz4P5/5sFMpqGSh
-# x+mOlz1RlZzYFS51/3fsTPSJ6YlqPGE6xwH6gZqvWuSVMuNC7IaU8OsUBNv7kfIN
-# NFJu2curgzuQZqCK1VKsEBKeAEw6P03p5nopOrPVUSKkI+MozJDEYCq53k5tfHvt
-# v7ku2EI09HtIry9wCmuQl1Pc/+4y3PeiCecCeXAAe//0xWr0tIMZkxOVkQ8RL2ql
-# x6Z6tT3Hbw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTMyMDE0
+# MDNaMC8GCSqGSIb3DQEJBDEiBCAWfLkI9EezR0k3Vg+G4AGT1pY39levXaCOt0DN
+# Rcnc/zANBgkqhkiG9w0BAQEFAASCAgCjFp7wSvWyV2/TZCE/fVpBQFO4RzKQ3miN
+# 6oMh/sNR5mexz8Xz0SPVo8zrd+y8Q/c/I21JXE9VSBDR63gZ6PEJW0agkHEIwCWk
+# QHAT9oOh4/S9Wu5tYwyf6SuJ+KGlFH7aL8gzIc52w5P9ROCmNMirZJXH7dJjKNf5
+# Oxw5ckLrm2wGy7iG9LjiG0Dl3o2EjptGzwkFv6OdH+YQVdrtvq9uiF+3oVy4L/RT
+# PvsHkCE/7gANUy8IuLQpqhnSyEQiQ1nZ6Hw7Ie+3QUx2XjbnhQdOhVksVWL8Hc9d
+# MAJRSyDlJ/o8NfACPXF5iNyr5frVdAR/xGZC5ZiH2g0uUFu9L95+n2rSW11ZUaQG
+# Y/QNsj+lZELF/pTPkmd7TXLznCteNXW55azMM+WyrfqQsqeKn3Lkk5lP2247t79H
+# 6vG8OE9rAXAxW/gVT8dzNam7nk8nEDp0p5k22p7XUst0SMQhjOg+kHZnp6eHi4Bq
+# JojdudUtUaKvZlbQmJfCVRbiuSHmRhtxioL5eisCdBcyeZo002w0jgNUYdAIAlkO
+# hXfzwiK8tc9fl1WOcKqq0frFKfEo+kOJ/mdaqS+x6+hf7/FwkF3GjaaDe1KsQRB9
+# SwnitotZ2CtstkpKYcskRcWx5DUHGKVMcXF9OS2JH3adyGLrRvlli6sPYaBDsbeQ
+# 4F6HEViJWA==
 # SIG # End signature block

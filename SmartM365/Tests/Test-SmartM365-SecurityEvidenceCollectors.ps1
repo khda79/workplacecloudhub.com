@@ -2,7 +2,7 @@
 .SYNOPSIS
 Runs offline contract tests for the three new Microsoft 365 security evidence collectors.
 .VERSION
-1.0.1
+1.0.2
 #>
 [CmdletBinding()]param()
 $ErrorActionPreference='Stop'
@@ -44,16 +44,42 @@ $symbolicRetryResult=Invoke-SmartM365EvidenceGraphRequest -Uri 'https://example.
     return [pscustomobject]@{ok=$true}
 }
 if($script:symbolicRetry-ne 2-or -not $symbolicRetryResult.ok){throw 'Graph symbolic TooManyRequests retry simulation failed.'}
+$symbolicUnavailableMessage='Too many retries performed. More than 3 retries encountered while sending the request. (HTTP request failed with status code: ServiceUnavailable.{"error":{"code":"ServiceUnavailable"}})'
+$symbolicUnavailableStatus=0
+try{throw [System.Exception]::new($symbolicUnavailableMessage)}catch{$symbolicUnavailableStatus=Get-SmartM365EvidenceStatusCode $_}
+if($symbolicUnavailableStatus-ne 503){throw "Graph symbolic ServiceUnavailable classification failed: $symbolicUnavailableStatus"}
+$script:unavailableRetry=0
+$unavailableResult=Invoke-SmartM365EvidenceGraphRequest -Uri 'https://example.invalid/unavailable' -MaxRetryCount 2 -NoSleep -Invoker {
+    $script:unavailableRetry++
+    if($script:unavailableRetry-eq 1){throw [System.Exception]::new($symbolicUnavailableMessage)}
+    return [pscustomobject]@{ok=$true}
+}
+if($script:unavailableRetry-ne 2-or -not $unavailableResult.ok){throw 'Graph symbolic ServiceUnavailable retry simulation failed.'}
+$retryHeaderSeconds=& (Get-Module SmartM365.EvidenceCollector.Common) {
+    $exception=[System.Exception]::new('HTTP 503')
+    $exception | Add-Member -NotePropertyName ResponseHeaders -NotePropertyValue @{'Retry-After'='17'}
+    try{throw $exception}catch{Get-SmartM365EvidenceRetryAfterSeconds $_}
+}
+if($retryHeaderSeconds-ne 17){throw 'Graph Retry-After header parsing failed.'}
+$script:terminalAttempts=0
+try{
+    Invoke-SmartM365EvidenceGraphRequest -Uri 'https://example.invalid/unavailable-terminal' -MaxRetryCount 2 -NoSleep -Invoker {
+        $script:terminalAttempts++
+        throw [System.Exception]::new($symbolicUnavailableMessage)
+    } | Out-Null
+    throw 'Expected terminal ServiceUnavailable failure.'
+}catch{if($_.Exception.Message-ne $symbolicUnavailableMessage){throw}}
+if($script:terminalAttempts-ne 2){throw 'Graph ServiceUnavailable retries were not bounded.'}
 $accessDenied=$false
 try{Invoke-SmartM365EvidenceGraphRequest -Uri 'https://example.invalid/denied' -NoSleep -Invoker {throw [System.Exception]::new('HTTP 403 forbidden')}|Out-Null}catch{$accessDenied=$true}
 if(-not $accessDenied){throw 'Graph 403 terminal-error simulation failed.'}
-Write-Output 'PASS: pagination, empty, numeric and symbolic throttling, and access-denied simulations'
+Write-Output 'PASS: pagination, empty, numeric and symbolic throttling, ServiceUnavailable, Retry-After, bounded retries, and access-denied simulations'
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCyrRTarGBR/Dd0
-# Bl7egeqFgXuTy/pKtGpCPcHBJuq0l6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCCZyU7BRdy38Dj
+# 3MuOZ4iQ7H6BwsO905kbho24JhKbdaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -186,31 +212,31 @@ Write-Output 'PASS: pagination, empty, numeric and symbolic throttling, and acce
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIH4UKq5N4XoYD56EjjoIvNC7IVRI5CHCa1QREYkFpT8NMA0GCSqG
-# SIb3DQEBAQUABIIBgCfUJXST+T/BUx4eactLnYuR+xa7ELGhARePQUL6aDMQcG3/
-# qxuj/6m9yjafcx7pUngmNlCYQtdfsHSRRRZHqqizVwPO3HKP4UJ/P612l5NP08dl
-# ZwZRCwdFPN7l69+GWGrhkxaLVtWype9gCQx5p+XeIseGzos9ejmMonxSXr6jPIHv
-# 0FdGHyYOIuDHziNEegF4GzNzYLaRMpzVHhNCYSm0YQi9q5nWhZB4q8SUWOlc38ST
-# NqLfXmSmSyYpqhwHhBoNtOd+XfeBg60VBX9kCpmjrrnT/c8u3UIG8KMP0xxkXm/3
-# gjZF2Km43e8HUyi40lbAWibHlOBLCP/dbP8l7kgXllubdSZM/n3Iz/3T6xHWDcza
-# N78UgSj5Zvz8tz60xZ/WA8Oc+Le1MhV5T4jLpDiycnFeEeK6oCLk4ADXNpoVsEfo
-# fCULzmLu/xh5fN3WyTbUXlkrxOUQXFszujOtPvHJVDN8tNEjLg0zPzC6/l2IwSow
-# gv1wS5vcIOJ4WsdH1aGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIL6CU2pXNgUfZQew+i3aMErcLyXqfdqJzcC7BWlY+SZMMA0GCSqG
+# SIb3DQEBAQUABIIBgBKAhsGNr7WLMzKULQOGISs0W54JIy018i98fuoYH+1dmMOD
+# PEzOmg2xQVweRl8A40GucCqyyiGJtx/o7pDgJEir6cRyJglCzLV1r16JwUxXFl0r
+# U2RAlQzWUYnms6w6+jPfcnanT1QCByNOV7C1wezjDuRQUh4Hq9opmRN+85wNYpDd
+# qugdsfnp8HG+Lz1lAIGHU38vSaFAS5C4cwmHCHywcsWnW1C1RRF8T+j9zjRt2VoN
+# 4hCSrV/N1yEFPRUlWlICTv+jY1GGZ+17c2gtuervQkdcyoXhYkL+5an04p05dzkV
+# bPnOG3m2mvpbIO/mqPiVqn/1+NwqjplEbHf9uoj5c22A3H2g3okWR/Y6XIgR1Jd3
+# i5q4xVriPVvxdSJ1/YeQis4kNqQveAu/VIBPhLQILAgcnAlAqdmeGgfcJtrTN4+g
+# gtF4rf3Px5XgVIysCbqdnywmkJyeOtnoNrBiBZHMm3PYgPKiw1NgzvzQ5elLmjEJ
+# xSJAl3awwq+6ZqrkH6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjIxMjA0
-# MTFaMC8GCSqGSIb3DQEJBDEiBCAkuF0x7b/nSt/7DDCOHdL2XVrWIrr+722wKNEV
-# dxrVTzANBgkqhkiG9w0BAQEFAASCAgBkTJOdfHuv4LN4wo9oQFTy37IMMjmWsSpM
-# PjjoxEcrA5bV3TDjBjBHvkv7NADZgusYVED/Vd1r2K8yAFoVZIq3zpnFKG2fM/ak
-# Zj0HIP0ScXcVcMgxFI0a+wlfoDOfaTMd3JwEiTHeTf62yMXX2RsmbtoIorKz1iUM
-# JGJzR1ZavrUYyP2R6Jm/oR6LcLph/w1UrSfbAhG4ZDPaEkb0ifkyrTzJJEXioSo/
-# uJ1MpXTrkKFCbR3UCiB2ER+sjQltYvtvqpkyacCWcPF4viE0ZO1tcVDRGfgYTYOe
-# 3r6t6Eg3A9gHrkUPaWCo+U1jpnQIO89RcLOCDUpSGpEVLSZmb5xfkg9AT6zbbHnJ
-# V/nbLh6RvLjR9tt4MWwBJDN508tkWftx9Fhh3r5rPHt3vjuZD/PY0sRrG3Y1nsbh
-# xiQk+EymcFJwoR87JeYyBhfl2HKCeMNYF1HBczqiX5KCoF7P3Fclqv/9fU1GRndg
-# YpSu2UW4x5UgjW9+DiPgn1E7BUoLTUg+pcbcAw49bwKArjM0Vcdyrm6MtR1bXNew
-# 1sEPPC/a/RK1h99NNEswZiBgJGjguzDvZPkxP+LSR/OBNPaBsmheLMxINNwBryef
-# 4ff+CS48du5OaweQ5MPFDZRGALz3QOhtjO1tIYBuALiv/ch4x5XGLvi7TPjYUMMk
-# IKA/QuZiEQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTMyMDE0
+# MDRaMC8GCSqGSIb3DQEJBDEiBCCK6thQhFJxtphvb+N3C5JKpXvkDl4ms9rCoin1
+# /T4xgzANBgkqhkiG9w0BAQEFAASCAgCSzRyAGibShC+KJs4VNFmZZfJTcIhBCAZ8
+# mrtE9f4SjH70ga+U0H4GtmaRCOz2A17XSzPzw5f1y7Vb5LtjBoulvgvOSS3RG2hp
+# e+19ETfKMIa5kVvYiK5khDuIf/9ms5yc0qi6QfLeSLON+GDv7dxSwpUzQToBfSUG
+# HfuYb7rcmky1P16BDjmzhlhwuOT4mrz1lvuogmZju3BO9x1zJ+TQthxDbMqu+18d
+# 0gAOdeuEPTrwiaWq9YN8y1JcZh7y3ylf03Xp5a54YMABEn2h6YVmE0yIZG5sJ14q
+# QaH0Q9SoZEObLX9X6XABQ/V0trNcvs9J6Sw4d/cx76w9Pe6qyTqgBP8aUJM+ibQu
+# vVevmQX6OYWAeiM64O0NXkByKCHMPtIcWOfos8CM/2rJmc3ia3VJbfL9naz8IIG9
+# MSxJIXOgKAfseRJWhxy8B/b0UPh4Be2An61tdJbp+G2wbF97xG2ZdvOZ+kz1BHhG
+# tO++GTq/MFcrUPWSUMbtlUle6iPCk6fQgZDTweFAApT0OOSSUDyXESFjhb6Wi9PP
+# Mv+DfdNutph2MvGeC7e+0/07Ryv15+JulxrjS7+30k/4uPqLeLa7k4ml4T9xuyvc
+# SjDYj9gCiWDNHtziihbnUFIMUtFcS4112VThlZRs9bt9zBndeIxTF0SR4uQhMA4X
+# YTMpcf9YPg==
 # SIG # End signature block

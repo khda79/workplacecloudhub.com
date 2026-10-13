@@ -133,7 +133,33 @@ function Get-SmartM365EvidenceStatusCode {
     try { if ($ErrorRecord.Exception.Response.StatusCode) { return [int]$ErrorRecord.Exception.Response.StatusCode } } catch {}
     $message = [string]$ErrorRecord.Exception.Message
     if ($message -match '(?i)\bTooManyRequests\b') { return 429 }
+    if ($message -match '(?i)\bServiceUnavailable\b') { return 503 }
     if ($message -match '(?<!\d)(?<Code>400|401|403|404|408|409|429|500|502|503|504)(?!\d)') { return [int]$Matches.Code }
+    return 0
+}
+
+function Get-SmartM365EvidenceRetryAfterSeconds {
+    param([Parameter(Mandatory)]$ErrorRecord)
+    $exception = $ErrorRecord.Exception
+    $response = Get-SmartM365EvidenceProperty $exception @('Response') $null
+    $headerSets = @(
+        (Get-SmartM365EvidenceProperty $exception @('ResponseHeaders') $null),
+        (Get-SmartM365EvidenceProperty $response @('Headers') $null)
+    )
+    foreach ($headers in $headerSets) {
+        if ($null -eq $headers) { continue }
+        $retryAfter = Get-SmartM365EvidenceProperty $headers @('Retry-After','RetryAfter') $null
+        if ($null -eq $retryAfter) { continue }
+        $delta = Get-SmartM365EvidenceProperty $retryAfter @('Delta') $null
+        if ($null -ne $delta) { return [Math]::Max(0,[int][Math]::Ceiling($delta.TotalSeconds)) }
+        $date = Get-SmartM365EvidenceProperty $retryAfter @('Date') $null
+        if ($null -ne $date) { return [Math]::Max(0,[int][Math]::Ceiling(($date - [DateTimeOffset]::UtcNow).TotalSeconds)) }
+        $raw = [string]@($retryAfter)[0]
+        $seconds = 0
+        if ([int]::TryParse($raw,[ref]$seconds)) { return [Math]::Max(0,$seconds) }
+        $retryDate = [DateTimeOffset]::MinValue
+        if ([DateTimeOffset]::TryParse($raw,[ref]$retryDate)) { return [Math]::Max(0,[int][Math]::Ceiling(($retryDate - [DateTimeOffset]::UtcNow).TotalSeconds)) }
+    }
     return 0
 }
 
@@ -149,7 +175,11 @@ function Invoke-SmartM365EvidenceGraphRequest {
         catch {
             $status = Get-SmartM365EvidenceStatusCode $_
             if ($status -notin @(408,409,429,500,502,503,504) -or $attempt -eq $MaxRetryCount) { throw }
-            if (-not $NoSleep) { Start-Sleep -Seconds ([Math]::Min(120,[int](5*[Math]::Pow(2,$attempt-1)))) }
+            $backoffSeconds = [Math]::Min(120,[int](5*[Math]::Pow(2,$attempt-1)))
+            $retryAfterSeconds = Get-SmartM365EvidenceRetryAfterSeconds $_
+            $delaySeconds = if ($retryAfterSeconds -gt 0) { [Math]::Min(300,[Math]::Max($backoffSeconds,$retryAfterSeconds)) } else { $backoffSeconds }
+            if (-not $Invoker) { Write-SmartM365EvidenceLog "Graph request returned HTTP $status; retry $($attempt+1)/$MaxRetryCount after $delaySeconds seconds." }
+            if (-not $NoSleep) { Start-Sleep -Seconds $delaySeconds }
         }
     }
 }
@@ -253,8 +283,8 @@ Export-ModuleMember -Function Get-SmartM365EvidenceProperty,ConvertTo-SmartM365E
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDaU8EGB/UbbXZW
-# TwmfUVe0S/C7w1kjCcHIVsiWkJeIIKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDIhmaDwqCOjafN
+# L7utLOY2k9jobx+AAqpLRHv6V+rdXqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -387,31 +417,31 @@ Export-ModuleMember -Function Get-SmartM365EvidenceProperty,ConvertTo-SmartM365E
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIPQJFwSCOGAZCqz9CXVgxGtaM05yFoB56PUjZikU6sPaMA0GCSqG
-# SIb3DQEBAQUABIIBgEjdxsJhtjEsgage8iFod6Nu6pRgFgNyGeXWiS72tBifJEoM
-# epJsXEzBbcF/F0aFKegbhBoMuIOiDoiWE118KaxgZVtkbG5uLc6+jnjK8JVY1mgF
-# lDTgd20ALVQMq9mC3G1wSJbZs4Xen7CNZQp/V83UD2kTyQOriHMXAjRXeQNZoPCU
-# ZcC/TwmV3dsYw3iM+VCKb7X/qdRxDSWe70CWZWY0YiUyqvccwzZh4rbyxjb5ic3/
-# 6NVc0U6sg10sayJn4K4EFoVJlwXZhArFl0uCE6+UIKEjJ84078ohJzFo5YP3cx78
-# vlR3wnFMAi0+rnkvynOL5IyHPr715sGPHlrv9gmaNyq/WOvfwi5PbrBE/7c7NqkZ
-# aXMZarP4+nO6NSEOGSuOU1tk6RaI6KvJpfehwDf4RfsDqIr7KiD5bEFkw0S0YV4U
-# P/ZHR1jUctFf8KpKjMtLv/uRPP1FobLfkB4gHiS96Lc29bHlYYn5uPPsX5pDT4lE
-# fWJIo06JQRV9AlpTSqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIN2FvU5S5uDxAtae0bITuKhDe9CKXsILicwPZVIrCvqVMA0GCSqG
+# SIb3DQEBAQUABIIBgHLQ6eBln/Lx/cWehgC/6UjUetjBLTQWjxGI4y1zd6p3y/fs
+# NeAIaralamtBExiFHSWtEUnvgdT3gd3Rr6lKIkSzGRzI8VDP2P6QOno+UzXY+8WI
+# qJ3uRyXfAPydVgCX0OOnaTUvMwjSzka5gXRFOQrqAvq1xMf2K1gn/GKz0spaFwIb
+# t+muG2G1N5wRz5zYvqfq5FbEf9KVAuqffTWOlBOEHpYPqw9qXkeKqXDr4zqG8Kk2
+# /YhGFVYrLMo5Y/RLX+w8Iagdxc7eOYsQLjMAKSyDNeUObZr9ac8zsjzvOktfWxW4
+# Xg0H33nFRPFElkv3bjzYV8Rn1iaFV/LGgygwZmAoH4667G9NWv7JN5qpKgstF+Jk
+# n19jf/hxWW9s4+5XHgnYI2mlSOW58r5FTNe8ZLfs2x7vbuC0Bp6J/WXczayHDhSg
+# TIJWhm36F+OujJ4Reml8Ge3xqPfZZhPmCYhbVbFztKGMm6O5p0GfD/mDbrFY86M8
+# UI+CdjsNOeix+F6DTKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTMxOTIy
-# NDZaMC8GCSqGSIb3DQEJBDEiBCDKLz1+/2rtaSf/klWCPGHXvoznF0ij7uiFtWSe
-# qIrfiTANBgkqhkiG9w0BAQEFAASCAgA2Ovqyn5Tb8knsPvdQeprFlu+z0KMLNWh3
-# LWc+h9L7oQJMk7K1ygm6SN86bsq73U9FVQZB4VFCYqbCZv42TlqEzJRUW4cg729V
-# PM2aQ8OA0umOtMMsVZf8VV1l9Nd1Y3ghklWv4hL6Ve8YN6yLFCu7DbYg77ZmWiws
-# H8T3U4IBW8F71B6hQl06Dj+JCqiGvB0WWF4ifc6CZ6j2mOQBMj8YsF8w1qkRQYqJ
-# qP0Tqa25hMW1YvZJq+RWxsNWHN8EQuJOg+nQyejBAKhbAilblTgW3YodssgGDsRm
-# DbskbLpDxiXZAfIuM+/WSt4ofJaT5yhH0RDA6fFGYO17u3cPgUqaHnpJfP2l28Eu
-# 5ktGCweNKPCUDRIxtr+sCI0AmLWIq5iIPny9oNQxzggjhtOrbReM0MBQKYyDCctG
-# t/0f7zICBOPylxg5sx4PUn9oCcd8kATA5mgBe/TTZQDZ9qt2Fr0UqR8peBrGW8FA
-# izew7CPI9WYRJxbg/Ys4fUOoq5gF/U2ldU/ezdbYRCe99hFJLTotb/zq4ax/9K+H
-# IwYHdj3sNsnqR88RBx/EkfueRZmafloqhecaTXhilSME5Se3hDyN4Kmlv9wJloF6
-# gs3GB33AJF/Vp51XxoU8hh9HymAKnuiVjcf40SAggIHSHzaEjUNvdp8C4/CEqquF
-# VdAsfWbIhQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTMyMDE0
+# MDNaMC8GCSqGSIb3DQEJBDEiBCAOcttyYbr8zaRYQiyMczjRMdOErFrKP2mbgsu2
+# nOb00TANBgkqhkiG9w0BAQEFAASCAgAYf9kVPPt3WCpqsZHqodGb1kUT3KIhPMR/
+# k1DRzn7Gk42cRCSzFfgyeEb9q61zf50KbS1gEZP+P6sMvFK5tWBJ6hbpR40cfkuK
+# MvPc3aolofsT3hiKeoEJ8J3Jd4L8mLgGJq9TSOJ35lXCHArFggUnv386CIn+8g8m
+# ZMy+ivJqmyM3T0k0f84LM18slF+jWcGNs3kmGRwSDnUxCbyfBAqRY2nCYI31GMnw
+# Sekbd2OYE/wrw53QhupM+snnSEMf2yXqVagynI2BW2rolRIXdBLbClZQhmHpJQfG
+# Il3atdQOxkng3GeBHJt7uCJWUt6yWsNsEK/8PkXLAVIXdj5SCa+MOfPYYyWzjfA4
+# ivaR1sG+CpB/Rk2DxPzmSQ1UiTE0qGxF5rgn5c/16rqkUE/zchalCOTWS9AEzeQP
+# xbVufn9RPP7v0qKKYGALWjPmYLW6f4WtqXzYFRJqb0pmaVzSgOBFXVauDimUZPOa
+# WcKkoGe69/W6fJiipPcuxJJzd1Bk0YJJUScPU10hkpl3YfrAA8cCMwbtAN6/mPhy
+# EX4OOQmajprQmCniA5aEx4PZYWtCLBfXdMVCBACAa3GwDfMM0YOjUpV9Qv9FdLGd
+# IJInENRWnyf0ecmUpkxXx+CMxEFGte/RYFxaW42/5ARG2CcDwVR6kI80X88y05uS
+# ocnuYj6r0g==
 # SIG # End signature block
