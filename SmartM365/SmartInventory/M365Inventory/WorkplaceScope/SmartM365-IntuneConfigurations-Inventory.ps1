@@ -3,7 +3,7 @@
 .SYNOPSIS
 Collects Intune configuration definitions, assignments, and reported device states.
 .VERSION
-1.1.0
+1.1.1
 #>
 [CmdletBinding()]
 param(
@@ -118,7 +118,6 @@ try {
         }
     }
     $assignmentRaw = @(Invoke-SmartM365EvidenceExportReport -ReportName 'DeviceAssignmentStatusByConfigurationPolicyV3' -ApiVersion v1.0 -TimeoutSeconds $ExportTimeoutSeconds -MaxItems $MaxItems)
-    $statusRaw = @(Invoke-SmartM365EvidenceExportReport -ReportName 'DeviceStatusesByConfigurationProfileV3' -ApiVersion v1.0 -TimeoutSeconds $ExportTimeoutSeconds -MaxItems $MaxItems)
     $assignmentStates = @($assignmentRaw | ForEach-Object {
         $policyId = [string](Get-SmartM365EvidenceProperty $_ @('PolicyId'))
         $deviceId = [string](Get-SmartM365EvidenceProperty $_ @('IntuneDeviceId'))
@@ -131,6 +130,8 @@ try {
             RunId=$script:Runtime.RunId; CollectedAtUtc=$script:Runtime.CollectedAtUtc
         }
     })
+    $assignmentRaw = $null
+    $statusRaw = @(Invoke-SmartM365EvidenceExportReport -ReportName 'DeviceStatusesByConfigurationProfileV3' -ApiVersion v1.0 -TimeoutSeconds $ExportTimeoutSeconds -MaxItems $MaxItems)
     $deviceStates = @($statusRaw | ForEach-Object {
         $policyId = [string](Get-SmartM365EvidenceProperty $_ @('PolicyId'))
         $deviceId = [string](Get-SmartM365EvidenceProperty $_ @('IntuneDeviceId'))
@@ -150,6 +151,7 @@ try {
             RunId=$script:Runtime.RunId; CollectedAtUtc=$script:Runtime.CollectedAtUtc
         }
     })
+    $statusRaw = $null
     $currentByKey = [Collections.Generic.Dictionary[string,object]]::new([StringComparer]::OrdinalIgnoreCase)
     $undatedStateRows = 0
     foreach ($state in $deviceStates) {
@@ -172,6 +174,7 @@ try {
         }
     }
     $currentStates = @($currentByKey.Values | ForEach-Object { $_.Row })
+    $currentByKey = $null
     $unknownStates = @($deviceStates | Where-Object { $_.ReportedApplicationState -eq 'Unknown' }).Count
     if ($deviceStates.Count -gt 0 -and $unknownStates -eq $deviceStates.Count) {
         throw 'Every configuration device state is Unknown; source status values require qualification before publication.'
@@ -221,8 +224,20 @@ try {
         @{Name='Intune_ConfigurationStatusCoverage';Rows=$statusCoverage;Columns=@('AssignmentStatusReportState','AssignmentStatusRows','DeviceStatusHistoryRows','DeviceStatusCurrentRows','UnknownDeviceStatusRows','UndatedDeviceStatusRows','CurrentStatesOutsideCollectedCatalog','RunId','CollectedAtUtc')}
     )
     foreach ($export in $exports) { Assert-SmartM365CsvDataCompleteness -Data $export.Rows -BaseFileName $export.Name -Columns $export.Columns | Out-Null }
-    foreach ($export in $exports) { Export-SmartM365EvidenceDataset $script:Runtime $export.Name $export.Rows $export.Columns | Out-Null }
-    Write-SmartM365EvidenceLog "Intune configurations collected: policies=$($policies.Count); settings=$($settings.Count); assignments=$($assignments.Count); assignmentStates=$($assignmentStates.Count); deviceStateHistory=$($deviceStates.Count); deviceStateCurrent=$($currentStates.Count); unknownStates=$unknownStates." -Level SUCCESS
+    $assignmentStateCount = $assignmentStates.Count
+    $deviceStateHistoryCount = $deviceStates.Count
+    $deviceStateCurrentCount = $currentStates.Count
+    $assignmentStates = $null
+    $deviceStates = $null
+    $currentStates = $null
+    [GC]::Collect()
+    foreach ($export in $exports) {
+        $rowCount = $export.Rows.Count
+        Export-SmartM365EvidenceDataset $script:Runtime $export.Name $export.Rows $export.Columns -SingleSerialization | Out-Null
+        $export.Rows = $null
+        if ($rowCount -ge 100000) { [GC]::Collect() }
+    }
+    Write-SmartM365EvidenceLog "Intune configurations collected: policies=$($policies.Count); settings=$($settings.Count); assignments=$($assignments.Count); assignmentStates=$assignmentStateCount; deviceStateHistory=$deviceStateHistoryCount; deviceStateCurrent=$deviceStateCurrentCount; unknownStates=$unknownStates." -Level SUCCESS
 } catch { $failure = $_; throw } finally {
     try { Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null } catch {}
     if ($script:Runtime) { Complete-SmartM365EvidenceRuntime -Status $(if ($failure) {'Failed'} else {'Success'}) -ErrorRecord $failure -FailureStage 'IntuneConfigurationsInventory' }
@@ -231,8 +246,8 @@ try {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBPbXP2rYUAGjVF
-# ttidKJVu2lUAX1H+Za4FF4bDh+0NYaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA97IrmYyxPZuuN
+# L7ZTjfgOhYcmRym82nSsmi5WpjBcLqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -365,31 +380,31 @@ try {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIOZvVbOB/NQnREZoA1x6tLkx6gn8NRPaWl1WiJOPcnrJMA0GCSqG
-# SIb3DQEBAQUABIIBgHonH0sKoecAoSUGHszm/JkAkvAhse/8TbWZi22jEffPWoMP
-# 0OV/6tHnGtH7/60z8KnLtxgQBEqgO0G0DUrxeLX7EbQ7aC506REpIjGEVrrb/1TO
-# n+aW+eEZc9g7fGHjCkuFoTgyq+/U03XWrDnfY0vuFPjJMV7UbNcm+mx9GxlPSeEp
-# NA+YazSS1a06cx+jqfwMAytQ1a4Nqj2/XkJwaOhUanQGr6VrFEn/TBb/pEcqWy/R
-# 31oItWxpDBuAQ/Z3s12W2i9s5BH952DwLEQaPDWkLkycdKQX5/gk0ISItvQgksjl
-# ZCCgMc0Jyret/huynggplHF/Dz9fDfWq6Jnt7nLov0VawYbZjZ9+hV7zPI3Jq49O
-# 5h2pdvj6Oqbwa++sNkRTX0ZTsIzhxighKFQYa3KWsJSTxKpRUYbUj/Gft/Yr8+Jp
-# /cezdVYqXbz1PX+9Us7QLkSBIaClJIXEkQbAFKNn9LPNVv7RhO0y9fHz6uNc9a7D
-# U3NkSIyaXNhD8E1JkqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIDp4nCbfAC+Zb0PqiBSqdZ+mIScco4aWw08krm85HR+jMA0GCSqG
+# SIb3DQEBAQUABIIBgBzX/srqxcdnRgqisG3O5FZAkcqJ6WHcekvRRAykF8bPsyFe
+# 0aHwPZrpQlKYC1/ErFUMrPXtHZ0rKLNWS5litTFwLyj75MlPbbpnTXRv4JmzbIHt
+# BPPSeBmwL87tw1EwyQ01jtsBcjdutXaXC0qoqEeiM/+Ro067lxH707M0v9OSIqoI
+# Rpw5hKWTMVgcsC/ENYH8sJElEgcojJkREQ4X1p7UjXDUoUOSTPwraAr/xyO0DFnT
+# d2BC8LL7pdkp/vbtxc6SFfRsVnmc8v6kN5AWYwPiELB7vUd89k6cnZkzZu4DI48t
+# rHVeZkVFpCuD7OSQZW2794a8TQTQ7jmNbHsDGBgf10ekkaCQz7ofIr/FHLYDutDh
+# ophz4i8yOoOf1VXw4X3ywEVeIbZHRr7aad4UXitYygEjJODleI9vmb5E6iGoMKaZ
+# xkUaZRNPMBzVXnQhOtjS4ecyC9oc8IQGS0MsHFFAV+OQunm1mYhwnEiAdIjkagKx
+# 86CemJYo0vLB29sBgKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTMxNTM4
-# NDJaMC8GCSqGSIb3DQEJBDEiBCA6j6WQkMymJQuqhJe1uVWK9HGUBAFrFT8euxyF
-# O65xCDANBgkqhkiG9w0BAQEFAASCAgAFDfldHfsOmsQ+PNThd1KklzuSXYdTntrA
-# O7Yy0vtpE/Kln+wur4GMBcxrHhhOQHWG5UlfusW2sr0CVPHicAs6OnoBr+u51cjF
-# On6frOLGMYF5hgdyuskA1PuX8ozYhOerk1ItviTMQUfMQGCviVVeKuCZA3DzyY5R
-# O0wyGQhK/tAZe9TLVlSekkg9Rbfx+hP7pBfkmaaOuN8gAbw0DNKPWqFWeqWzzvUL
-# Opkpp0U8bFW17MKIuyXeHSMFEsPXuhumJna9PTXGRVMlKRds7P03256wFfQ1eSDh
-# FgKjslWf4spKHNTIXy/7GLWglHAKbOREIxd75meWp7YNtCwk47hD8C2FJagrrw5p
-# GNxevej2TVow+IAvm7WD+ErP9cVxv47b/GTppy1lg+pkQ+tmEYulCMXpeAf2VrJK
-# oBCiwUcGq/Pl/1zEs+qN26W7cyF+zb37ii5zmLCBq0uKB2kOVRmhJUSJdY5cH/7v
-# 8OKGaNWk89GiOWrtvfAWW776PmnS6CdvjrsalaQfy+/4OO0FEBJcyXHUWlj3K1CT
-# M5ZmuG/3DndWq87Mb7KcCBzuHUPfsg50MkThpoBFyHpqKg9XbDnOAEFHfuwMN54G
-# /PDtdwdur2OnrQ4M1P8JRT/YkNJt4173nsxm6Wreog1JC9mY7Vf+P5bd2U45SIoS
-# /8psGy4SOg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTMxODQw
+# MDJaMC8GCSqGSIb3DQEJBDEiBCBrsb+Gk+I8EIeK5FxX7c61eRUerWqAy4XHUZfv
+# 8jzlCTANBgkqhkiG9w0BAQEFAASCAgBKeR1BV73kVFfEVLEnYyAHxzuZViqVqDIV
+# G/lpBFt0J3SanE+7jpudMiq0F3Bsf+FafherOF+F0ZpraPWUar2pHxxsekl/Xfjt
+# IgRNv7yzl4XHBpFBim6PLjjeiejFh9CoLK4C105l+9TOb7AoC6uxvDnEtuTmtDiy
+# 0vtYw8521wZmxBBbZfl6Qs4ohKC8b2gBpBpeexCl9fh2n5nXDC3SKGbV4iOOEpUv
+# rOhRKfzQXMVJeKprAe/4v/hVGWUWTIpsNtv8Ycgls6ZC1pzZ/vfXJWTsPTQEaLzs
+# NWHP5MM3zm5Hg0Jd4J3v9J9U0bq8qTa3rzNBx2q6d3PyA3alNn8I1yp4KnQqG85h
+# SHGZG49hMc9XUhr8Gkjkp+4q9Y7u1LaEgn8I3nq7uMMlaYR6H5wjFcJmX+ncM+Qw
+# aePtJfa2Wb5JLb/cOLZYuYhJ5ImDQleytC2IqafGvh6obRMDGDXCukQRTe9Yx5RH
+# waGUyx8c3Ah7XNgCSFZQtHloCEuTJyWiER8f/EQsNDs5iUTMGD7LcuEwQ3u1oGxk
+# u3FHAKSl4zZ3cHabhvJTE2r/eU9hzz4WCy4bnj3JVUfdP6FxoNCUQw80Q/i/mTKV
+# /sj4dINM29pBn/IEXe33eQq6gNn72hRS2oDkubMmpEQ7I/Ng7MLdlgb9dmmf5uSd
+# oNd/6Sr+GA==
 # SIG # End signature block
