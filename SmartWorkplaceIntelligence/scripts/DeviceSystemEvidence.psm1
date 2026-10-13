@@ -70,7 +70,9 @@ function Get-DeviceSystemEvidenceColumns {
       'Last Sync Raw','Last Sync UTC','Last Sync Time Basis','Third Party AV State','Third Party AV Raw','Third Party AV Products',
       'Expected AV Name','Expected AV State','Expected AV Raw','AV Qualification','AV Comparison',
       'Windows Update Reboot Required','Windows Update Reboot Raw','BitLocker OS Protection','BitLocker OS Protection Raw',
-      'BitLocker OS Conversion','BitLocker OS Conversion Raw','Data Quality Issues')
+      'BitLocker OS Conversion','BitLocker OS Conversion Raw','Data Quality Issues',
+      'Local Data Source','Local Data Freshness','Last Console Logon Status','Last Console Logon User',
+      'Last Console Logon UTC','Last Console Logon Quality','Last Console Logon SID')
 }
 function Assert-DeviceSystemCsvSchema {
     param([Parameter(Mandatory)][string]$Path)
@@ -80,6 +82,10 @@ function Assert-DeviceSystemCsvSchema {
     if (-not $header) {throw 'Device System source schema rejected: no CSV header.'}
     $names=@((($header+"`n"+$header | ConvertFrom-Csv)[0]).PSObject.Properties.Name)
     if (@($schema.files.'Intune_Devices_LocalSystem.csv'.columns | Where-Object {$_ -notin $names}).Count) {throw 'Device System source schema rejected: required columns are missing.'}
+    $recurring=@('LocalObservationUtc','LocalDataSource','LocalDataFreshness')
+    if (@($recurring | Where-Object {$_ -in $names}).Count) {
+        if (@($recurring | Where-Object {$_ -notin $names}).Count) {throw 'Device System source schema rejected: incomplete recurring metadata.'}
+    } elseif ('PlatformScriptLastUpdate' -notin $names) {throw 'Device System source schema rejected: observation timestamp column missing.'}
 }
 function New-DeviceSystemEvidence {
     [CmdletBinding()]
@@ -119,8 +125,29 @@ function New-DeviceSystemEvidence {
                 elseif ($usage -and $usage -ine 'Unknown') { $country=$usage.ToUpperInvariant(); $countryBasis='Primary user UsageLocation fallback' }
             } elseif ($userIndex.ContainsKey($userKey)) { $issues.Add('Ambiguous primary-user match') }
         }
-        $observationRaw=Get-SystemText $row 'PlatformScriptLastUpdate'
+        $localSource=Get-SystemText $row 'LocalDataSource'
+        if (-not $localSource) {$localSource='LegacyPlatformScript'}
+        $localFreshness=Get-SystemText $row 'LocalDataFreshness'
+        if ($localSource -eq 'IntuneRemediation') {
+            $localFreshness=Convert-SystemState $localFreshness @('Fresh','Stale') $issues 'LocalDataFreshness'
+        } elseif (-not $localFreshness) {$localFreshness='Not reported'}
+        $observationRaw=if ($localSource -eq 'IntuneRemediation') {Get-SystemText $row 'LocalObservationUtc'} else {Get-SystemText $row 'PlatformScriptLastUpdate'}
         $observation=Convert-SystemTime $observationRaw $OffsetlessGraphTimeZoneId
+        if ($localSource -eq 'IntuneRemediation') {
+            # Never repair a recurring local observation using a legacy script-state alias.
+            if ($observation.Quality -ne 'Explicit offset') {$observation=[pscustomobject]@{Utc=$null;Quality=if($observation.Quality -eq 'Missing'){'Missing'}else{'Unqualified recurring time'}}}
+            $legacyAlias=Get-SystemText $row 'PlatformScriptLastUpdate'
+            if ($legacyAlias -and $null -ne $observation.Utc) {
+                $aliasTime=Convert-SystemTime $legacyAlias ''
+                if ($null -eq $aliasTime.Utc -or $aliasTime.Utc -ne $observation.Utc) {
+                    $issues.Add('Conflicting observation aliases')
+                    $observation=[pscustomobject]@{Utc=$null;Quality='Conflicting observation aliases'}
+                }
+            }
+        } elseif ($localSource -ne 'LegacyPlatformScript') {
+            $issues.Add('Unknown local data source')
+            $observation=[pscustomobject]@{Utc=$null;Quality='Unknown local data source'}
+        }
         $age=$null; $freshness=$observation.Quality
         if ($null -ne $observation.Utc) {
             $age=($AsOfUtc.UtcDateTime-$observation.Utc).TotalHours
@@ -128,6 +155,27 @@ function New-DeviceSystemEvidence {
             elseif ($null -eq $MaxObservationAgeHours) { $freshness='Policy not configured' }
             elseif ($age -le $MaxObservationAgeHours) { $freshness='Within policy' } else { $freshness='Stale' }
         }
+        if ($localSource -eq 'IntuneRemediation' -and $localFreshness -ne 'Fresh') {
+            $freshness=$localFreshness
+        }
+        $consoleRaw=Get-SystemText $row 'LastConsoleLogonUtc'
+        $consoleTime=Convert-SystemTime $consoleRaw ''
+        $consoleStatus=Get-SystemText $row 'LastConsoleLogonStatus'
+        if (-not $consoleStatus) {$consoleStatus='NotCollected'}
+        $consoleStatus=Convert-SystemState $consoleStatus @('Observed','NotFoundInScan') $issues 'LastConsoleLogonStatus'
+        $consoleUser=Get-SystemText $row 'LastConsoleLogonUser'
+        $consoleSid=Get-SystemText $row 'LastConsoleLogonSid'
+        if ($consoleSid -and $consoleSid -notmatch '^S-1-[0-9]+(?:-[0-9]+)+$') {$issues.Add('Invalid console SID');$consoleSid=''}
+        $consoleQuality=if($consoleStatus -eq 'Observed'){$consoleTime.Quality}else{$consoleStatus}
+        if ($consoleStatus -eq 'Observed' -and (-not $consoleUser -or $consoleTime.Quality -ne 'Explicit offset' -or $null -eq $observation.Utc -or $observation.Utc -gt $AsOfUtc.UtcDateTime -or $consoleTime.Utc -gt $observation.Utc -or $consoleTime.Utc -gt $AsOfUtc.UtcDateTime)) {
+            $consoleStatus='Unknown'; $consoleQuality='Unqualified console logon observation'
+            $issues.Add('Console logon qualification')
+        }
+        if ($localSource -eq 'IntuneRemediation' -and $localFreshness -ne 'Fresh') {
+            $consoleStatus=if($localFreshness -in @('NotCollected','Error')){$localFreshness}else{'Unknown'}
+            $consoleQuality='Local collection '+$localFreshness
+        }
+        if ($consoleStatus -ne 'Observed') {$consoleUser='';$consoleSid='';$consoleTime=[pscustomobject]@{Utc=$null;Quality=$consoleQuality}}
         $syncRaw=Get-SystemText $row 'LastSyncDateTime'; $sync=Convert-SystemTime $syncRaw $OffsetlessGraphTimeZoneId
         $bootValues=@('LastRebootDate','Last Reboot Date','LastBootUpTime','LastBootTime' | ForEach-Object {Get-SystemText $row $_} | Where-Object {$_})
         $bootDistinct=@($bootValues | Sort-Object -Unique)
@@ -200,7 +248,11 @@ function New-DeviceSystemEvidence {
             'Windows Update Reboot Required'=$states['Windows Update Reboot Required']; 'Windows Update Reboot Raw'=(Get-SystemText $row 'WindowsUpdateRebootRequired');
             'BitLocker OS Protection'=$states['BitLocker OS Protection']; 'BitLocker OS Protection Raw'=(Get-SystemText $row 'BitLockerOSProtectionStatus');
             'BitLocker OS Conversion'=$states['BitLocker OS Conversion']; 'BitLocker OS Conversion Raw'=(Get-SystemText $row 'BitLockerOSConversionStatus');
-            'Data Quality Issues'=($issues -join '; ')
+            'Data Quality Issues'=($issues -join '; ');
+            'Local Data Source'=$localSource; 'Local Data Freshness'=$localFreshness;
+            'Last Console Logon Status'=$consoleStatus; 'Last Console Logon User'=$consoleUser;
+            'Last Console Logon UTC'=if($consoleStatus -eq 'Observed'){$consoleTime.Utc.ToString('o')}else{''};
+            'Last Console Logon Quality'=$consoleQuality; 'Last Console Logon SID'=$consoleSid
         }
     }
 }
@@ -209,8 +261,8 @@ Export-ModuleMember -Function New-DeviceSystemEvidence,Get-DeviceSystemEvidenceC
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBcORbErSIGyV0Z
-# ECl/iQ1WAxrdi93p2erBC92qxLBKxaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBuMZQptvRRO8UD
+# txnZvGJ6U/0bL4IOWKYdIxA8z+H6ZaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -343,31 +395,31 @@ Export-ModuleMember -Function New-DeviceSystemEvidence,Get-DeviceSystemEvidenceC
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEICaG7Kc/GAUEtcNZrXwsu3Fon+k01+8eMPb+TkztsG3WMA0GCSqG
-# SIb3DQEBAQUABIIBgE+O6OY4H4aE7iUqa0mIeN4ijz8ZMnTaDm4Ohxh+DL8XJTwR
-# Zrw8HXxWpkuBTW6j3vzui7lF62id7WBt+kGAcU8wewyAruw08S7AxVO+ZOQIIB6Q
-# Tvvuzh5hPBX0oXllPAIZD13xX6y4LQMj0lo9jFyfgWjOyJJ0taobby4i7x/44SSQ
-# 4i/UCxMf3Yk5vNlJkhcqnjnaPK9qAwBJfZUxgmXsYW3fLJmfE7TX5pwhqsrJ0Qur
-# ScgR0B1IQnddS5K37/UXOsiPvTFQTO0WbmPGB0HR7hK2u5s2al6Y9Hm4P/3RcHtj
-# xgTAVTw7mauPKR2q/LBLr6U6JTMxa69TQjjoXOdWb0umB+tS4ePzSbjYA7nfYgCx
-# nomeMPJVW/gLmTCDTCUyc2KcTZwbDw8E356hZDiidD9HjG1z/fodiW5sgV31gC4W
-# G+xUuz4qxI5TpU7iggv9yLc6jq0VAbabnhAxB0fpBQS/a/DVmzQbyimdaksCXARd
-# RsSrmBnQ7hY4pYZVa6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIC78sKc0FLZzQCUycFjdBIx0s+nS1rYHH0TW23EXO7sbMA0GCSqG
+# SIb3DQEBAQUABIIBgHhV/0V5Rj5dyQK5fqpN1gelFz/ayIRV6bNnVo3ngCS7I/nN
+# qOroxFIvacA7+r6hSfOVkpbsn/9VDwJTrL3JUeUSuyQcmKmxpGkaYbblxN89e+uh
+# bcJ/o9hRgbIU+TnIiZcMVegT8n/xNjJhIHIo7kHgZYRNpA5L4BSt3rFMjkXO6sNI
+# Fx9UyGpVrrFNcyRaqsk2vXeXcitulwurNQ9940+VFwc3BPBS65YoNSC4IUMv6nvt
+# FMjXQ8eTTk6RQblI8Z5G+Lekqwhexzhxv3f2OQBEIeQ+dr8lRXhpWSfF4F4LtXhi
+# mO1CJSJngSQIFtSor4Acr+LLkHZ1Q3liwpUU2B/VER4/1BtP9CAttQWpa+KMFtC6
+# 1nirlcRMrLyb7ntC/5C74CRTsabuwq2IvFAQoX61w5DOuNST31u/Fjz0dyTmTs2d
+# hBzgpxCMNVUNJiAk4LuuzmeW96vdWy78kgJYnpWw15+AatPCEABRNCtC3QsCJEVV
+# zkrzuMeSv4tTT6a8waGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTIyMDE5
-# MTFaMC8GCSqGSIb3DQEJBDEiBCB0+g8viunSTDXwh1vUFUJDD55AOjnRqWRH1t/+
-# EqO3FTANBgkqhkiG9w0BAQEFAASCAgB2JUzjmd2e0LgI+Dzu3QgWHFafY3q6yaD9
-# M4XDkffrbO3aFkYWYbK1I0zoI+YRnhejWxMQBFjyaMdRPHDR1m0axBhDO0BiNyBy
-# 1JTNEtlqfF+caO5yLLJ67PyMHRjiSZpm3O4K+xuXOhQDH1krCJDTPfX2slaFTNWO
-# ql6qTsLom8V/D25NE5TvhNTwfaJTeOkdWlFLXFYq49SM6zlkVRnWK5jZkLwzjEwr
-# BonmHKlCd5cbEf5pn1Vcr8laXzHrcA3T08ElqEmKKA8nCaWO8fpg1Wv5PBy3udVn
-# OUo9/T9j+WYu/bksXLiwZkHcMpbaO0sFwvdgGcCwekT0tkge7TPqDqQoxgibx9EC
-# /bNB8bohphexjmwmXEkyl3/odl7ONvoHlMeN57dHQbA/4LoaT51zVyRFIIM6EakV
-# EQh0GzBXpEBQVJ8Y3sw1w64erK6YeqmC+2OekZ9Rpe9dKZ2eMk5hlMt0kWUYAFpu
-# ETfdfbNm3e41VCWDxWeqrhTklAuJiaK5OtslM9ddwF40RHQfmIJatDqxyFc/Micb
-# hEdAn8qvL7G8Qo4gGS503OdR1iAvfiyLX+DBNaQNONY6rEdivmAjj3nwovzdsFh9
-# JIZCAqEPYu3/oBdc0pTMfbLYP91HyTfFxOTbeM8qyD3KhIytEq+oZWmGRA5YSYmE
-# qaCtZXKUPQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTMxNTQy
+# MTVaMC8GCSqGSIb3DQEJBDEiBCCB6xVGwPF5x1S89H0u+yW/6XnK5tWL4/ifZ1pr
+# 5cS3eDANBgkqhkiG9w0BAQEFAASCAgCV4EyT5kA5TazE1Cebiex949RcGkfPg5y3
+# Fppgo14C6xzBb8khA7uJV1cJs4RyHHgcqIUvcQgNcy6kJBYeJlqSSolC9al+VIri
+# 7tky1pGLdLr487g10gIahF9lvehPbsdIkz4blT4vpkLk9UzFcqeoWjuoJRiUEdzh
+# VWH9DFcVzMUG0KJ5Fud36lWZsE4bg8TbD4TTlKKyP41WmBY8r2jCnvMth79gnQT7
+# t/TQJSttHIB2Bfn8hA/5sLAEUM2fZAbyYtqQSAhP7YCsOtmH5O6WTe9zBf4pH/1U
+# sD3CpadB4+Rk9DERL1vbGgXS6EeCOeLX3c9yONI3hwKsnwIZ+KnRT5O3ZN8K7nLI
+# 7jbdbelBBBxQNMPWKX3Suph3AjjIBq6aJLQmkEZCzBPr8gHJlU2KvtYMlQiVlfPs
+# wEDhAHV6D27KssRlZ4Fc8dUAcp6Sn/yz7uLAiQGJNYTJTj0YqZ1jwfbxdmSaLvN1
+# GeYMEYLotCT+d2LVvt+jHNPptjGZOa88IIe6rbJphjzqSP51qc57JCAv+7IhQ7c7
+# lGQKDAxxYKxj4fY2rhr6s2tJJNyGisJETj9+Vz0c1QO0x1Oe9eE9agJj3mRdKkAK
+# RXBN9/2sDNoLieLZPlYpXsDAB3+bNaVa5BWW3Du5oRbIUXeslg2dd8sKlhu00tbL
+# abMZVd324A==
 # SIG # End signature block

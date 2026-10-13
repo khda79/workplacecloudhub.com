@@ -30,7 +30,7 @@ $body = Get-DeviceSystemPackageBody -ScriptPath $detectionPath -Name 'Synthetic 
 Assert ($body.displayName -eq 'Synthetic Device System' -and $body.runAsAccount -eq 'system' -and -not $body.runAs32Bit) 'The package execution context changed.'
 Assert ($body.remediationScriptContent -ceq '' -and $body.deviceHealthScriptType -eq 'deviceHealthScript') 'The package is not detection only.'
 Assert (-not $body.Contains('assignments') -and -not $body.Contains('runSchedule')) 'The creation body contains an assignment or schedule.'
-Assert ($body.version -eq '1.5.0') 'The package version does not match the detection script.'
+Assert ($body.version -eq '1.6.0') 'The package version does not match the detection script.'
 Assert ([Convert]::FromBase64String($body.detectionScriptContent).Length -eq [IO.File]::ReadAllBytes($detectionPath).Length) 'Detection script content was not encoded.'
 Assert ([Linq.Enumerable]::SequenceEqual([byte[]][Convert]::FromBase64String($body.detectionScriptContent),[byte[]][IO.File]::ReadAllBytes($detectionPath))) 'Detection script bytes changed in the package.'
 Assert ($body.roleScopeTagIds.Count -eq 1 -and $body.roleScopeTagIds[0] -eq '0') 'The default scope tag changed.'
@@ -170,8 +170,8 @@ Assert ([IO.File]::Exists([IO.Path]::GetFullPath((Join-Path (Split-Path $launche
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCByjAlrnYcE2n83
-# NsG3zQS5lk3UHpvYuSaWyIrPAr7jHaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDZl6w3sJGls4M7
+# lkxnwyz0NaYCW6kki7XMuIQ27pD0zqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -304,31 +304,31 @@ Assert ([IO.File]::Exists([IO.Path]::GetFullPath((Join-Path (Split-Path $launche
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIDQJI9VPtGqoEn/dj0kTKP0mrXrNIkMx/aQl2vvAiwelMA0GCSqG
-# SIb3DQEBAQUABIIBgEao+rUsFmplOuRyuBBoaiTSCUE1T2qrwqjX/phCwmyXtNUQ
-# sNxOS6uPmyKxvZ6LuyophYgDeJe8iOWzgoAO27RneJoVgAUmayME1B2nXWHKIkTk
-# c2HeI9c5oDAxbmZlQReinmgADDM96Nc1I4qa5iRTgOKV+qqUXYQnhzc0bwaDUcmB
-# Ll+hxnY34uuDo/wKmd0UNjYGLP9VkUrjlzI25MGzmyGo+DBY2lmPmdvMV0z/jgeB
-# GLTtdNeCSr8bGPfZsftA/QnUMFMBbpS1csmONUiHXyUPQ3XQ198dEKdnwrKk7BMp
-# nEBwqohcALCtBEBef7ijIPbuoAQfVV515k+eZeNUH/xZGkfOPDLGI3RZa2zJMzT9
-# v3jTHXOGN1vrpW2psw3KZaPNEt9JfBlt4gtuTDNPCSEEDYDelZa5pG1MTVwgElED
-# HUSp4GUILPvrA/71RAFoMgA+PSlpSmPJ1gp5sNYimfRfI22AZT46DPGyxl+I3T3i
-# w+8XbWD6w5HMm6YJgaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEINJ3UoejSeeUq/na2l/7Yvy3veGGPTfL+YXm1dhBok68MA0GCSqG
+# SIb3DQEBAQUABIIBgH7yOqOUnfzxY4lErQjCJFwe1wIdi9QwI/csEofRi3+NjN//
+# Ef2r1Hj1BpmI5BYhZu9zW2Ks7AA2KUdEt2JA5AR8yKSlCQk6aS1CDx1NTrzdK1j5
+# Pnelm11EdrudSNm3YOYHfTqN7HJjs9sNMw5E4ULt1kdCojTm/VX153dJJw+jkxfo
+# J4hnWBYAo5xvu2kwRe+mPevi1/tXmQPnkp92q24ikVVxuGJt/A5knCMtVl3XSN6W
+# wBSpupALl9qcnAMy6rudf/ASWH0DKq2tGJDzzcdtq6siIO9kDhyjW/lKpNmj47Lk
+# Fu5XokjpIklwmCigtmLbPesywpV2WHtkyeGfWqNiRq3pdRrJ/08USGbX7FRjs6nN
+# FEBqIHF/W89TztRZb9HJIgfqjvQOmN84/8sm1evyCQZNJ5a4goDSS1qhUouWWPmP
+# 2kbSQdlx4V4M5Kk18LGNg8pQ6hWY5YlL6cWUkW6U38w40QXO+X+uOp1waSs6jEA3
+# 812dR3ynMNoZXtBlAaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTMxNDEx
-# MjVaMC8GCSqGSIb3DQEJBDEiBCCC3W5Y4Gl6dgbDrhvz/erA3ZPvtYs0AIV49Tki
-# k/HfDTANBgkqhkiG9w0BAQEFAASCAgA9XivZ/hqCyqOnsrUeex5PeeEFhmmJF4+p
-# 1Q4hLNAAev1/8qed3a5vRveUl4e4Lcfb82XzXhqQ11Pt9V76ZDKd5Ui0QDk5FYES
-# aEwDHzdMT2agCzaSIFPhUwDjKD50Ngq6XLis6s1PBY8Z7ZWO/UMnMhATDqxJaYF/
-# DXc/eotC4AR9FzJhovx8VJD6qy8ex55GF0S63T0lPr98GCOYezNucWMQ+uzcnhTB
-# Xs3hT8KwSmoegSD4juJO5Zy8+HcTGf9xGNiO64oLGwByXFtiB1vCc8697DdWs0KU
-# sGn8xLwF3Uk3MpU/jd1gc3QCyUDFrj8vo3zYNYPRhmk1YEiA6MCDO0IOWZshfE+2
-# 7/qqyL4s094JpKWr8LXaeHBNGPc4FAe8hfFiZs8GlyuZMTbUXv1Zm27D0DZZbWmd
-# BgbK+aLsfuugoFUdTZ2Ds1OK6V7XEWLTfdePIvVdo0fPeruyd41mr5mOsxgBnHgt
-# Ma1GsSPvIMnteDVhK/86yQi3h5r/usuCyJAa5sfFoLISdZmzg5hR5kENYd4CywsJ
-# t7omMdeTum8fERFJ5AmqPsb9aJehj6U4Br7pnL42UdncEC6ZtRDJMHQt2FqyZIpn
-# IfAp092PmZbVTJbxiRDgDInAZiJxEZZJD9IKw3GdaQaomigsp3wTqamW9TQMh0DT
-# Ha8cNLsV9A==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTMxNTQy
+# MTVaMC8GCSqGSIb3DQEJBDEiBCDR5gSS0OJb3qdUDTHRnkpdBeXZYNDV8ZdElRfe
+# CwEr4jANBgkqhkiG9w0BAQEFAASCAgA1Vp7cjxRLjJ7xberkIqLATHMnUhUpOSl5
+# cnRqkb0qwAQtUCDbP9DiRr+e30j+aQYExG4ONjA8g3O6Kvfo34C0MBZ3IOsMmHUy
+# CuFnZDw5tKQhMd+I9o9boXKWd2kqPGFm+uZuJ3r6EgXfGduLqVwkvu1itRH99Eao
+# dPgAxL7HuTPDGO0c842LrN/HDjaLLMB4paFcZkEtxWaZYw0tXFIFXRV+FLPE81Di
+# GWWm05v8WyZ1OLFfE6pw4T3aALhogcSQsENqdGDVNJCkPdYa9+AwPO2ysgbzRePr
+# 77OV9tQ3QAW2ZxnOoIO/5Px68FwZ0qLxOZYPh8Tgthh+i1XJgbizQy8tHdIrT+/W
+# luUnU0SaH2f6AvohfjNwd/ZXfjM09NFXpcsNd2Jetc9F2d+ktn3aY2dy2I80w8Bj
+# D7LnAW9V4j23t/ilWLJbQy/fC039ILlHSqpJrC8Y9TWR+IR9gyeAmbeprsWiYvm7
+# oaC2JdqJlpE4MeD3VXs2f9XBc+7ljp6VCoWXvaVCp69hlw8n+21izIxi9TI2QMgi
+# L0DuTxpoMtsbCdRnJ0kv3MOby78Kdry2eGPmdUf6G/4PQrwm2Ij/+Xt0ivHJKSY2
+# YRAKglmYfn5LxkoDls+ei0yLFsc+sKuAgfRABDb7fnH/+ztxIpHnuSbzWGiKBLXr
+# M6GeWlETgw==
 # SIG # End signature block

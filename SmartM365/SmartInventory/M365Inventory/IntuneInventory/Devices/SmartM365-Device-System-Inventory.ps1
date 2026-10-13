@@ -50,7 +50,7 @@
     Minimum Graph application permissions: DeviceManagementManagedDevices.Read.All; DeviceManagementConfiguration.Read.All; DeviceManagementScripts.Read.All.
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
-    Version : 2.14
+    Version : 2.15
     Author: https://github.com/khda79/workplacecloudhub.com
     Requires: SmartM365.Core module (logging, init, CSV, cleanup, cloud connectivity)
     Scopes: DeviceManagementManagedDevices.Read.All, DeviceManagementConfiguration.Read.All
@@ -727,6 +727,7 @@ function Parse-PlatformScriptStdout {
         BitLockerOSConversionStatus = 'NotCollected'
         LastConsoleLogonStatus = 'NotCollected'
         LastConsoleLogonUser = $null
+        LastConsoleLogonSid = $null
         LastConsoleLogonUtc = $null
     }
 
@@ -753,7 +754,9 @@ function Test-DeviceSystemRecurringPayload {
     param([AllowNull()][string]$ResultMessage)
     if ([string]::IsNullOrWhiteSpace($ResultMessage)) { return $false }
     $text = $ResultMessage.Trim()
-    if (-not $text.EndsWith('|DeviceSystemPayloadEnd:1.5', [StringComparison]::Ordinal)) { return $false }
+    $hasSid = $text.EndsWith('|DeviceSystemPayloadEnd:1.6', [StringComparison]::Ordinal)
+    if (-not $hasSid -and -not $text.EndsWith('|DeviceSystemPayloadEnd:1.5', [StringComparison]::Ordinal)) { return $false }
+    if ($hasSid -and $text -notmatch '(?:^|\|)LastConsoleLogonSid:') { return $false }
     foreach ($field in @('SecureBoot','BIOSVersion','BIOSDate','FirmwareType','LastBootUpTime',
         'ThirdPartyAVStatus','ThirdPartyAVProducts','WindowsUpdateRebootRequired',
         'BitLockerOSProtectionStatus','BitLockerOSConversionStatus','LastConsoleLogonStatus',
@@ -786,7 +789,7 @@ function Get-DeviceSystemLocalFreshness {
 # ==========================================================
 # Initialization via SmartM365.Core
 # ==========================================================
-$ScriptVersion = "2.14"
+$ScriptVersion = "2.15"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'DeviceSystemCsvLogFolderPath' -DefaultValue $OutputPath
 try {
@@ -937,7 +940,7 @@ try {
         $hw = $device.hardwareInformation
 
         # Locally observed system information, antivirus registration, and console logon.
-        $emptyPsData = @{ SecureBoot = $null; BIOSVersion = $null; BIOSDate = $null; FirmwareType = $null; LastBootUpTime = $null; ThirdPartyAVStatus = 'NotCollected'; ThirdPartyAVProducts = $null; WindowsUpdateRebootRequired = 'NotCollected'; BitLockerOSProtectionStatus = 'NotCollected'; BitLockerOSConversionStatus = 'NotCollected'; LastConsoleLogonStatus = 'NotCollected'; LastConsoleLogonUser = $null; LastConsoleLogonUtc = $null }
+        $emptyPsData = @{ SecureBoot = $null; BIOSVersion = $null; BIOSDate = $null; FirmwareType = $null; LastBootUpTime = $null; ThirdPartyAVStatus = 'NotCollected'; ThirdPartyAVProducts = $null; WindowsUpdateRebootRequired = 'NotCollected'; BitLockerOSProtectionStatus = 'NotCollected'; BitLockerOSConversionStatus = 'NotCollected'; LastConsoleLogonStatus = 'NotCollected'; LastConsoleLogonUser = $null; LastConsoleLogonSid = $null; LastConsoleLogonUtc = $null }
         $psData = $emptyPsData
         $psLastUpdate = $null
         $detectionState = $null
@@ -993,6 +996,7 @@ try {
             BitLockerOSConversionStatus       = $psData.BitLockerOSConversionStatus
             LastConsoleLogonStatus            = $psData.LastConsoleLogonStatus
             LastConsoleLogonUser              = $psData.LastConsoleLogonUser
+            LastConsoleLogonSid               = $psData.LastConsoleLogonSid
             LastConsoleLogonUtc               = ConvertTo-DeviceSystemGraphUtcTimestamp -Value $psData.LastConsoleLogonUtc -FieldName 'LastConsoleLogonUtc'
         }
 
@@ -1100,8 +1104,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBf3yTR5xnXEZ4l
-# +RG3+fVbq7VtT7OTC/9tpIE24qr2IKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA7Uh89f5jGCT/r
+# yvz8nylQK1y3SA5+SSdM+PhpNJGEKKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1234,31 +1238,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIF6l+JVFxAd7smo3wG/a8Z560K1t8m6ozaDHC9oZw8zzMA0GCSqG
-# SIb3DQEBAQUABIIBgE8LjWMw63xyRL1TpMbQjAC5+r6VgptKuPMdlrfDUJ2AOSSd
-# cv9dwXMAqr5GTjTFA9U+7MEyWHb+sNDfIaNeIu+ibqh4N95AxiJtvOYUnT9JyAk3
-# xc53vsnBb0m3wIuU1M4ZapWYLeRBvHA35Aq6jBDlon27+g5Dt1+DPDot38aJGXnd
-# mKHZtM3bgaHwpPTPn3Irq5bHNlAe2tv4Q6jwWyCxxTrNNwRikdZZfGL9m6YA7TPa
-# D4a14XFiLXteARnF8r4IURKScJ848NhZGeW1qdo9rkWgNBHRE2TBHgYqmqGRLAkG
-# UwQh9RPN0i48Fxp5ExLdLcyq5uix74sy2ZDFZQomI6C7lTXmsT1w+KBxMyLn028w
-# /C7Rt+OLGMtbAl2LW6qmdCD720zDsb7C+Ws9wipn2Epa0TUvjkfvCHwjfE+1wT4D
-# NGkfjWm+MDKHyO8/6xZvNWGW+rh2biDCBgfQjXhErS91uag81K/ooAPgZWxO0luB
-# dugNcFmskLpp+9nPEqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIF0OoPlCIG4YNDDeLC3sO9Be9nDANIEPJ3hphuHtDKggMA0GCSqG
+# SIb3DQEBAQUABIIBgCJTs20582MDsJin6CtPlwUMLm43dYwj3uXLuPw7umhJndiL
+# aX7P7sqJKbK+6RekE7aCJPV2bMewsabrU01ukwtibb8ChBXxIISjKLB60nQHLX7Y
+# 8VZlJ5BcdcgfWyCMJopQ5Dkvg+QcI6nU/VPbZxJy5XQzOvuFnLl5EoSBteMM/PqR
+# n8kBkktz9WHXgPS5xw231jeRb9jiiZnzt/iZDzvl1tjPZxXRFROX7HiCOUpJlFkO
+# /ut9xTlg+BUPjhBZ73ZJxRN6k0CJbXcPex8LcIo95d+4guYWhUKSD6tJs4Gcm/r+
+# QLMO8cUs73UDXW2m4h3teRLPzWfCSCfM2GylC1cg2ymHkishiojG6QtKh2i3rN1h
+# /j84ql4jj5XzwHLJJoEQYhSK9OwA4H7yn4JAUlfuA1aLVxzAX01ujrlDhuTGf17M
+# qhMEfLzX7GcRa04rlV109DCbi2UlkTzXhymt6q5UOLCOuTOetEDlPf0vQDpq2+AW
+# VdeJLwscPFfCvbwK+KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTMxMzQ3
-# MDBaMC8GCSqGSIb3DQEJBDEiBCBj1iag/5Zy+eoQ4g0JeZe0+sWjHbvenIINL7il
-# Rd1k1TANBgkqhkiG9w0BAQEFAASCAgCauwothpIfL8DNHjVOmrIE8aeIeP5wCiKR
-# SjcGrNgRfoGjB9pfYnRs992MA43HLvWWjfI+MwOQr8h9LWQ7I1MxoKKsCWIrn4w/
-# RiJK9UXEkCqTZqzqwr4058zRDQNbgZGhHFK/dz3+lDlmZ80//5oT8h0+5nwZ++YY
-# gdflT9ZBp3uTbnzjW+IZ0fcZzMSVMOR+vS+8oUWYgQoFITTnl/QHYBDE0T2fTZjB
-# Z0/j094ciJ2TnlMrA+eGu4rNpGzlGic5hL6zXsXvU3RddHkcpBLny+zW01ijlFmh
-# wnoqIotxrXOezoDZmFEk+mUb7QOec7HJaMxivv8/7Zv5gSys6PiXRb6s5bCZLL5w
-# dyBRTz7OUS8BlAYUIzfj2boAlVzSJ7e6j7InooOoZw8liGVsMam7UpP79oig+Eya
-# iA6Blfo/WCaTJE7jUyJlNWbqPTclX+gDQflVue/dgQH/MgDXig5wMQPxmhNJyjPu
-# eX+sahmyVbcLFg+QTqbi/Ml7dtcdPvoi9nmmLOYM2Nz6Nx0//fAG4v2ECgT81iNS
-# JQMupJEnlUTR1qgvmJ65433y3BPQRuuMzmVSqUO0h2+cuaujDNVB/dRWjJTcjr30
-# lXWjUC8UhDqhbfLYmZXlnm2BS8uCvi0hFsVMmahvkTr+3SS++3AkstdW0uzqVc+b
-# DHPBp7hhFQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTMxNTQy
+# MTRaMC8GCSqGSIb3DQEJBDEiBCAKMs8pot/lkzFJnUd66OOOFWENuLMv/2pqjXL+
+# 2lihWDANBgkqhkiG9w0BAQEFAASCAgAuoSmUbo0bjNaPFfPvSfNjR7b4N1re5h3N
+# xGX2fQYhZIt/f2uRsqIUYwDY9K94RW8SqAWEg7SBVthNjD8fOMJY6I8lQGZSwGvp
+# nhK5DHNXN8SxQj6LU5SsYk8b9MuWYSadSexMRCJwnKPe8y7VZJLJkf8J5/Wcs2ks
+# pHyt1XN+4WZnOp+jHNqfvPBlI8yrDe0+3VYMvwxg26Fp+cr2zQZYRAOe7RGW9uj4
+# bADOjOzmKeoQiZYZc1GFe3m1fJfsj0ppXDHP6DWTnh4ni6a32kjIVsSc1e4N7UvR
+# NZ18sF9k/nrUs4+RQ/e91n4YXC1GpFf3SQkcAaquol20sS/TmTCu2NjrWN3ZmYae
+# oxW5D4kZvK9EnGmSxEAjex+j+RAfnj3bENO8mufSfxdCIJR36VpEZh5Gs7/Xp+oY
+# d/R9spE3Z6sfShrVXV8eutIfOhEu35PRtItqg3jDk8c74N2tIMskWXQo/mSj90uT
+# FM6grSc6LfZsDqaNpvQm/CJsSUXcfC5Z1EaHBcOjqB4aW9uucsgszygPFWNyzx8f
+# Z6IA6F7xcaMHV8QrB3hblIeeTRk9N4TaNiP1olFpjbSqspG/W0YlXnNxcV/RDW62
+# XDHImTlhgROfd1JrwyxFvlRtPI5I94fJHcE8gdLciLaOi+xEurcH01uYuqCzpZYR
+# syA9SGqlWw==
 # SIG # End signature block

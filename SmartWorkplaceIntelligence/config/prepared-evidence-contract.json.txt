@@ -37,7 +37,11 @@
         {"name":"Windows Update Reboot Required","type":"string"}, {"name":"Windows Update Reboot Raw","type":"string"},
         {"name":"BitLocker OS Protection","type":"string"}, {"name":"BitLocker OS Protection Raw","type":"string"},
         {"name":"BitLocker OS Conversion","type":"string"}, {"name":"BitLocker OS Conversion Raw","type":"string"},
-        {"name":"Data Quality Issues","type":"string"}
+        {"name":"Data Quality Issues","type":"string"},
+        {"name":"Local Data Source","type":"string"}, {"name":"Local Data Freshness","type":"string"},
+        {"name":"Last Console Logon Status","type":"string"}, {"name":"Last Console Logon User","type":"string"},
+        {"name":"Last Console Logon UTC","type":"dateTime"}, {"name":"Last Console Logon Quality","type":"string"},
+        {"name":"Last Console Logon SID","type":"string"}
       ]
     },
     {
@@ -498,6 +502,10 @@
           "name": "Activity Source",
           "type": "string"
         },
+        {"name":"Console Last Activity UTC","type":"dateTime"},
+        {"name":"Console Activity Evidence State","type":"string"},
+        {"name":"Console Activity Device Count","type":"int64"},
+        {"name":"Console Activity Match Method","type":"string"},
         {
           "name": "Workforce Persona",
           "type": "string"

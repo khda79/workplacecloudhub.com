@@ -37,7 +37,13 @@ function Run([string]$Domain, [string]$Script, [object[]]$Arguments) {
 }
 $countryArgs=@();if($AdCountryRulesPath){$countryArgs=@('-AdCountryRulesPath',$AdCountryRulesPath)}
 Run 'Estate' 'New-EnterpriseEstateEvidence.ps1' (@('-DataRoot',$DataRoot,'-OutputRoot',$OutputRoot)+$countryArgs)
+$deviceArgs=@('-DataRoot',$DataRoot,'-OutputPath',(OutPath 'DeviceInventoryEvidence'),'-SignalsOutputPath',(OutPath 'DeviceRiskEvidenceSummary'),'-DirectorySummaryOutputPath',(OutPath 'DeviceDirectorySummary'),'-SystemEvidenceOutputPath',(OutPath 'DeviceSystemEvidence'))
+if ($null -ne $DeviceSystemMaxObservationAgeHours) { $deviceArgs+=@('-DeviceSystemMaxObservationAgeHours',$DeviceSystemMaxObservationAgeHours) }
+if ($DeviceSystemOffsetlessGraphTimeZoneId) { $deviceArgs+=@('-DeviceSystemOffsetlessGraphTimeZoneId',$DeviceSystemOffsetlessGraphTimeZoneId) }
+# Current workforce may use the current staged console evidence, never a future snapshot in history.
+Run 'Devices' 'New-DeviceInventoryEvidence.ps1' $deviceArgs
 $wf = @('-DataRoot',$DataRoot,'-UserOutputPath',(OutPath 'UserInventoryEvidence'),'-HistoryOutputPath',(OutPath 'UserActivityHistoryEvidence'),'-TrendOutputPath',(OutPath 'WorkforceTrendEvidence'),'-IdentityOutputPath',(OutPath 'IdentityReconciliationEvidence'),'-SignalsOutputPath',(OutPath 'WorkforceOperationalSignals'))
+if ($Only -eq 'All') { $wf+=@('-SystemEvidencePath',(OutPath 'DeviceSystemEvidence')) }
 if ($AccountClassificationConfigPath) { $wf += @('-AccountClassificationConfigPath',$AccountClassificationConfigPath) }
 if ($SkipWorkforceHistory) { $wf += '-SkipHistory' }
 if ($ReuseStagedWorkforce) {
@@ -45,10 +51,6 @@ if ($ReuseStagedWorkforce) {
         if (-not (Test-Path -LiteralPath (OutPath $name))) { throw "Missing staged workforce output: $name" }
     }
 } else { Run 'Workforce' 'New-WorkforceIdentityEvidence.ps1' $wf }
-$deviceArgs=@('-DataRoot',$DataRoot,'-OutputPath',(OutPath 'DeviceInventoryEvidence'),'-SignalsOutputPath',(OutPath 'DeviceRiskEvidenceSummary'),'-DirectorySummaryOutputPath',(OutPath 'DeviceDirectorySummary'),'-SystemEvidenceOutputPath',(OutPath 'DeviceSystemEvidence'))
-if ($null -ne $DeviceSystemMaxObservationAgeHours) { $deviceArgs+=@('-DeviceSystemMaxObservationAgeHours',$DeviceSystemMaxObservationAgeHours) }
-if ($DeviceSystemOffsetlessGraphTimeZoneId) { $deviceArgs+=@('-DeviceSystemOffsetlessGraphTimeZoneId',$DeviceSystemOffsetlessGraphTimeZoneId) }
-Run 'Devices' 'New-DeviceInventoryEvidence.ps1' $deviceArgs
 if ($EndpointProtectionPolicyPath) {
     Run 'Devices' 'New-EndpointProtectionEvidence.ps1' @('-DataRoot',$DataRoot,'-InventoryEvidencePath',(OutPath 'DeviceInventoryEvidence'),'-SystemEvidencePath',(OutPath 'DeviceSystemEvidence'),'-PolicyPath',$EndpointProtectionPolicyPath,'-OutputRoot',$OutputRoot)
 }
@@ -68,8 +70,8 @@ Write-Host 'Preparation finished. Outputs are staging only; schema/data validati
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBddOlYEX7RYrs4
-# AD3dcXighe8uO3sGPBvLhc0PCjyr6aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCsnXNATKf3tPUa
+# HlJZ0MfF3H/U8wyNWFzgtxR8s3xjc6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -202,31 +204,31 @@ Write-Host 'Preparation finished. Outputs are staging only; schema/data validati
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIAKjljsHUMbSIKn2CfBylG1Tkz5kGLDNYFkRa+P19NbbMA0GCSqG
-# SIb3DQEBAQUABIIBgBII3StZmMNSKWDdvsezxpFLcjdRCL1kBqkHj47mRA5btgv2
-# 9/UjcJo0s91BMLiaU5pS1hkx1qvWz/6vZTmwOP2rQnNP8W6FulaIKG45t9CeWh1y
-# WvTxpcKHJjB9zB4eS53YFPDO4DOr6EScoag6fdRJ63Pm9bF3a3yVusjXhPjnrUE/
-# pa9dK1nZNEUCS/TrOaz7xz0i8UKKuREj8F31netuHrjPR53A+Ql1/xozhnkMvZUU
-# /B/k1GQGHTFP8FGAlWtNc9okKIpjObqX2cGnvr+Ny3lcGEP8Q8LnjUEHr0+CsauS
-# ryI/HUaWAMCZh7IjqBz1QvcvSXAb7ks6CuMle4IjpZPEawOiOt1xSi/34jpJOsXt
-# RlRYLtSuE9ddvAqfcKV169k6behEr1yagOkZ1oVwdmSxQucALbqvbuO/anr5cWea
-# tfbvbvWHUBkqEpJMPzHKHSwF6yMEFjpcLdVt9gbwFH9LkMr19M49OK+Gx2541QPU
-# S4moQM/nuiX7q94o2qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIMnKx5o88PdOyAlttPQfurtyaU1mOoPI+3n8jwStrENdMA0GCSqG
+# SIb3DQEBAQUABIIBgKtFsbNbhhZrEKqJXfxqLc8Ncb6z+W+8EIehPtFT7Uz142Pa
+# pfr+HUb17UROXosh7ORU3+lOggfvIDyRMs0m/BxJ45hcfIefUmnd/N4hs8OgkCAc
+# 7H02hzQmFDrtCAXIs90eTGsA52HOMqgjwsc5vQ5BWfHCaiUC7ME0kmfmyq1tR9/F
+# XOKBKSwSW5GxCHOnkZJbex4u30/UPgWehmIh/X5Um5Yh2up3xhoTIwrqhXgi2gV6
+# +h42oft6qIwjOOX3bzUI+OQ4ncYSvFkCWG0l/QyBw3pD4aGWbjN+LGvRSEfypLIw
+# qd17/Po2bjdOnr+k0F+8VikzHVccoFtJ4etT05bf7SM4VeBnGWEHu5zTQ9mMliE7
+# bnmpaFjv0GbpXr8nCUjHLlDo2wdhehWWH/CLHHyy/PU2mjyTHvA05S2nuWlhHpEs
+# 26AjtIdogd5ayzIfQKR0Ghc9g46Uhh+8OTrHF117BmS+3e86hhb87xGe36ib08AS
+# NddS/9GTElNYRYfrB6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTIyMDE4
-# MjlaMC8GCSqGSIb3DQEJBDEiBCC6+UwfUbL4hQ9HmY6MHOqFxW8J/+eM2wOGRJZ8
-# uLlINjANBgkqhkiG9w0BAQEFAASCAgBshH69neOB0sdlYojwYGf9w9F2MU7V42N/
-# aH3qvmB/V+7CfPtWXNmO+Gx+rMRZ64vFzsIQ5JnwnNsKd6nWr9owVT+dsPMBPN9R
-# xrUGBpgb+agEJYC/PjCjor9RMVdCTZ32SHcwJXyiWQbLExiMp784uvRwMc/Yi7xh
-# IF3bKVKsU1R+6XnyUS3R/bKKk0/+azJWZ0d7VMdC/BjT7G07KTI6WZN6bKCl1eI/
-# khFHwvm/wIJQbmaWjorgxvscslfXVjv5EK4metlFXBQmtqU99qRAHYR9tv2TzuAK
-# 2V5GPM2uBW8+0Au+zXLl4OvhOmEb28ijwEhuSkq0EDXrPmNXDOMArhQpavb1SJkY
-# zHR5Ummf6rbA5NfxjCYfzvWbMat/DlUB7kGy0t0qNcClGk0H76rDNjRkRpgT0Hs2
-# fB92Vs5OUDVUJ1e2Ci8BRtt3lRLbGWefL1cDE0pD1j+5ZeU1pAG5oZjMwzwornEn
-# Os61u3KWFPXL2AYMrcc+ay7Hu7Bzy9QprnY0CYiDB2wDH6Dg1W9dy00ca7tAYWza
-# eDykDmOxENX5bfI6+Yi4itSfp2OLbb7sVZPnSdHKsbZgL8X509FO4Y6OMxRlCsWR
-# x8DeGzE02y0x/T5mI5vN4Yg1ZsQis0f3u6mQSF0GYfldMewUKO/ZwAvDRc2qkkpz
-# eXgMNdiPiQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTMxNTQy
+# MTZaMC8GCSqGSIb3DQEJBDEiBCBjNVo7lXh0mlPYX9WlMR0uDTybr5HSFxaClx9z
+# zGxODzANBgkqhkiG9w0BAQEFAASCAgCRKGtrbX8ehp4KTXPoQXIg8MdvCE4dBSZc
+# nwkdXSxCpV7vRnYYyGR0mf1gLXPcy2wDznzD6sZNiIbgS3H9nTXFXCnzmBdg9Zr7
+# Iq5qoLwOFjPJ5WQhvBmzS0ch9h31Rz7ukyk1z4/4g/LgQXONyfQ/3o/J3ekgz/cN
+# dM9UA+P39DjgatBc4ZY/ySSvqRACri6q6Ou15D3c29GXTPb3ED1b3FQxmjYQa+U0
+# FNuVnQ0znuOjgLl0dpfFpHaoj5U0VB538YrAlNE9qlhO9V6FubNX/+tA3ZwmLX8I
+# I68Ie68Suq1boM/xg9axcGMXTsscNS4n46FpVh6+k6y1RXHSVVUxtHNcxU7xG+Mh
+# 7hdFGmMPiQCYWErjfFaRWQWt8mbJpP6FZJQ6UFJIuvwohXO/A3R7voXc8zUgbrey
+# 9uJbrykbJXXQ35PeEII1APEs168iJI2pRkH1H88I2GGKDVXgBeMaGkUbSjBllcYM
+# O4qVXoCc3Zrwbf0cMV/Juxayr3eve2OaQMC9LGmyVTvjUQxWY4Mlzfk+B75idB5x
+# mw9dCu/sG4cMgaHIX+6tB4hJK/63ORwuw0CTGWlga1dTszhQHc+5240Ft/1DDUYr
+# j0b2ISm/h+Rp5wCuDL8LesMdLXbNJCMcBVhr75Ctri0vXr6Y6vNfKOXVDwuYsZZM
+# /QUJ82+npw==
 # SIG # End signature block

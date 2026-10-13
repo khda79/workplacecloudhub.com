@@ -46,6 +46,7 @@ function Get-WinEvent {
 }
 $last = Get-LastConsoleLogon
 Assert ($last.Status -eq 'Observed' -and $last.User -eq 'AzureAD\person' -and $last.Utc -eq '2026-10-13T10:00:00.0000000+00:00') 'The last console logon was not selected.'
+Assert ($last.Sid -eq 'S-1-12-1-123') 'The event SID was not preserved.'
 Assert ($script:observedXPath -match "LogonType']='2'" -and $script:observedXPath -match "LogonType']='11'" -and $script:observedXPath -notmatch "LogonType']='10'") 'The query includes remote or network sessions.'
 $script:eventMode = 'systemOnly'
 Assert ((Get-LastConsoleLogon).Status -eq 'NotFoundInScan') 'A system-only Security log was presented as a user.'
@@ -55,8 +56,14 @@ Assert ((Get-LastConsoleLogon).Status -eq 'Error') 'A Security log failure was p
 $parsed = Parse-PlatformScriptStdout -ResultMessage 'SecureBoot:Enabled|LastConsoleLogonStatus:Observed|LastConsoleLogonUser:AzureAD\person|LastConsoleLogonUtc:2026-10-13T10:00:00Z'
 Assert ($parsed.LastConsoleLogonStatus -eq 'Observed' -and $parsed.LastConsoleLogonUser -eq 'AzureAD\person') 'Console logon fields were not parsed.'
 Assert ((Parse-PlatformScriptStdout -ResultMessage '').LastConsoleLogonStatus -eq 'NotCollected') 'Missing console evidence was inferred.'
+Assert ($null -eq (Parse-PlatformScriptStdout -ResultMessage '').LastConsoleLogonSid) 'A missing SID was invented.'
+$sidParsed=Parse-PlatformScriptStdout -ResultMessage 'LastConsoleLogonStatus:Observed|LastConsoleLogonSid:S-1-5-21-1-2-3-1001'
+Assert ($sidParsed.LastConsoleLogonSid -eq 'S-1-5-21-1-2-3-1001') 'The SID payload was not parsed.'
 $completePayload = 'SecureBoot:Enabled|BIOSVersion:1|BIOSDate:2026-01-01|FirmwareType:Uefi|LastBootUpTime:2026-01-01 10:00:00|ThirdPartyAVStatus:Detected|ThirdPartyAVProducts:Example|WindowsUpdateRebootRequired:False|BitLockerOSProtectionStatus:On|BitLockerOSConversionStatus:FullyEncrypted|LastConsoleLogonStatus:Observed|LastConsoleLogonUser:AzureAD\person|LastConsoleLogonUtc:2026-10-13T10:00:00Z|DeviceSystemPayloadEnd:1.5'
 Assert (Test-DeviceSystemRecurringPayload $completePayload) 'A complete recurring payload was rejected.'
+$sidPayload=$completePayload.Replace('LastConsoleLogonUtc:','LastConsoleLogonSid:S-1-5-21-1-2-3-1001|LastConsoleLogonUtc:').Replace('DeviceSystemPayloadEnd:1.5','DeviceSystemPayloadEnd:1.6')
+Assert (Test-DeviceSystemRecurringPayload $sidPayload) 'The SID-capable payload was rejected.'
+Assert (-not (Test-DeviceSystemRecurringPayload ($completePayload.Replace('DeviceSystemPayloadEnd:1.5','DeviceSystemPayloadEnd:1.6')))) 'A 1.6 payload without its SID field was accepted.'
 Assert (-not (Test-DeviceSystemRecurringPayload ($completePayload -replace '\|DeviceSystemPayloadEnd:1.5$',''))) 'A truncated recurring payload was accepted.'
 
 $asOf = [datetimeoffset]'2026-10-13T12:00:00Z'
@@ -123,8 +130,8 @@ Assert $failed 'An empty recurring collection could replace the existing CSV.'
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDrKCgFnqixW3Gy
-# 7jLRx88i+lDLFWG9KX+IorfE/m0niqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBTIPdgbLB5DDKM
+# W9mWCAol97ZvJtU7J6C938cx1XT6+qCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -257,31 +264,31 @@ Assert $failed 'An empty recurring collection could replace the existing CSV.'
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIBp5vytwrlLhH0tR+CQWDKsA7xLAAthF4dJfQkRnkvV5MA0GCSqG
-# SIb3DQEBAQUABIIBgE3l5UBZZ8D81FL0ddYDLLf7J4gQ3SiD+1sFVnUaqiRSpZBP
-# 6hFlIqkzIVixcNmUGMboMmxKWw1av1Ob+gAYrjFuQFEdfsYnq1rBG7SOkXcbJT/r
-# wQCY/tuCAAQOwGNVjVNMJYeOYXEKo93dGsWAg9eR3PkGBy//Qjjx9cWsJT9CbPvz
-# /5zhjlTao1GS/BfpnVFJ8EPgBxDEQP8DjKzW/nmLePVrWzSi4f2cDcpXOna1AkZI
-# S1crj+PtASH+856ua0QyfI7UweETPqyCwpN9QtUMbayW3RH9yvFGUKspMC2fiDbZ
-# 9KU/Jt/Om+Y21keDYyoZcxUKL5Q+eiwC0L7uzw0WD4VQsGxjSuSkEmOclQ1FWdER
-# 0zFXaOU/nuxlUZirvPtgVmHJ4wUzQcItEBfK0SpoFi3ZZh+wDwBYBgkZR5h0L+8o
-# 09aYH0E/zDb3L97CE7QC8KyzPyw3513cVb/ytTmOXxKOBEXl3IHF+bXM0SBm0iJC
-# NUNbVOIbyH8cQ4w+OqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIDLRR4AKkFxxx4lO2iDe6ER1p0QtdH1wAF4k2KXrjEENMA0GCSqG
+# SIb3DQEBAQUABIIBgJc2Clu+RGMndFH3exN7e+qNFEqYj9Q/Dh3Ox6KsO9Ap7b/7
+# 0OZ691s5krwy/Dc2pENj//8EOCHIulio1FvVtTKfnh9AYRV6p7fO3YXokzl/XSMC
+# i5dqwqNLDI2/1rLPklR2ZJr/Xd2F9HcVEf61Z2p+mtZhZolKE2kUdSnG8MKQlmgH
+# X0gpQ/3oGHxRrczxQ9JcJXgYkozhAlpxI3x2Wd6F7YpC7tJIjxUj5sx5Vatq4BKJ
+# LA+8Mi7lV/ZwwUGZad9VusG3134CcAh0UecZZXl1etGzVT/3V03f7UH82DNzoU+l
+# 0LqgSRo8hYBCryr5/bkfAQG7c1PmZdYl3U99QkZBmRVtyIK3ausy5r6w8F7w/+2R
+# ChNJOtLp9MRLMVup8nZbu9y9+YizzCmu/q/GXjp6dpcDJmJpSRkh0+G4Xv2fVZi0
+# tU3sR0sFSk4r4Nj28Pybn9Utl7+F5ehtkqGfLBAJZUz+Cp69FWlUljlkTFam2hWZ
+# 17dxOwFmlUrOhWujRqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTMxMzQ3
-# MDBaMC8GCSqGSIb3DQEJBDEiBCDgU+iCKa6Mk8nJg0UA+g+uxsBNgtv/FPn79y0b
-# GhL1KzANBgkqhkiG9w0BAQEFAASCAgBU9k9NEQW0ER8u6ORE6nMJguw+3YztvJ5A
-# b01bHOBVzwq/7IC7fHE4btsLF6rietab/hu906x3kS8F+givVhEZOTX3zIr+zwNa
-# GDE2y4XNG5hHWs8KhvaotrltZ94u4s7MycqlzYRLDNWAcMIUZSxkDmpXnmw8FSnI
-# IPExGClxsyuELoCJPetEtZVfXuBmHHv0pwW7gYwa+AGqPBbIj6QOgRc/qehZ+2pX
-# H23WEMd6FdQQ4wFU018XJzy7a91JDEKYBa+vY/5JdLqdxN0Nn7BsrM1UqHEfPqfQ
-# J/GwMoSkrVmsjz06M6F9IZFJYVbMalkwsPYvOTSqMTvC0x3njYIU8aQwHbb5alag
-# CBsvflfuQnrQWfS7WbUkRYjMpgciHoDbLksSXQzSG/bW3car6oFWLN+7z0QLy8C7
-# rp9olc0VViia6+AaOjUbvkepdqKX1tq4qQcJKy5E2obiEMDZjIRODugUc3vJ/K2I
-# nQgGyk+UyXG9hFzb6iKYDyMgj7dD3Th588I6JoIeO65gjrxNjftTemRe1jOROBa8
-# ym6avWG/dT5dHVRTBXZAHtoAIZVYSS8eaCcM3m/bqHmkT62UaITJJB0S7JqLQEGx
-# 5XZZXaMFCgRiFk0S+5Az+MhABIpnnIeToRG6p1HEoEb3dPRGbkxc4S2bnu/K9xdQ
-# 5CQDjBNgJw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTMxNTQy
+# MTRaMC8GCSqGSIb3DQEJBDEiBCAc8wY6KzuHDejFGmhW37rMxq3wZ5khYSmfiLn0
+# xV7eVzANBgkqhkiG9w0BAQEFAASCAgAAN0Jedof7t48U1oCpjRxx0kQbiLLRtNku
+# UUzPhHgU9utvmRYprcPpmO6gdE0vwqt35JzIC3ylxJ2zQsaKdi7R9PZaOOmxBMcL
+# 0gDPNWgvQkH7wrbQUxnCify6soxoauLoo8niqIh9C9mZJStHmesbBSpNJHdXaESh
+# +iUW12ApGVjomjzu80/IxcyowGCZCWxGao9jLj99Yzadj5r/X1pKxC6v++6kqems
+# 6iWo86K2ctEafHJAlCjkCTsYg25j/Xo/gohMMSKwC5kV2TIINDiwQu5oZaA9W/EO
+# 0Mb50bKHVjgqpIqEjFXd06n2sTnO81zky/91PNDrZE7qnY9ddHRmKKG9h+4Rm+0S
+# 9E1NsWMhVmvoMfY12aXeyUMaiWaEG5mNWvgOOdnhNWP4Yci27qjdJnuo8kyAnp5W
+# 4JBmw9+s/KU710RvPop+lwfwQIKY62WzYYzhFkifiU1kD/QmGz3aEZwaznh1mf5A
+# wUJu1kv/cnH88oo/VaOom1asxdvBGG7rw119dsKIGjQCLgV+HEMhHyWbCpBNNNO8
+# eq92MvRlqar/DOKSSnpcIH5IeHG8N4ev29m8ON1y7cqKP88MpdUGw3SirfOl+lgT
+# 7EnG4MRj08FPc5JZzQVMiGEhFi5+scmitWP3wtwRh6A476chHdo9SoBWG6Vu29Cb
+# +FPUmeh+Ng==
 # SIG # End signature block

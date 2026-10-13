@@ -65,13 +65,78 @@ $ast=[Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot
 Assert-Test ($parseErrors.Count -eq 0) 'Security generator did not parse.'
 foreach ($statement in $ast.EndBlock.Statements | Where-Object {$_.Extent.Text -match '^\$secureBoot(Covered|Healthy|Affected)\s*='}) {. ([scriptblock]::Create($statement.Extent.Text))}
 Assert-Test ($secureBootCovered.Count -eq 2 -and $secureBootHealthy.Count -eq 1 -and $secureBootAffected.Count -eq 1) 'Secure Boot error became an adverse or evaluable entity.'
+Assert-Test ($base[0].'Local Data Source' -eq 'LegacyPlatformScript' -and $base[0].'Last Console Logon Status' -eq 'NotCollected') 'Legacy provenance/console defaults changed.'
+function New-RecurringSystem {
+    $r=New-SyntheticSystem
+    $r | Add-Member LocalDataSource 'IntuneRemediation'
+    $r | Add-Member LocalDataFreshness 'Fresh'
+    $r | Add-Member LocalObservationUtc '2026-01-02T00:00:00Z'
+    $r | Add-Member LastConsoleLogonStatus 'Observed'
+    $r | Add-Member LastConsoleLogonUser 'example\console-user'
+    $r | Add-Member LastConsoleLogonSid 'S-1-5-21-1-2-3-1001'
+    $r | Add-Member LastConsoleLogonUtc '2026-01-01T23:00:00Z'
+    $r
+}
+$r=New-RecurringSystem; $r.PSObject.Properties.Remove('PlatformScriptLastUpdate')
+$e=(Invoke-Synthetic -System @($r))[0]
+Assert-Test ($e.'Observation UTC' -eq '2026-01-02T00:00:00.0000000Z' -and $e.'Local Data Freshness' -eq 'Fresh') 'Recurring timestamp without legacy alias failed.'
+Assert-Test ($e.'Last Console Logon Status' -eq 'Observed' -and $e.'Last Console Logon User' -eq 'example\console-user' -and $e.'Last Console Logon UTC' -eq '2026-01-01T23:00:00.0000000Z') 'Qualified console evidence lost.'
+Assert-Test ($e.'Primary User UPN' -eq 'user@example.invalid') 'Console identity overwrote primary-user ownership.'
+Assert-Test ($e.'Last Console Logon SID' -eq 'S-1-5-21-1-2-3-1001') 'The prepared console SID was lost.'
+$r=New-RecurringSystem; $r.LastConsoleLogonSid='not-a-sid'
+Assert-Test ((Invoke-Synthetic -System @($r))[0].'Last Console Logon SID' -eq '') 'An invalid console SID was exposed.'
+$r=New-RecurringSystem; $r.LastConsoleLogonStatus='Error'
+Assert-Test ((Invoke-Synthetic -System @($r))[0].'Last Console Logon SID' -eq '') 'An error exposed an attributed console SID.'
+foreach ($state in @('NotCollected','Stale','Error','Unknown','unexpected')) {
+    $r=New-RecurringSystem; $r.LocalDataFreshness=$state
+    $e=(Invoke-Synthetic -System @($r))[0]
+    Assert-Test ($e.Freshness -ne 'Within policy' -and $e.'Last Console Logon User' -eq '' -and $e.'Last Console Logon Status' -ne 'Observed') 'Unqualified collection became current console evidence.'
+}
+$r=New-RecurringSystem; $r.LocalObservationUtc='2026-01-02T02:00:00+02:00'
+Assert-Test ((Invoke-Synthetic -System @($r))[0].Freshness -eq 'Within policy') 'Equivalent observation aliases conflict.'
+$r=New-RecurringSystem; $r.PlatformScriptLastUpdate='2026-01-02T01:00:00Z'
+Assert-Test ((Invoke-Synthetic -System @($r))[0].'Observation UTC' -eq '') 'Contradictory timestamps qualified.'
+foreach ($time in @('','invalid','2026-01-02T00:00:00','2026-01-04T00:00:00Z')) {
+    $r=New-RecurringSystem; $r.LocalObservationUtc=$time; $r.PlatformScriptLastUpdate=''
+    $e=(Invoke-Synthetic -System @($r) -Zone 'UTC')[0]
+    Assert-Test ($e.Freshness -ne 'Within policy' -and $e.'Last Console Logon Status' -eq 'Unknown') 'Invalid recurring timestamp or future console observation qualified.'
+}
+foreach ($time in @('','invalid','2026-01-03T00:00:00Z','2026-01-01T23:00:00')) {
+    $r=New-RecurringSystem; $r.LastConsoleLogonUtc=$time
+    $e=(Invoke-Synthetic -System @($r))[0]
+    Assert-Test ($e.'Last Console Logon Status' -eq 'Unknown' -and $e.'Last Console Logon User' -eq '') 'Unqualified console observation exposed as observed.'
+}
+$r=New-RecurringSystem; $r.LastConsoleLogonStatus='NotFoundInScan'; $r.LastConsoleLogonUser=''; $r.LastConsoleLogonUtc=''
+Assert-Test ((Invoke-Synthetic -System @($r))[0].'Last Console Logon Status' -eq 'NotFoundInScan') 'NotFoundInScan became never-used or missing collection.'
+$schemaScratch=Join-Path ([IO.Path]::GetTempPath()) ('DeviceSystemSchemaOffline-'+[guid]::NewGuid().ToString('N'))
+[void](New-Item -ItemType Directory -Path $schemaScratch)
+$sourceSchema=Get-Content -LiteralPath (Join-Path $PSScriptRoot '..\config\source-schema.json') -Raw | ConvertFrom-Json
+$common=@($sourceSchema.files.'Intune_Devices_LocalSystem.csv'.columns)
+$schemaCases=@(
+    @{Extra=@('PlatformScriptLastUpdate');Accept=$true},
+    @{Extra=@('LocalObservationUtc','LocalDataSource','LocalDataFreshness');Accept=$true},
+    @{Extra=@('PlatformScriptLastUpdate','LocalObservationUtc','LocalDataSource','LocalDataFreshness');Accept=$true},
+    @{Extra=@();Accept=$false},
+    @{Extra=@('LocalObservationUtc');Accept=$false},
+    @{Extra=@('PlatformScriptLastUpdate','LocalDataSource');Accept=$false},
+    @{Extra=@('LocalObservationUtc','LocalDataFreshness');Accept=$false}
+)
+foreach($case in $schemaCases) {
+    $schemaFile=Join-Path $schemaScratch ([guid]::NewGuid().ToString('N')+'.csv')
+    $schemaRow=[ordered]@{}
+    foreach($column in @($common)+@($case.Extra)) {$schemaRow[$column]=''}
+    [pscustomobject]$schemaRow | Export-Csv -LiteralPath $schemaFile -NoTypeInformation
+    $accepted=$true
+    try {Assert-DeviceSystemCsvSchema -Path $schemaFile} catch {$accepted=$false}
+    Assert-Test ($accepted -eq $case.Accept) 'Legacy/recurring header qualification changed.'
+}
 [pscustomobject]@{Passed=$true;Checks=$script:checks;Sources='Synthetic only';Collection=$false;Refresh=$false;Publication=$false} | ConvertTo-Json
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCKJ0IT++z4Tpo0
-# V1UB01sGbPOmRdqUtCSM97xql/g03aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDp2n7A5jphqgbG
+# XsNkNUXgDTYiwDhewW6wuXoy1fKobqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -204,31 +269,31 @@ Assert-Test ($secureBootCovered.Count -eq 2 -and $secureBootHealthy.Count -eq 1 
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEICFgacAxCZVebDE7SkKTQ7+jtesmesOSUxCEaTIkOxLlMA0GCSqG
-# SIb3DQEBAQUABIIBgE4K1MaThV4QElDDLjQNqzmNgXlIL36wh1Tf2mMcHxwiBL6p
-# WhcW7n83mOPSopmiqQ8DnnmzUsh7HIptjMKGzJNgDbG2S3eLu1FQG4ODwl/DnT/3
-# UMX00UNsoBDAesVUPq1aNsBjyfrHZoMXgAGZSQaJgpzwB7CckKaSxvzhQUmeYGBY
-# vObr+Av7kCOc7CRKmnj+SKz7vifvYHrcgblSJPpTUY4DpnDxTu6jAsP46172b0Hh
-# nFcSkUKWfvCwJQwHVaQPhiBx1j03y0rJ/UII5st7c7whxFyxYN93dA/WQZg9igli
-# Pxu043jZ0wYvx+CTDTtXjCPEIdTQ99oYPm0CjSp60z5JaPDvj9xpaMQdIl+DnsJb
-# 4zb42Yt+F93AN+Lyi8oJqzj8liv9i66nQPjA04dE3FjZ+MxCMHt9/kOCAg4vU6c/
-# pHxcvvDu80e6nS60sqKiSeo8kzP6AP3gn/8JGr9eqGdUCnXaEAlnYT6hAjabM4Ob
-# 7rdLSDGXPU/LIPfdK6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIH96SKg8nvq5r3A86E240x7oePu4SprVIqnya3+RqGeSMA0GCSqG
+# SIb3DQEBAQUABIIBgHbrNjfwzC7zmmW7igWpzo0Cq48nH7Vd66PX237zr/NlQoXf
+# R27jhw7lNhoKlgC2Ozviz0AeBrMsQj/T49T9tluuX20j7l0tRJwDRbEswZXXScH7
+# 7uNgYNYa2ytGUoO+jpexJ9gQ5ndDbXuPyDoFNypgOauQWlysZK/poZaiVt0H6pib
+# 9cbg4vyaAZzR5aKOKK1pvK2spRUcsMz47qijkaKmHA8SLb8Osj1v8r3Ii4aWDzfp
+# 7xGHvAeqZ8mjKypuACWQ2Y1Qa7OvvFmFtIoX7rNl417FIsZ87oAYzGxfEJAvDoA2
+# 0scj7eULmtXjgm3/4Lhe8Oh3kf2LcXLXAMZhn78V6OHHktMKUfpJGdZUz4nzthKq
+# wHvDZnr/qblS1iXEsOtwZECLAxvUlBlvUe1kIbqRXzWEsxyfqXWB8sGeL69MPeDl
+# yQFReabOkPGRkImjU7yggRKWKJAqUrtwHK50BTYECnUOJUklyZzfYcnZt8dUDT5/
+# FUPYG9Q2xSYB93lpL6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTIyMDE5
-# MTNaMC8GCSqGSIb3DQEJBDEiBCBx+IU9vRGRkRc4yFa5ZBS9mEDmTIiVKJ/OVRxt
-# SLFLDzANBgkqhkiG9w0BAQEFAASCAgCX6kXFSd0FbOddl2ecZmXjWQ7jsV4jy+9g
-# 2UycgxPQxcjwkRWbZsq8bXYBu+0vqFGUPK5iNjhytbOJvIL2qZwedYkGDclVj1ra
-# 6PuGaAq4+5o5soFLCFPF589W/CPFfZ0xEEWqpLnRhngE0T7FyiOCSK+5MsKi+1ic
-# JU9SyhE6BPFfy6x9tS7uk7R8vIVLemn7ZkX8O5u3/P+4DWfCekWSUb+JlxJlQb3U
-# uzx1Rd8jBOi0wWcYvNgeAZ9VoszX42+UI8XPQx5RYT18vdmYfGYJ5nlSNAV/KxoT
-# pq8l/eOkvET4ntb7o8xzlxh1Dm3YBtVszgSefdtulcM/PsRgXJNxbyBHS2xpmarU
-# 8CwfGexC9EXBs2vUeH9xUdf4FlolZoi2CrzcFdGPq+mdr4H01W7Sc57iHqe7uLS+
-# i/ZylwUEfycYvAGYqsQLrjF4sMJd42hD9Kp12fl5mUZ/VgcVUL9w//TyaXAYrhRJ
-# 9SqUkKULITBrNGld/zi0zThHE8hVSpEIHhFuEw6xkWXLc2L3/P/NhbeZqleQ3Usl
-# B2L53cU6bm6yE+f33nbq7bunoIiCLmrHMPJHHOdLkg2xtsUqlGwSymCA9F5eefd5
-# BnvgIuPgnEFzfbFLErwZbSI/oVHE6OGw5lP8rgEwmDHiWAV8akk/Vip6eb0355aO
-# ncZDx6rWeA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTMxNTQy
+# MTZaMC8GCSqGSIb3DQEJBDEiBCDszT+CKe53gfMX+zaTCRSioY2hgiqNWLt0QsA6
+# 5H0IPzANBgkqhkiG9w0BAQEFAASCAgCoMsvjGrS4Ja49yAIGt15dEG2oiuH38Lmc
+# kjONMxqmFcpY0zCvylw5fruIXZkuFsDklW00yzNBJol8mTbwiJzuuqcu1nJ6XM/h
+# zIHM9feI3e6xykumKIwkQk36Y2TFUbyZduK64fURnE4hSkDknBZOtTu1tSHj26Um
+# B/ByIr62+Diu5u7TSko4oFICfw5cJWVJXy03W5LL+Ngh80baJWz9oEPGgoXvzL+h
+# MbZnJ6vmhXDodUGa6UAQ8EMwzUy5mGYAzfPcSgwshXCnna6Qzv2N9FM5TltUw9RU
+# ZRFl4nxdEl6qDHv6L7PLriw6MmYeSv9buv2TR1Q0N7fzGJujXp6NO74ddO8bUdx/
+# CzLnlZciT9QJxUpJx7PpeyzPD0hFhqV+xIyJToWIjlanN0IKqOcPTRLtQPSu+vzL
+# nYpteLl9nAzH0Th+ZsO/1/hlaqt8agI06zslpyuG0TR4udoiCv0tdVeS5oI1De3+
+# sh6ZtoLxbzRBJo8nQgrTdSKf61pnIkpntaydHoAJIOUUtEvEffL7ajJjMq2DTlDc
+# yhnejt4GzQkgntwcyZn0sGr+BEnFNci2kd/q4Ou2rKds1lWoOlksH5pS05oTBhet
+# opUgXUmhGTCK495kt9oHJoCR+dJLSevPTaSOnRx0qVDJFyNJMJuF/mm9Do7c5XTA
+# rrxit6FTAw==
 # SIG # End signature block

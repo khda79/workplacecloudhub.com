@@ -174,7 +174,12 @@ function New-EndpointProtectionEvidence {
                 else {
                     $s=$system[$id][0]; $fresh=Get-EPFreshness (Get-EPText $s 'Observation UTC') $Policy.MaxObservationAgeHours $AsOfUtc
                     $expectedName=if ($r.EvidenceProductName) {$r.EvidenceProductName} else {$r.Product}
-                    if ((Get-EPText $s 'Expected AV Name') -ine $expectedName) { $reason='Expected product does not match registration evidence; configure an explicit alias if appropriate' }
+                    if ((Get-EPText $s 'Local Data Source') -eq 'IntuneRemediation' -and (Get-EPText $s 'Local Data Freshness') -ne 'Fresh') {
+                        $fresh.State=Get-EPText $s 'Local Data Freshness'
+                        if (-not $fresh.State) {$fresh.State='Unknown'}
+                        $reason='Local collection state: '+$fresh.State
+                    }
+                    elseif ((Get-EPText $s 'Expected AV Name') -ine $expectedName) { $reason='Expected product does not match registration evidence; configure an explicit alias if appropriate' }
                     elseif ($fresh.State -ne 'Current') { $reason=$fresh.State }
                     elseif ((Get-EPText $s 'AV Qualification') -ne 'Evaluable registration observation' -or (Get-EPText $s 'AV Comparison') -eq 'Conflict' -or (Get-EPText $s 'Prepared Inventory Match') -ne 'Matched' -or (Get-EPText $s 'Inventory Match') -ne 'Matched') { $reason='Unqualified or conflicting registration observation' }
                     elseif ((Get-EPText $s 'Expected AV State') -in @('Detected','NotDetected')) { $registration=Get-EPText $s 'Expected AV State' }
@@ -203,8 +208,8 @@ Export-ModuleMember -Function ConvertTo-EndpointProtectionPolicy,Get-EndpointPro
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDdc/mpdzhi+s8t
-# 57tG8UsHZXRiXsbBbAxYo3NNYCIBwaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAfqNM5lVP/48a8
+# bD4dBU/YGQxwDUhwZPoI1qTyOTTYBKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -337,31 +342,31 @@ Export-ModuleMember -Function ConvertTo-EndpointProtectionPolicy,Get-EndpointPro
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIK9gn0un3nV8BvHxY5dxRgxzdnCIfm+g+bSRBqtiKdMbMA0GCSqG
-# SIb3DQEBAQUABIIBgJiAAdtZBkEa+N68MEtz/o3rHKoD2DcA8l/i6e2Z1zyVD+6Y
-# 00PyNeCBkoStwmM4Z8jpWVL9JUKswpCAtC5IaxLl6VP8RksGlO7Kgia6832aJm9X
-# iHE+l+pw2qdRIbMsZVB9wQZyrxqRqGfbCnfo/qu5AOEIijySITd0rUkueCmYpPGO
-# GmPVT9xHK7GwGqp1SA4PkO4JW/CYfx112od0UwKLx+DzXsmyz/3JpxsGGSRZN1yv
-# iVU/HNb/mMAAJOMlIviODU9lNOGpvwh2YTOc9TqToy8K3obCn8ngOz2Mj0DKquAo
-# 4Bs1b8Eolk/dCUZKWjTwo5sTJJnqytoaDFK9X6EKSp4SRwW5SUTzbs1QH+pG5H7I
-# cfU6Vk52hxN2LAofCjRyQfsruucTJZx2qyicbk/q/l0zrqJzuzQjO2FaVgaw/IiP
-# hx5My8npn328jbLEAv1LIk/t7LiKYkEu7uXW9WZApinGFg4B69kPT1KXjX3D940F
-# VCfPvY7j4nh5772qkqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIBOHlH80QinCiUYjbmMoQDmToiLBELr0+p/OXgIKL8uhMA0GCSqG
+# SIb3DQEBAQUABIIBgCRM3bM8Vvh3UPaWddWJ4GeUaBD4RoKUrg2l60Wi5lTAJwSN
+# I2HaEPUP2qKiF0cx7ESLNZSC0Z0Kj/ym1BEh06Ehq8/A7YzyXZQdn528exrCt2Fb
+# 6m2527kCBhwcDe9e2EAN5q8qrqaKuTIkjAa6K7LYrBC3jsOF0mCq+DexurHay/Il
+# oOZVz2baffzxLmtqNmatfh+SYmzAhAjdGUA8QZgcxEwp5MTrqQee7p7NXOkfBBbu
+# lrXCgkBXkXaggqyFFRSdBsYuE9dSClVj4lwHy8BS3N4xT8PW5Ej7BXRUHTrmZOgh
+# 6BBGxwIAJx/f+leFOd+vEXz6oKc9Idx4AGzK+CgG9og5CVJXj+9egvSGN+TUUIzG
+# 6uGeyQ2s+vhoKbPDcrnxDfRS8sJ+A/bjKPbFYkEhzKOkKtTk5HaLSwO5T1lKjuj0
+# KD0e6GR1jbpD6PQ/083bgUY5v/effjrkJYkrFlNdscIUyj6pCCyhVIXYuRZz9rb+
+# LECpzuG2UxNa+KTLzqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTIyMDE5
-# MTFaMC8GCSqGSIb3DQEJBDEiBCCfajmoHQ/YRg6p6oX4Hpgn47qS8rtQ7VAvJWWu
-# cCXj9zANBgkqhkiG9w0BAQEFAASCAgCrKhrsmuZus2lc8T5+aqDtUM223lLe7GwD
-# 05vUM03NaDZPipvG7rfq+a+ho6oeLgj+Pvl4djgTRta5Dn5/Gf3+kMg3rKgZslIB
-# XYRic9RU98b4m3uBPcWRbCxAo5zpO2EVE9q4cUD8jykCKkAs6RvTttNDawsvhO+6
-# RjWUWyMOk1nicPmL3LX6C/yFu8alz1om4GB9FiUt8YBAAGy6HG72LWrqzRqI09vv
-# l/XJvYWsLNJcWwmREjT7c7FFwy24+Vx6RdyuGNYdZawDaWg1PiEAf434EDV8UIjF
-# jhgvmX40/DPKxcFkktyRs4wM3B5xm67IUhOAjmSOtx1kfMfPcLFllHK6cRgzlZNG
-# XyWGb1oyY2FCVrN+CflyzTN0SQNRVYQ4uIJdiWEj2lMiyZXOq3NMglpOpmgv9d3g
-# vMLZBptJGNHJWOP6T0G7HyMlIkbRZSLHq1gK3uhJ03Ot2O02JF2UuwBBnPpgg+CV
-# djyQ4zC4GKCF5UaA+IXxa25ZjKX0apQUJK9kyqpc40p7ifHZP0IdmPsjSz6xPBI+
-# jqZUvcHS7UOMDJ+I5i1mDlqszFEyQudzNcunEtGO/7gxv1Hp31SpZ4j7oMqw+mBE
-# qjgLxkffgj9E2QyF8wYbRydm0AxyGVHblnBdTyotZRClr83pIlRsm2bJMkIMTyji
-# 2siQFk9BkQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTMxNTEy
+# MzdaMC8GCSqGSIb3DQEJBDEiBCCctJk3L1oXJUs2qJ0TTsgoMJxCIlj7To5l/ZEQ
+# Us4iiDANBgkqhkiG9w0BAQEFAASCAgB8zgxQOj5VK/jVA2322q+0ol9+gKlAWRq/
+# zydHLaFzkikhun6doJsfigqaN3VWO9UL6w+gxuiW6MOHQgHJBVmvwHyjSgZ2TPh6
+# Md53G+ejuwSqL39yF8IlfwFTx/T2gjQSYOvIDjV2RC4d29ky+bslZQagmuSMD/tg
+# dvPP88/ZaEP7g+J3B/OPz16DWPdazQJfYAmIXSlp+Vs65eXEgc2V9c3hkKDBj8FU
+# VsDk8dUHfiJvUC33k8Ssd4wkAFoNLmp9zhKLQ6/SfDIbPqtAgJm3w+fIr9Cgu/rr
+# jXQf5rExEUGkRaJr0k35V8SS6V2zjnydAIAMyg5vWq0d5W0CKzNuUL5WCz4Q3xxq
+# cf7lvRrdwwL5IiJs1P/078EsSBa25h7pHWTWBZ64R3dV5WpBmINhjhlES/7iQgo+
+# pVZzOL8cukY4Oeg6cSP6MO/HCacRKWLMlsVx4SbOGZVxCAdYwXdJh6IqWCYlVLkm
+# N+nVF0ROnPyJ1d0feILoQoOtw8DOZfM0zf1jOlnawPSN6va6xeA1qxMj5S7k3cQP
+# 52kN+HSIeehGYTmH0WwOTaFtaLT7ek5zKE1iRzhwfD+CkvoM5tR4sLCeaRxcsZ/F
+# mOk7P520RylupdhElcNnAf5PfQnFA4im5ncDiMuJXX2yRo8NK3qfG02orV//1r41
+# xZhqJo++4Q==
 # SIG # End signature block

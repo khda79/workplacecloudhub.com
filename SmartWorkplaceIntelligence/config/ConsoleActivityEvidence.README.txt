@@ -1,0 +1,62 @@
+Console activity and workforce inactivity
+=======================================
+
+The current user snapshot uses the latest qualified AD, Microsoft 365 or local
+console activity date. Existing 30/90-day boundaries remain unchanged. M365
+workload and Office usage dates/criteria remain separate and are not updated by
+a Windows sign-in. Workforce inactivity is an observed signal, not automatic
+authorization to disable accounts or reclaim licenses.
+
+The device probe reads Security event 4624, logon types 2 and 11, at most 512
+events. RDP, network, service and unlock events are excluded. Only the last
+qualifying console user per device is observed. Missing output, an empty scan
+or partial device coverage does not prove that any user never signs in.
+
+Payload 1.6 adds LastConsoleLogonSid. The collector also accepts payload 1.5;
+its missing SID is not guessed from a name, owner, primary user, device name,
+domain label or UPN. DeviceSystemEvidence.csv preserves the SID only for a
+qualified console observation.
+
+Current workforce attribution requires an exact unique AD ObjectSID within
+the same TenantKey, a uniquely linked AD-to-Entra workforce identity, a
+qualified managed-device identity, current recurring collection, and UTC
+event/observation dates not later than preparation or each other. Multiple
+devices for one user are consolidated using the latest qualified event.
+Local/cloud SIDs without an exact AD match and ambiguous identities remain
+unattributed. Diagnostic rejection counts never expose user identities.
+
+UserInventoryEvidence.csv adds:
+  Console Last Activity UTC
+  Console Activity Evidence State
+  Console Activity Device Count
+  Console Activity Match Method
+
+No attributable console evidence is not evidence of inactivity. If all AD,
+M365 and console activity dates are absent in the enhanced current snapshot,
+the user stays Unknown even if a M365 report alone says no workload was used.
+
+Invoke-PreparedEvidenceBuild.ps1 builds the current Device/System evidence
+before Workforce when Only=All. A standalone workforce preparation can use
+SystemEvidencePath explicitly; it does not read raw local-system CSV directly.
+Weekly history never receives the current console snapshot. Existing histories
+and their source-specific dates are not retrospectively enriched with today's
+observations. New daily snapshots must be compared with the activity-definition
+change in mind; console-enriched current activity is not a like-for-like
+comparison with AD/M365-only historical activity.
+
+Private Power BI readers accept previous CSV schemas with missing console
+fields as Not supplied / null. Model authoring does not refresh any data.
+
+Activation is separate from code/tests:
+1. Publish reviewed code, then update the server clone.
+2. Update the existing Intune detection-only package to the signed 1.6 probe;
+   updating only the server collector does not update deployed device code.
+   Keep its package identity, assignments and schedule; do not create duplicates.
+3. Collect a new qualified observation with SID, then prepare and validate a
+   new batch. Transfer and Power BI refresh require their own approval gates.
+
+Offline tests:
+  SmartM365/Tests/Test-SmartM365-DeviceSystemRecurringOffline.ps1
+  SmartM365/Tests/Test-SmartM365-DeviceSystemRemediationCreationOffline.ps1
+  SmartWorkplaceIntelligence/scripts/Test-DeviceSystemEvidence.ps1
+  SmartWorkplaceIntelligence/scripts/Test-ConsoleActivityEvidence.ps1

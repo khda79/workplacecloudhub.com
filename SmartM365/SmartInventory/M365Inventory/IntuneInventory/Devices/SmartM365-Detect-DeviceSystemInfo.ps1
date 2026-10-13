@@ -12,10 +12,10 @@
     through Microsoft Graph deviceHealthScripts/deviceRunStates.
 
     Output format:
-    SecureBoot:<value>|BIOSVersion:<value>|BIOSDate:<value>|FirmwareType:<value>|LastBootUpTime:<value>|ThirdPartyAVStatus:<value>|ThirdPartyAVProducts:<value>|WindowsUpdateRebootRequired:<value>|BitLockerOSProtectionStatus:<value>|BitLockerOSConversionStatus:<value>|LastConsoleLogonStatus:<value>|LastConsoleLogonUser:<value>|LastConsoleLogonUtc:<value>
+    SecureBoot:<value>|BIOSVersion:<value>|BIOSDate:<value>|FirmwareType:<value>|LastBootUpTime:<value>|ThirdPartyAVStatus:<value>|ThirdPartyAVProducts:<value>|WindowsUpdateRebootRequired:<value>|BitLockerOSProtectionStatus:<value>|BitLockerOSConversionStatus:<value>|LastConsoleLogonStatus:<value>|LastConsoleLogonUser:<value>|LastConsoleLogonSid:<value>|LastConsoleLogonUtc:<value>
 
 .NOTES
-    Version: 1.5.0
+    Version: 1.6.0
     Author: https://github.com/khda79/workplacecloudhub.com
     Deploy via: Intune > Devices > Scripts and remediations > Remediations
     Run as: System
@@ -154,7 +154,7 @@ function Get-LastConsoleLogon {
             $sid = ([string]$fields.TargetUserSid).Trim()
             $name = ([string]$fields.TargetUserName).Trim()
             $domain = ([string]$fields.TargetDomainName).Trim()
-            if (-not $sid -or $sid -match '^S-1-5-(18|19|20)$' -or -not $name -or
+            if ($sid -notmatch '^S-1-[0-9]+(?:-[0-9]+)+$' -or $sid -match '^S-1-5-(18|19|20)$' -or -not $name -or
                 $name -match '^(DWM-|UMFD-)' -or $name.EndsWith('$')) { continue }
             $time = [datetimeoffset]::MinValue
             if (-not [datetimeoffset]::TryParse([string]$document.Event.System.TimeCreated.SystemTime,
@@ -162,21 +162,22 @@ function Get-LastConsoleLogon {
                 [Globalization.DateTimeStyles]::AssumeUniversal, [ref]$time)) { continue }
             $identity = if ($domain -and $domain -ne '-') { "$domain\$name" } else { $name }
             $identity = ($identity -replace '[|;\r\n]+', ' ').Trim()
-            return [pscustomobject]@{ Status = 'Observed'; User = $identity; Utc = $time.ToUniversalTime().ToString('o') }
+            return [pscustomobject]@{ Status = 'Observed'; User = $identity; Sid = $sid; Utc = $time.ToUniversalTime().ToString('o') }
         }
-        return [pscustomobject]@{ Status = 'NotFoundInScan'; User = ''; Utc = '' }
+        return [pscustomobject]@{ Status = 'NotFoundInScan'; User = ''; Sid = ''; Utc = '' }
     }
     catch {
         $status = if ($_.FullyQualifiedErrorId -match 'NoMatchingEventsFound') { 'NotFoundInScan' } else { 'Error' }
-        return [pscustomobject]@{ Status = $status; User = ''; Utc = '' }
+        return [pscustomobject]@{ Status = $status; User = ''; Sid = ''; Utc = '' }
     }
 }
 
 $lastConsoleLogon = Get-LastConsoleLogon
 $outputParts += "LastConsoleLogonStatus:$($lastConsoleLogon.Status)"
 $outputParts += "LastConsoleLogonUser:$($lastConsoleLogon.User)"
+$outputParts += "LastConsoleLogonSid:$($lastConsoleLogon.Sid)"
 $outputParts += "LastConsoleLogonUtc:$($lastConsoleLogon.Utc)"
-$outputParts += 'DeviceSystemPayloadEnd:1.5'
+$outputParts += 'DeviceSystemPayloadEnd:1.6'
 
 $payload = $outputParts -join '|'
 if ($payload.Length -gt 2048) {
@@ -189,8 +190,8 @@ exit 0
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDoIcRgrGU7Psav
-# loUncG1Md+OxOeNEZBqLgk/kuJy+oqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB6UYZwPmHThZvt
+# +tNa3LBpUmcESvcVSYuzuGsArPzRNaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -323,31 +324,31 @@ exit 0
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIIOygGMle+cIxDFUuZUUuBMMqGBHerikeG5z5BXiKOtsMA0GCSqG
-# SIb3DQEBAQUABIIBgE4Hf5DVi+nEJ4YhzuTB/amjwSz29K/AKEfi+xUP1aqzkHbX
-# mM2DWojxWK3cM86aT+elGVH1+43ZAjGxQtpzuJBG4FA6uZjcKPwB9JsOLh+IgTLF
-# QblTLs2I/b7IRTQj4UE/5ORM/nDnk3epIz56qNoet6oxthkngljUBa4RarZiyW4t
-# Rw77pUwUuPsh1Q3d43luVDoewxC9Uqn0nDN3aJH3xGdnNNwtkTjL0a1c3m2SxsRb
-# 1ovZ5IQczbTXgka1CHiM50jS1kuAW6RGbNPa3lC5cue6hYF/BMSfL0JtBLF4Uqo5
-# VeKuHvx656tSlSVWY904VKaDVG7Tz6RrTk2u94QE31xPnCwwnaOrMeC9gICTN3Y5
-# pAn/5bR82c9KTlz6nwUn46m7ybE5mhJqz5q0mOLE6zDo/R8VhQfpCoL69wGxl7MI
-# HiWQ+WCnRUi260/eTuAWx2jSj+8//TfVtcz/imfldnnbwnwbonub6a8YbXU3NPfe
-# eA14cW9qHC1h2yGpiKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIKovoL/zS9D9PrhyFyj1djqByF5wxqBmTJfLdTNM2BzaMA0GCSqG
+# SIb3DQEBAQUABIIBgKoMABN/YenVK5/tC8AwN8c0uFni88H7iUAlF7O+WyISt0qp
+# MzUGUCi8gdx0gcRkz6yh7pWW/gQs9qIti6z12f4orq5bxenATc7UtMDtcLZb9pz5
+# rTVyHHZjU8H/ekpbaoydeSD57mhQQyiyBY+xWWS+dVur1P54lo+85ypvhJx1/d4u
+# u1Fa6optL7XhVBB+9EE6i1n6f/WbWLfa33KYllNqhfcdR48+FYImBez+WmEl284f
+# x7oIZr7HxraEO7uTpxujGmIsjkHK6Ql5aPL1Emr1U141RaaO+hw01/y1GO57J8Cs
+# dNb5GiOA4pDoPB49QVgaG+OAUAscj92rm5gIb8zmYlieW5ac55MSdMpFvm9vg216
+# I8CF5/CIN1gXTEZP6Gx72NWjbn/3TxwFyZT7t7N+m+vcQ50R77uGLIu3yLxnEify
+# NgttpWhuJf9jkea80ri6EL9m1dXx+wfdWTpv1TEJpBL4TtbP68Nb9WsCGQPk+yk8
+# 9e6yiZAsfhhFApm/IaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTMxMjU1
-# MjlaMC8GCSqGSIb3DQEJBDEiBCDLe6JaOsO5zDlGJKK+SuLSiXSSOOqO2Uan6gxt
-# JvTHiTANBgkqhkiG9w0BAQEFAASCAgAqsgBWPFm8eOOo87hulsKDXODXVX6ds4Dv
-# lV0l0+ElRsAbzvoWf5Z6bIROtnL95eWuiDwi9EfwtL3bGOLaNZM4BGKIsNuUj8cS
-# x6jl2rVCo0GHuD91XtqcDTv+Y5icF2205zHnPDCI32EiKYkIpsSqsPPRbbsyixz4
-# RNBVEnTfrRRB6E+UKFGDA9Dy+FKCvwt8FspAaSqbfzzttXRaYFPBZnaVRHdz50In
-# 7GqstQDpm20Gi9pOHRY51Ilmb2BTcJgNiKnuuXS1i547yj0FjdRTZ6n5pCCAj3JW
-# sQIbyaqdN+yzYBkR5zjtFQd9qucBg7OTKaaZNTq7CBqu46vzqTnsYow4LdazZS/s
-# GeJD5vgtyxMl7Kqm21clh2Bfh515BThl0w8fyCQQTfNkVor16tdUzv5v8MPfMpgw
-# 9aRqVeONRejg2iqm0s19Bm7caq5gIKyqKytMdq044Gbs/fa6ghjhHJQhMgMUOyIH
-# xk5sdIzMPfwbCM2fg4juuRI+5+Y4SYGCqFyGlPhN0tZam/+OaAgHnhxpAZWdzCwi
-# vha3BSoKcv+HcvJ5r0crG7AMWrIAYst9BfVESSAKSmg3sACaYCH9wE3aqwM2QgMl
-# oSN6/0cdl/c94LfUudpZrEQzJYxsBWuwWnXOFNsRkxPC2jj+D7bNbBCnBbxM+XVb
-# 8vLVexEoAw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTMxNTQy
+# MTNaMC8GCSqGSIb3DQEJBDEiBCDq8ac0PBawiYF75Q03iYJyAeMtkBl/uS1Ek9rh
+# 0OOMHjANBgkqhkiG9w0BAQEFAASCAgBPd8oNu1c2bCCEn/O3RweMsE9cG4eVg8fE
+# 3yJOXqgp1nwyA+mjQLCuJMjFWiIla2r4aqvSgnf00Qw8bnnHYEoD2SQWZZD0we4M
+# vyxyxMQfn5D2ZVQXVf/p+UjIJFB0k5Pt3vYU3/tmzKilVSUJJjJAErrGi4NO0G/9
+# QFYZxteIEQu01RGTeGxD9qT+BmaVMMbnzchdJbsqnrcZtW+vMsS4rlKBuKIjhPNd
+# 5Z6Vv9xwlX2P1GQD3RVbsCl/azrpJurnncJLi+4jylGNq+suOaq/WAjXZn7tTHrC
+# 6fHC5dzY7bh2x7WY6Y0xpSMKExUV1d4IEw/JXIzv3Llm+LZLLPcskWpcNd7sznIe
+# SDM1OnqvWW9JoVxym9tzJiX2fC3BpL+BZxzzRnazZfVXAsO6FC92Jp40wkPxWnd/
+# hLgRRQ9z0odTGnOumEi2G8HEQVSSlWq4yuYT0ebIlWIycyP8e8YyooWLqXN8lOlp
+# DGJSTftcrSFycI2lgkN1gwmoAkw7goemsFT5UsU2mN0FkcAR1LhYhgKyUAuxX/Zd
+# tVDzqgdK2hm549ghvwhYHqfnABr+h/TVWo+XJlnSKH8QpYCVou2GjfWZB2UMalXM
+# lP+3vG7QdUasCqih1T0wX7DNiw1K8UQKvLvg13bqy4xdOVjaCBqEKEXRP4Kv+5P9
+# bLN2fe83Yg==
 # SIG # End signature block

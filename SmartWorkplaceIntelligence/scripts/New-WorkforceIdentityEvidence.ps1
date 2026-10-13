@@ -23,11 +23,14 @@ param(
 
     [string]$DiagnosticStagePath,
 
+    [string]$SystemEvidencePath,
+
     [string]$AccountClassificationConfigPath = (Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) 'SmartM365\SmartInventory\Config\AccountClassification.local.json')
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+Import-Module (Join-Path $PSScriptRoot 'ConsoleActivityEvidence.psm1') -Force -ErrorAction Stop
 function Write-WorkforceDiagnostic {
     param([string]$Stage)
     if (-not $DiagnosticStagePath) { return }
@@ -425,12 +428,15 @@ function Get-ActivityClassification {
     param(
         [AllowNull()][object]$ActivityRow,
         [AllowNull()][object]$AdRow,
-        [datetime]$AsOfDate
+        [datetime]$AsOfDate,
+        [AllowNull()][object]$ConsoleActivity = $null,
+        [switch]$IncludeConsole
     )
 
     $m365LastActivity = if ($null -ne $ActivityRow) { Convert-ToDateTimeOrNull (Get-PropertyValue $ActivityRow 'LastActivityDate') } else { $null }
     $adLastActivity = if ($null -ne $AdRow) { Convert-AdLogonDateTimeOrNull (Get-PropertyValue $AdRow 'LastLogonDate') } else { $null }
-    $observedDates = @(@($m365LastActivity, $adLastActivity) | Where-Object { $null -ne $_ })
+    $consoleLastActivity = if($IncludeConsole -and $null -ne $ConsoleActivity){$ConsoleActivity.Utc.UtcDateTime}else{$null}
+    $observedDates = @(@($m365LastActivity, $adLastActivity, $consoleLastActivity) | Where-Object { $null -ne $_ })
     $lastActivity = if ($observedDates.Count -gt 0) { $observedDates | Sort-Object -Descending | Select-Object -First 1 } else { $null }
     $days = if ($null -ne $lastActivity) { [math]::Max(0, [int][math]::Floor(($AsOfDate.Date - $lastActivity.Date).TotalDays)) } else { $null }
 
@@ -443,6 +449,7 @@ function Get-ActivityClassification {
     } else {
         $activitySource = 'None'
     }
+    if($null -ne $consoleLastActivity){$activitySource=if($activitySource -eq 'None'){'Local console'}else{$activitySource+' + Local console'}}
 
     if ($null -ne $days -and $days -le 30) {
         $state = 'Active <=30D'
@@ -456,7 +463,7 @@ function Get-ActivityClassification {
         $state = 'Stale >90D'
         $workforceStatus = 'Inactive'
         $evidenceStatus = 'Observed'
-    } elseif ($null -ne $ActivityRow -and (Get-NormalizedKey (Get-PropertyValue $ActivityRow 'HasAnyM365Activity')) -eq 'false') {
+    } elseif (-not $IncludeConsole -and $null -ne $ActivityRow -and (Get-NormalizedKey (Get-PropertyValue $ActivityRow 'HasAnyM365Activity')) -eq 'false') {
         $state = 'Observed never used'
         $workforceStatus = 'Inactive'
         $evidenceStatus = 'Observed'
@@ -474,6 +481,7 @@ function Get-ActivityClassification {
         LastActivityDate = $lastActivity
         AdLastActivityDate = $adLastActivity
         M365LastActivityDate = $m365LastActivity
+        ConsoleLastActivityDate = $consoleLastActivity
         ActivitySource = $activitySource
     }
 }
@@ -520,6 +528,13 @@ Write-WorkforceDiagnostic 'Load M365 activity'
 $activityRows = @(Import-Csv -LiteralPath $activityPath)
 Write-WorkforceDiagnostic 'Load AD users'
 $adUsers = @(Import-Csv -LiteralPath $adUsersPath)
+$consoleIndex=$null
+$consoleAsOfUtc=[datetimeoffset]::UtcNow
+if($SystemEvidencePath) {
+    if(-not (Test-Path -LiteralPath $SystemEvidencePath -PathType Leaf)){throw 'Prepared Device System evidence was not found.'}
+    $consoleIndex=New-ConsoleActivityIndex -SystemRows @(Import-Csv -LiteralPath $SystemEvidencePath) -AdRows $adUsers -AsOfUtc $consoleAsOfUtc
+    Write-WorkforceDiagnostic 'Qualified console activity index'
+}
 Write-WorkforceDiagnostic 'Load site classification'
 $siteSettings = @{}
 foreach ($row in @(Import-Excel -Path $SiteClassificationPath -WorksheetName 'Settings')) {
@@ -696,6 +711,7 @@ foreach ($row in $licenseRows) {
 }
 
 $matchedAdByEntraId = @{}
+$consoleAdLinkCountsByEntraId = @{}
 $matchMethodByEntraId = @{}
 $conflictEntraIds = [System.Collections.Generic.HashSet[string]]::new()
 $identityCounts = [ordered]@{ Matched = 0; Conflict = 0; Unmatched = 0 }
@@ -726,6 +742,7 @@ foreach ($adUser in $eligibleAdUsers) {
         $identityCounts.Matched++
         $candidateId = @($candidates.Keys)[0]
         $matchedAdByEntraId[$candidateId] = $adUser
+        $consoleAdLinkCountsByEntraId[$candidateId]=1+([int]$consoleAdLinkCountsByEntraId[$candidateId])
         $methods = $candidateMethods[$candidateId]
         $matchMethodByEntraId[$candidateId] = if ($methods.Contains('SID')) { 'SID' } elseif ($methods.Contains('ImmutableId')) { 'ImmutableId' } else { 'UPN fallback' }
     } elseif ($candidates.Count -gt 1) {
@@ -743,6 +760,7 @@ foreach ($row in $duplicateUpnRows) {
 }
 
 $evidenceDate = (Get-Item -LiteralPath $activityPath).LastWriteTime.Date
+if($SystemEvidencePath){$evidenceDate=$consoleAsOfUtc.UtcDateTime.Date}
 Write-WorkforceDiagnostic 'Calculate users, activity and personas'
 $userOutput = [System.Collections.Generic.List[object]]::new()
 $activityStateCounts = @{
@@ -763,7 +781,8 @@ foreach ($user in $enabledWorkforceUsers) {
     $officeUsage = if ($officeUsageByUpn.ContainsKey($upn)) { $officeUsageByUpn[$upn] } else { $null }
     $officeUsageState = Get-OfficeDesktopUsageState -Row $(if ($null -ne $officeUsage) { $officeUsage.Row } else { $null })
     $officeActivationState = if ($null -eq $officeActivation) { 'Unknown — no activation report row' } elseif ($officeActivation.PcCount -gt 0 -and $null -ne $officeActivation.LastActivationDate -and $officeActivation.LastActivationDate.Date -ge $officeActivation.ReportDate.Date.AddDays(-30) -and $officeActivation.LastActivationDate.Date -le $officeActivation.ReportDate.Date) { 'Activated on PC in 30D' } else { 'No PC activation in 30D' }
-    $classification = Get-ActivityClassification -ActivityRow $activity -AdRow $matchedAd -AsOfDate $evidenceDate
+    $consoleActivity=if(-not $conflictEntraIds.Contains($objectId) -and $consoleAdLinkCountsByEntraId.ContainsKey($objectId) -and $consoleAdLinkCountsByEntraId[$objectId] -eq 1){Get-ConsoleActivityForAdUser -Index $consoleIndex -AdRow $matchedAd}else{$null}
+    $classification = Get-ActivityClassification -ActivityRow $activity -AdRow $matchedAd -AsOfDate $evidenceDate -ConsoleActivity $consoleActivity -IncludeConsole:([bool]$SystemEvidencePath)
     $activityStateCounts[$classification.ActivityState]++
     if ($conflictEntraIds.Contains($objectId)) {
         $identityMatchStatus = 'Conflict'
@@ -861,7 +880,11 @@ foreach ($user in $enabledWorkforceUsers) {
         'AD Last Activity Date' = if ($null -eq $classification.AdLastActivityDate) { $null } else { $classification.AdLastActivityDate.ToString('yyyy-MM-dd') }
         'M365 Last Activity Date' = if ($null -eq $classification.M365LastActivityDate) { $null } else { $classification.M365LastActivityDate.ToString('yyyy-MM-dd') }
         'Activity Source' = $classification.ActivitySource
-        'Last Activity Workload' = if ($null -ne $classification.AdLastActivityDate -and ($null -eq $classification.M365LastActivityDate -or $classification.AdLastActivityDate -gt $classification.M365LastActivityDate)) { 'Active Directory' } elseif ($null -eq $activity) { $null } else { Get-PropertyValue $activity 'LastActivityWorkload' }
+        'Last Activity Workload' = if($null -ne $classification.ConsoleLastActivityDate -and $classification.ConsoleLastActivityDate -eq $classification.LastActivityDate){'Local console'} elseif ($null -ne $classification.AdLastActivityDate -and ($null -eq $classification.M365LastActivityDate -or $classification.AdLastActivityDate -gt $classification.M365LastActivityDate)) { 'Active Directory' } elseif ($null -eq $activity) { $null } else { Get-PropertyValue $activity 'LastActivityWorkload' }
+        'Console Last Activity UTC' = if($null -ne $consoleActivity){$consoleActivity.Utc.UtcDateTime.ToString('o')}else{''}
+        'Console Activity Evidence State' = if($null -ne $consoleActivity){'Observed'}elseif($SystemEvidencePath){'No attributable console evidence'}else{'Not supplied'}
+        'Console Activity Device Count' = if($null -ne $consoleActivity){$consoleActivity.DeviceCount}else{0}
+        'Console Activity Match Method' = if($null -ne $consoleActivity){$consoleActivity.MatchMethod}else{'None'}
         'Identity Match Status' = $identityMatchStatus
         'Identity Match Method' = $identityMatchMethod
         'M365 License Count' = $licenseCount
@@ -938,10 +961,11 @@ function New-SignalRow {
 }
 
 Write-WorkforceDiagnostic 'Calculate workforce signals'
+$currentActivityScope=if($SystemEvidencePath){'Combined AD, Microsoft 365 and qualified SID-linked local console activity; console coverage is partial'}else{'Combined AD and Microsoft 365 activity for enabled workforce accounts'}
 $signalRows = @(
-    New-SignalRow 'High' 'Accounts without activity for more than 30 days' 'Activity hygiene' $inactiveOver30 $coveredUsers 'Observed' 'Review ownership, disable obsolete accounts, and reclaim licenses where appropriate.' 'Combined AD and Microsoft 365 activity for enabled workforce accounts'
-    New-SignalRow 'High' 'Observed never-used accounts' 'Activity hygiene' $activityStateCounts['Observed never used'] $coveredUsers 'Observed' 'Confirm ownership and business need before disabling or licensing changes.' 'Combined AD and Microsoft 365 activity for enabled workforce accounts'
-    New-SignalRow 'High' 'Observed activity older than 90 days' 'Activity hygiene' $activityStateCounts['Stale >90D'] $coveredUsers 'Observed' 'Validate employment and service need, then remediate stale access.' 'Combined AD and Microsoft 365 activity for enabled workforce accounts'
+    New-SignalRow 'High' 'Accounts without activity for more than 30 days' 'Activity hygiene' $inactiveOver30 $coveredUsers 'Observed' 'Review ownership and unmeasured activity sources before disabling accounts or reclaiming licenses.' $currentActivityScope
+    New-SignalRow 'High' 'Observed never-used accounts' 'Activity hygiene' $activityStateCounts['Observed never used'] $coveredUsers 'Observed' 'Confirm ownership and business need before disabling or licensing changes.' $currentActivityScope
+    New-SignalRow 'High' 'Observed activity older than 90 days' 'Activity hygiene' $activityStateCounts['Stale >90D'] $coveredUsers 'Observed' 'Validate employment, service need and partial activity coverage before remediating access.' $currentActivityScope
     New-SignalRow 'High' 'Disabled accounts with active M365 license' 'License hygiene' $disabledLicensedGoverned $null 'Governed issue export' 'Remove or reassign licenses after validating exception scope.' 'Exchange Hybrid Identity governed rules'
     New-SignalRow 'Critical' 'Identity reconciliation conflicts' 'Identity integrity' $identityCounts.Conflict $eligibleAdUsers.Count 'Observed' 'Resolve conflicting SID, immutable ID, and UPN mappings before automation.' 'Enabled human-classified AD accounts'
     New-SignalRow 'High' 'Duplicate UPN rows' 'Identity integrity' $duplicateUpnRows.Count $eligibleAdUsers.Count 'Observed' 'Correct duplicate UPN values and rerun identity reconciliation.' 'Enabled human-classified AD accounts'
@@ -1174,8 +1198,8 @@ $summary | ConvertTo-Json -Depth 4
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCACbgXjHkv2hgF
-# B4+IiMHzvDi2P9tIHKgTxSeadWuCUqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCqjAExLgn1zMOW
+# brnLyhVZTE0ROxHNoFsjYTUG70aVYaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1308,31 +1332,31 @@ $summary | ConvertTo-Json -Depth 4
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIK0bg4BuyhRznLpwmIAx7fjGph7H+InsWxMiHR7Y5LA2MA0GCSqG
-# SIb3DQEBAQUABIIBgFE626VAMWyJ1RgjwtSipQSpB0a0fC1CZw61cwJLOeaNm5u+
-# x0AGkojY1mnbp7WDysYlFjH9+VVLNFfLWBgcRJ1hqr0AIZnRHTpMcVYU0d+/dYz3
-# zDmP04ba1lJSeXEyJipndDPKxpxBoqcTkuZee7o3xg0cYX9aT8SAcukFA/fr2iGQ
-# v3aHe13Kyr+1c5QDFMowuOsUNmaDmpQgdXnHc43iu5+nL/b8izmhGPtXXT4vUJsF
-# OaYj9y/j5xs2OxFm30jkx5MIV5Y4hyqLdAYO5RSN18oXvxpwHs6wAfYKg3nRU+kf
-# 3shSmAsx8OSTXmoU6Ho/tdlkLh3r5y1uZPOFKGzOexjg77jIOoO21HHoJ1z3iCG0
-# 7EiDj+tZUe41KEbtbpxPfvG/UP7qQvajpO3Y9siPqwhZq7YyqaBgAsBCIycB3cfs
-# tZgiYLAkPmgC32iMnxOZ/+OECy3I/Apa1ehYm0t0Ukz3kAzuXgogJJmnlK/EScCS
-# cfpk1dkGfBtTQxKvQqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEICDt++tbmquw/ZS9Z/j2E7w2KfDE2tJnhNfA+Pv1MrpCMA0GCSqG
+# SIb3DQEBAQUABIIBgJ5m4MFVkHgfNMrYhWOoRBgDCkPil4HI86S30vXj7xf9tuy9
+# wXxyowGcbRaBFEUJncPiZLLJh2am1aUmR/r7nDoj/b79QNWXbTpEarlvoPJPsRyl
+# 5xsEWUk7GyWiqbs/YIJyEV7f0KRuJAcTOucRSuhnQydXWrKQ43cbFU5yBXOw0n/0
+# JSPu8fmMru9k2ON8FoyMD4DE7bYHp1JTfwd5qbOOjaljicWGLt5AmwYzmk5h3dxj
+# UNL50eDSvBZfzMKg1BfK5ucIjVHzanUbb2P6Di8mR8m4UuUTy+5Vd3LwtDVOlbxL
+# XreZ94PuzGVPhqTgCmnKdHKIa01emO/rZPOnNbmgzkEPIVdQGcTIJcCzhx/I+4Oj
+# pQpA/lawCuwgKUWPn+sFpZ8j6EViG6teX1rhxIZt7s5PLNCVBjzTYiPHcNgUK188
+# HKZr1bfDYsOLHG0ceubJtzqAhmOEvfHwmbUqoJJa+2mb7ljuY7qW+EnCxQA0Cgsc
+# O+G3OgcawNuvyYRXhaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDExMjAz
-# MTlaMC8GCSqGSIb3DQEJBDEiBCAdLz3zXs+ULuZBxD51xkMwDRbPCkNsT3bX6EsN
-# f9NeijANBgkqhkiG9w0BAQEFAASCAgC2JHOBtO9q2cYYGJ8Mc7QHnYzh/2k/xk9D
-# OzetQleJZnczvwwkzPtPyQci8TRJgsj21dRXNP13F02fsdHgNervqIwVosnVJfCc
-# mGeOqM2tf/y2XpFT/3ltwDLH5BzkxZbpWuqiMi7ByCJzH2wxKDkuK3+O9aib+g4d
-# 8xhaK/Xek9qvE2YSsorhB29I9XEJI4DWJB9OnGTG9FjiO7pT5QVGSyQsoVXmOJFM
-# 3n+L+7tr3K7lMhow5PKfZc3585HJ91tBLhg86f++BJjrvSIdhhipgFM/9I7YFk1E
-# am+UeRpb98sc/sMGXjWoavhieE5UQGs2SbHaiuTsOAYkhvjBJR4VNGVMd3KZOUug
-# i6mOOKy0kU2nwiTqYpZ9EaM4aF4BgQPwWFzsyE4xvJPrAGWj+FLtpAq0UVJazC9y
-# QZbdK3hXy+yXN/pzacq5Rj9r2jkAmaZD+NR0njNIaDgQJZO8q5hYtsdvSbFaf+EL
-# fTyUuIeAoWAqrN+hG/BxnU1sti6ou2kG5v+JMXQr9sHXlUcIW/bnRMNyzX5AzH/l
-# K/OwIokq6ngy724GHFYMjUaLZ7jZq7bx2+Ws+dZ9hfglrOts7Jt5IcKopWCvZXC/
-# 10G8pwMk3SlRIqsOdeOTV1cyDrENyJSfl2fihEkF8npUKovl7Is0RRn9wvj4y4KM
-# WaGWt5NjCg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTMxNTQy
+# MTZaMC8GCSqGSIb3DQEJBDEiBCBAKaLGxXXcSnmV69pgMRuxKOie7NREGbIj9DR2
+# bf63kjANBgkqhkiG9w0BAQEFAASCAgA6guQBbeP/fPdLwoX4898VcPFA8oLLojhr
+# c3GTUIvyWnNLDycoMPvlvIT9kNUuVMp0OpyD9EyvY81wQKsgZ6yS7h5a3g6p7WgY
+# 83unISUBm5X9EyT/2dagYZIboCobMt4tncvohG9kJV/Z/DRzAXR6NMAvq8oiD9d/
+# 9YGafHyAkvtAy/a74/9dBUXyQXJK/w7so161bdEA0v6EPUzOlqw92BG1XapG4wuv
+# 2N9Q5jIoC1WrRYf7gqitn/xPyDl7NSJxYyJSBk0tUHMQ3ckQFBMWXOz/f1kr+vtt
+# IfSsN9y3o1R0vUr5To4o5dAOUmBA7en+bY38n22wOo8tcC7jdF0sI/KOYdL0w+ZP
+# 2mm001WiuvtZqg3mYIz1VmNZWsbCVCnMffTL6yvaA6zVVMtNKEgQti/UFSjM1LPN
+# nVD3Ewnylpz0b0NXGgiPzCiVYYUZ0DNFy19IOq8rCtelS3V4bHNuV8Pz4Ej+1GKi
+# V3j47TsRm1iwtJYdc9qZEVfelSdMOTcUU29RESltOesDdZklyHxqL77l9Cx7yZM6
+# prL4enatYQcZiFYqTzZppV94ULvWbuId5jpJkNov6vvOoCUDUfUT1le4uGbLzjM4
+# Yzd19OECY/quY36JnfH2CvqxFtcfAkIHftR85rfYjO6qYVKYHJq3QGGCEYXQSQlM
+# kTGCksXlCg==
 # SIG # End signature block

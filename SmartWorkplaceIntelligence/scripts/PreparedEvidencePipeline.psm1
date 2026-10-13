@@ -587,6 +587,7 @@ function Invoke-PreparedEvidencePipeline {
         $provenance.WindowsMigration = (Get-Content -LiteralPath (Join-Path $staging 'WindowsMigrationAudit.json.txt') -Raw | ConvertFrom-Json)
         $provenance.AdCountryRulesSHA256=(Get-FileHash -LiteralPath $countryRulesPath).Hash
         $provenance.DeviceSystemPolicy=@{MaxObservationAgeHours=$DeviceSystemMaxObservationAgeHours;OffsetlessGraphTimeZoneId=$DeviceSystemOffsetlessGraphTimeZoneId;HardwareFreshness='Platform timestamp is context only; not hardware collection time.'}
+        $provenance.WorkforceActivity=@{DefinitionVersion='AD-M365-Console-v1';CurrentSources=@('Active Directory','Microsoft 365','Qualified local console');ConsoleIdentity='Exact unique tenant-scoped AD SID and unique AD-to-Entra link';ConsoleScope='Last observed local interactive user per device; partial coverage; RDP excluded';HistoricalSources=@('Active Directory','Microsoft 365');CurrentConsoleInjectedIntoHistory=$false}
         if ($endpointPolicy.Enabled) {$provenance.EndpointProtectionPolicy=@{PolicyVersion=$endpointPolicy.PolicyVersion;SHA256=(Get-FileHash -LiteralPath $endpointPolicyPath).Hash;Qualification='Antivirus and EDR evaluated separately; unknown is not healthy.'}}
         Publish-PreparedEvidenceBatch -StagingRoot $staging -OutputRoot $OutputRoot -TenantKey $TenantKey -Provenance $provenance -AllowEmptyTables $AllowEmptyTables @endpointContractArgs
     } catch {
@@ -602,8 +603,8 @@ Export-ModuleMember -Function Get-PreparedSourcePlan, Invoke-PreparedEvidencePip
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAMfA9Dr/0Vypvj
-# /+jwzdR6xtlTfutx3axc8lMtDW1jW6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBSelLCk/n8PxFt
+# 3rPGmGHAcLADV7oqZs5R1ufTZqv3cqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -736,31 +737,31 @@ Export-ModuleMember -Function Get-PreparedSourcePlan, Invoke-PreparedEvidencePip
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIBdYWIbLjmuFw3JL8usOtxBRmHw3HNBzzMKJmwn5dlPpMA0GCSqG
-# SIb3DQEBAQUABIIBgIbD+QWxB/k/FsuE4BincQUA23ecR09QtU3oZ2IviGU6hbJa
-# DgsKa/a7B3nY7+hQIGNEnWo2Epe5Wz8GrG5fcQGIRkU8BwyVmnNgjDxxPp6tT3en
-# EFe5JfhMygg8WsMlAIcef55vEUBAldzBinc+RNp47kIbtD2S1JzoTJ64rGxLqfL/
-# 74HFbQ9bmSpbuFGlASrcFKQvkd5aawikHI8w9swLPfEitwf3JOfnwtXQVriQ7QTV
-# mwMTRqIIAETyZpOVWG21RpGEh1B8sGAtiIzr+DhUBY/jsTXkxTD37eD2zdKoywO/
-# 6AVM4pAYvUxP8wuJ/RuXw2pXiRKbi08/9N1ncmKylUXwQqwyG0r+9NXPrsww+eyj
-# GofI/QDtqMwMidQyCTJT1qYtIMUrCSAjDyMN2VDKHTg3xP57vfuwuNPjhdRwFCj3
-# 1VYz0FInzwWfMaPom5jYk2lXYhPanPWh5hfqZ5oAyrmeZI7+aNdvVy9liRLiTwYf
-# nU9GqOZxLZum7rrHF6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIJ6Str53+3JdtB1UK1Q8Y7wcyDer7lgj9ytf6dZ87DKZMA0GCSqG
+# SIb3DQEBAQUABIIBgF14FN1X5L62bPU9ViKOfciyJSNRclPemzGqnV8nzD7783xD
+# 6C17+KP+wJ2wjf4Gwc/nL0XfX/SZ926DWgTicNCOMb7blWygBt6UwMHP+H58QhJ4
+# rkONMq8elLMyUKfg+61J4yzEPoX4/+ZqqBYhShhLibwHUomlkJGNlzeEOjRL92lX
+# CoWfs4GaCZ6jmBzK1AS9c8AKPH54ex1YuIryjLiKT0pMSpG3uW61LseQrO223aCy
+# CKXJNa0PVYXa//w44Iklil3EDyRBAkJTILEIMC3VZySTmzpnn+KLhkKd2pZSxTaC
+# jRw/bslk59N+fKxvz3bC1V3YpdUkVW8vHAyMz/+jq7KY6m1T9uZ0BndA6Q8IF87n
+# lhcdFMqOXM+dMyGH92XuwIhZ5gIG1Z8RpmFX/rjGwM+yJCzP+kCzY0aTdNKhMwks
+# 5CEdBkloeNJzMQkO3Tzf6tCT32PnEBXm3Wuz29Ygn86/dAumKq89qdGt+IheIIts
+# JVxtQAyuYTZrPwwqiqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTIyMDE4
-# MzBaMC8GCSqGSIb3DQEJBDEiBCCX49eGVjyRh2S9kSZeO/dDhNln8THW0ipnfpC/
-# dH5RYjANBgkqhkiG9w0BAQEFAASCAgAAej4h2R16mfkHuF+xBXqCs28HEzn4TkD5
-# HaQkt++7WXSzao/ctE1dSy7w5cCfzJfyCiFOM84ekIcqCDYkj7NUGj5WOkoFkJDu
-# JFjC2a4EVLQ9N52Fg1rzoL8Nxhg1HfxvTO+JCEMfdEO+ayM5ukIRK+PhckbVGgcG
-# SxekXlhWz8blc5NCV3dVuYkNpbzM6Po+9XgSSheqsrx0yadEFLxUB5OoJek+i7Ic
-# XTUvMVUJq7LyLbk9L6l6Xe9rhXbk46iDzwQP4petMJsX0DHT25YG7onhz6k4y93x
-# 9OUFXViF/vYJ4CHVLoUkTO9rJTmidbSx3xvZJ/waS8JfCh3UUCwLN7XW6nE35T4t
-# WzSJfjNZFgQJSARc8DWqWcTmHgxfDZNzImS0zv8lHTTY2bJtL+YmmRP0UgBfiFVe
-# 40xREelac+jsr+MNqFMIVgscjMeNm91vK0OKFMxVLhs3CnaPQcyz/oV6gD6OGDGj
-# d73tuZSM5G+h2mpB0rbYDXBMdo5wZoZEXUDDlHsO2BrQMv0XcLSq432hlzfvtW7d
-# 2/RwUHKOI22IrkoNrSTQFysvUOdTi37DW0GSW/fTJ3+z8p11ygXiGldMBUrqxKF5
-# BzS/DTkJLolfqfEdOg6EbotBaoC57Tx67m1oUtNAKGRkmR5qPQeuw5WqyMqy7/z6
-# MX+EJGrH+w==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTMxNTQ3
+# MDhaMC8GCSqGSIb3DQEJBDEiBCC+VYQPfM6SsmuQyaWGRrOIyteK7gP+720YHpbg
+# b7TOJzANBgkqhkiG9w0BAQEFAASCAgBapE8VxkZP80HR84CicX31KNT/pXPuWdYU
+# Q8JYBFlLaYs9Xo285B1R+6nkjWsGxzsei8s84MoS5426T+unjWM1ch121bBCH1N7
+# Of0w1YwBHbZJ7otZCRrynr5oZKLsItiAi0Nm5pt2j1tNbPFG8ubIHYP8t9UoWflS
+# fKk4kpTOJZDy9tYn71cEmXx7zqsrPFwwsJ0C2mK3y/1VnxcR6vxHEFABmD6Y/eXj
+# IqHr4ZrA37OV47Ty5AQKYVZfm2yn9LpCI6AlR1lpTrVItW59dzF3dS4almw4cqXC
+# BSanUUhSG/P/r42r4i/CpfadUzusZ4FRLJxZea/n+Q/0zJRA0Dx4bOUAS9V9QDoD
+# 0lhlywjk5Wyp0QasyVjc3xEerZRNiHat0jbD7jSET/yVK5+vQGKaA/Jz51x/lSGc
+# 7CDt5FPLhPDwDiuuzSXuazf6JNEQKV8GZ/OvumI5e0hEYliOCQizlIcYRe7pjdx4
+# HvgH2yHOCNG4jd10Ligc+/3fYXb4UNf7O5XRHyer5XBgn+OaPDS95Jmv5Pumi83D
+# bWegdGysLi0n7NfOmguiDERuoP8hXJY17JqFTmSQpAePBY59teufmFi/N447ouEH
+# tJll8cmHI4gbqL7pqCKhzbWh8RLl33IZ9f75ARVF94vAWTGr7nk6RKiiBAJZlNt9
+# AzcvsuqIWw==
 # SIG # End signature block
