@@ -654,6 +654,7 @@ function Get-DeviceHealthScriptRunStates {
 
     WriteLog -Message ("Retrieving recurring Device System deviceRunStates. RequestedPageSize={0}; PagePauseMs={1}" -f $RunStatePageSize, $RunStatePagePauseMilliseconds) "INFO"
     $map = @{}
+    $duplicateCount = 0
     $visited = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
     $uri = "/beta/deviceManagement/deviceHealthScripts/$ScriptId/deviceRunStates?`$expand=managedDevice(`$select=id)&`$select=detectionState,preRemediationDetectionScriptOutput,lastStateUpdateDateTime&`$top=$RunStatePageSize"
     $pageCount = 0
@@ -666,18 +667,36 @@ function Get-DeviceHealthScriptRunStates {
             if ($null -eq $runState) { continue }
             $deviceId = [string]$runState.managedDevice.id
             if ([string]::IsNullOrWhiteSpace($deviceId)) { throw 'Device Health Script run state lacks a managed device ID; collection is incomplete.' }
-            if ($map.ContainsKey($deviceId)) { throw 'Device Health Script returned duplicate managed device run states; collection is ambiguous.' }
-            $map[$deviceId] = [pscustomobject]@{
+            $candidate = [pscustomobject]@{
                 ResultMessage = $runState.preRemediationDetectionScriptOutput
                 LastStateUpdateDateTime = $runState.lastStateUpdateDateTime
                 DetectionState = [string]$runState.detectionState
             }
+            if ($map.ContainsKey($deviceId)) {
+                $duplicateCount++
+                $existing = $map[$deviceId]
+                $existingUtc = ConvertTo-DeviceSystemGraphUtcTimestamp -Value $existing.LastStateUpdateDateTime -FieldName 'DuplicateRunStateTime'
+                $candidateUtc = ConvertTo-DeviceSystemGraphUtcTimestamp -Value $candidate.LastStateUpdateDateTime -FieldName 'DuplicateRunStateTime'
+                if (-not $existingUtc -or -not $candidateUtc) {
+                    throw 'Duplicate Device Health Script run states have a missing or invalid update timestamp; collection is ambiguous.'
+                }
+                $existingTime = [datetimeoffset]::Parse($existingUtc, [Globalization.CultureInfo]::InvariantCulture)
+                $candidateTime = [datetimeoffset]::Parse($candidateUtc, [Globalization.CultureInfo]::InvariantCulture)
+                if ($candidateTime -lt $existingTime) { continue }
+                if ($candidateTime -eq $existingTime) {
+                    if ($candidate.ResultMessage -cne $existing.ResultMessage -or $candidate.DetectionState -cne $existing.DetectionState) {
+                        throw 'Duplicate Device Health Script run states conflict at the same update timestamp; collection is ambiguous.'
+                    }
+                    continue
+                }
+            }
+            $map[$deviceId] = $candidate
         }
         $uri = Get-GraphResponsePropertyValue -Response $response -Name '@odata.nextLink'
         if ($uri -and $RunStatePagePauseMilliseconds -gt 0) { Start-Sleep -Milliseconds $RunStatePagePauseMilliseconds }
     }
     if ($map.Count -eq 0) { throw 'Device Health Script returned no device run states; the existing CSV was not replaced.' }
-    WriteLog -Message ("Recurring Device System run states retrieved: {0} devices in {1} page(s)." -f $map.Count, $pageCount) "INFO"
+    WriteLog -Message ("Recurring Device System run states retrieved: {0} devices in {1} page(s); duplicate rows collapsed: {2}." -f $map.Count, $pageCount, $duplicateCount) "INFO"
     return $map
 }
 
@@ -1081,8 +1100,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCK9NYBxrBtDN+F
-# u0ScLS/hEY1zSlLWXy5yin7Q+RNoOKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBf3yTR5xnXEZ4l
+# +RG3+fVbq7VtT7OTC/9tpIE24qr2IKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1215,31 +1234,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIPQj3xMYaT7lo+UIA+BZuhGE+agsM9S3W9+02SAY5p2KMA0GCSqG
-# SIb3DQEBAQUABIIBgGPw8kQQGTcdQYHCUHENGYm4UWwcFF6ygHC5BbGW7DfLDDJt
-# W9rVxXx4B1Ghw7pdmVSgPe1TQR3qIEnLTcM6TPJGAN3miVfTE30Qh2fk05b02nlE
-# cuw096t8P48ZYlNaSNxpoTwouNnSLIYS0ZTLzvWcpajJgPkBVc1mAE2L2y/X2BSr
-# S68DhtEhg6p61U4w31sMiXnQqoTBZRN5ji1Kfj/sUStn403oIfB1yljNuD5BMrF6
-# 3FwkRd3kMeb29ADR5nPCs7jaEA1k4EzyjpaxTWcrkIk8bGHrJ7k3anuK7d6jLMsy
-# GHZCnoGdaYu8R+SdPpy3ir1CCjooHvvnEa5ref/x2tvD6qja2/6SFcWwGMK5UNIx
-# YFMjfdKn4onUjoVvus6G2lDb3/kos6OBj9K36mHZmo2X0fCk1NX7/CbeZaisfsDI
-# Zi9mNVz4U55lzfwL/0j1qobWJV8tQKqLhpQBZ82Ni5V9gpe5f7m4x65nDxczMs7t
-# w8PvnEyI3uqma7ERBaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIF6l+JVFxAd7smo3wG/a8Z560K1t8m6ozaDHC9oZw8zzMA0GCSqG
+# SIb3DQEBAQUABIIBgE8LjWMw63xyRL1TpMbQjAC5+r6VgptKuPMdlrfDUJ2AOSSd
+# cv9dwXMAqr5GTjTFA9U+7MEyWHb+sNDfIaNeIu+ibqh4N95AxiJtvOYUnT9JyAk3
+# xc53vsnBb0m3wIuU1M4ZapWYLeRBvHA35Aq6jBDlon27+g5Dt1+DPDot38aJGXnd
+# mKHZtM3bgaHwpPTPn3Irq5bHNlAe2tv4Q6jwWyCxxTrNNwRikdZZfGL9m6YA7TPa
+# D4a14XFiLXteARnF8r4IURKScJ848NhZGeW1qdo9rkWgNBHRE2TBHgYqmqGRLAkG
+# UwQh9RPN0i48Fxp5ExLdLcyq5uix74sy2ZDFZQomI6C7lTXmsT1w+KBxMyLn028w
+# /C7Rt+OLGMtbAl2LW6qmdCD720zDsb7C+Ws9wipn2Epa0TUvjkfvCHwjfE+1wT4D
+# NGkfjWm+MDKHyO8/6xZvNWGW+rh2biDCBgfQjXhErS91uag81K/ooAPgZWxO0luB
+# dugNcFmskLpp+9nPEqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTMxMjUw
-# NDRaMC8GCSqGSIb3DQEJBDEiBCB1UoVG2BeURPuiMUPlnE/RguG9S4DPOc/HUZE4
-# T+0FKTANBgkqhkiG9w0BAQEFAASCAgAl+ivDPl6K7/1wRCLuD43jfwapxWYeB1K3
-# KNWc8y83SPlP43uz5nsvakqAGuay8+oysxk9bGoh7fQ+vMZx9+REiMQQU4KOrRNA
-# JShrAefXQzaLRJ37SyBpM8HBQJW5xrK3FcCu1sWCBWcE38ASe1e2kjineEVIVjMJ
-# xqzx+yPx6jzgy+UgB8gZZq5LcRZM7qid4Nvk3fNDBareQ7FOY28Um3JJTNCEcaqj
-# 7dmb+wB0hf3pxKoWcxtxeU43VQlB8p/0SZFl1heFbihkITqagrVZueVhZLO88e61
-# FWLJMyo6bU1V5PpqHiA/xTxbI7k49T9t8BfaKKyg/LlgQs+EIdxs4ANjbsG/SfKu
-# C2GlQ/+xmwK4qBGaF88uF8zg8QPf7YK82MW9yP32BhtHrKunhRuTWlvHjaPOexHx
-# yAeiXBJOYzHqY5dsl0h8oiUPLX6oGsoWmvuv47CEdV/LrKV4k0FegZJZJaOGdFL1
-# 8VWcP4r3XRS1QHWvWNRHwbF7N6XP+0nzP0g3CShZ4nH75749sWsU4quHSvrlL372
-# R51dFS0uRk1+iVPv2C78nqsDzHWx4OfogC7yqqLAiXJRfAPbIC7Ag81fvAQV44j5
-# FUOXlArF1Y0RZHDG2CoxDcyIaNFem9I5iw23QAprJDKlnATpkEZGhnlKOthJDUyU
-# 0o3yZejmIQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTMxMzQ3
+# MDBaMC8GCSqGSIb3DQEJBDEiBCBj1iag/5Zy+eoQ4g0JeZe0+sWjHbvenIINL7il
+# Rd1k1TANBgkqhkiG9w0BAQEFAASCAgCauwothpIfL8DNHjVOmrIE8aeIeP5wCiKR
+# SjcGrNgRfoGjB9pfYnRs992MA43HLvWWjfI+MwOQr8h9LWQ7I1MxoKKsCWIrn4w/
+# RiJK9UXEkCqTZqzqwr4058zRDQNbgZGhHFK/dz3+lDlmZ80//5oT8h0+5nwZ++YY
+# gdflT9ZBp3uTbnzjW+IZ0fcZzMSVMOR+vS+8oUWYgQoFITTnl/QHYBDE0T2fTZjB
+# Z0/j094ciJ2TnlMrA+eGu4rNpGzlGic5hL6zXsXvU3RddHkcpBLny+zW01ijlFmh
+# wnoqIotxrXOezoDZmFEk+mUb7QOec7HJaMxivv8/7Zv5gSys6PiXRb6s5bCZLL5w
+# dyBRTz7OUS8BlAYUIzfj2boAlVzSJ7e6j7InooOoZw8liGVsMam7UpP79oig+Eya
+# iA6Blfo/WCaTJE7jUyJlNWbqPTclX+gDQflVue/dgQH/MgDXig5wMQPxmhNJyjPu
+# eX+sahmyVbcLFg+QTqbi/Ml7dtcdPvoi9nmmLOYM2Nz6Nx0//fAG4v2ECgT81iNS
+# JQMupJEnlUTR1qgvmJ65433y3BPQRuuMzmVSqUO0h2+cuaujDNVB/dRWjJTcjr30
+# lXWjUC8UhDqhbfLYmZXlnm2BS8uCvi0hFsVMmahvkTr+3SS++3AkstdW0uzqVc+b
+# DHPBp7hhFQ==
 # SIG # End signature block

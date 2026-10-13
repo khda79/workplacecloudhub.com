@@ -22,7 +22,7 @@ function Get-FunctionSource([string]$Path, [string]$Name) {
     return $definition.Extent.Text
 }
 foreach ($name in @('Get-LastConsoleLogon')) { . ([scriptblock]::Create((Get-FunctionSource $probePath $name))) }
-foreach ($name in @('Get-DeviceHealthScriptRunStates','Parse-PlatformScriptStdout','Test-DeviceSystemRecurringPayload','Get-DeviceSystemLocalFreshness',
+foreach ($name in @('ConvertTo-DeviceSystemGraphUtcTimestamp','Get-DeviceHealthScriptRunStates','Parse-PlatformScriptStdout','Test-DeviceSystemRecurringPayload','Get-DeviceSystemLocalFreshness',
     'Test-GraphResponseProperty','Get-GraphResponsePropertyValue')) { . ([scriptblock]::Create((Get-FunctionSource $collectorPath $name))) }
 
 $script:eventMode = 'found'
@@ -76,6 +76,39 @@ function Invoke-GraphSafe { param($Uri, $MaxRetries, $BaseDelaySeconds)
 $script:pages = @(@{ value = @(@{managedDevice=@{id='device-one'};preRemediationDetectionScriptOutput='SecureBoot:Enabled';detectionState='success';lastStateUpdateDateTime='2026-10-13T10:00:00Z'}) })
 $map = Get-DeviceHealthScriptRunStates -ScriptId '00000000-0000-0000-0000-000000000001'
 Assert ($map.Count -eq 1 -and $map['device-one'].ResultMessage -eq 'SecureBoot:Enabled') 'Recurring Graph output was not mapped by managed device ID.'
+$script:pages = @(@{ value = @(
+    @{managedDevice=@{id='device-one'};preRemediationDetectionScriptOutput='first';detectionState='success';lastStateUpdateDateTime='2026-10-13T10:00:00Z'},
+    @{managedDevice=@{id='device-one'};preRemediationDetectionScriptOutput='latest';detectionState='success';lastStateUpdateDateTime='2026-10-13T11:00:00Z'},
+    @{managedDevice=@{id='device-two'};preRemediationDetectionScriptOutput='same';detectionState='success';lastStateUpdateDateTime='2026-10-13T10:00:00Z'},
+    @{managedDevice=@{id='device-two'};preRemediationDetectionScriptOutput='same';detectionState='success';lastStateUpdateDateTime='2026-10-13T10:00:00Z'},
+    @{managedDevice=@{id='device-three'};preRemediationDetectionScriptOutput='old';detectionState='success';lastStateUpdateDateTime='2026-10-13T10:00:00Z'},
+    @{managedDevice=@{id='device-three'};preRemediationDetectionScriptOutput='failed';detectionState='scriptError';lastStateUpdateDateTime='2026-10-13T11:00:00Z'}
+) })
+$map = Get-DeviceHealthScriptRunStates -ScriptId '00000000-0000-0000-0000-000000000001'
+Assert ($map.Count -eq 3) 'Three duplicate device run states were not collapsed.'
+Assert ($map['device-one'].ResultMessage -eq 'latest') 'The latest device run state was not selected.'
+Assert ($map['device-two'].ResultMessage -eq 'same') 'An identical run state was rejected.'
+Assert ($map['device-three'].DetectionState -eq 'scriptError') 'A newer detection failure was hidden by an older success.'
+$script:pages = @(@{ value = @(
+    @{managedDevice=@{id='device-one'};preRemediationDetectionScriptOutput='newest';detectionState='success';lastStateUpdateDateTime='2026-10-13T11:00:00Z'},
+    @{managedDevice=@{id='device-one'};preRemediationDetectionScriptOutput='older';detectionState='success';lastStateUpdateDateTime='2026-10-13T10:00:00Z'}
+) })
+$map = Get-DeviceHealthScriptRunStates -ScriptId '00000000-0000-0000-0000-000000000001'
+Assert ($map['device-one'].ResultMessage -eq 'newest') 'An older run state replaced a newer one.'
+$script:pages = @(@{ value = @(
+    @{managedDevice=@{id='device-one'};preRemediationDetectionScriptOutput='first';detectionState='success';lastStateUpdateDateTime='2026-10-13T10:00:00Z'},
+    @{managedDevice=@{id='device-one'};preRemediationDetectionScriptOutput='conflict';detectionState='success';lastStateUpdateDateTime='2026-10-13T10:00:00Z'}
+) })
+$failed = $false
+try { $null = Get-DeviceHealthScriptRunStates -ScriptId '00000000-0000-0000-0000-000000000001' } catch { $failed = $true }
+Assert $failed 'Conflicting run states with the same timestamp were accepted.'
+$script:pages = @(@{ value = @(
+    @{managedDevice=@{id='device-one'};preRemediationDetectionScriptOutput='first';detectionState='success';lastStateUpdateDateTime='not-a-date'},
+    @{managedDevice=@{id='device-one'};preRemediationDetectionScriptOutput='second';detectionState='success';lastStateUpdateDateTime='2026-10-13T10:00:00Z'}
+) })
+$failed = $false
+try { $null = Get-DeviceHealthScriptRunStates -ScriptId '00000000-0000-0000-0000-000000000001' } catch { $failed = $true }
+Assert $failed 'Duplicate run states with an invalid timestamp were accepted.'
 $script:pages = @(@{ value = @(@{managedDevice=@{id=''};preRemediationDetectionScriptOutput='SecureBoot:Enabled'}) })
 $failed = $false
 try { $null = Get-DeviceHealthScriptRunStates -ScriptId '00000000-0000-0000-0000-000000000001' } catch { $failed = $true }
@@ -90,8 +123,8 @@ Assert $failed 'An empty recurring collection could replace the existing CSV.'
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA96Wg4mQqVJJ3i
-# jGoFO/O/LvkW+xq02U4FYuhHz6WZLaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDrKCgFnqixW3Gy
+# 7jLRx88i+lDLFWG9KX+IorfE/m0niqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -224,31 +257,31 @@ Assert $failed 'An empty recurring collection could replace the existing CSV.'
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIHA6F4IEU1Dd0z4f3VhF1f8irPJsLVl6Lhh6cXDWkUuGMA0GCSqG
-# SIb3DQEBAQUABIIBgGPKxng8nL9WhQlPdWHhOtSIU//oEeZIkHYRmViPQ+wnn1yY
-# BMTTPopJQIboD83Q21odrsZTZ9tM4+Jsek53gqXYBQ3wU6poMq5IOUSLPlRzLH3J
-# 5dlt+8+QEEOVnHDrVyR2r64rqm03r8yzB2pTaqSWdjkNHIoxpzUOXEOrOEEea3rj
-# 4owkM/5IaACjWw+pN/4KDTj1sQopPTdMQCSO9DQuypH7SzIPybnbLdsXNDb79euM
-# vh9H6hKmJbb4KRohkuDdl0w7AwyAR/RWo377RXh1nQf+Hb+PTOSInGYbAT94OXLd
-# XkmJbQ5j14qvIejKLNLzn3IijY9TlhWuP7UTVEtiTkyIbW/QGxOF52d7s61nUN3y
-# X/WJnY3TRYEiueYmsgvtW08sQK1bHZnjxwSVWXRDmg7mty7WRTuSfPFa9kQyniwm
-# z0dkZOC1A+9c+SiD3gya680wrBiKSkKhc0BwwGppU9GdjkxT3iI5hAYrX/tS1BgA
-# MpvtZew8cjRKO8d57KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIBp5vytwrlLhH0tR+CQWDKsA7xLAAthF4dJfQkRnkvV5MA0GCSqG
+# SIb3DQEBAQUABIIBgE3l5UBZZ8D81FL0ddYDLLf7J4gQ3SiD+1sFVnUaqiRSpZBP
+# 6hFlIqkzIVixcNmUGMboMmxKWw1av1Ob+gAYrjFuQFEdfsYnq1rBG7SOkXcbJT/r
+# wQCY/tuCAAQOwGNVjVNMJYeOYXEKo93dGsWAg9eR3PkGBy//Qjjx9cWsJT9CbPvz
+# /5zhjlTao1GS/BfpnVFJ8EPgBxDEQP8DjKzW/nmLePVrWzSi4f2cDcpXOna1AkZI
+# S1crj+PtASH+856ua0QyfI7UweETPqyCwpN9QtUMbayW3RH9yvFGUKspMC2fiDbZ
+# 9KU/Jt/Om+Y21keDYyoZcxUKL5Q+eiwC0L7uzw0WD4VQsGxjSuSkEmOclQ1FWdER
+# 0zFXaOU/nuxlUZirvPtgVmHJ4wUzQcItEBfK0SpoFi3ZZh+wDwBYBgkZR5h0L+8o
+# 09aYH0E/zDb3L97CE7QC8KyzPyw3513cVb/ytTmOXxKOBEXl3IHF+bXM0SBm0iJC
+# NUNbVOIbyH8cQ4w+OqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTMxMzIz
-# MzZaMC8GCSqGSIb3DQEJBDEiBCBxXwxa6DoJnjhBmx04BtnYoqhOi4FSb/UOSCe8
-# OOpfRTANBgkqhkiG9w0BAQEFAASCAgCiYIc7qNpmgx2KWe3D3y+cVOIp7/K2Mx2t
-# qV2Gz4UNWMhm4g7RNet4jqcp/8293GJ5vIe+Pe17GXfCXWsff1fejn4B9oloT6Uo
-# 1uD1EyN+caGLa3HzIKKj3Z7o/5UO5Qg3hyC3DnmbXNKOiCjEv/HEqfucxLE+L4Wo
-# KLfn/86ta0WdFlOEuqezjhhDKZL6J9zML7mUiQPFlvhXg/QOitO24DsLO9S6pEIQ
-# gUmPS/76dInAvukyVPq8+QCN2ynJbMl08ovkH2KjphHJRXlHaoceQW8xGNr1g3Ed
-# 2ciVIGQ21P5sK0uvQfFRX4YwHVgGHgV87dCPJUDx2gr5R/Oa/fvhZFR3pdaz9Kw7
-# sa5IAesPStbYoFPgt7QyxnwRNroQH3mUs0FG1qIP4a+Kiuu4yL/zLpZ3VV12ViUE
-# JE3/+I5/AeZj3mNAM6OTdOVD41he4wY7kF+OWvfz9+L1CP7QVAkth3YR6aM4hd7C
-# 6FfAxekg5jKCWyOGE+IoZ+Y5U8GBPRFRyy0Au80Q1UpzTfh1bNWuBIMYBGEJuGvP
-# NzY6B5E8AoIhU/TA/RBx5CmxfU/YDD5iGILWT67wm/rzdCzYElrzvA03EXdgKW67
-# iGDVDHp24GG3DG1y3BuhZMTAmAZRNjneqinMeXX/AB9qvR0HUEfmADMmbJWzqDGE
-# 6Z/UG9/BnQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTMxMzQ3
+# MDBaMC8GCSqGSIb3DQEJBDEiBCDgU+iCKa6Mk8nJg0UA+g+uxsBNgtv/FPn79y0b
+# GhL1KzANBgkqhkiG9w0BAQEFAASCAgBU9k9NEQW0ER8u6ORE6nMJguw+3YztvJ5A
+# b01bHOBVzwq/7IC7fHE4btsLF6rietab/hu906x3kS8F+givVhEZOTX3zIr+zwNa
+# GDE2y4XNG5hHWs8KhvaotrltZ94u4s7MycqlzYRLDNWAcMIUZSxkDmpXnmw8FSnI
+# IPExGClxsyuELoCJPetEtZVfXuBmHHv0pwW7gYwa+AGqPBbIj6QOgRc/qehZ+2pX
+# H23WEMd6FdQQ4wFU018XJzy7a91JDEKYBa+vY/5JdLqdxN0Nn7BsrM1UqHEfPqfQ
+# J/GwMoSkrVmsjz06M6F9IZFJYVbMalkwsPYvOTSqMTvC0x3njYIU8aQwHbb5alag
+# CBsvflfuQnrQWfS7WbUkRYjMpgciHoDbLksSXQzSG/bW3car6oFWLN+7z0QLy8C7
+# rp9olc0VViia6+AaOjUbvkepdqKX1tq4qQcJKy5E2obiEMDZjIRODugUc3vJ/K2I
+# nQgGyk+UyXG9hFzb6iKYDyMgj7dD3Th588I6JoIeO65gjrxNjftTemRe1jOROBa8
+# ym6avWG/dT5dHVRTBXZAHtoAIZVYSS8eaCcM3m/bqHmkT62UaITJJB0S7JqLQEGx
+# 5XZZXaMFCgRiFk0S+5Az+MhABIpnnIeToRG6p1HEoEb3dPRGbkxc4S2bnu/K9xdQ
+# 5CQDjBNgJw==
 # SIG # End signature block
