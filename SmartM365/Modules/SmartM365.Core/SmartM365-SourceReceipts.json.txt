@@ -215,7 +215,9 @@
         "Intune_ConfigurationSettings.csv",
         "Intune_ConfigurationAssignments.csv",
         "Intune_ConfigurationAssignmentStates.csv",
-        "Intune_ConfigurationDeviceStates.csv"
+        "Intune_ConfigurationDeviceStates.csv",
+        "Intune_ConfigurationDeviceCurrentStates.csv",
+        "Intune_ConfigurationStatusCoverage.csv"
       ],
       "OptionalFiles": []
     },

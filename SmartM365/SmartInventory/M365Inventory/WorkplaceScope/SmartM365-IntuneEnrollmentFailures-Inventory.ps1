@@ -1,9 +1,9 @@
 #Requires -Version 7.0
 <#
 .SYNOPSIS
-Collects the Intune device enrollment failures report.
+Collects Intune enrollment troubleshooting events.
 .VERSION
-1.0.0
+1.1.0
 #>
 [CmdletBinding()]
 param(
@@ -14,7 +14,7 @@ param(
     [string]$OutputPath,
     [string]$LatestCsvFolderPath,
     [ValidateRange(0,10000000)][int]$MaxItems = 0,
-    [ValidateRange(30,7200)][int]$ExportTimeoutSeconds = 1200
+    [ValidateRange(30,7200)][int]$ExportTimeoutSeconds = 1200 # Kept for launcher compatibility; this source does not create export jobs.
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -36,40 +36,44 @@ try {
     Invoke-SmartM365Preflight -ScriptName 'SmartM365-IntuneEnrollmentFailures-Inventory' `
         -OutputPaths @($script:Runtime.OutputPath,$script:Runtime.LatestCsvFolderPath) `
         -RequiredGraphApplicationPermissions @('DeviceManagementManagedDevices.ReadWrite.All') `
-        -GraphProbeUris @('https://graph.microsoft.com/v1.0/deviceManagement/managedDevices?$top=1') | Out-Null
+        -GraphProbeUris @('https://graph.microsoft.com/v1.0/deviceManagement/troubleshootingEvents?$top=1') | Out-Null
     if ($ValidateOnly) {
-        Write-SmartM365EvidenceLog 'Enrollment report prerequisites validated. Report availability requires a collection run.'
+        Write-SmartM365EvidenceLog 'Enrollment troubleshooting event prerequisites validated. Event coverage requires a collection run.'
         return
     }
 
-    $raw = @(Invoke-SmartM365EvidenceExportReport -ReportName 'DeviceEnrollmentFailures' -ApiVersion v1.0 -TimeoutSeconds $ExportTimeoutSeconds -MaxItems $MaxItems)
-    $rows = @($raw | ForEach-Object {
-        $date = [string](Get-SmartM365EvidenceProperty $_ @('EnrollmentFailureDateTime'))
-        $reason = [string](Get-SmartM365EvidenceProperty $_ @('FailureReason'))
-        if (-not $date -or -not $reason) { throw 'Enrollment failure report contains a row without date or reason.' }
+    $raw = @(Get-SmartM365EvidenceGraphCollection -Uri 'https://graph.microsoft.com/v1.0/deviceManagement/troubleshootingEvents' -MaxItems $MaxItems)
+    $events = @($raw | Where-Object { [string](Get-SmartM365EvidenceProperty $_ @('@odata.type')) -eq '#microsoft.graph.enrollmentTroubleshootingEvent' })
+    $rows = @($events | ForEach-Object {
+        $eventId = [string](Get-SmartM365EvidenceProperty $_ @('id'))
+        $eventDateTime = [string](Get-SmartM365EvidenceProperty $_ @('eventDateTime'))
+        if (-not $eventId -or -not $eventDateTime) { throw 'Enrollment troubleshooting event lacks id or eventDateTime.' }
         [pscustomobject][ordered]@{
-            EnrollmentFailureDateTime=$date
-            EnrollmentMethod=[string](Get-SmartM365EvidenceProperty $_ @('EnrollmentMethod'))
-            FailureGuid=[string](Get-SmartM365EvidenceProperty $_ @('FailureGuid'))
-            FailureReason=$reason
-            OS=[string](Get-SmartM365EvidenceProperty $_ @('OS'))
-            OSVersion=[string](Get-SmartM365EvidenceProperty $_ @('OSVersion'))
-            UPN=[string](Get-SmartM365EvidenceProperty $_ @('UPN'))
-            UserId=[string](Get-SmartM365EvidenceProperty $_ @('UserId'))
+            EventId=$eventId
+            EventDateTime=$eventDateTime
+            CorrelationId=[string](Get-SmartM365EvidenceProperty $_ @('correlationId'))
+            ManagedDeviceIdentifier=[string](Get-SmartM365EvidenceProperty $_ @('managedDeviceIdentifier'))
+            DeviceId=[string](Get-SmartM365EvidenceProperty $_ @('deviceId'))
+            UserId=[string](Get-SmartM365EvidenceProperty $_ @('userId'))
+            EnrollmentType=[string](Get-SmartM365EvidenceProperty $_ @('enrollmentType'))
+            FailureCategory=[string](Get-SmartM365EvidenceProperty $_ @('failureCategory'))
+            FailureReason=[string](Get-SmartM365EvidenceProperty $_ @('failureReason'))
+            OperatingSystem=[string](Get-SmartM365EvidenceProperty $_ @('operatingSystem'))
+            OSVersion=[string](Get-SmartM365EvidenceProperty $_ @('osVersion'))
             RunId=$script:Runtime.RunId; CollectedAtUtc=$script:Runtime.CollectedAtUtc
         }
     })
     if ($MaxItems -gt 0) {
-        Write-SmartM365EvidenceLog "Sample complete: enrollment failures=$($rows.Count). No canonical CSV published."
+        Write-SmartM365EvidenceLog "Sample complete: troubleshooting events=$($raw.Count); enrollment failures=$($rows.Count). No canonical CSV published."
         return
     }
     $rules = $global:SmartM365CsvValidationRules
     if ($rules -isnot [hashtable]) { throw 'Core CSV validation rules are unavailable.' }
-    Add-SmartM365CsvValidationRule -Rules $rules -BaseFileName 'Intune_EnrollmentFailures' -CriticalFields @('EnrollmentFailureDateTime','FailureReason','RunId','CollectedAtUtc') -AllowEmptyDataset -CriticalMissingFailMinRows 1 -CriticalMissingFailPercent 0
-    $columns = @('EnrollmentFailureDateTime','EnrollmentMethod','FailureGuid','FailureReason','OS','OSVersion','UPN','UserId','RunId','CollectedAtUtc')
+    Add-SmartM365CsvValidationRule -Rules $rules -BaseFileName 'Intune_EnrollmentFailures' -CriticalFields @('EventId','EventDateTime','RunId','CollectedAtUtc') -UniqueFields @('EventId') -AllowEmptyDataset -CriticalMissingFailMinRows 1 -CriticalMissingFailPercent 0
+    $columns = @('EventId','EventDateTime','CorrelationId','ManagedDeviceIdentifier','DeviceId','UserId','EnrollmentType','FailureCategory','FailureReason','OperatingSystem','OSVersion','RunId','CollectedAtUtc')
     Assert-SmartM365CsvDataCompleteness -Data $rows -BaseFileName 'Intune_EnrollmentFailures' -Columns $columns | Out-Null
     Export-SmartM365EvidenceDataset $script:Runtime 'Intune_EnrollmentFailures' $rows $columns | Out-Null
-    Write-SmartM365EvidenceLog "Enrollment failures collected: rows=$($rows.Count). No device identity is provided by the source report." -Level SUCCESS
+    Write-SmartM365EvidenceLog "Enrollment troubleshooting events collected: total=$($raw.Count); enrollment failures=$($rows.Count). Device identifiers are retained only when provided by Graph." -Level SUCCESS
 } catch { $failure = $_; throw } finally {
     try { Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null } catch {}
     if ($script:Runtime) { Complete-SmartM365EvidenceRuntime -Status $(if ($failure) {'Failed'} else {'Success'}) -ErrorRecord $failure -FailureStage 'IntuneEnrollmentFailuresInventory' }
@@ -78,8 +82,8 @@ try {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBppd+eWhnUdIGU
-# gHk0VBPvpOTVqvExgRwy+JDWo7obUKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA0UCoi6+7jsP2z
+# 5FTNuDxJW8ru4xCjYxe8LsHdfWHkn6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -212,31 +216,31 @@ try {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIET0hLHkwqoS1NYaGnxn4ZMGWaXAnpsCb2KA6jtKvwdYMA0GCSqG
-# SIb3DQEBAQUABIIBgARzJqrFO8oz6+jPk4lSqnBFu3fVY5oEk6tH5wv48CWFrHWz
-# iPld4sZnoexz7CaVX1b5bhQ6lCDE6FRUge3FrRFUSqOIWz9vkrH8B2b9cu5VmUTF
-# HP/baeG3pSttiAOht0kpirxROWnKb/TRY0opVRbtqVyUEV7aqAEtlzCogU5Q5y2/
-# IFCfpVlSoIJ7GAuS6WuQdMtm0ZMK+3FXnIfyuT4PVnUUX78rOfkL1UKIZ8khQt6I
-# lSR0u56YnnVuIq446MnAaUUCIf6Yv1Nq1s5PqUqG56+7aJONVl3BbuOk9sCD1sIj
-# VMciCdvEK8n6PNarVqmLPaZDIXa52iT7fXrvADkcc56ZaT6si28uOD0svaMbMKgg
-# vTs0FGUSY5AsRe2YyBzvX4OwxF2WJS/f/V8Th4CT8vISwQf+bEvKnwGoii2hdrOQ
-# N+7mK6Qn3aXg5gwMtjoYDHR3PucFvzF/a1EKWXYyJzt3grfuvmABJ2LUunie9RZ3
-# XQp55nASePJ4L3M8lKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIGG1npdAV5XaWhNApmI+AknIlo8SsymJ4XQATefCs+4eMA0GCSqG
+# SIb3DQEBAQUABIIBgFz4TwBkcAaqEHvxDZph+TDJTuh3Lo3kGsv5FKe7CD95gCAm
+# luGnY0yVu0HRXFYoto0EFAhksFCFqO6/RFqN1j0LIEJWGPjwddvzPodDUQ/f9L3W
+# 9BGo7pbWt4MaHU1+/zI9ayaRPLQTabpH/OrAWkuRAyBtFAHBu7cxfPmb2H/+No7Y
+# vyO+6d7X5De4Y+x30Rt/5bp4ezZumH4irQZb2R2EQLk6KU9kTSEycwH+tvfgs3Sh
+# y6gk0MoyhnYYNx24jtmuI0L3WVJRFTvRdQnHUtIJ8lkm8MProojOhb2FF2b7ODH1
+# ubeU1WerH3JuHThSpuqJvGhLuZ2uy6UGmZT+7C+lwsVz2hfUfFpyNih0kk4UAY0p
+# 7PabULela2rBnqSeH2mgyfcFJxJ2lRO/3fHmIzTdMTPdCVIrNcJG6fXt9FHTmcWn
+# OxsXsxwyKBg0jSMe5WdiEtnK5XLntwaXsNnBHO5WlZvUtTm6xG/jLVErjqwrxV9Y
+# 4oERJ5seE5y1QupvEaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTMxMzEw
-# MjRaMC8GCSqGSIb3DQEJBDEiBCCYpQJzlHUG9stJj3/k5w3bt2uGxiksyQ1YQl3G
-# 3h5rwTANBgkqhkiG9w0BAQEFAASCAgBidVcX44++s5P7pnrdNMHdaVOXqNRdZqL1
-# Qrs5Kf9vv4A57QspWbnqoZPSNAOPcvWgBt/OTVqwBkgd77qRjEi3ETRwC3ZpX+dy
-# xSGmNEFhY8GS2+zUx6BErzMMXx+w2WG4esKPdlnJ7dniOjKz5BFjkNdWGSlUaySI
-# uFrtjyfy1E+Bhsq9thJ/lvyb5ublAGXzzS/FCpQQT0Lxk697alOVcdu+ibk1RaNc
-# tPslsGDIT/0dw4KhEI3aqyipA5peXfierWKfgyaQX/mJz9O94Jv5ugDKKfj0Rg1i
-# jSTsCzZjA1fYt1St6R8K1ScrSFsuxvJqgITT/NDpPN/NtIllHc9Vf/XeY0bnfGNB
-# WAji6xIGW6QmUY5Lv/lGA+t4TQbI7iNtEftsVhOqYfSfvXJG9yDIbY7uG6aHYjrj
-# IXF+0Pu0ZV9nYnsJfWdqaBdH3MYyWmoxd9InkbJP21poMq+QAfT+unx4onWiIXf+
-# MUqdAhENz8m7lRUmPmX18VTabKkmTnJQqIFfUrAscPjU+md+Y5cWZ1SaKdHieUjQ
-# 7e1PjhilNAtFf7tFq4xCS3spMRoXchEPDI8VXFy/yslqW1PzglILZ1ZKbasNRkRc
-# POjzL+qVNNmxgaEOEhqXuLgIo3SLQJyhVqBkaOk41MGTvZ7sHrr1IgskZDKg7feS
-# xYZiQTNlzA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTMxNTM4
+# NDNaMC8GCSqGSIb3DQEJBDEiBCDZMl3QNlJbmilGQ/L1wu73ydi2NHNdEesTajo1
+# 9BXTFTANBgkqhkiG9w0BAQEFAASCAgBTXxNmQWM3974nx7YkWvauqblRIEWT7UgP
+# Nw6uZEDkPlOH9q7Rz5oIq7qBDdUJinf3ECN+AAWLgkLWqw6waAbLPY7eJOpAaQxk
+# nPgKHuOl8P311j60aoCcj5Q8L1NoViWaZqRlti4eCRjFBfK0wM55ZvwoWgq0sovD
+# Qz1lx8bJ3E96GCR5u/yGZ7BFYfqWCQDswaz/GtrqvX8h/iCZ9bxg2K7RXJXg+yOJ
+# Wp/kT1AvwZTkJHSntas1mLyR9t1dZF5hz2gKR30Jlnxucb6yVo7vQMSwcZbANzeQ
+# QQ6w9mNOcFjX+guWCHZ2h2N0LuSliMuKPUVFWCyi001GpJdSbXSbjxdM5xAmJPjd
+# phGJHYwu/SRbbXU70u1abAi/cPVoA8a1uNJIOxeK05BECEUwY+VLpKxC3sfUDc2Z
+# GbmSntWd2AgUN9GA061CuKOyV9Mq3SpDIER5njrO1ylzzzVMl/dEznLFo7Sc5a4g
+# O/R5wi3VoUPCSgt0zTvII3NsQta0fjTlS5VuigvRhea0/6pmmA8gJW75LxnYPSi2
+# DOAfUGyDS+Jw7hAMxbR4L+NnEf6ZLx85y7cUUanPW5Sd9NZlGm3x5DFeJ5ENNykV
+# ukTfobED978zWHKwqZ15oeHvV8VKuf3IjplCDESgCAthl31oR1jvqTrM14Ex0bFN
+# pNScLWd6ww==
 # SIG # End signature block

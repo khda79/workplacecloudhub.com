@@ -7,9 +7,9 @@ producer dependency set.
 
 | Collector | Source | Canonical DATA-LAST files |
 | --- | --- | --- |
-| `SmartM365-IntuneConfigurations-Inventory.ps1` | Graph beta policy families, assignments and Settings Catalog setting definitions; `DeviceAssignmentStatusByConfigurationPolicyV3` and `DeviceStatusesByConfigurationProfileV3` export jobs | `Intune_ConfigurationPolicies.csv`, `Intune_ConfigurationSettings.csv`, `Intune_ConfigurationAssignments.csv`, `Intune_ConfigurationAssignmentStates.csv`, `Intune_ConfigurationDeviceStates.csv` |
-| `SmartM365-IntuneManagedApps-Inventory.ps1` | Graph v1.0 `mobileApps` and assignments; `OrgAppsInstallStatus` and `OrgDeviceInstallStatus` export jobs | `Intune_ManagedApps.csv`, `Intune_ManagedAppAssignments.csv`, `Intune_ManagedAppInstallSummary.csv`, `Intune_ManagedAppDeviceStates.csv` |
-| `SmartM365-IntuneEnrollmentFailures-Inventory.ps1` | `DeviceEnrollmentFailures` export job | `Intune_EnrollmentFailures.csv` |
+| `SmartM365-IntuneConfigurations-Inventory.ps1` | Graph beta policy families, assignments and Settings Catalog setting definitions; `DeviceAssignmentStatusByConfigurationPolicyV3` and `DeviceStatusesByConfigurationProfileV3` export jobs | `Intune_ConfigurationPolicies.csv`, `Intune_ConfigurationSettings.csv`, `Intune_ConfigurationAssignments.csv`, `Intune_ConfigurationAssignmentStates.csv`, `Intune_ConfigurationDeviceStates.csv`, `Intune_ConfigurationDeviceCurrentStates.csv`, `Intune_ConfigurationStatusCoverage.csv` |
+| `SmartM365-IntuneManagedApps-Inventory.ps1` | Graph v1.0 `mobileApps` and assignments; `OrgDeviceInstallStatus` export job | `Intune_ManagedApps.csv`, `Intune_ManagedAppAssignments.csv`, `Intune_ManagedAppInstallSummary.csv`, `Intune_ManagedAppDeviceStates.csv` |
+| `SmartM365-IntuneEnrollmentFailures-Inventory.ps1` | Graph v1.0 enrollment troubleshooting events | `Intune_EnrollmentFailures.csv` |
 
 All collectors use tenant-specific certificate authentication, preflight, Core
 CSV publication, source receipts, weekly history and configured SharePoint/Teams
@@ -20,14 +20,23 @@ The configuration collector exports native policy and Settings Catalog setting
 JSON, including configured values. Keep these operational CSVs under the same
 access controls as other Intune configuration exports. Its device status is
 Intune's report state, not direct on-device proof. `ReportedApplied` requires
-an explicit successful policy state; other or absent states remain distinct.
+an explicit successful `ReportStatus`; raw numeric `PolicyStatus` remains available.
+`Intune_ConfigurationDeviceStates.csv` preserves the report rows and their dates.
+`Intune_ConfigurationDeviceCurrentStates.csv` keeps the latest dated row for
+each policy and device; a missing date cannot establish a current state.
+`Intune_ConfigurationStatusCoverage.csv` records source row counts and whether
+the assignment-status report returned rows. A zero-row assignment-status report
+when policy assignments exist does not qualify per-device assignment status.
 An assignment is not proof of application.
 The managed-app collector covers applications published in Intune, not apps
-detected on devices. Missing install-status rows mean unobserved, not failed or
-not installed. `ReportedInstalled` requires an explicit installed state from
-Intune. Enrollment failures contain no device ID; the report must not
-be joined to an inventoried device by UPN or name. Its snapshots should not be
-summed across weekly history as distinct failure events.
+detected on devices. `OrgDeviceInstallStatus` is required for installation
+states; the summary counts observed report rows, not unique devices or users.
+`NoReportRows` means unobserved, not failed or not installed. `ReportedInstalled`
+requires an explicit installed state from Intune. Enrollment failures come from
+`enrollmentTroubleshootingEvent` records; their optional device identifiers are
+retained only when Graph provides them. This source differs from the Intune
+admin-center export report, and its retention and coverage must be checked in
+the tenant. Its weekly snapshots must not be summed as distinct failure events.
 
 The jobs are enabled in `Orchestrator-Jobs.json.template` at 04:30, 05:00 and
 05:30. Their duration estimates are initial scheduler values and need review

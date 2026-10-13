@@ -3,7 +3,7 @@
 .SYNOPSIS
 Collects Intune managed apps, assignments, and reported installation states.
 .VERSION
-1.0.0
+1.1.0
 #>
 [CmdletBinding()]
 param(
@@ -23,11 +23,11 @@ $failure = $null
 
 function Get-IntuneManagedAppDeploymentState {
     param([string]$InstallState)
-    switch ($InstallState.Trim().ToLowerInvariant()) {
+    switch (($InstallState.Trim().ToLowerInvariant() -replace '[\s_-]+','')) {
         'installed' { return 'ReportedInstalled' }
-        { $_ -in @('failed','error') } { return 'ReportedFailure' }
+        { $_ -in @('failed','error','uninstallfailed') } { return 'ReportedFailure' }
         'notinstalled' { return 'ReportedNotInstalled' }
-        { $_ -in @('pendinginstall','installing','pending') } { return 'Pending' }
+        { $_ -in @('pendinginstall','installpending','installing','pending','uninstallpending') } { return 'Pending' }
         'notapplicable' { return 'NotApplicable' }
         default { return 'Unknown' }
     }
@@ -90,27 +90,7 @@ try {
             })
         }
     }
-    $aggregateRaw = @(Invoke-SmartM365EvidenceExportReport -ReportName 'OrgAppsInstallStatus' -ApiVersion v1.0 -TimeoutSeconds $ExportTimeoutSeconds -MaxItems $MaxItems)
     $deviceRaw = @(Invoke-SmartM365EvidenceExportReport -ReportName 'OrgDeviceInstallStatus' -ApiVersion v1.0 -TimeoutSeconds $ExportTimeoutSeconds -MaxItems $MaxItems)
-    $aggregate = @($aggregateRaw | ForEach-Object {
-        $id = [string](Get-SmartM365EvidenceProperty $_ @('ApplicationId'))
-        if (-not $id) { throw 'App installation aggregate lacks ApplicationId.' }
-        [pscustomobject][ordered]@{
-            ApplicationId=$id; AppVersion=[string](Get-SmartM365EvidenceProperty $_ @('AppVersion'))
-            Platform=[string](Get-SmartM365EvidenceProperty $_ @('Platform'))
-            InstalledDeviceCount=[string](Get-SmartM365EvidenceProperty $_ @('InstalledDeviceCount'))
-            FailedDeviceCount=[string](Get-SmartM365EvidenceProperty $_ @('FailedDeviceCount'))
-            PendingInstallDeviceCount=[string](Get-SmartM365EvidenceProperty $_ @('PendingInstallDeviceCount'))
-            NotInstalledDeviceCount=[string](Get-SmartM365EvidenceProperty $_ @('NotInstalledDeviceCount'))
-            NotApplicableDeviceCount=[string](Get-SmartM365EvidenceProperty $_ @('NotApplicableDeviceCount'))
-            InstalledUserCount=[string](Get-SmartM365EvidenceProperty $_ @('InstalledUserCount'))
-            FailedUserCount=[string](Get-SmartM365EvidenceProperty $_ @('FailedUserCount'))
-            PendingInstallUserCount=[string](Get-SmartM365EvidenceProperty $_ @('PendingInstallUserCount'))
-            NotInstalledUserCount=[string](Get-SmartM365EvidenceProperty $_ @('NotInstalledUserCount'))
-            NotApplicableUserCount=[string](Get-SmartM365EvidenceProperty $_ @('NotApplicableUserCount'))
-            RunId=$script:Runtime.RunId; CollectedAtUtc=$script:Runtime.CollectedAtUtc
-        }
-    })
     $deviceStates = @($deviceRaw | ForEach-Object {
         $id = [string](Get-SmartM365EvidenceProperty $_ @('ApplicationId'))
         if (-not $id) { throw 'App device installation status lacks ApplicationId.' }
@@ -128,25 +108,63 @@ try {
             RunId=$script:Runtime.RunId; CollectedAtUtc=$script:Runtime.CollectedAtUtc
         }
     })
+    $statusByApp = [Collections.Generic.Dictionary[string,object]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($app in $apps) {
+        $statusByApp[$app.ApplicationId] = [ordered]@{ ReportedInstalledRows=0; ReportedFailureRows=0; ReportedNotInstalledRows=0; PendingRows=0; NotApplicableRows=0; UnknownRows=0; ObservedRows=0; InCollectedCatalog=$true }
+    }
+    foreach ($state in $deviceStates) {
+        if (-not $statusByApp.ContainsKey($state.ApplicationId)) {
+            $statusByApp[$state.ApplicationId] = [ordered]@{ ReportedInstalledRows=0; ReportedFailureRows=0; ReportedNotInstalledRows=0; PendingRows=0; NotApplicableRows=0; UnknownRows=0; ObservedRows=0; InCollectedCatalog=$false }
+        }
+        $counts = $statusByApp[$state.ApplicationId]
+        $counts.ObservedRows++
+        switch ($state.ReportedDeploymentState) {
+            'ReportedInstalled' { $counts.ReportedInstalledRows++ }
+            'ReportedFailure' { $counts.ReportedFailureRows++ }
+            'ReportedNotInstalled' { $counts.ReportedNotInstalledRows++ }
+            'Pending' { $counts.PendingRows++ }
+            'NotApplicable' { $counts.NotApplicableRows++ }
+            default { $counts.UnknownRows++ }
+        }
+    }
+    $aggregate = @($statusByApp.Keys | ForEach-Object {
+        $counts = $statusByApp[$_]
+        [pscustomobject][ordered]@{
+            ApplicationId=$_
+            InCollectedCatalog=$counts.InCollectedCatalog
+            StatusSource=if ($counts.ObservedRows -gt 0) { 'OrgDeviceInstallStatus' } else { 'NoReportRows' }
+            ObservedRows=$counts.ObservedRows
+            ReportedInstalledRows=$counts.ReportedInstalledRows
+            ReportedFailureRows=$counts.ReportedFailureRows
+            ReportedNotInstalledRows=$counts.ReportedNotInstalledRows
+            PendingRows=$counts.PendingRows
+            NotApplicableRows=$counts.NotApplicableRows
+            UnknownRows=$counts.UnknownRows
+            RunId=$script:Runtime.RunId; CollectedAtUtc=$script:Runtime.CollectedAtUtc
+        }
+    })
+    if ($deviceStates.Count -gt 0 -and @($deviceStates | Where-Object { $_.ReportedDeploymentState -eq 'Unknown' }).Count -eq $deviceStates.Count) {
+        throw 'Every managed-app device state is Unknown; source install-state values require qualification before publication.'
+    }
     if ($MaxItems -gt 0) {
-        Write-SmartM365EvidenceLog "Sample complete: apps=$($apps.Count); assignments=$($assignments.Count); aggregate=$($aggregate.Count); deviceStates=$($deviceStates.Count). No canonical CSV published."
+        Write-SmartM365EvidenceLog "Sample complete: apps=$($apps.Count); assignments=$($assignments.Count); statusSummary=$($aggregate.Count); deviceStateRows=$($deviceStates.Count). No canonical CSV published."
         return
     }
     $rules = $global:SmartM365CsvValidationRules
     if ($rules -isnot [hashtable]) { throw 'Core CSV validation rules are unavailable.' }
     Add-SmartM365CsvValidationRule -Rules $rules -BaseFileName 'Intune_ManagedApps' -CriticalFields @('ApplicationId','RunId','CollectedAtUtc') -UniqueFields @('ApplicationId') -AllowEmptyDataset -CriticalMissingFailMinRows 1 -CriticalMissingFailPercent 0
     Add-SmartM365CsvValidationRule -Rules $rules -BaseFileName 'Intune_ManagedAppAssignments' -CriticalFields @('ApplicationId','AssignmentId','RunId','CollectedAtUtc') -UniqueFields @('ApplicationId','AssignmentId') -AllowEmptyDataset -CriticalMissingFailMinRows 1 -CriticalMissingFailPercent 0
-    Add-SmartM365CsvValidationRule -Rules $rules -BaseFileName 'Intune_ManagedAppInstallSummary' -CriticalFields @('ApplicationId','RunId','CollectedAtUtc') -AllowEmptyDataset -CriticalMissingFailMinRows 1 -CriticalMissingFailPercent 0
+    Add-SmartM365CsvValidationRule -Rules $rules -BaseFileName 'Intune_ManagedAppInstallSummary' -CriticalFields @('ApplicationId','StatusSource','RunId','CollectedAtUtc') -UniqueFields @('ApplicationId') -AllowEmptyDataset -CriticalMissingFailMinRows 1 -CriticalMissingFailPercent 0
     Add-SmartM365CsvValidationRule -Rules $rules -BaseFileName 'Intune_ManagedAppDeviceStates' -CriticalFields @('ApplicationId','RunId','CollectedAtUtc') -AllowEmptyDataset -CriticalMissingFailMinRows 1 -CriticalMissingFailPercent 0
     $exports = @(
         @{Name='Intune_ManagedApps';Rows=$apps.ToArray();Columns=@('ApplicationId','DisplayName','Publisher','AppType','DisplayVersion','CreatedDateTime','LastModifiedDateTime','RunId','CollectedAtUtc')},
         @{Name='Intune_ManagedAppAssignments';Rows=$assignments.ToArray();Columns=@('ApplicationId','AssignmentId','Intent','TargetType','GroupId','AssignmentFilterId','AssignmentFilterType','RunId','CollectedAtUtc')},
-        @{Name='Intune_ManagedAppInstallSummary';Rows=$aggregate;Columns=@('ApplicationId','AppVersion','Platform','InstalledDeviceCount','FailedDeviceCount','PendingInstallDeviceCount','NotInstalledDeviceCount','NotApplicableDeviceCount','InstalledUserCount','FailedUserCount','PendingInstallUserCount','NotInstalledUserCount','NotApplicableUserCount','RunId','CollectedAtUtc')},
+        @{Name='Intune_ManagedAppInstallSummary';Rows=$aggregate;Columns=@('ApplicationId','InCollectedCatalog','StatusSource','ObservedRows','ReportedInstalledRows','ReportedFailureRows','ReportedNotInstalledRows','PendingRows','NotApplicableRows','UnknownRows','RunId','CollectedAtUtc')},
         @{Name='Intune_ManagedAppDeviceStates';Rows=$deviceStates;Columns=@('ApplicationId','DeviceId','UserPrincipalName','AppVersion','Platform','InstallState','ReportedDeploymentState','InstallStateDetail','ErrorCode','LastModifiedDateTime','RunId','CollectedAtUtc')}
     )
     foreach ($export in $exports) { Assert-SmartM365CsvDataCompleteness -Data $export.Rows -BaseFileName $export.Name -Columns $export.Columns | Out-Null }
     foreach ($export in $exports) { Export-SmartM365EvidenceDataset $script:Runtime $export.Name $export.Rows $export.Columns | Out-Null }
-    Write-SmartM365EvidenceLog "Managed apps collected: apps=$($apps.Count); assignments=$($assignments.Count); aggregate=$($aggregate.Count); deviceStates=$($deviceStates.Count)." -Level SUCCESS
+    Write-SmartM365EvidenceLog "Managed apps collected: apps=$($apps.Count); assignments=$($assignments.Count); statusSummary=$($aggregate.Count); deviceStateRows=$($deviceStates.Count). Summary counts are report rows, not unique devices." -Level SUCCESS
 } catch { $failure = $_; throw } finally {
     try { Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null } catch {}
     if ($script:Runtime) { Complete-SmartM365EvidenceRuntime -Status $(if ($failure) {'Failed'} else {'Success'}) -ErrorRecord $failure -FailureStage 'IntuneManagedAppsInventory' }
@@ -155,8 +173,8 @@ try {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAWSH7nX7FJl7+Y
-# 2dTXWxXEXDpdXzRM4yNsfucnzUJZ/KCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAOUy4deFs72c1Y
+# tBUazkr+IdUoEASnz3CoFvBiHs6ljqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -289,31 +307,31 @@ try {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIC43U/ktl2B/Qb+M+a5v4N3aq6aGiGG/ngvPxFKLaXh/MA0GCSqG
-# SIb3DQEBAQUABIIBgDyRv7ABlPZWbb6bzIIcMJ0kC6qBtMtv4CUjoUJdIniPfkTN
-# /OZ5O4P5MAxUkVhExbBmduAmAgaqRrZ2a/QH4b/DZvdV5H5nHDTObZT5PvaDK3Ba
-# PU+bzYA3cunCBsGJ3trQFlTklX28ofCXGtRxqGEI50hVaLjm7VRx0Yo47apyDNMA
-# kLg45rUjGGiGGou52DLmaoCP0LsIXg2EeQNdhTtndiNeu9tzNT0Un6dNccXR7/At
-# nMlv2ONuArXQC5pJ+4Z1cd1XdOApH8Gx038tQ/DmqbS+s0J7ziCiR8OM3j8ERUvY
-# 8OlPvbuEh3fYIwpuuvBMDNTmMOjaDrE+WAJxJSJbA7bVM34sF2D+o4bPHgOibR7z
-# IOe+1Ur07JGWTLJ46ZYpyOvHYXzpAhODp1G5zQuXmPv6BfaMRhCf9S946DQmwVGi
-# ZCr+AM4N6jikRXiZB4G6YJJDvAX8boom/IsxpSFQr6Cxq3Bd4pyi4ZeYsMqwCbu4
-# Jx4xxe03CaXIiwrUCaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIOeAE2JLmTN7AP2Cf5hjWlVuEay/pbSn6g0OGd4JxzYHMA0GCSqG
+# SIb3DQEBAQUABIIBgA9fWpfhFBIeRdMuIdWsVil43LGehV7wZHBtHwNHmUU7xbwl
+# G/4oSGs7iMUNs1xQ1i4fHj40/qUHpE1RKv9AGqrN86HVBrf0UJaZL1Nxz8YO9Waa
+# 65N+tLWvqehMqHagrBQJ775iN8Ji3LsO84E7EAnlaD6kyh5LEEHbltvxjen7GGKV
+# 7bLAALqwNr5EIRseMcfagxwbQglUiYvTbuxotWHIpyJg6uJV2l5fa23RL7Pxi4Bh
+# KVGjtStmihkOI18N8ZdHHEn2EUnJKfBHNsGP0Smkpu1hdEGH6yNIbNasGWKf+2Nc
+# B7infxQDBPX24osUNArY5Sq0fjRncX2ZMGNAUUORrk04XpLKjUIZT+ByJ/5AR1ob
+# d0iZz3u5eQns833xioTugR3A3OsVi6J6bsuUZKBN3FDpjofT7a21UkxoAzYByGwX
+# YVRrlcgNKnR4yTGDjb3Ci5n6VZSbwrGYY1yYHOr0dS98kTkjfy9DOpvr5pXO6Gkz
+# HeBKcJ4YzLm6+M+CqqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTMxMzEw
-# MjRaMC8GCSqGSIb3DQEJBDEiBCBqVOEOcga0z+fpEhlbq4NfObdQf29A5Sb1V47B
-# Gd2azzANBgkqhkiG9w0BAQEFAASCAgBPJiVB9dfVby2+HtzNq71a9zqKh2l4Iqir
-# cNyZXcDaQOychcw55+idbfgUDYrJEsoy9qPBflb+jo/Bx8rS41rDbegr0bmDundz
-# JAi3ZS+0eyeLiW+zccZ9IOgQgAFkY5oJVnNntMipweXAimWJrAUkPRPG/DZHypDV
-# v6Kcyxq+i89fkvK2/XEQOFcEUUbTNPLkqsYBe1+l6PHl3HI2b5lD3DU7bDNoxAMe
-# l18eLqNlSsX9Rg6lARbskIWyMwbt04Rg/Rus8SlkAic8rqZe2JC94AknMzwtala4
-# X7vhvUjyKtVGYhPggyntdmb3BCZXoNfvA+ZrDU51a946o52lBQVr3y50aFzXqjST
-# mCitj7hVmI8xV9AolNskMIckFbUwRasQS0iU5azRxXRKzlpDMRZnaBbUexc7EIqr
-# cCVLeIbivnhe6IKcNkb+qdfBHxogiiWHOG1WInv0TeJgbvqyeRtBEQNWzHdPGlzS
-# avNzjrlhzW5iCiShWMemKrhRk3gBqnemAd7vbHhwtUOtWYHSgtecDqnoOhMVvNFQ
-# oAJZ+b2v1YxgUKY1JoAgr5GKeUI+kXXQo/5dxtc6WPJdwqKdW1V+0g/0aSX1QEVR
-# RV2KCfMJUGZYrn3RYBb3ah5oHVfbGBdWGFZVXAaOLoZGdQsY3IinRg69FNToutCX
-# eKP+r7TGOw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTMxNTM4
+# NDJaMC8GCSqGSIb3DQEJBDEiBCAmZ4P4wabcm5qrfXaFO57x6gmzOFqDBECdYDN4
+# dtOVdzANBgkqhkiG9w0BAQEFAASCAgBzI88TQTmedMZHWa45Jp2oIgVLoNDioBAz
+# bWPCLXLmcl0J6jbsocXvir2mMu8sqJ/glNngSGwa6RKaCyuCymAbpnaIAF+HHgDe
+# uxhw53+0wvF0Qr5W30GcocoZa84gEhNI4D95MORl44yVJXvwpTm1niqSrIu7SFXU
+# 4qDm4SABydShm/JtQSr//MQBhsLRAR/Bz6hWBXyIGFdAf/ICoW6lqffGthxF6FQ3
+# /mLByrvFRGQOqGjnzFKO1wzuTXBJIbiwqdULoNfZ3w/bBfVzoi7L9ZRfvMJWNJ5e
+# 03Ehl0YLMLih49efE2U8fXgAv6zGhQoF69aeWxCRH0Lt0l1iuDoMiPfp8tNHGkaM
+# JjU6mmmmfXPaKs/ufGbzjRMApxb1byeQzCv7f2RlLq8q0uNQcyBl1dFccaIEjCN7
+# scNvOO2hQQEuwp+R8OHIZ5btkT9l5EgkqCR2cone8Nuym6IMRQL9PJbQ+guKAqLX
+# woK5Qc8DsSz/R6C4YP29YDatpxyoNM+0SHJflGVbKXuaso7s8BQqp6GotKSxaq2R
+# mfxqby4EvJcDIvU8lq/oB5iaBhOQbbgR4oI6SIlGIpj8rlf7UkrOYm9RRYSRQPA2
+# Xo7KK32yk/L9a+gvPU8AFVWW8mcvr/arh1lTZ+HTtKtJWovXSGdiLLKA+qX6+0n/
+# z1cWgNP4tw==
 # SIG # End signature block

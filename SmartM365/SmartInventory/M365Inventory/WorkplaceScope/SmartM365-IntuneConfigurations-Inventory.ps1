@@ -3,7 +3,7 @@
 .SYNOPSIS
 Collects Intune configuration definitions, assignments, and reported device states.
 .VERSION
-1.0.0
+1.1.0
 #>
 [CmdletBinding()]
 param(
@@ -22,12 +22,13 @@ $script:Runtime = $null
 $failure = $null
 
 function Get-IntuneConfigurationApplicationState {
-    param([string]$PolicyStatus)
-    switch ($PolicyStatus.Trim().ToLowerInvariant()) {
-        { $_ -in @('success','succeeded','applied','compliant') } { return 'ReportedApplied' }
-        { $_ -in @('error','failed','conflict','noncompliant') } { return 'ReportedIssue' }
+    param([string]$PolicyStatus,[string]$ReportStatus)
+    $state = if ([string]::IsNullOrWhiteSpace($ReportStatus)) { $PolicyStatus } else { $ReportStatus }
+    switch ($state.Trim().ToLowerInvariant()) {
+        { $_ -in @('success','succeeded','applied','compliant','2') } { return 'ReportedApplied' }
+        { $_ -in @('error','failed','conflict','noncompliant','4','5','6') } { return 'ReportedIssue' }
         { $_ -in @('pending','inprogress') } { return 'Pending' }
-        { $_ -in @('notapplicable') } { return 'NotApplicable' }
+        { $_ -in @('notapplicable','not applicable','1') } { return 'NotApplicable' }
         default { return 'Unknown' }
     }
 }
@@ -135,17 +136,69 @@ try {
         $deviceId = [string](Get-SmartM365EvidenceProperty $_ @('IntuneDeviceId'))
         if (-not $policyId -or -not $deviceId) { throw 'Configuration device status lacks policy or device id.' }
         $policyStatus = [string](Get-SmartM365EvidenceProperty $_ @('PolicyStatus'))
+        $reportStatus = [string](Get-SmartM365EvidenceProperty $_ @('ReportStatus'))
         [pscustomobject][ordered]@{
             PolicyId=$policyId; IntuneDeviceId=$deviceId
+            UPN=[string](Get-SmartM365EvidenceProperty $_ @('UPN'))
+            PolicyName=[string](Get-SmartM365EvidenceProperty $_ @('PolicyName'))
+            DeviceName=[string](Get-SmartM365EvidenceProperty $_ @('DeviceName'))
+            PolicyInCollectedCatalog=$seenPolicies.Contains($policyId)
             PolicyStatus=$policyStatus
-            ReportedApplicationState=Get-IntuneConfigurationApplicationState $policyStatus
-            ReportStatus=[string](Get-SmartM365EvidenceProperty $_ @('ReportStatus'))
+            ReportedApplicationState=Get-IntuneConfigurationApplicationState $policyStatus $reportStatus
+            ReportStatus=$reportStatus
             LastModifiedTimeUtc=[string](Get-SmartM365EvidenceProperty $_ @('PspdpuLastModifiedTimeUtc'))
             RunId=$script:Runtime.RunId; CollectedAtUtc=$script:Runtime.CollectedAtUtc
         }
     })
+    $currentByKey = [Collections.Generic.Dictionary[string,object]]::new([StringComparer]::OrdinalIgnoreCase)
+    $undatedStateRows = 0
+    foreach ($state in $deviceStates) {
+        [datetimeoffset]$stateTime = [datetimeoffset]::MinValue
+        if (-not [datetimeoffset]::TryParse([string]$state.LastModifiedTimeUtc,[ref]$stateTime)) {
+            $undatedStateRows++
+            continue
+        }
+        $key = '{0}|{1}' -f $state.PolicyId,$state.IntuneDeviceId
+        if (-not $currentByKey.ContainsKey($key)) {
+            $currentByKey[$key] = [pscustomobject]@{ Row=$state; Time=$stateTime }
+            continue
+        }
+        $prior = $currentByKey[$key]
+        if ($stateTime -gt $prior.Time) {
+            $currentByKey[$key] = [pscustomobject]@{ Row=$state; Time=$stateTime }
+        }
+        elseif ($stateTime -eq $prior.Time -and $state.ReportedApplicationState -ne $prior.Row.ReportedApplicationState) {
+            throw 'Conflicting configuration states share the latest timestamp for a policy/device key.'
+        }
+    }
+    $currentStates = @($currentByKey.Values | ForEach-Object { $_.Row })
+    $unknownStates = @($deviceStates | Where-Object { $_.ReportedApplicationState -eq 'Unknown' }).Count
+    if ($deviceStates.Count -gt 0 -and $unknownStates -eq $deviceStates.Count) {
+        throw 'Every configuration device state is Unknown; source status values require qualification before publication.'
+    }
+    if ($deviceStates.Count -gt 0 -and $currentStates.Count -eq 0) {
+        throw 'No dated configuration device state can establish the current state.'
+    }
+    $uncataloguedStates = @($currentStates | Where-Object { -not $_.PolicyInCollectedCatalog }).Count
+    $assignmentReportState = if ($assignmentStates.Count -gt 0) { 'Reported' } elseif ($assignments.Count -gt 0) { 'NoRowsWithAssignments' } else { 'NoRowsNoAssignments' }
+    if ($assignmentReportState -eq 'NoRowsWithAssignments') {
+        Write-SmartM365EvidenceLog 'Configuration assignment status report returned no rows while policy assignments exist; per-device assignment status is not qualified.' -Level WARNING
+    }
+    if ($undatedStateRows -gt 0) {
+        Write-SmartM365EvidenceLog "Configuration device status rows without a valid timestamp were excluded from current state: $undatedStateRows." -Level WARNING
+    }
+    $statusCoverage = @([pscustomobject][ordered]@{
+        AssignmentStatusReportState=$assignmentReportState
+        AssignmentStatusRows=$assignmentStates.Count
+        DeviceStatusHistoryRows=$deviceStates.Count
+        DeviceStatusCurrentRows=$currentStates.Count
+        UnknownDeviceStatusRows=$unknownStates
+        UndatedDeviceStatusRows=$undatedStateRows
+        CurrentStatesOutsideCollectedCatalog=$uncataloguedStates
+        RunId=$script:Runtime.RunId; CollectedAtUtc=$script:Runtime.CollectedAtUtc
+    })
     if ($MaxItems -gt 0) {
-        Write-SmartM365EvidenceLog "Sample complete: policies=$($policies.Count); settings=$($settings.Count); assignments=$($assignments.Count); assignmentStates=$($assignmentStates.Count); deviceStates=$($deviceStates.Count). No canonical CSV published."
+        Write-SmartM365EvidenceLog "Sample complete: policies=$($policies.Count); settings=$($settings.Count); assignments=$($assignments.Count); assignmentStates=$($assignmentStates.Count); deviceStateHistory=$($deviceStates.Count); deviceStateCurrent=$($currentStates.Count). No canonical CSV published."
         return
     }
     $rules = $global:SmartM365CsvValidationRules
@@ -155,16 +208,21 @@ try {
     Add-SmartM365CsvValidationRule -Rules $rules -BaseFileName 'Intune_ConfigurationAssignments' -CriticalFields @('PolicyId','AssignmentId','RunId','CollectedAtUtc') -UniqueFields @('PolicyId','AssignmentId') -AllowEmptyDataset -CriticalMissingFailMinRows 1 -CriticalMissingFailPercent 0
     Add-SmartM365CsvValidationRule -Rules $rules -BaseFileName 'Intune_ConfigurationAssignmentStates' -CriticalFields @('PolicyId','IntuneDeviceId','RunId','CollectedAtUtc') -AllowEmptyDataset -CriticalMissingFailMinRows 1 -CriticalMissingFailPercent 0
     Add-SmartM365CsvValidationRule -Rules $rules -BaseFileName 'Intune_ConfigurationDeviceStates' -CriticalFields @('PolicyId','IntuneDeviceId','RunId','CollectedAtUtc') -AllowEmptyDataset -CriticalMissingFailMinRows 1 -CriticalMissingFailPercent 0
+    Add-SmartM365CsvValidationRule -Rules $rules -BaseFileName 'Intune_ConfigurationDeviceCurrentStates' -CriticalFields @('PolicyId','IntuneDeviceId','LastModifiedTimeUtc','RunId','CollectedAtUtc') -AllowEmptyDataset -CriticalMissingFailMinRows 1 -CriticalMissingFailPercent 0
+    Add-SmartM365CsvValidationRule -Rules $rules -BaseFileName 'Intune_ConfigurationStatusCoverage' -CriticalFields @('AssignmentStatusReportState','RunId','CollectedAtUtc') -CriticalMissingFailMinRows 1 -CriticalMissingFailPercent 0
+    $deviceStateColumns = @('PolicyId','IntuneDeviceId','UPN','PolicyName','DeviceName','PolicyInCollectedCatalog','PolicyStatus','ReportedApplicationState','ReportStatus','LastModifiedTimeUtc','RunId','CollectedAtUtc')
     $exports = @(
         @{Name='Intune_ConfigurationPolicies';Rows=$policies.ToArray();Columns=@('PolicyId','PolicyFamily','DisplayName','PolicyType','Platforms','Technologies','CreatedDateTime','LastModifiedDateTime','NativePolicyJson','RunId','CollectedAtUtc')},
         @{Name='Intune_ConfigurationSettings';Rows=$settings.ToArray();Columns=@('PolicyId','PolicyFamily','SettingId','SettingDefinitionId','SettingInstanceType','SettingInstanceJson','RunId','CollectedAtUtc')},
         @{Name='Intune_ConfigurationAssignments';Rows=$assignments.ToArray();Columns=@('PolicyId','PolicyFamily','AssignmentId','TargetType','GroupId','AssignmentFilterId','AssignmentFilterType','RunId','CollectedAtUtc')},
         @{Name='Intune_ConfigurationAssignmentStates';Rows=$assignmentStates;Columns=@('PolicyId','IntuneDeviceId','AssignmentStatus','ReportStatus','LastModifiedTimeUtc','RunId','CollectedAtUtc')},
-        @{Name='Intune_ConfigurationDeviceStates';Rows=$deviceStates;Columns=@('PolicyId','IntuneDeviceId','PolicyStatus','ReportedApplicationState','ReportStatus','LastModifiedTimeUtc','RunId','CollectedAtUtc')}
+        @{Name='Intune_ConfigurationDeviceStates';Rows=$deviceStates;Columns=$deviceStateColumns},
+        @{Name='Intune_ConfigurationDeviceCurrentStates';Rows=$currentStates;Columns=$deviceStateColumns},
+        @{Name='Intune_ConfigurationStatusCoverage';Rows=$statusCoverage;Columns=@('AssignmentStatusReportState','AssignmentStatusRows','DeviceStatusHistoryRows','DeviceStatusCurrentRows','UnknownDeviceStatusRows','UndatedDeviceStatusRows','CurrentStatesOutsideCollectedCatalog','RunId','CollectedAtUtc')}
     )
     foreach ($export in $exports) { Assert-SmartM365CsvDataCompleteness -Data $export.Rows -BaseFileName $export.Name -Columns $export.Columns | Out-Null }
     foreach ($export in $exports) { Export-SmartM365EvidenceDataset $script:Runtime $export.Name $export.Rows $export.Columns | Out-Null }
-    Write-SmartM365EvidenceLog "Intune configurations collected: policies=$($policies.Count); settings=$($settings.Count); assignments=$($assignments.Count); assignmentStates=$($assignmentStates.Count); deviceStates=$($deviceStates.Count)." -Level SUCCESS
+    Write-SmartM365EvidenceLog "Intune configurations collected: policies=$($policies.Count); settings=$($settings.Count); assignments=$($assignments.Count); assignmentStates=$($assignmentStates.Count); deviceStateHistory=$($deviceStates.Count); deviceStateCurrent=$($currentStates.Count); unknownStates=$unknownStates." -Level SUCCESS
 } catch { $failure = $_; throw } finally {
     try { Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null } catch {}
     if ($script:Runtime) { Complete-SmartM365EvidenceRuntime -Status $(if ($failure) {'Failed'} else {'Success'}) -ErrorRecord $failure -FailureStage 'IntuneConfigurationsInventory' }
@@ -173,8 +231,8 @@ try {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCS56653ldgdrP4
-# idXyqLpmHuW42gby3h38m0QaK/JFx6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBPbXP2rYUAGjVF
+# ttidKJVu2lUAX1H+Za4FF4bDh+0NYaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -307,31 +365,31 @@ try {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIO3mSktas9E+56FKRuUY7YMuokqmXjHeThWyFXzPijh0MA0GCSqG
-# SIb3DQEBAQUABIIBgIUmbszTWitZLrLw+ewVRwLXSMOiTgIYY9Ulhiv1IgK7xDlz
-# ert1oLkcZbpw+YgTGDp6jm/6YEf5HaaUfebCIv3TPDt2gFa13xZ1rVCNYaYZ2WHy
-# fp0wBSPGaF0EWwzb9tkjAQDJaHpfgD59IdN3gPh87EJ57CHz8ubyyw1L8O9Agkuu
-# 3eai+NUyux6X5grYB9Y3H9Djsc4Q5H061zy9F1Ltz2ckmpfDkOZLgcDSYa0NnsNq
-# S6jUDjKrc72ehS6cV9pkDqiKPSFOsgeh96oQDc1Pg/sm3D8pAyMsAeUOXk6XTYfz
-# Oo8heeVyU59opICusyfjnhiQFirRjMpEla+lnhd2zah/K1GGPExMfrTw0wQRjSqB
-# OVJgZHcgE0MtH2e4/iC6R4hAXKx9gsBQUMvBTJPfEjwLghYhpvANyvQkeyOWRtHh
-# cCCzbuhApzxeIhZtRPsvEMiwiBI7VD3FCgF5AVux/xBLa9ZlOBStxcKruWVxW0h/
-# VexJGjRTuXF/PqlmcKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIOZvVbOB/NQnREZoA1x6tLkx6gn8NRPaWl1WiJOPcnrJMA0GCSqG
+# SIb3DQEBAQUABIIBgHonH0sKoecAoSUGHszm/JkAkvAhse/8TbWZi22jEffPWoMP
+# 0OV/6tHnGtH7/60z8KnLtxgQBEqgO0G0DUrxeLX7EbQ7aC506REpIjGEVrrb/1TO
+# n+aW+eEZc9g7fGHjCkuFoTgyq+/U03XWrDnfY0vuFPjJMV7UbNcm+mx9GxlPSeEp
+# NA+YazSS1a06cx+jqfwMAytQ1a4Nqj2/XkJwaOhUanQGr6VrFEn/TBb/pEcqWy/R
+# 31oItWxpDBuAQ/Z3s12W2i9s5BH952DwLEQaPDWkLkycdKQX5/gk0ISItvQgksjl
+# ZCCgMc0Jyret/huynggplHF/Dz9fDfWq6Jnt7nLov0VawYbZjZ9+hV7zPI3Jq49O
+# 5h2pdvj6Oqbwa++sNkRTX0ZTsIzhxighKFQYa3KWsJSTxKpRUYbUj/Gft/Yr8+Jp
+# /cezdVYqXbz1PX+9Us7QLkSBIaClJIXEkQbAFKNn9LPNVv7RhO0y9fHz6uNc9a7D
+# U3NkSIyaXNhD8E1JkqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTMxMzEw
-# MjRaMC8GCSqGSIb3DQEJBDEiBCAlnTxTptKmHRmbUfhuV0sNYF20ou77sadq2XXP
-# adpObjANBgkqhkiG9w0BAQEFAASCAgA+i2Pgv/sCyekVM3XG5UBPBKGwiiz855oA
-# k/xyKmCSXa23CNWIC2ZGRB6Nw9+znrOaC/33kJTOOWq0UK4eJFBX5EXGDy9D3zRE
-# amTrMzgzeTKTDDXw3xYFvSHaqlvvK+UnotxtOaUbnrpdJlvdhk+5Uzqj54ZbEOEX
-# bB9XYU3YNz4lVtg9QtGvR88VhhkAsHL7jU0vUTUDI605bA+VXkuNZ0fz9AJbPtAI
-# 63WFbzdya0gTJXcLJcW/QdM5j4LEsJKyiKY8cYHjfVNrd5kR+Nzs4WdSrk2QyWSu
-# YlhCSz7zQFNs5PAhZdmPoIzKOpY+uZ8XerR3Co+eaXJQ4s4UNdnhOudjf6C0/iWT
-# UvdClyAI+O2Uw+rt/1qyOpBHfHJfildCqhhojj2DWviW0gOXyCRL2IMf9mAARDTx
-# JCyF6xVpPHopE1O5mL6aBsCRX6ODdna0/unnKJHSEFgYmsyg9yvnQIxMf82l2zT4
-# LFcWU9OozsgcQ5gUoxwMijON1iFEDNyoNtpG3aiUyCBM51Pw5oWWvvBpXiK8SIjj
-# qaD/V71V+DFHMnRAiBJaWkhTkP+5SX0IOEmiRG8ziju4m5Y9k4XM5So/u1box/EB
-# Gsy79NBw9y8DGyR3OwOwqTAIu5bxvASSe8CazsPcIQl5rldww6iF9urZL0MQaoR5
-# 3NT6L1Zzxw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTMxNTM4
+# NDJaMC8GCSqGSIb3DQEJBDEiBCA6j6WQkMymJQuqhJe1uVWK9HGUBAFrFT8euxyF
+# O65xCDANBgkqhkiG9w0BAQEFAASCAgAFDfldHfsOmsQ+PNThd1KklzuSXYdTntrA
+# O7Yy0vtpE/Kln+wur4GMBcxrHhhOQHWG5UlfusW2sr0CVPHicAs6OnoBr+u51cjF
+# On6frOLGMYF5hgdyuskA1PuX8ozYhOerk1ItviTMQUfMQGCviVVeKuCZA3DzyY5R
+# O0wyGQhK/tAZe9TLVlSekkg9Rbfx+hP7pBfkmaaOuN8gAbw0DNKPWqFWeqWzzvUL
+# Opkpp0U8bFW17MKIuyXeHSMFEsPXuhumJna9PTXGRVMlKRds7P03256wFfQ1eSDh
+# FgKjslWf4spKHNTIXy/7GLWglHAKbOREIxd75meWp7YNtCwk47hD8C2FJagrrw5p
+# GNxevej2TVow+IAvm7WD+ErP9cVxv47b/GTppy1lg+pkQ+tmEYulCMXpeAf2VrJK
+# oBCiwUcGq/Pl/1zEs+qN26W7cyF+zb37ii5zmLCBq0uKB2kOVRmhJUSJdY5cH/7v
+# 8OKGaNWk89GiOWrtvfAWW776PmnS6CdvjrsalaQfy+/4OO0FEBJcyXHUWlj3K1CT
+# M5ZmuG/3DndWq87Mb7KcCBzuHUPfsg50MkThpoBFyHpqKg9XbDnOAEFHfuwMN54G
+# /PDtdwdur2OnrQ4M1P8JRT/YkNJt4173nsxm6Wreog1JC9mY7Vf+P5bd2U45SIoS
+# /8psGy4SOg==
 # SIG # End signature block
