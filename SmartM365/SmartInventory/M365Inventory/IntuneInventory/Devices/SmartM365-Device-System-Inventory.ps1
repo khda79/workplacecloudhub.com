@@ -40,14 +40,14 @@
 .PARAMETER ManagedDevicePagePauseMilliseconds
     Delay between managed-device Graph pages in milliseconds. Default: 500.
 .VERSION
-2.12
+2.13
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication.
     Minimum Graph application permissions: DeviceManagementManagedDevices.Read.All; DeviceManagementConfiguration.Read.All; DeviceManagementScripts.Read.All.
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
-    Version : 2.12
+    Version : 2.13
     Author: https://github.com/khda79/workplacecloudhub.com
     Requires: SmartM365.Core module (logging, init, CSV, cleanup, cloud connectivity)
     Scopes: DeviceManagementManagedDevices.Read.All, DeviceManagementConfiguration.Read.All
@@ -468,6 +468,37 @@ $BulkEndpoint = "/beta/deviceManagement/managedDevices?`$select=id,deviceName,az
 # Helpers
 # ==========================================================
 
+function ConvertTo-DeviceSystemGraphUtcTimestamp {
+    [CmdletBinding()]
+    param(
+        [AllowNull()][AllowEmptyString()][object]$Value,
+        [Parameter(Mandatory)][string]$FieldName
+    )
+
+    if ($null -eq $Value -or ($Value -is [string] -and [string]::IsNullOrWhiteSpace($Value))) { return $null }
+
+    if ($Value -is [datetimeoffset]) {
+        return $Value.UtcDateTime.ToString('o', [Globalization.CultureInfo]::InvariantCulture)
+    }
+    if ($Value -is [datetime]) {
+        if ($Value.Kind -ne [DateTimeKind]::Unspecified) {
+            return $Value.ToUniversalTime().ToString('o', [Globalization.CultureInfo]::InvariantCulture)
+        }
+    }
+    elseif ($Value -is [string]) {
+        # Only explicit Graph offsets are accepted; never infer the server/device time zone.
+        $timestamp = $Value.Trim()
+        $parsed = [datetimeoffset]::MinValue
+        if ($timestamp -cmatch '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,7})?(?:Z|[+-]\d{2}:\d{2})$' -and
+            [datetimeoffset]::TryParse($timestamp, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::None, [ref]$parsed)) {
+            return $parsed.UtcDateTime.ToString('o', [Globalization.CultureInfo]::InvariantCulture)
+        }
+    }
+
+    [void](WriteLog -Message "$FieldName is not a qualified Graph timestamp: a valid explicit offset or known DateTime Kind is required. Exporting an empty value; no time-zone fallback was applied." -Level 'WARNING')
+    return $null
+}
+
 function Invoke-GraphSafe {
     <#
     .SYNOPSIS
@@ -653,7 +684,7 @@ function Parse-PlatformScriptStdout {
 # ==========================================================
 # Initialization via SmartM365.Core
 # ==========================================================
-$ScriptVersion = "2.12"
+$ScriptVersion = "2.13"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'DeviceSystemCsvLogFolderPath' -DefaultValue $OutputPath
 try {
@@ -814,7 +845,7 @@ try {
             BIOSVersion                       = $psData.BIOSVersion
             BIOSDate                          = $psData.BIOSDate
             FirmwareType                      = $psData.FirmwareType
-            PlatformScriptLastUpdate          = $psLastUpdate
+            PlatformScriptLastUpdate          = ConvertTo-DeviceSystemGraphUtcTimestamp -Value $psLastUpdate -FieldName 'PlatformScriptLastUpdate'
             LastRebootDate                    = $psData.LastBootUpTime
             'Last Reboot Date'                = $psData.LastBootUpTime
             LastBootUpTime                    = $psData.LastBootUpTime
@@ -825,7 +856,7 @@ try {
             DeviceGuardCredentialGuardState   = if ($hw) { $hw.deviceGuardLocalSystemAuthorityCredentialGuardState } else { $null }
             ManagementState                   = $device.managementState
             ComplianceState                   = $device.complianceState
-            LastSyncDateTime                  = $device.lastSyncDateTime
+            LastSyncDateTime                  = ConvertTo-DeviceSystemGraphUtcTimestamp -Value $device.lastSyncDateTime -FieldName 'LastSyncDateTime'
             ThirdPartyAVStatus                = $psData.ThirdPartyAVStatus
             ThirdPartyAVProducts              = $psData.ThirdPartyAVProducts
             ExpectedThirdPartyAVName          = $ExpectedThirdPartyAV.DisplayName
@@ -934,8 +965,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCeds/If8F2a+BM
-# QzszOxHNDQwczJU5rLuu9pHYF6QVcqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBf5w1ayjXr7q3K
+# GmhmnzwRGmSfmGyko6OiIU9IRk46OqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1068,31 +1099,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEINp3QpzP27J768Wqn07F/HIbI7J9mDqUYNA2g4PYx+QJMA0GCSqG
-# SIb3DQEBAQUABIIBgHLyC67WYE3shFE3LktB6N6BVFuPSzJBXqaeaejo7cu+vMB3
-# YFB+gfKt2d6lxcHglv2WbRB54sVJiYVFIQNQtPtFEzr/5UZk5tgNWGtfdCdKSv2h
-# Mq5crp2TDdVl4T+Sp9V2LBTXSH+oT5/SW6mFoNz9avKDpftDHLykLEimSOYVK+rg
-# uchUP3ykTCCmZ3P9B2iiIhzQeY2fLSaUFJGaIP0OGLrGb1bJsPIup9hS/nZRXEvJ
-# AGpZw1PNkZplbw12D1A1apsGwQ6Q5JLVEaKrppZHv8jq73usQRgK7QICX/c6MsM4
-# YXjG14h1C+8cMY+5madHEhRHsgOQiUUlWTf8UcRk6ImqLsJYJrOf31BF9pNUz+AM
-# 3VWlTyAjy85nDtg3yyDbJI1YMowueV2KvB8W316Z48sZwKOlasjLjqJZlkE9rbaZ
-# FrNE5HLLFrBnUZdCd8b0szo1CsZGyuyRAULgM/3krySN+ZsvOXyLeyFEY9A0ZTd6
-# kTOltRFDXxT86fCR36GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIKm3Pubf0yW8L9k/YJnQFFtQJIUuo7OyKx5vd5BI7aOPMA0GCSqG
+# SIb3DQEBAQUABIIBgBh5WXORg9o43Bp/MH/wURPlU3GNVWXtmlcHMl9bDMTiJZLl
+# xWE5iezGXsO5LPmqIoM7d/MlD7TyyHYfiO1GFprF4UkJdRsO3A8a2e89Zq/StyHx
+# qARv3MSSHn+LOkD+IFglB6Nn6bVFp8yXvqbuZtTDfJX6Fn+CloKXf1OHb80xE/Y5
+# FevqlUmnwp2lYe3t2kcB1OQiasLwYRA/jBu6CESWPl4WBNeSRVZe5K8GhsOh3Njp
+# vQ0bo0x+BPr10kMMSTiq4Dpv+2aY1wy3F2GsxM6oefrKTEJizbEwumSHn9eeW1hY
+# NQvCBDjgnqKnv9OsbzkuBjcExDoyvFGGGjnj5KgzE01tzZMDW0GzKTQOm2d8Ia6e
+# EntIs+eqQmQZ1dD7LLotGpSv3IVgqpziRKlD2VZsmHWtl/7sKUYEMkZTT6MHHAFT
+# pOS5Hp8UcpOMIrKTtNcYAM1IdzHVlujR04smr3Y9QIw0HlcKyaxES5n09prIlY18
+# haU0vtf5qGMvFFEfsqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTAyMzUw
-# MTNaMC8GCSqGSIb3DQEJBDEiBCC4kZjSxFSQ9QPYx4dKQvglkZjG8aAXwKrdWNv9
-# wKP8vzANBgkqhkiG9w0BAQEFAASCAgBhnah08pxkFmxunmTVpoaMybGXYjOc1Dw+
-# IQRtHJ7uxqYvpJGlEuCgGp9YuMHcty8oHmazUBRitEVz6Bn/agZupb+1TJtLW7a6
-# BEasooVWmkWzUzU9pqXRXFsmGTPHu9EUmalSXbKwwsoPu9vEpOdhoBfZOaDh0sC7
-# 56lFMw6z2qy8w2187Xoq4cnMyShIxQlsvkq4kFskj87f8naF5VjIQ7TOrvRWFo71
-# oHNcVBfFnRXxpoZQex1krRHrENRumk/aa5ToBnhDqm+BOpeheZmq2+h7KFnhQyaB
-# guT+YBYm7r55diQRM4HM/ic6PoXicurH1aVaViRbkMmupJpExEPE6TU75ZvznUVQ
-# WACzznfPjT33KmuwOueZZz5aRD6ShExtQ3jJVHzRKYRpiiaD7gMGV+Qjj0YKj09y
-# nJxql0/PGTJMBw3DHBPZJuJHqMVuLpxl5i7IAxtxAXMsMbVNeA+8gh9UfNvMqD5v
-# 6Z0EjpA0dn0TORiUKD2UtaGDJxrmUYMxkwSom/Qb7hfifZwA33mTGA1Z1XrLWkhl
-# N85HQXZyOWbpcMcvQnG1NIxgwoGM0GEArT08zYhsv4flD7EKxczGLW8rzWId1k4c
-# nBwlZE1l6HiB7KOn9Ubq68NpkFkp+OYex2jsrjySO+I9DmHwMIMsHArEOxVS2bt4
-# Vzvk/+gk/w==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTMwOTM3
+# MDlaMC8GCSqGSIb3DQEJBDEiBCBx7NVhXhMg1IlHJT++cJkN7mB9WNd/C5EigM/B
+# sc/bsDANBgkqhkiG9w0BAQEFAASCAgAOefVNgAsteaam3Y+D8rCw6CzlrKXqeLhM
+# OO5mMy7V6u1zgRMTQUwyqOOgxZCeq+2TvMVwe2ZBnyyhxrwLrVzKFo2j9k4+6Ysl
+# VnQQgNy6bJXuqmWIUb4suGVQUQzxDjRTj1HafII0shyhXvbnI6k10LFfRzWPG8NI
+# RMumVbFmQspLG6kmC3xt0vWSGDdMYKfw9c5naWjfKmQY0W0z3LucbcLFb0TBfNx2
+# 4dB9/RtvAAT5dyI3qOauv2Y1b+9/nCumR3ECnW3gxUADKKMVqtfcOp1tDr8phx93
+# crYCyeWFMlp1OcfFIeNZtvTb1NHKSM5U9LuqkSn/ER+t9yURXzGYF8wmtFXHUvOH
+# WevnLH/9ACN8LkqJDbxFB6RrSxclJfUqbQU4BaTz1iS22OvWvC5stPrgnI/5PKpC
+# i8TE4gX3SVl4LZJ33rRyQ7lClk42RK12e+GiWzzSZoDfXzDG2HEfL7C7EN6TNDDQ
+# IhJeJtc4fkJQdYC43QdyNtcBjUvNvSurE9rPwOHqEIU1s3h45joa3v7gyDgh7Q6g
+# NEHFQBg6AsWmplTXB4AOWFQfvgW/T3GW86sCu7GYta6OBPAZYBj/RbYYJOB0R4eh
+# vmfvmYoN+ZatDBbQSRmvSK89MMcEPhG9MB2bzdVABAYvnavJG4Z63z8aUwakSZG3
+# yoF+dvgqkQ==
 # SIG # End signature block
