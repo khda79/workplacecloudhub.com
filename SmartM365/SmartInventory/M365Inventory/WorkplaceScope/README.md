@@ -33,3 +33,10 @@ The jobs are enabled in `Orchestrator-Jobs.json.template` at 04:30, 05:00 and
 05:30. Their duration estimates are initial scheduler values and need review
 after tenant-run evidence. Template changes do not publish the live orchestrator
 configuration. Tenant runs and publication remain separate operator actions.
+
+For a direct run on the current host, use the three matching
+`SmartInventory/Launchers/Cloud/Start-SmartM365-Intune*.cmd` launchers.
+They default to tenant `prod`, pass additional script arguments such as
+`-ValidateOnly`, and bypass orchestrator claims and scheduling. Use the
+`LaunchersByOrchestrator/Request-Intune-*.cmd` launchers to request a run
+through the resident orchestrator after the jobs are present in its live manifest.
