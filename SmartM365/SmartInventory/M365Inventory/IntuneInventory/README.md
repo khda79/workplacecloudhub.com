@@ -14,6 +14,49 @@ Intune-focused inventory and export scripts, grouped under `SmartInventory/M365I
 
 `Export-IntuneRemediations.ps1` remains at the folder root because it is a utility for exporting remediation packages rather than a device inventory report.
 
+## Recurring Device System observations
+
+Run `SmartInventory/Launchers/Cloud/Start-SmartM365-Create-DeviceSystemRemediation.cmd`
+to create the package in the `prod` tenant profile with interactive Graph sign-in.
+The standalone script also accepts `-Tenant test` and requires the delegated
+`DeviceManagementScripts.ReadWrite.All` permission. It refuses to update a
+package with the same name, prints the new package GUID, and verifies that the
+package has zero assignments. Creation does not define a schedule or target
+any device or user. The launcher does not run the inventory collector.
+When run from an isolated worktree, pass `-ConfigRoot` pointing to the
+operational SmartM365 root that contains the private tenant profile.
+
+`Devices/SmartM365-Detect-DeviceSystemInfo.ps1` is the detection script for a
+detection-only Intune Remediations package. Assign it to the intended Windows
+device group, run it as SYSTEM in 64-bit PowerShell, and schedule it daily. It
+reports Secure Boot, BIOS, firmware, last boot, Windows Security Center AV
+registration, Windows Update reboot requirement, OS-volume BitLocker, and the
+last local console sign-in found in the Security log. The sign-in check accepts
+event 4624 types 2 and 11; it excludes network, service, unlock, and Remote
+Desktop logons. The scan reads at most the latest 512 matching Security events;
+no user found in that scan or an inaccessible log is reported as unavailable.
+The account name is personal data in the Intune script output and exported CSV;
+restrict access and retention accordingly. Microsoft advises against collecting
+personal data through Remediations, so assess this deployment before assignment.
+If Intune signature enforcement is enabled, the signing certificate must be
+trusted on the devices.
+
+After Intune has reported pilot results, set `DeviceHealthScriptId` in the
+private Device System `.local.json` configuration to the package GUID. The
+collector then reads only that package's `deviceRunStates`; it does not fall
+back to the older Platform Script for missing devices. `LocalObservationUtc`,
+`LocalDataSource`, and `LocalDataFreshness` make the source and age explicit.
+`PlatformScriptLastUpdate` remains a compatibility alias for prepared evidence.
+The collector continues to read the legacy Platform Script until the new ID is
+configured. Do not disable the old assignment before pilot output, coverage,
+and downstream CSV checks are complete.
+
+Intune reports changed recurring output promptly and unchanged output at least
+every seven days. `LocalDataFreshness` considers a recurring report stale after
+192 hours. A daily device execution is therefore not evidence of a daily
+cloud report. The production run, package assignment, and CSV publication are
+operator actions; offline tests do not qualify them.
+
 ## Graph paging and partial-result safeguards
 
 The consolidated Graph candidate updates only transport and publication safety in

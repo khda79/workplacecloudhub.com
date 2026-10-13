@@ -44,6 +44,7 @@ $psData = [pscustomobject]@{
     SecureBoot = 'Enabled'; BIOSVersion = 'synthetic'; BIOSDate = '2026-01-01'; FirmwareType = 'Uefi'
     LastBootUpTime = '2026-01-01 10:00:00'; ThirdPartyAVStatus = 'Detected'; ThirdPartyAVProducts = 'Synthetic AV'
     WindowsUpdateRebootRequired = 'False'; BitLockerOSProtectionStatus = 'On'; BitLockerOSConversionStatus = 'FullyEncrypted'
+    LastConsoleLogonStatus = 'Observed'; LastConsoleLogonUser = 'SYNTHETIC\\user'; LastConsoleLogonUtc = '2026-10-12T10:00:00Z'
 }
 $hw = $null
 $device = [pscustomobject]@{
@@ -52,8 +53,13 @@ $device = [pscustomobject]@{
     lastSyncDateTime = [datetimeoffset]'2026-10-12T14:13:32+02:00'
 }
 $psLastUpdate = [datetime]::new(2026, 10, 12, 14, 13, 32, [DateTimeKind]::Utc)
+$localObservationUtc = ConvertTo-DeviceSystemGraphUtcTimestamp -Value $psLastUpdate -FieldName 'LocalObservationUtc'
+$localFreshness = 'Fresh'
+$UseRecurringDeviceSystem = $true
 . ([scriptblock]::Create($recordAssignment.Extent.Text))
 Assert-Offline ($record.PlatformScriptLastUpdate -ceq '2026-10-12T14:13:32.0000000Z') 'PlatformScriptLastUpdate bypasses the serializer.'
+Assert-Offline ($record.LocalObservationUtc -ceq $record.PlatformScriptLastUpdate -and $record.LocalDataFreshness -eq 'Fresh') 'Recurring observation alias or freshness was lost.'
+Assert-Offline ($record.LastConsoleLogonUser -eq 'SYNTHETIC\\user' -and $record.LastConsoleLogonUtc -eq '2026-10-12T10:00:00.0000000Z') 'Local console logon was not serialized.'
 Assert-Offline ($record.LastSyncDateTime -ceq '2026-10-12T12:13:32.0000000Z') 'LastSyncDateTime bypasses the serializer.'
 Assert-Offline ($record.PlatformScriptLastUpdate -is [string] -and $record.LastSyncDateTime -is [string]) 'The exported timestamps must be strings, not date objects.'
 
@@ -157,8 +163,8 @@ Assert-Offline ($script:warnings[$script:warnings.Count - 1] -match '^LastSyncDa
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDt9+SeAYjKHvmW
-# jzD6xaMKDPh1oqNIPdrA2zKIfA7Ef6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA27JiUCz/aaSxP
+# 1mwj0erqZfrB3bh/ViG6TzW96AxATqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -291,31 +297,31 @@ Assert-Offline ($script:warnings[$script:warnings.Count - 1] -match '^LastSyncDa
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIDNqNhe66nM1/1mVMgbArnptjOxDV//iu/auxVp70SreMA0GCSqG
-# SIb3DQEBAQUABIIBgDcwxzz0ZwTaEI5Op9IDqTvUhuhayCp/BPhpzLlHYrqxhDZN
-# /6ekuNcJ2+Co1C1zVOV1COnkOLf06xNd2uDAElDA9mLUHk/TQMTyJYNZiK0gV29Q
-# Wtlw6XNSihinN4BoJCsLLPyBTQJiWsSmfue1Og+iF2QcQFFY85jwn1oh3ZFy0MD5
-# 0K/AFsvsFDT64PXbYejl172FbwbxWRdZjXkPAb6F5Uqh1RbkB4WF23xLic7BIeG0
-# gTMzPrxDVnsqGN+YmV/ZpbNt/Wcp7KAXHdgiZNN70QkTBUdSfT12p+ancUnXjoAT
-# sxwBnriem1P1+454H7oI2R0YRoAtOSOW9Kai2GzCZlCk/ROvF8TCWdQ2KF5eaDlF
-# XCw6+LzIyZtI0K5YU/W2g/odgErZTdRm9otIB3OgvZAFprBvURQpFUMepsKxCBUb
-# Cf+RAG6res6Yk/uJhoYvMmNm9rNdxN01jSwluLFnSzn32hd7ZzD9umodYNB58CTa
-# CvdtQMLPCdZ4V1MvYqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIDZ0UCzBsrfx7AglHOrGN13QGv263rLxqH0hrkFxKgTFMA0GCSqG
+# SIb3DQEBAQUABIIBgIalkpw2NKDVp/qvEVHew5Rnb93tAovINo2taPokiQ8wpqUP
+# 4kCH0kYrSCNx8jKRhAveulwIxKOCP97DWyzrx+oQXtr4VFioZqhTrUEBYskJGqB7
+# rHQ4CyHofwAP5kgLsmijNO1m9olFfblA2uyfbjfY6w7i/oz7BxwZV6A0VfKV83Lo
+# ctJCyQrbft+pMF/LSZEvie963S08PsZgxUvzm2g+9EX4+mbL3Oc1ahJ0529D0S8I
+# BQ2LzRDeVHlPT26V2ocoKf68DdAAu8GX2ZWOQmujypYsWMidJcNKo8xmJunyeWKK
+# V97kQ38uEc3i3c6Z8dN++JSJ0YpwBYQ26cTN/XINXQfmx0hNTN+s4YeCd8PiLQOy
+# rtvicdWVwu70GkC4Qoo0GYFuLMLJDnQ6quzFF+mTeMoukeJqYE8ocJ6F+7++zx64
+# 4Spw8FqWL0uqY7IBtzo1v04HfaTW25kZP6fRYefKloHHqheGLkeefO6ekYccOw7U
+# 5e00FqMiAIMA/XikqqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTMwOTM3
-# MDlaMC8GCSqGSIb3DQEJBDEiBCB2HWtcRsmGyOJeeMnG1mu+9ECAzAKyFClBA1qU
-# 9+pesjANBgkqhkiG9w0BAQEFAASCAgC0xfLW38pc3uvVvl7zmjWLwGM2LqPMtCAI
-# DoHiAU5CMdHETGVTwh2oJ/7ow+8QPuBm8l6cE8U+O69UBcqzji7ve2w36bt6EPpD
-# 4kmUH2F8d91nK4g4Z5FS81ohm6/xFvccJYawUxcX79LRcRam81aDOUBqNCZTOH8P
-# eOcmdK91fxDip1668nwhNf4TKP0GMqEPGdCE8nISHWcjRzK75QN3lomYsI8d2ycl
-# WSTU98A7MqkofkDr4sMuwYgpBOnwADZQB43yfxIHlvFUJwzr260X1ZeAniv2XMd6
-# AJa8amn6x4t1qwKyBPyD5XQV4b9JsJA15H5XKursMRm8hH1VBSuWvFJC5FRaKNsf
-# Fo1eX6yfteH0KM3DnqPgsY7xf1HPzi9xxLNpVNNNgmOqS/nzDHZ0B4cm5iaa8DWM
-# jB3aMiaC9pk8/A18h6gkvOeVnAEavoBb8nmQosQDrV64azdG6SPkPtQahgEX1ysD
-# RxsgD/AiHx7EvygdlA7Tz0gAlEQ8PUpmhKD6Sf4M3hkDitjWeY6JBcGYlbKL8DVP
-# UvWaDTF2GcOf9CL63fGXWr1dIT1ZWtn3ardClWeBooGwxrncpHbLBBQLTvMPnv1r
-# QQrbg0O7a/9jXWHnSl7WTZt3rGzFLBfx4KRPEhyLHYTCNxB9i8XfK8gjbrks+B+A
-# 4A8uJyitGA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTMxMjUw
+# NDVaMC8GCSqGSIb3DQEJBDEiBCCiENHSKEACfgMq7IYCxG0eL8xl8gDVmt3tKRgp
+# +EQ1/jANBgkqhkiG9w0BAQEFAASCAgAd4wR7ch3jMNpEbe8RWH8mCLlZGdN1fys0
+# emybzRTmgsBZRnbICQ+WPisLC+yfbS60wU63BXG8iq56SiSo5CYqlkSNyp4qauV7
+# VP4gCiax5HPG3PgWD3MwP0jffRvAVmSbLgkmc+y2nYvbixCVFsPqNktVvwjpXBh+
+# m7Es/LBjCpdApamC8ztpFe/bODWoFk9qvC/h8+9a21aX6XXAPpVlK06SOp4sJ2fz
+# zI4yNCP/+NMbycxIAJ2XcRbmrNw0coeSXzUvUJ2lNtl08y7cFcJVjNbJ+5S1Eiln
+# vWuTn8HeD03BUAJXVV09SINBrUfOWDGNuSFXnexTN6wLIV7EeNF2KDlp9sk8u+lU
+# bhTKkoyq77p/siyqwkV3rFiB37KfbfpKWe3+x//VT98Mrs2cfLa99Oo+uidTXin/
+# FtWAGdoKidWEkdw75bPWBoCnJCi+tNEg6vsz/NhC1EZtuO2kpdPtXGRGFGZo8v/t
+# 1Myog52neeiwFG7+PbDL6h1ILLSgZItO0mgxTpLoA6kWhKLfGN8M/LyeAPIE3BuF
+# 2xDsR8cvWqa6YMwjERePOb5hpWfGbQTNb0s1MqymgB9LmG1TmM67YV0//lSIDfSJ
+# Yq6iygJb2ZIAWX7eHCk6L3WwFXT6diy23fDZthG96IAhxzwIHXG9LnE2zZ+5kKpm
+# WkUyCFv18g==
 # SIG # End signature block

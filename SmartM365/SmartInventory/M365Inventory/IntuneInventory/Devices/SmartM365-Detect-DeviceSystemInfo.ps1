@@ -3,20 +3,21 @@
     Detects device system information for the SmartM365 Intune inventory.
 
 .DESCRIPTION
-    This script is intended to be deployed as an Intune Platform Script on Windows devices.
+    This script is intended as a detection-only Intune Remediations script on Windows devices.
     It collects Secure Boot status, BIOS information, firmware type, and the operating system
     last boot time, third-party antivirus products registered in Windows Security Center,
-    Windows Update reboot requirement, and operating-system volume BitLocker state.
+    Windows Update reboot requirement, operating-system volume BitLocker state, and the
+    last local console sign-in found in the device Security log.
     Results are written to stdout in a pipe-delimited format for retrieval
-    through Microsoft Graph deviceManagementScripts/deviceRunStates.
+    through Microsoft Graph deviceHealthScripts/deviceRunStates.
 
     Output format:
-    SecureBoot:<value>|BIOSVersion:<value>|BIOSDate:<value>|FirmwareType:<value>|LastBootUpTime:<value>|ThirdPartyAVStatus:<value>|ThirdPartyAVProducts:<value>|WindowsUpdateRebootRequired:<value>|BitLockerOSProtectionStatus:<value>|BitLockerOSConversionStatus:<value>
+    SecureBoot:<value>|BIOSVersion:<value>|BIOSDate:<value>|FirmwareType:<value>|LastBootUpTime:<value>|ThirdPartyAVStatus:<value>|ThirdPartyAVProducts:<value>|WindowsUpdateRebootRequired:<value>|BitLockerOSProtectionStatus:<value>|BitLockerOSConversionStatus:<value>|LastConsoleLogonStatus:<value>|LastConsoleLogonUser:<value>|LastConsoleLogonUtc:<value>
 
 .NOTES
-    Version: 1.4.0
+    Version: 1.5.0
     Author: https://github.com/khda79/workplacecloudhub.com
-    Deploy via: Intune > Devices > Scripts > Platform scripts (Windows)
+    Deploy via: Intune > Devices > Scripts and remediations > Remediations
     Run as: System
     Run in 64-bit PowerShell: Yes
 #>
@@ -138,14 +139,58 @@ catch {
     $outputParts += 'BitLockerOSConversionStatus:Error'
 }
 
-Write-Output ($outputParts -join '|')
+function Get-LastConsoleLogon {
+    # Types 2 and 11 are local interactive and cached local interactive logons.
+    # Network, service, unlock, and Remote Desktop logons are excluded.
+    $query = "*[System[(EventID=4624)]] and *[EventData[(Data[@Name='LogonType']='2' or Data[@Name='LogonType']='11')]]"
+    try {
+        $events = @(Get-WinEvent -LogName Security -FilterXPath $query -MaxEvents 512 -ErrorAction Stop)
+        foreach ($securityEvent in $events) {
+            [xml]$document = $securityEvent.ToXml()
+            $fields = @{}
+            foreach ($field in @($document.Event.EventData.Data)) {
+                $fields[[string]$field.Name] = [string]$field.'#text'
+            }
+            $sid = ([string]$fields.TargetUserSid).Trim()
+            $name = ([string]$fields.TargetUserName).Trim()
+            $domain = ([string]$fields.TargetDomainName).Trim()
+            if (-not $sid -or $sid -match '^S-1-5-(18|19|20)$' -or -not $name -or
+                $name -match '^(DWM-|UMFD-)' -or $name.EndsWith('$')) { continue }
+            $time = [datetimeoffset]::MinValue
+            if (-not [datetimeoffset]::TryParse([string]$document.Event.System.TimeCreated.SystemTime,
+                [Globalization.CultureInfo]::InvariantCulture,
+                [Globalization.DateTimeStyles]::AssumeUniversal, [ref]$time)) { continue }
+            $identity = if ($domain -and $domain -ne '-') { "$domain\$name" } else { $name }
+            $identity = ($identity -replace '[|;\r\n]+', ' ').Trim()
+            return [pscustomobject]@{ Status = 'Observed'; User = $identity; Utc = $time.ToUniversalTime().ToString('o') }
+        }
+        return [pscustomobject]@{ Status = 'NotFoundInScan'; User = ''; Utc = '' }
+    }
+    catch {
+        $status = if ($_.FullyQualifiedErrorId -match 'NoMatchingEventsFound') { 'NotFoundInScan' } else { 'Error' }
+        return [pscustomobject]@{ Status = $status; User = ''; Utc = '' }
+    }
+}
+
+$lastConsoleLogon = Get-LastConsoleLogon
+$outputParts += "LastConsoleLogonStatus:$($lastConsoleLogon.Status)"
+$outputParts += "LastConsoleLogonUser:$($lastConsoleLogon.User)"
+$outputParts += "LastConsoleLogonUtc:$($lastConsoleLogon.Utc)"
+$outputParts += 'DeviceSystemPayloadEnd:1.5'
+
+$payload = $outputParts -join '|'
+if ($payload.Length -gt 2048) {
+    Write-Output 'DeviceSystemOutputError:TooLong'
+    exit 0
+}
+Write-Output $payload
 exit 0
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCsAFO9Xw86shBW
-# MKrnCWhl8WvdE0wmfw1xj7n88ee8W6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDoIcRgrGU7Psav
+# loUncG1Md+OxOeNEZBqLgk/kuJy+oqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -278,31 +323,31 @@ exit 0
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIDeVIPgxj1827+7C8ncHaNu/O+8mr6Oxt30C135NJihuMA0GCSqG
-# SIb3DQEBAQUABIIBgEweJU2CwgsGMkwjrCzv0NDfyDA4+D3RiPX7YQTlIZo5pmZE
-# J5EV90Br5tDFOW2BPNtw/D+OTSUb0qZlGE6miWvnffXwyR/NKAFsYFrEKhRT3e3t
-# 7vwkyqhxOpEzX9pjcu4hpOtpY+MROt9K4BGX6edZmdA4LjqjEJwPTW8H3UrIWY/J
-# /icCxckASza3SxCF/sOygL4A8f4b9H4s0yqzg31IgjWC9T+aeqLxtj5TafK2w+3l
-# YeoSsOmiSA9tdIcBZC/alb6pool8YC2Phxi5/NXbp4ELt7+z3KYi8ZLCAUGFhZG/
-# Umdmg1yjIY+7uV2R4Luq3RwEKtyUgcSq4Fy5X6SmqKXvMM/ohrlD7nqg/7Km6btE
-# RTt1rAfMpw/jqKHruINvQYqf7d5j95J7V9QH3ELRUOabn+AwJBmjMs5wa/GUPZLs
-# 0ZT8/a7w3UCAmWNBSLupjM/6wOblbjWqXe7Mesii7b16q6W72+pO4q91yPBF2ofB
-# nPwdcgLrKXv3E3HyVqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIIOygGMle+cIxDFUuZUUuBMMqGBHerikeG5z5BXiKOtsMA0GCSqG
+# SIb3DQEBAQUABIIBgE4Hf5DVi+nEJ4YhzuTB/amjwSz29K/AKEfi+xUP1aqzkHbX
+# mM2DWojxWK3cM86aT+elGVH1+43ZAjGxQtpzuJBG4FA6uZjcKPwB9JsOLh+IgTLF
+# QblTLs2I/b7IRTQj4UE/5ORM/nDnk3epIz56qNoet6oxthkngljUBa4RarZiyW4t
+# Rw77pUwUuPsh1Q3d43luVDoewxC9Uqn0nDN3aJH3xGdnNNwtkTjL0a1c3m2SxsRb
+# 1ovZ5IQczbTXgka1CHiM50jS1kuAW6RGbNPa3lC5cue6hYF/BMSfL0JtBLF4Uqo5
+# VeKuHvx656tSlSVWY904VKaDVG7Tz6RrTk2u94QE31xPnCwwnaOrMeC9gICTN3Y5
+# pAn/5bR82c9KTlz6nwUn46m7ybE5mhJqz5q0mOLE6zDo/R8VhQfpCoL69wGxl7MI
+# HiWQ+WCnRUi260/eTuAWx2jSj+8//TfVtcz/imfldnnbwnwbonub6a8YbXU3NPfe
+# eA14cW9qHC1h2yGpiKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTAyMjA1
-# MjhaMC8GCSqGSIb3DQEJBDEiBCB5cu/sQIa/jz2XQ4/cVrw2ziGGujxKjf5V3Gmi
-# D44noDANBgkqhkiG9w0BAQEFAASCAgAaYhXFihikGrsIPXtt6Y5j+f80zg0s+VI2
-# 7k7L52C/oig5KEV6M7YkEz4eh94w5hfmVYVGfRJvWcc5Sz8Cu0lwObRrnmCJDGYb
-# iIv9Xe7ODOlImA7BOW0RuyH9Ygesq8cz4Qu1vdbyn9vNvUJlhMTacOBW++j6aaVe
-# IK5ejYe5V4A8QMjcBr/VKwLbv+LxwIGCnpuzjX8aik8crTmC3e2wDrb8zA7rkZak
-# 7guaGMVC98VNyWL5ETY886RnxUrQxmA2jA8fGbXgqKQfhdX4i8HDm4wUmaN3yBHM
-# FxnXT5eNP7ysFcsqhGfU/ly9XfSl2OPeeytQDE5YonhWfYOyO7FvZ140NCs01hiV
-# 6cGB+w1IAymrpV9VVoxkrw5xDDLBC5nHA0db57JelWQ0/gFoBHfbeZ0IxcwJ2JLd
-# BQQ6w2UOD6vYDiz2L8Seuy+EHf4QcR4eG8bDzw5x7y41TZGT7HsI9dbGWaU1ufNX
-# SGvh+1IWqe1bXKGUO03vW4m1Qg56jjXEulYit1utxloYVnznZwVUVtDpHcW4Ln5q
-# FkB+Tel4nNTVobYEIfzcoHnFlvHTILbjPJREHmpue2O1y1jlXZz1GwJIorixLsIL
-# 3UgfrcYIY2wi19rt0NKPbwilki6QFGuF5oFtBE5r+HynEucPEMx61fQlVqPTGOY3
-# DI76yc1tmA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTMxMjU1
+# MjlaMC8GCSqGSIb3DQEJBDEiBCDLe6JaOsO5zDlGJKK+SuLSiXSSOOqO2Uan6gxt
+# JvTHiTANBgkqhkiG9w0BAQEFAASCAgAqsgBWPFm8eOOo87hulsKDXODXVX6ds4Dv
+# lV0l0+ElRsAbzvoWf5Z6bIROtnL95eWuiDwi9EfwtL3bGOLaNZM4BGKIsNuUj8cS
+# x6jl2rVCo0GHuD91XtqcDTv+Y5icF2205zHnPDCI32EiKYkIpsSqsPPRbbsyixz4
+# RNBVEnTfrRRB6E+UKFGDA9Dy+FKCvwt8FspAaSqbfzzttXRaYFPBZnaVRHdz50In
+# 7GqstQDpm20Gi9pOHRY51Ilmb2BTcJgNiKnuuXS1i547yj0FjdRTZ6n5pCCAj3JW
+# sQIbyaqdN+yzYBkR5zjtFQd9qucBg7OTKaaZNTq7CBqu46vzqTnsYow4LdazZS/s
+# GeJD5vgtyxMl7Kqm21clh2Bfh515BThl0w8fyCQQTfNkVor16tdUzv5v8MPfMpgw
+# 9aRqVeONRejg2iqm0s19Bm7caq5gIKyqKytMdq044Gbs/fa6ghjhHJQhMgMUOyIH
+# xk5sdIzMPfwbCM2fg4juuRI+5+Y4SYGCqFyGlPhN0tZam/+OaAgHnhxpAZWdzCwi
+# vha3BSoKcv+HcvJ5r0crG7AMWrIAYst9BfVESSAKSmg3sACaYCH9wE3aqwM2QgMl
+# oSN6/0cdl/c94LfUudpZrEQzJYxsBWuwWnXOFNsRkxPC2jj+D7bNbBCnBbxM+XVb
+# 8vLVexEoAw==
 # SIG # End signature block

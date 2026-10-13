@@ -5,8 +5,8 @@
 .DESCRIPTION
     Connects to Microsoft Graph Beta and retrieves:
     - Hardware security fields from hardwareInformation (TPM, encryption, DeviceGuard)
-    - SecureBoot, BIOS, firmware, and Windows Security Center antivirus registration from a deployed Platform Script
-      via deviceManagementScripts/deviceRunStates
+    - Recurring local observations from a detection-only Intune Remediations package
+      via deviceHealthScripts/deviceRunStates, or legacy Platform Script snapshots until configured
 
     It:
     - Retrieves all managed devices with hardwareInformation in bulk
@@ -27,8 +27,11 @@
     Uses interactive authentication instead of app-only certificate authentication.
 
 .PARAMETER PlatformScriptId
-    The GUID of the Intune Platform Script (SmartM365-Detect-DeviceSystemInfo) deployed to devices.
-    Required to retrieve SecureBoot/BIOS/FirmwareType/LastBootUpTime/ThirdPartyAV/WindowsUpdateRebootRequired/BitLockerOS results from deviceRunStates.
+    Legacy Platform Script GUID used only until a recurring DeviceHealthScriptId is configured.
+
+.PARAMETER DeviceHealthScriptId
+    Intune Remediations detection-only package GUID. When configured, its recurring
+    deviceRunStates are the sole source of locally observed device system data.
 
 .PARAMETER RunStatePageSize
     Number of deviceRunStates requested per Graph page. Default: 500. Allowed range: 1-1000.
@@ -40,14 +43,14 @@
 .PARAMETER ManagedDevicePagePauseMilliseconds
     Delay between managed-device Graph pages in milliseconds. Default: 500.
 .VERSION
-2.13
+    2.14
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication.
     Minimum Graph application permissions: DeviceManagementManagedDevices.Read.All; DeviceManagementConfiguration.Read.All; DeviceManagementScripts.Read.All.
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
-    Version : 2.13
+    Version : 2.14
     Author: https://github.com/khda79/workplacecloudhub.com
     Requires: SmartM365.Core module (logging, init, CSV, cleanup, cloud connectivity)
     Scopes: DeviceManagementManagedDevices.Read.All, DeviceManagementConfiguration.Read.All
@@ -62,6 +65,8 @@ param(
 
     [Parameter(Mandatory = $false)]
     [string]$PlatformScriptId = "0d121c5c-65cc-480f-b07a-9ae79d2d928d",
+
+    [string]$DeviceHealthScriptId = '',
 
     [ValidateRange(1, 1000)]
     [int]$RunStatePageSize = 500,
@@ -250,6 +255,13 @@ function Get-ScriptLocalConfigValue {
 }
 
 $ScriptLocalConfig = Get-ScriptLocalConfig
+$DeviceHealthScriptId = if ($PSBoundParameters.ContainsKey('DeviceHealthScriptId')) { $DeviceHealthScriptId } else {
+    [string](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'DeviceHealthScriptId' -DefaultValue '')
+}
+if ($DeviceHealthScriptId -and $DeviceHealthScriptId -notmatch '^[0-9a-fA-F]{8}(-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}$') {
+    throw 'DeviceHealthScriptId must be an Intune script GUID.'
+}
+$UseRecurringDeviceSystem = -not [string]::IsNullOrWhiteSpace($DeviceHealthScriptId)
 
 
 
@@ -636,11 +648,44 @@ function Get-PlatformScriptRunStates {
     return $map
 }
 
+function Get-DeviceHealthScriptRunStates {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$ScriptId)
+
+    WriteLog -Message ("Retrieving recurring Device System deviceRunStates. RequestedPageSize={0}; PagePauseMs={1}" -f $RunStatePageSize, $RunStatePagePauseMilliseconds) "INFO"
+    $map = @{}
+    $visited = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+    $uri = "/beta/deviceManagement/deviceHealthScripts/$ScriptId/deviceRunStates?`$expand=managedDevice(`$select=id)&`$select=detectionState,preRemediationDetectionScriptOutput,lastStateUpdateDateTime&`$top=$RunStatePageSize"
+    $pageCount = 0
+    while ($uri) {
+        if (-not $visited.Add([string]$uri)) { throw 'Device Health Script pagination returned a repeated @odata.nextLink; collection is incomplete.' }
+        $response = Invoke-GraphSafe -Uri $uri -MaxRetries $MaxRetries -BaseDelaySeconds $BaseDelaySeconds
+        $pageCount++
+        if (-not (Test-GraphResponseProperty -Response $response -Name 'value')) { throw "Device Health Script page $pageCount returned an invalid Graph collection response without a value property." }
+        foreach ($runState in @(Get-GraphResponsePropertyValue -Response $response -Name 'value')) {
+            if ($null -eq $runState) { continue }
+            $deviceId = [string]$runState.managedDevice.id
+            if ([string]::IsNullOrWhiteSpace($deviceId)) { throw 'Device Health Script run state lacks a managed device ID; collection is incomplete.' }
+            if ($map.ContainsKey($deviceId)) { throw 'Device Health Script returned duplicate managed device run states; collection is ambiguous.' }
+            $map[$deviceId] = [pscustomobject]@{
+                ResultMessage = $runState.preRemediationDetectionScriptOutput
+                LastStateUpdateDateTime = $runState.lastStateUpdateDateTime
+                DetectionState = [string]$runState.detectionState
+            }
+        }
+        $uri = Get-GraphResponsePropertyValue -Response $response -Name '@odata.nextLink'
+        if ($uri -and $RunStatePagePauseMilliseconds -gt 0) { Start-Sleep -Milliseconds $RunStatePagePauseMilliseconds }
+    }
+    if ($map.Count -eq 0) { throw 'Device Health Script returned no device run states; the existing CSV was not replaced.' }
+    WriteLog -Message ("Recurring Device System run states retrieved: {0} devices in {1} page(s)." -f $map.Count, $pageCount) "INFO"
+    return $map
+}
+
 function Parse-PlatformScriptStdout {
     <#
     .SYNOPSIS
-        Parses the pipe-delimited stdout from the SmartM365-Detect-DeviceSystemInfo Platform Script.
-        Format: SecureBoot:<value>|BIOSVersion:<value>|BIOSDate:<value>|FirmwareType:<value>|LastBootUpTime:<value>|ThirdPartyAVStatus:<value>|ThirdPartyAVProducts:<value>|WindowsUpdateRebootRequired:<value>|BitLockerOSProtectionStatus:<value>|BitLockerOSConversionStatus:<value>
+        Parses the pipe-delimited stdout from the SmartM365-Detect-DeviceSystemInfo device probe.
+        The recurring source also has local console logon fields and a payload end marker.
         Returns a hashtable with each key/value pair.
     #>
     [CmdletBinding()]
@@ -661,6 +706,9 @@ function Parse-PlatformScriptStdout {
         WindowsUpdateRebootRequired = 'NotCollected'
         BitLockerOSProtectionStatus = 'NotCollected'
         BitLockerOSConversionStatus = 'NotCollected'
+        LastConsoleLogonStatus = 'NotCollected'
+        LastConsoleLogonUser = $null
+        LastConsoleLogonUtc = $null
     }
 
     if ([string]::IsNullOrWhiteSpace($ResultMessage)) {
@@ -681,15 +729,50 @@ function Parse-PlatformScriptStdout {
     return $result
 }
 
+function Test-DeviceSystemRecurringPayload {
+    [CmdletBinding()]
+    param([AllowNull()][string]$ResultMessage)
+    if ([string]::IsNullOrWhiteSpace($ResultMessage)) { return $false }
+    $text = $ResultMessage.Trim()
+    if (-not $text.EndsWith('|DeviceSystemPayloadEnd:1.5', [StringComparison]::Ordinal)) { return $false }
+    foreach ($field in @('SecureBoot','BIOSVersion','BIOSDate','FirmwareType','LastBootUpTime',
+        'ThirdPartyAVStatus','ThirdPartyAVProducts','WindowsUpdateRebootRequired',
+        'BitLockerOSProtectionStatus','BitLockerOSConversionStatus','LastConsoleLogonStatus',
+        'LastConsoleLogonUser','LastConsoleLogonUtc')) {
+        if ($text -notmatch "(?:^|\|)$($field):") { return $false }
+    }
+    return $true
+}
+
+function Get-DeviceSystemLocalFreshness {
+    [CmdletBinding()]
+    param([AllowNull()][string]$ObservationUtc, [bool]$IsRecurring, [bool]$HasOutput,
+          [AllowNull()][string]$DetectionState, [bool]$PayloadValid = $true, [int]$MaxAgeHours = 192,
+          [datetimeoffset]$AsOfUtc = [datetimeoffset]::UtcNow)
+    if (-not $IsRecurring) { return 'LegacySnapshot' }
+    if (-not $HasOutput -and -not $DetectionState) { return 'NotCollected' }
+    if ($DetectionState -ine 'success') { return 'Error' }
+    if (-not $HasOutput) { return 'NotCollected' }
+    if (-not $PayloadValid) { return 'InvalidOutput' }
+    if (-not $ObservationUtc) { return 'InvalidTimestamp' }
+    $observed = [datetimeoffset]::MinValue
+    if (-not [datetimeoffset]::TryParse($ObservationUtc, [Globalization.CultureInfo]::InvariantCulture,
+        [Globalization.DateTimeStyles]::None, [ref]$observed)) { return 'InvalidTimestamp' }
+    $age = ($AsOfUtc - $observed).TotalHours
+    if ($age -lt (-5.0 / 60.0)) { return 'FutureObservation' }
+    if ($age -gt $MaxAgeHours) { return 'Stale' }
+    return 'Fresh'
+}
+
 # ==========================================================
 # Initialization via SmartM365.Core
 # ==========================================================
-$ScriptVersion = "2.13"
+$ScriptVersion = "2.14"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'DeviceSystemCsvLogFolderPath' -DefaultValue $OutputPath
 try {
     $InitializeOutputPath = InitializeScriptEnvironment -OutputPathInit $OutputPath -LogFileName $(($MyInvocation.MyCommand.Name) -replace '\.ps1$','')
-    Start-SmartM365SourceReceipt -ScriptPath $PSCommandPath -SourceRootPath (Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue '') -ScopeParameters @{PlatformScriptId=$PlatformScriptId}
+    Start-SmartM365SourceReceipt -ScriptPath $PSCommandPath -SourceRootPath (Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue '') -ScopeParameters @{PlatformScriptId=$PlatformScriptId;DeviceHealthScriptId=$DeviceHealthScriptId}
     Start-Transcript -Path $global:logTranscriptFile -Append
 
     WriteLog -Message "Script Environment initialized at $InitializeOutputPath"
@@ -761,9 +844,13 @@ try {
     }
 
     # ======================================================
-    Invoke-SmartM365Preflight -ScriptName $TaskName -OutputPaths @($OutputPath) -RequiredGraphApplicationPermissions @('DeviceManagementManagedDevices.Read.All','DeviceManagementConfiguration.Read.All','DeviceManagementScripts.Read.All') -GraphProbeUris @(
-        'https://graph.microsoft.com/beta/deviceManagement/managedDevices?$top=1',
+    $runStateProbe = if ($UseRecurringDeviceSystem) {
+        "https://graph.microsoft.com/beta/deviceManagement/deviceHealthScripts/$DeviceHealthScriptId/deviceRunStates?`$top=1"
+    } else {
         'https://graph.microsoft.com/beta/deviceManagement/deviceManagementScripts?$top=1'
+    }
+    Invoke-SmartM365Preflight -ScriptName $TaskName -OutputPaths @($OutputPath) -RequiredGraphApplicationPermissions @('DeviceManagementManagedDevices.Read.All','DeviceManagementConfiguration.Read.All','DeviceManagementScripts.Read.All') -GraphProbeUris @(
+        'https://graph.microsoft.com/beta/deviceManagement/managedDevices?$top=1', $runStateProbe
     ) | Out-Null
 
     # PHASE 1: BULK RETRIEVAL OF MANAGED DEVICES
@@ -804,17 +891,20 @@ try {
     }
 
     # ======================================================
-    # PHASE 2: RETRIEVE SECUREBOOT FROM PLATFORM SCRIPT
+    # PHASE 2: RETRIEVE LOCAL DEVICE OBSERVATIONS
     # ======================================================
     $secureBootMap = @{}
 
-    if (-not [string]::IsNullOrWhiteSpace($PlatformScriptId)) {
-        WriteLog -Message "Phase 2: Retrieving device system information from Platform Script deviceRunStates..." "INFO"
+    if ($UseRecurringDeviceSystem) {
+        WriteLog -Message 'Phase 2: Retrieving recurring Device System detection results...' 'INFO'
+        $secureBootMap = Get-DeviceHealthScriptRunStates -ScriptId $DeviceHealthScriptId
+    }
+    elseif (-not [string]::IsNullOrWhiteSpace($PlatformScriptId)) {
+        WriteLog -Message "Phase 2: Retrieving legacy Platform Script deviceRunStates..." "WARNING"
         $secureBootMap = Get-PlatformScriptRunStates -ScriptId $PlatformScriptId
     }
     else {
-        WriteLog -Message "Phase 2: Skipped (no -PlatformScriptId provided). SecureBoot column will be empty." "WARNING"
-        WriteLog -Message "To populate SecureBoot/BIOS/FirmwareType/LastBootUpTime/ThirdPartyAV/WindowsUpdateRebootRequired/BitLockerOS, deploy the SmartM365-Detect-DeviceSystemInfo Platform Script and pass its GUID via -PlatformScriptId." "WARNING"
+        WriteLog -Message "Phase 2: Skipped (no DeviceHealthScriptId or PlatformScriptId configured). Local observation columns will be empty." "WARNING"
     }
 
     # ======================================================
@@ -827,13 +917,28 @@ try {
     foreach ($device in $allDevices) {
         $hw = $device.hardwareInformation
 
-        # Platform Script data (system information and antivirus registration)
-        $psData = @{ SecureBoot = $null; BIOSVersion = $null; BIOSDate = $null; FirmwareType = $null; LastBootUpTime = $null; ThirdPartyAVStatus = 'NotCollected'; ThirdPartyAVProducts = $null; WindowsUpdateRebootRequired = 'NotCollected'; BitLockerOSProtectionStatus = 'NotCollected'; BitLockerOSConversionStatus = 'NotCollected' }
+        # Locally observed system information, antivirus registration, and console logon.
+        $emptyPsData = @{ SecureBoot = $null; BIOSVersion = $null; BIOSDate = $null; FirmwareType = $null; LastBootUpTime = $null; ThirdPartyAVStatus = 'NotCollected'; ThirdPartyAVProducts = $null; WindowsUpdateRebootRequired = 'NotCollected'; BitLockerOSProtectionStatus = 'NotCollected'; BitLockerOSConversionStatus = 'NotCollected'; LastConsoleLogonStatus = 'NotCollected'; LastConsoleLogonUser = $null; LastConsoleLogonUtc = $null }
+        $psData = $emptyPsData
         $psLastUpdate = $null
+        $detectionState = $null
+        $hasLocalOutput = $false
+        $payloadValid = $false
         if ($secureBootMap.ContainsKey($device.id)) {
             $runState = $secureBootMap[$device.id]
-            $psData = Parse-PlatformScriptStdout -ResultMessage $runState.ResultMessage
+            $detectionState = [string]$runState.DetectionState
+            $hasLocalOutput = -not [string]::IsNullOrWhiteSpace([string]$runState.ResultMessage)
+            $payloadValid = if ($UseRecurringDeviceSystem) { Test-DeviceSystemRecurringPayload -ResultMessage $runState.ResultMessage } else { $hasLocalOutput }
+            if ((-not $UseRecurringDeviceSystem -or $detectionState -ieq 'success') -and $payloadValid) {
+                $psData = Parse-PlatformScriptStdout -ResultMessage $runState.ResultMessage
+            }
             $psLastUpdate = $runState.LastStateUpdateDateTime
+        }
+
+        $localObservationUtc = ConvertTo-DeviceSystemGraphUtcTimestamp -Value $psLastUpdate -FieldName 'LocalObservationUtc'
+        $localFreshness = Get-DeviceSystemLocalFreshness -ObservationUtc $localObservationUtc -IsRecurring $UseRecurringDeviceSystem -HasOutput $hasLocalOutput -DetectionState $detectionState -PayloadValid $payloadValid
+        if ($UseRecurringDeviceSystem -and $localFreshness -ne 'Fresh') {
+            $psData = $emptyPsData
         }
 
         $record = [PSCustomObject]@{
@@ -845,7 +950,10 @@ try {
             BIOSVersion                       = $psData.BIOSVersion
             BIOSDate                          = $psData.BIOSDate
             FirmwareType                      = $psData.FirmwareType
-            PlatformScriptLastUpdate          = ConvertTo-DeviceSystemGraphUtcTimestamp -Value $psLastUpdate -FieldName 'PlatformScriptLastUpdate'
+            PlatformScriptLastUpdate          = $localObservationUtc # Compatibility alias for existing prepared evidence.
+            LocalObservationUtc               = $localObservationUtc
+            LocalDataSource                   = if ($UseRecurringDeviceSystem) { 'IntuneRemediation' } else { 'LegacyPlatformScript' }
+            LocalDataFreshness                = $localFreshness
             LastRebootDate                    = $psData.LastBootUpTime
             'Last Reboot Date'                = $psData.LastBootUpTime
             LastBootUpTime                    = $psData.LastBootUpTime
@@ -864,6 +972,9 @@ try {
             WindowsUpdateRebootRequired       = $psData.WindowsUpdateRebootRequired
             BitLockerOSProtectionStatus       = $psData.BitLockerOSProtectionStatus
             BitLockerOSConversionStatus       = $psData.BitLockerOSConversionStatus
+            LastConsoleLogonStatus            = $psData.LastConsoleLogonStatus
+            LastConsoleLogonUser              = $psData.LastConsoleLogonUser
+            LastConsoleLogonUtc               = ConvertTo-DeviceSystemGraphUtcTimestamp -Value $psData.LastConsoleLogonUtc -FieldName 'LastConsoleLogonUtc'
         }
 
         $results.Add($record)
@@ -899,14 +1010,19 @@ try {
     WriteLog -Message ("Firmware Legacy BIOS     : {0}" -f $fwLegacy) "INFO"
 
     # ======================================================
-    # FILTER: Keep only devices with Platform Script data
+    # Recurring mode retains all managed devices and marks unavailable local evidence.
     # ======================================================
-    $filteredResults = @($results | Where-Object { -not [string]::IsNullOrWhiteSpace($_.SecureBootStatus) })
-    WriteLog -Message ("Filtered results: {0} devices with Platform Script data (excluded {1} without)" -f $filteredResults.Count, ($results.Count - $filteredResults.Count)) "INFO"
+    $filteredResults = if ($UseRecurringDeviceSystem) { @($results) } else {
+        @($results | Where-Object { -not [string]::IsNullOrWhiteSpace($_.SecureBootStatus) })
+    }
+    WriteLog -Message ("Exportable results: {0} devices; recurring={1}; local Fresh={2}; Stale={3}; NotCollected={4}; Error={5}" -f $filteredResults.Count, $UseRecurringDeviceSystem,
+        @($results | Where-Object LocalDataFreshness -eq 'Fresh').Count,
+        @($results | Where-Object LocalDataFreshness -eq 'Stale').Count,
+        @($results | Where-Object LocalDataFreshness -eq 'NotCollected').Count,
+        @($results | Where-Object LocalDataFreshness -eq 'Error').Count) 'INFO'
 
     if ($filteredResults.Count -eq 0) {
-        WriteLog -Message "No devices with Platform Script data to export. CSV will not be generated." "WARNING"
-        WriteLog -Message "Ensure the Platform Script has been executed on target devices (allow 24-48h after deployment)." "WARNING"
+        WriteLog -Message "No devices with local Device System data to export. CSV will not be generated." "WARNING"
         return
     }
 
@@ -965,8 +1081,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBf5w1ayjXr7q3K
-# GmhmnzwRGmSfmGyko6OiIU9IRk46OqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCK9NYBxrBtDN+F
+# u0ScLS/hEY1zSlLWXy5yin7Q+RNoOKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1099,31 +1215,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIKm3Pubf0yW8L9k/YJnQFFtQJIUuo7OyKx5vd5BI7aOPMA0GCSqG
-# SIb3DQEBAQUABIIBgBh5WXORg9o43Bp/MH/wURPlU3GNVWXtmlcHMl9bDMTiJZLl
-# xWE5iezGXsO5LPmqIoM7d/MlD7TyyHYfiO1GFprF4UkJdRsO3A8a2e89Zq/StyHx
-# qARv3MSSHn+LOkD+IFglB6Nn6bVFp8yXvqbuZtTDfJX6Fn+CloKXf1OHb80xE/Y5
-# FevqlUmnwp2lYe3t2kcB1OQiasLwYRA/jBu6CESWPl4WBNeSRVZe5K8GhsOh3Njp
-# vQ0bo0x+BPr10kMMSTiq4Dpv+2aY1wy3F2GsxM6oefrKTEJizbEwumSHn9eeW1hY
-# NQvCBDjgnqKnv9OsbzkuBjcExDoyvFGGGjnj5KgzE01tzZMDW0GzKTQOm2d8Ia6e
-# EntIs+eqQmQZ1dD7LLotGpSv3IVgqpziRKlD2VZsmHWtl/7sKUYEMkZTT6MHHAFT
-# pOS5Hp8UcpOMIrKTtNcYAM1IdzHVlujR04smr3Y9QIw0HlcKyaxES5n09prIlY18
-# haU0vtf5qGMvFFEfsqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIPQj3xMYaT7lo+UIA+BZuhGE+agsM9S3W9+02SAY5p2KMA0GCSqG
+# SIb3DQEBAQUABIIBgGPw8kQQGTcdQYHCUHENGYm4UWwcFF6ygHC5BbGW7DfLDDJt
+# W9rVxXx4B1Ghw7pdmVSgPe1TQR3qIEnLTcM6TPJGAN3miVfTE30Qh2fk05b02nlE
+# cuw096t8P48ZYlNaSNxpoTwouNnSLIYS0ZTLzvWcpajJgPkBVc1mAE2L2y/X2BSr
+# S68DhtEhg6p61U4w31sMiXnQqoTBZRN5ji1Kfj/sUStn403oIfB1yljNuD5BMrF6
+# 3FwkRd3kMeb29ADR5nPCs7jaEA1k4EzyjpaxTWcrkIk8bGHrJ7k3anuK7d6jLMsy
+# GHZCnoGdaYu8R+SdPpy3ir1CCjooHvvnEa5ref/x2tvD6qja2/6SFcWwGMK5UNIx
+# YFMjfdKn4onUjoVvus6G2lDb3/kos6OBj9K36mHZmo2X0fCk1NX7/CbeZaisfsDI
+# Zi9mNVz4U55lzfwL/0j1qobWJV8tQKqLhpQBZ82Ni5V9gpe5f7m4x65nDxczMs7t
+# w8PvnEyI3uqma7ERBaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTMwOTM3
-# MDlaMC8GCSqGSIb3DQEJBDEiBCBx7NVhXhMg1IlHJT++cJkN7mB9WNd/C5EigM/B
-# sc/bsDANBgkqhkiG9w0BAQEFAASCAgAOefVNgAsteaam3Y+D8rCw6CzlrKXqeLhM
-# OO5mMy7V6u1zgRMTQUwyqOOgxZCeq+2TvMVwe2ZBnyyhxrwLrVzKFo2j9k4+6Ysl
-# VnQQgNy6bJXuqmWIUb4suGVQUQzxDjRTj1HafII0shyhXvbnI6k10LFfRzWPG8NI
-# RMumVbFmQspLG6kmC3xt0vWSGDdMYKfw9c5naWjfKmQY0W0z3LucbcLFb0TBfNx2
-# 4dB9/RtvAAT5dyI3qOauv2Y1b+9/nCumR3ECnW3gxUADKKMVqtfcOp1tDr8phx93
-# crYCyeWFMlp1OcfFIeNZtvTb1NHKSM5U9LuqkSn/ER+t9yURXzGYF8wmtFXHUvOH
-# WevnLH/9ACN8LkqJDbxFB6RrSxclJfUqbQU4BaTz1iS22OvWvC5stPrgnI/5PKpC
-# i8TE4gX3SVl4LZJ33rRyQ7lClk42RK12e+GiWzzSZoDfXzDG2HEfL7C7EN6TNDDQ
-# IhJeJtc4fkJQdYC43QdyNtcBjUvNvSurE9rPwOHqEIU1s3h45joa3v7gyDgh7Q6g
-# NEHFQBg6AsWmplTXB4AOWFQfvgW/T3GW86sCu7GYta6OBPAZYBj/RbYYJOB0R4eh
-# vmfvmYoN+ZatDBbQSRmvSK89MMcEPhG9MB2bzdVABAYvnavJG4Z63z8aUwakSZG3
-# yoF+dvgqkQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTMxMjUw
+# NDRaMC8GCSqGSIb3DQEJBDEiBCB1UoVG2BeURPuiMUPlnE/RguG9S4DPOc/HUZE4
+# T+0FKTANBgkqhkiG9w0BAQEFAASCAgAl+ivDPl6K7/1wRCLuD43jfwapxWYeB1K3
+# KNWc8y83SPlP43uz5nsvakqAGuay8+oysxk9bGoh7fQ+vMZx9+REiMQQU4KOrRNA
+# JShrAefXQzaLRJ37SyBpM8HBQJW5xrK3FcCu1sWCBWcE38ASe1e2kjineEVIVjMJ
+# xqzx+yPx6jzgy+UgB8gZZq5LcRZM7qid4Nvk3fNDBareQ7FOY28Um3JJTNCEcaqj
+# 7dmb+wB0hf3pxKoWcxtxeU43VQlB8p/0SZFl1heFbihkITqagrVZueVhZLO88e61
+# FWLJMyo6bU1V5PpqHiA/xTxbI7k49T9t8BfaKKyg/LlgQs+EIdxs4ANjbsG/SfKu
+# C2GlQ/+xmwK4qBGaF88uF8zg8QPf7YK82MW9yP32BhtHrKunhRuTWlvHjaPOexHx
+# yAeiXBJOYzHqY5dsl0h8oiUPLX6oGsoWmvuv47CEdV/LrKV4k0FegZJZJaOGdFL1
+# 8VWcP4r3XRS1QHWvWNRHwbF7N6XP+0nzP0g3CShZ4nH75749sWsU4quHSvrlL372
+# R51dFS0uRk1+iVPv2C78nqsDzHWx4OfogC7yqqLAiXJRfAPbIC7Ag81fvAQV44j5
+# FUOXlArF1Y0RZHDG2CoxDcyIaNFem9I5iw23QAprJDKlnATpkEZGhnlKOthJDUyU
+# 0o3yZejmIQ==
 # SIG # End signature block
