@@ -2,6 +2,789 @@
   "schemaVersion": 1,
   "tables": [
     {
+      "table": "Intune Configuration Policy Evidence",
+      "file": "IntuneConfigurationPolicyEvidence.csv",
+      "source": "Intune_ConfigurationPolicies.csv",
+      "stagingIncludesTenantKey": true,
+      "uniqueKey": [
+        "EvidenceKey"
+      ],
+      "allowEmpty": true,
+      "columns": [
+        {
+          "name": "TenantKey",
+          "type": "string"
+        },
+        {
+          "name": "EvidenceKey",
+          "type": "string"
+        },
+        {
+          "name": "ReceiptRunId",
+          "type": "string"
+        },
+        {
+          "name": "BusinessRunId",
+          "type": "string"
+        },
+        {
+          "name": "SourceFile",
+          "type": "string"
+        },
+        {
+          "name": "SourceSHA256",
+          "type": "string"
+        },
+        {
+          "name": "SourceRecord",
+          "type": "int64"
+        },
+        {
+          "name": "CollectionUTC",
+          "type": "dateTime"
+        },
+        {
+          "name": "PolicyId",
+          "type": "string"
+        },
+        {
+          "name": "PolicyFamily",
+          "type": "string"
+        },
+        {
+          "name": "DisplayName",
+          "type": "string"
+        },
+        {
+          "name": "PolicyType",
+          "type": "string"
+        },
+        {
+          "name": "Platforms",
+          "type": "string"
+        },
+        {
+          "name": "Technologies",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "table": "Intune Configuration Setting Evidence",
+      "file": "IntuneConfigurationSettingEvidence.csv",
+      "source": "Intune_ConfigurationSettings.csv",
+      "stagingIncludesTenantKey": true,
+      "uniqueKey": [
+        "EvidenceKey"
+      ],
+      "allowEmpty": true,
+      "columns": [
+        {
+          "name": "TenantKey",
+          "type": "string"
+        },
+        {
+          "name": "EvidenceKey",
+          "type": "string"
+        },
+        {
+          "name": "ReceiptRunId",
+          "type": "string"
+        },
+        {
+          "name": "BusinessRunId",
+          "type": "string"
+        },
+        {
+          "name": "SourceFile",
+          "type": "string"
+        },
+        {
+          "name": "SourceSHA256",
+          "type": "string"
+        },
+        {
+          "name": "SourceRecord",
+          "type": "int64"
+        },
+        {
+          "name": "CollectionUTC",
+          "type": "dateTime"
+        },
+        {
+          "name": "PolicyId",
+          "type": "string"
+        },
+        {
+          "name": "PolicyFamily",
+          "type": "string"
+        },
+        {
+          "name": "SettingId",
+          "type": "string"
+        },
+        {
+          "name": "SettingDefinitionId",
+          "type": "string"
+        },
+        {
+          "name": "SettingInstanceType",
+          "type": "string"
+        },
+        {
+          "name": "CatalogMatch",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "table": "Intune Configuration Assignment Evidence",
+      "file": "IntuneConfigurationAssignmentEvidence.csv",
+      "source": "Intune_ConfigurationAssignments.csv",
+      "stagingIncludesTenantKey": true,
+      "uniqueKey": [
+        "EvidenceKey"
+      ],
+      "allowEmpty": true,
+      "columns": [
+        {
+          "name": "TenantKey",
+          "type": "string"
+        },
+        {
+          "name": "EvidenceKey",
+          "type": "string"
+        },
+        {
+          "name": "ReceiptRunId",
+          "type": "string"
+        },
+        {
+          "name": "BusinessRunId",
+          "type": "string"
+        },
+        {
+          "name": "SourceFile",
+          "type": "string"
+        },
+        {
+          "name": "SourceSHA256",
+          "type": "string"
+        },
+        {
+          "name": "SourceRecord",
+          "type": "int64"
+        },
+        {
+          "name": "CollectionUTC",
+          "type": "dateTime"
+        },
+        {
+          "name": "PolicyId",
+          "type": "string"
+        },
+        {
+          "name": "PolicyFamily",
+          "type": "string"
+        },
+        {
+          "name": "AssignmentId",
+          "type": "string"
+        },
+        {
+          "name": "TargetType",
+          "type": "string"
+        },
+        {
+          "name": "GroupId",
+          "type": "string"
+        },
+        {
+          "name": "AssignmentFilterId",
+          "type": "string"
+        },
+        {
+          "name": "AssignmentFilterType",
+          "type": "string"
+        },
+        {
+          "name": "CatalogMatch",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "table": "Intune Configuration Device Evidence",
+      "file": "IntuneConfigurationDeviceEvidence.csv",
+      "source": "Intune_ConfigurationDeviceCurrentStates.csv",
+      "stagingIncludesTenantKey": true,
+      "uniqueKey": [
+        "EvidenceKey"
+      ],
+      "allowEmpty": true,
+      "columns": [
+        {
+          "name": "TenantKey",
+          "type": "string"
+        },
+        {
+          "name": "EvidenceKey",
+          "type": "string"
+        },
+        {
+          "name": "ReceiptRunId",
+          "type": "string"
+        },
+        {
+          "name": "BusinessRunId",
+          "type": "string"
+        },
+        {
+          "name": "SourceFile",
+          "type": "string"
+        },
+        {
+          "name": "SourceSHA256",
+          "type": "string"
+        },
+        {
+          "name": "SourceRecord",
+          "type": "int64"
+        },
+        {
+          "name": "CollectionUTC",
+          "type": "dateTime"
+        },
+        {
+          "name": "PolicyId",
+          "type": "string"
+        },
+        {
+          "name": "IntuneDeviceId",
+          "type": "string"
+        },
+        {
+          "name": "UPN",
+          "type": "string"
+        },
+        {
+          "name": "PolicyName",
+          "type": "string"
+        },
+        {
+          "name": "DeviceName",
+          "type": "string"
+        },
+        {
+          "name": "PolicyInCollectedCatalog",
+          "type": "string"
+        },
+        {
+          "name": "PolicyStatus",
+          "type": "string"
+        },
+        {
+          "name": "ReportedApplicationState",
+          "type": "string"
+        },
+        {
+          "name": "ReportStatus",
+          "type": "string"
+        },
+        {
+          "name": "LastModifiedTimeUtc",
+          "type": "string"
+        },
+        {
+          "name": "SourceStatusUTC",
+          "type": "dateTime"
+        },
+        {
+          "name": "SourceStatusTimeBasis",
+          "type": "string"
+        },
+        {
+          "name": "CatalogMatch",
+          "type": "string"
+        },
+        {
+          "name": "InventoryMatch",
+          "type": "string"
+        },
+        {
+          "name": "HealthQualification",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "table": "Intune Managed App Evidence",
+      "file": "IntuneManagedAppEvidence.csv",
+      "source": "Intune_ManagedAppInstallSummary.csv",
+      "stagingIncludesTenantKey": true,
+      "uniqueKey": [
+        "EvidenceKey"
+      ],
+      "allowEmpty": true,
+      "columns": [
+        {
+          "name": "TenantKey",
+          "type": "string"
+        },
+        {
+          "name": "EvidenceKey",
+          "type": "string"
+        },
+        {
+          "name": "ReceiptRunId",
+          "type": "string"
+        },
+        {
+          "name": "BusinessRunId",
+          "type": "string"
+        },
+        {
+          "name": "SourceFile",
+          "type": "string"
+        },
+        {
+          "name": "SourceSHA256",
+          "type": "string"
+        },
+        {
+          "name": "SourceRecord",
+          "type": "int64"
+        },
+        {
+          "name": "CollectionUTC",
+          "type": "dateTime"
+        },
+        {
+          "name": "ApplicationId",
+          "type": "string"
+        },
+        {
+          "name": "DisplayName",
+          "type": "string"
+        },
+        {
+          "name": "Publisher",
+          "type": "string"
+        },
+        {
+          "name": "AppType",
+          "type": "string"
+        },
+        {
+          "name": "DisplayVersion",
+          "type": "string"
+        },
+        {
+          "name": "InCollectedCatalog",
+          "type": "string"
+        },
+        {
+          "name": "StatusSource",
+          "type": "string"
+        },
+        {
+          "name": "ObservedRows",
+          "type": "int64"
+        },
+        {
+          "name": "ReportedInstalledRows",
+          "type": "int64"
+        },
+        {
+          "name": "ReportedFailureRows",
+          "type": "int64"
+        },
+        {
+          "name": "ReportedNotInstalledRows",
+          "type": "int64"
+        },
+        {
+          "name": "PendingRows",
+          "type": "int64"
+        },
+        {
+          "name": "NotApplicableRows",
+          "type": "int64"
+        },
+        {
+          "name": "UnknownRows",
+          "type": "int64"
+        },
+        {
+          "name": "MeasurementState",
+          "type": "string"
+        },
+        {
+          "name": "HealthQualification",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "table": "Intune Managed App Assignment Evidence",
+      "file": "IntuneManagedAppAssignmentEvidence.csv",
+      "source": "Intune_ManagedAppAssignments.csv",
+      "stagingIncludesTenantKey": true,
+      "uniqueKey": [
+        "EvidenceKey"
+      ],
+      "allowEmpty": true,
+      "columns": [
+        {
+          "name": "TenantKey",
+          "type": "string"
+        },
+        {
+          "name": "EvidenceKey",
+          "type": "string"
+        },
+        {
+          "name": "ReceiptRunId",
+          "type": "string"
+        },
+        {
+          "name": "BusinessRunId",
+          "type": "string"
+        },
+        {
+          "name": "SourceFile",
+          "type": "string"
+        },
+        {
+          "name": "SourceSHA256",
+          "type": "string"
+        },
+        {
+          "name": "SourceRecord",
+          "type": "int64"
+        },
+        {
+          "name": "CollectionUTC",
+          "type": "dateTime"
+        },
+        {
+          "name": "ApplicationId",
+          "type": "string"
+        },
+        {
+          "name": "AssignmentId",
+          "type": "string"
+        },
+        {
+          "name": "Intent",
+          "type": "string"
+        },
+        {
+          "name": "TargetType",
+          "type": "string"
+        },
+        {
+          "name": "GroupId",
+          "type": "string"
+        },
+        {
+          "name": "AssignmentFilterId",
+          "type": "string"
+        },
+        {
+          "name": "AssignmentFilterType",
+          "type": "string"
+        },
+        {
+          "name": "CatalogMatch",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "table": "Intune Managed App Deployment Evidence",
+      "file": "IntuneManagedAppDeploymentEvidence.csv",
+      "source": "Intune_ManagedAppDeviceStates.csv",
+      "stagingIncludesTenantKey": true,
+      "uniqueKey": [
+        "EvidenceKey"
+      ],
+      "allowEmpty": true,
+      "columns": [
+        {
+          "name": "TenantKey",
+          "type": "string"
+        },
+        {
+          "name": "EvidenceKey",
+          "type": "string"
+        },
+        {
+          "name": "ReceiptRunId",
+          "type": "string"
+        },
+        {
+          "name": "BusinessRunId",
+          "type": "string"
+        },
+        {
+          "name": "SourceFile",
+          "type": "string"
+        },
+        {
+          "name": "SourceSHA256",
+          "type": "string"
+        },
+        {
+          "name": "SourceRecord",
+          "type": "int64"
+        },
+        {
+          "name": "CollectionUTC",
+          "type": "dateTime"
+        },
+        {
+          "name": "ApplicationId",
+          "type": "string"
+        },
+        {
+          "name": "DeviceId",
+          "type": "string"
+        },
+        {
+          "name": "UserPrincipalName",
+          "type": "string"
+        },
+        {
+          "name": "AppVersion",
+          "type": "string"
+        },
+        {
+          "name": "Platform",
+          "type": "string"
+        },
+        {
+          "name": "InstallState",
+          "type": "string"
+        },
+        {
+          "name": "ReportedDeploymentState",
+          "type": "string"
+        },
+        {
+          "name": "InstallStateDetail",
+          "type": "string"
+        },
+        {
+          "name": "ErrorCode",
+          "type": "string"
+        },
+        {
+          "name": "LastModifiedDateTime",
+          "type": "string"
+        },
+        {
+          "name": "SourceStatusUTC",
+          "type": "dateTime"
+        },
+        {
+          "name": "SourceStatusTimeBasis",
+          "type": "string"
+        },
+        {
+          "name": "CatalogMatch",
+          "type": "string"
+        },
+        {
+          "name": "InventoryMatch",
+          "type": "string"
+        },
+        {
+          "name": "HealthQualification",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "table": "Intune Enrollment Failure Evidence",
+      "file": "IntuneEnrollmentFailureEvidence.csv",
+      "source": "Intune_EnrollmentFailures.csv",
+      "stagingIncludesTenantKey": true,
+      "uniqueKey": [
+        "EvidenceKey"
+      ],
+      "allowEmpty": true,
+      "columns": [
+        {
+          "name": "TenantKey",
+          "type": "string"
+        },
+        {
+          "name": "EvidenceKey",
+          "type": "string"
+        },
+        {
+          "name": "ReceiptRunId",
+          "type": "string"
+        },
+        {
+          "name": "BusinessRunId",
+          "type": "string"
+        },
+        {
+          "name": "SourceFile",
+          "type": "string"
+        },
+        {
+          "name": "SourceSHA256",
+          "type": "string"
+        },
+        {
+          "name": "SourceRecord",
+          "type": "int64"
+        },
+        {
+          "name": "CollectionUTC",
+          "type": "dateTime"
+        },
+        {
+          "name": "EventId",
+          "type": "string"
+        },
+        {
+          "name": "EventDateTime",
+          "type": "string"
+        },
+        {
+          "name": "CorrelationId",
+          "type": "string"
+        },
+        {
+          "name": "ManagedDeviceIdentifier",
+          "type": "string"
+        },
+        {
+          "name": "HasManagedDeviceIdentifier",
+          "type": "string"
+        },
+        {
+          "name": "DeviceId",
+          "type": "string"
+        },
+        {
+          "name": "UserId",
+          "type": "string"
+        },
+        {
+          "name": "EnrollmentType",
+          "type": "string"
+        },
+        {
+          "name": "FailureCategory",
+          "type": "string"
+        },
+        {
+          "name": "FailureReason",
+          "type": "string"
+        },
+        {
+          "name": "OperatingSystem",
+          "type": "string"
+        },
+        {
+          "name": "OSVersion",
+          "type": "string"
+        },
+        {
+          "name": "SourceStatusUTC",
+          "type": "dateTime"
+        },
+        {
+          "name": "SourceStatusTimeBasis",
+          "type": "string"
+        },
+        {
+          "name": "InventoryMatch",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "table": "Intune Operational Source Evidence",
+      "file": "IntuneOperationalSourceEvidence.csv",
+      "uniqueKey": [
+        "EvidenceKey"
+      ],
+      "stagingIncludesTenantKey": true,
+      "allowEmpty": false,
+      "columns": [
+        {
+          "name": "TenantKey",
+          "type": "string"
+        },
+        {
+          "name": "EvidenceKey",
+          "type": "string"
+        },
+        {
+          "name": "SourceGroup",
+          "type": "string"
+        },
+        {
+          "name": "Availability",
+          "type": "string"
+        },
+        {
+          "name": "Producer",
+          "type": "string"
+        },
+        {
+          "name": "ScriptVersion",
+          "type": "string"
+        },
+        {
+          "name": "ReceiptRunId",
+          "type": "string"
+        },
+        {
+          "name": "BusinessRunId",
+          "type": "string"
+        },
+        {
+          "name": "ReceiptSHA256",
+          "type": "string"
+        },
+        {
+          "name": "CompletedUTC",
+          "type": "dateTime"
+        },
+        {
+          "name": "ScopeQualification",
+          "type": "string"
+        },
+        {
+          "name": "FullInventoryQualified",
+          "type": "string"
+        },
+        {
+          "name": "ConsumerScopeQualified",
+          "type": "string"
+        },
+        {
+          "name": "FileCount",
+          "type": "int64"
+        },
+        {
+          "name": "RowCount",
+          "type": "int64"
+        },
+        {
+          "name": "Qualification",
+          "type": "string"
+        }
+      ]
+    },
+    {
       "table": "Device System Evidence",
       "file": "DeviceSystemEvidence.csv",
       "stagingIncludesTenantKey": true,

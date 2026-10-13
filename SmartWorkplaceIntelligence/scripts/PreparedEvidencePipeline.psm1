@@ -5,6 +5,7 @@ $script:ProductRoot = Split-Path -Parent $PSScriptRoot
 Import-Module (Join-Path $PSScriptRoot 'PreparedMetadata.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'AdCountryEvidence.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'EndpointProtectionEvidence.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'IntuneOperationalEvidence.psm1')
 
 function Get-PreparedChildPath([string]$Root, [string]$Relative) {
     $base = [IO.Path]::GetFullPath($Root).TrimEnd([IO.Path]::DirectorySeparatorChar)
@@ -228,6 +229,13 @@ function Get-PreparedSourcePlan {
     $spec = (Read-SmartM365JsonDocument $SourceContractPath).Document
     $items = [Collections.Generic.List[object]]::new()
     foreach ($name in $spec.currentFiles) { $items.Add(@{Relative="DATA-LAST/$name";Kind='Current'}) }
+    if ($spec.PSObject.Properties['optionalSourceGroups']) {
+        if ($spec.optionalSourceGroups -ne 'intune-operational-contract.json.txt') { throw 'Unknown grouped Intune source contract.' }
+        foreach ($group in Get-IntuneOperationalSourceGroups -LastRoot (Join-Path $root 'DATA-LAST') -MaxSourceAgeHours $MaxSourceAgeHours -AgeOverrides $AgeOverrides | Where-Object Available) {
+            $items.Add(@{Relative=('DATA-LAST/'+[IO.Path]::GetFileName($group.ReceiptPath));Kind='Receipt'})
+            foreach ($file in $group.Files) { $items.Add(@{Relative=('DATA-LAST/'+$file.Spec.file);Kind='Current'}) }
+        }
+    }
     if ($spec.PSObject.Properties['optionalCurrentFiles']) {
         $optionalNames = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
         foreach ($entry in $spec.optionalCurrentFiles) {
@@ -554,10 +562,11 @@ function Invoke-PreparedEvidencePipeline {
             if ($captured.Count % 25 -eq 0) { Write-Host ('[{0:yyyy-MM-dd HH:mm:ss}] Stable source copies: {1}/{2}.' -f (Get-Date),$captured.Count,$plan.Count) }
         }
         $plan=$captured.ToArray()
-        Write-PreparedJson (Join-Path $run 'capture.json') @{SelectedUtc=$selectedUtc;Sources=$plan;OptionalSourceIssues=$optionalIssues.ToArray();Policy='Per-file verified capture; later raw updates belong to the next run, not an atomic collector-wide snapshot.'}
+        Write-PreparedJson (Join-Path $run 'capture.json') @{SelectedUtc=$selectedUtc;Sources=$plan;OptionalSourceIssues=$optionalIssues.ToArray();Policy='Per-file verified capture; Intune operational groups additionally require matching complete source receipts. Later raw updates belong to the next run.'}
         $identity = Test-PreparedSourceTenants -Plan $plan -TenantKey $TenantKey -SnapshotRoot $snapshot
         if ($ValidateOnly) {
-            return [pscustomobject]@{SourceFiles=$plan.Count;Bytes=($plan | Measure-Object Bytes -Sum).Sum;Status='SourcesAndRowTenantValidationPassed';Publication=$false;Identity=$identity;DiagnosticPath=$run;OptionalSourceIssues=$optionalIssues.ToArray()}
+            $intuneChecks=@(Test-IntuneOperationalSnapshot -LastRoot (Join-Path $snapshot 'DATA-LAST') -TenantKey $TenantKey -MaxSourceAgeHours $MaxSourceAgeHours -AgeOverrides $AgeOverrides)
+            return [pscustomobject]@{SourceFiles=$plan.Count;Bytes=($plan | Measure-Object Bytes -Sum).Sum;Status='SourcesAndRowTenantValidationPassed';Publication=$false;Identity=$identity;IntuneOperations=$intuneChecks;DiagnosticPath=$run;OptionalSourceIssues=$optionalIssues.ToArray()}
         }
         $rules = Join-Path $run 'AccountClassification.json.txt'
         Copy-Item -LiteralPath $AccountClassificationConfigPath -Destination $rules
@@ -566,6 +575,9 @@ function Invoke-PreparedEvidencePipeline {
         Write-PreparedJson $countryRulesPath @{TenantKey=$TenantKey;AdDomainCountryMappings=$adCountryRules.Domains;AdComputerNameCountryPrefixes=$adCountryRules.Prefixes}
         $log = Join-Path $run 'preparation.log'
         $systemPolicyArgs=@()
+        $intuneSourcePolicyPath=Join-Path $run 'IntuneSourcePolicy.json.txt'
+        Write-PreparedJson $intuneSourcePolicyPath @{MaxSourceAgeHours=$MaxSourceAgeHours;AgeOverrides=$AgeOverrides}
+        $systemPolicyArgs+=@('-TenantKey',$TenantKey,'-IntuneSourcePolicyPath',$intuneSourcePolicyPath)
         $endpointContractArgs=@{}; $endpointPolicyPath=$null
         if ($endpointPolicy.Enabled) {
             # Only normalized non-secret policy fields cross into the preparation child process.
@@ -585,6 +597,7 @@ function Invoke-PreparedEvidencePipeline {
         if ($LASTEXITCODE -ne 0) { throw "Preparation failed. Retained diagnostics: $run" }
         $provenance = @{Mode='RebuiltFromSnapshot';CapturePolicy='PerFileVerified';SelectedUtc=$selectedUtc;Sources=$plan;OptionalSourceIssues=$optionalIssues.ToArray();TenantValidation=$identity;LegacyTenantlessAllowed=$false;AccountRulesSHA256=(Get-FileHash $rules).Hash;Scripts=@(Get-ChildItem $PSScriptRoot -File | Where-Object Extension -In '.ps1','.psm1' | ForEach-Object { @{File=$_.Name;SHA256=(Get-FileHash $_.FullName).Hash} })}
         $provenance.WindowsMigration = (Get-Content -LiteralPath (Join-Path $staging 'WindowsMigrationAudit.json.txt') -Raw | ConvertFrom-Json)
+        $provenance.IntuneOperations=@{ContractSHA256=(Get-FileHash -LiteralPath (Join-Path $script:ProductRoot 'config/intune-operational-contract.json.txt')).Hash;SourcePolicySHA256=(Get-FileHash -LiteralPath $intuneSourcePolicyPath).Hash;Audit=(Get-Content -LiteralPath (Join-Path $staging 'IntuneOperationalAudit.json.txt') -Raw | ConvertFrom-Json)}
         $provenance.AdCountryRulesSHA256=(Get-FileHash -LiteralPath $countryRulesPath).Hash
         $provenance.DeviceSystemPolicy=@{MaxObservationAgeHours=$DeviceSystemMaxObservationAgeHours;OffsetlessGraphTimeZoneId=$DeviceSystemOffsetlessGraphTimeZoneId;HardwareFreshness='Platform timestamp is context only; not hardware collection time.'}
         $provenance.WorkforceActivity=@{DefinitionVersion='AD-M365-Console-v1';CurrentSources=@('Active Directory','Microsoft 365','Qualified local console');ConsoleIdentity='Exact unique tenant-scoped AD SID and unique AD-to-Entra link';ConsoleScope='Last observed local interactive user per device; partial coverage; RDP excluded';HistoricalSources=@('Active Directory','Microsoft 365');CurrentConsoleInjectedIntoHistory=$false}
@@ -603,8 +616,8 @@ Export-ModuleMember -Function Get-PreparedSourcePlan, Invoke-PreparedEvidencePip
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBSelLCk/n8PxFt
-# 3rPGmGHAcLADV7oqZs5R1ufTZqv3cqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCmMjBn9C2QvMLJ
+# ZFwpB7UEZK7wbHnECeaqPw5KqXXMtaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -737,31 +750,31 @@ Export-ModuleMember -Function Get-PreparedSourcePlan, Invoke-PreparedEvidencePip
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIJ6Str53+3JdtB1UK1Q8Y7wcyDer7lgj9ytf6dZ87DKZMA0GCSqG
-# SIb3DQEBAQUABIIBgF14FN1X5L62bPU9ViKOfciyJSNRclPemzGqnV8nzD7783xD
-# 6C17+KP+wJ2wjf4Gwc/nL0XfX/SZ926DWgTicNCOMb7blWygBt6UwMHP+H58QhJ4
-# rkONMq8elLMyUKfg+61J4yzEPoX4/+ZqqBYhShhLibwHUomlkJGNlzeEOjRL92lX
-# CoWfs4GaCZ6jmBzK1AS9c8AKPH54ex1YuIryjLiKT0pMSpG3uW61LseQrO223aCy
-# CKXJNa0PVYXa//w44Iklil3EDyRBAkJTILEIMC3VZySTmzpnn+KLhkKd2pZSxTaC
-# jRw/bslk59N+fKxvz3bC1V3YpdUkVW8vHAyMz/+jq7KY6m1T9uZ0BndA6Q8IF87n
-# lhcdFMqOXM+dMyGH92XuwIhZ5gIG1Z8RpmFX/rjGwM+yJCzP+kCzY0aTdNKhMwks
-# 5CEdBkloeNJzMQkO3Tzf6tCT32PnEBXm3Wuz29Ygn86/dAumKq89qdGt+IheIIts
-# JVxtQAyuYTZrPwwqiqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEINKe3cpqBgK9jo2GafsC5yqbssCtVr9jjbAJ1aMYCIaqMA0GCSqG
+# SIb3DQEBAQUABIIBgIHYsHbczlR64RFJ7RY4GTlHdrGDXvDZR77vLg1zTRtCo6dK
+# aOjL9pSDaTTYxH/m1xo3oHG5tSFGPhz1bMUqFpZUVQXlopDibHXfHtEji5d0GDyC
+# nKufmDEc7n5niciMz9KRV14poZMrEvmIjW7gZUSJFSXyIRDiOrBKMbc3TVgZg/Bw
+# N5jBGwrjnYECLWWTu3PZwHd8cIUNzwhs0b2s95fuTdZWec2knFBlvJNqdRqxu2Xb
+# 2sTZxjxVsZ3jkscTdPhdSO3OjE85pDlfPeOwLAO5r8g+5Roa0Npxf1Ix1HPDYVxT
+# qxqA/jORKd7vC5D0dMZ+Wp8j5usCYCD3Ako/1ErewcFQuZLNPsG0fg3zW6WKCuSa
+# amo68YL2RhBeK1l8Dd3a+yIt18UAKtYBE5EbxcIlkug67MRrQ9sNmbAqVf47EA88
+# v8Gkk/SULZYTyhOqPXE4gNqGUrwpmasoSm5d8mRE7expFoFQnXLtT3tcP2Ss4ot8
+# pj122m/riM7Uv0+ZHqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTMxNTQ3
-# MDhaMC8GCSqGSIb3DQEJBDEiBCC+VYQPfM6SsmuQyaWGRrOIyteK7gP+720YHpbg
-# b7TOJzANBgkqhkiG9w0BAQEFAASCAgBapE8VxkZP80HR84CicX31KNT/pXPuWdYU
-# Q8JYBFlLaYs9Xo285B1R+6nkjWsGxzsei8s84MoS5426T+unjWM1ch121bBCH1N7
-# Of0w1YwBHbZJ7otZCRrynr5oZKLsItiAi0Nm5pt2j1tNbPFG8ubIHYP8t9UoWflS
-# fKk4kpTOJZDy9tYn71cEmXx7zqsrPFwwsJ0C2mK3y/1VnxcR6vxHEFABmD6Y/eXj
-# IqHr4ZrA37OV47Ty5AQKYVZfm2yn9LpCI6AlR1lpTrVItW59dzF3dS4almw4cqXC
-# BSanUUhSG/P/r42r4i/CpfadUzusZ4FRLJxZea/n+Q/0zJRA0Dx4bOUAS9V9QDoD
-# 0lhlywjk5Wyp0QasyVjc3xEerZRNiHat0jbD7jSET/yVK5+vQGKaA/Jz51x/lSGc
-# 7CDt5FPLhPDwDiuuzSXuazf6JNEQKV8GZ/OvumI5e0hEYliOCQizlIcYRe7pjdx4
-# HvgH2yHOCNG4jd10Ligc+/3fYXb4UNf7O5XRHyer5XBgn+OaPDS95Jmv5Pumi83D
-# bWegdGysLi0n7NfOmguiDERuoP8hXJY17JqFTmSQpAePBY59teufmFi/N447ouEH
-# tJll8cmHI4gbqL7pqCKhzbWh8RLl33IZ9f75ARVF94vAWTGr7nk6RKiiBAJZlNt9
-# AzcvsuqIWw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTMyMjQy
+# MTRaMC8GCSqGSIb3DQEJBDEiBCAiQ0gk/a8CAfcaVNsEpidGrD3OMyMB4y2cu9ST
+# ouL3YjANBgkqhkiG9w0BAQEFAASCAgBeu4Y/gpLM7ppU4+6iz2e6zuVhSx3I61JT
+# 0KIR9wYHPqEJknsRy+yd1tFUcKJsOoHYU9uR18tEsnsSlkq5S4cv7Wf3xPqQHBYO
+# Lx8z2prpyUdBKtDC9cqgOIpm+EyojtQPtWRQ6kwuvws7+tPMsy1Ig29JjtkWzpYS
+# XXwGzKACcuQyrc8eil6Z/UewwU/7vbITUcXfWATf1PVWQaOznboKl4FNbf+53Glz
+# N6OMZXmMvRpb73+lyKiDDGsyhsf/BMyKMQBKKpkWfFMQ5z8958QbPB4B/+wW0rIk
+# 9q1mwgMJxyVLgdUTo0/KOp7gW7XSRAsGBNPyQwBmmVo9j/By2t/Lp/pUjPcEtvdn
+# 3DLSWDTbMLlLBZKHDMK0U0poZikDmG/0JOYQB72pfFAdnenOto1rkl+dGG1wUsTZ
+# Pde3TSLnMcH0QUvPRiLYP+ltzIBtxwa/FRCUniPmsAPYgs0L+4t6FY8fQuBcW84Q
+# 12qkV+/5syW8Jhwc1kAHo7Ae8WW8zn7rT8ij1DzqpvyXcdwBOsHTMDjvOuu/aDF3
+# KNLrSmSVFrZ23tXcivzpTm7xEJHCuhgAZz9spBvM4ioZkFIpuSpl5VwRFPs2NHWp
+# 1OqabaoiQ1GQVQdGDcSLa2C7841AmR7OXkYrMLfkbScvaxQekUOCXzix86evPbN3
+# YNGh1rRiEA==
 # SIG # End signature block

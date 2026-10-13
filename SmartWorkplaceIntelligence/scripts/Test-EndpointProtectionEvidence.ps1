@@ -132,8 +132,9 @@ $templatePolicy=ConvertTo-EndpointProtectionPolicy -Configuration $template -Ten
 Assert-EP (-not $templatePolicy.Enabled -and $templatePolicy.Requirements.Count -eq 0 -and $templatePolicy.ScopeRules.Count -eq 0) 'Public template activates a customer-specific policy.'
 $base=Get-Content -LiteralPath (Join-Path $productRoot 'config/prepared-evidence-contract.json.txt') -Raw | ConvertFrom-Json
 $extension=Get-Content -LiteralPath (Join-Path $productRoot 'config/endpoint-protection-contract.json.txt') -Raw | ConvertFrom-Json
+$baseSnapshot=$base | ConvertTo-Json -Depth 20 -Compress
 $merged=Merge-EndpointProtectionContract $base $extension
-Assert-EP ($merged.tables.Count -eq $base.tables.Count+2 -and $base.tables.Count -eq 29) 'Opt-in contract changed base tables.'
+Assert-EP ($merged.tables.Count -eq $base.tables.Count+2 -and ($base | ConvertTo-Json -Depth 20 -Compress) -eq $baseSnapshot) 'Opt-in contract changed base tables.'
 Assert-EPThrows {Merge-EndpointProtectionContract $merged $extension} 'Duplicate contract extension accepted.'
 Assert-EP ((($extension.tables[0].columns.name) -join '|') -eq ((Get-EndpointProtectionPolicyColumns) -join '|')) 'Policy contract/header mismatch.'
 Assert-EP ((($extension.tables[1].columns.name) -join '|') -eq ((Get-EndpointProtectionEvidenceColumns) -join '|')) 'Evidence contract/header mismatch.'
@@ -197,8 +198,8 @@ Write-Host "PASS: $script:checks endpoint protection checks. Synthetic scratch: 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBSUAD6I2me2SY3
-# t3CbOmQXeRDxo4YNMfcwicDNfHIHQaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBMNEcOPWy+RIHC
+# aeJp+k/CIJ0UeTEtLPUN2PtAUZhIuKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -331,31 +332,31 @@ Write-Host "PASS: $script:checks endpoint protection checks. Synthetic scratch: 
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIM04nWPwQ2IrGwhlXXllQdaqowng0kH11kNa0s/YsQM3MA0GCSqG
-# SIb3DQEBAQUABIIBgK3B0C2e0Od+FXgygwrhCb7oWisQX6ijshyOXI7WjnMudTQy
-# Nk3uQGrldTmTz84/mwaBB5mhEiAfgGYk6ImVXP/srkQO2uxNeTIvYm8HaLZ7z4kW
-# 2sJOooQ5frzRHdypyn5Xu5911KPpLX+KNhstgncs/8L6QBFV1q6S7fU5WFPNN0Hk
-# 7JTBaFum+2BUDekSKnMteClkv0pK9yoc0pWMSoInmJw2lBwAOoTsXViyOWF3RIoU
-# CWvABHGGQZEnXhInqSK183xPvx0U48/m8KcaWLN1OVe6vjmNCahYLS+7k/7PrVxU
-# r+4+WgHPLOP5Paf2msjcARHAqOivkU7UcE8Vu4WxEcx/++RZxe2exaLj+iJTXkZq
-# Lmj9Qg1Zt9+PwRXe9fY1o137KxpN/wQ93zwHxawNc3PjzpKURa05Fnaqo/05ODVd
-# YPkg25qmIsdSmWNexm+KDvlpyIzo95NmVxC6+RIybqrjgVzs/s/FW4TYtcZttQ4/
-# 33vdqyNfX4jIgHkE6qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIIm0tJgta1bVEovw2XWKMBq5qRLW76j4tf8xlHJNm/SvMA0GCSqG
+# SIb3DQEBAQUABIIBgKpzOUD/Kn4lScrZHriP78CCl9DKXGLZi/JFt1ZPc6Gq5/qq
+# ZKucA5iiGApwH8En/5l16Z25WwWvnWBw5NF8/EdMKUXXSDnH96OhlsVNV5ujTgki
+# V4L/uXe2LL0qak6M2HzhyGr0YNUQTAagwfQs0Fhyi+BMzDOuCDK8cggRIMu7Oc7s
+# beaEh4P40YfUOFt8KYi78l1VLQX7Q9vbCsL4Yynk4WbayC04cHEKfMr9HvEVMOUq
+# JwV+TWPpdPbKDLnqK5EYhpeVggp/scwQR+Z2dxJ2GMVy3+XU+a+EvI0lU4j0CcYW
+# 47C7/MYg0ouMti0SFLDkqOS/DZq8pROFYXGaSJyEj0fsgrRLBFAWmXWuHZJdNVxY
+# z/RFpbzmJgs5dsSgUwbvBVrAD4KJhGA6icqoeaQow0OyYuwCiren5j48TxKS7ClL
+# vkVo3PFWmi6wdggMSjg0Unl7CJPAooC5ZPU+pw7KsjwjAKYxk1nQKwQELQ9QGpzP
+# FoyjEagawIXExosW/KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTMxNzMx
-# MzlaMC8GCSqGSIb3DQEJBDEiBCBvp3FIu2IBNYn38nC0u6XOcV5zdjk83kfy4ocN
-# WDvnsTANBgkqhkiG9w0BAQEFAASCAgCmAjHwSYYAGHWn67NnlUBKSpIwzyPPlijd
-# WkIZRxMK+DN3LFIa0YIMAIybWHYANOBfkxMyz7egGH2ZLPoNtkv2QMPGFD+0Wsro
-# ppts0jtJyN1O6Dpjq8ndD7J/k26i1nJA9DFeIkXCDDoPkwyFXj1C6wMr8wSlpNWE
-# RCWOu3FOffjZE5BzzZ5UVghlRg24s1KSyLbZttI/bj+0mz7kW6sf9TKM7ZesfsDU
-# z1rr/pg/8/v2IdmBPbuBPyZjrGiTpqAQLmqNLqn3YSBukUUbvwh1wF6bgHDdi+lO
-# v6NrQm6+1b5p/J7WNtVqsG173sc8x2qZLRhVWI2wG2sjA0Lo7JbA37w7kvQvg/vl
-# ftELcDC5e4iG3Y8RQclHt/3LdpdFhF+e7r4brcnnbLW2ZRi7m56VaJoh1z9rcKcD
-# qYhCdRaj0KbYDoVIKGGh7lLTdsOg0YcXSW5YhWNhwZUXBbiBDiGm3OfZxm9UwlkT
-# XsulAR6p8tsjgXjnXlrSlumu0LLyKn7xLQUCpR7699Z+sSWQ+FavydLrGnEmJK9J
-# 57ob++kg/rDZJuPdc/6Aam8ZGP23BHh0DaDng9ym7wn6Bh8INrgytckjcfxF72Fo
-# rFW3OVgvtoQOnXYiBGQmFcGYmLJtBWoFtcTvK2t9P3Tbq6nGKrL06FcvJl0Wr2uA
-# RM+HuaxyvQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTMyMjQy
+# MTZaMC8GCSqGSIb3DQEJBDEiBCDbPvrFUmRQOhaEMNPpjhaVYRhms7KNqXpSW3lk
+# JEtR/jANBgkqhkiG9w0BAQEFAASCAgCgNOmm3YZlq0iphi/ck0dFabkvYsygWFFq
+# djog+ya1p6DnPrkv+LQt4O39xQVbSF8ZYF0aak0/KXfHTFH7YZZBnNMg8BZDgg0x
+# Cwq2cykPkscfQomikwl8PQ/2/CE7ciRClvN5FeVY+Cd1xN3VBaZTDtlXAOIlaNdB
+# c2sUKq0ANugAUJau5/+68Q8s21lpa8AUmRfjbPinTooJ9GIsH8/vMAAE95jSLEKZ
+# ZZbdON0DDA6M1MhT8ewdhPHxzutfzn51XeI4GB2bg71DKgkD5lvQBK2ER0KUkZiq
+# fUkM0H0Us4GlXExnwTQDNL9b6YFYNQ96DW4Jr+x9i3AizsPMiZ3b6ZZvLZYqiqDi
+# Syu/VuwWtUjzWkkr9jcv7KloRyBBhjZhmFE3NFgXl7WKo6aqIRe8aPgLYGPzvNj8
+# oTabLjZTApwQxgs4QtZUiujcpXvww0F0jtY2hckh+MEL7ySew8RPjfSMeCE4Edi4
+# wd7RBEkR0i6OiO+6jiHdcJdI+Ss4hX2ByEpUfgDTgsJMYm/SuP37I3LzTszGw7vF
+# OPkBRr0cQ+eusLs3yr1dRbC4hhnrOSojccMZIEIGm4m7IkEomqLrUUKeERIVw3dc
+# YQ+6Sjia/bK/7o+UrcbKZ3ZHVQMizf8HSt+19ly/SnZxWZONVy/i3Zv+H0dJGqmF
+# ttntjTRKDQ==
 # SIG # End signature block

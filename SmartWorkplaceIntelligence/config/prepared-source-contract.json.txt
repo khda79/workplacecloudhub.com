@@ -1,5 +1,6 @@
 {
   "schemaVersion": 1,
+  "optionalSourceGroups": "intune-operational-contract.json.txt",
   "currentFiles": [
     "M365_Users_Active.csv", "M365_Users_Activity.csv", "AD_Users_AllDomains.csv",
     "AD_Users_DuplicateUPN.csv", "Exchange_HybridIdentity_Issues.csv", "M365_Licenses_Users.csv",

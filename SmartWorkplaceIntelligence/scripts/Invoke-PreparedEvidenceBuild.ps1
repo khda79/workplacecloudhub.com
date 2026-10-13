@@ -2,7 +2,7 @@
 param(
     [Parameter(Mandatory)][string]$DataRoot,
     [Parameter(Mandatory)][string]$OutputRoot,
-    [ValidateSet('All','Estate','Workforce','Devices','Applications','Collaboration','Content','Mailbox','Licensing','Security','Backup','Trust','Executive')]
+    [ValidateSet('All','Estate','Workforce','Devices','Applications','IntuneOperations','Collaboration','Content','Mailbox','Licensing','Security','Backup','Trust','Executive')]
     [string]$Only = 'All',
     [switch]$SkipWorkforceHistory,
     [switch]$ReuseStagedWorkforce,
@@ -10,7 +10,9 @@ param(
     [string]$AdCountryRulesPath,
     [string]$EndpointProtectionPolicyPath,
     [Nullable[double]]$DeviceSystemMaxObservationAgeHours,
-    [string]$DeviceSystemOffsetlessGraphTimeZoneId
+    [string]$DeviceSystemOffsetlessGraphTimeZoneId,
+    [string]$TenantKey,
+    [string]$IntuneSourcePolicyPath
 )
 
 # Offline preparation only. No collection, upload, Desktop control or promotion.
@@ -63,15 +65,21 @@ Run 'Mailbox' 'New-MailboxEvidence.ps1' @('-DataRoot',$last,'-UserEvidencePath',
 Run 'Licensing' 'New-LicensingEvidence.ps1' @('-DataRoot',$last,'-UserEvidencePath',(OutPath 'UserInventoryEvidence'),'-MailboxEvidencePath',(OutPath 'MailboxEvidence'),'-OutputPath',(OutPath 'LicenseEvidence'),'-OptimizationOutputPath',(OutPath 'LicenseOptimizationEvidence'))
 Run 'Security' 'New-SecurityEvidence.ps1' @('-DataRoot',$last,'-ExtendedEvidenceRoot',$last,'-UserEvidencePath',(OutPath 'UserInventoryEvidence'),'-DeviceEvidencePath',(OutPath 'DeviceInventoryEvidence'),'-OutputPath',(OutPath 'SecurityControlEvidence'))
 Run 'Backup' 'New-BackupResilienceEvidence.ps1' @('-DataRoot',$last,'-OutputRoot',$OutputRoot)
-Run 'Trust' 'New-DataTrustEvidence.ps1' @('-DataRoot',$DataRoot,'-OutputPath',(OutPath 'DataTrustEvidence'))
+$intuneArgs=@('-DataRoot',$DataRoot,'-OutputRoot',$OutputRoot)
+if($TenantKey){$intuneArgs+=@('-TenantKey',$TenantKey)}
+if($IntuneSourcePolicyPath){$intuneArgs+=@('-SourcePolicyPath',$IntuneSourcePolicyPath)}
+Run 'IntuneOperations' 'New-IntuneOperationalEvidence.ps1' $intuneArgs
+$trustArgs=@('-DataRoot',$DataRoot,'-OutputPath',(OutPath 'DataTrustEvidence'))
+if($Only -eq 'All'){$trustArgs+=@('-IntuneOperationalAuditPath',(Join-Path $OutputRoot 'IntuneOperationalAudit.json.txt'))}
+Run 'Trust' 'New-DataTrustEvidence.ps1' $trustArgs
 Run 'Executive' 'New-ExecutiveTrendEvidence.ps1' @('-DataRoot',$DataRoot,'-OutputPath',(OutPath 'ExecutiveKPITrends'))
 Write-Host 'Preparation finished. Outputs are staging only; schema/data validation and promotion are separate steps.'
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCsnXNATKf3tPUa
-# HlJZ0MfF3H/U8wyNWFzgtxR8s3xjc6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDhIix5bo8cRwG6
+# /TDDFEmnHQ0LXQlRbUuL43eeH/F3FaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -204,31 +212,31 @@ Write-Host 'Preparation finished. Outputs are staging only; schema/data validati
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIMnKx5o88PdOyAlttPQfurtyaU1mOoPI+3n8jwStrENdMA0GCSqG
-# SIb3DQEBAQUABIIBgKtFsbNbhhZrEKqJXfxqLc8Ncb6z+W+8EIehPtFT7Uz142Pa
-# pfr+HUb17UROXosh7ORU3+lOggfvIDyRMs0m/BxJ45hcfIefUmnd/N4hs8OgkCAc
-# 7H02hzQmFDrtCAXIs90eTGsA52HOMqgjwsc5vQ5BWfHCaiUC7ME0kmfmyq1tR9/F
-# XOKBKSwSW5GxCHOnkZJbex4u30/UPgWehmIh/X5Um5Yh2up3xhoTIwrqhXgi2gV6
-# +h42oft6qIwjOOX3bzUI+OQ4ncYSvFkCWG0l/QyBw3pD4aGWbjN+LGvRSEfypLIw
-# qd17/Po2bjdOnr+k0F+8VikzHVccoFtJ4etT05bf7SM4VeBnGWEHu5zTQ9mMliE7
-# bnmpaFjv0GbpXr8nCUjHLlDo2wdhehWWH/CLHHyy/PU2mjyTHvA05S2nuWlhHpEs
-# 26AjtIdogd5ayzIfQKR0Ghc9g46Uhh+8OTrHF117BmS+3e86hhb87xGe36ib08AS
-# NddS/9GTElNYRYfrB6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIHU8LTltDtqClJA8ZdcRTQ/CyTV0VCM3Z+ZQfK7mJwbnMA0GCSqG
+# SIb3DQEBAQUABIIBgJul3LQxoYa7quN772mXzl0GZ/0x2N25zfnIcBIPr0GvD+PX
+# mWwBmLQCDcK4EbhJrbWJ7NFz3XVVfvfRKiBJcdc/CStgln2V5O9cEw2Yv5zCnLFJ
+# PFVHQ6XgQhbENJuCpOz5ovwE1Kl0eSlTc5PX7BrKsN1oyiw/BPH9HUcASSGUxa6K
+# Ipoc9WJRoXYG4N2dNoSut0UmncGEIz+hgYIN+NIUeE+tfQVHoPkMQ/5aDx1lNK5/
+# GVjJpxUGhuwhT+6XX6NCMHOoitFl9NvKVjiyaEHNSEGnx2apWzQzfwjBCT4mcDg0
+# 2E9zY7R4q71XNXXSReoXMSUw1LGBx63mGeUON0oVZIbRDckucWqvGkvZ0UJnxvsY
+# FYiyKbG9ElmagoLHD1/XNY06GVnwoG3L5z5c9B+X9y5xKIywWhlY1CSZW4Ig63uq
+# 7OYh1snkHg4D19VCKUuT6CnucLKMQ/IjoDxqrJtE087tJRzEfShtGXpEhyq1HaXP
+# WANoPf59nz2kzm36eaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTMxNTQy
-# MTZaMC8GCSqGSIb3DQEJBDEiBCBjNVo7lXh0mlPYX9WlMR0uDTybr5HSFxaClx9z
-# zGxODzANBgkqhkiG9w0BAQEFAASCAgCRKGtrbX8ehp4KTXPoQXIg8MdvCE4dBSZc
-# nwkdXSxCpV7vRnYYyGR0mf1gLXPcy2wDznzD6sZNiIbgS3H9nTXFXCnzmBdg9Zr7
-# Iq5qoLwOFjPJ5WQhvBmzS0ch9h31Rz7ukyk1z4/4g/LgQXONyfQ/3o/J3ekgz/cN
-# dM9UA+P39DjgatBc4ZY/ySSvqRACri6q6Ou15D3c29GXTPb3ED1b3FQxmjYQa+U0
-# FNuVnQ0znuOjgLl0dpfFpHaoj5U0VB538YrAlNE9qlhO9V6FubNX/+tA3ZwmLX8I
-# I68Ie68Suq1boM/xg9axcGMXTsscNS4n46FpVh6+k6y1RXHSVVUxtHNcxU7xG+Mh
-# 7hdFGmMPiQCYWErjfFaRWQWt8mbJpP6FZJQ6UFJIuvwohXO/A3R7voXc8zUgbrey
-# 9uJbrykbJXXQ35PeEII1APEs168iJI2pRkH1H88I2GGKDVXgBeMaGkUbSjBllcYM
-# O4qVXoCc3Zrwbf0cMV/Juxayr3eve2OaQMC9LGmyVTvjUQxWY4Mlzfk+B75idB5x
-# mw9dCu/sG4cMgaHIX+6tB4hJK/63ORwuw0CTGWlga1dTszhQHc+5240Ft/1DDUYr
-# j0b2ISm/h+Rp5wCuDL8LesMdLXbNJCMcBVhr75Ctri0vXr6Y6vNfKOXVDwuYsZZM
-# /QUJ82+npw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTMyMjQy
+# MTVaMC8GCSqGSIb3DQEJBDEiBCC+liuL3BqKTtm/YKzcYRfRGd8mjhzhthuBRVmo
+# GjK6qTANBgkqhkiG9w0BAQEFAASCAgCGIaXtYQCjIBdserH8ilu3DZIa3SlPgx9e
+# gHT7OFn1A0IjDVH/EMYt1To3qoRYtqrNYqNyBqkaRf1SmRedHZyx3wkuhii3ahI/
+# /GB7n7aAizYn+mZ4gVO1FmJxFfHzhagoA0aRw1Oe3uCq9Q6Q9VsoMUghxzmKyhyn
+# LCTTtvWWtaXRDCO+j/pRDnJIg/tUC01W6LfyiS2vO6iQRvlgFdgaiJMUQ4cYhkkr
+# ST/H0dW9/1us9fmQ7NjXq9cnvDIXzGFle7baezwetQWBhVEV6rcNvhv7vRyJCLKO
+# bGzBOy+CjnUpIWoFH07rzSwO2j01LLwWWjZS5LB/OmCsdjeMffOMF/kYmjrKa0qL
+# I7g9/NGlvIUQtFSdVE9gTu/G7L54kwRTKbmh7vvhEk6LH8BeBTRGzpY7Pm0WeWdM
+# lmSIh3d033OfJnrWpfsaCCNVeO1UsRlCAlV9AhCha+1TFCBX6mLZaypBuOJc7QA6
+# DnWO26QFn2mVWfgKUNqlSOIg5/1knVA0hgw8+hMdZT3Z0tIxQjl1AKqPuj2zQVjn
+# tIS1RZCUtKtKZ1mqJmi78cFoDyWSFOpgMsibnFhz3JDanYx4gpDSDB+ojBoB4wXG
+# OqJl7FQz8LpWfD2+GwIBd+MBV2HlN6p+0oz15lRAqCh3S+5V8w2MEHD5oFWyUh9M
+# Y0sIQU6Aiw==
 # SIG # End signature block

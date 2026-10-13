@@ -23,10 +23,13 @@ function Check([bool]$Value,[string]$Message){$script:checks++;if(-not $Value){t
 function Reject([scriptblock]$Action,[string]$Pattern){
     $caught=$null;try{& $Action | Out-Null}catch{$caught=$_}
     Check ($null -ne $caught) 'Expected rejection'
-    Check ($caught.Exception.Message -match $Pattern) "Unexpected rejection: $caught"
+    Check ($caught.Exception.Message -match $Pattern) "Expected '$Pattern', got: $caught"
 }
-Check (@($baseContract.tables).Count -eq 29) 'Expected reviewed base contract with 29 files'
-Check (@($extendedContract.tables).Count -eq 31) 'Expected reviewed extended contract with 31 files'
+$intuneSpec=(Read-SmartM365JsonDocument (Join-Path $PSScriptRoot '../config/intune-operational-contract.json.txt')).Document
+$baseCount=@($baseContract.tables).Count
+$extendedCount=@($extendedContract.tables).Count
+Check ($baseCount -eq 29+$intuneSpec.tables.Count) 'Expected legacy tables plus governed Intune tables'
+Check ($extendedCount -eq $baseCount+2) 'Expected endpoint protection extension'
 function New-Fixture([string]$Name,$Contract,[string]$ContractPath,[bool]$Endpoint){
     $fixtureRoot=Join-Path $root $Name
     $staging=Join-Path $fixtureRoot 'staging'
@@ -52,6 +55,7 @@ function New-Fixture([string]$Name,$Contract,[string]$ContractPath,[bool]$Endpoi
         [pscustomobject]$row | Export-Csv -LiteralPath (Join-Path $staging $table.file) -NoTypeInformation -Encoding utf8
     }
     $provenance=@{Synthetic=$true}
+    if(@($Contract.tables | Where-Object file -in $intuneSpec.tables.file).Count){$provenance.IntuneOperations=@{ContractSHA256=(Get-FileHash -LiteralPath (Join-Path $PSScriptRoot '../config/intune-operational-contract.json.txt')).Hash}}
     if($Endpoint){$provenance.EndpointProtectionPolicy=@{PolicyVersion='synthetic-v1';SHA256=('A'*64);Qualification='Synthetic only'}}
     $batch=Publish-PreparedEvidenceBatch -StagingRoot $staging -OutputRoot $output -TenantKey 'synthetic-transfer' -Provenance $provenance -ContractPath $ContractPath -SkipRetention
     [pscustomobject]@{
@@ -94,13 +98,13 @@ function New-Transport($Fixture,[string]$Mode='ok'){
 function Check-Success($Fixture,[int]$Count,[string]$ContractPath=$basePath){
     $before=Snapshot-Fixture $Fixture
     $t=New-Transport $Fixture;$params=$t.Params;$params.ContractPath=$ContractPath
-    $result=Send-PreparedEvidenceBatch @params
+    $result=Send-PreparedEvidenceBatch @params 6>$null
     Check ($result.CsvFiles -eq $Count -and $result.VerifiedFiles -eq ($Count+4) -and $result.PointerVerified) 'Unexpected successful transfer receipt'
     Check (-not $result.CsvRecalculated) 'Transfer recalculated CSVs'
     Check ($t.State.Events[-2] -eq 'U:current.json.txt' -and $t.State.Events[-1] -eq 'D:current.json.txt') 'Root pointer not transferred last'
     Check ((Snapshot-Fixture $Fixture) -eq $before) 'Transfer changed local batch or pointer bytes'
     Check ((Get-FileHash -LiteralPath (Join-Path $t.State.Remote 'current.json.txt')).Hash -eq (Get-FileHash -LiteralPath $Fixture.Pointer).Hash) 'Remote pointer differs'
-    if($Count -eq 31){
+    if(Test-Path -LiteralPath (Join-Path $Fixture.Batch.BatchPath 'EndpointProtectionEvidence.csv')){
         foreach($name in 'EndpointProtectionPolicy.csv','EndpointProtectionEvidence.csv'){
             Check (Test-Path -LiteralPath (Join-Path $t.State.Remote "batches/$($Fixture.Batch.BatchId)/$name")) "Endpoint CSV absent from simulated transfer: $name"
         }
@@ -134,13 +138,29 @@ function With-MutatedReceipt($Fixture,[scriptblock]$Change,[scriptblock]$Action)
 }
 $base=New-Fixture 'base' $baseContract $basePath $false
 $extended=New-Fixture 'extended' $extendedContract $extendedPath $true
-$null=Check-Success $base 29
-$first=Check-Success $extended 31
-$again=Check-Success $extended 31
+$null=Check-Success $base $baseCount
+$first=Check-Success $extended $extendedCount
+$again=Check-Success $extended $extendedCount
 Check ($again.BatchId -eq $first.BatchId) 'Retry switched batches'
-$null=Check-Success $extended 31 $extendedPath
+$null=Check-Success $extended $extendedCount $extendedPath
 # Base batches remain transferable after extended batches; no live tenant policy is read.
-$null=Check-Success $base 29
+$null=Check-Success $base $baseCount
+$legacyBase=$baseContract | ConvertTo-Json -Depth 30 | ConvertFrom-Json
+$legacyBase.tables=@($legacyBase.tables | Where-Object file -notin $intuneSpec.tables.file)
+$legacyPath=Join-Path $root 'legacy-contract.json.txt';Write-TestJson $legacyPath $legacyBase
+Import-Module (Join-Path $PSScriptRoot 'EndpointProtectionEvidence.psm1') -Global
+$legacyExtended=Merge-EndpointProtectionContract $legacyBase $extension
+$legacyExtendedPath=Join-Path $root 'legacy-extended-contract.json.txt';Write-TestJson $legacyExtendedPath $legacyExtended
+$oldBase=New-Fixture 'legacy-base' $legacyBase $legacyPath $false
+$oldExtended=New-Fixture 'legacy-extended' $legacyExtended $legacyExtendedPath $true
+$null=Check-Success $oldBase 29
+$null=Check-Success $oldExtended 31
+With-MutatedReceipt $base {param($m,$v)$m.Provenance.PSObject.Properties.Remove('IntuneOperations')} {
+    Check-RejectedBeforeTransport $base 'Intune operational batch lacks'
+}
+With-MutatedReceipt $base {param($m,$v)$m.Files=@($m.Files | Where-Object File -ne 'IntuneManagedAppDeploymentEvidence.csv');$v.Files=@($v.Files | Where-Object File -ne 'IntuneManagedAppDeploymentEvidence.csv')} {
+    Check-RejectedBeforeTransport $base 'Incomplete Intune operational file set'
+}
 With-MutatedReceipt $extended {param($m,$v) $m.Provenance.PSObject.Properties.Remove('EndpointProtectionPolicy')} {
     Check-RejectedBeforeTransport $extended 'policy provenance'
 }
@@ -164,7 +184,8 @@ With-MutatedReceipt $extended {param($m,$v)
     ($m.Files | Where-Object File -eq 'EndpointProtectionEvidence.csv').File='EndpointProtectionPolicy.csv'
 } {Check-RejectedBeforeTransport $extended 'Incomplete endpoint protection file set'}
 With-MutatedReceipt $extended {param($m,$v)
-    $m.Files[0].File='Unreviewed.csv';$v.Files[0].File='Unreviewed.csv'
+    ($m.Files | Where-Object File -eq 'DeviceSystemEvidence.csv').File='Unreviewed.csv'
+    ($v.Files | Where-Object File -eq 'DeviceSystemEvidence.csv').File='Unreviewed.csv'
 } {Check-RejectedBeforeTransport $extended 'Unexpected, unsafe or duplicate CSV name'}
 With-MutatedReceipt $extended {param($m,$v) $v.Files=@($v.Files | Select-Object -Skip 1)} {
     Check-RejectedBeforeTransport $extended 'file count differs'
@@ -198,8 +219,8 @@ Write-Host "PASS: $script:checks synthetic base/endpoint contract, retry, proven
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDYuL+89RKJokMn
-# YgkwiF+h0mepCW3DWWX+SV39c5eZwqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBbtLvraxX8bIWT
+# mXRE8RKLn9jM8xfC4eKWFPbz1mFM+KCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -332,31 +353,31 @@ Write-Host "PASS: $script:checks synthetic base/endpoint contract, retry, proven
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEINa9aSicmMH5prc7jrRdn5hi7VCbiQruchQVLrDrzca4MA0GCSqG
-# SIb3DQEBAQUABIIBgAADPP18ajbT0J2aGiE8P+V/2YxMlXzSELf5wHWQ1pFuX6S9
-# vCZS2DAOoybUFYs2+d/cK3sC40lZFrkV28guJrLbuT4wmwYdfYbTU3LZqODHNuoI
-# 4tyQJHjh6NsxtfnLU3dQ8fGi9GkibHCfoIQ0c3joj+gi2ma+F1epI88BpWbV23Ee
-# EUR/wls9YeUx0uCg4cQL8YtUfaLqT+LvcGfu5RCQwJejPZkuIbFoawigBLy53v14
-# LUId4o2P3ux0CmYWH5rh1vK+d/1MQQSj43n7p9t4/44kvP2Y+s2s4C9e7StuTgaU
-# S36tkjBvrcVXGcIv8b4tleXlj86ri8I7ERTU5rDikonIZqf54HcWTfVz/mCzVt4N
-# 3lC8qR6p4JA1oBi0tMO3R94ZIKpEgD+kZsJ0UFI2U4/h/8fp9ICkjb8rD7dtjwQi
-# NPnU5It00CLmL6iqcin62XJR4QPFzAMl/33QwZMr86wm7b6iTBHk0E0OvCnapinr
-# bbdm+movtNOzNcGWi6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIPPxMgLqa+/KeYhVLy6Lq9LXBz7MnC9j59R7S00LQkeAMA0GCSqG
+# SIb3DQEBAQUABIIBgAOB7dYhesfaySk/vJvC9zy6gR/mfWYLiSZoPX8CxaSivpIe
+# sVQf7fa9mM0qj8IKXKQfJ8Yz74HZAOXK2GcqegOYEMKToZ2CFcNmYC24GHH0JYOF
+# Tsum6YpjIcMkuHokw2zQ/m0zXYjlvYEB96FjeC++M63Fn9bHxqqgGcihqZBPdQP0
+# Pm/0feVxfIGW8IBkgQ9O1XIufLOVFZ7K+A6zlnoL3URMpRAOkVWhPSkbii2Ft9Ge
+# dYygLExN76DTym1d8RAXljj2dKm6RgxOXmKM0pvywty4J8ggr8l3FvtPoXSe+ST+
+# UZXxcUcHPjsOyUyKzcYITWCqWJFOPxkj0Zi0fdg4HJwJqApxubq/w6LwLslXdOXx
+# OP74bC1XJHWp3SRbVGPfH+QkUwDEcxTFfGFokoQdgQtkOKP/py+ZoImLUYFi7BrL
+# I9c+wd9nKaIkfivRIp1Y+GiZHOtb3tLGGVD/VnPfAR8naQQnzYLx71bZk5TRuFKU
+# CZpaDdbcu05yQHIs+qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTMwODQz
-# NTRaMC8GCSqGSIb3DQEJBDEiBCAAK7sWU95dIijUwGIF8zUePsRTDxDKM5ewZzGR
-# pAnjGTANBgkqhkiG9w0BAQEFAASCAgB+BXKEOAQHCOWLOxnHwhSKWNnylEMqnoYr
-# 6aMV7r4WhJlL/FaXdALECWuQ8jZK1sKA+47eR1+chCmuBfOaS+UtO+P3qX88tYtX
-# hozF1AvPpeNogEN8JV/4gV3febZWXFTJeSBkir65HZa1k6YmEUWhioNizjv0XyE5
-# XuzGvXqoH8uBGBzhtIWn284oPlF0olPHMoKlHyllGWMA2ELBoNPQqsDO7OLOu4hY
-# ICijM2IETZmk97R+31D8ZJxC2dXhcULc0RbU5OhZVV9vU0hak2R9g2+IeX/UF7ql
-# /hbcydI/GxBt7Me7WJ19nKecKJUKztNrx3Ka2eBEKEBUuusr2jo5lSEk1a7WU7U/
-# Y6UPOqnt/kJ6Ld7HK0/kgqSmZYxhQ4s0iG4xDkHhtXULCy9d/eUwGMy32EUqYsMU
-# 9Y6jwLoiiuTZoYpR8iO69lnv1isDTjnzhw3++kklyCDd6tEC6+uc1On7HaTg6PYm
-# vJqXX5RYrx7YJJkdMWCm8Iq9yKsZUN65t7j5Qm5st7YJJSkYM8JYdJEMPV2x936w
-# LhDIscwhpVqruj2fHESuOcEje2KpQWb5mEbu8DIAL/sE+gZoL/NdvAa+gM6xxvx7
-# tszy144l2kz7+x8rB2M4AOaXKEdQxhEyAwKWf6k/9t2zGXI1/PmytGyrTRgodWci
-# GFGoV+QNJQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTMyMjQy
+# MTZaMC8GCSqGSIb3DQEJBDEiBCAcjgafs5xZEnOKKjaRC7znNcvcTgtAKFzRtVGf
+# C6fkEDANBgkqhkiG9w0BAQEFAASCAgAc/qoZBnZNqsL+b/k+L6D04E79NrGU5meb
+# r89LIWW7HdpP5Gz579+y6JKMWK0zFxA1OteomAHOtX6284sgNWw5UeuOkFrhHXWH
+# 2SuGU9+OqjhMRFDLDXkr/OxYtOjtKFY+gqu/lOGxg9jabTSGhhM03vQoYWALyO8b
+# lTe9eIZX/S9yAGMxhjN7NKtMx0wcRcCnOBWRx6SgrrmtZPAfX+Yw0JqqfedhBxe/
+# mIrctyBdK403lzUwEE6RAlGiA3iVtozpjAUx/nTDdG7x1FVMj1RlHWLP46zaqLKq
+# hu4CtQHISHHqK2ldK5+me3qd/2SIHPBgxS2Lye+z+EDzEnC2RNBn+WTgdm6Mi9a0
+# EsXY9wK0S20Eov/kTs+2gmuLpTbYl6kvmSscjF8m1r8T/AYZPJnH1sFT/pCCDs62
+# fkpnxyiAee22RVfKN3ZkavZt8t5v3kJenaTJ4OZo7Nyf/UfaXSiJelteSDsFHPvI
+# iJ/nk7dpENUFb6k5SZ5D13Hw0wqu290zKu7GYOLh95pv6rcrplkx6utvqno+hoOb
+# Z9Yg9fG6yYk/Zs77YXGmXNXsyAIM2Up/HkvC5s7nKeTmiTtV+S3P8kqnPXeEuUDH
+# N61dGy8b2+TQFhKc1xKwjhNcMPYc/u0n9NLyZFD3Ed46N3Hx/ZvdrnHoaMEpefRz
+# zuQ8y68CQA==
 # SIG # End signature block

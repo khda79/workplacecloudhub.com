@@ -1,0 +1,64 @@
+Intune operational prepared evidence (offline integration)
+========================================================
+
+Inputs: three optional, indivisible source groups from the Configurations,
+ManagedApps and EnrollmentFailures collectors. Their current source receipts
+must match the configured producer/version, tenant, complete file list,
+SHA256 hashes, row counts and completed publication. No collector is invoked.
+An absent entire group is Not supplied; an incomplete or inconsistent group
+fails staging without replacing the published batch.
+
+Receipt RunId and business CSV RunId are separate provenance identifiers.
+Business rows must share one run per source group. Equality with the receipt
+RunId is neither required nor assumed. Group age uses the existing preparation
+MaxSourceAgeHours/AgeOverrides; no hidden new freshness threshold is introduced.
+
+Outputs (the exact schema is in intune-operational-contract.json.txt):
+- Configuration policy catalog, setting metadata, assignments and current
+  reported policy/device observations. NativePolicyJson and SettingInstanceJson
+  are deliberately excluded, including configured secret values.
+- Managed application catalog/status summary, assignments and deployment
+  observations. This does not replace the discovered-application inventory.
+- Enrollment failure events and three source-group qualification observations.
+
+Grain and interpretation:
+- Catalog/assignment/current configuration keys use tenant-scoped technical IDs.
+- Deployment facts retain every source record through a key containing tenant,
+  business run, file hash and logical CSV record ordinal. Nullable users/versions
+  never cause records to collapse into an app/device total.
+- Enrollment events use tenant/EventId. Event DeviceId is NOT an Intune managed
+  device identifier. Only the supplied ManagedDeviceIdentifier is used for an
+  exact reference join; missing, ambiguous and unmatched IDs remain visible.
+- Assignments, exclusions and uninstall intent do not prove successful install
+  or application. NoReportRows and NotAssigned mean Not measured, not failure.
+- Reported policy/install status does not prove antivirus or EDR health.
+- Receipt scope flags are retained; ConfiguredOutputsOnly is not full inventory.
+- The source-reported current configuration table is used as-is, without adding
+  history rows. Current means producer selection, not a freshness/health promise.
+
+Time:
+- Collection and receipt timestamps must have explicit offsets.
+- Configuration LastModifiedTimeUtc originates in the report field
+  PspdpuLastModifiedTimeUtc. Offsetless ISO values normalize to UTC ONLY under
+  this explicit source-field contract, independent of host culture/time zone.
+- App LastModifiedDateTime has no established time-zone contract. Offsetless
+  values are preserved raw and their qualified UTC remains blank.
+- Invalid/future report times remain unqualified. They are not dated trends.
+- Event history must deduplicate tenant/EventId across snapshots. Never sum
+  snapshots as new enrollment incidents; this adapter stages a single snapshot.
+
+Data Trust reuses streamed, hash-verified profiles. File readiness is not scope
+coverage. The preparation manifest captures the source receipts, both run IDs,
+source hashes and the adapter contract hash for audit.
+
+Validation entry: scripts/Test-IntuneOperationalEvidence.ps1. Its fixtures are
+synthetic and isolated under the OS temporary directory. No operational data,
+collector, real preparation, SharePoint upload, orchestrator or Power BI is used.
+Approval to deploy/run preparation, transfer a batch and refresh the model are
+separate gates. No report/model changes are part of this integration.
+
+Legacy immutable batches without the nine Intune tables remain transferable
+under the corresponding legacy base/Endpoint Protection schema. Partial new
+file sets are rejected, and new Intune batches require the reviewed adapter
+contract hash in their provenance. This compatibility is tested with filesystem
+callbacks only, not with a SharePoint connection.
