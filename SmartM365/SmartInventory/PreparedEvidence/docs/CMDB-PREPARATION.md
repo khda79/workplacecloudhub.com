@@ -595,16 +595,18 @@ entries are rejected; existing native WorkplaceScope configuration is preserved.
 Other jobs and cluster configuration are retained. Publication uses the snapshot
 hashes to refuse concurrent configuration edits and verifies the resulting
 configuration by read-back. Repeating an identical application skips publication.
-The repository jobs template now carries both entries disabled, elected and
-marked `RequiresExplicitActivation`. No private worker name is stored there.
-The explicit helper can activate these marked entries on a verified pinned
-worker; an unmarked disabled WorkplaceScope job remains a review error.
+The repository jobs template enables the native WorkplaceScope entry as an
+elected daily job at 22:00 and CmdbEvidence-Prepare as an elected daily job at
+09:30 with `-Publish`. No private worker name is stored there. The explicit
+helper preserves already enabled native jobs and can qualify marked disabled
+entries on a verified pinned worker; an unmarked disabled WorkplaceScope job
+remains a review error.
 Private server names and paths belong in private runtime arguments.
 
 The template runs Teams at 03:30, SharePoint at 03:45 and Autopilot at 04:00
 daily to fit their unchanged 48-hour CMDB source-age limit. DiscoveredApps
 remains weekly (Saturday 20:00), with the existing 168-hour warning and 240-hour maximum.
-Disabled CMDB template preparation has one occurrence, 09:30, with `-Publish`;
+Enabled CMDB template preparation has one occurrence, 09:30, with `-Publish`;
 the deployment helper defaults to the same time. Intelligence preparation is
 separate at 09:00. Core sources, readiness and hybrid-identity analysis each
 have one daily occurrence; SyncHealth runs every two hours. See the complete

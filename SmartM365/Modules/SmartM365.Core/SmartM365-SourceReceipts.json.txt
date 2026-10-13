@@ -207,6 +207,40 @@
       "OptionalFiles": []
     },
     {
+      "Script": "SmartM365-IntuneConfigurations-Inventory.ps1",
+      "Receipt": "SmartInventory_SmartM365-IntuneConfigurations-Inventory.current.json.txt",
+      "Scope": "ConfiguredOutputs",
+      "Files": [
+        "Intune_ConfigurationPolicies.csv",
+        "Intune_ConfigurationSettings.csv",
+        "Intune_ConfigurationAssignments.csv",
+        "Intune_ConfigurationAssignmentStates.csv",
+        "Intune_ConfigurationDeviceStates.csv"
+      ],
+      "OptionalFiles": []
+    },
+    {
+      "Script": "SmartM365-IntuneManagedApps-Inventory.ps1",
+      "Receipt": "SmartInventory_SmartM365-IntuneManagedApps-Inventory.current.json.txt",
+      "Scope": "ConfiguredOutputs",
+      "Files": [
+        "Intune_ManagedApps.csv",
+        "Intune_ManagedAppAssignments.csv",
+        "Intune_ManagedAppInstallSummary.csv",
+        "Intune_ManagedAppDeviceStates.csv"
+      ],
+      "OptionalFiles": []
+    },
+    {
+      "Script": "SmartM365-IntuneEnrollmentFailures-Inventory.ps1",
+      "Receipt": "SmartInventory_SmartM365-IntuneEnrollmentFailures-Inventory.current.json.txt",
+      "Scope": "ConfiguredOutputs",
+      "Files": [
+        "Intune_EnrollmentFailures.csv"
+      ],
+      "OptionalFiles": []
+    },
+    {
       "Script": "SmartM365-Intune-EndpointSecurityHealth-Inventory.ps1",
       "Receipt": "SmartInventory_SmartM365-Intune-EndpointSecurityHealth-Inventory.current.json.txt",
       "Scope": "ConfiguredOutputs",

@@ -15,7 +15,7 @@ SmartM365 is organized as a set of independent but consistent projects. Some scr
 
 Local tenant configuration files are not committed. Use the committed templates to create local profiles before running tenant-based inventory or setup scripts.
 
-The SmartInventory orchestrator template uses a [single daily inventory cycle](SmartInventory/Orchestrator/DAILY-SCHEDULE.md): overnight core collection, morning analysis and preparation, two-hour SyncHealth monitoring and weekly long-running exceptions. Existing shared schedules require explicit configuration publication; template changes do not reschedule them automatically. CMDB integration entries remain disabled until explicitly qualified and activated.
+The SmartInventory orchestrator template uses a [single daily inventory cycle](SmartInventory/Orchestrator/DAILY-SCHEDULE.md): overnight core collection, morning analysis and preparation, two-hour SyncHealth monitoring and weekly long-running exceptions. Existing shared schedules require explicit configuration publication; template changes do not reschedule them automatically. WorkplaceScope and CMDB preparation are enabled in the template; CMDB preparation includes verified SharePoint publication.
 
 ## Content
 
@@ -102,14 +102,25 @@ Current Microsoft Graph application permissions include the read scopes used by 
 
 The Power BI and Microsoft Fabric activity collector uses a Power BI token with audience `https://analysis.windows.net/powerbi/api`. Interactive collection requires a Fabric Administrator with delegated `Tenant.Read.All` or `Tenant.ReadWrite.All`. App-only collection is authorized through the Fabric tenant setting **Service principals can access read-only admin APIs**, scoped to a security group containing the service principal; do not add admin-consent-required Power BI permissions to the app registration.
 
-The candidate `SmartInventory/M365Inventory/WorkplaceScope/SmartM365-WorkplaceScope-Inventory.ps1`
+The `SmartInventory/M365Inventory/WorkplaceScope/SmartM365-WorkplaceScope-Inventory.ps1`
 requires `Microsoft.Graph.Beta.Groups` and `Microsoft.Graph.Beta.DeviceManagement`,
 `Group.Read.All` and `DeviceManagementConfiguration.Read.All`. Hidden-membership
 groups additionally require `Member.Read.Hidden`; missing access blocks collection
 rather than reporting an empty group. Beta membership is used because Microsoft
 documents a service-principal omission in the v1.0 members endpoint. No application
-permissions are granted by this collector. It is not automatically scheduled until
-the CMDB source migration is qualified. Its completion receipt uses `.json.txt`.
+permissions are granted by this collector. Its repository template schedule is
+daily at 22:00; production activation still requires publishing the reviewed
+template. Its completion receipt uses `.json.txt`.
+
+Three independent Intune WorkplaceScope collectors cover configuration definitions
+and reported device states, managed app catalog/assignments/install states, and
+enrollment failures. They use Graph application permissions
+`DeviceManagementConfiguration.Read.All`, `DeviceManagementApps.Read.All`, and
+`DeviceManagementManagedDevices.ReadWrite.All` as applicable. The ReadWrite role
+creates temporary Intune export jobs; the collectors do not modify devices or
+policies. The repository template enables all three daily jobs. Report availability
+and production duration still require tenant-run qualification. See
+`SmartInventory/M365Inventory/WorkplaceScope/README.md` for source and status limits.
 
 Discovered-app inventory now covers all platforms. All-mode collection bypasses
 previous-run caches: equal counts do not prove equal device identities. Resumed or

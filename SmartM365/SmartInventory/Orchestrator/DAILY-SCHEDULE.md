@@ -47,6 +47,9 @@ editing the template.
 | M365-LicensePricing-Inventory | Daily 05:30 |
 | WorkplaceEvidence-Prepare | Daily 09:00 |
 | M365-WorkplaceScope-Inventory | Daily 22:00 |
+| Intune-Configurations-Inventory | Daily 04:30 |
+| Intune-ManagedApps-Inventory | Daily 05:00 |
+| Intune-EnrollmentFailures-Inventory | Daily 05:30 |
 | CmdbEvidence-Prepare | Daily 09:30 |
 | M365-SyncHealth-Inventory | Daily 00:20, 02:20, 04:20, 06:20, 08:20, 10:20, 12:20, 14:20, 16:20, 18:20, 20:20, 22:20 |
 | EXO-MigrationJobs-Inventory | Daily 06:00, 12:00, 18:00 |
@@ -80,8 +83,11 @@ a still-running full inventory can delay a daily Fast occurrence.
 
 The four existing disabled jobs remain disabled: BackupProtectedMailboxes,
 BackupPolicyScope, BackupProtectedSitesAndDrives and PowerBIFabricActivity.
-The public template also keeps WorkplaceScope and CmdbEvidence-Prepare disabled,
-with explicit activation required and no private execution server.
+The public template enables WorkplaceScope, the three Intune WorkplaceScope
+collectors and CmdbEvidence-Prepare. They use elected Graph-capable workers;
+no private server is stored in the template. CMDB preparation includes
+`-Publish` at 09:30. The three new jobs do not change its 17-producer
+dependency set.
 
 ## Dependencies and freshness
 
@@ -115,7 +121,10 @@ In particular, AD's observed duration does not imply error-free domain coverage.
 | M365-Licences-Inventory | 90 |
 | AD-Inventory | 120 |
 | Exchange2016-Local-Mailboxes-Inventory | 150 |
-| M365-WorkplaceScope-Inventory | 270 |
+| M365-WorkplaceScope-Inventory | 360 |
+| Intune-Configurations-Inventory | 30 |
+| Intune-ManagedApps-Inventory | 60 |
+| Intune-EnrollmentFailures-Inventory | 10 |
 | Intune-DiscoveredApps-Inventory | 1500 |
 | EXO-Mailboxes-Inventory-Fast | 90 |
 | EXO-Mailboxes-Inventory | 1200 |
