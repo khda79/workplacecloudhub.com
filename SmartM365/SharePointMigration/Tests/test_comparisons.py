@@ -31,6 +31,7 @@ GLOBAL = load('build_global_report')
 GLOBAL_PERMISSIONS = load('build_global_permissions_report')
 EVIDENCE = load('scan_evidence')
 HTML = load('report_html')
+HISTORY = load('comparison_history_chart')
 
 
 class InventoryCompletenessTests(unittest.TestCase):
@@ -369,6 +370,72 @@ class PermissionComparisonTests(unittest.TestCase):
 
 
 class HtmlReportTests(unittest.TestCase):
+    def test_file_history_shows_every_prior_run_and_marks_unavailable_or_stale_results(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / 'comparisons' / 'files'
+            runs = [root / f'Example-files-2026100{day}-100000-run{day}' for day in range(1, 5)]
+            for run in runs:
+                run.mkdir(parents=True)
+            rows = [
+                {'SourceUniqueKeys': '10', 'MatchedKeys': '2', 'SuccessPercent': '', 'ScanEvidenceStatus': 'Unknown'},
+                {'SourceUniqueKeys': '10', 'MatchedKeys': '5', 'SuccessPercent': '50.00%', 'ScanEvidenceStatus': 'Verified'},
+                {'SourceUniqueKeys': '10', 'MatchedKeys': '7', 'SuccessPercent': '70.00%', 'ScanEvidenceStatus': 'Stale'},
+                {'SourceUniqueKeys': '10', 'MatchedKeys': '9', 'SuccessPercent': '90.00%', 'ScanEvidenceStatus': 'Verified'},
+            ]
+            for run, row in zip(runs, rows):
+                with (run / 'Example-Summary.csv').open('w', newline='', encoding='utf-8') as handle:
+                    writer = csv.DictWriter(handle, fieldnames=list(row), delimiter=';')
+                    writer.writeheader()
+                    writer.writerow(row)
+                (run / 'Example-summary.html').write_text('historical report', encoding='utf-8')
+            current_html = runs[2] / 'Example-summary-20261003.html'
+            FILES.create_file_html_summary(current_html, 'Example', rows[2], [], [])
+            report = current_html.read_text(encoding='utf-8')
+            self.assertIn('3 comparisons; 1 unavailable', report)
+            self.assertIn('50.00%', report)
+            self.assertIn('70.00%', report)
+            self.assertNotIn('90.00%', report)
+            self.assertIn('N/A = unavailable, not 0%', report)
+            self.assertIn('Stale or unverified', report)
+            self.assertIn('../Example-files-20261002-100000-run2/Example-summary.html', report)
+            self.assertLess(report.index('comparison-history:start'), report.index('id="run-context"'))
+
+    def test_permission_history_uses_matched_over_source_and_keeps_scopes_separate(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / 'comparisons' / 'permissions'
+            runs = [root / f'Example-permissions-2026100{day}-100000-run{day}' for day in range(1, 4)]
+            for run in runs:
+                run.mkdir(parents=True)
+                (run / 'DocumentLibraries').mkdir()
+            rows = [
+                {'SourceUniqueKeys': '10', 'TargetUniqueKeys': '10', 'MatchedPermissions': '2', 'ScanEvidenceStatus': 'Verified'},
+                {'SourceUniqueKeys': '10', 'TargetUniqueKeys': '0', 'MatchedPermissions': '0', 'ScanEvidenceStatus': 'Stale'},
+                {'SourceUniqueKeys': '10', 'TargetUniqueKeys': '10', 'MatchedPermissions': '3', 'ScanEvidenceStatus': 'Verified'},
+            ]
+            for run, row in zip(runs, rows):
+                for folder, values in ((run, row), (run / 'DocumentLibraries', dict(row, MatchedPermissions='8'))):
+                    with (folder / 'Summary.csv').open('w', newline='', encoding='utf-8') as handle:
+                        writer = csv.DictWriter(handle, fieldnames=list(values))
+                        writer.writeheader()
+                        writer.writerow(values)
+            html_path = runs[-1] / 'Example-summary.html'
+            PERMISSIONS.create_permission_html_summary(html_path, 'Example', rows[-1], [], [], [])
+            report = html_path.read_text(encoding='utf-8')
+            self.assertIn('20.00%', report)
+            self.assertIn('30.00%', report)
+            self.assertIn('N/A = unavailable, not 0%', report)
+            self.assertNotIn('80.00%', report)
+
+            scoped_path = runs[-1] / 'DocumentLibraries' / 'Example-summary.html'
+            PERMISSIONS.create_permission_html_summary(scoped_path, 'Example libraries', rows[-1], [], [], [])
+            scoped = scoped_path.read_text(encoding='utf-8')
+            self.assertIn('80.00%', scoped)
+            self.assertNotIn('<td class="num">20.00%</td>', scoped)
+
+            self.assertTrue(HISTORY.refresh_history_in_existing_html(html_path, 'permissions'))
+            self.assertTrue(HISTORY.refresh_history_in_existing_html(html_path, 'permissions'))
+            self.assertEqual(html_path.read_text(encoding='utf-8').count('comparison-history:start'), 1)
+
     def test_public_branding_template_has_no_client_logo(self):
         template = json.loads((ROOT / 'Config' / 'report-branding.json.template').read_text(encoding='utf-8'))
         self.assertEqual(template['ClientLogoPath'], '')
@@ -591,6 +658,7 @@ class HtmlReportTests(unittest.TestCase):
             shutil.copy2(COMPARE_DIR / 'report_html.py', Path(directory) / 'report_html.py')
             shutil.copy2(COMPARE_DIR / 'scan_evidence.py', Path(directory) / 'scan_evidence.py')
             shutil.copy2(COMPARE_DIR / 'comparison_artifacts.py', Path(directory) / 'comparison_artifacts.py')
+            shutil.copy2(COMPARE_DIR / 'comparison_history_chart.py', Path(directory) / 'comparison_history_chart.py')
             shutil.copy2(ROOT / 'Scripts' / 'console_lifecycle.py', Path(directory) / 'console_lifecycle.py')
             portable_python = ROOT / 'Tools' / 'Python' / 'python.exe'
             executable = str(portable_python if portable_python.is_file() else sys.executable)

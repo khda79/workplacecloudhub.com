@@ -17,6 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from report_html import metric_card, render_report
 from scan_evidence import describe_pair, manifest_path
 from comparison_artifacts import artifact_name, find_artifact
+from comparison_history_chart import render_history_section
 
 
 def verified_empty_target_scan(path, target_rows):
@@ -433,7 +434,9 @@ def create_file_html_summary(path, title, summary, library_summary_rows, report_
         "this may be expected before a copy.</dd>"
         if summary.get("TargetEmptyVerified") else ""
     )
+    history_html = render_history_section(path, "files")
     body_html = f'''
+  {history_html}
   <section class="section" aria-labelledby="run-context">
     <div class="section-heading"><h2 id="run-context">Run context</h2></div>
     <dl class="context">

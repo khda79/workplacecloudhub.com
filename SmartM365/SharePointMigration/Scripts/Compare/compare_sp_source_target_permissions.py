@@ -18,6 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from report_html import metric_card, render_report
 from scan_evidence import assert_inventory_complete, describe_pair
 from comparison_artifacts import artifact_name
+from comparison_history_chart import render_history_section
 
 
 def print(*args, **kwargs):
@@ -542,7 +543,9 @@ def create_permission_html_summary(path, title, summary_row, permission_summary_
     if not scope_rows_html:
         scope_rows_html.append('<tr><td colspan="3" class="empty">No scope summary rows.</td></tr>')
 
+    history_html = render_history_section(path, "permissions")
     body_html = f'''
+  {history_html}
   <section class="section" aria-labelledby="run-context">
     <div class="section-heading"><h2 id="run-context">Run context</h2></div>
     <dl class="context">
