@@ -101,7 +101,7 @@ detailed tables for the last 24 hours and 7 days, then exits without acquiring t
 lock or launching inventory jobs.
 
 .VERSION
-1.5.50
+1.5.51
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -114,7 +114,7 @@ lock or launching inventory jobs.
     inside its own child process.
 
 .NOTES
-    Version : 1.5.50
+    Version : 1.5.51
     Author: https://github.com/khda79/workplacecloudhub.com
     Exit codes: 0 = normal end (recycle, DryRun, Once, summary sent), 1 = fatal error or summary send failure,
     2 = configuration or manifest error at startup, 3 = another live instance holds the lock,
@@ -151,7 +151,7 @@ $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -Requi
 try {
 $ErrorActionPreference = 'Stop'
 
-$ScriptVersion = "1.5.50"
+$ScriptVersion = "1.5.51"
 $ScriptName = 'SmartM365-Inventory-Orchestrator'
 $global:SmartM365ScriptFileName = [System.IO.Path]::GetFileName($PSCommandPath)
 $global:SmartM365ScriptVersion = $ScriptVersion
@@ -1708,6 +1708,12 @@ function Get-OrchestratorDependencyFreshStatus {
         [Parameter(Mandatory = $true)][datetime]$Now
     )
 
+    # Pinned jobs have no elected claims. Never let a cached receipt hide an active remote run.
+    if ($DependencyJob.AssignmentMode -eq 'Pinned') {
+        return (Get-SmartM365OrchestratorPinnedDependencyReadiness -SharedDataFolderPath $script:Settings.SharedDataFolderPath `
+            -Job $DependencyJob -Now $Now -MaxAgeHours $MaxAgeHours -ProfileKey ([string]$global:SmartM365ProfileKey) `
+            -HeartbeatStaleMinutes $script:Settings.PeerHeartbeatStaleMinutes).State
+    }
     # Evaluated every tick while a dependent waits: cache results to limit shared-storage reads.
     $cacheKey = '{0}|{1}' -f $DependencyJob.Name, $MaxAgeHours
     if ($script:DependencyFreshCache.ContainsKey($cacheKey) -and $Now -lt $script:DependencyFreshCache[$cacheKey].Until) {
@@ -5382,6 +5388,13 @@ function Invoke-LaunchPhase {
                 $depJob = $null
                 if ($script:Manifest.JobsByName.ContainsKey($dep)) { $depJob = $script:Manifest.JobsByName[$dep] }
 
+                if ($null -ne $depJob -and $depJob.Enabled -and $depJob.AssignmentMode -eq 'Pinned' -and $job.DependencyMode -eq 'FreshSuccess') {
+                    $pinnedStatus = Get-OrchestratorExternalDependencyStatus -Job $job -DependencyName $dep -Now $Now
+                    if ($pinnedStatus -eq 'Ready') { continue }
+                    $deferred = $true
+                    $blockingDependencies.Add(("{0} (pinned producer not ready)" -f $dep))
+                    continue
+                }
                 if ($script:Settings.DistributedSchedulingEnabled -and $null -ne $depJob -and $depJob.Enabled -and $depJob.AssignmentMode -eq 'Elected') {
                     if ($job.DependencyMode -eq 'FreshSuccess') {
                         $maxAgeHours = Get-OrchestratorDependencyMaxAge -DependencyJob $depJob -OverrideHours ([int]$job.DependencyMaxAgeHours) -Now $Now
@@ -6946,8 +6959,8 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBWCFXWwgatzRHO
-# bJShtoMciKdJHPNdDQaxOqJBwj6NlKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAadPKKoIl23/8n
+# S57Bhhm6Jpev3IVF+8ZxfO3vWkIaL6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -7080,31 +7093,31 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIO4y6OHAz1fN03SgfKxl555npNKQKSqRE3kDT2k8N6mEMA0GCSqG
-# SIb3DQEBAQUABIIBgGVtuZw3VLXYdgUNgqx0RC749sg3PMzYdZriaboc2cvPNmc1
-# +SGoTfvdPywdF+jmcZYDl44vi8fO60+VyFl8kiQSX5xrX3Ds8I6ACzbd/rwsZEZq
-# RepGFHoMhZ7BCnag0ZNoEpJIIVuGeqanL+8esxc/urPT0g1OYtiVUT4p8dx+EbUa
-# dQHxj7bMtBKLBhF/7xpxIifJiAFgXE5lTNTgazs/vBAN8iWF8Vmq5rn38Hlx6f7g
-# ewAOqx+EtWQFWDudZnqr8WBnve9FVY00sgcpFn5sYdi5lzonpnF8r8w7XKPFI4od
-# +AkPjDjrjcSksV6OHWnXgAh0i/0pwIjJpB/7w1liGg+G36bbAzABsjQqg+HYVHY/
-# X/SsfC6h1htFShn7pQ0mMbpG4csqNKMZ9+BceDaCZhgg6rTc0K5Acrao9pY+P0es
-# 6PU2+8FnM21/cGpy80DKSrECjzaov/uFLhTjEO7nbNYFBTRpDs+C4fy/uuolqlWm
-# VeiStX+mMdtvMFT9QqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEICwu7rR8tN8W4ebrGkj2CWZSbGc7V18eMFgNFF/JsTtQMA0GCSqG
+# SIb3DQEBAQUABIIBgK9UrzMLywg8eNWg7vhxwpgCewcoySEv6+9jA579SB0gyYLC
+# 2bkEDctJ/xSdjTr6JfyK2crmgUQdNoF0jgh9TpuupkcNHCpYDuuLS8kOymEDbMkU
+# Bb3WjCQuN8c9fTaxrcz7bGvTLohG5k+BMcY9JHwL2m08TCfq4NsNeVyjoO7vh5m6
+# 9H9Er4/TL0qBXeF2J5DtEPgD8/JkB/vlAvyx3xhbavTtFkGnpTipDnt+WEBX6Qo8
+# Pflu0K67rQZoXnn1XExDVQGZCUFGGCewBMIcEajsKxosFaCAAFkVk9keUUBp63pD
+# HiVH3sQPPOiEfYaHj7AH51l0zrjhGDJsPIIdGBq81ejV44B9mUmSizdlQbbqlBpH
+# Fv8ufvNdkbbzgMuUcmO9+pk+i8oUnBR0zVO4zzcIzi73x7WjBr/5UKFmyac9eDzp
+# GeLeii0WFIoYcYhcMsaexabcurhSyBh/J5zuIDg2mz6AY20w76ZyC/08af+qvr1O
+# jf9k5n1sLpBss6IVjKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTQxNTMw
-# MzlaMC8GCSqGSIb3DQEJBDEiBCCSOFyoSTM7TQFE2ywOigIS3t8h4GaFeuU1GF/R
-# WeEYvzANBgkqhkiG9w0BAQEFAASCAgCAARSx4XjGLWP8aqVvPFlCdBTqjZwwinRr
-# 7IqTveyzWETifQx7zHvzZ0nJR1G0H/dMR95wXyAOAEakOB2kYNQzy8ZDo5im1Blm
-# 8VJHlShR/Xk0dbMXwSPhZRe3I1JxBf2Llr63KekYhJG7Lz+I+25CRM4YhLmPZzOC
-# MAHkm0KSs4e589T2IEkV3iVtm2rSd2mU+QGr4BLUNTKVN0TaIXrIqXfkNd9ku65B
-# XIcLefwslLl8/71ru0D3xoCoryQMmqmS7DNw1kCFJcqXfIi6wrgBtwD80HPSj6+0
-# 41ZvWWeNS3wtNSzbsIzz98LZlkuXe1JF46/3kw065J3hJk6t/jbE4dENXp2utyDr
-# HSCUjZfVV/E9UT/0bL0tmbFxUgA+qksKty3uP2r3XOdZyrh9WiXQj1KaBntsg6ZA
-# /sejrdmxFf+A+WOtD4UEv7Q/srrA7Vfun5oP6P0eCXV+QmeaqSU2RvW/ddxn31Dn
-# yN3vwH6oNzgu2vt09lmUZDrP23e3s7d9w0cUMAkJ5F9jsQvJWayZNZFndpsxT+KA
-# THReNzf3BySKFi0tSkPgISvsqhDvi8EVApBGmqkPYxX3lNZ7kUqhHFyv1ui5aeHu
-# ujeSldQy27wQvAbKq4O7l+6vLB4Q2bJOVOZxFa1m33yQgLf473ing9RIic/azE2L
-# q0lQFjn+7Q==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTQyMjE1
+# NTNaMC8GCSqGSIb3DQEJBDEiBCCa4chLuSHj5iNghvyvlNhM3cB2t7L/Qdw3R9fz
+# 7gpYpDANBgkqhkiG9w0BAQEFAASCAgBClE+umb0eryWNARI4LuL1Gl/ZxZowcdQY
+# nnMTm+zxqGhm2++bt7HbEn+LvmF+yUsN5DMXcitFZ6jedUpYMfbUR6Gh1dDeYudF
+# YZFoYR3BPXCOH/c+5jGQkFOtGTjCcCx3WXl4rALTj9j3ijBs9VWsajwfyjtoHu51
+# pphhCsd1+jUstauunanAMkJH9NYD/xNIjZKK/QOuOns653irfvP9jOBxtSQuY2+V
+# U0EOK/FAoDPFEAoW+3Xf+VYBmz/FVIq/9oIo1eYaxWSoJ7xQ07gGFRheXcWi0Pxq
+# jENp2wlFnZwN1z3FlbKMWkOakGqR2dZlt5mYy4vglfeS/68swmhHuxgRRaFetGbo
+# Io/dfcc3lp1PB+ReCL1BX0Lzmh7jnhacbEYDvGerjuu2XjVSRoEhMQXlmQTE6mj8
+# oLfUnSNLa4XFmWf1VSpm0LAcVBgURAPAsC09wdjVbGmuJ0w+lLC5V6IQPnH8iTX3
+# J5Ru5Z7qMMq+Ol9fG/MvfFn3Szo1eDE4zl91AsinNRCOrihSKUHm+Cg21mupoUB7
+# r2dOvFBMsHgV9PeuvtXC8FKexLkrPT5DGWjM8aaNMlTtQ7ZpizN+iMhFfhSVD40L
+# /709cN2E5nnz1lXL2YSJ6ooEq9nq95AnBVGuUr7byUO51/mTG4ycoyM4lyZXmOZJ
+# AtOGd7BjXg==
 # SIG # End signature block
