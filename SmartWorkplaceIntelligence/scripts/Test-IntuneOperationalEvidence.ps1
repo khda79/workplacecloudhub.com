@@ -61,6 +61,17 @@ function Write-Fixtures {
 function Build([string]$Suffix){New-IntuneOperationalEvidence -LastRoot $last -OutputRoot (Join-Path $testRoot $Suffix) -TenantKey 'synthetic-test' -AsOfUtc $now}
 function Validate {Test-IntuneOperationalSnapshot -LastRoot $last -TenantKey 'synthetic-test' -AsOfUtc $now}
 function Edit-Receipt($Group,[scriptblock]$Action){$p=Join-Path $last $Group.receipt;$r=Get-Content $p -Raw | ConvertFrom-Json -AsHashtable;& $Action $r;$r | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $p -Encoding utf8}
+function Test-TrustExport($Rows,[string]$Name,[bool]$ExpectedPass=$true) {
+    $root=Join-Path $testRoot ('trust-'+$Name)
+    $null=New-Item -ItemType Directory -Path $root
+    $Rows | Export-Csv -LiteralPath (Join-Path $root 'DataTrustEvidence.csv') -NoTypeInformation -Encoding utf8
+    $report=Join-Path $root 'validation.json.txt'
+    & (Get-Process -Id $PID).Path -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Test-PreparedEvidence.ps1') -Root $root -Tables 'Data Trust Evidence' -ReportPath $report | Out-Null
+    $exitCode=$LASTEXITCODE
+    $validation=Read-IntuneOperationalJson $report
+    Assert ($validation.Passed -eq $ExpectedPass -and $exitCode -eq $(if($ExpectedPass){0}else{1})) ('Final Data Trust contract '+$Name+': '+($validation.Errors -join '; '))
+    return $validation
+}
 try{
     Reset-Fixtures;Write-Fixtures
     $result=Build 'valid'
@@ -89,6 +100,52 @@ try{
     $trust=@(ConvertFrom-IntuneOperationalAudit -Audit $audit -AsOfUtc $now)
     Assert ($trust.Count -eq 12) 'Data Trust reuses all twelve verified profiles'
     Assert (@($trust | Where-Object 'Evidence Status' -ne 'Reported source scope only').Count -eq 0) 'Data Trust has bounded source status'
+    $null=Test-TrustExport $trust 'fractional-day'
+    Assert (@($trust | Where-Object {$_.'Evidence Age Days' -isnot [long] -or $_.'Evidence Age Days' -ne 0}).Count -eq 0) 'Two-hour observations export zero completed days as Int64'
+    # Integer display must not round freshness/readiness across the existing exact thresholds.
+    $ageCases=@(
+        @{Age=0.0;Days=0L;Freshness='Fresh';Readiness='Ready'},
+        @{Age=(1.0-1.0/1440);Days=0L;Freshness='Fresh';Readiness='Ready'},
+        @{Age=1.0;Days=1L;Freshness='Fresh';Readiness='Ready'},
+        @{Age=(7.0-1.0/1440);Days=6L;Freshness='Fresh';Readiness='Ready'},
+        @{Age=7.0;Days=7L;Freshness='Fresh';Readiness='Ready'},
+        @{Age=(7.0+1.0/1440);Days=7L;Freshness='Aging';Readiness='Ready'},
+        @{Age=(30.0-1.0/1440);Days=29L;Freshness='Aging';Readiness='Ready'},
+        @{Age=30.0;Days=30L;Freshness='Aging';Readiness='Ready'},
+        @{Age=(30.0+1.0/1440);Days=30L;Freshness='Stale';Readiness='Refresh required'},
+        @{Age=31.0;Days=31L;Freshness='Stale';Readiness='Refresh required'}
+    )
+    foreach($culture in @('en-US','fr-FR','tr-TR')) {
+        $before=[Globalization.CultureInfo]::CurrentCulture
+        try {
+            [Globalization.CultureInfo]::CurrentCulture=[Globalization.CultureInfo]$culture
+            $allTrust=[Collections.Generic.List[object]]::new()
+            foreach($case in $ageCases) {
+                $ageAudit=$audit | ConvertTo-Json -Depth 15 | ConvertFrom-Json @jsonArgs
+                foreach($file in $ageAudit.Files){$file.Stats.LatestCollectionUTC=$now.AddDays(-$case.Age).ToString('O')}
+                $ageTrust=@(ConvertFrom-IntuneOperationalAudit -Audit $ageAudit -AsOfUtc $now)
+                Assert ($ageTrust.Count -eq 12) ('All source profiles retained at age '+$case.Age)
+                foreach($row in $ageTrust) {
+                    Assert ($row.'Evidence Age Days' -is [long] -and $row.'Evidence Age Days' -eq $case.Days) ('Completed-day export '+$culture+'/'+$case.Age)
+                    Assert ($row.'Freshness State' -eq $case.Freshness -and $row.'Decision Readiness' -eq $case.Readiness) ('Unrounded age thresholds '+$culture+'/'+$case.Age)
+                    $allTrust.Add($row)
+                }
+            }
+            $null=Test-TrustExport $allTrust ('boundaries-'+$culture)
+        } finally {[Globalization.CultureInfo]::CurrentCulture=$before}
+    }
+    # The unchanged validator must still reject the pre-fix fractional export.
+    $legacyTrust=$audit | ConvertTo-Json -Depth 15 | ConvertFrom-Json @jsonArgs
+    $legacyRows=@(ConvertFrom-IntuneOperationalAudit -Audit $legacyTrust -AsOfUtc $now)
+    foreach($row in $legacyRows){$row.'Evidence Age Days'=0.08}
+    $legacyValidation=Test-TrustExport $legacyRows 'legacy-fractional' $false
+    Assert ($legacyValidation.Errors.Count -eq 1 -and $legacyValidation.Errors[0] -eq 'Invalid DataTrustEvidence.csv: duplicate keys=0, invalid values=12') 'Pre-fix twelve invalid ages remain rejected'
+    $emptyFileAudit=$audit | ConvertTo-Json -Depth 15 | ConvertFrom-Json @jsonArgs
+    foreach($group in $emptyFileAudit.Groups){$group.CompletedUTC=$now.AddHours(-23).ToString('O')}
+    foreach($file in $emptyFileAudit.Files){$file.Rows=0;$file.Stats.LatestCollectionUTC=''}
+    $emptyFileTrust=@(ConvertFrom-IntuneOperationalAudit -Audit $emptyFileAudit -AsOfUtc $now)
+    Assert ($emptyFileTrust.Count -eq 12 -and @($emptyFileTrust | Where-Object {$_.'Evidence Age Days' -isnot [long] -or $_.'Evidence Age Days' -ne 0 -or $_.'Freshness State' -ne 'Fresh'}).Count -eq 0) 'Allowed empty files use receipt completion, with integer days'
+    $null=Test-TrustExport $emptyFileTrust 'empty-files'
     # Exercise source selection/capture with isolated fixtures only. No pipeline run.
     Import-Module (Join-Path $PSScriptRoot 'PreparedEvidencePipeline.psm1') -Force
     $sourceContract=Join-Path $testRoot 'sources.json.txt'
@@ -108,6 +165,7 @@ try{
     Assert ($LASTEXITCODE -eq 0) 'Staging entry point accepts isolated synthetic source and policy'
     $entryAudit=Read-IntuneOperationalJson (Join-Path $entryRoot 'IntuneOperationalAudit.json.txt')
     Assert (@(ConvertFrom-IntuneOperationalAudit -Audit $entryAudit -AsOfUtc $now).Count -eq 12) 'Serialized staging audit preserves UTC for Data Trust'
+    $null=Test-TrustExport @(ConvertFrom-IntuneOperationalAudit -Audit $entryAudit -AsOfUtc $now) 'serialized-audit'
     foreach($value in @('2026-01-02T09:00:00Z','2026-01-02T10:00:00+01:00','2026-01-02T04:00:00-05:00')){Assert ((ConvertTo-IntuneEvidenceTime $value -AsOfUtc $now).UTC -eq '2026-01-02T09:00:00.0000000Z') 'Explicit offsets equivalent'}
     foreach($culture in @('en-US','fr-FR','tr-TR')){
         $before=[Globalization.CultureInfo]::CurrentCulture
@@ -206,6 +264,8 @@ try{
     $emptyAudit=$empty | ConvertTo-Json -Depth 15 | ConvertFrom-Json @jsonArgs
     $trust=@(ConvertFrom-IntuneOperationalAudit -Audit $emptyAudit -AsOfUtc $now)
     Assert ($trust.Count -eq 3 -and @($trust | Where-Object 'Decision Readiness' -ne 'Optional unavailable').Count -eq 0) 'Missing groups not blocking unrelated sources'
+    Assert (@($trust | Where-Object {$null -ne $_.'Evidence Age Days'}).Count -eq 0) 'Unavailable source ages remain null, not zero'
+    $null=Test-TrustExport $trust 'absent-groups'
     foreach($table in $spec.tables | Where-Object {$_.ContainsKey('source')}){Assert (@(Import-Csv (Join-Path $testRoot ('absent/'+$table.file))).Count -eq 0) 'Absent group tables header-only'}
     $contractPath=Join-Path $testRoot 'output-contract.json.txt';@{tables=$spec.tables} | ConvertTo-Json -Depth 15 | Set-Content -LiteralPath $contractPath
     foreach($name in @('valid','limits','absent')){
@@ -222,8 +282,8 @@ try{
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAB1s/PmvNtYks2
-# wCa7q8wGqqibqZNl7Z43eqPQdYU37aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDO4+wITT+4w7mg
+# NaXvxTaTqR6ge+OdNxcoG+aet8WJpKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -356,31 +416,31 @@ try{
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEICguvCxJjwW/X5RYQbSl1X/5pb+rTVuOlSztFh/hzx+eMA0GCSqG
-# SIb3DQEBAQUABIIBgGpPDV+O8eSfOblf6YoMvkiMVrTKZNcq0VukeC8M3xsM6PRC
-# KJ4S4F/tcfNyy9CklsA2273d/E6QCds9qWO2MOiztpkTAbefagyywIEzfJ5Vi01f
-# HeT9ofcT7IeQPHTNWLUurU8mnm+bSc7sinZxolslY0DeV9z3An4F5Mxfov2HgNFs
-# s/hnu4sH1szcpRpTp9vhZWkOkPg74Enl0zv0q5cymRuSxdkISHean++sFF58+XT9
-# 1gviVx2zGtRrW4CoM76OEOYYoWzBiF6cKYP/Q5Uu371k8hL+qsrw4WFTXtPWeItN
-# Ty8u9PryHrI2sZFd035ZU2KM18nKeIHxnFcxVWdNmGb7jZ3+9Ob3UPSDoPdIcU14
-# VHCI5/MtRgP3cVyOvFOluWfgPnGNTn2KkKSHj7+gnkYABqlVC+VPytj+gbB6FBqK
-# TmZ5HMZeRgRePdVhY4uXejuU0qgTCC9iUxhlBdajNLShAeHlpVPAwnW/c6unw2Cs
-# muSuvUfeUOxHviKKdKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIDtzDTUXre8pbxJQ00jf4nC8Q2cZHxgFBKrvFT1Gn7o7MA0GCSqG
+# SIb3DQEBAQUABIIBgHb52wf/bZsPqQNuq0PoVdH5469T99x1bPxDlsYG2HPneyav
+# Ni0snsj6xH6JwARvA6AdtcXn4A2+BcdP2DiLVdHPJc7F3vUB2Uvl7MFIKjERQOoW
+# oGxn0EkOjS6nB2/COMVQC4GPdSwo7LeaTGRRprkNiMuWcfounUBE9XjjyYv3BuY6
+# /snAQlufsSdrKsONFCuKLnxUBX7lZcr5Xzc2L2aXlj7i4UtZTTcM5Xwk5pqTNHtp
+# ZvPBad0SMKXGrOAw12Ka8afW5Ug6oDzTuAqGwfE/pLFefSQVj7aHqIkWJstrf1OI
+# 6Hhc+bseBy+Pq2N5T20Azk273JNCj+jOsl82V7+6XKzRD51UKsfwgVJj1GlxPgA8
+# 8eHp9cJymVoBMtA5NQ9jQ85Txm/X5n9X3Taj2ksUnjv8KEwhZgaHX5bLvYfsFOVc
+# mVBC64N9wIs1Yl4nQ2kRzNFUq/o4LN023+2qpVufQI6DoBkLKVowqTWeFV7KyHkU
+# kS71Z//YwWfJYGVRnqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTMyMjQ0
-# NTZaMC8GCSqGSIb3DQEJBDEiBCDKRHoulYutWYl/bk26Dvvb2+b5Mq4oYC0BQTWP
-# PAQfvDANBgkqhkiG9w0BAQEFAASCAgCUxNV97G6PXFjAK20MGnPu9qLX76ZQYT99
-# xuVp14cb5pa2+05s+gtjKd74Qfop9QLGlk4kVtBYRHj8hvHjJ0iTpGcRBiEzmKXj
-# 4iZfwCPRI7INoEeAa3NNmTUlTbJr482gYKDtlmbzXorL1vdmRkiR7WHp4fg/9o/+
-# fTY0XjVkN5ZoDjn8TMA19LnPLpd3+chITW3KsNYi1pkHmfm7hm8uRlhgklxWV4OD
-# G9XmkfD1ukamxb7dMP5nm0QxJmWKzIgiorEYs/8+R6J/lMBWIQZtb86tD13dmVQh
-# pkDDPWQLpo7+Nd3qRcMxQlHi+vtKwexKbRlpvXN5+H/JZiifgAwDG4/y9r4Wtam4
-# gbciotj0hEH6nLq2xJXCMjxlzsfQVe2QKW3U5GdVfcYyCHx4PpikuymNI2GcpFFj
-# dTN93OLOMR3Dm/wy4TpAtTG6yqOv5Yvep/mEEDDjU0WrjTO0qnzPMLa3g59EWyoi
-# tyep3EbOZRHbmxMq0jlDdhXFHt16r+Aj9KNh18HG3h8TPHXsg46hy+kh92TbHVdi
-# nFuhWBwRIvKH5X66pVFOL4sAEY8eiK0QquV+ls4fywOMB5v4hsQccovryp8mALn3
-# sWIEcW6uMB1F1G+no3iX2/NGKSag+ifDkP7VlViXf7C7w5UFec/5Ks0x6K40H1Sh
-# yHSXGsaBbw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTQxMTI3
+# NTFaMC8GCSqGSIb3DQEJBDEiBCAIFhctJzpiIMTxqijjcmAonfxNl27vFxQfe1dA
+# NezJGjANBgkqhkiG9w0BAQEFAASCAgBBjFn8kfe98wQDWLJdik6zZreCenLyWZHn
+# FkkhPMayvpiuvjAOuvFZ1+JnC/8YUKzDHz1CG3feVu/N7ILEkRAZEWQAbXDUvy27
+# +FZsbn8KMDiIT/6iMdYvXdpsMMzY7ob5DdH/DsvHuSvKQBYkKbqhIdKKgcbVV5/I
+# gkKqfY62vWRB6pQQUJSOiMRsgI5rbDIBV5hkEVY2DZXEg2VwYnYqbiiClOFMfqog
+# zOTum6+xbmPUB+k1N21LuQaqNU15EB0/9PL/pihFFm7N6PmgWQ9SSMGLEBdaN+Qp
+# jPIEu+GOHXFK0p68ZNeTAFK1sjID4BbdOyVW+XV6Y6mBNwEbxfp+I43qI3CA8ngB
+# iYIvPvlZUaIalkpagGp8DEME8mzlE6w6duWgTe1jZ7k4H3XaKHdGLAFz2Du60ybL
+# kUx6prPg+d3VQ8ErUp+yHkqcv+31ewOyU3woJDeJxS5G74HxXFQbmAtfWyeW6oEA
+# mV0agn/AMCCcX5/hf4ow2szmWEwiLLBGSertfttS02eXVcEV5ESNAgpTHIvJcVxq
+# evrPT4lLzBGmZkANKUs3mIaCmwPGL14xDahqTvtNdwbdZ0mvrxPpSK0oo9KTa7qB
+# 67fKfQdTi6D34TtPP2wFb/aRdxETHocrsCaJK9zqfh5bzQkphki7PplchyprO4b2
+# KE4T1Tu/5g==
 # SIG # End signature block
