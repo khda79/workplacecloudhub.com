@@ -4,10 +4,10 @@
   "position": {
     "x": 1552,
     "y": 8,
-    "z": 104,
-    "height": 80,
     "width": 168,
-    "tabOrder": 104
+    "height": 80,
+    "z": 16,
+    "tabOrder": 16
   },
   "visual": {
     "visualType": "slicer",
@@ -80,6 +80,19 @@
                       "Value": "'#1F2937'"
                     }
                   }
+                }
+              }
+            }
+          }
+        }
+      ],
+      "general": [
+        {
+          "properties": {
+            "selfFilterEnabled": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
                 }
               }
             }

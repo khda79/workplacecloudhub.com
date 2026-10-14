@@ -120,8 +120,6 @@ table 'Collaboration Object Evidence'
 			relationship: 696d3894-6d81-4fbc-980b-c7d794d16702
 			defaultHierarchy: LocalDateTable_3a66da98-0fbc-42b3-89df-31d1353178bb.'Date Hierarchy'
 
-		annotation UnderlyingDateTimeDataType = Date
-
 	column 'Owner State'
 		dataType: string
 		lineageTag: 8ec3edbd-2611-4631-9cd3-7021183b21d7
@@ -209,8 +207,6 @@ table 'Collaboration Object Evidence'
 			isDefault
 			relationship: ca194499-edb9-4349-b904-eaaacbe755a4
 			defaultHierarchy: LocalDateTable_63d8f937-1415-4f4a-b264-72221c118188.'Date Hierarchy'
-
-		annotation UnderlyingDateTimeDataType = Date
 
 	column 'Evidence Status'
 		dataType: string

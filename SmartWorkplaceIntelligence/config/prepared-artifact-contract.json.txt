@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "currentFiles": [
+    "M365_Licenses_ReportSummary.csv",
+    "M365_Licenses_ReportCandidates.csv",
+    "M365_Licenses_ReportGaps.csv",
+    "M365_Licenses_ReportSources.csv",
+    "M365_Licenses_ReportAssignmentIssues.csv",
+    "M365_Licenses_ReportSnapshot.json.txt",
+    "SharePoint_OnPrem_Farms.csv",
+    "SharePoint_OnPrem_Servers.csv",
+    "SharePoint_OnPrem_ServiceApplications.csv",
+    "SharePoint_OnPrem_WebApplications.csv",
+    "SharePoint_OnPrem_WebApplicationZones.csv",
+    "SharePoint_OnPrem_ContentDatabases.csv",
+    "SharePoint_OnPrem_SiteCollections.csv",
+    "SharePoint_OnPrem_SiteAdministrators.csv",
+    "SharePoint_OnPrem_Webs.csv",
+    "SharePoint_OnPrem_CollectionCoverage.csv",
+    "Exchange_EXO_MigrationJobs.csv",
+    "Exchange_Mailboxes_AllSources_PermissionsByUser.csv",
+    "Exchange_OnPrem_Mailboxes_AllDomains.csv",
+    "Exchange_HybridIdentity_Issues.csv"
+  ],
+  "history": [
+    {
+      "kind": "Windows",
+      "root": "DATA-ALL/Intune/Devices/Inventory/WeeklyHistory",
+      "file": "Intune_Devices_Inventory.csv"
+    },
+    {
+      "kind": "Mailbox",
+      "root": "DATA-ALL/Exchange/OnPrem/Mailboxes/WeeklyHistory",
+      "file": "Exchange_OnPrem_Mailboxes_AllDomains.csv",
+      "optionalFile": "Exchange_OnPrem_MailboxCollectionIssues.csv"
+    }
+  ]
+}

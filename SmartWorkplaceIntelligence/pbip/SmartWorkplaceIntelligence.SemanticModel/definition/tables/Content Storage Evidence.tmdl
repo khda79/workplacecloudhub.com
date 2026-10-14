@@ -91,10 +91,36 @@ table 'Content Storage Evidence'
 		displayFolder: Content | Executive
 		lineageTag: 0a31c5c5-b9a6-4d5e-a7d8-ffc2fd2a5072
 
-	measure 'Messaging and Collaboration Storage per Workforce Account (GB)' = DIVIDE ( [Total Mailbox Storage (TB)] * 1024 + [Content Storage Used (GB)], [Enabled Workforce Accounts] )
+	/// Global combined mailbox, SharePoint and OneDrive storage in GB divided by enabled workforce accounts. Returns blank when Country is filtered because a qualified Country breakdown of combined storage is unavailable.
+	measure 'Messaging and Collaboration Storage per Workforce Account (GB)' =
+			IF (
+			    ISCROSSFILTERED ( 'Country Selection'[Country] ),
+			    BLANK (),
+			    DIVIDE (
+			        [Total Mailbox Storage (TB)] * 1024 + [Content Storage Used (GB)],
+			        [Enabled Workforce Accounts]
+			    )
+			)
 		formatString: #,0.0
 		displayFolder: Content | Executive
 		lineageTag: 2576b30b-04e8-4588-802c-a0a1531d1bd0
+
+	/// Tooltip explaining the global-only scope of the combined storage per enabled workforce account KPI.
+	measure 'Messaging and Collaboration Storage per Workforce Account Scope' =
+			IF (
+			    ISCROSSFILTERED ( 'Country Selection'[Country] ),
+			    "Country breakdown unavailable for combined storage",
+			    "Global combined storage divided by enabled workforce accounts. Country breakdown unavailable for combined storage."
+			)
+		formatString: @
+		isHidden
+		displayFolder: Content | Executive
+		lineageTag: 573f2889-fa70-4eca-8b13-931b6d0a9f36
+
+	/// Preserves the original dynamic evidence status together with the footer scope after removal of the duplicate ribbon.
+	measure 'Combined Content Evidence Ribbon Text' = [Content Evidence Ribbon Text] & UNICHAR(10) & "Evidence scope: prepared private snapshot · missing evidence is not zero · filters stay active across views · full detail available in task views."
+		displayFolder: Report footer
+		lineageTag: fb50120b-f2e0-4753-8244-7af6626cf189
 
 	column 'Content Object Key'
 		dataType: string
@@ -164,8 +190,6 @@ table 'Content Storage Evidence'
 			isDefault
 			relationship: 3b2bd393-27ba-4570-8069-2b721ee98199
 			defaultHierarchy: LocalDateTable_b62f6adb-63eb-4a4b-ad79-834b3e451455.'Date Hierarchy'
-
-		annotation UnderlyingDateTimeDataType = Date
 
 		annotation SummarizationSetBy = Automatic
 
@@ -274,8 +298,6 @@ table 'Content Storage Evidence'
 			isDefault
 			relationship: 5c2998eb-91ec-43aa-ae33-df38a4b8b9fd
 			defaultHierarchy: LocalDateTable_36a66c53-7233-45f9-aae9-44d7dc6b9397.'Date Hierarchy'
-
-		annotation UnderlyingDateTimeDataType = Date
 
 		annotation SummarizationSetBy = Automatic
 

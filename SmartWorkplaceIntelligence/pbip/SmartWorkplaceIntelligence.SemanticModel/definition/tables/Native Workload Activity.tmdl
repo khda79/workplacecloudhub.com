@@ -1,0 +1,169 @@
+/// Native source facet migrated from FactUserActivity; exact source grain, unresolved links and qualification retained. Uses the unified pinned batch, not a separate CMDB reader.
+table 'Native Workload Activity'
+	lineageTag: 007760ab-8495-46d0-bdfe-f9dd40a0a3af
+
+	/// Users whose Microsoft 365 workload report row was linked to DimUser by exact normalized UPN. Migrated without changing the source calculation.
+	measure 'Native Users with exact M365 activity evidence' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimUser"))
+			VAR InventoryUsers = CALCULATETABLE(VALUES('Native User Evidence'[TenantUserKey]), REMOVEFILTERS('Native User Evidence'), TREATAS(VALUES('User Inventory Evidence'[User Source ID]), 'Native User Evidence'[SourceUserId]))
+			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((CALCULATE(DISTINCTCOUNT('Native Workload Activity'[TenantUserKey]), KEEPFILTERS('Native Workload Activity'[MatchStatus] = "ExactUPN"))), KEEPFILTERS(TREATAS(NativeKeys0, 'Native Workload Activity'[TenantUserKey]))), BLANK()), BLANK()), SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((CALCULATE(DISTINCTCOUNT('Native Workload Activity'[TenantUserKey]), KEEPFILTERS('Native Workload Activity'[MatchStatus] = "ExactUPN"))), KEEPFILTERS(TREATAS(InventoryUsers, 'Native Workload Activity'[TenantUserKey]))), (CALCULATE(DISTINCTCOUNT('Native Workload Activity'[TenantUserKey]), KEEPFILTERS('Native Workload Activity'[MatchStatus] = "ExactUPN")))))
+		formatString: #,0
+		displayFolder: Native evidence
+		lineageTag: cb7adaeb-6c23-4aec-82e0-dd3114fafe90
+
+	/// Exact native-key entity context or existing inventory context. No name matching or inferred transitive membership. Unrelated entity selections return blank.
+	measure 'Native Context Rows · Native Workload Activity' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimUser"))
+			VAR InventoryUsers = CALCULATETABLE(VALUES('Native User Evidence'[TenantUserKey]), REMOVEFILTERS('Native User Evidence'), TREATAS(VALUES('User Inventory Evidence'[User Source ID]), 'Native User Evidence'[SourceUserId]))
+			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((COUNTROWS('Native Workload Activity')), KEEPFILTERS(TREATAS(NativeKeys0, 'Native Workload Activity'[TenantUserKey]))), BLANK()), BLANK()), SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((COUNTROWS('Native Workload Activity')), KEEPFILTERS(TREATAS(InventoryUsers, 'Native Workload Activity'[TenantUserKey]))), (COUNTROWS('Native Workload Activity'))))
+		formatString: #,0
+		isHidden
+		lineageTag: 16aeef3d-f505-4031-a1d7-aceea87e5fb1
+
+	/// Native FactUserActivity attribute; source qualification is retained.
+	column TenantKey
+		dataType: string
+		isHidden
+		lineageTag: 1bbac497-3081-4344-a2d3-d9b4a0a62052
+		summarizeBy: none
+		sourceColumn: TenantKey
+
+	/// Native FactUserActivity attribute; source qualification is retained.
+	column OrganizationKey
+		dataType: string
+		isHidden
+		lineageTag: c0d8a01d-646b-4a9a-9245-874f026cf655
+		summarizeBy: none
+		sourceColumn: OrganizationKey
+
+	/// Native FactUserActivity attribute; source qualification is retained.
+	column EnvironmentKey
+		dataType: string
+		isHidden
+		lineageTag: 681a4319-bf89-4cf7-80ca-af79e83f02ed
+		summarizeBy: none
+		sourceColumn: EnvironmentKey
+
+	/// Native FactUserActivity attribute; source qualification is retained.
+	column TenantId
+		dataType: string
+		isHidden
+		lineageTag: 106a2559-8c20-43d0-92ed-89fdf9667346
+		summarizeBy: none
+		sourceColumn: TenantId
+
+	/// Native FactUserActivity attribute; source qualification is retained.
+	column TenantUserActivityKey
+		dataType: string
+		isHidden
+		lineageTag: 8a6fa725-5f1c-49a2-a9a0-bdb3ff9708b5
+		summarizeBy: none
+		sourceColumn: TenantUserActivityKey
+
+	/// Native FactUserActivity attribute; source qualification is retained.
+	column TenantUserKey
+		dataType: string
+		isHidden
+		lineageTag: 9c852c98-dec4-40e6-b0a7-e1d037dba0ee
+		summarizeBy: none
+		sourceColumn: TenantUserKey
+
+	/// Native FactUserActivity attribute; source qualification is retained.
+	column UserPrincipalName
+		dataType: string
+		lineageTag: 16ff61b5-4ee1-41e4-ab88-3e570c1e8b21
+		summarizeBy: none
+		sourceColumn: UserPrincipalName
+
+	/// Native FactUserActivity attribute; source qualification is retained.
+	column MatchStatus
+		dataType: string
+		lineageTag: 4506f656-7cfd-408d-83fb-3fbeaf3580fd
+		summarizeBy: none
+		sourceColumn: MatchStatus
+
+	/// Native FactUserActivity attribute; source qualification is retained.
+	column ReportRefreshDate
+		dataType: dateTime
+		lineageTag: 401874a8-8098-4b2c-8803-7fc2be831875
+		summarizeBy: none
+		sourceColumn: ReportRefreshDate
+
+	/// Native FactUserActivity attribute; source qualification is retained.
+	column IsDeleted
+		dataType: string
+		lineageTag: f543b818-e17a-4f2b-9f0e-816faf986b75
+		summarizeBy: none
+		sourceColumn: IsDeleted
+
+	/// Native FactUserActivity attribute; source qualification is retained.
+	column ExchangeLastActivityDate
+		dataType: dateTime
+		lineageTag: d9b087c4-2be7-49ca-877e-851db23e12ae
+		summarizeBy: none
+		sourceColumn: ExchangeLastActivityDate
+
+	/// Native FactUserActivity attribute; source qualification is retained.
+	column OneDriveLastActivityDate
+		dataType: dateTime
+		lineageTag: f763b3ce-edf4-4088-8b47-73e930036c91
+		summarizeBy: none
+		sourceColumn: OneDriveLastActivityDate
+
+	/// Native FactUserActivity attribute; source qualification is retained.
+	column SharePointLastActivityDate
+		dataType: dateTime
+		lineageTag: ee6d0cb2-3b86-4e1a-8c24-3c0176fb6759
+		summarizeBy: none
+		sourceColumn: SharePointLastActivityDate
+
+	/// Native FactUserActivity attribute; source qualification is retained.
+	column TeamsLastActivityDate
+		dataType: dateTime
+		lineageTag: 1240dad7-8d07-4703-bd95-5909f0e570b1
+		summarizeBy: none
+		sourceColumn: TeamsLastActivityDate
+
+	/// Native FactUserActivity attribute; source qualification is retained.
+	column LastActivityDate
+		dataType: dateTime
+		lineageTag: 8589b216-05c9-432d-bbd1-81990db7dd2c
+		summarizeBy: none
+		sourceColumn: LastActivityDate
+
+	/// Native FactUserActivity attribute; source qualification is retained.
+	column LastActivityWorkload
+		dataType: string
+		lineageTag: 1d81ade5-8dc9-4b4a-a1c5-185ea517fbd6
+		summarizeBy: none
+		sourceColumn: LastActivityWorkload
+
+	/// Native FactUserActivity attribute; source qualification is retained.
+	column HasAnyM365Activity
+		dataType: boolean
+		lineageTag: f5d2a8e4-323a-4e11-b53d-b06d26a70200
+		summarizeBy: none
+		sourceColumn: HasAnyM365Activity
+
+	/// Native FactUserActivity attribute; source qualification is retained.
+	column AssignedProducts
+		dataType: string
+		lineageTag: a3d9257d-d814-4797-9559-d669c0546e2c
+		summarizeBy: none
+		sourceColumn: AssignedProducts
+
+	/// Native FactUserActivity attribute; source qualification is retained.
+	column SourceCollectedDateTime
+		dataType: dateTime
+		lineageTag: 6bb600c8-d0ce-49bd-89b1-36f6ef976875
+		summarizeBy: none
+		sourceColumn: SourceCollectedDateTime
+
+	partition 'Native Workload Activity' = m
+		mode: import
+		source = NativeEvidenceTypes(Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("FactUserActivity.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]), {[name="TenantKey", dataType="String"], [name="OrganizationKey", dataType="String"], [name="EnvironmentKey", dataType="String"], [name="TenantId", dataType="String"], [name="TenantUserActivityKey", dataType="String"], [name="TenantUserKey", dataType="String"], [name="UserPrincipalName", dataType="String"], [name="MatchStatus", dataType="String"], [name="ReportRefreshDate", dataType="DateOnly"], [name="IsDeleted", dataType="String"], [name="ExchangeLastActivityDate", dataType="DateOnly"], [name="OneDriveLastActivityDate", dataType="DateOnly"], [name="SharePointLastActivityDate", dataType="DateOnly"], [name="TeamsLastActivityDate", dataType="DateOnly"], [name="LastActivityDate", dataType="DateOnly"], [name="LastActivityWorkload", dataType="String"], [name="HasAnyM365Activity", dataType="Boolean"], [name="AssignedProducts", dataType="String"], [name="SourceCollectedDateTime", dataType="DateTime"]})
+

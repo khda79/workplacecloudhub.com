@@ -1,5 +1,6 @@
-/// One mailbox reconciliation candidate per synthetic run.
+/// Legacy synthetic fixture: not used by production report visuals or consolidated evidence. Removal is pending a separately cleared dependency-safe retirement; no real data.
 table 'Mailbox Matches'
+	isHidden
 	lineageTag: a8b15f1c-7d3c-483f-a176-fa8a9f80b4b1
 
 	/// Eligible directory-to-mailbox reconciliation candidates matched unambiguously divided by eligible mailbox candidates; conflicts and unmatched candidates remain in the denominator.

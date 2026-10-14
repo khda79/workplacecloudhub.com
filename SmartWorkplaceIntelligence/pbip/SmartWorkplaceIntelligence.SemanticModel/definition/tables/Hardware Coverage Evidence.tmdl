@@ -1,0 +1,78 @@
+/// Native source facet migrated from HardwareCoverage; exact source grain, unresolved links and qualification retained. Uses the unified pinned batch, not a separate CMDB reader.
+table 'Hardware Coverage Evidence'
+	lineageTag: ec1b2008-845c-4487-93ec-d1e1ca0c4a79
+
+	/// Exact native-key entity context or existing inventory context. No name matching or inferred transitive membership. Unrelated entity selections return blank.
+	measure 'Native Context Rows · Hardware Coverage Evidence' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (COUNTROWS('Hardware Coverage Evidence')))
+		formatString: #,0
+		isHidden
+		lineageTag: a4155221-3ce5-4650-a8d7-0c1a4488819c
+
+	/// Native HardwareCoverage attribute; source qualification is retained.
+	column TenantKey
+		dataType: string
+		isHidden
+		lineageTag: e3b28524-7734-4086-bf96-1fa4188e5c2d
+		summarizeBy: none
+		sourceColumn: TenantKey
+
+	/// Native HardwareCoverage attribute; source qualification is retained.
+	column OrganizationKey
+		dataType: string
+		isHidden
+		lineageTag: f1c90cd4-2841-4386-abc4-32ff7d6a7aab
+		summarizeBy: none
+		sourceColumn: OrganizationKey
+
+	/// Native HardwareCoverage attribute; source qualification is retained.
+	column EnvironmentKey
+		dataType: string
+		isHidden
+		lineageTag: 4e356d71-5461-453a-8105-29b445873c8a
+		summarizeBy: none
+		sourceColumn: EnvironmentKey
+
+	/// Native HardwareCoverage attribute; source qualification is retained.
+	column TenantId
+		dataType: string
+		isHidden
+		lineageTag: 2ae5a308-73d2-4169-829e-6d4be572401e
+		summarizeBy: none
+		sourceColumn: TenantId
+
+	/// Native HardwareCoverage attribute; source qualification is retained.
+	column Status
+		dataType: string
+		lineageTag: f7dd51b5-8f63-48bc-8cd9-e429229898a1
+		summarizeBy: none
+		sourceColumn: Status
+
+	/// Native HardwareCoverage attribute; source qualification is retained.
+	column Coverage
+		dataType: string
+		lineageTag: 2a606269-3bd3-449a-8713-10ef13ac3a8e
+		summarizeBy: none
+		sourceColumn: Coverage
+
+	/// Native HardwareCoverage attribute; source qualification is retained.
+	column Mode
+		dataType: string
+		lineageTag: 47d541b4-807c-4185-8596-8cd6f717d4c0
+		summarizeBy: none
+		sourceColumn: Mode
+
+	/// Native HardwareCoverage attribute; source qualification is retained.
+	column RecordCount
+		dataType: int64
+		isHidden
+		lineageTag: 5de1f241-83ba-4a99-b7f2-adbf56702508
+		summarizeBy: none
+		sourceColumn: RecordCount
+
+	partition 'Hardware Coverage Evidence' = m
+		mode: import
+		source = NativeEvidenceTypes(Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("HardwareCoverage.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]), {[name="TenantKey", dataType="String"], [name="OrganizationKey", dataType="String"], [name="EnvironmentKey", dataType="String"], [name="TenantId", dataType="String"], [name="Status", dataType="String"], [name="Coverage", dataType="String"], [name="Mode", dataType="String"], [name="RecordCount", dataType="Int64"]})
+

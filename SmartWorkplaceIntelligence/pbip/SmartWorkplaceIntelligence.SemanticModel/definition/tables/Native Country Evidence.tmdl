@@ -1,0 +1,192 @@
+/// Native source facet migrated from DimCountry; exact source grain, unresolved links and qualification retained. Uses the unified pinned batch, not a separate CMDB reader.
+table 'Native Country Evidence'
+	lineageTag: 4e1e7927-c817-451f-9d52-e8aebffc7268
+
+	/// Devices in the selected shared country context; the ownership slicer may further restrict the population. Migrated without changing the source calculation.
+	measure 'Native Executive workplace devices' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (CALCULATE([Native Devices], TREATAS(VALUES('Native Country Evidence'[CountryLabel]), 'Native Device Evidence'[CountryLabel]))))
+		formatString: #,0
+		displayFolder: Native evidence
+		lineageTag: 99c16996-791c-4362-9af8-d74b5c1a9af6
+
+	/// Managed-device share in the selected shared country context. Migrated without changing the source calculation.
+	measure 'Native Executive managed device share' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (CALCULATE([Native Managed device share], TREATAS(VALUES('Native Country Evidence'[CountryLabel]), 'Native Device Evidence'[CountryLabel]))))
+		formatString: 0.0%
+		displayFolder: Native evidence
+		lineageTag: 8762b7c7-4c19-463d-ad75-703633cd5a3c
+
+	/// Compliant-device share in the selected shared country context. Migrated without changing the source calculation.
+	measure 'Native Executive compliant device share' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (CALCULATE([Native Compliant device share], TREATAS(VALUES('Native Country Evidence'[CountryLabel]), 'Native Device Evidence'[CountryLabel]))))
+		formatString: 0.0%
+		displayFolder: Native evidence
+		lineageTag: 1ebb4ac1-c0e6-4c82-9e13-2ed0ec6ce468
+
+	/// Corporate devices in the selected shared country context; ownership selection is intentionally ignored by the base measure. Migrated without changing the source calculation.
+	measure 'Native Executive corporate devices' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (CALCULATE([Native Corporate devices], TREATAS(VALUES('Native Country Evidence'[CountryLabel]), 'Native Device Evidence'[CountryLabel]))))
+		formatString: #,0
+		displayFolder: Native evidence
+		lineageTag: 567cbf36-b350-4519-939e-e2849667ec01
+
+	/// Corporate devices for each country divided by all corporate devices. Migrated without changing the source calculation.
+	measure 'Native Executive corporate country share' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (VAR _selected = [Native Executive corporate devices] VAR _all = CALCULATE([Native Executive corporate devices], REMOVEFILTERS('Native Country Evidence')) RETURN DIVIDE(_selected, _all)))
+		formatString: 0.0%
+		displayFolder: Native evidence
+		lineageTag: f412baf3-da23-4a9d-85ce-a06c04da9d6c
+
+	/// Users for each country divided by all users, including unknown or unassigned country. Migrated without changing the source calculation.
+	measure 'Native Executive user country share' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (DIVIDE([Native Users], CALCULATE([Native Users], REMOVEFILTERS('Native Country Evidence')))))
+		formatString: 0.0%
+		displayFolder: Native evidence
+		lineageTag: d0a25ab2-e6f9-4147-9426-176bfdb721ca
+
+	/// Reconciled mailboxes for each country divided by all reconciled mailboxes, including unknown or unassigned country. Migrated without changing the source calculation.
+	measure 'Native Executive mailbox country share' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (DIVIDE([Native Hosted mailboxes], CALCULATE([Native Hosted mailboxes], REMOVEFILTERS('Native Country Evidence')))))
+		formatString: 0.0%
+		displayFolder: Native evidence
+		lineageTag: 7cd3c377-5c66-4b36-a691-2b4c14eb4a7a
+
+	/// Microsoft 365 F1 assignments for each country divided by all observed Microsoft 365 F1 assignments. Assignment does not prove usage. Migrated without changing the source calculation.
+	measure 'Native Executive M365 F1 country share' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (VAR _countryAssignments = CALCULATE([Native License assignments], KEEPFILTERS('Native License SKU'[SkuPartNumber] == "M365_F1")) VAR _allAssignments = CALCULATE([Native License assignments], KEEPFILTERS('Native License SKU'[SkuPartNumber] == "M365_F1"), REMOVEFILTERS('Native Country Evidence')) RETURN DIVIDE(_countryAssignments, _allAssignments)))
+		formatString: 0.0%
+		displayFolder: Native evidence
+		lineageTag: 29192d98-2167-4866-9661-f554b7b56700
+
+	/// Microsoft 365 F3 assignments for each country divided by all observed Microsoft 365 F3 assignments. Assignment does not prove usage. Migrated without changing the source calculation.
+	measure 'Native Executive M365 F3 country share' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (VAR _countryAssignments = CALCULATE([Native License assignments], KEEPFILTERS('Native License SKU'[SkuPartNumber] == "SPE_F1")) VAR _allAssignments = CALCULATE([Native License assignments], KEEPFILTERS('Native License SKU'[SkuPartNumber] == "SPE_F1"), REMOVEFILTERS('Native Country Evidence')) RETURN DIVIDE(_countryAssignments, _allAssignments)))
+		formatString: 0.0%
+		displayFolder: Native evidence
+		lineageTag: 847157a5-8b46-4b03-9a5f-fc8a0ee6238c
+
+	/// Microsoft 365 E3 assignments for each country divided by all observed Microsoft 365 E3 assignments. Assignment does not prove usage. Migrated without changing the source calculation.
+	measure 'Native Executive M365 E3 country share' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (VAR _countryAssignments = CALCULATE([Native License assignments], KEEPFILTERS('Native License SKU'[SkuPartNumber] == "SPE_E3")) VAR _allAssignments = CALCULATE([Native License assignments], KEEPFILTERS('Native License SKU'[SkuPartNumber] == "SPE_E3"), REMOVEFILTERS('Native Country Evidence')) RETURN DIVIDE(_countryAssignments, _allAssignments)))
+		formatString: 0.0%
+		displayFolder: Native evidence
+		lineageTag: 73d67b17-ce2f-4ffc-a4ed-d4442fa9fdac
+
+	/// Microsoft 365 E5 assignments for each country divided by all observed Microsoft 365 E5 assignments. Assignment does not prove usage. Migrated without changing the source calculation.
+	measure 'Native Executive M365 E5 country share' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (VAR _countryAssignments = CALCULATE([Native License assignments], KEEPFILTERS('Native License SKU'[SkuPartNumber] == "SPE_E5")) VAR _allAssignments = CALCULATE([Native License assignments], KEEPFILTERS('Native License SKU'[SkuPartNumber] == "SPE_E5"), REMOVEFILTERS('Native Country Evidence')) RETURN DIVIDE(_countryAssignments, _allAssignments)))
+		formatString: 0.0%
+		displayFolder: Native evidence
+		lineageTag: 6a06aed3-e35b-4ce4-a514-1c614b5b3685
+
+	/// Microsoft 365 Copilot assignments for each country divided by all observed Microsoft 365 Copilot assignments. Assignment does not prove usage. Migrated without changing the source calculation.
+	measure 'Native Executive Copilot country share' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (VAR _countryAssignments = CALCULATE([Native License assignments], KEEPFILTERS('Native License SKU'[SkuPartNumber] == "Microsoft_365_Copilot")) VAR _allAssignments = CALCULATE([Native License assignments], KEEPFILTERS('Native License SKU'[SkuPartNumber] == "Microsoft_365_Copilot"), REMOVEFILTERS('Native Country Evidence')) RETURN DIVIDE(_countryAssignments, _allAssignments)))
+		formatString: 0.0%
+		displayFolder: Native evidence
+		lineageTag: a7d36fb8-f705-493f-be6e-c0c9278a894a
+
+	/// Share of each device form-factor category in the selected shared country and ownership context. Migrated without changing the source calculation.
+	measure 'Native Executive device form factor share' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (VAR _countries = VALUES('Native Country Evidence'[CountryLabel]) VAR _selected = CALCULATE([Native Devices], TREATAS(_countries, 'Native Device Evidence'[CountryLabel])) VAR _all = CALCULATE([Native Devices], REMOVEFILTERS('Native Device Evidence'[Device form factor]), TREATAS(_countries, 'Native Device Evidence'[CountryLabel])) RETURN DIVIDE(_selected, _all)))
+		formatString: 0.0%
+		displayFolder: Native evidence
+		lineageTag: 4c2eaef5-caf0-478b-a333-b0da1dcef7d5
+
+	/// Share of each device-ownership category in the selected shared country context. Migrated without changing the source calculation.
+	measure 'Native Executive device ownership share' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (VAR _countries = VALUES('Native Country Evidence'[CountryLabel]) VAR _selected = CALCULATE([Native Devices], TREATAS(_countries, 'Native Device Evidence'[CountryLabel])) VAR _all = CALCULATE([Native Devices], REMOVEFILTERS('Native Device Evidence'[Device ownership group]), TREATAS(_countries, 'Native Device Evidence'[CountryLabel])) RETURN DIVIDE(_selected, _all)))
+		formatString: 0.0%
+		displayFolder: Native evidence
+		lineageTag: 90a0a734-4872-4e07-b7ca-c96472f35070
+
+	/// Share of each Windows-version category in the selected shared country and ownership context. Migrated without changing the source calculation.
+	measure 'Native Executive Windows version share' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (VAR _countries = VALUES('Native Country Evidence'[CountryLabel]) VAR _selected = CALCULATE([Native Devices], TREATAS(_countries, 'Native Device Evidence'[CountryLabel])) VAR _all = CALCULATE([Native Devices], REMOVEFILTERS('Native Device Evidence'[Windows version group]), TREATAS(_countries, 'Native Device Evidence'[CountryLabel])) RETURN DIVIDE(_selected, _all)))
+		formatString: 0.0%
+		displayFolder: Native evidence
+		lineageTag: ae5c3812-3005-4b64-ab93-2b5c50afc6a6
+
+	/// Windows 10 devices identified from the reported operating-system version in the selected country and ownership context. This is an OS count, not a hardware-readiness assessment. Migrated without changing the source calculation.
+	measure 'Native Executive Windows 10 devices' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (VAR _countries = VALUES('Native Country Evidence'[CountryLabel]) RETURN CALCULATE([Native Devices], TREATAS(_countries, 'Native Device Evidence'[CountryLabel]), KEEPFILTERS(FILTER('Native Device Evidence', VAR _os = COALESCE('Native Device Evidence'[OperatingSystem], "") VAR _version = COALESCE('Native Device Evidence'[OperatingSystemVersion], "") VAR _isNumericVersion = LEFT(_version, 5) = "10.0." VAR _build = IF(_isNumericVersion, IFERROR(VALUE(PATHITEM(SUBSTITUTE(_version, ".", "|"), 3, INTEGER)), BLANK())) RETURN _os = "Windows" && (_version = "Windows 10" || (_build > 0 && _build < 22000)))))))
+		formatString: #,0
+		displayFolder: Native evidence
+		lineageTag: b1108717-5329-4c9d-ba4e-abef4450b595
+
+	/// Distinct Windows 10 Intune devices explicitly reported as notCapable by Endpoint Analytics in the selected country and ownership context. Returns blank when no readiness evidence exists; unknown is never treated as incompatible. Migrated without changing the source calculation.
+	measure 'Native Executive Windows 10 not compatible devices' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (VAR _countries = VALUES('Native Country Evidence'[CountryLabel]) VAR _windows10DeviceKeys = CALCULATETABLE(VALUES('Native Device Evidence'[TenantDeviceKey]), TREATAS(_countries, 'Native Device Evidence'[CountryLabel]), KEEPFILTERS(FILTER('Native Device Evidence', VAR _os = COALESCE('Native Device Evidence'[OperatingSystem], "") VAR _version = COALESCE('Native Device Evidence'[OperatingSystemVersion], "") VAR _isNumericVersion = LEFT(_version, 5) = "10.0." VAR _build = IF(_isNumericVersion, IFERROR(VALUE(PATHITEM(SUBSTITUTE(_version, ".", "|"), 3, INTEGER)), BLANK())) RETURN _os = "Windows" && (_version = "Windows 10" || (_build > 0 && _build < 22000))))) VAR _intuneDeviceIds = CALCULATETABLE(VALUES('Device Source Evidence'[SourceObjectId]), TREATAS(_windows10DeviceKeys, 'Device Source Evidence'[TenantDeviceKey]), KEEPFILTERS('Device Source Evidence'[SourceSystem] = "Intune")) VAR _observed = CALCULATE(COUNTROWS('Native Upgrade Eligibility'), TREATAS(_intuneDeviceIds, 'Native Upgrade Eligibility'[DeviceId]), KEEPFILTERS('Native Upgrade Eligibility'[UpgradeEligibility] IN {"upgraded", "unknown", "notCapable", "capable", "unknownFutureValue"})) VAR _notCapable = CALCULATE(DISTINCTCOUNT('Native Upgrade Eligibility'[DeviceId]), TREATAS(_intuneDeviceIds, 'Native Upgrade Eligibility'[DeviceId]), KEEPFILTERS('Native Upgrade Eligibility'[UpgradeEligibility] = "notCapable")) RETURN IF(_observed = 0, BLANK(), _notCapable)))
+		formatString: #,0
+		displayFolder: Native evidence
+		lineageTag: 6b049d92-ccb8-4df6-a3c4-aa3a464007ad
+
+	/// Average Endpoint Analytics score from 0 to 100, linked by exact Intune device identifier in the selected country and ownership context; it is a normalized score, not a population percentage. Migrated without changing the source calculation.
+	measure 'Native Executive Endpoint Analytics score' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (VAR _countries = VALUES('Native Country Evidence'[CountryLabel]) VAR _deviceKeys = CALCULATETABLE(VALUES('Native Device Evidence'[TenantDeviceKey]), TREATAS(_countries, 'Native Device Evidence'[CountryLabel])) VAR _intuneIds = CALCULATETABLE(VALUES('Device Source Evidence'[SourceObjectId]), TREATAS(_deviceKeys, 'Device Source Evidence'[TenantDeviceKey]), KEEPFILTERS('Device Source Evidence'[SourceSystem] = "Intune")) RETURN CALCULATE(AVERAGE('Native Endpoint Score Evidence'[EndpointAnalyticsScore]), TREATAS(_intuneIds, 'Native Endpoint Score Evidence'[DeviceId]))))
+		formatString: 0.0
+		displayFolder: Native evidence
+		lineageTag: cb0d4d96-f66f-4da0-a779-8c529ce1668e
+
+	/// Exact native-key entity context or existing inventory context. No name matching or inferred transitive membership. Unrelated entity selections return blank.
+	measure 'Native Context Rows · Native Country Evidence' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (COUNTROWS('Native Country Evidence')))
+		formatString: #,0
+		isHidden
+		lineageTag: 5c9398eb-8d49-408d-b604-d20c95e6707c
+
+	/// Native DimCountry attribute; source qualification is retained.
+	column CountryLabel
+		dataType: string
+		lineageTag: f94d341a-27d4-46ad-8836-9d9915d121d3
+		summarizeBy: none
+		sourceColumn: CountryLabel
+
+	/// Compact country label used only by Executive Overview footprint charts; the full country key remains unchanged.
+	column 'Country footprint label' = IF('Native Country Evidence'[CountryLabel] = "Unknown / unassigned", "Unknown", 'Native Country Evidence'[CountryLabel])
+		dataType: string
+		lineageTag: cf0c8788-a33a-4e5a-aa5d-c8c3e18753cd
+		summarizeBy: none
+
+	partition 'Native Country Evidence' = m
+		mode: import
+		source = NativeEvidenceTypes(Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("DimCountry.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]), {[name="CountryLabel", dataType="String"]})
+

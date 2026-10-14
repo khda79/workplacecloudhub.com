@@ -19,7 +19,7 @@
               {
                 "textRuns": [
                   {
-                    "value": "Product version · Data as of · Evidence status · © 2026 WorkplaceCloudHub — https://workplacecloudhub.com/",
+                    "value": "Prepared private snapshot · Check Data Trust for source status · © 2026 WorkplaceCloudHub — https://workplacecloudhub.com/",
                     "textStyle": {
                       "fontFamily": "Segoe UI",
                       "fontSize": "11px",
@@ -116,5 +116,6 @@
         }
       ]
     }
-  }
+  },
+  "isHidden": true
 }

@@ -2,12 +2,12 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json",
   "name": "5786945b22d26fbb495d",
   "position": {
-    "x": 1400,
-    "y": 256,
+    "x": 32,
+    "y": 512,
+    "width": 912,
+    "height": 480,
     "z": 108,
-    "height": 150,
-    "width": 488,
-    "tabOrder": 108
+    "tabOrder": 1328
   },
   "visual": {
     "visualType": "pivotTable",
@@ -195,7 +195,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Control & Evidence Explorer diagnostic context. Summary grouped for the current filter context.'"
+                  "Value": "'Control & Evidence Explorer diagnostic context'"
                 }
               }
             }
@@ -222,7 +222,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "13D"
+                  "Value": "12D"
                 }
               }
             },
@@ -231,16 +231,9 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#1F2937'"
+                      "Value": "'#183153'"
                     }
                   }
-                }
-              }
-            },
-            "bold": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
                 }
               }
             }
@@ -293,9 +286,16 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#CBD8E5'"
+                      "Value": "'#CCDCEC'"
                     }
                   }
+                }
+              }
+            },
+            "radius": {
+              "expr": {
+                "Literal": {
+                  "Value": "8D"
                 }
               }
             },
@@ -303,13 +303,6 @@
               "expr": {
                 "Literal": {
                   "Value": "1D"
-                }
-              }
-            },
-            "radius": {
-              "expr": {
-                "Literal": {
-                  "Value": "12D"
                 }
               }
             }
@@ -349,14 +342,14 @@
             "left": {
               "expr": {
                 "Literal": {
-                  "Value": "10D"
+                  "Value": "8D"
                 }
               }
             },
             "right": {
               "expr": {
                 "Literal": {
-                  "Value": "10D"
+                  "Value": "8D"
                 }
               }
             }
@@ -378,5 +371,70 @@
       ]
     },
     "drillFilterOtherVisuals": true
+  },
+  "parentGroupName": "185cdb21b5904ce2099a",
+  "filterConfig": {
+    "filters": [
+      {
+        "name": "Filter98d8a9a0cfb88cf44b11b20a",
+        "field": {
+          "Column": {
+            "Expression": {
+              "SourceRef": {
+                "Entity": "Security Control Evidence"
+              }
+            },
+            "Property": "Control Name"
+          }
+        },
+        "type": "Categorical",
+        "filter": {
+          "Version": 2,
+          "From": [
+            {
+              "Name": "ep",
+              "Entity": "Security Control Evidence",
+              "Type": 0
+            }
+          ],
+          "Where": [
+            {
+              "Condition": {
+                "Not": {
+                  "Expression": {
+                    "In": {
+                      "Expressions": [
+                        {
+                          "Column": {
+                            "Expression": {
+                              "SourceRef": {
+                                "Source": "ep"
+                              }
+                            },
+                            "Property": "Control Name"
+                          }
+                        }
+                      ],
+                      "Values": [
+                        [
+                          {
+                            "Literal": {
+                              "Value": "'Defender protection active'"
+                            }
+                          }
+                        ]
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "howCreated": "User",
+        "isHiddenInViewMode": true,
+        "isLockedInViewMode": true
+      }
+    ]
   }
 }

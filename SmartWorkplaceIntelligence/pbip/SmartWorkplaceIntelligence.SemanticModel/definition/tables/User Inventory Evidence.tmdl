@@ -1,4 +1,4 @@
-/// Private current workforce evidence built from enabled AD-linked Entra member accounts excluding governed non-human types and cloud-only accounts; AD and M365 activity are combined.
+/// Private current enabled workforce evidence. Latest qualified AD, Microsoft 365 or SID-attributed local-console activity determines inactivity. Unattributed console observations are not inactivity.
 table 'User Inventory Evidence'
 	lineageTag: df26e7e4-eb8d-421b-a918-ac6b09df54fb
 
@@ -8,13 +8,13 @@ table 'User Inventory Evidence'
 		displayFolder: Workforce | Current
 		lineageTag: 0cbd7b34-7544-4f67-8be9-0621ffbbc7a0
 
-	/// Enabled workforce accounts with observed AD or Microsoft 365 activity in the last 30 days.
+	/// Enabled workforce accounts with qualified observed Active Directory, Microsoft 365 or SID-attributed local-console activity within 30 days.
 	measure 'Active Workforce' = CALCULATE ( [Enabled Workforce Accounts], 'User Inventory Evidence'[Activity State] = "Active <=30D" )
 		formatString: #,0
 		displayFolder: Workforce | Current
 		lineageTag: c731eb5c-9800-4a4b-a214-6e2b1ba81941
 
-	/// Activity-covered enabled workforce accounts without observed AD or Microsoft 365 activity for more than 30 days, including never-used accounts.
+	/// Activity-covered enabled workforce accounts without qualified observed Active Directory, Microsoft 365 or SID-attributed local-console activity for more than 30 days. Missing evidence is not inactivity.
 	measure 'Accounts Without Activity >30D' = CALCULATE ( [Enabled Workforce Accounts], 'User Inventory Evidence'[Activity State] IN { "Dormant 31-90D", "Stale >90D", "Observed never used" } )
 		formatString: #,0
 		displayFolder: Workforce | Risk
@@ -337,6 +337,18 @@ table 'User Inventory Evidence'
 		displayFolder: Workforce | Personas | Coverage
 		lineageTag: cd3d7e9b-4756-418d-93be-6cb5b771a439
 
+	/// Enabled workforce accounts with qualified, SID-attributed local-console evidence. Absence is an evidence gap, not inactivity.
+	measure 'Workforce With Qualified Console Evidence' = CALCULATE([Enabled Workforce Accounts], 'User Inventory Evidence'[Console Activity Evidence State] = "Observed")
+		formatString: #,##0
+		displayFolder: Intune | Reported scope
+		lineageTag: db10a1e2-0f86-499d-869c-c83e3cabbf4b
+
+	/// Qualified attributed console evidence as a share of enabled workforce accounts, not overall activity coverage.
+	measure 'Workforce Console Evidence Coverage (%)' = DIVIDE([Workforce With Qualified Console Evidence], [Enabled Workforce Accounts])
+		formatString: 0.0%
+		displayFolder: Intune | Reported scope
+		lineageTag: ea6a2a91-53a5-4f0f-b1f8-ee0282757a31
+
 	column 'User Source ID'
 		dataType: string
 		isHidden
@@ -439,8 +451,6 @@ table 'User Inventory Evidence'
 			relationship: d8de528d-fe71-42de-bf5f-dd1e90ccaae6
 			defaultHierarchy: LocalDateTable_0b3d0881-ea5e-47e6-be43-df832464f67b.'Date Hierarchy'
 
-		annotation UnderlyingDateTimeDataType = Date
-
 	column 'Last Activity Workload'
 		dataType: string
 		lineageTag: 8ab1967f-0243-45fd-b0ad-d33e1a3aff21
@@ -498,8 +508,6 @@ table 'User Inventory Evidence'
 			relationship: 9187c498-78ab-4b52-ad4d-af3185bc6817
 			defaultHierarchy: LocalDateTable_7ed3f920-2740-4f06-b5e4-1235160ee31a.'Date Hierarchy'
 
-		annotation UnderlyingDateTimeDataType = Date
-
 	/// Governed AD account type resolved through strong identity keys.
 	column 'Account Type'
 		dataType: string
@@ -546,8 +554,6 @@ table 'User Inventory Evidence'
 			relationship: af25d72b-f474-4d3f-a099-a855a6159f66
 			defaultHierarchy: LocalDateTable_0cd5f2d1-5431-442e-98f7-a997ef72119f.'Date Hierarchy'
 
-		annotation UnderlyingDateTimeDataType = Date
-
 	column 'M365 Last Activity Date'
 		dataType: dateTime
 		formatString: Short Date
@@ -559,8 +565,6 @@ table 'User Inventory Evidence'
 			isDefault
 			relationship: cf8775ad-03fc-454c-a4ea-923e741dc3d4
 			defaultHierarchy: LocalDateTable_e67025e1-0027-4578-ac67-8d29bff0dee2.'Date Hierarchy'
-
-		annotation UnderlyingDateTimeDataType = Date
 
 	column 'Activity Source'
 		dataType: string
@@ -654,8 +658,6 @@ table 'User Inventory Evidence'
 			relationship: b76347bc-6359-4e8f-9618-c13519b9d16b
 			defaultHierarchy: LocalDateTable_992ffd8b-7f92-4f3a-bd88-9b41a35b51d2.'Date Hierarchy'
 
-		annotation UnderlyingDateTimeDataType = Date
-
 	column 'Office Desktop Activation State (30D)'
 		dataType: string
 		lineageTag: 0d0d5979-641e-4799-8f90-48a2db2bd445
@@ -680,8 +682,6 @@ table 'User Inventory Evidence'
 			isDefault
 			relationship: 860d3156-60bd-4d7c-946f-616889068225
 			defaultHierarchy: LocalDateTable_a7bac2e8-dc96-494a-803b-01fa833a644d.'Date Hierarchy'
-
-		annotation UnderlyingDateTimeDataType = Date
 
 	/// Site code from the configured AD user attribute, preserved as text including leading zeroes.
 	column 'Directory Site Code'
@@ -710,14 +710,51 @@ table 'User Inventory Evidence'
 		summarizeBy: none
 		sourceColumn: Persona Classification Source
 
+	/// Latest qualified SID-linked local console activity across managed devices, expressed in UTC. Not current session, RDP or M365 workload usage. Blank for older batches or unavailable attribution.
+	column 'Console Last Activity UTC'
+		dataType: dateTime
+		formatString: yyyy-MM-dd HH:mm:ss
+		displayFolder: Activity\Console evidence
+		lineageTag: 541b21e5-20ec-458c-9f61-8e7eadbdbb4c
+		summarizeBy: none
+		sourceColumn: Console Last Activity UTC
+
+	/// Positive console observation attribution, not activity coverage for every session. No attributable console evidence is not proof of inactivity.
+	column 'Console Activity Evidence State'
+		dataType: string
+		displayFolder: Activity\Console evidence
+		lineageTag: 0ca24d6c-bd16-4b6c-8eb1-c0c536071631
+		summarizeBy: none
+		sourceColumn: Console Activity Evidence State
+
+	/// Count of distinct qualified managed-device observations attributed uniquely to this AD SID in the current snapshot. Not the user's complete device estate.
+	column 'Console Activity Device Count'
+		dataType: int64
+		isHidden
+		displayFolder: Activity\Console evidence
+		lineageTag: b6ff3ec8-8a73-4cf4-81e0-712f6093d834
+		summarizeBy: none
+		sourceColumn: Console Activity Device Count
+
+	/// Console attribution uses an exact unique AD ObjectSID within the tenant and a unique governed AD-to-Entra identity link. No name, primary-user or workstation-name fallback.
+	column 'Console Activity Match Method'
+		dataType: string
+		displayFolder: Activity\Console evidence
+		lineageTag: 33d246eb-5d4b-4738-be77-1c0578ab73d9
+		summarizeBy: none
+		sourceColumn: Console Activity Match Method
+
 	partition 'User Inventory Evidence Import' = m
 		mode: import
 		source =
 				let
 				    Raw = Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("UserInventoryEvidence.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]),
-				    Selected = Table.SelectColumns(Raw, {"User Source ID", "User Principal Name", "Display Name", "Country", "Department", "Department Evidence State", "Manager", "Manager Evidence State", "Account State", "User Type", "Workforce Status", "Activity State", "Activity Evidence Status", "Days Since Last Activity", "Last Activity Date", "Last Activity Workload", "Identity Match Status", "Identity Match Method", "M365 License Count", "Has M365 License", "Duplicate UPN State", "Attention Priority", "Evidence Date", "Account Type", "Account Population", "Account Classification Rule Version", "Job Title", "Job Title Evidence State", "AD Last Activity Date", "M365 Last Activity Date", "Activity Source", "Workforce Persona", "Persona Match State", "Persona Matched Keywords", "MFA Registration State", "Has Microsoft 365 F3", "Has Microsoft 365 E3", "Has Microsoft 365 E5", "Exchange Usage State (30D)", "Teams Usage State (30D)", "SharePoint Usage State (30D)", "OneDrive Usage State (30D)", "M365 Usage Report Date", "Office Desktop Activation State (30D)", "Office Desktop Usage State (30D)", "Office Desktop Usage Report Date", "Directory Site Code", "Site Type", "Site Match State", "Persona Classification Source"}),
-				    Nulls = Table.ReplaceValue(Selected, "", null, Replacer.ReplaceValue, {"Days Since Last Activity", "Last Activity Date", "M365 License Count", "Evidence Date", "AD Last Activity Date", "M365 Last Activity Date", "M365 Usage Report Date", "Office Desktop Usage Report Date"}),
-				    Typed = Table.TransformColumnTypes(Nulls, {{"User Source ID", type text}, {"User Principal Name", type text}, {"Display Name", type text}, {"Country", type text}, {"Department", type text}, {"Department Evidence State", type text}, {"Manager", type text}, {"Manager Evidence State", type text}, {"Account State", type text}, {"User Type", type text}, {"Workforce Status", type text}, {"Activity State", type text}, {"Activity Evidence Status", type text}, {"Days Since Last Activity", Int64.Type}, {"Last Activity Date", type datetime}, {"Last Activity Workload", type text}, {"Identity Match Status", type text}, {"Identity Match Method", type text}, {"M365 License Count", Int64.Type}, {"Has M365 License", type text}, {"Duplicate UPN State", type text}, {"Attention Priority", type text}, {"Evidence Date", type datetime}, {"Account Type", type text}, {"Account Population", type text}, {"Account Classification Rule Version", type text}, {"Job Title", type text}, {"Job Title Evidence State", type text}, {"AD Last Activity Date", type datetime}, {"M365 Last Activity Date", type datetime}, {"Activity Source", type text}, {"Workforce Persona", type text}, {"Persona Match State", type text}, {"Persona Matched Keywords", type text}, {"MFA Registration State", type text}, {"Has Microsoft 365 F3", type text}, {"Has Microsoft 365 E3", type text}, {"Has Microsoft 365 E5", type text}, {"Exchange Usage State (30D)", type text}, {"Teams Usage State (30D)", type text}, {"SharePoint Usage State (30D)", type text}, {"OneDrive Usage State (30D)", type text}, {"M365 Usage Report Date", type datetime}, {"Office Desktop Activation State (30D)", type text}, {"Office Desktop Usage State (30D)", type text}, {"Office Desktop Usage Report Date", type datetime}, {"Directory Site Code", type text}, {"Site Type", type text}, {"Site Match State", type text}, {"Persona Classification Source", type text}}, "en-US")
+				    OptionalNames = {"Console Last Activity UTC", "Console Activity Evidence State", "Console Activity Device Count", "Console Activity Match Method"},
+				    Compatible = List.Accumulate(OptionalNames, Raw, (t, n) => if Table.HasColumns(t, n) then t else Table.AddColumn(t, n, each if n = "Console Activity Evidence State" then "Not supplied" else if n = "Console Activity Match Method" then "None" else null, type nullable text)),
+				    Selected = Table.SelectColumns(Compatible, {"User Source ID", "User Principal Name", "Display Name", "Country", "Department", "Department Evidence State", "Manager", "Manager Evidence State", "Account State", "User Type", "Workforce Status", "Activity State", "Activity Evidence Status", "Days Since Last Activity", "Last Activity Date", "Last Activity Workload", "Identity Match Status", "Identity Match Method", "M365 License Count", "Has M365 License", "Duplicate UPN State", "Attention Priority", "Evidence Date", "Account Type", "Account Population", "Account Classification Rule Version", "Job Title", "Job Title Evidence State", "AD Last Activity Date", "M365 Last Activity Date", "Activity Source", "Workforce Persona", "Persona Match State", "Persona Matched Keywords", "MFA Registration State", "Has Microsoft 365 F3", "Has Microsoft 365 E3", "Has Microsoft 365 E5", "Exchange Usage State (30D)", "Teams Usage State (30D)", "SharePoint Usage State (30D)", "OneDrive Usage State (30D)", "M365 Usage Report Date", "Office Desktop Activation State (30D)", "Office Desktop Usage State (30D)", "Office Desktop Usage Report Date", "Directory Site Code", "Site Type", "Site Match State", "Persona Classification Source", "Console Last Activity UTC", "Console Activity Evidence State", "Console Activity Device Count", "Console Activity Match Method"}),
+				    Nulls = Table.ReplaceValue(Selected, "", null, Replacer.ReplaceValue, {"Days Since Last Activity", "Last Activity Date", "M365 License Count", "Evidence Date", "AD Last Activity Date", "M365 Last Activity Date", "M365 Usage Report Date", "Office Desktop Usage Report Date", "Console Last Activity UTC", "Console Activity Device Count"}),
+				    ConsoleTimes = Table.TransformColumns(Nulls, {{"Console Last Activity UTC", each if _ = null then null else if not Text.EndsWith(_, "Z") then error "Prepared console activity timestamp requires an explicit UTC Z suffix" else DateTimeZone.RemoveZone(DateTimeZone.SwitchZone(DateTimeZone.FromText(_, [Culture="en-US"]), 0)), type nullable datetime}}),
+				    Typed = Table.TransformColumnTypes(ConsoleTimes, {{"User Source ID", type text}, {"User Principal Name", type text}, {"Display Name", type text}, {"Country", type text}, {"Department", type text}, {"Department Evidence State", type text}, {"Manager", type text}, {"Manager Evidence State", type text}, {"Account State", type text}, {"User Type", type text}, {"Workforce Status", type text}, {"Activity State", type text}, {"Activity Evidence Status", type text}, {"Days Since Last Activity", Int64.Type}, {"Last Activity Date", type datetime}, {"Last Activity Workload", type text}, {"Identity Match Status", type text}, {"Identity Match Method", type text}, {"M365 License Count", Int64.Type}, {"Has M365 License", type text}, {"Duplicate UPN State", type text}, {"Attention Priority", type text}, {"Evidence Date", type datetime}, {"Account Type", type text}, {"Account Population", type text}, {"Account Classification Rule Version", type text}, {"Job Title", type text}, {"Job Title Evidence State", type text}, {"AD Last Activity Date", type datetime}, {"M365 Last Activity Date", type datetime}, {"Activity Source", type text}, {"Workforce Persona", type text}, {"Persona Match State", type text}, {"Persona Matched Keywords", type text}, {"MFA Registration State", type text}, {"Has Microsoft 365 F3", type text}, {"Has Microsoft 365 E3", type text}, {"Has Microsoft 365 E5", type text}, {"Exchange Usage State (30D)", type text}, {"Teams Usage State (30D)", type text}, {"SharePoint Usage State (30D)", type text}, {"OneDrive Usage State (30D)", type text}, {"M365 Usage Report Date", type datetime}, {"Office Desktop Activation State (30D)", type text}, {"Office Desktop Usage State (30D)", type text}, {"Office Desktop Usage Report Date", type datetime}, {"Directory Site Code", type text}, {"Site Type", type text}, {"Site Match State", type text}, {"Persona Classification Source", type text}, {"Console Last Activity UTC", type datetime}, {"Console Activity Evidence State", type text}, {"Console Activity Device Count", Int64.Type}, {"Console Activity Match Method", type text}}, "en-US")
 				in
 				    Typed
 

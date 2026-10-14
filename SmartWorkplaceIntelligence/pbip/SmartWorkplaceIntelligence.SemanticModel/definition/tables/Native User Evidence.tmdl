@@ -1,0 +1,355 @@
+/// Native source facet migrated from DimUser; exact source grain, unresolved links and qualification retained. Uses the unified pinned batch, not a separate CMDB reader.
+table 'Native User Evidence'
+	lineageTag: f27d20f6-d146-4c6b-8ca0-1d6d45121859
+
+	/// Distinct accounts in the Entra export, subject to page filters. Migrated without changing the source calculation.
+	measure 'Native Users' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimUser"))
+			VAR InventoryUsers = CALCULATETABLE(VALUES('Native User Evidence'[TenantUserKey]), REMOVEFILTERS('Native User Evidence'), TREATAS(VALUES('User Inventory Evidence'[User Source ID]), 'Native User Evidence'[SourceUserId]))
+			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((COALESCE(COUNTROWS('Native User Evidence'),0)), KEEPFILTERS(TREATAS(NativeKeys0, 'Native User Evidence'[TenantUserKey]))), BLANK()), BLANK()), SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((COALESCE(COUNTROWS('Native User Evidence'),0)), KEEPFILTERS(TREATAS(InventoryUsers, 'Native User Evidence'[TenantUserKey]))), (COALESCE(COUNTROWS('Native User Evidence'),0))))
+		formatString: #,0
+		displayFolder: Native evidence
+		lineageTag: 7cb92128-3257-4a8f-a1eb-bcdb964af09d
+
+	/// AccountEnabled=true; this is not a measure of activity or sign-ins. Migrated without changing the source calculation.
+	measure 'Native Enabled accounts' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimUser"))
+			VAR InventoryUsers = CALCULATETABLE(VALUES('Native User Evidence'[TenantUserKey]), REMOVEFILTERS('Native User Evidence'), TREATAS(VALUES('User Inventory Evidence'[User Source ID]), 'Native User Evidence'[SourceUserId]))
+			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((CALCULATE([Native Users], KEEPFILTERS('Native User Evidence'[AccountEnabled] == TRUE()))), KEEPFILTERS(TREATAS(NativeKeys0, 'Native User Evidence'[TenantUserKey]))), BLANK()), BLANK()), SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((CALCULATE([Native Users], KEEPFILTERS('Native User Evidence'[AccountEnabled] == TRUE()))), KEEPFILTERS(TREATAS(InventoryUsers, 'Native User Evidence'[TenantUserKey]))), (CALCULATE([Native Users], KEEPFILTERS('Native User Evidence'[AccountEnabled] == TRUE())))))
+		formatString: #,0
+		displayFolder: Native evidence
+		lineageTag: 617e995d-43da-4c6a-afe3-04b5c744e8f8
+
+	/// AccountEnabled=false; unknown values remain separate. Migrated without changing the source calculation.
+	measure 'Native Disabled accounts' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimUser"))
+			VAR InventoryUsers = CALCULATETABLE(VALUES('Native User Evidence'[TenantUserKey]), REMOVEFILTERS('Native User Evidence'), TREATAS(VALUES('User Inventory Evidence'[User Source ID]), 'Native User Evidence'[SourceUserId]))
+			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((CALCULATE([Native Users], KEEPFILTERS('Native User Evidence'[AccountEnabled] == FALSE()))), KEEPFILTERS(TREATAS(NativeKeys0, 'Native User Evidence'[TenantUserKey]))), BLANK()), BLANK()), SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((CALCULATE([Native Users], KEEPFILTERS('Native User Evidence'[AccountEnabled] == FALSE()))), KEEPFILTERS(TREATAS(InventoryUsers, 'Native User Evidence'[TenantUserKey]))), (CALCULATE([Native Users], KEEPFILTERS('Native User Evidence'[AccountEnabled] == FALSE())))))
+		formatString: #,0
+		displayFolder: Native evidence
+		lineageTag: d0f403ac-8fd4-476b-a972-33f3c454d023
+
+	/// Enabled accounts / all filtered users; no activity information is implied. Migrated without changing the source calculation.
+	measure 'Native Enabled account share' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimUser"))
+			VAR InventoryUsers = CALCULATETABLE(VALUES('Native User Evidence'[TenantUserKey]), REMOVEFILTERS('Native User Evidence'), TREATAS(VALUES('User Inventory Evidence'[User Source ID]), 'Native User Evidence'[SourceUserId]))
+			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((DIVIDE([Native Enabled accounts], [Native Users])), KEEPFILTERS(TREATAS(NativeKeys0, 'Native User Evidence'[TenantUserKey]))), BLANK()), BLANK()), SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((DIVIDE([Native Enabled accounts], [Native Users])), KEEPFILTERS(TREATAS(InventoryUsers, 'Native User Evidence'[TenantUserKey]))), (DIVIDE([Native Enabled accounts], [Native Users]))))
+		formatString: 0.0%
+		displayFolder: Native evidence
+		lineageTag: 137a6e2f-cfdd-44da-b3e1-8016c8cc339a
+
+	/// Detail rows only when exactly one user is selected outside visual row grouping. Blank otherwise. Migrated without changing the source calculation.
+	measure 'Native User details' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimUser"))
+			VAR InventoryUsers = CALCULATETABLE(VALUES('Native User Evidence'[TenantUserKey]), REMOVEFILTERS('Native User Evidence'), TREATAS(VALUES('User Inventory Evidence'[User Source ID]), 'Native User Evidence'[SourceUserId]))
+			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((IF(COUNTROWS(ALLSELECTED('Native User Evidence')) = 1, COUNTROWS('Native User Evidence'))), KEEPFILTERS(TREATAS(NativeKeys0, 'Native User Evidence'[TenantUserKey]))), BLANK()), BLANK()), SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((IF(COUNTROWS(ALLSELECTED('Native User Evidence')) = 1, COUNTROWS('Native User Evidence'))), KEEPFILTERS(TREATAS(InventoryUsers, 'Native User Evidence'[TenantUserKey]))), (IF(COUNTROWS(ALLSELECTED('Native User Evidence')) = 1, COUNTROWS('Native User Evidence')))))
+		formatString: #,0
+		displayFolder: Native evidence
+		lineageTag: 689f42f0-c415-4f52-b7a1-13022458b181
+
+	/// Share of the current account-status category within the filtered user population. Migrated without changing the source calculation.
+	measure 'Native Account status share' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimUser"))
+			VAR InventoryUsers = CALCULATETABLE(VALUES('Native User Evidence'[TenantUserKey]), REMOVEFILTERS('Native User Evidence'), TREATAS(VALUES('User Inventory Evidence'[User Source ID]), 'Native User Evidence'[SourceUserId]))
+			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((DIVIDE([Native Users], CALCULATE([Native Users], REMOVEFILTERS('Native User Evidence'[AccountStatusLabel])))), KEEPFILTERS(TREATAS(NativeKeys0, 'Native User Evidence'[TenantUserKey]))), BLANK()), BLANK()), SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((DIVIDE([Native Users], CALCULATE([Native Users], REMOVEFILTERS('Native User Evidence'[AccountStatusLabel])))), KEEPFILTERS(TREATAS(InventoryUsers, 'Native User Evidence'[TenantUserKey]))), (DIVIDE([Native Users], CALCULATE([Native Users], REMOVEFILTERS('Native User Evidence'[AccountStatusLabel]))))))
+		formatString: 0.0%
+		displayFolder: Native evidence
+		lineageTag: 37cc227e-1647-44fd-bdfa-fea1d99261a8
+
+	/// Share of each observed activity state within the filtered user population. Migrated without changing the source calculation.
+	measure 'Native Activity state rate' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimUser"))
+			VAR InventoryUsers = CALCULATETABLE(VALUES('Native User Evidence'[TenantUserKey]), REMOVEFILTERS('Native User Evidence'), TREATAS(VALUES('User Inventory Evidence'[User Source ID]), 'Native User Evidence'[SourceUserId]))
+			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((DIVIDE([Native Users], CALCULATE([Native Users], REMOVEFILTERS('Native User Evidence'[ActivityState])))), KEEPFILTERS(TREATAS(NativeKeys0, 'Native User Evidence'[TenantUserKey]))), BLANK()), BLANK()), SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((DIVIDE([Native Users], CALCULATE([Native Users], REMOVEFILTERS('Native User Evidence'[ActivityState])))), KEEPFILTERS(TREATAS(InventoryUsers, 'Native User Evidence'[TenantUserKey]))), (DIVIDE([Native Users], CALCULATE([Native Users], REMOVEFILTERS('Native User Evidence'[ActivityState]))))))
+		formatString: 0.0%
+		displayFolder: Native evidence
+		lineageTag: 7cdcbe13-6dfb-48a4-a6ae-ccd3aef0db6c
+
+	/// Distinct licensed users in priority or watch bands based on exact M365 workload evidence; coverage gaps are excluded and non-use is not asserted. Migrated without changing the source calculation.
+	measure 'Native License review candidates' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimUser"))
+			VAR InventoryUsers = CALCULATETABLE(VALUES('Native User Evidence'[TenantUserKey]), REMOVEFILTERS('Native User Evidence'), TREATAS(VALUES('User Inventory Evidence'[User Source ID]), 'Native User Evidence'[SourceUserId]))
+			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((CALCULATE(DISTINCTCOUNT('Native License Assignment'[TenantUserKey]), KEEPFILTERS(FILTER('Native User Evidence', LEFT('Native User Evidence'[License review band], 8) = "Priority" || LEFT('Native User Evidence'[License review band], 5) = "Watch")))), KEEPFILTERS(TREATAS(NativeKeys0, 'Native User Evidence'[TenantUserKey]))), BLANK()), BLANK()), SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((CALCULATE(DISTINCTCOUNT('Native License Assignment'[TenantUserKey]), KEEPFILTERS(FILTER('Native User Evidence', LEFT('Native User Evidence'[License review band], 8) = "Priority" || LEFT('Native User Evidence'[License review band], 5) = "Watch")))), KEEPFILTERS(TREATAS(InventoryUsers, 'Native User Evidence'[TenantUserKey]))), (CALCULATE(DISTINCTCOUNT('Native License Assignment'[TenantUserKey]), KEEPFILTERS(FILTER('Native User Evidence', LEFT('Native User Evidence'[License review band], 8) = "Priority" || LEFT('Native User Evidence'[License review band], 5) = "Watch"))))))
+		formatString: #,0
+		displayFolder: Native evidence
+		lineageTag: 9929ed80-bab3-4cc8-aa42-3c1c945a7e66
+
+	/// Exact native-key entity context or existing inventory context. No name matching or inferred transitive membership. Unrelated entity selections return blank.
+	measure 'Native Context Rows · Native User Evidence' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimUser"))
+			VAR InventoryUsers = CALCULATETABLE(VALUES('Native User Evidence'[TenantUserKey]), REMOVEFILTERS('Native User Evidence'), TREATAS(VALUES('User Inventory Evidence'[User Source ID]), 'Native User Evidence'[SourceUserId]))
+			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((COUNTROWS('Native User Evidence')), KEEPFILTERS(TREATAS(NativeKeys0, 'Native User Evidence'[TenantUserKey]))), BLANK()), BLANK()), SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((COUNTROWS('Native User Evidence')), KEEPFILTERS(TREATAS(InventoryUsers, 'Native User Evidence'[TenantUserKey]))), (COUNTROWS('Native User Evidence'))))
+		formatString: #,0
+		isHidden
+		lineageTag: fb3d3924-6299-442d-907d-dde3d56721cf
+
+	/// Native DimUser attribute; source qualification is retained.
+	column TenantKey
+		dataType: string
+		isHidden
+		lineageTag: 7347e34f-b07f-4306-bbfd-b28541bd9850
+		summarizeBy: none
+		sourceColumn: TenantKey
+
+	/// Native DimUser attribute; source qualification is retained.
+	column OrganizationKey
+		dataType: string
+		isHidden
+		lineageTag: e23d99cd-cded-44f0-bf77-b086f6ced41c
+		summarizeBy: none
+		sourceColumn: OrganizationKey
+
+	/// Native DimUser attribute; source qualification is retained.
+	column EnvironmentKey
+		dataType: string
+		isHidden
+		lineageTag: 70b2bb0d-2c4e-4e85-97b4-60cd2eeefea6
+		summarizeBy: none
+		sourceColumn: EnvironmentKey
+
+	/// Native DimUser attribute; source qualification is retained.
+	column TenantId
+		dataType: string
+		isHidden
+		lineageTag: f2572c3d-2058-4c91-84ec-4613fe140156
+		summarizeBy: none
+		sourceColumn: TenantId
+
+	/// Native DimUser attribute; source qualification is retained.
+	column TenantUserKey
+		dataType: string
+		isHidden
+		lineageTag: 64a7c0df-3ec5-494c-b04a-0739cf926363
+		summarizeBy: none
+		sourceColumn: TenantUserKey
+
+	/// Native DimUser attribute; source qualification is retained.
+	column CmdbUserId
+		dataType: string
+		isHidden
+		lineageTag: 578bdc95-2734-4ad6-8525-f495ffc3c277
+		summarizeBy: none
+		sourceColumn: CmdbUserId
+
+	/// Native DimUser attribute; source qualification is retained.
+	column UserPrincipalName
+		dataType: string
+		lineageTag: 195a23a7-658c-4f5b-a4b8-5de05103b3ab
+		summarizeBy: none
+		sourceColumn: UserPrincipalName
+
+	/// Native DimUser attribute; source qualification is retained.
+	column DisplayName
+		dataType: string
+		lineageTag: 699891eb-0c74-4275-b692-9aaebc521d72
+		summarizeBy: none
+		sourceColumn: DisplayName
+
+	/// Native DimUser attribute; source qualification is retained.
+	column AccountEnabled
+		dataType: boolean
+		lineageTag: a84c7dff-bf9e-48dc-9df2-13ef0d0aeb61
+		summarizeBy: none
+		sourceColumn: AccountEnabled
+
+	/// Native DimUser attribute; source qualification is retained.
+	column UserType
+		dataType: string
+		lineageTag: 1b745c93-64e3-438a-82da-090e7675aab6
+		summarizeBy: none
+		sourceColumn: UserType
+
+	/// Native DimUser attribute; source qualification is retained.
+	column Department
+		dataType: string
+		lineageTag: 191890d1-311f-4fe6-ac4f-dc88e263429d
+		summarizeBy: none
+		sourceColumn: Department
+
+	/// Native DimUser attribute; source qualification is retained.
+	column JobTitle
+		dataType: string
+		lineageTag: c74292c9-9e2a-4b69-a4ab-b5b4544f8f41
+		summarizeBy: none
+		sourceColumn: JobTitle
+
+	/// Native DimUser attribute; source qualification is retained.
+	column CountryCode
+		dataType: string
+		lineageTag: d8e9b486-017e-4414-ba08-2343ccac5d85
+		summarizeBy: none
+		sourceColumn: CountryCode
+
+	/// Native DimUser attribute; source qualification is retained.
+	column CountryLabel
+		dataType: string
+		lineageTag: cac48c8d-4024-4051-b5a8-b62f5e5620a1
+		summarizeBy: none
+		sourceColumn: CountryLabel
+
+	/// Native DimUser attribute; source qualification is retained.
+	column CountryStatus
+		dataType: string
+		lineageTag: e3ba7b54-fb36-47a6-b695-7b2d1acafab6
+		summarizeBy: none
+		sourceColumn: CountryStatus
+
+	/// Native DimUser attribute; source qualification is retained.
+	column LastSignInDateTime
+		dataType: dateTime
+		formatString: yyyy-MM-dd HH:mm:ss
+		lineageTag: 70a9a202-acac-4fe6-9ee9-93a13d8e10d8
+		summarizeBy: none
+		sourceColumn: LastSignInDateTime
+
+	/// Native DimUser attribute; source qualification is retained.
+	column LastNonInteractiveSignInDateTime
+		dataType: dateTime
+		formatString: yyyy-MM-dd HH:mm:ss
+		lineageTag: fafb660d-acf6-4630-9673-585afe1473c1
+		summarizeBy: none
+		sourceColumn: LastNonInteractiveSignInDateTime
+
+	/// Native DimUser attribute; source qualification is retained.
+	column LastSuccessfulSignInDateTime
+		dataType: dateTime
+		formatString: yyyy-MM-dd HH:mm:ss
+		lineageTag: 5cf74ba2-fe7d-4a40-ba03-d8bba40bf675
+		summarizeBy: none
+		sourceColumn: LastSuccessfulSignInDateTime
+
+	/// Native DimUser attribute; source qualification is retained.
+	column ActivityState
+		dataType: string
+		lineageTag: 82208c69-d1c4-4b1d-ab65-980f26ee0c6b
+		summarizeBy: none
+		sourceColumn: ActivityState
+
+	/// Native DimUser attribute; source qualification is retained.
+	column ConfidenceScore
+		dataType: double
+		lineageTag: 7d60698e-549f-480a-97a9-574434cf530e
+		summarizeBy: none
+		sourceColumn: ConfidenceScore
+
+	/// Native DimUser attribute; source qualification is retained.
+	column AccountStatusLabel
+		dataType: string
+		lineageTag: 3a076654-716b-4e13-a6c8-7b54e549b387
+		summarizeBy: none
+		sourceColumn: AccountStatusLabel
+
+	/// Native DimUser attribute; source qualification is retained.
+	column DisplayNameLabel
+		dataType: string
+		lineageTag: 1438cdc5-e8e9-430b-97b4-937f2eea3736
+		summarizeBy: none
+		sourceColumn: DisplayNameLabel
+
+	/// Native DimUser attribute; source qualification is retained.
+	column UserPrincipalNameLabel
+		dataType: string
+		lineageTag: c9f67e06-de91-44ec-aee9-70f9018e14ac
+		summarizeBy: none
+		sourceColumn: UserPrincipalNameLabel
+
+	/// Native DimUser attribute; source qualification is retained.
+	column DepartmentLabel
+		dataType: string
+		lineageTag: 75c879b2-dc6b-4f7b-a3eb-684b092f325a
+		summarizeBy: none
+		sourceColumn: DepartmentLabel
+
+	/// Native DimUser attribute; source qualification is retained.
+	column UserTypeLabel
+		dataType: string
+		lineageTag: e83acb5f-0610-4c90-a362-2d3c76595a1b
+		summarizeBy: none
+		sourceColumn: UserTypeLabel
+
+	/// Native DimUser attribute; source qualification is retained.
+	column UserSelection
+		dataType: string
+		lineageTag: 7f704c9e-f037-4aff-a77c-d6658fc6750e
+		summarizeBy: none
+		sourceColumn: UserSelection
+
+	/// Native DimUser attribute; source qualification is retained.
+	column SourceUserId
+		dataType: string
+		lineageTag: a0a1a860-0885-48a4-931b-528500440393
+		summarizeBy: none
+		sourceColumn: SourceUserId
+
+	/// Native DimUser attribute; source qualification is retained.
+	column CreationRaw
+		dataType: string
+		lineageTag: 81017c56-831a-4c62-a18a-34e013a4bea6
+		summarizeBy: none
+		sourceColumn: CreationRaw
+
+	/// Native DimUser attribute; source qualification is retained.
+	column CreationUtcDateTime
+		dataType: dateTime
+		formatString: yyyy-MM-dd HH:mm:ss
+		lineageTag: 20cf014c-6443-41c1-813b-75b064f79473
+		summarizeBy: none
+		sourceColumn: CreationUtcDateTime
+
+	/// Native DimUser attribute; source qualification is retained.
+	column CreationStatus
+		dataType: string
+		lineageTag: bd8e0f64-9876-4ff8-82b8-d7d7acb25ce3
+		summarizeBy: none
+		sourceColumn: CreationStatus
+
+	/// Native DimUser attribute; source qualification is retained.
+	column SourceCollectedDateTime
+		dataType: dateTime
+		formatString: yyyy-MM-dd HH:mm:ss
+		lineageTag: 74696204-fb74-4dc4-83fa-0ccb8c996900
+		summarizeBy: none
+		sourceColumn: SourceCollectedDateTime
+
+	/// Native DimUser attribute; source qualification is retained.
+	column ManagerStatus
+		dataType: string
+		lineageTag: 27ab3078-2928-4728-a66c-95f289fca479
+		summarizeBy: none
+		sourceColumn: ManagerStatus
+
+	/// Native DimUser attribute; source qualification is retained.
+	column UserActivityStatus
+		dataType: string
+		lineageTag: 5f6a13a9-acac-4fee-9685-6fe1f5fe7405
+		summarizeBy: none
+		sourceColumn: UserActivityStatus
+
+	/// License-review prioritization from exact Office 365 workload activity evidence and account status. It is evidence for review, not proof that a license is unused.
+	column 'License review band' = VAR _activityMatch = LOOKUPVALUE('Native Workload Activity'[MatchStatus], 'Native Workload Activity'[TenantUserKey], 'Native User Evidence'[TenantUserKey]) VAR _workloadLast = LOOKUPVALUE('Native Workload Activity'[LastActivityDate], 'Native Workload Activity'[TenantUserKey], 'Native User Evidence'[TenantUserKey]) VAR _days = IF(NOT ISBLANK(_workloadLast), DATEDIFF(_workloadLast, TODAY(), DAY)) RETURN SWITCH(TRUE(), 'Native User Evidence'[AccountEnabled] = FALSE(), "Priority · disabled account", _activityMatch <> "ExactUPN", "Coverage gap · no exact workload row", ISBLANK(_workloadLast), "Priority · no M365 activity in D180", _days > 90, "Priority · workload over 90 days", _days > 30, "Watch · workload 31–90 days", "Recent M365 workload activity")
+		dataType: string
+		lineageTag: 0b9d8f5c-d36a-40c1-9a01-20ed16768571
+		summarizeBy: none
+
+	partition 'Native User Evidence' = m
+		mode: import
+		source = NativeEvidenceTypes(Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("DimUser.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]), {[name="TenantKey", dataType="String"], [name="OrganizationKey", dataType="String"], [name="EnvironmentKey", dataType="String"], [name="TenantId", dataType="String"], [name="TenantUserKey", dataType="String"], [name="CmdbUserId", dataType="String"], [name="UserPrincipalName", dataType="String"], [name="DisplayName", dataType="String"], [name="AccountEnabled", dataType="Boolean"], [name="UserType", dataType="String"], [name="Department", dataType="String"], [name="JobTitle", dataType="String"], [name="CountryCode", dataType="String"], [name="CountryLabel", dataType="String"], [name="CountryStatus", dataType="String"], [name="LastSignInDateTime", dataType="DateTime", allowSourceWallClock=true], [name="LastNonInteractiveSignInDateTime", dataType="DateTime", allowSourceWallClock=true], [name="LastSuccessfulSignInDateTime", dataType="DateTime", allowSourceWallClock=true], [name="ActivityState", dataType="String"], [name="ConfidenceScore", dataType="Double"], [name="AccountStatusLabel", dataType="String"], [name="DisplayNameLabel", dataType="String"], [name="UserPrincipalNameLabel", dataType="String"], [name="DepartmentLabel", dataType="String"], [name="UserTypeLabel", dataType="String"], [name="UserSelection", dataType="String"], [name="SourceUserId", dataType="String"], [name="CreationRaw", dataType="String"], [name="CreationUtcDateTime", dataType="DateTime"], [name="CreationStatus", dataType="String"], [name="SourceCollectedDateTime", dataType="DateTime"], [name="ManagerStatus", dataType="String"], [name="UserActivityStatus", dataType="String"]})
+

@@ -75,14 +75,24 @@ table 'License Report Candidates'
 		sourceColumn: Target Suites
 
 	column 'Mailbox Size GB'
-		dataType: decimal
+		dataType: double
 		lineageTag: 10a4f507-8493-4a76-bc6d-b77d782fba29
+		summarizeBy: sum
 		sourceColumn: Mailbox Size GB
 
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
+
 	column 'OneDrive Used GB'
-		dataType: decimal
+		dataType: double
 		lineageTag: 4be98eed-80fb-4ca0-8003-273f83a404be
+		summarizeBy: sum
 		sourceColumn: OneDrive Used GB
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
 
 	/// Detail from the E3 to F3 review worksheet; blank for recovery candidates.
 	column 'OneDrive Used Bytes'

@@ -1,0 +1,95 @@
+/// Governed tenant protection requirements by policy scope and role. Utility configuration table; not measured protection health.
+table 'Endpoint Protection Policy'
+	lineageTag: 71ce5ddb-8b49-4bcd-85b4-ca0df2cd6a7c
+
+	/// Prepared TenantKey. Retains source qualification.
+	column TenantKey
+		dataType: string
+		isHidden
+		lineageTag: b2e6f324-f64d-4b3f-bc8b-b01ae949730c
+		summarizeBy: none
+		sourceColumn: TenantKey
+
+	/// Prepared Policy Key. Retains source qualification.
+	column 'Policy Key'
+		dataType: string
+		isHidden
+		lineageTag: 401b4364-aa7d-4128-9643-fc2e65c8e742
+		summarizeBy: none
+		sourceColumn: Policy Key
+
+	/// Prepared Policy Version. Retains source qualification.
+	column 'Policy Version'
+		dataType: string
+		lineageTag: d8945c60-8396-480e-949e-af62ecfc55dc
+		summarizeBy: none
+		sourceColumn: Policy Version
+
+	/// Prepared Scope ID. Retains source qualification.
+	column 'Scope ID'
+		dataType: string
+		lineageTag: acddd1e4-0c61-467e-83a0-7f24a2a336a8
+		summarizeBy: none
+		sourceColumn: Scope ID
+
+	/// Prepared Device Source IDs. Retains source qualification.
+	column 'Device Source IDs'
+		dataType: string
+		isHidden
+		lineageTag: 05c4d56a-672b-4329-8c6d-532e884f9e58
+		summarizeBy: none
+		sourceColumn: Device Source IDs
+
+	/// Prepared Role. Retains source qualification.
+	column Role
+		dataType: string
+		lineageTag: 1dc6afc3-8707-46eb-925c-e97491dad816
+		summarizeBy: none
+		sourceColumn: Role
+
+	/// Prepared Expected Product. Retains source qualification.
+	column 'Expected Product'
+		dataType: string
+		lineageTag: 0d49cbe9-5852-4763-be50-dab5c93b7cfe
+		summarizeBy: none
+		sourceColumn: Expected Product
+
+	/// Prepared Expected Mode. Retains source qualification.
+	column 'Expected Mode'
+		dataType: string
+		lineageTag: 3f9df868-a58d-42f3-bd32-e151d968db36
+		summarizeBy: none
+		sourceColumn: Expected Mode
+
+	/// Prepared Evidence Product Name. Retains source qualification.
+	column 'Evidence Product Name'
+		dataType: string
+		lineageTag: 5f57aaf2-10d8-401d-bfd7-12f000eaeccb
+		summarizeBy: none
+		sourceColumn: Evidence Product Name
+
+	/// Prepared Exception Reason. Retains source qualification.
+	column 'Exception Reason'
+		dataType: string
+		lineageTag: 01b276ae-1713-4707-b54d-988eed5453d9
+		summarizeBy: none
+		sourceColumn: Exception Reason
+
+	/// Prepared Max Observation Age Hours. Retains source qualification.
+	column 'Max Observation Age Hours'
+		dataType: decimal
+		lineageTag: 54ebe7b9-2ef1-496a-b795-9dd8c44ae73f
+		summarizeBy: none
+		sourceColumn: Max Observation Age Hours
+
+	partition 'Endpoint Protection Policy' = m
+		mode: import
+		source =
+				let
+				    Source = ReadMigrationCsv(GetPreparedEvidenceFile("EndpointProtectionPolicy.csv"), {"TenantKey", "Policy Key", "Policy Version", "Scope ID", "Device Source IDs", "Role", "Expected Product", "Expected Mode", "Evidence Product Name", "Exception Reason", "Max Observation Age Hours"}),
+				    Selected = Table.SelectColumns(Source, {"TenantKey", "Policy Key", "Policy Version", "Scope ID", "Device Source IDs", "Role", "Expected Product", "Expected Mode", "Evidence Product Name", "Exception Reason", "Max Observation Age Hours"}),
+				    ParseUtc = (raw as nullable text) as nullable datetime => if raw = null or Text.Trim(raw) = "" then null else if not Text.EndsWith(raw, "Z") then error "Endpoint Protection observation must be UTC Z" else DateTimeZone.RemoveZone(DateTimeZone.SwitchZone(DateTimeZone.FromText(raw, [Culture="en-US"]), 0)),
+				    TypedSpecial = Table.TransformColumns(Selected, {{"Max Observation Age Hours", each if _ = null or Text.Trim(_) = "" then null else Number.FromText(_, "en-US"), type nullable number}}),
+				    Typed = Table.TransformColumnTypes(TypedSpecial, {{"TenantKey", type text}, {"Policy Key", type text}, {"Policy Version", type text}, {"Scope ID", type text}, {"Device Source IDs", type text}, {"Role", type text}, {"Expected Product", type text}, {"Expected Mode", type text}, {"Evidence Product Name", type text}, {"Exception Reason", type text}})
+				in Typed
+

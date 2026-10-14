@@ -1,0 +1,139 @@
+/// Native source facet migrated from DimIntuneConfigurationPolicy; exact source grain, unresolved links and qualification retained. Uses the unified pinned batch, not a separate CMDB reader.
+table 'Native Configuration Catalog'
+	lineageTag: d76a3ae1-2d9e-4753-911a-5bcc74f0f8e5
+
+	/// Configuration policies observed in the frozen Intune collection. Migrated without changing the source calculation.
+	measure 'Native Intune configuration policies' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (COALESCE(COUNTROWS('Native Configuration Catalog'),0)))
+		formatString: #,0
+		displayFolder: Native evidence
+		lineageTag: 9f7c2e4a-da32-4e36-825a-f608a3c53589
+
+	/// Exact native-key entity context or existing inventory context. No name matching or inferred transitive membership. Unrelated entity selections return blank.
+	measure 'Native Context Rows · Native Configuration Catalog' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (COUNTROWS('Native Configuration Catalog')))
+		formatString: #,0
+		isHidden
+		lineageTag: 4fc78ff8-38a1-4cf2-a7f1-5fd9cc6c55c5
+
+	/// Native DimIntuneConfigurationPolicy attribute; source qualification is retained.
+	column TenantKey
+		dataType: string
+		isHidden
+		lineageTag: 2a78c5ec-b884-4595-b840-d8fb0192007b
+		summarizeBy: none
+		sourceColumn: TenantKey
+
+	/// Native DimIntuneConfigurationPolicy attribute; source qualification is retained.
+	column OrganizationKey
+		dataType: string
+		isHidden
+		lineageTag: b535e464-efce-4994-8a57-45f3cd54d9aa
+		summarizeBy: none
+		sourceColumn: OrganizationKey
+
+	/// Native DimIntuneConfigurationPolicy attribute; source qualification is retained.
+	column EnvironmentKey
+		dataType: string
+		isHidden
+		lineageTag: bbb48455-58e8-4274-b7ac-ba82b4e59ec5
+		summarizeBy: none
+		sourceColumn: EnvironmentKey
+
+	/// Native DimIntuneConfigurationPolicy attribute; source qualification is retained.
+	column TenantId
+		dataType: string
+		isHidden
+		lineageTag: 0f96da8b-e695-435b-a9f9-34938bd06750
+		summarizeBy: none
+		sourceColumn: TenantId
+
+	/// Native DimIntuneConfigurationPolicy attribute; source qualification is retained.
+	column TenantPolicyKey
+		dataType: string
+		isHidden
+		lineageTag: b7ff5773-6ee6-4126-a991-3d4078004187
+		summarizeBy: none
+		sourceColumn: TenantPolicyKey
+
+	/// Native DimIntuneConfigurationPolicy attribute; source qualification is retained.
+	column PolicyId
+		dataType: string
+		lineageTag: d2883856-7222-4fd4-8e76-23fbdea0cf8a
+		summarizeBy: none
+		sourceColumn: PolicyId
+
+	/// Native DimIntuneConfigurationPolicy attribute; source qualification is retained.
+	column DisplayName
+		dataType: string
+		lineageTag: cce35c33-df5b-42a9-b7cd-f8a2888bc7ed
+		summarizeBy: none
+		sourceColumn: DisplayName
+
+	/// Native DimIntuneConfigurationPolicy attribute; source qualification is retained.
+	column Description
+		dataType: string
+		lineageTag: 17ca3060-98be-4d02-b141-b2711c8d69fb
+		summarizeBy: none
+		sourceColumn: Description
+
+	/// Native DimIntuneConfigurationPolicy attribute; source qualification is retained.
+	column Platforms
+		dataType: string
+		lineageTag: b1d71565-2b59-4490-8e45-07f2efc98c24
+		summarizeBy: none
+		sourceColumn: Platforms
+
+	/// Native DimIntuneConfigurationPolicy attribute; source qualification is retained.
+	column Technologies
+		dataType: string
+		lineageTag: d40d45bf-28c0-41f2-b7b7-402ad5c494bb
+		summarizeBy: none
+		sourceColumn: Technologies
+
+	/// Native DimIntuneConfigurationPolicy attribute; source qualification is retained.
+	column TemplateId
+		dataType: string
+		lineageTag: 50b7bb81-3976-465f-b118-5fd7cea2b2cc
+		summarizeBy: none
+		sourceColumn: TemplateId
+
+	/// Native DimIntuneConfigurationPolicy attribute; source qualification is retained.
+	column TemplateFamily
+		dataType: string
+		lineageTag: 2a5ba78e-0623-48e6-90b2-ac94e20a2c6a
+		summarizeBy: none
+		sourceColumn: TemplateFamily
+
+	/// Native DimIntuneConfigurationPolicy attribute; source qualification is retained.
+	column CreatedDateTime
+		dataType: dateTime
+		formatString: yyyy-MM-dd HH:mm:ss
+		lineageTag: 9466cb73-595c-4bae-9a29-aa55b70500af
+		summarizeBy: none
+		sourceColumn: CreatedDateTime
+
+	/// Native DimIntuneConfigurationPolicy attribute; source qualification is retained.
+	column LastModifiedDateTime
+		dataType: dateTime
+		formatString: yyyy-MM-dd HH:mm:ss
+		lineageTag: d157cf4a-be95-4247-ab2a-3d595b09997d
+		summarizeBy: none
+		sourceColumn: LastModifiedDateTime
+
+	/// Native DimIntuneConfigurationPolicy attribute; source qualification is retained.
+	column SourceCollectedDateTime
+		dataType: dateTime
+		formatString: yyyy-MM-dd HH:mm:ss
+		lineageTag: 053be69f-3f8c-4c68-848c-713c88d786de
+		summarizeBy: none
+		sourceColumn: SourceCollectedDateTime
+
+	partition 'Native Configuration Catalog' = m
+		mode: import
+		source = NativeEvidenceTypes(Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("DimIntuneConfigurationPolicy.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]), {[name="TenantKey", dataType="String"], [name="OrganizationKey", dataType="String"], [name="EnvironmentKey", dataType="String"], [name="TenantId", dataType="String"], [name="TenantPolicyKey", dataType="String"], [name="PolicyId", dataType="String"], [name="DisplayName", dataType="String"], [name="Description", dataType="String"], [name="Platforms", dataType="String"], [name="Technologies", dataType="String"], [name="TemplateId", dataType="String"], [name="TemplateFamily", dataType="String"], [name="CreatedDateTime", dataType="DateTime", allowSourceWallClock=true], [name="LastModifiedDateTime", dataType="DateTime", allowSourceWallClock=true], [name="SourceCollectedDateTime", dataType="DateTime"]})
+

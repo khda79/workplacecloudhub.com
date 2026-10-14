@@ -3,11 +3,11 @@
   "name": "f141ba9967fd53af0f1a",
   "position": {
     "x": 32,
-    "y": 256,
+    "y": 688,
+    "width": 912,
+    "height": 304,
     "z": 108,
-    "width": 560,
-    "height": 400,
-    "tabOrder": 108
+    "tabOrder": 1338
   },
   "visual": {
     "visualType": "azureMap",
@@ -23,10 +23,10 @@
                       "Entity": "Device Inventory Evidence"
                     }
                   },
-                  "Property": "Country"
+                  "Property": "Country Name"
                 }
               },
-              "queryRef": "Device Inventory Evidence.Country",
+              "queryRef": "Device Inventory Evidence.Country Name",
               "nativeQueryRef": "Country",
               "active": true
             }
@@ -294,6 +294,19 @@
             }
           }
         }
+      ],
+      "labels": [
+        {
+          "properties": {
+            "labelDisplayUnits": {
+              "expr": {
+                "Literal": {
+                  "Value": "1D"
+                }
+              }
+            }
+          }
+        }
       ]
     },
     "visualContainerObjects": {
@@ -303,7 +316,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Endpoint footprint by country. Geographic distribution for the current filter context.'"
+                  "Value": "'Endpoint footprint by country'"
                 }
               }
             }
@@ -330,7 +343,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "13D"
+                  "Value": "12D"
                 }
               }
             },
@@ -339,16 +352,9 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#1F2937'"
+                      "Value": "'#183153'"
                     }
                   }
-                }
-              }
-            },
-            "bold": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
                 }
               }
             }
@@ -401,9 +407,16 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#CBD8E5'"
+                      "Value": "'#CCDCEC'"
                     }
                   }
+                }
+              }
+            },
+            "radius": {
+              "expr": {
+                "Literal": {
+                  "Value": "8D"
                 }
               }
             },
@@ -411,13 +424,6 @@
               "expr": {
                 "Literal": {
                   "Value": "1D"
-                }
-              }
-            },
-            "radius": {
-              "expr": {
-                "Literal": {
-                  "Value": "12D"
                 }
               }
             }
@@ -457,14 +463,14 @@
             "left": {
               "expr": {
                 "Literal": {
-                  "Value": "10D"
+                  "Value": "8D"
                 }
               }
             },
             "right": {
               "expr": {
                 "Literal": {
-                  "Value": "10D"
+                  "Value": "8D"
                 }
               }
             }
@@ -472,5 +478,6 @@
         }
       ]
     }
-  }
+  },
+  "parentGroupName": "389fe54faee87edb23b9"
 }

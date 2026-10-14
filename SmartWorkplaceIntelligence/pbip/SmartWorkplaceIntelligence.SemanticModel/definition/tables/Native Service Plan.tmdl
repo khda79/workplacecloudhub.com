@@ -1,0 +1,135 @@
+/// Native source facet migrated from DimLicenseServicePlan; exact source grain, unresolved links and qualification retained. Uses the unified pinned batch, not a separate CMDB reader.
+table 'Native Service Plan'
+	lineageTag: 92a7715f-84fc-430a-b367-0ceb331480df
+
+	/// Service plans published by the subscribed Microsoft 365 SKUs in the frozen collection. Migrated without changing the source calculation.
+	measure 'Native License service plans' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimLicenseSku"))
+			VAR NativeKeys1 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimLicenseServicePlan"))
+			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((COALESCE(COUNTROWS('Native Service Plan'),0)), KEEPFILTERS(TREATAS(NativeKeys0, 'Native Service Plan'[TenantSkuKey]))),
+			COUNTROWS(NativeKeys1) > 0, CALCULATE((COALESCE(COUNTROWS('Native Service Plan'),0)), KEEPFILTERS(TREATAS(NativeKeys1, 'Native Service Plan'[TenantServicePlanKey]))), BLANK()), BLANK()), (COALESCE(COUNTROWS('Native Service Plan'),0)))
+		formatString: #,0
+		displayFolder: Native evidence
+		lineageTag: 716b0a7b-0268-405c-b293-8c13671c68cc
+
+	/// Share of each service-plan provisioning status. Migrated without changing the source calculation.
+	measure 'Native Service plan provisioning rate' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimLicenseSku"))
+			VAR NativeKeys1 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimLicenseServicePlan"))
+			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((DIVIDE([Native License service plans], CALCULATE([Native License service plans], REMOVEFILTERS('Native Service Plan'[ProvisioningStatus])))), KEEPFILTERS(TREATAS(NativeKeys0, 'Native Service Plan'[TenantSkuKey]))),
+			COUNTROWS(NativeKeys1) > 0, CALCULATE((DIVIDE([Native License service plans], CALCULATE([Native License service plans], REMOVEFILTERS('Native Service Plan'[ProvisioningStatus])))), KEEPFILTERS(TREATAS(NativeKeys1, 'Native Service Plan'[TenantServicePlanKey]))), BLANK()), BLANK()), (DIVIDE([Native License service plans], CALCULATE([Native License service plans], REMOVEFILTERS('Native Service Plan'[ProvisioningStatus])))))
+		formatString: 0.0%
+		displayFolder: Native evidence
+		lineageTag: 55ce5edc-516c-4547-a6d6-d32cbf867c50
+
+	/// Exact native-key entity context or existing inventory context. No name matching or inferred transitive membership. Unrelated entity selections return blank.
+	measure 'Native Context Rows · Native Service Plan' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimLicenseSku"))
+			VAR NativeKeys1 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimLicenseServicePlan"))
+			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((COUNTROWS('Native Service Plan')), KEEPFILTERS(TREATAS(NativeKeys0, 'Native Service Plan'[TenantSkuKey]))),
+			COUNTROWS(NativeKeys1) > 0, CALCULATE((COUNTROWS('Native Service Plan')), KEEPFILTERS(TREATAS(NativeKeys1, 'Native Service Plan'[TenantServicePlanKey]))), BLANK()), BLANK()), (COUNTROWS('Native Service Plan')))
+		formatString: #,0
+		isHidden
+		lineageTag: dac19b3e-9d3d-49cf-bbc8-cd95f9d48f29
+
+	/// Native DimLicenseServicePlan attribute; source qualification is retained.
+	column TenantKey
+		dataType: string
+		isHidden
+		lineageTag: 09d6005a-7b8e-433f-94d4-75b974f570f0
+		summarizeBy: none
+		sourceColumn: TenantKey
+
+	/// Native DimLicenseServicePlan attribute; source qualification is retained.
+	column OrganizationKey
+		dataType: string
+		isHidden
+		lineageTag: ab22bb89-6045-443c-974d-336eb7e884ce
+		summarizeBy: none
+		sourceColumn: OrganizationKey
+
+	/// Native DimLicenseServicePlan attribute; source qualification is retained.
+	column EnvironmentKey
+		dataType: string
+		isHidden
+		lineageTag: e926b733-f06c-4d29-b354-4c42865fd010
+		summarizeBy: none
+		sourceColumn: EnvironmentKey
+
+	/// Native DimLicenseServicePlan attribute; source qualification is retained.
+	column TenantId
+		dataType: string
+		isHidden
+		lineageTag: 1dddec42-7152-40cc-863e-e47938f457de
+		summarizeBy: none
+		sourceColumn: TenantId
+
+	/// Native DimLicenseServicePlan attribute; source qualification is retained.
+	column TenantServicePlanKey
+		dataType: string
+		isHidden
+		lineageTag: fb468648-3ce5-4c67-a38c-fbb958ff5059
+		summarizeBy: none
+		sourceColumn: TenantServicePlanKey
+
+	/// Native DimLicenseServicePlan attribute; source qualification is retained.
+	column TenantSkuKey
+		dataType: string
+		isHidden
+		lineageTag: b592a973-ecac-4e0a-b08e-dbbb1ef32fdc
+		summarizeBy: none
+		sourceColumn: TenantSkuKey
+
+	/// Native DimLicenseServicePlan attribute; source qualification is retained.
+	column SkuId
+		dataType: string
+		isHidden
+		lineageTag: 6581c0e8-f16a-433b-a1c1-27bd1525f8ae
+		summarizeBy: none
+		sourceColumn: SkuId
+
+	/// Native DimLicenseServicePlan attribute; source qualification is retained.
+	column SkuPartNumber
+		dataType: string
+		lineageTag: f079e443-432e-41dd-b86a-34bc8f2af33d
+		summarizeBy: none
+		sourceColumn: SkuPartNumber
+
+	/// Native DimLicenseServicePlan attribute; source qualification is retained.
+	column ServicePlanId
+		dataType: string
+		lineageTag: 65bb88a7-4b4f-4f35-9ca6-6af3c186c286
+		summarizeBy: none
+		sourceColumn: ServicePlanId
+
+	/// Native DimLicenseServicePlan attribute; source qualification is retained.
+	column ServicePlanName
+		dataType: string
+		lineageTag: c7b95e3e-74d6-4291-9fe1-46185e68de88
+		summarizeBy: none
+		sourceColumn: ServicePlanName
+
+	/// Native DimLicenseServicePlan attribute; source qualification is retained.
+	column ProvisioningStatus
+		dataType: string
+		lineageTag: 102357a9-5920-4f2d-8364-1521eb3bcc9e
+		summarizeBy: none
+		sourceColumn: ProvisioningStatus
+
+	/// Native DimLicenseServicePlan attribute; source qualification is retained.
+	column AppliesTo
+		dataType: string
+		lineageTag: 6eb7ddf9-0309-4126-ac49-5bbffe16cb42
+		summarizeBy: none
+		sourceColumn: AppliesTo
+
+	partition 'Native Service Plan' = m
+		mode: import
+		source = NativeEvidenceTypes(Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("DimLicenseServicePlan.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]), {[name="TenantKey", dataType="String"], [name="OrganizationKey", dataType="String"], [name="EnvironmentKey", dataType="String"], [name="TenantId", dataType="String"], [name="TenantServicePlanKey", dataType="String"], [name="TenantSkuKey", dataType="String"], [name="SkuId", dataType="String"], [name="SkuPartNumber", dataType="String"], [name="ServicePlanId", dataType="String"], [name="ServicePlanName", dataType="String"], [name="ProvisioningStatus", dataType="String"], [name="AppliesTo", dataType="String"]})
+

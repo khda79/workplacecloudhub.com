@@ -38,8 +38,6 @@ table 'Collaboration Trend Evidence'
 			relationship: 0741e885-869b-471d-916d-7ca9dc4e235b
 			defaultHierarchy: LocalDateTable_23ebdc86-a087-40cc-9e59-977a41aaba93.'Date Hierarchy'
 
-		annotation UnderlyingDateTimeDataType = Date
-
 	column 'Date Key'
 		dataType: int64
 		isHidden

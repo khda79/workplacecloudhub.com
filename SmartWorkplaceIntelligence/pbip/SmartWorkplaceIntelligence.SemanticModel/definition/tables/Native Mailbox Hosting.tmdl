@@ -1,0 +1,209 @@
+/// Native source facet migrated from FactMailboxHosting; exact source grain, unresolved links and qualification retained. Uses the unified pinned batch, not a separate CMDB reader.
+table 'Native Mailbox Hosting'
+	lineageTag: cac9bb82-11de-49a9-ab40-822dfb410155
+
+	/// Distinct mailbox addresses after reconciliation of Exchange Online, RemoteMailbox and local Mailbox evidence. Migrated without changing the source calculation.
+	measure 'Native Hosted mailboxes' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (COALESCE(COUNTROWS('Native Mailbox Hosting'), 0)))
+		formatString: #,0
+		displayFolder: Native evidence
+		lineageTag: 00d6b9d3-10b8-4455-8bf1-4cac3aeb9747
+
+	/// Mailboxes observed in Exchange Online or as RemoteMailbox; duplicate addresses are counted once. Migrated without changing the source calculation.
+	measure 'Native Exchange Online mailboxes' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (CALCULATE([Native Hosted mailboxes], KEEPFILTERS('Native Mailbox Hosting'[HostingLocation] == "Exchange Online"))))
+		formatString: #,0
+		displayFolder: Native evidence
+		lineageTag: 4d039333-fec6-40a9-8450-391c3df7462b
+
+	/// Local Mailbox recipients not already observed as Exchange Online or RemoteMailbox; duplicate addresses are counted once. Migrated without changing the source calculation.
+	measure 'Native Exchange On-premises mailboxes' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (CALCULATE([Native Hosted mailboxes], KEEPFILTERS('Native Mailbox Hosting'[HostingLocation] == "Exchange On-premises"))))
+		formatString: #,0
+		displayFolder: Native evidence
+		lineageTag: c505adec-f2c9-4e2e-8102-4cd2a453709a
+
+	/// Exchange Online mailboxes divided by the reconciled mailbox footprint. Migrated without changing the source calculation.
+	measure 'Native Exchange Online share' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (DIVIDE([Native Exchange Online mailboxes], [Native Hosted mailboxes])))
+		formatString: 0.0%
+		displayFolder: Native evidence
+		lineageTag: 3b19e76c-7e29-47ca-a628-55e5ebbdb7d2
+
+	/// Exchange On-premises mailboxes divided by the reconciled mailbox footprint. Migrated without changing the source calculation.
+	measure 'Native Exchange On-premises share' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (DIVIDE([Native Exchange On-premises mailboxes], [Native Hosted mailboxes])))
+		formatString: 0.0%
+		displayFolder: Native evidence
+		lineageTag: 3e6814b8-957e-483e-b785-eb19fc400bf5
+
+	/// UserMailbox and RemoteUserMailbox recipients after mailbox-hosting reconciliation. Migrated without changing the source calculation.
+	measure 'Native User mailboxes' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (CALCULATE([Native Hosted mailboxes], KEEPFILTERS('Native Mailbox Hosting'[MailboxTypeGroup] == "User mailbox"))))
+		formatString: #,0
+		displayFolder: Native evidence
+		lineageTag: 6268162c-d29e-424d-834f-0125cc7823df
+
+	/// SharedMailbox and RemoteSharedMailbox recipients after mailbox-hosting reconciliation. Migrated without changing the source calculation.
+	measure 'Native Shared mailboxes' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (CALCULATE([Native Hosted mailboxes], KEEPFILTERS('Native Mailbox Hosting'[MailboxTypeGroup] == "Shared mailbox"))))
+		formatString: #,0
+		displayFolder: Native evidence
+		lineageTag: 3bb98cf8-2e0f-4de2-a934-eaeb07ef1ee1
+
+	/// Room, scheduling, discovery and other recipient types after mailbox-hosting reconciliation. Migrated without changing the source calculation.
+	measure 'Native Other mailbox types' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (CALCULATE([Native Hosted mailboxes], KEEPFILTERS('Native Mailbox Hosting'[MailboxTypeGroup] == "Other mailbox types"))))
+		formatString: #,0
+		displayFolder: Native evidence
+		lineageTag: 2555ee26-4261-41ca-a68b-7aa1a0d2af6c
+
+	/// User mailbox family divided by all reconciled mailboxes. Migrated without changing the source calculation.
+	measure 'Native User mailbox share' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (DIVIDE([Native User mailboxes], [Native Hosted mailboxes])))
+		formatString: 0.0%
+		displayFolder: Native evidence
+		lineageTag: 8b9f0720-7aef-41ac-81f6-9cf683000e15
+
+	/// Shared mailbox family divided by all reconciled mailboxes. Migrated without changing the source calculation.
+	measure 'Native Shared mailbox share' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (DIVIDE([Native Shared mailboxes], [Native Hosted mailboxes])))
+		formatString: 0.0%
+		displayFolder: Native evidence
+		lineageTag: cf32af72-b776-4586-918f-72e80f157893
+
+	/// Other mailbox types divided by all reconciled mailboxes. Migrated without changing the source calculation.
+	measure 'Native Other mailbox type share' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (DIVIDE([Native Other mailbox types], [Native Hosted mailboxes])))
+		formatString: 0.0%
+		displayFolder: Native evidence
+		lineageTag: 579eea35-52ad-4295-a14a-9d6cbb239180
+
+	/// Share of the current mailbox-type category within the filtered reconciled mailbox population. Migrated without changing the source calculation.
+	measure 'Native Mailbox type share' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (DIVIDE([Native Hosted mailboxes], CALCULATE([Native Hosted mailboxes], REMOVEFILTERS('Native Mailbox Hosting'[MailboxTypeGroup])))))
+		formatString: 0.0%
+		displayFolder: Native evidence
+		lineageTag: 93635aca-d39f-45e1-b0e2-06976ccfd012
+
+	/// Share of each mailbox-hosting location within the filtered reconciled mailbox population. Migrated without changing the source calculation.
+	measure 'Native Mailbox hosting rate' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (DIVIDE([Native Hosted mailboxes], CALCULATE([Native Hosted mailboxes], REMOVEFILTERS('Native Mailbox Hosting'[HostingLocation])))))
+		formatString: 0.0%
+		displayFolder: Native evidence
+		lineageTag: e3e667f0-836a-4a3e-b3c7-5b6b0081a6de
+
+	/// Exact native-key entity context or existing inventory context. No name matching or inferred transitive membership. Unrelated entity selections return blank.
+	measure 'Native Context Rows · Native Mailbox Hosting' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (COUNTROWS('Native Mailbox Hosting')))
+		formatString: #,0
+		isHidden
+		lineageTag: 03a3bbbd-d0d3-420f-b8e8-42288a2114b6
+
+	/// Native FactMailboxHosting attribute; source qualification is retained.
+	column TenantKey
+		dataType: string
+		isHidden
+		lineageTag: 78c59e62-7dc6-4bca-8d2e-04b7a47e893f
+		summarizeBy: none
+		sourceColumn: TenantKey
+
+	/// Native FactMailboxHosting attribute; source qualification is retained.
+	column OrganizationKey
+		dataType: string
+		isHidden
+		lineageTag: d034db54-5f15-427c-afcc-99eb9f811034
+		summarizeBy: none
+		sourceColumn: OrganizationKey
+
+	/// Native FactMailboxHosting attribute; source qualification is retained.
+	column EnvironmentKey
+		dataType: string
+		isHidden
+		lineageTag: 033f9354-39e9-40b5-a532-6201d04c8535
+		summarizeBy: none
+		sourceColumn: EnvironmentKey
+
+	/// Native FactMailboxHosting attribute; source qualification is retained.
+	column TenantId
+		dataType: string
+		isHidden
+		lineageTag: bbc4c1b1-b3cd-43c9-8a83-d71bffe57eb7
+		summarizeBy: none
+		sourceColumn: TenantId
+
+	/// Native FactMailboxHosting attribute; source qualification is retained.
+	column MailboxHostingKey
+		dataType: string
+		isHidden
+		lineageTag: 55695049-c99e-4ebe-82b6-2627dd808b07
+		summarizeBy: none
+		sourceColumn: MailboxHostingKey
+
+	/// Native FactMailboxHosting attribute; source qualification is retained.
+	column CountryLabel
+		dataType: string
+		lineageTag: ce5af8c5-af33-4172-88a8-972fe8d51e80
+		summarizeBy: none
+		sourceColumn: CountryLabel
+
+	/// Native FactMailboxHosting attribute; source qualification is retained.
+	column HostingLocation
+		dataType: string
+		lineageTag: 34d5c61d-49b2-47e2-b87e-a1410279c477
+		summarizeBy: none
+		sourceColumn: HostingLocation
+
+	/// Native FactMailboxHosting attribute; source qualification is retained.
+	column RecipientTypeDetails
+		dataType: string
+		lineageTag: 6d13d4b5-13b4-4947-a9db-fd86f1a0cb4c
+		summarizeBy: none
+		sourceColumn: RecipientTypeDetails
+
+	/// Native FactMailboxHosting attribute; source qualification is retained.
+	column EvidenceSource
+		dataType: string
+		lineageTag: 8b6d1854-e3fb-48d7-a664-7874c781f041
+		summarizeBy: none
+		sourceColumn: EvidenceSource
+
+	/// Native FactMailboxHosting attribute; source qualification is retained.
+	column MailboxTypeGroup
+		dataType: string
+		lineageTag: de5516a0-ba8d-46f7-9cb7-fb7f3eb48486
+		summarizeBy: none
+		sourceColumn: MailboxTypeGroup
+
+	partition 'Native Mailbox Hosting' = m
+		mode: import
+		source = NativeEvidenceTypes(Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("FactMailboxHosting.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]), {[name="TenantKey", dataType="String"], [name="OrganizationKey", dataType="String"], [name="EnvironmentKey", dataType="String"], [name="TenantId", dataType="String"], [name="MailboxHostingKey", dataType="String"], [name="CountryLabel", dataType="String"], [name="HostingLocation", dataType="String"], [name="RecipientTypeDetails", dataType="String"], [name="MailboxTypeGroup", dataType="String"], [name="EvidenceSource", dataType="String"]})
+

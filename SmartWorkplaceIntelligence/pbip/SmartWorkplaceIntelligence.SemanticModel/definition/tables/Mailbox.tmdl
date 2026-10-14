@@ -1,5 +1,6 @@
-/// Synthetic mailbox catalogue.
+/// Legacy synthetic fixture: not used by production report visuals or consolidated evidence. Removal is pending a separately cleared dependency-safe retirement; no real data.
 table Mailbox
+	isHidden
 	lineageTag: 83c5c0b2-18b4-4ee2-a27b-df06af1ca075
 
 	/// Business attribute Mailbox Key.

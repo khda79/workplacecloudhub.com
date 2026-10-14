@@ -1,0 +1,127 @@
+/// Native source facet migrated from ADDomainSource; exact source grain, unresolved links and qualification retained. Uses the unified pinned batch, not a separate CMDB reader.
+table 'AD Domain Evidence'
+	lineageTag: a7aa330d-7c70-466e-bfeb-14e59d347fad
+
+	/// Exact native-key entity context or existing inventory context. No name matching or inferred transitive membership. Unrelated entity selections return blank.
+	measure 'Native Context Rows · AD Domain Evidence' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (COUNTROWS('AD Domain Evidence')))
+		formatString: #,0
+		isHidden
+		lineageTag: ac23cb6f-9e87-471a-9618-0e71e06f7729
+
+	/// Native ADDomainSource attribute; source qualification is retained.
+	column TenantKey
+		dataType: string
+		isHidden
+		lineageTag: c58902f0-eee4-4723-b752-9d83ece016c4
+		summarizeBy: none
+		sourceColumn: TenantKey
+
+	/// Native ADDomainSource attribute; source qualification is retained.
+	column OrganizationKey
+		dataType: string
+		isHidden
+		lineageTag: c84ff0aa-16b4-4010-9a65-69371f12fc55
+		summarizeBy: none
+		sourceColumn: OrganizationKey
+
+	/// Native ADDomainSource attribute; source qualification is retained.
+	column EnvironmentKey
+		dataType: string
+		isHidden
+		lineageTag: 5250b64a-17a6-465f-a63c-51efcbb2b6d3
+		summarizeBy: none
+		sourceColumn: EnvironmentKey
+
+	/// Native ADDomainSource attribute; source qualification is retained.
+	column TenantId
+		dataType: string
+		isHidden
+		lineageTag: 65e004fa-360c-453f-b6d1-bc8a1e4158a0
+		summarizeBy: none
+		sourceColumn: TenantId
+
+	/// Native ADDomainSource attribute; source qualification is retained.
+	column TenantADDomainKey
+		dataType: string
+		isHidden
+		lineageTag: 32209678-7c71-457b-94c5-4440ee7c6911
+		summarizeBy: none
+		sourceColumn: TenantADDomainKey
+
+	/// Native ADDomainSource attribute; source qualification is retained.
+	column DNSRoot
+		dataType: string
+		lineageTag: 45880669-6e1a-46c2-a715-1dbcaacfcd0d
+		summarizeBy: none
+		sourceColumn: DNSRoot
+
+	/// Native ADDomainSource attribute; source qualification is retained.
+	column DomainSID
+		dataType: string
+		lineageTag: 557ad721-392c-4f9b-9fa5-7f767ea05277
+		summarizeBy: none
+		sourceColumn: DomainSID
+
+	/// Native ADDomainSource attribute; source qualification is retained.
+	column NetBIOSName
+		dataType: string
+		lineageTag: 39d6c8b5-7d72-4346-affe-3d7c7001eaec
+		summarizeBy: none
+		sourceColumn: NetBIOSName
+
+	/// Native ADDomainSource attribute; source qualification is retained.
+	column Forest
+		dataType: string
+		lineageTag: 499551b7-1604-4bde-a12c-465274f209cd
+		summarizeBy: none
+		sourceColumn: Forest
+
+	/// Native ADDomainSource attribute; source qualification is retained.
+	column DistinguishedName
+		dataType: string
+		lineageTag: 447ac976-3122-455f-a365-be8ca21e81a5
+		summarizeBy: none
+		sourceColumn: DistinguishedName
+
+	/// Native ADDomainSource attribute; source qualification is retained.
+	column DomainMode
+		dataType: string
+		lineageTag: dc61cc26-94ef-4a3a-bce1-a60970c56fe6
+		summarizeBy: none
+		sourceColumn: DomainMode
+
+	/// Native ADDomainSource attribute; source qualification is retained.
+	column PDCEmulator
+		dataType: string
+		lineageTag: e46037e1-ed7b-4a36-b429-50a174febc37
+		summarizeBy: none
+		sourceColumn: PDCEmulator
+
+	/// Native ADDomainSource attribute; source qualification is retained.
+	column RIDMaster
+		dataType: string
+		lineageTag: 9105219b-10e5-4160-b0bc-570f9112cf27
+		summarizeBy: none
+		sourceColumn: RIDMaster
+
+	/// Native ADDomainSource attribute; source qualification is retained.
+	column InfrastructureMaster
+		dataType: string
+		lineageTag: 79471199-dead-4ed5-9443-b1412dcea907
+		summarizeBy: none
+		sourceColumn: InfrastructureMaster
+
+	/// Native ADDomainSource attribute; source qualification is retained.
+	column SourceCollectedDateTime
+		dataType: dateTime
+		lineageTag: 759d1ba0-2506-47d4-87e4-1e7e77831787
+		summarizeBy: none
+		sourceColumn: SourceCollectedDateTime
+
+	partition 'AD Domain Evidence' = m
+		mode: import
+		source = NativeEvidenceTypes(Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("ADDomainSource.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]), {[name="TenantKey", dataType="String"], [name="OrganizationKey", dataType="String"], [name="EnvironmentKey", dataType="String"], [name="TenantId", dataType="String"], [name="TenantADDomainKey", dataType="String"], [name="DNSRoot", dataType="String"], [name="DomainSID", dataType="String"], [name="NetBIOSName", dataType="String"], [name="Forest", dataType="String"], [name="DistinguishedName", dataType="String"], [name="DomainMode", dataType="String"], [name="PDCEmulator", dataType="String"], [name="RIDMaster", dataType="String"], [name="InfrastructureMaster", dataType="String"], [name="SourceCollectedDateTime", dataType="DateTime"]})
+

@@ -1,0 +1,71 @@
+/// Native source facet migrated from DimTenant; exact source grain, unresolved links and qualification retained. Uses the unified pinned batch, not a separate CMDB reader.
+table 'Tenant Evidence'
+	lineageTag: baf3e7c3-fb26-4015-af7d-ccc6798da2ef
+
+	/// Exact native-key entity context or existing inventory context. No name matching or inferred transitive membership. Unrelated entity selections return blank.
+	measure 'Native Context Rows · Tenant Evidence' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (COUNTROWS('Tenant Evidence')))
+		formatString: #,0
+		isHidden
+		lineageTag: 406b97f6-d4f1-4abf-a032-8be3ec32ab90
+
+	/// Native DimTenant attribute; source qualification is retained.
+	column TenantKey
+		dataType: string
+		isHidden
+		lineageTag: f1d30ed0-0ee2-4d63-a17d-87a764dab4b5
+		summarizeBy: none
+		sourceColumn: TenantKey
+
+	/// Native DimTenant attribute; source qualification is retained.
+	column OrganizationKey
+		dataType: string
+		isHidden
+		lineageTag: 8d92b0c0-efbb-4147-b93c-88568a6d7646
+		summarizeBy: none
+		sourceColumn: OrganizationKey
+
+	/// Native DimTenant attribute; source qualification is retained.
+	column EnvironmentKey
+		dataType: string
+		isHidden
+		lineageTag: d5b7f2bd-03db-4dca-97dd-db06bb7ca32f
+		summarizeBy: none
+		sourceColumn: EnvironmentKey
+
+	/// Native DimTenant attribute; source qualification is retained.
+	column TenantId
+		dataType: string
+		isHidden
+		lineageTag: 9a41e6ed-fef6-453e-b83e-b954aac60e7f
+		summarizeBy: none
+		sourceColumn: TenantId
+
+	/// Native DimTenant attribute; source qualification is retained.
+	column TenantDisplayName
+		dataType: string
+		lineageTag: 49e4d5e4-df43-4311-9c42-ac9415eacdec
+		summarizeBy: none
+		sourceColumn: TenantDisplayName
+
+	/// Native DimTenant attribute; source qualification is retained.
+	column Environment
+		dataType: string
+		lineageTag: 5f858060-b787-41e6-a0a7-9363a394d3b4
+		summarizeBy: none
+		sourceColumn: Environment
+
+	/// Native DimTenant attribute; source qualification is retained.
+	column LastRefreshDateTime
+		dataType: dateTime
+		formatString: yyyy-MM-dd HH:mm:ss
+		lineageTag: 6f0718cd-c0f7-48df-b3f2-1fb724c3b7f3
+		summarizeBy: none
+		sourceColumn: LastRefreshDateTime
+
+	partition 'Tenant Evidence' = m
+		mode: import
+		source = NativeEvidenceTypes(Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("DimTenant.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]), {[name="TenantKey", dataType="String"], [name="OrganizationKey", dataType="String"], [name="EnvironmentKey", dataType="String"], [name="TenantId", dataType="String"], [name="TenantDisplayName", dataType="String"], [name="Environment", dataType="String"], [name="LastRefreshDateTime", dataType="DateTime"]})
+

@@ -2,12 +2,12 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json",
   "name": "6ead047915962471b5dc",
   "position": {
-    "x": 1400,
-    "y": 256,
+    "x": 32,
+    "y": 336,
+    "width": 1856,
+    "height": 296,
     "z": 114,
-    "height": 168,
-    "width": 488,
-    "tabOrder": 114
+    "tabOrder": 672
   },
   "visual": {
     "visualType": "barChart",
@@ -114,6 +114,13 @@
                   "Value": "24L"
                 }
               }
+            },
+            "labelDisplayUnits": {
+              "expr": {
+                "Literal": {
+                  "Value": "1D"
+                }
+              }
             }
           }
         }
@@ -206,7 +213,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Observed health percentage by security control.'"
+                  "Value": "'Control health by security control'"
                 }
               }
             }
@@ -233,7 +240,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "13D"
+                  "Value": "12D"
                 }
               }
             },
@@ -242,16 +249,9 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#1F2937'"
+                      "Value": "'#183153'"
                     }
                   }
-                }
-              }
-            },
-            "bold": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
                 }
               }
             }
@@ -304,9 +304,16 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#CBD8E5'"
+                      "Value": "'#CCDCEC'"
                     }
                   }
+                }
+              }
+            },
+            "radius": {
+              "expr": {
+                "Literal": {
+                  "Value": "8D"
                 }
               }
             },
@@ -314,13 +321,6 @@
               "expr": {
                 "Literal": {
                   "Value": "1D"
-                }
-              }
-            },
-            "radius": {
-              "expr": {
-                "Literal": {
-                  "Value": "12D"
                 }
               }
             }
@@ -360,14 +360,14 @@
             "left": {
               "expr": {
                 "Literal": {
-                  "Value": "10D"
+                  "Value": "8D"
                 }
               }
             },
             "right": {
               "expr": {
                 "Literal": {
-                  "Value": "10D"
+                  "Value": "8D"
                 }
               }
             }
@@ -376,5 +376,70 @@
       ]
     },
     "drillFilterOtherVisuals": true
+  },
+  "parentGroupName": "cbe79466bbafde369ae0",
+  "filterConfig": {
+    "filters": [
+      {
+        "name": "Filter12f3d9699d1f2a126fa330a3",
+        "field": {
+          "Column": {
+            "Expression": {
+              "SourceRef": {
+                "Entity": "Security Control Evidence"
+              }
+            },
+            "Property": "Control Name"
+          }
+        },
+        "type": "Categorical",
+        "filter": {
+          "Version": 2,
+          "From": [
+            {
+              "Name": "ep",
+              "Entity": "Security Control Evidence",
+              "Type": 0
+            }
+          ],
+          "Where": [
+            {
+              "Condition": {
+                "Not": {
+                  "Expression": {
+                    "In": {
+                      "Expressions": [
+                        {
+                          "Column": {
+                            "Expression": {
+                              "SourceRef": {
+                                "Source": "ep"
+                              }
+                            },
+                            "Property": "Control Name"
+                          }
+                        }
+                      ],
+                      "Values": [
+                        [
+                          {
+                            "Literal": {
+                              "Value": "'Defender protection active'"
+                            }
+                          }
+                        ]
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "howCreated": "User",
+        "isHiddenInViewMode": true,
+        "isLockedInViewMode": true
+      }
+    ]
   }
 }

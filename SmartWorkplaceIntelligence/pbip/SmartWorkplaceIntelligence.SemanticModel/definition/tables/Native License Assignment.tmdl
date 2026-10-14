@@ -1,0 +1,336 @@
+/// Native source facet migrated from LicenseAssignmentPath; exact source grain, unresolved links and qualification retained. Uses the unified pinned batch, not a separate CMDB reader.
+table 'Native License Assignment'
+	lineageTag: b6bfd696-a3a3-4650-87b3-a07d16073448
+
+	/// Individual direct/group assignment paths, not distinct user/SKU pairs. Migrated without changing the source calculation.
+	measure 'Native Assignment paths' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimUser"))
+			VAR NativeKeys1 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimGroup"))
+			VAR NativeKeys2 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimLicenseSku"))
+			VAR InventoryUsers = CALCULATETABLE(VALUES('Native User Evidence'[TenantUserKey]), REMOVEFILTERS('Native User Evidence'), TREATAS(VALUES('User Inventory Evidence'[User Source ID]), 'Native User Evidence'[SourceUserId]))
+			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((COALESCE(COUNTROWS('Native License Assignment'),0)), KEEPFILTERS(TREATAS(NativeKeys0, 'Native License Assignment'[TenantUserKey]))),
+			COUNTROWS(NativeKeys1) > 0, CALCULATE((COALESCE(COUNTROWS('Native License Assignment'),0)), KEEPFILTERS(TREATAS(NativeKeys1, 'Native License Assignment'[TenantGroupKey]))),
+			COUNTROWS(NativeKeys2) > 0, CALCULATE((COALESCE(COUNTROWS('Native License Assignment'),0)), KEEPFILTERS(TREATAS(NativeKeys2, 'Native License Assignment'[TenantSkuKey]))), BLANK()), BLANK()), SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((COALESCE(COUNTROWS('Native License Assignment'),0)), KEEPFILTERS(TREATAS(InventoryUsers, 'Native License Assignment'[TenantUserKey]))), (COALESCE(COUNTROWS('Native License Assignment'),0))))
+		formatString: #,0
+		displayFolder: Native evidence
+		lineageTag: b19b98e2-fde9-4edb-885d-22adc6cb7106
+
+	/// Observed group-based paths, not membership or effective access. Migrated without changing the source calculation.
+	measure 'Native Group assignment paths' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimUser"))
+			VAR NativeKeys1 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimGroup"))
+			VAR NativeKeys2 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimLicenseSku"))
+			VAR InventoryUsers = CALCULATETABLE(VALUES('Native User Evidence'[TenantUserKey]), REMOVEFILTERS('Native User Evidence'), TREATAS(VALUES('User Inventory Evidence'[User Source ID]), 'Native User Evidence'[SourceUserId]))
+			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((CALCULATE([Native Assignment paths], KEEPFILTERS('Native License Assignment'[AssignmentRoute] == "Group"))), KEEPFILTERS(TREATAS(NativeKeys0, 'Native License Assignment'[TenantUserKey]))),
+			COUNTROWS(NativeKeys1) > 0, CALCULATE((CALCULATE([Native Assignment paths], KEEPFILTERS('Native License Assignment'[AssignmentRoute] == "Group"))), KEEPFILTERS(TREATAS(NativeKeys1, 'Native License Assignment'[TenantGroupKey]))),
+			COUNTROWS(NativeKeys2) > 0, CALCULATE((CALCULATE([Native Assignment paths], KEEPFILTERS('Native License Assignment'[AssignmentRoute] == "Group"))), KEEPFILTERS(TREATAS(NativeKeys2, 'Native License Assignment'[TenantSkuKey]))), BLANK()), BLANK()), SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((CALCULATE([Native Assignment paths], KEEPFILTERS('Native License Assignment'[AssignmentRoute] == "Group"))), KEEPFILTERS(TREATAS(InventoryUsers, 'Native License Assignment'[TenantUserKey]))), (CALCULATE([Native Assignment paths], KEEPFILTERS('Native License Assignment'[AssignmentRoute] == "Group")))))
+		formatString: #,0
+		displayFolder: Native evidence
+		lineageTag: 0f5518fe-fbb2-4a22-be2d-17d5c355bc9f
+
+	/// Observed direct assignment paths. Migrated without changing the source calculation.
+	measure 'Native Direct assignment paths' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimUser"))
+			VAR NativeKeys1 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimGroup"))
+			VAR NativeKeys2 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimLicenseSku"))
+			VAR InventoryUsers = CALCULATETABLE(VALUES('Native User Evidence'[TenantUserKey]), REMOVEFILTERS('Native User Evidence'), TREATAS(VALUES('User Inventory Evidence'[User Source ID]), 'Native User Evidence'[SourceUserId]))
+			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((CALCULATE([Native Assignment paths], KEEPFILTERS('Native License Assignment'[AssignmentRoute] == "Direct"))), KEEPFILTERS(TREATAS(NativeKeys0, 'Native License Assignment'[TenantUserKey]))),
+			COUNTROWS(NativeKeys1) > 0, CALCULATE((CALCULATE([Native Assignment paths], KEEPFILTERS('Native License Assignment'[AssignmentRoute] == "Direct"))), KEEPFILTERS(TREATAS(NativeKeys1, 'Native License Assignment'[TenantGroupKey]))),
+			COUNTROWS(NativeKeys2) > 0, CALCULATE((CALCULATE([Native Assignment paths], KEEPFILTERS('Native License Assignment'[AssignmentRoute] == "Direct"))), KEEPFILTERS(TREATAS(NativeKeys2, 'Native License Assignment'[TenantSkuKey]))), BLANK()), BLANK()), SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((CALCULATE([Native Assignment paths], KEEPFILTERS('Native License Assignment'[AssignmentRoute] == "Direct"))), KEEPFILTERS(TREATAS(InventoryUsers, 'Native License Assignment'[TenantUserKey]))), (CALCULATE([Native Assignment paths], KEEPFILTERS('Native License Assignment'[AssignmentRoute] == "Direct")))))
+		formatString: #,0
+		displayFolder: Native evidence
+		lineageTag: c7ef4e8d-804d-4fc2-954f-6c22a147962e
+
+	/// Paths reporting an error; another path may still supply the entitlement. Migrated without changing the source calculation.
+	measure 'Native Assignment paths with errors' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimUser"))
+			VAR NativeKeys1 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimGroup"))
+			VAR NativeKeys2 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimLicenseSku"))
+			VAR InventoryUsers = CALCULATETABLE(VALUES('Native User Evidence'[TenantUserKey]), REMOVEFILTERS('Native User Evidence'), TREATAS(VALUES('User Inventory Evidence'[User Source ID]), 'Native User Evidence'[SourceUserId]))
+			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((CALCULATE([Native Assignment paths], KEEPFILTERS('Native License Assignment'[ErrorStatus] == "Error reported"))), KEEPFILTERS(TREATAS(NativeKeys0, 'Native License Assignment'[TenantUserKey]))),
+			COUNTROWS(NativeKeys1) > 0, CALCULATE((CALCULATE([Native Assignment paths], KEEPFILTERS('Native License Assignment'[ErrorStatus] == "Error reported"))), KEEPFILTERS(TREATAS(NativeKeys1, 'Native License Assignment'[TenantGroupKey]))),
+			COUNTROWS(NativeKeys2) > 0, CALCULATE((CALCULATE([Native Assignment paths], KEEPFILTERS('Native License Assignment'[ErrorStatus] == "Error reported"))), KEEPFILTERS(TREATAS(NativeKeys2, 'Native License Assignment'[TenantSkuKey]))), BLANK()), BLANK()), SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((CALCULATE([Native Assignment paths], KEEPFILTERS('Native License Assignment'[ErrorStatus] == "Error reported"))), KEEPFILTERS(TREATAS(InventoryUsers, 'Native License Assignment'[TenantUserKey]))), (CALCULATE([Native Assignment paths], KEEPFILTERS('Native License Assignment'[ErrorStatus] == "Error reported")))))
+		formatString: #,0
+		displayFolder: Native evidence
+		lineageTag: 4b7379d5-49ac-45aa-a701-ca61de39b664
+
+	/// Assignment paths reporting an error divided by all observed assignment paths. Another path may still supply the entitlement. Migrated without changing the source calculation.
+	measure 'Native Assignment error rate' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimUser"))
+			VAR NativeKeys1 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimGroup"))
+			VAR NativeKeys2 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimLicenseSku"))
+			VAR InventoryUsers = CALCULATETABLE(VALUES('Native User Evidence'[TenantUserKey]), REMOVEFILTERS('Native User Evidence'), TREATAS(VALUES('User Inventory Evidence'[User Source ID]), 'Native User Evidence'[SourceUserId]))
+			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((DIVIDE([Native Assignment paths with errors], [Native Assignment paths])), KEEPFILTERS(TREATAS(NativeKeys0, 'Native License Assignment'[TenantUserKey]))),
+			COUNTROWS(NativeKeys1) > 0, CALCULATE((DIVIDE([Native Assignment paths with errors], [Native Assignment paths])), KEEPFILTERS(TREATAS(NativeKeys1, 'Native License Assignment'[TenantGroupKey]))),
+			COUNTROWS(NativeKeys2) > 0, CALCULATE((DIVIDE([Native Assignment paths with errors], [Native Assignment paths])), KEEPFILTERS(TREATAS(NativeKeys2, 'Native License Assignment'[TenantSkuKey]))), BLANK()), BLANK()), SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((DIVIDE([Native Assignment paths with errors], [Native Assignment paths])), KEEPFILTERS(TREATAS(InventoryUsers, 'Native License Assignment'[TenantUserKey]))), (DIVIDE([Native Assignment paths with errors], [Native Assignment paths]))))
+		formatString: 0.000%
+		displayFolder: Native evidence
+		lineageTag: cd76d30b-6f47-4b0f-9c30-a6fe76216929
+
+	/// Detail rows only when exactly one user is selected outside visual row grouping. Blank otherwise. Migrated without changing the source calculation.
+	measure 'Native User assignment details' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimUser"))
+			VAR NativeKeys1 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimGroup"))
+			VAR NativeKeys2 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimLicenseSku"))
+			VAR InventoryUsers = CALCULATETABLE(VALUES('Native User Evidence'[TenantUserKey]), REMOVEFILTERS('Native User Evidence'), TREATAS(VALUES('User Inventory Evidence'[User Source ID]), 'Native User Evidence'[SourceUserId]))
+			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((IF(COUNTROWS(ALLSELECTED('Native User Evidence')) = 1, COUNTROWS('Native License Assignment'))), KEEPFILTERS(TREATAS(NativeKeys0, 'Native License Assignment'[TenantUserKey]))),
+			COUNTROWS(NativeKeys1) > 0, CALCULATE((IF(COUNTROWS(ALLSELECTED('Native User Evidence')) = 1, COUNTROWS('Native License Assignment'))), KEEPFILTERS(TREATAS(NativeKeys1, 'Native License Assignment'[TenantGroupKey]))),
+			COUNTROWS(NativeKeys2) > 0, CALCULATE((IF(COUNTROWS(ALLSELECTED('Native User Evidence')) = 1, COUNTROWS('Native License Assignment'))), KEEPFILTERS(TREATAS(NativeKeys2, 'Native License Assignment'[TenantSkuKey]))), BLANK()), BLANK()), SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((IF(COUNTROWS(ALLSELECTED('Native User Evidence')) = 1, COUNTROWS('Native License Assignment'))), KEEPFILTERS(TREATAS(InventoryUsers, 'Native License Assignment'[TenantUserKey]))), (IF(COUNTROWS(ALLSELECTED('Native User Evidence')) = 1, COUNTROWS('Native License Assignment')))))
+		formatString: #,0
+		displayFolder: Native evidence
+		lineageTag: 9f1a0a7e-34e6-4179-abcd-91b57555105f
+
+	/// Detail rows only when exactly one group is selected outside visual row grouping. Blank otherwise. Migrated without changing the source calculation.
+	measure 'Native Group assignment details' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimUser"))
+			VAR NativeKeys1 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimGroup"))
+			VAR NativeKeys2 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimLicenseSku"))
+			VAR InventoryUsers = CALCULATETABLE(VALUES('Native User Evidence'[TenantUserKey]), REMOVEFILTERS('Native User Evidence'), TREATAS(VALUES('User Inventory Evidence'[User Source ID]), 'Native User Evidence'[SourceUserId]))
+			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((IF(COUNTROWS(ALLSELECTED('Native Group Evidence')) = 1, COUNTROWS('Native License Assignment'))), KEEPFILTERS(TREATAS(NativeKeys0, 'Native License Assignment'[TenantUserKey]))),
+			COUNTROWS(NativeKeys1) > 0, CALCULATE((IF(COUNTROWS(ALLSELECTED('Native Group Evidence')) = 1, COUNTROWS('Native License Assignment'))), KEEPFILTERS(TREATAS(NativeKeys1, 'Native License Assignment'[TenantGroupKey]))),
+			COUNTROWS(NativeKeys2) > 0, CALCULATE((IF(COUNTROWS(ALLSELECTED('Native Group Evidence')) = 1, COUNTROWS('Native License Assignment'))), KEEPFILTERS(TREATAS(NativeKeys2, 'Native License Assignment'[TenantSkuKey]))), BLANK()), BLANK()), SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((IF(COUNTROWS(ALLSELECTED('Native Group Evidence')) = 1, COUNTROWS('Native License Assignment'))), KEEPFILTERS(TREATAS(InventoryUsers, 'Native License Assignment'[TenantUserKey]))), (IF(COUNTROWS(ALLSELECTED('Native Group Evidence')) = 1, COUNTROWS('Native License Assignment')))))
+		formatString: #,0
+		displayFolder: Native evidence
+		lineageTag: 3cfa237a-8456-442f-86c3-7f8cbee1018a
+
+	/// Share of each observed license-assignment route. Migrated without changing the source calculation.
+	measure 'Native Assignment route rate' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimUser"))
+			VAR NativeKeys1 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimGroup"))
+			VAR NativeKeys2 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimLicenseSku"))
+			VAR InventoryUsers = CALCULATETABLE(VALUES('Native User Evidence'[TenantUserKey]), REMOVEFILTERS('Native User Evidence'), TREATAS(VALUES('User Inventory Evidence'[User Source ID]), 'Native User Evidence'[SourceUserId]))
+			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((DIVIDE([Native Assignment paths], CALCULATE([Native Assignment paths], REMOVEFILTERS('Native License Assignment'[AssignmentRoute])))), KEEPFILTERS(TREATAS(NativeKeys0, 'Native License Assignment'[TenantUserKey]))),
+			COUNTROWS(NativeKeys1) > 0, CALCULATE((DIVIDE([Native Assignment paths], CALCULATE([Native Assignment paths], REMOVEFILTERS('Native License Assignment'[AssignmentRoute])))), KEEPFILTERS(TREATAS(NativeKeys1, 'Native License Assignment'[TenantGroupKey]))),
+			COUNTROWS(NativeKeys2) > 0, CALCULATE((DIVIDE([Native Assignment paths], CALCULATE([Native Assignment paths], REMOVEFILTERS('Native License Assignment'[AssignmentRoute])))), KEEPFILTERS(TREATAS(NativeKeys2, 'Native License Assignment'[TenantSkuKey]))), BLANK()), BLANK()), SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((DIVIDE([Native Assignment paths], CALCULATE([Native Assignment paths], REMOVEFILTERS('Native License Assignment'[AssignmentRoute])))), KEEPFILTERS(TREATAS(InventoryUsers, 'Native License Assignment'[TenantUserKey]))), (DIVIDE([Native Assignment paths], CALCULATE([Native Assignment paths], REMOVEFILTERS('Native License Assignment'[AssignmentRoute]))))))
+		formatString: 0.0%
+		displayFolder: Native evidence
+		lineageTag: 6a9545cd-4dd3-4f8b-adc1-57f70bfbbfe9
+
+	/// Exact native-key entity context or existing inventory context. No name matching or inferred transitive membership. Unrelated entity selections return blank.
+	measure 'Native Context Rows · Native License Assignment' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimUser"))
+			VAR NativeKeys1 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimGroup"))
+			VAR NativeKeys2 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimLicenseSku"))
+			VAR InventoryUsers = CALCULATETABLE(VALUES('Native User Evidence'[TenantUserKey]), REMOVEFILTERS('Native User Evidence'), TREATAS(VALUES('User Inventory Evidence'[User Source ID]), 'Native User Evidence'[SourceUserId]))
+			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((COUNTROWS('Native License Assignment')), KEEPFILTERS(TREATAS(NativeKeys0, 'Native License Assignment'[TenantUserKey]))),
+			COUNTROWS(NativeKeys1) > 0, CALCULATE((COUNTROWS('Native License Assignment')), KEEPFILTERS(TREATAS(NativeKeys1, 'Native License Assignment'[TenantGroupKey]))),
+			COUNTROWS(NativeKeys2) > 0, CALCULATE((COUNTROWS('Native License Assignment')), KEEPFILTERS(TREATAS(NativeKeys2, 'Native License Assignment'[TenantSkuKey]))), BLANK()), BLANK()), SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((COUNTROWS('Native License Assignment')), KEEPFILTERS(TREATAS(InventoryUsers, 'Native License Assignment'[TenantUserKey]))), (COUNTROWS('Native License Assignment'))))
+		formatString: #,0
+		isHidden
+		lineageTag: ea68307c-7be5-48e3-97c8-07be23707bab
+
+	/// Native LicenseAssignmentPath attribute; source qualification is retained.
+	column TenantKey
+		dataType: string
+		isHidden
+		lineageTag: 96cc78da-4e54-457c-8aea-8e46bd169b00
+		summarizeBy: none
+		sourceColumn: TenantKey
+
+	/// Native LicenseAssignmentPath attribute; source qualification is retained.
+	column OrganizationKey
+		dataType: string
+		isHidden
+		lineageTag: 1845660b-3322-4b9b-84f6-b361f8edabab
+		summarizeBy: none
+		sourceColumn: OrganizationKey
+
+	/// Native LicenseAssignmentPath attribute; source qualification is retained.
+	column EnvironmentKey
+		dataType: string
+		isHidden
+		lineageTag: aaab5ee6-c187-464a-8442-ee4492892c23
+		summarizeBy: none
+		sourceColumn: EnvironmentKey
+
+	/// Native LicenseAssignmentPath attribute; source qualification is retained.
+	column TenantId
+		dataType: string
+		isHidden
+		lineageTag: 4bdbe164-0129-46cc-ba22-b512826181e7
+		summarizeBy: none
+		sourceColumn: TenantId
+
+	/// Native LicenseAssignmentPath attribute; source qualification is retained.
+	column TenantAssignmentPathKey
+		dataType: string
+		isHidden
+		lineageTag: 282206d4-7535-44cf-9a3f-02cff6e7b404
+		summarizeBy: none
+		sourceColumn: TenantAssignmentPathKey
+
+	/// Native LicenseAssignmentPath attribute; source qualification is retained.
+	column TenantUserKey
+		dataType: string
+		isHidden
+		lineageTag: 7baf0db6-a8f5-4cbd-bd26-c31c7d07ae72
+		summarizeBy: none
+		sourceColumn: TenantUserKey
+
+	/// Native LicenseAssignmentPath attribute; source qualification is retained.
+	column TenantGroupKey
+		dataType: string
+		isHidden
+		lineageTag: babd235c-6d22-40a5-8158-5e6fa6b1986b
+		summarizeBy: none
+		sourceColumn: TenantGroupKey
+
+	/// Native LicenseAssignmentPath attribute; source qualification is retained.
+	column TenantSkuKey
+		dataType: string
+		isHidden
+		lineageTag: c6559c40-7a3c-46d7-9bcb-a753c4113364
+		summarizeBy: none
+		sourceColumn: TenantSkuKey
+
+	/// Native LicenseAssignmentPath attribute; source qualification is retained.
+	column SourceUserId
+		dataType: string
+		lineageTag: fad98c18-2767-419a-9ff7-a06babb95cb7
+		summarizeBy: none
+		sourceColumn: SourceUserId
+
+	/// Native LicenseAssignmentPath attribute; source qualification is retained.
+	column AssignedByGroupId
+		dataType: string
+		lineageTag: 581ed2d1-9aa4-43cd-869c-0b4857fe90c1
+		summarizeBy: none
+		sourceColumn: AssignedByGroupId
+
+	/// Native LicenseAssignmentPath attribute; source qualification is retained.
+	column SkuId
+		dataType: string
+		isHidden
+		lineageTag: 4ac88fa4-32b3-416f-a216-4e6b1acbb3b7
+		summarizeBy: none
+		sourceColumn: SkuId
+
+	/// Native LicenseAssignmentPath attribute; source qualification is retained.
+	column Account
+		dataType: string
+		lineageTag: bdf394bb-fbcf-4b7a-966c-0db5cc197724
+		summarizeBy: none
+		sourceColumn: Account
+
+	/// Native LicenseAssignmentPath attribute; source qualification is retained.
+	column Product
+		dataType: string
+		lineageTag: 16688fa6-b573-4aec-8a6d-d886db018a98
+		summarizeBy: none
+		sourceColumn: Product
+
+	/// Native LicenseAssignmentPath attribute; source qualification is retained.
+	column AssignmentRoute
+		dataType: string
+		lineageTag: a07e1c15-b5bd-4727-9680-dc3486fa433e
+		summarizeBy: none
+		sourceColumn: AssignmentRoute
+
+	/// Native LicenseAssignmentPath attribute; source qualification is retained.
+	column GroupName
+		dataType: string
+		lineageTag: a59d862b-971e-49fc-89b2-753f3eb27be3
+		summarizeBy: none
+		sourceColumn: GroupName
+
+	/// Native LicenseAssignmentPath attribute; source qualification is retained.
+	column AssignmentState
+		dataType: string
+		lineageTag: b8b7b413-036e-499e-9d1f-95740522cdd0
+		summarizeBy: none
+		sourceColumn: AssignmentState
+
+	/// Native LicenseAssignmentPath attribute; source qualification is retained.
+	column AssignmentError
+		dataType: string
+		lineageTag: 3b0ad924-5d52-4489-9198-c36b9e0b58d1
+		summarizeBy: none
+		sourceColumn: AssignmentError
+
+	/// Native LicenseAssignmentPath attribute; source qualification is retained.
+	column ErrorStatus
+		dataType: string
+		lineageTag: 63403015-0d97-4f26-a253-e20be415cf14
+		summarizeBy: none
+		sourceColumn: ErrorStatus
+
+	/// Native LicenseAssignmentPath attribute; source qualification is retained.
+	column DisabledPlanIds
+		dataType: string
+		lineageTag: bf029256-dd6a-4c01-8b2f-d4540621630e
+		summarizeBy: none
+		sourceColumn: DisabledPlanIds
+
+	/// Native LicenseAssignmentPath attribute; source qualification is retained.
+	column AssignmentUpdatedRaw
+		dataType: string
+		lineageTag: 247245f6-eeca-4134-8ea6-1880ee0d659b
+		summarizeBy: none
+		sourceColumn: AssignmentUpdatedRaw
+
+	/// Native LicenseAssignmentPath attribute; source qualification is retained.
+	column AssignmentUpdatedUtcDateTime
+		dataType: dateTime
+		formatString: yyyy-MM-dd HH:mm:ss
+		lineageTag: 9fee086c-949f-44a6-9f19-3f07c9566323
+		summarizeBy: none
+		sourceColumn: AssignmentUpdatedUtcDateTime
+
+	/// Native LicenseAssignmentPath attribute; source qualification is retained.
+	column AssignmentUpdatedStatus
+		dataType: string
+		lineageTag: 5f3c3447-5a31-47dd-b9df-f5c7d5c724a0
+		summarizeBy: none
+		sourceColumn: AssignmentUpdatedStatus
+
+	/// Native LicenseAssignmentPath attribute; source qualification is retained.
+	column SourceCollectedDateTime
+		dataType: dateTime
+		formatString: yyyy-MM-dd HH:mm:ss
+		lineageTag: c3156733-2cab-414f-960d-1cba866781d7
+		summarizeBy: none
+		sourceColumn: SourceCollectedDateTime
+
+	/// Native LicenseAssignmentPath attribute; source qualification is retained.
+	column GroupLinkStatus
+		dataType: string
+		lineageTag: e08bcc73-c3bc-4ef5-a412-b19d62b12fef
+		summarizeBy: none
+		sourceColumn: GroupLinkStatus
+
+	/// Native LicenseAssignmentPath attribute; source qualification is retained.
+	column UserLinkStatus
+		dataType: string
+		lineageTag: 2823c381-cd97-4f13-94fb-836cd359d61c
+		summarizeBy: none
+		sourceColumn: UserLinkStatus
+
+	/// Native LicenseAssignmentPath attribute; source qualification is retained.
+	column SkuLinkStatus
+		dataType: string
+		lineageTag: cb3e28fb-a0ac-47a5-8db7-4e8cd6fd1db7
+		summarizeBy: none
+		sourceColumn: SkuLinkStatus
+
+	partition 'Native License Assignment' = m
+		mode: import
+		source = NativeEvidenceTypes(Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("LicenseAssignmentPath.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]), {[name="TenantKey", dataType="String"], [name="OrganizationKey", dataType="String"], [name="EnvironmentKey", dataType="String"], [name="TenantId", dataType="String"], [name="TenantAssignmentPathKey", dataType="String"], [name="TenantUserKey", dataType="String"], [name="TenantGroupKey", dataType="String"], [name="TenantSkuKey", dataType="String"], [name="SourceUserId", dataType="String"], [name="AssignedByGroupId", dataType="String"], [name="SkuId", dataType="String"], [name="Account", dataType="String"], [name="Product", dataType="String"], [name="AssignmentRoute", dataType="String"], [name="GroupName", dataType="String"], [name="AssignmentState", dataType="String"], [name="AssignmentError", dataType="String"], [name="ErrorStatus", dataType="String"], [name="DisabledPlanIds", dataType="String"], [name="AssignmentUpdatedRaw", dataType="String"], [name="AssignmentUpdatedUtcDateTime", dataType="DateTime"], [name="AssignmentUpdatedStatus", dataType="String"], [name="SourceCollectedDateTime", dataType="DateTime"], [name="GroupLinkStatus", dataType="String"], [name="UserLinkStatus", dataType="String"], [name="SkuLinkStatus", dataType="String"]})
+

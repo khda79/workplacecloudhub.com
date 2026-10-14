@@ -1,4 +1,6 @@
 {
+  "nativeEvidence": true,
+  "governedArtifacts": true,
   "schemaVersion": 1,
   "optionalSourceGroups": "intune-operational-contract.json.txt",
   "currentFiles": [

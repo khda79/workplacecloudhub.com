@@ -2,12 +2,12 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json",
   "name": "7795f0c1073375250e4c",
   "position": {
-    "x": 32,
-    "y": 2604,
-    "width": 1856,
-    "height": 140,
-    "z": 134,
-    "tabOrder": 134
+    "x": 972,
+    "y": 464,
+    "width": 916,
+    "height": 120,
+    "z": 47,
+    "tabOrder": 47
   },
   "visual": {
     "visualType": "tableEx",
@@ -145,6 +145,13 @@
       "columnHeaders": [
         {
           "properties": {
+            "autoSizeColumnWidth": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
             "columnAdjustment": {
               "expr": {
                 "Literal": {
@@ -152,7 +159,14 @@
                 }
               }
             },
-            "autoSizeColumnWidth": {
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
+            },
+            "bold": {
               "expr": {
                 "Literal": {
                   "Value": "true"
@@ -182,23 +196,9 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#005A9E'"
+                      "Value": "'#215E9E'"
                     }
                   }
-                }
-              }
-            },
-            "bold": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "fontSize": {
-              "expr": {
-                "Literal": {
-                  "Value": "10D"
                 }
               }
             }
@@ -208,10 +208,39 @@
       "values": [
         {
           "properties": {
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
+            },
             "wordWrap": {
               "expr": {
                 "Literal": {
-                  "Value": "true"
+                  "Value": "false"
+                }
+              }
+            },
+            "fontColorPrimary": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#183153'"
+                    }
+                  }
+                }
+              }
+            },
+            "fontColorSecondary": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#183153'"
+                    }
+                  }
                 }
               }
             },
@@ -231,38 +260,9 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#F3F7FA'"
+                      "Value": "'#F0F5FA'"
                     }
                   }
-                }
-              }
-            },
-            "fontColorPrimary": {
-              "solid": {
-                "color": {
-                  "expr": {
-                    "Literal": {
-                      "Value": "'#1F2937'"
-                    }
-                  }
-                }
-              }
-            },
-            "fontColorSecondary": {
-              "solid": {
-                "color": {
-                  "expr": {
-                    "Literal": {
-                      "Value": "'#1F2937'"
-                    }
-                  }
-                }
-              }
-            },
-            "fontSize": {
-              "expr": {
-                "Literal": {
-                  "Value": "9D"
                 }
               }
             }
@@ -290,7 +290,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'No UserMailbox gap breakdown table.'"
+                  "Value": "'Tenant-wide no-mailbox / no-suite breakdown'"
                 }
               }
             }
@@ -310,7 +310,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'No UserMailbox gap breakdown'"
+                  "Value": "'Tenant-wide no-mailbox / no-suite breakdown'"
                 }
               }
             },
@@ -473,5 +473,6 @@
       ]
     },
     "drillFilterOtherVisuals": true
-  }
+  },
+  "parentGroupName": "ec3aac9702b5e1a75aa3"
 }

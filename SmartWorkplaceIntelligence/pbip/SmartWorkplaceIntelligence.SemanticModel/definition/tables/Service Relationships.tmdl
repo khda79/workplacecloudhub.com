@@ -1,5 +1,6 @@
-/// Accepted typed relationships between governed synthetic entities.
+/// Legacy synthetic fixture: not used by production report visuals or consolidated evidence. Removal is pending a separately cleared dependency-safe retirement; no real data.
 table 'Service Relationships'
+	isHidden
 	lineageTag: 38aa8f75-1ecc-4b6d-bcd3-940bf566586c
 
 	/// Accepted typed relationships in scope.

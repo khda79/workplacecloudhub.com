@@ -3,11 +3,11 @@
   "name": "1a61f92f4791cfad2db2",
   "position": {
     "x": 32,
-    "y": 3779,
+    "y": 592,
     "width": 1856,
-    "height": 360,
-    "z": 143,
-    "tabOrder": 143
+    "height": 400,
+    "z": 39,
+    "tabOrder": 39
   },
   "visual": {
     "visualType": "tableEx",
@@ -205,6 +205,13 @@
       "columnHeaders": [
         {
           "properties": {
+            "autoSizeColumnWidth": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
             "columnAdjustment": {
               "expr": {
                 "Literal": {
@@ -212,7 +219,14 @@
                 }
               }
             },
-            "autoSizeColumnWidth": {
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
+            },
+            "bold": {
               "expr": {
                 "Literal": {
                   "Value": "true"
@@ -242,23 +256,9 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#005A9E'"
+                      "Value": "'#215E9E'"
                     }
                   }
-                }
-              }
-            },
-            "bold": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "fontSize": {
-              "expr": {
-                "Literal": {
-                  "Value": "10D"
                 }
               }
             }
@@ -268,10 +268,39 @@
       "values": [
         {
           "properties": {
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
+            },
             "wordWrap": {
               "expr": {
                 "Literal": {
-                  "Value": "true"
+                  "Value": "false"
+                }
+              }
+            },
+            "fontColorPrimary": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#183153'"
+                    }
+                  }
+                }
+              }
+            },
+            "fontColorSecondary": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#183153'"
+                    }
+                  }
                 }
               }
             },
@@ -291,38 +320,9 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#F3F7FA'"
+                      "Value": "'#F0F5FA'"
                     }
                   }
-                }
-              }
-            },
-            "fontColorPrimary": {
-              "solid": {
-                "color": {
-                  "expr": {
-                    "Literal": {
-                      "Value": "'#1F2937'"
-                    }
-                  }
-                }
-              }
-            },
-            "fontColorSecondary": {
-              "solid": {
-                "color": {
-                  "expr": {
-                    "Literal": {
-                      "Value": "'#1F2937'"
-                    }
-                  }
-                }
-              }
-            },
-            "fontSize": {
-              "expr": {
-                "Literal": {
-                  "Value": "9D"
                 }
               }
             }
@@ -350,7 +350,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'E3 to F3 review candidates table.'"
+                  "Value": "'E3 → F3 manual review · published candidates'"
                 }
               }
             }
@@ -370,7 +370,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'E3 to F3 review candidates'"
+                  "Value": "'E3 → F3 manual review · published candidates'"
                 }
               }
             },
@@ -537,7 +537,7 @@
   "filterConfig": {
     "filters": [
       {
-        "name": "f7f84c2cc809e8da2d92",
+        "name": "2f685d823d5b03459f81",
         "field": {
           "Column": {
             "Expression": {
@@ -589,7 +589,59 @@
             }
           ]
         }
+      },
+      {
+        "name": "777f68fc726d47d5a952",
+        "field": {
+          "Measure": {
+            "Expression": {
+              "SourceRef": {
+                "Entity": "License Report Summary"
+              }
+            },
+            "Property": "License Candidate Selection Included"
+          }
+        },
+        "type": "Advanced",
+        "filter": {
+          "Version": 2,
+          "From": [
+            {
+              "Name": "summary",
+              "Entity": "License Report Summary",
+              "Type": 0
+            }
+          ],
+          "Where": [
+            {
+              "Condition": {
+                "Comparison": {
+                  "ComparisonKind": 0,
+                  "Left": {
+                    "Measure": {
+                      "Expression": {
+                        "SourceRef": {
+                          "Source": "summary"
+                        }
+                      },
+                      "Property": "License Candidate Selection Included"
+                    }
+                  },
+                  "Right": {
+                    "Literal": {
+                      "Value": "1L"
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "howCreated": "User",
+        "isHiddenInViewMode": true,
+        "isLockedInViewMode": true
       }
     ]
-  }
+  },
+  "parentGroupName": "2f0bec9f812f4bf98e8a"
 }

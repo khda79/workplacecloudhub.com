@@ -1,5 +1,6 @@
-/// Governed logical source entity catalogue.
+/// Legacy synthetic fixture: not used by production report visuals or consolidated evidence. Removal is pending a separately cleared dependency-safe retirement; no real data.
 table 'Data Source'
+	isHidden
 	lineageTag: b38db3bd-67ff-4430-b407-529694ca5687
 
 	/// Business attribute Data Source Key.

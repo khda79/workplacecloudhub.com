@@ -3,11 +3,11 @@
   "name": "bce16dd0260827ecf338",
   "position": {
     "x": 32,
-    "y": 3068,
-    "width": 1856,
-    "height": 235,
-    "z": 139,
-    "tabOrder": 139
+    "y": 328,
+    "width": 916,
+    "height": 664,
+    "z": 52,
+    "tabOrder": 52
   },
   "visual": {
     "visualType": "tableEx",
@@ -115,6 +115,13 @@
       "columnHeaders": [
         {
           "properties": {
+            "autoSizeColumnWidth": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
             "columnAdjustment": {
               "expr": {
                 "Literal": {
@@ -122,7 +129,14 @@
                 }
               }
             },
-            "autoSizeColumnWidth": {
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
+            },
+            "bold": {
               "expr": {
                 "Literal": {
                   "Value": "true"
@@ -152,23 +166,9 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#005A9E'"
+                      "Value": "'#215E9E'"
                     }
                   }
-                }
-              }
-            },
-            "bold": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "fontSize": {
-              "expr": {
-                "Literal": {
-                  "Value": "10D"
                 }
               }
             }
@@ -178,10 +178,39 @@
       "values": [
         {
           "properties": {
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
+            },
             "wordWrap": {
               "expr": {
                 "Literal": {
-                  "Value": "true"
+                  "Value": "false"
+                }
+              }
+            },
+            "fontColorPrimary": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#183153'"
+                    }
+                  }
+                }
+              }
+            },
+            "fontColorSecondary": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#183153'"
+                    }
+                  }
                 }
               }
             },
@@ -201,38 +230,9 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#F3F7FA'"
+                      "Value": "'#F0F5FA'"
                     }
                   }
-                }
-              }
-            },
-            "fontColorPrimary": {
-              "solid": {
-                "color": {
-                  "expr": {
-                    "Literal": {
-                      "Value": "'#1F2937'"
-                    }
-                  }
-                }
-              }
-            },
-            "fontColorSecondary": {
-              "solid": {
-                "color": {
-                  "expr": {
-                    "Literal": {
-                      "Value": "'#1F2937'"
-                    }
-                  }
-                }
-              }
-            },
-            "fontSize": {
-              "expr": {
-                "Literal": {
-                  "Value": "9D"
                 }
               }
             }
@@ -260,7 +260,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Source freshness and qualification table.'"
+                  "Value": "'Tenant-wide source freshness and qualification'"
                 }
               }
             }
@@ -280,7 +280,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Source freshness and qualification'"
+                  "Value": "'Tenant-wide source freshness and qualification'"
                 }
               }
             },
@@ -443,5 +443,6 @@
       ]
     },
     "drillFilterOtherVisuals": true
-  }
+  },
+  "parentGroupName": "91ab1ca1101fcb82eb6f"
 }

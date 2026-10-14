@@ -1,0 +1,73 @@
+/// Retained initial authoring staging table, unused. Current validated evidence: Windows Migration AD Observations
+table 'Windows AD Unlinked Evidence'
+	isHidden
+	excludeFromModelRefresh
+	lineageTag: 619e7826-2cd3-45c0-9dcb-23f93cd52b2a
+
+	/// AD Object GUID from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
+	column 'AD Object GUID'
+		dataType: string
+		lineageTag: 21a04791-b078-4f69-9da1-224dc793f009
+		sourceColumn: AD Object GUID
+
+	/// Device Name from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
+	column 'Device Name'
+		dataType: string
+		lineageTag: da31bdcb-5cdb-488d-be4b-d7d5d36258b6
+		sourceColumn: Device Name
+
+	/// Source Domain from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
+	column 'Source Domain'
+		dataType: string
+		lineageTag: beca3a6e-6445-4951-8f89-b4c104106662
+		sourceColumn: Source Domain
+
+	/// OS Version from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
+	column 'OS Version'
+		dataType: string
+		lineageTag: 1d1f684b-326e-40a5-89f1-e1b812eeba6d
+		sourceColumn: OS Version
+
+	/// Intune Evidence from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
+	column 'Intune Evidence'
+		dataType: string
+		lineageTag: c18631c0-ece3-4be8-8abd-e1b1149dc1ec
+		sourceColumn: Intune Evidence
+
+	/// Autopatch Evidence from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
+	column 'Autopatch Evidence'
+		dataType: string
+		lineageTag: 47450420-00bd-4734-865c-47744a0a0b26
+		sourceColumn: Autopatch Evidence
+
+	/// Country from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
+	column Country
+		dataType: string
+		lineageTag: fe0941ea-e280-4089-8292-76ac6cfce2c7
+		sourceColumn: Country
+
+	/// Qualification from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
+	column Qualification
+		dataType: string
+		lineageTag: 7cffb6ee-d3f7-467f-9b22-93e522e65ec7
+		sourceColumn: Qualification
+
+	/// Next Action from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
+	column 'Next Action'
+		dataType: string
+		lineageTag: 44bdf3a2-4b09-47bd-916d-e225b653ddbb
+		sourceColumn: Next Action
+
+	/// Normal SmartM365 local inputs through DataRoot / PreparedEvidenceRoot. No dependency on frozen report-validation JSON. Source qualification is retained; no collection is triggered.
+	partition 'Windows AD Unlinked Evidence' = m
+		mode: import
+		source = ```
+				let
+				    Source = #"Windows Migration AD Observations",
+				    Selected = Table.SelectColumns(Source, {"AD Object GUID","Device Name","Source Domain","OS Version","Intune Evidence","Autopatch Evidence","Country","Qualification","Next Action"}),
+				    Typed = Table.TransformColumnTypes(Selected, {{"AD Object GUID", type text},{"Device Name", type text},{"Source Domain", type text},{"OS Version", type text},{"Intune Evidence", type text},{"Autopatch Evidence", type text},{"Country", type text},{"Qualification", type text},{"Next Action", type text}}, "en-US")
+				in
+				    Typed
+				
+				```
+

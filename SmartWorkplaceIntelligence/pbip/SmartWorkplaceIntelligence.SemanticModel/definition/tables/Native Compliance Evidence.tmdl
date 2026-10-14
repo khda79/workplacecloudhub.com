@@ -1,0 +1,89 @@
+/// Native source facet migrated from FactDeviceCompliance; exact source grain, unresolved links and qualification retained. Uses the unified pinned batch, not a separate CMDB reader.
+table 'Native Compliance Evidence'
+	lineageTag: 7e9adcd3-61ec-4376-af82-a8dcab53eb30
+
+	/// Exact native-key entity context or existing inventory context. No name matching or inferred transitive membership. Unrelated entity selections return blank.
+	measure 'Native Context Rows · Native Compliance Evidence' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimDevice"))
+			VAR InventoryDevices = CALCULATETABLE(VALUES('Native Managed Device Evidence'[TenantDeviceKey]), REMOVEFILTERS('Native Managed Device Evidence'), TREATAS(VALUES('Device Inventory Evidence'[Device Source ID]), 'Native Managed Device Evidence'[ManagedDeviceId]))
+			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((COUNTROWS('Native Compliance Evidence')), KEEPFILTERS(TREATAS(NativeKeys0, 'Native Compliance Evidence'[TenantDeviceKey]))), BLANK()), BLANK()), SWITCH(TRUE(), ISCROSSFILTERED('Device Inventory Evidence'), CALCULATE((COUNTROWS('Native Compliance Evidence')), KEEPFILTERS(TREATAS(InventoryDevices, 'Native Compliance Evidence'[TenantDeviceKey]))), (COUNTROWS('Native Compliance Evidence'))))
+		formatString: #,0
+		isHidden
+		lineageTag: b571d1d1-8ba2-4416-922c-f426bbcb25ce
+
+	/// Native FactDeviceCompliance attribute; source qualification is retained.
+	column TenantKey
+		dataType: string
+		isHidden
+		lineageTag: a37735e9-ce6b-414e-b438-0f0de0894957
+		summarizeBy: none
+		sourceColumn: TenantKey
+
+	/// Native FactDeviceCompliance attribute; source qualification is retained.
+	column OrganizationKey
+		dataType: string
+		isHidden
+		lineageTag: 008755c9-29a5-48e3-bb75-cbde9c891c48
+		summarizeBy: none
+		sourceColumn: OrganizationKey
+
+	/// Native FactDeviceCompliance attribute; source qualification is retained.
+	column EnvironmentKey
+		dataType: string
+		isHidden
+		lineageTag: c9b924d1-045f-43fc-b9b6-30a8789060e0
+		summarizeBy: none
+		sourceColumn: EnvironmentKey
+
+	/// Native FactDeviceCompliance attribute; source qualification is retained.
+	column TenantId
+		dataType: string
+		isHidden
+		lineageTag: 28467a15-c07d-44cc-aae1-3d1c3c77f930
+		summarizeBy: none
+		sourceColumn: TenantId
+
+	/// Native FactDeviceCompliance attribute; source qualification is retained.
+	column TenantDeviceKey
+		dataType: string
+		isHidden
+		lineageTag: a78514f8-e321-49fb-91de-d36d0fcae7b6
+		summarizeBy: none
+		sourceColumn: TenantDeviceKey
+
+	/// Native FactDeviceCompliance attribute; source qualification is retained.
+	column CmdbDeviceId
+		dataType: string
+		isHidden
+		lineageTag: 26e358c9-71d8-48f7-8de8-2ae145836e70
+		summarizeBy: none
+		sourceColumn: CmdbDeviceId
+
+	/// Native FactDeviceCompliance attribute; source qualification is retained.
+	column ComplianceState
+		dataType: string
+		lineageTag: a6b3881a-aced-43d5-884b-d7a7af0ab1b4
+		summarizeBy: none
+		sourceColumn: ComplianceState
+
+	/// Native FactDeviceCompliance attribute; source qualification is retained.
+	column LastSyncDateTime
+		dataType: dateTime
+		formatString: yyyy-MM-dd HH:mm:ss
+		lineageTag: ecee828b-de11-43ba-af46-381d4e7df60b
+		summarizeBy: none
+		sourceColumn: LastSyncDateTime
+
+	/// Native FactDeviceCompliance attribute; source qualification is retained.
+	column SourceSystem
+		dataType: string
+		lineageTag: 9f2f22bb-3263-4606-847e-5472da86b297
+		summarizeBy: none
+		sourceColumn: SourceSystem
+
+	partition 'Native Compliance Evidence' = m
+		mode: import
+		source = NativeEvidenceTypes(Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("FactDeviceCompliance.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]), {[name="TenantKey", dataType="String"], [name="OrganizationKey", dataType="String"], [name="EnvironmentKey", dataType="String"], [name="TenantId", dataType="String"], [name="TenantDeviceKey", dataType="String"], [name="CmdbDeviceId", dataType="String"], [name="ComplianceState", dataType="String"], [name="LastSyncDateTime", dataType="DateTime"], [name="SourceSystem", dataType="String"]})
+

@@ -1,0 +1,57 @@
+/// Retained initial authoring staging table, unused. Current validated evidence: Mailbox Migration Weekly History
+table 'Mailbox Migration History'
+	isHidden
+	excludeFromModelRefresh
+	lineageTag: 6ec8321d-80a8-4432-8639-49dad802f1b1
+
+	/// Snapshot Date from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
+	column 'Snapshot Date'
+		dataType: dateTime
+		lineageTag: 3c111f20-a05c-4d37-97ff-7054fae6b494
+		sourceColumn: Snapshot Date
+
+	/// Snapshot Week from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
+	column 'Snapshot Week'
+		dataType: string
+		lineageTag: a67b279c-3d67-4b14-a79d-a15380b4cb70
+		sourceColumn: Snapshot Week
+
+	/// Observed Local Mailboxes from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
+	column 'Observed Local Mailboxes'
+		dataType: string
+		lineageTag: ff6d5937-f5dc-42bb-96f6-582471b70524
+		sourceColumn: Observed Local Mailboxes
+
+	/// Provisional Local Mailboxes from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
+	column 'Provisional Local Mailboxes'
+		dataType: double
+		formatString: #,0
+		lineageTag: dfb9a195-c25a-429d-8e89-03842f035a4d
+		summarizeBy: none
+		sourceColumn: Provisional Local Mailboxes
+
+	/// Evidence Status from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
+	column 'Evidence Status'
+		dataType: string
+		lineageTag: e3346ba4-094f-4bc2-9958-4756ce816f98
+		sourceColumn: Evidence Status
+
+	/// Evidence Note from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
+	column 'Evidence Note'
+		dataType: string
+		lineageTag: e79dcce4-ff21-4612-a326-a47a43e4da8e
+		sourceColumn: Evidence Note
+
+	/// Normal SmartM365 local inputs through DataRoot / PreparedEvidenceRoot. No dependency on frozen report-validation JSON. Source qualification is retained; no collection is triggered.
+	partition 'Mailbox Migration History' = m
+		mode: import
+		source = ```
+				let
+				    Source = #"Mailbox Migration Weekly History",
+				    Selected = Table.SelectColumns(Source, {"Snapshot Date","Snapshot Week","Observed Local Mailboxes","Provisional Local Mailboxes","Evidence Status","Evidence Note"}),
+				    Typed = Table.TransformColumnTypes(Selected, {{"Snapshot Date", type date},{"Snapshot Week", type text},{"Observed Local Mailboxes", type text},{"Provisional Local Mailboxes", type number},{"Evidence Status", type text},{"Evidence Note", type text}}, "en-US")
+				in
+				    Typed
+				
+				```
+

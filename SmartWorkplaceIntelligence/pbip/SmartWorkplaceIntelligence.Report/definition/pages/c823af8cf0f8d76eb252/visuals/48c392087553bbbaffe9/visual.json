@@ -2,11 +2,11 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
   "name": "48c392087553bbbaffe9",
   "position": {
-    "x": 1412,
-    "y": 562,
+    "x": 32,
+    "y": 992,
     "z": 120,
-    "width": 220,
-    "height": 20,
+    "width": 600,
+    "height": 24,
     "tabOrder": 120
   },
   "visual": {
@@ -19,12 +19,11 @@
               {
                 "textRuns": [
                   {
-                    "value": "Identity and access attention",
+                    "value": "Registration is not MFA enforcement.",
                     "textStyle": {
-                      "fontFamily": "Segoe UI Semibold",
-                      "fontSize": "10px",
-                      "color": "#52606D",
-                      "fontWeight": "bold"
+                      "fontFamily": "Segoe UI",
+                      "fontSize": "12pt",
+                      "color": "#183153"
                     }
                   }
                 ],
@@ -115,7 +114,22 @@
             }
           }
         }
+      ],
+      "general": [
+        {
+          "properties": {
+            "altText": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Registration is not MFA enforcement.'"
+                }
+              }
+            }
+          }
+        }
       ]
     }
-  }
+  },
+  "isHidden": true,
+  "parentGroupName": "7dbfb122566e65960823"
 }

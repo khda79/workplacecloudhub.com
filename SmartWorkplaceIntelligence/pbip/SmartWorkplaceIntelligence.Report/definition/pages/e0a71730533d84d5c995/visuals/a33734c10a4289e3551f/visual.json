@@ -4,10 +4,10 @@
   "position": {
     "x": 96,
     "y": 16,
-    "z": 100,
-    "width": 1024,
+    "width": 880,
     "height": 48,
-    "tabOrder": 100
+    "z": 11,
+    "tabOrder": 11
   },
   "visual": {
     "visualType": "textbox",
@@ -19,7 +19,7 @@
               {
                 "textRuns": [
                   {
-                    "value": "Where is licensed capacity underused or reclaimable?",
+                    "value": "License Overview",
                     "textStyle": {
                       "fontFamily": "Segoe UI Semibold",
                       "fontSize": "26px",

@@ -38,6 +38,38 @@ table 'Windows Lifecycle Trend Evidence'
 		displayFolder: Windows Lifecycle | Trend
 		lineageTag: bb553ab3-7dd9-4a18-b939-ff8a7a4dd095
 
+	/// Relative percentage change (last - first) / first between the first and last selected observed snapshots. Blank when either endpoint is missing or the first value is zero. Executive Overview uses this relative change; existing absolute-count and percentage-point measures are preserved.
+	measure 'Managed Devices Period Change (%)' =
+			VAR _FirstObservedDate = MINX ( ALLSELECTED ( 'Windows Lifecycle Trend Evidence'[Snapshot Date] ), 'Windows Lifecycle Trend Evidence'[Snapshot Date] )
+			VAR _LastObservedDate = MAXX ( ALLSELECTED ( 'Windows Lifecycle Trend Evidence'[Snapshot Date] ), 'Windows Lifecycle Trend Evidence'[Snapshot Date] )
+			VAR _FirstObservedValue = CALCULATE ( [Trend Managed Devices], 'Windows Lifecycle Trend Evidence'[Snapshot Date] = _FirstObservedDate )
+			VAR _LastObservedValue = CALCULATE ( [Trend Managed Devices], 'Windows Lifecycle Trend Evidence'[Snapshot Date] = _LastObservedDate )
+			RETURN
+			    IF (
+			        ISBLANK ( _FirstObservedValue ) || ISBLANK ( _LastObservedValue ),
+			        BLANK (),
+			        DIVIDE ( _LastObservedValue - _FirstObservedValue, _FirstObservedValue )
+			    )
+		formatString: +0.0%;-0.0%;0.0%
+		displayFolder: Windows Lifecycle | Trend
+		lineageTag: 0e97b559-c908-4f8b-9353-59f2bdf78a27
+
+	/// Relative percentage change (last - first) / first between the first and last selected observed snapshots. Blank when either endpoint is missing or the first value is zero. Executive Overview uses this relative change; existing absolute-count and percentage-point measures are preserved.
+	measure 'Windows 11 Adoption Period Change (%)' =
+			VAR _FirstObservedDate = MINX ( ALLSELECTED ( 'Windows Lifecycle Trend Evidence'[Snapshot Date] ), 'Windows Lifecycle Trend Evidence'[Snapshot Date] )
+			VAR _LastObservedDate = MAXX ( ALLSELECTED ( 'Windows Lifecycle Trend Evidence'[Snapshot Date] ), 'Windows Lifecycle Trend Evidence'[Snapshot Date] )
+			VAR _FirstObservedValue = CALCULATE ( [Trend Windows 11 Adoption], 'Windows Lifecycle Trend Evidence'[Snapshot Date] = _FirstObservedDate )
+			VAR _LastObservedValue = CALCULATE ( [Trend Windows 11 Adoption], 'Windows Lifecycle Trend Evidence'[Snapshot Date] = _LastObservedDate )
+			RETURN
+			    IF (
+			        ISBLANK ( _FirstObservedValue ) || ISBLANK ( _LastObservedValue ),
+			        BLANK (),
+			        DIVIDE ( _LastObservedValue - _FirstObservedValue, _FirstObservedValue )
+			    )
+		formatString: +0.0%;-0.0%;0.0%
+		displayFolder: Windows Lifecycle | Trend
+		lineageTag: ffde89a6-f988-4c7e-8ce4-346a5c6797db
+
 	column 'Snapshot Date'
 		dataType: dateTime
 		formatString: Short Date

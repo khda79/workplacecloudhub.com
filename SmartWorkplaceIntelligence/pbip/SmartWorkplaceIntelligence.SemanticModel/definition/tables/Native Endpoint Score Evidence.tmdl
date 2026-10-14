@@ -1,0 +1,187 @@
+/// Native source facet migrated from FactEndpointAnalyticsDevice; exact source grain, unresolved links and qualification retained. Uses the unified pinned batch, not a separate CMDB reader.
+table 'Native Endpoint Score Evidence'
+	lineageTag: 431b2e97-cd7b-436a-978d-5bb5f38298fb
+
+	/// Devices represented in the Endpoint Analytics export. Migrated without changing the source calculation.
+	measure 'Native Endpoint Analytics devices' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (COALESCE(COUNTROWS('Native Endpoint Score Evidence'),0)))
+		formatString: #,0
+		displayFolder: Native evidence
+		lineageTag: a568f4cd-a570-4b47-9b35-ed20cbbe3300
+
+	/// Arithmetic mean of the source-reported Endpoint Analytics device score across rows with a value. Migrated without changing the source calculation.
+	measure 'Native Average Endpoint Analytics score' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (AVERAGE('Native Endpoint Score Evidence'[EndpointAnalyticsScore])))
+		formatString: 0.0
+		displayFolder: Native evidence
+		lineageTag: e10fc8c5-245d-4db0-9458-cb12baebab59
+
+	/// Average Endpoint Analytics score for exact Intune device identifiers in the filtered device population. Migrated without changing the source calculation.
+	measure 'Native Selected Endpoint Analytics score' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (VAR _deviceKeys = VALUES('Native Device Evidence'[TenantDeviceKey]) VAR _intuneIds = CALCULATETABLE(VALUES('Device Source Evidence'[SourceObjectId]), TREATAS(_deviceKeys, 'Device Source Evidence'[TenantDeviceKey]), KEEPFILTERS('Device Source Evidence'[SourceSystem] = "Intune")) RETURN CALCULATE(AVERAGE('Native Endpoint Score Evidence'[EndpointAnalyticsScore]), TREATAS(_intuneIds, 'Native Endpoint Score Evidence'[DeviceId]))))
+		formatString: 0.0
+		displayFolder: Native evidence
+		lineageTag: b43c35be-4447-42f2-8ca6-5ca3583ef0c1
+
+	/// Average startup score for exact Intune device identifiers in the filtered device population. Migrated without changing the source calculation.
+	measure 'Native Selected startup performance score' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (VAR _deviceKeys = VALUES('Native Device Evidence'[TenantDeviceKey]) VAR _intuneIds = CALCULATETABLE(VALUES('Device Source Evidence'[SourceObjectId]), TREATAS(_deviceKeys, 'Device Source Evidence'[TenantDeviceKey]), KEEPFILTERS('Device Source Evidence'[SourceSystem] = "Intune")) RETURN CALCULATE(AVERAGE('Native Endpoint Score Evidence'[StartupPerformanceScore]), TREATAS(_intuneIds, 'Native Endpoint Score Evidence'[DeviceId]))))
+		formatString: 0.0
+		displayFolder: Native evidence
+		lineageTag: 5a5dab2a-faa8-4251-942d-7e05ddcf3b5b
+
+	/// Average app reliability score for exact Intune device identifiers in the filtered device population. Migrated without changing the source calculation.
+	measure 'Native Selected app reliability score' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (VAR _deviceKeys = VALUES('Native Device Evidence'[TenantDeviceKey]) VAR _intuneIds = CALCULATETABLE(VALUES('Device Source Evidence'[SourceObjectId]), TREATAS(_deviceKeys, 'Device Source Evidence'[TenantDeviceKey]), KEEPFILTERS('Device Source Evidence'[SourceSystem] = "Intune")) RETURN CALCULATE(AVERAGE('Native Endpoint Score Evidence'[AppReliabilityScore]), TREATAS(_intuneIds, 'Native Endpoint Score Evidence'[DeviceId]))))
+		formatString: 0.0
+		displayFolder: Native evidence
+		lineageTag: cc5d2344-c88f-4dc4-b093-6a2d35b03d5f
+
+	/// Average work-from-anywhere score for exact Intune device identifiers in the filtered device population. Migrated without changing the source calculation.
+	measure 'Native Selected work from anywhere score' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (VAR _deviceKeys = VALUES('Native Device Evidence'[TenantDeviceKey]) VAR _intuneIds = CALCULATETABLE(VALUES('Device Source Evidence'[SourceObjectId]), TREATAS(_deviceKeys, 'Device Source Evidence'[TenantDeviceKey]), KEEPFILTERS('Device Source Evidence'[SourceSystem] = "Intune")) RETURN CALCULATE(AVERAGE('Native Endpoint Score Evidence'[WorkFromAnywhereScore]), TREATAS(_intuneIds, 'Native Endpoint Score Evidence'[DeviceId]))))
+		formatString: 0.0
+		displayFolder: Native evidence
+		lineageTag: 1ae7893b-5fe7-42a0-81fd-47bba0cf46ed
+
+	/// Exact native-key entity context or existing inventory context. No name matching or inferred transitive membership. Unrelated entity selections return blank.
+	measure 'Native Context Rows · Native Endpoint Score Evidence' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (COUNTROWS('Native Endpoint Score Evidence')))
+		formatString: #,0
+		isHidden
+		lineageTag: 0e976b6d-0558-4beb-87fb-9d1f178807db
+
+	/// Native FactEndpointAnalyticsDevice attribute; source qualification is retained.
+	column TenantKey
+		dataType: string
+		isHidden
+		lineageTag: a0b6aa10-c9d2-4349-8040-135c173dcb06
+		summarizeBy: none
+		sourceColumn: TenantKey
+
+	/// Native FactEndpointAnalyticsDevice attribute; source qualification is retained.
+	column OrganizationKey
+		dataType: string
+		isHidden
+		lineageTag: 05ac5a09-bb94-44bd-ab1a-a37bcb6a6963
+		summarizeBy: none
+		sourceColumn: OrganizationKey
+
+	/// Native FactEndpointAnalyticsDevice attribute; source qualification is retained.
+	column EnvironmentKey
+		dataType: string
+		isHidden
+		lineageTag: a234cff4-c3fd-4fd4-8da0-2fb9841a1df0
+		summarizeBy: none
+		sourceColumn: EnvironmentKey
+
+	/// Native FactEndpointAnalyticsDevice attribute; source qualification is retained.
+	column TenantId
+		dataType: string
+		isHidden
+		lineageTag: f523f03b-c1a2-46b3-b0c8-abbc2ba023f1
+		summarizeBy: none
+		sourceColumn: TenantId
+
+	/// Native FactEndpointAnalyticsDevice attribute; source qualification is retained.
+	column TenantEndpointAnalyticsDeviceKey
+		dataType: string
+		isHidden
+		lineageTag: e3754de8-c730-4f46-a104-318fe81435ee
+		summarizeBy: none
+		sourceColumn: TenantEndpointAnalyticsDeviceKey
+
+	/// Native FactEndpointAnalyticsDevice attribute; source qualification is retained.
+	column DeviceId
+		dataType: string
+		lineageTag: abeaeb2c-62bd-410a-9ffc-4dd06710c794
+		summarizeBy: none
+		sourceColumn: DeviceId
+
+	/// Native FactEndpointAnalyticsDevice attribute; source qualification is retained.
+	column DeviceName
+		dataType: string
+		lineageTag: e517636d-acb7-47c6-ac41-5dc86d74be49
+		summarizeBy: none
+		sourceColumn: DeviceName
+
+	/// Native FactEndpointAnalyticsDevice attribute; source qualification is retained.
+	column Manufacturer
+		dataType: string
+		lineageTag: 8388193b-0dc0-438c-82be-787f37409308
+		summarizeBy: none
+		sourceColumn: Manufacturer
+
+	/// Native FactEndpointAnalyticsDevice attribute; source qualification is retained.
+	column Model
+		dataType: string
+		lineageTag: e1acc908-d2e8-4d6d-95aa-8ca9c32c0f33
+		summarizeBy: none
+		sourceColumn: Model
+
+	/// Native FactEndpointAnalyticsDevice attribute; source qualification is retained.
+	column EndpointAnalyticsScore
+		dataType: double
+		isHidden
+		formatString: 0.0
+		lineageTag: 008dc0a7-b323-4266-b16c-e3da8735ce71
+		summarizeBy: none
+		sourceColumn: EndpointAnalyticsScore
+
+	/// Native FactEndpointAnalyticsDevice attribute; source qualification is retained.
+	column StartupPerformanceScore
+		dataType: double
+		formatString: 0.0
+		lineageTag: 6d2d7878-ffa0-47f6-b775-2825231d74e3
+		summarizeBy: none
+		sourceColumn: StartupPerformanceScore
+
+	/// Native FactEndpointAnalyticsDevice attribute; source qualification is retained.
+	column AppReliabilityScore
+		dataType: double
+		formatString: 0.0
+		lineageTag: fe625bc9-72f1-44ac-a005-a36cd94ef8b1
+		summarizeBy: none
+		sourceColumn: AppReliabilityScore
+
+	/// Native FactEndpointAnalyticsDevice attribute; source qualification is retained.
+	column WorkFromAnywhereScore
+		dataType: double
+		formatString: 0.0
+		lineageTag: 1752b258-eadf-4c8f-81b4-3716c71af9f2
+		summarizeBy: none
+		sourceColumn: WorkFromAnywhereScore
+
+	/// Native FactEndpointAnalyticsDevice attribute; source qualification is retained.
+	column SourceCollectedDateTime
+		dataType: dateTime
+		formatString: yyyy-MM-dd HH:mm:ss
+		lineageTag: 8ebe774e-2ca3-481e-9463-cd61087c4b67
+		summarizeBy: none
+		sourceColumn: SourceCollectedDateTime
+
+	/// Native FactEndpointAnalyticsDevice attribute; source qualification is retained.
+	column SourceSystem
+		dataType: string
+		lineageTag: e7c0da8f-5083-4b5a-b4e5-5d9d32be8426
+		summarizeBy: none
+		sourceColumn: SourceSystem
+
+	partition 'Native Endpoint Score Evidence' = m
+		mode: import
+		source = NativeEvidenceTypes(Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("FactEndpointAnalyticsDevice.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]), {[name="TenantKey", dataType="String"], [name="OrganizationKey", dataType="String"], [name="EnvironmentKey", dataType="String"], [name="TenantId", dataType="String"], [name="TenantEndpointAnalyticsDeviceKey", dataType="String"], [name="DeviceId", dataType="String"], [name="DeviceName", dataType="String"], [name="Manufacturer", dataType="String"], [name="Model", dataType="String"], [name="EndpointAnalyticsScore", dataType="Double"], [name="StartupPerformanceScore", dataType="Double"], [name="AppReliabilityScore", dataType="Double"], [name="WorkFromAnywhereScore", dataType="Double"], [name="SourceCollectedDateTime", dataType="DateTime"], [name="SourceSystem", dataType="String"]})
+

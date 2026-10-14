@@ -1,5 +1,6 @@
-/// Synthetic license product catalogue.
+/// Legacy synthetic fixture: not used by production report visuals or consolidated evidence. Removal is pending a separately cleared dependency-safe retirement; no real data.
 table 'License Product'
+	isHidden
 	lineageTag: fb6cfc91-5ce4-40cf-ba1b-ddbed9e971ab
 
 	/// Business attribute License Product Key.

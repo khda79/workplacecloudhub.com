@@ -1,0 +1,152 @@
+/// Current SharePoint Server inventory; one row per content database. Tenant and farm identity are retained in hidden relationship keys.
+table 'SharePoint On-prem Content Databases'
+	lineageTag: 88d28459-3069-44b2-bbec-f778091b9b14
+
+	/// Observed content databases in the Infrastructure inventory.
+	measure 'On-prem Content Databases' = COUNTROWS('SharePoint On-prem Content Databases')
+		formatString: #,##0
+		lineageTag: d54d5dab-c89f-433e-8934-0c8e2f9f9df4
+
+	/// SharePoint content database CurrentSiteCount total. This is Infrastructure metadata, not a qualified Content collection count.
+	measure 'Reported Site Collections' = SUM('SharePoint On-prem Content Databases'[Reported Site Collection Count])
+		formatString: #,##0
+		lineageTag: 6765a481-8c42-41db-b0c0-3a949c586a0f
+
+	/// Databases whose read-only property was observed as true.
+	measure 'Read-only Content Databases' = COALESCE(CALCULATE(COUNTROWS('SharePoint On-prem Content Databases'), KEEPFILTERS('SharePoint On-prem Content Databases'[Database Read Only] = "True")), 0)
+		formatString: #,##0
+		lineageTag: 46d8bff6-9657-4afc-9192-646be2383aac
+
+	/// Databases with an observed NeedsUpgradeIncludeChildren=true. Missing values are excluded.
+	measure 'Databases Needing Upgrade' = COALESCE(CALCULATE(COUNTROWS('SharePoint On-prem Content Databases'), KEEPFILTERS('SharePoint On-prem Content Databases'[Needs Upgrade] = "True"), KEEPFILTERS('SharePoint On-prem Content Databases'[Upgrade Evidence Status] = "Collected")), 0)
+		formatString: #,##0
+		lineageTag: 1551cc89-0386-4dc3-9717-5e0ecec447a3
+
+	/// Databases without a qualified upgrade observation.
+	measure 'Upgrade Evidence Unavailable' = CALCULATE(COUNTROWS('SharePoint On-prem Content Databases'), KEEPFILTERS('SharePoint On-prem Content Databases'[Upgrade Evidence Status] <> "Collected"))
+		formatString: #,##0
+		lineageTag: ebd8e5ca-95ff-4fb4-bf21-2c0820375b18
+
+	/// Databases for which this collector does not provide measured database size.
+	measure 'Database Size Unavailable' = CALCULATE(COUNTROWS('SharePoint On-prem Content Databases'), KEEPFILTERS('SharePoint On-prem Content Databases'[Database Size Status] <> "Measured"))
+		formatString: #,##0
+		lineageTag: 8237c09a-c586-4b6e-88c8-7c1eddd5fa65
+
+	/// Number of content databases without measured size divided by all observed content databases in the current filter context.
+	measure 'Database Size Coverage Label' = FORMAT(COALESCE([Database Size Unavailable], 0), "#,##0") & "/" & FORMAT(COALESCE([On-prem Content Databases], 0), "#,##0") & " not collected"
+		formatString: @
+		lineageTag: ef5e8577-1c81-4bef-946e-36628b67ff7d
+
+	/// Infrastructure content databases reporting zero site collections; does not assess Content collection completeness.
+	measure 'Empty Content Databases' = COALESCE(CALCULATE(COUNTROWS('SharePoint On-prem Content Databases'), KEEPFILTERS('SharePoint On-prem Content Databases'[Reported Site Collection Count] = 0)), 0)
+		formatString: #,##0
+		lineageTag: 500181c1-2fd2-4638-9ca8-84ac9ea07886
+
+	column 'Tenant Key'
+		dataType: string
+		isHidden
+		lineageTag: 9a1910c6-5dc2-4b64-bd3d-ab01d49e1dff
+		sourceColumn: Tenant Key
+
+	column 'Farm ID'
+		dataType: string
+		isHidden
+		lineageTag: 3d9142f9-397b-4d4a-a7e1-e8feea1f4057
+		sourceColumn: Farm ID
+
+	column 'Run ID'
+		dataType: string
+		isHidden
+		lineageTag: 5b48e6d5-3417-4252-b91f-8ed17edd7893
+		sourceColumn: Run ID
+
+	column 'Web Application ID'
+		dataType: string
+		isHidden
+		lineageTag: 306b3328-9ba1-4f2c-8ada-00dd94b84cfd
+		sourceColumn: Web Application ID
+
+	column 'Content Database ID'
+		dataType: string
+		isHidden
+		lineageTag: 5f2419ff-f1da-4758-8ec0-d264627c00ec
+		sourceColumn: Content Database ID
+
+	column 'Content Database'
+		dataType: string
+		lineageTag: 2bcfa981-1728-4722-a04c-a3f6beefd2d9
+		sourceColumn: Content Database
+
+	column 'Database Server'
+		dataType: string
+		lineageTag: c4486285-728f-43d4-b4b1-f4f59f4dd259
+		sourceColumn: Database Server
+
+	column 'Database Status'
+		dataType: string
+		lineageTag: 8da2ffc0-22a8-415a-9096-a7b331116efe
+		sourceColumn: Database Status
+
+	column 'Reported Site Collection Count'
+		dataType: int64
+		isHidden
+		lineageTag: 36cab883-a5bc-4cc4-ad93-a31cfaa57ae6
+		sourceColumn: Reported Site Collection Count
+
+	column 'Database Read Only'
+		dataType: string
+		lineageTag: 87809267-2fab-432f-8c7f-0ed99617f5f1
+		sourceColumn: Database Read Only
+
+	column 'Collection Status'
+		dataType: string
+		lineageTag: 861b4334-b044-479d-92bf-513bc6c5c4f3
+		sourceColumn: Collection Status
+
+	column 'Database Size Status'
+		dataType: string
+		lineageTag: 20fe51ef-87ab-4763-98b2-0ae15c84b5e6
+		sourceColumn: Database Size Status
+
+	column 'Needs Upgrade'
+		dataType: string
+		lineageTag: 8b5d4022-f9ed-4d70-9697-1edaa0faa801
+		sourceColumn: Needs Upgrade
+
+	column 'Upgrade Evidence Status'
+		dataType: string
+		lineageTag: 13735ae4-56af-4c4e-a31e-7e7d5064e35c
+		sourceColumn: Upgrade Evidence Status
+
+	column 'Farm Key'
+		dataType: string
+		isHidden
+		lineageTag: a61eb0f6-9efd-4feb-b668-9f74e50734b9
+		sourceColumn: Farm Key
+
+	column 'Web Application Key'
+		dataType: string
+		isHidden
+		lineageTag: e3f3b2a2-2117-435c-af7c-5a06471993b4
+		sourceColumn: Web Application Key
+
+	column 'Content Database Key'
+		dataType: string
+		isHidden
+		lineageTag: 7d0e45ce-1365-4a44-b6cb-82f2d76365fb
+		sourceColumn: Content Database Key
+
+	partition 'SharePoint On-prem Content Databases' = m
+		mode: import
+		source =
+				let
+				    Raw = GetSharePointOnPremCsv("SharePoint_OnPrem_ContentDatabases.csv", {"TenantKey", "FarmId", "RunId", "WebApplicationId", "ContentDatabaseId", "Name", "DatabaseServer", "Status", "SiteCollectionCount", "IsReadOnly", "CollectionStatus", "DatabaseSizeStatus", "NeedsUpgradeIncludeChildren", "NeedsUpgradeStatus"}, {}),
+				    Nulls = Table.ReplaceValue(Raw, "", null, Replacer.ReplaceValue, {"SiteCollectionCount"}),
+				    Typed = Table.TransformColumnTypes(Nulls, {{"SiteCollectionCount", Int64.Type}}, "en-US"),
+				    FarmKey = Table.AddColumn(Typed, "Farm Key", each [TenantKey] & "|" & [FarmId], type text),
+				    WebKey = Table.AddColumn(FarmKey, "Web Application Key", each [TenantKey] & "|" & [FarmId] & "|" & [WebApplicationId], type text),
+				    DbKey = Table.AddColumn(WebKey, "Content Database Key", each [TenantKey] & "|" & [FarmId] & "|" & [ContentDatabaseId], type text),
+				    Renamed = Table.RenameColumns(DbKey, {{"TenantKey", "Tenant Key"}, {"FarmId", "Farm ID"}, {"RunId", "Run ID"}, {"WebApplicationId", "Web Application ID"}, {"ContentDatabaseId", "Content Database ID"}, {"Name", "Content Database"}, {"DatabaseServer", "Database Server"}, {"Status", "Database Status"}, {"SiteCollectionCount", "Reported Site Collection Count"}, {"IsReadOnly", "Database Read Only"}, {"CollectionStatus", "Collection Status"}, {"DatabaseSizeStatus", "Database Size Status"}, {"NeedsUpgradeIncludeChildren", "Needs Upgrade"}, {"NeedsUpgradeStatus", "Upgrade Evidence Status"}})
+				in
+				    Renamed
+

@@ -1,5 +1,6 @@
-/// Synthetic source-contract and data-quality rule results.
+/// Legacy synthetic fixture: not used by production report visuals or consolidated evidence. Removal is pending a separately cleared dependency-safe retirement; no real data.
 table 'Data Quality Results'
+	isHidden
 	lineageTag: 2e75efa0-9f14-4268-b6c7-a7396237f27e
 
 	/// Passed required rules divided by executed required rules.

@@ -1,5 +1,6 @@
-/// Conformed Digital Workplace service domains and concrete services.
+/// Legacy synthetic fixture: not used by production report visuals or consolidated evidence. Removal is pending a separately cleared dependency-safe retirement; no real data.
 table Service
+	isHidden
 	lineageTag: 56db469e-5a6c-45e8-8bde-33fb13b938fd
 
 	/// Evidence-aware headline KPI text for each service row in the executive domain pulse.

@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.13.0/schema.json",
   "name": "aa5e3a15d2b847c0d092",
   "position": {
-    "x": 1400,
-    "y": 256,
+    "x": 1504,
+    "y": 336,
     "z": 109,
-    "height": 150,
-    "width": 488,
-    "tabOrder": 109
+    "height": 176,
+    "width": 384,
+    "tabOrder": 1333
   },
   "visual": {
     "visualType": "pivotTable",
@@ -195,7 +195,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Application Explorer diagnostic context. Summary grouped for the current filter context.'"
+                  "Value": "'Application Explorer diagnostic context'"
                 }
               }
             }
@@ -222,7 +222,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "13D"
+                  "Value": "12D"
                 }
               }
             },
@@ -231,16 +231,9 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#1F2937'"
+                      "Value": "'#183153'"
                     }
                   }
-                }
-              }
-            },
-            "bold": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
                 }
               }
             }
@@ -293,9 +286,16 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#CBD8E5'"
+                      "Value": "'#CCDCEC'"
                     }
                   }
+                }
+              }
+            },
+            "radius": {
+              "expr": {
+                "Literal": {
+                  "Value": "8D"
                 }
               }
             },
@@ -303,13 +303,6 @@
               "expr": {
                 "Literal": {
                   "Value": "1D"
-                }
-              }
-            },
-            "radius": {
-              "expr": {
-                "Literal": {
-                  "Value": "12D"
                 }
               }
             }
@@ -349,14 +342,14 @@
             "left": {
               "expr": {
                 "Literal": {
-                  "Value": "10D"
+                  "Value": "8D"
                 }
               }
             },
             "right": {
               "expr": {
                 "Literal": {
-                  "Value": "10D"
+                  "Value": "8D"
                 }
               }
             }
@@ -378,5 +371,38 @@
       ]
     },
     "drillFilterOtherVisuals": true
+  },
+  "parentGroupName": "eaa4fe1c0e36d833b4c6",
+  "filterConfig": {
+    "filters": [
+      {
+        "name": "0ceb0262eac47b1da465",
+        "field": {
+          "Column": {
+            "Expression": {
+              "SourceRef": {
+                "Entity": "Application Inventory Evidence"
+              }
+            },
+            "Property": "Risk Priority"
+          }
+        },
+        "type": "Categorical"
+      },
+      {
+        "name": "4b413eaba7033b8a4904",
+        "field": {
+          "Measure": {
+            "Expression": {
+              "SourceRef": {
+                "Entity": "Application Inventory Evidence"
+              }
+            },
+            "Property": "Applications"
+          }
+        },
+        "type": "Advanced"
+      }
+    ]
   }
 }

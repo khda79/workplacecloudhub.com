@@ -1,12 +1,12 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.13.0/schema.json",
   "name": "367556f9f37d14c180be",
   "position": {
-    "x": 1120,
-    "y": 112,
+    "x": 1480,
+    "y": 288,
     "z": 107,
-    "width": 768,
-    "height": 120,
+    "height": 232,
+    "width": 408,
     "tabOrder": 107
   },
   "visual": {
@@ -20,20 +20,6 @@
                 "Measure": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Device Inventory Evidence"
-                    }
-                  },
-                  "Property": "Noncompliant Devices"
-                }
-              },
-              "queryRef": "Device Inventory Evidence.Noncompliant Devices",
-              "nativeQueryRef": "Noncompliant Devices"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
                       "Entity": "License Evidence"
                     }
                   },
@@ -41,21 +27,57 @@
                 }
               },
               "queryRef": "License Evidence.Observed Potentially Reclaimable Assignments",
-              "nativeQueryRef": "Potentially Reclaimable Assignments"
+              "nativeQueryRef": "Potentially Reclaimable Assignments",
+              "displayName": "Potentially reclaimable assignments"
             },
             {
               "field": {
                 "Measure": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Mailbox Evidence"
+                      "Entity": "Device System Evidence"
                     }
                   },
-                  "Property": "Large Mailboxes Without Archive"
+                  "Property": "Device System Reported Reboot Required"
                 }
               },
-              "queryRef": "Mailbox Evidence.Large Mailboxes Without Archive",
-              "nativeQueryRef": "Large Mailboxes Without Archive"
+              "queryRef": "Device System Evidence.Device System Reported Reboot Required",
+              "nativeQueryRef": "Reported reboot required",
+              "displayName": "Reported reboot required"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Device System Evidence"
+                    }
+                  },
+                  "Property": "Device System Reported Secure Boot Disabled"
+                }
+              },
+              "queryRef": "Device System Evidence.Device System Reported Secure Boot Disabled",
+              "nativeQueryRef": "Reported Secure Boot disabled",
+              "displayName": "Reported Secure Boot disabled"
+            }
+          ]
+        },
+        "Tooltips": {
+          "projections": [
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Device System Evidence"
+                    }
+                  },
+                  "Property": "Device System Evidence Scope"
+                }
+              },
+              "queryRef": "Device System Evidence.Device System Evidence Scope",
+              "nativeQueryRef": "Observation scope",
+              "displayName": "Observation scope"
             }
           ]
         }
@@ -75,7 +97,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "20D"
+                  "Value": "22D"
                 }
               }
             },
@@ -110,6 +132,13 @@
                   "Value": "true"
                 }
               }
+            },
+            "showBlankAs": {
+              "expr": {
+                "Literal": {
+                  "Value": "'—'"
+                }
+              }
             }
           },
           "selector": {
@@ -130,7 +159,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "10D"
+                  "Value": "12D"
                 }
               }
             },
@@ -149,6 +178,13 @@
               "expr": {
                 "Literal": {
                   "Value": "true"
+                }
+              }
+            },
+            "position": {
+              "expr": {
+                "Literal": {
+                  "Value": "'aboveValue'"
                 }
               }
             }
@@ -203,7 +239,7 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#7A9CB8'"
+                      "Value": "'#2F6B9A'"
                     }
                   }
                 }
@@ -303,6 +339,27 @@
                   "Value": "0L"
                 }
               }
+            },
+            "rowCount": {
+              "expr": {
+                "Literal": {
+                  "Value": "3L"
+                }
+              }
+            },
+            "columnCount": {
+              "expr": {
+                "Literal": {
+                  "Value": "1L"
+                }
+              }
+            },
+            "autoGrid": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
             }
           },
           "selector": {
@@ -379,7 +436,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Supporting KPIs for Risk & Incident Signals.'"
+                  "Value": "'Supporting indicators. Values from existing source-backed measures.'"
                 }
               }
             }
@@ -399,14 +456,14 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Supporting KPIs'"
+                  "Value": "'Supporting / reported review'"
                 }
               }
             },
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "13D"
+                  "Value": "14D"
                 }
               }
             },
@@ -548,5 +605,37 @@
         }
       ]
     }
+  },
+  "filterConfig": {
+    "filters": [
+      {
+        "name": "3e992491702ce60b55b0",
+        "field": {
+          "Measure": {
+            "Expression": {
+              "SourceRef": {
+                "Entity": "License Evidence"
+              }
+            },
+            "Property": "Observed Potentially Reclaimable Assignments"
+          }
+        },
+        "type": "Advanced"
+      },
+      {
+        "name": "485257018c7414162e05",
+        "field": {
+          "Measure": {
+            "Expression": {
+              "SourceRef": {
+                "Entity": "Mailbox Evidence"
+              }
+            },
+            "Property": "Large Mailboxes Without Archive"
+          }
+        },
+        "type": "Advanced"
+      }
+    ]
   }
 }

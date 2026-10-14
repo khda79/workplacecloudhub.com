@@ -1,0 +1,76 @@
+/// Native source facet migrated from DimIntuneManagedDevice; exact source grain, unresolved links and qualification retained. Uses the unified pinned batch, not a separate CMDB reader.
+table 'Native Managed Device Evidence'
+	lineageTag: 979720b5-d70f-431f-871a-9cb82bedb908
+
+	/// Exact native-key entity context or existing inventory context. No name matching or inferred transitive membership. Unrelated entity selections return blank.
+	measure 'Native Context Rows · Native Managed Device Evidence' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimDevice"))
+			VAR NativeKeys1 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimIntuneManagedDevice"))
+			VAR InventoryDevices = CALCULATETABLE(VALUES('Native Managed Device Evidence'[TenantDeviceKey]), REMOVEFILTERS('Native Managed Device Evidence'), TREATAS(VALUES('Device Inventory Evidence'[Device Source ID]), 'Native Managed Device Evidence'[ManagedDeviceId]))
+			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((COUNTROWS('Native Managed Device Evidence')), KEEPFILTERS(TREATAS(NativeKeys0, 'Native Managed Device Evidence'[TenantDeviceKey]))),
+			COUNTROWS(NativeKeys1) > 0, CALCULATE((COUNTROWS('Native Managed Device Evidence')), KEEPFILTERS(TREATAS(NativeKeys1, 'Native Managed Device Evidence'[TenantIntuneDeviceKey]))), BLANK()), BLANK()), SWITCH(TRUE(), ISCROSSFILTERED('Device Inventory Evidence'), CALCULATE((COUNTROWS('Native Managed Device Evidence')), KEEPFILTERS(TREATAS(InventoryDevices, 'Native Managed Device Evidence'[TenantDeviceKey]))), (COUNTROWS('Native Managed Device Evidence'))))
+		formatString: #,0
+		isHidden
+		lineageTag: 94215afb-0c77-4301-a555-d5c478739ea3
+
+	/// Native DimIntuneManagedDevice attribute; source qualification is retained.
+	column TenantKey
+		dataType: string
+		isHidden
+		lineageTag: ded005bf-b98d-44f7-9024-b0374375b079
+		summarizeBy: none
+		sourceColumn: TenantKey
+
+	/// Native DimIntuneManagedDevice attribute; source qualification is retained.
+	column OrganizationKey
+		dataType: string
+		isHidden
+		lineageTag: 95c5d244-2e88-4fb7-a09f-b49e41a4a7db
+		summarizeBy: none
+		sourceColumn: OrganizationKey
+
+	/// Native DimIntuneManagedDevice attribute; source qualification is retained.
+	column EnvironmentKey
+		dataType: string
+		isHidden
+		lineageTag: e4ed2ffb-e23f-4ae9-b539-3ff60257d5f4
+		summarizeBy: none
+		sourceColumn: EnvironmentKey
+
+	/// Native DimIntuneManagedDevice attribute; source qualification is retained.
+	column TenantId
+		dataType: string
+		isHidden
+		lineageTag: b8eac938-1525-475e-9575-6efa8baa5a1a
+		summarizeBy: none
+		sourceColumn: TenantId
+
+	/// Native DimIntuneManagedDevice attribute; source qualification is retained.
+	column TenantIntuneDeviceKey
+		dataType: string
+		isHidden
+		lineageTag: 2275d131-37a6-46ee-84c5-f01f4adfb4dc
+		summarizeBy: none
+		sourceColumn: TenantIntuneDeviceKey
+
+	/// Native DimIntuneManagedDevice attribute; source qualification is retained.
+	column TenantDeviceKey
+		dataType: string
+		isHidden
+		lineageTag: 079b9cfc-0eeb-4546-85cb-68d5c1efb22d
+		summarizeBy: none
+		sourceColumn: TenantDeviceKey
+
+	/// Native DimIntuneManagedDevice attribute; source qualification is retained.
+	column ManagedDeviceId
+		dataType: string
+		lineageTag: 3a78b188-3318-41a6-8c3b-6c9c1df3887c
+		summarizeBy: none
+		sourceColumn: ManagedDeviceId
+
+	partition 'Native Managed Device Evidence' = m
+		mode: import
+		source = NativeEvidenceTypes(Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("DimIntuneManagedDevice.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]), {[name="TenantKey", dataType="String"], [name="OrganizationKey", dataType="String"], [name="EnvironmentKey", dataType="String"], [name="TenantId", dataType="String"], [name="TenantIntuneDeviceKey", dataType="String"], [name="TenantDeviceKey", dataType="String"], [name="ManagedDeviceId", dataType="String"]})
+

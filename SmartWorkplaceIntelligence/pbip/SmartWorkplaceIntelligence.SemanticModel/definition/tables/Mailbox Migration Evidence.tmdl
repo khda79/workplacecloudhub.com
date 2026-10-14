@@ -1,0 +1,183 @@
+/// Retained initial authoring staging table, unused. Current validated evidence: Mailbox Migration Inventory
+table 'Mailbox Migration Evidence'
+	isHidden
+	excludeFromModelRefresh
+	lineageTag: dd2931ac-dd4b-444d-bd06-391e351d32d0
+
+	/// Mailbox GUID from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
+	column 'Mailbox GUID'
+		dataType: string
+		lineageTag: 1cc3fc09-45d0-42de-b14b-6d3d8517b6ac
+		sourceColumn: Mailbox GUID
+
+	/// Object GUID from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
+	column 'Object GUID'
+		dataType: string
+		lineageTag: 4f3214bb-1e11-4039-8c61-af533167fcf5
+		sourceColumn: Object GUID
+
+	/// Primary SMTP Address from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
+	column 'Primary SMTP Address'
+		dataType: string
+		lineageTag: dd8257a4-d337-470c-9d8c-b36e5a624f79
+		sourceColumn: Primary SMTP Address
+
+	/// Display Name from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
+	column 'Display Name'
+		dataType: string
+		lineageTag: 85001dc5-711c-4cbc-8df8-aafefc72cd29
+		sourceColumn: Display Name
+
+	/// Country from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
+	column Country
+		dataType: string
+		lineageTag: b69ab974-70d9-45b8-a579-8dbd86793425
+		sourceColumn: Country
+
+	/// Country Basis from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
+	column 'Country Basis'
+		dataType: string
+		lineageTag: d57bf79c-fdcc-4eef-8637-6b371e29d854
+		sourceColumn: Country Basis
+
+	/// Exchange Version from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
+	column 'Exchange Version'
+		dataType: string
+		lineageTag: dddd2366-b450-4851-8a49-c32d8a1f1d28
+		sourceColumn: Exchange Version
+
+	/// Mailbox Type from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
+	column 'Mailbox Type'
+		dataType: string
+		lineageTag: 71bdcb1c-77a9-4daf-8e5c-31997704aaed
+		sourceColumn: Mailbox Type
+
+	/// Mailbox Size GB from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
+	column 'Mailbox Size GB'
+		dataType: double
+		formatString: #,0.00
+		lineageTag: 72307484-d9bc-470d-b258-df5fc754e68b
+		summarizeBy: none
+		sourceColumn: Mailbox Size GB
+
+	/// Archive Size GB from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
+	column 'Archive Size GB'
+		dataType: double
+		formatString: #,0.00
+		lineageTag: 0970003c-758b-4e7b-9677-a8b2b224033b
+		summarizeBy: none
+		sourceColumn: Archive Size GB
+
+	/// Archive State from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
+	column 'Archive State'
+		dataType: string
+		lineageTag: 7826ee7b-f210-4b90-a4d4-3d95abd6753d
+		sourceColumn: Archive State
+
+	/// Full Access Count from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
+	column 'Full Access Count'
+		dataType: double
+		formatString: #,0
+		lineageTag: 3221192a-c6cb-4a72-8663-ab0dbf001df2
+		summarizeBy: none
+		sourceColumn: Full Access Count
+
+	/// Send As Count from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
+	column 'Send As Count'
+		dataType: double
+		formatString: #,0
+		lineageTag: 62aaf53f-5eb4-4740-9348-44a71ddaf563
+		summarizeBy: none
+		sourceColumn: Send As Count
+
+	/// Send On Behalf from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
+	column 'Send On Behalf'
+		dataType: string
+		lineageTag: ed30d6c2-96bc-412b-a639-b179e547c215
+		sourceColumn: Send On Behalf
+
+	/// Cross-premises Permissions from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
+	column 'Cross-premises Permissions'
+		dataType: string
+		lineageTag: 34336268-6b67-415b-8b49-7b53f8359d82
+		sourceColumn: Cross-premises Permissions
+
+	/// Hold and Retention from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
+	column 'Hold and Retention'
+		dataType: string
+		lineageTag: 07e6d13b-b656-48e7-86ba-4cdac9157e59
+		sourceColumn: Hold and Retention
+
+	/// Large Item Count from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
+	column 'Large Item Count'
+		dataType: string
+		lineageTag: 18695dce-bfac-4607-9bef-7fbd2905eb7e
+		sourceColumn: Large Item Count
+
+	/// Large Item Evidence from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
+	column 'Large Item Evidence'
+		dataType: string
+		lineageTag: 0ba547aa-5e75-4439-94ef-1933f0bbaa66
+		sourceColumn: Large Item Evidence
+
+	/// Identity Issues from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
+	column 'Identity Issues'
+		dataType: string
+		lineageTag: 362ee9d1-06b9-46fa-b214-162fac7e8e02
+		sourceColumn: Identity Issues
+
+	/// Batch Name from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
+	column 'Batch Name'
+		dataType: string
+		lineageTag: 2030a486-b1ba-4167-a260-ababed2803e9
+		sourceColumn: Batch Name
+
+	/// Migration User Status from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
+	column 'Migration User Status'
+		dataType: string
+		lineageTag: e3477120-40aa-4a16-9985-7404eb605fa3
+		sourceColumn: Migration User Status
+
+	/// Risk Reasons from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
+	column 'Risk Reasons'
+		dataType: string
+		lineageTag: fcffaf9c-60f5-4e8a-baeb-da3207a36572
+		sourceColumn: Risk Reasons
+
+	/// Migration Status from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
+	column 'Migration Status'
+		dataType: string
+		lineageTag: dbd9a4fe-684b-4da4-a419-73e95ce38906
+		sourceColumn: Migration Status
+
+	/// Next Action from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
+	column 'Next Action'
+		dataType: string
+		lineageTag: 4e9e8dac-19ab-49af-bcd7-464f8cdf08da
+		sourceColumn: Next Action
+
+	/// Evidence Date from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
+	column 'Evidence Date'
+		dataType: string
+		lineageTag: 4b532b80-fc58-4dd9-9812-07d3fd70265c
+		sourceColumn: Evidence Date
+
+	/// Source Domain from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
+	column 'Source Domain'
+		dataType: string
+		lineageTag: e3097279-635f-44c0-a6f2-f5f381b1b76f
+		sourceColumn: Source Domain
+
+	/// Normal SmartM365 local inputs through DataRoot / PreparedEvidenceRoot. No dependency on frozen report-validation JSON. Source qualification is retained; no collection is triggered.
+	partition 'Mailbox Migration Evidence' = m
+		mode: import
+		source = ```
+				let
+				    Source = #"Mailbox Migration Inventory",
+				    Selected = Table.SelectColumns(Source, {"Mailbox GUID","Object GUID","Primary SMTP Address","Display Name","Country","Country Basis","Exchange Version","Mailbox Type","Mailbox Size GB","Archive Size GB","Archive State","Full Access Count","Send As Count","Send On Behalf","Cross-premises Permissions","Hold and Retention","Large Item Count","Large Item Evidence","Identity Issues","Batch Name","Migration User Status","Risk Reasons","Migration Status","Next Action","Evidence Date","Source Domain"}),
+				    Typed = Table.TransformColumnTypes(Selected, {{"Mailbox GUID", type text},{"Object GUID", type text},{"Primary SMTP Address", type text},{"Display Name", type text},{"Country", type text},{"Country Basis", type text},{"Exchange Version", type text},{"Mailbox Type", type text},{"Mailbox Size GB", type number},{"Archive Size GB", type number},{"Archive State", type text},{"Full Access Count", type number},{"Send As Count", type number},{"Send On Behalf", type text},{"Cross-premises Permissions", type text},{"Hold and Retention", type text},{"Large Item Count", type text},{"Large Item Evidence", type text},{"Identity Issues", type text},{"Batch Name", type text},{"Migration User Status", type text},{"Risk Reasons", type text},{"Migration Status", type text},{"Next Action", type text},{"Evidence Date", type text},{"Source Domain", type text}}, "en-US")
+				in
+				    Typed
+				
+				```
+

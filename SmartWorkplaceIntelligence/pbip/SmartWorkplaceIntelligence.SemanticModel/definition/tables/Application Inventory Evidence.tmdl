@@ -80,6 +80,11 @@ table 'Application Inventory Evidence'
 		displayFolder: Applications | Evidence
 		lineageTag: 517e8156-3947-4667-b1f9-0bc05b4afc32
 
+	/// Preserves the original dynamic evidence status together with the footer scope after removal of the duplicate ribbon.
+	measure 'Combined Application Evidence Ribbon Text' = [Application Evidence Ribbon Text] & UNICHAR(10) & "Evidence scope: prepared private snapshot · missing evidence is not zero · filters stay active across views · full detail available in task views."
+		displayFolder: Report footer
+		lineageTag: f4cc9bf2-7aab-43fb-a986-ef2cd3c858d0
+
 	column 'Application Source ID'
 		dataType: string
 		isHidden
@@ -200,8 +205,6 @@ table 'Application Inventory Evidence'
 			isDefault
 			relationship: fb74ea06-15bb-4aff-9b4e-c1419788d31c
 			defaultHierarchy: LocalDateTable_907dcf50-c645-4908-abf0-a270c18cfb44.'Date Hierarchy'
-
-		annotation UnderlyingDateTimeDataType = Date
 
 	column 'Snapshot Week'
 		dataType: string

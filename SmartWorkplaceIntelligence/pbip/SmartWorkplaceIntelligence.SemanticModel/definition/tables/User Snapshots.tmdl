@@ -1,5 +1,6 @@
-/// One synthetic user per reporting snapshot.
+/// Legacy synthetic fixture: not used by production report visuals or consolidated evidence. Removal is pending a separately cleared dependency-safe retirement; no real data.
 table 'User Snapshots'
+	isHidden
 	lineageTag: a0c0daf2-1d04-4be9-8411-0482f1a9a844
 
 	/// Distinct qualified synthetic users in scope.

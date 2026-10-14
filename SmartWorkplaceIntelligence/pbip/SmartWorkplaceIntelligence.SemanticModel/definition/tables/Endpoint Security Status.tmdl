@@ -1,5 +1,6 @@
-/// One synthetic eligible-endpoint security health observation per device and reporting date.
+/// Legacy synthetic fixture: not used by production report visuals or consolidated evidence. Removal is pending a separately cleared dependency-safe retirement; no real data.
 table 'Endpoint Security Status'
+	isHidden
 	lineageTag: cc9d8297-9e58-4144-9ab5-b0f1f41fbe01
 
 	/// Eligible endpoints with observed healthy Defender status divided by eligible endpoints with qualified evidence.

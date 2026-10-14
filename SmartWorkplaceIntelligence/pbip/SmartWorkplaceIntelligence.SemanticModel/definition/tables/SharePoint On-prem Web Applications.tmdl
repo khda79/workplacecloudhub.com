@@ -1,0 +1,74 @@
+/// Current SharePoint Server inventory; one row per web application. Tenant and farm identity are retained in hidden relationship keys.
+table 'SharePoint On-prem Web Applications'
+	lineageTag: cf38f514-27dd-4045-814d-f3928f7de760
+
+	/// Observed content web applications, excluding Central Administration.
+	measure 'On-prem Web Applications' = COUNTROWS('SharePoint On-prem Web Applications')
+		formatString: #,##0
+		lineageTag: 5cabd2bf-8379-4793-a468-51bf96542d16
+
+	column 'Tenant Key'
+		dataType: string
+		isHidden
+		lineageTag: 3cf3aa78-c0b2-424b-a25b-9f1fba8793e5
+		sourceColumn: Tenant Key
+
+	column 'Farm ID'
+		dataType: string
+		isHidden
+		lineageTag: 45dd04ab-5867-4676-987d-47523415c75d
+		sourceColumn: Farm ID
+
+	column 'Run ID'
+		dataType: string
+		isHidden
+		lineageTag: ab5c33cd-2fad-4086-8e70-2eeb67bb54b8
+		sourceColumn: Run ID
+
+	column 'Web Application ID'
+		dataType: string
+		isHidden
+		lineageTag: 0acccca5-0204-4c32-b32c-94e9120dac38
+		sourceColumn: Web Application ID
+
+	column 'Web Application'
+		dataType: string
+		lineageTag: ad8d4acd-c568-48f9-b01a-a972c27afaf7
+		sourceColumn: Web Application
+
+	column 'Reported Database Count'
+		dataType: int64
+		isHidden
+		lineageTag: 23bc736c-ace4-4321-9b43-bcfd53b8404d
+		sourceColumn: Reported Database Count
+
+	column 'Collection Status'
+		dataType: string
+		lineageTag: 0849e658-0981-424e-a972-0f0b7869c38e
+		sourceColumn: Collection Status
+
+	column 'Farm Key'
+		dataType: string
+		isHidden
+		lineageTag: 7a2e3898-ba78-41e2-99e1-3718ec70d8ed
+		sourceColumn: Farm Key
+
+	column 'Web Application Key'
+		dataType: string
+		isHidden
+		lineageTag: da463cce-f594-4e1c-b5e0-767e3f666339
+		sourceColumn: Web Application Key
+
+	partition 'SharePoint On-prem Web Applications' = m
+		mode: import
+		source =
+				let
+				    Raw = GetSharePointOnPremCsv("SharePoint_OnPrem_WebApplications.csv", {"TenantKey", "FarmId", "RunId", "WebApplicationId", "Name", "ContentDatabaseCount", "CollectionStatus"}, {}),
+				    Nulls = Table.ReplaceValue(Raw, "", null, Replacer.ReplaceValue, {"ContentDatabaseCount"}),
+				    Typed = Table.TransformColumnTypes(Nulls, {{"ContentDatabaseCount", Int64.Type}}, "en-US"),
+				    FarmKey = Table.AddColumn(Typed, "Farm Key", each [TenantKey] & "|" & [FarmId], type text),
+				    WebKey = Table.AddColumn(FarmKey, "Web Application Key", each [TenantKey] & "|" & [FarmId] & "|" & [WebApplicationId], type text),
+				    Renamed = Table.RenameColumns(WebKey, {{"TenantKey", "Tenant Key"}, {"FarmId", "Farm ID"}, {"RunId", "Run ID"}, {"WebApplicationId", "Web Application ID"}, {"Name", "Web Application"}, {"ContentDatabaseCount", "Reported Database Count"}, {"CollectionStatus", "Collection Status"}})
+				in
+				    Renamed
+

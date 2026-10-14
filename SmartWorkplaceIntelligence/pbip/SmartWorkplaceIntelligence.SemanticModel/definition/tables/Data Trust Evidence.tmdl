@@ -8,13 +8,13 @@ table 'Data Trust Evidence'
 		displayFolder: Data Trust | Current
 		lineageTag: 55aee4b8-6776-4add-b5d0-305ab7c97921
 
-	/// Sources with qualified schema and evidence no older than 30 days.
+	/// Prepared source files passing file, expected-schema and business-snapshot age checks. Does not qualify collector receipts, cross-source completeness or license analysis.
 	measure 'Decision Ready Sources' = CALCULATE([Evidence Sources], KEEPFILTERS('Data Trust Evidence'[Decision Readiness] = "Ready"))
 		formatString: #,0
 		displayFolder: Data Trust | Readiness
 		lineageTag: 99a41201-8ae7-4424-ba7e-0124fb16ccb2
 
-	/// Share of inventoried report sources ready for current decisions.
+	/// Share of inventoried files passing prepared-file/schema/freshness checks. Not an analytical readiness score; license source qualification is reported separately.
 	measure 'Decision Ready Sources (%)' = DIVIDE([Decision Ready Sources], [Evidence Sources])
 		formatString: 0.0%
 		displayFolder: Data Trust | Readiness
@@ -86,8 +86,8 @@ table 'Data Trust Evidence'
 		displayFolder: Data Trust | Current
 		lineageTag: b59a219e-1bc8-4aee-acbf-84ee769d48a9
 
-	/// Compact disclosure of source coverage, readiness, freshness, and blocking issues.
-	measure 'Data Trust Evidence Ribbon Text' = FORMAT([Evidence Sources], "0") & " sources · " & FORMAT([Decision Ready Sources (%)], "0%") & " ready · " & FORMAT([Stale Sources], "0") & " stale · " & FORMAT([Blocked Sources], "0") & " blocked"
+	/// Prepared file/schema/freshness status only. License analytical qualification is independent and can remain Provisional or Unknown.
+	measure 'Data Trust Evidence Ribbon Text' = FORMAT([Evidence Sources], "0") & " files · " & FORMAT([Decision Ready Sources (%)], "0%") & " file-ready · " & FORMAT([Stale Sources], "0") & " stale · " & FORMAT([Blocked Sources], "0") & " blocked"
 		formatString: @
 		displayFolder: Data Trust | Evidence
 		lineageTag: fd7b6004-aea4-4dbb-aa92-3321d80650ac
@@ -103,6 +103,11 @@ table 'Data Trust Evidence'
 		formatString: #,0
 		displayFolder: Data Trust | Entity Integrity
 		lineageTag: 961d18e6-00d9-4ac2-927e-51e79b58c975
+
+	/// Preserves the original dynamic evidence status together with the footer scope after removal of the duplicate ribbon.
+	measure 'Combined Data Trust Evidence Ribbon Text' = [Data Trust Evidence Ribbon Text] & UNICHAR(10) & "Evidence scope: prepared private snapshot · missing evidence is not zero · filters stay active across views · full detail available in task views."
+		displayFolder: Report footer
+		lineageTag: ffa2c505-e794-4ebd-b80c-cc6370c1587c
 
 	column 'Source Key'
 		dataType: string
@@ -198,8 +203,6 @@ table 'Data Trust Evidence'
 			isDefault
 			relationship: 2a9a07c1-3508-4ab9-a944-d1349047df9e
 			defaultHierarchy: LocalDateTable_ac1cb02b-4ba7-4e8e-9125-ce7bdaddab0e.'Date Hierarchy'
-
-		annotation UnderlyingDateTimeDataType = Date
 
 		annotation SummarizationSetBy = Automatic
 

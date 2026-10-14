@@ -3,11 +3,11 @@
   "name": "cc348089506642b0ce2f",
   "position": {
     "x": 32,
-    "y": 2296,
-    "width": 1856,
-    "height": 140,
-    "z": 130,
-    "tabOrder": 130
+    "y": 464,
+    "width": 916,
+    "height": 120,
+    "z": 46,
+    "tabOrder": 46
   },
   "visual": {
     "visualType": "tableEx",
@@ -72,8 +72,8 @@
                 }
               },
               "queryRef": "License Report Gaps.License Report Gap UserMailboxes EntraStateUnknown",
-              "nativeQueryRef": "Entra N/D",
-              "displayName": "Entra N/D"
+              "nativeQueryRef": "Entra Unknown",
+              "displayName": "Entra Unknown"
             },
             {
               "field": {
@@ -145,6 +145,13 @@
       "columnHeaders": [
         {
           "properties": {
+            "autoSizeColumnWidth": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
             "columnAdjustment": {
               "expr": {
                 "Literal": {
@@ -152,7 +159,14 @@
                 }
               }
             },
-            "autoSizeColumnWidth": {
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
+            },
+            "bold": {
               "expr": {
                 "Literal": {
                   "Value": "true"
@@ -182,23 +196,9 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#005A9E'"
+                      "Value": "'#215E9E'"
                     }
                   }
-                }
-              }
-            },
-            "bold": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "fontSize": {
-              "expr": {
-                "Literal": {
-                  "Value": "10D"
                 }
               }
             }
@@ -208,10 +208,39 @@
       "values": [
         {
           "properties": {
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
+            },
             "wordWrap": {
               "expr": {
                 "Literal": {
-                  "Value": "true"
+                  "Value": "false"
+                }
+              }
+            },
+            "fontColorPrimary": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#183153'"
+                    }
+                  }
+                }
+              }
+            },
+            "fontColorSecondary": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#183153'"
+                    }
+                  }
                 }
               }
             },
@@ -231,38 +260,9 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#F3F7FA'"
+                      "Value": "'#F0F5FA'"
                     }
                   }
-                }
-              }
-            },
-            "fontColorPrimary": {
-              "solid": {
-                "color": {
-                  "expr": {
-                    "Literal": {
-                      "Value": "'#1F2937'"
-                    }
-                  }
-                }
-              }
-            },
-            "fontColorSecondary": {
-              "solid": {
-                "color": {
-                  "expr": {
-                    "Literal": {
-                      "Value": "'#1F2937'"
-                    }
-                  }
-                }
-              }
-            },
-            "fontSize": {
-              "expr": {
-                "Literal": {
-                  "Value": "9D"
                 }
               }
             }
@@ -290,7 +290,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'User mailbox gap breakdown table.'"
+                  "Value": "'Tenant-wide UserMailbox gap breakdown'"
                 }
               }
             }
@@ -310,7 +310,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'User mailbox gap breakdown'"
+                  "Value": "'Tenant-wide UserMailbox gap breakdown'"
                 }
               }
             },
@@ -473,5 +473,6 @@
       ]
     },
     "drillFilterOtherVisuals": true
-  }
+  },
+  "parentGroupName": "ec3aac9702b5e1a75aa3"
 }

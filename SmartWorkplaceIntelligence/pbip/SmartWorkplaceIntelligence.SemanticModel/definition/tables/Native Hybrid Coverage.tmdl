@@ -1,0 +1,155 @@
+/// Native source facet migrated from FactHybridIdentityCoverage; exact source grain, unresolved links and qualification retained. Uses the unified pinned batch, not a separate CMDB reader.
+table 'Native Hybrid Coverage'
+	lineageTag: 56bc0149-17e1-445d-9b21-3586706fc5eb
+
+	/// Matched on-premises/cloud identities for the selected entity type using the collector's declared match method. Migrated without changing the source calculation.
+	measure 'Native Hybrid identities matched' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (COALESCE(SUM('Native Hybrid Coverage'[MatchedCount]),0)))
+		formatString: #,0
+		displayFolder: Native evidence
+		lineageTag: 5e2e08f0-97f4-4768-b5c9-a0435eab918a
+
+	/// Matched identities divided by on-premises identities for the selected entity type. User and device populations must be reviewed separately. Migrated without changing the source calculation.
+	measure 'Native Hybrid identity match rate' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (DIVIDE(SUM('Native Hybrid Coverage'[MatchedCount]),SUM('Native Hybrid Coverage'[OnPremisesCount]))))
+		formatString: 0.0%
+		displayFolder: Native evidence
+		lineageTag: 0aa24615-71a1-4ca3-a7c8-d1285127b611
+
+	/// Exact native-key entity context or existing inventory context. No name matching or inferred transitive membership. Unrelated entity selections return blank.
+	measure 'Native Context Rows · Native Hybrid Coverage' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (COUNTROWS('Native Hybrid Coverage')))
+		formatString: #,0
+		isHidden
+		lineageTag: 093f93b9-3ed2-4276-9901-329763c2f4ae
+
+	/// Native FactHybridIdentityCoverage attribute; source qualification is retained.
+	column TenantKey
+		dataType: string
+		isHidden
+		lineageTag: f79989b9-8222-4baf-8c8d-98cf88810c5c
+		summarizeBy: none
+		sourceColumn: TenantKey
+
+	/// Native FactHybridIdentityCoverage attribute; source qualification is retained.
+	column OrganizationKey
+		dataType: string
+		isHidden
+		lineageTag: 899f1fc5-b094-4f66-9211-c50a9160f2dc
+		summarizeBy: none
+		sourceColumn: OrganizationKey
+
+	/// Native FactHybridIdentityCoverage attribute; source qualification is retained.
+	column EnvironmentKey
+		dataType: string
+		isHidden
+		lineageTag: 0a3442fa-7b97-47a4-9148-9a2cfa653751
+		summarizeBy: none
+		sourceColumn: EnvironmentKey
+
+	/// Native FactHybridIdentityCoverage attribute; source qualification is retained.
+	column TenantId
+		dataType: string
+		isHidden
+		lineageTag: bb9ceee5-0b41-460c-a909-8ecb2417c1d9
+		summarizeBy: none
+		sourceColumn: TenantId
+
+	/// Native FactHybridIdentityCoverage attribute; source qualification is retained.
+	column EntityType
+		dataType: string
+		lineageTag: aff43b17-339b-4ae0-aa33-6d75a35904f8
+		summarizeBy: none
+		sourceColumn: EntityType
+
+	/// Native FactHybridIdentityCoverage attribute; source qualification is retained.
+	column OnPremisesCount
+		dataType: int64
+		isHidden
+		formatString: #,0
+		lineageTag: 78a50c2c-75eb-47e1-b03d-4165967db187
+		summarizeBy: none
+		sourceColumn: OnPremisesCount
+
+	/// Native FactHybridIdentityCoverage attribute; source qualification is retained.
+	column CloudCount
+		dataType: int64
+		formatString: #,0
+		lineageTag: 442c8a1f-2ece-453f-8843-59b31fe9e4a5
+		summarizeBy: none
+		sourceColumn: CloudCount
+
+	/// Native FactHybridIdentityCoverage attribute; source qualification is retained.
+	column MatchedCount
+		dataType: int64
+		isHidden
+		formatString: #,0
+		lineageTag: cca57147-a2fe-4b79-a265-3c49b3664309
+		summarizeBy: none
+		sourceColumn: MatchedCount
+
+	/// Native FactHybridIdentityCoverage attribute; source qualification is retained.
+	column OnPremisesOnlyCount
+		dataType: int64
+		formatString: #,0
+		lineageTag: 08bc665b-fc58-4fff-b4b3-5a0b9eb4f212
+		summarizeBy: none
+		sourceColumn: OnPremisesOnlyCount
+
+	/// Native FactHybridIdentityCoverage attribute; source qualification is retained.
+	column CloudOnlyCount
+		dataType: int64
+		formatString: #,0
+		lineageTag: 991f0dff-fe84-4d35-b8b8-360d33c88255
+		summarizeBy: none
+		sourceColumn: CloudOnlyCount
+
+	/// Native FactHybridIdentityCoverage attribute; source qualification is retained.
+	column DuplicateOnPremisesKeyCount
+		dataType: int64
+		formatString: #,0
+		lineageTag: 11bbd0c1-785e-4f3d-ac38-ef1bee498e39
+		summarizeBy: none
+		sourceColumn: DuplicateOnPremisesKeyCount
+
+	/// Native FactHybridIdentityCoverage attribute; source qualification is retained.
+	column DuplicateCloudKeyCount
+		dataType: int64
+		formatString: #,0
+		lineageTag: 02c3980f-f624-4d29-940d-904d19bd1b58
+		summarizeBy: none
+		sourceColumn: DuplicateCloudKeyCount
+
+	/// Native FactHybridIdentityCoverage attribute; source qualification is retained.
+	column MatchRatio
+		dataType: double
+		formatString: 0.0
+		lineageTag: 8a42fdb2-79b0-43a3-8905-f078c36d041f
+		summarizeBy: none
+		sourceColumn: MatchRatio
+
+	/// Native FactHybridIdentityCoverage attribute; source qualification is retained.
+	column MatchMethod
+		dataType: string
+		lineageTag: 7c09e3ce-cbc9-4055-b65f-c448a9377571
+		summarizeBy: none
+		sourceColumn: MatchMethod
+
+	/// Native FactHybridIdentityCoverage attribute; source qualification is retained.
+	column SourceCollectedDateTime
+		dataType: dateTime
+		formatString: yyyy-MM-dd HH:mm:ss
+		lineageTag: b1efe9f7-edd5-4d22-9f44-a7933b6efccc
+		summarizeBy: none
+		sourceColumn: SourceCollectedDateTime
+
+	partition 'Native Hybrid Coverage' = m
+		mode: import
+		source = NativeEvidenceTypes(Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("FactHybridIdentityCoverage.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]), {[name="TenantKey", dataType="String"], [name="OrganizationKey", dataType="String"], [name="EnvironmentKey", dataType="String"], [name="TenantId", dataType="String"], [name="EntityType", dataType="String"], [name="OnPremisesCount", dataType="Int64"], [name="CloudCount", dataType="Int64"], [name="MatchedCount", dataType="Int64"], [name="OnPremisesOnlyCount", dataType="Int64"], [name="CloudOnlyCount", dataType="Int64"], [name="DuplicateOnPremisesKeyCount", dataType="Int64"], [name="DuplicateCloudKeyCount", dataType="Int64"], [name="MatchRatio", dataType="Double"], [name="MatchMethod", dataType="String"], [name="SourceCollectedDateTime", dataType="DateTime"]})
+

@@ -2,12 +2,12 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json",
   "name": "928e023a66d403298322",
   "position": {
-    "x": 1480,
-    "y": 256,
+    "x": 976,
+    "y": 512,
+    "width": 912,
+    "height": 480,
     "z": 108,
-    "height": 136,
-    "width": 408,
-    "tabOrder": 108
+    "tabOrder": 1340
   },
   "visual": {
     "visualType": "pivotTable",
@@ -218,7 +218,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'User Explorer diagnostic context. Summary grouped for the current filter context.'"
+                  "Value": "'User Explorer diagnostic context'"
                 }
               }
             }
@@ -245,7 +245,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "13D"
+                  "Value": "12D"
                 }
               }
             },
@@ -254,16 +254,9 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#1F2937'"
+                      "Value": "'#183153'"
                     }
                   }
-                }
-              }
-            },
-            "bold": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
                 }
               }
             }
@@ -316,9 +309,16 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#CBD8E5'"
+                      "Value": "'#CCDCEC'"
                     }
                   }
+                }
+              }
+            },
+            "radius": {
+              "expr": {
+                "Literal": {
+                  "Value": "8D"
                 }
               }
             },
@@ -326,13 +326,6 @@
               "expr": {
                 "Literal": {
                   "Value": "1D"
-                }
-              }
-            },
-            "radius": {
-              "expr": {
-                "Literal": {
-                  "Value": "12D"
                 }
               }
             }
@@ -372,14 +365,14 @@
             "left": {
               "expr": {
                 "Literal": {
-                  "Value": "10D"
+                  "Value": "8D"
                 }
               }
             },
             "right": {
               "expr": {
                 "Literal": {
-                  "Value": "10D"
+                  "Value": "8D"
                 }
               }
             }
@@ -401,5 +394,6 @@
       ]
     },
     "drillFilterOtherVisuals": true
-  }
+  },
+  "parentGroupName": "42884626b16cfe1a0a99"
 }

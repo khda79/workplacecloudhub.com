@@ -1,5 +1,6 @@
-/// Accepted user-team membership relationships.
+/// Legacy synthetic fixture: not used by production report visuals or consolidated evidence. Removal is pending a separately cleared dependency-safe retirement; no real data.
 table 'Team Memberships'
+	isHidden
 	lineageTag: 09b2b436-6080-439e-8284-305a17169fad
 
 	/// Business attribute Tenant Key.

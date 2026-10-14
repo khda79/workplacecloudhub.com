@@ -1,5 +1,6 @@
-/// Enabled and consumed synthetic license capacity by product.
+/// Legacy synthetic fixture: not used by production report visuals or consolidated evidence. Removal is pending a separately cleared dependency-safe retirement; no real data.
 table 'License Capacity'
+	isHidden
 	lineageTag: 26ccbe75-8c5d-4fef-851f-b0ce4b8e65cb
 
 	/// Enabled synthetic license units.

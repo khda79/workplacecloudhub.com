@@ -2,18 +2,18 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json",
   "name": "f5253e62e0f2366eeeac",
   "position": {
-    "x": 32,
-    "y": 2021,
-    "width": 1856,
-    "height": 260,
-    "z": 126,
-    "tabOrder": 126
+    "x": 972,
+    "y": 328,
+    "width": 916,
+    "height": 664,
+    "z": 53,
+    "tabOrder": 53
   },
   "visual": {
-    "visualType": "tableEx",
+    "visualType": "pivotTable",
     "query": {
       "queryState": {
-        "Values": {
+        "Rows": {
           "projections": [
             {
               "field": {
@@ -28,6 +28,7 @@
               },
               "queryRef": "License Report Gaps.Section",
               "nativeQueryRef": "Section",
+              "active": true,
               "displayName": "Section"
             },
             {
@@ -43,35 +44,40 @@
               },
               "queryRef": "License Report Gaps.Metric",
               "nativeQueryRef": "Indicator",
+              "active": true,
               "displayName": "Indicator"
-            },
+            }
+          ]
+        },
+        "Values": {
+          "projections": [
             {
               "field": {
-                "Column": {
+                "Measure": {
                   "Expression": {
                     "SourceRef": {
                       "Entity": "License Report Gaps"
                     }
                   },
-                  "Property": "Value"
+                  "Property": "License Report Gap Value Label"
                 }
               },
-              "queryRef": "License Report Gaps.Value",
+              "queryRef": "License Report Gaps.License Report Gap Value Label",
               "nativeQueryRef": "Value",
               "displayName": "Value"
             },
             {
               "field": {
-                "Column": {
+                "Measure": {
                   "Expression": {
                     "SourceRef": {
                       "Entity": "License Report Gaps"
                     }
                   },
-                  "Property": "Evidence Status"
+                  "Property": "License Report Gap Evidence Label"
                 }
               },
-              "queryRef": "License Report Gaps.Evidence Status",
+              "queryRef": "License Report Gaps.License Report Gap Evidence Label",
               "nativeQueryRef": "Evidence",
               "displayName": "Evidence"
             }
@@ -85,10 +91,10 @@
               "Column": {
                 "Expression": {
                   "SourceRef": {
-                    "Entity": "License Report Summary"
+                    "Entity": "License Report Gaps"
                   }
                 },
-                "Property": "Product"
+                "Property": "Section"
               }
             },
             "direction": "Ascending"
@@ -96,6 +102,52 @@
         ]
       }
     },
+    "expansionStates": [
+      {
+        "roles": [
+          "Rows"
+        ],
+        "levels": [
+          {
+            "queryRefs": [
+              "License Report Gaps.Section"
+            ],
+            "identityKeys": [
+              {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "License Report Gaps"
+                    }
+                  },
+                  "Property": "Section"
+                }
+              }
+            ],
+            "isPinned": true
+          },
+          {
+            "queryRefs": [
+              "License Report Gaps.Metric"
+            ],
+            "identityKeys": [
+              {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "License Report Gaps"
+                    }
+                  },
+                  "Property": "Metric"
+                }
+              }
+            ],
+            "isPinned": true
+          }
+        ],
+        "root": {}
+      }
+    ],
     "objects": {
       "columnHeaders": [
         {
@@ -153,7 +205,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "10D"
+                  "Value": "11D"
                 }
               }
             }
@@ -217,20 +269,158 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "9D"
+                  "Value": "11D"
+                }
+              }
+            },
+            "bandedRowHeaders": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
                 }
               }
             }
           }
         }
       ],
-      "total": [
+      "rowHeaders": [
         {
           "properties": {
-            "totals": {
+            "stepped": {
               "expr": {
                 "Literal": {
                   "Value": "false"
+                }
+              }
+            },
+            "autoExpand": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "repeatRowHeaders": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "showExpandCollapseButtons": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
+            },
+            "wordWrap": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "unfrozen": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "subTotals": [
+        {
+          "properties": {
+            "rowSubtotals": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            },
+            "columnSubtotals": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            },
+            "perRowLevel": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            },
+            "perColumnLevel": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "id": "Row"
+          },
+          "properties": {
+            "rowSubtotals": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            },
+            "perRowLevel": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "id": "Column"
+          },
+          "properties": {
+            "columnSubtotals": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            },
+            "perColumnLevel": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "general": [
+        {
+          "properties": {
+            "layout": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Tabular'"
                 }
               }
             }
@@ -245,7 +435,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Evidence gaps by section table.'"
+                  "Value": "'Tenant-wide evidence gaps · Unknown means unqualified'"
                 }
               }
             }
@@ -265,7 +455,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Evidence gaps by section'"
+                  "Value": "'Tenant-wide evidence gaps · Unknown means unqualified'"
                 }
               }
             },
@@ -428,5 +618,6 @@
       ]
     },
     "drillFilterOtherVisuals": true
-  }
+  },
+  "parentGroupName": "91ab1ca1101fcb82eb6f"
 }

@@ -1,0 +1,108 @@
+/// Current SharePoint Server inventory; one row per farm. Tenant and farm identity are retained in hidden relationship keys.
+table 'SharePoint On-prem Farms'
+	lineageTag: a7e3c016-35a3-4141-886f-1bb2e30a339e
+
+	/// Number of observed SharePoint Server farms in the current Infrastructure CSV.
+	measure 'On-prem Farms' = COUNTROWS('SharePoint On-prem Farms')
+		formatString: #,##0
+		lineageTag: 7ec47e42-8683-416f-87d0-b87c0a9f9970
+
+	/// Row-level status and CSV run alignment across the six Infrastructure datasets. Receipt hashes and farm validation remain separate.
+	measure 'Infrastructure Collection Health' = VAR _farmRows = COUNTROWS('SharePoint On-prem Farms') VAR _run = SELECTEDVALUE('SharePoint On-prem Farms'[Run ID]) VAR _mixedRuns = ISBLANK(_run) || SELECTEDVALUE('SharePoint On-prem Servers'[Run ID]) <> _run || SELECTEDVALUE('SharePoint On-prem Service Applications'[Run ID]) <> _run || SELECTEDVALUE('SharePoint On-prem Web Applications'[Run ID]) <> _run || SELECTEDVALUE('SharePoint On-prem Web Zones'[Run ID]) <> _run || SELECTEDVALUE('SharePoint On-prem Content Databases'[Run ID]) <> _run VAR _badFarms = CALCULATE(COUNTROWS('SharePoint On-prem Farms'), KEEPFILTERS('SharePoint On-prem Farms'[Collection Status] <> "Collected")) VAR _badServers = CALCULATE(COUNTROWS('SharePoint On-prem Servers'), KEEPFILTERS('SharePoint On-prem Servers'[Collection Status] <> "Collected")) VAR _badApps = CALCULATE(COUNTROWS('SharePoint On-prem Web Applications'), KEEPFILTERS('SharePoint On-prem Web Applications'[Collection Status] <> "Collected")) VAR _badDbs = CALCULATE(COUNTROWS('SharePoint On-prem Content Databases'), KEEPFILTERS('SharePoint On-prem Content Databases'[Collection Status] <> "Collected")) VAR _badServices = CALCULATE(COUNTROWS('SharePoint On-prem Service Applications'), KEEPFILTERS('SharePoint On-prem Service Applications'[Collection Status] <> "Collected")) VAR _badZones = CALCULATE(COUNTROWS('SharePoint On-prem Web Zones'), KEEPFILTERS('SharePoint On-prem Web Zones'[Collection Status] <> "Collected")) RETURN SWITCH(TRUE(), _farmRows = 0, "Unavailable", _mixedRuns, "Run mismatch", _badFarms + _badServers + _badApps + _badDbs + _badServices + _badZones > 0, "Review needed", "Collected")
+		formatString: @
+		lineageTag: 3d637ac6-6c21-41b9-ba44-03466e978a1e
+
+	/// Readable SharePoint product inferred from the observed Build Version. The v16 third-segment ranges follow the distinct 2016, 2019 and Subscription Edition build families published by Microsoft as of October 2026. Unknown or malformed builds display Version to verify; the value changes only after the farm CSV is refreshed in the model.
+	measure 'SharePoint Product And Farm Version' =
+			VAR _build = SELECTEDVALUE('SharePoint On-prem Farms'[Build Version])
+			VAR _family = IFERROR(VALUE(PATHITEM(SUBSTITUTE(_build, ".", "|"), 3)), BLANK())
+			RETURN
+			    IF(
+			        ISBLANK(_build),
+			        "Not collected",
+			        SWITCH(
+			            TRUE(),
+			            LEFT(_build, 5) <> "16.0." || ISBLANK(_family), "Version to verify",
+			            _family >= 4000 && _family < 10000, "SharePoint 2016 (v16)",
+			            _family >= 10000 && _family < 14000, "SharePoint 2019 (v16)",
+			            _family >= 14000 && _family < 30000, "SharePoint SE (v16)",
+			            "Version to verify"
+			        )
+			    )
+		formatString: @
+		lineageTag: 78540c17-7e3a-40c4-9732-d7a4fcbd0818
+
+	/// Observed build version from the current SharePoint on-prem Infrastructure Farms CSV.
+	measure 'Observed Farm Build' = COALESCE(SELECTEDVALUE('SharePoint On-prem Farms'[Build Version]), "Not collected")
+		formatString: @
+		lineageTag: 8dbc7e4e-fa76-4f9a-86aa-5fd5898a9dce
+
+	column 'Tenant Key'
+		dataType: string
+		isHidden
+		lineageTag: 4c44740e-519a-439a-a927-1d72ebb6af2f
+		sourceColumn: Tenant Key
+
+	column 'Farm ID'
+		dataType: string
+		isHidden
+		lineageTag: fa39c0c6-267b-4197-8d41-5ba8a9fcd6ee
+		sourceColumn: Farm ID
+
+	column 'Run ID'
+		dataType: string
+		isHidden
+		lineageTag: 1f8ff89e-ddfb-4171-b49e-248a09c5ac7f
+		sourceColumn: Run ID
+
+	column 'Collected At UTC'
+		dataType: dateTime
+		isHidden
+		lineageTag: 78832b34-86bd-4e50-9147-17e30b4ed0ee
+		sourceColumn: Collected At UTC
+
+	column 'Farm Version'
+		dataType: string
+		lineageTag: 6fbc460c-eddd-4d43-89ca-5295165d2bf2
+		sourceColumn: Farm Version
+
+	column 'Build Version'
+		dataType: string
+		lineageTag: 8cc86069-0829-49c7-acf6-2c61232b4df9
+		sourceColumn: Build Version
+
+	column 'Reported Server Count'
+		dataType: int64
+		isHidden
+		lineageTag: c9423879-4f21-43fc-b305-e5a0895015d0
+		sourceColumn: Reported Server Count
+
+	column 'Reported Service Application Count'
+		dataType: int64
+		isHidden
+		lineageTag: e80684b9-7c00-4769-8074-f264ad2f3133
+		sourceColumn: Reported Service Application Count
+
+	column 'Collection Status'
+		dataType: string
+		lineageTag: de59b00d-f81b-48e8-a2e3-d2da8983d0e4
+		sourceColumn: Collection Status
+
+	column 'Farm Key'
+		dataType: string
+		isHidden
+		lineageTag: cde3b580-3368-4a1b-8f56-afee6668cb8a
+		sourceColumn: Farm Key
+
+	partition 'SharePoint On-prem Farms' = m
+		mode: import
+		source =
+				let
+				    Raw = GetSharePointOnPremCsv("SharePoint_OnPrem_Farms.csv", {"TenantKey", "FarmId", "RunId", "CollectedAtUtc", "FarmVersion", "BuildVersion", "ServerCount", "ServiceApplicationCount", "CollectionStatus"}, {}),
+				    Nulls = Table.ReplaceValue(Raw, "", null, Replacer.ReplaceValue, {"CollectedAtUtc", "ServerCount", "ServiceApplicationCount"}),
+				    Typed = Table.TransformColumnTypes(Nulls, {{"CollectedAtUtc", type datetime}, {"ServerCount", Int64.Type}, {"ServiceApplicationCount", Int64.Type}}, "en-US"),
+				    FarmKey = Table.AddColumn(Typed, "Farm Key", each [TenantKey] & "|" & [FarmId], type text),
+				    Renamed = Table.RenameColumns(FarmKey, {{"TenantKey", "Tenant Key"}, {"FarmId", "Farm ID"}, {"RunId", "Run ID"}, {"CollectedAtUtc", "Collected At UTC"}, {"FarmVersion", "Farm Version"}, {"BuildVersion", "Build Version"}, {"ServerCount", "Reported Server Count"}, {"ServiceApplicationCount", "Reported Service Application Count"}, {"CollectionStatus", "Collection Status"}})
+				in
+				    Renamed
+

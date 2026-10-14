@@ -242,8 +242,6 @@ table 'Security Control Evidence'
 			relationship: 81e59377-f0f1-4fa5-b2bf-d01399d45ce5
 			defaultHierarchy: LocalDateTable_7351d1a0-1eb4-4aea-9827-af128eb26629.'Date Hierarchy'
 
-		annotation UnderlyingDateTimeDataType = Date
-
 		annotation SummarizationSetBy = Automatic
 
 	/// Unit used by the control counts (Devices, Users, Policies, Checks, Connectors, or Score). Do not sum affected values across different units.

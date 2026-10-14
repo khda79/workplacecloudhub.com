@@ -1,5 +1,6 @@
-/// One synthetic user security capability and privileged-access protection observation per reporting date.
+/// Legacy synthetic fixture: not used by production report visuals or consolidated evidence. Removal is pending a separately cleared dependency-safe retirement; no real data.
 table 'Identity Security Status'
+	isHidden
 	lineageTag: 7e03211b-05b6-493a-8e47-e3e009d5ec98
 
 	/// Enabled human users recorded as MFA capable divided by the observed MFA-eligible enabled human population.

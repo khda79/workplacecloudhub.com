@@ -1,5 +1,6 @@
-/// One synthetic directory-presence and activity observation per user, source, and reporting date.
+/// Legacy synthetic fixture: not used by production report visuals or consolidated evidence. Removal is pending a separately cleared dependency-safe retirement; no real data.
 table 'User Directory Observations'
+	isHidden
 	lineageTag: 9fb00228-bed6-4977-951d-6e56ff0d8b0a
 
 	/// Observed workforce accounts present in AD and absent from Entra in the same reporting scope.

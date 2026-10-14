@@ -38,8 +38,6 @@ table 'Content Storage Trend Evidence'
 			relationship: dbb5ebb0-940f-48f8-b83e-a114cf438aac
 			defaultHierarchy: LocalDateTable_39fd069f-d4c0-4fbd-acf1-e67975dbf5d4.'Date Hierarchy'
 
-		annotation UnderlyingDateTimeDataType = Date
-
 		annotation SummarizationSetBy = Automatic
 
 	column 'Date Key'

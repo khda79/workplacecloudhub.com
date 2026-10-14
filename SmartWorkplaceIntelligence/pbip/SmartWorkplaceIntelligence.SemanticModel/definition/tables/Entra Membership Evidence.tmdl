@@ -1,0 +1,131 @@
+/// Native source facet migrated from EntraGroupMembership; exact source grain, unresolved links and qualification retained. Uses the unified pinned batch, not a separate CMDB reader.
+table 'Entra Membership Evidence'
+	lineageTag: eafd43ab-b38c-4c61-a93b-8b9d67c33a2e
+
+	/// Exact native-key entity context or existing inventory context. No name matching or inferred transitive membership. Unrelated entity selections return blank.
+	measure 'Native Context Rows · Entra Membership Evidence' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimUser"))
+			VAR NativeKeys1 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimDevice"))
+			VAR NativeKeys2 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimGroup"))
+			VAR InventoryUsers = CALCULATETABLE(VALUES('Native User Evidence'[TenantUserKey]), REMOVEFILTERS('Native User Evidence'), TREATAS(VALUES('User Inventory Evidence'[User Source ID]), 'Native User Evidence'[SourceUserId]))
+			VAR InventoryDevices = CALCULATETABLE(VALUES('Native Managed Device Evidence'[TenantDeviceKey]), REMOVEFILTERS('Native Managed Device Evidence'), TREATAS(VALUES('Device Inventory Evidence'[Device Source ID]), 'Native Managed Device Evidence'[ManagedDeviceId]))
+			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((COUNTROWS('Entra Membership Evidence')), KEEPFILTERS(TREATAS(NativeKeys0, 'Entra Membership Evidence'[TenantUserKey]))),
+			COUNTROWS(NativeKeys1) > 0, CALCULATE((COUNTROWS('Entra Membership Evidence')), KEEPFILTERS(TREATAS(NativeKeys1, 'Entra Membership Evidence'[TenantDeviceKey]))),
+			COUNTROWS(NativeKeys2) > 0, CALCULATE((COUNTROWS('Entra Membership Evidence')), KEEPFILTERS(TREATAS(NativeKeys2, 'Entra Membership Evidence'[TenantGroupKey]))), BLANK()), BLANK()), SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((COUNTROWS('Entra Membership Evidence')), KEEPFILTERS(TREATAS(InventoryUsers, 'Entra Membership Evidence'[TenantUserKey]))),
+			ISCROSSFILTERED('Device Inventory Evidence'), CALCULATE((COUNTROWS('Entra Membership Evidence')), KEEPFILTERS(TREATAS(InventoryDevices, 'Entra Membership Evidence'[TenantDeviceKey]))), (COUNTROWS('Entra Membership Evidence'))))
+		formatString: #,0
+		isHidden
+		lineageTag: f5a847fc-545a-4af1-8033-5a9eb5d128b3
+
+	/// Native EntraGroupMembership attribute; source qualification is retained.
+	column TenantKey
+		dataType: string
+		isHidden
+		lineageTag: 9ee89f5c-36ce-4f4f-bd51-31b80ba1e7e4
+		summarizeBy: none
+		sourceColumn: TenantKey
+
+	/// Native EntraGroupMembership attribute; source qualification is retained.
+	column OrganizationKey
+		dataType: string
+		isHidden
+		lineageTag: 64757a22-da64-4810-8c75-4200bc877a0e
+		summarizeBy: none
+		sourceColumn: OrganizationKey
+
+	/// Native EntraGroupMembership attribute; source qualification is retained.
+	column EnvironmentKey
+		dataType: string
+		isHidden
+		lineageTag: b045fe67-9fee-4a45-8fc0-6f4eb57cbc24
+		summarizeBy: none
+		sourceColumn: EnvironmentKey
+
+	/// Native EntraGroupMembership attribute; source qualification is retained.
+	column TenantId
+		dataType: string
+		isHidden
+		lineageTag: 2487741d-2ac3-4094-87dd-1fbe4ac23af6
+		summarizeBy: none
+		sourceColumn: TenantId
+
+	/// Native EntraGroupMembership attribute; source qualification is retained.
+	column TenantMembershipKey
+		dataType: string
+		isHidden
+		lineageTag: 1852f248-a8d6-41b8-bb4f-d444064e2e99
+		summarizeBy: none
+		sourceColumn: TenantMembershipKey
+
+	/// Native EntraGroupMembership attribute; source qualification is retained.
+	column TenantGroupKey
+		dataType: string
+		isHidden
+		lineageTag: 6c635a73-7a28-4433-9cbe-ca7d912002eb
+		summarizeBy: none
+		sourceColumn: TenantGroupKey
+
+	/// Native EntraGroupMembership attribute; source qualification is retained.
+	column TenantUserKey
+		dataType: string
+		isHidden
+		lineageTag: 426dc598-a84a-416f-8f32-0996c04da714
+		summarizeBy: none
+		sourceColumn: TenantUserKey
+
+	/// Native EntraGroupMembership attribute; source qualification is retained.
+	column TenantDeviceKey
+		dataType: string
+		isHidden
+		lineageTag: 45b1ebf9-e347-4d04-a0f6-0c4995bf1bee
+		summarizeBy: none
+		sourceColumn: TenantDeviceKey
+
+	/// Native EntraGroupMembership attribute; source qualification is retained.
+	column NestedTenantGroupKey
+		dataType: string
+		lineageTag: b7383d7b-313e-4640-9d00-4b2fe2020c1d
+		summarizeBy: none
+		sourceColumn: NestedTenantGroupKey
+
+	/// Native EntraGroupMembership attribute; source qualification is retained.
+	column MemberId
+		dataType: string
+		lineageTag: fc3b7167-f18c-4a33-842e-68fb5b36f7d0
+		summarizeBy: none
+		sourceColumn: MemberId
+
+	/// Native EntraGroupMembership attribute; source qualification is retained.
+	column MemberType
+		dataType: string
+		lineageTag: dd71dde7-c492-4cf5-b2db-53a7a0c24321
+		summarizeBy: none
+		sourceColumn: MemberType
+
+	/// Native EntraGroupMembership attribute; source qualification is retained.
+	column MembershipKind
+		dataType: string
+		lineageTag: 43741618-ec9d-4f9c-bc1c-811f7cc0e91c
+		summarizeBy: none
+		sourceColumn: MembershipKind
+
+	/// Native EntraGroupMembership attribute; source qualification is retained.
+	column LinkStatus
+		dataType: string
+		lineageTag: 7409040d-1d2c-4242-85c0-808adb23abc5
+		summarizeBy: none
+		sourceColumn: LinkStatus
+
+	/// Native EntraGroupMembership attribute; source qualification is retained.
+	column SourceCollectedDateTime
+		dataType: dateTime
+		lineageTag: d7b6d7ca-5187-435b-b0b0-ee95d4047d2a
+		summarizeBy: none
+		sourceColumn: SourceCollectedDateTime
+
+	partition 'Entra Membership Evidence' = m
+		mode: import
+		source = NativeEvidenceTypes(Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("EntraGroupMembership.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]), {[name="TenantKey", dataType="String"], [name="OrganizationKey", dataType="String"], [name="EnvironmentKey", dataType="String"], [name="TenantId", dataType="String"], [name="TenantMembershipKey", dataType="String"], [name="TenantGroupKey", dataType="String"], [name="TenantUserKey", dataType="String"], [name="TenantDeviceKey", dataType="String"], [name="NestedTenantGroupKey", dataType="String"], [name="MemberId", dataType="String"], [name="MemberType", dataType="String"], [name="MembershipKind", dataType="String"], [name="LinkStatus", dataType="String"], [name="SourceCollectedDateTime", dataType="DateTime"]})
+

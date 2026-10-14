@@ -1,5 +1,6 @@
-/// Synthetic governed security control observations.
+/// Legacy synthetic fixture: not used by production report visuals or consolidated evidence. Removal is pending a separately cleared dependency-safe retirement; no real data.
 table 'Security Posture Observations'
+	isHidden
 	lineageTag: 77b5eb03-12b8-4444-987d-2b21eaa3f294
 
 	/// Observed secure score divided by the qualified maximum score.

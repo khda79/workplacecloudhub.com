@@ -4,10 +4,10 @@
   "position": {
     "x": 32,
     "y": 16,
-    "z": 900,
     "width": 48,
     "height": 48,
-    "tabOrder": 900
+    "z": 10,
+    "tabOrder": 10
   },
   "visual": {
     "visualType": "image",
@@ -20,7 +20,7 @@
                 "ResourcePackageItem": {
                   "PackageName": "RegisteredResources",
                   "PackageType": 1,
-                  "ItemName": "smartworkplace-licenses-20260913.svg"
+                  "ItemName": "smartworkplace-kpi-licenses-20260913.svg"
                 }
               }
             }

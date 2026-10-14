@@ -1,5 +1,6 @@
-/// Synthetic group catalogue.
+/// Legacy synthetic fixture: not used by production report visuals or consolidated evidence. Removal is pending a separately cleared dependency-safe retirement; no real data.
 table Group
+	isHidden
 	lineageTag: 7da1d7be-8902-48a4-b472-8c27e365fc0b
 
 	/// Business attribute Group Key.

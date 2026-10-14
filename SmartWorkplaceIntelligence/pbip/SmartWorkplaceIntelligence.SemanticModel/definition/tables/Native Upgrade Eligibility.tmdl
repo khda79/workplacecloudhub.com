@@ -1,0 +1,131 @@
+/// Native source facet migrated from FactEndpointAnalyticsUpgradeEligibility; exact source grain, unresolved links and qualification retained. Uses the unified pinned batch, not a separate CMDB reader.
+table 'Native Upgrade Eligibility'
+	lineageTag: e7382a93-248d-4a6b-86cb-da35f24e6fc9
+
+	/// Distinct readiness records linked by exact Intune device identifier to the filtered device population. Migrated without changing the source calculation.
+	measure 'Native Selected upgrade eligibility devices' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (VAR _deviceKeys = VALUES('Native Device Evidence'[TenantDeviceKey]) VAR _intuneIds = CALCULATETABLE(VALUES('Device Source Evidence'[SourceObjectId]), TREATAS(_deviceKeys, 'Device Source Evidence'[TenantDeviceKey]), KEEPFILTERS('Device Source Evidence'[SourceSystem] = "Intune")) RETURN CALCULATE(DISTINCTCOUNT('Native Upgrade Eligibility'[DeviceId]), TREATAS(_intuneIds, 'Native Upgrade Eligibility'[DeviceId]))))
+		formatString: #,0
+		displayFolder: Native evidence
+		lineageTag: 630b65c2-df6b-4001-9442-1b87277d1ce3
+
+	/// Share of each reported Windows upgrade-eligibility state within exact matched Intune devices. Migrated without changing the source calculation.
+	measure 'Native Upgrade eligibility rate' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (DIVIDE([Native Selected upgrade eligibility devices], CALCULATE([Native Selected upgrade eligibility devices], REMOVEFILTERS('Native Upgrade Eligibility'[UpgradeEligibility])))))
+		formatString: 0.0%
+		displayFolder: Native evidence
+		lineageTag: d4ecf900-f4cc-4aeb-9f0a-3d357ab741d4
+
+	/// Exact native-key entity context or existing inventory context. No name matching or inferred transitive membership. Unrelated entity selections return blank.
+	measure 'Native Context Rows · Native Upgrade Eligibility' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (COUNTROWS('Native Upgrade Eligibility')))
+		formatString: #,0
+		isHidden
+		lineageTag: 10aed998-82cc-4cd9-a52c-fa4127fa3df0
+
+	/// Native FactEndpointAnalyticsUpgradeEligibility attribute; source qualification is retained.
+	column TenantKey
+		dataType: string
+		isHidden
+		lineageTag: 9123199f-f50f-4841-8d0a-7340d02c22e6
+		summarizeBy: none
+		sourceColumn: TenantKey
+
+	/// Native FactEndpointAnalyticsUpgradeEligibility attribute; source qualification is retained.
+	column OrganizationKey
+		dataType: string
+		isHidden
+		lineageTag: 2278dab8-ab38-4c59-9351-ac2bd096711a
+		summarizeBy: none
+		sourceColumn: OrganizationKey
+
+	/// Native FactEndpointAnalyticsUpgradeEligibility attribute; source qualification is retained.
+	column EnvironmentKey
+		dataType: string
+		isHidden
+		lineageTag: baa1acef-c60d-436c-907b-85aa2b40d0f5
+		summarizeBy: none
+		sourceColumn: EnvironmentKey
+
+	/// Native FactEndpointAnalyticsUpgradeEligibility attribute; source qualification is retained.
+	column TenantId
+		dataType: string
+		isHidden
+		lineageTag: e6bfaa28-d46e-470c-824b-ec48b0dfdcf5
+		summarizeBy: none
+		sourceColumn: TenantId
+
+	/// Native FactEndpointAnalyticsUpgradeEligibility attribute; source qualification is retained.
+	column TenantUpgradeEligibilityDeviceKey
+		dataType: string
+		isHidden
+		lineageTag: 939137ac-836d-476b-a140-c7ce731e6fce
+		summarizeBy: none
+		sourceColumn: TenantUpgradeEligibilityDeviceKey
+
+	/// Native FactEndpointAnalyticsUpgradeEligibility attribute; source qualification is retained.
+	column MetricId
+		dataType: string
+		lineageTag: 90cf8223-b360-42ef-8ac4-f0a7dc248fbb
+		summarizeBy: none
+		sourceColumn: MetricId
+
+	/// Native FactEndpointAnalyticsUpgradeEligibility attribute; source qualification is retained.
+	column MetricDeviceId
+		dataType: string
+		lineageTag: ee46808c-a3dc-4e50-8016-181eea67aace
+		summarizeBy: none
+		sourceColumn: MetricDeviceId
+
+	/// Native FactEndpointAnalyticsUpgradeEligibility attribute; source qualification is retained.
+	column DeviceId
+		dataType: string
+		lineageTag: b00ef6cc-1910-49f4-8859-2066febf9498
+		summarizeBy: none
+		sourceColumn: DeviceId
+
+	/// Native FactEndpointAnalyticsUpgradeEligibility attribute; source qualification is retained.
+	column DeviceIdSource
+		dataType: string
+		lineageTag: ece6fa8f-7ce1-44de-955f-40ee0c9f4c28
+		summarizeBy: none
+		sourceColumn: DeviceIdSource
+
+	/// Native FactEndpointAnalyticsUpgradeEligibility attribute; source qualification is retained.
+	column DeviceName
+		dataType: string
+		lineageTag: 637bde88-028b-4b0e-8d36-cbb526a2869f
+		summarizeBy: none
+		sourceColumn: DeviceName
+
+	/// Native FactEndpointAnalyticsUpgradeEligibility attribute; source qualification is retained.
+	column UpgradeEligibility
+		dataType: string
+		lineageTag: e7787976-6c13-4183-9a54-be7bb17b28a8
+		summarizeBy: none
+		sourceColumn: UpgradeEligibility
+
+	/// Native FactEndpointAnalyticsUpgradeEligibility attribute; source qualification is retained.
+	column SourceCollectedDateTime
+		dataType: dateTime
+		lineageTag: 569d205d-4040-4b5e-8f11-66165f3a1a9e
+		summarizeBy: none
+		sourceColumn: SourceCollectedDateTime
+
+	/// Native FactEndpointAnalyticsUpgradeEligibility attribute; source qualification is retained.
+	column SourceSystem
+		dataType: string
+		lineageTag: df51cebe-3cc7-4c82-b0e6-e81b2077bee8
+		summarizeBy: none
+		sourceColumn: SourceSystem
+
+	partition 'Native Upgrade Eligibility' = m
+		mode: import
+		source = NativeEvidenceTypes(Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("FactEndpointAnalyticsUpgradeEligibility.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]), {[name="TenantKey", dataType="String"], [name="OrganizationKey", dataType="String"], [name="EnvironmentKey", dataType="String"], [name="TenantId", dataType="String"], [name="TenantUpgradeEligibilityDeviceKey", dataType="String"], [name="MetricId", dataType="String"], [name="MetricDeviceId", dataType="String"], [name="DeviceId", dataType="String"], [name="DeviceIdSource", dataType="String"], [name="DeviceName", dataType="String"], [name="UpgradeEligibility", dataType="String"], [name="SourceCollectedDateTime", dataType="DateTime"], [name="SourceSystem", dataType="String"]})
+

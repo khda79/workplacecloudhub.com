@@ -1,0 +1,87 @@
+/// One observed authentication zone per web application and zone from the current Infrastructure CSV.
+table 'SharePoint On-prem Web Zones'
+	lineageTag: e4b61944-969f-4549-bcd8-f0500aa6235b
+
+	/// Observed web application zone authentication configurations.
+	measure 'On-prem Authentication Zones' = COUNTROWS('SharePoint On-prem Web Zones')
+		formatString: #,##0
+		lineageTag: f11c7098-3507-4839-83e7-8939ce4cfdfd
+
+	column 'Tenant Key'
+		dataType: string
+		isHidden
+		lineageTag: 29f87094-a769-45b4-83dd-f8a84e479d67
+		sourceColumn: Tenant Key
+
+	column 'Farm ID'
+		dataType: string
+		isHidden
+		lineageTag: 757d57af-262a-4dc9-bc10-03b09b5c9cd1
+		sourceColumn: Farm ID
+
+	column 'Run ID'
+		dataType: string
+		isHidden
+		lineageTag: b9378623-2b62-4cd4-a6aa-f99ea565ade1
+		sourceColumn: Run ID
+
+	column 'Web Application ID'
+		dataType: string
+		isHidden
+		lineageTag: ad50ffe8-5817-4264-b78a-a35332ef01a0
+		sourceColumn: Web Application ID
+
+	column Zone
+		dataType: string
+		lineageTag: 753c8cb2-add5-40bb-891c-8adf7e73369b
+		sourceColumn: Zone
+
+	column 'Authentication Mode'
+		dataType: string
+		lineageTag: cb11c026-4357-47ed-bbc5-0fe6fe516e1d
+		sourceColumn: Authentication Mode
+
+	column 'Claims Authentication'
+		dataType: string
+		lineageTag: 8d13e7c2-b92e-457e-9f37-98351e9251f7
+		sourceColumn: Claims Authentication
+
+	column 'Authentication Providers'
+		dataType: string
+		lineageTag: 980dd909-2fc6-43d6-9c48-5a2c65cc4000
+		sourceColumn: Authentication Providers
+
+	column 'Collection Status'
+		dataType: string
+		lineageTag: 49351ec7-f22d-451e-a870-23d7e1842827
+		sourceColumn: Collection Status
+
+	column 'Farm Key'
+		dataType: string
+		isHidden
+		lineageTag: da6ca535-5f57-44e1-91d1-026e85210d41
+		sourceColumn: Farm Key
+
+	column 'Web Application Key'
+		dataType: string
+		isHidden
+		lineageTag: 9c88b8c9-4fd3-4b80-8c3e-a0055c32b2bc
+		sourceColumn: Web Application Key
+
+	/// Public URL observed for this web application zone.
+	column 'Public URL'
+		dataType: string
+		lineageTag: b44280e9-fc5e-45dc-ac14-3747f25bf714
+		sourceColumn: Public URL
+
+	partition 'SharePoint On-prem Web Zones' = m
+		mode: import
+		source =
+				let
+				    Raw = GetSharePointOnPremCsv("SharePoint_OnPrem_WebApplicationZones.csv", {"TenantKey", "FarmId", "RunId", "WebApplicationId", "Zone", "PublicUrl", "AuthenticationMode", "ClaimsAuthentication", "AuthenticationProviders", "CollectionStatus"}, {}),
+				    FarmKey = Table.AddColumn(Raw, "Farm Key", each [TenantKey] & "|" & [FarmId], type text),
+				    WebKey = Table.AddColumn(FarmKey, "Web Application Key", each [TenantKey] & "|" & [FarmId] & "|" & [WebApplicationId], type text),
+				    Renamed = Table.RenameColumns(WebKey, {{"TenantKey", "Tenant Key"}, {"FarmId", "Farm ID"}, {"RunId", "Run ID"}, {"WebApplicationId", "Web Application ID"}, {"Zone", "Zone"}, {"PublicUrl", "Public URL"}, {"AuthenticationMode", "Authentication Mode"}, {"ClaimsAuthentication", "Claims Authentication"}, {"AuthenticationProviders", "Authentication Providers"}, {"CollectionStatus", "Collection Status"}})
+				in
+				    Renamed
+

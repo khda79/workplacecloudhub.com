@@ -1,5 +1,6 @@
-/// One synthetic device per reporting snapshot.
+/// Legacy synthetic fixture: not used by production report visuals or consolidated evidence. Removal is pending a separately cleared dependency-safe retirement; no real data.
 table 'Device Snapshots'
+	isHidden
 	lineageTag: d54d7bc3-460b-4bdc-ab4b-a16ae3e774cd
 
 	/// Distinct reconciled synthetic devices in scope.

@@ -1,5 +1,6 @@
-/// One row per anonymized synthetic account identity with private-workflow search and ownership attributes.
+/// Legacy synthetic fixture: not used by production report visuals or consolidated evidence. Removal is pending a separately cleared dependency-safe retirement; no real data.
 table User
+	isHidden
 	lineageTag: e9f7a367-7445-423b-bfa5-8af2ce0c79db
 
 	/// Enabled workforce users without a qualified manager value.

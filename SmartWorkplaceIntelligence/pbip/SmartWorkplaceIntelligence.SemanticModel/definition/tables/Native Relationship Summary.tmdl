@@ -1,0 +1,56 @@
+/// Native source facet migrated from FactRelationshipOverview; exact source grain, unresolved links and qualification retained. Uses the unified pinned batch, not a separate CMDB reader.
+table 'Native Relationship Summary'
+	lineageTag: aa1cfb73-e489-4903-a8f7-7759fd7f2f7e
+
+	/// Exact observed relationship edges by supported source type. Migrated without changing the source calculation.
+	measure 'Native Relationship edges' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (SUM('Native Relationship Summary'[RelationshipCount])))
+		formatString: #,0
+		displayFolder: Native evidence
+		lineageTag: 48b8b69e-d02c-48e5-ab0b-2f84ac537e89
+
+	/// Share of exact observed edges by relationship type. Migrated without changing the source calculation.
+	measure 'Native Relationship type rate' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (DIVIDE([Native Relationship edges], CALCULATE([Native Relationship edges], REMOVEFILTERS('Native Relationship Summary'[RelationshipType])))))
+		formatString: 0.0%
+		displayFolder: Native evidence
+		lineageTag: 01ec8bd4-ae43-4233-9bd8-ab35952cb877
+
+	/// Exact native-key entity context or existing inventory context. No name matching or inferred transitive membership. Unrelated entity selections return blank.
+	measure 'Native Context Rows · Native Relationship Summary' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (COUNTROWS('Native Relationship Summary')))
+		formatString: #,0
+		isHidden
+		lineageTag: ed20c42d-bdfe-4675-b868-bfd49a410ad8
+
+	/// Native FactRelationshipOverview attribute; source qualification is retained.
+	column RelationshipType
+		dataType: string
+		lineageTag: 179acdc7-825a-4eee-89b9-bf9288629b79
+		summarizeBy: none
+		sourceColumn: RelationshipType
+
+	/// Native FactRelationshipOverview attribute; source qualification is retained.
+	column RelationshipCount
+		dataType: int64
+		lineageTag: 74d3af5b-189d-4452-82ec-a6d66ac1a526
+		summarizeBy: none
+		sourceColumn: RelationshipCount
+
+	/// Native FactRelationshipOverview attribute; source qualification is retained.
+	column EvidenceSource
+		dataType: string
+		lineageTag: a8c60ffa-7b97-4361-9091-0cb753bea05a
+		summarizeBy: none
+		sourceColumn: EvidenceSource
+
+	partition 'Native Relationship Summary' = m
+		mode: import
+		source = NativeEvidenceTypes(Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("FactRelationshipOverview.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]), {[name="RelationshipType", dataType="String"], [name="RelationshipCount", dataType="Int64"], [name="EvidenceSource", dataType="String"]})
+

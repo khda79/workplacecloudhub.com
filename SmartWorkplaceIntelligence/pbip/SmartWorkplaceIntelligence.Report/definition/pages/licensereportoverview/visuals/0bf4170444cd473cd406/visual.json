@@ -3,11 +3,11 @@
   "name": "0bf4170444cd473cd406",
   "position": {
     "x": 32,
-    "y": 1624,
+    "y": 328,
     "width": 1856,
-    "height": 230,
-    "z": 124,
-    "tabOrder": 124
+    "height": 264,
+    "z": 42,
+    "tabOrder": 42
   },
   "visual": {
     "visualType": "tableEx",
@@ -57,8 +57,8 @@
                 }
               },
               "queryRef": "License Report Summary.No AD or Entra Activity Unknown",
-              "nativeQueryRef": "N/D AD",
-              "displayName": "N/D AD"
+              "nativeQueryRef": "Unknown AD",
+              "displayName": "Unknown AD"
             },
             {
               "field": {
@@ -87,8 +87,8 @@
                 }
               },
               "queryRef": "License Report Summary.No Mailbox Activity Unknown",
-              "nativeQueryRef": "N/D mailbox",
-              "displayName": "N/D mailbox"
+              "nativeQueryRef": "Unknown mailbox",
+              "displayName": "Unknown mailbox"
             },
             {
               "field": {
@@ -117,8 +117,8 @@
                 }
               },
               "queryRef": "License Report Summary.No Local Apps Use Unknown",
-              "nativeQueryRef": "N/D Apps",
-              "displayName": "N/D Apps"
+              "nativeQueryRef": "Unknown Apps",
+              "displayName": "Unknown Apps"
             },
             {
               "field": {
@@ -147,8 +147,8 @@
                 }
               },
               "queryRef": "License Report Summary.Multiple Assigned SKUs Unknown",
-              "nativeQueryRef": "N/D SKUs",
-              "displayName": "N/D SKUs"
+              "nativeQueryRef": "Unknown SKUs",
+              "displayName": "Unknown SKUs"
             }
           ]
         }
@@ -175,6 +175,13 @@
       "columnHeaders": [
         {
           "properties": {
+            "autoSizeColumnWidth": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
             "columnAdjustment": {
               "expr": {
                 "Literal": {
@@ -182,7 +189,14 @@
                 }
               }
             },
-            "autoSizeColumnWidth": {
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
+            },
+            "bold": {
               "expr": {
                 "Literal": {
                   "Value": "true"
@@ -212,23 +226,9 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#005A9E'"
+                      "Value": "'#215E9E'"
                     }
                   }
-                }
-              }
-            },
-            "bold": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "fontSize": {
-              "expr": {
-                "Literal": {
-                  "Value": "10D"
                 }
               }
             }
@@ -238,10 +238,39 @@
       "values": [
         {
           "properties": {
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
+            },
             "wordWrap": {
               "expr": {
                 "Literal": {
-                  "Value": "true"
+                  "Value": "false"
+                }
+              }
+            },
+            "fontColorPrimary": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#183153'"
+                    }
+                  }
+                }
+              }
+            },
+            "fontColorSecondary": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#183153'"
+                    }
+                  }
                 }
               }
             },
@@ -261,38 +290,9 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#F3F7FA'"
+                      "Value": "'#F0F5FA'"
                     }
                   }
-                }
-              }
-            },
-            "fontColorPrimary": {
-              "solid": {
-                "color": {
-                  "expr": {
-                    "Literal": {
-                      "Value": "'#1F2937'"
-                    }
-                  }
-                }
-              }
-            },
-            "fontColorSecondary": {
-              "solid": {
-                "color": {
-                  "expr": {
-                    "Literal": {
-                      "Value": "'#1F2937'"
-                    }
-                  }
-                }
-              }
-            },
-            "fontSize": {
-              "expr": {
-                "Literal": {
-                  "Value": "9D"
                 }
               }
             }
@@ -320,7 +320,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Activity and overlap by license table.'"
+                  "Value": "'Activity and overlap by suite · complete selected families'"
                 }
               }
             }
@@ -340,7 +340,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Activity and overlap by license'"
+                  "Value": "'Activity and overlap by suite · complete selected families'"
                 }
               }
             },
@@ -507,7 +507,7 @@
   "filterConfig": {
     "filters": [
       {
-        "name": "4ac7b7c0f9fd6436ad01",
+        "name": "0f2ea9dd8ca2ad6120df",
         "field": {
           "Column": {
             "Expression": {
@@ -559,7 +559,59 @@
             }
           ]
         }
+      },
+      {
+        "name": "c6ce1a91cd5b880cae70",
+        "field": {
+          "Measure": {
+            "Expression": {
+              "SourceRef": {
+                "Entity": "License Report Summary"
+              }
+            },
+            "Property": "License Report Inventory Selection Included"
+          }
+        },
+        "type": "Advanced",
+        "filter": {
+          "Version": 2,
+          "From": [
+            {
+              "Name": "summary",
+              "Entity": "License Report Summary",
+              "Type": 0
+            }
+          ],
+          "Where": [
+            {
+              "Condition": {
+                "Comparison": {
+                  "ComparisonKind": 0,
+                  "Left": {
+                    "Measure": {
+                      "Expression": {
+                        "SourceRef": {
+                          "Source": "summary"
+                        }
+                      },
+                      "Property": "License Report Inventory Selection Included"
+                    }
+                  },
+                  "Right": {
+                    "Literal": {
+                      "Value": "1L"
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "howCreated": "User",
+        "isHiddenInViewMode": true,
+        "isLockedInViewMode": true
       }
     ]
-  }
+  },
+  "parentGroupName": "2e0e38071010aadde6c5"
 }

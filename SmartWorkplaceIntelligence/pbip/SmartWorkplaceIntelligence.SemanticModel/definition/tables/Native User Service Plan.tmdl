@@ -1,0 +1,175 @@
+/// Native source facet migrated from FactUserServicePlan; exact source grain, unresolved links and qualification retained. Uses the unified pinned batch, not a separate CMDB reader.
+table 'Native User Service Plan'
+	lineageTag: 8a4c634f-b51b-4451-98fc-dc707747f52a
+
+	/// Observed user and service-plan assignment rows; this is entitlement configuration, not usage. Migrated without changing the source calculation.
+	measure 'Native User service plan rows' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimUser"))
+			VAR NativeKeys1 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimLicenseSku"))
+			VAR NativeKeys2 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimLicenseServicePlan"))
+			VAR InventoryUsers = CALCULATETABLE(VALUES('Native User Evidence'[TenantUserKey]), REMOVEFILTERS('Native User Evidence'), TREATAS(VALUES('User Inventory Evidence'[User Source ID]), 'Native User Evidence'[SourceUserId]))
+			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((COALESCE(COUNTROWS('Native User Service Plan'),0)), KEEPFILTERS(TREATAS(NativeKeys0, 'Native User Service Plan'[TenantUserKey]))),
+			COUNTROWS(NativeKeys1) > 0, CALCULATE((COALESCE(COUNTROWS('Native User Service Plan'),0)), KEEPFILTERS(TREATAS(NativeKeys1, 'Native User Service Plan'[TenantSkuKey]))),
+			COUNTROWS(NativeKeys2) > 0, CALCULATE((COALESCE(COUNTROWS('Native User Service Plan'),0)), KEEPFILTERS(TREATAS(NativeKeys2, 'Native User Service Plan'[TenantServicePlanKey]))), BLANK()), BLANK()), SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((COALESCE(COUNTROWS('Native User Service Plan'),0)), KEEPFILTERS(TREATAS(InventoryUsers, 'Native User Service Plan'[TenantUserKey]))), (COALESCE(COUNTROWS('Native User Service Plan'),0))))
+		formatString: #,0
+		displayFolder: Native evidence
+		lineageTag: 903a5f5f-b7ae-4829-b1f7-12a78f6cdfad
+
+	/// User service-plan rows explicitly enabled in the collection. Migrated without changing the source calculation.
+	measure 'Native Enabled user service plan rows' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimUser"))
+			VAR NativeKeys1 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimLicenseSku"))
+			VAR NativeKeys2 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimLicenseServicePlan"))
+			VAR InventoryUsers = CALCULATETABLE(VALUES('Native User Evidence'[TenantUserKey]), REMOVEFILTERS('Native User Evidence'), TREATAS(VALUES('User Inventory Evidence'[User Source ID]), 'Native User Evidence'[SourceUserId]))
+			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((CALCULATE([Native User service plan rows],KEEPFILTERS('Native User Service Plan'[IsEnabled] = "True"))), KEEPFILTERS(TREATAS(NativeKeys0, 'Native User Service Plan'[TenantUserKey]))),
+			COUNTROWS(NativeKeys1) > 0, CALCULATE((CALCULATE([Native User service plan rows],KEEPFILTERS('Native User Service Plan'[IsEnabled] = "True"))), KEEPFILTERS(TREATAS(NativeKeys1, 'Native User Service Plan'[TenantSkuKey]))),
+			COUNTROWS(NativeKeys2) > 0, CALCULATE((CALCULATE([Native User service plan rows],KEEPFILTERS('Native User Service Plan'[IsEnabled] = "True"))), KEEPFILTERS(TREATAS(NativeKeys2, 'Native User Service Plan'[TenantServicePlanKey]))), BLANK()), BLANK()), SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((CALCULATE([Native User service plan rows],KEEPFILTERS('Native User Service Plan'[IsEnabled] = "True"))), KEEPFILTERS(TREATAS(InventoryUsers, 'Native User Service Plan'[TenantUserKey]))), (CALCULATE([Native User service plan rows],KEEPFILTERS('Native User Service Plan'[IsEnabled] = "True")))))
+		formatString: #,0
+		displayFolder: Native evidence
+		lineageTag: 19fa3995-e587-4ca8-8860-54244310f67c
+
+	/// Exact native-key entity context or existing inventory context. No name matching or inferred transitive membership. Unrelated entity selections return blank.
+	measure 'Native Context Rows · Native User Service Plan' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimUser"))
+			VAR NativeKeys1 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimLicenseSku"))
+			VAR NativeKeys2 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimLicenseServicePlan"))
+			VAR InventoryUsers = CALCULATETABLE(VALUES('Native User Evidence'[TenantUserKey]), REMOVEFILTERS('Native User Evidence'), TREATAS(VALUES('User Inventory Evidence'[User Source ID]), 'Native User Evidence'[SourceUserId]))
+			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((COUNTROWS('Native User Service Plan')), KEEPFILTERS(TREATAS(NativeKeys0, 'Native User Service Plan'[TenantUserKey]))),
+			COUNTROWS(NativeKeys1) > 0, CALCULATE((COUNTROWS('Native User Service Plan')), KEEPFILTERS(TREATAS(NativeKeys1, 'Native User Service Plan'[TenantSkuKey]))),
+			COUNTROWS(NativeKeys2) > 0, CALCULATE((COUNTROWS('Native User Service Plan')), KEEPFILTERS(TREATAS(NativeKeys2, 'Native User Service Plan'[TenantServicePlanKey]))), BLANK()), BLANK()), SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((COUNTROWS('Native User Service Plan')), KEEPFILTERS(TREATAS(InventoryUsers, 'Native User Service Plan'[TenantUserKey]))), (COUNTROWS('Native User Service Plan'))))
+		formatString: #,0
+		isHidden
+		lineageTag: b67d253e-fdec-4fb4-b097-307be440c650
+
+	/// Native FactUserServicePlan attribute; source qualification is retained.
+	column TenantKey
+		dataType: string
+		isHidden
+		lineageTag: bc63e172-1039-4fe5-a496-13ba2e22b690
+		summarizeBy: none
+		sourceColumn: TenantKey
+
+	/// Native FactUserServicePlan attribute; source qualification is retained.
+	column OrganizationKey
+		dataType: string
+		isHidden
+		lineageTag: eaf8a78d-82c5-4f6b-946d-8499fb7e9dbd
+		summarizeBy: none
+		sourceColumn: OrganizationKey
+
+	/// Native FactUserServicePlan attribute; source qualification is retained.
+	column EnvironmentKey
+		dataType: string
+		isHidden
+		lineageTag: 5cd92460-e773-41ec-a9de-4744d1fa6196
+		summarizeBy: none
+		sourceColumn: EnvironmentKey
+
+	/// Native FactUserServicePlan attribute; source qualification is retained.
+	column TenantId
+		dataType: string
+		isHidden
+		lineageTag: 948506df-fcd5-458e-a934-c36bd0ed66dd
+		summarizeBy: none
+		sourceColumn: TenantId
+
+	/// Native FactUserServicePlan attribute; source qualification is retained.
+	column TenantUserKey
+		dataType: string
+		isHidden
+		lineageTag: 0617d522-25fa-44b9-ac02-9a0d8614a9d2
+		summarizeBy: none
+		sourceColumn: TenantUserKey
+
+	/// Native FactUserServicePlan attribute; source qualification is retained.
+	column TenantSkuKey
+		dataType: string
+		isHidden
+		lineageTag: 03c5f8d9-dac1-45f8-95e3-1c1e98eaeff8
+		summarizeBy: none
+		sourceColumn: TenantSkuKey
+
+	/// Native FactUserServicePlan attribute; source qualification is retained.
+	column TenantServicePlanKey
+		dataType: string
+		isHidden
+		lineageTag: a7674c85-3060-45f1-9ca6-d2cc8a06defe
+		summarizeBy: none
+		sourceColumn: TenantServicePlanKey
+
+	/// Native FactUserServicePlan attribute; source qualification is retained.
+	column CmdbUserId
+		dataType: string
+		isHidden
+		lineageTag: 91a34b4f-d0bd-4a63-8846-e6e2f5d2a895
+		summarizeBy: none
+		sourceColumn: CmdbUserId
+
+	/// Native FactUserServicePlan attribute; source qualification is retained.
+	column SkuId
+		dataType: string
+		isHidden
+		lineageTag: 1dc45b15-ee82-4817-9a41-a45b96093073
+		summarizeBy: none
+		sourceColumn: SkuId
+
+	/// Native FactUserServicePlan attribute; source qualification is retained.
+	column ServicePlanId
+		dataType: string
+		lineageTag: 98cf9364-cd55-412b-8bb7-069094581b3e
+		summarizeBy: none
+		sourceColumn: ServicePlanId
+
+	/// Native FactUserServicePlan attribute; source qualification is retained.
+	column ServicePlanName
+		dataType: string
+		lineageTag: b5f5b4ad-37bd-4127-94d1-9b15fd6c1b73
+		summarizeBy: none
+		sourceColumn: ServicePlanName
+
+	/// Native FactUserServicePlan attribute; source qualification is retained.
+	column IsEnabled
+		dataType: string
+		lineageTag: 6fd30d2f-4324-45a4-9111-16b97781fa80
+		summarizeBy: none
+		sourceColumn: IsEnabled
+
+	/// Native FactUserServicePlan attribute; source qualification is retained.
+	column AssignmentState
+		dataType: string
+		lineageTag: cc8b9d9f-cba8-4063-bf87-44cf75f57cc1
+		summarizeBy: none
+		sourceColumn: AssignmentState
+
+	/// Native FactUserServicePlan attribute; source qualification is retained.
+	column SourceSystem
+		dataType: string
+		lineageTag: 6e29d7c4-ffb1-4782-82c7-33ffaa36446d
+		summarizeBy: none
+		sourceColumn: SourceSystem
+
+	/// Native licensing user identifier. Retained even when the current user dimension has no matching parent; never a fabricated CMDB user.
+	column SourceUserId
+		dataType: string
+		isHidden
+		lineageTag: bd473c7d-06b6-441b-9228-cd055d757f51
+		summarizeBy: none
+		sourceColumn: SourceUserId
+
+	/// Exact current user-dimension link qualification: Resolved or Unresolved. Unresolved native licensing evidence remains in the fact table.
+	column UserLinkStatus
+		dataType: string
+		lineageTag: 8bfec526-06fc-475b-bca6-fa301a1f08b4
+		summarizeBy: none
+		sourceColumn: UserLinkStatus
+
+	partition 'Native User Service Plan' = m
+		mode: import
+		source = NativeEvidenceTypes(Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("FactUserServicePlan.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]), {[name="TenantKey", dataType="String"], [name="OrganizationKey", dataType="String"], [name="EnvironmentKey", dataType="String"], [name="TenantId", dataType="String"], [name="TenantUserKey", dataType="String"], [name="TenantSkuKey", dataType="String"], [name="TenantServicePlanKey", dataType="String"], [name="CmdbUserId", dataType="String"], [name="SkuId", dataType="String"], [name="ServicePlanId", dataType="String"], [name="ServicePlanName", dataType="String"], [name="IsEnabled", dataType="String"], [name="AssignmentState", dataType="String"], [name="SourceSystem", dataType="String"], [name="SourceUserId", dataType="String"], [name="UserLinkStatus", dataType="String"]})
+

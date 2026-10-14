@@ -1,0 +1,77 @@
+/// Private source-backed migration planning evidence. Unknown is not zero. No Infrastructure hybride assessment.
+table 'Windows Migration AD Observations'
+	lineageTag: 0ff05662-201b-40ca-b17d-d98dcd463b9b
+
+	/// Observed local migration planning evidence. Missing evidence is not zero; see provenance and task views. Unloaded/empty source is blank, never a verified zero.
+	measure 'Observed AD Windows 10 Unlinked' = IF(COUNTROWS(ALL('Windows Migration AD Observations')) > 0, COALESCE(COUNTROWS('Windows Migration AD Observations'),0), BLANK())
+		formatString: #,0
+		displayFolder: Migration planning
+		lineageTag: 79f33844-574a-40ee-8652-12ffcda2001b
+
+	/// AD Object GUID from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
+	column 'AD Object GUID'
+		dataType: string
+		lineageTag: 3291cb16-0e61-43a8-850a-e2db5ea62ee5
+		sourceColumn: AD Object GUID
+
+	/// Device Name from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
+	column 'Device Name'
+		dataType: string
+		lineageTag: aff0bf4c-708b-4c81-88e8-438f3f153ccb
+		sourceColumn: Device Name
+
+	/// Source Domain from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
+	column 'Source Domain'
+		dataType: string
+		lineageTag: e8e408ff-fcf5-4eb2-b7cd-54c5c0b14d46
+		sourceColumn: Source Domain
+
+	/// OS Version from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
+	column 'OS Version'
+		dataType: string
+		lineageTag: 41b4d648-f892-43b4-8581-8baf0ac66348
+		sourceColumn: OS Version
+
+	/// Intune Evidence from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
+	column 'Intune Evidence'
+		dataType: string
+		lineageTag: fe716f2a-159b-4718-95ac-acd8ff62ef56
+		sourceColumn: Intune Evidence
+
+	/// Autopatch Evidence from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
+	column 'Autopatch Evidence'
+		dataType: string
+		lineageTag: 31346b05-081b-492f-959b-96b3c0b213e7
+		sourceColumn: Autopatch Evidence
+
+	/// Country from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
+	column Country
+		dataType: string
+		lineageTag: f49021db-54d8-4c57-9dc8-4f34aa58bc4d
+		sourceColumn: Country
+
+	/// Qualification from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
+	column Qualification
+		dataType: string
+		lineageTag: 1700ed4d-6e8a-4b4e-a152-6af062bb93eb
+		sourceColumn: Qualification
+
+	/// Next Action from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
+	column 'Next Action'
+		dataType: string
+		lineageTag: cb6cd9c2-c0ba-408f-8cfe-5fe350a475fe
+		sourceColumn: Next Action
+
+	/// Rebuilt from tenant-qualified local source snapshots by the prepared evidence pipeline. Versioned batch reader; missing/incomplete outputs fail, never fall back to frozen recovery JSON. No live collection; AD absence is not proof of non-enrollment.
+	partition 'Windows AD Unlinked Evidence Rebuilt' = m
+		mode: import
+		source =
+				let
+				    Source = Csv.Document(GetPreparedEvidenceFile("WindowsMigrationADObservations.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]),
+				    Headers = Table.PromoteHeaders(Source, [PromoteAllScalars=true]),
+				    Required = Table.SelectColumns(Headers, {"AD Object GUID","Device Name","Source Domain","OS Version","Intune Evidence","Autopatch Evidence","Country","Qualification","Next Action"}),
+				    Nulls = Required,
+				    Typed = Table.TransformColumnTypes(Nulls, {{"AD Object GUID", type text},{"Device Name", type text},{"Source Domain", type text},{"OS Version", type text},{"Intune Evidence", type text},{"Autopatch Evidence", type text},{"Country", type text},{"Qualification", type text},{"Next Action", type text}}, "en-US")
+				in
+				    Typed
+

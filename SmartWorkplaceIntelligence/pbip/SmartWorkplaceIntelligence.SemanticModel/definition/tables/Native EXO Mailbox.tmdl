@@ -1,0 +1,207 @@
+/// Native source facet migrated from FactMailbox; exact source grain, unresolved links and qualification retained. Uses the unified pinned batch, not a separate CMDB reader.
+table 'Native EXO Mailbox'
+	lineageTag: 80a81d9b-56e6-4b2a-a31d-de439d264162
+
+	/// All exported mailboxes, including technical and shared mailboxes. Migrated without changing the source calculation.
+	measure 'Native Mailboxes' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimUser"))
+			VAR NativeKeys1 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "FactMailbox"))
+			VAR InventoryUsers = CALCULATETABLE(VALUES('Native User Evidence'[TenantUserKey]), REMOVEFILTERS('Native User Evidence'), TREATAS(VALUES('User Inventory Evidence'[User Source ID]), 'Native User Evidence'[SourceUserId]))
+			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((COALESCE(COUNTROWS('Native EXO Mailbox'),0)), KEEPFILTERS(TREATAS(NativeKeys0, 'Native EXO Mailbox'[TenantUserKey]))),
+			COUNTROWS(NativeKeys1) > 0, CALCULATE((COALESCE(COUNTROWS('Native EXO Mailbox'),0)), KEEPFILTERS(TREATAS(NativeKeys1, 'Native EXO Mailbox'[TenantMailboxKey]))), BLANK()), BLANK()), SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((COALESCE(COUNTROWS('Native EXO Mailbox'),0)), KEEPFILTERS(TREATAS(InventoryUsers, 'Native EXO Mailbox'[TenantUserKey]))), (COALESCE(COUNTROWS('Native EXO Mailbox'),0))))
+		formatString: #,0
+		displayFolder: Native evidence
+		lineageTag: dc25847e-c2a5-491c-9cc4-5ce6af79575d
+
+	/// Includes technical mailboxes; a missing user link is not always an issue. Migrated without changing the source calculation.
+	measure 'Native Mailboxes without a resolved user' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimUser"))
+			VAR NativeKeys1 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "FactMailbox"))
+			VAR InventoryUsers = CALCULATETABLE(VALUES('Native User Evidence'[TenantUserKey]), REMOVEFILTERS('Native User Evidence'), TREATAS(VALUES('User Inventory Evidence'[User Source ID]), 'Native User Evidence'[SourceUserId]))
+			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((CALCULATE([Native Mailboxes], KEEPFILTERS(ISBLANK('Native EXO Mailbox'[TenantUserKey])))), KEEPFILTERS(TREATAS(NativeKeys0, 'Native EXO Mailbox'[TenantUserKey]))),
+			COUNTROWS(NativeKeys1) > 0, CALCULATE((CALCULATE([Native Mailboxes], KEEPFILTERS(ISBLANK('Native EXO Mailbox'[TenantUserKey])))), KEEPFILTERS(TREATAS(NativeKeys1, 'Native EXO Mailbox'[TenantMailboxKey]))), BLANK()), BLANK()), SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((CALCULATE([Native Mailboxes], KEEPFILTERS(ISBLANK('Native EXO Mailbox'[TenantUserKey])))), KEEPFILTERS(TREATAS(InventoryUsers, 'Native EXO Mailbox'[TenantUserKey]))), (CALCULATE([Native Mailboxes], KEEPFILTERS(ISBLANK('Native EXO Mailbox'[TenantUserKey]))))))
+		formatString: #,0
+		displayFolder: Native evidence
+		lineageTag: 1151f823-abad-468f-9649-ea1a9e2068bd
+
+	/// Mailboxes without a resolved user divided by all mailboxes. Technical and shared mailboxes can be legitimate. Migrated without changing the source calculation.
+	measure 'Native Mailbox link gap rate' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimUser"))
+			VAR NativeKeys1 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "FactMailbox"))
+			VAR InventoryUsers = CALCULATETABLE(VALUES('Native User Evidence'[TenantUserKey]), REMOVEFILTERS('Native User Evidence'), TREATAS(VALUES('User Inventory Evidence'[User Source ID]), 'Native User Evidence'[SourceUserId]))
+			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((DIVIDE([Native Mailboxes without a resolved user], [Native Mailboxes])), KEEPFILTERS(TREATAS(NativeKeys0, 'Native EXO Mailbox'[TenantUserKey]))),
+			COUNTROWS(NativeKeys1) > 0, CALCULATE((DIVIDE([Native Mailboxes without a resolved user], [Native Mailboxes])), KEEPFILTERS(TREATAS(NativeKeys1, 'Native EXO Mailbox'[TenantMailboxKey]))), BLANK()), BLANK()), SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((DIVIDE([Native Mailboxes without a resolved user], [Native Mailboxes])), KEEPFILTERS(TREATAS(InventoryUsers, 'Native EXO Mailbox'[TenantUserKey]))), (DIVIDE([Native Mailboxes without a resolved user], [Native Mailboxes]))))
+		formatString: 0.000%
+		displayFolder: Native evidence
+		lineageTag: f4dbc1d0-1ee1-4b89-b8ac-1f334d979caf
+
+	/// Detail rows only when exactly one user is selected outside visual row grouping. Blank otherwise. Migrated without changing the source calculation.
+	measure 'Native User mailbox details' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimUser"))
+			VAR NativeKeys1 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "FactMailbox"))
+			VAR InventoryUsers = CALCULATETABLE(VALUES('Native User Evidence'[TenantUserKey]), REMOVEFILTERS('Native User Evidence'), TREATAS(VALUES('User Inventory Evidence'[User Source ID]), 'Native User Evidence'[SourceUserId]))
+			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((IF(COUNTROWS(ALLSELECTED('Native User Evidence')) = 1, COUNTROWS('Native EXO Mailbox'))), KEEPFILTERS(TREATAS(NativeKeys0, 'Native EXO Mailbox'[TenantUserKey]))),
+			COUNTROWS(NativeKeys1) > 0, CALCULATE((IF(COUNTROWS(ALLSELECTED('Native User Evidence')) = 1, COUNTROWS('Native EXO Mailbox'))), KEEPFILTERS(TREATAS(NativeKeys1, 'Native EXO Mailbox'[TenantMailboxKey]))), BLANK()), BLANK()), SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((IF(COUNTROWS(ALLSELECTED('Native User Evidence')) = 1, COUNTROWS('Native EXO Mailbox'))), KEEPFILTERS(TREATAS(InventoryUsers, 'Native EXO Mailbox'[TenantUserKey]))), (IF(COUNTROWS(ALLSELECTED('Native User Evidence')) = 1, COUNTROWS('Native EXO Mailbox')))))
+		formatString: #,0
+		displayFolder: Native evidence
+		lineageTag: b62af5c4-64f3-4d8d-8b02-6355fe50b8d6
+
+	/// Exact native-key entity context or existing inventory context. No name matching or inferred transitive membership. Unrelated entity selections return blank.
+	measure 'Native Context Rows · Native EXO Mailbox' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimUser"))
+			VAR NativeKeys1 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "FactMailbox"))
+			VAR InventoryUsers = CALCULATETABLE(VALUES('Native User Evidence'[TenantUserKey]), REMOVEFILTERS('Native User Evidence'), TREATAS(VALUES('User Inventory Evidence'[User Source ID]), 'Native User Evidence'[SourceUserId]))
+			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((COUNTROWS('Native EXO Mailbox')), KEEPFILTERS(TREATAS(NativeKeys0, 'Native EXO Mailbox'[TenantUserKey]))),
+			COUNTROWS(NativeKeys1) > 0, CALCULATE((COUNTROWS('Native EXO Mailbox')), KEEPFILTERS(TREATAS(NativeKeys1, 'Native EXO Mailbox'[TenantMailboxKey]))), BLANK()), BLANK()), SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((COUNTROWS('Native EXO Mailbox')), KEEPFILTERS(TREATAS(InventoryUsers, 'Native EXO Mailbox'[TenantUserKey]))), (COUNTROWS('Native EXO Mailbox'))))
+		formatString: #,0
+		isHidden
+		lineageTag: bc5ce256-71a2-4d49-99ba-2d420fc1cd88
+
+	/// Native FactMailbox attribute; source qualification is retained.
+	column TenantKey
+		dataType: string
+		isHidden
+		lineageTag: 67dd8d7c-824c-4092-ba8e-76d9f646f502
+		summarizeBy: none
+		sourceColumn: TenantKey
+
+	/// Native FactMailbox attribute; source qualification is retained.
+	column OrganizationKey
+		dataType: string
+		isHidden
+		lineageTag: 2bee9546-45b6-4bae-b221-04e852699d76
+		summarizeBy: none
+		sourceColumn: OrganizationKey
+
+	/// Native FactMailbox attribute; source qualification is retained.
+	column EnvironmentKey
+		dataType: string
+		isHidden
+		lineageTag: 88104def-b068-46b8-b904-3d52c83b9b83
+		summarizeBy: none
+		sourceColumn: EnvironmentKey
+
+	/// Native FactMailbox attribute; source qualification is retained.
+	column TenantId
+		dataType: string
+		isHidden
+		lineageTag: 01b8257a-200a-44dc-a070-5f556b99a580
+		summarizeBy: none
+		sourceColumn: TenantId
+
+	/// Native FactMailbox attribute; source qualification is retained.
+	column TenantMailboxKey
+		dataType: string
+		isHidden
+		lineageTag: 7d200eab-bee5-4cbe-9156-2159cb309cbd
+		summarizeBy: none
+		sourceColumn: TenantMailboxKey
+
+	/// Native FactMailbox attribute; source qualification is retained.
+	column TenantUserKey
+		dataType: string
+		isHidden
+		lineageTag: 2d453063-ebb5-4fc1-a0c1-6860a0414a46
+		summarizeBy: none
+		sourceColumn: TenantUserKey
+
+	/// Native FactMailbox attribute; source qualification is retained.
+	column CmdbMailboxId
+		dataType: string
+		isHidden
+		lineageTag: c8119879-d652-41c6-9d0c-3e03bd156b10
+		summarizeBy: none
+		sourceColumn: CmdbMailboxId
+
+	/// Native FactMailbox attribute; source qualification is retained.
+	column CmdbUserId
+		dataType: string
+		isHidden
+		lineageTag: e678ba83-61f1-4c14-9716-004825d72d6a
+		summarizeBy: none
+		sourceColumn: CmdbUserId
+
+	/// Native FactMailbox attribute; source qualification is retained.
+	column RecipientTypeDetails
+		dataType: string
+		lineageTag: c28f9f43-bafc-41ce-a2df-8acfe2aa2850
+		summarizeBy: none
+		sourceColumn: RecipientTypeDetails
+
+	/// Native FactMailbox attribute; source qualification is retained.
+	column ArchiveStatus
+		dataType: string
+		lineageTag: 805c5a15-610e-4f66-bda4-3045259f5a7a
+		summarizeBy: none
+		sourceColumn: ArchiveStatus
+
+	/// Native FactMailbox attribute; source qualification is retained.
+	column SourceSystem
+		dataType: string
+		lineageTag: 24e48fdf-d85f-4c8d-a657-93dd76fe46c7
+		summarizeBy: none
+		sourceColumn: SourceSystem
+
+	/// Native FactMailbox attribute; source qualification is retained.
+	column DisplayName
+		dataType: string
+		lineageTag: 52078d8f-9496-4ec8-b801-f88987e53ca3
+		summarizeBy: none
+		sourceColumn: DisplayName
+
+	/// Native FactMailbox attribute; source qualification is retained.
+	column PrimarySmtpAddress
+		dataType: string
+		lineageTag: dee4781f-e09f-4d6c-a7a1-88141f350de6
+		summarizeBy: none
+		sourceColumn: PrimarySmtpAddress
+
+	/// Native FactMailbox attribute; source qualification is retained.
+	column LinkStatusLabel
+		dataType: string
+		lineageTag: 7a59546c-7d2f-4ccf-a8a5-2dc72774dc7d
+		summarizeBy: none
+		sourceColumn: LinkStatusLabel
+
+	/// Native FactMailbox attribute; source qualification is retained.
+	column DisplayNameLabel
+		dataType: string
+		lineageTag: 6e641c63-988b-4ea8-bce9-e247da7e5f1e
+		summarizeBy: none
+		sourceColumn: DisplayNameLabel
+
+	/// Native FactMailbox attribute; source qualification is retained.
+	column PrimarySmtpAddressLabel
+		dataType: string
+		lineageTag: 3c719ac1-200f-431f-90e2-1d08fb5a24be
+		summarizeBy: none
+		sourceColumn: PrimarySmtpAddressLabel
+
+	/// Native FactMailbox attribute; source qualification is retained.
+	column RecipientTypeDetailsLabel
+		dataType: string
+		lineageTag: 041f268b-596a-4f79-89af-b513183d38b0
+		summarizeBy: none
+		sourceColumn: RecipientTypeDetailsLabel
+
+	/// Native FactMailbox attribute; source qualification is retained.
+	column ArchiveStatusLabel
+		dataType: string
+		lineageTag: 60a048bc-820e-4322-a3ae-09c3ee3addd5
+		summarizeBy: none
+		sourceColumn: ArchiveStatusLabel
+
+	partition 'Native EXO Mailbox' = m
+		mode: import
+		source = NativeEvidenceTypes(Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("FactMailbox.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]), {[name="TenantKey", dataType="String"], [name="OrganizationKey", dataType="String"], [name="EnvironmentKey", dataType="String"], [name="TenantId", dataType="String"], [name="TenantMailboxKey", dataType="String"], [name="TenantUserKey", dataType="String"], [name="CmdbMailboxId", dataType="String"], [name="CmdbUserId", dataType="String"], [name="RecipientTypeDetails", dataType="String"], [name="ArchiveStatus", dataType="String"], [name="SourceSystem", dataType="String"], [name="DisplayName", dataType="String"], [name="PrimarySmtpAddress", dataType="String"], [name="LinkStatusLabel", dataType="String"], [name="DisplayNameLabel", dataType="String"], [name="PrimarySmtpAddressLabel", dataType="String"], [name="RecipientTypeDetailsLabel", dataType="String"], [name="ArchiveStatusLabel", dataType="String"]})
+

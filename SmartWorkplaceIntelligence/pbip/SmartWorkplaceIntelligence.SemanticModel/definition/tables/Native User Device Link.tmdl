@@ -1,0 +1,264 @@
+/// Native source facet migrated from FactUserDeviceRelationship; exact source grain, unresolved links and qualification retained. Uses the unified pinned batch, not a separate CMDB reader.
+table 'Native User Device Link'
+	lineageTag: 0ded5ec6-94dc-4009-8fcb-4397ecf6981d
+
+	/// Resolved relationships between a user and a device. Migrated without changing the source calculation.
+	measure 'Native User-device links' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimUser"))
+			VAR NativeKeys1 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimDevice"))
+			VAR InventoryUsers = CALCULATETABLE(VALUES('Native User Evidence'[TenantUserKey]), REMOVEFILTERS('Native User Evidence'), TREATAS(VALUES('User Inventory Evidence'[User Source ID]), 'Native User Evidence'[SourceUserId]))
+			VAR InventoryDevices = CALCULATETABLE(VALUES('Native Managed Device Evidence'[TenantDeviceKey]), REMOVEFILTERS('Native Managed Device Evidence'), TREATAS(VALUES('Device Inventory Evidence'[Device Source ID]), 'Native Managed Device Evidence'[ManagedDeviceId]))
+			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((COALESCE(COUNTROWS('Native User Device Link'),0)), KEEPFILTERS(TREATAS(NativeKeys0, 'Native User Device Link'[TenantUserKey]))),
+			COUNTROWS(NativeKeys1) > 0, CALCULATE((COALESCE(COUNTROWS('Native User Device Link'),0)), KEEPFILTERS(TREATAS(NativeKeys1, 'Native User Device Link'[TenantDeviceKey]))), BLANK()), BLANK()), SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((COALESCE(COUNTROWS('Native User Device Link'),0)), KEEPFILTERS(TREATAS(InventoryUsers, 'Native User Device Link'[TenantUserKey]))),
+			ISCROSSFILTERED('Device Inventory Evidence'), CALCULATE((COALESCE(COUNTROWS('Native User Device Link'),0)), KEEPFILTERS(TREATAS(InventoryDevices, 'Native User Device Link'[TenantDeviceKey]))), (COALESCE(COUNTROWS('Native User Device Link'),0))))
+		formatString: #,0
+		displayFolder: Native evidence
+		lineageTag: f493e306-ef5e-4448-b9c9-947748aa28c1
+
+	/// Distinct devices with a resolved user relationship. Migrated without changing the source calculation.
+	measure 'Native Devices with a resolved user' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimUser"))
+			VAR NativeKeys1 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimDevice"))
+			VAR InventoryUsers = CALCULATETABLE(VALUES('Native User Evidence'[TenantUserKey]), REMOVEFILTERS('Native User Evidence'), TREATAS(VALUES('User Inventory Evidence'[User Source ID]), 'Native User Evidence'[SourceUserId]))
+			VAR InventoryDevices = CALCULATETABLE(VALUES('Native Managed Device Evidence'[TenantDeviceKey]), REMOVEFILTERS('Native Managed Device Evidence'), TREATAS(VALUES('Device Inventory Evidence'[Device Source ID]), 'Native Managed Device Evidence'[ManagedDeviceId]))
+			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((COALESCE(DISTINCTCOUNTNOBLANK('Native User Device Link'[TenantDeviceKey]),0)), KEEPFILTERS(TREATAS(NativeKeys0, 'Native User Device Link'[TenantUserKey]))),
+			COUNTROWS(NativeKeys1) > 0, CALCULATE((COALESCE(DISTINCTCOUNTNOBLANK('Native User Device Link'[TenantDeviceKey]),0)), KEEPFILTERS(TREATAS(NativeKeys1, 'Native User Device Link'[TenantDeviceKey]))), BLANK()), BLANK()), SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((COALESCE(DISTINCTCOUNTNOBLANK('Native User Device Link'[TenantDeviceKey]),0)), KEEPFILTERS(TREATAS(InventoryUsers, 'Native User Device Link'[TenantUserKey]))),
+			ISCROSSFILTERED('Device Inventory Evidence'), CALCULATE((COALESCE(DISTINCTCOUNTNOBLANK('Native User Device Link'[TenantDeviceKey]),0)), KEEPFILTERS(TREATAS(InventoryDevices, 'Native User Device Link'[TenantDeviceKey]))), (COALESCE(DISTINCTCOUNTNOBLANK('Native User Device Link'[TenantDeviceKey]),0))))
+		formatString: #,0
+		displayFolder: Native evidence
+		lineageTag: a5ff14a4-114f-430f-a08b-51925bee2102
+
+	/// Distinct users with at least one resolved device relationship. Migrated without changing the source calculation.
+	measure 'Native Users with a resolved device' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimUser"))
+			VAR NativeKeys1 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimDevice"))
+			VAR InventoryUsers = CALCULATETABLE(VALUES('Native User Evidence'[TenantUserKey]), REMOVEFILTERS('Native User Evidence'), TREATAS(VALUES('User Inventory Evidence'[User Source ID]), 'Native User Evidence'[SourceUserId]))
+			VAR InventoryDevices = CALCULATETABLE(VALUES('Native Managed Device Evidence'[TenantDeviceKey]), REMOVEFILTERS('Native Managed Device Evidence'), TREATAS(VALUES('Device Inventory Evidence'[Device Source ID]), 'Native Managed Device Evidence'[ManagedDeviceId]))
+			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((COALESCE(DISTINCTCOUNTNOBLANK('Native User Device Link'[TenantUserKey]),0)), KEEPFILTERS(TREATAS(NativeKeys0, 'Native User Device Link'[TenantUserKey]))),
+			COUNTROWS(NativeKeys1) > 0, CALCULATE((COALESCE(DISTINCTCOUNTNOBLANK('Native User Device Link'[TenantUserKey]),0)), KEEPFILTERS(TREATAS(NativeKeys1, 'Native User Device Link'[TenantDeviceKey]))), BLANK()), BLANK()), SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((COALESCE(DISTINCTCOUNTNOBLANK('Native User Device Link'[TenantUserKey]),0)), KEEPFILTERS(TREATAS(InventoryUsers, 'Native User Device Link'[TenantUserKey]))),
+			ISCROSSFILTERED('Device Inventory Evidence'), CALCULATE((COALESCE(DISTINCTCOUNTNOBLANK('Native User Device Link'[TenantUserKey]),0)), KEEPFILTERS(TREATAS(InventoryDevices, 'Native User Device Link'[TenantDeviceKey]))), (COALESCE(DISTINCTCOUNTNOBLANK('Native User Device Link'[TenantUserKey]),0))))
+		formatString: #,0
+		displayFolder: Native evidence
+		lineageTag: fd7f7e37-64e5-4d75-979b-96712317aa56
+
+	/// Devices with at least one resolved user relationship divided by all filtered devices. A relationship does not prove exclusive ownership. Migrated without changing the source calculation.
+	measure 'Native Device user-link coverage' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimUser"))
+			VAR NativeKeys1 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimDevice"))
+			VAR InventoryUsers = CALCULATETABLE(VALUES('Native User Evidence'[TenantUserKey]), REMOVEFILTERS('Native User Evidence'), TREATAS(VALUES('User Inventory Evidence'[User Source ID]), 'Native User Evidence'[SourceUserId]))
+			VAR InventoryDevices = CALCULATETABLE(VALUES('Native Managed Device Evidence'[TenantDeviceKey]), REMOVEFILTERS('Native Managed Device Evidence'), TREATAS(VALUES('Device Inventory Evidence'[Device Source ID]), 'Native Managed Device Evidence'[ManagedDeviceId]))
+			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((DIVIDE([Native Devices with a resolved user], [Native Devices])), KEEPFILTERS(TREATAS(NativeKeys0, 'Native User Device Link'[TenantUserKey]))),
+			COUNTROWS(NativeKeys1) > 0, CALCULATE((DIVIDE([Native Devices with a resolved user], [Native Devices])), KEEPFILTERS(TREATAS(NativeKeys1, 'Native User Device Link'[TenantDeviceKey]))), BLANK()), BLANK()), SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((DIVIDE([Native Devices with a resolved user], [Native Devices])), KEEPFILTERS(TREATAS(InventoryUsers, 'Native User Device Link'[TenantUserKey]))),
+			ISCROSSFILTERED('Device Inventory Evidence'), CALCULATE((DIVIDE([Native Devices with a resolved user], [Native Devices])), KEEPFILTERS(TREATAS(InventoryDevices, 'Native User Device Link'[TenantDeviceKey]))), (DIVIDE([Native Devices with a resolved user], [Native Devices]))))
+		formatString: 0.0%
+		displayFolder: Native evidence
+		lineageTag: 96631b34-feaa-4bce-97ec-3d35d70c3d18
+
+	/// Users with at least one resolved device relationship divided by all filtered users. Migrated without changing the source calculation.
+	measure 'Native User device-link coverage' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimUser"))
+			VAR NativeKeys1 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimDevice"))
+			VAR InventoryUsers = CALCULATETABLE(VALUES('Native User Evidence'[TenantUserKey]), REMOVEFILTERS('Native User Evidence'), TREATAS(VALUES('User Inventory Evidence'[User Source ID]), 'Native User Evidence'[SourceUserId]))
+			VAR InventoryDevices = CALCULATETABLE(VALUES('Native Managed Device Evidence'[TenantDeviceKey]), REMOVEFILTERS('Native Managed Device Evidence'), TREATAS(VALUES('Device Inventory Evidence'[Device Source ID]), 'Native Managed Device Evidence'[ManagedDeviceId]))
+			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((DIVIDE([Native Users with a resolved device], [Native Users])), KEEPFILTERS(TREATAS(NativeKeys0, 'Native User Device Link'[TenantUserKey]))),
+			COUNTROWS(NativeKeys1) > 0, CALCULATE((DIVIDE([Native Users with a resolved device], [Native Users])), KEEPFILTERS(TREATAS(NativeKeys1, 'Native User Device Link'[TenantDeviceKey]))), BLANK()), BLANK()), SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((DIVIDE([Native Users with a resolved device], [Native Users])), KEEPFILTERS(TREATAS(InventoryUsers, 'Native User Device Link'[TenantUserKey]))),
+			ISCROSSFILTERED('Device Inventory Evidence'), CALCULATE((DIVIDE([Native Users with a resolved device], [Native Users])), KEEPFILTERS(TREATAS(InventoryDevices, 'Native User Device Link'[TenantDeviceKey]))), (DIVIDE([Native Users with a resolved device], [Native Users]))))
+		formatString: 0.0%
+		displayFolder: Native evidence
+		lineageTag: 900bc1bc-1f85-4b58-bc96-ae549d91a12c
+
+	/// Detail rows only when exactly one user is selected outside visual row grouping. Blank otherwise. Migrated without changing the source calculation.
+	measure 'Native User device details' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimUser"))
+			VAR NativeKeys1 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimDevice"))
+			VAR InventoryUsers = CALCULATETABLE(VALUES('Native User Evidence'[TenantUserKey]), REMOVEFILTERS('Native User Evidence'), TREATAS(VALUES('User Inventory Evidence'[User Source ID]), 'Native User Evidence'[SourceUserId]))
+			VAR InventoryDevices = CALCULATETABLE(VALUES('Native Managed Device Evidence'[TenantDeviceKey]), REMOVEFILTERS('Native Managed Device Evidence'), TREATAS(VALUES('Device Inventory Evidence'[Device Source ID]), 'Native Managed Device Evidence'[ManagedDeviceId]))
+			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((IF(COUNTROWS(ALLSELECTED('Native User Evidence')) = 1, COUNTROWS('Native User Device Link'))), KEEPFILTERS(TREATAS(NativeKeys0, 'Native User Device Link'[TenantUserKey]))),
+			COUNTROWS(NativeKeys1) > 0, CALCULATE((IF(COUNTROWS(ALLSELECTED('Native User Evidence')) = 1, COUNTROWS('Native User Device Link'))), KEEPFILTERS(TREATAS(NativeKeys1, 'Native User Device Link'[TenantDeviceKey]))), BLANK()), BLANK()), SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((IF(COUNTROWS(ALLSELECTED('Native User Evidence')) = 1, COUNTROWS('Native User Device Link'))), KEEPFILTERS(TREATAS(InventoryUsers, 'Native User Device Link'[TenantUserKey]))),
+			ISCROSSFILTERED('Device Inventory Evidence'), CALCULATE((IF(COUNTROWS(ALLSELECTED('Native User Evidence')) = 1, COUNTROWS('Native User Device Link'))), KEEPFILTERS(TREATAS(InventoryDevices, 'Native User Device Link'[TenantDeviceKey]))), (IF(COUNTROWS(ALLSELECTED('Native User Evidence')) = 1, COUNTROWS('Native User Device Link')))))
+		formatString: #,0
+		displayFolder: Native evidence
+		lineageTag: f56bc6ac-27f5-434e-880c-6e4bd3b0b039
+
+	/// Share of each observed user-device relationship type. Migrated without changing the source calculation.
+	measure 'Native User-device relationship type rate' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimUser"))
+			VAR NativeKeys1 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimDevice"))
+			VAR InventoryUsers = CALCULATETABLE(VALUES('Native User Evidence'[TenantUserKey]), REMOVEFILTERS('Native User Evidence'), TREATAS(VALUES('User Inventory Evidence'[User Source ID]), 'Native User Evidence'[SourceUserId]))
+			VAR InventoryDevices = CALCULATETABLE(VALUES('Native Managed Device Evidence'[TenantDeviceKey]), REMOVEFILTERS('Native Managed Device Evidence'), TREATAS(VALUES('Device Inventory Evidence'[Device Source ID]), 'Native Managed Device Evidence'[ManagedDeviceId]))
+			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((DIVIDE([Native User-device links], CALCULATE([Native User-device links], REMOVEFILTERS('Native User Device Link'[RelationshipType])))), KEEPFILTERS(TREATAS(NativeKeys0, 'Native User Device Link'[TenantUserKey]))),
+			COUNTROWS(NativeKeys1) > 0, CALCULATE((DIVIDE([Native User-device links], CALCULATE([Native User-device links], REMOVEFILTERS('Native User Device Link'[RelationshipType])))), KEEPFILTERS(TREATAS(NativeKeys1, 'Native User Device Link'[TenantDeviceKey]))), BLANK()), BLANK()), SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((DIVIDE([Native User-device links], CALCULATE([Native User-device links], REMOVEFILTERS('Native User Device Link'[RelationshipType])))), KEEPFILTERS(TREATAS(InventoryUsers, 'Native User Device Link'[TenantUserKey]))),
+			ISCROSSFILTERED('Device Inventory Evidence'), CALCULATE((DIVIDE([Native User-device links], CALCULATE([Native User-device links], REMOVEFILTERS('Native User Device Link'[RelationshipType])))), KEEPFILTERS(TREATAS(InventoryDevices, 'Native User Device Link'[TenantDeviceKey]))), (DIVIDE([Native User-device links], CALCULATE([Native User-device links], REMOVEFILTERS('Native User Device Link'[RelationshipType]))))))
+		formatString: 0.0%
+		displayFolder: Native evidence
+		lineageTag: 35153037-b907-4f08-a4a5-80f9cef4c3b9
+
+	/// Exact native-key entity context or existing inventory context. No name matching or inferred transitive membership. Unrelated entity selections return blank.
+	measure 'Native Context Rows · Native User Device Link' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimUser"))
+			VAR NativeKeys1 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimDevice"))
+			VAR InventoryUsers = CALCULATETABLE(VALUES('Native User Evidence'[TenantUserKey]), REMOVEFILTERS('Native User Evidence'), TREATAS(VALUES('User Inventory Evidence'[User Source ID]), 'Native User Evidence'[SourceUserId]))
+			VAR InventoryDevices = CALCULATETABLE(VALUES('Native Managed Device Evidence'[TenantDeviceKey]), REMOVEFILTERS('Native Managed Device Evidence'), TREATAS(VALUES('Device Inventory Evidence'[Device Source ID]), 'Native Managed Device Evidence'[ManagedDeviceId]))
+			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((COUNTROWS('Native User Device Link')), KEEPFILTERS(TREATAS(NativeKeys0, 'Native User Device Link'[TenantUserKey]))),
+			COUNTROWS(NativeKeys1) > 0, CALCULATE((COUNTROWS('Native User Device Link')), KEEPFILTERS(TREATAS(NativeKeys1, 'Native User Device Link'[TenantDeviceKey]))), BLANK()), BLANK()), SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((COUNTROWS('Native User Device Link')), KEEPFILTERS(TREATAS(InventoryUsers, 'Native User Device Link'[TenantUserKey]))),
+			ISCROSSFILTERED('Device Inventory Evidence'), CALCULATE((COUNTROWS('Native User Device Link')), KEEPFILTERS(TREATAS(InventoryDevices, 'Native User Device Link'[TenantDeviceKey]))), (COUNTROWS('Native User Device Link'))))
+		formatString: #,0
+		isHidden
+		lineageTag: 4a42afe7-9fb3-4136-90c6-78ff45a4307f
+
+	/// Native FactUserDeviceRelationship attribute; source qualification is retained.
+	column TenantKey
+		dataType: string
+		isHidden
+		lineageTag: af9de07a-84e8-440f-b3cd-803c0fc5ce5a
+		summarizeBy: none
+		sourceColumn: TenantKey
+
+	/// Native FactUserDeviceRelationship attribute; source qualification is retained.
+	column OrganizationKey
+		dataType: string
+		isHidden
+		lineageTag: ca4930ff-079b-4335-9f0f-1fb807e35bb7
+		summarizeBy: none
+		sourceColumn: OrganizationKey
+
+	/// Native FactUserDeviceRelationship attribute; source qualification is retained.
+	column EnvironmentKey
+		dataType: string
+		isHidden
+		lineageTag: 102143bb-8162-460a-92a0-2c4f73e8c099
+		summarizeBy: none
+		sourceColumn: EnvironmentKey
+
+	/// Native FactUserDeviceRelationship attribute; source qualification is retained.
+	column TenantId
+		dataType: string
+		isHidden
+		lineageTag: 13a8cf2c-4b72-4394-822b-0e3ea5a6d784
+		summarizeBy: none
+		sourceColumn: TenantId
+
+	/// Native FactUserDeviceRelationship attribute; source qualification is retained.
+	column TenantRelationshipKey
+		dataType: string
+		isHidden
+		lineageTag: 3f711b51-e2a9-4d38-ba86-ccbf16029f59
+		summarizeBy: none
+		sourceColumn: TenantRelationshipKey
+
+	/// Native FactUserDeviceRelationship attribute; source qualification is retained.
+	column TenantUserKey
+		dataType: string
+		isHidden
+		lineageTag: db082fe6-9b44-4e0e-a935-9acd1ebc7edd
+		summarizeBy: none
+		sourceColumn: TenantUserKey
+
+	/// Native FactUserDeviceRelationship attribute; source qualification is retained.
+	column TenantDeviceKey
+		dataType: string
+		isHidden
+		lineageTag: d44244d7-09e0-4a33-aac3-fd0b7b6872d1
+		summarizeBy: none
+		sourceColumn: TenantDeviceKey
+
+	/// Native FactUserDeviceRelationship attribute; source qualification is retained.
+	column CmdbRelationshipId
+		dataType: string
+		isHidden
+		lineageTag: efd2e7fb-c16f-4b87-a7b4-c8aad0d54960
+		summarizeBy: none
+		sourceColumn: CmdbRelationshipId
+
+	/// Native FactUserDeviceRelationship attribute; source qualification is retained.
+	column CmdbUserId
+		dataType: string
+		isHidden
+		lineageTag: dc39c9be-3beb-49b6-a388-8c91c9a2e705
+		summarizeBy: none
+		sourceColumn: CmdbUserId
+
+	/// Native FactUserDeviceRelationship attribute; source qualification is retained.
+	column CmdbDeviceId
+		dataType: string
+		isHidden
+		lineageTag: 46b80460-5696-4404-b9ab-5161d8b94635
+		summarizeBy: none
+		sourceColumn: CmdbDeviceId
+
+	/// Native FactUserDeviceRelationship attribute; source qualification is retained.
+	column RelationshipType
+		dataType: string
+		lineageTag: 9a4946eb-3e67-4911-b65e-19638f18f0b4
+		summarizeBy: none
+		sourceColumn: RelationshipType
+
+	/// Native FactUserDeviceRelationship attribute; source qualification is retained.
+	column ConfidenceScore
+		dataType: double
+		lineageTag: 812366c8-5184-4445-a444-a231918684a6
+		summarizeBy: none
+		sourceColumn: ConfidenceScore
+
+	/// Native FactUserDeviceRelationship attribute; source qualification is retained.
+	column SourceSystem
+		dataType: string
+		lineageTag: 8e48e60f-ccb2-4808-abee-941d200eb13a
+		summarizeBy: none
+		sourceColumn: SourceSystem
+
+	/// Native FactUserDeviceRelationship attribute; source qualification is retained.
+	column Account
+		dataType: string
+		lineageTag: c90877de-3183-4afd-a8a7-d62568866030
+		summarizeBy: none
+		sourceColumn: Account
+
+	/// Native FactUserDeviceRelationship attribute; source qualification is retained.
+	column Device
+		dataType: string
+		lineageTag: 082419ed-7fa3-4f47-851f-1f60d03a5f9b
+		summarizeBy: none
+		sourceColumn: Device
+
+	/// Native FactUserDeviceRelationship attribute; source qualification is retained.
+	column DeviceSelection
+		dataType: string
+		lineageTag: cda757e8-bbb4-4ab1-8e2f-d2df85526362
+		summarizeBy: none
+		sourceColumn: DeviceSelection
+
+	/// Native FactUserDeviceRelationship attribute; source qualification is retained.
+	column DeviceCompliance
+		dataType: string
+		lineageTag: 90ffd1bf-c3fa-4347-9557-3d15d24d6bad
+		summarizeBy: none
+		sourceColumn: DeviceCompliance
+
+	/// Native FactUserDeviceRelationship attribute; source qualification is retained.
+	column DeviceSyncStatus
+		dataType: string
+		lineageTag: b64660e8-bfc6-4446-aae2-4f59f43d37ae
+		summarizeBy: none
+		sourceColumn: DeviceSyncStatus
+
+	partition 'Native User Device Link' = m
+		mode: import
+		source = NativeEvidenceTypes(Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("FactUserDeviceRelationship.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]), {[name="TenantKey", dataType="String"], [name="OrganizationKey", dataType="String"], [name="EnvironmentKey", dataType="String"], [name="TenantId", dataType="String"], [name="TenantRelationshipKey", dataType="String"], [name="TenantUserKey", dataType="String"], [name="TenantDeviceKey", dataType="String"], [name="CmdbRelationshipId", dataType="String"], [name="CmdbUserId", dataType="String"], [name="CmdbDeviceId", dataType="String"], [name="RelationshipType", dataType="String"], [name="ConfidenceScore", dataType="Double"], [name="SourceSystem", dataType="String"], [name="Account", dataType="String"], [name="Device", dataType="String"], [name="DeviceSelection", dataType="String"], [name="DeviceCompliance", dataType="String"], [name="DeviceSyncStatus", dataType="String"]})
+

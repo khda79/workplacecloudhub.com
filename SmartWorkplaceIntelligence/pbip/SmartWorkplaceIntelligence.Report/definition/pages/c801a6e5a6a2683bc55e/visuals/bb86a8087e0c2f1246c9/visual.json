@@ -5,8 +5,8 @@
     "x": 32,
     "y": 112,
     "z": 106,
-    "width": 1064,
-    "height": 120,
+    "width": 400,
+    "height": 128,
     "tabOrder": 106
   },
   "visual": {
@@ -28,34 +28,6 @@
               },
               "queryRef": "Enterprise Operational Signals.Affected Signal Observations",
               "nativeQueryRef": "Affected signal observations"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Data Trust Evidence"
-                    }
-                  },
-                  "Property": "Blocked Sources"
-                }
-              },
-              "queryRef": "Data Trust Evidence.Blocked Sources",
-              "nativeQueryRef": "Blocked Sources"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Security Control Evidence"
-                    }
-                  },
-                  "Property": "Security Controls Without Evidence"
-                }
-              },
-              "queryRef": "Security Control Evidence.Security Controls Without Evidence",
-              "nativeQueryRef": "Security Controls Without Evidence"
             }
           ]
         }
@@ -75,7 +47,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "26D"
+                  "Value": "30D"
                 }
               }
             },
@@ -91,7 +63,7 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#005A9E'"
+                      "Value": "'#C62828'"
                     }
                   }
                 }
@@ -108,6 +80,13 @@
               "expr": {
                 "Literal": {
                   "Value": "true"
+                }
+              }
+            },
+            "showBlankAs": {
+              "expr": {
+                "Literal": {
+                  "Value": "'—'"
                 }
               }
             }
@@ -149,6 +128,20 @@
               "expr": {
                 "Literal": {
                   "Value": "true"
+                }
+              }
+            },
+            "position": {
+              "expr": {
+                "Literal": {
+                  "Value": "'aboveValue'"
+                }
+              }
+            },
+            "text": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Signal observations'"
                 }
               }
             }
@@ -203,7 +196,7 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#005A9E'"
+                      "Value": "'#C62828'"
                     }
                   }
                 }
@@ -303,6 +296,27 @@
                   "Value": "0L"
                 }
               }
+            },
+            "rowCount": {
+              "expr": {
+                "Literal": {
+                  "Value": "1L"
+                }
+              }
+            },
+            "columnCount": {
+              "expr": {
+                "Literal": {
+                  "Value": "1L"
+                }
+              }
+            },
+            "autoGrid": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
             }
           },
           "selector": {
@@ -379,7 +393,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Three priority indicators for Risk & Incident Signals.'"
+                  "Value": "'Critical. Values from existing source-backed measures.'"
                 }
               }
             }
@@ -399,14 +413,14 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Priority KPIs'"
+                  "Value": "'Critical'"
                 }
               }
             },
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "13D"
+                  "Value": "14D"
                 }
               }
             },
@@ -548,5 +562,123 @@
         }
       ]
     }
+  },
+  "filterConfig": {
+    "filters": [
+      {
+        "name": "c5e2208890946a7f849e",
+        "field": {
+          "Column": {
+            "Expression": {
+              "SourceRef": {
+                "Entity": "Enterprise Operational Signals"
+              }
+            },
+            "Property": "Severity Label"
+          }
+        },
+        "type": "Categorical",
+        "howCreated": "User",
+        "filter": {
+          "Version": 2,
+          "From": [
+            {
+              "Name": "s",
+              "Entity": "Enterprise Operational Signals",
+              "Type": 0
+            }
+          ],
+          "Where": [
+            {
+              "Condition": {
+                "In": {
+                  "Expressions": [
+                    {
+                      "Column": {
+                        "Expression": {
+                          "SourceRef": {
+                            "Source": "s"
+                          }
+                        },
+                        "Property": "Severity Label"
+                      }
+                    }
+                  ],
+                  "Values": [
+                    [
+                      {
+                        "Literal": {
+                          "Value": "'Critical'"
+                        }
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          ]
+        }
+      },
+      {
+        "name": "Filter624c0c5600b257b1b1fe2a5b",
+        "field": {
+          "Column": {
+            "Expression": {
+              "SourceRef": {
+                "Entity": "Enterprise Operational Signals"
+              }
+            },
+            "Property": "Signal Sort"
+          }
+        },
+        "type": "Categorical",
+        "filter": {
+          "Version": 2,
+          "From": [
+            {
+              "Name": "ep",
+              "Entity": "Enterprise Operational Signals",
+              "Type": 0
+            }
+          ],
+          "Where": [
+            {
+              "Condition": {
+                "Not": {
+                  "Expression": {
+                    "In": {
+                      "Expressions": [
+                        {
+                          "Column": {
+                            "Expression": {
+                              "SourceRef": {
+                                "Source": "ep"
+                              }
+                            },
+                            "Property": "Signal Sort"
+                          }
+                        }
+                      ],
+                      "Values": [
+                        [
+                          {
+                            "Literal": {
+                              "Value": "21L"
+                            }
+                          }
+                        ]
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "howCreated": "User",
+        "isHiddenInViewMode": true,
+        "isLockedInViewMode": true
+      }
+    ]
   }
 }

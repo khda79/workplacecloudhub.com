@@ -1,5 +1,6 @@
-/// One row per anonymized synthetic device identity.
+/// Legacy synthetic fixture: not used by production report visuals or consolidated evidence. Removal is pending a separately cleared dependency-safe retirement; no real data.
 table Device
+	isHidden
 	lineageTag: 727871f1-74b6-4a17-9fb1-f8da19d5d392
 
 	/// Distinct observed device manufacturers in the selected estate.

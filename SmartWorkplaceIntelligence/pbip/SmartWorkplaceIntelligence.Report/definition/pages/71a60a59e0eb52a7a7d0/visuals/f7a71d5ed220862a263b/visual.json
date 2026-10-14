@@ -3,11 +3,11 @@
   "name": "f7a71d5ed220862a263b",
   "position": {
     "x": 32,
-    "y": 112,
+    "y": 336,
+    "width": 1856,
+    "height": 128,
     "z": 107,
-    "width": 1064,
-    "height": 120,
-    "tabOrder": 107
+    "tabOrder": 677
   },
   "visual": {
     "visualType": "cardVisual",
@@ -75,7 +75,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "26D"
+                  "Value": "32D"
                 }
               }
             },
@@ -130,7 +130,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "12D"
+                  "Value": "14D"
                 }
               }
             },
@@ -339,7 +339,7 @@
             "paddingUniform": {
               "expr": {
                 "Literal": {
-                  "Value": "8L"
+                  "Value": "0L"
                 }
               }
             },
@@ -379,7 +379,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Three priority indicators for Messaging & Hybrid.'"
+                  "Value": "'Priority KPIs'"
                 }
               }
             }
@@ -406,7 +406,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "13D"
+                  "Value": "14D"
                 }
               }
             },
@@ -415,16 +415,9 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#1F2937'"
+                      "Value": "'#183153'"
                     }
                   }
-                }
-              }
-            },
-            "bold": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
                 }
               }
             }
@@ -477,9 +470,16 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#CBD8E5'"
+                      "Value": "'#CCDCEC'"
                     }
                   }
+                }
+              }
+            },
+            "radius": {
+              "expr": {
+                "Literal": {
+                  "Value": "8D"
                 }
               }
             },
@@ -487,13 +487,6 @@
               "expr": {
                 "Literal": {
                   "Value": "1D"
-                }
-              }
-            },
-            "radius": {
-              "expr": {
-                "Literal": {
-                  "Value": "12D"
                 }
               }
             }
@@ -533,14 +526,14 @@
             "left": {
               "expr": {
                 "Literal": {
-                  "Value": "10D"
+                  "Value": "8D"
                 }
               }
             },
             "right": {
               "expr": {
                 "Literal": {
-                  "Value": "10D"
+                  "Value": "8D"
                 }
               }
             }
@@ -548,5 +541,6 @@
         }
       ]
     }
-  }
+  },
+  "parentGroupName": "daaf5c483406b36ac30c"
 }

@@ -3,11 +3,11 @@
   "name": "b4bb3d72c06c91c6817e",
   "position": {
     "x": 96,
-    "y": 64,
-    "z": 101,
-    "width": 1024,
+    "y": 88,
+    "width": 664,
     "height": 32,
-    "tabOrder": 101
+    "z": 101,
+    "tabOrder": 145
   },
   "visual": {
     "visualType": "textbox",
@@ -19,7 +19,7 @@
               {
                 "textRuns": [
                   {
-                    "value": "Data Trust · BETA 1.0.0-beta.1 · private source inventory, schema qualification, business-snapshot freshness, and cross-domain reconciliation evidence",
+                    "value": "Data Trust · file/schema/freshness checks and reconciliation. License analytical qualification is separate: see License Overview / License Recovery & Evidence.",
                     "textStyle": {
                       "fontFamily": "Segoe UI",
                       "fontSize": "13px",

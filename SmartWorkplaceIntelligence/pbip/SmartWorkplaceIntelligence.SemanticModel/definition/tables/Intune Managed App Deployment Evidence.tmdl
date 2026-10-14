@@ -1,0 +1,252 @@
+/// Governed IntuneManagedAppDeploymentEvidence.csv. EvidenceKey row identity; configured reported scope only. Missing evidence is not success. Retains outside-catalog and unmatched observations.
+table 'Intune Managed App Deployment Evidence'
+	lineageTag: 84ef94b5-0e13-42e1-b837-6340e2a647ec
+
+	/// Count of reported observations in the collected scope only. Blank when the source group is not supplied; zero is not proof of complete coverage.
+	measure 'Intune App Deployment Observations' = IF(CALCULATE(COUNTROWS('Intune Operational Source Evidence'), REMOVEFILTERS('Intune Operational Source Evidence'), 'Intune Operational Source Evidence'[Source Group] = "ManagedApps", 'Intune Operational Source Evidence'[Availability] = "Receipt and files verified") > 0, COALESCE(COUNTROWS('Intune Managed App Deployment Evidence'), 0), BLANK())
+		formatString: #,##0
+		displayFolder: Intune | Reported scope
+		lineageTag: 00c29c8a-11ac-4e74-8995-b722b9e5654a
+
+	/// Count of reported observations in the collected scope only. Blank when the source group is not supplied; zero is not proof of complete coverage.
+	measure 'Intune Reported Installed Observations' = IF(CALCULATE(COUNTROWS('Intune Operational Source Evidence'), REMOVEFILTERS('Intune Operational Source Evidence'), 'Intune Operational Source Evidence'[Source Group] = "ManagedApps", 'Intune Operational Source Evidence'[Availability] = "Receipt and files verified") > 0, COALESCE(CALCULATE(COUNTROWS('Intune Managed App Deployment Evidence'), KEEPFILTERS('Intune Managed App Deployment Evidence'[Reported Deployment State] = "ReportedInstalled")), 0), BLANK())
+		formatString: #,##0
+		displayFolder: Intune | Reported scope
+		lineageTag: c51e692f-7c20-499c-bbd9-5f6f7639a32f
+
+	/// Count of reported observations in the collected scope only. Blank when the source group is not supplied; zero is not proof of complete coverage.
+	measure 'Intune Reported Failure Observations' = IF(CALCULATE(COUNTROWS('Intune Operational Source Evidence'), REMOVEFILTERS('Intune Operational Source Evidence'), 'Intune Operational Source Evidence'[Source Group] = "ManagedApps", 'Intune Operational Source Evidence'[Availability] = "Receipt and files verified") > 0, COALESCE(CALCULATE(COUNTROWS('Intune Managed App Deployment Evidence'), KEEPFILTERS('Intune Managed App Deployment Evidence'[Reported Deployment State] = "ReportedFailure")), 0), BLANK())
+		formatString: #,##0
+		displayFolder: Intune | Reported scope
+		lineageTag: 2bb8445b-2259-4136-b6f7-e99329422d7f
+
+	/// Count of reported observations in the collected scope only. Blank when the source group is not supplied; zero is not proof of complete coverage.
+	measure 'Intune Reported Not Installed Observations' = IF(CALCULATE(COUNTROWS('Intune Operational Source Evidence'), REMOVEFILTERS('Intune Operational Source Evidence'), 'Intune Operational Source Evidence'[Source Group] = "ManagedApps", 'Intune Operational Source Evidence'[Availability] = "Receipt and files verified") > 0, COALESCE(CALCULATE(COUNTROWS('Intune Managed App Deployment Evidence'), KEEPFILTERS('Intune Managed App Deployment Evidence'[Reported Deployment State] = "ReportedNotInstalled")), 0), BLANK())
+		formatString: #,##0
+		displayFolder: Intune | Reported scope
+		lineageTag: 1a0d8ca6-b671-4ab7-89c6-5c77c2885128
+
+	/// Count of reported observations in the collected scope only. Blank when the source group is not supplied; zero is not proof of complete coverage.
+	measure 'Intune App Pending Observations' = IF(CALCULATE(COUNTROWS('Intune Operational Source Evidence'), REMOVEFILTERS('Intune Operational Source Evidence'), 'Intune Operational Source Evidence'[Source Group] = "ManagedApps", 'Intune Operational Source Evidence'[Availability] = "Receipt and files verified") > 0, COALESCE(CALCULATE(COUNTROWS('Intune Managed App Deployment Evidence'), KEEPFILTERS('Intune Managed App Deployment Evidence'[Reported Deployment State] = "Pending")), 0), BLANK())
+		formatString: #,##0
+		displayFolder: Intune | Reported scope
+		lineageTag: 516df178-c987-4656-a5de-da711623168c
+
+	/// Count of reported observations in the collected scope only. Blank when the source group is not supplied; zero is not proof of complete coverage.
+	measure 'Intune App Unknown Observations' = IF(CALCULATE(COUNTROWS('Intune Operational Source Evidence'), REMOVEFILTERS('Intune Operational Source Evidence'), 'Intune Operational Source Evidence'[Source Group] = "ManagedApps", 'Intune Operational Source Evidence'[Availability] = "Receipt and files verified") > 0, COALESCE(CALCULATE(COUNTROWS('Intune Managed App Deployment Evidence'), KEEPFILTERS('Intune Managed App Deployment Evidence'[Reported Deployment State] = "Unknown")), 0), BLANK())
+		formatString: #,##0
+		displayFolder: Intune | Reported scope
+		lineageTag: 60bcd4b2-5988-4d0c-b3c0-7c68bfb350d2
+
+	/// Distinct tenant-aware identities among the specified reported observations, not verified physical endpoints or full tenant coverage.
+	measure 'Intune Managed Apps With Reported Failures' = IF(CALCULATE(COUNTROWS('Intune Operational Source Evidence'), REMOVEFILTERS('Intune Operational Source Evidence'), 'Intune Operational Source Evidence'[Source Group] = "ManagedApps", 'Intune Operational Source Evidence'[Availability] = "Receipt and files verified") > 0, COALESCE(CALCULATE(DISTINCTCOUNT('Intune Managed App Deployment Evidence'[Application Key]), KEEPFILTERS('Intune Managed App Deployment Evidence'[Application Key] <> BLANK()), KEEPFILTERS('Intune Managed App Deployment Evidence'[Reported Deployment State] = "ReportedFailure")), 0), BLANK())
+		formatString: #,##0
+		displayFolder: Intune | Reported scope
+		lineageTag: 7f747a84-a8df-47f6-9e9d-44821c742b4e
+
+	/// Distinct tenant-aware identities among the specified reported observations, not verified physical endpoints or full tenant coverage.
+	measure 'Intune App Identified Devices With Failures' = IF(CALCULATE(COUNTROWS('Intune Operational Source Evidence'), REMOVEFILTERS('Intune Operational Source Evidence'), 'Intune Operational Source Evidence'[Source Group] = "ManagedApps", 'Intune Operational Source Evidence'[Availability] = "Receipt and files verified") > 0, COALESCE(CALCULATE(DISTINCTCOUNT('Intune Managed App Deployment Evidence'[Device Key]), KEEPFILTERS('Intune Managed App Deployment Evidence'[Device Key] <> BLANK()), KEEPFILTERS('Intune Managed App Deployment Evidence'[Reported Deployment State] = "ReportedFailure")), 0), BLANK())
+		formatString: #,##0
+		displayFolder: Intune | Reported scope
+		lineageTag: f1092249-fa9a-43d0-b24b-09cb4e153ee0
+
+	/// Prepared IntuneManagedAppDeploymentEvidence.csv: TenantKey. Reported source scope only; not whole-tenant coverage or endpoint health.
+	column 'Tenant Key'
+		dataType: string
+		isHidden
+		lineageTag: 3a7ae973-1368-427f-955d-4bc7af6b4f77
+		summarizeBy: none
+		sourceColumn: TenantKey
+
+	/// Prepared IntuneManagedAppDeploymentEvidence.csv: EvidenceKey. Reported source scope only; not whole-tenant coverage or endpoint health.
+	column 'Evidence Key'
+		dataType: string
+		isHidden
+		lineageTag: 520e7aa5-b732-46dc-b08e-a0ec4ff0d558
+		summarizeBy: none
+		sourceColumn: EvidenceKey
+
+	/// Prepared IntuneManagedAppDeploymentEvidence.csv: ReceiptRunId. Reported source scope only; not whole-tenant coverage or endpoint health.
+	column 'Receipt Run ID'
+		dataType: string
+		isHidden
+		lineageTag: 43c532dc-d3c7-4ed2-ac7c-7f7b5126aca7
+		summarizeBy: none
+		sourceColumn: ReceiptRunId
+
+	/// Prepared IntuneManagedAppDeploymentEvidence.csv: BusinessRunId. Reported source scope only; not whole-tenant coverage or endpoint health.
+	column 'Business Run ID'
+		dataType: string
+		isHidden
+		lineageTag: 3b981fd3-06ea-495e-baed-456802338297
+		summarizeBy: none
+		sourceColumn: BusinessRunId
+
+	/// Prepared IntuneManagedAppDeploymentEvidence.csv: SourceFile. Reported source scope only; not whole-tenant coverage or endpoint health.
+	column 'Source File'
+		dataType: string
+		isHidden
+		lineageTag: b083c630-8929-40a6-a060-5f67f508a071
+		summarizeBy: none
+		sourceColumn: SourceFile
+
+	/// Prepared IntuneManagedAppDeploymentEvidence.csv: SourceSHA256. Reported source scope only; not whole-tenant coverage or endpoint health.
+	column 'Source SHA256'
+		dataType: string
+		isHidden
+		lineageTag: ee41e4d6-4b73-440a-a22e-99ae873c2881
+		summarizeBy: none
+		sourceColumn: SourceSHA256
+
+	/// Prepared IntuneManagedAppDeploymentEvidence.csv: SourceRecord. Reported source scope only; not whole-tenant coverage or endpoint health.
+	column 'Source Record'
+		dataType: int64
+		isHidden
+		lineageTag: 53ea0aec-20f6-4af3-a815-cd841cc100ae
+		summarizeBy: none
+		sourceColumn: SourceRecord
+
+	/// Prepared IntuneManagedAppDeploymentEvidence.csv: CollectionUTC. Reported source scope only; not whole-tenant coverage or endpoint health.
+	column 'Collection UTC'
+		dataType: dateTime
+		lineageTag: 8fee544d-e4fb-424b-bf62-fe9aef30c79e
+		summarizeBy: none
+		sourceColumn: CollectionUTC
+
+	/// Prepared IntuneManagedAppDeploymentEvidence.csv: ApplicationId. Reported source scope only; not whole-tenant coverage or endpoint health.
+	column 'Application ID'
+		dataType: string
+		lineageTag: d273996c-5575-4fc4-9cf2-a2f848f7a2e8
+		summarizeBy: none
+		sourceColumn: ApplicationId
+
+	/// Prepared IntuneManagedAppDeploymentEvidence.csv: DeviceId. Reported source scope only; not whole-tenant coverage or endpoint health.
+	column 'Device ID'
+		dataType: string
+		lineageTag: 8757af3a-e69f-47a7-b291-b0ce72b0fe72
+		summarizeBy: none
+		sourceColumn: DeviceId
+
+	/// Prepared IntuneManagedAppDeploymentEvidence.csv: UserPrincipalName. Reported source scope only; not whole-tenant coverage or endpoint health.
+	column 'User Principal Name'
+		dataType: string
+		lineageTag: a8812e13-7777-4f7b-bd4b-b6ff7e2b3ac0
+		summarizeBy: none
+		sourceColumn: UserPrincipalName
+
+	/// Prepared IntuneManagedAppDeploymentEvidence.csv: AppVersion. Reported source scope only; not whole-tenant coverage or endpoint health.
+	column 'App Version'
+		dataType: string
+		lineageTag: aaee7bd9-5a93-4a42-8306-6bf3c0c45065
+		summarizeBy: none
+		sourceColumn: AppVersion
+
+	/// Prepared IntuneManagedAppDeploymentEvidence.csv: Platform. Reported source scope only; not whole-tenant coverage or endpoint health.
+	column Platform
+		dataType: string
+		lineageTag: 7793c377-ea27-448b-8b67-ed145368f963
+		summarizeBy: none
+		sourceColumn: Platform
+
+	/// Prepared IntuneManagedAppDeploymentEvidence.csv: InstallState. Reported source scope only; not whole-tenant coverage or endpoint health.
+	column 'Install State'
+		dataType: string
+		lineageTag: edc8353a-ee3e-49b6-9aca-d37201cd8252
+		summarizeBy: none
+		sourceColumn: InstallState
+
+	/// Prepared IntuneManagedAppDeploymentEvidence.csv: ReportedDeploymentState. Reported source scope only; not whole-tenant coverage or endpoint health.
+	column 'Reported Deployment State'
+		dataType: string
+		lineageTag: 4d350c19-6a7e-4da6-8272-bd8b60020974
+		summarizeBy: none
+		sourceColumn: ReportedDeploymentState
+
+	/// Prepared IntuneManagedAppDeploymentEvidence.csv: InstallStateDetail. Reported source scope only; not whole-tenant coverage or endpoint health.
+	column 'Install State Detail'
+		dataType: string
+		lineageTag: 4a1d8b5d-afc5-4c89-8e00-bb63622dbb46
+		summarizeBy: none
+		sourceColumn: InstallStateDetail
+
+	/// Prepared IntuneManagedAppDeploymentEvidence.csv: ErrorCode. Reported source scope only; not whole-tenant coverage or endpoint health.
+	column 'Error Code'
+		dataType: string
+		lineageTag: 66b07c98-fe4c-4249-9f62-2991253629e3
+		summarizeBy: none
+		sourceColumn: ErrorCode
+
+	/// Prepared IntuneManagedAppDeploymentEvidence.csv: LastModifiedDateTime. Reported source scope only; not whole-tenant coverage or endpoint health.
+	column 'Last Modified Time Raw'
+		dataType: string
+		lineageTag: b69fb29a-6e6d-497b-8fb5-9b3c170097ec
+		summarizeBy: none
+		sourceColumn: LastModifiedDateTime
+
+	/// Prepared IntuneManagedAppDeploymentEvidence.csv: SourceStatusUTC. Reported source scope only; not whole-tenant coverage or endpoint health.
+	column 'Source Status UTC'
+		dataType: dateTime
+		lineageTag: 4e0dc8a6-31bf-4723-9118-921aca1dd1fc
+		summarizeBy: none
+		sourceColumn: SourceStatusUTC
+
+	/// Prepared IntuneManagedAppDeploymentEvidence.csv: SourceStatusTimeBasis. Reported source scope only; not whole-tenant coverage or endpoint health.
+	column 'Source Status Time Basis'
+		dataType: string
+		lineageTag: 2a4b6900-2602-41d0-969c-ecd2b8b3f7c2
+		summarizeBy: none
+		sourceColumn: SourceStatusTimeBasis
+
+	/// Prepared IntuneManagedAppDeploymentEvidence.csv: CatalogMatch. Reported source scope only; not whole-tenant coverage or endpoint health.
+	column 'Catalog Match'
+		dataType: string
+		lineageTag: 73c3b89f-3ef1-4bd7-9b54-025c644b52dd
+		summarizeBy: none
+		sourceColumn: CatalogMatch
+
+	/// Prepared IntuneManagedAppDeploymentEvidence.csv: InventoryMatch. Reported source scope only; not whole-tenant coverage or endpoint health.
+	column 'Inventory Match'
+		dataType: string
+		lineageTag: f7ad91e9-72d6-4f1e-a908-2708585e50ec
+		summarizeBy: none
+		sourceColumn: InventoryMatch
+
+	/// Prepared IntuneManagedAppDeploymentEvidence.csv: HealthQualification. Reported source scope only; not whole-tenant coverage or endpoint health.
+	column 'Health Qualification'
+		dataType: string
+		lineageTag: f1575706-e2c5-420f-a367-2293e5d9a6ff
+		summarizeBy: none
+		sourceColumn: HealthQualification
+
+	/// Length-prefixed tenant-aware technical relationship key.
+	column 'Application Key'
+		dataType: string
+		isHidden
+		lineageTag: 4fb0cac9-7e1d-4760-a831-1408c49ff767
+		summarizeBy: none
+		sourceColumn: Application Key
+
+	/// Length-prefixed tenant-aware technical relationship key.
+	column 'Device Key'
+		dataType: string
+		isHidden
+		lineageTag: e2d70430-3fc8-4c5e-b36a-1fd1e88abbcd
+		summarizeBy: none
+		sourceColumn: Device Key
+
+	partition 'Intune Managed App Deployment Evidence' = m
+		mode: import
+		source =
+				let
+				    Raw = ReadMigrationCsv(GetPreparedEvidenceFile("IntuneManagedAppDeploymentEvidence.csv"), {"TenantKey", "EvidenceKey", "ReceiptRunId", "BusinessRunId", "SourceFile", "SourceSHA256", "SourceRecord", "CollectionUTC", "ApplicationId", "DeviceId", "UserPrincipalName", "AppVersion", "Platform", "InstallState", "ReportedDeploymentState", "InstallStateDetail", "ErrorCode", "LastModifiedDateTime", "SourceStatusUTC", "SourceStatusTimeBasis", "CatalogMatch", "InventoryMatch", "HealthQualification"}),
+				    Selected = Table.SelectColumns(Raw, {"TenantKey", "EvidenceKey", "ReceiptRunId", "BusinessRunId", "SourceFile", "SourceSHA256", "SourceRecord", "CollectionUTC", "ApplicationId", "DeviceId", "UserPrincipalName", "AppVersion", "Platform", "InstallState", "ReportedDeploymentState", "InstallStateDetail", "ErrorCode", "LastModifiedDateTime", "SourceStatusUTC", "SourceStatusTimeBasis", "CatalogMatch", "InventoryMatch", "HealthQualification"}),
+				    Tenants = List.Distinct(Selected[TenantKey]),
+				    Validated = if List.Count(Tenants) > 1 or List.Contains(Tenants, null) or List.Contains(Tenants, "") then error "Intune evidence tenant identity is invalid" else Selected,
+				    ParseUtc = (raw as nullable text) as nullable datetime => if raw = null or Text.Trim(raw) = "" then null else if not Text.EndsWith(raw, "Z") then error "Intune prepared time requires explicit UTC Z" else DateTimeZone.RemoveZone(DateTimeZone.SwitchZone(DateTimeZone.FromText(raw, [Culture="en-US"]), 0)),
+				    Key = (values as list) as nullable text => if List.AnyTrue(List.Transform(values, each _ = null or Text.Trim(Text.From(_)) = "")) then null else Text.Combine(List.Transform(values, each Text.From(Text.Length(Text.From(_))) & ":" & Text.From(_)), "|"),
+				    Typed = Table.TransformColumns(Validated, {{"TenantKey", each _, type nullable text}, {"EvidenceKey", each _, type nullable text}, {"ReceiptRunId", each _, type nullable text}, {"BusinessRunId", each _, type nullable text}, {"SourceFile", each _, type nullable text}, {"SourceSHA256", each _, type nullable text}, {"SourceRecord", each if _ = null or Text.Trim(_) = "" then null else Int64.From(Number.FromText(_, "en-US")), type nullable number}, {"CollectionUTC", ParseUtc, type nullable datetime}, {"ApplicationId", each _, type nullable text}, {"DeviceId", each _, type nullable text}, {"UserPrincipalName", each _, type nullable text}, {"AppVersion", each _, type nullable text}, {"Platform", each _, type nullable text}, {"InstallState", each _, type nullable text}, {"ReportedDeploymentState", each _, type nullable text}, {"InstallStateDetail", each _, type nullable text}, {"ErrorCode", each _, type nullable text}, {"LastModifiedDateTime", each _, type nullable text}, {"SourceStatusUTC", ParseUtc, type nullable datetime}, {"SourceStatusTimeBasis", each _, type nullable text}, {"CatalogMatch", each _, type nullable text}, {"InventoryMatch", each _, type nullable text}, {"HealthQualification", each _, type nullable text}}),
+				    WithApplicationKey = Table.AddColumn(Typed, "Application Key", each Key({[TenantKey], [ApplicationId]}), type nullable text),
+				    WithDeviceKey = Table.AddColumn(WithApplicationKey, "Device Key", each Key({[TenantKey], [DeviceId]}), type nullable text)
+				in
+				    WithDeviceKey
+

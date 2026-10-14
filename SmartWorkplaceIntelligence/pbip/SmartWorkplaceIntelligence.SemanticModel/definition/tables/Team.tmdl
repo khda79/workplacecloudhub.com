@@ -1,5 +1,6 @@
-/// Synthetic collaboration team catalogue.
+/// Legacy synthetic fixture: not used by production report visuals or consolidated evidence. Removal is pending a separately cleared dependency-safe retirement; no real data.
 table Team
+	isHidden
 	lineageTag: 16c570e7-0f8f-438c-a452-0f44bd9ee8b0
 
 	/// Business attribute Team Key.

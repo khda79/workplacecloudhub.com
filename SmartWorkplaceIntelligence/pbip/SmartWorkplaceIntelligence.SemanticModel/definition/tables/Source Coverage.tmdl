@@ -1,5 +1,6 @@
-/// Materialized required-source matrix including failed and stale sources.
+/// Legacy synthetic fixture: not used by production report visuals or consolidated evidence. Removal is pending a separately cleared dependency-safe retirement; no real data.
 table 'Source Coverage'
+	isHidden
 	lineageTag: 500d9ccb-cef7-4472-969a-ecb6a5686d2f
 
 	/// Required sources within target divided by all required sources.

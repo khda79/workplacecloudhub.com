@@ -2,12 +2,12 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json",
   "name": "661f82352c7b55e9f0b9",
   "position": {
-    "x": 1480,
-    "y": 422,
+    "x": 32,
+    "y": 512,
+    "width": 560,
+    "height": 480,
     "z": 110,
-    "height": 234,
-    "width": 408,
-    "tabOrder": 110
+    "tabOrder": 677
   },
   "visual": {
     "visualType": "barChart",
@@ -114,6 +114,13 @@
                   "Value": "24L"
                 }
               }
+            },
+            "labelDisplayUnits": {
+              "expr": {
+                "Literal": {
+                  "Value": "1D"
+                }
+              }
             }
           }
         }
@@ -206,7 +213,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Managed estate by observed tenure. Ranked comparison for the current filter context.'"
+                  "Value": "'Managed estate by observed tenure'"
                 }
               }
             }
@@ -233,7 +240,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "13D"
+                  "Value": "12D"
                 }
               }
             },
@@ -242,16 +249,9 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#1F2937'"
+                      "Value": "'#183153'"
                     }
                   }
-                }
-              }
-            },
-            "bold": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
                 }
               }
             }
@@ -304,9 +304,16 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#CBD8E5'"
+                      "Value": "'#CCDCEC'"
                     }
                   }
+                }
+              }
+            },
+            "radius": {
+              "expr": {
+                "Literal": {
+                  "Value": "8D"
                 }
               }
             },
@@ -314,13 +321,6 @@
               "expr": {
                 "Literal": {
                   "Value": "1D"
-                }
-              }
-            },
-            "radius": {
-              "expr": {
-                "Literal": {
-                  "Value": "12D"
                 }
               }
             }
@@ -360,14 +360,14 @@
             "left": {
               "expr": {
                 "Literal": {
-                  "Value": "10D"
+                  "Value": "8D"
                 }
               }
             },
             "right": {
               "expr": {
                 "Literal": {
-                  "Value": "10D"
+                  "Value": "8D"
                 }
               }
             }
@@ -380,7 +380,7 @@
   "filterConfig": {
     "filters": [
       {
-        "name": "d81883f31071a5209370",
+        "name": "ed02afe31eeb5eeda646",
         "field": {
           "Column": {
             "Expression": {
@@ -394,7 +394,7 @@
         "type": "Categorical"
       },
       {
-        "name": "4a597dcaccc90bcdee5e",
+        "name": "6a2753eeec53c50f3da3",
         "field": {
           "Measure": {
             "Expression": {
@@ -408,5 +408,6 @@
         "type": "Advanced"
       }
     ]
-  }
+  },
+  "parentGroupName": "43f45f8154c24e2769b9"
 }

@@ -1,0 +1,126 @@
+/// Deduplicated AD user and managed-service accounts plus all Entra users. Includes disabled, guest and service accounts; excludes computer accounts, groups and contacts. Strong SID/immutable-ID matches only; never name or UPN merges. Country filters are applied virtually from Country Selection.
+table 'All Accounts Evidence'
+	lineageTag: ca87930c-7b4d-4be6-9f41-ed1a68dca80f
+
+	/// Deduplicated AD user and managed-service accounts plus all Entra users. Includes disabled, guest and service accounts; excludes computer accounts, groups and contacts. Strong SID/immutable-ID matches only; never name or UPN merges. Country filters are applied virtually from Country Selection.
+	measure 'All Accounts' =
+			VAR _countries = VALUES('Country Selection'[Country])
+			VAR _filtered = ISCROSSFILTERED('Country Selection'[Country])
+			VAR _total = DISTINCTCOUNT('All Accounts Evidence'[Account Key])
+			RETURN COALESCE(IF(_filtered, CALCULATE(DISTINCTCOUNT('All Accounts Evidence'[Account Key]), KEEPFILTERS(TREATAS(_countries, 'All Accounts Evidence'[Country Name]))), _total), 0)
+		formatString: #,0
+		displayFolder: Executive overview
+		lineageTag: 5cbdbf1d-6da3-4609-af7f-e2e26b813552
+
+	/// AD user and managed-service accounts + all Entra users, including disabled, guest and service accounts. Deduplicated by SID/immutable-ID; names and UPNs never merge records. Excludes computers, groups and contacts. Source-publication timestamps (UTC) are not event times; country may be Unknown.
+	measure 'All Accounts Scope' = "AD user and managed-service accounts + all Entra users (disabled, guests and services included). Strong SID/immutable-ID deduplication; no name or UPN merges. Excludes computers, groups and contacts. Source-publication UTC is not an event time." & UNICHAR(10) & "AD export UTC: " & MAX('All Accounts Evidence'[AD Observation UTC]) & UNICHAR(10) & "Entra export UTC: " & MAX('All Accounts Evidence'[Entra Observation UTC])
+		isHidden
+		displayFolder: Evidence scope
+		lineageTag: 397ebc17-38fb-430a-96ab-2bf102b19e41
+
+	column TenantKey
+		dataType: string
+		isHidden
+		lineageTag: 32c7e71f-c424-4b96-a6dc-31f6e2c0b384
+		summarizeBy: none
+		sourceColumn: TenantKey
+
+	column 'Account Key'
+		dataType: string
+		isHidden
+		lineageTag: d7083fd4-2977-47c6-9ca6-028b68d35d59
+		summarizeBy: none
+		sourceColumn: Account Key
+
+	column 'Inventory Source'
+		dataType: string
+		lineageTag: 9a3db194-94ba-4a64-8398-d597909b3bc7
+		summarizeBy: none
+		sourceColumn: Inventory Source
+
+	column 'Account Kind'
+		dataType: string
+		lineageTag: c1b26805-fe8e-41f3-a185-310de8a30acc
+		summarizeBy: none
+		sourceColumn: Account Kind
+
+	column 'AD State'
+		dataType: string
+		lineageTag: 83c38f91-eac8-4024-9768-3371e12ba3de
+		summarizeBy: none
+		sourceColumn: AD State
+
+	column 'Entra State'
+		dataType: string
+		lineageTag: 00fb2cae-dd9c-4a44-9edc-6c62f81bb353
+		summarizeBy: none
+		sourceColumn: Entra State
+
+	column 'Entra User Type'
+		dataType: string
+		lineageTag: d8b9d5de-6675-45d5-be7f-872f3b0439f6
+		summarizeBy: none
+		sourceColumn: Entra User Type
+
+	column Country
+		dataType: string
+		isHidden
+		lineageTag: 8efdf965-ec26-4297-8387-cc480ed40a7e
+		summarizeBy: none
+		sourceColumn: Country
+
+	column 'Country Basis'
+		dataType: string
+		lineageTag: 1ae4cd14-7f15-49c8-ab3b-a1d0951a031a
+		summarizeBy: none
+		sourceColumn: Country Basis
+
+	column 'Match Basis'
+		dataType: string
+		lineageTag: 2c0c1035-1b06-47ee-9900-a920c6374f16
+		summarizeBy: none
+		sourceColumn: Match Basis
+
+	column 'UPN Comparison'
+		dataType: string
+		lineageTag: a8749fc7-de17-4289-9a71-af63895dde34
+		summarizeBy: none
+		sourceColumn: UPN Comparison
+
+	column 'AD Observation UTC'
+		dataType: string
+		lineageTag: c2556dbf-9b13-4402-b0e7-c3c06a4a0813
+		summarizeBy: none
+		sourceColumn: AD Observation UTC
+
+	column 'Entra Observation UTC'
+		dataType: string
+		lineageTag: 90b11263-dae2-4810-9c49-3c6b6fd583cf
+		summarizeBy: none
+		sourceColumn: Entra Observation UTC
+
+	/// Canonical country name from the complete ISO reference. Missing country is Unknown; no country inference from device names.
+	column 'Country Name' =
+			VAR _raw = TRIM('All Accounts Evidence'[Country])
+			VAR _code = IF(UPPER(_raw) = "UK", "GB", UPPER(_raw))
+			VAR _codeName = LOOKUPVALUE('Country Reference'[Country Name], 'Country Reference'[Country Code], _code)
+			VAR _sourceName = LOOKUPVALUE('Country Reference'[Country Name], 'Country Reference'[Source Country Name], _raw)
+			RETURN IF(_raw = "" || UPPER(_raw) = "UNKNOWN", "Unknown", COALESCE(_codeName, _sourceName, _raw))
+		dataType: string
+		lineageTag: bd09f327-c40e-4438-a8b1-154859f5a550
+		summarizeBy: none
+
+	partition 'All Accounts Evidence' = m
+		mode: import
+		source =
+				let
+				    Source = ReadMigrationCsv(GetPreparedEvidenceFile("AllAccountsEvidence.csv"), {"TenantKey", "Account Key", "Inventory Source", "Account Kind", "AD State", "Entra State", "Entra User Type", "Country", "Country Basis", "Match Basis", "UPN Comparison", "AD Observation UTC", "Entra Observation UTC"}),
+				    Selected = Table.SelectColumns(Source, {"TenantKey", "Account Key", "Inventory Source", "Account Kind", "AD State", "Entra State", "Entra User Type", "Country", "Country Basis", "Match Basis", "UPN Comparison", "AD Observation UTC", "Entra Observation UTC"}),
+				    Typed = Table.TransformColumnTypes(Selected, {{"TenantKey", type text}, {"Account Key", type text}, {"Inventory Source", type text}, {"Account Kind", type text}, {"AD State", type text}, {"Entra State", type text}, {"Entra User Type", type text}, {"Country", type text}, {"Country Basis", type text}, {"Match Basis", type text}, {"UPN Comparison", type text}, {"AD Observation UTC", type text}, {"Entra Observation UTC", type text}}),
+				    NormalizeUtc = (raw as nullable text) as text => if raw = null or Text.Trim(raw) = "" then "" else let
+				        Parsed = if Text.Contains(raw, "T") then DateTimeZone.FromText(raw, [Culture="en-US"]) else DateTime.AddZone(DateTime.FromText(raw, [Culture="en-US"]), 0)
+				    in DateTimeZone.ToText(DateTimeZone.SwitchZone(Parsed, 0), "yyyy-MM-dd'T'HH:mm:ss'Z'", "en-US"),
+				    NormalizedUtc = Table.TransformColumns(Typed, {{"AD Observation UTC", NormalizeUtc, type text}, {"Entra Observation UTC", NormalizeUtc, type text}})
+				in
+				    NormalizedUtc
+

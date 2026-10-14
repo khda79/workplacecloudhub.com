@@ -1,0 +1,96 @@
+/// Private source-backed migration planning evidence. Unknown is not zero. No Infrastructure hybride assessment.
+table 'Mailbox Migration Batches'
+	lineageTag: c9056e66-163f-43e3-a20a-404c2d8ddc4b
+
+	/// Batch GUID from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
+	column 'Batch GUID'
+		dataType: string
+		lineageTag: 382348fd-34b7-4e2e-b130-6cd25867e3f2
+		sourceColumn: Batch GUID
+
+	/// Batch Name from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
+	column 'Batch Name'
+		dataType: string
+		lineageTag: bb46551c-a6ad-4081-86c7-ef13671fa708
+		sourceColumn: Batch Name
+
+	/// Batch Status from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
+	column 'Batch Status'
+		dataType: string
+		lineageTag: 5cad4658-00cc-47f7-aac7-d37301248e39
+		sourceColumn: Batch Status
+
+	/// Migration Direction from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
+	column 'Migration Direction'
+		dataType: string
+		lineageTag: 42a69630-94d8-46a4-a2aa-7fd26b19dcdf
+		sourceColumn: Migration Direction
+
+	/// Total Mailboxes from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
+	column 'Total Mailboxes'
+		dataType: double
+		formatString: #,0
+		lineageTag: 20be00ab-79d6-47d4-a1b3-caad0eeb48df
+		summarizeBy: none
+		sourceColumn: Total Mailboxes
+
+	/// Failed Mailboxes from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
+	column 'Failed Mailboxes'
+		dataType: double
+		formatString: #,0
+		lineageTag: 3c14f688-5e6c-4a4a-8080-0f9242115413
+		summarizeBy: none
+		sourceColumn: Failed Mailboxes
+
+	/// Warnings from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
+	column Warnings
+		dataType: double
+		formatString: #,0
+		lineageTag: c56384d2-9cb8-4963-aca4-c5a6ab53eb9b
+		summarizeBy: none
+		sourceColumn: Warnings
+
+	/// Last Sync from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
+	column 'Last Sync'
+		dataType: string
+		lineageTag: b9149cad-d966-4351-92cc-0ba4b299f63c
+		sourceColumn: Last Sync
+
+	/// Observation Date from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
+	column 'Observation Date'
+		dataType: string
+		lineageTag: 3a34758e-665b-4a3f-91bf-e733fe6679fe
+		sourceColumn: Observation Date
+
+	/// Evidence Note from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
+	column 'Evidence Note'
+		dataType: string
+		lineageTag: d42eb10e-e493-4a79-8688-5f3c36e0c5b2
+		sourceColumn: Evidence Note
+
+	/// Same governed batch as all Workplace evidence; original migration qualification retained.
+	partition 'Mailbox Migration Batches' = m
+		mode: import
+		source = ```
+				let
+				    Key = (v as any) as text => if v = null then "" else Text.Lower(Text.Trim(Text.From(v))),
+				    Num = (v as any) as nullable number => if v = null or Text.Trim(Text.From(v)) = "" then null else try Number.FromText(Text.From(v), "en-US") otherwise null,
+				    Prepared = ReadMigrationCsv(GetPreparedEvidenceFile("MailboxEvidence.csv"), {"TenantKey"}),
+				    Tenants = List.Distinct(Prepared[TenantKey]),
+				    Tenant = if List.Count(Tenants) = 1 and Tenants{0} <> null and Text.Trim(Tenants{0}) <> "" then Tenants{0} else error "Prepared mailbox evidence must have one tenant",
+				    Raw = ReadMigrationCsv(GetPreparedEvidenceFile("Source-" & "Exchange_EXO_MigrationJobs.csv"), {"TenantKey", "BatchGuid", "BatchName", "BatchStatus", "BatchDirection", "TotalCount", "FailedCount", "ValidationWarningCount", "Timestamp"}),
+				    Checked = if List.AllTrue(List.Transform(Raw[TenantKey], each _ = Tenant)) then Raw else error "Migration batch and prepared tenant differ",
+				    Keys = Table.AddColumn(Checked, "__key", each if Key([BatchGuid]) <> "" then Key([BatchGuid]) else Key([BatchName]), type text),
+				    Nonblank = if List.Contains(Keys[__key], "") then error "Missing migration batch identity" else Keys,
+				    Groups = Table.Group(Nonblank, {"__key"}, {{"Rows", each _, type table}}),
+				    Project = (g as record) as record =>
+				        let R = g[Rows]{0}, F = (name as text) as any => Record.FieldOrDefault(R, name, null),
+				            Control = Table.SelectColumns(g[Rows], {"BatchStatus", "BatchDirection", "TotalCount", "FailedCount", "ValidationWarningCount", "Timestamp"}),
+				            Ambiguous = Table.RowCount(Table.Distinct(Control)) > 1
+				        in [#"Batch GUID"=R[BatchGuid], #"Batch Name"=R[BatchName], #"Batch Status"=R[BatchStatus], #"Migration Direction"=R[BatchDirection], #"Total Mailboxes"=Num(R[TotalCount]), #"Failed Mailboxes"=Num(R[FailedCount]), Warnings=Num(R[ValidationWarningCount]), #"Last Sync"=if F("LastSyncedDateTimeUTC") <> null and F("LastSyncedDateTimeUTC") <> "" then F("LastSyncedDateTimeUTC") else F("LastSyncedDateTime"), #"Observation Date"=R[Timestamp], #"Evidence Note"="One row per batch identity; original export timestamp may be stale. No summed repeated user rows." & (if Ambiguous then " Repeated batch metadata differs; validate original observations." else "")],
+				    Result = Table.FromRecords(List.Transform(Table.ToRecords(Groups), Project), {"Batch GUID", "Batch Name", "Batch Status", "Migration Direction", "Total Mailboxes", "Failed Mailboxes", "Warnings", "Last Sync", "Observation Date", "Evidence Note"}, MissingField.Error)
+				in
+				    Table.TransformColumnTypes(Result, {{"Total Mailboxes", type number}, {"Failed Mailboxes", type number}, {"Warnings", type number}}, "en-US")
+				
+				```
+

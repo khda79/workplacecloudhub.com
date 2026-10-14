@@ -1,0 +1,213 @@
+/// Governed IntuneEnrollmentFailureEvidence.csv. EvidenceKey row identity; configured reported scope only. Missing evidence is not success. Retains outside-catalog and unmatched observations.
+table 'Intune Enrollment Failure Evidence'
+	lineageTag: b9b1164c-807b-4e9f-b3b0-a95d2664d4a7
+
+	/// Count of reported observations in the collected scope only. Blank when the source group is not supplied; zero is not proof of complete coverage.
+	measure 'Intune Enrollment Failure Events' = IF(CALCULATE(COUNTROWS('Intune Operational Source Evidence'), REMOVEFILTERS('Intune Operational Source Evidence'), 'Intune Operational Source Evidence'[Source Group] = "EnrollmentFailures", 'Intune Operational Source Evidence'[Availability] = "Receipt and files verified") > 0, COALESCE(COUNTROWS('Intune Enrollment Failure Evidence'), 0), BLANK())
+		formatString: #,##0
+		displayFolder: Intune | Reported scope
+		lineageTag: e09182e4-e3c1-435b-8947-083298de4802
+
+	/// Distinct tenant-aware identities among the specified reported observations, not verified physical endpoints or full tenant coverage.
+	measure 'Intune Enrollment Identified Devices' = IF(CALCULATE(COUNTROWS('Intune Operational Source Evidence'), REMOVEFILTERS('Intune Operational Source Evidence'), 'Intune Operational Source Evidence'[Source Group] = "EnrollmentFailures", 'Intune Operational Source Evidence'[Availability] = "Receipt and files verified") > 0, COALESCE(CALCULATE(DISTINCTCOUNT('Intune Enrollment Failure Evidence'[Device Key]), KEEPFILTERS('Intune Enrollment Failure Evidence'[Device Key] <> BLANK())), 0), BLANK())
+		formatString: #,##0
+		displayFolder: Intune | Reported scope
+		lineageTag: b7758a0a-83c9-4e83-bb50-6aeed7677676
+
+	/// Count of reported observations in the collected scope only. Blank when the source group is not supplied; zero is not proof of complete coverage.
+	measure 'Intune Enrollment Unmatched Events' = IF(CALCULATE(COUNTROWS('Intune Operational Source Evidence'), REMOVEFILTERS('Intune Operational Source Evidence'), 'Intune Operational Source Evidence'[Source Group] = "EnrollmentFailures", 'Intune Operational Source Evidence'[Availability] = "Receipt and files verified") > 0, COALESCE(CALCULATE(COUNTROWS('Intune Enrollment Failure Evidence'), KEEPFILTERS('Intune Enrollment Failure Evidence'[Inventory Match] <> "Matched technical identifier")), 0), BLANK())
+		formatString: #,##0
+		displayFolder: Intune | Reported scope
+		lineageTag: 96be52a0-526a-4a85-9e9f-bc3dbf85adbf
+
+	/// Prepared IntuneEnrollmentFailureEvidence.csv: TenantKey. Reported source scope only; not whole-tenant coverage or endpoint health.
+	column 'Tenant Key'
+		dataType: string
+		isHidden
+		lineageTag: f1138ada-23cc-4c1c-aa91-705f985faa53
+		summarizeBy: none
+		sourceColumn: TenantKey
+
+	/// Prepared IntuneEnrollmentFailureEvidence.csv: EvidenceKey. Reported source scope only; not whole-tenant coverage or endpoint health.
+	column 'Evidence Key'
+		dataType: string
+		isHidden
+		lineageTag: aa61252b-a54f-4cf0-a17c-2cc3e4779069
+		summarizeBy: none
+		sourceColumn: EvidenceKey
+
+	/// Prepared IntuneEnrollmentFailureEvidence.csv: ReceiptRunId. Reported source scope only; not whole-tenant coverage or endpoint health.
+	column 'Receipt Run ID'
+		dataType: string
+		isHidden
+		lineageTag: ac514cad-6cba-4c31-951c-2a8f7adfbb6c
+		summarizeBy: none
+		sourceColumn: ReceiptRunId
+
+	/// Prepared IntuneEnrollmentFailureEvidence.csv: BusinessRunId. Reported source scope only; not whole-tenant coverage or endpoint health.
+	column 'Business Run ID'
+		dataType: string
+		isHidden
+		lineageTag: 94dbd22e-0fb0-485e-b6d0-84a93d1f1689
+		summarizeBy: none
+		sourceColumn: BusinessRunId
+
+	/// Prepared IntuneEnrollmentFailureEvidence.csv: SourceFile. Reported source scope only; not whole-tenant coverage or endpoint health.
+	column 'Source File'
+		dataType: string
+		isHidden
+		lineageTag: 9ec7ed45-c15c-4568-9dd0-873f7f0487d3
+		summarizeBy: none
+		sourceColumn: SourceFile
+
+	/// Prepared IntuneEnrollmentFailureEvidence.csv: SourceSHA256. Reported source scope only; not whole-tenant coverage or endpoint health.
+	column 'Source SHA256'
+		dataType: string
+		isHidden
+		lineageTag: 1a19830f-3083-41aa-b54a-ba12fdedfcb2
+		summarizeBy: none
+		sourceColumn: SourceSHA256
+
+	/// Prepared IntuneEnrollmentFailureEvidence.csv: SourceRecord. Reported source scope only; not whole-tenant coverage or endpoint health.
+	column 'Source Record'
+		dataType: int64
+		isHidden
+		lineageTag: 66b69c04-e594-4fe4-b414-a22fe3043160
+		summarizeBy: none
+		sourceColumn: SourceRecord
+
+	/// Prepared IntuneEnrollmentFailureEvidence.csv: CollectionUTC. Reported source scope only; not whole-tenant coverage or endpoint health.
+	column 'Collection UTC'
+		dataType: dateTime
+		lineageTag: 8e484a3c-c387-4de7-8efa-066daddcb87a
+		summarizeBy: none
+		sourceColumn: CollectionUTC
+
+	/// Prepared IntuneEnrollmentFailureEvidence.csv: EventId. Reported source scope only; not whole-tenant coverage or endpoint health.
+	column 'Event ID'
+		dataType: string
+		lineageTag: e32e377a-d7fa-44e5-a3ef-3f48a62276c3
+		summarizeBy: none
+		sourceColumn: EventId
+
+	/// Prepared IntuneEnrollmentFailureEvidence.csv: EventDateTime. Reported source scope only; not whole-tenant coverage or endpoint health.
+	column 'Event Time Raw'
+		dataType: string
+		lineageTag: eaa5988d-6f09-4104-9263-442958a139f4
+		summarizeBy: none
+		sourceColumn: EventDateTime
+
+	/// Prepared IntuneEnrollmentFailureEvidence.csv: CorrelationId. Reported source scope only; not whole-tenant coverage or endpoint health.
+	column 'Correlation ID'
+		dataType: string
+		lineageTag: 3142871f-ce4d-4e06-8662-93be21a66094
+		summarizeBy: none
+		sourceColumn: CorrelationId
+
+	/// Prepared IntuneEnrollmentFailureEvidence.csv: ManagedDeviceIdentifier. Reported source scope only; not whole-tenant coverage or endpoint health.
+	column 'Managed Device Identifier'
+		dataType: string
+		lineageTag: 0b68ccb3-b821-44ed-8822-4696fe2246f7
+		summarizeBy: none
+		sourceColumn: ManagedDeviceIdentifier
+
+	/// Prepared IntuneEnrollmentFailureEvidence.csv: HasManagedDeviceIdentifier. Reported source scope only; not whole-tenant coverage or endpoint health.
+	column 'Has Managed Device Identifier'
+		dataType: string
+		lineageTag: 6d926f7f-1810-4394-898c-553b6abf9d62
+		summarizeBy: none
+		sourceColumn: HasManagedDeviceIdentifier
+
+	/// Prepared IntuneEnrollmentFailureEvidence.csv: DeviceId. Reported source scope only; not whole-tenant coverage or endpoint health.
+	column 'Device ID'
+		dataType: string
+		lineageTag: 9e269a5a-9571-4471-ac62-4c8feb7a8a05
+		summarizeBy: none
+		sourceColumn: DeviceId
+
+	/// Prepared IntuneEnrollmentFailureEvidence.csv: UserId. Reported source scope only; not whole-tenant coverage or endpoint health.
+	column 'User ID'
+		dataType: string
+		lineageTag: 65179455-1f02-4082-a1b5-d48a5ca8dbc0
+		summarizeBy: none
+		sourceColumn: UserId
+
+	/// Prepared IntuneEnrollmentFailureEvidence.csv: EnrollmentType. Reported source scope only; not whole-tenant coverage or endpoint health.
+	column 'Enrollment Type'
+		dataType: string
+		lineageTag: 94fee7fb-8c5c-4c31-887e-690e061036de
+		summarizeBy: none
+		sourceColumn: EnrollmentType
+
+	/// Prepared IntuneEnrollmentFailureEvidence.csv: FailureCategory. Reported source scope only; not whole-tenant coverage or endpoint health.
+	column 'Failure Category'
+		dataType: string
+		lineageTag: d10b2567-9ff1-4741-a2a6-85c1b995cd95
+		summarizeBy: none
+		sourceColumn: FailureCategory
+
+	/// Prepared IntuneEnrollmentFailureEvidence.csv: FailureReason. Reported source scope only; not whole-tenant coverage or endpoint health.
+	column 'Failure Reason'
+		dataType: string
+		lineageTag: 294ac82d-9fae-40ec-ba69-af1b1973792a
+		summarizeBy: none
+		sourceColumn: FailureReason
+
+	/// Prepared IntuneEnrollmentFailureEvidence.csv: OperatingSystem. Reported source scope only; not whole-tenant coverage or endpoint health.
+	column 'Operating System'
+		dataType: string
+		lineageTag: 6aaaee09-d567-4437-97ff-bdd0be930651
+		summarizeBy: none
+		sourceColumn: OperatingSystem
+
+	/// Prepared IntuneEnrollmentFailureEvidence.csv: OSVersion. Reported source scope only; not whole-tenant coverage or endpoint health.
+	column 'OS Version'
+		dataType: string
+		lineageTag: 39b22979-d63b-4850-b58b-78f3bd2fbf2d
+		summarizeBy: none
+		sourceColumn: OSVersion
+
+	/// Prepared IntuneEnrollmentFailureEvidence.csv: SourceStatusUTC. Reported source scope only; not whole-tenant coverage or endpoint health.
+	column 'Source Status UTC'
+		dataType: dateTime
+		lineageTag: 941d9f2a-3a8a-41cf-8f62-4439755e4592
+		summarizeBy: none
+		sourceColumn: SourceStatusUTC
+
+	/// Prepared IntuneEnrollmentFailureEvidence.csv: SourceStatusTimeBasis. Reported source scope only; not whole-tenant coverage or endpoint health.
+	column 'Source Status Time Basis'
+		dataType: string
+		lineageTag: e8fa1441-96b7-49b1-b394-5ee904940f91
+		summarizeBy: none
+		sourceColumn: SourceStatusTimeBasis
+
+	/// Prepared IntuneEnrollmentFailureEvidence.csv: InventoryMatch. Reported source scope only; not whole-tenant coverage or endpoint health.
+	column 'Inventory Match'
+		dataType: string
+		lineageTag: c0dd879b-69f2-4c5d-8c3d-7181740439fa
+		summarizeBy: none
+		sourceColumn: InventoryMatch
+
+	/// Length-prefixed tenant-aware technical relationship key.
+	column 'Device Key'
+		dataType: string
+		isHidden
+		lineageTag: f364c2e6-8521-403f-b78d-55e2aa2a2847
+		summarizeBy: none
+		sourceColumn: Device Key
+
+	partition 'Intune Enrollment Failure Evidence' = m
+		mode: import
+		source =
+				let
+				    Raw = ReadMigrationCsv(GetPreparedEvidenceFile("IntuneEnrollmentFailureEvidence.csv"), {"TenantKey", "EvidenceKey", "ReceiptRunId", "BusinessRunId", "SourceFile", "SourceSHA256", "SourceRecord", "CollectionUTC", "EventId", "EventDateTime", "CorrelationId", "ManagedDeviceIdentifier", "HasManagedDeviceIdentifier", "DeviceId", "UserId", "EnrollmentType", "FailureCategory", "FailureReason", "OperatingSystem", "OSVersion", "SourceStatusUTC", "SourceStatusTimeBasis", "InventoryMatch"}),
+				    Selected = Table.SelectColumns(Raw, {"TenantKey", "EvidenceKey", "ReceiptRunId", "BusinessRunId", "SourceFile", "SourceSHA256", "SourceRecord", "CollectionUTC", "EventId", "EventDateTime", "CorrelationId", "ManagedDeviceIdentifier", "HasManagedDeviceIdentifier", "DeviceId", "UserId", "EnrollmentType", "FailureCategory", "FailureReason", "OperatingSystem", "OSVersion", "SourceStatusUTC", "SourceStatusTimeBasis", "InventoryMatch"}),
+				    Tenants = List.Distinct(Selected[TenantKey]),
+				    Validated = if List.Count(Tenants) > 1 or List.Contains(Tenants, null) or List.Contains(Tenants, "") then error "Intune evidence tenant identity is invalid" else Selected,
+				    ParseUtc = (raw as nullable text) as nullable datetime => if raw = null or Text.Trim(raw) = "" then null else if not Text.EndsWith(raw, "Z") then error "Intune prepared time requires explicit UTC Z" else DateTimeZone.RemoveZone(DateTimeZone.SwitchZone(DateTimeZone.FromText(raw, [Culture="en-US"]), 0)),
+				    Key = (values as list) as nullable text => if List.AnyTrue(List.Transform(values, each _ = null or Text.Trim(Text.From(_)) = "")) then null else Text.Combine(List.Transform(values, each Text.From(Text.Length(Text.From(_))) & ":" & Text.From(_)), "|"),
+				    Typed = Table.TransformColumns(Validated, {{"TenantKey", each _, type nullable text}, {"EvidenceKey", each _, type nullable text}, {"ReceiptRunId", each _, type nullable text}, {"BusinessRunId", each _, type nullable text}, {"SourceFile", each _, type nullable text}, {"SourceSHA256", each _, type nullable text}, {"SourceRecord", each if _ = null or Text.Trim(_) = "" then null else Int64.From(Number.FromText(_, "en-US")), type nullable number}, {"CollectionUTC", ParseUtc, type nullable datetime}, {"EventId", each _, type nullable text}, {"EventDateTime", each _, type nullable text}, {"CorrelationId", each _, type nullable text}, {"ManagedDeviceIdentifier", each _, type nullable text}, {"HasManagedDeviceIdentifier", each _, type nullable text}, {"DeviceId", each _, type nullable text}, {"UserId", each _, type nullable text}, {"EnrollmentType", each _, type nullable text}, {"FailureCategory", each _, type nullable text}, {"FailureReason", each _, type nullable text}, {"OperatingSystem", each _, type nullable text}, {"OSVersion", each _, type nullable text}, {"SourceStatusUTC", ParseUtc, type nullable datetime}, {"SourceStatusTimeBasis", each _, type nullable text}, {"InventoryMatch", each _, type nullable text}}),
+				    WithDeviceKey = Table.AddColumn(Typed, "Device Key", each if [HasManagedDeviceIdentifier] = "True" and [ManagedDeviceIdentifier] <> "00000000-0000-0000-0000-000000000000" then Key({[TenantKey], [ManagedDeviceIdentifier]}) else null, type nullable text)
+				in
+				    WithDeviceKey
+

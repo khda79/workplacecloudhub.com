@@ -1,0 +1,93 @@
+/// Private source-backed migration planning evidence. Unknown is not zero. No Infrastructure hybride assessment.
+table 'Windows Migration History'
+	lineageTag: 2bf8d625-fb55-440f-9e7e-6def58871717
+
+	/// Observed local migration planning evidence. Missing evidence is not zero; see provenance and task views.
+	measure 'Migration Trend Windows 10' = SUM('Windows Migration History'[Windows 10 Devices])
+		formatString: #,0
+		displayFolder: Migration planning
+		lineageTag: 90b7f8fa-ca4b-439c-8537-402b1ce18dca
+
+	/// Observed local migration planning evidence. Missing evidence is not zero; see provenance and task views.
+	measure 'Migration Trend Windows 11' = SUM('Windows Migration History'[Windows 11 Devices])
+		formatString: #,0
+		displayFolder: Migration planning
+		lineageTag: cb5c0556-2793-4872-aedc-6598268a40b1
+
+	/// Snapshot Date from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
+	column 'Snapshot Date'
+		dataType: dateTime
+		lineageTag: d57a2bb7-014a-431e-b8da-54257abd5b5a
+		sourceColumn: Snapshot Date
+
+	/// Snapshot Week from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
+	column 'Snapshot Week'
+		dataType: string
+		lineageTag: 1e9e3a64-c4f5-483a-88ee-5f2cee1113f2
+		sourceColumn: Snapshot Week
+
+	/// Windows 10 Devices from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
+	column 'Windows 10 Devices'
+		dataType: double
+		formatString: #,0
+		lineageTag: e2ab110e-b57b-4454-ad6e-162fd88800cf
+		summarizeBy: none
+		sourceColumn: Windows 10 Devices
+
+	/// Windows 11 Devices from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
+	column 'Windows 11 Devices'
+		dataType: double
+		formatString: #,0
+		lineageTag: ca6b323f-d593-4035-aff5-4cc7c2b16e22
+		summarizeBy: none
+		sourceColumn: Windows 11 Devices
+
+	/// Excluded Ambiguous Keys from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
+	column 'Excluded Ambiguous Keys'
+		dataType: double
+		formatString: #,0
+		lineageTag: 73df4da5-91e4-4507-9f57-150989b5a960
+		summarizeBy: none
+		sourceColumn: Excluded Ambiguous Keys
+
+	/// Evidence Status from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
+	column 'Evidence Status'
+		dataType: string
+		lineageTag: 044d74fe-1426-4dea-a742-ef640dca1f0d
+		sourceColumn: Evidence Status
+
+	/// Evidence Note from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
+	column 'Evidence Note'
+		dataType: string
+		lineageTag: 71f9f8d0-60e8-403c-a928-172570e47a92
+		sourceColumn: Evidence Note
+
+	/// Normal SmartM365 local inputs through DataRoot / PreparedEvidenceRoot. No dependency on frozen report-validation JSON. Source qualification is retained; no collection is triggered.
+	partition 'Windows Migration History' = m
+		mode: import
+		source = ```
+				let
+				    Prepared = ReadMigrationCsv(GetPreparedEvidenceFile("WindowsMigrationEvidence.csv"), {"TenantKey"}),
+				    Tenants = List.Distinct(Prepared[TenantKey]),
+				    Tenant = if List.Count(Tenants) = 1 and Tenants{0} <> null and Text.Trim(Tenants{0}) <> "" then Tenants{0} else error "Prepared device evidence must have one tenant",
+				    Key = (v as any) as text => if v = null then "" else Text.Lower(Text.Trim(Text.From(v))),
+				    Snapshots = ReadMigrationWeeklyHistory("Windows", "Intune_Devices_Inventory.csv", {"Device ID", "OS version", "OS"}, Tenant),
+				    Project = (s as record) as record =>
+				        let Keys = Table.AddColumn(s[Rows], "__key", each Key([#"Device ID"]), type text),
+				            Nonblank = Table.SelectRows(Keys, each [__key] <> ""),
+				            Groups = Table.Group(Nonblank, {"__key"}, {{"Rows", each _, type table}}),
+				            Unique = Table.SelectRows(Groups, each Table.RowCount([Rows]) = 1),
+				            Records = List.Transform(Unique[Rows], each _{0}),
+				            Generation = (r as record) as nullable text =>
+				                let Version = Text.Split(Key(r[#"OS version"]), "."),
+				                    Build = if List.Count(Version) > 2 then try Number.FromText(Version{2}, "en-US") otherwise null else null
+				                in if Text.Contains(Key(r[OS]), "windows") and Build <> null and Build >= 10240 then (if Build >= 22000 then "Windows 11" else "Windows 10") else null,
+				            Generations = List.Transform(Records, Generation),
+				            Excluded = Table.RowCount(Keys) - List.Count(Records)
+				        in [#"Snapshot Date"=s[Date], #"Snapshot Week"=s[Week], #"Windows 10 Devices"=List.Count(List.Select(Generations, each _ = "Windows 10")), #"Windows 11 Devices"=List.Count(List.Select(Generations, each _ = "Windows 11")), #"Excluded Ambiguous Keys"=Excluded, #"Evidence Status"=if s[HasRecordedDate] and s[AllTenantScoped] then "Observed weekly inventory; ambiguous keys excluded" else "Provisional - exact collection date or tenant scope not recorded", #"Evidence Note"=(if s[HasRecordedDate] then "Recorded snapshot date. " else "ISO week bucket, not collection date. ") & "Managed inventory only; country history is unavailable; stock changes are not verified migration events." & (if s[ExcludedOtherTenantRows] > 0 then " Other-tenant records excluded." else "")],
+				    Result = Table.FromRecords(List.Transform(Snapshots, Project), {"Snapshot Date", "Snapshot Week", "Windows 10 Devices", "Windows 11 Devices", "Excluded Ambiguous Keys", "Evidence Status", "Evidence Note"}, MissingField.Error)
+				in
+				    Table.TransformColumnTypes(Result, {{"Snapshot Date", type date}, {"Windows 10 Devices", type number}, {"Windows 11 Devices", type number}, {"Excluded Ambiguous Keys", type number}}, "en-US")
+				
+				```
+

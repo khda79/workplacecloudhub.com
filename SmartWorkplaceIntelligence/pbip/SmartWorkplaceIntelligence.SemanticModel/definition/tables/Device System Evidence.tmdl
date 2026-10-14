@@ -1,0 +1,923 @@
+/// Prepared tenant-aware Windows Device System observations at one tenant/device identity per snapshot. Country derives from the unique primary-user CountryOrRegion. Includes unmatched observations. PlatformScriptLastUpdate freshness, missingness and contradictory states are explicit; Windows registration does not prove EDR health or BitLocker key escrow.
+table 'Device System Evidence'
+	lineageTag: a284d322-eda3-4fad-bdaa-615f03c2f099
+
+	/// Unique tenant/device identities in the prepared LocalSystem source, including 12 observations unmatched to the older prepared inventory at the audited checkpoint. Not the full AD + Intune estate.
+	measure 'Device System Observations' = COALESCE(DISTINCTCOUNT('Device System Evidence'[Device System Key]), 0)
+		formatString: #,##0
+		displayFolder: Device System
+		lineageTag: 15bec58d-37a8-4dce-b738-79c3bec25fb1
+
+	/// Reported Windows registration state for the configured antivirus product. Does not prove EDR presence, health, or current coverage. Missing, unknown and error states are separate.
+	measure 'Expected AV Detected' = CALCULATE([Device System Observations], KEEPFILTERS('Device System Evidence'[Expected AV State] = "Detected"))
+		formatString: #,##0
+		displayFolder: Device System\Antivirus
+		lineageTag: 0f719ced-5dfd-4dfe-a639-1475aa96b4c1
+
+	/// Reported Windows registration state for the configured antivirus product. Does not prove EDR presence, health, or current coverage. Missing, unknown and error states are separate.
+	measure 'Expected AV NotDetected' = CALCULATE([Device System Observations], KEEPFILTERS('Device System Evidence'[Expected AV State] = "NotDetected"))
+		formatString: #,##0
+		displayFolder: Device System\Antivirus
+		lineageTag: c1f47424-a318-4709-a96d-67d13ed20d1f
+
+	/// Reported Windows registration state for the configured antivirus product. Does not prove EDR presence, health, or current coverage. Missing, unknown and error states are separate.
+	measure 'Expected AV NotCollected' = CALCULATE([Device System Observations], KEEPFILTERS('Device System Evidence'[Expected AV State] = "NotCollected"))
+		formatString: #,##0
+		displayFolder: Device System\Antivirus
+		lineageTag: 310cd960-ad58-4115-9907-19fb5e70f28a
+
+	/// Configured product and a comparable Detected/NotDetected registration state without conflicting evidence. Observation freshness is qualified separately.
+	measure 'Expected AV Evaluable Observations' = CALCULATE([Device System Observations], KEEPFILTERS('Device System Evidence'[AV Qualification] = "Evaluable registration observation"))
+		formatString: #,##0
+		displayFolder: Device System\Antivirus
+		lineageTag: ae583d03-c6b0-4757-8e0d-1c930e9879c3
+
+	/// Evaluable Windows registration observations divided by all LocalSystem observations in the same filters. Never a detected-EDR coverage percentage for the whole AD + Intune estate.
+	measure 'Expected AV Evaluable Share (%)' = DIVIDE([Expected AV Evaluable Observations], [Device System Observations])
+		formatString: 0.0%
+		displayFolder: Device System\Antivirus
+		lineageTag: 80c27012-8aba-4b45-a123-0fae13acab08
+
+	/// Product label derived only from prepared Expected AV Name; no tenant-specific product is hardcoded.
+	measure 'Expected Antivirus Product' =
+			VAR _names = FILTER(VALUES('Device System Evidence'[Expected AV Name]), NOT ISBLANK('Device System Evidence'[Expected AV Name]) && 'Device System Evidence'[Expected AV Name] <> "")
+			RETURN IF(COUNTROWS(_names) = 0, "Not configured", IF(COUNTROWS(_names) = 1, MAXX(_names, 'Device System Evidence'[Expected AV Name]), "Multiple configured products"))
+		displayFolder: Device System\Antivirus
+		lineageTag: a37184a0-5041-4815-81fc-adcb841f9588
+
+	/// PlatformScriptLastUpdate parsed using an explicit offset or verified configured timezone and age no greater than the configured limit, evaluated at query UTC. Unknown timezone or absent policy never counts as fresh.
+	measure 'Device System Fresh Observations' =
+			VAR _now = UTCNOW()
+			RETURN COALESCE(COUNTROWS(FILTER('Device System Evidence', NOT ISBLANK('Device System Evidence'[Observation UTC]) && NOT ISBLANK('Device System Evidence'[Freshness Max Age Hours]) && 'Device System Evidence'[Freshness Max Age Hours] > 0 && 'Device System Evidence'[Observation UTC] <= _now && (_now - 'Device System Evidence'[Observation UTC]) * 24 <= 'Device System Evidence'[Freshness Max Age Hours])), 0)
+		formatString: #,##0
+		displayFolder: Device System
+		lineageTag: 07e740e7-7c9a-4c53-9312-002d5dd7bb6f
+
+	/// Missing, invalid or offsetless unqualified observation time. Not an adverse device state.
+	measure 'Device System Unqualified Time Observations' = CALCULATE([Device System Observations], KEEPFILTERS(ISBLANK('Device System Evidence'[Observation UTC])))
+		formatString: #,##0
+		displayFolder: Device System\Data quality
+		lineageTag: 759de4a8-1766-4788-84f6-d6db4b268945
+
+	/// Contradictory local, Intune inventory, or OS BitLocker conversion observations. Does not prove an unencrypted device and does not modify the existing Intune encryption KPI.
+	measure 'Device System Encryption Conflicts' = CALCULATE([Device System Observations], KEEPFILTERS('Device System Evidence'[Encryption Comparison] = "Conflict"))
+		formatString: #,##0
+		displayFolder: Device System\Data quality
+		lineageTag: c10cfb11-0c7a-4567-b9a5-41dcb1b85e90
+
+	/// LocalSystem device identities absent from the older prepared Device Inventory export; retained in this source, not silently dropped.
+	measure 'Device System Prepared Inventory Unmatched' = CALCULATE([Device System Observations], KEEPFILTERS('Device System Evidence'[Prepared Inventory Match] = "Unmatched"))
+		formatString: #,##0
+		displayFolder: Device System\Data quality
+		lineageTag: c464c17d-4a98-46a1-bce6-f433b17dfbd2
+
+	/// Scope and freshness tooltip shared by the new Device System views.
+	measure 'Device System Evidence Scope' = "Windows registration observations; no proof of EDR health or BitLocker recovery-key escrow. Freshness uses PlatformScriptLastUpdate, not preparation time. " & FORMAT([Device System Fresh Observations], "#,##0") & " observations meet configured age/time qualification; " & FORMAT([Device System Unqualified Time Observations], "#,##0") & " have no qualified UTC observation time. Graph inventory fields do not prove per-field measurement time. Last boot aliases are consolidated into one value."
+		displayFolder: Device System\Evidence scope
+		lineageTag: e7c0b61c-4274-4824-9b3f-03ceef200926
+
+	/// Prepared BIOS Version, exposed only for one unique Intune source ID in the existing inventory and a single tenant. No name matching; missing and ambiguous joins are explicit. Reported states retain their source qualification; freshness is separate.
+	measure 'Device System BIOS Version' =
+			VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
+			VAR _tenants = CALCULATE(DISTINCTCOUNT('Device System Evidence'[TenantKey]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'))
+			VAR _matches = CALCULATE(COUNTROWS('Device System Evidence'), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			VAR _value = CALCULATE(SELECTEDVALUE('Device System Evidence'[BIOS Version]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			RETURN IF(ISBLANK(_id), BLANK(), SWITCH(TRUE(), _tenants <> 1, "Ambiguous tenant scope", _matches = 0, "Missing observation", _matches <> 1, "Ambiguous device identity", ISBLANK(_value) || _value = "", "Missing", _value))
+		displayFolder: Device System\Matched device detail
+		lineageTag: cbe9f44d-f194-4ac1-8736-809d5853013b
+
+	/// Prepared BIOS Date, exposed only for one unique Intune source ID in the existing inventory and a single tenant. No name matching; missing and ambiguous joins are explicit. Reported states retain their source qualification; freshness is separate.
+	measure 'Device System BIOS Date' =
+			VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
+			VAR _tenants = CALCULATE(DISTINCTCOUNT('Device System Evidence'[TenantKey]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'))
+			VAR _matches = CALCULATE(COUNTROWS('Device System Evidence'), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			VAR _value = CALCULATE(SELECTEDVALUE('Device System Evidence'[BIOS Date]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			RETURN IF(ISBLANK(_id), BLANK(), SWITCH(TRUE(), _tenants <> 1, "Ambiguous tenant scope", _matches = 0, "Missing observation", _matches <> 1, "Ambiguous device identity", ISBLANK(_value) || _value = "", "Missing", _value))
+		displayFolder: Device System\Matched device detail
+		lineageTag: cdc8e372-f336-46ed-b8b6-57225fee8a28
+
+	/// Prepared Firmware Type, exposed only for one unique Intune source ID in the existing inventory and a single tenant. No name matching; missing and ambiguous joins are explicit. Reported states retain their source qualification; freshness is separate.
+	measure 'Device System Firmware Type' =
+			VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
+			VAR _tenants = CALCULATE(DISTINCTCOUNT('Device System Evidence'[TenantKey]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'))
+			VAR _matches = CALCULATE(COUNTROWS('Device System Evidence'), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			VAR _value = CALCULATE(SELECTEDVALUE('Device System Evidence'[Firmware Type]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			RETURN IF(ISBLANK(_id), BLANK(), SWITCH(TRUE(), _tenants <> 1, "Ambiguous tenant scope", _matches = 0, "Missing observation", _matches <> 1, "Ambiguous device identity", ISBLANK(_value) || _value = "", "Missing", _value))
+		displayFolder: Device System\Matched device detail
+		lineageTag: f424eccf-1f04-4f7c-b1ec-96e923641834
+
+	/// Prepared Last Boot Time, exposed only for one unique Intune source ID in the existing inventory and a single tenant. No name matching; missing and ambiguous joins are explicit. Reported states retain their source qualification; freshness is separate.
+	measure 'Device System Last Boot Time' =
+			VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
+			VAR _tenants = CALCULATE(DISTINCTCOUNT('Device System Evidence'[TenantKey]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'))
+			VAR _matches = CALCULATE(COUNTROWS('Device System Evidence'), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			VAR _value = CALCULATE(SELECTEDVALUE('Device System Evidence'[Last Boot Time]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			RETURN IF(ISBLANK(_id), BLANK(), SWITCH(TRUE(), _tenants <> 1, "Ambiguous tenant scope", _matches = 0, "Missing observation", _matches <> 1, "Ambiguous device identity", ISBLANK(_value) || _value = "", "Missing", _value))
+		displayFolder: Device System\Matched device detail
+		lineageTag: 964a2247-c3a2-4388-b3d7-cd3b3c0b900e
+
+	/// Prepared Secure Boot State, exposed only for one unique Intune source ID in the existing inventory and a single tenant. No name matching; missing and ambiguous joins are explicit. Reported states retain their source qualification; freshness is separate.
+	measure 'Device System Secure Boot State' =
+			VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
+			VAR _tenants = CALCULATE(DISTINCTCOUNT('Device System Evidence'[TenantKey]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'))
+			VAR _matches = CALCULATE(COUNTROWS('Device System Evidence'), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			VAR _value = CALCULATE(SELECTEDVALUE('Device System Evidence'[Secure Boot State]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			RETURN IF(ISBLANK(_id), BLANK(), SWITCH(TRUE(), _tenants <> 1, "Ambiguous tenant scope", _matches = 0, "Missing observation", _matches <> 1, "Ambiguous device identity", ISBLANK(_value) || _value = "", "Missing", _value))
+		displayFolder: Device System\Matched device detail
+		lineageTag: 4efebc92-f324-41bb-80c8-a69cc5e72fdc
+
+	/// Prepared VBS State, exposed only for one unique Intune source ID in the existing inventory and a single tenant. No name matching; missing and ambiguous joins are explicit. Reported states retain their source qualification; freshness is separate.
+	measure 'Device System VBS State' =
+			VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
+			VAR _tenants = CALCULATE(DISTINCTCOUNT('Device System Evidence'[TenantKey]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'))
+			VAR _matches = CALCULATE(COUNTROWS('Device System Evidence'), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			VAR _value = CALCULATE(SELECTEDVALUE('Device System Evidence'[VBS State]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			RETURN IF(ISBLANK(_id), BLANK(), SWITCH(TRUE(), _tenants <> 1, "Ambiguous tenant scope", _matches = 0, "Missing observation", _matches <> 1, "Ambiguous device identity", ISBLANK(_value) || _value = "", "Missing", _value))
+		displayFolder: Device System\Matched device detail
+		lineageTag: 376703e8-c587-449b-9c62-e3604c7d620f
+
+	/// Prepared VBS Hardware Requirements, exposed only for one unique Intune source ID in the existing inventory and a single tenant. No name matching; missing and ambiguous joins are explicit. Reported states retain their source qualification; freshness is separate.
+	measure 'Device System VBS Hardware Requirements' =
+			VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
+			VAR _tenants = CALCULATE(DISTINCTCOUNT('Device System Evidence'[TenantKey]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'))
+			VAR _matches = CALCULATE(COUNTROWS('Device System Evidence'), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			VAR _value = CALCULATE(SELECTEDVALUE('Device System Evidence'[VBS Hardware Requirements]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			RETURN IF(ISBLANK(_id), BLANK(), SWITCH(TRUE(), _tenants <> 1, "Ambiguous tenant scope", _matches = 0, "Missing observation", _matches <> 1, "Ambiguous device identity", ISBLANK(_value) || _value = "", "Missing", _value))
+		displayFolder: Device System\Matched device detail
+		lineageTag: f90f99fd-e87b-4da9-8846-323b6d70e27d
+
+	/// Prepared Credential Guard State, exposed only for one unique Intune source ID in the existing inventory and a single tenant. No name matching; missing and ambiguous joins are explicit. Reported states retain their source qualification; freshness is separate.
+	measure 'Device System Credential Guard State' =
+			VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
+			VAR _tenants = CALCULATE(DISTINCTCOUNT('Device System Evidence'[TenantKey]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'))
+			VAR _matches = CALCULATE(COUNTROWS('Device System Evidence'), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			VAR _value = CALCULATE(SELECTEDVALUE('Device System Evidence'[Credential Guard State]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			RETURN IF(ISBLANK(_id), BLANK(), SWITCH(TRUE(), _tenants <> 1, "Ambiguous tenant scope", _matches = 0, "Missing observation", _matches <> 1, "Ambiguous device identity", ISBLANK(_value) || _value = "", "Missing", _value))
+		displayFolder: Device System\Matched device detail
+		lineageTag: 9e41e2c8-cdcd-4ae6-8dc4-d04f490e8bac
+
+	/// Prepared Management State, exposed only for one unique Intune source ID in the existing inventory and a single tenant. No name matching; missing and ambiguous joins are explicit. Reported states retain their source qualification; freshness is separate.
+	measure 'Device System Management State' =
+			VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
+			VAR _tenants = CALCULATE(DISTINCTCOUNT('Device System Evidence'[TenantKey]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'))
+			VAR _matches = CALCULATE(COUNTROWS('Device System Evidence'), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			VAR _value = CALCULATE(SELECTEDVALUE('Device System Evidence'[Management State]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			RETURN IF(ISBLANK(_id), BLANK(), SWITCH(TRUE(), _tenants <> 1, "Ambiguous tenant scope", _matches = 0, "Missing observation", _matches <> 1, "Ambiguous device identity", ISBLANK(_value) || _value = "", "Missing", _value))
+		displayFolder: Device System\Matched device detail
+		lineageTag: 5b9e8d28-57cd-460c-a8ce-e65dc11693b4
+
+	/// Prepared Compliance State, exposed only for one unique Intune source ID in the existing inventory and a single tenant. No name matching; missing and ambiguous joins are explicit. Reported states retain their source qualification; freshness is separate.
+	measure 'Device System Compliance State' =
+			VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
+			VAR _tenants = CALCULATE(DISTINCTCOUNT('Device System Evidence'[TenantKey]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'))
+			VAR _matches = CALCULATE(COUNTROWS('Device System Evidence'), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			VAR _value = CALCULATE(SELECTEDVALUE('Device System Evidence'[Compliance State]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			RETURN IF(ISBLANK(_id), BLANK(), SWITCH(TRUE(), _tenants <> 1, "Ambiguous tenant scope", _matches = 0, "Missing observation", _matches <> 1, "Ambiguous device identity", ISBLANK(_value) || _value = "", "Missing", _value))
+		displayFolder: Device System\Matched device detail
+		lineageTag: 238fb7bc-eb6d-4011-88c6-a06831428ef1
+
+	/// Prepared Last Sync Raw, exposed only for one unique Intune source ID in the existing inventory and a single tenant. No name matching; missing and ambiguous joins are explicit. Reported states retain their source qualification; freshness is separate.
+	measure 'Device System Last Sync Raw' =
+			VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
+			VAR _tenants = CALCULATE(DISTINCTCOUNT('Device System Evidence'[TenantKey]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'))
+			VAR _matches = CALCULATE(COUNTROWS('Device System Evidence'), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			VAR _value = CALCULATE(SELECTEDVALUE('Device System Evidence'[Last Sync Raw]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			RETURN IF(ISBLANK(_id), BLANK(), SWITCH(TRUE(), _tenants <> 1, "Ambiguous tenant scope", _matches = 0, "Missing observation", _matches <> 1, "Ambiguous device identity", ISBLANK(_value) || _value = "", "Missing", _value))
+		displayFolder: Device System\Matched device detail
+		lineageTag: 1aa63934-3da6-48b5-855d-01e8c850a238
+
+	/// Prepared Expected AV Name, exposed only for one unique Intune source ID in the existing inventory and a single tenant. No name matching; missing and ambiguous joins are explicit. Reported states retain their source qualification; freshness is separate.
+	measure 'Device System Expected AV Name' =
+			VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
+			VAR _tenants = CALCULATE(DISTINCTCOUNT('Device System Evidence'[TenantKey]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'))
+			VAR _matches = CALCULATE(COUNTROWS('Device System Evidence'), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			VAR _value = CALCULATE(SELECTEDVALUE('Device System Evidence'[Expected AV Name]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			RETURN IF(ISBLANK(_id), BLANK(), SWITCH(TRUE(), _tenants <> 1, "Ambiguous tenant scope", _matches = 0, "Missing observation", _matches <> 1, "Ambiguous device identity", ISBLANK(_value) || _value = "", "Missing", _value))
+		displayFolder: Device System\Matched device detail
+		lineageTag: 8abe7ac7-4d01-4527-85e1-0e20d06e49a7
+
+	/// Prepared Expected AV State, exposed only for one unique Intune source ID in the existing inventory and a single tenant. No name matching; missing and ambiguous joins are explicit. Reported states retain their source qualification; freshness is separate.
+	measure 'Device System Expected AV State' =
+			VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
+			VAR _tenants = CALCULATE(DISTINCTCOUNT('Device System Evidence'[TenantKey]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'))
+			VAR _matches = CALCULATE(COUNTROWS('Device System Evidence'), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			VAR _value = CALCULATE(SELECTEDVALUE('Device System Evidence'[Expected AV State]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			RETURN IF(ISBLANK(_id), BLANK(), SWITCH(TRUE(), _tenants <> 1, "Ambiguous tenant scope", _matches = 0, "Missing observation", _matches <> 1, "Ambiguous device identity", ISBLANK(_value) || _value = "", "Missing", _value))
+		displayFolder: Device System\Matched device detail
+		lineageTag: 3dd549c6-ad8d-4173-9b3a-f878b68fc9e5
+
+	/// Prepared Third Party AV Products, exposed only for one unique Intune source ID in the existing inventory and a single tenant. No name matching; missing and ambiguous joins are explicit. Reported states retain their source qualification; freshness is separate.
+	measure 'Device System Third Party AV Products' =
+			VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
+			VAR _tenants = CALCULATE(DISTINCTCOUNT('Device System Evidence'[TenantKey]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'))
+			VAR _matches = CALCULATE(COUNTROWS('Device System Evidence'), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			VAR _value = CALCULATE(SELECTEDVALUE('Device System Evidence'[Third Party AV Products]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			RETURN IF(ISBLANK(_id), BLANK(), SWITCH(TRUE(), _tenants <> 1, "Ambiguous tenant scope", _matches = 0, "Missing observation", _matches <> 1, "Ambiguous device identity", ISBLANK(_value) || _value = "", "Missing", _value))
+		displayFolder: Device System\Matched device detail
+		lineageTag: 18578fa2-f83e-4006-b747-9a307a3aecf7
+
+	/// Prepared AV Qualification, exposed only for one unique Intune source ID in the existing inventory and a single tenant. No name matching; missing and ambiguous joins are explicit. Reported states retain their source qualification; freshness is separate.
+	measure 'Device System AV Qualification' =
+			VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
+			VAR _tenants = CALCULATE(DISTINCTCOUNT('Device System Evidence'[TenantKey]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'))
+			VAR _matches = CALCULATE(COUNTROWS('Device System Evidence'), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			VAR _value = CALCULATE(SELECTEDVALUE('Device System Evidence'[AV Qualification]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			RETURN IF(ISBLANK(_id), BLANK(), SWITCH(TRUE(), _tenants <> 1, "Ambiguous tenant scope", _matches = 0, "Missing observation", _matches <> 1, "Ambiguous device identity", ISBLANK(_value) || _value = "", "Missing", _value))
+		displayFolder: Device System\Matched device detail
+		lineageTag: 378e98f3-2cb8-4955-9dcd-3910b3bda017
+
+	/// Prepared Observation Raw, exposed only for one unique Intune source ID in the existing inventory and a single tenant. No name matching; missing and ambiguous joins are explicit. Reported states retain their source qualification; freshness is separate.
+	measure 'Device System Observation Raw' =
+			VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
+			VAR _tenants = CALCULATE(DISTINCTCOUNT('Device System Evidence'[TenantKey]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'))
+			VAR _matches = CALCULATE(COUNTROWS('Device System Evidence'), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			VAR _value = CALCULATE(SELECTEDVALUE('Device System Evidence'[Observation Raw]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			RETURN IF(ISBLANK(_id), BLANK(), SWITCH(TRUE(), _tenants <> 1, "Ambiguous tenant scope", _matches = 0, "Missing observation", _matches <> 1, "Ambiguous device identity", ISBLANK(_value) || _value = "", "Missing", _value))
+		displayFolder: Device System\Matched device detail
+		lineageTag: cde513a1-5c5b-4af3-9f89-041b9f0bda0a
+
+	/// Prepared Freshness, exposed only for one unique Intune source ID in the existing inventory and a single tenant. No name matching; missing and ambiguous joins are explicit. Reported states retain their source qualification; freshness is separate.
+	measure 'Device System Freshness' =
+			VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
+			VAR _tenants = CALCULATE(DISTINCTCOUNT('Device System Evidence'[TenantKey]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'))
+			VAR _matches = CALCULATE(COUNTROWS('Device System Evidence'), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			VAR _value = CALCULATE(SELECTEDVALUE('Device System Evidence'[Freshness]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			RETURN IF(ISBLANK(_id), BLANK(), SWITCH(TRUE(), _tenants <> 1, "Ambiguous tenant scope", _matches = 0, "Missing observation", _matches <> 1, "Ambiguous device identity", ISBLANK(_value) || _value = "", "Missing", _value))
+		displayFolder: Device System\Matched device detail
+		lineageTag: 6a9c1541-d11a-443e-9dba-d86e277166b1
+
+	/// Prepared Windows Update Reboot Required, exposed only for one unique Intune source ID in the existing inventory and a single tenant. No name matching; missing and ambiguous joins are explicit. Reported states retain their source qualification; freshness is separate.
+	measure 'Device System Windows Update Reboot Required' =
+			VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
+			VAR _tenants = CALCULATE(DISTINCTCOUNT('Device System Evidence'[TenantKey]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'))
+			VAR _matches = CALCULATE(COUNTROWS('Device System Evidence'), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			VAR _value = CALCULATE(SELECTEDVALUE('Device System Evidence'[Windows Update Reboot Required]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			RETURN IF(ISBLANK(_id), BLANK(), SWITCH(TRUE(), _tenants <> 1, "Ambiguous tenant scope", _matches = 0, "Missing observation", _matches <> 1, "Ambiguous device identity", ISBLANK(_value) || _value = "", "Missing", _value))
+		displayFolder: Device System\Matched device detail
+		lineageTag: 08e71ef1-9585-4cbb-aacd-0c52a03f1e0c
+
+	/// Prepared BitLocker OS Protection, exposed only for one unique Intune source ID in the existing inventory and a single tenant. No name matching; missing and ambiguous joins are explicit. Reported states retain their source qualification; freshness is separate.
+	measure 'Device System BitLocker OS Protection' =
+			VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
+			VAR _tenants = CALCULATE(DISTINCTCOUNT('Device System Evidence'[TenantKey]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'))
+			VAR _matches = CALCULATE(COUNTROWS('Device System Evidence'), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			VAR _value = CALCULATE(SELECTEDVALUE('Device System Evidence'[BitLocker OS Protection]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			RETURN IF(ISBLANK(_id), BLANK(), SWITCH(TRUE(), _tenants <> 1, "Ambiguous tenant scope", _matches = 0, "Missing observation", _matches <> 1, "Ambiguous device identity", ISBLANK(_value) || _value = "", "Missing", _value))
+		displayFolder: Device System\Matched device detail
+		lineageTag: c75bf22b-fbfb-4e5a-9951-996e6abf0da6
+
+	/// Prepared BitLocker OS Conversion, exposed only for one unique Intune source ID in the existing inventory and a single tenant. No name matching; missing and ambiguous joins are explicit. Reported states retain their source qualification; freshness is separate.
+	measure 'Device System BitLocker OS Conversion' =
+			VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
+			VAR _tenants = CALCULATE(DISTINCTCOUNT('Device System Evidence'[TenantKey]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'))
+			VAR _matches = CALCULATE(COUNTROWS('Device System Evidence'), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			VAR _value = CALCULATE(SELECTEDVALUE('Device System Evidence'[BitLocker OS Conversion]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			RETURN IF(ISBLANK(_id), BLANK(), SWITCH(TRUE(), _tenants <> 1, "Ambiguous tenant scope", _matches = 0, "Missing observation", _matches <> 1, "Ambiguous device identity", ISBLANK(_value) || _value = "", "Missing", _value))
+		displayFolder: Device System\Matched device detail
+		lineageTag: 6fb928b9-b293-4f2c-8bdd-88c294617bae
+
+	/// Prepared Local Encryption State, exposed only for one unique Intune source ID in the existing inventory and a single tenant. No name matching; missing and ambiguous joins are explicit. Reported states retain their source qualification; freshness is separate.
+	measure 'Device System Local Encryption State' =
+			VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
+			VAR _tenants = CALCULATE(DISTINCTCOUNT('Device System Evidence'[TenantKey]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'))
+			VAR _matches = CALCULATE(COUNTROWS('Device System Evidence'), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			VAR _value = CALCULATE(SELECTEDVALUE('Device System Evidence'[Local Encryption State]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			RETURN IF(ISBLANK(_id), BLANK(), SWITCH(TRUE(), _tenants <> 1, "Ambiguous tenant scope", _matches = 0, "Missing observation", _matches <> 1, "Ambiguous device identity", ISBLANK(_value) || _value = "", "Missing", _value))
+		displayFolder: Device System\Matched device detail
+		lineageTag: 4a400d6e-fdc2-40c1-8256-1899aafea381
+
+	/// Prepared Encryption Comparison, exposed only for one unique Intune source ID in the existing inventory and a single tenant. No name matching; missing and ambiguous joins are explicit. Reported states retain their source qualification; freshness is separate.
+	measure 'Device System Encryption Comparison' =
+			VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
+			VAR _tenants = CALCULATE(DISTINCTCOUNT('Device System Evidence'[TenantKey]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'))
+			VAR _matches = CALCULATE(COUNTROWS('Device System Evidence'), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			VAR _value = CALCULATE(SELECTEDVALUE('Device System Evidence'[Encryption Comparison]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			RETURN IF(ISBLANK(_id), BLANK(), SWITCH(TRUE(), _tenants <> 1, "Ambiguous tenant scope", _matches = 0, "Missing observation", _matches <> 1, "Ambiguous device identity", ISBLANK(_value) || _value = "", "Missing", _value))
+		displayFolder: Device System\Matched device detail
+		lineageTag: 5fb48b3f-f50a-41a3-b687-006689bafd95
+
+	/// Prepared Data Quality Issues, exposed only for one unique Intune source ID in the existing inventory and a single tenant. No name matching; missing and ambiguous joins are explicit. Reported states retain their source qualification; freshness is separate.
+	measure 'Device System Data Quality Issues' =
+			VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
+			VAR _tenants = CALCULATE(DISTINCTCOUNT('Device System Evidence'[TenantKey]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'))
+			VAR _matches = CALCULATE(COUNTROWS('Device System Evidence'), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			VAR _value = CALCULATE(SELECTEDVALUE('Device System Evidence'[Data Quality Issues]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			RETURN IF(ISBLANK(_id), BLANK(), SWITCH(TRUE(), _tenants <> 1, "Ambiguous tenant scope", _matches = 0, "Missing observation", _matches <> 1, "Ambiguous device identity", ISBLANK(_value) || _value = "", "Missing", _value))
+		displayFolder: Device System\Matched device detail
+		lineageTag: 8d38d887-d301-4eea-8900-4a15185e8e4c
+
+	/// Visual-level guard applies the expected AV registration-state slicer to unique existing inventory identities. With no AV selection, missing system observations remain visible.
+	measure 'Device System AV Selection Match' =
+			VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
+			VAR _selected = ISFILTERED('Device System Evidence'[Expected AV State])
+			VAR _tenants = CALCULATE(DISTINCTCOUNT('Device System Evidence'[TenantKey]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'))
+			VAR _matches = CALCULATE(COUNTROWS('Device System Evidence'), KEEPFILTERS(TREATAS({_id},'Device System Evidence'[Device Source ID])))
+			RETURN IF(NOT(_selected), 1, IF(NOT(ISBLANK(_id)) && _tenants = 1 && _matches = 1, 1, BLANK()))
+		formatString: 0
+		isHidden
+		displayFolder: Device System\Matched device detail
+		lineageTag: bc9dce7c-00dc-4945-ba44-93535bc180a0
+
+	/// Reported Windows Update reboot-required observations. NotCollected, Missing, Unknown and Error are excluded; no claim of current status until observation freshness is qualified.
+	measure 'Device System Reported Reboot Required' = COALESCE(CALCULATE(COUNTROWS('Device System Evidence'), KEEPFILTERS('Device System Evidence'[Windows Update Reboot Required] = "True")),0)
+		formatString: #,##0
+		displayFolder: Device System\Reported review
+		lineageTag: 016785b7-f3e8-4cab-9cea-269716c08fef
+
+	/// Reported Secure Boot Disabled observations only. Error, NotSupported and missingness are not disabled; observation time must be separately qualified.
+	measure 'Device System Reported Secure Boot Disabled' = COALESCE(CALCULATE(COUNTROWS('Device System Evidence'), KEEPFILTERS('Device System Evidence'[Secure Boot State] = "Disabled")),0)
+		formatString: #,##0
+		displayFolder: Device System\Reported review
+		lineageTag: 8f3b8c8f-3b89-4bc0-a2c3-6ed08546c46a
+
+	/// Prepared overall third-party antivirus registration state, exposed only for one unique Intune source ID and a single tenant. Separate from expected-product registration and from EDR health.
+	measure 'Device System Third Party AV State' =
+			VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
+			VAR _tenants = CALCULATE(DISTINCTCOUNT('Device System Evidence'[TenantKey]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'))
+			VAR _matches = CALCULATE(COUNTROWS('Device System Evidence'), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			VAR _value = CALCULATE(SELECTEDVALUE('Device System Evidence'[Third Party AV State]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			RETURN IF(ISBLANK(_id), BLANK(), SWITCH(TRUE(), _tenants <> 1, "Ambiguous tenant scope", _matches = 0, "Missing observation", _matches <> 1, "Ambiguous device identity", ISBLANK(_value) || _value = "", "Missing", _value))
+		displayFolder: Device System\Matched device detail
+		lineageTag: 3dad3f50-ecc6-496d-a546-4bc56f5d90e7
+
+	/// Local collection source/state from prepared evidence. One unique tenant/device identity only.
+	measure 'Device System Local Data Source' =
+			VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
+			VAR _tenants = CALCULATE(DISTINCTCOUNT('Device System Evidence'[TenantKey]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'))
+			VAR _matches = CALCULATE(COUNTROWS('Device System Evidence'), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			VAR _value = CALCULATE(SELECTEDVALUE('Device System Evidence'[Local Data Source]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			RETURN IF(ISBLANK(_id) || _tenants <> 1 || _matches <> 1, BLANK(), _value)
+		displayFolder: Device System\Matched device detail
+		lineageTag: 4872ae2b-999e-47bc-9e1b-f7fffcd5392d
+
+	/// Local collection source/state from prepared evidence. One unique tenant/device identity only.
+	measure 'Device System Local Data Freshness' =
+			VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
+			VAR _tenants = CALCULATE(DISTINCTCOUNT('Device System Evidence'[TenantKey]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'))
+			VAR _matches = CALCULATE(COUNTROWS('Device System Evidence'), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			VAR _value = CALCULATE(SELECTEDVALUE('Device System Evidence'[Local Data Freshness]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			RETURN IF(ISBLANK(_id) || _tenants <> 1 || _matches <> 1, BLANK(), _value)
+		displayFolder: Device System\Matched device detail
+		lineageTag: 4c493340-2bca-4a30-9333-78222d643e4f
+
+	/// Local/console interactive session only. Not primary-user ownership, current login or M365 activity. Requires a unique Intune identity and one tenant. UTC timestamp and collection freshness are separate.
+	measure 'Device System Last Console Logon Status' =
+			VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
+			VAR _tenants = CALCULATE(DISTINCTCOUNT('Device System Evidence'[TenantKey]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'))
+			VAR _matches = CALCULATE(COUNTROWS('Device System Evidence'), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			VAR _value = CALCULATE(SELECTEDVALUE('Device System Evidence'[Last Console Logon Status]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			RETURN IF(ISBLANK(_id) || _tenants <> 1 || _matches <> 1, BLANK(), _value)
+		displayFolder: Device System\Matched device detail
+		lineageTag: eed3b2c2-5bf9-4c89-b19b-1e3db8f9ab27
+
+	/// Local/console interactive session only. Not primary-user ownership, current login or M365 activity. Requires a unique Intune identity and one tenant. UTC timestamp and collection freshness are separate.
+	measure 'Device System Last Console Logon User' =
+			VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
+			VAR _tenants = CALCULATE(DISTINCTCOUNT('Device System Evidence'[TenantKey]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'))
+			VAR _matches = CALCULATE(COUNTROWS('Device System Evidence'), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			VAR _value = CALCULATE(SELECTEDVALUE('Device System Evidence'[Last Console Logon User]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			RETURN IF(ISBLANK(_id) || _tenants <> 1 || _matches <> 1, BLANK(), _value)
+		displayFolder: Device System\Matched device detail
+		lineageTag: f66654fa-af03-45cd-b0a4-2d9568dd034e
+
+	/// Local/console interactive session only. Not primary-user ownership, current login or M365 activity. Requires a unique Intune identity and one tenant. UTC timestamp and collection freshness are separate.
+	measure 'Device System Last Console Logon UTC' =
+			VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
+			VAR _tenants = CALCULATE(DISTINCTCOUNT('Device System Evidence'[TenantKey]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'))
+			VAR _matches = CALCULATE(COUNTROWS('Device System Evidence'), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			VAR _value = CALCULATE(SELECTEDVALUE('Device System Evidence'[Last Console Logon UTC]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			RETURN IF(ISBLANK(_id) || _tenants <> 1 || _matches <> 1, BLANK(), _value)
+		formatString: yyyy-MM-dd HH:mm:ss
+		displayFolder: Device System\Matched device detail
+		lineageTag: d1c495af-94ed-4834-89e3-c7d46d2ac7ea
+
+	/// Local/console interactive session only. Not primary-user ownership, current login or M365 activity. Requires a unique Intune identity and one tenant. UTC timestamp and collection freshness are separate.
+	measure 'Device System Last Console Logon Quality' =
+			VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
+			VAR _tenants = CALCULATE(DISTINCTCOUNT('Device System Evidence'[TenantKey]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'))
+			VAR _matches = CALCULATE(COUNTROWS('Device System Evidence'), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			VAR _value = CALCULATE(SELECTEDVALUE('Device System Evidence'[Last Console Logon Quality]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			RETURN IF(ISBLANK(_id) || _tenants <> 1 || _matches <> 1, BLANK(), _value)
+		displayFolder: Device System\Matched device detail
+		lineageTag: 18086442-91e9-4a08-b3df-452195c3175b
+
+	/// Prepared TenantKey observation or qualification from the tenant-aware Device System source. Missing, NotCollected, Unknown, Error and NotSupported are not confirmed adverse states.
+	column TenantKey
+		dataType: string
+		isHidden
+		isNullable: false
+		lineageTag: dca3532e-c702-42d0-8a01-50d1b8506886
+		summarizeBy: none
+		sourceColumn: TenantKey
+
+	/// Prepared Device System Key observation or qualification from the tenant-aware Device System source. Missing, NotCollected, Unknown, Error and NotSupported are not confirmed adverse states.
+	column 'Device System Key'
+		dataType: string
+		isHidden
+		isNullable: false
+		lineageTag: 052dee24-2462-4b01-9e29-f14b019b46e9
+		summarizeBy: none
+		sourceColumn: Device System Key
+
+	/// Prepared Device Source ID observation or qualification from the tenant-aware Device System source. Missing, NotCollected, Unknown, Error and NotSupported are not confirmed adverse states.
+	column 'Device Source ID'
+		dataType: string
+		isHidden
+		lineageTag: fd9b7d89-248e-4bc5-82f9-4eb377ea38ca
+		summarizeBy: none
+		sourceColumn: Device Source ID
+
+	/// Observed device name for display only; never used for identity deduplication.
+	column 'Device Name'
+		dataType: string
+		lineageTag: 111360bd-2ecd-45a6-af42-1966f3d41106
+		summarizeBy: none
+		sourceColumn: Device Name
+
+	/// Prepared Azure AD Device ID observation or qualification from the tenant-aware Device System source. Missing, NotCollected, Unknown, Error and NotSupported are not confirmed adverse states.
+	column 'Azure AD Device ID'
+		dataType: string
+		isHidden
+		lineageTag: 5608d195-d062-44bc-b731-61a176687ea9
+		summarizeBy: none
+		sourceColumn: Azure AD Device ID
+
+	/// Prepared Primary User UPN observation or qualification from the tenant-aware Device System source. Missing, NotCollected, Unknown, Error and NotSupported are not confirmed adverse states.
+	column 'Primary User UPN'
+		dataType: string
+		isHidden
+		lineageTag: 924e9e03-c4f0-428e-aa36-2c829012ee38
+		summarizeBy: none
+		sourceColumn: Primary User UPN
+
+	/// Primary-user country from a unique tenant-aware user match; CountryOrRegion has priority. Shared Country Selection filters this table directly without dropping unmatched inventory observations.
+	column Country
+		dataType: string
+		lineageTag: 0c63cfff-91fe-4c3e-9228-c80bf9c6b31d
+		dataCategory: Country
+		summarizeBy: none
+		sourceColumn: Country
+
+	/// Prepared Country Basis observation or qualification from the tenant-aware Device System source. Missing, NotCollected, Unknown, Error and NotSupported are not confirmed adverse states.
+	column 'Country Basis'
+		dataType: string
+		isHidden
+		lineageTag: 4f5757f8-c1d1-47aa-b99b-85f23c505610
+		summarizeBy: none
+		sourceColumn: Country Basis
+
+	/// Prepared Inventory Match observation or qualification from the tenant-aware Device System source. Missing, NotCollected, Unknown, Error and NotSupported are not confirmed adverse states.
+	column 'Inventory Match'
+		dataType: string
+		isHidden
+		lineageTag: 31de6311-a03a-41ae-af61-44aef968fc6b
+		summarizeBy: none
+		sourceColumn: Inventory Match
+
+	/// Prepared Prepared Inventory Match observation or qualification from the tenant-aware Device System source. Missing, NotCollected, Unknown, Error and NotSupported are not confirmed adverse states.
+	column 'Prepared Inventory Match'
+		dataType: string
+		isHidden
+		lineageTag: b21b2a19-e65f-4e4e-b7a8-7429e59fa80b
+		summarizeBy: none
+		sourceColumn: Prepared Inventory Match
+
+	/// Original PlatformScriptLastUpdate value. Absence of a timezone is not silently interpreted as UTC.
+	column 'Observation Raw'
+		dataType: string
+		lineageTag: 20290a2a-ca55-49a7-a56d-48b708ededbd
+		summarizeBy: none
+		sourceColumn: Observation Raw
+
+	/// PlatformScriptLastUpdate normalized only with an explicit source offset or verified configured timezone. Blank when time basis is unqualified.
+	column 'Observation UTC'
+		dataType: dateTime
+		isHidden
+		formatString: yyyy-mm-dd hh:mm:ss
+		lineageTag: e634b74a-1f50-47be-8287-8761b1fb277f
+		summarizeBy: none
+		sourceColumn: Observation UTC
+
+	/// Prepared Observation Time Basis observation or qualification from the tenant-aware Device System source. Missing, NotCollected, Unknown, Error and NotSupported are not confirmed adverse states.
+	column 'Observation Time Basis'
+		dataType: string
+		isHidden
+		lineageTag: 38047671-33a3-4984-9ee1-aa3c9667e75c
+		summarizeBy: none
+		sourceColumn: Observation Time Basis
+
+	/// Prepared Observation Age Hours observation or qualification from the tenant-aware Device System source. Missing, NotCollected, Unknown, Error and NotSupported are not confirmed adverse states.
+	column 'Observation Age Hours'
+		dataType: double
+		isHidden
+		lineageTag: fe13779f-4127-4d9d-9f08-45ac82234e16
+		summarizeBy: none
+		sourceColumn: Observation Age Hours
+
+	/// Preparation-time qualification of PlatformScriptLastUpdate and configured maximum age. Use Device System Fresh Observations for query-time qualification. Not evidence of exact observation time for every Graph inventory field.
+	column Freshness
+		dataType: string
+		lineageTag: c1ed4271-cd03-4d6f-b17b-fe9d4644693e
+		summarizeBy: none
+		sourceColumn: Freshness
+
+	/// Prepared Freshness Max Age Hours observation or qualification from the tenant-aware Device System source. Missing, NotCollected, Unknown, Error and NotSupported are not confirmed adverse states.
+	column 'Freshness Max Age Hours'
+		dataType: double
+		isHidden
+		lineageTag: ce4ae5b8-e20c-4508-881f-a013ab43b5fd
+		summarizeBy: none
+		sourceColumn: Freshness Max Age Hours
+
+	/// Preparation timestamp, not a collection or device observation timestamp.
+	column 'Prepared UTC'
+		dataType: dateTime
+		isHidden
+		formatString: yyyy-mm-dd hh:mm:ss
+		lineageTag: c5e22597-64c6-4665-a25c-ab0fd9b7e7cf
+		summarizeBy: none
+		sourceColumn: Prepared UTC
+
+	/// Prepared Secure Boot State observation or qualification from the tenant-aware Device System source. Missing, NotCollected, Unknown, Error and NotSupported are not confirmed adverse states.
+	column 'Secure Boot State'
+		dataType: string
+		lineageTag: 0bce742b-c677-41b0-8c6a-85afca7277c7
+		summarizeBy: none
+		sourceColumn: Secure Boot State
+
+	/// Original source value retained for traceability; normalization never converts missingness or error into a confirmed adverse state.
+	column 'Secure Boot Raw'
+		dataType: string
+		isHidden
+		lineageTag: cbd80789-03ba-4373-afab-a309e35fe8db
+		summarizeBy: none
+		sourceColumn: Secure Boot Raw
+
+	/// Prepared BIOS Version observation or qualification from the tenant-aware Device System source. Missing, NotCollected, Unknown, Error and NotSupported are not confirmed adverse states.
+	column 'BIOS Version'
+		dataType: string
+		lineageTag: 1f473bab-afd9-4443-8f67-87147c9f5f8a
+		summarizeBy: none
+		sourceColumn: BIOS Version
+
+	/// Observed BIOS release date, not a device-health or upgrade verdict based on age.
+	column 'BIOS Date'
+		dataType: string
+		lineageTag: 7bbd5e66-4fc5-4e81-ac6d-bdb8dfefcc4e
+		summarizeBy: none
+		sourceColumn: BIOS Date
+
+	/// Prepared BIOS Date Quality observation or qualification from the tenant-aware Device System source. Missing, NotCollected, Unknown, Error and NotSupported are not confirmed adverse states.
+	column 'BIOS Date Quality'
+		dataType: string
+		isHidden
+		lineageTag: 91173a4f-0dfe-4941-910a-64b8aadf7274
+		summarizeBy: none
+		sourceColumn: BIOS Date Quality
+
+	/// Prepared Firmware Type observation or qualification from the tenant-aware Device System source. Missing, NotCollected, Unknown, Error and NotSupported are not confirmed adverse states.
+	column 'Firmware Type'
+		dataType: string
+		lineageTag: f244aea0-ab5f-43aa-881c-1ebb9fff1f90
+		summarizeBy: none
+		sourceColumn: Firmware Type
+
+	/// Original source value retained for traceability; normalization never converts missingness or error into a confirmed adverse state.
+	column 'Firmware Raw'
+		dataType: string
+		isHidden
+		lineageTag: efbd78dd-98a9-4f45-8ec9-bb2ea4fd5592
+		summarizeBy: none
+		sourceColumn: Firmware Raw
+
+	/// Single consolidated value for equivalent boot aliases. Endpoint-local time; no inferred UTC or additional boot indicators.
+	column 'Last Boot Time'
+		dataType: string
+		lineageTag: 0d7efdbd-195e-4cb4-a6d5-c36197e4bf3a
+		summarizeBy: none
+		sourceColumn: Last Boot Time
+
+	/// Prepared Last Boot Quality observation or qualification from the tenant-aware Device System source. Missing, NotCollected, Unknown, Error and NotSupported are not confirmed adverse states.
+	column 'Last Boot Quality'
+		dataType: string
+		isHidden
+		lineageTag: 6f7c5da4-9cd7-4e66-b5d6-06498c21ffd3
+		summarizeBy: none
+		sourceColumn: Last Boot Quality
+
+	/// Local reported encryption flag; may conflict with Intune inventory or OS volume conversion. Must not override the existing Intune encryption indicator.
+	column 'Local Encryption State'
+		dataType: string
+		lineageTag: e73a6fd6-6b93-4793-bfd2-f31db82bbbe0
+		summarizeBy: none
+		sourceColumn: Local Encryption State
+
+	/// Prepared Inventory Encryption State observation or qualification from the tenant-aware Device System source. Missing, NotCollected, Unknown, Error and NotSupported are not confirmed adverse states.
+	column 'Inventory Encryption State'
+		dataType: string
+		lineageTag: aa1e9dda-8821-457f-9b76-4f8f631c9c81
+		summarizeBy: none
+		sourceColumn: Inventory Encryption State
+
+	/// Prepared Encryption Comparison observation or qualification from the tenant-aware Device System source. Missing, NotCollected, Unknown, Error and NotSupported are not confirmed adverse states.
+	column 'Encryption Comparison'
+		dataType: string
+		lineageTag: a200594b-bfac-476f-8483-031bc2eb8ff1
+		summarizeBy: none
+		sourceColumn: Encryption Comparison
+
+	/// Prepared VBS State observation or qualification from the tenant-aware Device System source. Missing, NotCollected, Unknown, Error and NotSupported are not confirmed adverse states.
+	column 'VBS State'
+		dataType: string
+		lineageTag: d7af405c-5eb3-4dca-9a36-71714eec02ae
+		summarizeBy: none
+		sourceColumn: VBS State
+
+	/// Original source value retained for traceability; normalization never converts missingness or error into a confirmed adverse state.
+	column 'VBS Raw'
+		dataType: string
+		isHidden
+		lineageTag: f59a53bf-dc93-426d-8618-7fb3d0aaa1e4
+		summarizeBy: none
+		sourceColumn: VBS Raw
+
+	/// Prepared VBS Hardware Requirements observation or qualification from the tenant-aware Device System source. Missing, NotCollected, Unknown, Error and NotSupported are not confirmed adverse states.
+	column 'VBS Hardware Requirements'
+		dataType: string
+		lineageTag: 88e32016-63d9-49d7-ac5e-cd5e44297687
+		summarizeBy: none
+		sourceColumn: VBS Hardware Requirements
+
+	/// Original source value retained for traceability; normalization never converts missingness or error into a confirmed adverse state.
+	column 'VBS Hardware Raw'
+		dataType: string
+		isHidden
+		lineageTag: 3b6ba50a-349c-49a7-8922-799a05d2d189
+		summarizeBy: none
+		sourceColumn: VBS Hardware Raw
+
+	/// Prepared Credential Guard State observation or qualification from the tenant-aware Device System source. Missing, NotCollected, Unknown, Error and NotSupported are not confirmed adverse states.
+	column 'Credential Guard State'
+		dataType: string
+		lineageTag: 048b58e2-456c-4e09-b527-38109026307e
+		summarizeBy: none
+		sourceColumn: Credential Guard State
+
+	/// Original source value retained for traceability; normalization never converts missingness or error into a confirmed adverse state.
+	column 'Credential Guard Raw'
+		dataType: string
+		isHidden
+		lineageTag: cf49d220-64c3-42f8-8a27-2fb858f6cb8f
+		summarizeBy: none
+		sourceColumn: Credential Guard Raw
+
+	/// Prepared Management State observation or qualification from the tenant-aware Device System source. Missing, NotCollected, Unknown, Error and NotSupported are not confirmed adverse states.
+	column 'Management State'
+		dataType: string
+		lineageTag: 9a54a008-ac6a-4140-b411-083110b60c0e
+		summarizeBy: none
+		sourceColumn: Management State
+
+	/// Original source value retained for traceability; normalization never converts missingness or error into a confirmed adverse state.
+	column 'Management Raw'
+		dataType: string
+		isHidden
+		lineageTag: bc5be1c1-13e3-4371-95b2-ead60eeccb15
+		summarizeBy: none
+		sourceColumn: Management Raw
+
+	/// Prepared Compliance State observation or qualification from the tenant-aware Device System source. Missing, NotCollected, Unknown, Error and NotSupported are not confirmed adverse states.
+	column 'Compliance State'
+		dataType: string
+		lineageTag: 3d4137de-cf30-493f-ae62-017869ab0e99
+		summarizeBy: none
+		sourceColumn: Compliance State
+
+	/// Original source value retained for traceability; normalization never converts missingness or error into a confirmed adverse state.
+	column 'Compliance Raw'
+		dataType: string
+		isHidden
+		lineageTag: 18bcff82-9833-45bb-ba15-f30d1602b6b1
+		summarizeBy: none
+		sourceColumn: Compliance Raw
+
+	/// Prepared Inventory Compliance State observation or qualification from the tenant-aware Device System source. Missing, NotCollected, Unknown, Error and NotSupported are not confirmed adverse states.
+	column 'Inventory Compliance State'
+		dataType: string
+		isHidden
+		lineageTag: f70ae785-77d6-4a32-a516-4ca771ce1f7e
+		summarizeBy: none
+		sourceColumn: Inventory Compliance State
+
+	/// Prepared Compliance Comparison observation or qualification from the tenant-aware Device System source. Missing, NotCollected, Unknown, Error and NotSupported are not confirmed adverse states.
+	column 'Compliance Comparison'
+		dataType: string
+		isHidden
+		lineageTag: 3ce8aacb-bc51-4fcf-8e33-81165b2a0347
+		summarizeBy: none
+		sourceColumn: Compliance Comparison
+
+	/// Original source value retained for traceability; normalization never converts missingness or error into a confirmed adverse state.
+	column 'Last Sync Raw'
+		dataType: string
+		lineageTag: 4740f1e3-08d7-4a5c-8cbf-bdc88ec6d24b
+		summarizeBy: none
+		sourceColumn: Last Sync Raw
+
+	/// Prepared Last Sync UTC observation or qualification from the tenant-aware Device System source. Missing, NotCollected, Unknown, Error and NotSupported are not confirmed adverse states.
+	column 'Last Sync UTC'
+		dataType: dateTime
+		isHidden
+		formatString: yyyy-mm-dd hh:mm:ss
+		lineageTag: 200dc10f-596f-422b-bff4-bce84e397168
+		summarizeBy: none
+		sourceColumn: Last Sync UTC
+
+	/// Prepared Last Sync Time Basis observation or qualification from the tenant-aware Device System source. Missing, NotCollected, Unknown, Error and NotSupported are not confirmed adverse states.
+	column 'Last Sync Time Basis'
+		dataType: string
+		isHidden
+		lineageTag: 8fc816e9-607d-4413-a1bc-c49a611b1354
+		summarizeBy: none
+		sourceColumn: Last Sync Time Basis
+
+	/// Prepared Third Party AV State observation or qualification from the tenant-aware Device System source. Missing, NotCollected, Unknown, Error and NotSupported are not confirmed adverse states.
+	column 'Third Party AV State'
+		dataType: string
+		lineageTag: e33fa3f6-02a9-4e77-9598-b90c7c6cf253
+		summarizeBy: none
+		sourceColumn: Third Party AV State
+
+	/// Original source value retained for traceability; normalization never converts missingness or error into a confirmed adverse state.
+	column 'Third Party AV Raw'
+		dataType: string
+		isHidden
+		lineageTag: 3a90f04e-75fd-4516-9edb-8f9a0eedd29f
+		summarizeBy: none
+		sourceColumn: Third Party AV Raw
+
+	/// Prepared Third Party AV Products observation or qualification from the tenant-aware Device System source. Missing, NotCollected, Unknown, Error and NotSupported are not confirmed adverse states.
+	column 'Third Party AV Products'
+		dataType: string
+		lineageTag: 6fc0f833-f97d-4a0d-ae3e-3273dd6a8d13
+		summarizeBy: none
+		sourceColumn: Third Party AV Products
+
+	/// Tenant-configured expected antivirus product name from the published source; no hardcoded product.
+	column 'Expected AV Name'
+		dataType: string
+		lineageTag: c751b93f-2365-4792-b38b-1d3d3cbf76b8
+		summarizeBy: none
+		sourceColumn: Expected AV Name
+
+	/// Reported Windows registration observation for the expected product. Not proof of EDR presence or absence; Missing, Unknown, NotCollected, Error, and NotSupported are distinct.
+	column 'Expected AV State'
+		dataType: string
+		lineageTag: 9d1045b1-07a1-472a-81d6-80f99df6fa41
+		summarizeBy: none
+		sourceColumn: Expected AV State
+
+	/// Original source value retained for traceability; normalization never converts missingness or error into a confirmed adverse state.
+	column 'Expected AV Raw'
+		dataType: string
+		isHidden
+		lineageTag: 850507d4-3f98-4bca-90d5-ada62dd090ed
+		summarizeBy: none
+		sourceColumn: Expected AV Raw
+
+	/// A registration observation is evaluable only with an expected product, Detected/NotDetected state, and no contradictory antivirus observations. Freshness is qualified separately.
+	column 'AV Qualification'
+		dataType: string
+		lineageTag: 34ebc736-322e-4ae1-8c96-de38f995aaa3
+		summarizeBy: none
+		sourceColumn: AV Qualification
+
+	/// Prepared AV Comparison observation or qualification from the tenant-aware Device System source. Missing, NotCollected, Unknown, Error and NotSupported are not confirmed adverse states.
+	column 'AV Comparison'
+		dataType: string
+		lineageTag: 7a744f54-3fbb-4c7a-b89a-5529e94a45f0
+		summarizeBy: none
+		sourceColumn: AV Comparison
+
+	/// Prepared Windows Update Reboot Required observation or qualification from the tenant-aware Device System source. Missing, NotCollected, Unknown, Error and NotSupported are not confirmed adverse states.
+	column 'Windows Update Reboot Required'
+		dataType: string
+		lineageTag: 7fa4b9f5-f8bb-4d2a-b6cd-8c2e7ccbc709
+		summarizeBy: none
+		sourceColumn: Windows Update Reboot Required
+
+	/// Original source value retained for traceability; normalization never converts missingness or error into a confirmed adverse state.
+	column 'Windows Update Reboot Raw'
+		dataType: string
+		isHidden
+		lineageTag: df0da201-0388-4dad-8c9d-582c4f1f6842
+		summarizeBy: none
+		sourceColumn: Windows Update Reboot Raw
+
+	/// Observed OS BitLocker protection On/Off or explicit unknown/uncollected/error state. Does not prove recovery-key escrow.
+	column 'BitLocker OS Protection'
+		dataType: string
+		lineageTag: 7ac1ebc2-20ce-4117-9a34-d8d1be26db93
+		summarizeBy: none
+		sourceColumn: BitLocker OS Protection
+
+	/// Original source value retained for traceability; normalization never converts missingness or error into a confirmed adverse state.
+	column 'BitLocker OS Protection Raw'
+		dataType: string
+		isHidden
+		lineageTag: cb2d4879-8268-4b27-bfbc-cf1b889f75d5
+		summarizeBy: none
+		sourceColumn: BitLocker OS Protection Raw
+
+	/// Observed OS volume conversion state; not equivalent to protection status or recovery-key escrow.
+	column 'BitLocker OS Conversion'
+		dataType: string
+		lineageTag: 0c776bb8-d788-43cc-8ece-f61dacb5b191
+		summarizeBy: none
+		sourceColumn: BitLocker OS Conversion
+
+	/// Original source value retained for traceability; normalization never converts missingness or error into a confirmed adverse state.
+	column 'BitLocker OS Conversion Raw'
+		dataType: string
+		isHidden
+		lineageTag: 5258aebc-3ede-43c1-9d20-bb2f5ca59147
+		summarizeBy: none
+		sourceColumn: BitLocker OS Conversion Raw
+
+	/// Explicit ambiguity, invalid dates, missing joins, unknown enum values, and contradictory observations. These do not by themselves prove an adverse device state.
+	column 'Data Quality Issues'
+		dataType: string
+		lineageTag: 042f814a-c647-425b-b192-2b7b36f06cbb
+		summarizeBy: none
+		sourceColumn: Data Quality Issues
+
+	/// Prepared local collection provenance and state, separate from policy freshness.
+	column 'Local Data Source'
+		dataType: string
+		isHidden
+		lineageTag: fcbb40ff-f0fd-46ce-a024-666d860e6b4c
+		summarizeBy: none
+		sourceColumn: Local Data Source
+
+	/// Prepared local collection provenance and state, separate from policy freshness.
+	column 'Local Data Freshness'
+		dataType: string
+		isHidden
+		lineageTag: 784c3e30-e26f-4169-bb6d-9c3d830d61eb
+		summarizeBy: none
+		sourceColumn: Local Data Freshness
+
+	/// Reported local/console interactive session only. Not ownership, current login, or M365 activity. Private detail; not a tenant-wide identity mapping.
+	column 'Last Console Logon Status'
+		dataType: string
+		isHidden
+		lineageTag: f3fd3cec-4155-4092-8395-8248b410586b
+		summarizeBy: none
+		sourceColumn: Last Console Logon Status
+
+	/// Reported local/console interactive session only. Not ownership, current login, or M365 activity. Private detail; not a tenant-wide identity mapping.
+	column 'Last Console Logon User'
+		dataType: string
+		isHidden
+		lineageTag: ea62c7fa-c014-41c8-9cfc-a975f30ba916
+		summarizeBy: none
+		sourceColumn: Last Console Logon User
+
+	/// Reported local/console interactive session only. Not ownership, current login, or M365 activity. Private detail; not a tenant-wide identity mapping.
+	column 'Last Console Logon UTC'
+		dataType: dateTime
+		isHidden
+		lineageTag: ae81c6a1-3884-4e08-a232-90e4a28b1b4f
+		summarizeBy: none
+		sourceColumn: Last Console Logon UTC
+
+	/// Reported local/console interactive session only. Not ownership, current login, or M365 activity. Private detail; not a tenant-wide identity mapping.
+	column 'Last Console Logon Quality'
+		dataType: string
+		isHidden
+		lineageTag: 9caca909-25eb-49ce-a07d-cad167d7a660
+		summarizeBy: none
+		sourceColumn: Last Console Logon Quality
+
+	/// Reported Security event user security identifier (SID). Used upstream for exact unique AD attribution; not primary-user ownership or an inferred identity.
+	column 'Last Console Logon SID'
+		dataType: string
+		isHidden
+		lineageTag: 3d5cc533-bb6c-4959-9d88-c4b9c015ac00
+		summarizeBy: none
+		sourceColumn: Last Console Logon SID
+
+	partition 'Device System Evidence' = m
+		mode: import
+		source =
+				let
+				    Source = ReadMigrationCsv(GetPreparedEvidenceFile("DeviceSystemEvidence.csv"), {"TenantKey", "Device System Key", "Device Source ID", "Device Name", "Azure AD Device ID", "Primary User UPN", "Country", "Country Basis", "Inventory Match", "Prepared Inventory Match", "Observation Raw", "Observation UTC", "Observation Time Basis", "Observation Age Hours", "Freshness", "Freshness Max Age Hours", "Prepared UTC", "Secure Boot State", "Secure Boot Raw", "BIOS Version", "BIOS Date", "BIOS Date Quality", "Firmware Type", "Firmware Raw", "Last Boot Time", "Last Boot Quality", "Local Encryption State", "Inventory Encryption State", "Encryption Comparison", "VBS State", "VBS Raw", "VBS Hardware Requirements", "VBS Hardware Raw", "Credential Guard State", "Credential Guard Raw", "Management State", "Management Raw", "Compliance State", "Compliance Raw", "Inventory Compliance State", "Compliance Comparison", "Last Sync Raw", "Last Sync UTC", "Last Sync Time Basis", "Third Party AV State", "Third Party AV Raw", "Third Party AV Products", "Expected AV Name", "Expected AV State", "Expected AV Raw", "AV Qualification", "AV Comparison", "Windows Update Reboot Required", "Windows Update Reboot Raw", "BitLocker OS Protection", "BitLocker OS Protection Raw", "BitLocker OS Conversion", "BitLocker OS Conversion Raw", "Data Quality Issues"}),
+				    OptionalNames = {"Local Data Source", "Local Data Freshness", "Last Console Logon Status", "Last Console Logon User", "Last Console Logon UTC", "Last Console Logon Quality", "Last Console Logon SID"},
+				    Compatible = List.Accumulate(OptionalNames, Source, (t, n) => if Table.HasColumns(t, n) then t else Table.AddColumn(t, n, each if n = "Local Data Source" then "LegacyPlatformScript" else if n = "Local Data Freshness" then "Not reported" else if n = "Last Console Logon Status" then "NotCollected" else null, type nullable text)),
+				    Selected = Table.SelectColumns(Compatible, {"TenantKey", "Device System Key", "Device Source ID", "Device Name", "Azure AD Device ID", "Primary User UPN", "Country", "Country Basis", "Inventory Match", "Prepared Inventory Match", "Observation Raw", "Observation UTC", "Observation Time Basis", "Observation Age Hours", "Freshness", "Freshness Max Age Hours", "Prepared UTC", "Secure Boot State", "Secure Boot Raw", "BIOS Version", "BIOS Date", "BIOS Date Quality", "Firmware Type", "Firmware Raw", "Last Boot Time", "Last Boot Quality", "Local Encryption State", "Inventory Encryption State", "Encryption Comparison", "VBS State", "VBS Raw", "VBS Hardware Requirements", "VBS Hardware Raw", "Credential Guard State", "Credential Guard Raw", "Management State", "Management Raw", "Compliance State", "Compliance Raw", "Inventory Compliance State", "Compliance Comparison", "Last Sync Raw", "Last Sync UTC", "Last Sync Time Basis", "Third Party AV State", "Third Party AV Raw", "Third Party AV Products", "Expected AV Name", "Expected AV State", "Expected AV Raw", "AV Qualification", "AV Comparison", "Windows Update Reboot Required", "Windows Update Reboot Raw", "BitLocker OS Protection", "BitLocker OS Protection Raw", "BitLocker OS Conversion", "BitLocker OS Conversion Raw", "Data Quality Issues", "Local Data Source", "Local Data Freshness", "Last Console Logon Status", "Last Console Logon User", "Last Console Logon UTC", "Last Console Logon Quality", "Last Console Logon SID"}),
+				    ParseUtc = (raw as nullable text) as nullable datetime => if raw = null or Text.Trim(raw) = "" then null else if not Text.EndsWith(raw, "Z") then error "Prepared Device System UTC timestamp must have an explicit Z suffix" else DateTimeZone.RemoveZone(DateTimeZone.SwitchZone(DateTimeZone.FromText(raw, [Culture="en-US"]), 0)),
+				    TypedDates = Table.TransformColumns(Selected, {{"Observation UTC", ParseUtc, type nullable datetime}, {"Prepared UTC", ParseUtc, type nullable datetime}, {"Last Sync UTC", ParseUtc, type nullable datetime}, {"Last Console Logon UTC", ParseUtc, type nullable datetime}}),
+				    TypedNumbers = Table.TransformColumns(TypedDates, {{"Observation Age Hours", each if _ = null or Text.Trim(_) = "" then null else Number.FromText(_, "en-US"), type nullable number}, {"Freshness Max Age Hours", each if _ = null or Text.Trim(_) = "" then null else Number.FromText(_, "en-US"), type nullable number}}),
+				    Typed = Table.TransformColumnTypes(TypedNumbers, {{"TenantKey", type text}, {"Device System Key", type text}, {"Device Source ID", type text}, {"Device Name", type text}, {"Azure AD Device ID", type text}, {"Primary User UPN", type text}, {"Country", type text}, {"Country Basis", type text}, {"Inventory Match", type text}, {"Prepared Inventory Match", type text}, {"Observation Raw", type text}, {"Observation Time Basis", type text}, {"Freshness", type text}, {"Secure Boot State", type text}, {"Secure Boot Raw", type text}, {"BIOS Version", type text}, {"BIOS Date", type text}, {"BIOS Date Quality", type text}, {"Firmware Type", type text}, {"Firmware Raw", type text}, {"Last Boot Time", type text}, {"Last Boot Quality", type text}, {"Local Encryption State", type text}, {"Inventory Encryption State", type text}, {"Encryption Comparison", type text}, {"VBS State", type text}, {"VBS Raw", type text}, {"VBS Hardware Requirements", type text}, {"VBS Hardware Raw", type text}, {"Credential Guard State", type text}, {"Credential Guard Raw", type text}, {"Management State", type text}, {"Management Raw", type text}, {"Compliance State", type text}, {"Compliance Raw", type text}, {"Inventory Compliance State", type text}, {"Compliance Comparison", type text}, {"Last Sync Raw", type text}, {"Last Sync Time Basis", type text}, {"Third Party AV State", type text}, {"Third Party AV Raw", type text}, {"Third Party AV Products", type text}, {"Expected AV Name", type text}, {"Expected AV State", type text}, {"Expected AV Raw", type text}, {"AV Qualification", type text}, {"AV Comparison", type text}, {"Windows Update Reboot Required", type text}, {"Windows Update Reboot Raw", type text}, {"BitLocker OS Protection", type text}, {"BitLocker OS Protection Raw", type text}, {"BitLocker OS Conversion", type text}, {"BitLocker OS Conversion Raw", type text}, {"Data Quality Issues", type text}, {"Local Data Source", type text}, {"Local Data Freshness", type text}, {"Last Console Logon Status", type text}, {"Last Console Logon User", type text}, {"Last Console Logon Quality", type text}, {"Last Console Logon SID", type text}})
+				in Typed
+

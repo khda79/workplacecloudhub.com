@@ -338,6 +338,14 @@ table 'Device Inventory Evidence'
 		displayFolder: Device | Security
 		lineageTag: 82b838ba-7ed5-43df-b2bf-93b20a5685c2
 
+	/// Share of the currently filtered Intune inventory with a nonblank, uniquely prepared Endpoint Analytics score. Numerator and denominator use the same inventory and country scope; not a freshness guarantee.
+	measure 'Endpoint Analytics Matched Inventory Coverage (%)' =
+			VAR _covered = CALCULATE(COUNTROWS('Device Inventory Evidence'), KEEPFILTERS(NOT(ISBLANK('Device Inventory Evidence'[Endpoint Analytics Score]))))
+			RETURN DIVIDE(_covered, [Managed Devices])
+		formatString: 0.0%
+		displayFolder: Evidence coverage
+		lineageTag: 68a88111-fcc5-44e6-8690-fae193b283f4
+
 	column 'Device Source ID'
 		dataType: string
 		isHidden
@@ -721,15 +729,41 @@ table 'Device Inventory Evidence'
 		summarizeBy: none
 		sourceColumn: Intune Encryption State
 
+	/// Full English country name using the existing Country Selection mapping. Original Country values remain unchanged for relationships and source traceability; unknown countries remain Unknown.
+	column 'Country Name' =
+			VAR _sourceCountry = 'Device Inventory Evidence'[Country]
+			RETURN COALESCE(LOOKUPVALUE('Country Selection'[Country], 'Country Selection'[Source Country], _sourceCountry), IF(ISBLANK(_sourceCountry) || LEN(TRIM(_sourceCountry)) = 2, "Unknown", _sourceCountry))
+		dataType: string
+		lineageTag: 08dbbe0f-0728-40d9-b3d0-9bfe36bc6b61
+		dataCategory: Country
+		summarizeBy: none
+
+	/// Prepared tenant identity for governed Intune joins.
+	column TenantKey
+		dataType: string
+		isHidden
+		lineageTag: 9e1eefe8-a6e4-4608-ade0-a71e36578b04
+		summarizeBy: none
+		sourceColumn: TenantKey
+
+	/// Length-prefixed tenant and Intune managed-device identifier.
+	column 'Device Tenant Key'
+		dataType: string
+		isHidden
+		lineageTag: fcbb6dfd-e9e6-4867-ab9c-6df96da1e3a4
+		summarizeBy: none
+		sourceColumn: Device Tenant Key
+
 	/// Imports the pre-consolidated private device evidence cache to avoid repeated multi-source joins in Power Query.
 	partition 'Device Inventory Evidence Import' = m
 		mode: import
 		source =
 				let
 				    Raw = Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("DeviceInventoryEvidence.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]),
-				    Selected = Table.SelectColumns(Raw, {"Device Source ID", "Device Name", "Primary User UPN", "Country", "Platform", "Device Category", "Ownership", "Management State", "Compliance State", "Manufacturer", "Model", "Operating System Family", "Operating System Version", "Windows Release", "System Drive Capacity (GB)", "Free Disk Space (GB)", "Free Disk Space (%)", "Disk Space State", "AD to Intune Match", "Entra Match", "Enrollment DateTime", "Last Sync DateTime", "Observed Since", "Managed Tenure (Years)", "Tenure Bucket", "Tenure Confidence", "Source Scope", "Windows Generation", "Windows 11 Upgrade Eligibility", "Windows 11 Blocking Reasons", "Windows Update State", "Windows Update Risk", "Windows Update Action Code", "Secure Boot State", "Endpoint Analytics Score", "Endpoint Analytics State", "Stop Error Count", "Stop Error State", "Entra Hardware ID Conflict", "Removal Candidate", "Windows 11 Release State", "Startup Score", "Startup Score State", "App Reliability Score", "App Reliability State", "Boot Score", "Sign-in Score", "Core Boot Time (s)", "Core Sign-in Time (s)", "Restart Count", "Crash Count", "Crash State", "Entra Account State", "Intune Encryption State"}),
+				    Selected = Table.SelectColumns(Raw, {"TenantKey", "Device Source ID", "Device Name", "Primary User UPN", "Country", "Platform", "Device Category", "Ownership", "Management State", "Compliance State", "Manufacturer", "Model", "Operating System Family", "Operating System Version", "Windows Release", "System Drive Capacity (GB)", "Free Disk Space (GB)", "Free Disk Space (%)", "Disk Space State", "AD to Intune Match", "Entra Match", "Enrollment DateTime", "Last Sync DateTime", "Observed Since", "Managed Tenure (Years)", "Tenure Bucket", "Tenure Confidence", "Source Scope", "Windows Generation", "Windows 11 Upgrade Eligibility", "Windows 11 Blocking Reasons", "Windows Update State", "Windows Update Risk", "Windows Update Action Code", "Secure Boot State", "Endpoint Analytics Score", "Endpoint Analytics State", "Stop Error Count", "Stop Error State", "Entra Hardware ID Conflict", "Removal Candidate", "Windows 11 Release State", "Startup Score", "Startup Score State", "App Reliability Score", "App Reliability State", "Boot Score", "Sign-in Score", "Core Boot Time (s)", "Core Sign-in Time (s)", "Restart Count", "Crash Count", "Crash State", "Entra Account State", "Intune Encryption State"}),
 				    Nulls = Table.ReplaceValue(Selected, "", null, Replacer.ReplaceValue, {"System Drive Capacity (GB)", "Free Disk Space (GB)", "Free Disk Space (%)", "Enrollment DateTime", "Last Sync DateTime", "Observed Since", "Managed Tenure (Years)", "Endpoint Analytics Score", "Stop Error Count", "Startup Score", "App Reliability Score", "Boot Score", "Sign-in Score", "Core Boot Time (s)", "Core Sign-in Time (s)", "Restart Count", "Crash Count"}),
-				    Typed = Table.TransformColumnTypes(Nulls, {{"Device Source ID", type text}, {"Device Name", type text}, {"Primary User UPN", type text}, {"Country", type text}, {"Platform", type text}, {"Device Category", type text}, {"Ownership", type text}, {"Management State", type text}, {"Compliance State", type text}, {"Manufacturer", type text}, {"Model", type text}, {"Operating System Family", type text}, {"Operating System Version", type text}, {"Windows Release", type text}, {"System Drive Capacity (GB)", type number}, {"Free Disk Space (GB)", type number}, {"Free Disk Space (%)", type number}, {"Disk Space State", type text}, {"AD to Intune Match", type text}, {"Entra Match", type text}, {"Enrollment DateTime", type datetime}, {"Last Sync DateTime", type datetime}, {"Observed Since", type datetime}, {"Managed Tenure (Years)", type number}, {"Tenure Bucket", type text}, {"Tenure Confidence", type text}, {"Source Scope", type text}, {"Windows Generation", type text}, {"Windows 11 Upgrade Eligibility", type text}, {"Windows 11 Blocking Reasons", type text}, {"Windows Update State", type text}, {"Windows Update Risk", type text}, {"Windows Update Action Code", type text}, {"Secure Boot State", type text}, {"Endpoint Analytics Score", type number}, {"Endpoint Analytics State", type text}, {"Stop Error Count", Int64.Type}, {"Stop Error State", type text}, {"Entra Hardware ID Conflict", type text}, {"Removal Candidate", type text}, {"Windows 11 Release State", type text}, {"Startup Score", type number}, {"Startup Score State", type text}, {"App Reliability Score", type number}, {"App Reliability State", type text}, {"Boot Score", type number}, {"Sign-in Score", type number}, {"Core Boot Time (s)", type number}, {"Core Sign-in Time (s)", type number}, {"Restart Count", Int64.Type}, {"Crash Count", Int64.Type}, {"Crash State", type text}, {"Entra Account State", type text}, {"Intune Encryption State", type text}}, "en-US")
+				    Typed = Table.TransformColumnTypes(Nulls, {{"Device Source ID", type text}, {"Device Name", type text}, {"Primary User UPN", type text}, {"Country", type text}, {"Platform", type text}, {"Device Category", type text}, {"Ownership", type text}, {"Management State", type text}, {"Compliance State", type text}, {"Manufacturer", type text}, {"Model", type text}, {"Operating System Family", type text}, {"Operating System Version", type text}, {"Windows Release", type text}, {"System Drive Capacity (GB)", type number}, {"Free Disk Space (GB)", type number}, {"Free Disk Space (%)", type number}, {"Disk Space State", type text}, {"AD to Intune Match", type text}, {"Entra Match", type text}, {"Enrollment DateTime", type datetime}, {"Last Sync DateTime", type datetime}, {"Observed Since", type datetime}, {"Managed Tenure (Years)", type number}, {"Tenure Bucket", type text}, {"Tenure Confidence", type text}, {"Source Scope", type text}, {"Windows Generation", type text}, {"Windows 11 Upgrade Eligibility", type text}, {"Windows 11 Blocking Reasons", type text}, {"Windows Update State", type text}, {"Windows Update Risk", type text}, {"Windows Update Action Code", type text}, {"Secure Boot State", type text}, {"Endpoint Analytics Score", type number}, {"Endpoint Analytics State", type text}, {"Stop Error Count", Int64.Type}, {"Stop Error State", type text}, {"Entra Hardware ID Conflict", type text}, {"Removal Candidate", type text}, {"Windows 11 Release State", type text}, {"Startup Score", type number}, {"Startup Score State", type text}, {"App Reliability Score", type number}, {"App Reliability State", type text}, {"Boot Score", type number}, {"Sign-in Score", type number}, {"Core Boot Time (s)", type number}, {"Core Sign-in Time (s)", type number}, {"Restart Count", Int64.Type}, {"Crash Count", Int64.Type}, {"Crash State", type text}, {"Entra Account State", type text}, {"Intune Encryption State", type text}}, "en-US") ,
+				    WithDeviceKey = Table.AddColumn(Typed, "Device Tenant Key", each Text.From(Text.Length([TenantKey])) & ":" & [TenantKey] & "|" & Text.From(Text.Length([#"Device Source ID"])) & ":" & [#"Device Source ID"], type text)
 				in
-				    Typed
+				    WithDeviceKey
 

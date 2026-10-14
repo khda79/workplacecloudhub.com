@@ -1,7 +1,7 @@
 {
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/page/2.1.0/schema.json",
   "name": "c89dfefb108af0ea8164",
-  "displayName": "Content & Storage",
+  "displayName": "Cloud Content & Storage",
   "displayOption": "FitToPage",
   "height": 1080,
   "width": 1920,

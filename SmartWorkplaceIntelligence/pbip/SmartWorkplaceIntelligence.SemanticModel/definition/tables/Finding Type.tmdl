@@ -1,5 +1,6 @@
-/// Governed current-issue and risk-signal definitions.
+/// Legacy synthetic fixture: not used by production report visuals or consolidated evidence. Removal is pending a separately cleared dependency-safe retirement; no real data.
 table 'Finding Type'
+	isHidden
 	lineageTag: c47ac8df-04a2-4e61-b2fa-1126889124e3
 
 	/// Business attribute Finding Type Key.

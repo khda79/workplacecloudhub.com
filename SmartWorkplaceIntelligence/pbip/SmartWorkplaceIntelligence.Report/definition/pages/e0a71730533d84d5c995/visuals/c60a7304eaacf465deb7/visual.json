@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.13.0/schema.json",
   "name": "c60a7304eaacf465deb7",
   "position": {
-    "x": 1184,
+    "x": 992,
     "y": 8,
-    "z": 102,
+    "z": 13,
     "height": 80,
-    "width": 168,
-    "tabOrder": 102
+    "width": 360,
+    "tabOrder": 13
   },
   "visual": {
     "visualType": "slicer",
@@ -35,6 +35,19 @@
       }
     },
     "objects": {
+      "general": [
+        {
+          "properties": {
+            "selfFilterEnabled": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        }
+      ],
       "data": [
         {
           "properties": {
@@ -230,6 +243,29 @@
           }
         }
       ]
+    },
+    "syncGroup": {
+      "groupName": "LicenseProductShared",
+      "fieldChanges": true,
+      "filterChanges": true
     }
+  },
+  "filterConfig": {
+    "filters": [
+      {
+        "name": "11347c42791f30ac2bf0",
+        "field": {
+          "Column": {
+            "Expression": {
+              "SourceRef": {
+                "Entity": "License Evidence"
+              }
+            },
+            "Property": "License Product"
+          }
+        },
+        "type": "Categorical"
+      }
+    ]
   }
 }

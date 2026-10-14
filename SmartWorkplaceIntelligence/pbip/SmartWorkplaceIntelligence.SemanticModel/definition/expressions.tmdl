@@ -5,13 +5,13 @@ expression DataRoot = "C:\SmartM365\DATA" meta [IsParameterQuery=true, Type="Tex
 	annotation PBI_ResultType = Text
 
 /// Deployment parameter. Replace this client's value with an example before publishing a reusable PBIP template.
-expression SharePointSiteUrl = "https://contoso.sharepoint.com/sites/SMART-M365" meta [IsParameterQuery=true, Type="Text", IsParameterQueryRequired=true]
+expression SharePointSiteUrl = "https://example.sharepoint.com/sites/SmartM365" meta [IsParameterQuery=true, Type="Text", IsParameterQueryRequired=true]
 	lineageTag: ab3aa36b-3a32-472a-bf59-a75f8944dce5
 
 	annotation PBI_ResultType = Text
 
 /// Display name of the SharePoint document library containing SmartInventory evidence.
-expression SharePointLibraryName = "Documents partages" meta [IsParameterQuery=true, Type="Text", IsParameterQueryRequired=true]
+expression SharePointLibraryName = "Documents" meta [IsParameterQuery=true, Type="Text", IsParameterQueryRequired=true]
 	lineageTag: 08e0c7c7-6007-4f99-a8e0-8e0bde7c0799
 
 	annotation PBI_ResultType = Text
@@ -22,44 +22,25 @@ expression SharePointDataFolder = "SMART-M365/DATA" meta [IsParameterQuery=true,
 
 	annotation PBI_ResultType = Text
 
-/// Local Desktop current-state source. Non-recursive DATA-LAST or root configuration only; DATA-ALL is explicitly rejected.
-expression GetSmartInventoryFolder =
-		(Subfolders as list) as table =>
-		let
-		    Allowed = List.IsEmpty(Subfolders) or (List.Count(Subfolders) = 1 and Subfolders{0} = "DATA-LAST"),
-		    Relative = if Allowed then Text.Combine(Subfolders, "\") else error Error.Record("SmartInventory scope", "Only DATA-LAST and root configuration files are allowed in current-state mode.", Subfolders),
-		    Path = Text.TrimEnd(DataRoot, {"\", "/"}) & (if Relative = "" then "" else "\" & Relative),
-		    Folder = Folder.Contents(Path)
-		in
-		    Folder
-	lineageTag: a87b1f01-13d8-4d8b-88a5-3e290d083b82
-
-/// Read one exact local source file with its modification time; no fallback or historical search.
-expression GetSmartInventoryFile =
-		(Subfolders as list, FileName as text) as record =>
-			let
-				Folder = GetSmartInventoryFolder(Subfolders),
-				Matches = Table.SelectRows(Folder, each [Name] = FileName),
-				Selected = if Table.RowCount(Matches) = 1 and Value.Is(Matches{0}[Content], type binary)
-					then [Content = Matches{0}[Content], Modified = Matches{0}[#"Date modified"]]
-					else error Error.Record("SmartInventory file", "Missing or ambiguous local source file", FileName)
-			in
-				Selected
-	lineageTag: e1c0464a-0d57-4c77-9e11-80c0c3c575a8
-
 /// Local for Desktop validation; SharePoint for the published prepared dataset.
 expression PreparedSourceMode = "Local" meta [IsParameterQuery=true, Type="Text", IsParameterQueryRequired=true]
 	lineageTag: 4ed43701-3685-428f-a9d4-32b65616deb6
+
+	annotation PBI_ResultType = Text
 
 /// Private synchronized local DATA-POWERBI root. Do not publish tenant runtime values to GitHub.
 expression PreparedEvidenceRoot = "C:\SmartM365\DATA\DATA-POWERBI" meta [IsParameterQuery=true, Type="Text", IsParameterQueryRequired=true]
 	lineageTag: a27274ad-f065-4462-af3e-51eaaef0c51b
 
+	annotation PBI_ResultType = Text
+
 /// Prepared batch folder relative to SharePoint DATA. Cloud deployment unqualified.
 expression PreparedSharePointFolder = "DATA-POWERBI" meta [IsParameterQuery=true, Type="Text", IsParameterQueryRequired=true]
 	lineageTag: a534194b-79d0-466f-a96c-0ea15cdea611
 
-/// Versioned single-tenant CSV reader. Prefers .json.txt metadata, with legacy .json fallback only on absence. Checks manifest identity and file size. Refresh after publication/synchronization; optional immutable batch pin.
+	annotation PBI_ResultType = Text
+
+/// Requires an explicit immutable reviewed batch and expected tenant. Reads only declared batch tables/artifacts, checks size and pointer tenant. SHA256 verified by preparation and transfer, not recomputed by M.
 expression GetPreparedEvidenceFile =
 		(fileName as text) as binary =>
 		let
@@ -92,69 +73,83 @@ expression GetPreparedEvidenceFile =
 		            // Fallback only on ABSENCE, never after a read or JSON parse error.
 		            Selected = if Table.RowCount(Preferred) = 0 then Legacy else Preferred
 		        in if Table.RowCount(Selected) = 1 then Binary.Buffer(Selected{0}[Content]) else error "Missing or ambiguous prepared metadata",
-		    PointerBytes = ReadMetadata({}, "current"),
+		    RequiredPin = if Text.Trim(PreparedBatchId) = "" then error "Set PreparedBatchId to the reviewed immutable unified batch before refresh" else SafeSegment(PreparedBatchId),
+		    ExpectedTenant = if Text.Trim(PreparedExpectedTenantKey) = "" then error "PreparedExpectedTenantKey is required" else PreparedExpectedTenantKey,
+		    PointerBytes = if RequiredPin <> "" then ReadMetadata({}, "current") else error "Missing prepared batch pin",
 		    Pointer = Json.Document(PointerBytes),
-		    BatchId = SafeSegment(if PreparedBatchId = "" then Text.From(Pointer[BatchId]) else PreparedBatchId),
+		    BatchId = RequiredPin,
 		    Manifest = Json.Document(ReadMetadata({"batches", BatchId}, "batch")),
-		    Selected = List.Select(Manifest[Files], each [File] = SafeSegment(fileName)),
-		    Entry = if Manifest[SchemaVersion] <> 1 or Manifest[BatchId] <> BatchId or Manifest[TenantKey] <> Pointer[TenantKey] or List.Count(Selected) <> 1 then error "Invalid prepared batch manifest" else Selected{0},
+		    Selected = List.Select(Manifest[Files] & Record.FieldOrDefault(Manifest, "Artifacts", {}), each [File] = SafeSegment(fileName)),
+		    Entry = if Manifest[SchemaVersion] <> 1 or Manifest[BatchId] <> BatchId or Manifest[TenantKey] <> ExpectedTenant or Pointer[TenantKey] <> ExpectedTenant or List.Count(Selected) <> 1 then error "Invalid prepared batch manifest" else Selected{0},
 		    Content = Binary.Buffer(ReadBinary({"batches", BatchId, SafeSegment(fileName)})),
 		    // Size guard rejects incomplete synchronized files. SHA256 is checked by the publisher, not by M.
-		    Checked = if Binary.Length(Content) <> Entry[Bytes] then error "Prepared CSV transfer incomplete; previous imported model must be retained" else Content,
+		    Checked = if Binary.Length(Content) <> Entry[Bytes] then error "Prepared evidence transfer incomplete; previous imported model must be retained" else Content,
 		    StablePointer = if PreparedBatchId <> "" or Binary.ToText(PointerBytes, BinaryEncoding.Base64) = Binary.ToText(ReadMetadata({}, "current"), BinaryEncoding.Base64) then Checked else error "Prepared batch changed during read; refresh after preparation finishes"
 		in
 		    StablePointer
 	lineageTag: 1a2449ff-1655-4999-b5f5-61649746d24f
 
-/// Optional immutable prepared batch ID. Empty reads current.json; preparation and synchronization must finish before refresh.
-expression PreparedBatchId = "" meta [IsParameterQuery=true, Type="Text", IsParameterQueryRequired=false]
+/// Required immutable unified batch ID. Remains empty until the server batch is validated; refresh fails closed instead of mixing current pointers.
+expression PreparedBatchId = "" meta [IsParameterQuery=true, Type="Text", IsParameterQueryRequired=true]
 	lineageTag: 340fbb26-2a1c-4c79-a41c-3e024ed2a776
 
-/// Read the exact SmartInventory license report snapshot used by the daily email. Missing or malformed evidence fails refresh.
+	annotation PBI_ResultType = Text
+
+/// Reads governed source artifacts from the same immutable DATA-POWERBI batch; original domain validation retained.
 expression GetLicenseReportSnapshot =
 		() as record =>
 		let
 		    FileName = "M365_Licenses_ReportSnapshot.json.txt",
-		    Content = if PreparedSourceMode = "Local" then GetSmartInventoryFile({"DATA-LAST"}, FileName)[Content]
-		        else if PreparedSourceMode = "SharePoint" then
-		            let
-		                Root = SharePoint.Contents(SharePointSiteUrl, [ApiVersion=15]),
-		                Segments = {SharePointLibraryName} & List.Select(Text.Split(SharePointDataFolder & "/DATA-LAST", "/"), each _ <> ""),
-		                Folder = List.Accumulate(Segments, Root, (parent, segment) =>
-		                    let matches = Table.SelectRows(parent, each [Name] = segment)
-		                    in if Table.RowCount(matches) = 1 then matches{0}[Content] else error Error.Record("License report snapshot", "Missing or ambiguous source folder", segment)),
-		                Matches = Table.SelectRows(Folder, each [Name] = FileName)
-		            in if Table.RowCount(Matches) = 1 then Matches{0}[Content] else error Error.Record("License report snapshot", "Missing or ambiguous source file", FileName)
-		        else error "PreparedSourceMode must be Local or SharePoint",
+		    Content = GetPreparedEvidenceFile("Source-" & FileName),
 		    Snapshot = Json.Document(Binary.Buffer(Content)),
-		    Checked = if Snapshot[SchemaVersion] = 1 and Text.Length(Text.From(Snapshot[SnapshotId])) = 32 and
-		        Text.Length(Text.From(Snapshot[TenantKey])) > 0 and List.Count(Snapshot[Products]) = 4 and
-		        List.Count(Snapshot[OtherProducts]) = 3
-		        then Snapshot else error "Invalid SmartInventory license report snapshot"
+		    SchemaVersion = Record.FieldOrDefault(Snapshot, "SchemaVersion", null),
+		    SupportedVersion = List.Contains({1, 2}, SchemaVersion),
+		    BaseValid = try
+		        Text.Length(Text.From(Snapshot[SnapshotId])) = 32 and
+		        Text.Length(Text.Trim(Text.From(Snapshot[TenantKey]))) > 0 and
+		        Value.Is(Snapshot[Products], type list) and List.Count(Snapshot[Products]) = 4 and
+		        Value.Is(Snapshot[OtherProducts], type list) and List.Count(Snapshot[OtherProducts]) = 3
+		        otherwise false,
+		    AssignmentValid = if SchemaVersion = 1 then true else try
+		        Value.Is(Snapshot[AssignmentIssues], type record) and
+		        Value.Is(Snapshot[AssignmentIssues][Available], type logical) and
+		        Value.Is(Snapshot[AssignmentIssues][Rows], type list) and
+		        (if Snapshot[AssignmentIssues][Available]
+		            then Value.Is(Snapshot[AssignmentIssues][Counts], type record)
+		            else List.IsEmpty(Snapshot[AssignmentIssues][Rows]))
+		        otherwise false,
+		    Checked = if not SupportedVersion then
+		        error Error.Record("License report snapshot", "Unsupported SmartInventory license report snapshot schema version", [Actual=SchemaVersion, Supported={1, 2}])
+		        else if BaseValid <> true or AssignmentValid <> true then
+		        error Error.Record("License report snapshot", "Invalid SmartInventory license report snapshot structure", [SchemaVersion=SchemaVersion])
+		        else Snapshot
 		in
 		    Checked
 	lineageTag: 62c7ccc9-3b11-4ab8-aeda-9be8e172c2d3
 
-/// Read SmartM365 CSVs produced with the same snapshot as the email and workbook.
+/// Reads governed source artifacts from the same immutable DATA-POWERBI batch; original domain validation retained.
 expression GetLicenseReportCsv =
 		(fileName as text, expectedColumns as list) as table =>
 		let
-		    Allowed = {"M365_Licenses_ReportSummary.csv", "M365_Licenses_ReportCandidates.csv", "M365_Licenses_ReportGaps.csv", "M365_Licenses_ReportSources.csv"},
-		    Content = if not List.Contains(Allowed, fileName) then error "Unexpected license report CSV"
-		        else if PreparedSourceMode = "Local" then GetSmartInventoryFile({"DATA-LAST"}, fileName)[Content]
-		        else if PreparedSourceMode = "SharePoint" then
-		            let
-		                Root = SharePoint.Contents(SharePointSiteUrl, [ApiVersion=15]),
-		                Segments = {SharePointLibraryName} & List.Select(Text.Split(SharePointDataFolder & "/DATA-LAST", "/"), each _ <> ""),
-		                Folder = List.Accumulate(Segments, Root, (parent, segment) =>
-		                    let matches = Table.SelectRows(parent, each [Name] = segment)
-		                    in if Table.RowCount(matches) = 1 then matches{0}[Content] else error "License report CSV folder missing or ambiguous"),
-		                Matches = Table.SelectRows(Folder, each [Name] = fileName)
-		            in if Table.RowCount(Matches) = 1 then Matches{0}[Content] else error "License report CSV missing or ambiguous"
-		        else error "PreparedSourceMode must be Local or SharePoint",
-		    Raw = Csv.Document(Binary.Buffer(Content), [Delimiter=",", Columns=List.Count(expectedColumns), Encoding=65001, QuoteStyle=QuoteStyle.Csv, ExtraValues=ExtraValues.Error]),
-		    Rows = Table.PromoteHeaders(Raw, [PromoteAllScalars=true]),
-		    HeadersChecked = if Table.ColumnNames(Rows) = expectedColumns then Rows else error "License report CSV schema differs from the SmartM365 contract",
+		    Allowed = {"M365_Licenses_ReportSummary.csv", "M365_Licenses_ReportCandidates.csv", "M365_Licenses_ReportGaps.csv", "M365_Licenses_ReportSources.csv", "M365_Licenses_ReportAssignmentIssues.csv"},
+		    Content = if not List.Contains(Allowed, fileName) then error "Unexpected license report CSV" else GetPreparedEvidenceFile("Source-" & fileName),
+		    // Accept only the legacy summary and its exact assignment-status extension.
+		    Buffered = Binary.Buffer(Content),
+		    Raw = Csv.Document(Buffered, [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv, ExtraValues=ExtraValues.Error]),
+		    Header = if Table.IsEmpty(Raw) then error "License report CSV is empty" else Record.FieldValues(Raw{0}),
+		    ExtendedColumns = if fileName = "M365_Licenses_ReportSummary.csv" and List.Count(expectedColumns) = 40
+		        and expectedColumns{10} = "AssignedUsers"
+		        then List.InsertRange(expectedColumns, 11, {"AssignmentCapacityWait", "AssignmentOtherErrors", "AssignmentEvidenceStatus"})
+		        else expectedColumns,
+		    AcceptedColumns = if Header = expectedColumns then expectedColumns
+		        else if fileName = "M365_Licenses_ReportSummary.csv" and Header = ExtendedColumns then ExtendedColumns
+		        else error "License report CSV schema differs from the SmartM365 contract",
+		    StrictRows = Csv.Document(Buffered, [Delimiter=",", Columns=List.Count(AcceptedColumns), Encoding=65001, QuoteStyle=QuoteStyle.Csv, ExtraValues=ExtraValues.Error]),
+		    Rows = Table.PromoteHeaders(StrictRows, [PromoteAllScalars=true]),
+		    HeadersChecked = if fileName = "M365_Licenses_ReportSummary.csv" then
+		        if Header = ExtendedColumns and List.Count(Header) = 43 then Rows
+		        else Table.AddColumn(Table.AddColumn(Table.AddColumn(Rows, "AssignmentCapacityWait", each null, Int64.Type), "AssignmentOtherErrors", each null, Int64.Type), "AssignmentEvidenceStatus", each "Unknown", type text)
+		        else Table.SelectColumns(Rows, expectedColumns),
 		    Snapshot = GetLicenseReportSnapshot(),
 		    IdentityChecked = if Table.RowCount(HeadersChecked) = 0 or
 		        (List.Distinct(HeadersChecked[SnapshotId]) = {Snapshot[SnapshotId]} and List.Distinct(HeadersChecked[TenantKey]) = {Snapshot[TenantKey]})
@@ -162,4 +157,137 @@ expression GetLicenseReportCsv =
 		in
 		    IdentityChecked
 	lineageTag: a2931804-2243-4d2a-bf3d-3a271daf2f71
+
+/// Read normal local migration CSV inputs with strict header and schema validation. No frozen validation fallback.
+expression ReadMigrationCsv =
+		(content as binary, required as list) as table =>
+		let
+		    Buffered = Binary.Buffer(content),
+		    HeaderLine = Text.BeforeDelimiter(Text.FromBinary(Buffered, TextEncoding.Utf8) & "#(lf)", "#(lf)"),
+		    Separator = if Text.Contains(HeaderLine, ";") then ";" else ",",
+		    Raw = Csv.Document(Buffered, [Delimiter=Separator, Encoding=65001, QuoteStyle=QuoteStyle.Csv]),
+		    Headers = if Table.IsEmpty(Raw) then error "Migration source is empty; a schema header is required" else Record.FieldValues(Raw{0}),
+		    UniqueHeaders = if List.Count(Headers) = List.Count(List.Distinct(Headers)) and not List.Contains(Headers, null) and not List.Contains(Headers, "") then Raw else error "Duplicate or empty migration CSV headers",
+		    Promoted = Table.PromoteHeaders(UniqueHeaders, [PromoteAllScalars=true]),
+		    Missing = List.Difference(required, Table.ColumnNames(Promoted)),
+		    Checked = if List.IsEmpty(Missing) then Promoted else error Error.Record("Migration source schema", "Required columns are missing", Missing)
+		in
+		    Checked
+	lineageTag: 25ff69f8-08ac-4896-ae1f-f3eb16c544da
+
+/// Observed migration history captured and indexed in the same immutable batch. No raw folder reads; original time/coverage semantics retained.
+expression ReadMigrationWeeklyHistory =
+		(kind as text, fileName as text, required as list, tenant as text) as list =>
+		let
+		    Scope = if kind = "Mailbox" and fileName = "Exchange_OnPrem_Mailboxes_AllDomains.csv" then kind
+		        else if kind = "Windows" and fileName = "Intune_Devices_Inventory.csv" then kind
+		        else error "Unsupported migration history scope",
+		    Index = Json.Document(GetPreparedEvidenceFile("PreparedHistoryIndex.json.txt")),
+		    Entries = if Index[SchemaVersion] = 1 and Index[TenantKey] = tenant then Index[Entries] else error "Invalid prepared history identity",
+		    Weeks = List.Select(Entries, each [Kind] = Scope and [SourceFile] = fileName),
+		    ReadWeek = (week as record) as record =>
+		        let
+		            Name = week[Week],
+		            Year = Number.FromText(Text.Start(Name, 4), "en-US"),
+		            Number = Number.FromText(Text.End(Name, 2), "en-US"),
+		            Monday = Date.AddWeeks(Date.StartOfWeek(#date(Year, 1, 4), Day.Monday), Number - 1),
+		            CheckedWeek = if Number >= 1 and Number <= 53 then Monday else error "Invalid ISO history week",
+		            Manifest = Json.Document(GetPreparedEvidenceFile(week[Manifest])),
+		            ManifestWeek = Record.FieldOrDefault(Manifest, "Week", Name),
+		            CheckedManifest = if ManifestWeek = Name then Manifest else error "History manifest week differs from folder",
+		            Stamps = Record.FieldOrDefault(CheckedManifest, "FileSnapshotCreatedAtUtc", []),
+		            Stamp = Record.FieldOrDefault(Stamps, fileName, Record.FieldOrDefault(CheckedManifest, "SnapshotCreatedAtUtc", null)),
+		            Date = if Stamp <> null and Text.Trim(Text.From(Stamp)) <> "" then Date.FromText(Text.Start(Text.From(Stamp), 10), [Culture="en-US"]) else CheckedWeek,
+		            Source = ReadMigrationCsv(GetPreparedEvidenceFile(week[File]), required),
+		            HasTenant = Table.HasColumns(Source, {"TenantKey"}),
+		            AllScoped = HasTenant and List.AllTrue(List.Transform(Table.Column(Source, "TenantKey"), each _ = tenant)),
+		            Rows = if HasTenant then Table.SelectRows(Source, each [TenantKey] = tenant or [TenantKey] = "" or [TenantKey] = null) else Source,
+		            Issues = if kind <> "Mailbox" or week[Issues] = null then null else ReadMigrationCsv(GetPreparedEvidenceFile(week[Issues]), {}),
+		            NoCollectionIssues = Issues <> null and Table.IsEmpty(Issues)
+		        in
+		            [Week=Name, Date=Date, HasRecordedDate=Stamp <> null and Text.Trim(Text.From(Stamp)) <> "", AllTenantScoped=AllScoped, Rows=Rows, NoCollectionIssues=NoCollectionIssues, ExcludedOtherTenantRows=Table.RowCount(Source)-Table.RowCount(Rows)],
+		    Result = List.Transform(Weeks, ReadWeek)
+		in
+		    Result
+	lineageTag: b15da87d-590d-4358-a6e1-f31d226b18b8
+
+/// Reads governed source artifacts from the same immutable DATA-POWERBI batch; original domain validation retained.
+expression GetSharePointOnPremCsv =
+		(FileName as text, RequiredColumns as list, OptionalColumns as list) as table =>
+		let
+		    Allowed = {"SharePoint_OnPrem_Farms.csv", "SharePoint_OnPrem_Servers.csv", "SharePoint_OnPrem_ServiceApplications.csv", "SharePoint_OnPrem_WebApplications.csv", "SharePoint_OnPrem_WebApplicationZones.csv", "SharePoint_OnPrem_ContentDatabases.csv", "SharePoint_OnPrem_SiteCollections.csv", "SharePoint_OnPrem_SiteAdministrators.csv", "SharePoint_OnPrem_Webs.csv", "SharePoint_OnPrem_CollectionCoverage.csv"},
+		    NameChecked = if List.Contains(Allowed, FileName) then FileName else error Error.Record("SharePoint on-prem source", "Unexpected CSV name", FileName),
+		    Content = GetPreparedEvidenceFile("Source-" & NameChecked),
+		    Parsed = Csv.Document(Binary.Buffer(Content), [Delimiter=";", Encoding=65001, QuoteStyle=QuoteStyle.Csv]),
+		    Headers = Table.PromoteHeaders(Parsed, [PromoteAllScalars=true]),
+		    Missing = List.Difference(RequiredColumns, Table.ColumnNames(Headers)),
+		    Checked = if List.IsEmpty(Missing) then Headers else error Error.Record("SharePoint on-prem schema", "Required CSV columns are missing", [File=FileName, Columns=Missing]),
+		    OptionalReady = Table.HasColumns(Checked, OptionalColumns),
+		    Selected = Table.SelectColumns(Checked, RequiredColumns & OptionalColumns, MissingField.UseNull),
+		    WithSchema = Table.AddColumn(Selected, "Optional Schema Ready", each OptionalReady, type logical)
+		in
+		    WithSchema
+	lineageTag: 694f1b88-74ed-459f-9f5a-b93ff719702b
+
+/// Strict native evidence types, preserving missing values and explicit time qualifications.
+expression NativeEvidenceTypes =
+		// Candidate strict typed projection; pass the complete existing/new column map.
+		// No missing-field suppression, locale inference, or blank-to-zero conversion.
+		(Rows as table, Types as list) as table =>
+		let
+		    // Wall-clock support is opt-in per source column, never inferred globally.
+		    Parse = (Value as any, Kind as text, SourceWallClock as logical, EmptyAutopilotContact as logical) as any =>
+		        if Value = null or Value = "" then null
+		        else if Kind = "String" then Text.From(Value)
+		        else if Kind = "Boolean" then
+		            if Text.Lower(Text.From(Value)) = "true" then true
+		            else if Text.Lower(Text.From(Value)) = "false" then false
+		            else error "Invalid Boolean evidence."
+		        else if Kind = "Double" then
+		            let Number = Number.FromText(Text.From(Value), "en-US")
+		            in if Number.IsNaN(Number) or Number = #infinity or Number = -#infinity
+		                then error "Non-finite numeric evidence." else Number
+		        else if Kind = "Int64" then
+		            let Number = Number.FromText(Text.From(Value), "en-US")
+		            in if not Number.IsNaN(Number) and Number <> #infinity and Number <> -#infinity
+		                and Number.Abs(Number) <= 9007199254740991 and Number.RoundTowardZero(Number) = Number
+		                then Int64.From(Number) else error "Invalid or inexact integer evidence."
+		        else if Kind = "DateOnly" then DateTime.From(
+		            Date.FromText(Text.From(Value), [Format = "yyyy-MM-dd", Culture = "en-US"]))
+		        else if Kind = "DateTime" then
+		            let TextValue = Text.From(Value), Offset = Text.End(TextValue, 6),
+		                ExplicitZone = Text.EndsWith(TextValue, "Z")
+		                    or (Text.Length(Offset) = 6
+		                        and List.Contains({"+", "-"}, Text.Start(Offset, 1))
+		                        and Text.At(Offset, 3) = ":"
+		                        and Text.Length(Text.Select(Offset, {"0".."9"})) = 4),
+		                WallClock = () as datetime =>
+		                    let Parsed = DateTime.FromText(TextValue,
+		                            [Format = "dd/MM/yyyy HH:mm:ss", Culture = "fr-FR"]),
+		                        Exact = DateTime.ToText(Parsed,
+		                            [Format = "dd/MM/yyyy HH:mm:ss", Culture = "fr-FR"]) = TextValue
+		                    in if Exact and Date.Year(DateTime.Date(Parsed)) >= 1900 then Parsed
+		                        else error "Invalid source wall-clock date evidence."
+		            in if EmptyAutopilotContact and TextValue = "01/01/0001 00:00:00" then null
+		                else if ExplicitZone then DateTimeZone.RemoveZone(
+		                DateTimeZone.SwitchZone(DateTimeZone.FromText(TextValue, [Culture = "en-US"]), 0))
+		                else if SourceWallClock then WallClock()
+		                else error "Date evidence requires an explicit timezone."
+		        else error "Unsupported candidate type.",
+		    Converted = Table.TransformColumns(Rows, List.Transform(Types, (Definition) =>
+		        {Definition[name], (Value) => Parse(Value, Definition[dataType],
+		            Record.FieldOrDefault(Definition, "allowSourceWallClock", false),
+		            Record.FieldOrDefault(Definition, "allowEmptyAutopilotContact", false)),
+		            if Definition[dataType] = "String" then type nullable text
+		            else if Definition[dataType] = "Boolean" then type nullable logical
+		            else if Definition[dataType] = "Double" then type nullable number
+		            else if Definition[dataType] = "Int64" then Int64.Type
+		            else type nullable datetime}), null, MissingField.Error)
+		in
+		    Converted
+	lineageTag: 5fef8535-2f69-4d1c-866a-d915494c40a3
+
+/// Expected private reporting tenant. Replace with deployment identity before any refresh; never infer identity from the downloaded pointer.
+expression PreparedExpectedTenantKey = "" meta [IsParameterQuery=true, Type="Text", IsParameterQueryRequired=true]
+	lineageTag: fd94c8fb-7f6c-48b7-ac89-42afd49db4fe
 

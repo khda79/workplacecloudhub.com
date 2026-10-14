@@ -35,7 +35,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Content & Storage diagnostic context icon'"
+                  "Value": "'Cloud Content & Storage diagnostic context icon'"
                 }
               }
             }
@@ -117,5 +117,6 @@
       ]
     },
     "drillFilterOtherVisuals": true
-  }
+  },
+  "isHidden": true
 }

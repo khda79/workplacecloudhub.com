@@ -3,11 +3,11 @@
   "name": "a9d6639e49b5c4ee5e09",
   "position": {
     "x": 96,
-    "y": 64,
-    "z": 101,
-    "width": 1024,
+    "y": 88,
+    "width": 640,
     "height": 32,
-    "tabOrder": 101
+    "z": 101,
+    "tabOrder": 145
   },
   "visual": {
     "visualType": "textbox",
@@ -19,7 +19,7 @@
               {
                 "textRuns": [
                   {
-                    "value": "Content & Storage · BETA 1.0.0-beta.1 · current private SharePoint inventory · OneDrive usage freshness shown · SharePoint weekly history",
+                    "value": "Cloud Content & Storage · BETA 1.0.0-beta.1 · current private SharePoint inventory · OneDrive usage freshness shown · SharePoint weekly history",
                     "textStyle": {
                       "fontFamily": "Segoe UI",
                       "fontSize": "13px",

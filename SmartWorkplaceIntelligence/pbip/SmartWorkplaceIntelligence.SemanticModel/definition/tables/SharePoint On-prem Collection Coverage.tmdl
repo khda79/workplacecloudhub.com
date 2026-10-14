@@ -1,0 +1,120 @@
+/// One coverage result per attempted site collection or content database failure. ExcludedPersonal is intentional; other statuses indicate partial coverage.
+table 'SharePoint On-prem Collection Coverage'
+	lineageTag: 6d2550a8-9561-42e9-a66a-fa4ae5e199d4
+
+	/// Coverage attempts and database-level exceptions in the current Content CSV.
+	measure 'Coverage Rows' = COUNTROWS('SharePoint On-prem Collection Coverage')
+		formatString: #,##0
+		lineageTag: 7d343a40-e3db-44e3-a5b1-cb6f9573e71d
+
+	/// Coverage rows other than Collected or intentionally ExcludedPersonal; a nonzero value makes the Content run Partial.
+	measure 'Coverage Issues' = CALCULATE(COUNTROWS('SharePoint On-prem Collection Coverage'), KEEPFILTERS('SharePoint On-prem Collection Coverage'[Coverage Status] <> "Collected"), KEEPFILTERS('SharePoint On-prem Collection Coverage'[Coverage Status] <> "ExcludedPersonal"))
+		formatString: #,##0
+		lineageTag: dbd4ff94-9e4b-4030-b153-af6002a7c389
+
+	/// Personal site collections intentionally omitted from detailed Content CSVs but retained in coverage.
+	measure 'Excluded Personal Collections' = CALCULATE(COUNTROWS('SharePoint On-prem Collection Coverage'), KEEPFILTERS('SharePoint On-prem Collection Coverage'[Coverage Status] = "ExcludedPersonal"))
+		formatString: #,##0
+		lineageTag: 43f06896-7bbf-4d7d-814b-3f0db5622ba0
+
+	/// Reports Partial for coverage anomalies; validates optional Content schema and run alignment. Receipt hashes and live farm qualification are separate checks.
+	measure 'Content Coverage Health' = VAR _coverageRows = COUNTROWS('SharePoint On-prem Collection Coverage') VAR _issues = [Coverage Issues] VAR _schemaMissing = CALCULATE(COUNTROWS('SharePoint On-prem Site Collections'), KEEPFILTERS('SharePoint On-prem Site Collections'[Optional Schema Ready] <> TRUE())) VAR _siteRun = SELECTEDVALUE('SharePoint On-prem Site Collections'[Run ID]) VAR _coverageRun = SELECTEDVALUE('SharePoint On-prem Collection Coverage'[Run ID]) VAR _collected = CALCULATE(COUNTROWS('SharePoint On-prem Collection Coverage'), KEEPFILTERS('SharePoint On-prem Collection Coverage'[Coverage Status] = "Collected")) VAR _siteRows = COUNTROWS('SharePoint On-prem Site Collections') RETURN SWITCH(TRUE(), _coverageRows = 0, "Unavailable", _schemaMissing > 0, "Schema pending", _issues > 0, "Partial", ISBLANK(_coverageRun) || _siteRun <> _coverageRun, "Run mismatch", _siteRows <> _collected, "Count mismatch", "Coverage complete")
+		formatString: @
+		lineageTag: da6d5e95-1f63-482f-85fb-4ac0314b8db5
+
+	/// Visual filter flag for rows representing coverage anomalies; intentionally excluded personal sites are not issues.
+	measure 'Coverage Issue Row' = VAR _status = SELECTEDVALUE('SharePoint On-prem Collection Coverage'[Coverage Status]) RETURN IF(_status IN {"Collected", "ExcludedPersonal"}, 0, 1)
+		formatString: 0
+		isHidden
+		lineageTag: bf22e299-be5d-4047-8389-11f7e4da965a
+
+	column 'Tenant Key'
+		dataType: string
+		isHidden
+		lineageTag: b32278f9-b846-45bf-a734-db4f12a23c40
+		sourceColumn: Tenant Key
+
+	column 'Farm ID'
+		dataType: string
+		isHidden
+		lineageTag: 6f4c59ec-3262-49b4-bd62-f0a6b4c2b677
+		sourceColumn: Farm ID
+
+	column 'Run ID'
+		dataType: string
+		isHidden
+		lineageTag: 7f6cea11-9cb7-41ae-98f4-046b6f1321ed
+		sourceColumn: Run ID
+
+	column 'Web Application ID'
+		dataType: string
+		isHidden
+		lineageTag: 2fc689c6-18e0-4c85-95c9-0f140eaf4848
+		sourceColumn: Web Application ID
+
+	column 'Content Database ID'
+		dataType: string
+		isHidden
+		lineageTag: 2ea22e75-d328-4b45-98df-6b91a64d86a9
+		sourceColumn: Content Database ID
+
+	column 'Site Collection ID'
+		dataType: string
+		isHidden
+		lineageTag: 77e35bb8-8072-4f2a-851e-2e1b4bd202ef
+		sourceColumn: Site Collection ID
+
+	column 'Coverage Status'
+		dataType: string
+		lineageTag: 2e2e6839-667d-4705-b2a6-e5e129cce8ea
+		sourceColumn: Coverage Status
+
+	column 'Error Stage'
+		dataType: string
+		lineageTag: 0726a842-ab59-4436-bd78-0d36d6ce8f35
+		sourceColumn: Error Stage
+
+	column 'Farm Key'
+		dataType: string
+		isHidden
+		lineageTag: 3e9f7f23-b333-4b06-bf1f-2e0541644eab
+		sourceColumn: Farm Key
+
+	column 'Web Application Key'
+		dataType: string
+		isHidden
+		lineageTag: 03acdb6a-1f6d-4437-b4a5-3aaebac35efe
+		sourceColumn: Web Application Key
+
+	column 'Content Database Key'
+		dataType: string
+		isHidden
+		lineageTag: ae231c93-8a67-44f1-95da-4605c6a5240f
+		sourceColumn: Content Database Key
+
+	/// Site URL associated with a coverage outcome when the source provides one.
+	column 'Coverage URL'
+		dataType: string
+		lineageTag: 907a9ee2-b8b7-428d-ba63-1137428f9157
+		sourceColumn: Coverage URL
+
+	/// Collector-provided detail for a coverage issue; blank for successful or intentionally excluded rows.
+	column 'Error Message'
+		dataType: string
+		lineageTag: 21dc9d03-8645-4428-a2a8-01ef142e8b14
+		sourceColumn: Error Message
+
+	partition 'SharePoint On-prem Collection Coverage' = m
+		mode: import
+		source =
+				let
+				    Raw = GetSharePointOnPremCsv("SharePoint_OnPrem_CollectionCoverage.csv", {"TenantKey", "FarmId", "RunId", "WebApplicationId", "ContentDatabaseId", "SiteCollectionId", "Status", "ErrorStage"}, {"Url", "ErrorMessage"}),
+				    Nulls = Table.ReplaceValue(Raw, "", null, Replacer.ReplaceValue, {}),
+				    Typed = Table.TransformColumnTypes(Nulls, {}, "en-US"),
+				    FarmKey = Table.AddColumn(Typed, "Farm Key", each [TenantKey] & "|" & [FarmId], type text),
+				    WebKey = Table.AddColumn(FarmKey, "Web Application Key", each [TenantKey] & "|" & [FarmId] & "|" & [WebApplicationId], type text),
+				    DbKey = Table.AddColumn(WebKey, "Content Database Key", each [TenantKey] & "|" & [FarmId] & "|" & [ContentDatabaseId], type text),
+				    Renamed = Table.RenameColumns(DbKey, {{"TenantKey", "Tenant Key"}, {"FarmId", "Farm ID"}, {"RunId", "Run ID"}, {"WebApplicationId", "Web Application ID"}, {"ContentDatabaseId", "Content Database ID"}, {"SiteCollectionId", "Site Collection ID"}, {"Status", "Coverage Status"}, {"ErrorStage", "Error Stage"}, {"Url", "Coverage URL"}, {"ErrorMessage", "Error Message"}})
+				in
+				    Renamed
+

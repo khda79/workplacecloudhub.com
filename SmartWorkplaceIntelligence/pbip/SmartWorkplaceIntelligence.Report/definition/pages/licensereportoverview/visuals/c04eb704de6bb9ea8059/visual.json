@@ -3,11 +3,11 @@
   "name": "c04eb704de6bb9ea8059",
   "position": {
     "x": 32,
-    "y": 2796,
-    "width": 1856,
-    "height": 105,
-    "z": 136,
-    "tabOrder": 136
+    "y": 712,
+    "width": 916,
+    "height": 120,
+    "z": 49,
+    "tabOrder": 49
   },
   "visual": {
     "visualType": "tableEx",
@@ -23,10 +23,10 @@
                       "Entity": "License Report Gaps"
                     }
                   },
-                  "Property": "License Report Gap AdGapActivity Members"
+                  "Property": "License Report Gap AdGapActivity Members Label"
                 }
               },
-              "queryRef": "License Report Gaps.License Report Gap AdGapActivity Members",
+              "queryRef": "License Report Gaps.License Report Gap AdGapActivity Members Label",
               "nativeQueryRef": "Members",
               "displayName": "Members"
             },
@@ -38,10 +38,10 @@
                       "Entity": "License Report Gaps"
                     }
                   },
-                  "Property": "License Report Gap AdGapActivity AdObserved"
+                  "Property": "License Report Gap AdGapActivity AdObserved Label"
                 }
               },
-              "queryRef": "License Report Gaps.License Report Gap AdGapActivity AdObserved",
+              "queryRef": "License Report Gaps.License Report Gap AdGapActivity AdObserved Label",
               "nativeQueryRef": "AD observed",
               "displayName": "AD observed"
             },
@@ -53,10 +53,10 @@
                       "Entity": "License Report Gaps"
                     }
                   },
-                  "Property": "License Report Gap AdGapActivity NoObservedMatch"
+                  "Property": "License Report Gap AdGapActivity NoObservedMatch Label"
                 }
               },
-              "queryRef": "License Report Gaps.License Report Gap AdGapActivity NoObservedMatch",
+              "queryRef": "License Report Gaps.License Report Gap AdGapActivity NoObservedMatch Label",
               "nativeQueryRef": "No AD match",
               "displayName": "No AD match"
             },
@@ -68,38 +68,28 @@
                       "Entity": "License Report Gaps"
                     }
                   },
-                  "Property": "License Report Gap AdGapActivity Ambiguous"
+                  "Property": "License Report Gap AdGapActivity Ambiguous Label"
                 }
               },
-              "queryRef": "License Report Gaps.License Report Gap AdGapActivity Ambiguous",
+              "queryRef": "License Report Gaps.License Report Gap AdGapActivity Ambiguous Label",
               "nativeQueryRef": "Ambiguous",
               "displayName": "Ambiguous"
             }
           ]
         }
-      },
-      "sortDefinition": {
-        "sort": [
-          {
-            "field": {
-              "Column": {
-                "Expression": {
-                  "SourceRef": {
-                    "Entity": "License Report Summary"
-                  }
-                },
-                "Property": "Product"
-              }
-            },
-            "direction": "Ascending"
-          }
-        ]
       }
     },
     "objects": {
       "columnHeaders": [
         {
           "properties": {
+            "autoSizeColumnWidth": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
             "columnAdjustment": {
               "expr": {
                 "Literal": {
@@ -107,7 +97,14 @@
                 }
               }
             },
-            "autoSizeColumnWidth": {
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
+            },
+            "bold": {
               "expr": {
                 "Literal": {
                   "Value": "true"
@@ -137,23 +134,9 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#005A9E'"
+                      "Value": "'#215E9E'"
                     }
                   }
-                }
-              }
-            },
-            "bold": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "fontSize": {
-              "expr": {
-                "Literal": {
-                  "Value": "10D"
                 }
               }
             }
@@ -163,10 +146,39 @@
       "values": [
         {
           "properties": {
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
+            },
             "wordWrap": {
               "expr": {
                 "Literal": {
-                  "Value": "true"
+                  "Value": "false"
+                }
+              }
+            },
+            "fontColorPrimary": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#183153'"
+                    }
+                  }
+                }
+              }
+            },
+            "fontColorSecondary": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#183153'"
+                    }
+                  }
                 }
               }
             },
@@ -186,38 +198,9 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#F3F7FA'"
+                      "Value": "'#F0F5FA'"
                     }
                   }
-                }
-              }
-            },
-            "fontColorPrimary": {
-              "solid": {
-                "color": {
-                  "expr": {
-                    "Literal": {
-                      "Value": "'#1F2937'"
-                    }
-                  }
-                }
-              }
-            },
-            "fontColorSecondary": {
-              "solid": {
-                "color": {
-                  "expr": {
-                    "Literal": {
-                      "Value": "'#1F2937'"
-                    }
-                  }
-                }
-              }
-            },
-            "fontSize": {
-              "expr": {
-                "Literal": {
-                  "Value": "9D"
                 }
               }
             }
@@ -245,7 +228,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'AD activity coverage table.'"
+                  "Value": "'Tenant-wide AD coverage · section 07 Members'"
                 }
               }
             }
@@ -265,7 +248,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'AD activity coverage'"
+                  "Value": "'Tenant-wide AD coverage · section 07 Members'"
                 }
               }
             },
@@ -428,5 +411,6 @@
       ]
     },
     "drillFilterOtherVisuals": true
-  }
+  },
+  "parentGroupName": "ec3aac9702b5e1a75aa3"
 }

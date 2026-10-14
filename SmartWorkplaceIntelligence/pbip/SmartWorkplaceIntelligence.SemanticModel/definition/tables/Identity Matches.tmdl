@@ -1,5 +1,6 @@
-/// One identity reconciliation candidate per synthetic run.
+/// Legacy synthetic fixture: not used by production report visuals or consolidated evidence. Removal is pending a separately cleared dependency-safe retirement; no real data.
 table 'Identity Matches'
+	isHidden
 	lineageTag: b91c5249-3e2f-4f1b-b6e5-1bd622f2ae70
 
 	/// Eligible identity candidates in the reconciliation scope.

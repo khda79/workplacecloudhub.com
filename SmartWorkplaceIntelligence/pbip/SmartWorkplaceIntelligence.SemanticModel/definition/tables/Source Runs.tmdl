@@ -1,5 +1,6 @@
-/// Synthetic collection-run freshness and completeness evidence.
+/// Legacy synthetic fixture: not used by production report visuals or consolidated evidence. Removal is pending a separately cleared dependency-safe retirement; no real data.
 table 'Source Runs'
+	isHidden
 	lineageTag: 78dac2ce-28e6-408f-bb26-a04ea50b6c61
 
 	/// Latest accepted collection timestamp in UTC.

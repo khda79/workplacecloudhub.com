@@ -1,0 +1,427 @@
+/// Private source-backed migration planning evidence. Unknown is not zero. No Infrastructure hybride assessment.
+table 'Windows Migration Evidence'
+	lineageTag: 380dd445-f2b5-44b5-b6e7-f10ba35587d8
+
+	/// Qualified Intune Windows 10 source identities in the current frozen union; excludes AD-only records. Distinct source IDs, not proof that every identity is a separate active physical PC.
+	measure 'Remaining Managed Windows 10' = IF(COUNTROWS(ALL('Windows Migration Evidence')) > 0, COALESCE(CALCULATE(COUNTROWS('Windows Migration Evidence'), KEEPFILTERS('Windows Migration Evidence'[Inventory Source] = "Intune")), 0), BLANK())
+		formatString: #,0
+		displayFolder: Migration planning
+		lineageTag: cd275713-ce09-416f-9584-e521c5b6a9ad
+
+	/// Observed local migration planning evidence. Missing evidence is not zero; see provenance and task views. Unloaded/empty source is blank, never a verified zero.
+	measure 'Hardware Incompatible Windows 10' = IF(COUNTROWS(ALL('Windows Migration Evidence')) > 0, COALESCE(CALCULATE(COUNTROWS('Windows Migration Evidence'),KEEPFILTERS('Windows Migration Evidence'[Upgrade Eligibility] = "Not capable")),0), BLANK())
+		formatString: #,0
+		displayFolder: Migration planning
+		lineageTag: e22efc27-5f6a-4a92-9a7c-8f7a4f093e8e
+
+	/// Legacy combined unknown/conflict count retained for compatibility. Use the separate Migration Windows 10 Eligibility Unknown and Conflicting measures for the new KPI row.
+	measure 'Windows 10 Eligibility Unknown' = IF(COUNTROWS(ALL('Windows Migration Evidence')) > 0, COALESCE(COUNTROWS(FILTER('Windows Migration Evidence',NOT('Windows Migration Evidence'[Upgrade Eligibility] IN {"Capable","Not capable"}))),0), BLANK())
+		formatString: #,0
+		isHidden
+		displayFolder: Migration planning
+		lineageTag: 85cacbfd-a76a-4a55-8c21-27b1a88a50e9
+
+	/// Observed local migration planning evidence. Missing evidence is not zero; see provenance and task views.
+	measure 'Confirmed Autopatch Readiness' = "Unknown"
+		displayFolder: Migration planning
+		lineageTag: 0243c63f-1a78-443c-9652-8c235401bbfa
+
+	/// Local source-file modification timestamps, not individual device event timestamps.
+	measure 'Windows Migration Source Date' = "Frozen local exports: Intune 2026-10-08 22:47 UTC; AD 2026-10-09 00:39 UTC; history remains Intune-only"
+		displayFolder: Migration planning
+		lineageTag: f9a94ad8-c625-4fea-b4e9-87c35dcba5c8
+
+	/// Observed local migration planning evidence. Missing evidence is not zero; see provenance and task views. Unloaded/empty source is blank, never a verified zero.
+	measure 'Windows 10 Disk Review' = IF(COUNTROWS(ALL('Windows Migration Evidence')) > 0, COALESCE(COUNTROWS(FILTER('Windows Migration Evidence',NOT ISBLANK('Windows Migration Evidence'[Free Disk GB]) && 'Windows Migration Evidence'[Free Disk GB] < 20)),0), BLANK())
+		formatString: #,0
+		displayFolder: Migration planning
+		lineageTag: adc5fd5a-5862-484c-ac10-86085a9867f0
+
+	/// Observed local migration planning evidence. Missing evidence is not zero; see provenance and task views. Unloaded/empty source is blank, never a verified zero.
+	measure 'Windows 10 Legacy Build Review' = IF(COUNTROWS(ALL('Windows Migration Evidence')) > 0, COALESCE(COUNTROWS(FILTER('Windows Migration Evidence',LEFT('Windows Migration Evidence'[Legacy Build Review],8)="Pre-22H2")),0), BLANK())
+		formatString: #,0
+		displayFolder: Migration planning
+		lineageTag: 18e7aa5c-f4dc-4aea-96b5-55a7fc7932f2
+
+	/// Observed local migration planning evidence. Missing evidence is not zero; see provenance and task views. Unloaded/empty source is blank, never a verified zero.
+	measure 'Windows 10 Deployment Errors' = IF(COUNTROWS(ALL('Windows Migration Evidence')) > 0, COALESCE(CALCULATE(COUNTROWS('Windows Migration Evidence'),KEEPFILTERS('Windows Migration Evidence'[Update State]="Error")),0), BLANK())
+		formatString: #,0
+		displayFolder: Migration planning
+		lineageTag: a1ad2e8f-5967-4138-b4f3-5e0d15b9caaa
+
+	/// Count of frozen Intune Windows 10 source identities with the specified observed feature-update policy state. Excludes AD-only records. Unique tenant/policy/device-ID attribution. Success is not Windows 11 migration proof; absence is not proof of non-enrollment.
+	measure 'Windows 10 Autopatch Policy Observed' = IF(COUNTROWS(ALL('Windows Migration Evidence')) > 0, COALESCE(CALCULATE(COALESCE(CALCULATE(COUNTROWS('Windows Migration Evidence'), KEEPFILTERS('Windows Migration Evidence'[Autopatch Policy State] IN {"Success","InProgress","Error"})), 0), KEEPFILTERS('Windows Migration Evidence'[Inventory Source] = "Intune")), 0), BLANK())
+		formatString: #,##0
+		displayFolder: Migration policy context
+		lineageTag: 8b5a1bc2-89f1-40b9-a5f5-6128f33b7c3f
+
+	/// Count of frozen Intune Windows 10 source identities with the specified observed feature-update policy state. Excludes AD-only records. Unique tenant/policy/device-ID attribution. Success is not Windows 11 migration proof; absence is not proof of non-enrollment.
+	measure 'Windows 10 Autopatch Policy Success' = IF(COUNTROWS(ALL('Windows Migration Evidence')) > 0, COALESCE(CALCULATE(COALESCE(CALCULATE(COUNTROWS('Windows Migration Evidence'), KEEPFILTERS('Windows Migration Evidence'[Autopatch Policy State] IN {"Success"})), 0), KEEPFILTERS('Windows Migration Evidence'[Inventory Source] = "Intune")), 0), BLANK())
+		formatString: #,##0
+		displayFolder: Migration policy context
+		lineageTag: bbeb751c-0dbd-424d-bc74-6033fae7fa0a
+
+	/// Count of frozen Intune Windows 10 source identities with the specified observed feature-update policy state. Excludes AD-only records. Unique tenant/policy/device-ID attribution. Success is not Windows 11 migration proof; absence is not proof of non-enrollment.
+	measure 'Windows 10 Autopatch Policy In Progress' = IF(COUNTROWS(ALL('Windows Migration Evidence')) > 0, COALESCE(CALCULATE(COALESCE(CALCULATE(COUNTROWS('Windows Migration Evidence'), KEEPFILTERS('Windows Migration Evidence'[Autopatch Policy State] IN {"InProgress"})), 0), KEEPFILTERS('Windows Migration Evidence'[Inventory Source] = "Intune")), 0), BLANK())
+		formatString: #,##0
+		displayFolder: Migration policy context
+		lineageTag: 781dd729-db4b-4df3-9949-b84399ce0957
+
+	/// Count of frozen Intune Windows 10 source identities with the specified observed feature-update policy state. Excludes AD-only records. Unique tenant/policy/device-ID attribution. Success is not Windows 11 migration proof; absence is not proof of non-enrollment.
+	measure 'Windows 10 Autopatch Policy Errors' = IF(COUNTROWS(ALL('Windows Migration Evidence')) > 0, COALESCE(CALCULATE(COALESCE(CALCULATE(COUNTROWS('Windows Migration Evidence'), KEEPFILTERS('Windows Migration Evidence'[Autopatch Policy State] IN {"Error"})), 0), KEEPFILTERS('Windows Migration Evidence'[Inventory Source] = "Intune")), 0), BLANK())
+		formatString: #,##0
+		displayFolder: Migration policy context
+		lineageTag: f8be2857-36c7-4d1c-ab73-d8e0b9e1f125
+
+	/// Count of frozen Intune Windows 10 source identities with the specified observed feature-update policy state. Excludes AD-only records. Unique tenant/policy/device-ID attribution. Success is not Windows 11 migration proof; absence is not proof of non-enrollment.
+	measure 'Windows 10 Autopatch Policy Unobserved' = IF(COUNTROWS(ALL('Windows Migration Evidence')) > 0, COALESCE(CALCULATE(COALESCE(CALCULATE(COUNTROWS('Windows Migration Evidence'), KEEPFILTERS('Windows Migration Evidence'[Autopatch Policy State] IN {"Not observed"})), 0), KEEPFILTERS('Windows Migration Evidence'[Inventory Source] = "Intune")), 0), BLANK())
+		formatString: #,##0
+		displayFolder: Migration policy context
+		lineageTag: 023f79c1-581f-42fb-a99d-580a2713fede
+
+	/// Count of frozen Intune Windows 10 source identities with the specified observed feature-update policy state. Excludes AD-only records. Unique tenant/policy/device-ID attribution. Success is not Windows 11 migration proof; absence is not proof of non-enrollment.
+	measure 'Windows 10 Target Policy Observed' = IF(COUNTROWS(ALL('Windows Migration Evidence')) > 0, COALESCE(CALCULATE(COALESCE(CALCULATE(COUNTROWS('Windows Migration Evidence'), KEEPFILTERS('Windows Migration Evidence'[Windows 11 Policy State] IN {"Success","InProgress","Error","Cancelled"})), 0), KEEPFILTERS('Windows Migration Evidence'[Inventory Source] = "Intune")), 0), BLANK())
+		formatString: #,##0
+		displayFolder: Migration policy context
+		lineageTag: b269160b-6581-4714-87e5-99e72535bba2
+
+	/// Count of frozen Intune Windows 10 source identities with the specified observed feature-update policy state. Excludes AD-only records. Unique tenant/policy/device-ID attribution. Success is not Windows 11 migration proof; absence is not proof of non-enrollment.
+	measure 'Windows 10 Target Policy Errors' = IF(COUNTROWS(ALL('Windows Migration Evidence')) > 0, COALESCE(CALCULATE(COALESCE(CALCULATE(COUNTROWS('Windows Migration Evidence'), KEEPFILTERS('Windows Migration Evidence'[Windows 11 Policy State] IN {"Error"})), 0), KEEPFILTERS('Windows Migration Evidence'[Inventory Source] = "Intune")), 0), BLANK())
+		formatString: #,##0
+		displayFolder: Migration policy context
+		lineageTag: cb3d54a9-f17d-4a1d-a00c-936de8556632
+
+	/// Windows 10 union records without a usable readiness assessment (Not assessed or Unknown), including AD-only records. Disjoint from Already upgraded source conflicts.
+	measure 'Migration Windows 10 Eligibility Unknown' = IF(COUNTROWS(ALL('Windows Migration Evidence')) > 0, COALESCE(CALCULATE(COUNTROWS('Windows Migration Evidence'), KEEPFILTERS('Windows Migration Evidence'[Upgrade Eligibility] IN {"Not assessed", "Unknown"})), 0), BLANK())
+		formatString: #,0
+		displayFolder: Migration planning
+		lineageTag: 0a9b83a8-fbf0-400e-80c1-6a95f2d0d948
+
+	/// Inventory OS is Windows 10 while prepared readiness reports Already upgraded. Current 28 cases use name-only readiness attribution with ambiguous Intune identities. Source reconciliation flags, not proven contradictory OS on a uniquely identified physical PC.
+	measure 'Migration Windows 10 Eligibility Conflicting' = IF(COUNTROWS(ALL('Windows Migration Evidence')) > 0, COALESCE(CALCULATE(COUNTROWS('Windows Migration Evidence'), KEEPFILTERS('Windows Migration Evidence'[Upgrade Eligibility] = "Already upgraded")), 0), BLANK())
+		formatString: #,0
+		displayFolder: Migration planning
+		lineageTag: 8dac260d-02fe-4d20-ba59-abe601942a90
+
+	/// Current qualified union of Intune Windows 10 and enabled AD Windows 10 without a qualified Intune match. Source identities, not verified physical-PC uniqueness. Intersects the shared Country Selection with current task filters. Country is primary-user CountryOrRegion with UsageLocation fallback for Intune; configured domain/prefix attribution for AD-only.
+	measure 'Remaining Observed Windows 10' =
+			VAR _countries = VALUES('Country Selection'[Country])
+			VAR _filtered = ISCROSSFILTERED('Country Selection'[Country])
+			RETURN
+			IF(
+			    COUNTROWS(ALL('Windows Migration Evidence')) > 0,
+			    COALESCE(
+			        IF(_filtered,
+			            CALCULATE(COUNTROWS('Windows Migration Evidence'),
+			                KEEPFILTERS(TREATAS(_countries, 'Windows Migration Evidence'[Country Name]))),
+			            COUNTROWS('Windows Migration Evidence')),
+			        0),
+			    BLANK())
+		formatString: #,##0
+		displayFolder: Migration planning
+		lineageTag: ca387993-93a9-4818-9706-07283df9a954
+
+	/// Enabled AD Windows 10 records with unique GUID/name and no qualified ID or unique-name match in the frozen local Intune export. Not proof of device activity or non-enrollment. Respects filters.
+	measure 'Migration AD Windows 10 Without Intune Match' = IF(COUNTROWS(ALL('Windows Migration Evidence')) > 0, COALESCE(CALCULATE(COUNTROWS('Windows Migration Evidence'), KEEPFILTERS('Windows Migration Evidence'[Inventory Source] = "AD only")), 0), BLANK())
+		formatString: #,##0
+		displayFolder: Migration planning
+		lineageTag: 257eee2d-685b-4263-a9b2-bdac9e9112e1
+
+	/// Device Source ID from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
+	column 'Device Source ID'
+		dataType: string
+		lineageTag: dc2665f7-644a-4bfd-bc17-255b586ad7fe
+		sourceColumn: Device Source ID
+
+	/// Device Name from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
+	column 'Device Name'
+		dataType: string
+		lineageTag: 2d9142e6-e6f9-4146-9821-5ccb6b3f6314
+		sourceColumn: Device Name
+
+	/// Country from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
+	column Country
+		dataType: string
+		lineageTag: 90a46f11-9087-41e6-a245-0a4588811256
+		sourceColumn: Country
+
+	/// Primary User UPN from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
+	column 'Primary User UPN'
+		dataType: string
+		lineageTag: 5ca7ae2c-6885-4edb-bc63-10d1dab84f39
+		sourceColumn: Primary User UPN
+
+	/// OS Version from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
+	column 'OS Version'
+		dataType: string
+		lineageTag: 9fb04b5e-5e8f-45f8-b519-8a14119a7dba
+		sourceColumn: OS Version
+
+	/// Windows Release from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
+	column 'Windows Release'
+		dataType: string
+		lineageTag: e0014e21-fde0-4f93-bcc6-1ac1491582d7
+		sourceColumn: Windows Release
+
+	/// Intune State from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
+	column 'Intune State'
+		dataType: string
+		lineageTag: 2dd3f749-235c-4c9c-9843-ebb01c538a00
+		sourceColumn: Intune State
+
+	/// Autopatch Registration from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
+	column 'Autopatch Registration'
+		dataType: string
+		lineageTag: 4fee2870-86ad-4d31-970d-09d1f042107a
+		sourceColumn: Autopatch Registration
+
+	/// Upgrade Eligibility from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
+	column 'Upgrade Eligibility'
+		dataType: string
+		lineageTag: 3610d9e8-ca03-49ea-a5d2-0de026e98a8c
+		sourceColumn: Upgrade Eligibility
+
+	/// Hardware Reasons from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
+	column 'Hardware Reasons'
+		dataType: string
+		lineageTag: 19ce5aaf-d429-49c2-ae60-ea40f4c32844
+		sourceColumn: Hardware Reasons
+
+	/// Free Disk GB from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
+	column 'Free Disk GB'
+		dataType: double
+		formatString: #,0.00
+		lineageTag: 509c2f41-59fc-4b0c-8c82-dc62278311fd
+		summarizeBy: none
+		sourceColumn: Free Disk GB
+
+	/// Disk Review from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
+	column 'Disk Review'
+		dataType: string
+		lineageTag: 4f2c0803-3302-431f-bbd5-ba8015b16f25
+		sourceColumn: Disk Review
+
+	/// Legacy Build Review from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
+	column 'Legacy Build Review'
+		dataType: string
+		lineageTag: 28af3bb3-4496-438f-8861-07a72868c73f
+		sourceColumn: Legacy Build Review
+
+	/// Update State from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
+	column 'Update State'
+		dataType: string
+		lineageTag: 1eab7036-fd59-46dc-8a5b-5cc9c91d5c3c
+		sourceColumn: Update State
+
+	/// Update Action from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
+	column 'Update Action'
+		dataType: string
+		lineageTag: ff4e23a0-5042-4979-9a1f-33157f91f468
+		sourceColumn: Update Action
+
+	/// Last Intune Sync from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
+	column 'Last Intune Sync'
+		dataType: string
+		lineageTag: 71e9bb1b-8df4-4887-ad9e-16c45d66f8a8
+		sourceColumn: Last Intune Sync
+
+	/// Migration Status from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
+	column 'Migration Status'
+		dataType: string
+		lineageTag: cc09b7f5-5772-44bb-9ea4-06f511fb1011
+		sourceColumn: Migration Status
+
+	/// Risk Priority from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
+	column 'Risk Priority'
+		dataType: string
+		lineageTag: 46d9ea2b-cb80-4051-a5cb-be7a4d32c6da
+		sourceColumn: Risk Priority
+
+	/// Next Action from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
+	column 'Next Action'
+		dataType: string
+		lineageTag: 60f881d7-61cf-49f2-b567-90f8bf24257f
+		sourceColumn: Next Action
+
+	/// Evidence Date from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
+	column 'Evidence Date'
+		dataType: string
+		lineageTag: 24204428-157c-4017-b59b-adf7f74b7658
+		sourceColumn: Evidence Date
+
+	/// Country Basis from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
+	column 'Country Basis'
+		dataType: string
+		lineageTag: 0b014435-a4d8-4d9a-b9f9-b4682e930447
+		sourceColumn: Country Basis
+
+	/// English display name resolved from the frozen complete ISO alpha-2 Country Reference, independently of User/Device inventory loading. Source Country is preserved. UK is a compatibility alias for GB, not an ISO code. Missing/Unknown stays Unknown; unrecognized two-letter codes remain visible as unmapped. Full source names are preserved.
+	column 'Country Name' =
+			VAR _sourceCountry = TRIM(COALESCE('Windows Migration Evidence'[Country], ""))
+			VAR _normalizedCountry = UPPER(_sourceCountry)
+			VAR _countryCode = IF(_normalizedCountry = "UK", "GB", _normalizedCountry)
+			VAR _countryName =
+			    LOOKUPVALUE(
+			        'Country Reference'[Country Name],
+			        'Country Reference'[Country Code], _countryCode
+			    )
+			RETURN
+			    SWITCH(
+			        TRUE(),
+			        _sourceCountry = "" || _normalizedCountry = "UNKNOWN", "Unknown",
+			        NOT ISBLANK(_countryName), _countryName,
+			        LEN(_sourceCountry) = 2, "Code " & _normalizedCountry & " (unmapped)",
+			        _sourceCountry
+			    )
+		dataType: string
+		lineageTag: 69e79e5c-ebe4-4ee9-9271-69a97a4d86f8
+		dataCategory: Country
+		summarizeBy: none
+
+	/// Actual AD domain. Intune records require a unique AD match by Intune ID; AD-only records use the qualified AD source domain. Never inferred from country or device prefix.
+	column 'AD Domain'
+		dataType: string
+		lineageTag: 1574fd9d-b5f8-4117-8739-5bb73ba768fa
+		summarizeBy: none
+		sourceColumn: AD Domain
+
+	/// Domain match qualification: unique AD-to-Intune ID match, unknown/ambiguous match, or direct AD source record. Independent of primary-user country.
+	column 'AD Domain Match Status'
+		dataType: string
+		lineageTag: 043a905b-fcc7-44cd-b651-46364b8ae590
+		summarizeBy: none
+		sourceColumn: AD Domain Match Status
+
+	/// Autopatch anchor policy AggregateState from existing local Intune Windows Update export. Tenant and policy scoped, unique managed-device ID join only; missing observations do not establish exclusion or readiness.
+	column 'Autopatch Policy State'
+		dataType: string
+		displayFolder: Migration policy context
+		lineageTag: 934f4371-11fd-485e-b3cf-d5e8c76fe536
+		summarizeBy: none
+		sourceColumn: Autopatch Policy State
+
+	/// Autopatch anchor policy CurrentDeviceUpdateStatus from existing local Intune Windows Update export. Tenant and policy scoped, unique managed-device ID join only; missing observations do not establish exclusion or readiness.
+	column 'Autopatch Device Status'
+		dataType: string
+		displayFolder: Migration policy context
+		lineageTag: 8df3dd97-d855-48c9-a15a-0aa9df18e6c0
+		summarizeBy: none
+		sourceColumn: Autopatch Device Status
+
+	/// Autopatch anchor policy BlockingReason from existing local Intune Windows Update export. Tenant and policy scoped, unique managed-device ID join only; missing observations do not establish exclusion or readiness.
+	column 'Autopatch Blocking Reason'
+		dataType: string
+		displayFolder: Migration policy context
+		lineageTag: aefdde1e-6e06-4fc4-96d3-726758ba415f
+		summarizeBy: none
+		sourceColumn: Autopatch Blocking Reason
+
+	/// Autopatch anchor policy LatestAlertMessage from existing local Intune Windows Update export. Tenant and policy scoped, unique managed-device ID join only; missing observations do not establish exclusion or readiness.
+	column 'Autopatch Alert'
+		dataType: string
+		displayFolder: Migration policy context
+		lineageTag: 42bfdf24-cf8c-4c3d-b10e-1855827a1dec
+		summarizeBy: none
+		sourceColumn: Autopatch Alert
+
+	/// Autopatch anchor policy ExportDateTime from existing local Intune Windows Update export. Tenant and policy scoped, unique managed-device ID join only; missing observations do not establish exclusion or readiness.
+	column 'Autopatch Observation Date'
+		dataType: string
+		displayFolder: Migration policy context
+		lineageTag: f5a6c6cf-e8f9-4453-a75d-0e40a17143c7
+		summarizeBy: none
+		sourceColumn: Autopatch Observation Date
+
+	/// Windows 11 24H2 policy AggregateState from existing local Intune Windows Update export. Tenant and policy scoped, unique managed-device ID join only; missing observations do not establish exclusion or readiness.
+	column 'Windows 11 Policy State'
+		dataType: string
+		displayFolder: Migration policy context
+		lineageTag: 7c6efd84-f494-4f2c-8bd3-726911159e01
+		summarizeBy: none
+		sourceColumn: Windows 11 Policy State
+
+	/// Windows 11 24H2 policy CurrentDeviceUpdateStatus from existing local Intune Windows Update export. Tenant and policy scoped, unique managed-device ID join only; missing observations do not establish exclusion or readiness.
+	column 'Windows 11 Device Status'
+		dataType: string
+		displayFolder: Migration policy context
+		lineageTag: ec549c06-d505-4cf0-b71f-85beef914a3c
+		summarizeBy: none
+		sourceColumn: Windows 11 Device Status
+
+	/// Windows 11 24H2 policy BlockingReason from existing local Intune Windows Update export. Tenant and policy scoped, unique managed-device ID join only; missing observations do not establish exclusion or readiness.
+	column 'Windows 11 Blocking Reason'
+		dataType: string
+		displayFolder: Migration policy context
+		lineageTag: 3aea8e20-3be5-43d0-af91-4517ca35216b
+		summarizeBy: none
+		sourceColumn: Windows 11 Blocking Reason
+
+	/// Windows 11 24H2 policy LatestAlertMessage from existing local Intune Windows Update export. Tenant and policy scoped, unique managed-device ID join only; missing observations do not establish exclusion or readiness.
+	column 'Windows 11 Alert'
+		dataType: string
+		displayFolder: Migration policy context
+		lineageTag: 89c0743f-1f8e-4dc9-b1b2-5d9ac1bb58b9
+		summarizeBy: none
+		sourceColumn: Windows 11 Alert
+
+	/// Windows 11 24H2 policy ExportDateTime from existing local Intune Windows Update export. Tenant and policy scoped, unique managed-device ID join only; missing observations do not establish exclusion or readiness.
+	column 'Windows 11 Observation Date'
+		dataType: string
+		displayFolder: Migration policy context
+		lineageTag: 4ac482aa-f503-404b-a5c8-cb12ea19c884
+		summarizeBy: none
+		sourceColumn: Windows 11 Observation Date
+
+	/// Source scope: Intune or AD only. AD only means no qualified match in the local Intune export; not proof of non-enrollment.
+	column 'Inventory Source'
+		dataType: string
+		lineageTag: 0d6e71ff-1492-423c-aa0a-ffcb2517c073
+		summarizeBy: none
+		sourceColumn: Inventory Source
+
+	/// Source-file modification timestamp in UTC, not an individual device activity or collection event timestamp.
+	column 'Inventory Observation Date'
+		dataType: string
+		lineageTag: c558b780-5df2-4686-8a0a-9c086da0fcca
+		summarizeBy: none
+		sourceColumn: Inventory Observation Date
+
+	/// Export timestamp of the matched readiness source record; Not observed when unavailable.
+	column 'Eligibility Observation Date'
+		dataType: string
+		lineageTag: 4e770734-1cd7-4a66-8581-d0e7aa870906
+		summarizeBy: none
+		sourceColumn: Eligibility Observation Date
+
+	/// OS version reported by the readiness source, which may belong to a different Intune identity when the join uses device name only.
+	column 'Eligibility OS Version'
+		dataType: string
+		lineageTag: f3a884e1-5a9b-4db9-9e3e-e37187ab595b
+		summarizeBy: none
+		sourceColumn: Eligibility OS Version
+
+	/// Readiness matching method and qualification. A unique readiness name does not guarantee a unique Intune device identity.
+	column 'Eligibility Match Status'
+		dataType: string
+		lineageTag: 01ab94e5-ec8b-4954-b821-4533429199cd
+		summarizeBy: none
+		sourceColumn: Eligibility Match Status
+
+	/// Rebuilt from tenant-qualified local source snapshots by the prepared evidence pipeline. Versioned batch reader; missing/incomplete outputs fail, never fall back to frozen recovery JSON. No live collection; AD absence is not proof of non-enrollment.
+	partition 'Windows Migration Evidence' = m
+		mode: import
+		source =
+				let
+				    Source = Csv.Document(GetPreparedEvidenceFile("WindowsMigrationEvidence.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]),
+				    Headers = Table.PromoteHeaders(Source, [PromoteAllScalars=true]),
+				    Required = Table.SelectColumns(Headers, {"Device Source ID","Device Name","Country","Primary User UPN","OS Version","Windows Release","Intune State","Autopatch Registration","Upgrade Eligibility","Hardware Reasons","Free Disk GB","Disk Review","Legacy Build Review","Update State","Update Action","Last Intune Sync","Migration Status","Risk Priority","Next Action","Evidence Date","Country Basis","AD Domain","AD Domain Match Status","Inventory Source","Inventory Observation Date","Eligibility Observation Date","Eligibility OS Version","Eligibility Match Status","Autopatch Policy State","Autopatch Device Status","Autopatch Blocking Reason","Autopatch Alert","Autopatch Observation Date","Windows 11 Policy State","Windows 11 Device Status","Windows 11 Blocking Reason","Windows 11 Alert","Windows 11 Observation Date"}),
+				    Nulls = Table.ReplaceValue(Required, "", null, Replacer.ReplaceValue, {"Free Disk GB"}),
+				    Typed = Table.TransformColumnTypes(Nulls, {{"Device Source ID", type text},{"Device Name", type text},{"Country", type text},{"Primary User UPN", type text},{"OS Version", type text},{"Windows Release", type text},{"Intune State", type text},{"Autopatch Registration", type text},{"Upgrade Eligibility", type text},{"Hardware Reasons", type text},{"Free Disk GB", type number},{"Disk Review", type text},{"Legacy Build Review", type text},{"Update State", type text},{"Update Action", type text},{"Last Intune Sync", type text},{"Migration Status", type text},{"Risk Priority", type text},{"Next Action", type text},{"Evidence Date", type text},{"Country Basis", type text},{"AD Domain", type text},{"AD Domain Match Status", type text},{"Inventory Source", type text},{"Inventory Observation Date", type text},{"Eligibility Observation Date", type text},{"Eligibility OS Version", type text},{"Eligibility Match Status", type text},{"Autopatch Policy State", type text},{"Autopatch Device Status", type text},{"Autopatch Blocking Reason", type text},{"Autopatch Alert", type text},{"Autopatch Observation Date", type text},{"Windows 11 Policy State", type text},{"Windows 11 Device Status", type text},{"Windows 11 Blocking Reason", type text},{"Windows 11 Alert", type text},{"Windows 11 Observation Date", type text}}, "en-US"),
+				    PreservedObservationUtc = Table.TransformColumns(Typed, {{"Inventory Observation Date", (raw as nullable text) as nullable text =>
+				        if raw = null or Text.Trim(raw) = "" or raw = "Not observed" then raw
+				        else let
+				            Parsed = if Text.Contains(raw, "T") then DateTimeZone.FromText(raw, [Culture="en-US"]) else DateTime.AddZone(DateTime.FromText(raw, [Culture="en-US"]), 0)
+				        in DateTimeZone.ToText(DateTimeZone.SwitchZone(Parsed, 0), "yyyy-MM-dd'T'HH:mm:ss.fff'Z'", "en-US"), type text}})
+				in
+				    PreservedObservationUtc
+

@@ -1,0 +1,179 @@
+/// Native source facet migrated from ADMembership; exact source grain, unresolved links and qualification retained. Uses the unified pinned batch, not a separate CMDB reader.
+table 'AD Membership Evidence'
+	lineageTag: da39c258-c61e-4796-b465-5490db125522
+
+	/// Exact native-key entity context or existing inventory context. No name matching or inferred transitive membership. Unrelated entity selections return blank.
+	measure 'Native Context Rows · AD Membership Evidence' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimUser"))
+			VAR NativeKeys1 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimDevice"))
+			VAR NativeKeys2 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimGroup"))
+			VAR NativeKeys3 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "ADGroupSource"))
+			VAR NativeKeys4 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "ADDirectoryObject"))
+			VAR InventoryUsers = CALCULATETABLE(VALUES('Native User Evidence'[TenantUserKey]), REMOVEFILTERS('Native User Evidence'), TREATAS(VALUES('User Inventory Evidence'[User Source ID]), 'Native User Evidence'[SourceUserId]))
+			VAR InventoryDevices = CALCULATETABLE(VALUES('Native Managed Device Evidence'[TenantDeviceKey]), REMOVEFILTERS('Native Managed Device Evidence'), TREATAS(VALUES('Device Inventory Evidence'[Device Source ID]), 'Native Managed Device Evidence'[ManagedDeviceId]))
+			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((COUNTROWS('AD Membership Evidence')), KEEPFILTERS(TREATAS(NativeKeys0, 'AD Membership Evidence'[TenantUserKey]))),
+			COUNTROWS(NativeKeys1) > 0, CALCULATE((COUNTROWS('AD Membership Evidence')), KEEPFILTERS(TREATAS(NativeKeys1, 'AD Membership Evidence'[TenantDeviceKey]))),
+			COUNTROWS(NativeKeys2) > 0, CALCULATE((COUNTROWS('AD Membership Evidence')), KEEPFILTERS(TREATAS(NativeKeys2, 'AD Membership Evidence'[TenantGroupKey]))),
+			COUNTROWS(NativeKeys3) > 0, CALCULATE((COUNTROWS('AD Membership Evidence')), KEEPFILTERS(TREATAS(NativeKeys3, 'AD Membership Evidence'[TenantADGroupKey]))),
+			COUNTROWS(NativeKeys4) > 0, CALCULATE((COUNTROWS('AD Membership Evidence')), KEEPFILTERS(TREATAS(NativeKeys4, 'AD Membership Evidence'[TenantADObjectKey]))), BLANK()), BLANK()), SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((COUNTROWS('AD Membership Evidence')), KEEPFILTERS(TREATAS(InventoryUsers, 'AD Membership Evidence'[TenantUserKey]))),
+			ISCROSSFILTERED('Device Inventory Evidence'), CALCULATE((COUNTROWS('AD Membership Evidence')), KEEPFILTERS(TREATAS(InventoryDevices, 'AD Membership Evidence'[TenantDeviceKey]))), (COUNTROWS('AD Membership Evidence'))))
+		formatString: #,0
+		isHidden
+		lineageTag: 857b225b-cf10-4fba-a613-78c6d19da37f
+
+	/// Native ADMembership attribute; source qualification is retained.
+	column TenantKey
+		dataType: string
+		isHidden
+		lineageTag: 0cb32afa-de81-477b-a6b9-ee002f3f4c52
+		summarizeBy: none
+		sourceColumn: TenantKey
+
+	/// Native ADMembership attribute; source qualification is retained.
+	column OrganizationKey
+		dataType: string
+		isHidden
+		lineageTag: 4c13283e-b9e0-4c4b-9cdd-e9984e600815
+		summarizeBy: none
+		sourceColumn: OrganizationKey
+
+	/// Native ADMembership attribute; source qualification is retained.
+	column EnvironmentKey
+		dataType: string
+		isHidden
+		lineageTag: 8c459dab-ab21-41fe-a81e-ed504a328ff5
+		summarizeBy: none
+		sourceColumn: EnvironmentKey
+
+	/// Native ADMembership attribute; source qualification is retained.
+	column TenantId
+		dataType: string
+		isHidden
+		lineageTag: 32788e62-7ff9-437c-86bb-4641c8d332b4
+		summarizeBy: none
+		sourceColumn: TenantId
+
+	/// Native ADMembership attribute; source qualification is retained.
+	column TenantADMembershipKey
+		dataType: string
+		isHidden
+		lineageTag: 9fc08fc8-3c26-40dc-84d9-5066dc56554b
+		summarizeBy: none
+		sourceColumn: TenantADMembershipKey
+
+	/// Native ADMembership attribute; source qualification is retained.
+	column TenantADGroupKey
+		dataType: string
+		isHidden
+		lineageTag: 73bed2d0-daef-4cf5-a2c1-d806eb8bc60e
+		summarizeBy: none
+		sourceColumn: TenantADGroupKey
+
+	/// Native ADMembership attribute; source qualification is retained.
+	column TenantGroupKey
+		dataType: string
+		isHidden
+		lineageTag: c28e5a40-26e2-492a-92a5-be655e992874
+		summarizeBy: none
+		sourceColumn: TenantGroupKey
+
+	/// Native ADMembership attribute; source qualification is retained.
+	column TenantADObjectKey
+		dataType: string
+		isHidden
+		lineageTag: c2ce86a1-b2ca-49f9-8e46-3372ebdee731
+		summarizeBy: none
+		sourceColumn: TenantADObjectKey
+
+	/// Native ADMembership attribute; source qualification is retained.
+	column TenantUserKey
+		dataType: string
+		isHidden
+		lineageTag: 39652628-b0a8-4e8f-9b3b-4f95ed1415d3
+		summarizeBy: none
+		sourceColumn: TenantUserKey
+
+	/// Native ADMembership attribute; source qualification is retained.
+	column TenantDeviceKey
+		dataType: string
+		isHidden
+		lineageTag: 26f7fc8f-2ec6-4744-b63d-cfd360c656be
+		summarizeBy: none
+		sourceColumn: TenantDeviceKey
+
+	/// Native ADMembership attribute; source qualification is retained.
+	column GroupObjectGUID
+		dataType: string
+		lineageTag: b54ec2f9-64cc-4afe-a32d-a7eb3ec0c5ba
+		summarizeBy: none
+		sourceColumn: GroupObjectGUID
+
+	/// Native ADMembership attribute; source qualification is retained.
+	column GroupSID
+		dataType: string
+		lineageTag: 921db75c-8cdb-4b96-b2a5-71f87e8f30d5
+		summarizeBy: none
+		sourceColumn: GroupSID
+
+	/// Native ADMembership attribute; source qualification is retained.
+	column MemberDistinguishedName
+		dataType: string
+		lineageTag: 45d5f10d-a75b-4fee-a5be-f24995549cfb
+		summarizeBy: none
+		sourceColumn: MemberDistinguishedName
+
+	/// Native ADMembership attribute; source qualification is retained.
+	column MemberObjectGUID
+		dataType: string
+		lineageTag: 30c25c38-01fe-492b-9f23-9042e5eb8ac9
+		summarizeBy: none
+		sourceColumn: MemberObjectGUID
+
+	/// Native ADMembership attribute; source qualification is retained.
+	column MemberSID
+		dataType: string
+		lineageTag: eebee2bf-c79d-4c09-aa45-9b6997a8bcba
+		summarizeBy: none
+		sourceColumn: MemberSID
+
+	/// Native ADMembership attribute; source qualification is retained.
+	column MemberObjectClass
+		dataType: string
+		lineageTag: 6cb3e4be-fa63-4e63-adda-6b55e7ac3cbd
+		summarizeBy: none
+		sourceColumn: MemberObjectClass
+
+	/// Native ADMembership attribute; source qualification is retained.
+	column MembershipKind
+		dataType: string
+		lineageTag: bcc6f87d-8979-49c8-9b82-0663a5eb6c1c
+		summarizeBy: none
+		sourceColumn: MembershipKind
+
+	/// Native ADMembership attribute; source qualification is retained.
+	column ResolutionStatus
+		dataType: string
+		lineageTag: eca031c7-3805-4c33-8bd7-2c01674bba78
+		summarizeBy: none
+		sourceColumn: ResolutionStatus
+
+	/// Native ADMembership attribute; source qualification is retained.
+	column CloudMatchStatus
+		dataType: string
+		lineageTag: 5f2b85a5-483c-4df6-8245-587e02e6ce2f
+		summarizeBy: none
+		sourceColumn: CloudMatchStatus
+
+	/// Native ADMembership attribute; source qualification is retained.
+	column SourceCollectedDateTime
+		dataType: dateTime
+		lineageTag: 4b86ea3a-443d-4bc6-a8cb-c147961c07d4
+		summarizeBy: none
+		sourceColumn: SourceCollectedDateTime
+
+	partition 'AD Membership Evidence' = m
+		mode: import
+		source = NativeEvidenceTypes(Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("ADMembership.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]), {[name="TenantKey", dataType="String"], [name="OrganizationKey", dataType="String"], [name="EnvironmentKey", dataType="String"], [name="TenantId", dataType="String"], [name="TenantADMembershipKey", dataType="String"], [name="TenantADGroupKey", dataType="String"], [name="TenantGroupKey", dataType="String"], [name="TenantADObjectKey", dataType="String"], [name="TenantUserKey", dataType="String"], [name="TenantDeviceKey", dataType="String"], [name="GroupObjectGUID", dataType="String"], [name="GroupSID", dataType="String"], [name="MemberDistinguishedName", dataType="String"], [name="MemberObjectGUID", dataType="String"], [name="MemberSID", dataType="String"], [name="MemberObjectClass", dataType="String"], [name="MembershipKind", dataType="String"], [name="ResolutionStatus", dataType="String"], [name="CloudMatchStatus", dataType="String"], [name="SourceCollectedDateTime", dataType="DateTime"]})
+

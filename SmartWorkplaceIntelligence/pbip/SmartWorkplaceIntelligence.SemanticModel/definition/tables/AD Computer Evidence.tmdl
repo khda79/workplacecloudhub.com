@@ -1,0 +1,214 @@
+/// Native source facet migrated from ADComputerSource; exact source grain, unresolved links and qualification retained. Uses the unified pinned batch, not a separate CMDB reader.
+table 'AD Computer Evidence'
+	lineageTag: 71652ef4-ed36-4a95-9b70-6ef9ab37e71f
+
+	/// Native AD computer objects whose DNSHostName is absent; this does not prove physical use or non-use. Migrated without changing the source calculation.
+	measure 'Native AD objects without DNS' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimDevice"))
+			VAR NativeKeys1 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "ADComputerSource"))
+			VAR InventoryDevices = CALCULATETABLE(VALUES('Native Managed Device Evidence'[TenantDeviceKey]), REMOVEFILTERS('Native Managed Device Evidence'), TREATAS(VALUES('Device Inventory Evidence'[Device Source ID]), 'Native Managed Device Evidence'[ManagedDeviceId]))
+			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((COUNTROWS ( FILTER ( 'AD Computer Evidence', ISBLANK ( 'AD Computer Evidence'[DNSHostName] ) || TRIM ( 'AD Computer Evidence'[DNSHostName] ) = "" ) )), KEEPFILTERS(TREATAS(NativeKeys0, 'AD Computer Evidence'[TenantDeviceKey]))),
+			COUNTROWS(NativeKeys1) > 0, CALCULATE((COUNTROWS ( FILTER ( 'AD Computer Evidence', ISBLANK ( 'AD Computer Evidence'[DNSHostName] ) || TRIM ( 'AD Computer Evidence'[DNSHostName] ) = "" ) )), KEEPFILTERS(TREATAS(NativeKeys1, 'AD Computer Evidence'[TenantADComputerKey]))), BLANK()), BLANK()), SWITCH(TRUE(), ISCROSSFILTERED('Device Inventory Evidence'), CALCULATE((COUNTROWS ( FILTER ( 'AD Computer Evidence', ISBLANK ( 'AD Computer Evidence'[DNSHostName] ) || TRIM ( 'AD Computer Evidence'[DNSHostName] ) = "" ) )), KEEPFILTERS(TREATAS(InventoryDevices, 'AD Computer Evidence'[TenantDeviceKey]))), (COUNTROWS ( FILTER ( 'AD Computer Evidence', ISBLANK ( 'AD Computer Evidence'[DNSHostName] ) || TRIM ( 'AD Computer Evidence'[DNSHostName] ) = "" ) ))))
+		formatString: #,##0
+		displayFolder: Native evidence
+		lineageTag: 5ab20d20-9415-464b-bb19-f4e2c861a6a6
+
+	/// Native AD records explicitly linked to one selected CMDB device identity; no name-based guessed relation. Migrated without changing the source calculation.
+	measure 'Native Selected device AD objects' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimDevice"))
+			VAR NativeKeys1 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "ADComputerSource"))
+			VAR InventoryDevices = CALCULATETABLE(VALUES('Native Managed Device Evidence'[TenantDeviceKey]), REMOVEFILTERS('Native Managed Device Evidence'), TREATAS(VALUES('Device Inventory Evidence'[Device Source ID]), 'Native Managed Device Evidence'[ManagedDeviceId]))
+			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((IF ( HASONEVALUE ( 'Native Device Evidence'[TenantDeviceKey] ), CALCULATE ( COUNTROWS ( 'AD Computer Evidence' ), TREATAS ( VALUES ( 'Native Device Evidence'[TenantDeviceKey] ), 'AD Computer Evidence'[TenantDeviceKey] ) ) )), KEEPFILTERS(TREATAS(NativeKeys0, 'AD Computer Evidence'[TenantDeviceKey]))),
+			COUNTROWS(NativeKeys1) > 0, CALCULATE((IF ( HASONEVALUE ( 'Native Device Evidence'[TenantDeviceKey] ), CALCULATE ( COUNTROWS ( 'AD Computer Evidence' ), TREATAS ( VALUES ( 'Native Device Evidence'[TenantDeviceKey] ), 'AD Computer Evidence'[TenantDeviceKey] ) ) )), KEEPFILTERS(TREATAS(NativeKeys1, 'AD Computer Evidence'[TenantADComputerKey]))), BLANK()), BLANK()), SWITCH(TRUE(), ISCROSSFILTERED('Device Inventory Evidence'), CALCULATE((IF ( HASONEVALUE ( 'Native Device Evidence'[TenantDeviceKey] ), CALCULATE ( COUNTROWS ( 'AD Computer Evidence' ), TREATAS ( VALUES ( 'Native Device Evidence'[TenantDeviceKey] ), 'AD Computer Evidence'[TenantDeviceKey] ) ) )), KEEPFILTERS(TREATAS(InventoryDevices, 'AD Computer Evidence'[TenantDeviceKey]))), (IF ( HASONEVALUE ( 'Native Device Evidence'[TenantDeviceKey] ), CALCULATE ( COUNTROWS ( 'AD Computer Evidence' ), TREATAS ( VALUES ( 'Native Device Evidence'[TenantDeviceKey] ), 'AD Computer Evidence'[TenantDeviceKey] ) ) ))))
+		formatString: #,##0
+		displayFolder: Native evidence
+		lineageTag: 150f749f-09ac-4120-84de-ccb27188ca48
+
+	/// Exact native-key entity context or existing inventory context. No name matching or inferred transitive membership. Unrelated entity selections return blank.
+	measure 'Native Context Rows · AD Computer Evidence' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimDevice"))
+			VAR NativeKeys1 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "ADComputerSource"))
+			VAR InventoryDevices = CALCULATETABLE(VALUES('Native Managed Device Evidence'[TenantDeviceKey]), REMOVEFILTERS('Native Managed Device Evidence'), TREATAS(VALUES('Device Inventory Evidence'[Device Source ID]), 'Native Managed Device Evidence'[ManagedDeviceId]))
+			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((COUNTROWS('AD Computer Evidence')), KEEPFILTERS(TREATAS(NativeKeys0, 'AD Computer Evidence'[TenantDeviceKey]))),
+			COUNTROWS(NativeKeys1) > 0, CALCULATE((COUNTROWS('AD Computer Evidence')), KEEPFILTERS(TREATAS(NativeKeys1, 'AD Computer Evidence'[TenantADComputerKey]))), BLANK()), BLANK()), SWITCH(TRUE(), ISCROSSFILTERED('Device Inventory Evidence'), CALCULATE((COUNTROWS('AD Computer Evidence')), KEEPFILTERS(TREATAS(InventoryDevices, 'AD Computer Evidence'[TenantDeviceKey]))), (COUNTROWS('AD Computer Evidence'))))
+		formatString: #,0
+		isHidden
+		lineageTag: 392a3f24-406b-4ffb-aec2-fb916aaaad17
+
+	/// Native ADComputerSource attribute; source qualification is retained.
+	column TenantKey
+		dataType: string
+		isHidden
+		lineageTag: 156226a9-67f6-41d3-9cda-653c4f195b49
+		summarizeBy: none
+		sourceColumn: TenantKey
+
+	/// Native ADComputerSource attribute; source qualification is retained.
+	column OrganizationKey
+		dataType: string
+		isHidden
+		lineageTag: 3ed2c57a-c0f0-4487-b96b-2c5c8a17831e
+		summarizeBy: none
+		sourceColumn: OrganizationKey
+
+	/// Native ADComputerSource attribute; source qualification is retained.
+	column EnvironmentKey
+		dataType: string
+		isHidden
+		lineageTag: 3d468c18-f79c-4f96-86f0-e82db006a48b
+		summarizeBy: none
+		sourceColumn: EnvironmentKey
+
+	/// Native ADComputerSource attribute; source qualification is retained.
+	column TenantId
+		dataType: string
+		isHidden
+		lineageTag: 0ae74faf-052c-4068-bd97-15a64787947b
+		summarizeBy: none
+		sourceColumn: TenantId
+
+	/// Native ADComputerSource attribute; source qualification is retained.
+	column TenantADComputerKey
+		dataType: string
+		isHidden
+		lineageTag: 5bed56af-c1c0-4500-8f5d-c90d7ef11fb6
+		summarizeBy: none
+		sourceColumn: TenantADComputerKey
+
+	/// Native ADComputerSource attribute; source qualification is retained.
+	column ObjectGUID
+		dataType: string
+		lineageTag: feec9019-ee1e-4593-9690-156a9ace118a
+		summarizeBy: none
+		sourceColumn: ObjectGUID
+
+	/// Native ADComputerSource attribute; source qualification is retained.
+	column ObjectSID
+		dataType: string
+		lineageTag: 286d0621-5277-4279-835c-1f936ab51dc5
+		summarizeBy: none
+		sourceColumn: ObjectSID
+
+	/// Native ADComputerSource attribute; source qualification is retained.
+	column DomainName
+		dataType: string
+		lineageTag: 37b4421c-e4c9-441b-a95d-18a0815751cb
+		summarizeBy: none
+		sourceColumn: DomainName
+
+	/// Native ADComputerSource attribute; source qualification is retained.
+	column DistinguishedName
+		dataType: string
+		lineageTag: 88d557a1-1cdd-4ed3-8a31-5e0440267df3
+		summarizeBy: none
+		sourceColumn: DistinguishedName
+
+	/// Native ADComputerSource attribute; source qualification is retained.
+	column Name
+		dataType: string
+		lineageTag: f3ba2754-4b07-4d31-b8ea-c5c94984fa2b
+		summarizeBy: none
+		sourceColumn: Name
+
+	/// Native ADComputerSource attribute; source qualification is retained.
+	column DNSHostName
+		dataType: string
+		lineageTag: fd3a7914-a9a2-4f12-8489-36df3511a8a5
+		summarizeBy: none
+		sourceColumn: DNSHostName
+
+	/// Native ADComputerSource attribute; source qualification is retained.
+	column Enabled
+		dataType: boolean
+		lineageTag: 7a89d29e-0d9d-470a-bfad-9f8d215508c1
+		summarizeBy: none
+		sourceColumn: Enabled
+
+	/// Native ADComputerSource attribute; source qualification is retained.
+	column OperatingSystem
+		dataType: string
+		lineageTag: a26d90b9-be92-4f22-9f5d-f90c9f3b5117
+		summarizeBy: none
+		sourceColumn: OperatingSystem
+
+	/// Native ADComputerSource attribute; source qualification is retained.
+	column OperatingSystemVersion
+		dataType: string
+		lineageTag: 18936622-8ba3-4ed6-a778-7996bdbcdb21
+		summarizeBy: none
+		sourceColumn: OperatingSystemVersion
+
+	/// Native ADComputerSource attribute; source qualification is retained.
+	column TenantDeviceKey
+		dataType: string
+		isHidden
+		lineageTag: 2aa75964-4107-45b1-a942-9db4ad676151
+		summarizeBy: none
+		sourceColumn: TenantDeviceKey
+
+	/// Native ADComputerSource attribute; source qualification is retained.
+	column CloudMatchStatus
+		dataType: string
+		lineageTag: c357ae4b-613a-4e96-83ed-bcbe3d052de2
+		summarizeBy: none
+		sourceColumn: CloudMatchStatus
+
+	/// Native ADComputerSource attribute; source qualification is retained.
+	column LastLogonTimestampRaw
+		dataType: string
+		lineageTag: c0239fa9-57dc-48ad-8f2b-17c1eaec1400
+		summarizeBy: none
+		sourceColumn: LastLogonTimestampRaw
+
+	/// Native ADComputerSource attribute; source qualification is retained.
+	column LastLogonUtcDateTime
+		dataType: dateTime
+		lineageTag: 578849fa-d34b-4258-8fe0-eae9e0731527
+		summarizeBy: none
+		sourceColumn: LastLogonUtcDateTime
+
+	/// Native ADComputerSource attribute; source qualification is retained.
+	column LastLogonStatus
+		dataType: string
+		lineageTag: de37488b-932f-4836-84d0-ed821c74b206
+		summarizeBy: none
+		sourceColumn: LastLogonStatus
+
+	/// Native ADComputerSource attribute; source qualification is retained.
+	column CreationRaw
+		dataType: string
+		lineageTag: 45d2ac30-c54d-48ad-a3f7-cd0989d565c2
+		summarizeBy: none
+		sourceColumn: CreationRaw
+
+	/// Native ADComputerSource attribute; source qualification is retained.
+	column CreationUtcDateTime
+		dataType: dateTime
+		lineageTag: c8935212-3c13-431c-8710-789702535c8d
+		summarizeBy: none
+		sourceColumn: CreationUtcDateTime
+
+	/// Native ADComputerSource attribute; source qualification is retained.
+	column CreationStatus
+		dataType: string
+		lineageTag: 73fb9cf1-d6dc-4529-96fe-f6c901dbf1f3
+		summarizeBy: none
+		sourceColumn: CreationStatus
+
+	/// Native ADComputerSource attribute; source qualification is retained.
+	column SourceCollectedDateTime
+		dataType: dateTime
+		lineageTag: c3fa0f2d-d9c7-48bc-af4c-602634435d8e
+		summarizeBy: none
+		sourceColumn: SourceCollectedDateTime
+
+	partition 'AD Computer Evidence' = m
+		mode: import
+		source = NativeEvidenceTypes(Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("ADComputerSource.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]), {[name="TenantKey", dataType="String"], [name="OrganizationKey", dataType="String"], [name="EnvironmentKey", dataType="String"], [name="TenantId", dataType="String"], [name="TenantADComputerKey", dataType="String"], [name="ObjectGUID", dataType="String"], [name="ObjectSID", dataType="String"], [name="DomainName", dataType="String"], [name="DistinguishedName", dataType="String"], [name="Name", dataType="String"], [name="DNSHostName", dataType="String"], [name="Enabled", dataType="Boolean"], [name="OperatingSystem", dataType="String"], [name="OperatingSystemVersion", dataType="String"], [name="TenantDeviceKey", dataType="String"], [name="CloudMatchStatus", dataType="String"], [name="LastLogonTimestampRaw", dataType="String"], [name="LastLogonUtcDateTime", dataType="DateTime"], [name="LastLogonStatus", dataType="String"], [name="CreationRaw", dataType="String"], [name="CreationUtcDateTime", dataType="DateTime"], [name="CreationStatus", dataType="String"], [name="SourceCollectedDateTime", dataType="DateTime"]})
+

@@ -3,11 +3,11 @@
   "name": "94321dfeed105876deee",
   "position": {
     "x": 32,
-    "y": 680,
-    "z": 112,
-    "height": 328,
+    "y": 656,
     "width": 1856,
-    "tabOrder": 112
+    "height": 336,
+    "z": 112,
+    "tabOrder": 1317
   },
   "visual": {
     "visualType": "tableEx",
@@ -45,20 +45,6 @@
             },
             {
               "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Backup Operational Signals"
-                    }
-                  },
-                  "Property": "Risk Category"
-                }
-              },
-              "queryRef": "Backup Operational Signals.Risk Category",
-              "nativeQueryRef": "Risk Category"
-            },
-            {
-              "field": {
                 "Measure": {
                   "Expression": {
                     "SourceRef": {
@@ -70,34 +56,6 @@
               },
               "queryRef": "Backup Operational Signals.Backup Signal Affected",
               "nativeQueryRef": "Affected"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Backup Operational Signals"
-                    }
-                  },
-                  "Property": "Backup Signal Covered"
-                }
-              },
-              "queryRef": "Backup Operational Signals.Backup Signal Covered",
-              "nativeQueryRef": "Covered"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Backup Operational Signals"
-                    }
-                  },
-                  "Property": "Backup Signal Affected (%)"
-                }
-              },
-              "queryRef": "Backup Operational Signals.Backup Signal Affected (%)",
-              "nativeQueryRef": "Affected (%)"
             },
             {
               "field": {
@@ -138,6 +96,13 @@
       "columnHeaders": [
         {
           "properties": {
+            "autoSizeColumnWidth": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
             "columnAdjustment": {
               "expr": {
                 "Literal": {
@@ -145,7 +110,14 @@
                 }
               }
             },
-            "autoSizeColumnWidth": {
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
+            },
+            "bold": {
               "expr": {
                 "Literal": {
                   "Value": "true"
@@ -175,23 +147,9 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#005A9E'"
+                      "Value": "'#215E9E'"
                     }
                   }
-                }
-              }
-            },
-            "bold": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "fontSize": {
-              "expr": {
-                "Literal": {
-                  "Value": "10D"
                 }
               }
             }
@@ -201,10 +159,39 @@
       "values": [
         {
           "properties": {
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
+            },
             "wordWrap": {
               "expr": {
                 "Literal": {
-                  "Value": "true"
+                  "Value": "false"
+                }
+              }
+            },
+            "fontColorPrimary": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#183153'"
+                    }
+                  }
+                }
+              }
+            },
+            "fontColorSecondary": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#183153'"
+                    }
+                  }
                 }
               }
             },
@@ -224,38 +211,9 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#F3F7FA'"
+                      "Value": "'#F0F5FA'"
                     }
                   }
-                }
-              }
-            },
-            "fontColorPrimary": {
-              "solid": {
-                "color": {
-                  "expr": {
-                    "Literal": {
-                      "Value": "'#1F2937'"
-                    }
-                  }
-                }
-              }
-            },
-            "fontColorSecondary": {
-              "solid": {
-                "color": {
-                  "expr": {
-                    "Literal": {
-                      "Value": "'#1F2937'"
-                    }
-                  }
-                }
-              }
-            },
-            "fontSize": {
-              "expr": {
-                "Literal": {
-                  "Value": "9D"
                 }
               }
             }
@@ -283,7 +241,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Backup protection and evidence signals. Detailed records for the current filter context.'"
+                  "Value": "'Backup protection and evidence signals'"
                 }
               }
             }
@@ -310,7 +268,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "13D"
+                  "Value": "12D"
                 }
               }
             },
@@ -319,16 +277,9 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#1F2937'"
+                      "Value": "'#183153'"
                     }
                   }
-                }
-              }
-            },
-            "bold": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
                 }
               }
             }
@@ -381,9 +332,16 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#CBD8E5'"
+                      "Value": "'#CCDCEC'"
                     }
                   }
+                }
+              }
+            },
+            "radius": {
+              "expr": {
+                "Literal": {
+                  "Value": "8D"
                 }
               }
             },
@@ -391,13 +349,6 @@
               "expr": {
                 "Literal": {
                   "Value": "1D"
-                }
-              }
-            },
-            "radius": {
-              "expr": {
-                "Literal": {
-                  "Value": "12D"
                 }
               }
             }
@@ -437,14 +388,14 @@
             "left": {
               "expr": {
                 "Literal": {
-                  "Value": "10D"
+                  "Value": "8D"
                 }
               }
             },
             "right": {
               "expr": {
                 "Literal": {
-                  "Value": "10D"
+                  "Value": "8D"
                 }
               }
             }
@@ -470,7 +421,7 @@
   "filterConfig": {
     "filters": [
       {
-        "name": "Filter0e635fe1e6f8f70b51f40000",
+        "name": "8d4d83479c81fb919512",
         "field": {
           "Column": {
             "Expression": {
@@ -573,5 +524,6 @@
         "howCreated": "User"
       }
     ]
-  }
+  },
+  "parentGroupName": "2086510df0c51fd7df05"
 }

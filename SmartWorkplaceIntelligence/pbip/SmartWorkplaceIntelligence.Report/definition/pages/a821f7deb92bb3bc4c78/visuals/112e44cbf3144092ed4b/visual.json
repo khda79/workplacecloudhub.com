@@ -1,0 +1,17 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.13.0/schema.json",
+  "name": "112e44cbf3144092ed4b",
+  "position": {
+    "x": 0,
+    "y": 0,
+    "z": 1,
+    "height": 1080,
+    "width": 1920,
+    "tabOrder": 1
+  },
+  "visualGroup": {
+    "displayName": "Installed footprint",
+    "groupMode": "ScaleMode"
+  },
+  "isHidden": true
+}

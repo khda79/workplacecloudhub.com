@@ -1,5 +1,6 @@
-/// Synthetic collaboration service usage.
+/// Legacy synthetic fixture: not used by production report visuals or consolidated evidence. Removal is pending a separately cleared dependency-safe retirement; no real data.
 table 'Collaboration Usage'
+	isHidden
 	lineageTag: ad1b3e85-f817-43ec-9e6b-baa9a515a900
 
 	/// Qualified active users divided by eligible users for the selected service.
@@ -20,8 +21,8 @@ table 'Collaboration Usage'
 		displayFolder: Measures
 		lineageTag: 71e68ee0-b86e-4812-bd4c-1c0cac78c591
 
-	/// Latest accepted usage period in the visible collaboration scope.
-	measure 'Latest Usage Period' = FORMAT(MAXX('Collaboration Usage', RELATED('Date'[Date])), "yyyy-MM")
+	/// Legacy hidden synthetic measure only. Explicit date-key lookup avoids a dependency on the retired fixture relationship; no production visual consumes this measure.
+	measure 'Latest Usage Period' = FORMAT(MAXX('Collaboration Usage', LOOKUPVALUE('Date'[Date], 'Date'[Date Key], 'Collaboration Usage'[Date Key])), "yyyy-MM")
 		formatString: @
 		displayFolder: Measures
 		lineageTag: fba375e9-cc96-4d8b-89ef-6d0650946ba8

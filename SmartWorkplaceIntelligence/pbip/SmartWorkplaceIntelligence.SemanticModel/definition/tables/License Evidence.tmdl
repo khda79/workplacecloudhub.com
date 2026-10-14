@@ -52,12 +52,26 @@ table 'License Evidence'
 		displayFolder: Licensing | Evidence
 		lineageTag: 5cc9d953-acbb-48a8-8b10-4d89b40d489c
 
-	measure 'Microsoft 365 Enabled Units' = CALCULATE ( [License Report Enabled Units], 'License Report Summary'[Category] = "Suite" )
+	/// Published suite snapshot KPI, intersected with inventory product, capacity-class and risk filters. Excluded or unmapped suites return BLANK, not a global total. Source qualification and snapshot guards are preserved.
+	measure 'Microsoft 365 Enabled Units' =
+			VAR _products = VALUES ( 'License Evidence'[License Product] )
+			RETURN IF (
+			    ISCROSSFILTERED ( 'License Evidence' ),
+			    CALCULATE ( [License Report Enabled Units], KEEPFILTERS ( TREATAS ( _products, 'License Report Summary'[Product] ) ), KEEPFILTERS ( 'License Report Summary'[Category] = "Suite" ) ),
+			    CALCULATE ( [License Report Enabled Units], KEEPFILTERS ( 'License Report Summary'[Category] = "Suite" ) )
+			)
 		formatString: #,0
 		displayFolder: Licensing | Microsoft 365
 		lineageTag: ab61b7ea-fd17-44be-ae46-1146b1873f37
 
-	measure 'Microsoft 365 Consumed Units' = CALCULATE ( [License Report Consumed Units], 'License Report Summary'[Category] = "Suite" )
+	/// Published suite snapshot KPI, intersected with inventory product, capacity-class and risk filters. Excluded or unmapped suites return BLANK, not a global total. Source qualification and snapshot guards are preserved.
+	measure 'Microsoft 365 Consumed Units' =
+			VAR _products = VALUES ( 'License Evidence'[License Product] )
+			RETURN IF (
+			    ISCROSSFILTERED ( 'License Evidence' ),
+			    CALCULATE ( [License Report Consumed Units], KEEPFILTERS ( TREATAS ( _products, 'License Report Summary'[Product] ) ), KEEPFILTERS ( 'License Report Summary'[Category] = "Suite" ) ),
+			    CALCULATE ( [License Report Consumed Units], KEEPFILTERS ( 'License Report Summary'[Category] = "Suite" ) )
+			)
 		formatString: #,0
 		displayFolder: Licensing | Microsoft 365
 		lineageTag: 6d8a72ff-af96-41b2-919a-6ac54186e1bf
@@ -67,27 +81,62 @@ table 'License Evidence'
 		displayFolder: Licensing | Microsoft 365
 		lineageTag: b0f195fe-ac36-448f-829b-a771e63b659b
 
-	measure 'F3 Reclaimable Assignments' = [License Report F3 Recovery Candidates]
+	/// Published recovery assignments for this suite, intersected with inventory filters. An excluded suite is BLANK; qualified zero and unknown evidence remain distinct.
+	measure 'F3 Reclaimable Assignments' =
+			VAR _products = VALUES ( 'License Evidence'[License Product] )
+			RETURN IF (
+			    ISCROSSFILTERED ( 'License Evidence' ),
+			    CALCULATE ( [License Report Recovery Candidates], KEEPFILTERS ( TREATAS ( _products, 'License Report Summary'[Product] ) ), KEEPFILTERS ( 'License Report Summary'[Product] = "Microsoft 365 F3" ) ),
+			    CALCULATE ( [License Report Recovery Candidates], KEEPFILTERS ( 'License Report Summary'[Product] = "Microsoft 365 F3" ) )
+			)
 		formatString: #,0
 		displayFolder: Licensing | Microsoft 365
 		lineageTag: fa70c748-4552-4812-9db4-1f3121f9d86a
 
-	measure 'E3 Reclaimable Assignments' = [License Report E3 Recovery Candidates]
+	/// Published recovery assignments for this suite, intersected with inventory filters. An excluded suite is BLANK; qualified zero and unknown evidence remain distinct.
+	measure 'E3 Reclaimable Assignments' =
+			VAR _products = VALUES ( 'License Evidence'[License Product] )
+			RETURN IF (
+			    ISCROSSFILTERED ( 'License Evidence' ),
+			    CALCULATE ( [License Report Recovery Candidates], KEEPFILTERS ( TREATAS ( _products, 'License Report Summary'[Product] ) ), KEEPFILTERS ( 'License Report Summary'[Product] = "Microsoft 365 E3" ) ),
+			    CALCULATE ( [License Report Recovery Candidates], KEEPFILTERS ( 'License Report Summary'[Product] = "Microsoft 365 E3" ) )
+			)
 		formatString: #,0
 		displayFolder: Licensing | Microsoft 365
 		lineageTag: b4e25a48-7dbf-4f6e-99b6-0c500e5872ba
 
-	measure 'E5 Reclaimable Assignments' = [License Report E5 Recovery Candidates]
+	/// Published recovery assignments for this suite, intersected with inventory filters. An excluded suite is BLANK; qualified zero and unknown evidence remain distinct.
+	measure 'E5 Reclaimable Assignments' =
+			VAR _products = VALUES ( 'License Evidence'[License Product] )
+			RETURN IF (
+			    ISCROSSFILTERED ( 'License Evidence' ),
+			    CALCULATE ( [License Report Recovery Candidates], KEEPFILTERS ( TREATAS ( _products, 'License Report Summary'[Product] ) ), KEEPFILTERS ( 'License Report Summary'[Product] = "Microsoft 365 E5" ) ),
+			    CALCULATE ( [License Report Recovery Candidates], KEEPFILTERS ( 'License Report Summary'[Product] = "Microsoft 365 E5" ) )
+			)
 		formatString: #,0
 		displayFolder: Licensing | Microsoft 365
 		lineageTag: 539b6d11-7c27-4596-95fe-e14926d88bdb
 
-	measure 'E3 to F3 Review Candidates' = [License Report E3 to F3 Review]
+	/// Published suite snapshot KPI, intersected with inventory product, capacity-class and risk filters. Excluded or unmapped suites return BLANK, not a global total. Source qualification and snapshot guards are preserved.
+	measure 'E3 to F3 Review Candidates' =
+			VAR _products = VALUES ( 'License Evidence'[License Product] )
+			RETURN IF (
+			    ISCROSSFILTERED ( 'License Evidence' ),
+			    CALCULATE ( [License Report E3 to F3 Review], KEEPFILTERS ( TREATAS ( _products, 'License Report Summary'[Product] ) ), KEEPFILTERS ( 'License Report Summary'[Category] = "Suite" ) ),
+			    CALCULATE ( [License Report E3 to F3 Review], KEEPFILTERS ( 'License Report Summary'[Category] = "Suite" ) )
+			)
 		formatString: #,0
 		displayFolder: Licensing | Optimization
 		lineageTag: 326209b1-71ea-4ff6-bdcb-6887d8a4a9df
 
-	measure 'Immediate Reclaimable Assignments' = [License Report Recovery Candidates]
+	/// Published suite snapshot KPI, intersected with inventory product, capacity-class and risk filters. Excluded or unmapped suites return BLANK, not a global total. Source qualification and snapshot guards are preserved.
+	measure 'Immediate Reclaimable Assignments' =
+			VAR _products = VALUES ( 'License Evidence'[License Product] )
+			RETURN IF (
+			    ISCROSSFILTERED ( 'License Evidence' ),
+			    CALCULATE ( [License Report Recovery Candidates], KEEPFILTERS ( TREATAS ( _products, 'License Report Summary'[Product] ) ), KEEPFILTERS ( 'License Report Summary'[Category] = "Suite" ) ),
+			    CALCULATE ( [License Report Recovery Candidates], KEEPFILTERS ( 'License Report Summary'[Category] = "Suite" ) )
+			)
 		formatString: #,0
 		displayFolder: Licensing | Optimization
 		lineageTag: 6f5d6136-4e81-46df-b2e8-c7a4d3c07ec6
@@ -228,8 +277,6 @@ table 'License Evidence'
 			isDefault
 			relationship: ad7cd566-97b6-4435-97f9-e92dc29ea499
 			defaultHierarchy: LocalDateTable_317cc133-7d7e-48f1-9f84-06cddef33d30.'Date Hierarchy'
-
-		annotation UnderlyingDateTimeDataType = Date
 
 		annotation SummarizationSetBy = Automatic
 

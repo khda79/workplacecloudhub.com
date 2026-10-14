@@ -1,0 +1,108 @@
+/// Native source facet migrated from DimVerifiedDomain; exact source grain, unresolved links and qualification retained. Uses the unified pinned batch, not a separate CMDB reader.
+table 'Verified Domain Evidence'
+	lineageTag: d3e90a80-b310-4f81-9697-98f7154a4a06
+
+	/// Verified Entra domains present in the frozen collection; a domain row does not prove DNS or authentication health. Migrated without changing the source calculation.
+	measure 'Native Verified domains' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (COALESCE(COUNTROWS('Verified Domain Evidence'),0)))
+		formatString: #,0
+		displayFolder: Native evidence
+		lineageTag: b178e0e5-e1c8-4ec1-bd3f-ac5785dbecb9
+
+	/// Exact native-key entity context or existing inventory context. No name matching or inferred transitive membership. Unrelated entity selections return blank.
+	measure 'Native Context Rows · Verified Domain Evidence' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (COUNTROWS('Verified Domain Evidence')))
+		formatString: #,0
+		isHidden
+		lineageTag: 7f4c854e-cfce-4a98-9e77-b0c716140294
+
+	/// Native DimVerifiedDomain attribute; source qualification is retained.
+	column TenantKey
+		dataType: string
+		isHidden
+		lineageTag: 460ca2b5-c580-45a9-9d7b-447f5f42aba6
+		summarizeBy: none
+		sourceColumn: TenantKey
+
+	/// Native DimVerifiedDomain attribute; source qualification is retained.
+	column OrganizationKey
+		dataType: string
+		isHidden
+		lineageTag: 32a57f6a-695f-4db5-9b49-b82c41c22cdb
+		summarizeBy: none
+		sourceColumn: OrganizationKey
+
+	/// Native DimVerifiedDomain attribute; source qualification is retained.
+	column EnvironmentKey
+		dataType: string
+		isHidden
+		lineageTag: c7fb6096-481c-4150-8fca-6dc5c5450d57
+		summarizeBy: none
+		sourceColumn: EnvironmentKey
+
+	/// Native DimVerifiedDomain attribute; source qualification is retained.
+	column TenantId
+		dataType: string
+		isHidden
+		lineageTag: b7ba9b4a-0266-4af1-bdeb-11de037696e0
+		summarizeBy: none
+		sourceColumn: TenantId
+
+	/// Native DimVerifiedDomain attribute; source qualification is retained.
+	column TenantDomainKey
+		dataType: string
+		isHidden
+		lineageTag: 10174877-cb9d-4daf-8d7d-25610d94104c
+		summarizeBy: none
+		sourceColumn: TenantDomainKey
+
+	/// Native DimVerifiedDomain attribute; source qualification is retained.
+	column DomainId
+		dataType: string
+		lineageTag: 69efc155-a5ea-4403-a8e6-caf7ea291a46
+		summarizeBy: none
+		sourceColumn: DomainId
+
+	/// Native DimVerifiedDomain attribute; source qualification is retained.
+	column IsDefault
+		dataType: string
+		lineageTag: 68ef1a5f-07ba-4b84-9b6b-46157fe63665
+		summarizeBy: none
+		sourceColumn: IsDefault
+
+	/// Native DimVerifiedDomain attribute; source qualification is retained.
+	column IsInitial
+		dataType: string
+		lineageTag: e86269f0-293b-4f8e-aeed-bb41d753c0a5
+		summarizeBy: none
+		sourceColumn: IsInitial
+
+	/// Native DimVerifiedDomain attribute; source qualification is retained.
+	column AuthenticationType
+		dataType: string
+		lineageTag: 1ba4132f-6bc2-47d4-b240-f4dfca20a4e3
+		summarizeBy: none
+		sourceColumn: AuthenticationType
+
+	/// Native DimVerifiedDomain attribute; source qualification is retained.
+	column SupportedServices
+		dataType: string
+		lineageTag: 04edb483-76a3-45aa-b60c-00d86b0cf825
+		summarizeBy: none
+		sourceColumn: SupportedServices
+
+	/// Native DimVerifiedDomain attribute; source qualification is retained.
+	column AvailabilityStatus
+		dataType: string
+		lineageTag: 87bcb447-801c-4937-8dd4-b5b3fdfb87aa
+		summarizeBy: none
+		sourceColumn: AvailabilityStatus
+
+	partition 'Verified Domain Evidence' = m
+		mode: import
+		source = NativeEvidenceTypes(Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("DimVerifiedDomain.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]), {[name="TenantKey", dataType="String"], [name="OrganizationKey", dataType="String"], [name="EnvironmentKey", dataType="String"], [name="TenantId", dataType="String"], [name="TenantDomainKey", dataType="String"], [name="DomainId", dataType="String"], [name="IsDefault", dataType="String"], [name="IsInitial", dataType="String"], [name="AuthenticationType", dataType="String"], [name="SupportedServices", dataType="String"], [name="AvailabilityStatus", dataType="String"]})
+

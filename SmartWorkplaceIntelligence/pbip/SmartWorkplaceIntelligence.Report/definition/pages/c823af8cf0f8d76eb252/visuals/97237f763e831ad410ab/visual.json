@@ -2,12 +2,12 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
   "name": "97237f763e831ad410ab",
   "position": {
-    "x": 32,
-    "y": 112,
+    "x": 972,
+    "y": 512,
+    "width": 916,
+    "height": 208,
     "z": 106,
-    "width": 1064,
-    "height": 120,
-    "tabOrder": 106
+    "tabOrder": 682
   },
   "visual": {
     "visualType": "cardVisual",
@@ -23,39 +23,12 @@
                       "Entity": "Security Control Evidence"
                     }
                   },
-                  "Property": "Microsoft Secure Score (%)"
-                }
-              },
-              "queryRef": "Security Control Evidence.Microsoft Secure Score (%)",
-              "nativeQueryRef": "Microsoft Secure Score (%)"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Security Control Evidence"
-                    }
-                  },
-                  "Property": "Workforce MFA Registered (%)"
-                }
-              },
-              "queryRef": "Security Control Evidence.Workforce MFA Registered (%)",
-              "nativeQueryRef": "Workforce MFA Registered (%)"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Security Control Evidence"
-                    }
-                  },
                   "Property": "Defender Protection Active (%)"
                 }
               },
               "queryRef": "Security Control Evidence.Defender Protection Active (%)",
-              "nativeQueryRef": "Defender Protection Active (%)"
+              "nativeQueryRef": "Three reported Defender AV checks passed (%)",
+              "displayName": "Three reported Defender AV checks passed (%)"
             }
           ]
         }
@@ -75,7 +48,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "26D"
+                  "Value": "28D"
                 }
               }
             },
@@ -130,7 +103,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "12D"
+                  "Value": "14D"
                 }
               }
             },
@@ -249,7 +222,7 @@
             "leftMargin": {
               "expr": {
                 "Literal": {
-                  "Value": "8L"
+                  "Value": "12L"
                 }
               }
             },
@@ -303,6 +276,34 @@
                   "Value": "0L"
                 }
               }
+            },
+            "columnCount": {
+              "expr": {
+                "Literal": {
+                  "Value": "1L"
+                }
+              }
+            },
+            "rowCount": {
+              "expr": {
+                "Literal": {
+                  "Value": "1L"
+                }
+              }
+            },
+            "autoGrid": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            },
+            "paddingIndividual": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
             }
           },
           "selector": {
@@ -316,7 +317,7 @@
             "verticalSpacing": {
               "expr": {
                 "Literal": {
-                  "Value": "0D"
+                  "Value": "4D"
                 }
               }
             }
@@ -379,7 +380,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Three priority Security Posture KPIs: Secure Score, MFA capability, and Defender protection.'"
+                  "Value": "'Technical Microsoft Defender Antivirus observations only. No tenant applicability, operating-mode or EDR health conclusion.'"
                 }
               }
             }
@@ -399,14 +400,14 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Priority KPIs'"
+                  "Value": "'Microsoft Defender AV · reported checks only'"
                 }
               }
             },
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "13D"
+                  "Value": "14D"
                 }
               }
             },
@@ -415,16 +416,9 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#1F2937'"
+                      "Value": "'#183153'"
                     }
                   }
-                }
-              }
-            },
-            "bold": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
                 }
               }
             }
@@ -477,9 +471,16 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#CBD8E5'"
+                      "Value": "'#CCDCEC'"
                     }
                   }
+                }
+              }
+            },
+            "radius": {
+              "expr": {
+                "Literal": {
+                  "Value": "8D"
                 }
               }
             },
@@ -487,13 +488,6 @@
               "expr": {
                 "Literal": {
                   "Value": "1D"
-                }
-              }
-            },
-            "radius": {
-              "expr": {
-                "Literal": {
-                  "Value": "12D"
                 }
               }
             }
@@ -533,14 +527,14 @@
             "left": {
               "expr": {
                 "Literal": {
-                  "Value": "10D"
+                  "Value": "8D"
                 }
               }
             },
             "right": {
               "expr": {
                 "Literal": {
-                  "Value": "10D"
+                  "Value": "8D"
                 }
               }
             }
@@ -548,5 +542,6 @@
         }
       ]
     }
-  }
+  },
+  "parentGroupName": "5c048ea3af19e711756c"
 }

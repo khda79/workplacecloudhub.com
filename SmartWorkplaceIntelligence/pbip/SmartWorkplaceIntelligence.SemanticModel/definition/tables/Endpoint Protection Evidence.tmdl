@@ -1,0 +1,225 @@
+/// Prepared tenant/device/requirement evaluations. Registration is not AV or EDR health. Unknown, stale and unavailable evidence remain explicit.
+table 'Endpoint Protection Evidence'
+	lineageTag: 68f0a811-b578-4b42-9e21-f2aa334595ba
+
+	/// Distinct tenant/device identities, not device × role evaluation rows.
+	measure 'Endpoint Protection Devices' = COUNTROWS(SUMMARIZE('Endpoint Protection Evidence', 'Endpoint Protection Evidence'[TenantKey], 'Endpoint Protection Evidence'[Device Source ID]))
+		formatString: #,##0
+		displayFolder: Endpoint Protection
+		lineageTag: 733b6858-5495-48c7-8b91-46e3b2df69ae
+
+	/// Device identities with an antivirus requirement in the selected policy scope.
+	measure 'Endpoint Protection AV Scope Devices' = CALCULATE(COUNTROWS(SUMMARIZE('Endpoint Protection Evidence', 'Endpoint Protection Evidence'[TenantKey], 'Endpoint Protection Evidence'[Device Source ID])), KEEPFILTERS('Endpoint Protection Evidence'[Role] = "Antivirus"))
+		formatString: #,##0
+		displayFolder: Endpoint Protection
+		lineageTag: 83eb0564-e212-48e1-ab33-c2144cd5e0d1
+
+	/// Current qualified expected-product registration. Not product health.
+	measure 'Endpoint Protection AV Registered Devices' = IF([Endpoint Protection AV Scope Devices] > 0, COALESCE(CALCULATE(COUNTROWS(SUMMARIZE('Endpoint Protection Evidence', 'Endpoint Protection Evidence'[TenantKey], 'Endpoint Protection Evidence'[Device Source ID])), KEEPFILTERS('Endpoint Protection Evidence'[Role] = "Antivirus"), KEEPFILTERS('Endpoint Protection Evidence'[Registration State] = "Detected"), KEEPFILTERS('Endpoint Protection Evidence'[Freshness] = "Current")), 0), BLANK())
+		formatString: #,##0
+		displayFolder: Endpoint Protection
+		lineageTag: 3dbf82a8-cec3-421a-a6cd-78df6262c673
+
+	/// Current comparable registration not detected. Does not prove absence of AV/EDR protection.
+	measure 'Endpoint Protection AV Not Registered Devices' = IF([Endpoint Protection AV Scope Devices] > 0, COALESCE(CALCULATE(COUNTROWS(SUMMARIZE('Endpoint Protection Evidence', 'Endpoint Protection Evidence'[TenantKey], 'Endpoint Protection Evidence'[Device Source ID])), KEEPFILTERS('Endpoint Protection Evidence'[Role] = "Antivirus"), KEEPFILTERS('Endpoint Protection Evidence'[Registration State] = "NotDetected"), KEEPFILTERS('Endpoint Protection Evidence'[Freshness] = "Current")), 0), BLANK())
+		formatString: #,##0
+		displayFolder: Endpoint Protection
+		lineageTag: 1501975c-df78-4c6c-ac37-0b940c436ee6
+
+	/// Antivirus evidence outside the policy observation-age limit.
+	measure 'Endpoint Protection AV Stale Devices' = IF([Endpoint Protection AV Scope Devices] > 0, COALESCE(CALCULATE(COUNTROWS(SUMMARIZE('Endpoint Protection Evidence', 'Endpoint Protection Evidence'[TenantKey], 'Endpoint Protection Evidence'[Device Source ID])), KEEPFILTERS('Endpoint Protection Evidence'[Role] = "Antivirus"), KEEPFILTERS('Endpoint Protection Evidence'[Freshness] = "Stale")), 0), BLANK())
+		formatString: #,##0
+		displayFolder: Endpoint Protection
+		lineageTag: 4b87c9d0-f2eb-4a44-ba09-e557047cc0c4
+
+	/// Missing, errored, invalid or conflicting registration; excludes the separately displayed stale category.
+	measure 'Endpoint Protection AV Unknown Devices' = IF([Endpoint Protection AV Scope Devices] > 0, COALESCE(CALCULATE(COUNTROWS(SUMMARIZE('Endpoint Protection Evidence', 'Endpoint Protection Evidence'[TenantKey], 'Endpoint Protection Evidence'[Device Source ID])), KEEPFILTERS('Endpoint Protection Evidence'[Role] = "Antivirus"), KEEPFILTERS('Endpoint Protection Evidence'[Registration State] = "Unknown"), KEEPFILTERS('Endpoint Protection Evidence'[Freshness] <> "Stale")), 0), BLANK())
+		formatString: #,##0
+		displayFolder: Endpoint Protection
+		lineageTag: bb14d337-2c54-4bc8-9d30-cdedbcc3d883
+
+	/// Current comparable antivirus registration observations only.
+	measure 'Endpoint Protection AV Comparable Devices' = IF([Endpoint Protection AV Scope Devices] > 0, COALESCE(CALCULATE(COUNTROWS(SUMMARIZE('Endpoint Protection Evidence', 'Endpoint Protection Evidence'[TenantKey], 'Endpoint Protection Evidence'[Device Source ID])), KEEPFILTERS('Endpoint Protection Evidence'[Role] = "Antivirus"), KEEPFILTERS('Endpoint Protection Evidence'[Registration State] IN {"Detected", "NotDetected"}), KEEPFILTERS('Endpoint Protection Evidence'[Freshness] = "Current")), 0), BLANK())
+		formatString: #,##0
+		displayFolder: Endpoint Protection
+		lineageTag: e1819b73-85a8-485f-80e7-4fc6330c2d93
+
+	/// Registration detection among current comparable observations, not protection coverage of the full estate.
+	measure 'Endpoint Protection AV Detected Rate (%)' = DIVIDE([Endpoint Protection AV Registered Devices], [Endpoint Protection AV Comparable Devices])
+		formatString: 0.0%
+		displayFolder: Endpoint Protection
+		lineageTag: 1cee2356-75f8-47f8-8d81-9b442ac5ed28
+
+	/// Share of antivirus policy-scope device identities with current comparable registration evidence.
+	measure 'Endpoint Protection AV Evidence Coverage (%)' = DIVIDE([Endpoint Protection AV Comparable Devices], [Endpoint Protection AV Scope Devices])
+		formatString: 0.0%
+		displayFolder: Endpoint Protection
+		lineageTag: 87ad276f-3c22-4167-af60-ae3ecb33589a
+
+	/// Confirmed policy gaps. Blank when no applicable requirement has qualified health evidence; not a healthy zero.
+	measure 'Endpoint Protection Confirmed Gap Devices' =
+			VAR _assessed = CALCULATE(COUNTROWS('Endpoint Protection Evidence'), KEEPFILTERS('Endpoint Protection Evidence'[Evaluation State] IN {"Healthy", "Gap"}))
+			RETURN IF(_assessed > 0, COALESCE(CALCULATE(COUNTROWS(SUMMARIZE('Endpoint Protection Evidence', 'Endpoint Protection Evidence'[TenantKey], 'Endpoint Protection Evidence'[Device Source ID])), KEEPFILTERS('Endpoint Protection Evidence'[Evaluation State] = "Gap")), 0), BLANK())
+		formatString: #,##0
+		displayFolder: Endpoint Protection
+		lineageTag: ed716a54-9761-4431-8c8d-3544e0b39c55
+
+	/// Devices with no unknown applicable policy requirement, including AV and EDR. Zero means no fully assessed device, not no protection.
+	measure 'Endpoint Protection Fully Evaluated Devices' =
+			VAR _devices = SUMMARIZE('Endpoint Protection Evidence', 'Endpoint Protection Evidence'[TenantKey], 'Endpoint Protection Evidence'[Device Source ID])
+			VAR _evaluated = FILTER(_devices, CALCULATE(COUNTROWS('Endpoint Protection Evidence'), REMOVEFILTERS('Endpoint Protection Evidence'[Role], 'Endpoint Protection Evidence'[Expected Product], 'Endpoint Protection Evidence'[Expected Mode]), 'Endpoint Protection Evidence'[Evaluation State] = "Unknown") = 0)
+			RETURN IF([Endpoint Protection Devices] > 0, COALESCE(COUNTROWS(_evaluated), 0), BLANK())
+		formatString: #,##0
+		displayFolder: Endpoint Protection
+		lineageTag: de9a0a45-7df2-4f10-b4e1-4c57116d85c4
+
+	/// Assessment completeness, never an endpoint protection health rate.
+	measure 'Endpoint Protection Fully Evaluated Devices (%)' = DIVIDE([Endpoint Protection Fully Evaluated Devices], [Endpoint Protection Devices])
+		formatString: 0.0%
+		displayFolder: Endpoint Protection
+		lineageTag: 0c7acee1-96ee-4852-aebd-5d4abf1d9cdd
+
+	/// Policy readiness text; missing health stays explicit.
+	measure 'Endpoint Protection Policy Message' =
+			VAR _policy = COUNTROWS('Endpoint Protection Policy')
+			RETURN IF(_policy = 0, "Policy not loaded", IF([Endpoint Protection Fully Evaluated Devices] = 0, "Policy loaded; AV / EDR health evidence unavailable", "Policy loaded; assessment completeness shown separately"))
+		displayFolder: Endpoint Protection
+		lineageTag: 490f0eb7-d255-4ed5-abf7-7701fe4d119b
+
+	/// Presentation label preserving unassessed gaps as a dash.
+	measure 'Endpoint Protection Gap Display' = IF(ISBLANK([Endpoint Protection Confirmed Gap Devices]), "—", FORMAT([Endpoint Protection Confirmed Gap Devices], "#,##0"))
+		displayFolder: Endpoint Protection
+		lineageTag: 7078f490-da6c-451e-89b1-027d2768d8c2
+
+	/// Presentation of assessment completeness; not protection health.
+	measure 'Endpoint Protection Assessment Display' = IF(ISBLANK([Endpoint Protection Fully Evaluated Devices (%)]), "—", FORMAT([Endpoint Protection Fully Evaluated Devices (%)], "0.0%"))
+		displayFolder: Endpoint Protection
+		lineageTag: 6a5e2ad0-86e3-4938-bd28-70780d994294
+
+	/// Prepared TenantKey. Retains source qualification.
+	column TenantKey
+		dataType: string
+		isHidden
+		lineageTag: cb75f9bf-5463-4b97-b44e-0fca5546137c
+		summarizeBy: none
+		sourceColumn: TenantKey
+
+	/// Prepared Endpoint Protection Key. Retains source qualification.
+	column 'Endpoint Protection Key'
+		dataType: string
+		isHidden
+		lineageTag: 2b594401-f127-41fb-8c36-90d077e262b1
+		summarizeBy: none
+		sourceColumn: Endpoint Protection Key
+
+	/// Prepared Device Source ID. Retains source qualification.
+	column 'Device Source ID'
+		dataType: string
+		isHidden
+		lineageTag: 238c5ade-79ca-409b-bcb3-3782c0627509
+		summarizeBy: none
+		sourceColumn: Device Source ID
+
+	/// Prepared Country. Retains source qualification.
+	column Country
+		dataType: string
+		isHidden
+		lineageTag: c9a14ae3-0b52-400b-b08e-3cf39be923ac
+		summarizeBy: none
+		sourceColumn: Country
+
+	/// Prepared Policy Version. Retains source qualification.
+	column 'Policy Version'
+		dataType: string
+		lineageTag: 0854b73e-5832-435c-b477-2494ee5047fc
+		summarizeBy: none
+		sourceColumn: Policy Version
+
+	/// Prepared Scope ID. Retains source qualification.
+	column 'Scope ID'
+		dataType: string
+		lineageTag: 0be50e76-a635-4187-b85f-5383d0460c71
+		summarizeBy: none
+		sourceColumn: Scope ID
+
+	/// Prepared Role. Retains source qualification.
+	column Role
+		dataType: string
+		lineageTag: 88b319f6-4a80-4486-903c-fe9b0b8186b0
+		summarizeBy: none
+		sourceColumn: Role
+
+	/// Prepared Expected Product. Retains source qualification.
+	column 'Expected Product'
+		dataType: string
+		lineageTag: a144bf30-86ff-4235-b138-86c8a5019463
+		summarizeBy: none
+		sourceColumn: Expected Product
+
+	/// Prepared Expected Mode. Retains source qualification.
+	column 'Expected Mode'
+		dataType: string
+		lineageTag: 6074ef4c-ed25-4bc7-af23-67c7ec161301
+		summarizeBy: none
+		sourceColumn: Expected Mode
+
+	/// Prepared Evaluation State. Policy assessment, never inferred from registration alone.
+	column 'Evaluation State'
+		dataType: string
+		lineageTag: 0c715d61-abc8-4fca-81d0-2c055782af02
+		summarizeBy: none
+		sourceColumn: Evaluation State
+
+	/// Prepared Evaluation Reason. Retains source qualification.
+	column 'Evaluation Reason'
+		dataType: string
+		lineageTag: b1e8191f-aff9-4c4d-9007-f15cc10de892
+		summarizeBy: none
+		sourceColumn: Evaluation Reason
+
+	/// Prepared Registration State. Windows registration only; not product health.
+	column 'Registration State'
+		dataType: string
+		lineageTag: 0fe955a9-a35a-4ce4-b24f-2e713b4b77d7
+		summarizeBy: none
+		sourceColumn: Registration State
+
+	/// Prepared Evidence Source. Retains source qualification.
+	column 'Evidence Source'
+		dataType: string
+		lineageTag: 6714a78d-c433-47c3-9fca-7465c647d346
+		summarizeBy: none
+		sourceColumn: Evidence Source
+
+	/// Prepared Observation UTC. Retains source qualification.
+	column 'Observation UTC'
+		dataType: dateTime
+		lineageTag: 6d8229f8-0a95-4191-9400-811ae8102270
+		summarizeBy: none
+		sourceColumn: Observation UTC
+
+	/// Prepared Freshness. Retains source qualification.
+	column Freshness
+		dataType: string
+		lineageTag: 5e4ae3c6-b496-4d6d-a34c-dc5798cca554
+		summarizeBy: none
+		sourceColumn: Freshness
+
+	/// Prepared Exception Reason. Retains source qualification.
+	column 'Exception Reason'
+		dataType: string
+		lineageTag: e82ff67f-d5d7-477d-a0c8-b380a6fa38a4
+		summarizeBy: none
+		sourceColumn: Exception Reason
+
+	partition 'Endpoint Protection Evidence' = m
+		mode: import
+		source =
+				let
+				    Source = ReadMigrationCsv(GetPreparedEvidenceFile("EndpointProtectionEvidence.csv"), {"TenantKey", "Endpoint Protection Key", "Device Source ID", "Country", "Policy Version", "Scope ID", "Role", "Expected Product", "Expected Mode", "Evaluation State", "Evaluation Reason", "Registration State", "Evidence Source", "Observation UTC", "Freshness", "Exception Reason"}),
+				    Selected = Table.SelectColumns(Source, {"TenantKey", "Endpoint Protection Key", "Device Source ID", "Country", "Policy Version", "Scope ID", "Role", "Expected Product", "Expected Mode", "Evaluation State", "Evaluation Reason", "Registration State", "Evidence Source", "Observation UTC", "Freshness", "Exception Reason"}),
+				    ParseUtc = (raw as nullable text) as nullable datetime => if raw = null or Text.Trim(raw) = "" then null else if not Text.EndsWith(raw, "Z") then error "Endpoint Protection observation must be UTC Z" else DateTimeZone.RemoveZone(DateTimeZone.SwitchZone(DateTimeZone.FromText(raw, [Culture="en-US"]), 0)),
+				    TypedSpecial = Table.TransformColumns(Selected, {{"Observation UTC", ParseUtc, type nullable datetime}}),
+				    Typed = Table.TransformColumnTypes(TypedSpecial, {{"TenantKey", type text}, {"Endpoint Protection Key", type text}, {"Device Source ID", type text}, {"Country", type text}, {"Policy Version", type text}, {"Scope ID", type text}, {"Role", type text}, {"Expected Product", type text}, {"Expected Mode", type text}, {"Evaluation State", type text}, {"Evaluation Reason", type text}, {"Registration State", type text}, {"Evidence Source", type text}, {"Freshness", type text}, {"Exception Reason", type text}})
+				in Typed
+

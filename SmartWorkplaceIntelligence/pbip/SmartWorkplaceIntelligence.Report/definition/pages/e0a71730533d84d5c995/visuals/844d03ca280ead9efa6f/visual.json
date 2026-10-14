@@ -2,12 +2,12 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json",
   "name": "844d03ca280ead9efa6f",
   "position": {
-    "x": 1400,
-    "y": 422,
-    "z": 109,
-    "height": 234,
-    "width": 488,
-    "tabOrder": 109
+    "x": 1264,
+    "y": 608,
+    "width": 624,
+    "height": 384,
+    "z": 24,
+    "tabOrder": 1229
   },
   "visual": {
     "visualType": "barChart",
@@ -114,6 +114,13 @@
                   "Value": "24L"
                 }
               }
+            },
+            "labelDisplayUnits": {
+              "expr": {
+                "Literal": {
+                  "Value": "1D"
+                }
+              }
             }
           }
         }
@@ -206,7 +213,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Consumed units by license product. Ranked comparison for the current filter context.'"
+                  "Value": "'Assigned license units by product · excluding free and trial products'"
                 }
               }
             }
@@ -226,14 +233,14 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Consumed units by license product'"
+                  "Value": "'Assigned license units by product · excluding free and trial products'"
                 }
               }
             },
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "13D"
+                  "Value": "12D"
                 }
               }
             },
@@ -376,5 +383,6 @@
       ]
     },
     "drillFilterOtherVisuals": true
-  }
+  },
+  "parentGroupName": "403082f4ddd7359804c4"
 }

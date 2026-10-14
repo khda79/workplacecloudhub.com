@@ -1,5 +1,6 @@
-/// One synthetic compliance observation per device and date.
+/// Legacy synthetic fixture: not used by production report visuals or consolidated evidence. Removal is pending a separately cleared dependency-safe retirement; no real data.
 table 'Device Compliance Snapshots'
+	isHidden
 	lineageTag: bb9609bb-229b-43ca-9029-cc584cae999f
 
 	/// Compliant devices divided by devices with known compliance.

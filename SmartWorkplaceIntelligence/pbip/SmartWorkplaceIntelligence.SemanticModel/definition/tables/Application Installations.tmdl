@@ -1,5 +1,6 @@
-/// Synthetic device-application installations.
+/// Legacy synthetic fixture: not used by production report visuals or consolidated evidence. Removal is pending a separately cleared dependency-safe retirement; no real data.
 table 'Application Installations'
+	isHidden
 	lineageTag: 96df9dad-3a66-43c4-bda9-6986b4c518d8
 
 	/// Accepted synthetic device-application installations.

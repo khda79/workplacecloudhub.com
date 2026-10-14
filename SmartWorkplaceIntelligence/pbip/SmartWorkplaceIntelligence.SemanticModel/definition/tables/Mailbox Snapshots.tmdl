@@ -1,5 +1,6 @@
-/// One synthetic mailbox per reporting snapshot.
+/// Legacy synthetic fixture: not used by production report visuals or consolidated evidence. Removal is pending a separately cleared dependency-safe retirement; no real data.
 table 'Mailbox Snapshots'
+	isHidden
 	lineageTag: 3c7b81ad-062e-4506-9fa8-e84a2d986c2e
 
 	/// Distinct mailboxes with an accepted synthetic snapshot.

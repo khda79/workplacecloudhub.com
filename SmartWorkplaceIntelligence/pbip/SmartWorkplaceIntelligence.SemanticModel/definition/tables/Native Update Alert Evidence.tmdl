@@ -1,0 +1,171 @@
+/// Native source facet migrated from FactWindowsUpdateAlert; exact source grain, unresolved links and qualification retained. Uses the unified pinned batch, not a separate CMDB reader.
+table 'Native Update Alert Evidence'
+	lineageTag: 5ce74dc0-cd50-4a61-8d31-e229ed2c9a52
+
+	/// Windows Update report rows in the frozen collection; a device can contribute more than one row. Migrated without changing the source calculation.
+	measure 'Native Windows update alert records' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (COALESCE(COUNTROWS('Native Update Alert Evidence'),0)))
+		formatString: #,0
+		displayFolder: Native evidence
+		lineageTag: 2cf7b5c4-d618-45a9-a17b-bb649f540329
+
+	/// Distinct source device identifiers represented in Windows Update report rows. Migrated without changing the source calculation.
+	measure 'Native Devices with Windows update alerts' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (COALESCE(DISTINCTCOUNTNOBLANK('Native Update Alert Evidence'[DeviceId]),0)))
+		formatString: #,0
+		displayFolder: Native evidence
+		lineageTag: bbe4159e-72c3-4d18-9f53-3ea49c8ca2be
+
+	/// Windows Update report rows whose current device update status is explicitly Needs attention. Migrated without changing the source calculation.
+	measure 'Native Windows update alerts needing attention' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (CALCULATE([Native Windows update alert records],KEEPFILTERS('Native Update Alert Evidence'[CurrentDeviceUpdateStatus] = "Needs attention"))))
+		formatString: #,0
+		displayFolder: Native evidence
+		lineageTag: 00b3d154-03fa-45ad-8771-f83f7a994add
+
+	/// Share of Windows Update evidence records by aggregate state. Migrated without changing the source calculation.
+	measure 'Native Update aggregate state rate' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (DIVIDE([Native Windows update alert records], CALCULATE([Native Windows update alert records], REMOVEFILTERS('Native Update Alert Evidence'[AggregateState])))))
+		formatString: 0.0%
+		displayFolder: Native evidence
+		lineageTag: 9ea08a78-4a1c-4a3e-8832-5d3e35f7d78e
+
+	/// Exact native-key entity context or existing inventory context. No name matching or inferred transitive membership. Unrelated entity selections return blank.
+	measure 'Native Context Rows · Native Update Alert Evidence' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (COUNTROWS('Native Update Alert Evidence')))
+		formatString: #,0
+		isHidden
+		lineageTag: b1a631f9-b433-47a5-96c7-44cddc5344a2
+
+	/// Native FactWindowsUpdateAlert attribute; source qualification is retained.
+	column TenantKey
+		dataType: string
+		isHidden
+		lineageTag: 5a2e4f90-35cb-480c-9e03-866f17ac343e
+		summarizeBy: none
+		sourceColumn: TenantKey
+
+	/// Native FactWindowsUpdateAlert attribute; source qualification is retained.
+	column OrganizationKey
+		dataType: string
+		isHidden
+		lineageTag: 69c1543c-cd1a-485a-9377-01c17461c4d8
+		summarizeBy: none
+		sourceColumn: OrganizationKey
+
+	/// Native FactWindowsUpdateAlert attribute; source qualification is retained.
+	column EnvironmentKey
+		dataType: string
+		isHidden
+		lineageTag: 22374060-5801-4ee0-afc3-ea15d1d4dff4
+		summarizeBy: none
+		sourceColumn: EnvironmentKey
+
+	/// Native FactWindowsUpdateAlert attribute; source qualification is retained.
+	column TenantId
+		dataType: string
+		isHidden
+		lineageTag: 0599ef7d-dba7-4845-b016-4d1a7be78a90
+		summarizeBy: none
+		sourceColumn: TenantId
+
+	/// Native FactWindowsUpdateAlert attribute; source qualification is retained.
+	column TenantUpdateAlertKey
+		dataType: string
+		isHidden
+		lineageTag: 5cd4e9dd-9745-4c1b-8c1d-55f9c9df2f95
+		summarizeBy: none
+		sourceColumn: TenantUpdateAlertKey
+
+	/// Native FactWindowsUpdateAlert attribute; source qualification is retained.
+	column SourceReport
+		dataType: string
+		lineageTag: d1d100a6-6d5c-4da2-995f-06364fbbb6ab
+		summarizeBy: none
+		sourceColumn: SourceReport
+
+	/// Native FactWindowsUpdateAlert attribute; source qualification is retained.
+	column DeviceId
+		dataType: string
+		lineageTag: b03937ec-94a3-487a-a846-d085f06f9d7b
+		summarizeBy: none
+		sourceColumn: DeviceId
+
+	/// Native FactWindowsUpdateAlert attribute; source qualification is retained.
+	column DeviceName
+		dataType: string
+		lineageTag: 650ecaf5-e2cb-419c-bca9-a224b2ddeddb
+		summarizeBy: none
+		sourceColumn: DeviceName
+
+	/// Native FactWindowsUpdateAlert attribute; source qualification is retained.
+	column PolicyId
+		dataType: string
+		lineageTag: 9a1178be-ef2e-41f3-b095-cf8ec23aa575
+		summarizeBy: none
+		sourceColumn: PolicyId
+
+	/// Native FactWindowsUpdateAlert attribute; source qualification is retained.
+	column EventDateTimeUTC
+		dataType: string
+		lineageTag: c780e783-4416-450c-b82a-cd6859b223d1
+		summarizeBy: none
+		sourceColumn: EventDateTimeUTC
+
+	/// Native FactWindowsUpdateAlert attribute; source qualification is retained.
+	column LastWUScanTimeUTC
+		dataType: string
+		lineageTag: 779a1ea7-e9a1-4b2e-8fd0-5556ef9e531a
+		summarizeBy: none
+		sourceColumn: LastWUScanTimeUTC
+
+	/// Native FactWindowsUpdateAlert attribute; source qualification is retained.
+	column AggregateState
+		dataType: string
+		lineageTag: 7ca942ff-3c2f-4153-8f56-84e7c67733a0
+		summarizeBy: none
+		sourceColumn: AggregateState
+
+	/// Native FactWindowsUpdateAlert attribute; source qualification is retained.
+	column CurrentDeviceUpdateStatus
+		dataType: string
+		lineageTag: 54e32f55-0ecd-4c91-ba82-5b1ff44a1cf7
+		summarizeBy: none
+		sourceColumn: CurrentDeviceUpdateStatus
+
+	/// Native FactWindowsUpdateAlert attribute; source qualification is retained.
+	column LatestAlertMessage
+		dataType: string
+		lineageTag: cb0e0274-a0d6-4c27-8be4-3f2397fd521e
+		summarizeBy: none
+		sourceColumn: LatestAlertMessage
+
+	/// Native FactWindowsUpdateAlert attribute; source qualification is retained.
+	column SourceCollectedDateTime
+		dataType: dateTime
+		formatString: yyyy-MM-dd HH:mm:ss
+		lineageTag: 5ad5f7b3-73b9-4545-80ec-e8a5344c3fe4
+		summarizeBy: none
+		sourceColumn: SourceCollectedDateTime
+
+	/// Native FactWindowsUpdateAlert attribute; source qualification is retained.
+	column SourceSystem
+		dataType: string
+		lineageTag: e4547528-7371-402f-9def-853b4a43e0da
+		summarizeBy: none
+		sourceColumn: SourceSystem
+
+	partition 'Native Update Alert Evidence' = m
+		mode: import
+		source = NativeEvidenceTypes(Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("FactWindowsUpdateAlert.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]), {[name="TenantKey", dataType="String"], [name="OrganizationKey", dataType="String"], [name="EnvironmentKey", dataType="String"], [name="TenantId", dataType="String"], [name="TenantUpdateAlertKey", dataType="String"], [name="SourceReport", dataType="String"], [name="DeviceId", dataType="String"], [name="DeviceName", dataType="String"], [name="PolicyId", dataType="String"], [name="EventDateTimeUTC", dataType="String"], [name="LastWUScanTimeUTC", dataType="String"], [name="AggregateState", dataType="String"], [name="CurrentDeviceUpdateStatus", dataType="String"], [name="LatestAlertMessage", dataType="String"], [name="SourceCollectedDateTime", dataType="DateTime"], [name="SourceSystem", dataType="String"]})
+

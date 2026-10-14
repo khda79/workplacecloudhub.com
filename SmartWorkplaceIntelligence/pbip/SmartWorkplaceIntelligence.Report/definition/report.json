@@ -75,11 +75,6 @@
           "type": "Image"
         },
         {
-          "name": "smartworkplace-licenses-20260913.svg",
-          "path": "smartworkplace-licenses-20260913.svg",
-          "type": "Image"
-        },
-        {
           "name": "smartworkplace-lifecycle-20260913.svg",
           "path": "smartworkplace-lifecycle-20260913.svg",
           "type": "Image"
@@ -143,7 +138,7 @@
   "annotations": [
     {
       "name": "defaultPage",
-      "value": "74096d393d05fa994d48"
+      "value": "f0b223aaaa07dc5ad1d0"
     }
   ]
 }

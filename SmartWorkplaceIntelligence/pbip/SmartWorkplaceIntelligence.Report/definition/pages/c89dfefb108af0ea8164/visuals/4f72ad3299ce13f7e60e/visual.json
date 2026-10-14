@@ -3,11 +3,11 @@
   "name": "4f72ad3299ce13f7e60e",
   "position": {
     "x": 32,
-    "y": 16,
-    "z": 900,
+    "y": 24,
     "width": 48,
     "height": 48,
-    "tabOrder": 900
+    "z": 900,
+    "tabOrder": 48
   },
   "visual": {
     "visualType": "image",
@@ -35,7 +35,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Content & Storage page icon'"
+                  "Value": "'Cloud Content & Storage page icon'"
                 }
               }
             }

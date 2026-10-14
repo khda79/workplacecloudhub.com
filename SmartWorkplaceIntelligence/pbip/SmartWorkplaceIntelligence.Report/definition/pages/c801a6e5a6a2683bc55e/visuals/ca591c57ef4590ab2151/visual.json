@@ -1,12 +1,12 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.13.0/schema.json",
   "name": "ca591c57ef4590ab2151",
   "position": {
-    "x": 1400,
-    "y": 256,
+    "x": 1136,
+    "y": 288,
     "z": 108,
-    "height": 150,
-    "width": 488,
+    "height": 232,
+    "width": 320,
     "tabOrder": 108
   },
   "visual": {
@@ -28,7 +28,8 @@
               },
               "queryRef": "Enterprise Operational Signals.Severity Label",
               "nativeQueryRef": "Severity Label",
-              "active": true
+              "active": true,
+              "displayName": "Severity"
             }
           ]
         },
@@ -46,7 +47,8 @@
                 }
               },
               "queryRef": "Enterprise Operational Signals.Affected Signal Observations",
-              "nativeQueryRef": "Affected signal observations"
+              "nativeQueryRef": "Affected signal observations",
+              "displayName": "Observations"
             }
           ]
         }
@@ -102,7 +104,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "10D"
+                  "Value": "12D"
                 }
               }
             }
@@ -131,6 +133,13 @@
                       "Value": "'#F3F7FA'"
                     }
                   }
+                }
+              }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "12D"
                 }
               }
             }
@@ -186,6 +195,49 @@
             }
           }
         }
+      ],
+      "grid": [
+        {
+          "properties": {
+            "textSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "12D"
+                }
+              }
+            },
+            "rowPadding": {
+              "expr": {
+                "Literal": {
+                  "Value": "3D"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "columnFormatting": [
+        {
+          "properties": {
+            "labelDisplayUnits": {
+              "expr": {
+                "Literal": {
+                  "Value": "1D"
+                }
+              }
+            },
+            "labelPrecision": {
+              "expr": {
+                "Literal": {
+                  "Value": "0L"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Enterprise Operational Signals.Affected Signal Observations"
+          }
+        }
       ]
     },
     "visualContainerObjects": {
@@ -215,14 +267,14 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Risk & Incident Signals diagnostic context'"
+                  "Value": "'Observations by severity'"
                 }
               }
             },
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "13D"
+                  "Value": "14D"
                 }
               }
             },
@@ -378,5 +430,97 @@
       ]
     },
     "drillFilterOtherVisuals": true
+  },
+  "filterConfig": {
+    "filters": [
+      {
+        "name": "0266dd047f06aec0595a",
+        "field": {
+          "Column": {
+            "Expression": {
+              "SourceRef": {
+                "Entity": "Enterprise Operational Signals"
+              }
+            },
+            "Property": "Severity Label"
+          }
+        },
+        "type": "Categorical"
+      },
+      {
+        "name": "9c6b8cc029dc99a59195",
+        "field": {
+          "Measure": {
+            "Expression": {
+              "SourceRef": {
+                "Entity": "Enterprise Operational Signals"
+              }
+            },
+            "Property": "Affected Signal Observations"
+          }
+        },
+        "type": "Advanced"
+      },
+      {
+        "name": "Filter56b77c6a6d453e49a42a6417",
+        "field": {
+          "Column": {
+            "Expression": {
+              "SourceRef": {
+                "Entity": "Enterprise Operational Signals"
+              }
+            },
+            "Property": "Signal Sort"
+          }
+        },
+        "type": "Categorical",
+        "filter": {
+          "Version": 2,
+          "From": [
+            {
+              "Name": "ep",
+              "Entity": "Enterprise Operational Signals",
+              "Type": 0
+            }
+          ],
+          "Where": [
+            {
+              "Condition": {
+                "Not": {
+                  "Expression": {
+                    "In": {
+                      "Expressions": [
+                        {
+                          "Column": {
+                            "Expression": {
+                              "SourceRef": {
+                                "Source": "ep"
+                              }
+                            },
+                            "Property": "Signal Sort"
+                          }
+                        }
+                      ],
+                      "Values": [
+                        [
+                          {
+                            "Literal": {
+                              "Value": "21L"
+                            }
+                          }
+                        ]
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "howCreated": "User",
+        "isHiddenInViewMode": true,
+        "isLockedInViewMode": true
+      }
+    ]
   }
 }

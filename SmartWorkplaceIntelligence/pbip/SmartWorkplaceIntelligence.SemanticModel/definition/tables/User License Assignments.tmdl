@@ -1,5 +1,6 @@
-/// One synthetic user and license assignment per snapshot.
+/// Legacy synthetic fixture: not used by production report visuals or consolidated evidence. Removal is pending a separately cleared dependency-safe retirement; no real data.
 table 'User License Assignments'
+	isHidden
 	lineageTag: 36c595cb-740c-4ae0-a3de-38e2b3f33adf
 
 	/// Assigned licenses with qualified inactivity and no approved exclusion; not a monetary claim.

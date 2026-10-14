@@ -1,0 +1,76 @@
+/// Current SharePoint Server inventory; one row per server. Tenant and farm identity are retained in hidden relationship keys.
+table 'SharePoint On-prem Servers'
+	lineageTag: a68d5ab9-8bab-4f10-b2d2-90f52b7e0a04
+
+	/// SharePoint farm member servers; excludes external Role=Invalid entries.
+	measure 'On-prem SharePoint Servers' = CALCULATE(COUNTROWS('SharePoint On-prem Servers'), KEEPFILTERS('SharePoint On-prem Servers'[Role] <> "Invalid"))
+		formatString: #,##0
+		lineageTag: 063ed4ef-81e1-4f4d-98ec-0facda94e148
+
+	/// Server rows marked Role=Invalid in the infrastructure source and excluded from SharePoint farm member count.
+	measure 'External Server Rows' = COALESCE(CALCULATE(COUNTROWS('SharePoint On-prem Servers'), KEEPFILTERS('SharePoint On-prem Servers'[Role] = "Invalid")), 0)
+		formatString: #,##0
+		lineageTag: 4af25814-f384-45ce-a281-7f5d100beae7
+
+	column 'Tenant Key'
+		dataType: string
+		isHidden
+		lineageTag: 01d0dbc9-6401-49e9-b073-b944dbc03d49
+		sourceColumn: Tenant Key
+
+	column 'Farm ID'
+		dataType: string
+		isHidden
+		lineageTag: d0cf0074-2b49-425f-bf68-fe459d15b206
+		sourceColumn: Farm ID
+
+	column 'Run ID'
+		dataType: string
+		isHidden
+		lineageTag: b07ff88a-5a95-475b-b205-6876f185b234
+		sourceColumn: Run ID
+
+	column 'Server ID'
+		dataType: string
+		isHidden
+		lineageTag: 2da9ffa8-490b-41b4-9d47-f9eee7eb4070
+		sourceColumn: Server ID
+
+	column 'Server Name'
+		dataType: string
+		lineageTag: 1410f234-4274-4f59-b782-e5a9024706a9
+		sourceColumn: Server Name
+
+	column Role
+		dataType: string
+		lineageTag: cdc0738c-22dc-4ef4-8565-185002266098
+		sourceColumn: Role
+
+	column 'Server Status'
+		dataType: string
+		lineageTag: d5bc2f6a-cbff-456a-a33a-41dee286403b
+		sourceColumn: Server Status
+
+	column 'Collection Status'
+		dataType: string
+		lineageTag: 1b528b99-b435-456e-9447-7cde47f64fc4
+		sourceColumn: Collection Status
+
+	column 'Farm Key'
+		dataType: string
+		isHidden
+		lineageTag: ba90d14c-e08e-4e5e-970b-7a3ebe9f311d
+		sourceColumn: Farm Key
+
+	partition 'SharePoint On-prem Servers' = m
+		mode: import
+		source =
+				let
+				    Raw = GetSharePointOnPremCsv("SharePoint_OnPrem_Servers.csv", {"TenantKey", "FarmId", "RunId", "ServerId", "ServerName", "Role", "Status", "CollectionStatus"}, {}),
+				    Nulls = Table.ReplaceValue(Raw, "", null, Replacer.ReplaceValue, {}),
+				    Typed = Table.TransformColumnTypes(Nulls, {}, "en-US"),
+				    FarmKey = Table.AddColumn(Typed, "Farm Key", each [TenantKey] & "|" & [FarmId], type text),
+				    Renamed = Table.RenameColumns(FarmKey, {{"TenantKey", "Tenant Key"}, {"FarmId", "Farm ID"}, {"RunId", "Run ID"}, {"ServerId", "Server ID"}, {"ServerName", "Server Name"}, {"Role", "Role"}, {"Status", "Server Status"}, {"CollectionStatus", "Collection Status"}})
+				in
+				    Renamed
+

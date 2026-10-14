@@ -1,5 +1,6 @@
-/// Accepted principal-mailbox permissions.
+/// Legacy synthetic fixture: not used by production report visuals or consolidated evidence. Removal is pending a separately cleared dependency-safe retirement; no real data.
 table 'Mailbox Permissions'
+	isHidden
 	lineageTag: 51be8047-a57b-4e3f-a3a9-3066988b0036
 
 	/// Business attribute Date Key.

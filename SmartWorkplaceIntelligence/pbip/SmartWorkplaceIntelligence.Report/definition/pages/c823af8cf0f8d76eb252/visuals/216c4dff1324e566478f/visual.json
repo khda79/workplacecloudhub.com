@@ -2,11 +2,11 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
   "name": "216c4dff1324e566478f",
   "position": {
-    "x": 44,
-    "y": 552,
+    "x": 648,
+    "y": 968,
     "z": 113,
-    "width": 376,
-    "height": 72,
+    "width": 1240,
+    "height": 48,
     "tabOrder": 113
   },
   "visual": {
@@ -19,11 +19,11 @@
               {
                 "textRuns": [
                   {
-                    "value": "Observed controls are decision-qualified. Missing evidence remains explicitly blocked from conclusions.",
+                    "value": "Reported control evidence does not establish whole-estate protection. Missing or unqualified AV/EDR evidence is not a confirmed protection gap.",
                     "textStyle": {
                       "fontFamily": "Segoe UI",
-                      "fontSize": "11px",
-                      "color": "#52606D"
+                      "fontSize": "12pt",
+                      "color": "#183153"
                     }
                   }
                 ],
@@ -114,7 +114,22 @@
             }
           }
         }
+      ],
+      "general": [
+        {
+          "properties": {
+            "altText": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Reported control evidence does not establish whole-estate protection. Missing or unqualified AV/EDR evidence is not a confirmed protection gap.'"
+                }
+              }
+            }
+          }
+        }
       ]
     }
-  }
+  },
+  "isHidden": true,
+  "parentGroupName": "7dbfb122566e65960823"
 }

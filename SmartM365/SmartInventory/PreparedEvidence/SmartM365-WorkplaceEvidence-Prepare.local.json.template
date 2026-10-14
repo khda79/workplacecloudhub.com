@@ -4,6 +4,7 @@
   "LogAllRootPath": "__USE_GLOBAL__",
   "WorkplaceIntelligenceRootPath": "",
   "PreparedWorkRootPath": "",
+  "PreparedPythonCommand": "python",
   "PreparedMaxSourceAgeHours": 168,
   "PreparedSourceAgeOverrides": {
     "M365_License_Prices.csv": 744,

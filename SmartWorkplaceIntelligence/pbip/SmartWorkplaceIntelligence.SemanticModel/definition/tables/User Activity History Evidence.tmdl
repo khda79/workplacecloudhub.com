@@ -55,8 +55,6 @@ table 'User Activity History Evidence'
 			relationship: b6a44913-a444-4fcd-b9cf-5f11c9ca63cb
 			defaultHierarchy: LocalDateTable_09b9235b-b066-4958-97e2-848f2d2dddd1.'Date Hierarchy'
 
-		annotation UnderlyingDateTimeDataType = Date
-
 	column 'Date Key'
 		dataType: int64
 		isHidden
@@ -111,8 +109,6 @@ table 'User Activity History Evidence'
 			relationship: 42c5ef6f-19ab-45f7-8b2d-90de5dbc46c8
 			defaultHierarchy: LocalDateTable_34c9943b-b627-41a6-892f-38af610aa3ab.'Date Hierarchy'
 
-		annotation UnderlyingDateTimeDataType = Date
-
 	column 'AD Last Activity Date'
 		dataType: dateTime
 		formatString: Short Date
@@ -125,8 +121,6 @@ table 'User Activity History Evidence'
 			relationship: aeadbb30-a64a-46e6-8830-ad10d63bdb7e
 			defaultHierarchy: LocalDateTable_9c75bf89-ef1c-44c2-a9c2-d4c0f8594ea3.'Date Hierarchy'
 
-		annotation UnderlyingDateTimeDataType = Date
-
 	column 'M365 Last Activity Date'
 		dataType: dateTime
 		formatString: Short Date
@@ -138,8 +132,6 @@ table 'User Activity History Evidence'
 			isDefault
 			relationship: de341192-97a0-4903-ae1b-8008d5143e3b
 			defaultHierarchy: LocalDateTable_5687bff7-bb24-402c-aec1-3a5d0ec7aa58.'Date Hierarchy'
-
-		annotation UnderlyingDateTimeDataType = Date
 
 	column 'Activity Source'
 		dataType: string

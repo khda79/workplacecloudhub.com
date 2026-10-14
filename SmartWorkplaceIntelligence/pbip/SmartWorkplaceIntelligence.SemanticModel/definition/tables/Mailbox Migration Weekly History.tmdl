@@ -1,0 +1,68 @@
+/// Private source-backed migration planning evidence. Unknown is not zero. No Infrastructure hybride assessment.
+table 'Mailbox Migration Weekly History'
+	lineageTag: 7fc72409-81dd-4379-a6ce-168a0b0e9f34
+
+	/// Observed local migration planning evidence. Missing evidence is not zero; see provenance and task views.
+	measure 'Remaining Mailboxes Weekly Provisional' = SUM('Mailbox Migration Weekly History'[Provisional Local Mailboxes])
+		formatString: #,0
+		displayFolder: Migration planning
+		lineageTag: 9238fc48-ec1b-452f-97e2-4343548c9257
+
+	/// Snapshot Date from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
+	column 'Snapshot Date'
+		dataType: dateTime
+		lineageTag: 9ac9b39f-7ffe-4363-8169-a6cdde05630f
+		sourceColumn: Snapshot Date
+
+	/// Snapshot Week from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
+	column 'Snapshot Week'
+		dataType: string
+		lineageTag: 7d2c7884-207f-4f6b-9cf1-5cddd33dca04
+		sourceColumn: Snapshot Week
+
+	/// Observed Local Mailboxes from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
+	column 'Observed Local Mailboxes'
+		dataType: string
+		lineageTag: 5689e667-1b56-4196-8216-7cdabe4c6889
+		sourceColumn: Observed Local Mailboxes
+
+	/// Provisional Local Mailboxes from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
+	column 'Provisional Local Mailboxes'
+		dataType: double
+		lineageTag: c6db8393-ac14-4762-9e09-aa03422d9b4c
+		sourceColumn: Provisional Local Mailboxes
+
+	/// Evidence Status from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
+	column 'Evidence Status'
+		dataType: string
+		lineageTag: 403ff7a4-de94-4c89-96ca-7a5d94748ddb
+		sourceColumn: Evidence Status
+
+	/// Evidence Note from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
+	column 'Evidence Note'
+		dataType: string
+		lineageTag: 8137f2cf-3c04-43a6-8b63-603f7f05237f
+		sourceColumn: Evidence Note
+
+	/// Normal SmartM365 local inputs through DataRoot / PreparedEvidenceRoot. No dependency on frozen report-validation JSON. Source qualification is retained; no collection is triggered.
+	partition 'Mailbox Migration History Rebuilt' = m
+		mode: import
+		source = ```
+				let
+				    Prepared = ReadMigrationCsv(GetPreparedEvidenceFile("MailboxEvidence.csv"), {"TenantKey"}),
+				    Tenants = List.Distinct(Prepared[TenantKey]),
+				    Tenant = if List.Count(Tenants) = 1 and Tenants{0} <> null and Text.Trim(Tenants{0}) <> "" then Tenants{0} else error "Prepared mailbox evidence must have one tenant",
+				    Key = (v as any) as text => if v = null then "" else Text.Lower(Text.Trim(Text.From(v))),
+				    Snapshots = ReadMigrationWeeklyHistory("Mailbox", "Exchange_OnPrem_Mailboxes_AllDomains.csv", {"RecipientType", "ObjectGUID"}, Tenant),
+				    Project = (s as record) as record =>
+				        let Local = Table.SelectRows(s[Rows], each not Text.StartsWith(Key([RecipientType]), "remote")),
+				            Ids = List.Transform(Table.ToRecords(Local), each let Guid = Key(Record.FieldOrDefault(_, "ExchangeGuid", null)) in if Guid <> "" then Guid else Key([ObjectGUID])),
+				            Unique = List.Distinct(List.Select(Ids, each _ <> "")),
+				            Qualified = s[HasRecordedDate] and s[AllTenantScoped] and List.Count(Ids) = List.Count(Unique) and s[NoCollectionIssues]
+				        in [#"Snapshot Date"=s[Date], #"Snapshot Week"=s[Week], #"Observed Local Mailboxes"=if Qualified then Text.From(List.Count(Unique), "en-US") else null, #"Provisional Local Mailboxes"=List.Count(Unique), #"Evidence Status"=if Qualified then "Qualified observed snapshot" else "Provisional - scope or key qualification requires review", #"Evidence Note"=(if s[HasRecordedDate] then "Recorded snapshot date. " else "ISO week bucket only; exact collection date and tenant scope not recorded. ") & "Stock change is not verified EXO migration. Country is unavailable historically." & (if s[ExcludedOtherTenantRows] > 0 then " Other-tenant records excluded." else "")],
+				    Result = Table.FromRecords(List.Transform(Snapshots, Project), {"Snapshot Date", "Snapshot Week", "Observed Local Mailboxes", "Provisional Local Mailboxes", "Evidence Status", "Evidence Note"}, MissingField.Error)
+				in
+				    Table.TransformColumnTypes(Result, {{"Snapshot Date", type date}, {"Provisional Local Mailboxes", type number}}, "en-US")
+				
+				```
+

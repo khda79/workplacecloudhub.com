@@ -1,0 +1,138 @@
+/// Governed IntuneConfigurationPolicyEvidence.csv. EvidenceKey row identity; configured reported scope only. Missing evidence is not success. Retains outside-catalog and unmatched observations.
+table 'Intune Configuration Policy Evidence'
+	lineageTag: 3e8964b6-d2db-4765-b621-623d1b34a088
+
+	/// Count of reported observations in the collected scope only. Blank when the source group is not supplied; zero is not proof of complete coverage.
+	measure 'Intune Configuration Policies (Catalog)' = IF(CALCULATE(COUNTROWS('Intune Operational Source Evidence'), REMOVEFILTERS('Intune Operational Source Evidence'), 'Intune Operational Source Evidence'[Source Group] = "Configurations", 'Intune Operational Source Evidence'[Availability] = "Receipt and files verified") > 0, COALESCE(COUNTROWS('Intune Configuration Policy Evidence'), 0), BLANK())
+		formatString: #,##0
+		displayFolder: Intune | Reported scope
+		lineageTag: fc9a25c2-cb3a-4e9a-a07b-fc9d82d1806c
+
+	/// Prepared IntuneConfigurationPolicyEvidence.csv: TenantKey. Reported source scope only; not whole-tenant coverage or endpoint health.
+	column 'Tenant Key'
+		dataType: string
+		isHidden
+		lineageTag: 49a1e40e-ed55-46c3-81be-5f43fdb58554
+		summarizeBy: none
+		sourceColumn: TenantKey
+
+	/// Prepared IntuneConfigurationPolicyEvidence.csv: EvidenceKey. Reported source scope only; not whole-tenant coverage or endpoint health.
+	column 'Evidence Key'
+		dataType: string
+		isHidden
+		lineageTag: 0bc62a42-aaa9-4414-89af-a94d31e98acb
+		summarizeBy: none
+		sourceColumn: EvidenceKey
+
+	/// Prepared IntuneConfigurationPolicyEvidence.csv: ReceiptRunId. Reported source scope only; not whole-tenant coverage or endpoint health.
+	column 'Receipt Run ID'
+		dataType: string
+		isHidden
+		lineageTag: fcd535ff-3d2e-4cb8-b438-d1da829c976d
+		summarizeBy: none
+		sourceColumn: ReceiptRunId
+
+	/// Prepared IntuneConfigurationPolicyEvidence.csv: BusinessRunId. Reported source scope only; not whole-tenant coverage or endpoint health.
+	column 'Business Run ID'
+		dataType: string
+		isHidden
+		lineageTag: 55935ce7-ae44-4655-aab9-6005a0e8caf6
+		summarizeBy: none
+		sourceColumn: BusinessRunId
+
+	/// Prepared IntuneConfigurationPolicyEvidence.csv: SourceFile. Reported source scope only; not whole-tenant coverage or endpoint health.
+	column 'Source File'
+		dataType: string
+		isHidden
+		lineageTag: 3637dfc1-6dc3-40ca-9373-af87230b0f07
+		summarizeBy: none
+		sourceColumn: SourceFile
+
+	/// Prepared IntuneConfigurationPolicyEvidence.csv: SourceSHA256. Reported source scope only; not whole-tenant coverage or endpoint health.
+	column 'Source SHA256'
+		dataType: string
+		isHidden
+		lineageTag: 34ac15c2-e2b8-44b5-9b96-e941e487706a
+		summarizeBy: none
+		sourceColumn: SourceSHA256
+
+	/// Prepared IntuneConfigurationPolicyEvidence.csv: SourceRecord. Reported source scope only; not whole-tenant coverage or endpoint health.
+	column 'Source Record'
+		dataType: int64
+		isHidden
+		lineageTag: 9c423af8-bb58-452d-996a-0d6befb9fed7
+		summarizeBy: none
+		sourceColumn: SourceRecord
+
+	/// Prepared IntuneConfigurationPolicyEvidence.csv: CollectionUTC. Reported source scope only; not whole-tenant coverage or endpoint health.
+	column 'Collection UTC'
+		dataType: dateTime
+		lineageTag: c94c31b6-706d-4a61-b159-43a7eb5df2e4
+		summarizeBy: none
+		sourceColumn: CollectionUTC
+
+	/// Prepared IntuneConfigurationPolicyEvidence.csv: PolicyId. Reported source scope only; not whole-tenant coverage or endpoint health.
+	column 'Policy ID'
+		dataType: string
+		lineageTag: c278ad19-584d-4976-980e-1916c8e3db3a
+		summarizeBy: none
+		sourceColumn: PolicyId
+
+	/// Prepared IntuneConfigurationPolicyEvidence.csv: PolicyFamily. Reported source scope only; not whole-tenant coverage or endpoint health.
+	column 'Policy Family'
+		dataType: string
+		lineageTag: 371df6cb-671a-4f82-bbc3-53ef184223e3
+		summarizeBy: none
+		sourceColumn: PolicyFamily
+
+	/// Prepared IntuneConfigurationPolicyEvidence.csv: DisplayName. Reported source scope only; not whole-tenant coverage or endpoint health.
+	column 'Display Name'
+		dataType: string
+		lineageTag: 6255cf12-e94c-40f0-965e-331cee83b840
+		summarizeBy: none
+		sourceColumn: DisplayName
+
+	/// Prepared IntuneConfigurationPolicyEvidence.csv: PolicyType. Reported source scope only; not whole-tenant coverage or endpoint health.
+	column 'Policy Type'
+		dataType: string
+		lineageTag: 34b224e0-6c9a-4f47-8b80-c88edc1a9939
+		summarizeBy: none
+		sourceColumn: PolicyType
+
+	/// Prepared IntuneConfigurationPolicyEvidence.csv: Platforms. Reported source scope only; not whole-tenant coverage or endpoint health.
+	column Platforms
+		dataType: string
+		lineageTag: 00d5724c-8fd6-4ee0-b954-7ddb25dacb13
+		summarizeBy: none
+		sourceColumn: Platforms
+
+	/// Prepared IntuneConfigurationPolicyEvidence.csv: Technologies. Reported source scope only; not whole-tenant coverage or endpoint health.
+	column Technologies
+		dataType: string
+		lineageTag: c1694412-6d1c-4a00-b39f-d401a22bca71
+		summarizeBy: none
+		sourceColumn: Technologies
+
+	/// Length-prefixed tenant-aware technical relationship key.
+	column 'Policy Key'
+		dataType: string
+		isHidden
+		lineageTag: 62d5da51-ad8d-4841-9dbc-de142c5588e0
+		summarizeBy: none
+		sourceColumn: Policy Key
+
+	partition 'Intune Configuration Policy Evidence' = m
+		mode: import
+		source =
+				let
+				    Raw = ReadMigrationCsv(GetPreparedEvidenceFile("IntuneConfigurationPolicyEvidence.csv"), {"TenantKey", "EvidenceKey", "ReceiptRunId", "BusinessRunId", "SourceFile", "SourceSHA256", "SourceRecord", "CollectionUTC", "PolicyId", "PolicyFamily", "DisplayName", "PolicyType", "Platforms", "Technologies"}),
+				    Selected = Table.SelectColumns(Raw, {"TenantKey", "EvidenceKey", "ReceiptRunId", "BusinessRunId", "SourceFile", "SourceSHA256", "SourceRecord", "CollectionUTC", "PolicyId", "PolicyFamily", "DisplayName", "PolicyType", "Platforms", "Technologies"}),
+				    Tenants = List.Distinct(Selected[TenantKey]),
+				    Validated = if List.Count(Tenants) > 1 or List.Contains(Tenants, null) or List.Contains(Tenants, "") then error "Intune evidence tenant identity is invalid" else Selected,
+				    ParseUtc = (raw as nullable text) as nullable datetime => if raw = null or Text.Trim(raw) = "" then null else if not Text.EndsWith(raw, "Z") then error "Intune prepared time requires explicit UTC Z" else DateTimeZone.RemoveZone(DateTimeZone.SwitchZone(DateTimeZone.FromText(raw, [Culture="en-US"]), 0)),
+				    Key = (values as list) as nullable text => if List.AnyTrue(List.Transform(values, each _ = null or Text.Trim(Text.From(_)) = "")) then null else Text.Combine(List.Transform(values, each Text.From(Text.Length(Text.From(_))) & ":" & Text.From(_)), "|"),
+				    Typed = Table.TransformColumns(Validated, {{"TenantKey", each _, type nullable text}, {"EvidenceKey", each _, type nullable text}, {"ReceiptRunId", each _, type nullable text}, {"BusinessRunId", each _, type nullable text}, {"SourceFile", each _, type nullable text}, {"SourceSHA256", each _, type nullable text}, {"SourceRecord", each if _ = null or Text.Trim(_) = "" then null else Int64.From(Number.FromText(_, "en-US")), type nullable number}, {"CollectionUTC", ParseUtc, type nullable datetime}, {"PolicyId", each _, type nullable text}, {"PolicyFamily", each _, type nullable text}, {"DisplayName", each _, type nullable text}, {"PolicyType", each _, type nullable text}, {"Platforms", each _, type nullable text}, {"Technologies", each _, type nullable text}}),
+				    WithPolicyKey = Table.AddColumn(Typed, "Policy Key", each Key({[TenantKey], [PolicyId]}), type nullable text)
+				in
+				    WithPolicyKey
+

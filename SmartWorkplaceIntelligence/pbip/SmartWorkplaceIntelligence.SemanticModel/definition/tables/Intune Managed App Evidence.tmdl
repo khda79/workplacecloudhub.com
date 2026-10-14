@@ -1,0 +1,214 @@
+/// Governed IntuneManagedAppEvidence.csv. EvidenceKey row identity; configured reported scope only. Missing evidence is not success. Retains outside-catalog and unmatched observations.
+table 'Intune Managed App Evidence'
+	lineageTag: f4b7df29-0f16-4150-bc24-3f74c02bc3d4
+
+	/// Count of reported observations in the collected scope only. Blank when the source group is not supplied; zero is not proof of complete coverage.
+	measure 'Intune Managed Apps (Catalog)' = IF(CALCULATE(COUNTROWS('Intune Operational Source Evidence'), REMOVEFILTERS('Intune Operational Source Evidence'), 'Intune Operational Source Evidence'[Source Group] = "ManagedApps", 'Intune Operational Source Evidence'[Availability] = "Receipt and files verified") > 0, COALESCE(COUNTROWS('Intune Managed App Evidence'), 0), BLANK())
+		formatString: #,##0
+		displayFolder: Intune | Reported scope
+		lineageTag: f7fa0680-3101-4fad-8fb3-20f176d880cd
+
+	/// Count of reported observations in the collected scope only. Blank when the source group is not supplied; zero is not proof of complete coverage.
+	measure 'Intune Managed Apps Not Measured' = IF(CALCULATE(COUNTROWS('Intune Operational Source Evidence'), REMOVEFILTERS('Intune Operational Source Evidence'), 'Intune Operational Source Evidence'[Source Group] = "ManagedApps", 'Intune Operational Source Evidence'[Availability] = "Receipt and files verified") > 0, COALESCE(CALCULATE(COUNTROWS('Intune Managed App Evidence'), KEEPFILTERS('Intune Managed App Evidence'[Measurement State] = "Not measured")), 0), BLANK())
+		formatString: #,##0
+		displayFolder: Intune | Reported scope
+		lineageTag: 34874e9e-2ad4-4432-a33a-789046f2e47e
+
+	/// Prepared IntuneManagedAppEvidence.csv: TenantKey. Reported source scope only; not whole-tenant coverage or endpoint health.
+	column 'Tenant Key'
+		dataType: string
+		isHidden
+		lineageTag: 4297d860-93aa-4522-907e-b192f7e95edf
+		summarizeBy: none
+		sourceColumn: TenantKey
+
+	/// Prepared IntuneManagedAppEvidence.csv: EvidenceKey. Reported source scope only; not whole-tenant coverage or endpoint health.
+	column 'Evidence Key'
+		dataType: string
+		isHidden
+		lineageTag: 9d5defd5-6447-4bd8-84e8-03158078a937
+		summarizeBy: none
+		sourceColumn: EvidenceKey
+
+	/// Prepared IntuneManagedAppEvidence.csv: ReceiptRunId. Reported source scope only; not whole-tenant coverage or endpoint health.
+	column 'Receipt Run ID'
+		dataType: string
+		isHidden
+		lineageTag: 8a531464-ad8b-419d-9e6f-0cd1141dcbbc
+		summarizeBy: none
+		sourceColumn: ReceiptRunId
+
+	/// Prepared IntuneManagedAppEvidence.csv: BusinessRunId. Reported source scope only; not whole-tenant coverage or endpoint health.
+	column 'Business Run ID'
+		dataType: string
+		isHidden
+		lineageTag: 08d33018-5bb6-42f2-9ce3-69fb32188485
+		summarizeBy: none
+		sourceColumn: BusinessRunId
+
+	/// Prepared IntuneManagedAppEvidence.csv: SourceFile. Reported source scope only; not whole-tenant coverage or endpoint health.
+	column 'Source File'
+		dataType: string
+		isHidden
+		lineageTag: ccd600e2-4824-4c49-af69-087818fee807
+		summarizeBy: none
+		sourceColumn: SourceFile
+
+	/// Prepared IntuneManagedAppEvidence.csv: SourceSHA256. Reported source scope only; not whole-tenant coverage or endpoint health.
+	column 'Source SHA256'
+		dataType: string
+		isHidden
+		lineageTag: ac6cddd1-4dde-471c-a8ad-5289a7d756ed
+		summarizeBy: none
+		sourceColumn: SourceSHA256
+
+	/// Prepared IntuneManagedAppEvidence.csv: SourceRecord. Reported source scope only; not whole-tenant coverage or endpoint health.
+	column 'Source Record'
+		dataType: int64
+		isHidden
+		lineageTag: c5fddd28-8dde-44ed-b7ed-777ea584ce80
+		summarizeBy: none
+		sourceColumn: SourceRecord
+
+	/// Prepared IntuneManagedAppEvidence.csv: CollectionUTC. Reported source scope only; not whole-tenant coverage or endpoint health.
+	column 'Collection UTC'
+		dataType: dateTime
+		lineageTag: 370fe0d1-4738-415f-bba8-b7f3ef0f4cff
+		summarizeBy: none
+		sourceColumn: CollectionUTC
+
+	/// Prepared IntuneManagedAppEvidence.csv: ApplicationId. Reported source scope only; not whole-tenant coverage or endpoint health.
+	column 'Application ID'
+		dataType: string
+		lineageTag: 54a5e4b7-8dce-47f8-a725-1a7b59d042e9
+		summarizeBy: none
+		sourceColumn: ApplicationId
+
+	/// Prepared IntuneManagedAppEvidence.csv: DisplayName. Reported source scope only; not whole-tenant coverage or endpoint health.
+	column 'Display Name'
+		dataType: string
+		lineageTag: acc186f4-8bbe-40d5-bd67-8f541a428c32
+		summarizeBy: none
+		sourceColumn: DisplayName
+
+	/// Prepared IntuneManagedAppEvidence.csv: Publisher. Reported source scope only; not whole-tenant coverage or endpoint health.
+	column Publisher
+		dataType: string
+		lineageTag: 2cf7ee42-ea03-4f07-8085-901175ffe3a3
+		summarizeBy: none
+		sourceColumn: Publisher
+
+	/// Prepared IntuneManagedAppEvidence.csv: AppType. Reported source scope only; not whole-tenant coverage or endpoint health.
+	column 'App Type'
+		dataType: string
+		lineageTag: 6551c27b-fac4-4e0a-b1b5-1d534a0bc7f3
+		summarizeBy: none
+		sourceColumn: AppType
+
+	/// Prepared IntuneManagedAppEvidence.csv: DisplayVersion. Reported source scope only; not whole-tenant coverage or endpoint health.
+	column 'Display Version'
+		dataType: string
+		lineageTag: a5b25b7d-187c-4628-9c05-bfa1be2fed4c
+		summarizeBy: none
+		sourceColumn: DisplayVersion
+
+	/// Prepared IntuneManagedAppEvidence.csv: InCollectedCatalog. Reported source scope only; not whole-tenant coverage or endpoint health.
+	column 'In Collected Catalog'
+		dataType: string
+		lineageTag: 1be85a32-52d2-4c61-846c-6e06d78f7001
+		summarizeBy: none
+		sourceColumn: InCollectedCatalog
+
+	/// Prepared IntuneManagedAppEvidence.csv: StatusSource. Reported source scope only; not whole-tenant coverage or endpoint health.
+	column 'Status Source'
+		dataType: string
+		lineageTag: 1d14f159-8754-4183-9d90-547d719dedaa
+		summarizeBy: none
+		sourceColumn: StatusSource
+
+	/// Prepared IntuneManagedAppEvidence.csv: ObservedRows. Reported source scope only; not whole-tenant coverage or endpoint health.
+	column 'Observed Rows'
+		dataType: int64
+		lineageTag: 1b4e4eea-28b1-4789-a8b5-73c6c8281d7e
+		summarizeBy: none
+		sourceColumn: ObservedRows
+
+	/// Prepared IntuneManagedAppEvidence.csv: ReportedInstalledRows. Reported source scope only; not whole-tenant coverage or endpoint health.
+	column 'Reported Installed Rows'
+		dataType: int64
+		lineageTag: ce47f697-04f0-45ca-8e0d-bee28354abda
+		summarizeBy: none
+		sourceColumn: ReportedInstalledRows
+
+	/// Prepared IntuneManagedAppEvidence.csv: ReportedFailureRows. Reported source scope only; not whole-tenant coverage or endpoint health.
+	column 'Reported Failure Rows'
+		dataType: int64
+		lineageTag: e6050fdc-f599-4363-b701-4bc28676cde3
+		summarizeBy: none
+		sourceColumn: ReportedFailureRows
+
+	/// Prepared IntuneManagedAppEvidence.csv: ReportedNotInstalledRows. Reported source scope only; not whole-tenant coverage or endpoint health.
+	column 'Reported Not Installed Rows'
+		dataType: int64
+		lineageTag: 05296d02-bd2d-4a9d-bbef-38a5583c85d7
+		summarizeBy: none
+		sourceColumn: ReportedNotInstalledRows
+
+	/// Prepared IntuneManagedAppEvidence.csv: PendingRows. Reported source scope only; not whole-tenant coverage or endpoint health.
+	column 'Pending Rows'
+		dataType: int64
+		lineageTag: fd9a3781-896a-4228-bc34-e210b2d61159
+		summarizeBy: none
+		sourceColumn: PendingRows
+
+	/// Prepared IntuneManagedAppEvidence.csv: NotApplicableRows. Reported source scope only; not whole-tenant coverage or endpoint health.
+	column 'Not Applicable Rows'
+		dataType: int64
+		lineageTag: d34626c3-ca4d-4ca8-934a-9fda3661b5d9
+		summarizeBy: none
+		sourceColumn: NotApplicableRows
+
+	/// Prepared IntuneManagedAppEvidence.csv: UnknownRows. Reported source scope only; not whole-tenant coverage or endpoint health.
+	column 'Unknown Rows'
+		dataType: int64
+		lineageTag: 6393e67e-08b0-4fa5-b628-2c0dccc24ee0
+		summarizeBy: none
+		sourceColumn: UnknownRows
+
+	/// Prepared IntuneManagedAppEvidence.csv: MeasurementState. Reported source scope only; not whole-tenant coverage or endpoint health.
+	column 'Measurement State'
+		dataType: string
+		lineageTag: 3be86645-73cd-4c61-b747-fad09177ee80
+		summarizeBy: none
+		sourceColumn: MeasurementState
+
+	/// Prepared IntuneManagedAppEvidence.csv: HealthQualification. Reported source scope only; not whole-tenant coverage or endpoint health.
+	column 'Health Qualification'
+		dataType: string
+		lineageTag: befee214-552e-43aa-9968-9fc40d46e707
+		summarizeBy: none
+		sourceColumn: HealthQualification
+
+	/// Length-prefixed tenant-aware technical relationship key.
+	column 'Application Key'
+		dataType: string
+		isHidden
+		lineageTag: 760822ca-2d8e-49ce-88b2-36a94e06c28d
+		summarizeBy: none
+		sourceColumn: Application Key
+
+	partition 'Intune Managed App Evidence' = m
+		mode: import
+		source =
+				let
+				    Raw = ReadMigrationCsv(GetPreparedEvidenceFile("IntuneManagedAppEvidence.csv"), {"TenantKey", "EvidenceKey", "ReceiptRunId", "BusinessRunId", "SourceFile", "SourceSHA256", "SourceRecord", "CollectionUTC", "ApplicationId", "DisplayName", "Publisher", "AppType", "DisplayVersion", "InCollectedCatalog", "StatusSource", "ObservedRows", "ReportedInstalledRows", "ReportedFailureRows", "ReportedNotInstalledRows", "PendingRows", "NotApplicableRows", "UnknownRows", "MeasurementState", "HealthQualification"}),
+				    Selected = Table.SelectColumns(Raw, {"TenantKey", "EvidenceKey", "ReceiptRunId", "BusinessRunId", "SourceFile", "SourceSHA256", "SourceRecord", "CollectionUTC", "ApplicationId", "DisplayName", "Publisher", "AppType", "DisplayVersion", "InCollectedCatalog", "StatusSource", "ObservedRows", "ReportedInstalledRows", "ReportedFailureRows", "ReportedNotInstalledRows", "PendingRows", "NotApplicableRows", "UnknownRows", "MeasurementState", "HealthQualification"}),
+				    Tenants = List.Distinct(Selected[TenantKey]),
+				    Validated = if List.Count(Tenants) > 1 or List.Contains(Tenants, null) or List.Contains(Tenants, "") then error "Intune evidence tenant identity is invalid" else Selected,
+				    ParseUtc = (raw as nullable text) as nullable datetime => if raw = null or Text.Trim(raw) = "" then null else if not Text.EndsWith(raw, "Z") then error "Intune prepared time requires explicit UTC Z" else DateTimeZone.RemoveZone(DateTimeZone.SwitchZone(DateTimeZone.FromText(raw, [Culture="en-US"]), 0)),
+				    Key = (values as list) as nullable text => if List.AnyTrue(List.Transform(values, each _ = null or Text.Trim(Text.From(_)) = "")) then null else Text.Combine(List.Transform(values, each Text.From(Text.Length(Text.From(_))) & ":" & Text.From(_)), "|"),
+				    Typed = Table.TransformColumns(Validated, {{"TenantKey", each _, type nullable text}, {"EvidenceKey", each _, type nullable text}, {"ReceiptRunId", each _, type nullable text}, {"BusinessRunId", each _, type nullable text}, {"SourceFile", each _, type nullable text}, {"SourceSHA256", each _, type nullable text}, {"SourceRecord", each if _ = null or Text.Trim(_) = "" then null else Int64.From(Number.FromText(_, "en-US")), type nullable number}, {"CollectionUTC", ParseUtc, type nullable datetime}, {"ApplicationId", each _, type nullable text}, {"DisplayName", each _, type nullable text}, {"Publisher", each _, type nullable text}, {"AppType", each _, type nullable text}, {"DisplayVersion", each _, type nullable text}, {"InCollectedCatalog", each _, type nullable text}, {"StatusSource", each _, type nullable text}, {"ObservedRows", each if _ = null or Text.Trim(_) = "" then null else Int64.From(Number.FromText(_, "en-US")), type nullable number}, {"ReportedInstalledRows", each if _ = null or Text.Trim(_) = "" then null else Int64.From(Number.FromText(_, "en-US")), type nullable number}, {"ReportedFailureRows", each if _ = null or Text.Trim(_) = "" then null else Int64.From(Number.FromText(_, "en-US")), type nullable number}, {"ReportedNotInstalledRows", each if _ = null or Text.Trim(_) = "" then null else Int64.From(Number.FromText(_, "en-US")), type nullable number}, {"PendingRows", each if _ = null or Text.Trim(_) = "" then null else Int64.From(Number.FromText(_, "en-US")), type nullable number}, {"NotApplicableRows", each if _ = null or Text.Trim(_) = "" then null else Int64.From(Number.FromText(_, "en-US")), type nullable number}, {"UnknownRows", each if _ = null or Text.Trim(_) = "" then null else Int64.From(Number.FromText(_, "en-US")), type nullable number}, {"MeasurementState", each _, type nullable text}, {"HealthQualification", each _, type nullable text}}),
+				    WithApplicationKey = Table.AddColumn(Typed, "Application Key", each Key({[TenantKey], [ApplicationId]}), type nullable text)
+				in
+				    WithApplicationKey
+

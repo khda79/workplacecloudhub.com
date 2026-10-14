@@ -71,12 +71,31 @@ table Date
 		lineageTag: defc7ec3-7d17-4e95-ace0-34425301050a
 		sourceColumn: Reporting Period
 
+	/// Calendar day of month; shared replacement for the former CMDB calendar.
+	column Day = DAY('Date'[Date])
+		dataType: int64
+		lineageTag: c4dee688-578f-461b-926f-ac1e59dbe774
+		summarizeBy: none
+
+	/// English calendar month name, independent of the native source population.
+	column 'Month Name' = FORMAT('Date'[Date], "MMMM", "en-US")
+		dataType: string
+		lineageTag: d13a12a6-7b5d-448e-9e6c-13ef88967539
+		sortByColumn: 'Month Number'
+
+	column 'Quarter Number' = QUARTER('Date'[Date])
+		dataType: int64
+		lineageTag: 560dfd06-28fa-4149-b9b9-887c55da89e0
+		summarizeBy: none
+
 	partition 'Date Import' = m
 		mode: import
 		source =
 				let
-				    StartDate = #date(2025, 10, 1),
-				    EndDate = #date(2027, 11, 9),
+				    Native = Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("DimDate.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]),
+				    NativeDates = List.Transform(Table.Column(Native, "Date"), each Date.FromText(_, [Culture="en-US"])),
+				    StartDate = List.Min({#date(2025, 10, 1)} & NativeDates),
+				    EndDate = List.Max({#date(2027, 11, 9)} & NativeDates),
 				    Dates = List.Dates(StartDate, Duration.Days(EndDate - StartDate) + 1, #duration(1, 0, 0, 0)),
 				    Base = Table.FromList(Dates, Splitter.SplitByNothing(), {"Date"}),
 				    Typed = Table.TransformColumnTypes(Base, {{"Date", type date}}),

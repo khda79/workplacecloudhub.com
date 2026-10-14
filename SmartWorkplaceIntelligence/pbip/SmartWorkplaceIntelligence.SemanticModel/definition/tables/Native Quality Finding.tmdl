@@ -1,0 +1,233 @@
+/// Native source facet migrated from FactDataQuality; exact source grain, unresolved links and qualification retained. Uses the unified pinned batch, not a separate CMDB reader.
+table 'Native Quality Finding'
+	lineageTag: 6ba791c4-b772-487d-aec4-4fef309ff8e7
+
+	/// Retained findings, including technical information. Migrated without changing the source calculation.
+	measure 'Native Quality findings' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (COALESCE(COUNTROWS('Native Quality Finding'),0)))
+		formatString: #,0
+		displayFolder: Native evidence
+		lineageTag: 0c02e925-f2a6-4948-8e6f-ba276dbf4dff
+
+	/// Findings classified as Warning by the quality normalizer. Migrated without changing the source calculation.
+	measure 'Native Warnings' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (CALCULATE([Native Quality findings], KEEPFILTERS('Native Quality Finding'[Severity] == "Warning"))))
+		formatString: #,0
+		displayFolder: Native evidence
+		lineageTag: 69fdf865-9d8b-47cc-bb03-373cbffb0ddd
+
+	/// Retained information, including technical DiscoveryMailbox findings classified by the local rule. Migrated without changing the source calculation.
+	measure 'Native Information' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (CALCULATE([Native Quality findings], KEEPFILTERS('Native Quality Finding'[Severity] == "Information"))))
+		formatString: #,0
+		displayFolder: Native evidence
+		lineageTag: 4242926e-b397-4167-a436-00651ee4eb60
+
+	/// Findings classified as Critical by the quality normalizer. Migrated without changing the source calculation.
+	measure 'Native Critical findings' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (CALCULATE([Native Quality findings], KEEPFILTERS('Native Quality Finding'[Severity] == "Critical"))))
+		formatString: #,0
+		displayFolder: Native evidence
+		lineageTag: 409f5ce3-4c1c-4393-b8f3-4f1f88d3231d
+
+	/// Orphan primary-user references plus observed Microsoft 365 license-assignment errors. Migrated without changing the source calculation.
+	measure 'Native Integrity issues' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (CALCULATE([Native Quality findings], KEEPFILTERS('Native Quality Finding'[FindingType] == "OrphanPrimaryUserReference")) + CALCULATE([Native Quality findings], KEEPFILTERS('Native Quality Finding'[FindingType] == "ObservedLicenseAssignmentError"))))
+		formatString: #,0
+		displayFolder: Native evidence
+		lineageTag: 3a6b59f1-ab96-4e48-8125-d617ec168d6e
+
+	/// User records without a country plus devices without a primary user; these are coverage gaps, not integrity failures. Migrated without changing the source calculation.
+	measure 'Native Coverage gaps' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (CALCULATE([Native Quality findings], KEEPFILTERS('Native Quality Finding'[FindingType] == "UserCountryUnknown")) + CALCULATE([Native Quality findings], KEEPFILTERS('Native Quality Finding'[FindingType] == "DeviceWithoutPrimaryUser"))))
+		formatString: #,0
+		displayFolder: Native evidence
+		lineageTag: 6585742e-cc47-4f6c-876c-974ff451d837
+
+	/// Devices whose country cannot be derived. This overlaps device primary-user findings and must not be added to Coverage gaps. Migrated without changing the source calculation.
+	measure 'Native Derived country gaps' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (CALCULATE([Native Quality findings], KEEPFILTERS('Native Quality Finding'[FindingType] == "DeviceCountryUnknown"))))
+		formatString: #,0
+		displayFolder: Native evidence
+		lineageTag: e267c523-c322-4604-9305-80d5999acfaa
+
+	/// Lowest non-blank global completeness rate across user country, device primary-user, device country and integrity checks. Overlapping findings are assessed separately, never added together. Country and ownership selections are intentionally ignored because quality findings are not country-grained. Migrated without changing the source calculation.
+	measure 'Native Data quality score' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (VAR _users = CALCULATE([Native Users], REMOVEFILTERS('Native User Evidence'), REMOVEFILTERS('Native Country Evidence')) VAR _devices = CALCULATE([Native Devices], REMOVEFILTERS('Native Device Evidence'), REMOVEFILTERS('Native Country Evidence')) VAR _userCountryCoverage = IF(_users > 0, MAX(0, DIVIDE(_users - CALCULATE([Native Quality findings], KEEPFILTERS('Native Quality Finding'[FindingType] == "UserCountryUnknown")), _users))) VAR _primaryUserCoverage = IF(_devices > 0, MAX(0, DIVIDE(_devices - CALCULATE([Native Quality findings], KEEPFILTERS('Native Quality Finding'[FindingType] == "DeviceWithoutPrimaryUser")), _devices))) VAR _deviceCountryCoverage = IF(_devices > 0, MAX(0, DIVIDE(_devices - CALCULATE([Native Quality findings], KEEPFILTERS('Native Quality Finding'[FindingType] == "DeviceCountryUnknown")), _devices))) VAR _population = _users + _devices VAR _integrityCoverage = IF(_population > 0, MAX(0, DIVIDE(_population - [Native Integrity issues], _population))) VAR _rates = {_userCountryCoverage, _primaryUserCoverage, _deviceCountryCoverage, _integrityCoverage} RETURN MINX(FILTER(_rates, NOT ISBLANK([Value])), [Value])))
+		formatString: 0.0%
+		displayFolder: Native evidence
+		lineageTag: 39fc0513-d4d5-4e0d-bbd4-5bf629c1c858
+
+	/// Traffic-light assessment of the data quality score: Good at 90% or above, Average from 60% to below 90%, and Poor below 60%. Migrated without changing the source calculation.
+	measure 'Native Data quality status' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (VAR _score = [Native Data quality score] RETURN SWITCH(TRUE(), ISBLANK(_score), "Not assessed", _score >= 0.9, "Good", _score >= 0.6, "Average", "Poor")))
+		formatString: General
+		displayFolder: Native evidence
+		lineageTag: 7dbe8348-3d77-43d6-9440-4050f77ee843
+
+	/// Compact status and score intended for the Executive Overview; open Workplace Health for the underlying findings. Migrated without changing the source calculation.
+	measure 'Native Data quality health' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (VAR _score = [Native Data quality score] VAR _status = [Native Data quality status] RETURN IF(ISBLANK(_score), _status, _status & " · " & FORMAT(_score, "0.0%"))))
+		formatString: General
+		displayFolder: Native evidence
+		lineageTag: b6f8e179-5645-40a8-a315-e531554dbd17
+
+	/// Exact native-key entity context or existing inventory context. No name matching or inferred transitive membership. Unrelated entity selections return blank.
+	measure 'Native Context Rows · Native Quality Finding' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (COUNTROWS('Native Quality Finding')))
+		formatString: #,0
+		isHidden
+		lineageTag: 39412dc2-3ee1-439d-8749-2f5201c808bb
+
+	/// Native FactDataQuality attribute; source qualification is retained.
+	column TenantKey
+		dataType: string
+		isHidden
+		lineageTag: 8bad900c-8405-4e2b-8ed1-6bd7cf488449
+		summarizeBy: none
+		sourceColumn: TenantKey
+
+	/// Native FactDataQuality attribute; source qualification is retained.
+	column OrganizationKey
+		dataType: string
+		isHidden
+		lineageTag: e796fb84-31c3-49b6-9c06-4498c074e9f4
+		summarizeBy: none
+		sourceColumn: OrganizationKey
+
+	/// Native FactDataQuality attribute; source qualification is retained.
+	column EnvironmentKey
+		dataType: string
+		isHidden
+		lineageTag: 9d792cf2-10b5-4aba-a3eb-7e94a128a87b
+		summarizeBy: none
+		sourceColumn: EnvironmentKey
+
+	/// Native FactDataQuality attribute; source qualification is retained.
+	column TenantId
+		dataType: string
+		isHidden
+		lineageTag: 7dad79bc-86b2-40f5-9aec-2b15e84dfd1c
+		summarizeBy: none
+		sourceColumn: TenantId
+
+	/// Native FactDataQuality attribute; source qualification is retained.
+	column TenantFindingKey
+		dataType: string
+		isHidden
+		lineageTag: 1d92b656-46cc-4c3b-b60a-832b7374b3a0
+		summarizeBy: none
+		sourceColumn: TenantFindingKey
+
+	/// Native FactDataQuality attribute; source qualification is retained.
+	column FindingId
+		dataType: string
+		isHidden
+		lineageTag: bfe57cd6-7375-43c8-b623-dfe0e3d105d0
+		summarizeBy: none
+		sourceColumn: FindingId
+
+	/// Native FactDataQuality attribute; source qualification is retained.
+	column Severity
+		dataType: string
+		lineageTag: 82bd8f5b-baa5-4bad-93a1-476f6ac8eed3
+		summarizeBy: none
+		sourceColumn: Severity
+
+	/// Native FactDataQuality attribute; source qualification is retained.
+	column EntityType
+		dataType: string
+		lineageTag: c0a907b0-c745-4847-ae13-e45bcf332bcd
+		summarizeBy: none
+		sourceColumn: EntityType
+
+	/// Native FactDataQuality attribute; source qualification is retained.
+	column FindingType
+		dataType: string
+		lineageTag: 384e1876-fce0-4b36-8144-ad992b8d3310
+		summarizeBy: none
+		sourceColumn: FindingType
+
+	/// Native FactDataQuality attribute; source qualification is retained.
+	column DetectedDateTime
+		dataType: dateTime
+		formatString: yyyy-MM-dd HH:mm:ss
+		lineageTag: 0f80ab18-aac4-4d65-a695-88907811ba73
+		summarizeBy: none
+		sourceColumn: DetectedDateTime
+
+	/// Native FactDataQuality attribute; source qualification is retained.
+	column SourceSystem
+		dataType: string
+		lineageTag: 77746be4-1edc-4cfa-b02a-eb31a642c9d3
+		summarizeBy: none
+		sourceColumn: SourceSystem
+
+	/// Native FactDataQuality attribute; source qualification is retained.
+	column Description
+		dataType: string
+		lineageTag: a8319bae-3ba7-4fb5-86ba-0d4ee57fd8e0
+		summarizeBy: none
+		sourceColumn: Description
+
+	/// Native FactDataQuality attribute; source qualification is retained.
+	column RecommendedAction
+		dataType: string
+		lineageTag: 53bd318a-e7e5-4f9d-bdde-521934fb5ade
+		summarizeBy: none
+		sourceColumn: RecommendedAction
+
+	/// Native FactDataQuality attribute; source qualification is retained.
+	column SeverityLabel
+		dataType: string
+		lineageTag: 9fad08ed-9ff8-4987-a7bb-fd9e371098fe
+		summarizeBy: none
+		sourceColumn: SeverityLabel
+
+	/// Native FactDataQuality attribute; source qualification is retained.
+	column FindingTypeLabel
+		dataType: string
+		lineageTag: 8a8063be-0493-4e25-aec1-71a2c8ff1bd0
+		summarizeBy: none
+		sourceColumn: FindingTypeLabel
+
+	/// Native FactDataQuality attribute; source qualification is retained.
+	column DescriptionLabel
+		dataType: string
+		lineageTag: 88967c2a-7655-4b64-acfd-ecbfa226eed1
+		summarizeBy: none
+		sourceColumn: DescriptionLabel
+
+	/// Native FactDataQuality attribute; source qualification is retained.
+	column RecommendedActionLabel
+		dataType: string
+		lineageTag: 6724e936-365e-4ff5-8289-c85e06128720
+		summarizeBy: none
+		sourceColumn: RecommendedActionLabel
+
+	partition 'Native Quality Finding' = m
+		mode: import
+		source = NativeEvidenceTypes(Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("FactDataQuality.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]), {[name="TenantKey", dataType="String"], [name="OrganizationKey", dataType="String"], [name="EnvironmentKey", dataType="String"], [name="TenantId", dataType="String"], [name="TenantFindingKey", dataType="String"], [name="FindingId", dataType="String"], [name="Severity", dataType="String"], [name="EntityType", dataType="String"], [name="FindingType", dataType="String"], [name="DetectedDateTime", dataType="DateTime"], [name="SourceSystem", dataType="String"], [name="Description", dataType="String"], [name="RecommendedAction", dataType="String"], [name="SeverityLabel", dataType="String"], [name="FindingTypeLabel", dataType="String"], [name="DescriptionLabel", dataType="String"], [name="RecommendedActionLabel", dataType="String"]})
+

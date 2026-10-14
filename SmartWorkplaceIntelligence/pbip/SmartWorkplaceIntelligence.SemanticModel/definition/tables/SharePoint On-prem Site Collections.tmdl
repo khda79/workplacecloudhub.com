@@ -1,0 +1,278 @@
+/// One observed SharePoint Server site collection per row. Partial runs and excluded personal collections are qualified by Collection Coverage; no visit or activity inference.
+table 'SharePoint On-prem Site Collections'
+	lineageTag: e350a85a-fd42-42ac-8a4f-abc952ff1b90
+
+	/// Site collections with collected metadata in the current Content snapshot; this count is observed scope and may be partial.
+	measure 'Collected Site Collections' = CALCULATE(COUNTROWS('SharePoint On-prem Site Collections'), KEEPFILTERS('SharePoint On-prem Site Collections'[Collection Status] = "Collected"))
+		formatString: #,##0
+		lineageTag: 0d98f8be-4037-4923-8cbf-5f1f1a10d55d
+
+	/// Observed site collection rows whose collection status is incomplete.
+	measure 'Site Rows With Missing Metadata' = CALCULATE(COUNTROWS('SharePoint On-prem Site Collections'), KEEPFILTERS('SharePoint On-prem Site Collections'[Collection Status] <> "Collected"))
+		formatString: #,##0
+		lineageTag: 8fc2c4f4-b828-471c-ba53-392676d1b671
+
+	/// Site collection lock observations missing or conflicting; boolean properties do not substitute for Lock State.
+	measure 'Unverified Lock Observations' = CALCULATE(COUNTROWS('SharePoint On-prem Site Collections'), KEEPFILTERS('SharePoint On-prem Site Collections'[Lock Status] <> "Observed"))
+		formatString: #,##0
+		lineageTag: 9511f94e-bba5-4e4b-aa50-9534ff48035e
+
+	/// Observed site collections with a restrictive lock state. Excludes unverified locks.
+	measure 'Restricted Site Collections' = CALCULATE(COUNTROWS('SharePoint On-prem Site Collections'), KEEPFILTERS('SharePoint On-prem Site Collections'[Lock Status] = "Observed"), KEEPFILTERS('SharePoint On-prem Site Collections'[Lock State] IN {"NoAdditions","ReadOnly","NoAccess"}))
+		formatString: #,##0
+		lineageTag: b6d21d23-639d-47b3-a38f-526d5b824799
+
+	/// Observed site collection rows without a resolved Site Category; inspect Site Category Status, including HostListUnconfigured.
+	measure 'Site Categories Unresolved' = CALCULATE(COUNTROWS('SharePoint On-prem Site Collections'), KEEPFILTERS(ISBLANK('SharePoint On-prem Site Collections'[Site Category]) || 'SharePoint On-prem Site Collections'[Site Category] = ""))
+		formatString: #,##0
+		lineageTag: ea0eb472-5fb2-4bd9-891a-503ed4ce175d
+
+	/// Observed site rows with a positive quota and a calculated Quota Usage Percent.
+	measure 'Sites With Measured Quota' = CALCULATE(COUNTROWS('SharePoint On-prem Site Collections'), KEEPFILTERS('SharePoint On-prem Site Collections'[Quota Usage Status] = "Observed"))
+		formatString: #,##0
+		lineageTag: 995150ed-6425-4e27-af9b-4b245af2d41b
+
+	/// Storage in GB across observed site rows only. Partial Content runs are not farm-wide storage totals.
+	measure 'Observed Site Storage (GB)' = DIVIDE(SUM('SharePoint On-prem Site Collections'[Storage Bytes]), 1000000000)
+		formatString: #,##0.0
+		lineageTag: 060ef29f-03aa-49a3-b055-36e74420d679
+
+	/// Terabytes of storage summed only across observed site collection rows; partial Content coverage and excluded personal sites prevent a farm-wide total.
+	measure 'Observed Site Storage (TB)' = DIVIDE([Observed Site Storage (GB)], 1000)
+		formatString: #,##0.00
+		lineageTag: b314786d-b49d-483b-b490-1ee55dd1b6e0
+
+	/// Rows preserved in the current Content site collection CSV, including incomplete metadata; this is not a complete farm inventory.
+	measure 'Observed Site Collection Rows' = COALESCE(COUNTROWS('SharePoint On-prem Site Collections'), 0)
+		formatString: #,##0
+		lineageTag: 2ee89fda-45fa-4296-9653-7609d553a2a9
+
+	/// Observed site collection rows with no secondary owner login in the source.
+	measure 'Sites Without Secondary Owner' = COALESCE(CALCULATE(COUNTROWS('SharePoint On-prem Site Collections'), KEEPFILTERS(ISBLANK('SharePoint On-prem Site Collections'[Secondary Owner]) || 'SharePoint On-prem Site Collections'[Secondary Owner] = "")), 0)
+		formatString: #,##0
+		lineageTag: 5ee98875-3bb8-483e-b729-a77f7c41a8a1
+
+	/// Observed site collection rows with neither a primary nor a secondary owner login reported.
+	measure 'Sites Without Any Owner' = COALESCE(CALCULATE(COUNTROWS('SharePoint On-prem Site Collections'), KEEPFILTERS(ISBLANK('SharePoint On-prem Site Collections'[Primary Owner]) || 'SharePoint On-prem Site Collections'[Primary Owner] = ""), KEEPFILTERS(ISBLANK('SharePoint On-prem Site Collections'[Secondary Owner]) || 'SharePoint On-prem Site Collections'[Secondary Owner] = "")), 0)
+		formatString: #,##0
+		lineageTag: ad7669bb-06b1-4af5-ae2e-a1a4eedd6a50
+
+	/// Observed site collection rows where the source reports NoQuota; this is distinct from unavailable quota evidence.
+	measure 'Sites Without Quota' = COALESCE(CALCULATE(COUNTROWS('SharePoint On-prem Site Collections'), KEEPFILTERS('SharePoint On-prem Site Collections'[Quota Usage Status] = "NoQuota")), 0)
+		formatString: #,##0
+		lineageTag: 42ceea30-33e6-41c7-be44-5c277d53a91e
+
+	/// Observed site collection rows whose category host list is unconfigured in the source.
+	measure 'Host List Unconfigured Sites' = COALESCE(CALCULATE(COUNTROWS('SharePoint On-prem Site Collections'), KEEPFILTERS('SharePoint On-prem Site Collections'[Site Category Status] = "HostListUnconfigured")), 0)
+		formatString: #,##0
+		lineageTag: 3dddb6e3-5f32-40ca-8196-b44ce295f0ad
+
+	/// Filter-aware category-status and quota context for observed site rows; adapts to source qualification state.
+	measure 'Category And Quota Context' =
+			VAR Total = [Observed Site Collection Rows]
+			VAR Unconfigured = [Host List Unconfigured Sites]
+			VAR CategoryObserved = COALESCE(CALCULATE(COUNTROWS('SharePoint On-prem Site Collections'), KEEPFILTERS('SharePoint On-prem Site Collections'[Site Category Status] = "Observed")), 0)
+			VAR MyHost = COALESCE(CALCULATE(COUNTROWS('SharePoint On-prem Site Collections'), KEEPFILTERS('SharePoint On-prem Site Collections'[Site Category] = "OtherOnMyHost")), 0)
+			VAR OtherCategory = COALESCE(CALCULATE(COUNTROWS('SharePoint On-prem Site Collections'), KEEPFILTERS('SharePoint On-prem Site Collections'[Site Category] = "Other")), 0)
+			VAR RemainingCategories = CategoryObserved - MyHost - OtherCategory
+			VAR CategoryText = IF(Unconfigured > 0, FORMAT(Unconfigured, "#,##0") & "/" & FORMAT(Total, "#,##0") & " category host list unconfigured", IF(CategoryObserved = Total, FORMAT(Total, "#,##0") & "/" & FORMAT(Total, "#,##0") & " classified: " & FORMAT(MyHost, "#,##0") & " MySites host sites, " & FORMAT(OtherCategory, "#,##0") & " other sites" & IF(RemainingCategories > 0, ", " & FORMAT(RemainingCategories, "#,##0") & " other categories", ""), "Site category status requires review"))
+			RETURN IF(Total = 0, "Site category and quota evidence unavailable", CategoryText & "; " & FORMAT([Sites Without Quota], "#,##0") & "/" & FORMAT(Total, "#,##0") & " without quota")
+		formatString: @
+		lineageTag: 443a96b7-71fc-4859-8c64-e8b319b09359
+
+	column 'Tenant Key'
+		dataType: string
+		isHidden
+		lineageTag: d552993a-89ee-4611-876d-4f81a0513fdb
+		sourceColumn: Tenant Key
+
+	column 'Farm ID'
+		dataType: string
+		isHidden
+		lineageTag: f24761aa-e8b4-4f43-ab4c-b15b5ec3ed12
+		sourceColumn: Farm ID
+
+	column 'Run ID'
+		dataType: string
+		isHidden
+		lineageTag: bcc09fbe-80fb-4794-bab2-3c8898123d52
+		sourceColumn: Run ID
+
+	column 'Web Application ID'
+		dataType: string
+		isHidden
+		lineageTag: 0fcf784f-8a65-49f6-a77c-0b9237ba5e82
+		sourceColumn: Web Application ID
+
+	column 'Content Database ID'
+		dataType: string
+		isHidden
+		lineageTag: 08d935a4-4ec5-4e2c-9115-2c7d95955ae1
+		sourceColumn: Content Database ID
+
+	column 'Site Collection ID'
+		dataType: string
+		isHidden
+		lineageTag: 030d0367-cf1d-4b63-a257-83dc18ae3251
+		sourceColumn: Site Collection ID
+
+	column 'Site URL'
+		dataType: string
+		lineageTag: 56953b9f-1be1-4f64-8e26-d33dea17cf22
+		sourceColumn: Site URL
+
+	column 'Storage Bytes'
+		dataType: int64
+		isHidden
+		lineageTag: 7ccdb65a-3547-4ae7-a00a-67644745bc35
+		sourceColumn: Storage Bytes
+
+	column 'Quota Limit Bytes'
+		dataType: int64
+		isHidden
+		lineageTag: d22b6b9c-797a-4828-8eb3-61a4cdef243d
+		sourceColumn: Quota Limit Bytes
+
+	column 'Quota Usage Percent'
+		dataType: decimal
+		lineageTag: dca30f33-41a6-4174-8a7e-c6dc398cb758
+		sourceColumn: Quota Usage Percent
+
+	column 'Quota Usage Status'
+		dataType: string
+		lineageTag: 92983592-4117-47c8-9c22-5e31b4d59dad
+		sourceColumn: Quota Usage Status
+
+	column 'Site Category'
+		dataType: string
+		lineageTag: 26fe0ff8-7596-4b86-8681-a46c34ae05fd
+		sourceColumn: Site Category
+
+	column 'Site Category Status'
+		dataType: string
+		lineageTag: 98ecc4ec-a521-42bc-896a-9f2e424316a6
+		sourceColumn: Site Category Status
+
+	column 'Lock State'
+		dataType: string
+		lineageTag: 4b613a30-5e45-4f3a-8c1a-a4187a5671a1
+		sourceColumn: Lock State
+
+	column 'Lock Status'
+		dataType: string
+		lineageTag: 90b0d3aa-54b5-482f-abba-6d3f603284ae
+		sourceColumn: Lock Status
+
+	column 'Collection Status'
+		dataType: string
+		lineageTag: 5e4c639c-4d34-4ded-b353-2af4e6d4e775
+		sourceColumn: Collection Status
+
+	column 'Farm Key'
+		dataType: string
+		isHidden
+		lineageTag: 0354e4af-a363-428b-9463-a02d86f291a0
+		sourceColumn: Farm Key
+
+	column 'Web Application Key'
+		dataType: string
+		isHidden
+		lineageTag: 5fba48ba-3e2b-4392-940f-49e5c80cad2b
+		sourceColumn: Web Application Key
+
+	column 'Content Database Key'
+		dataType: string
+		isHidden
+		lineageTag: 317da1a5-5396-4d39-b029-c0ac480ddd16
+		sourceColumn: Content Database Key
+
+	column 'Optional Schema Ready'
+		dataType: boolean
+		isHidden
+		lineageTag: d954587a-6f6b-4bf7-9449-fa7f8cc85147
+		sourceColumn: Optional Schema Ready
+
+	/// Collection snapshot timestamp used as the reference for modification age.
+	column 'Collected At UTC'
+		dataType: dateTime
+		isHidden
+		lineageTag: c95341d6-6197-47ac-bfa1-5f941817eeca
+		sourceColumn: Collected At UTC
+
+	/// Primary owner login observed in the site collection CSV.
+	column 'Primary Owner'
+		dataType: string
+		lineageTag: ac5f61e6-18d8-46f8-b607-03981d6bf420
+		sourceColumn: Primary Owner
+
+	/// Secondary owner login observed in the site collection CSV; blank means not reported.
+	column 'Secondary Owner'
+		dataType: string
+		lineageTag: 8bf0e499-8f8c-4499-86b2-e9e8d5a8550e
+		sourceColumn: Secondary Owner
+
+	/// Last content modification timestamp reported by the source; it is not proof of user inactivity.
+	column 'Last Content Modified UTC'
+		dataType: dateTime
+		lineageTag: 8cdb2620-7398-41cb-840c-2527b7811b0a
+		sourceColumn: Last Content Modified UTC
+
+	/// Sort order for snapshot-relative last modification age bands.
+	column 'Last Modification Age Order'
+		dataType: int64
+		isHidden
+		lineageTag: d2c8dcde-cd53-4e47-b180-a68397619133
+		sourceColumn: Last Modification Age Order
+
+	/// Source lock issue with punctuation-only values suppressed for display.
+	column 'Lock Issue Display'
+		dataType: string
+		lineageTag: 4b41fc3a-5b8a-4998-ad68-4e61b36f1bba
+		sourceColumn: Lock Issue Display
+
+	/// Age of last observed content modification relative to this row's collection timestamp; not a user inactivity signal.
+	column 'Last Modification Age Band'
+		dataType: string
+		lineageTag: fa7d59a1-9aec-44f8-9888-2478fdf25031
+		sourceColumn: Last Modification Age Band
+		sortByColumn: 'Last Modification Age Order'
+
+	/// Friendly site category label for report tables; raw source category is preserved.
+	column 'Site Category Display'
+		dataType: string
+		lineageTag: 5c69f01a-b6d7-4e64-b189-eeb6ad72a926
+		sourceColumn: Site Category Display
+
+	/// Identity claim prefix removed for display; the raw primary owner remains available.
+	column 'Primary Owner Display'
+		dataType: string
+		lineageTag: 805ff3a9-2166-4133-b5b3-bca3c6a08115
+		sourceColumn: Primary Owner Display
+
+	/// Identity claim prefix removed for display; missing values are grouped first as (none).
+	column 'Secondary Owner Display'
+		dataType: string
+		lineageTag: 3085d223-c973-41c9-892d-70615cb41983
+		sourceColumn: Secondary Owner Display
+
+	partition 'SharePoint On-prem Site Collections' = m
+		mode: import
+		source =
+				let
+				    Raw = GetSharePointOnPremCsv("SharePoint_OnPrem_SiteCollections.csv", {"TenantKey", "FarmId", "RunId", "WebApplicationId", "ContentDatabaseId", "SiteCollectionId", "Url", "StorageBytes", "QuotaLimitBytes", "LockState", "LockStatus", "CollectionStatus"}, {"QuotaUsagePercent", "QuotaUsageStatus", "SiteCategory", "SiteCategoryStatus", "CollectedAtUtc", "OwnerLogin", "SecondaryOwnerLogin", "LastContentModifiedUtc", "LockIssue"}),
+				    Nulls = Table.ReplaceValue(Raw, "", null, Replacer.ReplaceValue, {"StorageBytes", "QuotaLimitBytes", "QuotaUsagePercent", "CollectedAtUtc", "LastContentModifiedUtc"}),
+				    Typed = Table.TransformColumnTypes(Nulls, {{"StorageBytes", Int64.Type}, {"QuotaLimitBytes", Int64.Type}, {"QuotaUsagePercent", type number}, {"CollectedAtUtc", type datetime}, {"LastContentModifiedUtc", type datetime}}, "en-US"),
+				    Aged = Table.AddColumn(Typed, "Last Modification Age Band", each let delta = try Duration.Days([CollectedAtUtc] - [LastContentModifiedUtc]) otherwise null in if delta = null then "Unknown" else if delta <= 30 then "0-30 days" else if delta <= 180 then "31-180 days" else if delta <= 365 then "181-365 days" else "365+ days", type text),
+				    AgeOrder = Table.AddColumn(Aged, "Last Modification Age Order", each if [Last Modification Age Band] = "0-30 days" then 1 else if [Last Modification Age Band] = "31-180 days" then 2 else if [Last Modification Age Band] = "181-365 days" then 3 else if [Last Modification Age Band] = "365+ days" then 4 else 5, Int64.Type),
+				    CleanIssue = Table.AddColumn(AgeOrder, "Lock Issue Display", each let v = if [LockIssue] = null then "" else Text.Trim(Text.From([LockIssue])), letters = Text.Select(v, {"A".."Z", "a".."z", "0".."9"}) in if letters = "" then null else v, type text),
+				    WithoutRawIssue = Table.RemoveColumns(CleanIssue, {"LockIssue"}),
+				    FarmKey = Table.AddColumn(WithoutRawIssue, "Farm Key", each [TenantKey] & "|" & [FarmId], type text),
+				    WebKey = Table.AddColumn(FarmKey, "Web Application Key", each [TenantKey] & "|" & [FarmId] & "|" & [WebApplicationId], type text),
+				    DbKey = Table.AddColumn(WebKey, "Content Database Key", each [TenantKey] & "|" & [FarmId] & "|" & [ContentDatabaseId], type text),
+				    Renamed = Table.RenameColumns(DbKey, {{"TenantKey", "Tenant Key"}, {"FarmId", "Farm ID"}, {"RunId", "Run ID"}, {"CollectedAtUtc", "Collected At UTC"}, {"OwnerLogin", "Primary Owner"}, {"SecondaryOwnerLogin", "Secondary Owner"}, {"LastContentModifiedUtc", "Last Content Modified UTC"}, {"WebApplicationId", "Web Application ID"}, {"ContentDatabaseId", "Content Database ID"}, {"SiteCollectionId", "Site Collection ID"}, {"Url", "Site URL"}, {"StorageBytes", "Storage Bytes"}, {"QuotaLimitBytes", "Quota Limit Bytes"}, {"QuotaUsagePercent", "Quota Usage Percent"}, {"QuotaUsageStatus", "Quota Usage Status"}, {"SiteCategory", "Site Category"}, {"SiteCategoryStatus", "Site Category Status"}, {"LockState", "Lock State"}, {"LockStatus", "Lock Status"}, {"CollectionStatus", "Collection Status"}}),
+				    CategoryDisplay = Table.AddColumn(Renamed, "Site Category Display", each if [Site Category] = "OtherOnMyHost" then "MySites host sites" else if [Site Category] = "Other" then "Other sites" else [Site Category], type text),
+				    PrimaryDisplay = Table.AddColumn(CategoryDisplay, "Primary Owner Display", each let v = try Text.Trim(Text.From([Primary Owner])) otherwise "" in if v = null or v = "" then "(not reported)" else List.Last(Text.Split(v, "|")), type text),
+				    SecondaryDisplay = Table.AddColumn(PrimaryDisplay, "Secondary Owner Display", each let v = try Text.Trim(Text.From([Secondary Owner])) otherwise "" in if v = null or v = "" then "(none)" else List.Last(Text.Split(v, "|")), type text)
+				in
+				    SecondaryDisplay
+

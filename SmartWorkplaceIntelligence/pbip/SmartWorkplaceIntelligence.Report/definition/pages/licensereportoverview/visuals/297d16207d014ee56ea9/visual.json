@@ -3,11 +3,11 @@
   "name": "297d16207d014ee56ea9",
   "position": {
     "x": 32,
-    "y": 1068,
+    "y": 328,
     "width": 1856,
-    "height": 255,
-    "z": 120,
-    "tabOrder": 120
+    "height": 200,
+    "z": 34,
+    "tabOrder": 34
   },
   "visual": {
     "visualType": "tableEx",
@@ -57,8 +57,8 @@
                 }
               },
               "queryRef": "License Report Summary.Recovery Unknown",
-              "nativeQueryRef": "N/D",
-              "displayName": "N/D"
+              "nativeQueryRef": "Unknown",
+              "displayName": "Unknown"
             },
             {
               "field": {
@@ -87,8 +87,8 @@
                 }
               },
               "queryRef": "License Report Summary.Disabled Unknown",
-              "nativeQueryRef": "N/D disabled",
-              "displayName": "N/D disabled"
+              "nativeQueryRef": "Unknown disabled",
+              "displayName": "Unknown disabled"
             },
             {
               "field": {
@@ -117,8 +117,8 @@
                 }
               },
               "queryRef": "License Report Summary.No M365 Activity Unknown",
-              "nativeQueryRef": "N/D activity",
-              "displayName": "N/D activity"
+              "nativeQueryRef": "Unknown activity",
+              "displayName": "Unknown activity"
             },
             {
               "field": {
@@ -147,8 +147,8 @@
                 }
               },
               "queryRef": "License Report Summary.Candidates Primary Intune PC Unknown",
-              "nativeQueryRef": "N/D PC",
-              "displayName": "N/D PC"
+              "nativeQueryRef": "Unknown PC",
+              "displayName": "Unknown PC"
             },
             {
               "field": {
@@ -177,8 +177,8 @@
                 }
               },
               "queryRef": "License Report Summary.Multiple Target Suites Unknown",
-              "nativeQueryRef": "N/D suites",
-              "displayName": "N/D suites"
+              "nativeQueryRef": "Unknown suites",
+              "displayName": "Unknown suites"
             }
           ]
         }
@@ -205,6 +205,13 @@
       "columnHeaders": [
         {
           "properties": {
+            "autoSizeColumnWidth": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
             "columnAdjustment": {
               "expr": {
                 "Literal": {
@@ -212,7 +219,14 @@
                 }
               }
             },
-            "autoSizeColumnWidth": {
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
+            },
+            "bold": {
               "expr": {
                 "Literal": {
                   "Value": "true"
@@ -242,23 +256,9 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#005A9E'"
+                      "Value": "'#215E9E'"
                     }
                   }
-                }
-              }
-            },
-            "bold": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "fontSize": {
-              "expr": {
-                "Literal": {
-                  "Value": "10D"
                 }
               }
             }
@@ -268,10 +268,39 @@
       "values": [
         {
           "properties": {
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
+            },
             "wordWrap": {
               "expr": {
                 "Literal": {
-                  "Value": "true"
+                  "Value": "false"
+                }
+              }
+            },
+            "fontColorPrimary": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#183153'"
+                    }
+                  }
+                }
+              }
+            },
+            "fontColorSecondary": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#183153'"
+                    }
+                  }
                 }
               }
             },
@@ -291,38 +320,9 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#F3F7FA'"
+                      "Value": "'#F0F5FA'"
                     }
                   }
-                }
-              }
-            },
-            "fontColorPrimary": {
-              "solid": {
-                "color": {
-                  "expr": {
-                    "Literal": {
-                      "Value": "'#1F2937'"
-                    }
-                  }
-                }
-              }
-            },
-            "fontColorSecondary": {
-              "solid": {
-                "color": {
-                  "expr": {
-                    "Literal": {
-                      "Value": "'#1F2937'"
-                    }
-                  }
-                }
-              }
-            },
-            "fontSize": {
-              "expr": {
-                "Literal": {
-                  "Value": "9D"
                 }
               }
             }
@@ -350,7 +350,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Recovery by license table.'"
+                  "Value": "'Recovery by suite · complete selected families'"
                 }
               }
             }
@@ -370,7 +370,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Recovery by license'"
+                  "Value": "'Recovery by suite · complete selected families'"
                 }
               }
             },
@@ -537,7 +537,7 @@
   "filterConfig": {
     "filters": [
       {
-        "name": "d06f276d12f03014e3a2",
+        "name": "2ca2bb578d7f4de94c82",
         "field": {
           "Column": {
             "Expression": {
@@ -589,7 +589,59 @@
             }
           ]
         }
+      },
+      {
+        "name": "eed2aec3097888c33e6a",
+        "field": {
+          "Measure": {
+            "Expression": {
+              "SourceRef": {
+                "Entity": "License Report Summary"
+              }
+            },
+            "Property": "License Report Inventory Selection Included"
+          }
+        },
+        "type": "Advanced",
+        "filter": {
+          "Version": 2,
+          "From": [
+            {
+              "Name": "summary",
+              "Entity": "License Report Summary",
+              "Type": 0
+            }
+          ],
+          "Where": [
+            {
+              "Condition": {
+                "Comparison": {
+                  "ComparisonKind": 0,
+                  "Left": {
+                    "Measure": {
+                      "Expression": {
+                        "SourceRef": {
+                          "Source": "summary"
+                        }
+                      },
+                      "Property": "License Report Inventory Selection Included"
+                    }
+                  },
+                  "Right": {
+                    "Literal": {
+                      "Value": "1L"
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "howCreated": "User",
+        "isHiddenInViewMode": true,
+        "isLockedInViewMode": true
       }
     ]
-  }
+  },
+  "parentGroupName": "9c3c536b349f93cf6320"
 }

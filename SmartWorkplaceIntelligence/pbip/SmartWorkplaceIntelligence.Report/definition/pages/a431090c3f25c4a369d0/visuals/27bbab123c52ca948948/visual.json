@@ -2,12 +2,12 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json",
   "name": "27bbab123c52ca948948",
   "position": {
-    "x": 1480,
-    "y": 680,
+    "x": 32,
+    "y": 512,
+    "width": 912,
+    "height": 480,
     "z": 114,
-    "height": 328,
-    "width": 408,
-    "tabOrder": 114
+    "tabOrder": 1333
   },
   "visual": {
     "visualType": "barChart",
@@ -114,6 +114,13 @@
                   "Value": "24L"
                 }
               }
+            },
+            "labelDisplayUnits": {
+              "expr": {
+                "Literal": {
+                  "Value": "1D"
+                }
+              }
             }
           }
         }
@@ -206,7 +213,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Windows 11 devices by release (%). Ranked comparison for the current filter context.'"
+                  "Value": "'Windows 11 devices by release (%)'"
                 }
               }
             }
@@ -233,7 +240,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "13D"
+                  "Value": "12D"
                 }
               }
             },
@@ -242,16 +249,9 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#1F2937'"
+                      "Value": "'#183153'"
                     }
                   }
-                }
-              }
-            },
-            "bold": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
                 }
               }
             }
@@ -304,9 +304,16 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#CBD8E5'"
+                      "Value": "'#CCDCEC'"
                     }
                   }
+                }
+              }
+            },
+            "radius": {
+              "expr": {
+                "Literal": {
+                  "Value": "8D"
                 }
               }
             },
@@ -314,13 +321,6 @@
               "expr": {
                 "Literal": {
                   "Value": "1D"
-                }
-              }
-            },
-            "radius": {
-              "expr": {
-                "Literal": {
-                  "Value": "12D"
                 }
               }
             }
@@ -360,14 +360,14 @@
             "left": {
               "expr": {
                 "Literal": {
-                  "Value": "10D"
+                  "Value": "8D"
                 }
               }
             },
             "right": {
               "expr": {
                 "Literal": {
-                  "Value": "10D"
+                  "Value": "8D"
                 }
               }
             }
@@ -376,5 +376,6 @@
       ]
     },
     "drillFilterOtherVisuals": true
-  }
+  },
+  "parentGroupName": "a12765da9a93dcb54433"
 }

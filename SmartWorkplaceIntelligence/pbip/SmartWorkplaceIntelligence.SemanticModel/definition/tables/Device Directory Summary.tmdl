@@ -41,8 +41,15 @@ table 'Device Directory Summary'
 		formatString: #,0
 		lineageTag: 8dfa6ee5-1a59-49df-9491-919a9d73de02
 
-	/// Intune Windows 10 devices without a known readiness result, plus enabled AD Windows 10 PCs without an Intune match. Ambiguous matches are kept separate.
-	measure 'Windows 10 Eligibility Undetermined' = MAX ( 'Device Directory Summary'[Windows 10 Eligibility Undetermined Value] )
+	/// Windows 10 union records whose eligibility is Not assessed or Unknown, including AD-only. Excludes conflicting Already upgraded evidence. Intersects the shared Country Selection with migration task filters.
+	measure 'Windows 10 Eligibility Undetermined' =
+			VAR _countries = VALUES('Country Selection'[Country])
+			VAR _filtered = ISCROSSFILTERED('Country Selection'[Country])
+			RETURN
+			IF(_filtered,
+			    CALCULATE([Migration Windows 10 Eligibility Unknown],
+			        KEEPFILTERS(TREATAS(_countries, 'Windows Migration Evidence'[Country Name]))),
+			    [Migration Windows 10 Eligibility Unknown])
 		formatString: #,0
 		lineageTag: 1daf24fe-40b0-49b7-9862-9796af93abe6
 
@@ -57,8 +64,6 @@ table 'Device Directory Summary'
 			isDefault
 			relationship: 9e058c03-fdc3-4d80-80fa-fbe2ca4315e3
 			defaultHierarchy: LocalDateTable_cdbfe80e-2839-456b-be8f-cb16ce0d35a5.'Date Hierarchy'
-
-		annotation UnderlyingDateTimeDataType = Date
 
 	column 'Enabled AD Windows PCs Value'
 		dataType: int64

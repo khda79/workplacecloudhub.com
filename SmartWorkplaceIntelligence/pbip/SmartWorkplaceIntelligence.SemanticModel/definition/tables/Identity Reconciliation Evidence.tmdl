@@ -34,8 +34,6 @@ table 'Identity Reconciliation Evidence'
 			relationship: 180e0e7e-0b5a-4497-b1b8-6600de8a84c3
 			defaultHierarchy: LocalDateTable_07dba14d-5771-4b27-9d12-29e8f8909a2e.'Date Hierarchy'
 
-		annotation UnderlyingDateTimeDataType = Date
-
 	column 'Match Status'
 		dataType: string
 		lineageTag: 0aafe52b-91eb-4662-92c0-40dbf109e888

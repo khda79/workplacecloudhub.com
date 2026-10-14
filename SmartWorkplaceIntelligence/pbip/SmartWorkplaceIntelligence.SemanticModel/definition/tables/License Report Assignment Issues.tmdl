@@ -1,0 +1,178 @@
+/// Published assignment issues at user/product/category/error-code grain. Snapshot and per-suite counts are reconciled before load. Legacy snapshots return no detail and Unknown measures.
+table 'License Report Assignment Issues'
+	lineageTag: 19bc987c-b2fe-4b7c-ba9c-3e3ef47f9eda
+
+	/// Published assignment evidence: Snapshot ID
+	column 'Snapshot ID'
+		dataType: string
+		isHidden
+		lineageTag: 973b3d5b-0c3f-4353-a3bd-a92d7a73ed61
+		summarizeBy: none
+		sourceColumn: Snapshot ID
+
+	/// Published assignment evidence: Tenant Key
+	column 'Tenant Key'
+		dataType: string
+		isHidden
+		lineageTag: 7659767b-6674-4fa6-a4c0-8b8751ea917a
+		summarizeBy: none
+		sourceColumn: Tenant Key
+
+	/// Published assignment evidence: Product
+	column Product
+		dataType: string
+		lineageTag: 720f002e-97c3-4831-a0ae-6287570bfc90
+		summarizeBy: none
+		sourceColumn: Product
+
+	/// Published assignment evidence: Category
+	column Category
+		dataType: string
+		lineageTag: 610f754b-9418-4da7-a5fa-e7bf2608826a
+		summarizeBy: none
+		sourceColumn: Category
+
+	/// Normalized immutable user identifier used for distinct-user alert totals.
+	column 'User ID'
+		dataType: string
+		lineageTag: 05db40e7-35e2-4f4e-b7ab-f1663d6d9e6d
+		summarizeBy: none
+		sourceColumn: User ID
+
+	/// Published assignment evidence: User Principal Name
+	column 'User Principal Name'
+		dataType: string
+		lineageTag: 2b053003-4488-4759-882e-51ce2e89da54
+		summarizeBy: none
+		sourceColumn: User Principal Name
+
+	/// Published assignment evidence: Display Name
+	column 'Display Name'
+		dataType: string
+		lineageTag: 145e6ad3-bbb7-4d93-bf9f-87da0fbcd072
+		summarizeBy: none
+		sourceColumn: Display Name
+
+	/// Published assignment evidence: Identity Status
+	column 'Identity Status'
+		dataType: string
+		lineageTag: 645c68ca-2e0f-4297-93c4-b87529fb7ffc
+		summarizeBy: none
+		sourceColumn: Identity Status
+
+	/// Published assignment evidence: Account Enabled
+	column 'Account Enabled'
+		dataType: string
+		lineageTag: 60cbb088-995b-472b-b3a1-433c8949ea4d
+		summarizeBy: none
+		sourceColumn: Account Enabled
+
+	/// Published assignment evidence: User Type
+	column 'User Type'
+		dataType: string
+		lineageTag: 3edc1ae6-3708-4365-885c-19b87a4f0031
+		summarizeBy: none
+		sourceColumn: User Type
+
+	/// Published assignment evidence: SKU IDs
+	column 'SKU IDs'
+		dataType: string
+		isHidden
+		lineageTag: c0fc9b53-c6aa-4060-8b46-8d0ac30c35e0
+		summarizeBy: none
+		sourceColumn: SKU IDs
+
+	/// Published assignment evidence: Assignment States
+	column 'Assignment States'
+		dataType: string
+		lineageTag: cadc1711-3f92-42c2-b390-27bef827a35c
+		summarizeBy: none
+		sourceColumn: Assignment States
+
+	/// Published assignment evidence: Assignment Error
+	column 'Assignment Error'
+		dataType: string
+		lineageTag: b93b7759-0191-4c36-87ab-2edb9568b5a4
+		summarizeBy: none
+		sourceColumn: Assignment Error
+
+	/// Published assignment evidence: Assignment Routes
+	column 'Assignment Routes'
+		dataType: string
+		lineageTag: 7063f8b6-c72f-4acf-95b0-77cadc7a52fa
+		summarizeBy: none
+		sourceColumn: Assignment Routes
+
+	/// Published assignment evidence: Assigning Group IDs
+	column 'Assigning Group IDs'
+		dataType: string
+		isHidden
+		lineageTag: 9136aa25-3e31-414b-a24b-c60bfa2d50ed
+		summarizeBy: none
+		sourceColumn: Assigning Group IDs
+
+	/// Published assignment evidence: Assigning Groups
+	column 'Assigning Groups'
+		dataType: string
+		lineageTag: 1e110d63-fc7f-4967-9052-1bbc1627fdde
+		summarizeBy: none
+		sourceColumn: Assigning Groups
+
+	/// Published assignment evidence: Has Effective Target Suite
+	column 'Has Effective Target Suite'
+		dataType: string
+		lineageTag: 56d56c0e-24d9-4476-a341-82119fd5d21f
+		summarizeBy: none
+		sourceColumn: Has Effective Target Suite
+
+	/// Published assignment evidence: Last Updated UTC
+	column 'Last Updated UTC'
+		dataType: dateTime
+		lineageTag: 0fe85733-cc0d-4902-b392-a49be2ad40a1
+		summarizeBy: none
+		sourceColumn: Last Updated UTC
+
+	/// Published assignment evidence: Assignment Paths
+	column 'Assignment Paths'
+		dataType: int64
+		isHidden
+		lineageTag: 00a4b9aa-f23a-4975-8d00-c1524cf022c9
+		summarizeBy: none
+		sourceColumn: Assignment Paths
+
+	partition 'License Report Assignment Issues' = m
+		mode: import
+		source =
+				let
+				    Snapshot = GetLicenseReportSnapshot(),
+				    HasAssignment = Record.HasFields(Snapshot, "AssignmentIssues"),
+				    Assignment = if HasAssignment then Snapshot[AssignmentIssues] else [Available=false, Rows={}],
+				    Columns = {"SnapshotId", "TenantKey", "Product", "Category", "UserId", "UserPrincipalName", "DisplayName", "IdentityStatus", "AccountEnabled", "UserType", "SkuIds", "AssignmentStates", "AssignmentError", "AssignmentRoutes", "AssignedByGroupIds", "AssignedByGroupNames", "HasEffectiveTargetSuite", "LastUpdatedDateTime", "AssignmentPaths"},
+				    Raw = if HasAssignment then GetLicenseReportCsv("M365_Licenses_ReportAssignmentIssues.csv", Columns) else #table(Columns, {}),
+				    SuiteProducts = List.Transform(Snapshot[Products], each [Product]),
+				    ValidRows = Table.SelectRows(Raw, each [UserId] <> null and Text.Trim([UserId]) <> "" and
+				        List.Contains(SuiteProducts, [Product]) and List.Contains({"Capacity wait", "Licensing error"}, [Category]) and
+				        [AssignmentError] <> null and Text.Trim([AssignmentError]) <> ""),
+				    Keys = {"Product", "Category", "UserId", "AssignmentError"},
+				    SnapshotRows = Table.FromRecords(Assignment[Rows], Columns, MissingField.UseNull),
+				    KeySort = List.Transform(Keys, each {_, Order.Ascending}),
+				    ActualKeys = Table.ToRows(Table.Sort(Table.SelectColumns(Raw, Keys), KeySort)),
+				    ExpectedKeys = Table.ToRows(Table.Sort(Table.SelectColumns(SnapshotRows, Keys), KeySort)),
+				    CountsMatch = if not Assignment[Available] then Table.IsEmpty(Raw) else
+				        List.AllTrue(List.Transform(SuiteProducts, (product) =>
+				            let totals = Record.Field(Assignment[Counts], product),
+				                waiting = List.Count(List.Distinct(Table.SelectRows(Raw, each [Product] = product and [Category] = "Capacity wait")[UserId])),
+				                errors = List.Count(List.Distinct(Table.SelectRows(Raw, each [Product] = product and [Category] = "Licensing error")[UserId]))
+				            in waiting = totals[CapacityWait] and errors = totals[OtherErrors])),
+				    Checked = if Table.RowCount(ValidRows) = Table.RowCount(Raw) and
+				        Table.RowCount(Table.Distinct(Raw, Keys)) = Table.RowCount(Raw) and ActualKeys = ExpectedKeys and CountsMatch
+				        then Raw else error "Assignment issue detail does not reconcile with the qualified license snapshot",
+				    Renamed = Table.RenameColumns(Checked, {{"SnapshotId", "Snapshot ID"}, {"TenantKey", "Tenant Key"}, {"Product", "Product"}, {"Category", "Category"}, {"UserId", "User ID"}, {"UserPrincipalName", "User Principal Name"}, {"DisplayName", "Display Name"}, {"IdentityStatus", "Identity Status"}, {"AccountEnabled", "Account Enabled"}, {"UserType", "User Type"}, {"SkuIds", "SKU IDs"}, {"AssignmentStates", "Assignment States"}, {"AssignmentError", "Assignment Error"}, {"AssignmentRoutes", "Assignment Routes"}, {"AssignedByGroupIds", "Assigning Group IDs"}, {"AssignedByGroupNames", "Assigning Groups"}, {"HasEffectiveTargetSuite", "Has Effective Target Suite"}, {"LastUpdatedDateTime", "Last Updated UTC"}, {"AssignmentPaths", "Assignment Paths"}}),
+				    EmptyToNull = Table.ReplaceValue(Renamed, "", null, Replacer.ReplaceValue, {"Last Updated UTC", "Assignment Paths"}),
+				    Typed = Table.TransformColumnTypes(EmptyToNull, {{"Last Updated UTC", type datetimezone}, {"Assignment Paths", Int64.Type}}, "en-US"),
+				    UtcDate = Table.TransformColumns(Typed, {{"Last Updated UTC", each if _ = null then null else DateTimeZone.RemoveZone(DateTimeZone.ToUtc(_)), type nullable datetime}}),
+				    English = Table.ReplaceValue(UtcDate, "N/D", "Unknown", Replacer.ReplaceValue, {"Assigning Groups", "Identity Status"}),
+				    NormalizedUserId = Table.TransformColumns(English, {{"User ID", each Text.Lower(Text.Trim(_)), type text}})
+				in
+				    NormalizedUserId
+

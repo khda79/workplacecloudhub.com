@@ -1,0 +1,85 @@
+/// Tenant-scoped observed native entities/links. No physical-asset, effective-access or transitive-impact inference.
+table 'CMDB Entity Evidence'
+	lineageTag: edb1dd13-8b4f-4594-ac47-d5a91ce5369c
+
+	/// Observed native identities, not verified physical machines.
+	measure 'CMDB Observed Entities' = COUNTROWS('CMDB Entity Evidence')
+		formatString: #,0
+		lineageTag: 637545b3-a369-40cc-ab79-a78e6b8af265
+
+	column TenantKey
+		dataType: string
+		isHidden
+		lineageTag: 571de1d9-21d0-492a-a5df-968b09e04f06
+		summarizeBy: none
+		sourceColumn: TenantKey
+
+	column 'Entity Key'
+		dataType: string
+		isHidden
+		lineageTag: e0c9ead1-eed8-44f8-a9c4-4c60ac9b0129
+		summarizeBy: none
+		sourceColumn: Entity Key
+
+	column 'Entity Type'
+		dataType: string
+		lineageTag: b50389a5-1a71-4cc1-999f-2a0c94f0d7a2
+		summarizeBy: none
+		sourceColumn: Entity Type
+
+	column 'Source System'
+		dataType: string
+		lineageTag: a5c2b441-7121-45d2-b3ed-74d45687c699
+		summarizeBy: none
+		sourceColumn: Source System
+
+	column 'Native ID'
+		dataType: string
+		lineageTag: 78811124-8cbf-4a1d-b176-2293923a15b7
+		summarizeBy: none
+		sourceColumn: Native ID
+
+	column 'Display Name'
+		dataType: string
+		lineageTag: 83075508-3865-456f-bb91-1ad17f7b358f
+		summarizeBy: none
+		sourceColumn: Display Name
+
+	column Selection
+		dataType: string
+		lineageTag: 0466e220-2758-4df0-a449-e880cf3c938b
+		summarizeBy: none
+		sourceColumn: Selection
+
+	column State
+		dataType: string
+		lineageTag: f010cd79-ce04-4bb4-ab2f-6d56c17dcc50
+		summarizeBy: none
+		sourceColumn: State
+
+	column Country
+		dataType: string
+		lineageTag: 58f75cb4-27e6-40d7-ae6e-396a42dc57aa
+		summarizeBy: none
+		sourceColumn: Country
+
+	column 'Acquired UTC'
+		dataType: string
+		lineageTag: 07e97612-c21e-4021-810a-c85f05e4b56c
+		summarizeBy: none
+		sourceColumn: Acquired UTC
+
+	column 'Source Table'
+		dataType: string
+		lineageTag: ed402ae3-d327-4ecc-bd4e-27bc0ae94b29
+		summarizeBy: none
+		sourceColumn: Source Table
+
+	partition 'CMDB Entity Evidence' = m
+		mode: import
+		source =
+				let
+				    Source = Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("CMDBEntityEvidence.csv"),[Delimiter=",",Encoding=65001,QuoteStyle=QuoteStyle.Csv]),[PromoteAllScalars=true]),
+				    Typed = Table.TransformColumnTypes(Source,{{"TenantKey", type text},{"Entity Key", type text},{"Entity Type", type text},{"Source System", type text},{"Native ID", type text},{"Display Name", type text},{"Selection", type text},{"State", type text},{"Country", type text},{"Acquired UTC", type text},{"Source Table", type text}},"en-US")
+				in Typed
+

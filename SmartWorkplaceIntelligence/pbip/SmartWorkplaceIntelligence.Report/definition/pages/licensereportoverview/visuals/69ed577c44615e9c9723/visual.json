@@ -1,0 +1,17 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json",
+  "name": "69ed577c44615e9c9723",
+  "position": {
+    "x": 0,
+    "y": 0,
+    "width": 1920,
+    "height": 1080,
+    "z": 3,
+    "tabOrder": 3
+  },
+  "visualGroup": {
+    "displayName": "Assignment issues",
+    "groupMode": "ScaleMode"
+  },
+  "isHidden": true
+}

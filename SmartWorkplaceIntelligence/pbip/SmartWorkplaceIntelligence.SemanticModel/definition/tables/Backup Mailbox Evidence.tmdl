@@ -98,6 +98,11 @@ table 'Backup Mailbox Evidence'
 		displayFolder: Backup | Evidence
 		lineageTag: 442ca619-7d66-46ca-943b-eb8953da73d7
 
+	/// Preserves the original dynamic evidence status together with the footer scope after removal of the duplicate ribbon.
+	measure 'Combined Backup Evidence Ribbon Text' = [Backup Evidence Ribbon Text] & UNICHAR(10) & "Evidence scope: prepared private snapshot · missing evidence is not zero · filters stay active across views · full detail available in task views."
+		displayFolder: Report footer
+		lineageTag: 2dfd0df2-647b-4739-aa86-a2307546443f
+
 	column 'Backup Entity Key'
 		dataType: string
 		isHidden
@@ -247,8 +252,6 @@ table 'Backup Mailbox Evidence'
 			relationship: b05a65f0-0620-4dd4-8e57-7cd83dd12c0c
 			defaultHierarchy: LocalDateTable_3bde06cb-1619-411f-a7f0-1e1435fac888.'Date Hierarchy'
 
-		annotation UnderlyingDateTimeDataType = Date
-
 		annotation SummarizationSetBy = Automatic
 
 	column 'Policy Snapshot Date'
@@ -262,8 +265,6 @@ table 'Backup Mailbox Evidence'
 			isDefault
 			relationship: 29d9fc6b-0fd4-4253-9c75-eaa229ba63f5
 			defaultHierarchy: LocalDateTable_11d6eea0-46e2-4eb8-ba1b-53e58ca0be30.'Date Hierarchy'
-
-		annotation UnderlyingDateTimeDataType = Date
 
 		annotation SummarizationSetBy = Automatic
 

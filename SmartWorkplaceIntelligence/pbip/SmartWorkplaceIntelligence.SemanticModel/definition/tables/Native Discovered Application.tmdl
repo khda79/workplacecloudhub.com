@@ -1,0 +1,236 @@
+/// Native source facet migrated from DimDetectedApplication; exact source grain, unresolved links and qualification retained. Uses the unified pinned batch, not a separate CMDB reader.
+table 'Native Discovered Application'
+	lineageTag: 32414e8d-f72e-4152-891f-6e1722217a8b
+
+	/// Distinct detected-application rows in the Intune export; versions can create separate rows. Migrated without changing the source calculation.
+	measure 'Native Detected applications' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimDetectedApplication"))
+			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((COALESCE(COUNTROWS('Native Discovered Application'),0)), KEEPFILTERS(TREATAS(NativeKeys0, 'Native Discovered Application'[TenantApplicationKey]))), BLANK()), BLANK()), (COALESCE(COUNTROWS('Native Discovered Application'),0)))
+		formatString: #,0
+		displayFolder: Native evidence
+		lineageTag: def829a7-f6a8-4344-a494-0998215f2a83
+
+	/// Source-reported application-device occurrences. Exact device-level reporting uses FactDeviceApplication instead. Migrated without changing the source calculation.
+	measure 'Native Reported application-device occurrences' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimDetectedApplication"))
+			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((SUM('Native Discovered Application'[ReportedDeviceCount])), KEEPFILTERS(TREATAS(NativeKeys0, 'Native Discovered Application'[TenantApplicationKey]))), BLANK()), BLANK()), (SUM('Native Discovered Application'[ReportedDeviceCount])))
+		formatString: #,0
+		displayFolder: Native evidence
+		lineageTag: bc79bf15-9e28-49bf-a422-6a68dadb8415
+
+	/// Distinct normalized application name, publisher and platform products; versions are not products. Migrated without changing the source calculation.
+	measure 'Native Application products' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimDetectedApplication"))
+			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((DISTINCTCOUNT ( 'Native Discovered Application'[Application product key] )), KEEPFILTERS(TREATAS(NativeKeys0, 'Native Discovered Application'[TenantApplicationKey]))), BLANK()), BLANK()), (DISTINCTCOUNT ( 'Native Discovered Application'[Application product key] )))
+		formatString: #,0
+		displayFolder: Native evidence
+		lineageTag: 9831b24e-0e80-47a6-a6bb-497c20036f7c
+
+	/// Source-reported application product-version rows. Migrated without changing the source calculation.
+	measure 'Native Application version rows' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimDetectedApplication"))
+			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((COUNTROWS('Native Discovered Application')), KEEPFILTERS(TREATAS(NativeKeys0, 'Native Discovered Application'[TenantApplicationKey]))), BLANK()), BLANK()), (COUNTROWS('Native Discovered Application')))
+		formatString: #,0
+		displayFolder: Native evidence
+		lineageTag: 3b60aadc-34e6-4294-8dd8-174cda288dbd
+
+	/// Share of source-reported application-device occurrences for each product; occurrences are not distinct devices. Migrated without changing the source calculation.
+	measure 'Native Application occurrence rate' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimDetectedApplication"))
+			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((DIVIDE ( [Native Reported application-device occurrences], CALCULATE ( [Native Reported application-device occurrences], REMOVEFILTERS ( 'Native Discovered Application' ) ) )), KEEPFILTERS(TREATAS(NativeKeys0, 'Native Discovered Application'[TenantApplicationKey]))), BLANK()), BLANK()), (DIVIDE ( [Native Reported application-device occurrences], CALCULATE ( [Native Reported application-device occurrences], REMOVEFILTERS ( 'Native Discovered Application' ) ) )))
+		formatString: 0.0%
+		displayFolder: Native evidence
+		lineageTag: a74d7cd2-94ff-445a-a292-4587a01f17d6
+
+	/// Deterministic Top 5 normalized products by distinct native reporting devices in the selected fleet; product-key tie breaker. Migrated without changing the source calculation.
+	measure 'Native Application Top 5' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimDetectedApplication"))
+			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((VAR _current = SELECTEDVALUE ( 'Native Discovered Application'[Application product key] )
+			VAR _scored = CALCULATETABLE (
+			    SUMMARIZECOLUMNS ( 'Native Discovered Application'[Application product key], "DeviceCount", [Native Devices reporting applications] ),
+			    ALLSELECTED ( 'Native Discovered Application' )
+			)
+			VAR _top = TOPN ( 5, FILTER ( _scored, [DeviceCount] > 0 ), [DeviceCount], DESC, 'Native Discovered Application'[Application product key], ASC )
+			RETURN IF ( NOT ISBLANK ( _current ), INT ( CONTAINS ( _top, 'Native Discovered Application'[Application product key], _current ) ) )), KEEPFILTERS(TREATAS(NativeKeys0, 'Native Discovered Application'[TenantApplicationKey]))), BLANK()), BLANK()), (VAR _current = SELECTEDVALUE ( 'Native Discovered Application'[Application product key] )
+			VAR _scored = CALCULATETABLE (
+			    SUMMARIZECOLUMNS ( 'Native Discovered Application'[Application product key], "DeviceCount", [Native Devices reporting applications] ),
+			    ALLSELECTED ( 'Native Discovered Application' )
+			)
+			VAR _top = TOPN ( 5, FILTER ( _scored, [DeviceCount] > 0 ), [DeviceCount], DESC, 'Native Discovered Application'[Application product key], ASC )
+			RETURN IF ( NOT ISBLANK ( _current ), INT ( CONTAINS ( _top, 'Native Discovered Application'[Application product key], _current ) ) )))
+		formatString: 0
+		displayFolder: Native evidence
+		lineageTag: 9811cda0-f317-4fca-830c-e11f4ebd8e8b
+
+	/// Exact native-key entity context or existing inventory context. No name matching or inferred transitive membership. Unrelated entity selections return blank.
+	measure 'Native Context Rows · Native Discovered Application' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimDetectedApplication"))
+			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((COUNTROWS('Native Discovered Application')), KEEPFILTERS(TREATAS(NativeKeys0, 'Native Discovered Application'[TenantApplicationKey]))), BLANK()), BLANK()), (COUNTROWS('Native Discovered Application')))
+		formatString: #,0
+		isHidden
+		lineageTag: e0301fbf-c00d-48fd-baf8-781704e221de
+
+	/// Native DimDetectedApplication attribute; source qualification is retained.
+	column TenantKey
+		dataType: string
+		isHidden
+		lineageTag: 34480a3c-36b1-41ad-92c5-cd4b4d7edd27
+		summarizeBy: none
+		sourceColumn: TenantKey
+
+	/// Native DimDetectedApplication attribute; source qualification is retained.
+	column OrganizationKey
+		dataType: string
+		isHidden
+		lineageTag: c066316c-d6bb-49c6-b99c-aae1a7f23614
+		summarizeBy: none
+		sourceColumn: OrganizationKey
+
+	/// Native DimDetectedApplication attribute; source qualification is retained.
+	column EnvironmentKey
+		dataType: string
+		isHidden
+		lineageTag: 6be61690-d67c-49f3-b897-9e179de34bfb
+		summarizeBy: none
+		sourceColumn: EnvironmentKey
+
+	/// Native DimDetectedApplication attribute; source qualification is retained.
+	column TenantId
+		dataType: string
+		isHidden
+		lineageTag: e85471aa-9899-4dd9-bd22-f29809ba4745
+		summarizeBy: none
+		sourceColumn: TenantId
+
+	/// Native DimDetectedApplication attribute; source qualification is retained.
+	column TenantApplicationKey
+		dataType: string
+		isHidden
+		lineageTag: 8d86608f-d4d8-430f-8a7d-2bd72ac8a1ef
+		summarizeBy: none
+		sourceColumn: TenantApplicationKey
+
+	/// Native DimDetectedApplication attribute; source qualification is retained.
+	column AppId
+		dataType: string
+		lineageTag: 355e18ba-2539-4eef-8cce-943e153c664a
+		summarizeBy: none
+		sourceColumn: AppId
+
+	/// Native DimDetectedApplication attribute; source qualification is retained.
+	column DisplayName
+		dataType: string
+		lineageTag: 1b6bea74-dd8c-4bc0-8cfc-6b83a462599a
+		summarizeBy: none
+		sourceColumn: DisplayName
+
+	/// Native DimDetectedApplication attribute; source qualification is retained.
+	column Version
+		dataType: string
+		lineageTag: d410a607-a9ee-4ba3-8121-ba2567ca8022
+		summarizeBy: none
+		sourceColumn: Version
+
+	/// Native DimDetectedApplication attribute; source qualification is retained.
+	column Publisher
+		dataType: string
+		lineageTag: 34f8b791-8f75-4add-a20e-dfb540d31d1e
+		summarizeBy: none
+		sourceColumn: Publisher
+
+	/// Native DimDetectedApplication attribute; source qualification is retained.
+	column DeviceCount
+		dataType: int64
+		lineageTag: 943b6ff8-18b0-4109-8370-73b6bc3be741
+		summarizeBy: none
+		sourceColumn: DeviceCount
+
+	/// Native DimDetectedApplication attribute; source qualification is retained.
+	column Platform
+		dataType: string
+		lineageTag: 16ac7517-6b9c-47b8-ac91-774624cebcc7
+		summarizeBy: none
+		sourceColumn: Platform
+
+	/// Native DimDetectedApplication attribute; source qualification is retained.
+	column SourceCollectedDateTime
+		dataType: dateTime
+		lineageTag: fe39fb35-710b-4811-adf2-d6570e688cc9
+		summarizeBy: none
+		sourceColumn: SourceCollectedDateTime
+
+	/// Native DimDetectedApplication attribute; source qualification is retained.
+	column SourceApplicationKey
+		dataType: string
+		isHidden
+		lineageTag: 6e941a18-be5d-4f65-b3d2-b68d84b762db
+		summarizeBy: none
+		sourceColumn: SourceApplicationKey
+
+	/// Native DimDetectedApplication attribute; source qualification is retained.
+	column ReportedDeviceCount
+		dataType: int64
+		lineageTag: a1781a55-d5b7-4900-8a04-16bde73ccce5
+		summarizeBy: none
+		sourceColumn: ReportedDeviceCount
+
+	/// Native DimDetectedApplication attribute; source qualification is retained.
+	column ExactRelatedDeviceCount
+		dataType: int64
+		lineageTag: ea289d7e-1e78-4122-98f2-2e1a6fe99a47
+		summarizeBy: none
+		sourceColumn: ExactRelatedDeviceCount
+
+	/// Native DimDetectedApplication attribute; source qualification is retained.
+	column RelationshipCoverageStatus
+		dataType: string
+		lineageTag: c3509aad-083f-43dc-ac16-239802de0850
+		summarizeBy: none
+		sourceColumn: RelationshipCoverageStatus
+
+	/// Native DimDetectedApplication attribute; source qualification is retained.
+	column ResolvedDeviceCount
+		dataType: int64
+		lineageTag: 3120005f-94fa-4bc6-add5-2b794205ee3c
+		summarizeBy: none
+		sourceColumn: ResolvedDeviceCount
+
+	/// Native DimDetectedApplication attribute; source qualification is retained.
+	column UnresolvedDeviceCount
+		dataType: int64
+		lineageTag: bb060a50-0c42-4b91-b9e7-da18f9b85798
+		summarizeBy: none
+		sourceColumn: UnresolvedDeviceCount
+
+	/// Native DimDetectedApplication attribute; source qualification is retained.
+	column 'Application product key'
+		dataType: string
+		isHidden
+		lineageTag: a1ca7662-e921-4eca-a8b7-428f620b73ff
+		summarizeBy: none
+		sourceColumn: Application product key
+
+	/// Readable product label grouped by the authoritative normalized product key; similar labels never merge different products.
+	column 'Application product' = LOWER ( TRIM ( COALESCE ( 'Native Discovered Application'[DisplayName], "Unknown application" ) ) ) & " · " & LOWER ( TRIM ( COALESCE ( 'Native Discovered Application'[Publisher], "Unknown publisher" ) ) ) & " · " & LOWER ( TRIM ( COALESCE ( 'Native Discovered Application'[Platform], "Unknown platform" ) ) )
+		dataType: string
+		lineageTag: 1f135a10-b4b2-4a04-ab08-88f879bcb3bc
+		summarizeBy: none
+
+	partition 'Native Discovered Application' = m
+		mode: import
+		source = NativeEvidenceTypes(Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("DimDetectedApplication.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]), {[name="TenantKey", dataType="String"], [name="OrganizationKey", dataType="String"], [name="EnvironmentKey", dataType="String"], [name="TenantId", dataType="String"], [name="TenantApplicationKey", dataType="String"], [name="AppId", dataType="String"], [name="SourceApplicationKey", dataType="String"], [name="DisplayName", dataType="String"], [name="Version", dataType="String"], [name="Publisher", dataType="String"], [name="DeviceCount", dataType="Int64"], [name="ReportedDeviceCount", dataType="Int64"], [name="ExactRelatedDeviceCount", dataType="Int64"], [name="ResolvedDeviceCount", dataType="Int64"], [name="UnresolvedDeviceCount", dataType="Int64"], [name="RelationshipCoverageStatus", dataType="String"], [name="Platform", dataType="String"], [name="SourceCollectedDateTime", dataType="DateTime"], [name="Application product key", dataType="String"]})
+

@@ -12,7 +12,9 @@ param(
     [Nullable[double]]$DeviceSystemMaxObservationAgeHours,
     [string]$DeviceSystemOffsetlessGraphTimeZoneId,
     [string]$TenantKey,
-    [string]$IntuneSourcePolicyPath
+    [string]$IntuneSourcePolicyPath,
+    [string]$NativeEvidenceAuditPath,
+    [string]$PythonCommand='python'
 )
 
 # Offline preparation only. No collection, upload, Desktop control or promotion.
@@ -39,6 +41,11 @@ function Run([string]$Domain, [string]$Script, [object[]]$Arguments) {
 }
 $countryArgs=@();if($AdCountryRulesPath){$countryArgs=@('-AdCountryRulesPath',$AdCountryRulesPath)}
 Run 'Estate' 'New-EnterpriseEstateEvidence.ps1' (@('-DataRoot',$DataRoot,'-OutputRoot',$OutputRoot)+$countryArgs)
+if ($Only -eq 'All') {
+    if (-not $NativeEvidenceAuditPath) { throw 'Unified preparation requires a receipt-qualified native capture audit.' }
+    Import-Module (Join-Path $PSScriptRoot 'NativeEvidence.psm1') -Force
+    Invoke-NativeEvidenceStage -LastRoot $last -TenantKey $TenantKey -AuditPath $NativeEvidenceAuditPath -OutputRoot $OutputRoot -PythonCommand $PythonCommand
+}
 $deviceArgs=@('-DataRoot',$DataRoot,'-OutputPath',(OutPath 'DeviceInventoryEvidence'),'-SignalsOutputPath',(OutPath 'DeviceRiskEvidenceSummary'),'-DirectorySummaryOutputPath',(OutPath 'DeviceDirectorySummary'),'-SystemEvidenceOutputPath',(OutPath 'DeviceSystemEvidence'))
 if ($null -ne $DeviceSystemMaxObservationAgeHours) { $deviceArgs+=@('-DeviceSystemMaxObservationAgeHours',$DeviceSystemMaxObservationAgeHours) }
 if ($DeviceSystemOffsetlessGraphTimeZoneId) { $deviceArgs+=@('-DeviceSystemOffsetlessGraphTimeZoneId',$DeviceSystemOffsetlessGraphTimeZoneId) }
@@ -78,8 +85,8 @@ Write-Host 'Preparation finished. Outputs are staging only; schema/data validati
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDhIix5bo8cRwG6
-# /TDDFEmnHQ0LXQlRbUuL43eeH/F3FaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC542pg/zXmKnW2
+# XZBKr8ePjoMC0g4+Vf4Mv+6Ie1Sxs6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -212,31 +219,31 @@ Write-Host 'Preparation finished. Outputs are staging only; schema/data validati
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIHU8LTltDtqClJA8ZdcRTQ/CyTV0VCM3Z+ZQfK7mJwbnMA0GCSqG
-# SIb3DQEBAQUABIIBgJul3LQxoYa7quN772mXzl0GZ/0x2N25zfnIcBIPr0GvD+PX
-# mWwBmLQCDcK4EbhJrbWJ7NFz3XVVfvfRKiBJcdc/CStgln2V5O9cEw2Yv5zCnLFJ
-# PFVHQ6XgQhbENJuCpOz5ovwE1Kl0eSlTc5PX7BrKsN1oyiw/BPH9HUcASSGUxa6K
-# Ipoc9WJRoXYG4N2dNoSut0UmncGEIz+hgYIN+NIUeE+tfQVHoPkMQ/5aDx1lNK5/
-# GVjJpxUGhuwhT+6XX6NCMHOoitFl9NvKVjiyaEHNSEGnx2apWzQzfwjBCT4mcDg0
-# 2E9zY7R4q71XNXXSReoXMSUw1LGBx63mGeUON0oVZIbRDckucWqvGkvZ0UJnxvsY
-# FYiyKbG9ElmagoLHD1/XNY06GVnwoG3L5z5c9B+X9y5xKIywWhlY1CSZW4Ig63uq
-# 7OYh1snkHg4D19VCKUuT6CnucLKMQ/IjoDxqrJtE087tJRzEfShtGXpEhyq1HaXP
-# WANoPf59nz2kzm36eaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIKRZA8RhgnxRJtWilY93wXQLzuHrGKOThYDgLzGXmmy2MA0GCSqG
+# SIb3DQEBAQUABIIBgHrBzn4iRdo8zShEXoGEjinrWXMI8HcCIYioEtWmXLguNosF
+# GtpCeTm2+lSU9mrCsXr3tKtl1EwD7kn/4dZwYTbyo18oBEz/flCfM6+8D8g5HyNZ
+# ijr0ywJPpGo0+TOisCpZKJEG8A114zLfx/IULQbwFVAyzcznGGVEeA9U7hBxwKFo
+# goXJZDEiPE0fTIfIupPe4B5aKVTqmqvAdZyWTMX2XnI7sp+pieqmcYl4g7mzpFcu
+# GUk5/QYWYzaf36Gu/VBfWRjdlP22Z+MHLJOKpYtUTCH4LOT7HgmNb9nJusMdOZJE
+# sUTGZjvcpIVP8Q+sNVxocp+Shh6Ml53jZIAHkIpifIYmxYLECRd4PCsHgx7Q5pBi
+# hcmYQEkMOpxWSdVhNOM6Lxgs6iULUzMY8ZVoczwei2eXLFr9gDtMSNTgeMyAaME9
+# dlPAYXhCN0K34+Aq/HKxvNA0CgJa0hK5fBc3IfadqsRUZ2T5V923JoRKB51oycvC
+# L0P+gEKzWhI+O8iHVKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTMyMjQy
-# MTVaMC8GCSqGSIb3DQEJBDEiBCC+liuL3BqKTtm/YKzcYRfRGd8mjhzhthuBRVmo
-# GjK6qTANBgkqhkiG9w0BAQEFAASCAgCGIaXtYQCjIBdserH8ilu3DZIa3SlPgx9e
-# gHT7OFn1A0IjDVH/EMYt1To3qoRYtqrNYqNyBqkaRf1SmRedHZyx3wkuhii3ahI/
-# /GB7n7aAizYn+mZ4gVO1FmJxFfHzhagoA0aRw1Oe3uCq9Q6Q9VsoMUghxzmKyhyn
-# LCTTtvWWtaXRDCO+j/pRDnJIg/tUC01W6LfyiS2vO6iQRvlgFdgaiJMUQ4cYhkkr
-# ST/H0dW9/1us9fmQ7NjXq9cnvDIXzGFle7baezwetQWBhVEV6rcNvhv7vRyJCLKO
-# bGzBOy+CjnUpIWoFH07rzSwO2j01LLwWWjZS5LB/OmCsdjeMffOMF/kYmjrKa0qL
-# I7g9/NGlvIUQtFSdVE9gTu/G7L54kwRTKbmh7vvhEk6LH8BeBTRGzpY7Pm0WeWdM
-# lmSIh3d033OfJnrWpfsaCCNVeO1UsRlCAlV9AhCha+1TFCBX6mLZaypBuOJc7QA6
-# DnWO26QFn2mVWfgKUNqlSOIg5/1knVA0hgw8+hMdZT3Z0tIxQjl1AKqPuj2zQVjn
-# tIS1RZCUtKtKZ1mqJmi78cFoDyWSFOpgMsibnFhz3JDanYx4gpDSDB+ojBoB4wXG
-# OqJl7FQz8LpWfD2+GwIBd+MBV2HlN6p+0oz15lRAqCh3S+5V8w2MEHD5oFWyUh9M
-# Y0sIQU6Aiw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTQyMTIy
+# MDNaMC8GCSqGSIb3DQEJBDEiBCCiuNKl7oKxDPMzw8RFwLWo1UQ7aa7ql5QgYSkT
+# iqBbITANBgkqhkiG9w0BAQEFAASCAgAYlRsTP0e2vIMC3zlocKC/yG/KqySGT294
+# dP4GMiptHELs2yq9hpCSMOpIWBcS1hx6hN7MqcW3cmtxVVb97RcD0EMur9QIOR+s
+# 49PTFBKyGjB1aSZJKcOYauTkFQEm6rDxoPJQDhx3FWh9jVpTgV7Q6fYb7CIKKqAn
+# HCcOYYrPfAmwxzCbjm3+hhM/hVC/gg4ZeeSYdhqh7SjtnmbcuCqaJ144qKwi4iV1
+# 64RNPC8C2joMI5Q68ZqzsHqOvOATfhqLyTEFr/s7gxcM7i2JwxM2RzDk4goWefTi
+# bNpFDjIFjQjibda02PpsVUI0VOnHXNH6OXR1EJeZp0BGzba+8fgATPM1SD5XrI5U
+# rJHdDtUbVrpNQhGpJW+r0l3MvaLB/dJ9VvuTGbsf3XjfgrL8S0XYtO5RxQTzbB4M
+# nLit8lc/k66SgMGjTtrVXmMb01INkppPmUEcqzUc3q4ha/G361GztHItwTqvgzv2
+# Tt+sm79kJv9vGMMlGpxJPFXRhnbUPsvxKuSxXrINLzDMwYK+fa9LFdbtyfTvj+B+
+# ihs+YNIJoQNOVIUkLL8hiIMTA4odzVClpySD4iYtqV+ZGOnv1YVDO0tDPPIl4M/O
+# +snwAQTouCIHtNGo8wO1f1YXA0Ev5vuqMf2Vs9SkLCCAapiGGbVmvmKZs+NaK/iC
+# c9gyjaonAA==
 # SIG # End signature block

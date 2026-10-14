@@ -1,6 +1,7 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
 Import-Module (Join-Path $PSScriptRoot 'PreparedMetadata.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'PreparedArtifacts.psm1')
 
 function Resolve-PreparedSharePointFolder {
     param([string]$ConfiguredPath,[string]$NormalizedDataRoot)
@@ -50,6 +51,22 @@ function Resolve-PreparedTransferContract {
             throw 'Intune operational batch lacks matching reviewed contract provenance; transfer not started.'
         }
     }
+    $nativePath=Join-Path $PSScriptRoot '../config/native-output-contract.json.txt'
+    $nativeContract=(Read-SmartM365JsonDocument $nativePath).Document
+    $nativeFiles=@($nativeContract.tables.file)
+    $nativePresent=@($Manifest.Files | Where-Object File -in $nativeFiles)
+    $nativeProvenance=$null
+    if($Manifest.PSObject.Properties['Provenance'] -and $Manifest.Provenance.PSObject.Properties['NativeEvidence']){$nativeProvenance=$Manifest.Provenance.NativeEvidence}
+    if($nativePresent.Count -or $null -ne $nativeProvenance){
+        if($nativePresent.Count -ne $nativeFiles.Count -or @($nativePresent.File | Sort-Object -Unique).Count -ne $nativeFiles.Count){throw 'Incomplete unified native evidence file set; transfer not started.'}
+        if($null -eq $nativeProvenance -or -not $nativeProvenance.PSObject.Properties['ContractSHA256'] -or $nativeProvenance.ContractSHA256 -ine (Get-FileHash -LiteralPath $nativePath).Hash){throw 'Native evidence contract provenance mismatch; transfer not started.'}
+        $nativeSupplied=@($contract.tables | Where-Object file -in $nativeFiles)
+        if($nativeSupplied.Count -eq 0){
+            Import-Module (Join-Path $PSScriptRoot 'NativeEvidence.psm1') -Force
+            $contract=Merge-NativeEvidenceContract -BaseContract $contract
+            $contractFiltered=$true
+        }elseif($nativeSupplied.Count -ne $nativeFiles.Count){throw 'Incomplete supplied native contract; transfer not started.'}
+    }
     $endpointFiles=@('EndpointProtectionPolicy.csv','EndpointProtectionEvidence.csv')
     $present=@($Manifest.Files | Where-Object { $_.File -in $endpointFiles })
     $endpointProvenance=$null
@@ -58,7 +75,14 @@ function Resolve-PreparedTransferContract {
         $endpointProvenance=$Manifest.Provenance.EndpointProtectionPolicy
     }
     # Use the immutable batch, never the tenant's current Enabled setting.
-    if($present.Count -eq 0 -and $null -eq $endpointProvenance){return $contract}
+    if($present.Count -eq 0 -and $null -eq $endpointProvenance){
+        if($nativePresent.Count){
+            $bytes=[Text.UTF8Encoding]::new($false).GetBytes(($contract | ConvertTo-Json -Depth 20))
+            $hash=[Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($bytes))
+            if($hash -ine $Manifest.ContractSHA256){throw 'Unified native contract hash mismatch; transfer not started.'}
+        }
+        return $contract
+    }
     if($present.Count -ne 2 -or @($present.File | Sort-Object -Unique).Count -ne 2){
         throw 'Incomplete endpoint protection file set; transfer not started.'
     }
@@ -125,6 +149,15 @@ function Get-PreparedTransferPlan {
         if($entry.SHA256 -notmatch '^[A-Fa-f0-9]{64}$' -or $validated.Count -ne 1 -or $validated[0].SHA256 -ne $entry.SHA256 -or $validated[0].Rows -ne $entry.Rows -or (Get-Item -LiteralPath $path).Length -ne $entry.Bytes -or (Get-FileHash -LiteralPath $path).Hash -ne $entry.SHA256){throw "Local CSV integrity mismatch: $name"}
         $files.Add([pscustomobject]@{Path=$path;Relative="batches/$id/$name";Bytes=$entry.Bytes;SHA256=$entry.SHA256})
     }
+    if($manifest.PSObject.Properties['Artifacts']){
+        $artifactContract=Join-Path $PSScriptRoot '../config/prepared-artifact-contract.json.txt'
+        if(-not $manifest.PSObject.Properties['ArtifactContractSHA256'] -or $manifest.ArtifactContractSHA256 -ne (Get-FileHash -LiteralPath $artifactContract).Hash){throw 'Artifact contract mismatch.'}
+        Assert-PreparedArtifacts -BatchRoot $folder -Entries @($manifest.Artifacts) -TenantKey $TenantKey
+        foreach($entry in $manifest.Artifacts){
+            if(-not $seen.Add($entry.File)){throw 'Artifact collides with a prepared table.'}
+            $files.Add([pscustomobject]@{Path=(Join-Path $folder $entry.File);Relative="batches/$id/$($entry.File)";Bytes=$entry.Bytes;SHA256=$entry.SHA256})
+        }
+    } elseif($manifest.Provenance.PSObject.Properties['NativeEvidence']) {throw 'Unified batch is missing its governed source artifacts.'}
     foreach($name in 'batch','validation','current'){
         $m=$metadata[$name];$files.Add([pscustomobject]@{Path=$m.Path;Relative="batches/$id/$name.json.txt";Bytes=$m.Bytes;SHA256=$m.SHA256})
     }
@@ -175,7 +208,7 @@ function Send-PreparedEvidenceBatch {
             Write-Host ('SharePoint verified {0}/{1}: {2}' -f $journal.VerifiedFiles.Count,$plan.Files.Count,$file.Relative)
         }
         $journal.Status='Success'
-        [pscustomobject]@{BatchId=$plan.BatchId;CsvFiles=$plan.CsvCount;VerifiedFiles=$journal.VerifiedFiles.Count;PointerVerified=$true;CsvRecalculated=$false;AuditPath=$auditPath}
+        [pscustomobject]@{Status='PublishedAndReadBack';BatchId=$plan.BatchId;CsvFiles=$plan.CsvCount;VerifiedFiles=$journal.VerifiedFiles.Count;ExpectedFiles=$plan.Files.Count;ManifestSHA256=($plan.Files|Where-Object Relative -eq "batches/$($plan.BatchId)/batch.json.txt").SHA256;PointerVerified=$true;CsvRecalculated=$false;AuditPath=$auditPath}
     } catch {
         if($journal){$journal.Status='Failed';$journal.Error=$_.Exception.Message}
         if($journal -and $journal.PointerAttempted){throw "Cloud pointer publication was attempted but completion is not confirmed. Do not refresh Power BI; retry the same batch. $($_.Exception.Message)"}
@@ -187,6 +220,20 @@ function Send-PreparedEvidenceBatch {
         }finally{$lock.Dispose()}
     }
 }
+function Assert-PreparedTransferResult {
+    param([Parameter(Mandatory)]$Result,[Parameter(Mandatory)][string]$ExpectedBatchId)
+    foreach($field in 'Status','BatchId','CsvFiles','VerifiedFiles','ExpectedFiles','ManifestSHA256','PointerVerified','CsvRecalculated'){
+        if(-not $Result.PSObject.Properties[$field]){throw 'Verified transfer receipt is missing required fields.'}
+    }
+    if($Result.Status -cne 'PublishedAndReadBack' -or $Result.BatchId -cne $ExpectedBatchId -or
+       $Result.PointerVerified -isnot [bool] -or -not $Result.PointerVerified -or
+       $Result.CsvRecalculated -isnot [bool] -or $Result.CsvRecalculated -or
+       $Result.CsvFiles -le 0 -or $Result.ExpectedFiles -lt ($Result.CsvFiles+4) -or
+       $Result.VerifiedFiles -ne $Result.ExpectedFiles -or $Result.ManifestSHA256 -notmatch '^[A-Fa-f0-9]{64}$'){
+        throw 'Transfer did not return a complete verified receipt for the expected batch.'
+    }
+}
+
 function Send-PreparedFailureAudit {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$OutputRoot,[Parameter(Mandatory)][string]$TenantKey,
@@ -230,13 +277,13 @@ function Send-PreparedFailureAudit {
     }
 }
 
-Export-ModuleMember -Function Resolve-PreparedSharePointFolder,Send-PreparedEvidenceBatch,Send-PreparedFailureAudit
+Export-ModuleMember -Function Resolve-PreparedSharePointFolder,Send-PreparedEvidenceBatch,Send-PreparedFailureAudit,Assert-PreparedTransferResult
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAzccEdOSLAScRK
-# cPp4G96PPhaY7p0ha6MtokhS8ai0yaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDuYhig4WGhHS74
+# KecPYEhNTaGjSSsumVwz/Q2Zb2c5S6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -369,31 +416,31 @@ Export-ModuleMember -Function Resolve-PreparedSharePointFolder,Send-PreparedEvid
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIIqJeaoY7ljbzp8pu46CurY4yKk8gASsTZEfDauWF7ogMA0GCSqG
-# SIb3DQEBAQUABIIBgJKLpG98Y89tqLqkWGBi30GbChHRMTSyBKUk8a0QnRz0Xtm0
-# i/de9lQdg0cztyLOhImzD0bKKgVlsNt75XUeK0aBXXA7SmEFLYlAkWSz0H2/KyP/
-# YIclCL4hHNuxi+z+JipfsMmGh0QuvsHMNDtwx2SvjqkIZBDVbCAhGUgGBoQ3TA2v
-# j8OJXul06UMah/HXh3Ot+0qIFCDay2T+17PZOTNePwSm8KJbxjt1CiN14S+qYzhs
-# sVUducbdAkoRM+fLJPmmtQawJNBvIpt6Azdiu8uT7ncmQirrmk+gzqmF4tXstPHJ
-# z9PVlbHXycm6keiYhuxlWJUQNGL6wXH/F1ro2/XgXtCY9osQx5HAtTug+iScag4d
-# L0g/9491U/eyimmAZK2M5m/oNeEcQb/O5SJKHcGwvwWHTsM2Lk96WDIl6ivDU2VN
-# WaATxJIcjeZC/nVjBq9OjM99J01qD+DfRGM20J35FpZrEB+76kHiI3PvNXEFic5M
-# op8ocMwEN/uFzPw4jKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEICHQVeqVUaJlCAQQuK6pmbCdpvqLbVB59oXDCyc7QnWpMA0GCSqG
+# SIb3DQEBAQUABIIBgHKhS4RTej780MDMQ0Mv/CzGzMBL4AvFOseujJPKdscecbsb
+# s55vTvTZF4d899IyEM75MsOg2mk7T46D5AqxbJjnTyFYbn9ssx/MbE2HEvzSGfED
+# Vg2GDuyHxXd47UByom7x9KGRYWJVV6bIs9gQ5t76AE6JV9pLg+xbtBBoiD6QwxRt
+# K5lK19eONEPwovD1wG2PD9IdmI3nnRDcdvxc1KqjqGYHU9OCH1cKAqX12xvnvuME
+# NBxEJwt6YMYTQ4d6WCavE60XxTcl0FXiTaEmMSK5FkRIcCy/VhLK8JiMQa/WxYDm
+# tFzCL9X7l75L5u96A9x/S/yip6udXeUiwnsLY2i4oDvc+QO+0C+tuokF2IpCpjiS
+# m/r9UhTYzf90MQOafXvoFyQZuvnyjJRdRqhNtDcy8cMvZWaL5ljGeVJ69IcWYJFA
+# QzfP7pSBRXeZOcmUZJgNMK2r1YfJ3cs4ggiFe2WNYLR7R1qTh49BARPKTDe+KQL/
+# V4+QFV6xkAwcTlbO4qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTMyMjQy
-# MTVaMC8GCSqGSIb3DQEJBDEiBCDxAjS9kv0pJ4/I80p3LJ48YqFoaF31EDoFPTiN
-# /QwaADANBgkqhkiG9w0BAQEFAASCAgCmpAjIOC5bPKjeGLuBA53huc0C8YCS83Ii
-# fqK4+8bgj4+mA2WO7O0KubJCm9+6g/k6ozQrNgl/GI4AJE3KnB2E+XLLO4/dKFSh
-# 0oxqy2fhBAcbBIIa9WS+sLpaL4MFujkuLVjEFd+5MjDmvtrT+EQPMyC9okuXOqdw
-# v/l67f/dUZz+syMgqF98BNqMxVmx/+fIPZbrpeEbI1+jC8GMXqcIRKzLSD70QjpL
-# a9kClmyiFPW3VqZYSkuohRc10vdV5epn3Wu9ajnXFGsnjbPP4nAND/FHszqJ0C3k
-# yWRXCxptmUN3d6OAoVvOzoY103z4D+KBixA9Z2MgPxDuD2bsI4d5PSE+s6nYqeBD
-# o1IYTyT5fZVtMcIrxTz0GWuesWJk1YFZ+XQ5kf3x3XwIdGrGgJclZDuwYMy7Sha6
-# +LZz8zFAUybCjqAcFMtQoJPsdLwTWHYX9QoD1Jme61YCZbhBylD6zrmf3dWMWK4J
-# 9BaPx3XgT+j2frFqB/Gz+yjagL0RwAcsEpd92EgdA38O7ffKKkYtPWnUKu1lgyS8
-# kAi6JVYjK7PCFaV+C/Bh3VFgtaZrt8RrBqIEIL1T9POiJ8vW890Ffpz82fcJkRCF
-# xrjfKkdwpnWnjQADOsiZjy7wXpjhInH2j3w5ldBg0DyS6bXIGinFBjqx3Hbnrqgp
-# cOHsZRKFhQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTQyMTIy
+# MDNaMC8GCSqGSIb3DQEJBDEiBCDmpXyfLxTfoE+AvzN+Laj+ZyBnois6zFbvajNT
+# hToxBDANBgkqhkiG9w0BAQEFAASCAgBqn4/GtwzveMvvNPg34g2buByB7CnBycC1
+# D64/BW7RVS6d8pRscmFWwK3ldjx43yvTV6uRm4jK8ZdD0RAwXgzR1OGgB7ZIk9Jj
+# EBimtGdgY6QAHVsSM4xEbLZObkw8mO7XgJxMCNwwU2hnRMZs8LMvxCh/1D9FcFYS
+# PkpaceBBVFz1Lbd13reuDOILqplwoHjW/fKqfUpAfoKU/YMFTKTNHXzG4mG2vjWL
+# GF94ksgnV0ltREGs6PIPslE18qoHYbNFLB2b7XtJsMEJuAwqUzY29mCbODUw6wU4
+# Cu6bjP9pmCJ2bh9eaeUEI8mom4NLIShHIoeIukbbXvXPUajAmEv1X6FK2NYhTqcp
+# LjyTHVX8OT/aap9JUQSlDtCA3FKJzJqRXpYT6DW3cJwMTqoQEtbmDdc833lABSWM
+# DfTr9jxK015/kf3hdu+hcs2cGCHyxcn7fy2lawDVibhFY6gIa7o9pWStTeaWulun
+# bP+ly2iimkvo2cINglfqPqRASDSZh9XWlmPJAjSQl2kN36803bD3Sy4bfZadINPW
+# nDdLMwYw/aaQp3rPsygV7iIGz+FOSwHqdkeQ43tVH6B0GT8X7b2KAs+XmEOucNpo
+# vkmnt/ja1GCJUc3IC/3cN6tw9UmEJacr2rf9hfSowXIlDK+DXLKIR/aB3EH+wVFm
+# 9qL3ME+gQQ==
 # SIG # End signature block

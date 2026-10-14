@@ -1,0 +1,229 @@
+/// Native source facet migrated from ADUserSource; exact source grain, unresolved links and qualification retained. Uses the unified pinned batch, not a separate CMDB reader.
+table 'AD User Evidence'
+	lineageTag: 1e115a2f-b2e1-483c-ae44-df45b0b0b0f8
+
+	/// Native AD records explicitly linked to one selected cloud user identity. Migrated without changing the source calculation.
+	measure 'Native Selected user AD objects' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimUser"))
+			VAR NativeKeys1 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "ADUserSource"))
+			VAR InventoryUsers = CALCULATETABLE(VALUES('Native User Evidence'[TenantUserKey]), REMOVEFILTERS('Native User Evidence'), TREATAS(VALUES('User Inventory Evidence'[User Source ID]), 'Native User Evidence'[SourceUserId]))
+			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((IF ( HASONEVALUE ( 'Native User Evidence'[TenantUserKey] ), CALCULATE ( COUNTROWS ( 'AD User Evidence' ), TREATAS ( VALUES ( 'Native User Evidence'[TenantUserKey] ), 'AD User Evidence'[TenantUserKey] ) ) )), KEEPFILTERS(TREATAS(NativeKeys0, 'AD User Evidence'[TenantUserKey]))),
+			COUNTROWS(NativeKeys1) > 0, CALCULATE((IF ( HASONEVALUE ( 'Native User Evidence'[TenantUserKey] ), CALCULATE ( COUNTROWS ( 'AD User Evidence' ), TREATAS ( VALUES ( 'Native User Evidence'[TenantUserKey] ), 'AD User Evidence'[TenantUserKey] ) ) )), KEEPFILTERS(TREATAS(NativeKeys1, 'AD User Evidence'[TenantADUserKey]))), BLANK()), BLANK()), SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((IF ( HASONEVALUE ( 'Native User Evidence'[TenantUserKey] ), CALCULATE ( COUNTROWS ( 'AD User Evidence' ), TREATAS ( VALUES ( 'Native User Evidence'[TenantUserKey] ), 'AD User Evidence'[TenantUserKey] ) ) )), KEEPFILTERS(TREATAS(InventoryUsers, 'AD User Evidence'[TenantUserKey]))), (IF ( HASONEVALUE ( 'Native User Evidence'[TenantUserKey] ), CALCULATE ( COUNTROWS ( 'AD User Evidence' ), TREATAS ( VALUES ( 'Native User Evidence'[TenantUserKey] ), 'AD User Evidence'[TenantUserKey] ) ) ))))
+		formatString: #,##0
+		displayFolder: Native evidence
+		lineageTag: 795ef77c-e02f-4a78-bee3-1c91b8ec8050
+
+	/// Exact native-key entity context or existing inventory context. No name matching or inferred transitive membership. Unrelated entity selections return blank.
+	measure 'Native Context Rows · AD User Evidence' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimUser"))
+			VAR NativeKeys1 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "ADUserSource"))
+			VAR InventoryUsers = CALCULATETABLE(VALUES('Native User Evidence'[TenantUserKey]), REMOVEFILTERS('Native User Evidence'), TREATAS(VALUES('User Inventory Evidence'[User Source ID]), 'Native User Evidence'[SourceUserId]))
+			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((COUNTROWS('AD User Evidence')), KEEPFILTERS(TREATAS(NativeKeys0, 'AD User Evidence'[TenantUserKey]))),
+			COUNTROWS(NativeKeys1) > 0, CALCULATE((COUNTROWS('AD User Evidence')), KEEPFILTERS(TREATAS(NativeKeys1, 'AD User Evidence'[TenantADUserKey]))), BLANK()), BLANK()), SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((COUNTROWS('AD User Evidence')), KEEPFILTERS(TREATAS(InventoryUsers, 'AD User Evidence'[TenantUserKey]))), (COUNTROWS('AD User Evidence'))))
+		formatString: #,0
+		isHidden
+		lineageTag: 602a6ddb-cf39-45a2-8006-b8e18737f42f
+
+	/// Native ADUserSource attribute; source qualification is retained.
+	column TenantKey
+		dataType: string
+		isHidden
+		lineageTag: 868bbb8b-f3c4-410b-89b4-881e4f78b217
+		summarizeBy: none
+		sourceColumn: TenantKey
+
+	/// Native ADUserSource attribute; source qualification is retained.
+	column OrganizationKey
+		dataType: string
+		isHidden
+		lineageTag: e45924a0-2075-44f3-833f-8fce1a83e810
+		summarizeBy: none
+		sourceColumn: OrganizationKey
+
+	/// Native ADUserSource attribute; source qualification is retained.
+	column EnvironmentKey
+		dataType: string
+		isHidden
+		lineageTag: 55712ffa-3863-4c32-8657-9e464d7b02e8
+		summarizeBy: none
+		sourceColumn: EnvironmentKey
+
+	/// Native ADUserSource attribute; source qualification is retained.
+	column TenantId
+		dataType: string
+		isHidden
+		lineageTag: bee728c8-576f-462a-b5d3-5842ff545d14
+		summarizeBy: none
+		sourceColumn: TenantId
+
+	/// Native ADUserSource attribute; source qualification is retained.
+	column TenantADUserKey
+		dataType: string
+		isHidden
+		lineageTag: 4832e1b7-8c04-4566-ac91-7a172808fa7d
+		summarizeBy: none
+		sourceColumn: TenantADUserKey
+
+	/// Native ADUserSource attribute; source qualification is retained.
+	column ObjectGUID
+		dataType: string
+		lineageTag: 89d0258b-954a-4952-9a5b-eb826ade4a46
+		summarizeBy: none
+		sourceColumn: ObjectGUID
+
+	/// Native ADUserSource attribute; source qualification is retained.
+	column ObjectSID
+		dataType: string
+		lineageTag: 25e8d398-6855-4e54-829f-b0547457980f
+		summarizeBy: none
+		sourceColumn: ObjectSID
+
+	/// Native ADUserSource attribute; source qualification is retained.
+	column DomainName
+		dataType: string
+		lineageTag: afa3936f-f15d-4639-88dd-748ebfc864e6
+		summarizeBy: none
+		sourceColumn: DomainName
+
+	/// Native ADUserSource attribute; source qualification is retained.
+	column DistinguishedName
+		dataType: string
+		lineageTag: 6c004ad8-a739-46d4-96b0-f70c653b0dc9
+		summarizeBy: none
+		sourceColumn: DistinguishedName
+
+	/// Native ADUserSource attribute; source qualification is retained.
+	column SamAccountName
+		dataType: string
+		lineageTag: 7f914357-74f0-482a-a7ac-3af961ad7160
+		summarizeBy: none
+		sourceColumn: SamAccountName
+
+	/// Native ADUserSource attribute; source qualification is retained.
+	column UserPrincipalName
+		dataType: string
+		lineageTag: f97f0aca-6eed-4f0c-b20f-8a50e67938c7
+		summarizeBy: none
+		sourceColumn: UserPrincipalName
+
+	/// Native ADUserSource attribute; source qualification is retained.
+	column DisplayName
+		dataType: string
+		lineageTag: 4bc098bb-b0df-4f79-89f3-acc04f895c34
+		summarizeBy: none
+		sourceColumn: DisplayName
+
+	/// Native ADUserSource attribute; source qualification is retained.
+	column Enabled
+		dataType: boolean
+		lineageTag: a480e5b8-da4d-40e8-8933-a43fe5198b52
+		summarizeBy: none
+		sourceColumn: Enabled
+
+	/// Native ADUserSource attribute; source qualification is retained.
+	column Department
+		dataType: string
+		lineageTag: 5abacbfb-14a8-451b-a8b7-2db63b240748
+		summarizeBy: none
+		sourceColumn: Department
+
+	/// Native ADUserSource attribute; source qualification is retained.
+	column Title
+		dataType: string
+		lineageTag: d533fdff-0b5d-442c-86c2-96fa19a5f7f5
+		summarizeBy: none
+		sourceColumn: Title
+
+	/// Native ADUserSource attribute; source qualification is retained.
+	column Country
+		dataType: string
+		lineageTag: 464894a6-d388-43f1-9661-e216104c7e64
+		summarizeBy: none
+		sourceColumn: Country
+
+	/// Native ADUserSource attribute; source qualification is retained.
+	column ManagerDistinguishedName
+		dataType: string
+		lineageTag: 94aea76f-2de7-4dd4-a090-66736f3438b7
+		summarizeBy: none
+		sourceColumn: ManagerDistinguishedName
+
+	/// Native ADUserSource attribute; source qualification is retained.
+	column ManagerADObjectKey
+		dataType: string
+		lineageTag: a9871888-22bd-4ebf-bf05-453e7658edc6
+		summarizeBy: none
+		sourceColumn: ManagerADObjectKey
+
+	/// Native ADUserSource attribute; source qualification is retained.
+	column TenantUserKey
+		dataType: string
+		isHidden
+		lineageTag: 2100aad9-0753-44cf-b9d4-d6594bf731ff
+		summarizeBy: none
+		sourceColumn: TenantUserKey
+
+	/// Native ADUserSource attribute; source qualification is retained.
+	column CloudMatchStatus
+		dataType: string
+		lineageTag: 3a458610-b22e-4ce6-a64e-f083a04a7b32
+		summarizeBy: none
+		sourceColumn: CloudMatchStatus
+
+	/// Native ADUserSource attribute; source qualification is retained.
+	column LastLogonTimestampRaw
+		dataType: string
+		lineageTag: e4b0e3d0-c0e4-4f03-a248-6d5972922e36
+		summarizeBy: none
+		sourceColumn: LastLogonTimestampRaw
+
+	/// Native ADUserSource attribute; source qualification is retained.
+	column LastLogonUtcDateTime
+		dataType: dateTime
+		lineageTag: 8b9d7247-d0ad-486c-bef6-56e9782ef933
+		summarizeBy: none
+		sourceColumn: LastLogonUtcDateTime
+
+	/// Native ADUserSource attribute; source qualification is retained.
+	column LastLogonStatus
+		dataType: string
+		lineageTag: 84044ecb-573c-4289-8f22-8574ebbc628a
+		summarizeBy: none
+		sourceColumn: LastLogonStatus
+
+	/// Native ADUserSource attribute; source qualification is retained.
+	column CreationRaw
+		dataType: string
+		lineageTag: be7c5fc4-938a-4ce8-9a7d-7cf3a00305e4
+		summarizeBy: none
+		sourceColumn: CreationRaw
+
+	/// Native ADUserSource attribute; source qualification is retained.
+	column CreationUtcDateTime
+		dataType: dateTime
+		lineageTag: 3d185d2f-f419-4bee-b4c0-924c0eeab29c
+		summarizeBy: none
+		sourceColumn: CreationUtcDateTime
+
+	/// Native ADUserSource attribute; source qualification is retained.
+	column CreationStatus
+		dataType: string
+		lineageTag: 732312d1-2313-4c6f-b50e-4858f6e650c2
+		summarizeBy: none
+		sourceColumn: CreationStatus
+
+	/// Native ADUserSource attribute; source qualification is retained.
+	column SourceCollectedDateTime
+		dataType: dateTime
+		lineageTag: 1c29905c-ed72-45a5-bf92-660529370fb9
+		summarizeBy: none
+		sourceColumn: SourceCollectedDateTime
+
+	partition 'AD User Evidence' = m
+		mode: import
+		source = NativeEvidenceTypes(Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("ADUserSource.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]), {[name="TenantKey", dataType="String"], [name="OrganizationKey", dataType="String"], [name="EnvironmentKey", dataType="String"], [name="TenantId", dataType="String"], [name="TenantADUserKey", dataType="String"], [name="ObjectGUID", dataType="String"], [name="ObjectSID", dataType="String"], [name="DomainName", dataType="String"], [name="DistinguishedName", dataType="String"], [name="SamAccountName", dataType="String"], [name="UserPrincipalName", dataType="String"], [name="DisplayName", dataType="String"], [name="Enabled", dataType="Boolean"], [name="Department", dataType="String"], [name="Title", dataType="String"], [name="Country", dataType="String"], [name="ManagerDistinguishedName", dataType="String"], [name="ManagerADObjectKey", dataType="String"], [name="TenantUserKey", dataType="String"], [name="CloudMatchStatus", dataType="String"], [name="LastLogonTimestampRaw", dataType="String"], [name="LastLogonUtcDateTime", dataType="DateTime"], [name="LastLogonStatus", dataType="String"], [name="CreationRaw", dataType="String"], [name="CreationUtcDateTime", dataType="DateTime"], [name="CreationStatus", dataType="String"], [name="SourceCollectedDateTime", dataType="DateTime"]})
+

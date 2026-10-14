@@ -1,5 +1,6 @@
-/// Synthetic content site catalogue.
+/// Legacy synthetic fixture: not used by production report visuals or consolidated evidence. Removal is pending a separately cleared dependency-safe retirement; no real data.
 table Site
+	isHidden
 	lineageTag: 828d85ae-7841-4aba-8b91-d246a489babb
 
 	/// Business attribute Site Key.

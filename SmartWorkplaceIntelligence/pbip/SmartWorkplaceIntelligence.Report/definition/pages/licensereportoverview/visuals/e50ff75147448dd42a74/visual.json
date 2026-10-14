@@ -3,11 +3,11 @@
   "name": "e50ff75147448dd42a74",
   "position": {
     "x": 32,
-    "y": 1378,
+    "y": 328,
     "width": 1856,
-    "height": 190,
-    "z": 122,
-    "tabOrder": 122
+    "height": 152,
+    "z": 37,
+    "tabOrder": 37
   },
   "visual": {
     "visualType": "tableEx",
@@ -72,8 +72,8 @@
                 }
               },
               "queryRef": "License Report Summary.E3 to F3 Review Unknown",
-              "nativeQueryRef": "N/D",
-              "displayName": "N/D"
+              "nativeQueryRef": "Unknown",
+              "displayName": "Unknown"
             },
             {
               "field": {
@@ -130,6 +130,13 @@
       "columnHeaders": [
         {
           "properties": {
+            "autoSizeColumnWidth": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
             "columnAdjustment": {
               "expr": {
                 "Literal": {
@@ -137,7 +144,14 @@
                 }
               }
             },
-            "autoSizeColumnWidth": {
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
+            },
+            "bold": {
               "expr": {
                 "Literal": {
                   "Value": "true"
@@ -167,23 +181,9 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#005A9E'"
+                      "Value": "'#215E9E'"
                     }
                   }
-                }
-              }
-            },
-            "bold": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "fontSize": {
-              "expr": {
-                "Literal": {
-                  "Value": "10D"
                 }
               }
             }
@@ -193,10 +193,39 @@
       "values": [
         {
           "properties": {
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
+            },
             "wordWrap": {
               "expr": {
                 "Literal": {
-                  "Value": "true"
+                  "Value": "false"
+                }
+              }
+            },
+            "fontColorPrimary": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#183153'"
+                    }
+                  }
+                }
+              }
+            },
+            "fontColorSecondary": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#183153'"
+                    }
+                  }
                 }
               }
             },
@@ -216,38 +245,9 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#F3F7FA'"
+                      "Value": "'#F0F5FA'"
                     }
                   }
-                }
-              }
-            },
-            "fontColorPrimary": {
-              "solid": {
-                "color": {
-                  "expr": {
-                    "Literal": {
-                      "Value": "'#1F2937'"
-                    }
-                  }
-                }
-              }
-            },
-            "fontColorSecondary": {
-              "solid": {
-                "color": {
-                  "expr": {
-                    "Literal": {
-                      "Value": "'#1F2937'"
-                    }
-                  }
-                }
-              }
-            },
-            "fontSize": {
-              "expr": {
-                "Literal": {
-                  "Value": "9D"
                 }
               }
             }
@@ -275,7 +275,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'E3 to F3 review by license table.'"
+                  "Value": "'E3 → F3 eligibility summary · complete selected E3 family'"
                 }
               }
             }
@@ -295,7 +295,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'E3 to F3 review by license'"
+                  "Value": "'E3 → F3 eligibility summary · complete selected E3 family'"
                 }
               }
             },
@@ -462,7 +462,7 @@
   "filterConfig": {
     "filters": [
       {
-        "name": "d895fa5805732ddc63ea",
+        "name": "b1aa4e2ecd868839d943",
         "field": {
           "Column": {
             "Expression": {
@@ -514,7 +514,59 @@
             }
           ]
         }
+      },
+      {
+        "name": "f4cc08c14c8beef7862c",
+        "field": {
+          "Measure": {
+            "Expression": {
+              "SourceRef": {
+                "Entity": "License Report Summary"
+              }
+            },
+            "Property": "License Report Inventory Selection Included"
+          }
+        },
+        "type": "Advanced",
+        "filter": {
+          "Version": 2,
+          "From": [
+            {
+              "Name": "summary",
+              "Entity": "License Report Summary",
+              "Type": 0
+            }
+          ],
+          "Where": [
+            {
+              "Condition": {
+                "Comparison": {
+                  "ComparisonKind": 0,
+                  "Left": {
+                    "Measure": {
+                      "Expression": {
+                        "SourceRef": {
+                          "Source": "summary"
+                        }
+                      },
+                      "Property": "License Report Inventory Selection Included"
+                    }
+                  },
+                  "Right": {
+                    "Literal": {
+                      "Value": "1L"
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "howCreated": "User",
+        "isHiddenInViewMode": true,
+        "isLockedInViewMode": true
       }
     ]
-  }
+  },
+  "parentGroupName": "2f0bec9f812f4bf98e8a"
 }

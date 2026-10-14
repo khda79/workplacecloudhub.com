@@ -1,5 +1,6 @@
-/// Accepted user-group membership relationships.
+/// Legacy synthetic fixture: not used by production report visuals or consolidated evidence. Removal is pending a separately cleared dependency-safe retirement; no real data.
 table 'User Group Memberships'
+	isHidden
 	lineageTag: 747b7e76-bb90-406c-8eca-67915e580413
 
 	/// Business attribute Tenant Key.

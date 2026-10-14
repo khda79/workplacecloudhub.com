@@ -1,0 +1,219 @@
+/// Native source facet migrated from DimTeam; exact source grain, unresolved links and qualification retained. Uses the unified pinned batch, not a separate CMDB reader.
+table 'Native Team'
+	lineageTag: 04ed6c73-eeef-4f9b-acef-6961987476f9
+
+	/// Distinct Microsoft 365 groups provisioned as Teams. Migrated without changing the source calculation.
+	measure 'Native Teams' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimTeam"))
+			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((DISTINCTCOUNT('Native Team'[TenantTeamKey])), KEEPFILTERS(TREATAS(NativeKeys0, 'Native Team'[TenantTeamKey]))), BLANK()), BLANK()), (DISTINCTCOUNT('Native Team'[TenantTeamKey])))
+		formatString: #,0
+		displayFolder: Native evidence
+		lineageTag: 5a8fca3b-9959-4e3c-bf46-6cbe8f249e6e
+
+	/// Teams with activity reported within 90 days. Migrated without changing the source calculation.
+	measure 'Native Active Teams' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimTeam"))
+			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((CALCULATE([Native Teams], KEEPFILTERS('Native Team'[ActivityState] = "Active (90d)"))), KEEPFILTERS(TREATAS(NativeKeys0, 'Native Team'[TenantTeamKey]))), BLANK()), BLANK()), (CALCULATE([Native Teams], KEEPFILTERS('Native Team'[ActivityState] = "Active (90d)"))))
+		formatString: #,0
+		displayFolder: Native evidence
+		lineageTag: 53065359-4e50-4da0-b1a9-7e408fed688f
+
+	/// Teams active within 90 days divided by all Teams. Migrated without changing the source calculation.
+	measure 'Native Teams active rate' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimTeam"))
+			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((DIVIDE([Native Active Teams], [Native Teams])), KEEPFILTERS(TREATAS(NativeKeys0, 'Native Team'[TenantTeamKey]))), BLANK()), BLANK()), (DIVIDE([Native Active Teams], [Native Teams])))
+		formatString: 0.0%
+		displayFolder: Native evidence
+		lineageTag: 701ac858-4c0b-47e1-a7bd-b8900f21d738
+
+	/// Share of Teams by explicit 90-day activity state. Migrated without changing the source calculation.
+	measure 'Native Teams activity state rate' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimTeam"))
+			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((DIVIDE([Native Teams], CALCULATE([Native Teams], REMOVEFILTERS('Native Team'[ActivityState])))), KEEPFILTERS(TREATAS(NativeKeys0, 'Native Team'[TenantTeamKey]))), BLANK()), BLANK()), (DIVIDE([Native Teams], CALCULATE([Native Teams], REMOVEFILTERS('Native Team'[ActivityState])))))
+		formatString: 0.0%
+		displayFolder: Native evidence
+		lineageTag: 58e68eaf-c87e-4890-a2c3-a0934652caac
+
+	/// Average exact enumerated group-member count across Teams with complete membership coverage. Partial Teams are excluded. Migrated without changing the source calculation.
+	measure 'Native Average members per Team' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimTeam"))
+			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((CALCULATE(AVERAGE('Native Team'[MemberCount]), KEEPFILTERS('Native Team'[MembershipCoverageStatus] = "Complete"))), KEEPFILTERS(TREATAS(NativeKeys0, 'Native Team'[TenantTeamKey]))), BLANK()), BLANK()), (CALCULATE(AVERAGE('Native Team'[MemberCount]), KEEPFILTERS('Native Team'[MembershipCoverageStatus] = "Complete"))))
+		formatString: #,0.0
+		displayFolder: Native evidence
+		lineageTag: be047df7-6e99-415e-b70f-de9cb779dcbe
+
+	/// Teams for which Graph returned one or more member objects without an immutable identifier; exact links are preserved but the member total is incomplete. Migrated without changing the source calculation.
+	measure 'Native Teams with partial membership coverage' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimTeam"))
+			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((CALCULATE([Native Teams], KEEPFILTERS('Native Team'[MembershipCoverageStatus] = "Partial"))), KEEPFILTERS(TREATAS(NativeKeys0, 'Native Team'[TenantTeamKey]))), BLANK()), BLANK()), (CALCULATE([Native Teams], KEEPFILTERS('Native Team'[MembershipCoverageStatus] = "Partial"))))
+		formatString: #,0
+		displayFolder: Native evidence
+		lineageTag: 1184ed9c-6320-4e3c-9f51-5957cd3bc513
+
+	/// Teams whose exact owner enumeration returned no owner. Migrated without changing the source calculation.
+	measure 'Native Teams without owner' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimTeam"))
+			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((CALCULATE([Native Teams], KEEPFILTERS('Native Team'[OwnerCount] = 0))), KEEPFILTERS(TREATAS(NativeKeys0, 'Native Team'[TenantTeamKey]))), BLANK()), BLANK()), (CALCULATE([Native Teams], KEEPFILTERS('Native Team'[OwnerCount] = 0))))
+		formatString: #,0
+		displayFolder: Native evidence
+		lineageTag: 94a88591-be6e-4f21-b3e8-2c3c583a615c
+
+	/// Exact native-key entity context or existing inventory context. No name matching or inferred transitive membership. Unrelated entity selections return blank.
+	measure 'Native Context Rows · Native Team' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimTeam"))
+			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((COUNTROWS('Native Team')), KEEPFILTERS(TREATAS(NativeKeys0, 'Native Team'[TenantTeamKey]))), BLANK()), BLANK()), (COUNTROWS('Native Team')))
+		formatString: #,0
+		isHidden
+		lineageTag: 1b876499-893f-4845-9096-63d6b3682904
+
+	/// Native DimTeam attribute; source qualification is retained.
+	column TenantKey
+		dataType: string
+		isHidden
+		lineageTag: e601ad96-2f31-47b9-9369-8f86bd598412
+		summarizeBy: none
+		sourceColumn: TenantKey
+
+	/// Native DimTeam attribute; source qualification is retained.
+	column OrganizationKey
+		dataType: string
+		isHidden
+		lineageTag: aff4e092-403f-4ae6-aa91-4a47c25ebad2
+		summarizeBy: none
+		sourceColumn: OrganizationKey
+
+	/// Native DimTeam attribute; source qualification is retained.
+	column EnvironmentKey
+		dataType: string
+		isHidden
+		lineageTag: ced6066b-6282-44cb-86a8-f7aa0ac790b2
+		summarizeBy: none
+		sourceColumn: EnvironmentKey
+
+	/// Native DimTeam attribute; source qualification is retained.
+	column TenantId
+		dataType: string
+		isHidden
+		lineageTag: 86af18f1-6950-49d1-8a23-ca69c746ad87
+		summarizeBy: none
+		sourceColumn: TenantId
+
+	/// Native DimTeam attribute; source qualification is retained.
+	column TenantTeamKey
+		dataType: string
+		isHidden
+		lineageTag: 184f52da-79d4-4927-abe9-84e2dad74997
+		summarizeBy: none
+		sourceColumn: TenantTeamKey
+
+	/// Native DimTeam attribute; source qualification is retained.
+	column TeamId
+		dataType: string
+		lineageTag: 69942118-f0e4-4a02-a134-2bc3ae48b4e9
+		summarizeBy: none
+		sourceColumn: TeamId
+
+	/// Native DimTeam attribute; source qualification is retained.
+	column DisplayName
+		dataType: string
+		lineageTag: 703ad430-38fe-41b5-b5bf-b4f331765684
+		summarizeBy: none
+		sourceColumn: DisplayName
+
+	/// Native DimTeam attribute; source qualification is retained.
+	column Visibility
+		dataType: string
+		lineageTag: b0767b83-e7bc-481a-a82e-67e8e0cddc05
+		summarizeBy: none
+		sourceColumn: Visibility
+
+	/// Native DimTeam attribute; source qualification is retained.
+	column CreatedDateTime
+		dataType: dateTime
+		lineageTag: 474df962-9e03-442b-a523-e555daa363c4
+		summarizeBy: none
+		sourceColumn: CreatedDateTime
+
+	/// Native DimTeam attribute; source qualification is retained.
+	column LastActivityDate
+		dataType: dateTime
+		lineageTag: 2dfb0fe7-2434-48e5-817d-c8c366d938ec
+		summarizeBy: none
+		sourceColumn: LastActivityDate
+
+	/// Native DimTeam attribute; source qualification is retained.
+	column ActivityState
+		dataType: string
+		lineageTag: 2ac1b5c2-c9d1-43ae-b402-c51f07738540
+		summarizeBy: none
+		sourceColumn: ActivityState
+
+	/// Native DimTeam attribute; source qualification is retained.
+	column OwnerCount
+		dataType: int64
+		lineageTag: 1702f002-cc32-424f-be94-e0109a9b05d4
+		summarizeBy: none
+		sourceColumn: OwnerCount
+
+	/// Native DimTeam attribute; source qualification is retained.
+	column MemberCount
+		dataType: int64
+		lineageTag: 9a7bab9c-452b-4932-a179-d5a7abc54551
+		summarizeBy: none
+		sourceColumn: MemberCount
+
+	/// Native DimTeam attribute; source qualification is retained.
+	column GuestCount
+		dataType: int64
+		lineageTag: a27f964b-6c3a-4cc7-b3aa-57634a0b13c6
+		summarizeBy: none
+		sourceColumn: GuestCount
+
+	/// Native DimTeam attribute; source qualification is retained.
+	column UnresolvedMemberCount
+		dataType: int64
+		lineageTag: 6d1f7f48-bcd0-4bce-b43a-e47441e12787
+		summarizeBy: none
+		sourceColumn: UnresolvedMemberCount
+
+	/// Native DimTeam attribute; source qualification is retained.
+	column MembershipCoverageStatus
+		dataType: string
+		lineageTag: 34c00231-7b63-4d35-aa5d-fd921a305082
+		summarizeBy: none
+		sourceColumn: MembershipCoverageStatus
+
+	/// Native DimTeam attribute; source qualification is retained.
+	column IsArchived
+		dataType: boolean
+		lineageTag: 2357c075-f6b4-440f-ae20-3bbe021ca378
+		summarizeBy: none
+		sourceColumn: IsArchived
+
+	/// Native DimTeam attribute; source qualification is retained.
+	column SourceCollectedDateTime
+		dataType: dateTime
+		lineageTag: d1dcc04d-11e8-4134-a67c-3da5f52421b8
+		summarizeBy: none
+		sourceColumn: SourceCollectedDateTime
+
+	partition 'Native Team' = m
+		mode: import
+		source = NativeEvidenceTypes(Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("DimTeam.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]), {[name="TenantKey", dataType="String"], [name="OrganizationKey", dataType="String"], [name="EnvironmentKey", dataType="String"], [name="TenantId", dataType="String"], [name="TenantTeamKey", dataType="String"], [name="TeamId", dataType="String"], [name="DisplayName", dataType="String"], [name="Visibility", dataType="String"], [name="CreatedDateTime", dataType="DateTime"], [name="LastActivityDate", dataType="DateTime"], [name="ActivityState", dataType="String"], [name="OwnerCount", dataType="Int64"], [name="MemberCount", dataType="Int64"], [name="GuestCount", dataType="Int64"], [name="UnresolvedMemberCount", dataType="Int64"], [name="MembershipCoverageStatus", dataType="String"], [name="IsArchived", dataType="Boolean"], [name="SourceCollectedDateTime", dataType="DateTime"]})
+

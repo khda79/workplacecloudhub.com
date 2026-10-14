@@ -4,10 +4,10 @@
   "position": {
     "x": 96,
     "y": 16,
+    "width": 1000,
+    "height": 64,
     "z": 100,
-    "width": 1024,
-    "height": 48,
-    "tabOrder": 100
+    "tabOrder": 49
   },
   "visual": {
     "visualType": "textbox",
@@ -21,10 +21,9 @@
                   {
                     "value": "Which security controls have evidence-backed gaps?",
                     "textStyle": {
-                      "fontFamily": "Segoe UI Semibold",
-                      "fontSize": "26px",
-                      "color": "#172B4D",
-                      "fontWeight": "bold"
+                      "fontFamily": "Segoe UI",
+                      "fontSize": "20pt",
+                      "color": "#183153"
                     }
                   }
                 ],
@@ -110,6 +109,19 @@
               "expr": {
                 "Literal": {
                   "Value": "0D"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "general": [
+        {
+          "properties": {
+            "altText": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Which security controls have evidence-backed gaps?'"
                 }
               }
             }

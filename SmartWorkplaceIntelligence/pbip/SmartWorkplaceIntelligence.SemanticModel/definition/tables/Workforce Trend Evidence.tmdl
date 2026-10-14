@@ -49,8 +49,6 @@ table 'Workforce Trend Evidence'
 			relationship: dffe9089-38e6-4808-8d01-05543499391f
 			defaultHierarchy: LocalDateTable_e444bea0-7cd3-4554-903e-4527328b5859.'Date Hierarchy'
 
-		annotation UnderlyingDateTimeDataType = Date
-
 	column 'Date Key'
 		dataType: int64
 		isHidden

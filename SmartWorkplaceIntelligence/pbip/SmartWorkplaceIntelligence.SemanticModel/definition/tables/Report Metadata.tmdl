@@ -4,7 +4,7 @@ table 'Report Metadata'
 	lineageTag: 96c75a83-a101-4521-83c4-4fc2b02b7d79
 
 	/// Text summary of active reporting-period and geography filters.
-	measure 'Active Filter Summary' = "Reporting period: " & COALESCE(SELECTEDVALUE('Date'[Reporting Period]), "All") & " · Country: " & COALESCE(SELECTEDVALUE('Geography'[Country]), "All")
+	measure 'Active Filter Summary' = "Reporting period: " & COALESCE(SELECTEDVALUE('Date'[Reporting Period]), "All") & " · Country: " & COALESCE(SELECTEDVALUE('Country Selection'[Country]), "All")
 		formatString: @
 		displayFolder: Measures
 		lineageTag: 014cd9aa-8e27-4292-9607-547258ebf9d1
@@ -28,13 +28,13 @@ table 'Report Metadata'
 		lineageTag: b4aa9299-265f-4200-b64a-53fb5aaf3e07
 
 	/// Security-page evidence and active-scope summary.
-	measure 'Security Evidence Ribbon Text' = "Synthetic security evidence · " & [Active Filter Summary]
+	measure 'Security Evidence Ribbon Text' = "Prepared security evidence · qualification is not a health guarantee · " & [Active Filter Summary]
 		formatString: @
 		displayFolder: Measures
 		lineageTag: 1c3efa02-0071-4c48-b168-05c3ba7b4663
 
 	/// Service-page evidence and active-scope summary.
-	measure 'Service Evidence Ribbon Text' = "Synthetic service evidence · " & [Active Filter Summary]
+	measure 'Service Evidence Ribbon Text' = "Prepared service evidence · observed scope only · " & [Active Filter Summary]
 		formatString: @
 		displayFolder: Measures
 		lineageTag: 0276a36d-a2d7-4476-bcc9-248dd818dd2e
@@ -44,6 +44,16 @@ table 'Report Metadata'
 		formatString: @
 		displayFolder: Measures
 		lineageTag: c8e6518d-d602-4c03-b849-97e76d638287
+
+	/// Preserves the original dynamic evidence status together with the footer scope after removal of the duplicate ribbon.
+	measure 'Combined User Evidence Ribbon Text' = [User Evidence Ribbon Text] & UNICHAR(10) & "Evidence scope: prepared private snapshot · missing evidence is not zero · filters stay active across views · full detail available in task views."
+		displayFolder: Report footer
+		lineageTag: 771bd587-825b-494c-a45a-f904ad66c34a
+
+	/// Preserves the original dynamic evidence status together with the footer scope after removal of the duplicate ribbon.
+	measure 'Combined Device Evidence Ribbon Text' = [Device Evidence Ribbon Text] & UNICHAR(10) & "Evidence scope: prepared private snapshot · missing evidence is not zero · filters stay active across views · full detail available in task views."
+		displayFolder: Report footer
+		lineageTag: 6419c96c-92ed-4a44-8656-500affbf531b
 
 	/// Business attribute Product Version.
 	column 'Product Version'
@@ -68,7 +78,7 @@ table 'Report Metadata'
 		source =
 				let
 				    Source = #table(type table [#"Product Version" = nullable text, #"Evidence Disclaimer" = nullable text, #"Copyright Notice" = nullable text], {
-				        {"1.0.0-beta.1", "Synthetic evidence only. No tenant or production qualification.", "© 2026 WorkplaceCloudHub"}
+				        {"1.0.0-beta.1", "Governed prepared evidence. Reported scope only; missing evidence is not healthy zero.", "© 2026 WorkplaceCloudHub"}
 				    })
 				in
 				    Source

@@ -56,6 +56,11 @@ table 'Collaboration Adoption Evidence'
 		displayFolder: Collaboration | Evidence
 		lineageTag: a97a405c-6660-4bd6-be66-323a3512bfc0
 
+	/// Preserves the original dynamic evidence status together with the footer scope after removal of the duplicate ribbon.
+	measure 'Combined Collaboration Evidence Ribbon Text' = [Collaboration Evidence Ribbon Text] & UNICHAR(10) & "Evidence scope: prepared private snapshot · missing evidence is not zero · filters stay active across views · full detail available in task views."
+		displayFolder: Report footer
+		lineageTag: 01a03a62-653a-493d-a18c-8512fc8104cf
+
 	column Service
 		dataType: string
 		lineageTag: 878a91d8-b602-484a-bc71-f9414c4ff7be
@@ -165,8 +170,6 @@ table 'Collaboration Adoption Evidence'
 			isDefault
 			relationship: 1ed3a234-0fd6-44c0-a312-d960ad470074
 			defaultHierarchy: LocalDateTable_092d7bca-578d-4359-9d57-7785e5c19297.'Date Hierarchy'
-
-		annotation UnderlyingDateTimeDataType = Date
 
 	column 'Evidence Age Days'
 		dataType: int64

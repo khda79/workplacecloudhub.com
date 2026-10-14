@@ -2,12 +2,12 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json",
   "name": "e50ffcbab12026b6540c",
   "position": {
-    "x": 1480,
-    "y": 384,
+    "x": 32,
+    "y": 728,
+    "width": 1856,
+    "height": 248,
     "z": 110,
-    "height": 132,
-    "width": 408,
-    "tabOrder": 110
+    "tabOrder": 677
   },
   "visual": {
     "visualType": "barChart",
@@ -121,6 +121,13 @@
                   "Value": "48L"
                 }
               }
+            },
+            "labelDisplayUnits": {
+              "expr": {
+                "Literal": {
+                  "Value": "1D"
+                }
+              }
             }
           }
         }
@@ -213,7 +220,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Mailboxes by Exchange version. Ranked comparison for the current filter context.'"
+                  "Value": "'Mailboxes by Exchange version'"
                 }
               }
             }
@@ -240,7 +247,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "13D"
+                  "Value": "12D"
                 }
               }
             },
@@ -249,16 +256,9 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#1F2937'"
+                      "Value": "'#183153'"
                     }
                   }
-                }
-              }
-            },
-            "bold": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
                 }
               }
             }
@@ -311,9 +311,16 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#CBD8E5'"
+                      "Value": "'#CCDCEC'"
                     }
                   }
+                }
+              }
+            },
+            "radius": {
+              "expr": {
+                "Literal": {
+                  "Value": "8D"
                 }
               }
             },
@@ -321,13 +328,6 @@
               "expr": {
                 "Literal": {
                   "Value": "1D"
-                }
-              }
-            },
-            "radius": {
-              "expr": {
-                "Literal": {
-                  "Value": "12D"
                 }
               }
             }
@@ -367,14 +367,14 @@
             "left": {
               "expr": {
                 "Literal": {
-                  "Value": "10D"
+                  "Value": "8D"
                 }
               }
             },
             "right": {
               "expr": {
                 "Literal": {
-                  "Value": "10D"
+                  "Value": "8D"
                 }
               }
             }
@@ -383,5 +383,6 @@
       ]
     },
     "drillFilterOtherVisuals": true
-  }
+  },
+  "parentGroupName": "7a060b34882f0b9fc3b5"
 }

@@ -1,0 +1,171 @@
+/// Native source facet migrated from DimGroup; exact source grain, unresolved links and qualification retained. Uses the unified pinned batch, not a separate CMDB reader.
+table 'Native Group Evidence'
+	lineageTag: 3af188ea-6a2f-414b-8b4d-f107541c8afb
+
+	/// Exported Entra groups; no membership metric. Migrated without changing the source calculation.
+	measure 'Native Groups' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimGroup"))
+			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((COALESCE(COUNTROWS('Native Group Evidence'),0)), KEEPFILTERS(TREATAS(NativeKeys0, 'Native Group Evidence'[TenantGroupKey]))), BLANK()), BLANK()), (COALESCE(COUNTROWS('Native Group Evidence'),0)))
+		formatString: #,0
+		displayFolder: Native evidence
+		lineageTag: 7e974ac9-f6fe-4bea-b70b-4cdf2a9566bc
+
+	/// Detail rows only when exactly one group is selected outside visual row grouping. Blank otherwise. Migrated without changing the source calculation.
+	measure 'Native Group details' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimGroup"))
+			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((IF(COUNTROWS(ALLSELECTED('Native Group Evidence')) = 1, COUNTROWS('Native Group Evidence'))), KEEPFILTERS(TREATAS(NativeKeys0, 'Native Group Evidence'[TenantGroupKey]))), BLANK()), BLANK()), (IF(COUNTROWS(ALLSELECTED('Native Group Evidence')) = 1, COUNTROWS('Native Group Evidence'))))
+		formatString: #,0
+		displayFolder: Native evidence
+		lineageTag: c4236137-6b68-4a98-bfef-398c151adb3c
+
+	/// Exact native-key entity context or existing inventory context. No name matching or inferred transitive membership. Unrelated entity selections return blank.
+	measure 'Native Context Rows · Native Group Evidence' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimGroup"))
+			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((COUNTROWS('Native Group Evidence')), KEEPFILTERS(TREATAS(NativeKeys0, 'Native Group Evidence'[TenantGroupKey]))), BLANK()), BLANK()), (COUNTROWS('Native Group Evidence')))
+		formatString: #,0
+		isHidden
+		lineageTag: 3a2640ab-e52a-423a-a0d1-55ec4e258bca
+
+	/// Native DimGroup attribute; source qualification is retained.
+	column TenantKey
+		dataType: string
+		isHidden
+		lineageTag: bf44fa01-63d5-4207-883f-ddebbde4e0fa
+		summarizeBy: none
+		sourceColumn: TenantKey
+
+	/// Native DimGroup attribute; source qualification is retained.
+	column OrganizationKey
+		dataType: string
+		isHidden
+		lineageTag: 6ce222cb-8bfa-4bfc-98dd-79e58f7f6457
+		summarizeBy: none
+		sourceColumn: OrganizationKey
+
+	/// Native DimGroup attribute; source qualification is retained.
+	column EnvironmentKey
+		dataType: string
+		isHidden
+		lineageTag: 98a87a42-2a1d-4cb8-959e-e95e5019f1b5
+		summarizeBy: none
+		sourceColumn: EnvironmentKey
+
+	/// Native DimGroup attribute; source qualification is retained.
+	column TenantId
+		dataType: string
+		isHidden
+		lineageTag: 0fae21fa-96fc-4791-a516-6aa1d5a49a21
+		summarizeBy: none
+		sourceColumn: TenantId
+
+	/// Native DimGroup attribute; source qualification is retained.
+	column TenantGroupKey
+		dataType: string
+		isHidden
+		lineageTag: be5412d3-f1b8-4922-a25d-d137d163290e
+		summarizeBy: none
+		sourceColumn: TenantGroupKey
+
+	/// Native DimGroup attribute; source qualification is retained.
+	column CmdbGroupId
+		dataType: string
+		isHidden
+		lineageTag: c23dc1da-50f5-410c-a4a9-e5d7e39c4578
+		summarizeBy: none
+		sourceColumn: CmdbGroupId
+
+	/// Native DimGroup attribute; source qualification is retained.
+	column DisplayName
+		dataType: string
+		lineageTag: 5d8da629-8661-42cb-bb42-8358f84647b6
+		summarizeBy: none
+		sourceColumn: DisplayName
+
+	/// Native DimGroup attribute; source qualification is retained.
+	column MailEnabled
+		dataType: boolean
+		lineageTag: 1c2f40e6-2dee-418b-ba81-4117e5e1b09d
+		summarizeBy: none
+		sourceColumn: MailEnabled
+
+	/// Native DimGroup attribute; source qualification is retained.
+	column SecurityEnabled
+		dataType: boolean
+		lineageTag: 96ead339-2d81-4d94-8e2d-9a6dd054eacf
+		summarizeBy: none
+		sourceColumn: SecurityEnabled
+
+	/// Native DimGroup attribute; source qualification is retained.
+	column GroupTypes
+		dataType: string
+		lineageTag: 553a8f71-b477-42e7-bb04-8697f348064a
+		summarizeBy: none
+		sourceColumn: GroupTypes
+
+	/// Native DimGroup attribute; source qualification is retained.
+	column GroupSelection
+		dataType: string
+		lineageTag: 4a674395-3739-43fc-bdaf-04051bd9d48e
+		summarizeBy: none
+		sourceColumn: GroupSelection
+
+	/// Native DimGroup attribute; source qualification is retained.
+	column SourceGroupId
+		dataType: string
+		lineageTag: 6640ef3a-f267-4469-9546-5b78aa781b49
+		summarizeBy: none
+		sourceColumn: SourceGroupId
+
+	/// Native DimGroup attribute; source qualification is retained.
+	column MemberStatus
+		dataType: string
+		lineageTag: 12eba300-c516-4d04-b23b-896dd05dc6cc
+		summarizeBy: none
+		sourceColumn: MemberStatus
+
+	/// Native DimGroup attribute; source qualification is retained.
+	column OwnerStatus
+		dataType: string
+		lineageTag: bb73520a-cf13-40fc-a05a-347554f85b33
+		summarizeBy: none
+		sourceColumn: OwnerStatus
+
+	/// Native DimGroup attribute; source qualification is retained.
+	column SourceCollectedDateTime
+		dataType: dateTime
+		formatString: yyyy-MM-dd HH:mm:ss
+		lineageTag: 5c89e0fa-5bd0-4098-a722-ae54fd4ee571
+		summarizeBy: none
+		sourceColumn: SourceCollectedDateTime
+
+	/// Native DimGroup attribute; source qualification is retained.
+	column ObservedPathCount
+		dataType: int64
+		lineageTag: 567b4108-a471-4b8c-849a-5535729d75f2
+		summarizeBy: none
+		sourceColumn: ObservedPathCount
+
+	/// Native DimGroup attribute; source qualification is retained.
+	column ObservedPathStatus
+		dataType: string
+		lineageTag: 64b80028-dda9-49ee-b475-e4027d5a97d1
+		summarizeBy: none
+		sourceColumn: ObservedPathStatus
+
+	/// Exact governed native-key bridge; not a display-name or transitive match.
+	column 'CMDB Entity Key' = LOOKUPVALUE('CMDB Entity Alias'[Entity Key], 'CMDB Entity Alias'[Source Table], "DimGroup", 'CMDB Entity Alias'[Source Key], 'Native Group Evidence'[TenantGroupKey])
+		dataType: string
+		isHidden
+		lineageTag: c89f0a08-7c97-4692-9f3d-a3892e72f28b
+		summarizeBy: none
+
+	partition 'Native Group Evidence' = m
+		mode: import
+		source = NativeEvidenceTypes(Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("DimGroup.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]), {[name="TenantKey", dataType="String"], [name="OrganizationKey", dataType="String"], [name="EnvironmentKey", dataType="String"], [name="TenantId", dataType="String"], [name="TenantGroupKey", dataType="String"], [name="CmdbGroupId", dataType="String"], [name="DisplayName", dataType="String"], [name="MailEnabled", dataType="Boolean"], [name="SecurityEnabled", dataType="Boolean"], [name="GroupTypes", dataType="String"], [name="GroupSelection", dataType="String"], [name="SourceGroupId", dataType="String"], [name="MemberStatus", dataType="String"], [name="OwnerStatus", dataType="String"], [name="SourceCollectedDateTime", dataType="DateTime"], [name="ObservedPathCount", dataType="Int64"], [name="ObservedPathStatus", dataType="String"]})
+

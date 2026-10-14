@@ -57,8 +57,6 @@ table 'License Optimization Evidence'
 			relationship: a8ffeee3-5c94-4d3b-a29c-a0797ac5f7ea
 			defaultHierarchy: LocalDateTable_623a6266-3731-4f68-93d0-284adc5d666e.'Date Hierarchy'
 
-		annotation UnderlyingDateTimeDataType = Date
-
 	column 'Last Office Desktop Activation Date'
 		dataType: dateTime
 		formatString: Short Date
@@ -70,8 +68,6 @@ table 'License Optimization Evidence'
 			isDefault
 			relationship: f595e7d9-5845-4f20-aa6a-b7e4757074d9
 			defaultHierarchy: LocalDateTable_f6ef3481-f74c-4978-a1ae-1f67540b1732.'Date Hierarchy'
-
-		annotation UnderlyingDateTimeDataType = Date
 
 	column 'Mailbox Size GB'
 		dataType: double
@@ -123,8 +119,6 @@ table 'License Optimization Evidence'
 			isDefault
 			relationship: 7047d62c-e8ae-4866-a17c-d56696eb5b2e
 			defaultHierarchy: LocalDateTable_28a09470-b7cb-47dd-b260-23fa1d527587.'Date Hierarchy'
-
-		annotation UnderlyingDateTimeDataType = Date
 
 	partition 'License Optimization Evidence Import' = m
 		mode: import

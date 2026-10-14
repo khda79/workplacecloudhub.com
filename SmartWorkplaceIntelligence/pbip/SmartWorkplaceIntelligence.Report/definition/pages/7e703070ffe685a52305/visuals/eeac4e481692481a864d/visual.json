@@ -4,10 +4,10 @@
   "position": {
     "x": 96,
     "y": 16,
+    "width": 664,
+    "height": 64,
     "z": 100,
-    "width": 1024,
-    "height": 48,
-    "tabOrder": 100
+    "tabOrder": 49
   },
   "visual": {
     "visualType": "textbox",
@@ -22,7 +22,7 @@
                     "value": "Which mailbox protection gaps, scope anomalies, or stale evidence require action?",
                     "textStyle": {
                       "fontFamily": "Segoe UI Semibold",
-                      "fontSize": "26px",
+                      "fontSize": "20px",
                       "color": "#172B4D",
                       "fontWeight": "bold"
                     }
@@ -102,7 +102,7 @@
             "left": {
               "expr": {
                 "Literal": {
-                  "Value": "0D"
+                  "Value": "8D"
                 }
               }
             },

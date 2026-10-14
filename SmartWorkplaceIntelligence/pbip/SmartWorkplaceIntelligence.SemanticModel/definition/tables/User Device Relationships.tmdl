@@ -1,5 +1,6 @@
-/// Accepted user-device relationships.
+/// Legacy synthetic fixture: not used by production report visuals or consolidated evidence. Removal is pending a separately cleared dependency-safe retirement; no real data.
 table 'User Device Relationships'
+	isHidden
 	lineageTag: 21afd481-d2b4-4eec-aaec-9d8a7932d0b9
 
 	/// Business attribute Tenant Key.

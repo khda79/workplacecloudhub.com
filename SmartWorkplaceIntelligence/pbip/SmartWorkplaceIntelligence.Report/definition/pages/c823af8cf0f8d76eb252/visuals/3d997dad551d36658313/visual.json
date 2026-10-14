@@ -3,10 +3,10 @@
   "name": "3d997dad551d36658313",
   "position": {
     "x": 32,
-    "y": 256,
-    "z": 108,
-    "width": 400,
-    "height": 400,
+    "y": 336,
+    "z": 0,
+    "width": 600,
+    "height": 152,
     "tabOrder": 108
   },
   "visual": {
@@ -179,5 +179,7 @@
         }
       ]
     }
-  }
+  },
+  "isHidden": true,
+  "parentGroupName": "7dbfb122566e65960823"
 }

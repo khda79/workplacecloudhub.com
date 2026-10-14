@@ -1,0 +1,3544 @@
+{
+  "schemaVersion": 1,
+  "tables": [
+    {
+      "table": "Entra Membership Evidence",
+      "file": "EntraGroupMembership.csv",
+      "source": "Native SmartInventory receipt-qualified evidence",
+      "stagingIncludesTenantKey": true,
+      "uniqueKey": [
+        "TenantMembershipKey"
+      ],
+      "allowEmpty": true,
+      "columns": [
+        {
+          "name": "TenantKey",
+          "type": "string"
+        },
+        {
+          "name": "OrganizationKey",
+          "type": "string"
+        },
+        {
+          "name": "EnvironmentKey",
+          "type": "string"
+        },
+        {
+          "name": "TenantId",
+          "type": "string"
+        },
+        {
+          "name": "TenantMembershipKey",
+          "type": "string"
+        },
+        {
+          "name": "TenantGroupKey",
+          "type": "string"
+        },
+        {
+          "name": "TenantUserKey",
+          "type": "string"
+        },
+        {
+          "name": "TenantDeviceKey",
+          "type": "string"
+        },
+        {
+          "name": "NestedTenantGroupKey",
+          "type": "string"
+        },
+        {
+          "name": "MemberId",
+          "type": "string"
+        },
+        {
+          "name": "MemberType",
+          "type": "string"
+        },
+        {
+          "name": "MembershipKind",
+          "type": "string"
+        },
+        {
+          "name": "LinkStatus",
+          "type": "string"
+        },
+        {
+          "name": "SourceCollectedDateTime",
+          "type": "dateTime"
+        }
+      ]
+    },
+    {
+      "table": "AD User Evidence",
+      "file": "ADUserSource.csv",
+      "source": "Native SmartInventory receipt-qualified evidence",
+      "stagingIncludesTenantKey": true,
+      "uniqueKey": [
+        "TenantADUserKey"
+      ],
+      "allowEmpty": true,
+      "columns": [
+        {
+          "name": "TenantKey",
+          "type": "string"
+        },
+        {
+          "name": "OrganizationKey",
+          "type": "string"
+        },
+        {
+          "name": "EnvironmentKey",
+          "type": "string"
+        },
+        {
+          "name": "TenantId",
+          "type": "string"
+        },
+        {
+          "name": "TenantADUserKey",
+          "type": "string"
+        },
+        {
+          "name": "ObjectGUID",
+          "type": "string"
+        },
+        {
+          "name": "ObjectSID",
+          "type": "string"
+        },
+        {
+          "name": "DomainName",
+          "type": "string"
+        },
+        {
+          "name": "DistinguishedName",
+          "type": "string"
+        },
+        {
+          "name": "SamAccountName",
+          "type": "string"
+        },
+        {
+          "name": "UserPrincipalName",
+          "type": "string"
+        },
+        {
+          "name": "DisplayName",
+          "type": "string"
+        },
+        {
+          "name": "Enabled",
+          "type": "boolean"
+        },
+        {
+          "name": "Department",
+          "type": "string"
+        },
+        {
+          "name": "Title",
+          "type": "string"
+        },
+        {
+          "name": "Country",
+          "type": "string"
+        },
+        {
+          "name": "ManagerDistinguishedName",
+          "type": "string"
+        },
+        {
+          "name": "ManagerADObjectKey",
+          "type": "string"
+        },
+        {
+          "name": "TenantUserKey",
+          "type": "string"
+        },
+        {
+          "name": "CloudMatchStatus",
+          "type": "string"
+        },
+        {
+          "name": "LastLogonTimestampRaw",
+          "type": "string"
+        },
+        {
+          "name": "LastLogonUtcDateTime",
+          "type": "dateTime"
+        },
+        {
+          "name": "LastLogonStatus",
+          "type": "string"
+        },
+        {
+          "name": "CreationRaw",
+          "type": "string"
+        },
+        {
+          "name": "CreationUtcDateTime",
+          "type": "dateTime"
+        },
+        {
+          "name": "CreationStatus",
+          "type": "string"
+        },
+        {
+          "name": "SourceCollectedDateTime",
+          "type": "dateTime"
+        }
+      ]
+    },
+    {
+      "table": "AD Computer Evidence",
+      "file": "ADComputerSource.csv",
+      "source": "Native SmartInventory receipt-qualified evidence",
+      "stagingIncludesTenantKey": true,
+      "uniqueKey": [
+        "TenantADComputerKey"
+      ],
+      "allowEmpty": true,
+      "columns": [
+        {
+          "name": "TenantKey",
+          "type": "string"
+        },
+        {
+          "name": "OrganizationKey",
+          "type": "string"
+        },
+        {
+          "name": "EnvironmentKey",
+          "type": "string"
+        },
+        {
+          "name": "TenantId",
+          "type": "string"
+        },
+        {
+          "name": "TenantADComputerKey",
+          "type": "string"
+        },
+        {
+          "name": "ObjectGUID",
+          "type": "string"
+        },
+        {
+          "name": "ObjectSID",
+          "type": "string"
+        },
+        {
+          "name": "DomainName",
+          "type": "string"
+        },
+        {
+          "name": "DistinguishedName",
+          "type": "string"
+        },
+        {
+          "name": "Name",
+          "type": "string"
+        },
+        {
+          "name": "DNSHostName",
+          "type": "string"
+        },
+        {
+          "name": "Enabled",
+          "type": "boolean"
+        },
+        {
+          "name": "OperatingSystem",
+          "type": "string"
+        },
+        {
+          "name": "OperatingSystemVersion",
+          "type": "string"
+        },
+        {
+          "name": "TenantDeviceKey",
+          "type": "string"
+        },
+        {
+          "name": "CloudMatchStatus",
+          "type": "string"
+        },
+        {
+          "name": "LastLogonTimestampRaw",
+          "type": "string"
+        },
+        {
+          "name": "LastLogonUtcDateTime",
+          "type": "dateTime"
+        },
+        {
+          "name": "LastLogonStatus",
+          "type": "string"
+        },
+        {
+          "name": "CreationRaw",
+          "type": "string"
+        },
+        {
+          "name": "CreationUtcDateTime",
+          "type": "dateTime"
+        },
+        {
+          "name": "CreationStatus",
+          "type": "string"
+        },
+        {
+          "name": "SourceCollectedDateTime",
+          "type": "dateTime"
+        }
+      ]
+    },
+    {
+      "table": "AD Group Evidence",
+      "file": "ADGroupSource.csv",
+      "source": "Native SmartInventory receipt-qualified evidence",
+      "stagingIncludesTenantKey": true,
+      "uniqueKey": [
+        "TenantADGroupKey"
+      ],
+      "allowEmpty": true,
+      "columns": [
+        {
+          "name": "TenantKey",
+          "type": "string"
+        },
+        {
+          "name": "OrganizationKey",
+          "type": "string"
+        },
+        {
+          "name": "EnvironmentKey",
+          "type": "string"
+        },
+        {
+          "name": "TenantId",
+          "type": "string"
+        },
+        {
+          "name": "TenantADGroupKey",
+          "type": "string"
+        },
+        {
+          "name": "ObjectGUID",
+          "type": "string"
+        },
+        {
+          "name": "ObjectSID",
+          "type": "string"
+        },
+        {
+          "name": "DomainName",
+          "type": "string"
+        },
+        {
+          "name": "DistinguishedName",
+          "type": "string"
+        },
+        {
+          "name": "Name",
+          "type": "string"
+        },
+        {
+          "name": "DisplayName",
+          "type": "string"
+        },
+        {
+          "name": "GroupCategory",
+          "type": "string"
+        },
+        {
+          "name": "GroupScope",
+          "type": "string"
+        },
+        {
+          "name": "ManagedBy",
+          "type": "string"
+        },
+        {
+          "name": "ManagedByADObjectKey",
+          "type": "string"
+        },
+        {
+          "name": "TenantGroupKey",
+          "type": "string"
+        },
+        {
+          "name": "CloudMatchStatus",
+          "type": "string"
+        },
+        {
+          "name": "SourceCollectedDateTime",
+          "type": "dateTime"
+        }
+      ]
+    },
+    {
+      "table": "AD Domain Evidence",
+      "file": "ADDomainSource.csv",
+      "source": "Native SmartInventory receipt-qualified evidence",
+      "stagingIncludesTenantKey": true,
+      "uniqueKey": [
+        "TenantADDomainKey"
+      ],
+      "allowEmpty": true,
+      "columns": [
+        {
+          "name": "TenantKey",
+          "type": "string"
+        },
+        {
+          "name": "OrganizationKey",
+          "type": "string"
+        },
+        {
+          "name": "EnvironmentKey",
+          "type": "string"
+        },
+        {
+          "name": "TenantId",
+          "type": "string"
+        },
+        {
+          "name": "TenantADDomainKey",
+          "type": "string"
+        },
+        {
+          "name": "DNSRoot",
+          "type": "string"
+        },
+        {
+          "name": "DomainSID",
+          "type": "string"
+        },
+        {
+          "name": "NetBIOSName",
+          "type": "string"
+        },
+        {
+          "name": "Forest",
+          "type": "string"
+        },
+        {
+          "name": "DistinguishedName",
+          "type": "string"
+        },
+        {
+          "name": "DomainMode",
+          "type": "string"
+        },
+        {
+          "name": "PDCEmulator",
+          "type": "string"
+        },
+        {
+          "name": "RIDMaster",
+          "type": "string"
+        },
+        {
+          "name": "InfrastructureMaster",
+          "type": "string"
+        },
+        {
+          "name": "SourceCollectedDateTime",
+          "type": "dateTime"
+        }
+      ]
+    },
+    {
+      "table": "AD Object Evidence",
+      "file": "ADDirectoryObject.csv",
+      "source": "Native SmartInventory receipt-qualified evidence",
+      "stagingIncludesTenantKey": true,
+      "uniqueKey": [
+        "TenantADObjectKey"
+      ],
+      "allowEmpty": true,
+      "columns": [
+        {
+          "name": "TenantKey",
+          "type": "string"
+        },
+        {
+          "name": "OrganizationKey",
+          "type": "string"
+        },
+        {
+          "name": "EnvironmentKey",
+          "type": "string"
+        },
+        {
+          "name": "TenantId",
+          "type": "string"
+        },
+        {
+          "name": "TenantADObjectKey",
+          "type": "string"
+        },
+        {
+          "name": "ObjectGUID",
+          "type": "string"
+        },
+        {
+          "name": "ObjectSID",
+          "type": "string"
+        },
+        {
+          "name": "DomainName",
+          "type": "string"
+        },
+        {
+          "name": "DistinguishedName",
+          "type": "string"
+        },
+        {
+          "name": "ObjectClass",
+          "type": "string"
+        },
+        {
+          "name": "PrimaryGroupID",
+          "type": "string"
+        },
+        {
+          "name": "SourceCollectedDateTime",
+          "type": "dateTime"
+        }
+      ]
+    },
+    {
+      "table": "AD Membership Evidence",
+      "file": "ADMembership.csv",
+      "source": "Native SmartInventory receipt-qualified evidence",
+      "stagingIncludesTenantKey": true,
+      "uniqueKey": [
+        "TenantADMembershipKey"
+      ],
+      "allowEmpty": true,
+      "columns": [
+        {
+          "name": "TenantKey",
+          "type": "string"
+        },
+        {
+          "name": "OrganizationKey",
+          "type": "string"
+        },
+        {
+          "name": "EnvironmentKey",
+          "type": "string"
+        },
+        {
+          "name": "TenantId",
+          "type": "string"
+        },
+        {
+          "name": "TenantADMembershipKey",
+          "type": "string"
+        },
+        {
+          "name": "TenantADGroupKey",
+          "type": "string"
+        },
+        {
+          "name": "TenantGroupKey",
+          "type": "string"
+        },
+        {
+          "name": "TenantADObjectKey",
+          "type": "string"
+        },
+        {
+          "name": "TenantUserKey",
+          "type": "string"
+        },
+        {
+          "name": "TenantDeviceKey",
+          "type": "string"
+        },
+        {
+          "name": "GroupObjectGUID",
+          "type": "string"
+        },
+        {
+          "name": "GroupSID",
+          "type": "string"
+        },
+        {
+          "name": "MemberDistinguishedName",
+          "type": "string"
+        },
+        {
+          "name": "MemberObjectGUID",
+          "type": "string"
+        },
+        {
+          "name": "MemberSID",
+          "type": "string"
+        },
+        {
+          "name": "MemberObjectClass",
+          "type": "string"
+        },
+        {
+          "name": "MembershipKind",
+          "type": "string"
+        },
+        {
+          "name": "ResolutionStatus",
+          "type": "string"
+        },
+        {
+          "name": "CloudMatchStatus",
+          "type": "string"
+        },
+        {
+          "name": "SourceCollectedDateTime",
+          "type": "dateTime"
+        }
+      ]
+    },
+    {
+      "table": "Native Hardware Evidence",
+      "file": "DeviceHardware.csv",
+      "source": "Native SmartInventory receipt-qualified evidence",
+      "stagingIncludesTenantKey": true,
+      "uniqueKey": [
+        "TenantDeviceKey",
+        "ManagedDeviceId"
+      ],
+      "allowEmpty": true,
+      "columns": [
+        {
+          "name": "TenantKey",
+          "type": "string"
+        },
+        {
+          "name": "OrganizationKey",
+          "type": "string"
+        },
+        {
+          "name": "EnvironmentKey",
+          "type": "string"
+        },
+        {
+          "name": "TenantId",
+          "type": "string"
+        },
+        {
+          "name": "TenantDeviceKey",
+          "type": "string"
+        },
+        {
+          "name": "ManagedDeviceId",
+          "type": "string"
+        },
+        {
+          "name": "SerialNumber",
+          "type": "string"
+        },
+        {
+          "name": "Manufacturer",
+          "type": "string"
+        },
+        {
+          "name": "Model",
+          "type": "string"
+        },
+        {
+          "name": "Storage",
+          "type": "string"
+        },
+        {
+          "name": "PhysicalMemoryGiB",
+          "type": "double"
+        },
+        {
+          "name": "StorageStatus",
+          "type": "string"
+        },
+        {
+          "name": "MemoryStatus",
+          "type": "string"
+        },
+        {
+          "name": "HardwareCollectedDateTime",
+          "type": "dateTime"
+        },
+        {
+          "name": "InventoryCollectedDateTime",
+          "type": "dateTime"
+        },
+        {
+          "name": "CollectionCoverage",
+          "type": "string"
+        },
+        {
+          "name": "CollectionMode",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "table": "Device Source Evidence",
+      "file": "DeviceSource.csv",
+      "source": "Native SmartInventory receipt-qualified evidence",
+      "stagingIncludesTenantKey": true,
+      "uniqueKey": [
+        "SourceRecordKey"
+      ],
+      "allowEmpty": true,
+      "columns": [
+        {
+          "name": "TenantKey",
+          "type": "string"
+        },
+        {
+          "name": "OrganizationKey",
+          "type": "string"
+        },
+        {
+          "name": "EnvironmentKey",
+          "type": "string"
+        },
+        {
+          "name": "TenantId",
+          "type": "string"
+        },
+        {
+          "name": "TenantDeviceKey",
+          "type": "string"
+        },
+        {
+          "name": "SourceRecordKey",
+          "type": "string"
+        },
+        {
+          "name": "SourceSystem",
+          "type": "string"
+        },
+        {
+          "name": "SourceObjectId",
+          "type": "string"
+        },
+        {
+          "name": "SourceDeviceId",
+          "type": "string"
+        },
+        {
+          "name": "DeviceName",
+          "type": "string"
+        },
+        {
+          "name": "ManagementAgent",
+          "type": "string"
+        },
+        {
+          "name": "EnrollmentRaw",
+          "type": "string"
+        },
+        {
+          "name": "EnrollmentUtcDateTime",
+          "type": "dateTime"
+        },
+        {
+          "name": "EnrollmentStatus",
+          "type": "string"
+        },
+        {
+          "name": "EnrollmentType",
+          "type": "string"
+        },
+        {
+          "name": "ActivityKind",
+          "type": "string"
+        },
+        {
+          "name": "ActivityRaw",
+          "type": "string"
+        },
+        {
+          "name": "ActivityUtcDateTime",
+          "type": "dateTime"
+        },
+        {
+          "name": "ActivityStatus",
+          "type": "string"
+        },
+        {
+          "name": "SourceCollectedDateTime",
+          "type": "dateTime"
+        },
+        {
+          "name": "SelectionStatus",
+          "type": "string"
+        },
+        {
+          "name": "SelectionReason",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "table": "Native Country Evidence",
+      "file": "DimCountry.csv",
+      "source": "Native SmartInventory receipt-qualified evidence",
+      "stagingIncludesTenantKey": false,
+      "uniqueKey": [
+        "CountryLabel"
+      ],
+      "allowEmpty": false,
+      "columns": [
+        {
+          "name": "TenantKey",
+          "type": "string"
+        },
+        {
+          "name": "CountryLabel",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "table": "Date",
+      "file": "DimDate.csv",
+      "source": "Native SmartInventory receipt-qualified evidence",
+      "stagingIncludesTenantKey": false,
+      "uniqueKey": [
+        "Date"
+      ],
+      "allowEmpty": false,
+      "columns": [
+        {
+          "name": "TenantKey",
+          "type": "string"
+        },
+        {
+          "name": "Date",
+          "type": "dateTime"
+        },
+        {
+          "name": "Year",
+          "type": "int64"
+        },
+        {
+          "name": "Quarter",
+          "type": "string"
+        },
+        {
+          "name": "Month",
+          "type": "int64"
+        },
+        {
+          "name": "MonthName",
+          "type": "string"
+        },
+        {
+          "name": "Day",
+          "type": "int64"
+        }
+      ]
+    },
+    {
+      "table": "Native Discovered Application",
+      "file": "DimDetectedApplication.csv",
+      "source": "Native SmartInventory receipt-qualified evidence",
+      "stagingIncludesTenantKey": true,
+      "uniqueKey": [
+        "TenantApplicationKey"
+      ],
+      "allowEmpty": true,
+      "columns": [
+        {
+          "name": "TenantKey",
+          "type": "string"
+        },
+        {
+          "name": "OrganizationKey",
+          "type": "string"
+        },
+        {
+          "name": "EnvironmentKey",
+          "type": "string"
+        },
+        {
+          "name": "TenantId",
+          "type": "string"
+        },
+        {
+          "name": "TenantApplicationKey",
+          "type": "string"
+        },
+        {
+          "name": "AppId",
+          "type": "string"
+        },
+        {
+          "name": "SourceApplicationKey",
+          "type": "string"
+        },
+        {
+          "name": "DisplayName",
+          "type": "string"
+        },
+        {
+          "name": "Version",
+          "type": "string"
+        },
+        {
+          "name": "Publisher",
+          "type": "string"
+        },
+        {
+          "name": "DeviceCount",
+          "type": "int64"
+        },
+        {
+          "name": "ReportedDeviceCount",
+          "type": "int64"
+        },
+        {
+          "name": "ExactRelatedDeviceCount",
+          "type": "int64"
+        },
+        {
+          "name": "ResolvedDeviceCount",
+          "type": "int64"
+        },
+        {
+          "name": "UnresolvedDeviceCount",
+          "type": "int64"
+        },
+        {
+          "name": "RelationshipCoverageStatus",
+          "type": "string"
+        },
+        {
+          "name": "Platform",
+          "type": "string"
+        },
+        {
+          "name": "SourceCollectedDateTime",
+          "type": "dateTime"
+        }
+      ]
+    },
+    {
+      "table": "Native Device Evidence",
+      "file": "DimDevice.csv",
+      "source": "Native SmartInventory receipt-qualified evidence",
+      "stagingIncludesTenantKey": true,
+      "uniqueKey": [
+        "TenantDeviceKey"
+      ],
+      "allowEmpty": true,
+      "columns": [
+        {
+          "name": "TenantKey",
+          "type": "string"
+        },
+        {
+          "name": "OrganizationKey",
+          "type": "string"
+        },
+        {
+          "name": "EnvironmentKey",
+          "type": "string"
+        },
+        {
+          "name": "TenantId",
+          "type": "string"
+        },
+        {
+          "name": "TenantDeviceKey",
+          "type": "string"
+        },
+        {
+          "name": "CmdbDeviceId",
+          "type": "string"
+        },
+        {
+          "name": "DeviceName",
+          "type": "string"
+        },
+        {
+          "name": "OperatingSystem",
+          "type": "string"
+        },
+        {
+          "name": "OperatingSystemVersion",
+          "type": "string"
+        },
+        {
+          "name": "Ownership",
+          "type": "string"
+        },
+        {
+          "name": "ComplianceState",
+          "type": "string"
+        },
+        {
+          "name": "EncryptionState",
+          "type": "string"
+        },
+        {
+          "name": "ManagementState",
+          "type": "string"
+        },
+        {
+          "name": "ConfidenceScore",
+          "type": "double"
+        },
+        {
+          "name": "DeviceNameLabel",
+          "type": "string"
+        },
+        {
+          "name": "OperatingSystemLabel",
+          "type": "string"
+        },
+        {
+          "name": "OperatingSystemVersionLabel",
+          "type": "string"
+        },
+        {
+          "name": "OwnershipLabel",
+          "type": "string"
+        },
+        {
+          "name": "ComplianceStateLabel",
+          "type": "string"
+        },
+        {
+          "name": "EncryptionStateLabel",
+          "type": "string"
+        },
+        {
+          "name": "ManagementStateLabel",
+          "type": "string"
+        },
+        {
+          "name": "DeviceSelection",
+          "type": "string"
+        },
+        {
+          "name": "SourceDeviceId",
+          "type": "string"
+        },
+        {
+          "name": "SourceSystems",
+          "type": "string"
+        },
+        {
+          "name": "AssociatedAccount",
+          "type": "string"
+        },
+        {
+          "name": "AssociationStatus",
+          "type": "string"
+        },
+        {
+          "name": "CountryCode",
+          "type": "string"
+        },
+        {
+          "name": "CountryLabel",
+          "type": "string"
+        },
+        {
+          "name": "CountryStatus",
+          "type": "string"
+        },
+        {
+          "name": "PrimaryUserSourceId",
+          "type": "string"
+        },
+        {
+          "name": "SyncRaw",
+          "type": "string"
+        },
+        {
+          "name": "SyncUtcDateTime",
+          "type": "dateTime"
+        },
+        {
+          "name": "SyncStatus",
+          "type": "string"
+        },
+        {
+          "name": "SourceCollectedDateTime",
+          "type": "dateTime"
+        }
+      ]
+    },
+    {
+      "table": "Native Group Evidence",
+      "file": "DimGroup.csv",
+      "source": "Native SmartInventory receipt-qualified evidence",
+      "stagingIncludesTenantKey": true,
+      "uniqueKey": [
+        "TenantGroupKey"
+      ],
+      "allowEmpty": true,
+      "columns": [
+        {
+          "name": "TenantKey",
+          "type": "string"
+        },
+        {
+          "name": "OrganizationKey",
+          "type": "string"
+        },
+        {
+          "name": "EnvironmentKey",
+          "type": "string"
+        },
+        {
+          "name": "TenantId",
+          "type": "string"
+        },
+        {
+          "name": "TenantGroupKey",
+          "type": "string"
+        },
+        {
+          "name": "CmdbGroupId",
+          "type": "string"
+        },
+        {
+          "name": "DisplayName",
+          "type": "string"
+        },
+        {
+          "name": "MailEnabled",
+          "type": "boolean"
+        },
+        {
+          "name": "SecurityEnabled",
+          "type": "boolean"
+        },
+        {
+          "name": "GroupTypes",
+          "type": "string"
+        },
+        {
+          "name": "GroupSelection",
+          "type": "string"
+        },
+        {
+          "name": "SourceGroupId",
+          "type": "string"
+        },
+        {
+          "name": "MemberStatus",
+          "type": "string"
+        },
+        {
+          "name": "OwnerStatus",
+          "type": "string"
+        },
+        {
+          "name": "SourceCollectedDateTime",
+          "type": "dateTime"
+        },
+        {
+          "name": "ObservedPathCount",
+          "type": "int64"
+        },
+        {
+          "name": "ObservedPathStatus",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "table": "Native Configuration Catalog",
+      "file": "DimIntuneConfigurationPolicy.csv",
+      "source": "Native SmartInventory receipt-qualified evidence",
+      "stagingIncludesTenantKey": true,
+      "uniqueKey": [
+        "TenantPolicyKey"
+      ],
+      "allowEmpty": true,
+      "columns": [
+        {
+          "name": "TenantKey",
+          "type": "string"
+        },
+        {
+          "name": "OrganizationKey",
+          "type": "string"
+        },
+        {
+          "name": "EnvironmentKey",
+          "type": "string"
+        },
+        {
+          "name": "TenantId",
+          "type": "string"
+        },
+        {
+          "name": "TenantPolicyKey",
+          "type": "string"
+        },
+        {
+          "name": "PolicyId",
+          "type": "string"
+        },
+        {
+          "name": "DisplayName",
+          "type": "string"
+        },
+        {
+          "name": "Description",
+          "type": "string"
+        },
+        {
+          "name": "Platforms",
+          "type": "string"
+        },
+        {
+          "name": "Technologies",
+          "type": "string"
+        },
+        {
+          "name": "TemplateId",
+          "type": "string"
+        },
+        {
+          "name": "TemplateFamily",
+          "type": "string"
+        },
+        {
+          "name": "CreatedDateTime",
+          "type": "dateTime"
+        },
+        {
+          "name": "LastModifiedDateTime",
+          "type": "dateTime"
+        },
+        {
+          "name": "SourceCollectedDateTime",
+          "type": "dateTime"
+        }
+      ]
+    },
+    {
+      "table": "Native Managed Device Evidence",
+      "file": "DimIntuneManagedDevice.csv",
+      "source": "Native SmartInventory receipt-qualified evidence",
+      "stagingIncludesTenantKey": true,
+      "uniqueKey": [
+        "TenantIntuneDeviceKey"
+      ],
+      "allowEmpty": true,
+      "columns": [
+        {
+          "name": "TenantKey",
+          "type": "string"
+        },
+        {
+          "name": "OrganizationKey",
+          "type": "string"
+        },
+        {
+          "name": "EnvironmentKey",
+          "type": "string"
+        },
+        {
+          "name": "TenantId",
+          "type": "string"
+        },
+        {
+          "name": "TenantIntuneDeviceKey",
+          "type": "string"
+        },
+        {
+          "name": "TenantDeviceKey",
+          "type": "string"
+        },
+        {
+          "name": "ManagedDeviceId",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "table": "Native Service Plan",
+      "file": "DimLicenseServicePlan.csv",
+      "source": "Native SmartInventory receipt-qualified evidence",
+      "stagingIncludesTenantKey": true,
+      "uniqueKey": [
+        "TenantServicePlanKey"
+      ],
+      "allowEmpty": true,
+      "columns": [
+        {
+          "name": "TenantKey",
+          "type": "string"
+        },
+        {
+          "name": "OrganizationKey",
+          "type": "string"
+        },
+        {
+          "name": "EnvironmentKey",
+          "type": "string"
+        },
+        {
+          "name": "TenantId",
+          "type": "string"
+        },
+        {
+          "name": "TenantServicePlanKey",
+          "type": "string"
+        },
+        {
+          "name": "TenantSkuKey",
+          "type": "string"
+        },
+        {
+          "name": "SkuId",
+          "type": "string"
+        },
+        {
+          "name": "SkuPartNumber",
+          "type": "string"
+        },
+        {
+          "name": "ServicePlanId",
+          "type": "string"
+        },
+        {
+          "name": "ServicePlanName",
+          "type": "string"
+        },
+        {
+          "name": "ProvisioningStatus",
+          "type": "string"
+        },
+        {
+          "name": "AppliesTo",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "table": "Native License SKU",
+      "file": "DimLicenseSku.csv",
+      "source": "Native SmartInventory receipt-qualified evidence",
+      "stagingIncludesTenantKey": true,
+      "uniqueKey": [
+        "TenantSkuKey"
+      ],
+      "allowEmpty": true,
+      "columns": [
+        {
+          "name": "TenantKey",
+          "type": "string"
+        },
+        {
+          "name": "OrganizationKey",
+          "type": "string"
+        },
+        {
+          "name": "EnvironmentKey",
+          "type": "string"
+        },
+        {
+          "name": "TenantId",
+          "type": "string"
+        },
+        {
+          "name": "TenantSkuKey",
+          "type": "string"
+        },
+        {
+          "name": "SkuId",
+          "type": "string"
+        },
+        {
+          "name": "SkuPartNumber",
+          "type": "string"
+        },
+        {
+          "name": "ConsumedUnits",
+          "type": "int64"
+        },
+        {
+          "name": "EnabledUnits",
+          "type": "int64"
+        },
+        {
+          "name": "SkuPartNumberLabel",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "table": "Native SharePoint Site",
+      "file": "DimSharePointSite.csv",
+      "source": "Native SmartInventory receipt-qualified evidence",
+      "stagingIncludesTenantKey": true,
+      "uniqueKey": [
+        "TenantSiteKey"
+      ],
+      "allowEmpty": true,
+      "columns": [
+        {
+          "name": "TenantKey",
+          "type": "string"
+        },
+        {
+          "name": "OrganizationKey",
+          "type": "string"
+        },
+        {
+          "name": "EnvironmentKey",
+          "type": "string"
+        },
+        {
+          "name": "TenantId",
+          "type": "string"
+        },
+        {
+          "name": "TenantSiteKey",
+          "type": "string"
+        },
+        {
+          "name": "SiteId",
+          "type": "string"
+        },
+        {
+          "name": "SiteUrl",
+          "type": "string"
+        },
+        {
+          "name": "SiteName",
+          "type": "string"
+        },
+        {
+          "name": "OwnerPrincipalName",
+          "type": "string"
+        },
+        {
+          "name": "LastActivityDate",
+          "type": "dateTime"
+        },
+        {
+          "name": "ActivityState",
+          "type": "string"
+        },
+        {
+          "name": "StorageUsedBytes",
+          "type": "double"
+        },
+        {
+          "name": "StorageAllocatedBytes",
+          "type": "double"
+        },
+        {
+          "name": "RootWebTemplate",
+          "type": "string"
+        },
+        {
+          "name": "IsDeleted",
+          "type": "boolean"
+        },
+        {
+          "name": "SourceCollectedDateTime",
+          "type": "dateTime"
+        }
+      ]
+    },
+    {
+      "table": "Native Team",
+      "file": "DimTeam.csv",
+      "source": "Native SmartInventory receipt-qualified evidence",
+      "stagingIncludesTenantKey": true,
+      "uniqueKey": [
+        "TenantTeamKey"
+      ],
+      "allowEmpty": true,
+      "columns": [
+        {
+          "name": "TenantKey",
+          "type": "string"
+        },
+        {
+          "name": "OrganizationKey",
+          "type": "string"
+        },
+        {
+          "name": "EnvironmentKey",
+          "type": "string"
+        },
+        {
+          "name": "TenantId",
+          "type": "string"
+        },
+        {
+          "name": "TenantTeamKey",
+          "type": "string"
+        },
+        {
+          "name": "TeamId",
+          "type": "string"
+        },
+        {
+          "name": "DisplayName",
+          "type": "string"
+        },
+        {
+          "name": "Visibility",
+          "type": "string"
+        },
+        {
+          "name": "CreatedDateTime",
+          "type": "dateTime"
+        },
+        {
+          "name": "LastActivityDate",
+          "type": "dateTime"
+        },
+        {
+          "name": "ActivityState",
+          "type": "string"
+        },
+        {
+          "name": "OwnerCount",
+          "type": "int64"
+        },
+        {
+          "name": "MemberCount",
+          "type": "int64"
+        },
+        {
+          "name": "GuestCount",
+          "type": "int64"
+        },
+        {
+          "name": "UnresolvedMemberCount",
+          "type": "int64"
+        },
+        {
+          "name": "MembershipCoverageStatus",
+          "type": "string"
+        },
+        {
+          "name": "IsArchived",
+          "type": "boolean"
+        },
+        {
+          "name": "SourceCollectedDateTime",
+          "type": "dateTime"
+        }
+      ]
+    },
+    {
+      "table": "Tenant Evidence",
+      "file": "DimTenant.csv",
+      "source": "Native SmartInventory receipt-qualified evidence",
+      "stagingIncludesTenantKey": true,
+      "uniqueKey": [
+        "TenantKey"
+      ],
+      "allowEmpty": false,
+      "columns": [
+        {
+          "name": "TenantKey",
+          "type": "string"
+        },
+        {
+          "name": "OrganizationKey",
+          "type": "string"
+        },
+        {
+          "name": "EnvironmentKey",
+          "type": "string"
+        },
+        {
+          "name": "TenantId",
+          "type": "string"
+        },
+        {
+          "name": "TenantDisplayName",
+          "type": "string"
+        },
+        {
+          "name": "Environment",
+          "type": "string"
+        },
+        {
+          "name": "LastRefreshDateTime",
+          "type": "dateTime"
+        }
+      ]
+    },
+    {
+      "table": "Native User Evidence",
+      "file": "DimUser.csv",
+      "source": "Native SmartInventory receipt-qualified evidence",
+      "stagingIncludesTenantKey": true,
+      "uniqueKey": [
+        "TenantUserKey"
+      ],
+      "allowEmpty": true,
+      "columns": [
+        {
+          "name": "TenantKey",
+          "type": "string"
+        },
+        {
+          "name": "OrganizationKey",
+          "type": "string"
+        },
+        {
+          "name": "EnvironmentKey",
+          "type": "string"
+        },
+        {
+          "name": "TenantId",
+          "type": "string"
+        },
+        {
+          "name": "TenantUserKey",
+          "type": "string"
+        },
+        {
+          "name": "CmdbUserId",
+          "type": "string"
+        },
+        {
+          "name": "UserPrincipalName",
+          "type": "string"
+        },
+        {
+          "name": "DisplayName",
+          "type": "string"
+        },
+        {
+          "name": "AccountEnabled",
+          "type": "boolean"
+        },
+        {
+          "name": "UserType",
+          "type": "string"
+        },
+        {
+          "name": "Department",
+          "type": "string"
+        },
+        {
+          "name": "JobTitle",
+          "type": "string"
+        },
+        {
+          "name": "CountryCode",
+          "type": "string"
+        },
+        {
+          "name": "CountryLabel",
+          "type": "string"
+        },
+        {
+          "name": "CountryStatus",
+          "type": "string"
+        },
+        {
+          "name": "LastSignInDateTime",
+          "type": "dateTime"
+        },
+        {
+          "name": "LastNonInteractiveSignInDateTime",
+          "type": "dateTime"
+        },
+        {
+          "name": "LastSuccessfulSignInDateTime",
+          "type": "dateTime"
+        },
+        {
+          "name": "ActivityState",
+          "type": "string"
+        },
+        {
+          "name": "ConfidenceScore",
+          "type": "double"
+        },
+        {
+          "name": "AccountStatusLabel",
+          "type": "string"
+        },
+        {
+          "name": "DisplayNameLabel",
+          "type": "string"
+        },
+        {
+          "name": "UserPrincipalNameLabel",
+          "type": "string"
+        },
+        {
+          "name": "DepartmentLabel",
+          "type": "string"
+        },
+        {
+          "name": "UserTypeLabel",
+          "type": "string"
+        },
+        {
+          "name": "UserSelection",
+          "type": "string"
+        },
+        {
+          "name": "SourceUserId",
+          "type": "string"
+        },
+        {
+          "name": "CreationRaw",
+          "type": "string"
+        },
+        {
+          "name": "CreationUtcDateTime",
+          "type": "dateTime"
+        },
+        {
+          "name": "CreationStatus",
+          "type": "string"
+        },
+        {
+          "name": "SourceCollectedDateTime",
+          "type": "dateTime"
+        },
+        {
+          "name": "ManagerStatus",
+          "type": "string"
+        },
+        {
+          "name": "UserActivityStatus",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "table": "Verified Domain Evidence",
+      "file": "DimVerifiedDomain.csv",
+      "source": "Native SmartInventory receipt-qualified evidence",
+      "stagingIncludesTenantKey": true,
+      "uniqueKey": [
+        "TenantDomainKey"
+      ],
+      "allowEmpty": true,
+      "columns": [
+        {
+          "name": "TenantKey",
+          "type": "string"
+        },
+        {
+          "name": "OrganizationKey",
+          "type": "string"
+        },
+        {
+          "name": "EnvironmentKey",
+          "type": "string"
+        },
+        {
+          "name": "TenantId",
+          "type": "string"
+        },
+        {
+          "name": "TenantDomainKey",
+          "type": "string"
+        },
+        {
+          "name": "DomainId",
+          "type": "string"
+        },
+        {
+          "name": "IsDefault",
+          "type": "string"
+        },
+        {
+          "name": "IsInitial",
+          "type": "string"
+        },
+        {
+          "name": "AuthenticationType",
+          "type": "string"
+        },
+        {
+          "name": "SupportedServices",
+          "type": "string"
+        },
+        {
+          "name": "AvailabilityStatus",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "table": "Native Update Policy Evidence",
+      "file": "DimWindowsUpdatePolicy.csv",
+      "source": "Native SmartInventory receipt-qualified evidence",
+      "stagingIncludesTenantKey": true,
+      "uniqueKey": [
+        "TenantUpdatePolicyKey"
+      ],
+      "allowEmpty": true,
+      "columns": [
+        {
+          "name": "TenantKey",
+          "type": "string"
+        },
+        {
+          "name": "OrganizationKey",
+          "type": "string"
+        },
+        {
+          "name": "EnvironmentKey",
+          "type": "string"
+        },
+        {
+          "name": "TenantId",
+          "type": "string"
+        },
+        {
+          "name": "TenantUpdatePolicyKey",
+          "type": "string"
+        },
+        {
+          "name": "PolicyType",
+          "type": "string"
+        },
+        {
+          "name": "PolicyId",
+          "type": "string"
+        },
+        {
+          "name": "DisplayName",
+          "type": "string"
+        },
+        {
+          "name": "TargetVersion",
+          "type": "string"
+        },
+        {
+          "name": "ReleaseDateTime",
+          "type": "dateTime"
+        },
+        {
+          "name": "DaysUntilForcedReboot",
+          "type": "string"
+        },
+        {
+          "name": "CreatedDateTime",
+          "type": "dateTime"
+        },
+        {
+          "name": "LastModifiedDateTime",
+          "type": "dateTime"
+        },
+        {
+          "name": "SourceCollectedDateTime",
+          "type": "dateTime"
+        }
+      ]
+    },
+    {
+      "table": "Native Entity Finding",
+      "file": "EntityFinding.csv",
+      "source": "Native SmartInventory receipt-qualified evidence",
+      "stagingIncludesTenantKey": true,
+      "uniqueKey": [
+        "TenantFindingKey"
+      ],
+      "allowEmpty": true,
+      "columns": [
+        {
+          "name": "TenantKey",
+          "type": "string"
+        },
+        {
+          "name": "OrganizationKey",
+          "type": "string"
+        },
+        {
+          "name": "EnvironmentKey",
+          "type": "string"
+        },
+        {
+          "name": "TenantId",
+          "type": "string"
+        },
+        {
+          "name": "TenantFindingKey",
+          "type": "string"
+        },
+        {
+          "name": "TenantUserKey",
+          "type": "string"
+        },
+        {
+          "name": "TenantDeviceKey",
+          "type": "string"
+        },
+        {
+          "name": "TenantGroupKey",
+          "type": "string"
+        },
+        {
+          "name": "EntityType",
+          "type": "string"
+        },
+        {
+          "name": "EntityId",
+          "type": "string"
+        },
+        {
+          "name": "Severity",
+          "type": "string"
+        },
+        {
+          "name": "FindingType",
+          "type": "string"
+        },
+        {
+          "name": "Description",
+          "type": "string"
+        },
+        {
+          "name": "RecommendedAction",
+          "type": "string"
+        },
+        {
+          "name": "DetectedDateTime",
+          "type": "dateTime"
+        },
+        {
+          "name": "LinkStatus",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "table": "Native AD Intune Coverage",
+      "file": "FactADIntuneCoverage.csv",
+      "source": "Native SmartInventory receipt-qualified evidence",
+      "stagingIncludesTenantKey": true,
+      "uniqueKey": [
+        "TenantADComputerKey"
+      ],
+      "allowEmpty": true,
+      "columns": [
+        {
+          "name": "TenantKey",
+          "type": "string"
+        },
+        {
+          "name": "OrganizationKey",
+          "type": "string"
+        },
+        {
+          "name": "EnvironmentKey",
+          "type": "string"
+        },
+        {
+          "name": "TenantId",
+          "type": "string"
+        },
+        {
+          "name": "TenantADComputerKey",
+          "type": "string"
+        },
+        {
+          "name": "CmdbAdComputerId",
+          "type": "string"
+        },
+        {
+          "name": "DeviceName",
+          "type": "string"
+        },
+        {
+          "name": "Enabled",
+          "type": "boolean"
+        },
+        {
+          "name": "OperatingSystem",
+          "type": "string"
+        },
+        {
+          "name": "OperatingSystemVersion",
+          "type": "string"
+        },
+        {
+          "name": "TenantDeviceKey",
+          "type": "string"
+        },
+        {
+          "name": "EntraDeviceId",
+          "type": "string"
+        },
+        {
+          "name": "IntuneManagedDeviceId",
+          "type": "string"
+        },
+        {
+          "name": "CoverageState",
+          "type": "string"
+        },
+        {
+          "name": "MatchMethod",
+          "type": "string"
+        },
+        {
+          "name": "SourceCollectedDateTime",
+          "type": "dateTime"
+        }
+      ]
+    },
+    {
+      "table": "Autopilot Evidence",
+      "file": "FactAutopilotDevice.csv",
+      "source": "Native SmartInventory receipt-qualified evidence",
+      "stagingIncludesTenantKey": true,
+      "uniqueKey": [
+        "TenantAutopilotDeviceKey"
+      ],
+      "allowEmpty": true,
+      "columns": [
+        {
+          "name": "TenantKey",
+          "type": "string"
+        },
+        {
+          "name": "OrganizationKey",
+          "type": "string"
+        },
+        {
+          "name": "EnvironmentKey",
+          "type": "string"
+        },
+        {
+          "name": "TenantId",
+          "type": "string"
+        },
+        {
+          "name": "TenantAutopilotDeviceKey",
+          "type": "string"
+        },
+        {
+          "name": "AutopilotDeviceId",
+          "type": "string"
+        },
+        {
+          "name": "DisplayName",
+          "type": "string"
+        },
+        {
+          "name": "SerialNumber",
+          "type": "string"
+        },
+        {
+          "name": "Manufacturer",
+          "type": "string"
+        },
+        {
+          "name": "Model",
+          "type": "string"
+        },
+        {
+          "name": "GroupTag",
+          "type": "string"
+        },
+        {
+          "name": "EnrollmentState",
+          "type": "string"
+        },
+        {
+          "name": "LastContactedDateTime",
+          "type": "dateTime"
+        },
+        {
+          "name": "AzureAdDeviceId",
+          "type": "string"
+        },
+        {
+          "name": "ManagedDeviceId",
+          "type": "string"
+        },
+        {
+          "name": "SourceCollectedDateTime",
+          "type": "dateTime"
+        }
+      ]
+    },
+    {
+      "table": "Native Quality Finding",
+      "file": "FactDataQuality.csv",
+      "source": "Native SmartInventory receipt-qualified evidence",
+      "stagingIncludesTenantKey": true,
+      "uniqueKey": [
+        "TenantFindingKey"
+      ],
+      "allowEmpty": true,
+      "columns": [
+        {
+          "name": "TenantKey",
+          "type": "string"
+        },
+        {
+          "name": "OrganizationKey",
+          "type": "string"
+        },
+        {
+          "name": "EnvironmentKey",
+          "type": "string"
+        },
+        {
+          "name": "TenantId",
+          "type": "string"
+        },
+        {
+          "name": "TenantFindingKey",
+          "type": "string"
+        },
+        {
+          "name": "FindingId",
+          "type": "string"
+        },
+        {
+          "name": "Severity",
+          "type": "string"
+        },
+        {
+          "name": "EntityType",
+          "type": "string"
+        },
+        {
+          "name": "FindingType",
+          "type": "string"
+        },
+        {
+          "name": "DetectedDateTime",
+          "type": "dateTime"
+        },
+        {
+          "name": "SourceSystem",
+          "type": "string"
+        },
+        {
+          "name": "Description",
+          "type": "string"
+        },
+        {
+          "name": "RecommendedAction",
+          "type": "string"
+        },
+        {
+          "name": "SeverityLabel",
+          "type": "string"
+        },
+        {
+          "name": "FindingTypeLabel",
+          "type": "string"
+        },
+        {
+          "name": "DescriptionLabel",
+          "type": "string"
+        },
+        {
+          "name": "RecommendedActionLabel",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "table": "Native Device Application",
+      "file": "FactDeviceApplication.csv",
+      "source": "Native SmartInventory receipt-qualified evidence",
+      "stagingIncludesTenantKey": true,
+      "uniqueKey": [
+        "TenantDeviceApplicationKey"
+      ],
+      "allowEmpty": true,
+      "columns": [
+        {
+          "name": "TenantKey",
+          "type": "string"
+        },
+        {
+          "name": "OrganizationKey",
+          "type": "string"
+        },
+        {
+          "name": "EnvironmentKey",
+          "type": "string"
+        },
+        {
+          "name": "TenantId",
+          "type": "string"
+        },
+        {
+          "name": "TenantDeviceApplicationKey",
+          "type": "string"
+        },
+        {
+          "name": "TenantApplicationKey",
+          "type": "string"
+        },
+        {
+          "name": "ManagedDeviceId",
+          "type": "string"
+        },
+        {
+          "name": "AppId",
+          "type": "string"
+        },
+        {
+          "name": "ApplicationLinkStatus",
+          "type": "string"
+        },
+        {
+          "name": "DeviceLinkStatus",
+          "type": "string"
+        },
+        {
+          "name": "SourceCollectedDateTime",
+          "type": "dateTime"
+        }
+      ]
+    },
+    {
+      "table": "Native Compliance Evidence",
+      "file": "FactDeviceCompliance.csv",
+      "source": "Native SmartInventory receipt-qualified evidence",
+      "stagingIncludesTenantKey": true,
+      "uniqueKey": [
+        "TenantDeviceKey"
+      ],
+      "allowEmpty": true,
+      "columns": [
+        {
+          "name": "TenantKey",
+          "type": "string"
+        },
+        {
+          "name": "OrganizationKey",
+          "type": "string"
+        },
+        {
+          "name": "EnvironmentKey",
+          "type": "string"
+        },
+        {
+          "name": "TenantId",
+          "type": "string"
+        },
+        {
+          "name": "TenantDeviceKey",
+          "type": "string"
+        },
+        {
+          "name": "CmdbDeviceId",
+          "type": "string"
+        },
+        {
+          "name": "ComplianceState",
+          "type": "string"
+        },
+        {
+          "name": "LastSyncDateTime",
+          "type": "dateTime"
+        },
+        {
+          "name": "SourceSystem",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "table": "Native Endpoint Score Evidence",
+      "file": "FactEndpointAnalyticsDevice.csv",
+      "source": "Native SmartInventory receipt-qualified evidence",
+      "stagingIncludesTenantKey": true,
+      "uniqueKey": [
+        "TenantEndpointAnalyticsDeviceKey"
+      ],
+      "allowEmpty": true,
+      "columns": [
+        {
+          "name": "TenantKey",
+          "type": "string"
+        },
+        {
+          "name": "OrganizationKey",
+          "type": "string"
+        },
+        {
+          "name": "EnvironmentKey",
+          "type": "string"
+        },
+        {
+          "name": "TenantId",
+          "type": "string"
+        },
+        {
+          "name": "TenantEndpointAnalyticsDeviceKey",
+          "type": "string"
+        },
+        {
+          "name": "DeviceId",
+          "type": "string"
+        },
+        {
+          "name": "DeviceName",
+          "type": "string"
+        },
+        {
+          "name": "Manufacturer",
+          "type": "string"
+        },
+        {
+          "name": "Model",
+          "type": "string"
+        },
+        {
+          "name": "EndpointAnalyticsScore",
+          "type": "double"
+        },
+        {
+          "name": "StartupPerformanceScore",
+          "type": "double"
+        },
+        {
+          "name": "AppReliabilityScore",
+          "type": "double"
+        },
+        {
+          "name": "WorkFromAnywhereScore",
+          "type": "double"
+        },
+        {
+          "name": "SourceCollectedDateTime",
+          "type": "dateTime"
+        },
+        {
+          "name": "SourceSystem",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "table": "Native Upgrade Eligibility",
+      "file": "FactEndpointAnalyticsUpgradeEligibility.csv",
+      "source": "Native SmartInventory receipt-qualified evidence",
+      "stagingIncludesTenantKey": true,
+      "uniqueKey": [
+        "TenantUpgradeEligibilityDeviceKey"
+      ],
+      "allowEmpty": true,
+      "columns": [
+        {
+          "name": "TenantKey",
+          "type": "string"
+        },
+        {
+          "name": "OrganizationKey",
+          "type": "string"
+        },
+        {
+          "name": "EnvironmentKey",
+          "type": "string"
+        },
+        {
+          "name": "TenantId",
+          "type": "string"
+        },
+        {
+          "name": "TenantUpgradeEligibilityDeviceKey",
+          "type": "string"
+        },
+        {
+          "name": "MetricId",
+          "type": "string"
+        },
+        {
+          "name": "MetricDeviceId",
+          "type": "string"
+        },
+        {
+          "name": "DeviceId",
+          "type": "string"
+        },
+        {
+          "name": "DeviceIdSource",
+          "type": "string"
+        },
+        {
+          "name": "DeviceName",
+          "type": "string"
+        },
+        {
+          "name": "UpgradeEligibility",
+          "type": "string"
+        },
+        {
+          "name": "SourceCollectedDateTime",
+          "type": "dateTime"
+        },
+        {
+          "name": "SourceSystem",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "table": "Native Hybrid Coverage",
+      "file": "FactHybridIdentityCoverage.csv",
+      "source": "Native SmartInventory receipt-qualified evidence",
+      "stagingIncludesTenantKey": true,
+      "uniqueKey": [
+        "EntityType"
+      ],
+      "allowEmpty": true,
+      "columns": [
+        {
+          "name": "TenantKey",
+          "type": "string"
+        },
+        {
+          "name": "OrganizationKey",
+          "type": "string"
+        },
+        {
+          "name": "EnvironmentKey",
+          "type": "string"
+        },
+        {
+          "name": "TenantId",
+          "type": "string"
+        },
+        {
+          "name": "EntityType",
+          "type": "string"
+        },
+        {
+          "name": "OnPremisesCount",
+          "type": "int64"
+        },
+        {
+          "name": "CloudCount",
+          "type": "int64"
+        },
+        {
+          "name": "MatchedCount",
+          "type": "int64"
+        },
+        {
+          "name": "OnPremisesOnlyCount",
+          "type": "int64"
+        },
+        {
+          "name": "CloudOnlyCount",
+          "type": "int64"
+        },
+        {
+          "name": "DuplicateOnPremisesKeyCount",
+          "type": "int64"
+        },
+        {
+          "name": "DuplicateCloudKeyCount",
+          "type": "int64"
+        },
+        {
+          "name": "MatchRatio",
+          "type": "double"
+        },
+        {
+          "name": "MatchMethod",
+          "type": "string"
+        },
+        {
+          "name": "SourceCollectedDateTime",
+          "type": "dateTime"
+        }
+      ]
+    },
+    {
+      "table": "Native EXO Mailbox",
+      "file": "FactMailbox.csv",
+      "source": "Native SmartInventory receipt-qualified evidence",
+      "stagingIncludesTenantKey": true,
+      "uniqueKey": [
+        "TenantMailboxKey"
+      ],
+      "allowEmpty": true,
+      "columns": [
+        {
+          "name": "TenantKey",
+          "type": "string"
+        },
+        {
+          "name": "OrganizationKey",
+          "type": "string"
+        },
+        {
+          "name": "EnvironmentKey",
+          "type": "string"
+        },
+        {
+          "name": "TenantId",
+          "type": "string"
+        },
+        {
+          "name": "TenantMailboxKey",
+          "type": "string"
+        },
+        {
+          "name": "TenantUserKey",
+          "type": "string"
+        },
+        {
+          "name": "CmdbMailboxId",
+          "type": "string"
+        },
+        {
+          "name": "CmdbUserId",
+          "type": "string"
+        },
+        {
+          "name": "RecipientTypeDetails",
+          "type": "string"
+        },
+        {
+          "name": "ArchiveStatus",
+          "type": "string"
+        },
+        {
+          "name": "SourceSystem",
+          "type": "string"
+        },
+        {
+          "name": "DisplayName",
+          "type": "string"
+        },
+        {
+          "name": "PrimarySmtpAddress",
+          "type": "string"
+        },
+        {
+          "name": "LinkStatusLabel",
+          "type": "string"
+        },
+        {
+          "name": "DisplayNameLabel",
+          "type": "string"
+        },
+        {
+          "name": "PrimarySmtpAddressLabel",
+          "type": "string"
+        },
+        {
+          "name": "RecipientTypeDetailsLabel",
+          "type": "string"
+        },
+        {
+          "name": "ArchiveStatusLabel",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "table": "Native Mailbox Hosting",
+      "file": "FactMailboxHosting.csv",
+      "source": "Native SmartInventory receipt-qualified evidence",
+      "stagingIncludesTenantKey": true,
+      "uniqueKey": [
+        "MailboxHostingKey"
+      ],
+      "allowEmpty": true,
+      "columns": [
+        {
+          "name": "TenantKey",
+          "type": "string"
+        },
+        {
+          "name": "OrganizationKey",
+          "type": "string"
+        },
+        {
+          "name": "EnvironmentKey",
+          "type": "string"
+        },
+        {
+          "name": "TenantId",
+          "type": "string"
+        },
+        {
+          "name": "MailboxHostingKey",
+          "type": "string"
+        },
+        {
+          "name": "CountryLabel",
+          "type": "string"
+        },
+        {
+          "name": "HostingLocation",
+          "type": "string"
+        },
+        {
+          "name": "RecipientTypeDetails",
+          "type": "string"
+        },
+        {
+          "name": "MailboxTypeGroup",
+          "type": "string"
+        },
+        {
+          "name": "EvidenceSource",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "table": "Native Relationship Summary",
+      "file": "FactRelationshipOverview.csv",
+      "source": "Native SmartInventory receipt-qualified evidence",
+      "stagingIncludesTenantKey": false,
+      "uniqueKey": [
+        "RelationshipType"
+      ],
+      "allowEmpty": true,
+      "columns": [
+        {
+          "name": "TenantKey",
+          "type": "string"
+        },
+        {
+          "name": "RelationshipType",
+          "type": "string"
+        },
+        {
+          "name": "RelationshipCount",
+          "type": "int64"
+        },
+        {
+          "name": "EvidenceSource",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "table": "Native Team Membership",
+      "file": "FactTeamMember.csv",
+      "source": "Native SmartInventory receipt-qualified evidence",
+      "stagingIncludesTenantKey": true,
+      "uniqueKey": [
+        "TenantTeamMemberKey"
+      ],
+      "allowEmpty": true,
+      "columns": [
+        {
+          "name": "TenantKey",
+          "type": "string"
+        },
+        {
+          "name": "OrganizationKey",
+          "type": "string"
+        },
+        {
+          "name": "EnvironmentKey",
+          "type": "string"
+        },
+        {
+          "name": "TenantId",
+          "type": "string"
+        },
+        {
+          "name": "TenantTeamMemberKey",
+          "type": "string"
+        },
+        {
+          "name": "TenantTeamKey",
+          "type": "string"
+        },
+        {
+          "name": "TeamId",
+          "type": "string"
+        },
+        {
+          "name": "TenantUserKey",
+          "type": "string"
+        },
+        {
+          "name": "UserId",
+          "type": "string"
+        },
+        {
+          "name": "UserPrincipalName",
+          "type": "string"
+        },
+        {
+          "name": "UserType",
+          "type": "string"
+        },
+        {
+          "name": "Role",
+          "type": "string"
+        },
+        {
+          "name": "SourceCollectedDateTime",
+          "type": "dateTime"
+        }
+      ]
+    },
+    {
+      "table": "Native Workload Activity",
+      "file": "FactUserActivity.csv",
+      "source": "Native SmartInventory receipt-qualified evidence",
+      "stagingIncludesTenantKey": true,
+      "uniqueKey": [
+        "TenantUserActivityKey"
+      ],
+      "allowEmpty": true,
+      "columns": [
+        {
+          "name": "TenantKey",
+          "type": "string"
+        },
+        {
+          "name": "OrganizationKey",
+          "type": "string"
+        },
+        {
+          "name": "EnvironmentKey",
+          "type": "string"
+        },
+        {
+          "name": "TenantId",
+          "type": "string"
+        },
+        {
+          "name": "TenantUserActivityKey",
+          "type": "string"
+        },
+        {
+          "name": "TenantUserKey",
+          "type": "string"
+        },
+        {
+          "name": "UserPrincipalName",
+          "type": "string"
+        },
+        {
+          "name": "MatchStatus",
+          "type": "string"
+        },
+        {
+          "name": "ReportRefreshDate",
+          "type": "dateTime"
+        },
+        {
+          "name": "IsDeleted",
+          "type": "string"
+        },
+        {
+          "name": "ExchangeLastActivityDate",
+          "type": "dateTime"
+        },
+        {
+          "name": "OneDriveLastActivityDate",
+          "type": "dateTime"
+        },
+        {
+          "name": "SharePointLastActivityDate",
+          "type": "dateTime"
+        },
+        {
+          "name": "TeamsLastActivityDate",
+          "type": "dateTime"
+        },
+        {
+          "name": "LastActivityDate",
+          "type": "dateTime"
+        },
+        {
+          "name": "LastActivityWorkload",
+          "type": "string"
+        },
+        {
+          "name": "HasAnyM365Activity",
+          "type": "boolean"
+        },
+        {
+          "name": "AssignedProducts",
+          "type": "string"
+        },
+        {
+          "name": "SourceCollectedDateTime",
+          "type": "dateTime"
+        }
+      ]
+    },
+    {
+      "table": "Native User Device Link",
+      "file": "FactUserDeviceRelationship.csv",
+      "source": "Native SmartInventory receipt-qualified evidence",
+      "stagingIncludesTenantKey": true,
+      "uniqueKey": [
+        "TenantRelationshipKey"
+      ],
+      "allowEmpty": true,
+      "columns": [
+        {
+          "name": "TenantKey",
+          "type": "string"
+        },
+        {
+          "name": "OrganizationKey",
+          "type": "string"
+        },
+        {
+          "name": "EnvironmentKey",
+          "type": "string"
+        },
+        {
+          "name": "TenantId",
+          "type": "string"
+        },
+        {
+          "name": "TenantRelationshipKey",
+          "type": "string"
+        },
+        {
+          "name": "TenantUserKey",
+          "type": "string"
+        },
+        {
+          "name": "TenantDeviceKey",
+          "type": "string"
+        },
+        {
+          "name": "CmdbRelationshipId",
+          "type": "string"
+        },
+        {
+          "name": "CmdbUserId",
+          "type": "string"
+        },
+        {
+          "name": "CmdbDeviceId",
+          "type": "string"
+        },
+        {
+          "name": "RelationshipType",
+          "type": "string"
+        },
+        {
+          "name": "ConfidenceScore",
+          "type": "double"
+        },
+        {
+          "name": "SourceSystem",
+          "type": "string"
+        },
+        {
+          "name": "Account",
+          "type": "string"
+        },
+        {
+          "name": "Device",
+          "type": "string"
+        },
+        {
+          "name": "DeviceSelection",
+          "type": "string"
+        },
+        {
+          "name": "DeviceCompliance",
+          "type": "string"
+        },
+        {
+          "name": "DeviceSyncStatus",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "table": "Native User License",
+      "file": "FactUserLicense.csv",
+      "source": "Native SmartInventory receipt-qualified evidence",
+      "stagingIncludesTenantKey": true,
+      "uniqueKey": [
+        "SourceUserId",
+        "TenantSkuKey"
+      ],
+      "allowEmpty": true,
+      "columns": [
+        {
+          "name": "TenantKey",
+          "type": "string"
+        },
+        {
+          "name": "OrganizationKey",
+          "type": "string"
+        },
+        {
+          "name": "EnvironmentKey",
+          "type": "string"
+        },
+        {
+          "name": "TenantId",
+          "type": "string"
+        },
+        {
+          "name": "TenantUserKey",
+          "type": "string"
+        },
+        {
+          "name": "TenantSkuKey",
+          "type": "string"
+        },
+        {
+          "name": "CmdbUserId",
+          "type": "string"
+        },
+        {
+          "name": "SkuId",
+          "type": "string"
+        },
+        {
+          "name": "AssignmentState",
+          "type": "string"
+        },
+        {
+          "name": "AssignedDateTime",
+          "type": "dateTime"
+        },
+        {
+          "name": "SourceSystem",
+          "type": "string"
+        },
+        {
+          "name": "AssignmentStateLabel",
+          "type": "string"
+        },
+        {
+          "name": "SourceUserId",
+          "type": "string"
+        },
+        {
+          "name": "UserLinkStatus",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "table": "Native User Service Plan",
+      "file": "FactUserServicePlan.csv",
+      "source": "Native SmartInventory receipt-qualified evidence",
+      "stagingIncludesTenantKey": true,
+      "uniqueKey": [
+        "SourceUserId",
+        "TenantSkuKey",
+        "TenantServicePlanKey"
+      ],
+      "allowEmpty": true,
+      "columns": [
+        {
+          "name": "TenantKey",
+          "type": "string"
+        },
+        {
+          "name": "OrganizationKey",
+          "type": "string"
+        },
+        {
+          "name": "EnvironmentKey",
+          "type": "string"
+        },
+        {
+          "name": "TenantId",
+          "type": "string"
+        },
+        {
+          "name": "TenantUserKey",
+          "type": "string"
+        },
+        {
+          "name": "TenantSkuKey",
+          "type": "string"
+        },
+        {
+          "name": "TenantServicePlanKey",
+          "type": "string"
+        },
+        {
+          "name": "CmdbUserId",
+          "type": "string"
+        },
+        {
+          "name": "SkuId",
+          "type": "string"
+        },
+        {
+          "name": "ServicePlanId",
+          "type": "string"
+        },
+        {
+          "name": "ServicePlanName",
+          "type": "string"
+        },
+        {
+          "name": "IsEnabled",
+          "type": "string"
+        },
+        {
+          "name": "AssignmentState",
+          "type": "string"
+        },
+        {
+          "name": "SourceSystem",
+          "type": "string"
+        },
+        {
+          "name": "SourceUserId",
+          "type": "string"
+        },
+        {
+          "name": "UserLinkStatus",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "table": "Native Update Alert Evidence",
+      "file": "FactWindowsUpdateAlert.csv",
+      "source": "Native SmartInventory receipt-qualified evidence",
+      "stagingIncludesTenantKey": true,
+      "uniqueKey": [
+        "TenantUpdateAlertKey"
+      ],
+      "allowEmpty": true,
+      "columns": [
+        {
+          "name": "TenantKey",
+          "type": "string"
+        },
+        {
+          "name": "OrganizationKey",
+          "type": "string"
+        },
+        {
+          "name": "EnvironmentKey",
+          "type": "string"
+        },
+        {
+          "name": "TenantId",
+          "type": "string"
+        },
+        {
+          "name": "TenantUpdateAlertKey",
+          "type": "string"
+        },
+        {
+          "name": "SourceReport",
+          "type": "string"
+        },
+        {
+          "name": "DeviceId",
+          "type": "string"
+        },
+        {
+          "name": "DeviceName",
+          "type": "string"
+        },
+        {
+          "name": "PolicyId",
+          "type": "string"
+        },
+        {
+          "name": "EventDateTimeUTC",
+          "type": "string"
+        },
+        {
+          "name": "LastWUScanTimeUTC",
+          "type": "string"
+        },
+        {
+          "name": "AggregateState",
+          "type": "string"
+        },
+        {
+          "name": "CurrentDeviceUpdateStatus",
+          "type": "string"
+        },
+        {
+          "name": "LatestAlertMessage",
+          "type": "string"
+        },
+        {
+          "name": "SourceCollectedDateTime",
+          "type": "dateTime"
+        },
+        {
+          "name": "SourceSystem",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "table": "Hardware Coverage Evidence",
+      "file": "HardwareCoverage.csv",
+      "source": "Native SmartInventory receipt-qualified evidence",
+      "stagingIncludesTenantKey": true,
+      "uniqueKey": [
+        "Status"
+      ],
+      "allowEmpty": false,
+      "columns": [
+        {
+          "name": "TenantKey",
+          "type": "string"
+        },
+        {
+          "name": "OrganizationKey",
+          "type": "string"
+        },
+        {
+          "name": "EnvironmentKey",
+          "type": "string"
+        },
+        {
+          "name": "TenantId",
+          "type": "string"
+        },
+        {
+          "name": "Status",
+          "type": "string"
+        },
+        {
+          "name": "Coverage",
+          "type": "string"
+        },
+        {
+          "name": "Mode",
+          "type": "string"
+        },
+        {
+          "name": "RecordCount",
+          "type": "int64"
+        }
+      ]
+    },
+    {
+      "table": "Native License Assignment",
+      "file": "LicenseAssignmentPath.csv",
+      "source": "Native SmartInventory receipt-qualified evidence",
+      "stagingIncludesTenantKey": true,
+      "uniqueKey": [
+        "TenantAssignmentPathKey"
+      ],
+      "allowEmpty": true,
+      "columns": [
+        {
+          "name": "TenantKey",
+          "type": "string"
+        },
+        {
+          "name": "OrganizationKey",
+          "type": "string"
+        },
+        {
+          "name": "EnvironmentKey",
+          "type": "string"
+        },
+        {
+          "name": "TenantId",
+          "type": "string"
+        },
+        {
+          "name": "TenantAssignmentPathKey",
+          "type": "string"
+        },
+        {
+          "name": "TenantUserKey",
+          "type": "string"
+        },
+        {
+          "name": "TenantGroupKey",
+          "type": "string"
+        },
+        {
+          "name": "TenantSkuKey",
+          "type": "string"
+        },
+        {
+          "name": "SourceUserId",
+          "type": "string"
+        },
+        {
+          "name": "AssignedByGroupId",
+          "type": "string"
+        },
+        {
+          "name": "SkuId",
+          "type": "string"
+        },
+        {
+          "name": "Account",
+          "type": "string"
+        },
+        {
+          "name": "Product",
+          "type": "string"
+        },
+        {
+          "name": "AssignmentRoute",
+          "type": "string"
+        },
+        {
+          "name": "GroupName",
+          "type": "string"
+        },
+        {
+          "name": "AssignmentState",
+          "type": "string"
+        },
+        {
+          "name": "AssignmentError",
+          "type": "string"
+        },
+        {
+          "name": "ErrorStatus",
+          "type": "string"
+        },
+        {
+          "name": "DisabledPlanIds",
+          "type": "string"
+        },
+        {
+          "name": "AssignmentUpdatedRaw",
+          "type": "string"
+        },
+        {
+          "name": "AssignmentUpdatedUtcDateTime",
+          "type": "dateTime"
+        },
+        {
+          "name": "AssignmentUpdatedStatus",
+          "type": "string"
+        },
+        {
+          "name": "SourceCollectedDateTime",
+          "type": "dateTime"
+        },
+        {
+          "name": "GroupLinkStatus",
+          "type": "string"
+        },
+        {
+          "name": "UserLinkStatus",
+          "type": "string"
+        },
+        {
+          "name": "SkuLinkStatus",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "table": "Native Source Health",
+      "file": "SourceHealth.csv",
+      "source": "Native SmartInventory receipt-qualified evidence",
+      "stagingIncludesTenantKey": true,
+      "uniqueKey": [
+        "SourceName"
+      ],
+      "allowEmpty": false,
+      "columns": [
+        {
+          "name": "TenantKey",
+          "type": "string"
+        },
+        {
+          "name": "OrganizationKey",
+          "type": "string"
+        },
+        {
+          "name": "EnvironmentKey",
+          "type": "string"
+        },
+        {
+          "name": "TenantId",
+          "type": "string"
+        },
+        {
+          "name": "SourceName",
+          "type": "string"
+        },
+        {
+          "name": "Status",
+          "type": "string"
+        },
+        {
+          "name": "Coverage",
+          "type": "string"
+        },
+        {
+          "name": "SourceRows",
+          "type": "int64"
+        },
+        {
+          "name": "MaxItems",
+          "type": "int64"
+        },
+        {
+          "name": "StartedDateTime",
+          "type": "dateTime"
+        },
+        {
+          "name": "CompletedDateTime",
+          "type": "dateTime"
+        },
+        {
+          "name": "Evidence",
+          "type": "string"
+        },
+        {
+          "name": "SourceRowsLabel",
+          "type": "string"
+        },
+        {
+          "name": "CompletedDateTimeLabel",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "table": "Native Application Ranking",
+      "file": "TopApplication.csv",
+      "source": "Native SmartInventory receipt-qualified evidence",
+      "stagingIncludesTenantKey": false,
+      "uniqueKey": [
+        "ApplicationProduct"
+      ],
+      "allowEmpty": true,
+      "columns": [
+        {
+          "name": "TenantKey",
+          "type": "string"
+        },
+        {
+          "name": "ApplicationProduct",
+          "type": "string"
+        },
+        {
+          "name": "DisplayName",
+          "type": "string"
+        },
+        {
+          "name": "Publisher",
+          "type": "string"
+        },
+        {
+          "name": "Platform",
+          "type": "string"
+        },
+        {
+          "name": "VersionCount",
+          "type": "int64"
+        },
+        {
+          "name": "ReportedDeviceCount",
+          "type": "int64"
+        }
+      ]
+    },
+    {
+      "table": "CMDB Entity Evidence",
+      "file": "CMDBEntityEvidence.csv",
+      "source": "Governed native facets from the same captured batch; observed links only",
+      "stagingIncludesTenantKey": true,
+      "uniqueKey": [
+        "Entity Key"
+      ],
+      "allowEmpty": true,
+      "columns": [
+        {
+          "name": "TenantKey",
+          "type": "string"
+        },
+        {
+          "name": "Entity Key",
+          "type": "string"
+        },
+        {
+          "name": "Entity Type",
+          "type": "string"
+        },
+        {
+          "name": "Source System",
+          "type": "string"
+        },
+        {
+          "name": "Native ID",
+          "type": "string"
+        },
+        {
+          "name": "Display Name",
+          "type": "string"
+        },
+        {
+          "name": "Selection",
+          "type": "string"
+        },
+        {
+          "name": "State",
+          "type": "string"
+        },
+        {
+          "name": "Country",
+          "type": "string"
+        },
+        {
+          "name": "Acquired UTC",
+          "type": "string"
+        },
+        {
+          "name": "Source Table",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "table": "CMDB Relationship Evidence",
+      "file": "CMDBRelationshipEvidence.csv",
+      "source": "Governed native facets from the same captured batch; observed links only",
+      "stagingIncludesTenantKey": true,
+      "uniqueKey": [
+        "Link Key"
+      ],
+      "allowEmpty": true,
+      "columns": [
+        {
+          "name": "TenantKey",
+          "type": "string"
+        },
+        {
+          "name": "Link Key",
+          "type": "string"
+        },
+        {
+          "name": "From Entity Key",
+          "type": "string"
+        },
+        {
+          "name": "To Entity Key",
+          "type": "string"
+        },
+        {
+          "name": "From Name",
+          "type": "string"
+        },
+        {
+          "name": "To Name",
+          "type": "string"
+        },
+        {
+          "name": "Relationship Type",
+          "type": "string"
+        },
+        {
+          "name": "Source System",
+          "type": "string"
+        },
+        {
+          "name": "Resolution",
+          "type": "string"
+        },
+        {
+          "name": "Qualification",
+          "type": "string"
+        },
+        {
+          "name": "Source Table",
+          "type": "string"
+        },
+        {
+          "name": "Source Row Key",
+          "type": "string"
+        },
+        {
+          "name": "Acquired UTC",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "table": "CMDB Relationship Endpoint",
+      "file": "CMDBRelationshipEndpoint.csv",
+      "source": "Governed native facets from the same captured batch; observed links only",
+      "stagingIncludesTenantKey": true,
+      "uniqueKey": [
+        "Link Key",
+        "Entity Key"
+      ],
+      "allowEmpty": true,
+      "columns": [
+        {
+          "name": "TenantKey",
+          "type": "string"
+        },
+        {
+          "name": "Link Key",
+          "type": "string"
+        },
+        {
+          "name": "Entity Key",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "table": "CMDB Entity Alias",
+      "file": "CMDBEntityAlias.csv",
+      "source": "Governed native facets from the same captured batch; observed links only",
+      "stagingIncludesTenantKey": true,
+      "uniqueKey": [
+        "Entity Key",
+        "Source Table",
+        "Source Key"
+      ],
+      "allowEmpty": true,
+      "columns": [
+        {
+          "name": "TenantKey",
+          "type": "string"
+        },
+        {
+          "name": "Entity Key",
+          "type": "string"
+        },
+        {
+          "name": "Source Table",
+          "type": "string"
+        },
+        {
+          "name": "Source Key",
+          "type": "string"
+        },
+        {
+          "name": "Canonical Account Key",
+          "type": "string"
+        },
+        {
+          "name": "Canonical Device Key",
+          "type": "string"
+        }
+      ]
+    }
+  ]
+}

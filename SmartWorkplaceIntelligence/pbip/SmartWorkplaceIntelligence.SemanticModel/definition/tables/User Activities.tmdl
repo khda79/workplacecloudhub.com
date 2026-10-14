@@ -1,5 +1,6 @@
-/// Accepted user activity observations.
+/// Legacy synthetic fixture: not used by production report visuals or consolidated evidence. Removal is pending a separately cleared dependency-safe retirement; no real data.
 table 'User Activities'
+	isHidden
 	lineageTag: a96dafaf-12c0-4fe7-aec8-f15e8d6b0582
 
 	/// Users with accepted activity evidence divided by qualified users.

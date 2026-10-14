@@ -1,5 +1,6 @@
-/// Synthetic endpoint experience measurements.
+/// Legacy synthetic fixture: not used by production report visuals or consolidated evidence. Removal is pending a separately cleared dependency-safe retirement; no real data.
 table 'Endpoint Experience Measurements'
+	isHidden
 	lineageTag: ffb67e36-61ed-499f-afa7-1b79ff5a9e56
 
 	/// Eligible managed devices with a qualified endpoint measurement.

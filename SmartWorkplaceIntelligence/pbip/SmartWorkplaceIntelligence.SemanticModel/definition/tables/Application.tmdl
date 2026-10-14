@@ -1,5 +1,6 @@
-/// Normalized synthetic application and version catalogue.
+/// Legacy synthetic fixture: not used by production report visuals or consolidated evidence. Removal is pending a separately cleared dependency-safe retirement; no real data.
 table Application
+	isHidden
 	lineageTag: 5b337ec8-f5a8-4036-a35c-b3d2beaf0052
 
 	/// Business attribute Application Key.

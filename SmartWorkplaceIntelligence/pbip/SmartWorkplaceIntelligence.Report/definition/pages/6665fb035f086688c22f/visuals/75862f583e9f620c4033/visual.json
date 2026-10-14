@@ -2,7 +2,7 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
   "name": "75862f583e9f620c4033",
   "position": {
-    "x": 1056,
+    "x": 772,
     "y": 124,
     "z": 911,
     "width": 24,
@@ -117,5 +117,6 @@
       ]
     },
     "drillFilterOtherVisuals": true
-  }
+  },
+  "isHidden": true
 }

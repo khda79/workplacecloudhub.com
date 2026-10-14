@@ -1,0 +1,77 @@
+/// Native source facet migrated from TopApplication; exact source grain, unresolved links and qualification retained. Uses the unified pinned batch, not a separate CMDB reader.
+table 'Native Application Ranking'
+	lineageTag: f8650fc5-484c-40c6-b2b0-2841a34c1a00
+
+	/// Source-reported application-device occurrences for the five highest-volume normalized products; not distinct devices. Migrated without changing the source calculation.
+	measure 'Native Top application occurrences' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (SUM('Native Application Ranking'[ReportedDeviceCount])))
+		formatString: #,0
+		displayFolder: Native evidence
+		lineageTag: 99bd8b6e-c9b4-41f9-818b-ca122f5f6f7a
+
+	/// Share within the five highest-volume normalized application products; source-reported occurrences are not distinct devices. Migrated without changing the source calculation.
+	measure 'Native Top application occurrence rate' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (DIVIDE([Native Top application occurrences], CALCULATE([Native Top application occurrences], REMOVEFILTERS('Native Application Ranking'[ApplicationProduct])))))
+		formatString: 0.0%
+		displayFolder: Native evidence
+		lineageTag: 6e2bcf46-73ad-4bb7-927d-55e054dc29b7
+
+	/// Exact native-key entity context or existing inventory context. No name matching or inferred transitive membership. Unrelated entity selections return blank.
+	measure 'Native Context Rows · Native Application Ranking' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (COUNTROWS('Native Application Ranking')))
+		formatString: #,0
+		isHidden
+		lineageTag: 0f2546d5-bf24-4847-b50d-db4dbc2ceba2
+
+	/// Native TopApplication attribute; source qualification is retained.
+	column ApplicationProduct
+		dataType: string
+		lineageTag: 0e4734dc-b183-48cc-b293-388f64412fb4
+		summarizeBy: none
+		sourceColumn: ApplicationProduct
+
+	/// Native TopApplication attribute; source qualification is retained.
+	column DisplayName
+		dataType: string
+		lineageTag: 51cc3c72-41b4-4c6b-892b-2caa779af309
+		summarizeBy: none
+		sourceColumn: DisplayName
+
+	/// Native TopApplication attribute; source qualification is retained.
+	column Publisher
+		dataType: string
+		lineageTag: 1f785d3a-b2bb-42a7-8372-d8c75819e16f
+		summarizeBy: none
+		sourceColumn: Publisher
+
+	/// Native TopApplication attribute; source qualification is retained.
+	column Platform
+		dataType: string
+		lineageTag: c1fb93b5-4d49-4ae6-9aad-101444d31b64
+		summarizeBy: none
+		sourceColumn: Platform
+
+	/// Native TopApplication attribute; source qualification is retained.
+	column VersionCount
+		dataType: int64
+		lineageTag: 94f53e5b-7f37-40d3-a4a4-6ee690960667
+		summarizeBy: none
+		sourceColumn: VersionCount
+
+	/// Native TopApplication attribute; source qualification is retained.
+	column ReportedDeviceCount
+		dataType: int64
+		lineageTag: adeedcf6-3212-4d09-84aa-d614de14736f
+		summarizeBy: none
+		sourceColumn: ReportedDeviceCount
+
+	partition 'Native Application Ranking' = m
+		mode: import
+		source = NativeEvidenceTypes(Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("TopApplication.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]), {[name="ApplicationProduct", dataType="String"], [name="DisplayName", dataType="String"], [name="Publisher", dataType="String"], [name="Platform", dataType="String"], [name="VersionCount", dataType="Int64"], [name="ReportedDeviceCount", dataType="Int64"]})
+

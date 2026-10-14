@@ -1,0 +1,203 @@
+/// Native source facet migrated from DeviceSource; exact source grain, unresolved links and qualification retained. Uses the unified pinned batch, not a separate CMDB reader.
+table 'Device Source Evidence'
+	lineageTag: 205418fc-0982-4892-8a75-e90f854e9be4
+
+	/// Raw Entra and Intune evidence records; multiple records may describe one CMDB device. Migrated without changing the source calculation.
+	measure 'Native Device source records' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimDevice"))
+			VAR InventoryDevices = CALCULATETABLE(VALUES('Native Managed Device Evidence'[TenantDeviceKey]), REMOVEFILTERS('Native Managed Device Evidence'), TREATAS(VALUES('Device Inventory Evidence'[Device Source ID]), 'Native Managed Device Evidence'[ManagedDeviceId]))
+			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((COALESCE(COUNTROWS('Device Source Evidence'),0)), KEEPFILTERS(TREATAS(NativeKeys0, 'Device Source Evidence'[TenantDeviceKey]))), BLANK()), BLANK()), SWITCH(TRUE(), ISCROSSFILTERED('Device Inventory Evidence'), CALCULATE((COALESCE(COUNTROWS('Device Source Evidence'),0)), KEEPFILTERS(TREATAS(InventoryDevices, 'Device Source Evidence'[TenantDeviceKey]))), (COALESCE(COUNTROWS('Device Source Evidence'),0))))
+		formatString: #,0
+		displayFolder: Native evidence
+		lineageTag: 14b9a0bf-4524-4d00-949d-47c12b45a852
+
+	/// Detail rows only when exactly one device is selected outside visual row grouping. Blank otherwise. Migrated without changing the source calculation.
+	measure 'Native Device source details' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimDevice"))
+			VAR InventoryDevices = CALCULATETABLE(VALUES('Native Managed Device Evidence'[TenantDeviceKey]), REMOVEFILTERS('Native Managed Device Evidence'), TREATAS(VALUES('Device Inventory Evidence'[Device Source ID]), 'Native Managed Device Evidence'[ManagedDeviceId]))
+			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((IF(COUNTROWS(ALLSELECTED('Native Device Evidence')) = 1, COUNTROWS('Device Source Evidence'))), KEEPFILTERS(TREATAS(NativeKeys0, 'Device Source Evidence'[TenantDeviceKey]))), BLANK()), BLANK()), SWITCH(TRUE(), ISCROSSFILTERED('Device Inventory Evidence'), CALCULATE((IF(COUNTROWS(ALLSELECTED('Native Device Evidence')) = 1, COUNTROWS('Device Source Evidence'))), KEEPFILTERS(TREATAS(InventoryDevices, 'Device Source Evidence'[TenantDeviceKey]))), (IF(COUNTROWS(ALLSELECTED('Native Device Evidence')) = 1, COUNTROWS('Device Source Evidence')))))
+		formatString: #,0
+		displayFolder: Native evidence
+		lineageTag: 6ef79887-296a-4e3b-b6d7-d938b7d5ac9b
+
+	/// Exact native-key entity context or existing inventory context. No name matching or inferred transitive membership. Unrelated entity selections return blank.
+	measure 'Native Context Rows · Device Source Evidence' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimDevice"))
+			VAR InventoryDevices = CALCULATETABLE(VALUES('Native Managed Device Evidence'[TenantDeviceKey]), REMOVEFILTERS('Native Managed Device Evidence'), TREATAS(VALUES('Device Inventory Evidence'[Device Source ID]), 'Native Managed Device Evidence'[ManagedDeviceId]))
+			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((COUNTROWS('Device Source Evidence')), KEEPFILTERS(TREATAS(NativeKeys0, 'Device Source Evidence'[TenantDeviceKey]))), BLANK()), BLANK()), SWITCH(TRUE(), ISCROSSFILTERED('Device Inventory Evidence'), CALCULATE((COUNTROWS('Device Source Evidence')), KEEPFILTERS(TREATAS(InventoryDevices, 'Device Source Evidence'[TenantDeviceKey]))), (COUNTROWS('Device Source Evidence'))))
+		formatString: #,0
+		isHidden
+		lineageTag: 9860615a-dc98-4ed7-8e73-fe09a43b6b92
+
+	/// Native DeviceSource attribute; source qualification is retained.
+	column TenantKey
+		dataType: string
+		isHidden
+		lineageTag: cba40511-2659-4e0a-9a68-28deaf27363f
+		summarizeBy: none
+		sourceColumn: TenantKey
+
+	/// Native DeviceSource attribute; source qualification is retained.
+	column OrganizationKey
+		dataType: string
+		isHidden
+		lineageTag: f423cb04-0cfa-4cd2-b233-9b8f1aac3296
+		summarizeBy: none
+		sourceColumn: OrganizationKey
+
+	/// Native DeviceSource attribute; source qualification is retained.
+	column EnvironmentKey
+		dataType: string
+		isHidden
+		lineageTag: 251f2f0d-1333-4a06-b069-7afea98dd93c
+		summarizeBy: none
+		sourceColumn: EnvironmentKey
+
+	/// Native DeviceSource attribute; source qualification is retained.
+	column TenantId
+		dataType: string
+		isHidden
+		lineageTag: 9356f503-9106-4829-a1ef-da0b2e180b7d
+		summarizeBy: none
+		sourceColumn: TenantId
+
+	/// Native DeviceSource attribute; source qualification is retained.
+	column TenantDeviceKey
+		dataType: string
+		isHidden
+		lineageTag: f4db7df7-c44c-484e-9bf7-2fd08c594054
+		summarizeBy: none
+		sourceColumn: TenantDeviceKey
+
+	/// Native DeviceSource attribute; source qualification is retained.
+	column SourceRecordKey
+		dataType: string
+		lineageTag: fd6c7d5b-fab7-4a67-838f-3b2693d32873
+		summarizeBy: none
+		sourceColumn: SourceRecordKey
+
+	/// Native DeviceSource attribute; source qualification is retained.
+	column SourceSystem
+		dataType: string
+		lineageTag: e6100459-49bc-4ee6-89b3-eb72c2d2559a
+		summarizeBy: none
+		sourceColumn: SourceSystem
+
+	/// Native DeviceSource attribute; source qualification is retained.
+	column SourceObjectId
+		dataType: string
+		lineageTag: 18a9c0a7-a8d3-458c-9886-a4e4ed8707b0
+		summarizeBy: none
+		sourceColumn: SourceObjectId
+
+	/// Native DeviceSource attribute; source qualification is retained.
+	column SourceDeviceId
+		dataType: string
+		lineageTag: 71744c8e-1093-4599-b420-f0c0e1a97449
+		summarizeBy: none
+		sourceColumn: SourceDeviceId
+
+	/// Native DeviceSource attribute; source qualification is retained.
+	column DeviceName
+		dataType: string
+		lineageTag: 31ff44f6-a5b3-4b2d-9b81-4851fbbdd964
+		summarizeBy: none
+		sourceColumn: DeviceName
+
+	/// Native DeviceSource attribute; source qualification is retained.
+	column ManagementAgent
+		dataType: string
+		lineageTag: 4858ab7c-d2cb-4213-90d8-3c85642b2ea4
+		summarizeBy: none
+		sourceColumn: ManagementAgent
+
+	/// Native DeviceSource attribute; source qualification is retained.
+	column EnrollmentRaw
+		dataType: string
+		lineageTag: 666c9d28-59ce-49e0-bd27-a1afe261f9be
+		summarizeBy: none
+		sourceColumn: EnrollmentRaw
+
+	/// Native DeviceSource attribute; source qualification is retained.
+	column EnrollmentUtcDateTime
+		dataType: dateTime
+		formatString: yyyy-MM-dd HH:mm:ss
+		lineageTag: 3f479220-a237-4427-8894-1f41a4496c70
+		summarizeBy: none
+		sourceColumn: EnrollmentUtcDateTime
+
+	/// Native DeviceSource attribute; source qualification is retained.
+	column EnrollmentStatus
+		dataType: string
+		lineageTag: d16b5460-8ae0-40c0-8bef-eaee95e8bdc2
+		summarizeBy: none
+		sourceColumn: EnrollmentStatus
+
+	/// Native DeviceSource attribute; source qualification is retained.
+	column EnrollmentType
+		dataType: string
+		lineageTag: fb0f99eb-9054-4c78-b2ce-0b6f415f740b
+		summarizeBy: none
+		sourceColumn: EnrollmentType
+
+	/// Native DeviceSource attribute; source qualification is retained.
+	column ActivityKind
+		dataType: string
+		lineageTag: 5aa94232-5bd0-46cd-9e1f-9b7383fdbfae
+		summarizeBy: none
+		sourceColumn: ActivityKind
+
+	/// Native DeviceSource attribute; source qualification is retained.
+	column ActivityRaw
+		dataType: string
+		lineageTag: c6c343e7-db26-4e8d-a1f1-4c6595027ecf
+		summarizeBy: none
+		sourceColumn: ActivityRaw
+
+	/// Native DeviceSource attribute; source qualification is retained.
+	column ActivityUtcDateTime
+		dataType: dateTime
+		formatString: yyyy-MM-dd HH:mm:ss
+		lineageTag: 1f47e61d-3c3f-400a-931f-939f7ca84fe2
+		summarizeBy: none
+		sourceColumn: ActivityUtcDateTime
+
+	/// Native DeviceSource attribute; source qualification is retained.
+	column ActivityStatus
+		dataType: string
+		lineageTag: e7b800e8-07ee-46e9-a03f-b3de01793bab
+		summarizeBy: none
+		sourceColumn: ActivityStatus
+
+	/// Native DeviceSource attribute; source qualification is retained.
+	column SourceCollectedDateTime
+		dataType: dateTime
+		formatString: yyyy-MM-dd HH:mm:ss
+		lineageTag: e89b4151-f6a1-4cd2-b892-1f18786e9fde
+		summarizeBy: none
+		sourceColumn: SourceCollectedDateTime
+
+	/// Native DeviceSource attribute; source qualification is retained.
+	column SelectionStatus
+		dataType: string
+		lineageTag: aca04e97-d882-4802-85fd-880c76d9824f
+		summarizeBy: none
+		sourceColumn: SelectionStatus
+
+	/// Native DeviceSource attribute; source qualification is retained.
+	column SelectionReason
+		dataType: string
+		lineageTag: 0044820c-8a40-42aa-8908-bebc6960a778
+		summarizeBy: none
+		sourceColumn: SelectionReason
+
+	partition 'Device Source Evidence' = m
+		mode: import
+		source = NativeEvidenceTypes(Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("DeviceSource.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]), {[name="TenantKey", dataType="String"], [name="OrganizationKey", dataType="String"], [name="EnvironmentKey", dataType="String"], [name="TenantId", dataType="String"], [name="TenantDeviceKey", dataType="String"], [name="SourceRecordKey", dataType="String"], [name="SourceSystem", dataType="String"], [name="SourceObjectId", dataType="String"], [name="SourceDeviceId", dataType="String"], [name="DeviceName", dataType="String"], [name="ManagementAgent", dataType="String"], [name="EnrollmentRaw", dataType="String"], [name="EnrollmentUtcDateTime", dataType="DateTime"], [name="EnrollmentStatus", dataType="String"], [name="EnrollmentType", dataType="String"], [name="ActivityKind", dataType="String"], [name="ActivityRaw", dataType="String"], [name="ActivityUtcDateTime", dataType="DateTime"], [name="ActivityStatus", dataType="String"], [name="SourceCollectedDateTime", dataType="DateTime"], [name="SelectionStatus", dataType="String"], [name="SelectionReason", dataType="String"]})
+

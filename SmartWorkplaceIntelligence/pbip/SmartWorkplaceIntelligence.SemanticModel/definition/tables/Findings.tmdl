@@ -1,5 +1,6 @@
-/// Synthetic governed current issues and evidence-backed risk signals.
+/// Legacy synthetic fixture: not used by production report visuals or consolidated evidence. Removal is pending a separately cleared dependency-safe retirement; no real data.
 table Findings
+	isHidden
 	lineageTag: b1b8e433-dcb5-47da-8646-095d446f2569
 
 	/// Open findings with qualified evidence and actionable severity.

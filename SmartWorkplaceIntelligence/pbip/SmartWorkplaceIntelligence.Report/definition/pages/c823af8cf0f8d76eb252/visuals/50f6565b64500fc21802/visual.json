@@ -2,11 +2,11 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
   "name": "50f6565b64500fc21802",
   "position": {
-    "x": 44,
-    "y": 266,
+    "x": 32,
+    "y": 968,
     "z": 109,
-    "width": 300,
-    "height": 28,
+    "width": 600,
+    "height": 24,
     "tabOrder": 109
   },
   "visual": {
@@ -19,12 +19,11 @@
               {
                 "textRuns": [
                   {
-                    "value": "Security evidence qualification",
+                    "value": "endpoint policy and health evidence shown separately",
                     "textStyle": {
-                      "fontFamily": "Segoe UI Semibold",
-                      "fontSize": "13px",
-                      "color": "#172B4D",
-                      "fontWeight": "bold"
+                      "fontFamily": "Segoe UI",
+                      "fontSize": "12pt",
+                      "color": "#183153"
                     }
                   }
                 ],
@@ -115,7 +114,22 @@
             }
           }
         }
+      ],
+      "general": [
+        {
+          "properties": {
+            "altText": {
+              "expr": {
+                "Literal": {
+                  "Value": "'endpoint policy and health evidence shown separately'"
+                }
+              }
+            }
+          }
+        }
       ]
     }
-  }
+  },
+  "isHidden": true,
+  "parentGroupName": "7dbfb122566e65960823"
 }

@@ -1,0 +1,177 @@
+/// Native source facet migrated from FactAutopilotDevice; exact source grain, unresolved links and qualification retained. Uses the unified pinned batch, not a separate CMDB reader.
+table 'Autopilot Evidence'
+	lineageTag: 6e96eae8-29a5-49e8-adf6-ad4f62bd7144
+
+	/// Windows Autopilot device identities observed in the frozen collection. Migrated without changing the source calculation.
+	measure 'Native Autopilot devices' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "FactAutopilotDevice"))
+			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((COALESCE(COUNTROWS('Autopilot Evidence'),0)), KEEPFILTERS(TREATAS(NativeKeys0, 'Autopilot Evidence'[TenantAutopilotDeviceKey]))), BLANK()), BLANK()), (COALESCE(COUNTROWS('Autopilot Evidence'),0)))
+		formatString: #,0
+		displayFolder: Native evidence
+		lineageTag: edb4b3c2-79bc-458c-9c2f-28f504ff060a
+
+	/// Autopilot rows explicitly reported with enrollment state enrolled. Migrated without changing the source calculation.
+	measure 'Native Autopilot enrolled devices' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "FactAutopilotDevice"))
+			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((CALCULATE([Native Autopilot devices],KEEPFILTERS('Autopilot Evidence'[EnrollmentState] = "enrolled"))), KEEPFILTERS(TREATAS(NativeKeys0, 'Autopilot Evidence'[TenantAutopilotDeviceKey]))), BLANK()), BLANK()), (CALCULATE([Native Autopilot devices],KEEPFILTERS('Autopilot Evidence'[EnrollmentState] = "enrolled"))))
+		formatString: #,0
+		displayFolder: Native evidence
+		lineageTag: 71463cc1-a650-4b74-b4b5-5d30e6a1aa6e
+
+	/// Share of each Autopilot enrollment state within exact matched Intune devices. Migrated without changing the source calculation.
+	measure 'Native Autopilot enrollment rate' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "FactAutopilotDevice"))
+			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((DIVIDE([Native Selected Autopilot devices], CALCULATE([Native Selected Autopilot devices], REMOVEFILTERS('Autopilot Evidence'[EnrollmentState])))), KEEPFILTERS(TREATAS(NativeKeys0, 'Autopilot Evidence'[TenantAutopilotDeviceKey]))), BLANK()), BLANK()), (DIVIDE([Native Selected Autopilot devices], CALCULATE([Native Selected Autopilot devices], REMOVEFILTERS('Autopilot Evidence'[EnrollmentState])))))
+		formatString: 0.0%
+		displayFolder: Native evidence
+		lineageTag: 123cf284-0cc2-4824-b162-96d79fecc153
+
+	/// Autopilot records linked by exact Intune managed-device identifier to the filtered device population. Migrated without changing the source calculation.
+	measure 'Native Selected Autopilot devices' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "FactAutopilotDevice"))
+			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((VAR _deviceKeys = VALUES('Native Device Evidence'[TenantDeviceKey]) VAR _intuneIds = CALCULATETABLE(VALUES('Device Source Evidence'[SourceObjectId]), TREATAS(_deviceKeys, 'Device Source Evidence'[TenantDeviceKey]), KEEPFILTERS('Device Source Evidence'[SourceSystem] = "Intune")) RETURN CALCULATE(DISTINCTCOUNT('Autopilot Evidence'[ManagedDeviceId]), TREATAS(_intuneIds, 'Autopilot Evidence'[ManagedDeviceId]))), KEEPFILTERS(TREATAS(NativeKeys0, 'Autopilot Evidence'[TenantAutopilotDeviceKey]))), BLANK()), BLANK()), (VAR _deviceKeys = VALUES('Native Device Evidence'[TenantDeviceKey]) VAR _intuneIds = CALCULATETABLE(VALUES('Device Source Evidence'[SourceObjectId]), TREATAS(_deviceKeys, 'Device Source Evidence'[TenantDeviceKey]), KEEPFILTERS('Device Source Evidence'[SourceSystem] = "Intune")) RETURN CALCULATE(DISTINCTCOUNT('Autopilot Evidence'[ManagedDeviceId]), TREATAS(_intuneIds, 'Autopilot Evidence'[ManagedDeviceId]))))
+		formatString: #,0
+		displayFolder: Native evidence
+		lineageTag: 44b6eb48-7f19-4b95-9956-34c578e1c55d
+
+	/// Exact native-key entity context or existing inventory context. No name matching or inferred transitive membership. Unrelated entity selections return blank.
+	measure 'Native Context Rows · Autopilot Evidence' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "FactAutopilotDevice"))
+			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((COUNTROWS('Autopilot Evidence')), KEEPFILTERS(TREATAS(NativeKeys0, 'Autopilot Evidence'[TenantAutopilotDeviceKey]))), BLANK()), BLANK()), (COUNTROWS('Autopilot Evidence')))
+		formatString: #,0
+		isHidden
+		lineageTag: 93a4c33c-f65f-4c1d-a220-73e9f4d6c352
+
+	/// Native FactAutopilotDevice attribute; source qualification is retained.
+	column TenantKey
+		dataType: string
+		isHidden
+		lineageTag: d473dd1a-97c0-4db3-90f1-2ef0f6c9cf9f
+		summarizeBy: none
+		sourceColumn: TenantKey
+
+	/// Native FactAutopilotDevice attribute; source qualification is retained.
+	column OrganizationKey
+		dataType: string
+		isHidden
+		lineageTag: 49a79d1d-ae37-4c3d-97f3-48cb2d500069
+		summarizeBy: none
+		sourceColumn: OrganizationKey
+
+	/// Native FactAutopilotDevice attribute; source qualification is retained.
+	column EnvironmentKey
+		dataType: string
+		isHidden
+		lineageTag: 333c916b-96da-4c03-976e-a5cd93b072fb
+		summarizeBy: none
+		sourceColumn: EnvironmentKey
+
+	/// Native FactAutopilotDevice attribute; source qualification is retained.
+	column TenantId
+		dataType: string
+		isHidden
+		lineageTag: 66d43f7b-db99-4922-acdb-7aa6f38bf66b
+		summarizeBy: none
+		sourceColumn: TenantId
+
+	/// Native FactAutopilotDevice attribute; source qualification is retained.
+	column TenantAutopilotDeviceKey
+		dataType: string
+		isHidden
+		lineageTag: 425782d5-43cb-4883-b658-40606c4f8fe3
+		summarizeBy: none
+		sourceColumn: TenantAutopilotDeviceKey
+
+	/// Native FactAutopilotDevice attribute; source qualification is retained.
+	column AutopilotDeviceId
+		dataType: string
+		lineageTag: 500ed9a7-fba8-4792-a82b-8524f27cd481
+		summarizeBy: none
+		sourceColumn: AutopilotDeviceId
+
+	/// Native FactAutopilotDevice attribute; source qualification is retained.
+	column DisplayName
+		dataType: string
+		lineageTag: 26fc3201-2d1b-4ce0-8502-a66ffddced8e
+		summarizeBy: none
+		sourceColumn: DisplayName
+
+	/// Native FactAutopilotDevice attribute; source qualification is retained.
+	column SerialNumber
+		dataType: string
+		lineageTag: 4a0bc9a3-7948-436b-9206-cec9c5d258ad
+		summarizeBy: none
+		sourceColumn: SerialNumber
+
+	/// Native FactAutopilotDevice attribute; source qualification is retained.
+	column Manufacturer
+		dataType: string
+		lineageTag: efa6f70f-12f3-4ed9-8c5a-ab532cff29d3
+		summarizeBy: none
+		sourceColumn: Manufacturer
+
+	/// Native FactAutopilotDevice attribute; source qualification is retained.
+	column Model
+		dataType: string
+		lineageTag: e39b4b89-21a2-4185-8ccd-58b1d6ea4b1b
+		summarizeBy: none
+		sourceColumn: Model
+
+	/// Native FactAutopilotDevice attribute; source qualification is retained.
+	column GroupTag
+		dataType: string
+		lineageTag: b0345085-b23d-4632-a652-3eaa0d31d295
+		summarizeBy: none
+		sourceColumn: GroupTag
+
+	/// Native FactAutopilotDevice attribute; source qualification is retained.
+	column EnrollmentState
+		dataType: string
+		lineageTag: 20226a89-c58b-413e-a469-2866bfa84737
+		summarizeBy: none
+		sourceColumn: EnrollmentState
+
+	/// Native FactAutopilotDevice attribute; source qualification is retained.
+	column LastContactedDateTime
+		dataType: dateTime
+		formatString: yyyy-MM-dd HH:mm:ss
+		lineageTag: a515476f-1b55-467a-adc2-ebc0dd2d048e
+		summarizeBy: none
+		sourceColumn: LastContactedDateTime
+
+	/// Native FactAutopilotDevice attribute; source qualification is retained.
+	column AzureAdDeviceId
+		dataType: string
+		lineageTag: 026462c1-6d8a-4b1b-98f1-2af53e99aafc
+		summarizeBy: none
+		sourceColumn: AzureAdDeviceId
+
+	/// Native FactAutopilotDevice attribute; source qualification is retained.
+	column ManagedDeviceId
+		dataType: string
+		lineageTag: f71b595f-7dee-4cee-b419-d7c852554049
+		summarizeBy: none
+		sourceColumn: ManagedDeviceId
+
+	/// Native FactAutopilotDevice attribute; source qualification is retained.
+	column SourceCollectedDateTime
+		dataType: dateTime
+		formatString: yyyy-MM-dd HH:mm:ss
+		lineageTag: 3e90e8d3-c465-4477-a954-af0ac3e9e47c
+		summarizeBy: none
+		sourceColumn: SourceCollectedDateTime
+
+	partition 'Autopilot Evidence' = m
+		mode: import
+		source = NativeEvidenceTypes(Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("FactAutopilotDevice.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]), {[name="TenantKey", dataType="String"], [name="OrganizationKey", dataType="String"], [name="EnvironmentKey", dataType="String"], [name="TenantId", dataType="String"], [name="TenantAutopilotDeviceKey", dataType="String"], [name="AutopilotDeviceId", dataType="String"], [name="DisplayName", dataType="String"], [name="SerialNumber", dataType="String"], [name="Manufacturer", dataType="String"], [name="Model", dataType="String"], [name="GroupTag", dataType="String"], [name="EnrollmentState", dataType="String"], [name="LastContactedDateTime", dataType="DateTime", allowSourceWallClock=true, allowEmptyAutopilotContact=true], [name="AzureAdDeviceId", dataType="String"], [name="ManagedDeviceId", dataType="String"], [name="SourceCollectedDateTime", dataType="DateTime"]})
+

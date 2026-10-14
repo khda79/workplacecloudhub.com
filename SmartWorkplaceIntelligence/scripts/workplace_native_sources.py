@@ -1,0 +1,457 @@
+"""Native evidence source qualification for the unified Workplace pipeline.
+
+Pure offline validation; no capture, collection, publication or network access.
+"""
+import argparse
+import collections
+import csv
+import datetime as dt
+import hashlib
+import json
+import os
+import shutil
+import uuid
+from pathlib import Path
+import workplace_freshness as cmdb_freshness
+
+VERSION = '0.3.11'
+OWNER = 'SmartInventory-CMDB-Prepared'
+CONTRACT = Path(__file__).resolve().parents[1] / 'config/native-evidence-contract.json.txt'
+REGISTRY = Path(__file__).resolve().parents[2] / 'SmartM365/Modules/SmartM365.Core/SmartM365-CmdbSources.json.txt'
+MANIFEST = 'current.json.txt'
+UTC = dt.timezone.utc
+# Native AD group membership JSON can exceed Python's 128 KiB CSV default.
+CSV_FIELD_LIMIT = 64 * 1024 * 1024
+
+
+def load_json(path):
+    return json.loads(Path(path).read_text(encoding='utf-8-sig'))
+
+
+def sha(path):
+    digest = hashlib.sha256()
+    with Path(path).open('rb') as stream:
+        for chunk in iter(lambda: stream.read(4 * 1024 * 1024), b''):
+            digest.update(chunk)
+    return digest.hexdigest().upper()
+
+
+def utc(value):
+    try:
+        date = dt.datetime.fromisoformat(value.replace('Z', '+00:00'))
+        if date.tzinfo is None:
+            raise ValueError()
+        return date.astimezone(UTC)
+    except (ValueError, TypeError, AttributeError):
+        raise ValueError('Acquisition timestamp requires an explicit timezone') from None
+
+
+def rows(path):
+    previous_limit = csv.field_size_limit()
+    csv.field_size_limit(max(previous_limit, CSV_FIELD_LIMIT))
+    try:
+        with Path(path).open(encoding='utf-8-sig', newline='') as stream:
+            reader = csv.DictReader(stream)
+            if not reader.fieldnames or len(set(reader.fieldnames)) != len(reader.fieldnames):
+                raise ValueError('Missing or duplicate CSV header: ' + Path(path).name)
+            for row in reader:
+                if None in row or any(value is None for value in row.values()):
+                    raise ValueError('Malformed logical CSV row: ' + Path(path).name)
+                yield row
+    finally:
+        csv.field_size_limit(previous_limit)
+
+
+def header(path):
+    with Path(path).open(encoding='utf-8-sig', newline='') as stream:
+        return next(csv.reader(stream), [])
+
+
+def normalized(value):
+    return str(value or '').strip().casefold()
+
+
+def check_rows(path, definition, tenant, exact=False, identity=None):
+    columns = header(path)
+    required = definition['columns']
+    if (exact and columns != required) or not set(required).issubset(columns):
+        raise ValueError('CSV schema mismatch: ' + path.name)
+    seen, count = set(), 0
+    for row in rows(path):
+        count += 1
+        if 'TenantKey' in columns and row['TenantKey'] != tenant:
+            raise ValueError('Foreign or blank TenantKey: ' + path.name)
+        if identity and any(row[field] != value for field, value in identity.items() if field in columns):
+            raise ValueError('Source reporting identity mismatch: ' + path.name)
+        key = tuple(normalized(row[field]) for field in definition['key'])
+        optional = {'AssignedByGroupId'} if definition.get('name') == 'license_paths' else set()
+        if (definition.get('name') == 'ad_members' and row.get('MembershipKind') == 'PrimaryGroup'
+                and row.get('ResolutionStatus') == 'UnresolvedPrimaryGroup'):
+            optional = {'GroupObjectGUID'}  # The native group SID remains mandatory.
+        if any(not normalized(row[field]) for field in definition['key'] if field not in optional):
+            raise ValueError('Blank immutable key: ' + path.name)
+        if key and key in seen:
+            raise ValueError('Duplicate immutable key: ' + path.name)
+        seen.add(key)
+    if count == 0 and not definition['allowEmpty']:
+        raise ValueError('Unexpected empty table: ' + path.name)
+    return count
+
+
+def check_publication(path, proof):
+    """Collecting preserves the previous proof; replacement or failed replacement does not."""
+    run_path = path.with_name(path.name.replace('.current.json.txt', '.run.json.txt'))
+    protocol = proof.get('PublicationProtocol')
+    if protocol is not None and (type(protocol) is not int or protocol != 1):
+        raise ValueError('Unsupported source publication protocol: ' + path.name)
+    if protocol is None and not run_path.exists():
+        return  # Existing completed receipts remain compatible, never fabricated.
+    if run_path == path or run_path.is_symlink() or not run_path.is_file():
+        raise ValueError('Missing or unsafe source run state: ' + path.name)
+    run = load_json(run_path)
+    if (run.get('Owner') != 'SmartInventory-SourceRun' or run.get('ContractVersion') != '1.0'
+            or run.get('Status') not in {'Collecting', 'Publishing', 'Completed', 'Failed'}
+            or not run.get('RunId') or type(run.get('PublicationStarted')) is not bool
+            or type(run.get('UnqualifiedPublication')) is not bool
+            or any(run.get(field) != proof.get(field) for field in
+                   ('TenantKey', 'OrganizationKey', 'EnvironmentKey', 'TenantId', 'Producer'))):
+        raise ValueError('Invalid source run state: ' + path.name)
+    if run['Status'] == 'Publishing' or run['UnqualifiedPublication']:
+        raise ValueError('Canonical source publication is in progress or remains unqualified: ' + path.name)
+
+
+def producer_records(source, identity):
+    registry_hash = sha(REGISTRY)
+    registry = load_json(REGISTRY)
+    records, receipts = {}, []
+    producers = set()
+    for definition in registry['Producers']:
+        name = definition['Script']
+        if name in producers:
+            raise ValueError('Duplicate producer registry entry')
+        producers.add(name)
+        path = source / definition['Receipt']
+        context = f"Producer={name!r}; Receipt={definition['Receipt']!r}"
+        if Path(definition['Receipt']).name != definition['Receipt'] or path.is_symlink():
+            raise ValueError('Unsafe or linked producer receipt: ' + context)
+        if not path.is_file():
+            raise ValueError('Missing producer completion proof: ' + context)
+        digest = sha(path)
+        proof = load_json(path)
+        check_publication(path, proof)
+        receipt_kind = (proof.get('Owner'), proof.get('ContractVersion'))
+        if receipt_kind not in {('SmartInventory-CmdbSourceReceipt', '1.1'),
+                                ('SmartInventory-SourceReceipt', '1.2')}:
+            raise ValueError('Producer completion proof owner or version mismatch: ' + context)
+        shared = receipt_kind == ('SmartInventory-SourceReceipt', '1.2')
+        coverage = accepted_ad_coverage(proof) if proof.get('DomainCoverage') is not None else None
+        if shared and (proof.get('ScopeQualification') != 'ConsumerScope'
+                       or set(proof.get('RequiredFiles', [])) != set(definition['Files'])):
+            raise ValueError('Producer consumer-scope declaration mismatch: ' + context)
+        if any(proof.get(field) != value for field, value in identity.items()):
+            raise ValueError('Producer completion proof tenant identity mismatch: ' + context)
+        if proof.get('Producer') != name or not proof.get('ScriptVersion') or not proof.get('RunId'):
+            raise ValueError('Producer completion proof lineage mismatch: ' + context)
+        if (proof.get('Status') != 'Completed' or proof.get('IsPartialInventory') is not bool(coverage)
+                or type(proof.get('Errors')) is not int or proof['Errors'] != 0):
+            raise ValueError('Incomplete producer completion proof: ' + context
+                             + f"; Status={proof.get('Status')!r}"
+                             + f"; IsPartialInventory={proof.get('IsPartialInventory')!r}"
+                             + f"; Errors={proof.get('Errors')!r} ({type(proof.get('Errors')).__name__})")
+        if proof.get('Scope') != definition['Scope']:
+            raise ValueError('Producer full scope mismatch: ' + context)
+        start, end = utc(proof['StartedAtUtc']), utc(proof['CompletedAtUtc'])
+        local = {}
+        for record in proof['Files']:
+            file = record['File']
+            if Path(file).name != file or (file in records and file in definition['Files']) or file in local:
+                raise ValueError('Unsafe or repeated source proof filename: ' + context)
+            if any(record.get(field) != proof[field] for field in ('Producer','ScriptVersion','RunId','StartedAtUtc','Scope')):
+                raise ValueError('Source record lineage or scope differs from producer: ' + context)
+            if record.get('DomainCoverage') != coverage or record.get('IsPartialInventory') is not bool(coverage):
+                raise ValueError('Incomplete producer source: domain coverage differs from producer: ' + context)
+            completed = utc(record['CompletedAtUtc'])
+            if not start <= completed <= end:
+                raise ValueError('Invalid acquisition interval inside producer receipt: ' + context)
+            local[file] = record
+        if (not set(definition['Files']).issubset(local)
+                or (not shared and set(local) != set(definition['Files']))):
+            raise ValueError('Missing producer completion proof or unexpected source file: ' + context)
+        if sha(path) != digest:
+            raise ValueError('Producer proof changed during validation: ' + context)
+        # Additional exports belong to the shared producer, not to the CMDB source contract.
+        records.update({file: local[file] for file in definition['Files']})
+        receipts.append({'File':path.name, 'SHA256':digest, 'Producer':name,
+                         'RunId':proof['RunId'], 'ScriptVersion':proof['ScriptVersion'],
+                         'Scope':proof['Scope'], 'StartedAtUtc':proof['StartedAtUtc'],
+                         'CompletedAtUtc':proof['CompletedAtUtc'],
+                         'Qualifications':proof.get('Qualifications', []), 'DomainCoverage':coverage})
+    return records, receipts, registry_hash
+
+
+def accepted_ad_coverage(proof):
+    """Only explicit, bounded AD connectivity gaps qualify; never generic partial data."""
+    coverage = proof['DomainCoverage']
+    if (proof.get('Producer') != 'SmartM365-ActiveDirectory-Inventory.ps1'
+            or proof.get('Owner') != 'SmartInventory-SourceReceipt' or proof.get('ContractVersion') != '1.2'
+            or proof.get('ConsumerScopeQualified') is not True or proof.get('IsPartialInventory') is not True):
+        raise ValueError('Invalid partial AD coverage declaration')
+    return cmdb_freshness.partial_ad_coverage(proof['Producer'], coverage)
+
+
+def validate_license_assignment_parents(source, contract):
+    """Keep native user gaps qualified; missing SKU and blank IDs remain invalid."""
+    definitions = {item['name']: item for item in contract['sources']}
+    user_file = definitions['users']['file']
+    sku_file = definitions['skus']['file']
+    path_file = definitions['license_paths']['file']
+    users = {normalized(row['Object Id']) for row in rows(source / user_file)}
+    skus = {normalized(row['Id']) for row in rows(source / sku_file)}
+    missing_users, missing_skus = set(), set()
+    missing_user_rows = missing_sku_rows = blank_user_rows = total_rows = 0
+    pairs = set()
+    for row in rows(source / path_file):
+        user_id, sku_id = normalized(row['UserId']), normalized(row['SkuId'])
+        total_rows += 1
+        pairs.add((user_id, sku_id))
+        blank_user_rows += not user_id
+        if not user_id or user_id not in users:
+            missing_user_rows += 1
+            missing_users.add(user_id)
+        if not sku_id or sku_id not in skus:
+            missing_sku_rows += 1
+            missing_skus.add(sku_id)
+    if blank_user_rows or missing_sku_rows:
+        # Counts and file names suffice for diagnosis; do not expose account IDs.
+        raise ValueError(
+            'License assignment parent identity missing: '
+            + f'Source={path_file}; UserParent={user_file} (UserId -> Object Id); '
+            + f'MissingUserRows={missing_user_rows}; MissingUserIds={len(missing_users)}; '
+            + f'SkuParent={sku_file} (SkuId -> Id); '
+            + f'MissingSkuRows={missing_sku_rows}; MissingSkuIds={len(missing_skus)}. '
+            + 'Refresh the affected parent inventory and revalidate coherent current sources; '
+            + 'no assignment paths were excluded or historical exports substituted.')
+    return {'AssignmentRows':total_rows, 'UnresolvedAssignmentRows':missing_user_rows,
+            'DistinctUnresolvedUserIds':len(missing_users), 'AssignmentUserSkuPairs':len(pairs),
+            'UnresolvedUserSkuPairs':sum(uid not in users for uid, _ in pairs)}
+
+
+def assess_license_coverage(source, contract):
+    """Validate service-plan lineage while retaining every native unresolved user."""
+    definitions = {item['name']: item for item in contract['sources']}
+    coverage = validate_license_assignment_parents(source, contract)
+    users = {normalized(row['Object Id']) for row in rows(source / definitions['users']['file'])}
+    skus = {normalized(row['Id']) for row in rows(source / definitions['skus']['file'])}
+    pairs = {(normalized(row['UserId']), normalized(row['SkuId']))
+             for row in rows(source / definitions['license_paths']['file'])}
+    plans = set()
+    for row in rows(source / definitions['plans']['file']):
+        sid, pid = normalized(row['SkuId']), normalized(row['PlanId'])
+        if not pid or sid not in skus:
+            raise ValueError('Service-plan SKU missing or blank plan identity')
+        plans.add((sid, pid))
+    total = unresolved = 0
+    missing_users = set()
+    for row in rows(source / definitions['user_plans']['file']):
+        uid, sid, pid = (normalized(row[field]) for field in ('UserId', 'SkuId', 'PlanId'))
+        if not uid or (sid, pid) not in plans or (uid, sid) not in pairs:
+            raise ValueError('User service-plan native assignment or catalog parent missing')
+        total += 1
+        if uid not in users:
+            unresolved += 1
+            missing_users.add(uid)
+    coverage.update(ServicePlanRows=total, UnresolvedServicePlanRows=unresolved,
+                    DistinctUnresolvedServicePlanUserIds=len(missing_users),
+                    Policy='Native license paths, user/SKU pairs and service plans retained; missing user links are unresolved, never fabricated; missing SKU/plan/assignment parents remain blocking')
+    warnings = []
+    for name, count in (('license_paths', coverage['UnresolvedAssignmentRows']), ('user_plans', unresolved)):
+        if count:
+            warnings.append({'File':definitions[name]['file'], 'Kind':'UnresolvedLicenseUser',
+                'Message':f'Native licensing evidence retained with {count} unresolved user link(s): '
+                    + definitions[name]['file'] + '; no users fabricated or source rows excluded.'})
+    return coverage, warnings
+
+
+def application_coverage_status(reported, observed, unresolved):
+    parts = []
+    if reported != observed:
+        parts.append('Relation count differs')
+    if unresolved:
+        parts.append('Device links unresolved')
+    return '; '.join(parts) or 'Complete'
+
+
+def assess_application_coverage(source, contract):
+    """Weekly app snapshots may differ from current devices; retain every relation."""
+    definitions = {item['name']: item for item in contract['sources']}
+    applications = {}
+    for row in rows(source / definitions['apps']['file']):
+        if row['CollectionScope'] != 'AllPlatforms' or row['RelationCollectionScope'] != 'All':
+            raise ValueError('All-platform, All-mode applications are required')
+        raw = row['DeviceCount'].strip()
+        if not raw.isascii() or not raw.isdecimal():
+            raise ValueError('Invalid application reported device count')
+        applications[normalized(row['AppId'])] = int(raw)
+    managed = {normalized(row['ManagedDeviceId']) for row in rows(source / definitions['managed']['file'])}
+    counts = collections.Counter()
+    observed = collections.Counter()
+    missing_devices, missing_apps = set(), set()
+    for row in rows(source / definitions['app_relations']['file']):
+        aid, mid = normalized(row['AppId']), normalized(row['DeviceId'])
+        counts['RelationRows'] += 1
+        observed[aid] += 1
+        if aid not in applications:
+            counts['UnresolvedApplicationRelationRows'] += 1
+            missing_apps.add(aid)
+        if mid not in managed:
+            counts['UnresolvedDeviceRelationRows'] += 1
+            missing_devices.add(mid)
+    coverage = {field: counts[field] for field in (
+        'RelationRows', 'UnresolvedApplicationRelationRows', 'UnresolvedDeviceRelationRows')}
+    coverage.update(DistinctUnresolvedApplicationIds=len(missing_apps),
+                    DistinctUnresolvedDeviceIds=len(missing_devices),
+                    CountMismatchApplications=sum(reported != observed[aid] for aid, reported in applications.items()),
+                    Policy='Weekly native application evidence; unresolved relations retained without fabricated parents; not an instantaneous managed-device inventory')
+    warnings = []
+    for field, message in (
+            ('UnresolvedDeviceRelationRows', 'Weekly application relations reference device IDs outside the current managed inventory'),
+            ('UnresolvedApplicationRelationRows', 'Application relations reference IDs outside the collected application catalog'),
+            ('CountMismatchApplications', 'Reported application device counts differ from collected relation counts')):
+        if coverage[field]:
+            warnings.append({'File': definitions['app_relations']['file'], 'Kind': field,
+                             'Count': coverage[field], 'Message': message + f'; {field}={coverage[field]}. '
+                             'Evidence is retained and qualified; no parent identity is fabricated.'})
+    return coverage, warnings
+
+
+def validate_sources(source, contract, tenant, now=None, identity=None):
+    now = now or dt.datetime.now(UTC)
+    if not identity or identity.get('TenantKey') != tenant:
+        raise ValueError('Complete source identity is required')
+    records, receipts, registry_hash = producer_records(source, identity)
+    if contract['producerRegistry'] != REGISTRY.name:
+        raise ValueError('Preparation producer registry mismatch')
+    for receipt in receipts:
+        start, end = utc(receipt['StartedAtUtc']), utc(receipt['CompletedAtUtc'])
+        if start > end or end > now + dt.timedelta(minutes=5) or start > now + dt.timedelta(minutes=5):
+            raise ValueError('Invalid producer acquisition interval')
+        rule = cmdb_freshness.producer_policy(contract, [file for file, record in records.items()
+                                                       if record['Producer'] == receipt['Producer']])
+        if now - start > dt.timedelta(hours=rule['MaxAgeHours']):
+            raise ValueError('Stale acquisition evidence: ' + receipt['Producer'])
+    if set(records) != {s['file'] for s in contract['sources']}:
+        raise ValueError('Producer registry and source contract disagree')
+    checks, starts, ends = [], [], []
+    for definition in contract['sources']:
+        name = definition['file']
+        if name not in records:
+            raise ValueError('Missing producer completion proof: ' + name)
+        record = records[name]
+        coverage = record.get('DomainCoverage')
+        if record.get('Status') != 'Success' or record.get('IsPartialInventory') is not bool(coverage) or type(record.get('Errors')) is not int or record['Errors'] != 0:
+            raise ValueError('Incomplete producer result: ' + name)
+        if not record.get('Producer') or not record.get('ScriptVersion') or not record.get('RunId'):
+            raise ValueError('Missing producer lineage: ' + name)
+        start, end = utc(record['StartedAtUtc']), utc(record['CompletedAtUtc'])
+        if start > end or end > now + dt.timedelta(minutes=5) or start > now + dt.timedelta(minutes=5):
+            raise ValueError('Invalid acquisition interval: ' + name)
+        starts.append(start); ends.append(end)
+        path = source / name
+        if path.is_symlink() or not path.is_file():
+            raise ValueError('Missing or linked source file: ' + name)
+        before = sha(path)
+        if before != str(record['SHA256']).upper():
+            raise ValueError('Producer hash mismatch: ' + name)
+        count = check_rows(path, definition, tenant, identity=identity)
+        if coverage:
+            collected = {v.casefold() for v in coverage['CollectedDomains']}
+            if definition['name'] == 'ad_domains':
+                if {normalized(row['DNSRoot']) for row in rows(path)} != collected:
+                    raise ValueError('AD domain export differs from declared collected coverage')
+            elif definition['name'] in {'ad_users', 'ad_computers', 'ad_groups', 'ad_objects'}:
+                if (count and 'DomainName' not in header(path)) or any(normalized(row['DomainName']) not in collected for row in rows(path)):
+                    raise ValueError('AD export includes an unavailable or unqualified domain: ' + name)
+        if type(record['Rows']) is not int or count != record['Rows']:
+            raise ValueError('Producer row count mismatch: ' + name)
+        if sha(path) != before:
+            raise ValueError('Source changed during validation: ' + name)
+        checks.append(dict(record, SHA256=before))
+    freshness = cmdb_freshness.evaluate(contract, checks, now)
+    evidence = {'ProducerReceipts':receipts, 'RegistrySHA256':registry_hash, 'Files':checks,
+                'StartedAtUtc':min(starts).isoformat(), 'CompletedAtUtc':max(ends).isoformat(),
+                'Freshness':freshness, 'CoverageWarnings':[
+                    {'Producer':r['Producer'], 'Message':'Partial AD coverage accepted; unavailable domains: '
+                        + ', '.join(r['DomainCoverage']['UnavailableDomains']) + '; no historical exports substituted.'}
+                    for r in receipts if r.get('DomainCoverage')]}
+    evidence['LicenseCoverage'], evidence['LicenseWarnings'] = assess_license_coverage(source, contract)
+    evidence['ApplicationCoverage'], evidence['ApplicationWarnings'] = assess_application_coverage(source, contract)
+    recheck_sources(source, evidence, contract)
+    return evidence
+
+
+def recheck_sources(source, evidence, contract):
+    if sha(REGISTRY) != evidence['RegistrySHA256']:
+        raise ValueError('Producer registry changed during preparation')
+    for receipt in evidence['ProducerReceipts']:
+        check_publication(source / receipt['File'], load_json(source / receipt['File']))
+        if sha(source / receipt['File']) != receipt['SHA256']:
+            raise ValueError('Source proof changed during preparation')
+    for record in evidence['Files']:
+        if sha(source / record['File']) != record['SHA256']:
+            raise ValueError('Source changed during preparation: ' + record['File'])
+
+
+def validate_relationships(output, contract):
+    parents = {'TenantDeviceKey':'DimDevice', 'TenantUserKey':'DimUser',
+               'TenantGroupKey':'DimGroup', 'TenantSkuKey':'DimLicenseSku',
+               'TenantServicePlanKey':'DimLicenseServicePlan',
+               'TenantApplicationKey':'DimDetectedApplication', 'TenantTeamKey':'DimTeam',
+               'TenantADGroupKey':'ADGroupSource', 'TenantADObjectKey':'ADDirectoryObject'}
+    keys = {field: {row[field] for row in rows(output / (table+'.csv'))}
+            for field, table in parents.items()}
+    managed_ids = {row['ManagedDeviceId'] for row in rows(output / 'DimIntuneManagedDevice.csv')}
+    applications = {normalized(row['AppId']): row for row in rows(output / 'DimDetectedApplication.csv')}
+    application_counts, unresolved_devices = collections.Counter(), collections.Counter()
+    mailboxes = {row['TenantMailboxKey'] for row in rows(output / 'FactMailbox.csv')}
+    users = {normalized(row['SourceUserId']): row for row in rows(output / 'DimUser.csv')}
+    for definition in contract['tables']:
+        name = definition['name']
+        for row in rows(output / (name+'.csv')):
+            for field, table in parents.items():
+                if name != table and row.get(field) and row[field] not in keys[field]:
+                    raise ValueError('Orphan output relationship: ' + name + '.' + field)
+            if name == 'DeviceHardware' and row['ManagedDeviceId'] not in managed_ids:
+                raise ValueError('Orphan output managed device: ' + name)
+            if name == 'FactDeviceApplication':
+                aid = normalized(row['AppId'])
+                application = applications.get(aid)
+                if (row['ApplicationLinkStatus'] != ('Resolved' if application else 'Unresolved')
+                        or row['TenantApplicationKey'] != (application['TenantApplicationKey'] if application else '')):
+                    raise ValueError('Inconsistent application link qualification')
+                resolved = row['ManagedDeviceId'] in managed_ids
+                if row['DeviceLinkStatus'] != ('Resolved' if resolved else 'Unresolved'):
+                    raise ValueError('Inconsistent application device link qualification')
+                application_counts[aid] += 1
+                unresolved_devices[aid] += not resolved
+            if name == 'FactMailboxHosting' and row['MailboxHostingKey'] not in mailboxes:
+                raise ValueError('Orphan output mailbox hosting')
+            if name in {'LicenseAssignmentPath', 'FactUserLicense', 'FactUserServicePlan'} and 'UserLinkStatus' in row:
+                user = users.get(normalized(row['SourceUserId']))
+                if (not normalized(row['SourceUserId'])
+                        or row['UserLinkStatus'] != ('Resolved' if user else 'Unresolved')
+                        or row['TenantUserKey'] != (user['TenantUserKey'] if user else '')
+                        or ('CmdbUserId' in row and row['CmdbUserId'] != (user['CmdbUserId'] if user else ''))):
+                    raise ValueError('Inconsistent license user link qualification: ' + name)
+            for field in ('ManagerADObjectKey','ManagedByADObjectKey'):
+                if row.get(field) and row[field] not in keys['TenantADObjectKey']:
+                    raise ValueError('Orphan AD source owner/manager relationship')
+            if row.get('NestedTenantGroupKey') and row['NestedTenantGroupKey'] not in keys['TenantGroupKey']:
+                raise ValueError('Orphan nested Entra group relationship')
+    for aid, row in applications.items():
+        count, missing = application_counts[aid], unresolved_devices[aid]
+        expected = application_coverage_status(int(row['ReportedDeviceCount']), count, missing)
+        if (row['RelationshipCoverageStatus'] != expected or row['DeviceCount'] != str(count)
+                or row['ExactRelatedDeviceCount'] != str(count)
+                or row['ResolvedDeviceCount'] != str(count - missing)
+                or row['UnresolvedDeviceCount'] != str(missing)):
+            raise ValueError('Inconsistent application relationship coverage')

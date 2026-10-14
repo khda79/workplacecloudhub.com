@@ -1,0 +1,157 @@
+/// Native source facet migrated from SourceHealth; exact source grain, unresolved links and qualification retained. Uses the unified pinned batch, not a separate CMDB reader.
+table 'Native Source Health'
+	lineageTag: 281de526-d87b-42e0-8dd3-f41d75aef28f
+
+	/// Configured source feeds represented in SourceHealth for the frozen snapshot. Migrated without changing the source calculation.
+	measure 'Native Source feeds' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (COALESCE(COUNTROWS('Native Source Health'), 0)))
+		formatString: #,0
+		displayFolder: Native evidence
+		lineageTag: 357aa941-a508-477f-b23e-815c6ae5274f
+
+	/// Source feeds whose collection status is explicitly Completed. Completed is not tenant certification. Migrated without changing the source calculation.
+	measure 'Native Collected source feeds' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (CALCULATE([Native Source feeds], KEEPFILTERS('Native Source Health'[Status] == "Completed"))))
+		formatString: #,0
+		displayFolder: Native evidence
+		lineageTag: 21999a0e-0974-4acb-90bc-20d2c53fa4b1
+
+	/// Source feeds not explicitly completed in the frozen snapshot. Migrated without changing the source calculation.
+	measure 'Native Missing source feeds' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (MAX(0, [Native Source feeds] - [Native Collected source feeds])))
+		formatString: #,0
+		displayFolder: Native evidence
+		lineageTag: 2cdc2862-f82f-4d5e-a905-4a225c1b1139
+
+	/// Completed source feeds divided by represented source feeds. This is collection coverage, not a composite CMDB quality score. Migrated without changing the source calculation.
+	measure 'Native Source collection coverage' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (DIVIDE([Native Collected source feeds], [Native Source feeds])))
+		formatString: 0.0%
+		displayFolder: Native evidence
+		lineageTag: a4d11cc5-35c3-457a-91c5-c7cdbb98ae70
+
+	/// Exact native-key entity context or existing inventory context. No name matching or inferred transitive membership. Unrelated entity selections return blank.
+	measure 'Native Context Rows · Native Source Health' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (COUNTROWS('Native Source Health')))
+		formatString: #,0
+		isHidden
+		lineageTag: 13c62cae-81f2-41c1-8b01-d06836c9719d
+
+	/// Native SourceHealth attribute; source qualification is retained.
+	column TenantKey
+		dataType: string
+		isHidden
+		lineageTag: 4b6cd335-15f4-4a98-a008-efce8b4ed257
+		summarizeBy: none
+		sourceColumn: TenantKey
+
+	/// Native SourceHealth attribute; source qualification is retained.
+	column OrganizationKey
+		dataType: string
+		isHidden
+		lineageTag: 35ce9c00-53c8-4957-886e-b172bb9979bf
+		summarizeBy: none
+		sourceColumn: OrganizationKey
+
+	/// Native SourceHealth attribute; source qualification is retained.
+	column EnvironmentKey
+		dataType: string
+		isHidden
+		lineageTag: 87534197-f673-48d3-b1ac-4ac970989f4e
+		summarizeBy: none
+		sourceColumn: EnvironmentKey
+
+	/// Native SourceHealth attribute; source qualification is retained.
+	column TenantId
+		dataType: string
+		isHidden
+		lineageTag: 78afdf0b-6ccb-4b3f-af46-38a2ba762be9
+		summarizeBy: none
+		sourceColumn: TenantId
+
+	/// Native SourceHealth attribute; source qualification is retained.
+	column SourceName
+		dataType: string
+		lineageTag: 13000168-6736-4832-bcc2-b6821ccb9b30
+		summarizeBy: none
+		sourceColumn: SourceName
+
+	/// Native SourceHealth attribute; source qualification is retained.
+	column Status
+		dataType: string
+		lineageTag: ab58798c-34cc-446b-b862-754881d4fa19
+		summarizeBy: none
+		sourceColumn: Status
+
+	/// Native SourceHealth attribute; source qualification is retained.
+	column Coverage
+		dataType: string
+		lineageTag: 9b6dd0a6-e70e-4470-8956-97eab7885825
+		summarizeBy: none
+		sourceColumn: Coverage
+
+	/// Native SourceHealth attribute; source qualification is retained.
+	column SourceRows
+		dataType: int64
+		lineageTag: 59aedf2f-62ae-4dd4-86a8-ee2ecca3f5f6
+		summarizeBy: none
+		sourceColumn: SourceRows
+
+	/// Native SourceHealth attribute; source qualification is retained.
+	column MaxItems
+		dataType: int64
+		lineageTag: 34545f7e-df04-4495-aac2-386d163496b0
+		summarizeBy: none
+		sourceColumn: MaxItems
+
+	/// Native SourceHealth attribute; source qualification is retained.
+	column StartedDateTime
+		dataType: dateTime
+		formatString: yyyy-MM-dd HH:mm:ss
+		lineageTag: 4d55a180-1713-46fa-8c96-4bb7e5ab2f12
+		summarizeBy: none
+		sourceColumn: StartedDateTime
+
+	/// Native SourceHealth attribute; source qualification is retained.
+	column CompletedDateTime
+		dataType: dateTime
+		formatString: yyyy-MM-dd HH:mm:ss
+		lineageTag: 7f4011a7-bcc9-4d0a-aead-156e5a4c2815
+		summarizeBy: none
+		sourceColumn: CompletedDateTime
+
+	/// Native SourceHealth attribute; source qualification is retained.
+	column Evidence
+		dataType: string
+		lineageTag: d2c873f4-361a-46ef-af8b-65a35eb596e6
+		summarizeBy: none
+		sourceColumn: Evidence
+
+	/// Native SourceHealth attribute; source qualification is retained.
+	column SourceRowsLabel
+		dataType: string
+		lineageTag: 09c65c29-9677-4939-96f2-1ab6cda5c841
+		summarizeBy: none
+		sourceColumn: SourceRowsLabel
+
+	/// Native SourceHealth attribute; source qualification is retained.
+	column CompletedDateTimeLabel
+		dataType: string
+		lineageTag: 35893adc-3462-46aa-ae4c-4887e17884f2
+		summarizeBy: none
+		sourceColumn: CompletedDateTimeLabel
+
+	partition 'Native Source Health' = m
+		mode: import
+		source = NativeEvidenceTypes(Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("SourceHealth.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]), {[name="TenantKey", dataType="String"], [name="OrganizationKey", dataType="String"], [name="EnvironmentKey", dataType="String"], [name="TenantId", dataType="String"], [name="SourceName", dataType="String"], [name="Status", dataType="String"], [name="Coverage", dataType="String"], [name="SourceRows", dataType="Int64"], [name="MaxItems", dataType="Int64"], [name="StartedDateTime", dataType="DateTime"], [name="CompletedDateTime", dataType="DateTime"], [name="Evidence", dataType="String"], [name="SourceRowsLabel", dataType="String"], [name="CompletedDateTimeLabel", dataType="String"]})
+

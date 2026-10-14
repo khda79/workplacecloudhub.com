@@ -3,11 +3,11 @@
   "name": "5777a289f344d5ce626d",
   "position": {
     "x": 32,
-    "y": 680,
+    "y": 656,
+    "width": 1856,
+    "height": 336,
     "z": 112,
-    "height": 328,
-    "width": 1424,
-    "tabOrder": 112
+    "tabOrder": 1317
   },
   "visual": {
     "visualType": "tableEx",
@@ -15,20 +15,6 @@
       "queryState": {
         "Values": {
           "projections": [
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Enterprise Operational Signals"
-                    }
-                  },
-                  "Property": "Domain"
-                }
-              },
-              "queryRef": "Enterprise Operational Signals.Domain",
-              "nativeQueryRef": "Domain"
-            },
             {
               "field": {
                 "Column": {
@@ -59,20 +45,6 @@
             },
             {
               "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Enterprise Operational Signals"
-                    }
-                  },
-                  "Property": "Risk Category"
-                }
-              },
-              "queryRef": "Enterprise Operational Signals.Risk Category",
-              "nativeQueryRef": "Risk Category"
-            },
-            {
-              "field": {
                 "Measure": {
                   "Expression": {
                     "SourceRef": {
@@ -84,48 +56,6 @@
               },
               "queryRef": "Enterprise Operational Signals.Affected Signal Observations",
               "nativeQueryRef": "Affected"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Enterprise Operational Signals"
-                    }
-                  },
-                  "Property": "Enterprise Signal Covered"
-                }
-              },
-              "queryRef": "Enterprise Operational Signals.Enterprise Signal Covered",
-              "nativeQueryRef": "Covered"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Enterprise Operational Signals"
-                    }
-                  },
-                  "Property": "Enterprise Signal Affected (%)"
-                }
-              },
-              "queryRef": "Enterprise Operational Signals.Enterprise Signal Affected (%)",
-              "nativeQueryRef": "Affected (%)"
-            },
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Enterprise Operational Signals"
-                    }
-                  },
-                  "Property": "Evidence Status"
-                }
-              },
-              "queryRef": "Enterprise Operational Signals.Evidence Status",
-              "nativeQueryRef": "Evidence Status"
             },
             {
               "field": {
@@ -166,6 +96,13 @@
       "columnHeaders": [
         {
           "properties": {
+            "autoSizeColumnWidth": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
             "columnAdjustment": {
               "expr": {
                 "Literal": {
@@ -173,7 +110,14 @@
                 }
               }
             },
-            "autoSizeColumnWidth": {
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
+            },
+            "bold": {
               "expr": {
                 "Literal": {
                   "Value": "true"
@@ -203,23 +147,9 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#005A9E'"
+                      "Value": "'#215E9E'"
                     }
                   }
-                }
-              }
-            },
-            "bold": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "fontSize": {
-              "expr": {
-                "Literal": {
-                  "Value": "10D"
                 }
               }
             }
@@ -229,10 +159,39 @@
       "values": [
         {
           "properties": {
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
+            },
             "wordWrap": {
               "expr": {
                 "Literal": {
-                  "Value": "true"
+                  "Value": "false"
+                }
+              }
+            },
+            "fontColorPrimary": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#183153'"
+                    }
+                  }
+                }
+              }
+            },
+            "fontColorSecondary": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#183153'"
+                    }
+                  }
                 }
               }
             },
@@ -252,38 +211,9 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#F3F7FA'"
+                      "Value": "'#F0F5FA'"
                     }
                   }
-                }
-              }
-            },
-            "fontColorPrimary": {
-              "solid": {
-                "color": {
-                  "expr": {
-                    "Literal": {
-                      "Value": "'#1F2937'"
-                    }
-                  }
-                }
-              }
-            },
-            "fontColorSecondary": {
-              "solid": {
-                "color": {
-                  "expr": {
-                    "Literal": {
-                      "Value": "'#1F2937'"
-                    }
-                  }
-                }
-              }
-            },
-            "fontSize": {
-              "expr": {
-                "Literal": {
-                  "Value": "9D"
                 }
               }
             }
@@ -311,7 +241,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Messaging and hybrid attention signals. Detailed records for the current filter context.'"
+                  "Value": "'Messaging and hybrid attention signals'"
                 }
               }
             }
@@ -338,7 +268,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "13D"
+                  "Value": "12D"
                 }
               }
             },
@@ -347,16 +277,9 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#1F2937'"
+                      "Value": "'#183153'"
                     }
                   }
-                }
-              }
-            },
-            "bold": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
                 }
               }
             }
@@ -409,9 +332,16 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#CBD8E5'"
+                      "Value": "'#CCDCEC'"
                     }
                   }
+                }
+              }
+            },
+            "radius": {
+              "expr": {
+                "Literal": {
+                  "Value": "8D"
                 }
               }
             },
@@ -419,13 +349,6 @@
               "expr": {
                 "Literal": {
                   "Value": "1D"
-                }
-              }
-            },
-            "radius": {
-              "expr": {
-                "Literal": {
-                  "Value": "12D"
                 }
               }
             }
@@ -465,14 +388,14 @@
             "left": {
               "expr": {
                 "Literal": {
-                  "Value": "10D"
+                  "Value": "8D"
                 }
               }
             },
             "right": {
               "expr": {
                 "Literal": {
-                  "Value": "10D"
+                  "Value": "8D"
                 }
               }
             }
@@ -498,7 +421,7 @@
   "filterConfig": {
     "filters": [
       {
-        "name": "Filter854c4909d6131883850b0000",
+        "name": "3fc7c6448e12f35310ff",
         "field": {
           "Column": {
             "Expression": {
@@ -580,5 +503,6 @@
         "howCreated": "User"
       }
     ]
-  }
+  },
+  "parentGroupName": "356f38365fae5fd56ff9"
 }

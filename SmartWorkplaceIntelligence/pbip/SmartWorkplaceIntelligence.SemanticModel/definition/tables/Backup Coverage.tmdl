@@ -1,5 +1,6 @@
-/// Synthetic policy eligibility and protection evidence.
+/// Legacy synthetic fixture: not used by production report visuals or consolidated evidence. Removal is pending a separately cleared dependency-safe retirement; no real data.
 table 'Backup Coverage'
+	isHidden
 	lineageTag: 8af38ee8-f60d-48b5-85f3-bf296a98433e
 
 	/// Protected eligible mailboxes divided by eligible mailboxes.

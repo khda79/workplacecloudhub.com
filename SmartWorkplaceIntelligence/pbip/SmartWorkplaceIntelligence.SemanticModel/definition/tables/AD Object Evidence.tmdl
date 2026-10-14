@@ -1,0 +1,107 @@
+/// Native source facet migrated from ADDirectoryObject; exact source grain, unresolved links and qualification retained. Uses the unified pinned batch, not a separate CMDB reader.
+table 'AD Object Evidence'
+	lineageTag: cc3b294f-5102-4a87-8518-abb4f3297f18
+
+	/// Exact native-key entity context or existing inventory context. No name matching or inferred transitive membership. Unrelated entity selections return blank.
+	measure 'Native Context Rows · AD Object Evidence' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "ADDirectoryObject"))
+			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((COUNTROWS('AD Object Evidence')), KEEPFILTERS(TREATAS(NativeKeys0, 'AD Object Evidence'[TenantADObjectKey]))), BLANK()), BLANK()), (COUNTROWS('AD Object Evidence')))
+		formatString: #,0
+		isHidden
+		lineageTag: c8c1b3f3-f879-4a90-9c44-2428329d3a4a
+
+	/// Native ADDirectoryObject attribute; source qualification is retained.
+	column TenantKey
+		dataType: string
+		isHidden
+		lineageTag: ad3cfbc5-6e5d-4576-92f8-6d20ec807289
+		summarizeBy: none
+		sourceColumn: TenantKey
+
+	/// Native ADDirectoryObject attribute; source qualification is retained.
+	column OrganizationKey
+		dataType: string
+		isHidden
+		lineageTag: a1cbec74-8eda-4b50-9190-8b2ad7417ad9
+		summarizeBy: none
+		sourceColumn: OrganizationKey
+
+	/// Native ADDirectoryObject attribute; source qualification is retained.
+	column EnvironmentKey
+		dataType: string
+		isHidden
+		lineageTag: 9d4f1feb-3f9c-4d5a-8466-0bccb45a3d8f
+		summarizeBy: none
+		sourceColumn: EnvironmentKey
+
+	/// Native ADDirectoryObject attribute; source qualification is retained.
+	column TenantId
+		dataType: string
+		isHidden
+		lineageTag: 4d5360bc-8b76-470b-beac-b9796ecd0106
+		summarizeBy: none
+		sourceColumn: TenantId
+
+	/// Native ADDirectoryObject attribute; source qualification is retained.
+	column TenantADObjectKey
+		dataType: string
+		isHidden
+		lineageTag: 8c45d056-c380-4bc7-a7e1-dcbbf169a1da
+		summarizeBy: none
+		sourceColumn: TenantADObjectKey
+
+	/// Native ADDirectoryObject attribute; source qualification is retained.
+	column ObjectGUID
+		dataType: string
+		lineageTag: 0431308e-e87a-47c8-bb6a-e62044e4a683
+		summarizeBy: none
+		sourceColumn: ObjectGUID
+
+	/// Native ADDirectoryObject attribute; source qualification is retained.
+	column ObjectSID
+		dataType: string
+		lineageTag: 63c2984e-4bff-4d11-a761-3d3d8e0687c8
+		summarizeBy: none
+		sourceColumn: ObjectSID
+
+	/// Native ADDirectoryObject attribute; source qualification is retained.
+	column DomainName
+		dataType: string
+		lineageTag: d7059058-e36d-40bd-9488-13f80ade04b2
+		summarizeBy: none
+		sourceColumn: DomainName
+
+	/// Native ADDirectoryObject attribute; source qualification is retained.
+	column DistinguishedName
+		dataType: string
+		lineageTag: 5a6ab42e-f0d9-4ff9-bb7e-3f3c017fe348
+		summarizeBy: none
+		sourceColumn: DistinguishedName
+
+	/// Native ADDirectoryObject attribute; source qualification is retained.
+	column ObjectClass
+		dataType: string
+		lineageTag: 3d8e7b23-79c1-4640-9fe2-0c60e23d38f9
+		summarizeBy: none
+		sourceColumn: ObjectClass
+
+	/// Native ADDirectoryObject attribute; source qualification is retained.
+	column PrimaryGroupID
+		dataType: string
+		lineageTag: f44d5ae4-1f49-461e-ab02-4bec363572b5
+		summarizeBy: none
+		sourceColumn: PrimaryGroupID
+
+	/// Native ADDirectoryObject attribute; source qualification is retained.
+	column SourceCollectedDateTime
+		dataType: dateTime
+		lineageTag: 177c7588-d81f-4374-9227-732c3f086421
+		summarizeBy: none
+		sourceColumn: SourceCollectedDateTime
+
+	partition 'AD Object Evidence' = m
+		mode: import
+		source = NativeEvidenceTypes(Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("ADDirectoryObject.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]), {[name="TenantKey", dataType="String"], [name="OrganizationKey", dataType="String"], [name="EnvironmentKey", dataType="String"], [name="TenantId", dataType="String"], [name="TenantADObjectKey", dataType="String"], [name="ObjectGUID", dataType="String"], [name="ObjectSID", dataType="String"], [name="DomainName", dataType="String"], [name="DistinguishedName", dataType="String"], [name="ObjectClass", dataType="String"], [name="PrimaryGroupID", dataType="String"], [name="SourceCollectedDateTime", dataType="DateTime"]})
+

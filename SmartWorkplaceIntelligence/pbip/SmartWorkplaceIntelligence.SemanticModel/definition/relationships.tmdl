@@ -1,594 +1,6 @@
-relationship rel_Date_User_Snapshots_Date_Key
-	fromColumn: 'User Snapshots'.'Date Key'
-	toColumn: Date.'Date Key'
-
-relationship rel_Date_User_Activities_Date_Key
-	fromColumn: 'User Activities'.'Date Key'
-	toColumn: Date.'Date Key'
-
-relationship rel_Date_Identity_Matches_Date_Key
-	fromColumn: 'Identity Matches'.'Date Key'
-	toColumn: Date.'Date Key'
-
-relationship rel_Date_User_License_Assignments_Date_Key
-	fromColumn: 'User License Assignments'.'Date Key'
-	toColumn: Date.'Date Key'
-
-relationship rel_Date_License_Capacity_Date_Key
-	fromColumn: 'License Capacity'.'Date Key'
-	toColumn: Date.'Date Key'
-
-relationship rel_Date_Device_Snapshots_Date_Key
-	fromColumn: 'Device Snapshots'.'Date Key'
-	toColumn: Date.'Date Key'
-
-relationship rel_Date_Device_Compliance_Snapshots_Date_Key
-	fromColumn: 'Device Compliance Snapshots'.'Date Key'
-	toColumn: Date.'Date Key'
-
-relationship rel_Date_Device_Matches_Date_Key
-	fromColumn: 'Device Matches'.'Date Key'
-	toColumn: Date.'Date Key'
-
-relationship rel_Date_Windows_Lifecycle_Assessments_Date_Key
-	fromColumn: 'Windows Lifecycle Assessments'.'Date Key'
-	toColumn: Date.'Date Key'
-
-relationship rel_Date_Endpoint_Experience_Measurements_Date_Key
-	fromColumn: 'Endpoint Experience Measurements'.'Date Key'
-	toColumn: Date.'Date Key'
-
-relationship rel_Date_Application_Installations_Date_Key
-	fromColumn: 'Application Installations'.'Date Key'
-	toColumn: Date.'Date Key'
-
-relationship rel_Date_Collaboration_Usage_Date_Key
-	fromColumn: 'Collaboration Usage'.'Date Key'
-	toColumn: Date.'Date Key'
-
-relationship rel_Date_Content_Usage_Date_Key
-	fromColumn: 'Content Usage'.'Date Key'
-	toColumn: Date.'Date Key'
-
-relationship rel_Date_Mailbox_Snapshots_Date_Key
-	fromColumn: 'Mailbox Snapshots'.'Date Key'
-	toColumn: Date.'Date Key'
-
-relationship rel_Date_Mailbox_Matches_Date_Key
-	fromColumn: 'Mailbox Matches'.'Date Key'
-	toColumn: Date.'Date Key'
-
-relationship rel_Date_Backup_Coverage_Date_Key
-	fromColumn: 'Backup Coverage'.'Date Key'
-	toColumn: Date.'Date Key'
-
-relationship rel_Date_Security_Posture_Observations_Date_Key
-	fromColumn: 'Security Posture Observations'.'Date Key'
-	toColumn: Date.'Date Key'
-
-relationship rel_Date_Source_Runs_Date_Key
-	fromColumn: 'Source Runs'.'Date Key'
-	toColumn: Date.'Date Key'
-
-relationship rel_Date_Source_Coverage_Date_Key
-	fromColumn: 'Source Coverage'.'Date Key'
-	toColumn: Date.'Date Key'
-
-relationship rel_Date_Data_Quality_Results_Date_Key
-	fromColumn: 'Data Quality Results'.'Date Key'
-	toColumn: Date.'Date Key'
-
-relationship rel_Date_Findings_Date_Key
-	fromColumn: Findings.'Date Key'
-	toColumn: Date.'Date Key'
-
-relationship rel_Date_Mailbox_Permissions_Date_Key
-	fromColumn: 'Mailbox Permissions'.'Date Key'
-	toColumn: Date.'Date Key'
-
-relationship rel_Date_Service_Relationships_Date_Key
-	fromColumn: 'Service Relationships'.'Date Key'
-	toColumn: Date.'Date Key'
-
-relationship rel_Tenant_User_Snapshots_Tenant_Key
-	fromColumn: 'User Snapshots'.'Tenant Key'
-	toColumn: Tenant.'Tenant Key'
-
-relationship rel_Tenant_User_Activities_Tenant_Key
-	fromColumn: 'User Activities'.'Tenant Key'
-	toColumn: Tenant.'Tenant Key'
-
-relationship rel_Tenant_Identity_Matches_Tenant_Key
-	fromColumn: 'Identity Matches'.'Tenant Key'
-	toColumn: Tenant.'Tenant Key'
-
-relationship rel_Tenant_User_License_Assignments_Tenant_Key
-	fromColumn: 'User License Assignments'.'Tenant Key'
-	toColumn: Tenant.'Tenant Key'
-
-relationship rel_Tenant_License_Capacity_Tenant_Key
-	fromColumn: 'License Capacity'.'Tenant Key'
-	toColumn: Tenant.'Tenant Key'
-
-relationship rel_Tenant_Device_Snapshots_Tenant_Key
-	fromColumn: 'Device Snapshots'.'Tenant Key'
-	toColumn: Tenant.'Tenant Key'
-
-relationship rel_Tenant_Device_Compliance_Snapshots_Tenant_Key
-	fromColumn: 'Device Compliance Snapshots'.'Tenant Key'
-	toColumn: Tenant.'Tenant Key'
-
-relationship rel_Tenant_Device_Matches_Tenant_Key
-	fromColumn: 'Device Matches'.'Tenant Key'
-	toColumn: Tenant.'Tenant Key'
-
-relationship rel_Tenant_Windows_Lifecycle_Assessments_Tenant_Key
-	fromColumn: 'Windows Lifecycle Assessments'.'Tenant Key'
-	toColumn: Tenant.'Tenant Key'
-
-relationship rel_Tenant_Endpoint_Experience_Measurements_Tenant_Key
-	fromColumn: 'Endpoint Experience Measurements'.'Tenant Key'
-	toColumn: Tenant.'Tenant Key'
-
-relationship rel_Tenant_Application_Installations_Tenant_Key
-	fromColumn: 'Application Installations'.'Tenant Key'
-	toColumn: Tenant.'Tenant Key'
-
-relationship rel_Tenant_Collaboration_Usage_Tenant_Key
-	fromColumn: 'Collaboration Usage'.'Tenant Key'
-	toColumn: Tenant.'Tenant Key'
-
-relationship rel_Tenant_Content_Usage_Tenant_Key
-	fromColumn: 'Content Usage'.'Tenant Key'
-	toColumn: Tenant.'Tenant Key'
-
-relationship rel_Tenant_Mailbox_Snapshots_Tenant_Key
-	fromColumn: 'Mailbox Snapshots'.'Tenant Key'
-	toColumn: Tenant.'Tenant Key'
-
-relationship rel_Tenant_Mailbox_Matches_Tenant_Key
-	fromColumn: 'Mailbox Matches'.'Tenant Key'
-	toColumn: Tenant.'Tenant Key'
-
-relationship rel_Tenant_Backup_Coverage_Tenant_Key
-	fromColumn: 'Backup Coverage'.'Tenant Key'
-	toColumn: Tenant.'Tenant Key'
-
-relationship rel_Tenant_Security_Posture_Observations_Tenant_Key
-	fromColumn: 'Security Posture Observations'.'Tenant Key'
-	toColumn: Tenant.'Tenant Key'
-
-relationship rel_Tenant_Source_Runs_Tenant_Key
-	fromColumn: 'Source Runs'.'Tenant Key'
-	toColumn: Tenant.'Tenant Key'
-
-relationship rel_Tenant_Source_Coverage_Tenant_Key
-	fromColumn: 'Source Coverage'.'Tenant Key'
-	toColumn: Tenant.'Tenant Key'
-
-relationship rel_Tenant_Data_Quality_Results_Tenant_Key
-	fromColumn: 'Data Quality Results'.'Tenant Key'
-	toColumn: Tenant.'Tenant Key'
-
-relationship rel_Tenant_Findings_Tenant_Key
-	fromColumn: Findings.'Tenant Key'
-	toColumn: Tenant.'Tenant Key'
-
-relationship rel_Tenant_User_Device_Relationships_Tenant_Key
-	fromColumn: 'User Device Relationships'.'Tenant Key'
-	toColumn: Tenant.'Tenant Key'
-
-relationship rel_Tenant_User_Group_Memberships_Tenant_Key
-	fromColumn: 'User Group Memberships'.'Tenant Key'
-	toColumn: Tenant.'Tenant Key'
-
-relationship rel_Tenant_Team_Memberships_Tenant_Key
-	fromColumn: 'Team Memberships'.'Tenant Key'
-	toColumn: Tenant.'Tenant Key'
-
-relationship rel_Tenant_Mailbox_Permissions_Tenant_Key
-	fromColumn: 'Mailbox Permissions'.'Tenant Key'
-	toColumn: Tenant.'Tenant Key'
-
-relationship rel_Tenant_Service_Relationships_Tenant_Key
-	fromColumn: 'Service Relationships'.'Tenant Key'
-	toColumn: Tenant.'Tenant Key'
-
-relationship rel_Environment_User_Snapshots_Environment_Key
-	fromColumn: 'User Snapshots'.'Environment Key'
-	toColumn: Environment.'Environment Key'
-
-relationship rel_Environment_User_Activities_Environment_Key
-	fromColumn: 'User Activities'.'Environment Key'
-	toColumn: Environment.'Environment Key'
-
-relationship rel_Environment_Identity_Matches_Environment_Key
-	fromColumn: 'Identity Matches'.'Environment Key'
-	toColumn: Environment.'Environment Key'
-
-relationship rel_Environment_User_License_Assignments_Environment_Key
-	fromColumn: 'User License Assignments'.'Environment Key'
-	toColumn: Environment.'Environment Key'
-
-relationship rel_Environment_License_Capacity_Environment_Key
-	fromColumn: 'License Capacity'.'Environment Key'
-	toColumn: Environment.'Environment Key'
-
-relationship rel_Environment_Device_Snapshots_Environment_Key
-	fromColumn: 'Device Snapshots'.'Environment Key'
-	toColumn: Environment.'Environment Key'
-
-relationship rel_Environment_Device_Compliance_Snapshots_Environment_Key
-	fromColumn: 'Device Compliance Snapshots'.'Environment Key'
-	toColumn: Environment.'Environment Key'
-
-relationship rel_Environment_Device_Matches_Environment_Key
-	fromColumn: 'Device Matches'.'Environment Key'
-	toColumn: Environment.'Environment Key'
-
-relationship rel_Environment_Windows_Lifecycle_Assessments_Environment_Key
-	fromColumn: 'Windows Lifecycle Assessments'.'Environment Key'
-	toColumn: Environment.'Environment Key'
-
-relationship rel_Environment_Endpoint_Experience_Measurements_Environment_Key
-	fromColumn: 'Endpoint Experience Measurements'.'Environment Key'
-	toColumn: Environment.'Environment Key'
-
-relationship rel_Environment_Application_Installations_Environment_Key
-	fromColumn: 'Application Installations'.'Environment Key'
-	toColumn: Environment.'Environment Key'
-
-relationship rel_Environment_Collaboration_Usage_Environment_Key
-	fromColumn: 'Collaboration Usage'.'Environment Key'
-	toColumn: Environment.'Environment Key'
-
-relationship rel_Environment_Content_Usage_Environment_Key
-	fromColumn: 'Content Usage'.'Environment Key'
-	toColumn: Environment.'Environment Key'
-
-relationship rel_Environment_Mailbox_Snapshots_Environment_Key
-	fromColumn: 'Mailbox Snapshots'.'Environment Key'
-	toColumn: Environment.'Environment Key'
-
-relationship rel_Environment_Mailbox_Matches_Environment_Key
-	fromColumn: 'Mailbox Matches'.'Environment Key'
-	toColumn: Environment.'Environment Key'
-
-relationship rel_Environment_Backup_Coverage_Environment_Key
-	fromColumn: 'Backup Coverage'.'Environment Key'
-	toColumn: Environment.'Environment Key'
-
-relationship rel_Environment_Security_Posture_Observations_Environment_Key
-	fromColumn: 'Security Posture Observations'.'Environment Key'
-	toColumn: Environment.'Environment Key'
-
-relationship rel_Environment_Source_Runs_Environment_Key
-	fromColumn: 'Source Runs'.'Environment Key'
-	toColumn: Environment.'Environment Key'
-
-relationship rel_Environment_Source_Coverage_Environment_Key
-	fromColumn: 'Source Coverage'.'Environment Key'
-	toColumn: Environment.'Environment Key'
-
-relationship rel_Environment_Data_Quality_Results_Environment_Key
-	fromColumn: 'Data Quality Results'.'Environment Key'
-	toColumn: Environment.'Environment Key'
-
-relationship rel_Environment_Findings_Environment_Key
-	fromColumn: Findings.'Environment Key'
-	toColumn: Environment.'Environment Key'
-
-relationship rel_Environment_User_Device_Relationships_Environment_Key
-	fromColumn: 'User Device Relationships'.'Environment Key'
-	toColumn: Environment.'Environment Key'
-
-relationship rel_Environment_User_Group_Memberships_Environment_Key
-	fromColumn: 'User Group Memberships'.'Environment Key'
-	toColumn: Environment.'Environment Key'
-
-relationship rel_Environment_Team_Memberships_Environment_Key
-	fromColumn: 'Team Memberships'.'Environment Key'
-	toColumn: Environment.'Environment Key'
-
-relationship rel_Environment_Mailbox_Permissions_Environment_Key
-	fromColumn: 'Mailbox Permissions'.'Environment Key'
-	toColumn: Environment.'Environment Key'
-
-relationship rel_Environment_Service_Relationships_Environment_Key
-	fromColumn: 'Service Relationships'.'Environment Key'
-	toColumn: Environment.'Environment Key'
-
-relationship rel_Organization_User_Snapshots_Organization_Key
-	fromColumn: 'User Snapshots'.'Organization Key'
-	toColumn: Organization.'Organization Key'
-
-relationship rel_Organization_Device_Snapshots_Organization_Key
-	fromColumn: 'Device Snapshots'.'Organization Key'
-	toColumn: Organization.'Organization Key'
-
-relationship rel_Organization_Mailbox_Snapshots_Organization_Key
-	fromColumn: 'Mailbox Snapshots'.'Organization Key'
-	toColumn: Organization.'Organization Key'
-
-relationship rel_Geography_User_Snapshots_Geography_Key
-	fromColumn: 'User Snapshots'.'Geography Key'
-	toColumn: Geography.'Geography Key'
-
-relationship rel_Geography_Device_Snapshots_Geography_Key
-	fromColumn: 'Device Snapshots'.'Geography Key'
-	toColumn: Geography.'Geography Key'
-
-relationship rel_Geography_Windows_Lifecycle_Assessments_Geography_Key
-	fromColumn: 'Windows Lifecycle Assessments'.'Geography Key'
-	toColumn: Geography.'Geography Key'
-
-relationship rel_Geography_Mailbox_Snapshots_Geography_Key
-	fromColumn: 'Mailbox Snapshots'.'Geography Key'
-	toColumn: Geography.'Geography Key'
-
-relationship rel_User_User_Snapshots_User_Key
-	fromColumn: 'User Snapshots'.'User Key'
-	toColumn: User.'User Key'
-
-relationship rel_User_User_Activities_User_Key
-	fromColumn: 'User Activities'.'User Key'
-	toColumn: User.'User Key'
-
-relationship rel_User_Identity_Matches_User_Key
-	fromColumn: 'Identity Matches'.'User Key'
-	toColumn: User.'User Key'
-
-relationship rel_User_User_License_Assignments_User_Key
-	fromColumn: 'User License Assignments'.'User Key'
-	toColumn: User.'User Key'
-
-relationship rel_User_User_Device_Relationships_User_Key
-	fromColumn: 'User Device Relationships'.'User Key'
-	toColumn: User.'User Key'
-
-relationship rel_User_User_Group_Memberships_User_Key
-	fromColumn: 'User Group Memberships'.'User Key'
-	toColumn: User.'User Key'
-
-relationship rel_User_Team_Memberships_User_Key
-	fromColumn: 'Team Memberships'.'User Key'
-	toColumn: User.'User Key'
-
-relationship rel_User_Mailbox_Permissions_User_Key
-	fromColumn: 'Mailbox Permissions'.'User Key'
-	toColumn: User.'User Key'
-
-relationship rel_Device_Device_Snapshots_Device_Key
-	fromColumn: 'Device Snapshots'.'Device Key'
-	toColumn: Device.'Device Key'
-
-relationship rel_Device_Device_Compliance_Snapshots_Device_Key
-	fromColumn: 'Device Compliance Snapshots'.'Device Key'
-	toColumn: Device.'Device Key'
-
-relationship rel_Device_Device_Matches_Device_Key
-	fromColumn: 'Device Matches'.'Device Key'
-	toColumn: Device.'Device Key'
-
-relationship rel_Device_Windows_Lifecycle_Assessments_Device_Key
-	fromColumn: 'Windows Lifecycle Assessments'.'Device Key'
-	toColumn: Device.'Device Key'
-
-relationship rel_Device_Endpoint_Experience_Measurements_Device_Key
-	fromColumn: 'Endpoint Experience Measurements'.'Device Key'
-	toColumn: Device.'Device Key'
-
-relationship rel_Device_Application_Installations_Device_Key
-	fromColumn: 'Application Installations'.'Device Key'
-	toColumn: Device.'Device Key'
-
-relationship rel_Device_User_Device_Relationships_Device_Key
-	fromColumn: 'User Device Relationships'.'Device Key'
-	toColumn: Device.'Device Key'
-
-relationship rel_Application_Application_Installations_Application_Key
-	fromColumn: 'Application Installations'.'Application Key'
-	toColumn: Application.'Application Key'
-
-relationship rel_License_Product_User_License_Assignments_License_Product_Key
-	fromColumn: 'User License Assignments'.'License Product Key'
-	toColumn: 'License Product'.'License Product Key'
-
-relationship rel_License_Product_License_Capacity_License_Product_Key
-	fromColumn: 'License Capacity'.'License Product Key'
-	toColumn: 'License Product'.'License Product Key'
-
-relationship rel_Service_User_Activities_Service_Key
-	fromColumn: 'User Activities'.'Service Key'
-	toColumn: Service.'Service Key'
-
-relationship rel_Service_Collaboration_Usage_Service_Key
-	fromColumn: 'Collaboration Usage'.'Service Key'
-	toColumn: Service.'Service Key'
-
-relationship rel_Service_Content_Usage_Service_Key
-	fromColumn: 'Content Usage'.'Service Key'
-	toColumn: Service.'Service Key'
-
-relationship rel_Service_Backup_Coverage_Service_Key
-	fromColumn: 'Backup Coverage'.'Service Key'
-	toColumn: Service.'Service Key'
-
-relationship rel_Service_Security_Posture_Observations_Service_Key
-	fromColumn: 'Security Posture Observations'.'Service Key'
-	toColumn: Service.'Service Key'
-
-relationship rel_Service_Findings_Service_Key
-	fromColumn: Findings.'Service Key'
-	toColumn: Service.'Service Key'
-
-relationship rel_Service_Service_Relationships_Service_Key
-	fromColumn: 'Service Relationships'.'Service Key'
-	toColumn: Service.'Service Key'
-
-relationship rel_Group_User_Group_Memberships_Group_Key
-	fromColumn: 'User Group Memberships'.'Group Key'
-	toColumn: Group.'Group Key'
-
-relationship rel_Group_Mailbox_Permissions_Group_Key
-	fromColumn: 'Mailbox Permissions'.'Group Key'
-	toColumn: Group.'Group Key'
-
-relationship rel_Team_Collaboration_Usage_Team_Key
-	fromColumn: 'Collaboration Usage'.'Team Key'
-	toColumn: Team.'Team Key'
-
-relationship rel_Team_Team_Memberships_Team_Key
-	fromColumn: 'Team Memberships'.'Team Key'
-	toColumn: Team.'Team Key'
-
-relationship rel_Site_Content_Usage_Site_Key
-	fromColumn: 'Content Usage'.'Site Key'
-	toColumn: Site.'Site Key'
-
-relationship rel_Mailbox_Mailbox_Snapshots_Mailbox_Key
-	fromColumn: 'Mailbox Snapshots'.'Mailbox Key'
-	toColumn: Mailbox.'Mailbox Key'
-
-relationship rel_Mailbox_Mailbox_Matches_Mailbox_Key
-	fromColumn: 'Mailbox Matches'.'Mailbox Key'
-	toColumn: Mailbox.'Mailbox Key'
-
-relationship rel_Mailbox_Mailbox_Permissions_Mailbox_Key
-	fromColumn: 'Mailbox Permissions'.'Mailbox Key'
-	toColumn: Mailbox.'Mailbox Key'
-
-relationship rel_Data_Source_Source_Runs_Data_Source_Key
-	fromColumn: 'Source Runs'.'Data Source Key'
-	toColumn: 'Data Source'.'Data Source Key'
-
-relationship rel_Data_Source_Source_Coverage_Data_Source_Key
-	fromColumn: 'Source Coverage'.'Data Source Key'
-	toColumn: 'Data Source'.'Data Source Key'
-
-relationship rel_Data_Source_Data_Quality_Results_Data_Source_Key
-	fromColumn: 'Data Quality Results'.'Data Source Key'
-	toColumn: 'Data Source'.'Data Source Key'
-
-relationship rel_Finding_Type_Findings_Finding_Type_Key
-	fromColumn: Findings.'Finding Type Key'
-	toColumn: 'Finding Type'.'Finding Type Key'
-
 relationship rel_Date_Executive_KPI_Trends_Date_Key
 	fromColumn: 'Executive KPI Trends'.'Date Key'
 	toColumn: Date.'Date Key'
-
-relationship rel_Tenant_Executive_KPI_Trends_Tenant_Key
-	fromColumn: 'Executive KPI Trends'.'Tenant Key'
-	toColumn: Tenant.'Tenant Key'
-
-relationship rel_Environment_Executive_KPI_Trends_Environment_Key
-	fromColumn: 'Executive KPI Trends'.'Environment Key'
-	toColumn: Environment.'Environment Key'
-
-relationship rel_Date_User_Directory_Observations_Date_Key
-	fromColumn: 'User Directory Observations'.'Date Key'
-	toColumn: Date.'Date Key'
-
-relationship rel_Tenant_User_Directory_Observations_Tenant_Key
-	fromColumn: 'User Directory Observations'.'Tenant Key'
-	toColumn: Tenant.'Tenant Key'
-
-relationship rel_Environment_User_Directory_Observations_Environment_Key
-	fromColumn: 'User Directory Observations'.'Environment Key'
-	toColumn: Environment.'Environment Key'
-
-relationship rel_User_User_Directory_Observations_User_Key
-	fromColumn: 'User Directory Observations'.'User Key'
-	toColumn: User.'User Key'
-
-relationship rel_User_Findings_User_Key
-	fromColumn: Findings.'User Key'
-	toColumn: User.'User Key'
-
-relationship rel_Date_Identity_Security_Status_Date_Key
-	fromColumn: 'Identity Security Status'.'Date Key'
-	toColumn: Date.'Date Key'
-
-relationship rel_Date_Conditional_Access_Coverage_Date_Key
-	fromColumn: 'Conditional Access Coverage'.'Date Key'
-	toColumn: Date.'Date Key'
-
-relationship rel_Date_Endpoint_Security_Status_Date_Key
-	fromColumn: 'Endpoint Security Status'.'Date Key'
-	toColumn: Date.'Date Key'
-
-relationship rel_Tenant_Identity_Security_Status_Tenant_Key
-	fromColumn: 'Identity Security Status'.'Tenant Key'
-	toColumn: Tenant.'Tenant Key'
-
-relationship rel_Tenant_Conditional_Access_Coverage_Tenant_Key
-	fromColumn: 'Conditional Access Coverage'.'Tenant Key'
-	toColumn: Tenant.'Tenant Key'
-
-relationship rel_Tenant_Endpoint_Security_Status_Tenant_Key
-	fromColumn: 'Endpoint Security Status'.'Tenant Key'
-	toColumn: Tenant.'Tenant Key'
-
-relationship rel_Environment_Identity_Security_Status_Environment_Key
-	fromColumn: 'Identity Security Status'.'Environment Key'
-	toColumn: Environment.'Environment Key'
-
-relationship rel_Environment_Conditional_Access_Coverage_Environment_Key
-	fromColumn: 'Conditional Access Coverage'.'Environment Key'
-	toColumn: Environment.'Environment Key'
-
-relationship rel_Environment_Endpoint_Security_Status_Environment_Key
-	fromColumn: 'Endpoint Security Status'.'Environment Key'
-	toColumn: Environment.'Environment Key'
-
-relationship rel_User_Identity_Security_Status_User_Key
-	fromColumn: 'Identity Security Status'.'User Key'
-	toColumn: User.'User Key'
-
-relationship rel_Device_Endpoint_Security_Status_Device_Key
-	fromColumn: 'Endpoint Security Status'.'Device Key'
-	toColumn: Device.'Device Key'
-
-relationship cde0bcc0-1d98-48cb-ac78-6c360db76bb0
-	joinOnDateBehavior: datePartOnly
-	fromColumn: 'User Snapshots'.'Last Activity UTC'
-	toColumn: LocalDateTable_975b6c35-8bb1-4f3d-a39b-7f73fb68c00e.Date
-
-relationship ad7963ba-888f-4a86-8447-f24952f00930
-	joinOnDateBehavior: datePartOnly
-	fromColumn: 'User Activities'.'Activity Date UTC'
-	toColumn: LocalDateTable_ab3547e2-cc3e-4859-b585-ddc0b959c470.Date
-
-relationship 4b51ff80-f219-41dd-9988-bf83e55298c6
-	joinOnDateBehavior: datePartOnly
-	fromColumn: 'Device Snapshots'.'Last Activity UTC'
-	toColumn: LocalDateTable_0e067407-fa48-4653-bed4-bd560ca242d8.Date
-
-relationship ff024808-4f95-4d25-959b-f02349daec62
-	joinOnDateBehavior: datePartOnly
-	fromColumn: 'Windows Lifecycle Assessments'.'End Of Support Date'
-	toColumn: LocalDateTable_224137e9-4fb1-4b15-8c63-ab2635f24d56.Date
-
-relationship d11a1024-03d3-4fff-bb8f-00f04976694c
-	joinOnDateBehavior: datePartOnly
-	fromColumn: 'Endpoint Experience Measurements'.'Measurement Date UTC'
-	toColumn: LocalDateTable_db4727be-32c4-4cef-85a9-8b3b83f7f111.Date
-
-relationship 8e9b707f-7ed3-43f1-86ea-68f7c929b1d4
-	joinOnDateBehavior: datePartOnly
-	fromColumn: 'Source Runs'.'Latest Accepted Run UTC'
-	toColumn: LocalDateTable_0a080a09-8c9b-4ecd-b1d6-928b95ea4abf.Date
-
-relationship b28477eb-88ed-45b0-a707-231148632d2e
-	joinOnDateBehavior: datePartOnly
-	fromColumn: Findings.'Evidence Date'
-	toColumn: LocalDateTable_a7b04572-0e01-4ac5-b43f-70dfcc411998.Date
-
-relationship c665ed82-aad0-4fe1-bb8e-e7efa804cb52
-	joinOnDateBehavior: datePartOnly
-	fromColumn: 'User Directory Observations'.'Last Activity UTC'
-	toColumn: LocalDateTable_c9c293c5-cf73-4433-897e-aa085f83eb42.Date
 
 relationship rel_user_activity_history_to_inventory
 	fromColumn: 'User Activity History Evidence'.'User Source ID'
@@ -777,4 +189,248 @@ relationship rel_country_selection_to_workforce_inventory
 relationship rel_country_selection_to_device_inventory
 	fromColumn: 'Device Inventory Evidence'.Country
 	toColumn: 'Country Selection'.'Source Country'
+
+relationship 'License Assignment Issues to Summary'
+	fromColumn: 'License Report Assignment Issues'.Product
+	toColumn: 'License Report Summary'.Product
+
+relationship SharePointOnPremInfrastructure1
+	fromColumn: 'SharePoint On-prem Servers'.'Farm Key'
+	toColumn: 'SharePoint On-prem Farms'.'Farm Key'
+
+relationship SharePointOnPremInfrastructure2
+	fromColumn: 'SharePoint On-prem Web Applications'.'Farm Key'
+	toColumn: 'SharePoint On-prem Farms'.'Farm Key'
+
+relationship SharePointOnPremInfrastructure3
+	fromColumn: 'SharePoint On-prem Content Databases'.'Web Application Key'
+	toColumn: 'SharePoint On-prem Web Applications'.'Web Application Key'
+
+relationship SharePointOnPremSites
+	fromColumn: 'SharePoint On-prem Site Collections'.'Content Database Key'
+	toColumn: 'SharePoint On-prem Content Databases'.'Content Database Key'
+
+relationship SharePointOnPremCoverage
+	fromColumn: 'SharePoint On-prem Collection Coverage'.'Content Database Key'
+	toColumn: 'SharePoint On-prem Content Databases'.'Content Database Key'
+
+relationship SharePointOnPremServiceApplications
+	fromColumn: 'SharePoint On-prem Service Applications'.'Farm Key'
+	toColumn: 'SharePoint On-prem Farms'.'Farm Key'
+
+relationship SharePointOnPremWebZones
+	fromColumn: 'SharePoint On-prem Web Zones'.'Web Application Key'
+	toColumn: 'SharePoint On-prem Web Applications'.'Web Application Key'
+
+relationship rel_country_selection_to_device_system_evidence
+	fromColumn: 'Device System Evidence'.Country
+	toColumn: 'Country Selection'.'Source Country'
+
+relationship EndpointProtection_CountrySelection
+	fromColumn: 'Endpoint Protection Evidence'.Country
+	toColumn: 'Country Selection'.'Source Country'
+
+relationship Intune_Configuration_Setting
+	fromColumn: 'Intune Configuration Setting Evidence'.'Policy Key'
+	toColumn: 'Intune Configuration Policy Evidence'.'Policy Key'
+
+relationship Intune_Configuration_Assignment
+	fromColumn: 'Intune Configuration Assignment Evidence'.'Policy Key'
+	toColumn: 'Intune Configuration Policy Evidence'.'Policy Key'
+
+relationship Intune_Configuration_Device
+	fromColumn: 'Intune Configuration Device Evidence'.'Policy Key'
+	toColumn: 'Intune Configuration Policy Evidence'.'Policy Key'
+
+relationship Intune_ManagedApp_Assignment
+	fromColumn: 'Intune Managed App Assignment Evidence'.'Application Key'
+	toColumn: 'Intune Managed App Evidence'.'Application Key'
+
+relationship Intune_ManagedApp_Deployment
+	fromColumn: 'Intune Managed App Deployment Evidence'.'Application Key'
+	toColumn: 'Intune Managed App Evidence'.'Application Key'
+
+relationship Intune_Device_IntuneConfigurationDeviceEvidence
+	fromColumn: 'Intune Configuration Device Evidence'.'Device Key'
+	toColumn: 'Device Inventory Evidence'.'Device Tenant Key'
+
+relationship Intune_Device_IntuneManagedAppDeploymentEvidence
+	fromColumn: 'Intune Managed App Deployment Evidence'.'Device Key'
+	toColumn: 'Device Inventory Evidence'.'Device Tenant Key'
+
+relationship Intune_Device_IntuneEnrollmentFailureEvidence
+	fromColumn: 'Intune Enrollment Failure Evidence'.'Device Key'
+	toColumn: 'Device Inventory Evidence'.'Device Tenant Key'
+
+relationship native-cmdb-report-0
+	fromColumn: 'Native User License'.TenantUserKey
+	toColumn: 'Native User Evidence'.TenantUserKey
+
+relationship native-cmdb-report-1
+	fromColumn: 'Native User License'.TenantSkuKey
+	toColumn: 'Native License SKU'.TenantSkuKey
+
+relationship native-cmdb-report-2
+	fromColumn: 'Native Compliance Evidence'.TenantDeviceKey
+	toColumn: 'Native Device Evidence'.TenantDeviceKey
+
+relationship native-cmdb-report-3
+	fromColumn: 'Native User Device Link'.TenantUserKey
+	toColumn: 'Native User Evidence'.TenantUserKey
+
+relationship native-cmdb-report-4
+	fromColumn: 'Native User Device Link'.TenantDeviceKey
+	toColumn: 'Native Device Evidence'.TenantDeviceKey
+
+relationship native-cmdb-report-5
+	fromColumn: 'Native EXO Mailbox'.TenantUserKey
+	toColumn: 'Native User Evidence'.TenantUserKey
+
+relationship native-cmdb-report-6
+	fromColumn: 'Device Source Evidence'.TenantDeviceKey
+	toColumn: 'Native Device Evidence'.TenantDeviceKey
+
+relationship native-cmdb-report-7
+	fromColumn: 'Native License Assignment'.TenantUserKey
+	toColumn: 'Native User Evidence'.TenantUserKey
+
+relationship native-cmdb-report-8
+	fromColumn: 'Native License Assignment'.TenantSkuKey
+	toColumn: 'Native License SKU'.TenantSkuKey
+
+relationship native-cmdb-report-9
+	fromColumn: 'Native License Assignment'.TenantGroupKey
+	toColumn: 'Native Group Evidence'.TenantGroupKey
+
+relationship native-cmdb-report-10
+	fromColumn: 'Native Entity Finding'.TenantDeviceKey
+	toColumn: 'Native Device Evidence'.TenantDeviceKey
+
+relationship native-cmdb-report-11
+	fromColumn: 'Native Entity Finding'.TenantUserKey
+	toColumn: 'Native User Evidence'.TenantUserKey
+
+relationship native-cmdb-report-12
+	fromColumn: 'Native Entity Finding'.TenantGroupKey
+	toColumn: 'Native Group Evidence'.TenantGroupKey
+
+relationship native-cmdb-executive-country-user
+	fromColumn: 'Native User Evidence'.CountryLabel
+	toColumn: 'Native Country Evidence'.CountryLabel
+
+relationship native-cmdb-executive-country-mailbox
+	fromColumn: 'Native Mailbox Hosting'.CountryLabel
+	toColumn: 'Native Country Evidence'.CountryLabel
+
+relationship native-cmdb-hardware-device
+	fromColumn: 'Native Hardware Evidence'.TenantDeviceKey
+	toColumn: 'Native Device Evidence'.TenantDeviceKey
+
+relationship native-cmdb-service-plan-user
+	fromColumn: 'Native User Service Plan'.TenantUserKey
+	toColumn: 'Native User Evidence'.TenantUserKey
+
+relationship native-cmdb-service-plan-sku
+	fromColumn: 'Native User Service Plan'.TenantSkuKey
+	toColumn: 'Native License SKU'.TenantSkuKey
+
+relationship native-cmdb-service-plan-definition
+	fromColumn: 'Native User Service Plan'.TenantServicePlanKey
+	toColumn: 'Native Service Plan'.TenantServicePlanKey
+
+relationship native-cmdb-app-device
+	fromColumn: 'Native Device Application'.'Tenant Intune device key'
+	toColumn: 'Native Managed Device Evidence'.TenantIntuneDeviceKey
+
+relationship native-cmdb-app-device-parent
+	fromColumn: 'Native Managed Device Evidence'.TenantDeviceKey
+	toColumn: 'Native Device Evidence'.TenantDeviceKey
+
+relationship native-cmdb-app-product
+	fromColumn: 'Native Device Application'.TenantApplicationKey
+	toColumn: 'Native Discovered Application'.TenantApplicationKey
+
+relationship native-cmdb-user-activity
+	fromColumn: 'Native Workload Activity'.TenantUserKey
+	toColumn: 'Native User Evidence'.TenantUserKey
+
+relationship native-cmdb-team-member-team
+	fromColumn: 'Native Team Membership'.TenantTeamKey
+	toColumn: 'Native Team'.TenantTeamKey
+
+relationship native-cmdb-team-member-user
+	fromColumn: 'Native Team Membership'.TenantUserKey
+	toColumn: 'Native User Evidence'.TenantUserKey
+
+relationship native-cmdb-native-ad-member-object
+	fromColumn: 'AD Membership Evidence'.TenantADObjectKey
+	toColumn: 'AD Object Evidence'.TenantADObjectKey
+
+relationship native-cmdb-native-ad-member-group
+	fromColumn: 'AD Membership Evidence'.TenantADGroupKey
+	toColumn: 'AD Group Evidence'.TenantADGroupKey
+
+relationship native-cmdb-native-entra-member-group
+	fromColumn: 'Entra Membership Evidence'.TenantGroupKey
+	toColumn: 'Native Group Evidence'.TenantGroupKey
+
+relationship cmdb-entity-endpoint
+	fromColumn: 'CMDB Relationship Endpoint'.'Entity Key'
+	toColumn: 'CMDB Entity Evidence'.'Entity Key'
+
+relationship cmdb-link-endpoint
+	fromColumn: 'CMDB Relationship Endpoint'.'Link Key'
+	toColumn: 'CMDB Relationship Evidence'.'Link Key'
+
+relationship cmdb-entity-alias
+	fromColumn: 'CMDB Entity Alias'.'Entity Key'
+	toColumn: 'CMDB Entity Evidence'.'Entity Key'
+
+relationship cmdb-context-Native-Group-Evidence
+	fromColumn: 'Native Group Evidence'.'CMDB Entity Key'
+	toColumn: 'CMDB Entity Evidence'.'Entity Key'
+
+relationship cmdb-context-AD-Group-Evidence
+	fromColumn: 'AD Group Evidence'.'CMDB Entity Key'
+	toColumn: 'CMDB Entity Evidence'.'Entity Key'
+
+relationship cde0bcc0-1d98-48cb-ac78-6c360db76bb0
+	joinOnDateBehavior: datePartOnly
+	fromColumn: 'User Snapshots'.'Last Activity UTC'
+	toColumn: LocalDateTable_975b6c35-8bb1-4f3d-a39b-7f73fb68c00e.Date
+
+relationship ad7963ba-888f-4a86-8447-f24952f00930
+	joinOnDateBehavior: datePartOnly
+	fromColumn: 'User Activities'.'Activity Date UTC'
+	toColumn: LocalDateTable_ab3547e2-cc3e-4859-b585-ddc0b959c470.Date
+
+relationship 4b51ff80-f219-41dd-9988-bf83e55298c6
+	joinOnDateBehavior: datePartOnly
+	fromColumn: 'Device Snapshots'.'Last Activity UTC'
+	toColumn: LocalDateTable_0e067407-fa48-4653-bed4-bd560ca242d8.Date
+
+relationship ff024808-4f95-4d25-959b-f02349daec62
+	joinOnDateBehavior: datePartOnly
+	fromColumn: 'Windows Lifecycle Assessments'.'End Of Support Date'
+	toColumn: LocalDateTable_224137e9-4fb1-4b15-8c63-ab2635f24d56.Date
+
+relationship d11a1024-03d3-4fff-bb8f-00f04976694c
+	joinOnDateBehavior: datePartOnly
+	fromColumn: 'Endpoint Experience Measurements'.'Measurement Date UTC'
+	toColumn: LocalDateTable_db4727be-32c4-4cef-85a9-8b3b83f7f111.Date
+
+relationship 8e9b707f-7ed3-43f1-86ea-68f7c929b1d4
+	joinOnDateBehavior: datePartOnly
+	fromColumn: 'Source Runs'.'Latest Accepted Run UTC'
+	toColumn: LocalDateTable_0a080a09-8c9b-4ecd-b1d6-928b95ea4abf.Date
+
+relationship b28477eb-88ed-45b0-a707-231148632d2e
+	joinOnDateBehavior: datePartOnly
+	fromColumn: Findings.'Evidence Date'
+	toColumn: LocalDateTable_a7b04572-0e01-4ac5-b43f-70dfcc411998.Date
+
+relationship c665ed82-aad0-4fe1-bb8e-e7efa804cb52
+	joinOnDateBehavior: datePartOnly
+	fromColumn: 'User Directory Observations'.'Last Activity UTC'
+	toColumn: LocalDateTable_c9c293c5-cf73-4433-897e-aa085f83eb42.Date
 

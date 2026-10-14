@@ -2,7 +2,7 @@
 .SYNOPSIS
     Prepare a validated, versioned SmartWorkplaceIntelligence batch after raw collectors.
 .VERSION
-    0.1.18
+    0.2.0
 .NOTES
     PowerShell 7. SharePoint mapping reads use the tenant configuration unless Offline.
     Deployment must include the sibling SmartWorkplaceIntelligence/scripts, config and reference folders.
@@ -178,6 +178,7 @@ try {
     if ($TransferOnly) {
         $phase='SharePoint existing-batch transfer'
         $transfer=Send-PreparedEvidenceBatch @transferParameters -ExpectedBatchId $ExpectedBatchId
+        Assert-PreparedTransferResult -Result $transfer -ExpectedBatchId $ExpectedBatchId
         WriteLog -Message "Transfer complete: batch=$($transfer.BatchId); CSVs=$($transfer.CsvFiles); verified files=$($transfer.VerifiedFiles); pointer verified=$($transfer.PointerVerified); audit=$($transfer.AuditPath). No collection, mapping download or CSV generation." -Level INFO
         $smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; return
     }
@@ -218,6 +219,7 @@ try {
         $smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; return
     }
     $phase='Prepare and validate'
+    $preparedPython=if($config['PreparedPythonCommand']){[string]$config['PreparedPythonCommand']}else{'python'}
     $params = @{
         DataRoot=$data;OutputRoot=$output;WorkRoot=$work;TenantKey=$effective.TenantKey
         AccountClassificationConfigPath=$accountClassificationPath
@@ -228,12 +230,14 @@ try {
         AllowEmptyTables=[string[]](ConfigValue 'PreparedAllowEmptyTables')
         ValidateOnly=[bool]$ValidateOnly
         MappingRoot=$mappingRoot
+        PythonCommand=$preparedPython
     }
     $result = Invoke-PreparedEvidencePipeline @params
     if (-not $ValidateOnly) { WriteLog -Message "Local batch published and validated: $($result.BatchId); CSV files=$($result.Files); path=$($result.BatchPath). Cloud transfer is a separate step." -Level INFO }
     if (-not $ValidateOnly -and $batchUploadEnabled) {
         $phase='SharePoint batch transfer'
         $transfer=Send-PreparedEvidenceBatch @transferParameters -ExpectedBatchId $result.BatchId
+        Assert-PreparedTransferResult -Result $transfer -ExpectedBatchId $result.BatchId
         WriteLog -Message "SharePoint batch and pointer verified: $($transfer.BatchId); files=$($transfer.VerifiedFiles); audit=$($transfer.AuditPath)." -Level INFO
     }
     $recap = if ($ValidateOnly) { "Source preflight: $($result.SourceFiles) files; $($result.Identity.CsvFiles) CSVs and $($result.Identity.Rows) rows checked; no generation/publication." } else { "$($result.Files) prepared CSVs; observed history retained; batch $($result.BatchId)." }
@@ -290,8 +294,8 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAZnFO/Xbm+x8zb
-# arjC9bJJRf6ic5+GmfsCQMehOrf6Z6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC6TiwkHVpxd9Tf
+# 5bQEpmApiJ8R+tQhhfCK2saIfyGwXaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -424,31 +428,31 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEICiScDPa3rjwiLP0vvKYuMttlNM6UhUbgh2rS412yipsMA0GCSqG
-# SIb3DQEBAQUABIIBgABJ4vNAldYPtCelOZ6PqWbcGvyD14Av1uyN3q4bXURZqzyo
-# CRh2GC8xY5rsweSAXtJ6p1lDgsLUBga1e1Aa9eW8uvkievKmCipVlimw7NGqQc9J
-# KvzJBAns1tRbkiSvtu3RGECZcLYwYdW6n1O151+Y1oXOr0Et2+kvjRKMCyLTu5Nf
-# cgZY2kiMXU0LHxI/VrfDvVNwTPYslwsKQ30JbKO97ruGJdq/pyIT73L8D8K+e9Xd
-# orVB0jn3nQWr5XZrSvNOjmoujkob7MabSSresrnEBSAWcUvBQBmcnqwZ6/9tsv5P
-# wZ6Fw8Vubgx8hSP6i7XVHhcQa6W7dZ7f++zfi2ElqGvy1739P3fpVHfT3J45W/aJ
-# GY+3SMclRZL2TI4STHrc2+1bQvWUOgce9Jex4PJDmjz42PWrQNT+Hq8bLCvsGz4d
-# Czh0BAmY7PqEibWbnGQjPFPpQfmI6nRBcpEk09PJaNPBYDqSHZQDJ2c22FSjzMGC
-# LCuTPt5IkJFm9Ajxr6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEICRi6nbIKb0D6Aop0/XKZ5n0hYLP2JvZTflOMW467AGcMA0GCSqG
+# SIb3DQEBAQUABIIBgCOKOJ5mSBspwKl3jmQ9d7APreYYPkpCKB1VN+lxthckjEIQ
+# heZ59AF1yY0+81IcL+5Pz1YM1KW+xTbm8HGPZu8XQf3Xe0pBA8hcGWvTJcHsqj8F
+# nyA50iogrYUqSyyHiqvfYoLYnyCD1bPjP6qPKBMRDK+wEmqgETENHStFLedF2TUh
+# e0A/0ACb3TRbR4qamXq7sfPmCLtY8nhmBJKUiGF8SJrk848y7hvlWOFDkv9VOTUy
+# +Ii8PsYwuenr+swm/2KUeSdei/DWM9Bi8aj/0XW+3tGWvxuxVV0ApDp3+C2X50GC
+# IZprVv1M6Awvq5chzRX69RdzzVX9xxMaqspm8+PA36izjSADrwIh71IVtBe+iBWN
+# rqpwjSIkQ+xJXSvws3t8cfgUs/h4fgMc1imcOMx9CCTikGNm/lCQp726fpECAYaI
+# sHRV79zeybT/hoU7xSeCfkBwArPPSxUZ74CbE4ZIYVXWxsmcHOE3fVd73LRjpOsI
+# /TlMiYs+9yN71V6VgKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTQxNTMw
-# NDFaMC8GCSqGSIb3DQEJBDEiBCAdXAuMGO+26Tgu4jjXJ5uTbhdWN4wLAPTAcxPe
-# rXnSnjANBgkqhkiG9w0BAQEFAASCAgA/gVSZvdsBPNOMePRtetmcNRSfGHDakqQX
-# ZfG0mI+OYizzwBK+SMdDrd12o2hmAhBo6spRZhN7gSdWRK8dQ4wjJmiU6Z4Ptsg7
-# 9CQhLZnQ8kS95j8m1UlYh7B0sLLEzkBAB9ygxlhFOPP2PY/Es2hUrTcUf+i6eZvs
-# 8PAWg4hjW6BvrF2KsBlK6rT+TXyr1/X7bMa3bL/K6YDk9ya4/Vkx7pXa0SxrVDrT
-# MBDNfQp2OvVvhpV+cXkv2dxwSs1Ax39ZGoehT4um8iqoZaRT9ED8He8XHrXGpUHh
-# f0DBEKmzZo4eTHqyzHQ9kkCBvAdGNfti1XhgGfA8YTu6RNJYNtnhGBOnhawtNzCW
-# 6qHcEt2t7rAj68bUFleLbdRLf2Uaf9/qx9UUgxnT2FrpI/yk6IJje/DUS5aH6Xhj
-# llsJwm1jbPj5Mg7ijk5l/V0Ugq6r+IF2iCJziLZYe/LiuIpJEFNrj86uIo9UO5cY
-# MgypHHZ9hA0iFPsgTGAOhn1xxOyPizcESMT+HG3dOygIOIW9ecaMNUetDbfdTmcL
-# ypod0tT9eLsb8ySmmRhshUsdMpDvPdXuMbEfX/I760S9naYGfBu/OP7+Ye8iILuf
-# P7pwI81cKbxbmlD5+HIaTJ131GhJvbwLf9sCoAhf2BEo1wEa636YSg69+3qc3Svm
-# OpHOq9vtqQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTQyMTIy
+# MDJaMC8GCSqGSIb3DQEJBDEiBCAnnNB6wmhSde1sSs6Ss55t34OTEZ6sfS27ezN/
+# lWFkbTANBgkqhkiG9w0BAQEFAASCAgBuputCP7fI9Ko6zUWmR72W31jYAFsAd3vD
+# xPVVf/jwb3/PS+IgrXCXs1TK40w3Etw+MYdgk5VNtohbZmPlWIgCDVHb5caPvxgS
+# WZFi7m96ktr4J5TzlISWMfNaWtCCsl1cPcSAlK8QMTUxcBNKC6yDEWM9AIp2ral9
+# GmL1ARYLrssQL+RTNRYjoG6y2UEBX4GYdmLBMLPKXzrzY059HWKeFTSPmt+MTCS7
+# opXel7FuhMRmuIIbUgdQOWbJwXtEm7NDH7zpJ26V+5ou8hCtwktKVRmtVFgYms75
+# /IqHgrPaJhdkr+46JOIGpCAbqPOP7wMSXJ+V9wWVujtionrDepW7lJNV0mN9Mogz
+# WnUs3xDSNqsWD1COTnnJx3z9wycM0lJsPeUIxhMK94g2sNZ+19SC1Tsli3vnZxoZ
+# +ZRF+Yp5WQRA1AkdOnPuhlLySJM4YUcs4EykLxcfFgpuyWLCq/2sdORFdgJ8VoRz
+# jfm4DB//7UJC5bjsPcN+Rk0YL1mSquv7xI7VC3YdyBww6wEHyaiSTb0d/0Ck0Xxu
+# tEQuhiIKj7Phvt5tw5srrhKt1Qoeg0SebZzyMpzmpPpcQsa6ANRrJHMRJJMfgSai
+# P0byZmUv7AbMXbHYVujog8oMH1IaO8tML8SWvurAtUX/c3LE71Crua1yS8fC5K6e
+# pKp+vxSFtA==
 # SIG # End signature block

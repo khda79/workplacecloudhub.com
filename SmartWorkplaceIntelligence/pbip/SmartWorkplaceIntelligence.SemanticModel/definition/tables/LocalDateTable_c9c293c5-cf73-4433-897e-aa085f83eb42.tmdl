@@ -1,3 +1,4 @@
+/// Legacy synthetic fixture: not used by production report visuals or consolidated evidence. Removal is pending a separately cleared dependency-safe retirement; no real data.
 table LocalDateTable_c9c293c5-cf73-4433-897e-aa085f83eb42
 	isHidden
 	showAsVariationsOnly

@@ -2,11 +2,11 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
   "name": "53a9ddee934dbc706952",
   "position": {
-    "x": 1412,
-    "y": 474,
+    "x": 32,
+    "y": 1016,
     "z": 118,
-    "width": 220,
-    "height": 20,
+    "width": 600,
+    "height": 24,
     "tabOrder": 118
   },
   "visual": {
@@ -19,12 +19,11 @@
               {
                 "textRuns": [
                   {
-                    "value": "Endpoint attention",
+                    "value": "Microsoft observations are not generic protection coverage.",
                     "textStyle": {
-                      "fontFamily": "Segoe UI Semibold",
-                      "fontSize": "10px",
-                      "color": "#52606D",
-                      "fontWeight": "bold"
+                      "fontFamily": "Segoe UI",
+                      "fontSize": "12pt",
+                      "color": "#183153"
                     }
                   }
                 ],
@@ -115,7 +114,22 @@
             }
           }
         }
+      ],
+      "general": [
+        {
+          "properties": {
+            "altText": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Microsoft observations are not generic protection coverage.'"
+                }
+              }
+            }
+          }
+        }
       ]
     }
-  }
+  },
+  "isHidden": true,
+  "parentGroupName": "7dbfb122566e65960823"
 }

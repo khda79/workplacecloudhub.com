@@ -1,0 +1,147 @@
+/// Governed IntuneOperationalSourceEvidence.csv. EvidenceKey row identity; configured reported scope only. Missing evidence is not success. Retains outside-catalog and unmatched observations.
+table 'Intune Operational Source Evidence'
+	lineageTag: bb89210d-4c1d-489b-b406-698daa2092b0
+
+	/// Source groups with verified receipts/files. This is not full-inventory or analytical qualification.
+	measure 'Intune Source Groups Supplied' = CALCULATE(COUNTROWS('Intune Operational Source Evidence'), 'Intune Operational Source Evidence'[Availability] = "Receipt and files verified")
+		formatString: #,##0
+		displayFolder: Intune | Reported scope
+		lineageTag: 11adc2d2-7380-4366-b341-e4867ddad12d
+
+	/// Source availability and limits. Country does not apply to this tenant-level qualification utility.
+	measure 'Intune Source Scope Message' = IF([Intune Source Groups Supplied] > 0, "Reported Intune scope only; assignment and reported status are not on-device proof. Full tenant coverage and endpoint health are not qualified.", "Intune operational evidence not supplied; not measured.")
+		formatString: @
+		displayFolder: Intune | Reported scope
+		lineageTag: 05700124-ca0e-4f87-93a2-0f6a846e3a40
+
+	/// Prepared IntuneOperationalSourceEvidence.csv: TenantKey. Reported source scope only; not whole-tenant coverage or endpoint health.
+	column 'Tenant Key'
+		dataType: string
+		isHidden
+		lineageTag: 04177beb-c4d2-423a-b4be-815aa565966d
+		summarizeBy: none
+		sourceColumn: TenantKey
+
+	/// Prepared IntuneOperationalSourceEvidence.csv: EvidenceKey. Reported source scope only; not whole-tenant coverage or endpoint health.
+	column 'Evidence Key'
+		dataType: string
+		isHidden
+		lineageTag: a7f5332a-056a-4a5d-820f-9db9a3eee3e2
+		summarizeBy: none
+		sourceColumn: EvidenceKey
+
+	/// Prepared IntuneOperationalSourceEvidence.csv: SourceGroup. Reported source scope only; not whole-tenant coverage or endpoint health.
+	column 'Source Group'
+		dataType: string
+		lineageTag: be1b37ca-f098-4fec-ab2b-20d394331699
+		summarizeBy: none
+		sourceColumn: SourceGroup
+
+	/// Prepared IntuneOperationalSourceEvidence.csv: Availability. Reported source scope only; not whole-tenant coverage or endpoint health.
+	column Availability
+		dataType: string
+		lineageTag: 110c5659-e055-4fd8-ab07-8631f115e2c1
+		summarizeBy: none
+		sourceColumn: Availability
+
+	/// Prepared IntuneOperationalSourceEvidence.csv: Producer. Reported source scope only; not whole-tenant coverage or endpoint health.
+	column Producer
+		dataType: string
+		lineageTag: 7ff49536-4f81-4ca8-8719-e4a96da49f34
+		summarizeBy: none
+		sourceColumn: Producer
+
+	/// Prepared IntuneOperationalSourceEvidence.csv: ScriptVersion. Reported source scope only; not whole-tenant coverage or endpoint health.
+	column 'Script Version'
+		dataType: string
+		lineageTag: 579d5256-737f-45e3-8c3c-08468679fcc7
+		summarizeBy: none
+		sourceColumn: ScriptVersion
+
+	/// Prepared IntuneOperationalSourceEvidence.csv: ReceiptRunId. Reported source scope only; not whole-tenant coverage or endpoint health.
+	column 'Receipt Run ID'
+		dataType: string
+		isHidden
+		lineageTag: b87d52c7-c456-4323-9700-fc5da1e45c22
+		summarizeBy: none
+		sourceColumn: ReceiptRunId
+
+	/// Prepared IntuneOperationalSourceEvidence.csv: BusinessRunId. Reported source scope only; not whole-tenant coverage or endpoint health.
+	column 'Business Run ID'
+		dataType: string
+		isHidden
+		lineageTag: d8241b0c-13e7-4c6a-98aa-ff3588206d10
+		summarizeBy: none
+		sourceColumn: BusinessRunId
+
+	/// Prepared IntuneOperationalSourceEvidence.csv: ReceiptSHA256. Reported source scope only; not whole-tenant coverage or endpoint health.
+	column 'Receipt SHA256'
+		dataType: string
+		isHidden
+		lineageTag: afc16572-ba52-4228-840b-c211643382c5
+		summarizeBy: none
+		sourceColumn: ReceiptSHA256
+
+	/// Prepared IntuneOperationalSourceEvidence.csv: CompletedUTC. Reported source scope only; not whole-tenant coverage or endpoint health.
+	column 'Completed UTC'
+		dataType: dateTime
+		lineageTag: 2e566374-fd0d-4235-9dce-6b23825f10f3
+		summarizeBy: none
+		sourceColumn: CompletedUTC
+
+	/// Prepared IntuneOperationalSourceEvidence.csv: ScopeQualification. Reported source scope only; not whole-tenant coverage or endpoint health.
+	column 'Scope Qualification'
+		dataType: string
+		lineageTag: d53cb92e-0258-4817-8e96-f023ed38dc19
+		summarizeBy: none
+		sourceColumn: ScopeQualification
+
+	/// Prepared IntuneOperationalSourceEvidence.csv: FullInventoryQualified. Reported source scope only; not whole-tenant coverage or endpoint health.
+	column 'Full Inventory Qualified'
+		dataType: string
+		lineageTag: 3d390cd8-9f26-44f6-853a-44e37bcc9ad3
+		summarizeBy: none
+		sourceColumn: FullInventoryQualified
+
+	/// Prepared IntuneOperationalSourceEvidence.csv: ConsumerScopeQualified. Reported source scope only; not whole-tenant coverage or endpoint health.
+	column 'Consumer Scope Qualified'
+		dataType: string
+		lineageTag: ae02b7a4-aa08-461a-a88e-1ea4ad807384
+		summarizeBy: none
+		sourceColumn: ConsumerScopeQualified
+
+	/// Prepared IntuneOperationalSourceEvidence.csv: FileCount. Reported source scope only; not whole-tenant coverage or endpoint health.
+	column 'File Count'
+		dataType: int64
+		lineageTag: 65ede7c2-e884-44f9-8f7d-7964fe4ce4f7
+		summarizeBy: none
+		sourceColumn: FileCount
+
+	/// Prepared IntuneOperationalSourceEvidence.csv: RowCount. Reported source scope only; not whole-tenant coverage or endpoint health.
+	column 'Row Count'
+		dataType: int64
+		lineageTag: a400921a-e1bb-450d-b852-1ef1aee63e20
+		summarizeBy: none
+		sourceColumn: RowCount
+
+	/// Prepared IntuneOperationalSourceEvidence.csv: Qualification. Reported source scope only; not whole-tenant coverage or endpoint health.
+	column Qualification
+		dataType: string
+		lineageTag: 2ba71c19-a5c6-48a0-b1fc-031eb8a08c5e
+		summarizeBy: none
+		sourceColumn: Qualification
+
+	partition 'Intune Operational Source Evidence' = m
+		mode: import
+		source =
+				let
+				    Raw = ReadMigrationCsv(GetPreparedEvidenceFile("IntuneOperationalSourceEvidence.csv"), {"TenantKey", "EvidenceKey", "SourceGroup", "Availability", "Producer", "ScriptVersion", "ReceiptRunId", "BusinessRunId", "ReceiptSHA256", "CompletedUTC", "ScopeQualification", "FullInventoryQualified", "ConsumerScopeQualified", "FileCount", "RowCount", "Qualification"}),
+				    Selected = Table.SelectColumns(Raw, {"TenantKey", "EvidenceKey", "SourceGroup", "Availability", "Producer", "ScriptVersion", "ReceiptRunId", "BusinessRunId", "ReceiptSHA256", "CompletedUTC", "ScopeQualification", "FullInventoryQualified", "ConsumerScopeQualified", "FileCount", "RowCount", "Qualification"}),
+				    Tenants = List.Distinct(Selected[TenantKey]),
+				    Validated = if List.Count(Tenants) > 1 or List.Contains(Tenants, null) or List.Contains(Tenants, "") then error "Intune evidence tenant identity is invalid" else Selected,
+				    ParseUtc = (raw as nullable text) as nullable datetime => if raw = null or Text.Trim(raw) = "" then null else if not Text.EndsWith(raw, "Z") then error "Intune prepared time requires explicit UTC Z" else DateTimeZone.RemoveZone(DateTimeZone.SwitchZone(DateTimeZone.FromText(raw, [Culture="en-US"]), 0)),
+				    Key = (values as list) as nullable text => if List.AnyTrue(List.Transform(values, each _ = null or Text.Trim(Text.From(_)) = "")) then null else Text.Combine(List.Transform(values, each Text.From(Text.Length(Text.From(_))) & ":" & Text.From(_)), "|"),
+				    Typed = Table.TransformColumns(Validated, {{"TenantKey", each _, type nullable text}, {"EvidenceKey", each _, type nullable text}, {"SourceGroup", each _, type nullable text}, {"Availability", each _, type nullable text}, {"Producer", each _, type nullable text}, {"ScriptVersion", each _, type nullable text}, {"ReceiptRunId", each _, type nullable text}, {"BusinessRunId", each _, type nullable text}, {"ReceiptSHA256", each _, type nullable text}, {"CompletedUTC", ParseUtc, type nullable datetime}, {"ScopeQualification", each _, type nullable text}, {"FullInventoryQualified", each _, type nullable text}, {"ConsumerScopeQualified", each _, type nullable text}, {"FileCount", each if _ = null or Text.Trim(_) = "" then null else Int64.From(Number.FromText(_, "en-US")), type nullable number}, {"RowCount", each if _ = null or Text.Trim(_) = "" then null else Int64.From(Number.FromText(_, "en-US")), type nullable number}, {"Qualification", each _, type nullable text}})
+				in
+				    Typed
+

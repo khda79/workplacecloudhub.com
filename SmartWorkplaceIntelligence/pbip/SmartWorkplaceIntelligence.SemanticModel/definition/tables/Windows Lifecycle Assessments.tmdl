@@ -1,5 +1,6 @@
-/// Synthetic Windows adoption, readiness, and lifecycle assessments.
+/// Legacy synthetic fixture: not used by production report visuals or consolidated evidence. Removal is pending a separately cleared dependency-safe retirement; no real data.
 table 'Windows Lifecycle Assessments'
+	isHidden
 	lineageTag: fdafd7ae-43ca-449a-bdf9-6ea1de895cdb
 
 	/// Active Windows devices with qualified lifecycle evidence.

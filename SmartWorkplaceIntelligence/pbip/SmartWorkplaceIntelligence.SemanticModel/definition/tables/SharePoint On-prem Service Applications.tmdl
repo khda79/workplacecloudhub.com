@@ -1,0 +1,74 @@
+/// One observed SharePoint service application from the current Infrastructure CSV.
+table 'SharePoint On-prem Service Applications'
+	lineageTag: c2451ceb-8c33-4d23-908b-b8cdab769943
+
+	/// Observed service applications in the current Infrastructure CSV.
+	measure 'On-prem Service Applications' = COUNTROWS('SharePoint On-prem Service Applications')
+		formatString: #,##0
+		lineageTag: 208d7eb9-7c51-477f-95f0-c2172e286eef
+
+	column 'Tenant Key'
+		dataType: string
+		isHidden
+		lineageTag: 5bf3c3a6-9974-4086-ab9e-b0063dc4a220
+		sourceColumn: Tenant Key
+
+	column 'Farm ID'
+		dataType: string
+		isHidden
+		lineageTag: a87db468-29f8-47af-b775-cbf9ca0c2e90
+		sourceColumn: Farm ID
+
+	column 'Run ID'
+		dataType: string
+		isHidden
+		lineageTag: e63b60a7-f83c-410c-a548-d9de23206c13
+		sourceColumn: Run ID
+
+	column 'Service Application ID'
+		dataType: string
+		isHidden
+		lineageTag: 293a9937-930f-43d4-bbf4-5603843d95f0
+		sourceColumn: Service Application ID
+
+	column 'Service Application'
+		dataType: string
+		lineageTag: 760375de-3917-4dbf-9462-776f1eda39bd
+		sourceColumn: Service Application
+
+	column 'Service Type'
+		dataType: string
+		lineageTag: 95a485e6-32db-487e-b478-32d416036fa1
+		sourceColumn: Service Type
+
+	column 'Service Status'
+		dataType: string
+		lineageTag: 224fcace-1f96-4c45-bda8-2a3ceee4bc61
+		sourceColumn: Service Status
+
+	column 'Application Pool'
+		dataType: string
+		lineageTag: 7a075309-5bb4-4987-8f9f-6938ea93adc6
+		sourceColumn: Application Pool
+
+	column 'Collection Status'
+		dataType: string
+		lineageTag: 6152944d-b6cf-42c2-aa97-d098f075e469
+		sourceColumn: Collection Status
+
+	column 'Farm Key'
+		dataType: string
+		isHidden
+		lineageTag: 9e874d3d-cae3-47df-8aa7-ea75a6ced424
+		sourceColumn: Farm Key
+
+	partition 'SharePoint On-prem Service Applications' = m
+		mode: import
+		source =
+				let
+				    Raw = GetSharePointOnPremCsv("SharePoint_OnPrem_ServiceApplications.csv", {"TenantKey", "FarmId", "RunId", "ServiceApplicationId", "Name", "TypeName", "Status", "ApplicationPool", "CollectionStatus"}, {}),
+				    FarmKey = Table.AddColumn(Raw, "Farm Key", each [TenantKey] & "|" & [FarmId], type text),
+				    Renamed = Table.RenameColumns(FarmKey, {{"TenantKey", "Tenant Key"}, {"FarmId", "Farm ID"}, {"RunId", "Run ID"}, {"ServiceApplicationId", "Service Application ID"}, {"Name", "Service Application"}, {"TypeName", "Service Type"}, {"Status", "Service Status"}, {"ApplicationPool", "Application Pool"}, {"CollectionStatus", "Collection Status"}})
+				in
+				    Renamed
+

@@ -1,5 +1,6 @@
-/// Synthetic content-site usage and storage.
+/// Legacy synthetic fixture: not used by production report visuals or consolidated evidence. Removal is pending a separately cleared dependency-safe retirement; no real data.
 table 'Content Usage'
+	isHidden
 	lineageTag: f7832e21-fb35-4a6e-a9d6-b766b2fd9a75
 
 	/// Active sites divided by eligible sites.

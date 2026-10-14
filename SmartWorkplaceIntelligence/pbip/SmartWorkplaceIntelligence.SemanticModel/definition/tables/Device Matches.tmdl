@@ -1,5 +1,6 @@
-/// One device reconciliation candidate per synthetic run.
+/// Legacy synthetic fixture: not used by production report visuals or consolidated evidence. Removal is pending a separately cleared dependency-safe retirement; no real data.
 table 'Device Matches'
+	isHidden
 	lineageTag: 9e7228c8-6a27-49c6-922d-197676ef5012
 
 	/// Unambiguous device matches divided by eligible candidates.

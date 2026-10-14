@@ -1,0 +1,159 @@
+/// Native source facet migrated from ADGroupSource; exact source grain, unresolved links and qualification retained. Uses the unified pinned batch, not a separate CMDB reader.
+table 'AD Group Evidence'
+	lineageTag: eb66f367-097f-42f9-9603-146618e3f252
+
+	/// Exact native-key entity context or existing inventory context. No name matching or inferred transitive membership. Unrelated entity selections return blank.
+	measure 'Native Context Rows · AD Group Evidence' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimGroup"))
+			VAR NativeKeys1 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "ADGroupSource"))
+			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((COUNTROWS('AD Group Evidence')), KEEPFILTERS(TREATAS(NativeKeys0, 'AD Group Evidence'[TenantGroupKey]))),
+			COUNTROWS(NativeKeys1) > 0, CALCULATE((COUNTROWS('AD Group Evidence')), KEEPFILTERS(TREATAS(NativeKeys1, 'AD Group Evidence'[TenantADGroupKey]))), BLANK()), BLANK()), (COUNTROWS('AD Group Evidence')))
+		formatString: #,0
+		isHidden
+		lineageTag: 463d1229-9d46-4dca-95c9-b84df78913d6
+
+	/// Native ADGroupSource attribute; source qualification is retained.
+	column TenantKey
+		dataType: string
+		isHidden
+		lineageTag: 9d3d8c16-b1cc-4a32-9dce-65fb21dffb72
+		summarizeBy: none
+		sourceColumn: TenantKey
+
+	/// Native ADGroupSource attribute; source qualification is retained.
+	column OrganizationKey
+		dataType: string
+		isHidden
+		lineageTag: 12af45c5-cb53-48d3-8e8f-078f878e37b5
+		summarizeBy: none
+		sourceColumn: OrganizationKey
+
+	/// Native ADGroupSource attribute; source qualification is retained.
+	column EnvironmentKey
+		dataType: string
+		isHidden
+		lineageTag: 9eb362d8-f7ac-4c10-bebc-6b64299af463
+		summarizeBy: none
+		sourceColumn: EnvironmentKey
+
+	/// Native ADGroupSource attribute; source qualification is retained.
+	column TenantId
+		dataType: string
+		isHidden
+		lineageTag: 53ec242d-3d8e-4806-92d4-70a5d77b973d
+		summarizeBy: none
+		sourceColumn: TenantId
+
+	/// Native ADGroupSource attribute; source qualification is retained.
+	column TenantADGroupKey
+		dataType: string
+		isHidden
+		lineageTag: 542f9f18-7aa5-45b9-95f2-5c9f70a73ba7
+		summarizeBy: none
+		sourceColumn: TenantADGroupKey
+
+	/// Native ADGroupSource attribute; source qualification is retained.
+	column ObjectGUID
+		dataType: string
+		lineageTag: 087628bd-7353-437c-8006-b26d58827486
+		summarizeBy: none
+		sourceColumn: ObjectGUID
+
+	/// Native ADGroupSource attribute; source qualification is retained.
+	column ObjectSID
+		dataType: string
+		lineageTag: de341fd0-6ee1-49aa-ab8d-75bbffc2367d
+		summarizeBy: none
+		sourceColumn: ObjectSID
+
+	/// Native ADGroupSource attribute; source qualification is retained.
+	column DomainName
+		dataType: string
+		lineageTag: 3391e82a-cea4-4798-91a1-3083bf3043de
+		summarizeBy: none
+		sourceColumn: DomainName
+
+	/// Native ADGroupSource attribute; source qualification is retained.
+	column DistinguishedName
+		dataType: string
+		lineageTag: 2c5e92e1-4722-44bc-af7a-26bf1702ccca
+		summarizeBy: none
+		sourceColumn: DistinguishedName
+
+	/// Native ADGroupSource attribute; source qualification is retained.
+	column Name
+		dataType: string
+		lineageTag: 9204ce41-0bc0-463a-be83-d5b4ac3133ac
+		summarizeBy: none
+		sourceColumn: Name
+
+	/// Native ADGroupSource attribute; source qualification is retained.
+	column DisplayName
+		dataType: string
+		lineageTag: 54d046e8-44b3-41eb-b45a-da61f8ddc0b8
+		summarizeBy: none
+		sourceColumn: DisplayName
+
+	/// Native ADGroupSource attribute; source qualification is retained.
+	column GroupCategory
+		dataType: string
+		lineageTag: 388614a0-873a-45cc-b74f-ef2d5d052baa
+		summarizeBy: none
+		sourceColumn: GroupCategory
+
+	/// Native ADGroupSource attribute; source qualification is retained.
+	column GroupScope
+		dataType: string
+		lineageTag: 28144fcd-4fb2-4e0c-8eb3-562dd0f18e49
+		summarizeBy: none
+		sourceColumn: GroupScope
+
+	/// Native ADGroupSource attribute; source qualification is retained.
+	column ManagedBy
+		dataType: string
+		lineageTag: 31a78a89-e59a-4d2f-8636-18a5144fdf89
+		summarizeBy: none
+		sourceColumn: ManagedBy
+
+	/// Native ADGroupSource attribute; source qualification is retained.
+	column ManagedByADObjectKey
+		dataType: string
+		lineageTag: ce762e47-7096-466b-91e7-fd870aea81fd
+		summarizeBy: none
+		sourceColumn: ManagedByADObjectKey
+
+	/// Native ADGroupSource attribute; source qualification is retained.
+	column TenantGroupKey
+		dataType: string
+		isHidden
+		lineageTag: a230f5f3-f278-4c0a-bf91-f68e89171708
+		summarizeBy: none
+		sourceColumn: TenantGroupKey
+
+	/// Native ADGroupSource attribute; source qualification is retained.
+	column CloudMatchStatus
+		dataType: string
+		lineageTag: 5b488f56-7072-4799-a885-c380625d43ca
+		summarizeBy: none
+		sourceColumn: CloudMatchStatus
+
+	/// Native ADGroupSource attribute; source qualification is retained.
+	column SourceCollectedDateTime
+		dataType: dateTime
+		lineageTag: d1eaac95-d87a-41d4-9784-9d805537abdb
+		summarizeBy: none
+		sourceColumn: SourceCollectedDateTime
+
+	/// Exact governed native-key bridge; not a display-name or transitive match.
+	column 'CMDB Entity Key' = LOOKUPVALUE('CMDB Entity Alias'[Entity Key], 'CMDB Entity Alias'[Source Table], "ADGroupSource", 'CMDB Entity Alias'[Source Key], 'AD Group Evidence'[TenantADGroupKey])
+		dataType: string
+		isHidden
+		lineageTag: 778e24bd-7a8c-4781-9a0b-d903285d821c
+		summarizeBy: none
+
+	partition 'AD Group Evidence' = m
+		mode: import
+		source = NativeEvidenceTypes(Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("ADGroupSource.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]), {[name="TenantKey", dataType="String"], [name="OrganizationKey", dataType="String"], [name="EnvironmentKey", dataType="String"], [name="TenantId", dataType="String"], [name="TenantADGroupKey", dataType="String"], [name="ObjectGUID", dataType="String"], [name="ObjectSID", dataType="String"], [name="DomainName", dataType="String"], [name="DistinguishedName", dataType="String"], [name="Name", dataType="String"], [name="DisplayName", dataType="String"], [name="GroupCategory", dataType="String"], [name="GroupScope", dataType="String"], [name="ManagedBy", dataType="String"], [name="ManagedByADObjectKey", dataType="String"], [name="TenantGroupKey", dataType="String"], [name="CloudMatchStatus", dataType="String"], [name="SourceCollectedDateTime", dataType="DateTime"]})
+

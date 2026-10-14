@@ -1,0 +1,133 @@
+/// Native source facet migrated from DimWindowsUpdatePolicy; exact source grain, unresolved links and qualification retained. Uses the unified pinned batch, not a separate CMDB reader.
+table 'Native Update Policy Evidence'
+	lineageTag: 8c141ee3-cb9b-45b6-b191-04fbc8c959ac
+
+	/// Windows Update policies observed in the frozen Intune collection. Migrated without changing the source calculation.
+	measure 'Native Windows Update policies' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (COALESCE(COUNTROWS('Native Update Policy Evidence'),0)))
+		formatString: #,0
+		displayFolder: Native evidence
+		lineageTag: b12951cf-ed8c-481e-a554-d2f4ae8e251c
+
+	/// Exact native-key entity context or existing inventory context. No name matching or inferred transitive membership. Unrelated entity selections return blank.
+	measure 'Native Context Rows · Native Update Policy Evidence' =
+			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
+			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
+			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (COUNTROWS('Native Update Policy Evidence')))
+		formatString: #,0
+		isHidden
+		lineageTag: 50a849d3-25f5-4a2b-b171-87a6a4bd80b9
+
+	/// Native DimWindowsUpdatePolicy attribute; source qualification is retained.
+	column TenantKey
+		dataType: string
+		isHidden
+		lineageTag: b30104a1-8542-44b3-a50a-b758fc3e04fb
+		summarizeBy: none
+		sourceColumn: TenantKey
+
+	/// Native DimWindowsUpdatePolicy attribute; source qualification is retained.
+	column OrganizationKey
+		dataType: string
+		isHidden
+		lineageTag: a4e8ce69-631c-4425-90f4-1d1fe0da37e6
+		summarizeBy: none
+		sourceColumn: OrganizationKey
+
+	/// Native DimWindowsUpdatePolicy attribute; source qualification is retained.
+	column EnvironmentKey
+		dataType: string
+		isHidden
+		lineageTag: 6c333ee6-4966-4173-bebb-7b041967132c
+		summarizeBy: none
+		sourceColumn: EnvironmentKey
+
+	/// Native DimWindowsUpdatePolicy attribute; source qualification is retained.
+	column TenantId
+		dataType: string
+		isHidden
+		lineageTag: 17323066-a129-4a6f-92f7-edaa48c43c66
+		summarizeBy: none
+		sourceColumn: TenantId
+
+	/// Native DimWindowsUpdatePolicy attribute; source qualification is retained.
+	column TenantUpdatePolicyKey
+		dataType: string
+		isHidden
+		lineageTag: a1eae2ef-b5c9-41a1-b4da-b8f0775d872e
+		summarizeBy: none
+		sourceColumn: TenantUpdatePolicyKey
+
+	/// Native DimWindowsUpdatePolicy attribute; source qualification is retained.
+	column PolicyType
+		dataType: string
+		lineageTag: 198f3d0b-be5d-4dc4-8714-b8d7ffd9ff1c
+		summarizeBy: none
+		sourceColumn: PolicyType
+
+	/// Native DimWindowsUpdatePolicy attribute; source qualification is retained.
+	column PolicyId
+		dataType: string
+		lineageTag: a646d923-9e6f-41ce-856c-50cb396f8a41
+		summarizeBy: none
+		sourceColumn: PolicyId
+
+	/// Native DimWindowsUpdatePolicy attribute; source qualification is retained.
+	column DisplayName
+		dataType: string
+		lineageTag: 515d5bfb-9170-4890-9042-9985f4c21798
+		summarizeBy: none
+		sourceColumn: DisplayName
+
+	/// Native DimWindowsUpdatePolicy attribute; source qualification is retained.
+	column TargetVersion
+		dataType: string
+		lineageTag: 0d63edb4-a171-4eef-9596-dca851206797
+		summarizeBy: none
+		sourceColumn: TargetVersion
+
+	/// Native DimWindowsUpdatePolicy attribute; source qualification is retained.
+	column ReleaseDateTime
+		dataType: dateTime
+		formatString: yyyy-MM-dd HH:mm:ss
+		lineageTag: 4df5b769-3c54-45c8-a3fd-53f387b975f8
+		summarizeBy: none
+		sourceColumn: ReleaseDateTime
+
+	/// Native DimWindowsUpdatePolicy attribute; source qualification is retained.
+	column DaysUntilForcedReboot
+		dataType: string
+		lineageTag: 48a5bbb1-27b2-4a97-b634-371c5233fae4
+		summarizeBy: none
+		sourceColumn: DaysUntilForcedReboot
+
+	/// Native DimWindowsUpdatePolicy attribute; source qualification is retained.
+	column CreatedDateTime
+		dataType: dateTime
+		formatString: yyyy-MM-dd HH:mm:ss
+		lineageTag: e48b85b6-c0ec-4bf5-874e-5f9ed931633d
+		summarizeBy: none
+		sourceColumn: CreatedDateTime
+
+	/// Native DimWindowsUpdatePolicy attribute; source qualification is retained.
+	column LastModifiedDateTime
+		dataType: dateTime
+		formatString: yyyy-MM-dd HH:mm:ss
+		lineageTag: 26ec13f2-82c7-469c-a3e5-04dba234992a
+		summarizeBy: none
+		sourceColumn: LastModifiedDateTime
+
+	/// Native DimWindowsUpdatePolicy attribute; source qualification is retained.
+	column SourceCollectedDateTime
+		dataType: dateTime
+		formatString: yyyy-MM-dd HH:mm:ss
+		lineageTag: c26ca63c-f672-4cc2-8652-8edf7c76e80b
+		summarizeBy: none
+		sourceColumn: SourceCollectedDateTime
+
+	partition 'Native Update Policy Evidence' = m
+		mode: import
+		source = NativeEvidenceTypes(Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("DimWindowsUpdatePolicy.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]), {[name="TenantKey", dataType="String"], [name="OrganizationKey", dataType="String"], [name="EnvironmentKey", dataType="String"], [name="TenantId", dataType="String"], [name="TenantUpdatePolicyKey", dataType="String"], [name="PolicyType", dataType="String"], [name="PolicyId", dataType="String"], [name="DisplayName", dataType="String"], [name="TargetVersion", dataType="String"], [name="ReleaseDateTime", dataType="DateTime"], [name="DaysUntilForcedReboot", dataType="String"], [name="CreatedDateTime", dataType="DateTime", allowSourceWallClock=true], [name="LastModifiedDateTime", dataType="DateTime", allowSourceWallClock=true], [name="SourceCollectedDateTime", dataType="DateTime"]})
+

@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.13.0/schema.json",
   "name": "56a8e6c2442e7dcbf557",
   "position": {
-    "x": 1400,
-    "y": 256,
+    "x": 32,
+    "y": 688,
     "z": 107,
-    "height": 150,
-    "width": 488,
-    "tabOrder": 107
+    "height": 304,
+    "width": 480,
+    "tabOrder": 672
   },
   "visual": {
     "visualType": "pivotTable",
@@ -195,7 +195,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Collaboration Adoption diagnostic context. Summary grouped for the current filter context.'"
+                  "Value": "'Collaboration Adoption diagnostic context'"
                 }
               }
             }
@@ -222,7 +222,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "13D"
+                  "Value": "12D"
                 }
               }
             },
@@ -231,13 +231,13 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#1F2937'"
+                      "Value": "'#183153'"
                     }
                   }
                 }
               }
             },
-            "bold": {
+            "titleWrap": {
               "expr": {
                 "Literal": {
                   "Value": "true"
@@ -293,9 +293,16 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#CBD8E5'"
+                      "Value": "'#CCDCEC'"
                     }
                   }
+                }
+              }
+            },
+            "radius": {
+              "expr": {
+                "Literal": {
+                  "Value": "8D"
                 }
               }
             },
@@ -303,13 +310,6 @@
               "expr": {
                 "Literal": {
                   "Value": "1D"
-                }
-              }
-            },
-            "radius": {
-              "expr": {
-                "Literal": {
-                  "Value": "12D"
                 }
               }
             }
@@ -349,14 +349,14 @@
             "left": {
               "expr": {
                 "Literal": {
-                  "Value": "10D"
+                  "Value": "8D"
                 }
               }
             },
             "right": {
               "expr": {
                 "Literal": {
-                  "Value": "10D"
+                  "Value": "8D"
                 }
               }
             }
@@ -378,5 +378,38 @@
       ]
     },
     "drillFilterOtherVisuals": true
+  },
+  "parentGroupName": "e7fe6ade45961dfa0fb7",
+  "filterConfig": {
+    "filters": [
+      {
+        "name": "3a6a49de8183e589546c",
+        "field": {
+          "Column": {
+            "Expression": {
+              "SourceRef": {
+                "Entity": "Collaboration Adoption Evidence"
+              }
+            },
+            "Property": "Freshness State"
+          }
+        },
+        "type": "Categorical"
+      },
+      {
+        "name": "149c4d4d325a74ce535e",
+        "field": {
+          "Measure": {
+            "Expression": {
+              "SourceRef": {
+                "Entity": "Collaboration Adoption Evidence"
+              }
+            },
+            "Property": "Collaboration Services"
+          }
+        },
+        "type": "Advanced"
+      }
+    ]
   }
 }
