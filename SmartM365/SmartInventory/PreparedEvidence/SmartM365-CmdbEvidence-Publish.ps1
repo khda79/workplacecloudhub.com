@@ -3,7 +3,7 @@
 .SYNOPSIS
 Publish an existing, pinned current CMDB snapshot to its separate SharePoint folder.
 .VERSION
-0.1.2
+0.1.3
 .NOTES
 Manual only. ValidateOnly is offline. No collection, CSV generation, history,
 Intelligence transfer, notification, Power BI refresh or report switch.
@@ -11,7 +11,8 @@ Intelligence transfer, notification, Power BI refresh or report switch.
 [CmdletBinding()]
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidGlobalVars','',Justification='Shared Core runtime toggles are saved and restored; transport is explicitly enabled only in its callbacks.')]
 param([string]$Tenant='test',[string]$PreparedRootPath,
-      [ValidatePattern('^[A-Fa-f0-9]{64}$')][string]$ExpectedManifestSHA256,[switch]$ValidateOnly)
+      [ValidatePattern('^[A-Fa-f0-9]{64}$')][string]$ExpectedManifestSHA256,
+      [string]$ResultReceiptPath,[switch]$ValidateOnly)
 # Local lifecycle only; no collection or publication is performed by this guard.
 $smartM365LifecycleRoot=$PSScriptRoot
 while ($smartM365LifecycleRoot -and -not (Test-Path -LiteralPath (Join-Path $smartM365LifecycleRoot 'Modules/SmartM365.Core/SmartM365-InventoryLifecycle.ps1') -PathType Leaf)) {
@@ -25,11 +26,20 @@ $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -Requi
 try {
 Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
-$ScriptVersion='0.1.2'
+$ScriptVersion='0.1.3'
 $failure=$null; $initialized=$false; $transcript=$false; $core=$null; $guardInstalled=$false
 $previousGuard=$false; $saved=@{}; $warning=$false
 try {
     if(-not $ValidateOnly -and -not $ExpectedManifestSHA256){throw 'Publication requires ExpectedManifestSHA256 from the reviewed snapshot.'}
+    if($ValidateOnly -and $ResultReceiptPath){throw 'ValidateOnly cannot produce a publication success receipt.'}
+    if($ResultReceiptPath){
+        $receiptFull=[IO.Path]::GetFullPath($ResultReceiptPath)
+        if((Split-Path $receiptFull -Parent).TrimEnd('\','/') -ine ([IO.Path]::GetTempPath()).TrimEnd('\','/') -or
+           (Split-Path $receiptFull -Leaf) -cnotmatch '^SmartM365-CmdbPublish-[a-f0-9]{32}\.json\.txt$' -or
+           (Test-Path -LiteralPath $receiptFull)){
+            throw 'ResultReceiptPath must be a new CMDB publication receipt in the system temporary directory.'
+        }
+    }
     $smartRoot=Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
     . (Join-Path $smartRoot 'Config/SmartM365-TenantContext.ps1')
     $effective=Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot
@@ -109,6 +119,11 @@ try {
         $parameters['Progress']={param($name,$index,$total) WriteLog -Message "CMDB transfer $index/${total}: $name" -Level INFO}
         $result=Send-SmartM365CmdbPreparedSnapshot @parameters
         $result | ConvertTo-Json -Depth 8
+        if($ResultReceiptPath){
+            $receipt=[ordered]@{Status=$result.Status;CsvFiles=$result.CsvFiles;VerifiedFiles=$result.VerifiedFiles;
+                ManifestSHA256=$result.ManifestSHA256;ManifestVerified=$result.ManifestVerified}
+            [IO.File]::WriteAllText($receiptFull,($receipt | ConvertTo-Json -Compress),[Text.UTF8Encoding]::new($false))
+        }
     }
     foreach($item in @($result.FreshnessWarnings)){$warning=$true;WriteLog -Message $item.Message -Level WARNING}
     WriteLog -Message $(if($ValidateOnly){'CMDB transfer validation completed offline. Nothing was uploaded.'}else{'CMDB snapshot uploaded and read back. Power BI qualification remains separate.'}) -Level SUCCESS
@@ -147,8 +162,8 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBydITv9AbGVLjt
-# Gd9SPjVBFE+6A/2kuORtWlWjqr1fFaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBm6enX7vchcqsH
+# fPhmVt26t/jnwTQYZhyvKHI/2rwz2KCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -281,31 +296,31 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIG4bgd/98an/pDZUa4TFxPdbeAOuSOTJPwMF4natRa/yMA0GCSqG
-# SIb3DQEBAQUABIIBgIvH5GtC8DrXK18hNFiXwevrZQucArfmKtygPOsbAKD2a6d9
-# fJnc8qwwOo5QjOnleCsGjuA9VcbDXf6vWSpwtqt38D2skrEC/eJMLuw30xaJFQJ8
-# exw83/AuTgJpRnmbYm/TdynIstI8n2X5TCwynmQJ8ws5uToN8OCrmIV0HxWTETeo
-# 7a5venduKkNx8GtJTMX3AQ2tiZBSXbop0uSPxWZHVyJeG2lXQ+pUu6D5dSCkO6Lw
-# djGE/O6CoSx4XWlZT6r8yB7uXB5ec6hL6cKbXGsyP2u+9rAIXR3xcHd30gCnfibB
-# XAzcgA1Bqa0f1ASrCKfuUSuwlWFa9B58xvNz4LPlg2XbNk61623Hym+mozWQbevZ
-# xYxX0KtnQlwPeVbqVEteAeZMqeVlH1V+XyfM0yazkbibL88T+5oXYigcLjvfFr/0
-# 8owe446TqGqR3VPffz6xIC/jwoBhXkv1inKjpf3HFtxtHpMKrXexBpIxcFh/jQ4f
-# r6D/OHZ+77xfFmtbiKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIOWceztU3seO6KNfan2/BUVh0rMmb2ohi++QXeTDDRQOMA0GCSqG
+# SIb3DQEBAQUABIIBgF/Kfv6t2QgIjGZGIUsbPqvuTqjOphfLua3M21vqK6rbft+O
+# 5+8fksMSybNhCoMONU6sqLfmTKq3RWrpheeS2lZpfDe/KMHieoPp3jzpUS37Yxpl
+# Yyr3JQLWnEoW/ddIRjBG1GcMvMKRj9NFhePu8go2u1NatR3cOpNXyzWjoOnMqUsU
+# VrDEC5P1oazxP7j33deHNfTEX5odnXuk111f5Bt997Aa/en9POPmgawaCV0OpJl3
+# bRLpnr4EEFlVDJAY3l3dbt/xlVdtVFmf/qZBGkTQI1YJqYrviZ6t3Zwhy69Wm3gj
+# bfdudUVrXHo4uZbxqAA+wJTbonmGNSkwVplCqpIJl3HwooCEx1UFPI6wOJXkhm7d
+# +OBahfPYhz/Og6jPPBgHwbTsfecmcEYg/meIRXA/jIUTMIlcufy/s/4znvNL7Hjv
+# FUao98JDu+4wk+szyAcaA5o5ZfuwkFVn+qHbFj50+VUd2Uh/pMQQroqEg+EatI96
+# RRuDX7qQIS3gzql5L6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTQxNTMw
-# NDFaMC8GCSqGSIb3DQEJBDEiBCAF1dEHOWMlAuF9WSA3rWCMBOu+Eqcwp2fpohSd
-# M0m7DDANBgkqhkiG9w0BAQEFAASCAgCttjvxANzbwqbEOU8MaDFnu7EyL23pODK1
-# CPo6VfRUIuUTSfU7vxasbirBMMkm4gyw77R8ZQ6ZbKgIr7l5n+5D+xX8melkffFz
-# vESA9N2kFI1e6/gGK7Pt76+ffKh4oQrHI1+ogWIPe1xvkieHha0N+E6DbLbG8+Fn
-# 2jcCBfaj266A/ZdhyGn8AWoF6KJAJkXGVupv2w630r7EnSMl/mrIgJA792hntAhS
-# w7FNdUVC4EOr7teQ5K88oz+m51o16IimtXf/ZEwOFxAMVuL7Y2vYCIHeSYXwNFKN
-# k85KcDM4LGJp6mQ+LtfRnDSaVLwtq2Kb+TWNo2iVJRmJ8lGSPzPotPJwPBlUwBOX
-# 5aigWr+mH5+CZYy507HUkQ3Nueu3rS3WfMPHtBLuOi8yYdKfji7n4fWyRS3RqJd5
-# VXJurXQWbgim67K/eQZuHj3BiSyt3EBHff8L2Z/cYadHA6N8viwDOWrk8OUuQTCi
-# ZMWF/kTx85QPCgQQbWDkIIh1PbiHjgrEVde7EpT7TpHGbQwB4Eftxe5NfQ26x85+
-# 23+/vaDfTk9AJowxnjh8dpCjmZxmEiwq2V7G50RdRGcK+Yq+mBC7Cb3TqgTf59Ad
-# ZP3u3i70tKhx774eNYqP67SzVDSXi9ZLpKzv5znFcl179TK+Yje4MdfJXbakdcmP
-# nre/jGuvfQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTQxODE2
+# MTlaMC8GCSqGSIb3DQEJBDEiBCC6mQKjNbccAjCVSfHy8SHYadrEJ5RPkBpkoUXh
+# WkHrZTANBgkqhkiG9w0BAQEFAASCAgAG+CnAbW4EHzyPssJoku2pPh2b188eZHQs
+# CYn7U33zeVQp3h7UVs6K+S+BrOEjXVU2PRpe7GcgsVk4l+v9u/rBtgRAcmDDdBEC
+# p5AC+mryu5xvIyfm985Azjq1qp7abZylrX361S65A46A55g7HAGVb5BMfq4ZT1BW
+# jIxLMUNPb8wPwBQGZGzXhhS6NWlQe16ti4nBxDI98crzXqqlqBCAPXvtdLF4XAnq
+# 0JoM7u5q80qsi4UjB9VjOdcc33amH1LkS/bLf4RzxXe1d9jSKJL0qHXeuQq73wCz
+# aFJRLTJMN3qWqtxVhY7rBhRElC+fyqwf3pr0mhwmJa92jgUOcSC+7F6UQ1k19gZG
+# Db/I+RSYsNzvdJsVFObS3HPAX9DgRQD+Hsin0oS3dU6X90zLw030dXc5h4RKR017
+# dzyriIMjQOSFImmqik53uR6hFhf8EL4Rwyw10+DT7T3VBx+FX0W3EYKxaAcQqmDC
+# GdIAl26Cz9EaMeOwr/mKqDJW9MGncCKqn+OsH5Sp2zeqC30rK93eHIRLCQ8D/3yV
+# b/oQIq60yIne/kG2SCoy4gPrgXjhuduax/eNWHKoFFkme2fmzUzD+dyEftWFB2z6
+# k2y5uoFgaRI8He7/GuQa8QEz+cbySm2OcVdfq77b/DWvj1vGaIir8N0viRjqoWgZ
+# vejPHS2L9Q==
 # SIG # End signature block

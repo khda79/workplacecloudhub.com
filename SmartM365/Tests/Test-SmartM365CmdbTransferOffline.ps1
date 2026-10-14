@@ -1,7 +1,7 @@
 #Requires -Version 7.0
 <# .SYNOPSIS Offline transport fault tests. Synthetic fixtures and callbacks only.
 .VERSION
-1.0.1
+1.0.2
 #>
 [CmdletBinding()]
 param([string]$PythonCommand='python')
@@ -140,6 +140,7 @@ try {
     foreach($name in 'SmartM365-CmdbEvidence-Publish.ps1','SmartM365-CmdbSharePointTransfer.psm1','cmdb_transfer.py','cmdb_freshness.py','cmdb-prepared-contract.json.txt'){
         Copy-Item -LiteralPath (Join-Path $base $name) -Destination (Join-Path $fakePrepared $name)
     }
+    Copy-Item -LiteralPath (Join-Path (Split-Path $PSScriptRoot -Parent) 'Modules/SmartM365.Core/SmartM365-InventoryLifecycle.ps1') -Destination (Join-Path $fakeCore 'SmartM365-InventoryLifecycle.ps1')
     $settings=@{LatestCsvFolderPath=(Join-Path $root 'DATA-LAST');LogAllRootPath=(Join-Path $root 'LOG-ALL');
         PythonCommand=$python;TenantKey='synthetic';OrganizationKey='test';EnvironmentKey='test';TenantId='synthetic-tenant';
         SharePointTargetFolderPath='SYNTHETIC/CSV';SharePointSiteHostname='synthetic.invalid';SharePointSitePath='/sites/synthetic';
@@ -151,7 +152,7 @@ function Initialize-SmartM365TenantContext {
     Get-Content -LiteralPath (Join-Path $PSScriptRoot 'fixture.json.txt') -Raw | ConvertFrom-Json
 }
 '@)
-    [IO.File]::WriteAllText((Join-Path $fakeCore 'SmartM365.Core.psd1'), "@{RootModule='SmartM365.Core.psm1';ModuleVersion='1.0.80';GUID='0a5e1631-8547-4088-8abf-8d2c99f0cd61'}")
+    [IO.File]::WriteAllText((Join-Path $fakeCore 'SmartM365.Core.psd1'), "@{RootModule='SmartM365.Core.psm1';ModuleVersion='1.0.87';GUID='0a5e1631-8547-4088-8abf-8d2c99f0cd61'}")
     [IO.File]::WriteAllText((Join-Path $fakeCore 'SmartM365.Core.psm1'), @'
 $script:Fixture=Get-Content -LiteralPath (Join-Path $PSScriptRoot '../../Config/fixture.json.txt') -Raw | ConvertFrom-Json -AsHashtable
 function Read-SmartM365JsonConfig {param($Path,[switch]$Required) return $script:Fixture}
@@ -188,8 +189,8 @@ function Connect-MgGraph {throw 'Authentication reached in offline mode.'}
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDK9PkDkYWqbDE+
-# LE9gOZGp0u2Q8mGUI9Le3lw9DgWs8KCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB6ygxghbGr+/MB
+# 0NdE/KB+STOcMbs9FemEZif9JbCb8aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -322,31 +323,31 @@ function Connect-MgGraph {throw 'Authentication reached in offline mode.'}
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIPD9WNkpuRMlseMGaG+blzlNnrcYia2LftGR8ML/p/upMA0GCSqG
-# SIb3DQEBAQUABIIBgIFqcSrut9rR1e2djeGE+VqNt5XNMFqH8IbdQF8IOw2nqH+9
-# YWY4hijaqIlf0o+xbxOwjaQiZ7iBvXuUnBzsFoA3BLmhYQamfE2zj9uRqMXQU8eh
-# GunNEpKUxKsmNYDvV17dmcene/s0wWead8mfIIOXaVP2TBWyC0cIbDBw/GKyXr1Q
-# llCM9wcELI1UEdB6300mm3vWIQAjj0tLPcXA6QaYAxe8VcPbJvmnnpDorqfQEurU
-# fBSN3qF/Cs69Rzjz40rVTjgeDncs7iQ9im40WkiQHlAGRxfF3Ezk9twPZJXPk3Yk
-# /ToF8DsbDJX5vuN4P7YmyBHKaGuaRcRFqykLv38WLlK+YHe4icaGqs7or+t18OZd
-# BzokvMi5k/l9THTP/Ld7nG1TNH/0COAEs70R8Vs4SI+I5HUB4+ih4cyFJmpL3DEm
-# Z68Uqo8sxmvSCXAD+cWgJqpX+xLa/fjEAJdf2EthMS2gDaPI1cMR9iUmeeF8zjcz
-# cE/e74mWfugrxjP3ZKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIAYP6Nn3t4l6OzGJje/Ywf14s4xOmoarJDCyejJkR+qbMA0GCSqG
+# SIb3DQEBAQUABIIBgERd3dBh2xjEnz/NGcG/uH7+0ZNtbH4oINJG+Nc5BMO2IOMf
+# oZQOdfzQJGxq45qeXcpn45Fd2h0B/u5UXpoioHRMxBy11B4ieHtVNPvRZCX7J5TT
+# 6qy0Dx6X4/M6eu8xDe7gin6iu2ZMF6WFC5QcsTV9WH+IXUieWyrfMvyjAXGkVXZn
+# D5k3wHwLkGCl4J6cAQG74Gy1h0HfseW6TS1PLavXHeWdkW+mpkMdOJ47HiqgeJmp
+# dWmDKHLn1SlpylSXB5xU52a8v7WfbOfflEoMNyjd8sNl5RlYGRt1ZvXs3Cw2ou1S
+# ShNLN8EZaCd3g/qFdsJlecAm9CH+q63cwUcc5Ql4GCl0POtCd3GL0B6MDPNTtCkB
+# JEWo3CEfguFFqFusSVYpPMy1HWSB5vLCi/XSRR2Bbi96A9OM5AiWuronoEYTybBY
+# F7T2Mj4FegnD93FrAlPlvhbMmEIN3tzUQiENbSAZDW8bBmiPBATu6K1eYdxMz66u
+# cHxz2AlxFobPpkASaqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDcxMTM2
-# NTFaMC8GCSqGSIb3DQEJBDEiBCBuCmtY07+yJD3r94DEpMNZ3VwvI/QojHkv31j3
-# c3ziuTANBgkqhkiG9w0BAQEFAASCAgBtQmX5/otL9A0XON//frl62tYzcK5zd1pm
-# /D+grWuU5LswzKdW96klqR1aD22i/0IQTV0Ezf2VU0OFEQGeMrgN0yv+P1XjQLA3
-# 9KB2hiIoA/ctIc3dzT7T45C9muGm1hl6YZ65TV75GLKPZFYnZqRHOMJ5uDbi11jr
-# w5JVD4pKf8rrZZdgQ9bPZ8ZmaGYVESfykklsSmyTieucpjyffr3yU0s1tCgSa4gM
-# EF2FPPvYOK6WMDFgCk5mj8gzNZj77dq78Qm3NXilduL0l8IZtU0O4kM1RLOD+1rk
-# Y8lN7JiICvGwVLgbD0VI+2uYRodgfXNQBmglJGma77VrNnXX+JBCH8lNpkcZ6JP1
-# UaxDDoRKA5/tkVf7MwkinA6Zc6aF00E8mYazG/mTwcYtZBqgCA5t3/Z0oVAcfh15
-# X04WffvQ5U0humseMdZFQOa3fmCowUhbQdIHf5zzt+ELdf9mwZlW6mjQuOmouyiO
-# kvA6cJor5z8sL/DhKViOO3M4LLYDai87cdFtw6NKoMqnnBV16WHhdDy989P8aLzn
-# FGyr8xmFgQKYdMPW9FCtAe0SFQtXfTfJEaTsdKkozzGsxIQ4+Z1oV5qBOBNRE+Yc
-# FmTNf8rQdawphoaZAIA+6o1PzugKX1FKHYyD/HtSyga69kqVe++poUVrPTu8UqYT
-# JATwC58pTA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTQxODE2
+# MTlaMC8GCSqGSIb3DQEJBDEiBCCjN8ovoZapAz3DTbe7cgCdYV5sNQnp9JAXt1r8
+# Zh1jKzANBgkqhkiG9w0BAQEFAASCAgCTQSf5gp+Pm7w1d2fPUkTA20aW8aMf/QSZ
+# x2g+K3LA1Dwjth+mP+fTT+VBbdq6drr0wvr9TRMJ2c1anxZUCkmgeS4U+B7hIjyL
+# 7+fg1NwfXJGHsvSpvotjjBDuYcmHT2w+0F9ysUkLdfqE5jUMJVdq898DjTr8QtoB
+# imVMvXo6jSobmnzDiGlaC2N4kWs2B5utp/Spu+iKLz+AXx3437MV1GpgNeAZFoM3
+# XaNNtt7Xuf1gXhJXYGmx8YByFCbFSpN4LqtplDwT41BBGw6V+kWSrCoaPOLFBKNh
+# al7Wh01hN38wf8CVMjCJFq23n5lOgrfqdBpgfxZVJdlZTc9AI53cHXhIyWba01Rj
+# rPiBqZhalLnxOXfHfjT4xGHskUi/66v/+gU3Pr4VtgSRtm5QnQNlFAS1cBpFxhap
+# /3SFvKeLT6ZHkYmoVU1KObVfeovVm7/zEFioVS1X2XBgHzcVw6vHn4r8JNBs+SAV
+# HdAm1oleVxXrhw+FZaqqN1qTuhlugkKVcEtfD9ExGtLXp2kQwwi0992F8zOt3FrR
+# Q4bHNVrkJqft9ZS5pbksKYBJKheJ2e9Hz8FtyrqUZlpn20Fs6eJOTwGTfWt4heTN
+# sOn1tR5XhfA7Ug799oTka3zlclFGCBGJscsazWfyADFl0Osbw5VdLcFj43jLT89I
+# gCf8GCdt+w==
 # SIG # End signature block

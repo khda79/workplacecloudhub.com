@@ -3,7 +3,7 @@
 .SYNOPSIS
 Prepare the current-only CMDB reporting tables from proven SmartInventory CSVs.
 .VERSION
-0.3.13
+0.3.14
 .NOTES
 Local preparation by default. -Publish explicitly transfers the newly validated
 snapshot through the existing SharePoint publisher. -ValidateOnly never uploads.
@@ -26,7 +26,7 @@ $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -Requi
 try {
 Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
-$script:Version='0.3.13'
+$script:Version='0.3.14'
 $failure=$null; $runtimeInitialized=$false; $transcriptStarted=$false
 $core=$null; $previousTeamsGuard=$false; $teamsGuardInstalled=$false
 $savedOfflineGlobals=@{}; $preparationWarning=$false; $logUploadEnabled=$false
@@ -62,9 +62,24 @@ function Invoke-SmartM365CmdbPreparedPublication {
     # Capture this generation, not a manually pasted or previous batch hash.
     # The publisher independently locks and validates all 46 files and freshness.
     $hash=(Get-FileHash -LiteralPath $manifest -Algorithm SHA256).Hash
-    $exitCode=& $PublisherInvoker $TenantProfile $PreparedRoot $hash
-    if($exitCode -isnot [int] -or $exitCode -ne 0){
-        throw 'CMDB SharePoint publication failed. Prepared local output is retained; no upload success is inferred.'
+    $receiptPath=Join-Path ([IO.Path]::GetTempPath()) ('SmartM365-CmdbPublish-'+[guid]::NewGuid().ToString('N')+'.json.txt')
+    try {
+        $exitCode=& $PublisherInvoker $TenantProfile $PreparedRoot $hash $receiptPath
+        if($exitCode -isnot [int] -or $exitCode -ne 0){
+            throw 'CMDB SharePoint publication failed. Prepared local output is retained; no upload success is inferred.'
+        }
+        $receiptFile=Get-Item -LiteralPath $receiptPath -Force -ErrorAction Stop
+        if($receiptFile.PSIsContainer -or $receiptFile.Attributes -band [IO.FileAttributes]::ReparsePoint){
+            throw 'CMDB publication success receipt must be a regular file.'
+        }
+        $receipt=Get-Content -LiteralPath $receiptPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        if($receipt.Status -cne 'PublishedAndReadBack' -or $receipt.ManifestSHA256 -cne $hash -or
+           $receipt.ManifestVerified -ne $true -or $receipt.CsvFiles -lt 1 -or
+           $receipt.VerifiedFiles -ne ($receipt.CsvFiles+1)){
+            throw 'CMDB SharePoint publication success receipt does not match the prepared snapshot.'
+        }
+    } finally {
+        if(Test-Path -LiteralPath $receiptPath){Remove-Item -LiteralPath $receiptPath -Force -ErrorAction Stop}
     }
 }
 function Resolve-SmartM365CmdbPreparationSourcePath {
@@ -187,10 +202,10 @@ try {
     if($Publish -and -not $ValidateOnly){
         $publisherScript=Join-Path $PSScriptRoot 'SmartM365-CmdbEvidence-Publish.ps1'
         $publisherInvoker={
-            param($tenantProfile,$preparedRoot,$manifestHash)
+            param($tenantProfile,$preparedRoot,$manifestHash,$receiptPath)
             # A separate PS7 process prevents preparation's offline globals from
             # leaking into the publisher's independently resolved tenant config.
-            & (Join-Path $PSHOME 'pwsh.exe') -NoProfile -ExecutionPolicy Bypass -File $publisherScript -Tenant $tenantProfile -PreparedRootPath $preparedRoot -ExpectedManifestSHA256 $manifestHash | Out-Host
+            & (Join-Path $PSHOME 'pwsh.exe') -NoProfile -ExecutionPolicy Bypass -File $publisherScript -Tenant $tenantProfile -PreparedRootPath $preparedRoot -ExpectedManifestSHA256 $manifestHash -ResultReceiptPath $receiptPath | Out-Host
             return [int]$LASTEXITCODE
         }.GetNewClosure()
         Invoke-SmartM365CmdbPreparedPublication -PreparationResult $result -PreparedRoot $output -TenantProfile $Tenant -PublisherInvoker $publisherInvoker
@@ -240,8 +255,8 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDYDlvPLxTpwN5j
-# mUc+IkLILLSN9XnS2cvDEEhZMOs406CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD7DHV8tEygnUxo
+# 5tkvHO6YnZaO/3x1PTgCpOZuYV/F+KCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -374,31 +389,31 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIBeiK9vIyJtyquuquFd+MG6baFn4quJXIZLDP32tHV8eMA0GCSqG
-# SIb3DQEBAQUABIIBgG5NHkvakvJwyel4jkhgISF3zkdfQmVmc83QReQIli2YLaL1
-# u5E65XSEoft+VEYNeIr2ycfkM48H83gNmqb4Pbt4J4kg0HwB5bH634Y3cbUqJxdY
-# Snop54SfNXJaOEvTQd5KumGC3ci32mlB+xxvseUd5t62fa4jFvglK+/k0Z05VuaD
-# 6KXehVL+hS0jYjblHk9AefMecTzf3GYOL0KBxVo1mLcf11/kYb/kKjQvcFYAm4yX
-# eNmcjVwVk1JrsesOUvtIZByNEyhhN51rbSzIvNpu+n7p7K0g3JE5/fqhCWidJ/4V
-# hdGCiaog1gggtI2nMltaF4/eyRl1GJj7FwHxo5lDg2pG0phJ9j/w7kfF1ja73rfT
-# lfWhdC0K+pngBZqyjCVUW2cYHYvqcH43DQkGQQFOoFSBtK6/rrzzyS4Bd8qdT4GE
-# N/av13FH97qfFln0XdmtJmeHDjdj4kX618twPuy5wEakp6eOgvE+Iz8uflwDXwBr
-# 0puCsc7743Z/lIDjfqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEILD/LuRBuD7y9Ngu4e7+rf5/yGBR9MxjcqYy8Lob5GmHMA0GCSqG
+# SIb3DQEBAQUABIIBgJkiSSiLuMwFcEHh8pBkg92aLzqvh3YRcp3Q4EMkr/2mH0ZX
+# LfcDJItMM3q3+ScTWMscuxcTtEqLhsZDf6qmFcwNj5ULtnV5C3UXHs4HhlAqvRwf
+# XdZH/fuEUgLEESzWVxADs/y8I9pGj1zRDkukmHtuO0wzGE6bWuBP0Ol94gr8LYkm
+# ZYUOsMfbtTtGW3IkzQwyga/01WsvF9QlAB3QJsMg4aRX2uwjIBS9yQKRUpQ2QkjK
+# /LlSa+7Cz5/CW8b3iHheU8Wd/lEXTQb5lCJ1v7SrxjsiA8JOhkB6SX/ESZC4YkfQ
+# zBui2ThAMIO7Z5g6l9VtAUgTaSi6JlN3eYorsEYB55VAZ74CrFcZ0o1ParHCDxhd
+# 9m1HWOio1ymad8ZIsNk1kjkN246IDBVnx2iqNtbvcUN90uirRgrG5jb+SmEELlAr
+# tYr5PCpNump/u6B1x0umMFPYBJXgYhdiSO62vtVSO+tP24f+vavO1VXbj9GxMHys
+# 9oj23qcLUrveExJY76GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTQxNTMw
-# NDBaMC8GCSqGSIb3DQEJBDEiBCCR63pEo7MG3Avh9P+y1sdSAY3ATE7QBUa7Wlu9
-# Llk9HjANBgkqhkiG9w0BAQEFAASCAgBgl07ZyyRQ9MjyUtbptrioBrmBI9Uxq81Q
-# +IuBdeje0YuCK2yZtJbbVV9W1lkEkl+E/gR48/KuGNfk6jiFpUpS69j1KnFo6E9Q
-# il/uueq1y4Mfpn5u5oQMeACngoKVbWZsYyoLJmuCbnpBpLX+cCIUP6cqp9ziI3lU
-# 1dk/Q2T9179/mBKHL78cGOIv4pPjZxU8pUXTnkmlxqF+6OFsA8fu3I3DgeAA2Qk6
-# Oikf3H7XxQ03/gqM99WTma3MJhKj78YEhuQLYGwmLdjg1mDQZPDAB5KBl6XAC4QM
-# aRNhexgEM2gzYSLus5DFnV8PoTldf4tRNlK5TqL7ymIE7xpbva+kPUhKpN/ZkRZh
-# GXcAntKTPNGoWmIhKTaqlVXBA4qpG2USVVK9VKoHZE97Z1FtlQjT1QohiiXC83AR
-# Z1LAQQdKIOm7u/A2sljJZpkmKT/kASoIEdHg+2pPpFiDZIGg9cnOduWOlKlfp8M8
-# qTujVP8lGEgNO1KdySr1pVAL+pjYbwpD3uammhVQ5TdEOvp8wCte0w/52ZbDZqIY
-# hegETW/q2hVygpIgM15+mKHHFYAedCm7ozDoItrCQ5A3e3aGmOmJzTMiAuMSFEw2
-# uwObALJLr+Q2AxHWSyaPBQnRVV0t1DoP2+i1BRQ6xuzPaZzyUCGH6wEerUS9d8mh
-# GboJHLaipA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTQxODE2
+# MTlaMC8GCSqGSIb3DQEJBDEiBCCULxhaczsAaNA86juggTgFYBlMbWvZf65ykdBJ
+# OKsKNTANBgkqhkiG9w0BAQEFAASCAgCGWa/cPXrykMxwnLX0Fxdf00OgOkXdeMFO
+# /8xI0ocHtTybEdsnx2iZanfDHOOJevqlmhdL/N73MonARY5UcEuVtd6t1az/xR1r
+# tA8/IU8QvLbu1hhZAQV3d6zdIUvvThBish2dFhx3YTHxGNth1avRdwgbYv4HX0nD
+# ddqPUR0SNvSLXgbrbUZqLhE8p0GIKuQRVpZCnDnSHjKWtjgDmE+EOjRCbOMZvSGX
+# kYYvlyz/cFxqaRhX18rMcXIpcbniANQV+aoRcup/rZSFv1xA7FOTi6pOiigxmCML
+# 4QosoqmU6juoeLBDOZ6VnPKkOxRLDWHpFXDJmbYHvgb44DlBgq+i9eMDo09wHMlH
+# KS1x4cGf1d7WOj2E2Niy9Vfq6qvGrJnXRRayaNDsChkbOV8EHEc7jzKwAG2tEx4z
+# wN0o9IhNNnmNuqWbsYBmt8OJQsZr6/kpyBERiw6HyoGP9gDwC3up8y6ZjqsM1EEx
+# uXzvoRHSXPEc4b6uakBF840Gy3iPmnrz+mgFFo9AI9BYB6JzEmBubFz3QAFhaC1j
+# AVZsk6qid9W2eZq2Tk9LIIBXqiyVNUJXfN/HP8E91WuXkfwCWA6PmBgHqR3i7BKM
+# MqU42/H/r9oafr7Pg/U/RHh90y56L/OhCzyucZy63ZB8um96EjLj/lQCBKjyurgZ
+# shTM9KSctw==
 # SIG # End signature block
