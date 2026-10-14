@@ -534,7 +534,11 @@ def main():
 
     sheets = SP2019_CHANGES_SHEETS if args.sheet_profile == "sp2019-changes" else SHEETS
     stats = export_workbook(args.comparison_directory, args.output_xlsx, sheets=sheets)
+    from compare_sp_source_target_file_inventories import refresh_file_html_summary
+    html_path = refresh_file_html_summary(args.comparison_directory, args.output_xlsx)
     print(f"Excel file created: {args.output_xlsx}")
+    if html_path:
+        print(f"File comparison HTML updated: {html_path}")
     for sheet_name, row_count, column_count, truncated in stats:
         marker = " (truncated at Excel row limit)" if truncated else ""
         print(f"{sheet_name}: {row_count} rows, {column_count} columns{marker}")

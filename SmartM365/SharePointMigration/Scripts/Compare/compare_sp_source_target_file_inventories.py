@@ -16,7 +16,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from report_html import metric_card, render_report
 from scan_evidence import describe_pair, manifest_path
-from comparison_artifacts import artifact_name
+from comparison_artifacts import artifact_name, find_artifact
 
 
 def verified_empty_target_scan(path, target_rows):
@@ -283,6 +283,43 @@ def html_file_link(path):
     return f'<a href="{html_escape(quote(path.name))}">{html_escape(path.name)}</a>'
 
 
+def report_action_card(label, action, href, icon):
+    return (
+        f'<div class="metric report-action {html_escape(icon)}">'
+        f'<a href="{html_escape(href)}" aria-label="{html_escape("Open " + label)}">'
+        f'<div class="metric-label">{html_escape(label)}</div>'
+        '<div class="metric-value">'
+        f'<span class="report-action-icon {html_escape(icon)}" aria-hidden="true">'
+        f'{"X" if icon == "excel" else "📁"}</span>'
+        f'<span>{html_escape(action)}</span></div></a></div>'
+    )
+
+
+FILE_REPORTS = (
+    ("Summary", "Summary.csv", "Run counters and comparison inputs."),
+    ("Library summary", "LibrarySummary.csv", "Library-level file comparison summary."),
+    ("Missing in target", "MissingInTarget.csv", "Source files absent from target or not usable at target."),
+    ("Missing diagnostics", "MissingDiagnostics.csv", "Diagnostic hints for missing files: wrong version, zero-byte target, relocated candidates, and ShareGate rename suspects."),
+    ("Extra in target", "ExtraInTarget.csv", "Target files not found in source."),
+    ("Different size", "DifferentSize.csv", "Matched files with size differences beyond tolerance."),
+    ("Changed modified date", "ChangedModifiedDate.csv", "Matched files with modified-date differences beyond tolerance."),
+    ("Target older than source", "TargetOlderThanSource.csv", "Matched files where target is older than source."),
+    ("Changed version", "ChangedVersion.csv", "Same-path files whose SharePoint version differs."),
+    ("Extra folders in target", "ExtraFoldersInTarget.csv", "Target folders containing extra files."),
+    ("Duplicate keys", "DuplicateKeys.csv", "Source or target duplicate comparison keys ignored."),
+)
+
+
+def file_report_links(output_directory, excel_workbook=None):
+    links = [
+        (label, find_artifact(output_directory, filename), description)
+        for label, filename, description in FILE_REPORTS
+    ]
+    if excel_workbook and Path(excel_workbook).is_file():
+        links.append(("Excel workbook", Path(excel_workbook), "Full file comparison workbook."))
+    return links
+
+
 def format_integer(value):
     return f"{to_int(value):,}".replace(",", " ")
 
@@ -309,7 +346,7 @@ def top_file_difference_rows(library_summary_rows, limit=20):
     return rows[:limit]
 
 
-def create_file_html_summary(path, title, summary, library_summary_rows, report_links):
+def create_file_html_summary(path, title, summary, library_summary_rows, report_links, excel_workbook=None, generated_at=None):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -352,6 +389,9 @@ def create_file_html_summary(path, title, summary, library_summary_rows, report_
     ]
     card_html = [metric_card(label, value if label == "Success rate" else format_integer(value), css_class)
                  for label, value, css_class in cards]
+    if excel_workbook and Path(excel_workbook).is_file():
+        card_html.append(report_action_card("Excel workbook", "Open file", quote(Path(excel_workbook).name), "excel"))
+    card_html.append(report_action_card("Report folder", "Open folder", "./", "folder"))
 
     report_link_rows = []
     for label, target_path, description in report_links:
@@ -387,7 +427,7 @@ def create_file_html_summary(path, title, summary, library_summary_rows, report_
     if not top_rows_html:
         top_rows_html.append('<tr><td colspan="8" class="empty">No library-level differences.</td></tr>')
 
-    generated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    generated_at = generated_at or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     empty_target_note = (
         "<dt>Target scan</dt><dd>Verified empty scan. All source files appear in Missing in target; "
         "this may be expected before a copy.</dd>"
@@ -427,6 +467,52 @@ def create_file_html_summary(path, title, summary, library_summary_rows, report_
     )
     path.write_text(document, encoding="utf-8", newline="\n")
     return path
+
+
+def refresh_file_html_summary(comparison_directory, excel_workbook):
+    """Add the exported workbook to an existing report without rerunning the comparison."""
+    comparison_directory = Path(comparison_directory).resolve()
+    excel_workbook = Path(excel_workbook).resolve()
+    if not excel_workbook.is_file() or excel_workbook.parent != comparison_directory:
+        return None
+
+    summary_path = find_artifact(comparison_directory, "Summary.csv")
+    library_summary_path = find_artifact(comparison_directory, "LibrarySummary.csv")
+    if not summary_path.is_file() or not library_summary_path.is_file():
+        return None
+    with summary_path.open(encoding="utf-8-sig", newline="") as handle:
+        summary = next(csv.DictReader(handle, delimiter=CSV_OUTPUT_DELIMITER), None)
+    if not summary or not summary.get("HtmlSummary"):
+        return None
+    summary["TargetEmptyVerified"] = str(summary.get("TargetEmptyVerified") or "").strip().lower() in ("true", "1", "yes")
+
+    html_name = summary["HtmlSummary"].replace("\\", "/").rsplit("/", 1)[-1]
+    if not html_name.lower().endswith(".html"):
+        return None
+    html_path = comparison_directory / html_name
+    if not html_path.is_file():
+        return None
+    with library_summary_path.open(encoding="utf-8-sig", newline="") as handle:
+        library_rows = list(csv.DictReader(handle, delimiter=CSV_OUTPUT_DELIMITER))
+
+    existing_html = html_path.read_text(encoding="utf-8")
+    timestamp_match = re.search(r'Generated at ([^<]+)</div>', existing_html)
+    generated_at = html.unescape(timestamp_match.group(1)) if timestamp_match else None
+    temp_path = html_path.with_name(html_path.name + ".tmp")
+    try:
+        create_file_html_summary(
+            temp_path,
+            summary.get("ComparisonName") or html_path.stem,
+            summary,
+            library_rows,
+            file_report_links(comparison_directory, excel_workbook),
+            excel_workbook=excel_workbook,
+            generated_at=generated_at,
+        )
+        temp_path.replace(html_path)
+    finally:
+        temp_path.unlink(missing_ok=True)
+    return html_path
 
 
 def strip_query_from_path(value):
@@ -1899,19 +1985,7 @@ def main():
         args.comparison_name,
         summary,
         library_summary_rows,
-        [
-            ("Summary", summary_path, "Run counters and comparison inputs."),
-            ("Library summary", library_summary_path, "Library-level file comparison summary."),
-            ("Missing in target", missing_path, "Source files absent from target or not usable at target."),
-            ("Missing diagnostics", missing_diagnostics_path, "Diagnostic hints for missing files: wrong version, zero-byte target, relocated candidates, and ShareGate rename suspects."),
-            ("Extra in target", extra_path, "Target files not found in source."),
-            ("Different size", different_size_path, "Matched files with size differences beyond tolerance."),
-            ("Changed modified date", changed_modified_date_path, "Matched files with modified-date differences beyond tolerance."),
-            ("Target older than source", target_older_than_source_path, "Matched files where target is older than source."),
-            ("Changed version", changed_version_path, "Same-path files whose SharePoint version differs."),
-            ("Extra folders in target", extra_folders_path, "Target folders containing extra files."),
-            ("Duplicate keys", duplicate_keys_path, "Source or target duplicate comparison keys ignored."),
-        ],
+        file_report_links(output_directory),
     )
 
     print("Comparison completed.")

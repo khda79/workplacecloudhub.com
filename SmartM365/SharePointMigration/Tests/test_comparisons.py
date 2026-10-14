@@ -247,7 +247,11 @@ class FileComparisonTests(unittest.TestCase):
             self.assertEqual(summary['MissingInTarget'], '1')
             self.assertEqual(summary['SuccessPercent'], '0.00%')
             self.assertEqual(summary['ValidationStatus'], 'ReviewNeeded')
-            self.assertIn('0.00%', Path(summary['HtmlSummary']).read_text(encoding='utf-8'))
+            initial_html = Path(summary['HtmlSummary']).read_text(encoding='utf-8')
+            self.assertIn('0.00%', initial_html)
+            self.assertIn('class="metric report-action folder"', initial_html)
+            self.assertIn('href="./" aria-label="Open Report folder"', initial_html)
+            self.assertNotIn('class="metric report-action excel"', initial_html)
 
             prefixed = root / 'prefixed'
             prefixed_summary = compare(prefixed, 'Example')
@@ -260,6 +264,15 @@ class FileComparisonTests(unittest.TestCase):
                 '--comparison-directory', str(prefixed), '--output-xlsx', str(workbook)], capture_output=True, text=True)
             self.assertEqual(exported.returncode, 0, exported.stdout + exported.stderr)
             self.assertTrue(workbook.is_file())
+            exported_html = Path(prefixed_summary['HtmlSummary']).read_text(encoding='utf-8')
+            self.assertEqual(exported_html.count('class="metric report-action excel"'), 1)
+            self.assertEqual(exported_html.count('class="metric report-action folder"'), 1)
+            self.assertIn('href="Example-Comparison.xlsx"', exported_html)
+            self.assertIn('<td>Excel workbook</td>', exported_html)
+            self.assertIn('Verified empty scan', exported_html)
+            FILES.refresh_file_html_summary(prefixed, workbook)
+            refreshed_html = Path(prefixed_summary['HtmlSummary']).read_text(encoding='utf-8')
+            self.assertEqual(refreshed_html.count('<td>Excel workbook</td>'), 1)
 
             EVIDENCE.manifest_path(target).unlink()
             unverified = compare(root / 'unverified')

@@ -78,6 +78,14 @@ h1 { max-width: 900px; margin: 7px 0 4px; font-size: clamp(24px, 3vw, 34px); lin
 .metric.note .metric-value { color: var(--warning); }
 .metric.ok .metric-value { color: var(--navy-2); }
 .metric.muted .metric-value { color: var(--muted); }
+.metric.report-action { padding: 0; border-top-color: var(--blue); }
+.metric.report-action.excel { border-top-color: #107c41; }
+.report-action a { display: block; height: 100%; padding: 17px 18px; border-radius: 8px; color: var(--navy-2); text-decoration: none; }
+.report-action a:hover { background: #f1f8ff; }
+.report-action .metric-value { display: flex; align-items: center; gap: 10px; font-size: 18px; }
+.report-action-icon { display: inline-flex; flex: none; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: 5px; font-size: 21px; }
+.report-action-icon.excel { background: #107c41; color: white; font-weight: 800; font-family: Arial, sans-serif; }
+.report-action-icon.folder { font-size: 28px; }
 .section { margin: 18px 0; padding: 21px 23px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
 .section-heading { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 8px 16px; margin-bottom: 13px; }
 h2 { margin: 0; color: var(--navy); font-size: 18px; }
