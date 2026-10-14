@@ -1,5 +1,9 @@
 #Requires -Version 7.0
-<# Synthetic and local-file checks only. No authentication or Graph mutation. #>
+<#
+Synthetic and local-file checks only. No authentication or Graph mutation.
+.VERSION
+1.0.1
+#>
 [CmdletBinding()]
 param()
 
@@ -30,7 +34,8 @@ $body = Get-DeviceSystemPackageBody -ScriptPath $detectionPath -Name 'Synthetic 
 Assert ($body.displayName -eq 'Synthetic Device System' -and $body.runAsAccount -eq 'system' -and -not $body.runAs32Bit) 'The package execution context changed.'
 Assert ($body.remediationScriptContent -ceq '' -and $body.deviceHealthScriptType -eq 'deviceHealthScript') 'The package is not detection only.'
 Assert (-not $body.Contains('assignments') -and -not $body.Contains('runSchedule')) 'The creation body contains an assignment or schedule.'
-Assert ($body.version -eq '1.6.0') 'The package version does not match the detection script.'
+$detectionVersion=[regex]::Match([IO.File]::ReadAllText($detectionPath),'(?m)^\s*Version:\s*([0-9]+(?:\.[0-9]+)+)\s*$').Groups[1].Value
+Assert ($detectionVersion -and $body.version -eq $detectionVersion) 'The package version does not match the detection script.'
 Assert ([Convert]::FromBase64String($body.detectionScriptContent).Length -eq [IO.File]::ReadAllBytes($detectionPath).Length) 'Detection script content was not encoded.'
 Assert ([Linq.Enumerable]::SequenceEqual([byte[]][Convert]::FromBase64String($body.detectionScriptContent),[byte[]][IO.File]::ReadAllBytes($detectionPath))) 'Detection script bytes changed in the package.'
 Assert ($body.roleScopeTagIds.Count -eq 1 -and $body.roleScopeTagIds[0] -eq '0') 'The default scope tag changed.'
@@ -170,8 +175,8 @@ Assert ([IO.File]::Exists([IO.Path]::GetFullPath((Join-Path (Split-Path $launche
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDZl6w3sJGls4M7
-# lkxnwyz0NaYCW6kki7XMuIQ27pD0zqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAFS3QkP11tHO8P
+# URIkDJrXgyd2kNsAcApc40PRySzHPKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -304,31 +309,31 @@ Assert ([IO.File]::Exists([IO.Path]::GetFullPath((Join-Path (Split-Path $launche
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEINJ3UoejSeeUq/na2l/7Yvy3veGGPTfL+YXm1dhBok68MA0GCSqG
-# SIb3DQEBAQUABIIBgH7yOqOUnfzxY4lErQjCJFwe1wIdi9QwI/csEofRi3+NjN//
-# Ef2r1Hj1BpmI5BYhZu9zW2Ks7AA2KUdEt2JA5AR8yKSlCQk6aS1CDx1NTrzdK1j5
-# Pnelm11EdrudSNm3YOYHfTqN7HJjs9sNMw5E4ULt1kdCojTm/VX153dJJw+jkxfo
-# J4hnWBYAo5xvu2kwRe+mPevi1/tXmQPnkp92q24ikVVxuGJt/A5knCMtVl3XSN6W
-# wBSpupALl9qcnAMy6rudf/ASWH0DKq2tGJDzzcdtq6siIO9kDhyjW/lKpNmj47Lk
-# Fu5XokjpIklwmCigtmLbPesywpV2WHtkyeGfWqNiRq3pdRrJ/08USGbX7FRjs6nN
-# FEBqIHF/W89TztRZb9HJIgfqjvQOmN84/8sm1evyCQZNJ5a4goDSS1qhUouWWPmP
-# 2kbSQdlx4V4M5Kk18LGNg8pQ6hWY5YlL6cWUkW6U38w40QXO+X+uOp1waSs6jEA3
-# 812dR3ynMNoZXtBlAaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIIblXi2zd+cxV+B0DEwa2Xt78QFn5Kt0anYJ9J7Qctv9MA0GCSqG
+# SIb3DQEBAQUABIIBgKu+sSnBCCXnNx0HqFqH8u1A3mgdTOzQCHBVUVDQQGmulvB5
+# 1ekqVDEElTgJ02RIr+h3zYrfwZFl+OnxrLCfLRMINjk+G6z0mRt+y+Gy0kjsHML9
+# yjzUalvtGAW55sOWL5plNAviFYNnCe3LfVkCaNQPI0kPjH9g6raSMJwqCoQrkz1O
+# HmIh8yhxxvSBLr7uIQn8Fb/F0MGM3xcArDqy4yP23ODZ22x4PeKFX/pbGvO6BEhS
+# nPOyv4Wjk1nE92LnOdCoo9DBiHr+RXxwm+d4ek27gqqHxy4PlfFE6OlojNyYD6+I
+# DfLdOOllxYdEobyUdhwFDXCGeQdC8OKfhlojqIGt+nhd8q0RaDFs2BDQ1ZnBHkdO
+# WvbOzW1XGomu8wKJVsLKJsv31m0OhFjuiIiEcoYvcB3ftXRxFQo0gStii3mhjMLK
+# CMLCwnROPbFDZjbd5HH0KEpjsCpaJArTNNcQBLxBlwWNLju8mm+GOvcor1BCzwvY
+# DrDWNWfEzoMZWWB3bqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTMxNTQy
-# MTVaMC8GCSqGSIb3DQEJBDEiBCDR5gSS0OJb3qdUDTHRnkpdBeXZYNDV8ZdElRfe
-# CwEr4jANBgkqhkiG9w0BAQEFAASCAgA1Vp7cjxRLjJ7xberkIqLATHMnUhUpOSl5
-# cnRqkb0qwAQtUCDbP9DiRr+e30j+aQYExG4ONjA8g3O6Kvfo34C0MBZ3IOsMmHUy
-# CuFnZDw5tKQhMd+I9o9boXKWd2kqPGFm+uZuJ3r6EgXfGduLqVwkvu1itRH99Eao
-# dPgAxL7HuTPDGO0c842LrN/HDjaLLMB4paFcZkEtxWaZYw0tXFIFXRV+FLPE81Di
-# GWWm05v8WyZ1OLFfE6pw4T3aALhogcSQsENqdGDVNJCkPdYa9+AwPO2ysgbzRePr
-# 77OV9tQ3QAW2ZxnOoIO/5Px68FwZ0qLxOZYPh8Tgthh+i1XJgbizQy8tHdIrT+/W
-# luUnU0SaH2f6AvohfjNwd/ZXfjM09NFXpcsNd2Jetc9F2d+ktn3aY2dy2I80w8Bj
-# D7LnAW9V4j23t/ilWLJbQy/fC039ILlHSqpJrC8Y9TWR+IR9gyeAmbeprsWiYvm7
-# oaC2JdqJlpE4MeD3VXs2f9XBc+7ljp6VCoWXvaVCp69hlw8n+21izIxi9TI2QMgi
-# L0DuTxpoMtsbCdRnJ0kv3MOby78Kdry2eGPmdUf6G/4PQrwm2Ij/+Xt0ivHJKSY2
-# YRAKglmYfn5LxkoDls+ei0yLFsc+sKuAgfRABDb7fnH/+ztxIpHnuSbzWGiKBLXr
-# M6GeWlETgw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTQxNTMy
+# MjlaMC8GCSqGSIb3DQEJBDEiBCDmAIzXabRH6+UxQddSSK9m+GsyaOWKvdJ8/6Oi
+# 0Kg6qDANBgkqhkiG9w0BAQEFAASCAgCR1c2YaKx0SL+UMg5QbBiWPVQuKYrajOJV
+# lVhi+9RBvsByxPAxwdfNPj4lcP22Uw6qbNyRFTbZov3CKBJ8CATOi5s8njKwdjyu
+# RI9t4tj6vUKCIU6K3/js53MgiSw1ypUFuuZjexqw3HTJNJAREt+WdaHc5qY42A7w
+# tLjWQXvOKcNYMqeUaeN6+zOMQafaajhurSkQMXJuD+ZC4H0cfCOeuJxmFjVaHuSy
+# p11mOyFhhg1C6X7ywIkib60HvNMVLLs/Y2sdrWBQNxqKwencTFkh58WyURk4L1eo
+# f2gT4SkiwvLgwws62penPxdrrumoKlEV3E/I7+2CfhhtIO8XcDWTmJmm9fEU+mo+
+# vV5Ys/VObZASnbV1PQ9LfYzaBZF5k25wkO24FQwDxjJ2ZjObcSbuCOxqb1SzpihN
+# H7gztx+xGSITrg4WqBRS7jYotl5XujHmDlYG0pbjzYQ78AGtnBJhzcXLZsXzQLER
+# tgtM7ngEA/b0TrRfgR46KHjolwMAeLjfJW9tsu24znNpwwEaGFIhr2enboHyb0sV
+# 0jAJDWq3CmhO085VFno+Brrxj0Cv3ZjXcfqoWfqZPHn4tL5e2p5ejx8zQYFN+kL9
+# tZ6vmyIW7p+PZZ9m+vY9pt8UjAlVgaNhv4Yu/Xagt+FNV2eiRAVyzcDBdc8CHYq+
+# AybgeMFKkg==
 # SIG # End signature block

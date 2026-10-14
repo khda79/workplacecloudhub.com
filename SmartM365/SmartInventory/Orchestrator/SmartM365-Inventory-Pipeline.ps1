@@ -45,6 +45,17 @@ param(
     [string]$SharedDataFolderPath = ''
 )
 
+# Local lifecycle only; no collection or publication is performed by this guard.
+$smartM365LifecycleRoot=$PSScriptRoot
+while ($smartM365LifecycleRoot -and -not (Test-Path -LiteralPath (Join-Path $smartM365LifecycleRoot 'Modules/SmartM365.Core/SmartM365-InventoryLifecycle.ps1') -PathType Leaf)) {
+    $smartM365LifecycleParent=Split-Path $smartM365LifecycleRoot -Parent
+    if($smartM365LifecycleParent -eq $smartM365LifecycleRoot){break}
+    $smartM365LifecycleRoot=$smartM365LifecycleParent
+}
+if(-not $smartM365LifecycleRoot){throw 'SmartM365 lifecycle support is missing; update the complete runtime.'}
+. (Join-Path $smartM365LifecycleRoot 'Modules/SmartM365.Core/SmartM365-InventoryLifecycle.ps1')
+$smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -RequireReturn
+try {
 $ErrorActionPreference = 'Stop'
 $startedAt = Get-Date
 $scriptName = 'SmartM365-Inventory-Pipeline'
@@ -165,7 +176,7 @@ try {
         Write-Host ("Cancellation {0}: BatchId={1}; status={2}; cancelled={3}; remaining={4}; failed={5}. Running collectors are not stopped." -f $(if ($ValidateOnly) { 'validated only (no write)' } else { 'published' }), $BatchId, $cancelStatus.OverallStatus, $cancelStatus.CancelledCount, $cancelStatus.PendingCount, $cancelStatus.FailedCount)
         $cancelStatus.Jobs | Format-Table JobName, Status, OwnerServer, Detail -AutoSize
         Complete-PipelineScript -Status Success
-        exit 0
+        $smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; $smartM365RunGuard.ExitCode=(0); exit $smartM365RunGuard.ExitCode
     }
     $JobsManifestPath = Get-SmartM365JsonReadPath ([IO.Path]::GetFullPath($JobsManifestPath))
     if (-not (Test-Path -LiteralPath $JobsManifestPath -PathType Leaf)) { throw "Effective jobs manifest not found: $JobsManifestPath" }
@@ -221,14 +232,14 @@ try {
     if ($ValidateOnly) {
         $warningCount = @($validation.Warnings).Count + $missingOwners.Count
         Complete-PipelineScript -Status $(if ($warningCount -gt 0) { 'CompletedWithWarnings' } else { 'Success' }) -Warnings $warningCount
-        exit $(if ($warningCount -gt 0) { 3 } else { 0 })
+        $smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; $smartM365RunGuard.ExitCode=($(if ($warningCount -gt 0) { 3 } else { 0 })); exit $smartM365RunGuard.ExitCode
     }
 
     $request = New-SmartM365OrchestratorPipelineRequest -SharedDataFolderPath $SharedDataFolderPath -Tenant $Tenant -Pipeline $selectionName -Selection $selection -ManifestHash ((Get-FileHash -LiteralPath $JobsManifestPath -Algorithm SHA256).Hash) -RequestedBy ([Environment]::UserName) -RequestedFrom ([Environment]::MachineName)
     Write-Host ("Pipeline request submitted: BatchId={0}; request={1}" -f $request.BatchId, $request.RequestPath) -ForegroundColor Green
     if ($NoWait) {
         Complete-PipelineScript -Status Success
-        exit 0
+        $smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; $smartM365RunGuard.ExitCode=(0); exit $smartM365RunGuard.ExitCode
     }
 
     $deadline = [datetime]::UtcNow.AddHours($WaitTimeoutHours)
@@ -248,24 +259,35 @@ try {
     } while ($true)
 
     Write-Host ("Pipeline completed: BatchId={0}; status={1}; failed={2}; warnings={3}." -f $status.BatchId, $status.OverallStatus, $status.FailedCount, $status.WarningCount) -ForegroundColor $(if ($status.OverallStatus -eq 'Success') { 'Green' } elseif ($status.OverallStatus -eq 'CompletedWithWarnings') { 'Yellow' } else { 'Red' })
-    if ($status.OverallStatus -eq 'Success') { Complete-PipelineScript -Status Success; exit 0 }
-    if ($status.OverallStatus -eq 'CompletedWithWarnings') { Complete-PipelineScript -Status CompletedWithWarnings -Warnings $status.WarningCount; exit 3 }
-    if ($status.OverallStatus -eq 'Cancelled') { Complete-PipelineScript -Status CompletedWithWarnings -Warnings 1; exit 3 }
+    if ($status.OverallStatus -eq 'Success') { Complete-PipelineScript -Status Success; $smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; $smartM365RunGuard.ExitCode=(0); exit $smartM365RunGuard.ExitCode }
+    if ($status.OverallStatus -eq 'CompletedWithWarnings') { Complete-PipelineScript -Status CompletedWithWarnings -Warnings $status.WarningCount; $smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; $smartM365RunGuard.ExitCode=(3); exit $smartM365RunGuard.ExitCode }
+    if ($status.OverallStatus -eq 'Cancelled') { Complete-PipelineScript -Status CompletedWithWarnings -Warnings 1; $smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; $smartM365RunGuard.ExitCode=(3); exit $smartM365RunGuard.ExitCode }
     Complete-PipelineScript -Status Failed -Errors $status.FailedCount
-    exit 1
+    $smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; $smartM365RunGuard.ExitCode=(1); exit $smartM365RunGuard.ExitCode
 }
 catch {
     Write-Host ("Pipeline error: {0}" -f $_.Exception.Message) -ForegroundColor Red
     Complete-PipelineScript -Status Failed -Errors 1
     $exitCode = 1
 }
-exit $exitCode
+$smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; $smartM365RunGuard.ExitCode=($exitCode); exit $smartM365RunGuard.ExitCode
+    $smartM365RunGuard.ReachedTerminal=$true
+    $smartM365RunGuard.ReturnedNormally=$true
+} catch {
+    if ($_.Exception -isnot [Management.Automation.PipelineStoppedException] -and $_.Exception -isnot [OperationCanceledException]) { $smartM365RunGuard.ErrorRecord=$_ }
+    throw
+} finally {
+    Complete-SmartM365InventoryRun -State $smartM365RunGuard
+    if($smartM365RunGuard.ExitCode -eq 130){exit 130}
+}
+if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
+
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDohCbgauZ4BUJ+
-# i1TZItFM34PVIqAESeKUuCn7wrlv2qCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD/D5MTP3zoidRC
+# k1k7n1c7pr2PqJr/ClqpuE6lx3PdNaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -398,31 +420,31 @@ exit $exitCode
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIC26WJv1SAjI6Jx5wc24AEjv7UlSP+XCuONHE729pXv9MA0GCSqG
-# SIb3DQEBAQUABIIBgHsGSBvd2iFLw/Y+R3zqqIY1z+u1ZqeNCXPjShmNa8WU5aPM
-# /y60KMqvC3PGWKeFkBx/aD++WKUXyrIC3RhMq6JzqjKm5E7wsuvHszHg6IeMKxxP
-# k0J4wqc72TiH3PnrOpYlydM3PvIf3SNN1/VOOj6zF+k58e1jgfiAspONK1DQcKan
-# IjiJEO/2Q31U1FmZ2ZVJr/7vrB+gaikdynDHGkBhYent7bvzu3OvS65kL0qgSi5q
-# Nr9R/2vavKJ4OrZSVHQahVKPobomlbLg/WXF91Ts+IU8y//Y/L+r74uqaxEydPvA
-# uGU/c0KikMN6xGxg9/1kplTKOXmIeqh7I0C7ICFRpfBPjW4K/VePBUjgbU5i9dit
-# 5sJwaLxEp+S2dwGN5Ykl5FzHgQFjIRe6DZSF8h3Eb+J+GDuB2dqgif8Sj1SjhR5O
-# 7PlHEZ1YdoFhpvHO9xiBOyfLFD0jnjzbm8NYE+uOu3G7/pkn/XsdAQsGoRjEcahC
-# Dp5QnN/wx9qHCz3xGaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIJMu2tmFfur/0k8dl/7kJn/P/ymls8mHDIOLAIZdbb+jMA0GCSqG
+# SIb3DQEBAQUABIIBgBqtXDMPy9szRPAtJMb3AqjeLJcGF3Zc8R4lU2RKBvComBSh
+# hCyf2ysfgrcPwPbUjCxT3ceeceCrd1QL0BdVY/cSHNT6mtcxBMhbAm+8YOboSNw5
+# ZHr+PR4Tkrd0PC2uM3LGZCIsaM7S+hLdkrSXcdF6Rb/Nikyd08AHnGJmvPZH7SGV
+# zKy5ZsqoJqFybiZBQd5iKUuOOzQ9G2vaEC/JJv35pKDKbdBBmkCJr5AwkucvmSmx
+# brhgqJI6rxw9Gx0CU+3KuoR1vCtBWbox/LHC8o4fUMdRZ2mksb/r06vENiLFTLRR
+# L8Nu5/isoNm3uKtEYv3VBjpvj/6G9gmPntcz4TJGQxMB3zgHBqow8vEbvFoXwFtV
+# LzRJc9iaBldhi6xoOQk8o3+v3ZhXcLxpMbZD/2akEKjGN1jUu1B2dqBiJ3ssBJjs
+# FtcFda8ygJ+R/V6yswM1piCtHarUtA9kMRPBwIhPV/wYw7/p6H6RN42i4x+Jsb/v
+# fD7XfscIBy0smGb6pKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDUxODAy
-# MzRaMC8GCSqGSIb3DQEJBDEiBCCkW+lWQuZi4m/iGJx0R/geDdyRxpC63R1NhNs1
-# 8VBZ6DANBgkqhkiG9w0BAQEFAASCAgCoxVK3Kv/fXGiyX0KHCtE6sEULq0g41Tci
-# 25jLdPrOrr+VwN2iF5dhrfaRJnMF7Hma1YGfDN9d64mb8FAp6MVL6q5dH5NeJ1To
-# b4Btas6HLcabU/ITUq+QPVUQgj/euJ2/sdScu3IaWAzPd3/zg/GSxpUChxJbbcEB
-# IyGgp2Dpmp3HlfDVwEyL2tF6FB9fyFEw9HWx4RPuHbHeKzdub654RSxcMqhuIbcR
-# NXEcZtLGvqvHERmd5mzGwvBsp8Ff0ma5niBa6nKhhWxzs8pyfGyHORV5VlapAyGY
-# /ne+YFUBeXkIjiIY3z8y5nKqfTV11dy/FuJxglhr4Hvk82/d1+3AxNX2jXRit5Tk
-# YRLXFyzpdA1A+aKcSuZyeoRGuN9Ux6LZ4jy4dE9b9/w1M+p8anHRG8rTEL/lljjE
-# pLR4FE2NkU+aj7PVW7ibQs7xJMYBXNDu/DpOORo1mp2DSte7ZTaXJ7cRAookQ6Lg
-# mLfZT5ec32GG9zY0JoS08fxYftSwIoBgwNXaz/YUOgylFB73cvRQF4hUwDhXy+ra
-# dapzR0rC89h9Jcus+XEah7CvReFXCUYRv7M9LMP4490DFMwAa+pbTCgPlIKK92Kn
-# VBtJmDbI+VexL87/mibF+oJ0HGXyCZhrAjg484I9pJqpEhiX/o1FbNF2yWJzCYkp
-# UNQKoxLOTQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTQxNTMw
+# MzlaMC8GCSqGSIb3DQEJBDEiBCCeqSOwN7Yo4FbAoyFr3mkTGFmwRiK6gnT9bCTM
+# UqYCxzANBgkqhkiG9w0BAQEFAASCAgBaSKXzQuj334NUlhzyd+xq5T2+9bGk1qdZ
+# i56GCMStRd9sEpRWOP6qB8gHMG0OH2pQtGXBdLarqnpVNzfsCU0raY84s3IhbB1Q
+# n48SoQ+nzoEgWNNtAzAKWaq4mbOdNgdSk7A4WZ7Vg9Znsr0NoUc0UXosIWCG3s8T
+# KyxSuXlpIKzcVuXE24fpbBy2+Cnle7DpI8yt1lHTNXg11Mh6VgtWcABbTvDhM3QZ
+# xeb/IMEP+/XK0MMqAETdDVD9fVr/jqvmuaRz2EGBvIcok0gapd3sykIqeayM5j+a
+# g77xm/Z/t0lF+Qm3nK5YZw1h0/HrP+pD0A223IL4RZGEdHYkQFY8ARJ0bAh7ljTH
+# UePlEwaY+QR1OXANksAXxjfxM8Q3ICrouDFBcbw5OAV5RV3eO/K/GoCcp/5OiI1s
+# YYUog9iJpUQHe4HcdJCMxPpNkRyNvTZzCTEAAjX3Q4XWSsdPcbca684KoR6q6Wws
+# AaBmjcZvpT2NRiTDAYG5iBh2f2rW7F5h7CtLXUCeiUl5n1Z03ZIfrXbA1yoxZI1s
+# uIJFGV/GPZkR94fpMAi4KM5N4WzLLh/2W+4XvmPtHnN2E4UfkLrWWZTo6fI3zSZJ
+# 1r5K+FTe5bW1Oz4zYRlD9tLHA2Fnuicc+jzplYTMyrIiWf8tO44DLGyoUzvIOHh9
+# 7LO5ty2Mrg==
 # SIG # End signature block

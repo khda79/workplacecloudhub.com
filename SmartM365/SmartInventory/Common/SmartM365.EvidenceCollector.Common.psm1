@@ -98,7 +98,7 @@ function Initialize-SmartM365EvidenceRuntime {
     $root = [string](Get-SmartM365EvidenceProperty $EffectiveConfig @('SmartM365RootPath'))
     $coreManifest = Join-Path $root 'Modules\SmartM365.Core\SmartM365.Core.psd1'
     # Keep receipt exports visible to the caller and preserve the loaded Core context.
-    Import-Module -Name $coreManifest -MinimumVersion '1.0.72' -Global -ErrorAction Stop
+    Import-Module -Name $coreManifest -MinimumVersion '1.0.87' -Global -ErrorAction Stop
     $dataAllRoot = [string](Get-SmartM365EvidenceProperty $config @('DataAllRootPath'))
     $resolvedOutput = if (-not [string]::IsNullOrWhiteSpace($OutputPath)) { $OutputPath } elseif (-not [string]::IsNullOrWhiteSpace([string](Get-SmartM365EvidenceProperty $config @('ScriptCsvLogFolderPath')))) { [string](Get-SmartM365EvidenceProperty $config @('ScriptCsvLogFolderPath')) } else { Join-Path $dataAllRoot $DefaultOutputRelativePath }
     $resolvedLatest = if (-not [string]::IsNullOrWhiteSpace($LatestCsvFolderPath)) { $LatestCsvFolderPath } else { [string](Get-SmartM365EvidenceProperty $config @('LatestCsvFolderPath')) }
@@ -119,13 +119,13 @@ function Initialize-SmartM365EvidenceRuntime {
 function Connect-SmartM365EvidenceGraph {
     param([Parameter(Mandatory)]$Runtime,[Parameter(Mandatory)][string[]]$Scopes,[switch]$InteractiveAuth)
     Import-Module Microsoft.Graph.Authentication -ErrorAction Stop
-    try { if (Get-MgContext -ErrorAction SilentlyContinue) { Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null } } catch {}
-    if ($InteractiveAuth) { Connect-MgGraph -Scopes $Scopes -NoWelcome -ErrorAction Stop | Out-Null; return }
+    try { if (Get-MgContext -ErrorAction SilentlyContinue) { Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null; Set-SmartM365InventoryConnectionOwnership -Connection Graph -Owned $false } } catch {}
+    if ($InteractiveAuth) { Connect-MgGraph -Scopes $Scopes -NoWelcome -ErrorAction Stop | Out-Null; Set-SmartM365InventoryConnectionOwnership -Connection Graph -Owned $true; return }
     $appId = [string](Get-SmartM365EvidenceProperty $Runtime.Config @('AppId'))
     $tenantId = [string](Get-SmartM365EvidenceProperty $Runtime.Config @('TenantId'))
     $thumb = [string](Get-SmartM365EvidenceProperty $Runtime.Config @('Thumbprint','Thumb'))
     if ([string]::IsNullOrWhiteSpace($appId) -or [string]::IsNullOrWhiteSpace($tenantId) -or [string]::IsNullOrWhiteSpace($thumb)) { throw 'AppId, TenantId, and Thumbprint are required for app-only Graph authentication.' }
-    Connect-MgGraph -ClientId $appId -TenantId $tenantId -CertificateThumbprint $thumb -NoWelcome -ErrorAction Stop | Out-Null
+    Connect-MgGraph -ClientId $appId -TenantId $tenantId -CertificateThumbprint $thumb -NoWelcome -ErrorAction Stop | Out-Null; Set-SmartM365InventoryConnectionOwnership -Connection Graph -Owned $true
 }
 
 function Get-SmartM365EvidenceStatusCode {
@@ -245,7 +245,12 @@ function Invoke-SmartM365EvidenceExportReport {
         if ($MaxItems -gt 0) { $rows = @($rows | Select-Object -First $MaxItems) }
         return $rows
     }
-    finally { if (Test-Path -LiteralPath $tempRoot) { Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue } }
+    finally {
+        if (Test-Path -LiteralPath $tempRoot) {
+            try { Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction Stop }
+            catch { Write-Warning "Temporary report cleanup failed: $($_.Exception.Message)" }
+        }
+    }
 }
 
 function Export-SmartM365EvidenceDataset {
@@ -268,7 +273,7 @@ function Write-SmartM365EvidenceLog {
 
 function Complete-SmartM365EvidenceRuntime {
     param(
-        [ValidateSet('Auto','Success','CompletedWithWarnings','Failed')][string]$Status='Auto',
+        [ValidateSet('Auto','Success','CompletedWithWarnings','Failed','Cancelled')][string]$Status='Auto',
         [AllowNull()]$ErrorRecord,
         [string]$FailureStage='',
         [switch]$CloseTranscriptBeforeUpload
@@ -283,8 +288,8 @@ Export-ModuleMember -Function Get-SmartM365EvidenceProperty,ConvertTo-SmartM365E
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDIhmaDwqCOjafN
-# L7utLOY2k9jobx+AAqpLRHv6V+rdXqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDA4I1S5vrCEJzI
+# rRumbcLz/4Df/Np317NdSJwMoD9lUaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -417,31 +422,31 @@ Export-ModuleMember -Function Get-SmartM365EvidenceProperty,ConvertTo-SmartM365E
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIN2FvU5S5uDxAtae0bITuKhDe9CKXsILicwPZVIrCvqVMA0GCSqG
-# SIb3DQEBAQUABIIBgHLQ6eBln/Lx/cWehgC/6UjUetjBLTQWjxGI4y1zd6p3y/fs
-# NeAIaralamtBExiFHSWtEUnvgdT3gd3Rr6lKIkSzGRzI8VDP2P6QOno+UzXY+8WI
-# qJ3uRyXfAPydVgCX0OOnaTUvMwjSzka5gXRFOQrqAvq1xMf2K1gn/GKz0spaFwIb
-# t+muG2G1N5wRz5zYvqfq5FbEf9KVAuqffTWOlBOEHpYPqw9qXkeKqXDr4zqG8Kk2
-# /YhGFVYrLMo5Y/RLX+w8Iagdxc7eOYsQLjMAKSyDNeUObZr9ac8zsjzvOktfWxW4
-# Xg0H33nFRPFElkv3bjzYV8Rn1iaFV/LGgygwZmAoH4667G9NWv7JN5qpKgstF+Jk
-# n19jf/hxWW9s4+5XHgnYI2mlSOW58r5FTNe8ZLfs2x7vbuC0Bp6J/WXczayHDhSg
-# TIJWhm36F+OujJ4Reml8Ge3xqPfZZhPmCYhbVbFztKGMm6O5p0GfD/mDbrFY86M8
-# UI+CdjsNOeix+F6DTKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEINZL8TFEzNG5zAK4gqmkaFNmTGbdhCyvmKWRVEYpFS+DMA0GCSqG
+# SIb3DQEBAQUABIIBgFWfz3v9F3A7XWTNg3RzdscySKW8YMruUAdbjjtwaDExahlb
+# XoWIAvYwIzFX9D2c8Kwb1bY3Tzwmtgx7gnPj2wk7iOr8PM5pAxOc40NMj0UZzNOC
+# DHxDZW1akSXAIO01WxTgrgdfb/rN/0NTpPRYhDdOMFEMgs5Zf2mAQ5TTkORo1Dcz
+# +eYpanSN6kxJhznTgq3HNc+CAc+GVcJrYyfM0lBCaUGnuYAHShCqXU/+M+BLV5HU
+# IrOnafyoB9Pr9QRgK1mBGMY5aK3TYJh28qOJEuM8PRsGuNiFmUeTLf0ABQYmi8dL
+# 5E38V3KxtPzfm8txjtwrgGhq9XHnmmaqjQmBrBrxpHs/ljQtH8s5ews2LTf+h/ik
+# EZF4CDqR8GVl4xKIRgmzHSLlr7K+CVexyulEYVnSJ52GUa/gobV6g5vpwRyWe46a
+# MCtaSnB1y5p+UyhEeTG/fGx9MGR8WKPNUAeLWlSkWBG5PYaNDI/zEXlvn1KegcGK
+# d7SnsoHrXnhNcj6DZKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTMyMDE0
-# MDNaMC8GCSqGSIb3DQEJBDEiBCAOcttyYbr8zaRYQiyMczjRMdOErFrKP2mbgsu2
-# nOb00TANBgkqhkiG9w0BAQEFAASCAgAYf9kVPPt3WCpqsZHqodGb1kUT3KIhPMR/
-# k1DRzn7Gk42cRCSzFfgyeEb9q61zf50KbS1gEZP+P6sMvFK5tWBJ6hbpR40cfkuK
-# MvPc3aolofsT3hiKeoEJ8J3Jd4L8mLgGJq9TSOJ35lXCHArFggUnv386CIn+8g8m
-# ZMy+ivJqmyM3T0k0f84LM18slF+jWcGNs3kmGRwSDnUxCbyfBAqRY2nCYI31GMnw
-# Sekbd2OYE/wrw53QhupM+snnSEMf2yXqVagynI2BW2rolRIXdBLbClZQhmHpJQfG
-# Il3atdQOxkng3GeBHJt7uCJWUt6yWsNsEK/8PkXLAVIXdj5SCa+MOfPYYyWzjfA4
-# ivaR1sG+CpB/Rk2DxPzmSQ1UiTE0qGxF5rgn5c/16rqkUE/zchalCOTWS9AEzeQP
-# xbVufn9RPP7v0qKKYGALWjPmYLW6f4WtqXzYFRJqb0pmaVzSgOBFXVauDimUZPOa
-# WcKkoGe69/W6fJiipPcuxJJzd1Bk0YJJUScPU10hkpl3YfrAA8cCMwbtAN6/mPhy
-# EX4OOQmajprQmCniA5aEx4PZYWtCLBfXdMVCBACAa3GwDfMM0YOjUpV9Qv9FdLGd
-# IJInENRWnyf0ecmUpkxXx+CMxEFGte/RYFxaW42/5ARG2CcDwVR6kI80X88y05uS
-# ocnuYj6r0g==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTQxNTMw
+# MTVaMC8GCSqGSIb3DQEJBDEiBCDHnriC3Ewhr9iLQt/THGqFakPlMOs06wSFQqK8
+# B5GSpjANBgkqhkiG9w0BAQEFAASCAgArCfU/s4VRWN95uNALJihfrBX70jrRYtu8
+# AC65lPOvTxEBwnHCQ1xTLIO6Xh8VvCH4DkE019VFmMLJL5kNc/IgBdhv+1YmrKKe
+# 0lt2LRblSw8YCo/V1EBqLO9455uYbFnRdcg5bBXVsEth8qMDfPLpYLoXFlf9FCNm
+# SxF3HA7LrmuaSaHisdByLal5y0Ysjtq1hQU72M27C3RRFbHpHaeF/Nmdh0GFRb+L
+# PHbYQjX8kiWGlRm0min6oTeWV47S6J+LyT0CyR1zmPryJUE2BewGIWo3f2cxgBdL
+# RYcnqrGaAYGACRHEXn8HAT4z0cgjVasq7F0HkTvewIzKNbKVMeZVV+Nxcon57qQ3
+# 9a8BjFaRg88vvHTJhnAzfSTrooXGi1czEifi0O8sVSE00rwMNtVHuChEUHyBCxI0
+# g8dIvINqfh8OQ++kjkczftU/Gm/D58KmvCZ6HuhPk7nLp4fccyFR0bQ+DcsaOAdZ
+# 1awvH73vTXoIGoFRNlKB+hlu0jYi4pkqUfVD6Wqnb3IcLNqd2524VNe4KO6U7elX
+# qxgX2VF7rqAGuOOjGEz8i/Ds85nI3hAkFaKaMZtMUrrqLRhUP/JWCxoMe513z6+C
+# kfd/3yR3C0gFpuH13M5WnprQYdU0RmZ6lyVZgdJePUM8epJiDFeYG33bAMpfIPDv
+# fm5dCkwuDA==
 # SIG # End signature block

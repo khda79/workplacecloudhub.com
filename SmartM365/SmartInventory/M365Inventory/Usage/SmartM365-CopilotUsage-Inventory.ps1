@@ -17,7 +17,7 @@ columns remain empty after a v1 fallback.
 This collector never requests or exports prompt text.
 
 .VERSION
-1.0.3
+1.0.4
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -47,6 +47,17 @@ param(
     [int]$MaxItems = 0
 )
 
+# Local lifecycle only; no collection or publication is performed by this guard.
+$smartM365LifecycleRoot=$PSScriptRoot
+while ($smartM365LifecycleRoot -and -not (Test-Path -LiteralPath (Join-Path $smartM365LifecycleRoot 'Modules/SmartM365.Core/SmartM365-InventoryLifecycle.ps1') -PathType Leaf)) {
+    $smartM365LifecycleParent=Split-Path $smartM365LifecycleRoot -Parent
+    if($smartM365LifecycleParent -eq $smartM365LifecycleRoot){break}
+    $smartM365LifecycleRoot=$smartM365LifecycleParent
+}
+if(-not $smartM365LifecycleRoot){throw 'SmartM365 lifecycle support is missing; update the complete runtime.'}
+. (Join-Path $smartM365LifecycleRoot 'Modules/SmartM365.Core/SmartM365-InventoryLifecycle.ps1')
+$smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -RequireReturn
+try {
 if ($PSBoundParameters.ContainsKey('MaxItems') -and $MaxItems -gt 0) {
     $global:SmartM365MaxItems = [int]$MaxItems
     $global:SmartM365TestMaxItems = [int]$MaxItems
@@ -54,7 +65,7 @@ if ($PSBoundParameters.ContainsKey('MaxItems') -and $MaxItems -gt 0) {
 }
 
 $ErrorActionPreference = 'Stop'
-$ScriptVersion = '1.0.3'
+$ScriptVersion = '1.0.4'
 $TaskName = "SmartM365-CopilotUsage-Inventory v$ScriptVersion"
 $runId = Get-Date -Format 'yyyyMMdd_HHmmss'
 $rawReportPath = $null
@@ -416,7 +427,7 @@ function Test-CopilotEmptyCsvSchema {
     }
     finally {
         if (Test-Path -LiteralPath $validationPath) {
-            Remove-Item -LiteralPath $validationPath -Force -ErrorAction SilentlyContinue
+            try { Remove-Item -LiteralPath $validationPath -Force -ErrorAction Stop } catch { Write-Warning "Validation CSV cleanup failed: $($_.Exception.Message)" }
         }
     }
 }
@@ -443,7 +454,7 @@ $logPath = Join-Path -Path $logFolder -ChildPath ("{0}_{1}.log" -f $logFileBaseN
 $rawReportPath = Join-Path -Path $runOutputRoot -ChildPath ("M365_Copilot_UserUsage_Source_{0}.csv" -f $runId)
 
 $modulePath = Join-Path -Path ([string](Get-SmartM365ConfigValue -Name 'SmartM365RootPath' -DefaultValue (Split-Path -Path $PSScriptRoot -Parent))) -ChildPath 'Modules\SmartM365.Core\SmartM365.Core.psd1'
-Import-Module -Name $modulePath -MinimumVersion '1.0.72' -Force -ErrorAction Stop
+Import-Module -Name $modulePath -MinimumVersion '1.0.87' -Force -ErrorAction Stop
 
 $global:RetentionMaxCSV = [int](Get-SmartM365ConfigValue -Name 'RetentionMaxCSV' -DefaultValue 30)
 $global:RetentionMaxLogs = [int](Get-SmartM365ConfigValue -Name 'RetentionMaxLogs' -DefaultValue 30)
@@ -487,7 +498,7 @@ function Stop-SmartM365CopilotUsageTranscript {
     param()
 
     try {
-        Stop-Transcript | Out-Null
+        Stop-SmartM365RunTranscript | Out-Null
         if ($global:logTranscriptFile -and (Get-Command Update-SmartM365TimestampedTranscript -ErrorAction SilentlyContinue)) {
             Update-SmartM365TimestampedTranscript -Path $global:logTranscriptFile
         }
@@ -506,7 +517,7 @@ try {
     }
 
     Start-SmartM365SourceReceipt -ScriptPath $PSCommandPath -SourceRootPath $LatestCsvFolderPath -ReadOnly:$ValidateOnly -ScopeParameters @{Period=$Period;ReportVersion=$ReportVersion}
-    Start-Transcript -Path $global:logTranscriptFile -Append | Out-Null
+    Start-SmartM365RunTranscript -Path $global:logTranscriptFile -Append | Out-Null
     WriteLog ("Starting {0}. Tenant={1}; Period={2}; RequestedReportVersion={3}; RunId={4}" -f $TaskName, $Tenant, $Period, $ReportVersion, $runId) 'INFO'
 
     $initialReportVersion = Resolve-CopilotInitialReportVersion
@@ -524,7 +535,7 @@ try {
         WriteLog ("Validation completed. {0}" -f $validationSummary) 'SUCCESS'
         Stop-SmartM365CopilotUsageTranscript
         Complete-SmartM365ExecutionContext -Status Auto
-        return
+        $smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; return
     }
 
     if ($Connect -or $null -eq (Get-MgContext -ErrorAction SilentlyContinue)) {
@@ -588,8 +599,13 @@ try {
 
     Stop-SmartM365CopilotUsageTranscript
     Complete-SmartM365ExecutionContext -Status Auto
+
+    $smartM365RunGuard.ReachedTerminal=$true
 }
 catch {
+    if ($_.Exception -is [Management.Automation.PipelineStoppedException] -or $_.Exception -is [OperationCanceledException]) { throw }
+    $smartM365RunGuard.ErrorRecord=$_
+
     $message = $_.Exception.Message
     WriteLog ("Microsoft 365 Copilot usage inventory failed: {0}" -f $message) 'ERROR'
     try {
@@ -615,19 +631,32 @@ catch {
     throw
 }
 finally {
+    $smartM365RunGuard.InCleanup=$true
+
     if ($rawReportPath -and (Test-Path -LiteralPath $rawReportPath)) {
-        Remove-Item -LiteralPath $rawReportPath -Force -ErrorAction SilentlyContinue
+        try { Remove-Item -LiteralPath $rawReportPath -Force -ErrorAction Stop } catch { Write-Warning "Raw report cleanup failed: $($_.Exception.Message)" }
     }
     try { Remove-SmartM365TimestampedFilesOlderThan -FolderPath $OutputPath -FilePattern '*.csv' -RetentionDays 7 -RequireCurrentRunPublication -LogFile $global:LogTextFile } catch {}
     try { RemoveOldFiles -Path $logFolder -Filter '*.log' -KeepCount $global:RetentionMaxLogs -LogFile $global:LogTextFile } catch {}
     try { Stop-SmartM365CopilotUsageTranscript } catch {}
 }
+    $smartM365RunGuard.ReachedTerminal=$true
+    $smartM365RunGuard.ReturnedNormally=$true
+} catch {
+    if ($_.Exception -isnot [Management.Automation.PipelineStoppedException] -and $_.Exception -isnot [OperationCanceledException]) { $smartM365RunGuard.ErrorRecord=$_ }
+    throw
+} finally {
+    Complete-SmartM365InventoryRun -State $smartM365RunGuard
+    if($smartM365RunGuard.ExitCode -eq 130){exit 130}
+}
+if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
+
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCJIhNY0Yy1CBTm
-# 0NPitmpRg6IiGBIwZP8g1xxFzYFaiaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAMA2sZX9PqIGto
+# J3YQXsGW0J0JO95PP13Bk/0JFW54NaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -760,31 +789,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIMHYqC/Oby4xbzpRRZ4whp6NfphoS7E+7W7Dy3TqCrhfMA0GCSqG
-# SIb3DQEBAQUABIIBgAAJGIfSZdVQ91YD1dm4Ijx02PSvpv0pD7EHisIJ8n0JLD+A
-# +0618T5YTTbU1rIY+qOujH8gC21WFv4KNTrNF9A6VJiEE+z1ejmX+Y2HKKFt8Lwx
-# yREYMMSw2th8ew6n//5PMtYF3Unz53rRn5vrWjaFE6boLZ2BtxSdz3ZaZxAsur11
-# BqZbUeUAwNHj19pey+ZVr15XROcwssWl6yvOR1RXqaKahP3ZHMjfqUsMVIGMOixt
-# m9DNMUwT1zWFUN/9BoSmy59Ztc4/uuh+DGt0G89xA+MtGyzSFItoyYf8d+JmC5zX
-# OqmARgFdvdxg+oi0RohDBmrEIbOEB53AML5FuJngXS2zcAnG/C+lLAz5aRVciS2s
-# 18tTu2SXbsHsaQ+HP/GosLaqag1pddwLf1L/RmDHGlPOjueV4BVASy+vCb9XCqeY
-# kKXtr9LOqlZ63oaNQmE+CBmu1iHpRbGLG9+s2l7Re5+6jGZVbWeWrj90sMzqegog
-# BGFiY8Cja9vKy+9EGKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIB3+GSF2qZb3LvApjEShG3E2yU7j5tkeVlfB3DH7s5/nMA0GCSqG
+# SIb3DQEBAQUABIIBgHQE6lTZki+41B5EfPZRO69seKRje3QuLGiJ28YG+coWEpLA
+# XC7HD3YlkDslFed9NppIwEeqpFMUu6PgluqCwqBXL+CD9WdeF9hdDvxyor2OpNN9
+# X74WZl8qu9kwO9JiFtdN5f9CE6zh2Edhm9RZlnNkFpyqPWMdjFvUfjSCpjtcTMLE
+# v/dZlsH9vzuZXYa6dYO7vnjOFoof7qcrbfMQLkzMsKkror5ol1XWVzK6k9yUAtYj
+# 2cmXmPkn5UbmNTWSt2Hwy3WwHkmhzaHSBcUB5SLcPpm6t6PC1pbTC0nwYt4ZqNgB
+# Vl/Z5Ih3N1SgD3aVg4xp0h/AFgDGvNp/cDGbI2yDFZi7kSwduuVcJybQD906vT14
+# K/SCHDLrKsmM97gjED+uJTAGY8gU/ZZjC0cIDTmX7zAOZd03+qGyrKxnd/tWHqSm
+# BJKWQHTjVJuJXYkR5NOygQjIfZ+N9YebcAb/dGlplc4vYYkiqep1yYfdgQa+g57a
+# 1ZpuiOn/2lDt2kcRs6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDUxOTAx
-# NTVaMC8GCSqGSIb3DQEJBDEiBCBkclNUAYOusC+WFRssETT1J2OsG91FKqDOCrPH
-# hoMfOTANBgkqhkiG9w0BAQEFAASCAgB4na3SL/fvi7cwA/cwOUf2Fk4d5KoqP4rg
-# 4Oa6xc4baqIxmwOPchKF/8LOAhXYF9yBb8MydNUeQYFPm9a4AXOMSBvHvgo8UpS1
-# ODVLmx01Ds7ARb935qAgG3xBJoseo1B0vFaYi1JXDOe7/42YxoRkMr86VeZFMfg4
-# xO6/tnYqKtJ25uXdMZN9DDcCgtjEgILCNTJYpJs13aCAPWvwSq1tgxZ8Cq3qmdKQ
-# fFbJIy7WD2qFgO8/d4TUtLrqQIXjbwDlHUQRntFqGmZzXKdn6kgWH5HKN19QHizN
-# oOBqtWRsiwc+mcm9VZFgfRf2HTlPPFCsvcyvzhH5eIBBCVLwNDPOq1ExVotAvFzY
-# iVv0dluizUxNGOIu394rXOa7TlAjuLEgCTQye34IGSbVjU5q62noxoJ2CI8UMgj/
-# 5uKqonMRTt1fTw8yPFkOczbMjAJULbUfJwP0N6SDZb4IsAaVDyzJS9jWZdlhCixU
-# 6A0836j1ibHJcKxjyXVAKPdAIee7EOLM7i0Mgn/3CGRxtolQa89/6uhmauW1tRv4
-# nUiLIJh+IGqfryDOG0I2SUdD2b/DNlfjogK7irfg5LHr72OgH3gpWSwPGucmNEpv
-# 5y+gIgylaEWQZgR70cecHFVpQnBvrxYxfFxSZpyC9AlLL5ZT3Wpr4utolHS5XVUi
-# l9EQuvSrlA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTQxNTMw
+# MzVaMC8GCSqGSIb3DQEJBDEiBCCb7JKN/J0/BWHHVIywwbHfcWEH7iouO9MAU5rL
+# iycV2DANBgkqhkiG9w0BAQEFAASCAgAkpzwT4ib4Nrhi1fQHVfAR3ak7tUpSlojp
+# zCfcP506+7YpjXfWRlyiZ+mLGjoGYjbbUeWVYEtuLgjhhQElhrbttJ1KjYjLRZUq
+# p6E29+Svrb29RcpaxTNlGsxSrSB8Z20fAchXIbOzv+zeudyBH6jiYVdzgKhmqIUQ
+# qIZZCI3dE3thZQXZDxYtpyHMgPycZ5EIdGMHV1s+c+S2TxoB4wIThxV5scDoFRzG
+# abqYLfW9BIMDDUh66c6u7rP3fYkQV2HMuVi7JIxNfegOIRo3JbQdU0MKZO8Id3CB
+# 50sQXpuAdwGVOZCccFPpB9jj5zYbSrruZHFLJ/UqKgomFj2pMPVnYIBbDmMEGuBh
+# AUeqVQhg4iJMJxq2wzlB3uuwjfwNdic0VvhjjuBvC3dBlIsUE/eHA0h0PeSp27Vo
+# Wu3w0yguAQR3y+o0V4B7mjzsNWlZpO7Tj+Sb8n7PvA/0a9jfnxcQpxxxJFWlydbE
+# rncOW/Da515u89me11pPxlYKIx1wYA0/bI66u0QBU3G2tLMJdBhJenRigLYt5LnE
+# qiAsQFClYokRhy71yCZKxV/rJjxPeXIUivAI8D9im7SDYkfW6JG79tjackui4Zsi
+# FNd+AODAce/KqzNG8EmPYcOp/lVeM0wO9OBVyZsRxjaWDlwZcH54fjlFEO1xUibB
+# bpOslFYtYQ==
 # SIG # End signature block

@@ -21,7 +21,7 @@
     Bounds the Exchange MAPI connectivity preflight for each mailbox database. Set to 0 to disable it.
 
 .VERSION
-1.9
+1.10
 .REQUIREMENTS
     Windows PowerShell 5.1 on an Exchange 2016 management host.
     Modules/snap-ins: SmartM365 WindowsPowerShell5 compatibility module; Exchange Management snap-in.
@@ -29,7 +29,7 @@
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled; Mail.Send is required only when Graph mail is enabled.
 
 .NOTES
-    Version : 1.7
+    Version : 1.10
     Author: https://github.com/khda79/workplacecloudhub.com
     Environment : Exchange 2016 On-Premises
 #>
@@ -44,6 +44,17 @@ param(
     [string]$OutputPath,
     [int]$MaxItems = 0
 )
+# Local lifecycle only; no collection or publication is performed by this guard.
+$smartM365LifecycleRoot=$PSScriptRoot
+while ($smartM365LifecycleRoot -and -not (Test-Path -LiteralPath (Join-Path $smartM365LifecycleRoot 'Modules/SmartM365.Core/SmartM365-InventoryLifecycle.ps1') -PathType Leaf)) {
+    $smartM365LifecycleParent=Split-Path $smartM365LifecycleRoot -Parent
+    if($smartM365LifecycleParent -eq $smartM365LifecycleRoot){break}
+    $smartM365LifecycleRoot=$smartM365LifecycleParent
+}
+if(-not $smartM365LifecycleRoot){throw 'SmartM365 lifecycle support is missing; update the complete runtime.'}
+. (Join-Path $smartM365LifecycleRoot 'Modules/SmartM365.Core/SmartM365-InventoryLifecycle.ps1')
+$smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -RequireReturn
+try {
 if ($PSBoundParameters.ContainsKey('MaxItems') -and $MaxItems -gt 0) {
     $global:SmartM365MaxItems = [int]$MaxItems
     $global:SmartM365TestMaxItems = [int]$MaxItems
@@ -78,7 +89,7 @@ Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot | Out
 if ($PSVersionTable.PSEdition -ne 'Desktop' -or $PSVersionTable.PSVersion.Major -ne 5) {
     Write-Host 'This script requires Windows PowerShell 5.1.' -ForegroundColor Red
     Write-Host "Current PowerShell version: $($PSVersionTable.PSVersion) ($($PSVersionTable.PSEdition))" -ForegroundColor Yellow
-    exit 1
+    $smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; $smartM365RunGuard.ExitCode=(1); exit $smartM365RunGuard.ExitCode
 }
 $MaximumFunctionCount = 32768
 function Get-ScriptLocalConfig {
@@ -252,16 +263,16 @@ function Join-ModulePath {
     throw "SmartM365 WindowsPowerShell5 compatibility module file not found: $FileName"
 }
 
-$ScriptVersion = '1.9'
+$ScriptVersion = '1.10'
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LocalCalendarPermissionsCsvLogFolderPath' -DefaultValue $OutputPath
 $TaskName = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 
 try {
     Write-Host 'Loading module SmartM365-WindowsPowerShell5.psd1...' -ForegroundColor Cyan
-    Import-Module -Name (Join-ModulePath 'SmartM365-WindowsPowerShell5.psd1') -MinimumVersion '1.0.50' -ErrorAction Stop
+    Import-Module -Name (Join-ModulePath 'SmartM365-WindowsPowerShell5.psd1') -MinimumVersion '1.0.57' -ErrorAction Stop
     $InitializeOutputPath = InitializeScriptEnvironment -OutputPath $OutputPath -LogFileName $(($MyInvocation.MyCommand.Name) -replace '\.ps1$','')
     Start-SmartM365SourceReceipt -ScriptPath $PSCommandPath -SourceRootPath (Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue '') -ScopeParameters @{PrimaryOnly=$PrimaryOnly;EmitNoPermRow=$EmitNoPermRow;TopMailboxes=$TopMailboxes}
-    Start-Transcript -Path $global:logTranscriptFile -Append
+    Start-SmartM365RunTranscript -Path $global:logTranscriptFile -Append
     $logTextFile = Join-Path $logPath "$(($MyInvocation.MyCommand.Name) -replace '\.ps1$','')-OnPrem-$(Get-Date -Format 'yyyy-MM-dd_HH-mm-ss').log"
     WriteLog -Message "Script Environment initialized at $InitializeOutputPath"
     $OutputPath = $InitializeOutputPath
@@ -269,7 +280,7 @@ try {
 }
 catch {
     Write-Host "Initialization failed: $_" -ForegroundColor Red
-    exit 1
+    $smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; $smartM365RunGuard.ExitCode=(1); exit $smartM365RunGuard.ExitCode
 }
 Write-Host "Detecting Exchange environment..." -ForegroundColor Cyan
 
@@ -314,10 +325,10 @@ try {
 }
 catch {
     WriteLog -Message ("Unable to initialize Exchange Management Shell: {0}" -f $_.Exception.Message) 'ERROR'
-    Stop-Transcript | Out-Null
+    Stop-SmartM365RunTranscript | Out-Null
     try { if ($global:logTranscriptFile) { Update-SmartM365TimestampedTranscript -Path $global:logTranscriptFile } } catch {}
     Complete-SmartM365ExecutionContext -Status Auto
-    exit 1
+    $smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; $smartM365RunGuard.ExitCode=(1); exit $smartM365RunGuard.ExitCode
 }
 
 Invoke-SmartM365Preflight -ScriptName $TaskName -OutputPaths @($OutputPath) -RequireExchangeOnPrem | Out-Null
@@ -335,10 +346,10 @@ try {
 }
 catch {
     WriteLog -Message "Mailbox enumeration failed : $($_.Exception.Message)" 'ERROR'
-    Stop-Transcript | Out-Null
+    Stop-SmartM365RunTranscript | Out-Null
     try { if ($global:logTranscriptFile) { Update-SmartM365TimestampedTranscript -Path $global:logTranscriptFile } } catch {}
     Complete-SmartM365ExecutionContext -Status Auto
-    exit 1
+    $smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; $smartM365RunGuard.ExitCode=(1); exit $smartM365RunGuard.ExitCode
 }
 
 $total = $mailboxes.Count
@@ -350,10 +361,10 @@ if ($TopMailboxes -gt 0 -and $total -gt $TopMailboxes) {
 }
 if ($total -eq 0) {
     WriteLog -Message 'No mailboxes found. Stopping.'
-    Stop-Transcript | Out-Null
+    Stop-SmartM365RunTranscript | Out-Null
     try { if ($global:logTranscriptFile) { Update-SmartM365TimestampedTranscript -Path $global:logTranscriptFile } } catch {}
     Complete-SmartM365ExecutionContext -Status Auto
-    exit 0
+    $smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; $smartM365RunGuard.ExitCode=(0); exit $smartM365RunGuard.ExitCode
 }
 
 function Get-SmartM365CalendarFailureCategory {
@@ -887,16 +898,27 @@ Write-Host "- Log              : $global:logTextFile"
 Remove-SmartM365TimestampedFilesOlderThan -FolderPath $OutputPath -FilePattern '*.csv' -RetentionDays 7 -LogFile $global:logTextFile
 RemoveOldFiles -Path $logPath -Filter "*.log" -KeepCount $global:RetentionMaxLogs -LogFile $global:logTextFile
 WriteLog -Message "$TaskName completed."
-Stop-Transcript | Out-Null
+Stop-SmartM365RunTranscript | Out-Null
 try { if ($global:logTranscriptFile) { Update-SmartM365TimestampedTranscript -Path $global:logTranscriptFile } } catch {}
 $finalStatus = if ($errors.Count -gt 0) { 'CompletedWithWarnings' } else { 'Auto' }
 Complete-SmartM365ExecutionContext -Status $finalStatus
+    $smartM365RunGuard.ReachedTerminal=$true
+    $smartM365RunGuard.ReturnedNormally=$true
+} catch {
+    if ($_.Exception -isnot [Management.Automation.PipelineStoppedException] -and $_.Exception -isnot [OperationCanceledException]) { $smartM365RunGuard.ErrorRecord=$_ }
+    throw
+} finally {
+    Complete-SmartM365InventoryRun -State $smartM365RunGuard
+    if($smartM365RunGuard.ExitCode -eq 130){exit 130}
+}
+if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
+
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAaYkvBuSCd+ibh
-# 3b+S69uJzXCuM0ZVXJoS1POVKp/mwKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD2EdtnNQ/hrSvh
+# v4n92viftQwVfShKw9z20dSffQyDMKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1029,31 +1051,31 @@ Complete-SmartM365ExecutionContext -Status $finalStatus
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIIyQuG5/sBDMfp5Uerj8w1pSo5eTjfcuarnMXMUelvnJMA0GCSqG
-# SIb3DQEBAQUABIIBgEdqi9ClMUuJuWJzsn15Rj1zVPGxLnzNtx6GT4TFkt+HL3na
-# SF91Ycl8Qlrv0ZyMpcKycfHR5ou1XbNmOcFPDQUIjGzRKOC9M1L1nz4i0p6xu/sX
-# 978GFuMEcwcDJk7u4Yi6vC5BTWtu+oEbQjYUVieVq92g3xswyZkTVIu6dtI0C1Ih
-# xJvaxEgKLTtpJfK3Jbzl528KMHLxyf6Ld4QRpmgWnr2oum273LCE6RJjySzNyHKo
-# hHH54tvBQZhSmLioTX+Ri9iAQYiAMPsdmWG2ocopLsVg+AVbOTqGbNJSPclj943K
-# GK6kgBq5N1QQGj/iIbA40dv+ivOHiv/HyxqzAT4PyZTR3jPQ622lxjL/gsMjpQlv
-# HUEzghUVaQpw6D2wgHpn2/JcGEDZ1Qz9UYoWCdJ1O1k3mJcKIoKLBsdaKCpMDTdD
-# paIFsgdRqBBVx1moHduDc+JgFMKA7wYu5XyNtrUZ/4hkPt3wHTtVFbWCXibiXOWC
-# YDlzb3hsbU6D+biR/6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIJweTmynIT8Mtlqub6bsP4PmVGet7s5xvAGVg8/S/z55MA0GCSqG
+# SIb3DQEBAQUABIIBgDNBE5VqNmFOqahbpRafCL6FJyCNSIRHoEIiyPAxRb42iNSR
+# 8pg9i+Vw4kGErq4GZPRUjAvdon9dQvIJXa1Zo7XmB8S9D5xhw9IY2lL+rApTJwFZ
+# 0awyW8tk4T6ZwcniHgHO0p/OknJg6RT0KAIP+maUVJG+ZZV2LB+Vo7PYsC5PMLi6
+# cMqycippZWvHEJTuwIqs5Zmg2BYbt7aU33cQZ1yTJQcMwg3WKv3EJ2pEAMG7sKdL
+# R8HEx/qQjaVaM9fMkHVLv7jgjlnSLY0kDzv4TJdVW+LgGeZ82kwcZ2BN+gz/KGHb
+# YOTN8LXbdthP0r1Fdc+C7qBQzNvv5B8cgm2Eq5JLQ+oJOsOj9IEICnuZkurIETku
+# GwJc4AF/7mkDZrB0k2aXgEUuy2gUwkpTjZSIKxqYMiBXYZx00lUpyZhNAqF744n/
+# svWhjNUU9uIqxQDasa+O2YL3va3xmmhzX9vxweUIal8ZPSoo6p50Sljsl4ayyTrV
+# 2M09xgEso2yUub8076GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDUxOTAx
-# NDRaMC8GCSqGSIb3DQEJBDEiBCAdc8HbkyQgIEn+Dzt9Usb9mL0BB/HdvCcGigp7
-# KoyuHzANBgkqhkiG9w0BAQEFAASCAgCn5EwT+a3BIMNQ60H3SIFOmmHnAOQYQFOV
-# yOagc4V2KLbFZvtJYY+caavMYpScH6uRJw1RWuqp3cCkquRfKocu2MxsrM2iJDXW
-# tE6k64Q1LpfMmz7LeKbPPRXGLibCvZ3X3s+IWWdqnZoSfHHRhyY/cOj4Tpg9WFYT
-# SvUlItkJgROnGdFTkA7znoy94LLW5T3D3eAmcnHaSzWmrO9D+bSGsnjBMqK+ovGZ
-# lb+xoQL5+fwaPRBmnTFrdtwmN26H/UTeRk7neWZSqXsg3xZefQVlIjIbYA/lVHZ3
-# ScfLD/ACd1MufrMWinvm7Rm8pgotk6naPccZcY7BTUqc3gmZ7TvNBHai+rm4la4j
-# PX9YfvHmz+mdpx/JURXx90RTz2EvN8jqmpFVkK1MJfWg57/fny0DZaQcYfb4p54g
-# vaM4kwwNEooxOMZFwzyUCFfeQwwpgOja8iXlRADVmt+5NwEKTo/4X2aVJbJ0cgkF
-# fdb2ECkL+VfmMDjNjO9S86KYlglv9OSvVWMWqiHTW5wxHf4kk4NLfL98Rbawoqx7
-# RVsZy5MUWTCqvexExiLxo5ZIRtgzXsmRUzFQad1O7/ueZeGL208/FIov6pyGoNHw
-# Ly02dQnkVqT60Od4RJBimBDu73XS7frp4B/muyW0ZCnJgdbiD3jeFmQFFNNbPTRA
-# PLKChDhWDw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTQxNTMw
+# MjBaMC8GCSqGSIb3DQEJBDEiBCBK1QveG2IrybtPFxZyg6gTJgH7hrOy4xuh114F
+# oXLWdjANBgkqhkiG9w0BAQEFAASCAgBJf/4GPgWHNyHXGMyhOA0Di9tR8TWTuY3s
+# 034h6zdcOkStv+O1SK9c1PVi8NmiFioyeUjUpXJS682eSm8oyOUVBtQogUfCE5M5
+# ezKDc2sF6sjbjnsSMYw7LFfp1IXvQpCaxePHAW+kRzDcRh1MQ1luNquSiNRcI9Jx
+# waTeHzeCvGd+7IL1xY3YlW5CdZMD+GqLklBwvmIwkqY1224M/sEW2isv/sIns1DC
+# B0KrYYHer5az+H5tm6XGsMHphfSMdO3dLuPjnbPtebzDseYCHRuDKZpO0pgWkQOI
+# ueeUAtpRPIX0UsZQHH/fLVH+PWkdY8Rz5VFVbVvNvPyT8seWXpcwRZ6LOqmrhuWw
+# Pg3kNlnzTC1lHP5MHt27FOAemcGSTYebOBW25AdhSOt9LtAzT+ntt0KxC8ZAqMaC
+# NCDzXQ0vNpJij215E6aHh+Rs8e6TDjdYYT6yb/7tJcqNBwmOV4XKPDaV6/ej5BCq
+# 93RvBUhsy8IcMX/slGaFvGFL2iyxIzuF4PFqoCb7Q9IazZtTxKKD3+yPyf3LR2eJ
+# 3di29yyC8P40OCR/ZCaHfw1R+8g9WH0V3nMX4JksO4h+3yFUwUypgSo/49WNVNTN
+# kfbJ5p0W7nKmwLggHMpvZb6etPSMn5ffv08WAk8kHjaUwt3yPwqLkD7DcVcWjOER
+# ECsHx45dJw==
 # SIG # End signature block

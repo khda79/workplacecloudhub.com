@@ -67,7 +67,7 @@ pwsh -File .\SmartM365-EndpointAnalytics-Inventory.ps1 -Tenant test -Reports All
 pwsh -File .\SmartM365-EndpointAnalytics-Inventory.ps1 -Tenant test -Reports All -IncludeBatteryHealth -ValidateOnly -Connect
 
 .VERSION
-1.1.0
+1.1.1
 .REQUIREMENTS
 PowerShell 7+.
 Modules: SmartM365.Core 1.0.69+; Microsoft.Graph.Authentication.
@@ -106,9 +106,20 @@ param(
     [switch]$SelfTest
 )
 
+# Local lifecycle only; no collection or publication is performed by this guard.
+$smartM365LifecycleRoot=$PSScriptRoot
+while ($smartM365LifecycleRoot -and -not (Test-Path -LiteralPath (Join-Path $smartM365LifecycleRoot 'Modules/SmartM365.Core/SmartM365-InventoryLifecycle.ps1') -PathType Leaf)) {
+    $smartM365LifecycleParent=Split-Path $smartM365LifecycleRoot -Parent
+    if($smartM365LifecycleParent -eq $smartM365LifecycleRoot){break}
+    $smartM365LifecycleRoot=$smartM365LifecycleParent
+}
+if(-not $smartM365LifecycleRoot){throw 'SmartM365 lifecycle support is missing; update the complete runtime.'}
+. (Join-Path $smartM365LifecycleRoot 'Modules/SmartM365.Core/SmartM365-InventoryLifecycle.ps1')
+$smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -RequireReturn
+try {
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-$script:ScriptVersion = '1.1.0'
+$script:ScriptVersion = '1.1.1'
 $script:ScriptName = [System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
 $script:RunId = [guid]::NewGuid().Guid
 $script:CollectedAtUtc = [datetime]::UtcNow.ToString('o')
@@ -147,7 +158,7 @@ function Start-EATranscript {
     if ([string]::IsNullOrWhiteSpace([string]$global:logTranscriptFile)) {
         throw 'Endpoint Analytics transcript path was not initialized.'
     }
-    Start-Transcript -LiteralPath $global:logTranscriptFile -Append -ErrorAction Stop | Out-Null
+    Start-SmartM365RunTranscript -LiteralPath $global:logTranscriptFile -Append -ErrorAction Stop | Out-Null
     $script:TranscriptStarted = $true
 }
 
@@ -155,7 +166,7 @@ function Complete-EATraceArtifacts {
     # Core completion runs first so the closed transcript includes its final banner.
     if ($script:TranscriptStarted) {
         try {
-            Stop-Transcript -ErrorAction Stop | Out-Null
+            Stop-SmartM365RunTranscript -ErrorAction Stop | Out-Null
             $script:TranscriptStarted = $false
         }
         catch { Write-EALog 'Endpoint Analytics transcript could not be closed.' WARNING }
@@ -251,7 +262,7 @@ function Initialize-EARuntime {
     if ((Split-Path -Path $moduleRoot -Leaf) -eq 'Config') { $moduleRoot = Split-Path -Path $moduleRoot -Parent }
     $coreManifest = Join-Path $moduleRoot 'Modules\SmartM365.Core\SmartM365.Core.psd1'
     if (-not (Test-Path -LiteralPath $coreManifest)) { throw "SmartM365.Core manifest was not found: $coreManifest" }
-    Import-Module -Name $coreManifest -MinimumVersion '1.0.69' -Prefix Core -Force -ErrorAction Stop
+    Import-Module -Name $coreManifest -MinimumVersion '1.0.87' -Prefix Core -Force -ErrorAction Stop
     $script:CoreImported = $true
 
     if ([string]::IsNullOrWhiteSpace($OutputPath)) {
@@ -480,7 +491,7 @@ function Import-EAExportedCsv {
         return $rows
     }
     finally {
-        if (Test-Path -LiteralPath $tempRoot) { Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue }
+        if (Test-Path -LiteralPath $tempRoot) { try { Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction Stop } catch { Write-Warning "Endpoint Analytics temporary cleanup failed: $($_.Exception.Message)" } }
     }
 }
 
@@ -913,7 +924,7 @@ function Invoke-EASelfTest {
     Write-EALog 'Self-test passed: completed, failed, throttled, schemas, report-group selection, TenantKey, MAXITEMS, normalization, output-list materialization, permission, and Advanced Analytics guard.' SUCCESS
 }
 
-if ($SelfTest) { Invoke-EASelfTest; return }
+if ($SelfTest) { Invoke-EASelfTest; $smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; return }
 
 $script:CompletionStatus='Success'
 $script:CompletionError=$null
@@ -944,18 +955,18 @@ try {
         $appId=[string](Get-EAConfigValue AppId '')
         $thumbprint=[string](Get-EAConfigValue Thumbprint (Get-EAConfigValue Thumb ''))
         if ($shouldConnectForCollection -or $Connect -or $InteractiveAuth -or $null -eq $existingContext) {
-            try { Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null }
+            try { Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null; Set-SmartM365InventoryConnectionOwnership -Connection Graph -Owned $false }
             catch { Write-EALog "Existing Graph session disconnect failed: $($_.Exception.Message)" DEBUG }
             if ($InteractiveAuth) {
                 $connectParameters=@{Scopes=@($script:RequiredPermission);NoWelcome=$true;ErrorAction='Stop'}
                 if ($tenantId) { $connectParameters.TenantId=$tenantId }
                 Write-EALog 'Connecting to Microsoft Graph with delegated interactive authentication.'
-                Connect-MgGraph @connectParameters | Out-Null
+                Connect-MgGraph @connectParameters | Out-Null; Set-SmartM365InventoryConnectionOwnership -Connection Graph -Owned $true
             }
             else {
                 if (-not $tenantId -or -not $appId -or -not $thumbprint) { throw 'App-only authentication requires TenantId, AppId, and Thumbprint in local SmartM365 configuration.' }
                 Write-EALog 'Connecting to Microsoft Graph with SmartM365 app-only certificate authentication.'
-                Connect-MgGraph -TenantId $tenantId -ClientId $appId -CertificateThumbprint $thumbprint -NoWelcome -ErrorAction Stop | Out-Null
+                Connect-MgGraph -TenantId $tenantId -ClientId $appId -CertificateThumbprint $thumbprint -NoWelcome -ErrorAction Stop | Out-Null; Set-SmartM365InventoryConnectionOwnership -Connection Graph -Owned $true
             }
         }
         $script:FailureStage='Preflight'
@@ -966,7 +977,7 @@ try {
         foreach ($report in $selectedReports) { $script:DataQualityRows.Add((New-EADataQualityRow $report.Name $report.ApiVersion StaticValidated 0 NotCreated)) }
         Write-EALog 'ValidateOnly static validation passed. Add -Connect or -InteractiveAuth to test tenant availability.' SUCCESS
         $script:DataQualityRows | Format-Table ReportName,ApiVersion,Status,ExportJobStatus
-        return
+        $smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; return
     }
 
     $script:FailureStage=if ($ValidateOnly) {'Tenant report availability validation'} else {'Endpoint Analytics collection'}
@@ -997,7 +1008,7 @@ try {
             throw 'Endpoint Analytics availability validation failed because no requested standard report completed successfully.'
         }
         Write-EALog 'ValidateOnly tenant availability validation completed. No CSV was published.' SUCCESS
-        return
+        $smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; return
     }
     if (@($script:DataQualityRows | Where-Object Status -eq AccessDenied).Count -gt 0) {
         throw "Endpoint Analytics collection stopped: required permission or access is missing. Required: $($script:RequiredPermission)."
@@ -1031,8 +1042,13 @@ try {
     $completionLevel = if ($script:ScoreExclusions.Count -gt 0) { 'WARNING' } else { 'SUCCESS' }
     Write-EALog $resultSummary $completionLevel
     Send-CoreSmartM365TeamsNotification -Title "$($script:ScriptName) completed" -Message $resultSummary -Level $completionLevel -Channel Infos -ResultSummary $resultSummary -Facts @{Tenant=$Tenant;OutputPath=$script:OutputPath;RunId=$script:RunId} | Out-Null
+
+    $smartM365RunGuard.ReachedTerminal=$true
 }
 catch {
+    if ($_.Exception -is [Management.Automation.PipelineStoppedException] -or $_.Exception -is [OperationCanceledException]) { throw }
+    $smartM365RunGuard.ErrorRecord=$_
+
     $script:CompletionStatus='Failed'; $script:CompletionError=$_
     Write-EALog $_.Exception.Message ERROR
     if ($script:CoreImported) {
@@ -1042,7 +1058,9 @@ catch {
     throw
 }
 finally {
-    try { Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null }
+    $smartM365RunGuard.InCleanup=$true
+
+    try { Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null; Set-SmartM365InventoryConnectionOwnership -Connection Graph -Owned $false }
     catch { Microsoft.PowerShell.Utility\Write-Debug "Graph disconnect failed: $($_.Exception.Message)" }
     if ($script:CoreImported) {
         try {
@@ -1060,13 +1078,24 @@ finally {
 
 # Success=0, completed with warnings=3, failed=1: the orchestrator's native contract.
 # Never exit inside finally: cleanup must finish and the original failure must survive.
-exit (Get-EAExitCode)
+$smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; $smartM365RunGuard.ExitCode=((Get-EAExitCode)); exit $smartM365RunGuard.ExitCode
+    $smartM365RunGuard.ReachedTerminal=$true
+    $smartM365RunGuard.ReturnedNormally=$true
+} catch {
+    if ($_.Exception -isnot [Management.Automation.PipelineStoppedException] -and $_.Exception -isnot [OperationCanceledException]) { $smartM365RunGuard.ErrorRecord=$_ }
+    throw
+} finally {
+    Complete-SmartM365InventoryRun -State $smartM365RunGuard
+    if($smartM365RunGuard.ExitCode -eq 130){exit 130}
+}
+if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
+
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBeiPNmjWYmlh93
-# 60x89IFZrFyXaue6M/s3VimlIs4kiKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA/2IdGZRcokGPV
+# cQkpnByt3AWTLKOYs6DcT+Pjl2fTq6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1199,31 +1228,31 @@ exit (Get-EAExitCode)
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIIvxD7hlV+Yap1T1F4wjCgv2xAshxNgOeRdawWMrxj64MA0GCSqG
-# SIb3DQEBAQUABIIBgAVXLcrcH1ki8HIL5WBxmN3XAi2OvTPDYs6NrjbDqu+ANhQc
-# SNT3x1flXUvUb6YRx998Mv/lZ2AXSX9sjUZ/sWwIQUv3ACQOvGTfnmOsQorQ3vjm
-# NEwhdGr9Hxd6SkUCaVfvLkA7I8zEv9JrJ/k+yM4taZxCroVr0i49BWC7/B77ySGn
-# KEfgRU2FDFZzi6KgFQ+sAARwznj+0ixHEz+NXIZPlCIc1lqwPH2jZtmhZenVb7Ji
-# mrDOR8UV7vtajbI6M4EoEZNHyzygBnSwuDHp+krlzrYnPNkLsjOxGaZLbSaaWUuH
-# nGbe97s/T9GPWiMt6SyyEvyvLpEn5TrZ6e+dzSwh4Oco50FriWIKxL5ETtACpunE
-# 3HAO9FxNkseHYZ77sVp0y9HxeNJcTZ9M4f4/GfxEfgI33wNUilpL9IawEvOVZ+I3
-# d7DAIwIsinVA/QMjZf7yGUplQyD6tLCSYqiC/74eHGisFg4MVzl4sZMCVK+VgoaL
-# 9vr7CKnFfDC/ql7bjqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIO+x/JE07Zo9tc32xh7S8J8LoCiV7nSwOFlR5L1ovrtsMA0GCSqG
+# SIb3DQEBAQUABIIBgHyw9hnPcALTIiJH01JVHXKHdQwfdQPD1miH8jLL6f+oJTyn
+# sG7Jf6OlLgIVDUFrW1dMWccZB/dnSL1u7zbpDz1uRdAhtrljZyTE7nvhU+Z8lej0
+# 8DkJnZgVMXeROOuVSCvb598FOHeEIG90v8pnSCCmcQOa/h0YHLdZRhjRGrY5ea5h
+# ewqtR0tvIToV830oFZaGDNsSYvXuBKsVBgDM4wmhI8gkOj8kLTzfP+AbVn+Ct41+
+# mEvxdhYA57WYwtTiTEu+ewl1tIPI8BE+DydR4fyq0RKAVJD59Y4AUEl7ann+Z1T1
+# iGAs+hSBsvdtXtzY7qePItFoQTHHIgCeqyHDK7UKmFc632fCN3hwTPGSMnxeWsd6
+# t22jRtXVxyYim+8+JumJEaJDxTH6Flg/jjbpuhPidxvT72T/3cBWiR5Ya8vraI6+
+# SXE/p+LTmJIAvp1OCBt7i1ZP+dG/yVjUHHO6q7dBWbp9sdo8nIs4yLREtcbJWoHU
+# QnMpOHmQWz5gKsjMZaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTAyMjA1
-# MjhaMC8GCSqGSIb3DQEJBDEiBCAqj0AC5krKJWKPuhMhhch70MKcSfm0UJ0A8W2c
-# bFvvJDANBgkqhkiG9w0BAQEFAASCAgBt5kt2QIsyoRW32aKzi5d/6tMEETeOnmnp
-# F9IOuOgKuW9eqRVZxoPr9K1Cb8Tt7oeTdrMp2qSMoJDQtlzRH4pVXidkLXi0/Xw+
-# eTajBogsDQ8rcmkrrIReQ6ybdKnxEdeZmhdlszhxRbS6CDxx7f0sDoKMcI+ChhgR
-# MaxGMtIwA4tBJaZbVlNT073KyVKCo1AFDs4Z0THT72ZwdabGFFHtXm0nAH1YneKa
-# Py136ZA2Ue7b4fMc2Lo8pOHO6rtehTXWoaOqpoNf3SGMIYqKL67QI2zOFGQgMRhi
-# kEcmRT8qiqlfoTDJYgOCtxOu2cdZfVM2cNE+eR8awu3QhZU8DdRDD/l/0362VoME
-# CQMiusNT4muo3EafEDnv6AzVyAFBP+CtNGDUMNn9nMdFbmvDH26uU3lRtxN0g2Jq
-# 5spr2TsLM5la0pK/u9rCH+qfxlf5trxR00o1SiLy0mim0yynAYFnh5pUyKAWjkgG
-# mHpVDEVE78fa/EAnFKrWYBju6Ft8FJl9q09OrRAkIIMAylEhohWPYlNsWJJvB94Z
-# kGIFo1aJ1CWC+Uo3yciPgzLlLfpQTpUJvhJYj+lhrhL58zcE8s6Old0OV+ZTsQoq
-# lvJ44Ly/NuH3lwlWvngXSMWHuwkWWI8CPRtVRTOQArxfwYF1H+eKTWaf5G3NqaCg
-# Z43uXOQaNA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTQxNTMw
+# MjdaMC8GCSqGSIb3DQEJBDEiBCAByEbH2dA68/VGAgUwB9mJVYeA63GpiSKimKAn
+# 5Y2BxDANBgkqhkiG9w0BAQEFAASCAgBBNmZUIcmOQkpt5aevNM6L37REEkgsTumt
+# pny+sTyyhhO58Qgk5+DBFt8yP8JN16p0aMiO19A/iRAZ/S7ooXrYRH038JoTEk17
+# Q1vpL2e+Z7aeKV4g/rq8S2Esg7BLoXjc+lZKJlwnIhSmXHZU+sDNH4hsMXHzLdjK
+# BZ/9kc2JsO9McABgb3FhOM8QzcIjN7KG4+Zkc4115n6Vx4v/wPpnYNKX04wEkAz7
+# 2819+2x0MBXv/J+A+7hzc1XJ8DefbPeM85+p6SdPpZVJ4CyyOZwdMu9pPx2VO6Mc
+# yGdM3DR15cjTTyP+CCDEIF7IbxLfd20VXtX1Q3QytFyxUVzDAH9FD4YlfdAwVHCH
+# 6quONK4BMTN70m5Da0n13xApo6JbPELkntiy7w5IyFHhg5Z63x6ZQCMULFO4Lyf2
+# iAhiptF7GRuyKp7Aa/B8UdYQGF12hlj014UOapkGu+BA6ObCzvAWGXHfdZYpMll3
+# nAlU9nZqP+/YpFAw4U8ah2tZKDzKef59D90w0TNHw7LEPiRraJ06owRknw0VSmd8
+# 5L3UrLRqRyez3PTxVFdbOrVUaK/PqcQNav7nztjuAoC0LxcCzsRB5hID7wl2M0BI
+# QAEojH5qHGysoyByEnDeaiDq5RXeJgBDDzkqc+r0O5iKEjXvm8uD5sAFCoWXmQM9
+# 9MnbM9sN3g==
 # SIG # End signature block

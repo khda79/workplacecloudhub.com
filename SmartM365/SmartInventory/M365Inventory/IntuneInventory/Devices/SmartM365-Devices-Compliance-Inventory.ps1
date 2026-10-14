@@ -45,10 +45,10 @@ Forces a (re)connection to Microsoft Graph (disconnects any existing session fir
 
 .PARAMETER InteractiveAuth
 Uses interactive authentication instead of app-only certificate authentication.
-    Version : 1.24
+    Version : 1.28
 
 .VERSION
-1.27
+1.28
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication.
@@ -56,7 +56,7 @@ Uses interactive authentication instead of app-only certificate authentication.
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
-    Version : 1.24
+    Version : 1.28
 Requires    : PowerShell 7+, SmartM365.Core, Microsoft Graph PowerShell SDK
 Scopes      : DeviceManagementManagedDevices.Read.All, DeviceManagementConfiguration.Read.All, Device.Read.All
     Minimum application permissions: DeviceManagementManagedDevices.Read.All, DeviceManagementConfiguration.Read.All, Device.Read.All
@@ -104,6 +104,17 @@ param(
     [Parameter(Mandatory = $false)]
     [int]$MaxItems = 0
 )
+# Local lifecycle only; no collection or publication is performed by this guard.
+$smartM365LifecycleRoot=$PSScriptRoot
+while ($smartM365LifecycleRoot -and -not (Test-Path -LiteralPath (Join-Path $smartM365LifecycleRoot 'Modules/SmartM365.Core/SmartM365-InventoryLifecycle.ps1') -PathType Leaf)) {
+    $smartM365LifecycleParent=Split-Path $smartM365LifecycleRoot -Parent
+    if($smartM365LifecycleParent -eq $smartM365LifecycleRoot){break}
+    $smartM365LifecycleRoot=$smartM365LifecycleParent
+}
+if(-not $smartM365LifecycleRoot){throw 'SmartM365 lifecycle support is missing; update the complete runtime.'}
+. (Join-Path $smartM365LifecycleRoot 'Modules/SmartM365.Core/SmartM365-InventoryLifecycle.ps1')
+$smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -RequireReturn
+try {
 if ($PSBoundParameters.ContainsKey('MaxItems') -and $MaxItems -gt 0) {
     $global:SmartM365MaxItems = [int]$MaxItems
     $global:SmartM365TestMaxItems = [int]$MaxItems
@@ -143,7 +154,7 @@ Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot | Out
 if ($PSVersionTable.PSVersion.Major -lt 7) {
     Write-Host "This script requires PowerShell 7 or later." -ForegroundColor Red
     Write-Host "Current PowerShell version: $($PSVersionTable.PSVersion)" -ForegroundColor Yellow
-    exit 1
+    $smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; $smartM365RunGuard.ExitCode=(1); exit $smartM365RunGuard.ExitCode
 }
 
 # Avoid PS function-capacity issues
@@ -315,16 +326,16 @@ $LogAllRootPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'L
 # ==========================================================
 $modulePath = & { $d = $PSScriptRoot; while ($d) { $p = Join-Path $d 'Modules\SmartM365.Core\SmartM365.Core.psd1'; if (Test-Path -LiteralPath $p) { return $p }; $parent = Split-Path -Path $d -Parent; if ($parent -eq $d) { break }; $d = $parent }; throw 'SmartM365.Core module not found.' }
 try {
-    Import-Module -Name $modulePath -MinimumVersion '1.0.72' -ErrorAction Stop
+    Import-Module -Name $modulePath -MinimumVersion '1.0.87' -ErrorAction Stop
 } catch {
     Write-Host "Failed to import SmartM365.Core module from '$modulePath' : $_" -ForegroundColor Red
-    exit 1
+    $smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; $smartM365RunGuard.ExitCode=(1); exit $smartM365RunGuard.ExitCode
 }
 
 # ==========================================================
 # Fixed output paths and transcript
 # ==========================================================
-$ScriptVersion = "1.27"
+$ScriptVersion = "1.28"
 $ScriptName = [System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
 $TaskName = "$ScriptName v$ScriptVersion"
 $ts = Get-Date -Format 'yyyyMMdd_HHmmss'
@@ -454,7 +465,7 @@ function Test-PolicyStateCircuitBreakerException {
 
 try {
     $transcriptPath = $global:logTranscriptFile
-    Start-Transcript -Path $transcriptPath -Force | Out-Null
+    Start-SmartM365RunTranscript -Path $transcriptPath -Force | Out-Null
 } catch {
     Write-ComplianceWarning -Message "Failed to start transcript. $_"
 }
@@ -1405,7 +1416,7 @@ function Invoke-CompliancePolicyExport {
     }
     finally {
         if ($parser) { $parser.Dispose() }
-        if (Test-Path -LiteralPath $tempRoot) { Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue }
+        if (Test-Path -LiteralPath $tempRoot) { try { Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction Stop } catch { Write-Warning "Compliance temporary cleanup failed: $($_.Exception.Message)" } }
     }
 }
 
@@ -1872,14 +1883,21 @@ try {
     if ((Test-Path -LiteralPath $tsCsv -PathType Leaf) -or (Test-Path -LiteralPath $policyTsCsv -PathType Leaf)) {
         Remove-SmartM365TimestampedFilesOlderThan -FolderPath $ScriptCsvLogFolderPath -FilePattern '*.csv' -RetentionDays 7 -LogFile $global:LogTextFile
     }
+
+    $smartM365RunGuard.ReachedTerminal=$true
 }
 catch {
+    if ($_.Exception -is [Management.Automation.PipelineStoppedException] -or $_.Exception -is [OperationCanceledException]) { throw }
+    $smartM365RunGuard.ErrorRecord=$_
+
     $script:ComplianceFatalError = $_
     WriteLog -Message "A global error occurred in SmartM365-Devices-Compliance-Inventory.ps1: $($_.Exception.Message)" -Level 'ERROR'
     $global:SmartM365ErrorCount = [Math]::Max(1, [int]$global:SmartM365ErrorCount)
     Write-Error $script:ComplianceFatalError
 }
 finally {
+    $smartM365RunGuard.InCleanup=$true
+
     # Disconnect Graph only if we connected it in this run
     if ($connectedGraphInThisRun) {
         Write-ComplianceInfo -Message 'Disconnecting cloud services.'
@@ -1891,7 +1909,7 @@ finally {
     }
 
     try {
-        Stop-Transcript | Out-Null
+        Stop-SmartM365RunTranscript | Out-Null
         try {
             if ($transcriptPath) {
                 Update-SmartM365TimestampedTranscript -Path $transcriptPath
@@ -1908,12 +1926,23 @@ finally {
         }
     } catch { }
 }
+    $smartM365RunGuard.ReachedTerminal=$true
+    $smartM365RunGuard.ReturnedNormally=$true
+} catch {
+    if ($_.Exception -isnot [Management.Automation.PipelineStoppedException] -and $_.Exception -isnot [OperationCanceledException]) { $smartM365RunGuard.ErrorRecord=$_ }
+    throw
+} finally {
+    Complete-SmartM365InventoryRun -State $smartM365RunGuard
+    if($smartM365RunGuard.ExitCode -eq 130){exit 130}
+}
+if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
+
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBQwRREEOPi3O2H
-# 03Mw4UG4OUMkhZCU5+Nuv2MgaTjnZqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAzb3jeA/qqi6A8
+# xt9wzOPvefUvB5dmIbzm2qSXMYAuDKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -2046,31 +2075,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIGwPrtQCob9cTYQI4fclgvxy86wNGt1Ri8sDD9JpceKfMA0GCSqG
-# SIb3DQEBAQUABIIBgEKEBzsEZ26I3NSPOQ2io07FvaRUIPBTfCknPkefo7kBkd7a
-# ikXLuZrexXHJr1mPTqDxWudA++8nMg/vW5JKqKVSacfNrh4tf/jXktGPc3cUOFfK
-# 9KL6DSfOth5CcZKNk2XdjdpxT8u8OMl80oFqETu1vtg9RuorooSgQpW4WZT+d77n
-# xFjtpEZ0kB0rn1PRGWGEgO2BgoeWnPzeXIZnJzJA/nsjrswuDPOa6gLiHnz/ZlwQ
-# s48Cg9OlPSB3qIa/jmEwJcHcdhUXvFBBwX6a8LDNxncEBpKAV2Q2cpSqQpsDlU3W
-# uW9bIhLBlaT9/jcNT+pgXSHb/gA5Wy1DaHbmXUuPvITT4CFAQgbzqfpWUED2p/mW
-# 3ScI5W8eG1b/BPsxwP9R9PB5y+t1yEZV1PwEunTsuitQS0lJM7x5z43kky17ClZj
-# hJipLQmHMKCE5AIJ+Guxh4SUBaoLnjeFqQd3ojsa2XezxRukmpTP5B2SFTtVcdBo
-# DWluibH9jRIGkX7m9qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIMNiZXimbKnE51f17DmlrN3sqMljpRgFn9BCosR4KybPMA0GCSqG
+# SIb3DQEBAQUABIIBgFtNnIC2R1fDhJE4h/iinRqJQaFRL/i5s/ZIBv2TXwod5cbG
+# daBThEOAu/bC6ygSVL+wj639WGW/Vrz15wK1XwmgGE78niPAFwCb3r7XZygEezQ4
+# irhQn+aDEnTSEDaq6UtBh/19Jk7h8g3XEdpKI5ENYMDu/dkQKSVj2jvXMxVHCzDb
+# Aavs9eW+paEQvGTrxdDczAURXHzZZML8m6qERX3gGWw/2imbg5q536OfPu0V8ImH
+# 3Ynlm3Txa1EYbSYg2dOr4mTBjj7YPY45O5FszWO/9qiEKtt5/VOyS08z+SNVRsxt
+# 1pteKd4WqEaGFWSZJg/TYzegvxJo4T2UMvtNK/s213gquMiMx0UPziWcmhA6JEg4
+# 9JEc/4veNNgDFTvyAk3XGG0kjOuibnZYSjiH4h5qzkkfDGvDtJdbohwYyhLIOrPo
+# Pk3M+sNHcprg9RRVJOhtYF4ygTJ/t8qz7eUF2dywfmaUFzVgkpdaoZynD4wIAVn5
+# CzGp54LQ0zF0S8kIrqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDUxOTAx
-# NDhaMC8GCSqGSIb3DQEJBDEiBCBh/gKFecx/WhnzWA4QgSUAzCVSnhD584JY3N23
-# OXEWqDANBgkqhkiG9w0BAQEFAASCAgBKbRnV2EFMtKP2FkoQ48XZFxwZQcWXj6Mf
-# NTS8SRHC+X90MiZkP3GANS3XPuemvSjvHYFHJb2wHDrWuUKL0JuOYt+eDc3ENuYI
-# r5yRIGlQvgYEGZEJ2xDGluKBkZ/nJYWblmQw9j1cbAsmkhIPcSh1mPmh4Zo6XSi7
-# uOK+D9owK2X6O+9XB6ccotuFfwwhQdOBQvXfKOCnckEOEAFJaQrXJTS2oqjl7mjZ
-# awtOb6h8u5OKx1eZMqVI2plup0Fnnsq+8LlnPx7VUpWqotdqD9aJn5jzsuGux5X1
-# /vCd58LUhTSMEQYBTNDodzjuOYnO1oeMX55iktz9FiOw2O2/SvNk1ggcUX/VtS18
-# 7D4qlSOTr3GvDnP/nh8kOTBuBV52T9izQjSzHJnrkEFPpE3JpqMhBY70wQFz2U1Z
-# V+7SZD31vc6AlHmqBrif7i8B/QwDkTbwVqxnsK5LV/2JfW9sYjmaabItsPXTNdkv
-# TZm7JijLVli4MWniMOEaB679375QCz8elToW0NUJXPuvHogyBs8dC8OQpHdlOKRY
-# TZtpn74AhHFJHk2+1j5TET1CnZJiIDaGqz1K3h+Uqv9zXrEB9Dj2bZi+8dl5zgry
-# E4JEMDa+AJR9h/UJFkOn83w967B8J0LwHt0xdqOlM57ZyPvsMFHTCprK92pc/dF8
-# oUgnrMTrvw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTQxNTMw
+# MjZaMC8GCSqGSIb3DQEJBDEiBCCkR9InWzUaMH6FlOf2bJysbmeqbHhIgqS6+ibL
+# C4mkEzANBgkqhkiG9w0BAQEFAASCAgCn89cjsAaxumAsd6IPtfrExKe5OaYNRuWf
+# ReLXWDyqunZeJU70Vadi/x/o2CFUZ6jBX8LotIfmIbX2W3rOAb+hHFSycjdEQZqG
+# RMeFT7kRqdPVHfRAAsOHpaI+WM366i4zRpDRX5jujimlZhdUlTYwMOgbyg/zO4N0
+# VmcCWTsvHIpZrjv/CWpxGTNE5sH0S8CvkSap8hrG+q5tPXBFdKj5i0yYabt+NGpX
+# GELXPdAaX8snDZ8XW9A4XBKwfS+He4HS++6NjUNtboLf/WecVebdqdwk2PzC2kYw
+# sXHA0VMB+wEdJu/tn+1vaVgybnK4A9vR6dSQVlEEh3Mf8ciyDyKayAzYwCMmbpqP
+# oBtnUXO9NK02d6py1Lm+EAoKm2PIs6d4CEzwbivIvu4B/kytQGheDc2V5L+qUFhr
+# 6e1Oex7KKQq4k4mvYtwVcjDB28SSbMNkFITR8sJE0mJ+thO7boSAFRDTSiiH89Kq
+# bbSegKthl6CAVGDHBffgu/gLXGHQtI9uv9B7bzPWh+p7hYkPwAQp4ymNp6m9mfsf
+# uNeWVJG7tcdfNIWLzmqcEPl4eo0rCXd8oY2hCHq6x+upxy44yYkFJJiPFZl7C8l6
+# kT19CCfWNh2tsCqJMJGS2jckHk5ReDfdRFvN8I3cwqYOqc/TPHHGdn3jBL0ufu/Q
+# VFfYZOEz0w==
 # SIG # End signature block

@@ -11,6 +11,17 @@
 param([string]$Tenant='test', [switch]$ValidateOnly, [switch]$Offline, [switch]$WorkforceDiagnostic,
     [switch]$RepairLegacyHistory, [string]$RepairWeeks, [int]$ExpectedRepairFileCount=0, [switch]$ApplyRepair,
     [switch]$ConvertMetadata, [switch]$ApplyMetadataConversion, [switch]$TransferOnly, [string]$ExpectedBatchId)
+# Local lifecycle only; no collection or publication is performed by this guard.
+$smartM365LifecycleRoot=$PSScriptRoot
+while ($smartM365LifecycleRoot -and -not (Test-Path -LiteralPath (Join-Path $smartM365LifecycleRoot 'Modules/SmartM365.Core/SmartM365-InventoryLifecycle.ps1') -PathType Leaf)) {
+    $smartM365LifecycleParent=Split-Path $smartM365LifecycleRoot -Parent
+    if($smartM365LifecycleParent -eq $smartM365LifecycleRoot){break}
+    $smartM365LifecycleRoot=$smartM365LifecycleParent
+}
+if(-not $smartM365LifecycleRoot){throw 'SmartM365 lifecycle support is missing; update the complete runtime.'}
+. (Join-Path $smartM365LifecycleRoot 'Modules/SmartM365.Core/SmartM365-InventoryLifecycle.ps1')
+$smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -RequireReturn
+try {
 $ErrorActionPreference='Stop'
 if ($RepairLegacyHistory -or $ConvertMetadata) { $Offline=$true }
 $tenantContext = Join-Path (Split-Path (Split-Path $PSScriptRoot -Parent) -Parent) 'Config/SmartM365-TenantContext.ps1'
@@ -84,7 +95,7 @@ try {
     Import-Module (Join-Path $smartRoot 'SmartInventory/Common/SmartM365.AccountClassification.psd1') -MinimumVersion '1.0.0' -ErrorAction Stop
     $accountClassificationPath = Resolve-SmartM365AccountClassificationPath -Path (Join-Path $smartRoot 'SmartInventory/Config/AccountClassification.local.json')
     if (-not (Test-Path -LiteralPath $pipeline)) { throw 'Deploy SmartWorkplaceIntelligence scripts/config beside SmartM365, or configure WorkplaceIntelligenceRootPath.' }
-    Import-Module (Join-Path $smartRoot 'Modules/SmartM365.Core/SmartM365.Core.psd1') -MinimumVersion '1.0.86' -ErrorAction Stop
+    Import-Module (Join-Path $smartRoot 'Modules/SmartM365.Core/SmartM365.Core.psd1') -MinimumVersion '1.0.87' -ErrorAction Stop
     $coreLoaded=$true
     # Refuse a stale sibling product before downloading mappings or preparing a batch.
     if (-not ($TransferOnly -or $ConvertMetadata -or $RepairLegacyHistory -or $WorkforceDiagnostic)) {
@@ -113,7 +124,7 @@ try {
     if ([string]::IsNullOrWhiteSpace($work)) { $work=Join-Path ([IO.Path]::GetTempPath()) "SmartWorkplaceIntelligence/$($effective.ProfileKey)" }
     if ($WorkforceDiagnostic) { $output=Join-Path $work 'workforce-diagnostics' }
     InitializeScriptEnvironment -OutputPath $output -LogFileName $scriptName -CallerScriptPath $PSCommandPath | Out-Null
-    Start-Transcript -Path $global:logTranscriptFile -Append | Out-Null
+    Start-SmartM365RunTranscript -Path $global:logTranscriptFile -Append | Out-Null
     $transcriptStarted = $true
     if (-not ($TransferOnly -or $ConvertMetadata -or $RepairLegacyHistory -or $ValidateOnly)) {
         $phase = 'ImportExcel startup health'
@@ -127,7 +138,7 @@ try {
         $conversion=Convert-PreparedMetadataNames -OutputRoot $output -TenantKey $effective.TenantKey -Apply:$ApplyMetadataConversion
         WriteLog -Message "Metadata conversion: applied=$($conversion.Applied); batches=$($conversion.Batches); checked CSVs=$($conversion.CheckedCsvFiles); metadata files=$($conversion.MetadataFiles); current batch=$($conversion.BatchId). No CSV recalculation or SharePoint transfer." -Level INFO
         $conversion | ConvertTo-Json -Depth 5 | Write-Host
-        return
+        $smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; return
     }
     if (-not $ValidateOnly -and -not $RepairLegacyHistory -and -not $WorkforceDiagnostic) {
         Import-Module (Join-Path $product 'scripts/PreparedMetadata.psm1') -Force
@@ -168,14 +179,14 @@ try {
         $phase='SharePoint existing-batch transfer'
         $transfer=Send-PreparedEvidenceBatch @transferParameters -ExpectedBatchId $ExpectedBatchId
         WriteLog -Message "Transfer complete: batch=$($transfer.BatchId); CSVs=$($transfer.CsvFiles); verified files=$($transfer.VerifiedFiles); pointer verified=$($transfer.PointerVerified); audit=$($transfer.AuditPath). No collection, mapping download or CSV generation." -Level INFO
-        return
+        $smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; return
     }
     if ($RepairLegacyHistory) {
         $phase='Repair historical TenantKey columns'
         Import-Module (Join-Path $product 'scripts/Repair-PreparedHistoryTenantKeys.psm1') -Force
         $repair = Invoke-PreparedHistoryTenantRepair -DataRoot $data -TenantKey $effective.TenantKey -Weeks @($RepairWeeks.Split(',') | ForEach-Object {$_.Trim()}) -ExpectedFileCount $ExpectedRepairFileCount -Apply:$ApplyRepair
         WriteLog -Message "Historical TenantKey repair: $($repair.Status); files=$($repair.Files); applied=$($repair.Applied); backup=$($repair.BackupPath). No prepared CSV generation or SharePoint access." -Level INFO
-        return
+        $smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; return
     }
     $mappingRoot = ''
     if (-not $Offline) {
@@ -204,7 +215,7 @@ try {
         WriteLog -Message "Workforce diagnostic: exit=$($diagnostic.ExitCode); last stage=$($diagnostic.LastStage); samples=$($diagnostic.Samples); sample errors=$($diagnostic.SampleErrors); sampled peak private MiB=$([math]::Round($diagnostic.SampledPeakPrivateBytes/1MB,1)); private logs=$($diagnostic.RunRoot). No prepared publication." -Level INFO
         if ($diagnostic.SampleErrors -gt 0) { WriteLog -Message 'Some memory measurements were unavailable. Inspect memory.csv; this diagnostic is not a complete memory profile.' -Level WARNING }
         if ($diagnostic.ExitCode -ne 0) { throw "Workforce diagnostic worker failed (exit $($diagnostic.ExitCode)); last stage: $($diagnostic.LastStage). Logs: $($diagnostic.RunRoot)" }
-        return
+        $smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; return
     }
     $phase='Prepare and validate'
     $params = @{
@@ -230,7 +241,12 @@ try {
     if (-not ($Offline -or $ValidateOnly -or $WorkforceDiagnostic)) {
         Send-SmartM365TeamsNotification -Title $scriptName -Message 'Preparation completed.' -Level SUCCESS -Channel Infos -ResultSummary $recap -Facts @{Tenant=$effective.TenantKey;Output=$output} | Out-Null
     }
+
+    $smartM365RunGuard.ReachedTerminal=$true
 } catch {
+    if ($_.Exception -is [Management.Automation.PipelineStoppedException] -or $_.Exception -is [OperationCanceledException]) { throw }
+    $smartM365RunGuard.ErrorRecord=$_
+
     $failure=$_
     if ($coreLoaded) {
         WriteLog -Message "$phase failed: $($_.Exception.Message)" -Level ERROR
@@ -251,18 +267,31 @@ try {
         }
     } else { Write-Host ('[{0:yyyy-MM-dd HH:mm:ss}] {1}' -f (Get-Date),$_.Exception.Message) }
 } finally {
+    $smartM365RunGuard.InCleanup=$true
+
     if ($mappingRoot) { try { Remove-PreparedMappingWorkbooks -DataRoot $data -MappingRoot $mappingRoot } catch { Write-Warning "Downloaded mapping cleanup incomplete: $($_.Exception.Message)" } }
-    if ($transcriptStarted) { try { Stop-Transcript | Out-Null; Update-SmartM365TimestampedTranscript -Path $global:logTranscriptFile } catch { Write-Warning "Transcript finalization failed: $($_.Exception.Message)" } }
+    if ($transcriptStarted) { try { Stop-SmartM365RunTranscript | Out-Null; Update-SmartM365TimestampedTranscript -Path $global:logTranscriptFile } catch { Write-Warning "Transcript finalization failed: $($_.Exception.Message)" } }
     if ($coreLoaded) { Complete-SmartM365ExecutionContext -Status $(if($failure){'Failed'}else{'Success'}) -ErrorRecord $failure -FailureStage $(if($failure){$phase}else{''}) }
     else { Write-SmartM365CompletionBanner -Status 'Failed' }
 }
-if ($failure) { exit 1 }
+if ($failure) { $smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; $smartM365RunGuard.ExitCode=(1); exit $smartM365RunGuard.ExitCode }
+    $smartM365RunGuard.ReachedTerminal=$true
+    $smartM365RunGuard.ReturnedNormally=$true
+} catch {
+    if ($_.Exception -isnot [Management.Automation.PipelineStoppedException] -and $_.Exception -isnot [OperationCanceledException]) { $smartM365RunGuard.ErrorRecord=$_ }
+    throw
+} finally {
+    Complete-SmartM365InventoryRun -State $smartM365RunGuard
+    if($smartM365RunGuard.ExitCode -eq 130){exit 130}
+}
+if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
+
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCBSlbgRu/amTp4
-# 7k0Q5gRCs+VVCSTAdWl5RTJ9MQClsaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAZnFO/Xbm+x8zb
+# arjC9bJJRf6ic5+GmfsCQMehOrf6Z6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -395,31 +424,31 @@ if ($failure) { exit 1 }
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIHYcx0QQBdFMPx/FmwHE5TIRZ+/+xCGSgZfol2vvgQGiMA0GCSqG
-# SIb3DQEBAQUABIIBgBXrhpEi70G/X9VKtjpyqOZlc/uIsCEkkEl6dry7XdMXraOS
-# HlQwdCKiufsr49rTpUTHavAwIXo5zkngNp32nEfpNjdq1A8iH1op2IClvd0UoEGc
-# ollZyKHRFcbhkj1mmke39N+zpHTC9PkuNrUZDsB6x6F8DzC1VcFrN7r9S5ubw/q3
-# c5rBeOcYWHzyMIQU91QuLgkRGJfv9WA6lNFvSh5lMCj7r91XYCKFBlWRGv4k2jCa
-# gH83Dfh3dVG0fkwCGWkodPLfrzv00a4wvFiwiWroki48Js6unNp+efvP4VljKfQZ
-# OhLROG4qOh34Pl3DXwOq4O6I5R/OfeFIu5T7mTe1L0j5orkni4m6mvZAFHq5NBDz
-# eGFyYKE2kiaEyK/vbdmIaI0fUvHk/0udJLCZHvoF1wvcBdCeY3otYvSRL/f52ZNQ
-# tduWNBe7ybTudqXJA6A+0+hJRbSPQgEBTJnmKkJGbQ6rJq0rj4Y49sNxWZwyr8TS
-# gsoxCAxva9YuZ4C3E6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEICiScDPa3rjwiLP0vvKYuMttlNM6UhUbgh2rS412yipsMA0GCSqG
+# SIb3DQEBAQUABIIBgABJ4vNAldYPtCelOZ6PqWbcGvyD14Av1uyN3q4bXURZqzyo
+# CRh2GC8xY5rsweSAXtJ6p1lDgsLUBga1e1Aa9eW8uvkievKmCipVlimw7NGqQc9J
+# KvzJBAns1tRbkiSvtu3RGECZcLYwYdW6n1O151+Y1oXOr0Et2+kvjRKMCyLTu5Nf
+# cgZY2kiMXU0LHxI/VrfDvVNwTPYslwsKQ30JbKO97ruGJdq/pyIT73L8D8K+e9Xd
+# orVB0jn3nQWr5XZrSvNOjmoujkob7MabSSresrnEBSAWcUvBQBmcnqwZ6/9tsv5P
+# wZ6Fw8Vubgx8hSP6i7XVHhcQa6W7dZ7f++zfi2ElqGvy1739P3fpVHfT3J45W/aJ
+# GY+3SMclRZL2TI4STHrc2+1bQvWUOgce9Jex4PJDmjz42PWrQNT+Hq8bLCvsGz4d
+# Czh0BAmY7PqEibWbnGQjPFPpQfmI6nRBcpEk09PJaNPBYDqSHZQDJ2c22FSjzMGC
+# LCuTPt5IkJFm9Ajxr6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTQxMjIz
-# MzRaMC8GCSqGSIb3DQEJBDEiBCCm5PgmEUHsC8wAl+Wy78595sNtGcFUcL2XpRUK
-# 7bnDMzANBgkqhkiG9w0BAQEFAASCAgBmJDC8728etZ/Lr/mK03uRhPwNZxhngnDz
-# 7LtiVc1RkrNw3R88V4isKw+k2TJbQynq9CKs7tLFwaiakPgAqn+DTutG3DEw9HAc
-# OnNgwQ0jHUlppiT3f3+0tpOXoA6XNzGqNQEF21viJ6xlPMUCPTbuphbu9GezCaLW
-# ygiYMbgkufgqTXxGjjjf439ffqnhB6m6UNn3S7kXd2U+WZlqhLG/5PnM7Bg+kqsw
-# rLJfeBgA8HAnPUIdStIdk7efnqehuSdKOqejMV0Hh5RuN22vcdt7UStHyIjbWF8s
-# d+jGsUnSjNTMyKd4hHmJ1Lc3TCN6l8JBw2j5ExOt2B5QysJ0NSTGLWW2DwUPmlLZ
-# bYEWWhJSYg/rBwWiVodd3+MLjIJHnUxXJEUAbszaGvU6YlimWm+JdEK9RV2XwP+D
-# rWPfgNLal9MZ3P3zNYsh9CXGMJkgyc/khAesKS1EqFzH1XdkhWBzUFUzOtKWm5s1
-# L5G1EGyAJelXx0uCuB+nG2yAghOWo0WrNiJfWx0pOUIx23ZaLth2gl2TMoPvXocm
-# DqWDiQY2gd2JD622KknhUpdixFdfDuNCFH/XPrvBA1NybrsFk+u99bDT+orj2s9Z
-# F0dk8pr7mQIvP12ZDf5AVdk/PrPWSQ236SnQrDELn9eMyE/tHMNVxHTp4YvAZHy0
-# JOjOBgQg1A==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTQxNTMw
+# NDFaMC8GCSqGSIb3DQEJBDEiBCAdXAuMGO+26Tgu4jjXJ5uTbhdWN4wLAPTAcxPe
+# rXnSnjANBgkqhkiG9w0BAQEFAASCAgA/gVSZvdsBPNOMePRtetmcNRSfGHDakqQX
+# ZfG0mI+OYizzwBK+SMdDrd12o2hmAhBo6spRZhN7gSdWRK8dQ4wjJmiU6Z4Ptsg7
+# 9CQhLZnQ8kS95j8m1UlYh7B0sLLEzkBAB9ygxlhFOPP2PY/Es2hUrTcUf+i6eZvs
+# 8PAWg4hjW6BvrF2KsBlK6rT+TXyr1/X7bMa3bL/K6YDk9ya4/Vkx7pXa0SxrVDrT
+# MBDNfQp2OvVvhpV+cXkv2dxwSs1Ax39ZGoehT4um8iqoZaRT9ED8He8XHrXGpUHh
+# f0DBEKmzZo4eTHqyzHQ9kkCBvAdGNfti1XhgGfA8YTu6RNJYNtnhGBOnhawtNzCW
+# 6qHcEt2t7rAj68bUFleLbdRLf2Uaf9/qx9UUgxnT2FrpI/yk6IJje/DUS5aH6Xhj
+# llsJwm1jbPj5Mg7ijk5l/V0Ugq6r+IF2iCJziLZYe/LiuIpJEFNrj86uIo9UO5cY
+# MgypHHZ9hA0iFPsgTGAOhn1xxOyPizcESMT+HG3dOygIOIW9ecaMNUetDbfdTmcL
+# ypod0tT9eLsb8ySmmRhshUsdMpDvPdXuMbEfX/I760S9naYGfBu/OP7+Ye8iILuf
+# P7pwI81cKbxbmlD5+HIaTJ131GhJvbwLf9sCoAhf2BEo1wEa636YSg69+3qc3Svm
+# OpHOq9vtqQ==
 # SIG # End signature block

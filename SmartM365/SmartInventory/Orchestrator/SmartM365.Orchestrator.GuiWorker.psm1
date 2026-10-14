@@ -1,6 +1,6 @@
 # In-process background work for the GUI. No ThreadJob dependency, UI objects,
 # tenant initialization, process termination or cancellation policy changes.
-# Version: 1.0.0
+# Version: 1.0.1
 Set-StrictMode -Version 2.0
 
 function Start-SmartM365OrchestratorGuiWorker {
@@ -12,8 +12,9 @@ function Start-SmartM365OrchestratorGuiWorker {
     $runspace = [runspacefactory]::CreateRunspace()
     $runspace.ApartmentState = 'MTA'
     $runspace.ThreadOptions = 'ReuseThread'
-    $powershell = [powershell]::Create()
+    $powershell = $null
     try {
+        $powershell = [powershell]::Create()
         $runspace.Open()
         $powershell.Runspace = $runspace
         $null = $powershell.AddScript($Work.ToString()).AddArgument($Context.Progress).AddArgument($InputObject)
@@ -22,7 +23,7 @@ function Start-SmartM365OrchestratorGuiWorker {
         }
         return $true
     }
-    catch { $powershell.Dispose(); $runspace.Dispose(); throw }
+    catch { if($powershell){$powershell.Dispose()}; $runspace.Dispose(); throw }
 }
 
 function Receive-SmartM365OrchestratorGuiWorker {
@@ -48,13 +49,27 @@ function Receive-SmartM365OrchestratorGuiWorker {
     [pscustomobject]@{ Output = $output; Error = $failure }
 }
 
-Export-ModuleMember -Function Start-SmartM365OrchestratorGuiWorker, Receive-SmartM365OrchestratorGuiWorker
+function Close-SmartM365OrchestratorGuiWorker {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)]$Context,[ValidateRange(1,30000)][int]$WaitMilliseconds=5000)
+    $worker=$Context.Worker
+    if($null -eq $worker){return}
+    if(-not $worker.Handle.IsCompleted){
+        $stop=$worker.PowerShell.BeginStop($null,$null)
+        if(-not $stop.AsyncWaitHandle.WaitOne($WaitMilliseconds)){throw 'GUI worker is still stopping; its resources are retained until completion.'}
+        $worker.PowerShell.EndStop($stop)
+    }
+    try { $worker.PowerShell.Dispose() }
+    finally { $worker.Runspace.Dispose(); $Context.Worker=$null }
+}
+
+Export-ModuleMember -Function Start-SmartM365OrchestratorGuiWorker, Receive-SmartM365OrchestratorGuiWorker, Close-SmartM365OrchestratorGuiWorker
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBU7FguuROSx7VW
-# AF6zQ+jZMKnO0GHZ3yqgv7Nt1sEiHaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCKeEIBbUHo9xSg
+# WSOQY58iHXg2oh9f4wzyAYvmH6wldaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -187,31 +202,31 @@ Export-ModuleMember -Function Start-SmartM365OrchestratorGuiWorker, Receive-Smar
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIEG9RWieOqBYvi06ZUgojxSePzhErF/3m7xpfJS/7grsMA0GCSqG
-# SIb3DQEBAQUABIIBgCa3684u+arTuep8cwh195UARn3whyKAiHkdphyfO0Gzi4yr
-# 4tP2JSQPstYmWb9HMg+ipZJvZANtjqYpSdfR3MTgGnNKgfFjCwkOgUMD14CT+Fut
-# DYwF9XPKG5ilG22q1G7AMXEW/fq9VXTWHiZX1UdnpFO3ai5eeKfzXnFtntSwZJwl
-# MR4dppZV8CNRMQ4HzgDkVK7l6K3hmwvI2MjsA4UDKv8+suQvY1vi7dYTbatl0mWO
-# ddq26EZB/uENWENtaT2unIPC+WfhIS4ivfxv/2ODkuCOvUqJLzQB7Kv1yzu6Eba3
-# w9M6Dyc3mMLogJhtCuj+R95IfIWPmAzdeY2v2aee9kWFB9G3NU3dlLBUtgFN/B/E
-# Tw4qpGwWZFORnAR2t0SCTjznXBYYC8Nzq1eeSET5sEmK/qZq6nLxsp2sK+R1jwuZ
-# 34VFIyiSJTbiLVQVU7Gw2gyjJJ9R0npHY/mLwRaUBc6St79N8ECf4cLJOg0fFwAp
-# 4WH5VBmsmDumsvOGMqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIIH9EKD1ghvVHW7p1WpUoLVFEDJuUaQ+Ytt30/eIS3reMA0GCSqG
+# SIb3DQEBAQUABIIBgAEFMkgu5sM725f4t7GVd6d/8PIHHZyi704iWn9n16RSQs4u
+# ngV4Dm9jet4/3QC5lPzucQHGRUSfBL1akdXfqrfrgZBvyi+gg8sDrXWZZZr4Zn06
+# CVOq3YQQGxjoaF1O0gUAn5Z11BS9QyTWKC+wzFQGoZQfNCiyhffo8c9bMOhYh9lB
+# A7t4l9GWdqwcTsCAKeVUZ9YOBB+keqpSVeX51RsVK0atIl65F9ZLfNR6dm/9WDrR
+# KewB0iaLf2ATiA/HzTPQQiXQHEtgb2+b/6SbRxSMCHojAjRghoA1Z1RhmycbIt2l
+# vCc5ZRpUD7A/jHv6I4xQ9PATZdZxql4KbXKeJBGyf+9EDw4m9IaeFFgchq25xX8K
+# YZ8L/p1PRW1Nv7BOsoSdF7r0T3A8pyP+Ks867/RS45kLGltuGulK8o7Eda22AJOw
+# UjAvENEgwxn4iBKkkoREDWFu51r8c6kJgd68e24BIQxqpgcnA7dr8rOMvS3Mme3b
+# tGkYeMZQzRGrLSb6zaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDUyMDQ4
-# MzlaMC8GCSqGSIb3DQEJBDEiBCAGUlgJyQbVNIkychoz1nGcfdvACxbf9fsMyOWv
-# nAaFKTANBgkqhkiG9w0BAQEFAASCAgC2VWpSjyrov0nF+XI6at99K5JWvCcjY8Kw
-# 3HWgzNBc282hO3NlTywZKxxIjr+Zlqy2aU2PGqb8UkDNWiwwyu6JcnKuL+IwsUt8
-# JZlMe3f8pYjcTTcQQ4r3uuNf70AcK8kKkYtdbmBSzlFIsa6Gqn2kXc/eCFCQUTqw
-# PUBxZNv+wt6sUzKTGV9LfzouI1ZkLUdRqnPap26AUnSht2JuMDo8GslmQnuDbU2t
-# quPJEzRea2Kczuh1VnvgtcJ+DTBcsnZYUX14+rMO6TMRsKJUoibVjPYA1eFa3d25
-# 6c8Y0GPixcKuuZ+Ma5G4yWzgDEmfZHTPKdwXDJ7RP9k4nR2DqWbmjeJMkqKLyAlZ
-# Rm4/m9w27vexv9pzM3mdohKnjaAVRrFpipLqPKDOaGRSnvbNxUw8FbiM0uIIkqXd
-# Q4+BX4aFQcTqiMfQFHQ/RZYt+a4dLZTktNc8CRnB0mkjzzRELRhrwx+j/VzRzn7Q
-# GvrGmBQHKx7LFxjUFrjGB1EDqift0RSps82UNmVqT02wPY0b93Hyq8KZBSwPIWp7
-# iJzQAlpWhrwAhqBwjwGwv+c6HQaWj4veP+K8aTSMOID2r9i7tp86BuGujX+04pcq
-# ckBJpU9b30cvoDC/aRxRE4KxyOtELYWcc/476mYBwsPMzdQ9PL4ttOulQREiPbyh
-# zbUTI1/AyQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTQxNTMw
+# MzlaMC8GCSqGSIb3DQEJBDEiBCCh+HjnA9Ju1J3td+QOdawcFTv/W5Qz8Sudy1nt
+# sAXpDjANBgkqhkiG9w0BAQEFAASCAgB2mI0/tXdUeJ27AVWu24LeZ965CZIp8usr
+# QEAq7C5RwzkTdNynDWWKE89wLnk7AoU4tfnRwvp/pp+oJ5XHCLxYLbkXDlbKIZtF
+# uDMuMphWnr00ozaZ5zGad2kxowQ/nmZC6ApIxd9jLnABgORrc5kWkIzMibkFzncW
+# h8ljowtq2TpnUI5Qlfy2an8gMerfHToqy1FuVaOFX2le4iyJxYXgoUtftwrPRyXP
+# cfSbc1DD0KklZOaA6tBJwMzzqOApuJcmJlynV4mwWjLhaZh3m7gRq4dxctzXR7LF
+# TsPnwuYFXxDitT8MjxBYFIiVDS8hcULu0PPPWwIjD2Sis/P9Akf4R0nISsvk+ev9
+# Qe8LDOMYtljwUBEYDYD92ippxk2Cy/9FySI9jr58EGzPn4PdCraSLNTudboOHQEl
+# vEPw9pqm8Pyq7vMSUjM+ujG9YQ7w8ZB/JiM9Qf4ZJdyL17cGI11mswhRmdgxnTXY
+# iX/P+kxlkJz1h+6jYoHVtB7qdIirs477PawnT80nb/NI5mWZfJNREUDRY3DMAoDx
+# zGVORAbynUMBpoi3zJQl0dwkGgfqQX0ewAoSp1/Sl8yJagwarw2ptOjPTXTObXuo
+# winLlxELIlc57R57ZoZI64UGgkP4HBzMJEBvRqjs8oPvafdkvqNbBWcw5y+aWcnK
+# o9WQ7JkH5w==
 # SIG # End signature block

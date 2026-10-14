@@ -3,6 +3,7 @@ Import-Module (Join-Path $PSScriptRoot 'SmartM365.JsonTransport.psd1') -MinimumV
 . (Join-Path $PSScriptRoot 'SmartM365-CmdbReceipt.ps1')
 . (Join-Path $PSScriptRoot 'SmartM365-MailMaintenance.ps1')
 . (Join-Path $PSScriptRoot 'SmartM365-ImportExcelHealth.ps1')
+. (Join-Path $PSScriptRoot 'SmartM365-InventoryLifecycle.ps1')
 # SmartM365.Core.psm1
 # Core utilities: logging, initialization, cleanup, CSV export, mail, remote scheduling, cloud connections.
 
@@ -876,6 +877,13 @@ function Write-SmartM365CompletionBanner {
         [switch]$ConsoleOnly,
         [switch]$Force
     )
+    $Status = Get-SmartM365InventoryCompletionStatus -Status $Status -ErrorRecord $null
+    $lifecycle = Get-Variable SmartM365InventoryRun -Scope Global -ValueOnly -ErrorAction SilentlyContinue
+    if ($lifecycle -and -not $lifecycle.Finalizing) {
+        $lifecycle.PendingBanner=@{}; foreach($key in $PSBoundParameters.Keys){$lifecycle.PendingBanner[$key]=$PSBoundParameters[$key]}
+        $lifecycle.PendingBanner.Status=$Status
+        return
+    }
     $scriptNameVariable = Get-Variable -Name SmartM365ScriptName -Scope Global -ErrorAction SilentlyContinue
     if ([string]::IsNullOrWhiteSpace($ScriptName) -and $scriptNameVariable) { $ScriptName = [string]$scriptNameVariable.Value }
     $startedAtVariable = Get-Variable -Name SmartM365ExecutionStartTime -Scope Global -ErrorAction SilentlyContinue
@@ -1044,7 +1052,7 @@ function Write-SmartM365ExecutionContext {
 function Complete-SmartM365ExecutionContext {
     [CmdletBinding()]
     param(
-        [ValidateSet('Auto', 'Success', 'Failed', 'CompletedWithWarnings')]
+        [ValidateSet('Auto', 'Success', 'Failed', 'CompletedWithWarnings', 'Cancelled')]
         [string]$Status = 'Auto',
         [AllowNull()]$ErrorRecord = $null,
         [string]$FailureStage = '',
@@ -1054,6 +1062,14 @@ function Complete-SmartM365ExecutionContext {
         [switch]$CloseTranscriptBeforeUpload
     )
 
+    $Status = Get-SmartM365InventoryCompletionStatus -Status $Status -ErrorRecord $ErrorRecord
+    $lifecycle = Get-Variable SmartM365InventoryRun -Scope Global -ValueOnly -ErrorAction SilentlyContinue
+    if ($lifecycle -and -not $lifecycle.Finalizing) {
+        $lifecycle.PendingCompletion=@{}; foreach($key in $PSBoundParameters.Keys){$lifecycle.PendingCompletion[$key]=$PSBoundParameters[$key]}
+        $lifecycle.PendingCompletion.Status=$Status
+        $global:SmartM365ExecutionStatus=$Status
+        return
+    }
     if ($global:SmartM365ExecutionSummaryWritten) { return }
     $global:SmartM365ExecutionSummaryWritten = $true
 
@@ -1150,6 +1166,7 @@ function Complete-SmartM365ExecutionContext {
     if ($CloseTranscriptBeforeUpload) {
         try {
             Stop-Transcript -ErrorAction Stop | Out-Null
+            if ($lifecycle) { $lifecycle.TranscriptOwned=$false }
             $closedTranscriptPath = [string]$global:logTranscriptFile
         }
         catch {
@@ -1168,6 +1185,7 @@ function Complete-SmartM365ExecutionContext {
     $logUploadCandidates = $logUploadCandidates |
         Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) -and (Test-Path -LiteralPath $_ -PathType Leaf) } |
         Sort-Object -Unique
+    if ($Status -eq 'Cancelled') { $logUploadCandidates=@() }
     $logUploadStartCount = if ($global:SmartM365SharePointUploadedFiles) { @($global:SmartM365SharePointUploadedFiles).Count } else { 0 }
     foreach ($logUploadCandidate in $logUploadCandidates) {
         Invoke-SmartM365SharePointCsvUpload -LocalFilePath $logUploadCandidate | Out-Null
@@ -1189,7 +1207,7 @@ function Complete-SmartM365ExecutionContext {
             # Include publication warnings even when the caller explicitly requested Success.
             $warningCount = [int]$global:SmartM365WarningCount
             $errorCount = [int]$global:SmartM365ErrorCount
-            if ($Status -ne 'Failed') {
+            if ($Status -notin @('Failed','Cancelled')) {
                 if ($errorCount -gt 0 -or $null -ne $ErrorRecord) { $Status = 'Failed' }
                 elseif ($warningCount -gt 0) { $Status = 'CompletedWithWarnings' }
             }
@@ -1211,7 +1229,7 @@ function Complete-SmartM365ExecutionContext {
             $finalWarnings = [int]$global:SmartM365WarningCount
             $finalErrors = [int]$global:SmartM365ErrorCount
             if ($finalWarnings -ne $warningCount -or $finalErrors -ne $errorCount) {
-                if ($Status -ne 'Failed') { $Status = if ($finalErrors -gt 0) { 'Failed' } else { 'CompletedWithWarnings' } }
+                if ($Status -notin @('Failed','Cancelled')) { $Status = if ($finalErrors -gt 0) { 'Failed' } else { 'CompletedWithWarnings' } }
                 $bannerArguments.Status=$Status; $bannerArguments.WarningCount=$finalWarnings; $bannerArguments.ErrorCount=$finalErrors
                 $global:SmartM365ExecutionStatus = $Status
                 WriteLog -Message ('Final execution status after trace synchronization: {0}; Warnings={1}; Errors={2}. Remote traces may be incomplete; local evidence is preserved.' -f $Status,$finalWarnings,$finalErrors) -Level INFO
@@ -1334,7 +1352,7 @@ function RemoveOldFiles {
         [string]$LogFile
     )
 
-    if (-not (Test-Path -LiteralPath $Path)) { return }
+    if (Test-SmartM365InterruptedRun) { return }; if (-not (Test-Path -LiteralPath $Path)) { return }
     if ([string]::IsNullOrWhiteSpace($LogFile) -and -not [string]::IsNullOrWhiteSpace([string]$global:LogTextFile)) {
         $LogFile = [string]$global:LogTextFile
     }
@@ -1425,7 +1443,7 @@ function Remove-SmartM365TimestampedFilesOlderThan {
         [string]$LogFile
     )
 
-    if (-not (Test-Path -LiteralPath $FolderPath -PathType Container)) { return }
+    if (Test-SmartM365InterruptedRun) { return }; if (-not (Test-Path -LiteralPath $FolderPath -PathType Container)) { return }
     if ([string]::IsNullOrWhiteSpace($LogFile) -and -not [string]::IsNullOrWhiteSpace([string]$global:LogTextFile)) {
         $LogFile = [string]$global:LogTextFile
     }
@@ -1546,7 +1564,7 @@ function Remove-SmartM365TimestampedDirectoriesOlderThan {
         [string]$LogFile
     )
 
-    if (-not (Test-Path -LiteralPath $RootPath -PathType Container)) { return }
+    if (Test-SmartM365InterruptedRun) { return }; if (-not (Test-Path -LiteralPath $RootPath -PathType Container)) { return }
     if ([string]::IsNullOrWhiteSpace($LogFile) -and -not [string]::IsNullOrWhiteSpace([string]$global:LogTextFile)) {
         $LogFile = [string]$global:LogTextFile
     }
@@ -3733,7 +3751,7 @@ function SendEmailHtmlReport {
         [ValidateSet('Auto','Report','Error','Maintenance')][string]$MailPurpose = 'Auto'
     )
 
-    try {
+    if (Test-SmartM365InterruptedRun) { return }; try {
         $moduleLocalConfig = Get-ModuleLocalConfig
         $callerLocalConfig = Get-SmartM365CallerLocalConfig
         foreach ($configName in @('SendMailMode','SmtpServer','From','To','Cc','Subject')) {
@@ -3872,7 +3890,7 @@ function Send-SmartM365Mail {
         [ValidateSet('Auto','Report','Error','Maintenance')][string]$MailPurpose = 'Auto'
     )
 
-    $moduleLocalConfig = Get-ModuleLocalConfig
+    if (Test-SmartM365InterruptedRun) { return }; $moduleLocalConfig = Get-ModuleLocalConfig
     $callerLocalConfig = Get-SmartM365CallerLocalConfig
     foreach ($configName in @('SendMailMode','SmtpServer','From','To','Cc','Subject')) {
         if (-not $PSBoundParameters.ContainsKey($configName)) {
@@ -3966,7 +3984,7 @@ function Send-SmartM365TeamsNotification {
         [switch]$ThrowOnError
     )
 
-    try {
+    if (Test-SmartM365InterruptedRun) { return }; try {
         $effectiveChannel = if ($Channel -ne 'Auto') {
             $Channel
         }
@@ -4119,6 +4137,8 @@ function InitializeScriptEnvironment {
         [string]$CallerScriptPath
     )
 
+    $lifecycle = Get-Variable SmartM365InventoryRun -Scope Global -ValueOnly -ErrorAction SilentlyContinue
+    if ($lifecycle) { $lifecycle.Initialized=$true }
     $CallerScriptPath = [string]$CallerScriptPath
     $callerScriptPath = if ([string]::IsNullOrWhiteSpace($CallerScriptPath)) { '' } else { $CallerScriptPath }
     if ([string]::IsNullOrWhiteSpace($callerScriptPath)) {
@@ -4307,8 +4327,8 @@ function Connect-SmartM365GraphAppOnly {
         }
 
         WriteLog -Message ("Connecting to Microsoft Graph for {0}." -f $Purpose) -Level "INFO"
-        try { Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null } catch {}
-        Connect-MgGraph -ClientId $AppId -TenantId $TenantId -CertificateThumbprint $Thumbprint -NoWelcome -ErrorAction Stop | Out-Null
+        try { Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null; Set-SmartM365InventoryConnectionOwnership -Connection Graph -Owned $false } catch {}
+        Connect-MgGraph -ClientId $AppId -TenantId $TenantId -CertificateThumbprint $Thumbprint -NoWelcome -ErrorAction Stop | Out-Null; Set-SmartM365InventoryConnectionOwnership -Connection Graph -Owned $true
 
         $context = Get-MgContext -ErrorAction SilentlyContinue
         if ($null -eq $context) {
@@ -4811,7 +4831,7 @@ function Invoke-SmartM365SharePointCsvUpload {
         [string]$JsonTransitionStateFolderPath
     )
 
-    if (-not $Enabled) { return }
+    if (Test-SmartM365InterruptedRun) { return }; if (-not $Enabled) { return }
     if (-not (Test-Path -LiteralPath $LocalFilePath)) {
         WriteLog -Message "SharePoint upload skipped: local file not found: $LocalFilePath" -Level "WARNING"
         return
@@ -5970,6 +5990,7 @@ function Invoke-SmartM365Preflight {
     }
 
     foreach ($path in @($OutputPaths | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })) {
+        $probePath=$null
         try {
             if (-not (Test-Path -LiteralPath $path)) {
                 if ($SkipOutputPathCreation) {
@@ -5986,6 +6007,12 @@ function Invoke-SmartM365Preflight {
         }
         catch {
             $failures.Add("Output path is not writable: $path. $($_.Exception.Message)")
+        }
+        finally {
+            if ($probePath -and (Test-Path -LiteralPath $probePath)) {
+                try { Remove-Item -LiteralPath $probePath -Force -ErrorAction Stop }
+                catch { Write-Warning "Preflight probe cleanup failed: $($_.Exception.Message)" }
+            }
         }
     }
 
@@ -6227,12 +6254,12 @@ function Connect-SmartM365CloudSession {
     if ($Graph) {
         try {
             WriteLog "Connecting to Microsoft Graph..." "INFO"
-            try { Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null } catch {}
+            try { Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null; Set-SmartM365InventoryConnectionOwnership -Connection Graph -Owned $false } catch {}
 
             if ($useCertAuth) {
-                Connect-MgGraph -ClientId $AppId -TenantId $TenantId -CertificateThumbprint $Thumbprint -NoWelcome -ErrorAction Stop
+                Connect-MgGraph -ClientId $AppId -TenantId $TenantId -CertificateThumbprint $Thumbprint -NoWelcome -ErrorAction Stop; Set-SmartM365InventoryConnectionOwnership -Connection Graph -Owned $true
             } else {
-                Connect-MgGraph -Scopes $GraphScopes -NoWelcome -ErrorAction Stop
+                Connect-MgGraph -Scopes $GraphScopes -NoWelcome -ErrorAction Stop; Set-SmartM365InventoryConnectionOwnership -Connection Graph -Owned $true
             }
 
             $context = Get-MgContext -ErrorAction SilentlyContinue
@@ -6250,7 +6277,7 @@ function Connect-SmartM365CloudSession {
     if ($ExchangeOnline) {
         try {
             WriteLog "Connecting to Exchange Online..." "INFO"
-            try { Disconnect-ExchangeOnline -Confirm:$false -ErrorAction SilentlyContinue | Out-Null } catch {}
+            try { Disconnect-ExchangeOnline -Confirm:$false -ErrorAction SilentlyContinue | Out-Null; Set-SmartM365InventoryConnectionOwnership -Connection Exchange -Owned $false } catch {}
 
             if ($useCertAuth) {
                 if (-not $Organization) {
@@ -6261,9 +6288,9 @@ function Connect-SmartM365CloudSession {
                     }
                 }
 
-                Connect-ExchangeOnline -AppId $AppId -CertificateThumbprint $Thumbprint -Organization $Organization -ShowBanner:$false
+                Connect-ExchangeOnline -AppId $AppId -CertificateThumbprint $Thumbprint -Organization $Organization -ShowBanner:$false; Set-SmartM365InventoryConnectionOwnership -Connection Exchange -Owned $true
             } else {
-                Connect-ExchangeOnline -ShowProgress:$true -ShowBanner:$false
+                Connect-ExchangeOnline -ShowProgress:$true -ShowBanner:$false; Set-SmartM365InventoryConnectionOwnership -Connection Exchange -Owned $true
             }
 
             WriteLog "Exchange Online connection successful." "SUCCESS"
@@ -6289,7 +6316,7 @@ function Disconnect-SmartM365CloudSession {
     if ($ExchangeOnline) {
         try {
             if ($VerboseDisconnect) { WriteLog "Disconnecting from Exchange Online..." "INFO" }
-            Disconnect-ExchangeOnline -Confirm:$false | Out-Null
+            Disconnect-ExchangeOnline -Confirm:$false | Out-Null; Set-SmartM365InventoryConnectionOwnership -Connection Exchange -Owned $false
             if ($VerboseDisconnect) { WriteLog "Disconnected from Exchange Online." "SUCCESS" }
         } catch {
             if ($VerboseDisconnect) { WriteLog "Failed to disconnect from Exchange Online: $($_.Exception.Message)" "WARNING" }
@@ -6303,7 +6330,7 @@ function Disconnect-SmartM365CloudSession {
                 if ($VerboseDisconnect) { WriteLog "No active Microsoft Graph session to disconnect." "INFO" }
                 return
             }
-            Disconnect-MgGraph -ErrorAction Stop | Out-Null
+            Disconnect-MgGraph -ErrorAction Stop | Out-Null; Set-SmartM365InventoryConnectionOwnership -Connection Graph -Owned $false
             if ($VerboseDisconnect) { WriteLog "Disconnected from Microsoft Graph." "SUCCESS" }
         } catch {
             if ($VerboseDisconnect) { WriteLog "Failed to disconnect from Microsoft Graph: $($_.Exception.Message)" "WARNING" }
@@ -6327,8 +6354,8 @@ Export-ModuleMember -Function `
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA+2lSm60arM4Vs
-# Y/K6f9IRq1yAfOiRenDp+OxBZWOQWaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCqvY8Qbd9J3XDL
+# YxXjzT4WcnENAa6GYk133MovxOXqP6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -6461,31 +6488,31 @@ Export-ModuleMember -Function `
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIKro0z5aQZTV5KDok46ibHJawVDLiA++R1ddF9UycvF4MA0GCSqG
-# SIb3DQEBAQUABIIBgIucz2fpM7J+6Z5uqQcmX8quaVsDbvmQ8H29MdRFF4hl8kwh
-# Cw0C/2UbeC5srVhukB8JvCqykntw4s3C9eFqHLRUccA1vSn6J8GFoZ2/ZsNjUeZC
-# fFLyQKQ87bdjFsyXBTCqP/WpMtP2UEEn9t3SI641+iExDgefnnihxM7EtXfOdbQh
-# 5QortgIYZNJc8epZBSenCm+W/ywTHxiAYRDhjRanvQ8pPLDpRnvenvyOFa5kcwrG
-# eoVGMF/sq466S3NlPanr555LS/8b309b/YCuwK7JGnBLSUy0jwMvB/nZQuV5mIrF
-# MuTWq6bcHF+yBpgM3nGdhSHlLdnJdUamhB7Y62Lz1BFf9ltX4NTgVDm42UjuvcCp
-# SBW4bqQjGN4Np00WSjpfij90IPk3OqRg+PzoFBMM2OTL+H4PRsG5Y3FN9EbwEwSq
-# pYDRDG88iwpjPjxxInxvfvLomXojNtmVO5kG7Y1t5PGwcUrxGoSsGQjU0Zfppn2z
-# bP9ETrTmowPdBcc+IKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEID+n6a9/XS78iXxh/wu0FRbPv5GGm5qQ4u+Oq2ywWvvHMA0GCSqG
+# SIb3DQEBAQUABIIBgG9w6KC/aC8URRRk2hon3/S4R3jbBYp27b5f0D3VNXSlxL1b
+# hm00Sw0p8S7YG0K/ukLfToSq5y+CnJpTpqrduxJux8F+Sfj5bFUjDalMWqH8ZKiq
+# kaPbEfzC/vPyGj7bGn1fBOnXGn1Or1oYbkfSDQ3Wg03a4+ZD0aBvAJwLfNTBc+YH
+# Ah1Hm0YVkZCorrMzvImZpPx5DgCbvy5TfvtmJ8y9xln5ZuHIxbJIt7FjT/6NFAyk
+# pOTa2+qpS49FYXtv2gU9wQxPXB0CGmm/lOJ8XzPRP8PskSeIE8SPBTDVfVRVqy8S
+# IcePSITSZMmhKdN7/zQxmfQZo+rpsbgDUTqRPqym7vVfOyLqsMxQpqrxF+hzLJ1e
+# DFbBT9HwClja4UaEGY8hysQ7zqG2sMBcITg5IlOMAfw2zEFcLmaQF354voWYr2ya
+# qqCir91cgUUavNBwi478VF1YCfdlczVtz35za1wLa7Y/P86udL2nQ2CL5PWvvH6/
+# ZYSV1BXHOIhez6Fd76GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTQwODMw
-# MzBaMC8GCSqGSIb3DQEJBDEiBCA/h4cXrTYZPJbUCuUEpak5xtN0pYCammzzDEdV
-# 1+KHxDANBgkqhkiG9w0BAQEFAASCAgAQiATsOLF6tu2mUi5fz/wzo+RNIaPQRZS4
-# J1UvWsMy8y7ltuP/HlY15Kk/RBMGF7gMf1hS6xeJ7VOc7C1xEAzfc2hZIyKWsQM5
-# 3hbnULrJLRJs7HnnaiCquaea96C+jxStTuutAnT/WWPHlbWHbxijjjAwF0FWXUiw
-# HRbaVRvC6fu7EnzCOAMpEQzoXwjnDL2aPnT0GinAA1qCOvRnL+/UChHr4S9Sdho/
-# VJmoyOd3ITmN8mqCNgTzZZSzdyt6H4tl2RKCwR+8N0P2nfWQTmheKTYh+FXXmdNj
-# ttMPi64tHIfeo6Mlp70DrGoYHxJ9etcsh5HEcqF4iE8czfKcFsUNAirmtKnn7Fet
-# FqQP8VWWhLF7rTYa7O9mJ14p0NrL9rtTnB/2ZoE8dUThn0L91BDFkfFRdox+WE0P
-# YdFahOitTzIM+w86Jscp0ZPOuBb0+rxfpZG2AK19ERRYem+yiXOHUPbTa6/o/Jje
-# Vbmriln98DchFJEMYiss6WXlIEiMlq7/RMAg5zeBINJ+NeT+M3Eu6bpks/wnpB2x
-# ygyMeBSPnw6IG+mTsSya+/QuFZTei9Bn0wI66PcCTop3LMICpiMua3X+T9JsWBaa
-# JSqNjPtmmL2GVPQs933aZKbBebz6cZodUBAvlLEhF3FNWBRgtPvGnAxEa0Y8NUg9
-# XSlLWwhkuQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTQxNTMw
+# MTNaMC8GCSqGSIb3DQEJBDEiBCB2iIvU3uBgm11rt6lLLSOcjf3XReR4yq4FQnEB
+# LzVNKDANBgkqhkiG9w0BAQEFAASCAgBnuQm9gBHx+Nr0A6RdMNKSZkIaPVhcbhvd
+# chiHo6bZfNsYG6GDFZFiFxgUpIDwrMgd0tUdAsIcd/rlJfAT3q1SAB/CHfuf5OfS
+# fXtSzESVhaQ7KCORSfUqPVakyavB3QVALT6Babv3ZsO9YsJD5w0vrxgy1TUlycex
+# A152p72JXbjnM6Lk6GdqeBmA6pwqZDcRpXd0dwtSevGu5zeLFdVAwPRNnptOP3cq
+# G4D40uhQu/R7NqtDCRFXcPm+5cA3RafJ9UG9toAUwnNG5FFoOR8foUlCvLCg/Zgz
+# RJtg999lFEoE6j6Ph7ZQ79cy8EamAtsoyJyr/Px7ejS7kUqJ9PmvFip/Ch5/rfnO
+# fjEWVqSVu1nUMP5beRAxSuNF671LDR0j2eqAkf+aKe/yqTDGOVf93EdxZBpM7+5m
+# NVTvgCr0S4Yox7sGGi9/xMqeibpq7OsjrJjjr8uqWFz23jPeBqJm4LtIAxHQey6H
+# 4vpmUd3eRdnsvJmdVkMg97hL9HljiOsa0nAfDGqwjRtVaN7pWOGgvq0RiQoCwvnr
+# tnjN65Zg2s4mTbhtOT6g6EM0HBL0/xT9A9Yy7d+NYUd7zRTSwWJds/XtTz9MsoM3
+# ShUy8iK0VbeBJRzzDs7Nm4uKTICC9SynTyJLS6Bzj4Pe7ZkOGvWho4PCIAY3coOE
+# QmAzLCj3cg==
 # SIG # End signature block

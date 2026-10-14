@@ -62,7 +62,7 @@
     - Maintains logs and cleans up old files automatically.
 
 .VERSION
-1.29
+1.30
 .AUTHOR
     https://github.com/khda79/workplacecloudhub.com
     Minimum permissions: Windows PowerShell 5.1, Exchange 2016 Management snap-in, ActiveDirectory module, Exchange recipient read access, and AD read access.
@@ -114,6 +114,17 @@ param(
 
     [int]$MaxItems = 0
 )
+# Local lifecycle only; no collection or publication is performed by this guard.
+$smartM365LifecycleRoot=$PSScriptRoot
+while ($smartM365LifecycleRoot -and -not (Test-Path -LiteralPath (Join-Path $smartM365LifecycleRoot 'Modules/SmartM365.Core/SmartM365-InventoryLifecycle.ps1') -PathType Leaf)) {
+    $smartM365LifecycleParent=Split-Path $smartM365LifecycleRoot -Parent
+    if($smartM365LifecycleParent -eq $smartM365LifecycleRoot){break}
+    $smartM365LifecycleRoot=$smartM365LifecycleParent
+}
+if(-not $smartM365LifecycleRoot){throw 'SmartM365 lifecycle support is missing; update the complete runtime.'}
+. (Join-Path $smartM365LifecycleRoot 'Modules/SmartM365.Core/SmartM365-InventoryLifecycle.ps1')
+$smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -RequireReturn
+try {
 if ($PSBoundParameters.ContainsKey('MaxItems') -and $MaxItems -gt 0) {
     $global:SmartM365MaxItems = [int]$MaxItems
     $global:SmartM365TestMaxItems = [int]$MaxItems
@@ -498,7 +509,7 @@ $ErrorActionPreference = 'Stop'
     }
 
     #region Module Import and Initialization
-$ScriptVersion = "1.29"
+$ScriptVersion = "1.30"
     $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
     $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ProxyAddressesCsvLogFolderPath' -DefaultValue $OutputPath
     $LatestCsvFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ''
@@ -510,16 +521,16 @@ $ScriptVersion = "1.29"
 
     try {
         Write-Host "Loading module SmartM365-WindowsPowerShell5.psd1..."
-        Import-Module -Name (Join-ModulePath 'SmartM365-WindowsPowerShell5.psd1') -MinimumVersion '1.0.56' -ErrorAction Stop
+        Import-Module -Name (Join-ModulePath 'SmartM365-WindowsPowerShell5.psd1') -MinimumVersion '1.0.57' -ErrorAction Stop
         $InitializeOutputPath = InitializeScriptEnvironment -OutputPath $OutputPath -LogFileName $(($MyInvocation.MyCommand.Name) -replace '\.ps1$','')
         Start-SmartM365SourceReceipt -ScriptPath $PSCommandPath -SourceRootPath $LatestCsvFolderPath -ScopeParameters @{OrganizationalUnit=$OrganizationalUnit;AllOrganizationalUnit=$AllOrganizationalUnit;AddMissingAddress=[bool]$AddMissingAddress}
-        Start-Transcript -Path $global:logTranscriptFile -Append
+        Start-SmartM365RunTranscript -Path $global:logTranscriptFile -Append
         WriteLog -Message "Script Environment initialized at $InitializeOutputPath"
         $OutputPath = $InitializeOutputPath
         WriteLog -Message "Starting $TaskName..."
     } catch {
         Write-Host "Initialization failed: $($_.Exception.Message)`n$($_.ScriptStackTrace)" -ForegroundColor Red
-        exit
+        $smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; $smartM365RunGuard.ExitCode=(0); exit $smartM365RunGuard.ExitCode
     }
     #endregion
 
@@ -577,8 +588,8 @@ $ScriptVersion = "1.29"
 
     if (-not (Get-PSSnapin $snapinName -Registered -ErrorAction SilentlyContinue)) {
         Write-Error "The Exchange Management PSSnapin '$snapinName' is not registered on this server.`nThis script must be run on an Exchange 2016 server where the Management Tools are installed."
-        Stop-Transcript | Out-Null; try { $smartM365TranscriptPath = $null; $smartM365TranscriptVariable = Get-Variable -Name logTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } else { $smartM365TranscriptVariable = Get-Variable -Name LogTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } }; if ($smartM365TranscriptPath) { Update-SmartM365TimestampedTranscript -Path $smartM365TranscriptPath } } catch {}
-        exit 1
+        Stop-SmartM365RunTranscript | Out-Null; try { $smartM365TranscriptPath = $null; $smartM365TranscriptVariable = Get-Variable -Name logTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } else { $smartM365TranscriptVariable = Get-Variable -Name LogTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } }; if ($smartM365TranscriptPath) { Update-SmartM365TimestampedTranscript -Path $smartM365TranscriptPath } } catch {}
+        $smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; $smartM365RunGuard.ExitCode=(1); exit $smartM365RunGuard.ExitCode
     }
 
     if (-not (Get-PSSnapin $snapinName -ErrorAction SilentlyContinue)) {
@@ -590,8 +601,8 @@ $ScriptVersion = "1.29"
         catch {
             Write-Error "Failed to load the Exchange PSSnapin '$snapinName'. Error: $($_.Exception.Message)`n$($_.ScriptStackTrace)"
             Write-Error "Ensure you are running this script on an Exchange 2016 server and have the necessary permissions.`nAlternatively, try running this script from the Exchange Management Shell or use a script that connects via PowerShell Remoting to localhost."
-            Stop-Transcript | Out-Null; try { $smartM365TranscriptPath = $null; $smartM365TranscriptVariable = Get-Variable -Name logTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } else { $smartM365TranscriptVariable = Get-Variable -Name LogTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } }; if ($smartM365TranscriptPath) { Update-SmartM365TimestampedTranscript -Path $smartM365TranscriptPath } } catch {}
-            exit 1
+            Stop-SmartM365RunTranscript | Out-Null; try { $smartM365TranscriptPath = $null; $smartM365TranscriptVariable = Get-Variable -Name logTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } else { $smartM365TranscriptVariable = Get-Variable -Name LogTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } }; if ($smartM365TranscriptPath) { Update-SmartM365TimestampedTranscript -Path $smartM365TranscriptPath } } catch {}
+            $smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; $smartM365RunGuard.ExitCode=(1); exit $smartM365RunGuard.ExitCode
         }
     } else {
         Write-Host "The Exchange PSSnapin '$snapinName' is already loaded."
@@ -614,14 +625,14 @@ $ScriptVersion = "1.29"
 
     if (-not (Get-Command Get-Mailbox -ErrorAction SilentlyContinue)) {
         Write-Error "The Get-Mailbox cmdlet is still not available after attempting to load the snap-in.`nThis could indicate an issue with the Exchange Management Tools installation."
-        Stop-Transcript | Out-Null; try { $smartM365TranscriptPath = $null; $smartM365TranscriptVariable = Get-Variable -Name logTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } else { $smartM365TranscriptVariable = Get-Variable -Name LogTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } }; if ($smartM365TranscriptPath) { Update-SmartM365TimestampedTranscript -Path $smartM365TranscriptPath } } catch {}
-        exit 1
+        Stop-SmartM365RunTranscript | Out-Null; try { $smartM365TranscriptPath = $null; $smartM365TranscriptVariable = Get-Variable -Name logTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } else { $smartM365TranscriptVariable = Get-Variable -Name LogTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } }; if ($smartM365TranscriptPath) { Update-SmartM365TimestampedTranscript -Path $smartM365TranscriptPath } } catch {}
+        $smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; $smartM365RunGuard.ExitCode=(1); exit $smartM365RunGuard.ExitCode
     }
 
     if (-not (Get-Command Get-Recipient -ErrorAction SilentlyContinue)) {
         Write-Error "Get-Recipient is unavailable. Ensure the Exchange Management Tools are installed, or run from the Exchange Management Shell."
-        Stop-Transcript | Out-Null; try { $smartM365TranscriptPath = $null; $smartM365TranscriptVariable = Get-Variable -Name logTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } else { $smartM365TranscriptVariable = Get-Variable -Name LogTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } }; if ($smartM365TranscriptPath) { Update-SmartM365TimestampedTranscript -Path $smartM365TranscriptPath } } catch {}
-        exit 1
+        Stop-SmartM365RunTranscript | Out-Null; try { $smartM365TranscriptPath = $null; $smartM365TranscriptVariable = Get-Variable -Name logTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } else { $smartM365TranscriptVariable = Get-Variable -Name LogTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } }; if ($smartM365TranscriptPath) { Update-SmartM365TimestampedTranscript -Path $smartM365TranscriptPath } } catch {}
+        $smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; $smartM365RunGuard.ExitCode=(1); exit $smartM365RunGuard.ExitCode
     }
 
     # --- Enable ViewEntireForest
@@ -687,7 +698,7 @@ $ScriptVersion = "1.29"
         }
         catch {
             Write-Error "Failed to Get-Recipient for ALL OU: $($_.Exception.Message)`n$($_.ScriptStackTrace)"
-            Stop-Transcript | Out-Null; try { $smartM365TranscriptPath = $null; $smartM365TranscriptVariable = Get-Variable -Name logTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } else { $smartM365TranscriptVariable = Get-Variable -Name LogTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } }; if ($smartM365TranscriptPath) { Update-SmartM365TimestampedTranscript -Path $smartM365TranscriptPath } } catch {}
+            Stop-SmartM365RunTranscript | Out-Null; try { $smartM365TranscriptPath = $null; $smartM365TranscriptVariable = Get-Variable -Name logTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } else { $smartM365TranscriptVariable = Get-Variable -Name LogTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } }; if ($smartM365TranscriptPath) { Update-SmartM365TimestampedTranscript -Path $smartM365TranscriptPath } } catch {}
             throw
         }
     }
@@ -1330,6 +1341,7 @@ WriteLog -Message 'ProxyAddresses report email is disabled; CSV and workbook out
     try {
         if ($script:ChangedViewEntireForest -and $script:PrevViewEntireForest -ne $null) {
             Set-ADServerSettings -ViewEntireForest $script:PrevViewEntireForest
+            $script:ChangedViewEntireForest=$false
             Write-Host "ViewEntireForest restored to initial state ($script:PrevViewEntireForest)."
         }
     } catch {
@@ -1353,18 +1365,35 @@ WriteLog -Message 'ProxyAddresses report email is disabled; CSV and workbook out
             $smartM365TranscriptVariable = Get-Variable -Name LogTranscriptFile -Scope Global -ErrorAction SilentlyContinue
             if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value }
         }
-        Stop-Transcript | Out-Null
+        Stop-SmartM365RunTranscript | Out-Null
         if ($smartM365TranscriptPath) { Update-SmartM365TimestampedTranscript -Path $smartM365TranscriptPath }
     }
     catch {}
     Complete-SmartM365ExecutionContext -Status Success
+    $smartM365RunGuard.ReachedTerminal=$true
+    $smartM365RunGuard.ReturnedNormally=$true
+} catch {
+    if ($_.Exception -isnot [Management.Automation.PipelineStoppedException] -and $_.Exception -isnot [OperationCanceledException]) { $smartM365RunGuard.ErrorRecord=$_ }
+    throw
+} finally {
+    Complete-SmartM365InventoryRun -State $smartM365RunGuard -Cleanup {
+        $changed=Get-Variable ChangedViewEntireForest -Scope Script -ValueOnly -ErrorAction SilentlyContinue
+        $previous=Get-Variable PrevViewEntireForest -Scope Script -ValueOnly -ErrorAction SilentlyContinue
+        if($changed -and $null -ne $previous){
+            Invoke-SmartM365RunCleanup $smartM365RunGuard 'AD session settings' { Set-ADServerSettings -ViewEntireForest $previous; $script:ChangedViewEntireForest=$false }
+        }
+    }
+    if($smartM365RunGuard.ExitCode -eq 130){exit 130}
+}
+if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
+
     #endregion
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAkSwtCUlPTv2Rd
-# DS3ooA0gE4bYLfO7N+f6TZdVkjloRKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBNrcY8Ova/0QbK
+# yuizwOAIY5elI1fH+cDdsGas/ukDQKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1497,31 +1526,31 @@ WriteLog -Message 'ProxyAddresses report email is disabled; CSV and workbook out
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIK8KX/buByPWhVcCSJPTEZd4mOa7IqthCkkRAz0lP4YoMA0GCSqG
-# SIb3DQEBAQUABIIBgHTIJp+1eJxevCzKOh00jcUWeHN6DdU5jYSKOxL/2ihl/Dmz
-# PxVbvZfN1ev/Oso8Ema82on0/tVPUPiGsKdsPck1/W8lOh8Aju6Xb9xYr3zYR8ax
-# IEB6RcuqVu4K01q8i4QXP4m98SwTsFFOxhz4BQSTZwew1aWui0tQVs5pGfVRngEp
-# GzJ/xwtRLO6MtRDIH9Cu2bbD4CbvXMcJCtyBTT/mlextgaS+hDt5G8xVxBIQYaIq
-# z3B2hSp82mUVHkbK2Llm35R2IKpolduN9OFWd+IetXIFWEXjSfs8DsXMrgQEc0gk
-# /cJ+IwBzHnPsGXKKFzoBBTClALMv9QvU2LpZpCN9hAXwTgzdSJX/w1czDuvQAXz4
-# NCoN/xcfuNzxlo7yaC2/iCnpPviiuLJQ7+x6YqNZLdX+oeBFJaUHFrXwA6HrqagU
-# Pbp4VnuQtAf6SGUkzgQM21f0IQXxLTPIIhBcOq3Sdu+29ILPSwToFFWLLw9M6R+W
-# X2Yme57kViWKUXo1T6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIO99OekckinuM/evE0TF5dsn9lEqjHwLff+ZonMaZjPPMA0GCSqG
+# SIb3DQEBAQUABIIBgBk5uzVhFn71R4IeZP6idp+N2EVs0etKWKgluDeAh7te+VRm
+# TbeFAZmVOVeyhAFCyvtdJdhgrP6/9+KT/SPkjNRRm02NnVp1NGi2Jz3LMrdHWFdm
+# qbVKNssCeOTq2E80yJfRiPjdupnkD65U/r4JKVKFZq7D4JzVTKNQtiehsUbZ4+Mj
+# TglU9k6yTGdF9ENzQmOxNhlTw75uOZrj0VTDWp5c6R7In86sOHTBk+iobhS9rR7K
+# dazDgLkXwHi9HBpshLmEqtCtG2Ojyc8V7BlrefRtk+OJG7fpIcNFr5cDizFAskrD
+# kN+wgpH/azZLR72CG4pKj0Hy7+rHxZDQmFb4AskoFs9AQhYfxDHkO6AuuSYTz7NY
+# 65zx+E36kGVw49uMUf6pC50O+5BSusiYzSQDVJlbkxCcyXuZr9rRMYnOknqiuWlT
+# VnVf9Z/AlLNvoazoAE0puAXteAP6qP0nEHdsphCzwCIa0Rb5706zD/7RokKgQnHw
+# mYIRB4DCCG9gLjW6ZaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTQwODMw
-# MjZaMC8GCSqGSIb3DQEJBDEiBCANPpD2qhkX5Of7IhHOpOhR6NnI58FhBExEfykJ
-# v4oAETANBgkqhkiG9w0BAQEFAASCAgBCoqxHdo8E9SCO/ceNQ+3k584H56F/hWUx
-# nXfcawmzdYu92aLmmQVC23nowjx8DGPsaujYLuCns1owaR5dfRDt27sGy7ACqqs+
-# 86kZmbbLvGdM3m+gnaESqLdKidq6hQRp8+r00fHRcm2VF7dSWEzctp46oI0liybr
-# nAwxTtSaNyTUf4BQyVopHUvZh78vWOPcXQt0Zjme9oMhPc/ZV63AObTi5tMMStG4
-# 6jximKgCWPUeGZnl6CbrT+ly3X3tM1GUt/e6s8DMcmY0fA1qWdOOqYYjfgbwkrt1
-# qkuvoTRxgZHhkj3mK4rcIZqiyXGbPEkHFvu+2cZvRT5AmHjg99OVl0OFAVOnKQVy
-# 0JwVNOwbqVG2ktb/MjM/sDNbNR1a/6ErXFe1cBchnJiMmIlWQqQd6XNudgZRbEbi
-# ka1qYbw61i686UjCdGHGKMcidKkWkpND/uODHmGWeTf7BhNYbhdQGCYVHNNIGhji
-# XcMCaMBBusUoiGZbsmaRG0C2ed0LDPTtjPooRgqcYwWGsXzTAm7GElyPWcLQKV64
-# KyOB9vlDnIZ66IsaE0sWQVh1B0HTwAz6kKdSxNrh8MwAgiw2D4aZfGuOAdxa3XJR
-# kwN6cO6zls2D6kqeHVX5ilN0RkWqFvoqBSqv/a04prixiz9G/8IuZeOhD8YkZXO8
-# HWqETdopmg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTQxNTMw
+# MjFaMC8GCSqGSIb3DQEJBDEiBCBK1OixCRPSMXI/G6AmiB1OeJVtg9JYTq9twDiD
+# W4v1QzANBgkqhkiG9w0BAQEFAASCAgBVndCrrXNKg7T1rPsBFcJZtjfiW6qS5jdx
+# Tcfez8VLjJzH5HS3E1b5W6pJIOtqUUBg6HF3ergx/oaGLbP5Ysnxqsyge9WUvTyJ
+# d10OL50F4MxJVNRoqGyjBYtuSTuk5iKvItv2TjVdrh6jUwhsGn/YYSXI6D0VSJxB
+# /PCjsNLdL34oGju1+W3zSKf0wVEwcTi2Iwky6TEwELfGp9Tp3mvIOIRkuglj/A+H
+# 4ZVCuPnSOlk56bbvgwPcBdxfd8FA2LIkemGMKTFr/F7oWBlxwKgBnoTevLMGV/Pm
+# THS+31Hvc7bD8YFBU/D/NEgixK3r1EikAK8HGQf1xI1q6Kioqyc25ylyM7poN7Tn
+# Nmh31iwchSwkGw13fg7Ut5mBcSz1raKxGqdamxT47ArFURApmKbKOkhEiXZbYtf9
+# tjJBN5Aj3VdDlXssDGGcnmtzEPZ7KOd4GL2qDNeWQQ/7TEolQafXrV6/Hfh5m6Rf
+# ih5xaiLZF/py+/sGSIWuQmi4SzwkTCyLt6C9UwS86q62xOO7NzsoR2pps1BMXN0u
+# 3ibt1she7su6tb5UU6m2xEyFmYyL7ZnzOMH+3JVKgr43Kvi02M8Te9QC2HNvvroX
+# Taz55hBljoR/e0TrQYCNJtF7HaxhFbIlkSy+y2vt7cR2mvWGNkAql5P/VMt2qSlM
+# cOROh2T3JA==
 # SIG # End signature block

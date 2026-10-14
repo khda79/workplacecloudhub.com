@@ -101,7 +101,7 @@ detailed tables for the last 24 hours and 7 days, then exits without acquiring t
 lock or launching inventory jobs.
 
 .VERSION
-1.5.49
+1.5.50
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -114,10 +114,11 @@ lock or launching inventory jobs.
     inside its own child process.
 
 .NOTES
-    Version : 1.5.49
+    Version : 1.5.50
     Author: https://github.com/khda79/workplacecloudhub.com
     Exit codes: 0 = normal end (recycle, DryRun, Once, summary sent), 1 = fatal error or summary send failure,
-    2 = configuration or manifest error at startup, 3 = another live instance holds the lock.
+    2 = configuration or manifest error at startup, 3 = another live instance holds the lock,
+    130 = operator pipeline cancellation (Ctrl+C).
 #>
 
 param(
@@ -137,9 +138,20 @@ param(
     [string]$StatePath = ''
 )
 
+# Local lifecycle only; no collection or publication is performed by this guard.
+$smartM365LifecycleRoot=$PSScriptRoot
+while ($smartM365LifecycleRoot -and -not (Test-Path -LiteralPath (Join-Path $smartM365LifecycleRoot 'Modules/SmartM365.Core/SmartM365-InventoryLifecycle.ps1') -PathType Leaf)) {
+    $smartM365LifecycleParent=Split-Path $smartM365LifecycleRoot -Parent
+    if($smartM365LifecycleParent -eq $smartM365LifecycleRoot){break}
+    $smartM365LifecycleRoot=$smartM365LifecycleParent
+}
+if(-not $smartM365LifecycleRoot){throw 'SmartM365 lifecycle support is missing; update the complete runtime.'}
+. (Join-Path $smartM365LifecycleRoot 'Modules/SmartM365.Core/SmartM365-InventoryLifecycle.ps1')
+$smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -RequireReturn
+try {
 $ErrorActionPreference = 'Stop'
 
-$ScriptVersion = "1.5.49"
+$ScriptVersion = "1.5.50"
 $ScriptName = 'SmartM365-Inventory-Orchestrator'
 $global:SmartM365ScriptFileName = [System.IO.Path]::GetFileName($PSCommandPath)
 $global:SmartM365ScriptVersion = $ScriptVersion
@@ -203,7 +215,7 @@ function Write-Host {
 if ($PSVersionTable.PSVersion.Major -lt 7) {
     Write-Host "This script requires PowerShell 7 or later." -ForegroundColor Red
     Write-Host "Current PowerShell version: $($PSVersionTable.PSVersion)" -ForegroundColor Yellow
-    exit 2
+    $smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; $smartM365RunGuard.ExitCode=(2); exit $smartM365RunGuard.ExitCode
 }
 
 # ==========================================================
@@ -6311,7 +6323,7 @@ $script:CentralClusterHash = ''
 try {
     $tenantContextPath = Find-SmartM365TenantContextPath
     $coreModulePath = Find-SmartM365CoreModulePath
-    Import-Module -Name $coreModulePath -MinimumVersion '1.0.68' -Force -ErrorAction Stop
+    Import-Module -Name $coreModulePath -MinimumVersion '1.0.87' -Force -ErrorAction Stop
     $distributedModulePath = Join-Path -Path $PSScriptRoot -ChildPath 'SmartM365.Orchestrator.Distributed.psm1'
     Import-Module -Name $distributedModulePath -Force -ErrorAction Stop
     $managementModulePath = Join-Path -Path $PSScriptRoot -ChildPath 'SmartM365.Orchestrator.Management.psm1'
@@ -6638,7 +6650,7 @@ try {
 }
 catch {
     Write-Host ("Configuration error: {0}" -f $_.Exception.Message) -ForegroundColor Red
-    exit 2
+    $smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; $smartM365RunGuard.ExitCode=(2); exit $smartM365RunGuard.ExitCode
 }
 
 # ==========================================================
@@ -6656,7 +6668,7 @@ try {
     if ($Stop) {
         $script:ExitCode = Request-OrchestratorStop -TimeoutSeconds $StopTimeoutSeconds
         $script:OrchestratorStopReason = 'StopRequestSubmitted'
-        exit $script:ExitCode
+        $smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; $smartM365RunGuard.ExitCode=($script:ExitCode); exit $smartM365RunGuard.ExitCode
     }
 
     if ($SendExecutionSummary) {
@@ -6671,7 +6683,7 @@ try {
             $script:OrchestratorRunErrorText = 'Execution summary email could not be sent.'
             Write-OrchestratorLog -Message $script:OrchestratorRunErrorText -Level ERROR
         }
-        exit $script:ExitCode
+        $smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; $smartM365RunGuard.ExitCode=($script:ExitCode); exit $smartM365RunGuard.ExitCode
     }
 
     Add-OrchestratorRunTracking
@@ -6742,13 +6754,13 @@ try {
     if ($DryRun) {
         Show-DryRunPlan
         $script:OrchestratorStopReason = 'DryRun'
-        exit 0
+        $smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; $smartM365RunGuard.ExitCode=(0); exit $smartM365RunGuard.ExitCode
     }
 
     if (-not (Enter-OrchestratorLock)) {
         $script:ExitCode = 3
         $script:OrchestratorStopReason = 'LockConflict'
-        exit 3
+        $smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; $smartM365RunGuard.ExitCode=(3); exit $smartM365RunGuard.ExitCode
     }
     $script:LockOwned = $true
 
@@ -6861,8 +6873,13 @@ try {
         Write-OrchestratorLog -Message ("Heartbeat published as Recycling ({0}); peers tolerate it for {1} minute(s)." -f $script:OrchestratorStopReason, $script:Settings.PeerRecycleGraceMinutes)
     }
     Write-OrchestratorLog -Message ("{0} exiting normally (exit code 0)." -f $ScriptName)
+
+    $smartM365RunGuard.ReachedTerminal=$true
 }
 catch {
+    if ($_.Exception -is [Management.Automation.PipelineStoppedException] -or $_.Exception -is [OperationCanceledException]) { throw }
+    $smartM365RunGuard.ErrorRecord=$_
+
     if ($script:ExitCode -eq 0) { $script:ExitCode = 1 }
     $errorText = "{0}`n{1}" -f $_.Exception.Message, $_.ScriptStackTrace
     $script:OrchestratorRunErrorText = $errorText
@@ -6873,20 +6890,28 @@ catch {
     if ($script:ExitCode -eq 1) { Send-OrchestratorFatalEmail -ErrorText $errorText }
 }
 finally {
+    $smartM365RunGuard.InCleanup=$true
+
     if ($null -ne $script:State -and -not $DryRun) {
         try { Save-OrchestratorState } catch { }
     }
     Exit-OrchestratorLock
     $runStatus = 'Failed'
+    if (-not $smartM365RunGuard.ReachedTerminal -and -not $smartM365RunGuard.ErrorRecord) {
+        $script:ExitCode=130
+        $script:OrchestratorStopReason='OperatorCancelled'
+        Disable-SmartM365InterruptedPublication $smartM365RunGuard
+    }
     if ($script:ExitCode -eq 0) { $runStatus = 'Success' }
     elseif ($script:ExitCode -eq 3) { $runStatus = 'Rejected' }
+    elseif ($script:ExitCode -eq 130) { $runStatus = 'Interrupted' }
     try {
         Complete-OrchestratorRunTracking -Status $runStatus -ExitCode $script:ExitCode -StopReason $script:OrchestratorStopReason -ErrorMessage $script:OrchestratorRunErrorText
     }
     catch {
         Write-OrchestratorLog -Message ("Failed to finalize orchestrator lifecycle tracking: {0}" -f $_.Exception.Message) -Level WARN
     }
-    if (-not $DryRun -and -not $Stop -and -not $SendExecutionSummary) {
+    if ($script:ExitCode -ne 130 -and -not $DryRun -and -not $Stop -and -not $SendExecutionSummary) {
         try {
             # A planned recycle only publishes logs and state; the next instance runs the mirror.
             Invoke-OrchestratorPeriodicSharePointUpload -Now (Get-Date) -RunNow -SkipMirror:(Test-OrchestratorPlannedRecycle)
@@ -6899,19 +6924,30 @@ finally {
     $errorVariable = Get-Variable -Name SmartM365ErrorCount -Scope Global -ErrorAction SilentlyContinue
     $baseWarningCount = if ($warningVariable) { [int]$warningVariable.Value } else { 0 }
     $baseErrorCount = if ($errorVariable) { [int]$errorVariable.Value } else { 0 }
-    $completionStatus = if ($script:ExitCode -eq 0) { 'Auto' } elseif ($script:ExitCode -eq 3) { 'CompletedWithWarnings' } else { 'Failed' }
+    $completionStatus = if ($script:ExitCode -eq 130) { 'Cancelled' } elseif ($script:ExitCode -eq 0) { 'Auto' } elseif ($script:ExitCode -eq 3) { 'CompletedWithWarnings' } else { 'Failed' }
     $completionWarnings = if ($script:ExitCode -eq 3) { [Math]::Max(1, $baseWarningCount) } else { $baseWarningCount }
-    $completionErrors = if ($script:ExitCode -notin @(0, 3)) { [Math]::Max(1, $baseErrorCount) } else { $baseErrorCount }
+    $completionErrors = if ($script:ExitCode -notin @(0, 3, 130)) { [Math]::Max(1, $baseErrorCount) } else { $baseErrorCount }
     Write-SmartM365CompletionBanner -Status $completionStatus -ScriptName $ScriptName -StartedAt $script:StartTime -WarningCount $completionWarnings -ErrorCount $completionErrors -LogPath $global:LogTextFile
 }
 
-exit $script:ExitCode
+$smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; $smartM365RunGuard.ExitCode=($script:ExitCode); exit $smartM365RunGuard.ExitCode
+    $smartM365RunGuard.ReachedTerminal=$true
+    $smartM365RunGuard.ReturnedNormally=$true
+} catch {
+    if ($_.Exception -isnot [Management.Automation.PipelineStoppedException] -and $_.Exception -isnot [OperationCanceledException]) { $smartM365RunGuard.ErrorRecord=$_ }
+    throw
+} finally {
+    Complete-SmartM365InventoryRun -State $smartM365RunGuard
+    if($smartM365RunGuard.ExitCode -eq 130){exit 130}
+}
+if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
+
 
 # SIG # Begin signature block
-# MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
+# MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDGiFMVqU9UzHMb
-# 7LkvTWAEUnckrsjuIrfE2VXuLRJyeKCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBWCFXWwgatzRHO
+# bJShtoMciKdJHPNdDQaxOqJBwj6NlKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -6936,19 +6972,139 @@ exit $script:ExitCode
 # PI5wrVTjV/pR7IrtSIfq8UladlrSZJyyDn3NV2ATvIZ6wNxbTmPFcE0uMg/EYzwd
 # Tek+CgXL3TxUKeldJM4YDWPimNBRhOPXzBDiOQIj6WNswt/KM1oDLnA00CNtciPN
 # dn+dXlneMvTEUah9wyt8o8tkLpoBw+KN+Bq/K0O1qPtS7umi70l45pPiej+mwbwq
-# ztcaoVD7a8ggHP1Vdp/rnafM4GtyCAE6b7U9Yzgvp1/a1kh7XffmqVhRRjGCApQw
-# ggKQAgEBMGIwTjEeMBwGA1UEAwwVd29ya3BsYWNlY2xvdWRodWIuY29tMSwwKgYJ
-# KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
-# 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
-# gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCBpivI92vpJGSlziWc9qvzO
-# CNLPI0DUulOEwgMdlpMkqzANBgkqhkiG9w0BAQEFAASCAYCsdaNN91qw4AHyYCws
-# Hvuih7hgbQ2vcHYCeFTqgnmL/oYOKzOfSDuvNoJ6N0QR85anhwAcktY5nr4mZlxZ
-# DLdz6c1/1biYFiDOdhOYOYGIMSHmYIK8sE4x1CrN4afndTdTSllINJTuUp6YwuoF
-# VLl3J/dzc96iqwEoNChrH6C3Y7G6fbCHaSW7/XWR3ThfuYc7W5ufSaAutlF3JzRL
-# LR7zKJ5QPfm2q0ZTpUlcQ2fbUUgK1TfOE6dKznqPDljU0bwt+on4bBtjmpMG1Lg5
-# CCOqyYTZ0eDsmCoQu5GjheRCAVy3i5+1Afy7bfcB/3Vw8Kks8GNa6OtbF1+/Ex0e
-# LtSStLeboIktVThcbWBAlskFy0XhSJFaiqkE1eTwCPzKV5ZOkfmZPJxdVxbPnysX
-# 75F7KcCXFL/syJ2poVTs+N2nDsT+qM0cH8qr32kocDB/mK0Tu0/sGOdEVSa/sWw5
-# eAweGzhXVMvxpzLL/8SqWNa1fsO9nBSvz25G0KQKO4s6vOY=
+# ztcaoVD7a8ggHP1Vdp/rnafM4GtyCAE6b7U9Yzgvp1/a1kh7XffmqVhRRjCCBY0w
+# ggR1oAMCAQICEA6bGI750C3n79tQ4ghAGFowDQYJKoZIhvcNAQEMBQAwZTELMAkG
+# A1UEBhMCVVMxFTATBgNVBAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRp
+# Z2ljZXJ0LmNvbTEkMCIGA1UEAxMbRGlnaUNlcnQgQXNzdXJlZCBJRCBSb290IENB
+# MB4XDTIyMDgwMTAwMDAwMFoXDTMxMTEwOTIzNTk1OVowYjELMAkGA1UEBhMCVVMx
+# FTATBgNVBAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRpZ2ljZXJ0LmNv
+# bTEhMB8GA1UEAxMYRGlnaUNlcnQgVHJ1c3RlZCBSb290IEc0MIICIjANBgkqhkiG
+# 9w0BAQEFAAOCAg8AMIICCgKCAgEAv+aQc2jeu+RdSjwwIjBpM+zCpyUuySE98orY
+# WcLhKac9WKt2ms2uexuEDcQwH/MbpDgW61bGl20dq7J58soR0uRf1gU8Ug9SH8ae
+# FaV+vp+pVxZZVXKvaJNwwrK6dZlqczKU0RBEEC7fgvMHhOZ0O21x4i0MG+4g1ckg
+# HWMpLc7sXk7Ik/ghYZs06wXGXuxbGrzryc/NrDRAX7F6Zu53yEioZldXn1RYjgwr
+# t0+nMNlW7sp7XeOtyU9e5TXnMcvak17cjo+A2raRmECQecN4x7axxLVqGDgDEI3Y
+# 1DekLgV9iPWCPhCRcKtVgkEy19sEcypukQF8IUzUvK4bA3VdeGbZOjFEmjNAvwjX
+# WkmkwuapoGfdpCe8oU85tRFYF/ckXEaPZPfBaYh2mHY9WV1CdoeJl2l6SPDgohIb
+# Zpp0yt5LHucOY67m1O+SkjqePdwA5EUlibaaRBkrfsCUtNJhbesz2cXfSwQAzH0c
+# lcOP9yGyshG3u3/y1YxwLEFgqrFjGESVGnZifvaAsPvoZKYz0YkH4b235kOkGLim
+# dwHhD5QMIR2yVCkliWzlDlJRR3S+Jqy2QXXeeqxfjT/JvNNBERJb5RBQ6zHFynIW
+# IgnffEx1P2PsIV/EIFFrb7GrhotPwtZFX50g/KEexcCPorF+CiaZ9eRpL5gdLfXZ
+# qbId5RsCAwEAAaOCATowggE2MA8GA1UdEwEB/wQFMAMBAf8wHQYDVR0OBBYEFOzX
+# 44LScV1kTN8uZz/nupiuHA9PMB8GA1UdIwQYMBaAFEXroq/0ksuCMS1Ri6enIZ3z
+# bcgPMA4GA1UdDwEB/wQEAwIBhjB5BggrBgEFBQcBAQRtMGswJAYIKwYBBQUHMAGG
+# GGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBDBggrBgEFBQcwAoY3aHR0cDovL2Nh
+# Y2VydHMuZGlnaWNlcnQuY29tL0RpZ2lDZXJ0QXNzdXJlZElEUm9vdENBLmNydDBF
+# BgNVHR8EPjA8MDqgOKA2hjRodHRwOi8vY3JsMy5kaWdpY2VydC5jb20vRGlnaUNl
+# cnRBc3N1cmVkSURSb290Q0EuY3JsMBEGA1UdIAQKMAgwBgYEVR0gADANBgkqhkiG
+# 9w0BAQwFAAOCAQEAcKC/Q1xV5zhfoKN0Gz22Ftf3v1cHvZqsoYcs7IVeqRq7IviH
+# GmlUIu2kiHdtvRoU9BNKei8ttzjv9P+Aufih9/Jy3iS8UgPITtAq3votVs/59Pes
+# MHqai7Je1M/RQ0SbQyHrlnKhSLSZy51PpwYDE3cnRNTnf+hZqPC/Lwum6fI0POz3
+# A8eHqNJMQBk1RmppVLC4oVaO7KTVPeix3P0c2PR3WlxUjG/voVA9/HYJaISfb8rb
+# II01YBwCA8sgsKxYoA5AY8WYIsGyWfVVa88nq2x2zm8jLfR+cWojayL/ErhULSd+
+# 2DrZ8LaHlv1b0VysGMNNn3O3AamfV6peKOK5lDCCBrQwggScoAMCAQICEA3HrFcF
+# /yGZLkBDIgw6SYYwDQYJKoZIhvcNAQELBQAwYjELMAkGA1UEBhMCVVMxFTATBgNV
+# BAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRpZ2ljZXJ0LmNvbTEhMB8G
+# A1UEAxMYRGlnaUNlcnQgVHJ1c3RlZCBSb290IEc0MB4XDTI1MDUwNzAwMDAwMFoX
+# DTM4MDExNDIzNTk1OVowaTELMAkGA1UEBhMCVVMxFzAVBgNVBAoTDkRpZ2lDZXJ0
+# LCBJbmMuMUEwPwYDVQQDEzhEaWdpQ2VydCBUcnVzdGVkIEc0IFRpbWVTdGFtcGlu
+# ZyBSU0E0MDk2IFNIQTI1NiAyMDI1IENBMTCCAiIwDQYJKoZIhvcNAQEBBQADggIP
+# ADCCAgoCggIBALR4MdMKmEFyvjxGwBysddujRmh0tFEXnU2tjQ2UtZmWgyxU7UNq
+# EY81FzJsQqr5G7A6c+Gh/qm8Xi4aPCOo2N8S9SLrC6Kbltqn7SWCWgzbNfiR+2fk
+# HUiljNOqnIVD/gG3SYDEAd4dg2dDGpeZGKe+42DFUF0mR/vtLa4+gKPsYfwEu7EE
+# bkC9+0F2w4QJLVSTEG8yAR2CQWIM1iI5PHg62IVwxKSpO0XaF9DPfNBKS7Zazch8
+# NF5vp7eaZ2CVNxpqumzTCNSOxm+SAWSuIr21Qomb+zzQWKhxKTVVgtmUPAW35xUU
+# FREmDrMxSNlr/NsJyUXzdtFUUt4aS4CEeIY8y9IaaGBpPNXKFifinT7zL2gdFpBP
+# 9qh8SdLnEut/GcalNeJQ55IuwnKCgs+nrpuQNfVmUB5KlCX3ZA4x5HHKS+rqBvKW
+# xdCyQEEGcbLe1b8Aw4wJkhU1JrPsFfxW1gaou30yZ46t4Y9F20HHfIY4/6vHespY
+# MQmUiote8ladjS/nJ0+k6MvqzfpzPDOy5y6gqztiT96Fv/9bH7mQyogxG9QEPHrP
+# V6/7umw052AkyiLA6tQbZl1KhBtTasySkuJDpsZGKdlsjg4u70EwgWbVRSX1Wd4+
+# zoFpp4Ra+MlKM2baoD6x0VR4RjSpWM8o5a6D8bpfm4CLKczsG7ZrIGNTAgMBAAGj
+# ggFdMIIBWTASBgNVHRMBAf8ECDAGAQH/AgEAMB0GA1UdDgQWBBTvb1NK6eQGfHrK
+# 4pBW9i/USezLTjAfBgNVHSMEGDAWgBTs1+OC0nFdZEzfLmc/57qYrhwPTzAOBgNV
+# HQ8BAf8EBAMCAYYwEwYDVR0lBAwwCgYIKwYBBQUHAwgwdwYIKwYBBQUHAQEEazBp
+# MCQGCCsGAQUFBzABhhhodHRwOi8vb2NzcC5kaWdpY2VydC5jb20wQQYIKwYBBQUH
+# MAKGNWh0dHA6Ly9jYWNlcnRzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRS
+# b290RzQuY3J0MEMGA1UdHwQ8MDowOKA2oDSGMmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0
+# LmNvbS9EaWdpQ2VydFRydXN0ZWRSb290RzQuY3JsMCAGA1UdIAQZMBcwCAYGZ4EM
+# AQQCMAsGCWCGSAGG/WwHATANBgkqhkiG9w0BAQsFAAOCAgEAF877FoAc/gc9EXZx
+# ML2+C8i1NKZ/zdCHxYgaMH9Pw5tcBnPw6O6FTGNpoV2V4wzSUGvI9NAzaoQk97fr
+# PBtIj+ZLzdp+yXdhOP4hCFATuNT+ReOPK0mCefSG+tXqGpYZ3essBS3q8nL2UwM+
+# NMvEuBd/2vmdYxDCvwzJv2sRUoKEfJ+nN57mQfQXwcAEGCvRR2qKtntujB71WPYA
+# gwPyWLKu6RnaID/B0ba2H3LUiwDRAXx1Neq9ydOal95CHfmTnM4I+ZI2rVQfjXQA
+# 1WSjjf4J2a7jLzWGNqNX+DF0SQzHU0pTi4dBwp9nEC8EAqoxW6q17r0z0noDjs6+
+# BFo+z7bKSBwZXTRNivYuve3L2oiKNqetRHdqfMTCW/NmKLJ9M+MtucVGyOxiDf06
+# VXxyKkOirv6o02OoXN4bFzK0vlNMsvhlqgF2puE6FndlENSmE+9JGYxOGLS/D284
+# NHNboDGcmWXfwXRy4kbu4QFhOm0xJuF2EZAOk5eCkhSxZON3rGlHqhpB/8MluDez
+# ooIs8CVnrpHMiD2wL40mm53+/j7tFaxYKIqL0Q4ssd8xHZnIn/7GELH3IdvG2XlM
+# 9q7WP/UwgOkw/HQtyRN62JK4S1C8uw3PdBunvAZapsiI5YKdvlarEvf8EA+8hcpS
+# M9LHJmyrxaFtoza2zNaQ9k+5t1wwggbtMIIE1aADAgECAhAIT9wzT35FTtvDD4/5
+# khg1MA0GCSqGSIb3DQEBCwUAMGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdp
+# Q2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3Rh
+# bXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTEwHhcNMjYwODA1MDAwMDAwWhcN
+# MzcxMTA0MjM1OTU5WjBjMQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQs
+# IEluYy4xOzA5BgNVBAMTMkRpZ2lDZXJ0IFNIQTI1NiBSU0E0MDk2IFRpbWVzdGFt
+# cCBSZXNwb25kZXIgMjAyNiAxMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKC
+# AgEAtnum8sn+zUr41JtMZbP9OMYw+HwJDpG5xkIu/lqcfNYmMX81YmsUiHLbh9yk
+# peWBGKTLhYBrAN9Tdg/QEzG32XcObmgIblnr0CoQ3WSAeDZ6nH6X6VkFyYkJw3QB
+# JREwvm4UhLzSxmwPA7cFKRTEOMsmEEj6qJk/dqLEAL+oQYuOwE2UuiX1Vnul8YRe
+# IyWd4kgLn9gq6LNXM0UplkR6jL/QHxmb6fMoGBJYbnaUI7XD6cKDpekK2SVMld4i
+# DbzeHDtOaaxldH5IxuNusQ69nd8/ZXEiB5Hbxj3RlK13cX1W4DlFXKdv/CEhM8Cj
+# 1vvlmvhNroyPdRGbbpBlgyf8Wdu5N6ByhFwURn0U6ozlPoxN22v+fviUhP+6DR54
+# 7OZnpBMWDfei1f5sVGwiiW/KQTWOK97g+4RJpPzPNV4VYMAwO2jM2Aty2QYPVmOQ
+# TJm0msuXnJrSbl2gf9JylpkJlWXqk1Q4LJsxz+TELoQCZIljbgvTJgoPU2R12ydv
+# 8i1UqL/adelA0y7U9Pmmtbze9Xx3rtajC5SzQd1jgfwAwsa90v9YcSPdmeoyoBBA
+# /27cCL237l5DTYYPDLQ4ON3OLTGWnvRb6jDrf/T75gMRfUzSLCBQfBusm9+mSWRl
+# C/Df6S/e9Q8i13CuhzOT2Jx+V/nlbXM4QoBwlUAhelwwJT0CAwEAAaOCAZUwggGR
+# MAwGA1UdEwEB/wQCMAAwHQYDVR0OBBYEFBTJY4owLtRK+26U8+bjQH717M3iMB8G
+# A1UdIwQYMBaAFO9vU0rp5AZ8esrikFb2L9RJ7MtOMA4GA1UdDwEB/wQEAwIHgDAW
+# BgNVHSUBAf8EDDAKBggrBgEFBQcDCDCBlQYIKwYBBQUHAQEEgYgwgYUwJAYIKwYB
+# BQUHMAGGGGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBdBggrBgEFBQcwAoZRaHR0
+# cDovL2NhY2VydHMuZGlnaWNlcnQuY29tL0RpZ2lDZXJ0VHJ1c3RlZEc0VGltZVN0
+# YW1waW5nUlNBNDA5NlNIQTI1NjIwMjVDQTEuY3J0MF8GA1UdHwRYMFYwVKBSoFCG
+# Tmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRHNFRpbWVT
+# dGFtcGluZ1JTQTQwOTZTSEEyNTYyMDI1Q0ExLmNybDAgBgNVHSAEGTAXMAgGBmeB
+# DAEEAjALBglghkgBhv1sBwEwDQYJKoZIhvcNAQELBQADggIBAI3FOmEenVIK35ms
+# CYB+fShAsWvSYvLBItoNdAgQ2jIqrGsVsluXMJU/+mRebBc52s6lbKAvOVPXaizm
+# KkMLLflEEKDZQx4CkS2t8aHPjkXha3hYZ010htFa3dhNgmalH5vuWvh3tTCf4frT
+# S7gPtGc4Z/xaPhQ2AB1mR8eEe/WbH0RWHvVIl6VwQ3+g5FKNfN2N/DWJkf13w2H+
+# 2GfqEfbd35Ww8CvoYBjLNIDTadcPWdgsjsiOaK/7EsKJgLjUNIVgvcaFOLLQ/Glr
+# A+0ZHJoFUbOr5SJN8zykPspXIXlpDJY/gqFUZRROeab9GVgmhbdOJcD/63RhxPah
+# FUGbckRONqMe6DYAv6/mOG0pWd3cPStsdcS7buj5DyniwRY8yooMH6ptx5vpP/pZ
+# zBPBeZD2U4IsthyxB5Jaa8qrOkB5z160TXiM5ADMspZ0TfD9MJoq0tFpFPssKRFh
+# WeEDYPvcUuN7U7lvcdHl4ezQ3NT/7Ffs1sR1yh/LRbdZ3B3Vc6q2WmD8mDC0p9kz
+# l2o73iVtS946IkEj7FkRsZGww1teYxERROC745xrtjvcw9ZyyUjHZWGRIpJeMNsP
+# quCDf0fkyHtB+J4AiNZqCQk23rxh+KbpyMTNVKItJ5l92Svl20U9NbqMBOVYl1h5
+# 4NEYLJq1/xHWFKPNK903zJZA9P2DMYIFvjCCBboCAQEwYjBOMR4wHAYDVQQDDBV3
+# b3JrcGxhY2VjbG91ZGh1Yi5jb20xLDAqBgkqhkiG9w0BCQEWHWNvbnRhY3RAd29y
+# a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
+# AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
+# CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
+# hvcNAQkEMSIEIO4y6OHAz1fN03SgfKxl555npNKQKSqRE3kDT2k8N6mEMA0GCSqG
+# SIb3DQEBAQUABIIBgGVtuZw3VLXYdgUNgqx0RC749sg3PMzYdZriaboc2cvPNmc1
+# +SGoTfvdPywdF+jmcZYDl44vi8fO60+VyFl8kiQSX5xrX3Ds8I6ACzbd/rwsZEZq
+# RepGFHoMhZ7BCnag0ZNoEpJIIVuGeqanL+8esxc/urPT0g1OYtiVUT4p8dx+EbUa
+# dQHxj7bMtBKLBhF/7xpxIifJiAFgXE5lTNTgazs/vBAN8iWF8Vmq5rn38Hlx6f7g
+# ewAOqx+EtWQFWDudZnqr8WBnve9FVY00sgcpFn5sYdi5lzonpnF8r8w7XKPFI4od
+# +AkPjDjrjcSksV6OHWnXgAh0i/0pwIjJpB/7w1liGg+G36bbAzABsjQqg+HYVHY/
+# X/SsfC6h1htFShn7pQ0mMbpG4csqNKMZ9+BceDaCZhgg6rTc0K5Acrao9pY+P0es
+# 6PU2+8FnM21/cGpy80DKSrECjzaov/uFLhTjEO7nbNYFBTRpDs+C4fy/uuolqlWm
+# VeiStX+mMdtvMFT9QqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
+# RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
+# MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTQxNTMw
+# MzlaMC8GCSqGSIb3DQEJBDEiBCCSOFyoSTM7TQFE2ywOigIS3t8h4GaFeuU1GF/R
+# WeEYvzANBgkqhkiG9w0BAQEFAASCAgCAARSx4XjGLWP8aqVvPFlCdBTqjZwwinRr
+# 7IqTveyzWETifQx7zHvzZ0nJR1G0H/dMR95wXyAOAEakOB2kYNQzy8ZDo5im1Blm
+# 8VJHlShR/Xk0dbMXwSPhZRe3I1JxBf2Llr63KekYhJG7Lz+I+25CRM4YhLmPZzOC
+# MAHkm0KSs4e589T2IEkV3iVtm2rSd2mU+QGr4BLUNTKVN0TaIXrIqXfkNd9ku65B
+# XIcLefwslLl8/71ru0D3xoCoryQMmqmS7DNw1kCFJcqXfIi6wrgBtwD80HPSj6+0
+# 41ZvWWeNS3wtNSzbsIzz98LZlkuXe1JF46/3kw065J3hJk6t/jbE4dENXp2utyDr
+# HSCUjZfVV/E9UT/0bL0tmbFxUgA+qksKty3uP2r3XOdZyrh9WiXQj1KaBntsg6ZA
+# /sejrdmxFf+A+WOtD4UEv7Q/srrA7Vfun5oP6P0eCXV+QmeaqSU2RvW/ddxn31Dn
+# yN3vwH6oNzgu2vt09lmUZDrP23e3s7d9w0cUMAkJ5F9jsQvJWayZNZFndpsxT+KA
+# THReNzf3BySKFi0tSkPgISvsqhDvi8EVApBGmqkPYxX3lNZ7kUqhHFyv1ui5aeHu
+# ujeSldQy27wQvAbKq4O7l+6vLB4Q2bJOVOZxFa1m33yQgLf473ing9RIic/azE2L
+# q0lQFjn+7Q==
 # SIG # End signature block

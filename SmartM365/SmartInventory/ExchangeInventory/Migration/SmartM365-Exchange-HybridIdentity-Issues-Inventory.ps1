@@ -13,7 +13,7 @@ Generates Exchange hybrid identity issue tables for PowerBI from SmartInventory 
   M365_Users_Active.csv
 
 .VERSION
-1.23
+1.24
 #>
 #requires -Version 7.0
 [CmdletBinding()]
@@ -27,6 +27,17 @@ param(
   [int]$DetailedArchiveRetentionDays = 7,
   [int]$MaxItems = 0
 )
+# Local lifecycle only; no collection or publication is performed by this guard.
+$smartM365LifecycleRoot=$PSScriptRoot
+while ($smartM365LifecycleRoot -and -not (Test-Path -LiteralPath (Join-Path $smartM365LifecycleRoot 'Modules/SmartM365.Core/SmartM365-InventoryLifecycle.ps1') -PathType Leaf)) {
+    $smartM365LifecycleParent=Split-Path $smartM365LifecycleRoot -Parent
+    if($smartM365LifecycleParent -eq $smartM365LifecycleRoot){break}
+    $smartM365LifecycleRoot=$smartM365LifecycleParent
+}
+if(-not $smartM365LifecycleRoot){throw 'SmartM365 lifecycle support is missing; update the complete runtime.'}
+. (Join-Path $smartM365LifecycleRoot 'Modules/SmartM365.Core/SmartM365-InventoryLifecycle.ps1')
+$smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -RequireReturn
+try {
 if ($PSBoundParameters.ContainsKey('MaxItems') -and $MaxItems -gt 0) {
     $global:SmartM365MaxItems = [int]$MaxItems
     $global:SmartM365TestMaxItems = [int]$MaxItems
@@ -44,7 +55,7 @@ if ($MaxItems -gt 0) {
 }
 $ErrorActionPreference='Stop'
 $ScriptName='SmartM365-Exchange-HybridIdentity-Issues-Inventory'
-$ScriptVersion="1.23"
+$ScriptVersion="1.24"
 $RunStamp=Get-Date -Format 'yyyyMMdd-HHmmss'
 $RunStartedAt=Get-Date
 $script:WarningCount=0
@@ -221,7 +232,7 @@ function PublishWeeklyHistory($files){
 $script:CompletionStatus = 'Auto'
 try{
   Log "Starting $ScriptName v$ScriptVersion"
-  $sr=Root; . (Join-Path $sr 'Config\SmartM365-TenantContext.ps1'); $script:Cfg=Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot; Import-Module -Name (Join-Path $sr 'Modules\SmartM365.Core\SmartM365.Core.psd1') -MinimumVersion '1.0.72' -Force; Initialize-SmartM365DefaultCsvValidationRules
+  $sr=Root; . (Join-Path $sr 'Config\SmartM365-TenantContext.ps1'); $script:Cfg=Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot; Import-Module -Name (Join-Path $sr 'Modules\SmartM365.Core\SmartM365.Core.psd1') -MinimumVersion '1.0.87' -Force; Initialize-SmartM365DefaultCsvValidationRules
   $lc=LocalConfig
   # Tenant domains are configuration, never code: the routing domain comes from the tenant context, the allowed TargetAddress domains from the local configuration.
   $remoteRoutingDomain=([string](Cfg $lc 'RemoteRoutingDomain' '')).Trim().TrimStart('@').ToLowerInvariant(); if($remoteRoutingDomain -notmatch '^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+mail\.onmicrosoft\.com$'){throw "RemoteRoutingDomain is missing or invalid in the tenant configuration: '$remoteRoutingDomain'."}
@@ -237,7 +248,7 @@ try{
   $global:SharePointSiteHostname=Cfg $lc 'SharePointSiteHostname' ''; $global:SharePointSitePath=Cfg $lc 'SharePointSitePath' ''; $global:SharePointLibraryDisplayName=Cfg $lc 'SharePointLibraryDisplayName' 'Documents'; $global:SharePointTargetFolderPath=Cfg $lc 'SharePointTargetFolderPath' ''; $global:AppId=Cfg $lc 'AppId' ''; $global:TenantId=Cfg $lc 'TenantId' ''; $global:Thumbprint=Cfg $lc 'Thumbprint' (Cfg $lc 'Thumb' '')
   InitializeScriptEnvironment -OutputPath $OutputFolder -LogFileName $ScriptName -CallerScriptPath $PSCommandPath | Out-Null
   Start-SmartM365SourceReceipt -ScriptPath $PSCommandPath -SourceRootPath $LatestFolder
-  Start-Transcript -Path $global:logTranscriptFile -Append | Out-Null
+  Start-SmartM365RunTranscript -Path $global:logTranscriptFile -Append | Out-Null
   $script:LogReady=$true
   Log "Log environment initialized for $ScriptName v$ScriptVersion (EnableSharePointUpload=$($global:EnableSharePointUpload))."
   Log "DataLastFolder: $DataLastFolder"; Log "OutputFolder: $OutputFolder"; Log "LatestFolder: $LatestFolder"
@@ -343,8 +354,13 @@ try{
   Log "Generated Exchange hybrid identity issues: $($issues.Count) row(s)"
   if($global:EnableSharePointUpload){foreach($f in $files){try{Invoke-SmartM365SharePointCsvUpload -LocalFilePath $f|Out-Null; Log "SharePoint upload completed: $f"}catch{Warn "SharePoint upload failed for $f : $($_.Exception.Message)"}}}
   Log "$ScriptName completed successfully."
+
+    $smartM365RunGuard.ReachedTerminal=$true
 }
 catch {
+    if ($_.Exception -is [Management.Automation.PipelineStoppedException] -or $_.Exception -is [OperationCanceledException]) { throw }
+    $smartM365RunGuard.ErrorRecord=$_
+
   $script:ErrorCount++
   $script:CompletionStatus = 'Failed'
   $failure = $_
@@ -357,19 +373,32 @@ catch {
   throw
 }
 finally {
+    $smartM365RunGuard.InCleanup=$true
+
   if($script:LogReady){
-    try{ Stop-Transcript | Out-Null; Update-SmartM365TimestampedTranscript -Path $global:logTranscriptFile }catch{ Write-Warning ("Transcript finalization failed: {0}" -f $_.Exception.Message) }
+    try{ Stop-SmartM365RunTranscript | Out-Null; Update-SmartM365TimestampedTranscript -Path $global:logTranscriptFile }catch{ Write-Warning ("Transcript finalization failed: {0}" -f $_.Exception.Message) }
     Complete-SmartM365ExecutionContext -Status $(if($script:CompletionStatus -eq 'Failed'){'Failed'}else{'Auto'}) -ErrorRecord $failure -FailureStage $(if($failure){'Inventory'}else{''})
   } else {
     Write-SmartM365CompletionBanner -Status $script:CompletionStatus -ScriptName $ScriptName -StartedAt $RunStartedAt -WarningCount $script:WarningCount -ErrorCount $script:ErrorCount -GeneratedCsvFiles $script:GeneratedFileCount
   }
 }
+    $smartM365RunGuard.ReachedTerminal=$true
+    $smartM365RunGuard.ReturnedNormally=$true
+} catch {
+    if ($_.Exception -isnot [Management.Automation.PipelineStoppedException] -and $_.Exception -isnot [OperationCanceledException]) { $smartM365RunGuard.ErrorRecord=$_ }
+    throw
+} finally {
+    Complete-SmartM365InventoryRun -State $smartM365RunGuard
+    if($smartM365RunGuard.ExitCode -eq 130){exit 130}
+}
+if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
+
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDIzj7R0M6O6sH0
-# 9kHBJEEvdVEmuGf6NQeOoPiwbuRNwaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAf/7O3AkAc88G/
+# i2ttckP1nEb1pIQr1AhuO7qK3sStjKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -502,31 +531,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIIOTvSEULJqZokhLpaPdA/q1os0GEalSTJP8gESSQXhgMA0GCSqG
-# SIb3DQEBAQUABIIBgA2++qe+H4n0hePuUX5WENtInQvLJYgmOEEAp6hmCzayz3iB
-# nnNpqlwYHvbBORs3rmRaKnGfpO39VkTLITg8wGOmC+Jetypzdf3cWEmCM7qZDYkz
-# ZRWiwUAw+4pQdfEHpAQNNXt/tx/dprtnYNHymRW/tTQ3QFXNjvi1f1wLNYCYQF2X
-# q2sN+eL5e6YjmrPEHVKnO2F3BdEAQRG00ShbmeLvpEVjYXD4AzZQfosOWm8/DKPs
-# vk/9OILQdwC+EWEDFNdagbp2QaWhXLUW1iJXgN1Nw2p0TpiV+U5S/ZxHMTDNrhn2
-# SSOzRBj8AN4xAPX4twooU8CKkPpGcJdmUecRcXGUe35tlvIYwrZXbBPsZwcthQaB
-# yeFpA8lQWEvtGMhmZaMtuaQ+wcAkB9BuTPZVTWEd+cJUsi5nSa1PI/syUpJz6U/U
-# g4t2RQJByyLmfuC47fIP6HcH19MUt/cNUsPhPR7CUGODTzppe8r5W/lQzFkfMeAF
-# QN/emUq9cWW3rwQ9UKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIB+DdP8JPyXH4Zae1bJD7i6f4ymH9g+aI7bRzBMALn2AMA0GCSqG
+# SIb3DQEBAQUABIIBgHwRJnkGk71BdD784q6FNHLZA9TQni9/umt9xFXiPYsiPhi0
+# BKUGA4CZLOzlrSUiDtsTd/Xpj/qQmLVZTgDphn4+Y7TWWL/p2eqn1HsgFX8uGdyB
+# GThpB014mkawi1wYfQF9WZ2/a6us1rK3tl9Zd4zQleqWopkCiSe+S5LrIPXRZk9s
+# FRIWJ1C1u8fdV1hiaAOg2bAweUnnEXksldmsIIMgXReg7lgdB4TMIoEnPEpaH/Pu
+# A1HWG/0NarQAe8r1UJRGKREViwoAFsAPn/XhbWiX9FSOSi4zGfGGRbqgrST9Ylh1
+# 3yiFUk3A3js02R1eXFoJbbLM4lhcfOAys6kabED/A2VjNxpBqN57xLPYFFaIeCl+
+# W8pOaU+ueEQDr9yXZ0PVJi5IWy0ptQv2kFVuTaMCGQnUWwe/TkMBp7yNFL+0sQcf
+# Ipu8sTGyTYNyzWDLc4Y/56ZdK/67RilLS1rTPrJGJB4/2LqEMVDB0+NO43l/B62m
+# HvK/EmC/LfeETGYho6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDUxOTAx
-# NDNaMC8GCSqGSIb3DQEJBDEiBCBFmMszvXQpUlH08NibF/h9X6ly+gZHLP1IKcar
-# chBJ/DANBgkqhkiG9w0BAQEFAASCAgCOJfX4/XcKTT5toNN0HNVr80+oQaNtGwXH
-# tFnXxejgiAhoXaWPsRspFgPAT49rsDjJFpsnVxa+d9h+PMa1TypDIPFH8Sfs/69g
-# wnrrK1GYWkNv6HgLdfVmJZK0bsrjcxwUemct/+IxgE+8aIOXB8AcMa7Zd5ByxYkk
-# nfv4IycmkSiU/os9VnZrwwNOxt589f7fbKEp7fkYeYYOd32NI3Z1x+Bs/JPFdkPM
-# uXUTxI8Tl08iHZN8aLkNpbNWvpCRE7tiYXmWnRpGbD90LF12OvHgZogEp06kchpZ
-# uRFF3hY0jxJsg6EV88h6qgjFtPcIbzms95D3P1N9NmHykXU0U/18vENR3WSRH+Xb
-# 9SxGURHAOTwdUjJ7FuIFWViWlFrVxkdpdyfz+S9+m18vy+mUTvi/BjwuLx/vjOWD
-# Ov48IOPbCohj7yc9nMzgXiryG2/k0gSOcAUCaSE7DxhMk9QGXg09foludVc4+35T
-# az3KIZNko3wMNHkSv7a0vSeeozYAxq3DOrb+LQjbc3LoxvK+MDw7hb+kYDvPZdDU
-# OEnuy86fwNzTa5+vkJNaCifNYuuXg2WRc+BiU6vPy2wnYIm7XCnqrTNZdmRCMsiu
-# KiWrpN+5wXwZarCCZ+5xfzTAMlCne+S/eS6hNbAyBgdaWeECFi52PLGRJKN0u9jj
-# w/8CwjwZ1Q==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTQxNTMw
+# MTlaMC8GCSqGSIb3DQEJBDEiBCAjg7XCR3XfbmMKDevjpSpAGtf+dzY9Ji7UKU+1
+# 4TBe+zANBgkqhkiG9w0BAQEFAASCAgALFcHXxnpjsG06i11HyHrXlCJwOmxXjDXz
+# 7GvxSgum9TgV4272rkuwyWBr+lKct0WI2uuB/7j2cxf6J6SdkEXwXH3bJIR+3sSz
+# pqkypjDf6UALo2rGc2ogNV+naTF3wo8Dyfs02PZZFLC2AXdzPrLgZdsbe09BKYcT
+# fKEJt2Ta7Lbe/S+69rXJjHF80dFUO3DbXBOk6YbJDyBeHFL79lQw96b3Hu2VT1eS
+# 6S7LB+7+T6NUUcQiwk0BjtRVI9yPOpqFq79QxdVchFvbuO8hxfu2LF66ZEeF7qHd
+# T5a5HUJ8y8MtRP3OgL1s8Rv3JfnEpBVjU8xrjua7yGxA010yyG8gFSsFIAjaADOT
+# HjuS1635T1YGO9cYgHT2jOwEPnbtlp9jpSK2EKqGQpAsZ/QFw6oGGymsKyx90p1Z
+# Li5S/DUxKGnz3+Kh+DqlGr2PxGfB+L2FaPBua8NdB4doKi8lQSKy4v/ugfdjA64e
+# +uZGsXID1qwnruNDz6r/7Jdbyh0AKJq3bOXuw5p8n2rVKiZbWIvR1pkr7+UBybPx
+# hKTcstmVNGGku5/nk9+j3eeu3XrOCv5hoLMkArxRzdoSaWo785hO/iv6Yyc8tIxS
+# +IbHmpw55xHS6ZIeZxCI7/47hbjPfjCnPh30NPv1cGUjIG9gSGud8LbkBd3RcNt9
+# Ilo5sYZvow==
 # SIG # End signature block

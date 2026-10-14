@@ -15,7 +15,7 @@
     SecureBoot:<value>|BIOSVersion:<value>|BIOSDate:<value>|FirmwareType:<value>|LastBootUpTime:<value>|ThirdPartyAVStatus:<value>|ThirdPartyAVProducts:<value>|WindowsUpdateRebootRequired:<value>|BitLockerOSProtectionStatus:<value>|BitLockerOSConversionStatus:<value>|LastConsoleLogonStatus:<value>|LastConsoleLogonUser:<value>|LastConsoleLogonSid:<value>|LastConsoleLogonUtc:<value>
 
 .NOTES
-    Version: 1.6.0
+    Version: 1.6.1
     Author: https://github.com/khda79/workplacecloudhub.com
     Deploy via: Intune > Devices > Scripts and remediations > Remediations
     Run as: System
@@ -94,12 +94,18 @@ catch {
 }
 
 # Windows Update Agent reports only update-related reboot requirements.
+$updateSystemInfo=$null
 try {
     $updateSystemInfo = New-Object -ComObject Microsoft.Update.SystemInfo -ErrorAction Stop
     $outputParts += if ($updateSystemInfo.RebootRequired) { 'WindowsUpdateRebootRequired:True' } else { 'WindowsUpdateRebootRequired:False' }
 }
 catch {
     $outputParts += 'WindowsUpdateRebootRequired:Error'
+}
+finally {
+    if ($null -ne $updateSystemInfo -and [Runtime.InteropServices.Marshal]::IsComObject($updateSystemInfo)) {
+        [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($updateSystemInfo)
+    }
 }
 
 # Local operating-system volume state; recovery keys are never queried or emitted.
@@ -143,6 +149,7 @@ function Get-LastConsoleLogon {
     # Types 2 and 11 are local interactive and cached local interactive logons.
     # Network, service, unlock, and Remote Desktop logons are excluded.
     $query = "*[System[(EventID=4624)]] and *[EventData[(Data[@Name='LogonType']='2' or Data[@Name='LogonType']='11')]]"
+    $events=@()
     try {
         $events = @(Get-WinEvent -LogName Security -FilterXPath $query -MaxEvents 512 -ErrorAction Stop)
         foreach ($securityEvent in $events) {
@@ -170,6 +177,11 @@ function Get-LastConsoleLogon {
         $status = if ($_.FullyQualifiedErrorId -match 'NoMatchingEventsFound') { 'NotFoundInScan' } else { 'Error' }
         return [pscustomobject]@{ Status = $status; User = ''; Sid = ''; Utc = '' }
     }
+    finally {
+        foreach ($securityEvent in $events) {
+            if ($securityEvent -is [IDisposable]) { try { $securityEvent.Dispose() } catch {} }
+        }
+    }
 }
 
 $lastConsoleLogon = Get-LastConsoleLogon
@@ -190,8 +202,8 @@ exit 0
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB6UYZwPmHThZvt
-# +tNa3LBpUmcESvcVSYuzuGsArPzRNaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB7vZSf4HvMNndL
+# WvwTAbX6kupgo7Iu+8SBEh1IVWnX66CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -324,31 +336,31 @@ exit 0
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIKovoL/zS9D9PrhyFyj1djqByF5wxqBmTJfLdTNM2BzaMA0GCSqG
-# SIb3DQEBAQUABIIBgKoMABN/YenVK5/tC8AwN8c0uFni88H7iUAlF7O+WyISt0qp
-# MzUGUCi8gdx0gcRkz6yh7pWW/gQs9qIti6z12f4orq5bxenATc7UtMDtcLZb9pz5
-# rTVyHHZjU8H/ekpbaoydeSD57mhQQyiyBY+xWWS+dVur1P54lo+85ypvhJx1/d4u
-# u1Fa6optL7XhVBB+9EE6i1n6f/WbWLfa33KYllNqhfcdR48+FYImBez+WmEl284f
-# x7oIZr7HxraEO7uTpxujGmIsjkHK6Ql5aPL1Emr1U141RaaO+hw01/y1GO57J8Cs
-# dNb5GiOA4pDoPB49QVgaG+OAUAscj92rm5gIb8zmYlieW5ac55MSdMpFvm9vg216
-# I8CF5/CIN1gXTEZP6Gx72NWjbn/3TxwFyZT7t7N+m+vcQ50R77uGLIu3yLxnEify
-# NgttpWhuJf9jkea80ri6EL9m1dXx+wfdWTpv1TEJpBL4TtbP68Nb9WsCGQPk+yk8
-# 9e6yiZAsfhhFApm/IaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIJxnwDeDcxUXhoXbhcBRLz3Ya7WGjrj5e2skf7nMvakRMA0GCSqG
+# SIb3DQEBAQUABIIBgF3CDN7kePw3NfoL7wwY5eg755Wqq7vCI2Y1oPQkRg5wYZdX
+# IR4wmyKGywNccYEUFLpHJeuNGZjuC0OPKlQB9A0QNt477p0p5HgBEbRfXN0EnDDo
+# g2dezx2MzUtHDl6sAwIf3NlYsaYEIE+zdOyic+S7g6G9/WgAv9fjt4RPfIWvzhSD
+# GchI1PFeDBwA2uOibHJj1x3incT/ST3q8UgtJMycyk5sGm1H1hKxXyWpXTvkCWra
+# 9PD1HYFdKGAZdJ4gtVJvslgdmDcWsExNguUzc05kM5SkC9em1OuBjf95xprTrWHG
+# 7tXz5LFhBex+AGwDihiQ2HRqVNaWJZbFABdO6zo561YyrdrBieWKhOLVUdiuSlES
+# oNZDFCjv5nXNVtFrfQJRJbgonSlMXOQw+K1UqRY7y2aU2bhj/GL0Cb56u3I4Q5cb
+# XiryIEpoxA1GFgBp58A4/JaS0vNZcIn+vWxZ3KuvTjyJRuEp9XSgU5dAG6Tl2e8W
+# kclejJvX3WpL9VGxOaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTMxNTQy
-# MTNaMC8GCSqGSIb3DQEJBDEiBCDq8ac0PBawiYF75Q03iYJyAeMtkBl/uS1Ek9rh
-# 0OOMHjANBgkqhkiG9w0BAQEFAASCAgBPd8oNu1c2bCCEn/O3RweMsE9cG4eVg8fE
-# 3yJOXqgp1nwyA+mjQLCuJMjFWiIla2r4aqvSgnf00Qw8bnnHYEoD2SQWZZD0we4M
-# vyxyxMQfn5D2ZVQXVf/p+UjIJFB0k5Pt3vYU3/tmzKilVSUJJjJAErrGi4NO0G/9
-# QFYZxteIEQu01RGTeGxD9qT+BmaVMMbnzchdJbsqnrcZtW+vMsS4rlKBuKIjhPNd
-# 5Z6Vv9xwlX2P1GQD3RVbsCl/azrpJurnncJLi+4jylGNq+suOaq/WAjXZn7tTHrC
-# 6fHC5dzY7bh2x7WY6Y0xpSMKExUV1d4IEw/JXIzv3Llm+LZLLPcskWpcNd7sznIe
-# SDM1OnqvWW9JoVxym9tzJiX2fC3BpL+BZxzzRnazZfVXAsO6FC92Jp40wkPxWnd/
-# hLgRRQ9z0odTGnOumEi2G8HEQVSSlWq4yuYT0ebIlWIycyP8e8YyooWLqXN8lOlp
-# DGJSTftcrSFycI2lgkN1gwmoAkw7goemsFT5UsU2mN0FkcAR1LhYhgKyUAuxX/Zd
-# tVDzqgdK2hm549ghvwhYHqfnABr+h/TVWo+XJlnSKH8QpYCVou2GjfWZB2UMalXM
-# lP+3vG7QdUasCqih1T0wX7DNiw1K8UQKvLvg13bqy4xdOVjaCBqEKEXRP4Kv+5P9
-# bLN2fe83Yg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTQxNTMw
+# MjRaMC8GCSqGSIb3DQEJBDEiBCBR6PXfSZBNS4SyTaYBDlJrLiSVUN0/driwjDtC
+# 5wXYjTANBgkqhkiG9w0BAQEFAASCAgAnxG8zL2P4z5MUmviHKeRFGhRQGCkMwf8S
+# 4b9cIxONHbmDox4wL6QQqgSD2BcHsx8IHJiDL0KbDsUU7mVdPUEw0CS7CRy4wJtq
+# WqUR/15gLdtV/F6WKM0BTveSCNf966Q265EsoGJhPNFoMs0WAsykP08rfMmCpeVT
+# g1mqFSRscQj+ePFsB/WTmN/RS/y58lPsiJzqcx+OEK3eF4nOR1bq5pCW/VO5sJTj
+# dOp/JW9dGtS63Ajeld4TQf9mHjA/rCRA/pLdsPw2MtLzOLEUUbCnuixZI2dehQX6
+# buGVB3XDHwCN9vO0SxdSYo7/VLyzEu4CTfyZL/o2HJZzj2JfOYRO+KWmyUKaqYpe
+# Yopk7h/8Q3rLd6UrnGrBogsXYVVSJ8EhbwYy9pBW8QKivT5YE7OmvbE2hX6j1/gB
+# 8TiXdLVeNHxO8hDNOrOcDcXpLd5uYwZ/6fiVVt3CkEFF9WozKsNuK+gW9NsGgXDv
+# TR7lTI64faPC11/6xn+3rYVqLV5qlPGgSMVabaGfkbe4DMQSZ448fGX9oivjTzrk
+# 5NTPXnC2kO3hbv1a0pdNbyCQ+inWxZRXcnYROh1SxOFHCCkY+8U9vjvET2bN+VON
+# DIjIlEQ9ke0YsMxXCzslMB8GefCaTSFqTxhQ2rPqvNJMaE4sr4rx2MkL62msyR+H
+# 06Y/AgpatA==
 # SIG # End signature block

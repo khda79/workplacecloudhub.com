@@ -16,6 +16,17 @@ param(
     [ValidateRange(0,10000000)][int]$MaxItems = 0,
     [ValidateRange(30,7200)][int]$ExportTimeoutSeconds = 1200 # Kept for launcher compatibility; this source does not create export jobs.
 )
+# Local lifecycle only; no collection or publication is performed by this guard.
+$smartM365LifecycleRoot=$PSScriptRoot
+while ($smartM365LifecycleRoot -and -not (Test-Path -LiteralPath (Join-Path $smartM365LifecycleRoot 'Modules/SmartM365.Core/SmartM365-InventoryLifecycle.ps1') -PathType Leaf)) {
+    $smartM365LifecycleParent=Split-Path $smartM365LifecycleRoot -Parent
+    if($smartM365LifecycleParent -eq $smartM365LifecycleRoot){break}
+    $smartM365LifecycleRoot=$smartM365LifecycleParent
+}
+if(-not $smartM365LifecycleRoot){throw 'SmartM365 lifecycle support is missing; update the complete runtime.'}
+. (Join-Path $smartM365LifecycleRoot 'Modules/SmartM365.Core/SmartM365-InventoryLifecycle.ps1')
+$smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -RequireReturn
+try {
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $script:Runtime = $null
@@ -68,7 +79,7 @@ try {
     $smartRoot = Split-Path (Split-Path (Split-Path $PSScriptRoot -Parent) -Parent) -Parent
     . (Join-Path $smartRoot 'Config/SmartM365-TenantContext.ps1')
     $effective = Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot
-    Import-Module (Join-Path $smartRoot 'SmartInventory/Common/SmartM365.EvidenceCollector.Common.psd1') -MinimumVersion '1.0.8' -Force
+    Import-Module (Join-Path $smartRoot 'SmartInventory/Common/SmartM365.EvidenceCollector.Common.psd1') -MinimumVersion '1.0.11' -Force
     $script:Runtime = Initialize-SmartM365EvidenceRuntime -ScriptPath $PSCommandPath -EffectiveConfig $effective `
         -DefaultOutputRelativePath 'Intune/WorkplaceScope/EnrollmentFailures' -OutputPath $OutputPath `
         -LatestCsvFolderPath $LatestCsvFolderPath -ValidateOnly:$ValidateOnly `
@@ -82,7 +93,7 @@ try {
         -GraphProbeUris @('https://graph.microsoft.com/v1.0/deviceManagement/troubleshootingEvents?$top=1') | Out-Null
     if ($ValidateOnly) {
         Write-SmartM365EvidenceLog 'Enrollment troubleshooting event prerequisites validated. Event coverage requires a collection run.'
-        return
+        $smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; return
     }
 
     $raw = @(Get-SmartM365EvidenceGraphCollection -Uri 'https://graph.microsoft.com/v1.0/deviceManagement/troubleshootingEvents' -MaxItems $MaxItems)
@@ -90,7 +101,7 @@ try {
     $rows = @($events | ForEach-Object { ConvertTo-IntuneEnrollmentEventRow -Event $_ -RunId $script:Runtime.RunId -CollectedAtUtc $script:Runtime.CollectedAtUtc })
     if ($MaxItems -gt 0) {
         Write-SmartM365EvidenceLog "Sample complete: troubleshooting events=$($raw.Count); enrollment failures=$($rows.Count). No canonical CSV published."
-        return
+        $smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; return
     }
     $rules = $global:SmartM365CsvValidationRules
     if ($rules -isnot [hashtable]) { throw 'Core CSV validation rules are unavailable.' }
@@ -99,16 +110,34 @@ try {
     Assert-SmartM365CsvDataCompleteness -Data $rows -BaseFileName 'Intune_EnrollmentFailures' -Columns $columns | Out-Null
     Export-SmartM365EvidenceDataset $script:Runtime 'Intune_EnrollmentFailures' $rows $columns | Out-Null
     Write-SmartM365EvidenceLog "Enrollment troubleshooting events collected: total=$($raw.Count); enrollment failures=$($rows.Count). Device identifiers are retained only when provided by Graph." -Level SUCCESS
-} catch { $failure = $_; throw } finally {
-    try { Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null } catch {}
+
+    $smartM365RunGuard.ReachedTerminal=$true
+} catch {
+    if ($_.Exception -is [Management.Automation.PipelineStoppedException] -or $_.Exception -is [OperationCanceledException]) { throw }
+    $smartM365RunGuard.ErrorRecord=$_
+ $failure = $_; throw } finally {
+    $smartM365RunGuard.InCleanup=$true
+
+    try { Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null; Set-SmartM365InventoryConnectionOwnership -Connection Graph -Owned $false } catch {}
     if ($script:Runtime) { Complete-SmartM365EvidenceRuntime -Status $(if ($failure) {'Failed'} else {'Success'}) -ErrorRecord $failure -FailureStage 'IntuneEnrollmentFailuresInventory' }
 }
+    $smartM365RunGuard.ReachedTerminal=$true
+    $smartM365RunGuard.ReturnedNormally=$true
+} catch {
+    if ($_.Exception -isnot [Management.Automation.PipelineStoppedException] -and $_.Exception -isnot [OperationCanceledException]) { $smartM365RunGuard.ErrorRecord=$_ }
+    throw
+} finally {
+    Complete-SmartM365InventoryRun -State $smartM365RunGuard
+    if($smartM365RunGuard.ExitCode -eq 130){exit 130}
+}
+if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
+
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBkVc4FaJajV8yN
-# ZmoOFjTQ+rNSLlamMK0xVnLAHEGMqqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA1fLbsdk8qkx+9
+# HaipW6WSqlMtdoLPkGKlozVMSc291aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -241,31 +270,31 @@ try {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIOXgNtIrGTjgwBoBv5ymyWvZr39ButW6VlX6NQXR6mfDMA0GCSqG
-# SIb3DQEBAQUABIIBgIdEX6R7nHbhLASJ1RHWQM4NEa6VfOvywnOhkK6fT5qP1gte
-# zb5lQIDjQVkVkSOsA/xHrrJWILC6qysYdZFqMN1RVTWM6OClF1y2xAO0ho3PzH0N
-# k5KFriYQnwboy0Jm47H9IoL49XXV1T+BeKNMNmC2T/HueW+0/tmNkl6zldF8nfPq
-# PM5PIiiwOwEfbHCXH8xf+7cOK9NBglQydc+0V82UNjr9+kJDs/H5SOQ4svJRsNNZ
-# xuC4fewwTyEqZkai9H+pS0W5UdLykkF0MHf/VO6JUdnEy1/wPBxmUai2y7E+3t6z
-# lr9p8q/dz9gXkkNMNytJbLC/hzzO74Cf8jla0+jOaR1y+7eUwPx2RlEHE3VvxC9J
-# UhknNE/Sxdja74mz+EgpUwea7EbKdvE6ZKiQUieYMiaQvZelPbSpQis1rxY+TyPM
-# jKbGlkZnHkr21X0T5bF3ZZejgpKKXSLYvHAs/nOWNdZp/7G24cZXB3cHrbPW/KqH
-# VU0QOGk8qYvPMHFuBKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIAiGh3PQpGEnVPS/KLHrZ3dORNDtvR8arNEm0r5BHerwMA0GCSqG
+# SIb3DQEBAQUABIIBgC93G9NHsgjchPY/dZ0YjdBfac5NKD3TClEdOxqCVFRwaui0
+# N/wy77O1OgKhfuS0lADDXVnO2Xpedk9WuVDokTu7L59x+yPjcTfhFS1w5Km8lXuf
+# nP9ZkfojdBiXETSEZyAYB0+fPKgCTbGf2Y88xycKaOVFUuxHemFZB6ZIHOaaWzR9
+# JjkmSQ917CrsBRqTfzRTgSJjciUzG+eE9o4Bx2G1kA2q2atJi5T5rtncEJYZMiah
+# PzpJ9xha3SXFWVdaOzYTCXakoqiriOgXKlr1R8YKrX6cJbXyfz7qOYaCEnkoDwXb
+# Y8YDCmULUHkXP5o0dp5e5K8v1AM7vASVpuX2rJB8MJLmGPlJ9PTwhZzPI49R9fTI
+# YM9RLf/LB6Cwr9vEfqbnZSPmkQuUu8xgZr2p8RFe9yfjWtGzeMamctV45zS6nnZu
+# flTN06hUivYJAKN/YeYJmCHu9mg5TTsTFLIq0Mx/wXp7+a92vU5qsMJo7NCgs7Rf
+# bEkM/ix5GHTiW21Sz6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTMyMDI3
-# MzRaMC8GCSqGSIb3DQEJBDEiBCBf7U+bZ8cFRkfh3SShsRvf8CLHPnJb1YBQeXPq
-# i0CIZjANBgkqhkiG9w0BAQEFAASCAgCgyHDXLa+/MceQoOjrV4QU5pkmu1M8Py9g
-# Z4SvQs6xDpEoW8P8/81JHMvF62avLgCyAbtmuyWJms/syTGyHAOe9A5dQNakpaIF
-# 2KM3dN/jrPNqQ9rgiGwVCEJQqvdE4BgRgdTnKvZYPfMU+qKDD+pRniism7BnCj1H
-# tdkOnoRwrNJbH9MvOfjhjsMXP6L3tXLviGigjwkA1QtOh96FC15QOwSEzRPCQd9i
-# dXFl1+UIYZirUPZGv5lyOEvta7VvRnjoxlF9k6rDWbPyBAb4fSNtzAr9cghVemxC
-# wSkjyzhGW8J11009GP+b8Ufuiu2dGPRUoVmRpnSdApklFL2im3Fxidl0J1OOG41F
-# yYQGYsxe/aliC9mNofGOmmDOgNGdl5zAkK5RwIpgIJ49HnVJcd6DUBIOkNtpsuTp
-# DbMj4kAKsGdO1CxVj44cZIL+83TEqYEhy7cYtXT5sB5i6FxWCfPseKPy3aTZZ1xd
-# iXbbN0PViWXlfpzlzJe0Rl+DYYghn9gyDGekPKKfwIafPrw+LdiygrEDURyPrYqG
-# hE80wYNkUKq9Jg9JQJjqqdd67xcViQLEA7SIHe4rzPmIwwJZk0T43287E4f89cvI
-# mR7JKut+QnbjNJUzC4edVq4+PbCoXEY7UiPSEgbLZSMHYV7Gk/bxNLl/rOkI+nZo
-# I6O2SHEwLg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTQxNTMw
+# MzZaMC8GCSqGSIb3DQEJBDEiBCB0m7aPwHQkOLZYF32g730vSTEIugcIirgHbDJN
+# zfJ5SDANBgkqhkiG9w0BAQEFAASCAgBjZsGVeAFh/dQ/7jmPXoIAnfv3GFEzJG1J
+# 9eJjalE0QUaz5xhQgEgfkjUJEiM6By6KyEKYTSLRPRVJZM8RQbAHovboKzTqiFbN
+# HJPDNzPDmBoqVECYGsAKXC2+5iH1G+GJtKiEAWCZuWAzQX5/mHWxfIcr5FQ4k8ch
+# fWLdTf0qaDsJrsKL/GlIRX0ZUOQOYmnKtiKeYHyd+2pFz1O5VjqSIyvL13mPgb5e
+# Ue9/nxemqkAU8uNw+tqSNHVOIeHKqLIkxu0UgaktYqjKIYykNrsiBmmb3narROnE
+# rC1/fHJClJwAB4jZA0+87D7OWsC26Z74RxFzqNUXrdpEYMa7tGO/+ByQrBI33qHb
+# oxLqxefWjMr8Rsc47IqwzzSL67OlAnv6mCNuhwRaPILRF89E5FlDe1LE3Unvvu4u
+# Xi+535J/8VLhozNmnjZaUAeB1FRqi6MO2TV58TMRdyMUm8I8PwHEvojjcNj0B7/o
+# Jm0BF6M4WOjvfv9NDCZqVUQ8PiBtO9OQiBx4sSV4usEGYueG9NgXEsRp8EgQn6tg
+# 9blNlHThWqfsz0jkU318ebzwaYg5Ukf6XvMQsU8GyrzeXIXZBKImjhHL+ATjwDXg
+# LfqD3WkM3Q1bv+gaJiQbKzp6KPxyj9Gu4TS500pcvqaEoTdw+D76rcJJrU7Gk/2h
+# XVMJEV0zgA==
 # SIG # End signature block

@@ -13,6 +13,17 @@ Hidden groups require Member.Read.Hidden; missing access is fatal, not empty.
 param([string]$Tenant='test', [switch]$InteractiveAuth, [switch]$ValidateOnly,
     [switch]$EnableConfiguredExternalActions, [string]$OutputPath, [string]$LatestCsvFolderPath,
     [ValidateRange(0,10000000)][int]$MaxItems=0)
+# Local lifecycle only; no collection or publication is performed by this guard.
+$smartM365LifecycleRoot=$PSScriptRoot
+while ($smartM365LifecycleRoot -and -not (Test-Path -LiteralPath (Join-Path $smartM365LifecycleRoot 'Modules/SmartM365.Core/SmartM365-InventoryLifecycle.ps1') -PathType Leaf)) {
+    $smartM365LifecycleParent=Split-Path $smartM365LifecycleRoot -Parent
+    if($smartM365LifecycleParent -eq $smartM365LifecycleRoot){break}
+    $smartM365LifecycleRoot=$smartM365LifecycleParent
+}
+if(-not $smartM365LifecycleRoot){throw 'SmartM365 lifecycle support is missing; update the complete runtime.'}
+. (Join-Path $smartM365LifecycleRoot 'Modules/SmartM365.Core/SmartM365-InventoryLifecycle.ps1')
+$smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -RequireReturn
+try {
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $script:Runtime = $null; $failure = $null; $transcriptStarted = $false
@@ -20,14 +31,14 @@ try {
     $smartRoot = Split-Path (Split-Path (Split-Path $PSScriptRoot -Parent) -Parent) -Parent
     . (Join-Path $smartRoot 'Config/SmartM365-TenantContext.ps1')
     $effective = Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot
-    Import-Module (Join-Path $smartRoot 'Modules/SmartM365.Core/SmartM365.Core.psd1') -MinimumVersion '1.0.86' -ErrorAction Stop
-    Import-Module (Join-Path $PSScriptRoot '../../Common/SmartM365.EvidenceCollector.Common.psd1') -MinimumVersion '1.0.7' -ErrorAction Stop
+    Import-Module (Join-Path $smartRoot 'Modules/SmartM365.Core/SmartM365.Core.psd1') -MinimumVersion '1.0.87' -ErrorAction Stop
+    Import-Module (Join-Path $PSScriptRoot '../../Common/SmartM365.EvidenceCollector.Common.psd1') -MinimumVersion '1.0.11' -ErrorAction Stop
     Import-Module (Join-Path $PSScriptRoot '../../Common/SmartM365.WorkplaceSource.psd1') -MinimumVersion '1.0.0' -ErrorAction Stop
     $script:Runtime = Initialize-SmartM365EvidenceRuntime -ScriptPath $PSCommandPath -EffectiveConfig $effective `
         -DefaultOutputRelativePath 'M365/WorkplaceScope' -OutputPath $OutputPath -LatestCsvFolderPath $LatestCsvFolderPath `
         -ValidateOnly:$ValidateOnly -EnableConfiguredExternalActions:$EnableConfiguredExternalActions
     Start-SmartM365CmdbSourceReceipt -ScriptPath $PSCommandPath -SourceRootPath $script:Runtime.LatestCsvFolderPath -ReadOnly:($ValidateOnly -or $MaxItems -gt 0)
-    Start-Transcript -Path $global:logTranscriptFile -Append | Out-Null
+    Start-SmartM365RunTranscript -Path $global:logTranscriptFile -Append | Out-Null
     $transcriptStarted = $true
     Initialize-SmartM365ImportExcel | Out-Null
     foreach ($module in @('Microsoft.Graph.Beta.Groups','Microsoft.Graph.Beta.DeviceManagement')) {
@@ -38,7 +49,7 @@ try {
     Invoke-SmartM365Preflight -ScriptName 'SmartM365-WorkplaceScope-Inventory' -OutputPaths @($script:Runtime.OutputPath) `
         -RequiredGraphApplicationPermissions @('Group.Read.All','DeviceManagementConfiguration.Read.All') `
         -GraphProbeUris @('https://graph.microsoft.com/beta/groups?$top=1','https://graph.microsoft.com/beta/deviceManagement/configurationPolicies?$top=1') | Out-Null
-    if ($ValidateOnly) { Write-SmartM365EvidenceLog 'Workplace scope prerequisites validated; no full collection or CSV publication.'; return }
+    if ($ValidateOnly) { Write-SmartM365EvidenceLog 'Workplace scope prerequisites validated; no full collection or CSV publication.'; $smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; return }
     if ($MaxItems -gt 0) {
         $global:SmartM365MaxItems=$MaxItems; $global:SmartM365TestMaxItems=$MaxItems; $global:SmartM365IsMaxItemsRun=$true
     }
@@ -226,17 +237,35 @@ try {
     if ($absentGroups.Count) { $qualifications += "Groups excluded after corroborated absence (not empty membership): $($absentGroups -join ','); membership attempts=3; parent 404s=2; fresh full catalog verified." }
     Set-SmartM365CmdbSourceScope -CompleteScope ($MaxItems -eq 0) -Scope 'CMDB:group_scope,group_members,policies,policy_assignments' -Qualifications $qualifications
     Write-SmartM365EvidenceLog "Workplace scope collected. Groups=$($groupScope.Count); excludedAbsentGroups=$($absentGroups.Count); memberships=$($memberships.Count); policies=$($policies.Count); assignments=$($assignments.Count)." -Level SUCCESS
-} catch { $failure=$_; throw } finally {
-    try { Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null } catch {}
+
+    $smartM365RunGuard.ReachedTerminal=$true
+} catch {
+    if ($_.Exception -is [Management.Automation.PipelineStoppedException] -or $_.Exception -is [OperationCanceledException]) { throw }
+    $smartM365RunGuard.ErrorRecord=$_
+ $failure=$_; throw } finally {
+    $smartM365RunGuard.InCleanup=$true
+
+    try { Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null; Set-SmartM365InventoryConnectionOwnership -Connection Graph -Owned $false } catch {}
     # Completion owns transcript closure so SharePoint receives the terminal summary.
     if ($script:Runtime) { Complete-SmartM365EvidenceRuntime -Status $(if ($failure) {'Failed'} else {'Success'}) -ErrorRecord $failure -FailureStage 'WorkplaceScopeInventory' -CloseTranscriptBeforeUpload:$transcriptStarted }
 }
+    $smartM365RunGuard.ReachedTerminal=$true
+    $smartM365RunGuard.ReturnedNormally=$true
+} catch {
+    if ($_.Exception -isnot [Management.Automation.PipelineStoppedException] -and $_.Exception -isnot [OperationCanceledException]) { $smartM365RunGuard.ErrorRecord=$_ }
+    throw
+} finally {
+    Complete-SmartM365InventoryRun -State $smartM365RunGuard
+    if($smartM365RunGuard.ExitCode -eq 130){exit 130}
+}
+if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
+
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAWrsXHcg23O6jA
-# stBGsbyL3iaqdoboSIUXjain5SW+FaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAZ2y2wfVOhDAHE
+# P92RXlwyGMuv0XwJPXlRPGPgecLXOaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -369,31 +398,31 @@ try {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEICHOEr2H+RN7alm29HA9E0IgQ4+Zl+PhQajMbhbflHRLMA0GCSqG
-# SIb3DQEBAQUABIIBgFcbvX7MfXOU7kp0P3juMbeiAIEoQ2ql4igzh7FOURkf6LKW
-# I7vP6S4zkAEVvyPBxkl2GGiUov2HFVW+gTkjl5v38+sNv0bH/9uSshVHD6McsXH5
-# p2QqU0ZG3AVQYwKlVQ8NCqpG/plz9PBMxduGO+fOogBz8j7FRdoWFpVhUzWVB2Y2
-# Eiz1RQ78vULTRNkEVDROyPQzl3FGeOTEy16cqe5ADLJSXX5tpXmrqk5vug5mfTLd
-# Yvpprqmv7QMdY8I6Mp9X2oJQNNPf178VXtQGJ4bmLpLN1H5Nab4dYNf4OBrHDn3p
-# 2Y0JYZk3pv1gjmU+n52QAOdnXLu8FDVna5f0odMsFILvNRn74b5Ud5QclMGjZbpB
-# ykGcrGlFG10zDCEUDm33J/QS/8CAvwLkOkF6t3ln8QmokuasrjFj7+Sac62i8BeH
-# d5cHeLajJsYYkK/dugROKZgx/9mouStDpljDpjvqNe3Au0/mQTLhQ25Sf7kt81Uv
-# s/8JE0Uoi6z55xsII6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIFtEVzg0sNMrjJ5WGaw9P1Kl4svcE4PqoGirMeKuP8aqMA0GCSqG
+# SIb3DQEBAQUABIIBgEYCl4sHSSlJMQl3XnyhReMuxkGq3RDGIgv7ohCFJOJyUI+p
+# /1jp2zIbK3GSuXxrDf6gDyr2CYP7V9V2GFl6ewTyI75PjUkkfWpFKWWbvzhzgZkq
+# mzJbBstigZC4I4q1/UDRxqFr/H2iIo8OGAQHToS0ivcy0M3uEme+ZsyY01E9+c5a
+# qFFbak6iKaHHuzV+yzzFt0P4MaIXEPomifQjMLoOXqRPSXQmVqir7fpVRORncHGm
+# iAQ8BnkwTV5nVh91+twkMsogJZtW0FBHS4hdk05kED+LNK9BlWTRQwwtl0TzXA+9
+# 3LS9E+2gpMY6ujg91Whla+TH6/0Vj49g4JrCgW3MVbQTs9Y+wNcS9b2al+ebcVfy
+# i67s/ZvGPDr1zONFi2z0P2q4OvnY0WSP6woQasjsLDJU+c+MT9mfaB3892SLuYj5
+# PkPGBbfnu5AsiLvJKxCXtLWDvwu3vuZCjJfQwzMpuXwxvoYKt7XkEzcVCFgnmYRl
+# GDcTHdoGTiwS8bvkzqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTQwODMw
-# MjRaMC8GCSqGSIb3DQEJBDEiBCBYMXasa0cQqAGJIkyb06weWdPtTKax3WE2BH8j
-# ybKZPjANBgkqhkiG9w0BAQEFAASCAgAQdEctSh11UmrkGXsYGsu8ilxW6hThHN3T
-# 1ObBqocf0pyU3Db3Fke/Xil0QwQOWo5lDFRsRTMe8tJCt3B9ZZp3nZIujZYGQfEl
-# BZ+oEjYkQyOh4deEUV+1azkf+j5JxO9qXfKwsw1feh63AJ2eVzvLi6nMGKMv1hmo
-# iQ4GtNwKLYJwBzBmCyDc8Lh94TLZEhqCowtgtFkut/pZeIzhfSl3+lwSEzfxctXZ
-# dWokqM6VET5k6eraNof/d79dBiDJAt924Oq1Mw60yyNAuau975kFO3+8jO9x2DIh
-# z03vKEviBnk3IaQhMvnTzFEomdtB6wwT8tgQF6bGt+hF6NdgSNBu6zLVJRRuBJvv
-# 6noouC5R9Z1CxkB83PF8OXT2r13ur2BR/nhIOOMsDJrGKdTuGHev4yFBG/P3ZG3I
-# hYlcoBgix1IVk7PKRQVs7y6ibvHT+0EeX53gK5/3mUYSNuuxRgl1CqJde47sEhma
-# sFimIyTJPBdu3nTJobeBp/MzOer1FkUm5BHmRcB+QKLQconQUDgBXa0lEuX8hpY+
-# nI933hOH3Epq2x6xJ16sWbrHOWXGkt+5kcA63eyarFsfTuRrqeEDFzzoz/URxHZp
-# TuTGFubgRCCOznEUnI+jyAiVt6CAxztzNdDD3BPLWK7Vm+H749hbOXGeUekcj4ec
-# tWNDiMhBMw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTQxNTMw
+# MzdaMC8GCSqGSIb3DQEJBDEiBCAxuO1Kt5Mc1mQ8cja/WyxlhysVIaTs+X3hfBh3
+# mqcZBjANBgkqhkiG9w0BAQEFAASCAgB1p6jix+WW+62h43V1NwkNcjHmmmMbeu9g
+# 4NIPzxN9FsqfSeiMZoFBG/t6r5yKyNKzJ/qFec06gMWEq49KNTYA9ShYYEffOMhN
+# zzIYqkXty4YXP2j8bBJC4BPSSsWWaSvK1JSHS27yFMLJvgTOiJ+ZkgUpLQOguVLU
+# 6InneEmrTwURfgTY3n8ISXXe4CQ2e/hDO3IHlikwRZRBAwELjT/Pk37PG6XWDt7m
+# LUllnlKW8dIsn4X0i6jx5iyHvvWIPXuhBNEgGewv10WN8xsIKBc1btkSn+EXyFml
+# I7fj0EUFjCKwFlQuFgUfeSqXuf1BdMH8EaoGCZIobsncaxG7S6HwMsbypZqf+/2o
+# 7Opq4+uj2crVO3bHss+irgtu1eqUnkCQC0RxbcXfj3/3YtbT152ajJKJkhLww2FU
+# DCwkNtCp05EQ0lhg/+IAYencU5MOhWuNJa7dC3dm8Be4PTf/4MpFldchkTUBl6he
+# /F64q7qir2wVX6m3LnOOp75b0hnDLOn7YeqmyXsCPLgnYWmiu4qh0snVWO1dv6/F
+# iVJLlFKBVNhBuMWrFTONCoWhRJtjvQ1nkeiNJfi+bzC4hU59esxYhUHZ6p7goIHG
+# EMKL5OL6lBHDRVgMxGZZkY4s0QFUUW9TxNV5C0fOS75j40IvLS8CvgK/ZVIBuzDR
+# outwq+llzw==
 # SIG # End signature block

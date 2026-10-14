@@ -13,7 +13,7 @@ Generates Windows 11 readiness issue tables from SmartInventory CSV exports usin
   Intune_Devices_Compliance.csv, Intune_Devices_UpgradeEligibility.csv, M365_Entra_Devices_HardwareIdConflicts.csv
 
 .VERSION
-1.29
+1.30
 #>
 #requires -Version 7.0
 [CmdletBinding()]
@@ -29,6 +29,17 @@ param(
   [int]$DetailedArchiveRetentionDays = 7,
   [int]$MaxItems = 0
 )
+# Local lifecycle only; no collection or publication is performed by this guard.
+$smartM365LifecycleRoot=$PSScriptRoot
+while ($smartM365LifecycleRoot -and -not (Test-Path -LiteralPath (Join-Path $smartM365LifecycleRoot 'Modules/SmartM365.Core/SmartM365-InventoryLifecycle.ps1') -PathType Leaf)) {
+    $smartM365LifecycleParent=Split-Path $smartM365LifecycleRoot -Parent
+    if($smartM365LifecycleParent -eq $smartM365LifecycleRoot){break}
+    $smartM365LifecycleRoot=$smartM365LifecycleParent
+}
+if(-not $smartM365LifecycleRoot){throw 'SmartM365 lifecycle support is missing; update the complete runtime.'}
+. (Join-Path $smartM365LifecycleRoot 'Modules/SmartM365.Core/SmartM365-InventoryLifecycle.ps1')
+$smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -RequireReturn
+try {
 if ($PSBoundParameters.ContainsKey('MaxItems') -and $MaxItems -gt 0) {
     $global:SmartM365MaxItems = [int]$MaxItems
     $global:SmartM365TestMaxItems = [int]$MaxItems
@@ -46,7 +57,7 @@ if ($MaxItems -gt 0) {
 }
 $ErrorActionPreference='Stop'
 $ScriptName='SmartM365-Intune-Windows11-Readiness-Issues-Inventory'
-$ScriptVersion="1.29"
+$ScriptVersion="1.30"
 $RunStamp=Get-Date -Format 'yyyyMMdd-HHmmss'
 $RunStartedAt=Get-Date
 $script:WarningCount=0
@@ -285,7 +296,7 @@ function PublishWeeklyHistory($files){
 $script:CompletionStatus = 'Auto'
 try{
   Log "Starting $ScriptName v$ScriptVersion"
-  $sr=Root; . (Join-Path $sr 'Config\SmartM365-TenantContext.ps1'); $script:Cfg=Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot; Import-Module -Name (Join-Path $sr 'Modules\SmartM365.Core\SmartM365.Core.psd1') -MinimumVersion '1.0.72' -Force; Initialize-SmartM365DefaultCsvValidationRules
+  $sr=Root; . (Join-Path $sr 'Config\SmartM365-TenantContext.ps1'); $script:Cfg=Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot; Import-Module -Name (Join-Path $sr 'Modules\SmartM365.Core\SmartM365.Core.psd1') -MinimumVersion '1.0.87' -Force; Initialize-SmartM365DefaultCsvValidationRules
   $lc=LocalConfig
   if(!$PSBoundParameters.ContainsKey('DetailedArchiveRetentionDays')){$DetailedArchiveRetentionDays=[int](Cfg $lc 'DetailedArchiveRetentionDays' 7)}
   if(!$DataLastFolder){$DataLastFolder=Cfg $lc 'InputDataLastFolder' (Cfg $lc 'LatestCsvFolderPath' $PSScriptRoot)}
@@ -298,7 +309,7 @@ try{
   $global:SharePointSiteHostname=Cfg $lc 'SharePointSiteHostname' ''; $global:SharePointSitePath=Cfg $lc 'SharePointSitePath' ''; $global:SharePointLibraryDisplayName=Cfg $lc 'SharePointLibraryDisplayName' 'Documents'; $global:SharePointTargetFolderPath=Cfg $lc 'SharePointTargetFolderPath' ''; $global:AppId=Cfg $lc 'AppId' ''; $global:TenantId=Cfg $lc 'TenantId' ''; $global:Thumbprint=Cfg $lc 'Thumbprint' (Cfg $lc 'Thumb' '')
   InitializeScriptEnvironment -OutputPath $OutputFolder -LogFileName $ScriptName -CallerScriptPath $PSCommandPath | Out-Null
   Start-SmartM365SourceReceipt -ScriptPath $PSCommandPath -SourceRootPath $LatestFolder
-  Start-Transcript -Path $global:logTranscriptFile -Append | Out-Null
+  Start-SmartM365RunTranscript -Path $global:logTranscriptFile -Append | Out-Null
   $script:LogReady=$true
   Log "Log environment initialized for $ScriptName v$ScriptVersion (EnableSharePointUpload=$($global:EnableSharePointUpload))."
   Log "DataLastFolder: $DataLastFolder"; Log "OutputFolder: $OutputFolder"; Log "LatestFolder: $LatestFolder"
@@ -830,8 +841,13 @@ try{
   Log "Generated Windows 11 readiness issues: $($issues.Count) row(s)"
   if($global:EnableSharePointUpload){foreach($f in $files){try{Invoke-SmartM365SharePointCsvUpload -LocalFilePath $f|Out-Null; Log "SharePoint upload completed: $f"}catch{Warn "SharePoint upload failed for $f : $($_.Exception.Message)"}}}
   Log "$ScriptName completed successfully."
+
+    $smartM365RunGuard.ReachedTerminal=$true
 }
 catch {
+    if ($_.Exception -is [Management.Automation.PipelineStoppedException] -or $_.Exception -is [OperationCanceledException]) { throw }
+    $smartM365RunGuard.ErrorRecord=$_
+
   $script:ErrorCount++
   $script:CompletionStatus = 'Failed'
   $failure = $_
@@ -844,19 +860,32 @@ catch {
   throw
 }
 finally {
+    $smartM365RunGuard.InCleanup=$true
+
   if($script:LogReady){
-    try{ Stop-Transcript | Out-Null; Update-SmartM365TimestampedTranscript -Path $global:logTranscriptFile }catch{ Write-Warning ("Transcript finalization failed: {0}" -f $_.Exception.Message) }
+    try{ Stop-SmartM365RunTranscript | Out-Null; Update-SmartM365TimestampedTranscript -Path $global:logTranscriptFile }catch{ Write-Warning ("Transcript finalization failed: {0}" -f $_.Exception.Message) }
     Complete-SmartM365ExecutionContext -Status $(if($script:CompletionStatus -eq 'Failed'){'Failed'}else{'Auto'}) -ErrorRecord $failure -FailureStage $(if($failure){'Inventory'}else{''})
   } else {
     Write-SmartM365CompletionBanner -Status $script:CompletionStatus -ScriptName $ScriptName -StartedAt $RunStartedAt -WarningCount $script:WarningCount -ErrorCount $script:ErrorCount -GeneratedCsvFiles $script:GeneratedFileCount
   }
 }
+    $smartM365RunGuard.ReachedTerminal=$true
+    $smartM365RunGuard.ReturnedNormally=$true
+} catch {
+    if ($_.Exception -isnot [Management.Automation.PipelineStoppedException] -and $_.Exception -isnot [OperationCanceledException]) { $smartM365RunGuard.ErrorRecord=$_ }
+    throw
+} finally {
+    Complete-SmartM365InventoryRun -State $smartM365RunGuard
+    if($smartM365RunGuard.ExitCode -eq 130){exit 130}
+}
+if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
+
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDc9k/IAWkF3We0
-# 61R+Ua6wZNTZdQa6XWUoI7lmf5LfmqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDLvo4B+onQMuIE
+# 9xLyU4aA/ygJpOgF/3Knrzx6k1EoxqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -989,31 +1018,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIJJjkmCf1068FGPfMi/8xWftRf/qubsbDeOekX9XkSu/MA0GCSqG
-# SIb3DQEBAQUABIIBgCL4d3WDKtkAknk7snIv7fVQrzudbyLB6glr9tyxlzWDM3sH
-# cj/9xUca08s/x7lk0tL1fD2+nmq5qOvfqwg4gezroh8EcWxHdYXmOok71YretJ1Z
-# ESe3hsn7wKz3cChAYY2kDpN0YDzZ7UgA79IaaI8mbG+43WqqSpUmjmFSZmKTyLli
-# ZuNbTqljOC9Q4KLv+0E5K23pSirpoLul4huMFfbA4Xn8EH8xGd7TusFDe9PQHGgg
-# IEJnCEWZAf43hRzcd9vcCKg1RGtFe8+KYX3hGKK3pJCo9hVp3MrifE4qP3aWJXq+
-# asd1gnV15Q/sukV6AXlwOYVAeqoG/pfOQYkesFMlLTJL4Xw2WxNd+xjJM45wdBJV
-# i0092OTdzs8kF88tPq7E2B1YILNcEjccA1JdTrURoFW94z6nfc2jjfiNCrixavsw
-# SeVxWEyXb48AnNPuHgTxC07VsSrYcNdvTxurzqkwJuV4NAjUiNMZEDavx9CVMtvs
-# kLz1SsxD05FWhurWd6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIJTtkOeL8c92jSqrJW3DBd5ylLPYtKmFS/8j2NCvK8kkMA0GCSqG
+# SIb3DQEBAQUABIIBgAaYtx/LWnyFlQaLsBRqLhyo8j/lT27yI3LwyFAdnS8rWW+s
+# 0ZQ4AOHbylexzNUHY5HmFcFr5ObN07asj3zyzHWCvNOIjVymZzOIf6t3O8qR6LyZ
+# SFbrXVipG+rffz2IreNmWeXcEe5kGKV9Tg/laoaEGGaF6X8y8y1cUseYeIksur8y
+# WHTv6vpuFAIO9KQUCV7+WVfmMssJ70PQBc4FZsdrVePrm0nysmYkorpWLq9m9Sby
+# Z1WKfPK6JISkoDmVHxoHodU3dGqCCxWolcNyh5dtTsBc0GmAhiv+OxlBy7/D9bmZ
+# 78RhVUDco2JZjsXsJub3tZaoA3fNSf4BsmQBPvpw+rovj3e9Ais2V3qz7Rl1ZV5X
+# JRfikwJtqathHe/1TaBmz+TOyhhoSk8hKlIz8cxqc0slOYx+KazkCylFqhn9J9yE
+# mAG5STc1KmuMZi7WTerTBPtewQxNmF/h3u/7Kp9tqEk4FnplfWXr2sTTy4tRH48E
+# UVP9f8a9NXwvcUfELqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDcwOTEz
-# MzZaMC8GCSqGSIb3DQEJBDEiBCCFu5AOwyL7MErXU9cvcu1ooY0NaxAPtqCHPgsV
-# WGXA+jANBgkqhkiG9w0BAQEFAASCAgBpz0nluI7A14BmHXhpyYp1Gg1FGiNuDbf9
-# 5JmFG2ztDZzqOBT+tImglfgMMb9wjwGRPUocV9xgvPJiRt1w6Wgh3xkQQ0Z5vG2a
-# 7ozgOVSZHjn40uX11VIDnN4Lf46hHAQKKvWQJYN85RFjuvRJqivTutcDpf9ctwOd
-# ZmrZrM1KrbEkto9gWjJWUKRZBoZ3bp0SSHALVY1iqSvtGdQlX53VYxGMXD1behXX
-# 5y95bQGAWrz+horrF0hoBGHX0AlyRh2royyuOpxCTjdklwtGWmYikE2RrznqCBHB
-# V9Euwp8JZKisjSdLlcYjpJIX6+SNSeyDYOKYx+DwVdCuVhC9vOzfI2Mu/b/ZprPO
-# cwZtlopYbM+Po/Y7nADR3AaE6d58ZNnmM0480DyzcP0K8+G8lGvQZBiarbXYXWlD
-# g5bvHFDon9CsSqHkygMMTdWTMVAcsCTeNS5FitvR1YDgz4KnbsnIjPFn0z/JjdCl
-# vvefDKwGaZfP8XZnMcFPEcEwHa6XSWOmz9yjC91C+v3td5u4U73LBepdSiGvjnp8
-# QKDZFvLQJjmGiFgU8p1627ic95Emb8/h3qxVcfQR0JWAtCTofkd3UnfjSXeRzT+O
-# HI/nGHLi5qRQB+F7J3qWEiFjH3v9LSmMq2cSJce77yPWuZbLHB2LfK+6zdghUd7M
-# WKGPQDrWhA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTQxNTMw
+# MjlaMC8GCSqGSIb3DQEJBDEiBCDalTyqCQ5qop4BL4Qz8c4aGgzl5Sf3+HcmJIJb
+# 5dRllzANBgkqhkiG9w0BAQEFAASCAgCGAno9yQLiJIsfRqU9KH2cfapzpzT/Zi0v
+# GiKvkXy9JaRUPn6zI+dDGVq7RSYSG3qQlkftpIkLuuL+j1Cl1WYfEhUahsB4oQ4j
+# imd3FYsgzqsbFnlqGy7gEGUpteEHpf4OcizWjqR9rwH1OT21Bw8HLKTnY7yYEeh0
+# 5ddxRT1zHPEtbR0RWuEdckxoFfwk+32Xe5sPWZjFt35cQcnU0HQ/FWHLE+MSPf4q
+# JZIeRNLh1Tr7R4v/dk1Z3bsMVXi3UsbGoaFrQ3rurQ55O5HSfQZZZRlPJFZ2AuFu
+# LoxD4Dwls5lL+nAGA6o0MGaZoEB/NZRykYvqrEs0OCxFE/iyhMGRmF3Kf//R+EPR
+# x+Z+ipFjI0KQSCc8ZDh10NfhMc5QjN7v5/a3NL4FM01pUNtdZ+hQD2gjzJGqoRUl
+# gnjDt/8jTszxG+qs8VLwi1SeadwzKN1orKJoGt8idNNsz+BgprN99DIdSkDuNgFk
+# S+fF6L+MvV2e53QIUhmsp3Jzynu+R1IIYxMXpSBN+cpz9IF1gMAhmT120rbV1FdP
+# qsy7RcUwulFN8Na9NMxOtYZ7oHLY3EkV5ARSRc0wyWpnTKi5YCA2BIx+P6jeH1ik
+# YN9wIPnlD9XNX/GkQH2lzOUA4FpBrL0eDunFWpaERfbN4NAe6a+nT1/fHElASnrg
+# 9PVCD1sCRw==
 # SIG # End signature block

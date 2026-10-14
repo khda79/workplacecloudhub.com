@@ -3,7 +3,7 @@
 .SYNOPSIS
 Offline transcript lifecycle and truthful trace-publication status regression tests.
 .VERSION
-1.0.0
+1.0.1
 #>
 [CmdletBinding()]
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidGlobalVars','',Justification='Isolated synthetic Core execution globals in this offline test process.')]
@@ -31,6 +31,7 @@ function Read-TraceFunction([string]$Path, [string[]]$Names) {
 # Extract only function definitions. No tenant configuration, credentials or collector runs.
 $definitions = @(Read-TraceFunction (Join-Path $root 'Modules/SmartM365.Core/SmartM365.Core.psm1') @('Complete-SmartM365ExecutionContext','Write-SmartM365CompletionBanner'))
 $definitions += @(Read-TraceFunction (Join-Path $root 'SmartInventory/Common/SmartM365.EvidenceCollector.Common.psm1') @('Complete-SmartM365EvidenceRuntime'))
+$definitions += @(Read-TraceFunction (Join-Path $root 'Modules/SmartM365.Core/SmartM365-InventoryLifecycle.ps1') @('Get-SmartM365InventoryCompletionStatus','Disable-SmartM365InterruptedPublication'))
 $module=New-Module -ScriptBlock ([scriptblock]::Create($definitions -join "`n"))
 try {
     foreach ($scenario in @(
@@ -58,6 +59,7 @@ try {
                 $script:Case=$Case; $script:Closed=$false; $script:ClosureCalls=0
                 $script:Uploads=[Collections.Generic.List[object]]::new()
                 $script:Attempts=@{}
+                $script:SmartM365SourceReceiptUploadPaths=@()
                 $global:SmartM365ExecutionSummaryWritten=$false
                 $global:SmartM365CompletionBannerRunKey=''
                 $global:SmartM365ExecutionStatus=''
@@ -162,12 +164,13 @@ try {
     }
     $collector=Get-Content -LiteralPath (Join-Path $root 'SmartInventory/M365Inventory/WorkplaceScope/SmartM365-WorkplaceScope-Inventory.ps1') -Raw
     Assert-Trace ($collector -match '-CloseTranscriptBeforeUpload:\$transcriptStarted') 'WorkplaceScope did not delegate transcript ownership.'
-    Assert-Trace ($collector -match "-MinimumVersion '1.0.71'") 'WorkplaceScope Core version guard missing.'
+    Assert-Trace ($collector -match "-MinimumVersion '1.0.87'") 'WorkplaceScope Core version guard missing.'
     $results | Format-Table -AutoSize
     if (@($results | Where-Object { -not $_.Passed }).Count) { throw 'Offline transcript completion regression failed.' }
     Write-Output ("PASS: {0} offline completion scenarios; no authentication, mail or SharePoint calls." -f $results.Count)
 }
 finally {
+    try { Microsoft.PowerShell.Host\Stop-Transcript -ErrorAction Stop | Out-Null } catch {}
     Remove-Module $module -Force
     # Exact test-owned temporary directory only.
     $resolvedTemporary=[IO.Path]::GetFullPath($temporaryRoot)
@@ -179,8 +182,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAh5cc5Mv2kB3Oa
-# HXatEklKLcixu6rKhsDr/uGCM9vE9KCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBqhrUCCSwRZbN8
+# +gXVyxDcigwhtyxWSt1Z3XoDqLEOV6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -313,31 +316,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEILSXxJ6vP66SBqHnvV5xaMzvlnLwcKWG73TJo/Ob5dADMA0GCSqG
-# SIb3DQEBAQUABIIBgJcbBbb/8vo7pPvEKCLt24e9UZoLWQAZT+KS25HxheZtRknM
-# QvsL83AipK51MdIQkNumNZjyY6AOyCAb6Xi1Pd4K9XEf1p/yMLe82T6d1hbitZJZ
-# uW2bn8X+Ib8aS2tswLrpxTAkCVtpXXKcxlpnSjTYkM6JxNDBF7+62fogQB9FzgRd
-# XDHISdCs5V1tjyaGL4LvrT/iJo0zUlM28Y0x7mcqyWUNSzDLhKboDZvSM9jozpF7
-# CW6h36LKibtza0C9EJnS4LkhO+1bzja/DC3rju72/XHg/9lv/i8QubaSkKz4dj19
-# FXT7QNrn301itgopHbjBOpd1GQnAMYfnyouTuD0osMJhhDl2OinsvUHtmREz1U40
-# HnEHnqJYJkqLrfl+0/ckrUiaqbANuUZ0s2XqwpWEFCMWOc+XX54tf3trhnt5eA1I
-# NVPAovfPrAKbisXI1kuQCrNH8x+4+cMvpHpwbbrUd4sSAjIPz3kgV7xmkx88hKWp
-# iOwAFlIMG8Ws341Ux6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIBqLk48fXMjaYd82UxiwuFNQ38sC5V6k4wnLxDBmV8nKMA0GCSqG
+# SIb3DQEBAQUABIIBgJP36v7FmGbMP6ZzKmBermeqKb/UosNGjp9WXERlaHwlN9PJ
+# D/8PXc98N9JMHGJ+qo/MuIAKBuEgwtJZP6PGfEUfNOiRbFKhAoGWidEk+ESlW1BW
+# X8VBjAsT+MVUEMNXBaH3Fi27dOHMFnnYF28EivnD2SmQfjRj4M43eA4X5H76mLMG
+# E6H+LXrwegA8bZgzYy2iyAwsWrF9DC/T+sVM5WkM9igtWhAju2D/5wGouUcx7KGE
+# 9+7YeZzcW98KA3AhOLdqaALaXxt9nEG784FNFcTUYUcreGsPB5JV9nUnXGGrrzDG
+# JqcL1jURCyrg/CanRaH18lypGQbG5WOxZLnwtDD4oAGhIbYAH8On0faLS7BrAPVu
+# 9kOjumsmlDeoxqwHP/xYjl53JjQI9ZATHXgZodF4oV7p6IyfL5PzmNkZwHHUKZ4P
+# HHVV2ZcaX/oenSqllOfA9cqgQCH1C0ytYUq2G5rw4pSI4AtbCo1OHWrW6ekZkqId
+# bkqUBRxwS6MR1UaWAKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDQyMjAw
-# NTBaMC8GCSqGSIb3DQEJBDEiBCAsN6kyyv/gzSV4JcHRoV2IB3iykEklWc0GAL6g
-# 1sWkMzANBgkqhkiG9w0BAQEFAASCAgCbuGND1op1kG4CpClISl/iZKxsLjY/YHzk
-# 2AJhe+esZseui1+UtRTKAgxpE5pz4TNY/zZXAw8w+Rf/Lzb0KEMC0zeMbmw+EDLX
-# T/3W8zXutx8hCUHs6mGoCc0kyl3S9UuXJtAeAEGwFPs+WfOwONvh+o6opK7pKzOj
-# pc3RR1b6ar6fCA1t1tuNGtQs/vqibrmXyGTlnDEmDwgxD8YSh4MEBDbDPVxZF17f
-# uj5Eq4xCtD1tDM9cwFE1W5zFw4LfFx8LepIBAaGA5PNepHV29b/4ZeVn82SwrGGl
-# DRl07Cd1QjebINRbTmZileIR8dJ8hAa1CLvN38QIUf82lWmQgijYXJlgF6PjQc6Y
-# WQZTntghyAQ7OuQhUueTzd1ddzPutH7EhyN01ju1oaqcJK68bmR2Iw0Ux1ApPZOr
-# nu0DJFoowZ1/1DZFZdCX/AKeNO63lEKI/k3NRAW0w5ctaZPI+p1QUlnm+RLnBQPy
-# ZOC9h2tR6VqNhmCJ/oXt99CKJ23MgqlE8U53iHzGKFhU8L0o04OYJKof4nD/bck+
-# DYRsWG99LJ7lSRiEEGXZGGuT0shdCiV1z/eHhVRpZF2VcCzlzcmnd48VWDH6Zupv
-# Iup0R0auY8lAuD0cdGxRag0J8Vozdft+I3V6hPnQSmqklDDB470h0LogDTcouHMZ
-# QDtfytCFPg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTQxNTMw
+# NDNaMC8GCSqGSIb3DQEJBDEiBCBnvKxXQ2Yeg1aPXwQ1kzyQdYBe3aR7fFOxzFQk
+# /TKkSjANBgkqhkiG9w0BAQEFAASCAgCztqqaZL9mDbx73y4uXqXAWrQPSt5pUIEF
+# bHwzN1htNPar+rRQyd4oSgbPzNgmhVU7xuPxLwOny5kc+Q9xznS73iFdkXDVFuSk
+# uUexRk5lu8+6pUCj0eNMwuUBYTU4AjzsRUKC3jZCiVmj+Kn+qZZHY3NT82NN0R0Y
+# NLV0WH8WfEh34OuG0V6v69kLDj10/cXkgXNiE1wAgP/NzaBVXXcM4ArHIFLk/v40
+# mIMh4Vjp6nMR10TmnywAvdXlC4gEhDeCUoa1JiJoQglHGjTye8GJjXMNojnYCnwo
+# i9por8ThQwNt+jDSnSqCF+6FvbFS/jx0wySWLK55aSl9YlYSAyn/NapIgm7uEOO+
+# EqQU3wYfMAsXaZ5M218L0ya/Wi5MJ683Vfazrsd2ITtsl0bTrPA6cPA0Y+9AwNFv
+# CWnX9y5fNa9ObsKYpNxsD0neD27NNGjlXRtEHxuoeYI9aXo2h0QMW5vAcviIaQ3+
+# Tib/hGT1N+aL6N/NF3+3tlqVevhVy3oeBN1UjBSHysadYw2NHbzGErWuWMxvrdum
+# hMiroYhOFmdfOCKCz+CP/2S7D9xHhdQvCN7gVCCwFqGS1uVXK5cM/X8A/5PP17Bg
+# 5vdjfDqyzQlsOOkjkVypNvtxa/fZ43xQN6WdUt6KKXHf43nBkuf46bS0j5lDCZIg
+# Y9LUKaoFVw==
 # SIG # End signature block

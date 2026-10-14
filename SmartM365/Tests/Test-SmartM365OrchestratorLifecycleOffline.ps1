@@ -2,7 +2,7 @@
 .SYNOPSIS
 Synthetic lifecycle regression tests; no orchestrator entry point is executed.
 .VERSION
-1.0.3
+1.0.4
 #>
 [CmdletBinding()]
 param([string]$SourceRoot, [string]$ResultPath)
@@ -15,7 +15,7 @@ $ast = [Management.Automation.Language.Parser]::ParseFile($source, [ref]$tokens,
 if ($parseErrors.Count) { throw 'Orchestrator source failed parsing.' }
 $names = @('Update-RunningJobs','Restore-RunningJobs','Sync-RunningJobConcurrencyLease',
     'Get-RunningJobTimeoutWindow','Complete-JobRun','Get-JobState','ConvertTo-StateTime',
-    'ConvertFrom-StateTime','Invoke-LaunchPhase')
+    'ConvertFrom-StateTime','Invoke-LaunchPhase','Get-CompletedJobResult')
 $definitions = foreach ($name in $names) {
     $node = $ast.Find({param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name}, $true)
     if (-not $node) { throw "Missing function: $name" }
@@ -301,8 +301,8 @@ if($failed.Count){exit 1}
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDq2UsxPO8zbZbq
-# BNQy5FsVC9h0/peOFBGvLwWhMdCttaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA78j/FO/hveJVy
+# nH+xB+3+sl2dubIUUIxb3rESVPB13qCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -435,31 +435,31 @@ if($failed.Count){exit 1}
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIG7ht0iafBMxwqdiQfhZKK9WBCSBRWFr8rKjvLIF20mYMA0GCSqG
-# SIb3DQEBAQUABIIBgHlQ5f6E8kGD3NV/EZC4LB69LQdlyahKIoJy/aNMi9DyzYvV
-# SoJc31xT9essvARy+WIln0b1NurhxTJge39OcfmE643lUdBkoVsQLg40PLjkqcy7
-# DYLMV2Ufg5QGquEo+2gW7OFgXbd0tv1ilqWo+cgQLyc/ESo3fBFT1tUp4IsG/kfV
-# 8ZrjSUwhpKslnq46HTEzsmHeaWiZ0NGIvLEwpLo6qA5wg8c6lwhLW07qbqzsIsCF
-# n0Sx8WZvRrEkWoIV4SFJ8HvSR8ZV5a/WRy5YxkLSDqzQF2cd9pL/OAMQVazjBoix
-# YZqb4Qf2h6lpgFDmyVVzl2B4sl2E9EKCG76Za66gK/nnLYSJTbZs1anoeiC/p5M8
-# cSIbQb8VUvF0CV0QS+TK8AaG6NtwyMBfmoCmhZaRWWi00TyHs4rs+vekd2+ck9aI
-# xBS7G4X0vYFudHjrQc7pcqjRx2yLC/76HgHRfn/JKRnNQXgpU6P7trdzQkCHc1dq
-# PQ/PYwa+xvPc8U/UvqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEILl0m24HL1GvlVS0UFtEcqG3MMBL9m5WC8ekxqy3Vqj/MA0GCSqG
+# SIb3DQEBAQUABIIBgDTnuQdOPb/qLsXZL2+We2A+Pb96Fb9EMNjffnV6oSUNCDyB
+# DiQY0lheYjTR7ePbJstG4em8l2MlqiOBUFGFN6Qtxp8ADBYI8iLptTH8ePW8soQq
+# bzhSfgax8DXWs4uzZSQfupQAMYVIWMDlJbscnKLfdRZmsgIZCyh7x2Hcsxj9a+Qg
+# lg/cY7ADxVi+DRS08QhOpfF4dKyy02myv+SS3igWZilmKCY8lgnqVEM4jfkIIHQ9
+# M4n/3SyP8vQJ07tgRm0rJQWL66lhAxqAcl89B5wa8b+N3aZTwZoM1cTm1KiLpNxx
+# XIQ643SndvldzFl08aF8CNcGrPTS+PU8NwJXp1Pes/PTI/rEG1DXOJXQysUorozK
+# +z6sH84JHy6EYqnPD2vNZSDO00hX1BOszhqGli3Z1XYZ2FTHDdWdnlVBB+54i8o9
+# sSfS7+JnNo6qXgrv5+KVhaMW8asBhQ/Nz6h7g2O7TYWARcsTYSz5AYTEJWi+4ADz
+# HeIDfMQR24Jp7DUoAqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMyMDEy
-# MTVaMC8GCSqGSIb3DQEJBDEiBCDOXtjwp9t5yelb84MnTlba6jAxtpiQgI5l7NWV
-# h/E5UDANBgkqhkiG9w0BAQEFAASCAgCM8UNg2j7k5HsNn0jc8w9gnbxV8Y3bWWUQ
-# SWGE7ExkwFpEdPjdJfFAmBQOiPV/7omGh5NjjK6+f9wf/hpLklMBTP9huNJsBKn8
-# 5jXHwHLMNXiUFlWI9QsyUQ7EWLOrP5ch416iCSuBBALSHpm+dHvSdC/EZi9/mg5O
-# ly9Jqrplv9+3u+TUCyxBwqER2xIrU5k25rv5yaoaoYvlBfcm2wLH32o05xx5PGJn
-# YGumtJR4mo027gZhStMWT16FqIhDKDrBH5kLsepDTy4lMiMDgAELBZbQMbW/3V3t
-# 4UM++H2JS4Njdd+Br7Z42t0IfsLWq9AJvrZQOiTTeFYsBcu6pc3Ci2Vzi2NmnzWO
-# TYVUtalJuhSuALctFWuYn1K5EBnH7G02DSYGrYlkBREryLWNLd4w13kTvYPnaB9t
-# ymHyurCz8Fg2S9neuWFPRFzMb4azfEDthhrvmLgttYpwlUBakQ1OFuF06B2/m8qO
-# agAm5VQU1uV9BuN/EeVSa+EIgrJhhROaNBokqkvGWIaC4uvxNc2ho38SqrMBmAKA
-# /BhM/snlUEeZWQCm93+EJcYLCc/VYZCaUo7OSUnIyRhtCZ3ZkMbzPclmUiG9yEfL
-# jkATTldBDplxnVe4lg1z9pyxpNDBt5CWIzKgbZuSEqmOFIsyVHDFjFsiOSdMzj67
-# vqBKtjH4qw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTQxNTMw
+# NDJaMC8GCSqGSIb3DQEJBDEiBCCfmK9rpWMfRC45ykOAJiRYDO937fZK+ADZjYcX
+# VTyOTTANBgkqhkiG9w0BAQEFAASCAgBnMiWYY8oBLSXgEGxFB7Zrm2Qzifq6F00N
+# 3/Fl0rKwpbR0iB4igs71LUrlQ0ME6NhCEKnUeCj+eNeRmmVfuSb6eblcPbpQzyRM
+# Rvmn9x7Sc4dv6Q0mPhHEOuCDBPv03UrnfIlciBIh44F6reuS/tgd6a4AnyWs3BLl
+# RR6fhxd5Bs23BBeNVaRrHqNO2FVeZL7AWWgFcIziA/lRyLuUYmQTvQqgSpTnx98S
+# WzHAPE/bfIJvRCuCJMpEDkh21PmtrZQM0x3WkitI/+6rsE4hBfbTtBNLl2y/RzWn
+# /b0QV3TmD46fAUNmVZ7m/DcK/GcS0M3EB1aRiVe3NruH1eJ1+6c5u1Y4lquE0xxf
+# roZdoCItC5YagU9FPh3KssgtZwVA/aAJG9UxubtiigTfewlM0aB9dcmJc4JvZ2hq
+# KOniiHRqdmWMH2jETbGerWlKRh0DakRsdeUcxj3h7AfVZwqp2BKOst7UGeNlOv1k
+# WUopaWgSRZtwMTMgxWG8OgmPVjq/tq3g8mhB8qcQ0qOij4QXqdi2qD6RNV8fhzXp
+# o6N4KF1XV0IdI56WsnlVFdoDHIPeW0VESg7WfOuBqy/Km5qh9DufcjmKR0sh8Qve
+# kBpIfNeHfkoKOvNLbotvU9kEboJxHC3PZom7yFrxarmrhEHKAnAnznQBdFDYCxWH
+# 9DHrctWdmw==
 # SIG # End signature block

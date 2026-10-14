@@ -63,6 +63,17 @@ param(
     [int]$StartWaitSeconds = 60
 )
 
+# Local lifecycle only; no collection or publication is performed by this guard.
+$smartM365LifecycleRoot=$PSScriptRoot
+while ($smartM365LifecycleRoot -and -not (Test-Path -LiteralPath (Join-Path $smartM365LifecycleRoot 'Modules/SmartM365.Core/SmartM365-InventoryLifecycle.ps1') -PathType Leaf)) {
+    $smartM365LifecycleParent=Split-Path $smartM365LifecycleRoot -Parent
+    if($smartM365LifecycleParent -eq $smartM365LifecycleRoot){break}
+    $smartM365LifecycleRoot=$smartM365LifecycleParent
+}
+if(-not $smartM365LifecycleRoot){throw 'SmartM365 lifecycle support is missing; update the complete runtime.'}
+. (Join-Path $smartM365LifecycleRoot 'Modules/SmartM365.Core/SmartM365-InventoryLifecycle.ps1')
+$smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -RequireReturn
+try {
 $ErrorActionPreference = 'Stop'
 
 $smartM365Root = Split-Path -Path (Split-Path -Path $PSScriptRoot -Parent) -Parent
@@ -156,13 +167,6 @@ function Get-OrchestratorTask {
     catch {
         throw ("Scheduled task not found. TaskPath={0}; TaskName={1}; {2}" -f $Path, $Name, $_.Exception.Message)
     }
-trap {
-    $script:RestartCompletionStatus = 'Failed'
-    try { Write-RestartLog -Level ERROR -Message $_.Exception.Message } catch {}
-    Write-SmartM365CompletionBanner -Status 'Failed' -ScriptName $global:SmartM365ScriptName -StartedAt $script:RestartStartedAt -ErrorCount 1 -LogPath $global:LogTextFile
-    exit 1
-}
-
 }
 
 if ([string]::IsNullOrWhiteSpace($TaskName)) {
@@ -211,7 +215,7 @@ do {
         Write-RestartLog -Level SUCCESS -Message ("Scheduled task restarted and is Running. TaskPath={0}; TaskName={1}" -f $TaskPath, $TaskName)
         $script:RestartCompletionStatus = 'Auto'
         Write-SmartM365CompletionBanner -Status $script:RestartCompletionStatus -ScriptName $global:SmartM365ScriptName -StartedAt $script:RestartStartedAt -LogPath $global:LogTextFile
-        exit 0
+        $smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; $smartM365RunGuard.ExitCode=(0); exit $smartM365RunGuard.ExitCode
     }
 } while ((Get-Date) -lt $deadline)
 
@@ -228,12 +232,29 @@ if ($null -ne $taskInfo) {
 }
 
 throw ("Scheduled task did not enter Running state within {0} second(s). State={1}" -f $StartWaitSeconds, $task.State)
+    $smartM365RunGuard.ReachedTerminal=$true
+    $smartM365RunGuard.ReturnedNormally=$true
+} catch {
+    if ($_.Exception -isnot [Management.Automation.PipelineStoppedException] -and $_.Exception -isnot [OperationCanceledException]) { $smartM365RunGuard.ErrorRecord=$_ }
+    if ($smartM365RunGuard.ErrorRecord) {
+        try { Write-RestartLog -Level ERROR -Message $_.Exception.Message } catch {}
+        if (Get-Command Write-SmartM365CompletionBanner -ErrorAction SilentlyContinue) {
+            Write-SmartM365CompletionBanner -Status Failed -ScriptName $smartM365RunGuard.ScriptName -StartedAt $smartM365RunGuard.StartedAt -ErrorCount 1
+        }
+    }
+    throw
+} finally {
+    Complete-SmartM365InventoryRun -State $smartM365RunGuard
+    if($smartM365RunGuard.ExitCode -eq 130){exit 130}
+}
+if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
+
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCHCviZR1aYUfWH
-# uZIyKXguqMG+1qQUixHpyEWZnVztTaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBDIcI/4VRFpigy
+# RdnfCh3b/aw8UXujPO9l759iyyFi46CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -324,25 +345,25 @@ throw ("Scheduled task did not enter Running state within {0} second(s). State={
 # NHNboDGcmWXfwXRy4kbu4QFhOm0xJuF2EZAOk5eCkhSxZON3rGlHqhpB/8MluDez
 # ooIs8CVnrpHMiD2wL40mm53+/j7tFaxYKIqL0Q4ssd8xHZnIn/7GELH3IdvG2XlM
 # 9q7WP/UwgOkw/HQtyRN62JK4S1C8uw3PdBunvAZapsiI5YKdvlarEvf8EA+8hcpS
-# M9LHJmyrxaFtoza2zNaQ9k+5t1wwggbtMIIE1aADAgECAhAKgO8YS43xBYLRxHan
-# lXRoMA0GCSqGSIb3DQEBCwUAMGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdp
+# M9LHJmyrxaFtoza2zNaQ9k+5t1wwggbtMIIE1aADAgECAhAIT9wzT35FTtvDD4/5
+# khg1MA0GCSqGSIb3DQEBCwUAMGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdp
 # Q2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3Rh
-# bXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTEwHhcNMjUwNjA0MDAwMDAwWhcN
-# MzYwOTAzMjM1OTU5WjBjMQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQs
+# bXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTEwHhcNMjYwODA1MDAwMDAwWhcN
+# MzcxMTA0MjM1OTU5WjBjMQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQs
 # IEluYy4xOzA5BgNVBAMTMkRpZ2lDZXJ0IFNIQTI1NiBSU0E0MDk2IFRpbWVzdGFt
-# cCBSZXNwb25kZXIgMjAyNSAxMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKC
-# AgEA0EasLRLGntDqrmBWsytXum9R/4ZwCgHfyjfMGUIwYzKomd8U1nH7C8Dr0cVM
-# F3BsfAFI54um8+dnxk36+jx0Tb+k+87H9WPxNyFPJIDZHhAqlUPt281mHrBbZHqR
-# K71Em3/hCGC5KyyneqiZ7syvFXJ9A72wzHpkBaMUNg7MOLxI6E9RaUueHTQKWXym
-# OtRwJXcrcTTPPT2V1D/+cFllESviH8YjoPFvZSjKs3SKO1QNUdFd2adw44wDcKgH
-# +JRJE5Qg0NP3yiSyi5MxgU6cehGHr7zou1znOM8odbkqoK+lJ25LCHBSai25CFyD
-# 23DZgPfDrJJJK77epTwMP6eKA0kWa3osAe8fcpK40uhktzUd/Yk0xUvhDU6lvJuk
-# x7jphx40DQt82yepyekl4i0r8OEps/FNO4ahfvAk12hE5FVs9HVVWcO5J4dVmVzi
-# x4A77p3awLbr89A90/nWGjXMGn7FQhmSlIUDy9Z2hSgctaepZTd0ILIUbWuhKuAe
-# NIeWrzHKYueMJtItnj2Q+aTyLLKLM0MheP/9w6CtjuuVHJOVoIJ/DtpJRE7Ce7vM
-# RHoRon4CWIvuiNN1Lk9Y+xZ66lazs2kKFSTnnkrT3pXWETTJkhd76CIDBbTRofOs
-# NyEhzZtCGmnQigpFHti58CSmvEyJcAlDVcKacJ+A9/z7eacCAwEAAaOCAZUwggGR
-# MAwGA1UdEwEB/wQCMAAwHQYDVR0OBBYEFOQ7/PIx7f391/ORcWMZUEPPYYzoMB8G
+# cCBSZXNwb25kZXIgMjAyNiAxMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKC
+# AgEAtnum8sn+zUr41JtMZbP9OMYw+HwJDpG5xkIu/lqcfNYmMX81YmsUiHLbh9yk
+# peWBGKTLhYBrAN9Tdg/QEzG32XcObmgIblnr0CoQ3WSAeDZ6nH6X6VkFyYkJw3QB
+# JREwvm4UhLzSxmwPA7cFKRTEOMsmEEj6qJk/dqLEAL+oQYuOwE2UuiX1Vnul8YRe
+# IyWd4kgLn9gq6LNXM0UplkR6jL/QHxmb6fMoGBJYbnaUI7XD6cKDpekK2SVMld4i
+# DbzeHDtOaaxldH5IxuNusQ69nd8/ZXEiB5Hbxj3RlK13cX1W4DlFXKdv/CEhM8Cj
+# 1vvlmvhNroyPdRGbbpBlgyf8Wdu5N6ByhFwURn0U6ozlPoxN22v+fviUhP+6DR54
+# 7OZnpBMWDfei1f5sVGwiiW/KQTWOK97g+4RJpPzPNV4VYMAwO2jM2Aty2QYPVmOQ
+# TJm0msuXnJrSbl2gf9JylpkJlWXqk1Q4LJsxz+TELoQCZIljbgvTJgoPU2R12ydv
+# 8i1UqL/adelA0y7U9Pmmtbze9Xx3rtajC5SzQd1jgfwAwsa90v9YcSPdmeoyoBBA
+# /27cCL237l5DTYYPDLQ4ON3OLTGWnvRb6jDrf/T75gMRfUzSLCBQfBusm9+mSWRl
+# C/Df6S/e9Q8i13CuhzOT2Jx+V/nlbXM4QoBwlUAhelwwJT0CAwEAAaOCAZUwggGR
+# MAwGA1UdEwEB/wQCMAAwHQYDVR0OBBYEFBTJY4owLtRK+26U8+bjQH717M3iMB8G
 # A1UdIwQYMBaAFO9vU0rp5AZ8esrikFb2L9RJ7MtOMA4GA1UdDwEB/wQEAwIHgDAW
 # BgNVHSUBAf8EDDAKBggrBgEFBQcDCDCBlQYIKwYBBQUHAQEEgYgwgYUwJAYIKwYB
 # BQUHMAGGGGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBdBggrBgEFBQcwAoZRaHR0
@@ -350,47 +371,47 @@ throw ("Scheduled task did not enter Running state within {0} second(s). State={
 # YW1waW5nUlNBNDA5NlNIQTI1NjIwMjVDQTEuY3J0MF8GA1UdHwRYMFYwVKBSoFCG
 # Tmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRHNFRpbWVT
 # dGFtcGluZ1JTQTQwOTZTSEEyNTYyMDI1Q0ExLmNybDAgBgNVHSAEGTAXMAgGBmeB
-# DAEEAjALBglghkgBhv1sBwEwDQYJKoZIhvcNAQELBQADggIBAGUqrfEcJwS5rmBB
-# 7NEIRJ5jQHIh+OT2Ik/bNYulCrVvhREafBYF0RkP2AGr181o2YWPoSHz9iZEN/FP
-# sLSTwVQWo2H62yGBvg7ouCODwrx6ULj6hYKqdT8wv2UV+Kbz/3ImZlJ7YXwBD9R0
-# oU62PtgxOao872bOySCILdBghQ/ZLcdC8cbUUO75ZSpbh1oipOhcUT8lD8QAGB9l
-# ctZTTOJM3pHfKBAEcxQFoHlt2s9sXoxFizTeHihsQyfFg5fxUFEp7W42fNBVN4ue
-# LaceRf9Cq9ec1v5iQMWTFQa0xNqItH3CPFTG7aEQJmmrJTV3Qhtfparz+BW60OiM
-# EgV5GWoBy4RVPRwqxv7Mk0Sy4QHs7v9y69NBqycz0BZwhB9WOfOu/CIJnzkQTwtS
-# SpGGhLdjnQ4eBpjtP+XB3pQCtv4E5UCSDag6+iX8MmB10nfldPF9SVD7weCC3yXZ
-# i/uuhqdwkgVxuiMFzGVFwYbQsiGnoa9F5AaAyBjFBtXVLcKtapnMG3VH3EmAp/js
-# J3FVF3+d1SVDTmjFjLbNFZUWMXuZyvgLfgyPehwJVxwC+UpX2MSey2ueIu9THFVk
-# T+um1vshETaWyQo8gmBto/m3acaP9QsuLj3FNwFlTxq25+T4QwX9xa6ILs84ZPvm
-# povq90K8eWyG2N01c4IhSOxqt81nMYIFvjCCBboCAQEwYjBOMR4wHAYDVQQDDBV3
+# DAEEAjALBglghkgBhv1sBwEwDQYJKoZIhvcNAQELBQADggIBAI3FOmEenVIK35ms
+# CYB+fShAsWvSYvLBItoNdAgQ2jIqrGsVsluXMJU/+mRebBc52s6lbKAvOVPXaizm
+# KkMLLflEEKDZQx4CkS2t8aHPjkXha3hYZ010htFa3dhNgmalH5vuWvh3tTCf4frT
+# S7gPtGc4Z/xaPhQ2AB1mR8eEe/WbH0RWHvVIl6VwQ3+g5FKNfN2N/DWJkf13w2H+
+# 2GfqEfbd35Ww8CvoYBjLNIDTadcPWdgsjsiOaK/7EsKJgLjUNIVgvcaFOLLQ/Glr
+# A+0ZHJoFUbOr5SJN8zykPspXIXlpDJY/gqFUZRROeab9GVgmhbdOJcD/63RhxPah
+# FUGbckRONqMe6DYAv6/mOG0pWd3cPStsdcS7buj5DyniwRY8yooMH6ptx5vpP/pZ
+# zBPBeZD2U4IsthyxB5Jaa8qrOkB5z160TXiM5ADMspZ0TfD9MJoq0tFpFPssKRFh
+# WeEDYPvcUuN7U7lvcdHl4ezQ3NT/7Ffs1sR1yh/LRbdZ3B3Vc6q2WmD8mDC0p9kz
+# l2o73iVtS946IkEj7FkRsZGww1teYxERROC745xrtjvcw9ZyyUjHZWGRIpJeMNsP
+# quCDf0fkyHtB+J4AiNZqCQk23rxh+KbpyMTNVKItJ5l92Svl20U9NbqMBOVYl1h5
+# 4NEYLJq1/xHWFKPNK903zJZA9P2DMYIFvjCCBboCAQEwYjBOMR4wHAYDVQQDDBV3
 # b3JrcGxhY2VjbG91ZGh1Yi5jb20xLDAqBgkqhkiG9w0BCQEWHWNvbnRhY3RAd29y
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIGVgjILy6v6ZbTJlafKXFrSb2FLNnZ6227xzKfpccWwjMA0GCSqG
-# SIb3DQEBAQUABIIBgEVqplvPCOk9xzl3Vg71/v9wWb7o39Hw0ksXy1nFLswzQmTC
-# zGTt0sxFoGMJiru6KnPE0nUSspDVZQc+DeGWnuGpQtapwFVyXwrkfzwutc7PeJuj
-# 7+TkvZHEMOqGK3bsHki/WbMq4MoAxfu9r1PZmAzja9asywejKgpG+d1O49Gby9er
-# DKaxaf9yqG+/8JYi2tKVJPQ+wCmLVJX3WgGDbXM+Wt6mLKulqV881ryfNr0/NIw8
-# GdnrlZZrLemNX2KRMknEL0MKT+hZL0ZhG5nGILSuujG+NmU7OctTo2NIr8Z4Vrw6
-# bgzPCLDyno9KHFaEmVllPoZvAmSNt2KUiECNGPc6GnkWkmfAIVJlqqL0bU7dcuLC
-# byDn54dDc7FUt7FzPvZ2RPHGsQcX9VVwbfsYi8lcohb2KZ0FDimD5Y151E88Yf8O
-# yxebrsSdu5d+UlCfgALbu6S/C2EJApKprJ6swJISG3eBeglG2Fqg9APCz5BTS4hk
-# V4WweytObJjV6zV556GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEICJItkFsIpJKz6XIBu+waNzdp8l8GoaCSeKCb3jgoEpeMA0GCSqG
+# SIb3DQEBAQUABIIBgJqIGo4+EDgNxZM8GESEOqxuRLljsBU+/dy6VZCKpScS2ADs
+# wGFzpKLaCKgjsNDG85VyaKJbJ/ukmy9wyekOvFgmgjV/sipd5B+vSMPZKtrhNfSo
+# SxEPMCdWQZaysXsJfYiGzLcUlQglK5loOdJFs/77k9eJd4a19cb1QxPaR7Oe6/id
+# NmAzgVL5WVBuplkkBQeUL01eHIktCmmaZxN4awpyNmxIxqdSkGR9Bls4jsjypZyk
+# VfXLT4VJx1ed7nHsYy+08MjQP14t2s3aZ7/BPP7CanIb7iOh/IPOV8+2xWBAuBE7
+# TFF0gjUb/DpA9fPH6TYjTyYt0ND5t84zTYLJVO4MKApKsCR5FJKtRsb/8GLDeDvr
+# l+0PwiuvZXeT9JeqYJn5nwiePgA99sgN5RLLhpW4qKuod0ns0fcAdehgepevDmpd
+# WmUFzmodbF6/Nh1QAXroHbznr7zaVnPd8ple3Gifp+oY0AeCJyGLJ/7t7Is/0beB
+# fXdSIpNGiWTd31pxc6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
-# MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTQwMTEy
-# NThaMC8GCSqGSIb3DQEJBDEiBCDbrZLBaFQGxsti9/IN1B7CbMZ9jtzOnwP/1GRu
-# DRIxNzANBgkqhkiG9w0BAQEFAASCAgCkrp7ueRbZZ/f05Pe+VplRxSUu4hKgPSpi
-# 0oVisfIjZrcx6cwM71H3dPZlTJdyuwxmAyRbSMUVblRNMyUujVpu6W/fdCdUHV2p
-# x1RnIwhfwH06DpLX3AF2zT761806/Nubmj+P7kd7txh7aQgbbQq+Tu7op9gH6yQk
-# PAO2qqcYu7xTWcPvMaCvGX+2nsNA8zl6rSqIJflQnyf7PhgVjSTSyvEZkAIqfX6d
-# SvTSkQIa8OG/F3Kftb0LXGzdSMp3b3w52ikSp338sAFXMhzJkL4MskynAMJ22hLu
-# nBu9F69qTKxOVox0J6cFyRSwonx0hKaNlJscuxNU5ZLb2lv6TRHKJI9I+e4ZzyDq
-# /kOneXxxcQTfPiF6nb/sOODAi32Di6jaE4j96312mqHU/HjHuJq4DZbkbiqUKAa8
-# CGKG/Hn6KE1yq5M+uqkGR3Bc6PjxaiVMEENlNInEg+QQUBL24YnEWvcrvx+n7tPk
-# Dfjt/3qfDPXzprz1HzXid5e0tda+WD1fyjCZaIwzdyw3875O6maZ/eZWnbmcUwSe
-# jV7DiRrYFbmy3ZPeLfmlLqgBob4pIiLoWFyaSrmkuV8cGejV5S/CJQlzE5hhk2Vr
-# InHdG0YQtHjINKUxyjoYp3ov5HhhNSRJ5kWoUmbd2i44LaIDYOpHVKuDW6Bo/06B
-# 8lqTaKt9tw==
+# MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTQxNTMw
+# MzhaMC8GCSqGSIb3DQEJBDEiBCCODp36uSQup1uWKrfsVC145xYekkjQGJ0eimtt
+# +qFkcjANBgkqhkiG9w0BAQEFAASCAgBi0UnNIQYZ5BEl5t6GmAFFCqhY21mQnk+c
+# lP4sv4rB8AeNCkCr3F5V5f0h6IlQM8Dcyx3AtBYT/F+b6Wi2BHTieXI7mifAliQV
+# k4BgcQ23F7V3OYpLd5nN1ZYUN14sCSppGLYpj6hgRDLJr/48F6fOYEuIwzyUyFbj
+# 0LvHJzNmOgnFS7V/djsgflOX7TNBbOxu5kBqORpfBk26QE14DmKT27j0USms06vI
+# R86i0sB7pbCK3+o2V5vLSQ59MtK8vdAMOMl7RvDqXppiF2zmd7VFMk0UDRVFI1aE
+# NhnYUY39vKrbLYTzhPjsiMBDp/G8qGY+39kaU8So0oRKkxX3bOdNBbzoCo/0l6SO
+# wFXvDmaXikZaV7XlQkxbJagVw/DkkDGYMXoJQoE9g9P4qh9MVfM+VAnuNGQMIhsK
+# PtxZDn1pj19+ckFhlC7MPu4MQ5yNkd9wi3z3NEYdxe8erqq/u091bs02WXcS4pc1
+# JzE5HiX+l8Hsfj7B/SzI/qZ1MkCMf/uGCZA1Wwm0M/ctyZa8d5AHiKnVGMNyJlns
+# zF4u3ggpAA+6IsrMMWV/zZN92+MSAEuZ7dtbzBT3UXRds9BTXASAt0wa1pb3VLSM
+# NCiRvlBN7J9OdIf5VIrLKCkvLQ+vlO8aHdTDsC5eNGiuw5Qyq6fl4xcPCvgUoYxJ
+# Y0mhtHENhw==
 # SIG # End signature block

@@ -3,7 +3,7 @@
 .SYNOPSIS
 Review or explicitly activate current-only CMDB preparation and publication.
 .VERSION
-1.0.2
+1.0.3
 .NOTES
 Default is validation only. -Apply publishes the two reviewed job entries through
 the existing optimistic configuration API. No collection or pipeline is requested.
@@ -18,9 +18,20 @@ param(
     [ValidatePattern('^([01][0-9]|2[0-3]):[0-5][0-9]$')][string]$ScopeTime='22:00',
     [switch]$Apply
 )
+# Local lifecycle only; no collection or publication is performed by this guard.
+$smartM365LifecycleRoot=$PSScriptRoot
+while ($smartM365LifecycleRoot -and -not (Test-Path -LiteralPath (Join-Path $smartM365LifecycleRoot 'Modules/SmartM365.Core/SmartM365-InventoryLifecycle.ps1') -PathType Leaf)) {
+    $smartM365LifecycleParent=Split-Path $smartM365LifecycleRoot -Parent
+    if($smartM365LifecycleParent -eq $smartM365LifecycleRoot){break}
+    $smartM365LifecycleRoot=$smartM365LifecycleParent
+}
+if(-not $smartM365LifecycleRoot){throw 'SmartM365 lifecycle support is missing; update the complete runtime.'}
+. (Join-Path $smartM365LifecycleRoot 'Modules/SmartM365.Core/SmartM365-InventoryLifecycle.ps1')
+$smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -RequireReturn
+try {
 Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
-$ScriptVersion='1.0.2'
+$ScriptVersion='1.0.3'
 $failure=$null; $initialized=$false
 $core=$null; $guardInstalled=$false; $previousGuard=$false; $saved=@{}
 
@@ -115,7 +126,7 @@ try {
     $smartRoot=Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
     . (Join-Path $smartRoot 'Config/SmartM365-TenantContext.ps1')
     $effective=Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot
-    Import-Module (Join-Path $smartRoot 'Modules/SmartM365.Core/SmartM365.Core.psd1') -MinimumVersion '1.0.77'
+    Import-Module (Join-Path $smartRoot 'Modules/SmartM365.Core/SmartM365.Core.psd1') -MinimumVersion '1.0.87'
     $core=Get-Module SmartM365.Core
     $previousGuard=& $core {
         $previous=Get-Variable -Name SmartM365TeamsNotificationInProgress -Scope Script -ErrorAction SilentlyContinue
@@ -165,7 +176,14 @@ try {
     } else {
         WriteLog -Message 'CMDB integration validated only. No shared configuration was changed. Apply only after Power BI qualification.' -Level SUCCESS
     }
-} catch {$failure=$_;throw} finally {
+
+    $smartM365RunGuard.ReachedTerminal=$true
+} catch {
+    if ($_.Exception -is [Management.Automation.PipelineStoppedException] -or $_.Exception -is [OperationCanceledException]) { throw }
+    $smartM365RunGuard.ErrorRecord=$_
+$failure=$_;throw} finally {
+    $smartM365RunGuard.InCleanup=$true
+
     try {
         if($initialized){Complete-SmartM365ExecutionContext -Status $(if($failure){'Failed'}else{'Success'}) -ErrorRecord $failure -FailureStage 'CmdbConfiguration'}
     } finally {
@@ -176,12 +194,23 @@ try {
         }
     }
 }
+    $smartM365RunGuard.ReachedTerminal=$true
+    $smartM365RunGuard.ReturnedNormally=$true
+} catch {
+    if ($_.Exception -isnot [Management.Automation.PipelineStoppedException] -and $_.Exception -isnot [OperationCanceledException]) { $smartM365RunGuard.ErrorRecord=$_ }
+    throw
+} finally {
+    Complete-SmartM365InventoryRun -State $smartM365RunGuard
+    if($smartM365RunGuard.ExitCode -eq 130){exit 130}
+}
+if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
+
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDu5wpRp1/Vz0Fd
-# vUN/SutnQpnYV8TjDi7GnKKMgXpmn6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB3goxr4ZG63NwR
+# jmDSV5/9M1uU21AkMxEz/kQql6OeZKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -314,31 +343,31 @@ try {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIBqExo8+GXuPkAHSPfHBTMV9ZhNSrPbntZqif0/xfusvMA0GCSqG
-# SIb3DQEBAQUABIIBgH2RWAvhsYpXI+eLOCBkuQG4JoSq6rNI7AXakJSCMLeM46R+
-# 0cHU1SlmuiC/jjy5PVa+sd6w8btq5vrvXM3pGTPS8OxWeFxJbV2fGS4myaZrWeR1
-# DNjXetfUrMKLX9DOmFC7TSvgIdAUpclCx8TSkxf4jHOs1o4oFKty6nVskOme9ELm
-# dy4goic3JmXVv/hKNXqHy8I2NbcvC5Fpo16WZGQsn0ybaFbul2YRJ9UDUfcS/jFR
-# vfm7Qr1vqN6W40WW0v/c7xYPr/i8k3OsLENflPk0l2/uD1cGrfzgip0Z/Kpvia6W
-# z92XR08nXtVAuKv+Tufe6Ssg39SJnVC7aVZBykm3fa5Qaqfo93igjQ8VxowkKBdF
-# zPb9VMZ3wtYNslHVQq7Zt9CKqjRMnKYgYR3nrbIOw78YmYJnlDRRwQ8dY+zxc+8h
-# i9jz8fNPmpl/3lYipEiMBUXP96t8G2/PKthSh01AEmls1sX85U2QHCDvKuE+w+6h
-# tOzK5oNPCxWGA4KlpaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIGHREcP8FBzJaPFiOlnEplzuXR7+tCPzJxcZUztbYVweMA0GCSqG
+# SIb3DQEBAQUABIIBgImLrpBx3IiDA2EoPK8KHu2q8QvSWe1+HVvDOnfUp4ZS8bGY
+# YYnEwn4lAq/hP4kKQTKA/I7SPnXrRqePcvtBtlz8LG3TioWY42h2dHvxpH5An25M
+# DaCY/bL/eIds1bWZYsNXSWNojqqnq/FoqaDj0NwXcergop4bZx1WWgVmnAe2UpP0
+# FNwL56SAQoabLybra5L1qc8PL2lPx4sBHB5OQIEVz14SG8uZiw8i5lThNmU6KVI/
+# qsKwiqoludYFxZj6aLGBzcQzvqRZR/wHqA7FAYrYuAQyM6ZLdth3cacD0UGR6fZn
+# 8mwjUr1/eHVs/3RTpxClf0f+/9/OmeYjRLjVkIgdO5OLM6vefPjA3rEvN7xPAu22
+# RNJZDjJ32O8tww8yIv97Z+mJ939S6liPLOBgKYBKXGo3CTMnh9oFFpo3PFOVeO/x
+# sA0Bji/wkUAKbWxoVNXXdzWpbhoPC/8dNQLs3l5eKd7/u6QtQV5lJKCJx78T64l7
+# cBPCxJNDZWrsiQoOx6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDcxNDQ1
-# NDlaMC8GCSqGSIb3DQEJBDEiBCAZzsR7FP8lfjV0XH/zl9icdZYIT+00YJLyhbv6
-# UdTw1zANBgkqhkiG9w0BAQEFAASCAgANx9Bn6F+5up7FRpHyELCgvzWS0miYKDz3
-# XtxBmUYadx1eJRnGWy9OxsmJOGxdn2Mb3nUodMY/9goiBumzjbtnDKKbXmx2dCUj
-# tFflCX89kMKaQYLtVQUCeC8ABPQYMWBlHrupyLKZKzpGiCSCzNoZQjG7xHL46FxU
-# 7vwJV4daBjsFKZA/lN2cgJfp28BHY7yw/Bpmf8rmSmNGQi+tF6eynaSUXQmQp5Bn
-# aVWICrRetDum2lHK5NLO3wpDQNV+0QxMUpC+JpCJQjKHDUpFPCkzhi8LoY6wPIhe
-# 3bWNPBscMIqvskyoN7etJUyYd9e8NhloFwHLzES2lIlnjpXR9tNFzjbGEO+MjKrx
-# lFGlHPYGFUo6jA7ShiTOuj92+IyLYrAmslL5xXfFXQMeneM74eHv4KCdCg/TF1Bc
-# WYVTCI/j3hVOOmGmayY7uL2SxKnxG1Eop3ez3TDVlgj8gLf5N282HLsjaLjGyTC4
-# boVwZXNgfvd16gib9oEJqkp2fY0R5U2kdgOP5vvcl8UtdhyyM7Ao1VNDsQBlLvwz
-# XWhr2qcNa3yKr0Jfhs0xOA991QGa5vM1gzcflgJ51TUQeqwMyEUzkDa48x5hIQnp
-# ekvgpanFp0ejL+UGprotSOlvUTfmw30sRK7ahuqtqPRUrIMjMB2hFMF/w4BmfEkU
-# YekwwTu9Og==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTQxNTMw
+# NDBaMC8GCSqGSIb3DQEJBDEiBCBmJQfjFFegQC6Jcz7gxJ9B2B2DrxrUyu0ihDaP
+# DsfoazANBgkqhkiG9w0BAQEFAASCAgB3iV4ZbRZGhApFzu/JqF8Jm33pbjaRa9jL
+# GFENpV6i6WSX4bP9+MBtNWJjl6eMli5Tzt2qpgrJ1w/eUVk63JPFv0xZh3F3ceVr
+# aI2MgsVhdD32if06Tq/R+2Rl/e8KvDx330nJ44D73oERYMvby6Pe32Z9+8tg4XHV
+# iVw5AhcHQSoiQZDFwNuGsLX40O0miL4oWy+/8HBys7OEWRkI/zlz5WOMS4dhZUxT
+# /bUdvTbfu2IkYgFmUeyeFpeGRqES/Q9uudM4NUtZOpSsgTU1GHdfezQwGDqsVWjv
+# 433FJ3A6fFNwEI9oHyKT09kHrr7XfGKCQAGKzxn+4JbUrpveh+axiASokvjg8712
+# z9Lhp1jg4mRHFe1Eon11qgYIkVwT5AddhHchhtJegRrNLZpJNYVynD281WXpMrf2
+# cVp32/t5dj0e8e7URdNiYnsD8P8gizrGcCsrJd+uM0a911OQ4qGttsRM4PfZO1qC
+# eMzQGfcKE0rKUBx6poKvk6J8IIDjscfI5R23j5DhCIdgyl4kp1f8K/+Mv4t0CEs5
+# c1OQEnmRgImUtfOVXDEi+qpCdylXO4JBtaOikwXO+9QNKdi8gKbUYx8KDB8ozvo6
+# DHhwQKELcTW2vXOgQsokhhARZcmturEHWESwED8I3xNlIMbn7x3blIDvPoHNt4lj
+# 9OYtQ21AWQ==
 # SIG # End signature block

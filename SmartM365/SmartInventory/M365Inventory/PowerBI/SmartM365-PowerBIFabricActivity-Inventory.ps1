@@ -12,7 +12,7 @@ files for SmartInventory and SmartFinOps.
 but suppresses SharePoint uploads and Teams notifications during a controlled run.
 
 .VERSION
-1.0.4
+1.0.5
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -47,8 +47,19 @@ param(
     [int]$MaxItems = 0
 )
 
+# Local lifecycle only; no collection or publication is performed by this guard.
+$smartM365LifecycleRoot=$PSScriptRoot
+while ($smartM365LifecycleRoot -and -not (Test-Path -LiteralPath (Join-Path $smartM365LifecycleRoot 'Modules/SmartM365.Core/SmartM365-InventoryLifecycle.ps1') -PathType Leaf)) {
+    $smartM365LifecycleParent=Split-Path $smartM365LifecycleRoot -Parent
+    if($smartM365LifecycleParent -eq $smartM365LifecycleRoot){break}
+    $smartM365LifecycleRoot=$smartM365LifecycleParent
+}
+if(-not $smartM365LifecycleRoot){throw 'SmartM365 lifecycle support is missing; update the complete runtime.'}
+. (Join-Path $smartM365LifecycleRoot 'Modules/SmartM365.Core/SmartM365-InventoryLifecycle.ps1')
+$smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -RequireReturn
+try {
 $ErrorActionPreference = 'Stop'
-$ScriptVersion = '1.0.4'
+$ScriptVersion = '1.0.5'
 $TaskName = "SmartM365-PowerBIFabricActivity-Inventory v$ScriptVersion"
 $runId = Get-Date -Format 'yyyyMMdd_HHmmss'
 $script:PowerBIActivityApiUri = 'https://api.powerbi.com/v1.0/myorg/admin/activityevents'
@@ -155,7 +166,7 @@ function Get-PowerBIActivityConfigValue {
 
 $smartM365RootPath = [string](Get-PowerBIActivityConfigValue -Name 'SmartM365RootPath' -DefaultValue '')
 $coreModulePath = Join-Path -Path $smartM365RootPath -ChildPath 'Modules\SmartM365.Core\SmartM365.Core.psd1'
-Import-Module -Name $coreModulePath -MinimumVersion '1.0.72' -Force -ErrorAction Stop
+Import-Module -Name $coreModulePath -MinimumVersion '1.0.87' -Force -ErrorAction Stop
 
 $global:SmartM365ExecutionStartTime = Get-Date
 $global:SmartM365ExecutionSummaryWritten = $false
@@ -971,7 +982,7 @@ if ($ValidateOnly) {
         $moduleStatus = if ($powerBIModule) { "$($powerBIModule.Version)" } else { 'not installed; required only for a live collection' }
         WriteLog -Message ("ValidateOnly passed. Tenant={0}; UTC days={1}; FromDate={2}; ToDate={3}; Pagination=continuationUri+continuationToken; RateLimit={4}/hour; DetailedColumns={5}; UserActivityColumns={6}; MicrosoftPowerBIMgmt.Profile={7}" -f $Tenant, $dateRange.DayCount, $dateRange.FromDate.ToString('yyyy-MM-dd'), $dateRange.ToDate.ToString('yyyy-MM-dd'), $script:PowerBIRequestLimitPerHour, $detailColumns.Count, $userActivityColumns.Count, $moduleStatus) -Level 'SUCCESS'
         Complete-SmartM365ExecutionContext -Status Success
-        return
+        $smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; return
     }
     catch {
         try { Complete-SmartM365ExecutionContext -Status Failed -ErrorRecord $_ -FailureStage 'ValidateOnly' } catch {}
@@ -989,7 +1000,7 @@ function Stop-PowerBIActivityTranscript {
     [CmdletBinding()]
     param()
     try {
-        Stop-Transcript | Out-Null
+        Stop-SmartM365RunTranscript | Out-Null
         Update-SmartM365TimestampedTranscript -Path $global:logTranscriptFile
     }
     catch {}
@@ -1000,7 +1011,7 @@ try {
         if (-not (Test-Path -LiteralPath $folder)) { New-Item -Path $folder -ItemType Directory -Force | Out-Null }
     }
     Start-SmartM365SourceReceipt -ScriptPath $PSCommandPath -SourceRootPath $LatestCsvFolderPath -ScopeParameters @{FromDate=$dateRange.FromDate.ToString('o');ToDate=$dateRange.ToDate.ToString('o')}
-    Start-Transcript -Path $transcriptPath -Append | Out-Null
+    Start-SmartM365RunTranscript -Path $transcriptPath -Append | Out-Null
     WriteLog -Message ("Starting {0}. Tenant={1}; FromDate={2}; ToDate={3}; UtcDays={4}; InteractiveAuth={5}; MaxItems={6}; NoExternalActions={7}" -f $TaskName, $Tenant, $dateRange.FromDate.ToString('yyyy-MM-dd'), $dateRange.ToDate.ToString('yyyy-MM-dd'), $dateRange.DayCount, [bool]$InteractiveAuth, $MaxItems, [bool]$NoExternalActions) -Level 'INFO'
 
     Invoke-SmartM365Preflight -ScriptName $TaskName -RequiredModules @('MicrosoftPowerBIMgmt.Profile') -RequiredCommands @('Connect-PowerBIServiceAccount', 'Get-PowerBIAccessToken', 'Disconnect-PowerBIServiceAccount') -OutputPaths @($OutputPath, $LatestCsvFolderPath, $logFolder) | Out-Null
@@ -1040,8 +1051,13 @@ try {
 
     Stop-PowerBIActivityTranscript
     Complete-SmartM365ExecutionContext -Status Auto
+
+    $smartM365RunGuard.ReachedTerminal=$true
 }
 catch {
+    if ($_.Exception -is [Management.Automation.PipelineStoppedException] -or $_.Exception -is [OperationCanceledException]) { throw }
+    $smartM365RunGuard.ErrorRecord=$_
+
     $failure = $_
     $message = $failure.Exception.Message
     WriteLog -Message ("Power BI and Fabric activity inventory failed: {0}" -f $message) -Level 'ERROR'
@@ -1065,18 +1081,31 @@ catch {
     throw
 }
 finally {
+    $smartM365RunGuard.InCleanup=$true
+
     if ($script:PowerBIConnected -and (Get-Command -Name Disconnect-PowerBIServiceAccount -ErrorAction SilentlyContinue)) {
         try { Disconnect-PowerBIServiceAccount -ErrorAction SilentlyContinue | Out-Null } catch {}
     }
     try { RemoveOldFiles -Path $logFolder -Filter '*.log' -KeepCount $global:RetentionMaxLogs -LogFile $global:LogTextFile } catch {}
     try { Stop-PowerBIActivityTranscript } catch {}
 }
+    $smartM365RunGuard.ReachedTerminal=$true
+    $smartM365RunGuard.ReturnedNormally=$true
+} catch {
+    if ($_.Exception -isnot [Management.Automation.PipelineStoppedException] -and $_.Exception -isnot [OperationCanceledException]) { $smartM365RunGuard.ErrorRecord=$_ }
+    throw
+} finally {
+    Complete-SmartM365InventoryRun -State $smartM365RunGuard
+    if($smartM365RunGuard.ExitCode -eq 130){exit 130}
+}
+if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
+
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBCEBdUD7se0039
-# /wTtQo/DqN58cjB7Mq/CIoq/mNuQoqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAxWKqyZMA6hXpY
+# ZrigJVUItBvCAUKcdXSMApnJ/E3XQqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1209,31 +1238,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEINE8iTLgKcVcJ/LFpF3OGzPGzTelyXeFLJ++EJCz7ki5MA0GCSqG
-# SIb3DQEBAQUABIIBgK6iFIrAO/hMCxqVZXJWH7FFcFeNFIw0LqnpJV7VYv8T59t3
-# 4oH+r3yHH05RGCy0fZq7PvUUzOuSJfn2w2MK8QQugMkddhTmPQ5SeRdUxohIV6BF
-# 1oE/EHcL4H9HUCse6TsWGEdFqX1tP2VOvhaOOoxoFQe34EhRtEYrUEtIJSJqrqEg
-# 8b8leDpar8iVRjxj7+W/+WYXh0P2ZyPoh3SF3Rwqr8qJQxYc7CqC3Qa2rVWnSeMA
-# 6fxH83EvDTmt09FYt1uYLB+DQaYB2ek7pYDqiLlydCThK3Z2r2LpEMl476ubrUzI
-# /UcubTEaWU/wPI4Kuvj93slASWDfz85hELY7FNDBwo/cINK3u4MUiujw6yNMTgkl
-# qzgGyuJbFUzwNOuFeI1TBaDFmI/5rl4YLaXCrPcecZnNXCDadFwiBqX+t/epaLjW
-# WmB3Us55xSInoDuGI8p4oZMY+ceCcaGFbHZLF93WgLkTcRwFj/QoUbXneJndD3f4
-# 5szLbcnwluO6Y+FZtqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIFJEzuJTZrmDMeaEAJBQ6F2szXv9frLWepun4vAqmcbjMA0GCSqG
+# SIb3DQEBAQUABIIBgAxN+LYQoMotnmuFu115/YyD8S5zqbYvpvi7T+N3iKpQO6r7
+# hRX6sxmPJpqXlsUIoxud/DcoWt/VAQomLiq53UIibZ2iHupvVCyH7XDvRzpZYEZx
+# QVUPQA9rwg2gPSFUZ4xDjEFjeKuN79WJUBAPAFwp+qShtXOFqr+DvpYXq55B/fhB
+# jgwRua6cM/1fYZPi2aDWUQGOzynRpfcMlofW7uTSZEOIk5RqFNxQmeOa6MgDL/SA
+# Li90HbEMYcPHphG7VbEqk2D0A52mglTJ48uhPWID6HJHB9JjuPPRnuHDMSxSrJzJ
+# utJQ7IxEKdyB+i1t94Fk3bj2v884WcarWnbSSn66X5vlVoeCOKHzJRGWPdLxCyyC
+# dW6AcmPXAesuPG7pLWs6eEGefaDnmK/bohL4ySaIA+EXQBoH7DjwF6U3iphztR4D
+# 8Jv7EW7MDTJ86aVH6t3BciDbGkI83ofkl5nnEO5jrvolPUQusKFhej7iC1aoMbaM
+# c/4u3KjB2GenjnGNH6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDUxOTAx
-# NTJaMC8GCSqGSIb3DQEJBDEiBCApQ0Or9I08SXrfJIlmn5+hJs6waW5MbDH3kIE+
-# FgYAqDANBgkqhkiG9w0BAQEFAASCAgAjyph2T4D5eRqkKts/1OTmwxFvOQYHiSuY
-# i8vlCCPhi4vaXF3+bCCKL53Qh7Aah4plPnBI0xF6zsPt/a7nzxwuastZg4rW6X62
-# sd0ZFhHhcfrfQ/RehFwQllBfhGYZNenQAzZazxrvQ9r0H5VLQnUDqKGhm/1Xi0Tz
-# GbE1iJor2azcoAAjFn3vb+Ak5SJzrQLr3MS+V1THiK+VoituT3t8ryyVcsoMtPqc
-# +m8V0SkdtE/I6rSAIeYaUWFuegTkP5MQyML6d59wX68HlSFZ7cSoE9vDL9JBheLl
-# YpQNOm7gGHx7CinwJbzeWbbO3MCR/oQPEtUfh57JqRySZO0bINCsvgevaasFK96Q
-# qDShPl3v9O3oTwOBLOxv/5g0B+jHGuhShcPS3I/XVW2lPggc55sMl54tP4hu10OD
-# YjGSLGMbnA6+F+2hGK+HuwpOfEYhUZU7Wo2DvirFa95HQF/vS6+hwCykaUOJu2aE
-# O4JZvas5S1hfpy60apGqE99aO2/+O37M1+ajF8GAEghgRVFGtE3vfrYOEhSKd+9l
-# lsGYpQiv/FdVY4tjyENv6agHK/EaAWJAuvW2TZ4sRMohE8HWIkFhpsCfSB5z1rpL
-# NeR0gRaDvFasDqZJQUMDS9sn0Hb/wYw/OFfCFqbg0FeTBooRMEsRT53MWCSF880P
-# OzUOE+Z7lg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTQxNTMw
+# MzFaMC8GCSqGSIb3DQEJBDEiBCAp3Sk6TaSgL6aVjLGTzgtxj0LMyNnba0WqMs8K
+# HRnJ4zANBgkqhkiG9w0BAQEFAASCAgBbkdbOWR96ZgK960r/HlYb2YDc3dq1FTA+
+# UiTzifflhNJtFSStn3LSKQyIKlJub+9LFz2ST7EtXwsBJ6pxNa0NA/ReHM6Ar3oT
+# YWbdiiFVwyO+/peMV2wzwrFcijuSxpzo/xbUz6e12hbcT0S+1wgkLGewVKow792A
+# H5d+ZW9AnrDP2dMq/yOWWaOjby2t3XHfnzvfk3btGnVfCMZT8IS/pP525kqRamNB
+# uiZPvRvNREqvHdLSdNQJXOZACcF5hmtC5X+LBohmWhgN+HyZde0jYuoebxSvBL7F
+# FHvxmSLbXnlTmPZMHv/pj8HtyDjV1AR2v3J/5g0yCwFnAAtlDALSimKQYfth+1Ef
+# ZiZBPrRw7hAurJ5pY6Y8695OacX+QokUCbrP6ZvzzlM1QspFwnbvdoBiLkCbIqTz
+# j3qL44rtEnG9Yr/e3ITS49tK2vW3Nypp7Ka3RGvYJ1N6n65r6i+cCWhcCNmEGRs0
+# xT87hi8Egv7txzJqLlHDjx3Svt95VXfYV31i3jJoogM9UQJA3odEoMvi31sml/bU
+# rV9yJGYbSxlBFJl4+3zBqDcY7YBcqggEZ5rtn3SF2jiXOqn4IG/mhvzspDla8DKe
+# UyY6MOiGHaz0n5oEEx2gEBEoI9tZTFKZaVR+20mqpwmG5VkKCNXGdoayopz4Jveu
+# +Mmtp5TuMQ==
 # SIG # End signature block

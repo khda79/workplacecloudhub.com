@@ -3,14 +3,25 @@
 .SYNOPSIS
 Collects Intune Defender agent and firewall health reports through exportJobs.
 .VERSION
-1.0.2
+1.0.3
 .REQUIREMENTS
 Microsoft Graph application or delegated permission DeviceManagementManagedDevices.ReadWrite.All.
 #>
 [CmdletBinding()]
 param([string]$Tenant='test',[switch]$InteractiveAuth,[switch]$ValidateOnly,[switch]$SelfTest,[switch]$EnableConfiguredExternalActions,[string]$OutputPath,[string]$LatestCsvFolderPath,[ValidateRange(0,10000000)][int]$MaxItems=0,[ValidateRange(30,7200)][int]$ExportTimeoutSeconds=600)
+# Local lifecycle only; no collection or publication is performed by this guard.
+$smartM365LifecycleRoot=$PSScriptRoot
+while ($smartM365LifecycleRoot -and -not (Test-Path -LiteralPath (Join-Path $smartM365LifecycleRoot 'Modules/SmartM365.Core/SmartM365-InventoryLifecycle.ps1') -PathType Leaf)) {
+    $smartM365LifecycleParent=Split-Path $smartM365LifecycleRoot -Parent
+    if($smartM365LifecycleParent -eq $smartM365LifecycleRoot){break}
+    $smartM365LifecycleRoot=$smartM365LifecycleParent
+}
+if(-not $smartM365LifecycleRoot){throw 'SmartM365 lifecycle support is missing; update the complete runtime.'}
+. (Join-Path $smartM365LifecycleRoot 'Modules/SmartM365.Core/SmartM365-InventoryLifecycle.ps1')
+$smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -RequireReturn
+try {
 Set-StrictMode -Version Latest
-$ErrorActionPreference='Stop';$ScriptVersion='1.0.2';$script:Runtime=$null;$script:CompletionStatus='Success';$script:CompletionError=$null
+$ErrorActionPreference='Stop';$ScriptVersion='1.0.3';$script:Runtime=$null;$script:CompletionStatus='Success';$script:CompletionError=$null
 
 function ConvertTo-EndpointSecurityRow{
     param([Parameter(Mandatory)]$Row,[Parameter(Mandatory)][string]$ReportName,[string]$RunId,[string]$CollectedAtUtc,[bool]$IsPartialInventory=$false)
@@ -21,11 +32,11 @@ function ConvertTo-EndpointSecurityRow{
     return [pscustomobject]$result
 }
 
-if($SelfTest){Import-Module (Join-Path $PSScriptRoot '..\..\..\Common\SmartM365.EvidenceCollector.Common.psd1') -MinimumVersion '1.0.8' -Force;$test=ConvertTo-EndpointSecurityRow ([pscustomobject]@{DeviceId='d';RealTimeProtectionEnabled=$true}) DefenderAgents r n;if($test.DeviceId-ne'd'-or $test.RealTimeProtectionEnabled-ne$true){throw 'Endpoint security self-test failed.'};'PASS: Endpoint security offline contract';return}
+if($SelfTest){Import-Module (Join-Path $PSScriptRoot '..\..\..\Common\SmartM365.EvidenceCollector.Common.psd1') -MinimumVersion '1.0.11' -Force;$test=ConvertTo-EndpointSecurityRow ([pscustomobject]@{DeviceId='d';RealTimeProtectionEnabled=$true}) DefenderAgents r n;if($test.DeviceId-ne'd'-or $test.RealTimeProtectionEnabled-ne$true){throw 'Endpoint security self-test failed.'};'PASS: Endpoint security offline contract';$smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; return}
 try{
     $tenantContextPath=Join-Path (Split-Path (Split-Path (Split-Path (Split-Path $PSScriptRoot -Parent) -Parent) -Parent) -Parent) 'Config\SmartM365-TenantContext.ps1';. $tenantContextPath
     $effectiveConfig=Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot
-    Import-Module (Join-Path $PSScriptRoot '..\..\..\Common\SmartM365.EvidenceCollector.Common.psd1') -MinimumVersion '1.0.8' -Force
+    Import-Module (Join-Path $PSScriptRoot '..\..\..\Common\SmartM365.EvidenceCollector.Common.psd1') -MinimumVersion '1.0.11' -Force
     $script:Runtime=Initialize-SmartM365EvidenceRuntime -ScriptPath $PSCommandPath -EffectiveConfig $effectiveConfig -DefaultOutputRelativePath 'Intune\EndpointSecurity' -OutputPath $OutputPath -LatestCsvFolderPath $LatestCsvFolderPath -ValidateOnly:$ValidateOnly -EnableConfiguredExternalActions:$EnableConfiguredExternalActions
     Start-SmartM365SourceReceipt -ScriptPath $PSCommandPath -SourceRootPath $script:Runtime.LatestCsvFolderPath -ReadOnly:($ValidateOnly -or $SelfTest)
     Connect-SmartM365EvidenceGraph $script:Runtime @('DeviceManagementManagedDevices.ReadWrite.All') -InteractiveAuth:$InteractiveAuth
@@ -35,7 +46,7 @@ try{
         try{$rawByReport[$definition.Name]=@(Invoke-SmartM365EvidenceExportReport -ReportName $definition.Name -ApiVersion v1.0 -TimeoutSeconds $ExportTimeoutSeconds -MaxItems $MaxItems);$quality.Add([pscustomobject][ordered]@{RunId=$script:Runtime.RunId;CollectedAtUtc=$script:Runtime.CollectedAtUtc;SourceScriptVersion=$ScriptVersion;ReportName=$definition.Name;Status='Collected';RowCount=$rawByReport[$definition.Name].Count;Required=$definition.Required;RequiredPermission='DeviceManagementManagedDevices.ReadWrite.All';ErrorCode='';ErrorMessage=''})}
         catch{$status=Get-SmartM365EvidenceStatusCode $_;$quality.Add([pscustomobject][ordered]@{RunId=$script:Runtime.RunId;CollectedAtUtc=$script:Runtime.CollectedAtUtc;SourceScriptVersion=$ScriptVersion;ReportName=$definition.Name;Status='Failed';RowCount=0;Required=$definition.Required;RequiredPermission='DeviceManagementManagedDevices.ReadWrite.All';ErrorCode=if($status){"HTTP$status"}else{'ExportFailed'};ErrorMessage=$_.Exception.Message});if($definition.Required){$requiredFailure=$true}}
     }
-    if($ValidateOnly){$quality|Format-Table ReportName,Status,RowCount,Required;if($requiredFailure){throw 'One or more required endpoint-security reports failed validation.'};return}
+    if($ValidateOnly){$quality|Format-Table ReportName,Status,RowCount,Required;if($requiredFailure){throw 'One or more required endpoint-security reports failed validation.'};$smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; return}
     Export-SmartM365EvidenceDataset $script:Runtime 'Intune_EndpointSecurity_DataQuality' @($quality) @('RunId','CollectedAtUtc','SourceScriptVersion','ReportName','Status','RowCount','Required','RequiredPermission','ErrorCode','ErrorMessage') -NoWeeklyHistory|Out-Null
     if($requiredFailure){throw 'Required DefenderAgents or FirewallStatus evidence was unavailable; canonical business CSV files were not replaced.'}
     $isPartial=@($quality|Where-Object Status -eq 'Failed').Count-gt 0
@@ -43,13 +54,31 @@ try{
     $firewall=@($rawByReport.FirewallStatus|ForEach-Object{ConvertTo-EndpointSecurityRow $_ FirewallStatus $script:Runtime.RunId $script:Runtime.CollectedAtUtc $isPartial})
     Export-SmartM365EvidenceDataset $script:Runtime 'Intune_EndpointSecurity_DefenderAgents' $defender @('RunId','CollectedAtUtc','CollectionStatus','IsPartialInventory','SourceScriptVersion','ReportName','DeviceId','DeviceName','UserPrincipalName','LastReportedDateTime','DeviceState','MalwareProtectionEnabled','NetworkInspectionSystemEnabled','RealTimeProtectionEnabled','SignatureUpdateOverdue','TamperProtectionEnabled','ProductStatus')|Out-Null
     Export-SmartM365EvidenceDataset $script:Runtime 'Intune_EndpointSecurity_FirewallStatus' $firewall @('RunId','CollectedAtUtc','CollectionStatus','IsPartialInventory','SourceScriptVersion','ReportName','DeviceId','DeviceName','UserPrincipalName','LastReportedDateTime','FirewallStatus','ManagedBy','OSVersion')|Out-Null
-}catch{$script:CompletionStatus='Failed';$script:CompletionError=$_;throw}finally{try{Disconnect-MgGraph -ErrorAction SilentlyContinue|Out-Null}catch{};if($script:Runtime){Complete-SmartM365EvidenceRuntime -Status $script:CompletionStatus -ErrorRecord $script:CompletionError -FailureStage 'EndpointSecurityHealthInventory'}}
+
+    $smartM365RunGuard.ReachedTerminal=$true
+}catch{
+    if ($_.Exception -is [Management.Automation.PipelineStoppedException] -or $_.Exception -is [OperationCanceledException]) { throw }
+    $smartM365RunGuard.ErrorRecord=$_
+$script:CompletionStatus='Failed';$script:CompletionError=$_;throw}finally{
+    $smartM365RunGuard.InCleanup=$true
+try{Disconnect-MgGraph -ErrorAction SilentlyContinue|Out-Null; Set-SmartM365InventoryConnectionOwnership -Connection Graph -Owned $false}catch{};if($script:Runtime){Complete-SmartM365EvidenceRuntime -Status $script:CompletionStatus -ErrorRecord $script:CompletionError -FailureStage 'EndpointSecurityHealthInventory'}}
+    $smartM365RunGuard.ReachedTerminal=$true
+    $smartM365RunGuard.ReturnedNormally=$true
+} catch {
+    if ($_.Exception -isnot [Management.Automation.PipelineStoppedException] -and $_.Exception -isnot [OperationCanceledException]) { $smartM365RunGuard.ErrorRecord=$_ }
+    throw
+} finally {
+    Complete-SmartM365InventoryRun -State $smartM365RunGuard
+    if($smartM365RunGuard.ExitCode -eq 130){exit 130}
+}
+if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
+
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCq6HpwjbrD0/vx
-# IQYWfeKYmmCzRbQaq+ieuMQ+6pmZUKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDKrm4d06Q+Vbvi
+# yE0ttww/yT/sGCF6eiCXsjSVaq1t/6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -182,31 +211,31 @@ try{
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIKWLWm8lm1mBKqhVOL222/1RgszEVu0kCkqZmGle794QMA0GCSqG
-# SIb3DQEBAQUABIIBgHKlWy3smuUQCtDVfO9ZrdxdZV+H/ZGyqXo2CvOETXaKE4+W
-# pBNqwGTEn2aIriiw4HbwY/wwiz9Eq0Jq28Q3fcPbL+0PoAsRDdVE9Xzzzdt57jbq
-# Ixo+hDeLNQx5wG3fC13dJ67xxCP+bcvf0CRQCAMxdHnA8QUe3JmOQ8X2MpGlAEq1
-# KpRTSET5pLefLl24qhfbHE6fquA/NawoBWt6lvepCzweEw5tqt2ZfQ2MANvnA820
-# QguQP3dnyOFYyFnzZS46leaNEdqG0V27nI325fewlS46Ra+bW+mXCDsMADbzE+gp
-# PCOF7fSJWeL46bnWzYWPEUIBEBm4wPa8Cvrh+yT824Nk+6UUwgj4GS8NLFCxfprg
-# T8FA9WShgyDm9D8hgH+RgUBcjBvWogfPqW7UV+bFSfCRoRknpkYtb64z5jan+OW3
-# 4lq71/inTUhx0UHApuduNa5MCclDlWzsGQGwJXc5ToOHQHSdMreBsXtPjGfiskFj
-# 2dm/P1mztUuK+5kX4qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIA4f+Klf5qqMQFLksIQ5nCam2CZg1PCr695ovJNvl0umMA0GCSqG
+# SIb3DQEBAQUABIIBgDaqEhvvxnrV0oeFAwSV7/OqdvxDsSrJUzaehH13RsXYC44R
+# jvflrHWIjBjKNs8lSpleHdTUHo7Yn3XH6SXzw9dM59kbxzFbI7WPz4iQ6AwmDUnf
+# PYXEH/WY5GaaNRivoa5Qw00XZQmXEeeBnfmZjwABT4OvQc7hhXjdpMmAPs8Atfac
+# HBZNwlmzO/4JADwJV2u9GllN6cauwluT/7R8O/IbzL50iIQsNBa2/P8/YTjyz1rS
+# QiC0XfdrNRHZwFPBugi+9Sh0rtPgbaQhHx2+Yp+Rypt5fErzAsGwNQmUGnYQ5dlQ
+# soPDvPldGhz8T+oYksOL6yIg0Ny5+4biheODHaDpZrt7Jj/Lqsx+j7T8Zu33zmnu
+# vbYxYZeRRThrfFe5Z9GPzPelcRj8y4wrXDaxzHNWg5Lm5KdZlKkg7OnvhXGWIPIN
+# 1tZWd63uFeuzeDBOMOyZh9KKtqXhqwEmAoJ6jF57kvCw3ce9yFr/XCQRGl4o2bfE
+# GmKj/L/x9x8rnmhWlKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDUxOTAx
-# NDlaMC8GCSqGSIb3DQEJBDEiBCATsGU0Jc7598RweCR1MXDtQRngk0VayOi600ZS
-# tMm75DANBgkqhkiG9w0BAQEFAASCAgAfZo7+4qG2UPGs2BtzMX43aTTlKYDYSsnu
-# hBts7WgPtHn06glKADpK/XoJ95WcHmjgpbwVuAQbApPEjCnmBSCy1E6+Ji+KARR/
-# Thm8QnVIbhOe0jvKFhEVldWMSUGWqCYmT2u1BPWzlJiYck8xqPnFk0IWdO/k/qhP
-# dnqX0UM8fZo+HwXdq5doBggfe5LcEk/hCXQG4UWotHoGAxc4zvPaOeEvBxeYUJJt
-# 0CCK7MC6clJmZD0lqaEKAg8ORgNMYjFbDIVD2NsYg5t1ewbHj2kHqz3+EfkhskuS
-# W4eKisBlBlCRmoGVoH5UrFVApugwHLMPwi1iQ95lgxU/q+lVghcgciz0yeaf5G7m
-# nlzIDkQ8ShVBtYuqzMjDFevcCvovx6D+H3ayEDbJnonu1+Z+VRKmuWLsrRig6PMS
-# fdne7RQg6RgPXP7uZc4mu1/2FRgn3qJIqPDm3eV8mX/iZadPfM0gajqDqbBufIZf
-# +D7hvYVObXLvo1qmyU7mYRHcLgrn9xCMFAK43JWdw4n5ZW12qsW+Nhdxn3DGtyTk
-# rTkeqylnqGwHs8YPWTgqsafLiFjG1qlnj9fgD9Q/BASnoVn0iF2EPZjqGLYlWpQA
-# Nhf2okdBD7yYKGRdF2KJ937LboutDP0hHZlU2gkGZ/svnKr7vtNNWBoD3N0LlJnL
-# wzhvpxMmYg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTQxNTMw
+# MjhaMC8GCSqGSIb3DQEJBDEiBCAJCLhTf3IUhCAKGAioJD0WbW+/F7DyYQWUNuHt
+# nBKCQTANBgkqhkiG9w0BAQEFAASCAgB9mMUJm+J0IdsOSfyV/+iLoRa6e6cVIExQ
+# 2r4Awx1bd/8Ns2Da6Yyk31oyiFcymICUfn4GObDRFOnpwxyAbuL52Dpb3HqS79RN
+# W1NOi0oFKUukbBbjyZAYymhbthvvrRoBVgfRdsal0BTZ05NNZCyRJ02JotwHYP5P
+# mwaUag+YMBHio9muupEh1lWpYV/ut1efqfylQ0WSQcKXveO+kg8jZhDCe7QR2Xyn
+# kuwNUMVZnBKN3vIBZudcqwYgkwfr+mPGX0AAjQxNNRJoa4aoleBhpiw9T35OiMmc
+# /kPE/9TFCnhlxUBUqg+7Rz47KFeuMRFZmRpwp9LOv+lTg7Y6umsLF4LYNA6g7qS7
+# 3vOvS24zDpcJChSu3f6vwCv7bm9Sdamo+MsqXVY2sAv7/Gzhqb6Rh50uVvjK8BEv
+# Xt18jIBcCcCGDzdLt5J0w2Ui7vL7Fj7Ml1mlaEZeeGX+u6WTsb1ejnQ70sBUERdc
+# Kr85Kg8VAkqjvGY3Ko5JSt9GJ4TEnSWj2EEUo7WEetKjLCIW5RVpmnkxoKaZCzIC
+# wNIeq67dQWGTO8KYvhFBkgIg+1j6m3hWzD2CfRM4Xtu5mdUSwTY7qTV6GiSRkdWN
+# R/MHfK4reTqfUSa4RcSRvV47chXIldhuwj3MT2we8VOvwX8vXINrdm9rnGNlh0eM
+# IzBTm8efRg==
 # SIG # End signature block

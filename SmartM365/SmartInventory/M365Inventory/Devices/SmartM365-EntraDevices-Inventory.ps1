@@ -46,14 +46,14 @@ Use empty string "" to disable the OS filter.
 Filters devices by TrustType (exact match). Disabled by default.
 Use "ServerAd" to target hybrid joined devices. Use empty string "" or "false" to disable the TrustType filter.
 .VERSION
-1.18
+1.19
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication; Microsoft.Graph.Identity.DirectoryManagement.
     Minimum Graph application permissions: Directory.Read.All; Device.Read.All.
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
-    Version : 1.18
+    Version : 1.19
     Author: https://github.com/khda79/workplacecloudhub.com
 Requires: SmartM365.Core module and Microsoft.Graph.Identity.DirectoryManagement
 Minimum application permissions: Directory.Read.All, Device.Read.All
@@ -68,6 +68,17 @@ param(
     [string]$TrustTypeFilter = "",
     [int]$MaxItems = 0
 )
+# Local lifecycle only; no collection or publication is performed by this guard.
+$smartM365LifecycleRoot=$PSScriptRoot
+while ($smartM365LifecycleRoot -and -not (Test-Path -LiteralPath (Join-Path $smartM365LifecycleRoot 'Modules/SmartM365.Core/SmartM365-InventoryLifecycle.ps1') -PathType Leaf)) {
+    $smartM365LifecycleParent=Split-Path $smartM365LifecycleRoot -Parent
+    if($smartM365LifecycleParent -eq $smartM365LifecycleRoot){break}
+    $smartM365LifecycleRoot=$smartM365LifecycleParent
+}
+if(-not $smartM365LifecycleRoot){throw 'SmartM365 lifecycle support is missing; update the complete runtime.'}
+. (Join-Path $smartM365LifecycleRoot 'Modules/SmartM365.Core/SmartM365-InventoryLifecycle.ps1')
+$smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -RequireReturn
+try {
 if ($PSBoundParameters.ContainsKey('MaxItems') -and $MaxItems -gt 0) {
     $global:SmartM365MaxItems = [int]$MaxItems
     $global:SmartM365TestMaxItems = [int]$MaxItems
@@ -104,7 +115,7 @@ Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot | Out
 if ($PSVersionTable.PSVersion.Major -lt 7) {
     Write-Host "This script requires PowerShell 7 or later." -ForegroundColor Red
     Write-Host "Current PowerShell version: $($PSVersionTable.PSVersion)" -ForegroundColor Yellow
-    exit 1
+    $smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; $smartM365RunGuard.ExitCode=(1); exit $smartM365RunGuard.ExitCode
 }
 
 # Avoid PS function-capacity issues
@@ -275,10 +286,10 @@ $OrgDomain = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'OrgDom
 # ==========================================================
 $modulePath = & { $d = $PSScriptRoot; while ($d) { $p = Join-Path $d 'Modules\SmartM365.Core\SmartM365.Core.psd1'; if (Test-Path -LiteralPath $p) { return $p }; $parent = Split-Path -Path $d -Parent; if ($parent -eq $d) { break }; $d = $parent }; throw 'SmartM365.Core module not found.' }
 try {
-    Import-Module -Name $modulePath -MinimumVersion '1.0.65' -ErrorAction Stop
+    Import-Module -Name $modulePath -MinimumVersion '1.0.87' -ErrorAction Stop
 } catch {
     Write-Host "Failed to import SmartM365.Core module from '$modulePath' : $_" -ForegroundColor Red
-    exit 1
+    $smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; $smartM365RunGuard.ExitCode=(1); exit $smartM365RunGuard.ExitCode
 }
 
 try {
@@ -286,7 +297,7 @@ try {
 } catch {
     Write-Host "Failed to import Microsoft.Graph.Identity.DirectoryManagement. Install the module before running this script." -ForegroundColor Red
     Write-Host $_ -ForegroundColor Yellow
-    exit 1
+    $smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; $smartM365RunGuard.ExitCode=(1); exit $smartM365RunGuard.ExitCode
 }
 
 # ==========================================================
@@ -573,7 +584,7 @@ function Send-EntraDevicesTeamsAlert {
 # ==========================================================
 # Initialization via SmartM365.Core
 # ==========================================================
-$ScriptVersion = "1.18"
+$ScriptVersion = "1.19"
 $script:SmartM365ScriptName = $MyInvocation.MyCommand.Name
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'EntraDevicesCsvLogFolderPath' -DefaultValue $OutputPath
@@ -584,7 +595,7 @@ if ([string]::IsNullOrWhiteSpace($LatestCsvFolderPath) -or $LatestCsvFolderPath 
 try {
     $InitializeOutputPath = InitializeScriptEnvironment -OutputPathInit $OutputPath -LogFileName $(($MyInvocation.MyCommand.Name) -replace '\.ps1$','')
     Start-SmartM365CmdbSourceReceipt -ScriptPath $PSCommandPath -SourceRootPath (Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue '')
-    Start-Transcript -Path $global:logTranscriptFile -Append
+    Start-SmartM365RunTranscript -Path $global:logTranscriptFile -Append
 
     WriteLog -Message "Script Environment initialized at $InitializeOutputPath"
     $OutputPath = $InitializeOutputPath
@@ -596,7 +607,7 @@ try {
     } catch {
         Write-Host "Failed to send Teams alert for initialization failure: $_" -ForegroundColor Yellow
     }
-    exit 1
+    $smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; $smartM365RunGuard.ExitCode=(1); exit $smartM365RunGuard.ExitCode
 }
 
 # ==========================================================
@@ -736,7 +747,7 @@ try {
     if (-not $devices -or $devices.Count -eq 0) {
         WriteLog -Message "No Azure Entra devices found. Exiting." "WARNING"
         Send-EntraDevicesTeamsInfo -TotalDevices $totalDeviceCount -ExportedDevices 0 -RegisteredPendingCount 0 -HardwareConflictCount 0 -RemovalCandidateCount 0 -MainCsvPath ''
-        return
+        $smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; return
     }
 
     # ------------------------
@@ -753,7 +764,7 @@ try {
     if (-not $devices -or $devices.Count -eq 0) {
         WriteLog -Message "No Azure Entra devices match the current OS filter. Exiting." "WARNING"
         Send-EntraDevicesTeamsInfo -TotalDevices $totalDeviceCount -ExportedDevices 0 -RegisteredPendingCount 0 -HardwareConflictCount 0 -RemovalCandidateCount 0 -MainCsvPath ''
-        return
+        $smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; return
     }
 
     # ------------------------
@@ -769,7 +780,7 @@ try {
         if (-not $devices -or $devices.Count -eq 0) {
             WriteLog -Message "No Azure Entra devices with TrustType = '$TrustTypeFilter' after filters. Exiting." "WARNING"
             Send-EntraDevicesTeamsInfo -TotalDevices $totalDeviceCount -ExportedDevices 0 -RegisteredPendingCount 0 -HardwareConflictCount 0 -RemovalCandidateCount 0 -MainCsvPath ''
-            return
+            $smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; return
         }
     }
     else {
@@ -1327,8 +1338,13 @@ try {
         -RemovalCandidateCount $removalCandidateCount `
         -MainCsvPath $mainLatestCsvPath
 
+
+    $smartM365RunGuard.ReachedTerminal=$true
 }
 catch {
+    if ($_.Exception -is [Management.Automation.PipelineStoppedException] -or $_.Exception -is [OperationCanceledException]) { throw }
+    $smartM365RunGuard.ErrorRecord=$_
+
     $globalError = $_
     $script:ExitCode = 1
     WriteLog -Message ("Global error in Azure Entra devices inventory: {0}" -f $globalError) "ERROR"
@@ -1367,6 +1383,8 @@ $($global:LogTextFile)
     }
 }
 finally {
+    $smartM365RunGuard.InCleanup=$true
+
     if ($connectedGraphInThisRun) {
         Write-Host "`n--- Disconnect Cloud Services ---"
         try {
@@ -1386,7 +1404,7 @@ finally {
     WriteLog -Message "$TaskName completed (finally block)."
 
     try {
-        Stop-Transcript | Out-Null; try { $smartM365TranscriptPath = $null; $smartM365TranscriptVariable = Get-Variable -Name logTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } else { $smartM365TranscriptVariable = Get-Variable -Name LogTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } }; if ($smartM365TranscriptPath) { Update-SmartM365TimestampedTranscript -Path $smartM365TranscriptPath } } catch {}
+        Stop-SmartM365RunTranscript | Out-Null; try { $smartM365TranscriptPath = $null; $smartM365TranscriptVariable = Get-Variable -Name logTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } else { $smartM365TranscriptVariable = Get-Variable -Name LogTranscriptFile -Scope Global -ErrorAction SilentlyContinue; if ($smartM365TranscriptVariable -and $smartM365TranscriptVariable.Value) { $smartM365TranscriptPath = $smartM365TranscriptVariable.Value } }; if ($smartM365TranscriptPath) { Update-SmartM365TimestampedTranscript -Path $smartM365TranscriptPath } } catch {}
         Set-SmartM365CmdbSourceScope -CompleteScope ($MaxItems -eq 0) -Scope 'CMDB:entra_devices'
         Complete-SmartM365ExecutionContext -Status Auto -ErrorRecord $globalError
     } catch {
@@ -1399,11 +1417,22 @@ finally {
         exit $script:ExitCode
     }
 }
+    $smartM365RunGuard.ReachedTerminal=$true
+    $smartM365RunGuard.ReturnedNormally=$true
+} catch {
+    if ($_.Exception -isnot [Management.Automation.PipelineStoppedException] -and $_.Exception -isnot [OperationCanceledException]) { $smartM365RunGuard.ErrorRecord=$_ }
+    throw
+} finally {
+    Complete-SmartM365InventoryRun -State $smartM365RunGuard
+    if($smartM365RunGuard.ExitCode -eq 130){exit 130}
+}
+if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
+
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBRKR4nxEZqpBuE
-# +FkzyTv6tk3zs9bBZzbDXM4S0O3J56CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDECC0tj6opnCHQ
+# tr96s07FF+kFA05S0I1EGv4o4SDCqaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1536,31 +1565,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIEo0MAHd+9dBnjPcVMNuRc2e6AFNg+3Cemji8htGFLgrMA0GCSqG
-# SIb3DQEBAQUABIIBgB7LYeWvQGTqWsLWFvWR5qNajuX/wrpbT/QbPi38yzOT/9Rj
-# 9OT1EsDYvY4WLuCn3OjobiNqW1+9FTg7CE06zb6wr8daeuzzvXFp+jSG4a+7khCW
-# g3/2t0NjLU76IQmKHWqcJ+bpoELJZfEmxcRdelaGDXmBoU/rRdEptesB4z1LFqW0
-# 6qDyPEN+xHqHWz7sLm40e4ijOEXZWL1PnSHNyLu+oU/ritFz/ASmVzV34WxkPh3+
-# 1K0qHpeQZlbq22DBCPmNMMR15jmDExR/dP5qGvaY1k6Ddx/cpNlM7f43f0aYz01c
-# IFkF0JW6DjrTWSOEg9I1LMImkB7iXg01xCHgStS/yGw2nlHrxt50b98m7sEU2ZWv
-# Vhn17AgthVCuAlFrK6ptkOpqnnUSUj0Z4ETHHCOtjXSqnsJ7vfjlVfackvUVHpeA
-# nmItnrUj1P4msbl2gE/50aKgmDJKkvK3vZx0H/BbfCZxsEmz1McBgk7ysejps+se
-# nGNYJk5uZP0YNo3pC6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIPe//nIXokLqb92sHBYPOyEbbvdZMl6hvSeFFVi+GAwqMA0GCSqG
+# SIb3DQEBAQUABIIBgIq3QycXCDiD4GhXYjABqXJlQnpqG1qgwL0lDyVwmWYrfiZN
+# p8G5i2xMItnxEkCWNn8Oe/8jaj93qSt2cnsLIR6CenUDAClO2DRNxC2LxQ0IH2ge
+# WQ4ox7dIQ1hbvi5mP1zmTFey3pAxIB/pHW/ZygCRGXenhNDNCz8Qu+Vo9l6ao+Z8
+# KCYhIZyyTwqgg1Bn99hS2DqaxKH5K9ES+5G+qtovvx4E1ZTVsmOl+9Gm4sXR+utE
+# B1+uQ2pTHGeS0XjCEh+hNQHOWYQgrjULsEWR5vnDpD9+MXwKrv8ssmJpto2kUoRU
+# gCiiIXbVLvPd3/NerL6/VR74+VXOBiSzzCYWinyXUxu2shXRlDeRfzTdND1EEfC2
+# zyILz9iYYRyWptgf4vcMCgl79kbI3dNlaUquO6g+yPyDvw+gaImlIF5peQj8V7Ax
+# IcGiAr3Tv0pmlEmu+dgIrVY0Rqx/ITA9bSU9PRFsjqWQgYLTd2qeDQk+sDwlPfhb
+# OUxCMJlIjcnHOJCVGqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDMxNDE2
-# MzFaMC8GCSqGSIb3DQEJBDEiBCCH6zu6AdfJbVJWCRLgdBI82PgLk6VBzbPaPzdW
-# Jibt+TANBgkqhkiG9w0BAQEFAASCAgBzwIGHQNfnO12imIq1uFemPUcCqlueu8Fm
-# gox+4gs+emHYeQl91AwMxafN4fAsl94JVi3n2ZXxQSinmiy6V2dXcKnQqWTK1HB8
-# nQuql6CTTWFKwChmO/AJSLy3/UllXp8I07m/MxqVScYCIXfj4MhklpUaWpG1BHgN
-# RcWlEE4qPkWJPMb1TC0J7SDZLNt4k5k8GSnLBz2BZC+QeVr+wdlmpXuHde3IgXOB
-# W4dW4YOqT26UabIxODWCDsROk4l/FIRWP+ZnZXzf4NGGcIQCgqqjrGcx0TMwlKFd
-# hRRzw4R1DG0c1nF3zjntwL7uKvLzPzFAcoj7WjDcAVsW22gfLP1QBWzbyQaCnYVW
-# O9k4Y2bHKbreFdRHkp4c7xaeH+MIRo5MvLGMf1Yt8hmxXrQzxaSbi+bn6OV62hc1
-# T7cNNSm0Uf022DYIEKrGihJ/TwdFmPht9sLm//VcBo2CmkZbmYaR1VitXu4Nil7l
-# Q1Ids7dudcxcIqjrk5+fQLLoZUEVC/44+F2hTAMTxoYthqmrfzF6/g5e+2HA7XMN
-# ecNN5Tij1n1PU6BT5Dqlm2FC4iYznbH9JZHoXZILrykxtgedibsmo2rdt9ERLvkP
-# DY7M8e2B5wSu3l0GCJVB8pmj2KiilkgF40supRozmRFVf4IC1OesyMUnURA2u7lz
-# AFBhXU2nmg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTQxNTMw
+# MjNaMC8GCSqGSIb3DQEJBDEiBCBaekT8+BoK/QApDe5q+i6oYMWM4Ss9td8q6C8h
+# BZrRMTANBgkqhkiG9w0BAQEFAASCAgCDwwBMXuSryj9ccjeBu3fRykHvCr2GYLqq
+# ZD2G3RIXryP87k+x2kaT38CuloKTOTA9uT2WvJZmY84c8vzP1ERZEqJtD6RDTNcN
+# 5kv55WRhH0oQY8mKv+YM2xxXGyAMfrTLDIR0m/LSD/u8sLMiuKFmWwEtZ4N3xrqk
+# xkV84nlycLNRFv3XxRVl+t30Kxpiqx2VG8Gzws0TGp2CjtYj7PMNQeTeKa81Jcfd
+# hhtA2MW4HBtqleYtXrARr65gclIaTeGuhzoXEV6oO3Qah7I6UktY5eCR6CD+nLV1
+# G6KQcgDa3TBRR/A4cZFr5Em7bsWVKSZXMEV/M3I+LMzbLWGuiXAwVjaMUdNmrH9I
+# AguskIJpCQkKjWMsUDrDCRasEtpY+iTdQdpBk8v1tpADBUaz2cZQyfcZ3pIvi01F
+# mrtLMHNbsGjTde1Q49R6hog4I9cXN2yH/vbYxzeAWK2tajx/DO1IqbRzsHdpogxF
+# oNqAnfUKOUSkfxMVnYFsPEG22e/rb0jPw5WVdPbts/9hohwvE5G2GEPcgQT2DABi
+# ghrwGwndUAf2s2e2p47xQfAqeMbnk+zQxDcySg84yVTS5Pk1NvBPY8ZTSch5Oe9A
+# vMlqZUVdSuO2ETRXYnsTbibdGE6teNyWrO6cJ4vWezHDMWwpzg/1I51GDCiJU8tm
+# eCteCLwxJQ==
 # SIG # End signature block

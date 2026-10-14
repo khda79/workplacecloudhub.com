@@ -3,16 +3,27 @@
 .SYNOPSIS
 Collects Microsoft Secure Score evidence and control-level score evidence.
 .VERSION
-1.0.2
+1.0.3
 .REQUIREMENTS
 Microsoft Graph application or delegated permission SecurityEvents.Read.All.
 #>
 [CmdletBinding()]
 param([string]$Tenant='test',[switch]$InteractiveAuth,[switch]$ValidateOnly,[switch]$SelfTest,[switch]$EnableConfiguredExternalActions,[string]$OutputPath,[string]$LatestCsvFolderPath,[ValidateRange(0,1000000)][int]$MaxItems=0)
 
+# Local lifecycle only; no collection or publication is performed by this guard.
+$smartM365LifecycleRoot=$PSScriptRoot
+while ($smartM365LifecycleRoot -and -not (Test-Path -LiteralPath (Join-Path $smartM365LifecycleRoot 'Modules/SmartM365.Core/SmartM365-InventoryLifecycle.ps1') -PathType Leaf)) {
+    $smartM365LifecycleParent=Split-Path $smartM365LifecycleRoot -Parent
+    if($smartM365LifecycleParent -eq $smartM365LifecycleRoot){break}
+    $smartM365LifecycleRoot=$smartM365LifecycleParent
+}
+if(-not $smartM365LifecycleRoot){throw 'SmartM365 lifecycle support is missing; update the complete runtime.'}
+. (Join-Path $smartM365LifecycleRoot 'Modules/SmartM365.Core/SmartM365-InventoryLifecycle.ps1')
+$smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -RequireReturn
+try {
 Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
-$ScriptVersion='1.0.2'
+$ScriptVersion='1.0.3'
 $script:CompletionStatus='Success'; $script:CompletionError=$null; $script:Runtime=$null
 
 function ConvertTo-SecureScoreRows {
@@ -29,35 +40,53 @@ function ConvertTo-SecureScoreRows {
 }
 
 if($SelfTest){
-    Import-Module (Join-Path $PSScriptRoot '..\..\..\Common\SmartM365.EvidenceCollector.Common.psd1') -MinimumVersion '1.0.8' -Force
+    Import-Module (Join-Path $PSScriptRoot '..\..\..\Common\SmartM365.EvidenceCollector.Common.psd1') -MinimumVersion '1.0.11' -Force
     $sample=[pscustomobject]@{createdDateTime='2026-09-01';currentScore=50;maxScore=100;enabledServices=@('AAD');licensedUserCount=10;activeUserCount=8;controlScores=@([pscustomobject]@{controlName='MFA';score=5})}
     $test=ConvertTo-SecureScoreRows @($sample) 'run' 'now'
     if($test.Summary.Count-ne 1 -or $test.Controls.Count-ne 1 -or $test.Summary[0].ScorePercentage-ne 50){throw 'Secure Score self-test failed.'}
-    Write-Output 'PASS: Secure Score offline contract'; return
+    Write-Output 'PASS: Secure Score offline contract'; $smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; return
 }
 
 try{
     $tenantContextPath=Join-Path (Split-Path (Split-Path (Split-Path (Split-Path $PSScriptRoot -Parent) -Parent) -Parent) -Parent) 'Config\SmartM365-TenantContext.ps1'
     . $tenantContextPath
     $effectiveConfig=Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot
-    Import-Module (Join-Path $PSScriptRoot '..\..\..\Common\SmartM365.EvidenceCollector.Common.psd1') -MinimumVersion '1.0.8' -Force
+    Import-Module (Join-Path $PSScriptRoot '..\..\..\Common\SmartM365.EvidenceCollector.Common.psd1') -MinimumVersion '1.0.11' -Force
     $script:Runtime=Initialize-SmartM365EvidenceRuntime -ScriptPath $PSCommandPath -EffectiveConfig $effectiveConfig -DefaultOutputRelativePath 'M365\Security\SecureScore' -OutputPath $OutputPath -LatestCsvFolderPath $LatestCsvFolderPath -ValidateOnly:$ValidateOnly -EnableConfiguredExternalActions:$EnableConfiguredExternalActions
     Start-SmartM365SourceReceipt -ScriptPath $PSCommandPath -SourceRootPath $script:Runtime.LatestCsvFolderPath -ReadOnly:($ValidateOnly -or $SelfTest)
     Connect-SmartM365EvidenceGraph -Runtime $script:Runtime -Scopes @('SecurityEvents.Read.All') -InteractiveAuth:$InteractiveAuth
     $scores=@(Get-SmartM365EvidenceGraphCollection -Uri 'https://graph.microsoft.com/v1.0/security/secureScores?$top=100' -MaxItems $MaxItems)
-    if($ValidateOnly){ Write-SmartM365EvidenceLog -Message ("Secure Score endpoint available; returned {0} score record(s). No CSV published." -f $scores.Count) -Level SUCCESS; return }
+    if($ValidateOnly){ Write-SmartM365EvidenceLog -Message ("Secure Score endpoint available; returned {0} score record(s). No CSV published." -f $scores.Count) -Level SUCCESS; $smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; return }
     $data=ConvertTo-SecureScoreRows $scores $script:Runtime.RunId $script:Runtime.CollectedAtUtc
     Export-SmartM365EvidenceDataset $script:Runtime 'M365_Security_SecureScore' $data.Summary @('RunId','CollectedAtUtc','CollectionStatus','IsPartialInventory','SourceScriptVersion','ScoreDate','CurrentScore','MaxScore','ScorePercentage','EnabledServices','LicensedUserCount','ActiveUserCount','ControlScoreCount') | Out-Null
     Export-SmartM365EvidenceDataset $script:Runtime 'M365_Security_SecureScoreControls' $data.Controls @('RunId','CollectedAtUtc','CollectionStatus','IsPartialInventory','SourceScriptVersion','ScoreDate','ControlName','ControlCategory','Score','Description','ImplementationStatus','On') | Out-Null
+
+    $smartM365RunGuard.ReachedTerminal=$true
 }
-catch{$script:CompletionStatus='Failed';$script:CompletionError=$_;throw}
-finally{try{Disconnect-MgGraph -ErrorAction SilentlyContinue|Out-Null}catch{};if($script:Runtime){Complete-SmartM365EvidenceRuntime -Status $script:CompletionStatus -ErrorRecord $script:CompletionError -FailureStage 'SecureScoreInventory'}}
+catch{
+    if ($_.Exception -is [Management.Automation.PipelineStoppedException] -or $_.Exception -is [OperationCanceledException]) { throw }
+    $smartM365RunGuard.ErrorRecord=$_
+$script:CompletionStatus='Failed';$script:CompletionError=$_;throw}
+finally{
+    $smartM365RunGuard.InCleanup=$true
+try{Disconnect-MgGraph -ErrorAction SilentlyContinue|Out-Null; Set-SmartM365InventoryConnectionOwnership -Connection Graph -Owned $false}catch{};if($script:Runtime){Complete-SmartM365EvidenceRuntime -Status $script:CompletionStatus -ErrorRecord $script:CompletionError -FailureStage 'SecureScoreInventory'}}
+    $smartM365RunGuard.ReachedTerminal=$true
+    $smartM365RunGuard.ReturnedNormally=$true
+} catch {
+    if ($_.Exception -isnot [Management.Automation.PipelineStoppedException] -and $_.Exception -isnot [OperationCanceledException]) { $smartM365RunGuard.ErrorRecord=$_ }
+    throw
+} finally {
+    Complete-SmartM365InventoryRun -State $smartM365RunGuard
+    if($smartM365RunGuard.ExitCode -eq 130){exit 130}
+}
+if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
+
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBfBckcf9z/d62S
-# FAw1SxjmUdRagSnrC7QRvvetDPvyFqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA1KKXMDnVh+pPU
+# e7cJrr+MN/vpn6quadIVGBIaqxBSUaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -190,31 +219,31 @@ finally{try{Disconnect-MgGraph -ErrorAction SilentlyContinue|Out-Null}catch{};if
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIAMy+rBUJsWOgsAT5RCENPbljh7x5CR8gnm3MYYUPXixMA0GCSqG
-# SIb3DQEBAQUABIIBgF/ux56aC3ExCoeil2fWRgBa2h58i1AQ+RNgsl48KkhPOrUY
-# yB6XegfwKkwQSDoP0I8MNwqT2OTctEtdhx9Wi+sf3X0ha6g1Z3CxZVk6wv8m/IVU
-# OF3rZ7lyEuBzT2uPZfIOevCu18yRi1CUu+G+wKeairf8UPy0uQpZPxkOJ7dk4SXR
-# Hx7dkojBprAAKBobnaSuV316yIhQiqpggmUXC3dnEEzvvixQMYh2pSzrVDnBz30t
-# e3EHKNW6w8CmcSYUSFsXgMeVKFwyqEowwpLWvNWT1vGqvBwpSV4HtBW64lOQBlkK
-# NbY7opQsj1Dgsw4NZ4foDolb4jB6JwIFJt4KPqCFrvLpUteOTSX1LOMYCR4WmueV
-# Z3PbMrPPLBNf6BZBYof6CpocuMbhGbgS2/NbDYH4X0mDOST5DEVzygiLqHYkyrwh
-# sISvokS8J3KuRJhNrXT5eP2g08uKB1C8L0HM83rQa+MISnvBLhs6l90t5jQ30VDU
-# mhaIUfAc6604LinXFqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIJlIN5wMtaGH+BBhiwvnCuUtzxagyQhoQzdMfXhOobyLMA0GCSqG
+# SIb3DQEBAQUABIIBgFZiyZW1eOiL2uqxov62cBt7FKc7J2pzHAns9r8v9SpyX+R1
+# BL8Ypm3i5YvhxQ8WzpQTNrQDsIDCoUxPROl/KCxXAUghRtv1CFXsEwUgI55H3vWP
+# l3SRVFMYBv0wHwdBQM8PFUnYf8GUaLxrhdGJheDWMtGGgK1vQ7yD0GoaJTNRjCHm
+# b3gc3lxwPMv+gqgwpj01xiMPxjYWwNK5vP3GnoYEuKZWOsy4QFpVvfI+lqwI9XgL
+# rytt1gmd5uTedzi/BAr7X4H6jDRUQpz0vjykULcDX/6gxOW3mYyLJBxQ4u2/JH3m
+# pdfZRzs3vhSChSEJp9YikQ3ckO+9jId2K3zeEYedZcNZFnootV7mXdKYp45qCkQz
+# QsMlnXMtrPYz/6dA+QtjPFI03gWYLC4tpMjpC2i7vMHHBG79VNvNnim2MbsJLcPw
+# T4uma0/ky86mIMy/a6X5CTfm+p7WECWeOkK4WAIrzB1Ie0f/zxDoKAPrkbs9UqIO
+# VSA/CJ4GkUSvW41NdqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDUxOTAx
-# NTNaMC8GCSqGSIb3DQEJBDEiBCCWCvs/2EBEhIyBVPT+/c6tBn/tpYZeDsYJscL4
-# foAmODANBgkqhkiG9w0BAQEFAASCAgBRd9NPeYlmcoq0PAZIh1DKMcWI+BrVEPeY
-# ioxAF4Kqf54cxUWkPjUih0+sPelwKl6/RavJoiFNIG2yCImkArSbIKf0U+AZaPGA
-# OB/7AyZzbfOTGTTve89yjcXOr+4gCY+c+PBAQl5ATkeQ7smjrKGH8iVssjY4kIsI
-# FAE2+ggbrPYK2EVLaW7hWsQ/XVQyNycFPufRC4HgqHWBkBoTFqeHX556wVR/ZojE
-# cxzVCcnmg1PbuktYT4f24CBgohLMiuXjX5sFEa9te0eM2rpo4yfXGRjQ826be7wN
-# w9YlNk3Cg5st5t2+YAa5UyQ7V3ZNIeUw2qGcOsV90wl9QhhFd3Kwy3rg59lhr4HX
-# oPfeaF2FXE/BsOAZI1c4EAwINHSfjFMpM4MPckb7a17n+Mra07wQwHUk4eNkpMk8
-# Dk1dMTEPI7J/wRmLoaKxtcwscR09ZKXHZjBNwR1DtkWYhG+zV8+R9K8izDkARt1T
-# HOaVf/+KsYMlB64YoT/Biz1BLrzqlmPIl0GrsE78rrmfF2ZCAtZUnIClCrD5OJim
-# NDjTKoP+qF6rWGMoewHOzd2BLSwenDGHDjJr/xU4ub0i1bRXH5xU3r1rkJ0/WZBZ
-# yaBrAADJ7s5kbq5TesrqY3M/2BayGAwqFXbLfDSiAk3EfW16rLvB37L/jj4QU8WF
-# xqJnQ62PGA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTQxNTMw
+# MzJaMC8GCSqGSIb3DQEJBDEiBCCpawD1KVgKBcpuBGhkpQEf7T5++m5hJxOyFQ7P
+# vi2WejANBgkqhkiG9w0BAQEFAASCAgBG3GAsjq9/fUykn8vtqmZoFOVQ93zT7Nap
+# Irfymw+L3eDbvUeTwjSlT9P151yC000hjcXTEJIHz4MsGXmajPdLuMjd02hP75xg
+# 5E/805e/huizt+caATskQR16IkKeoumf0swMPf68YR019cxNVp0jiJPud6sw4sk7
+# /F/D2k81ssgshKfFm70S07aijOZ3S44HDQ1bToX04BOlwKoTOQXO1GBjuqqBQ34i
+# yeQChMOco9MGZLyJxmg870MHx4bIbOlO0sKJ+R3y/wOxXHOCivGsHPhV5uq1mPVK
+# Fg1dAdA5UgmLlElKl79Eye0tNZdqw8fyH4Y9Ii3C0Mtz0iZ6KPt4DoaeZ4OUd2cK
+# 2aw8ahpCO/M2VjGD1LF9YzCZdTYSIPnUSnYXymLqEzwgCr13CcRFsLqc+XngW7yH
+# sd6uTZgr769URrWvFnRd1S9vAhGRQiKlWlPfMZsIHllkBs8TWB48WkYOMlgMvxsy
+# NaZ/q74TKlr/+meJUd+HoZvptuw2ldVro8TlYpK1EVqxjWqhtJJBtkxsDBkH5W6l
+# iLcF15XkKp79lFl/Uw5FDEOtR8USx32N1/2hgUObunHOhXtgv4JDkg+733Pi/o0g
+# ocREH3uAutGw2pGmBx8Nf+dvXo8nJTlc4Ii0MO/5Fg1yOFop0K478QvVLZ8mg/xb
+# AON9RoGvyg==
 # SIG # End signature block

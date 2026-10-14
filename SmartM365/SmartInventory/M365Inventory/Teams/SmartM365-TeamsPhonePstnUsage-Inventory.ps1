@@ -10,7 +10,7 @@ SmartFinOps output aggregates usage by user without calculating license cost or
 performing any financial allocation.
 
 .VERSION
-1.7
+1.8
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication.
@@ -42,6 +42,17 @@ param(
     [string]$LatestCsvFolderPath
 )
 
+# Local lifecycle only; no collection or publication is performed by this guard.
+$smartM365LifecycleRoot=$PSScriptRoot
+while ($smartM365LifecycleRoot -and -not (Test-Path -LiteralPath (Join-Path $smartM365LifecycleRoot 'Modules/SmartM365.Core/SmartM365-InventoryLifecycle.ps1') -PathType Leaf)) {
+    $smartM365LifecycleParent=Split-Path $smartM365LifecycleRoot -Parent
+    if($smartM365LifecycleParent -eq $smartM365LifecycleRoot){break}
+    $smartM365LifecycleRoot=$smartM365LifecycleParent
+}
+if(-not $smartM365LifecycleRoot){throw 'SmartM365 lifecycle support is missing; update the complete runtime.'}
+. (Join-Path $smartM365LifecycleRoot 'Modules/SmartM365.Core/SmartM365-InventoryLifecycle.ps1')
+$smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -RequireReturn
+try {
 if (-not $PSBoundParameters.ContainsKey('IncludePstn')) { $IncludePstn = $true }
 if (-not $PSBoundParameters.ContainsKey('IncludeDirectRouting')) { $IncludeDirectRouting = $true }
 
@@ -53,7 +64,7 @@ if ($MaxItems -gt 0) {
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
-$ScriptVersion = '1.7'
+$ScriptVersion = '1.8'
 $ScriptBaseName = [System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
 $TaskName = "$ScriptBaseName v$ScriptVersion"
 $RunId = [guid]::NewGuid().Guid
@@ -88,7 +99,7 @@ else {
 }
 
 $coreModulePath = Join-Path -Path $SmartM365Root -ChildPath 'Modules\SmartM365.Core\SmartM365.Core.psd1'
-Import-Module -Name $coreModulePath -MinimumVersion '1.0.72' -Force -ErrorAction Stop
+Import-Module -Name $coreModulePath -MinimumVersion '1.0.87' -Force -ErrorAction Stop
 
 $LocalConfigPath = Join-Path -Path $PSScriptRoot -ChildPath "$ScriptBaseName.local.json"; $LocalConfigPath = Resolve-SmartM365JsonConfigurationPath -Path $LocalConfigPath
 $LocalTemplatePath = (Get-SmartM365JsonTemplateName -Path $LocalConfigPath)
@@ -692,13 +703,13 @@ function Connect-TeamsPhoneAssignmentSession {
         throw 'Get-CsPhoneNumberAssignment is not available in the installed MicrosoftTeams module.'
     }
 
-    try { Disconnect-MicrosoftTeams -ErrorAction SilentlyContinue | Out-Null } catch {}
+    try { Disconnect-MicrosoftTeams -ErrorAction SilentlyContinue | Out-Null; Set-SmartM365InventoryConnectionOwnership -Connection Teams -Owned $false } catch {}
     try {
         Connect-MicrosoftTeams `
             -ApplicationId $ApplicationId `
             -TenantId $DirectoryTenantId `
             -CertificateThumbprint $CertificateThumbprint `
-            -ErrorAction Stop | Out-Null
+            -ErrorAction Stop | Out-Null; Set-SmartM365InventoryConnectionOwnership -Connection Teams -Owned $true
         $script:TeamsPowerShellConnected = $true
     }
     catch {
@@ -848,7 +859,7 @@ try {
     $CurrentOperation = 'Initialize script environment'
     $OutputPath = InitializeScriptEnvironment -OutputPathInit $OutputPath -LogFileName $ScriptBaseName
     Start-SmartM365SourceReceipt -ScriptPath $PSCommandPath -SourceRootPath $LatestCsvFolderPath -ReadOnly:($ValidateOnly) -ScopeParameters @{LookbackDays=$LookbackDays;FromDate=$FromDate;ToDate=$ToDate;IncludePstn=$IncludePstn;IncludeDirectRouting=$IncludeDirectRouting;IncludePhoneAssignments=$IncludePhoneAssignments}
-    Start-Transcript -Path $global:logTranscriptFile -Append | Out-Null
+    Start-SmartM365RunTranscript -Path $global:logTranscriptFile -Append | Out-Null
     WriteLog -Message (
         'Starting {0}. Tenant={1}; FromUtc={2}; ToUtc={3}; Windows={4}; IncludePstn={5}; IncludeDirectRouting={6}; IncludePhoneAssignments={7}; MaxItems={8}' -f
         $TaskName,
@@ -901,9 +912,9 @@ try {
             $windows.Count
         )
         WriteLog -Message $validationSummary -Level 'SUCCESS'
-        try { Stop-Transcript | Out-Null; Update-SmartM365TimestampedTranscript -Path $global:logTranscriptFile } catch {}
+        try { Stop-SmartM365RunTranscript | Out-Null; Update-SmartM365TimestampedTranscript -Path $global:logTranscriptFile } catch {}
         Complete-SmartM365ExecutionContext -Status Success
-        return
+        $smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; return
     }
 
     if (-not $IncludePstn -and -not $IncludeDirectRouting -and -not $IncludePhoneAssignments) {
@@ -1034,11 +1045,16 @@ try {
             RunId = $RunId
         } | Out-Null
 
-    try { Stop-Transcript | Out-Null; Update-SmartM365TimestampedTranscript -Path $global:logTranscriptFile } catch {}
+    try { Stop-SmartM365RunTranscript | Out-Null; Update-SmartM365TimestampedTranscript -Path $global:logTranscriptFile } catch {}
     Complete-SmartM365ExecutionContext -Status Auto
     Write-Host ("Teams Phone PSTN usage inventory completed. {0}" -f $summary)
+
+    $smartM365RunGuard.ReachedTerminal=$true
 }
 catch {
+    if ($_.Exception -is [Management.Automation.PipelineStoppedException] -or $_.Exception -is [OperationCanceledException]) { throw }
+    $smartM365RunGuard.ErrorRecord=$_
+
     $errorRecord = $_
     $message = $errorRecord.Exception.Message
     try {
@@ -1064,7 +1080,7 @@ catch {
             } | Out-Null
     }
     catch {}
-    try { Stop-Transcript | Out-Null; Update-SmartM365TimestampedTranscript -Path $global:logTranscriptFile } catch {}
+    try { Stop-SmartM365RunTranscript | Out-Null; Update-SmartM365TimestampedTranscript -Path $global:logTranscriptFile } catch {}
     try {
         Complete-SmartM365ExecutionContext `
             -Status Failed `
@@ -1075,19 +1091,32 @@ catch {
     throw
 }
 finally {
+    $smartM365RunGuard.InCleanup=$true
+
     if ($script:TeamsPowerShellConnected) {
-        try { Disconnect-MicrosoftTeams -ErrorAction SilentlyContinue | Out-Null } catch {}
+        try { Disconnect-MicrosoftTeams -ErrorAction SilentlyContinue | Out-Null; Set-SmartM365InventoryConnectionOwnership -Connection Teams -Owned $false } catch {}
         $script:TeamsPowerShellConnected = $false
     }
     try { Disconnect-SmartM365CloudSession -ExchangeOnline:$false -Graph:$true } catch {}
-    try { Stop-Transcript | Out-Null } catch {}
+    try { Stop-SmartM365RunTranscript | Out-Null } catch {}
 }
+    $smartM365RunGuard.ReachedTerminal=$true
+    $smartM365RunGuard.ReturnedNormally=$true
+} catch {
+    if ($_.Exception -isnot [Management.Automation.PipelineStoppedException] -and $_.Exception -isnot [OperationCanceledException]) { $smartM365RunGuard.ErrorRecord=$_ }
+    throw
+} finally {
+    Complete-SmartM365InventoryRun -State $smartM365RunGuard
+    if($smartM365RunGuard.ExitCode -eq 130){exit 130}
+}
+if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
+
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBHQOjEp3XLvhJU
-# 0oqzrwVcCpxZuUWzC5xrp6yOdEA0uKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB2J3cCLY0USCZO
+# oGpRta8G524YOUTPGlTemmTX5l/CuKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1220,31 +1249,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIDb6YaR1oRY2bpWHP2UBAZd0v6OmHlQvCMNsSq6pIDciMA0GCSqG
-# SIb3DQEBAQUABIIBgHiS5iz1T6OVAPQnhQMrVH6mT/SIErGhkb8wKYYXrDzHRQeG
-# GgkCzCJhOTbdLKMARV2fnJwiQQsNjyHVEUQraItDpbXtBOCpT2OVojmjhcJtsK/v
-# 4+ZcES2q1r+M0Ho32jKyGOvyNjh85RAhv5gML5gIyvscJ6nwSIjGCwe/0EwW8kV3
-# hYvrwpX7Cvig//vaaT0wkaZ7+RqxpkfFwC/PefSkgNlUurKyKG7mJ6pk8daRLwJn
-# SybCb9xLFg7sISDK1TaJq0lILcYrgT1ur28uqpmAd59roKAo+O9eJuAHdlfb9Z56
-# LMhkWG4CwDSE8q+rOPu6d1uaT4S3O5tJyvb7gEQOKEmgpjCB5AV70XDZx5dziFPg
-# Py16HLZzcJFptgyrpqobqUm/avumSDcgayQR86RY6O65eCZ+yiBYKvV3by6wgoA2
-# VfVw5nwmCUh23R3JCLjzR6wvHQjcH7a5DSxljzSvWfbZt5vCeI9y5HFH7pp5dOuY
-# 8Gnegbzw3x5KtIqNnqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIBQTRYwarGW7QL2A54yH2tGk7zwGU2m7ZcWImo3BEXisMA0GCSqG
+# SIb3DQEBAQUABIIBgCjyMJThJxLVC9nlVPCfePrrS+HiBIElnO2fAKFviSca0hvn
+# U+lcchX86qEGvFsnYLQgQ7hXzvTKwK22D8Wax6g8qdF9p1TnQiCzGhHUg6xpBtje
+# NCPONFV0KW38sjiT5QzZUP7NFAtX+I3Usfbat9stAxXLqDcDpL8EaBULNFldhuWq
+# K/LZOZOqOLcI+ZalMBeYCMtW2hjmNmxJ+O/F2N8pEmbqLZIq5m3qlIbsSEhB4HbX
+# PxZFLvAmWAvnsmZQmIeShLdWYT9IEewNxT6ZX2JKXOk/ShmD53qXTEk82xNTj0oR
+# pq2nXSUHk7E5ILvtxCX5GAtXIhBuA7c9VmRbGy2tzjYIWhiaz7riZcf9SZGTPXQI
+# BCT3iTJlF4Q3gnTeYNkQrv7OzrGY83of4Vl/lDMeKmRVLRC6O7CmAS2mjmv0AEvS
+# wvKfMXaoxubvS+UOi3S59XQnQo72EVeT7s7gHjrryQRR62oTaoFg5ea/lGKJQ3jG
+# uMroAz2YFgUYH6pi1KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDUxOTAx
-# NTRaMC8GCSqGSIb3DQEJBDEiBCD02oN2kvcLmVgSeUkSt+o8j0q1EqIIuXCBNTXt
-# 79UoHDANBgkqhkiG9w0BAQEFAASCAgCFp3E6qeMQ2iLjP0RlBlkophjmQ1q87xjc
-# LkOS3FKnNydNWY1ntFRSxFIF5gHIzDwLdApRhXlk9YcOUkhtvlCYwkz8tnAvoCTk
-# 3LLmqMIZyiaychC2z6zFFlojX6PnsFuyUDUHhZ0JjU8MIjGsDmJ58GKEebzrrEbF
-# 7QeAw1HqY9+ODmqaLEparEOZZ/IP2PmZ1c6GWPIPEzcyHl2s41Elz8SRQT1FzFTt
-# XuOgogQzNhGAC0XYJIWm9bl0NcRbrYCMQ5v6mhnuY/mWUZZkorbtSqFJUPFvuURe
-# B4E4cYet4LMWcd1R4zXMuDDLLWUMkpugEAL+Huk1RtSKJ0dGlQda7p4mCMBQ2YBh
-# gzodctWjD2Mf76iFD25n6uhpBjfv1akAjB3WIjRsHMp2QdylDUc7smkO7oroYJ9V
-# gkGl2lJQMrAo1VS84gh5od9QtHVdRfZ4/h6Lo425f1ryglIbknsXIxmx4WXOB/Q8
-# tWi6d5My1nVdbB33zSB9wLNmJBw+rZK4xUAbbQVHZxII29lXzeeCATJPzRLit6oM
-# xtXqrCwBsh56OkpBazTKOMcghyeqzq1UAIZhmGjdrEj9lF2tWDrEMYwgEvrVnbof
-# yZCOhHyJuqeJalXtttmslbtpUwTxlPZcSKuiCfToN8TJw5uMogbAbtHXfKXU3APC
-# i74RyKsKAw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTQxNTMw
+# MzRaMC8GCSqGSIb3DQEJBDEiBCCbnwFWml6WjdyZs+IYY48kCMNupafL7cZPLTNQ
+# jJ/WsTANBgkqhkiG9w0BAQEFAASCAgBIGUCQGuju76Zd9LQryQDIVmS5ok3zgwqj
+# ygGrOxjQhavNJ0XYdrC1PmEsccidO9UYAl4BpbHfl4tHobGCFH0B1WmXAZ5AhTNu
+# AAWdQ2jnCjpe8xdDW4WJpcD5lqKSPNNbLmp5x+z9wL0mjsoP1IFQBHBnkYNN32Hr
+# CXoARQVePbslJgvVr1cWjxlHmIKSMZOzP+dhzg/1niJXQjMpNVKzNSTTwml2S5jS
+# WdkFSSEB6LlPjKFoIRifIRdy/LzPOW+PAb/lYChJwl6Th+rljd+ELH2CovL2cL+k
+# DZRHFpLKtkaKaRPuWMh7URG6mlgpmfAyJDTIARa4/5AqnFkIff03wOW961336lqo
+# AgYDyBVarhSyp5r5gG2jmOB8W0RMMUeAES+h4mZxDi9jEfuvMLo+a6cqzzI2IS8K
+# Tn8gMpROp489O6j06o88rp4SNLDzp3CoN1bSyALRYmuHWKb8oI5bRlyq2oTF3NFO
+# 9/DcBCKrzrJhJ7qwxQGaeO9wLdGJvYBeY8c9A1bp8I7yJQ9lkrvfcnPlIYVD8UYZ
+# HJmtGY+dmlfTKO4TXQ9iUNIfiyVomoRP4Y80g52Z/bsy0kOZNHhKFNpNhGCstLZt
+# ppgX7gHHqkfyYMOwD8d8JT0aZ1MTSTiGkXrrKw8HF7D7N24eHBSOloqRr3Y6DD8H
+# uSJo3BoNtw==
 # SIG # End signature block

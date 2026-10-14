@@ -3,39 +3,68 @@
 .SYNOPSIS
 Collects Entra authentication-method registration evidence for MFA, SSPR, and passwordless readiness.
 .VERSION
-1.0.2
+1.0.3
 .REQUIREMENTS
 Microsoft Graph application or delegated permission AuditLog.Read.All.
 #>
 [CmdletBinding()]
 param([string]$Tenant='test',[switch]$InteractiveAuth,[switch]$ValidateOnly,[switch]$SelfTest,[switch]$EnableConfiguredExternalActions,[string]$OutputPath,[string]$LatestCsvFolderPath,[ValidateRange(0,10000000)][int]$MaxItems=0)
+# Local lifecycle only; no collection or publication is performed by this guard.
+$smartM365LifecycleRoot=$PSScriptRoot
+while ($smartM365LifecycleRoot -and -not (Test-Path -LiteralPath (Join-Path $smartM365LifecycleRoot 'Modules/SmartM365.Core/SmartM365-InventoryLifecycle.ps1') -PathType Leaf)) {
+    $smartM365LifecycleParent=Split-Path $smartM365LifecycleRoot -Parent
+    if($smartM365LifecycleParent -eq $smartM365LifecycleRoot){break}
+    $smartM365LifecycleRoot=$smartM365LifecycleParent
+}
+if(-not $smartM365LifecycleRoot){throw 'SmartM365 lifecycle support is missing; update the complete runtime.'}
+. (Join-Path $smartM365LifecycleRoot 'Modules/SmartM365.Core/SmartM365-InventoryLifecycle.ps1')
+$smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -RequireReturn
+try {
 Set-StrictMode -Version Latest
-$ErrorActionPreference='Stop';$ScriptVersion='1.0.2';$script:Runtime=$null;$script:CompletionStatus='Success';$script:CompletionError=$null
+$ErrorActionPreference='Stop';$ScriptVersion='1.0.3';$script:Runtime=$null;$script:CompletionStatus='Success';$script:CompletionError=$null
 
 function ConvertTo-AuthenticationRegistrationRows{
     param([object[]]$InputRows,[string]$RunId,[string]$CollectedAtUtc)
     return @($InputRows|ForEach-Object{[pscustomobject][ordered]@{RunId=$RunId;CollectedAtUtc=$CollectedAtUtc;CollectionStatus='Observed';IsPartialInventory=$false;SourceScriptVersion=$ScriptVersion;UserId=[string](Get-SmartM365EvidenceProperty $_ @('id'));UserPrincipalName=[string](Get-SmartM365EvidenceProperty $_ @('userPrincipalName'));UserDisplayName=[string](Get-SmartM365EvidenceProperty $_ @('userDisplayName'));UserType=[string](Get-SmartM365EvidenceProperty $_ @('userType'));IsAdmin=Get-SmartM365EvidenceProperty $_ @('isAdmin');IsMfaCapable=Get-SmartM365EvidenceProperty $_ @('isMfaCapable');IsMfaRegistered=Get-SmartM365EvidenceProperty $_ @('isMfaRegistered');IsPasswordlessCapable=Get-SmartM365EvidenceProperty $_ @('isPasswordlessCapable');IsSsprCapable=Get-SmartM365EvidenceProperty $_ @('isSsprCapable');IsSsprEnabled=Get-SmartM365EvidenceProperty $_ @('isSsprEnabled');IsSsprRegistered=Get-SmartM365EvidenceProperty $_ @('isSsprRegistered');MethodsRegistered=ConvertTo-SmartM365EvidenceText (Get-SmartM365EvidenceProperty $_ @('methodsRegistered') @());LastUpdatedDateTime=[string](Get-SmartM365EvidenceProperty $_ @('lastUpdatedDateTime'))}})
 }
-if($SelfTest){Import-Module (Join-Path $PSScriptRoot '..\..\..\Common\SmartM365.EvidenceCollector.Common.psd1') -MinimumVersion '1.0.8' -Force;$row=[pscustomobject]@{id='1';isMfaCapable=$true;methodsRegistered=@('microsoftAuthenticatorPush','passKeyDeviceBound')};$test=ConvertTo-AuthenticationRegistrationRows @($row) r n;if($test.Count-ne 1 -or $test[0].MethodsRegistered-notmatch';'){throw 'Authentication methods self-test failed.'};'PASS: Authentication methods offline contract';return}
+if($SelfTest){Import-Module (Join-Path $PSScriptRoot '..\..\..\Common\SmartM365.EvidenceCollector.Common.psd1') -MinimumVersion '1.0.11' -Force;$row=[pscustomobject]@{id='1';isMfaCapable=$true;methodsRegistered=@('microsoftAuthenticatorPush','passKeyDeviceBound')};$test=ConvertTo-AuthenticationRegistrationRows @($row) r n;if($test.Count-ne 1 -or $test[0].MethodsRegistered-notmatch';'){throw 'Authentication methods self-test failed.'};'PASS: Authentication methods offline contract';$smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; return}
 try{
     $tenantContextPath=Join-Path (Split-Path (Split-Path (Split-Path (Split-Path $PSScriptRoot -Parent) -Parent) -Parent) -Parent) 'Config\SmartM365-TenantContext.ps1';. $tenantContextPath
     $effectiveConfig=Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot
-    Import-Module (Join-Path $PSScriptRoot '..\..\..\Common\SmartM365.EvidenceCollector.Common.psd1') -MinimumVersion '1.0.8' -Force
+    Import-Module (Join-Path $PSScriptRoot '..\..\..\Common\SmartM365.EvidenceCollector.Common.psd1') -MinimumVersion '1.0.11' -Force
     $script:Runtime=Initialize-SmartM365EvidenceRuntime -ScriptPath $PSCommandPath -EffectiveConfig $effectiveConfig -DefaultOutputRelativePath 'M365\Security\AuthenticationMethods' -OutputPath $OutputPath -LatestCsvFolderPath $LatestCsvFolderPath -ValidateOnly:$ValidateOnly -EnableConfiguredExternalActions:$EnableConfiguredExternalActions
     Start-SmartM365SourceReceipt -ScriptPath $PSCommandPath -SourceRootPath $script:Runtime.LatestCsvFolderPath -ReadOnly:($ValidateOnly -or $SelfTest)
     Connect-SmartM365EvidenceGraph $script:Runtime @('AuditLog.Read.All') -InteractiveAuth:$InteractiveAuth
     $raw=@(Get-SmartM365EvidenceGraphCollection -Uri 'https://graph.microsoft.com/v1.0/reports/authenticationMethods/userRegistrationDetails?$top=999' -MaxItems $MaxItems)
-    if($ValidateOnly){Write-SmartM365EvidenceLog -Message ("Authentication registration endpoint available; {0} record(s). No CSV published." -f $raw.Count) -Level SUCCESS;return}
+    if($ValidateOnly){Write-SmartM365EvidenceLog -Message ("Authentication registration endpoint available; {0} record(s). No CSV published." -f $raw.Count) -Level SUCCESS;$smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; return}
     $rows=ConvertTo-AuthenticationRegistrationRows $raw $script:Runtime.RunId $script:Runtime.CollectedAtUtc
     $columns=@('RunId','CollectedAtUtc','CollectionStatus','IsPartialInventory','SourceScriptVersion','UserId','UserPrincipalName','UserDisplayName','UserType','IsAdmin','IsMfaCapable','IsMfaRegistered','IsPasswordlessCapable','IsSsprCapable','IsSsprEnabled','IsSsprRegistered','MethodsRegistered','LastUpdatedDateTime')
     Export-SmartM365EvidenceDataset $script:Runtime 'M365_Entra_AuthenticationMethodsRegistration' $rows $columns|Out-Null
-}catch{$script:CompletionStatus='Failed';$script:CompletionError=$_;throw}finally{try{Disconnect-MgGraph -ErrorAction SilentlyContinue|Out-Null}catch{};if($script:Runtime){Complete-SmartM365EvidenceRuntime -Status $script:CompletionStatus -ErrorRecord $script:CompletionError -FailureStage 'AuthenticationMethodsInventory'}}
+
+    $smartM365RunGuard.ReachedTerminal=$true
+}catch{
+    if ($_.Exception -is [Management.Automation.PipelineStoppedException] -or $_.Exception -is [OperationCanceledException]) { throw }
+    $smartM365RunGuard.ErrorRecord=$_
+$script:CompletionStatus='Failed';$script:CompletionError=$_;throw}finally{
+    $smartM365RunGuard.InCleanup=$true
+try{Disconnect-MgGraph -ErrorAction SilentlyContinue|Out-Null; Set-SmartM365InventoryConnectionOwnership -Connection Graph -Owned $false}catch{};if($script:Runtime){Complete-SmartM365EvidenceRuntime -Status $script:CompletionStatus -ErrorRecord $script:CompletionError -FailureStage 'AuthenticationMethodsInventory'}}
+    $smartM365RunGuard.ReachedTerminal=$true
+    $smartM365RunGuard.ReturnedNormally=$true
+} catch {
+    if ($_.Exception -isnot [Management.Automation.PipelineStoppedException] -and $_.Exception -isnot [OperationCanceledException]) { $smartM365RunGuard.ErrorRecord=$_ }
+    throw
+} finally {
+    Complete-SmartM365InventoryRun -State $smartM365RunGuard
+    if($smartM365RunGuard.ExitCode -eq 130){exit 130}
+}
+if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
+
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBvvyMgwKCAG7Z0
-# 78gH66Q5yPWMjakMWycetjU62rqbLaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDwh+WSOUTp+r+Z
+# 0lltdtv8g9DKQaKnLwQSTtK22Qpa4aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -168,31 +197,31 @@ try{
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIOb7mwQ4IdlTe1N/GhvXXF9+Mq3rancgSFV17JN9hSTtMA0GCSqG
-# SIb3DQEBAQUABIIBgIaZs9tVhNV3px2fAA38qEF22XYZwofTrcdaliBLH2OTuUra
-# vOEQgz9RMDcxImVJ/+0y2f+wY9IUL1iYgDEm1QsQpDRdR9uRhiRB+lrDlpVgDNNF
-# hspAv5mOW1Iqfisp2IeTD2Lsi2k0YbmlUOHyaxmb/KvjpO2Mz56o4UuTgZBtflR9
-# IslEF9Jzbp1+fHT1pvFHzjeR9XCubIr9K+iTzDBNDAFkxAhVsGyRBRa/MDReP5vj
-# X+mEYjDOhMOrpgu/7CN2C8dDenW8LSChnBYLxcIQSjdzICnkSDGFewOv4X9ZdwTX
-# Y8oa9ZY1Hv7ZJplTLRxkP9hErmUw8tYctH8bouBAqAJkJ7ZR+e9ABesApZD+THtX
-# hpP1VuUph385FulYfiATWzshtQcUsW3ifhmKEssJF40XSaxlIOGJo9OQKFGtbYUT
-# gsls61GhLarPPaIxRqdpKDipZ6PygA9T7SWYm6A5mzef6fbMKpssbS7BhWp5Ssew
-# ft70OeVHR/AGUc4yUqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIJvTtqjIg71a3qSbPiPumFGEV9A9rvgokjMO/0XOHA3OMA0GCSqG
+# SIb3DQEBAQUABIIBgEaKsRD/Fie23aiOQKSt1ljrEPTW5UlclwVwwtpLAwtsNlmH
+# 6vDnRtckIRL3Q34MsInfUKU4zdQQUaYyBOkebjFr2MIrAm17H1u8dTFUJEVSFUaW
+# smy/kXEqiNxPKGrijfD+Vw5uavbvwB3508Z/4F2+LFVPfhxjQ4OAA04BTUShXKxB
+# 6R3e+S4c/MN//9Q44iOIOz47qoE0k2I4GvvOfa0+jStGVd1enKbcjoEF4IB0l/jU
+# 5qEChmGpmLLrk8WR9VE6tgWCbd50IZrUl/YFpGovFtnVPgCL+7JVw/YbhxDGFcGi
+# S2O4V2TOZm20PMrC7vzQmxSXVYH3JXFWQmEcnDdPAparUbEVxYh2KanDaqoh3ZAK
+# Cc9I6PeVY5Tx/RC7S0l2o7njyq51ORGs9LIFDjqKqPCWgTemzMd1xK/O9iAjEwy+
+# LhcCo4eNImjXR0dZ234ICKAxNtFGAnTQnSL7uLweVq4ud5iV359VrB7ohCX/YPJB
+# 60DRZKcwEqnQOo88wKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDUxOTAx
-# NTJaMC8GCSqGSIb3DQEJBDEiBCDaSCfaJ6kvb3Y5/kapEWBudzFEK5sxML4hVHgP
-# 5C+RLTANBgkqhkiG9w0BAQEFAASCAgCo46I/dJBxs3Tgrt0DkYFDAiNtf2qpXtfN
-# F3PT7BiufqA9IlfkDbRSBXuN3sC/PdLyTydgySfvNzyQExSr7cO8Bp0uGxoOAbWY
-# 44pz4SWqa5S7MLmn0PdigmhmqZtXEVzI0mlesIMQMbQTJdlkgkCCgag+kTTcEV1q
-# fTzZ3rW8MCwV1a0e0OHbUjLDmWhOZm/QuWAMAgInpJEtEcCu+vCiOLCou8IlTOTN
-# aTUZ9oZq0K5Mgw4fg4LgDQNbsHspSYDv/KrN4eZzUTNhPW0oncueqct71Aq86gOL
-# DyIXf4Hf1+snWMayUekVKy8J4De0oMTWEmsbVNy4Z7zXTQ572ZRigSh4kJOUwlbX
-# g4VNcvphKoGlI4j4O8GcMrzXoQ8MQaAuKnQW8P4+WEkIi+BqmeLbOou0u/fL/M16
-# LUilNr8r/lYQ1oVNmc6GbvaMx8Y4+IDNGtb3qlQjxPKNayNDRlt1SGAT6+pxm/LQ
-# AtNuJc2RJdagFmpmTWvs6cV61pwTAN50EA2WllWZ5wUhKSoNS8hU1AgnSMzSYJEt
-# 5A1CfEitMjyS8fZxVBd88edf4RjX5IACzWIdRowf7OXhQcuxL+wQ7MPU6APrGZLF
-# YWDmoi46ttnhm+bs8WAaAXNLy8SyqnrqGQ5OxA5m+E9vTiuJo5rY7PT0ZhKQ45Pc
-# v+KpSoSrdQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTQxNTMw
+# MzFaMC8GCSqGSIb3DQEJBDEiBCAWxXmEfBuHBMLp5QLoJJwY5IiaQhLVKISZ620a
+# mqIQEzANBgkqhkiG9w0BAQEFAASCAgBY08xy0AYwFr0WiLk+4I2Nx3MyBsEdaEKT
+# 3rUZXylIhX5sK1oM8CMH4I2EBinQ6cchCTKzg/5KHfdl9Qut3Ys4zzScxwLnbYBA
+# G811eZW3hEmE2b5/yp72i7PqwIZYmaRzr0Ph9WpZdKHS0emt4BLD4w6sOnMffXFd
+# lgqtnMyWUZP/Zi9HzeJ00KVZfHrYUk46WujkDxdICdtX/yIwcgVxXaMQ+TXKHf6g
+# uWX0Ixm0W4/arc4oNAIphh3Teu6w9kxesAV75SNsVCvQWnaqfZo/J/UVv+SxIt4k
+# NhtaOdeHgW8pcJ/Zg70o0UT2PLOc3CfDraRStdBP5nxZEYZxWyS762Sb3xoeObmN
+# QhxELpOZ0TvXdp6YwK5QbxmofoDrRTTO3TsE6yJoKscVdTSChKzkq9BUM0hqRvjk
+# ia1p3/DPpaql5YK3UtLfZ/eG4Zb3GHTHtGldqNOBUWsusdS34TXRFHEDWal+9A3o
+# 4eByjJqXRc+TleXE4M/vMs4dtEMlHf26J1RoWfg0JcOVzaxCOEwHuw38cDD5haea
+# KG1Ph/6zVEyUI09DlseN8VFywynMOuxc77MNArdM+ZF9+vOJV3Y5X12V/HYoW/4P
+# D1YF9GFhb68nebca2VlE0ll/McMVoZK0ipdz2B5zElUoqQTBJAm6vDQILpme08Fx
+# k9gHKQ47vQ==
 # SIG # End signature block

@@ -82,7 +82,8 @@ Assert ((Get-DeviceSystemLocalFreshness -ObservationUtc '' -IsRecurring $true -H
 Assert ((Get-DeviceSystemLocalFreshness -ObservationUtc '' -IsRecurring $true -HasOutput $true -DetectionState success -AsOfUtc $asOf) -eq 'InvalidTimestamp') 'Success without an observation time became fresh.'
 Assert ((Get-DeviceSystemLocalFreshness -ObservationUtc '2026-10-13T13:00:00Z' -IsRecurring $true -HasOutput $true -DetectionState success -AsOfUtc $asOf) -eq 'FutureObservation') 'A future successful observation became fresh.'
 $collectorSource=Get-Content -LiteralPath $collectorPath -Raw
-Assert ($collectorSource -match '(?m)^\.VERSION\s*\r?\n\s+2\.16' -and $collectorSource -match 'Version : 2\.16' -and $collectorSource -match '\$ScriptVersion = "2\.16"') 'Collector version metadata disagrees.'
+$runtimeVersion=[regex]::Match($collectorSource,'\$ScriptVersion = "([0-9.]+)"').Groups[1].Value
+Assert ($runtimeVersion -and $collectorSource -match ('(?m)^\.VERSION\s*\r?\n\s+'+[regex]::Escape($runtimeVersion)+'\b') -and $collectorSource -match ('Version\s*:\s*'+[regex]::Escape($runtimeVersion)+'\b')) 'Collector version metadata disagrees.'
 Assert ((Get-DeviceSystemLocalFreshness -ObservationUtc '2026-10-13T10:00:00Z' -IsRecurring $true -HasOutput $true -DetectionState success -PayloadValid $false -AsOfUtc $asOf) -eq 'InvalidOutput') 'A truncated output was accepted.'
 Assert ((Get-DeviceSystemLocalFreshness -ObservationUtc '' -IsRecurring $true -HasOutput $false -DetectionState '' -AsOfUtc $asOf) -eq 'NotCollected') 'Missing output was accepted.'
 Assert ((Get-DeviceSystemLocalFreshness -ObservationUtc '2026-10-13T10:00:00Z' -IsRecurring $false -HasOutput $true -DetectionState '' -AsOfUtc $asOf) -eq 'LegacySnapshot') 'Legacy output was mislabelled recurring.'
@@ -143,8 +144,8 @@ Assert $failed 'An empty recurring collection could replace the existing CSV.'
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAmFKUk/LDjlzZ3
-# tekyPP8aQkEgXQRY7njHrCtwZT2fy6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC05lOm+a1Br9e+
+# IwXfZpRiNnlPG2e3BS3psdt2uvxH36CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -277,31 +278,31 @@ Assert $failed 'An empty recurring collection could replace the existing CSV.'
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIAA0tuVF0tZ/JiwcJkVd7T87ENdCtBAbAYIC+ZZF0YWqMA0GCSqG
-# SIb3DQEBAQUABIIBgDu+NDBmuhla6SkbbMttjnyCqT3+uduECzr6OWpp0/fXehJX
-# rOe9LNP3ZoUO5CWZngTaIg5QIJZk2PntqLYFZQb9Ko4h23Idqx+FOZHFwtQjwpZ4
-# 5RPzXwCW8o/nNMVTPoiov75dMo1Rcq13Atwv2xjqk8Y50LFNCmN5cKrrFNE9JsXm
-# mGzC2By+gbOgmMAwRmfYoUyhRs/BVZE0RW3yzaUgVAkBwWLDKySvcVzpt/r78XAe
-# SZQr2zJmui4qqcarN4/5yCecXMYOZs0YYa8t+mp4HdpTcKT/cX2T1zhU5X+P7naz
-# EZ0JqDVsBjpMgQz0ZwewOJaH36iOQGoffDa7eXN8coO1SRkwWtAWee34dkcwgKA3
-# HIrm4QG0S2DsAnc2M1pz2B4aaULcKBnQ/CHtE2jGtPoqpDwV5BpFdyev+DHrtvuO
-# JWYo29Aemndrrfrihjr1PFPNTv0q8xDtLo0V00HFtx2eR8Y4TGFwBlzYgZ0G+pHr
-# aj0NGPB7J5Am7c85v6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEICRm8ZT65mOF6Wxs3eZ4gfWOp4XyzsVpdf8VGBTBeXDTMA0GCSqG
+# SIb3DQEBAQUABIIBgJ+qdl6zPhy9F0kNAYey5q3qJXxx/8+VbfcVu6//wCjP9tta
+# pvTGqyo3XRe2v53mJwZhDvqxyFrs7REL5tlxc1v9bX47VEY3GT9OjF/pnLb00QNI
+# RLFVyjUEgg9oKnBH5hzSCLrT/IeeCXvihSfb3uOgqUUU1Jq13ujw3LVL4nAuyMMA
+# 3ZqcbPfW9yYlPf7xlA/j8Xnxg9nAguF22h0l91ZUm/yqTxwvFeTvoRtmzeiQvZRG
+# fO0aS3+6Mt1h6TxuQUqlLc4k7YxLIoJaGWH1otOIK5nxUM9/kzU1QQmyklYOokxx
+# F6dkQSAJOb5gJIzp2uU0bf1+tpRHKXPAtNhn9oXrNGlQvWKeNtfu2HpGuuxARotq
+# 1siQDnQ01I70+PJd9bpwF1Y9pavbaOrpEK33DOBZvYx4QR81Cc844U69ofvp4z9F
+# M1GKxNGNEwx+UrUH+JhQ5kKk7doAno1gIdyZK99Qwz8twjdwJW7n9vWjMYCoPXCN
+# oxjFFozcPFDjotLXHaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTMxNzMx
-# MzhaMC8GCSqGSIb3DQEJBDEiBCA2K+gmRGSmI6Bw0eK3oGinQ4kVtyBc2xPAYVDt
-# CFZ08jANBgkqhkiG9w0BAQEFAASCAgCP2ugy2PS/GT5MQMg6mdKBFjZcx0I3FSyM
-# rHhqZvvE2lbMc+XL1IhxOJmnsOFEaPyBwi0kudu/D3E1Kc1q/XDHAWsjtFC/fbKm
-# CDRxLuByC3ol+YRyBi5sxY/gV44jjEf93noKNCeJ1YNIfuwX8y3pqsr6o10xr9ox
-# hJ1LE8NmRu1NXsuES36/u485o65PSfve2CytcaWCbvMth4CRD4vvipQPhFy1pkdS
-# 8dZvaPW2wp7KjZq4RGlWwopw17xH3OCQ0JWT2shSTlNxmaZ7zjfyESR0CnqrU+LA
-# q67kToHGA4WFIb5QcFaL3Yx4ENqW0ZhyCh5Z94ykmXzjKlsVYIdC1P9XhObuPhwH
-# vJY5+p+TVN3VrDN3EHJnusiG3TO9Ii4M+L79iY0eQLkOId7Iw4aJk2WcRi9NIaC6
-# wE7DDiw0H291yb6bG2fO/YBz0tHOXqRSpaMzbQwmRL2q6wH1AJhuOgCsu5zEnQR0
-# vXmHGvm3OD8lvcMNGUC4kbseeJf6jYHM3eKMX2ssfs6cgNhmP5Wb6lSJ/kSajr4c
-# rDYnT1R3tObA3c9qlPEzja2ZzQUrP/HUzS7nAzb+kLbeE0sFsxRDs6g13rTzCb45
-# wYkXyuikvK0E8YioNANsfX0kLndjZBE+FsWZ1lYb1U2lsXUErNnBaxQjyJTcOeAh
-# 8Xynoe+fXg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTQxNTMw
+# NDFaMC8GCSqGSIb3DQEJBDEiBCClM7EvTg+WtyJlbrHfL39JwmjDE5eYIGr3llyX
+# dpG0WzANBgkqhkiG9w0BAQEFAASCAgB1KDapE2bWdt0maTZoC+SZFf1LO/OAdzqP
+# GG0wXhvg2nM58dDQNMZYU06RN5Qi6TzygZLqqosljpTPvY9WKSHaYM86sespsw5a
+# LCRRI7Pblhc86IjV/4aW90UHVAGeuxJ9fDxiS4nJSpZ/oSjqYRWM3tsA07ObsNij
+# L3TV1KBE+oJjIYYP4TiC2K2AdRS99bJ1EiTCx1F9NuiXOopT/VMjUfRSETOqObwM
+# qcnpC8V20ZufntHfL/zvvt6oz6C+I3g0dTMyb01JSPuDsTafLz8SF9Ab8svmRNde
+# gd8ecmVHfe79zxGaaDhZh7F1JN+HP7favBbshdQ8bNcuKtierMFQukGVkZnmmCD4
+# AQoEthuJfTQGr20/2wST6V3Jg/RBC5mJ8gaWZntWKKpVECn5mtH6Ndho+NGVzE/3
+# VhdJPVwiwNLJ/lk7yUDsOQLJW3yxRCynHLQxsobumLs+ksYGkJRw5s9d6U2mM0Yb
+# qRB7BRRpOT3eALQp27uD00xcI2hTVkvSCPKbAKw3N0aQfY3yWKMJ58n58SwAVDdQ
+# hRhppaw/NOGuOwWC6dzokGZGiTjtK11z7Kb2yyKOXA3Y6mm93pd4cBNyHU/KuVcV
+# XyPYTZ6PilwNN8bcn8Ui+fYPGU4a1S4QxCpsK7+HUuFur3KtwAbKsXgVYUGbGFKk
+# 1vMoF5kzsA==
 # SIG # End signature block

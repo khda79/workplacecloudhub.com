@@ -74,7 +74,7 @@ function Clear-PreparedRunPayload([string]$WorkRoot, [string]$RunId, [string]$Da
             Resolve-SmartM365OwnedJsonPath -Path $path -Owner 'WorkplaceEvidence-Prepare/run' -Validate {param($document) if($document -isnot [pscustomobject]){throw 'Invalid prepared run audit.'}} | Out-Null
         }
     }
-    foreach ($name in 'source','prepared','AccountClassification.psd1','AccountClassification.json.txt','AdCountryRules.json.txt','EndpointProtectionPolicy.json.txt','PreparedEndpointContract.json.txt') { Remove-PreparedOwnedPath $WorkRoot "$RunId/$name" }
+    foreach ($name in 'source','prepared','AccountClassification.psd1','AccountClassification.json.txt','AdCountryRules.json.txt','EndpointProtectionPolicy.json.txt','PreparedEndpointContract.json.txt','IntuneSourcePolicy.json.txt') { Remove-PreparedOwnedPath $WorkRoot "$RunId/$name" }
 }
 
 function Copy-PreparedStableSource {
@@ -177,6 +177,23 @@ function Remove-PreparedObsoleteBatches([string]$OutputRoot, $Pointer) {
     }
 }
 
+function Undo-PreparedMappingReplacement {
+    param([string]$DataRoot,[string]$MappingRoot,$Committed,[hashtable]$Previous,[hashtable]$Hashes)
+    for ($index=$Committed.Count-1; $index -ge 0; $index--) {
+        $name=$Committed[$index]; $target=Get-PreparedChildPath $DataRoot $name
+        if ($Previous[$name]) {
+            $backup=Join-Path (Join-Path $MappingRoot 'rollback') $name
+            if ((Get-FileHash -LiteralPath $backup).Hash -ne $Previous[$name]) { throw "Mapping rollback copy changed: $name" }
+            Move-PreparedFile -Source $backup -Destination $target -Overwrite
+            if ((Get-FileHash -LiteralPath $target).Hash -ne $Previous[$name]) { throw "Mapping rollback hash mismatch: $name" }
+        } elseif (Test-Path -LiteralPath $target) {
+            if ((Get-FileHash -LiteralPath $target).Hash -ne $Hashes[$name]) { throw "Mapping rollback refused unexpected target: $name" }
+            Remove-PreparedOwnedPath $DataRoot $name
+        }
+    }
+    $Committed.Clear()
+}
+
 function Receive-PreparedMappingWorkbooks {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$DataRoot, [Parameter(Mandatory)][scriptblock]$DownloadFile)
@@ -190,6 +207,7 @@ function Receive-PreparedMappingWorkbooks {
     $committed = [Collections.Generic.List[string]]::new()
     $previous = @{}
     $hashes = @{}
+    $mappingReady=$false; $keepRecovery=$false
     $required = [ordered]@{
         'SmartWorkplaceIntelligence-PersonaClassification.xlsx' = @('Personas','Rules','Exclusions')
         'SmartWorkplaceIntelligence-SiteClassification.xlsx' = @('Settings','SiteTypes','Sites')
@@ -246,23 +264,19 @@ function Receive-PreparedMappingWorkbooks {
             if ($previous[$name]) {
                 if ((Get-FileHash -LiteralPath $target).Hash -ne $previous[$name]) { throw "Retained mapping changed before replacement: $name" }
             } elseif (Test-Path -LiteralPath $target) { throw "Retained mapping appeared before replacement: $name" }
-            Move-PreparedFile -Source (Join-Path $promotion $name) -Destination $target -Overwrite
+            # Record the intent before the rename so Ctrl+C between statements can roll it back.
             $committed.Add($name)
+            Move-PreparedFile -Source (Join-Path $promotion $name) -Destination $target -Overwrite
             if ((Get-FileHash -LiteralPath $target).Hash -ne $hashes[$name]) { throw "Retained mapping hash mismatch: $name" }
         }
     } catch {
         $replacementFailure = $_
         try {
-            for ($index=$committed.Count-1; $index -ge 0; $index--) {
-                $name=$committed[$index]; $target=Get-PreparedChildPath $data $name
-                if ($previous[$name]) {
-                    Move-PreparedFile -Source (Join-Path $rollback $name) -Destination $target -Overwrite
-                    if ((Get-FileHash -LiteralPath $target).Hash -ne $previous[$name]) { throw "Mapping rollback hash mismatch: $name" }
-                } else { Remove-PreparedOwnedPath $data $name }
-            }
+            Undo-PreparedMappingReplacement -DataRoot $data -MappingRoot $folder -Committed $committed -Previous $previous -Hashes $hashes
         } catch {
             $recovery=[InvalidOperationException]::new("Mapping replacement and rollback failed. Recovery files retained at $folder. $($_.Exception.Message)",$replacementFailure.Exception)
             $recovery.Data['KeepMappingRecovery']=$true
+            $keepRecovery=$true
             throw $recovery
         }
         throw $replacementFailure
@@ -270,6 +284,7 @@ function Receive-PreparedMappingWorkbooks {
     Remove-PreparedOwnedPath $folder 'promotion'
     Remove-PreparedOwnedPath $folder 'rollback'
     # Retained root files survive cleanup. This run consumes its immutable DATA pair.
+    $mappingReady=$true
     $folder
     } catch {
         $failure=$_
@@ -278,7 +293,14 @@ function Receive-PreparedMappingWorkbooks {
         }
         throw $failure
     } finally {
-        $lock.Dispose()
+        try {
+            if (-not $mappingReady -and -not $keepRecovery -and (Test-Path -LiteralPath $folder)) {
+                try {
+                    if ($committed.Count) { Undo-PreparedMappingReplacement -DataRoot $data -MappingRoot $folder -Committed $committed -Previous $previous -Hashes $hashes }
+                    Remove-PreparedMappingWorkbooks -DataRoot $data -MappingRoot $folder
+                } catch { Write-Warning "Mapping interruption cleanup incomplete; recovery retained at $folder. $($_.Exception.Message)" }
+            }
+        } finally { $lock.Dispose() }
     }
 }
 
@@ -565,12 +587,31 @@ function Publish-PreparedEvidenceBatch {
                 Write-PreparedJson (Join-Path $audit 'failure.json.txt') @{BatchId=$batchId;TenantKey=$TenantKey;Error=$failureMessage;Utc=[datetime]::UtcNow.ToString('O')}
                 if (Test-Path -LiteralPath (Join-Path $batch 'validation.json.txt')) { Copy-Item -LiteralPath (Join-Path $batch 'validation.json.txt') -Destination (Join-Path $audit 'validation.json.txt') }
                 $_.Exception.Data['PreparedFailureAuditBatchId'] = $batchId
-                Remove-PreparedOwnedPath $output "batches/$batchId"
-                Remove-PreparedOwnedPath $output "current.$batchId.tmp"
+                # Deletion is owned by finally, after checking the actual publication pointer.
             } catch { Write-Warning "Failed batch cleanup incomplete: $($_.Exception.Message)" }
         }
         throw
-    } finally { $lock.Dispose() }
+    } finally {
+        try {
+            if ($batch -and -not $committed) {
+                # The pointer rename may already have completed before Ctrl+C was received.
+                $referenced=$false; $pointerKnown=$true
+                try {
+                    if (Get-SmartM365JsonReadPath $currentPath -Optional) { $referenced=(Read-SmartM365JsonDocument $currentPath).Document.BatchId -eq $batchId }
+                } catch { $pointerKnown=$false; Write-Warning 'Publication pointer could not be read; the candidate batch is retained.' }
+                if ($pointerKnown -and -not $referenced -and (Test-Path -LiteralPath $batch)) {
+                    $audit=Get-PreparedChildPath $output "failed/$batchId"
+                    New-Item -ItemType Directory -Path $audit -Force | Out-Null
+                    if (-not (Test-Path -LiteralPath (Join-Path $audit 'failure.json.txt'))) {
+                        Write-PreparedJson (Join-Path $audit 'failure.json.txt') @{BatchId=$batchId;TenantKey=$TenantKey;Error='Publication interrupted before pointer commit';Utc=[datetime]::UtcNow.ToString('O')}
+                    }
+                    Remove-PreparedOwnedPath $output "batches/$batchId"
+                }
+            }
+            if (Test-Path -LiteralPath (Join-Path $output "current.$batchId.tmp")) { Remove-PreparedOwnedPath $output "current.$batchId.tmp" }
+        } catch { Write-Warning "Publication cleanup incomplete: $($_.Exception.Message)" }
+        finally { $lock.Dispose() }
+    }
 }
 
 function Invoke-PreparedEvidencePipeline {
@@ -680,8 +721,8 @@ Export-ModuleMember -Function Get-PreparedSourcePlan, Invoke-PreparedEvidencePip
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAcMul8GysZl05l
-# YNaYXEX/SZGys3Ba/yP/AnCb8vVdyqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCRVo3pJQXebiX3
+# v/1TgFHzwgCY6SX7G06gOaDif5tOeaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -814,31 +855,31 @@ Export-ModuleMember -Function Get-PreparedSourcePlan, Invoke-PreparedEvidencePip
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIMZdMLU5mna6vLsHq+hGc06BGx1SiO24JzFyAxHmKyCrMA0GCSqG
-# SIb3DQEBAQUABIIBgIsH5TCMtDTQT4QpXH+I05fnkolXcEMOBaZIojMGSnGgatVD
-# XgN+nBn4haKzM3A1Ul4Liogan8iHT3DNJceBrsTWTNqdY9jX43R966yYnQXbN7KT
-# i8Y+v4gwe0nBBcxxpqd3sxEoRAdBCUeka+dmkws7j3nx1LsbauyYCkd9lyYwdRXR
-# QBbxdaiCbLw9KhDnq3dO9UgbRtGMNSuOuCYyYF1GLXqk0qtgwEFMo3AN1UoA+5hS
-# /0PV12nM1SSK0l3xSPxvF/xwirADGpi1qD/lQN7Nt1OD+wC9wPTEoeBIxir7Jjlm
-# tcqsMWhP+bK4/n6WVTGSoRulk6i67cZ6QEneGuRWMa0veViolFKpnVqnype0Z1O3
-# 6lqwqk98GCuF1337PLHiUoZINBBX5vTrCPounX247hepZC1eZ/rG13mkHlSbrikG
-# 0RLr/d9KPSqFjXssIzq4JWpMnPAADZpL2jYVIx1T9ogoo7ErEwXN/1Z9ejFZFITm
-# MgU3aXtDtryQ1/j1NKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIMgae2iAiR4eeEymUEsyh4hkMEtkwasOJaTF4jChMsMEMA0GCSqG
+# SIb3DQEBAQUABIIBgIESCZKQgBcmcuaflhVCk8NHXBbo15ayHB4LFW3dVrfz9wlH
+# 8TYGcjHhtC9ycRdeJFmxQKa/sDeJJRnAQ64Sw2l/YQJz9Xdta3Hqfz4klCKaR/LS
+# ph333G7+zgnw0K+aJ9cOx221iCAqY0Y0j4JkRPlzNGOziMTMakHt3kpi0KmzS8bg
+# ncyZ+zR5WBtOumG/9asitlnnVa7XjFPXX8mcZ+aLm39yX0kW/q/FJr8N0nMJ1Xne
+# cE1khK9p8QcMSMlCdy0R/Uz4rdncYhXCEAQRlDOBbL1XrzujUkpP0DDaglopjIq7
+# XQVcnAFc1L3FyrV20xXwn8ytSA+Czfjlbgz0WtnRBt++kQox2jEe6+XHmbsyNRaa
+# GhdZ30xXY7Abygs3Ak/t3pTEIB5M1pad0FxsxlkBF9DEFTJctcEs77qp5f6gNObe
+# JTGrGhFK2vD2waVttqB/x+XMgu8TTV7gEzLGlUW7fXRU2yN5K8OJzAZER43G6PyC
+# zu4IWQSdk57KYnoXyaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTQxMjIz
-# MzNaMC8GCSqGSIb3DQEJBDEiBCARw3LVTD5LjcoTPku+OEeH8T++4TNuQb/xRV1p
-# LB65VzANBgkqhkiG9w0BAQEFAASCAgA3kaDmPotwiaGpPdIKsTQ8XSC58Y62tzHW
-# BmvXaZLL8woYfoA/LZ0kpv05GQORACBu9R1HqW1LdmdcaGu3L1axe9m51BRXiNCR
-# U0JSQ7HHnSjY2kVNXk8gMrq1pMmBNGLqIaGS7GM0ykUeQaxhUa7UpRUpXcVbZKxV
-# 6YwjYlOzrkyp4zqou80Z3h8/J3wndxWvvLLswu/lCtkeeb+SYaLmILtcRBGQ4TDd
-# HVg6kQG+BNZAFZnNeaj1KAqu+j+HoGaapvWfFQVnVFm7TRMpI6+dbzYHfAHh7Jsr
-# iTgCtqMIfrY12XftM3rqiFgvvGdYvA6m97bbLuAcXxTRPwzgmMiczjhlTmi3NYTF
-# uu03Sxc7Q1gRgUSD+A5QSjJwW38YousPzvarfuIAkkZR8TQiARGlDG1hKLXcoYCZ
-# QHlVjdxbr5U7T28QF873/tIwDBnBBUfD28nMBk/ZKywFHgmMG6cWPScRf9QT1412
-# GpmxvKBrt6Vtx/8EIBVkDCWOtsgqAbs/wgF8kAbojRtuubsOLixtwRT9Z70CI8ex
-# CsFFgq+/ITdki1t1Qc8oVbEk7M1Op/G6pR+93If/VMXnQYjqsEZrOyQb5aCv3Y4Q
-# llFtDn/rx6Pb6jRZqkpWPCLUNE/LzYXYPL+GQYHA1VoL1/nuXHJt+XLbJtin/epr
-# lyAq/8EupA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTQxNTMw
+# NDNaMC8GCSqGSIb3DQEJBDEiBCC5ptMyRb0q0rDZrw8EXZyZ6ggoyVRRj1hiEYL9
+# 08LPTTANBgkqhkiG9w0BAQEFAASCAgCWO7UgNEnJKu6eNHOrPeSw0wKlYs9diWdA
+# MwuVBVJoTqI7hBd36IneW4ijpRkdHtOF5NdDShWegQ2JpDoYzOAr5XGEjvce+lnU
+# mLjNa89fGTbjCCXIrF1IBRrAj/2c+iGgB5Hn5XtAoo+u/u3LxIEE+YiZkSK3Brzc
+# vtEofHkvSobKTVn1gKv84v1Kd2vbZgVShvgxLwmfXKGot9Onf5H2tH1xWafsDddj
+# X+dTx04Dcc1QvW7etNDaBVirdh3ZjgGlt727LwTlonZedOmJUrcdniRO347vNjKh
+# rHz7cCEe7gWia/CdplynDczqk2+kvqKWZKd+Atl4Tugog8RlAi4WpBTyqngeZ6q5
+# mGhgRjJ0mIljIlnJ6A0Zax7hsP464m+LdiuY7iRsz67f/G0bDLq5dqAQ7lZVfayT
+# OQHUqeUAqGw3pAK10Esj98z12TTfJvggG89aRljiIFqT3wZJYQFsc/EeRNWLfboo
+# GfC5TBMKEEaDsZXl3lUSEpFM8rgNJb2h1Eh04xq3sWvO3mxb+xiKKnpkht/tZjuC
+# oVRSFn17LjO7FGce89cMZbulxgoDjcWoZ9xWwbgN9e0woJ/lybYl9w5ZoKdQu8zQ
+# otFjG+2Xpv1nYsCmbtXQIQ/O3ZpwPvOuyKLJNQFUhrp26sQRIyk35W2Ya6i0noE7
+# JeQLC+Gd1Q==
 # SIG # End signature block

@@ -22,7 +22,7 @@
     - WinRM / PowerShell Remoting
 
 .VERSION
-1.6.9
+1.6.10
 .REQUIREMENTS
     Windows PowerShell 5.1 on an Exchange 2016/on-premises management host.
     Modules/snap-ins: SmartM365 WindowsPowerShell5 compatibility module; Exchange Management snap-in.
@@ -30,7 +30,7 @@
     Conditional: Mail.Send is required only when Graph mail is used; Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
     Script Name : SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory.ps1
-    Version     : 1.6.9
+    Version     : 1.6.10
     Requirements:
       - Windows PowerShell 5.1 with Exchange 2016 Management Tools
       - Exchange 2016 read RBAC for Get-ExchangeServer, Get-MailboxDatabase,
@@ -138,6 +138,17 @@ param(
     [int]$LowFreeSpaceThresholdPercent = 15,
     [int]$MaxItems = 0
 )
+# Local lifecycle only; no collection or publication is performed by this guard.
+$smartM365LifecycleRoot=$PSScriptRoot
+while ($smartM365LifecycleRoot -and -not (Test-Path -LiteralPath (Join-Path $smartM365LifecycleRoot 'Modules/SmartM365.Core/SmartM365-InventoryLifecycle.ps1') -PathType Leaf)) {
+    $smartM365LifecycleParent=Split-Path $smartM365LifecycleRoot -Parent
+    if($smartM365LifecycleParent -eq $smartM365LifecycleRoot){break}
+    $smartM365LifecycleRoot=$smartM365LifecycleParent
+}
+if(-not $smartM365LifecycleRoot){throw 'SmartM365 lifecycle support is missing; update the complete runtime.'}
+. (Join-Path $smartM365LifecycleRoot 'Modules/SmartM365.Core/SmartM365-InventoryLifecycle.ps1')
+$smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -RequireReturn
+try {
 if ($PSBoundParameters.ContainsKey('MaxItems') -and $MaxItems -gt 0) {
     $global:SmartM365MaxItems = [int]$MaxItems
     $global:SmartM365TestMaxItems = [int]$MaxItems
@@ -176,7 +187,7 @@ $tenantContextPath = & {
 . $tenantContextPath
 
 $ScriptName = "SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory"
-$ScriptVersion = "1.6.9"
+$ScriptVersion = "1.6.10"
 $RunId = (Get-Date).ToString("yyyyMMdd-HHmmss")
 
 $script:SmartM365EffectiveConfig = Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot
@@ -281,7 +292,7 @@ function Write-Log {
 
 function Stop-ServersAndStorageTranscriptSafely {
     if (-not $script:TranscriptStarted) { return }
-    try { Stop-Transcript | Out-Null } catch {}
+    try { Stop-SmartM365RunTranscript | Out-Null } catch {}
     $script:TranscriptStarted = $false
 }
 
@@ -393,7 +404,7 @@ function Import-SmartM365CoreModule {
 
         foreach ($modulePath in $moduleCandidates) {
             if (Test-Path -LiteralPath $modulePath) {
-                $minimumVersion = if ($modulePath -like '*WindowsPowerShell5*') { '1.0.50' } else { '1.0.72' }
+                $minimumVersion = if ($modulePath -like '*WindowsPowerShell5*') { '1.0.57' } else { '1.0.87' }
                 Import-Module -Name $modulePath -MinimumVersion $minimumVersion -Prefix Core -ErrorAction Stop
                 return
             }
@@ -1711,7 +1722,7 @@ $script:CompletionStatus = 'Auto'
 try {
     Ensure-Directory -Path $OutputFolder
     Ensure-Directory -Path $LogFolder
-    Start-Transcript -Path $TranscriptFile -Append | Out-Null
+    Start-SmartM365RunTranscript -Path $TranscriptFile -Append | Out-Null
     $script:TranscriptStarted = $true
     Write-Log "Starting $ScriptName v$ScriptVersion. RunId: $RunId"
     Write-Log "Output folder: $OutputFolder"
@@ -1723,8 +1734,8 @@ try {
         $completionStatus = if ($script:ServersAndStorageWarningCount -gt 0) { 'CompletedWithWarnings' } else { 'Success' }
         $script:CompletionStatus = $completionStatus
         Complete-ServersAndStorageRun -Status $completionStatus -Started $StartTime -ErrorMessage $null
-        if ($completionStatus -eq 'CompletedWithWarnings') { exit 3 }
-        return
+        if ($completionStatus -eq 'CompletedWithWarnings') { $smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; $smartM365RunGuard.ExitCode=(3); exit $smartM365RunGuard.ExitCode }
+        $smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; return
     }
     Write-Log "Collection method: WMI/DCOM only"
 
@@ -1972,9 +1983,14 @@ try {
     $completionStatus = if ($script:ServersAndStorageWarningCount -gt 0) { 'CompletedWithWarnings' } else { 'Success' }
     $script:CompletionStatus = $completionStatus
     Complete-ServersAndStorageRun -Status $completionStatus -Started $StartTime -ErrorMessage $null
-    if ($completionStatus -eq 'CompletedWithWarnings') { exit 3 }
+    if ($completionStatus -eq 'CompletedWithWarnings') { $smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; $smartM365RunGuard.ExitCode=(3); exit $smartM365RunGuard.ExitCode }
+
+    $smartM365RunGuard.ReachedTerminal=$true
 }
 catch {
+    if ($_.Exception -is [Management.Automation.PipelineStoppedException] -or $_.Exception -is [OperationCanceledException]) { throw }
+    $smartM365RunGuard.ErrorRecord=$_
+
     $script:CompletionStatus = 'Failed'
     $message = $_.Exception.Message
     try { Write-Log -Level "ERROR" -Message $message } catch {}
@@ -1982,13 +1998,26 @@ catch {
     throw
 }
 finally {
+    $smartM365RunGuard.InCleanup=$true
+
     Write-SmartM365CompletionBanner -Status $script:CompletionStatus -ScriptName $ScriptName -StartedAt $StartTime -WarningCount $script:ServersAndStorageWarningCount -ErrorCount $script:ServersAndStorageErrorCount
 }
+    $smartM365RunGuard.ReachedTerminal=$true
+    $smartM365RunGuard.ReturnedNormally=$true
+} catch {
+    if ($_.Exception -isnot [Management.Automation.PipelineStoppedException] -and $_.Exception -isnot [OperationCanceledException]) { $smartM365RunGuard.ErrorRecord=$_ }
+    throw
+} finally {
+    Complete-SmartM365InventoryRun -State $smartM365RunGuard
+    if($smartM365RunGuard.ExitCode -eq 130){exit 130}
+}
+if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
+
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDKXk5G/ujGKsNZ
-# KWAsa7dJ5QcSuZeEBk1fPC7hK9ih4qCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB6gWRpBQmBkQi8
+# 3pgT1ns2rBI3YxQsc19dj4IVuh9s5qCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -2121,31 +2150,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIHHzsv/ctARpjsZ8Sd5ljaE1uba2Ly3/IifeqP4OAvRVMA0GCSqG
-# SIb3DQEBAQUABIIBgJ7ceRQCGAQKUzUtR/DNPI8Z4qqkjojQdWVGddAMvHVKhjZg
-# rlLvd6h/AAt7JUAgTHh18A/dn86CYB9zKfyEmLXb5UviUHC38bdJwE9gTuYc0D9f
-# PZUl0KKorcFUkL3pTVGc4BkvWIp9onfBYdO4givKZGooVnyCJtWEdpYii1Du7Ho2
-# BQCJCt7MyrvEAfRvvXkptlrvRPwjmywHw99X5QSLP/SdrpXvMQvfULv++qoLdCm+
-# 3oIeGU3Ht1uCchsiXpClXTu4nvqwkaA+e9Al+qldmvFpxG2L/IlZEMv7YXHABdmL
-# yyERrVwxX/OUCvn0OMK4w2v8HDTMsDs0/RXzq8NZXcxg4ASISkXP5lgc7mWXWPSZ
-# 8ehXEXsGOEghBsWxingItUhuj6Y8jDRNTyMad40Y+ftisDpuQS9yU9jkqvyBhEiR
-# zC0WOp/CbWY/qxiiDI18cGb8bRidufjfvUu6kd/YPEMSgV5KO1XglfPLLN1iLB1Q
-# eUjD4VwnzOBkOK1PpaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIBgzQJ2FNYNtbdrgdD2BnkGUNEr1MvV+Mn48IE3jn5npMA0GCSqG
+# SIb3DQEBAQUABIIBgH9repxgubIfHCSFlogkj8ziiBchk73C0JPt2j8qTbT/3z94
+# uxWe4OiDsklGSo1xZppQ8dNbxZa0+VDI7iIeOf50wuO6rm5UdMa4SIcwRTfgIEoT
+# TGz4Iqf3In1xNplkvqyZIWDvIN1lDInApXzCvu7KqpFlw3BtxZfC/JtDN9F/9nl4
+# Ld6WgkEsz0KN2gnxzdwrPSdpXel8gokXQO5DkI20TbYExRdvYfChH//OxPkOQVGD
+# c8Eby9KlYkoGmFIv7Dq+rXIycFqtPghl4b1fA4mEASz6zs6b3GSA7HrnFJfIYO0+
+# uZQkDhtMqMc1cASL55Cn/z4ynUAYPMeHrf7eXFl6eKaWdD9orru1A5zRwoqaDEeS
+# zXKks9i59pjCP7eik+S0iXjkoUrQdym4Y39l9kvrkrkwK4KLkyRZkKCnO4755S++
+# fjnX4XAsA8ZKoCzymslKG+SsnRqVXn2x1TOQ6+OeWN2jHMkLHiZsFf7PSqKk1vaj
+# vCQUHG2iORbf0a5oIaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDkwNzMw
-# MzdaMC8GCSqGSIb3DQEJBDEiBCA4s6L3Qmvy9U8yWwMwbFs1eoxwv2C5Fc8qqCQb
-# NdXDeDANBgkqhkiG9w0BAQEFAASCAgCrF8KgeBJBeUrRfX33MwyDoIwFHxh4AG+o
-# aOuP29J74z38aGEGAepkeASGUNSZ4h1YAvuugWuyAmEQmSGR2Z64laZ0qdxH1e5Z
-# 4qXUHK4oBVJV9IIvUElz0CZJvab6TXRtgK7CaoW/6j0KfNp/EOXhzI8uXOYhQ76L
-# goHDYfoE6iOjS8xNHQihZoP3iViHF/BSLOGqu3h38QpzxjvBUBukponGBopYgfDS
-# bAHkeBH9JwOUSqdgAIeHbc843p1mr2i3aWweJh4c7TycMj7T/mrmFyVlYVyVaD0g
-# lY2A/fUsV4CIqaPhs2nowD93GmxmEqQW7Og6j/ZlOhAydl6W45n04SmDWIcj2r0D
-# lzVMXIVCuz1Spr0WGASkMeaOoifnRp+BmWj68MOYaHWLlUqUP4qcO4Dq/YtGFd05
-# /EdCtU5BpGNuFyNZv8i8/SMYUdFGExtcv5DUt3OZjYd3DMfWOuCcDj8HZyvmM31d
-# j8YOxeMMUKwbQq9gErehzaRXp834nr8/T9D9Mwi2nRXnrGZlTRJ/1arqCX6DdyTT
-# LoPDWZIrB4+UqBhhP9ycu/aB9f4pBDPS4kybRFXOd6gFdKvbyRfG9/trQiVZS2fy
-# oDgGdCNyC9Ms+hjLon8PhkF8MOUa4mjxuBSk40OIhbR6KuJafk6OM8MZPXRZ2G5Z
-# 2pTuwxODeQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTQxNTMw
+# MjFaMC8GCSqGSIb3DQEJBDEiBCARrer8swviHaYJ9DmGvjdJhA4QmaIGRGrqNLKY
+# p826DTANBgkqhkiG9w0BAQEFAASCAgAg6qvoSnXU9AohZU6wGor2ZOH1qbO7o1Dj
+# 7tfv8F9ucLTaxrITM/W2OLXIZdcJv0IFwqEoIs5jMCft5uBzfE6pMfBJ+xmUCeMH
+# 370TN0LRNX1yI896xMqvtZ6xf0t3kwOC2sijMMwfgXPDotwPK8yxYwyTGT5VTazA
+# uOGujiv0TC8VbdQzvcPL39m+3ZilVaozgNWr/R68nZyxWJAC3HK9UxsUGXKENepN
+# VmZAlVhY6hiWGYxC4RjzlAqo49h1Z+lsZIabzHbMydDI4ie/xviqQdhpjFlQbIze
+# oLSIIrPEV3UbXXMBGc62N9PtMnMZhvsAUg4NVsegEksVj+E9upw1IqUX6o7c9SsB
+# 2CL4x/HpPrY3hmlyOAaVjzWxIHgq2i09hGz5QXlApn4nWSWqQmxG0E5FztP/gVx0
+# F4npWUQj4XFwBww7FBf0dw/+GP5CIGlpKs1S7AwZ9ihG4n8rjecH52KkTXyIo7eF
+# HcCrR2rzsqmpV3+NvKV6bl8wyNdUIHffn+rw5eK0PTna9TXX8ioqSHsH65p8asH+
+# 7fadxxDpqYE0gKDKsWiW8AGLoFsO8Q7sqoRYQn5LxTzR/Mh6REGiMSgj8tTrieE9
+# CPZw+KsSSRyP03QpJRCSndoKhbPttiydcHfiT9UkOTXS0z7Jlu1X0nfQ985VBXAv
+# u8vqMbSi+A==
 # SIG # End signature block
