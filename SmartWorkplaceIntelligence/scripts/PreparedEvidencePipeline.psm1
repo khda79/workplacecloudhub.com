@@ -140,7 +140,7 @@ function Add-PreparedOptionalSourceIssue {
     Write-Warning "Optional monitoring unavailable: $Relative ($Phase): $Reason. Other evidence can continue."
 }
 
-function Remove-PreparedMappingWorkbooks([string]$WorkRoot, [string]$MappingRoot) {
+function Remove-PreparedMappingWorkbooks([Alias('DataRoot')][string]$WorkRoot, [string]$MappingRoot) {
     $relative = [IO.Path]::GetRelativePath([IO.Path]::GetFullPath($WorkRoot),[IO.Path]::GetFullPath($MappingRoot)).Replace('\','/')
     if ($relative -notmatch '^mappings/[a-f0-9]{32}$') { throw 'Mapping cleanup requires the exact run-owned download folder.' }
     Remove-PreparedOwnedPath $WorkRoot $relative
@@ -179,14 +179,24 @@ function Remove-PreparedObsoleteBatches([string]$OutputRoot, $Pointer) {
 
 function Receive-PreparedMappingWorkbooks {
     [CmdletBinding()]
-    param([Parameter(Mandatory)][string]$WorkRoot, [Parameter(Mandatory)][scriptblock]$DownloadFile)
-    $folder = Join-Path ([IO.Path]::GetFullPath($WorkRoot)) ('mappings/'+[guid]::NewGuid().ToString('N'))
-    New-Item -ItemType Directory -Path $folder -Force | Out-Null
+    param([Parameter(Mandatory)][string]$DataRoot, [Parameter(Mandatory)][scriptblock]$DownloadFile)
+    $data = (Resolve-Path -LiteralPath $DataRoot -ErrorAction Stop).ProviderPath
+    if (-not (Test-Path -LiteralPath $data -PathType Container)) { throw 'Mapping DataRoot must be an existing directory.' }
+    $mappingParent=Get-Item -LiteralPath (Join-Path $data 'mappings') -Force -ErrorAction SilentlyContinue
+    if ($mappingParent -and (-not $mappingParent.PSIsContainer -or ($mappingParent.Attributes -band [IO.FileAttributes]::ReparsePoint))) { throw 'Mapping download parent must be an ordinary directory.' }
+    # Serialize replacement with mapping downloads and the pipeline's raw-source capture.
+    $lock = [IO.File]::Open((Join-Path $data '.prepared-source.lock'),'OpenOrCreate','ReadWrite','None')
+    $folder = Get-PreparedChildPath $data ('mappings/'+[guid]::NewGuid().ToString('N'))
+    $committed = [Collections.Generic.List[string]]::new()
+    $previous = @{}
+    $hashes = @{}
     $required = [ordered]@{
         'SmartWorkplaceIntelligence-PersonaClassification.xlsx' = @('Personas','Rules','Exclusions')
         'SmartWorkplaceIntelligence-SiteClassification.xlsx' = @('Settings','SiteTypes','Sites')
     }
-    try { foreach ($name in $required.Keys) {
+    try {
+    New-Item -ItemType Directory -Path $folder -Force | Out-Null
+    foreach ($name in $required.Keys) {
         $path = Join-Path $folder $name
         $receipt = & $DownloadFile $path $name
         if (-not $receipt -or -not (Test-Path -LiteralPath $path -PathType Leaf) -or (Get-Item -LiteralPath $path).Length -eq 0) {
@@ -210,12 +220,66 @@ function Receive-PreparedMappingWorkbooks {
             foreach ($sheet in $required[$name]) { if ($sheet -notin $sheets) { throw "Required worksheet missing: $sheet" } }
         } catch { throw "Invalid SharePoint mapping workbook '$name': $($_.Exception.Message)" }
         finally { if ($archive) { $archive.Dispose() } }
-    } } catch {
-        try { Remove-PreparedMappingWorkbooks $WorkRoot $folder } catch { Write-Warning "Mapping cleanup failed: $($_.Exception.Message)" }
-        throw
+        $hashes[$name] = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash
     }
-    # Return only after both files passed; a partial download never reaches source planning.
+    # Prepare both replacements and rollback copies before touching either retained workbook.
+    $promotion = Join-Path $folder 'promotion'
+    $rollback = Join-Path $folder 'rollback'
+    New-Item -ItemType Directory -Path $promotion,$rollback -Force | Out-Null
+    foreach ($name in $required.Keys) {
+        $target = Get-PreparedChildPath $data $name
+        $existing = Get-Item -LiteralPath $target -Force -ErrorAction SilentlyContinue
+        if ($existing -and ($existing.PSIsContainer -or ($existing.Attributes -band [IO.FileAttributes]::ReparsePoint))) { throw "Mapping replacement refused nonregular target: $target" }
+        $previous[$name] = if ($existing) { (Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash } else { $null }
+        if ($existing) {
+            $backup = Join-Path $rollback $name
+            Copy-Item -LiteralPath $target -Destination $backup -ErrorAction Stop
+            if ((Get-FileHash -LiteralPath $backup).Hash -ne $previous[$name]) { throw "Mapping rollback copy changed: $name" }
+        }
+        $replacement = Join-Path $promotion $name
+        Copy-Item -LiteralPath (Join-Path $folder $name) -Destination $replacement -ErrorAction Stop
+        if ((Get-FileHash -LiteralPath $replacement).Hash -ne $hashes[$name]) { throw "Validated mapping changed before replacement: $name" }
+    }
+    try {
+        foreach ($name in $required.Keys) {
+            $target = Get-PreparedChildPath $data $name
+            if ($previous[$name]) {
+                if ((Get-FileHash -LiteralPath $target).Hash -ne $previous[$name]) { throw "Retained mapping changed before replacement: $name" }
+            } elseif (Test-Path -LiteralPath $target) { throw "Retained mapping appeared before replacement: $name" }
+            Move-PreparedFile -Source (Join-Path $promotion $name) -Destination $target -Overwrite
+            $committed.Add($name)
+            if ((Get-FileHash -LiteralPath $target).Hash -ne $hashes[$name]) { throw "Retained mapping hash mismatch: $name" }
+        }
+    } catch {
+        $replacementFailure = $_
+        try {
+            for ($index=$committed.Count-1; $index -ge 0; $index--) {
+                $name=$committed[$index]; $target=Get-PreparedChildPath $data $name
+                if ($previous[$name]) {
+                    Move-PreparedFile -Source (Join-Path $rollback $name) -Destination $target -Overwrite
+                    if ((Get-FileHash -LiteralPath $target).Hash -ne $previous[$name]) { throw "Mapping rollback hash mismatch: $name" }
+                } else { Remove-PreparedOwnedPath $data $name }
+            }
+        } catch {
+            $recovery=[InvalidOperationException]::new("Mapping replacement and rollback failed. Recovery files retained at $folder. $($_.Exception.Message)",$replacementFailure.Exception)
+            $recovery.Data['KeepMappingRecovery']=$true
+            throw $recovery
+        }
+        throw $replacementFailure
+    }
+    Remove-PreparedOwnedPath $folder 'promotion'
+    Remove-PreparedOwnedPath $folder 'rollback'
+    # Retained root files survive cleanup. This run consumes its immutable DATA pair.
     $folder
+    } catch {
+        $failure=$_
+        if (-not $failure.Exception.Data['KeepMappingRecovery']) {
+            try { Remove-PreparedMappingWorkbooks -DataRoot $data -MappingRoot $folder } catch { Write-Warning "Mapping cleanup failed: $($_.Exception.Message)" }
+        }
+        throw $failure
+    } finally {
+        $lock.Dispose()
+    }
 }
 
 function Get-PreparedSourcePlan {
@@ -616,8 +680,8 @@ Export-ModuleMember -Function Get-PreparedSourcePlan, Invoke-PreparedEvidencePip
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCmMjBn9C2QvMLJ
-# ZFwpB7UEZK7wbHnECeaqPw5KqXXMtaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAcMul8GysZl05l
+# YNaYXEX/SZGys3Ba/yP/AnCb8vVdyqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -750,31 +814,31 @@ Export-ModuleMember -Function Get-PreparedSourcePlan, Invoke-PreparedEvidencePip
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEINKe3cpqBgK9jo2GafsC5yqbssCtVr9jjbAJ1aMYCIaqMA0GCSqG
-# SIb3DQEBAQUABIIBgIHYsHbczlR64RFJ7RY4GTlHdrGDXvDZR77vLg1zTRtCo6dK
-# aOjL9pSDaTTYxH/m1xo3oHG5tSFGPhz1bMUqFpZUVQXlopDibHXfHtEji5d0GDyC
-# nKufmDEc7n5niciMz9KRV14poZMrEvmIjW7gZUSJFSXyIRDiOrBKMbc3TVgZg/Bw
-# N5jBGwrjnYECLWWTu3PZwHd8cIUNzwhs0b2s95fuTdZWec2knFBlvJNqdRqxu2Xb
-# 2sTZxjxVsZ3jkscTdPhdSO3OjE85pDlfPeOwLAO5r8g+5Roa0Npxf1Ix1HPDYVxT
-# qxqA/jORKd7vC5D0dMZ+Wp8j5usCYCD3Ako/1ErewcFQuZLNPsG0fg3zW6WKCuSa
-# amo68YL2RhBeK1l8Dd3a+yIt18UAKtYBE5EbxcIlkug67MRrQ9sNmbAqVf47EA88
-# v8Gkk/SULZYTyhOqPXE4gNqGUrwpmasoSm5d8mRE7expFoFQnXLtT3tcP2Ss4ot8
-# pj122m/riM7Uv0+ZHqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIMZdMLU5mna6vLsHq+hGc06BGx1SiO24JzFyAxHmKyCrMA0GCSqG
+# SIb3DQEBAQUABIIBgIsH5TCMtDTQT4QpXH+I05fnkolXcEMOBaZIojMGSnGgatVD
+# XgN+nBn4haKzM3A1Ul4Liogan8iHT3DNJceBrsTWTNqdY9jX43R966yYnQXbN7KT
+# i8Y+v4gwe0nBBcxxpqd3sxEoRAdBCUeka+dmkws7j3nx1LsbauyYCkd9lyYwdRXR
+# QBbxdaiCbLw9KhDnq3dO9UgbRtGMNSuOuCYyYF1GLXqk0qtgwEFMo3AN1UoA+5hS
+# /0PV12nM1SSK0l3xSPxvF/xwirADGpi1qD/lQN7Nt1OD+wC9wPTEoeBIxir7Jjlm
+# tcqsMWhP+bK4/n6WVTGSoRulk6i67cZ6QEneGuRWMa0veViolFKpnVqnype0Z1O3
+# 6lqwqk98GCuF1337PLHiUoZINBBX5vTrCPounX247hepZC1eZ/rG13mkHlSbrikG
+# 0RLr/d9KPSqFjXssIzq4JWpMnPAADZpL2jYVIx1T9ogoo7ErEwXN/1Z9ejFZFITm
+# MgU3aXtDtryQ1/j1NKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTMyMjQy
-# MTRaMC8GCSqGSIb3DQEJBDEiBCAiQ0gk/a8CAfcaVNsEpidGrD3OMyMB4y2cu9ST
-# ouL3YjANBgkqhkiG9w0BAQEFAASCAgBeu4Y/gpLM7ppU4+6iz2e6zuVhSx3I61JT
-# 0KIR9wYHPqEJknsRy+yd1tFUcKJsOoHYU9uR18tEsnsSlkq5S4cv7Wf3xPqQHBYO
-# Lx8z2prpyUdBKtDC9cqgOIpm+EyojtQPtWRQ6kwuvws7+tPMsy1Ig29JjtkWzpYS
-# XXwGzKACcuQyrc8eil6Z/UewwU/7vbITUcXfWATf1PVWQaOznboKl4FNbf+53Glz
-# N6OMZXmMvRpb73+lyKiDDGsyhsf/BMyKMQBKKpkWfFMQ5z8958QbPB4B/+wW0rIk
-# 9q1mwgMJxyVLgdUTo0/KOp7gW7XSRAsGBNPyQwBmmVo9j/By2t/Lp/pUjPcEtvdn
-# 3DLSWDTbMLlLBZKHDMK0U0poZikDmG/0JOYQB72pfFAdnenOto1rkl+dGG1wUsTZ
-# Pde3TSLnMcH0QUvPRiLYP+ltzIBtxwa/FRCUniPmsAPYgs0L+4t6FY8fQuBcW84Q
-# 12qkV+/5syW8Jhwc1kAHo7Ae8WW8zn7rT8ij1DzqpvyXcdwBOsHTMDjvOuu/aDF3
-# KNLrSmSVFrZ23tXcivzpTm7xEJHCuhgAZz9spBvM4ioZkFIpuSpl5VwRFPs2NHWp
-# 1OqabaoiQ1GQVQdGDcSLa2C7841AmR7OXkYrMLfkbScvaxQekUOCXzix86evPbN3
-# YNGh1rRiEA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTQxMjIz
+# MzNaMC8GCSqGSIb3DQEJBDEiBCARw3LVTD5LjcoTPku+OEeH8T++4TNuQb/xRV1p
+# LB65VzANBgkqhkiG9w0BAQEFAASCAgA3kaDmPotwiaGpPdIKsTQ8XSC58Y62tzHW
+# BmvXaZLL8woYfoA/LZ0kpv05GQORACBu9R1HqW1LdmdcaGu3L1axe9m51BRXiNCR
+# U0JSQ7HHnSjY2kVNXk8gMrq1pMmBNGLqIaGS7GM0ykUeQaxhUa7UpRUpXcVbZKxV
+# 6YwjYlOzrkyp4zqou80Z3h8/J3wndxWvvLLswu/lCtkeeb+SYaLmILtcRBGQ4TDd
+# HVg6kQG+BNZAFZnNeaj1KAqu+j+HoGaapvWfFQVnVFm7TRMpI6+dbzYHfAHh7Jsr
+# iTgCtqMIfrY12XftM3rqiFgvvGdYvA6m97bbLuAcXxTRPwzgmMiczjhlTmi3NYTF
+# uu03Sxc7Q1gRgUSD+A5QSjJwW38YousPzvarfuIAkkZR8TQiARGlDG1hKLXcoYCZ
+# QHlVjdxbr5U7T28QF873/tIwDBnBBUfD28nMBk/ZKywFHgmMG6cWPScRf9QT1412
+# GpmxvKBrt6Vtx/8EIBVkDCWOtsgqAbs/wgF8kAbojRtuubsOLixtwRT9Z70CI8ex
+# CsFFgq+/ITdki1t1Qc8oVbEk7M1Op/G6pR+93If/VMXnQYjqsEZrOyQb5aCv3Y4Q
+# llFtDn/rx6Pb6jRZqkpWPCLUNE/LzYXYPL+GQYHA1VoL1/nuXHJt+XLbJtin/epr
+# lyAq/8EupA==
 # SIG # End signature block

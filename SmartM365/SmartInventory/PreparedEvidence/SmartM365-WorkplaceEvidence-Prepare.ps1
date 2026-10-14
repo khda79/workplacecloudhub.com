@@ -2,7 +2,7 @@
 .SYNOPSIS
     Prepare a validated, versioned SmartWorkplaceIntelligence batch after raw collectors.
 .VERSION
-    0.1.17
+    0.1.18
 .NOTES
     PowerShell 7. SharePoint mapping reads use the tenant configuration unless Offline.
     Deployment must include the sibling SmartWorkplaceIntelligence/scripts, config and reference folders.
@@ -194,8 +194,8 @@ try {
             param($destination, $name)
             SmartM365.Core\Invoke-SmartM365SharePointFileDownload -LocalFilePath $destination -SharePointRelativePath $name -Force @mappingConnection
         }.GetNewClosure()
-        $mappingRoot = Receive-PreparedMappingWorkbooks -WorkRoot $work -DownloadFile $downloadMapping
-        WriteLog -Message 'Both classification workbooks downloaded and structurally validated from configured SharePoint source.' -Level INFO
+        $mappingRoot = Receive-PreparedMappingWorkbooks -DataRoot $data -DownloadFile $downloadMapping
+        WriteLog -Message "Both classification workbooks downloaded, validated and retained in DATA: $data. Previous copies replaced; this run uses its isolated validated pair." -Level INFO
     }
     if ($WorkforceDiagnostic) {
         $phase='Workforce memory diagnostic'
@@ -251,7 +251,7 @@ try {
         }
     } else { Write-Host ('[{0:yyyy-MM-dd HH:mm:ss}] {1}' -f (Get-Date),$_.Exception.Message) }
 } finally {
-    if ($mappingRoot) { try { Remove-PreparedMappingWorkbooks -WorkRoot $work -MappingRoot $mappingRoot } catch { Write-Warning "Downloaded mapping cleanup incomplete: $($_.Exception.Message)" } }
+    if ($mappingRoot) { try { Remove-PreparedMappingWorkbooks -DataRoot $data -MappingRoot $mappingRoot } catch { Write-Warning "Downloaded mapping cleanup incomplete: $($_.Exception.Message)" } }
     if ($transcriptStarted) { try { Stop-Transcript | Out-Null; Update-SmartM365TimestampedTranscript -Path $global:logTranscriptFile } catch { Write-Warning "Transcript finalization failed: $($_.Exception.Message)" } }
     if ($coreLoaded) { Complete-SmartM365ExecutionContext -Status $(if($failure){'Failed'}else{'Success'}) -ErrorRecord $failure -FailureStage $(if($failure){$phase}else{''}) }
     else { Write-SmartM365CompletionBanner -Status 'Failed' }
@@ -261,8 +261,8 @@ if ($failure) { exit 1 }
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBfZC2uOwqsgjXq
-# WUE0mI8FxMWl+umEJrHNWKuO92C0BKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCBSlbgRu/amTp4
+# 7k0Q5gRCs+VVCSTAdWl5RTJ9MQClsaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -395,31 +395,31 @@ if ($failure) { exit 1 }
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIB05KQ4Itou9K27VVjc1/8zjWu48t737qcVmDG0zEmMKMA0GCSqG
-# SIb3DQEBAQUABIIBgE75CyQ6Gwm9u4xpQzhfPWd5F7FebP/l5nui8FiMNOyIK1Qn
-# qbF2fVjcY0nsfUMQiyfauwdGfiOIapyw4u3qsiFNYnNqsV316hLYdmzZqVoWg3Tk
-# VbyWsjGRgM4Kb7OIxbEvglkQe0JCr0GvoFoHMnoHjOmrqsaKawDO6vFGwhmImS9L
-# dd8Dco27GYjHOcDpUICHd9T0Z/Iu3yOtIiO0fJoypEH2p/K/VbLdA8RyZzMMtrAw
-# gwB+iXUw9jcuforwKlrj9ZPijmhRiKRFXiiHV92FqjNjSRPZr4BvNyCAkHDLsN3G
-# oFkFOXZiBBNZvRIXKZ6WqVLslspqhgI/p8n/X/m2pldl0FoTO5HLS2jeMlgDHLso
-# 5kgjWXx5rHSm0VMfP0mQRSCzmor23dHnLGaGVToxzY2/FqrxnLzaNJQkM7QYTdEy
-# 3vZYBfUbhCAAV5wnFvC3C2cU1jTrBDVD+Lac644U/l6Geq5ExPzg+S9LnPKL/BPm
-# c6QuSdlY2jxfLxTrQaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIHYcx0QQBdFMPx/FmwHE5TIRZ+/+xCGSgZfol2vvgQGiMA0GCSqG
+# SIb3DQEBAQUABIIBgBXrhpEi70G/X9VKtjpyqOZlc/uIsCEkkEl6dry7XdMXraOS
+# HlQwdCKiufsr49rTpUTHavAwIXo5zkngNp32nEfpNjdq1A8iH1op2IClvd0UoEGc
+# ollZyKHRFcbhkj1mmke39N+zpHTC9PkuNrUZDsB6x6F8DzC1VcFrN7r9S5ubw/q3
+# c5rBeOcYWHzyMIQU91QuLgkRGJfv9WA6lNFvSh5lMCj7r91XYCKFBlWRGv4k2jCa
+# gH83Dfh3dVG0fkwCGWkodPLfrzv00a4wvFiwiWroki48Js6unNp+efvP4VljKfQZ
+# OhLROG4qOh34Pl3DXwOq4O6I5R/OfeFIu5T7mTe1L0j5orkni4m6mvZAFHq5NBDz
+# eGFyYKE2kiaEyK/vbdmIaI0fUvHk/0udJLCZHvoF1wvcBdCeY3otYvSRL/f52ZNQ
+# tduWNBe7ybTudqXJA6A+0+hJRbSPQgEBTJnmKkJGbQ6rJq0rj4Y49sNxWZwyr8TS
+# gsoxCAxva9YuZ4C3E6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTQwODMw
-# MjVaMC8GCSqGSIb3DQEJBDEiBCCbTDn/d7W6QCbsJr4Ozqjjo1faRqMXYky3ikfF
-# l6/VDTANBgkqhkiG9w0BAQEFAASCAgAfixqZRbwPXZ9rK6KkTENtYq81Upwv9Bxl
-# 1Oj2lYfpdJHLLz+c/uu5VkkKbW7Jb5osiM4lnuAKNg/NyNYHgFO0aKdsXrfNLl+N
-# 7mWK/SapwX8RwU9k/qxrl84prRt6eCiAIgY8hglsaZzwjoivPA8ZGOTcpyPYBT6h
-# 7bfwsk+JFRa1MVf+Z1rVm6tyA9MKBSzwFHE2phw4ItX7YCRpuhkfqkKrASz/3oZh
-# d/n+DZup4ts/rYn6TTtumh2BM3ayQNOL0MW0yQTBozuu5NlBscgk1MwFPsvLGh1O
-# HWW9xKoePedWbVAiEtSqIUM7JBkGJ2K8BcS7cLRz9e7OLjVMdW/u+G9H6IAjjbAb
-# lg+qTphhEIgLJAl9php35/Wn7NKsFzHMhF1sXg+U1PCgopcjQphv6XRKRWNLhwmd
-# +dSUFRiYUSloe4BVrCxBfSc+NeEjIYIMvFGg/YBxvN6NFgR7ihcUhZ0hiYJbUY8p
-# m2aRb2P0C0lc/Ws0LDeDvSABRHZN5o+ODEIEQyx0ixWm8C7BHD1fOTVn7jPKMCGN
-# Q1Ww48jDiVsUARAM9Zi26JbmOWxAiqhYYyYfGqXz00LnAEc0sf1UpNEusKvRdcgv
-# sRY9//fBWnKn/ySquDaX8H1as21chWQ9QDoZn7y0esub69K2HzfxsaI6LLZMo0a5
-# deR8d5Cb1w==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTQxMjIz
+# MzRaMC8GCSqGSIb3DQEJBDEiBCCm5PgmEUHsC8wAl+Wy78595sNtGcFUcL2XpRUK
+# 7bnDMzANBgkqhkiG9w0BAQEFAASCAgBmJDC8728etZ/Lr/mK03uRhPwNZxhngnDz
+# 7LtiVc1RkrNw3R88V4isKw+k2TJbQynq9CKs7tLFwaiakPgAqn+DTutG3DEw9HAc
+# OnNgwQ0jHUlppiT3f3+0tpOXoA6XNzGqNQEF21viJ6xlPMUCPTbuphbu9GezCaLW
+# ygiYMbgkufgqTXxGjjjf439ffqnhB6m6UNn3S7kXd2U+WZlqhLG/5PnM7Bg+kqsw
+# rLJfeBgA8HAnPUIdStIdk7efnqehuSdKOqejMV0Hh5RuN22vcdt7UStHyIjbWF8s
+# d+jGsUnSjNTMyKd4hHmJ1Lc3TCN6l8JBw2j5ExOt2B5QysJ0NSTGLWW2DwUPmlLZ
+# bYEWWhJSYg/rBwWiVodd3+MLjIJHnUxXJEUAbszaGvU6YlimWm+JdEK9RV2XwP+D
+# rWPfgNLal9MZ3P3zNYsh9CXGMJkgyc/khAesKS1EqFzH1XdkhWBzUFUzOtKWm5s1
+# L5G1EGyAJelXx0uCuB+nG2yAghOWo0WrNiJfWx0pOUIx23ZaLth2gl2TMoPvXocm
+# DqWDiQY2gd2JD622KknhUpdixFdfDuNCFH/XPrvBA1NybrsFk+u99bDT+orj2s9Z
+# F0dk8pr7mQIvP12ZDf5AVdk/PrPWSQ236SnQrDELn9eMyE/tHMNVxHTp4YvAZHy0
+# JOjOBgQg1A==
 # SIG # End signature block

@@ -2,10 +2,13 @@
 param([Parameter(Mandatory)][string]$TestRoot)
 # Synthetic XLSX metadata and download callbacks only; no Graph or SharePoint connection.
 $ErrorActionPreference='Stop'
+$script:checks=0
+function Check([bool]$Condition,[string]$Message){$script:checks++;if(-not $Condition){throw "Assertion failed: $Message"}}
 Import-Module (Join-Path $PSScriptRoot 'PreparedEvidencePipeline.psm1') -Force
 $root=Join-Path ([IO.Path]::GetFullPath($TestRoot)) ([guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $root -Force | Out-Null
 function Write-WorkbookFixture([string]$Path,[string[]]$Sheets) {
+    if (Test-Path -LiteralPath $Path) { Remove-Item -LiteralPath $Path -Force }
     $archive=[IO.Compression.ZipFile]::Open($Path,[IO.Compression.ZipArchiveMode]::Create)
     try {
         $entry=$archive.CreateEntry('xl/workbook.xml')
@@ -23,16 +26,34 @@ $site='SmartWorkplaceIntelligence-SiteClassification.xlsx'
 Write-WorkbookFixture (Join-Path $fixtures $persona) @('Personas','Rules','Exclusions')
 Write-WorkbookFixture (Join-Path $fixtures $site) @('Settings','SiteTypes','Sites')
 $download={param($destination,$name) Copy-Item -LiteralPath (Join-Path $fixtures $name) -Destination $destination; Get-Item -LiteralPath $destination}.GetNewClosure()
-$work=Join-Path $root 'scratch'
-$accepted=Receive-PreparedMappingWorkbooks -WorkRoot $work -DownloadFile $download
+$work=Join-Path $root 'data'
+New-Item -ItemType Directory -Path $work | Out-Null
+$accepted=Receive-PreparedMappingWorkbooks -DataRoot $work -DownloadFile $download
 if(@(Get-ChildItem -LiteralPath $accepted -File).Count -ne 2){throw 'Expected two downloaded workbooks'}
-$second=Receive-PreparedMappingWorkbooks -WorkRoot $work -DownloadFile $download
+$originalHashes=@{}
+foreach($name in @($persona,$site)){
+    $originalHashes[$name]=(Get-FileHash -LiteralPath (Join-Path $accepted $name)).Hash
+    Check ((Get-FileHash -LiteralPath (Join-Path $work $name)).Hash -eq $originalHashes[$name]) ('Retained DATA copy matches validated download '+$name)
+}
+Check ($accepted.StartsWith($work+[IO.Path]::DirectorySeparatorChar,[StringComparison]::OrdinalIgnoreCase)) 'Download staging lives below DATA, not WorkRoot/Temp'
+Write-WorkbookFixture (Join-Path $fixtures $persona) @('Personas','Rules','Exclusions','Revision2')
+Write-WorkbookFixture (Join-Path $fixtures $site) @('Settings','SiteTypes','Sites','Revision2')
+$second=Receive-PreparedMappingWorkbooks -DataRoot $work -DownloadFile $download
 if($accepted -eq $second){throw 'Run mappings must be isolated'}
+foreach($name in @($persona,$site)){
+    Check ((Get-FileHash -LiteralPath (Join-Path $work $name)).Hash -eq (Get-FileHash -LiteralPath (Join-Path $second $name)).Hash) ('Next run replaces retained copy '+$name)
+    Check ((Get-FileHash -LiteralPath (Join-Path $work $name)).Hash -ne $originalHashes[$name]) ('Retained revision changed '+$name)
+    Check ((Get-FileHash -LiteralPath (Join-Path $accepted $name)).Hash -eq $originalHashes[$name]) ('First run keeps its own immutable pair '+$name)
+}
 function Expect-Rejection([string]$Name,[scriptblock]$Download) {
+    $before=@{};foreach($file in @($persona,$site)){$before[$file]=(Get-FileHash -LiteralPath (Join-Path $work $file)).Hash}
+    $folderCount=@(Get-ChildItem -LiteralPath (Join-Path $work 'mappings') -Directory).Count
     $failed=$false
-    try {$null=Receive-PreparedMappingWorkbooks -WorkRoot $work -DownloadFile $Download} catch {$failed=$true}
+    try {$null=Receive-PreparedMappingWorkbooks -DataRoot $work -DownloadFile $Download} catch {$failed=$true}
     if(-not $failed){throw "Expected rejection: $Name"}
     if(@(Get-ChildItem -LiteralPath $accepted -File).Count -ne 2){throw 'Previous files changed'}
+    foreach($file in @($persona,$site)){Check ((Get-FileHash -LiteralPath (Join-Path $work $file)).Hash -eq $before[$file]) ('Failure preserves retained workbook '+$Name+'/'+$file)}
+    Check (@(Get-ChildItem -LiteralPath (Join-Path $work 'mappings') -Directory).Count -eq $folderCount) ('Failure removes only its intermediate folder '+$Name)
 }
 Expect-Rejection 'null receipt, even with previous cache' {param($destination,$name) $null}
 Expect-Rejection 'receipt without file' {param($destination,$name) $true}
@@ -46,7 +67,7 @@ Expect-Rejection 'second download failed' ({
     Copy-Item -LiteralPath (Join-Path $fixtures $name) -Destination $destination
     Get-Item -LiteralPath $destination
 }.GetNewClosure())
-$data=Join-Path $root 'data'
+$data=Join-Path $root 'source-selection'
 New-Item -ItemType Directory -Path $data | Out-Null
 # An unrelated raw-root workbook must never override the freshly downloaded mapping.
 [IO.File]::WriteAllText((Join-Path $data $persona),'stale fixture')
@@ -58,20 +79,92 @@ foreach($entry in $plan){
     if($entry.SourcePath -ne (Join-Path $accepted $entry.Relative)){throw 'Source plan used raw-root fallback'}
     if($entry.SHA256 -ne (Get-FileHash -LiteralPath $entry.SourcePath).Hash){throw 'Mapping provenance hash mismatch'}
 }
+# Simulate deterministic replacement errors without filesystem timing or any live service.
+$module=Get-Module PreparedEvidencePipeline
+$moveOriginal=& $module { (Get-Item Function:Move-PreparedFile).ScriptBlock }
+try {
+    & $module {param($siteName) $script:failMappingSite=$siteName
+        function script:Move-PreparedFile {param($Source,$Destination,[switch]$Overwrite)
+            if((Split-Path $Source -Parent) -like '*promotion' -and (Split-Path $Destination -Leaf) -eq $script:failMappingSite){throw 'Synthetic second mapping move failed'}
+            [IO.File]::Move($Source,$Destination,[bool]$Overwrite)
+        }
+    } $site
+    Write-WorkbookFixture (Join-Path $fixtures $persona) @('Personas','Rules','Exclusions','Revision3')
+    Write-WorkbookFixture (Join-Path $fixtures $site) @('Settings','SiteTypes','Sites','Revision3')
+    Expect-Rejection 'second replacement rolls back first' $download
+    $firstInstall=Join-Path $root 'first-install';New-Item -ItemType Directory -Path $firstInstall | Out-Null
+    $rejected=$false;try{$null=Receive-PreparedMappingWorkbooks -DataRoot $firstInstall -DownloadFile $download}catch{$rejected=$true}
+    Check $rejected 'Failed initial pair installation is rejected'
+    foreach($name in @($persona,$site)){Check (-not(Test-Path -LiteralPath (Join-Path $firstInstall $name))) ('Initial replacement failure leaves no partial retained pair '+$name)}
+} finally { & $module {param($original) Set-Item Function:script:Move-PreparedFile -Value $original} $moveOriginal }
+
+# A live capture lock refuses replacement before any download or workbook change.
+$captureLock=[IO.File]::Open((Join-Path $work '.prepared-source.lock'),'OpenOrCreate','ReadWrite','None')
+$blockedDownload=[pscustomobject]@{Called=$false}
+try {Expect-Rejection 'capture lock' ({param($destination,$name) $blockedDownload.Called=$true;throw 'Download callback must not be invoked'}.GetNewClosure())} finally {$captureLock.Dispose()}
+Check (-not $blockedDownload.Called) 'Capture lock rejects before download callback'
+$nested=[pscustomobject]@{Rejected=$false}
+$nestedDownload={param($destination,$name)
+    if(-not $nested.Rejected){try{$null=Receive-PreparedMappingWorkbooks -DataRoot $work -DownloadFile $download}catch{$nested.Rejected=$true}}
+    & $download $destination $name
+}.GetNewClosure()
+$third=Receive-PreparedMappingWorkbooks -DataRoot $work -DownloadFile $nestedDownload
+Check $nested.Rejected 'Concurrent nested mapping run refused'
+foreach($name in @($persona,$site)){Check ((Get-FileHash -LiteralPath (Join-Path $work $name)).Hash -eq (Get-FileHash -LiteralPath (Join-Path $third $name)).Hash) ('Concurrent attempt does not corrupt final pair '+$name)}
+# Successful online acquisition also installs both files when DATA has no prior pair.
+$fresh=Join-Path $root 'fresh-data';New-Item -ItemType Directory -Path $fresh | Out-Null
+$freshPair=Receive-PreparedMappingWorkbooks -DataRoot $fresh -DownloadFile $download
+Remove-PreparedMappingWorkbooks -DataRoot $fresh -MappingRoot $freshPair
+foreach($name in @($persona,$site)){Check (Test-Path -LiteralPath (Join-Path $fresh $name) -PathType Leaf) ('Persistent workbook survives first-run cleanup '+$name)}
+foreach($mapping in @($accepted,$second,$third)){Remove-PreparedMappingWorkbooks -DataRoot $work -MappingRoot $mapping}
+foreach($name in @($persona,$site)){Check ((Get-FileHash -LiteralPath (Join-Path $work $name)).Hash -eq (Get-FileHash -LiteralPath (Join-Path $fixtures $name)).Hash) ('Persistent workbook survives all run cleanup '+$name)}
+$cleanupRejected=$false;try{Remove-PreparedMappingWorkbooks -DataRoot $work -MappingRoot $work}catch{$cleanupRejected=$true}
+Check $cleanupRejected 'Mapping cleanup refuses DATA root'
+Check (@(Get-ChildItem -LiteralPath (Join-Path $work 'mappings') -Directory).Count -eq 0) 'No completed-run workbook history left in DATA'
+# If rollback itself fails, preserve recovery bytes and stop instead of deleting the backups.
+try {
+    & $module {param($siteName) $script:failMappingSite=$siteName
+        function script:Move-PreparedFile {param($Source,$Destination,[switch]$Overwrite)
+            if((Split-Path $Source -Parent) -like '*rollback' -or ((Split-Path $Source -Parent) -like '*promotion' -and (Split-Path $Destination -Leaf) -eq $script:failMappingSite)){throw 'Synthetic move/rollback failure'}
+            [IO.File]::Move($Source,$Destination,[bool]$Overwrite)
+        }
+    } $site
+    $prior=@{};foreach($name in @($persona,$site)){$prior[$name]=(Get-FileHash -LiteralPath (Join-Path $work $name)).Hash}
+    Write-WorkbookFixture (Join-Path $fixtures $persona) @('Personas','Rules','Exclusions','Revision4')
+    Write-WorkbookFixture (Join-Path $fixtures $site) @('Settings','SiteTypes','Sites','Revision4')
+    $recoveryFailure=$null;try{$null=Receive-PreparedMappingWorkbooks -DataRoot $work -DownloadFile $download}catch{$recoveryFailure=$_}
+    Check ($null -ne $recoveryFailure -and $recoveryFailure.Exception.Data['KeepMappingRecovery']) 'Failed rollback is explicitly fatal and retains recovery files'
+    $recoveryFolders=@(Get-ChildItem -LiteralPath (Join-Path $work 'mappings') -Directory)
+    Check ($recoveryFolders.Count -eq 1) 'Only failed rollback folder retained'
+    foreach($name in @($persona,$site)){
+        $backup=Join-Path $recoveryFolders[0].FullName ('rollback/'+$name)
+        Check ((Get-FileHash -LiteralPath $backup).Hash -eq $prior[$name]) ('Recovery backup preserves previous bytes '+$name)
+        # Restore synthetic fixtures only, proving the retained rollback bytes are usable.
+        Copy-Item -LiteralPath $backup -Destination (Join-Path $work $name) -Force
+        Check ((Get-FileHash -LiteralPath (Join-Path $work $name)).Hash -eq $prior[$name]) ('Synthetic recovery byte verification '+$name)
+    }
+    Remove-PreparedMappingWorkbooks -DataRoot $work -MappingRoot $recoveryFolders[0].FullName
+} finally { & $module {param($original) Set-Item Function:script:Move-PreparedFile -Value $original} $moveOriginal }
 # Check shared CSV-to-DATA root normalization with neutral fixture values.
 $repo=Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 $tokens=$null;$errors=$null
+$entryAst=[Management.Automation.Language.Parser]::ParseFile((Join-Path $repo 'SmartM365/SmartInventory/PreparedEvidence/SmartM365-WorkplaceEvidence-Prepare.ps1'),[ref]$tokens,[ref]$errors)
+Check ($errors.Count -eq 0) 'Preparation entry point parses without execution'
+$mappingCalls=@($entryAst.FindAll({param($node) $node -is [Management.Automation.Language.CommandAst] -and $node.GetCommandName() -eq 'Receive-PreparedMappingWorkbooks'},$true))
+Check ($mappingCalls.Count -eq 1 -and $mappingCalls[0].Extent.Text -match '-DataRoot \$data' -and $mappingCalls[0].Extent.Text -notmatch '-WorkRoot') 'Preparation passes tenant DATA to mapping acquisition'
+$cleanupCalls=@($entryAst.FindAll({param($node) $node -is [Management.Automation.Language.CommandAst] -and $node.GetCommandName() -eq 'Remove-PreparedMappingWorkbooks'},$true))
+Check ($cleanupCalls.Count -eq 1 -and $cleanupCalls[0].Extent.Text -match '-DataRoot \$data') 'Preparation cleans DATA intermediates only'
 $ast=[Management.Automation.Language.Parser]::ParseFile((Join-Path $repo 'SmartM365/Modules/SmartM365.Core/SmartM365.Core.psm1'),[ref]$tokens,[ref]$errors)
 $fn=$ast.FindAll({param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst]},$true) | Where-Object Name -eq 'ConvertTo-SmartM365SharePointDataRootPath'
 . ([scriptblock]::Create($fn.Extent.Text))
 if((ConvertTo-SmartM365SharePointDataRootPath 'Example/CSV') -ne 'Example/DATA'){throw 'Shared source root normalization changed'}
-Write-Host 'PASS: two validated mappings, isolated runs, five download failures rejected, fresh-source provenance and shared root resolution. No network access.'
+Write-Host "PASS: $script:checks persistent DATA mapping, replacement rollback, concurrency, cleanup and provenance checks; synthetic workbooks/callbacks only. No network access."
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBNTR6lmylvinHs
-# QMlRNAUHKN9g2rRfQvN4jSIfgOZnuqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDeclaGpB3Y37qT
+# alKyp7dj4HCQtE4CQTPpN4H/UyZEPaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -204,31 +297,31 @@ Write-Host 'PASS: two validated mappings, isolated runs, five download failures 
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIJO3Hy0TSr5uKEfzH6iM2XO48Wj5FmaZ34TLO+B18OMXMA0GCSqG
-# SIb3DQEBAQUABIIBgAuFYYMD8pQn7vi166T5dU4I2HAYDx7Bo7QJCW/zctZDG/oS
-# 72r1T5rUaIBbT7K2he3AK/IbOxW5uRbcnVNhitNY+o5DuJOIy2nq2kcrh4t7mIcj
-# MOcb0ZySCA2hQjullH5jyIripnZYSVzF3gJFphic+KWoBNpZ3TzYQu8n8T6lwIY5
-# h/KWjEpe8exdD4Ig+ig5Y2Tbt45sjea6t76fX+sAuwbt+D/LWbBr7SqMIsgn6UUh
-# A9Al+AejJ8GWZIWR3k2i7KcS/YJiz2tVLItZ0jkpf4dFY0hNl03aXENKVjT5wGRz
-# JNF51UCGzExJ9m7Ok6AIJBZlMcTte8G5u2VFrNVITnKRl/ctVJP6z/n0ei5v7BL9
-# /h4iVSuaZkO70qZPy+VDperuju9M78kBYxAat14WXUIthNGRVmKSEmn82Z+ccq0F
-# JdKD/QLztfjDGuoKwpOJUQcXBD3N8S9s8jLaYfQOLDp5cqrZORx0lhpIMD1S2u6H
-# XOpjAVceLYwFBw7dBaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEINJeoU8LrW+ENAehQ0YWUJiPPy3JFsPVFW54RwckaHDdMA0GCSqG
+# SIb3DQEBAQUABIIBgBUN4bAXDn6DXSVOWumJPwOjeAT03mT8+92BmTia8FlUIJFv
+# Vt+ZmH2cqKOsDdlHwJa9lg/ggi7aGJN8t5EeJEvDBKW2/cg5ZgkdBlDqosQzWdzG
+# j/FDKXCT2X5/ex8x8EyrbDERBVfcTBEWuUV+XRTZv21mQTe+VhQtFdW5E61LDDp2
+# 1SgD7j95NCVkblScqN/uSzmNxKNRdyan+3XFkSR/ZMfP8XPHvuq0KfOWFw1h+jO+
+# ciURZaZ69u9oCA7rxJLLad1yYY8ovLM+r0tk5AsBWXCNEGHJJRc2GM1Mcp0IQj3C
+# C4/W0ywfPNB47pCXJia/59lhHb1vihvRbLDg6L6hrTkEwM8koyG/jjmuwltjIEA9
+# v/6NMT1FAPFPdDm4FSlY7JyDBFAcqC3RmmM0Qda49yvcffghhOzfQJg3TsfOFYw/
+# Ywmyk0v5q0pXF/9tazGl5/6kMHV7apsX2hJB7CXdMSw6ss5Pa0ha4R2/tWsPKKDA
+# VUXSLj46D/l9XX41aKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcwMDA2
-# MjJaMC8GCSqGSIb3DQEJBDEiBCC2POZw8zQh+ik1rLLT9V30yPsjBso0I7501/av
-# Kr0r/TANBgkqhkiG9w0BAQEFAASCAgA89Ek7d5A3CBe/dKqysERCUDLbLk+S5nG/
-# Xx5L3GGTA+SWogdYvIy+TOz5p14gTzCD+Og8XyYsxMd6rQoX+wh7AtLTI7XZ/JKi
-# SFip7I5JPgck08MJahwBcywa2BHotWiwYQlkUlrKRTyTbQ9kokUDB8wR42vHOfPD
-# +cEiuhmjfZfB1f59ynlg7EIRCBWDmUTCIBox7NiNr9ThjkTCXWL9kz3twhBb9SMb
-# WV0UrAIVQiXo6epZG7pQKMtqY+UIXaprM0+93yGIu2q0lKuRfimI+wWgtYizxN0l
-# Yugsx7FklwceLtwUfG7P3wz0he61RIxx1kMAwAa41D3S/76QzsOA6XSFGGTarb+x
-# TRbpJkFjnTsrDS8BNcufPb0TaiYhiBmeKl1Kxor4WgBIIaxtRO16afUr7hizWwQ/
-# KdRliUoLYnLQ8Yr9WWkAnuw15iHcXG7MH2p+ssvt7OjRI1zWNunc+WfKjlMPyOfQ
-# YpfvfYGbQuWKpXoBBoIK/9S7NJ1RdnZj2t/3QiVp2sgV8ulcRnvyKmA2Jo940Y8U
-# BR9i+td1d7JWiJPTvaZ89VRqY4cJRyI4V03QXLug3B2hR2MXmrop9UocD8y4gT5x
-# 3O374vJGhgYp7LPD1iahiBBsvSjOic20P2TGWCftJriLkXKOOC8FM01LiiOjJBBY
-# sKBPslGJ9A==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTQxMjIz
+# MzRaMC8GCSqGSIb3DQEJBDEiBCAv5tngytZ1uClvqSoQuVSPLqmqcMmrgYW6Tpmh
+# tTI4NDANBgkqhkiG9w0BAQEFAASCAgCRY55JjxnFtLu95sU3mXKhcq9xQ/B+nbIU
+# YgXb5vxgJPK4RUHZ0iRsBKkgToAMcfsxYyaz3TQnXe1VhlNQX2QcQIAUV4jI7lGu
+# +eoMy6jPeiG6trYMEdW2g/6IMW/q4by/R7miaeNJ6z5V40SmRzxbgqlCbT98Uuw9
+# 41tVDOpkOHwAXNq8fX5o36dyRNHDV4588GCxyj6Hc9gPylXAso+efnBEEWigpEHa
+# O7DuQAkX7jqX9aiZe/dfw8eD3j8odcvrX5O8Hn8CGLE8q7BFgU3B0jChB/DOI8Jn
+# YSWsdGwHjiv24+JXHQLqcnCRSnXHJW1ehk95awSeq+ewOiVf9OseN2mfCF30rs3O
+# C5vwL9+kp0+P6/856/BzP3MXNaM5Ah2N7MNJpNzPUvPjv2govtr0bNGUa+cr0pFa
+# FKemPZF3ueagcar2roMwrt4FZI9iTMdD6K/BhXwCFEWlzKnHabU/o892rrmN/fw1
+# N4t8f4RvfnkDikj089+P42aw2AqlokxsvQ7mEmZ3tm4HfYUDWrpKmghL3XQex8a0
+# DncbqH47qGsmKNLGQlFLiw7w5zt6dvQ0JXFnD+U9O38ppf2olzFM9+zgCO3uFulM
+# kQq+EJJ98T2xIMa734m4PYKmaRvr2e8r/PFwbJUje6WXsdOqZ/eqksa6SphdvP/s
+# cbzdN4KAIQ==
 # SIG # End signature block

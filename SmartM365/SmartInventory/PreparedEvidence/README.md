@@ -57,6 +57,21 @@ Cloud launchers under `SmartInventory/Launchers/Cloud` select the existing prod 
 Unlike CMDB validation, Intelligence `-ValidateOnly` reads SharePoint mappings
 and can upload execution logs. See the deployment guide before running.
 
+Online Intelligence runs download both classification workbooks under the tenant
+DATA root (beside DATA-LAST and DATA-ALL), not under the OS temporary directory.
+Both workbooks must pass structural validation before replacing the retained
+`SmartWorkplaceIntelligence-PersonaClassification.xlsx` and
+`SmartWorkplaceIntelligence-SiteClassification.xlsx` at that root. Existing copies
+are overwritten on each successful mapping acquisition, not archived or removed
+at completion. A failed download/validation stops the run; retained copies are
+never used as an automatic online fallback. Offline mode remains local-only.
+
+Replacement shares the raw-source capture lock and rolls back earlier changes if
+the second replacement fails. If rollback itself fails, the run stops and retains
+its recovery files with an explicit diagnostic. The preparation consumes its own
+validated pair in DATA/mappings/<run-id>; only that intermediate folder is cleaned
+at completion. Persistent root workbooks are never part of run cleanup.
+
 The protected mailbox, SharePoint site, and OneDrive account exports come from
 interactive Backup collectors. They are optional inputs with a 168-hour freshness
 limit: missing or older files are excluded from the prepared snapshot and reported
