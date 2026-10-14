@@ -47,7 +47,9 @@ Synthetic composed-batch tests cover publication, immutable artifacts, full tran
 
 PBIR structural validation and MCP TMDL export/reimport are offline checks only. They do not qualify DAX execution, actual filter behavior, memory consumption, performance or Desktop rendering on the tenant batch.
 
-Obsolete synthetic model tables have no report consumers. Their bulk retirement was blocked by the safety reviewer; 49 remain hidden, with only their required private automatic-calendar links restored to keep serialization valid. No production visual is bound to them. This outstanding cleanup must not be presented as completed.
+The explicitly approved retirement of the remaining 49 synthetic tables is complete in both the private and public model definitions: 41 demonstration tables and their eight owned automatic calendars, including 111 obsolete measures and eight internal relationships. Dependency checks found no consumers in retained DAX or either report. Before/after metadata comparisons prove that all 154 retained table definitions (including their calculations and source expressions), the 91 retained relationships, cultures and parameters are unchanged. Only the retired objects, their query-order entries and the model description changed. Report files are byte-identical to the pre-cleanup baseline.
+
+A separate pre-cleanup backup outside the repository contains 4,762 SHA256-verified definition/report files. It complements the earlier full project/data backup; the private cache was not modified. This is model cleanup only: the former CMDB runtime/job and prepared-data root still require the server and Desktop acceptance gates below.
 
 ### Reproducible offline checks
 
@@ -63,7 +65,13 @@ try { python -B -m unittest test_native_evidence -q } finally { Pop-Location }
 
 The targeted results are 126 source-selection checks, 35 artifact checks, 130 composed publication/transfer checks and 18 native migration/graph test cases. The full native suite passes all 151 tests (603 seconds in the final workstation run); it includes the former preparation regression suite, intentionally retained until retirement ports its synthetic fixtures and golden comparisons. The 135 existing endpoint-transfer checks pass with the composed contract changes. Other existing capture, history, lifecycle and metadata suites remain part of the regression gate; the metadata suite passes 43 checks.
 
-`Test-ConsolidatedReport.mjs` requires the report folder and an explicit JSON model-metadata projection obtained through the modeling MCP. It checks 8,714 bindings and structural invariants on each public/private report. The final definitions reimport as 203 tables, 982 measures and 99 relationships. These counts include the 49 hidden legacy tables pending cleanup; they are not a claim of 203 governed production sources.
+`Test-ConsolidatedReport.mjs` requires the report folder and an explicit JSON model-metadata projection obtained through the modeling MCP. It checks 8,714 bindings and structural invariants on each public/private report. After synthetic retirement, the definitions reimport as 154 tables, 871 measures and 91 relationships. These are semantic-model object counts, not a count of independent governed production sources.
+
+`Test-SyntheticTableRetirement.mjs` accepts the before/after BIM metadata snapshots exported by the modeling MCP and a report root. It verifies the exact 49-table allowlist, 1,116 retained DAX expressions for retired-object dependencies, unchanged retained metadata, absence of retired report bindings and three deliberately failing cases (unexpected retained change, DAX dependency and report dependency). Both public and private export/reimport snapshots pass. The private BIM snapshots contain private source parameters and must stay outside Git. Example:
+
+```powershell
+node SmartWorkplaceIntelligence/scripts/Test-SyntheticTableRetirement.mjs <before.bim> <after.bim> <ReportRoot>
+```
 
 PBIR validation reports no structural errors. Five preexisting drillthrough pages still lack a visible Back button; offline schema reachability can add a schema-unavailable warning. These warnings and actual rendering/filter behavior must be checked during the Desktop gate, not silently waived by static success.
 
