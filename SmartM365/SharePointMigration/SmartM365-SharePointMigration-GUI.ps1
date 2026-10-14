@@ -15,7 +15,7 @@
     the directory containing this GUI when launched from the shared toolkit.
 
 .VERSION
-    1.0.69
+    1.0.70
 #>
 
 #Requires -Version 7.4
@@ -28,7 +28,7 @@ param(
 )
 
 $script:AppName    = 'Smart SharePoint Migration'
-$script:AppVersion = '1.0.69'
+$script:AppVersion = '1.0.70'
 $script:ScriptRoot = $PSScriptRoot
 $script:FarmToolkitRoot = if ($FarmToolkitRoot) { $FarmToolkitRoot } else { $PSScriptRoot }
 $script:SummaryLastGoodRows = @{}
@@ -139,7 +139,7 @@ function Get-CsvFileItems {
     @(Get-SmartM365InventoryScans -Directory $Directory -Filter $Filter -Recurse | ForEach-Object {
         [pscustomobject]@{
             Display = ('{0}  {1}' -f $_.Date.ToString('yyyy-MM-dd HH:mm'), $_.File.Name)
-            File = $_.File; FullName = $_.File.FullName; Name = $_.File.Name
+            File = $_.File; FullName = $_.File.FullName; Name = $_.File.Name; Date = $_.Date
         }
     })
 }
@@ -183,6 +183,38 @@ function Get-ComparisonBadgeText {
         '{0:N2} %' -f ([double]$comparison.Matched / [double]$comparison.Source * 100)
     } else { 'Rate unavailable' }
     return ('{0} · {1}' -f (Format-RunAgeText -Date $date), $rate)
+}
+function Get-ComparisonRefreshNotice {
+    param($Comparison, $SourceScan, $TargetScan)
+    if ($null -eq $Comparison) { return $null }
+
+    $newer = [System.Collections.Generic.List[string]]::new()
+    $details = [System.Collections.Generic.List[string]]::new()
+    foreach ($side in @(
+        @{ Name = 'source'; Scan = $SourceScan; Input = 'SourceCsv' },
+        @{ Name = 'destination'; Scan = $TargetScan; Input = 'TargetCsv' }
+    )) {
+        $scan = $side.Scan
+        if ($null -eq $scan -or $null -eq $scan.Date -or $scan.Date -le $Comparison.Date) { continue }
+        $inputName = [IO.Path]::GetFileName(([string]$Comparison.Summary.($side.Input)).Replace('/', '\'))
+        if ([string]::Equals($inputName, [string]$scan.Name, [StringComparison]::OrdinalIgnoreCase)) { continue }
+        $newer.Add($side.Name)
+        $details.Add(('{0} scan: {1} ({2}); comparison input: {3}' -f
+            $side.Name, $scan.Date.ToString('yyyy-MM-dd HH:mm:ss'), $scan.Name, $inputName))
+    }
+    if ($newer.Count -eq 0) { return $null }
+    [pscustomobject]@{
+        Text = ('Newer {0} scan{1} since this comparison. Rerun the comparison.' -f
+            ($newer -join ' and '), $(if ($newer.Count -gt 1) { 's' } else { '' }))
+        Tooltip = ("Comparison: {0}`n{1}" -f
+            $Comparison.Date.ToString('yyyy-MM-dd HH:mm:ss'), ($details -join "`n"))
+    }
+}
+function Set-ComparisonRefreshNotice {
+    param($Banner, $Label, $Notice)
+    $Banner.Visibility = if ($Notice) { 'Visible' } else { 'Collapsed' }
+    $Label.Text = if ($Notice) { $Notice.Text } else { '' }
+    $Banner.ToolTip = if ($Notice) { $Notice.Tooltip } else { $null }
 }
 function Get-MigrationEndpointType {
     param($Config, [string]$Side)
@@ -250,20 +282,24 @@ function Get-MigrationStatus {
 
     $fileComparisonFolder = Get-LatestComparisonResultFolder $fileCmpDir $name Files
     $permComparisonFolder = Get-LatestComparisonResultFolder $permCmpDir $name Permissions
+    $sourceFileItems = @(Get-CsvFileItems $srcFileDir ("{0}-FileInventory-$name-*.csv" -f (Get-MigrationEndpointType $cfg 'Source')))
+    $targetFileItems = @(Get-CsvFileItems $tgtFileDir ("{0}-FileInventory-$name-*.csv" -f (Get-MigrationEndpointType $cfg 'Target')))
+    $sourcePermItems = @(Get-CsvFileItems $srcPermDir ("{0}-PermissionInventory-$name-*.csv" -f (Get-MigrationEndpointType $cfg 'Source')))
+    $targetPermItems = @(Get-CsvFileItems $tgtPermDir ("{0}-PermissionInventory-$name-*.csv" -f (Get-MigrationEndpointType $cfg 'Target')))
 
     [pscustomobject]@{
-        SourceFileCsv         = Get-LatestCsvFile    $srcFileDir  ("{0}-FileInventory-$name-*.csv" -f (Get-MigrationEndpointType $cfg 'Source'))
-        SourceFileCsvItems    = @(Get-CsvFileItems   $srcFileDir  ("{0}-FileInventory-$name-*.csv" -f (Get-MigrationEndpointType $cfg 'Source')))
-        TargetFileCsv         = Get-LatestCsvFile    $tgtFileDir  ("{0}-FileInventory-$name-*.csv" -f (Get-MigrationEndpointType $cfg 'Target'))
-        TargetFileCsvItems    = @(Get-CsvFileItems   $tgtFileDir  ("{0}-FileInventory-$name-*.csv" -f (Get-MigrationEndpointType $cfg 'Target')))
+        SourceFileCsv         = if ($sourceFileItems.Count) { $sourceFileItems[0].File } else { $null }
+        SourceFileCsvItems    = $sourceFileItems
+        TargetFileCsv         = if ($targetFileItems.Count) { $targetFileItems[0].File } else { $null }
+        TargetFileCsvItems    = $targetFileItems
         FileComparisonFolder  = $fileComparisonFolder
         FileComparisonAttemptFolder = Get-LatestSubfolder $fileCmpDir "$name-*" -UseRunTimestamp
         FileComparisonReport  = Get-ComparisonHtmlReport $fileComparisonFolder
         HistoryFolder         = Get-LatestSubfolder  $histDir     '*-Changes-*'
-        SourcePermCsv         = Get-LatestCsvFile    $srcPermDir  ("{0}-PermissionInventory-$name-*.csv" -f (Get-MigrationEndpointType $cfg 'Source'))
-        SourcePermCsvItems    = @(Get-CsvFileItems   $srcPermDir  ("{0}-PermissionInventory-$name-*.csv" -f (Get-MigrationEndpointType $cfg 'Source')))
-        TargetPermCsv         = Get-LatestCsvFile    $tgtPermDir  ("{0}-PermissionInventory-$name-*.csv" -f (Get-MigrationEndpointType $cfg 'Target'))
-        TargetPermCsvItems    = @(Get-CsvFileItems   $tgtPermDir  ("{0}-PermissionInventory-$name-*.csv" -f (Get-MigrationEndpointType $cfg 'Target')))
+        SourcePermCsv         = if ($sourcePermItems.Count) { $sourcePermItems[0].File } else { $null }
+        SourcePermCsvItems    = $sourcePermItems
+        TargetPermCsv         = if ($targetPermItems.Count) { $targetPermItems[0].File } else { $null }
+        TargetPermCsvItems    = $targetPermItems
         PermComparisonFolder  = $permComparisonFolder
         PermComparisonAttemptFolder = Get-LatestSubfolder $permCmpDir "$name-*" -UseRunTimestamp
         PermComparisonReport  = Get-ComparisonHtmlReport $permComparisonFolder
@@ -943,12 +979,41 @@ function New-FarmDiagnosticsWindow {
 
         <!-- FILES AND PERMISSIONS -->
         <Grid x:Name="panelWorkflows" Margin="18,14" Visibility="Collapsed">
+          <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+          </Grid.RowDefinitions>
           <Grid.ColumnDefinitions>
             <ColumnDefinition Width="*"/>
             <ColumnDefinition Width="1"/>
             <ColumnDefinition Width="*"/>
           </Grid.ColumnDefinitions>
-          <StackPanel x:Name="panelFiles" Grid.Column="0" Margin="0,0,14,0">
+          <Border Grid.Row="0" Grid.ColumnSpan="3" Background="#EAF5FC" BorderBrush="#C9E2F2"
+                  BorderThickness="1" CornerRadius="8" Padding="14,10" Margin="0,0,0,14">
+            <Grid>
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="190"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="*"/>
+              </Grid.ColumnDefinitions>
+              <StackPanel Grid.Column="0" Margin="0,0,16,0">
+                <TextBlock Text="MIGRATION" Style="{StaticResource SectionLabel}" Margin="0,0,0,3"/>
+                <TextBlock x:Name="lblWorkflowMigration" Text="—" FontSize="14" FontWeight="SemiBold"
+                           Foreground="#17324D" TextTrimming="CharacterEllipsis"/>
+              </StackPanel>
+              <StackPanel Grid.Column="1" Margin="0,0,16,0">
+                <TextBlock Text="SOURCE" Style="{StaticResource SectionLabel}" Margin="0,0,0,3"/>
+                <TextBlock x:Name="lblWorkflowSourceUrl" Text="—" FontSize="12" Foreground="#1F2937"
+                           TextTrimming="CharacterEllipsis"/>
+              </StackPanel>
+              <StackPanel Grid.Column="2">
+                <TextBlock Text="DESTINATION" Style="{StaticResource SectionLabel}" Margin="0,0,0,3"/>
+                <TextBlock x:Name="lblWorkflowTargetUrl" Text="—" FontSize="12" Foreground="#1F2937"
+                           TextTrimming="CharacterEllipsis"/>
+              </StackPanel>
+            </Grid>
+          </Border>
+          <StackPanel x:Name="panelFiles" Grid.Row="1" Grid.Column="0" Margin="0,0,14,0">
           <TextBlock Text="FILES" FontSize="16" FontWeight="SemiBold" Foreground="#1F2937" Margin="0,0,0,10"/>
 
           <TextBlock Text="INVENTORY" Style="{StaticResource SectionLabel}"/>
@@ -1040,6 +1105,10 @@ function New-FarmDiagnosticsWindow {
                   <TextBlock Grid.Column="1" x:Name="lblCmpFilesDir" Text="" FontSize="11" Foreground="#5F6B7A" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
                 </Grid>
                 <TextBlock x:Name="lblCmpFilesAvailability" FontSize="11" Foreground="#8A5E00" Margin="0,4,8,0" TextWrapping="Wrap" Visibility="Collapsed"/>
+                <Border x:Name="bannerCmpFilesRefresh" Background="#FFF8E8" BorderBrush="#F0D69B"
+                        BorderThickness="1" CornerRadius="4" Padding="7,4" Margin="0,5,8,0" Visibility="Collapsed">
+                  <TextBlock x:Name="lblCmpFilesRefresh" FontSize="11" Foreground="#8A5E00" TextWrapping="Wrap"/>
+                </Border>
               </StackPanel>
               <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
                 <Button x:Name="btnOpenCmpFiles" Content="Open" Style="{StaticResource BtnGhost}"
@@ -1094,10 +1163,10 @@ function New-FarmDiagnosticsWindow {
                   Style="{StaticResource Btn}" HorizontalAlignment="Right" Padding="12,6" Margin="0,10,0,0"/>
 
           </StackPanel>
-          <Border Grid.Column="1" Background="#CBD8E6" Margin="0,0,0,0"/>
+          <Border Grid.Row="1" Grid.Column="1" Background="#CBD8E6" Margin="0,0,0,0"/>
 
           <!-- PERMISSIONS -->
-          <StackPanel x:Name="panelPermissions" Grid.Column="2" Margin="14,0,0,0">
+          <StackPanel x:Name="panelPermissions" Grid.Row="1" Grid.Column="2" Margin="14,0,0,0">
           <TextBlock Text="PERMISSIONS" FontSize="16" FontWeight="SemiBold" Foreground="#1F2937" Margin="0,0,0,10"/>
 
           <TextBlock Text="INVENTORY" Style="{StaticResource SectionLabel}"/>
@@ -1189,6 +1258,10 @@ function New-FarmDiagnosticsWindow {
                   <TextBlock Grid.Column="1" x:Name="lblCmpPermsDir" Text="" FontSize="11" Foreground="#5F6B7A" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
                 </Grid>
                 <TextBlock x:Name="lblCmpPermsAvailability" FontSize="11" Foreground="#8A5E00" Margin="0,4,8,0" TextWrapping="Wrap" Visibility="Collapsed"/>
+                <Border x:Name="bannerCmpPermsRefresh" Background="#FFF8E8" BorderBrush="#F0D69B"
+                        BorderThickness="1" CornerRadius="4" Padding="7,4" Margin="0,5,8,0" Visibility="Collapsed">
+                  <TextBlock x:Name="lblCmpPermsRefresh" FontSize="11" Foreground="#8A5E00" TextWrapping="Wrap"/>
+                </Border>
               </StackPanel>
               <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
                 <Button x:Name="btnOpenCmpPerms" Content="Open" Style="{StaticResource BtnGhost}"
@@ -1834,6 +1907,9 @@ $lblPortfolioPermissionsCompared = ctrl 'lblPortfolioPermissionsCompared'
 $lblPortfolioActions = ctrl 'lblPortfolioActions'
 $lblPortfolioRefreshErrors = ctrl 'lblPortfolioRefreshErrors'
 $panelWorkflows   = ctrl 'panelWorkflows'
+$lblWorkflowMigration = ctrl 'lblWorkflowMigration'
+$lblWorkflowSourceUrl = ctrl 'lblWorkflowSourceUrl'
+$lblWorkflowTargetUrl = ctrl 'lblWorkflowTargetUrl'
 $panelOperations  = ctrl 'panelOperations'
 $panelBatches = ctrl 'panelBatches'
 $panelDiagnostics = ctrl 'panelDiagnostics'
@@ -1864,6 +1940,8 @@ $btnOpenCmpFiles= ctrl 'btnOpenCmpFiles'
 $btnReportCmpFiles = ctrl 'btnReportCmpFiles'
 $btnRunCmpFiles = ctrl 'btnRunCmpFiles'
 $lblCmpFilesAvailability = ctrl 'lblCmpFilesAvailability'
+$bannerCmpFilesRefresh = ctrl 'bannerCmpFilesRefresh'
+$lblCmpFilesRefresh = ctrl 'lblCmpFilesRefresh'
 
 $badgeHistory  = ctrl 'badgeHistory'
 $lblHistoryAge = ctrl 'lblHistoryAge'
@@ -1893,6 +1971,8 @@ $btnOpenCmpPerms= ctrl 'btnOpenCmpPerms'
 $btnReportCmpPerms = ctrl 'btnReportCmpPerms'
 $btnRunCmpPerms = ctrl 'btnRunCmpPerms'
 $lblCmpPermsAvailability = ctrl 'lblCmpPermsAvailability'
+$bannerCmpPermsRefresh = ctrl 'bannerCmpPermsRefresh'
+$lblCmpPermsRefresh = ctrl 'lblCmpPermsRefresh'
 $badgePermHistory = ctrl 'badgePermHistory'
 $lblPermHistoryAge = ctrl 'lblPermHistoryAge'
 $cmbPermHistorySide = ctrl 'cmbPermHistorySide'
@@ -2526,6 +2606,16 @@ function Update-UI {
     $lblSourceType.Text = Get-MigrationEndpointType $cfg 'Source'
     $sourceScope = Get-MigrationScope $script:CurrentMigration 'Source'
     $targetScope = Get-MigrationScope $script:CurrentMigration 'Target'
+    $lblWorkflowMigration.Text = $script:CurrentMigration.Name
+    $lblWorkflowMigration.ToolTip = $script:CurrentMigration.Name
+    $lblWorkflowSourceUrl.Text = $sourceScope.Text
+    $lblWorkflowSourceUrl.ToolTip = $sourceScope.Tooltip
+    $lblWorkflowTargetUrl.Text = $targetScope.Text
+    $lblWorkflowTargetUrl.ToolTip = $targetScope.Tooltip
+    $lblWorkflowTargetUrl.Foreground = if ($targetScope.Mismatch) {
+        [System.Windows.Media.Brushes]::Firebrick
+    } else { [System.Windows.Media.SolidColorBrush]::new([System.Windows.Media.Color]::FromRgb(31, 41, 55)) }
+    if ($targetScope.Mismatch) { $lblWorkflowTargetUrl.Text += '  [CONFIG DIFFERS]' }
     Set-MigrationSiteButton -Button $btnOpenSourceSite -Scope $sourceScope
     Set-MigrationSiteButton -Button $btnOpenTargetSite -Scope $targetScope
     Set-MigrationSiteButton -Button $btnOpenSourceSitePerm -Scope $sourceScope
@@ -2550,6 +2640,14 @@ function Update-UI {
 
     $fileComparisonText = Get-ComparisonBadgeText -Folder $st.FileComparisonFolder -MigrationName $script:CurrentMigration.Name -Kind Files
     Set-Badge $badgeCmpFiles $lblCmpFilesAge $fileComparisonText ($null -ne $st.FileComparisonFolder)
+    $fileComparison = if ($st.FileComparisonFolder) {
+        Get-SmartM365LatestPortfolioComparison -Directory $st.FileComparisonFolder.Parent.FullName `
+            -MigrationName $script:CurrentMigration.Name -Kind Files -SelectedFolder $st.FileComparisonFolder
+    } else { $null }
+    $fileNotice = Get-ComparisonRefreshNotice -Comparison $fileComparison `
+        -SourceScan $(if ($st.SourceFileCsvItems.Count) { $st.SourceFileCsvItems[0] } else { $null }) `
+        -TargetScan $(if ($st.TargetFileCsvItems.Count) { $st.TargetFileCsvItems[0] } else { $null })
+    Set-ComparisonRefreshNotice $bannerCmpFilesRefresh $lblCmpFilesRefresh $fileNotice
     $lblCmpFilesDir.Text    = if ($st.FileComparisonFolder) { $st.FileComparisonFolder.Name } else { '' }
     $btnOpenCmpFiles.Visibility = if ($st.FileComparisonFolder) { 'Visible' } else { 'Collapsed' }
     if ($st.FileComparisonFolder) { $btnOpenCmpFiles.Tag = $st.FileComparisonFolder.FullName }
@@ -2571,6 +2669,14 @@ function Update-UI {
 
     $permissionComparisonText = Get-ComparisonBadgeText -Folder $st.PermComparisonFolder -MigrationName $script:CurrentMigration.Name -Kind Permissions
     Set-Badge $badgeCmpPerms $lblCmpPermsAge $permissionComparisonText ($null -ne $st.PermComparisonFolder)
+    $permissionComparison = if ($st.PermComparisonFolder) {
+        Get-SmartM365LatestPortfolioComparison -Directory $st.PermComparisonFolder.Parent.FullName `
+            -MigrationName $script:CurrentMigration.Name -Kind Permissions -SelectedFolder $st.PermComparisonFolder
+    } else { $null }
+    $permissionNotice = Get-ComparisonRefreshNotice -Comparison $permissionComparison `
+        -SourceScan $(if ($st.SourcePermCsvItems.Count) { $st.SourcePermCsvItems[0] } else { $null }) `
+        -TargetScan $(if ($st.TargetPermCsvItems.Count) { $st.TargetPermCsvItems[0] } else { $null })
+    Set-ComparisonRefreshNotice $bannerCmpPermsRefresh $lblCmpPermsRefresh $permissionNotice
     $lblCmpPermsDir.Text = if ($st.PermComparisonFolder) { $st.PermComparisonFolder.Name } else { '' }
     $btnOpenCmpPerms.Visibility = if ($st.PermComparisonFolder) { 'Visible' } else { 'Collapsed' }
     if ($st.PermComparisonFolder) { $btnOpenCmpPerms.Tag = $st.PermComparisonFolder.FullName }
@@ -3247,6 +3353,9 @@ function Load-Migrations {
     if ($script:Migrations.Count -eq 0) {
         $script:CurrentMigration = $null
         $script:CurrentStatus = $null
+        $lblWorkflowMigration.Text = '—'
+        $lblWorkflowSourceUrl.Text = '—'
+        $lblWorkflowTargetUrl.Text = '—'
         $lblSourceUrl.Text = '—'
         $lblTargetUrl.Text = '—'
         return
@@ -4491,8 +4600,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBU87nhHlGYqMWV
-# vZaqUM2xdIV0vqXvoX1Ua3y3ewnOW6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBFB7klTpnWj9cy
+# YsDziVuZhEPcmKUTLq75ahxDA+/YqKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -4625,31 +4734,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIP+41KenQJH5VOkmNK1rnwCX4NKP2BAMDR4aGM5f6KkeMA0GCSqG
-# SIb3DQEBAQUABIIBgGLtN7yO3PPaAdi+O4GrFr7OXvqcV8PviEJBnh9DpIvnQ8bV
-# StRFEiZg4NqOfwlj8Zmu9ag5vV5ebsmhSwgXJA4o/rT9xuOhzEps6tkJ1WKiJheQ
-# hcBN/x7a1UwMibqkqPx2z69EKdXSW+/Y+68LHazrGYSGyr9ABjjgHKPJ+911+Qaq
-# 4VHhFUKA2lujPFfX+ZdYCBxvyKn8zxeHOfI5kbdWcoXelZeDed6dG+MvBhsPNAPy
-# 89i9IbRvGpXQoOdYYIstUZvO52mkgTLarnhCVaZ0TKALzV4bCs83N5gaIJyGK6st
-# m01KUFTMmONO0mxggsxUrX6jHlm9je/DaIXqvaQWn7xPLP+nTBNDkci+AmLuIEZt
-# sO1e/oQl0IaF/auZ2jujWHL8Z6CTYdIskPmYFxgJv7jAXIyYa8lzW2CBD1jbi/Zw
-# I0uqzrqytSf2pnue99M9euTqD5hHgVdpwbb9G/myQLWUxKlm7P2Xjsy/Mit/HyWL
-# rkYdnMtaL6eMjgBbHaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIK40xi9eIgUQnerIyA5YM3j+k5zExTBIKCws4arFnBhGMA0GCSqG
+# SIb3DQEBAQUABIIBgK7JOORvcgHdFMWBjuvg5ChKMEu0OR33lvCLsXKa6m0gqKxO
+# zfuQrdj/xN2Achd5OEX3iCf67HwiB6lgCpMLfhzkfxiVbrlGe7ZR3o642SazAA7f
+# JuBph2Z92sIFfG0/KXvK4kd6wyLxCA8muZG8RD8HG9dpfdpHBQJuhlQpkR0bwMGi
+# MRLTTJPIc8IKMHc+12UmCx6BMNsOfBgOkTh202RccAlqTtvCKvkY30ELx+jNdnPv
+# HdxFTetVmDGVLlMOmQJ+8Um1ILDH4z7nVOCX4qLPT53QfvKC0LJJp1W+0WmimA75
+# oyVgb8j0/vpAHurOBEn1NbxFKrWVucd//33PsipH1jFn2FpunnlUbmlx7E3eeN/D
+# vthYz3KKcOsRAJHEPR3rjJtwtk3PooEcE1NgzF8K84D4uINwtmxHLS83AK8m0xcM
+# Yw05NKE16l/VcvYtNNYsl1nCeBFFiPH8Wc2A3Pbcb9q/kn8MQZu6JVXhMUnkrFyD
+# d01/PDONfh1k6wydt6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTMxMDEx
-# MzhaMC8GCSqGSIb3DQEJBDEiBCD3/W13S6k8gONEewPr2td1FpNK9bXALkNkLcHI
-# 9UAVITANBgkqhkiG9w0BAQEFAASCAgCT9faWS5VE3qi9ivEySvdt3AgD2sdP2lJ9
-# a4rR+7bFWBYXNex/H1wHWOQg4EjV+1qIowaO2fSN4tpHYGDO2ZrB/XUlMbtztDr3
-# YbTGb+JogJJmIns9s1seSMfS/zBgPa8De8Y/TFRbAN+Fek1X7C6NkEYk6Fsyxqam
-# IoN+zO/Gx8Dc1VTEripKw6CEyZUMD3f+Kcg8fBFi6KBP5SuhukRmV3hLbQIFhN26
-# CErz1ZBuRpAjDlvAMga3/K2w4OaISxR8Y4xwL8u22Vy9AOXS0JiIurPRMrZ+stdy
-# Vdt6Zx1dLvGhae/r4+tNVJhOdZn31FN/vrT91mR6NjeMKPCZwRZYoOLfjYhtoqlp
-# nYXXstgPpN2rAASiekvk5NPNYUpR7woEdvuGL+KxVu4tHMIBMON7YYFDGBXpspIR
-# odOFW6JvrmpNk7q0MVv2q/B/Tap71W1f2Rce/d5mEBeVT9abysFP0s4g/4SbOciL
-# WZLCxN83URr5Ln2omHDy9bLL8g3ro9dt24fvENQGIMFHfxQ+r6u4yTUmfVbxz0si
-# PryZelAk4mwwzKLpAgrIbat76Mh57suDw/+7YIT4AQIaab8TxiI+xZmj1qnqrvDO
-# wZMMpqKKZ3gaKvFXJ2gQ/eXHwjx8WGImQhCgxiU9SOyYLj6CXSY2LHNEB6UsB550
-# d1FzqM8yPw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTQxNjM4
+# MjdaMC8GCSqGSIb3DQEJBDEiBCCx3eQCKLQvr4xB+hW9WbDmWFvgRDkxOpQLCl4r
+# kDbpRDANBgkqhkiG9w0BAQEFAASCAgCSsddp9X3S/HvmkjeQztmNiZ5irKB2rKBq
+# vthNknNVE07DuSzsqGC4LjNFhKRe4ejNxYnk7iyD4kTNT796/rCI3riCHys+7wWw
+# cER1n5qWsuKCTX3UIxsJehb4Gvm4EMDf3/+gan2kqXPPZqBMtqVYrOI2stegVws/
+# zjCz4lO6dFVO4tgNtUkQLBBA3tsvDv3uLfCSurDFSpapFAR+ruPGrIdql3m7Wrpr
+# dLb+2SC4T7puVOA95nFANtJLuYw6Tq3POzBYPcfxKfzvG0ZgDzmdGldsAxArBIeD
+# IIjYlSpoUX/u19b0rgPA49WTrK50woOzQA8HcuJKCSo9jDchiicxsGFi7qLPjfz3
+# ewi7/AX4gWmdyuYUERSzuiY6OGvdgVMwvTthODO8U8nam3+/kIauJzx3HJ3gCZpe
+# K9JlNcj65OEJP8zlt5tjxIddN54UVxbj1XQ3F6aUBqo3oWvqm2UAYhcCuZKVLVkN
+# Azd3KxL9JEkhj5Rl4m3YMMTEsuoAhLsoyIQOBIQ1DzfpKaH/Sb6nXJe4NcqAwL59
+# scEaNiO3xikDo6dvEgfNw7qUI9x4IiYzN7vM99M7bi1Uo5eSi9fp9xn9iGeIbggO
+# wFesj3shuXGOk6WH9u4S3n+xkgNyUimqpwmOQLIBe0aTN5x5qm88+zg5Oc3rWACo
+# D7DVS7Qs3Q==
 # SIG # End signature block
