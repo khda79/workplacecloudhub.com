@@ -11,7 +11,7 @@
   The report also lists target-suite users awaiting license capacity and other assignment errors from qualified existing CSVs.
   Qualified PartialAccepted AD coverage is usable but remains provisional; available allowlisted domains remain included.
 .VERSION
- 1.45
+ 1.46
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication; Microsoft.Graph.Identity.DirectoryManagement; Microsoft.Graph.Users; Microsoft.Graph.Groups; ImportExcel for the report attachment.
@@ -19,7 +19,7 @@
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
   Author: https://github.com/khda79/workplacecloudhub.com
-     Version : 1.45
+     Version : 1.46
   PowerShell: PowerShell 7+
   Minimum application permissions: Directory.Read.All, User.Read.All, Group.Read.All
   Requires: Microsoft.Graph.Authentication
@@ -257,7 +257,7 @@ $OrgDomain = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'OrgDom
 # ==========================================================
 $modulePath = & { $d = $PSScriptRoot; while ($d) { $p = Join-Path $d 'Modules\SmartM365.Core\SmartM365.Core.psd1'; if (Test-Path -LiteralPath $p) { return $p }; $parent = Split-Path -Path $d -Parent; if ($parent -eq $d) { break }; $d = $parent }; throw 'SmartM365.Core module not found.' }
 try {
-    Import-Module -Name $modulePath -MinimumVersion '1.0.79' -ErrorAction Stop
+    Import-Module -Name $modulePath -MinimumVersion '1.0.86' -ErrorAction Stop
 } catch {
     Write-Host "Failed to import SmartM365.Core module from '$modulePath' : $_" -ForegroundColor Red
     exit 1
@@ -1809,10 +1809,7 @@ function New-LicensesRecoveryWorkbook {
     [Parameter(Mandatory)][string]$CollectedAtUtc
   )
 
-  if (-not (Get-Module -ListAvailable -Name ImportExcel)) {
-    throw 'ImportExcel is required to attach the license recovery workbook.'
-  }
-  Import-Module ImportExcel -ErrorAction Stop
+  Initialize-SmartM365ImportExcel | Out-Null
   $usageByProduct = @{}
   if ($Usage) { foreach ($item in $Usage.Rows) { $usageByProduct[$item.Product] = $item } }
   $details = @(if ($Usage -and $Usage.RecoveryDetails) { $Usage.RecoveryDetails })
@@ -3241,12 +3238,15 @@ function Publish-LicensesWeeklyHistory {
 # ==========================================================
 # Main
 # ==========================================================
-$ScriptVersion = "1.44"
+$ScriptVersion = "1.46"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LicensesCsvLogFolderPath' -DefaultValue $OutputPath
 $LatestCsvFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ''
 $defaultLicenseSummaryMailStatePath = if ($LatestCsvFolderPath) { Join-Path -Path $LatestCsvFolderPath -ChildPath 'M365_Licenses_SummaryEmail_SendState.json.txt' } else { '' }
 $licenseSummaryMailStatePath = [string](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LicenseSummaryMailStatePath' -DefaultValue $defaultLicenseSummaryMailStatePath)
+# Includes email-only mode; the workbook remains optional for raw CSV collection.
+try { Initialize-SmartM365ImportExcel | Out-Null }
+catch { Write-Warning ("Optional license workbook unavailable at startup: {0}" -f $_.Exception.Message) }
 if ($SendLicenseSummaryEmailOnly) {
   if ($MaxItems -gt 0 -or $TopUsers -gt 0 -or $FastSample -or $InteractiveAuth) {
     throw '-SendLicenseSummaryEmailOnly cannot be combined with collection or sampling switches.'
@@ -3955,8 +3955,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAAKdhBzGEHebjI
-# n08OIidK5p4O7rbOKIZKiB8IokeuP6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC//ELZBBqZ+NbX
+# YoLDPEdi4URlbxz5IbU01egn2tAiIaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -4089,31 +4089,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIGpWXnUHL4IO43oQgypBIFyxZpQeKksX4kibwsmpYDNjMA0GCSqG
-# SIb3DQEBAQUABIIBgEoicjoN+ZXzCyezr6+OgHY+14PT0aTNVLHXsamrbyQniUY3
-# jpEGjxWS7xa0f/zaGw+Ud9H7D6QBv3nqZMxX3d76uP5z11R+s2XMYWgTQS+Xip4Q
-# HQmIq6FYU3NA2sYT08+YWRXtaHRdu1Gk4Ep5pE7JQtp/Y0Z3X9A32QYM5Q2I83fw
-# EK18GlZMsp98TS9zmPYjkAhl7BUBJz21pwqRY2kvoQcEU8zIj6YNCM30AanUiDLT
-# bG3XkYJnQlXf92BAJbZbPNAjp0schLJ5kQMKZ42st2O1lHDv/9IcqscYfHjRH409
-# HqE/BetN00yKsaBcE5GgPaCfVsfMuwpFVe/FZUjvPIguzWUcLX4FUcuUJM3EHABb
-# fGpzgnlH+OSHEuK5DI0LAoOD/0Oohr/c/yLoK4JuiAYa3zwFtAIQ9EiFbtBJvj0a
-# /MC8mEwpMvgVbE8/+Fjnr76OyczCr5JNUgCWXsEBBH2ulIL/JXM9yvS4zMDPu490
-# Keu7N0eOLfC06foN4KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIH7ZTgEXykd+C8tiYZ55EeBWs2cMQN7T0Ptq+nGjirl7MA0GCSqG
+# SIb3DQEBAQUABIIBgD/zz6G5oiAD1dYint1w+lVjoPR9XKP+21f8sPwZTGCSmUey
+# geADrWrY1eH3lcXfNCZgvvRctLLxcX8YhMqb/Gywy9QSpPP07zXH5h6s0tVc+95i
+# qOb+fFpzAhE7HXw0l6yI+4zVPpz9PjSGjxfj8d+ocePRAPBGR3EtoRpBs6to8Nxd
+# BxNjO1LJsPuVsUk+MRnIh+AhFKiHJI+kz018ivjMdSjXsCY0boaLZsFkvg5ingce
+# eZl3Q8UqWJsvZUsffvUKm2Eaflge6xlwDmMc6eN978Ngjk6kBVgaw0zCqk824jM2
+# jzFSu5VKmW2FJOoE+L4RXByFWjH15g8dPMNGwKi9SOvCWCEfvZpjgz1Z8CEjYyY+
+# HyRqR6eE+9KMu7iW3wgVaIS+2J6ngz7JSRELUXkIXfTJu3dtgLPFlez58BK4800E
+# VbrZYkNF3lce2YEzyPx6R+rH3dggj7H6ZputE4bCzSRie4ZIMGHW+KAbvo3585PR
+# DnqMkWFbwkGHres8s6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTEyMjMw
-# NDhaMC8GCSqGSIb3DQEJBDEiBCC/8IufTu9HUoSJGA3ZYl8aM0pXkGRSNB5OgCIT
-# 8vzQVTANBgkqhkiG9w0BAQEFAASCAgBFQyuBDjikl5smgm0I2X71lzsqBLAp9Z0P
-# iPww5hQvM37PMtSixYf/IenPtKEK24tlUDrge85XSP9zxzUROIHY2R+WufiQd6eY
-# FOlAm9HyHNB6Tl4PPOP72DbvZ2ueGuWGT5Oioi51+2NUfAD2igm3rJdb8e5xeqIJ
-# qT2kVNyTaWCDK5653V8A5ZPRO7N96qnQXtHCDmTqkhTL5FoY9jHvaLXjv2v/Sb1n
-# xHNPs0oEIhXexQX3lPm+MZ18XOvz/9XcL1q2g6rIBh1xZ/UJjiehkyIi0Dbv47p/
-# lPvg62Hv2kOsxPfiu0VL92LuBEnd2Da+V9JDVoqXUOphBibiOptcHIisrzc7Ixex
-# ZtzAO8r/2m0IGzNPxq6SeCRNiPiabxpTIznv+XTycREnfEY1sXanaanm2H55Kooj
-# +JziWtNL0gO8KbKNJV35pEXxXsTyq9TQ9XsDvCGX+kQWRYMGi7BtIk6lm3rMBeI/
-# JmhVzrUSsQJZso44+jNUC7TWG3B6blAlzPPSCzY7G+H6MHeE/DUTwvPHY1pzy4Dd
-# X0K2IJj07hs9cm4OC7YwQAnQbzCSuwQqwhBC/qOMMzr/+9o2a4c/VVgNSGL931+t
-# liRu4Fdq4gvSNO0k1hYcBJYFiv9ItwkyF+8IY0INpYJUBWqXbIkU+pCjGp31AQZ8
-# yXoloTbyrg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTQwODMw
+# MjdaMC8GCSqGSIb3DQEJBDEiBCCJSesjf1HhUcrflFEiC7WY1p7g/dlOcIjgGGtM
+# pywfzzANBgkqhkiG9w0BAQEFAASCAgA0mMBYH3lo1szQACZ7NRW/vkZEpbH6krVZ
+# rM7HQvA5H/inY+honPP0fA7t4iAEYeXAbYUKIT3/KkHWGFjY8uFjMUvVMsgOZDQj
+# 0GKkw5OknkNZwrzX9B8pANH7x3gbR7zpQAmA7efrWw0Onaqhv8P1tyavyJDipRNA
+# LnmAh2YmUaspMA249kLDrHGtx67PXQnHVuCFLpXgokT+M5X608w19Qxkysk+kBOh
+# 7YIdt+LqJaQvaB4o7OFzM69qzOQdpkOCk3wDME96ixyXog45Jpb3YYwLgZieTthI
+# Oz75BUqrDee0ll14dzCqK3YZV1wDwhe768NqeJmTe0AOGZS10EZV7fenLs8xVXHw
+# T1rUZwUFdgVDYzjUiECrSKPz2z/v0D+LGwWFjyZdp2nQypzzW+016ffyFjhyCxIG
+# df/SkS07MBUvYi/139p5wF9iQ38wQi2izPMgataYyQ4R6FwhxCYMa5XWhtxDXgU6
+# xDoeeBYtn7Lx4wXYWr8Muy70CJ7wfciaxwuyJg8cco1NK6w3A40cD20Uhg+gbjrS
+# ytyy6VUdpOFsgjcrabQEnsYfnXzq1Dij1Zf5di57lOP7LH1AlN4cvMwPbjFQy5K4
+# QySDcSZYf8pWhg2uMNcPzuzzmbaZ111vNi1QlnqY0V6CxmXkwZItqmN+THptKFVC
+# 6IaY53Cj1A==
 # SIG # End signature block

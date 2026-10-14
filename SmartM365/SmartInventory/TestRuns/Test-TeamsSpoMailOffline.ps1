@@ -1,4 +1,10 @@
 #Requires -Version 7.0
+<#
+.SYNOPSIS
+    Synthetic Teams and SharePoint workbook/mail regressions; no dependency repair.
+.VERSION
+    1.0.1
+#>
 [CmdletBinding()]
 param()
 
@@ -25,6 +31,11 @@ function Assert-Equal {
 $inventoryRoot = Split-Path $PSScriptRoot -Parent
 $smartM365Root = Split-Path $inventoryRoot -Parent
 Import-Module -Name (Join-Path $smartM365Root 'Modules/SmartM365.Core/SmartM365.Core.psd1') -Force -ErrorAction Stop
+# Workbook regression checks may load the installed module, but never repair/install it.
+function global:Initialize-SmartM365ImportExcel {
+    param([switch]$InstallIfMissing)
+    SmartM365.Core\Initialize-SmartM365ImportExcel -CheckOnly | Out-Null
+}
 $teamsPath = Join-Path $inventoryRoot 'M365Inventory/Teams/SmartM365-Teams-Inventory.ps1'
 $spoPath = Join-Path $inventoryRoot 'M365Inventory/SharePoint/SmartM365-SPO-Inventory.ps1'
 Import-ScriptFunction -Path $teamsPath -Names @('IsoUtc','Get-TeamsCsvColumnNames','Import-TeamsMailCsvSet','Invoke-TeamsDailySummaryMail','New-TeamsTimestampedWorkbook','Add-TeamsWorkbookOverview','Get-TeamsMailStatus','ConvertTo-HtmlReport')
@@ -233,8 +244,8 @@ Write-Host 'Teams/SPO mail and workbook offline checks passed.'
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAEsqzb2MY3FNH3
-# 7cyeGZ5AjWJPX8vrP21k/m+VWyeUE6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDnUzeiPmmTgC36
+# 3ube+SAjQTjZK+aE0s98SvjT1ks7paCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -367,31 +378,31 @@ Write-Host 'Teams/SPO mail and workbook offline checks passed.'
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIHgfI7z7UY2XE7TNq2zxnSBi7sv2EZh5xUBQLFaT98XzMA0GCSqG
-# SIb3DQEBAQUABIIBgIjw5p3oKhwjrJ6zSxkB0d9P6Z4ljtG9INgJIH4EGrXKauwG
-# PBLCcaMdBUkUObjrbTLYC40OB3cDq2u5Pss1Gn71w3bLv/bUen5l586/9oPNplY8
-# GL0AmcLwRWMIVI8/ILNbXDErDM5KB4zq7epimmGq1qitEYeamA7968YQPj49zrvB
-# cTcZd2wRY0IqyXNK/PhfMleNAht3Ny72A3Fea7wR0G687QFUW3d4HFDusPN7xGKb
-# dVzq7aa4h5YWIb+6FVwux3GhDYf8l6UBKTPBNUJ27kytUTx9s7rZ0udUnEVBfmCK
-# dbQgk27tUe81gwq1uwR5oYNM8iZw8NFEmB+wMlZZ0Dgu1ID8M888SLRXmRhsHUMN
-# wd9LYCEOpJuREs8n3lmcPDoezwvzSZ+/Svw2JzsgqLpV2gj8zamx7Pcc8Eq8nPYo
-# ty+bbqFgTX7r2F4SaPWoawJzaFy5oGObo/uZKrsm56T9TL5coARDTz2PzgLwDKvK
-# +nG6tQTWjIGQobVmuqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIEunowugzlO5ZMh56AoAUJBVPMAwyWqmAZyZSxa3NwgiMA0GCSqG
+# SIb3DQEBAQUABIIBgDbA7GmruxcBb5aIdO4IwEQEPU2KJedDm7bi6o/cyBzHCeNa
+# TeAbh7ucB6XIAF7Kt4AH2z7yV94Z+0G1rOWjZKNLkLb8OR/5SIu+I9StJq8UTt2Y
+# tFukwpN7icO2K8WVD+EI3UJQVhi/GN2ZVgkmDWrnmpaT1V9nJ+nm97aRqAzv1nvQ
+# Cw+hsv4R/+AunLnKSwAgizrHOECvuF4OsAFyxlkqR6Ikw0Jk6p0lbMScquYUxMmz
+# uclyBQmJKHxIyECQLvSOtbj1iqMyz7PLyjD/v6sk12G8S/fo/wIW2BKv8JKlUy/O
+# oyt4+ufVmpkXVBraPhOLLBGdxQ7CbwTOMWfIO+cdLNicN6Q5uLgeyrWT8CbXN1/K
+# ZPwbi0PRs3p3KHwrb5Zs2N4H5vQGMs/4c3aiPq3LTAOsAunfa3/n1zN2BIJwVHf1
+# k5sAAkCQintuXvpj+yB6HeqTBWHbKtAMUAgcZZczvABBqA57oL2jFW7AQq5dniXh
+# TtXYpeJBT0fV6CFLx6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTMwNzM4
-# MDNaMC8GCSqGSIb3DQEJBDEiBCCeUkV3z9ozQBy+PVzrMi1b1f+F2mDRtiFfsdno
-# mdBpUzANBgkqhkiG9w0BAQEFAASCAgAOqSCpYOWhGoxzOpaar77Smud32WRdyMI/
-# Xhp45HQ4l6TUuMLjYiegs6PE2XHTTsv2B29pLX/ucZpJ6UMWu2xzh3R0IPhx0e8B
-# 6nf1TuV5+5JWi7Fk8aBMJ+O90637N5cRdoMEk6BdfkjbgscJz/my3vZjqhiIRFBc
-# UeM2xp7qs4dohH/Q56qwuFCE2tE77MlXtthh9LV9IH5wHebqJJKlAeP7RQ43UMt1
-# /lvzFvcTSS7WcTjH5IULB7vu3SGEj6eFHVLpiGuvDJFzcLEqEktLT6gWUUNqGDVF
-# XTfKKRs7F3Gu+j5mFl7ku7hSVwAlA3E2WiYBVCP59CwylIg5xfVqD9LB/rGi/92v
-# tz9zUO2fHitAxe2R9X6xBtufq2qurTbtjVhuKA1jO8B8uvbGtrIA6pN8jxAYgiVi
-# VMi/GM2NrAh8hwmM5a+Q0EODoVOP4MXzIQ6Ja6vswpbhFyqM0le/LBtxbvOS4bYV
-# HuijUNIwrcQ7ICARK6sCoNrKhsTfJdGs2h9oC/48wtarC7oX14cLwzbfpHH8ddiv
-# XosRnYI6l3WTNrtgm66+o+Yne6n0E1f/SFWeu3Gwp0hNupPqjf2REfxDftBt/t59
-# 7gaXmxNwQoyfCDArJvdVr/wJplq/YaAFqdkvTeRpY2I5d/iCySOiBL5twLrWBLGB
-# EM3Z06fDyQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTQwODMw
+# MzJaMC8GCSqGSIb3DQEJBDEiBCBPnm3gOjy8j38YtbzonOtXqtaCv2JTXs3MKQDI
+# 6IDrDjANBgkqhkiG9w0BAQEFAASCAgAxDytfihnQZkFavXP8RRwYtPBZnpVva6Bh
+# W9CtCwBzBfRZEO4W8DjB3MnlVKDCOpi/KdBPJ1Fw3w5va6LVER1BqS2KADJdjuU6
+# KpkVikIppWgi5WFPG7g8AAi617M6cBQleXTMoV35GdqAxED3RTOKE/K52fpmTMZX
+# l5yq73AeC2ayugo+4wdQQNpMe3kxMe4DvfMa8Cm6hSsG3HMvvBOiBBFadk0D6rq5
+# /gSRzJfuw5B9uOxH0/UI36uRY32Cef1libpVAOiKMtVbeXWDRSyxyj1jXoEE4RxY
+# Oii6AVHT6S5MOL2yac/sUx/8N6TqNbMBv+G3Hamqhn+FPYk52loRnnax2mKniMNr
+# bPTx3hm7hUFy6W4boG0VOI8+01HWQwm45Xlq4tyK9fuqQpunt5fc3lDLl4KMudcb
+# bUWrjTfP420ID15UzXMEQQXccvwgByw43IR8qdK2ivb4uayT02B7mcA8m7eAI4F5
+# Idejuw3TH9wEJ1puiuerkHQqspNxwJ8EbPyX2zKS/bJyDSQpytSCmRUZRC1Yr1ge
+# bM3E0IKo5d/BdDfVv8Btgigm2wrkdj1+Tz5bIbsKy1dz/K5n5twvqQhN6YIlDZC9
+# HORQ9L+6DNEK0sonn+90TGpP08EphvN1BQqUmb6F6+jXEv9pYCa9WhxmwTYkMTIu
+# 10VmD8/Lwg==
 # SIG # End signature block

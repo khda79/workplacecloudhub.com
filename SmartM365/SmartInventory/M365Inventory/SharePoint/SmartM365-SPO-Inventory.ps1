@@ -58,7 +58,7 @@
     Uses delegated interactive Graph authentication instead of app-only certificate authentication.
 
 .VERSION
- 0.38
+ 0.39
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication; ImportExcel. PnP.PowerShell enables tenant capacity collection and optional sharing scans.
@@ -117,7 +117,7 @@ Set-StrictMode -Version Latest
 [System.Threading.Thread]::CurrentThread.CurrentUICulture = [System.Globalization.CultureInfo]::InvariantCulture
 $ErrorActionPreference = 'Stop'
 $MaximumFunctionCount = 32768
-$ScriptVersion = "0.38"
+$ScriptVersion = "0.39"
 $TenantCapacityEnabled = -not [bool]$SkipPnPTenantCapacity -and ([bool]$UsePnPTenantCapacity -or [bool](Get-Module -ListAvailable PnP.PowerShell | Select-Object -First 1))
 $CurrentOperation = 'Initialize'
 
@@ -148,7 +148,7 @@ function Import-SmartM365CoreModule {
     $searchRoot = $PSScriptRoot
     while ($searchRoot) {
         $candidate = Join-Path -Path $searchRoot -ChildPath 'Modules\SmartM365.Core\SmartM365.Core.psd1'
-        if (Test-Path -LiteralPath $candidate) { Import-Module -Name $candidate -MinimumVersion '1.0.74' -Force -ErrorAction Stop; return }
+        if (Test-Path -LiteralPath $candidate) { Import-Module -Name $candidate -MinimumVersion '1.0.86' -Force -ErrorAction Stop; return }
         $parent = Split-Path -Path $searchRoot -Parent
         if ([string]::IsNullOrWhiteSpace($parent) -or $parent -eq $searchRoot) { break }
         $searchRoot = $parent
@@ -429,26 +429,7 @@ function Import-SpoMailCsvSet {
 function Ensure-SpoImportExcelModule {
     [CmdletBinding()]
     param()
-
-    $module = Get-Module -ListAvailable -Name ImportExcel | Sort-Object Version -Descending | Select-Object -First 1
-    if (-not $module) {
-        $installCommand = 'Install-Module ImportExcel -Scope CurrentUser -Repository PSGallery -Force -AllowClobber'
-        Write-SpoLog -Message ("ImportExcel is not installed. Automatic installation starting: {0}" -f $installCommand) -Level WARNING
-        if (-not (Get-Command Install-Module -ErrorAction SilentlyContinue)) {
-            throw "ImportExcel is missing and Install-Module is unavailable. Install PowerShellGet, then run: $installCommand"
-        }
-        try {
-            Install-Module -Name ImportExcel -Scope CurrentUser -Repository PSGallery -Force -AllowClobber -ErrorAction Stop
-        }
-        catch {
-            throw "Automatic ImportExcel installation failed. Run '$installCommand' with the SmartM365 execution account. $($_.Exception.Message)"
-        }
-        $module = Get-Module -ListAvailable -Name ImportExcel | Sort-Object Version -Descending | Select-Object -First 1
-        if (-not $module) { throw 'ImportExcel installation completed but the module is still unavailable in PSModulePath.' }
-        Write-SpoLog -Message ("ImportExcel installed automatically: version={0}; path={1}" -f $module.Version,$module.Path) -Level SUCCESS
-    }
-    Import-Module -Name $module.Path -Force -ErrorAction Stop
-    Write-SpoLog -Message ("ImportExcel module loaded: version={0}; path={1}" -f $module.Version,$module.Path) -Level INFO
+    Initialize-SmartM365ImportExcel -InstallIfMissing | Out-Null
 }
 function New-SpoTimestampedWorkbook {
     param(
@@ -456,7 +437,7 @@ function New-SpoTimestampedWorkbook {
         [Parameter(Mandatory)][string]$Path
     )
 
-    Import-Module ImportExcel -ErrorAction Stop
+    Initialize-SmartM365ImportExcel -InstallIfMissing | Out-Null
     if (Test-Path -LiteralPath $Path) { Remove-Item -LiteralPath $Path -Force }
     foreach ($csv in $CsvFiles) {
         $rows = @(Import-Csv -LiteralPath $csv.Path)
@@ -1105,7 +1086,7 @@ Invoke-SmartM365Preflight `
     -ScriptName ([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) `
     -RequiredModules $requiredSpoModules | Out-Null
 if (-not $MailOnly) { Import-Module Microsoft.Graph.Authentication -ErrorAction Stop }
-Import-Module ImportExcel -ErrorAction Stop
+    Initialize-SmartM365ImportExcel -InstallIfMissing | Out-Null
 if (-not $MailOnly -and ($UsePnPDeepScan -or $TenantCapacityEnabled)) { Import-Module PnP.PowerShell -ErrorAction Stop }
 
 $ScriptLocalConfig = Get-ScriptLocalConfig
@@ -1495,8 +1476,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDybeLrju3PVdNa
-# q8kaG4kPWCqdyEFVKkUfKX1ZQo8buqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA6qJzd421XFjBC
+# 7H6QD8CQ5CQ6Ic/BeVXXtg5SOW/hqKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1629,31 +1610,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEICUITujzF30dP/ifphAVqSKx1pRUg6YNaTtoubEPA+tkMA0GCSqG
-# SIb3DQEBAQUABIIBgHmHP5n9f2XLlZ4mWxfYkN4Q+iemD88C8ettxeyDfpsbLMPF
-# 90VwtN7az29Stsqo8oDhhcMXb0mFS0bKmd91IDuHZG+gIbHRrYfQmmPQWHxM/BQG
-# deIZFOXizpIT+kZ18b6pMTeAGqjXhtfU5YIFVo4wFQhBrWK3V4IVNi6Nr4QkKwti
-# qDvsHL/dEc0wpVsHU5osTgrTNdGobaZ9EIdQS+5//9aP8DW1k6M1ur3pN9tmXwyy
-# jAPkiIFmFUAVBZYgbPQZWpus7C5Yu5XcRKO2J9gI2CODd4f5fjr3czwj3/ZuGCLl
-# 6xl22/kWTBy4UUAGVbv8M7lONUB+hCOSxX8VlzsUfDi4RgIDFEj1sohABIlrImOl
-# LhjkLeP6+laQJXs0xd99NO73xDbkB+w0pCPRkYX9f2wiMTD7NEHcG2PFGiQs4HDo
-# lDkPzslL26OtzWrYBB30XFDOiP4zaZhQJudEnPOpgnH0Ry5ljB+3xjyxweWp3MjG
-# qhk7SX5b9z7OGYihyKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIGBudopdWpLjtfIX+L02EMLX5jgKyK+yfstZG2812CEyMA0GCSqG
+# SIb3DQEBAQUABIIBgD1ws1dl6vOsR1zGXsc2SA6P0mI3Sy0lHqBKfjC4aAMEkWBc
+# MlIJO45VPG5RGCPtfcPNK+HU8zGquzJJ0crKcnknEhOJRYPv6xRWMgH+Vj8OcmwM
+# WBcrfX50P8+cpbAZQedPskYi8l9vicYoX5V5gyKtsBf+UWBU5V2JTRk0/cBcmf+v
+# BMszm4bZWcWvPR4FFvaAVWiy/bILC9M5n3H+1S34uxDoetOV1PmA3bdATB81jZF2
+# xiTre1/vXOGCA3DR/SJ8l/TIRqJDUIYEydbgA/dW7QOHt93AgAtYV5btg306VYqh
+# C1RClkjyEV4hGhi4azHAIypBUujHz1B1shAfPVQ6fxIzv63NIiNw60rG+SiAM24X
+# UePGk2WaRw9jiPo7SUlGTQbMd5koR2rz3S6Mwtk2c4fCxbHUoTjbfab6juFJnlon
+# 4yKAueXI/yy0uDvQXUPxCJPUGoGC5TjTVldwMRlLphV9LVBVenKDVuPunSrW11vD
+# J3x1W63b1qPHh/0mYqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTMwNzM4
-# MDNaMC8GCSqGSIb3DQEJBDEiBCD3Lpsp19u1lb+4alRHQMFyrKBK4QHSwrI1+8g+
-# bX/s/TANBgkqhkiG9w0BAQEFAASCAgAeZJOqXfGvNdjRc/PHpNOGoXxZ+KKjuDlW
-# sFKqOdNHsHvDRAuybozACE1xM94r591pyJ4QF0dX3UCzyn5g/b353hhppzxuZcRz
-# wz2g4cxpZtAlbbpP6SK7+XG8+tlSZdtQucVrOLkvC8LeB1KQNULN5CUwUuxxDzhJ
-# adjPhalxL3ofjGyTer3GD8HfKpIt1Lf9BkclOdsj8K/vWflSqTGeel++38kh+mVs
-# uU7pwuYGEo2OJ2rPPvThrWDB5AkUGBfLao6Qnz9ivwhdX8LoCgMYXIoxgilaFM+o
-# DUKaw9JHrod+YEdBTx0GCGMi2hFXCwBwFcKcpFhUpgwgI3R0XxEvGgpa+YGouMm4
-# VPGK0kvLul6spfCwcVsPo7ABJuYKFhegTCTigj1u2zD19oCeoQNsnklgYTGHps0h
-# 4AGpab1JgmC4zBoDAjTOqiUpySSO7lq9KRT/d936oYB3xNnoFUOL1AKs+V+3r7Hk
-# ggi+MWj+RoPEtByze+C+tLB7o++uLZKp75DGavTujqHxhyL0TeODFQ3cKyTvtO5k
-# eKh0EK8l2JNqwxXpNcFLqHmH9k7vc1FE+dp/hKJXrjar846QKxn04pWPxwzIybhI
-# jQ/hxQzalHctpxCM8lyOh9U9puz63+c0DsqJAWBTUmvNSWJSIQ0nj0EWkoQ9zGGs
-# usqEOkPPhA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTQwODMw
+# MjZaMC8GCSqGSIb3DQEJBDEiBCCvZXgAF8DADus04rdkoGea/Z5OX3ekfiXywG9w
+# OzHRFDANBgkqhkiG9w0BAQEFAASCAgBLZw4StuE6hgvXdonOmIJWNSPwyQpAabKl
+# OZeKm4f/b7PtGeAoB4z96shRSvZ1W7fOJSiE+duDUB7wvPG8W8KTdQbVolyb52tb
+# vPnE22yvpX0eP4zj2EdVl6Jyvmo3FScLnztHlE2aKILNrNZOAk7XnveB+KwfGixp
+# psTl5SSwcEsb+QWnOQ2UdmJXMuU5fnUu2Qkg5uxAdNeP5em4qCQiiaAUMoTHqRjQ
+# Z58jeqUrIGORDOV3h727hfadAN3DNxIC4PPn+jELKQ4QG+IOEC7lHzX0MmuIuGUX
+# 0etCo9cU+wNqdxVZg78bpSf87tUyZfMGe1oX1QUzDXTaqxe9EVEEGz5DauaGmNed
+# hjfYIDtHAGqP5flnEscbiBiAMGwegtgZf5BfGlNgSA2imKz5JYmx2zeRrNmjWM3E
+# osUhbD9o0HkAve+ki9/bkZo1prTmCeeneULlhJEQcR0vVIUyV9DMA5b5FwEldPo9
+# 3zmTRK0QLXHNGx5KhrfHwioGMHgcdTsaugD9KNuIdvBOBazVeeiVhhKSpU0kZy2M
+# tdWId9pdh7YtezRcArDZkTuX59NehhMrBhX6toylR/wqzIlxFLuL4bm0bxpZtPMv
+# ZZhXOabpmvrQiiLL0v8A7wjNtrtbEwNcKXMVtpEzyWCPoSQlcZAVJOQ6VDEaGbAK
+# L1E7UhJOgw==
 # SIG # End signature block

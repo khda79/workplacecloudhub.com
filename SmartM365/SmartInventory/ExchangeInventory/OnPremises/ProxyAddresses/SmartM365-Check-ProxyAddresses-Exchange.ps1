@@ -62,7 +62,7 @@
     - Maintains logs and cleans up old files automatically.
 
 .VERSION
-1.28
+1.29
 .AUTHOR
     https://github.com/khda79/workplacecloudhub.com
     Minimum permissions: Windows PowerShell 5.1, Exchange 2016 Management snap-in, ActiveDirectory module, Exchange recipient read access, and AD read access.
@@ -290,111 +290,9 @@ function Ensure-ProxyAddressesImportExcelAllUsers {
     [CmdletBinding()]
     [OutputType([string])]
     param()
-
-    $moduleName = 'ImportExcel'
-    $requiredCommands = @('Export-Excel', 'Open-ExcelPackage', 'Close-ExcelPackage')
-    $allUsersModuleRoot = Join-Path -Path $env:ProgramFiles -ChildPath 'WindowsPowerShell\Modules\ImportExcel'
-
-    $getValidatedManifest = {
-        param([string[]]$SearchRoots)
-
-        $validatedManifests = @()
-        foreach ($searchRoot in @($SearchRoots | Select-Object -Unique)) {
-            if ([string]::IsNullOrWhiteSpace($searchRoot) -or -not (Test-Path -LiteralPath $searchRoot)) {
-                continue
-            }
-
-            foreach ($manifestFile in @(Get-ChildItem -LiteralPath $searchRoot -Filter 'ImportExcel.psd1' -File -Recurse -ErrorAction SilentlyContinue)) {
-                try {
-                    $manifest = Test-ModuleManifest -Path $manifestFile.FullName -ErrorAction Stop
-                    if ($manifest.Name -ne $moduleName) { continue }
-                    $validatedManifests += [pscustomobject]@{
-                        Path       = $manifestFile.FullName
-                        ModuleBase = $manifestFile.DirectoryName
-                        Version    = [version]$manifest.Version
-                    }
-                }
-                catch {
-                    WriteLog -Message ("Ignoring invalid ImportExcel manifest '{0}': {1}" -f $manifestFile.FullName, $_.Exception.Message) -Level 'WARNING'
-                }
-            }
-        }
-
-        return @($validatedManifests | Sort-Object Version -Descending)
-    }
-
-    $importValidatedModule = {
-        param([Parameter(Mandatory = $true)][string]$ManifestPath)
-
-        Get-Module -Name $moduleName | Remove-Module -Force -ErrorAction SilentlyContinue
-        Import-Module -Name $ManifestPath -Force -ErrorAction Stop
-
-        $expectedModuleBase = Split-Path -Path $ManifestPath -Parent
-        $loadedModule = Get-Module -Name $moduleName |
-            Where-Object { $_.ModuleBase -ieq $expectedModuleBase } |
-            Select-Object -First 1
-        if ($null -eq $loadedModule) {
-            throw ("ImportExcel was not loaded from the expected AllUsers manifest: {0}" -f $ManifestPath)
-        }
-
-        foreach ($requiredCommand in $requiredCommands) {
-            $command = Get-Command -Name $requiredCommand -Module $moduleName -ErrorAction SilentlyContinue
-            if ($null -eq $command) {
-                throw ("ImportExcel command is unavailable after the AllUsers import: {0}" -f $requiredCommand)
-            }
-        }
-
-        return $loadedModule
-    }
-
-    $allUsersCandidates = @(& $getValidatedManifest @($allUsersModuleRoot))
-    if ($allUsersCandidates.Count -gt 0) {
-        $selectedAllUsersManifest = $allUsersCandidates[0]
-        $loadedAllUsersModule = & $importValidatedModule $selectedAllUsersManifest.Path
-        WriteLog -Message ("ImportExcel AllUsers module ready: version={0}; path={1}" -f $loadedAllUsersModule.Version, $loadedAllUsersModule.Path)
-        return $selectedAllUsersManifest.Path
-    }
-
-    $currentUserSearchRoots = New-Object System.Collections.Generic.List[string]
-    if (-not [string]::IsNullOrWhiteSpace($env:USERPROFILE)) {
-        [void]$currentUserSearchRoots.Add((Join-Path -Path $env:USERPROFILE -ChildPath 'Documents\WindowsPowerShell\Modules\ImportExcel'))
-        [void]$currentUserSearchRoots.Add((Join-Path -Path $env:USERPROFILE -ChildPath 'Documents\PowerShell\Modules\ImportExcel'))
-    }
-    $myDocuments = [Environment]::GetFolderPath('MyDocuments')
-    if (-not [string]::IsNullOrWhiteSpace($myDocuments)) {
-        [void]$currentUserSearchRoots.Add((Join-Path -Path $myDocuments -ChildPath 'WindowsPowerShell\Modules\ImportExcel'))
-        [void]$currentUserSearchRoots.Add((Join-Path -Path $myDocuments -ChildPath 'PowerShell\Modules\ImportExcel'))
-    }
-
-    $currentUserCandidates = @(& $getValidatedManifest @($currentUserSearchRoots))
-    if ($currentUserCandidates.Count -eq 0) {
-        WriteLog -Message 'No valid current-user ImportExcel installation was found to promote. The preflight will attempt an AllUsers installation when Install-Module is available.' -Level 'WARNING'
-        return $null
-    }
-
-    $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
-    $principal = New-Object Security.Principal.WindowsPrincipal($identity)
-    if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-        throw ("ImportExcel is only installed for the current user. Run the launcher as administrator once so the script can copy it to the AllUsers module path: {0}" -f $allUsersModuleRoot)
-    }
-
-    $selectedCurrentUserManifest = $currentUserCandidates[0]
-    $destinationModuleBase = Join-Path -Path $allUsersModuleRoot -ChildPath $selectedCurrentUserManifest.Version.ToString()
-    $destinationManifestPath = Join-Path -Path $destinationModuleBase -ChildPath 'ImportExcel.psd1'
-
-    WriteLog -Message ("Promoting ImportExcel {0} from current-user path '{1}' to AllUsers path '{2}'." -f $selectedCurrentUserManifest.Version, $selectedCurrentUserManifest.ModuleBase, $destinationModuleBase)
-    New-Item -Path $destinationModuleBase -ItemType Directory -Force -ErrorAction Stop | Out-Null
-    Get-ChildItem -LiteralPath $selectedCurrentUserManifest.ModuleBase -Force -ErrorAction Stop |
-        Copy-Item -Destination $destinationModuleBase -Recurse -Force -ErrorAction Stop
-
-    $destinationManifest = Test-ModuleManifest -Path $destinationManifestPath -ErrorAction Stop
-    if ($destinationManifest.Name -ne $moduleName -or [version]$destinationManifest.Version -ne $selectedCurrentUserManifest.Version) {
-        throw ("The promoted ImportExcel manifest failed validation: {0}" -f $destinationManifestPath)
-    }
-
-    $loadedPromotedModule = & $importValidatedModule $destinationManifestPath
-    WriteLog -Message ("ImportExcel promoted successfully for all users: version={0}; path={1}" -f $loadedPromotedModule.Version, $loadedPromotedModule.Path) -Level 'SUCCESS'
-    return $destinationManifestPath
+    $requiredRoot = Join-Path $env:ProgramFiles 'WindowsPowerShell/Modules/ImportExcel'
+    $ready = Initialize-SmartM365ImportExcel -Scope AllUsers -RequiredModuleRoot $requiredRoot -InstallIfMissing
+    return $ready.Path
 }
 
 function New-ProxyAddressesWorkbook {
@@ -407,7 +305,7 @@ function New-ProxyAddressesWorkbook {
     if ([string]::IsNullOrWhiteSpace($script:ImportExcelManifestPath)) {
         throw 'The validated AllUsers ImportExcel manifest path is unavailable.'
     }
-    Import-Module -Name $script:ImportExcelManifestPath -Force -ErrorAction Stop
+    Initialize-SmartM365ImportExcel -Scope AllUsers -ManifestPath $script:ImportExcelManifestPath | Out-Null
 
     $parentPath = Split-Path -Path $Path -Parent
     if (-not (Test-Path -LiteralPath $parentPath)) {
@@ -600,7 +498,7 @@ $ErrorActionPreference = 'Stop'
     }
 
     #region Module Import and Initialization
-$ScriptVersion = "1.28"
+$ScriptVersion = "1.29"
     $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
     $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ProxyAddressesCsvLogFolderPath' -DefaultValue $OutputPath
     $LatestCsvFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ''
@@ -612,7 +510,7 @@ $ScriptVersion = "1.28"
 
     try {
         Write-Host "Loading module SmartM365-WindowsPowerShell5.psd1..."
-        Import-Module -Name (Join-ModulePath 'SmartM365-WindowsPowerShell5.psd1') -MinimumVersion '1.0.50' -ErrorAction Stop
+        Import-Module -Name (Join-ModulePath 'SmartM365-WindowsPowerShell5.psd1') -MinimumVersion '1.0.56' -ErrorAction Stop
         $InitializeOutputPath = InitializeScriptEnvironment -OutputPath $OutputPath -LogFileName $(($MyInvocation.MyCommand.Name) -replace '\.ps1$','')
         Start-SmartM365SourceReceipt -ScriptPath $PSCommandPath -SourceRootPath $LatestCsvFolderPath -ScopeParameters @{OrganizationalUnit=$OrganizationalUnit;AllOrganizationalUnit=$AllOrganizationalUnit;AddMissingAddress=[bool]$AddMissingAddress}
         Start-Transcript -Path $global:logTranscriptFile -Append
@@ -710,7 +608,7 @@ $ScriptVersion = "1.28"
         throw 'ImportExcel is not installed in the AllUsers Windows PowerShell module path after preflight.'
     }
     Get-Module -Name ImportExcel | Remove-Module -Force -ErrorAction SilentlyContinue
-    Import-Module -Name $script:ImportExcelManifestPath -Force -ErrorAction Stop
+    Initialize-SmartM365ImportExcel -Scope AllUsers -ManifestPath $script:ImportExcelManifestPath | Out-Null
     $importExcelModule = Get-Module -Name ImportExcel | Sort-Object Version -Descending | Select-Object -First 1
     WriteLog -Message ("ImportExcel module loaded: version={0}; path={1}" -f $importExcelModule.Version, $importExcelModule.Path)
 
@@ -1461,11 +1359,12 @@ WriteLog -Message 'ProxyAddresses report email is disabled; CSV and workbook out
     catch {}
     Complete-SmartM365ExecutionContext -Status Success
     #endregion
+
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDpi+bnsdshs7+v
-# vCBo3ySbsoiRXZ4RlwOmfH8l/l/2FKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAkSwtCUlPTv2Rd
+# DS3ooA0gE4bYLfO7N+f6TZdVkjloRKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1598,31 +1497,31 @@ WriteLog -Message 'ProxyAddresses report email is disabled; CSV and workbook out
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIM2+vV0+VXYx/SGhPwsq4mIw4KvKsHevQ8t7hx/V6C8oMA0GCSqG
-# SIb3DQEBAQUABIIBgAkxiOtGPbZemRodjMKXkeLfmC9V50omDsdxaEfzUr0WljBS
-# LioCtJJnS6y5HIxdNnJcR+PaCGISrJzropvCpWIp7f/yogFUbsI4I2IL2UTlicqj
-# kjf8p4kcSSvnGjFUtFqgafVNh8c8+h7WvKElBff5BepzAgcDkomcfK3u08gxPcrA
-# PKzR1jqOc8OgFexj3dNlfwyYk6rI3TUO1JegPIFTky87SDp5n8JxcYqXMAOXauUf
-# +Wj0wTy4d8YlWukI3Rz8WKr5ID/fGNcAiGcKbd5gL8OibsLnbUVVqQf24PgEBaGY
-# A0PwibMi2WzVPBznYQkW1ZmUEyg9z8nud/SjYBxCXzSLadlkCxJFpk1hsy5zUKzt
-# cjrArBwATRiw+9ynaSizWYmgDDoDzDtReJGlOcF+Db3t33h1QHWVR8q5iLUChyzk
-# 5TjUPb5Ahuyl8tsVZMWLthcA+izK4jiQ8n6frw/6TxGcpjFL4fz+KOS+RiYbVYPp
-# p/hn0KOuaQCG+sqUfaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIK8KX/buByPWhVcCSJPTEZd4mOa7IqthCkkRAz0lP4YoMA0GCSqG
+# SIb3DQEBAQUABIIBgHTIJp+1eJxevCzKOh00jcUWeHN6DdU5jYSKOxL/2ihl/Dmz
+# PxVbvZfN1ev/Oso8Ema82on0/tVPUPiGsKdsPck1/W8lOh8Aju6Xb9xYr3zYR8ax
+# IEB6RcuqVu4K01q8i4QXP4m98SwTsFFOxhz4BQSTZwew1aWui0tQVs5pGfVRngEp
+# GzJ/xwtRLO6MtRDIH9Cu2bbD4CbvXMcJCtyBTT/mlextgaS+hDt5G8xVxBIQYaIq
+# z3B2hSp82mUVHkbK2Llm35R2IKpolduN9OFWd+IetXIFWEXjSfs8DsXMrgQEc0gk
+# /cJ+IwBzHnPsGXKKFzoBBTClALMv9QvU2LpZpCN9hAXwTgzdSJX/w1czDuvQAXz4
+# NCoN/xcfuNzxlo7yaC2/iCnpPviiuLJQ7+x6YqNZLdX+oeBFJaUHFrXwA6HrqagU
+# Pbp4VnuQtAf6SGUkzgQM21f0IQXxLTPIIhBcOq3Sdu+29ILPSwToFFWLLw9M6R+W
+# X2Yme57kViWKUXo1T6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDYwOTIz
-# MDFaMC8GCSqGSIb3DQEJBDEiBCCPaIIqxFDmGkuqxo/j/yJGJe1tKmUFgxFT6uua
-# H3Ka/zANBgkqhkiG9w0BAQEFAASCAgCwfXpeVkF6G/iGE/hhx+46TVJ2GW2/3lvj
-# /CK4zVPkYjOPy/8T0u0ip5kpkMUbN0nPRKZXFZQ3AK6D1nT5tP+hz0jOmEZFTC3S
-# g2hC1ZVWf6pRJOospO7IoAZmF32cKMAtEPMWBkuctYXWEPwpiy4KNNcStj5b/Frn
-# f3ee7KeG3N7qN9XzeSA+l6sx3cIorpToFhzfQ4kqaUglaDLvoiuxcBkFO+XJ09SN
-# oQkQ4drO8QO2fhrkf7desXjHliCC3gBRfisOwC3DncbvQmF3vZ9EH36LA0uf71WR
-# FgAYk7UujcVtM6Emko8HYaaBHLHE4p+3kFDFkV0y8osJIOM4SomZ6NG7hgtq3h8w
-# 4gC07ACYYAloC+lEtC2WCf5eVYJ1xT5GlYEwfEew12yjioB82UD82jr44berPFek
-# IxcZp+kXlvl09dIzfgxd41xaV3a6MgpEoJpykackjqCKWLXz2o/okbEIPvFnpjC9
-# CoNu8FlGk/HcyTv3QVRngB+TV0ZQMNXinR1OksilPXefR2j8gxuLrlALpRweT4DQ
-# HXGFgg/Kas3CKCe67xex0+Wfhb4REejOpnGOBaYqMvxK4K7I38TfDNqqy84u8bhU
-# OK3gVWAvrdCrROXiD3sNXX4wgiHmviJz4yeGzD3Fkfy1Ik2suI+dY1cJo/wzUGY3
-# yn/jmSzKHg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTQwODMw
+# MjZaMC8GCSqGSIb3DQEJBDEiBCANPpD2qhkX5Of7IhHOpOhR6NnI58FhBExEfykJ
+# v4oAETANBgkqhkiG9w0BAQEFAASCAgBCoqxHdo8E9SCO/ceNQ+3k584H56F/hWUx
+# nXfcawmzdYu92aLmmQVC23nowjx8DGPsaujYLuCns1owaR5dfRDt27sGy7ACqqs+
+# 86kZmbbLvGdM3m+gnaESqLdKidq6hQRp8+r00fHRcm2VF7dSWEzctp46oI0liybr
+# nAwxTtSaNyTUf4BQyVopHUvZh78vWOPcXQt0Zjme9oMhPc/ZV63AObTi5tMMStG4
+# 6jximKgCWPUeGZnl6CbrT+ly3X3tM1GUt/e6s8DMcmY0fA1qWdOOqYYjfgbwkrt1
+# qkuvoTRxgZHhkj3mK4rcIZqiyXGbPEkHFvu+2cZvRT5AmHjg99OVl0OFAVOnKQVy
+# 0JwVNOwbqVG2ktb/MjM/sDNbNR1a/6ErXFe1cBchnJiMmIlWQqQd6XNudgZRbEbi
+# ka1qYbw61i686UjCdGHGKMcidKkWkpND/uODHmGWeTf7BhNYbhdQGCYVHNNIGhji
+# XcMCaMBBusUoiGZbsmaRG0C2ed0LDPTtjPooRgqcYwWGsXzTAm7GElyPWcLQKV64
+# KyOB9vlDnIZ66IsaE0sWQVh1B0HTwAz6kKdSxNrh8MwAgiw2D4aZfGuOAdxa3XJR
+# kwN6cO6zls2D6kqeHVX5ilN0RkWqFvoqBSqv/a04prixiz9G/8IuZeOhD8YkZXO8
+# HWqETdopmg==
 # SIG # End signature block

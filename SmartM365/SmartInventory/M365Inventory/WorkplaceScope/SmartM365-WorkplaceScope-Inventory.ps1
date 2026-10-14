@@ -3,7 +3,7 @@
 .SYNOPSIS
 Collect native Entra direct membership and Intune policy/assignment evidence.
 .VERSION
-1.0.8
+1.0.9
 .NOTES
 Candidate collector. Not automatically scheduled until production qualification.
 Graph beta membership avoids the documented v1.0 service-principal omission.
@@ -20,7 +20,7 @@ try {
     $smartRoot = Split-Path (Split-Path (Split-Path $PSScriptRoot -Parent) -Parent) -Parent
     . (Join-Path $smartRoot 'Config/SmartM365-TenantContext.ps1')
     $effective = Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot
-    Import-Module (Join-Path $smartRoot 'Modules/SmartM365.Core/SmartM365.Core.psd1') -MinimumVersion '1.0.71' -ErrorAction Stop
+    Import-Module (Join-Path $smartRoot 'Modules/SmartM365.Core/SmartM365.Core.psd1') -MinimumVersion '1.0.86' -ErrorAction Stop
     Import-Module (Join-Path $PSScriptRoot '../../Common/SmartM365.EvidenceCollector.Common.psd1') -MinimumVersion '1.0.7' -ErrorAction Stop
     Import-Module (Join-Path $PSScriptRoot '../../Common/SmartM365.WorkplaceSource.psd1') -MinimumVersion '1.0.0' -ErrorAction Stop
     $script:Runtime = Initialize-SmartM365EvidenceRuntime -ScriptPath $PSCommandPath -EffectiveConfig $effective `
@@ -29,6 +29,7 @@ try {
     Start-SmartM365CmdbSourceReceipt -ScriptPath $PSCommandPath -SourceRootPath $script:Runtime.LatestCsvFolderPath -ReadOnly:($ValidateOnly -or $MaxItems -gt 0)
     Start-Transcript -Path $global:logTranscriptFile -Append | Out-Null
     $transcriptStarted = $true
+    Initialize-SmartM365ImportExcel | Out-Null
     foreach ($module in @('Microsoft.Graph.Beta.Groups','Microsoft.Graph.Beta.DeviceManagement')) {
         if (-not (Get-Module -ListAvailable $module)) { throw "Required SDK module missing. Install-Module $module -Scope CurrentUser" }
         Import-Module $module -ErrorAction Stop
@@ -234,8 +235,8 @@ try {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCNRxPkfxEXvwS2
-# QQkCUf+T+1ui/T0xIhJF+7oeuAPzsKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAWrsXHcg23O6jA
+# stBGsbyL3iaqdoboSIUXjain5SW+FaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -368,31 +369,31 @@ try {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIN6xjhrh0AoBDu9ud7DtmAYvz1IVbNY7VUaGQZpXZZxiMA0GCSqG
-# SIb3DQEBAQUABIIBgBW4dITrVUloAxqnkOBZ28Ksr0iwfE87/C9ol5jhbOx5olAi
-# mAyfWEOs2MtaFKDxOILZmJ+JbzusD+n7C5ByoP7jtB5b2JqiNVWmFYmOAgrP5QBR
-# xx+/8HkuXrk4ohAqfFbjWePV0FYbEnlFCqBbBG/un9550cDhN/bjQOOFLqRuAhve
-# d53WwBdkLw+Xq3sD45mK2zMAaBfLJaqQphtWeG07F6FfyYcTTYz0j6MMyOSOBdSc
-# X5TwSUmuMfDqFNnJdULOi7MeiY7vuPl8nadJPdFL6k+5GAd6iwpWRBmGcbzBuOpl
-# AsP7ukjVJ4PmSUVBuYu+TsgGCeSPcDr3+M5xM89DMOwa8+E0qwjkTWjpwSd5EZ3D
-# 3jJrYGMub8IbLSUqO/JvfBkjHmoo8zO47nIsHBVQ2LaLPkfjYi70AYLRCaJPDf5z
-# Y+sbuhadJfp6a2R+5ka7wJf0d3CJsa3O++2RcAc7DbfpoWHahza9AjXkQRoMibGG
-# lYBTn91lKO44RAS1N6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEICHOEr2H+RN7alm29HA9E0IgQ4+Zl+PhQajMbhbflHRLMA0GCSqG
+# SIb3DQEBAQUABIIBgFcbvX7MfXOU7kp0P3juMbeiAIEoQ2ql4igzh7FOURkf6LKW
+# I7vP6S4zkAEVvyPBxkl2GGiUov2HFVW+gTkjl5v38+sNv0bH/9uSshVHD6McsXH5
+# p2QqU0ZG3AVQYwKlVQ8NCqpG/plz9PBMxduGO+fOogBz8j7FRdoWFpVhUzWVB2Y2
+# Eiz1RQ78vULTRNkEVDROyPQzl3FGeOTEy16cqe5ADLJSXX5tpXmrqk5vug5mfTLd
+# Yvpprqmv7QMdY8I6Mp9X2oJQNNPf178VXtQGJ4bmLpLN1H5Nab4dYNf4OBrHDn3p
+# 2Y0JYZk3pv1gjmU+n52QAOdnXLu8FDVna5f0odMsFILvNRn74b5Ud5QclMGjZbpB
+# ykGcrGlFG10zDCEUDm33J/QS/8CAvwLkOkF6t3ln8QmokuasrjFj7+Sac62i8BeH
+# d5cHeLajJsYYkK/dugROKZgx/9mouStDpljDpjvqNe3Au0/mQTLhQ25Sf7kt81Uv
+# s/8JE0Uoi6z55xsII6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDYxMDM4
-# MThaMC8GCSqGSIb3DQEJBDEiBCCEGp7dI+So4gXJLXQXj0dWOsQF9WtzxSVpIWBU
-# ZY9jyTANBgkqhkiG9w0BAQEFAASCAgAzBesDmv7ndAc9xj1SwsXiNg4efZfTgKht
-# +F8KQ6uhimhm7i8aPW0YGiahCpzNCfih/4eFz/6OSSjY2ZlA3GfCXNJ7DyRMHQDD
-# 4+FXqCmLxaemV/rprNUwFBMSOpnHWiawY5S3BbV7VgRJK+ezewCqwW3OOcTH+XWZ
-# jpsk1oElFqBxlZM65y8Wcd9iz0YzFk0YGakEQt5p2qgttrnQh4cWFLlIUiAtO44K
-# aYK90OiLJ1jdTDRR2rwtI15e2i3AnYI6wPFnkoKcRMSJ+W7Mgj82GO0F605lQ1xt
-# eCjtZbOua1yW0OJ1ScYyscveB2fW6a3Cj4lOzviqEKApBtsJTrVgfXtdAPzY/Bhz
-# oUzOb81Aptvc+86N01UWNtR1fXt3EQ20xQ5HQwNFFgtWUchbSW4ke1FMFP3Eeb1D
-# /I3/qJXT2FG3IPtlr40/RZIaUFoYRxnY95aMHbXIki3TA99Z+eIwvqzMnzqHFWLI
-# tx1y5Pn0Xx79Jm7/k+kDCSI8kQNm8fdNj7+a4YxV/pRuJuvEgXczvT4wLQ3P6oGt
-# trS7TSMpWZcNet9kUpnaa031vzMmLoh9M8/WTE5zmDpBl7xNdlT3aW5rNaKIr8Jx
-# She9pG4tvuuengeaZ5xxXj7LPWlHdVrOSUzG4+PND+xxWq9aVdyDgOzh1XQANTAF
-# i6DVhfnk8A==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTQwODMw
+# MjRaMC8GCSqGSIb3DQEJBDEiBCBYMXasa0cQqAGJIkyb06weWdPtTKax3WE2BH8j
+# ybKZPjANBgkqhkiG9w0BAQEFAASCAgAQdEctSh11UmrkGXsYGsu8ilxW6hThHN3T
+# 1ObBqocf0pyU3Db3Fke/Xil0QwQOWo5lDFRsRTMe8tJCt3B9ZZp3nZIujZYGQfEl
+# BZ+oEjYkQyOh4deEUV+1azkf+j5JxO9qXfKwsw1feh63AJ2eVzvLi6nMGKMv1hmo
+# iQ4GtNwKLYJwBzBmCyDc8Lh94TLZEhqCowtgtFkut/pZeIzhfSl3+lwSEzfxctXZ
+# dWokqM6VET5k6eraNof/d79dBiDJAt924Oq1Mw60yyNAuau975kFO3+8jO9x2DIh
+# z03vKEviBnk3IaQhMvnTzFEomdtB6wwT8tgQF6bGt+hF6NdgSNBu6zLVJRRuBJvv
+# 6noouC5R9Z1CxkB83PF8OXT2r13ur2BR/nhIOOMsDJrGKdTuGHev4yFBG/P3ZG3I
+# hYlcoBgix1IVk7PKRQVs7y6ibvHT+0EeX53gK5/3mUYSNuuxRgl1CqJde47sEhma
+# sFimIyTJPBdu3nTJobeBp/MzOer1FkUm5BHmRcB+QKLQconQUDgBXa0lEuX8hpY+
+# nI933hOH3Epq2x6xJ16sWbrHOWXGkt+5kcA63eyarFsfTuRrqeEDFzzoz/URxHZp
+# TuTGFubgRCCOznEUnI+jyAiVt6CAxztzNdDD3BPLWK7Vm+H749hbOXGeUekcj4ec
+# tWNDiMhBMw==
 # SIG # End signature block

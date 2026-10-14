@@ -1,6 +1,7 @@
 # Site and persona classification from the private SmartWorkplaceIntelligence workbooks
 # (SharePoint DATA root). Same rules as the prepared workforce evidence; no rule is hard-coded.
 Set-StrictMode -Version Latest
+. (Join-Path $PSScriptRoot '../../Modules/SmartM365.Core/SmartM365-ImportExcelHealth.ps1')
 $ErrorActionPreference = 'Stop'
 
 $script:PersonaWorkbookName = 'SmartWorkplaceIntelligence-PersonaClassification.xlsx'
@@ -80,10 +81,7 @@ function Receive-SmartM365WorkplaceClassificationWorkbook {
 
 function Import-SmartM365ClassificationSheet {
     param([string]$Path, [string]$Worksheet)
-    if (-not (Get-Module -Name ImportExcel)) {
-        if (-not (Get-Module -ListAvailable -Name ImportExcel)) { throw 'ImportExcel PowerShell module is required to read the classification workbooks.' }
-        Import-Module ImportExcel -ErrorAction Stop
-    }
+    Initialize-SmartM365ImportExcel -SkipRepositoryRepair -CheckOnly | Out-Null
     @(Import-Excel -Path $Path -WorksheetName $Worksheet -ErrorAction Stop)
 }
 
@@ -248,8 +246,8 @@ Export-ModuleMember -Function Get-SmartM365WorkplaceClassificationWorkbookName, 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCBIX3Tfg1yk8rv
-# 7lVnF9snWPKb0aW8+VtFRJV4xiRtoqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDC7hFD4LjpE6Z0
+# 8DIrCcgHq4wBlLYj9Vj1SLtdmAXjMqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -382,31 +380,31 @@ Export-ModuleMember -Function Get-SmartM365WorkplaceClassificationWorkbookName, 
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIBFWyVlRzWA3I3S6EMEsCsAUx9ehuoosl9ogE8dc7tU1MA0GCSqG
-# SIb3DQEBAQUABIIBgBj83/fjKalkSINOqAQwT/cQYqEmHv9DF1WXW0SBMYBFNp6Q
-# bRIsyyMk9VngfdOEqHT222NN6Mvb7w0zUz01mmpqBqTNwalvOCLsnl7Jz3nV5882
-# uOrB4m+5m8mywJyJycfxc07Q4DVZD6s15wXNaFp/Y06aKjKuuQxSAZ9eGGddlxvV
-# oXZj5FFto81Nv1Hi7hg4OH/RvRTms2j4djvDsME3mab2QDqhdVJMtQP9Cg2jK/wM
-# y4yZjWvtrAyBgt8iVuKWzUDOhCrFpPOxLDQyLaAKB4eR1KP1rurEwfTN9af5acsQ
-# I3L96lq6v8vdUzMN8sjmxN+xSH7e/uksz0+E5eh3m2olLY6Boab60ugJp0qoc0/R
-# 4K+a26uZlBekNP9FuH/nUo1Z96BjYapqfE6H9Hi5BOGNCrOVuXpRzRUqD+XTzR7b
-# AcKb8bs4QgGLkb7lNSGYKEnmvZXhj9jdUHvyiMfjO/JKuQzIxB4Tv03EYBD91DPY
-# 6ExQx4y8aMgerMSg5KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEILioDIPpEg90a/7B8BqQRNnNg2kWBx0g0+Co12gANOFbMA0GCSqG
+# SIb3DQEBAQUABIIBgJ+o7GzopTrzqkrcX7dWlpU/oIaDlqMOXHZGYiRmvE9WSMMu
+# oZNDh7FhmV+AMkxgP6/lOf97kAGDICmrq27SebWENN2ginW69+/15AarQvvngjI7
+# BqgyT7ZR5owNedX8wPbm9XnR32P73neZiIkGwWtIbhf6lhq1du+M/B6gPMV02DNY
+# bhSo2rQksxA8PDL3C+Z/0fjsQC5EUz8o5P+++ywDyRvPcC7q8kq6bzDp7UeYGfAr
+# n7cJEFJX/Aqczs9udclMnDycklWqPjXmzWYx0Wh5Dlio/sqEu4RDMypJtaIb6/AE
+# mey5+or0n4js8CCRjj3IQQXgr4dNqYlgEyDYC1VC9LZSWawivZ3jP//zcsZgfBtg
+# ePMVCi3W/b0iQ8kqYfrQIN1WgE9/QYcOUv9I/ku30/pJ8e2dZCH7BjeNHZnXhvQN
+# AOSiLvEZrvNvd02O/QHq1I6ixqktrolq5WGKNBPysMLbiYPdZ25PEW/Q5rCQSaGU
+# 5QqPTsioBcSamPP8M6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDExNzUw
-# MjFaMC8GCSqGSIb3DQEJBDEiBCBiktSBzT7YRmi0FnBt0H4xX9YY2OCU3lg5EgOL
-# Ke3sFTANBgkqhkiG9w0BAQEFAASCAgBH5TBkjb1e3l7oPhGJvyQUpwd4r+VnDE84
-# h0PFPgXS1/28TTpCr/CIqJw7UvgqKgxAn1MuT1T5mOQm9IaneMzw49Jh7XNtWg7s
-# mTZ9w82OnV/5nA5BmZ/CnCl603jaoL691pEqpp8niE/zgHBoedyWRO0UxHwwUEYF
-# R5MXtJxwuPJLB60Es2BrX6jOE9c/YLSvvpGfXcjxuj5cOjsEFttpZjWCwJU4rJcT
-# 0eJ6u4S1YkT/jCMj8GoZL1OIeTNMiDvUzEeKrUKyL0JPYiKBcOn4c/TK7shiW8dL
-# IF6ZdVpnU9YbJ0CZP69aoC38W4uhVp9t3PcwhJCUzl1GLPNWSKPwO++hQO/N4gKi
-# Z+3fAh5CNXUgtBpXscigAZZLS9SlPOF+1LmbyVPWZddFnLNlBvflnCwTqu2o5qnt
-# 6QGr89VSctE+rJ76X3N8V5ECLJhrSqJEvgq/+WrDKe0bNIJHCXrh53C6gjPb7iFD
-# GeCwjcA44GZCAXGtJPe6bhGJ0FYCtXj9GA4fmWE29tUbSmA8sWzXrf56hRy3JOJX
-# KDtrdbO2awR9UvaR+mnK18TUxzHWztdXH2JncexDv9JHuELn8zGZri/RWdV4KdLJ
-# 107OT0/0JL6W9hDls5peji3cKJEZIEeHY4YJSsMM4Z/pIw2PEsjkew9/EESmIE6t
-# TnG2VsQByw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTQwODMw
+# MjlaMC8GCSqGSIb3DQEJBDEiBCBdmEOrtqIdah2TZ5nbAQqAvRNwDbuKwAFRXAtO
+# DLSBrTANBgkqhkiG9w0BAQEFAASCAgCjhTwgQ0rWScr3LdKOMbyLZMpcBfht3Kbh
+# d9JXTq65eJ0hStECXua9ADUB1ryEY9wX7uO62iFYwLg1uU/AQmziqMttXiDCwWf7
+# HEM1hE9d1mQk6nYTGFJ7VlI7WOYFmaRoRTCh974zM2INhmO+JU+8xKJsFg4tZESY
+# APYk7Js7d4mPWUTlSlYEKWoaSuvQG+TQI0a+ypZ4OX+9l5iDebJZxMQPX0ByWZKh
+# 6kvmYAGnddkww9719AeYB7S+qVK37mcI6grWWwDsGGn5c9sqd77Yi8rEnbi8yg+Y
+# b2aPILi0tn0qZnauNREq8cgfk+EOaz5nf36vZPkSAwN8j4FZftwbjCvTRaMpasMe
+# GLDpIgCVtXKMIMrICSD27qnNuyyTMNQqVNMt/zdgLbxl2VpVYbFzdZky4E63AL+q
+# XXVu5pDCLUo+mRtG02H8MsvkGk/cGsbJxAanWPfZYYApqBd+pYlmZ8GFJLxBVL8z
+# rljQzYy1Y2qYTzxCjnaikZe1So4sgPyIvbDozetsBFviYDr+JiqVSij+MphXNEPy
+# qbP+eibatkAwdJSIY4yBw4JgMoQM0vdpF8IJtxNGgukWu4I8QtgrrIWlfV4p0S3m
+# 7F0s/FbtJS2eQoWxHqwJPCKxu0c8CohqzcHWPh3nlhkFABfJJeG0Nq2MphwGP0/b
+# 0hZdUvm6/g==
 # SIG # End signature block

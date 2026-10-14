@@ -27,14 +27,14 @@
 .PARAMETER DryRun
     Lists target groups without making any Graph API calls.
 .VERSION
-1.17
+1.18
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication.
     Minimum Graph application permissions: Group.Read.All; GroupMember.Read.All.
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
-    Version : 1.14
+    Version : 1.18
     Author: https://github.com/khda79/workplacecloudhub.com
     Requires: PowerShell 7+, Microsoft.Graph PowerShell SDK, SmartM365.Core.psd1
 
@@ -398,7 +398,7 @@ $CsvBaseName       = "Intune_RBAC_GroupMembers"
 # ==========================================================
 $modulePath = & { $d = $PSScriptRoot; while ($d) { $p = Join-Path $d 'Modules\SmartM365.Core\SmartM365.Core.psd1'; if (Test-Path -LiteralPath $p) { return $p }; $parent = Split-Path -Path $d -Parent; if ($parent -eq $d) { break }; $d = $parent }; throw 'SmartM365.Core module not found.' }
 try {
-    Import-Module -Name $modulePath -MinimumVersion '1.0.72' -ErrorAction Stop
+    Import-Module -Name $modulePath -MinimumVersion '1.0.86' -ErrorAction Stop
 }
 catch {
     Write-Host "Failed to import SmartM365.Core module from '$modulePath' : $_" -ForegroundColor Red
@@ -542,7 +542,7 @@ $connectedGraphInThisRun = $false
 
 try {
     #region Initialization
-$ScriptVersion = "1.17"
+$ScriptVersion = "1.18"
     $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion"
     $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'RbacGroupMembersCsvLogFolderPath' -DefaultValue $OutputPath
     $InitializeOutputPath = InitializeScriptEnvironment -OutputPath $ScriptCsvLogFolderPath -LogFileName $(($MyInvocation.MyCommand.Name) -replace '\.ps1$','')
@@ -578,6 +578,10 @@ $ScriptVersion = "1.17"
     }
 
     #endregion DryRun
+
+    $script:ImportExcelReady = $false
+    try { Initialize-SmartM365ImportExcel | Out-Null; $script:ImportExcelReady = $true }
+    catch { WriteLog -Message ("Optional RBAC Excel export unavailable at startup: {0}" -f $_.Exception.Message) -Level WARN }
 
     #region Connect to Microsoft Graph
 
@@ -1021,7 +1025,7 @@ $MetaHtml
     $ExcelFile        = $null
     $CountryExcelFiles = [System.Collections.Generic.List[string]]::new()
 
-    if (Get-Command Export-Excel -ErrorAction SilentlyContinue) {
+    if ($script:ImportExcelReady) {
         $ExcelTimestamp = Get-Date -Format 'yyyyMMdd_HHmmss'
 
         # Consolidated Excel
@@ -1174,11 +1178,12 @@ finally {
 if ($global:ScriptFailed) {
     exit 1
 }
+
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBlPSadDemcPxDg
-# ZqyOOUQlUnBGGLpsE1D94uRhCHewzqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBDLRZhL6i0JwZO
+# YzgOBXYDsFegiPFTmE53A2rpuLVvmKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1311,31 +1316,31 @@ if ($global:ScriptFailed) {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIHQuFynn5EWaRr5ZX35KKO2FTW/NTu/zC/71oEmfiqZkMA0GCSqG
-# SIb3DQEBAQUABIIBgAgwaixPwFdF0b/uBKDRlQTEvdTtM65JTEgRAqjNvxxyXp1i
-# zeSh/3KGLa3KYI4kxjF5RuQs9vk3W7LMI0eHxZj6JuzHtL1JQ8hm8drwTFakIRSp
-# WqmWgaAZa0MHOtPOKDf/eNyFqD0toM5AS9UB6JeZfo16amuYFYzyhzA1gsWZ8s6U
-# y2iRmE/3+fgI3U3rZxBD2e0msh6C9A9u7pvQpOw7+E1A6Q+ss+ytvNbKuY180nWL
-# IGXy1eiuE/MOLAEUz+1UfDZ0vFDusPq6s2OLCeT1iUXlA0h0WIc/nCey+MRYwTIu
-# XDLKRMY0Mgh/ManL4tODYbD9TXAX9Z5kVGkOGTqG4Qu/quJzfImmUxSMKEpEU2AM
-# Jp4dTSJS2pPuYoABm75+ss1TSpJRecTtc/50ts5pvFb8nFFI9URdAyxLw9XuHCiS
-# mjMONYSUEeqFBfuAnE0AcKggdRNIJuETtb0bcLYp5Hhn1Qs+cWDxsCIihP56uh8q
-# TttZFyec/77whoEjDKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIJwfB7qDsixDEssAkjXmfgWteAyqey/EUkWD5pOf6enyMA0GCSqG
+# SIb3DQEBAQUABIIBgJhuuUDH7gB49CmWCkNMvT3reRV17Cvi2+ZOaHlv5Z9X7K2E
+# 1kavBmO3bxeZ9dGobsxgZiKiZn3W/p8AplNaGDhnqFWEWhXCHbcqLXZ80zOY7bdY
+# uELbrde5bgWhFIzNLEZ5+q0WhXdOyIcfQJqYc2Wzv73sokUZpkb9hIIOfrFdoCav
+# 82ZQjyxkvFsocUYUqM/J3NJ/RCer4G6VQ4Wictfc1/5ADCea2+I+t2V8oiI0zsrT
+# mkIz+CfZjU0QQIv8R/GdmBm+QW2k9fQjRMzetucwqOraNrfPkTERMvOtlD0n7Y/T
+# e2ffyv8L29bbTi0oPo5+vmpUJFcxdOxZ7XDmZy6GfhXrQQ8UGVEpcpS4xWGUCL5/
+# RJtEL37DeTu12jusctj3K1qBKrWyElW9Yw00qbGGj8bziAH27d8iXtgfchw7YbMU
+# nDz49PZpik3MI0RDAqf5csu1xezJD4yqBU48IL6tiTekSFlrBSfUD9R8SAtxxT/9
+# PTRd70EvtQDiucbzR6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDUxOTAx
-# NDlaMC8GCSqGSIb3DQEJBDEiBCDSM4+emOQ7VuAmd5Us1kqiozrrEEnAmXqx2e3/
-# nLS7+jANBgkqhkiG9w0BAQEFAASCAgBLx2jI7nge02YY3RRBBZWXf+qB5U+zY0ix
-# MBW2K0AyzRvt885JRJKXP9DsnxtXkxiDMHjj2sfwWYjZDS0gKlcrv2GX/PhCGdWG
-# HGjuBp6dVIkpKhE4bTxy3aTWevDqaWHMgpOYmSBkFquCk+ryUe8ZgI51/mvU2G9t
-# ocy9yFKRMYTFxVNX96yq6amcWrVbAlmCSm7xE4LiC8kYgN3WUJD+XH2SwWtjhgDF
-# TRH4ThMG9mn/GlCU0TJBjJKFqx2Ahhe2GiKez9A0YGpNmxiT70njm88SbvYEpuQ+
-# BZnc9ClEUhPk2XgU0vQhatrGsaSFSXLTLENIM27HAIkxxAyKVUKlnCgLTk4udy6j
-# 3JpWy0JRb/nm/PNYG7eAGuaPwqMJDwUPZkmw3dOY9I/hboCmi/5FLPiJxf7uR5DU
-# /qBFGH35e8U68VAYuY+KPckb/vFOtHu86GRuPdZ+r71+/7JU1XPFY6CeuB0qxE4H
-# nNuzX1oSD99Uj2gfd3p8Do6TfuNsgUQHdzRn/iD/jeOZKwdSaSgBCTz9DQFffbwJ
-# h5/04i5HEnSENwo73TsBEo2VlckxDZIEw1o9Q/Rm/7ibmJVLHs4fKTDWqOyZSe/G
-# AYgW/ffjGhY6GiF58dOgWlFskdGlCbeir1kzFOilaUxtA8smd+nxx4Psbet/oVUV
-# 1PohIbAaoQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTQwODMw
+# MjlaMC8GCSqGSIb3DQEJBDEiBCBCmVmhpOu4vPVwbawiowNGznr473Hb+IENf6Ci
+# JHOPtTANBgkqhkiG9w0BAQEFAASCAgCf64Kigg01JCSuBPt/D/7gtWDslAAetvqz
+# eBZEpcVfip4EYqEEG1R+O5BKuTRGwAbIW9kwZOT+FugzsMn+7M071ifKYLCkeN2Z
+# zaJ6pPsj+UWzS5auIwaW7fuYh7rn5JXf+U3sKTOnYu6CY/3gML0s/HW8COROGXDK
+# duryoRwxUxAn0m4X6WULccVNSiGrFJ6YP/l6xD6kSTgq6RGlIDGHCTiLnsA6IYce
+# C6i9oAIQ28Hm5gfXgx53HxTKdvCLj3JsNARWqtuuOm4G+TAISc/DNNMdnsvnFiBo
+# aXDXNCbVe+6294T7e1P5y/NKkCOhoKSn5lBIVCJRjpLmoMREFBzuDfzjUWSKwYEV
+# TjgCUsOemeA7GQjCdYBzlNLPsB3eJoohuz82dxAIbxEP77nV9gTpFGQyB1UE3hC4
+# B7wPOzBUrlzx+1ntoU3euJpHIcEnXjYfNNxMLURzwCxBWm3jlQQo55DIwxgrEhMZ
+# pX10M6uMEK4o4HMuOlFVs1N7+O8qIuAutNRGoR2HXB5fxCnJZjrVmlWPb2mq4+Qw
+# J3B5lMxMgN1grthu2hYm1JuUat6wqy6YaZmY4/TRClOfHSGFU0qlokltkcVbqhBs
+# IElcUGYneoMb8LQgH94QZUsbPQ6iqOsFWPyAAxiZh7bKya1gF1PI1qirXm7jYTe0
+# yxOs+jTCgw==
 # SIG # End signature block

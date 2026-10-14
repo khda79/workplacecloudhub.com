@@ -1,6 +1,8 @@
 <#
 .SYNOPSIS
   Offline checks for failed license assignments in the mail and Power BI source.
+.VERSION
+1.0.1
 #>
 
 [CmdletBinding()]
@@ -15,6 +17,10 @@ $ast = [System.Management.Automation.Language.Parser]::ParseFile($inventoryPath,
 if ($parseErrors.Count) { throw ($parseErrors | Out-String) }
 $corePath = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..\..\..\Modules\SmartM365.Core\SmartM365.Core.psd1')).Path
 Import-Module -Name $corePath -Force -ErrorAction Stop
+# Workbook regression checks may load the installed module, but never repair/install it.
+function Initialize-SmartM365ImportExcel {
+  SmartM365.Core\Initialize-SmartM365ImportExcel -CheckOnly | Out-Null
+}
 $names = @('Get-LicensesCsvSource','Import-LicensesSourceCsv','Read-LicensesIndexedSource','Get-LicensesAssignmentIssues','Get-LicensesAlertSummary','New-LicensesRecoveryWorkbook','Publish-LicensesReportCsv')
 foreach ($name in $names) {
   $definition = $ast.Find({param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name},$true)
@@ -148,8 +154,8 @@ finally { Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyCo
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBpxOP0yhDcq+Yu
-# Iv0JTKEc48r8RG/RfuFi0PtubeCBmKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCtCdP0ptEr4rfC
+# SgZwhaCZGjXjpHksUiv1XJuqZWKt2KCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -282,31 +288,31 @@ finally { Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyCo
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIOKvLBJK5dbR/dJ9gF+P9wnIbu6QiuzBIVvAaEfsebzSMA0GCSqG
-# SIb3DQEBAQUABIIBgKq3EIagaON0v5+HjtmqeMoWG/tye1o2l96yacVs08J8kGQb
-# lOnry33p/DdfuOQGBenHQA5X4MXjiZyTYWkXRM8qRBDltR4eMpz2IiQyfAPRQ+PS
-# 3IOQjpbXdRIOPYmeJFSBdyktqnVnvQOtbfjexq3UgqQ9YTiA+/IFIew+WWlN5++h
-# dLY/nc1tn1K7btIfi+h5HFzIDflD4jM1VMmruK7eaS9f8G2acnIcl1WlnWBVlpY6
-# +qrb+JnPOJQGleH2ex+p8/0LCdARv8M04c+JsgT7PRnrCdjo3GyMOpylrlUiAzSF
-# +n+mbCMHdqOTFRxRuMhgAUyku6oDPwg66Ph48KlCEs3q1yQEqbP3Sm6vfKJUIrVF
-# 2G6ZclTyS/rX9BEZvK7E22JGtqSuFd/1fG547D40kpRepXx19wQuQt62e9gsKzmp
-# BdyDdA4rYLY76Qrx/BqklKl8+h/ygyfpGoijStN95othxs2qYEiGMSVyPPNfZSYH
-# kY3WBqA7Fg2oXF4IAKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIBFtzHWvx24FBiOP/fs3VV0OgCQrnV+s1rlxC+f3v1KFMA0GCSqG
+# SIb3DQEBAQUABIIBgHsFfwdiBYVvm152cUzFEnsx1QIIEE2/3ZJskc3vG4HVdro7
+# afi+MOFIyQLfMe2x7sbQE2IMxRc55Ks8qrFQXcxpmqO/9rfqQfYcoJvhJtuJNaAB
+# mgb57BmVwvE49agAY7bm2svx7mx39U2z/MAuJTAlyzROf4bUNFZh7kB/O2+fyAVH
+# 70ZtsKh5uPwlzD/1e9htApe7tdYpTsihIL0Ca98UZTnOel2umIaBUdKOuQ6MtFIn
+# 2kAI4rHlwAc53+LSJcnTHfMeEcPtClAsrXwProPZ7RL+PVn0L1Tj/w9PjKNz1fZ4
+# 8yGBAb3Miw07oZJjfBdbIknRb0IzzpJL0t2BVgArExDYSlS+xB+N6xKg1SW6Q50g
+# yXH2bwKUArLrQ6kQj/Ayg+kFPO57CcFX43c9Pa3EZZ0IgkcTTMicSmlYSFbpKPs/
+# tObawd0hy+/bE0Y7Lv3LVpocBF9ECM9NNuzI5jAkSXdzxYeWmiWzyBAnBE1Ol9d7
+# We2DpWhZ7ttCSUty9aGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDgxMTIy
-# MDhaMC8GCSqGSIb3DQEJBDEiBCBO3oOdRbnBC2vFz/2pE3LjTuElZ3NLByBnwRgw
-# 0OhyoDANBgkqhkiG9w0BAQEFAASCAgAcfXmAJ60/lWTVbll5FqWt21w0jYWDSedH
-# peR+vBWTr39MebT/0JBg3dGVDrb6ddCxJCLs3KTPkZSLI2hl/pJ9eJmweHnVd5I1
-# FAG8hgwdI32v9SRSXEZirJ4YwOTjkNt4OKsN06PbCwQNGuAkaDLpAWWs7kBi278o
-# FpOeB4FwqtPaJzBH3xfo0J3sCj1p7Ii5qJwXnn7IIugYzYrofBQ4yrlcgx0+GZqz
-# zFNt0keGkJn8s27eLuZjlPeKxJAsYmgT86byonpm4D4SIZTTKqqvFaw7uPROXp/D
-# tI6UG3O53p8aOJ9709kB5e9oEaYy6SIBJaEVsGOnrG1c21kR/mKMj8sReEo2/i4F
-# LJxQsmIZli39Dr4WjqTzHAN55esVqvnqhO3WFB5nxZKhAOSlP9EB8fuaRSFYz6tz
-# +KQ5J63XpTL0wjRVeoHCHu4E94J0r1RwX3DXR7qlhUd1e8vkFC6T1cqGp9mF1t/Y
-# GDEF3oECg55UIyXUR/WHK2W0ErgKfMR0Uc/vxN5PClzasVrWAkuZuASDbANYlz3p
-# GEX6QxC6GJGRrXULBo64hpY4t0e67GSVuPHJaNVrX4IL3hdO0XT+FBh3IrL7P6wF
-# KUjgnMkHS2bX0KtikkjVZcXiuLTKAJBKyrLaHpn0MCFHsA+pB4f6DOvkB2Ymaykq
-# b5KsbCqWqg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTQwODMw
+# MzJaMC8GCSqGSIb3DQEJBDEiBCA6j2cMttYfJ/K5wu11rt+zX/iRBB9HepzsbJZ8
+# KutJzjANBgkqhkiG9w0BAQEFAASCAgA3FUsAZzV9mhkCETVbxhylmXgFqSaDsxiF
+# i6lARQt66onBdC/N9kTHGuBIpKRdtxNBDJaHR2/yLWTmDdUqRCR6PaDhrdh8UHDd
+# wQH0HxXN6RcE+Q4h15CupNCLd+6LerDM+Zqzskiqw2rwDJqmuCSR/3IslwD2lk2Z
+# ahAVkXS2X4ohpBgI7piLp6hHI0GjaA+kIBzdIAdofayZyBwCTjuTlgNvd4J+eODk
+# 3yHpfub8RlB2tvsa+HhtbnKQ+pzpCcj1NRQDz+T8pKw9RYRGlNT3ThEnaenrCK9z
+# +1EqLOyRjqfxRxIGtS9kLlSSs8mhZF59uTFeqRqGzypKbc9fXZnEYm1PABHrOPE5
+# zE5jU+BzbTw/nqkiYSfGhP0HvCjD6nZ4te82QhJxOtJ3uM/7SaSBvENRrR7+tm60
+# xaAQwhD9o1OzyBe0SsW7cuB4qvGf81vxYwZ0c3wHABCgypzqSw3JKGkn5sSH+PWA
+# XJ89sHQocfcDV0/UoYDXnsm2DHoS6FJZaYEVbCIBDtLJYQu8cABjl6lt/mRMrlqp
+# cu26S1TKeaTp8wLqRICXG4teQKRu/yqiz822TiQoBa38yPOh3xo452YlZfrMMPd7
+# wCo6QXPAXtEym4WJ/EN3BvbdimQnj0v83T7zeEoKfufB55kIbyjILnucs0s1vk0c
+# 1Vp2LjlgKA==
 # SIG # End signature block
