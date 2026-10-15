@@ -14,6 +14,10 @@ helper returns are not entry-point completion.
 - Ctrl+C produces `Cancelled` and exit code `130`, not a success receipt. Shared
   mail, Teams, upload and retention helpers skip post-cancellation publication.
 - Completion summaries are deferred until owned resources have been closed.
+  An explicitly deferred completion is honored even when an entry point uses
+  bespoke initialization instead of `InitializeScriptEnvironment`. Its source
+  receipt is finalized through the same success, failure and cancellation rules;
+  no existing receipt is repaired or promoted retrospectively.
   Cleanup is idempotent; one cleanup failure is reported and does not skip the
   remaining resources.
 - Only sessions, transcripts, jobs, runspaces and temporary paths owned by the

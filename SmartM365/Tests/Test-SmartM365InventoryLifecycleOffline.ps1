@@ -2,10 +2,10 @@
 .SYNOPSIS
     Offline lifecycle regression: no collector, tenant initialization, preparation or provider request.
 .VERSION
-    1.0.0
+    1.0.1
 #>
 [CmdletBinding()]
-param()
+param([switch]$ReceiptOnly)
 Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
 $testRoot=Split-Path $PSScriptRoot -Parent
@@ -63,6 +63,8 @@ try {
     New-Item -ItemType Directory -Path $fixture|Out-Null
     [IO.File]::WriteAllText((Join-Path $fixture 'trace.log'),'synthetic trace')
     $core=Join-Path $testRoot 'Modules/SmartM365.Core/SmartM365.Core.psm1'
+    # The broad suite parses PowerShell 7 collectors; receipt-only also runs on 5.1.
+    if(-not $ReceiptOnly){
     Invoke-Expression (Read-LifecycleFunction $core 'Complete-SmartM365ExecutionContext')
     foreach($implementation in @($core,(Join-Path $testRoot 'Modules/SmartM365.Core/Compatibility/WindowsPowerShell5/SmartM365-WindowsPowerShell5.psm1'))){
         Invoke-Expression (Read-LifecycleFunction $implementation 'Complete-SmartM365ExecutionContext')
@@ -168,7 +170,7 @@ try {
     Complete-SmartM365InventoryRun $smartM365RunGuard
     Assert-Lifecycle ($smartM365RunGuard.ExitCode -eq 130 -and -not $smartM365RunGuard.ErrorRecord) 'Mailbox cancellation is not replaced by a generic failure'
     # Local pipeline cancellation during processing and during inner finally.
-    foreach($stage in @('Processing','Cleanup')){
+    foreach($stage in @('Processing','Cleanup','BespokeProcessing','BespokeCleanup')){
         $control=[hashtable]::Synchronized(@{Ready=$false;Status='';Released=$false})
         $actor=[powershell]::Create()
         try {
@@ -176,7 +178,9 @@ try {
                 param($helperPath,$control,$stage)
                 . $helperPath
                 function Complete-SmartM365ExecutionContext {param($Status,$ErrorRecord,$FailureStage) $control.Status=Get-SmartM365InventoryCompletionStatus $Status $ErrorRecord}
-                $state=Start-SmartM365InventoryRun 'synthetic-entry.ps1' -RequireReturn;$state.Initialized=$true
+                $bespoke=$stage -like 'Bespoke*';$stage=$stage -replace '^Bespoke',''
+                $state=Start-SmartM365InventoryRun 'synthetic-entry.ps1' -RequireReturn;$state.Initialized=-not $bespoke
+                if($bespoke){$state.PendingCompletion=@{Status='Success'}}
                 try {
                     try {
                         if($stage -eq 'Processing'){$control.Ready=$true;while($true){[Threading.Thread]::Sleep(10)}}
@@ -287,9 +291,78 @@ try {
     $consoleCode=Read-LifecycleFunction $detector 'Get-LastConsoleLogon'
     Assert-Lifecycle ($consoleCode.Contains('$securityEvent.Dispose()')) 'Event records released, including early return'
     Assert-Lifecycle ($detectionCode.Contains("'DeviceSystemPayloadEnd:1.6'")) 'Detection payload contract unchanged'
+    }
+    # Real receipt finalization with bespoke initialization (Autopatch's path).
+    # Only the shared definition helpers run; all transport/log/banner calls remain mocks.
+    . (Join-Path $testRoot 'Modules/SmartM365.Core/SmartM365-CmdbReceipt.ps1')
+    function Test-SmartM365MaxItemsMode { return $false }
+    function Get-SmartM365ScriptVersionFromFile { param($Path) $null=$Path; return 'synthetic-test' }
+    $producer='SmartM365-Intune-WindowsAutopatch-Alerts-Inventory.ps1'
+    $definition=(Get-Content $script:SmartM365CmdbRegistryPath -Raw | ConvertFrom-Json).Producers | Where-Object Script -eq $producer
+    foreach($implementation in @($core,(Join-Path $testRoot 'Modules/SmartM365.Core/Compatibility/WindowsPowerShell5/SmartM365-WindowsPowerShell5.psm1'))){
+        foreach($prefix in @('','Core')){
+            Remove-Item Function:Complete-SmartM365ExecutionContext -ErrorAction SilentlyContinue
+            Remove-Item Function:Complete-CoreSmartM365ExecutionContext -ErrorAction SilentlyContinue
+            $command='Complete-'+$prefix+'SmartM365ExecutionContext'
+            $completionCode=Read-LifecycleFunction $implementation 'Complete-SmartM365ExecutionContext'
+            Invoke-Expression ($completionCode.Replace('function Complete-SmartM365ExecutionContext',('function '+$command)))
+            $receiptFolder=Join-Path $fixture ([guid]::NewGuid().ToString('N'))
+            foreach($scenario in @('Success','Failed','Cancelled','MissingOutput')){
+                Reset-LifecycleFixture
+                $global:SmartM365TenantKey='synthetic';$global:SmartM365OrganizationKey='test'
+                $global:SmartM365EnvironmentKey='test';$global:SmartM365TenantId='synthetic-tenant'
+                $state=Start-SmartM365InventoryRun $producer -RequireReturn
+                Start-SmartM365CmdbSourceReceipt -ScriptPath $producer -SourceRootPath $receiptFolder
+                $receiptPath=$script:SmartM365CmdbSourceContext.ReceiptPath
+                $runPath=$script:SmartM365CmdbSourceContext.RunPath
+                $proofBefore=if(Test-Path $receiptPath){(Get-FileHash $receiptPath).Hash}else{''}
+                $csvNames=@('Intune_WindowsAutopatch_Alerts_PolicySummary.csv','Intune_WindowsAutopatch_Alerts_Detail.csv','Intune_WindowsAutopatch_Alerts_Summary.csv')
+                foreach($csvName in $csvNames){
+                    if($scenario -eq 'MissingOutput' -and $csvName -in $definition.Files){continue}
+                    $csvPath=Join-Path $receiptFolder $csvName
+                    Start-SmartM365SourcePublication -Path $csvPath
+                    [IO.File]::WriteAllText($csvPath,("TenantKey,Name`r`nsynthetic,"+$scenario+"`r`n"))
+                    Register-SmartM365SourceCsv -Path $csvPath
+                }
+                $csvHashes=@(Get-ChildItem $receiptFolder -Filter '*.csv' | Get-FileHash | Select-Object Path,Hash) | ConvertTo-Json -Compress
+                $state.InCleanup=$true;$state.ReachedTerminal=$scenario -ne 'Cancelled'
+                Set-SmartM365CmdbSourceScope -CompleteScope $true -Scope $definition.Scope
+                $requested=if($scenario -eq 'Failed'){'Failed'}else{'Success'}
+                & $command -Status $requested
+                Assert-Lifecycle ($null -ne $state.PendingCompletion -and -not $state.Initialized) 'Bespoke completion queued without standard initialization'
+                Assert-Lifecycle ((Get-Content $runPath -Raw | ConvertFrom-Json).Status -eq 'Publishing') 'Receipt finalized before outer cleanup'
+                $state.ReturnedNormally=$scenario -ne 'Cancelled'
+                Complete-SmartM365InventoryRun $state
+                $run=Get-Content $runPath -Raw | ConvertFrom-Json
+                $expected=if($scenario -eq 'Success'){'Completed'}else{'Failed'}
+                Assert-Lifecycle ($run.Status -eq $expected -and $run.CompletedAtUtc) "Receipt terminal state: $scenario / $prefix"
+                Assert-Lifecycle ($run.UnqualifiedPublication -eq ($scenario -ne 'Success')) 'Incomplete run cleared publication fence'
+                Assert-Lifecycle ($state.CleanupWarnings.Count -eq 0 -and $null -eq $script:SmartM365CmdbSourceContext) 'Receipt finalization failed or lock context retained'
+                Assert-Lifecycle ((@(Get-ChildItem $receiptFolder -Filter '*.csv' | Get-FileHash | Select-Object Path,Hash) | ConvertTo-Json -Compress) -ceq $csvHashes) 'Finalization changed CSV content'
+                if($scenario -eq 'Success'){
+                    $proof=Get-Content $receiptPath -Raw | ConvertFrom-Json
+                    Assert-Lifecycle ($proof.Status -eq 'Completed' -and $proof.RunId -eq $run.RunId -and $proof.Files.Count -eq 3) 'Current proof does not describe completed run'
+                }else{
+                    Assert-Lifecycle ((Get-FileHash $receiptPath).Hash -eq $proofBefore) 'Failed attempt overwrote last completion proof'
+                }
+                if($scenario -eq 'Failed'){Assert-Lifecycle ($state.ExitCode -eq 1) 'Bespoke failure returned zero'}
+                if($scenario -eq 'Cancelled'){Assert-Lifecycle ($state.ExitCode -eq 130 -and -not $script:Events.Contains('Upload')) 'Cancelled bespoke run published or returned success'}
+                $terminalHash=(Get-FileHash $runPath).Hash
+                Complete-SmartM365InventoryRun $state
+                Assert-Lifecycle ((Get-FileHash $runPath).Hash -eq $terminalHash) 'Receipt finalized more than once'
+            }
+        }
+    }
+    # Early initialization failure without an explicit completion must not invent one.
+    Reset-LifecycleFixture
+    $state=Start-SmartM365InventoryRun 'not-initialized.ps1' -RequireReturn
+    $state.ErrorRecord=[Management.Automation.ErrorRecord]::new([InvalidOperationException]::new('Synthetic initialization error'),'Offline.Init',[Management.Automation.ErrorCategory]::InvalidOperation,$null)
+    Complete-SmartM365InventoryRun $state
+    Assert-Lifecycle ($script:Events.Count -eq 0 -and $state.ExitCode -eq 1) 'Uninitialized run fabricated a terminal summary'
     "PASS: $script:Checks lifecycle assertions. No collection, preparation, transfer or Power BI refresh."
 }
 finally {
+    if($null -ne (Get-Variable SmartM365CmdbSourceContext -Scope Script -ValueOnly -ErrorAction SilentlyContinue) -and $script:SmartM365CmdbSourceContext.Lock){$script:SmartM365CmdbSourceContext.Lock.Dispose()}
     [Environment]::ExitCode=$previousExit
     foreach($name in $saved.Keys){if($saved[$name].Exists){Set-Variable $name -Scope Global -Value $saved[$name].Value}else{Remove-Variable $name -Scope Global -ErrorAction SilentlyContinue}}
     if($null -ne (Get-Variable context -ValueOnly -ErrorAction SilentlyContinue) -and $context.Worker){try{Close-SmartM365OrchestratorGuiWorker $context}catch{}}
@@ -302,8 +375,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAdZtU4Jt6Q67Ax
-# +xXrs7cWQXYsaZ508Bl3F8QJIVfcv6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDX6BMpfUbbhJ8n
+# yr+bCZ9SoNFjoXEr3duvDTVZ4MC8vqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -436,31 +509,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIGSSk/ZbW/4xK64z82nZ6u0EDvv9nYCjiy2hbOqiZlatMA0GCSqG
-# SIb3DQEBAQUABIIBgCp2gfRQ22K3ky8rWGUPNGSf3WCYvXSTkPmr2xIDB9oRaphN
-# NvXolBuSBJTRJhCPwBUiARt1Qv+Kz+/B+Y8U+WibR5URkcN0C1CRvDH+UWkmAZ8I
-# 2RxkGA6uJjbGRvYWi8isMsCsQb42eUewwgujDimEZlV2gWrO2KcHZP2bP3x34d5E
-# +b2l4Y+ojqQrgBOnX7NIZSwVwIBNv5Rsp0Gd/ETnpbvkxeyS/YIKWaK/6Fe8Gn01
-# 83TdPsFMu9Ott8NGTEamqC+wj8ypo6xA1hOn8saI08qnGbfZqH0B2sVJsnTObjPZ
-# dQwr6vEQZ4g0y9S4I/RA0yniE7jdxCHDSCXK3278UN0tITu+WZs30Nsv5BbSN5pw
-# JWETBcRwlTiqKEDzGErkx3Yl5WMMBSJ+SR2782pTXn7eue63UA/E026fMqfWJaU6
-# 4mUBv/Zx3jDWvoGsX5PnxewZinNqdM5CHNzDwyZjQbNmdIZ+GzmGZAnRF0vm/ulb
-# aoSqYvjn1UaXEFA6PqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIIh9SUjjC4z0CATR9jt9BLAAXTb4O92zAkVZFed8+sH7MA0GCSqG
+# SIb3DQEBAQUABIIBgBdj04/l7rYQjDU+M3Fxa7jTmZYW1Pg5rbQQyLWwn78KIVcx
+# YN2yaTNOMUO5YRdrkBMmA07VEuYwQQF/DbaAkLudwNdO7EaYgPuum8WojFGt6x6m
+# Q0EcalNhLZF3U7SjezXf6YnHNt3xZikuc9Ij/kOuW98OWL7uB763G1EA7CEZNhq/
+# rhHnTZXf1PtStZOydd2zL//wGwQDX/v1uE0qgSotWJmgjAwEScfLfCcfr9MEaij7
+# 3mFfh08on1mM4COHtiCZliGLtOWHho6dr8OzEmRpT+gpQPgdCFR71Q0ZY0jR9/ha
+# rNE61Z7b53tyxnYuWcDskvkzBA+RoI4/vfPjX5o75q4Bx8XBbu7GSsLw+aT5OD/7
+# zPPeIHrZITGV0/ESvc66gHgSaJjRE3WlFbAAT430kV3p33L2ZT6eEsnq2raSht47
+# TKfgraCol5CNsyFnFenrz3tjmMVVnmx21EDX76hZyox3tyZR7rQqxDA26e9VYmWn
+# 4dHwPy0vu1KPew0Sw6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTQxNTMw
-# NDRaMC8GCSqGSIb3DQEJBDEiBCDgE/9w0H1meiTmEsiyaCmXNme+ndzlJK4lJdDv
-# j5QX4jANBgkqhkiG9w0BAQEFAASCAgCJAGE61KhVLxlqLl01icK5lnpAvHp3EO/M
-# aoxI9ov8AYqXTmhqrslgKEtEI14mZ7YocB7E3t9vuW+8ek45IPtYq0vndCXfMC3e
-# MNFcRlysPzJPBQK4HV4qfrm2X0YzOIj3fdlmiqZU0uFDEAU7dMJDJJLOUK78E42i
-# 73eTs4BqDnYyuEYurmuX2DPOG38oHae303YzlO9DUZjtxyA3OWSb4K+iCjNMF70H
-# VEzgO1bjjn9Q2uWyI10WX5/5AukyDUlyvHTaPqKUIFG/KuqRJLpjPehcXQ4NWaqK
-# ZH15mbFczgoiYATuvaijwMZ+zdKJa17RCkdyZtFyzSDkZorhpRmRDig8TKArrRsk
-# II6WHt+ui+7M3cMKXPjrQoqn2QMCKzusv1B+ITKr5jDrtMfFTyzjV7QwmKoySrZY
-# eRacijSSFut+YKlnkZc6uNOFNJ8VDbEugNthGNz+k1ZMWIp6gvdR0s4PM/W0WzGA
-# 33zNn+wwTldDInJgQ1Q7+iA+ju/ATNxKyjrR9Ar7c+76FsDepGNqfo0f7UOd0oc9
-# JnUU9361Fa/Xp5Z3DmH6tBsq2AKklvR35k9bLD1W8Xg5u355JEsaawAGAEaw2kPf
-# bvWZxVbeMPrEiynGWsnkou+Tx7kwruPBe7c6monrADmt+0sTBoG8OcB/BVU5A41W
-# KWjnoyd0yg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTUxMjA1
+# MjdaMC8GCSqGSIb3DQEJBDEiBCBv7DZ1/T9hNK1bQh+PFdMVQQlkqk3c1EzALgW7
+# xZV9fTANBgkqhkiG9w0BAQEFAASCAgCIpXvO8vqMy1Rt5ma1b+5b6ZZANSzjslJk
+# mvwJdobL75jAqReTch2EZBQ+e2jWho5+e83QEAgcy1mi4I2opZ3gw5H39AxB5GAQ
+# ffxB6jwWM9MSmLjP40Fpk7U79gUn8ksB8vdo5RYedzFK5JtprxQ/xvpNtjBUja6A
+# SLV2LqW55ldkuOpsWMfmiCjRJgHJEyv4ZR96XI/QlfjTHnqryRroLO5HYt2wXLfp
+# 3R/M0+0rQGuwrg4DTomkWkirV68a1bo2wWLOUM/08CD122wtorFe2bjbaR3UGTuM
+# 2ekmOfmyeex0QRN4//DNhH6RmjfGiVEkzQn/85tcU8vrGaWjOXZrqqlVD9QrRk0H
+# foF3a+x3jy7is0DYI7mTMSUuFxOkeWH/y4J5QGFYQRwOV3thTNk9EJO45DSM4Mfc
+# bzx8L94wK2X/k5AmZiHGRffoFEvzXnyO9iYUBI9xoF1PbHBKRBep+hHLkm4xhY0i
+# SJWdXa19sau7ha3IBHMDZYvYx5tVJ5SUDL7BfsDJ/kA69eFpAUrc+Al5e7soHV8P
+# cP7jlP9ePhJ5Ol6kCvGy7rmBk32unZiF/rm71JC5hD+5NMjHF6Xy/W0wos7ChVm6
+# 2vNtkRHfOzWhHiFRij0a8+R8Umr6oL1V95TkYVZ/rxidqDTJraQzeRhVaDABVNWs
+# hrEfA2Mqmw==
 # SIG # End signature block

@@ -1,8 +1,8 @@
 # Prepared evidence: deployment and operation
 
 Workplace Intelligence prepares one governed batch in `DATA-POWERBI`, including
-native CMDB evidence. The old flat `DATA-POWERBI-CMDB` pipeline is disabled in the
-template and retained only for rollback until the unified batch is accepted.
+native CMDB evidence. The old `CmdbEvidence-Prepare` job is removed from the
+template. Existing evidence in `DATA-POWERBI-CMDB` is not deleted by the job cutover.
 
 ## Targeted CMDB cutover
 
@@ -11,11 +11,13 @@ and call `Get-SmartM365WorkplaceCutoverPlan -SharedDataFolderPath <orchestrator-
 This preview reads the existing jobs/cluster bytes without migrating files, writing
 configuration or submitting jobs. Inspect `Changes`, `JobsHash` and `ClusterHash`.
 
-The plan disables only `CmdbEvidence-Prepare` and merges its dependency union into
+The plan removes only the `CmdbEvidence-Prepare` job and merges its dependency union into
 `WorkplaceEvidence-Prepare`, including WorkplaceScope, VerifiedDomains,
 WindowsAutopilot and AutopatchAlerts. It preserves the effective Workplace schedule,
 arguments, freshness floor, server assignments, all collectors and cluster settings.
 It does not copy the template schedule over the effective schedule.
+An already disabled legacy job is removed as well. If dependencies were already
+merged, the preview contains only `Job: Present -> Removed` for that legacy entry.
 
 On the operational host, after confirming no manual preparation/transfer is running,
 use `Publish-SmartM365WorkplaceCutover` with the same root, the two expected hashes,
@@ -29,7 +31,9 @@ Residents may independently run already scheduled jobs: this is not a scheduler
 pause or a distributed no-launch lock. Global maintenance is left unchanged.
 
 After publication, verify residents have loaded the new configuration and that the
-legacy job is disabled before separately authorizing a unified preparation.
+legacy job is absent before separately authorizing a unified preparation.
+Execution history and configuration backups are retained; do not delete old
+claims, logs or data as part of this targeted job removal.
 Do not bypass a source-publication guard: inspect the failing captured producer
 `.current.json.txt` and `.run.json.txt` pair, not an older synchronized receipt.
 

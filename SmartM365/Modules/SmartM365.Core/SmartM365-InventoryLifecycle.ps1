@@ -1,5 +1,5 @@
 # Shared local lifecycle for SmartInventory entry points. Compatible with PowerShell 5.1.
-# Version: 1.0.0
+# Version: 1.0.1
 function Start-SmartM365InventoryRun {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$ScriptPath,[switch]$RequireReturn)
@@ -135,7 +135,8 @@ function Complete-SmartM365InventoryRun {
             if($State.CleanupWarnings.Count){$banner.WarningCount=[Math]::Max([int]$banner.WarningCount,$State.CleanupWarnings.Count)}
             if($bannerCommand){Invoke-SmartM365RunCleanup $State 'terminal banner' { & $bannerCommand @banner }}
         }
-        elseif ($State.Initialized -and -not $written -and $completionCommand) {
+        # Bespoke entry initialization still owns an explicitly deferred completion.
+        elseif (($State.Initialized -or $completion) -and -not $written -and $completionCommand) {
             Invoke-SmartM365RunCleanup $State 'terminal summary' {
                 $options = @{Status=$status; ErrorRecord=$State.ErrorRecord; FailureStage=$(if($status -eq 'Cancelled'){'Interrupted'}else{'Inventory'})}
                 if($completion){ foreach($key in $completion.Keys){$options[$key]=$completion[$key]} }
@@ -145,7 +146,7 @@ function Complete-SmartM365InventoryRun {
             }
         }
         $finalStatus = Get-Variable SmartM365ExecutionStatus -Scope Global -ValueOnly -ErrorAction SilentlyContinue
-        if ($State.ErrorRecord -or ($State.Initialized -and $finalStatus -eq 'Failed')) {
+        if ($State.ErrorRecord -or (($State.Initialized -or $completion) -and $finalStatus -eq 'Failed')) {
             if ($State.ExitCode -in @(0,3)) { $State.ExitCode=1 }
         }
         if ($State.TranscriptOwned) { Invoke-SmartM365RunCleanup $State 'remaining transcript' { Stop-SmartM365RunTranscript -ErrorAction Stop } }
@@ -166,8 +167,8 @@ function Complete-SmartM365InventoryRun {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCr0sTQsm1Og4O9
-# H8GCd4sVa/3wydBXmTEqiZ9XSIKYSqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDoKJsg+BKmyuBt
+# BvfodoD4FnZ7msraiy7XeO0mUOwiX6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -300,31 +301,31 @@ function Complete-SmartM365InventoryRun {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIDPoinue7BdtgAxFvfZF7URoP/PjQ8u/h+uVhtkyPdy6MA0GCSqG
-# SIb3DQEBAQUABIIBgEwGuSZiPDonLghaScKUNFUJNtMaXVqIrrN6JviMcrA+VT6B
-# +JaEL7o9yd9kgukcxlM1nrVX31YNC+zhsJqc1p1jkm4yeysYScCh9cA4MCwzR+++
-# 3//21t0ux6UUXr0vnn/7zB7//TgZ/ETOtP68KFDI9mT7nQULpfyHpGYvW5OZnCr6
-# 7hGDATQwKNfTX71GTsYN5auA9X55SRQYcPBfekNNcg85qdd1h0XE8G2fLcpENWzh
-# flPrHVjSWSDvwvrPcassVMYEL7ZV0KVjnNfOFlXHPyyDWvyLdhQL9aF1GWI+xkrK
-# g0G+mHtxSga/RiOVvi0agpRi57aGtFd4QKhKih/TV2tPqYQUiBpQoHaeH2gzEHBS
-# TbmoEBiiJ0/3gxnJzD5qi4WQKOH98/ylnbDXFubvnjh33Lip5dWVayyG66514oIT
-# BLZmI8FWIvOE9AuUuMuORg87Np/KIgBwFf+Q5RL4VYgB+haIHxOjwM5upP3QXDbj
-# iFlb4NEBwYm25LVFfaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIPOD6drav+mkv1C1qxWVRVJ4xZIg5e7qoM/5nMwEnFRnMA0GCSqG
+# SIb3DQEBAQUABIIBgE0V5p5AbInVINSHrWGreKsdr95m/xFHzHkjt388SJ8LAT1T
+# DD3X9JIm8OEljy24P2JVPQZQCUq/Tn4Ac57lhvg9qERqbya7yyVmObyJrFxxTfzC
+# vNdA5nUspjs1BMQf0fnQ7dvd0nn57bekhCZySM/V25DnHcnEbHC0mGZVrjMrUJsf
+# r801WAMjXsTSiszYOBewBdjf+bDNtpe0tIKpJSqwjAD7T3mKaKVV8Q81OMnqYW6o
+# MAI7Wu44e8zHOY67BAGpc5tgS2G+aImZU1OluXTckUlf9JNRKI365WUCyWstZyzr
+# PJIijv8tp6Vq2yEf0HHkditirt17su1ZVYdbRXjEkt043Ldsb7Xbj80fbY4kPWhd
+# N+YRGUo8EgrqDv1GxTModXlRo++jWc5iMIOycwosoxDfLv3Wx14cch5l7JYJWhyL
+# Rkw5G7c4Xt2UdUbeUAPt4vhUi02Ww6UhpfNVA/BqKnJjnrmmZKqRa/Mq0DwC5C5q
+# xmM0WkeB7i4xWpr00aGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTQxNTMw
-# NDRaMC8GCSqGSIb3DQEJBDEiBCCzPnRtG5iAoDzOnILPyuZuy7GNJtmDORhZoZ77
-# 4sQHgDANBgkqhkiG9w0BAQEFAASCAgA2+wwByS+Kbjawom3qKaSQ1xUbeA/43SIU
-# /kNS0j1u5j28Kud8t8W4fycpGVKPqR+rlKIh3hWWV3WOz1QCE3z3sLnYwVCtwGEa
-# jB2jIRmjJHFzR+1bHcjMUennuE2Q/aSIaB1i2FxUFraRCg6fybXVYaFd0KBbOL50
-# 0zk2pxOJCP+qeR6at3d7fQ3NIx55c1dY+ZBVjJWEYiVsIDc+Wm0kiWYazE/L7Zrs
-# IjF/c09tJUEt5ROdf16c1mkfdz1zBJz9+OLhyQ/uqzj/318KBpcJYlDSxdf9KQ8m
-# u7oVDr1X25ipB+jeKqTYHnNwkGheGtnmUfiT9vvyc6/2d7UxZGTVX3KoL37mZeLd
-# 6lXn0as8GShJB9geA5s7wOcH30mOJvvAlySNNZ1eH6PvxKgl/Bj3GBSBIO9sKcQp
-# MNm9nxBMd5aiMrFAthhMI/20kAmFJBIy5fRqRNRIt0YF5DRTcPLl0ZGi+zBd2T05
-# 0M2NuPzKD6uoGIDnn4TgrApZn65S3sKai3XkBpDiyMP84f9zUmjRPFpIXbOtLPbg
-# OMRZIXfosm/qOlFmVyR86Jc8eZRA8WkfRH5PWbT4rP2tR19xSlKRkdIGo9Q+SjjF
-# /Tviag689YgjqtkJzHhMvC+2xvolIi/iDmtoE9YtXg1jk7uwb2Y3AtFKvDDpsI5/
-# NRgzHGhyTQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTUxMjA1
+# MjZaMC8GCSqGSIb3DQEJBDEiBCBmMOfo29YZ+JoKm6oh1f3pT+eK13QT2uQrlbzN
+# X7C1IjANBgkqhkiG9w0BAQEFAASCAgCwG1S09uXiVMhNmSyI0o8v3fIQAEkqIr2h
+# wevIhMMzk0KPswQ1Kq+lMShQUX8d6ra6H9IoLxZM7qBSag6k4qQRzH2VwQixTfOb
+# 72PjHJyxJbHdAeaON0teNYQSmjbS0FTvRFpHwwu14PZdK416o2jjuC/xNUMcmphl
+# yuIvQkwEXHIADLLYjVjwBK/XtXD8in4gGrvK9Bt5YTJU7UD04TkQteR61LiqhPdl
+# jIzsCwEojZZg13h71mmUjUl2l4cCOY8eLUiIZzQO+NfVBftYtogL5HheQxxkG2iK
+# h04TnI7fVEPFjCfeq8C4uetNBU7OLdcbXinm82yBcloF0EBVJURt8qSJd6kSO2H5
+# gQK9Pt2iKYp8qHRF1ScdvbJOzZp10sDx29KE+0itzTAvJeCy88FNi36MSLohDjWl
+# VlL8RrHfbX5acevA33pDM8aKbmMwKxm+hLvFWjd+brVKPv4IOxjufMD266GwgXtH
+# JGPLtWYktyqpo62A4u1PdAHu6L1s+uGAOSnTy4eGamYqiq7N/+c5TmdyPPvzyylI
+# cZx0qIczCtE7Mi5b0PvH39jTJyDutg0gKOVGX3lIDf7727E+NHdcps97UFJc4oSw
+# RgXTkVz6UnyVg5uaU+0mxfN3K6qQKCImjp4j3EPvV0gTxyvzEjJeMmu2RGRWC/PM
+# XEyr+AveJQ==
 # SIG # End signature block

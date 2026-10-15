@@ -15,10 +15,22 @@ function Reject([scriptblock]$Action,[string]$Pattern){
 function Json($Value){ConvertTo-Json -InputObject $Value -Depth 100 -Compress}
 function Clone($Value){Json $Value | ConvertFrom-Json -Depth 100}
 $template=Get-Content (Join-Path $orchestrator 'Orchestrator-Jobs.json.template') -Raw | ConvertFrom-Json
-Check (-not ($template.Jobs | Where-Object Name -eq 'CmdbEvidence-Prepare').Enabled) 'Legacy template job enabled'
+Check (@($template.Jobs | Where-Object Name -eq 'CmdbEvidence-Prepare').Count -eq 0) 'Legacy template job still present'
 $old=Clone $template
 $w=$old.Jobs | Where-Object Name -eq 'WorkplaceEvidence-Prepare'
-$m=$old.Jobs | Where-Object Name -eq 'CmdbEvidence-Prepare'
+# Historical runtime fixture, never restore this job to the active template.
+$m=Clone $w
+$m.Name='CmdbEvidence-Prepare'
+$m.ScriptPath='PreparedEvidence/SmartM365-CmdbEvidence-Prepare.ps1'
+$m.ConcurrencyKey='CmdbEvidence-Prepare'
+$m.DependsOn=@('M365-ActiveUsers-Inventory','AD-Inventory','M365-WorkplaceScope-Inventory',
+    'M365-EntraDevices-Inventory','Intune-Devices-Inventory','Intune-DiscoveredApps-Inventory',
+    'M365-Licences-Inventory','EXO-Mailboxes-Inventory-Fast','Exchange2016-Local-Mailboxes-Inventory',
+    'M365-SPO-Inventory','M365-Teams-Inventory','M365-VerifiedDomains-Inventory',
+    'Intune-WindowsAutopilot-Inventory','Intune-EndpointAnalytics-Inventory',
+    'Intune-Devices-UpgradeEligibility','Intune-AutopatchAlerts-Inventory','M365-Usage-Inventory')
+$m.Schedule.Times=@('09:30')
+$old.Jobs+=@($m)
 $m.Enabled=$true
 $native=@('M365-WorkplaceScope-Inventory','M365-VerifiedDomains-Inventory','Intune-WindowsAutopilot-Inventory','Intune-AutopatchAlerts-Inventory')
 $w.DependsOn=@($w.DependsOn | Where-Object {$_ -notin $native})
@@ -28,7 +40,7 @@ $w | Add-Member NoteProperty PrivateExtra 'preserved'
 $before=Json $old
 $plan=New-SmartM365WorkplaceCutoverPlan $old
 Check ((Json $old) -ceq $before) 'Input mutated'
-Check ($plan.Changes.Count -eq 5) 'Expected four dependencies and one disable'
+Check ($plan.Changes.Count -eq 5) 'Expected four dependencies and one removal'
 $afterW=$plan.Jobs.Jobs | Where-Object Name -eq $w.Name
 foreach($property in $w.PSObject.Properties){
     if($property.Name -eq 'DependsOn'){continue}
@@ -38,8 +50,17 @@ foreach($job in $old.Jobs){
     if($job.Name -in @($w.Name,$m.Name)){continue}
     Check ((Json ($plan.Jobs.Jobs | Where-Object Name -eq $job.Name)) -ceq (Json $job)) "Unrelated job changed: $($job.Name)"
 }
-$expectedLegacy=Clone $m;$expectedLegacy.Enabled=$false
-Check ((Json ($plan.Jobs.Jobs | Where-Object Name -eq $m.Name)) -ceq (Json $expectedLegacy)) 'Legacy fields changed beyond Enabled'
+Check (@($plan.Jobs.Jobs | Where-Object Name -eq $m.Name).Count -eq 0) 'Legacy job was not removed'
+Check (-not $plan.RetirementPending) 'Job retirement still pending'
+Check (@($plan.Changes | Where-Object {$_.Job -eq $m.Name -and $_.Field -eq 'Job' -and $_.After -eq 'Removed'}).Count -eq 1) 'Removal missing from preview'
+foreach($enabled in @($false,$true)){
+    $deployed=Clone $plan.Jobs
+    $retired=Clone $m;$retired.Enabled=$enabled
+    $deployed.Jobs+=@($retired)
+    $removal=New-SmartM365WorkplaceCutoverPlan $deployed
+    Check ($removal.Changes.Count -eq 1 -and $removal.Changes[0].After -eq 'Removed') 'Already merged legacy job must be removed, enabled or disabled'
+    Check ((Json $removal.Jobs) -ceq (Json $plan.Jobs)) 'Removal changed unrelated deployed configuration'
+}
 Check ((New-SmartM365WorkplaceCutoverPlan $plan.Jobs).Changes.Count -eq 0) 'Not idempotent'
 $bad=Clone $old;($bad.Jobs | Where-Object Name -eq $native[0]).Enabled=$false
 Reject {New-SmartM365WorkplaceCutoverPlan $bad} 'enabled and schedulable'
@@ -173,8 +194,8 @@ try{
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCjFFaum7RLuwrj
-# CgfoCtbSpgIw/gA3oGUldsjb81ZeRKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBIZ8gXf5cBHyc6
+# PRv141cnU1EbEGd4M9SuL6QocJfd26CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -307,31 +328,31 @@ try{
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIMHOxObCVnw6kOV6fcx0DXzzy2Ajn5IkSdvIm94O2C3EMA0GCSqG
-# SIb3DQEBAQUABIIBgFMftz3p9jU5s5bluQ9LeufJZ/LFoaixynwLoBWn6+3wOmUW
-# kcI5nTShW628/a7P5rBeUDmIWUKqf+Hgrw4qyLSAU3/dU/Le0sqTECYVBSfw/Aur
-# 8qKlixmSvPvOfIT80kgPK5DJiLFhtn+p/lvRK7SY11mygvP2cdTLnTWwNZHycBpx
-# QwYcuLJxu1HNencKafUXhjFOVboCYGd8I/gDItkIXMHCvPJCe/c5M5xWnodoh31R
-# Kg39LrnscpzUlcUJFsXzFg2lrj7V5l8bphq2X5BbVUt/HVC7saOpEPbgOuxDYjnp
-# ETr/YNQEDij34gU4+2leUj5A8jDZZejvyh1kot7apUxj2dY/f/y2YiOtWv2O+f2e
-# 9wKCnT7dvJJHykuOotKiNOqNvV4gza/Ex4ssblc6yHtp3onj8pB1Z69ySZMzrjmW
-# PF/8/ji5PGoP0uF10YHWYwRtOXU+Qu+nJ/Lf56eUKSZ1swcQNnN92W6+xQrPkwRI
-# pM6for8ZzqAoxerLFKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIODgbhO2BfPs+8aJ6IBDqHJSqU2DkXYBNQ+0yx7v+uHYMA0GCSqG
+# SIb3DQEBAQUABIIBgJ2tiwbqEMTxKkdntHyaa1QpukXgvKdriX1hiSKMLC4KvdbL
+# 6pXEl25jnfapT9kCWXvHpspAWZ5jv7EI8zJrehF7QB5jMTDwjEj03OzSJiMIsi8D
+# ClmFLL4Wig2e08tce63IyLdvDvT1kAuAxx5/EkRwUhWH3qFkwKxt1Nquu1xzH/4T
+# j/1Uzc1p+yoQ8QtKN6/41JL3xsbcOVkmT6bYXzHmmqnD7w7tHfOnJ98nbqnHa0oa
+# 1d/sTPacMjZS/fEf70meJC0NE5beKT3VUMyOnJ+RZUWgAS1VzTrxabZbv4nuZOc9
+# wKVZb6wwhFZRKwQFU6oBZMHVmlmAStimSa6DULthHG1JOB0duXulkFpVfYAkekg7
+# YyFnPCZTklYj2D7BalOOqH2yvYtkk9ofQqygdFMrBZXZe8FA+O1HK5bwW+ErrC+r
+# EgVUdfXVs7jXAqHGONA6QHKBUpS8sCR1KasrvgqXh+02BHyGcy5PBC6IEtZUuXJt
+# tWab39+Rjll2clhnK6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTUxMTQ0
-# NDVaMC8GCSqGSIb3DQEJBDEiBCAry0ulZ7dtvLU4ZeJo0lxebOOdcKSyo1Lxo9fB
-# xU+ByjANBgkqhkiG9w0BAQEFAASCAgBUAa2s3JpbvuIus5/ZMFAGfwq2i3KWvPkR
-# ++tbpYJxCQVCVuZPJ5CCa4KH/KJcaaLuLX582ol0gl9XWfuhhyysBC6ZTXOdcfX4
-# 9aHaUp+9vvI1cm+BbQkW1qGnjc8p8W+QRErhjAuYRzy52dcTVQ9202r3gej0u+oz
-# pqvFObd4wnX1puoT+E2NpLrszhAsRyC0jfCZtWzKwDbV6dttypwjZpw79xQfi8Zd
-# cwpwAUWbJZYTcuLu3xEhRU8CcXFUr/uo6dVjyS9A8740CpQeiaUwoiOtLh+kPT5s
-# P0yUx5yjQYUciQRUBHsahWiSrOQiEWD//UkipO/emqFve/dh4dTF5IrZQPEPIWIp
-# rw0tNXBjzLKa2j4zDUTCPAjpSNo79olrWFVAHDl4YxRXyK7nZOG6tIFn/hMg26Qu
-# Ad3pKHiYcMZ28iKoeJGJwVF8Oaol18DwwD9q8HXTAOLGgkyiZo0Mlg2EMWOkun3x
-# u2yMu4eRIinYiXTc7JMa7COZXfsByl/TVYNFJtwiMSCd7t6s92pm2MOyxtWfSJH8
-# 64zJLucWZFTTkrQsajbRu7BA9BfcNuVT9D9496309P0WHXIGeVJhzAGoCVN2pt+a
-# 0kEmTV5k0J4v6udxRTBaJLrMXfSUK0S27qinRJkQkHIr+pyk2qS/bFfwhO6bfcnB
-# aG7x4s+j9Q==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTUxMjA1
+# MjhaMC8GCSqGSIb3DQEJBDEiBCBRWlKhDAARHZ8XMYVy2SeSj8x89uJ1Jav05r3K
+# B7z6hzANBgkqhkiG9w0BAQEFAASCAgA3Mt4b5PYi/92KEJ+hpxVni6HOOKg2uYaV
+# M5lpC9+E/UKYUoSDEYom+ze17UQOSUlfSi+UeWNji+gxgIyoM90MpnD768oXDK8f
+# lEQE28w9pTzjiK1uboq+JRTayoin2KFyrhC2jEHWoAvPoDdnuJC39vk6Sls1YmXf
+# FkQiw2GR9ETyDiGI1dn7Zp0XreEOlEyhbL9oLdl6yQJxZsiuSY7zVFGypd1FGWK5
+# 5klb/1OIsnWFiS6GPWk3E+UCKjdO9WbOkDsh0zlSQgxFx0mx8Ikm7oP9DMVtfIr8
+# 83l69M1M6aioiw3WZzG+Wi9nkgyz1BCi5jSKqu0UxKK2M/D41NZiTpxr9vI0HZQa
+# NFvW2nbG950XauvdkpDNX6eW40f2lVaPUxR+A5pKbXzjHpMhrD2IEEz/4L72w8h3
+# eiSlBjDAzQxxVSrKe/ITwy3vNXxWjnliyk7arzwSsxR04eLCFW3vUs74XvMBxE/G
+# h6Q/QjOxctNlChIdAnG0h0j+lOcM6+h4lbIJhfJ6VNFon0MO8cgzek+wfRk1z0yk
+# 7ot4Kn8H5KwiDJUA1OacXRCK33shW46hlfP3xEe3xcvuetJ3Tw0uKanL558pcgfM
+# SWMjcQVcwFiPJ3T0lsU5Z629QcUZtoKT/RoDpAWyh8SGl/FxMQV5luy7QQmaVLO2
+# 91awWlVazw==
 # SIG # End signature block

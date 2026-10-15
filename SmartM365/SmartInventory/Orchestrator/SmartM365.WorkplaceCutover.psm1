@@ -1,5 +1,5 @@
 #Requires -Version 7.2
-# Machine-readable configuration helper, version 1.0.1.
+# Machine-readable configuration helper, version 1.0.2.
 # No tenant initialization, collection, preparation, transport or Desktop action.
 Set-StrictMode -Version Latest
 
@@ -40,11 +40,11 @@ function New-SmartM365WorkplaceCutoverPlan {
             $changes.Add([pscustomobject]@{Job=$workplace.Name; Field='DependsOn'; Before='Absent'; After=$name})
         }
     }
-    if ($legacy.Count -eq 1 -and $legacy[0].Enabled -ne $false) {
-        $legacy[0].Enabled = $false
-        $changes.Add([pscustomobject]@{Job=$legacy[0].Name; Field='Enabled'; Before=$true; After=$false})
+    if ($legacy.Count -eq 1) {
+        $copy.Jobs = @($copy.Jobs | Where-Object Name -ne 'CmdbEvidence-Prepare')
+        $changes.Add([pscustomobject]@{Job=$legacy[0].Name; Field='Job'; Before='Present'; After='Removed'})
     }
-    [pscustomobject]@{Jobs=$copy; Changes=@($changes.ToArray()); RetirementPending=$true}
+    [pscustomobject]@{Jobs=$copy; Changes=@($changes.ToArray()); RetirementPending=$false}
 }
 
 function Read-WorkplaceCutoverFile {
@@ -144,7 +144,7 @@ function Publish-SmartM365WorkplaceCutover {
         if ($parent -eq $ancestor) { break }
         $ancestor = $parent
     }
-    if (-not $PSCmdlet.ShouldProcess($SharedDataFolderPath,'Disable legacy CMDB job and merge native dependencies; no job request')) { return }
+    if (-not $PSCmdlet.ShouldProcess($SharedDataFolderPath,'Remove legacy CMDB job and merge native dependencies; no job request')) { return }
     Import-Module (Join-Path $PSScriptRoot 'SmartM365.Orchestrator.Management.psm1') -ErrorAction Stop
     $validation = Test-SmartM365OrchestratorJobsDocument $plan.Jobs
     $consistency = Test-SmartM365OrchestratorConfigurationConsistency $plan.Jobs $plan.Cluster
@@ -163,7 +163,7 @@ function Publish-SmartM365WorkplaceCutover {
     $result = Publish-SmartM365OrchestratorConfiguration -SharedDataFolderPath $SharedDataFolderPath `
         -JobsDocument $plan.Jobs -ClusterDocument $plan.Cluster `
         -ExpectedJobsHash $ExpectedJobsHash -ExpectedClusterHash $ExpectedClusterHash `
-        -ChangeSummary 'Workplace cutover: disable legacy preparation and merge native dependencies; preserve schedules and collectors'
+        -ChangeSummary 'Workplace cutover: remove legacy preparation job and merge native dependencies; preserve schedules and collectors'
     $after = Get-SmartM365WorkplaceCutoverPlan $SharedDataFolderPath
     if ($after.Changes.Count -ne 0 -or $after.JobsHash -ne $result.JobsHash -or $after.ClusterHash -ne $result.ClusterHash) {
         throw "Post-publication verification failed; inspect configuration and backup $backup. Do not rerun preparation."
@@ -177,8 +177,8 @@ Export-ModuleMember -Function New-SmartM365WorkplaceCutoverPlan, Get-SmartM365Wo
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC300XfKbZSO34T
-# Q+dvMd1ilDHnMkpguQxftuyzR1N5eqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAPCagagVXlAmkj
+# fWI71wbiO7yHXhMV1ndgIk/dIR+8JaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -311,31 +311,31 @@ Export-ModuleMember -Function New-SmartM365WorkplaceCutoverPlan, Get-SmartM365Wo
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIPf8zF5UGQW3Br5SabfsY64LiHGTcFGrhsHdLWvlpUePMA0GCSqG
-# SIb3DQEBAQUABIIBgAlO7tQs70V/ERJt7JDht88hDDlql3xOYKaNv3h7VGzhEE9p
-# xS0062pHm4rUyO5+3+Q8FQO5V2jV5zsEvItyd+yonOA9kE7wuiZdbtG1YqhJG3LT
-# Mpk09gWvLUe8J5Tv+c/VGMuOO/W3AqtDaEFfIAWie5i5udQEwIPCDTxuXmH6SFnO
-# zDBA8wee8CKg8ZKmqqItWvghRkjvM9Ol4Gf31b0FhfyVNR6fY88RpXLA1cjoXscI
-# 1q3va7zCIRuLO7e4J5/s4kFw60rJuS0lvjaPRWF42rxJTgxTz0w6K0uzFvaa9gp9
-# 4gSwbdE47Jwo5DfhhodRZHRi4LeZMWv1+DuTMR3qcKTgGcP1N/r4n4aYTORM5gnc
-# fAP9GVr8E/UQ2FAz+7piYqWDnmgseUvk8GPPJr3I0Ghc8KI8H2Ti2UXtqlXcj0Bk
-# 7x9JShB7cF+c7m2SSIhP7C5JFTM1tZpA+nzObqbJU+aQqzqhH/5iiXT+1POKyEFW
-# +9fEm335QvsDxukKXqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIGJUi2UT85VK3g+kYFfhdTQk4Qmpd1RvzZJCYOGFltgXMA0GCSqG
+# SIb3DQEBAQUABIIBgBxhlTksfjKKW2IgLNtH59br/osrf3z/AkeQZFLgINHbWinN
+# qEH85QjQzN3zXmUhZfv9Dbf7VAdCLPvNdIHFLDWqu9mLf/AdziWUgclfsKsuNwsM
+# 10lveHyDq/6T6YhMb3/G7QeIcBQnjPO4iRPRWcWNRLDn7FRhrMjm34i1+K6DiMmR
+# c/FbAPuWRShbM3qxGR06Zeu8xba8zBVbAesdlxYYKiJ4lqkd64Vw7EEIUi52ZWew
+# j8jjfscNwVRKnGZvc8NoG4KL2FZPCmjsOZBGOdY4UHddj+ASJuVxMzRA4wfoyek8
+# ltzyNOPmUyBbiJ5wGWVGiZOAHKOhLR9BkTFual2UG0RT1G3Zt0pBPk+dR8uO80KA
+# wI0TWPbWaL8f9oPYl8H9pUgA2GUCk3PYmv7IIlqAgXw0JIGmQtHbQd9evWRkszuL
+# /AdSAky5Q0tE8G/CiSSuUFACuAfoFhMxKBeIqbUICLBZkW//nou6vXqIRKSHNm4w
+# xachrTxNzKoNQ4r7N6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTUxMTQ0
-# NDRaMC8GCSqGSIb3DQEJBDEiBCDDhu8TKd8U0j986Do5umEhJVmCbpdP/mIGjq8o
-# 704IQjANBgkqhkiG9w0BAQEFAASCAgCsQ3A+LbEGyYLt/UmhPm+HlS0uZtvmABxt
-# UTnLw/OvhqU+1WgzzfPwvCNkJ8rAJ5hre54xVj0lPQq8R4mnE7axFanbLFn0NL4l
-# T2rhdF3gKRJL4pMXxc83iEU3sxm48Vg4xV0DIQm9UNSA/0ONua5LRjbGghy8H3Fw
-# uGwDks7ga5OmFwIbYcwZCoIvxLyJwUh2BRVKgLW0JVqcT6rdiBbmI+Vy3sBR/zWk
-# Su52Ya23Dpuv6rgxr9rYAsv7d2mpgAvgW0WXZBC2wBT8Vs0KO4SW874hDYO5p97B
-# 9YZ21uIPtetv0thswXd3Vkh2wPOrxv2m3tSP32SOzsMcOOPHGxgSubv8J/ZlqOd3
-# 3WiT5UItJVA25BwiozdLER3Lp1auWWWv1YmE7/Y2snijurU7tuCSEh6uz5Y2mzAV
-# fPK3rCJ4mesvESzPiA8KkzCm+rFTWCc/S0FkJyBEJo4S0PU5f0lHHN4QCpC19rT0
-# r4cuKlpHxruJOOUMrR1j8q6AIvj8vcYxT6uEXD5Hr8NTC62m4E2240wYaOU+/dst
-# 8KqSoh7pgXXa5Q2wVNwLMGCxMQFCTrXRgtqxayJEitunaropDeyYoQxEpEtLcxFS
-# GEKLioIGmYILK+V5+YxrdwBYRYh3MIeX2F7mzcijReuvthjNWCk5yDPnyJwiCkX+
-# ub1SIFwuFw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTUxMjA1
+# MjZaMC8GCSqGSIb3DQEJBDEiBCC7boTBUJ8gXZsrp7Ney5WL02Cun86cx8LwoAVG
+# mOKDizANBgkqhkiG9w0BAQEFAASCAgAtKUeavQEeqy/ZQMJAckhbt+mhd5WjT4K2
+# jrsxRJ4KFugz5hKpvnInB9ZBWt9WEN1ZqcXGF2fou4sHSwCG/P+mLCA17sT1WPFo
+# 8ha3mxRvl75IZMXE6cXTrkIPrPuAau+qyne3z05qWXivzypgjFTyWQQ06I7zuSpo
+# gG8Vy0ThivfbK0pA2FHZYLNTr5bdscmrlpuHTIsTORSuW1tAhasoXjtI5PatLm5v
+# eSvLaYMc2FMjVjCgqfWr9yccDzDPDuucEslt77YYuYqbzE+99PO08nOTqA7+g+1e
+# /Gm6HIKy3McODhk5WgDBG2gZdYFcoHy9xtxdN1tpH/1Ahbzb8tNWLvnPuA9qkfPY
+# wBbsXHXGQ/c/UGk4L9mWgLBVI4+lQXNr7bSianibc8e7M6FVATmW3/swlEtLJeNu
+# /dcCUs14p0IOX6HvTjHeFgmgM4ZKYgsj3mZ+vvHds61iuHC+1TUcKxUuleiPTrDP
+# hpYxJxhgcDG0flUFJ5YQpS0ovIzWKGGzy+Ht4UTsC0R1ZsKWsCIO8M7ElNuAP6uj
+# z5W6mjxptjyddd1JLu/UyMJ6lOXRsAUWis0vzBWXRWFFb7X75nkrWRkLbS8JzsJC
+# W8BYJr7gVZu7ZXCMPJbC0qav2lnpp7pwRLt5LDRf+AoyS90HXa6gBjQDlD+oJG9j
+# 4S33djIRsQ==
 # SIG # End signature block

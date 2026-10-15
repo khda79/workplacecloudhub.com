@@ -1610,58 +1610,6 @@
       "TimeoutMinutes": 120,
       "EstimatedDurationMinutes": 10,
       "Schedule": {"Type": "Daily", "Times": ["05:30"], "DaysOfWeek": [], "MissedRunPolicy": "RunOnce"}
-    },
-    {
-      "Name": "CmdbEvidence-Prepare",
-      "ScriptPath": "PreparedEvidence\\SmartM365-CmdbEvidence-Prepare.ps1",
-      "Arguments": "-Publish",
-      "Enabled": false,
-      "Group": "PreparedEvidence",
-      "DependsOn": [
-        "M365-ActiveUsers-Inventory",
-        "AD-Inventory",
-        "M365-WorkplaceScope-Inventory",
-        "M365-EntraDevices-Inventory",
-        "Intune-Devices-Inventory",
-        "Intune-DiscoveredApps-Inventory",
-        "M365-Licences-Inventory",
-        "EXO-Mailboxes-Inventory-Fast",
-        "Exchange2016-Local-Mailboxes-Inventory",
-        "M365-SPO-Inventory",
-        "M365-Teams-Inventory",
-        "M365-VerifiedDomains-Inventory",
-        "Intune-WindowsAutopilot-Inventory",
-        "Intune-EndpointAnalytics-Inventory",
-        "Intune-Devices-UpgradeEligibility",
-        "Intune-AutopatchAlerts-Inventory",
-        "M365-Usage-Inventory"
-      ],
-      "AssignmentMode": "Elected",
-      "AllowedServers": [],
-      "PowerShellEdition": "PowerShell7",
-      "RequiredCapabilities": [
-        "Graph",
-        "SharedRuntime"
-      ],
-      "RequiredGraphAppRoles": [
-        "Sites.Selected"
-      ],
-      "ContinueOnError": false,
-      "MaxRetries": 0,
-      "RetryDelaySeconds": 0,
-      "ConcurrencyKey": "CmdbEvidence-Prepare",
-      "DependencyMode": "FreshSuccess",
-      "DependencyMaxAgeHours": 240,
-      "TimeoutMinutes": 120,
-      "EstimatedDurationMinutes": 10,
-      "Schedule": {
-        "Type": "Daily",
-        "Times": [
-          "09:30"
-        ],
-        "DaysOfWeek": [],
-        "MissedRunPolicy": "RunOnce"
-      }
     }
   ]
 }

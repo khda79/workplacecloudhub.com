@@ -50,14 +50,13 @@ editing the template.
 | Intune-Configurations-Inventory | Daily 04:30 |
 | Intune-ManagedApps-Inventory | Daily 05:00 |
 | Intune-EnrollmentFailures-Inventory | Daily 05:30 |
-| CmdbEvidence-Prepare | Disabled; pending retirement |
 | M365-SyncHealth-Inventory | Daily 00:20, 02:20, 04:20, 06:20, 08:20, 10:20, 12:20, 14:20, 16:20, 18:20, 20:20, 22:20 |
 | EXO-MigrationJobs-Inventory | Daily 06:00, 12:00, 18:00 |
 
 The five central identity, device and license producers have one overnight
 collection, with no afternoon repeat. Readiness runs once at 07:00,
-hybrid-identity analysis at 08:00, Intelligence preparation at 09:00 and CMDB
-preparation/publication at 09:30. WorkplaceScope starts at 22:00 the preceding
+hybrid-identity analysis at 08:00 and unified Intelligence preparation at 09:00.
+There is no separate CMDB preparation job. WorkplaceScope starts at 22:00 the preceding
 evening because collection can take several hours.
 
 SyncHealth runs every two hours at minute 20 and skips missed monitoring slots;
@@ -74,7 +73,7 @@ do not trigger full identity/device/license recollection.
 | Intune-DiscoveredApps-Inventory | Saturday 20:00 |
 
 Daily EXO Fast refreshes unrestricted mailbox details without live statistics.
-The CMDB job depends on that daily acquisition rather than the weekly live-stats
+The unified Workplace job depends on that daily acquisition rather than the weekly live-stats
 job. Fast can reuse the last statistics snapshot, whose own age is unchanged.
 Weekly statistics are therefore not suitable for a requirement of fresh live
 statistics every 48 hours. Permission-only output cannot substitute for mailbox
@@ -84,10 +83,10 @@ a still-running full inventory can delay a daily Fast occurrence.
 The four existing disabled jobs remain disabled: BackupProtectedMailboxes,
 BackupPolicyScope, BackupProtectedSitesAndDrives and PowerBIFabricActivity.
 The public template enables WorkplaceScope and the three Intune WorkplaceScope
-collectors, but disables the former CmdbEvidence-Prepare job. Its dedicated request
+collectors, and removes the former CmdbEvidence-Prepare job. Its dedicated request
 launcher and activation path are retired. No private server is stored in the template.
 Existing shared manifests require the targeted Workplace cutover publication:
-disable the legacy job and merge its dependencies into Workplace without replacing
+remove the legacy job (including an already disabled entry) and merge its dependencies into Workplace without replacing
 the effective schedule. Git deployment alone is not that publication.
 
 ## Dependencies and freshness
@@ -98,7 +97,7 @@ success exists. This gate neither makes CSVs contemporaneous nor bypasses the
 analysis scripts' own source checks. Mailbox permissions and the permissions
 report retain their existing dependency semantics.
 
-CMDB retains all 17 producer dependencies. Its scheduler completion-age gate
+Workplace retains the former CMDB producer dependencies. Its scheduler completion-age gate
 allows weekly Apps (240 hours), while the preparation contract independently
 enforces acquisition limits: core sources 48 hours; DiscoveredApps warning after
 168 hours and maximum 240 hours. This is not a 240-hour allowance for core CSVs.
@@ -154,9 +153,10 @@ read-back verification, not by overwriting the shared file.
 
 The existing schedule-plan helper preserves runtime Arguments, Enabled,
 execution-server settings and estimated durations. Do not use `-SyncEnabled`
-to activate the disabled public CMDB entries. The explicit
-[CMDB activation helper](../PreparedEvidence/docs/CMDB-PREPARATION.md#automation-and-scheduling) still requires a
-qualified worker and does not launch collectors.
+to restore retired CMDB entries. The legacy activation entry point is blocked;
+use the targeted Workplace cutover helper for existing shared configurations.
+The removal is backed up and hash-guarded, preserves historical execution records,
+and creates no collector or preparation request.
 
 Offline tests do not qualify resident-account permissions, real scheduling,
 SharePoint transfer/synchronization or Power BI refresh.

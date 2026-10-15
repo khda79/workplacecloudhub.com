@@ -8,7 +8,7 @@ Do not schedule or request both preparations.
 
 | Pipeline | Entry point | Output | History |
 | --- | --- | --- | --- |
-| Legacy CMDB (disabled; pending retirement) | `SmartM365-CmdbEvidence-Prepare.ps1` | `DATA-POWERBI-CMDB`: retained previous cohort | Rollback only |
+| Legacy CMDB (job removed) | Historical `SmartM365-CmdbEvidence-Prepare.ps1` | `DATA-POWERBI-CMDB`: retained previous cohort | No scheduled execution |
 | SmartWorkplaceIntelligence | `SmartM365-WorkplaceEvidence-Prepare.ps1` | `DATA-POWERBI`: versioned batches selected by `current.json.txt` | Observed source history |
 
 Both read canonical SmartInventory `DATA-LAST`. Intelligence also reads `DATA-ALL`,
@@ -31,7 +31,7 @@ Use the deployed contracts and runtime orchestrator manifest for actual behavior
 ## Legacy CMDB — no new activation
 
 The former activation helper refuses execution and its dedicated request launcher
-is removed. The template disables the old job, but existing shared configuration
+is removed. The template removes the old job, but existing shared configuration
 is not overwritten by a Git update. Use the targeted cutover procedure in
 [deployment](docs/DEPLOYMENT.md#targeted-cmdb-cutover) before the next preparation.
 

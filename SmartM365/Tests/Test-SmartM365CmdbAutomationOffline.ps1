@@ -3,7 +3,7 @@
 .SYNOPSIS
 Offline activation merge and preparation-to-publication boundary tests.
 .VERSION
-1.0.4
+1.0.5
 .NOTES
 Extracts helpers only; no tenant initialization, collections, authentication,
 SharePoint transport or shared configuration publication. Temporary fixtures only.
@@ -29,6 +29,12 @@ function Import-Helper {
 Import-Helper (Join-Path $preparedRoot 'SmartM365-CmdbEvidence-Prepare.ps1') 'Invoke-SmartM365CmdbPreparedPublication'
 Import-Helper (Join-Path $preparedRoot 'SmartM365-CmdbEvidence-Orchestrator.ps1') 'New-SmartM365CmdbOrchestratorJobsDocument'
 $template=Get-Content (Join-Path $smartRoot 'SmartInventory/Orchestrator/Orchestrator-Jobs.json.template') -Raw | ConvertFrom-Json
+$candidate=Get-Content (Join-Path $preparedRoot 'cmdb-orchestrator-integration.json.txt') -Raw | ConvertFrom-Json
+Assert-True (@($template.Jobs | Where-Object Name -eq 'CmdbEvidence-Prepare').Count -eq 0) 'Retired CMDB job remains in the active template.'
+# Historical merge compatibility only: the operational activation entry is blocked.
+$legacyFixture=@($candidate.ProposedJobs | Where-Object Name -eq 'CmdbEvidence-Prepare')[0] | ConvertTo-Json -Depth 50 | ConvertFrom-Json
+$legacyFixture.Enabled=$false
+$template.Jobs+=@($legacyFixture)
 $optInNames=@('M365-WorkplaceScope-Inventory','CmdbEvidence-Prepare')
 foreach($name in $optInNames){
     $entries=@($template.Jobs | Where-Object Name -eq $name)
@@ -169,8 +175,8 @@ Write-Output "PASS: $testCount CMDB automation offline checks. No collections or
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCKwGDRZh4cAF8C
-# 8l6cmi/QyAhLvWpF3MePRiGq5hr8JKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDbrK6xW9RXpgId
+# tVt66t0DWkM3hlHO+PBscRarAyrg3aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -303,31 +309,31 @@ Write-Output "PASS: $testCount CMDB automation offline checks. No collections or
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEILQ2ZiK/CjbPNtjtEBeWK03ljSAQLEB4CXvUZl8uxDGgMA0GCSqG
-# SIb3DQEBAQUABIIBgF7hx8BMYve20aA1EwIbm8j7r1dwois3IBlEx2IJ15dVOSKu
-# auuaq9YkGeRThWNh31+XN1irSKv+xMzw2tYI2t9uxP9nmUrpbIzPlClry3/pu6xo
-# +asLEv3FRCXB5+mwvv1DmnjlG65f//FtVd9CTKu/9v+H1zv7/gFO1dp1RaHUyJkE
-# /IYrIcNSr9tcQ/q4NoM6w39bH3OTVXvi2/AaHkpC1fpxfx8tpZ1XEnYccmJ5srzd
-# 9uLxe0/Tu0j71YXoYepUWQ2RO18ebuoakElvms0OZs4ArOWtYQbXLBmeTgF9XzfU
-# ZGYc4XwIsSNvdITNgPh17WlBHzTyhbh6IWt1cDx5RXzAeB0xq1aPPkdf+A4ZTxbc
-# NSrorDKNwKzLNCmvouW7w3td1PlvVZv9JpCaLpWBPIDYZ3LIoLyKLQbrZsisjr4A
-# NQfQt9bRXXpBD06xCIFSGckrDdZTw2sNRy/XHXEnTVabnfZkEq1z9Sa6WlpYUwso
-# 88YPeDhhdQe+JnkyiKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEINj+UdUZWYRXJ/dVafjBpry/AXpMUrvccD55gNXlcZ0SMA0GCSqG
+# SIb3DQEBAQUABIIBgByRmk+SALIsP+BedqZjf2L+AyiOksFzJdU4SO+4ImUg9Vp5
+# g34cDbmsqcu7RlKgonFGm+6csbx5wi2RaeC8RnX1ugAMp84YRGKw8W8N29qFXKAE
+# fMO7n7fTDLjrZQcHcqlhTZWQO2LX3rQ9e+ucJ2BDpUnXJ23PIa10NcHzTYehkzSl
+# gu6eY1rQNDEH8HBF3QEgLqNWqmaWMtxyofVNGE/TwCanUXQyISjm83L0F1KnEkwH
+# Fi9MFCGmE7w/xZiICeX/0RLyxY65kv03NQSOzxfvJCdl7aJARK05cayMWkjMqKhW
+# lMteT9WGDtXTxLzUC2dnsyZmLC0hQ2xIYmm1gXmiSXx/PEUjxR+Cyew2qMC81OaQ
+# rHDNqMAPjSshTv3s4Bx72wRE9X8HWOP8jE3k8yukJ39jFJrzoQc4cHiCtgsTuynL
+# LPIsb/5MdEXjuS3jmm7R4Rl7YIy4u9U+x4rbA4cIBKO2pcZQv0YLszne4NbZtYJO
+# tnGCFsV3ayjQ52Dq2qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTUxMTMx
-# MTlaMC8GCSqGSIb3DQEJBDEiBCCEbcvX24+uJl6Lowi5VlZmJgIhQECGgNHdcquq
-# rF09azANBgkqhkiG9w0BAQEFAASCAgBaRXXImyew4KZ+cUuo7mLoIudAkv0+bANb
-# BB8/MchqZtaycIgY1HR8jAcIQuYOYQKpev6CmB3DjcT5pNPzy3uHVObOAT8BGwa0
-# NHmKFm5VYGhBcJLiokupEyvyWIKJ0fSZEYQ0CY4yQzT83SmnhdrKpib3yvpvI7cC
-# FUrANg4mg3CsuEzKdXo1WCYDRfuG8Rc5X7y+LjYVUIkf5MgAb0SQj4P1RkoPbxNc
-# uYW4rXrWS+61UmzP9D/6MxPpr1pERbXGF63agBai157RyVkju04x6bOsR+wYGP0u
-# lB+0gmrjLGi+ezwONKWULy5gAuArMO/Vvz/fTFE5MiTQ+PgQiTAWwuTq4qaaIidm
-# 8eKwQECiPl68BirH6swIzGmM2sV1IWoCYE4szXc0TQI4Rz18TthAg1Z3tYpfv/Q1
-# WhpUOG1SrMFB72uJQ0FWtJ0QmApQi9+oyp5pFLKGlRPPORLbE9EE33sFXRg8nq9N
-# 8Xq3VkaBUHHxORLTqQaFhpZCNTY834NktVK7EtAKCmJEZMX04JjYqB7FVR+d97Y/
-# 7F3aAnqoKrUlOBkz6+H1orrbWehGdA2QypA5zULWQXFzP29aZH2WhadpzEe6GOe9
-# bOlJ0BTS7bHPiKrKecpN/XBOIwfePiNSyW1VWaQmQxopPjrUkHJcDOp3hcPSlNZm
-# CZQz1A9AYg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTUxMjA1
+# MjdaMC8GCSqGSIb3DQEJBDEiBCAuu95qb/oR1Csd7KlaRp2/wlWw8ucu5Z+8oh0q
+# psSDiTANBgkqhkiG9w0BAQEFAASCAgB7ipqHuru985FrKG1MDU4zWAczwJOdfIXH
+# iVRuFIhJVLaYOdQGkgXgRy0MoYGzd8vOA7z9AbKE+RASZzrf6Ith9HPTkau8YEmf
+# AlDhZ8X7BaASWnoY8FD5A0BQVuN2VOKEXCkoctetkB7pz4WjroaPdnGDp2EN/0FJ
+# jilEhwSI20JLN3FQpqzJCvGEilQiE16uuiFBzXzUN0pKt7nvvtlpewu4hW9UB26I
+# FDu689bWWPB/kZRTUz+XRopOqVW8zAybcRMxNFFaEKw6OwT4/SLN66hlV4pl230h
+# g+vu9ycvu0JZW45w6bln0cIWHkrWAXquwbc/8aZzz432CWWJWXVNIil6ymncvFtz
+# hbBgKsJV0fguTqT66gs/eEtS24Cm/AECoWLgNPo8A89wqEDkDxs8g1VryOe2iidT
+# X9EmLx3bsnH3h88GBmGqk0BZd9ThheXDIVYLlpLON/zW8QAYF8CGlQbIgDUZFSms
+# f3wI2+EjCeuc8fQqVf5eXM4S/P/ag2d8OOwlSZ10dUBWc8YJMuMSt9IQ3s2PF/hY
+# Dhio3iAGn1ug147KTTOkrdQd+XEFxV0gDOR9E3IAB7YYFt6MV1lBNqirSnbWMKme
+# KJb268G2OxsTrDurrVKPytOcRZpSejUULT/suf39VCFYQg0HTEe+Kh5h7IUoqRX+
+# itofO2sMqw==
 # SIG # End signature block
