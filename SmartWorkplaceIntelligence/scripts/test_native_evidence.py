@@ -296,6 +296,36 @@ class NativeEvidenceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'effective tenant'):
             unified.validate(self.fixture.source, 'synthetic', NOW, dict(IDENTITY, TenantId='other'))
 
+    def test_native_dates_and_license_counts_use_output_types(self):
+        self.fixture.inputs['users'][0].update(LastSignInDateTime='05/10/2026 09:08:07',
+            LastNonInteractiveSignInDateTime='31/07/2026 08:00:34', LastSuccessfulSignInDateTime='2026-10-05T09:08:07Z')
+        self.fixture.inputs['skus'][0].update(TenantConsumedUnits='8794', TenantPrepaidEnabled='9000')
+        self.fixture.inputs['policies'] = [dict(PolicyId='p'+str(i), PolicyFamily=family,
+            CreatedDateTime='17/07/2025 12:00:23', LastModifiedDateTime='05/10/2026 09:08:07',
+            NativeEvidenceJson='{}', AssignmentCollectionStatus='Collected') for i, family in enumerate(
+            ('SettingsCatalog', 'DeviceConfiguration', 'DeviceCompliance', 'WindowsFeatureUpdate', 'WindowsQualityUpdate'))]
+        self.fixture.inputs['autopilot'] = [{'Autopilot ID':'ap1', 'Last contacted':'14/10/2026 09:00:00'}]
+        self.fixture.write_inputs()
+        unified.build(self.fixture.source, self.output, self.audit())
+        self.assertEqual(self.graph_rows('DimUser')[0]['LastSignInDateTime'], '2026-10-05T09:08:07')
+        self.assertEqual(self.graph_rows('DimLicenseSku')[0]['ConsumedUnits'], '8794')
+        self.assertEqual(self.graph_rows('DimLicenseSku')[0]['EnabledUnits'], '9000')
+        for table in ('DimIntuneConfigurationPolicy', 'DimWindowsUpdatePolicy'):
+            self.assertEqual(self.graph_rows(table)[0]['CreatedDateTime'], '2025-07-17T12:00:23')
+            self.assertEqual(self.graph_rows(table)[0]['LastModifiedDateTime'], '2026-10-05T09:08:07')
+        self.assertEqual(self.graph_rows('FactAutopilotDevice')[0]['LastContactedDateTime'], '2026-10-14T09:00:00')
+
+    def test_type_failure_precedes_graph_and_leaves_sources_unchanged(self):
+        self.fixture.inputs['skus'][0]['TenantConsumedUnits'] = '1.5'
+        self.fixture.write_inputs()
+        before = {p.name:sources.sha(p) for p in self.fixture.source.iterdir() if p.is_file()}
+        with mock.patch.object(unified, 'build_graph') as graph:
+            with self.assertRaisesRegex(ValueError, 'int64'):
+                unified.build(self.fixture.source, self.output, self.audit())
+            graph.assert_not_called()
+        self.assertEqual(before, {p.name:sources.sha(p) for p in self.fixture.source.iterdir() if p.is_file()})
+        self.assertFalse((self.output / 'current.json.txt').exists())
+
     def test_changed_source_after_validation_rejected(self):
         audit = self.audit()
         path = self.fixture.source / self.fixture.contract['sources'][0]['file']

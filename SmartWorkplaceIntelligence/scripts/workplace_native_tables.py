@@ -15,6 +15,7 @@ from pathlib import Path
 
 from workplace_native_sources import rows, normalized as key, utc, application_coverage_status
 from workplace_mailbox_identity import reconcile as reconcile_mailboxes
+from workplace_native_types import count64, source_datetime, validate_value
 
 UNKNOWN = 'Unknown / unassigned'
 ZERO = '00000000-0000-0000-0000-000000000000'
@@ -37,6 +38,13 @@ def boolean(value):
     if key(value) not in ('true','false'):
         raise ValueError('Invalid boolean evidence')
     return key(value)
+
+
+def typed_source(row, field, table, output_field=None, kind='dateTime'):
+    try:
+        return source_datetime(get(row, field)) if kind == 'dateTime' else count64(get(row, field))
+    except (ValueError, OverflowError) as error:
+        raise ValueError(f'{table}.csv column {output_field or field}, rule {kind}: invalid source value') from error
 
 
 def number(value):
@@ -105,6 +113,10 @@ def activity_state(raw, collected, user_enabled=None):
     if not raw:
         return 'No observed sign-in' if user_enabled is not None else 'Unknown'
     try:
+        if user_enabled is not None and 'T' not in raw:
+            return 'Timezone not established'
+        if 'T' in raw and dt.datetime.fromisoformat(raw.replace('Z', '+00:00')).tzinfo is None:
+            return 'Timezone not established'
         observed = utc(raw) if 'T' in raw else dt.datetime.combine(dt.date.fromisoformat(raw), dt.time(), dt.timezone.utc)
         age = (utc(collected)-observed).total_seconds()/86400
     except ValueError:
@@ -136,6 +148,8 @@ def build_tables(source, output, contract, identity, evidence, now=None):
     tenant = identity['TenantKey']
     reference = now or dt.datetime.now(dt.timezone.utc)
     definitions = {t['name']: t for t in contract['tables']}
+    typed_contract = json.loads((Path(__file__).resolve().parents[1] / 'config/native-output-contract.json.txt').read_text(encoding='utf-8-sig'))
+    typed_columns = {Path(t['file']).stem: [(c['name'], c['type']) for c in t['columns'] if c['type'] != 'string'] for t in typed_contract['tables']}
     source_defs = {s['name']: s for s in contract['sources']}
     proof = {f['File']: f for f in evidence['Files']}
     table_counts = {}
@@ -159,6 +173,11 @@ def build_tables(source, output, contract, identity, evidence, now=None):
                 for column in definition['columns']:
                     if column.endswith('Label') and column not in result and column[:-5] in result:
                         result[column] = result[column[:-5]] or 'Not provided'
+                for column, kind in typed_columns[name]:
+                    try:
+                        validate_value(result.get(column, ''), kind)
+                    except (ValueError, OverflowError) as error:
+                        raise ValueError(f'{name}.csv record {count + 1}, column {column}, rule {kind}: invalid value') from error
                 writer.writerow({column: result.get(column, '') for column in definition['columns']})
                 count += 1
         table_counts[name] = count
@@ -187,16 +206,16 @@ def build_tables(source, output, contract, identity, evidence, now=None):
         location = get(row,'Usage location').upper()
         country = location if re.fullmatch('[A-Z]{2}',location) else ''
         enabled = boolean(get(row,'AccountEnabled'))
+        sign_in = {name: typed_source(row, name, 'DimUser') for name in
+                   ('LastSignInDateTime', 'LastNonInteractiveSignInDateTime', 'LastSuccessfulSignInDateTime')}
         item = {'TenantUserKey':native_key(tenant,'user',sid),'CmdbUserId':'entra-user|'+key(sid),
                 'SourceUserId':sid,'UserPrincipalName':get(row,'User principal name'),
                 'DisplayName':get(row,'Display name'),'AccountEnabled':enabled,'UserType':get(row,'UserType'),
                 'Department':get(row,'Department'),'JobTitle':get(row,'Title'),
                 'CountryCode':country,'CountryLabel':country or UNKNOWN,
                 'CountryStatus':'Reported' if country else 'Invalid' if location else 'Not provided',
-                'LastSignInDateTime':get(row,'LastSignInDateTime'),
-                'LastNonInteractiveSignInDateTime':get(row,'LastNonInteractiveSignInDateTime'),
-                'LastSuccessfulSignInDateTime':get(row,'LastSuccessfulSignInDateTime'),
-                'ActivityState':activity_state(get(row,'LastSuccessfulSignInDateTime') or get(row,'LastSignInDateTime'), acquired('users'), enabled),
+                **sign_in,
+                'ActivityState':activity_state(sign_in['LastSuccessfulSignInDateTime'] or sign_in['LastSignInDateTime'], acquired('users'), enabled),
                 'AccountStatusLabel':'Enabled' if enabled=='true' else 'Disabled' if enabled=='false' else 'Unknown',
                 'CreationRaw':get(row,'When created'),'CreationUtcDateTime':created,'CreationStatus':creation_status,
                 'SourceCollectedDateTime':acquired('users'),'ManagerStatus':'Not collected',
@@ -204,7 +223,7 @@ def build_tables(source, output, contract, identity, evidence, now=None):
         users.append(item); users_by_native[key(sid)] = item
         if not country:
             finding('User',item['CmdbUserId'],'UserCountryUnknown','User usage location is missing or invalid; country is not inferred from AD.')
-        if item['ActivityState'] in ('Invalid date','Future date'):
+        if item['ActivityState'] in ('Invalid date','Future date','Timezone not established'):
             finding('User',item['CmdbUserId'],'InvalidActivityDate','User sign-in evidence is unqualified or in the future.')
     user_addresses = collections.defaultdict(list)
     for item in users:
@@ -388,8 +407,8 @@ def build_tables(source, output, contract, identity, evidence, now=None):
 
     skus = index(list(read('skus')),'Id')
     emit('DimLicenseSku',({'TenantSkuKey':native_key(tenant,'sku',sid),'SkuId':sid,
-         'SkuPartNumber':row['TenantSkuPartNumber'],'ConsumedUnits':number(row['TenantConsumedUnits']),
-         'EnabledUnits':number(row['TenantPrepaidEnabled'])} for sid,row in skus.items()))
+         'SkuPartNumber':row['TenantSkuPartNumber'],'ConsumedUnits':typed_source(row,'TenantConsumedUnits','DimLicenseSku','ConsumedUnits','int64'),
+         'EnabledUnits':typed_source(row,'TenantPrepaidEnabled','DimLicenseSku','EnabledUnits','int64')} for sid,row in skus.items()))
     paths, pairs, group_path_counts = [], collections.defaultdict(list), collections.Counter()
     for row in read('license_paths'):
         uid, sid, gid = key(row['UserId']), key(row['SkuId']), key(row['AssignedByGroupId'])
@@ -530,12 +549,12 @@ def build_tables(source, output, contract, identity, evidence, now=None):
     emit('DimIntuneConfigurationPolicy',({'TenantPolicyKey':native_key(tenant,'policy',r['PolicyFamily'],r['PolicyId']),
          'PolicyId':r['PolicyId'],'DisplayName':get(r,'DisplayName'),'Description':get(r,'Description'),
          'Platforms':get(r,'Platforms'),'Technologies':get(r,'Technologies'),
-         'CreatedDateTime':get(r,'CreatedDateTime'),'LastModifiedDateTime':get(r,'LastModifiedDateTime'),
+         'CreatedDateTime':typed_source(r,'CreatedDateTime','DimIntuneConfigurationPolicy'),'LastModifiedDateTime':typed_source(r,'LastModifiedDateTime','DimIntuneConfigurationPolicy'),
          'SourceCollectedDateTime':acquired('policies')} for r in policies if r['PolicyFamily'] not in ('WindowsFeatureUpdate','WindowsQualityUpdate')))
     emit('DimWindowsUpdatePolicy',({'TenantUpdatePolicyKey':native_key(tenant,'policy',r['PolicyFamily'],r['PolicyId']),
          'PolicyType':r['PolicyFamily'],'PolicyId':r['PolicyId'],'DisplayName':get(r,'DisplayName'),
-         'TargetVersion':get(r,'FeatureUpdateVersion'),'CreatedDateTime':get(r,'CreatedDateTime'),
-         'LastModifiedDateTime':get(r,'LastModifiedDateTime'),'SourceCollectedDateTime':acquired('policies')}
+         'TargetVersion':get(r,'FeatureUpdateVersion'),'CreatedDateTime':typed_source(r,'CreatedDateTime','DimWindowsUpdatePolicy'),
+         'LastModifiedDateTime':typed_source(r,'LastModifiedDateTime','DimWindowsUpdatePolicy'),'SourceCollectedDateTime':acquired('policies')}
          for r in policies if r['PolicyFamily'] in ('WindowsFeatureUpdate','WindowsQualityUpdate')))
 
     mailbox_rows,hosting={},{}
@@ -632,7 +651,7 @@ def build_tables(source, output, contract, identity, evidence, now=None):
     emit('FactAutopilotDevice',({'TenantAutopilotDeviceKey':native_key(tenant,'autopilot',r['Autopilot ID']),
         'AutopilotDeviceId':r['Autopilot ID'],'DisplayName':get(r,'Display name'),'SerialNumber':get(r,'Serial number'),
         'Manufacturer':get(r,'Manufacturer'),'Model':get(r,'Model'),'GroupTag':get(r,'Group tag'),
-        'EnrollmentState':get(r,'Enrollment state'),'LastContactedDateTime':get(r,'Last contacted'),
+        'EnrollmentState':get(r,'Enrollment state'),'LastContactedDateTime':typed_source(r,'Last contacted','FactAutopilotDevice','LastContactedDateTime'),
         'AzureAdDeviceId':get(r,'Azure AD Device ID'),'ManagedDeviceId':get(r,'Managed device ID'),
         'SourceCollectedDateTime':acquired('autopilot')} for r in read('autopilot')))
     analytics=[]

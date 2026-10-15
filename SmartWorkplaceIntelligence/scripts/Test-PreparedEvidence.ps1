@@ -4,11 +4,17 @@ param(
     [string]$ContractPath = (Join-Path (Split-Path -Parent $PSScriptRoot) 'config\prepared-evidence-contract.json'),
     [switch]$SchemaOnly,
     [string[]]$Tables,
+    [string]$TenantKey,
+    [switch]$LogTiming,
     [string]$ReportPath
 )
 $ErrorActionPreference='Stop'
+if ($PSVersionTable.PSVersion.Major -lt 7) { throw 'PowerShell 7 is required for prepared CSV validation.' }
 Import-Module (Join-Path $PSScriptRoot 'PreparedMetadata.psm1') -Force
 $contract=(Read-SmartM365JsonDocument $ContractPath).Document
+if (-not ('Workplace.Prepared.CsvValidation' -as [type])) {
+    Add-Type -Path (Join-Path $PSScriptRoot 'PreparedCsvValidation.cs') -ReferencedAssemblies @('System.Runtime','System.Collections','System.Console','System.Security.Cryptography','Microsoft.VisualBasic.Core','System.IO','System.Text.RegularExpressions','System.Diagnostics.TraceSource')
+}
 $results=[Collections.Generic.List[object]]::new()
 $failures=[Collections.Generic.List[string]]::new()
 foreach ($requested in $Tables) {
@@ -18,41 +24,17 @@ foreach($table in $contract.tables) {
     if($Tables -and $table.table -notin $Tables) {continue}
     $path=Join-Path $Root $table.file
     if(-not(Test-Path -LiteralPath $path -PathType Leaf)) { $failures.Add("Missing file: $($table.file)"); continue }
-    $reader=[IO.File]::OpenText($path)
-    try { $header=$reader.ReadLine() } finally { $reader.Dispose() }
-    if(-not $header) { $failures.Add("No header: $($table.file)"); continue }
-    $sample=($header + "`n" + $header | ConvertFrom-Csv)[0]
-    $headers=@($sample.PSObject.Properties.Name)
-    $missing=@($table.columns.name | Where-Object { $_ -notin $headers })
-    if($missing.Count) { $failures.Add("Missing columns in $($table.file): $($missing -join ', ')"); continue }
-    $state=@{Rows=0;DuplicateKeys=0;InvalidValues=0}
-    $keys=[Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
-    if(-not $SchemaOnly) {
-        Import-Csv -LiteralPath $path | ForEach-Object {
-            $row=$_; $state.Rows++
-            if($table.uniqueKey.Count) {
-                $values=@($table.uniqueKey | ForEach-Object { ([string]$row.$_).Trim() })
-                if(@($values | Where-Object { $_ -eq '' }).Count) { $state.InvalidValues++ }
-                $key=($values | ForEach-Object { $_.Length.ToString()+':'+$_ }) -join '|'
-                if(-not $keys.Add($key)) { $state.DuplicateKeys++ }
-            }
-            foreach($column in $table.columns) {
-                $value=[string]$row.($column.name)
-                if([string]::IsNullOrWhiteSpace($value) -or $column.type -eq 'string') { continue }
-                try {
-                    switch($column.type) {
-                        'int64' { $null=[long]::Parse($value,[Globalization.CultureInfo]::InvariantCulture) }
-                        'double' { $n=[double]::Parse($value,[Globalization.CultureInfo]::InvariantCulture); if([double]::IsInfinity($n) -or [double]::IsNaN($n)) {throw 'Non-finite'} }
-                        'decimal' { $null=[decimal]::Parse($value,[Globalization.CultureInfo]::InvariantCulture) }
-                        'dateTime' { $null=[datetime]::Parse($value,[Globalization.CultureInfo]::InvariantCulture) }
-                        'boolean' { $null=[bool]::Parse($value) }
-                    }
-                } catch { $state.InvalidValues++ }
-            }
-        }
+    $timer=[Diagnostics.Stopwatch]::StartNew()
+    if ($LogTiming) { Write-Host ('[{0:yyyy-MM-dd HH:mm:ss}] Validation started: {1}' -f (Get-Date),$table.file) }
+    try {
+        $state=[Workplace.Prepared.CsvValidation]::Check($path,[string[]]$table.columns.name,[string[]]$table.columns.type,[string[]]@($table.uniqueKey),$TenantKey,[bool]$SchemaOnly)
         if($state.DuplicateKeys -or $state.InvalidValues) { $failures.Add("Invalid $($table.file): duplicate keys=$($state.DuplicateKeys), invalid values=$($state.InvalidValues)") }
+        $results.Add([pscustomobject]@{File=$table.file;Rows=if($SchemaOnly){$null}else{$state.Rows};Columns=$state.Columns;SHA256=$state.SHA256;ScanSeconds=$state.ScanSeconds;HashSeconds=$state.HashSeconds;Issues=@($state.Issues)})
+    } catch {
+        $failures.Add("Invalid $($table.file): $($_.Exception.Message)")
+    } finally {
+        if ($LogTiming) { Write-Host ('[{0:yyyy-MM-dd HH:mm:ss}] Validation finished: {1}; seconds={2:F2}' -f (Get-Date),$table.file,$timer.Elapsed.TotalSeconds) }
     }
-    $results.Add([pscustomobject]@{File=$table.file;Rows=if($SchemaOnly){$null}else{$state.Rows};Columns=$headers.Count;SHA256=(Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash})
 }
 $json=[pscustomobject]@{Passed=($failures.Count -eq 0);SchemaOnly=[bool]$SchemaOnly;Files=$results;Errors=@($failures)} | ConvertTo-Json -Depth 8
 if($ReportPath) {[IO.File]::WriteAllText([IO.Path]::GetFullPath($ReportPath),$json,[Text.UTF8Encoding]::new($false))}
@@ -62,8 +44,8 @@ if($failures.Count) {exit 1}
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBJOKLwRwYHoLS7
-# qTsgeKODmF0kznAuXOYdTdb+s42lrqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBrkou6vHJwkCMx
+# KJIABePCaRDfRt6Cz1HkRu2F0pd+HaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -196,31 +178,31 @@ if($failures.Count) {exit 1}
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIDhKy06fOas7T3Zhf4QXMkg4kVKaB/+aei67TVD62+oeMA0GCSqG
-# SIb3DQEBAQUABIIBgCaWTYnxHORmhsSk1G2W6im8MeuDnY/7bQFyxpjeCqWgvfI4
-# 8wg6+J7Knpj6pUFdai1a8JiFlnGi5WGahqiD+s7gwITKll41febeep12HGCxZTs1
-# Jwqco0xfHKxi0w48DOpMUPGPapWoyOb/sBfV7aKHWlAM07TRCdTHkZPaaeyjHj9a
-# 0i7THBoJUoQHLuX05+DzVa7qAU9M2vEmbGI8hzMlRvaD4aMqYfqsGBmNpet6mqVH
-# 7zxh5kslHdPA45k1QjdKLUcYLSiovN99HO/sfRJOWd9Ta48u/cJVyAb32DBtk4Go
-# nc7dpLkCiw/57BgsmiEtFSeXyeQioAdsxBs3yhzf07iZMN+eAqub+oxKfV0hv20i
-# qmzd37NouFVNpUJBtWHwv9H+xqH6LLXm++yp8OeoZheYit2jv0fW/yoL/7SYjLV9
-# ORt9ZNrzN0zK9585HukYOUGohT0+v0mRQFcUGjc93gg2Gwl7G9eKO4xWyZRb7baS
-# AXzH6gQbIc0OYyeo1KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIBPtkMEdeCcRZ0UCAarBsu3ukhrjWHmBjx6QW/TvQG0FMA0GCSqG
+# SIb3DQEBAQUABIIBgI5TYuj5BDmXow+1yGGXJs8nKzk8UBwPt3XAuqsso7wpX/YA
+# vd6YoQsV+DCBACI7czaCFc/KLlxjWbwUkUUeaOWzI6ZXY7a/otlJ6cm5yMZUSaWh
+# c2v7EAmaBeBcZK++Ts+SPhrDXffEZmHiBT3Z19axcG1RCzAGrwfFpcbKt0PUHbju
+# jRvOJmjcnJrUj41NCAJwpO6dna8PmUq5jZpu56fuRnFPr7LlfY28dbYS4SMTBsOm
+# pqMVsagbkRVzHNrUQbLJgeZjcOM+OgIZ+7khuEBUp4IeA25Px2YEwRy0lXvY0wmw
+# opoExkmXzgxULFQ8+X0qjoQzkdlkATQxghKaGdmib2/V2HP8CWK65yklt8YKc7bL
+# b/n6GZ4xvULk9sq6nclsls+5a1E6N960BRxuw6lJV8rP6conGGtwBqXwmxzmTC28
+# ivrNdwqjSEDhDzpP3msE+KzsijkeAGPcrpn1yc/xAXJcCTO28hOFtU4ywoikghgX
+# FNNWoJZ4DSelxiUpsKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjcxNjU4
-# MDBaMC8GCSqGSIb3DQEJBDEiBCBwEI2UBni4KEhLr+uOg5jO+wSZYj1Fl43Ky6BN
-# YHlQGTANBgkqhkiG9w0BAQEFAASCAgAxJzqp99E+PsqkMlF1wobxjJzu/u2lm4ch
-# NDlOan1YxJkNOS4cbXjqCNZPaEz31rUK+iPJdDEGtOs4n28IQSvk3+GznoiUUylv
-# v+98VgkXrBLW4L/2tDRulJUcdzM6HihOfU/Ds95Ai7XnQmweEcWhK/lrEuuE1vKx
-# 4LkdGIyIEhGo6LmS+k/xOKj9BBTXhshIR15Ikj6ctKfSmlRYE3ndA/TT8NP5bj3T
-# Gbmmei2oiERTBbth95ND6io/rehuMQvzR5xFHJT2+iymYr5GUiadQKvdVpKxiHjD
-# 8sdg26SOLlCURZ8ZbMcLBgLlVURlSgoNtzDHAJ/FIHQ7wDFbt5M0JREJ2HN53gv0
-# 36p6Ve6j7jZ5qKZy2WsPhuaiCuot5NupUZQyVYUzyT74DGr9K4SIgY89BBEy16LI
-# bw+wLXvIj2mDMawC/X/fOt7r0lDLLlUhpMXGnEf8yYg7PUoWvJ0c9ftq0NGG84Q1
-# kCw4+15OjxrhBV4fGX1MNMsriuUSNe67o3p6bnfzFU4Gdi8uQBswW/EaHvHnyKMp
-# iw88cnON24Ny0jeH2RMpUJs83hapZxqGYUNFrmkCzndiLVA32kVz/2Eu3K19FHsR
-# iLEgLX6r9XUKgHxzvXEz2mQNAaPpjlZKUvjiVgyE8M9zImCP9eMQEMi/CS4OuCYN
-# wczM8vjUow==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTUxNzA5
+# MzdaMC8GCSqGSIb3DQEJBDEiBCDew7b/Z8wpvFKV+JNvZYMNlTSpQHlMTenbBeIi
+# JubkXTANBgkqhkiG9w0BAQEFAASCAgCl78CKfTS3Qrseq0+k6o/SeHpBQ/fF8lVU
+# zPI+XsVNRHWFLdB3jiJxgvAjN+Zg5lKaUfKFDjCatjZYT6+uJbQvhH+xtjN2TimV
+# OUAEieYo5kAyHozDf1KywqP2sfMVi8nXCKLnV3nfQoYp+jx1hnrU+iagqNLsqNlQ
+# JwhzwsTS8GhOGD0Ebzej/t9Zj9yrYXnZzeDBaxSusE6zpyrA5fRYWhfa6DKadZuE
+# b0dVgmn58ohef/jOcpailn8HB+2iTGLY3H7dcf2qbTaqRz32vznNz6X4JtV23sYP
+# wHG2PnK4PuuwO8H3osmUk2HHiO5+DuWl1YX4JOR8StHfnexOBpu8ULoElQoPqM34
+# p0K/h/YWh/4+aTavNLE3EVWqkjZjIIGFr9BbW9Lx1VR+Qz+zcoRntQCelk+12528
+# 5fFn5t0BXNQw07rru6MUSL5AWnFQ5dXOz3gYOuzOeoWuaQwJoD+o7W+wgnXrIYwr
+# qlHuBO3NRZHuZdn3Y9ckWP32e+E3eJYO6dJUsoCJwddWQJnN14G3vmF7vJJFknoU
+# GmI2kVuuVCpeV70N+Z8Shwb7u4mMNplBNxqKCGBH/Qb0vv5mKwCjVoGReCFFrKTD
+# g1Dt9w2U5f+KYgpdBNQQ56ns+ykbYJJOlk+JXo5X7w+A96kwRTUK8vFJEFZnqdae
+# /cGe4h7+Zw==
 # SIG # End signature block
