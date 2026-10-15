@@ -46,6 +46,11 @@ if ($reportRoot.StartsWith(($root + [IO.Path]::DirectorySeparatorChar), [StringC
 New-Item -ItemType Directory -Path $reportRoot -Force | Out-Null
 
 function Get-FileHashValue([string]$Path) { (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash }
+function Get-TotalBytes([object[]]$Items, [string]$Property) {
+    [int64]$total = 0
+    foreach ($item in $Items) { $total += [int64]$item.$Property }
+    return $total
+}
 function Get-Week([datetime]$Date) {
     '{0}-W{1:00}' -f [Globalization.ISOWeek]::GetYear($Date), [Globalization.ISOWeek]::GetWeekOfYear($Date)
 }
@@ -113,7 +118,7 @@ if (Test-Path -LiteralPath $usage -PathType Container) {
         $eligible = $plain -and $runDate -lt (Get-Date).AddDays(-7) -and
             ($runRows.Count -eq 0 -or -not @($runRows | Where-Object Decision -NotIn @('DuplicateOfWeekly','DuplicateOfLaterRun')).Count)
         $usageFolderRows.Add([pscustomobject]@{Run=$run.Name;Files=$runRows.Count
-            Bytes=[int64](($runRows | Measure-Object Bytes -Sum).Sum)
+            Bytes=(Get-TotalBytes -Items $runRows.ToArray() -Property 'Bytes')
             Decision=if ($eligible) { 'ReviewExactDuplicate' } else { 'Keep' }
             Reason=if (-not $plain) { 'Nested or linked content' } elseif ($runDate -ge (Get-Date).AddDays(-7)) { 'Recent run' }
                 elseif (-not $eligible) { 'Distinct or unqualified file remains' } else { 'Every file has a retained SHA256-identical copy' }} )
@@ -212,7 +217,7 @@ if (Test-Path -LiteralPath $repairRoot -PathType Container) {
             $issues.Add('Backup contains unexpected or missing files.')
         }
         $repairRows.Add([pscustomobject]@{Folder=(Get-Relative $folder.FullName);Status=$status
-            ReceiptFiles=$count;StoredFiles=$files.Count;Bytes=[int64](($files | Measure-Object Length -Sum).Sum)
+            ReceiptFiles=$count;StoredFiles=$files.Count;Bytes=(Get-TotalBytes -Items $files -Property 'Length')
             Verification=if ($issues.Count) { 'Review' } else { 'CompletedAndHashVerified' }
             Issues=($issues -join ' | ')})
     }
@@ -227,7 +232,7 @@ foreach ($family in 'failed','retired') {
     foreach ($folder in @(Get-ChildItem -LiteralPath $familyRoot -Directory -Force)) {
         $files = @(Get-ChildItem -LiteralPath $folder.FullName -File -Recurse -Force)
         $preparedRows.Add([pscustomobject]@{Family=$family;Folder=(Get-Relative $folder.FullName)
-            Files=$files.Count;Bytes=[int64](($files | Measure-Object Length -Sum).Sum)
+            Files=$files.Count;Bytes=(Get-TotalBytes -Items $files -Property 'Length')
             NewestUtc=if ($files.Count) { (@($files | Sort-Object LastWriteTimeUtc -Descending)[0].LastWriteTimeUtc.ToString('o')) } else { '' }
             Decision=if ($family -eq 'retired') { 'KeepAuditReceipts' } else { 'ReviewFailureDiagnostics' }})
     }
@@ -271,8 +276,8 @@ Write-Report 'cmdb-lock.csv' @([pscustomobject]@{Path=(Get-Relative $lockPath)
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB4yeCGVaKetoG6
-# K11lOG03yruKdJLIsc/3zM4NLYKtP6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAclJqPAvwr9ifH
+# 0qQP9MNYfApvbxd7dP53WN3p5/5Uf6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -405,31 +410,31 @@ Write-Report 'cmdb-lock.csv' @([pscustomobject]@{Path=(Get-Relative $lockPath)
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIJG+8sXMGQJxs6LbEnsm3tmbV0b3sSjycOzk7kSBQJVfMA0GCSqG
-# SIb3DQEBAQUABIIBgJ9T5b565GrCNzbE23l1eBlHhflxaqZLEqgNlPUiNSOqNWDI
-# BxmhABWSK3eqLBNyUfArGChb41bcPkvADP2ujkVhitlHkQ+xwwCa4vYZi998VPQN
-# CccytixRWjgmPRDvAJln1OhJh6zLl9lpLgbUdP3WSsz431AnEH/JI23gbUa3d4D8
-# I5FdmeZzcxzt32lnu4Ipnyjjeyde2r0Y9VeOSrCww+80IddoXe8uq0SFrb0jgiCp
-# kAWjalOLtpstbFVrlYM1AUzTYVElp8ygAmX89JhahILO+tUOU7wb9qBECfz1T9PY
-# TGiRL1rCqeVdzlCxxpqcs+tolg+aBLhsTrBSsBZLTKiGVdn71z1GjAT6dRCBzUv6
-# llN6+GffBf0WAPjuDJJnxM9AsXpMbymUNTCJsJukksWMANlurq7Jx5QpE8lbTTFJ
-# L966KgrHCuaI44SyKlFO0tt7kWHe0r/1bXuFyvVZYh3EYUvphH8yuhX1oTmExwVG
-# m13c47Xg00XKhU9jM6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIEiM5ebojwDtCY3X+G0TGtjMxm4HQJ3+5f9bxrJRWzlOMA0GCSqG
+# SIb3DQEBAQUABIIBgEGZRK6X4mfgsT1iOG/qQVUIMf9xggN+9lWQHuoc/ONgtX/V
+# xkdPTt4cBbiGW2QE8Qxz/YViLqQk91SklAqY8l9X4OFUcWmWN0TvxgYmvmC0TdWE
+# hcMEre35O8QoIeJBeL5RUJoY0jy84iTQs5usPw07R+UzG060wY3JWUOiECKToFLu
+# w+59Le+YA8rOqq9wC1lZuFbOjYxV0VkyzkfOd/AGUPNMEJrsXeRl3zBJwAq9ENTp
+# a5VTwrDx5sv/8vPqlwz7mgzqwu5euWQIgJkjA/ZDd4To+8CmUm1PcsaI+kuNEaH9
+# DrKmRLAgRV12BhUyJtNyjknN9HvxnGSDv0MwW19Yrrj4KpkABc3avXbZ6PD/uYTH
+# WgxVmhRgzEiNwJClWYh05U9dGVcK43GyVLEFKZ/x67BmNWmhGlf01m39/fLUyj2z
+# 8p/V+AtPEhRzl4vGrkphldy+R4htjDi4/CJapN4Ser92kSBXgWU8G8FTL1dmGJM9
+# Rj3PNWGNvIAqcqNqMqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTUxODE2
-# MDlaMC8GCSqGSIb3DQEJBDEiBCC80RWt8kQ78d9w99u88paVi9noMPDGDtv6hGkV
-# yV8ZNjANBgkqhkiG9w0BAQEFAASCAgCTEMMnt8NbMo4NsOHr9iyizZbiDlpptkwq
-# Bt/RhRVNUXdCc8GQmlvPvt91E/YqJio93QkVDr/bd94cWXZQmbdJqRRwzjLW1UwV
-# SVaWlx6RBbVP3qjsVvUYQ424UbH0HjCVlRfSSZFy0l6fhJu3vdJFM9EfOMeCFQKR
-# pLXXyjEqhHboz+HkjRV9s4MFFTA1pWSYxHv3xSLroyMN4sanu+o3jQGkrdFlDovh
-# yoQm9CvQ+jUi9CiHLg+QEEalfNaML+gcZk8kgVd44In0UVkyzizPfjb30XFjxHhG
-# iRvlFrBxKNdBzvuid16pYU+I+TTRRKHKqoZZrc8vLFwJBG8XS/gI1NzpXKwSHSvW
-# uUn6JGsZBzvl/DC6dUL+09tLkMiP6bJjNcHJOoj4h7T7lTpOcPHBXpD/AK0HJjIx
-# dTUqjDF3AjDXRtpPaLGJsbI4VvxkSmoUYgrGxweGJwgP6u2ZnDViJ/FCTHY5bdU8
-# xuvYW9RbJTjjaz1uNZwROMarE13FtNAK5pkRq0GV5DGNYGJbRuGhJNXo0Or+nOqa
-# RSXsEL96m2RrV3j7zMLeeV8K4XFAHUt/k2SuFpJtTf3GuahTAjhyESU0u7GpiH07
-# QbyfT1IG7UDDRsTqR1EbYbI5jcgvT36yn6UzWqcV9OnWMvU8CzKHXZg1XELVEnN0
-# d3C0/Xexaw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTUxODI0
+# MzJaMC8GCSqGSIb3DQEJBDEiBCBLiRdVBkyt9Se+UK/mg82bm+lTwW8LCLv8Ha1c
+# WvAW6zANBgkqhkiG9w0BAQEFAASCAgCr+PUBcIrK5eptRjmpMLsiGBnnafPhMV/u
+# zZJjOPhzZqVPjqAzTwHf6xpbP9IqF2tb+jTO9ky5wvMmoojuUYFiazQgf6Ua25F5
+# d4zxyR8pWjl+43W2ACEQ7DmEdAYvo7eQg9o8Tu70oXnCvjtDZUjWE8OUorW+Loa7
+# 1yOh8m21QocGnSdS46BX0YJdkvYmFUeLbC/mKDgn5SjlgSwhKGRMIsFX//WLLTgd
+# E2gaL5xQu8V7wLolZdeMPopsHYlhfc3xzaZPtT0He3Rt8t7bKovElzfGSMIuO4rs
+# 4IiI6hdFuEVFidkUVhECdGnZ5y4qPcfk7WI0mm/hD6Hj0fQSsp1tVwIOrFnec7vE
+# BFJeqddp0nqJGaCH4/jTKBSXlFjvwIaCmtwHwt9IeG9AG+qIbSUzQjV9jFcQOkDg
+# aaznigNvTlfzn6q4p7bgyXgHTjCDx9sWbxKDdqwpBY8OyabIX+pJIlASlG2UYH+n
+# ejidh5QnaRL4sGRY0w66uKV/6fXVH8Jo3ZvtZuEd0R32DzCffhGJA80VmR2sgsYk
+# vVHWGaj6mmECQJvg1cl9Sjv9UACvbe4a1GoF1jX7opzg1umj5lR4YwXmTXqLjQ+P
+# 3hqB7SaSMlshE3CQV+j1hUyeKcdby1pCQa+u+rc50t3T39xFNynUK0l+hhfVhz72
+# coXXiS3NhA==
 # SIG # End signature block
