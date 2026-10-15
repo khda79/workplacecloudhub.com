@@ -86,6 +86,51 @@ try{
     Publish-SmartM365WorkplaceCutover @publish -WhatIf
     Check (@(Get-ChildItem $root -Recurse -File).Count -eq $fileCount) 'WhatIf wrote files'
     Check (-not (Test-Path $publish.BackupDirectory)) 'WhatIf created backup'
+    # Exercise JSON shapes emitted by idle residents, not just synthetic [] lists.
+    $idleHeartbeat=Json $hb
+    foreach($shape in @(
+        '{"RunningJobs":[],"PendingJobs":null}',
+        '{"RunningJobs":null,"PendingJobs":[]}',
+        '{"RunningJobs":null,"PendingJobs":null}',
+        '{"RunningJobs":[{"Name":"AD-Inventory"}],"PendingJobs":null}',
+        '{"RunningJobs":null,"PendingJobs":{"Name":"AD-Inventory"}}'
+    )){
+        $lists=$shape | ConvertFrom-Json
+        $hb=Clone ($idleHeartbeat | ConvertFrom-Json)
+        $hb.RunningJobs=$lists.RunningJobs;$hb.PendingJobs=$lists.PendingJobs
+        [IO.File]::WriteAllText($heartbeatPath,(Json $hb))
+        Publish-SmartM365WorkplaceCutover @publish -WhatIf
+        Check (@(Get-ChildItem $root -Recurse -File).Count -eq $fileCount) 'Accepted heartbeat WhatIf wrote files'
+    }
+    foreach($listName in @('RunningJobs','PendingJobs')){
+        foreach($jobName in @('WorkplaceEvidence-Prepare','CmdbEvidence-Prepare')){
+            foreach($singleton in @($false,$true)){
+                $hb=$idleHeartbeat | ConvertFrom-Json
+                $hb.RunningJobs=$null;$hb.PendingJobs=$null
+                $entry=[pscustomobject]@{Name=$jobName}
+                if($singleton){$hb.$listName=$entry}else{$hb.$listName=@($entry)}
+                [IO.File]::WriteAllText($heartbeatPath,(Json $hb))
+                Reject {Publish-SmartM365WorkplaceCutover @publish} 'running or pending'
+            }
+        }
+        foreach($malformed in @('[null]','[{}]','["AD-Inventory"]','42','{"Name":null}',
+            '{"Name":42}','{"Name":""}','{"Name":" "}','{"Name":" WorkplaceEvidence-Prepare "}',
+            '[{"Name":"AD-Inventory"},null]','{"JobName":"WorkplaceEvidence-Prepare"}')){
+            $hb=$idleHeartbeat | ConvertFrom-Json
+            $hb.$listName=ConvertFrom-Json -InputObject $malformed -NoEnumerate
+            [IO.File]::WriteAllText($heartbeatPath,(Json $hb))
+            Reject {Publish-SmartM365WorkplaceCutover @publish} 'Invalid heartbeat job'
+        }
+        $hb=$idleHeartbeat | ConvertFrom-Json
+        $hb.PSObject.Properties.Remove($listName)
+        [IO.File]::WriteAllText($heartbeatPath,(Json $hb))
+        Reject {Publish-SmartM365WorkplaceCutover @publish} 'Missing heartbeat job list'
+    }
+    Check ((Get-FileHash $jobsPath).Hash -eq $preview.JobsHash) 'Heartbeat checks changed jobs'
+    Check ((Get-FileHash $clusterPath).Hash -eq $preview.ClusterHash) 'Heartbeat checks changed cluster'
+    Check (-not (Test-Path $publish.BackupDirectory)) 'Heartbeat checks created backup'
+    Check (@(Get-ChildItem $root -Recurse -File).Count -eq $fileCount) 'Heartbeat checks created files'
+    $hb=$idleHeartbeat | ConvertFrom-Json
     $hb.RunningJobs=@([pscustomobject]@{Name='CmdbEvidence-Prepare'})
     [IO.File]::WriteAllText($heartbeatPath,(Json $hb))
     Reject {Publish-SmartM365WorkplaceCutover @publish} 'running or pending'
@@ -101,6 +146,9 @@ try{
     Reject {Publish-SmartM365WorkplaceCutover @invalid} 'outside the repository'
     $invalid=@{}+$publish;$invalid.NoManualPreparationConfirmed=$false
     Reject {Publish-SmartM365WorkplaceCutover @invalid} 'Confirm that no manually'
+    # The real idle resident shape must pass both pre-publication heartbeat checks.
+    $hb.RunningJobs=@();$hb.PendingJobs=$null
+    [IO.File]::WriteAllText($heartbeatPath,(Json $hb))
     # Real configuration publication API against this synthetic directory only.
     $result=Publish-SmartM365WorkplaceCutover @publish
     Check ($result.Status -eq 'Published') 'Synthetic publication failed'
@@ -125,8 +173,8 @@ try{
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBEQjbCxcmUTLja
-# JTer92SdsCLJ2DGfSmirNfV7ws1ZJ6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCjFFaum7RLuwrj
+# CgfoCtbSpgIw/gA3oGUldsjb81ZeRKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -259,31 +307,31 @@ try{
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIM6uLRUzdFJHBr8DT3u59FBq69jaUW0bW2lF0PC0B27SMA0GCSqG
-# SIb3DQEBAQUABIIBgAclEmMGhWR3Dv4beAky/hE6W44tPJubaEK3VcJ34ytl72iI
-# eS/GsNtEstLq5kkbqoOa3jBTCeJB6I/xswLFEaIACiWBhep9Pr71YkrkiVelPrU4
-# 0yTD5XSyf+uTnfhGUdXjLpuKsLXOO+EOqQS5xy9cnVlRb7X8wuW+6WQDjB6See+N
-# pXBRDqsSNIP+YEYZN5Gn0jh+b95uq4nsFYRV4sQDxSESu9Emy2DsVYaSovgnVATa
-# KdaFH4g7yuIoJ3IkJPmBdJkTgJxNAq6OEHeud4TiKosRlIRTvs1nQEJ1FTVFiaqZ
-# yd0tXHjyUIv3Nze0O8LqES48BSP6nNoj7J8Jw5CZ+mSO9rZBptGzjeG5fayRBFbR
-# lEzkbDUd2QTSi0Tsu8QW3VzK/im02faIRmu7VB7VMcS+RkfDQAUO7iR0zoLJjnoF
-# HRkPwdjqzWA7n0QXtTxHuXzNGjGZJ+HyLfbAk5KrdRl7djxEz0lDjALZcuNTq+qG
-# pyUdbG3OM0mT7sUke6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIMHOxObCVnw6kOV6fcx0DXzzy2Ajn5IkSdvIm94O2C3EMA0GCSqG
+# SIb3DQEBAQUABIIBgFMftz3p9jU5s5bluQ9LeufJZ/LFoaixynwLoBWn6+3wOmUW
+# kcI5nTShW628/a7P5rBeUDmIWUKqf+Hgrw4qyLSAU3/dU/Le0sqTECYVBSfw/Aur
+# 8qKlixmSvPvOfIT80kgPK5DJiLFhtn+p/lvRK7SY11mygvP2cdTLnTWwNZHycBpx
+# QwYcuLJxu1HNencKafUXhjFOVboCYGd8I/gDItkIXMHCvPJCe/c5M5xWnodoh31R
+# Kg39LrnscpzUlcUJFsXzFg2lrj7V5l8bphq2X5BbVUt/HVC7saOpEPbgOuxDYjnp
+# ETr/YNQEDij34gU4+2leUj5A8jDZZejvyh1kot7apUxj2dY/f/y2YiOtWv2O+f2e
+# 9wKCnT7dvJJHykuOotKiNOqNvV4gza/Ex4ssblc6yHtp3onj8pB1Z69ySZMzrjmW
+# PF/8/ji5PGoP0uF10YHWYwRtOXU+Qu+nJ/Lf56eUKSZ1swcQNnN92W6+xQrPkwRI
+# pM6for8ZzqAoxerLFKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTUxMTMx
-# MThaMC8GCSqGSIb3DQEJBDEiBCDzKNA8iLqdLX7K7bapvr0d/T4XEyfzTZAOTtEU
-# VufIDDANBgkqhkiG9w0BAQEFAASCAgAQS8r2Z8JK+PSXSzcD0WJ+UxRfkrnPFy/E
-# /15/3NWr745kDnPSjvIY2SJJxc2athYPFJBLqytAFwC9l2PMAc7SI8Gr8YsU3O2C
-# 6xsCAU4NFdgRf4hfSRYBz4TGgmgwWrSK9q4H31rdPnJr1I3y6u30mMfX+Tt2ZXon
-# ZBs5dqbuXdvu5JXr3fESWR97eHaoFgaKrAgNuRuAnEEcT+f6DW3pnrl16c2CsarS
-# 80GmA2WiXF6iSrUs0p94BrLuqU3TPxJ4eJZaDpOGkKfANYuIwomPhxykuv9BBMNQ
-# if8wcqNcZAWcjwoj7w5EP7ZKarJ/sLKuCn1e2Ycjk91shGXtumB8ZoOo9YXQfPM8
-# IQlgxERQnBVgJtbgvxbS7/rFKHBgX4jh37WU86SKD+JpxijnDf3Lk4c4OjWTOjmG
-# hPyWloohgAWAXete+D/tg3DSJRq1Wxk2uPtWahxB7v2NDKRZnG18Zg8Kuc1OZMEa
-# Zb5Ht/3e2bPaAHLbHCHbxK3xQBpCr/3sJjldp2McRM2EJU8vMeViUdtN1kguFHmS
-# 1YRhM3HAVZ0Z4mRhxNUNfWIUQIG83i+I/ee2EFKb2x2qYW4rhd3CzbDkFwmL7llN
-# TUyOUIexfqdqU1dCkyLvw3orcNdupLptlRJAyoET8pUtjPq6ifLWwyp49MJo6FDt
-# suesWuFUaQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTUxMTQ0
+# NDVaMC8GCSqGSIb3DQEJBDEiBCAry0ulZ7dtvLU4ZeJo0lxebOOdcKSyo1Lxo9fB
+# xU+ByjANBgkqhkiG9w0BAQEFAASCAgBUAa2s3JpbvuIus5/ZMFAGfwq2i3KWvPkR
+# ++tbpYJxCQVCVuZPJ5CCa4KH/KJcaaLuLX582ol0gl9XWfuhhyysBC6ZTXOdcfX4
+# 9aHaUp+9vvI1cm+BbQkW1qGnjc8p8W+QRErhjAuYRzy52dcTVQ9202r3gej0u+oz
+# pqvFObd4wnX1puoT+E2NpLrszhAsRyC0jfCZtWzKwDbV6dttypwjZpw79xQfi8Zd
+# cwpwAUWbJZYTcuLu3xEhRU8CcXFUr/uo6dVjyS9A8740CpQeiaUwoiOtLh+kPT5s
+# P0yUx5yjQYUciQRUBHsahWiSrOQiEWD//UkipO/emqFve/dh4dTF5IrZQPEPIWIp
+# rw0tNXBjzLKa2j4zDUTCPAjpSNo79olrWFVAHDl4YxRXyK7nZOG6tIFn/hMg26Qu
+# Ad3pKHiYcMZ28iKoeJGJwVF8Oaol18DwwD9q8HXTAOLGgkyiZo0Mlg2EMWOkun3x
+# u2yMu4eRIinYiXTc7JMa7COZXfsByl/TVYNFJtwiMSCd7t6s92pm2MOyxtWfSJH8
+# 64zJLucWZFTTkrQsajbRu7BA9BfcNuVT9D9496309P0WHXIGeVJhzAGoCVN2pt+a
+# 0kEmTV5k0J4v6udxRTBaJLrMXfSUK0S27qinRJkQkHIr+pyk2qS/bFfwhO6bfcnB
+# aG7x4s+j9Q==
 # SIG # End signature block

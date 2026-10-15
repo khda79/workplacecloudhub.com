@@ -1,5 +1,5 @@
 #Requires -Version 7.2
-# Machine-readable configuration helper, version 1.0.0.
+# Machine-readable configuration helper, version 1.0.1.
 # No tenant initialization, collection, preparation, transport or Desktop action.
 Set-StrictMode -Version Latest
 
@@ -82,9 +82,25 @@ function Assert-WorkplaceCutoverIdle {
             $hb.Lifecycle -ne 'Running' -or $hb.StatePersistenceHealthy -ne $true) {
             throw "Fresh running heartbeat with healthy state persistence required: $server."
         }
-        foreach ($job in @($hb.RunningJobs) + @($hb.PendingJobs)) {
-            if ($job.Name -in @('WorkplaceEvidence-Prepare','CmdbEvidence-Prepare')) {
-                throw "Preparation is running or pending on $server. No configuration published."
+        foreach ($listName in @('RunningJobs','PendingJobs')) {
+            $property = $hb.PSObject.Properties[$listName]
+            if ($null -eq $property) { throw "Missing heartbeat job list ${listName} on $server. No configuration published." }
+            # An empty resident snapshot can serialize as null instead of [].
+            # Only the whole list may be null; malformed entries must fail closed.
+            if ($null -eq $property.Value) { continue }
+            foreach ($job in @($property.Value)) {
+                if ($null -eq $job -or $job -isnot [pscustomobject]) {
+                    throw "Invalid heartbeat job entry in ${listName} on $server. No configuration published."
+                }
+                $nameProperty = $job.PSObject.Properties['Name']
+                if ($null -eq $nameProperty -or $nameProperty.Value -isnot [string] -or
+                    [string]::IsNullOrWhiteSpace($nameProperty.Value) -or
+                    $nameProperty.Value -cne $nameProperty.Value.Trim()) {
+                    throw "Invalid heartbeat job Name in ${listName} on $server. No configuration published."
+                }
+                if ($nameProperty.Value -in @('WorkplaceEvidence-Prepare','CmdbEvidence-Prepare')) {
+                    throw "Preparation is running or pending on $server. No configuration published."
+                }
             }
         }
     }
@@ -161,8 +177,8 @@ Export-ModuleMember -Function New-SmartM365WorkplaceCutoverPlan, Get-SmartM365Wo
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA0V5efNVpgfcna
-# Zphx7FBAymZwrFp00feqEhxmNYLDBKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC300XfKbZSO34T
+# Q+dvMd1ilDHnMkpguQxftuyzR1N5eqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -295,31 +311,31 @@ Export-ModuleMember -Function New-SmartM365WorkplaceCutoverPlan, Get-SmartM365Wo
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIIEia2b6KdfKK9OnBDtetYW/tlCDj/gJm9GchPT6yiEqMA0GCSqG
-# SIb3DQEBAQUABIIBgGE4li0oBHRzhLPdM8VlSatMYglhLkCJZJ37mo4Kb90Cv5FU
-# jATGAaJg4i3jdaQtITPU7TtQ/ochi69YqDLbJSoIQCnY7YHgbhovk2+DlnGwl6x7
-# d5jGNfh/TIHILfKmpkQEc3aWRiK71m1ojSQWcEfLg2nteaBWUTDD1fq3oYDN2Sr9
-# dCgYDzqWRNWqUI2FTNv3oeHB/saKoRwkhgB6Pjd/2cdi0tPn348LACruz2Si0yIx
-# gSwapP9h3peB9Awv8zHrZcvfvIL+UXDdP/Ypq4unUNvolSMJkJXGXQXUsM1Ctwmf
-# SZlG3QqpxWb75i8fIBf7yJs0qzO5DUcf98FBXxghv0DVyIerauejarcBhi7nkce5
-# VAQ0ZTEa5j4MHWcvrJP/YSwxF9ZapAubb8D5IolJ6HwjRuJiEnLrpzgr69fXFKpc
-# ZTliZ7ZNk4JAHICMNhciBfgSKMlQEEaVdIYiDQMi0FqSeWiYccHyeu1JHmnl9oAi
-# QaxXgSmqF4cct07qcKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIPf8zF5UGQW3Br5SabfsY64LiHGTcFGrhsHdLWvlpUePMA0GCSqG
+# SIb3DQEBAQUABIIBgAlO7tQs70V/ERJt7JDht88hDDlql3xOYKaNv3h7VGzhEE9p
+# xS0062pHm4rUyO5+3+Q8FQO5V2jV5zsEvItyd+yonOA9kE7wuiZdbtG1YqhJG3LT
+# Mpk09gWvLUe8J5Tv+c/VGMuOO/W3AqtDaEFfIAWie5i5udQEwIPCDTxuXmH6SFnO
+# zDBA8wee8CKg8ZKmqqItWvghRkjvM9Ol4Gf31b0FhfyVNR6fY88RpXLA1cjoXscI
+# 1q3va7zCIRuLO7e4J5/s4kFw60rJuS0lvjaPRWF42rxJTgxTz0w6K0uzFvaa9gp9
+# 4gSwbdE47Jwo5DfhhodRZHRi4LeZMWv1+DuTMR3qcKTgGcP1N/r4n4aYTORM5gnc
+# fAP9GVr8E/UQ2FAz+7piYqWDnmgseUvk8GPPJr3I0Ghc8KI8H2Ti2UXtqlXcj0Bk
+# 7x9JShB7cF+c7m2SSIhP7C5JFTM1tZpA+nzObqbJU+aQqzqhH/5iiXT+1POKyEFW
+# +9fEm335QvsDxukKXqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTUxMTMx
-# MThaMC8GCSqGSIb3DQEJBDEiBCAOmNHbUjNrEZxOW5FA4IWtUzzzh1Q4wJFYnr0t
-# wnVW8TANBgkqhkiG9w0BAQEFAASCAgCAHlW4QyGqQZd1ZDqETOYfyqnJfh+ab0LK
-# mnPegRwKff4HR8kfRnppXcdtDSGfOOQEFXyRIeRIk6mgMXkiB92LncSLIKPCNUi8
-# rBk6qOZzIkiNBhWdyfuBmSywiccBXeI/u/RcuNwFq6bzv8BVFEfwg01vd6rZQY+9
-# 1Eg7z7SgSORYUW6xIC7LTOcpFuZZLFbg5GDnl8XKDYNxxRPHVdNilBp9QccqeEx/
-# ZVDMOwbUuey8ZOTX/yMVyCLYv5LYA/8McVAPZXFTCcd9cir3grE2gjjr9xGU//RB
-# KGJDLxlT6sfmMt+ZGT3e87hOHKCcaf6VXfA9kWlqGV9IkpeGdupcf9gquG97cHQD
-# I6SzV6DIBU+z36arGzdy6N/cTaUSvk3Z9PeRCLaBQnH/CDH/VTdgMogsc+NRR/n/
-# DUAYelBAwg+ut3k7OCFU7N04HNT8/1QKCfEPWJMLnsYWCfDXLeZ1i62FgD64Z/2Z
-# +FB1wI1ckUGWSB+lqf2EVxUqUUwfLVPurQ4o8jBTMzqlKPnWBKym29vOi4QhnM9i
-# vvT9MsPy7aUkUiHaH22BYgm4jAr3zKwyEDHelR58ghY+21V2mfjkgXqOsI4Uys3B
-# 22BXw68jPTEA5fRvUbsUbV2OS2FRhbkqfmelaf3ggPVlLwhxAiPk/5fLq6shtSkO
-# lWmqGwrHNA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTUxMTQ0
+# NDRaMC8GCSqGSIb3DQEJBDEiBCDDhu8TKd8U0j986Do5umEhJVmCbpdP/mIGjq8o
+# 704IQjANBgkqhkiG9w0BAQEFAASCAgCsQ3A+LbEGyYLt/UmhPm+HlS0uZtvmABxt
+# UTnLw/OvhqU+1WgzzfPwvCNkJ8rAJ5hre54xVj0lPQq8R4mnE7axFanbLFn0NL4l
+# T2rhdF3gKRJL4pMXxc83iEU3sxm48Vg4xV0DIQm9UNSA/0ONua5LRjbGghy8H3Fw
+# uGwDks7ga5OmFwIbYcwZCoIvxLyJwUh2BRVKgLW0JVqcT6rdiBbmI+Vy3sBR/zWk
+# Su52Ya23Dpuv6rgxr9rYAsv7d2mpgAvgW0WXZBC2wBT8Vs0KO4SW874hDYO5p97B
+# 9YZ21uIPtetv0thswXd3Vkh2wPOrxv2m3tSP32SOzsMcOOPHGxgSubv8J/ZlqOd3
+# 3WiT5UItJVA25BwiozdLER3Lp1auWWWv1YmE7/Y2snijurU7tuCSEh6uz5Y2mzAV
+# fPK3rCJ4mesvESzPiA8KkzCm+rFTWCc/S0FkJyBEJo4S0PU5f0lHHN4QCpC19rT0
+# r4cuKlpHxruJOOUMrR1j8q6AIvj8vcYxT6uEXD5Hr8NTC62m4E2240wYaOU+/dst
+# 8KqSoh7pgXXa5Q2wVNwLMGCxMQFCTrXRgtqxayJEitunaropDeyYoQxEpEtLcxFS
+# GEKLioIGmYILK+V5+YxrdwBYRYh3MIeX2F7mzcijReuvthjNWCk5yDPnyJwiCkX+
+# ub1SIFwuFw==
 # SIG # End signature block
