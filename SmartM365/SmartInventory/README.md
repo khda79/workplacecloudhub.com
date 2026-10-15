@@ -141,6 +141,19 @@ the lock stays in the review report.
 .\Maintenance\Invoke-SmartM365-ServerDataCleanup.ps1 -Tenant prod -DataRootPath '<server share>\DATA\Tenants\prod' -Execute
 ```
 
+For the next server cleanup pass, `Maintenance/SmartM365-ServerDataSecondPass.ps1`
+is read-only. It writes separate CSV reports for SHA256-qualified M365 Usage run
+duplicates, WorkplaceScope snapshots versus DATA-LAST, generated Entra removal
+scripts, old DATA-LAST outputs and coordination locks, repair backup integrity,
+prepared `failed`/`retired` receipts, and the CMDB lock. It preserves
+`Intune_Devices_Win11Readiness.csv` and does not delete any file. Review the
+reports before extending the cleanup rules. Pass the effective deployed jobs
+file when it is not next to the script.
+
+```powershell
+.\Maintenance\SmartM365-ServerDataSecondPass.ps1 -Tenant prod -DataRootPath '<server share>\DATA\Tenants\prod'
+```
+
 ## Active Directory launchers
 
 Use the production launchers under `Launchers/OnPremises/`:
