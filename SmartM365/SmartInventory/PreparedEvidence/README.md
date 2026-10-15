@@ -1,11 +1,14 @@
-# Prepared evidence for CMDB and Workplace Intelligence
+# Unified Workplace evidence
 
 This directory prepares reporting CSVs from existing SmartInventory exports.
-It does not run collectors or control Power BI. It contains two independent pipelines.
+It does not run collectors or control Power BI. Workplace Intelligence now includes
+native CMDB evidence in the same governed DATA-POWERBI batch. The former independent
+CMDB pipeline is retained only for rollback until server and Desktop acceptance.
+Do not schedule or request both preparations.
 
 | Pipeline | Entry point | Output | History |
 | --- | --- | --- | --- |
-| SmartWorkplaceCMDB | `SmartM365-CmdbEvidence-Prepare.ps1` | `DATA-POWERBI-CMDB`: 46 flat CSVs and `current.json.txt` | Current snapshot only |
+| Legacy CMDB (disabled; pending retirement) | `SmartM365-CmdbEvidence-Prepare.ps1` | `DATA-POWERBI-CMDB`: retained previous cohort | Rollback only |
 | SmartWorkplaceIntelligence | `SmartM365-WorkplaceEvidence-Prepare.ps1` | `DATA-POWERBI`: versioned batches selected by `current.json.txt` | Observed source history |
 
 Both read canonical SmartInventory `DATA-LAST`. Intelligence also reads `DATA-ALL`,
@@ -25,20 +28,12 @@ CMDB's executable contract is `cmdb-prepared-contract.json.txt`.
 Intelligence's contracts live in `SmartWorkplaceIntelligence/config`.
 Use the deployed contracts and runtime orchestrator manifest for actual behavior.
 
-## CMDB quick start
+## Legacy CMDB — no new activation
 
-From the repository root, select the tenant explicitly:
-
-```powershell
-# Validate sources only; no generation or transfers.
-pwsh -NoProfile -ExecutionPolicy Bypass -File .\SmartM365\SmartInventory\PreparedEvidence\SmartM365-CmdbEvidence-Prepare.ps1 -Tenant test -ValidateOnly
-
-# Prepare locally; configured log upload is independent of batch publication.
-pwsh -NoProfile -ExecutionPolicy Bypass -File .\SmartM365\SmartInventory\PreparedEvidence\SmartM365-CmdbEvidence-Prepare.ps1 -Tenant test
-
-# Prepare, then publish and read back the new cohort.
-pwsh -NoProfile -ExecutionPolicy Bypass -File .\SmartM365\SmartInventory\PreparedEvidence\SmartM365-CmdbEvidence-Prepare.ps1 -Tenant test -Publish
-```
+The former activation helper refuses execution and its dedicated request launcher
+is removed. The template disables the old job, but existing shared configuration
+is not overwritten by a Git update. Use the targeted cutover procedure in
+[deployment](docs/DEPLOYMENT.md#targeted-cmdb-cutover) before the next preparation.
 
 Do not overlap preparation/publication against the same root or refresh Power BI
 during transfer. Source acquisition age is not reset by preparation.

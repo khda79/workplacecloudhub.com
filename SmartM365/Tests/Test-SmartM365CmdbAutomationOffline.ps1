@@ -3,7 +3,7 @@
 .SYNOPSIS
 Offline activation merge and preparation-to-publication boundary tests.
 .VERSION
-1.0.3
+1.0.4
 .NOTES
 Extracts helpers only; no tenant initialization, collections, authentication,
 SharePoint transport or shared configuration publication. Temporary fixtures only.
@@ -33,7 +33,11 @@ $optInNames=@('M365-WorkplaceScope-Inventory','CmdbEvidence-Prepare')
 foreach($name in $optInNames){
     $entries=@($template.Jobs | Where-Object Name -eq $name)
     Assert-True ($entries.Count -eq 1) 'Template integration job missing.'
-    Assert-True ($entries[0].Enabled -and -not $entries[0].PSObject.Properties['RequiresExplicitActivation']) "$name must be enabled in the template."
+    if($name -eq 'CmdbEvidence-Prepare'){
+        Assert-True (-not $entries[0].Enabled) 'Legacy CMDB preparation must be disabled.'
+    }else{
+        Assert-True ($entries[0].Enabled -and -not $entries[0].PSObject.Properties['RequiresExplicitActivation']) "$name must be enabled in the template."
+    }
 }
 foreach($name in @('M365-Teams-Inventory','M365-SPO-Inventory','Intune-WindowsAutopilot-Inventory')){
     $entry=@($template.Jobs | Where-Object Name -eq $name)[0]
@@ -115,6 +119,8 @@ Assert-True ($selection.SelectedJobs.Count -eq 18) 'Native producer omitted from
 $contract=Get-Content (Join-Path $preparedRoot 'cmdb-prepared-contract.json.txt') -Raw | ConvertFrom-Json
 Assert-True ($contract.maxAgeHours -eq 48 -and $contract.freshnessGroups[0].maxAgeHours -eq 240 -and $contract.freshnessGroups[0].warningAgeHours -eq 168) 'Freshness policy changed.'
 $activation=Get-Content (Join-Path $preparedRoot 'SmartM365-CmdbEvidence-Orchestrator.ps1') -Raw
+$activationAst=[Management.Automation.Language.Parser]::ParseInput($activation,[ref]$null,[ref]$null)
+Assert-True ($activationAst.EndBlock.Statements[0] -is [Management.Automation.Language.ThrowStatementAst]) 'Retired entry point must refuse before any initialization.'
 Assert-True ($activation -match 'if\(\$Apply\)' -and $activation -match '-ExpectedJobsHash \$snapshot.JobsHash -ExpectedClusterHash \$snapshot.ClusterHash') 'Optimistic explicit activation guard missing.'
 Assert-True ($activation -notmatch 'Submit-SmartM365|Request-SmartM365|Invoke-RestMethod|Send-.*Mail') 'Activation entry point expanded into execution or external notifications.'
 Assert-True ($activation -match 'SmartM365TeamsNotificationInProgress=\$true' -and $activation -match 'SmartM365TeamsNotificationInProgress=\$previous' -and $activation -match 'EnableSharePointUpload=\$false') 'Local validation external-action guard missing.'
@@ -163,8 +169,8 @@ Write-Output "PASS: $testCount CMDB automation offline checks. No collections or
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAhPCE01XdW/cBs
-# bXrZAc/7B9M3XeL0LMmXVI1SkYcSjKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCKwGDRZh4cAF8C
+# 8l6cmi/QyAhLvWpF3MePRiGq5hr8JKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -297,31 +303,31 @@ Write-Output "PASS: $testCount CMDB automation offline checks. No collections or
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIDCTQMOnXQOauat280t2qNSLOisKVy4TvQjtIi7HRA1hMA0GCSqG
-# SIb3DQEBAQUABIIBgEEwJ0cjfgUBW3hK21mddQzn0jnCz3eyRUpie7ZezsOhIdr4
-# MP30nmeaCCmRryAYABWCXt1ZTh+nuWEulU1Vh2MKlwqyHHOD8SfkFg5sTWt3538n
-# kgEOhHwMtFcU2ItxExZBd3n1cDkcDmU2s8gcpd8WF2CsXwxSyA8DxFeitiBFBLeu
-# OlN9pIlnO4nLILfYlb0V06A6u9F7STmX1A0+F8B5wl8FUZRyuhbvAmWXTd1wj//a
-# w+ZYszfy5VpzFJNCB/48tt+yjNhc1JdpjhHEBHimco0eQaO3P0PpUWjuVxWXURGa
-# j/EFnJr8AqvozZkPwAbjg9nakzrlhCy4IvH4escwveJfHZYwfwz1uF78iWXWWdtM
-# vUridAhnuAArz723sGiBIegDAtjhtmJM0H7f84VLPDmBWJL9s5ujoAjxAMykYSI1
-# 78Rm4v68Mok+OEEbZkLEw5ywJGglT4ryx+GMANAYy0Mn/Xudb1tA7nzy2HMLvuD/
-# Pfxj3AmxaAWJa+WeeKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEILQ2ZiK/CjbPNtjtEBeWK03ljSAQLEB4CXvUZl8uxDGgMA0GCSqG
+# SIb3DQEBAQUABIIBgF7hx8BMYve20aA1EwIbm8j7r1dwois3IBlEx2IJ15dVOSKu
+# auuaq9YkGeRThWNh31+XN1irSKv+xMzw2tYI2t9uxP9nmUrpbIzPlClry3/pu6xo
+# +asLEv3FRCXB5+mwvv1DmnjlG65f//FtVd9CTKu/9v+H1zv7/gFO1dp1RaHUyJkE
+# /IYrIcNSr9tcQ/q4NoM6w39bH3OTVXvi2/AaHkpC1fpxfx8tpZ1XEnYccmJ5srzd
+# 9uLxe0/Tu0j71YXoYepUWQ2RO18ebuoakElvms0OZs4ArOWtYQbXLBmeTgF9XzfU
+# ZGYc4XwIsSNvdITNgPh17WlBHzTyhbh6IWt1cDx5RXzAeB0xq1aPPkdf+A4ZTxbc
+# NSrorDKNwKzLNCmvouW7w3td1PlvVZv9JpCaLpWBPIDYZ3LIoLyKLQbrZsisjr4A
+# NQfQt9bRXXpBD06xCIFSGckrDdZTw2sNRy/XHXEnTVabnfZkEq1z9Sa6WlpYUwso
+# 88YPeDhhdQe+JnkyiKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTQxODE2
-# MTlaMC8GCSqGSIb3DQEJBDEiBCBQyl45fnsj1FcWwWJcXc2vDDpeteHsnqv2F30m
-# EtI6xTANBgkqhkiG9w0BAQEFAASCAgATJZJ9w1tvRVA2wHNkOH4E8KMKhd5ejwjl
-# iUc4v2uFN9m95P6RGkwxRpaPg/jewGVXsuOPUPXxBSaJqN5KMCn1y7pIyPCt6O/T
-# RVBYxjhVsXhdhxTJvSAvhZ5C7/nvUbZz+mws52+BMb55iMA/6+sWFb5Cr0YuLmeg
-# H0kaooIt9nkzPSqe9mjZa1Zo6Kqf0+njk3CLGLtwx7wH48Vvzk67mMPKGufrJEW1
-# A/vEUbQBEhVPlD9ZZmzlcTW5oVCKwylb5uYn+HWBKNvD040GJLyIhVe1PuZhMrkB
-# hjqbNh6KkxQGLJ5wcRmsrsk9INp6oh4FYwY8IuuZ8jwA/6QuXrkkGr7HCfoTScC6
-# ewm9DsT3FBDRMYSdOAaGWmyKLDUyIf088AX/fCTMn6fOMVRQKV4C5iBxEKSSIWdR
-# c8qNYPMSwAONySEPF40mlkpmK8oDqi9y7SQ635W+7Bh6FF55BS4Oq0K2dUStmrqY
-# 0Zkylo+JslOGmWGmZuZwlTb+Nj3WI0dZ8LqSPR/cMYivvA/IMq6RV4t2MSMe7fX5
-# 2/EE1zQ40LcECx0yqzkYwS6sgrGExuOYIjH8nXJPqj8yFapa9Ce+a9LttQ0Z1CBS
-# kTBEwqkfPWnQ8kUgzwbjBWPWEkN1A2ez+mYx054EdHmjDTN6KtVpxKxfmQ/iy1Ph
-# 8Giz/XNcqg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTUxMTMx
+# MTlaMC8GCSqGSIb3DQEJBDEiBCCEbcvX24+uJl6Lowi5VlZmJgIhQECGgNHdcquq
+# rF09azANBgkqhkiG9w0BAQEFAASCAgBaRXXImyew4KZ+cUuo7mLoIudAkv0+bANb
+# BB8/MchqZtaycIgY1HR8jAcIQuYOYQKpev6CmB3DjcT5pNPzy3uHVObOAT8BGwa0
+# NHmKFm5VYGhBcJLiokupEyvyWIKJ0fSZEYQ0CY4yQzT83SmnhdrKpib3yvpvI7cC
+# FUrANg4mg3CsuEzKdXo1WCYDRfuG8Rc5X7y+LjYVUIkf5MgAb0SQj4P1RkoPbxNc
+# uYW4rXrWS+61UmzP9D/6MxPpr1pERbXGF63agBai157RyVkju04x6bOsR+wYGP0u
+# lB+0gmrjLGi+ezwONKWULy5gAuArMO/Vvz/fTFE5MiTQ+PgQiTAWwuTq4qaaIidm
+# 8eKwQECiPl68BirH6swIzGmM2sV1IWoCYE4szXc0TQI4Rz18TthAg1Z3tYpfv/Q1
+# WhpUOG1SrMFB72uJQ0FWtJ0QmApQi9+oyp5pFLKGlRPPORLbE9EE33sFXRg8nq9N
+# 8Xq3VkaBUHHxORLTqQaFhpZCNTY834NktVK7EtAKCmJEZMX04JjYqB7FVR+d97Y/
+# 7F3aAnqoKrUlOBkz6+H1orrbWehGdA2QypA5zULWQXFzP29aZH2WhadpzEe6GOe9
+# bOlJ0BTS7bHPiKrKecpN/XBOIwfePiNSyW1VWaQmQxopPjrUkHJcDOp3hcPSlNZm
+# CZQz1A9AYg==
 # SIG # End signature block

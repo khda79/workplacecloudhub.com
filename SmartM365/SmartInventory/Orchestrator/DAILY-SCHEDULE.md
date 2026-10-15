@@ -50,7 +50,7 @@ editing the template.
 | Intune-Configurations-Inventory | Daily 04:30 |
 | Intune-ManagedApps-Inventory | Daily 05:00 |
 | Intune-EnrollmentFailures-Inventory | Daily 05:30 |
-| CmdbEvidence-Prepare | Daily 09:30 |
+| CmdbEvidence-Prepare | Disabled; pending retirement |
 | M365-SyncHealth-Inventory | Daily 00:20, 02:20, 04:20, 06:20, 08:20, 10:20, 12:20, 14:20, 16:20, 18:20, 20:20, 22:20 |
 | EXO-MigrationJobs-Inventory | Daily 06:00, 12:00, 18:00 |
 
@@ -83,11 +83,12 @@ a still-running full inventory can delay a daily Fast occurrence.
 
 The four existing disabled jobs remain disabled: BackupProtectedMailboxes,
 BackupPolicyScope, BackupProtectedSitesAndDrives and PowerBIFabricActivity.
-The public template enables WorkplaceScope, the three Intune WorkplaceScope
-collectors and CmdbEvidence-Prepare. They use elected Graph-capable workers;
-no private server is stored in the template. CMDB preparation includes
-`-Publish` at 09:30. The three new jobs do not change its 17-producer
-dependency set.
+The public template enables WorkplaceScope and the three Intune WorkplaceScope
+collectors, but disables the former CmdbEvidence-Prepare job. Its dedicated request
+launcher and activation path are retired. No private server is stored in the template.
+Existing shared manifests require the targeted Workplace cutover publication:
+disable the legacy job and merge its dependencies into Workplace without replacing
+the effective schedule. Git deployment alone is not that publication.
 
 ## Dependencies and freshness
 

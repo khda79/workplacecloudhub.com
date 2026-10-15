@@ -1,23 +1,24 @@
 #Requires -Version 7.0
 <#
 .SYNOPSIS
-Review or explicitly activate current-only CMDB preparation and publication.
+Retired CMDB activation entry point. Use the Workplace cutover configuration helper.
 .VERSION
-1.0.3
+1.0.4
 .NOTES
-Default is validation only. -Apply publishes the two reviewed job entries through
-the existing optimistic configuration API. No collection or pipeline is requested.
-Run -Apply only after the Power BI migration is qualified.
+Execution is refused before tenant initialization or configuration access.
+Legacy helper definitions are retained for offline regression tests until final
+retirement ports their fixtures. They cannot be invoked through this entry point.
 #>
 [CmdletBinding()]
 param(
     [string]$Tenant='test',
-    [Parameter(Mandatory)][string]$SharedDataFolderPath,
-    [Parameter(Mandatory)][ValidateCount(1,1)][string[]]$AllowedServers,
+    [string]$SharedDataFolderPath,
+    [ValidateCount(1,1)][string[]]$AllowedServers,
     [ValidatePattern('^([01][0-9]|2[0-3]):[0-5][0-9]$')][string]$PreparationTime='09:30',
     [ValidatePattern('^([01][0-9]|2[0-3]):[0-5][0-9]$')][string]$ScopeTime='22:00',
     [switch]$Apply
 )
+throw 'CMDB activation is retired. Use SmartM365.WorkplaceCutover.psm1; no job or configuration was changed.'
 # Local lifecycle only; no collection or publication is performed by this guard.
 $smartM365LifecycleRoot=$PSScriptRoot
 while ($smartM365LifecycleRoot -and -not (Test-Path -LiteralPath (Join-Path $smartM365LifecycleRoot 'Modules/SmartM365.Core/SmartM365-InventoryLifecycle.ps1') -PathType Leaf)) {
@@ -31,7 +32,7 @@ $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -Requi
 try {
 Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
-$ScriptVersion='1.0.3'
+$ScriptVersion='1.0.4'
 $failure=$null; $initialized=$false
 $core=$null; $guardInstalled=$false; $previousGuard=$false; $saved=@{}
 
@@ -209,8 +210,8 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB3goxr4ZG63NwR
-# jmDSV5/9M1uU21AkMxEz/kQql6OeZKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBPopYjhvMr/JXy
+# 3f8WuT2C5g0WavcexqK5fQ2q/nKRJKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -343,31 +344,31 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIGHREcP8FBzJaPFiOlnEplzuXR7+tCPzJxcZUztbYVweMA0GCSqG
-# SIb3DQEBAQUABIIBgImLrpBx3IiDA2EoPK8KHu2q8QvSWe1+HVvDOnfUp4ZS8bGY
-# YYnEwn4lAq/hP4kKQTKA/I7SPnXrRqePcvtBtlz8LG3TioWY42h2dHvxpH5An25M
-# DaCY/bL/eIds1bWZYsNXSWNojqqnq/FoqaDj0NwXcergop4bZx1WWgVmnAe2UpP0
-# FNwL56SAQoabLybra5L1qc8PL2lPx4sBHB5OQIEVz14SG8uZiw8i5lThNmU6KVI/
-# qsKwiqoludYFxZj6aLGBzcQzvqRZR/wHqA7FAYrYuAQyM6ZLdth3cacD0UGR6fZn
-# 8mwjUr1/eHVs/3RTpxClf0f+/9/OmeYjRLjVkIgdO5OLM6vefPjA3rEvN7xPAu22
-# RNJZDjJ32O8tww8yIv97Z+mJ939S6liPLOBgKYBKXGo3CTMnh9oFFpo3PFOVeO/x
-# sA0Bji/wkUAKbWxoVNXXdzWpbhoPC/8dNQLs3l5eKd7/u6QtQV5lJKCJx78T64l7
-# cBPCxJNDZWrsiQoOx6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEICwxBbeJCN/DVfXLb8TzHZyRewt9kv9+ctqfWL1yChHxMA0GCSqG
+# SIb3DQEBAQUABIIBgC06A4I2yDEJxOBkmWZhHUYsQetmdOxGIawmvrO3yZNUW3UT
+# fAwl5CdQnqMq7PUtiOMYB1oKkPGZIL8dsh8czD04LFv1sFeXVZoc5ZaEMKLzAn0G
+# y4sjAOqy4gWzVUCm2R5d9ItGrDFg/Ws1qPqEFR3PgSXyYnk+WVnJr86dypbAD4or
+# 8PuVLrA9O7BJhzMLj7vLA57p01BdmaQuPN4dMWRANCxC9zDYyv8sLzMHEYs0m01Q
+# 06sddOsWlfbECa77ICqJ9hPRxJqvdC4b4DZ4QTnBlIYcq3Nht8Vxwuuwo/3BXQXq
+# Nc50EspRSQqAxXYXWLKYj2Mf3LOEUDsJ3P1BuH+ORA+0z8xCUhLbvwS+TeakdUbK
+# t06/Am02sOt5o48OMldqZABiHyqYL8mzC8dgT2LTlamHCfOEE3zb99Q6W4URuc5F
+# sBPk4/UqxJiyYwD6yXb1iAyNVFNm0JqdD3jd8GZkJdWM5nthZdXRN/M2Rc1q6S4o
+# /6N2g0BdLCfIjh7m06GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTQxNTMw
-# NDBaMC8GCSqGSIb3DQEJBDEiBCBmJQfjFFegQC6Jcz7gxJ9B2B2DrxrUyu0ihDaP
-# DsfoazANBgkqhkiG9w0BAQEFAASCAgB3iV4ZbRZGhApFzu/JqF8Jm33pbjaRa9jL
-# GFENpV6i6WSX4bP9+MBtNWJjl6eMli5Tzt2qpgrJ1w/eUVk63JPFv0xZh3F3ceVr
-# aI2MgsVhdD32if06Tq/R+2Rl/e8KvDx330nJ44D73oERYMvby6Pe32Z9+8tg4XHV
-# iVw5AhcHQSoiQZDFwNuGsLX40O0miL4oWy+/8HBys7OEWRkI/zlz5WOMS4dhZUxT
-# /bUdvTbfu2IkYgFmUeyeFpeGRqES/Q9uudM4NUtZOpSsgTU1GHdfezQwGDqsVWjv
-# 433FJ3A6fFNwEI9oHyKT09kHrr7XfGKCQAGKzxn+4JbUrpveh+axiASokvjg8712
-# z9Lhp1jg4mRHFe1Eon11qgYIkVwT5AddhHchhtJegRrNLZpJNYVynD281WXpMrf2
-# cVp32/t5dj0e8e7URdNiYnsD8P8gizrGcCsrJd+uM0a911OQ4qGttsRM4PfZO1qC
-# eMzQGfcKE0rKUBx6poKvk6J8IIDjscfI5R23j5DhCIdgyl4kp1f8K/+Mv4t0CEs5
-# c1OQEnmRgImUtfOVXDEi+qpCdylXO4JBtaOikwXO+9QNKdi8gKbUYx8KDB8ozvo6
-# DHhwQKELcTW2vXOgQsokhhARZcmturEHWESwED8I3xNlIMbn7x3blIDvPoHNt4lj
-# 9OYtQ21AWQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTUxMTMx
+# MTlaMC8GCSqGSIb3DQEJBDEiBCDDVqz1Xpn5rsx5ndS9XyGbSNKoa93zRXlXoJ4O
+# uIiHVzANBgkqhkiG9w0BAQEFAASCAgB71R4SbJ1ExdGaqyPL6ZPeWNxEVy7Jxr+i
+# jzfJlF3ziIO9A2ikbD0r1XXWrf+HfnVgktH4wEMoZE39iREqCkKaBmQKIzM8ZO37
+# 29pfYJ5mVMVc1NMmOmBoNLTzc3cuYECtVzkDD0BEzg0tXue5PP7GMZHRRJNa3map
+# izQWCUC4MUGu+TfpEUeF5/uEG6/pfC9ppOjLnG0GSPcUnMK9Qoj9X5Lg19m2xOVY
+# 3UF7DhUPyod59wbrmtq3DOHwyWNL3A0KCVcBnGAk3i9RZTnO1SCYOfN3U2APzAiS
+# m6PxqMQxLBhCpYoVBk6Pvd6/YvoSXwjv53DgcsHukYrrQeQuXYAaPD4ZzwnjeJ4z
+# wQiSS6zn8hMan+z5rpfq83HnEOhuRhkwjPaLOIMxq1bqV1t8GuamINLmoh56q2Ci
+# /+1JBg75/uRyH/AtjuOkZLMSKiVVgMtX+iFoLtWTSdAztrakG9O/aL/RyWHtsi4b
+# fdnJPUoi242fkb89p1ru5srlfOvJ6Fez3iYoSeVs61H4QflZXM5jTkpBBmndbNcH
+# r+WApyj0W1YW0jP/LhmbuB9/DBNeeBaRmlbaGgDNo7E2+uEzQHid4mdLphJFNdrx
+# KEqASzLr+/flBZBr3lsC/Da0ipxDHAufdzGNoPXqR8AJD1353dXXoae1gWSR/uto
+# 3askq8mhcQ==
 # SIG # End signature block

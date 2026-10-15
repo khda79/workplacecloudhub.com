@@ -1,8 +1,44 @@
 # Prepared evidence: deployment and operation
 
-This guide covers two independent pipelines. CMDB prepares a flat current cohort
-in `DATA-POWERBI-CMDB`; Intelligence prepares versioned/history-aware batches in
-`DATA-POWERBI`. The numbered Intelligence procedure below does not apply to CMDB.
+Workplace Intelligence prepares one governed batch in `DATA-POWERBI`, including
+native CMDB evidence. The old flat `DATA-POWERBI-CMDB` pipeline is disabled in the
+template and retained only for rollback until the unified batch is accepted.
+
+## Targeted CMDB cutover
+
+Deploy the reviewed code first. Import `Orchestrator/SmartM365.WorkplaceCutover.psm1`
+and call `Get-SmartM365WorkplaceCutoverPlan -SharedDataFolderPath <orchestrator-root>`.
+This preview reads the existing jobs/cluster bytes without migrating files, writing
+configuration or submitting jobs. Inspect `Changes`, `JobsHash` and `ClusterHash`.
+
+The plan disables only `CmdbEvidence-Prepare` and merges its dependency union into
+`WorkplaceEvidence-Prepare`, including WorkplaceScope, VerifiedDomains,
+WindowsAutopilot and AutopatchAlerts. It preserves the effective Workplace schedule,
+arguments, freshness floor, server assignments, all collectors and cluster settings.
+It does not copy the template schedule over the effective schedule.
+
+On the operational host, after confirming no manual preparation/transfer is running,
+use `Publish-SmartM365WorkplaceCutover` with the same root, the two expected hashes,
+an absolute `-BackupDirectory` outside the repository/orchestrator root, and
+`-NoManualPreparationConfirmed`. The helper asks for confirmation, requires fresh
+healthy resident heartbeats and no running/pending preparation, verifies a unique
+SHA256 configuration backup, and uses the existing optimistic publication API.
+`-WhatIf` performs no writes. A stale preview is rejected. Repeating an accepted
+cutover is a no-op. No collectors, preparation or transfer are requested by it.
+Residents may independently run already scheduled jobs: this is not a scheduler
+pause or a distributed no-launch lock. Global maintenance is left unchanged.
+
+After publication, verify residents have loaded the new configuration and that the
+legacy job is disabled before separately authorizing a unified preparation.
+Do not bypass a source-publication guard: inspect the failing captured producer
+`.current.json.txt` and `.run.json.txt` pair, not an older synchronized receipt.
+
+Only after server batch/transfer and private Desktop acceptance, retire the old
+product, preparation/publisher, legacy contracts and data roots from active use.
+Verify external backups of both prepared roots first. Port the legacy synthetic
+fixtures/golden comparisons used by `test_native_evidence.py` before deleting
+legacy Python modules/tests. Keep collectors, `SmartM365-CmdbReceipt.ps1` and
+`SmartM365-CmdbSources.json.txt`, which remain shared native evidence dependencies.
 
 `SmartM365-WorkplaceEvidence-Prepare.ps1` is a thin SmartM365 wrapper. The evidence generators, the
 publication pipeline (`PreparedEvidencePipeline.psm1`) and the table contracts live in the

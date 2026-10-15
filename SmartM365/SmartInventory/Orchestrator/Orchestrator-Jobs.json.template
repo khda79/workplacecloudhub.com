@@ -1615,7 +1615,7 @@
       "Name": "CmdbEvidence-Prepare",
       "ScriptPath": "PreparedEvidence\\SmartM365-CmdbEvidence-Prepare.ps1",
       "Arguments": "-Publish",
-      "Enabled": true,
+      "Enabled": false,
       "Group": "PreparedEvidence",
       "DependsOn": [
         "M365-ActiveUsers-Inventory",
