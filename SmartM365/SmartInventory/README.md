@@ -189,8 +189,10 @@ SummaryHistory copy when the old weekly detail has expired. Preview records a
 hash-pinned plan outside DATA. Execute requires that plan, repeats the checks,
 and removes only the approved DATA-LAST files, lock, and one repair backup.
 The report retains a copy of the repair audit, a retained-output map, and
-execution results. Removing the repair backup discards its pre-repair rollback
-copies; keep the external report.
+the backup directory list and execution results. Extra empty directories
+inside that backup are permitted; linked directories or unlisted files stop
+the run. Removing the repair backup discards its pre-repair rollback copies;
+keep the external report.
 
 ```powershell
 $cleanup = @{
@@ -203,7 +205,9 @@ $cleanup = @{
     ExpectedSummaryFallbacks = <approved fallback count>
     ApprovedDataLastNames = @('<reviewed obsolete output.csv>')
 }
+$preview = $null
 $preview = .\Maintenance\SmartM365-ServerDataResidualCleanup.ps1 @cleanup
+if ($null -eq $preview -or $preview.Mode -ne 'Preview') { throw 'Preview did not complete.' }
 .\Maintenance\SmartM365-ServerDataResidualCleanup.ps1 @cleanup -Execute -PlanPath $preview.PlanPath
 ```
 

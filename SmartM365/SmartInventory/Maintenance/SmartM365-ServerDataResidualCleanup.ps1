@@ -200,23 +200,15 @@ foreach ($entry in @($audit.Files)) {
 if ($fallbackCount -ne $ExpectedSummaryFallbacks) {
     throw "SummaryHistory fallback count $fallbackCount differs from expected $ExpectedSummaryFallbacks."
 }
+$actualDirs = @(Get-ChildItem -LiteralPath $backupRoot -Directory -Recurse -Force)
+if (@($actualDirs | Where-Object { $_.Attributes -band [IO.FileAttributes]::ReparsePoint }).Count) {
+    throw 'Repair backup contains a linked directory.'
+}
 $actualBackupFiles = @(Get-ChildItem -LiteralPath $backupRoot -File -Recurse -Force)
 if ($actualBackupFiles.Count -ne $expectedBackupFiles.Count -or
     @($actualBackupFiles | Where-Object { -not $expectedBackupFiles.Contains($_.FullName) }).Count) {
     throw 'Repair backup contains unexpected or missing files.'
 }
-$expectedDirs = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
-foreach ($path in $expectedBackupFiles) {
-    $cursor = Split-Path -Path $path -Parent
-    while (-not [string]::Equals($cursor, $backupRoot, [StringComparison]::OrdinalIgnoreCase)) {
-        [void]$expectedDirs.Add($cursor)
-        $cursor = Split-Path -Path $cursor -Parent
-    }
-}
-$actualDirs = @(Get-ChildItem -LiteralPath $backupRoot -Directory -Recurse -Force)
-if (@($actualDirs | Where-Object {
-    ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) -or -not $expectedDirs.Contains($_.FullName)
-}).Count) { throw 'Repair backup contains linked or unexpected directories.' }
 Add-PlanRow 'RepairAudit' $auditRelative $auditFile
 
 $auditReportPath = Join-Path $reportRoot 'repair-audit.json.txt'
@@ -225,6 +217,9 @@ if ((Get-FileHash -LiteralPath $auditReportPath -Algorithm SHA256).Hash -cne (Ge
     throw 'The copied repair audit differs from the source audit.'
 }
 $retainedRows.ToArray() | Export-Csv -LiteralPath (Join-Path $reportRoot 'retained-copies.csv') -NoTypeInformation -Encoding utf8
+$actualDirs | ForEach-Object {
+    [pscustomobject]@{RelativePath=$_.FullName.Substring($rootPrefix.Length)}
+} | Export-Csv -LiteralPath (Join-Path $reportRoot 'backup-directories.csv') -NoTypeInformation -Encoding utf8
 
 $planned = @($plan.ToArray() | Sort-Object Category, RelativePath)
 $uniquePaths = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
@@ -266,8 +261,8 @@ if (-not $Execute) {
             if (Test-Path -LiteralPath $file.FullName) { throw "File remains after removal: $($item.RelativePath)" }
             $results.Add([pscustomobject]@{Category=$item.Category;RelativePath=$item.RelativePath;Result='Removed'})
         }
-        foreach ($directory in @($expectedDirs | Sort-Object Length -Descending)) {
-            Remove-Item -LiteralPath $directory -ErrorAction Stop
+        foreach ($directory in @($actualDirs | Sort-Object { $_.FullName.Length } -Descending)) {
+            Remove-Item -LiteralPath $directory.FullName -ErrorAction Stop
         }
         Remove-Item -LiteralPath $backupRoot -ErrorAction Stop
         $backupParent = Split-Path -Path $backupRoot -Parent
@@ -289,8 +284,8 @@ if (Get-Command Write-SmartM365CompletionBanner -ErrorAction SilentlyContinue) {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBI+/mz8UdIjuCR
-# xplOzlPELMb0wYkz57cxXLusgPpUzKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD+GCXjXfs8eKjf
+# TmvsH8ncjsrO4em2yGLBCLf4z/70x6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -423,31 +418,31 @@ if (Get-Command Write-SmartM365CompletionBanner -ErrorAction SilentlyContinue) {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIKOYSHdfXdIMf7B5fw8V7mcIL1DdN1yAVq+TX7nHJ0ZoMA0GCSqG
-# SIb3DQEBAQUABIIBgGc9CE6bbTivcmS3s0HkYj3PW+bNi1lIxMHYO8NJPcuQYpte
-# B56Mdofc5lBQAl9lJN3hFmcGtLlek5jwM9Ruq8pSYMI55FVIH9UGpV1yzjAAfp47
-# 3yc0Rpg+xl5xa6SnJ1fJNArS6fvlbCatywKj8iSlikTw4zS434UbXVWGmDnkKT+N
-# 2PwC21bXtGHXyF00UNsLOZwIcH3sRAZA5UNYczPJhkc9lFDdZIS7+XedEWRSTtGh
-# 1ow/rCP9Ul2BkBCTTwdUYG9zBrcbF0Jbunr6MoCvxE+Zu9+hx/Op/WSHcX/FEDGW
-# AkfazdJypQPTfwtOoGhPROz5l3/TMc+E6mmxkW29IFW3gfCmDM0sPViprLc9q5eI
-# UnzMsYSZKvrdLtpPNV5vlIIako5QBQ8wLkpZ2+lqcJjB2ufX2NG3YW/pfYvuZZ0f
-# DAeBsXqdaZlPnPUROV6Mu+axb5hIjBebbIqMJx6VJtufsQSLFRZVzCy1F1ONqEly
-# 17s20EFfObCjNlkjaKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIM5/NugJGhMkgzV29SUZisnyNqgjxb46WVOotTG+ZX7KMA0GCSqG
+# SIb3DQEBAQUABIIBgAA4nL58N8p30lhKEbzHR97G2AONHkXU0ZqIHOy6t+zrvX3i
+# ICa9ISWlR/B7TWZspA8E6DJv88j1jcnZ1bduwfCITeNaa8NADiEtvWL8rXHHUrB/
+# NJ8UYVcLPqGyOr215ZloLkK/jpvydB3EEhnetiIMciqJZ2c9lmFjXeBXybsnqse8
+# qrEfSpQIjochUnOMgx/hb3UvQbWsZRGQf9dALAgPjUHdTNImrcx+VHWZOVtPq9Wm
+# 23u+gIUQ5QwloH7TKk7d4NP1ck/TyhF95Szy3aLvVbFusgtgsVb0vEEDvRYbnX3e
+# apb8Rnqg2mhgL0sBFL/IlxNLfsXN7+WcQpKU7e1HYk2XskJw826vF2zbSp9LIYpf
+# xXtugZYUl/3Qcqn9VyNLn8oInIPWGN/pDFYVWtBgjCn8lqLqGsZLNWYICOt7BlGp
+# Y0Jzb8L563ijooj9oz3L/Rw6oTW2/pu/JyMlKE2JkAESeXU7Xc5g2KSKlwRtAw/P
+# iN5RpB0+pXJxy0d186GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTUxOTI4
-# MDNaMC8GCSqGSIb3DQEJBDEiBCBupCXrVuFefMDNZnX/bwPb1Eh1kuuo5wAoSLvX
-# Vg416zANBgkqhkiG9w0BAQEFAASCAgBAmcbiuo/Yyoz150/gweDVnZE9TNSjufqn
-# mlUDQ+oedoXuxZyPth/z2oO4kUdGPfrYcvDyTLPWkv5PeeYbhdENRVDV6LRKvnVz
-# sGtBF9TJLMRu+oZXFlJS+mBIcMfuZ7b94NfAq2tCxESk+2Bx2S2hA7vCFMP1wGah
-# PgLWGRuUAhHHiUIYexe8Kgcj9pSgBnAL6hCp5lcS1z48yG5lXqeqpi5fEAK6DKtH
-# G1rqEglRBQqGeATWMFRvCYWODVALVCfh1lhojDU2MP8uwfdXY+Dc4qRBsj4PXlpP
-# p50nWiV3jZHrW8O4iKsS7nGUDgXOja07dIrUmUxLyD0I3rSbqxfLo7UqbxqURV8J
-# 8K/hw7AM1wP2bf4q56bEjm9g0K/Qgfd5b3U8RfuIhC/HtBIkwQjPhh4TT+fOPMSS
-# bA+ph64yQd/urwEjhN+fKdST/Xoh/lJCq/wd9636JkSps+Rmpa7ETClOETsEE+Ak
-# vXEik7W7OK/Z7MmI6e1YlhiXM72iIZEd7s/cXKycPJ88QtpcdpTVM7+sR8q+NbhR
-# sQqcPgb9q2hLKeaksHqQ3zHpI0wAl74j8o67XeMHjXXKul3kSlmoTxRdAkAcsBkQ
-# 5TAO/QrZeG9VHNep5CWTsiCDNkDOpNjOe/DjqhUMEF2ZkhR20dAjfW+/Tw2ty6sd
-# tdOqjHtcvg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTUxOTMz
+# NDRaMC8GCSqGSIb3DQEJBDEiBCBVdQPDyOGdHDzMBCxPGn1jrYyb+xp7qYa7AJ4d
+# KimiljANBgkqhkiG9w0BAQEFAASCAgCIP7RtLe7u6jh97fbKJabn23YO7CbRsxJz
+# EaAoXngycGE3erOhWvFPZpPBq0W+3uf9r2oD5lfcqJ37//Gz7PFOBs9p2AVbiKFq
+# 3NJazJ8hg/Vw2kVhVQy689pTT1l8zTB8EpIF4rJ2QtDmYHNZHKUXMs1Q3gbMrmKg
+# v4/ZYW3x0EYqNp/hnfRChHV89iuBafP+CfJngK7xFS08fCMrVnSWFoeYcnS6fWN2
+# JFqce7sn2VSRcrZfzdrHSy3Zba1cGOPxCqvqyS9AZF0u72V5Lh+aBq7cwp4o5pLn
+# lC4fAcYzAB8kTVah0+IOzrfARp2YOW4u7I+ZjtzuG8W+OBGiFlUmhyru2Vw1cLY4
+# HtJxh6VDeLBtV+CXeDhtxJ5r2h5Q0kDqqAAPFdUBlpbXYFJ2i8Qlg7f3pPzlHkgN
+# ApN8bRxhi9AcoDa6PXaZ3vYrrojWmAuMvLoFiC8i9Ct9vfDVS9pfRi4Cjyp4sWX4
+# ErBUFe5fLjlpzsWKU2b5bqDRklAlciBSWjJKRiqqHqwTrqAo69dDXAjRzpJgXkLU
+# xq0mF+aW0a+DCa5JjZ+6+GsNJmI4wTtTyuyLugBThf2yDhM9p2Nj/7icTHG3uqVI
+# odjlRptJZkShm9jwIjzGTW8t+kHkHTH34Js/oWOIaU0XIz25kh1H7v/M6D05jLpO
+# 5aY90Zsg6g==
 # SIG # End signature block
