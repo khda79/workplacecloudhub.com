@@ -1458,7 +1458,9 @@
       "Arguments": "",
       "Enabled": true,
       "Group": "M365",
-      "DependsOn": [],
+      "DependsOn": [
+        "M365-Teams-Inventory"
+      ],
       "AllowedServers": [],
       "TimeoutMinutes": 8640,
       "MaxRetries": 1,
@@ -1482,7 +1484,8 @@
         "Sites.Read.All",
         "Directory.Read.All"
       ],
-      "EstimatedDurationMinutes": 5
+      "EstimatedDurationMinutes": 5,
+      "DependencyMode": "LatestOccurrence"
     },
     {
       "Name": "Intune-WindowsAutopilot-Inventory",
