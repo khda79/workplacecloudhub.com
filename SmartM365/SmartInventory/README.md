@@ -179,6 +179,34 @@ $preview = .\Maintenance\SmartM365-ServerDataSecondPassCleanup.ps1 @cleanup
 .\Maintenance\SmartM365-ServerDataSecondPassCleanup.ps1 @cleanup -Execute -PlanPath $preview.PlanPath
 ```
 
+For a separately approved residual cleanup, use
+`Maintenance/SmartM365-ServerDataResidualCleanup.ps1`. It checks the effective
+orchestrator jobs file under the tenant DATA root, an exclusively available
+retired CMDB lock, the repair audit and every rollback-copy hash, and the
+reviewed DATA-LAST file names, sizes, and timestamps. It also verifies that
+each repaired output remains available, including an identical Discovered Apps
+SummaryHistory copy when the old weekly detail has expired. Preview records a
+hash-pinned plan outside DATA. Execute requires that plan, repeats the checks,
+and removes only the approved DATA-LAST files, lock, and one repair backup.
+The report retains a copy of the repair audit, a retained-output map, and
+execution results. Removing the repair backup discards its pre-repair rollback
+copies; keep the external report.
+
+```powershell
+$cleanup = @{
+    Tenant = 'prod'
+    DataRootPath = '<server DATA tenant root>'
+    EvidenceDirectory = '<reviewed second-pass report directory>'
+    BackupFolderName = '<approved repair backup folder name>'
+    ExpectedAuditTenantKey = '<audited tenant key>'
+    ExpectedRepairFiles = <audited repair receipt count>
+    ExpectedSummaryFallbacks = <approved fallback count>
+    ApprovedDataLastNames = @('<reviewed obsolete output.csv>')
+}
+$preview = .\Maintenance\SmartM365-ServerDataResidualCleanup.ps1 @cleanup
+.\Maintenance\SmartM365-ServerDataResidualCleanup.ps1 @cleanup -Execute -PlanPath $preview.PlanPath
+```
+
 ## Active Directory launchers
 
 Use the production launchers under `Launchers/OnPremises/`:
