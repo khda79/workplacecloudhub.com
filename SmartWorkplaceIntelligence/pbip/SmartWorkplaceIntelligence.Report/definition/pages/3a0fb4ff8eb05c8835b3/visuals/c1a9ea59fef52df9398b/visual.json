@@ -1,1 +1,620 @@
-{"$schema":"https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json","name":"c1a9ea59fef52df9398b","position":{"x":32,"y":488,"width":1856,"height":336,"z":12000,"tabOrder":544},"visual":{"visualType":"tableEx","query":{"queryState":{"Values":{"projections":[{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native User Service Plan"}},"Property":"ServicePlanName"}},"queryRef":"Native User Service Plan.ServicePlanName","nativeQueryRef":"ServicePlanName"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native User Service Plan"}},"Property":"TenantUserKey"}},"queryRef":"Native User Service Plan.TenantUserKey","nativeQueryRef":"TenantUserKey"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native User Service Plan"}},"Property":"TenantSkuKey"}},"queryRef":"Native User Service Plan.TenantSkuKey","nativeQueryRef":"TenantSkuKey"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native User Service Plan"}},"Property":"TenantServicePlanKey"}},"queryRef":"Native User Service Plan.TenantServicePlanKey","nativeQueryRef":"TenantServicePlanKey"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native User Service Plan"}},"Property":"CmdbUserId"}},"queryRef":"Native User Service Plan.CmdbUserId","nativeQueryRef":"CmdbUserId"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native User Service Plan"}},"Property":"SkuId"}},"queryRef":"Native User Service Plan.SkuId","nativeQueryRef":"SkuId"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native User Service Plan"}},"Property":"ServicePlanId"}},"queryRef":"Native User Service Plan.ServicePlanId","nativeQueryRef":"ServicePlanId"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native User Service Plan"}},"Property":"IsEnabled"}},"queryRef":"Native User Service Plan.IsEnabled","nativeQueryRef":"IsEnabled"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native User Service Plan"}},"Property":"AssignmentState"}},"queryRef":"Native User Service Plan.AssignmentState","nativeQueryRef":"AssignmentState"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native User Service Plan"}},"Property":"SourceSystem"}},"queryRef":"Native User Service Plan.SourceSystem","nativeQueryRef":"SourceSystem"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native User Service Plan"}},"Property":"SourceUserId"}},"queryRef":"Native User Service Plan.SourceUserId","nativeQueryRef":"SourceUserId"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native User Service Plan"}},"Property":"UserLinkStatus"}},"queryRef":"Native User Service Plan.UserLinkStatus","nativeQueryRef":"UserLinkStatus"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native User Service Plan"}},"Property":"TenantKey"}},"queryRef":"Native User Service Plan.TenantKey","nativeQueryRef":"TenantKey"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native User Service Plan"}},"Property":"OrganizationKey"}},"queryRef":"Native User Service Plan.OrganizationKey","nativeQueryRef":"OrganizationKey"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native User Service Plan"}},"Property":"EnvironmentKey"}},"queryRef":"Native User Service Plan.EnvironmentKey","nativeQueryRef":"EnvironmentKey"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native User Service Plan"}},"Property":"TenantId"}},"queryRef":"Native User Service Plan.TenantId","nativeQueryRef":"TenantId"}]}}},"objects":{"columnHeaders":[{"properties":{"fontSize":{"expr":{"Literal":{"Value":"14D"}}},"autoSizeColumnWidth":{"expr":{"Literal":{"Value":"true"}}},"columnAdjustment":{"expr":{"Literal":{"Value":"'growToFit'"}}},"wordWrap":{"expr":{"Literal":{"Value":"true"}}},"fontColor":{"solid":{"color":{"expr":{"Literal":{"Value":"'#FFFFFF'"}}}}},"backColor":{"solid":{"color":{"expr":{"Literal":{"Value":"'#215E9E'"}}}}}}}],"values":[{"properties":{"fontSize":{"expr":{"Literal":{"Value":"14D"}}},"wordWrap":{"expr":{"Literal":{"Value":"false"}}},"fontColorPrimary":{"solid":{"color":{"expr":{"Literal":{"Value":"'#1F2937'"}}}}},"fontColorSecondary":{"solid":{"color":{"expr":{"Literal":{"Value":"'#1F2937'"}}}}},"backColorPrimary":{"solid":{"color":{"expr":{"Literal":{"Value":"'#FFFFFF'"}}}}},"backColorSecondary":{"solid":{"color":{"expr":{"Literal":{"Value":"'#F7FAFC'"}}}}}}}],"grid":[{"properties":{"rowPadding":{"expr":{"Literal":{"Value":"4D"}}}}}]},"visualContainerObjects":{"general":[{"properties":{"altText":{"expr":{"Literal":{"Value":"'User service plans · complete governed fields'"}}}}}],"title":[{"properties":{"show":{"expr":{"Literal":{"Value":"true"}}},"text":{"expr":{"Literal":{"Value":"'User service plans · complete governed fields'"}}},"fontSize":{"expr":{"Literal":{"Value":"15D"}}}}}],"background":[{"properties":{"show":{"expr":{"Literal":{"Value":"true"}}},"color":{"solid":{"color":{"expr":{"Literal":{"Value":"'#FFFFFF'"}}}}},"transparency":{"expr":{"Literal":{"Value":"0D"}}}}}],"border":[{"properties":{"show":{"expr":{"Literal":{"Value":"true"}}},"color":{"solid":{"color":{"expr":{"Literal":{"Value":"'#CCDCEC'"}}}}},"radius":{"expr":{"Literal":{"Value":"8D"}}},"width":{"expr":{"Literal":{"Value":"1D"}}}}}],"visualHeader":[{"properties":{"show":{"expr":{"Literal":{"Value":"false"}}}}}],"padding":[{"properties":{"top":{"expr":{"Literal":{"Value":"8D"}}},"bottom":{"expr":{"Literal":{"Value":"8D"}}},"left":{"expr":{"Literal":{"Value":"8D"}}},"right":{"expr":{"Literal":{"Value":"8D"}}}}}],"subTitle":[{"properties":{"show":{"expr":{"Literal":{"Value":"false"}}}}}],"stylePreset":[{"properties":{"name":{"expr":{"Literal":{"Value":"'None'"}}}}}]},"drillFilterOtherVisuals":true},"parentGroupName":"35b6326dc1195c1e2709","filterConfig":{"filters":[{"name":"960c9885e40912982aca","field":{"Measure":{"Expression":{"SourceRef":{"Entity":"Native User Service Plan"}},"Property":"Native Context Rows · Native User Service Plan"}},"type":"Advanced","filter":{"Version":2,"From":[{"Name":"c","Entity":"Native User Service Plan","Type":0}],"Where":[{"Condition":{"Comparison":{"ComparisonKind":2,"Left":{"Measure":{"Expression":{"SourceRef":{"Source":"c"}},"Property":"Native Context Rows · Native User Service Plan"}},"Right":{"Literal":{"Value":"0L"}}}}}]}}]}}
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json",
+  "name": "c1a9ea59fef52df9398b",
+  "position": {
+    "x": 32,
+    "y": 536,
+    "width": 1856,
+    "height": 288,
+    "z": 12000,
+    "tabOrder": 544
+  },
+  "visual": {
+    "visualType": "tableEx",
+    "query": {
+      "queryState": {
+        "Values": {
+          "projections": [
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native User Service Plan"
+                    }
+                  },
+                  "Property": "ServicePlanName"
+                }
+              },
+              "queryRef": "Native User Service Plan.ServicePlanName",
+              "nativeQueryRef": "ServicePlanName"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native User Service Plan"
+                    }
+                  },
+                  "Property": "TenantUserKey"
+                }
+              },
+              "queryRef": "Native User Service Plan.TenantUserKey",
+              "nativeQueryRef": "TenantUserKey"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native User Service Plan"
+                    }
+                  },
+                  "Property": "TenantSkuKey"
+                }
+              },
+              "queryRef": "Native User Service Plan.TenantSkuKey",
+              "nativeQueryRef": "TenantSkuKey"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native User Service Plan"
+                    }
+                  },
+                  "Property": "TenantServicePlanKey"
+                }
+              },
+              "queryRef": "Native User Service Plan.TenantServicePlanKey",
+              "nativeQueryRef": "TenantServicePlanKey"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native User Service Plan"
+                    }
+                  },
+                  "Property": "CmdbUserId"
+                }
+              },
+              "queryRef": "Native User Service Plan.CmdbUserId",
+              "nativeQueryRef": "CmdbUserId"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native User Service Plan"
+                    }
+                  },
+                  "Property": "SkuId"
+                }
+              },
+              "queryRef": "Native User Service Plan.SkuId",
+              "nativeQueryRef": "SkuId"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native User Service Plan"
+                    }
+                  },
+                  "Property": "ServicePlanId"
+                }
+              },
+              "queryRef": "Native User Service Plan.ServicePlanId",
+              "nativeQueryRef": "ServicePlanId"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native User Service Plan"
+                    }
+                  },
+                  "Property": "IsEnabled"
+                }
+              },
+              "queryRef": "Native User Service Plan.IsEnabled",
+              "nativeQueryRef": "IsEnabled"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native User Service Plan"
+                    }
+                  },
+                  "Property": "AssignmentState"
+                }
+              },
+              "queryRef": "Native User Service Plan.AssignmentState",
+              "nativeQueryRef": "AssignmentState"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native User Service Plan"
+                    }
+                  },
+                  "Property": "SourceSystem"
+                }
+              },
+              "queryRef": "Native User Service Plan.SourceSystem",
+              "nativeQueryRef": "SourceSystem"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native User Service Plan"
+                    }
+                  },
+                  "Property": "SourceUserId"
+                }
+              },
+              "queryRef": "Native User Service Plan.SourceUserId",
+              "nativeQueryRef": "SourceUserId"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native User Service Plan"
+                    }
+                  },
+                  "Property": "UserLinkStatus"
+                }
+              },
+              "queryRef": "Native User Service Plan.UserLinkStatus",
+              "nativeQueryRef": "UserLinkStatus"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native User Service Plan"
+                    }
+                  },
+                  "Property": "TenantKey"
+                }
+              },
+              "queryRef": "Native User Service Plan.TenantKey",
+              "nativeQueryRef": "TenantKey"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native User Service Plan"
+                    }
+                  },
+                  "Property": "OrganizationKey"
+                }
+              },
+              "queryRef": "Native User Service Plan.OrganizationKey",
+              "nativeQueryRef": "OrganizationKey"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native User Service Plan"
+                    }
+                  },
+                  "Property": "EnvironmentKey"
+                }
+              },
+              "queryRef": "Native User Service Plan.EnvironmentKey",
+              "nativeQueryRef": "EnvironmentKey"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native User Service Plan"
+                    }
+                  },
+                  "Property": "TenantId"
+                }
+              },
+              "queryRef": "Native User Service Plan.TenantId",
+              "nativeQueryRef": "TenantId"
+            }
+          ]
+        }
+      }
+    },
+    "objects": {
+      "columnHeaders": [
+        {
+          "properties": {
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "14D"
+                }
+              }
+            },
+            "autoSizeColumnWidth": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "columnAdjustment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'growToFit'"
+                }
+              }
+            },
+            "wordWrap": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "fontColor": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#FFFFFF'"
+                    }
+                  }
+                }
+              }
+            },
+            "backColor": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#215E9E'"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      ],
+      "values": [
+        {
+          "properties": {
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "14D"
+                }
+              }
+            },
+            "wordWrap": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            },
+            "fontColorPrimary": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#1F2937'"
+                    }
+                  }
+                }
+              }
+            },
+            "fontColorSecondary": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#1F2937'"
+                    }
+                  }
+                }
+              }
+            },
+            "backColorPrimary": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#FFFFFF'"
+                    }
+                  }
+                }
+              }
+            },
+            "backColorSecondary": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#F7FAFC'"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      ],
+      "grid": [
+        {
+          "properties": {
+            "rowPadding": {
+              "expr": {
+                "Literal": {
+                  "Value": "4D"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "visualContainerObjects": {
+      "general": [
+        {
+          "properties": {
+            "altText": {
+              "expr": {
+                "Literal": {
+                  "Value": "'User service plans · complete governed fields'"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "title": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "text": {
+              "expr": {
+                "Literal": {
+                  "Value": "'User service plans · complete governed fields'"
+                }
+              }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "15D"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "background": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "color": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#FFFFFF'"
+                    }
+                  }
+                }
+              }
+            },
+            "transparency": {
+              "expr": {
+                "Literal": {
+                  "Value": "0D"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "border": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "color": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#CCDCEC'"
+                    }
+                  }
+                }
+              }
+            },
+            "radius": {
+              "expr": {
+                "Literal": {
+                  "Value": "8D"
+                }
+              }
+            },
+            "width": {
+              "expr": {
+                "Literal": {
+                  "Value": "1D"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "visualHeader": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "padding": [
+        {
+          "properties": {
+            "top": {
+              "expr": {
+                "Literal": {
+                  "Value": "8D"
+                }
+              }
+            },
+            "bottom": {
+              "expr": {
+                "Literal": {
+                  "Value": "8D"
+                }
+              }
+            },
+            "left": {
+              "expr": {
+                "Literal": {
+                  "Value": "8D"
+                }
+              }
+            },
+            "right": {
+              "expr": {
+                "Literal": {
+                  "Value": "8D"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "subTitle": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "stylePreset": [
+        {
+          "properties": {
+            "name": {
+              "expr": {
+                "Literal": {
+                  "Value": "'None'"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "drillFilterOtherVisuals": true
+  },
+  "parentGroupName": "35b6326dc1195c1e2709",
+  "filterConfig": {
+    "filters": [
+      {
+        "name": "960c9885e40912982aca",
+        "field": {
+          "Measure": {
+            "Expression": {
+              "SourceRef": {
+                "Entity": "Native User Service Plan"
+              }
+            },
+            "Property": "Native Context Rows · Native User Service Plan"
+          }
+        },
+        "type": "Advanced",
+        "filter": {
+          "Version": 2,
+          "From": [
+            {
+              "Name": "c",
+              "Entity": "Native User Service Plan",
+              "Type": 0
+            }
+          ],
+          "Where": [
+            {
+              "Condition": {
+                "Comparison": {
+                  "ComparisonKind": 2,
+                  "Left": {
+                    "Measure": {
+                      "Expression": {
+                        "SourceRef": {
+                          "Source": "c"
+                        }
+                      },
+                      "Property": "Native Context Rows · Native User Service Plan"
+                    }
+                  },
+                  "Right": {
+                    "Literal": {
+                      "Value": "0L"
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

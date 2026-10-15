@@ -4,33 +4,24 @@ table 'Device Source Evidence'
 
 	/// Raw Entra and Intune evidence records; multiple records may describe one CMDB device. Migrated without changing the source calculation.
 	measure 'Native Device source records' =
-			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
-			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
-			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimDevice"))
 			VAR InventoryDevices = CALCULATETABLE(VALUES('Native Managed Device Evidence'[TenantDeviceKey]), REMOVEFILTERS('Native Managed Device Evidence'), TREATAS(VALUES('Device Inventory Evidence'[Device Source ID]), 'Native Managed Device Evidence'[ManagedDeviceId]))
-			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((COALESCE(COUNTROWS('Device Source Evidence'),0)), KEEPFILTERS(TREATAS(NativeKeys0, 'Device Source Evidence'[TenantDeviceKey]))), BLANK()), BLANK()), SWITCH(TRUE(), ISCROSSFILTERED('Device Inventory Evidence'), CALCULATE((COALESCE(COUNTROWS('Device Source Evidence'),0)), KEEPFILTERS(TREATAS(InventoryDevices, 'Device Source Evidence'[TenantDeviceKey]))), (COALESCE(COUNTROWS('Device Source Evidence'),0))))
+			RETURN SWITCH(TRUE(), ISCROSSFILTERED('Device Inventory Evidence'), CALCULATE((COALESCE(COUNTROWS('Device Source Evidence'),0)), KEEPFILTERS(TREATAS(InventoryDevices, 'Device Source Evidence'[TenantDeviceKey]))), (COALESCE(COUNTROWS('Device Source Evidence'),0)))
 		formatString: #,0
 		displayFolder: Native evidence
 		lineageTag: 14b9a0bf-4524-4d00-949d-47c12b45a852
 
 	/// Detail rows only when exactly one device is selected outside visual row grouping. Blank otherwise. Migrated without changing the source calculation.
 	measure 'Native Device source details' =
-			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
-			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
-			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimDevice"))
 			VAR InventoryDevices = CALCULATETABLE(VALUES('Native Managed Device Evidence'[TenantDeviceKey]), REMOVEFILTERS('Native Managed Device Evidence'), TREATAS(VALUES('Device Inventory Evidence'[Device Source ID]), 'Native Managed Device Evidence'[ManagedDeviceId]))
-			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((IF(COUNTROWS(ALLSELECTED('Native Device Evidence')) = 1, COUNTROWS('Device Source Evidence'))), KEEPFILTERS(TREATAS(NativeKeys0, 'Device Source Evidence'[TenantDeviceKey]))), BLANK()), BLANK()), SWITCH(TRUE(), ISCROSSFILTERED('Device Inventory Evidence'), CALCULATE((IF(COUNTROWS(ALLSELECTED('Native Device Evidence')) = 1, COUNTROWS('Device Source Evidence'))), KEEPFILTERS(TREATAS(InventoryDevices, 'Device Source Evidence'[TenantDeviceKey]))), (IF(COUNTROWS(ALLSELECTED('Native Device Evidence')) = 1, COUNTROWS('Device Source Evidence')))))
+			RETURN SWITCH(TRUE(), ISCROSSFILTERED('Device Inventory Evidence'), CALCULATE((IF(COUNTROWS(ALLSELECTED('Native Device Evidence')) = 1, COUNTROWS('Device Source Evidence'))), KEEPFILTERS(TREATAS(InventoryDevices, 'Device Source Evidence'[TenantDeviceKey]))), (IF(COUNTROWS(ALLSELECTED('Native Device Evidence')) = 1, COUNTROWS('Device Source Evidence'))))
 		formatString: #,0
 		displayFolder: Native evidence
 		lineageTag: 6ef79887-296a-4e3b-b6d7-d938b7d5ac9b
 
-	/// Exact native-key entity context or existing inventory context. No name matching or inferred transitive membership. Unrelated entity selections return blank.
+	/// Existing qualified workforce/device scope via exact native IDs; otherwise the domain selection. No name matching or inferred transitive membership.
 	measure 'Native Context Rows · Device Source Evidence' =
-			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
-			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
-			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimDevice"))
 			VAR InventoryDevices = CALCULATETABLE(VALUES('Native Managed Device Evidence'[TenantDeviceKey]), REMOVEFILTERS('Native Managed Device Evidence'), TREATAS(VALUES('Device Inventory Evidence'[Device Source ID]), 'Native Managed Device Evidence'[ManagedDeviceId]))
-			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((COUNTROWS('Device Source Evidence')), KEEPFILTERS(TREATAS(NativeKeys0, 'Device Source Evidence'[TenantDeviceKey]))), BLANK()), BLANK()), SWITCH(TRUE(), ISCROSSFILTERED('Device Inventory Evidence'), CALCULATE((COUNTROWS('Device Source Evidence')), KEEPFILTERS(TREATAS(InventoryDevices, 'Device Source Evidence'[TenantDeviceKey]))), (COUNTROWS('Device Source Evidence'))))
+			RETURN SWITCH(TRUE(), ISCROSSFILTERED('Device Inventory Evidence'), CALCULATE((COUNTROWS('Device Source Evidence')), KEEPFILTERS(TREATAS(InventoryDevices, 'Device Source Evidence'[TenantDeviceKey]))), (COUNTROWS('Device Source Evidence')))
 		formatString: #,0
 		isHidden
 		lineageTag: 9860615a-dc98-4ed7-8e73-fe09a43b6b92

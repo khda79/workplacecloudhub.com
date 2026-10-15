@@ -1,0 +1,118 @@
+/// Receipt-qualified observed Teams / SharePoint scope. Single reviewed tenant batch; no inference of full tenant coverage.
+table 'Teams Site Links'
+	lineageTag: e9ac5c50-310e-4141-b64c-467d1dd78b6c
+
+	/// Preserved observed links absent from captured SPO scope; not invalid links.
+	measure 'Teams Links Outside SPO Scope' = CALCULATE(COUNTROWS('Teams Site Links'), KEEPFILTERS('Teams Site Links'[Resolution] = "Outside observed SPO scope"))
+		formatString: #,0
+		displayFolder: Teams & SharePoint | Observed scope
+		lineageTag: 71439f38-91b7-42d8-90e6-390588e08fc6
+
+	/// Receipt-qualified observed evidence.
+	column TenantKey
+		dataType: string
+		isHidden
+		lineageTag: aedae6df-7de4-425d-b7b8-ecbdfde1de18
+		summarizeBy: none
+		sourceColumn: TenantKey
+
+	/// Receipt-qualified observed evidence.
+	column 'Link Key'
+		dataType: string
+		isHidden
+		lineageTag: 2aa75c46-0764-4f6b-8205-a71540e14708
+		summarizeBy: none
+		sourceColumn: Link Key
+
+	/// Receipt-qualified observed evidence.
+	column 'Team ID'
+		dataType: string
+		lineageTag: 448c7a66-9b85-45f3-ae77-787a503b3934
+		summarizeBy: none
+		sourceColumn: Team ID
+
+	/// Receipt-qualified observed evidence.
+	column Team
+		dataType: string
+		lineageTag: 047ecf28-3caa-44e4-ad2c-09759387754c
+		summarizeBy: none
+		sourceColumn: Team
+
+	/// Receipt-qualified observed evidence.
+	column 'Channel ID'
+		dataType: string
+		lineageTag: b1633027-ffb8-4c7d-b202-59029f329d91
+		summarizeBy: none
+		sourceColumn: Channel ID
+
+	/// Receipt-qualified observed evidence.
+	column Channel
+		dataType: string
+		lineageTag: 633296a4-9255-4bd4-9aee-5670d7be30e5
+		summarizeBy: none
+		sourceColumn: Channel
+
+	/// Receipt-qualified observed evidence.
+	column 'Link Type'
+		dataType: string
+		lineageTag: 7ef9de7b-3db3-46ce-a6af-c7fc15a1a8d9
+		summarizeBy: none
+		sourceColumn: Link Type
+
+	/// Receipt-qualified observed evidence.
+	column 'Site ID'
+		dataType: string
+		lineageTag: 4a1a3006-e50c-4f01-93d4-92bac484ff28
+		summarizeBy: none
+		sourceColumn: Site ID
+
+	/// Receipt-qualified observed evidence.
+	column 'Link Status'
+		dataType: string
+		lineageTag: 2127f2ab-98f4-4d59-8e48-10a7126a5ee0
+		summarizeBy: none
+		sourceColumn: Link Status
+
+	/// Receipt-qualified observed evidence.
+	column Resolution
+		dataType: string
+		lineageTag: 3e6c0f9c-dd7b-49ef-939b-14da566c8748
+		summarizeBy: none
+		sourceColumn: Resolution
+
+	/// Receipt-qualified observed evidence.
+	column 'Site URL'
+		dataType: string
+		lineageTag: b75e5ce9-a0b5-4463-bfd8-b227067608e3
+		summarizeBy: none
+		sourceColumn: Site URL
+
+	/// Receipt-qualified observed evidence.
+	column 'Receipt Run ID'
+		dataType: string
+		lineageTag: ac10b84f-4a77-4aeb-a0b8-851d56435568
+		summarizeBy: none
+		sourceColumn: Receipt Run ID
+
+	/// Receipt-qualified observed evidence.
+	column 'Business Run ID'
+		dataType: string
+		lineageTag: 6dfc0954-39ad-46ac-a0a7-f3dd5f7d334c
+		summarizeBy: none
+		sourceColumn: Business Run ID
+
+	/// Receipt-qualified observed evidence.
+	column 'Collected UTC'
+		dataType: dateTime
+		lineageTag: 50b806cf-4c83-4d75-8f10-8ad1178e768f
+		summarizeBy: none
+		sourceColumn: Collected UTC
+
+	partition 'Teams Site Links' = m
+		mode: import
+		source =
+				let
+				 Source = Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("TeamsSiteLinkEvidence.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]),
+				 Typed = NativeEvidenceTypes(Source, {[name="TenantKey", dataType="String"], [name="Link Key", dataType="String"], [name="Team ID", dataType="String"], [name="Team", dataType="String"], [name="Channel ID", dataType="String"], [name="Channel", dataType="String"], [name="Link Type", dataType="String"], [name="Site ID", dataType="String"], [name="Link Status", dataType="String"], [name="Resolution", dataType="String"], [name="Site URL", dataType="String"], [name="Receipt Run ID", dataType="String"], [name="Business Run ID", dataType="String"], [name="Collected UTC", dataType="DateTime"]})
+				in Typed
+

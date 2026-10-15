@@ -49,7 +49,7 @@ export function buildPatch(rootPath) {
   const bmList=read(path.join(marks,'bookmarks.json'));
   const bmFiles=fs.readdirSync(marks).filter(f=>f.endsWith('.bookmark.json')).map(f=>({path:path.join(marks,f),value:read(path.join(marks,f))}));
   const allPages=fs.readdirSync(pages,{withFileTypes:true}).filter(e=>e.isDirectory()).map(e=>read(path.join(pages,e.name,'page.json')));
-  const targetNames=['Collaboration Adoption','Cloud Content & Storage','Service & Content Explorer','CMDB','Data Trust'];
+  const targetNames=['Collaboration Adoption','Cloud Content & Storage','Service & Content Explorer','Data Trust'];
   const coverage=[];
   for(const title of targetNames){
     const page=allPages.find(p=>p.displayName===title);if(!page)throw Error('Missing existing page: '+title);
@@ -66,12 +66,12 @@ export function buildPatch(rootPath) {
       options:{applyOnlyToTargetVisuals:true,targetVisualNames:[...groups,g],suppressActiveSection:true,suppressData:true},
       explorationState:{version:'1.0',activeSection:p,sections:{[p]:{visualContainers:{},visualContainerGroups:Object.fromEntries([...groups,g].map(n=>[n,{isHidden:n!==g}]))}}}});
     bmList.items.push({name:id(p+':bookmark-group'),displayName:title+' Teams & SharePoint view',children:[bm]});
-    const button=shell('34c99d7e680872d936e7',p+':entry',{x:title==='CMDB'?1280:320,y:1008,width:280,height:28},null);
+    const button=shell('34c99d7e680872d936e7',p+':entry',{x:320,y:1008,width:280,height:28},null);
     for(const t of button.visual.objects.text)t.properties.text=lit('Teams & SharePoint');
     button.visual.visualContainerObjects.visualLink=[{properties:{show:lit(true),type:lit('Bookmark'),bookmark:lit(bm)}}];
     button.visual.visualContainerObjects.general=[{properties:{altText:lit('Open Teams and SharePoint observed scope')}}];save(p,button);
     text(p,p+':heading','Selected view: Teams & SharePoint · observed tenant scope',312,24,g);
-    text(p,p+':scope','This view is tenant-level: country, service and CMDB entity selections above do not filter it. Source scope excludes OneDrive. Unmatched is not invalid; no observed link is not proof of a standalone site.',340,32,g);
+    text(p,p+':scope','This view is tenant-level: country and service selections above do not filter it. Source scope excludes OneDrive. Unmatched is not invalid; no observed link is not proof of a standalone site.',340,32,g);
     const site='SharePoint Site Links',cap='SharePoint Tenant Capacity';
     cards(p,p+':metrics',title==='Cloud Content & Storage' ? [
       [site,'Observed SPO Storage (GB)','Observed site storage (GB)'],[site,'Teams Linked SPO Storage (GB)','Teams-linked site storage (GB)'],

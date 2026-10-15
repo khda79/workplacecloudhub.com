@@ -1,1 +1,914 @@
-{"$schema":"https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json","name":"0f297e962abe13feec06","position":{"x":32,"y":536,"width":1856,"height":288,"z":12000,"tabOrder":544},"visual":{"visualType":"tableEx","query":{"queryState":{"Values":{"projections":[{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native Device Evidence"}},"Property":"DeviceSelection"}},"queryRef":"Native Device Evidence.DeviceSelection","nativeQueryRef":"DeviceSelection"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native Device Evidence"}},"Property":"TenantDeviceKey"}},"queryRef":"Native Device Evidence.TenantDeviceKey","nativeQueryRef":"TenantDeviceKey"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native Device Evidence"}},"Property":"CmdbDeviceId"}},"queryRef":"Native Device Evidence.CmdbDeviceId","nativeQueryRef":"CmdbDeviceId"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native Device Evidence"}},"Property":"DeviceName"}},"queryRef":"Native Device Evidence.DeviceName","nativeQueryRef":"DeviceName"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native Device Evidence"}},"Property":"OperatingSystem"}},"queryRef":"Native Device Evidence.OperatingSystem","nativeQueryRef":"OperatingSystem"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native Device Evidence"}},"Property":"OperatingSystemVersion"}},"queryRef":"Native Device Evidence.OperatingSystemVersion","nativeQueryRef":"OperatingSystemVersion"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native Device Evidence"}},"Property":"Ownership"}},"queryRef":"Native Device Evidence.Ownership","nativeQueryRef":"Ownership"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native Device Evidence"}},"Property":"ComplianceState"}},"queryRef":"Native Device Evidence.ComplianceState","nativeQueryRef":"ComplianceState"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native Device Evidence"}},"Property":"EncryptionState"}},"queryRef":"Native Device Evidence.EncryptionState","nativeQueryRef":"EncryptionState"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native Device Evidence"}},"Property":"ManagementState"}},"queryRef":"Native Device Evidence.ManagementState","nativeQueryRef":"ManagementState"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native Device Evidence"}},"Property":"ConfidenceScore"}},"queryRef":"Native Device Evidence.ConfidenceScore","nativeQueryRef":"ConfidenceScore"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native Device Evidence"}},"Property":"DeviceNameLabel"}},"queryRef":"Native Device Evidence.DeviceNameLabel","nativeQueryRef":"DeviceNameLabel"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native Device Evidence"}},"Property":"OperatingSystemLabel"}},"queryRef":"Native Device Evidence.OperatingSystemLabel","nativeQueryRef":"OperatingSystemLabel"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native Device Evidence"}},"Property":"OperatingSystemVersionLabel"}},"queryRef":"Native Device Evidence.OperatingSystemVersionLabel","nativeQueryRef":"OperatingSystemVersionLabel"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native Device Evidence"}},"Property":"OwnershipLabel"}},"queryRef":"Native Device Evidence.OwnershipLabel","nativeQueryRef":"OwnershipLabel"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native Device Evidence"}},"Property":"ComplianceStateLabel"}},"queryRef":"Native Device Evidence.ComplianceStateLabel","nativeQueryRef":"ComplianceStateLabel"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native Device Evidence"}},"Property":"EncryptionStateLabel"}},"queryRef":"Native Device Evidence.EncryptionStateLabel","nativeQueryRef":"EncryptionStateLabel"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native Device Evidence"}},"Property":"ManagementStateLabel"}},"queryRef":"Native Device Evidence.ManagementStateLabel","nativeQueryRef":"ManagementStateLabel"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native Device Evidence"}},"Property":"SourceDeviceId"}},"queryRef":"Native Device Evidence.SourceDeviceId","nativeQueryRef":"SourceDeviceId"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native Device Evidence"}},"Property":"SourceSystems"}},"queryRef":"Native Device Evidence.SourceSystems","nativeQueryRef":"SourceSystems"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native Device Evidence"}},"Property":"AssociatedAccount"}},"queryRef":"Native Device Evidence.AssociatedAccount","nativeQueryRef":"AssociatedAccount"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native Device Evidence"}},"Property":"AssociationStatus"}},"queryRef":"Native Device Evidence.AssociationStatus","nativeQueryRef":"AssociationStatus"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native Device Evidence"}},"Property":"CountryCode"}},"queryRef":"Native Device Evidence.CountryCode","nativeQueryRef":"CountryCode"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native Device Evidence"}},"Property":"CountryLabel"}},"queryRef":"Native Device Evidence.CountryLabel","nativeQueryRef":"CountryLabel"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native Device Evidence"}},"Property":"CountryStatus"}},"queryRef":"Native Device Evidence.CountryStatus","nativeQueryRef":"CountryStatus"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native Device Evidence"}},"Property":"PrimaryUserSourceId"}},"queryRef":"Native Device Evidence.PrimaryUserSourceId","nativeQueryRef":"PrimaryUserSourceId"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native Device Evidence"}},"Property":"SyncRaw"}},"queryRef":"Native Device Evidence.SyncRaw","nativeQueryRef":"SyncRaw"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native Device Evidence"}},"Property":"SyncUtcDateTime"}},"queryRef":"Native Device Evidence.SyncUtcDateTime","nativeQueryRef":"SyncUtcDateTime"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native Device Evidence"}},"Property":"SyncStatus"}},"queryRef":"Native Device Evidence.SyncStatus","nativeQueryRef":"SyncStatus"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native Device Evidence"}},"Property":"SourceCollectedDateTime"}},"queryRef":"Native Device Evidence.SourceCollectedDateTime","nativeQueryRef":"SourceCollectedDateTime"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native Device Evidence"}},"Property":"Device form factor"}},"queryRef":"Native Device Evidence.Device form factor","nativeQueryRef":"Device form factor"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native Device Evidence"}},"Property":"Windows version group"}},"queryRef":"Native Device Evidence.Windows version group","nativeQueryRef":"Windows version group"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native Device Evidence"}},"Property":"Device ownership group"}},"queryRef":"Native Device Evidence.Device ownership group","nativeQueryRef":"Device ownership group"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native Device Evidence"}},"Property":"TenantKey"}},"queryRef":"Native Device Evidence.TenantKey","nativeQueryRef":"TenantKey"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native Device Evidence"}},"Property":"OrganizationKey"}},"queryRef":"Native Device Evidence.OrganizationKey","nativeQueryRef":"OrganizationKey"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native Device Evidence"}},"Property":"EnvironmentKey"}},"queryRef":"Native Device Evidence.EnvironmentKey","nativeQueryRef":"EnvironmentKey"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native Device Evidence"}},"Property":"TenantId"}},"queryRef":"Native Device Evidence.TenantId","nativeQueryRef":"TenantId"}]}}},"objects":{"columnHeaders":[{"properties":{"fontSize":{"expr":{"Literal":{"Value":"14D"}}},"autoSizeColumnWidth":{"expr":{"Literal":{"Value":"true"}}},"columnAdjustment":{"expr":{"Literal":{"Value":"'growToFit'"}}},"wordWrap":{"expr":{"Literal":{"Value":"true"}}},"fontColor":{"solid":{"color":{"expr":{"Literal":{"Value":"'#FFFFFF'"}}}}},"backColor":{"solid":{"color":{"expr":{"Literal":{"Value":"'#215E9E'"}}}}}}}],"values":[{"properties":{"fontSize":{"expr":{"Literal":{"Value":"14D"}}},"wordWrap":{"expr":{"Literal":{"Value":"false"}}},"fontColorPrimary":{"solid":{"color":{"expr":{"Literal":{"Value":"'#1F2937'"}}}}},"fontColorSecondary":{"solid":{"color":{"expr":{"Literal":{"Value":"'#1F2937'"}}}}},"backColorPrimary":{"solid":{"color":{"expr":{"Literal":{"Value":"'#FFFFFF'"}}}}},"backColorSecondary":{"solid":{"color":{"expr":{"Literal":{"Value":"'#F7FAFC'"}}}}}}}],"grid":[{"properties":{"rowPadding":{"expr":{"Literal":{"Value":"4D"}}}}}]},"visualContainerObjects":{"general":[{"properties":{"altText":{"expr":{"Literal":{"Value":"'Native devices · complete governed fields'"}}}}}],"title":[{"properties":{"show":{"expr":{"Literal":{"Value":"true"}}},"text":{"expr":{"Literal":{"Value":"'Native devices · complete governed fields'"}}},"fontSize":{"expr":{"Literal":{"Value":"15D"}}}}}],"background":[{"properties":{"show":{"expr":{"Literal":{"Value":"true"}}},"color":{"solid":{"color":{"expr":{"Literal":{"Value":"'#FFFFFF'"}}}}},"transparency":{"expr":{"Literal":{"Value":"0D"}}}}}],"border":[{"properties":{"show":{"expr":{"Literal":{"Value":"true"}}},"color":{"solid":{"color":{"expr":{"Literal":{"Value":"'#CCDCEC'"}}}}},"radius":{"expr":{"Literal":{"Value":"8D"}}},"width":{"expr":{"Literal":{"Value":"1D"}}}}}],"visualHeader":[{"properties":{"show":{"expr":{"Literal":{"Value":"false"}}}}}],"padding":[{"properties":{"top":{"expr":{"Literal":{"Value":"8D"}}},"bottom":{"expr":{"Literal":{"Value":"8D"}}},"left":{"expr":{"Literal":{"Value":"8D"}}},"right":{"expr":{"Literal":{"Value":"8D"}}}}}],"subTitle":[{"properties":{"show":{"expr":{"Literal":{"Value":"false"}}}}}],"stylePreset":[{"properties":{"name":{"expr":{"Literal":{"Value":"'None'"}}}}}]},"drillFilterOtherVisuals":true},"parentGroupName":"45c8e559410c1058bcb8","filterConfig":{"filters":[{"name":"9ae9010201cbbe705f8d","field":{"Measure":{"Expression":{"SourceRef":{"Entity":"Native Device Evidence"}},"Property":"Native Context Rows · Native Device Evidence"}},"type":"Advanced","filter":{"Version":2,"From":[{"Name":"c","Entity":"Native Device Evidence","Type":0}],"Where":[{"Condition":{"Comparison":{"ComparisonKind":2,"Left":{"Measure":{"Expression":{"SourceRef":{"Source":"c"}},"Property":"Native Context Rows · Native Device Evidence"}},"Right":{"Literal":{"Value":"0L"}}}}}]}}]}}
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json",
+  "name": "0f297e962abe13feec06",
+  "position": {
+    "x": 32,
+    "y": 536,
+    "width": 1856,
+    "height": 288,
+    "z": 12000,
+    "tabOrder": 544
+  },
+  "visual": {
+    "visualType": "tableEx",
+    "query": {
+      "queryState": {
+        "Values": {
+          "projections": [
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Device Evidence"
+                    }
+                  },
+                  "Property": "DeviceSelection"
+                }
+              },
+              "queryRef": "Native Device Evidence.DeviceSelection",
+              "nativeQueryRef": "DeviceSelection"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Device Evidence"
+                    }
+                  },
+                  "Property": "TenantDeviceKey"
+                }
+              },
+              "queryRef": "Native Device Evidence.TenantDeviceKey",
+              "nativeQueryRef": "TenantDeviceKey"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Device Evidence"
+                    }
+                  },
+                  "Property": "CmdbDeviceId"
+                }
+              },
+              "queryRef": "Native Device Evidence.CmdbDeviceId",
+              "nativeQueryRef": "CmdbDeviceId"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Device Evidence"
+                    }
+                  },
+                  "Property": "DeviceName"
+                }
+              },
+              "queryRef": "Native Device Evidence.DeviceName",
+              "nativeQueryRef": "DeviceName"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Device Evidence"
+                    }
+                  },
+                  "Property": "OperatingSystem"
+                }
+              },
+              "queryRef": "Native Device Evidence.OperatingSystem",
+              "nativeQueryRef": "OperatingSystem"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Device Evidence"
+                    }
+                  },
+                  "Property": "OperatingSystemVersion"
+                }
+              },
+              "queryRef": "Native Device Evidence.OperatingSystemVersion",
+              "nativeQueryRef": "OperatingSystemVersion"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Device Evidence"
+                    }
+                  },
+                  "Property": "Ownership"
+                }
+              },
+              "queryRef": "Native Device Evidence.Ownership",
+              "nativeQueryRef": "Ownership"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Device Evidence"
+                    }
+                  },
+                  "Property": "ComplianceState"
+                }
+              },
+              "queryRef": "Native Device Evidence.ComplianceState",
+              "nativeQueryRef": "ComplianceState"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Device Evidence"
+                    }
+                  },
+                  "Property": "EncryptionState"
+                }
+              },
+              "queryRef": "Native Device Evidence.EncryptionState",
+              "nativeQueryRef": "EncryptionState"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Device Evidence"
+                    }
+                  },
+                  "Property": "ManagementState"
+                }
+              },
+              "queryRef": "Native Device Evidence.ManagementState",
+              "nativeQueryRef": "ManagementState"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Device Evidence"
+                    }
+                  },
+                  "Property": "ConfidenceScore"
+                }
+              },
+              "queryRef": "Native Device Evidence.ConfidenceScore",
+              "nativeQueryRef": "ConfidenceScore"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Device Evidence"
+                    }
+                  },
+                  "Property": "DeviceNameLabel"
+                }
+              },
+              "queryRef": "Native Device Evidence.DeviceNameLabel",
+              "nativeQueryRef": "DeviceNameLabel"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Device Evidence"
+                    }
+                  },
+                  "Property": "OperatingSystemLabel"
+                }
+              },
+              "queryRef": "Native Device Evidence.OperatingSystemLabel",
+              "nativeQueryRef": "OperatingSystemLabel"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Device Evidence"
+                    }
+                  },
+                  "Property": "OperatingSystemVersionLabel"
+                }
+              },
+              "queryRef": "Native Device Evidence.OperatingSystemVersionLabel",
+              "nativeQueryRef": "OperatingSystemVersionLabel"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Device Evidence"
+                    }
+                  },
+                  "Property": "OwnershipLabel"
+                }
+              },
+              "queryRef": "Native Device Evidence.OwnershipLabel",
+              "nativeQueryRef": "OwnershipLabel"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Device Evidence"
+                    }
+                  },
+                  "Property": "ComplianceStateLabel"
+                }
+              },
+              "queryRef": "Native Device Evidence.ComplianceStateLabel",
+              "nativeQueryRef": "ComplianceStateLabel"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Device Evidence"
+                    }
+                  },
+                  "Property": "EncryptionStateLabel"
+                }
+              },
+              "queryRef": "Native Device Evidence.EncryptionStateLabel",
+              "nativeQueryRef": "EncryptionStateLabel"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Device Evidence"
+                    }
+                  },
+                  "Property": "ManagementStateLabel"
+                }
+              },
+              "queryRef": "Native Device Evidence.ManagementStateLabel",
+              "nativeQueryRef": "ManagementStateLabel"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Device Evidence"
+                    }
+                  },
+                  "Property": "SourceDeviceId"
+                }
+              },
+              "queryRef": "Native Device Evidence.SourceDeviceId",
+              "nativeQueryRef": "SourceDeviceId"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Device Evidence"
+                    }
+                  },
+                  "Property": "SourceSystems"
+                }
+              },
+              "queryRef": "Native Device Evidence.SourceSystems",
+              "nativeQueryRef": "SourceSystems"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Device Evidence"
+                    }
+                  },
+                  "Property": "AssociatedAccount"
+                }
+              },
+              "queryRef": "Native Device Evidence.AssociatedAccount",
+              "nativeQueryRef": "AssociatedAccount"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Device Evidence"
+                    }
+                  },
+                  "Property": "AssociationStatus"
+                }
+              },
+              "queryRef": "Native Device Evidence.AssociationStatus",
+              "nativeQueryRef": "AssociationStatus"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Device Evidence"
+                    }
+                  },
+                  "Property": "CountryCode"
+                }
+              },
+              "queryRef": "Native Device Evidence.CountryCode",
+              "nativeQueryRef": "CountryCode"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Device Evidence"
+                    }
+                  },
+                  "Property": "CountryLabel"
+                }
+              },
+              "queryRef": "Native Device Evidence.CountryLabel",
+              "nativeQueryRef": "CountryLabel"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Device Evidence"
+                    }
+                  },
+                  "Property": "CountryStatus"
+                }
+              },
+              "queryRef": "Native Device Evidence.CountryStatus",
+              "nativeQueryRef": "CountryStatus"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Device Evidence"
+                    }
+                  },
+                  "Property": "PrimaryUserSourceId"
+                }
+              },
+              "queryRef": "Native Device Evidence.PrimaryUserSourceId",
+              "nativeQueryRef": "PrimaryUserSourceId"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Device Evidence"
+                    }
+                  },
+                  "Property": "SyncRaw"
+                }
+              },
+              "queryRef": "Native Device Evidence.SyncRaw",
+              "nativeQueryRef": "SyncRaw"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Device Evidence"
+                    }
+                  },
+                  "Property": "SyncUtcDateTime"
+                }
+              },
+              "queryRef": "Native Device Evidence.SyncUtcDateTime",
+              "nativeQueryRef": "SyncUtcDateTime"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Device Evidence"
+                    }
+                  },
+                  "Property": "SyncStatus"
+                }
+              },
+              "queryRef": "Native Device Evidence.SyncStatus",
+              "nativeQueryRef": "SyncStatus"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Device Evidence"
+                    }
+                  },
+                  "Property": "SourceCollectedDateTime"
+                }
+              },
+              "queryRef": "Native Device Evidence.SourceCollectedDateTime",
+              "nativeQueryRef": "SourceCollectedDateTime"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Device Evidence"
+                    }
+                  },
+                  "Property": "Device form factor"
+                }
+              },
+              "queryRef": "Native Device Evidence.Device form factor",
+              "nativeQueryRef": "Device form factor"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Device Evidence"
+                    }
+                  },
+                  "Property": "Windows version group"
+                }
+              },
+              "queryRef": "Native Device Evidence.Windows version group",
+              "nativeQueryRef": "Windows version group"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Device Evidence"
+                    }
+                  },
+                  "Property": "Device ownership group"
+                }
+              },
+              "queryRef": "Native Device Evidence.Device ownership group",
+              "nativeQueryRef": "Device ownership group"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Device Evidence"
+                    }
+                  },
+                  "Property": "TenantKey"
+                }
+              },
+              "queryRef": "Native Device Evidence.TenantKey",
+              "nativeQueryRef": "TenantKey"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Device Evidence"
+                    }
+                  },
+                  "Property": "OrganizationKey"
+                }
+              },
+              "queryRef": "Native Device Evidence.OrganizationKey",
+              "nativeQueryRef": "OrganizationKey"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Device Evidence"
+                    }
+                  },
+                  "Property": "EnvironmentKey"
+                }
+              },
+              "queryRef": "Native Device Evidence.EnvironmentKey",
+              "nativeQueryRef": "EnvironmentKey"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Device Evidence"
+                    }
+                  },
+                  "Property": "TenantId"
+                }
+              },
+              "queryRef": "Native Device Evidence.TenantId",
+              "nativeQueryRef": "TenantId"
+            }
+          ]
+        }
+      }
+    },
+    "objects": {
+      "columnHeaders": [
+        {
+          "properties": {
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "14D"
+                }
+              }
+            },
+            "autoSizeColumnWidth": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "columnAdjustment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'growToFit'"
+                }
+              }
+            },
+            "wordWrap": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "fontColor": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#FFFFFF'"
+                    }
+                  }
+                }
+              }
+            },
+            "backColor": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#215E9E'"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      ],
+      "values": [
+        {
+          "properties": {
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "14D"
+                }
+              }
+            },
+            "wordWrap": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            },
+            "fontColorPrimary": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#1F2937'"
+                    }
+                  }
+                }
+              }
+            },
+            "fontColorSecondary": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#1F2937'"
+                    }
+                  }
+                }
+              }
+            },
+            "backColorPrimary": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#FFFFFF'"
+                    }
+                  }
+                }
+              }
+            },
+            "backColorSecondary": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#F7FAFC'"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      ],
+      "grid": [
+        {
+          "properties": {
+            "rowPadding": {
+              "expr": {
+                "Literal": {
+                  "Value": "4D"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "visualContainerObjects": {
+      "general": [
+        {
+          "properties": {
+            "altText": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Native devices · complete governed fields'"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "title": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "text": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Native devices · complete governed fields'"
+                }
+              }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "15D"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "background": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "color": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#FFFFFF'"
+                    }
+                  }
+                }
+              }
+            },
+            "transparency": {
+              "expr": {
+                "Literal": {
+                  "Value": "0D"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "border": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "color": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#CCDCEC'"
+                    }
+                  }
+                }
+              }
+            },
+            "radius": {
+              "expr": {
+                "Literal": {
+                  "Value": "8D"
+                }
+              }
+            },
+            "width": {
+              "expr": {
+                "Literal": {
+                  "Value": "1D"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "visualHeader": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "padding": [
+        {
+          "properties": {
+            "top": {
+              "expr": {
+                "Literal": {
+                  "Value": "8D"
+                }
+              }
+            },
+            "bottom": {
+              "expr": {
+                "Literal": {
+                  "Value": "8D"
+                }
+              }
+            },
+            "left": {
+              "expr": {
+                "Literal": {
+                  "Value": "8D"
+                }
+              }
+            },
+            "right": {
+              "expr": {
+                "Literal": {
+                  "Value": "8D"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "subTitle": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "stylePreset": [
+        {
+          "properties": {
+            "name": {
+              "expr": {
+                "Literal": {
+                  "Value": "'None'"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "drillFilterOtherVisuals": true
+  },
+  "parentGroupName": "45c8e559410c1058bcb8",
+  "filterConfig": {
+    "filters": [
+      {
+        "name": "9ae9010201cbbe705f8d",
+        "field": {
+          "Measure": {
+            "Expression": {
+              "SourceRef": {
+                "Entity": "Native Device Evidence"
+              }
+            },
+            "Property": "Native Context Rows · Native Device Evidence"
+          }
+        },
+        "type": "Advanced",
+        "filter": {
+          "Version": 2,
+          "From": [
+            {
+              "Name": "c",
+              "Entity": "Native Device Evidence",
+              "Type": 0
+            }
+          ],
+          "Where": [
+            {
+              "Condition": {
+                "Comparison": {
+                  "ComparisonKind": 2,
+                  "Left": {
+                    "Measure": {
+                      "Expression": {
+                        "SourceRef": {
+                          "Source": "c"
+                        }
+                      },
+                      "Property": "Native Context Rows · Native Device Evidence"
+                    }
+                  },
+                  "Right": {
+                    "Literal": {
+                      "Value": "0L"
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

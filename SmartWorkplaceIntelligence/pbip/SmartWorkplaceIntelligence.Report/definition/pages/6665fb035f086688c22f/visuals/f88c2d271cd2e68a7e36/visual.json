@@ -1,1 +1,634 @@
-{"$schema":"https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json","name":"f88c2d271cd2e68a7e36","position":{"x":32,"y":488,"width":1856,"height":336,"z":12000,"tabOrder":544},"visual":{"visualType":"tableEx","query":{"queryState":{"Values":{"projections":[{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native Quality Finding"}},"Property":"TenantFindingKey"}},"queryRef":"Native Quality Finding.TenantFindingKey","nativeQueryRef":"TenantFindingKey"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native Quality Finding"}},"Property":"FindingId"}},"queryRef":"Native Quality Finding.FindingId","nativeQueryRef":"FindingId"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native Quality Finding"}},"Property":"Severity"}},"queryRef":"Native Quality Finding.Severity","nativeQueryRef":"Severity"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native Quality Finding"}},"Property":"EntityType"}},"queryRef":"Native Quality Finding.EntityType","nativeQueryRef":"EntityType"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native Quality Finding"}},"Property":"FindingType"}},"queryRef":"Native Quality Finding.FindingType","nativeQueryRef":"FindingType"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native Quality Finding"}},"Property":"DetectedDateTime"}},"queryRef":"Native Quality Finding.DetectedDateTime","nativeQueryRef":"DetectedDateTime"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native Quality Finding"}},"Property":"SourceSystem"}},"queryRef":"Native Quality Finding.SourceSystem","nativeQueryRef":"SourceSystem"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native Quality Finding"}},"Property":"Description"}},"queryRef":"Native Quality Finding.Description","nativeQueryRef":"Description"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native Quality Finding"}},"Property":"RecommendedAction"}},"queryRef":"Native Quality Finding.RecommendedAction","nativeQueryRef":"RecommendedAction"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native Quality Finding"}},"Property":"SeverityLabel"}},"queryRef":"Native Quality Finding.SeverityLabel","nativeQueryRef":"SeverityLabel"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native Quality Finding"}},"Property":"FindingTypeLabel"}},"queryRef":"Native Quality Finding.FindingTypeLabel","nativeQueryRef":"FindingTypeLabel"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native Quality Finding"}},"Property":"DescriptionLabel"}},"queryRef":"Native Quality Finding.DescriptionLabel","nativeQueryRef":"DescriptionLabel"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native Quality Finding"}},"Property":"RecommendedActionLabel"}},"queryRef":"Native Quality Finding.RecommendedActionLabel","nativeQueryRef":"RecommendedActionLabel"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native Quality Finding"}},"Property":"TenantKey"}},"queryRef":"Native Quality Finding.TenantKey","nativeQueryRef":"TenantKey"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native Quality Finding"}},"Property":"OrganizationKey"}},"queryRef":"Native Quality Finding.OrganizationKey","nativeQueryRef":"OrganizationKey"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native Quality Finding"}},"Property":"EnvironmentKey"}},"queryRef":"Native Quality Finding.EnvironmentKey","nativeQueryRef":"EnvironmentKey"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native Quality Finding"}},"Property":"TenantId"}},"queryRef":"Native Quality Finding.TenantId","nativeQueryRef":"TenantId"}]}}},"objects":{"columnHeaders":[{"properties":{"fontSize":{"expr":{"Literal":{"Value":"14D"}}},"autoSizeColumnWidth":{"expr":{"Literal":{"Value":"true"}}},"columnAdjustment":{"expr":{"Literal":{"Value":"'growToFit'"}}},"wordWrap":{"expr":{"Literal":{"Value":"true"}}},"fontColor":{"solid":{"color":{"expr":{"Literal":{"Value":"'#FFFFFF'"}}}}},"backColor":{"solid":{"color":{"expr":{"Literal":{"Value":"'#215E9E'"}}}}}}}],"values":[{"properties":{"fontSize":{"expr":{"Literal":{"Value":"14D"}}},"wordWrap":{"expr":{"Literal":{"Value":"false"}}},"fontColorPrimary":{"solid":{"color":{"expr":{"Literal":{"Value":"'#1F2937'"}}}}},"fontColorSecondary":{"solid":{"color":{"expr":{"Literal":{"Value":"'#1F2937'"}}}}},"backColorPrimary":{"solid":{"color":{"expr":{"Literal":{"Value":"'#FFFFFF'"}}}}},"backColorSecondary":{"solid":{"color":{"expr":{"Literal":{"Value":"'#F7FAFC'"}}}}}}}],"grid":[{"properties":{"rowPadding":{"expr":{"Literal":{"Value":"4D"}}}}}]},"visualContainerObjects":{"general":[{"properties":{"altText":{"expr":{"Literal":{"Value":"'Quality Finding · complete governed fields'"}}}}}],"title":[{"properties":{"show":{"expr":{"Literal":{"Value":"true"}}},"text":{"expr":{"Literal":{"Value":"'Quality Finding · complete governed fields'"}}},"fontSize":{"expr":{"Literal":{"Value":"15D"}}}}}],"background":[{"properties":{"show":{"expr":{"Literal":{"Value":"true"}}},"color":{"solid":{"color":{"expr":{"Literal":{"Value":"'#FFFFFF'"}}}}},"transparency":{"expr":{"Literal":{"Value":"0D"}}}}}],"border":[{"properties":{"show":{"expr":{"Literal":{"Value":"true"}}},"color":{"solid":{"color":{"expr":{"Literal":{"Value":"'#CCDCEC'"}}}}},"radius":{"expr":{"Literal":{"Value":"8D"}}},"width":{"expr":{"Literal":{"Value":"1D"}}}}}],"visualHeader":[{"properties":{"show":{"expr":{"Literal":{"Value":"false"}}}}}],"padding":[{"properties":{"top":{"expr":{"Literal":{"Value":"8D"}}},"bottom":{"expr":{"Literal":{"Value":"8D"}}},"left":{"expr":{"Literal":{"Value":"8D"}}},"right":{"expr":{"Literal":{"Value":"8D"}}}}}],"subTitle":[{"properties":{"show":{"expr":{"Literal":{"Value":"false"}}}}}],"stylePreset":[{"properties":{"name":{"expr":{"Literal":{"Value":"'None'"}}}}}]},"drillFilterOtherVisuals":true},"parentGroupName":"251230596dc4a4472e24","filterConfig":{"filters":[{"name":"a1028f3880a9734a0728","field":{"Measure":{"Expression":{"SourceRef":{"Entity":"Native Quality Finding"}},"Property":"Native Context Rows · Native Quality Finding"}},"type":"Advanced","filter":{"Version":2,"From":[{"Name":"c","Entity":"Native Quality Finding","Type":0}],"Where":[{"Condition":{"Comparison":{"ComparisonKind":2,"Left":{"Measure":{"Expression":{"SourceRef":{"Source":"c"}},"Property":"Native Context Rows · Native Quality Finding"}},"Right":{"Literal":{"Value":"0L"}}}}}]}}]}}
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json",
+  "name": "f88c2d271cd2e68a7e36",
+  "position": {
+    "x": 32,
+    "y": 488,
+    "width": 1856,
+    "height": 336,
+    "z": 12000,
+    "tabOrder": 544
+  },
+  "visual": {
+    "visualType": "tableEx",
+    "query": {
+      "queryState": {
+        "Values": {
+          "projections": [
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Quality Finding"
+                    }
+                  },
+                  "Property": "TenantFindingKey"
+                }
+              },
+              "queryRef": "Native Quality Finding.TenantFindingKey",
+              "nativeQueryRef": "TenantFindingKey"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Quality Finding"
+                    }
+                  },
+                  "Property": "FindingId"
+                }
+              },
+              "queryRef": "Native Quality Finding.FindingId",
+              "nativeQueryRef": "FindingId"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Quality Finding"
+                    }
+                  },
+                  "Property": "Severity"
+                }
+              },
+              "queryRef": "Native Quality Finding.Severity",
+              "nativeQueryRef": "Severity"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Quality Finding"
+                    }
+                  },
+                  "Property": "EntityType"
+                }
+              },
+              "queryRef": "Native Quality Finding.EntityType",
+              "nativeQueryRef": "EntityType"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Quality Finding"
+                    }
+                  },
+                  "Property": "FindingType"
+                }
+              },
+              "queryRef": "Native Quality Finding.FindingType",
+              "nativeQueryRef": "FindingType"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Quality Finding"
+                    }
+                  },
+                  "Property": "DetectedDateTime"
+                }
+              },
+              "queryRef": "Native Quality Finding.DetectedDateTime",
+              "nativeQueryRef": "DetectedDateTime"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Quality Finding"
+                    }
+                  },
+                  "Property": "SourceSystem"
+                }
+              },
+              "queryRef": "Native Quality Finding.SourceSystem",
+              "nativeQueryRef": "SourceSystem"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Quality Finding"
+                    }
+                  },
+                  "Property": "Description"
+                }
+              },
+              "queryRef": "Native Quality Finding.Description",
+              "nativeQueryRef": "Description"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Quality Finding"
+                    }
+                  },
+                  "Property": "RecommendedAction"
+                }
+              },
+              "queryRef": "Native Quality Finding.RecommendedAction",
+              "nativeQueryRef": "RecommendedAction"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Quality Finding"
+                    }
+                  },
+                  "Property": "SeverityLabel"
+                }
+              },
+              "queryRef": "Native Quality Finding.SeverityLabel",
+              "nativeQueryRef": "SeverityLabel"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Quality Finding"
+                    }
+                  },
+                  "Property": "FindingTypeLabel"
+                }
+              },
+              "queryRef": "Native Quality Finding.FindingTypeLabel",
+              "nativeQueryRef": "FindingTypeLabel"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Quality Finding"
+                    }
+                  },
+                  "Property": "DescriptionLabel"
+                }
+              },
+              "queryRef": "Native Quality Finding.DescriptionLabel",
+              "nativeQueryRef": "DescriptionLabel"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Quality Finding"
+                    }
+                  },
+                  "Property": "RecommendedActionLabel"
+                }
+              },
+              "queryRef": "Native Quality Finding.RecommendedActionLabel",
+              "nativeQueryRef": "RecommendedActionLabel"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Quality Finding"
+                    }
+                  },
+                  "Property": "TenantKey"
+                }
+              },
+              "queryRef": "Native Quality Finding.TenantKey",
+              "nativeQueryRef": "TenantKey"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Quality Finding"
+                    }
+                  },
+                  "Property": "OrganizationKey"
+                }
+              },
+              "queryRef": "Native Quality Finding.OrganizationKey",
+              "nativeQueryRef": "OrganizationKey"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Quality Finding"
+                    }
+                  },
+                  "Property": "EnvironmentKey"
+                }
+              },
+              "queryRef": "Native Quality Finding.EnvironmentKey",
+              "nativeQueryRef": "EnvironmentKey"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Quality Finding"
+                    }
+                  },
+                  "Property": "TenantId"
+                }
+              },
+              "queryRef": "Native Quality Finding.TenantId",
+              "nativeQueryRef": "TenantId"
+            }
+          ]
+        }
+      }
+    },
+    "objects": {
+      "columnHeaders": [
+        {
+          "properties": {
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "14D"
+                }
+              }
+            },
+            "autoSizeColumnWidth": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "columnAdjustment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'growToFit'"
+                }
+              }
+            },
+            "wordWrap": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "fontColor": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#FFFFFF'"
+                    }
+                  }
+                }
+              }
+            },
+            "backColor": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#215E9E'"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      ],
+      "values": [
+        {
+          "properties": {
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "14D"
+                }
+              }
+            },
+            "wordWrap": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            },
+            "fontColorPrimary": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#1F2937'"
+                    }
+                  }
+                }
+              }
+            },
+            "fontColorSecondary": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#1F2937'"
+                    }
+                  }
+                }
+              }
+            },
+            "backColorPrimary": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#FFFFFF'"
+                    }
+                  }
+                }
+              }
+            },
+            "backColorSecondary": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#F7FAFC'"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      ],
+      "grid": [
+        {
+          "properties": {
+            "rowPadding": {
+              "expr": {
+                "Literal": {
+                  "Value": "4D"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "visualContainerObjects": {
+      "general": [
+        {
+          "properties": {
+            "altText": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Quality Finding · complete governed fields'"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "title": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "text": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Quality Finding · complete governed fields'"
+                }
+              }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "15D"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "background": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "color": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#FFFFFF'"
+                    }
+                  }
+                }
+              }
+            },
+            "transparency": {
+              "expr": {
+                "Literal": {
+                  "Value": "0D"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "border": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "color": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#CCDCEC'"
+                    }
+                  }
+                }
+              }
+            },
+            "radius": {
+              "expr": {
+                "Literal": {
+                  "Value": "8D"
+                }
+              }
+            },
+            "width": {
+              "expr": {
+                "Literal": {
+                  "Value": "1D"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "visualHeader": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "padding": [
+        {
+          "properties": {
+            "top": {
+              "expr": {
+                "Literal": {
+                  "Value": "8D"
+                }
+              }
+            },
+            "bottom": {
+              "expr": {
+                "Literal": {
+                  "Value": "8D"
+                }
+              }
+            },
+            "left": {
+              "expr": {
+                "Literal": {
+                  "Value": "8D"
+                }
+              }
+            },
+            "right": {
+              "expr": {
+                "Literal": {
+                  "Value": "8D"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "subTitle": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "stylePreset": [
+        {
+          "properties": {
+            "name": {
+              "expr": {
+                "Literal": {
+                  "Value": "'None'"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "drillFilterOtherVisuals": true
+  },
+  "parentGroupName": "251230596dc4a4472e24",
+  "filterConfig": {
+    "filters": [
+      {
+        "name": "a1028f3880a9734a0728",
+        "field": {
+          "Measure": {
+            "Expression": {
+              "SourceRef": {
+                "Entity": "Native Quality Finding"
+              }
+            },
+            "Property": "Native Context Rows · Native Quality Finding"
+          }
+        },
+        "type": "Advanced",
+        "filter": {
+          "Version": 2,
+          "From": [
+            {
+              "Name": "c",
+              "Entity": "Native Quality Finding",
+              "Type": 0
+            }
+          ],
+          "Where": [
+            {
+              "Condition": {
+                "Comparison": {
+                  "ComparisonKind": 2,
+                  "Left": {
+                    "Measure": {
+                      "Expression": {
+                        "SourceRef": {
+                          "Source": "c"
+                        }
+                      },
+                      "Property": "Native Context Rows · Native Quality Finding"
+                    }
+                  },
+                  "Right": {
+                    "Literal": {
+                      "Value": "0L"
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

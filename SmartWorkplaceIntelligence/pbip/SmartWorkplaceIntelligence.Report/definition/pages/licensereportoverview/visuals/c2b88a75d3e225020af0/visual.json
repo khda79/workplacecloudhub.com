@@ -1,1 +1,760 @@
-{"$schema":"https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json","name":"c2b88a75d3e225020af0","position":{"x":32,"y":488,"width":1856,"height":336,"z":12000,"tabOrder":544},"visual":{"visualType":"tableEx","query":{"queryState":{"Values":{"projections":[{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native License Assignment"}},"Property":"TenantAssignmentPathKey"}},"queryRef":"Native License Assignment.TenantAssignmentPathKey","nativeQueryRef":"TenantAssignmentPathKey"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native License Assignment"}},"Property":"TenantUserKey"}},"queryRef":"Native License Assignment.TenantUserKey","nativeQueryRef":"TenantUserKey"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native License Assignment"}},"Property":"TenantGroupKey"}},"queryRef":"Native License Assignment.TenantGroupKey","nativeQueryRef":"TenantGroupKey"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native License Assignment"}},"Property":"TenantSkuKey"}},"queryRef":"Native License Assignment.TenantSkuKey","nativeQueryRef":"TenantSkuKey"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native License Assignment"}},"Property":"SourceUserId"}},"queryRef":"Native License Assignment.SourceUserId","nativeQueryRef":"SourceUserId"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native License Assignment"}},"Property":"AssignedByGroupId"}},"queryRef":"Native License Assignment.AssignedByGroupId","nativeQueryRef":"AssignedByGroupId"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native License Assignment"}},"Property":"SkuId"}},"queryRef":"Native License Assignment.SkuId","nativeQueryRef":"SkuId"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native License Assignment"}},"Property":"Account"}},"queryRef":"Native License Assignment.Account","nativeQueryRef":"Account"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native License Assignment"}},"Property":"Product"}},"queryRef":"Native License Assignment.Product","nativeQueryRef":"Product"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native License Assignment"}},"Property":"AssignmentRoute"}},"queryRef":"Native License Assignment.AssignmentRoute","nativeQueryRef":"AssignmentRoute"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native License Assignment"}},"Property":"GroupName"}},"queryRef":"Native License Assignment.GroupName","nativeQueryRef":"GroupName"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native License Assignment"}},"Property":"AssignmentState"}},"queryRef":"Native License Assignment.AssignmentState","nativeQueryRef":"AssignmentState"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native License Assignment"}},"Property":"AssignmentError"}},"queryRef":"Native License Assignment.AssignmentError","nativeQueryRef":"AssignmentError"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native License Assignment"}},"Property":"ErrorStatus"}},"queryRef":"Native License Assignment.ErrorStatus","nativeQueryRef":"ErrorStatus"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native License Assignment"}},"Property":"DisabledPlanIds"}},"queryRef":"Native License Assignment.DisabledPlanIds","nativeQueryRef":"DisabledPlanIds"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native License Assignment"}},"Property":"AssignmentUpdatedRaw"}},"queryRef":"Native License Assignment.AssignmentUpdatedRaw","nativeQueryRef":"AssignmentUpdatedRaw"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native License Assignment"}},"Property":"AssignmentUpdatedUtcDateTime"}},"queryRef":"Native License Assignment.AssignmentUpdatedUtcDateTime","nativeQueryRef":"AssignmentUpdatedUtcDateTime"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native License Assignment"}},"Property":"AssignmentUpdatedStatus"}},"queryRef":"Native License Assignment.AssignmentUpdatedStatus","nativeQueryRef":"AssignmentUpdatedStatus"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native License Assignment"}},"Property":"SourceCollectedDateTime"}},"queryRef":"Native License Assignment.SourceCollectedDateTime","nativeQueryRef":"SourceCollectedDateTime"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native License Assignment"}},"Property":"GroupLinkStatus"}},"queryRef":"Native License Assignment.GroupLinkStatus","nativeQueryRef":"GroupLinkStatus"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native License Assignment"}},"Property":"UserLinkStatus"}},"queryRef":"Native License Assignment.UserLinkStatus","nativeQueryRef":"UserLinkStatus"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native License Assignment"}},"Property":"SkuLinkStatus"}},"queryRef":"Native License Assignment.SkuLinkStatus","nativeQueryRef":"SkuLinkStatus"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native License Assignment"}},"Property":"TenantKey"}},"queryRef":"Native License Assignment.TenantKey","nativeQueryRef":"TenantKey"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native License Assignment"}},"Property":"OrganizationKey"}},"queryRef":"Native License Assignment.OrganizationKey","nativeQueryRef":"OrganizationKey"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native License Assignment"}},"Property":"EnvironmentKey"}},"queryRef":"Native License Assignment.EnvironmentKey","nativeQueryRef":"EnvironmentKey"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native License Assignment"}},"Property":"TenantId"}},"queryRef":"Native License Assignment.TenantId","nativeQueryRef":"TenantId"}]}}},"objects":{"columnHeaders":[{"properties":{"fontSize":{"expr":{"Literal":{"Value":"14D"}}},"autoSizeColumnWidth":{"expr":{"Literal":{"Value":"true"}}},"columnAdjustment":{"expr":{"Literal":{"Value":"'growToFit'"}}},"wordWrap":{"expr":{"Literal":{"Value":"true"}}},"fontColor":{"solid":{"color":{"expr":{"Literal":{"Value":"'#FFFFFF'"}}}}},"backColor":{"solid":{"color":{"expr":{"Literal":{"Value":"'#215E9E'"}}}}}}}],"values":[{"properties":{"fontSize":{"expr":{"Literal":{"Value":"14D"}}},"wordWrap":{"expr":{"Literal":{"Value":"false"}}},"fontColorPrimary":{"solid":{"color":{"expr":{"Literal":{"Value":"'#1F2937'"}}}}},"fontColorSecondary":{"solid":{"color":{"expr":{"Literal":{"Value":"'#1F2937'"}}}}},"backColorPrimary":{"solid":{"color":{"expr":{"Literal":{"Value":"'#FFFFFF'"}}}}},"backColorSecondary":{"solid":{"color":{"expr":{"Literal":{"Value":"'#F7FAFC'"}}}}}}}],"grid":[{"properties":{"rowPadding":{"expr":{"Literal":{"Value":"4D"}}}}}]},"visualContainerObjects":{"general":[{"properties":{"altText":{"expr":{"Literal":{"Value":"'License Assignment · complete governed fields'"}}}}}],"title":[{"properties":{"show":{"expr":{"Literal":{"Value":"true"}}},"text":{"expr":{"Literal":{"Value":"'License Assignment · complete governed fields'"}}},"fontSize":{"expr":{"Literal":{"Value":"15D"}}}}}],"background":[{"properties":{"show":{"expr":{"Literal":{"Value":"true"}}},"color":{"solid":{"color":{"expr":{"Literal":{"Value":"'#FFFFFF'"}}}}},"transparency":{"expr":{"Literal":{"Value":"0D"}}}}}],"border":[{"properties":{"show":{"expr":{"Literal":{"Value":"true"}}},"color":{"solid":{"color":{"expr":{"Literal":{"Value":"'#CCDCEC'"}}}}},"radius":{"expr":{"Literal":{"Value":"8D"}}},"width":{"expr":{"Literal":{"Value":"1D"}}}}}],"visualHeader":[{"properties":{"show":{"expr":{"Literal":{"Value":"false"}}}}}],"padding":[{"properties":{"top":{"expr":{"Literal":{"Value":"8D"}}},"bottom":{"expr":{"Literal":{"Value":"8D"}}},"left":{"expr":{"Literal":{"Value":"8D"}}},"right":{"expr":{"Literal":{"Value":"8D"}}}}}],"subTitle":[{"properties":{"show":{"expr":{"Literal":{"Value":"false"}}}}}],"stylePreset":[{"properties":{"name":{"expr":{"Literal":{"Value":"'None'"}}}}}]},"drillFilterOtherVisuals":true},"parentGroupName":"90ee4da2ad044ee08d00","filterConfig":{"filters":[{"name":"0c8bc8e4fd4bb98ef451","field":{"Measure":{"Expression":{"SourceRef":{"Entity":"Native License Assignment"}},"Property":"Native Context Rows · Native License Assignment"}},"type":"Advanced","filter":{"Version":2,"From":[{"Name":"c","Entity":"Native License Assignment","Type":0}],"Where":[{"Condition":{"Comparison":{"ComparisonKind":2,"Left":{"Measure":{"Expression":{"SourceRef":{"Source":"c"}},"Property":"Native Context Rows · Native License Assignment"}},"Right":{"Literal":{"Value":"0L"}}}}}]}}]}}
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json",
+  "name": "c2b88a75d3e225020af0",
+  "position": {
+    "x": 32,
+    "y": 488,
+    "width": 1856,
+    "height": 336,
+    "z": 12000,
+    "tabOrder": 544
+  },
+  "visual": {
+    "visualType": "tableEx",
+    "query": {
+      "queryState": {
+        "Values": {
+          "projections": [
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native License Assignment"
+                    }
+                  },
+                  "Property": "TenantAssignmentPathKey"
+                }
+              },
+              "queryRef": "Native License Assignment.TenantAssignmentPathKey",
+              "nativeQueryRef": "TenantAssignmentPathKey"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native License Assignment"
+                    }
+                  },
+                  "Property": "TenantUserKey"
+                }
+              },
+              "queryRef": "Native License Assignment.TenantUserKey",
+              "nativeQueryRef": "TenantUserKey"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native License Assignment"
+                    }
+                  },
+                  "Property": "TenantGroupKey"
+                }
+              },
+              "queryRef": "Native License Assignment.TenantGroupKey",
+              "nativeQueryRef": "TenantGroupKey"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native License Assignment"
+                    }
+                  },
+                  "Property": "TenantSkuKey"
+                }
+              },
+              "queryRef": "Native License Assignment.TenantSkuKey",
+              "nativeQueryRef": "TenantSkuKey"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native License Assignment"
+                    }
+                  },
+                  "Property": "SourceUserId"
+                }
+              },
+              "queryRef": "Native License Assignment.SourceUserId",
+              "nativeQueryRef": "SourceUserId"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native License Assignment"
+                    }
+                  },
+                  "Property": "AssignedByGroupId"
+                }
+              },
+              "queryRef": "Native License Assignment.AssignedByGroupId",
+              "nativeQueryRef": "AssignedByGroupId"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native License Assignment"
+                    }
+                  },
+                  "Property": "SkuId"
+                }
+              },
+              "queryRef": "Native License Assignment.SkuId",
+              "nativeQueryRef": "SkuId"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native License Assignment"
+                    }
+                  },
+                  "Property": "Account"
+                }
+              },
+              "queryRef": "Native License Assignment.Account",
+              "nativeQueryRef": "Account"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native License Assignment"
+                    }
+                  },
+                  "Property": "Product"
+                }
+              },
+              "queryRef": "Native License Assignment.Product",
+              "nativeQueryRef": "Product"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native License Assignment"
+                    }
+                  },
+                  "Property": "AssignmentRoute"
+                }
+              },
+              "queryRef": "Native License Assignment.AssignmentRoute",
+              "nativeQueryRef": "AssignmentRoute"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native License Assignment"
+                    }
+                  },
+                  "Property": "GroupName"
+                }
+              },
+              "queryRef": "Native License Assignment.GroupName",
+              "nativeQueryRef": "GroupName"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native License Assignment"
+                    }
+                  },
+                  "Property": "AssignmentState"
+                }
+              },
+              "queryRef": "Native License Assignment.AssignmentState",
+              "nativeQueryRef": "AssignmentState"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native License Assignment"
+                    }
+                  },
+                  "Property": "AssignmentError"
+                }
+              },
+              "queryRef": "Native License Assignment.AssignmentError",
+              "nativeQueryRef": "AssignmentError"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native License Assignment"
+                    }
+                  },
+                  "Property": "ErrorStatus"
+                }
+              },
+              "queryRef": "Native License Assignment.ErrorStatus",
+              "nativeQueryRef": "ErrorStatus"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native License Assignment"
+                    }
+                  },
+                  "Property": "DisabledPlanIds"
+                }
+              },
+              "queryRef": "Native License Assignment.DisabledPlanIds",
+              "nativeQueryRef": "DisabledPlanIds"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native License Assignment"
+                    }
+                  },
+                  "Property": "AssignmentUpdatedRaw"
+                }
+              },
+              "queryRef": "Native License Assignment.AssignmentUpdatedRaw",
+              "nativeQueryRef": "AssignmentUpdatedRaw"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native License Assignment"
+                    }
+                  },
+                  "Property": "AssignmentUpdatedUtcDateTime"
+                }
+              },
+              "queryRef": "Native License Assignment.AssignmentUpdatedUtcDateTime",
+              "nativeQueryRef": "AssignmentUpdatedUtcDateTime"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native License Assignment"
+                    }
+                  },
+                  "Property": "AssignmentUpdatedStatus"
+                }
+              },
+              "queryRef": "Native License Assignment.AssignmentUpdatedStatus",
+              "nativeQueryRef": "AssignmentUpdatedStatus"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native License Assignment"
+                    }
+                  },
+                  "Property": "SourceCollectedDateTime"
+                }
+              },
+              "queryRef": "Native License Assignment.SourceCollectedDateTime",
+              "nativeQueryRef": "SourceCollectedDateTime"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native License Assignment"
+                    }
+                  },
+                  "Property": "GroupLinkStatus"
+                }
+              },
+              "queryRef": "Native License Assignment.GroupLinkStatus",
+              "nativeQueryRef": "GroupLinkStatus"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native License Assignment"
+                    }
+                  },
+                  "Property": "UserLinkStatus"
+                }
+              },
+              "queryRef": "Native License Assignment.UserLinkStatus",
+              "nativeQueryRef": "UserLinkStatus"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native License Assignment"
+                    }
+                  },
+                  "Property": "SkuLinkStatus"
+                }
+              },
+              "queryRef": "Native License Assignment.SkuLinkStatus",
+              "nativeQueryRef": "SkuLinkStatus"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native License Assignment"
+                    }
+                  },
+                  "Property": "TenantKey"
+                }
+              },
+              "queryRef": "Native License Assignment.TenantKey",
+              "nativeQueryRef": "TenantKey"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native License Assignment"
+                    }
+                  },
+                  "Property": "OrganizationKey"
+                }
+              },
+              "queryRef": "Native License Assignment.OrganizationKey",
+              "nativeQueryRef": "OrganizationKey"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native License Assignment"
+                    }
+                  },
+                  "Property": "EnvironmentKey"
+                }
+              },
+              "queryRef": "Native License Assignment.EnvironmentKey",
+              "nativeQueryRef": "EnvironmentKey"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native License Assignment"
+                    }
+                  },
+                  "Property": "TenantId"
+                }
+              },
+              "queryRef": "Native License Assignment.TenantId",
+              "nativeQueryRef": "TenantId"
+            }
+          ]
+        }
+      }
+    },
+    "objects": {
+      "columnHeaders": [
+        {
+          "properties": {
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "14D"
+                }
+              }
+            },
+            "autoSizeColumnWidth": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "columnAdjustment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'growToFit'"
+                }
+              }
+            },
+            "wordWrap": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "fontColor": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#FFFFFF'"
+                    }
+                  }
+                }
+              }
+            },
+            "backColor": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#215E9E'"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      ],
+      "values": [
+        {
+          "properties": {
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "14D"
+                }
+              }
+            },
+            "wordWrap": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            },
+            "fontColorPrimary": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#1F2937'"
+                    }
+                  }
+                }
+              }
+            },
+            "fontColorSecondary": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#1F2937'"
+                    }
+                  }
+                }
+              }
+            },
+            "backColorPrimary": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#FFFFFF'"
+                    }
+                  }
+                }
+              }
+            },
+            "backColorSecondary": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#F7FAFC'"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      ],
+      "grid": [
+        {
+          "properties": {
+            "rowPadding": {
+              "expr": {
+                "Literal": {
+                  "Value": "4D"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "visualContainerObjects": {
+      "general": [
+        {
+          "properties": {
+            "altText": {
+              "expr": {
+                "Literal": {
+                  "Value": "'License Assignment · complete governed fields'"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "title": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "text": {
+              "expr": {
+                "Literal": {
+                  "Value": "'License Assignment · complete governed fields'"
+                }
+              }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "15D"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "background": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "color": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#FFFFFF'"
+                    }
+                  }
+                }
+              }
+            },
+            "transparency": {
+              "expr": {
+                "Literal": {
+                  "Value": "0D"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "border": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "color": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#CCDCEC'"
+                    }
+                  }
+                }
+              }
+            },
+            "radius": {
+              "expr": {
+                "Literal": {
+                  "Value": "8D"
+                }
+              }
+            },
+            "width": {
+              "expr": {
+                "Literal": {
+                  "Value": "1D"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "visualHeader": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "padding": [
+        {
+          "properties": {
+            "top": {
+              "expr": {
+                "Literal": {
+                  "Value": "8D"
+                }
+              }
+            },
+            "bottom": {
+              "expr": {
+                "Literal": {
+                  "Value": "8D"
+                }
+              }
+            },
+            "left": {
+              "expr": {
+                "Literal": {
+                  "Value": "8D"
+                }
+              }
+            },
+            "right": {
+              "expr": {
+                "Literal": {
+                  "Value": "8D"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "subTitle": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "stylePreset": [
+        {
+          "properties": {
+            "name": {
+              "expr": {
+                "Literal": {
+                  "Value": "'None'"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "drillFilterOtherVisuals": true
+  },
+  "parentGroupName": "90ee4da2ad044ee08d00",
+  "filterConfig": {
+    "filters": [
+      {
+        "name": "0c8bc8e4fd4bb98ef451",
+        "field": {
+          "Measure": {
+            "Expression": {
+              "SourceRef": {
+                "Entity": "Native License Assignment"
+              }
+            },
+            "Property": "Native Context Rows · Native License Assignment"
+          }
+        },
+        "type": "Advanced",
+        "filter": {
+          "Version": 2,
+          "From": [
+            {
+              "Name": "c",
+              "Entity": "Native License Assignment",
+              "Type": 0
+            }
+          ],
+          "Where": [
+            {
+              "Condition": {
+                "Comparison": {
+                  "ComparisonKind": 2,
+                  "Left": {
+                    "Measure": {
+                      "Expression": {
+                        "SourceRef": {
+                          "Source": "c"
+                        }
+                      },
+                      "Property": "Native Context Rows · Native License Assignment"
+                    }
+                  },
+                  "Right": {
+                    "Literal": {
+                      "Value": "0L"
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

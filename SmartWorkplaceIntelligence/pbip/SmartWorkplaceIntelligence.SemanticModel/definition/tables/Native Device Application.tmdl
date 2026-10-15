@@ -4,33 +4,8 @@ table 'Native Device Application'
 
 	/// Distinct normalized installed products in the selected native application evidence, respecting the resolved fleet and Country scope. Migrated without changing the source calculation.
 	measure 'Native Installed application products' =
-			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
-			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
-			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimDevice"))
-			VAR NativeKeys1 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimIntuneManagedDevice"))
-			VAR NativeKeys2 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimDetectedApplication"))
 			VAR InventoryDevices = CALCULATETABLE(VALUES('Native Managed Device Evidence'[TenantDeviceKey]), REMOVEFILTERS('Native Managed Device Evidence'), TREATAS(VALUES('Device Inventory Evidence'[Device Source ID]), 'Native Managed Device Evidence'[ManagedDeviceId]))
-			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((VAR _countries = VALUES ( 'Native Country Evidence'[CountryLabel] )
-			RETURN
-			IF ( ISCROSSFILTERED ( 'Native Country Evidence' ),
-			    VAR _countryApps = CALCULATETABLE ( VALUES ( 'Native Device Application'[TenantApplicationKey] ), KEEPFILTERS ( TREATAS ( _countries, 'Native Device Evidence'[CountryLabel] ) ) )
-			    RETURN CALCULATE ( DISTINCTCOUNT ( 'Native Discovered Application'[Application product key] ), KEEPFILTERS ( TREATAS ( _countryApps, 'Native Discovered Application'[TenantApplicationKey] ) ) ),
-			    VAR _scopeApps = VALUES ( 'Native Device Application'[TenantApplicationKey] )
-			    RETURN CALCULATE ( DISTINCTCOUNT ( 'Native Discovered Application'[Application product key] ), KEEPFILTERS ( TREATAS ( _scopeApps, 'Native Discovered Application'[TenantApplicationKey] ) ) ) )), KEEPFILTERS(TREATAS(NativeKeys0, 'Native Device Evidence'[TenantDeviceKey]))),
-			COUNTROWS(NativeKeys1) > 0, CALCULATE((VAR _countries = VALUES ( 'Native Country Evidence'[CountryLabel] )
-			RETURN
-			IF ( ISCROSSFILTERED ( 'Native Country Evidence' ),
-			    VAR _countryApps = CALCULATETABLE ( VALUES ( 'Native Device Application'[TenantApplicationKey] ), KEEPFILTERS ( TREATAS ( _countries, 'Native Device Evidence'[CountryLabel] ) ) )
-			    RETURN CALCULATE ( DISTINCTCOUNT ( 'Native Discovered Application'[Application product key] ), KEEPFILTERS ( TREATAS ( _countryApps, 'Native Discovered Application'[TenantApplicationKey] ) ) ),
-			    VAR _scopeApps = VALUES ( 'Native Device Application'[TenantApplicationKey] )
-			    RETURN CALCULATE ( DISTINCTCOUNT ( 'Native Discovered Application'[Application product key] ), KEEPFILTERS ( TREATAS ( _scopeApps, 'Native Discovered Application'[TenantApplicationKey] ) ) ) )), KEEPFILTERS(TREATAS(NativeKeys1, 'Native Managed Device Evidence'[TenantIntuneDeviceKey]))),
-			COUNTROWS(NativeKeys2) > 0, CALCULATE((VAR _countries = VALUES ( 'Native Country Evidence'[CountryLabel] )
-			RETURN
-			IF ( ISCROSSFILTERED ( 'Native Country Evidence' ),
-			    VAR _countryApps = CALCULATETABLE ( VALUES ( 'Native Device Application'[TenantApplicationKey] ), KEEPFILTERS ( TREATAS ( _countries, 'Native Device Evidence'[CountryLabel] ) ) )
-			    RETURN CALCULATE ( DISTINCTCOUNT ( 'Native Discovered Application'[Application product key] ), KEEPFILTERS ( TREATAS ( _countryApps, 'Native Discovered Application'[TenantApplicationKey] ) ) ),
-			    VAR _scopeApps = VALUES ( 'Native Device Application'[TenantApplicationKey] )
-			    RETURN CALCULATE ( DISTINCTCOUNT ( 'Native Discovered Application'[Application product key] ), KEEPFILTERS ( TREATAS ( _scopeApps, 'Native Discovered Application'[TenantApplicationKey] ) ) ) )), KEEPFILTERS(TREATAS(NativeKeys2, 'Native Device Application'[TenantApplicationKey]))), BLANK()), BLANK()), SWITCH(TRUE(), ISCROSSFILTERED('Device Inventory Evidence'), CALCULATE((VAR _countries = VALUES ( 'Native Country Evidence'[CountryLabel] )
+			RETURN SWITCH(TRUE(), ISCROSSFILTERED('Device Inventory Evidence'), CALCULATE((VAR _countries = VALUES ( 'Native Country Evidence'[CountryLabel] )
 			RETURN
 			IF ( ISCROSSFILTERED ( 'Native Country Evidence' ),
 			    VAR _countryApps = CALCULATETABLE ( VALUES ( 'Native Device Application'[TenantApplicationKey] ), KEEPFILTERS ( TREATAS ( _countries, 'Native Device Evidence'[CountryLabel] ) ) )
@@ -42,77 +17,43 @@ table 'Native Device Application'
 			    VAR _countryApps = CALCULATETABLE ( VALUES ( 'Native Device Application'[TenantApplicationKey] ), KEEPFILTERS ( TREATAS ( _countries, 'Native Device Evidence'[CountryLabel] ) ) )
 			    RETURN CALCULATE ( DISTINCTCOUNT ( 'Native Discovered Application'[Application product key] ), KEEPFILTERS ( TREATAS ( _countryApps, 'Native Discovered Application'[TenantApplicationKey] ) ) ),
 			    VAR _scopeApps = VALUES ( 'Native Device Application'[TenantApplicationKey] )
-			    RETURN CALCULATE ( DISTINCTCOUNT ( 'Native Discovered Application'[Application product key] ), KEEPFILTERS ( TREATAS ( _scopeApps, 'Native Discovered Application'[TenantApplicationKey] ) ) ) ))))
+			    RETURN CALCULATE ( DISTINCTCOUNT ( 'Native Discovered Application'[Application product key] ), KEEPFILTERS ( TREATAS ( _scopeApps, 'Native Discovered Application'[TenantApplicationKey] ) ) ) )))
 		formatString: #,0
 		displayFolder: Native evidence
 		lineageTag: 5d7cdd52-fa3a-459c-80f6-d58b62965543
 
 	/// Native application-version/device relations, not distinct products or distinct fleet devices. Unresolved native evidence remains in global scope. Migrated without changing the source calculation.
 	measure 'Native Application-device installations' =
-			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
-			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
-			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimDevice"))
-			VAR NativeKeys1 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimIntuneManagedDevice"))
-			VAR NativeKeys2 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimDetectedApplication"))
 			VAR InventoryDevices = CALCULATETABLE(VALUES('Native Managed Device Evidence'[TenantDeviceKey]), REMOVEFILTERS('Native Managed Device Evidence'), TREATAS(VALUES('Device Inventory Evidence'[Device Source ID]), 'Native Managed Device Evidence'[ManagedDeviceId]))
-			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((VAR _countries = VALUES ( 'Native Country Evidence'[CountryLabel] )
-			RETURN IF ( ISCROSSFILTERED ( 'Native Country Evidence' ), CALCULATE ( COUNTROWS ( 'Native Device Application' ), KEEPFILTERS ( TREATAS ( _countries, 'Native Device Evidence'[CountryLabel] ) ) ), COUNTROWS ( 'Native Device Application' ) )), KEEPFILTERS(TREATAS(NativeKeys0, 'Native Device Evidence'[TenantDeviceKey]))),
-			COUNTROWS(NativeKeys1) > 0, CALCULATE((VAR _countries = VALUES ( 'Native Country Evidence'[CountryLabel] )
-			RETURN IF ( ISCROSSFILTERED ( 'Native Country Evidence' ), CALCULATE ( COUNTROWS ( 'Native Device Application' ), KEEPFILTERS ( TREATAS ( _countries, 'Native Device Evidence'[CountryLabel] ) ) ), COUNTROWS ( 'Native Device Application' ) )), KEEPFILTERS(TREATAS(NativeKeys1, 'Native Managed Device Evidence'[TenantIntuneDeviceKey]))),
-			COUNTROWS(NativeKeys2) > 0, CALCULATE((VAR _countries = VALUES ( 'Native Country Evidence'[CountryLabel] )
-			RETURN IF ( ISCROSSFILTERED ( 'Native Country Evidence' ), CALCULATE ( COUNTROWS ( 'Native Device Application' ), KEEPFILTERS ( TREATAS ( _countries, 'Native Device Evidence'[CountryLabel] ) ) ), COUNTROWS ( 'Native Device Application' ) )), KEEPFILTERS(TREATAS(NativeKeys2, 'Native Device Application'[TenantApplicationKey]))), BLANK()), BLANK()), SWITCH(TRUE(), ISCROSSFILTERED('Device Inventory Evidence'), CALCULATE((VAR _countries = VALUES ( 'Native Country Evidence'[CountryLabel] )
+			RETURN SWITCH(TRUE(), ISCROSSFILTERED('Device Inventory Evidence'), CALCULATE((VAR _countries = VALUES ( 'Native Country Evidence'[CountryLabel] )
 			RETURN IF ( ISCROSSFILTERED ( 'Native Country Evidence' ), CALCULATE ( COUNTROWS ( 'Native Device Application' ), KEEPFILTERS ( TREATAS ( _countries, 'Native Device Evidence'[CountryLabel] ) ) ), COUNTROWS ( 'Native Device Application' ) )), KEEPFILTERS(TREATAS(InventoryDevices, 'Native Device Evidence'[TenantDeviceKey]))), (VAR _countries = VALUES ( 'Native Country Evidence'[CountryLabel] )
-			RETURN IF ( ISCROSSFILTERED ( 'Native Country Evidence' ), CALCULATE ( COUNTROWS ( 'Native Device Application' ), KEEPFILTERS ( TREATAS ( _countries, 'Native Device Evidence'[CountryLabel] ) ) ), COUNTROWS ( 'Native Device Application' ) ))))
+			RETURN IF ( ISCROSSFILTERED ( 'Native Country Evidence' ), CALCULATE ( COUNTROWS ( 'Native Device Application' ), KEEPFILTERS ( TREATAS ( _countries, 'Native Device Evidence'[CountryLabel] ) ) ), COUNTROWS ( 'Native Device Application' ) )))
 		formatString: #,0
 		displayFolder: Native evidence
 		lineageTag: 9e0b4361-2c80-4d8f-acbf-8ce5f5ed6245
 
 	/// Distinct managed-device IDs in native weekly application evidence. Global scope retains unresolved IDs; Country/ownership scope requires a resolved device. Migrated without changing the source calculation.
 	measure 'Native Devices reporting applications' =
-			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
-			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
-			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimDevice"))
-			VAR NativeKeys1 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimIntuneManagedDevice"))
-			VAR NativeKeys2 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimDetectedApplication"))
 			VAR InventoryDevices = CALCULATETABLE(VALUES('Native Managed Device Evidence'[TenantDeviceKey]), REMOVEFILTERS('Native Managed Device Evidence'), TREATAS(VALUES('Device Inventory Evidence'[Device Source ID]), 'Native Managed Device Evidence'[ManagedDeviceId]))
-			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((VAR _countries = VALUES ( 'Native Country Evidence'[CountryLabel] )
-			RETURN IF ( ISCROSSFILTERED ( 'Native Country Evidence' ), CALCULATE ( DISTINCTCOUNT ( 'Native Device Application'[ManagedDeviceId] ), KEEPFILTERS ( TREATAS ( _countries, 'Native Device Evidence'[CountryLabel] ) ) ), DISTINCTCOUNT ( 'Native Device Application'[ManagedDeviceId] ) )), KEEPFILTERS(TREATAS(NativeKeys0, 'Native Device Evidence'[TenantDeviceKey]))),
-			COUNTROWS(NativeKeys1) > 0, CALCULATE((VAR _countries = VALUES ( 'Native Country Evidence'[CountryLabel] )
-			RETURN IF ( ISCROSSFILTERED ( 'Native Country Evidence' ), CALCULATE ( DISTINCTCOUNT ( 'Native Device Application'[ManagedDeviceId] ), KEEPFILTERS ( TREATAS ( _countries, 'Native Device Evidence'[CountryLabel] ) ) ), DISTINCTCOUNT ( 'Native Device Application'[ManagedDeviceId] ) )), KEEPFILTERS(TREATAS(NativeKeys1, 'Native Managed Device Evidence'[TenantIntuneDeviceKey]))),
-			COUNTROWS(NativeKeys2) > 0, CALCULATE((VAR _countries = VALUES ( 'Native Country Evidence'[CountryLabel] )
-			RETURN IF ( ISCROSSFILTERED ( 'Native Country Evidence' ), CALCULATE ( DISTINCTCOUNT ( 'Native Device Application'[ManagedDeviceId] ), KEEPFILTERS ( TREATAS ( _countries, 'Native Device Evidence'[CountryLabel] ) ) ), DISTINCTCOUNT ( 'Native Device Application'[ManagedDeviceId] ) )), KEEPFILTERS(TREATAS(NativeKeys2, 'Native Device Application'[TenantApplicationKey]))), BLANK()), BLANK()), SWITCH(TRUE(), ISCROSSFILTERED('Device Inventory Evidence'), CALCULATE((VAR _countries = VALUES ( 'Native Country Evidence'[CountryLabel] )
+			RETURN SWITCH(TRUE(), ISCROSSFILTERED('Device Inventory Evidence'), CALCULATE((VAR _countries = VALUES ( 'Native Country Evidence'[CountryLabel] )
 			RETURN IF ( ISCROSSFILTERED ( 'Native Country Evidence' ), CALCULATE ( DISTINCTCOUNT ( 'Native Device Application'[ManagedDeviceId] ), KEEPFILTERS ( TREATAS ( _countries, 'Native Device Evidence'[CountryLabel] ) ) ), DISTINCTCOUNT ( 'Native Device Application'[ManagedDeviceId] ) )), KEEPFILTERS(TREATAS(InventoryDevices, 'Native Device Evidence'[TenantDeviceKey]))), (VAR _countries = VALUES ( 'Native Country Evidence'[CountryLabel] )
-			RETURN IF ( ISCROSSFILTERED ( 'Native Country Evidence' ), CALCULATE ( DISTINCTCOUNT ( 'Native Device Application'[ManagedDeviceId] ), KEEPFILTERS ( TREATAS ( _countries, 'Native Device Evidence'[CountryLabel] ) ) ), DISTINCTCOUNT ( 'Native Device Application'[ManagedDeviceId] ) ))))
+			RETURN IF ( ISCROSSFILTERED ( 'Native Country Evidence' ), CALCULATE ( DISTINCTCOUNT ( 'Native Device Application'[ManagedDeviceId] ), KEEPFILTERS ( TREATAS ( _countries, 'Native Device Evidence'[CountryLabel] ) ) ), DISTINCTCOUNT ( 'Native Device Application'[ManagedDeviceId] ) )))
 		formatString: #,0
 		displayFolder: Native evidence
 		lineageTag: fdefac50-e722-44ef-8fe7-3a7d8056fab5
 
 	/// Share of distinct reporting-device IDs for this product, over reporting-device IDs across all products in the same fleet scope. Product shares are not additive. Migrated without changing the source calculation.
 	measure 'Native Application device rate' =
-			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
-			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
-			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimDevice"))
-			VAR NativeKeys1 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimIntuneManagedDevice"))
-			VAR NativeKeys2 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimDetectedApplication"))
 			VAR InventoryDevices = CALCULATETABLE(VALUES('Native Managed Device Evidence'[TenantDeviceKey]), REMOVEFILTERS('Native Managed Device Evidence'), TREATAS(VALUES('Device Inventory Evidence'[Device Source ID]), 'Native Managed Device Evidence'[ManagedDeviceId]))
-			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((DIVIDE ( [Native Devices reporting applications], CALCULATE ( [Native Devices reporting applications], REMOVEFILTERS ( 'Native Discovered Application' ) ) )), KEEPFILTERS(TREATAS(NativeKeys0, 'Native Device Evidence'[TenantDeviceKey]))),
-			COUNTROWS(NativeKeys1) > 0, CALCULATE((DIVIDE ( [Native Devices reporting applications], CALCULATE ( [Native Devices reporting applications], REMOVEFILTERS ( 'Native Discovered Application' ) ) )), KEEPFILTERS(TREATAS(NativeKeys1, 'Native Managed Device Evidence'[TenantIntuneDeviceKey]))),
-			COUNTROWS(NativeKeys2) > 0, CALCULATE((DIVIDE ( [Native Devices reporting applications], CALCULATE ( [Native Devices reporting applications], REMOVEFILTERS ( 'Native Discovered Application' ) ) )), KEEPFILTERS(TREATAS(NativeKeys2, 'Native Device Application'[TenantApplicationKey]))), BLANK()), BLANK()), SWITCH(TRUE(), ISCROSSFILTERED('Device Inventory Evidence'), CALCULATE((DIVIDE ( [Native Devices reporting applications], CALCULATE ( [Native Devices reporting applications], REMOVEFILTERS ( 'Native Discovered Application' ) ) )), KEEPFILTERS(TREATAS(InventoryDevices, 'Native Device Evidence'[TenantDeviceKey]))), (DIVIDE ( [Native Devices reporting applications], CALCULATE ( [Native Devices reporting applications], REMOVEFILTERS ( 'Native Discovered Application' ) ) ))))
+			RETURN SWITCH(TRUE(), ISCROSSFILTERED('Device Inventory Evidence'), CALCULATE((DIVIDE ( [Native Devices reporting applications], CALCULATE ( [Native Devices reporting applications], REMOVEFILTERS ( 'Native Discovered Application' ) ) )), KEEPFILTERS(TREATAS(InventoryDevices, 'Native Device Evidence'[TenantDeviceKey]))), (DIVIDE ( [Native Devices reporting applications], CALCULATE ( [Native Devices reporting applications], REMOVEFILTERS ( 'Native Discovered Application' ) ) )))
 		formatString: 0.0%
 		displayFolder: Native evidence
 		lineageTag: d462359e-6686-4796-b5b6-eec577ba542e
 
-	/// Exact native-key entity context or existing inventory context. No name matching or inferred transitive membership. Unrelated entity selections return blank.
+	/// Existing qualified workforce/device scope via exact native IDs; otherwise the domain selection. No name matching or inferred transitive membership.
 	measure 'Native Context Rows · Native Device Application' =
-			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
-			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
-			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimDevice"))
-			VAR NativeKeys1 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimIntuneManagedDevice"))
-			VAR NativeKeys2 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimDetectedApplication"))
 			VAR InventoryDevices = CALCULATETABLE(VALUES('Native Managed Device Evidence'[TenantDeviceKey]), REMOVEFILTERS('Native Managed Device Evidence'), TREATAS(VALUES('Device Inventory Evidence'[Device Source ID]), 'Native Managed Device Evidence'[ManagedDeviceId]))
-			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((COUNTROWS('Native Device Application')), KEEPFILTERS(TREATAS(NativeKeys0, 'Native Device Evidence'[TenantDeviceKey]))),
-			COUNTROWS(NativeKeys1) > 0, CALCULATE((COUNTROWS('Native Device Application')), KEEPFILTERS(TREATAS(NativeKeys1, 'Native Managed Device Evidence'[TenantIntuneDeviceKey]))),
-			COUNTROWS(NativeKeys2) > 0, CALCULATE((COUNTROWS('Native Device Application')), KEEPFILTERS(TREATAS(NativeKeys2, 'Native Device Application'[TenantApplicationKey]))), BLANK()), BLANK()), SWITCH(TRUE(), ISCROSSFILTERED('Device Inventory Evidence'), CALCULATE((COUNTROWS('Native Device Application')), KEEPFILTERS(TREATAS(InventoryDevices, 'Native Device Evidence'[TenantDeviceKey]))), (COUNTROWS('Native Device Application'))))
+			RETURN SWITCH(TRUE(), ISCROSSFILTERED('Device Inventory Evidence'), CALCULATE((COUNTROWS('Native Device Application')), KEEPFILTERS(TREATAS(InventoryDevices, 'Native Device Evidence'[TenantDeviceKey]))), (COUNTROWS('Native Device Application')))
 		formatString: #,0
 		isHidden
 		lineageTag: cd2adff4-2797-41ac-a9f2-168b29878d55

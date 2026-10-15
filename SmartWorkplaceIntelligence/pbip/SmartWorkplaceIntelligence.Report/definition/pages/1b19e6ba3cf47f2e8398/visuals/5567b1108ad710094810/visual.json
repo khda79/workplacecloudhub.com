@@ -1,1 +1,405 @@
-{"$schema":"https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json","name":"5567b1108ad710094810","position":{"x":32,"y":336,"width":1856,"height":656,"z":111,"tabOrder":677},"visual":{"visualType":"tableEx","query":{"queryState":{"Values":{"projections":[{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Mailbox Evidence"}},"Property":"Display Name"}},"queryRef":"Mailbox Evidence.Display Name","nativeQueryRef":"Display Name"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Mailbox Evidence"}},"Property":"Delegation Count"}},"queryRef":"Mailbox Evidence.Delegation Count","nativeQueryRef":"Delegations"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Mailbox Evidence"}},"Property":"Delegation Types"}},"queryRef":"Mailbox Evidence.Delegation Types","nativeQueryRef":"Delegation Types"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Mailbox Evidence"}},"Property":"Forwarding State"}},"queryRef":"Mailbox Evidence.Forwarding State","nativeQueryRef":"Forwarding State"}]}}},"objects":{"columnHeaders":[{"properties":{"autoSizeColumnWidth":{"expr":{"Literal":{"Value":"true"}}},"columnAdjustment":{"expr":{"Literal":{"Value":"'growToFit'"}}},"fontSize":{"expr":{"Literal":{"Value":"11D"}}},"bold":{"expr":{"Literal":{"Value":"true"}}},"wordWrap":{"expr":{"Literal":{"Value":"true"}}},"fontColor":{"solid":{"color":{"expr":{"Literal":{"Value":"'#FFFFFF'"}}}}},"backColor":{"solid":{"color":{"expr":{"Literal":{"Value":"'#215E9E'"}}}}}}}],"values":[{"properties":{"fontSize":{"expr":{"Literal":{"Value":"11D"}}},"wordWrap":{"expr":{"Literal":{"Value":"false"}}},"fontColorPrimary":{"solid":{"color":{"expr":{"Literal":{"Value":"'#183153'"}}}}},"fontColorSecondary":{"solid":{"color":{"expr":{"Literal":{"Value":"'#183153'"}}}}},"backColorPrimary":{"solid":{"color":{"expr":{"Literal":{"Value":"'#FFFFFF'"}}}}},"backColorSecondary":{"solid":{"color":{"expr":{"Literal":{"Value":"'#F0F5FA'"}}}}}}}],"total":[{"properties":{"totals":{"expr":{"Literal":{"Value":"false"}}}}}]},"visualContainerObjects":{"general":[{"properties":{"altText":{"expr":{"Literal":{"Value":"'Delegation and forwarding · selected evidence'"}}}}}],"title":[{"properties":{"show":{"expr":{"Literal":{"Value":"true"}}},"text":{"expr":{"Literal":{"Value":"'Delegation and forwarding · selected evidence'"}}},"fontSize":{"expr":{"Literal":{"Value":"12D"}}},"fontColor":{"solid":{"color":{"expr":{"Literal":{"Value":"'#183153'"}}}}}}}],"background":[{"properties":{"show":{"expr":{"Literal":{"Value":"true"}}},"color":{"solid":{"color":{"expr":{"Literal":{"Value":"'#FFFFFF'"}}}}},"transparency":{"expr":{"Literal":{"Value":"0D"}}}}}],"border":[{"properties":{"show":{"expr":{"Literal":{"Value":"true"}}},"color":{"solid":{"color":{"expr":{"Literal":{"Value":"'#CCDCEC'"}}}}},"radius":{"expr":{"Literal":{"Value":"8D"}}},"width":{"expr":{"Literal":{"Value":"1D"}}}}}],"visualHeader":[{"properties":{"show":{"expr":{"Literal":{"Value":"false"}}}}}],"padding":[{"properties":{"top":{"expr":{"Literal":{"Value":"8D"}}},"bottom":{"expr":{"Literal":{"Value":"8D"}}},"left":{"expr":{"Literal":{"Value":"8D"}}},"right":{"expr":{"Literal":{"Value":"8D"}}}}}],"stylePreset":[{"properties":{"name":{"expr":{"Literal":{"Value":"'None'"}}}}}]},"drillFilterOtherVisuals":true},"parentGroupName":"8855e6d6b9d6ed227bda"}
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "name": "5567b1108ad710094810",
+  "position": {
+    "x": 32,
+    "y": 336,
+    "width": 1856,
+    "height": 656,
+    "z": 111,
+    "tabOrder": 677
+  },
+  "visual": {
+    "visualType": "tableEx",
+    "query": {
+      "queryState": {
+        "Values": {
+          "projections": [
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Evidence"
+                    }
+                  },
+                  "Property": "Display Name"
+                }
+              },
+              "queryRef": "Mailbox Evidence.Display Name",
+              "nativeQueryRef": "Display Name"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Evidence"
+                    }
+                  },
+                  "Property": "Delegation Count"
+                }
+              },
+              "queryRef": "Mailbox Evidence.Delegation Count",
+              "nativeQueryRef": "Delegations"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Evidence"
+                    }
+                  },
+                  "Property": "Delegation Types"
+                }
+              },
+              "queryRef": "Mailbox Evidence.Delegation Types",
+              "nativeQueryRef": "Delegation Types"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Evidence"
+                    }
+                  },
+                  "Property": "Forwarding State"
+                }
+              },
+              "queryRef": "Mailbox Evidence.Forwarding State",
+              "nativeQueryRef": "Forwarding State"
+            }
+          ]
+        }
+      }
+    },
+    "objects": {
+      "columnHeaders": [
+        {
+          "properties": {
+            "autoSizeColumnWidth": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "columnAdjustment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'growToFit'"
+                }
+              }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
+            },
+            "bold": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "wordWrap": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "fontColor": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#FFFFFF'"
+                    }
+                  }
+                }
+              }
+            },
+            "backColor": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#215E9E'"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      ],
+      "values": [
+        {
+          "properties": {
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
+            },
+            "wordWrap": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            },
+            "fontColorPrimary": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#183153'"
+                    }
+                  }
+                }
+              }
+            },
+            "fontColorSecondary": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#183153'"
+                    }
+                  }
+                }
+              }
+            },
+            "backColorPrimary": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#FFFFFF'"
+                    }
+                  }
+                }
+              }
+            },
+            "backColorSecondary": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#F0F5FA'"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      ],
+      "total": [
+        {
+          "properties": {
+            "totals": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "visualContainerObjects": {
+      "general": [
+        {
+          "properties": {
+            "altText": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Delegation and forwarding · selected evidence'"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "title": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "text": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Delegation and forwarding · selected evidence'"
+                }
+              }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "12D"
+                }
+              }
+            },
+            "fontColor": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#183153'"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      ],
+      "background": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "color": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#FFFFFF'"
+                    }
+                  }
+                }
+              }
+            },
+            "transparency": {
+              "expr": {
+                "Literal": {
+                  "Value": "0D"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "border": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "color": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#CCDCEC'"
+                    }
+                  }
+                }
+              }
+            },
+            "radius": {
+              "expr": {
+                "Literal": {
+                  "Value": "8D"
+                }
+              }
+            },
+            "width": {
+              "expr": {
+                "Literal": {
+                  "Value": "1D"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "visualHeader": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "padding": [
+        {
+          "properties": {
+            "top": {
+              "expr": {
+                "Literal": {
+                  "Value": "8D"
+                }
+              }
+            },
+            "bottom": {
+              "expr": {
+                "Literal": {
+                  "Value": "8D"
+                }
+              }
+            },
+            "left": {
+              "expr": {
+                "Literal": {
+                  "Value": "8D"
+                }
+              }
+            },
+            "right": {
+              "expr": {
+                "Literal": {
+                  "Value": "8D"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "stylePreset": [
+        {
+          "properties": {
+            "name": {
+              "expr": {
+                "Literal": {
+                  "Value": "'None'"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "drillFilterOtherVisuals": true
+  },
+  "parentGroupName": "8855e6d6b9d6ed227bda"
+}

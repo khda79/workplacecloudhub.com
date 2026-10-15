@@ -1,1 +1,75 @@
-{"$schema":"https://developer.microsoft.com/json-schemas/fabric/item/report/definition/bookmark/2.1.0/schema.json","displayName":"Qualification context","name":"034758c659d833e660c6","options":{"applyOnlyToTargetVisuals":true,"targetVisualNames":["4ec6f077ef6009c9556c","fc68b70c650b2f111db1","9b4853c091b907880e7f","e075da7325deb38719b3","2bd6cb06cd7942b172d0","13cb5e21867248327ce6","e997634a69c2300168ba","251230596dc4a4472e24","0e9fb9f1589873a1eaee","00a6d4dc0889b06e7f1c","ba1804eb6c006fa575b3"],"suppressActiveSection":true,"suppressData":true},"explorationState":{"version":"1.0","activeSection":"6665fb035f086688c22f","sections":{"6665fb035f086688c22f":{"visualContainers":{},"visualContainerGroups":{"4ec6f077ef6009c9556c":{"isHidden":true},"fc68b70c650b2f111db1":{"isHidden":true},"9b4853c091b907880e7f":{"isHidden":false},"e075da7325deb38719b3":{"isHidden":true},"2bd6cb06cd7942b172d0":{"isHidden":true},"13cb5e21867248327ce6":{"isHidden":true},"e997634a69c2300168ba":{"isHidden":true},"251230596dc4a4472e24":{"isHidden":true},"0e9fb9f1589873a1eaee":{"isHidden":true},"00a6d4dc0889b06e7f1c":{"isHidden":true},"ba1804eb6c006fa575b3":{"isHidden":true}}}}}}
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/bookmark/2.1.0/schema.json",
+  "displayName": "Qualification context",
+  "name": "034758c659d833e660c6",
+  "options": {
+    "applyOnlyToTargetVisuals": true,
+    "targetVisualNames": [
+      "4ec6f077ef6009c9556c",
+      "fc68b70c650b2f111db1",
+      "9b4853c091b907880e7f",
+      "e075da7325deb38719b3",
+      "2bd6cb06cd7942b172d0",
+      "13cb5e21867248327ce6",
+      "e997634a69c2300168ba",
+      "251230596dc4a4472e24",
+      "0e9fb9f1589873a1eaee",
+      "00a6d4dc0889b06e7f1c",
+      "ba1804eb6c006fa575b3",
+      "291d06b5cc27286be869",
+      "9b19c8692d08d5e85eb7"
+    ],
+    "suppressActiveSection": true,
+    "suppressData": true
+  },
+  "explorationState": {
+    "version": "1.0",
+    "activeSection": "6665fb035f086688c22f",
+    "sections": {
+      "6665fb035f086688c22f": {
+        "visualContainers": {},
+        "visualContainerGroups": {
+          "00a6d4dc0889b06e7f1c": {
+            "isHidden": true
+          },
+          "0e9fb9f1589873a1eaee": {
+            "isHidden": true
+          },
+          "13cb5e21867248327ce6": {
+            "isHidden": true
+          },
+          "251230596dc4a4472e24": {
+            "isHidden": true
+          },
+          "291d06b5cc27286be869": {
+            "isHidden": true
+          },
+          "2bd6cb06cd7942b172d0": {
+            "isHidden": true
+          },
+          "4ec6f077ef6009c9556c": {
+            "isHidden": true
+          },
+          "9b4853c091b907880e7f": {
+            "isHidden": false
+          },
+          "ba1804eb6c006fa575b3": {
+            "isHidden": true
+          },
+          "e075da7325deb38719b3": {
+            "isHidden": true
+          },
+          "e997634a69c2300168ba": {
+            "isHidden": true
+          },
+          "fc68b70c650b2f111db1": {
+            "isHidden": true
+          },
+          "9b19c8692d08d5e85eb7": {
+            "isHidden": true
+          }
+        }
+      }
+    }
+  }
+}

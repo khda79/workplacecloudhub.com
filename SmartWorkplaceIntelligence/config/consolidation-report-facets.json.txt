@@ -1226,7 +1226,7 @@
       "measures": []
     },
     {
-      "page": "CMDB",
+      "page": "User Explorer",
       "source": "DimGroup",
       "table": "Native Group Evidence",
       "label": "Entra groups",
@@ -1256,7 +1256,7 @@
       ]
     },
     {
-      "page": "CMDB",
+      "page": "User Explorer",
       "source": "ADGroupSource",
       "table": "AD Group Evidence",
       "label": "AD groups",
@@ -1284,7 +1284,7 @@
       "measures": []
     },
     {
-      "page": "CMDB",
+      "page": "User Explorer",
       "source": "EntraGroupMembership",
       "table": "Entra Membership Evidence",
       "label": "Entra members",
@@ -1304,11 +1304,11 @@
         "LinkStatus",
         "SourceCollectedDateTime"
       ],
-      "primary": "TenantMembershipKey",
+      "primary": "TenantGroupKey",
       "measures": []
     },
     {
-      "page": "CMDB",
+      "page": "User Explorer",
       "source": "ADMembership",
       "table": "AD Membership Evidence",
       "label": "AD members",
@@ -1334,11 +1334,11 @@
         "CloudMatchStatus",
         "SourceCollectedDateTime"
       ],
-      "primary": "TenantADMembershipKey",
+      "primary": "TenantADGroupKey",
       "measures": []
     },
     {
-      "page": "CMDB",
+      "page": "User Explorer",
       "source": "ADDirectoryObject",
       "table": "AD Object Evidence",
       "label": "AD objects",
@@ -1360,7 +1360,7 @@
       "measures": []
     },
     {
-      "page": "CMDB",
+      "page": "Data Trust",
       "source": "FactRelationshipOverview",
       "table": "Native Relationship Summary",
       "label": "Link summary",

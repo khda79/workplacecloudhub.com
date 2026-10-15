@@ -12,5 +12,6 @@
   "visualGroup": {
     "displayName": "Intune sources",
     "groupMode": "ScaleMode"
-  }
+  },
+  "isHidden": true
 }

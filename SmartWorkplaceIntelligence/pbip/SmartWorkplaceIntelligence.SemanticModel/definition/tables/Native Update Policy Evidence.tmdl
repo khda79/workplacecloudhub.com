@@ -3,19 +3,13 @@ table 'Native Update Policy Evidence'
 	lineageTag: 8c141ee3-cb9b-45b6-b191-04fbc8c959ac
 
 	/// Windows Update policies observed in the frozen Intune collection. Migrated without changing the source calculation.
-	measure 'Native Windows Update policies' =
-			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
-			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
-			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (COALESCE(COUNTROWS('Native Update Policy Evidence'),0)))
+	measure 'Native Windows Update policies' = (COALESCE(COUNTROWS('Native Update Policy Evidence'),0))
 		formatString: #,0
 		displayFolder: Native evidence
 		lineageTag: b12951cf-ed8c-481e-a554-d2f4ae8e251c
 
-	/// Exact native-key entity context or existing inventory context. No name matching or inferred transitive membership. Unrelated entity selections return blank.
-	measure 'Native Context Rows · Native Update Policy Evidence' =
-			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
-			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
-			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (COUNTROWS('Native Update Policy Evidence')))
+	/// Existing qualified workforce/device scope via exact native IDs; otherwise the domain selection. No name matching or inferred transitive membership.
+	measure 'Native Context Rows · Native Update Policy Evidence' = (COUNTROWS('Native Update Policy Evidence'))
 		formatString: #,0
 		isHidden
 		lineageTag: 50a849d3-25f5-4a2b-b171-87a6a4bd80b9

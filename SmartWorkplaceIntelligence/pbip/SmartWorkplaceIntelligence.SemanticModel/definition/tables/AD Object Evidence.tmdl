@@ -2,12 +2,8 @@
 table 'AD Object Evidence'
 	lineageTag: cc3b294f-5102-4a87-8518-abb4f3297f18
 
-	/// Exact native-key entity context or existing inventory context. No name matching or inferred transitive membership. Unrelated entity selections return blank.
-	measure 'Native Context Rows · AD Object Evidence' =
-			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
-			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
-			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "ADDirectoryObject"))
-			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((COUNTROWS('AD Object Evidence')), KEEPFILTERS(TREATAS(NativeKeys0, 'AD Object Evidence'[TenantADObjectKey]))), BLANK()), BLANK()), (COUNTROWS('AD Object Evidence')))
+	/// Existing qualified workforce/device scope via exact native IDs; otherwise the domain selection. No name matching or inferred transitive membership.
+	measure 'Native Context Rows · AD Object Evidence' = (COUNTROWS('AD Object Evidence'))
 		formatString: #,0
 		isHidden
 		lineageTag: c8c1b3f3-f879-4a90-9c44-2428329d3a4a

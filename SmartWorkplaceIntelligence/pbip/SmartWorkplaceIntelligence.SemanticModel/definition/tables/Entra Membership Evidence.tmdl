@@ -2,19 +2,12 @@
 table 'Entra Membership Evidence'
 	lineageTag: eafd43ab-b38c-4c61-a93b-8b9d67c33a2e
 
-	/// Exact native-key entity context or existing inventory context. No name matching or inferred transitive membership. Unrelated entity selections return blank.
+	/// Existing qualified workforce/device scope via exact native IDs; otherwise the domain selection. No name matching or inferred transitive membership.
 	measure 'Native Context Rows · Entra Membership Evidence' =
-			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
-			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
-			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimUser"))
-			VAR NativeKeys1 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimDevice"))
-			VAR NativeKeys2 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimGroup"))
 			VAR InventoryUsers = CALCULATETABLE(VALUES('Native User Evidence'[TenantUserKey]), REMOVEFILTERS('Native User Evidence'), TREATAS(VALUES('User Inventory Evidence'[User Source ID]), 'Native User Evidence'[SourceUserId]))
 			VAR InventoryDevices = CALCULATETABLE(VALUES('Native Managed Device Evidence'[TenantDeviceKey]), REMOVEFILTERS('Native Managed Device Evidence'), TREATAS(VALUES('Device Inventory Evidence'[Device Source ID]), 'Native Managed Device Evidence'[ManagedDeviceId]))
-			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((COUNTROWS('Entra Membership Evidence')), KEEPFILTERS(TREATAS(NativeKeys0, 'Entra Membership Evidence'[TenantUserKey]))),
-			COUNTROWS(NativeKeys1) > 0, CALCULATE((COUNTROWS('Entra Membership Evidence')), KEEPFILTERS(TREATAS(NativeKeys1, 'Entra Membership Evidence'[TenantDeviceKey]))),
-			COUNTROWS(NativeKeys2) > 0, CALCULATE((COUNTROWS('Entra Membership Evidence')), KEEPFILTERS(TREATAS(NativeKeys2, 'Entra Membership Evidence'[TenantGroupKey]))), BLANK()), BLANK()), SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((COUNTROWS('Entra Membership Evidence')), KEEPFILTERS(TREATAS(InventoryUsers, 'Entra Membership Evidence'[TenantUserKey]))),
-			ISCROSSFILTERED('Device Inventory Evidence'), CALCULATE((COUNTROWS('Entra Membership Evidence')), KEEPFILTERS(TREATAS(InventoryDevices, 'Entra Membership Evidence'[TenantDeviceKey]))), (COUNTROWS('Entra Membership Evidence'))))
+			RETURN SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((COUNTROWS('Entra Membership Evidence')), KEEPFILTERS(TREATAS(InventoryUsers, 'Entra Membership Evidence'[TenantUserKey]))),
+			ISCROSSFILTERED('Device Inventory Evidence'), CALCULATE((COUNTROWS('Entra Membership Evidence')), KEEPFILTERS(TREATAS(InventoryDevices, 'Entra Membership Evidence'[TenantDeviceKey]))), (COUNTROWS('Entra Membership Evidence')))
 		formatString: #,0
 		isHidden
 		lineageTag: f5a847fc-545a-4af1-8033-5a9eb5d128b3

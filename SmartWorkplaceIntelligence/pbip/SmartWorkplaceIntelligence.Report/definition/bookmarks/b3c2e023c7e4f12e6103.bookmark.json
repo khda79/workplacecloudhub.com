@@ -1,1 +1,47 @@
-{"$schema":"https://developer.microsoft.com/json-schemas/fabric/item/report/definition/bookmark/2.1.0/schema.json","displayName":"Classification evidence","name":"b3c2e023c7e4f12e6103","options":{"applyOnlyToTargetVisuals":true,"targetVisualNames":["173fa314feb49a6262f8","aa3d0b43d7a7b16435f5","a42890ef9d7b12de6b02","65f70c10fbb0643655e3","3e71be5b554d44e29c30","1332cee47b9a1ed7863f"],"suppressActiveSection":true,"suppressData":true},"explorationState":{"version":"1.0","activeSection":"9ae7c13f821d4a608e52","sections":{"9ae7c13f821d4a608e52":{"visualContainers":{},"visualContainerGroups":{"173fa314feb49a6262f8":{"isHidden":true},"aa3d0b43d7a7b16435f5":{"isHidden":true},"a42890ef9d7b12de6b02":{"isHidden":false},"65f70c10fbb0643655e3":{"isHidden":true},"3e71be5b554d44e29c30":{"isHidden":true},"1332cee47b9a1ed7863f":{"isHidden":true}}}}}}
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/bookmark/2.1.0/schema.json",
+  "displayName": "Classification evidence",
+  "name": "b3c2e023c7e4f12e6103",
+  "options": {
+    "applyOnlyToTargetVisuals": true,
+    "targetVisualNames": [
+      "173fa314feb49a6262f8",
+      "aa3d0b43d7a7b16435f5",
+      "a42890ef9d7b12de6b02",
+      "65f70c10fbb0643655e3",
+      "3e71be5b554d44e29c30",
+      "1332cee47b9a1ed7863f"
+    ],
+    "suppressActiveSection": true,
+    "suppressData": true
+  },
+  "explorationState": {
+    "version": "1.0",
+    "activeSection": "9ae7c13f821d4a608e52",
+    "sections": {
+      "9ae7c13f821d4a608e52": {
+        "visualContainers": {},
+        "visualContainerGroups": {
+          "173fa314feb49a6262f8": {
+            "isHidden": true
+          },
+          "aa3d0b43d7a7b16435f5": {
+            "isHidden": true
+          },
+          "a42890ef9d7b12de6b02": {
+            "isHidden": false
+          },
+          "65f70c10fbb0643655e3": {
+            "isHidden": true
+          },
+          "3e71be5b554d44e29c30": {
+            "isHidden": true
+          },
+          "1332cee47b9a1ed7863f": {
+            "isHidden": true
+          }
+        }
+      }
+    }
+  }
+}

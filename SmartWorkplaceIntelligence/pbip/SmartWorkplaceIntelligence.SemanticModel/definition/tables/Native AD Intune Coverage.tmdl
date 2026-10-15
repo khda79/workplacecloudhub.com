@@ -4,23 +4,8 @@ table 'Native AD Intune Coverage'
 
 	/// Enabled Windows 7/8/10/11 workstation directory objects, excluding Windows Server. Includes native AD objects without DNSHostName; not a count of active physical machines. AD-only objects have no inferred Country/ownership. Migrated without changing the source calculation.
 	measure 'Native Enabled AD Windows workstations' =
-			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
-			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
-			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimDevice"))
-			VAR NativeKeys1 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "ADComputerSource"))
 			VAR InventoryDevices = CALCULATETABLE(VALUES('Native Managed Device Evidence'[TenantDeviceKey]), REMOVEFILTERS('Native Managed Device Evidence'), TREATAS(VALUES('Device Inventory Evidence'[Device Source ID]), 'Native Managed Device Evidence'[ManagedDeviceId]))
-			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((COUNTROWS ( FILTER ( 'Native AD Intune Coverage',
-			VAR _os = LOWER ( COALESCE ( 'Native AD Intune Coverage'[OperatingSystem], "" ) )
-			RETURN 'Native AD Intune Coverage'[Enabled] = TRUE ()
-			&& NOT CONTAINSSTRING ( _os, "server" )
-			&& ( CONTAINSSTRING ( _os, "windows 7" ) || CONTAINSSTRING ( _os, "windows 8" )
-			|| CONTAINSSTRING ( _os, "windows 10" ) || CONTAINSSTRING ( _os, "windows 11" ) ) ) )), KEEPFILTERS(TREATAS(NativeKeys0, 'Native AD Intune Coverage'[TenantDeviceKey]))),
-			COUNTROWS(NativeKeys1) > 0, CALCULATE((COUNTROWS ( FILTER ( 'Native AD Intune Coverage',
-			VAR _os = LOWER ( COALESCE ( 'Native AD Intune Coverage'[OperatingSystem], "" ) )
-			RETURN 'Native AD Intune Coverage'[Enabled] = TRUE ()
-			&& NOT CONTAINSSTRING ( _os, "server" )
-			&& ( CONTAINSSTRING ( _os, "windows 7" ) || CONTAINSSTRING ( _os, "windows 8" )
-			|| CONTAINSSTRING ( _os, "windows 10" ) || CONTAINSSTRING ( _os, "windows 11" ) ) ) )), KEEPFILTERS(TREATAS(NativeKeys1, 'Native AD Intune Coverage'[TenantADComputerKey]))), BLANK()), BLANK()), SWITCH(TRUE(), ISCROSSFILTERED('Device Inventory Evidence'), CALCULATE((COUNTROWS ( FILTER ( 'Native AD Intune Coverage',
+			RETURN SWITCH(TRUE(), ISCROSSFILTERED('Device Inventory Evidence'), CALCULATE((COUNTROWS ( FILTER ( 'Native AD Intune Coverage',
 			VAR _os = LOWER ( COALESCE ( 'Native AD Intune Coverage'[OperatingSystem], "" ) )
 			RETURN 'Native AD Intune Coverage'[Enabled] = TRUE ()
 			&& NOT CONTAINSSTRING ( _os, "server" )
@@ -30,59 +15,39 @@ table 'Native AD Intune Coverage'
 			RETURN 'Native AD Intune Coverage'[Enabled] = TRUE ()
 			&& NOT CONTAINSSTRING ( _os, "server" )
 			&& ( CONTAINSSTRING ( _os, "windows 7" ) || CONTAINSSTRING ( _os, "windows 8" )
-			|| CONTAINSSTRING ( _os, "windows 10" ) || CONTAINSSTRING ( _os, "windows 11" ) ) ) ))))
+			|| CONTAINSSTRING ( _os, "windows 10" ) || CONTAINSSTRING ( _os, "windows 11" ) ) ) )))
 		formatString: #,0
 		displayFolder: Native evidence
 		lineageTag: f79d791f-0630-4c46-8dd6-c2610d8ed0d9
 
 	/// Enabled AD workstations linked exactly through AD ObjectSid to Entra onPremisesSecurityIdentifier, then Entra deviceId to Intune azureADDeviceId. Migrated without changing the source calculation.
 	measure 'Native AD Windows workstations managed in Intune' =
-			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
-			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
-			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimDevice"))
-			VAR NativeKeys1 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "ADComputerSource"))
 			VAR InventoryDevices = CALCULATETABLE(VALUES('Native Managed Device Evidence'[TenantDeviceKey]), REMOVEFILTERS('Native Managed Device Evidence'), TREATAS(VALUES('Device Inventory Evidence'[Device Source ID]), 'Native Managed Device Evidence'[ManagedDeviceId]))
-			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((CALCULATE([Native Enabled AD Windows workstations], KEEPFILTERS('Native AD Intune Coverage'[CoverageState] = "Managed in Intune"))), KEEPFILTERS(TREATAS(NativeKeys0, 'Native AD Intune Coverage'[TenantDeviceKey]))),
-			COUNTROWS(NativeKeys1) > 0, CALCULATE((CALCULATE([Native Enabled AD Windows workstations], KEEPFILTERS('Native AD Intune Coverage'[CoverageState] = "Managed in Intune"))), KEEPFILTERS(TREATAS(NativeKeys1, 'Native AD Intune Coverage'[TenantADComputerKey]))), BLANK()), BLANK()), SWITCH(TRUE(), ISCROSSFILTERED('Device Inventory Evidence'), CALCULATE((CALCULATE([Native Enabled AD Windows workstations], KEEPFILTERS('Native AD Intune Coverage'[CoverageState] = "Managed in Intune"))), KEEPFILTERS(TREATAS(InventoryDevices, 'Native AD Intune Coverage'[TenantDeviceKey]))), (CALCULATE([Native Enabled AD Windows workstations], KEEPFILTERS('Native AD Intune Coverage'[CoverageState] = "Managed in Intune")))))
+			RETURN SWITCH(TRUE(), ISCROSSFILTERED('Device Inventory Evidence'), CALCULATE((CALCULATE([Native Enabled AD Windows workstations], KEEPFILTERS('Native AD Intune Coverage'[CoverageState] = "Managed in Intune"))), KEEPFILTERS(TREATAS(InventoryDevices, 'Native AD Intune Coverage'[TenantDeviceKey]))), (CALCULATE([Native Enabled AD Windows workstations], KEEPFILTERS('Native AD Intune Coverage'[CoverageState] = "Managed in Intune"))))
 		formatString: #,0
 		displayFolder: Native evidence
 		lineageTag: e3cc1049-c512-41cf-ab8c-8ce9697ff63d
 
 	/// Matched Intune coverage of enabled AD Windows workstation objects, using the full workstation-state denominator. Migrated without changing the source calculation.
 	measure 'Native AD to Intune coverage rate' =
-			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
-			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
-			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimDevice"))
-			VAR NativeKeys1 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "ADComputerSource"))
 			VAR InventoryDevices = CALCULATETABLE(VALUES('Native Managed Device Evidence'[TenantDeviceKey]), REMOVEFILTERS('Native Managed Device Evidence'), TREATAS(VALUES('Device Inventory Evidence'[Device Source ID]), 'Native Managed Device Evidence'[ManagedDeviceId]))
-			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((DIVIDE ( [Native AD Windows workstations managed in Intune], CALCULATE ( [Native Enabled AD Windows workstations], REMOVEFILTERS ( 'Native AD Intune Coverage'[CoverageState] ) ) )), KEEPFILTERS(TREATAS(NativeKeys0, 'Native AD Intune Coverage'[TenantDeviceKey]))),
-			COUNTROWS(NativeKeys1) > 0, CALCULATE((DIVIDE ( [Native AD Windows workstations managed in Intune], CALCULATE ( [Native Enabled AD Windows workstations], REMOVEFILTERS ( 'Native AD Intune Coverage'[CoverageState] ) ) )), KEEPFILTERS(TREATAS(NativeKeys1, 'Native AD Intune Coverage'[TenantADComputerKey]))), BLANK()), BLANK()), SWITCH(TRUE(), ISCROSSFILTERED('Device Inventory Evidence'), CALCULATE((DIVIDE ( [Native AD Windows workstations managed in Intune], CALCULATE ( [Native Enabled AD Windows workstations], REMOVEFILTERS ( 'Native AD Intune Coverage'[CoverageState] ) ) )), KEEPFILTERS(TREATAS(InventoryDevices, 'Native AD Intune Coverage'[TenantDeviceKey]))), (DIVIDE ( [Native AD Windows workstations managed in Intune], CALCULATE ( [Native Enabled AD Windows workstations], REMOVEFILTERS ( 'Native AD Intune Coverage'[CoverageState] ) ) ))))
+			RETURN SWITCH(TRUE(), ISCROSSFILTERED('Device Inventory Evidence'), CALCULATE((DIVIDE ( [Native AD Windows workstations managed in Intune], CALCULATE ( [Native Enabled AD Windows workstations], REMOVEFILTERS ( 'Native AD Intune Coverage'[CoverageState] ) ) )), KEEPFILTERS(TREATAS(InventoryDevices, 'Native AD Intune Coverage'[TenantDeviceKey]))), (DIVIDE ( [Native AD Windows workstations managed in Intune], CALCULATE ( [Native Enabled AD Windows workstations], REMOVEFILTERS ( 'Native AD Intune Coverage'[CoverageState] ) ) )))
 		formatString: 0.0%
 		displayFolder: Native evidence
 		lineageTag: 399a84b6-f77c-48a7-a0f2-fb7f192a7192
 
 	/// Share of enabled AD Windows workstations by exact coverage state. Migrated without changing the source calculation.
 	measure 'Native AD workstation coverage state rate' =
-			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
-			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
-			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimDevice"))
-			VAR NativeKeys1 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "ADComputerSource"))
 			VAR InventoryDevices = CALCULATETABLE(VALUES('Native Managed Device Evidence'[TenantDeviceKey]), REMOVEFILTERS('Native Managed Device Evidence'), TREATAS(VALUES('Device Inventory Evidence'[Device Source ID]), 'Native Managed Device Evidence'[ManagedDeviceId]))
-			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((DIVIDE([Native Enabled AD Windows workstations], CALCULATE([Native Enabled AD Windows workstations], REMOVEFILTERS('Native AD Intune Coverage'[CoverageState])))), KEEPFILTERS(TREATAS(NativeKeys0, 'Native AD Intune Coverage'[TenantDeviceKey]))),
-			COUNTROWS(NativeKeys1) > 0, CALCULATE((DIVIDE([Native Enabled AD Windows workstations], CALCULATE([Native Enabled AD Windows workstations], REMOVEFILTERS('Native AD Intune Coverage'[CoverageState])))), KEEPFILTERS(TREATAS(NativeKeys1, 'Native AD Intune Coverage'[TenantADComputerKey]))), BLANK()), BLANK()), SWITCH(TRUE(), ISCROSSFILTERED('Device Inventory Evidence'), CALCULATE((DIVIDE([Native Enabled AD Windows workstations], CALCULATE([Native Enabled AD Windows workstations], REMOVEFILTERS('Native AD Intune Coverage'[CoverageState])))), KEEPFILTERS(TREATAS(InventoryDevices, 'Native AD Intune Coverage'[TenantDeviceKey]))), (DIVIDE([Native Enabled AD Windows workstations], CALCULATE([Native Enabled AD Windows workstations], REMOVEFILTERS('Native AD Intune Coverage'[CoverageState]))))))
+			RETURN SWITCH(TRUE(), ISCROSSFILTERED('Device Inventory Evidence'), CALCULATE((DIVIDE([Native Enabled AD Windows workstations], CALCULATE([Native Enabled AD Windows workstations], REMOVEFILTERS('Native AD Intune Coverage'[CoverageState])))), KEEPFILTERS(TREATAS(InventoryDevices, 'Native AD Intune Coverage'[TenantDeviceKey]))), (DIVIDE([Native Enabled AD Windows workstations], CALCULATE([Native Enabled AD Windows workstations], REMOVEFILTERS('Native AD Intune Coverage'[CoverageState])))))
 		formatString: 0.0%
 		displayFolder: Native evidence
 		lineageTag: 5693bfa1-91ce-4671-ba2d-c7935425c106
 
-	/// Exact native-key entity context or existing inventory context. No name matching or inferred transitive membership. Unrelated entity selections return blank.
+	/// Existing qualified workforce/device scope via exact native IDs; otherwise the domain selection. No name matching or inferred transitive membership.
 	measure 'Native Context Rows · Native AD Intune Coverage' =
-			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
-			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
-			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimDevice"))
-			VAR NativeKeys1 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "ADComputerSource"))
 			VAR InventoryDevices = CALCULATETABLE(VALUES('Native Managed Device Evidence'[TenantDeviceKey]), REMOVEFILTERS('Native Managed Device Evidence'), TREATAS(VALUES('Device Inventory Evidence'[Device Source ID]), 'Native Managed Device Evidence'[ManagedDeviceId]))
-			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((COUNTROWS('Native AD Intune Coverage')), KEEPFILTERS(TREATAS(NativeKeys0, 'Native AD Intune Coverage'[TenantDeviceKey]))),
-			COUNTROWS(NativeKeys1) > 0, CALCULATE((COUNTROWS('Native AD Intune Coverage')), KEEPFILTERS(TREATAS(NativeKeys1, 'Native AD Intune Coverage'[TenantADComputerKey]))), BLANK()), BLANK()), SWITCH(TRUE(), ISCROSSFILTERED('Device Inventory Evidence'), CALCULATE((COUNTROWS('Native AD Intune Coverage')), KEEPFILTERS(TREATAS(InventoryDevices, 'Native AD Intune Coverage'[TenantDeviceKey]))), (COUNTROWS('Native AD Intune Coverage'))))
+			RETURN SWITCH(TRUE(), ISCROSSFILTERED('Device Inventory Evidence'), CALCULATE((COUNTROWS('Native AD Intune Coverage')), KEEPFILTERS(TREATAS(InventoryDevices, 'Native AD Intune Coverage'[TenantDeviceKey]))), (COUNTROWS('Native AD Intune Coverage')))
 		formatString: #,0
 		isHidden
 		lineageTag: 61eecc17-f1d4-43c2-94c1-21aa54d9cc54

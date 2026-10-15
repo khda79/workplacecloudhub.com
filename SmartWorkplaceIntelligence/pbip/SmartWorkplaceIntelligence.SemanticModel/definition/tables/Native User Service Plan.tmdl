@@ -4,45 +4,24 @@ table 'Native User Service Plan'
 
 	/// Observed user and service-plan assignment rows; this is entitlement configuration, not usage. Migrated without changing the source calculation.
 	measure 'Native User service plan rows' =
-			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
-			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
-			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimUser"))
-			VAR NativeKeys1 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimLicenseSku"))
-			VAR NativeKeys2 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimLicenseServicePlan"))
 			VAR InventoryUsers = CALCULATETABLE(VALUES('Native User Evidence'[TenantUserKey]), REMOVEFILTERS('Native User Evidence'), TREATAS(VALUES('User Inventory Evidence'[User Source ID]), 'Native User Evidence'[SourceUserId]))
-			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((COALESCE(COUNTROWS('Native User Service Plan'),0)), KEEPFILTERS(TREATAS(NativeKeys0, 'Native User Service Plan'[TenantUserKey]))),
-			COUNTROWS(NativeKeys1) > 0, CALCULATE((COALESCE(COUNTROWS('Native User Service Plan'),0)), KEEPFILTERS(TREATAS(NativeKeys1, 'Native User Service Plan'[TenantSkuKey]))),
-			COUNTROWS(NativeKeys2) > 0, CALCULATE((COALESCE(COUNTROWS('Native User Service Plan'),0)), KEEPFILTERS(TREATAS(NativeKeys2, 'Native User Service Plan'[TenantServicePlanKey]))), BLANK()), BLANK()), SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((COALESCE(COUNTROWS('Native User Service Plan'),0)), KEEPFILTERS(TREATAS(InventoryUsers, 'Native User Service Plan'[TenantUserKey]))), (COALESCE(COUNTROWS('Native User Service Plan'),0))))
+			RETURN SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((COALESCE(COUNTROWS('Native User Service Plan'),0)), KEEPFILTERS(TREATAS(InventoryUsers, 'Native User Service Plan'[TenantUserKey]))), (COALESCE(COUNTROWS('Native User Service Plan'),0)))
 		formatString: #,0
 		displayFolder: Native evidence
 		lineageTag: 903a5f5f-b7ae-4829-b1f7-12a78f6cdfad
 
 	/// User service-plan rows explicitly enabled in the collection. Migrated without changing the source calculation.
 	measure 'Native Enabled user service plan rows' =
-			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
-			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
-			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimUser"))
-			VAR NativeKeys1 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimLicenseSku"))
-			VAR NativeKeys2 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimLicenseServicePlan"))
 			VAR InventoryUsers = CALCULATETABLE(VALUES('Native User Evidence'[TenantUserKey]), REMOVEFILTERS('Native User Evidence'), TREATAS(VALUES('User Inventory Evidence'[User Source ID]), 'Native User Evidence'[SourceUserId]))
-			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((CALCULATE([Native User service plan rows],KEEPFILTERS('Native User Service Plan'[IsEnabled] = "True"))), KEEPFILTERS(TREATAS(NativeKeys0, 'Native User Service Plan'[TenantUserKey]))),
-			COUNTROWS(NativeKeys1) > 0, CALCULATE((CALCULATE([Native User service plan rows],KEEPFILTERS('Native User Service Plan'[IsEnabled] = "True"))), KEEPFILTERS(TREATAS(NativeKeys1, 'Native User Service Plan'[TenantSkuKey]))),
-			COUNTROWS(NativeKeys2) > 0, CALCULATE((CALCULATE([Native User service plan rows],KEEPFILTERS('Native User Service Plan'[IsEnabled] = "True"))), KEEPFILTERS(TREATAS(NativeKeys2, 'Native User Service Plan'[TenantServicePlanKey]))), BLANK()), BLANK()), SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((CALCULATE([Native User service plan rows],KEEPFILTERS('Native User Service Plan'[IsEnabled] = "True"))), KEEPFILTERS(TREATAS(InventoryUsers, 'Native User Service Plan'[TenantUserKey]))), (CALCULATE([Native User service plan rows],KEEPFILTERS('Native User Service Plan'[IsEnabled] = "True")))))
+			RETURN SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((CALCULATE([Native User service plan rows],KEEPFILTERS('Native User Service Plan'[IsEnabled] = "True"))), KEEPFILTERS(TREATAS(InventoryUsers, 'Native User Service Plan'[TenantUserKey]))), (CALCULATE([Native User service plan rows],KEEPFILTERS('Native User Service Plan'[IsEnabled] = "True"))))
 		formatString: #,0
 		displayFolder: Native evidence
 		lineageTag: 19fa3995-e587-4ca8-8860-54244310f67c
 
-	/// Exact native-key entity context or existing inventory context. No name matching or inferred transitive membership. Unrelated entity selections return blank.
+	/// Existing qualified workforce/device scope via exact native IDs; otherwise the domain selection. No name matching or inferred transitive membership.
 	measure 'Native Context Rows · Native User Service Plan' =
-			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
-			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
-			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimUser"))
-			VAR NativeKeys1 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimLicenseSku"))
-			VAR NativeKeys2 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimLicenseServicePlan"))
 			VAR InventoryUsers = CALCULATETABLE(VALUES('Native User Evidence'[TenantUserKey]), REMOVEFILTERS('Native User Evidence'), TREATAS(VALUES('User Inventory Evidence'[User Source ID]), 'Native User Evidence'[SourceUserId]))
-			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((COUNTROWS('Native User Service Plan')), KEEPFILTERS(TREATAS(NativeKeys0, 'Native User Service Plan'[TenantUserKey]))),
-			COUNTROWS(NativeKeys1) > 0, CALCULATE((COUNTROWS('Native User Service Plan')), KEEPFILTERS(TREATAS(NativeKeys1, 'Native User Service Plan'[TenantSkuKey]))),
-			COUNTROWS(NativeKeys2) > 0, CALCULATE((COUNTROWS('Native User Service Plan')), KEEPFILTERS(TREATAS(NativeKeys2, 'Native User Service Plan'[TenantServicePlanKey]))), BLANK()), BLANK()), SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((COUNTROWS('Native User Service Plan')), KEEPFILTERS(TREATAS(InventoryUsers, 'Native User Service Plan'[TenantUserKey]))), (COUNTROWS('Native User Service Plan'))))
+			RETURN SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((COUNTROWS('Native User Service Plan')), KEEPFILTERS(TREATAS(InventoryUsers, 'Native User Service Plan'[TenantUserKey]))), (COUNTROWS('Native User Service Plan')))
 		formatString: #,0
 		isHidden
 		lineageTag: b67d253e-fdec-4fb4-b097-307be440c650

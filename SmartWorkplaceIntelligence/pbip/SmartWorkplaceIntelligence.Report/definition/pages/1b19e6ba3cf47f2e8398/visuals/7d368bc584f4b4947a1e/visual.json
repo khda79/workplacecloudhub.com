@@ -1,1 +1,526 @@
-{"$schema":"https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json","name":"7d368bc584f4b4947a1e","position":{"x":32,"y":848,"width":1856,"height":144,"z":12000,"tabOrder":544},"visual":{"visualType":"tableEx","query":{"queryState":{"Values":{"projections":[{"field":{"Measure":{"Expression":{"SourceRef":{"Entity":"Native Mailbox Hosting"}},"Property":"Native Hosted mailboxes"}},"queryRef":"Native Mailbox Hosting.Native Hosted mailboxes","nativeQueryRef":"Native Hosted mailboxes"},{"field":{"Measure":{"Expression":{"SourceRef":{"Entity":"Native Mailbox Hosting"}},"Property":"Native Exchange Online mailboxes"}},"queryRef":"Native Mailbox Hosting.Native Exchange Online mailboxes","nativeQueryRef":"Native Exchange Online mailboxes"},{"field":{"Measure":{"Expression":{"SourceRef":{"Entity":"Native Mailbox Hosting"}},"Property":"Native Exchange On-premises mailboxes"}},"queryRef":"Native Mailbox Hosting.Native Exchange On-premises mailboxes","nativeQueryRef":"Native Exchange On-premises mailboxes"},{"field":{"Measure":{"Expression":{"SourceRef":{"Entity":"Native Mailbox Hosting"}},"Property":"Native Exchange Online share"}},"queryRef":"Native Mailbox Hosting.Native Exchange Online share","nativeQueryRef":"Native Exchange Online share"},{"field":{"Measure":{"Expression":{"SourceRef":{"Entity":"Native Mailbox Hosting"}},"Property":"Native Exchange On-premises share"}},"queryRef":"Native Mailbox Hosting.Native Exchange On-premises share","nativeQueryRef":"Native Exchange On-premises share"},{"field":{"Measure":{"Expression":{"SourceRef":{"Entity":"Native Mailbox Hosting"}},"Property":"Native User mailboxes"}},"queryRef":"Native Mailbox Hosting.Native User mailboxes","nativeQueryRef":"Native User mailboxes"},{"field":{"Measure":{"Expression":{"SourceRef":{"Entity":"Native Mailbox Hosting"}},"Property":"Native Shared mailboxes"}},"queryRef":"Native Mailbox Hosting.Native Shared mailboxes","nativeQueryRef":"Native Shared mailboxes"},{"field":{"Measure":{"Expression":{"SourceRef":{"Entity":"Native Mailbox Hosting"}},"Property":"Native Other mailbox types"}},"queryRef":"Native Mailbox Hosting.Native Other mailbox types","nativeQueryRef":"Native Other mailbox types"},{"field":{"Measure":{"Expression":{"SourceRef":{"Entity":"Native Mailbox Hosting"}},"Property":"Native User mailbox share"}},"queryRef":"Native Mailbox Hosting.Native User mailbox share","nativeQueryRef":"Native User mailbox share"},{"field":{"Measure":{"Expression":{"SourceRef":{"Entity":"Native Mailbox Hosting"}},"Property":"Native Shared mailbox share"}},"queryRef":"Native Mailbox Hosting.Native Shared mailbox share","nativeQueryRef":"Native Shared mailbox share"},{"field":{"Measure":{"Expression":{"SourceRef":{"Entity":"Native Mailbox Hosting"}},"Property":"Native Other mailbox type share"}},"queryRef":"Native Mailbox Hosting.Native Other mailbox type share","nativeQueryRef":"Native Other mailbox type share"},{"field":{"Measure":{"Expression":{"SourceRef":{"Entity":"Native Mailbox Hosting"}},"Property":"Native Mailbox type share"}},"queryRef":"Native Mailbox Hosting.Native Mailbox type share","nativeQueryRef":"Native Mailbox type share"},{"field":{"Measure":{"Expression":{"SourceRef":{"Entity":"Native Mailbox Hosting"}},"Property":"Native Mailbox hosting rate"}},"queryRef":"Native Mailbox Hosting.Native Mailbox hosting rate","nativeQueryRef":"Native Mailbox hosting rate"}]}}},"objects":{"columnHeaders":[{"properties":{"fontSize":{"expr":{"Literal":{"Value":"14D"}}},"autoSizeColumnWidth":{"expr":{"Literal":{"Value":"true"}}},"columnAdjustment":{"expr":{"Literal":{"Value":"'growToFit'"}}},"wordWrap":{"expr":{"Literal":{"Value":"true"}}},"fontColor":{"solid":{"color":{"expr":{"Literal":{"Value":"'#FFFFFF'"}}}}},"backColor":{"solid":{"color":{"expr":{"Literal":{"Value":"'#215E9E'"}}}}}}}],"values":[{"properties":{"fontSize":{"expr":{"Literal":{"Value":"14D"}}},"wordWrap":{"expr":{"Literal":{"Value":"false"}}},"fontColorPrimary":{"solid":{"color":{"expr":{"Literal":{"Value":"'#1F2937'"}}}}},"fontColorSecondary":{"solid":{"color":{"expr":{"Literal":{"Value":"'#1F2937'"}}}}},"backColorPrimary":{"solid":{"color":{"expr":{"Literal":{"Value":"'#FFFFFF'"}}}}},"backColorSecondary":{"solid":{"color":{"expr":{"Literal":{"Value":"'#F7FAFC'"}}}}}}}],"grid":[{"properties":{"rowPadding":{"expr":{"Literal":{"Value":"4D"}}}}}]},"visualContainerObjects":{"general":[{"properties":{"altText":{"expr":{"Literal":{"Value":"'Native metrics · qualified source population, not workforce totals'"}}}}}],"title":[{"properties":{"show":{"expr":{"Literal":{"Value":"true"}}},"text":{"expr":{"Literal":{"Value":"'Native metrics · qualified source population, not workforce totals'"}}},"fontSize":{"expr":{"Literal":{"Value":"15D"}}}}}],"background":[{"properties":{"show":{"expr":{"Literal":{"Value":"true"}}},"color":{"solid":{"color":{"expr":{"Literal":{"Value":"'#FFFFFF'"}}}}},"transparency":{"expr":{"Literal":{"Value":"0D"}}}}}],"border":[{"properties":{"show":{"expr":{"Literal":{"Value":"true"}}},"color":{"solid":{"color":{"expr":{"Literal":{"Value":"'#CCDCEC'"}}}}},"radius":{"expr":{"Literal":{"Value":"8D"}}},"width":{"expr":{"Literal":{"Value":"1D"}}}}}],"visualHeader":[{"properties":{"show":{"expr":{"Literal":{"Value":"false"}}}}}],"padding":[{"properties":{"top":{"expr":{"Literal":{"Value":"8D"}}},"bottom":{"expr":{"Literal":{"Value":"8D"}}},"left":{"expr":{"Literal":{"Value":"8D"}}},"right":{"expr":{"Literal":{"Value":"8D"}}}}}],"subTitle":[{"properties":{"show":{"expr":{"Literal":{"Value":"false"}}}}}],"stylePreset":[{"properties":{"name":{"expr":{"Literal":{"Value":"'None'"}}}}}]},"drillFilterOtherVisuals":true},"parentGroupName":"e68d2d91aa9a731482da"}
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json",
+  "name": "7d368bc584f4b4947a1e",
+  "position": {
+    "x": 32,
+    "y": 848,
+    "width": 1856,
+    "height": 144,
+    "z": 12000,
+    "tabOrder": 544
+  },
+  "visual": {
+    "visualType": "tableEx",
+    "query": {
+      "queryState": {
+        "Values": {
+          "projections": [
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Mailbox Hosting"
+                    }
+                  },
+                  "Property": "Native Hosted mailboxes"
+                }
+              },
+              "queryRef": "Native Mailbox Hosting.Native Hosted mailboxes",
+              "nativeQueryRef": "Native Hosted mailboxes"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Mailbox Hosting"
+                    }
+                  },
+                  "Property": "Native Exchange Online mailboxes"
+                }
+              },
+              "queryRef": "Native Mailbox Hosting.Native Exchange Online mailboxes",
+              "nativeQueryRef": "Native Exchange Online mailboxes"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Mailbox Hosting"
+                    }
+                  },
+                  "Property": "Native Exchange On-premises mailboxes"
+                }
+              },
+              "queryRef": "Native Mailbox Hosting.Native Exchange On-premises mailboxes",
+              "nativeQueryRef": "Native Exchange On-premises mailboxes"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Mailbox Hosting"
+                    }
+                  },
+                  "Property": "Native Exchange Online share"
+                }
+              },
+              "queryRef": "Native Mailbox Hosting.Native Exchange Online share",
+              "nativeQueryRef": "Native Exchange Online share"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Mailbox Hosting"
+                    }
+                  },
+                  "Property": "Native Exchange On-premises share"
+                }
+              },
+              "queryRef": "Native Mailbox Hosting.Native Exchange On-premises share",
+              "nativeQueryRef": "Native Exchange On-premises share"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Mailbox Hosting"
+                    }
+                  },
+                  "Property": "Native User mailboxes"
+                }
+              },
+              "queryRef": "Native Mailbox Hosting.Native User mailboxes",
+              "nativeQueryRef": "Native User mailboxes"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Mailbox Hosting"
+                    }
+                  },
+                  "Property": "Native Shared mailboxes"
+                }
+              },
+              "queryRef": "Native Mailbox Hosting.Native Shared mailboxes",
+              "nativeQueryRef": "Native Shared mailboxes"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Mailbox Hosting"
+                    }
+                  },
+                  "Property": "Native Other mailbox types"
+                }
+              },
+              "queryRef": "Native Mailbox Hosting.Native Other mailbox types",
+              "nativeQueryRef": "Native Other mailbox types"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Mailbox Hosting"
+                    }
+                  },
+                  "Property": "Native User mailbox share"
+                }
+              },
+              "queryRef": "Native Mailbox Hosting.Native User mailbox share",
+              "nativeQueryRef": "Native User mailbox share"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Mailbox Hosting"
+                    }
+                  },
+                  "Property": "Native Shared mailbox share"
+                }
+              },
+              "queryRef": "Native Mailbox Hosting.Native Shared mailbox share",
+              "nativeQueryRef": "Native Shared mailbox share"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Mailbox Hosting"
+                    }
+                  },
+                  "Property": "Native Other mailbox type share"
+                }
+              },
+              "queryRef": "Native Mailbox Hosting.Native Other mailbox type share",
+              "nativeQueryRef": "Native Other mailbox type share"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Mailbox Hosting"
+                    }
+                  },
+                  "Property": "Native Mailbox type share"
+                }
+              },
+              "queryRef": "Native Mailbox Hosting.Native Mailbox type share",
+              "nativeQueryRef": "Native Mailbox type share"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Mailbox Hosting"
+                    }
+                  },
+                  "Property": "Native Mailbox hosting rate"
+                }
+              },
+              "queryRef": "Native Mailbox Hosting.Native Mailbox hosting rate",
+              "nativeQueryRef": "Native Mailbox hosting rate"
+            }
+          ]
+        }
+      }
+    },
+    "objects": {
+      "columnHeaders": [
+        {
+          "properties": {
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "14D"
+                }
+              }
+            },
+            "autoSizeColumnWidth": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "columnAdjustment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'growToFit'"
+                }
+              }
+            },
+            "wordWrap": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "fontColor": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#FFFFFF'"
+                    }
+                  }
+                }
+              }
+            },
+            "backColor": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#215E9E'"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      ],
+      "values": [
+        {
+          "properties": {
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "14D"
+                }
+              }
+            },
+            "wordWrap": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            },
+            "fontColorPrimary": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#1F2937'"
+                    }
+                  }
+                }
+              }
+            },
+            "fontColorSecondary": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#1F2937'"
+                    }
+                  }
+                }
+              }
+            },
+            "backColorPrimary": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#FFFFFF'"
+                    }
+                  }
+                }
+              }
+            },
+            "backColorSecondary": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#F7FAFC'"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      ],
+      "grid": [
+        {
+          "properties": {
+            "rowPadding": {
+              "expr": {
+                "Literal": {
+                  "Value": "4D"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "visualContainerObjects": {
+      "general": [
+        {
+          "properties": {
+            "altText": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Native metrics · qualified source population, not workforce totals'"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "title": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "text": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Native metrics · qualified source population, not workforce totals'"
+                }
+              }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "15D"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "background": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "color": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#FFFFFF'"
+                    }
+                  }
+                }
+              }
+            },
+            "transparency": {
+              "expr": {
+                "Literal": {
+                  "Value": "0D"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "border": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "color": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#CCDCEC'"
+                    }
+                  }
+                }
+              }
+            },
+            "radius": {
+              "expr": {
+                "Literal": {
+                  "Value": "8D"
+                }
+              }
+            },
+            "width": {
+              "expr": {
+                "Literal": {
+                  "Value": "1D"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "visualHeader": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "padding": [
+        {
+          "properties": {
+            "top": {
+              "expr": {
+                "Literal": {
+                  "Value": "8D"
+                }
+              }
+            },
+            "bottom": {
+              "expr": {
+                "Literal": {
+                  "Value": "8D"
+                }
+              }
+            },
+            "left": {
+              "expr": {
+                "Literal": {
+                  "Value": "8D"
+                }
+              }
+            },
+            "right": {
+              "expr": {
+                "Literal": {
+                  "Value": "8D"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "subTitle": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "stylePreset": [
+        {
+          "properties": {
+            "name": {
+              "expr": {
+                "Literal": {
+                  "Value": "'None'"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "drillFilterOtherVisuals": true
+  },
+  "parentGroupName": "e68d2d91aa9a731482da"
+}

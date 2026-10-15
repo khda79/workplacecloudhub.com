@@ -3,28 +3,19 @@ table 'Native Application Ranking'
 	lineageTag: f8650fc5-484c-40c6-b2b0-2841a34c1a00
 
 	/// Source-reported application-device occurrences for the five highest-volume normalized products; not distinct devices. Migrated without changing the source calculation.
-	measure 'Native Top application occurrences' =
-			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
-			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
-			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (SUM('Native Application Ranking'[ReportedDeviceCount])))
+	measure 'Native Top application occurrences' = (SUM('Native Application Ranking'[ReportedDeviceCount]))
 		formatString: #,0
 		displayFolder: Native evidence
 		lineageTag: 99bd8b6e-c9b4-41f9-818b-ca122f5f6f7a
 
 	/// Share within the five highest-volume normalized application products; source-reported occurrences are not distinct devices. Migrated without changing the source calculation.
-	measure 'Native Top application occurrence rate' =
-			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
-			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
-			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (DIVIDE([Native Top application occurrences], CALCULATE([Native Top application occurrences], REMOVEFILTERS('Native Application Ranking'[ApplicationProduct])))))
+	measure 'Native Top application occurrence rate' = (DIVIDE([Native Top application occurrences], CALCULATE([Native Top application occurrences], REMOVEFILTERS('Native Application Ranking'[ApplicationProduct]))))
 		formatString: 0.0%
 		displayFolder: Native evidence
 		lineageTag: 6e2bcf46-73ad-4bb7-927d-55e054dc29b7
 
-	/// Exact native-key entity context or existing inventory context. No name matching or inferred transitive membership. Unrelated entity selections return blank.
-	measure 'Native Context Rows · Native Application Ranking' =
-			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
-			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
-			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (COUNTROWS('Native Application Ranking')))
+	/// Existing qualified workforce/device scope via exact native IDs; otherwise the domain selection. No name matching or inferred transitive membership.
+	measure 'Native Context Rows · Native Application Ranking' = (COUNTROWS('Native Application Ranking'))
 		formatString: #,0
 		isHidden
 		lineageTag: 0f2546d5-bf24-4847-b50d-db4dbc2ceba2

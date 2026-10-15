@@ -47,7 +47,6 @@ table Date
 	column 'Month Number'
 		dataType: int64
 		isHidden
-		isAvailableInMdx: false
 		lineageTag: e93fa7c7-4738-49a3-997b-e3246cd1bda1
 		summarizeBy: none
 		sourceColumn: Month Number

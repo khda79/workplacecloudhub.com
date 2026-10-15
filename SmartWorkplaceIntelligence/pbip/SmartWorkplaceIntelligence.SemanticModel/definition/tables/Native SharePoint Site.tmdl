@@ -3,71 +3,43 @@ table 'Native SharePoint Site'
 	lineageTag: e564100c-c37b-4fe6-bac2-0ca663c2dc80
 
 	/// Distinct SharePoint sites from the Microsoft 365 D180 site-usage report; OneDrive personal sites are excluded. Migrated without changing the source calculation.
-	measure 'Native SharePoint sites' =
-			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
-			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
-			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimSharePointSite"))
-			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((DISTINCTCOUNT('Native SharePoint Site'[TenantSiteKey])), KEEPFILTERS(TREATAS(NativeKeys0, 'Native SharePoint Site'[TenantSiteKey]))), BLANK()), BLANK()), (DISTINCTCOUNT('Native SharePoint Site'[TenantSiteKey])))
+	measure 'Native SharePoint sites' = (DISTINCTCOUNT('Native SharePoint Site'[TenantSiteKey]))
 		formatString: #,0
 		displayFolder: Native evidence
 		lineageTag: e1fec929-9361-4d1c-9ad4-4d40ac7ce6ea
 
 	/// SharePoint sites with activity reported within 90 days. Migrated without changing the source calculation.
-	measure 'Native Active SharePoint sites' =
-			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
-			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
-			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimSharePointSite"))
-			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((CALCULATE([Native SharePoint sites], KEEPFILTERS('Native SharePoint Site'[ActivityState] = "Active (90d)"))), KEEPFILTERS(TREATAS(NativeKeys0, 'Native SharePoint Site'[TenantSiteKey]))), BLANK()), BLANK()), (CALCULATE([Native SharePoint sites], KEEPFILTERS('Native SharePoint Site'[ActivityState] = "Active (90d)"))))
+	measure 'Native Active SharePoint sites' = (CALCULATE([Native SharePoint sites], KEEPFILTERS('Native SharePoint Site'[ActivityState] = "Active (90d)")))
 		formatString: #,0
 		displayFolder: Native evidence
 		lineageTag: 19c0a310-0068-4f30-bbc1-55ec3e4b30a2
 
 	/// SharePoint sites active within 90 days divided by all reported SharePoint sites. Migrated without changing the source calculation.
-	measure 'Native SharePoint active rate' =
-			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
-			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
-			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimSharePointSite"))
-			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((DIVIDE([Native Active SharePoint sites], [Native SharePoint sites])), KEEPFILTERS(TREATAS(NativeKeys0, 'Native SharePoint Site'[TenantSiteKey]))), BLANK()), BLANK()), (DIVIDE([Native Active SharePoint sites], [Native SharePoint sites])))
+	measure 'Native SharePoint active rate' = (DIVIDE([Native Active SharePoint sites], [Native SharePoint sites]))
 		formatString: 0.0%
 		displayFolder: Native evidence
 		lineageTag: 214f2dd7-4fdc-4aa2-9891-9ae0323ac63b
 
 	/// Share of SharePoint sites by explicit 90-day activity state. Migrated without changing the source calculation.
-	measure 'Native SharePoint activity state rate' =
-			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
-			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
-			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimSharePointSite"))
-			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((DIVIDE([Native SharePoint sites], CALCULATE([Native SharePoint sites], REMOVEFILTERS('Native SharePoint Site'[ActivityState])))), KEEPFILTERS(TREATAS(NativeKeys0, 'Native SharePoint Site'[TenantSiteKey]))), BLANK()), BLANK()), (DIVIDE([Native SharePoint sites], CALCULATE([Native SharePoint sites], REMOVEFILTERS('Native SharePoint Site'[ActivityState])))))
+	measure 'Native SharePoint activity state rate' = (DIVIDE([Native SharePoint sites], CALCULATE([Native SharePoint sites], REMOVEFILTERS('Native SharePoint Site'[ActivityState]))))
 		formatString: 0.0%
 		displayFolder: Native evidence
 		lineageTag: 8db7ecee-2c0a-41ce-bddb-49ceaf545771
 
 	/// Total reported SharePoint site storage in GiB. Migrated without changing the source calculation.
-	measure 'Native SharePoint storage used GB' =
-			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
-			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
-			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimSharePointSite"))
-			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((DIVIDE(SUM('Native SharePoint Site'[StorageUsedBytes]), 1073741824)), KEEPFILTERS(TREATAS(NativeKeys0, 'Native SharePoint Site'[TenantSiteKey]))), BLANK()), BLANK()), (DIVIDE(SUM('Native SharePoint Site'[StorageUsedBytes]), 1073741824)))
+	measure 'Native SharePoint storage used GB' = (DIVIDE(SUM('Native SharePoint Site'[StorageUsedBytes]), 1073741824))
 		formatString: #,0.0
 		displayFolder: Native evidence
 		lineageTag: 556e9cc3-e981-4cf3-9846-05e41cc8722a
 
 	/// Reported SharePoint storage used divided by reported allocated storage. Migrated without changing the source calculation.
-	measure 'Native SharePoint storage utilization' =
-			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
-			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
-			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimSharePointSite"))
-			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((DIVIDE(SUM('Native SharePoint Site'[StorageUsedBytes]), SUM('Native SharePoint Site'[StorageAllocatedBytes]))), KEEPFILTERS(TREATAS(NativeKeys0, 'Native SharePoint Site'[TenantSiteKey]))), BLANK()), BLANK()), (DIVIDE(SUM('Native SharePoint Site'[StorageUsedBytes]), SUM('Native SharePoint Site'[StorageAllocatedBytes]))))
+	measure 'Native SharePoint storage utilization' = (DIVIDE(SUM('Native SharePoint Site'[StorageUsedBytes]), SUM('Native SharePoint Site'[StorageAllocatedBytes])))
 		formatString: 0.0%
 		displayFolder: Native evidence
 		lineageTag: 5cd79e92-4936-4636-8fb7-74711e121dfb
 
-	/// Exact native-key entity context or existing inventory context. No name matching or inferred transitive membership. Unrelated entity selections return blank.
-	measure 'Native Context Rows · Native SharePoint Site' =
-			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
-			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
-			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimSharePointSite"))
-			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((COUNTROWS('Native SharePoint Site')), KEEPFILTERS(TREATAS(NativeKeys0, 'Native SharePoint Site'[TenantSiteKey]))), BLANK()), BLANK()), (COUNTROWS('Native SharePoint Site')))
+	/// Existing qualified workforce/device scope via exact native IDs; otherwise the domain selection. No name matching or inferred transitive membership.
+	measure 'Native Context Rows · Native SharePoint Site' = (COUNTROWS('Native SharePoint Site'))
 		formatString: #,0
 		isHidden
 		lineageTag: f8f8fbde-7e9d-48d2-b536-e794328045e8

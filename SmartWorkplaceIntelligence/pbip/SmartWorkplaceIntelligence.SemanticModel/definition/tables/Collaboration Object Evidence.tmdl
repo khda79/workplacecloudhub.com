@@ -44,8 +44,8 @@ table 'Collaboration Object Evidence'
 		displayFolder: Content | Risk
 		lineageTag: c704b8d4-33b7-483e-852a-89fd27ed1339
 
-	/// Observed Teams, SharePoint, and OneDrive storage used in gigabytes.
-	measure 'Collaboration Storage Used (GB)' = SUM('Collaboration Object Evidence'[Storage Used GB])
+	/// Observed SharePoint and OneDrive storage only. Teams storage is hosted on SharePoint and is not added again. A Teams-only selection returns blank.
+	measure 'Collaboration Storage Used (GB)' = CALCULATE(SUM('Collaboration Object Evidence'[Storage Used GB]), KEEPFILTERS('Collaboration Object Evidence'[Service] <> "Teams"))
 		formatString: #,0.0
 		displayFolder: Content | Storage
 		lineageTag: dc113fc2-b9c2-4157-b3d0-7e2d0c13624d

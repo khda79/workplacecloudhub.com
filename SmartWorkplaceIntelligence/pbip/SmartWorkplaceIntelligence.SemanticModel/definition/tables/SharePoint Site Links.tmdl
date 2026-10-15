@@ -1,0 +1,134 @@
+/// Receipt-qualified observed Teams / SharePoint scope. Single reviewed tenant batch; no inference of full tenant coverage.
+table 'SharePoint Site Links'
+	lineageTag: c5bfe37c-529a-4124-8d04-84839d8fd2be
+
+	/// Sites in the verified non-OneDrive SPO capture; not all tenant sites.
+	measure 'Observed SPO Sites' = COUNTROWS('SharePoint Site Links')
+		formatString: #,0
+		displayFolder: Teams & SharePoint | Observed scope
+		lineageTag: fe3579f2-1d56-4282-89bf-cd87f5a4ebd1
+
+	/// Distinct observed sites, regardless of number of Teams/channel links.
+	measure 'SPO Sites With Teams Link' = CALCULATE(COUNTROWS('SharePoint Site Links'), KEEPFILTERS('SharePoint Site Links'[Teams Link State] = "Observed Teams link"))
+		formatString: #,0
+		displayFolder: Teams & SharePoint | Observed scope
+		lineageTag: 4080faa6-08e3-40e2-9ecf-e7bebd98051f
+
+	/// Receipt and complete channel-link coverage across captures no more than 24 hours apart; not tenant-wide completeness.
+	measure 'Teams Site Coverage Qualified' =
+			VAR Proofs = ALL('Collaboration Source Qualification')
+			RETURN IF(COUNTROWS(Proofs) = 2 && COUNTROWS(FILTER(Proofs, 'Collaboration Source Qualification'[Link Coverage Qualified] = TRUE())) = 2, 1, 0)
+		formatString: 0
+		displayFolder: Teams & SharePoint | Observed scope
+		lineageTag: 6ffc2c2a-e8d1-4edd-bebf-70c2ae4ab582
+
+	/// Distinct linked sites / observed sites. Blank if coverage is not qualified.
+	measure 'SPO Sites With Teams Link (%)' = IF([Teams Site Coverage Qualified] = 1, DIVIDE([SPO Sites With Teams Link], CALCULATE([Observed SPO Sites], REMOVEFILTERS('SharePoint Site Links'[Teams Link State]))))
+		formatString: 0.0%
+		displayFolder: Teams & SharePoint | Observed scope
+		lineageTag: 6fb5e09b-7d9e-4b02-9d9d-c5e0b7eb29b3
+
+	/// Absence of observed link is not proof of a standalone or non-Teams site.
+	measure 'SPO Sites Without Observed Teams Link' = IF([Teams Site Coverage Qualified] = 1, CALCULATE(COUNTROWS('SharePoint Site Links'), KEEPFILTERS('SharePoint Site Links'[Teams Link State] = "No observed Teams link")))
+		formatString: #,0
+		displayFolder: Teams & SharePoint | Observed scope
+		lineageTag: d90b2650-8b2a-49d4-9fb2-4d4d66df576f
+
+	/// One source row per SPO site; no addition of duplicate Teams storage.
+	measure 'Observed SPO Storage (GB)' = SUM('SharePoint Site Links'[Storage Used GB])
+		formatString: #,0.0
+		displayFolder: Teams & SharePoint | Observed scope
+		lineageTag: 17fa4603-8cff-49ba-8b51-4b3a2467f3d4
+
+	/// Storage counted once per observed linked site, including shared/private channel sites.
+	measure 'Teams Linked SPO Storage (GB)' = CALCULATE([Observed SPO Storage (GB)], KEEPFILTERS('SharePoint Site Links'[Teams Link State] = "Observed Teams link"))
+		formatString: #,0.0
+		displayFolder: Teams & SharePoint | Observed scope
+		lineageTag: 9d2bdb19-88de-4c1b-86ea-1fd0a4b844f7
+
+	/// Receipt-qualified observed evidence.
+	column TenantKey
+		dataType: string
+		isHidden
+		lineageTag: 4b4f74b6-304e-43b0-a55a-b7a4f0567276
+		summarizeBy: none
+		sourceColumn: TenantKey
+
+	/// Receipt-qualified observed evidence.
+	column 'Site ID'
+		dataType: string
+		lineageTag: 7f677da1-ae21-4a70-8f59-7daf540295b7
+		summarizeBy: none
+		sourceColumn: Site ID
+
+	/// Receipt-qualified observed evidence.
+	column Site
+		dataType: string
+		lineageTag: d92d4494-7689-4c5c-96fb-3c3b03ea459e
+		summarizeBy: none
+		sourceColumn: Site
+
+	/// Receipt-qualified observed evidence.
+	column 'Site URL'
+		dataType: string
+		lineageTag: 29b6ef2d-fb6b-4065-8975-41a0ec0c2de9
+		summarizeBy: none
+		sourceColumn: Site URL
+
+	/// Receipt-qualified observed evidence.
+	column 'Teams Link State'
+		dataType: string
+		lineageTag: 678848f9-62f8-4d1d-90f2-4939c17940ef
+		summarizeBy: none
+		sourceColumn: Teams Link State
+
+	/// Receipt-qualified observed evidence.
+	column 'Link Count'
+		dataType: int64
+		lineageTag: 72eb6e10-f2d7-4206-9c5d-45cb01268352
+		summarizeBy: none
+		sourceColumn: Link Count
+
+	/// Receipt-qualified observed evidence.
+	column 'Storage Used GB'
+		dataType: double
+		lineageTag: 062104de-d8c2-4cef-950b-1f43b65da155
+		summarizeBy: none
+		sourceColumn: Storage Used GB
+
+	/// Receipt-qualified observed evidence.
+	column 'Collection Scope'
+		dataType: string
+		lineageTag: d7f439c8-efcc-4239-b23c-1db70995d556
+		summarizeBy: none
+		sourceColumn: Collection Scope
+
+	/// Source usage report date, not acquisition time.
+	column 'Usage Report Date'
+		dataType: dateTime
+		lineageTag: 799fb331-4f50-46d7-adb4-25185a450877
+		summarizeBy: none
+		sourceColumn: Usage Report Date
+
+	/// Receipt-qualified observed evidence.
+	column 'Collected UTC'
+		dataType: dateTime
+		lineageTag: 773bc544-b3d7-47b4-8918-e5826246ad8a
+		summarizeBy: none
+		sourceColumn: Collected UTC
+
+	/// Receipt-qualified observed evidence.
+	column 'Link Coverage Qualified'
+		dataType: boolean
+		lineageTag: cb0a6d3a-65b8-4ecd-8886-0dd24609b4e8
+		summarizeBy: none
+		sourceColumn: Link Coverage Qualified
+
+	partition 'SharePoint Site Links' = m
+		mode: import
+		source =
+				let
+				 Source = Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("SharePointSiteLinkEvidence.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]),
+				 Typed = NativeEvidenceTypes(Source, {[name="TenantKey", dataType="String"], [name="Site ID", dataType="String"], [name="Site", dataType="String"], [name="Site URL", dataType="String"], [name="Teams Link State", dataType="String"], [name="Link Count", dataType="Int64"], [name="Storage Used GB", dataType="Double"], [name="Collection Scope", dataType="String"], [name="Usage Report Date", dataType="DateOnly"], [name="Collected UTC", dataType="DateTime"], [name="Link Coverage Qualified", dataType="Boolean"]})
+				in Typed
+

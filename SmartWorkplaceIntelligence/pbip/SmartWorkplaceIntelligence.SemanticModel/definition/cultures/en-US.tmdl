@@ -10700,6 +10700,195 @@ cultureInfo en-US
 			          }
 			        }
 			      ]
+			    },
+			    "sharepoint_site_links.observed_spo_sites": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "SharePoint Site Links",
+			          "ConceptualProperty": "Observed SPO Sites"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Observed SPO sites": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "sharepoint_site_links.spo_sites_with_teams_link": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "SharePoint Site Links",
+			          "ConceptualProperty": "SPO Sites With Teams Link"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Sites with observed Teams link": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "sharepoint_site_links.spo_sites_with_teams_link_": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "SharePoint Site Links",
+			          "ConceptualProperty": "SPO Sites With Teams Link (%)"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Linked / observed sites": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "sharepoint_site_links.observed_spo_storage_gb": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "SharePoint Site Links",
+			          "ConceptualProperty": "Observed SPO Storage (GB)"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Observed site storage (GB)": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "sharepoint_site_links.teams_linked_spo_storage_gb": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "SharePoint Site Links",
+			          "ConceptualProperty": "Teams Linked SPO Storage (GB)"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Teams-linked site storage (GB)": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "teams_site_links.teams_links_outside_spo_scope": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Teams Site Links",
+			          "ConceptualProperty": "Teams Links Outside SPO Scope"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Links outside SPO scope": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "sharepoint_tenant_capacity.spo_tenant_capacity_gb": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "SharePoint Tenant Capacity",
+			          "ConceptualProperty": "SPO Tenant Capacity (GB)"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Tenant capacity (GB)": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "sharepoint_tenant_capacity.spo_tenant_utilization_": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "SharePoint Tenant Capacity",
+			          "ConceptualProperty": "SPO Tenant Utilization (%)"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Tenant utilization": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "sharepoint_tenant_capacity.spo_tenant_capacity_state": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "SharePoint Tenant Capacity",
+			          "ConceptualProperty": "SPO Tenant Capacity State"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Capacity qualification": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
 			    }
 			  }
 			}

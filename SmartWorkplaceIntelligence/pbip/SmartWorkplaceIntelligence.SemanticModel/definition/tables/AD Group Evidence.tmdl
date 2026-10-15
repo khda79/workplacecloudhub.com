@@ -2,14 +2,8 @@
 table 'AD Group Evidence'
 	lineageTag: eb66f367-097f-42f9-9603-146618e3f252
 
-	/// Exact native-key entity context or existing inventory context. No name matching or inferred transitive membership. Unrelated entity selections return blank.
-	measure 'Native Context Rows · AD Group Evidence' =
-			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
-			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
-			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimGroup"))
-			VAR NativeKeys1 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "ADGroupSource"))
-			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((COUNTROWS('AD Group Evidence')), KEEPFILTERS(TREATAS(NativeKeys0, 'AD Group Evidence'[TenantGroupKey]))),
-			COUNTROWS(NativeKeys1) > 0, CALCULATE((COUNTROWS('AD Group Evidence')), KEEPFILTERS(TREATAS(NativeKeys1, 'AD Group Evidence'[TenantADGroupKey]))), BLANK()), BLANK()), (COUNTROWS('AD Group Evidence')))
+	/// Existing qualified workforce/device scope via exact native IDs; otherwise the domain selection. No name matching or inferred transitive membership.
+	measure 'Native Context Rows · AD Group Evidence' = (COUNTROWS('AD Group Evidence'))
 		formatString: #,0
 		isHidden
 		lineageTag: 463d1229-9d46-4dca-95c9-b84df78913d6
@@ -145,13 +139,6 @@ table 'AD Group Evidence'
 		lineageTag: d1eaac95-d87a-41d4-9784-9d805537abdb
 		summarizeBy: none
 		sourceColumn: SourceCollectedDateTime
-
-	/// Exact governed native-key bridge; not a display-name or transitive match.
-	column 'CMDB Entity Key' = LOOKUPVALUE('CMDB Entity Alias'[Entity Key], 'CMDB Entity Alias'[Source Table], "ADGroupSource", 'CMDB Entity Alias'[Source Key], 'AD Group Evidence'[TenantADGroupKey])
-		dataType: string
-		isHidden
-		lineageTag: 778e24bd-7a8c-4781-9a0b-d903285d821c
-		summarizeBy: none
 
 	partition 'AD Group Evidence' = m
 		mode: import

@@ -7,7 +7,7 @@ const root=process.argv[2];assert(root,'Explicit existing private Report directo
 const read=p=>JSON.parse(fs.readFileSync(p,'utf8').replace(/^\uFEFF/,''));
 const id=s=>crypto.createHash('sha256').update('teams-spo-v1:'+s).digest('hex').slice(0,20);
 const def=path.join(root,'definition'),pages=path.join(def,'pages'),marks=path.join(def,'bookmarks');
-const order=read(path.join(pages,'pages.json'));assert.equal(order.pageOrder.length,28);
+const order=read(path.join(pages,'pages.json'));assert.equal(order.pageOrder.length,27);
 const recipe=read(new URL('../config/teams-sharepoint-model-patch.json.txt',import.meta.url));
 const source=read(new URL('../config/prepared-source-contract.json.txt',import.meta.url));
 const output=read(new URL('../config/native-output-contract.json.txt',import.meta.url));
@@ -23,7 +23,7 @@ check(recipe.measureUpdates[0].expression.includes('[Service] <> "Teams"'),'Doub
 check(recipe.measures.find(m=>m.name==='SPO Sites With Teams Link (%)').expression.startsWith('IF([Teams Site Coverage Qualified] = 1'),'Unqualified percentage');
 check(recipe.relationships.every(r=>r.crossFilteringBehavior==='OneDirection'&&!r.relyOnReferentialIntegrity),'Unsafe relationship');
 const bmList=read(path.join(marks,'bookmarks.json'));
-for(const name of ['Collaboration Adoption','Cloud Content & Storage','Service & Content Explorer','CMDB','Data Trust']){
+for(const name of ['Collaboration Adoption','Cloud Content & Storage','Service & Content Explorer','Data Trust']){
   const page=order.pageOrder.map(p=>read(path.join(pages,p,'page.json'))).find(p=>p.displayName===name);
   check(!!page,'Missing existing page');const g=id(page.name+':group'),bm=id(page.name+':bookmark');
   const files=fs.readdirSync(path.join(pages,page.name,'visuals')).filter(v=>fs.existsSync(path.join(pages,page.name,'visuals',v,'visual.json')));

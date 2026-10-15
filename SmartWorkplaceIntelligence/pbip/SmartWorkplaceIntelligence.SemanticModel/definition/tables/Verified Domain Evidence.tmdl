@@ -3,19 +3,13 @@ table 'Verified Domain Evidence'
 	lineageTag: d3e90a80-b310-4f81-9697-98f7154a4a06
 
 	/// Verified Entra domains present in the frozen collection; a domain row does not prove DNS or authentication health. Migrated without changing the source calculation.
-	measure 'Native Verified domains' =
-			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
-			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
-			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (COALESCE(COUNTROWS('Verified Domain Evidence'),0)))
+	measure 'Native Verified domains' = (COALESCE(COUNTROWS('Verified Domain Evidence'),0))
 		formatString: #,0
 		displayFolder: Native evidence
 		lineageTag: b178e0e5-e1c8-4ec1-bd3f-ac5785dbecb9
 
-	/// Exact native-key entity context or existing inventory context. No name matching or inferred transitive membership. Unrelated entity selections return blank.
-	measure 'Native Context Rows · Verified Domain Evidence' =
-			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
-			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
-			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (COUNTROWS('Verified Domain Evidence')))
+	/// Existing qualified workforce/device scope via exact native IDs; otherwise the domain selection. No name matching or inferred transitive membership.
+	measure 'Native Context Rows · Verified Domain Evidence' = (COUNTROWS('Verified Domain Evidence'))
 		formatString: #,0
 		isHidden
 		lineageTag: 7f4c854e-cfce-4a98-9e77-b0c716140294

@@ -1,1 +1,736 @@
-{"$schema":"https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.13.0/schema.json","name":"f37f901e282ff8b8d626","position":{"x":32,"y":336,"z":111,"height":304,"width":1856,"tabOrder":672},"visual":{"visualType":"pivotTable","query":{"queryState":{"Rows":{"projections":[{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Device Operational Signals"}},"Property":"Severity Label"}},"queryRef":"Device Operational Signals.Severity Label","nativeQueryRef":"Severity","active":true},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Device Operational Signals"}},"Property":"Signal"}},"queryRef":"Device Operational Signals.Signal","nativeQueryRef":"Signal","active":true},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Device Operational Signals"}},"Property":"Recommended Action"}},"queryRef":"Device Operational Signals.Recommended Action","nativeQueryRef":"Recommended Action","active":true}]},"Values":{"projections":[{"field":{"Measure":{"Expression":{"SourceRef":{"Entity":"Device Operational Signals"}},"Property":"Affected"}},"queryRef":"Device Operational Signals.Affected","nativeQueryRef":"Affected"},{"field":{"Measure":{"Expression":{"SourceRef":{"Entity":"Device Operational Signals"}},"Property":"Covered"}},"queryRef":"Device Operational Signals.Covered","nativeQueryRef":"Covered"},{"field":{"Measure":{"Expression":{"SourceRef":{"Entity":"Device Operational Signals"}},"Property":"Affected (%)"}},"queryRef":"Device Operational Signals.Affected (%)","nativeQueryRef":"Affected (%)"}]}},"sortDefinition":{"sort":[{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Device Operational Signals"}},"Property":"Signal"}},"direction":"Ascending"}]}},"objects":{"general":[{"properties":{"layout":{"expr":{"Literal":{"Value":"'Tabular'"}}}}}],"subTotals":[{"properties":{"rowSubtotals":{"expr":{"Literal":{"Value":"false"}}},"columnSubtotals":{"expr":{"Literal":{"Value":"false"}}},"perRowLevel":{"expr":{"Literal":{"Value":"false"}}},"perColumnLevel":{"expr":{"Literal":{"Value":"false"}}}}},{"properties":{"rowSubtotals":{"expr":{"Literal":{"Value":"false"}}},"perRowLevel":{"expr":{"Literal":{"Value":"false"}}}},"selector":{"id":"Row"}},{"properties":{"columnSubtotals":{"expr":{"Literal":{"Value":"false"}}},"perColumnLevel":{"expr":{"Literal":{"Value":"false"}}}},"selector":{"id":"Column"}}],"columnHeaders":[{"properties":{"autoSizeColumnWidth":{"expr":{"Literal":{"Value":"true"}}},"columnAdjustment":{"expr":{"Literal":{"Value":"'growToFit'"}}},"fontSize":{"expr":{"Literal":{"Value":"11D"}}},"bold":{"expr":{"Literal":{"Value":"true"}}},"wordWrap":{"expr":{"Literal":{"Value":"true"}}},"fontColor":{"solid":{"color":{"expr":{"Literal":{"Value":"'#FFFFFF'"}}}}},"backColor":{"solid":{"color":{"expr":{"Literal":{"Value":"'#215E9E'"}}}}}}}],"values":[{"properties":{"fontSize":{"expr":{"Literal":{"Value":"11D"}}},"wordWrap":{"expr":{"Literal":{"Value":"false"}}},"fontColorPrimary":{"solid":{"color":{"expr":{"Literal":{"Value":"'#183153'"}}}}},"fontColorSecondary":{"solid":{"color":{"expr":{"Literal":{"Value":"'#183153'"}}}}},"backColorPrimary":{"solid":{"color":{"expr":{"Literal":{"Value":"'#FFFFFF'"}}}}},"backColorSecondary":{"solid":{"color":{"expr":{"Literal":{"Value":"'#F0F5FA'"}}}}}}}],"rowHeaders":[{"properties":{"unfrozen":{"expr":{"Literal":{"Value":"true"}}},"repeatRowHeaders":{"expr":{"Literal":{"Value":"true"}}},"stepped":{"expr":{"Literal":{"Value":"false"}}},"fontSize":{"expr":{"Literal":{"Value":"12D"}}},"wordWrap":{"expr":{"Literal":{"Value":"true"}}}}}]},"visualContainerObjects":{"general":[{"properties":{"altText":{"expr":{"Literal":{"Value":"'Risk and incident signals'"}}}}}],"title":[{"properties":{"show":{"expr":{"Literal":{"Value":"true"}}},"text":{"expr":{"Literal":{"Value":"'Risk and incident signals'"}}},"fontSize":{"expr":{"Literal":{"Value":"12D"}}},"fontColor":{"solid":{"color":{"expr":{"Literal":{"Value":"'#183153'"}}}}}}}],"background":[{"properties":{"show":{"expr":{"Literal":{"Value":"true"}}},"color":{"solid":{"color":{"expr":{"Literal":{"Value":"'#FFFFFF'"}}}}},"transparency":{"expr":{"Literal":{"Value":"0D"}}}}}],"border":[{"properties":{"show":{"expr":{"Literal":{"Value":"true"}}},"color":{"solid":{"color":{"expr":{"Literal":{"Value":"'#CCDCEC'"}}}}},"radius":{"expr":{"Literal":{"Value":"8D"}}},"width":{"expr":{"Literal":{"Value":"1D"}}}}}],"visualHeader":[{"properties":{"show":{"expr":{"Literal":{"Value":"false"}}}}}],"padding":[{"properties":{"top":{"expr":{"Literal":{"Value":"8D"}}},"bottom":{"expr":{"Literal":{"Value":"8D"}}},"left":{"expr":{"Literal":{"Value":"8D"}}},"right":{"expr":{"Literal":{"Value":"8D"}}}}}],"stylePreset":[{"properties":{"name":{"expr":{"Literal":{"Value":"'None'"}}}}}]},"drillFilterOtherVisuals":true},"parentGroupName":"fa5746d42f6566b93ea9","filterConfig":{"filters":[{"name":"d42d79f395ab7cfd24b3","field":{"Column":{"Expression":{"SourceRef":{"Entity":"Device Operational Signals"}},"Property":"Signal"}},"type":"Categorical","filter":{"Version":2,"From":[{"Name":"f","Entity":"Device Operational Signals","Type":0}],"Where":[{"Condition":{"In":{"Expressions":[{"Column":{"Expression":{"SourceRef":{"Source":"f"}},"Property":"Signal"}}],"Values":[[{"Literal":{"Value":"'Windows 10 devices not capable of Windows 11'"}}],[{"Literal":{"Value":"'Windows Update hard failures'"}}],[{"Literal":{"Value":"'Windows 10 devices capable but not migrated'"}}],[{"Literal":{"Value":"'Windows 11 eligibility not assessed'"}}],[{"Literal":{"Value":"'Secure Boot disabled'"}}],[{"Literal":{"Value":"'Older Windows 11 releases'"}}]]}}}]}},{"name":"7bc928fb11806e77fb89","field":{"Column":{"Expression":{"SourceRef":{"Entity":"Device Operational Signals"}},"Property":"Severity Label"}},"type":"Categorical"},{"name":"5b3eb2fe1bd4d08f5cf7","field":{"Measure":{"Expression":{"SourceRef":{"Entity":"Device Operational Signals"}},"Property":"Affected"}},"type":"Advanced"},{"name":"ff3dbf232a8af2345014","field":{"Measure":{"Expression":{"SourceRef":{"Entity":"Device Operational Signals"}},"Property":"Covered"}},"type":"Advanced"},{"name":"d68a63e079ea8361bbdb","field":{"Measure":{"Expression":{"SourceRef":{"Entity":"Device Operational Signals"}},"Property":"Affected (%)"}},"type":"Advanced"},{"name":"22a2130291fa1fb57fcf","field":{"Column":{"Expression":{"SourceRef":{"Entity":"Device Operational Signals"}},"Property":"Recommended Action"}},"type":"Categorical"}]}}
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.13.0/schema.json",
+  "name": "f37f901e282ff8b8d626",
+  "position": {
+    "x": 32,
+    "y": 336,
+    "z": 111,
+    "height": 304,
+    "width": 1856,
+    "tabOrder": 672
+  },
+  "visual": {
+    "visualType": "pivotTable",
+    "query": {
+      "queryState": {
+        "Rows": {
+          "projections": [
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Device Operational Signals"
+                    }
+                  },
+                  "Property": "Severity Label"
+                }
+              },
+              "queryRef": "Device Operational Signals.Severity Label",
+              "nativeQueryRef": "Severity",
+              "active": true
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Device Operational Signals"
+                    }
+                  },
+                  "Property": "Signal"
+                }
+              },
+              "queryRef": "Device Operational Signals.Signal",
+              "nativeQueryRef": "Signal",
+              "active": true
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Device Operational Signals"
+                    }
+                  },
+                  "Property": "Recommended Action"
+                }
+              },
+              "queryRef": "Device Operational Signals.Recommended Action",
+              "nativeQueryRef": "Recommended Action",
+              "active": true
+            }
+          ]
+        },
+        "Values": {
+          "projections": [
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Device Operational Signals"
+                    }
+                  },
+                  "Property": "Affected"
+                }
+              },
+              "queryRef": "Device Operational Signals.Affected",
+              "nativeQueryRef": "Affected"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Device Operational Signals"
+                    }
+                  },
+                  "Property": "Covered"
+                }
+              },
+              "queryRef": "Device Operational Signals.Covered",
+              "nativeQueryRef": "Covered"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Device Operational Signals"
+                    }
+                  },
+                  "Property": "Affected (%)"
+                }
+              },
+              "queryRef": "Device Operational Signals.Affected (%)",
+              "nativeQueryRef": "Affected (%)"
+            }
+          ]
+        }
+      },
+      "sortDefinition": {
+        "sort": [
+          {
+            "field": {
+              "Column": {
+                "Expression": {
+                  "SourceRef": {
+                    "Entity": "Device Operational Signals"
+                  }
+                },
+                "Property": "Signal"
+              }
+            },
+            "direction": "Ascending"
+          }
+        ]
+      }
+    },
+    "objects": {
+      "general": [
+        {
+          "properties": {
+            "layout": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Tabular'"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "subTotals": [
+        {
+          "properties": {
+            "rowSubtotals": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            },
+            "columnSubtotals": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            },
+            "perRowLevel": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            },
+            "perColumnLevel": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            }
+          }
+        },
+        {
+          "properties": {
+            "rowSubtotals": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            },
+            "perRowLevel": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            }
+          },
+          "selector": {
+            "id": "Row"
+          }
+        },
+        {
+          "properties": {
+            "columnSubtotals": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            },
+            "perColumnLevel": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            }
+          },
+          "selector": {
+            "id": "Column"
+          }
+        }
+      ],
+      "columnHeaders": [
+        {
+          "properties": {
+            "autoSizeColumnWidth": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "columnAdjustment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'growToFit'"
+                }
+              }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
+            },
+            "bold": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "wordWrap": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "fontColor": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#FFFFFF'"
+                    }
+                  }
+                }
+              }
+            },
+            "backColor": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#215E9E'"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      ],
+      "values": [
+        {
+          "properties": {
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
+            },
+            "wordWrap": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            },
+            "fontColorPrimary": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#183153'"
+                    }
+                  }
+                }
+              }
+            },
+            "fontColorSecondary": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#183153'"
+                    }
+                  }
+                }
+              }
+            },
+            "backColorPrimary": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#FFFFFF'"
+                    }
+                  }
+                }
+              }
+            },
+            "backColorSecondary": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#F0F5FA'"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      ],
+      "rowHeaders": [
+        {
+          "properties": {
+            "unfrozen": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "repeatRowHeaders": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "stepped": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "12D"
+                }
+              }
+            },
+            "wordWrap": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "visualContainerObjects": {
+      "general": [
+        {
+          "properties": {
+            "altText": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Risk and incident signals'"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "title": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "text": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Risk and incident signals'"
+                }
+              }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "12D"
+                }
+              }
+            },
+            "fontColor": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#183153'"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      ],
+      "background": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "color": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#FFFFFF'"
+                    }
+                  }
+                }
+              }
+            },
+            "transparency": {
+              "expr": {
+                "Literal": {
+                  "Value": "0D"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "border": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "color": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#CCDCEC'"
+                    }
+                  }
+                }
+              }
+            },
+            "radius": {
+              "expr": {
+                "Literal": {
+                  "Value": "8D"
+                }
+              }
+            },
+            "width": {
+              "expr": {
+                "Literal": {
+                  "Value": "1D"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "visualHeader": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "padding": [
+        {
+          "properties": {
+            "top": {
+              "expr": {
+                "Literal": {
+                  "Value": "8D"
+                }
+              }
+            },
+            "bottom": {
+              "expr": {
+                "Literal": {
+                  "Value": "8D"
+                }
+              }
+            },
+            "left": {
+              "expr": {
+                "Literal": {
+                  "Value": "8D"
+                }
+              }
+            },
+            "right": {
+              "expr": {
+                "Literal": {
+                  "Value": "8D"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "stylePreset": [
+        {
+          "properties": {
+            "name": {
+              "expr": {
+                "Literal": {
+                  "Value": "'None'"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "drillFilterOtherVisuals": true
+  },
+  "parentGroupName": "fa5746d42f6566b93ea9",
+  "filterConfig": {
+    "filters": [
+      {
+        "name": "d42d79f395ab7cfd24b3",
+        "field": {
+          "Column": {
+            "Expression": {
+              "SourceRef": {
+                "Entity": "Device Operational Signals"
+              }
+            },
+            "Property": "Signal"
+          }
+        },
+        "type": "Categorical",
+        "filter": {
+          "Version": 2,
+          "From": [
+            {
+              "Name": "f",
+              "Entity": "Device Operational Signals",
+              "Type": 0
+            }
+          ],
+          "Where": [
+            {
+              "Condition": {
+                "In": {
+                  "Expressions": [
+                    {
+                      "Column": {
+                        "Expression": {
+                          "SourceRef": {
+                            "Source": "f"
+                          }
+                        },
+                        "Property": "Signal"
+                      }
+                    }
+                  ],
+                  "Values": [
+                    [
+                      {
+                        "Literal": {
+                          "Value": "'Windows 10 devices not capable of Windows 11'"
+                        }
+                      }
+                    ],
+                    [
+                      {
+                        "Literal": {
+                          "Value": "'Windows Update hard failures'"
+                        }
+                      }
+                    ],
+                    [
+                      {
+                        "Literal": {
+                          "Value": "'Windows 10 devices capable but not migrated'"
+                        }
+                      }
+                    ],
+                    [
+                      {
+                        "Literal": {
+                          "Value": "'Windows 11 eligibility not assessed'"
+                        }
+                      }
+                    ],
+                    [
+                      {
+                        "Literal": {
+                          "Value": "'Secure Boot disabled'"
+                        }
+                      }
+                    ],
+                    [
+                      {
+                        "Literal": {
+                          "Value": "'Older Windows 11 releases'"
+                        }
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          ]
+        }
+      },
+      {
+        "name": "7bc928fb11806e77fb89",
+        "field": {
+          "Column": {
+            "Expression": {
+              "SourceRef": {
+                "Entity": "Device Operational Signals"
+              }
+            },
+            "Property": "Severity Label"
+          }
+        },
+        "type": "Categorical"
+      },
+      {
+        "name": "5b3eb2fe1bd4d08f5cf7",
+        "field": {
+          "Measure": {
+            "Expression": {
+              "SourceRef": {
+                "Entity": "Device Operational Signals"
+              }
+            },
+            "Property": "Affected"
+          }
+        },
+        "type": "Advanced"
+      },
+      {
+        "name": "ff3dbf232a8af2345014",
+        "field": {
+          "Measure": {
+            "Expression": {
+              "SourceRef": {
+                "Entity": "Device Operational Signals"
+              }
+            },
+            "Property": "Covered"
+          }
+        },
+        "type": "Advanced"
+      },
+      {
+        "name": "d68a63e079ea8361bbdb",
+        "field": {
+          "Measure": {
+            "Expression": {
+              "SourceRef": {
+                "Entity": "Device Operational Signals"
+              }
+            },
+            "Property": "Affected (%)"
+          }
+        },
+        "type": "Advanced"
+      },
+      {
+        "name": "22a2130291fa1fb57fcf",
+        "field": {
+          "Column": {
+            "Expression": {
+              "SourceRef": {
+                "Entity": "Device Operational Signals"
+              }
+            },
+            "Property": "Recommended Action"
+          }
+        },
+        "type": "Categorical"
+      }
+    ]
+  }
+}

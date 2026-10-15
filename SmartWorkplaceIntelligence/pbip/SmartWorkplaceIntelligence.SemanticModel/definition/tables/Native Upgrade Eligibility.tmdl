@@ -3,28 +3,19 @@ table 'Native Upgrade Eligibility'
 	lineageTag: e7382a93-248d-4a6b-86cb-da35f24e6fc9
 
 	/// Distinct readiness records linked by exact Intune device identifier to the filtered device population. Migrated without changing the source calculation.
-	measure 'Native Selected upgrade eligibility devices' =
-			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
-			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
-			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (VAR _deviceKeys = VALUES('Native Device Evidence'[TenantDeviceKey]) VAR _intuneIds = CALCULATETABLE(VALUES('Device Source Evidence'[SourceObjectId]), TREATAS(_deviceKeys, 'Device Source Evidence'[TenantDeviceKey]), KEEPFILTERS('Device Source Evidence'[SourceSystem] = "Intune")) RETURN CALCULATE(DISTINCTCOUNT('Native Upgrade Eligibility'[DeviceId]), TREATAS(_intuneIds, 'Native Upgrade Eligibility'[DeviceId]))))
+	measure 'Native Selected upgrade eligibility devices' = (VAR _deviceKeys = VALUES('Native Device Evidence'[TenantDeviceKey]) VAR _intuneIds = CALCULATETABLE(VALUES('Device Source Evidence'[SourceObjectId]), TREATAS(_deviceKeys, 'Device Source Evidence'[TenantDeviceKey]), KEEPFILTERS('Device Source Evidence'[SourceSystem] = "Intune")) RETURN CALCULATE(DISTINCTCOUNT('Native Upgrade Eligibility'[DeviceId]), TREATAS(_intuneIds, 'Native Upgrade Eligibility'[DeviceId])))
 		formatString: #,0
 		displayFolder: Native evidence
 		lineageTag: 630b65c2-df6b-4001-9442-1b87277d1ce3
 
 	/// Share of each reported Windows upgrade-eligibility state within exact matched Intune devices. Migrated without changing the source calculation.
-	measure 'Native Upgrade eligibility rate' =
-			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
-			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
-			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (DIVIDE([Native Selected upgrade eligibility devices], CALCULATE([Native Selected upgrade eligibility devices], REMOVEFILTERS('Native Upgrade Eligibility'[UpgradeEligibility])))))
+	measure 'Native Upgrade eligibility rate' = (DIVIDE([Native Selected upgrade eligibility devices], CALCULATE([Native Selected upgrade eligibility devices], REMOVEFILTERS('Native Upgrade Eligibility'[UpgradeEligibility]))))
 		formatString: 0.0%
 		displayFolder: Native evidence
 		lineageTag: d4ecf900-f4cc-4aeb-9f0a-3d357ab741d4
 
-	/// Exact native-key entity context or existing inventory context. No name matching or inferred transitive membership. Unrelated entity selections return blank.
-	measure 'Native Context Rows · Native Upgrade Eligibility' =
-			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
-			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
-			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (COUNTROWS('Native Upgrade Eligibility')))
+	/// Existing qualified workforce/device scope via exact native IDs; otherwise the domain selection. No name matching or inferred transitive membership.
+	measure 'Native Context Rows · Native Upgrade Eligibility' = (COUNTROWS('Native Upgrade Eligibility'))
 		formatString: #,0
 		isHidden
 		lineageTag: 10aed998-82cc-4cd9-a52c-fa4127fa3df0

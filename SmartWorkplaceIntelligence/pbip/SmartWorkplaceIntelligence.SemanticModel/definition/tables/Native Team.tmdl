@@ -3,81 +3,49 @@ table 'Native Team'
 	lineageTag: 04ed6c73-eeef-4f9b-acef-6961987476f9
 
 	/// Distinct Microsoft 365 groups provisioned as Teams. Migrated without changing the source calculation.
-	measure 'Native Teams' =
-			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
-			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
-			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimTeam"))
-			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((DISTINCTCOUNT('Native Team'[TenantTeamKey])), KEEPFILTERS(TREATAS(NativeKeys0, 'Native Team'[TenantTeamKey]))), BLANK()), BLANK()), (DISTINCTCOUNT('Native Team'[TenantTeamKey])))
+	measure 'Native Teams' = (DISTINCTCOUNT('Native Team'[TenantTeamKey]))
 		formatString: #,0
 		displayFolder: Native evidence
 		lineageTag: 5a8fca3b-9959-4e3c-bf46-6cbe8f249e6e
 
 	/// Teams with activity reported within 90 days. Migrated without changing the source calculation.
-	measure 'Native Active Teams' =
-			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
-			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
-			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimTeam"))
-			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((CALCULATE([Native Teams], KEEPFILTERS('Native Team'[ActivityState] = "Active (90d)"))), KEEPFILTERS(TREATAS(NativeKeys0, 'Native Team'[TenantTeamKey]))), BLANK()), BLANK()), (CALCULATE([Native Teams], KEEPFILTERS('Native Team'[ActivityState] = "Active (90d)"))))
+	measure 'Native Active Teams' = (CALCULATE([Native Teams], KEEPFILTERS('Native Team'[ActivityState] = "Active (90d)")))
 		formatString: #,0
 		displayFolder: Native evidence
 		lineageTag: 53065359-4e50-4da0-b1a9-7e408fed688f
 
 	/// Teams active within 90 days divided by all Teams. Migrated without changing the source calculation.
-	measure 'Native Teams active rate' =
-			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
-			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
-			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimTeam"))
-			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((DIVIDE([Native Active Teams], [Native Teams])), KEEPFILTERS(TREATAS(NativeKeys0, 'Native Team'[TenantTeamKey]))), BLANK()), BLANK()), (DIVIDE([Native Active Teams], [Native Teams])))
+	measure 'Native Teams active rate' = (DIVIDE([Native Active Teams], [Native Teams]))
 		formatString: 0.0%
 		displayFolder: Native evidence
 		lineageTag: 701ac858-4c0b-47e1-a7bd-b8900f21d738
 
 	/// Share of Teams by explicit 90-day activity state. Migrated without changing the source calculation.
-	measure 'Native Teams activity state rate' =
-			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
-			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
-			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimTeam"))
-			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((DIVIDE([Native Teams], CALCULATE([Native Teams], REMOVEFILTERS('Native Team'[ActivityState])))), KEEPFILTERS(TREATAS(NativeKeys0, 'Native Team'[TenantTeamKey]))), BLANK()), BLANK()), (DIVIDE([Native Teams], CALCULATE([Native Teams], REMOVEFILTERS('Native Team'[ActivityState])))))
+	measure 'Native Teams activity state rate' = (DIVIDE([Native Teams], CALCULATE([Native Teams], REMOVEFILTERS('Native Team'[ActivityState]))))
 		formatString: 0.0%
 		displayFolder: Native evidence
 		lineageTag: 58e68eaf-c87e-4890-a2c3-a0934652caac
 
 	/// Average exact enumerated group-member count across Teams with complete membership coverage. Partial Teams are excluded. Migrated without changing the source calculation.
-	measure 'Native Average members per Team' =
-			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
-			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
-			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimTeam"))
-			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((CALCULATE(AVERAGE('Native Team'[MemberCount]), KEEPFILTERS('Native Team'[MembershipCoverageStatus] = "Complete"))), KEEPFILTERS(TREATAS(NativeKeys0, 'Native Team'[TenantTeamKey]))), BLANK()), BLANK()), (CALCULATE(AVERAGE('Native Team'[MemberCount]), KEEPFILTERS('Native Team'[MembershipCoverageStatus] = "Complete"))))
+	measure 'Native Average members per Team' = (CALCULATE(AVERAGE('Native Team'[MemberCount]), KEEPFILTERS('Native Team'[MembershipCoverageStatus] = "Complete")))
 		formatString: #,0.0
 		displayFolder: Native evidence
 		lineageTag: be047df7-6e99-415e-b70f-de9cb779dcbe
 
 	/// Teams for which Graph returned one or more member objects without an immutable identifier; exact links are preserved but the member total is incomplete. Migrated without changing the source calculation.
-	measure 'Native Teams with partial membership coverage' =
-			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
-			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
-			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimTeam"))
-			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((CALCULATE([Native Teams], KEEPFILTERS('Native Team'[MembershipCoverageStatus] = "Partial"))), KEEPFILTERS(TREATAS(NativeKeys0, 'Native Team'[TenantTeamKey]))), BLANK()), BLANK()), (CALCULATE([Native Teams], KEEPFILTERS('Native Team'[MembershipCoverageStatus] = "Partial"))))
+	measure 'Native Teams with partial membership coverage' = (CALCULATE([Native Teams], KEEPFILTERS('Native Team'[MembershipCoverageStatus] = "Partial")))
 		formatString: #,0
 		displayFolder: Native evidence
 		lineageTag: 1184ed9c-6320-4e3c-9f51-5957cd3bc513
 
 	/// Teams whose exact owner enumeration returned no owner. Migrated without changing the source calculation.
-	measure 'Native Teams without owner' =
-			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
-			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
-			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimTeam"))
-			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((CALCULATE([Native Teams], KEEPFILTERS('Native Team'[OwnerCount] = 0))), KEEPFILTERS(TREATAS(NativeKeys0, 'Native Team'[TenantTeamKey]))), BLANK()), BLANK()), (CALCULATE([Native Teams], KEEPFILTERS('Native Team'[OwnerCount] = 0))))
+	measure 'Native Teams without owner' = (CALCULATE([Native Teams], KEEPFILTERS('Native Team'[OwnerCount] = 0)))
 		formatString: #,0
 		displayFolder: Native evidence
 		lineageTag: 94a88591-be6e-4f21-b3e8-2c3c583a615c
 
-	/// Exact native-key entity context or existing inventory context. No name matching or inferred transitive membership. Unrelated entity selections return blank.
-	measure 'Native Context Rows · Native Team' =
-			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
-			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
-			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimTeam"))
-			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((COUNTROWS('Native Team')), KEEPFILTERS(TREATAS(NativeKeys0, 'Native Team'[TenantTeamKey]))), BLANK()), BLANK()), (COUNTROWS('Native Team')))
+	/// Existing qualified workforce/device scope via exact native IDs; otherwise the domain selection. No name matching or inferred transitive membership.
+	measure 'Native Context Rows · Native Team' = (COUNTROWS('Native Team'))
 		formatString: #,0
 		isHidden
 		lineageTag: 1b876499-893f-4845-9096-63d6b3682904

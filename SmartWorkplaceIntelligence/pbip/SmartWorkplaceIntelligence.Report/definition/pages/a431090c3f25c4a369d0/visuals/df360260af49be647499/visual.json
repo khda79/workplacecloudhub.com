@@ -1,1 +1,718 @@
-{"$schema":"https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json","name":"df360260af49be647499","position":{"x":32,"y":536,"width":1856,"height":288,"z":12000,"tabOrder":544},"visual":{"visualType":"tableEx","query":{"queryState":{"Values":{"projections":[{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"AD Computer Evidence"}},"Property":"Name"}},"queryRef":"AD Computer Evidence.Name","nativeQueryRef":"Name"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"AD Computer Evidence"}},"Property":"TenantADComputerKey"}},"queryRef":"AD Computer Evidence.TenantADComputerKey","nativeQueryRef":"TenantADComputerKey"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"AD Computer Evidence"}},"Property":"ObjectGUID"}},"queryRef":"AD Computer Evidence.ObjectGUID","nativeQueryRef":"ObjectGUID"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"AD Computer Evidence"}},"Property":"ObjectSID"}},"queryRef":"AD Computer Evidence.ObjectSID","nativeQueryRef":"ObjectSID"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"AD Computer Evidence"}},"Property":"DomainName"}},"queryRef":"AD Computer Evidence.DomainName","nativeQueryRef":"DomainName"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"AD Computer Evidence"}},"Property":"DistinguishedName"}},"queryRef":"AD Computer Evidence.DistinguishedName","nativeQueryRef":"DistinguishedName"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"AD Computer Evidence"}},"Property":"DNSHostName"}},"queryRef":"AD Computer Evidence.DNSHostName","nativeQueryRef":"DNSHostName"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"AD Computer Evidence"}},"Property":"Enabled"}},"queryRef":"AD Computer Evidence.Enabled","nativeQueryRef":"Enabled"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"AD Computer Evidence"}},"Property":"OperatingSystem"}},"queryRef":"AD Computer Evidence.OperatingSystem","nativeQueryRef":"OperatingSystem"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"AD Computer Evidence"}},"Property":"OperatingSystemVersion"}},"queryRef":"AD Computer Evidence.OperatingSystemVersion","nativeQueryRef":"OperatingSystemVersion"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"AD Computer Evidence"}},"Property":"TenantDeviceKey"}},"queryRef":"AD Computer Evidence.TenantDeviceKey","nativeQueryRef":"TenantDeviceKey"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"AD Computer Evidence"}},"Property":"CloudMatchStatus"}},"queryRef":"AD Computer Evidence.CloudMatchStatus","nativeQueryRef":"CloudMatchStatus"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"AD Computer Evidence"}},"Property":"LastLogonTimestampRaw"}},"queryRef":"AD Computer Evidence.LastLogonTimestampRaw","nativeQueryRef":"LastLogonTimestampRaw"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"AD Computer Evidence"}},"Property":"LastLogonUtcDateTime"}},"queryRef":"AD Computer Evidence.LastLogonUtcDateTime","nativeQueryRef":"LastLogonUtcDateTime"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"AD Computer Evidence"}},"Property":"LastLogonStatus"}},"queryRef":"AD Computer Evidence.LastLogonStatus","nativeQueryRef":"LastLogonStatus"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"AD Computer Evidence"}},"Property":"CreationRaw"}},"queryRef":"AD Computer Evidence.CreationRaw","nativeQueryRef":"CreationRaw"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"AD Computer Evidence"}},"Property":"CreationUtcDateTime"}},"queryRef":"AD Computer Evidence.CreationUtcDateTime","nativeQueryRef":"CreationUtcDateTime"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"AD Computer Evidence"}},"Property":"CreationStatus"}},"queryRef":"AD Computer Evidence.CreationStatus","nativeQueryRef":"CreationStatus"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"AD Computer Evidence"}},"Property":"SourceCollectedDateTime"}},"queryRef":"AD Computer Evidence.SourceCollectedDateTime","nativeQueryRef":"SourceCollectedDateTime"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"AD Computer Evidence"}},"Property":"TenantKey"}},"queryRef":"AD Computer Evidence.TenantKey","nativeQueryRef":"TenantKey"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"AD Computer Evidence"}},"Property":"OrganizationKey"}},"queryRef":"AD Computer Evidence.OrganizationKey","nativeQueryRef":"OrganizationKey"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"AD Computer Evidence"}},"Property":"EnvironmentKey"}},"queryRef":"AD Computer Evidence.EnvironmentKey","nativeQueryRef":"EnvironmentKey"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"AD Computer Evidence"}},"Property":"TenantId"}},"queryRef":"AD Computer Evidence.TenantId","nativeQueryRef":"TenantId"}]}}},"objects":{"columnHeaders":[{"properties":{"fontSize":{"expr":{"Literal":{"Value":"14D"}}},"autoSizeColumnWidth":{"expr":{"Literal":{"Value":"true"}}},"columnAdjustment":{"expr":{"Literal":{"Value":"'growToFit'"}}},"wordWrap":{"expr":{"Literal":{"Value":"true"}}},"fontColor":{"solid":{"color":{"expr":{"Literal":{"Value":"'#FFFFFF'"}}}}},"backColor":{"solid":{"color":{"expr":{"Literal":{"Value":"'#215E9E'"}}}}}}}],"values":[{"properties":{"fontSize":{"expr":{"Literal":{"Value":"14D"}}},"wordWrap":{"expr":{"Literal":{"Value":"false"}}},"fontColorPrimary":{"solid":{"color":{"expr":{"Literal":{"Value":"'#1F2937'"}}}}},"fontColorSecondary":{"solid":{"color":{"expr":{"Literal":{"Value":"'#1F2937'"}}}}},"backColorPrimary":{"solid":{"color":{"expr":{"Literal":{"Value":"'#FFFFFF'"}}}}},"backColorSecondary":{"solid":{"color":{"expr":{"Literal":{"Value":"'#F7FAFC'"}}}}}}}],"grid":[{"properties":{"rowPadding":{"expr":{"Literal":{"Value":"4D"}}}}}]},"visualContainerObjects":{"general":[{"properties":{"altText":{"expr":{"Literal":{"Value":"'AD computers · complete governed fields'"}}}}}],"title":[{"properties":{"show":{"expr":{"Literal":{"Value":"true"}}},"text":{"expr":{"Literal":{"Value":"'AD computers · complete governed fields'"}}},"fontSize":{"expr":{"Literal":{"Value":"15D"}}}}}],"background":[{"properties":{"show":{"expr":{"Literal":{"Value":"true"}}},"color":{"solid":{"color":{"expr":{"Literal":{"Value":"'#FFFFFF'"}}}}},"transparency":{"expr":{"Literal":{"Value":"0D"}}}}}],"border":[{"properties":{"show":{"expr":{"Literal":{"Value":"true"}}},"color":{"solid":{"color":{"expr":{"Literal":{"Value":"'#CCDCEC'"}}}}},"radius":{"expr":{"Literal":{"Value":"8D"}}},"width":{"expr":{"Literal":{"Value":"1D"}}}}}],"visualHeader":[{"properties":{"show":{"expr":{"Literal":{"Value":"false"}}}}}],"padding":[{"properties":{"top":{"expr":{"Literal":{"Value":"8D"}}},"bottom":{"expr":{"Literal":{"Value":"8D"}}},"left":{"expr":{"Literal":{"Value":"8D"}}},"right":{"expr":{"Literal":{"Value":"8D"}}}}}],"subTitle":[{"properties":{"show":{"expr":{"Literal":{"Value":"false"}}}}}],"stylePreset":[{"properties":{"name":{"expr":{"Literal":{"Value":"'None'"}}}}}]},"drillFilterOtherVisuals":true},"parentGroupName":"8d573bc4ebd0c64cf41f","filterConfig":{"filters":[{"name":"4acad315996e5c32fb20","field":{"Measure":{"Expression":{"SourceRef":{"Entity":"AD Computer Evidence"}},"Property":"Native Context Rows · AD Computer Evidence"}},"type":"Advanced","filter":{"Version":2,"From":[{"Name":"c","Entity":"AD Computer Evidence","Type":0}],"Where":[{"Condition":{"Comparison":{"ComparisonKind":2,"Left":{"Measure":{"Expression":{"SourceRef":{"Source":"c"}},"Property":"Native Context Rows · AD Computer Evidence"}},"Right":{"Literal":{"Value":"0L"}}}}}]}}]}}
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json",
+  "name": "df360260af49be647499",
+  "position": {
+    "x": 32,
+    "y": 536,
+    "width": 1856,
+    "height": 288,
+    "z": 12000,
+    "tabOrder": 544
+  },
+  "visual": {
+    "visualType": "tableEx",
+    "query": {
+      "queryState": {
+        "Values": {
+          "projections": [
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "AD Computer Evidence"
+                    }
+                  },
+                  "Property": "Name"
+                }
+              },
+              "queryRef": "AD Computer Evidence.Name",
+              "nativeQueryRef": "Name"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "AD Computer Evidence"
+                    }
+                  },
+                  "Property": "TenantADComputerKey"
+                }
+              },
+              "queryRef": "AD Computer Evidence.TenantADComputerKey",
+              "nativeQueryRef": "TenantADComputerKey"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "AD Computer Evidence"
+                    }
+                  },
+                  "Property": "ObjectGUID"
+                }
+              },
+              "queryRef": "AD Computer Evidence.ObjectGUID",
+              "nativeQueryRef": "ObjectGUID"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "AD Computer Evidence"
+                    }
+                  },
+                  "Property": "ObjectSID"
+                }
+              },
+              "queryRef": "AD Computer Evidence.ObjectSID",
+              "nativeQueryRef": "ObjectSID"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "AD Computer Evidence"
+                    }
+                  },
+                  "Property": "DomainName"
+                }
+              },
+              "queryRef": "AD Computer Evidence.DomainName",
+              "nativeQueryRef": "DomainName"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "AD Computer Evidence"
+                    }
+                  },
+                  "Property": "DistinguishedName"
+                }
+              },
+              "queryRef": "AD Computer Evidence.DistinguishedName",
+              "nativeQueryRef": "DistinguishedName"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "AD Computer Evidence"
+                    }
+                  },
+                  "Property": "DNSHostName"
+                }
+              },
+              "queryRef": "AD Computer Evidence.DNSHostName",
+              "nativeQueryRef": "DNSHostName"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "AD Computer Evidence"
+                    }
+                  },
+                  "Property": "Enabled"
+                }
+              },
+              "queryRef": "AD Computer Evidence.Enabled",
+              "nativeQueryRef": "Enabled"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "AD Computer Evidence"
+                    }
+                  },
+                  "Property": "OperatingSystem"
+                }
+              },
+              "queryRef": "AD Computer Evidence.OperatingSystem",
+              "nativeQueryRef": "OperatingSystem"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "AD Computer Evidence"
+                    }
+                  },
+                  "Property": "OperatingSystemVersion"
+                }
+              },
+              "queryRef": "AD Computer Evidence.OperatingSystemVersion",
+              "nativeQueryRef": "OperatingSystemVersion"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "AD Computer Evidence"
+                    }
+                  },
+                  "Property": "TenantDeviceKey"
+                }
+              },
+              "queryRef": "AD Computer Evidence.TenantDeviceKey",
+              "nativeQueryRef": "TenantDeviceKey"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "AD Computer Evidence"
+                    }
+                  },
+                  "Property": "CloudMatchStatus"
+                }
+              },
+              "queryRef": "AD Computer Evidence.CloudMatchStatus",
+              "nativeQueryRef": "CloudMatchStatus"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "AD Computer Evidence"
+                    }
+                  },
+                  "Property": "LastLogonTimestampRaw"
+                }
+              },
+              "queryRef": "AD Computer Evidence.LastLogonTimestampRaw",
+              "nativeQueryRef": "LastLogonTimestampRaw"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "AD Computer Evidence"
+                    }
+                  },
+                  "Property": "LastLogonUtcDateTime"
+                }
+              },
+              "queryRef": "AD Computer Evidence.LastLogonUtcDateTime",
+              "nativeQueryRef": "LastLogonUtcDateTime"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "AD Computer Evidence"
+                    }
+                  },
+                  "Property": "LastLogonStatus"
+                }
+              },
+              "queryRef": "AD Computer Evidence.LastLogonStatus",
+              "nativeQueryRef": "LastLogonStatus"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "AD Computer Evidence"
+                    }
+                  },
+                  "Property": "CreationRaw"
+                }
+              },
+              "queryRef": "AD Computer Evidence.CreationRaw",
+              "nativeQueryRef": "CreationRaw"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "AD Computer Evidence"
+                    }
+                  },
+                  "Property": "CreationUtcDateTime"
+                }
+              },
+              "queryRef": "AD Computer Evidence.CreationUtcDateTime",
+              "nativeQueryRef": "CreationUtcDateTime"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "AD Computer Evidence"
+                    }
+                  },
+                  "Property": "CreationStatus"
+                }
+              },
+              "queryRef": "AD Computer Evidence.CreationStatus",
+              "nativeQueryRef": "CreationStatus"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "AD Computer Evidence"
+                    }
+                  },
+                  "Property": "SourceCollectedDateTime"
+                }
+              },
+              "queryRef": "AD Computer Evidence.SourceCollectedDateTime",
+              "nativeQueryRef": "SourceCollectedDateTime"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "AD Computer Evidence"
+                    }
+                  },
+                  "Property": "TenantKey"
+                }
+              },
+              "queryRef": "AD Computer Evidence.TenantKey",
+              "nativeQueryRef": "TenantKey"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "AD Computer Evidence"
+                    }
+                  },
+                  "Property": "OrganizationKey"
+                }
+              },
+              "queryRef": "AD Computer Evidence.OrganizationKey",
+              "nativeQueryRef": "OrganizationKey"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "AD Computer Evidence"
+                    }
+                  },
+                  "Property": "EnvironmentKey"
+                }
+              },
+              "queryRef": "AD Computer Evidence.EnvironmentKey",
+              "nativeQueryRef": "EnvironmentKey"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "AD Computer Evidence"
+                    }
+                  },
+                  "Property": "TenantId"
+                }
+              },
+              "queryRef": "AD Computer Evidence.TenantId",
+              "nativeQueryRef": "TenantId"
+            }
+          ]
+        }
+      }
+    },
+    "objects": {
+      "columnHeaders": [
+        {
+          "properties": {
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "14D"
+                }
+              }
+            },
+            "autoSizeColumnWidth": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "columnAdjustment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'growToFit'"
+                }
+              }
+            },
+            "wordWrap": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "fontColor": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#FFFFFF'"
+                    }
+                  }
+                }
+              }
+            },
+            "backColor": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#215E9E'"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      ],
+      "values": [
+        {
+          "properties": {
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "14D"
+                }
+              }
+            },
+            "wordWrap": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            },
+            "fontColorPrimary": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#1F2937'"
+                    }
+                  }
+                }
+              }
+            },
+            "fontColorSecondary": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#1F2937'"
+                    }
+                  }
+                }
+              }
+            },
+            "backColorPrimary": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#FFFFFF'"
+                    }
+                  }
+                }
+              }
+            },
+            "backColorSecondary": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#F7FAFC'"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      ],
+      "grid": [
+        {
+          "properties": {
+            "rowPadding": {
+              "expr": {
+                "Literal": {
+                  "Value": "4D"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "visualContainerObjects": {
+      "general": [
+        {
+          "properties": {
+            "altText": {
+              "expr": {
+                "Literal": {
+                  "Value": "'AD computers · complete governed fields'"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "title": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "text": {
+              "expr": {
+                "Literal": {
+                  "Value": "'AD computers · complete governed fields'"
+                }
+              }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "15D"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "background": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "color": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#FFFFFF'"
+                    }
+                  }
+                }
+              }
+            },
+            "transparency": {
+              "expr": {
+                "Literal": {
+                  "Value": "0D"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "border": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "color": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#CCDCEC'"
+                    }
+                  }
+                }
+              }
+            },
+            "radius": {
+              "expr": {
+                "Literal": {
+                  "Value": "8D"
+                }
+              }
+            },
+            "width": {
+              "expr": {
+                "Literal": {
+                  "Value": "1D"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "visualHeader": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "padding": [
+        {
+          "properties": {
+            "top": {
+              "expr": {
+                "Literal": {
+                  "Value": "8D"
+                }
+              }
+            },
+            "bottom": {
+              "expr": {
+                "Literal": {
+                  "Value": "8D"
+                }
+              }
+            },
+            "left": {
+              "expr": {
+                "Literal": {
+                  "Value": "8D"
+                }
+              }
+            },
+            "right": {
+              "expr": {
+                "Literal": {
+                  "Value": "8D"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "subTitle": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "stylePreset": [
+        {
+          "properties": {
+            "name": {
+              "expr": {
+                "Literal": {
+                  "Value": "'None'"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "drillFilterOtherVisuals": true
+  },
+  "parentGroupName": "8d573bc4ebd0c64cf41f",
+  "filterConfig": {
+    "filters": [
+      {
+        "name": "4acad315996e5c32fb20",
+        "field": {
+          "Measure": {
+            "Expression": {
+              "SourceRef": {
+                "Entity": "AD Computer Evidence"
+              }
+            },
+            "Property": "Native Context Rows · AD Computer Evidence"
+          }
+        },
+        "type": "Advanced",
+        "filter": {
+          "Version": 2,
+          "From": [
+            {
+              "Name": "c",
+              "Entity": "AD Computer Evidence",
+              "Type": 0
+            }
+          ],
+          "Where": [
+            {
+              "Condition": {
+                "Comparison": {
+                  "ComparisonKind": 2,
+                  "Left": {
+                    "Measure": {
+                      "Expression": {
+                        "SourceRef": {
+                          "Source": "c"
+                        }
+                      },
+                      "Property": "Native Context Rows · AD Computer Evidence"
+                    }
+                  },
+                  "Right": {
+                    "Literal": {
+                      "Value": "0L"
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

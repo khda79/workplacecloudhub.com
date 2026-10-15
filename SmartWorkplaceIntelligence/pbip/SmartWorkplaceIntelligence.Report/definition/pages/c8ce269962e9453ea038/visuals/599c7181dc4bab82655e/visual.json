@@ -1,1 +1,620 @@
-{"$schema":"https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json","name":"599c7181dc4bab82655e","position":{"x":32,"y":488,"width":1856,"height":336,"z":12000,"tabOrder":544},"visual":{"visualType":"tableEx","query":{"queryState":{"Values":{"projections":[{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native AD Intune Coverage"}},"Property":"DeviceName"}},"queryRef":"Native AD Intune Coverage.DeviceName","nativeQueryRef":"DeviceName"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native AD Intune Coverage"}},"Property":"TenantADComputerKey"}},"queryRef":"Native AD Intune Coverage.TenantADComputerKey","nativeQueryRef":"TenantADComputerKey"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native AD Intune Coverage"}},"Property":"CmdbAdComputerId"}},"queryRef":"Native AD Intune Coverage.CmdbAdComputerId","nativeQueryRef":"CmdbAdComputerId"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native AD Intune Coverage"}},"Property":"Enabled"}},"queryRef":"Native AD Intune Coverage.Enabled","nativeQueryRef":"Enabled"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native AD Intune Coverage"}},"Property":"OperatingSystem"}},"queryRef":"Native AD Intune Coverage.OperatingSystem","nativeQueryRef":"OperatingSystem"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native AD Intune Coverage"}},"Property":"OperatingSystemVersion"}},"queryRef":"Native AD Intune Coverage.OperatingSystemVersion","nativeQueryRef":"OperatingSystemVersion"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native AD Intune Coverage"}},"Property":"TenantDeviceKey"}},"queryRef":"Native AD Intune Coverage.TenantDeviceKey","nativeQueryRef":"TenantDeviceKey"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native AD Intune Coverage"}},"Property":"EntraDeviceId"}},"queryRef":"Native AD Intune Coverage.EntraDeviceId","nativeQueryRef":"EntraDeviceId"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native AD Intune Coverage"}},"Property":"IntuneManagedDeviceId"}},"queryRef":"Native AD Intune Coverage.IntuneManagedDeviceId","nativeQueryRef":"IntuneManagedDeviceId"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native AD Intune Coverage"}},"Property":"CoverageState"}},"queryRef":"Native AD Intune Coverage.CoverageState","nativeQueryRef":"CoverageState"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native AD Intune Coverage"}},"Property":"MatchMethod"}},"queryRef":"Native AD Intune Coverage.MatchMethod","nativeQueryRef":"MatchMethod"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native AD Intune Coverage"}},"Property":"SourceCollectedDateTime"}},"queryRef":"Native AD Intune Coverage.SourceCollectedDateTime","nativeQueryRef":"SourceCollectedDateTime"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native AD Intune Coverage"}},"Property":"TenantKey"}},"queryRef":"Native AD Intune Coverage.TenantKey","nativeQueryRef":"TenantKey"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native AD Intune Coverage"}},"Property":"OrganizationKey"}},"queryRef":"Native AD Intune Coverage.OrganizationKey","nativeQueryRef":"OrganizationKey"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native AD Intune Coverage"}},"Property":"EnvironmentKey"}},"queryRef":"Native AD Intune Coverage.EnvironmentKey","nativeQueryRef":"EnvironmentKey"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native AD Intune Coverage"}},"Property":"TenantId"}},"queryRef":"Native AD Intune Coverage.TenantId","nativeQueryRef":"TenantId"}]}}},"objects":{"columnHeaders":[{"properties":{"fontSize":{"expr":{"Literal":{"Value":"14D"}}},"autoSizeColumnWidth":{"expr":{"Literal":{"Value":"true"}}},"columnAdjustment":{"expr":{"Literal":{"Value":"'growToFit'"}}},"wordWrap":{"expr":{"Literal":{"Value":"true"}}},"fontColor":{"solid":{"color":{"expr":{"Literal":{"Value":"'#FFFFFF'"}}}}},"backColor":{"solid":{"color":{"expr":{"Literal":{"Value":"'#215E9E'"}}}}}}}],"values":[{"properties":{"fontSize":{"expr":{"Literal":{"Value":"14D"}}},"wordWrap":{"expr":{"Literal":{"Value":"false"}}},"fontColorPrimary":{"solid":{"color":{"expr":{"Literal":{"Value":"'#1F2937'"}}}}},"fontColorSecondary":{"solid":{"color":{"expr":{"Literal":{"Value":"'#1F2937'"}}}}},"backColorPrimary":{"solid":{"color":{"expr":{"Literal":{"Value":"'#FFFFFF'"}}}}},"backColorSecondary":{"solid":{"color":{"expr":{"Literal":{"Value":"'#F7FAFC'"}}}}}}}],"grid":[{"properties":{"rowPadding":{"expr":{"Literal":{"Value":"4D"}}}}}]},"visualContainerObjects":{"general":[{"properties":{"altText":{"expr":{"Literal":{"Value":"'AD Intune Coverage · complete governed fields'"}}}}}],"title":[{"properties":{"show":{"expr":{"Literal":{"Value":"true"}}},"text":{"expr":{"Literal":{"Value":"'AD Intune Coverage · complete governed fields'"}}},"fontSize":{"expr":{"Literal":{"Value":"15D"}}}}}],"background":[{"properties":{"show":{"expr":{"Literal":{"Value":"true"}}},"color":{"solid":{"color":{"expr":{"Literal":{"Value":"'#FFFFFF'"}}}}},"transparency":{"expr":{"Literal":{"Value":"0D"}}}}}],"border":[{"properties":{"show":{"expr":{"Literal":{"Value":"true"}}},"color":{"solid":{"color":{"expr":{"Literal":{"Value":"'#CCDCEC'"}}}}},"radius":{"expr":{"Literal":{"Value":"8D"}}},"width":{"expr":{"Literal":{"Value":"1D"}}}}}],"visualHeader":[{"properties":{"show":{"expr":{"Literal":{"Value":"false"}}}}}],"padding":[{"properties":{"top":{"expr":{"Literal":{"Value":"8D"}}},"bottom":{"expr":{"Literal":{"Value":"8D"}}},"left":{"expr":{"Literal":{"Value":"8D"}}},"right":{"expr":{"Literal":{"Value":"8D"}}}}}],"subTitle":[{"properties":{"show":{"expr":{"Literal":{"Value":"false"}}}}}],"stylePreset":[{"properties":{"name":{"expr":{"Literal":{"Value":"'None'"}}}}}]},"drillFilterOtherVisuals":true},"parentGroupName":"2126a4b3c4fb6811be92","filterConfig":{"filters":[{"name":"a6824b907a66920d2dfc","field":{"Measure":{"Expression":{"SourceRef":{"Entity":"Native AD Intune Coverage"}},"Property":"Native Context Rows · Native AD Intune Coverage"}},"type":"Advanced","filter":{"Version":2,"From":[{"Name":"c","Entity":"Native AD Intune Coverage","Type":0}],"Where":[{"Condition":{"Comparison":{"ComparisonKind":2,"Left":{"Measure":{"Expression":{"SourceRef":{"Source":"c"}},"Property":"Native Context Rows · Native AD Intune Coverage"}},"Right":{"Literal":{"Value":"0L"}}}}}]}}]}}
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json",
+  "name": "599c7181dc4bab82655e",
+  "position": {
+    "x": 32,
+    "y": 488,
+    "width": 1856,
+    "height": 336,
+    "z": 12000,
+    "tabOrder": 544
+  },
+  "visual": {
+    "visualType": "tableEx",
+    "query": {
+      "queryState": {
+        "Values": {
+          "projections": [
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native AD Intune Coverage"
+                    }
+                  },
+                  "Property": "DeviceName"
+                }
+              },
+              "queryRef": "Native AD Intune Coverage.DeviceName",
+              "nativeQueryRef": "DeviceName"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native AD Intune Coverage"
+                    }
+                  },
+                  "Property": "TenantADComputerKey"
+                }
+              },
+              "queryRef": "Native AD Intune Coverage.TenantADComputerKey",
+              "nativeQueryRef": "TenantADComputerKey"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native AD Intune Coverage"
+                    }
+                  },
+                  "Property": "CmdbAdComputerId"
+                }
+              },
+              "queryRef": "Native AD Intune Coverage.CmdbAdComputerId",
+              "nativeQueryRef": "CmdbAdComputerId"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native AD Intune Coverage"
+                    }
+                  },
+                  "Property": "Enabled"
+                }
+              },
+              "queryRef": "Native AD Intune Coverage.Enabled",
+              "nativeQueryRef": "Enabled"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native AD Intune Coverage"
+                    }
+                  },
+                  "Property": "OperatingSystem"
+                }
+              },
+              "queryRef": "Native AD Intune Coverage.OperatingSystem",
+              "nativeQueryRef": "OperatingSystem"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native AD Intune Coverage"
+                    }
+                  },
+                  "Property": "OperatingSystemVersion"
+                }
+              },
+              "queryRef": "Native AD Intune Coverage.OperatingSystemVersion",
+              "nativeQueryRef": "OperatingSystemVersion"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native AD Intune Coverage"
+                    }
+                  },
+                  "Property": "TenantDeviceKey"
+                }
+              },
+              "queryRef": "Native AD Intune Coverage.TenantDeviceKey",
+              "nativeQueryRef": "TenantDeviceKey"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native AD Intune Coverage"
+                    }
+                  },
+                  "Property": "EntraDeviceId"
+                }
+              },
+              "queryRef": "Native AD Intune Coverage.EntraDeviceId",
+              "nativeQueryRef": "EntraDeviceId"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native AD Intune Coverage"
+                    }
+                  },
+                  "Property": "IntuneManagedDeviceId"
+                }
+              },
+              "queryRef": "Native AD Intune Coverage.IntuneManagedDeviceId",
+              "nativeQueryRef": "IntuneManagedDeviceId"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native AD Intune Coverage"
+                    }
+                  },
+                  "Property": "CoverageState"
+                }
+              },
+              "queryRef": "Native AD Intune Coverage.CoverageState",
+              "nativeQueryRef": "CoverageState"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native AD Intune Coverage"
+                    }
+                  },
+                  "Property": "MatchMethod"
+                }
+              },
+              "queryRef": "Native AD Intune Coverage.MatchMethod",
+              "nativeQueryRef": "MatchMethod"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native AD Intune Coverage"
+                    }
+                  },
+                  "Property": "SourceCollectedDateTime"
+                }
+              },
+              "queryRef": "Native AD Intune Coverage.SourceCollectedDateTime",
+              "nativeQueryRef": "SourceCollectedDateTime"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native AD Intune Coverage"
+                    }
+                  },
+                  "Property": "TenantKey"
+                }
+              },
+              "queryRef": "Native AD Intune Coverage.TenantKey",
+              "nativeQueryRef": "TenantKey"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native AD Intune Coverage"
+                    }
+                  },
+                  "Property": "OrganizationKey"
+                }
+              },
+              "queryRef": "Native AD Intune Coverage.OrganizationKey",
+              "nativeQueryRef": "OrganizationKey"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native AD Intune Coverage"
+                    }
+                  },
+                  "Property": "EnvironmentKey"
+                }
+              },
+              "queryRef": "Native AD Intune Coverage.EnvironmentKey",
+              "nativeQueryRef": "EnvironmentKey"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native AD Intune Coverage"
+                    }
+                  },
+                  "Property": "TenantId"
+                }
+              },
+              "queryRef": "Native AD Intune Coverage.TenantId",
+              "nativeQueryRef": "TenantId"
+            }
+          ]
+        }
+      }
+    },
+    "objects": {
+      "columnHeaders": [
+        {
+          "properties": {
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "14D"
+                }
+              }
+            },
+            "autoSizeColumnWidth": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "columnAdjustment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'growToFit'"
+                }
+              }
+            },
+            "wordWrap": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "fontColor": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#FFFFFF'"
+                    }
+                  }
+                }
+              }
+            },
+            "backColor": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#215E9E'"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      ],
+      "values": [
+        {
+          "properties": {
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "14D"
+                }
+              }
+            },
+            "wordWrap": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            },
+            "fontColorPrimary": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#1F2937'"
+                    }
+                  }
+                }
+              }
+            },
+            "fontColorSecondary": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#1F2937'"
+                    }
+                  }
+                }
+              }
+            },
+            "backColorPrimary": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#FFFFFF'"
+                    }
+                  }
+                }
+              }
+            },
+            "backColorSecondary": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#F7FAFC'"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      ],
+      "grid": [
+        {
+          "properties": {
+            "rowPadding": {
+              "expr": {
+                "Literal": {
+                  "Value": "4D"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "visualContainerObjects": {
+      "general": [
+        {
+          "properties": {
+            "altText": {
+              "expr": {
+                "Literal": {
+                  "Value": "'AD Intune Coverage · complete governed fields'"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "title": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "text": {
+              "expr": {
+                "Literal": {
+                  "Value": "'AD Intune Coverage · complete governed fields'"
+                }
+              }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "15D"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "background": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "color": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#FFFFFF'"
+                    }
+                  }
+                }
+              }
+            },
+            "transparency": {
+              "expr": {
+                "Literal": {
+                  "Value": "0D"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "border": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "color": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#CCDCEC'"
+                    }
+                  }
+                }
+              }
+            },
+            "radius": {
+              "expr": {
+                "Literal": {
+                  "Value": "8D"
+                }
+              }
+            },
+            "width": {
+              "expr": {
+                "Literal": {
+                  "Value": "1D"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "visualHeader": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "padding": [
+        {
+          "properties": {
+            "top": {
+              "expr": {
+                "Literal": {
+                  "Value": "8D"
+                }
+              }
+            },
+            "bottom": {
+              "expr": {
+                "Literal": {
+                  "Value": "8D"
+                }
+              }
+            },
+            "left": {
+              "expr": {
+                "Literal": {
+                  "Value": "8D"
+                }
+              }
+            },
+            "right": {
+              "expr": {
+                "Literal": {
+                  "Value": "8D"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "subTitle": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "stylePreset": [
+        {
+          "properties": {
+            "name": {
+              "expr": {
+                "Literal": {
+                  "Value": "'None'"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "drillFilterOtherVisuals": true
+  },
+  "parentGroupName": "2126a4b3c4fb6811be92",
+  "filterConfig": {
+    "filters": [
+      {
+        "name": "a6824b907a66920d2dfc",
+        "field": {
+          "Measure": {
+            "Expression": {
+              "SourceRef": {
+                "Entity": "Native AD Intune Coverage"
+              }
+            },
+            "Property": "Native Context Rows · Native AD Intune Coverage"
+          }
+        },
+        "type": "Advanced",
+        "filter": {
+          "Version": 2,
+          "From": [
+            {
+              "Name": "c",
+              "Entity": "Native AD Intune Coverage",
+              "Type": 0
+            }
+          ],
+          "Where": [
+            {
+              "Condition": {
+                "Comparison": {
+                  "ComparisonKind": 2,
+                  "Left": {
+                    "Measure": {
+                      "Expression": {
+                        "SourceRef": {
+                          "Source": "c"
+                        }
+                      },
+                      "Property": "Native Context Rows · Native AD Intune Coverage"
+                    }
+                  },
+                  "Right": {
+                    "Literal": {
+                      "Value": "0L"
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

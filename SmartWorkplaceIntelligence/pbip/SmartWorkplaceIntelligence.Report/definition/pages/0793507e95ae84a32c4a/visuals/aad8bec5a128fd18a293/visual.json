@@ -1,1 +1,458 @@
-{"$schema":"https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.13.0/schema.json","name":"aad8bec5a128fd18a293","position":{"x":32,"y":336,"z":110,"height":656,"width":1856,"tabOrder":672},"visual":{"visualType":"pivotTable","query":{"queryState":{"Rows":{"projections":[{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Device Inventory Evidence"}},"Property":"Country Name"}},"queryRef":"Device Inventory Evidence.Country Name","nativeQueryRef":"Country","active":true,"displayName":"Country"}]},"Values":{"projections":[{"field":{"Measure":{"Expression":{"SourceRef":{"Entity":"Device Inventory Evidence"}},"Property":"Managed Devices"}},"queryRef":"Device Inventory Evidence.Managed Devices","nativeQueryRef":"Managed Devices","displayName":"Managed Devices"},{"field":{"Measure":{"Expression":{"SourceRef":{"Entity":"Device Inventory Evidence"}},"Property":"Current Windows 11 Adoption (%)"}},"queryRef":"Device Inventory Evidence.Current Windows 11 Adoption (%)","nativeQueryRef":"Current Windows 11 Adoption (%)","displayName":"Current Windows 11 Adoption (%)"},{"field":{"Measure":{"Expression":{"SourceRef":{"Entity":"Device Inventory Evidence"}},"Property":"Windows 10 Devices Remaining"}},"queryRef":"Device Inventory Evidence.Windows 10 Devices Remaining","nativeQueryRef":"Windows 10 Devices Remaining","displayName":"Windows 10 Devices Remaining"},{"field":{"Measure":{"Expression":{"SourceRef":{"Entity":"Device Inventory Evidence"}},"Property":"Windows 10 Devices Not Capable"}},"queryRef":"Device Inventory Evidence.Windows 10 Devices Not Capable","nativeQueryRef":"Windows 10 Devices Not Capable","displayName":"Windows 10 Devices Not Capable"},{"field":{"Measure":{"Expression":{"SourceRef":{"Entity":"Device Inventory Evidence"}},"Property":"Windows 10 Eligibility Not Assessed"}},"queryRef":"Device Inventory Evidence.Windows 10 Eligibility Not Assessed","nativeQueryRef":"Windows 10 Eligibility Not Assessed","displayName":"Windows 10 Eligibility Not Assessed"}]}}},"objects":{"columnHeaders":[{"properties":{"autoSizeColumnWidth":{"expr":{"Literal":{"Value":"true"}}},"columnAdjustment":{"expr":{"Literal":{"Value":"'growToFit'"}}},"fontSize":{"expr":{"Literal":{"Value":"11D"}}},"bold":{"expr":{"Literal":{"Value":"true"}}},"wordWrap":{"expr":{"Literal":{"Value":"true"}}},"fontColor":{"solid":{"color":{"expr":{"Literal":{"Value":"'#FFFFFF'"}}}}},"backColor":{"solid":{"color":{"expr":{"Literal":{"Value":"'#215E9E'"}}}}}}}],"values":[{"properties":{"fontSize":{"expr":{"Literal":{"Value":"11D"}}},"wordWrap":{"expr":{"Literal":{"Value":"false"}}},"fontColorPrimary":{"solid":{"color":{"expr":{"Literal":{"Value":"'#183153'"}}}}},"fontColorSecondary":{"solid":{"color":{"expr":{"Literal":{"Value":"'#183153'"}}}}},"backColorPrimary":{"solid":{"color":{"expr":{"Literal":{"Value":"'#FFFFFF'"}}}}},"backColorSecondary":{"solid":{"color":{"expr":{"Literal":{"Value":"'#F0F5FA'"}}}}}}}],"rowHeaders":[{"properties":{"stepped":{"expr":{"Literal":{"Value":"false"}}},"fontSize":{"expr":{"Literal":{"Value":"12D"}}},"wordWrap":{"expr":{"Literal":{"Value":"true"}}}}}]},"visualContainerObjects":{"general":[{"properties":{"altText":{"expr":{"Literal":{"Value":"'Geography · selected evidence'"}}}}}],"title":[{"properties":{"show":{"expr":{"Literal":{"Value":"true"}}},"text":{"expr":{"Literal":{"Value":"'Windows by country · current Intune scope; AD-only excluded'"}}},"fontSize":{"expr":{"Literal":{"Value":"12D"}}},"fontColor":{"solid":{"color":{"expr":{"Literal":{"Value":"'#183153'"}}}}}}}],"background":[{"properties":{"show":{"expr":{"Literal":{"Value":"true"}}},"color":{"solid":{"color":{"expr":{"Literal":{"Value":"'#FFFFFF'"}}}}},"transparency":{"expr":{"Literal":{"Value":"0D"}}}}}],"border":[{"properties":{"show":{"expr":{"Literal":{"Value":"true"}}},"color":{"solid":{"color":{"expr":{"Literal":{"Value":"'#CCDCEC'"}}}}},"radius":{"expr":{"Literal":{"Value":"8D"}}},"width":{"expr":{"Literal":{"Value":"1D"}}}}}],"visualHeader":[{"properties":{"show":{"expr":{"Literal":{"Value":"false"}}}}}],"padding":[{"properties":{"top":{"expr":{"Literal":{"Value":"8D"}}},"bottom":{"expr":{"Literal":{"Value":"8D"}}},"left":{"expr":{"Literal":{"Value":"8D"}}},"right":{"expr":{"Literal":{"Value":"8D"}}}}}],"stylePreset":[{"properties":{"name":{"expr":{"Literal":{"Value":"'None'"}}}}}]},"drillFilterOtherVisuals":true},"parentGroupName":"631845f07258f9eab137"}
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.13.0/schema.json",
+  "name": "aad8bec5a128fd18a293",
+  "position": {
+    "x": 32,
+    "y": 336,
+    "z": 110,
+    "height": 656,
+    "width": 1856,
+    "tabOrder": 672
+  },
+  "visual": {
+    "visualType": "pivotTable",
+    "query": {
+      "queryState": {
+        "Rows": {
+          "projections": [
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Device Inventory Evidence"
+                    }
+                  },
+                  "Property": "Country Name"
+                }
+              },
+              "queryRef": "Device Inventory Evidence.Country Name",
+              "nativeQueryRef": "Country",
+              "active": true,
+              "displayName": "Country"
+            }
+          ]
+        },
+        "Values": {
+          "projections": [
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Device Inventory Evidence"
+                    }
+                  },
+                  "Property": "Managed Devices"
+                }
+              },
+              "queryRef": "Device Inventory Evidence.Managed Devices",
+              "nativeQueryRef": "Managed Devices",
+              "displayName": "Managed Devices"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Device Inventory Evidence"
+                    }
+                  },
+                  "Property": "Current Windows 11 Adoption (%)"
+                }
+              },
+              "queryRef": "Device Inventory Evidence.Current Windows 11 Adoption (%)",
+              "nativeQueryRef": "Current Windows 11 Adoption (%)",
+              "displayName": "Current Windows 11 Adoption (%)"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Device Inventory Evidence"
+                    }
+                  },
+                  "Property": "Windows 10 Devices Remaining"
+                }
+              },
+              "queryRef": "Device Inventory Evidence.Windows 10 Devices Remaining",
+              "nativeQueryRef": "Windows 10 Devices Remaining",
+              "displayName": "Windows 10 Devices Remaining"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Device Inventory Evidence"
+                    }
+                  },
+                  "Property": "Windows 10 Devices Not Capable"
+                }
+              },
+              "queryRef": "Device Inventory Evidence.Windows 10 Devices Not Capable",
+              "nativeQueryRef": "Windows 10 Devices Not Capable",
+              "displayName": "Windows 10 Devices Not Capable"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Device Inventory Evidence"
+                    }
+                  },
+                  "Property": "Windows 10 Eligibility Not Assessed"
+                }
+              },
+              "queryRef": "Device Inventory Evidence.Windows 10 Eligibility Not Assessed",
+              "nativeQueryRef": "Windows 10 Eligibility Not Assessed",
+              "displayName": "Windows 10 Eligibility Not Assessed"
+            }
+          ]
+        }
+      }
+    },
+    "objects": {
+      "columnHeaders": [
+        {
+          "properties": {
+            "autoSizeColumnWidth": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "columnAdjustment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'growToFit'"
+                }
+              }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
+            },
+            "bold": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "wordWrap": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "fontColor": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#FFFFFF'"
+                    }
+                  }
+                }
+              }
+            },
+            "backColor": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#215E9E'"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      ],
+      "values": [
+        {
+          "properties": {
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
+            },
+            "wordWrap": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            },
+            "fontColorPrimary": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#183153'"
+                    }
+                  }
+                }
+              }
+            },
+            "fontColorSecondary": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#183153'"
+                    }
+                  }
+                }
+              }
+            },
+            "backColorPrimary": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#FFFFFF'"
+                    }
+                  }
+                }
+              }
+            },
+            "backColorSecondary": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#F0F5FA'"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      ],
+      "rowHeaders": [
+        {
+          "properties": {
+            "stepped": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "12D"
+                }
+              }
+            },
+            "wordWrap": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "visualContainerObjects": {
+      "general": [
+        {
+          "properties": {
+            "altText": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Geography · selected evidence'"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "title": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "text": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Windows by country · current Intune scope; AD-only excluded'"
+                }
+              }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "12D"
+                }
+              }
+            },
+            "fontColor": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#183153'"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      ],
+      "background": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "color": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#FFFFFF'"
+                    }
+                  }
+                }
+              }
+            },
+            "transparency": {
+              "expr": {
+                "Literal": {
+                  "Value": "0D"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "border": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "color": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#CCDCEC'"
+                    }
+                  }
+                }
+              }
+            },
+            "radius": {
+              "expr": {
+                "Literal": {
+                  "Value": "8D"
+                }
+              }
+            },
+            "width": {
+              "expr": {
+                "Literal": {
+                  "Value": "1D"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "visualHeader": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "padding": [
+        {
+          "properties": {
+            "top": {
+              "expr": {
+                "Literal": {
+                  "Value": "8D"
+                }
+              }
+            },
+            "bottom": {
+              "expr": {
+                "Literal": {
+                  "Value": "8D"
+                }
+              }
+            },
+            "left": {
+              "expr": {
+                "Literal": {
+                  "Value": "8D"
+                }
+              }
+            },
+            "right": {
+              "expr": {
+                "Literal": {
+                  "Value": "8D"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "stylePreset": [
+        {
+          "properties": {
+            "name": {
+              "expr": {
+                "Literal": {
+                  "Value": "'None'"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "drillFilterOtherVisuals": true
+  },
+  "parentGroupName": "631845f07258f9eab137"
+}

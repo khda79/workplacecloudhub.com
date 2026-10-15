@@ -1,1 +1,47 @@
-{"$schema":"https://developer.microsoft.com/json-schemas/fabric/item/report/definition/bookmark/2.1.0/schema.json","displayName":"Workforce & Personas","name":"b79715b976cab1cbba1e","options":{"applyOnlyToTargetVisuals":true,"targetVisualNames":["4221326348240b21e4d6","7d3b44a8181361449965","35ff3ce20243378b01b3","1413c5a3cf22d4eed68f","5b35693d4bec6957a6d0","a538fb0146f43fbde4ee"],"suppressActiveSection":true,"suppressData":true},"explorationState":{"version":"1.0","activeSection":"74096d393d05fa994d48","sections":{"74096d393d05fa994d48":{"visualContainers":{},"visualContainerGroups":{"4221326348240b21e4d6":{"isHidden":true},"7d3b44a8181361449965":{"isHidden":true},"35ff3ce20243378b01b3":{"isHidden":false},"1413c5a3cf22d4eed68f":{"isHidden":true},"5b35693d4bec6957a6d0":{"isHidden":true},"a538fb0146f43fbde4ee":{"isHidden":true}}}}}}
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/bookmark/2.1.0/schema.json",
+  "displayName": "Workforce & Personas",
+  "name": "b79715b976cab1cbba1e",
+  "options": {
+    "applyOnlyToTargetVisuals": true,
+    "targetVisualNames": [
+      "4221326348240b21e4d6",
+      "7d3b44a8181361449965",
+      "35ff3ce20243378b01b3",
+      "1413c5a3cf22d4eed68f",
+      "5b35693d4bec6957a6d0",
+      "a538fb0146f43fbde4ee"
+    ],
+    "suppressActiveSection": true,
+    "suppressData": true
+  },
+  "explorationState": {
+    "version": "1.0",
+    "activeSection": "74096d393d05fa994d48",
+    "sections": {
+      "74096d393d05fa994d48": {
+        "visualContainers": {},
+        "visualContainerGroups": {
+          "4221326348240b21e4d6": {
+            "isHidden": true
+          },
+          "7d3b44a8181361449965": {
+            "isHidden": true
+          },
+          "35ff3ce20243378b01b3": {
+            "isHidden": false
+          },
+          "1413c5a3cf22d4eed68f": {
+            "isHidden": true
+          },
+          "5b35693d4bec6957a6d0": {
+            "isHidden": true
+          },
+          "a538fb0146f43fbde4ee": {
+            "isHidden": true
+          }
+        }
+      }
+    }
+  }
+}

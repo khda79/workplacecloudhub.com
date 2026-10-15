@@ -1,0 +1,69 @@
+/// Receipt-qualified observed Teams / SharePoint scope. Single reviewed tenant batch; no inference of full tenant coverage. Disconnected tenant-level utility; intentionally unaffected by country, service and entity slicers.
+table 'Collaboration Source Qualification'
+	lineageTag: 977ca1ca-edd3-4078-a202-7726d58f6b6f
+
+	/// Receipt-qualified observed evidence.
+	column TenantKey
+		dataType: string
+		isHidden
+		lineageTag: 37752ea0-a0b7-4536-825f-5df777e7312f
+		summarizeBy: none
+		sourceColumn: TenantKey
+
+	/// Receipt-qualified observed evidence.
+	column Source
+		dataType: string
+		lineageTag: 63c692a7-7485-4e80-9250-a4d7dbd00b8d
+		summarizeBy: none
+		sourceColumn: Source
+
+	/// Receipt-qualified observed evidence.
+	column 'Receipt Version'
+		dataType: string
+		lineageTag: 1ab569f5-dab0-470f-a463-cd20b875736d
+		summarizeBy: none
+		sourceColumn: Receipt Version
+
+	/// Receipt-qualified observed evidence.
+	column 'Receipt Run ID'
+		dataType: string
+		lineageTag: 1319ffe6-089d-4486-9611-61e04fbee5b0
+		summarizeBy: none
+		sourceColumn: Receipt Run ID
+
+	/// Receipt-qualified observed evidence.
+	column 'Completed UTC'
+		dataType: dateTime
+		lineageTag: 0304fe0e-815e-4f70-bd23-8bfc93134b28
+		summarizeBy: none
+		sourceColumn: Completed UTC
+
+	/// Receipt-qualified observed evidence.
+	column 'Source Rows'
+		dataType: int64
+		lineageTag: 7680d4be-e7cf-444a-b106-e303f1a49d02
+		summarizeBy: none
+		sourceColumn: Source Rows
+
+	/// Receipt-qualified observed evidence.
+	column 'Link Coverage Qualified'
+		dataType: boolean
+		lineageTag: 08eef105-12a3-49b0-a629-0cc31634dab1
+		summarizeBy: none
+		sourceColumn: Link Coverage Qualified
+
+	/// Receipt-qualified observed evidence.
+	column Qualification
+		dataType: string
+		lineageTag: 72338d48-a5d7-4f4d-aa2a-357265597a5f
+		summarizeBy: none
+		sourceColumn: Qualification
+
+	partition 'Collaboration Source Qualification' = m
+		mode: import
+		source =
+				let
+				 Source = Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("CollaborationSourceQualification.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]),
+				 Typed = NativeEvidenceTypes(Source, {[name="TenantKey", dataType="String"], [name="Source", dataType="String"], [name="Receipt Version", dataType="String"], [name="Receipt Run ID", dataType="String"], [name="Completed UTC", dataType="DateTime"], [name="Source Rows", dataType="Int64"], [name="Link Coverage Qualified", dataType="Boolean"], [name="Qualification", dataType="String"]})
+				in Typed
+

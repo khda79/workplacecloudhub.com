@@ -10,7 +10,6 @@ from pathlib import Path
 
 import workplace_native_sources as sources
 from workplace_native_tables import build_tables
-from workplace_graph import build_graph
 import workplace_teams_sites as teams_sites
 
 
@@ -58,9 +57,8 @@ def build(source, output, audit):
         counts[table['name']] = count
     sources.validate_relationships(output, contract)
     collaboration_counts = teams_sites.build(source, output, audit['Identity']['TenantKey'], audit['TeamsSites'])
-    graph_counts = build_graph(output, audit['Identity']['TenantKey'])
     sources.recheck_sources(source, audit['Evidence'], contract)
-    return dict(audit, OutputRows=counts, GraphRows=graph_counts, CollaborationRows=collaboration_counts, Details=details, Publication=False,
+    return dict(audit, OutputRows=counts, CollaborationRows=collaboration_counts, Details=details, Publication=False,
                 Qualification='Native identities and observed links; not verified physical assets or effective assignments')
 
 

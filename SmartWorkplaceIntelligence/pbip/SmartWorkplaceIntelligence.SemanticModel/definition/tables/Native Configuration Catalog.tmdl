@@ -3,19 +3,13 @@ table 'Native Configuration Catalog'
 	lineageTag: d76a3ae1-2d9e-4753-911a-5bcc74f0f8e5
 
 	/// Configuration policies observed in the frozen Intune collection. Migrated without changing the source calculation.
-	measure 'Native Intune configuration policies' =
-			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
-			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
-			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (COALESCE(COUNTROWS('Native Configuration Catalog'),0)))
+	measure 'Native Intune configuration policies' = (COALESCE(COUNTROWS('Native Configuration Catalog'),0))
 		formatString: #,0
 		displayFolder: Native evidence
 		lineageTag: 9f7c2e4a-da32-4e36-825a-f608a3c53589
 
-	/// Exact native-key entity context or existing inventory context. No name matching or inferred transitive membership. Unrelated entity selections return blank.
-	measure 'Native Context Rows · Native Configuration Catalog' =
-			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
-			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
-			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (COUNTROWS('Native Configuration Catalog')))
+	/// Existing qualified workforce/device scope via exact native IDs; otherwise the domain selection. No name matching or inferred transitive membership.
+	measure 'Native Context Rows · Native Configuration Catalog' = (COUNTROWS('Native Configuration Catalog'))
 		formatString: #,0
 		isHidden
 		lineageTag: 4fc78ff8-38a1-4cf2-a7f1-5fd9cc6c55c5

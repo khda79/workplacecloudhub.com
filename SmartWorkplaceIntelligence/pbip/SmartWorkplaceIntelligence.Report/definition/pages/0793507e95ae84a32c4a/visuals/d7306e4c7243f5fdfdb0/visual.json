@@ -1,1 +1,578 @@
-{"$schema":"https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json","name":"d7306e4c7243f5fdfdb0","position":{"x":32,"y":488,"width":1856,"height":336,"z":12000,"tabOrder":544},"visual":{"visualType":"tableEx","query":{"queryState":{"Values":{"projections":[{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native Upgrade Eligibility"}},"Property":"DeviceName"}},"queryRef":"Native Upgrade Eligibility.DeviceName","nativeQueryRef":"DeviceName"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native Upgrade Eligibility"}},"Property":"TenantUpgradeEligibilityDeviceKey"}},"queryRef":"Native Upgrade Eligibility.TenantUpgradeEligibilityDeviceKey","nativeQueryRef":"TenantUpgradeEligibilityDeviceKey"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native Upgrade Eligibility"}},"Property":"MetricId"}},"queryRef":"Native Upgrade Eligibility.MetricId","nativeQueryRef":"MetricId"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native Upgrade Eligibility"}},"Property":"MetricDeviceId"}},"queryRef":"Native Upgrade Eligibility.MetricDeviceId","nativeQueryRef":"MetricDeviceId"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native Upgrade Eligibility"}},"Property":"DeviceId"}},"queryRef":"Native Upgrade Eligibility.DeviceId","nativeQueryRef":"DeviceId"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native Upgrade Eligibility"}},"Property":"DeviceIdSource"}},"queryRef":"Native Upgrade Eligibility.DeviceIdSource","nativeQueryRef":"DeviceIdSource"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native Upgrade Eligibility"}},"Property":"UpgradeEligibility"}},"queryRef":"Native Upgrade Eligibility.UpgradeEligibility","nativeQueryRef":"UpgradeEligibility"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native Upgrade Eligibility"}},"Property":"SourceCollectedDateTime"}},"queryRef":"Native Upgrade Eligibility.SourceCollectedDateTime","nativeQueryRef":"SourceCollectedDateTime"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native Upgrade Eligibility"}},"Property":"SourceSystem"}},"queryRef":"Native Upgrade Eligibility.SourceSystem","nativeQueryRef":"SourceSystem"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native Upgrade Eligibility"}},"Property":"TenantKey"}},"queryRef":"Native Upgrade Eligibility.TenantKey","nativeQueryRef":"TenantKey"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native Upgrade Eligibility"}},"Property":"OrganizationKey"}},"queryRef":"Native Upgrade Eligibility.OrganizationKey","nativeQueryRef":"OrganizationKey"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native Upgrade Eligibility"}},"Property":"EnvironmentKey"}},"queryRef":"Native Upgrade Eligibility.EnvironmentKey","nativeQueryRef":"EnvironmentKey"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native Upgrade Eligibility"}},"Property":"TenantId"}},"queryRef":"Native Upgrade Eligibility.TenantId","nativeQueryRef":"TenantId"}]}}},"objects":{"columnHeaders":[{"properties":{"fontSize":{"expr":{"Literal":{"Value":"14D"}}},"autoSizeColumnWidth":{"expr":{"Literal":{"Value":"true"}}},"columnAdjustment":{"expr":{"Literal":{"Value":"'growToFit'"}}},"wordWrap":{"expr":{"Literal":{"Value":"true"}}},"fontColor":{"solid":{"color":{"expr":{"Literal":{"Value":"'#FFFFFF'"}}}}},"backColor":{"solid":{"color":{"expr":{"Literal":{"Value":"'#215E9E'"}}}}}}}],"values":[{"properties":{"fontSize":{"expr":{"Literal":{"Value":"14D"}}},"wordWrap":{"expr":{"Literal":{"Value":"false"}}},"fontColorPrimary":{"solid":{"color":{"expr":{"Literal":{"Value":"'#1F2937'"}}}}},"fontColorSecondary":{"solid":{"color":{"expr":{"Literal":{"Value":"'#1F2937'"}}}}},"backColorPrimary":{"solid":{"color":{"expr":{"Literal":{"Value":"'#FFFFFF'"}}}}},"backColorSecondary":{"solid":{"color":{"expr":{"Literal":{"Value":"'#F7FAFC'"}}}}}}}],"grid":[{"properties":{"rowPadding":{"expr":{"Literal":{"Value":"4D"}}}}}]},"visualContainerObjects":{"general":[{"properties":{"altText":{"expr":{"Literal":{"Value":"'Upgrade Eligibility · complete governed fields'"}}}}}],"title":[{"properties":{"show":{"expr":{"Literal":{"Value":"true"}}},"text":{"expr":{"Literal":{"Value":"'Upgrade Eligibility · complete governed fields'"}}},"fontSize":{"expr":{"Literal":{"Value":"15D"}}}}}],"background":[{"properties":{"show":{"expr":{"Literal":{"Value":"true"}}},"color":{"solid":{"color":{"expr":{"Literal":{"Value":"'#FFFFFF'"}}}}},"transparency":{"expr":{"Literal":{"Value":"0D"}}}}}],"border":[{"properties":{"show":{"expr":{"Literal":{"Value":"true"}}},"color":{"solid":{"color":{"expr":{"Literal":{"Value":"'#CCDCEC'"}}}}},"radius":{"expr":{"Literal":{"Value":"8D"}}},"width":{"expr":{"Literal":{"Value":"1D"}}}}}],"visualHeader":[{"properties":{"show":{"expr":{"Literal":{"Value":"false"}}}}}],"padding":[{"properties":{"top":{"expr":{"Literal":{"Value":"8D"}}},"bottom":{"expr":{"Literal":{"Value":"8D"}}},"left":{"expr":{"Literal":{"Value":"8D"}}},"right":{"expr":{"Literal":{"Value":"8D"}}}}}],"subTitle":[{"properties":{"show":{"expr":{"Literal":{"Value":"false"}}}}}],"stylePreset":[{"properties":{"name":{"expr":{"Literal":{"Value":"'None'"}}}}}]},"drillFilterOtherVisuals":true},"parentGroupName":"061d12ad31275555c4c6","filterConfig":{"filters":[{"name":"10aaa74615c52b2acb68","field":{"Measure":{"Expression":{"SourceRef":{"Entity":"Native Upgrade Eligibility"}},"Property":"Native Context Rows · Native Upgrade Eligibility"}},"type":"Advanced","filter":{"Version":2,"From":[{"Name":"c","Entity":"Native Upgrade Eligibility","Type":0}],"Where":[{"Condition":{"Comparison":{"ComparisonKind":2,"Left":{"Measure":{"Expression":{"SourceRef":{"Source":"c"}},"Property":"Native Context Rows · Native Upgrade Eligibility"}},"Right":{"Literal":{"Value":"0L"}}}}}]}}]}}
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json",
+  "name": "d7306e4c7243f5fdfdb0",
+  "position": {
+    "x": 32,
+    "y": 488,
+    "width": 1856,
+    "height": 336,
+    "z": 12000,
+    "tabOrder": 544
+  },
+  "visual": {
+    "visualType": "tableEx",
+    "query": {
+      "queryState": {
+        "Values": {
+          "projections": [
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Upgrade Eligibility"
+                    }
+                  },
+                  "Property": "DeviceName"
+                }
+              },
+              "queryRef": "Native Upgrade Eligibility.DeviceName",
+              "nativeQueryRef": "DeviceName"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Upgrade Eligibility"
+                    }
+                  },
+                  "Property": "TenantUpgradeEligibilityDeviceKey"
+                }
+              },
+              "queryRef": "Native Upgrade Eligibility.TenantUpgradeEligibilityDeviceKey",
+              "nativeQueryRef": "TenantUpgradeEligibilityDeviceKey"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Upgrade Eligibility"
+                    }
+                  },
+                  "Property": "MetricId"
+                }
+              },
+              "queryRef": "Native Upgrade Eligibility.MetricId",
+              "nativeQueryRef": "MetricId"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Upgrade Eligibility"
+                    }
+                  },
+                  "Property": "MetricDeviceId"
+                }
+              },
+              "queryRef": "Native Upgrade Eligibility.MetricDeviceId",
+              "nativeQueryRef": "MetricDeviceId"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Upgrade Eligibility"
+                    }
+                  },
+                  "Property": "DeviceId"
+                }
+              },
+              "queryRef": "Native Upgrade Eligibility.DeviceId",
+              "nativeQueryRef": "DeviceId"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Upgrade Eligibility"
+                    }
+                  },
+                  "Property": "DeviceIdSource"
+                }
+              },
+              "queryRef": "Native Upgrade Eligibility.DeviceIdSource",
+              "nativeQueryRef": "DeviceIdSource"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Upgrade Eligibility"
+                    }
+                  },
+                  "Property": "UpgradeEligibility"
+                }
+              },
+              "queryRef": "Native Upgrade Eligibility.UpgradeEligibility",
+              "nativeQueryRef": "UpgradeEligibility"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Upgrade Eligibility"
+                    }
+                  },
+                  "Property": "SourceCollectedDateTime"
+                }
+              },
+              "queryRef": "Native Upgrade Eligibility.SourceCollectedDateTime",
+              "nativeQueryRef": "SourceCollectedDateTime"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Upgrade Eligibility"
+                    }
+                  },
+                  "Property": "SourceSystem"
+                }
+              },
+              "queryRef": "Native Upgrade Eligibility.SourceSystem",
+              "nativeQueryRef": "SourceSystem"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Upgrade Eligibility"
+                    }
+                  },
+                  "Property": "TenantKey"
+                }
+              },
+              "queryRef": "Native Upgrade Eligibility.TenantKey",
+              "nativeQueryRef": "TenantKey"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Upgrade Eligibility"
+                    }
+                  },
+                  "Property": "OrganizationKey"
+                }
+              },
+              "queryRef": "Native Upgrade Eligibility.OrganizationKey",
+              "nativeQueryRef": "OrganizationKey"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Upgrade Eligibility"
+                    }
+                  },
+                  "Property": "EnvironmentKey"
+                }
+              },
+              "queryRef": "Native Upgrade Eligibility.EnvironmentKey",
+              "nativeQueryRef": "EnvironmentKey"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Upgrade Eligibility"
+                    }
+                  },
+                  "Property": "TenantId"
+                }
+              },
+              "queryRef": "Native Upgrade Eligibility.TenantId",
+              "nativeQueryRef": "TenantId"
+            }
+          ]
+        }
+      }
+    },
+    "objects": {
+      "columnHeaders": [
+        {
+          "properties": {
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "14D"
+                }
+              }
+            },
+            "autoSizeColumnWidth": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "columnAdjustment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'growToFit'"
+                }
+              }
+            },
+            "wordWrap": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "fontColor": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#FFFFFF'"
+                    }
+                  }
+                }
+              }
+            },
+            "backColor": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#215E9E'"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      ],
+      "values": [
+        {
+          "properties": {
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "14D"
+                }
+              }
+            },
+            "wordWrap": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            },
+            "fontColorPrimary": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#1F2937'"
+                    }
+                  }
+                }
+              }
+            },
+            "fontColorSecondary": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#1F2937'"
+                    }
+                  }
+                }
+              }
+            },
+            "backColorPrimary": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#FFFFFF'"
+                    }
+                  }
+                }
+              }
+            },
+            "backColorSecondary": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#F7FAFC'"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      ],
+      "grid": [
+        {
+          "properties": {
+            "rowPadding": {
+              "expr": {
+                "Literal": {
+                  "Value": "4D"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "visualContainerObjects": {
+      "general": [
+        {
+          "properties": {
+            "altText": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Upgrade Eligibility · complete governed fields'"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "title": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "text": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Upgrade Eligibility · complete governed fields'"
+                }
+              }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "15D"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "background": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "color": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#FFFFFF'"
+                    }
+                  }
+                }
+              }
+            },
+            "transparency": {
+              "expr": {
+                "Literal": {
+                  "Value": "0D"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "border": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "color": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#CCDCEC'"
+                    }
+                  }
+                }
+              }
+            },
+            "radius": {
+              "expr": {
+                "Literal": {
+                  "Value": "8D"
+                }
+              }
+            },
+            "width": {
+              "expr": {
+                "Literal": {
+                  "Value": "1D"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "visualHeader": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "padding": [
+        {
+          "properties": {
+            "top": {
+              "expr": {
+                "Literal": {
+                  "Value": "8D"
+                }
+              }
+            },
+            "bottom": {
+              "expr": {
+                "Literal": {
+                  "Value": "8D"
+                }
+              }
+            },
+            "left": {
+              "expr": {
+                "Literal": {
+                  "Value": "8D"
+                }
+              }
+            },
+            "right": {
+              "expr": {
+                "Literal": {
+                  "Value": "8D"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "subTitle": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "stylePreset": [
+        {
+          "properties": {
+            "name": {
+              "expr": {
+                "Literal": {
+                  "Value": "'None'"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "drillFilterOtherVisuals": true
+  },
+  "parentGroupName": "061d12ad31275555c4c6",
+  "filterConfig": {
+    "filters": [
+      {
+        "name": "10aaa74615c52b2acb68",
+        "field": {
+          "Measure": {
+            "Expression": {
+              "SourceRef": {
+                "Entity": "Native Upgrade Eligibility"
+              }
+            },
+            "Property": "Native Context Rows · Native Upgrade Eligibility"
+          }
+        },
+        "type": "Advanced",
+        "filter": {
+          "Version": 2,
+          "From": [
+            {
+              "Name": "c",
+              "Entity": "Native Upgrade Eligibility",
+              "Type": 0
+            }
+          ],
+          "Where": [
+            {
+              "Condition": {
+                "Comparison": {
+                  "ComparisonKind": 2,
+                  "Left": {
+                    "Measure": {
+                      "Expression": {
+                        "SourceRef": {
+                          "Source": "c"
+                        }
+                      },
+                      "Property": "Native Context Rows · Native Upgrade Eligibility"
+                    }
+                  },
+                  "Right": {
+                    "Literal": {
+                      "Value": "0L"
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

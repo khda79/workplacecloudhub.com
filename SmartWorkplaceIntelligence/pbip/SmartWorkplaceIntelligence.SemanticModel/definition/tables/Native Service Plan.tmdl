@@ -3,37 +3,19 @@ table 'Native Service Plan'
 	lineageTag: 92a7715f-84fc-430a-b367-0ceb331480df
 
 	/// Service plans published by the subscribed Microsoft 365 SKUs in the frozen collection. Migrated without changing the source calculation.
-	measure 'Native License service plans' =
-			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
-			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
-			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimLicenseSku"))
-			VAR NativeKeys1 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimLicenseServicePlan"))
-			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((COALESCE(COUNTROWS('Native Service Plan'),0)), KEEPFILTERS(TREATAS(NativeKeys0, 'Native Service Plan'[TenantSkuKey]))),
-			COUNTROWS(NativeKeys1) > 0, CALCULATE((COALESCE(COUNTROWS('Native Service Plan'),0)), KEEPFILTERS(TREATAS(NativeKeys1, 'Native Service Plan'[TenantServicePlanKey]))), BLANK()), BLANK()), (COALESCE(COUNTROWS('Native Service Plan'),0)))
+	measure 'Native License service plans' = (COALESCE(COUNTROWS('Native Service Plan'),0))
 		formatString: #,0
 		displayFolder: Native evidence
 		lineageTag: 716b0a7b-0268-405c-b293-8c13671c68cc
 
 	/// Share of each service-plan provisioning status. Migrated without changing the source calculation.
-	measure 'Native Service plan provisioning rate' =
-			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
-			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
-			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimLicenseSku"))
-			VAR NativeKeys1 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimLicenseServicePlan"))
-			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((DIVIDE([Native License service plans], CALCULATE([Native License service plans], REMOVEFILTERS('Native Service Plan'[ProvisioningStatus])))), KEEPFILTERS(TREATAS(NativeKeys0, 'Native Service Plan'[TenantSkuKey]))),
-			COUNTROWS(NativeKeys1) > 0, CALCULATE((DIVIDE([Native License service plans], CALCULATE([Native License service plans], REMOVEFILTERS('Native Service Plan'[ProvisioningStatus])))), KEEPFILTERS(TREATAS(NativeKeys1, 'Native Service Plan'[TenantServicePlanKey]))), BLANK()), BLANK()), (DIVIDE([Native License service plans], CALCULATE([Native License service plans], REMOVEFILTERS('Native Service Plan'[ProvisioningStatus])))))
+	measure 'Native Service plan provisioning rate' = (DIVIDE([Native License service plans], CALCULATE([Native License service plans], REMOVEFILTERS('Native Service Plan'[ProvisioningStatus]))))
 		formatString: 0.0%
 		displayFolder: Native evidence
 		lineageTag: 55ce5edc-516c-4547-a6d6-d32cbf867c50
 
-	/// Exact native-key entity context or existing inventory context. No name matching or inferred transitive membership. Unrelated entity selections return blank.
-	measure 'Native Context Rows · Native Service Plan' =
-			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
-			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
-			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimLicenseSku"))
-			VAR NativeKeys1 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimLicenseServicePlan"))
-			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((COUNTROWS('Native Service Plan')), KEEPFILTERS(TREATAS(NativeKeys0, 'Native Service Plan'[TenantSkuKey]))),
-			COUNTROWS(NativeKeys1) > 0, CALCULATE((COUNTROWS('Native Service Plan')), KEEPFILTERS(TREATAS(NativeKeys1, 'Native Service Plan'[TenantServicePlanKey]))), BLANK()), BLANK()), (COUNTROWS('Native Service Plan')))
+	/// Existing qualified workforce/device scope via exact native IDs; otherwise the domain selection. No name matching or inferred transitive membership.
+	measure 'Native Context Rows · Native Service Plan' = (COUNTROWS('Native Service Plan'))
 		formatString: #,0
 		isHidden
 		lineageTag: dac19b3e-9d3d-49cf-bbc8-cd95f9d48f29

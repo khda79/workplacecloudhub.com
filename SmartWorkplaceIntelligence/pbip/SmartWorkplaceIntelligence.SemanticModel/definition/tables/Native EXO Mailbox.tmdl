@@ -4,65 +4,40 @@ table 'Native EXO Mailbox'
 
 	/// All exported mailboxes, including technical and shared mailboxes. Migrated without changing the source calculation.
 	measure 'Native Mailboxes' =
-			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
-			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
-			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimUser"))
-			VAR NativeKeys1 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "FactMailbox"))
 			VAR InventoryUsers = CALCULATETABLE(VALUES('Native User Evidence'[TenantUserKey]), REMOVEFILTERS('Native User Evidence'), TREATAS(VALUES('User Inventory Evidence'[User Source ID]), 'Native User Evidence'[SourceUserId]))
-			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((COALESCE(COUNTROWS('Native EXO Mailbox'),0)), KEEPFILTERS(TREATAS(NativeKeys0, 'Native EXO Mailbox'[TenantUserKey]))),
-			COUNTROWS(NativeKeys1) > 0, CALCULATE((COALESCE(COUNTROWS('Native EXO Mailbox'),0)), KEEPFILTERS(TREATAS(NativeKeys1, 'Native EXO Mailbox'[TenantMailboxKey]))), BLANK()), BLANK()), SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((COALESCE(COUNTROWS('Native EXO Mailbox'),0)), KEEPFILTERS(TREATAS(InventoryUsers, 'Native EXO Mailbox'[TenantUserKey]))), (COALESCE(COUNTROWS('Native EXO Mailbox'),0))))
+			RETURN SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((COALESCE(COUNTROWS('Native EXO Mailbox'),0)), KEEPFILTERS(TREATAS(InventoryUsers, 'Native EXO Mailbox'[TenantUserKey]))), (COALESCE(COUNTROWS('Native EXO Mailbox'),0)))
 		formatString: #,0
 		displayFolder: Native evidence
 		lineageTag: dc25847e-c2a5-491c-9cc4-5ce6af79575d
 
 	/// Includes technical mailboxes; a missing user link is not always an issue. Migrated without changing the source calculation.
 	measure 'Native Mailboxes without a resolved user' =
-			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
-			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
-			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimUser"))
-			VAR NativeKeys1 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "FactMailbox"))
 			VAR InventoryUsers = CALCULATETABLE(VALUES('Native User Evidence'[TenantUserKey]), REMOVEFILTERS('Native User Evidence'), TREATAS(VALUES('User Inventory Evidence'[User Source ID]), 'Native User Evidence'[SourceUserId]))
-			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((CALCULATE([Native Mailboxes], KEEPFILTERS(ISBLANK('Native EXO Mailbox'[TenantUserKey])))), KEEPFILTERS(TREATAS(NativeKeys0, 'Native EXO Mailbox'[TenantUserKey]))),
-			COUNTROWS(NativeKeys1) > 0, CALCULATE((CALCULATE([Native Mailboxes], KEEPFILTERS(ISBLANK('Native EXO Mailbox'[TenantUserKey])))), KEEPFILTERS(TREATAS(NativeKeys1, 'Native EXO Mailbox'[TenantMailboxKey]))), BLANK()), BLANK()), SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((CALCULATE([Native Mailboxes], KEEPFILTERS(ISBLANK('Native EXO Mailbox'[TenantUserKey])))), KEEPFILTERS(TREATAS(InventoryUsers, 'Native EXO Mailbox'[TenantUserKey]))), (CALCULATE([Native Mailboxes], KEEPFILTERS(ISBLANK('Native EXO Mailbox'[TenantUserKey]))))))
+			RETURN SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((CALCULATE([Native Mailboxes], KEEPFILTERS(ISBLANK('Native EXO Mailbox'[TenantUserKey])))), KEEPFILTERS(TREATAS(InventoryUsers, 'Native EXO Mailbox'[TenantUserKey]))), (CALCULATE([Native Mailboxes], KEEPFILTERS(ISBLANK('Native EXO Mailbox'[TenantUserKey])))))
 		formatString: #,0
 		displayFolder: Native evidence
 		lineageTag: 1151f823-abad-468f-9649-ea1a9e2068bd
 
 	/// Mailboxes without a resolved user divided by all mailboxes. Technical and shared mailboxes can be legitimate. Migrated without changing the source calculation.
 	measure 'Native Mailbox link gap rate' =
-			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
-			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
-			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimUser"))
-			VAR NativeKeys1 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "FactMailbox"))
 			VAR InventoryUsers = CALCULATETABLE(VALUES('Native User Evidence'[TenantUserKey]), REMOVEFILTERS('Native User Evidence'), TREATAS(VALUES('User Inventory Evidence'[User Source ID]), 'Native User Evidence'[SourceUserId]))
-			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((DIVIDE([Native Mailboxes without a resolved user], [Native Mailboxes])), KEEPFILTERS(TREATAS(NativeKeys0, 'Native EXO Mailbox'[TenantUserKey]))),
-			COUNTROWS(NativeKeys1) > 0, CALCULATE((DIVIDE([Native Mailboxes without a resolved user], [Native Mailboxes])), KEEPFILTERS(TREATAS(NativeKeys1, 'Native EXO Mailbox'[TenantMailboxKey]))), BLANK()), BLANK()), SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((DIVIDE([Native Mailboxes without a resolved user], [Native Mailboxes])), KEEPFILTERS(TREATAS(InventoryUsers, 'Native EXO Mailbox'[TenantUserKey]))), (DIVIDE([Native Mailboxes without a resolved user], [Native Mailboxes]))))
+			RETURN SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((DIVIDE([Native Mailboxes without a resolved user], [Native Mailboxes])), KEEPFILTERS(TREATAS(InventoryUsers, 'Native EXO Mailbox'[TenantUserKey]))), (DIVIDE([Native Mailboxes without a resolved user], [Native Mailboxes])))
 		formatString: 0.000%
 		displayFolder: Native evidence
 		lineageTag: f4dbc1d0-1ee1-4b89-b8ac-1f334d979caf
 
 	/// Detail rows only when exactly one user is selected outside visual row grouping. Blank otherwise. Migrated without changing the source calculation.
 	measure 'Native User mailbox details' =
-			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
-			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
-			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimUser"))
-			VAR NativeKeys1 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "FactMailbox"))
 			VAR InventoryUsers = CALCULATETABLE(VALUES('Native User Evidence'[TenantUserKey]), REMOVEFILTERS('Native User Evidence'), TREATAS(VALUES('User Inventory Evidence'[User Source ID]), 'Native User Evidence'[SourceUserId]))
-			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((IF(COUNTROWS(ALLSELECTED('Native User Evidence')) = 1, COUNTROWS('Native EXO Mailbox'))), KEEPFILTERS(TREATAS(NativeKeys0, 'Native EXO Mailbox'[TenantUserKey]))),
-			COUNTROWS(NativeKeys1) > 0, CALCULATE((IF(COUNTROWS(ALLSELECTED('Native User Evidence')) = 1, COUNTROWS('Native EXO Mailbox'))), KEEPFILTERS(TREATAS(NativeKeys1, 'Native EXO Mailbox'[TenantMailboxKey]))), BLANK()), BLANK()), SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((IF(COUNTROWS(ALLSELECTED('Native User Evidence')) = 1, COUNTROWS('Native EXO Mailbox'))), KEEPFILTERS(TREATAS(InventoryUsers, 'Native EXO Mailbox'[TenantUserKey]))), (IF(COUNTROWS(ALLSELECTED('Native User Evidence')) = 1, COUNTROWS('Native EXO Mailbox')))))
+			RETURN SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((IF(COUNTROWS(ALLSELECTED('Native User Evidence')) = 1, COUNTROWS('Native EXO Mailbox'))), KEEPFILTERS(TREATAS(InventoryUsers, 'Native EXO Mailbox'[TenantUserKey]))), (IF(COUNTROWS(ALLSELECTED('Native User Evidence')) = 1, COUNTROWS('Native EXO Mailbox'))))
 		formatString: #,0
 		displayFolder: Native evidence
 		lineageTag: b62af5c4-64f3-4d8d-8b02-6355fe50b8d6
 
-	/// Exact native-key entity context or existing inventory context. No name matching or inferred transitive membership. Unrelated entity selections return blank.
+	/// Existing qualified workforce/device scope via exact native IDs; otherwise the domain selection. No name matching or inferred transitive membership.
 	measure 'Native Context Rows · Native EXO Mailbox' =
-			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
-			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
-			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimUser"))
-			VAR NativeKeys1 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "FactMailbox"))
 			VAR InventoryUsers = CALCULATETABLE(VALUES('Native User Evidence'[TenantUserKey]), REMOVEFILTERS('Native User Evidence'), TREATAS(VALUES('User Inventory Evidence'[User Source ID]), 'Native User Evidence'[SourceUserId]))
-			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((COUNTROWS('Native EXO Mailbox')), KEEPFILTERS(TREATAS(NativeKeys0, 'Native EXO Mailbox'[TenantUserKey]))),
-			COUNTROWS(NativeKeys1) > 0, CALCULATE((COUNTROWS('Native EXO Mailbox')), KEEPFILTERS(TREATAS(NativeKeys1, 'Native EXO Mailbox'[TenantMailboxKey]))), BLANK()), BLANK()), SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((COUNTROWS('Native EXO Mailbox')), KEEPFILTERS(TREATAS(InventoryUsers, 'Native EXO Mailbox'[TenantUserKey]))), (COUNTROWS('Native EXO Mailbox'))))
+			RETURN SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((COUNTROWS('Native EXO Mailbox')), KEEPFILTERS(TREATAS(InventoryUsers, 'Native EXO Mailbox'[TenantUserKey]))), (COUNTROWS('Native EXO Mailbox')))
 		formatString: #,0
 		isHidden
 		lineageTag: bc5ce256-71a2-4d49-99ba-2d420fc1cd88

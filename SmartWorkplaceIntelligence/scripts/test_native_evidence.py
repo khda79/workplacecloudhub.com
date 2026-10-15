@@ -83,10 +83,10 @@ class NativeEvidenceTests(unittest.TestCase):
                 previous=list(csv.DictReader(stream))
             def unrelated(row):
                 return row.get('EntityType','').casefold() not in ('mailbox','mailbox recipient') and row.get('RelationshipType')!='HasMailbox'
-            self.assertEqual([r for r in previous if unrelated(r)], [r for r in self.graph_rows(name) if unrelated(r)],name)
-        self.assertEqual(len(self.graph_rows('FactMailbox')),2)
-        self.assertEqual(len(self.graph_rows('FactMailboxHosting')),2)
-        self.assertEqual({r['SourceSystem'] for r in self.graph_rows('FactMailbox')},{'local_mailboxes','mailboxes'})
+            self.assertEqual([r for r in previous if unrelated(r)], [r for r in self.output_rows(name) if unrelated(r)],name)
+        self.assertEqual(len(self.output_rows('FactMailbox')),2)
+        self.assertEqual(len(self.output_rows('FactMailboxHosting')),2)
+        self.assertEqual({r['SourceSystem'] for r in self.output_rows('FactMailbox')},{'local_mailboxes','mailboxes'})
         self.assertEqual(len(result['OutputRows']), 46)
         self.assertFalse(result['Publication'])
         self.assertFalse((self.output / 'current.json.txt').exists())
@@ -111,7 +111,7 @@ class NativeEvidenceTests(unittest.TestCase):
         ids=self.seed_smtp_conflict()
         digests={p.name:sources.sha(p) for p in self.fixture.source.iterdir() if p.is_file()}
         result=unified.build(self.fixture.source,self.output,self.audit())
-        mailboxes=self.graph_rows('FactMailbox');hosting=self.graph_rows('FactMailboxHosting')
+        mailboxes=self.output_rows('FactMailbox');hosting=self.output_rows('FactMailboxHosting')
         self.assertEqual(len(mailboxes),1);self.assertEqual(len(hosting),1)
         self.assertEqual(mailboxes[0]['SourceSystem'],'mailboxes')
         self.assertEqual(hosting[0]['MailboxHostingKey'],mailboxes[0]['TenantMailboxKey'])
@@ -122,27 +122,25 @@ class NativeEvidenceTests(unittest.TestCase):
         remote={o['NativeId']:o for o in audit['Observations'] if o['SourceSystem']=='remote_mailboxes'}
         self.assertEqual(remote[ids[0]]['TenantMailboxKey'],'')
         self.assertEqual(remote[ids[1]]['TenantMailboxKey'],mailboxes[0]['TenantMailboxKey'])
-        findings=self.graph_rows('FactDataQuality')
+        findings=self.output_rows('FactDataQuality')
         conflicts=[r for r in findings if r['FindingType']=='ConflictingPrimarySmtpAddress']
         self.assertEqual(len(conflicts),2)
         self.assertTrue(any(r['FindingType']=='UnresolvedRemoteMailboxRecipient' for r in findings))
-        self.assertEqual(len([r for r in self.graph_rows('CMDBEntityEvidence') if r['Entity Type']=='Mailbox']),1)
-        links=[r for r in self.graph_rows('CMDBRelationshipEvidence') if r['Source Table']=='FactMailbox']
-        self.assertEqual(len(links),1);self.assertEqual(links[0]['Resolution'],'Resolved')
-        overview=next(r for r in self.graph_rows('FactRelationshipOverview') if r['RelationshipType']=='HasMailbox')
+        self.assertTrue(mailboxes[0]['TenantUserKey'])
+        overview=next(r for r in self.output_rows('FactRelationshipOverview') if r['RelationshipType']=='HasMailbox')
         self.assertEqual(overview['RelationshipCount'],'1')
         self.assertEqual(digests,{p.name:sources.sha(p) for p in self.fixture.source.iterdir() if p.is_file()})
 
     def test_ambiguous_smtp_cannot_fallback_to_user(self):
         self.seed_smtp_conflict(cloud_user='')
         unified.build(self.fixture.source,self.output,self.audit())
-        self.assertEqual(self.graph_rows('FactMailbox')[0]['TenantUserKey'],'')
-        self.assertEqual(self.graph_rows('FactMailbox')[0]['LinkStatusLabel'],'Unresolved')
+        self.assertEqual(self.output_rows('FactMailbox')[0]['TenantUserKey'],'')
+        self.assertEqual(self.output_rows('FactMailbox')[0]['LinkStatusLabel'],'Unresolved')
 
     def test_unknown_technical_user_cannot_fallback_to_known_smtp(self):
         self.seed_smtp_conflict(cloud_user='unknown-user')
         unified.build(self.fixture.source,self.output,self.audit())
-        self.assertEqual(self.graph_rows('FactMailbox')[0]['TenantUserKey'],'')
+        self.assertEqual(self.output_rows('FactMailbox')[0]['TenantUserKey'],'')
 
     def test_unqualified_publication_still_blocks_even_with_preserved_conflict(self):
         self.seed_smtp_conflict()
@@ -154,19 +152,19 @@ class NativeEvidenceTests(unittest.TestCase):
     def test_mailbox_keys_are_stable_after_smtp_rename(self):
         ids=self.seed_smtp_conflict()
         unified.build(self.fixture.source,self.output,self.audit())
-        before=self.graph_rows('FactMailbox')[0]['TenantMailboxKey']
+        before=self.output_rows('FactMailbox')[0]['TenantMailboxKey']
         self.fixture.write_native_rows('mailboxes',[
             dict(MailboxGuid=ids[2],PrimarySmtpAddress='renamed@synthetic.invalid',ExternalDirectoryObjectId='u1',
                  RecipientTypeDetails='UserMailbox',CollectedAtUtc=NOW.isoformat())])
         # A separate synthetic staging tree, never overwrite the first batch.
         self.output=self.fixture.root/'renamed-staging';self.output.mkdir()
         unified.build(self.fixture.source,self.output,self.audit())
-        self.assertEqual(self.graph_rows('FactMailbox')[0]['TenantMailboxKey'],before)
+        self.assertEqual(self.output_rows('FactMailbox')[0]['TenantMailboxKey'],before)
 
     def test_same_capture_all_native_columns(self):
         self.compare()
 
-    def test_teams_channels_sites_flow_into_native_graph(self):
+    def test_teams_channels_sites_preserve_direct_links(self):
         self.fixture.inputs['teams']=[dict(TeamId='t1',TeamDisplayName='Synthetic team',
             MemberCollectionStatus='Collected',OwnerCollectionStatus='Collected',ChannelCollectionStatus='Collected',
             MemberCount='0',OwnerCount='0',GuestCount='0',IsArchived='false',IsPartialInventory='false',
@@ -184,98 +182,71 @@ class NativeEvidenceTests(unittest.TestCase):
         self.fixture.write_proof()
         before={p.name:sources.sha(p) for p in self.fixture.source.iterdir() if p.is_file()}
         unified.build(self.fixture.source,self.output,self.audit())
-        links=[r for r in self.graph_rows('CMDBRelationshipEvidence') if r['Source Table']=='TeamsSiteLinkEvidence']
-        self.assertEqual(len(links),6)
-        self.assertEqual(sum(r['Resolution']=='Resolved' for r in links),5)
-        self.assertEqual(len({r['Link Key'] for r in links}),6)
-        self.assertEqual(len([r for r in self.graph_rows('CMDBEntityEvidence') if r['Entity Type']=='Channel']),3)
-        self.assertEqual(self.graph_rows('SharePointSiteLinkEvidence')[0]['Link Count'],'2')
+        links=self.output_rows('TeamsSiteLinkEvidence')
+        self.assertEqual(len(links),4)
+        self.assertEqual(len({r['Link Key'] for r in links}),4)
+        self.assertTrue(any(r['Site ID']=='host,outside,w' for r in links))
+        self.assertEqual(self.output_rows('SharePointSiteLinkEvidence')[0]['Link Count'],'2')
         self.assertEqual(before,{p.name:sources.sha(p) for p in self.fixture.source.iterdir() if p.is_file()})
 
-    def graph_rows(self, name):
+    def output_rows(self, name):
         with (self.output / (name+'.csv')).open(encoding='utf-8-sig', newline='') as stream:
             return list(csv.DictReader(stream))
 
-    def test_graph_keys_endpoints_and_native_counts(self):
+    def test_no_generic_graph_outputs_and_native_keys_remain(self):
         result=unified.build(self.fixture.source,self.output,self.audit())
-        entities=self.graph_rows('CMDBEntityEvidence')
-        links=self.graph_rows('CMDBRelationshipEvidence')
-        endpoints=self.graph_rows('CMDBRelationshipEndpoint')
-        self.assertEqual(len(entities),len({r['Entity Key'] for r in entities}))
-        self.assertEqual(len(links),len({r['Link Key'] for r in links}))
-        self.assertEqual(len(endpoints),len({(r['Link Key'],r['Entity Key']) for r in endpoints}))
-        expected={(r['Link Key'],r[c]) for r in links for c in ('From Entity Key','To Entity Key') if r[c]}
-        self.assertEqual(expected,{(r['Link Key'],r['Entity Key']) for r in endpoints})
-        self.assertTrue({r['Entity Key'] for r in endpoints}<={r['Entity Key'] for r in entities})
-        self.assertEqual(len(links),result['GraphRows']['CMDBRelationshipEvidence'])
-        self.assertEqual({r['Source System'] for r in entities if r['Entity Type']=='Mailbox'},
-                         {'Exchange Online','Exchange On-premises'})
-        for source in ('FactDeviceApplication','FactUserServicePlan','DimLicenseServicePlan'):
-            self.assertEqual(len(self.graph_rows(source)),len([r for r in links if r['Source Table']==source]))
+        self.assertNotIn('GraphRows',result)
+        self.assertFalse(list(self.output.glob('CMDB*.csv')))
+        for table in sources.load_json(sources.CONTRACT)['tables']:
+            rows=self.output_rows(table['name'])
+            if table.get('key'):
+                self.assertEqual(len(rows),len({tuple(r[k] for k in table['key']) for r in rows}),table['name'])
 
-    def test_graph_preserves_direct_and_primary_group_without_transitive_edges(self):
+    def test_direct_and_primary_group_membership_preserved(self):
         self.fixture.seed_ad();self.fixture.write_inputs()
         unified.build(self.fixture.source,self.output,self.audit())
-        links=self.graph_rows('CMDBRelationshipEvidence')
-        memberships=[r for r in links if r['Source Table']=='ADMembership']
-        self.assertEqual({r['Relationship Type'] for r in memberships},{'Direct','PrimaryGroup'})
-        self.assertEqual(len(memberships),2)
-        self.assertTrue(all(r['Resolution']=='Resolved' for r in memberships))
-        self.assertFalse(any('transitive' in r['Relationship Type'].lower() for r in links))
+        members=self.output_rows('ADMembership')
+        self.assertEqual({r['MembershipKind'] for r in members},{'Direct','PrimaryGroup'})
+        self.assertEqual(len(members),2)
+        self.assertFalse(any('transitive' in r['MembershipKind'].lower() for r in members))
 
-    def test_graph_unknown_parent_is_not_a_fabricated_entity(self):
+    def test_unknown_application_and_device_remain_observed_not_fabricated(self):
         self.fixture.inputs['app_relations'].append({'AppId':'missing-app','DeviceId':'missing-device'})
         self.fixture.write_inputs();unified.build(self.fixture.source,self.output,self.audit())
-        missing=[r for r in self.graph_rows('CMDBRelationshipEvidence') if r['From Name']=='missing-device']
+        missing=[r for r in self.output_rows('FactDeviceApplication') if r['ManagedDeviceId']=='missing-device']
         self.assertEqual(len(missing),1)
-        self.assertEqual(missing[0]['Resolution'],'Unresolved endpoint')
-        self.assertEqual(missing[0]['From Entity Key'],'')
-        self.assertEqual(missing[0]['To Entity Key'],'')
-        self.assertNotIn('missing-device',{r['Native ID'] for r in self.graph_rows('CMDBEntityEvidence')})
+        self.assertEqual(missing[0]['AppId'],'missing-app')
+        self.assertFalse(any(r['ManagedDeviceId']=='missing-device' for r in self.output_rows('DimIntuneManagedDevice')))
 
-    def test_graph_manager_is_observed(self):
+    def test_manager_identity_preserved(self):
         self.fixture.seed_ad();self.fixture.write_inputs()
         unified.build(self.fixture.source,self.output,self.audit())
-        links=[r for r in self.graph_rows('CMDBRelationshipEvidence') if r['Relationship Type']=='Directory manager']
-        self.assertEqual(len(links),1)
-        self.assertEqual(links[0]['Resolution'],'Resolved')
-        self.assertEqual(links[0]['Source Table'],'ADUserSource')
+        self.assertTrue(any(r['ManagerADObjectKey'] for r in self.output_rows('ADUserSource')))
 
-    def test_graph_missing_manager_stays_unresolved(self):
+    def test_missing_manager_stays_unresolved(self):
         self.fixture.seed_ad()
         self.fixture.inputs['ad_users'][0]['manager']='CN=Absent,DC=synthetic,DC=invalid'
         self.fixture.write_inputs();unified.build(self.fixture.source,self.output,self.audit())
-        links=[r for r in self.graph_rows('CMDBRelationshipEvidence') if r['Relationship Type']=='Directory manager']
-        self.assertEqual(len(links),1)
-        self.assertEqual(links[0]['Resolution'],'Unresolved endpoint')
-        self.assertEqual(links[0]['To Entity Key'],'')
-        self.assertEqual(links[0]['To Name'],'CN=Absent,DC=synthetic,DC=invalid')
+        users=[r for r in self.output_rows('ADUserSource') if r['ManagerDistinguishedName']=='CN=Absent,DC=synthetic,DC=invalid']
+        self.assertEqual(len(users),1)
+        self.assertEqual(users[0]['ManagerADObjectKey'],'')
 
-    def test_graph_nested_group_and_non_user_members_are_not_dropped(self):
+    def test_nested_groups_and_non_user_members_preserved(self):
         self.fixture.inputs['group_scope'][0]['MemberCount']='4'
         self.fixture.inputs['group_members']=[dict(GroupId='g1',MemberId=mid,MemberType=kind,MembershipKind='Direct',CollectionStatus='Collected')
             for mid,kind in [('u1','#microsoft.graph.user'),('eo1','#microsoft.graph.device'),('g1','#microsoft.graph.group'),('sp1','#microsoft.graph.servicePrincipal')]]
         self.fixture.write_inputs();unified.build(self.fixture.source,self.output,self.audit())
-        links=[r for r in self.graph_rows('CMDBRelationshipEvidence') if r['Source Table']=='EntraGroupMembership']
-        self.assertEqual(len(links),4)
-        self.assertEqual(sum(r['Resolution']=='Resolved' for r in links),3)
-        self.assertEqual(sum(r['From Entity Key']==r['To Entity Key'] for r in links),1)
-        self.assertTrue(any(r['To Name']=='sp1' and r['Resolution']=='Unresolved endpoint' for r in links))
-        aliases=self.graph_rows('CMDBEntityAlias')
-        self.assertEqual(len(aliases),len({(r['Source Table'],r['Source Key']) for r in aliases}))
+        members=self.output_rows('EntraGroupMembership')
+        self.assertEqual(len(members),4)
+        self.assertEqual({r['MemberId'] for r in members},{'u1','eo1','g1','sp1'})
+        self.assertTrue(all(r['MembershipKind']=='Direct' for r in members))
+        self.assertEqual(len(members),len({r['TenantMembershipKey'] for r in members}))
 
-    def test_graph_reuses_canonical_estate_strong_links(self):
-        path=self.output/'AllDevicesEvidence.csv'
-        with path.open('w',encoding='utf-8',newline='') as stream:
-            writer=csv.DictWriter(stream,fieldnames=['Device Key','AD Object GUID','Intune Device ID'])
-            writer.writeheader();writer.writerow({'Device Key':'intune:md1','Intune Device ID':'md1'})
+    def test_managed_device_ids_not_merged_by_display_name(self):
         unified.build(self.fixture.source,self.output,self.audit())
-        bridges=[r for r in self.graph_rows('CMDBEntityAlias') if r['Canonical Device Key']]
-        self.assertEqual(len(bridges),1)
-        self.assertEqual(bridges[0]['Canonical Device Key'],'intune:md1')
-        devices=[r for r in self.graph_rows('CMDBEntityEvidence') if r['Entity Type']=='Device']
-        # Identical display names never merge the two managed identities.
+        devices=self.output_rows('DimIntuneManagedDevice')
         self.assertEqual(len(devices),2)
+        self.assertEqual(len({r['ManagedDeviceId'] for r in devices}),2)
 
     def test_unresolved_application_links_are_preserved(self):
         self.fixture.inputs['app_relations'].append({'AppId': 'missing-app', 'DeviceId': 'missing-device'})
@@ -307,22 +278,22 @@ class NativeEvidenceTests(unittest.TestCase):
         self.fixture.inputs['autopilot'] = [{'Autopilot ID':'ap1', 'Last contacted':'14/10/2026 09:00:00'}]
         self.fixture.write_inputs()
         unified.build(self.fixture.source, self.output, self.audit())
-        self.assertEqual(self.graph_rows('DimUser')[0]['LastSignInDateTime'], '2026-10-05T09:08:07')
-        self.assertEqual(self.graph_rows('DimLicenseSku')[0]['ConsumedUnits'], '8794')
-        self.assertEqual(self.graph_rows('DimLicenseSku')[0]['EnabledUnits'], '9000')
+        self.assertEqual(self.output_rows('DimUser')[0]['LastSignInDateTime'], '2026-10-05T09:08:07')
+        self.assertEqual(self.output_rows('DimLicenseSku')[0]['ConsumedUnits'], '8794')
+        self.assertEqual(self.output_rows('DimLicenseSku')[0]['EnabledUnits'], '9000')
         for table in ('DimIntuneConfigurationPolicy', 'DimWindowsUpdatePolicy'):
-            self.assertEqual(self.graph_rows(table)[0]['CreatedDateTime'], '2025-07-17T12:00:23')
-            self.assertEqual(self.graph_rows(table)[0]['LastModifiedDateTime'], '2026-10-05T09:08:07')
-        self.assertEqual(self.graph_rows('FactAutopilotDevice')[0]['LastContactedDateTime'], '2026-10-14T09:00:00')
+            self.assertEqual(self.output_rows(table)[0]['CreatedDateTime'], '2025-07-17T12:00:23')
+            self.assertEqual(self.output_rows(table)[0]['LastModifiedDateTime'], '2026-10-05T09:08:07')
+        self.assertEqual(self.output_rows('FactAutopilotDevice')[0]['LastContactedDateTime'], '2026-10-14T09:00:00')
 
-    def test_type_failure_precedes_graph_and_leaves_sources_unchanged(self):
+    def test_type_failure_precedes_collaboration_and_leaves_sources_unchanged(self):
         self.fixture.inputs['skus'][0]['TenantConsumedUnits'] = '1.5'
         self.fixture.write_inputs()
         before = {p.name:sources.sha(p) for p in self.fixture.source.iterdir() if p.is_file()}
-        with mock.patch.object(unified, 'build_graph') as graph:
+        with mock.patch.object(unified.teams_sites, 'build') as collaboration:
             with self.assertRaisesRegex(ValueError, 'int64'):
                 unified.build(self.fixture.source, self.output, self.audit())
-            graph.assert_not_called()
+            collaboration.assert_not_called()
         self.assertEqual(before, {p.name:sources.sha(p) for p in self.fixture.source.iterdir() if p.is_file()})
         self.assertFalse((self.output / 'current.json.txt').exists())
 

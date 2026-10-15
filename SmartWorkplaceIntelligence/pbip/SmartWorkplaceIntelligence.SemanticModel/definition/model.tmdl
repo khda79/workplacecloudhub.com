@@ -1,4 +1,4 @@
-/// Business-facing semantic model backed by governed SmartM365 evidence and observed histories, including native CMDB identities and relationships. Synthetic demonstration tables are retired. Offline validation does not imply production or Desktop qualification.
+/// Business-facing semantic model backed by governed SmartM365 domain evidence and observed histories. Generic CMDB projections and synthetic demonstration tables are retired. Offline validation does not imply production or Desktop qualification.
 model SmartWorkplaceIntelligence
 	culture: en-US
 	defaultPowerBIDataSourceVersion: powerBI_V3
@@ -9,9 +9,9 @@ model SmartWorkplaceIntelligence
 		legacyRedirects
 		returnErrorValuesAsNull
 
-annotation PBI_ProTooling = ["MCP-PBIModeling","DevMode"]
-
 annotation PBI_QueryOrder = ["Date","Tenant","Environment","Organization","Geography","Report Metadata","Executive KPI Trends","Device Inventory Evidence","User Inventory Evidence","License Evidence","Mailbox Evidence","Security Control Evidence","Enterprise Operational Signals","DataRoot","Device Risk Evidence Summary","User Activity History Evidence","Workforce Trend Evidence","Identity Reconciliation Evidence","Workforce Operational Signals","Windows Lifecycle Trend Evidence","Endpoint Experience Trend Evidence","Application Inventory Evidence","Application Trend Evidence","Application Operational Signals","Collaboration Adoption Evidence","Collaboration Object Evidence","Collaboration Trend Evidence","Collaboration Operational Signals","Content Storage Evidence","Content Storage Trend Evidence","Content Storage Operational Signals","Backup Mailbox Evidence","Backup Operational Signals","Data Trust Evidence","Data Trust Operational Signals","License Optimization Evidence","Device Directory Summary","SharePointSiteUrl","SharePointLibraryName","SharePointDataFolder","GetSmartInventoryFolder","GetSmartInventoryFile","License Report Summary","License Report Candidates","License Report Gaps","License Report Sources","PreparedSourceMode","PreparedEvidenceRoot","PreparedSharePointFolder","GetPreparedEvidenceFile","PreparedBatchId","GetLicenseReportSnapshot","GetLicenseReportCsv","License Report Assignment Issues"]
+
+annotation PBI_ProTooling = ["MCP-PBIModeling","DevMode"]
 
 annotation __PBI_TimeIntelligenceEnabled = 1
 
@@ -165,10 +165,10 @@ ref table 'Native Relationship Summary'
 ref table 'Native Entity Finding'
 ref table 'Native Quality Finding'
 ref table 'Native Source Health'
-ref table 'CMDB Entity Evidence'
-ref table 'CMDB Relationship Evidence'
-ref table 'CMDB Relationship Endpoint'
-ref table 'CMDB Entity Alias'
+ref table 'Teams Site Links'
+ref table 'SharePoint Site Links'
+ref table 'SharePoint Tenant Capacity'
+ref table 'Collaboration Source Qualification'
 
 ref cultureInfo en-US
 

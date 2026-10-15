@@ -1,1 +1,634 @@
-{"$schema":"https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json","name":"d68f47cd6e8e87f44a5c","position":{"x":32,"y":536,"width":1856,"height":288,"z":12000,"tabOrder":544},"visual":{"visualType":"tableEx","query":{"queryState":{"Values":{"projections":[{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native Hardware Evidence"}},"Property":"TenantDeviceKey"}},"queryRef":"Native Hardware Evidence.TenantDeviceKey","nativeQueryRef":"TenantDeviceKey"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native Hardware Evidence"}},"Property":"ManagedDeviceId"}},"queryRef":"Native Hardware Evidence.ManagedDeviceId","nativeQueryRef":"ManagedDeviceId"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native Hardware Evidence"}},"Property":"SerialNumber"}},"queryRef":"Native Hardware Evidence.SerialNumber","nativeQueryRef":"SerialNumber"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native Hardware Evidence"}},"Property":"Manufacturer"}},"queryRef":"Native Hardware Evidence.Manufacturer","nativeQueryRef":"Manufacturer"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native Hardware Evidence"}},"Property":"Model"}},"queryRef":"Native Hardware Evidence.Model","nativeQueryRef":"Model"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native Hardware Evidence"}},"Property":"Storage"}},"queryRef":"Native Hardware Evidence.Storage","nativeQueryRef":"Storage"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native Hardware Evidence"}},"Property":"HardwareCollectedDateTime"}},"queryRef":"Native Hardware Evidence.HardwareCollectedDateTime","nativeQueryRef":"HardwareCollectedDateTime"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native Hardware Evidence"}},"Property":"InventoryCollectedDateTime"}},"queryRef":"Native Hardware Evidence.InventoryCollectedDateTime","nativeQueryRef":"InventoryCollectedDateTime"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native Hardware Evidence"}},"Property":"CollectionCoverage"}},"queryRef":"Native Hardware Evidence.CollectionCoverage","nativeQueryRef":"CollectionCoverage"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native Hardware Evidence"}},"Property":"CollectionMode"}},"queryRef":"Native Hardware Evidence.CollectionMode","nativeQueryRef":"CollectionMode"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native Hardware Evidence"}},"Property":"PhysicalMemoryGiB"}},"queryRef":"Native Hardware Evidence.PhysicalMemoryGiB","nativeQueryRef":"PhysicalMemoryGiB"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native Hardware Evidence"}},"Property":"StorageStatus"}},"queryRef":"Native Hardware Evidence.StorageStatus","nativeQueryRef":"StorageStatus"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native Hardware Evidence"}},"Property":"MemoryStatus"}},"queryRef":"Native Hardware Evidence.MemoryStatus","nativeQueryRef":"MemoryStatus"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native Hardware Evidence"}},"Property":"TenantKey"}},"queryRef":"Native Hardware Evidence.TenantKey","nativeQueryRef":"TenantKey"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native Hardware Evidence"}},"Property":"OrganizationKey"}},"queryRef":"Native Hardware Evidence.OrganizationKey","nativeQueryRef":"OrganizationKey"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native Hardware Evidence"}},"Property":"EnvironmentKey"}},"queryRef":"Native Hardware Evidence.EnvironmentKey","nativeQueryRef":"EnvironmentKey"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native Hardware Evidence"}},"Property":"TenantId"}},"queryRef":"Native Hardware Evidence.TenantId","nativeQueryRef":"TenantId"}]}}},"objects":{"columnHeaders":[{"properties":{"fontSize":{"expr":{"Literal":{"Value":"14D"}}},"autoSizeColumnWidth":{"expr":{"Literal":{"Value":"true"}}},"columnAdjustment":{"expr":{"Literal":{"Value":"'growToFit'"}}},"wordWrap":{"expr":{"Literal":{"Value":"true"}}},"fontColor":{"solid":{"color":{"expr":{"Literal":{"Value":"'#FFFFFF'"}}}}},"backColor":{"solid":{"color":{"expr":{"Literal":{"Value":"'#215E9E'"}}}}}}}],"values":[{"properties":{"fontSize":{"expr":{"Literal":{"Value":"14D"}}},"wordWrap":{"expr":{"Literal":{"Value":"false"}}},"fontColorPrimary":{"solid":{"color":{"expr":{"Literal":{"Value":"'#1F2937'"}}}}},"fontColorSecondary":{"solid":{"color":{"expr":{"Literal":{"Value":"'#1F2937'"}}}}},"backColorPrimary":{"solid":{"color":{"expr":{"Literal":{"Value":"'#FFFFFF'"}}}}},"backColorSecondary":{"solid":{"color":{"expr":{"Literal":{"Value":"'#F7FAFC'"}}}}}}}],"grid":[{"properties":{"rowPadding":{"expr":{"Literal":{"Value":"4D"}}}}}]},"visualContainerObjects":{"general":[{"properties":{"altText":{"expr":{"Literal":{"Value":"'Hardware · complete governed fields'"}}}}}],"title":[{"properties":{"show":{"expr":{"Literal":{"Value":"true"}}},"text":{"expr":{"Literal":{"Value":"'Hardware · complete governed fields'"}}},"fontSize":{"expr":{"Literal":{"Value":"15D"}}}}}],"background":[{"properties":{"show":{"expr":{"Literal":{"Value":"true"}}},"color":{"solid":{"color":{"expr":{"Literal":{"Value":"'#FFFFFF'"}}}}},"transparency":{"expr":{"Literal":{"Value":"0D"}}}}}],"border":[{"properties":{"show":{"expr":{"Literal":{"Value":"true"}}},"color":{"solid":{"color":{"expr":{"Literal":{"Value":"'#CCDCEC'"}}}}},"radius":{"expr":{"Literal":{"Value":"8D"}}},"width":{"expr":{"Literal":{"Value":"1D"}}}}}],"visualHeader":[{"properties":{"show":{"expr":{"Literal":{"Value":"false"}}}}}],"padding":[{"properties":{"top":{"expr":{"Literal":{"Value":"8D"}}},"bottom":{"expr":{"Literal":{"Value":"8D"}}},"left":{"expr":{"Literal":{"Value":"8D"}}},"right":{"expr":{"Literal":{"Value":"8D"}}}}}],"subTitle":[{"properties":{"show":{"expr":{"Literal":{"Value":"false"}}}}}],"stylePreset":[{"properties":{"name":{"expr":{"Literal":{"Value":"'None'"}}}}}]},"drillFilterOtherVisuals":true},"parentGroupName":"dcae98e7e22f9b248681","filterConfig":{"filters":[{"name":"eff312b37aaa2a7613ef","field":{"Measure":{"Expression":{"SourceRef":{"Entity":"Native Hardware Evidence"}},"Property":"Native Context Rows · Native Hardware Evidence"}},"type":"Advanced","filter":{"Version":2,"From":[{"Name":"c","Entity":"Native Hardware Evidence","Type":0}],"Where":[{"Condition":{"Comparison":{"ComparisonKind":2,"Left":{"Measure":{"Expression":{"SourceRef":{"Source":"c"}},"Property":"Native Context Rows · Native Hardware Evidence"}},"Right":{"Literal":{"Value":"0L"}}}}}]}}]}}
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json",
+  "name": "d68f47cd6e8e87f44a5c",
+  "position": {
+    "x": 32,
+    "y": 536,
+    "width": 1856,
+    "height": 288,
+    "z": 12000,
+    "tabOrder": 544
+  },
+  "visual": {
+    "visualType": "tableEx",
+    "query": {
+      "queryState": {
+        "Values": {
+          "projections": [
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Hardware Evidence"
+                    }
+                  },
+                  "Property": "TenantDeviceKey"
+                }
+              },
+              "queryRef": "Native Hardware Evidence.TenantDeviceKey",
+              "nativeQueryRef": "TenantDeviceKey"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Hardware Evidence"
+                    }
+                  },
+                  "Property": "ManagedDeviceId"
+                }
+              },
+              "queryRef": "Native Hardware Evidence.ManagedDeviceId",
+              "nativeQueryRef": "ManagedDeviceId"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Hardware Evidence"
+                    }
+                  },
+                  "Property": "SerialNumber"
+                }
+              },
+              "queryRef": "Native Hardware Evidence.SerialNumber",
+              "nativeQueryRef": "SerialNumber"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Hardware Evidence"
+                    }
+                  },
+                  "Property": "Manufacturer"
+                }
+              },
+              "queryRef": "Native Hardware Evidence.Manufacturer",
+              "nativeQueryRef": "Manufacturer"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Hardware Evidence"
+                    }
+                  },
+                  "Property": "Model"
+                }
+              },
+              "queryRef": "Native Hardware Evidence.Model",
+              "nativeQueryRef": "Model"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Hardware Evidence"
+                    }
+                  },
+                  "Property": "Storage"
+                }
+              },
+              "queryRef": "Native Hardware Evidence.Storage",
+              "nativeQueryRef": "Storage"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Hardware Evidence"
+                    }
+                  },
+                  "Property": "HardwareCollectedDateTime"
+                }
+              },
+              "queryRef": "Native Hardware Evidence.HardwareCollectedDateTime",
+              "nativeQueryRef": "HardwareCollectedDateTime"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Hardware Evidence"
+                    }
+                  },
+                  "Property": "InventoryCollectedDateTime"
+                }
+              },
+              "queryRef": "Native Hardware Evidence.InventoryCollectedDateTime",
+              "nativeQueryRef": "InventoryCollectedDateTime"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Hardware Evidence"
+                    }
+                  },
+                  "Property": "CollectionCoverage"
+                }
+              },
+              "queryRef": "Native Hardware Evidence.CollectionCoverage",
+              "nativeQueryRef": "CollectionCoverage"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Hardware Evidence"
+                    }
+                  },
+                  "Property": "CollectionMode"
+                }
+              },
+              "queryRef": "Native Hardware Evidence.CollectionMode",
+              "nativeQueryRef": "CollectionMode"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Hardware Evidence"
+                    }
+                  },
+                  "Property": "PhysicalMemoryGiB"
+                }
+              },
+              "queryRef": "Native Hardware Evidence.PhysicalMemoryGiB",
+              "nativeQueryRef": "PhysicalMemoryGiB"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Hardware Evidence"
+                    }
+                  },
+                  "Property": "StorageStatus"
+                }
+              },
+              "queryRef": "Native Hardware Evidence.StorageStatus",
+              "nativeQueryRef": "StorageStatus"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Hardware Evidence"
+                    }
+                  },
+                  "Property": "MemoryStatus"
+                }
+              },
+              "queryRef": "Native Hardware Evidence.MemoryStatus",
+              "nativeQueryRef": "MemoryStatus"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Hardware Evidence"
+                    }
+                  },
+                  "Property": "TenantKey"
+                }
+              },
+              "queryRef": "Native Hardware Evidence.TenantKey",
+              "nativeQueryRef": "TenantKey"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Hardware Evidence"
+                    }
+                  },
+                  "Property": "OrganizationKey"
+                }
+              },
+              "queryRef": "Native Hardware Evidence.OrganizationKey",
+              "nativeQueryRef": "OrganizationKey"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Hardware Evidence"
+                    }
+                  },
+                  "Property": "EnvironmentKey"
+                }
+              },
+              "queryRef": "Native Hardware Evidence.EnvironmentKey",
+              "nativeQueryRef": "EnvironmentKey"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Hardware Evidence"
+                    }
+                  },
+                  "Property": "TenantId"
+                }
+              },
+              "queryRef": "Native Hardware Evidence.TenantId",
+              "nativeQueryRef": "TenantId"
+            }
+          ]
+        }
+      }
+    },
+    "objects": {
+      "columnHeaders": [
+        {
+          "properties": {
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "14D"
+                }
+              }
+            },
+            "autoSizeColumnWidth": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "columnAdjustment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'growToFit'"
+                }
+              }
+            },
+            "wordWrap": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "fontColor": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#FFFFFF'"
+                    }
+                  }
+                }
+              }
+            },
+            "backColor": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#215E9E'"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      ],
+      "values": [
+        {
+          "properties": {
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "14D"
+                }
+              }
+            },
+            "wordWrap": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            },
+            "fontColorPrimary": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#1F2937'"
+                    }
+                  }
+                }
+              }
+            },
+            "fontColorSecondary": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#1F2937'"
+                    }
+                  }
+                }
+              }
+            },
+            "backColorPrimary": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#FFFFFF'"
+                    }
+                  }
+                }
+              }
+            },
+            "backColorSecondary": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#F7FAFC'"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      ],
+      "grid": [
+        {
+          "properties": {
+            "rowPadding": {
+              "expr": {
+                "Literal": {
+                  "Value": "4D"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "visualContainerObjects": {
+      "general": [
+        {
+          "properties": {
+            "altText": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Hardware · complete governed fields'"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "title": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "text": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Hardware · complete governed fields'"
+                }
+              }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "15D"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "background": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "color": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#FFFFFF'"
+                    }
+                  }
+                }
+              }
+            },
+            "transparency": {
+              "expr": {
+                "Literal": {
+                  "Value": "0D"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "border": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "color": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#CCDCEC'"
+                    }
+                  }
+                }
+              }
+            },
+            "radius": {
+              "expr": {
+                "Literal": {
+                  "Value": "8D"
+                }
+              }
+            },
+            "width": {
+              "expr": {
+                "Literal": {
+                  "Value": "1D"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "visualHeader": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "padding": [
+        {
+          "properties": {
+            "top": {
+              "expr": {
+                "Literal": {
+                  "Value": "8D"
+                }
+              }
+            },
+            "bottom": {
+              "expr": {
+                "Literal": {
+                  "Value": "8D"
+                }
+              }
+            },
+            "left": {
+              "expr": {
+                "Literal": {
+                  "Value": "8D"
+                }
+              }
+            },
+            "right": {
+              "expr": {
+                "Literal": {
+                  "Value": "8D"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "subTitle": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "stylePreset": [
+        {
+          "properties": {
+            "name": {
+              "expr": {
+                "Literal": {
+                  "Value": "'None'"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "drillFilterOtherVisuals": true
+  },
+  "parentGroupName": "dcae98e7e22f9b248681",
+  "filterConfig": {
+    "filters": [
+      {
+        "name": "eff312b37aaa2a7613ef",
+        "field": {
+          "Measure": {
+            "Expression": {
+              "SourceRef": {
+                "Entity": "Native Hardware Evidence"
+              }
+            },
+            "Property": "Native Context Rows · Native Hardware Evidence"
+          }
+        },
+        "type": "Advanced",
+        "filter": {
+          "Version": 2,
+          "From": [
+            {
+              "Name": "c",
+              "Entity": "Native Hardware Evidence",
+              "Type": 0
+            }
+          ],
+          "Where": [
+            {
+              "Condition": {
+                "Comparison": {
+                  "ComparisonKind": 2,
+                  "Left": {
+                    "Measure": {
+                      "Expression": {
+                        "SourceRef": {
+                          "Source": "c"
+                        }
+                      },
+                      "Property": "Native Context Rows · Native Hardware Evidence"
+                    }
+                  },
+                  "Right": {
+                    "Literal": {
+                      "Value": "0L"
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

@@ -3,64 +3,43 @@ table 'Native Endpoint Score Evidence'
 	lineageTag: 431b2e97-cd7b-436a-978d-5bb5f38298fb
 
 	/// Devices represented in the Endpoint Analytics export. Migrated without changing the source calculation.
-	measure 'Native Endpoint Analytics devices' =
-			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
-			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
-			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (COALESCE(COUNTROWS('Native Endpoint Score Evidence'),0)))
+	measure 'Native Endpoint Analytics devices' = (COALESCE(COUNTROWS('Native Endpoint Score Evidence'),0))
 		formatString: #,0
 		displayFolder: Native evidence
 		lineageTag: a568f4cd-a570-4b47-9b35-ed20cbbe3300
 
 	/// Arithmetic mean of the source-reported Endpoint Analytics device score across rows with a value. Migrated without changing the source calculation.
-	measure 'Native Average Endpoint Analytics score' =
-			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
-			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
-			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (AVERAGE('Native Endpoint Score Evidence'[EndpointAnalyticsScore])))
+	measure 'Native Average Endpoint Analytics score' = (AVERAGE('Native Endpoint Score Evidence'[EndpointAnalyticsScore]))
 		formatString: 0.0
 		displayFolder: Native evidence
 		lineageTag: e10fc8c5-245d-4db0-9458-cb12baebab59
 
 	/// Average Endpoint Analytics score for exact Intune device identifiers in the filtered device population. Migrated without changing the source calculation.
-	measure 'Native Selected Endpoint Analytics score' =
-			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
-			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
-			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (VAR _deviceKeys = VALUES('Native Device Evidence'[TenantDeviceKey]) VAR _intuneIds = CALCULATETABLE(VALUES('Device Source Evidence'[SourceObjectId]), TREATAS(_deviceKeys, 'Device Source Evidence'[TenantDeviceKey]), KEEPFILTERS('Device Source Evidence'[SourceSystem] = "Intune")) RETURN CALCULATE(AVERAGE('Native Endpoint Score Evidence'[EndpointAnalyticsScore]), TREATAS(_intuneIds, 'Native Endpoint Score Evidence'[DeviceId]))))
+	measure 'Native Selected Endpoint Analytics score' = (VAR _deviceKeys = VALUES('Native Device Evidence'[TenantDeviceKey]) VAR _intuneIds = CALCULATETABLE(VALUES('Device Source Evidence'[SourceObjectId]), TREATAS(_deviceKeys, 'Device Source Evidence'[TenantDeviceKey]), KEEPFILTERS('Device Source Evidence'[SourceSystem] = "Intune")) RETURN CALCULATE(AVERAGE('Native Endpoint Score Evidence'[EndpointAnalyticsScore]), TREATAS(_intuneIds, 'Native Endpoint Score Evidence'[DeviceId])))
 		formatString: 0.0
 		displayFolder: Native evidence
 		lineageTag: b43c35be-4447-42f2-8ca6-5ca3583ef0c1
 
 	/// Average startup score for exact Intune device identifiers in the filtered device population. Migrated without changing the source calculation.
-	measure 'Native Selected startup performance score' =
-			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
-			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
-			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (VAR _deviceKeys = VALUES('Native Device Evidence'[TenantDeviceKey]) VAR _intuneIds = CALCULATETABLE(VALUES('Device Source Evidence'[SourceObjectId]), TREATAS(_deviceKeys, 'Device Source Evidence'[TenantDeviceKey]), KEEPFILTERS('Device Source Evidence'[SourceSystem] = "Intune")) RETURN CALCULATE(AVERAGE('Native Endpoint Score Evidence'[StartupPerformanceScore]), TREATAS(_intuneIds, 'Native Endpoint Score Evidence'[DeviceId]))))
+	measure 'Native Selected startup performance score' = (VAR _deviceKeys = VALUES('Native Device Evidence'[TenantDeviceKey]) VAR _intuneIds = CALCULATETABLE(VALUES('Device Source Evidence'[SourceObjectId]), TREATAS(_deviceKeys, 'Device Source Evidence'[TenantDeviceKey]), KEEPFILTERS('Device Source Evidence'[SourceSystem] = "Intune")) RETURN CALCULATE(AVERAGE('Native Endpoint Score Evidence'[StartupPerformanceScore]), TREATAS(_intuneIds, 'Native Endpoint Score Evidence'[DeviceId])))
 		formatString: 0.0
 		displayFolder: Native evidence
 		lineageTag: 5a5dab2a-faa8-4251-942d-7e05ddcf3b5b
 
 	/// Average app reliability score for exact Intune device identifiers in the filtered device population. Migrated without changing the source calculation.
-	measure 'Native Selected app reliability score' =
-			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
-			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
-			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (VAR _deviceKeys = VALUES('Native Device Evidence'[TenantDeviceKey]) VAR _intuneIds = CALCULATETABLE(VALUES('Device Source Evidence'[SourceObjectId]), TREATAS(_deviceKeys, 'Device Source Evidence'[TenantDeviceKey]), KEEPFILTERS('Device Source Evidence'[SourceSystem] = "Intune")) RETURN CALCULATE(AVERAGE('Native Endpoint Score Evidence'[AppReliabilityScore]), TREATAS(_intuneIds, 'Native Endpoint Score Evidence'[DeviceId]))))
+	measure 'Native Selected app reliability score' = (VAR _deviceKeys = VALUES('Native Device Evidence'[TenantDeviceKey]) VAR _intuneIds = CALCULATETABLE(VALUES('Device Source Evidence'[SourceObjectId]), TREATAS(_deviceKeys, 'Device Source Evidence'[TenantDeviceKey]), KEEPFILTERS('Device Source Evidence'[SourceSystem] = "Intune")) RETURN CALCULATE(AVERAGE('Native Endpoint Score Evidence'[AppReliabilityScore]), TREATAS(_intuneIds, 'Native Endpoint Score Evidence'[DeviceId])))
 		formatString: 0.0
 		displayFolder: Native evidence
 		lineageTag: cc5d2344-c88f-4dc4-b093-6a2d35b03d5f
 
 	/// Average work-from-anywhere score for exact Intune device identifiers in the filtered device population. Migrated without changing the source calculation.
-	measure 'Native Selected work from anywhere score' =
-			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
-			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
-			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (VAR _deviceKeys = VALUES('Native Device Evidence'[TenantDeviceKey]) VAR _intuneIds = CALCULATETABLE(VALUES('Device Source Evidence'[SourceObjectId]), TREATAS(_deviceKeys, 'Device Source Evidence'[TenantDeviceKey]), KEEPFILTERS('Device Source Evidence'[SourceSystem] = "Intune")) RETURN CALCULATE(AVERAGE('Native Endpoint Score Evidence'[WorkFromAnywhereScore]), TREATAS(_intuneIds, 'Native Endpoint Score Evidence'[DeviceId]))))
+	measure 'Native Selected work from anywhere score' = (VAR _deviceKeys = VALUES('Native Device Evidence'[TenantDeviceKey]) VAR _intuneIds = CALCULATETABLE(VALUES('Device Source Evidence'[SourceObjectId]), TREATAS(_deviceKeys, 'Device Source Evidence'[TenantDeviceKey]), KEEPFILTERS('Device Source Evidence'[SourceSystem] = "Intune")) RETURN CALCULATE(AVERAGE('Native Endpoint Score Evidence'[WorkFromAnywhereScore]), TREATAS(_intuneIds, 'Native Endpoint Score Evidence'[DeviceId])))
 		formatString: 0.0
 		displayFolder: Native evidence
 		lineageTag: 1ae7893b-5fe7-42a0-81fd-47bba0cf46ed
 
-	/// Exact native-key entity context or existing inventory context. No name matching or inferred transitive membership. Unrelated entity selections return blank.
-	measure 'Native Context Rows · Native Endpoint Score Evidence' =
-			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
-			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
-			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (COUNTROWS('Native Endpoint Score Evidence')))
+	/// Existing qualified workforce/device scope via exact native IDs; otherwise the domain selection. No name matching or inferred transitive membership.
+	measure 'Native Context Rows · Native Endpoint Score Evidence' = (COUNTROWS('Native Endpoint Score Evidence'))
 		formatString: #,0
 		isHidden
 		lineageTag: 0e976b6d-0558-4beb-87fb-9d1f178807db

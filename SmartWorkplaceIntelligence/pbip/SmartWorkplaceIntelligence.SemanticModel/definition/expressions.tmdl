@@ -81,7 +81,8 @@ expression GetPreparedEvidenceFile =
 		    Manifest = Json.Document(ReadMetadata({"batches", BatchId}, "batch")),
 		    Selected = List.Select(Manifest[Files] & Record.FieldOrDefault(Manifest, "Artifacts", {}), each [File] = SafeSegment(fileName)),
 		    Entry = if Manifest[SchemaVersion] <> 1 or Manifest[BatchId] <> BatchId or Manifest[TenantKey] <> ExpectedTenant or Pointer[TenantKey] <> ExpectedTenant or List.Count(Selected) <> 1 then error "Invalid prepared batch manifest" else Selected{0},
-		    Content = Binary.Buffer(ReadBinary({"batches", BatchId, SafeSegment(fileName)})),
+		    // Stream payloads: buffering an entire CSV exceeds the 2 GiB binary buffer limit.
+		    Content = ReadBinary({"batches", BatchId, SafeSegment(fileName)}),
 		    // Size guard rejects incomplete synchronized files. SHA256 is checked by the publisher, not by M.
 		    Checked = if Binary.Length(Content) <> Entry[Bytes] then error "Prepared evidence transfer incomplete; previous imported model must be retained" else Content,
 		    StablePointer = if PreparedBatchId <> "" or Binary.ToText(PointerBytes, BinaryEncoding.Base64) = Binary.ToText(ReadMetadata({}, "current"), BinaryEncoding.Base64) then Checked else error "Prepared batch changed during read; refresh after preparation finishes"

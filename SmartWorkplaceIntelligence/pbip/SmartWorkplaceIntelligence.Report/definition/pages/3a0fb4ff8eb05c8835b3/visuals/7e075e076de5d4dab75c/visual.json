@@ -1,1 +1,774 @@
-{"$schema":"https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json","name":"7e075e076de5d4dab75c","position":{"x":32,"y":488,"width":1856,"height":336,"z":12000,"tabOrder":544},"visual":{"visualType":"tableEx","query":{"queryState":{"Values":{"projections":[{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"AD User Evidence"}},"Property":"DisplayName"}},"queryRef":"AD User Evidence.DisplayName","nativeQueryRef":"DisplayName"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"AD User Evidence"}},"Property":"TenantADUserKey"}},"queryRef":"AD User Evidence.TenantADUserKey","nativeQueryRef":"TenantADUserKey"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"AD User Evidence"}},"Property":"ObjectGUID"}},"queryRef":"AD User Evidence.ObjectGUID","nativeQueryRef":"ObjectGUID"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"AD User Evidence"}},"Property":"ObjectSID"}},"queryRef":"AD User Evidence.ObjectSID","nativeQueryRef":"ObjectSID"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"AD User Evidence"}},"Property":"DomainName"}},"queryRef":"AD User Evidence.DomainName","nativeQueryRef":"DomainName"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"AD User Evidence"}},"Property":"DistinguishedName"}},"queryRef":"AD User Evidence.DistinguishedName","nativeQueryRef":"DistinguishedName"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"AD User Evidence"}},"Property":"SamAccountName"}},"queryRef":"AD User Evidence.SamAccountName","nativeQueryRef":"SamAccountName"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"AD User Evidence"}},"Property":"UserPrincipalName"}},"queryRef":"AD User Evidence.UserPrincipalName","nativeQueryRef":"UserPrincipalName"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"AD User Evidence"}},"Property":"Enabled"}},"queryRef":"AD User Evidence.Enabled","nativeQueryRef":"Enabled"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"AD User Evidence"}},"Property":"Department"}},"queryRef":"AD User Evidence.Department","nativeQueryRef":"Department"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"AD User Evidence"}},"Property":"Title"}},"queryRef":"AD User Evidence.Title","nativeQueryRef":"Title"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"AD User Evidence"}},"Property":"Country"}},"queryRef":"AD User Evidence.Country","nativeQueryRef":"Country"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"AD User Evidence"}},"Property":"ManagerDistinguishedName"}},"queryRef":"AD User Evidence.ManagerDistinguishedName","nativeQueryRef":"ManagerDistinguishedName"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"AD User Evidence"}},"Property":"ManagerADObjectKey"}},"queryRef":"AD User Evidence.ManagerADObjectKey","nativeQueryRef":"ManagerADObjectKey"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"AD User Evidence"}},"Property":"TenantUserKey"}},"queryRef":"AD User Evidence.TenantUserKey","nativeQueryRef":"TenantUserKey"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"AD User Evidence"}},"Property":"CloudMatchStatus"}},"queryRef":"AD User Evidence.CloudMatchStatus","nativeQueryRef":"CloudMatchStatus"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"AD User Evidence"}},"Property":"LastLogonTimestampRaw"}},"queryRef":"AD User Evidence.LastLogonTimestampRaw","nativeQueryRef":"LastLogonTimestampRaw"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"AD User Evidence"}},"Property":"LastLogonUtcDateTime"}},"queryRef":"AD User Evidence.LastLogonUtcDateTime","nativeQueryRef":"LastLogonUtcDateTime"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"AD User Evidence"}},"Property":"LastLogonStatus"}},"queryRef":"AD User Evidence.LastLogonStatus","nativeQueryRef":"LastLogonStatus"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"AD User Evidence"}},"Property":"CreationRaw"}},"queryRef":"AD User Evidence.CreationRaw","nativeQueryRef":"CreationRaw"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"AD User Evidence"}},"Property":"CreationUtcDateTime"}},"queryRef":"AD User Evidence.CreationUtcDateTime","nativeQueryRef":"CreationUtcDateTime"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"AD User Evidence"}},"Property":"CreationStatus"}},"queryRef":"AD User Evidence.CreationStatus","nativeQueryRef":"CreationStatus"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"AD User Evidence"}},"Property":"SourceCollectedDateTime"}},"queryRef":"AD User Evidence.SourceCollectedDateTime","nativeQueryRef":"SourceCollectedDateTime"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"AD User Evidence"}},"Property":"TenantKey"}},"queryRef":"AD User Evidence.TenantKey","nativeQueryRef":"TenantKey"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"AD User Evidence"}},"Property":"OrganizationKey"}},"queryRef":"AD User Evidence.OrganizationKey","nativeQueryRef":"OrganizationKey"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"AD User Evidence"}},"Property":"EnvironmentKey"}},"queryRef":"AD User Evidence.EnvironmentKey","nativeQueryRef":"EnvironmentKey"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"AD User Evidence"}},"Property":"TenantId"}},"queryRef":"AD User Evidence.TenantId","nativeQueryRef":"TenantId"}]}}},"objects":{"columnHeaders":[{"properties":{"fontSize":{"expr":{"Literal":{"Value":"14D"}}},"autoSizeColumnWidth":{"expr":{"Literal":{"Value":"true"}}},"columnAdjustment":{"expr":{"Literal":{"Value":"'growToFit'"}}},"wordWrap":{"expr":{"Literal":{"Value":"true"}}},"fontColor":{"solid":{"color":{"expr":{"Literal":{"Value":"'#FFFFFF'"}}}}},"backColor":{"solid":{"color":{"expr":{"Literal":{"Value":"'#215E9E'"}}}}}}}],"values":[{"properties":{"fontSize":{"expr":{"Literal":{"Value":"14D"}}},"wordWrap":{"expr":{"Literal":{"Value":"false"}}},"fontColorPrimary":{"solid":{"color":{"expr":{"Literal":{"Value":"'#1F2937'"}}}}},"fontColorSecondary":{"solid":{"color":{"expr":{"Literal":{"Value":"'#1F2937'"}}}}},"backColorPrimary":{"solid":{"color":{"expr":{"Literal":{"Value":"'#FFFFFF'"}}}}},"backColorSecondary":{"solid":{"color":{"expr":{"Literal":{"Value":"'#F7FAFC'"}}}}}}}],"grid":[{"properties":{"rowPadding":{"expr":{"Literal":{"Value":"4D"}}}}}]},"visualContainerObjects":{"general":[{"properties":{"altText":{"expr":{"Literal":{"Value":"'AD users · complete governed fields'"}}}}}],"title":[{"properties":{"show":{"expr":{"Literal":{"Value":"true"}}},"text":{"expr":{"Literal":{"Value":"'AD users · complete governed fields'"}}},"fontSize":{"expr":{"Literal":{"Value":"15D"}}}}}],"background":[{"properties":{"show":{"expr":{"Literal":{"Value":"true"}}},"color":{"solid":{"color":{"expr":{"Literal":{"Value":"'#FFFFFF'"}}}}},"transparency":{"expr":{"Literal":{"Value":"0D"}}}}}],"border":[{"properties":{"show":{"expr":{"Literal":{"Value":"true"}}},"color":{"solid":{"color":{"expr":{"Literal":{"Value":"'#CCDCEC'"}}}}},"radius":{"expr":{"Literal":{"Value":"8D"}}},"width":{"expr":{"Literal":{"Value":"1D"}}}}}],"visualHeader":[{"properties":{"show":{"expr":{"Literal":{"Value":"false"}}}}}],"padding":[{"properties":{"top":{"expr":{"Literal":{"Value":"8D"}}},"bottom":{"expr":{"Literal":{"Value":"8D"}}},"left":{"expr":{"Literal":{"Value":"8D"}}},"right":{"expr":{"Literal":{"Value":"8D"}}}}}],"subTitle":[{"properties":{"show":{"expr":{"Literal":{"Value":"false"}}}}}],"stylePreset":[{"properties":{"name":{"expr":{"Literal":{"Value":"'None'"}}}}}]},"drillFilterOtherVisuals":true},"parentGroupName":"907a2d686879f953b6e0","filterConfig":{"filters":[{"name":"ebf6471fbbb6f27c2ffb","field":{"Measure":{"Expression":{"SourceRef":{"Entity":"AD User Evidence"}},"Property":"Native Context Rows · AD User Evidence"}},"type":"Advanced","filter":{"Version":2,"From":[{"Name":"c","Entity":"AD User Evidence","Type":0}],"Where":[{"Condition":{"Comparison":{"ComparisonKind":2,"Left":{"Measure":{"Expression":{"SourceRef":{"Source":"c"}},"Property":"Native Context Rows · AD User Evidence"}},"Right":{"Literal":{"Value":"0L"}}}}}]}}]}}
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json",
+  "name": "7e075e076de5d4dab75c",
+  "position": {
+    "x": 32,
+    "y": 536,
+    "width": 1856,
+    "height": 288,
+    "z": 12000,
+    "tabOrder": 544
+  },
+  "visual": {
+    "visualType": "tableEx",
+    "query": {
+      "queryState": {
+        "Values": {
+          "projections": [
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "AD User Evidence"
+                    }
+                  },
+                  "Property": "DisplayName"
+                }
+              },
+              "queryRef": "AD User Evidence.DisplayName",
+              "nativeQueryRef": "DisplayName"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "AD User Evidence"
+                    }
+                  },
+                  "Property": "TenantADUserKey"
+                }
+              },
+              "queryRef": "AD User Evidence.TenantADUserKey",
+              "nativeQueryRef": "TenantADUserKey"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "AD User Evidence"
+                    }
+                  },
+                  "Property": "ObjectGUID"
+                }
+              },
+              "queryRef": "AD User Evidence.ObjectGUID",
+              "nativeQueryRef": "ObjectGUID"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "AD User Evidence"
+                    }
+                  },
+                  "Property": "ObjectSID"
+                }
+              },
+              "queryRef": "AD User Evidence.ObjectSID",
+              "nativeQueryRef": "ObjectSID"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "AD User Evidence"
+                    }
+                  },
+                  "Property": "DomainName"
+                }
+              },
+              "queryRef": "AD User Evidence.DomainName",
+              "nativeQueryRef": "DomainName"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "AD User Evidence"
+                    }
+                  },
+                  "Property": "DistinguishedName"
+                }
+              },
+              "queryRef": "AD User Evidence.DistinguishedName",
+              "nativeQueryRef": "DistinguishedName"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "AD User Evidence"
+                    }
+                  },
+                  "Property": "SamAccountName"
+                }
+              },
+              "queryRef": "AD User Evidence.SamAccountName",
+              "nativeQueryRef": "SamAccountName"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "AD User Evidence"
+                    }
+                  },
+                  "Property": "UserPrincipalName"
+                }
+              },
+              "queryRef": "AD User Evidence.UserPrincipalName",
+              "nativeQueryRef": "UserPrincipalName"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "AD User Evidence"
+                    }
+                  },
+                  "Property": "Enabled"
+                }
+              },
+              "queryRef": "AD User Evidence.Enabled",
+              "nativeQueryRef": "Enabled"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "AD User Evidence"
+                    }
+                  },
+                  "Property": "Department"
+                }
+              },
+              "queryRef": "AD User Evidence.Department",
+              "nativeQueryRef": "Department"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "AD User Evidence"
+                    }
+                  },
+                  "Property": "Title"
+                }
+              },
+              "queryRef": "AD User Evidence.Title",
+              "nativeQueryRef": "Title"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "AD User Evidence"
+                    }
+                  },
+                  "Property": "Country"
+                }
+              },
+              "queryRef": "AD User Evidence.Country",
+              "nativeQueryRef": "Country"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "AD User Evidence"
+                    }
+                  },
+                  "Property": "ManagerDistinguishedName"
+                }
+              },
+              "queryRef": "AD User Evidence.ManagerDistinguishedName",
+              "nativeQueryRef": "ManagerDistinguishedName"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "AD User Evidence"
+                    }
+                  },
+                  "Property": "ManagerADObjectKey"
+                }
+              },
+              "queryRef": "AD User Evidence.ManagerADObjectKey",
+              "nativeQueryRef": "ManagerADObjectKey"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "AD User Evidence"
+                    }
+                  },
+                  "Property": "TenantUserKey"
+                }
+              },
+              "queryRef": "AD User Evidence.TenantUserKey",
+              "nativeQueryRef": "TenantUserKey"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "AD User Evidence"
+                    }
+                  },
+                  "Property": "CloudMatchStatus"
+                }
+              },
+              "queryRef": "AD User Evidence.CloudMatchStatus",
+              "nativeQueryRef": "CloudMatchStatus"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "AD User Evidence"
+                    }
+                  },
+                  "Property": "LastLogonTimestampRaw"
+                }
+              },
+              "queryRef": "AD User Evidence.LastLogonTimestampRaw",
+              "nativeQueryRef": "LastLogonTimestampRaw"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "AD User Evidence"
+                    }
+                  },
+                  "Property": "LastLogonUtcDateTime"
+                }
+              },
+              "queryRef": "AD User Evidence.LastLogonUtcDateTime",
+              "nativeQueryRef": "LastLogonUtcDateTime"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "AD User Evidence"
+                    }
+                  },
+                  "Property": "LastLogonStatus"
+                }
+              },
+              "queryRef": "AD User Evidence.LastLogonStatus",
+              "nativeQueryRef": "LastLogonStatus"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "AD User Evidence"
+                    }
+                  },
+                  "Property": "CreationRaw"
+                }
+              },
+              "queryRef": "AD User Evidence.CreationRaw",
+              "nativeQueryRef": "CreationRaw"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "AD User Evidence"
+                    }
+                  },
+                  "Property": "CreationUtcDateTime"
+                }
+              },
+              "queryRef": "AD User Evidence.CreationUtcDateTime",
+              "nativeQueryRef": "CreationUtcDateTime"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "AD User Evidence"
+                    }
+                  },
+                  "Property": "CreationStatus"
+                }
+              },
+              "queryRef": "AD User Evidence.CreationStatus",
+              "nativeQueryRef": "CreationStatus"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "AD User Evidence"
+                    }
+                  },
+                  "Property": "SourceCollectedDateTime"
+                }
+              },
+              "queryRef": "AD User Evidence.SourceCollectedDateTime",
+              "nativeQueryRef": "SourceCollectedDateTime"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "AD User Evidence"
+                    }
+                  },
+                  "Property": "TenantKey"
+                }
+              },
+              "queryRef": "AD User Evidence.TenantKey",
+              "nativeQueryRef": "TenantKey"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "AD User Evidence"
+                    }
+                  },
+                  "Property": "OrganizationKey"
+                }
+              },
+              "queryRef": "AD User Evidence.OrganizationKey",
+              "nativeQueryRef": "OrganizationKey"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "AD User Evidence"
+                    }
+                  },
+                  "Property": "EnvironmentKey"
+                }
+              },
+              "queryRef": "AD User Evidence.EnvironmentKey",
+              "nativeQueryRef": "EnvironmentKey"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "AD User Evidence"
+                    }
+                  },
+                  "Property": "TenantId"
+                }
+              },
+              "queryRef": "AD User Evidence.TenantId",
+              "nativeQueryRef": "TenantId"
+            }
+          ]
+        }
+      }
+    },
+    "objects": {
+      "columnHeaders": [
+        {
+          "properties": {
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "14D"
+                }
+              }
+            },
+            "autoSizeColumnWidth": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "columnAdjustment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'growToFit'"
+                }
+              }
+            },
+            "wordWrap": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "fontColor": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#FFFFFF'"
+                    }
+                  }
+                }
+              }
+            },
+            "backColor": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#215E9E'"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      ],
+      "values": [
+        {
+          "properties": {
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "14D"
+                }
+              }
+            },
+            "wordWrap": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            },
+            "fontColorPrimary": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#1F2937'"
+                    }
+                  }
+                }
+              }
+            },
+            "fontColorSecondary": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#1F2937'"
+                    }
+                  }
+                }
+              }
+            },
+            "backColorPrimary": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#FFFFFF'"
+                    }
+                  }
+                }
+              }
+            },
+            "backColorSecondary": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#F7FAFC'"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      ],
+      "grid": [
+        {
+          "properties": {
+            "rowPadding": {
+              "expr": {
+                "Literal": {
+                  "Value": "4D"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "visualContainerObjects": {
+      "general": [
+        {
+          "properties": {
+            "altText": {
+              "expr": {
+                "Literal": {
+                  "Value": "'AD users · complete governed fields'"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "title": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "text": {
+              "expr": {
+                "Literal": {
+                  "Value": "'AD users · complete governed fields'"
+                }
+              }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "15D"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "background": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "color": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#FFFFFF'"
+                    }
+                  }
+                }
+              }
+            },
+            "transparency": {
+              "expr": {
+                "Literal": {
+                  "Value": "0D"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "border": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "color": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#CCDCEC'"
+                    }
+                  }
+                }
+              }
+            },
+            "radius": {
+              "expr": {
+                "Literal": {
+                  "Value": "8D"
+                }
+              }
+            },
+            "width": {
+              "expr": {
+                "Literal": {
+                  "Value": "1D"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "visualHeader": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "padding": [
+        {
+          "properties": {
+            "top": {
+              "expr": {
+                "Literal": {
+                  "Value": "8D"
+                }
+              }
+            },
+            "bottom": {
+              "expr": {
+                "Literal": {
+                  "Value": "8D"
+                }
+              }
+            },
+            "left": {
+              "expr": {
+                "Literal": {
+                  "Value": "8D"
+                }
+              }
+            },
+            "right": {
+              "expr": {
+                "Literal": {
+                  "Value": "8D"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "subTitle": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "stylePreset": [
+        {
+          "properties": {
+            "name": {
+              "expr": {
+                "Literal": {
+                  "Value": "'None'"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "drillFilterOtherVisuals": true
+  },
+  "parentGroupName": "907a2d686879f953b6e0",
+  "filterConfig": {
+    "filters": [
+      {
+        "name": "ebf6471fbbb6f27c2ffb",
+        "field": {
+          "Measure": {
+            "Expression": {
+              "SourceRef": {
+                "Entity": "AD User Evidence"
+              }
+            },
+            "Property": "Native Context Rows · AD User Evidence"
+          }
+        },
+        "type": "Advanced",
+        "filter": {
+          "Version": 2,
+          "From": [
+            {
+              "Name": "c",
+              "Entity": "AD User Evidence",
+              "Type": 0
+            }
+          ],
+          "Where": [
+            {
+              "Condition": {
+                "Comparison": {
+                  "ComparisonKind": 2,
+                  "Left": {
+                    "Measure": {
+                      "Expression": {
+                        "SourceRef": {
+                          "Source": "c"
+                        }
+                      },
+                      "Property": "Native Context Rows · AD User Evidence"
+                    }
+                  },
+                  "Right": {
+                    "Literal": {
+                      "Value": "0L"
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

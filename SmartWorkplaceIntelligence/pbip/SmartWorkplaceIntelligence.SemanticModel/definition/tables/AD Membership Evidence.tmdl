@@ -2,23 +2,12 @@
 table 'AD Membership Evidence'
 	lineageTag: da39c258-c61e-4796-b465-5490db125522
 
-	/// Exact native-key entity context or existing inventory context. No name matching or inferred transitive membership. Unrelated entity selections return blank.
+	/// Existing qualified workforce/device scope via exact native IDs; otherwise the domain selection. No name matching or inferred transitive membership.
 	measure 'Native Context Rows · AD Membership Evidence' =
-			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
-			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
-			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimUser"))
-			VAR NativeKeys1 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimDevice"))
-			VAR NativeKeys2 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimGroup"))
-			VAR NativeKeys3 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "ADGroupSource"))
-			VAR NativeKeys4 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "ADDirectoryObject"))
 			VAR InventoryUsers = CALCULATETABLE(VALUES('Native User Evidence'[TenantUserKey]), REMOVEFILTERS('Native User Evidence'), TREATAS(VALUES('User Inventory Evidence'[User Source ID]), 'Native User Evidence'[SourceUserId]))
 			VAR InventoryDevices = CALCULATETABLE(VALUES('Native Managed Device Evidence'[TenantDeviceKey]), REMOVEFILTERS('Native Managed Device Evidence'), TREATAS(VALUES('Device Inventory Evidence'[Device Source ID]), 'Native Managed Device Evidence'[ManagedDeviceId]))
-			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((COUNTROWS('AD Membership Evidence')), KEEPFILTERS(TREATAS(NativeKeys0, 'AD Membership Evidence'[TenantUserKey]))),
-			COUNTROWS(NativeKeys1) > 0, CALCULATE((COUNTROWS('AD Membership Evidence')), KEEPFILTERS(TREATAS(NativeKeys1, 'AD Membership Evidence'[TenantDeviceKey]))),
-			COUNTROWS(NativeKeys2) > 0, CALCULATE((COUNTROWS('AD Membership Evidence')), KEEPFILTERS(TREATAS(NativeKeys2, 'AD Membership Evidence'[TenantGroupKey]))),
-			COUNTROWS(NativeKeys3) > 0, CALCULATE((COUNTROWS('AD Membership Evidence')), KEEPFILTERS(TREATAS(NativeKeys3, 'AD Membership Evidence'[TenantADGroupKey]))),
-			COUNTROWS(NativeKeys4) > 0, CALCULATE((COUNTROWS('AD Membership Evidence')), KEEPFILTERS(TREATAS(NativeKeys4, 'AD Membership Evidence'[TenantADObjectKey]))), BLANK()), BLANK()), SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((COUNTROWS('AD Membership Evidence')), KEEPFILTERS(TREATAS(InventoryUsers, 'AD Membership Evidence'[TenantUserKey]))),
-			ISCROSSFILTERED('Device Inventory Evidence'), CALCULATE((COUNTROWS('AD Membership Evidence')), KEEPFILTERS(TREATAS(InventoryDevices, 'AD Membership Evidence'[TenantDeviceKey]))), (COUNTROWS('AD Membership Evidence'))))
+			RETURN SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((COUNTROWS('AD Membership Evidence')), KEEPFILTERS(TREATAS(InventoryUsers, 'AD Membership Evidence'[TenantUserKey]))),
+			ISCROSSFILTERED('Device Inventory Evidence'), CALCULATE((COUNTROWS('AD Membership Evidence')), KEEPFILTERS(TREATAS(InventoryDevices, 'AD Membership Evidence'[TenantDeviceKey]))), (COUNTROWS('AD Membership Evidence')))
 		formatString: #,0
 		isHidden
 		lineageTag: 857b225b-cf10-4fba-a613-78c6d19da37f

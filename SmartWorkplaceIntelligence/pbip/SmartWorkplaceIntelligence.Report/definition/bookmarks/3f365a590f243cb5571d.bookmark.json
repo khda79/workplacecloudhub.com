@@ -1,1 +1,35 @@
-{"$schema":"https://developer.microsoft.com/json-schemas/fabric/item/report/definition/bookmark/2.1.0/schema.json","displayName":"Capacity","name":"3f365a590f243cb5571d","options":{"applyOnlyToTargetVisuals":true,"targetVisualNames":["403082f4ddd7359804c4","8a434067a12556e7f725","4652caff1debb5e4527e"],"suppressActiveSection":true,"suppressData":true},"explorationState":{"version":"1.0","activeSection":"e0a71730533d84d5c995","sections":{"e0a71730533d84d5c995":{"visualContainers":{},"visualContainerGroups":{"403082f4ddd7359804c4":{"isHidden":false},"8a434067a12556e7f725":{"isHidden":true},"4652caff1debb5e4527e":{"isHidden":true}}}}}}
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/bookmark/2.1.0/schema.json",
+  "displayName": "Capacity",
+  "name": "3f365a590f243cb5571d",
+  "options": {
+    "applyOnlyToTargetVisuals": true,
+    "targetVisualNames": [
+      "403082f4ddd7359804c4",
+      "8a434067a12556e7f725",
+      "4652caff1debb5e4527e"
+    ],
+    "suppressActiveSection": true,
+    "suppressData": true
+  },
+  "explorationState": {
+    "version": "1.0",
+    "activeSection": "e0a71730533d84d5c995",
+    "sections": {
+      "e0a71730533d84d5c995": {
+        "visualContainers": {},
+        "visualContainerGroups": {
+          "403082f4ddd7359804c4": {
+            "isHidden": false
+          },
+          "8a434067a12556e7f725": {
+            "isHidden": true
+          },
+          "4652caff1debb5e4527e": {
+            "isHidden": true
+          }
+        }
+      }
+    }
+  }
+}

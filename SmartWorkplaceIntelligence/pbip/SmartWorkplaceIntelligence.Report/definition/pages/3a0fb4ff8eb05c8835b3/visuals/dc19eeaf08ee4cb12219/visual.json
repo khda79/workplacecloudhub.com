@@ -1,1 +1,648 @@
-{"$schema":"https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json","name":"dc19eeaf08ee4cb12219","position":{"x":32,"y":488,"width":1856,"height":336,"z":12000,"tabOrder":544},"visual":{"visualType":"tableEx","query":{"queryState":{"Values":{"projections":[{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native User Device Link"}},"Property":"DeviceSelection"}},"queryRef":"Native User Device Link.DeviceSelection","nativeQueryRef":"DeviceSelection"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native User Device Link"}},"Property":"TenantRelationshipKey"}},"queryRef":"Native User Device Link.TenantRelationshipKey","nativeQueryRef":"TenantRelationshipKey"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native User Device Link"}},"Property":"TenantUserKey"}},"queryRef":"Native User Device Link.TenantUserKey","nativeQueryRef":"TenantUserKey"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native User Device Link"}},"Property":"TenantDeviceKey"}},"queryRef":"Native User Device Link.TenantDeviceKey","nativeQueryRef":"TenantDeviceKey"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native User Device Link"}},"Property":"CmdbRelationshipId"}},"queryRef":"Native User Device Link.CmdbRelationshipId","nativeQueryRef":"CmdbRelationshipId"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native User Device Link"}},"Property":"CmdbUserId"}},"queryRef":"Native User Device Link.CmdbUserId","nativeQueryRef":"CmdbUserId"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native User Device Link"}},"Property":"CmdbDeviceId"}},"queryRef":"Native User Device Link.CmdbDeviceId","nativeQueryRef":"CmdbDeviceId"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native User Device Link"}},"Property":"RelationshipType"}},"queryRef":"Native User Device Link.RelationshipType","nativeQueryRef":"RelationshipType"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native User Device Link"}},"Property":"ConfidenceScore"}},"queryRef":"Native User Device Link.ConfidenceScore","nativeQueryRef":"ConfidenceScore"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native User Device Link"}},"Property":"SourceSystem"}},"queryRef":"Native User Device Link.SourceSystem","nativeQueryRef":"SourceSystem"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native User Device Link"}},"Property":"Account"}},"queryRef":"Native User Device Link.Account","nativeQueryRef":"Account"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native User Device Link"}},"Property":"Device"}},"queryRef":"Native User Device Link.Device","nativeQueryRef":"Device"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native User Device Link"}},"Property":"DeviceCompliance"}},"queryRef":"Native User Device Link.DeviceCompliance","nativeQueryRef":"DeviceCompliance"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native User Device Link"}},"Property":"DeviceSyncStatus"}},"queryRef":"Native User Device Link.DeviceSyncStatus","nativeQueryRef":"DeviceSyncStatus"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native User Device Link"}},"Property":"TenantKey"}},"queryRef":"Native User Device Link.TenantKey","nativeQueryRef":"TenantKey"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native User Device Link"}},"Property":"OrganizationKey"}},"queryRef":"Native User Device Link.OrganizationKey","nativeQueryRef":"OrganizationKey"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native User Device Link"}},"Property":"EnvironmentKey"}},"queryRef":"Native User Device Link.EnvironmentKey","nativeQueryRef":"EnvironmentKey"},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Native User Device Link"}},"Property":"TenantId"}},"queryRef":"Native User Device Link.TenantId","nativeQueryRef":"TenantId"}]}}},"objects":{"columnHeaders":[{"properties":{"fontSize":{"expr":{"Literal":{"Value":"14D"}}},"autoSizeColumnWidth":{"expr":{"Literal":{"Value":"true"}}},"columnAdjustment":{"expr":{"Literal":{"Value":"'growToFit'"}}},"wordWrap":{"expr":{"Literal":{"Value":"true"}}},"fontColor":{"solid":{"color":{"expr":{"Literal":{"Value":"'#FFFFFF'"}}}}},"backColor":{"solid":{"color":{"expr":{"Literal":{"Value":"'#215E9E'"}}}}}}}],"values":[{"properties":{"fontSize":{"expr":{"Literal":{"Value":"14D"}}},"wordWrap":{"expr":{"Literal":{"Value":"false"}}},"fontColorPrimary":{"solid":{"color":{"expr":{"Literal":{"Value":"'#1F2937'"}}}}},"fontColorSecondary":{"solid":{"color":{"expr":{"Literal":{"Value":"'#1F2937'"}}}}},"backColorPrimary":{"solid":{"color":{"expr":{"Literal":{"Value":"'#FFFFFF'"}}}}},"backColorSecondary":{"solid":{"color":{"expr":{"Literal":{"Value":"'#F7FAFC'"}}}}}}}],"grid":[{"properties":{"rowPadding":{"expr":{"Literal":{"Value":"4D"}}}}}]},"visualContainerObjects":{"general":[{"properties":{"altText":{"expr":{"Literal":{"Value":"'User-device links · complete governed fields'"}}}}}],"title":[{"properties":{"show":{"expr":{"Literal":{"Value":"true"}}},"text":{"expr":{"Literal":{"Value":"'User-device links · complete governed fields'"}}},"fontSize":{"expr":{"Literal":{"Value":"15D"}}}}}],"background":[{"properties":{"show":{"expr":{"Literal":{"Value":"true"}}},"color":{"solid":{"color":{"expr":{"Literal":{"Value":"'#FFFFFF'"}}}}},"transparency":{"expr":{"Literal":{"Value":"0D"}}}}}],"border":[{"properties":{"show":{"expr":{"Literal":{"Value":"true"}}},"color":{"solid":{"color":{"expr":{"Literal":{"Value":"'#CCDCEC'"}}}}},"radius":{"expr":{"Literal":{"Value":"8D"}}},"width":{"expr":{"Literal":{"Value":"1D"}}}}}],"visualHeader":[{"properties":{"show":{"expr":{"Literal":{"Value":"false"}}}}}],"padding":[{"properties":{"top":{"expr":{"Literal":{"Value":"8D"}}},"bottom":{"expr":{"Literal":{"Value":"8D"}}},"left":{"expr":{"Literal":{"Value":"8D"}}},"right":{"expr":{"Literal":{"Value":"8D"}}}}}],"subTitle":[{"properties":{"show":{"expr":{"Literal":{"Value":"false"}}}}}],"stylePreset":[{"properties":{"name":{"expr":{"Literal":{"Value":"'None'"}}}}}]},"drillFilterOtherVisuals":true},"parentGroupName":"b2adfbb09196d33da6d2","filterConfig":{"filters":[{"name":"09354ab83b599aad09a4","field":{"Measure":{"Expression":{"SourceRef":{"Entity":"Native User Device Link"}},"Property":"Native Context Rows · Native User Device Link"}},"type":"Advanced","filter":{"Version":2,"From":[{"Name":"c","Entity":"Native User Device Link","Type":0}],"Where":[{"Condition":{"Comparison":{"ComparisonKind":2,"Left":{"Measure":{"Expression":{"SourceRef":{"Source":"c"}},"Property":"Native Context Rows · Native User Device Link"}},"Right":{"Literal":{"Value":"0L"}}}}}]}}]}}
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json",
+  "name": "dc19eeaf08ee4cb12219",
+  "position": {
+    "x": 32,
+    "y": 536,
+    "width": 1856,
+    "height": 288,
+    "z": 12000,
+    "tabOrder": 544
+  },
+  "visual": {
+    "visualType": "tableEx",
+    "query": {
+      "queryState": {
+        "Values": {
+          "projections": [
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native User Device Link"
+                    }
+                  },
+                  "Property": "DeviceSelection"
+                }
+              },
+              "queryRef": "Native User Device Link.DeviceSelection",
+              "nativeQueryRef": "DeviceSelection"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native User Device Link"
+                    }
+                  },
+                  "Property": "TenantRelationshipKey"
+                }
+              },
+              "queryRef": "Native User Device Link.TenantRelationshipKey",
+              "nativeQueryRef": "TenantRelationshipKey"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native User Device Link"
+                    }
+                  },
+                  "Property": "TenantUserKey"
+                }
+              },
+              "queryRef": "Native User Device Link.TenantUserKey",
+              "nativeQueryRef": "TenantUserKey"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native User Device Link"
+                    }
+                  },
+                  "Property": "TenantDeviceKey"
+                }
+              },
+              "queryRef": "Native User Device Link.TenantDeviceKey",
+              "nativeQueryRef": "TenantDeviceKey"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native User Device Link"
+                    }
+                  },
+                  "Property": "CmdbRelationshipId"
+                }
+              },
+              "queryRef": "Native User Device Link.CmdbRelationshipId",
+              "nativeQueryRef": "CmdbRelationshipId"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native User Device Link"
+                    }
+                  },
+                  "Property": "CmdbUserId"
+                }
+              },
+              "queryRef": "Native User Device Link.CmdbUserId",
+              "nativeQueryRef": "CmdbUserId"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native User Device Link"
+                    }
+                  },
+                  "Property": "CmdbDeviceId"
+                }
+              },
+              "queryRef": "Native User Device Link.CmdbDeviceId",
+              "nativeQueryRef": "CmdbDeviceId"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native User Device Link"
+                    }
+                  },
+                  "Property": "RelationshipType"
+                }
+              },
+              "queryRef": "Native User Device Link.RelationshipType",
+              "nativeQueryRef": "RelationshipType"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native User Device Link"
+                    }
+                  },
+                  "Property": "ConfidenceScore"
+                }
+              },
+              "queryRef": "Native User Device Link.ConfidenceScore",
+              "nativeQueryRef": "ConfidenceScore"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native User Device Link"
+                    }
+                  },
+                  "Property": "SourceSystem"
+                }
+              },
+              "queryRef": "Native User Device Link.SourceSystem",
+              "nativeQueryRef": "SourceSystem"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native User Device Link"
+                    }
+                  },
+                  "Property": "Account"
+                }
+              },
+              "queryRef": "Native User Device Link.Account",
+              "nativeQueryRef": "Account"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native User Device Link"
+                    }
+                  },
+                  "Property": "Device"
+                }
+              },
+              "queryRef": "Native User Device Link.Device",
+              "nativeQueryRef": "Device"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native User Device Link"
+                    }
+                  },
+                  "Property": "DeviceCompliance"
+                }
+              },
+              "queryRef": "Native User Device Link.DeviceCompliance",
+              "nativeQueryRef": "DeviceCompliance"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native User Device Link"
+                    }
+                  },
+                  "Property": "DeviceSyncStatus"
+                }
+              },
+              "queryRef": "Native User Device Link.DeviceSyncStatus",
+              "nativeQueryRef": "DeviceSyncStatus"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native User Device Link"
+                    }
+                  },
+                  "Property": "TenantKey"
+                }
+              },
+              "queryRef": "Native User Device Link.TenantKey",
+              "nativeQueryRef": "TenantKey"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native User Device Link"
+                    }
+                  },
+                  "Property": "OrganizationKey"
+                }
+              },
+              "queryRef": "Native User Device Link.OrganizationKey",
+              "nativeQueryRef": "OrganizationKey"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native User Device Link"
+                    }
+                  },
+                  "Property": "EnvironmentKey"
+                }
+              },
+              "queryRef": "Native User Device Link.EnvironmentKey",
+              "nativeQueryRef": "EnvironmentKey"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native User Device Link"
+                    }
+                  },
+                  "Property": "TenantId"
+                }
+              },
+              "queryRef": "Native User Device Link.TenantId",
+              "nativeQueryRef": "TenantId"
+            }
+          ]
+        }
+      }
+    },
+    "objects": {
+      "columnHeaders": [
+        {
+          "properties": {
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "14D"
+                }
+              }
+            },
+            "autoSizeColumnWidth": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "columnAdjustment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'growToFit'"
+                }
+              }
+            },
+            "wordWrap": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "fontColor": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#FFFFFF'"
+                    }
+                  }
+                }
+              }
+            },
+            "backColor": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#215E9E'"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      ],
+      "values": [
+        {
+          "properties": {
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "14D"
+                }
+              }
+            },
+            "wordWrap": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            },
+            "fontColorPrimary": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#1F2937'"
+                    }
+                  }
+                }
+              }
+            },
+            "fontColorSecondary": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#1F2937'"
+                    }
+                  }
+                }
+              }
+            },
+            "backColorPrimary": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#FFFFFF'"
+                    }
+                  }
+                }
+              }
+            },
+            "backColorSecondary": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#F7FAFC'"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      ],
+      "grid": [
+        {
+          "properties": {
+            "rowPadding": {
+              "expr": {
+                "Literal": {
+                  "Value": "4D"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "visualContainerObjects": {
+      "general": [
+        {
+          "properties": {
+            "altText": {
+              "expr": {
+                "Literal": {
+                  "Value": "'User-device links · complete governed fields'"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "title": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "text": {
+              "expr": {
+                "Literal": {
+                  "Value": "'User-device links · complete governed fields'"
+                }
+              }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "15D"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "background": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "color": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#FFFFFF'"
+                    }
+                  }
+                }
+              }
+            },
+            "transparency": {
+              "expr": {
+                "Literal": {
+                  "Value": "0D"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "border": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "color": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#CCDCEC'"
+                    }
+                  }
+                }
+              }
+            },
+            "radius": {
+              "expr": {
+                "Literal": {
+                  "Value": "8D"
+                }
+              }
+            },
+            "width": {
+              "expr": {
+                "Literal": {
+                  "Value": "1D"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "visualHeader": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "padding": [
+        {
+          "properties": {
+            "top": {
+              "expr": {
+                "Literal": {
+                  "Value": "8D"
+                }
+              }
+            },
+            "bottom": {
+              "expr": {
+                "Literal": {
+                  "Value": "8D"
+                }
+              }
+            },
+            "left": {
+              "expr": {
+                "Literal": {
+                  "Value": "8D"
+                }
+              }
+            },
+            "right": {
+              "expr": {
+                "Literal": {
+                  "Value": "8D"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "subTitle": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "stylePreset": [
+        {
+          "properties": {
+            "name": {
+              "expr": {
+                "Literal": {
+                  "Value": "'None'"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "drillFilterOtherVisuals": true
+  },
+  "parentGroupName": "b2adfbb09196d33da6d2",
+  "filterConfig": {
+    "filters": [
+      {
+        "name": "09354ab83b599aad09a4",
+        "field": {
+          "Measure": {
+            "Expression": {
+              "SourceRef": {
+                "Entity": "Native User Device Link"
+              }
+            },
+            "Property": "Native Context Rows · Native User Device Link"
+          }
+        },
+        "type": "Advanced",
+        "filter": {
+          "Version": 2,
+          "From": [
+            {
+              "Name": "c",
+              "Entity": "Native User Device Link",
+              "Type": 0
+            }
+          ],
+          "Where": [
+            {
+              "Condition": {
+                "Comparison": {
+                  "ComparisonKind": 2,
+                  "Left": {
+                    "Measure": {
+                      "Expression": {
+                        "SourceRef": {
+                          "Source": "c"
+                        }
+                      },
+                      "Property": "Native Context Rows · Native User Device Link"
+                    }
+                  },
+                  "Right": {
+                    "Literal": {
+                      "Value": "0L"
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

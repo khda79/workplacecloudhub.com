@@ -1,1 +1,95 @@
-{"$schema":"https://developer.microsoft.com/json-schemas/fabric/item/report/definition/bookmark/2.1.0/schema.json","displayName":"Risk signals","name":"0f94d154b3962e799b1c","options":{"applyOnlyToTargetVisuals":true,"targetVisualNames":["42ed423b8e40ab3597b7","f5f50e9b958ebac1ad9e","194f5519ff62993efc58","ad1c8760c7b52aff0a86","5317b03cc5f50ec97842","42884626b16cfe1a0a99","63e3a170de0fa8d0ef14","7b90ca9fba0e57d6cca6","300809b8dc20496e4669","907a2d686879f953b6e0","ec9f5a00cd7cbcb2ff2e","b2adfbb09196d33da6d2","35b6326dc1195c1e2709"],"suppressActiveSection":true,"suppressData":true},"explorationState":{"version":"1.0","activeSection":"3a0fb4ff8eb05c8835b3","sections":{"3a0fb4ff8eb05c8835b3":{"visualContainers":{},"visualContainerGroups":{"42ed423b8e40ab3597b7":{"isHidden":true},"f5f50e9b958ebac1ad9e":{"isHidden":true},"194f5519ff62993efc58":{"isHidden":true},"ad1c8760c7b52aff0a86":{"isHidden":false},"5317b03cc5f50ec97842":{"isHidden":true},"42884626b16cfe1a0a99":{"isHidden":true},"63e3a170de0fa8d0ef14":{"isHidden":true},"7b90ca9fba0e57d6cca6":{"isHidden":true},"300809b8dc20496e4669":{"isHidden":true},"907a2d686879f953b6e0":{"isHidden":true},"ec9f5a00cd7cbcb2ff2e":{"isHidden":true},"b2adfbb09196d33da6d2":{"isHidden":true},"35b6326dc1195c1e2709":{"isHidden":true}}}}}}
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/bookmark/2.1.0/schema.json",
+  "displayName": "Risk signals",
+  "name": "0f94d154b3962e799b1c",
+  "options": {
+    "applyOnlyToTargetVisuals": true,
+    "targetVisualNames": [
+      "42ed423b8e40ab3597b7",
+      "f5f50e9b958ebac1ad9e",
+      "194f5519ff62993efc58",
+      "ad1c8760c7b52aff0a86",
+      "5317b03cc5f50ec97842",
+      "42884626b16cfe1a0a99",
+      "63e3a170de0fa8d0ef14",
+      "7b90ca9fba0e57d6cca6",
+      "300809b8dc20496e4669",
+      "907a2d686879f953b6e0",
+      "ec9f5a00cd7cbcb2ff2e",
+      "b2adfbb09196d33da6d2",
+      "35b6326dc1195c1e2709",
+      "71540081d7e024e59ebd",
+      "ab87863b17fcb4364cf6",
+      "4c36bebd2ccac55bb650",
+      "e11fbb34b4e2b18f67ad",
+      "1a0f34e34dc78b53952d"
+    ],
+    "suppressActiveSection": true,
+    "suppressData": true
+  },
+  "explorationState": {
+    "version": "1.0",
+    "activeSection": "3a0fb4ff8eb05c8835b3",
+    "sections": {
+      "3a0fb4ff8eb05c8835b3": {
+        "visualContainers": {},
+        "visualContainerGroups": {
+          "194f5519ff62993efc58": {
+            "isHidden": true
+          },
+          "300809b8dc20496e4669": {
+            "isHidden": true
+          },
+          "35b6326dc1195c1e2709": {
+            "isHidden": true
+          },
+          "42884626b16cfe1a0a99": {
+            "isHidden": true
+          },
+          "42ed423b8e40ab3597b7": {
+            "isHidden": true
+          },
+          "5317b03cc5f50ec97842": {
+            "isHidden": true
+          },
+          "63e3a170de0fa8d0ef14": {
+            "isHidden": true
+          },
+          "7b90ca9fba0e57d6cca6": {
+            "isHidden": true
+          },
+          "907a2d686879f953b6e0": {
+            "isHidden": true
+          },
+          "ad1c8760c7b52aff0a86": {
+            "isHidden": false
+          },
+          "b2adfbb09196d33da6d2": {
+            "isHidden": true
+          },
+          "ec9f5a00cd7cbcb2ff2e": {
+            "isHidden": true
+          },
+          "f5f50e9b958ebac1ad9e": {
+            "isHidden": true
+          },
+          "71540081d7e024e59ebd": {
+            "isHidden": true
+          },
+          "ab87863b17fcb4364cf6": {
+            "isHidden": true
+          },
+          "4c36bebd2ccac55bb650": {
+            "isHidden": true
+          },
+          "e11fbb34b4e2b18f67ad": {
+            "isHidden": true
+          },
+          "1a0f34e34dc78b53952d": {
+            "isHidden": true
+          }
+        }
+      }
+    }
+  }
+}

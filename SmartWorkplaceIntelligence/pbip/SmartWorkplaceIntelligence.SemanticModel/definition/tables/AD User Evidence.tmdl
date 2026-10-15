@@ -4,26 +4,16 @@ table 'AD User Evidence'
 
 	/// Native AD records explicitly linked to one selected cloud user identity. Migrated without changing the source calculation.
 	measure 'Native Selected user AD objects' =
-			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
-			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
-			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimUser"))
-			VAR NativeKeys1 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "ADUserSource"))
 			VAR InventoryUsers = CALCULATETABLE(VALUES('Native User Evidence'[TenantUserKey]), REMOVEFILTERS('Native User Evidence'), TREATAS(VALUES('User Inventory Evidence'[User Source ID]), 'Native User Evidence'[SourceUserId]))
-			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((IF ( HASONEVALUE ( 'Native User Evidence'[TenantUserKey] ), CALCULATE ( COUNTROWS ( 'AD User Evidence' ), TREATAS ( VALUES ( 'Native User Evidence'[TenantUserKey] ), 'AD User Evidence'[TenantUserKey] ) ) )), KEEPFILTERS(TREATAS(NativeKeys0, 'AD User Evidence'[TenantUserKey]))),
-			COUNTROWS(NativeKeys1) > 0, CALCULATE((IF ( HASONEVALUE ( 'Native User Evidence'[TenantUserKey] ), CALCULATE ( COUNTROWS ( 'AD User Evidence' ), TREATAS ( VALUES ( 'Native User Evidence'[TenantUserKey] ), 'AD User Evidence'[TenantUserKey] ) ) )), KEEPFILTERS(TREATAS(NativeKeys1, 'AD User Evidence'[TenantADUserKey]))), BLANK()), BLANK()), SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((IF ( HASONEVALUE ( 'Native User Evidence'[TenantUserKey] ), CALCULATE ( COUNTROWS ( 'AD User Evidence' ), TREATAS ( VALUES ( 'Native User Evidence'[TenantUserKey] ), 'AD User Evidence'[TenantUserKey] ) ) )), KEEPFILTERS(TREATAS(InventoryUsers, 'AD User Evidence'[TenantUserKey]))), (IF ( HASONEVALUE ( 'Native User Evidence'[TenantUserKey] ), CALCULATE ( COUNTROWS ( 'AD User Evidence' ), TREATAS ( VALUES ( 'Native User Evidence'[TenantUserKey] ), 'AD User Evidence'[TenantUserKey] ) ) ))))
+			RETURN SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((IF ( HASONEVALUE ( 'Native User Evidence'[TenantUserKey] ), CALCULATE ( COUNTROWS ( 'AD User Evidence' ), TREATAS ( VALUES ( 'Native User Evidence'[TenantUserKey] ), 'AD User Evidence'[TenantUserKey] ) ) )), KEEPFILTERS(TREATAS(InventoryUsers, 'AD User Evidence'[TenantUserKey]))), (IF ( HASONEVALUE ( 'Native User Evidence'[TenantUserKey] ), CALCULATE ( COUNTROWS ( 'AD User Evidence' ), TREATAS ( VALUES ( 'Native User Evidence'[TenantUserKey] ), 'AD User Evidence'[TenantUserKey] ) ) )))
 		formatString: #,##0
 		displayFolder: Native evidence
 		lineageTag: 795ef77c-e02f-4a78-bee3-1c91b8ec8050
 
-	/// Exact native-key entity context or existing inventory context. No name matching or inferred transitive membership. Unrelated entity selections return blank.
+	/// Existing qualified workforce/device scope via exact native IDs; otherwise the domain selection. No name matching or inferred transitive membership.
 	measure 'Native Context Rows · AD User Evidence' =
-			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
-			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
-			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimUser"))
-			VAR NativeKeys1 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "ADUserSource"))
 			VAR InventoryUsers = CALCULATETABLE(VALUES('Native User Evidence'[TenantUserKey]), REMOVEFILTERS('Native User Evidence'), TREATAS(VALUES('User Inventory Evidence'[User Source ID]), 'Native User Evidence'[SourceUserId]))
-			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((COUNTROWS('AD User Evidence')), KEEPFILTERS(TREATAS(NativeKeys0, 'AD User Evidence'[TenantUserKey]))),
-			COUNTROWS(NativeKeys1) > 0, CALCULATE((COUNTROWS('AD User Evidence')), KEEPFILTERS(TREATAS(NativeKeys1, 'AD User Evidence'[TenantADUserKey]))), BLANK()), BLANK()), SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((COUNTROWS('AD User Evidence')), KEEPFILTERS(TREATAS(InventoryUsers, 'AD User Evidence'[TenantUserKey]))), (COUNTROWS('AD User Evidence'))))
+			RETURN SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((COUNTROWS('AD User Evidence')), KEEPFILTERS(TREATAS(InventoryUsers, 'AD User Evidence'[TenantUserKey]))), (COUNTROWS('AD User Evidence')))
 		formatString: #,0
 		isHidden
 		lineageTag: 602a6ddb-cf39-45a2-8006-b8e18737f42f

@@ -3,28 +3,19 @@ table 'Native Hybrid Coverage'
 	lineageTag: 56bc0149-17e1-445d-9b21-3586706fc5eb
 
 	/// Matched on-premises/cloud identities for the selected entity type using the collector's declared match method. Migrated without changing the source calculation.
-	measure 'Native Hybrid identities matched' =
-			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
-			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
-			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (COALESCE(SUM('Native Hybrid Coverage'[MatchedCount]),0)))
+	measure 'Native Hybrid identities matched' = (COALESCE(SUM('Native Hybrid Coverage'[MatchedCount]),0))
 		formatString: #,0
 		displayFolder: Native evidence
 		lineageTag: 5e2e08f0-97f4-4768-b5c9-a0435eab918a
 
 	/// Matched identities divided by on-premises identities for the selected entity type. User and device populations must be reviewed separately. Migrated without changing the source calculation.
-	measure 'Native Hybrid identity match rate' =
-			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
-			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
-			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (DIVIDE(SUM('Native Hybrid Coverage'[MatchedCount]),SUM('Native Hybrid Coverage'[OnPremisesCount]))))
+	measure 'Native Hybrid identity match rate' = (DIVIDE(SUM('Native Hybrid Coverage'[MatchedCount]),SUM('Native Hybrid Coverage'[OnPremisesCount])))
 		formatString: 0.0%
 		displayFolder: Native evidence
 		lineageTag: 0aa24615-71a1-4ca3-a7c8-d1285127b611
 
-	/// Exact native-key entity context or existing inventory context. No name matching or inferred transitive membership. Unrelated entity selections return blank.
-	measure 'Native Context Rows · Native Hybrid Coverage' =
-			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
-			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
-			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (COUNTROWS('Native Hybrid Coverage')))
+	/// Existing qualified workforce/device scope via exact native IDs; otherwise the domain selection. No name matching or inferred transitive membership.
+	measure 'Native Context Rows · Native Hybrid Coverage' = (COUNTROWS('Native Hybrid Coverage'))
 		formatString: #,0
 		isHidden
 		lineageTag: 093f93b9-3ed2-4276-9901-329763c2f4ae

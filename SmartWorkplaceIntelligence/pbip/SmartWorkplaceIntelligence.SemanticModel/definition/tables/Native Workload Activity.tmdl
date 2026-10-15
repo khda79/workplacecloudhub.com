@@ -4,22 +4,16 @@ table 'Native Workload Activity'
 
 	/// Users whose Microsoft 365 workload report row was linked to DimUser by exact normalized UPN. Migrated without changing the source calculation.
 	measure 'Native Users with exact M365 activity evidence' =
-			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
-			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
-			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimUser"))
 			VAR InventoryUsers = CALCULATETABLE(VALUES('Native User Evidence'[TenantUserKey]), REMOVEFILTERS('Native User Evidence'), TREATAS(VALUES('User Inventory Evidence'[User Source ID]), 'Native User Evidence'[SourceUserId]))
-			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((CALCULATE(DISTINCTCOUNT('Native Workload Activity'[TenantUserKey]), KEEPFILTERS('Native Workload Activity'[MatchStatus] = "ExactUPN"))), KEEPFILTERS(TREATAS(NativeKeys0, 'Native Workload Activity'[TenantUserKey]))), BLANK()), BLANK()), SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((CALCULATE(DISTINCTCOUNT('Native Workload Activity'[TenantUserKey]), KEEPFILTERS('Native Workload Activity'[MatchStatus] = "ExactUPN"))), KEEPFILTERS(TREATAS(InventoryUsers, 'Native Workload Activity'[TenantUserKey]))), (CALCULATE(DISTINCTCOUNT('Native Workload Activity'[TenantUserKey]), KEEPFILTERS('Native Workload Activity'[MatchStatus] = "ExactUPN")))))
+			RETURN SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((CALCULATE(DISTINCTCOUNT('Native Workload Activity'[TenantUserKey]), KEEPFILTERS('Native Workload Activity'[MatchStatus] = "ExactUPN"))), KEEPFILTERS(TREATAS(InventoryUsers, 'Native Workload Activity'[TenantUserKey]))), (CALCULATE(DISTINCTCOUNT('Native Workload Activity'[TenantUserKey]), KEEPFILTERS('Native Workload Activity'[MatchStatus] = "ExactUPN"))))
 		formatString: #,0
 		displayFolder: Native evidence
 		lineageTag: cb7adaeb-6c23-4aec-82e0-dd3114fafe90
 
-	/// Exact native-key entity context or existing inventory context. No name matching or inferred transitive membership. Unrelated entity selections return blank.
+	/// Existing qualified workforce/device scope via exact native IDs; otherwise the domain selection. No name matching or inferred transitive membership.
 	measure 'Native Context Rows · Native Workload Activity' =
-			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
-			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
-			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimUser"))
 			VAR InventoryUsers = CALCULATETABLE(VALUES('Native User Evidence'[TenantUserKey]), REMOVEFILTERS('Native User Evidence'), TREATAS(VALUES('User Inventory Evidence'[User Source ID]), 'Native User Evidence'[SourceUserId]))
-			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((COUNTROWS('Native Workload Activity')), KEEPFILTERS(TREATAS(NativeKeys0, 'Native Workload Activity'[TenantUserKey]))), BLANK()), BLANK()), SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((COUNTROWS('Native Workload Activity')), KEEPFILTERS(TREATAS(InventoryUsers, 'Native Workload Activity'[TenantUserKey]))), (COUNTROWS('Native Workload Activity'))))
+			RETURN SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((COUNTROWS('Native Workload Activity')), KEEPFILTERS(TREATAS(InventoryUsers, 'Native Workload Activity'[TenantUserKey]))), (COUNTROWS('Native Workload Activity')))
 		formatString: #,0
 		isHidden
 		lineageTag: 16aeef3d-f505-4031-a1d7-aceea87e5fb1

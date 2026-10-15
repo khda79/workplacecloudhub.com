@@ -1,1 +1,51 @@
-{"$schema":"https://developer.microsoft.com/json-schemas/fabric/item/report/definition/bookmark/2.1.0/schema.json","name":"23b89d80e250b24b40a8","displayName":"Native · Endpoint Score","options":{"applyOnlyToTargetVisuals":true,"targetVisualNames":["2967efe453aee60263d5","389fe54faee87edb23b9","6ad48cbc236761717fe9","8be5852521e32caa92ed","94cb542a73622c8a4d5c","fe96a515abf2c91d4df3","9c336170ee0945cab2bf"],"suppressActiveSection":true,"suppressData":true},"explorationState":{"version":"1.0","activeSection":"d301e56b81a0cf6b1812","sections":{"d301e56b81a0cf6b1812":{"visualContainers":{},"visualContainerGroups":{"2967efe453aee60263d5":{"isHidden":true},"389fe54faee87edb23b9":{"isHidden":true},"6ad48cbc236761717fe9":{"isHidden":true},"8be5852521e32caa92ed":{"isHidden":true},"94cb542a73622c8a4d5c":{"isHidden":true},"fe96a515abf2c91d4df3":{"isHidden":true},"9c336170ee0945cab2bf":{"isHidden":false}}}}}}
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/bookmark/2.1.0/schema.json",
+  "name": "23b89d80e250b24b40a8",
+  "displayName": "Native · Endpoint Score",
+  "options": {
+    "applyOnlyToTargetVisuals": true,
+    "targetVisualNames": [
+      "2967efe453aee60263d5",
+      "389fe54faee87edb23b9",
+      "6ad48cbc236761717fe9",
+      "8be5852521e32caa92ed",
+      "94cb542a73622c8a4d5c",
+      "fe96a515abf2c91d4df3",
+      "9c336170ee0945cab2bf"
+    ],
+    "suppressActiveSection": true,
+    "suppressData": true
+  },
+  "explorationState": {
+    "version": "1.0",
+    "activeSection": "d301e56b81a0cf6b1812",
+    "sections": {
+      "d301e56b81a0cf6b1812": {
+        "visualContainers": {},
+        "visualContainerGroups": {
+          "2967efe453aee60263d5": {
+            "isHidden": true
+          },
+          "389fe54faee87edb23b9": {
+            "isHidden": true
+          },
+          "6ad48cbc236761717fe9": {
+            "isHidden": true
+          },
+          "8be5852521e32caa92ed": {
+            "isHidden": true
+          },
+          "94cb542a73622c8a4d5c": {
+            "isHidden": true
+          },
+          "fe96a515abf2c91d4df3": {
+            "isHidden": true
+          },
+          "9c336170ee0945cab2bf": {
+            "isHidden": false
+          }
+        }
+      }
+    }
+  }
+}

@@ -12,5 +12,6 @@
   "visualGroup": {
     "displayName": "Activity evidence",
     "groupMode": "ScaleMode"
-  }
+  },
+  "isHidden": true
 }

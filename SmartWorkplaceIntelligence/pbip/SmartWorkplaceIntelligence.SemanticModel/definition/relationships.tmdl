@@ -374,23 +374,7 @@ relationship native-cmdb-native-entra-member-group
 	fromColumn: 'Entra Membership Evidence'.TenantGroupKey
 	toColumn: 'Native Group Evidence'.TenantGroupKey
 
-relationship cmdb-entity-endpoint
-	fromColumn: 'CMDB Relationship Endpoint'.'Entity Key'
-	toColumn: 'CMDB Entity Evidence'.'Entity Key'
-
-relationship cmdb-link-endpoint
-	fromColumn: 'CMDB Relationship Endpoint'.'Link Key'
-	toColumn: 'CMDB Relationship Evidence'.'Link Key'
-
-relationship cmdb-entity-alias
-	fromColumn: 'CMDB Entity Alias'.'Entity Key'
-	toColumn: 'CMDB Entity Evidence'.'Entity Key'
-
-relationship cmdb-context-Native-Group-Evidence
-	fromColumn: 'Native Group Evidence'.'CMDB Entity Key'
-	toColumn: 'CMDB Entity Evidence'.'Entity Key'
-
-relationship cmdb-context-AD-Group-Evidence
-	fromColumn: 'AD Group Evidence'.'CMDB Entity Key'
-	toColumn: 'CMDB Entity Evidence'.'Entity Key'
+relationship TeamsSiteLinks_ObservedSite
+	fromColumn: 'Teams Site Links'.'Site ID'
+	toColumn: 'SharePoint Site Links'.'Site ID'
 

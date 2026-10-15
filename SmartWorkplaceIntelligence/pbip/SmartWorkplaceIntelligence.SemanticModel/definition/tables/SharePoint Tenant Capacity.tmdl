@@ -1,0 +1,85 @@
+/// Receipt-qualified observed Teams / SharePoint scope. Single reviewed tenant batch; no inference of full tenant coverage. Disconnected tenant-level utility; intentionally unaffected by country, service and entity slicers.
+table 'SharePoint Tenant Capacity'
+	lineageTag: a6468720-e36e-4f4d-9064-49ce4349092b
+
+	/// Tenant source storage, independent of page entity filters.
+	measure 'SPO Tenant Used (GB)' = MAX('SharePoint Tenant Capacity'[Storage Used GB])
+		formatString: #,0.0
+		displayFolder: Teams & SharePoint | Observed scope
+		lineageTag: 33098a92-c55c-48b6-bf31-34df5944fb5f
+
+	/// Only Get-PnPTenant.StorageQuota; blank when unauthorized or not measured.
+	measure 'SPO Tenant Capacity (GB)' = MAX('SharePoint Tenant Capacity'[Capacity GB])
+		formatString: #,0.0
+		displayFolder: Teams & SharePoint | Observed scope
+		lineageTag: ad84e870-14d5-4c05-8228-a3f4f17b3a62
+
+	/// Uses measured tenant capacity only, never allocated site quota.
+	measure 'SPO Tenant Utilization (%)' = MAX('SharePoint Tenant Capacity'[Utilization])
+		formatString: 0.0%
+		displayFolder: Teams & SharePoint | Observed scope
+		lineageTag: df297bab-ac69-419c-8faf-63548b42a543
+
+	/// Tenant-level qualification.
+	measure 'SPO Tenant Capacity State' = SELECTEDVALUE('SharePoint Tenant Capacity'[Capacity State], "Not measured")
+		displayFolder: Teams & SharePoint | Observed scope
+		lineageTag: 1023acf4-0c19-4271-90bd-58aa356c5f90
+
+	/// Receipt-qualified observed evidence.
+	column TenantKey
+		dataType: string
+		isHidden
+		lineageTag: 2963dc62-92d3-434c-a0bc-69a515ca8474
+		summarizeBy: none
+		sourceColumn: TenantKey
+
+	/// Receipt-qualified observed evidence.
+	column 'Storage Used GB'
+		dataType: double
+		lineageTag: d32bca96-617b-4ef2-a901-5fcf45777b20
+		summarizeBy: none
+		sourceColumn: Storage Used GB
+
+	/// Receipt-qualified observed evidence.
+	column 'Capacity GB'
+		dataType: double
+		lineageTag: 15eb290d-e2e1-46d9-b0a1-cb0d1042fd1a
+		summarizeBy: none
+		sourceColumn: Capacity GB
+
+	/// Receipt-qualified observed evidence.
+	column Utilization
+		dataType: double
+		lineageTag: 91a599e9-78b9-448a-a87a-ef9828ca12ae
+		summarizeBy: none
+		sourceColumn: Utilization
+
+	/// Receipt-qualified observed evidence.
+	column 'Capacity State'
+		dataType: string
+		lineageTag: cba3a86e-3d2a-47ee-a5a3-f34f8afa4ceb
+		summarizeBy: none
+		sourceColumn: Capacity State
+
+	/// Receipt-qualified observed evidence.
+	column 'Capacity Source'
+		dataType: string
+		lineageTag: cbb1e69a-13aa-4caf-b790-7ae67880767a
+		summarizeBy: none
+		sourceColumn: Capacity Source
+
+	/// Receipt-qualified observed evidence.
+	column 'Collected UTC'
+		dataType: dateTime
+		lineageTag: e5138480-271f-4851-a46d-f1b91f6e7b71
+		summarizeBy: none
+		sourceColumn: Collected UTC
+
+	partition 'SharePoint Tenant Capacity' = m
+		mode: import
+		source =
+				let
+				 Source = Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("SharePointTenantCapacityEvidence.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]),
+				 Typed = NativeEvidenceTypes(Source, {[name="TenantKey", dataType="String"], [name="Storage Used GB", dataType="Double"], [name="Capacity GB", dataType="Double"], [name="Utilization", dataType="Double"], [name="Capacity State", dataType="String"], [name="Capacity Source", dataType="String"], [name="Collected UTC", dataType="DateTime"]})
+				in Typed
+

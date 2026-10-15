@@ -1,1 +1,703 @@
-{"$schema":"https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.13.0/schema.json","name":"1821b0b7caca72f523c0","position":{"x":32,"y":664,"z":117,"height":304,"width":1856,"tabOrder":1328},"visual":{"visualType":"pivotTable","query":{"queryState":{"Rows":{"projections":[{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Workforce Operational Signals"}},"Property":"Severity Label"}},"queryRef":"Workforce Operational Signals.Severity Label","nativeQueryRef":"Severity","active":true},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Workforce Operational Signals"}},"Property":"Signal"}},"queryRef":"Workforce Operational Signals.Signal","nativeQueryRef":"Signal","active":true},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Workforce Operational Signals"}},"Property":"Risk Category"}},"queryRef":"Workforce Operational Signals.Risk Category","nativeQueryRef":"Risk Category","active":true},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Workforce Operational Signals"}},"Property":"Evidence Status"}},"queryRef":"Workforce Operational Signals.Evidence Status","nativeQueryRef":"Evidence Status","active":true},{"field":{"Column":{"Expression":{"SourceRef":{"Entity":"Workforce Operational Signals"}},"Property":"Recommended Action"}},"queryRef":"Workforce Operational Signals.Recommended Action","nativeQueryRef":"Recommended Action","active":true}]},"Values":{"projections":[{"field":{"Measure":{"Expression":{"SourceRef":{"Entity":"Workforce Operational Signals"}},"Property":"Workforce Signal Affected Users"}},"queryRef":"Workforce Operational Signals.Workforce Signal Affected Users","nativeQueryRef":"Affected users"},{"field":{"Measure":{"Expression":{"SourceRef":{"Entity":"Workforce Operational Signals"}},"Property":"Workforce Signal Covered Population"}},"queryRef":"Workforce Operational Signals.Workforce Signal Covered Population","nativeQueryRef":"Covered population"},{"field":{"Measure":{"Expression":{"SourceRef":{"Entity":"Workforce Operational Signals"}},"Property":"Workforce Signal Affected Estate"}},"queryRef":"Workforce Operational Signals.Workforce Signal Affected Estate","nativeQueryRef":"Affected estate (%)"}]}}},"objects":{"columnHeaders":[{"properties":{"autoSizeColumnWidth":{"expr":{"Literal":{"Value":"true"}}},"columnAdjustment":{"expr":{"Literal":{"Value":"'growToFit'"}}},"fontSize":{"expr":{"Literal":{"Value":"11D"}}},"bold":{"expr":{"Literal":{"Value":"true"}}},"wordWrap":{"expr":{"Literal":{"Value":"true"}}},"fontColor":{"solid":{"color":{"expr":{"Literal":{"Value":"'#FFFFFF'"}}}}},"backColor":{"solid":{"color":{"expr":{"Literal":{"Value":"'#215E9E'"}}}}}}}],"values":[{"properties":{"fontSize":{"expr":{"Literal":{"Value":"11D"}}},"wordWrap":{"expr":{"Literal":{"Value":"false"}}},"fontColorPrimary":{"solid":{"color":{"expr":{"Literal":{"Value":"'#183153'"}}}}},"fontColorSecondary":{"solid":{"color":{"expr":{"Literal":{"Value":"'#183153'"}}}}},"backColorPrimary":{"solid":{"color":{"expr":{"Literal":{"Value":"'#FFFFFF'"}}}}},"backColorSecondary":{"solid":{"color":{"expr":{"Literal":{"Value":"'#F0F5FA'"}}}}}}}],"rowHeaders":[{"properties":{"stepped":{"expr":{"Literal":{"Value":"false"}}},"fontSize":{"expr":{"Literal":{"Value":"12D"}}},"wordWrap":{"expr":{"Literal":{"Value":"true"}}},"unfrozen":{"expr":{"Literal":{"Value":"true"}}},"repeatRowHeaders":{"expr":{"Literal":{"Value":"true"}}}}}],"general":[{"properties":{"layout":{"expr":{"Literal":{"Value":"'Tabular'"}}}}}],"subTotals":[{"properties":{"rowSubtotals":{"expr":{"Literal":{"Value":"false"}}},"columnSubtotals":{"expr":{"Literal":{"Value":"false"}}},"perRowLevel":{"expr":{"Literal":{"Value":"false"}}},"perColumnLevel":{"expr":{"Literal":{"Value":"false"}}}}},{"properties":{"rowSubtotals":{"expr":{"Literal":{"Value":"false"}}},"perRowLevel":{"expr":{"Literal":{"Value":"false"}}}},"selector":{"id":"Row"}},{"properties":{"columnSubtotals":{"expr":{"Literal":{"Value":"false"}}},"perColumnLevel":{"expr":{"Literal":{"Value":"false"}}}},"selector":{"id":"Column"}}]},"visualContainerObjects":{"general":[{"properties":{"altText":{"expr":{"Literal":{"Value":"'Account inventory · selected evidence'"}}}}}],"title":[{"properties":{"show":{"expr":{"Literal":{"Value":"true"}}},"text":{"expr":{"Literal":{"Value":"'Account inventory · selected evidence'"}}},"fontSize":{"expr":{"Literal":{"Value":"12D"}}},"fontColor":{"solid":{"color":{"expr":{"Literal":{"Value":"'#183153'"}}}}}}}],"background":[{"properties":{"show":{"expr":{"Literal":{"Value":"true"}}},"color":{"solid":{"color":{"expr":{"Literal":{"Value":"'#FFFFFF'"}}}}},"transparency":{"expr":{"Literal":{"Value":"0D"}}}}}],"border":[{"properties":{"show":{"expr":{"Literal":{"Value":"true"}}},"color":{"solid":{"color":{"expr":{"Literal":{"Value":"'#CCDCEC'"}}}}},"radius":{"expr":{"Literal":{"Value":"8D"}}},"width":{"expr":{"Literal":{"Value":"1D"}}}}}],"visualHeader":[{"properties":{"show":{"expr":{"Literal":{"Value":"false"}}}}}],"padding":[{"properties":{"top":{"expr":{"Literal":{"Value":"8D"}}},"bottom":{"expr":{"Literal":{"Value":"8D"}}},"left":{"expr":{"Literal":{"Value":"8D"}}},"right":{"expr":{"Literal":{"Value":"8D"}}}}}],"stylePreset":[{"properties":{"name":{"expr":{"Literal":{"Value":"'None'"}}}}}]},"drillFilterOtherVisuals":true},"parentGroupName":"10f9633a9f63bcc2ce4e","filterConfig":{"filters":[{"name":"8aec2b830d0f978a331f","field":{"Column":{"Expression":{"SourceRef":{"Entity":"Workforce Operational Signals"}},"Property":"Severity Label"}},"type":"Categorical"},{"name":"d34f54d01f36f7c1ea24","field":{"Column":{"Expression":{"SourceRef":{"Entity":"Workforce Operational Signals"}},"Property":"Signal"}},"type":"Categorical"},{"name":"c6ede07e35a2792c12e0","field":{"Column":{"Expression":{"SourceRef":{"Entity":"Workforce Operational Signals"}},"Property":"Risk Category"}},"type":"Categorical"},{"name":"8dfc84cd8a04bb68e616","field":{"Measure":{"Expression":{"SourceRef":{"Entity":"Workforce Operational Signals"}},"Property":"Workforce Signal Affected Users"}},"type":"Advanced"},{"name":"2176b9e22dea9893ee3c","field":{"Measure":{"Expression":{"SourceRef":{"Entity":"Workforce Operational Signals"}},"Property":"Workforce Signal Covered Population"}},"type":"Advanced"},{"name":"0f6132f2c6cf5e473892","field":{"Measure":{"Expression":{"SourceRef":{"Entity":"Workforce Operational Signals"}},"Property":"Workforce Signal Affected Estate"}},"type":"Advanced"},{"name":"31dca8409d632c6f8618","field":{"Column":{"Expression":{"SourceRef":{"Entity":"Workforce Operational Signals"}},"Property":"Evidence Status"}},"type":"Categorical"},{"name":"df64a51599c77e5e7e30","field":{"Column":{"Expression":{"SourceRef":{"Entity":"Workforce Operational Signals"}},"Property":"Recommended Action"}},"type":"Categorical"}]}}
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.13.0/schema.json",
+  "name": "1821b0b7caca72f523c0",
+  "position": {
+    "x": 32,
+    "y": 664,
+    "z": 117,
+    "height": 304,
+    "width": 1856,
+    "tabOrder": 1328
+  },
+  "visual": {
+    "visualType": "pivotTable",
+    "query": {
+      "queryState": {
+        "Rows": {
+          "projections": [
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Workforce Operational Signals"
+                    }
+                  },
+                  "Property": "Severity Label"
+                }
+              },
+              "queryRef": "Workforce Operational Signals.Severity Label",
+              "nativeQueryRef": "Severity",
+              "active": true
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Workforce Operational Signals"
+                    }
+                  },
+                  "Property": "Signal"
+                }
+              },
+              "queryRef": "Workforce Operational Signals.Signal",
+              "nativeQueryRef": "Signal",
+              "active": true
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Workforce Operational Signals"
+                    }
+                  },
+                  "Property": "Risk Category"
+                }
+              },
+              "queryRef": "Workforce Operational Signals.Risk Category",
+              "nativeQueryRef": "Risk Category",
+              "active": true
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Workforce Operational Signals"
+                    }
+                  },
+                  "Property": "Evidence Status"
+                }
+              },
+              "queryRef": "Workforce Operational Signals.Evidence Status",
+              "nativeQueryRef": "Evidence Status",
+              "active": true
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Workforce Operational Signals"
+                    }
+                  },
+                  "Property": "Recommended Action"
+                }
+              },
+              "queryRef": "Workforce Operational Signals.Recommended Action",
+              "nativeQueryRef": "Recommended Action",
+              "active": true
+            }
+          ]
+        },
+        "Values": {
+          "projections": [
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Workforce Operational Signals"
+                    }
+                  },
+                  "Property": "Workforce Signal Affected Users"
+                }
+              },
+              "queryRef": "Workforce Operational Signals.Workforce Signal Affected Users",
+              "nativeQueryRef": "Affected users"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Workforce Operational Signals"
+                    }
+                  },
+                  "Property": "Workforce Signal Covered Population"
+                }
+              },
+              "queryRef": "Workforce Operational Signals.Workforce Signal Covered Population",
+              "nativeQueryRef": "Covered population"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Workforce Operational Signals"
+                    }
+                  },
+                  "Property": "Workforce Signal Affected Estate"
+                }
+              },
+              "queryRef": "Workforce Operational Signals.Workforce Signal Affected Estate",
+              "nativeQueryRef": "Affected estate (%)"
+            }
+          ]
+        }
+      }
+    },
+    "objects": {
+      "columnHeaders": [
+        {
+          "properties": {
+            "autoSizeColumnWidth": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "columnAdjustment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'growToFit'"
+                }
+              }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
+            },
+            "bold": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "wordWrap": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "fontColor": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#FFFFFF'"
+                    }
+                  }
+                }
+              }
+            },
+            "backColor": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#215E9E'"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      ],
+      "values": [
+        {
+          "properties": {
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
+            },
+            "wordWrap": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            },
+            "fontColorPrimary": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#183153'"
+                    }
+                  }
+                }
+              }
+            },
+            "fontColorSecondary": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#183153'"
+                    }
+                  }
+                }
+              }
+            },
+            "backColorPrimary": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#FFFFFF'"
+                    }
+                  }
+                }
+              }
+            },
+            "backColorSecondary": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#F0F5FA'"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      ],
+      "rowHeaders": [
+        {
+          "properties": {
+            "stepped": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "12D"
+                }
+              }
+            },
+            "wordWrap": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "unfrozen": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "repeatRowHeaders": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "general": [
+        {
+          "properties": {
+            "layout": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Tabular'"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "subTotals": [
+        {
+          "properties": {
+            "rowSubtotals": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            },
+            "columnSubtotals": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            },
+            "perRowLevel": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            },
+            "perColumnLevel": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            }
+          }
+        },
+        {
+          "properties": {
+            "rowSubtotals": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            },
+            "perRowLevel": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            }
+          },
+          "selector": {
+            "id": "Row"
+          }
+        },
+        {
+          "properties": {
+            "columnSubtotals": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            },
+            "perColumnLevel": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            }
+          },
+          "selector": {
+            "id": "Column"
+          }
+        }
+      ]
+    },
+    "visualContainerObjects": {
+      "general": [
+        {
+          "properties": {
+            "altText": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Account inventory · selected evidence'"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "title": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "text": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Account inventory · selected evidence'"
+                }
+              }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "12D"
+                }
+              }
+            },
+            "fontColor": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#183153'"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      ],
+      "background": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "color": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#FFFFFF'"
+                    }
+                  }
+                }
+              }
+            },
+            "transparency": {
+              "expr": {
+                "Literal": {
+                  "Value": "0D"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "border": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "color": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#CCDCEC'"
+                    }
+                  }
+                }
+              }
+            },
+            "radius": {
+              "expr": {
+                "Literal": {
+                  "Value": "8D"
+                }
+              }
+            },
+            "width": {
+              "expr": {
+                "Literal": {
+                  "Value": "1D"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "visualHeader": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "padding": [
+        {
+          "properties": {
+            "top": {
+              "expr": {
+                "Literal": {
+                  "Value": "8D"
+                }
+              }
+            },
+            "bottom": {
+              "expr": {
+                "Literal": {
+                  "Value": "8D"
+                }
+              }
+            },
+            "left": {
+              "expr": {
+                "Literal": {
+                  "Value": "8D"
+                }
+              }
+            },
+            "right": {
+              "expr": {
+                "Literal": {
+                  "Value": "8D"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "stylePreset": [
+        {
+          "properties": {
+            "name": {
+              "expr": {
+                "Literal": {
+                  "Value": "'None'"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "drillFilterOtherVisuals": true
+  },
+  "parentGroupName": "10f9633a9f63bcc2ce4e",
+  "filterConfig": {
+    "filters": [
+      {
+        "name": "8aec2b830d0f978a331f",
+        "field": {
+          "Column": {
+            "Expression": {
+              "SourceRef": {
+                "Entity": "Workforce Operational Signals"
+              }
+            },
+            "Property": "Severity Label"
+          }
+        },
+        "type": "Categorical"
+      },
+      {
+        "name": "d34f54d01f36f7c1ea24",
+        "field": {
+          "Column": {
+            "Expression": {
+              "SourceRef": {
+                "Entity": "Workforce Operational Signals"
+              }
+            },
+            "Property": "Signal"
+          }
+        },
+        "type": "Categorical"
+      },
+      {
+        "name": "c6ede07e35a2792c12e0",
+        "field": {
+          "Column": {
+            "Expression": {
+              "SourceRef": {
+                "Entity": "Workforce Operational Signals"
+              }
+            },
+            "Property": "Risk Category"
+          }
+        },
+        "type": "Categorical"
+      },
+      {
+        "name": "8dfc84cd8a04bb68e616",
+        "field": {
+          "Measure": {
+            "Expression": {
+              "SourceRef": {
+                "Entity": "Workforce Operational Signals"
+              }
+            },
+            "Property": "Workforce Signal Affected Users"
+          }
+        },
+        "type": "Advanced"
+      },
+      {
+        "name": "2176b9e22dea9893ee3c",
+        "field": {
+          "Measure": {
+            "Expression": {
+              "SourceRef": {
+                "Entity": "Workforce Operational Signals"
+              }
+            },
+            "Property": "Workforce Signal Covered Population"
+          }
+        },
+        "type": "Advanced"
+      },
+      {
+        "name": "0f6132f2c6cf5e473892",
+        "field": {
+          "Measure": {
+            "Expression": {
+              "SourceRef": {
+                "Entity": "Workforce Operational Signals"
+              }
+            },
+            "Property": "Workforce Signal Affected Estate"
+          }
+        },
+        "type": "Advanced"
+      },
+      {
+        "name": "31dca8409d632c6f8618",
+        "field": {
+          "Column": {
+            "Expression": {
+              "SourceRef": {
+                "Entity": "Workforce Operational Signals"
+              }
+            },
+            "Property": "Evidence Status"
+          }
+        },
+        "type": "Categorical"
+      },
+      {
+        "name": "df64a51599c77e5e7e30",
+        "field": {
+          "Column": {
+            "Expression": {
+              "SourceRef": {
+                "Entity": "Workforce Operational Signals"
+              }
+            },
+            "Property": "Recommended Action"
+          }
+        },
+        "type": "Categorical"
+      }
+    ]
+  }
+}

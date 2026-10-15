@@ -3,46 +3,31 @@ table 'Native Source Health'
 	lineageTag: 281de526-d87b-42e0-8dd3-f41d75aef28f
 
 	/// Configured source feeds represented in SourceHealth for the frozen snapshot. Migrated without changing the source calculation.
-	measure 'Native Source feeds' =
-			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
-			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
-			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (COALESCE(COUNTROWS('Native Source Health'), 0)))
+	measure 'Native Source feeds' = (COALESCE(COUNTROWS('Native Source Health'), 0))
 		formatString: #,0
 		displayFolder: Native evidence
 		lineageTag: 357aa941-a508-477f-b23e-815c6ae5274f
 
 	/// Source feeds whose collection status is explicitly Completed. Completed is not tenant certification. Migrated without changing the source calculation.
-	measure 'Native Collected source feeds' =
-			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
-			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
-			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (CALCULATE([Native Source feeds], KEEPFILTERS('Native Source Health'[Status] == "Completed"))))
+	measure 'Native Collected source feeds' = (CALCULATE([Native Source feeds], KEEPFILTERS('Native Source Health'[Status] == "Completed")))
 		formatString: #,0
 		displayFolder: Native evidence
 		lineageTag: 21999a0e-0974-4acb-90bc-20d2c53fa4b1
 
 	/// Source feeds not explicitly completed in the frozen snapshot. Migrated without changing the source calculation.
-	measure 'Native Missing source feeds' =
-			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
-			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
-			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (MAX(0, [Native Source feeds] - [Native Collected source feeds])))
+	measure 'Native Missing source feeds' = (MAX(0, [Native Source feeds] - [Native Collected source feeds]))
 		formatString: #,0
 		displayFolder: Native evidence
 		lineageTag: 2cdc2862-f82f-4d5e-a905-4a225c1b1139
 
 	/// Completed source feeds divided by represented source feeds. This is collection coverage, not a composite CMDB quality score. Migrated without changing the source calculation.
-	measure 'Native Source collection coverage' =
-			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
-			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
-			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (DIVIDE([Native Collected source feeds], [Native Source feeds])))
+	measure 'Native Source collection coverage' = (DIVIDE([Native Collected source feeds], [Native Source feeds]))
 		formatString: 0.0%
 		displayFolder: Native evidence
 		lineageTag: a4d11cc5-35c3-457a-91c5-c7cdbb98ae70
 
-	/// Exact native-key entity context or existing inventory context. No name matching or inferred transitive membership. Unrelated entity selections return blank.
-	measure 'Native Context Rows · Native Source Health' =
-			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
-			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
-			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (COUNTROWS('Native Source Health')))
+	/// Existing qualified workforce/device scope via exact native IDs; otherwise the domain selection. No name matching or inferred transitive membership.
+	measure 'Native Context Rows · Native Source Health' = (COUNTROWS('Native Source Health'))
 		formatString: #,0
 		isHidden
 		lineageTag: 13c62cae-81f2-41c1-8b01-d06836c9719d

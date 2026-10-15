@@ -3,46 +3,31 @@ table 'Native Update Alert Evidence'
 	lineageTag: 5ce74dc0-cd50-4a61-8d31-e229ed2c9a52
 
 	/// Windows Update report rows in the frozen collection; a device can contribute more than one row. Migrated without changing the source calculation.
-	measure 'Native Windows update alert records' =
-			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
-			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
-			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (COALESCE(COUNTROWS('Native Update Alert Evidence'),0)))
+	measure 'Native Windows update alert records' = (COALESCE(COUNTROWS('Native Update Alert Evidence'),0))
 		formatString: #,0
 		displayFolder: Native evidence
 		lineageTag: 2cf7b5c4-d618-45a9-a17b-bb649f540329
 
 	/// Distinct source device identifiers represented in Windows Update report rows. Migrated without changing the source calculation.
-	measure 'Native Devices with Windows update alerts' =
-			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
-			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
-			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (COALESCE(DISTINCTCOUNTNOBLANK('Native Update Alert Evidence'[DeviceId]),0)))
+	measure 'Native Devices with Windows update alerts' = (COALESCE(DISTINCTCOUNTNOBLANK('Native Update Alert Evidence'[DeviceId]),0))
 		formatString: #,0
 		displayFolder: Native evidence
 		lineageTag: bbe4159e-72c3-4d18-9f53-3ea49c8ca2be
 
 	/// Windows Update report rows whose current device update status is explicitly Needs attention. Migrated without changing the source calculation.
-	measure 'Native Windows update alerts needing attention' =
-			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
-			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
-			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (CALCULATE([Native Windows update alert records],KEEPFILTERS('Native Update Alert Evidence'[CurrentDeviceUpdateStatus] = "Needs attention"))))
+	measure 'Native Windows update alerts needing attention' = (CALCULATE([Native Windows update alert records],KEEPFILTERS('Native Update Alert Evidence'[CurrentDeviceUpdateStatus] = "Needs attention")))
 		formatString: #,0
 		displayFolder: Native evidence
 		lineageTag: 00b3d154-03fa-45ad-8771-f83f7a994add
 
 	/// Share of Windows Update evidence records by aggregate state. Migrated without changing the source calculation.
-	measure 'Native Update aggregate state rate' =
-			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
-			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
-			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (DIVIDE([Native Windows update alert records], CALCULATE([Native Windows update alert records], REMOVEFILTERS('Native Update Alert Evidence'[AggregateState])))))
+	measure 'Native Update aggregate state rate' = (DIVIDE([Native Windows update alert records], CALCULATE([Native Windows update alert records], REMOVEFILTERS('Native Update Alert Evidence'[AggregateState]))))
 		formatString: 0.0%
 		displayFolder: Native evidence
 		lineageTag: 9ea08a78-4a1c-4a3e-8832-5d3e35f7d78e
 
-	/// Exact native-key entity context or existing inventory context. No name matching or inferred transitive membership. Unrelated entity selections return blank.
-	measure 'Native Context Rows · Native Update Alert Evidence' =
-			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
-			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
-			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (COUNTROWS('Native Update Alert Evidence')))
+	/// Existing qualified workforce/device scope via exact native IDs; otherwise the domain selection. No name matching or inferred transitive membership.
+	measure 'Native Context Rows · Native Update Alert Evidence' = (COUNTROWS('Native Update Alert Evidence'))
 		formatString: #,0
 		isHidden
 		lineageTag: b1a631f9-b433-47a5-96c7-44cddc5344a2

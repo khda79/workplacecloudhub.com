@@ -3,100 +3,67 @@ table 'Native Quality Finding'
 	lineageTag: 6ba791c4-b772-487d-aec4-4fef309ff8e7
 
 	/// Retained findings, including technical information. Migrated without changing the source calculation.
-	measure 'Native Quality findings' =
-			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
-			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
-			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (COALESCE(COUNTROWS('Native Quality Finding'),0)))
+	measure 'Native Quality findings' = (COALESCE(COUNTROWS('Native Quality Finding'),0))
 		formatString: #,0
 		displayFolder: Native evidence
 		lineageTag: 0c02e925-f2a6-4948-8e6f-ba276dbf4dff
 
 	/// Findings classified as Warning by the quality normalizer. Migrated without changing the source calculation.
-	measure 'Native Warnings' =
-			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
-			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
-			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (CALCULATE([Native Quality findings], KEEPFILTERS('Native Quality Finding'[Severity] == "Warning"))))
+	measure 'Native Warnings' = (CALCULATE([Native Quality findings], KEEPFILTERS('Native Quality Finding'[Severity] == "Warning")))
 		formatString: #,0
 		displayFolder: Native evidence
 		lineageTag: 69fdf865-9d8b-47cc-bb03-373cbffb0ddd
 
 	/// Retained information, including technical DiscoveryMailbox findings classified by the local rule. Migrated without changing the source calculation.
-	measure 'Native Information' =
-			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
-			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
-			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (CALCULATE([Native Quality findings], KEEPFILTERS('Native Quality Finding'[Severity] == "Information"))))
+	measure 'Native Information' = (CALCULATE([Native Quality findings], KEEPFILTERS('Native Quality Finding'[Severity] == "Information")))
 		formatString: #,0
 		displayFolder: Native evidence
 		lineageTag: 4242926e-b397-4167-a436-00651ee4eb60
 
 	/// Findings classified as Critical by the quality normalizer. Migrated without changing the source calculation.
-	measure 'Native Critical findings' =
-			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
-			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
-			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (CALCULATE([Native Quality findings], KEEPFILTERS('Native Quality Finding'[Severity] == "Critical"))))
+	measure 'Native Critical findings' = (CALCULATE([Native Quality findings], KEEPFILTERS('Native Quality Finding'[Severity] == "Critical")))
 		formatString: #,0
 		displayFolder: Native evidence
 		lineageTag: 409f5ce3-4c1c-4393-b8f3-4f1f88d3231d
 
 	/// Orphan primary-user references plus observed Microsoft 365 license-assignment errors. Migrated without changing the source calculation.
-	measure 'Native Integrity issues' =
-			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
-			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
-			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (CALCULATE([Native Quality findings], KEEPFILTERS('Native Quality Finding'[FindingType] == "OrphanPrimaryUserReference")) + CALCULATE([Native Quality findings], KEEPFILTERS('Native Quality Finding'[FindingType] == "ObservedLicenseAssignmentError"))))
+	measure 'Native Integrity issues' = (CALCULATE([Native Quality findings], KEEPFILTERS('Native Quality Finding'[FindingType] == "OrphanPrimaryUserReference")) + CALCULATE([Native Quality findings], KEEPFILTERS('Native Quality Finding'[FindingType] == "ObservedLicenseAssignmentError")))
 		formatString: #,0
 		displayFolder: Native evidence
 		lineageTag: 3a6b59f1-ab96-4e48-8125-d617ec168d6e
 
 	/// User records without a country plus devices without a primary user; these are coverage gaps, not integrity failures. Migrated without changing the source calculation.
-	measure 'Native Coverage gaps' =
-			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
-			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
-			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (CALCULATE([Native Quality findings], KEEPFILTERS('Native Quality Finding'[FindingType] == "UserCountryUnknown")) + CALCULATE([Native Quality findings], KEEPFILTERS('Native Quality Finding'[FindingType] == "DeviceWithoutPrimaryUser"))))
+	measure 'Native Coverage gaps' = (CALCULATE([Native Quality findings], KEEPFILTERS('Native Quality Finding'[FindingType] == "UserCountryUnknown")) + CALCULATE([Native Quality findings], KEEPFILTERS('Native Quality Finding'[FindingType] == "DeviceWithoutPrimaryUser")))
 		formatString: #,0
 		displayFolder: Native evidence
 		lineageTag: 6585742e-cc47-4f6c-876c-974ff451d837
 
 	/// Devices whose country cannot be derived. This overlaps device primary-user findings and must not be added to Coverage gaps. Migrated without changing the source calculation.
-	measure 'Native Derived country gaps' =
-			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
-			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
-			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (CALCULATE([Native Quality findings], KEEPFILTERS('Native Quality Finding'[FindingType] == "DeviceCountryUnknown"))))
+	measure 'Native Derived country gaps' = (CALCULATE([Native Quality findings], KEEPFILTERS('Native Quality Finding'[FindingType] == "DeviceCountryUnknown")))
 		formatString: #,0
 		displayFolder: Native evidence
 		lineageTag: e267c523-c322-4604-9305-80d5999acfaa
 
 	/// Lowest non-blank global completeness rate across user country, device primary-user, device country and integrity checks. Overlapping findings are assessed separately, never added together. Country and ownership selections are intentionally ignored because quality findings are not country-grained. Migrated without changing the source calculation.
-	measure 'Native Data quality score' =
-			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
-			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
-			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (VAR _users = CALCULATE([Native Users], REMOVEFILTERS('Native User Evidence'), REMOVEFILTERS('Native Country Evidence')) VAR _devices = CALCULATE([Native Devices], REMOVEFILTERS('Native Device Evidence'), REMOVEFILTERS('Native Country Evidence')) VAR _userCountryCoverage = IF(_users > 0, MAX(0, DIVIDE(_users - CALCULATE([Native Quality findings], KEEPFILTERS('Native Quality Finding'[FindingType] == "UserCountryUnknown")), _users))) VAR _primaryUserCoverage = IF(_devices > 0, MAX(0, DIVIDE(_devices - CALCULATE([Native Quality findings], KEEPFILTERS('Native Quality Finding'[FindingType] == "DeviceWithoutPrimaryUser")), _devices))) VAR _deviceCountryCoverage = IF(_devices > 0, MAX(0, DIVIDE(_devices - CALCULATE([Native Quality findings], KEEPFILTERS('Native Quality Finding'[FindingType] == "DeviceCountryUnknown")), _devices))) VAR _population = _users + _devices VAR _integrityCoverage = IF(_population > 0, MAX(0, DIVIDE(_population - [Native Integrity issues], _population))) VAR _rates = {_userCountryCoverage, _primaryUserCoverage, _deviceCountryCoverage, _integrityCoverage} RETURN MINX(FILTER(_rates, NOT ISBLANK([Value])), [Value])))
+	measure 'Native Data quality score' = (VAR _users = CALCULATE([Native Users], REMOVEFILTERS('Native User Evidence'), REMOVEFILTERS('Native Country Evidence')) VAR _devices = CALCULATE([Native Devices], REMOVEFILTERS('Native Device Evidence'), REMOVEFILTERS('Native Country Evidence')) VAR _userCountryCoverage = IF(_users > 0, MAX(0, DIVIDE(_users - CALCULATE([Native Quality findings], KEEPFILTERS('Native Quality Finding'[FindingType] == "UserCountryUnknown")), _users))) VAR _primaryUserCoverage = IF(_devices > 0, MAX(0, DIVIDE(_devices - CALCULATE([Native Quality findings], KEEPFILTERS('Native Quality Finding'[FindingType] == "DeviceWithoutPrimaryUser")), _devices))) VAR _deviceCountryCoverage = IF(_devices > 0, MAX(0, DIVIDE(_devices - CALCULATE([Native Quality findings], KEEPFILTERS('Native Quality Finding'[FindingType] == "DeviceCountryUnknown")), _devices))) VAR _population = _users + _devices VAR _integrityCoverage = IF(_population > 0, MAX(0, DIVIDE(_population - [Native Integrity issues], _population))) VAR _rates = {_userCountryCoverage, _primaryUserCoverage, _deviceCountryCoverage, _integrityCoverage} RETURN MINX(FILTER(_rates, NOT ISBLANK([Value])), [Value]))
 		formatString: 0.0%
 		displayFolder: Native evidence
 		lineageTag: 39fc0513-d4d5-4e0d-bbd4-5bf629c1c858
 
 	/// Traffic-light assessment of the data quality score: Good at 90% or above, Average from 60% to below 90%, and Poor below 60%. Migrated without changing the source calculation.
-	measure 'Native Data quality status' =
-			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
-			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
-			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (VAR _score = [Native Data quality score] RETURN SWITCH(TRUE(), ISBLANK(_score), "Not assessed", _score >= 0.9, "Good", _score >= 0.6, "Average", "Poor")))
+	measure 'Native Data quality status' = (VAR _score = [Native Data quality score] RETURN SWITCH(TRUE(), ISBLANK(_score), "Not assessed", _score >= 0.9, "Good", _score >= 0.6, "Average", "Poor"))
 		formatString: General
 		displayFolder: Native evidence
 		lineageTag: 7dbe8348-3d77-43d6-9440-4050f77ee843
 
 	/// Compact status and score intended for the Executive Overview; open Workplace Health for the underlying findings. Migrated without changing the source calculation.
-	measure 'Native Data quality health' =
-			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
-			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
-			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (VAR _score = [Native Data quality score] VAR _status = [Native Data quality status] RETURN IF(ISBLANK(_score), _status, _status & " · " & FORMAT(_score, "0.0%"))))
+	measure 'Native Data quality health' = (VAR _score = [Native Data quality score] VAR _status = [Native Data quality status] RETURN IF(ISBLANK(_score), _status, _status & " · " & FORMAT(_score, "0.0%")))
 		formatString: General
 		displayFolder: Native evidence
 		lineageTag: b6f8e179-5645-40a8-a315-e531554dbd17
 
-	/// Exact native-key entity context or existing inventory context. No name matching or inferred transitive membership. Unrelated entity selections return blank.
-	measure 'Native Context Rows · Native Quality Finding' =
-			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
-			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
-			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (COUNTROWS('Native Quality Finding')))
+	/// Existing qualified workforce/device scope via exact native IDs; otherwise the domain selection. No name matching or inferred transitive membership.
+	measure 'Native Context Rows · Native Quality Finding' = (COUNTROWS('Native Quality Finding'))
 		formatString: #,0
 		isHidden
 		lineageTag: 39412dc2-3ee1-439d-8749-2f5201c808bb

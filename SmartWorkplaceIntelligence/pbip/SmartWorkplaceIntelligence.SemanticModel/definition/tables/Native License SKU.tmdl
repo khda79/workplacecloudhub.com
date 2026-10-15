@@ -3,41 +3,26 @@ table 'Native License SKU'
 	lineageTag: 7b51c842-9fa0-4737-a47a-ef4007e199b6
 
 	/// Subscribed product SKUs. A SKU does not represent a person. Migrated without changing the source calculation.
-	measure 'Native License SKUs' =
-			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
-			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
-			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimLicenseSku"))
-			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((COALESCE(COUNTROWS('Native License SKU'),0)), KEEPFILTERS(TREATAS(NativeKeys0, 'Native License SKU'[TenantSkuKey]))), BLANK()), BLANK()), (COALESCE(COUNTROWS('Native License SKU'),0)))
+	measure 'Native License SKUs' = (COALESCE(COUNTROWS('Native License SKU'),0))
 		formatString: #,0
 		displayFolder: Native evidence
 		lineageTag: 4ef2cd00-8845-4b6a-b96b-7a112b23d1bf
 
 	/// Available only for a single SKU; do not sum different products as a count of people. Migrated without changing the source calculation.
-	measure 'Native SKU enabled units' =
-			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
-			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
-			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimLicenseSku"))
-			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((IF(HASONEVALUE('Native License SKU'[TenantSkuKey]), SUM('Native License SKU'[EnabledUnits]))), KEEPFILTERS(TREATAS(NativeKeys0, 'Native License SKU'[TenantSkuKey]))), BLANK()), BLANK()), (IF(HASONEVALUE('Native License SKU'[TenantSkuKey]), SUM('Native License SKU'[EnabledUnits]))))
+	measure 'Native SKU enabled units' = (IF(HASONEVALUE('Native License SKU'[TenantSkuKey]), SUM('Native License SKU'[EnabledUnits])))
 		formatString: #,0
 		displayFolder: Native evidence
 		lineageTag: 0e81a849-120f-4773-a9fe-661b48949477
 
 	/// Available only for a single SKU; do not sum different products as a count of people. Migrated without changing the source calculation.
-	measure 'Native SKU consumed units' =
-			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
-			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
-			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimLicenseSku"))
-			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((IF(HASONEVALUE('Native License SKU'[TenantSkuKey]), SUM('Native License SKU'[ConsumedUnits]))), KEEPFILTERS(TREATAS(NativeKeys0, 'Native License SKU'[TenantSkuKey]))), BLANK()), BLANK()), (IF(HASONEVALUE('Native License SKU'[TenantSkuKey]), SUM('Native License SKU'[ConsumedUnits]))))
+	measure 'Native SKU consumed units' = (IF(HASONEVALUE('Native License SKU'[TenantSkuKey]), SUM('Native License SKU'[ConsumedUnits])))
 		formatString: #,0
 		displayFolder: Native evidence
 		lineageTag: e279d5f3-3a0b-4174-bf0d-b643276ff63b
 
 	/// Count of subscribed Microsoft 365 target plans observed in the current filter context. Scope: Microsoft 365 F1 (M365_F1), F3 (SPE_F1), E3 (SPE_E3), E5 (SPE_E5), and Microsoft 365 Copilot. A plan is not a person. Migrated without changing the source calculation.
 	measure 'Native Microsoft 365 plans observed' =
-			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
-			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
-			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimLicenseSku"))
-			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((VAR _targetSkus =
+			(VAR _targetSkus =
 			    { "M365_F1", "SPE_F1", "SPE_E3", "SPE_E5", "Microsoft_365_Copilot" }
 			RETURN
 			    COALESCE(
@@ -46,36 +31,20 @@ table 'Native License SKU'
 			            KEEPFILTERS('Native License SKU'[SkuPartNumber] IN _targetSkus)
 			        ),
 			        0
-			    )), KEEPFILTERS(TREATAS(NativeKeys0, 'Native License SKU'[TenantSkuKey]))), BLANK()), BLANK()), (VAR _targetSkus =
-			    { "M365_F1", "SPE_F1", "SPE_E3", "SPE_E5", "Microsoft_365_Copilot" }
-			RETURN
-			    COALESCE(
-			        CALCULATE(
-			            COUNTROWS('Native License SKU'),
-			            KEEPFILTERS('Native License SKU'[SkuPartNumber] IN _targetSkus)
-			        ),
-			        0
-			    )))
+			    ))
 		formatString: 0
 		displayFolder: Native evidence
 		lineageTag: acc2235b-0613-4c8d-b31b-ed089a8989aa
 
 	/// Assigned-seat allocation rate for the single Microsoft 365 SKU in filter context: ConsumedUnits divided by EnabledUnits. This measures seat allocation, not product usage. Migrated without changing the source calculation.
-	measure 'Native SKU allocation rate' =
-			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
-			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
-			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimLicenseSku"))
-			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((DIVIDE ( [Native SKU consumed units], [Native SKU enabled units] )), KEEPFILTERS(TREATAS(NativeKeys0, 'Native License SKU'[TenantSkuKey]))), BLANK()), BLANK()), (DIVIDE ( [Native SKU consumed units], [Native SKU enabled units] )))
+	measure 'Native SKU allocation rate' = (DIVIDE ( [Native SKU consumed units], [Native SKU enabled units] ))
 		formatString: 0.0%
 		displayFolder: Native evidence
 		lineageTag: 1c0f7176-2e2a-4aa1-886e-118f54e1ac64
 
 	/// Executive text summary for one Microsoft 365 SKU: assigned (ConsumedUnits) / enabled seats and allocation rate. Returns Not observed when the filtered SKU is absent from the snapshot. Migrated without changing the source calculation.
 	measure 'Native SKU allocation summary' =
-			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
-			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
-			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimLicenseSku"))
-			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((VAR _skuObserved = HASONEVALUE ( 'Native License SKU'[TenantSkuKey] )
+			(VAR _skuObserved = HASONEVALUE ( 'Native License SKU'[TenantSkuKey] )
 			VAR _assigned = [Native SKU consumed units]
 			VAR _enabled = [Native SKU enabled units]
 			VAR _rate = [Native SKU allocation rate]
@@ -88,30 +57,13 @@ table 'Native License SKU'
 			            & FORMAT ( _enabled, "#,0" )
 			            & " · "
 			            & FORMAT ( _rate, "0.0%" )
-			    )), KEEPFILTERS(TREATAS(NativeKeys0, 'Native License SKU'[TenantSkuKey]))), BLANK()), BLANK()), (VAR _skuObserved = HASONEVALUE ( 'Native License SKU'[TenantSkuKey] )
-			VAR _assigned = [Native SKU consumed units]
-			VAR _enabled = [Native SKU enabled units]
-			VAR _rate = [Native SKU allocation rate]
-			RETURN
-			    IF (
-			        NOT _skuObserved,
-			        "Not observed",
-			        FORMAT ( _assigned, "#,0" )
-			            & " / "
-			            & FORMAT ( _enabled, "#,0" )
-			            & " · "
-			            & FORMAT ( _rate, "0.0%" )
-			    )))
+			    ))
 		formatString: @
 		displayFolder: Native evidence
 		lineageTag: 5bbbd576-ce0d-4164-91de-35088b25b261
 
-	/// Exact native-key entity context or existing inventory context. No name matching or inferred transitive membership. Unrelated entity selections return blank.
-	measure 'Native Context Rows · Native License SKU' =
-			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
-			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
-			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimLicenseSku"))
-			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((COUNTROWS('Native License SKU')), KEEPFILTERS(TREATAS(NativeKeys0, 'Native License SKU'[TenantSkuKey]))), BLANK()), BLANK()), (COUNTROWS('Native License SKU')))
+	/// Existing qualified workforce/device scope via exact native IDs; otherwise the domain selection. No name matching or inferred transitive membership.
+	measure 'Native Context Rows · Native License SKU' = (COUNTROWS('Native License SKU'))
 		formatString: #,0
 		isHidden
 		lineageTag: b71bc722-5e0b-4f8a-9adb-895418d79105

@@ -1,1 +1,55 @@
-{"$schema":"https://developer.microsoft.com/json-schemas/fabric/item/report/definition/bookmark/2.1.0/schema.json","displayName":"Sources","name":"39b6a2739a857b81b307","options":{"applyOnlyToTargetVisuals":true,"targetVisualNames":["8290cb245bbf49ba9206","42bf57ef31e78827f93c","516a11eb98e930675409","70dd22e913becb25e58c","185cdb21b5904ce2099a","b79464116be0acf4e2b3","6b6763c84777e6ef2d7d","b86010eb69c14ed24d9a"],"suppressActiveSection":true,"suppressData":true},"explorationState":{"version":"1.0","activeSection":"6e8276acf6fa00f4aa6f","sections":{"6e8276acf6fa00f4aa6f":{"visualContainers":{},"visualContainerGroups":{"8290cb245bbf49ba9206":{"isHidden":true},"42bf57ef31e78827f93c":{"isHidden":false},"516a11eb98e930675409":{"isHidden":true},"70dd22e913becb25e58c":{"isHidden":true},"185cdb21b5904ce2099a":{"isHidden":true},"b79464116be0acf4e2b3":{"isHidden":true},"6b6763c84777e6ef2d7d":{"isHidden":true},"b86010eb69c14ed24d9a":{"isHidden":true}}}}}}
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/bookmark/2.1.0/schema.json",
+  "displayName": "Sources",
+  "name": "39b6a2739a857b81b307",
+  "options": {
+    "applyOnlyToTargetVisuals": true,
+    "targetVisualNames": [
+      "8290cb245bbf49ba9206",
+      "42bf57ef31e78827f93c",
+      "516a11eb98e930675409",
+      "70dd22e913becb25e58c",
+      "185cdb21b5904ce2099a",
+      "b79464116be0acf4e2b3",
+      "6b6763c84777e6ef2d7d",
+      "b86010eb69c14ed24d9a"
+    ],
+    "suppressActiveSection": true,
+    "suppressData": true
+  },
+  "explorationState": {
+    "version": "1.0",
+    "activeSection": "6e8276acf6fa00f4aa6f",
+    "sections": {
+      "6e8276acf6fa00f4aa6f": {
+        "visualContainers": {},
+        "visualContainerGroups": {
+          "8290cb245bbf49ba9206": {
+            "isHidden": true
+          },
+          "42bf57ef31e78827f93c": {
+            "isHidden": false
+          },
+          "516a11eb98e930675409": {
+            "isHidden": true
+          },
+          "70dd22e913becb25e58c": {
+            "isHidden": true
+          },
+          "185cdb21b5904ce2099a": {
+            "isHidden": true
+          },
+          "b79464116be0acf4e2b3": {
+            "isHidden": true
+          },
+          "6b6763c84777e6ef2d7d": {
+            "isHidden": true
+          },
+          "b86010eb69c14ed24d9a": {
+            "isHidden": true
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,5 +1,81 @@
 # CMDB consolidation into Workplace Intelligence
 
+> Superseded architecture record. The generic CMDB page/graph described below is
+> retired by the approved 2026-10-15 scope. Do not recreate it or follow the
+> historical cutover sequence below as current operational instructions.
+
+## Generic layer retirement — validated source, 2026-10-16
+
+The candidate removes four graph tables/CSV contracts (entities, aliases, links,
+endpoints), their four measures, five relationships and two calculated entity keys.
+It preserves 154 domain/model tables and 879 measures. The 235 entity-context
+wrappers are replaced by their exact existing non-CMDB branches, including the
+qualified user/device inventory filters. All domain partition expressions,
+business columns, measure formats and non-CMDB relationships are unchanged.
+
+The report returns to 27 pages. Entra groups, AD groups, direct memberships,
+nested/non-user membership records and AD objects move to User Explorer. Native
+relationship summaries move to Data Trust. License assignment paths remain in
+License Recovery & Evidence; Teams/SPO links remain in Service & Content Explorer.
+The generic synchronized entity selector is removed. No display-name joins or
+transitive/effective-permission claims replace it.
+
+The native output contract now has 50 tables: 46 domain outputs plus four
+Teams/SPO outputs. Generic graph generation and its original page-bootstrap
+generator are removed. Existing immutable batches, source CSVs and pointers are
+not rewritten or deleted. The same published batch can serve the reduced model;
+its additional retired files are simply no longer imported.
+
+### Duplicate review
+
+Similar names are not an equivalence proof. Prepared workforce and device
+inventories have narrower populations than their native source inventories.
+Replacing either broader population would discard identities. Application
+projections preserve different fields: standardization/product metrics versus exact
+installation-link coverage and native application keys. Mailbox projections
+distinguish operational evidence, mailbox/user identity and
+hosting. User-service-plan assignments have a different grain from SKU capacity.
+Managed applications are not discovered applications. Histories remain distinct
+from current inventories. These are retained; no further whole-table equivalence
+has been established. The four generic graph projections are the demonstrated
+redundant representation removed in this lot. Private row counts, tenant values
+and source evidence remain outside the repository.
+
+### Verification and remaining gates
+
+`Retire-CmdbLayer.mjs` generates MCP update references and checks before/after BIM
+snapshots. `Test-CmdbLayerRetirement.mjs` also verifies regeneration equality for
+all 235 rewritten measures and injects six negative controls.
+`Retire-CmdbReport.mjs` limits writes to an explicitly selected candidate copy.
+`Test-ConsolidatedReport.mjs` checks all retained bindings and facet columns;
+`Test-TeamsSharePointReport.mjs` covers the four remaining Teams/SPO views.
+
+Completed checks for this candidate: 159 native-evidence fixture tests, 37
+complementary type/Teams/mailbox tests, 9,348 report/model checks and 298 Teams/SPO
+checks. The PBIR CLI (without remote schema validation) reports zero errors and
+five preexisting Back-button warnings.
+
+Separately authorized private Desktop validation also completed: all 154
+candidate partitions were Ready with no partition error. Physical before/after
+comparison on the same immutable batch matched all 5,274 retained measure values
+across six contexts (whole population, two country selections, one user, one
+device and an empty-user selection). All 154 retained table row counts matched.
+The 27 page states and six relocated native detail views were reviewed without
+visible visual errors. This does not claim every bookmark/filter combination or
+Power BI Service qualification.
+
+The saved candidate was promoted to the private working project after a verified
+external backup. The source PBIP is synchronized from those validated definitions
+without cache, imported data, local settings or private connection parameters.
+Its nine deployment parameters retain neutral public defaults; expected tenant
+and immutable batch remain empty and fail closed until explicitly configured.
+Private validation receipts and screenshots are not distributed. The subsequent
+source synchronization does not run collectors, preparation, transfer or refresh.
+Synthetic fixtures validate the future preparation output-contract change;
+production execution of that revised preparation remains a separate gate.
+
+## Historical integration record
+
 ## Delivery boundary
 
 The consolidation is an integration candidate, not a production-qualified release. It does not execute collectors, preparation, SharePoint transfers, Desktop refresh or Desktop save. The former CMDB runtime and job remain available until the server and private Desktop gates below pass. Do not run both preparation jobs during cutover.

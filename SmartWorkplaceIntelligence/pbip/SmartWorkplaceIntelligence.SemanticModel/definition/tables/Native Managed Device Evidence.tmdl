@@ -2,15 +2,10 @@
 table 'Native Managed Device Evidence'
 	lineageTag: 979720b5-d70f-431f-871a-9cb82bedb908
 
-	/// Exact native-key entity context or existing inventory context. No name matching or inferred transitive membership. Unrelated entity selections return blank.
+	/// Existing qualified workforce/device scope via exact native IDs; otherwise the domain selection. No name matching or inferred transitive membership.
 	measure 'Native Context Rows · Native Managed Device Evidence' =
-			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
-			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
-			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimDevice"))
-			VAR NativeKeys1 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimIntuneManagedDevice"))
 			VAR InventoryDevices = CALCULATETABLE(VALUES('Native Managed Device Evidence'[TenantDeviceKey]), REMOVEFILTERS('Native Managed Device Evidence'), TREATAS(VALUES('Device Inventory Evidence'[Device Source ID]), 'Native Managed Device Evidence'[ManagedDeviceId]))
-			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((COUNTROWS('Native Managed Device Evidence')), KEEPFILTERS(TREATAS(NativeKeys0, 'Native Managed Device Evidence'[TenantDeviceKey]))),
-			COUNTROWS(NativeKeys1) > 0, CALCULATE((COUNTROWS('Native Managed Device Evidence')), KEEPFILTERS(TREATAS(NativeKeys1, 'Native Managed Device Evidence'[TenantIntuneDeviceKey]))), BLANK()), BLANK()), SWITCH(TRUE(), ISCROSSFILTERED('Device Inventory Evidence'), CALCULATE((COUNTROWS('Native Managed Device Evidence')), KEEPFILTERS(TREATAS(InventoryDevices, 'Native Managed Device Evidence'[TenantDeviceKey]))), (COUNTROWS('Native Managed Device Evidence'))))
+			RETURN SWITCH(TRUE(), ISCROSSFILTERED('Device Inventory Evidence'), CALCULATE((COUNTROWS('Native Managed Device Evidence')), KEEPFILTERS(TREATAS(InventoryDevices, 'Native Managed Device Evidence'[TenantDeviceKey]))), (COUNTROWS('Native Managed Device Evidence')))
 		formatString: #,0
 		isHidden
 		lineageTag: 94215afb-0c77-4301-a555-d5c478739ea3

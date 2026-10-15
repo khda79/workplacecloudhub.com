@@ -2,11 +2,8 @@
 table 'Hardware Coverage Evidence'
 	lineageTag: ec1b2008-845c-4487-93ec-d1e1ca0c4a79
 
-	/// Exact native-key entity context or existing inventory context. No name matching or inferred transitive membership. Unrelated entity selections return blank.
-	measure 'Native Context Rows · Hardware Coverage Evidence' =
-			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
-			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
-			RETURN IF(HasEntityContext, IF(OneEntity, BLANK(), BLANK()), (COUNTROWS('Hardware Coverage Evidence')))
+	/// Existing qualified workforce/device scope via exact native IDs; otherwise the domain selection. No name matching or inferred transitive membership.
+	measure 'Native Context Rows · Hardware Coverage Evidence' = (COUNTROWS('Hardware Coverage Evidence'))
 		formatString: #,0
 		isHidden
 		lineageTag: a4155221-3ce5-4650-a8d7-0c1a4488819c

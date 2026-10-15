@@ -4,39 +4,24 @@ table 'AD Computer Evidence'
 
 	/// Native AD computer objects whose DNSHostName is absent; this does not prove physical use or non-use. Migrated without changing the source calculation.
 	measure 'Native AD objects without DNS' =
-			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
-			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
-			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimDevice"))
-			VAR NativeKeys1 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "ADComputerSource"))
 			VAR InventoryDevices = CALCULATETABLE(VALUES('Native Managed Device Evidence'[TenantDeviceKey]), REMOVEFILTERS('Native Managed Device Evidence'), TREATAS(VALUES('Device Inventory Evidence'[Device Source ID]), 'Native Managed Device Evidence'[ManagedDeviceId]))
-			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((COUNTROWS ( FILTER ( 'AD Computer Evidence', ISBLANK ( 'AD Computer Evidence'[DNSHostName] ) || TRIM ( 'AD Computer Evidence'[DNSHostName] ) = "" ) )), KEEPFILTERS(TREATAS(NativeKeys0, 'AD Computer Evidence'[TenantDeviceKey]))),
-			COUNTROWS(NativeKeys1) > 0, CALCULATE((COUNTROWS ( FILTER ( 'AD Computer Evidence', ISBLANK ( 'AD Computer Evidence'[DNSHostName] ) || TRIM ( 'AD Computer Evidence'[DNSHostName] ) = "" ) )), KEEPFILTERS(TREATAS(NativeKeys1, 'AD Computer Evidence'[TenantADComputerKey]))), BLANK()), BLANK()), SWITCH(TRUE(), ISCROSSFILTERED('Device Inventory Evidence'), CALCULATE((COUNTROWS ( FILTER ( 'AD Computer Evidence', ISBLANK ( 'AD Computer Evidence'[DNSHostName] ) || TRIM ( 'AD Computer Evidence'[DNSHostName] ) = "" ) )), KEEPFILTERS(TREATAS(InventoryDevices, 'AD Computer Evidence'[TenantDeviceKey]))), (COUNTROWS ( FILTER ( 'AD Computer Evidence', ISBLANK ( 'AD Computer Evidence'[DNSHostName] ) || TRIM ( 'AD Computer Evidence'[DNSHostName] ) = "" ) ))))
+			RETURN SWITCH(TRUE(), ISCROSSFILTERED('Device Inventory Evidence'), CALCULATE((COUNTROWS ( FILTER ( 'AD Computer Evidence', ISBLANK ( 'AD Computer Evidence'[DNSHostName] ) || TRIM ( 'AD Computer Evidence'[DNSHostName] ) = "" ) )), KEEPFILTERS(TREATAS(InventoryDevices, 'AD Computer Evidence'[TenantDeviceKey]))), (COUNTROWS ( FILTER ( 'AD Computer Evidence', ISBLANK ( 'AD Computer Evidence'[DNSHostName] ) || TRIM ( 'AD Computer Evidence'[DNSHostName] ) = "" ) )))
 		formatString: #,##0
 		displayFolder: Native evidence
 		lineageTag: 5ab20d20-9415-464b-bb19-f4e2c861a6a6
 
 	/// Native AD records explicitly linked to one selected CMDB device identity; no name-based guessed relation. Migrated without changing the source calculation.
 	measure 'Native Selected device AD objects' =
-			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
-			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
-			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimDevice"))
-			VAR NativeKeys1 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "ADComputerSource"))
 			VAR InventoryDevices = CALCULATETABLE(VALUES('Native Managed Device Evidence'[TenantDeviceKey]), REMOVEFILTERS('Native Managed Device Evidence'), TREATAS(VALUES('Device Inventory Evidence'[Device Source ID]), 'Native Managed Device Evidence'[ManagedDeviceId]))
-			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((IF ( HASONEVALUE ( 'Native Device Evidence'[TenantDeviceKey] ), CALCULATE ( COUNTROWS ( 'AD Computer Evidence' ), TREATAS ( VALUES ( 'Native Device Evidence'[TenantDeviceKey] ), 'AD Computer Evidence'[TenantDeviceKey] ) ) )), KEEPFILTERS(TREATAS(NativeKeys0, 'AD Computer Evidence'[TenantDeviceKey]))),
-			COUNTROWS(NativeKeys1) > 0, CALCULATE((IF ( HASONEVALUE ( 'Native Device Evidence'[TenantDeviceKey] ), CALCULATE ( COUNTROWS ( 'AD Computer Evidence' ), TREATAS ( VALUES ( 'Native Device Evidence'[TenantDeviceKey] ), 'AD Computer Evidence'[TenantDeviceKey] ) ) )), KEEPFILTERS(TREATAS(NativeKeys1, 'AD Computer Evidence'[TenantADComputerKey]))), BLANK()), BLANK()), SWITCH(TRUE(), ISCROSSFILTERED('Device Inventory Evidence'), CALCULATE((IF ( HASONEVALUE ( 'Native Device Evidence'[TenantDeviceKey] ), CALCULATE ( COUNTROWS ( 'AD Computer Evidence' ), TREATAS ( VALUES ( 'Native Device Evidence'[TenantDeviceKey] ), 'AD Computer Evidence'[TenantDeviceKey] ) ) )), KEEPFILTERS(TREATAS(InventoryDevices, 'AD Computer Evidence'[TenantDeviceKey]))), (IF ( HASONEVALUE ( 'Native Device Evidence'[TenantDeviceKey] ), CALCULATE ( COUNTROWS ( 'AD Computer Evidence' ), TREATAS ( VALUES ( 'Native Device Evidence'[TenantDeviceKey] ), 'AD Computer Evidence'[TenantDeviceKey] ) ) ))))
+			RETURN SWITCH(TRUE(), ISCROSSFILTERED('Device Inventory Evidence'), CALCULATE((IF ( HASONEVALUE ( 'Native Device Evidence'[TenantDeviceKey] ), CALCULATE ( COUNTROWS ( 'AD Computer Evidence' ), TREATAS ( VALUES ( 'Native Device Evidence'[TenantDeviceKey] ), 'AD Computer Evidence'[TenantDeviceKey] ) ) )), KEEPFILTERS(TREATAS(InventoryDevices, 'AD Computer Evidence'[TenantDeviceKey]))), (IF ( HASONEVALUE ( 'Native Device Evidence'[TenantDeviceKey] ), CALCULATE ( COUNTROWS ( 'AD Computer Evidence' ), TREATAS ( VALUES ( 'Native Device Evidence'[TenantDeviceKey] ), 'AD Computer Evidence'[TenantDeviceKey] ) ) )))
 		formatString: #,##0
 		displayFolder: Native evidence
 		lineageTag: 150f749f-09ac-4120-84de-ccb27188ca48
 
-	/// Exact native-key entity context or existing inventory context. No name matching or inferred transitive membership. Unrelated entity selections return blank.
+	/// Existing qualified workforce/device scope via exact native IDs; otherwise the domain selection. No name matching or inferred transitive membership.
 	measure 'Native Context Rows · AD Computer Evidence' =
-			VAR HasEntityContext = ISFILTERED('CMDB Entity Evidence'[Selection]) || ISFILTERED('CMDB Entity Evidence'[Entity Key])
-			VAR OneEntity = HASONEVALUE('CMDB Entity Evidence'[Entity Key])
-			VAR NativeKeys0 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "DimDevice"))
-			VAR NativeKeys1 = CALCULATETABLE(VALUES('CMDB Entity Alias'[Source Key]), KEEPFILTERS('CMDB Entity Alias'[Source Table] = "ADComputerSource"))
 			VAR InventoryDevices = CALCULATETABLE(VALUES('Native Managed Device Evidence'[TenantDeviceKey]), REMOVEFILTERS('Native Managed Device Evidence'), TREATAS(VALUES('Device Inventory Evidence'[Device Source ID]), 'Native Managed Device Evidence'[ManagedDeviceId]))
-			RETURN IF(HasEntityContext, IF(OneEntity, SWITCH(TRUE(), COUNTROWS(NativeKeys0) > 0, CALCULATE((COUNTROWS('AD Computer Evidence')), KEEPFILTERS(TREATAS(NativeKeys0, 'AD Computer Evidence'[TenantDeviceKey]))),
-			COUNTROWS(NativeKeys1) > 0, CALCULATE((COUNTROWS('AD Computer Evidence')), KEEPFILTERS(TREATAS(NativeKeys1, 'AD Computer Evidence'[TenantADComputerKey]))), BLANK()), BLANK()), SWITCH(TRUE(), ISCROSSFILTERED('Device Inventory Evidence'), CALCULATE((COUNTROWS('AD Computer Evidence')), KEEPFILTERS(TREATAS(InventoryDevices, 'AD Computer Evidence'[TenantDeviceKey]))), (COUNTROWS('AD Computer Evidence'))))
+			RETURN SWITCH(TRUE(), ISCROSSFILTERED('Device Inventory Evidence'), CALCULATE((COUNTROWS('AD Computer Evidence')), KEEPFILTERS(TREATAS(InventoryDevices, 'AD Computer Evidence'[TenantDeviceKey]))), (COUNTROWS('AD Computer Evidence')))
 		formatString: #,0
 		isHidden
 		lineageTag: 392a3f24-406b-4ffb-aec2-fb916aaaad17
