@@ -30,7 +30,7 @@ Loads the complete WPF data model without showing the splash or main window.
 Intended only for isolated tests with SharedDataFolderPath pointing to a temporary folder.
 
 .VERSION
-1.3.12
+1.3.13
 #>
 [CmdletBinding()]
 param(
@@ -54,7 +54,7 @@ $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -Requi
 try {
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
-$script:AppVersion = '1.3.12'
+$script:AppVersion = '1.3.13'
 $script:StartupClock = [Diagnostics.Stopwatch]::StartNew()
 $script:Snapshot = $null
 $script:DraftJobs = $null
@@ -312,6 +312,7 @@ $xaml = @'
                     <DataGrid x:Name="PlanningGrid" SelectionMode="Single">
                         <DataGrid.Columns>
                             <DataGridTextColumn Header="Job" Binding="{Binding Name}" SortMemberPath="Name" SortDirection="Ascending" Width="250"/>
+                            <DataGridTextColumn Header="Arguments" Binding="{Binding Arguments}" Width="180"/>
                             <DataGridCheckBoxColumn Header="Enabled" Binding="{Binding Enabled}" Width="70"/>
                             <DataGridTextColumn Header="Frequency" Binding="{Binding Frequency}" Width="90"/>
                             <DataGridTextColumn Header="Times" Binding="{Binding Times}" Width="155"/>
@@ -345,6 +346,8 @@ $xaml = @'
                                 <GroupBox Header="Selected job">
                                     <StackPanel>
                                         <TextBlock x:Name="SelectedJobText" FontWeight="SemiBold" FontSize="15" Text="Select a job"/>
+                                        <TextBlock Text="Arguments (read-only)" Margin="0,8,0,0"/>
+                                        <TextBox x:Name="JobArgumentsBox" IsReadOnly="True" TextWrapping="Wrap" MinHeight="44" VerticalScrollBarVisibility="Auto"/>
                                         <CheckBox x:Name="JobEnabledCheck" Content="Enabled" Margin="0,10,0,8"/>
                                         <TextBlock Text="Frequency"/>
                                         <ComboBox x:Name="ScheduleTypeCombo"><ComboBoxItem Content="Daily"/><ComboBoxItem Content="Weekly"/></ComboBox>
@@ -593,7 +596,7 @@ Import-Module -Name (Join-Path $PSScriptRoot 'SmartM365.Orchestrator.GuiWorker.p
 
 if ($ValidateOnly) {
     $validationWindow = ConvertFrom-OrchestratorGuiXaml -Text $xaml
-    foreach ($controlName in @('MainTabs', 'PlanningGrid', 'HistoryGrid', 'ServersGrid', 'VersionsGrid', 'PublishButton', 'RebalanceButton', 'ApplyJobButton', 'ApplyServerButton', 'RollbackButton', 'DaysPanel', 'MondayCheck', 'TuesdayCheck', 'WednesdayCheck', 'ThursdayCheck', 'FridayCheck', 'SaturdayCheck', 'SundayCheck',
+    foreach ($controlName in @('MainTabs', 'PlanningGrid', 'JobArgumentsBox', 'HistoryGrid', 'ServersGrid', 'VersionsGrid', 'PublishButton', 'RebalanceButton', 'ApplyJobButton', 'ApplyServerButton', 'RollbackButton', 'DaysPanel', 'MondayCheck', 'TuesdayCheck', 'WednesdayCheck', 'ThursdayCheck', 'FridayCheck', 'SaturdayCheck', 'SundayCheck',
         'AutoRefreshCheck', 'OperationsServersGrid', 'OperationsRunningGrid', 'JobStopReasonBox', 'StopRunningJobButton', 'OperationsPendingGrid', 'OperationsIncidentsGrid', 'OperationsMailsGrid',
         'DependsOnBox', 'DependencyModeCombo', 'DependencyMaxAgeBox', 'DependentsText', 'ReadinessGrid', 'IncludeDependenciesCheck', 'RequestRunButton',
         'Failures24hButton', 'RequestsGrid', 'RequestJobsGrid', 'CancellationReasonBox', 'CancellationProgressText', 'CancelRequestButton', 'CancelAllRequestsButton', 'MaintenanceBannerText', 'MaintenanceDetailText',
@@ -858,6 +861,7 @@ function Refresh-PlanningView {
     $owners = if ($null -ne $Owners) { $Owners } else { Get-ElectionOwners }
     $rows = foreach ($job in @($script:DraftJobs.Jobs)) {
         $mode = if ($job.PSObject.Properties['AssignmentMode']) { [string]$job.AssignmentMode } else { 'Legacy' }
+        $arguments = [string](Get-OrchestratorGuiPropertyValue -Object $job -Name 'Arguments' -DefaultValue '')
         $allowedServers = @(Get-OrchestratorGuiPropertyValue -Object $job -Name 'AllowedServers' -DefaultValue @())
         $server = switch ($mode) {
             'Pinned' { $allowedServers -join ', ' }
@@ -868,6 +872,7 @@ function Refresh-PlanningView {
         $health = if ($script:HealthByName.ContainsKey([string]$job.Name)) { $script:HealthByName[[string]$job.Name] } else { $null }
         [pscustomobject]@{
             Name = [string]$job.Name
+            Arguments = if ([string]::IsNullOrWhiteSpace($arguments)) { '(none)' } else { $arguments }
             Enabled = [bool]$job.Enabled
             Frequency = [string]$job.Schedule.Type
             Times = @($job.Schedule.Times) -join ', '
@@ -1689,7 +1694,7 @@ $script:Controls = @{}
 foreach ($name in @(
     'MainTabs', 'HeaderLogo', 'SharedPathText', 'ConnectionText', 'LastRefreshText', 'StatusText', 'RefreshButton', 'ValidateButton', 'RebalanceButton', 'PublishButton',
     'JobsCountText', 'EnabledCountText', 'OnlineServersText', 'SuccessCountText', 'FailureCountText', 'DashboardGrid',
-    'PlanningGrid', 'SelectedJobText', 'JobEnabledCheck', 'ScheduleTypeCombo', 'TimesBox', 'DaysPanel',
+    'PlanningGrid', 'SelectedJobText', 'JobArgumentsBox', 'JobEnabledCheck', 'ScheduleTypeCombo', 'TimesBox', 'DaysPanel',
     'MondayCheck', 'TuesdayCheck', 'WednesdayCheck', 'ThursdayCheck', 'FridayCheck', 'SaturdayCheck', 'SundayCheck', 'MissedPolicyCombo',
     'AssignmentCombo', 'PinnedServerCombo', 'TimeoutBox', 'RetriesBox', 'RetryDelayBox', 'DurationBox', 'ApplyJobButton',
     'HistoryFromPicker', 'HistoryToPicker', 'HistoryServerCombo', 'HistoryJobCombo', 'HistoryStatusCombo', 'HistoryRefreshButton',
@@ -1733,6 +1738,7 @@ $script:Controls.PlanningGrid.Add_SelectionChanged({
     if ($null -eq $row) { return }
     $job = @($script:DraftJobs.Jobs | Where-Object Name -eq $row.Name)[0]
     $script:Controls.SelectedJobText.Text = [string]$job.Name
+    $script:Controls.JobArgumentsBox.Text = [string]$row.Arguments
     $script:Controls.JobEnabledCheck.IsChecked = [bool]$job.Enabled
     Select-ComboText -Combo $script:Controls.ScheduleTypeCombo -Text ([string]$job.Schedule.Type)
     $script:Controls.TimesBox.Text = @($job.Schedule.Times) -join ', '
@@ -1903,6 +1909,19 @@ if ($SmokeTest) {
         [void](Refresh-ServersView)
     }
     $script:Controls.PlanningGrid.SelectedItem = $script:PlanningRows[0]
+    $argumentsColumn = @($script:Controls.PlanningGrid.Columns | Where-Object { [string]$_.Header -eq 'Arguments' })[0]
+    if ($null -eq $argumentsColumn -or [string]$argumentsColumn.Binding.Path.Path -ne 'Arguments') { throw 'Planning arguments column is not bound to the job arguments.' }
+    if (-not $script:Controls.JobArgumentsBox.IsReadOnly -or [string]$script:Controls.JobArgumentsBox.Text -cne [string]$script:PlanningRows[0].Arguments) {
+        throw 'Selected job arguments are not displayed read-only.'
+    }
+    $rowWithArguments = @($script:PlanningRows | Where-Object { [string]$_.Arguments -ne '(none)' } | Select-Object -First 1)
+    if ($rowWithArguments.Count) {
+        $script:Controls.PlanningGrid.SelectedItem = $rowWithArguments[0]
+        if ([string]$script:Controls.JobArgumentsBox.Text -cne [string]$rowWithArguments[0].Arguments) {
+            throw 'Selected job arguments were not displayed in full.'
+        }
+        $script:Controls.PlanningGrid.SelectedItem = $script:PlanningRows[0]
+    }
     Select-ComboText -Combo $script:Controls.AssignmentCombo -Text 'Elected'
     Update-PinnedServerControlState
     if ($script:Controls.PinnedServerCombo.IsEnabled) { throw 'Pinned server selector stayed enabled for Elected assignment.' }
@@ -2072,8 +2091,8 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDQVO13ebG9WRMi
-# AdTkL22NHonEHnUoS9ty5DIVtLkPk6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDvk3xwZUlBDH3e
+# qTsbQG8JGXL1/rlVmZ6QBPIOCTj3UaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -2206,31 +2225,31 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIJNTRmL8sx7piXoR4Quigtv6QroutFoWpWy8G88KKgNYMA0GCSqG
-# SIb3DQEBAQUABIIBgDEeFCAz3498jEUkfsN0yeeWui4zT+L1KYgA052B25IXiBbV
-# ypp8bF8YeL5TWjxqYtoc37IbUeE9prbWO5imy47seV6HwQ+2oW/OZk5evLLqBwkG
-# DJ8KeK8xJylRjEro/4ayI9vA/ygSEq6YoVMYeHKuh8A/5+IhH2DuLyn03UbQKZFv
-# ajZgUAACplFonVCNhcNPITuHOujy9/z26B3RRRz9/alK+cY1GlgA7t2HCOcKviMP
-# Am8FH0UG540HFEr9tEdPLjiWhsAhqTGJ0a3yR0KEiShPgJ8/eOnxqFYLc8zB87LH
-# I/aPW5h9ycveS6JB+FFjcvLzJOdVuAIqFOP6zmFycRZzGUy9aFsaHqG+H/MRBEMl
-# 3BuiNHR+BNXgeWREP9vi42+JW2wLxWNb1werkiVv49KjnrmFiIrESf6gYlKHKQya
-# 8UXvWyFHJBG0yAVZ7s/O26Q2V8C72QJGS5XUK9bUIMdFeoQ6qEs3yRO+GAiHGYIB
-# cC1ZizdFqk70sh9+R6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIOf6eqeexjG8HqSzeg0fIw6jO4LttS3nIe4Vpq/1XaLgMA0GCSqG
+# SIb3DQEBAQUABIIBgGs9HDUFYMQrg9yyBAbqxGprRydCa28VuriOcJwSRM6L+ZZj
+# y++1Qw73cHjE+qXMtqektRfMsc5OVeKq3zNA43gY3utVkvCwvFZLOMjfyAnXnhNB
+# kOVQ1/lCkb1+K911ZpbvSBnEGEnKTEKuudphdcJp+8iHmLkycoGOkD1twtBUK+Xg
+# /NRQU/zhLoG+mjBNWSxBFvz0VjqpaXcdBQ7y+q8Srs/OAXycTgbFcDKXDMtOQmXH
+# 4ZdZEq66fP7X48vgwpE+9j6CtHmS1hSExaI7eSx6qlcSlYB6vV3KZ9XBQSpkahES
+# EjpEknb7tczGBG6YVBHnhwg4luBYQ9G+KueSzlW3gvK1HtDQZpsvKl1oLlr3IQmu
+# pwQeNZpXHXYE/P/fM1q+PBeXnMr+icTA7T6Qqx+WZAsgz1DldH86+850kKtPB3hc
+# 7DlPliKwJIUIZ5bbqrfNGc735x3UR5SlsgItQ+NNNZrYajdg7zK2jbLCzxjCLVCv
+# r6xeN5d0UTYNffjoiqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTQxNTMw
-# MzhaMC8GCSqGSIb3DQEJBDEiBCD76SORdn5fp6xnMXMxmur7IA5fzpX5ZoXyaWpY
-# LCboNDANBgkqhkiG9w0BAQEFAASCAgBPchnhpQLd6OnUeAwYE6C4EKw7Nssc1wGf
-# dPF1BrK+/rWU45myVMZ9dL1MN8RGOzXRV4leRjo3JMsjc++Bneo7s8S8Th7kZxTO
-# zh7C16+bI9+PBdFdPfV2OdcFJ3E+vaMZSoP/YiNuHrtucceY8MI3dHu1ftup39k6
-# E0D6bzRUW8J3lMGJktYtrJ/1+zt1QYqm7zkG4zeHJaWEsUGqf023acqXobAZRi5K
-# xqk4aToXWqOldZuYhJRXF7sp8yub5n9A8h2P3VmR7L3OmCcZM4TNwb5Y9R7bKvu2
-# mDIJOSmCBbeWcj/Hko0jlVofWCB+kr874tGl3uJZ7yPJrR3+H8J9m82PGAK/qb1p
-# M4kGOH/0T8ufJ8OJ86OorC/dTz23gt3MwcgMYT8EgNGbLU8FgPdoTL3RH+iV0FlH
-# ElkKi0F+1b31znqtALzzajJ/F/ww6/IIbiAeC9PmdXM3PJms2wdl0jV12Kli4bW9
-# KasHONBIzZkXsQhz6N9XVUJmEyLlJAL6cs4PAxK+oc6iyuenHVERQDBa7DgPvlc/
-# WRvxXuwT6Hz8Ma6yA7B4ydnPvr5J/5HTij8CgjJtb9XUOGDD1BU+rrMd35X7NGzp
-# AWMhNGQ5tIcfJnMsHVQ1lF91Eim59S7HthtSpGUPrqJ/x6LKxUVweUwdFBe/YLvC
-# Ij0/vXrujQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTUwOTE2
+# MzNaMC8GCSqGSIb3DQEJBDEiBCCgj/aAaO+lHHilC9vzYjG/yS8BHp3pf2Lf+snS
+# dmOBHTANBgkqhkiG9w0BAQEFAASCAgCENzrHmiRlgbWMnlIaOSBo9oW3T4Dpe58p
+# k93+y3o6Mk70/THipI5A1IcLJ7kGWm3XZo2hMzIX99ykMp+CsQqq2yucznOd5i+E
+# /PnABdl7+zeHm3p9fb6NgW20Ih7k5AYi+B8IXkU3bd/RMVA7WYrx1cFZb57j8k6N
+# gxc/1hnTL/zviBlU0CgmlPJqk0jgHQqszp6gbp5miC7yGidcodObeq0hAEZj60DO
+# bf6SFtTzZ5HzCNgVQXIJ9hookk6jAdiNJBZeemljJdUgZCOd2KjamY5Uo6BA8ZkA
+# UpqeZPXV08UcadxRrd+X95AhozSMptbOpX9b+2AuXFh0vk+auAkYoX6EWAeCkkbM
+# w5zxQqEScBe/VC+mKiiao1wKqWysSGAYX8DtH8g5TNHQ4kZ3fL1Mobpk5DPduMBd
+# RqmMggH8fr/cfMs+I09a56kD61bNBg70V0bU+G49z5/mzpLxZpb9qMBZwrXDY2N0
+# Q48Ixtb7mhVGaYwc+MlS/IqW0H3H07BkLRyO5ZU6ioJyc+tFRUNHJ8IvEV+W4yO1
+# IS+bZEW06Nr3pR4XTksOKXwxxABXLJhdlxfvvU5Ck5GHZE+x4WGlu9rofYMpLgPW
+# lVH8ITDJ5t1dGcMh0CGCsSqDyqFeT/wmpoxKp1Jeju2zVh7enV2k/W1uDeANacd5
+# 6GLjRPWVmw==
 # SIG # End signature block

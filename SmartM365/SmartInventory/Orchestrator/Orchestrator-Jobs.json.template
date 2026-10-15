@@ -980,7 +980,7 @@
     {
       "Name": "M365-Usage-Inventory",
       "ScriptPath": "M365Inventory\\Usage\\SmartM365-M365UserActivity-Inventory.ps1",
-      "Arguments": "",
+      "Arguments": "-Reports All",
       "Enabled": true,
       "Group": "M365",
       "DependsOn": [],
