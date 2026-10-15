@@ -3,7 +3,7 @@
 .SYNOPSIS
     Synthetic ImportExcel startup/repair tests. Never touches installed modules or tenant data.
 .VERSION
-    1.0.0
+    1.0.1
 #>
 [CmdletBinding()]
 param([string]$TestRoot = (Join-Path ([IO.Path]::GetTempPath()) ('SmartM365-ImportExcelTests-' + [guid]::NewGuid().ToString('N'))))
@@ -65,6 +65,27 @@ $policyBefore=Get-ExecutionPolicy
 $modulePathBefore=$env:PSModulePath
 try {
     $healthy=New-EPFixture 'healthy'
+    Assert-EP ((Get-SmartM365ImportExcelExecutionPolicy) -eq [string]$policyBefore) 'Built-in security dependency preserves effective policy'
+    Assert-EP ((Get-SmartM365ImportExcelExecutionPolicy) -eq [string]$policyBefore) 'Repeated security initialization is safe'
+    & {
+        # Synthetic host/type-data failure, before probing or package management.
+        $beforeSaves=$script:Saves; $beforeInstalls=$script:Installs
+        function Import-Module {
+            [CmdletBinding()]param($Name,[switch]$Global)
+            Assert-EP ($Name -eq (Join-Path $PSHOME 'Modules/Microsoft.PowerShell.Security/Microsoft.PowerShell.Security.psd1')) 'Security dependency pinned to current engine'
+            throw 'Synthetic TypeData ObjectSecurity: member AuditToString is already present.'
+        }
+        function Get-SmartM365ImportExcelCandidates { throw 'Candidate discovery must not run after a host failure' }
+        foreach ($options in @(@{InstallIfMissing=$true}, @{CheckOnly=$true}, @{Scope='AllUsers';InstallIfMissing=$true})) {
+            $failure=$null
+            try { Initialize-SmartM365ImportExcel @options -RepairRoot (Join-Path $TestRoot 'host-failure') } catch { $failure=$_ }
+            Assert-EP ($null -ne $failure -and $failure.FullyQualifiedErrorId -like 'SmartM365.ImportExcel.HostEnvironment*') 'Host failure has a distinct terminating error'
+            Assert-EP ($failure.Exception.Message -match 'AuditToString' -and $failure.Exception.Message -match 'No ImportExcel repair') 'Host failure retains actionable original cause'
+        }
+        Assert-EPThrows { & $script:RealProbe $healthy.Path } 'host environment check failed' 'Direct probe stops before child-process creation'
+        Assert-EP ($script:Saves -eq $beforeSaves -and $script:Installs -eq $beforeInstalls) 'Host failure never reaches package management'
+        Assert-EP (-not (Test-Path (Join-Path $TestRoot 'host-failure'))) 'Host failure creates no repair directory'
+    }
     Assert-EP ((& $script:RealProbe $healthy.Path).Success) 'Real isolated same-edition import and command checks'
     $discovered=@(& $script:RealCandidates -ModuleRoots @((Join-Path $TestRoot 'healthy')))
     Assert-EP ($discovered.Count -eq 1 -and $discovered[0].Version -eq [version]'1.2.3') 'Data-only manifest discovery'
@@ -229,7 +250,9 @@ $result=Initialize-SmartM365ImportExcel -SkipRepositoryRepair -RepairRoot $fixtu
     )
     foreach($relative in $consumers){
         $path=Join-Path $smartRoot $relative
-        $tokens=$null;$errors=$null;$ast=[Management.Automation.Language.Parser]::ParseFile($path,[ref]$tokens,[ref]$errors)
+        # PS7 consumers can be UTF-8 without BOM; PS5 ParseFile assumes ANSI.
+        # Decode explicitly for this static scan; never execute a consumer.
+        $tokens=$null;$errors=$null;$ast=[Management.Automation.Language.Parser]::ParseInput([IO.File]::ReadAllText($path),[ref]$tokens,[ref]$errors)
         Assert-EP (@($errors).Count -eq 0) "Consumer parses: $relative"
         $text=$ast.Extent.Text
         Assert-EP ($text -match 'Initialize-SmartM365ImportExcel|RequiredModules.*ImportExcel') "Startup helper coverage: $relative"
@@ -244,6 +267,9 @@ $result=Initialize-SmartM365ImportExcel -SkipRepositoryRepair -RepairRoot $fixtu
     Assert-EP ($teams.IndexOf("Check ImportExcel startup health") -lt $teams.IndexOf('if($MailOnly){')) 'Teams MailOnly and collection share startup check'
     $proxy=Get-Content (Join-Path $smartRoot $consumers[2]) -Raw
     Assert-EP ($proxy -match "WindowsPowerShell/Modules/ImportExcel" -and $proxy -match 'Scope AllUsers -RequiredModuleRoot') 'ProxyAddresses AllUsers requirement unchanged'
+    $startupCheck=$proxy.IndexOf('$script:ImportExcelManifestPath = Ensure-ProxyAddressesImportExcelAllUsers')
+    Assert-EP ($startupCheck -gt 0 -and $startupCheck -lt $proxy.IndexOf('Add-PSSnapin $snapinName')) 'ProxyAddresses verifies security and Excel before loading Exchange'
+    Assert-EP ($proxy -match "MinimumVersion '1.0.58'") 'ProxyAddresses requires the fixed compatibility module'
     foreach($moduleRelative in @('Modules/SmartM365.Core/SmartM365.Core.psm1','Modules/SmartM365.Core/Compatibility/WindowsPowerShell5/SmartM365-WindowsPowerShell5.psm1')){
         $text=Get-Content (Join-Path $smartRoot $moduleRelative) -Raw
         Assert-EP ($text -match 'SmartM365-ImportExcelHealth.ps1' -and $text -match 'if \(\$moduleName -eq ''ImportExcel''\)') "Shared preflight routing: $moduleRelative"
@@ -277,8 +303,8 @@ $result=Initialize-SmartM365ImportExcel -SkipRepositoryRepair -RepairRoot $fixtu
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC4Mq0ROyAw6U+K
-# 9crxZ1WDaZPeBsDT54XqZdxWJ18y/6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC4HIorZS/mJa3P
+# cVlwSAeYROW/4zmzItNgDBQViTSt8KCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -411,31 +437,31 @@ $result=Initialize-SmartM365ImportExcel -SkipRepositoryRepair -RepairRoot $fixtu
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIB5tIMJryJtToEyqCC1PrFRTBhyxBD/C87XBrt/87iYCMA0GCSqG
-# SIb3DQEBAQUABIIBgBc62JGyknGQdfI8nqQVgALwmMPyPbee2IoWFkx3YfMEEQvv
-# wwYAHLwKJB4Ama7hpc2vVSZzhPfunthbkR/g5rZETuvEhaFjVGEM5HQRfJ06+jum
-# y6XDLFRTOGivQsyrON4E4JxTOMtX9e1UUzNp75liJYUzhv4oPSjMpUSBXSP/3t0F
-# WT8sAmoflrhgRo+JturHswCUnA/Ozdbn4M4DSe+VlwIO3fyuwwqgzSq/dglJRqMP
-# PkF+CUFF2BjpE8We6S3LhQG8GWjhdsBM12h564weEOb7o7gwmmwtummWzpoT7MYK
-# dECnCaiYoa1I5YB0oX/JP+veoEDT9cyJSnvQUJQzXBEQOOeicaxJPyisrBGslXlA
-# Cwt83twh/xAKsbQfiEidMspHMwkkd5IkYwetO1jXacoijbrwFhn4+S4EnENuS1+l
-# O4vq9k1a3/JBNQE5jbDRxpiJeo4Gvc17X4QoC6NkfkmjhtjFWLAi1Nx7meDmQiKh
-# OcLRLusvVoQdJDDj6aGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIAxd00b967ybPEJ9jTOXMaPvVXhlO0DJ64xyw6CWg2uRMA0GCSqG
+# SIb3DQEBAQUABIIBgJLoru//shOCbc0kpJSDVMEgBY0m8za5Ylht8Tgvook/gtTz
+# tInCR1pr0ABa/v2oHWoqtMtrckEFZwGU1LRGKHMM53UIWcUYe1JS1FnoLF2Tf8N6
+# cNsY6GLN01BMojOoIvmCidrPjtMsyV0vOihm+A8LItdSkdpA5B7PqJ5Z8JUtQXiE
+# tc5aTPf0H9LBpFYAxOMbGzs2tR29u5slKsie7YClRfrWcNL5nSOgunPMiVuZWDQE
+# XHBZjswJAtx6QAhMcrN3aw90qCVIqyjrYndGyhJ03lKnr61gG3WBIQDiArA98jB8
+# 1d4/sYVgNX2sEUVaHnQERUjvsGXyquydzluxA3L8EQOfxc1mJVKelAAOA7s7yM/4
+# LOiXEGMK6Z/Mf5DlAqHtkT9XrvMxZyeQzXOiGA5Tnz0ULyet4DZ5J54ZdMRrNV9x
+# lGQDY6sOfRKZDimh+en2rQ6zoZ5ioUXN00tK4wA2wACyG2aImVCIPKKAXDCgSpMA
+# YgSwJfUy76V0rA5ts6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTQwODMw
-# MzFaMC8GCSqGSIb3DQEJBDEiBCCg0dOt1riosM9ZYCOPseqPEUNsb5YxYgT4AZNy
-# c/OM1DANBgkqhkiG9w0BAQEFAASCAgCwh44R/HlMEky9nE1sRZ+CjoamvSj/egg5
-# 3OeSeyzY0fmfw+NR60Ams5+jVU9y0cSlA6+QezcRS5r5g1HmdJT2PwFNJiEKGByu
-# PIpgluJbVSlT8WO81d+vPGA2SD3Lzzx5Yt8DAQfacU2qdE1Mx96IIf4U09f8Oyl3
-# Y0udjGrj2iW1ETmL90bzKJw7OonAtq8HgBVRHhfdIgzV0WQASGPc48X3MmkjMjB1
-# FayWU27megaPu/19pIKrw06aS1CqYyjtLnPd73p+yKVoni65u5GnciVT7tmsqjAe
-# p4TCXW7S598R9SQNermyBW3xzbSclHXDa8BhZaV/DmE3ylnzL9CqJ3Cnw7jOZy9e
-# H5CJuIL54FeWIwsROtkEzH7mhVPmpFKJb1SSwTjsRzNMRqUaaUUjeYGcnPJZIiWp
-# 0GE6v0SrZ4KSn9oGo0pkDlpuK7yOdogkeX1pGsjlecS+g8U55uu8j6p8GAXWEhnP
-# HQjVGbbu4o11DpyPsE5KB++Rc36fOpX2V1Wzte9MzHT0yuAKvO6yjnR+o3RJPmaS
-# OMq5D1Ebhh8LTzhvYZksKDHTrafhqKG16myy5kpx+0JSvhEea4KLDKJlGYqJn4vH
-# p/L8EXrVTO06EQI14ZSbpx79f/hXp65/VXdczX+OnUm5+SXuecsLEGxcnE4lAHfB
-# EObTS/uSEw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTUxMDA4
+# MTlaMC8GCSqGSIb3DQEJBDEiBCC7I2QVU26XjSr+I/yqqqAo1nrhR049NJfbxkrE
+# LHapbjANBgkqhkiG9w0BAQEFAASCAgCjAFqFiUOnYme3ClpK/hYr2IigTr0huYrl
+# Euyw3r61/WpkrOxGNyrIR7/lzpss3lHJv/5MLugv68uSGo3+assIiKVghYvZmTsq
+# 378AeBYbt7CMHdL3bEWUyfdEM+1hRD7+xW0tQHuAseMyOOPQynB1vV/d17vYpr7j
+# iU35iUpxu8sGZoV5DCc8kfYfYB9z8Q+EU5QpnReVr9Y5/LCUqtKGlIjvw8o9fzGD
+# 2WYN/AhdHtHdHB9aVjmBFP7LnBNH+u5IWPfps8I8XlWFgYeX3ZDC6sGaukX40s4Z
+# sMf8zgZ963Gxzjxxmnp1CrFc3U+iC6mtHOEfC8/5ToaDZsjuQcZ8BzryK59xZtXU
+# t3Lzdg01czn8LO2uianXB6BHm7hBG4mJd1bn/+74UuHjl01YWe/+yj52/+SHKeZV
+# 5yartDd+YmPkaK6Gzg/Zs5lcV8b3x+RvSfIPWJdZVGbMAWI5hY+fuYqeE3lb3Za6
+# HJ7IKamvOWmabFtGvKxX5RhlOmTyVg0zDWPGg42lEPvP7Q+vvE4AglSJGfhsOyt2
+# 3YlQnM/HiFLYKgerASHys13fBEcr2YIwWkHjAgio1NfdJuWBgL+EvihOVca7Emqf
+# wzhLP4FdUIESQRb9NDYdGp7ekAmhz+/oD4yjvnHDzP5NsmObrz6mgFELhUglnm2d
+# Xr6KJogT+Q==
 # SIG # End signature block

@@ -62,7 +62,7 @@
     - Maintains logs and cleans up old files automatically.
 
 .VERSION
-1.30
+1.31
 .AUTHOR
     https://github.com/khda79/workplacecloudhub.com
     Minimum permissions: Windows PowerShell 5.1, Exchange 2016 Management snap-in, ActiveDirectory module, Exchange recipient read access, and AD read access.
@@ -509,7 +509,7 @@ $ErrorActionPreference = 'Stop'
     }
 
     #region Module Import and Initialization
-$ScriptVersion = "1.30"
+$ScriptVersion = "1.31"
     $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
     $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ProxyAddressesCsvLogFolderPath' -DefaultValue $OutputPath
     $LatestCsvFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ''
@@ -521,7 +521,7 @@ $ScriptVersion = "1.30"
 
     try {
         Write-Host "Loading module SmartM365-WindowsPowerShell5.psd1..."
-        Import-Module -Name (Join-ModulePath 'SmartM365-WindowsPowerShell5.psd1') -MinimumVersion '1.0.57' -ErrorAction Stop
+        Import-Module -Name (Join-ModulePath 'SmartM365-WindowsPowerShell5.psd1') -MinimumVersion '1.0.58' -ErrorAction Stop
         $InitializeOutputPath = InitializeScriptEnvironment -OutputPath $OutputPath -LogFileName $(($MyInvocation.MyCommand.Name) -replace '\.ps1$','')
         Start-SmartM365SourceReceipt -ScriptPath $PSCommandPath -SourceRootPath $LatestCsvFolderPath -ScopeParameters @{OrganizationalUnit=$OrganizationalUnit;AllOrganizationalUnit=$AllOrganizationalUnit;AddMissingAddress=[bool]$AddMissingAddress}
         Start-SmartM365RunTranscript -Path $global:logTranscriptFile -Append
@@ -592,6 +592,9 @@ $ScriptVersion = "1.30"
         $smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; $smartM365RunGuard.ExitCode=(1); exit $smartM365RunGuard.ExitCode
     }
 
+    # Verify the PowerShell security dependency and Excel before Exchange loads type data.
+    $script:ImportExcelManifestPath = Ensure-ProxyAddressesImportExcelAllUsers
+
     if (-not (Get-PSSnapin $snapinName -ErrorAction SilentlyContinue)) {
         Write-Host "The Exchange PSSnapin '$snapinName' is not loaded in the current session. Attempting to load it..."
         try {
@@ -610,7 +613,6 @@ $ScriptVersion = "1.30"
 
     $requiredExchangeCommands = @('Get-Recipient', 'Get-RemoteMailbox')
     if ($AddMissingAddress) { $requiredExchangeCommands += @('Set-Mailbox', 'Set-RemoteMailbox') }
-    $script:ImportExcelManifestPath = Ensure-ProxyAddressesImportExcelAllUsers
     Invoke-SmartM365Preflight -ScriptName $TaskName -OutputPaths @($OutputPath) -RequiredModules @('ImportExcel') -RequiredCommands $requiredExchangeCommands -RequireExchangeOnPrem -RequireActiveDirectoryRead -InstallModuleScope AllUsers | Out-Null
     if ([string]::IsNullOrWhiteSpace($script:ImportExcelManifestPath)) {
         $script:ImportExcelManifestPath = Ensure-ProxyAddressesImportExcelAllUsers
@@ -1392,8 +1394,8 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBNrcY8Ova/0QbK
-# yuizwOAIY5elI1fH+cDdsGas/ukDQKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDNGuZMwHZKcbhc
+# F0KC0qKsqQJ0kJtJqZSWXgvnUd3UNKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1526,31 +1528,31 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIO99OekckinuM/evE0TF5dsn9lEqjHwLff+ZonMaZjPPMA0GCSqG
-# SIb3DQEBAQUABIIBgBk5uzVhFn71R4IeZP6idp+N2EVs0etKWKgluDeAh7te+VRm
-# TbeFAZmVOVeyhAFCyvtdJdhgrP6/9+KT/SPkjNRRm02NnVp1NGi2Jz3LMrdHWFdm
-# qbVKNssCeOTq2E80yJfRiPjdupnkD65U/r4JKVKFZq7D4JzVTKNQtiehsUbZ4+Mj
-# TglU9k6yTGdF9ENzQmOxNhlTw75uOZrj0VTDWp5c6R7In86sOHTBk+iobhS9rR7K
-# dazDgLkXwHi9HBpshLmEqtCtG2Ojyc8V7BlrefRtk+OJG7fpIcNFr5cDizFAskrD
-# kN+wgpH/azZLR72CG4pKj0Hy7+rHxZDQmFb4AskoFs9AQhYfxDHkO6AuuSYTz7NY
-# 65zx+E36kGVw49uMUf6pC50O+5BSusiYzSQDVJlbkxCcyXuZr9rRMYnOknqiuWlT
-# VnVf9Z/AlLNvoazoAE0puAXteAP6qP0nEHdsphCzwCIa0Rb5706zD/7RokKgQnHw
-# mYIRB4DCCG9gLjW6ZaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIHmCI+mtK7V0ZIekzs74sF6KatQYdeSgyJ9LrUidRBa/MA0GCSqG
+# SIb3DQEBAQUABIIBgHgUBRfPwDOnF4VEM1FsjzNkcJb3hveNhiXN5P9o7f34NAnQ
+# L+oYa2TS+nCgwdhNgt9eAutVIfaCGjD3hskDMSxSpLmiew7BhQ+D1NArmOHwwGpV
+# QV/n7eql2BGj56/Rp9lEN4VW9IPG7oufrTRPHXWsxB/sX98yQPRw+F9wNVBT3hU5
+# OswAAOISIb7yFJRMHEMot1hlVTX9xd4EMaB6YZCNc4kmJbl7okXLUoCOberurOlx
+# sWWSNvsMxFdL/cRpyTFCZiv/7Bq7/gHUOhGLbCDSHd6Rf5x/htE/lAbXJ0txE9Ny
+# ZFXEbUdNgOAexVg/s+zfw8rb2qpksQlgv5cHpwSBDaxTXp6yoH54/PdAvMYYS5/+
+# GQv8ARV4msqykIprfjovV9OC2wTLzJ88BkyJGOor/h5de09wCVLsFOiRjpz+k2tw
+# ZW5fAAD4UB2YqxcpdikYBtvOxMbNZdsxzlb1wNSxXs1T58+qCPfvCmj5VAxRIpVI
+# SoUlAmvWuNGR+uaze6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTQxNTMw
-# MjFaMC8GCSqGSIb3DQEJBDEiBCBK1OixCRPSMXI/G6AmiB1OeJVtg9JYTq9twDiD
-# W4v1QzANBgkqhkiG9w0BAQEFAASCAgBVndCrrXNKg7T1rPsBFcJZtjfiW6qS5jdx
-# Tcfez8VLjJzH5HS3E1b5W6pJIOtqUUBg6HF3ergx/oaGLbP5Ysnxqsyge9WUvTyJ
-# d10OL50F4MxJVNRoqGyjBYtuSTuk5iKvItv2TjVdrh6jUwhsGn/YYSXI6D0VSJxB
-# /PCjsNLdL34oGju1+W3zSKf0wVEwcTi2Iwky6TEwELfGp9Tp3mvIOIRkuglj/A+H
-# 4ZVCuPnSOlk56bbvgwPcBdxfd8FA2LIkemGMKTFr/F7oWBlxwKgBnoTevLMGV/Pm
-# THS+31Hvc7bD8YFBU/D/NEgixK3r1EikAK8HGQf1xI1q6Kioqyc25ylyM7poN7Tn
-# Nmh31iwchSwkGw13fg7Ut5mBcSz1raKxGqdamxT47ArFURApmKbKOkhEiXZbYtf9
-# tjJBN5Aj3VdDlXssDGGcnmtzEPZ7KOd4GL2qDNeWQQ/7TEolQafXrV6/Hfh5m6Rf
-# ih5xaiLZF/py+/sGSIWuQmi4SzwkTCyLt6C9UwS86q62xOO7NzsoR2pps1BMXN0u
-# 3ibt1she7su6tb5UU6m2xEyFmYyL7ZnzOMH+3JVKgr43Kvi02M8Te9QC2HNvvroX
-# Taz55hBljoR/e0TrQYCNJtF7HaxhFbIlkSy+y2vt7cR2mvWGNkAql5P/VMt2qSlM
-# cOROh2T3JA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTUxMDA4
+# MTlaMC8GCSqGSIb3DQEJBDEiBCC9MCpA/I4pjpaqi92MqlNC+cLVDhQXZPDgP99+
+# xzGfEzANBgkqhkiG9w0BAQEFAASCAgBBKb6XDcAyNL23hXE25sLGTDsKlEZZaouu
+# NOV1tn7EmM7Cx19/8jeio6zUdhTmRvTmvAnyWcVUnOKVKOHXMt18sgiaSmov1eN1
+# R3ciJnus+ebgn2Abe7zjht+XUOhsRBjhBQv0WCDik+Xxa2jsB1AfG2se943f3OS3
+# IYnAgnbD3f22fYSoEwnVKzxok+0Cb4qgm6f+sAMSvXADIl3lUrHBvJqaUMLnKR6n
+# UZVFXo7QOhFS7fhgZLgKcxHCskrjBk1Wh36C3vY/JPIN4lt/omfpeJnR5RXDCBPo
+# X3aWv5+/qd4UptO60r2f4J1TSZ6lxk3fqNnQyufcPU/8EYLH0fo+ynOvSj0C5+1y
+# HBjp52SuCZ5JksAZPZqv4ezm1Y6eQt4vDuZ4iWXA4VcZGpD0LTDWGl6yFLHSVVFD
+# OsDDTr4NBmxq9q8IqEkMjwdmDdEUzXX7/iT7AHSBL4/zZtp0uQXFg5xepS6ciVE6
+# TEF2HFS0qkKCTOuBROOTYI1iS+GcUikL2x6O20dqtjaesukcvjDCPsVl3hRn0/4c
+# 80Vsxy6e3xcDt8P+vkFiGvDlZbLIwZMs3RxIEz5F4UrN0i6f7jbuWBmHAhRxQrj/
+# 5Jj46MreHSV+eFZVrnJQVcKQKVux8IYZvLwHJsvW94U5OL0Ps3brqwZ4fxWOkLYG
+# 0krN1zGKWw==
 # SIG # End signature block

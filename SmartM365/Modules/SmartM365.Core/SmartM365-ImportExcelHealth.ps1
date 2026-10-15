@@ -1,3 +1,9 @@
+<#
+.SYNOPSIS
+    Shared ImportExcel startup health and exact-version missing-file repair.
+.VERSION
+    1.0.1
+#>
 # Shared by SmartM365.Core and its Windows PowerShell 5.1 compatibility module.
 # Repair only missing files, from a verified copy of the exact installed version.
 function Write-SmartM365ImportExcelHealthLog {
@@ -53,11 +59,33 @@ function Sort-SmartM365ImportExcelCandidates {
     $ordered | Sort-Object @{Expression={$_.Candidate.Version};Descending=$true}, Priority | ForEach-Object Candidate
 }
 
+function Get-SmartM365ImportExcelExecutionPolicy {
+    [CmdletBinding()]
+    param()
+    # Load the built-in module before any Exchange snap-in can affect type data.
+    # Never force a reload, remove type data, or change the effective policy.
+    try {
+        $securityManifest = Join-Path $PSHOME 'Modules/Microsoft.PowerShell.Security/Microsoft.PowerShell.Security.psd1'
+        Import-Module -Name $securityManifest -Global -ErrorAction Stop
+        $policy = [string](Microsoft.PowerShell.Security\Get-ExecutionPolicy -ErrorAction Stop)
+        if ($policy -notin @('Restricted','AllSigned','RemoteSigned','Unrestricted','Bypass')) {
+            throw 'The effective execution policy could not be determined unambiguously.'
+        }
+        return $policy
+    } catch {
+        $message = 'ImportExcel host environment check failed: Microsoft.PowerShell.Security or Get-ExecutionPolicy is unavailable. Initialize this dependency before loading the Exchange snap-in. No ImportExcel repair, installation or policy change was attempted. ' + $_.Exception.Message
+        $exception = New-Object System.InvalidOperationException($message, $_.Exception)
+        $record = New-Object Management.Automation.ErrorRecord($exception, 'SmartM365.ImportExcel.HostEnvironment', [Management.Automation.ErrorCategory]::ResourceUnavailable, $PSHOME)
+        $PSCmdlet.ThrowTerminatingError($record)
+    }
+}
+
 function Test-SmartM365ImportExcelLoad {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$ManifestPath, [ValidateRange(1,60)][int]$TimeoutSeconds = 45)
     # An isolated, same-edition process prevents a failed EPPlus load contaminating the collector.
     # No policy bypass: inherit the process policy and preserve the effective parent policy.
+    $policy = Get-SmartM365ImportExcelExecutionPolicy
     $engineName = if ($PSVersionTable.PSVersion.Major -ge 6) { 'pwsh.exe' } else { 'powershell.exe' }
     $engine = Join-Path $PSHOME $engineName
     $encodedPath = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes([IO.Path]::GetFullPath($ManifestPath)))
@@ -83,7 +111,6 @@ if (-not $result.Success) { exit 1 }
     $body = $body.Replace('__PATH__', $encodedPath)
     $start = New-Object Diagnostics.ProcessStartInfo
     $start.FileName = $engine
-    $policy = [string](Get-ExecutionPolicy)
     $start.Arguments = '-NoProfile -NonInteractive -ExecutionPolicy ' + $policy + ' -EncodedCommand ' + [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($body))
     $start.UseShellExecute = $false
     $start.CreateNoWindow = $true
@@ -214,6 +241,8 @@ function Initialize-SmartM365ImportExcel {
         [string]$ManifestPath,
         [string]$RepairRoot = (Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'SmartM365/ModuleRepairs')
     )
+    # Fail before candidate discovery, installation, promotion or repair.
+    $null = Get-SmartM365ImportExcelExecutionPolicy
     if ($Scope -eq 'AllUsers' -and -not $RequiredModuleRoot) {
         $flavor = if ($PSVersionTable.PSVersion.Major -ge 6) { 'PowerShell' } else { 'WindowsPowerShell' }
         $RequiredModuleRoot = Join-Path $env:ProgramFiles ($flavor + '/Modules/ImportExcel')
@@ -303,8 +332,8 @@ function Initialize-SmartM365ImportExcel {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCArZdhV/qJLrWIM
-# 2ucaoZeHuRq6oeWuNiWgSyjLIbDtTqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDBLtxSohymt7Eb
+# ZXTP8M+7r1FJDRjd7SDGSTKoSxdgTqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -437,31 +466,31 @@ function Initialize-SmartM365ImportExcel {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIFlLfqrsRZU1DO8l5RkzfpITpWxVfNgIDXwvcKJDTCTvMA0GCSqG
-# SIb3DQEBAQUABIIBgGLunCMh/CL8GwtWTA32iY27N13vxQdlDn9NYBzoo47TFE4P
-# 8fijHK6ivtGCNBKZ8eGn5LEbxb0svcehKP3om6nT+AXRkZGowlxwMUpNnnppbXrr
-# pMB28pViIYWfxHKaqPPWaN6oj8xfD7mHqedsOqbWIN0f8Axmlb7qil1Te2ujhU/L
-# 0XcsgNG0KaBgn11O5jAQHg1khF+r1yxF2YtkHDvwj64TGQlFE2R/ARSG6211T7DX
-# TotW8md6K1S0CQmsYpDuVydVjC4Ks+8LTYCtsLyuEATKtkQPet8D0XHeEKI5FXvt
-# lUCCAyDmRt8TENOFnmjLZAm0XMIzE6BskeeEmQ2NylT8thxYRo5/1gdSB8D/r5VZ
-# XI/9bAxkt2LYo/L3ej2yaKcWsnVH1IkvsgcPpRifTyWVpo5XfnASzwaV0WqKQ4R9
-# XjFSEbTCeEh4FIsqsk9OJ2XwFnILMMUXMcsSfiQl3xgEkX2axhCddhNTe3NCxP40
-# kRUVOE7NthckcTB9n6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIKdOZvtboAKqkdfSFuWPA7ezrA9JuXHGCJ5tA3o/kcKGMA0GCSqG
+# SIb3DQEBAQUABIIBgA66w/lcfsCPZ9437ryv97zHLUoxpkdlAV+cg9ilG3zREmMd
+# YEYYrFelnx4vFt0eNzaeqApxB0gKBAHsz06HDRq5LW+VF+7a86ivmK+5rj4FSlAB
+# Iad5k5eaE1IbYQ6aSzTU+OL02CgSqIBe4QuuPkoWQVUhHWYqPO5tAAakOg1JCQDe
+# 8xk7J6Gy0oGzCDuMnwN0XUnoGzySfSBwa8+jmeqezbE9oKyXoRgTavP+4aNT7DJ9
+# tMxp2sSokVGOwfAA6p26bJhekj4wntJSbOQzKg5MskQpinnhuWhyxdB/7BQ3lgs2
+# 9v57eSvB6BQwqySsmyN0hKbnTQRUfHLqDONH1JcGNjI3ZLNO9Yo5DNQjKB7Ib4Yb
+# o62OuMiRtegYBYzEbg/5J3fN2uImd4vZK7pO4G+HWZKWzX5uLP9SbTHWkkH6pvre
+# 3Psw2pBo2rHHNbWnOUIXD4IYSv3/uDuZ/aV/i3uWzKWvQ5yEeqr1vVUJuUtI8REn
+# vJAPXKqPNHbIfDno76GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTQwODMw
-# MzFaMC8GCSqGSIb3DQEJBDEiBCDCuOWRHYnm0eJwZD+9xoZ+6cUip5WQDRikek5u
-# ISUuKDANBgkqhkiG9w0BAQEFAASCAgAtnHKUXcvTnSdS67mI/odO6f++VUjIuaLI
-# WT/1ufxX4thjBTAXUoN7gcWp8WAudXFQo6fDebNVJDtM+ZCl1PcQq3OKIN+eqo86
-# gQ4RWJn6v83WDoOKXa/bAq3uOblkIPzMUlqt1bXYoWDRZNImfNdLwzTN5oVR3ICk
-# x4XCrEAsNxRzRys1SPrepgBg8flBehyGtj2PxXNEh1jlpF1JSz66RzZVSnGp6SR6
-# FntXGdosi6HXqA1LAR9N/Rer5MOXR9mCpqfHlH45uC4qgLOU3jGLbMIjkFFyQOj1
-# qRyhY6E04UhVV5aNz7Zqx56Sdg8fcN31P53ibVxoAXV2hOqTlR9oObYh3jrHCID4
-# WzEmqknYaiHFWHQuZKz3L+r9iXcXXIIflHOst8k/UrBxZYqikl7qfHGg79ZjiCiD
-# TVRmJyIpurAp38SAfK9ZL4eXA4kSFL6ydad59vP+VIpglFD+jDhvNZ7wgSR2iT8Z
-# oBzXnfTTBosyD1cKzaWv4U7E0cfAa96m3jIdxDMxTEiAFKMOiCbFv4QUUb1yMJXV
-# /cWSakdBNCBBtFq6+WWsXbn7/3EUl9aEFv42VMEIP+UUC65aG0Sbjw0ZNMo6xoxr
-# nM5xIduGVZuRHOh0e7do4jagIQqTWJ6C+Sr45Eimwp88jVIrQ8O5mYMJT4K0GtMW
-# IEyV9RxnMA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTUxMDA4
+# NDlaMC8GCSqGSIb3DQEJBDEiBCCKwJiZqmU8i71sys7fIQnd1xxHl+00owBzeITw
+# n6vjgTANBgkqhkiG9w0BAQEFAASCAgB3cjnPqJYWn8/HaaEidZrLn2mWsVN66AG7
+# GnnpqMx1NBr6tvnOO9ugJrgKHc75rzG6b38sv4QXyzZ9WVDnim6Xh0daWdkOIhSe
+# fls0XPYUxCLz9L52ZgQfVAVBiGVJPtLUeS/NGRcUO4AOdZL2jgoPZJE6xvpw1mZJ
+# TYt0n7ghaK7vRXlKrJTS0r2Qtc7mkyYSLW25KstpDLMUPeMGz9EqvqvgGDKEXrLr
+# REitWStAGvJA0WCcuYykR0o3AC4wNxkRzHK2DcKfUyz5hwyJYcQK/fc/zvHLd0bY
+# MZbYVeF+ytjawktJwDlXG8ypvPTI62m72V9RMI6Qor/+Pmn7Q4mi2O0PVwb7WJHR
+# jpwt0B4W1WOBtjFGgZTKVbAgfYbesU8bmLMh1EWAaT0ruoUKcRPcemn2pmaBVD1L
+# SSSIA/u25qKTE4K6AiAL5mM8zV59mdErF0xHNS/NDF045Ij4gpbfoSIJ3cWZbYLc
+# r9WKcWNmu/1MblIsrGUJgrdnwK1ykl/cgrYuNyiQHEdhWsYt7+OwfeC4Nk/TSsBr
+# A+TsJKNF2SK9bapXeYR9iJGh5VfR3zLhDvpa3w0kJ2IjJEgGCDcZe5YJTfzh117L
+# rg/jHbRY7PD50+GXw89eKrziVRn+E9AVIuix5Ug+mqZZQtV3ljMdwLD0rBqLKifD
+# rjPKwr2DQw==
 # SIG # End signature block

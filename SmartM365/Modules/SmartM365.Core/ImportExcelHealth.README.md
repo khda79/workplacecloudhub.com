@@ -1,6 +1,8 @@
 # ImportExcel startup health and missing-file repair
 
-`Initialize-SmartM365ImportExcel` is shared by SmartM365.Core 1.0.86 and the Windows PowerShell 5.1 compatibility module 1.0.56. It checks a real import and the Excel commands in a fresh, same-edition process, then pins the verified manifest in the caller. No tenant-specific paths or versions are built into the helper.
+`Initialize-SmartM365ImportExcel` is shared by SmartM365.Core 1.0.88 and the Windows PowerShell 5.1 compatibility module 1.0.58. It checks a real import and the Excel commands in a fresh, same-edition process, then pins the verified manifest in the caller. No tenant-specific paths or versions are built into the helper.
+
+The host check first loads the built-in `Microsoft.PowerShell.Security` manifest from the current engine and reads the effective execution policy. A host/type-data failure terminates with `SmartM365.ImportExcel.HostEnvironment` before discovery, installation or repair; it is not evidence of missing ImportExcel files. No forced module reload, type-data removal or policy fallback is used. ProxyAddresses 1.31 runs this startup check before loading the Exchange snap-in. An already contaminated Exchange session fails explicitly instead of attempting to repair its type table.
 
 ## Automatic repair boundary
 
