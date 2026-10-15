@@ -154,6 +154,31 @@ file when it is not next to the script.
 .\Maintenance\SmartM365-ServerDataSecondPass.ps1 -Tenant prod -DataRootPath '<server share>\DATA\Tenants\prod'
 ```
 
+After reviewing a second-pass report, use
+`Maintenance/SmartM365-ServerDataSecondPassCleanup.ps1` for a separately
+approved, file-only cleanup. Supply the original report directory, a fixed UTC
+cutoff, and the approved counts for Usage duplicates, old generated Entra
+removal scripts, DATA-LAST test outputs, and the transport log. Preview writes
+`plan.csv` outside DATA; Execute requires that exact plan and recomputes all
+candidate and retained-copy SHA256 hashes. It refuses changed or missing files
+and never removes directories, distinct Usage files, WorkplaceScope history,
+repair backups, prepared diagnostics, or the CMDB lock.
+
+```powershell
+$cleanup = @{
+    Tenant = 'prod'
+    DataRootPath = '<server DATA tenant root>'
+    EvidenceDirectory = '<reviewed second-pass report directory>'
+    CutoffUtc = [datetimeoffset]'<approved UTC cutoff>'
+    ExpectedUsageFiles = <approved count>
+    ExpectedEntraScripts = <approved count>
+    ExpectedTestOutputs = <approved count>
+    ExpectedTransportLogs = <approved count>
+}
+$preview = .\Maintenance\SmartM365-ServerDataSecondPassCleanup.ps1 @cleanup
+.\Maintenance\SmartM365-ServerDataSecondPassCleanup.ps1 @cleanup -Execute -PlanPath $preview.PlanPath
+```
+
 ## Active Directory launchers
 
 Use the production launchers under `Launchers/OnPremises/`:
