@@ -2,6 +2,214 @@
   "schemaVersion": 1,
   "tables": [
     {
+      "table": "Teams Site Links",
+      "file": "TeamsSiteLinkEvidence.csv",
+      "source": "Receipt-qualified Teams / SharePoint observed scope",
+      "stagingIncludesTenantKey": true,
+      "uniqueKey": [
+        "Link Key"
+      ],
+      "allowEmpty": true,
+      "columns": [
+        {
+          "name": "TenantKey",
+          "type": "string"
+        },
+        {
+          "name": "Link Key",
+          "type": "string"
+        },
+        {
+          "name": "Team ID",
+          "type": "string"
+        },
+        {
+          "name": "Team",
+          "type": "string"
+        },
+        {
+          "name": "Channel ID",
+          "type": "string"
+        },
+        {
+          "name": "Channel",
+          "type": "string"
+        },
+        {
+          "name": "Link Type",
+          "type": "string"
+        },
+        {
+          "name": "Site ID",
+          "type": "string"
+        },
+        {
+          "name": "Link Status",
+          "type": "string"
+        },
+        {
+          "name": "Resolution",
+          "type": "string"
+        },
+        {
+          "name": "Site URL",
+          "type": "string"
+        },
+        {
+          "name": "Receipt Run ID",
+          "type": "string"
+        },
+        {
+          "name": "Business Run ID",
+          "type": "string"
+        },
+        {
+          "name": "Collected UTC",
+          "type": "dateTime"
+        }
+      ]
+    },
+    {
+      "table": "SharePoint Site Links",
+      "file": "SharePointSiteLinkEvidence.csv",
+      "source": "Receipt-qualified Teams / SharePoint observed scope",
+      "stagingIncludesTenantKey": true,
+      "uniqueKey": [
+        "Site ID"
+      ],
+      "allowEmpty": true,
+      "columns": [
+        {
+          "name": "TenantKey",
+          "type": "string"
+        },
+        {
+          "name": "Site ID",
+          "type": "string"
+        },
+        {
+          "name": "Site",
+          "type": "string"
+        },
+        {
+          "name": "Site URL",
+          "type": "string"
+        },
+        {
+          "name": "Teams Link State",
+          "type": "string"
+        },
+        {
+          "name": "Link Count",
+          "type": "int64"
+        },
+        {
+          "name": "Storage Used GB",
+          "type": "double"
+        },
+        {
+          "name": "Collection Scope",
+          "type": "string"
+        },
+        {
+          "name": "Usage Report Date",
+          "type": "dateTime"
+        },
+        {
+          "name": "Collected UTC",
+          "type": "dateTime"
+        },
+        {
+          "name": "Link Coverage Qualified",
+          "type": "boolean"
+        }
+      ]
+    },
+    {
+      "table": "SharePoint Tenant Capacity",
+      "file": "SharePointTenantCapacityEvidence.csv",
+      "source": "Receipt-qualified Teams / SharePoint observed scope",
+      "stagingIncludesTenantKey": true,
+      "uniqueKey": [
+        "TenantKey"
+      ],
+      "allowEmpty": false,
+      "columns": [
+        {
+          "name": "TenantKey",
+          "type": "string"
+        },
+        {
+          "name": "Storage Used GB",
+          "type": "double"
+        },
+        {
+          "name": "Capacity GB",
+          "type": "double"
+        },
+        {
+          "name": "Utilization",
+          "type": "double"
+        },
+        {
+          "name": "Capacity State",
+          "type": "string"
+        },
+        {
+          "name": "Capacity Source",
+          "type": "string"
+        },
+        {
+          "name": "Collected UTC",
+          "type": "dateTime"
+        }
+      ]
+    },
+    {
+      "table": "Collaboration Source Qualification",
+      "file": "CollaborationSourceQualification.csv",
+      "source": "Receipt-qualified Teams / SharePoint observed scope",
+      "stagingIncludesTenantKey": true,
+      "uniqueKey": [
+        "Source"
+      ],
+      "allowEmpty": false,
+      "columns": [
+        {
+          "name": "TenantKey",
+          "type": "string"
+        },
+        {
+          "name": "Source",
+          "type": "string"
+        },
+        {
+          "name": "Receipt Version",
+          "type": "string"
+        },
+        {
+          "name": "Receipt Run ID",
+          "type": "string"
+        },
+        {
+          "name": "Completed UTC",
+          "type": "dateTime"
+        },
+        {
+          "name": "Source Rows",
+          "type": "int64"
+        },
+        {
+          "name": "Link Coverage Qualified",
+          "type": "boolean"
+        },
+        {
+          "name": "Qualification",
+          "type": "string"
+        }
+      ]
+    },
+    {
       "table": "Entra Membership Evidence",
       "file": "EntraGroupMembership.csv",
       "source": "Native SmartInventory receipt-qualified evidence",

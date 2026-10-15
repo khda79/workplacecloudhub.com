@@ -11,6 +11,7 @@ from pathlib import Path
 import workplace_native_sources as sources
 from workplace_native_tables import build_tables
 from workplace_graph import build_graph
+import workplace_teams_sites as teams_sites
 
 
 def identity_from_receipts(source, tenant):
@@ -32,7 +33,8 @@ def validate(source, tenant, now=None, expected_identity=None):
     reference = now or dt.datetime.now(dt.timezone.utc)
     evidence = sources.validate_sources(source, contract, tenant, now=reference, identity=identity)
     return {'Version': 1, 'Identity': identity, 'ReferenceUtc': reference.isoformat(),
-            'ContractSHA256': sources.sha(sources.CONTRACT), 'Evidence': evidence}
+            'ContractSHA256': sources.sha(sources.CONTRACT), 'Evidence': evidence,
+            'TeamsSites': teams_sites.validate(source, identity, reference)}
 
 
 def build(source, output, audit):
@@ -44,6 +46,7 @@ def build(source, output, audit):
         raise ValueError('Native source validation contract changed')
     sources.recheck_sources(source, audit['Evidence'], contract)
     targets = [output / (t['name'] + '.csv') for t in contract['tables']]
+    targets.extend(output / (name + '.csv') for name in teams_sites.SCHEMAS)
     if any(path.exists() for path in targets):
         raise ValueError('Native staging must not overwrite existing domain outputs')
     details = build_tables(source, output, contract, audit['Identity'], audit['Evidence'],
@@ -54,9 +57,10 @@ def build(source, output, audit):
                                    audit['Identity']['TenantKey'], exact=True, identity=audit['Identity'])
         counts[table['name']] = count
     sources.validate_relationships(output, contract)
+    collaboration_counts = teams_sites.build(source, output, audit['Identity']['TenantKey'], audit['TeamsSites'])
     graph_counts = build_graph(output, audit['Identity']['TenantKey'])
     sources.recheck_sources(source, audit['Evidence'], contract)
-    return dict(audit, OutputRows=counts, GraphRows=graph_counts, Details=details, Publication=False,
+    return dict(audit, OutputRows=counts, GraphRows=graph_counts, CollaborationRows=collaboration_counts, Details=details, Publication=False,
                 Qualification='Native identities and observed links; not verified physical assets or effective assignments')
 
 

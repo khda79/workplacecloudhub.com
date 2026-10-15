@@ -97,6 +97,16 @@ def build_graph(root, tenant):
             raise ValueError('Managed-device bridge has no observed parent')
         alias('IntuneManagedDeviceId',row['ManagedDeviceId'].lower(),key)
         alias('DimIntuneManagedDevice',row['TenantIntuneDeviceKey'],key)
+    # Direct observed Teams site relationships; never infer from display names.
+    site_links = list(rows(root, 'TeamsSiteLinkEvidence')) if (root/'TeamsSiteLinkEvidence.csv').exists() else []
+    for row in site_links:
+        if row['Channel ID']:
+            channel = dict(row, NativeChannelId=row['Team ID'].lower()+'|'+row['Channel ID'],
+                           SourceCollectedDateTime=row['Collected UTC'])
+            entity('TeamsSiteLinkEvidence',channel,'Channel','Teams','NativeChannelId','Channel','Link Key')
+    for (system, typ, identifier), entity_key in native.items():
+        if (system, typ) in [('Teams','Team'), ('SharePoint Online','Site')]:
+            alias('TeamsSiteNative:'+typ, identifier, entity_key)
     # Exact canonical estate identifiers only. The estate's strong-link decision
     # is reused, not reimplemented from names, UPN or SMTP.
     for filename, field, mappings in [
@@ -147,6 +157,18 @@ def build_graph(root, tenant):
             link('FactUserDeviceRelationship',r,r['TenantRelationshipKey'],'DimUser',r['TenantUserKey'],'DimDevice',r['TenantDeviceKey'],r['RelationshipType'],r['SourceSystem'],'Reported user-device association; not console activity',r['Account'],r['Device'])
         for r in rows(root,'FactTeamMember'):
             link('FactTeamMember',r,r['TenantTeamMemberKey'],'DimTeam',r['TenantTeamKey'],'DimUser',r['TenantUserKey'],'Team '+r['Role'],'Teams',raw_to=r['UserId'])
+        for r in site_links:
+            r['SourceCollectedDateTime'] = r['Collected UTC']
+            if r['Channel ID']:
+                link('TeamsSiteLinkEvidence',r,r['Link Key'],'TeamsSiteNative:Team',r['Team ID'].lower(),
+                     'TeamsSiteLinkEvidence',r['Link Key'],'Team channel','Teams',r['Link Type'],raw_from=r['Team ID'])
+            if r['Link Type'] != 'standard':
+                link('TeamsSiteLinkEvidence',r,r['Link Key'],
+                     'TeamsSiteLinkEvidence' if r['Channel ID'] else 'TeamsSiteNative:Team',
+                     r['Link Key'] if r['Channel ID'] else r['Team ID'].lower(),
+                     'TeamsSiteNative:Site',r['Site ID'].lower() if r['Link Status']=='Collected' else '',
+                     'Channel site' if r['Channel ID'] else 'Team primary site','Teams / SharePoint Online',
+                     r['Link Status']+'; '+r['Resolution']+'; no effective access inference',raw_to=r['Site ID'])
         for r in rows(root,'FactDeviceApplication'):
             link('FactDeviceApplication',r,r['TenantDeviceApplicationKey'],'IntuneManagedDeviceId',r['ManagedDeviceId'].lower(),'DimDetectedApplication',r['TenantApplicationKey'],'Discovered application version','Intune',r['ApplicationLinkStatus']+'; '+r['DeviceLinkStatus'],r['ManagedDeviceId'],r['AppId'])
         for r in rows(root,'FactUserLicense'):

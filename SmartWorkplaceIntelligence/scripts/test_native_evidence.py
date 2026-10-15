@@ -23,6 +23,46 @@ class NativeEvidenceTests(unittest.TestCase):
         self.addCleanup(self.fixture.tearDown)
         self.output = self.fixture.root / 'unified-staging'
         self.output.mkdir()
+        original_write_proof = self.fixture.write_proof
+        def write_qualified_proofs():
+            original_write_proof()
+            self.extend_collaboration_fixture()
+        self.fixture.write_proof = write_qualified_proofs
+        self.extend_collaboration_fixture()
+
+    def extend_collaboration_fixture(self):
+        """Upgrade only synthetic Teams/SPO proofs to the extended capture."""
+        for producer, names in unified.teams_sites.FILES.items():
+            path = self.fixture.source / f'SmartInventory_SmartM365-{producer}-Inventory.current.json.txt'
+            proof = json.loads(path.read_text(encoding='utf-8-sig'))
+            definition = next(p for p in sources.load_json(sources.REGISTRY)['Producers'] if p['Script'] == proof['Producer'])
+            proof.update(Owner='SmartInventory-SourceReceipt', ContractVersion='1.2',
+                         ScopeQualification='ConsumerScope', RequiredFiles=definition['Files'],
+                         FullInventoryQualified=False, ConsumerScopeQualified=True)
+            for name in names:
+                target = self.fixture.source / name
+                if target.exists():
+                    with target.open(encoding='utf-8-sig', newline='') as stream:
+                        reader = csv.DictReader(stream); fields = reader.fieldnames; rows = list(reader)
+                else:
+                    rows = [] if producer == 'Teams' else [dict(StorageUsedGB='', StorageCapacityGB='', CapacitySource='Not measured', IsPartialInventory='False')]
+                    fields = unified.teams_sites.EXTRA_HEADERS[name] if producer == 'Teams' else list(rows[0])
+                rows = [dict(r, **IDENTITY, RunId='synthetic-business') for r in rows]
+                fields = list(dict.fromkeys(fields + list(IDENTITY) + ['RunId']))
+                with target.open('w', encoding='utf-8-sig', newline='') as stream:
+                    writer = csv.DictWriter(stream, fieldnames=fields); writer.writeheader(); writer.writerows(rows)
+                record = next((r for r in proof['Files'] if r['File'] == name), None)
+                if record is None:
+                    record = dict(proof['Files'][0], File=name); proof['Files'].append(record)
+                record.update(SHA256=sources.sha(target), Rows=len(rows), Delimiter=',')
+                original = next((r for r in self.fixture.proof['Files'] if r['File'] == name), None)
+                if original is not None:
+                    original.update(SHA256=sources.sha(target), Rows=len(rows))
+            path.write_text(json.dumps(proof), encoding='utf-8')
+            path.with_name(path.name.replace('.current.', '.run.')).write_text(json.dumps(dict(
+                Owner='SmartInventory-SourceRun', ContractVersion='1.0', **IDENTITY,
+                Producer=proof['Producer'], Status='Completed', RunId=proof['RunId'],
+                PublicationStarted=True, UnqualifiedPublication=False)), encoding='utf-8')
 
     def audit(self):
         return unified.validate(self.fixture.source, IDENTITY['TenantKey'], NOW, IDENTITY)
@@ -125,6 +165,32 @@ class NativeEvidenceTests(unittest.TestCase):
 
     def test_same_capture_all_native_columns(self):
         self.compare()
+
+    def test_teams_channels_sites_flow_into_native_graph(self):
+        self.fixture.inputs['teams']=[dict(TeamId='t1',TeamDisplayName='Synthetic team',
+            MemberCollectionStatus='Collected',OwnerCollectionStatus='Collected',ChannelCollectionStatus='Collected',
+            MemberCount='0',OwnerCount='0',GuestCount='0',IsArchived='false',IsPartialInventory='false',
+            StandardChannelCount='1',PrivateChannelCount='2',SharedChannelCount='0',
+            SharePointSiteId='host,s1,w1',SharePointSiteLinkStatus='Collected',CollectedAtUtc=NOW.isoformat())]
+        self.fixture.inputs['sites']=[dict(SiteId='host,s1,w1',SiteIdentitySource='Graph',IsOneDrive='False',
+            SiteUrl='https://synthetic.invalid/site',Title='Synthetic site',StorageUsedGB='10',StorageUsedMB='10240',
+            CollectedAtUtc=NOW.isoformat(),ReportRefreshDate=NOW.date().isoformat())]
+        self.fixture.write_inputs()
+        channels=[dict(TeamId='t1',ChannelId=cid,ChannelDisplayName=cid,MembershipType=kind,
+            SharePointSiteId=site,SharePointSiteLinkStatus='Collected' if site else 'NotApplicable')
+            for cid,kind,site in [('c1','standard',''),('c2','private','host,s1,w1'),('c3','private','host,outside,w')]]
+        with (self.fixture.source/'M365_Teams_Channels.csv').open('w',newline='',encoding='utf-8') as stream:
+            writer=csv.DictWriter(stream,fieldnames=list(channels[0]));writer.writeheader();writer.writerows(channels)
+        self.fixture.write_proof()
+        before={p.name:sources.sha(p) for p in self.fixture.source.iterdir() if p.is_file()}
+        unified.build(self.fixture.source,self.output,self.audit())
+        links=[r for r in self.graph_rows('CMDBRelationshipEvidence') if r['Source Table']=='TeamsSiteLinkEvidence']
+        self.assertEqual(len(links),6)
+        self.assertEqual(sum(r['Resolution']=='Resolved' for r in links),5)
+        self.assertEqual(len({r['Link Key'] for r in links}),6)
+        self.assertEqual(len([r for r in self.graph_rows('CMDBEntityEvidence') if r['Entity Type']=='Channel']),3)
+        self.assertEqual(self.graph_rows('SharePointSiteLinkEvidence')[0]['Link Count'],'2')
+        self.assertEqual(before,{p.name:sources.sha(p) for p in self.fixture.source.iterdir() if p.is_file()})
 
     def graph_rows(self, name):
         with (self.output / (name+'.csv')).open(encoding='utf-8-sig', newline='') as stream:
