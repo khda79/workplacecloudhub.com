@@ -14,7 +14,7 @@ import uuid
 from pathlib import Path
 import workplace_freshness as cmdb_freshness
 
-VERSION = '0.3.11'
+VERSION = '0.3.12'
 OWNER = 'SmartInventory-CMDB-Prepared'
 CONTRACT = Path(__file__).resolve().parents[1] / 'config/native-evidence-contract.json.txt'
 REGISTRY = Path(__file__).resolve().parents[2] / 'SmartM365/Modules/SmartM365.Core/SmartM365-CmdbSources.json.txt'

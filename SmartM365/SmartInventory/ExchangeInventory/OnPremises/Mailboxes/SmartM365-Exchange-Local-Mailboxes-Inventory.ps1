@@ -17,7 +17,7 @@
     Parameters allow customization of output paths, permission inclusion, and overwrite behavior.
 
 .VERSION
-1.64
+1.65
 .REQUIREMENTS
     Windows PowerShell 5.1 on an Exchange 2016/on-premises management host.
     Modules/snap-ins: SmartM365 WindowsPowerShell5 compatibility module; Exchange Management snap-in; ActiveDirectory module when AD permission export is enabled.
@@ -25,7 +25,7 @@
     Optional switches: -IncludeADPermission and -OnlyADPermission require read access to AD mailbox permission ACLs.
     Conditional: Mail.Send is required only when Graph mail is used; Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
-Version: 1.64
+Version: 1.65
     Author: https://github.com/khda79/workplacecloudhub.com
     Requirements: Exchange 2016 Management Tools, Active Directory module
     Minimum permissions: Windows PowerShell 5.1, Exchange 2016 Management snap-in, ActiveDirectory module, Exchange read RBAC for mailbox/remote mailbox/statistics/permissions, and AD read access.
@@ -267,7 +267,7 @@ $global:SharePointTargetFolderPath = Get-ScriptLocalConfigValue -Config $ScriptL
 $script:SharePointUploadDisabledForRun = -not $global:EnableSharePointUpload
 $script:SharePointUploadDisableLogged = $false
 #region Module Import and Initialization
-$ScriptVersion = "1.64"
+$ScriptVersion = "1.65"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $EnableWeeklyHistory = [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'EnableWeeklyHistory' -DefaultValue $true)
 $WeeklyHistoryFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'WeeklyHistoryFolderPath' -DefaultValue ''
@@ -394,6 +394,10 @@ function Get-SmartM365LocalMailboxIssueImpact {
     }
     elseif ($Operation -eq 'Get-MobileDevice' -and $Category -in @('MissingMobileDeviceIdentity','RecipientAmbiguous','MobileDeviceLookupFailure')) {
         $impact = 'FieldUnavailable'
+    }
+    elseif ($Operation -eq 'MailboxReconciliation' -and $Category -eq 'ConflictingPrimarySmtpAddress' -and $NativeRecordRetained) {
+        # Address ambiguity does not mean a GUID-identified recipient was lost.
+        $impact = 'RecipientDataQuality'
     }
     [pscustomobject]@{
         CollectionImpact = $impact
@@ -629,7 +633,16 @@ function Find-SmartM365MailboxSmtpConflict {
         Group-Object { ([string]$_.PrimarySmtpAddress).Trim().ToLowerInvariant() } | Where-Object Count -gt 1)
     foreach ($group in $groups) {
         if (@($group.Group.ObjectGuid | Sort-Object -Unique).Count -eq 1 -and -not [string]::IsNullOrWhiteSpace([string]$group.Group[0].ObjectGuid)) { continue }
-        Add-SmartM365LocalMailboxIssue -Category 'ConflictingPrimarySmtpAddress' -Operation 'MailboxReconciliation' -PrimarySmtpAddress $group.Name -Message "Multiple native mailbox objects share one primary SMTP address; all $($group.Count) records are retained." -SuggestedAction 'Review distinct native object GUIDs before address-based reconciliation.' | Out-Null
+        $identities = New-Object 'Collections.Generic.HashSet[guid]'
+        $allIdentified = $true
+        foreach ($record in $group.Group) {
+            $id = [guid]::Empty
+            if (-not [guid]::TryParse([string]$record.ObjectGuid, [ref]$id) -or $id -eq [guid]::Empty -or -not $identities.Add($id)) { $allIdentified = $false }
+        }
+        foreach ($record in $group.Group) {
+            $native = [string]$record.ObjectGuid
+            Add-SmartM365LocalMailboxIssue -Category 'ConflictingPrimarySmtpAddress' -Operation 'MailboxReconciliation' -PrimarySmtpAddress $group.Name -ObjectGuid $native -MailboxIdentity $native -NativeRecordRetained:$allIdentified -Message "Multiple native mailbox objects share one primary SMTP address; all $($group.Count) records are retained. Conflicting native GUIDs: $(@($group.Group.ObjectGuid) -join ', ')." -SuggestedAction 'Preserve each native identity. Do not reconcile these recipients by SMTP; review unique technical identifiers and source configuration.' | Out-Null
+        }
     }
 }
 
@@ -3752,8 +3765,8 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBevzE0Kh3zAVEe
-# 1s7TsmUn8aPWYcpCN1VP3fJJxC7H8qCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD3zVjtBsShVVGb
+# NmyOlG7778a22P2vCBtouOFnETXYwKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -3886,31 +3899,31 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIGqwdHhZpkj4KUN2Ds7uDA5eQE+JJxtfgRoUn+Bq+/jZMA0GCSqG
-# SIb3DQEBAQUABIIBgAi90yRjR2TsjQM9B1H88hKGiCQCP1720BsnymtswWyNm6JB
-# NCKty7WW9zcPj0yUGuju295/WmYAF6h2PiOA6ykl3OV/IiRk1vQBKzOOq9vrnQ3R
-# +pHZhcYynC1nn1enrdwT2R/3Kjvpss03egpHFJi01SrRR2faLjdCDfwukLCzMTac
-# FG43yYdMdwTxExtDpWAPLaHQFrsj5ioTgG8WyIrQ0u9M4ejHdctJ2j7ThMDQhaM1
-# sjp9v3QLqtN2OZyIOxR2l6jCbspkoYkvnv06YGhTqfS8NEPStVA5Xemk2MgCQ0R7
-# h/YCPoDKc3ZWC9IOE53gKiwfawX/py8PPtLMgRgHNoMCfPrQnRUvhxid42RJhlgM
-# pDAQo5oZInjrIC2T0u/w03oHna4elTF6G9nbXOu8wB7NCaa+H9To4N5Y6ssLKPDX
-# Oai24ZwUU7JSS8Biio893YdddAV3kCD1NFXbh9exOWJi6fIpFzZekkFdo3JzU+cx
-# +JMwBxWcBnUg+MODqaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEICkHfQHBoAqsBpAtAUgX4s7mfAvCjkrJXQVU+13A+955MA0GCSqG
+# SIb3DQEBAQUABIIBgArIfPOy0gzGHwvshjRR/KuJXfZPbn2RAtXn1zR1lRFKXJ5Y
+# ixQOBJ6I4cMFgoZKgE8AAfdPQ4riM/vKOEX3xm7IYaTPL4WKKT0mIfv5cfKACOH/
+# A8N2T1eMbAeG+/5zr3XGZhJ+SlA7LBKX0WRhj2PZ6GazH9KfsoNYQd2SIvGTWx9+
+# RVxiXu8JUjm1Fwx6lUbhJcxwBcmR1QX247PT4ksGf3E5F0VBC12xPOmZBSxmlr3i
+# hhzkXFQoVgFG+Klj1mq8mtC1m7ONz9RNKrxpNHdqb0XulgIAWn7J7rl7rRqOMXBe
+# 0822XY3tAxOat5Oevcr8NdSCP0OWDMg1cWs0v03lnJIOPrrplykbYumr/+scBdtf
+# ldUL27L5D30R1sONyP2+1Sr0R7ZydUN7F2hbU+keIjKSVk7MvoKGVvReAkOK74LZ
+# k6sSLjjf8n01opjKCPMws/UymWGE4uGUdKDf3VwggsG2fbhl/WzRj2v8YKSSvgHV
+# XGEntN98IposdwS2sKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTQxNTMw
-# MjBaMC8GCSqGSIb3DQEJBDEiBCD+QPryIlEx4e5FI1ff//7EVsvXIfAq77g7+qGe
-# Xf+uDTANBgkqhkiG9w0BAQEFAASCAgAtP8P3mcqlU5shVJWX6mqJGAAJ6zea95F6
-# enKlo02+6VuK/+MFJwmyaI/yP3VUJM68ds8Iw2UY25IdQTakDeteNJKlb8GgZG8p
-# 9HtvI4l14fStsdYN9DNjk65eCxgdCPvLWRCIN85Jm0s7zri2EX1cqtwSbDLHlNwK
-# fqOy2JcQbMSgmnO0cX+CggL++nJoGcjXIMLYfrdZkCdeOrBpjiz0qP+vrzdDueFf
-# wJctj2ZBEFSDIfHohdyDiusjNA8OxajuUTxI1i7iNzBC6xiUamIwUOVvadi8Shaz
-# lY1XpF2mzCRi5QvxHeysvNdDnNj+9296E1uNW5PIpKAH31D0XE2KewXG6Fi+5Iye
-# HRSaMmPl/px4PlFL5YWXz+Im7l0lfShNbOvFK/4xPOcXOlIsDtSrBulXiDlBuRRO
-# Y1t53/ZZlaJPa4fQNs6rUTTTTcILoF2OjpeCgUEiv05C16jvfZj+2V2zABXxE9AA
-# dkAiBcOstvmi+8fpyEmhdSbVBU2iSc6C2IR4ZRGQpnHog8XJLL8jLFMlwyD9gqGA
-# Xb/6Z53vLdupEMvpIsOac7kWjapFXAwKrfc9oH8qfXaaIGfXxIPRazvjo7UkYDTn
-# O33it3Yla7z24lBGuqbC0LUHkWjXr9vsDiXKVjEWoIhI5j4Rswwop5cVzzerRPEs
-# Olazvk93OA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTUwNzMx
+# MTlaMC8GCSqGSIb3DQEJBDEiBCDjvNOQyL7/PRGKirvOGht9qUptJfXF3mcmDdWO
+# cfDNLjANBgkqhkiG9w0BAQEFAASCAgAobCHXijsavKscQiT6kHpMleFCnX/aVIcn
+# PcryusybIn4HlRcqyhN+5PJAxsH2uUq3evd9ZCuu/3pBE31YCk87nqvea5sE2e4C
+# Mn7UR2b4vMUqz0F/FiKQy9FJ8R/jeFrBtq9bKK8FXbDPQ56kjqAPEIDc3TmF/O6F
+# jomLxGOYt4bxF24x1HSxCpMM6fjsh/qAMtF89FRJgNtHtuzSXmVzO4oASu43PA3n
+# 4f/UBRXrIegPtpYv2UF0TDWXiSyPMQDLJyPnABQsZ8C2HnJYxVtfxFRUUJ6gCJkN
+# WKZI5ijhpa4lf0qpFCGJNNPQNq5W7j9+HyPuoOXqfkdc1KzR+msn6IwITY3aS9Od
+# aiVEBz18SEnddm0Vaa+oLAcuM8MQuKsjdoVDs/lGQ+7WWK6odC4dMvJjEXHWZ32B
+# ot4TU1tQRU1Da5Sv4ZZnqzWP6Du/cdmt+Uue9Xd0HY2VOX9CotTl7mLFJQfRx6/P
+# 1GnLiKxTiKS5tTIH+jpHlafw+UolxkDgZk9N9pnAJvoSdOIqTwK9Ay0TQAGh6X7h
+# g8cOlljRg7faEmzMUCTrGnDnHmKTTZNq6q2gwklXWjxsHMAG++I8BLMbwy90cUcs
+# f6nAjL5TevYhagbpuOQE9o+nYJ9sm29N9DX1MYifQ30gD1/JipezsNRLZxFT9vOP
+# WNOgkeOp0w==
 # SIG # End signature block

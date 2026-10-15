@@ -1,9 +1,11 @@
 """Offline same-input migration tests; no production CSVs, APIs or publication."""
 import datetime as dt
+import base64
 import csv
 import json
 import sys
 import unittest
+import uuid
 from pathlib import Path
 from unittest import mock
 
@@ -28,13 +30,98 @@ class NativeEvidenceTests(unittest.TestCase):
     def compare(self):
         self.fixture.prepare()
         result = unified.build(self.fixture.source, self.output, self.audit())
+        # The legacy SMTP collapse is deliberately NOT the mailbox oracle.
+        # Dedicated tests below cover keys, counts, findings and graph relations.
+        identity_outputs = {'FactMailbox','FactMailboxHosting','FactDataQuality','EntityFinding','FactRelationshipOverview'}
         for table in self.fixture.contract['tables']:
+            if table['name'] in identity_outputs:
+                continue
             name = table['name'] + '.csv'
             self.assertEqual(baseline.sha(self.fixture.output / name), sources.sha(self.output / name), name)
+        for name in ('FactDataQuality','EntityFinding','FactRelationshipOverview'):
+            with (self.fixture.output/(name+'.csv')).open(encoding='utf-8-sig',newline='') as stream:
+                previous=list(csv.DictReader(stream))
+            def unrelated(row):
+                return row.get('EntityType','').casefold() not in ('mailbox','mailbox recipient') and row.get('RelationshipType')!='HasMailbox'
+            self.assertEqual([r for r in previous if unrelated(r)], [r for r in self.graph_rows(name) if unrelated(r)],name)
+        self.assertEqual(len(self.graph_rows('FactMailbox')),2)
+        self.assertEqual(len(self.graph_rows('FactMailboxHosting')),2)
+        self.assertEqual({r['SourceSystem'] for r in self.graph_rows('FactMailbox')},{'local_mailboxes','mailboxes'})
         self.assertEqual(len(result['OutputRows']), 46)
         self.assertFalse(result['Publication'])
         self.assertFalse((self.output / 'current.json.txt').exists())
         return result
+
+    def seed_smtp_conflict(self, cloud_user='u1'):
+        ids = ['00000000-0000-0000-0000-00000000000'+str(i) for i in range(1,5)]
+        anchor = base64.b64encode(uuid.UUID(ids[1]).bytes_le).decode()
+        self.fixture.inputs['local_mailboxes']=[]
+        self.fixture.write_inputs()
+        self.fixture.write_native_rows('remote_mailboxes',[
+            dict(ObjectGuid=ids[0],PrimarySmtpAddress='user@synthetic.invalid',ExchangeGuid=ids[3],
+                 RecipientTypeDetails='RemoteUserMailbox',CollectedAtUtc=NOW.isoformat(),ImmutableId=''),
+            dict(ObjectGuid=ids[1],PrimarySmtpAddress='USER@synthetic.invalid',ExchangeGuid=str(uuid.UUID(int=0)),
+                 RecipientTypeDetails='RemoteUserMailbox',CollectedAtUtc=NOW.isoformat(),ImmutableId=anchor)])
+        self.fixture.write_native_rows('mailboxes',[
+            dict(MailboxGuid=ids[2],PrimarySmtpAddress='user@synthetic.invalid',ExternalDirectoryObjectId=cloud_user,
+                 RecipientTypeDetails='UserMailbox',CollectedAtUtc=NOW.isoformat(),OnPremisesImmutableId=anchor)])
+        return ids
+
+    def test_mailbox_conflict_counts_findings_keys_and_graph_endpoints(self):
+        ids=self.seed_smtp_conflict()
+        digests={p.name:sources.sha(p) for p in self.fixture.source.iterdir() if p.is_file()}
+        result=unified.build(self.fixture.source,self.output,self.audit())
+        mailboxes=self.graph_rows('FactMailbox');hosting=self.graph_rows('FactMailboxHosting')
+        self.assertEqual(len(mailboxes),1);self.assertEqual(len(hosting),1)
+        self.assertEqual(mailboxes[0]['SourceSystem'],'mailboxes')
+        self.assertEqual(hosting[0]['MailboxHostingKey'],mailboxes[0]['TenantMailboxKey'])
+        audit=result['Details']['MailboxIdentity']
+        self.assertEqual(len(audit['Observations']),3)
+        self.assertEqual(audit['UnresolvedRemoteRecipients'],1)
+        self.assertEqual({o['NativeId'] for o in audit['Observations']},set(ids[:3]))
+        remote={o['NativeId']:o for o in audit['Observations'] if o['SourceSystem']=='remote_mailboxes'}
+        self.assertEqual(remote[ids[0]]['TenantMailboxKey'],'')
+        self.assertEqual(remote[ids[1]]['TenantMailboxKey'],mailboxes[0]['TenantMailboxKey'])
+        findings=self.graph_rows('FactDataQuality')
+        conflicts=[r for r in findings if r['FindingType']=='ConflictingPrimarySmtpAddress']
+        self.assertEqual(len(conflicts),2)
+        self.assertTrue(any(r['FindingType']=='UnresolvedRemoteMailboxRecipient' for r in findings))
+        self.assertEqual(len([r for r in self.graph_rows('CMDBEntityEvidence') if r['Entity Type']=='Mailbox']),1)
+        links=[r for r in self.graph_rows('CMDBRelationshipEvidence') if r['Source Table']=='FactMailbox']
+        self.assertEqual(len(links),1);self.assertEqual(links[0]['Resolution'],'Resolved')
+        overview=next(r for r in self.graph_rows('FactRelationshipOverview') if r['RelationshipType']=='HasMailbox')
+        self.assertEqual(overview['RelationshipCount'],'1')
+        self.assertEqual(digests,{p.name:sources.sha(p) for p in self.fixture.source.iterdir() if p.is_file()})
+
+    def test_ambiguous_smtp_cannot_fallback_to_user(self):
+        self.seed_smtp_conflict(cloud_user='')
+        unified.build(self.fixture.source,self.output,self.audit())
+        self.assertEqual(self.graph_rows('FactMailbox')[0]['TenantUserKey'],'')
+        self.assertEqual(self.graph_rows('FactMailbox')[0]['LinkStatusLabel'],'Unresolved')
+
+    def test_unknown_technical_user_cannot_fallback_to_known_smtp(self):
+        self.seed_smtp_conflict(cloud_user='unknown-user')
+        unified.build(self.fixture.source,self.output,self.audit())
+        self.assertEqual(self.graph_rows('FactMailbox')[0]['TenantUserKey'],'')
+
+    def test_unqualified_publication_still_blocks_even_with_preserved_conflict(self):
+        self.seed_smtp_conflict()
+        self.fixture.source_run('Failed',unqualified=True)
+        with self.assertRaisesRegex(ValueError,'publication is in progress or remains unqualified'):
+            self.audit()
+        self.assertFalse(list(self.output.iterdir()))
+
+    def test_mailbox_keys_are_stable_after_smtp_rename(self):
+        ids=self.seed_smtp_conflict()
+        unified.build(self.fixture.source,self.output,self.audit())
+        before=self.graph_rows('FactMailbox')[0]['TenantMailboxKey']
+        self.fixture.write_native_rows('mailboxes',[
+            dict(MailboxGuid=ids[2],PrimarySmtpAddress='renamed@synthetic.invalid',ExternalDirectoryObjectId='u1',
+                 RecipientTypeDetails='UserMailbox',CollectedAtUtc=NOW.isoformat())])
+        # A separate synthetic staging tree, never overwrite the first batch.
+        self.output=self.fixture.root/'renamed-staging';self.output.mkdir()
+        unified.build(self.fixture.source,self.output,self.audit())
+        self.assertEqual(self.graph_rows('FactMailbox')[0]['TenantMailboxKey'],before)
 
     def test_same_capture_all_native_columns(self):
         self.compare()
@@ -55,6 +142,8 @@ class NativeEvidenceTests(unittest.TestCase):
         self.assertEqual(expected,{(r['Link Key'],r['Entity Key']) for r in endpoints})
         self.assertTrue({r['Entity Key'] for r in endpoints}<={r['Entity Key'] for r in entities})
         self.assertEqual(len(links),result['GraphRows']['CMDBRelationshipEvidence'])
+        self.assertEqual({r['Source System'] for r in entities if r['Entity Type']=='Mailbox'},
+                         {'Exchange Online','Exchange On-premises'})
         for source in ('FactDeviceApplication','FactUserServicePlan','DimLicenseServicePlan'):
             self.assertEqual(len(self.graph_rows(source)),len([r for r in links if r['Source Table']==source]))
 

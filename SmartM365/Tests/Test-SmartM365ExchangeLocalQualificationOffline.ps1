@@ -6,7 +6,7 @@ Offline Exchange mailbox scope, native identity and quality classification tests
 Extracts functions and statements through the AST. All Exchange queries are
 mocked; no tenant context, collector, module, export or external action runs.
 .VERSION
-1.0.7
+1.0.8
 #>
 [CmdletBinding()]
 param()
@@ -194,7 +194,28 @@ Case 'Primary SMTP conflicts never remove or alter records' {
     $before=$rows | ConvertTo-Json -Compress
     Find-SmartM365MailboxSmtpConflict -Rows $rows
     Assert-True (($rows | ConvertTo-Json -Compress) -ceq $before) 'SMTP check rewrote native records.'
-    Assert-True ($script:LocalMailboxIssues.Count -eq 1 -and $script:LocalMailboxIssues[0].BlocksCmdbQualification) 'Core address conflict was hidden.'
+    Assert-True ($script:LocalMailboxIssues.Count -eq 2) 'Conflict lost a native identity.'
+    Assert-True (@($script:LocalMailboxIssues | Where-Object BlocksCmdbQualification).Count -eq 0) 'Retained identities were treated as lost acquisition.'
+    Assert-True (@($script:LocalMailboxIssues.ObjectGuid | Sort-Object -Unique).Count -eq 2) 'Conflict identities were not retained.'
+    Assert-True (Get-TestQualification -Issues @($script:LocalMailboxIssues.ToArray())).CompleteScope 'Complete conflicting recipients were rejected.'
+}
+foreach ($badId in @('', 'not-a-guid', [string][guid]::Empty)) {
+    Case "SMTP conflict with unproven GUID remains blocking / $badId" {
+        Reset-Fixture
+        Find-SmartM365MailboxSmtpConflict -Rows @([pscustomobject]@{ObjectGuid=$id1;PrimarySmtpAddress='same@synthetic.invalid'},[pscustomobject]@{ObjectGuid=$badId;PrimarySmtpAddress='same@synthetic.invalid'})
+        Assert-True (-not (Get-TestQualification -Issues @($script:LocalMailboxIssues.ToArray())).CompleteScope) 'Unproven population was qualified.'
+        Assert-True (@($script:LocalMailboxIssues | Where-Object NativeRecordRetained).Count -eq 0) 'Partially identified conflict was accepted.'
+    }
+}
+Case 'Retained SMTP conflict does not hide failed acquisition' {
+    Reset-Fixture
+    Find-SmartM365MailboxSmtpConflict -Rows @([pscustomobject]@{ObjectGuid=$id1;PrimarySmtpAddress='same@synthetic.invalid'},[pscustomobject]@{ObjectGuid=$id2;PrimarySmtpAddress='same@synthetic.invalid'})
+    $badQuery=[pscustomobject]@{Scope=$scope;QueryCompleted=$false;ProjectionCompleted=$false;Rows=2}
+    Assert-True (-not (Get-TestQualification -Issues @($script:LocalMailboxIssues.ToArray()) -Queries @($badQuery)).CompleteScope) 'Failed acquisition became qualified.'
+    Assert-True (-not (Get-TestQualification -Issues @($script:LocalMailboxIssues.ToArray()) -Remote $false).CompleteScope) 'Missing remote population became qualified.'
+}
+Case 'SMTP allowlist requires the exact reconciliation operation' {
+    Assert-True (Get-SmartM365LocalMailboxIssueImpact -Category ConflictingPrimarySmtpAddress -Operation Get-Mailbox -NativeRecordRetained $true).BlocksCmdbQualification 'Unexpected operation became qualified.'
 }
 Case 'Blank SMTP is not collapsed or called a duplicate address' {
     Reset-Fixture
@@ -493,6 +514,11 @@ Case 'Mailbox email renders seven summary KPI cards without a metric table' {
     $mailNode=$moduleAst.Find({param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'New-SmartM365EmailBody'},$true)
     Assert-True ($null -ne $mailNode) 'Shared mail template is missing.'
     Set-Item Function:script:New-SmartM365EmailBody ([scriptblock]::Create($mailNode.Body.Extent.Text.TrimStart('{').TrimEnd('}')))
+    foreach ($helperName in @('New-SmartM365EmailKpiGridHtml','New-SmartM365EmailTableHtml')) {
+        $helperNode=$moduleAst.Find({param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $helperName},$true)
+        Assert-True ($null -ne $helperNode) "Missing shared mail helper: $helperName"
+        Set-Item "Function:script:$helperName" ([scriptblock]::Create($helperNode.Body.Extent.Text.TrimStart('{').TrimEnd('}')))
+    }
     function Get-SmartM365MailboxReportCsvRowCount {param($Path) 0}
     $script:Tenant='synthetic'
     $row=[pscustomobject]@{DomainName='synthetic & invalid';TotalMailboxCount=12;TotalLocalMailboxCount=5;TotalRemoteMailboxCount=7;EnabledAccounts=9;DisabledAccounts=3;TotalLocalMailboxSizeGB=17.5}
@@ -651,12 +677,19 @@ try {
     $originalHashes=@{}
     foreach ($file in $producer.Files) { $originalHashes[$file]=(Get-FileHash (Join-Path $testRoot $file)).Hash }
     function Invoke-TestReceipt($Qualification) {
+        $receiptPath=Join-Path $testRoot $producer.Receipt
+        $previousHash=if(Test-Path -LiteralPath $receiptPath){(Get-FileHash -LiteralPath $receiptPath).Hash}else{''}
         & $receiptModule {param($Script,$Folder,$Scope,$Proof)
             Start-SmartM365CmdbSourceReceipt -ScriptPath $Script -SourceRootPath $Folder
             Set-SmartM365CmdbSourceScope -CompleteScope $Proof.CompleteScope -Scope $Scope -Qualifications $Proof.Qualifications
             Complete-SmartM365CmdbSourceReceipt -Status CompletedWithWarnings
         } $producer.Script $testRoot $producer.Scope $Qualification | Out-Null
-        Get-Content -LiteralPath (Join-Path $testRoot $producer.Receipt) -Raw | ConvertFrom-Json
+        $run=Get-Content -LiteralPath ($receiptPath -replace '\.current\.json\.txt$','.run.json.txt') -Raw | ConvertFrom-Json
+        if ($run.Status -eq 'Failed') {
+            if($previousHash){Assert-True ((Get-FileHash -LiteralPath $receiptPath).Hash -eq $previousHash) 'Rejected run replaced the last qualified receipt.'}
+            return $run
+        }
+        Get-Content -LiteralPath $receiptPath -Raw | ConvertFrom-Json
     }
     Case 'Real receipt preserves 45 known findings without claiming clean recipient health' {
         $issues=@(1..40 | ForEach-Object {[pscustomobject]@{Category='MissingPrimarySmtpAddress';Operation='Get-RemoteMailbox';NativeRecordRetained=$true;ObjectGuid=$id1.ToString('D')}})
@@ -671,6 +704,13 @@ try {
         $receipt=Invoke-TestReceipt (Get-TestQualification -Issues @([pscustomobject]@{Category='UnknownFailure';Operation='Get-RemoteMailbox'}))
         Assert-True ($receipt.Status -eq 'Failed' -and $receipt.IsPartialInventory -and $receipt.Files.Count -eq 0) 'Unknown failure qualified.'
         foreach ($file in $producer.Files) { Assert-True ((Get-FileHash (Join-Path $testRoot $file)).Hash -eq $originalHashes[$file]) 'Failure mutated native files.' }
+    }
+    Case 'Real receipt qualifies retained SMTP conflicts without declaring addresses unique' {
+        Reset-Fixture
+        Find-SmartM365MailboxSmtpConflict -Rows @([pscustomobject]@{ObjectGuid=$id1;PrimarySmtpAddress='same@synthetic.invalid'},[pscustomobject]@{ObjectGuid=$id2;PrimarySmtpAddress='same@synthetic.invalid'})
+        $receipt=Invoke-TestReceipt (Get-TestQualification -Issues @($script:LocalMailboxIssues.ToArray()))
+        Assert-True ($receipt.Status -eq 'Completed' -and $receipt.ConsumerScopeQualified -and -not $receipt.FullInventoryQualified) 'Retained conflict did not preserve scoped qualification.'
+        Assert-True (($receipt.Qualifications -join ' ') -like '*occurrences: 2; blocking=0*') 'SMTP findings disappeared from qualified receipt.'
     }
     Case 'Real receipt refuses an omitted domain despite published CSVs' {
         $receipt=Invoke-TestReceipt (Get-TestQualification -Scopes @($scope,'DC=missing,DC=invalid'))
@@ -701,8 +741,8 @@ if ($failedTests.Count) { $failedTests | Format-List Name,Error; throw 'Offline 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCCtHHUfE8jApln
-# EQQIxFZfmf+/z5RvS6jL8cChHrxviKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDm/t0ZVHbfiB8B
+# 0cIcyWzLYjl5cAHIDPXH3hK+o+INY6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -835,31 +875,31 @@ if ($failedTests.Count) { $failedTests | Format-List Name,Error; throw 'Offline 
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIAqUMm24SiRAmhnkDJFbb6kSQSFegETjSTFFfsJq9B70MA0GCSqG
-# SIb3DQEBAQUABIIBgGuoGGrQ8jbE5W761Q1QDdHqToKqUsOyCmIb8dfqkMzGVxQr
-# BJG4qwVxzvV8u2HKsIO5AqFJXdX9DFqnSpWY2O5T/ahpCebjSRwZPPmLsFpLDA0p
-# 1rC2WevsukJ2RhruwvziG7jOY6fAo+shlNLrpEzFd/UhL+TPt7oNZOwO2Etcl+xp
-# U9owDWnkdWpJZOB6JOBbd3nZuKDNB7QElg6lI2i5jPUkLTBcFXC1Dpf0yTLrXbQ3
-# AyEyXDsLjjVdpFKr8YhU6aHX0lnUs8dyOl9DPa0LRJviZmy7BLBOnqn9WnWd8wes
-# vOLqZVDEsl8Nmgw9R36b9jsWQ8RlPOedQ8VlqS1ERAuW5GbWg7xzoL4QrUC3SW+s
-# uBS12hizDgdaVgaUPZQxD/FzRoO3Akx4VZzkBkP6OzcNZiiUYX5hh4wFvpQr7HS0
-# ugiZ/q/rjNhi0hL2S2YfI1VrR5ogI5zzKHv18UAaOysyODdYph7MEp1pvtdNWHo4
-# wYzWSTCKwa+baFCG8KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIN8FJfUz0JEI0qYhN2jDpGAy7NUZNfoJFb22gv/hISgMMA0GCSqG
+# SIb3DQEBAQUABIIBgEMVIEFKN9CZHnfjWeIoSKORYZnXqqdgDE06h2pZMvm8ofdn
+# IsBbQnZuAXbYDy85RBh2I81MxK23BkpsFcP7Ap6dCwKXsbMEb4skAU/TgI/GSTwd
+# 31NyRu2HPUtwGki7Wpc/AyFzRFyO18wWxJMymNooVajczdP1282knGw+cdvOpXXB
+# sVSd/3G3o/zoUZNyQKmyujJLHKtfOAad/+aDWjmmp8L8P69DtHKgFRIq7W58i86V
+# 3P+Qp7Xgte8uIA41CC/f0XFTDXEnN2be+ANBX3cWR7GEZ8TD9rsJbI++HBbHPz1T
+# F0/ZdU9TK6SClHFa3X+oDhZNdf8gGHQWl3R5bJHH0Uz9SFrIToR8nIMOdkDnYdNd
+# PwzeTDbMgk9WDbAZxzM7lbAcAsevSbVymlUfv/RTvMdvJOX/ImE6Smv45WPeEnU7
+# skGFphpuXwf/aGHJmH5EfXAquciB3R3SfsVfBCAndB//qfGXOmOJ/E57jU/W49H5
+# hvITvdGtRh3/7HVFI6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDcwOTA5
-# NDRaMC8GCSqGSIb3DQEJBDEiBCDUeWY7gyPPAlmnwGHpB2W6wPTRyCx9Ik/xRJZ4
-# FwYkdjANBgkqhkiG9w0BAQEFAASCAgCPDRVv05lvobIBj7l5Zr6gyG560y8c+27L
-# Pc/3OdmiZEbilhVIHi9heKFQYSV/NRt1O4coNE/lQiOuvJojioO5hfgFz1P3Z8mx
-# e39Ff3mv1Nm3gyPZlofilwEOfZ99wQIEwAs/488iqTmPGJmnnPOibiWgsPcx56wr
-# wvw4qRzjnO9TPU/Ih4C2K91m1H6lf8hmvm4sGIIsShdutWH/WFkQqWpYOIbDOGVr
-# eiPGwWt2Q3ZjaG7UT7r/TF2J/w6enl+LllpNCNe/l4pXsEV4mvQixSRQsmJfkG4K
-# 95mOkFh3FJfqeifR0Im8Y9ILrHF7VRyJAThgxxiGBmWIjk92En+FLLa+YqnXeyfC
-# UixLEgfX1NSzbPzlqJQy3lk1BmoRkWtquDSYtrWokj9vKOsr3CtMkIRnkvKiuuZE
-# uNJn2mu3KgeF1XgTaTJPeambFtx5MHyDRDVHnY76zPbBOF4+WWyaQnBSWfMKVMl9
-# 0YdgY1W/9gRH3ulH/Xgj8M95+0Ce9btRAPu9uQDtlK0/6mAkcte+67lyBA10ixye
-# Segoi24QrDMS3MR0euoW/jJtM4sauF2EgnBJGBaP99saOh66tCXanNbNvebN81NY
-# zVEQcu2vbz+i+NnoRUeFLGEkm2134cjisUuPOArzlIXKU/njRZKhbHQChljqXVfO
-# 3tBekfN/ow==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTUwNzMx
+# MjBaMC8GCSqGSIb3DQEJBDEiBCDhaQdq2YHUDTwEWJ9/Yfr25uhaY25qqjuexvSp
+# q/yoIDANBgkqhkiG9w0BAQEFAASCAgBNRt7JLPsp8OJ382aqtUGktOvc/KsCc6Uw
+# /ZEP6mJ29Go7R09jiL0iRuYGqX5btUlVw3UQPSgBVzJe7bHRHqV3iKf8Ad4NEA/e
+# 09DDO32xWoIZwF80Y/OAyzdt7gUp7b7VlAsdlzCoOsIw0HU1Sa9QRzJF2782iO4p
+# Dg6z94zcDkTHU8F1o0kbrNMEa1aRdZnXuY5Chf6C9khzEhO+EXPM8yAdX6PjlB+l
+# avHOeHlTvdeuBqV/1/h/JK6k0oImkDBJcQv/Zn7KJgPGBNABxIbUaJ9TbBjlejB0
+# bqtNSzKRqYVnYtKPKjqvgmKM9nlunFuje0+xCNOr97eeNyKA4Oe9eDjrzL3/+gBz
+# Vaci5pr7N/xT+T4DlnGqvKIfV0B+x+p0h/6hIilg1sYkDyw/eQA4j22LYWXo8C9w
+# fmEsOx8CPwDuJ8b3SYmZjLZXN25Hw7tOjUm/Ug/BOhgsjhvc4YAcPFun2KOo5927
+# oalhysXpHaElPXyxWs0XcK7lRF18B68wF58YJXQrT8wYsFs8FJAMEGkdudm4ZCZ6
+# J4zaT8tKdRbRYlsxqglj96w8/udBIHZYZ83A4Er0Jv1IozI2DdGZtg8uUKAK2kX3
+# Hva3XLl8NX+4XduGx1KRgCxzvaZ6lXBZoOD1TnkmsRvWNgs6JaZjXGoVGKJrWChM
+# P6nsEELShA==
 # SIG # End signature block

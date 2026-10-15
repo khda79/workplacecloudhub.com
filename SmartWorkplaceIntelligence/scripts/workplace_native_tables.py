@@ -14,6 +14,7 @@ import re
 from pathlib import Path
 
 from workplace_native_sources import rows, normalized as key, utc, application_coverage_status
+from workplace_mailbox_identity import reconcile as reconcile_mailboxes
 
 UNKNOWN = 'Unknown / unassigned'
 ZERO = '00000000-0000-0000-0000-000000000000'
@@ -538,33 +539,40 @@ def build_tables(source, output, contract, identity, evidence, now=None):
          for r in policies if r['PolicyFamily'] in ('WindowsFeatureUpdate','WindowsQualityUpdate')))
 
     mailbox_rows,hosting={},{}
-    for family,hosting_location in [('local_mailboxes','Exchange On-premises'),('remote_mailboxes','Exchange Online'),('mailboxes','Exchange Online')]:
-        source_addresses=set()
-        for r in read(family):
-            native=get(r,'MailboxGuid') if family=='mailboxes' else get(r,'ObjectGUID')
-            smtp=get(r,'PrimarySmtpAddress','PrimarySMTPaddress')
-            recipient=get(r,'RecipientType') if family=='local_mailboxes' else get(r,'RecipientTypeDetails')
-            location='Exchange Online' if 'remote' in key(recipient) else hosting_location
-            mkey=key(smtp) if smtp else family+':'+key(native)
-            if mkey in source_addresses:
-                raise ValueError('Conflicting native mailbox identities share SMTP within one source')
-            source_addresses.add(mkey)
-            old=hosting.get(mkey)
-            if old and old['HostingLocation']=='Exchange Online' and location!='Exchange Online':
-                continue
-            user=users_by_native.get(key(get(r,'ExternalDirectoryObjectId'))) or user_by_address(smtp)
-            hkey=native_key(tenant,'mailbox',mkey)
-            mailbox_rows[mkey]={'TenantMailboxKey':hkey,'CmdbMailboxId':hkey,'TenantUserKey':user['TenantUserKey'] if user else '',
-                'CmdbUserId':user['CmdbUserId'] if user else '', 'RecipientTypeDetails':recipient,'ArchiveStatus':get(r,'ArchiveStatus','ArchiveState'),
-                'SourceSystem':family,'DisplayName':get(r,'DisplayName'),'PrimarySmtpAddress':smtp,
-                'LinkStatusLabel':'Resolved' if user else 'Unresolved','ExternalDirectoryObjectId':get(r,'ExternalDirectoryObjectId')}
-            recipient_kind=key(recipient)
-            hosting[mkey]={'MailboxHostingKey':hkey,'CountryLabel':user['CountryLabel'] if user else UNKNOWN,
-                'HostingLocation':location,'RecipientTypeDetails':recipient,
-                'MailboxTypeGroup':'Shared mailboxes' if 'sharedmailbox' in recipient_kind else 'User mailboxes' if recipient_kind in ('usermailbox','remoteusermailbox') else 'Other types',
-                'EvidenceSource':family}
-            if not smtp:
-                finding('mailbox',hkey,'Missing SMTP','Native mailbox retained without an address; hosting deduplication cannot use SMTP.')
+    mailbox_entities,mailbox_observations,ambiguous_smtp = reconcile_mailboxes(
+        {family:list(read(family)) for family in ('local_mailboxes','remote_mailboxes','mailboxes')})
+    mailbox_keys = {mailbox_id:native_key(tenant,'mailbox',*mailbox_id) for mailbox_id in mailbox_entities}
+    mailbox_identity_audit = []
+    for mailbox_id,item in sorted(mailbox_observations.items()):
+        target = mailbox_keys.get(item['target'], '')
+        source_key = native_key(tenant,'mailbox-observation',*mailbox_id)
+        mailbox_identity_audit.append({'SourceSystem':mailbox_id[0],'NativeId':mailbox_id[1],
+            'TenantMailboxKey':target,'LinkBasis':item['basis'],'Issues':item['issues']})
+        for issue in item['issues']:
+            finding('Mailbox' if target else 'Mailbox recipient',target or source_key,issue,
+                'Source='+mailbox_id[0]+'; native ID='+mailbox_id[1]+'; SMTP='+item['smtp']
+                +'; '+item['basis']+'. Native recipient retained; SMTP is not an identity or proof of a physical mailbox.',
+                discriminator=source_key)
+    for mailbox_id,item in sorted(mailbox_entities.items()):
+        family,r = mailbox_id[0],item['row']
+        smtp=get(r,'PrimarySmtpAddress','PrimarySMTPaddress')
+        recipient=get(r,'RecipientType') if family=='local_mailboxes' else get(r,'RecipientTypeDetails')
+        external_id=get(r,'ExternalDirectoryObjectId')
+        # Never override a supplied but unmatched technical user ID with SMTP.
+        user=users_by_native.get(key(external_id)) if external_id else (
+            user_by_address(smtp) if key(smtp) not in ambiguous_smtp else None)
+        hkey=mailbox_keys[mailbox_id]
+        mailbox_rows[mailbox_id]={'TenantMailboxKey':hkey,'CmdbMailboxId':hkey,'TenantUserKey':user['TenantUserKey'] if user else '',
+            'CmdbUserId':user['CmdbUserId'] if user else '', 'RecipientTypeDetails':recipient,'ArchiveStatus':get(r,'ArchiveStatus','ArchiveState'),
+            'SourceSystem':family,'DisplayName':get(r,'DisplayName'),'PrimarySmtpAddress':smtp,
+            'LinkStatusLabel':'Resolved' if user else 'Unresolved','ExternalDirectoryObjectId':external_id}
+        recipient_kind=key(recipient)
+        hosting[mailbox_id]={'MailboxHostingKey':hkey,'CountryLabel':user['CountryLabel'] if user else UNKNOWN,
+            'HostingLocation':'Exchange Online' if family=='mailboxes' else 'Exchange On-premises','RecipientTypeDetails':recipient,
+            'MailboxTypeGroup':'Shared mailboxes' if 'sharedmailbox' in recipient_kind else 'User mailboxes' if recipient_kind=='usermailbox' else 'Other types',
+            'EvidenceSource':family}
+        if not smtp:
+            finding('mailbox',hkey,'Missing SMTP','Native mailbox retained without an address; native identity does not depend on SMTP.')
     for m in mailbox_rows.values():
         if not m['TenantUserKey']:
             technical=key(m['RecipientTypeDetails'])=='discoverymailbox' and not m['ExternalDirectoryObjectId']
@@ -826,8 +834,12 @@ def build_tables(source, output, contract, identity, evidence, now=None):
     emit('FactRelationshipOverview',({'RelationshipType':name,'RelationshipCount':count,'EvidenceSource':text} for name,count,text in relationships))
     if set(table_counts)!=set(definitions):
         raise ValueError('Builder did not cover every reporting contract table')
-    # Aggregate qualification, no device identifiers. Raw values remain in the hashed sources.
+    # Qualification plus native mailbox identity lineage; raw rows stay in hashed sources.
     return {'ApplicationCoverage':app_coverage, 'LicenseCoverage':evidence['LicenseCoverage'],
+        'MailboxIdentity': {'Observations':mailbox_identity_audit,
+            'ObservedMailboxEntities':len(mailbox_entities),
+            'UnresolvedRemoteRecipients':sum(i['identity'][0]=='remote_mailboxes' and i['target'] is None for i in mailbox_observations.values()),
+            'Policy':'Native mailbox keys; unique technical cross-source links only. Remote recipients without an observed mailbox are findings, not extra mailbox counts. All source identities are retained in this audit.'},
         'ADDomainCoverage':[r['DomainCoverage'] for r in evidence['ProducerReceipts'] if r.get('DomainCoverage')], 'EntraGroupCatalogComparison': {
         'CatalogSource': source_defs['group_scope']['file'],
         'CatalogGroups': len(native_groups),

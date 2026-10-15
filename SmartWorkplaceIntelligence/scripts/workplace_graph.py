@@ -75,7 +75,8 @@ def build_graph(root, tenant):
         ('ADDomainSource','Domain','Active Directory','DNSRoot','DNSRoot','TenantADDomainKey','','')]
     for table, typ, system, identifier, label, source_key, state, country in specs:
         for row in rows(root, table):
-            entity(table,row,typ,system,identifier,label,source_key,state,country)
+            source_system = ('Exchange On-premises' if row['SourceSystem']=='local_mailboxes' else 'Exchange Online') if table=='FactMailbox' else system
+            entity(table,row,typ,source_system,identifier,label,source_key,state,country)
     for row in rows(root,'ADDirectoryObject'):
         entity('ADDirectoryObject',row,'AD '+row['ObjectClass'],'Active Directory','ObjectGUID','DistinguishedName','TenantADObjectKey')
     for table, field, typ, label in [('ADUserSource','TenantADUserKey','AD user','DisplayName'),
@@ -159,7 +160,8 @@ def build_graph(root, tenant):
                 if r[target_field]:
                     link(table,r,r[field],table,r[field],target,r[target_field],'Qualified native identity link','AD / Entra',r['CloudMatchStatus'])
         for r in rows(root,'FactMailbox'):
-            link('FactMailbox',r,r['TenantMailboxKey'],'FactMailbox',r['TenantMailboxKey'],'DimUser',r['TenantUserKey'],'Mailbox account','Exchange Online',r['LinkStatusLabel'],raw_to=r['CmdbUserId'])
+            system='Exchange On-premises' if r['SourceSystem']=='local_mailboxes' else 'Exchange Online'
+            link('FactMailbox',r,r['TenantMailboxKey'],'FactMailbox',r['TenantMailboxKey'],'DimUser',r['TenantUserKey'],'Mailbox account',system,r['LinkStatusLabel'],raw_to=r['CmdbUserId'])
         for r in rows(root,'DimLicenseServicePlan'):
             link('DimLicenseServicePlan',r,r['TenantServicePlanKey'],'DimLicenseSku',r['TenantSkuKey'],'DimLicenseServicePlan',r['TenantServicePlanKey'],'SKU service plan','Microsoft 365',r['ProvisioningStatus'],r['SkuId'],r['ServicePlanId'])
         for r in rows(root,'FactUserServicePlan'):
