@@ -91,9 +91,28 @@ Permissions, configuration files, CSV schemas, filenames and business algorithms
 are unchanged. Detailed synthetic audit evidence is retained outside the public
 repository and does not establish tenant qualification.
 
-Windows 11 Readiness Issues 1.21 uses the shared atomic publisher for detail,
+Windows 11 Readiness Issues 1.21 used the shared atomic publisher for detail,
 summary, archives and weekly manifest. Its readiness classification and input
-contract are unchanged.
+contract were unchanged.
+
+## Current application and readiness retention
+
+Discovered Apps 1.34 keeps five weekly detail snapshots. Before a week leaves
+that window, its summary is copied to `SummaryHistory/<ISO week>/` with a SHA-256
+and original source timestamp manifest. The summary and manifest must be
+published to SharePoint before the shared history helper deletes the older
+weekly folder. `New-ApplicationInventoryEvidence.ps1` 1.2.0 reads these compact
+summaries together with the five detailed weeks, so trend weeks remain present.
+Deploy that evidence reader and set the server's per-script
+`WeeklyHistoryRetentionWeeks` to `5` before the next collector run. Verify the
+compact summaries and a prepared-evidence build before clearing old SharePoint
+weekly folders; local retention alone does not delete remote copies.
+
+Windows 11 Readiness Issues 1.31 no longer creates daily `Archive` copies. After
+a successful run it removes legacy timestamped copies only when the matching
+SharePoint deletion is verified. Current detail, summary and weekly history stay
+published. Old synchronized copies that are absent from the server still need
+separate SharePoint cleanup.
 
 ## Windows Update country breakdown
 

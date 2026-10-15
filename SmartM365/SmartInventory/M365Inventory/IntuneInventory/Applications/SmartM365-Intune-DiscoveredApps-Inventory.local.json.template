@@ -34,5 +34,5 @@
   "ProgressEveryApps": 250,
   "EnableWeeklyHistory": true,
   "WeeklyHistoryFolderPath": "{{DataAllRootPath}}\\Intune\\Applications\\DiscoveredApps\\WeeklyHistory",
-  "WeeklyHistoryRetentionWeeks": 52
+  "WeeklyHistoryRetentionWeeks": 5
 }
