@@ -3,7 +3,7 @@
 .SYNOPSIS
     Microsoft Teams tenant inventory with CSV exports and HTML alert summary.
 .VERSION
- 0.43
+ 0.44
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication; ImportExcel.
@@ -57,7 +57,7 @@ if ($PSBoundParameters.ContainsKey('MaxItems') -and $MaxItems -gt 0) {
     }
 }
 $ErrorActionPreference='Stop'; Set-StrictMode -Version Latest
-$ScriptVersion="0.43"
+$ScriptVersion="0.44"
 $ScriptBaseName = [System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
 $TaskName = $ScriptBaseName
 $RunStarted=Get-Date; $RunDateUtc=$RunStarted.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ',[Globalization.CultureInfo]::InvariantCulture); $RunId=[guid]::NewGuid().ToString(); $CurrentOperation='Initialize'
@@ -383,6 +383,20 @@ function Get-TeamsChannelSiteId {
     return [string](Get-TeamsGraphPropertyValue -Object $parent -Name 'siteId')
 }
 
+function Get-TeamsDriveSiteId {
+    param([AllowNull()][object]$Drive)
+    $ids = Get-TeamsGraphPropertyValue -Object $Drive -Name 'sharepointIds'
+    $siteGuid = [guid]::Empty
+    $webGuid = [guid]::Empty
+    if (-not [guid]::TryParse([string](Get-TeamsGraphPropertyValue -Object $ids -Name 'siteId'),[ref]$siteGuid) -or
+        -not [guid]::TryParse([string](Get-TeamsGraphPropertyValue -Object $ids -Name 'webId'),[ref]$webGuid)) { return '' }
+    $siteUrl = [string](Get-TeamsGraphPropertyValue -Object $ids -Name 'siteUrl')
+    if (-not $siteUrl) { $siteUrl = [string](Get-TeamsGraphPropertyValue -Object $Drive -Name 'webUrl') }
+    $uri = $null
+    if (-not [uri]::TryCreate($siteUrl,[UriKind]::Absolute,[ref]$uri) -or $uri.Scheme -ne 'https') { return '' }
+    return ('{0},{1},{2}' -f $uri.Host.ToLowerInvariant(),$siteGuid.ToString('D'),$webGuid.ToString('D'))
+}
+
 function Add-TeamsChannelSiteReferences {
     param([Parameter(Mandatory)][AllowEmptyCollection()][object[]]$ChannelRows)
 
@@ -394,6 +408,9 @@ function Add-TeamsChannelSiteReferences {
         } -Force
     }
     $targets = @($ChannelRows | Where-Object { [string]$_.MembershipType -in @('private','shared') })
+    $driveRows = @{}
+    $folderStatus = @{}
+    $driveStatus = @{}
     for ($offset = 0; $offset -lt $targets.Count; $offset += 20) {
         $last = [math]::Min($offset + 19,$targets.Count - 1)
         $requests = [System.Collections.Generic.List[object]]::new()
@@ -413,27 +430,59 @@ function Add-TeamsChannelSiteReferences {
         }
         foreach ($response in $responses) {
             $row = $requestMap[[string]$response.id]
-            if ($null -eq $row -or [int]$response.status -ne 200) { continue }
+            if ($null -eq $row) { continue }
+            $status = [string][int]$response.status
+            $folderStatus[$status] = 1 + [int]$folderStatus[$status]
+            if ($status -ne '200') { continue }
             $siteId = Get-TeamsChannelSiteId -DriveItem $response.body
-            if (-not $siteId) {
-                $parent = Get-TeamsGraphPropertyValue -Object $response.body -Name 'parentReference'
-                $driveId = [string](Get-TeamsGraphPropertyValue -Object $parent -Name 'driveId')
-                if ($driveId) {
-                    try {
-                        $root = Invoke-Graph -Uri ("https://graph.microsoft.com/v1.0/drives/{0}/root?`$select=parentReference" -f [uri]::EscapeDataString($driveId)) -Operation 'Get channel drive site identity'
-                        $siteId = Get-TeamsChannelSiteId -DriveItem $root
-                    }
-                    catch { WriteLog -Message ("Channel drive site identity was unavailable for TeamId={0}, ChannelId={1}: {2}" -f $row.TeamId,$row.ChannelId,$_.Exception.Message) -Level WARNING }
-                }
-            }
+            if (-not $siteId) { $siteId = Get-TeamsDriveSiteId -Drive $response.body }
             if ($siteId) {
+                $row.SharePointSiteId = $siteId
+                $row.SharePointSiteLinkStatus = 'Collected'
+                continue
+            }
+            $parent = Get-TeamsGraphPropertyValue -Object $response.body -Name 'parentReference'
+            $driveId = [string](Get-TeamsGraphPropertyValue -Object $parent -Name 'driveId')
+            if (-not $driveId) { continue }
+            if (-not $driveRows.ContainsKey($driveId)) { $driveRows[$driveId] = [System.Collections.Generic.List[object]]::new() }
+            [void]$driveRows[$driveId].Add($row)
+        }
+    }
+    $driveIds = @($driveRows.Keys | Sort-Object)
+    for ($offset = 0; $offset -lt $driveIds.Count; $offset += 20) {
+        $last = [math]::Min($offset + 19,$driveIds.Count - 1)
+        $requests = [System.Collections.Generic.List[object]]::new()
+        $requestMap = @{}
+        $requestId = 1
+        foreach ($driveId in @($driveIds[$offset..$last])) {
+            $id = [string]$requestId
+            $requestMap[$id] = $driveId
+            [void]$requests.Add(@{id=$id;method='GET';url=("/drives/{0}?`$select=id,sharepointIds,webUrl" -f [uri]::EscapeDataString($driveId))})
+            $requestId++
+        }
+        try { $responses = @(Invoke-TeamsGraphBatch -Requests $requests.ToArray()) }
+        catch {
+            WriteLog -Message ("Teams channel drive metadata batch failed at offset {0}: {1}" -f $offset,$_.Exception.Message) -Level WARNING
+            continue
+        }
+        foreach ($response in $responses) {
+            $driveId = $requestMap[[string]$response.id]
+            if (-not $driveId) { continue }
+            $status = [string][int]$response.status
+            $driveStatus[$status] = 1 + [int]$driveStatus[$status]
+            if ($status -ne '200') { continue }
+            $siteId = Get-TeamsDriveSiteId -Drive $response.body
+            if (-not $siteId) { continue }
+            foreach ($row in $driveRows[$driveId]) {
                 $row.SharePointSiteId = $siteId
                 $row.SharePointSiteLinkStatus = 'Collected'
             }
         }
     }
     $unavailable = @($targets | Where-Object { $_.SharePointSiteLinkStatus -ne 'Collected' }).Count
-    WriteLog -Message ("Teams channel site links: {0}/{1} resolved; {2} unavailable." -f ($targets.Count - $unavailable),$targets.Count,$unavailable) -Level $(if ($unavailable -gt 0) { 'WARNING' } else { 'INFO' })
+    $folderCodes = @($folderStatus.Keys | Sort-Object | ForEach-Object { '{0}:{1}' -f $_,$folderStatus[$_] }) -join ','
+    $driveCodes = @($driveStatus.Keys | Sort-Object | ForEach-Object { '{0}:{1}' -f $_,$driveStatus[$_] }) -join ','
+    WriteLog -Message ("Teams channel site links: {0}/{1} resolved; {2} unavailable; filesFolder HTTP=[{3}]; drive metadata HTTP=[{4}]." -f ($targets.Count - $unavailable),$targets.Count,$unavailable,$folderCodes,$driveCodes) -Level $(if ($unavailable -gt 0) { 'WARNING' } else { 'INFO' })
 }
 
 function Get-ReportRow {
@@ -844,8 +893,8 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC31s7PQKbiKHQv
-# iLfTZxI3B2QYZQOSrGD4NCA3Ka2qc6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBm0cr4c9uJWf/A
+# ZaAFa8mIRt1Z1LHLBRKtCQJT/ODi86CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -978,31 +1027,31 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIFPK62zTIagC2qyqI7GHB3gk8t0gWUyUcqS5VRetg6wgMA0GCSqG
-# SIb3DQEBAQUABIIBgEbHvlaVpUCrIFCoyDeKE+8+1JWmi5oS0d+vgyuSeCjL0a3b
-# 9L+I7Ukjm2saaadrKOu2D5ZXWj5YT0xK9p2LG4t+zzUpgvy57vLUdHkCIM5UG2Ku
-# Wa9vaPTsfE5gUmNGcFsL+sMfbzwPgfXzQFLfQKCRJXfRIjMB3cMRxg/CLm9Lngjt
-# V5LYYIg2rZ1ehF3TpNqaKpOueOOEgO4a3Vnhc+SYHLE4PUFbvOxZRBz6iwVPYJpq
-# hhQ6vnkvpELEEqR2IZ2EKDCDzjscXI+axKD6/de2wry0f/+LWAuGS0lhbYw4dfHS
-# eUQuEY2pAl9D+j+CzILG3jQIuH+z5x7YBHRl6PzFMCr9TQcPxCM/MiSEug+6GHh5
-# waVsHOA7+R5/7bsF4vI5zPWxEViN3X/qtpI4v+IaaxNUFjcLLQ7OkmyRgrWeVr5N
-# uTgrDAu4nJTfeLNv1839zYL1NTQ5nUO4YIy7h086A7md5Q4vqGZVvFKDdHbt8+wu
-# q1WIALH6O7nllu81KqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIE5OROTqlbjy0YdyQb9I62BdK1923XZZGbosYoNtDsXbMA0GCSqG
+# SIb3DQEBAQUABIIBgICe6z+27qHOQpdk0h8V1+H3Oku8Avk24A/EsqrA4CPOvBo8
+# 1Fwx0iTuduDYswcxZiXv4grh9Bfg6Zm3vXD0InxRRShCC3EY42B0iNLLvqyFWLez
+# WkX4RsY8hJk7M1xzmxMuCLzuEJil4Q8mfIItPwwBpVzReukdkYOPZYMF0MJMz6al
+# weOiChFMc7NVoDgpQKQ6TBUqm9ACctFRzXluRPp34QyIeXFesCNe1C3zJO5vrbqw
+# E7we70JJAezG/7oiLkevV6e+4oQPuFBLp5IM9HCIeEwWWUtBBtvv+u92tgnlO9h5
+# JuTlmqALCl3xYvcAnzB2YwwiczjknBopBbuxy7SzjFYVvY5a6DkA/wFXkA3WbFqL
+# i/fpazAUbiKPnIMN7sPn8LBrJxoQaZiD4E1oMzhGdzNEF5DXtOTC4wqbuDS4SUjO
+# KU6OjpsMqS/5L9yUgx+nvTwe+b0gU8pgRuOko2PjkgE2bnGYccFjnYFpcsMWoFNl
+# 5rUe1PSehPRQ3cz0GaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTUwNzI4
-# MDVaMC8GCSqGSIb3DQEJBDEiBCAEcDgtc2wuM9ebzNf7JjRUYRbFERMQJj7RbOCH
-# rgbexDANBgkqhkiG9w0BAQEFAASCAgBxRBIVqqjY4PbjsieD+Bv2lvGXkkDFVXJb
-# uXqIc5Y/zerSoeCdWToeLP0uL6WKL0iS5R3wXmxCRpmc8rxo63/C51gGOlGxZdy2
-# IcSJwOCKx6CCJyXt+gOJw68mcPfTiZaeF0x1NCP1bxW7I9dt+0FK1crYsj+X7pmG
-# fXcnHqgXw0JEh3uqjWgQyDw2cH69B2C4Qcf38Jc523tIAA5+X7kG+ceKEu2vtPJc
-# yAn1NzIH/ZRBdrVLN0ZSLvCNZOOi9HMWmJCb9ndWT6nlFmRMG3qCTk3AtBEyb0mG
-# dVyLvsSm1dCfR+tdG5c+Fd6B1Mxwn2Q5HpcsxV7hBKik69JDA8280R7oMH5sqeRs
-# ZO8GeeMKG6wy0fk1EZOxeMZ12QX9McywRZXK71wY6G5Acx0idgKnXQNvlGJ9Y21y
-# cHXz1QuNmAPw+KHzKbWebGO4fNdUw1jCRz2xmFd+YK2i3PLHt8bpFEICkq3S5BXp
-# WmCSo0CWKJZnbI6nyQBw/vil4pB+SZkFi/5AEcLkTRS4KqWTpZoZPK3HCFI6yt82
-# AKMmsED0dul8VFSg9wlnOpPaBM1U50H1Z9rsc55U+mYjad5+r8ri6S8S3/oMILsR
-# biiaQ57IIiH1xOsXU77q89o6GVwOQoD4cDZKxLNcJQ10wnGABeXK5NshNSwzEe/t
-# uWx0+dpAiQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTUwODA0
+# MDZaMC8GCSqGSIb3DQEJBDEiBCAXoN+M5BjizJfYTk6CenQQY8ogj+eu7W9v5c7Y
+# y//7UTANBgkqhkiG9w0BAQEFAASCAgASVFZRF+hFHr6X0IiQBpHQQnGQGg5SQPN0
+# 22VzExQpkhLaWsAb+h1slOeeaz5AD9vRLjHAxZ5YfUitKCAMyG/wFJ5W8ynS2XcL
+# gXMBzk/O0tviCvaw20sb42CJnvenFLXV2V1knkJo+W7SIT7vjee27W1PSFHbXajG
+# 8PP4ImI1U+l+eSUxeqwMhbZIl6rK/7XvVZ05wsFfFNysBhB9Y8fiS+7jZGwWsVfg
+# WAXIommchXY2RmQkWCLKroDvWGVtGRVMTaYbkkBPJEVS4R8t2XgPomnPoPLyh3Oa
+# mPI50/ngXcJjv4JATnNv2w5dStD+fqztFJ1Zkufe9m81wBpJsLTeWPjssbbXAnJ5
+# H9W4KUmb+qdTIrx7EZG0izPRuo6SlROd2b3PhxFOCO8Uj8YMBUJIzuR8phjiqwxb
+# DKmZjrpN5kgYhFo4sazEvCV+ZNsoc1ZHQssYvcvrRRbrDSYKZgD80eQjgxPsrf+r
+# n4pJ0Egw3RkA3IB8WqtQn2SPFeF3TfWXT3QkIkSKkHUnRFVPHleo8mGQ9ctQVDX+
+# sQmkiexX6mYXdyjgULGBkuXTfGXWoxEkFoq+h+2twvQgiABS506uPhQiCdcKgC0Z
+# s0sLucIPaidYF7Rf3RAvgOa99S8qGzqn6lpBFTSt06jEJZqCX0eZL1bGL0mbStUR
+# 69YBTdb0GQ==
 # SIG # End signature block

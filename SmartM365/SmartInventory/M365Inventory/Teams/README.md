@@ -19,7 +19,7 @@ Latest CSV files:
 | Channels | `M365_Teams_Channels.csv` |
 | Guests | `M365_Teams_Guests.csv` |
 
-The Teams CSV now exports the team's root SharePoint `SharePointSiteId`, `SharePointSiteUrl`, and `SharePointSiteLinkStatus` from Graph `/groups/{TeamId}/sites/root`. The Channels CSV exports `SharePointSiteId` and `SharePointSiteLinkStatus` for private and shared channels using Graph `filesFolder`; standard channels reuse the team site and are marked `NotApplicable`. A missing site identity is marked `Unavailable` and is never inferred from the team or channel name. The Teams CSV also records `IsPartialInventory`. These fields allow the SPO inventory mail to count Teams-linked sites in its own usage-report scope when both snapshots are qualified. The site-link lookups are best effort and do not change Teams inventory health status.
+The Teams CSV now exports the team's root SharePoint `SharePointSiteId`, `SharePointSiteUrl`, and `SharePointSiteLinkStatus` from Graph `/groups/{TeamId}/sites/root`. The Channels CSV exports `SharePointSiteId` and `SharePointSiteLinkStatus` for private and shared channels using Graph `filesFolder`; when its response supplies only `parentReference.driveId`, the collector reads the drive's `sharepointIds` to construct the Graph site ID. Standard channels reuse the team site and are marked `NotApplicable`. A missing site identity is marked `Unavailable` and is never inferred from the team or channel name. The Teams CSV also records `IsPartialInventory`. These fields allow the SPO inventory mail to count Teams-linked sites in its own usage-report scope when both snapshots are qualified. The site-link lookups are best effort and do not change Teams inventory health status.
 
 ## Collection completeness and publication
 

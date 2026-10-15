@@ -3,7 +3,7 @@
 .SYNOPSIS
     Synthetic Teams and SharePoint workbook/mail regressions; no dependency repair.
 .VERSION
-    1.0.2
+    1.0.3
 #>
 [CmdletBinding()]
 param()
@@ -38,7 +38,7 @@ function global:Initialize-SmartM365ImportExcel {
 }
 $teamsPath = Join-Path $inventoryRoot 'M365Inventory/Teams/SmartM365-Teams-Inventory.ps1'
 $spoPath = Join-Path $inventoryRoot 'M365Inventory/SharePoint/SmartM365-SPO-Inventory.ps1'
-Import-ScriptFunction -Path $teamsPath -Names @('IsoUtc','Get-TeamsGraphPropertyValue','Get-TeamsChannelSiteId','Add-TeamsChannelSiteReferences','Get-TeamsBatchSeed','Get-TeamsCsvColumnNames','Import-TeamsMailCsvSet','Invoke-TeamsDailySummaryMail','New-TeamsTimestampedWorkbook','Add-TeamsWorkbookOverview','Get-TeamsMailStatus','ConvertTo-HtmlReport')
+Import-ScriptFunction -Path $teamsPath -Names @('IsoUtc','Get-TeamsGraphPropertyValue','Get-TeamsChannelSiteId','Get-TeamsDriveSiteId','Add-TeamsChannelSiteReferences','Get-TeamsBatchSeed','Get-TeamsCsvColumnNames','Import-TeamsMailCsvSet','Invoke-TeamsDailySummaryMail','New-TeamsTimestampedWorkbook','Add-TeamsWorkbookOverview','Get-TeamsMailStatus','ConvertTo-HtmlReport')
 Import-ScriptFunction -Path $spoPath -Names @('ConvertTo-SpoHtml','Get-SpoCsvColumnNames','ConvertTo-SpoSiteUrlKey','Measure-SpoTeamsSiteLinks','Get-SpoTeamsSiteLinksFromCsv','Get-SpoLicenseCapacityEstimate','Add-SpoLicenseEstimateToSummary','Import-SpoMailCsvSet','Invoke-SpoDailySummaryMail','New-SpoTimestampedWorkbook','Add-SpoWorkbookOverview','Get-SpoMailStatus','New-SpoHtmlSummary')
 function WriteLog { param($Message,$Level) }
 function Write-SpoLog { param($Message,$Level) }
@@ -53,6 +53,12 @@ function global:Invoke-TeamsGraphBatch {
     }
     foreach ($request in $Requests) {
         if ($script:batchMode -eq 'Unavailable') { [pscustomobject]@{id=$request.id;status=404;body=$null} }
+        elseif ($script:batchMode -eq 'DriveMetadata') {
+            if ($request.url -like '/drives/*') {
+                [pscustomobject]@{id=$request.id;status=200;body=[pscustomobject]@{sharepointIds=[pscustomobject]@{siteId='11111111-1111-1111-1111-111111111111';webId='22222222-2222-2222-2222-222222222222';siteUrl='https://tenant.example/sites/channel'}}}
+            }
+            else { [pscustomobject]@{id=$request.id;status=200;body=[pscustomobject]@{parentReference=[pscustomobject]@{driveId='drive-channel'}}} }
+        }
         else { [pscustomobject]@{id=$request.id;status=200;body=[pscustomobject]@{parentReference=[pscustomobject]@{siteId='tenant.example,site-channel,web-channel'}}} }
     }
 }
@@ -68,6 +74,10 @@ Add-TeamsChannelSiteReferences -ChannelRows $channelLinkRows
 Assert-Equal $channelLinkRows[0].SharePointSiteId 'tenant.example,site-channel,web-channel' 'Private channel site identity'
 Assert-Equal $channelLinkRows[0].SharePointSiteLinkStatus 'Collected' 'Private channel link status'
 Assert-Equal $channelLinkRows[1].SharePointSiteLinkStatus 'NotApplicable' 'Standard channel reuses the team site'
+$script:batchMode = 'DriveMetadata'
+Add-TeamsChannelSiteReferences -ChannelRows $channelLinkRows
+Assert-Equal $channelLinkRows[0].SharePointSiteId 'tenant.example,11111111-1111-1111-1111-111111111111,22222222-2222-2222-2222-222222222222' 'Channel site ID is recovered from drive SharePoint IDs'
+Assert-Equal $channelLinkRows[0].SharePointSiteLinkStatus 'Collected' 'Drive metadata channel link status'
 $script:batchMode = 'Unavailable'
 Add-TeamsChannelSiteReferences -ChannelRows $channelLinkRows
 Assert-Equal $channelLinkRows[0].SharePointSiteLinkStatus 'Unavailable' 'Failed channel link cannot reuse a prior identity'
@@ -323,8 +333,8 @@ Write-Host 'Teams/SPO mail and workbook offline checks passed.'
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD4n1EHJoD0Mddl
-# qVsvV199I9zKxuMcNOXKKwza2Im2HaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDMrQ1GnN+6VHZU
+# e2bIT4wXJ7T0Nz1fCbuAeZfxoYzaw6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -457,31 +467,31 @@ Write-Host 'Teams/SPO mail and workbook offline checks passed.'
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIH2UdVHlCGM8RdMCWWkwuyhQTesS/WUD9JktNjSiz9tLMA0GCSqG
-# SIb3DQEBAQUABIIBgA6KtBhO58evvzut/JNwHs9aEVDZluoWPFeKLuBP+ltqNBuW
-# XNF9WN0eeqa95A1Ct2qJ40W8UTraGGMID97W5cpE6fiqqx6UCTF7HcML7eSUoVJs
-# 8a4MGQ9UZt2KNmZWzhw6JD9y+d70LAJ+fegBt5bQZEIjkw4fWmcnP7ZhNaTLgws7
-# p40xyQjrXakYYeQgPPGTq7Y//Js3GVD8eyGQEpArQYDgI5GbPND/tVdfjbSmVZHD
-# tpz4Lt+JWaxFzcNyNqO54PIb/zqucRMuS6qAq7kDi7ACwlpztrv73ZnlB36enbuH
-# wbWcbt24HduesOzM1du+4cXyeHsrK2MmWg2ASdL8TuKRLtpA6/IakjzvMp6wCpIh
-# PbJLzHSA1jEWvYt4Vm5yYmtJxlcx9DR03Vk88+oQCclbY1/g+o4mM/8H0K1E1WH6
-# yuiIUhdDO8zEKGz+HWKCgUzCfvh7lrwyDEjwyZ/Ispmk02XjI9fRZ+BDOM+cfN51
-# uN2kF64yTQH5/H7YrqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIADELAPTPBTf9Tk6NLyRZvgRMvE3FVv6bC9XsdGMk5RBMA0GCSqG
+# SIb3DQEBAQUABIIBgDFzxuYBo49BIsc1DvA+rZm2EPF797Z25VLvreIrZCMM/+vL
+# WtFXGf96bzOw/nUMywg/zfZSpO2/U2Xv/4Uvd92NQT+S0TfL9EX/MzeyZ54U49hy
+# PB36/rrKrblMZrMPYZ77dBPsYqtpjDoHJzP6xbymm4mjjoA+W8ix9WrSUpaq9KPF
+# mniDAU5Plww3v3pVdAPX5NZEUwldBhx1t+/MBUkKy3VVijBPezscKMIcNdwMUwNg
+# vo6xG4hWSenm7qI//NmfTWWQAAj/zzJAwoBg25R2tRFTajyChozCR1GzkGZmzUL3
+# pKWrM27XWsmwHikvBfjr7YhjPYgUNAR85UUXRjEz+zRKortMVsGuiTCLuZHWlFFS
+# 2TcnZwNo52p9viUNKV+ywRJgUNv7Qm3VI3/Df7yuJTOGvSrJCflemiTPVTx1obq/
+# aLC4xz9eKvH05OdSHm1FktxT4+Nea7srTPzpUWuhmRniefF6asb4cA9fcUBAH1jt
+# qL9lDcxWFpagEfipUKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTUwNzMz
-# MTVaMC8GCSqGSIb3DQEJBDEiBCDh4D/oj6F3OaP867hBXI3AwrdcUejxGYl/cqE5
-# GaZMeDANBgkqhkiG9w0BAQEFAASCAgAjb4Ehaei6FZVfH+HSSwdXOzSOYv0eV58O
-# VOJEAE+WLUZTE2kKbwsWyD9g+AD1ZbbQKDbRwjEobrTF0uj0oSSI+XJ6tu0ikGPJ
-# XM4jGeyC4oEUQY3yQF4rLxmWCqr3Ad7o60oyXnRiDC16GuMe2CzijIy0r0sTk8uM
-# eLKSOEAI5K7qpTd9u4QF/38kXtCvTpQ1ZanTdpndeNH0PorxRQU5CXfDcWRo8yI5
-# kWHmZcwFP0h5MPks8crzgj0xaX+3tzSjdU+tJZxxe0qk39+UgX5Gqs6ef7/CVzfz
-# L/hWJP10tjLvgBC7LQSMgJymCnx/es8ugaoyIpBdyB7gImSYF+x3jlDFWLL76cjc
-# k5/aFLs4dpEIWR8IAV0uTrV6FdD4N1jLRKxshWbQWh2ZoMUTomXePJeIEhNWRWB9
-# OsXCkvU/yBQjYk9PipW2S5oI6/GvoGe8DaqLm/hxdnq1ELDvxrcMI0bKd4SljKKY
-# CTpNmQTJ0n9DVjmFlpJSECCPZOycjF8R0VYkjATNzxdy0Jv+xhhAb1SmJFEjO9Py
-# lfF2tVM2ZvF0A0o51Z+LCvq7rcROL/ZK/7XtNnQlEvdKRyP6QXQFHDaxaM1bPmlB
-# BtRJ4Gq1dS3S0GG8hHLChG/IABYn2Fqlnf4/m61SFCH1dEdXqio7X5V4jwO3U+JQ
-# J1ms3LHG2A==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTUwODA0
+# MDZaMC8GCSqGSIb3DQEJBDEiBCC1e4XzXZmykrjn/+JbKNyf3mQupeLJF2escyr4
+# 7Ho39zANBgkqhkiG9w0BAQEFAASCAgAgAVhfw/s0qIVRIeUcSMoGLH7GOJTrmHun
+# jFqWg5nFbjVGhTr+b0pjUX5i5kJAuGrL3VUgf0tKtCtzhXLxJNuKE2xGgf1WB73f
+# VdSe5zYg/Sk30XLpNNE2A8LcWKteN/LIhZoVbIDaW/W+rCDHNmHSWFt53x5fwCyS
+# N3sv4KIcMpMzPdArb2aBQV3wT3oUMe+svK23KVfM7tCQiaQy3bn2eYn4KRTAmryV
+# MvyuRVzZ/wYjwXev1+rDIgF+PZeSoGe4PQEu0/kZI1nkzukTSQYeFV/XDjP1fS50
+# w109Ec7ID51Ah+CiJMX0cIFEdf2aO40WD29BYcth64ioVA+Qo+wB9xXbqzTsFAhZ
+# orLajLnpU0CMHhV0dqLa9/qYS+FBgjgS7KoBJ05v7BePHpfNOGbl06DFoDh8vaRh
+# O/ynN8Xc1fk3YNlYW98B5gW9vj/FH2Fj3H3gTSfOCGXwzN1mtT+oel8SVHqPx4Vq
+# 1COvkXOMADqd7SWzb85xPG3Rx3rHr6dEEzVkCT3sjK2Wh0vnVeZ+85v1px+Hwb2S
+# fsSKeR/K/kuRQDQI6XD0pXRh74LPk+ypyQk1RMq8Hll+H+Kb4aBca4C6s7qDKsoN
+# 8SdCLP4FEa81IGLRcuJG66RjHzDy6K7NyqosSFMjoXDznz71elORsoIzPoYeWTgL
+# Fr9azHITSg==
 # SIG # End signature block
