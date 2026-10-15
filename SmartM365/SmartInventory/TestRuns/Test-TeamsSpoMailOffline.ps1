@@ -3,7 +3,7 @@
 .SYNOPSIS
     Synthetic Teams and SharePoint workbook/mail regressions; no dependency repair.
 .VERSION
-    1.0.1
+    1.0.2
 #>
 [CmdletBinding()]
 param()
@@ -38,10 +38,39 @@ function global:Initialize-SmartM365ImportExcel {
 }
 $teamsPath = Join-Path $inventoryRoot 'M365Inventory/Teams/SmartM365-Teams-Inventory.ps1'
 $spoPath = Join-Path $inventoryRoot 'M365Inventory/SharePoint/SmartM365-SPO-Inventory.ps1'
-Import-ScriptFunction -Path $teamsPath -Names @('IsoUtc','Get-TeamsCsvColumnNames','Import-TeamsMailCsvSet','Invoke-TeamsDailySummaryMail','New-TeamsTimestampedWorkbook','Add-TeamsWorkbookOverview','Get-TeamsMailStatus','ConvertTo-HtmlReport')
-Import-ScriptFunction -Path $spoPath -Names @('ConvertTo-SpoHtml','Get-SpoCsvColumnNames','Get-SpoLicenseCapacityEstimate','Add-SpoLicenseEstimateToSummary','Import-SpoMailCsvSet','Invoke-SpoDailySummaryMail','New-SpoTimestampedWorkbook','Add-SpoWorkbookOverview','Get-SpoMailStatus','New-SpoHtmlSummary')
+Import-ScriptFunction -Path $teamsPath -Names @('IsoUtc','Get-TeamsGraphPropertyValue','Get-TeamsChannelSiteId','Add-TeamsChannelSiteReferences','Get-TeamsBatchSeed','Get-TeamsCsvColumnNames','Import-TeamsMailCsvSet','Invoke-TeamsDailySummaryMail','New-TeamsTimestampedWorkbook','Add-TeamsWorkbookOverview','Get-TeamsMailStatus','ConvertTo-HtmlReport')
+Import-ScriptFunction -Path $spoPath -Names @('ConvertTo-SpoHtml','Get-SpoCsvColumnNames','ConvertTo-SpoSiteUrlKey','Measure-SpoTeamsSiteLinks','Get-SpoTeamsSiteLinksFromCsv','Get-SpoLicenseCapacityEstimate','Add-SpoLicenseEstimateToSummary','Import-SpoMailCsvSet','Invoke-SpoDailySummaryMail','New-SpoTimestampedWorkbook','Add-SpoWorkbookOverview','Get-SpoMailStatus','New-SpoHtmlSummary')
 function WriteLog { param($Message,$Level) }
 function Write-SpoLog { param($Message,$Level) }
+
+$script:batchLengths = [System.Collections.Generic.List[int]]::new()
+$script:batchMode = 'Seed'
+function global:Invoke-TeamsGraphBatch {
+    param([object[]]$Requests)
+    if ($script:batchMode -eq 'Seed') {
+        [void]$script:batchLengths.Add($Requests.Count)
+        return @()
+    }
+    foreach ($request in $Requests) {
+        if ($script:batchMode -eq 'Unavailable') { [pscustomobject]@{id=$request.id;status=404;body=$null} }
+        else { [pscustomobject]@{id=$request.id;status=200;body=[pscustomobject]@{parentReference=[pscustomobject]@{siteId='tenant.example,site-channel,web-channel'}}} }
+    }
+}
+$seed = Get-TeamsBatchSeed -Teams @([pscustomobject]@{id='a'},[pscustomobject]@{id='b'},[pscustomobject]@{id='c'},[pscustomobject]@{id='d'})
+Assert-Equal ($script:batchLengths -join ',') '18,6' 'Teams prefetch stays within Graph 20-request batch limit'
+Assert-Equal $seed['a'].PSObject.Properties['Site'].Name 'Site' 'Teams prefetch includes the site identity'
+$script:batchMode = 'Channel'
+$channelLinkRows = @(
+    [pscustomobject]@{TeamId='a';ChannelId='private-1';MembershipType='private'},
+    [pscustomobject]@{TeamId='a';ChannelId='standard-1';MembershipType='standard'}
+)
+Add-TeamsChannelSiteReferences -ChannelRows $channelLinkRows
+Assert-Equal $channelLinkRows[0].SharePointSiteId 'tenant.example,site-channel,web-channel' 'Private channel site identity'
+Assert-Equal $channelLinkRows[0].SharePointSiteLinkStatus 'Collected' 'Private channel link status'
+Assert-Equal $channelLinkRows[1].SharePointSiteLinkStatus 'NotApplicable' 'Standard channel reuses the team site'
+$script:batchMode = 'Unavailable'
+Add-TeamsChannelSiteReferences -ChannelRows $channelLinkRows
+Assert-Equal $channelLinkRows[0].SharePointSiteLinkStatus 'Unavailable' 'Failed channel link cannot reuse a prior identity'
 
 $teamsSummary = @{TotalTeams=769;OwnerlessTeams=60;HighQuotaTeams=2;InactiveTeams=100;ActiveTeams=600;ArchivedTeams=69;PublicTeams=20;TeamsWithGuests=50;CriticalCount=62;WarningCount=384}
 Assert-Equal (Get-TeamsMailStatus -Summary $teamsSummary -PartialInventory $false) 'Warning' 'Localized Teams findings'
@@ -96,16 +125,17 @@ $spoSummary.IncludeOneDrive=$false
 $spoSummary.DeepSharingScan=$false
 $spoSummary.TenantCapacitySource='Get-PnPTenantUnauthorized'
 $spoSummary.EstimatedTenantCapacityGB=91024
+$spoSummary.EstimatedTenantUtilizationPercent=0.55
 $spoSummary.CapacityEstimateEligibleUnits=9000
 $spoSummary.CapacityEstimateAsOfUtc='2026-10-13T02:00:00Z'
-$statusFromEstimate = [ordered]@{SitesProcessed=100;OwnerlessSites=0;HighQuotaSites=0;CriticalAlerts=0;WarningAlerts=0;TenantStorageUtilizationPercent='';EstimatedTenantCapacityGB=91024}
+$statusFromEstimate = [ordered]@{SitesProcessed=100;OwnerlessSites=0;HighQuotaSites=0;CriticalAlerts=0;WarningAlerts=0;TenantStorageUtilizationPercent='';EstimatedTenantCapacityGB=91024;EstimatedTenantUtilizationPercent=99}
 Assert-Equal (Get-SpoMailStatus -Summary $statusFromEstimate -PartialInventory $false) 'OK' 'Estimated capacity cannot change mail status'
 $spoHtml = New-SpoHtmlSummary -WorstStatus 'Warning' -Alerts $spoAlerts -SiteRows $spoSites -Summary $spoSummary
 if ($spoHtml -notmatch 'Sites to review' -or $spoHtml -notmatch 'Action required' -or $spoHtml -notmatch 'Usage-report sites') { throw 'SPO mail summary is missing.' }
 if ($spoHtml -notmatch 'List &amp; One' -or $spoHtml -match 'List & One' -or $spoHtml -match '<a\s') { throw 'SPO mail escaping or default link behavior is invalid.' }
 if ([regex]::Matches($spoHtml,'https://example.invalid/a').Count -ne 1 -or $spoHtml -notmatch 'Inactive with date</div>\s*<div[^>]*>1') { throw 'SPO priority or dated-inactivity count is invalid.' }
 if ($spoHtml -notmatch 'Sites without an activity date: 1' -or $spoHtml -notmatch 'Sites without Graph enrichment: 1') { throw 'SPO evidence coverage is missing.' }
-if ($spoHtml -notmatch 'Tenant capacity \(estimated\)' -or $spoHtml -notmatch 'License estimate: 1 TB \+ 10 GB x 9000' -or $spoHtml -match 'Not measured') { throw 'SPO must label the license estimate and avoid an unmeasured card.' }
+if ($spoHtml -notmatch 'Tenant utilization \(estimated\)' -or $spoHtml -notmatch '0.55%' -or $spoHtml -notmatch '91(?:&#160;|,)024 GB estimated capacity' -or $spoHtml -notmatch 'License estimate: 1 TB \+ 10 GB x 9000' -or $spoHtml -match 'Not measured') { throw 'SPO must show estimated utilization, the capacity basis, and avoid an unmeasured card.' }
 if ($spoHtml -notmatch 'colspan="2"' -or $spoHtml -notmatch 'background:#eef2ff') { throw 'SPO KPI grid does not use the Exchange-style wide card.' }
 if ($spoHtml.IndexOf('<h2>Summary</h2>') -gt $spoHtml.IndexOf('Action required') -or $spoHtml -notmatch 'Priority' -or $spoHtml -notmatch 'Site storage above 90%' -or $spoHtml -notmatch 'No activity recorded for over 180 days') { throw 'SPO KPI grid must precede the action summary, which shows source thresholds.' }
 $spoSummary.TenantStorageCapacityGB = 1000
@@ -135,9 +165,58 @@ try {
     Assert-Equal $estimate.CapacityGB 2024 'Eligible E3 seats add 10 GB each; F1 seats do not'
     Assert-Equal (Get-SpoLicenseCapacityEstimate -Folder $temporaryRoot -ExpectedTenantKey 'other' -ExpectedTenantId 'tenant-synthetic' -ReferenceDateUtc $licenseDate).Available $false 'License estimate tenant isolation'
     Assert-Equal (Get-SpoLicenseCapacityEstimate -Folder $temporaryRoot -ExpectedTenantKey 'prod' -ExpectedTenantId 'tenant-synthetic' -ReferenceDateUtc '2026-01-01T00:00:00Z').Available $false 'License estimate freshness'
-    $estimateSummary = [ordered]@{TenantStorageCapacityGB='';TenantStorageUtilizationPercent=''}
+    $estimateSummary = [ordered]@{TenantStorageCapacityGB='';TenantStorageUtilizationPercent='';StorageUsedGB=506}
     Add-SpoLicenseEstimateToSummary -Summary $estimateSummary -Folder $temporaryRoot -ExpectedTenantKey 'prod' -ExpectedTenantId 'tenant-synthetic' -ReferenceDateUtc $licenseDate
     Assert-Equal $estimateSummary.EstimatedTenantCapacityGB 2024 'License estimate added to mail summary'
+    Assert-Equal $estimateSummary.EstimatedTenantUtilizationPercent 25 'Estimated utilization uses inventoried storage and estimated capacity'
+    Add-SpoLicenseEstimateToSummary -Summary $estimateSummary -Folder $temporaryRoot -ExpectedTenantKey 'prod' -ExpectedTenantId 'tenant-synthetic' -ReferenceDateUtc $licenseDate -PartialInventory:$true
+    Assert-Equal $estimateSummary.EstimatedTenantUtilizationPercent '' 'Partial inventory cannot claim tenant utilization'
+
+    $teamsDate = [datetimeoffset]::UtcNow.AddMinutes(-10).ToString('yyyy-MM-ddTHH:mm:ssZ',[Globalization.CultureInfo]::InvariantCulture)
+    $spoDate = [datetimeoffset]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ',[Globalization.CultureInfo]::InvariantCulture)
+    $siteLinkRows = @(
+        [pscustomobject]@{SiteId='tenant.example,site-one,web-one';SiteUrl='https://tenant.example/sites/one';IsOneDrive='False';SiteIdentitySource='GraphSite';GraphEnrichmentStatus='Collected'},
+        [pscustomobject]@{SiteId='tenant.example,site-two,web-two';SiteUrl='https://tenant.example/sites/two';IsOneDrive='False';SiteIdentitySource='GraphSite';GraphEnrichmentStatus='Collected'},
+        [pscustomobject]@{SiteId='tenant.example,site-channel,web-channel';SiteUrl='https://tenant.example/sites/channel';IsOneDrive='False';SiteIdentitySource='GraphSite';GraphEnrichmentStatus='Collected'},
+        [pscustomobject]@{SiteId='tenant.example,site-other,web-other';SiteUrl='https://tenant.example/sites/other';IsOneDrive='False';SiteIdentitySource='GraphSite';GraphEnrichmentStatus='Collected'},
+        [pscustomobject]@{SiteId='tenant.example,site-drive,web-drive';SiteUrl='https://tenant.example/personal/user';IsOneDrive='True';SiteIdentitySource='GraphSite';GraphEnrichmentStatus='Collected'}
+    )
+    $teamLinkRows = @(
+        [pscustomobject]@{TenantKey='prod';TenantId='tenant-synthetic';RunId='teams-run';RunDateUtc=$teamsDate;TeamId='team-one';TeamDisplayName='Team One';SharePointSiteId='tenant.example,site-one,web-one';SharePointSiteUrl='https://tenant.example/sites/one';SharePointSiteLinkStatus='Collected';IsPartialInventory='False'},
+        [pscustomobject]@{TenantKey='prod';TenantId='tenant-synthetic';RunId='teams-run';RunDateUtc=$teamsDate;TeamId='team-two';TeamDisplayName='Team Two';SharePointSiteId='tenant.example,site-two,web-two';SharePointSiteUrl='https://tenant.example/sites/two';SharePointSiteLinkStatus='Collected';IsPartialInventory='False'}
+    )
+    $channelSiteRows = @(
+        [pscustomobject]@{TenantKey='prod';TenantId='tenant-synthetic';RunId='teams-run';RunDateUtc=$teamsDate;TeamId='team-one';ChannelId='channel-private';ChannelDisplayName='Private';MembershipType='private';SharePointSiteId='tenant.example,site-channel,web-channel';SharePointSiteLinkStatus='Collected'},
+        [pscustomobject]@{TenantKey='prod';TenantId='tenant-synthetic';RunId='teams-run';RunDateUtc=$teamsDate;TeamId='team-one';ChannelId='channel-standard';ChannelDisplayName='General';MembershipType='standard';SharePointSiteId='';SharePointSiteLinkStatus='NotApplicable'}
+    )
+    $teamLinkPath = Join-Path $temporaryRoot 'M365_Teams_Teams.csv'
+    $channelLinkPath = Join-Path $temporaryRoot 'M365_Teams_Channels.csv'
+    $teamLinkRows | Export-Csv -LiteralPath $teamLinkPath -NoTypeInformation
+    $channelSiteRows | Export-Csv -LiteralPath $channelLinkPath -NoTypeInformation
+    $linkSummary = Get-SpoTeamsSiteLinksFromCsv -Folder $temporaryRoot -ExpectedTenantKey 'prod' -ExpectedTenantId 'tenant-synthetic' -ReferenceDateUtc $spoDate -SiteRows $siteLinkRows
+    Assert-Equal $linkSummary.Available $true 'Same-tenant Teams site mapping qualifies'
+    Assert-Equal $linkSummary.LinkedSites 3 'Teams site links are deduplicated by SPO site'
+    Assert-Equal $linkSummary.TotalSites 4 'OneDrive is excluded from Teams site ratio denominator'
+    Assert-Equal $linkSummary.Percent 75 'Teams site percentage'
+    Assert-Equal $linkSummary.ParentSites 2 'Team main sites counted once'
+    Assert-Equal $linkSummary.ChannelSites 1 'Private channel site counted separately'
+    Assert-Equal (Get-SpoTeamsSiteLinksFromCsv -Folder $temporaryRoot -ExpectedTenantKey 'prod' -ExpectedTenantId 'other-tenant' -ReferenceDateUtc $spoDate -SiteRows $siteLinkRows).Available $false 'Teams site mapping tenant isolation'
+    Assert-Equal (Get-SpoTeamsSiteLinksFromCsv -Folder $temporaryRoot -ExpectedTenantKey 'prod' -ExpectedTenantId 'tenant-synthetic' -ReferenceDateUtc ([datetimeoffset]::UtcNow.AddDays(2).ToString('o')) -SiteRows $siteLinkRows).Available $false 'Teams site mapping freshness'
+    Assert-Equal (Get-SpoTeamsSiteLinksFromCsv -Folder $temporaryRoot -ExpectedTenantKey 'prod' -ExpectedTenantId 'tenant-synthetic' -ReferenceDateUtc $spoDate -SiteRows $siteLinkRows -PartialInventory:$true).Available $false 'Limited SPO inventory cannot claim Teams site ratio'
+    $siteLinkRows[0].GraphEnrichmentStatus = 'Unavailable'
+    Assert-Equal (Get-SpoTeamsSiteLinksFromCsv -Folder $temporaryRoot -ExpectedTenantKey 'prod' -ExpectedTenantId 'tenant-synthetic' -ReferenceDateUtc $spoDate -SiteRows $siteLinkRows).Available $false 'SPO site without verified Graph identity cannot claim Teams site ratio'
+    $siteLinkRows[0].GraphEnrichmentStatus = 'Collected'
+    $spoSummary.TeamsSiteLinks = $linkSummary
+    $spoLinkedHtml = New-SpoHtmlSummary -WorstStatus 'Warning' -Alerts @() -SiteRows @() -Summary $spoSummary
+    if ($spoLinkedHtml -notmatch 'Teams-linked sites:</b> 3 / 4 \(75%\)' -or $spoLinkedHtml -notmatch 'private/shared channel sites: 1' -or $spoLinkedHtml.IndexOf('Teams-linked sites:') -gt $spoLinkedHtml.IndexOf('Action required')) { throw 'Teams site ratio is missing from the SPO Summary.' }
+    $channelSiteRows[0].SharePointSiteLinkStatus = 'Unavailable'
+    $channelSiteRows | Export-Csv -LiteralPath $channelLinkPath -NoTypeInformation
+    $unavailableLinks = Get-SpoTeamsSiteLinksFromCsv -Folder $temporaryRoot -ExpectedTenantKey 'prod' -ExpectedTenantId 'tenant-synthetic' -ReferenceDateUtc $spoDate -SiteRows $siteLinkRows
+    Assert-Equal $unavailableLinks.Available $false 'Unresolved channel site prevents a false percentage'
+    $spoSummary.TeamsSiteLinks = $unavailableLinks
+    $spoUnlinkedHtml = New-SpoHtmlSummary -WorstStatus 'Warning' -Alerts @() -SiteRows @() -Summary $spoSummary
+    if ($spoUnlinkedHtml -notmatch 'Teams-linked sites:</b> unavailable' -or $spoUnlinkedHtml -match '3 / 4 \(75%\)') { throw 'Unqualified Teams site evidence must not show a percentage.' }
+    $spoSummary.TeamsSiteLinks = $linkSummary
 
     $teamsFiles = @()
     foreach ($name in @('Teams','Members','Channels','Guests')) {
@@ -168,7 +247,7 @@ try {
     New-SpoTimestampedWorkbook -CsvFiles $spoFiles -Path $spoBook | Out-Null
     Add-SpoWorkbookOverview -Path $spoBook -Summary $spoSummary -Alerts @([pscustomobject]@{Severity='Critical';Category='Ownership';SiteUrl='https://example.invalid';ObjectName='';Metric='Owner';Value='';Threshold='Valid owner';Details='No owner'}) -Status 'Warning'
     $book = Open-ExcelPackage -Path $spoBook
-    try { Assert-Equal $book.Workbook.Worksheets.Count 7 'SPO worksheet count'; Assert-Equal $book.Workbook.Worksheets['Findings'].Cells[2,1].Text 'Critical' 'SPO findings worksheet'; Assert-Equal $book.Workbook.Worksheets['Summary'].Cells[11,2].Text '91024' 'Estimated SPO tenant capacity in workbook' }
+    try { Assert-Equal $book.Workbook.Worksheets.Count 8 'SPO worksheet count with qualified Teams links'; Assert-Equal $book.Workbook.Worksheets['Findings'].Cells[2,1].Text 'Critical' 'SPO findings worksheet'; Assert-Equal $book.Workbook.Worksheets['Summary'].Cells[11,2].Text '91024' 'Estimated SPO tenant capacity in workbook'; Assert-Equal $book.Workbook.Worksheets['Summary'].Cells[12,1].Text 'Tenant storage utilization estimated percent' 'SPO utilization provenance in workbook'; Assert-Equal ([double]$book.Workbook.Worksheets['Summary'].Cells[12,2].Value) 0.55 'Estimated SPO utilization in workbook'; Assert-Equal $book.Workbook.Worksheets['Teams site links'].Cells[2,1].Text 'https://tenant.example/sites/channel' 'Teams site mapping worksheet' }
     finally { Close-ExcelPackage -ExcelPackage $book -NoSave }
     $spoEmptyBook = Join-Path $temporaryRoot 'SPO-empty.xlsx'
     New-SpoTimestampedWorkbook -CsvFiles $spoFiles -Path $spoEmptyBook | Out-Null
@@ -244,8 +323,8 @@ Write-Host 'Teams/SPO mail and workbook offline checks passed.'
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDnUzeiPmmTgC36
-# 3ube+SAjQTjZK+aE0s98SvjT1ks7paCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD4n1EHJoD0Mddl
+# qVsvV199I9zKxuMcNOXKKwza2Im2HaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -378,31 +457,31 @@ Write-Host 'Teams/SPO mail and workbook offline checks passed.'
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIEunowugzlO5ZMh56AoAUJBVPMAwyWqmAZyZSxa3NwgiMA0GCSqG
-# SIb3DQEBAQUABIIBgDbA7GmruxcBb5aIdO4IwEQEPU2KJedDm7bi6o/cyBzHCeNa
-# TeAbh7ucB6XIAF7Kt4AH2z7yV94Z+0G1rOWjZKNLkLb8OR/5SIu+I9StJq8UTt2Y
-# tFukwpN7icO2K8WVD+EI3UJQVhi/GN2ZVgkmDWrnmpaT1V9nJ+nm97aRqAzv1nvQ
-# Cw+hsv4R/+AunLnKSwAgizrHOECvuF4OsAFyxlkqR6Ikw0Jk6p0lbMScquYUxMmz
-# uclyBQmJKHxIyECQLvSOtbj1iqMyz7PLyjD/v6sk12G8S/fo/wIW2BKv8JKlUy/O
-# oyt4+ufVmpkXVBraPhOLLBGdxQ7CbwTOMWfIO+cdLNicN6Q5uLgeyrWT8CbXN1/K
-# ZPwbi0PRs3p3KHwrb5Zs2N4H5vQGMs/4c3aiPq3LTAOsAunfa3/n1zN2BIJwVHf1
-# k5sAAkCQintuXvpj+yB6HeqTBWHbKtAMUAgcZZczvABBqA57oL2jFW7AQq5dniXh
-# TtXYpeJBT0fV6CFLx6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIH2UdVHlCGM8RdMCWWkwuyhQTesS/WUD9JktNjSiz9tLMA0GCSqG
+# SIb3DQEBAQUABIIBgA6KtBhO58evvzut/JNwHs9aEVDZluoWPFeKLuBP+ltqNBuW
+# XNF9WN0eeqa95A1Ct2qJ40W8UTraGGMID97W5cpE6fiqqx6UCTF7HcML7eSUoVJs
+# 8a4MGQ9UZt2KNmZWzhw6JD9y+d70LAJ+fegBt5bQZEIjkw4fWmcnP7ZhNaTLgws7
+# p40xyQjrXakYYeQgPPGTq7Y//Js3GVD8eyGQEpArQYDgI5GbPND/tVdfjbSmVZHD
+# tpz4Lt+JWaxFzcNyNqO54PIb/zqucRMuS6qAq7kDi7ACwlpztrv73ZnlB36enbuH
+# wbWcbt24HduesOzM1du+4cXyeHsrK2MmWg2ASdL8TuKRLtpA6/IakjzvMp6wCpIh
+# PbJLzHSA1jEWvYt4Vm5yYmtJxlcx9DR03Vk88+oQCclbY1/g+o4mM/8H0K1E1WH6
+# yuiIUhdDO8zEKGz+HWKCgUzCfvh7lrwyDEjwyZ/Ispmk02XjI9fRZ+BDOM+cfN51
+# uN2kF64yTQH5/H7YrqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTQwODMw
-# MzJaMC8GCSqGSIb3DQEJBDEiBCBPnm3gOjy8j38YtbzonOtXqtaCv2JTXs3MKQDI
-# 6IDrDjANBgkqhkiG9w0BAQEFAASCAgAxDytfihnQZkFavXP8RRwYtPBZnpVva6Bh
-# W9CtCwBzBfRZEO4W8DjB3MnlVKDCOpi/KdBPJ1Fw3w5va6LVER1BqS2KADJdjuU6
-# KpkVikIppWgi5WFPG7g8AAi617M6cBQleXTMoV35GdqAxED3RTOKE/K52fpmTMZX
-# l5yq73AeC2ayugo+4wdQQNpMe3kxMe4DvfMa8Cm6hSsG3HMvvBOiBBFadk0D6rq5
-# /gSRzJfuw5B9uOxH0/UI36uRY32Cef1libpVAOiKMtVbeXWDRSyxyj1jXoEE4RxY
-# Oii6AVHT6S5MOL2yac/sUx/8N6TqNbMBv+G3Hamqhn+FPYk52loRnnax2mKniMNr
-# bPTx3hm7hUFy6W4boG0VOI8+01HWQwm45Xlq4tyK9fuqQpunt5fc3lDLl4KMudcb
-# bUWrjTfP420ID15UzXMEQQXccvwgByw43IR8qdK2ivb4uayT02B7mcA8m7eAI4F5
-# Idejuw3TH9wEJ1puiuerkHQqspNxwJ8EbPyX2zKS/bJyDSQpytSCmRUZRC1Yr1ge
-# bM3E0IKo5d/BdDfVv8Btgigm2wrkdj1+Tz5bIbsKy1dz/K5n5twvqQhN6YIlDZC9
-# HORQ9L+6DNEK0sonn+90TGpP08EphvN1BQqUmb6F6+jXEv9pYCa9WhxmwTYkMTIu
-# 10VmD8/Lwg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTUwNzMz
+# MTVaMC8GCSqGSIb3DQEJBDEiBCDh4D/oj6F3OaP867hBXI3AwrdcUejxGYl/cqE5
+# GaZMeDANBgkqhkiG9w0BAQEFAASCAgAjb4Ehaei6FZVfH+HSSwdXOzSOYv0eV58O
+# VOJEAE+WLUZTE2kKbwsWyD9g+AD1ZbbQKDbRwjEobrTF0uj0oSSI+XJ6tu0ikGPJ
+# XM4jGeyC4oEUQY3yQF4rLxmWCqr3Ad7o60oyXnRiDC16GuMe2CzijIy0r0sTk8uM
+# eLKSOEAI5K7qpTd9u4QF/38kXtCvTpQ1ZanTdpndeNH0PorxRQU5CXfDcWRo8yI5
+# kWHmZcwFP0h5MPks8crzgj0xaX+3tzSjdU+tJZxxe0qk39+UgX5Gqs6ef7/CVzfz
+# L/hWJP10tjLvgBC7LQSMgJymCnx/es8ugaoyIpBdyB7gImSYF+x3jlDFWLL76cjc
+# k5/aFLs4dpEIWR8IAV0uTrV6FdD4N1jLRKxshWbQWh2ZoMUTomXePJeIEhNWRWB9
+# OsXCkvU/yBQjYk9PipW2S5oI6/GvoGe8DaqLm/hxdnq1ELDvxrcMI0bKd4SljKKY
+# CTpNmQTJ0n9DVjmFlpJSECCPZOycjF8R0VYkjATNzxdy0Jv+xhhAb1SmJFEjO9Py
+# lfF2tVM2ZvF0A0o51Z+LCvq7rcROL/ZK/7XtNnQlEvdKRyP6QXQFHDaxaM1bPmlB
+# BtRJ4Gq1dS3S0GG8hHLChG/IABYn2Fqlnf4/m61SFCH1dEdXqio7X5V4jwO3U+JQ
+# J1ms3LHG2A==
 # SIG # End signature block

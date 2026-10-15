@@ -58,7 +58,7 @@
     Uses delegated interactive Graph authentication instead of app-only certificate authentication.
 
 .VERSION
- 0.40
+ 0.41
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication; ImportExcel. PnP.PowerShell enables tenant capacity collection and optional sharing scans.
@@ -128,7 +128,7 @@ Set-StrictMode -Version Latest
 [System.Threading.Thread]::CurrentThread.CurrentUICulture = [System.Globalization.CultureInfo]::InvariantCulture
 $ErrorActionPreference = 'Stop'
 $MaximumFunctionCount = 32768
-$ScriptVersion = "0.40"
+$ScriptVersion = "0.41"
 $TenantCapacityEnabled = -not [bool]$SkipPnPTenantCapacity -and ([bool]$UsePnPTenantCapacity -or [bool](Get-Module -ListAvailable PnP.PowerShell | Select-Object -First 1))
 $CurrentOperation = 'Initialize'
 
@@ -381,9 +381,11 @@ function Add-SpoLicenseEstimateToSummary {
         [Parameter(Mandatory)][string]$Folder,
         [Parameter(Mandatory)][string]$ExpectedTenantKey,
         [Parameter(Mandatory)][AllowEmptyString()][string]$ExpectedTenantId,
-        [Parameter(Mandatory)][string]$ReferenceDateUtc
+        [Parameter(Mandatory)][string]$ReferenceDateUtc,
+        [bool]$PartialInventory = $false
     )
     $Summary['EstimatedTenantCapacityGB'] = ''
+    $Summary['EstimatedTenantUtilizationPercent'] = ''
     $Summary['CapacityEstimateEligibleUnits'] = 0
     $Summary['CapacityEstimateAsOfUtc'] = ''
     if (-not [string]::IsNullOrWhiteSpace([string]$Summary.TenantStorageCapacityGB)) { return }
@@ -395,6 +397,147 @@ function Add-SpoLicenseEstimateToSummary {
     $Summary['EstimatedTenantCapacityGB'] = $estimate.CapacityGB
     $Summary['CapacityEstimateEligibleUnits'] = $estimate.EligibleUnits
     $Summary['CapacityEstimateAsOfUtc'] = $estimate.AsOfUtc
+    if (-not $PartialInventory -and $Summary.Contains('StorageUsedGB')) {
+        $usedGB = [double]0
+        if ([double]::TryParse([string]$Summary.StorageUsedGB,[Globalization.NumberStyles]::Float,[Globalization.CultureInfo]::InvariantCulture,[ref]$usedGB) -and
+            [double]::IsFinite($usedGB) -and $usedGB -ge 0 -and [double]$estimate.CapacityGB -gt 0) {
+            $Summary['EstimatedTenantUtilizationPercent'] = [math]::Round(100 * $usedGB / [double]$estimate.CapacityGB,2)
+        }
+    }
+}
+
+function ConvertTo-SpoSiteUrlKey {
+    param([AllowEmptyString()][string]$Url)
+    if ([string]::IsNullOrWhiteSpace($Url)) { return '' }
+    $uri = $null
+    if (-not [uri]::TryCreate($Url,[UriKind]::Absolute,[ref]$uri) -or $uri.Scheme -ne 'https') { return '' }
+    return $uri.GetLeftPart([UriPartial]::Path).TrimEnd('/').ToLowerInvariant()
+}
+
+function Measure-SpoTeamsSiteLinks {
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$SiteRows,
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$TeamRows,
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$ChannelRows,
+        [Parameter(Mandatory)][string]$TeamsRunDateUtc
+    )
+
+    $sites = @($SiteRows | Where-Object { [string]$_.IsOneDrive -ne 'True' })
+    if ($sites.Count -eq 0) { throw 'No SharePoint sites are available for the Teams site ratio.' }
+    if (@($sites | Where-Object { -not $_.SiteId -or [string]$_.SiteIdentitySource -ne 'GraphSite' -or [string]$_.GraphEnrichmentStatus -ne 'Collected' }).Count -gt 0) {
+        throw 'Some SPO sites lack a verified Graph site identity.'
+    }
+    $byId = @{}
+    $byUrl = @{}
+    foreach ($site in $sites) {
+        $urlKey = ConvertTo-SpoSiteUrlKey -Url ([string]$site.SiteUrl)
+        if (-not $urlKey -or $byUrl.ContainsKey($urlKey)) { throw 'SPO site URLs are missing or duplicated.' }
+        $byUrl[$urlKey] = $site
+        $idKey = ([string]$site.SiteId).Trim().ToLowerInvariant()
+        if ($idKey) {
+            if ($byId.ContainsKey($idKey)) { throw 'SPO Graph site IDs are duplicated.' }
+            $byId[$idKey] = $site
+        }
+    }
+    $matched = @{}
+    $unmatchedParent = 0
+    $unmatchedChannel = 0
+    $links = [System.Collections.Generic.List[object]]::new()
+    foreach ($team in $TeamRows) {
+        [void]$links.Add([pscustomobject]@{SiteId=[string]$team.SharePointSiteId;SiteUrl=[string]$team.SharePointSiteUrl;LinkType='Team site';TeamId=[string]$team.TeamId;TeamDisplayName=[string]$team.TeamDisplayName;ChannelId='';ChannelDisplayName=''})
+    }
+    $teamById = @{}
+    foreach ($team in $TeamRows) { $teamById[[string]$team.TeamId] = $team }
+    foreach ($channel in $ChannelRows) {
+        if ([string]$channel.MembershipType -notin @('private','shared')) { continue }
+        [void]$links.Add([pscustomobject]@{SiteId=[string]$channel.SharePointSiteId;SiteUrl='';LinkType=([string]$channel.MembershipType + ' channel');TeamId=[string]$channel.TeamId;TeamDisplayName=[string]$teamById[[string]$channel.TeamId].TeamDisplayName;ChannelId=[string]$channel.ChannelId;ChannelDisplayName=[string]$channel.ChannelDisplayName})
+    }
+    foreach ($link in $links) {
+        $idKey = $link.SiteId.Trim().ToLowerInvariant()
+        $urlKey = ConvertTo-SpoSiteUrlKey -Url $link.SiteUrl
+        $siteById = if ($idKey -and $byId.ContainsKey($idKey)) { $byId[$idKey] } else { $null }
+        $siteByUrl = if ($urlKey -and $byUrl.ContainsKey($urlKey)) { $byUrl[$urlKey] } else { $null }
+        if ($siteById -and $siteByUrl -and [string]$siteById.SiteUrl -ine [string]$siteByUrl.SiteUrl) { throw 'Teams site ID and URL identify different SPO sites.' }
+        $site = if ($siteById) { $siteById } else { $siteByUrl }
+        if (-not $site) {
+            if ($link.LinkType -eq 'Team site') { $unmatchedParent++ } else { $unmatchedChannel++ }
+            continue
+        }
+        $matchKey = ConvertTo-SpoSiteUrlKey -Url ([string]$site.SiteUrl)
+        if ($matched.ContainsKey($matchKey)) { throw 'One SPO site is linked to multiple Teams resources.' }
+        $matched[$matchKey] = [pscustomobject]@{SiteUrl=[string]$site.SiteUrl;SiteId=[string]$site.SiteId;LinkType=$link.LinkType;TeamId=$link.TeamId;TeamDisplayName=$link.TeamDisplayName;ChannelId=$link.ChannelId;ChannelDisplayName=$link.ChannelDisplayName;TeamsRunDateUtc=$TeamsRunDateUtc}
+    }
+    $rows = @($matched.Values | Sort-Object SiteUrl)
+    $parentCount = @($rows | Where-Object { $_.LinkType -eq 'Team site' }).Count
+    $channelCount = $rows.Count - $parentCount
+    return [pscustomobject]@{
+        Available=$true;Reason='';TeamsRunDateUtc=$TeamsRunDateUtc;TotalSites=$sites.Count;LinkedSites=$rows.Count
+        ParentSites=$parentCount;ChannelSites=$channelCount;Percent=[math]::Round(100 * $rows.Count / $sites.Count,2)
+        UnmatchedParentSites=$unmatchedParent;UnmatchedChannelSites=$unmatchedChannel;Rows=$rows
+    }
+}
+
+function Get-SpoTeamsSiteLinksFromCsv {
+    param(
+        [Parameter(Mandatory)][string]$Folder,
+        [Parameter(Mandatory)][string]$ExpectedTenantKey,
+        [Parameter(Mandatory)][AllowEmptyString()][string]$ExpectedTenantId,
+        [Parameter(Mandatory)][string]$ReferenceDateUtc,
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$SiteRows,
+        [bool]$PartialInventory = $false
+    )
+    $unavailable = [pscustomobject]@{Available=$false;Reason='Teams site-link evidence is unavailable.';TeamsRunDateUtc='';TotalSites=0;LinkedSites=0;ParentSites=0;ChannelSites=0;Percent='';UnmatchedParentSites=0;UnmatchedChannelSites=0;Rows=@()}
+    if ($PartialInventory) { $unavailable.Reason = 'The SPO inventory is limited.'; return $unavailable }
+    if (-not $ExpectedTenantId) { $unavailable.Reason = 'Tenant identity is unavailable.'; return $unavailable }
+    $teamPath = Join-Path $Folder 'M365_Teams_Teams.csv'
+    $channelPath = Join-Path $Folder 'M365_Teams_Channels.csv'
+    if (-not (Test-Path -LiteralPath $teamPath -PathType Leaf) -or -not (Test-Path -LiteralPath $channelPath -PathType Leaf)) { $unavailable.Reason = 'Teams site-link CSVs are missing.'; return $unavailable }
+    try {
+        $teamHeaders = @(Get-SpoCsvColumnNames -Path $teamPath)
+        $channelHeaders = @(Get-SpoCsvColumnNames -Path $channelPath)
+        if (@(@('TenantKey','TenantId','RunId','RunDateUtc','TeamId','SharePointSiteId','SharePointSiteUrl','SharePointSiteLinkStatus','IsPartialInventory') | Where-Object { $teamHeaders -notcontains $_ }).Count -gt 0 -or
+            @(@('TenantKey','TenantId','RunId','RunDateUtc','TeamId','ChannelId','MembershipType','SharePointSiteId','SharePointSiteLinkStatus') | Where-Object { $channelHeaders -notcontains $_ }).Count -gt 0) {
+            $unavailable.Reason = 'Teams site-link columns are missing; run the updated Teams inventory.'
+            return $unavailable
+        }
+        $beforeTeam = (Get-FileHash -LiteralPath $teamPath -Algorithm SHA256).Hash
+        $beforeChannel = (Get-FileHash -LiteralPath $channelPath -Algorithm SHA256).Hash
+        $teams = @(Import-Csv -LiteralPath $teamPath -ErrorAction Stop)
+        $channels = @(Import-Csv -LiteralPath $channelPath -ErrorAction Stop)
+        if ($beforeTeam -ne (Get-FileHash -LiteralPath $teamPath -Algorithm SHA256).Hash -or
+            $beforeChannel -ne (Get-FileHash -LiteralPath $channelPath -Algorithm SHA256).Hash) { throw 'Teams site-link CSVs changed while being read.' }
+        if ($teams.Count -eq 0) { throw 'Teams inventory has no team rows.' }
+        $sourceRunId = [string]$teams[0].RunId
+        $sourceRunDate = [string]$teams[0].RunDateUtc
+        if (-not $sourceRunId -or -not $sourceRunDate -or
+            @($teams | Where-Object { [string]$_.TenantKey -ine $ExpectedTenantKey -or [string]$_.TenantId -ine $ExpectedTenantId -or [string]$_.RunId -ne $sourceRunId -or [string]$_.RunDateUtc -ne $sourceRunDate -or [string]$_.IsPartialInventory -ne 'False' }).Count -gt 0 -or
+            @($channels | Where-Object { [string]$_.TenantKey -ine $ExpectedTenantKey -or [string]$_.TenantId -ine $ExpectedTenantId -or [string]$_.RunId -ne $sourceRunId -or [string]$_.RunDateUtc -ne $sourceRunDate }).Count -gt 0) { throw 'Teams site-link CSVs have different tenant, run, or scope identities.' }
+        if ($channels.Count -eq 0 -and [math]::Abs(((Get-Item -LiteralPath $channelPath).LastWriteTimeUtc - (Get-Item -LiteralPath $teamPath).LastWriteTimeUtc).TotalMinutes) -gt 30) { throw 'Empty Teams channel CSV is not from the team run.' }
+        $sourceDate = [datetimeoffset]::MinValue
+        $referenceDate = [datetimeoffset]::MinValue
+        if (-not [datetimeoffset]::TryParse($sourceRunDate,[Globalization.CultureInfo]::InvariantCulture,[Globalization.DateTimeStyles]::AssumeUniversal,[ref]$sourceDate) -or
+            -not [datetimeoffset]::TryParse($ReferenceDateUtc,[Globalization.CultureInfo]::InvariantCulture,[Globalization.DateTimeStyles]::AssumeUniversal,[ref]$referenceDate) -or
+            $sourceDate -gt $referenceDate -or ($referenceDate - $sourceDate).TotalHours -gt 24) { throw 'Teams site-link snapshot is newer than or more than 24 hours older than SPO.' }
+        if (@($teams | Where-Object { -not $_.TeamId -or [string]$_.SharePointSiteLinkStatus -ne 'Collected' -or -not $_.SharePointSiteId }).Count -gt 0 -or
+            @($teams.TeamId | Sort-Object -Unique).Count -ne $teams.Count) { throw 'Teams primary site identities are incomplete or duplicated.' }
+        $teamIds = @{}
+        foreach ($team in $teams) { $teamIds[[string]$team.TeamId] = $true }
+        $channelKeys = @{}
+        foreach ($channel in $channels) {
+            $key = '{0}|{1}' -f [string]$channel.TeamId,[string]$channel.ChannelId
+            if (-not $channel.TeamId -or -not $channel.ChannelId -or -not $teamIds.ContainsKey([string]$channel.TeamId) -or $channelKeys.ContainsKey($key)) { throw 'Teams channel identities are incomplete or duplicated.' }
+            $channelKeys[$key] = $true
+            $type = [string]$channel.MembershipType
+            if ($type -notin @('','standard','private','shared')) { throw 'Teams channel type is unknown.' }
+            if ($type -in @('private','shared') -and ([string]$channel.SharePointSiteLinkStatus -ne 'Collected' -or -not $channel.SharePointSiteId)) { throw 'A private or shared channel site identity is unavailable.' }
+        }
+        return Measure-SpoTeamsSiteLinks -SiteRows $SiteRows -TeamRows $teams -ChannelRows $channels -TeamsRunDateUtc $sourceRunDate
+    }
+    catch {
+        $unavailable.Reason = $_.Exception.Message
+        Write-SpoLog -Message ("Teams site-link ratio unavailable: {0}" -f $unavailable.Reason) -Level WARNING
+        return $unavailable
+    }
 }
 
 function Import-SpoMailCsvSet {
@@ -479,6 +622,7 @@ function Get-SpoMailStatus {
 }
 function Add-SpoWorkbookOverview {
     param([Parameter(Mandatory)][string]$Path,[Parameter(Mandatory)][System.Collections.IDictionary]$Summary,[Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Alerts,[Parameter(Mandatory)][string]$Status)
+    $teamsLinks = if ($Summary.Contains('TeamsSiteLinks')) { $Summary.TeamsSiteLinks } else { $null }
     $overview = @(
         [pscustomobject]@{Metric='Inventory status';Value=$Status}
         [pscustomobject]@{Metric='Sites inventoried';Value=$Summary.SitesProcessed}
@@ -490,10 +634,20 @@ function Add-SpoWorkbookOverview {
         [pscustomobject]@{Metric='Lists inventoried';Value=$Summary.ListsProcessed}
         [pscustomobject]@{Metric='Storage used GB';Value=$Summary.StorageUsedGB}
         [pscustomobject]@{Metric=if(-not[string]::IsNullOrWhiteSpace([string]$Summary.TenantStorageCapacityGB)){'Tenant capacity measured GB'}elseif(-not[string]::IsNullOrWhiteSpace([string]$Summary.EstimatedTenantCapacityGB)){'Tenant capacity estimated from licenses GB'}else{'Tenant capacity'};Value=if(-not[string]::IsNullOrWhiteSpace([string]$Summary.TenantStorageCapacityGB)){$Summary.TenantStorageCapacityGB}elseif(-not[string]::IsNullOrWhiteSpace([string]$Summary.EstimatedTenantCapacityGB)){$Summary.EstimatedTenantCapacityGB}else{'Estimate unavailable'}}
-        [pscustomobject]@{Metric='Tenant storage utilization percent';Value=$Summary.TenantStorageUtilizationPercent}
+        [pscustomobject]@{Metric=if(-not[string]::IsNullOrWhiteSpace([string]$Summary.TenantStorageUtilizationPercent)){'Tenant storage utilization measured percent'}elseif(-not[string]::IsNullOrWhiteSpace([string]$Summary.EstimatedTenantUtilizationPercent)){'Tenant storage utilization estimated percent'}else{'Tenant storage utilization percent'};Value=if(-not[string]::IsNullOrWhiteSpace([string]$Summary.TenantStorageUtilizationPercent)){$Summary.TenantStorageUtilizationPercent}else{$Summary.EstimatedTenantUtilizationPercent}}
         [pscustomobject]@{Metric='Object-level critical findings';Value=$Summary.CriticalAlerts}
         [pscustomobject]@{Metric='Object-level warning findings';Value=$Summary.WarningAlerts}
     )
+    if ($teamsLinks) {
+        $overview += @(
+            [pscustomobject]@{Metric='Teams site mapping status';Value=if($teamsLinks.Available){'Qualified'}else{$teamsLinks.Reason}}
+            [pscustomobject]@{Metric='SharePoint sites linked to Teams';Value=if($teamsLinks.Available){$teamsLinks.LinkedSites}else{''}}
+            [pscustomobject]@{Metric='SharePoint sites linked to Teams percent';Value=if($teamsLinks.Available){$teamsLinks.Percent}else{''}}
+            [pscustomobject]@{Metric='Team main sites';Value=if($teamsLinks.Available){$teamsLinks.ParentSites}else{''}}
+            [pscustomobject]@{Metric='Private or shared channel sites';Value=if($teamsLinks.Available){$teamsLinks.ChannelSites}else{''}}
+            [pscustomobject]@{Metric='Teams source run UTC';Value=$teamsLinks.TeamsRunDateUtc}
+        )
+    }
     $overview | Export-Excel -Path $Path -WorksheetName 'Summary' -TableName 'SpoSummary' -AutoSize -FreezeTopRow -BoldTopRow -AutoFilter
     $findings = @($Alerts | Select-Object Severity,Category,SiteUrl,ObjectName,Metric,Value,Threshold,Details)
     if ($findings.Count -gt 0) {
@@ -504,6 +658,18 @@ function Add-SpoWorkbookOverview {
         $package = Open-ExcelPackage -Path $Path
         try { $package.Workbook.Worksheets['Findings'].DeleteRow(2) }
         finally { Close-ExcelPackage -ExcelPackage $package }
+    }
+    if ($teamsLinks -and $teamsLinks.Available) {
+        $linkRows = @($teamsLinks.Rows)
+        if ($linkRows.Count -eq 0) {
+            $linkRows = @([pscustomobject]@{SiteUrl='';SiteId='';LinkType='';TeamId='';TeamDisplayName='';ChannelId='';ChannelDisplayName='';TeamsRunDateUtc=''})
+        }
+        $linkRows | Export-Excel -Path $Path -WorksheetName 'Teams site links' -TableName 'SpoTeamsSiteLinks' -AutoSize -FreezeTopRow -BoldTopRow -AutoFilter
+        if ($teamsLinks.Rows.Count -eq 0) {
+            $package = Open-ExcelPackage -Path $Path
+            try { $package.Workbook.Worksheets['Teams site links'].DeleteRow(2) }
+            finally { Close-ExcelPackage -ExcelPackage $package }
+        }
     }
 }
 
@@ -556,9 +722,16 @@ function New-SpoHtmlSummary {
         $capacityDetail = 'Utilization unavailable for this run'
     }
     elseif ($estimatedCapacity) {
-        $capacityLabel = 'Tenant capacity (estimated)'
-        $capacityValue = '≈ ' + ([double]$Summary.EstimatedTenantCapacityGB).ToString('N0') + ' GB'
-        $capacityDetail = "Licenses as of $($Summary.CapacityEstimateAsOfUtc); excludes extra storage"
+        if (-not [string]::IsNullOrWhiteSpace([string]$Summary.EstimatedTenantUtilizationPercent)) {
+            $capacityLabel = 'Tenant utilization (estimated)'
+            $capacityValue = '≈ ' + ([double]$Summary.EstimatedTenantUtilizationPercent).ToString('N2') + '%'
+            $capacityDetail = ([double]$Summary.StorageUsedGB).ToString('N2') + ' GB used / ≈ ' + ([double]$Summary.EstimatedTenantCapacityGB).ToString('N0') + ' GB estimated capacity'
+        }
+        else {
+            $capacityLabel = 'Tenant capacity (estimated)'
+            $capacityValue = '≈ ' + ([double]$Summary.EstimatedTenantCapacityGB).ToString('N0') + ' GB'
+            $capacityDetail = 'Utilization unavailable for this inventory scope'
+        }
     }
     else {
         $capacityLabel = 'Tenant capacity'
@@ -607,8 +780,16 @@ function New-SpoHtmlSummary {
     $sharing=if($Summary.InventoryMode -eq 'CSVSnapshot'){'Not verifiable from CSV'}elseif($Summary.DeepSharingScan){'Enabled'}else{'Not enabled'}
     $capacitySource=if([string]::IsNullOrWhiteSpace([string]$Summary.TenantCapacitySource)){'Unavailable'}else{[string]$Summary.TenantCapacitySource}
     $estimateEvidence=if($estimatedCapacity -and -not $measuredCapacity){"<br>License estimate: 1 TB + 10 GB x $($Summary.CapacityEstimateEligibleUnits) known eligible purchased licenses; extra storage excluded. License snapshot: $(ConvertTo-SpoHtml $Summary.CapacityEstimateAsOfUtc)."}else{''}
+    $teamsLinks=if($Summary.Contains('TeamsSiteLinks')){$Summary.TeamsSiteLinks}else{$null}
+    $teamsSitesHtml=if($teamsLinks -and $teamsLinks.Available){
+        "<p style='margin:12px 0 0;'><b>Teams-linked sites:</b> $(ConvertTo-SpoHtml $teamsLinks.LinkedSites) / $(ConvertTo-SpoHtml $teamsLinks.TotalSites) ($(ConvertTo-SpoHtml $teamsLinks.Percent)%) SharePoint sites. Team sites: $(ConvertTo-SpoHtml $teamsLinks.ParentSites); private/shared channel sites: $(ConvertTo-SpoHtml $teamsLinks.ChannelSites).</p>"
+    }else{
+        $reason=if($teamsLinks){[string]$teamsLinks.Reason}else{'Teams site-link evidence was not assessed.'}
+        "<p style='margin:12px 0 0;'><b>Teams-linked sites:</b> unavailable — $(ConvertTo-SpoHtml $reason)</p>"
+    }
+    $teamsEvidence=if($teamsLinks -and $teamsLinks.Available){"<br>Teams site-link source run: $(ConvertTo-SpoHtml $teamsLinks.TeamsRunDateUtc); linked sites absent from the SPO usage-report scope: $(ConvertTo-SpoHtml ($teamsLinks.UnmatchedParentSites + $teamsLinks.UnmatchedChannelSites))."}else{''}
     $technical = 'RunId: {0}<br>Duration: {1}<br>Mode: {2}<br>Sites processed: {3}' -f (ConvertTo-SpoHtml $Summary.RunId),(ConvertTo-SpoHtml $Summary.Duration),(ConvertTo-SpoHtml $Summary.InventoryMode),(ConvertTo-SpoHtml $Summary.SitesProcessed)
-    return "<div style='font-family:Segoe UI,Arial,sans-serif;color:#1f2937;'><div style='background:#fff;border:1px solid #dde7f0;border-radius:8px;padding:16px;margin-bottom:16px;'><h1>SharePoint Online Inventory <span style='display:inline-block;border-radius:999px;background:$statusBg;color:$statusColor;border:1px solid $statusColor;padding:4px 12px;font-size:14px;'>$WorstStatus</span></h1><p>$($Summary.SitesProcessed) sites processed from usage reports; $affectedSites distinct sites require review. Findings can overlap. The complete detail is in the attached workbook.</p></div><div style='background:#fff;border:1px solid #dde7f0;border-radius:8px;padding:16px;margin-bottom:16px;'><h2>Summary</h2>$(New-SmartM365EmailKpiGridHtml -Cards $cards -RowSizes @(4,3))</div><div style='background:#fff;border:1px solid #dde7f0;border-radius:8px;padding:16px;margin-bottom:16px;'><h2>Action required</h2>$categoriesHtml<h3>First objects to review</h3>$topHtml</div><div style='background:#fff;border:1px solid #dde7f0;border-radius:8px;padding:16px;margin-bottom:16px;'><h2>Evidence coverage</h2><p>Scope: $scope<br>OneDrive included: $oneDrive<br>SharePoint sites: $($Summary.SharePointSites); OneDrive sites: $($Summary.OneDriveSites)<br>Usage report refresh: $(ConvertTo-SpoHtml $refreshText)<br>Sites without an activity date: $unknownActivity<br>Sites without Graph enrichment: $graphUnavailable<br>Tenant capacity source: $(ConvertTo-SpoHtml $capacitySource)$estimateEvidence<br>Deep sharing scan: $sharing<br>$(ConvertTo-SpoHtml $SourceNote)</p></div>$FileLinksHtml<div style='margin-top:18px;padding:14px;border:1px solid #d9e2ec;color:#64748b;font-size:12px;'><b>Run details</b><br>$technical</div></div>"
+    return "<div style='font-family:Segoe UI,Arial,sans-serif;color:#1f2937;'><div style='background:#fff;border:1px solid #dde7f0;border-radius:8px;padding:16px;margin-bottom:16px;'><h1>SharePoint Online Inventory <span style='display:inline-block;border-radius:999px;background:$statusBg;color:$statusColor;border:1px solid $statusColor;padding:4px 12px;font-size:14px;'>$WorstStatus</span></h1><p>$($Summary.SitesProcessed) sites processed from usage reports; $affectedSites distinct sites require review. Findings can overlap. The complete detail is in the attached workbook.</p></div><div style='background:#fff;border:1px solid #dde7f0;border-radius:8px;padding:16px;margin-bottom:16px;'><h2>Summary</h2>$(New-SmartM365EmailKpiGridHtml -Cards $cards -RowSizes @(4,3))$teamsSitesHtml</div><div style='background:#fff;border:1px solid #dde7f0;border-radius:8px;padding:16px;margin-bottom:16px;'><h2>Action required</h2>$categoriesHtml<h3>First objects to review</h3>$topHtml</div><div style='background:#fff;border:1px solid #dde7f0;border-radius:8px;padding:16px;margin-bottom:16px;'><h2>Evidence coverage</h2><p>Scope: $scope<br>OneDrive included: $oneDrive<br>SharePoint sites: $($Summary.SharePointSites); OneDrive sites: $($Summary.OneDriveSites)<br>Usage report refresh: $(ConvertTo-SpoHtml $refreshText)<br>Sites without an activity date: $unknownActivity<br>Sites without Graph enrichment: $graphUnavailable<br>Tenant capacity source: $(ConvertTo-SpoHtml $capacitySource)$estimateEvidence$teamsEvidence<br>Deep sharing scan: $sharing<br>$(ConvertTo-SpoHtml $SourceNote)</p></div>$FileLinksHtml<div style='margin-top:18px;padding:14px;border:1px solid #d9e2ec;color:#64748b;font-size:12px;'><b>Run details</b><br>$technical</div></div>"
 }
 
 function Connect-SpoGraph {
@@ -1182,7 +1363,8 @@ try {
             TenantStorageCapacityGB=[string]$tenantCapacity.StorageCapacityGB; TenantStorageUtilizationPercent=[string]$tenantCapacity.StorageUtilizationPercent; TenantCapacitySource=[string]$tenantCapacity.CapacitySource
             IncludeOneDrive=@($siteArray|Where-Object{[string]$_.IsOneDrive -eq 'True'}).Count -gt 0; DeepSharingScan=$false; SharingScanItemLimitPerSite=0
         }
-        Add-SpoLicenseEstimateToSummary -Summary $summary -Folder $latestFolder -ExpectedTenantKey $tenantKey -ExpectedTenantId ([string]$tenantCapacity.TenantId) -ReferenceDateUtc $snapshot.RunDateUtc
+        Add-SpoLicenseEstimateToSummary -Summary $summary -Folder $latestFolder -ExpectedTenantKey $tenantKey -ExpectedTenantId ([string]$tenantCapacity.TenantId) -ReferenceDateUtc $snapshot.RunDateUtc -PartialInventory:$partialInventory
+        $summary['TeamsSiteLinks'] = Get-SpoTeamsSiteLinksFromCsv -Folder $latestFolder -ExpectedTenantKey $tenantKey -ExpectedTenantId ([string]$tenantCapacity.TenantId) -ReferenceDateUtc $snapshot.RunDateUtc -SiteRows $siteArray -PartialInventory:$partialInventory
         $worstStatus = Get-SpoMailStatus -Summary $summary -PartialInventory:$partialInventory
         $CurrentOperation = 'Build SPO mail from existing CSVs'
         $stamp = '{0}_{1}' -f (Get-Date).ToUniversalTime().ToString('yyyyMMdd_HHmmss_fff',[Globalization.CultureInfo]::InvariantCulture),[guid]::NewGuid().ToString('N').Substring(0,8)
@@ -1435,7 +1617,8 @@ try {
     }
     $tenantKey = [string]$script:SmartM365GlobalConfig.TenantKey
     $tenantId = [string]$script:SmartM365GlobalConfig.TenantId
-    Add-SpoLicenseEstimateToSummary -Summary $summary -Folder $latestFolder -ExpectedTenantKey $tenantKey -ExpectedTenantId $tenantId -ReferenceDateUtc $RunDateUtc
+    Add-SpoLicenseEstimateToSummary -Summary $summary -Folder $latestFolder -ExpectedTenantKey $tenantKey -ExpectedTenantId $tenantId -ReferenceDateUtc $RunDateUtc -PartialInventory:($MaxSites -gt 0 -or (Test-SmartM365MaxItemsMode))
+    $summary['TeamsSiteLinks'] = Get-SpoTeamsSiteLinksFromCsv -Folder $latestFolder -ExpectedTenantKey $tenantKey -ExpectedTenantId $tenantId -ReferenceDateUtc $RunDateUtc -SiteRows $siteArray -PartialInventory:($MaxSites -gt 0 -or (Test-SmartM365MaxItemsMode))
 
     $worstStatus = Get-SpoMailStatus -Summary $summary -PartialInventory ($MaxSites -gt 0 -or (Test-SmartM365MaxItemsMode))
     Add-SpoWorkbookOverview -Path $workbookPath -Summary $summary -Alerts $alertArray -Status $worstStatus
@@ -1505,8 +1688,8 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAYV8FOSWs+BpiI
-# M8snbd3nhfYT7EUuM+6jukqAIyg5ZKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAJzDLCzp6E7d6F
+# Cz6BYu4u6GtUiAlBotip6L+CXfxKXKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1639,31 +1822,31 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEINes6/toH+CY/Z2PNrQSCXVCniYdhQ764bUWbpq53EFMMA0GCSqG
-# SIb3DQEBAQUABIIBgDuxKPXN9LoPCfiuXI6GKmD9M7MVONXgTef0joVEjvlGOb8T
-# f8lq9ZwF9dfr4Pr6wb206V8sopbS4p2ZIwtK9NMJ6V+9baQ5Feg9C4vUfmjYGMpf
-# FjQZp5kyiYK8+4SCKK1znr2lcZxHQW639Hgba8lIiuFl0fAjUxJj3Mvc5i59lzRE
-# 5ZN++aGYVOdUqTUxIrBY5YZEnaiQIIOrmtlJzW/07ulmkT0V0jS4d7DxbBWdOcic
-# 3cB23g1HEIAO2I5JpU9slLq959rm3+VWQTR7lJW8jP+Xq+OkcB7QYIeHnCm5WpNi
-# b5fdy01Lxcw752WiSR3zQ0EurxdNANViufsxw95/NHhK6WOy9SJnWI7+fFaq1BOl
-# +LSntjaHim9uTPJCkFVpj/V06C/M2SUFJbEnSsxm8Q2jM4Nfa2lp4Jj0kxGBSQnu
-# jYdVDDADvoFRV0suQNDCrZi19TJsJNqzQn5YGgz8ybx8oQLGf5R/ICwwhPpFydST
-# xX2BQX5EMDnRW40J5qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEICjIS9+dsOlrjC2mhaT/Hfu0BeDQTzFpIE7MftrV3JgCMA0GCSqG
+# SIb3DQEBAQUABIIBgGYYSgGjLgNot9PdyrUvgCz90E2NXapNj2LkSxBGl8jEvoa7
+# QyxAeiqBzOAxN8T48HouFg9AHwZmZtpMGueGKzKtCW1L7rhGXTmKtCXI7uTi95m1
+# eZtZ/LfgjBv8FZl3SPCfuECIi2edWC5XxXDfPs91yqYqk5ARi5kfOEOSh/yp/tOd
+# 5gS/qKNC5D8SSbWmm6jYcONx2JziBKBD2/AH0QmN6TatdC30D6ISnQbRFxPgIsqn
+# wWuJRRNB5Yk6WC+feCdez/CCREcXtKk5gq94B4vE+h+IKukzMkQEs/+OR2jvj8uK
+# ozxpYOQ0A9FQi1uPNIkv0FoO0y/evqNsxB51JgjPM/ao407BYVD64JKiDI/cX0ra
+# /lDs5CT7283pnd38hhuKOoCbww0m9IjVQykcA4aygu44eX3VG43Fv129iXg0oPJD
+# H/xn0aJ5w/MHsFrqt7Ote075uUg8WSTwns/KaEwUxXUsmZlz7/LKl+rHZngv5BBa
+# f/EYkBqkyHSuhyDSwqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTQxNTMw
-# MzNaMC8GCSqGSIb3DQEJBDEiBCC6WDQQaUMkVutTLwp7c+Bap3Uo99GpbW+76BDR
-# neTm0TANBgkqhkiG9w0BAQEFAASCAgBsW4YhEfCx+MrwKNOvKfJ38NbdlemhBlUA
-# sjZpkDNq+EYen5qy2bwlnNqkt9oUockf0Wv8Bpt53p71qlj45td7li5XUiywV4c/
-# p6G8R32LVMmHl9kO5cKtDY11wmP8lrmp/E4gV/P2OzbqKd4nH08eiB4HpC/7ifXE
-# 4INYhUD4HAf945vRWAbtVpoO4xDenkXjqllqhQBQefVyrANYnw+t41/Rqq9O3JA3
-# zyst1UQxvdlvSF8PYzhYpEXJN2E3oSamEV+XWNqsg1ucmtCPN7ZsZOz/MhAg8DWX
-# iw8poDO+k6nuHSulAbv2eEUZZrwOPlQ6op1f/9qLw11LMUTLN8jrtVDFPvuMc7s6
-# WnhXCugRasir9fw8HGFKNJvYIYJRmBuLwpTFQnvARI5XC+PLuRDF3C55PH/S5DxE
-# qFLa5x9LoccuGR3wVaMkLuQV1QpGmaS0BFWFBOpFleCypNeCTzXrSa4WLComoXMv
-# dgXJof7EzyPzxH7u7tubf3j0QVsxqToHkr4+rD5GSfH2OrzyiOwLnNirXJr/i0OW
-# QvpjOk56Bh/oBgAKg0GcngcGmMCG5UC1ZP1v5r6meKDBZ81xeHq9pfjX6/pGTSED
-# sr7HcxMP1El20U+4/ywr06iXfjU1dBG1tF6YhRnM1nPYL5hJftlRzUm0EaQnoC0A
-# +GjNMUioEw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTUwNzMz
+# MTVaMC8GCSqGSIb3DQEJBDEiBCAl6fmV3TFtDB56t6AUlmbyBXrW6mOVW5v/LHfj
+# 4g8gYDANBgkqhkiG9w0BAQEFAASCAgCKFKll64k4ny73kU1CmChlz0/QhmmoScxT
+# au67SN5Ye5Z+1vnDGSht+t+n2v6Gws+rWFtqFHDNQxw/oRiHer0VkyCQvrpgIFz+
+# eCw9eyNJggGRI5c7cOEQ1dJ3PUNzc1nvX8vMc7NMHqbPe6j5sqI4BEC+b+nEzsfE
+# QoK3G1APV7Y82C2IH2zBvlKvwFrwudtQeiW8en0l3ixC2Zn+1GKPZef7vCr9OpZm
+# Tkg5fmH33BJ1bVK9cpcru+YxUkLWyJCtWFoQ+SR3dmKR6PPsPiHKngkdPC3GgFhR
+# Hf2a1PQ3Cv6fDfWbysznjv3coQLGq1FzCYFn/GgEABiAhhmT6F5n44e8KEq+8KbQ
+# 5fZRX6Y5i4vHQCwQD/VoIVXGW16l+avIv45q00aNtvTZIux9/Il7a6EWPhmVzbWe
+# FBnTbyBJ8JIl80yobMSGyhUM9HjK5WowBTiMaYEyW+uds6VEXDVw5A63aDA6H+aX
+# MNWz+PCZZyOGfDVLxT6OM8fNPlsFxPtoCcvVb43DaUQpEgBX2jasATY1akgaBwul
+# ZwdJD1XYLG2SpyTMW48FiiLZsC17dTMzAc/N/KOEDxfiU59xkKg+1vJlElQcS6xA
+# d9OOUlTLyjzLi63F9V1kV2W2axAfBdQDpuYTkZWe74864KzAFc3lP8cxv5d0gQgQ
+# znQJ5YLgDA==
 # SIG # End signature block

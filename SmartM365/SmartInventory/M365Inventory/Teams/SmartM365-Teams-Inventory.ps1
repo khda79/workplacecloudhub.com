@@ -3,7 +3,7 @@
 .SYNOPSIS
     Microsoft Teams tenant inventory with CSV exports and HTML alert summary.
 .VERSION
- 0.42
+ 0.43
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication; ImportExcel.
@@ -57,7 +57,7 @@ if ($PSBoundParameters.ContainsKey('MaxItems') -and $MaxItems -gt 0) {
     }
 }
 $ErrorActionPreference='Stop'; Set-StrictMode -Version Latest
-$ScriptVersion="0.42"
+$ScriptVersion="0.43"
 $ScriptBaseName = [System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
 $TaskName = $ScriptBaseName
 $RunStarted=Get-Date; $RunDateUtc=$RunStarted.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ',[Globalization.CultureInfo]::InvariantCulture); $RunId=[guid]::NewGuid().ToString(); $CurrentOperation='Initialize'
@@ -310,21 +310,22 @@ function Get-TeamsBatchSeed {
     param([Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Teams)
 
     $result = @{}
-    for ($offset = 0; $offset -lt $Teams.Count; $offset += 4) {
-        $last = [math]::Min($offset + 3, $Teams.Count - 1)
+    for ($offset = 0; $offset -lt $Teams.Count; $offset += 3) {
+        $last = [math]::Min($offset + 2, $Teams.Count - 1)
         $requests = [System.Collections.Generic.List[object]]::new()
         $requestMap = @{}
         $requestId = 1
 
         foreach ($team in @($Teams[$offset..$last])) {
             $teamId = [string]$team.id
-            $result[$teamId] = [pscustomobject]@{ Details=$null; Owners=$null; Members=$null; Channels=$null; Drive=$null }
+            $result[$teamId] = [pscustomobject]@{ Details=$null; Owners=$null; Members=$null; Channels=$null; Drive=$null; Site=$null }
             $specs = @(
                 @{ Kind='Details'; Url="/teams/${teamId}?`$select=id,isArchived" },
                 @{ Kind='Owners'; Url="/groups/$teamId/owners/microsoft.graph.user?`$select=id,displayName,userPrincipalName,mail,userType&`$top=999" },
                 @{ Kind='Members'; Url="/groups/$teamId/members/microsoft.graph.user?`$select=id,displayName,userPrincipalName,mail,userType&`$top=999" },
                 @{ Kind='Channels'; Headers=$TeamsChannelRequestHeaders; Url="/teams/$teamId/channels" },
-                @{ Kind='Drive'; Url="/groups/$teamId/sites/root/drive?`$select=quota,webUrl" }
+                @{ Kind='Drive'; Url="/groups/$teamId/sites/root/drive?`$select=quota,webUrl" },
+                @{ Kind='Site'; Url="/groups/$teamId/sites/root?`$select=id,webUrl" }
             )
             foreach ($spec in $specs) {
                 $localId = [string]$requestId
@@ -374,6 +375,65 @@ function Get-TeamsBatchSeed {
         }
     }
     return $result
+}
+
+function Get-TeamsChannelSiteId {
+    param([AllowNull()][object]$DriveItem)
+    $parent = Get-TeamsGraphPropertyValue -Object $DriveItem -Name 'parentReference'
+    return [string](Get-TeamsGraphPropertyValue -Object $parent -Name 'siteId')
+}
+
+function Add-TeamsChannelSiteReferences {
+    param([Parameter(Mandatory)][AllowEmptyCollection()][object[]]$ChannelRows)
+
+    foreach ($row in $ChannelRows) {
+        $type = [string]$row.MembershipType
+        $row | Add-Member -NotePropertyMembers @{
+            SharePointSiteId = ''
+            SharePointSiteLinkStatus = if ($type -in @('','standard')) { 'NotApplicable' } else { 'Unavailable' }
+        } -Force
+    }
+    $targets = @($ChannelRows | Where-Object { [string]$_.MembershipType -in @('private','shared') })
+    for ($offset = 0; $offset -lt $targets.Count; $offset += 20) {
+        $last = [math]::Min($offset + 19,$targets.Count - 1)
+        $requests = [System.Collections.Generic.List[object]]::new()
+        $requestMap = @{}
+        $requestId = 1
+        foreach ($row in @($targets[$offset..$last])) {
+            $id = [string]$requestId
+            $requestMap[$id] = $row
+            $channelId = [uri]::EscapeDataString([string]$row.ChannelId)
+            [void]$requests.Add(@{id=$id;method='GET';url="/teams/$($row.TeamId)/channels/$channelId/filesFolder"})
+            $requestId++
+        }
+        try { $responses = @(Invoke-TeamsGraphBatch -Requests $requests.ToArray()) }
+        catch {
+            WriteLog -Message ("Teams channel site batch failed at offset {0}: {1}" -f $offset,$_.Exception.Message) -Level WARNING
+            continue
+        }
+        foreach ($response in $responses) {
+            $row = $requestMap[[string]$response.id]
+            if ($null -eq $row -or [int]$response.status -ne 200) { continue }
+            $siteId = Get-TeamsChannelSiteId -DriveItem $response.body
+            if (-not $siteId) {
+                $parent = Get-TeamsGraphPropertyValue -Object $response.body -Name 'parentReference'
+                $driveId = [string](Get-TeamsGraphPropertyValue -Object $parent -Name 'driveId')
+                if ($driveId) {
+                    try {
+                        $root = Invoke-Graph -Uri ("https://graph.microsoft.com/v1.0/drives/{0}/root?`$select=parentReference" -f [uri]::EscapeDataString($driveId)) -Operation 'Get channel drive site identity'
+                        $siteId = Get-TeamsChannelSiteId -DriveItem $root
+                    }
+                    catch { WriteLog -Message ("Channel drive site identity was unavailable for TeamId={0}, ChannelId={1}: {2}" -f $row.TeamId,$row.ChannelId,$_.Exception.Message) -Level WARNING }
+                }
+            }
+            if ($siteId) {
+                $row.SharePointSiteId = $siteId
+                $row.SharePointSiteLinkStatus = 'Collected'
+            }
+        }
+    }
+    $unavailable = @($targets | Where-Object { $_.SharePointSiteLinkStatus -ne 'Collected' }).Count
+    WriteLog -Message ("Teams channel site links: {0}/{1} resolved; {2} unavailable." -f ($targets.Count - $unavailable),$targets.Count,$unavailable) -Level $(if ($unavailable -gt 0) { 'WARNING' } else { 'INFO' })
 }
 
 function Get-ReportRow {
@@ -651,8 +711,9 @@ $AppId=[string](Get-ConfigValue 'AppId' ''); $TenantId=[string](Get-ConfigValue 
 $global:AppId=$AppId; $global:TenantId=$TenantId; $global:OrgDomain=$OrgDomain; $global:Thumb=$Thumb; $global:Thumbprint=$Thumb
 $teamColumns=@('RunId','RunDateUtc','TenantName','TeamId','TeamDisplayName','Description','Visibility','CreatedDateTimeUtc','Classification','SensitivityLabel','IsArchived','OwnerCount','MemberCount','GuestCount','StandardChannelCount','PrivateChannelCount','SharedChannelCount','LastActivityDateUtc','InactiveDays','StorageUsedGB','StorageQuotaGB','StorageQuotaPercent','Status','NumericValue','TextValue','Threshold','Details')
 $memberColumns=@('RunId','RunDateUtc','TenantName','TeamId','TeamDisplayName','UserId','DisplayName','UserPrincipalName','Mail','UserType','Role','Status','NumericValue','TextValue','Threshold','Details')
-$teamColumns += @('MemberCollectionStatus','OwnerCollectionStatus','ChannelCollectionStatus','StorageCollectionStatus','ActivityEvidenceStatus','ActivityReportRefreshDate','CollectedAtUtc')
+$teamColumns += @('MemberCollectionStatus','OwnerCollectionStatus','ChannelCollectionStatus','StorageCollectionStatus','ActivityEvidenceStatus','ActivityReportRefreshDate','CollectedAtUtc','SharePointSiteId','SharePointSiteUrl','SharePointSiteLinkStatus','IsPartialInventory')
 $channelColumns=@('RunId','RunDateUtc','TenantName','TeamId','TeamDisplayName','ChannelId','ChannelDisplayName','MembershipType','CreatedDateTimeUtc','PrivateChannelOwners','Status','NumericValue','TextValue','Threshold','Details')
+$channelColumns += @('SharePointSiteId','SharePointSiteLinkStatus')
 $guestColumns=@('RunId','RunDateUtc','TenantName','TeamId','TeamDisplayName','UserId','DisplayName','UserPrincipalName','Mail','Status','NumericValue','TextValue','Threshold','Details')
 try{
  $CurrentOperation='Initialize script environment'; $OutputPath=InitializeScriptEnvironment -OutputPathInit $OutputPath -LogFileName $ScriptBaseName; Start-SmartM365RunTranscript -Path $global:logTranscriptFile -Append|Out-Null; Write-SmartM365LoadedModuleVersions; WriteLog -Message "Starting $TaskName"
@@ -702,6 +763,7 @@ try{
  $CurrentOperation='Load tenant metadata'; $org=Invoke-Graph -Uri 'https://graph.microsoft.com/v1.0/organization?$select=displayName' -Operation 'Get organization'; $TenantName=[string]@($org.value)[0].displayName; if([string]::IsNullOrWhiteSpace($TenantName)){$TenantName=$Tenant}
  $activityById=@{}; foreach($r in (Get-ReportRow -ReportName 'getTeamsTeamActivityDetail' -Period 'D180')){$id=[string](Prop $r @('Team Id','TeamId','Team ID')); if($id){$activityById[$id]=$r}}
  $teamFilter=[uri]::EscapeDataString("resourceProvisioningOptions/Any(x:x eq 'Team')"); $teamsUri="https://graph.microsoft.com/v1.0/groups?`$filter=$teamFilter&`$select=id,displayName,description,visibility,createdDateTime,classification,assignedLabels,mail,webUrl&`$top=999"; $teams=@(Get-GraphCollection -Uri $teamsUri -Operation 'Get team groups'); if($MaxTeams-gt 0){$teams=@($teams|Select-Object -First $MaxTeams)}; WriteLog -Message ("Teams discovered: {0}" -f $teams.Count)
+ $teamsPartialInventory=($MaxTeams -gt 0 -or (Test-SmartM365MaxItemsMode))
  $CurrentOperation='Prefetch Teams Graph data'; $teamBatchSeed=Get-TeamsBatchSeed -Teams $teams; WriteLog -Message ("Teams Graph batch prefetch completed: {0}/{1} teams seeded." -f $teamBatchSeed.Count,$teams.Count)
  $i=0; foreach($g in $teams){$i++; $teamId=[string]$g.id; $teamName=[string]$g.displayName; WriteLog -Message ("Processing team {0}/{1}: {2}" -f $i,$teams.Count,$teamName); $CurrentOperation="Process team $teamName"
   $seed=if($teamBatchSeed.ContainsKey($teamId)){$teamBatchSeed[$teamId]}else{$null}; $details=if($seed-and$null-ne$seed.Details){$seed.Details}else{$null}; if($null-eq$details){$details=Invoke-Graph -Uri ("https://graph.microsoft.com/v1.0/teams/{0}" -f $teamId) -Operation 'Get team details'}; $archived=if($details-and$details.PSObject.Properties['isArchived']){[bool]$details.isArchived}else{$false}
@@ -716,14 +778,22 @@ try{
   foreach($ch in $channels){$chOwners=@(); if($IncludeChannelOwners-and [string]$ch.membershipType-in@('private','shared')){try{$cm=@(Get-GraphCollection -Uri ("https://graph.microsoft.com/v1.0/teams/{0}/channels/{1}/members?`$top=200" -f $teamId,$ch.id) -Operation 'Get channel members'); $chOwners=@($cm|Where-Object{@($_.roles)-contains'owner'}|ForEach-Object{$_.displayName})}catch{$chOwners=@('NotMeasured: ChannelMember.Read.All may be required')}}; [void]$ChannelsRows.Add([pscustomobject]@{RunId=$RunId;RunDateUtc=$RunDateUtc;TenantName=$TenantName;TeamId=$teamId;TeamDisplayName=$teamName;ChannelId=[string]$ch.id;ChannelDisplayName=[string]$ch.displayName;MembershipType=[string]$ch.membershipType;CreatedDateTimeUtc=(IsoUtc $ch.createdDateTime);PrivateChannelOwners=(JoinVals $chOwners);Status='OK';NumericValue='1';TextValue=[string]$ch.membershipType;Threshold='Inventory only';Details=''})}
   $last=''; $inactive=''; $act=$activityById[$teamId]; if($act){$la=Prop $act @('Last Activity Date','LastActivityDate'); $last=IsoUtc $la; if($last){$inactive=[math]::Round(((Get-Date).ToUniversalTime()-([datetime]$la).ToUniversalTime()).TotalDays,0)}}
   $usedGb=''; $quotaGb=''; $quotaPct=''; $storageDetail='Storage not measured'; try{$drive=if($seed-and$null-ne$seed.Drive){$seed.Drive}else{Invoke-Graph -Uri ("https://graph.microsoft.com/v1.0/groups/{0}/sites/root/drive?`$select=quota,webUrl" -f $teamId) -Operation 'Get team SharePoint quota'}; if($drive.quota-and[double]$drive.quota.total-gt 0){$usedGb=[math]::Round([double]$drive.quota.used/1GB,2); $quotaGb=[math]::Round([double]$drive.quota.total/1GB,2); $quotaPct=[math]::Round(([double]$drive.quota.used/[double]$drive.quota.total)*100,2); $storageDetail=[string]$drive.webUrl}}catch{$storageDetail='NotMeasured: '+$_.Exception.Message}
+  $teamSiteId=''; $teamSiteUrl=''; $teamSiteLinkStatus='Unavailable'
+  try {
+   $teamSite=if($seed-and$null-ne$seed.Site){$seed.Site}else{Invoke-Graph -Uri ("https://graph.microsoft.com/v1.0/groups/{0}/sites/root?`$select=id,webUrl" -f $teamId) -Operation 'Get team SharePoint site'}
+   $teamSiteId=[string](Get-TeamsGraphPropertyValue -Object $teamSite -Name 'id')
+   $teamSiteUrl=[string](Get-TeamsGraphPropertyValue -Object $teamSite -Name 'webUrl')
+   if($teamSiteId){$teamSiteLinkStatus='Collected'}
+  } catch { WriteLog -Message ("Team SharePoint site identity unavailable for TeamId={0}: {1}" -f $teamId,$_.Exception.Message) -Level WARNING }
   $status='OK'; $notes=New-Object 'System.Collections.Generic.List[string]'; if($owners.Count-eq 0){$status='Critical'; [void]$notes.Add('No owner'); Add-Alert $teamId $teamName Critical Owners $owners.Count 'NoOwner' "Owners >= $MinOwners" 'Team has no owner.'}elseif($owners.Count-lt$MinOwners){if($status-ne'Critical'){$status='Warning'}; [void]$notes.Add('Owner count below threshold'); Add-Alert $teamId $teamName Warning Owners $owners.Count 'LowOwnerCount' "Owners >= $MinOwners" 'Team has too few owners.'}
   if($inactive-ne'' -and [double]$inactive-gt$InactiveDays -and -not$archived){if($status-ne'Critical'){$status='Warning'}; [void]$notes.Add('Inactive team'); Add-Alert $teamId $teamName Warning Inactivity $inactive $last "<= $InactiveDays days" 'Team is a candidate for archival.'}
   if($quotaPct-ne'' -and [double]$quotaPct-gt$QuotaCriticalPercent){$status='Critical'; [void]$notes.Add('Storage quota critical'); Add-Alert $teamId $teamName Critical StorageQuotaPercent $quotaPct $storageDetail "<= $QuotaCriticalPercent percent" 'SharePoint storage quota usage is above threshold.'}
   if($guests.Count-gt$GuestWarningThreshold){if($status-ne'Critical'){$status='Warning'}; [void]$notes.Add('High guest count'); Add-Alert $teamId $teamName Warning GuestCount $guests.Count Guests "<= $GuestWarningThreshold" 'Team has many external guests.'}
   if([string]$g.visibility-eq'Public' -and -not[string]::IsNullOrWhiteSpace($label)){if($status-ne'Critical'){$status='Warning'}; [void]$notes.Add('Public team with sensitivity label'); Add-Alert $teamId $teamName Warning PublicSensitiveLabel 1 $label 'Review public sensitive teams' 'Public team has a sensitivity/classification label.'}
   if($RequireSensitivityLabel -and [string]::IsNullOrWhiteSpace($label)){if($status-ne'Critical'){$status='Warning'}; [void]$notes.Add('Missing sensitivity label'); Add-Alert $teamId $teamName Warning MissingSensitivityLabel 0 NoLabel 'Sensitivity label required' 'Tenant policy expects labels.'}
-  [void]$TeamsRows.Add([pscustomobject]@{RunId=$RunId;RunDateUtc=$RunDateUtc;TenantName=$TenantName;TeamId=$teamId;TeamDisplayName=$teamName;Description=[string]$g.description;Visibility=[string]$g.visibility;CreatedDateTimeUtc=(IsoUtc $g.createdDateTime);Classification=[string]$g.classification;SensitivityLabel=$label;IsArchived=[string]$archived;OwnerCount=$owners.Count;MemberCount=$members.Count;GuestCount=$guests.Count;StandardChannelCount=$standard;PrivateChannelCount=$private;SharedChannelCount=$shared;LastActivityDateUtc=$last;InactiveDays=(Num $inactive);StorageUsedGB=(Num $usedGb);StorageQuotaGB=(Num $quotaGb);StorageQuotaPercent=(Num $quotaPct);Status=$status;NumericValue=(Num $members.Count);TextValue="Owners=$($owners.Count); Members=$($members.Count); Guests=$($guests.Count)";Threshold="Owners >= $MinOwners; inactive <= $InactiveDays days; storage <= $QuotaCriticalPercent percent; guests <= $GuestWarningThreshold";Details=(JoinVals $notes)})
+  [void]$TeamsRows.Add([pscustomobject]@{RunId=$RunId;RunDateUtc=$RunDateUtc;TenantName=$TenantName;TeamId=$teamId;TeamDisplayName=$teamName;Description=[string]$g.description;Visibility=[string]$g.visibility;CreatedDateTimeUtc=(IsoUtc $g.createdDateTime);Classification=[string]$g.classification;SensitivityLabel=$label;IsArchived=[string]$archived;OwnerCount=$owners.Count;MemberCount=$members.Count;GuestCount=$guests.Count;StandardChannelCount=$standard;PrivateChannelCount=$private;SharedChannelCount=$shared;LastActivityDateUtc=$last;InactiveDays=(Num $inactive);StorageUsedGB=(Num $usedGb);StorageQuotaGB=(Num $quotaGb);StorageQuotaPercent=(Num $quotaPct);Status=$status;NumericValue=(Num $members.Count);TextValue="Owners=$($owners.Count); Members=$($members.Count); Guests=$($guests.Count)";Threshold="Owners >= $MinOwners; inactive <= $InactiveDays days; storage <= $QuotaCriticalPercent percent; guests <= $GuestWarningThreshold";Details=(JoinVals $notes);SharePointSiteId=$teamSiteId;SharePointSiteUrl=$teamSiteUrl;SharePointSiteLinkStatus=$teamSiteLinkStatus;IsPartialInventory=$teamsPartialInventory})
  }
+  $CurrentOperation='Resolve Teams private and shared channel sites'; Add-TeamsChannelSiteReferences -ChannelRows $ChannelsRows.ToArray()
  foreach ($teamRow in $TeamsRows) {
   $teamActivity=$activityById[[string]$teamRow.TeamId]
   $teamRow | Add-Member -NotePropertyMembers @{
@@ -774,8 +844,8 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBJz+lDZcfYPRQi
-# IWzrIBnnMfheQ/A5Z8dnHs4J2W5lNqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC31s7PQKbiKHQv
+# iLfTZxI3B2QYZQOSrGD4NCA3Ka2qc6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -908,31 +978,31 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIEXcaAfAqaub8dh7R4IMOzpcotEGMmHbsSLMH4sEQaB8MA0GCSqG
-# SIb3DQEBAQUABIIBgJZYaIrDHu18zlQ64ZT/chinfDY5h5T+zRxSUj/afccIIUp+
-# DRQJStMdevsXVYH+a7HwDyoZShkx8MDOuH0XlF1ORACuLvJhn79pHQvDXs39ddvb
-# 9eFCvTywnSiVeHrUMyTdltxVNBtUtWvptZZblYeWaiZU2NnPsBxPzm8PApFfDYm1
-# BIo53k1AYJh4eQ2Mr1zou9EK4MCf8Kp34QAep967mpt2RjxXMibSzf6T3XaSkWG8
-# ayIJ8HtLrWkS88ns1lzAt6NzfGwsnESVa8lh/dwmeV0qw2v/BALWIvkNUQQ2cFrv
-# e+6qVgMJVkTYYi0aP4tkg5BUTUy69SbvtH+FoKz3fCdtTcLFMZT9x44ypzXifsXH
-# Xy/7O5GWumItJxBIRDbzZpSRGRRjzbmYFYHPGvefoJ3rr32TeUeAU/uaS42DeLsF
-# EFxQvAKHT61kKk92TK8hH+iIUwuB0tId/rC1763ptViiZk3RVlqUy8WeAawIaRkU
-# HDLHQi5hYZUcgW33OKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIFPK62zTIagC2qyqI7GHB3gk8t0gWUyUcqS5VRetg6wgMA0GCSqG
+# SIb3DQEBAQUABIIBgEbHvlaVpUCrIFCoyDeKE+8+1JWmi5oS0d+vgyuSeCjL0a3b
+# 9L+I7Ukjm2saaadrKOu2D5ZXWj5YT0xK9p2LG4t+zzUpgvy57vLUdHkCIM5UG2Ku
+# Wa9vaPTsfE5gUmNGcFsL+sMfbzwPgfXzQFLfQKCRJXfRIjMB3cMRxg/CLm9Lngjt
+# V5LYYIg2rZ1ehF3TpNqaKpOueOOEgO4a3Vnhc+SYHLE4PUFbvOxZRBz6iwVPYJpq
+# hhQ6vnkvpELEEqR2IZ2EKDCDzjscXI+axKD6/de2wry0f/+LWAuGS0lhbYw4dfHS
+# eUQuEY2pAl9D+j+CzILG3jQIuH+z5x7YBHRl6PzFMCr9TQcPxCM/MiSEug+6GHh5
+# waVsHOA7+R5/7bsF4vI5zPWxEViN3X/qtpI4v+IaaxNUFjcLLQ7OkmyRgrWeVr5N
+# uTgrDAu4nJTfeLNv1839zYL1NTQ5nUO4YIy7h086A7md5Q4vqGZVvFKDdHbt8+wu
+# q1WIALH6O7nllu81KqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTQxNTMw
-# MzRaMC8GCSqGSIb3DQEJBDEiBCD4Wf1nJb7oxiymKwBItSeabG6LDh3h0N16UORG
-# RW917TANBgkqhkiG9w0BAQEFAASCAgCHve6iit59HEbpUo/Q27+laB0IWwp2UAkC
-# jkprIYEvRQYCIMXn1k7NStUbU+tM1PbiCqquF2mSNZcV13kbxuBfSNTTcmXfJV1K
-# F2gQVSxtnrzQNslfsHaGOzYIesQJp4nWa/KexnoK3pWSmJ/YmjDVnzex4Z8pmoTa
-# I3Qgkog1pC/CBKUVgF2btNBuURciDGStb+QrPh4qOmrW5wVS/+DwCCUu+BBOepK+
-# 5sMzf9B/n56y0mSB51oQdZ8J/gXzjUBYz2JbRtsAq/LOta6GzhzOl5PaQTBhYnoa
-# FGKA2dFcyv6zhEAtNm/s1kUQ3+RIQie09+pIIeGgfv84PBPjvfGfKnMpX6gNULq2
-# PbP5hqk7Je7vVeyM4/9ZuFcErjvxNDRqkp3PJT5HofdvRSt6v0I5PyyNGN+YSriX
-# FjJglkSerkeskpzKbbR8EP3xvhE2NtT3xigUqFeWPt3Bx8rMx6RPA0JTKNL0lQbI
-# 1lGVFOFsctnseXvAOqaH8NBNcKe3thReqhaR8sgMOA6OI71yfiEULR2pNRGfcpig
-# D5r17VJIKDRiHJxKhQiuBY3IlP+AEMiVL689p7qQpLH1HABxdQIzh1z5N7LcMu+F
-# LN1XO5wG0JqYHozY1cwgusbI1eOGAzBirGkfffkmjy4VUvFcVUJ/NET8Fx3Jo2dL
-# 1LV7w1KKyQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTUwNzI4
+# MDVaMC8GCSqGSIb3DQEJBDEiBCAEcDgtc2wuM9ebzNf7JjRUYRbFERMQJj7RbOCH
+# rgbexDANBgkqhkiG9w0BAQEFAASCAgBxRBIVqqjY4PbjsieD+Bv2lvGXkkDFVXJb
+# uXqIc5Y/zerSoeCdWToeLP0uL6WKL0iS5R3wXmxCRpmc8rxo63/C51gGOlGxZdy2
+# IcSJwOCKx6CCJyXt+gOJw68mcPfTiZaeF0x1NCP1bxW7I9dt+0FK1crYsj+X7pmG
+# fXcnHqgXw0JEh3uqjWgQyDw2cH69B2C4Qcf38Jc523tIAA5+X7kG+ceKEu2vtPJc
+# yAn1NzIH/ZRBdrVLN0ZSLvCNZOOi9HMWmJCb9ndWT6nlFmRMG3qCTk3AtBEyb0mG
+# dVyLvsSm1dCfR+tdG5c+Fd6B1Mxwn2Q5HpcsxV7hBKik69JDA8280R7oMH5sqeRs
+# ZO8GeeMKG6wy0fk1EZOxeMZ12QX9McywRZXK71wY6G5Acx0idgKnXQNvlGJ9Y21y
+# cHXz1QuNmAPw+KHzKbWebGO4fNdUw1jCRz2xmFd+YK2i3PLHt8bpFEICkq3S5BXp
+# WmCSo0CWKJZnbI6nyQBw/vil4pB+SZkFi/5AEcLkTRS4KqWTpZoZPK3HCFI6yt82
+# AKMmsED0dul8VFSg9wlnOpPaBM1U50H1Z9rsc55U+mYjad5+r8ri6S8S3/oMILsR
+# biiaQ57IIiH1xOsXU77q89o6GVwOQoD4cDZKxLNcJQ10wnGABeXK5NshNSwzEe/t
+# uWx0+dpAiQ==
 # SIG # End signature block
