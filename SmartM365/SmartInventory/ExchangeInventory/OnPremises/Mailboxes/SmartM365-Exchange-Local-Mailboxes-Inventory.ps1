@@ -17,7 +17,7 @@
     Parameters allow customization of output paths, permission inclusion, and overwrite behavior.
 
 .VERSION
-1.65
+1.66
 .REQUIREMENTS
     Windows PowerShell 5.1 on an Exchange 2016/on-premises management host.
     Modules/snap-ins: SmartM365 WindowsPowerShell5 compatibility module; Exchange Management snap-in; ActiveDirectory module when AD permission export is enabled.
@@ -25,7 +25,7 @@
     Optional switches: -IncludeADPermission and -OnlyADPermission require read access to AD mailbox permission ACLs.
     Conditional: Mail.Send is required only when Graph mail is used; Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
-Version: 1.65
+Version: 1.66
     Author: https://github.com/khda79/workplacecloudhub.com
     Requirements: Exchange 2016 Management Tools, Active Directory module
     Minimum permissions: Windows PowerShell 5.1, Exchange 2016 Management snap-in, ActiveDirectory module, Exchange read RBAC for mailbox/remote mailbox/statistics/permissions, and AD read access.
@@ -267,7 +267,7 @@ $global:SharePointTargetFolderPath = Get-ScriptLocalConfigValue -Config $ScriptL
 $script:SharePointUploadDisabledForRun = -not $global:EnableSharePointUpload
 $script:SharePointUploadDisableLogged = $false
 #region Module Import and Initialization
-$ScriptVersion = "1.65"
+$ScriptVersion = "1.66"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $EnableWeeklyHistory = [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'EnableWeeklyHistory' -DefaultValue $true)
 $WeeklyHistoryFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'WeeklyHistoryFolderPath' -DefaultValue ''
@@ -1818,8 +1818,10 @@ function Invoke-SmartM365ExchangeLocalMailboxReport {
         $totalMb = ($items | Measure-Object -Property TotalItemSizeToMB -Sum).Sum
         if ($null -eq $totalMb) { $totalMb = 0 }
         $row = [ordered]@{ Date = (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'); DomainName = $domain; TotalMailboxCount = $items.Count; TotalLocalMailboxCount = @($items | Where-Object { $_.RecipientTypeDetails -notin $remoteTypes }).Count; TotalRemoteMailboxCount = @($items | Where-Object { $_.RecipientTypeDetails -in $remoteTypes }).Count; EnabledAccounts = @($items | Where-Object { $_.AccountDisabled -eq $false }).Count; DisabledAccounts = @($items | Where-Object { $_.AccountDisabled -eq $true }).Count; TotalLocalMailboxSizeGB = [math]::Round(([double]$totalMb / 1024), 2) }
-        $counts = @($items | Group-Object -Property RecipientTypeDetails -NoElement)
-        foreach ($type in $mailboxTypes) { $row[$type] = @($counts | Where-Object { $_.Name -eq $type }).Count }
+        # Count mailboxes per type, not matching groups: each type column must sum to TotalMailboxCount.
+        $countByType = @{}
+        foreach ($group in @($items | Group-Object -Property RecipientTypeDetails -NoElement)) { $countByType[[string]$group.Name] = [int]$group.Count }
+        foreach ($type in $mailboxTypes) { $row[$type] = if ($countByType.ContainsKey($type)) { $countByType[$type] } else { 0 } }
         [pscustomobject]$row
     })
     $dailyRows = @()
