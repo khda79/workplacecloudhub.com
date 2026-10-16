@@ -105,7 +105,7 @@ table 'Data Trust Evidence'
 		lineageTag: 961d18e6-00d9-4ac2-927e-51e79b58c975
 
 	/// Preserves the original dynamic evidence status together with the footer scope after removal of the duplicate ribbon.
-	measure 'Combined Data Trust Evidence Ribbon Text' = [Data Trust Evidence Ribbon Text] & UNICHAR(10) & "Evidence scope: prepared private snapshot · missing evidence is not zero · filters stay active across views · full detail available in task views."
+	measure 'Combined Data Trust Evidence Ribbon Text' = [Data Trust Evidence Ribbon Text] & UNICHAR(10) & "Evidence scope: prepared private snapshot · missing evidence is not zero · filters stay active across views · full detail available in task views." & UNICHAR(10) & [Daily Domain Trust Text]
 		displayFolder: Report footer
 		lineageTag: ffa2c505-e794-4ebd-b80c-cc6370c1587c
 

@@ -12,8 +12,8 @@ const metadata=snapshot.model?{tables:snapshot.model.tables.map(t=>({name:t.name
 const tables=new Map(metadata.tables.map(t=>[t.name,t]));
 let checks=0;
 function check(test,message){assert(test,message);checks++;}
-check(order.pageOrder.length===27,'Expected 27 pages after generic graph retirement');
-check(new Set(order.pageOrder).size===27,'Duplicate page registration');
+check(order.pageOrder.length===28,'Expected 28 pages including the daily directory and mailbox trends');
+check(new Set(order.pageOrder).size===28,'Duplicate page registration');
 const pages=order.pageOrder.map(p=>read(path.join(def,'pages',p,'page.json')));
 check(!pages.some(p=>p.displayName==='CMDB')&&pages[1].displayName==='Operational Overview','Existing business pages preserved');
 const all=[];

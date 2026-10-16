@@ -378,3 +378,19 @@ relationship TeamsSiteLinks_ObservedSite
 	fromColumn: 'Teams Site Links'.'Site ID'
 	toColumn: 'SharePoint Site Links'.'Site ID'
 
+
+relationship rel_daily_directory_date
+	fromColumn: 'Daily Directory Trends'.'Date Key'
+	toColumn: Date.'Date Key'
+
+relationship rel_daily_mailbox_date
+	fromColumn: 'Daily Mailbox Trends'.'Date Key'
+	toColumn: Date.'Date Key'
+
+relationship rel_daily_directory_domain
+	fromColumn: 'Daily Directory Trends'.'Domain Key'
+	toColumn: 'Daily Domain'.'Domain Key'
+
+relationship rel_daily_mailbox_domain
+	fromColumn: 'Daily Mailbox Trends'.'Domain Key'
+	toColumn: 'Daily Domain'.'Domain Key'

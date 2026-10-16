@@ -18,6 +18,12 @@ annotation __PBI_TimeIntelligenceEnabled = 1
 ref table Date
 ref table 'Report Metadata'
 ref table 'Executive KPI Trends'
+ref table 'Daily Directory Trends'
+ref table 'Daily Mailbox Trends'
+ref table 'Daily Axis'
+ref table 'Daily Domain'
+ref table 'Daily Period'
+ref table 'Daily View'
 ref table DateTableTemplate_b24e4abb-ee4b-49b2-9882-957599ce3aa1
 ref table 'Device Inventory Evidence'
 ref table 'Device Operational Signals'

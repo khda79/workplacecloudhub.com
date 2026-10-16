@@ -1,0 +1,17 @@
+/// Page-local period selection. No selection means All history.
+table 'Daily Period'
+	lineageTag: 2e966390-c8bf-4789-bd48-4b84d5753dca
+
+	column Period
+		dataType: string
+		lineageTag: 9c29f0ae-818f-4cac-91ac-4673d87b46b6
+		sourceColumn: [Period]
+
+	column Days
+		dataType: int64
+		lineageTag: 5c5fecb4-b6fe-4ce1-9df9-e8c15d6b5f07
+		sourceColumn: [Days]
+
+	partition 'Daily Period' = calculated
+		mode: import
+		source = DATATABLE ( "Period", STRING, "Days", INTEGER, { {"All", 0}, {"12 months", 365}, {"90 days", 90}, {"30 days", 30} } )

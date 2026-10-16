@@ -74,6 +74,21 @@
               "queryRef": "Device Inventory Evidence.AD-to-Intune Unmatched Devices",
               "nativeQueryRef": "AD-to-Intune Unmatched Devices",
               "displayName": "AD-to-Intune Unmatched Devices"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Daily Directory Trends"
+                    }
+                  },
+                  "Property": "Persistent Domain Absence Events"
+                }
+              },
+              "queryRef": "Daily Directory Trends.Persistent Domain Absence Events",
+              "nativeQueryRef": "Persistent domain absence events",
+              "displayName": "Persistent domain absence events"
             }
           ]
         }

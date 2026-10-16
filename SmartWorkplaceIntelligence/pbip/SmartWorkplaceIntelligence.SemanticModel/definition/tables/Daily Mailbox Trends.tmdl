@@ -1,0 +1,287 @@
+/// Governed daily source and domain evidence; blank metrics are not measured, not zero.
+table 'Daily Mailbox Trends'
+	lineageTag: 3fbe1bd6-94d9-43b2-ba27-7212a3038df4
+
+	measure 'Total Mailboxes Daily' = VAR _days = SELECTEDVALUE('Daily Period'[Days], 0) VAR _latest = MIN(CALCULATE(MAX('Daily Mailbox Trends'[Date]), REMOVEFILTERS('Date')), MAXX(ALLSELECTED('Date'[Date]), 'Date'[Date])) VAR _date = MAX('Date'[Date]) VAR _domainSelected = ISFILTERED('Daily Domain'[Domain]) VAR _rows = CALCULATETABLE('Daily Mailbox Trends', KEEPFILTERS('Daily Mailbox Trends'[Source Name] = "Exchange On-premises"), KEEPFILTERS('Daily Mailbox Trends'[Metric Name] = "TotalMailboxCount"), KEEPFILTERS('Daily Mailbox Trends'[Source Day Status] = "Complete"), FILTER(ALL('Daily Mailbox Trends'[Domain Key]), IF(_domainSelected, 'Daily Mailbox Trends'[Domain Key] <> "__all__", 'Daily Mailbox Trends'[Domain Key] = "__all__"))) RETURN IF(_days > 0 && _date < _latest - _days + 1, BLANK(), IF(COUNTROWS(FILTER(_rows, 'Daily Mailbox Trends'[Metric Status] = "Not measured")) > 0, BLANK(), SUMX(_rows, 'Daily Mailbox Trends'[Metric Value])))
+		formatString: #,0
+		displayFolder: Daily Trends
+		lineageTag: bca38462-3cab-48d5-9102-4097d9b1784a
+
+
+	measure 'On-premises Mailboxes Daily' = VAR _days = SELECTEDVALUE('Daily Period'[Days], 0) VAR _latest = MIN(CALCULATE(MAX('Daily Mailbox Trends'[Date]), REMOVEFILTERS('Date')), MAXX(ALLSELECTED('Date'[Date]), 'Date'[Date])) VAR _date = MAX('Date'[Date]) VAR _domainSelected = ISFILTERED('Daily Domain'[Domain]) VAR _rows = CALCULATETABLE('Daily Mailbox Trends', KEEPFILTERS('Daily Mailbox Trends'[Source Name] = "Exchange On-premises"), KEEPFILTERS('Daily Mailbox Trends'[Metric Name] = "TotalLocalMailboxCount"), KEEPFILTERS('Daily Mailbox Trends'[Source Day Status] = "Complete"), FILTER(ALL('Daily Mailbox Trends'[Domain Key]), IF(_domainSelected, 'Daily Mailbox Trends'[Domain Key] <> "__all__", 'Daily Mailbox Trends'[Domain Key] = "__all__"))) RETURN IF(_days > 0 && _date < _latest - _days + 1, BLANK(), IF(COUNTROWS(FILTER(_rows, 'Daily Mailbox Trends'[Metric Status] = "Not measured")) > 0, BLANK(), SUMX(_rows, 'Daily Mailbox Trends'[Metric Value])))
+		formatString: #,0
+		displayFolder: Daily Trends
+		lineageTag: 16dcb744-17c5-408a-9635-f1c0f1cadc22
+
+
+	measure 'Exchange Online Remote Daily' = VAR _days = SELECTEDVALUE('Daily Period'[Days], 0) VAR _latest = MIN(CALCULATE(MAX('Daily Mailbox Trends'[Date]), REMOVEFILTERS('Date')), MAXX(ALLSELECTED('Date'[Date]), 'Date'[Date])) VAR _date = MAX('Date'[Date]) VAR _domainSelected = ISFILTERED('Daily Domain'[Domain]) VAR _rows = CALCULATETABLE('Daily Mailbox Trends', KEEPFILTERS('Daily Mailbox Trends'[Source Name] = "Exchange On-premises"), KEEPFILTERS('Daily Mailbox Trends'[Metric Name] = "TotalRemoteMailboxCount"), KEEPFILTERS('Daily Mailbox Trends'[Source Day Status] = "Complete"), FILTER(ALL('Daily Mailbox Trends'[Domain Key]), IF(_domainSelected, 'Daily Mailbox Trends'[Domain Key] <> "__all__", 'Daily Mailbox Trends'[Domain Key] = "__all__"))) RETURN IF(_days > 0 && _date < _latest - _days + 1, BLANK(), IF(COUNTROWS(FILTER(_rows, 'Daily Mailbox Trends'[Metric Status] = "Not measured")) > 0, BLANK(), SUMX(_rows, 'Daily Mailbox Trends'[Metric Value])))
+		formatString: #,0
+		displayFolder: Daily Trends
+		lineageTag: b31d9fb3-a659-4a53-adf3-c08743fd72a5
+
+
+	measure 'Enabled Mailbox Accounts Daily' = VAR _days = SELECTEDVALUE('Daily Period'[Days], 0) VAR _latest = MIN(CALCULATE(MAX('Daily Mailbox Trends'[Date]), REMOVEFILTERS('Date')), MAXX(ALLSELECTED('Date'[Date]), 'Date'[Date])) VAR _date = MAX('Date'[Date]) VAR _domainSelected = ISFILTERED('Daily Domain'[Domain]) VAR _rows = CALCULATETABLE('Daily Mailbox Trends', KEEPFILTERS('Daily Mailbox Trends'[Source Name] = "Exchange On-premises"), KEEPFILTERS('Daily Mailbox Trends'[Metric Name] = "EnabledAccounts"), KEEPFILTERS('Daily Mailbox Trends'[Source Day Status] = "Complete"), FILTER(ALL('Daily Mailbox Trends'[Domain Key]), IF(_domainSelected, 'Daily Mailbox Trends'[Domain Key] <> "__all__", 'Daily Mailbox Trends'[Domain Key] = "__all__"))) RETURN IF(_days > 0 && _date < _latest - _days + 1, BLANK(), IF(COUNTROWS(FILTER(_rows, 'Daily Mailbox Trends'[Metric Status] = "Not measured")) > 0, BLANK(), SUMX(_rows, 'Daily Mailbox Trends'[Metric Value])))
+		formatString: #,0
+		displayFolder: Daily Trends
+		lineageTag: 7f22afeb-7a37-43ef-a2af-193d4d7737dd
+
+
+	measure 'Disabled Mailbox Accounts Daily' = VAR _days = SELECTEDVALUE('Daily Period'[Days], 0) VAR _latest = MIN(CALCULATE(MAX('Daily Mailbox Trends'[Date]), REMOVEFILTERS('Date')), MAXX(ALLSELECTED('Date'[Date]), 'Date'[Date])) VAR _date = MAX('Date'[Date]) VAR _domainSelected = ISFILTERED('Daily Domain'[Domain]) VAR _rows = CALCULATETABLE('Daily Mailbox Trends', KEEPFILTERS('Daily Mailbox Trends'[Source Name] = "Exchange On-premises"), KEEPFILTERS('Daily Mailbox Trends'[Metric Name] = "DisabledAccounts"), KEEPFILTERS('Daily Mailbox Trends'[Source Day Status] = "Complete"), FILTER(ALL('Daily Mailbox Trends'[Domain Key]), IF(_domainSelected, 'Daily Mailbox Trends'[Domain Key] <> "__all__", 'Daily Mailbox Trends'[Domain Key] = "__all__"))) RETURN IF(_days > 0 && _date < _latest - _days + 1, BLANK(), IF(COUNTROWS(FILTER(_rows, 'Daily Mailbox Trends'[Metric Status] = "Not measured")) > 0, BLANK(), SUMX(_rows, 'Daily Mailbox Trends'[Metric Value])))
+		formatString: #,0
+		displayFolder: Daily Trends
+		lineageTag: d99a2a5c-ce50-4b9a-8ec6-6559f5a651c8
+
+
+	measure 'Local Mailbox Size GB Daily' = VAR _days = SELECTEDVALUE('Daily Period'[Days], 0) VAR _latest = MIN(CALCULATE(MAX('Daily Mailbox Trends'[Date]), REMOVEFILTERS('Date')), MAXX(ALLSELECTED('Date'[Date]), 'Date'[Date])) VAR _date = MAX('Date'[Date]) VAR _domainSelected = ISFILTERED('Daily Domain'[Domain]) VAR _rows = CALCULATETABLE('Daily Mailbox Trends', KEEPFILTERS('Daily Mailbox Trends'[Source Name] = "Exchange On-premises"), KEEPFILTERS('Daily Mailbox Trends'[Metric Name] = "TotalLocalMailboxSizeGB"), KEEPFILTERS('Daily Mailbox Trends'[Source Day Status] = "Complete"), FILTER(ALL('Daily Mailbox Trends'[Domain Key]), IF(_domainSelected, 'Daily Mailbox Trends'[Domain Key] <> "__all__", 'Daily Mailbox Trends'[Domain Key] = "__all__"))) RETURN IF(_days > 0 && _date < _latest - _days + 1, BLANK(), IF(COUNTROWS(FILTER(_rows, 'Daily Mailbox Trends'[Metric Status] = "Not measured")) > 0, BLANK(), SUMX(_rows, 'Daily Mailbox Trends'[Metric Value])))
+		formatString: #,0.0
+		displayFolder: Daily Trends
+		lineageTag: 809d93b7-84b5-440f-9ba1-310845627850
+
+
+	measure 'Equipment Mailboxes Daily' = VAR _days = SELECTEDVALUE('Daily Period'[Days], 0) VAR _latest = MIN(CALCULATE(MAX('Daily Mailbox Trends'[Date]), REMOVEFILTERS('Date')), MAXX(ALLSELECTED('Date'[Date]), 'Date'[Date])) VAR _date = MAX('Date'[Date]) VAR _domainSelected = ISFILTERED('Daily Domain'[Domain]) VAR _rows = CALCULATETABLE('Daily Mailbox Trends', KEEPFILTERS('Daily Mailbox Trends'[Source Name] = "Exchange On-premises"), KEEPFILTERS('Daily Mailbox Trends'[Metric Name] = "EquipmentMailbox"), KEEPFILTERS('Daily Mailbox Trends'[Source Day Status] = "Complete"), FILTER(ALL('Daily Mailbox Trends'[Domain Key]), IF(_domainSelected, 'Daily Mailbox Trends'[Domain Key] <> "__all__", 'Daily Mailbox Trends'[Domain Key] = "__all__"))) RETURN IF(_days > 0 && _date < _latest - _days + 1, BLANK(), IF(COUNTROWS(FILTER(_rows, 'Daily Mailbox Trends'[Metric Status] = "Not measured")) > 0, BLANK(), SUMX(_rows, 'Daily Mailbox Trends'[Metric Value])))
+		formatString: #,0
+		displayFolder: Daily Trends
+		lineageTag: 63263714-a29c-4258-b297-feb39553f99d
+
+
+	measure 'Remote Shared Mailboxes Daily' = VAR _days = SELECTEDVALUE('Daily Period'[Days], 0) VAR _latest = MIN(CALCULATE(MAX('Daily Mailbox Trends'[Date]), REMOVEFILTERS('Date')), MAXX(ALLSELECTED('Date'[Date]), 'Date'[Date])) VAR _date = MAX('Date'[Date]) VAR _domainSelected = ISFILTERED('Daily Domain'[Domain]) VAR _rows = CALCULATETABLE('Daily Mailbox Trends', KEEPFILTERS('Daily Mailbox Trends'[Source Name] = "Exchange On-premises"), KEEPFILTERS('Daily Mailbox Trends'[Metric Name] = "RemoteSharedMailbox"), KEEPFILTERS('Daily Mailbox Trends'[Source Day Status] = "Complete"), FILTER(ALL('Daily Mailbox Trends'[Domain Key]), IF(_domainSelected, 'Daily Mailbox Trends'[Domain Key] <> "__all__", 'Daily Mailbox Trends'[Domain Key] = "__all__"))) RETURN IF(_days > 0 && _date < _latest - _days + 1, BLANK(), IF(COUNTROWS(FILTER(_rows, 'Daily Mailbox Trends'[Metric Status] = "Not measured")) > 0, BLANK(), SUMX(_rows, 'Daily Mailbox Trends'[Metric Value])))
+		formatString: #,0
+		displayFolder: Daily Trends
+		lineageTag: eaffbebd-0a36-4142-bb03-1a5d84ce11c7
+
+
+	measure 'Remote User Mailboxes Daily' = VAR _days = SELECTEDVALUE('Daily Period'[Days], 0) VAR _latest = MIN(CALCULATE(MAX('Daily Mailbox Trends'[Date]), REMOVEFILTERS('Date')), MAXX(ALLSELECTED('Date'[Date]), 'Date'[Date])) VAR _date = MAX('Date'[Date]) VAR _domainSelected = ISFILTERED('Daily Domain'[Domain]) VAR _rows = CALCULATETABLE('Daily Mailbox Trends', KEEPFILTERS('Daily Mailbox Trends'[Source Name] = "Exchange On-premises"), KEEPFILTERS('Daily Mailbox Trends'[Metric Name] = "RemoteUserMailbox"), KEEPFILTERS('Daily Mailbox Trends'[Source Day Status] = "Complete"), FILTER(ALL('Daily Mailbox Trends'[Domain Key]), IF(_domainSelected, 'Daily Mailbox Trends'[Domain Key] <> "__all__", 'Daily Mailbox Trends'[Domain Key] = "__all__"))) RETURN IF(_days > 0 && _date < _latest - _days + 1, BLANK(), IF(COUNTROWS(FILTER(_rows, 'Daily Mailbox Trends'[Metric Status] = "Not measured")) > 0, BLANK(), SUMX(_rows, 'Daily Mailbox Trends'[Metric Value])))
+		formatString: #,0
+		displayFolder: Daily Trends
+		lineageTag: d1fa733c-1afa-4cb7-af91-d7f217256a01
+
+
+	measure 'Room Mailboxes Daily' = VAR _days = SELECTEDVALUE('Daily Period'[Days], 0) VAR _latest = MIN(CALCULATE(MAX('Daily Mailbox Trends'[Date]), REMOVEFILTERS('Date')), MAXX(ALLSELECTED('Date'[Date]), 'Date'[Date])) VAR _date = MAX('Date'[Date]) VAR _domainSelected = ISFILTERED('Daily Domain'[Domain]) VAR _rows = CALCULATETABLE('Daily Mailbox Trends', KEEPFILTERS('Daily Mailbox Trends'[Source Name] = "Exchange On-premises"), KEEPFILTERS('Daily Mailbox Trends'[Metric Name] = "RoomMailbox"), KEEPFILTERS('Daily Mailbox Trends'[Source Day Status] = "Complete"), FILTER(ALL('Daily Mailbox Trends'[Domain Key]), IF(_domainSelected, 'Daily Mailbox Trends'[Domain Key] <> "__all__", 'Daily Mailbox Trends'[Domain Key] = "__all__"))) RETURN IF(_days > 0 && _date < _latest - _days + 1, BLANK(), IF(COUNTROWS(FILTER(_rows, 'Daily Mailbox Trends'[Metric Status] = "Not measured")) > 0, BLANK(), SUMX(_rows, 'Daily Mailbox Trends'[Metric Value])))
+		formatString: #,0
+		displayFolder: Daily Trends
+		lineageTag: aab7f92a-5b2e-4ece-970d-0ad160a2421d
+
+
+	measure 'Shared Mailboxes Daily' = VAR _days = SELECTEDVALUE('Daily Period'[Days], 0) VAR _latest = MIN(CALCULATE(MAX('Daily Mailbox Trends'[Date]), REMOVEFILTERS('Date')), MAXX(ALLSELECTED('Date'[Date]), 'Date'[Date])) VAR _date = MAX('Date'[Date]) VAR _domainSelected = ISFILTERED('Daily Domain'[Domain]) VAR _rows = CALCULATETABLE('Daily Mailbox Trends', KEEPFILTERS('Daily Mailbox Trends'[Source Name] = "Exchange On-premises"), KEEPFILTERS('Daily Mailbox Trends'[Metric Name] = "SharedMailbox"), KEEPFILTERS('Daily Mailbox Trends'[Source Day Status] = "Complete"), FILTER(ALL('Daily Mailbox Trends'[Domain Key]), IF(_domainSelected, 'Daily Mailbox Trends'[Domain Key] <> "__all__", 'Daily Mailbox Trends'[Domain Key] = "__all__"))) RETURN IF(_days > 0 && _date < _latest - _days + 1, BLANK(), IF(COUNTROWS(FILTER(_rows, 'Daily Mailbox Trends'[Metric Status] = "Not measured")) > 0, BLANK(), SUMX(_rows, 'Daily Mailbox Trends'[Metric Value])))
+		formatString: #,0
+		displayFolder: Daily Trends
+		lineageTag: a08bdab9-7888-4caa-9790-21825c314206
+
+
+	measure 'User Mailboxes Daily' = VAR _days = SELECTEDVALUE('Daily Period'[Days], 0) VAR _latest = MIN(CALCULATE(MAX('Daily Mailbox Trends'[Date]), REMOVEFILTERS('Date')), MAXX(ALLSELECTED('Date'[Date]), 'Date'[Date])) VAR _date = MAX('Date'[Date]) VAR _domainSelected = ISFILTERED('Daily Domain'[Domain]) VAR _rows = CALCULATETABLE('Daily Mailbox Trends', KEEPFILTERS('Daily Mailbox Trends'[Source Name] = "Exchange On-premises"), KEEPFILTERS('Daily Mailbox Trends'[Metric Name] = "UserMailbox"), KEEPFILTERS('Daily Mailbox Trends'[Source Day Status] = "Complete"), FILTER(ALL('Daily Mailbox Trends'[Domain Key]), IF(_domainSelected, 'Daily Mailbox Trends'[Domain Key] <> "__all__", 'Daily Mailbox Trends'[Domain Key] = "__all__"))) RETURN IF(_days > 0 && _date < _latest - _days + 1, BLANK(), IF(COUNTROWS(FILTER(_rows, 'Daily Mailbox Trends'[Metric Status] = "Not measured")) > 0, BLANK(), SUMX(_rows, 'Daily Mailbox Trends'[Metric Value])))
+		formatString: #,0
+		displayFolder: Daily Trends
+		lineageTag: e39397ef-1cd7-402c-b27a-340c01cb00df
+
+
+	measure 'Exchange Online Share Daily' = DIVIDE([Exchange Online Remote Daily], [Total Mailboxes Daily])
+		formatString: 0.0%
+		displayFolder: Daily Trends
+		lineageTag: 89286378-d80b-4a09-8497-bd704ac91cd1
+
+
+	measure 'Exchange Online Share Card' = VAR _first = MINX(FILTER(ALLSELECTED('Date'[Date]), NOT ISBLANK([Exchange Online Share Daily])), 'Date'[Date]) VAR _last = MAXX(FILTER(ALLSELECTED('Date'[Date]), NOT ISBLANK([Exchange Online Share Daily])), 'Date'[Date]) VAR _a = CALCULATE([Exchange Online Share Daily], 'Date'[Date] = _first) VAR _b = CALCULATE([Exchange Online Share Daily], 'Date'[Date] = _last) RETURN IF(ISBLANK(_b), "Not measured", FORMAT(_b, "0.0%") & "  |  " & FORMAT((_b-_a)*100, "+0.0;-0.0;0.0") & " pp")
+		formatString: @
+		displayFolder: Daily Trends
+		lineageTag: 993b7121-ea56-4cce-b580-7dce566285ca
+
+
+	measure 'On-premises Remaining Card' = VAR _first = MINX(FILTER(ALLSELECTED('Date'[Date]), NOT ISBLANK([On-premises Mailboxes Daily])), 'Date'[Date]) VAR _last = MAXX(FILTER(ALLSELECTED('Date'[Date]), NOT ISBLANK([On-premises Mailboxes Daily])), 'Date'[Date]) VAR _a = CALCULATE([On-premises Mailboxes Daily], 'Date'[Date] = _first) VAR _b = CALCULATE([On-premises Mailboxes Daily], 'Date'[Date] = _last) RETURN IF(ISBLANK(_b), "Not measured", FORMAT(_b, "#,0") & "  |  " & FORMAT(_b-_a, "+#,0;-#,0;0"))
+		formatString: @
+		displayFolder: Daily Trends
+		lineageTag: 73cf969a-4a2a-4179-9918-a71726e39a28
+
+
+	measure 'Last Qualified Mailbox Core Day' = MAXX(FILTER(ALLSELECTED('Date'[Date]), NOT ISBLANK([Total Mailboxes Daily]) && NOT ISBLANK([On-premises Mailboxes Daily]) && NOT ISBLANK([Exchange Online Remote Daily]) && NOT ISBLANK([Enabled Mailbox Accounts Daily]) && NOT ISBLANK([Disabled Mailbox Accounts Daily])), 'Date'[Date])
+		formatString: yyyy-MM-dd
+		displayFolder: Daily Trends
+		lineageTag: 1dc02e40-0795-4ffe-9d35-f6b02a363e65
+
+
+	measure 'Last Fully Measured Mailbox Day' = MAXX(FILTER(ALLSELECTED('Date'[Date]), NOT ISBLANK([Total Mailboxes Daily]) && NOT ISBLANK([On-premises Mailboxes Daily]) && NOT ISBLANK([Exchange Online Remote Daily]) && NOT ISBLANK([Enabled Mailbox Accounts Daily]) && NOT ISBLANK([Disabled Mailbox Accounts Daily]) && NOT ISBLANK([Local Mailbox Size GB Daily]) && NOT ISBLANK([Equipment Mailboxes Daily]) && NOT ISBLANK([Remote Shared Mailboxes Daily]) && NOT ISBLANK([Remote User Mailboxes Daily]) && NOT ISBLANK([Room Mailboxes Daily]) && NOT ISBLANK([Shared Mailboxes Daily]) && NOT ISBLANK([User Mailboxes Daily])), 'Date'[Date])
+		formatString: yyyy-MM-dd
+		displayFolder: Daily Trends
+		lineageTag: cad7f1a3-cee8-4c67-b8df-f361ddf0dc83
+
+
+	measure 'Mailbox Partial Days' = CALCULATE(DISTINCTCOUNT('Daily Mailbox Trends'[Date Key]), REMOVEFILTERS('Daily Domain'), 'Daily Mailbox Trends'[Source Name] = "Exchange On-premises", 'Daily Mailbox Trends'[Domain Key] = "__all__", 'Daily Mailbox Trends'[Source Day Status] = "Partial capture")
+		formatString: #,0
+		displayFolder: Daily Trends
+		lineageTag: dfe3f228-c2f6-4ec5-ab6a-984afb958699
+
+
+	measure 'Mailbox Incomplete Days' = CALCULATE(DISTINCTCOUNT('Daily Mailbox Trends'[Date Key]), REMOVEFILTERS('Daily Domain'), 'Daily Mailbox Trends'[Source Name] = "Exchange On-premises", 'Daily Mailbox Trends'[Domain Key] = "__all__", 'Daily Mailbox Trends'[Metric Status] = "Not measured")
+		formatString: #,0
+		displayFolder: Daily Trends
+		lineageTag: de411e40-51dc-4c89-838f-c45e6b171721
+
+
+	measure 'Mailbox Quality Text' = "Last qualified day (core): " & FORMAT([Last Qualified Mailbox Core Day], "dd MMM yyyy") & UNICHAR(10) & "Last fully measured day: " & FORMAT([Last Fully Measured Mailbox Day], "dd MMM yyyy")
+		formatString: @
+		displayFolder: Daily Trends
+		lineageTag: 9a487489-bae5-4f8e-93c7-8b6b50802735
+
+
+	measure 'Persistent Mailbox Domain Events' = CALCULATE(DISTINCTCOUNT('Daily Mailbox Trends'[Date Key]), REMOVEFILTERS('Daily Domain'), 'Daily Mailbox Trends'[Domain Key] = "__all__", 'Daily Mailbox Trends'[Quality Event] = "Domain absent (persistent)")
+		formatString: #,0
+		displayFolder: Daily Trends
+		lineageTag: 4db753e5-10f1-404b-8efd-8462ac15c771
+
+
+	measure 'Mailbox Quality Days Tooltip' = VAR _partial = CALCULATETABLE(VALUES('Daily Mailbox Trends'[Date]), REMOVEFILTERS('Daily Domain'), 'Daily Mailbox Trends'[Source Name] = "Exchange On-premises", 'Daily Mailbox Trends'[Domain Key] = "__all__", 'Daily Mailbox Trends'[Source Day Status] = "Partial capture") VAR _incomplete = CALCULATETABLE(VALUES('Daily Mailbox Trends'[Date]), REMOVEFILTERS('Daily Domain'), 'Daily Mailbox Trends'[Source Name] = "Exchange On-premises", 'Daily Mailbox Trends'[Domain Key] = "__all__", 'Daily Mailbox Trends'[Metric Status] = "Not measured") VAR _retired = CALCULATETABLE(VALUES('Daily Mailbox Trends'[Date]), REMOVEFILTERS('Daily Domain'), 'Daily Mailbox Trends'[Source Name] = "Exchange On-premises", 'Daily Mailbox Trends'[Domain Key] = "__all__", 'Daily Mailbox Trends'[Quality Event] = "Domain absent (persistent)") RETURN "Partial capture days: " & IF(COUNTROWS(_partial)=0, "None", CONCATENATEX(_partial, FORMAT('Daily Mailbox Trends'[Date], "yyyy-MM-dd"), ", ", 'Daily Mailbox Trends'[Date], ASC)) & UNICHAR(10) & "Incomplete days: " & IF(COUNTROWS(_incomplete)=0, "None", CONCATENATEX(_incomplete, FORMAT('Daily Mailbox Trends'[Date], "yyyy-MM-dd"), ", ", 'Daily Mailbox Trends'[Date], ASC)) & UNICHAR(10) & "Persistent domain event days: " & IF(COUNTROWS(_retired)=0, "None", CONCATENATEX(_retired, FORMAT('Daily Mailbox Trends'[Date], "yyyy-MM-dd"), ", ", 'Daily Mailbox Trends'[Date], ASC))
+		formatString: @
+		displayFolder: Daily Trends
+		lineageTag: c34a2701-72a4-43c5-9d20-94fb7327e346
+
+	column TenantKey
+		dataType: string
+		isHidden
+		lineageTag: 330bab1e-597b-4a20-807c-db108e441976
+		summarizeBy: none
+		sourceColumn: TenantKey
+
+	column OrganizationKey
+		dataType: string
+		isHidden
+		lineageTag: 7e1880b8-bbe6-4a2a-9675-863743957cdf
+		summarizeBy: none
+		sourceColumn: OrganizationKey
+
+	column EnvironmentKey
+		dataType: string
+		isHidden
+		lineageTag: ae967dda-b67d-4738-b3ff-ec5d86ba55cf
+		summarizeBy: none
+		sourceColumn: EnvironmentKey
+
+	column TenantId
+		dataType: string
+		isHidden
+		lineageTag: cdd9b831-ed2c-4f19-b45b-7cfe030317cb
+		summarizeBy: none
+		sourceColumn: TenantId
+
+	column 'Date Key'
+		dataType: int64
+		lineageTag: 9c1cc307-614e-4473-8746-d20f3b79b7fd
+		summarizeBy: none
+		sourceColumn: Date Key
+
+	column Date
+		dataType: dateTime
+		lineageTag: b48dc0e3-2058-46a1-8b7b-07f3c4e9b73b
+		summarizeBy: none
+		sourceColumn: Date
+
+	column 'Source Name'
+		dataType: string
+		lineageTag: 997ef896-7277-4aeb-88ba-6e86539ebdb6
+		summarizeBy: none
+		sourceColumn: Source Name
+
+	column 'Domain Key'
+		dataType: string
+		isHidden
+		lineageTag: df943d62-5b12-4a54-8822-10c67b0b9e27
+		summarizeBy: none
+		sourceColumn: Domain Key
+
+	column 'Domain Name'
+		dataType: string
+		lineageTag: 3f1a1a6e-0559-49a8-bf33-4ca609ca0edc
+		summarizeBy: none
+		sourceColumn: Domain Name
+
+	column 'Metric Name'
+		dataType: string
+		lineageTag: c5bdce42-f64a-4cfe-9c9f-23b06764e459
+		summarizeBy: none
+		sourceColumn: Metric Name
+
+	column 'Metric Unit'
+		dataType: string
+		lineageTag: 06329ae5-ad74-4efe-88c6-0d668bb8099b
+		summarizeBy: none
+		sourceColumn: Metric Unit
+
+	column 'Metric Value'
+		dataType: double
+		lineageTag: 56614bef-7900-4ec7-aac0-a1e004638850
+		summarizeBy: sum
+		sourceColumn: Metric Value
+
+	column 'Reading At'
+		dataType: dateTime
+		lineageTag: 64c7a34f-6998-4b62-b548-62f5224c8976
+		summarizeBy: none
+		sourceColumn: Reading At
+
+	column 'Metric Status'
+		dataType: string
+		lineageTag: e869a963-58f5-405a-816a-9818a65bb4f2
+		summarizeBy: none
+		sourceColumn: Metric Status
+
+	column 'Source Day Status'
+		dataType: string
+		lineageTag: 0a7309b0-d0a9-401f-8f71-29ae7337147e
+		summarizeBy: none
+		sourceColumn: Source Day Status
+
+	column 'Quality Event'
+		dataType: string
+		lineageTag: aa0ce8b3-0746-43b2-b7da-8fcae3a26fbb
+		summarizeBy: none
+		sourceColumn: Quality Event
+
+	column 'Quality Reason'
+		dataType: string
+		lineageTag: 45ff9abd-a100-46af-9d46-787593eebe18
+		summarizeBy: none
+		sourceColumn: Quality Reason
+
+	column 'Observed Domain Count'
+		dataType: int64
+		lineageTag: 7e7d67d2-8c2e-47b0-a246-15af9a008e83
+		summarizeBy: none
+		sourceColumn: Observed Domain Count
+
+	column 'Absent Domain Count'
+		dataType: int64
+		lineageTag: 82b9db9e-a741-4ac2-a5d4-ddade1153ac2
+		summarizeBy: none
+		sourceColumn: Absent Domain Count
+
+	column 'Persistent Absent Domain Count'
+		dataType: int64
+		lineageTag: 74404e05-62d0-43b2-97c3-8650df2ebb36
+		summarizeBy: none
+		sourceColumn: Persistent Absent Domain Count
+
+	column 'Absent Prior Share (%)'
+		dataType: double
+		lineageTag: f6b7a7ee-1660-42b2-b82d-f6a020ec7adf
+		summarizeBy: none
+		sourceColumn: Absent Prior Share (%)
+
+	column 'Partial Threshold (%)'
+		dataType: double
+		lineageTag: 505c2efb-f7c6-4f23-9d23-00343df562f1
+		summarizeBy: none
+		sourceColumn: Partial Threshold (%)
+
+	column 'Reference Complete Day'
+		dataType: dateTime
+		lineageTag: 8f6fb23d-766e-4856-be9b-6327b8f4b859
+		summarizeBy: none
+		sourceColumn: Reference Complete Day
+
+	partition 'Daily Mailbox Trends Import' = m
+		mode: import
+		source =
+				let
+				    Raw = Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("DailyMailboxTrends.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]),
+				    Nulls = Table.ReplaceValue(Raw, "", null, Replacer.ReplaceValue, {"Metric Value", "Reference Complete Day"}),
+				    Typed = Table.TransformColumnTypes(Nulls, {{"TenantKey", type text}, {"OrganizationKey", type text}, {"EnvironmentKey", type text}, {"TenantId", type text}, {"Date Key", Int64.Type}, {"Date", type datetime}, {"Source Name", type text}, {"Domain Key", type text}, {"Domain Name", type text}, {"Metric Name", type text}, {"Metric Unit", type text}, {"Metric Value", type number}, {"Reading At", type datetime}, {"Metric Status", type text}, {"Source Day Status", type text}, {"Quality Event", type text}, {"Quality Reason", type text}, {"Observed Domain Count", Int64.Type}, {"Absent Domain Count", Int64.Type}, {"Persistent Absent Domain Count", Int64.Type}, {"Absent Prior Share (%)", type number}, {"Partial Threshold (%)", type number}, {"Reference Complete Day", type datetime}}, "en-US")
+				in
+				    Typed

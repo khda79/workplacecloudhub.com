@@ -1,0 +1,89 @@
+table 'Daily Axis'
+	lineageTag: 34999472-5e07-417d-9e4c-48e0f283c9bb
+
+	measure 'Axis Source Last Day' = MAX(CALCULATE(MAX('Daily Directory Trends'[Date]), REMOVEFILTERS('Date'), REMOVEFILTERS('Daily Domain')), CALCULATE(MAX('Daily Mailbox Trends'[Date]), REMOVEFILTERS('Date'), REMOVEFILTERS('Daily Domain')))
+		formatString: yyyy-MM-dd
+		lineageTag: 53b5d8fc-71ce-45a2-b000-8aba3a400bcf
+
+	measure 'Axis Window End' = MIN(MAXX(ALLSELECTED('Date'[Date]), 'Date'[Date]), [Axis Source Last Day])
+		formatString: yyyy-MM-dd
+		lineageTag: 677a28c7-7380-44ac-abec-20b4be3d926a
+
+	measure 'Axis Window Start' = VAR _days = SELECTEDVALUE('Daily Period'[Days], 0) VAR _start = MINX(ALLSELECTED('Date'[Date]), 'Date'[Date]) VAR _end = [Axis Window End] RETURN IF(_days > 0, MAX(_start, _end - _days + 1), _start)
+		formatString: yyyy-MM-dd
+		lineageTag: 947e144a-3e11-495c-a968-849d6d0a507d
+
+	measure 'Axis Is Weekly' = VAR _period = SELECTEDVALUE('Daily Period'[Period], "All") VAR _span = DATEDIFF([Axis Window Start], [Axis Window End], DAY) + 1 RETURN IF(_period = "12 months" || (_period = "All" && _span > 120), 1, 0)
+		formatString: 0
+		lineageTag: e67dd0b4-930d-4123-9d89-327c2aed3c8b
+
+	measure 'Axis Point Visible' = VAR _axis = SELECTEDVALUE('Daily Axis'[Axis Date]) VAR _start = [Axis Window Start] VAR _end = [Axis Window End] VAR _weekly = [Axis Is Weekly] RETURN IF(ISBLANK(_axis) || ISBLANK(_start) || ISBLANK(_end), 0, IF(_weekly = 1, IF(WEEKDAY(_axis, 2) = 1 && _axis <= _end && _axis + 6 >= _start, 1, 0), IF(_axis >= _start && _axis <= _end, 1, 0)))
+		formatString: 0
+		lineageTag: 6d7fe3b8-6add-4cac-a198-226e93793963
+
+	measure 'Axis Grain Subtitle' = IF([Axis Is Weekly] = 1, "Weekly view (last qualified reading per week)", "Daily view")
+		formatString: @
+		lineageTag: 69b0c581-6f13-46a0-a1f3-0baa43cf0e6a
+
+	measure 'Axis AD Users Reading Day' = VAR _axis = SELECTEDVALUE('Daily Axis'[Axis Date]) VAR _weekly = [Axis Is Weekly] VAR _end = IF(_weekly = 1, _axis + 6, _axis) RETURN IF([Axis Point Visible] <> 1, BLANK(), MAXX(FILTER(ALLSELECTED('Date'[Date]), 'Date'[Date] >= _axis && 'Date'[Date] <= _end && NOT ISBLANK([Total AD Users Daily]) && NOT ISBLANK([Enabled Users Daily]) && NOT ISBLANK([Disabled Users Daily])), 'Date'[Date]))
+		formatString: yyyy-MM-dd
+		lineageTag: 34b75a0d-98ea-4e47-9677-70919a0661ff
+
+	measure 'Axis AD Computers Reading Day' = VAR _axis = SELECTEDVALUE('Daily Axis'[Axis Date]) VAR _weekly = [Axis Is Weekly] VAR _end = IF(_weekly = 1, _axis + 6, _axis) RETURN IF([Axis Point Visible] <> 1, BLANK(), MAXX(FILTER(ALLSELECTED('Date'[Date]), 'Date'[Date] >= _axis && 'Date'[Date] <= _end && NOT ISBLANK([Enabled AD Computer Accounts Daily]) && NOT ISBLANK([Windows 10 Enabled Daily]) && NOT ISBLANK([Windows 11 Enabled Daily])), 'Date'[Date]))
+		formatString: yyyy-MM-dd
+		lineageTag: 04bee088-a97c-4231-a99f-210e7a7e844b
+
+	measure 'Axis Mailbox Reading Day' = VAR _axis = SELECTEDVALUE('Daily Axis'[Axis Date]) VAR _weekly = [Axis Is Weekly] VAR _end = IF(_weekly = 1, _axis + 6, _axis) RETURN IF([Axis Point Visible] <> 1, BLANK(), MAXX(FILTER(ALLSELECTED('Date'[Date]), 'Date'[Date] >= _axis && 'Date'[Date] <= _end && NOT ISBLANK([Total Mailboxes Daily]) && NOT ISBLANK([On-premises Mailboxes Daily]) && NOT ISBLANK([Exchange Online Remote Daily]) && NOT ISBLANK([Enabled Mailbox Accounts Daily]) && NOT ISBLANK([Disabled Mailbox Accounts Daily])), 'Date'[Date]))
+		formatString: yyyy-MM-dd
+		lineageTag: ab4bd933-0069-4cf9-9694-bc9d17e4b709
+
+	measure 'Axis Enabled Users' = VAR _day = [Axis AD Users Reading Day] RETURN IF(ISBLANK(_day), BLANK(), CALCULATE([Enabled Users Daily], TREATAS({_day}, 'Date'[Date])))
+		formatString: #,0
+		lineageTag: 6fec29af-60b4-4e81-b541-d316a4cd915a
+
+	measure 'Axis Disabled Users' = VAR _day = [Axis AD Users Reading Day] RETURN IF(ISBLANK(_day), BLANK(), CALCULATE([Disabled Users Daily], TREATAS({_day}, 'Date'[Date])))
+		formatString: #,0
+		lineageTag: f597391b-b9da-42a6-89ff-a2878eb92636
+
+	measure 'Axis Windows 10 Chart' = VAR _day = [Axis AD Computers Reading Day] RETURN IF(ISBLANK(_day), BLANK(), CALCULATE([Windows 10 Chart Daily], TREATAS({_day}, 'Date'[Date])))
+		lineageTag: 81267c35-0365-45ef-9f76-c27b1795b1a7
+
+		formatStringDefinition = IF(SELECTEDVALUE('Daily View'[View], "Count") = "Share", "0.0%", "#,0")
+
+	measure 'Axis Windows 11 Chart' = VAR _day = [Axis AD Computers Reading Day] RETURN IF(ISBLANK(_day), BLANK(), CALCULATE([Windows 11 Chart Daily], TREATAS({_day}, 'Date'[Date])))
+		lineageTag: 730e7142-984b-4a19-b642-d9436cd1c649
+
+		formatStringDefinition = IF(SELECTEDVALUE('Daily View'[View], "Count") = "Share", "0.0%", "#,0")
+
+	measure 'Axis On-premises Mailboxes' = VAR _day = [Axis Mailbox Reading Day] RETURN IF(ISBLANK(_day), BLANK(), CALCULATE([On-premises Mailboxes Daily], TREATAS({_day}, 'Date'[Date])))
+		formatString: #,0
+		lineageTag: 1b00edc9-b63a-4c27-a511-a55c6ab9eff1
+
+	measure 'Axis Exchange Online Remote' = VAR _day = [Axis Mailbox Reading Day] RETURN IF(ISBLANK(_day), BLANK(), CALCULATE([Exchange Online Remote Daily], TREATAS({_day}, 'Date'[Date])))
+		formatString: #,0
+		lineageTag: 7f1af662-54b7-4d48-9f68-56a64620384b
+
+	measure 'Axis Exchange Online Share' = VAR _day = [Axis Mailbox Reading Day] RETURN IF(ISBLANK(_day), BLANK(), CALCULATE([Exchange Online Share Daily], TREATAS({_day}, 'Date'[Date])))
+		formatString: 0.0%
+		lineageTag: 80b093bd-cbfd-4d48-8da6-4c99c5adc624
+
+	measure 'Axis AD Users Quality Tooltip' = VAR _axis = SELECTEDVALUE('Daily Axis'[Axis Date]) VAR _end = IF([Axis Is Weekly] = 1, _axis + 6, _axis) VAR _core = CALCULATETABLE('Daily Directory Trends', REMOVEFILTERS('Date'), REMOVEFILTERS('Daily Domain'), 'Daily Directory Trends'[Source Name] = "AD Users", 'Daily Directory Trends'[Domain Key] = "__all__", 'Daily Directory Trends'[Date] >= _axis, 'Daily Directory Trends'[Date] <= _end, 'Daily Directory Trends'[Source Day Status] = "Complete", 'Daily Directory Trends'[Metric Status] = "Measured", 'Daily Directory Trends'[Metric Name] IN {"TotalUsers", "EnabledUsers", "DisabledUsers"}) VAR _qualified = COUNTROWS(FILTER(SUMMARIZE(_core, 'Daily Directory Trends'[Date Key], "MeasuredCore", DISTINCTCOUNT('Daily Directory Trends'[Metric Name])), [MeasuredCore] = 3)) VAR _incomplete = CALCULATE(DISTINCTCOUNT('Daily Directory Trends'[Date Key]), REMOVEFILTERS('Date'), REMOVEFILTERS('Daily Domain'), 'Daily Directory Trends'[Source Name] = "AD Users", 'Daily Directory Trends'[Domain Key] = "__all__", 'Daily Directory Trends'[Date] >= _axis, 'Daily Directory Trends'[Date] <= _end, 'Daily Directory Trends'[Metric Status] = "Not measured") VAR _partial = CALCULATE(DISTINCTCOUNT('Daily Directory Trends'[Date Key]), REMOVEFILTERS('Date'), REMOVEFILTERS('Daily Domain'), 'Daily Directory Trends'[Source Name] = "AD Users", 'Daily Directory Trends'[Domain Key] = "__all__", 'Daily Directory Trends'[Date] >= _axis, 'Daily Directory Trends'[Date] <= _end, 'Daily Directory Trends'[Source Day Status] = "Partial capture") RETURN "Retained reading: " & IF(ISBLANK([Axis AD Users Reading Day]), "None", FORMAT([Axis AD Users Reading Day], "yyyy-MM-dd")) & UNICHAR(10) & "Qualified days: " & FORMAT(COALESCE(_qualified, 0), "0") & "  |  Incomplete: " & FORMAT(COALESCE(_incomplete, 0), "0") & "  |  Partial capture: " & FORMAT(COALESCE(_partial, 0), "0")
+		formatString: @
+		lineageTag: bb40c5a9-7bae-4336-ab51-ef9aac8b4f74
+
+	measure 'Axis AD Computers Quality Tooltip' = VAR _axis = SELECTEDVALUE('Daily Axis'[Axis Date]) VAR _end = IF([Axis Is Weekly] = 1, _axis + 6, _axis) VAR _core = CALCULATETABLE('Daily Directory Trends', REMOVEFILTERS('Date'), REMOVEFILTERS('Daily Domain'), 'Daily Directory Trends'[Source Name] = "AD Computers", 'Daily Directory Trends'[Domain Key] = "__all__", 'Daily Directory Trends'[Date] >= _axis, 'Daily Directory Trends'[Date] <= _end, 'Daily Directory Trends'[Source Day Status] = "Complete", 'Daily Directory Trends'[Metric Status] = "Measured", 'Daily Directory Trends'[Metric Name] IN {"TotalComputers", "EnabledAccounts", "DisabledAccounts", "Windows 10 Enabled", "Windows 11 Enabled"}) VAR _qualified = COUNTROWS(FILTER(SUMMARIZE(_core, 'Daily Directory Trends'[Date Key], "MeasuredCore", DISTINCTCOUNT('Daily Directory Trends'[Metric Name])), [MeasuredCore] = 5)) VAR _incomplete = CALCULATE(DISTINCTCOUNT('Daily Directory Trends'[Date Key]), REMOVEFILTERS('Date'), REMOVEFILTERS('Daily Domain'), 'Daily Directory Trends'[Source Name] = "AD Computers", 'Daily Directory Trends'[Domain Key] = "__all__", 'Daily Directory Trends'[Date] >= _axis, 'Daily Directory Trends'[Date] <= _end, 'Daily Directory Trends'[Metric Status] = "Not measured") VAR _partial = CALCULATE(DISTINCTCOUNT('Daily Directory Trends'[Date Key]), REMOVEFILTERS('Date'), REMOVEFILTERS('Daily Domain'), 'Daily Directory Trends'[Source Name] = "AD Computers", 'Daily Directory Trends'[Domain Key] = "__all__", 'Daily Directory Trends'[Date] >= _axis, 'Daily Directory Trends'[Date] <= _end, 'Daily Directory Trends'[Source Day Status] = "Partial capture") RETURN "Retained reading: " & IF(ISBLANK([Axis AD Computers Reading Day]), "None", FORMAT([Axis AD Computers Reading Day], "yyyy-MM-dd")) & UNICHAR(10) & "Qualified days: " & FORMAT(COALESCE(_qualified, 0), "0") & "  |  Incomplete: " & FORMAT(COALESCE(_incomplete, 0), "0") & "  |  Partial capture: " & FORMAT(COALESCE(_partial, 0), "0")
+		formatString: @
+		lineageTag: 1d0b6e43-b965-46df-8c02-963de162f415
+
+	measure 'Axis Mailbox Quality Tooltip' = VAR _axis = SELECTEDVALUE('Daily Axis'[Axis Date]) VAR _end = IF([Axis Is Weekly] = 1, _axis + 6, _axis) VAR _core = CALCULATETABLE('Daily Mailbox Trends', REMOVEFILTERS('Date'), REMOVEFILTERS('Daily Domain'), 'Daily Mailbox Trends'[Source Name] = "Exchange On-premises", 'Daily Mailbox Trends'[Domain Key] = "__all__", 'Daily Mailbox Trends'[Date] >= _axis, 'Daily Mailbox Trends'[Date] <= _end, 'Daily Mailbox Trends'[Source Day Status] = "Complete", 'Daily Mailbox Trends'[Metric Status] = "Measured", 'Daily Mailbox Trends'[Metric Name] IN {"TotalMailboxCount", "TotalLocalMailboxCount", "TotalRemoteMailboxCount", "EnabledAccounts", "DisabledAccounts"}) VAR _qualified = COUNTROWS(FILTER(SUMMARIZE(_core, 'Daily Mailbox Trends'[Date Key], "MeasuredCore", DISTINCTCOUNT('Daily Mailbox Trends'[Metric Name])), [MeasuredCore] = 5)) VAR _incomplete = CALCULATE(DISTINCTCOUNT('Daily Mailbox Trends'[Date Key]), REMOVEFILTERS('Date'), REMOVEFILTERS('Daily Domain'), 'Daily Mailbox Trends'[Source Name] = "Exchange On-premises", 'Daily Mailbox Trends'[Domain Key] = "__all__", 'Daily Mailbox Trends'[Date] >= _axis, 'Daily Mailbox Trends'[Date] <= _end, 'Daily Mailbox Trends'[Metric Status] = "Not measured") VAR _partial = CALCULATE(DISTINCTCOUNT('Daily Mailbox Trends'[Date Key]), REMOVEFILTERS('Date'), REMOVEFILTERS('Daily Domain'), 'Daily Mailbox Trends'[Source Name] = "Exchange On-premises", 'Daily Mailbox Trends'[Domain Key] = "__all__", 'Daily Mailbox Trends'[Date] >= _axis, 'Daily Mailbox Trends'[Date] <= _end, 'Daily Mailbox Trends'[Source Day Status] = "Partial capture") RETURN "Retained reading: " & IF(ISBLANK([Axis Mailbox Reading Day]), "None", FORMAT([Axis Mailbox Reading Day], "yyyy-MM-dd")) & UNICHAR(10) & "Qualified days: " & FORMAT(COALESCE(_qualified, 0), "0") & "  |  Incomplete: " & FORMAT(COALESCE(_incomplete, 0), "0") & "  |  Partial capture: " & FORMAT(COALESCE(_partial, 0), "0")
+		formatString: @
+		lineageTag: a2584b02-c6b9-4291-aca9-b10ca1429f30
+
+	column 'Axis Date'
+		isNameInferred
+		sourceColumn: [Axis Date]
+
+	partition 'Daily Axis' = calculated
+		mode: import
+		source = SELECTCOLUMNS(CALENDAR(DATE(2025,6,23), DATE(2027,11,9)), "Axis Date", [Date])
+

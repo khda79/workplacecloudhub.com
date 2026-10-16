@@ -7,7 +7,7 @@ const root=process.argv[2];assert(root,'Explicit existing private Report directo
 const read=p=>JSON.parse(fs.readFileSync(p,'utf8').replace(/^\uFEFF/,''));
 const id=s=>crypto.createHash('sha256').update('teams-spo-v1:'+s).digest('hex').slice(0,20);
 const def=path.join(root,'definition'),pages=path.join(def,'pages'),marks=path.join(def,'bookmarks');
-const order=read(path.join(pages,'pages.json'));assert.equal(order.pageOrder.length,27);
+const order=read(path.join(pages,'pages.json'));assert.equal(order.pageOrder.length,28);
 const recipe=read(new URL('../config/teams-sharepoint-model-patch.json.txt',import.meta.url));
 const source=read(new URL('../config/prepared-source-contract.json.txt',import.meta.url));
 const output=read(new URL('../config/native-output-contract.json.txt',import.meta.url));

@@ -1,0 +1,12 @@
+/// Switches the Windows 10 and Windows 11 chart between counts and shares.
+table 'Daily View'
+	lineageTag: 4f051dce-ed06-41c2-a1d4-509e2ab759a4
+
+	column View
+		dataType: string
+		lineageTag: 04b023fb-37d6-4216-ae97-a6acc119affc
+		sourceColumn: [View]
+
+	partition 'Daily View' = calculated
+		mode: import
+		source = DATATABLE ( "View", STRING, { {"Count"}, {"Share"} } )

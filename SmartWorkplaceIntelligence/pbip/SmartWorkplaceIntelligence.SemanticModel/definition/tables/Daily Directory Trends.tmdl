@@ -1,0 +1,381 @@
+/// Governed daily source and domain evidence; blank metrics are not measured, not zero.
+table 'Daily Directory Trends'
+	lineageTag: bb3dc628-a146-4a2e-ad99-3b1b933f5ee6
+
+	measure 'AD User Accounts Scope Tooltip' = "All AD user account types, including service, shared and technical accounts. Executive Overview reports the qualified workforce population. These populations are not directly comparable."
+		lineageTag: 0c209587-e75e-4073-b725-fe482809b96b
+
+	measure 'AD Computer Accounts Scope Tooltip' = "Enabled computer accounts in Active Directory, including computers outside Intune management. Executive Overview reports managed Intune devices. These populations are not directly comparable."
+		lineageTag: 31b9de54-a813-4a9f-ae6d-8240f573addc
+
+	measure 'Total AD Users Daily' = VAR _days = SELECTEDVALUE('Daily Period'[Days], 0) VAR _latest = MIN(CALCULATE(MAX('Daily Directory Trends'[Date]), REMOVEFILTERS('Date')), MAXX(ALLSELECTED('Date'[Date]), 'Date'[Date])) VAR _date = MAX('Date'[Date]) VAR _domainSelected = ISFILTERED('Daily Domain'[Domain]) VAR _rows = CALCULATETABLE('Daily Directory Trends', KEEPFILTERS('Daily Directory Trends'[Source Name] = "AD Users"), KEEPFILTERS('Daily Directory Trends'[Metric Name] = "TotalUsers"), KEEPFILTERS('Daily Directory Trends'[Source Day Status] = "Complete"), FILTER(ALL('Daily Directory Trends'[Domain Key]), IF(_domainSelected, 'Daily Directory Trends'[Domain Key] <> "__all__", 'Daily Directory Trends'[Domain Key] = "__all__"))) RETURN IF(_days > 0 && _date < _latest - _days + 1, BLANK(), IF(COUNTROWS(FILTER(_rows, 'Daily Directory Trends'[Metric Status] = "Not measured")) > 0, BLANK(), SUMX(_rows, 'Daily Directory Trends'[Metric Value])))
+		formatString: #,0
+		displayFolder: Daily Trends
+		lineageTag: 4068d25b-60be-4b76-82f0-bd96e3484f2c
+
+
+	measure 'Enabled Users Daily' = VAR _days = SELECTEDVALUE('Daily Period'[Days], 0) VAR _latest = MIN(CALCULATE(MAX('Daily Directory Trends'[Date]), REMOVEFILTERS('Date')), MAXX(ALLSELECTED('Date'[Date]), 'Date'[Date])) VAR _date = MAX('Date'[Date]) VAR _domainSelected = ISFILTERED('Daily Domain'[Domain]) VAR _rows = CALCULATETABLE('Daily Directory Trends', KEEPFILTERS('Daily Directory Trends'[Source Name] = "AD Users"), KEEPFILTERS('Daily Directory Trends'[Metric Name] = "EnabledUsers"), KEEPFILTERS('Daily Directory Trends'[Source Day Status] = "Complete"), FILTER(ALL('Daily Directory Trends'[Domain Key]), IF(_domainSelected, 'Daily Directory Trends'[Domain Key] <> "__all__", 'Daily Directory Trends'[Domain Key] = "__all__"))) RETURN IF(_days > 0 && _date < _latest - _days + 1, BLANK(), IF(COUNTROWS(FILTER(_rows, 'Daily Directory Trends'[Metric Status] = "Not measured")) > 0, BLANK(), SUMX(_rows, 'Daily Directory Trends'[Metric Value])))
+		formatString: #,0
+		displayFolder: Daily Trends
+		lineageTag: 8c175c69-2c37-4590-b98a-81b7315c566f
+
+
+	measure 'Disabled Users Daily' = VAR _days = SELECTEDVALUE('Daily Period'[Days], 0) VAR _latest = MIN(CALCULATE(MAX('Daily Directory Trends'[Date]), REMOVEFILTERS('Date')), MAXX(ALLSELECTED('Date'[Date]), 'Date'[Date])) VAR _date = MAX('Date'[Date]) VAR _domainSelected = ISFILTERED('Daily Domain'[Domain]) VAR _rows = CALCULATETABLE('Daily Directory Trends', KEEPFILTERS('Daily Directory Trends'[Source Name] = "AD Users"), KEEPFILTERS('Daily Directory Trends'[Metric Name] = "DisabledUsers"), KEEPFILTERS('Daily Directory Trends'[Source Day Status] = "Complete"), FILTER(ALL('Daily Directory Trends'[Domain Key]), IF(_domainSelected, 'Daily Directory Trends'[Domain Key] <> "__all__", 'Daily Directory Trends'[Domain Key] = "__all__"))) RETURN IF(_days > 0 && _date < _latest - _days + 1, BLANK(), IF(COUNTROWS(FILTER(_rows, 'Daily Directory Trends'[Metric Status] = "Not measured")) > 0, BLANK(), SUMX(_rows, 'Daily Directory Trends'[Metric Value])))
+		formatString: #,0
+		displayFolder: Daily Trends
+		lineageTag: 8cab43d3-8f25-4e4e-b183-d2f72b3d2931
+
+
+	measure 'Inactive 90 Days Users Daily' = VAR _days = SELECTEDVALUE('Daily Period'[Days], 0) VAR _latest = MIN(CALCULATE(MAX('Daily Directory Trends'[Date]), REMOVEFILTERS('Date')), MAXX(ALLSELECTED('Date'[Date]), 'Date'[Date])) VAR _date = MAX('Date'[Date]) VAR _domainSelected = ISFILTERED('Daily Domain'[Domain]) VAR _rows = CALCULATETABLE('Daily Directory Trends', KEEPFILTERS('Daily Directory Trends'[Source Name] = "AD Users"), KEEPFILTERS('Daily Directory Trends'[Metric Name] = "Inactive90DaysUsers"), KEEPFILTERS('Daily Directory Trends'[Source Day Status] = "Complete"), FILTER(ALL('Daily Directory Trends'[Domain Key]), IF(_domainSelected, 'Daily Directory Trends'[Domain Key] <> "__all__", 'Daily Directory Trends'[Domain Key] = "__all__"))) RETURN IF(_days > 0 && _date < _latest - _days + 1, BLANK(), IF(COUNTROWS(FILTER(_rows, 'Daily Directory Trends'[Metric Status] = "Not measured")) > 0, BLANK(), SUMX(_rows, 'Daily Directory Trends'[Metric Value])))
+		formatString: #,0
+		displayFolder: Daily Trends
+		lineageTag: 0f4a2ec9-c657-4212-a8ba-4c9a94e25c35
+
+
+	measure 'Total AD Computers Daily' = VAR _days = SELECTEDVALUE('Daily Period'[Days], 0) VAR _latest = MIN(CALCULATE(MAX('Daily Directory Trends'[Date]), REMOVEFILTERS('Date')), MAXX(ALLSELECTED('Date'[Date]), 'Date'[Date])) VAR _date = MAX('Date'[Date]) VAR _domainSelected = ISFILTERED('Daily Domain'[Domain]) VAR _rows = CALCULATETABLE('Daily Directory Trends', KEEPFILTERS('Daily Directory Trends'[Source Name] = "AD Computers"), KEEPFILTERS('Daily Directory Trends'[Metric Name] = "TotalComputers"), KEEPFILTERS('Daily Directory Trends'[Source Day Status] = "Complete"), FILTER(ALL('Daily Directory Trends'[Domain Key]), IF(_domainSelected, 'Daily Directory Trends'[Domain Key] <> "__all__", 'Daily Directory Trends'[Domain Key] = "__all__"))) RETURN IF(_days > 0 && _date < _latest - _days + 1, BLANK(), IF(COUNTROWS(FILTER(_rows, 'Daily Directory Trends'[Metric Status] = "Not measured")) > 0, BLANK(), SUMX(_rows, 'Daily Directory Trends'[Metric Value])))
+		formatString: #,0
+		displayFolder: Daily Trends
+		lineageTag: af87e2e7-e9d5-445f-b5a7-6a11e691c5b6
+
+
+	measure 'Enabled AD Computer Accounts Daily' = VAR _days = SELECTEDVALUE('Daily Period'[Days], 0) VAR _latest = MIN(CALCULATE(MAX('Daily Directory Trends'[Date]), REMOVEFILTERS('Date')), MAXX(ALLSELECTED('Date'[Date]), 'Date'[Date])) VAR _date = MAX('Date'[Date]) VAR _domainSelected = ISFILTERED('Daily Domain'[Domain]) VAR _rows = CALCULATETABLE('Daily Directory Trends', KEEPFILTERS('Daily Directory Trends'[Source Name] = "AD Computers"), KEEPFILTERS('Daily Directory Trends'[Metric Name] = "EnabledAccounts"), KEEPFILTERS('Daily Directory Trends'[Source Day Status] = "Complete"), FILTER(ALL('Daily Directory Trends'[Domain Key]), IF(_domainSelected, 'Daily Directory Trends'[Domain Key] <> "__all__", 'Daily Directory Trends'[Domain Key] = "__all__"))) RETURN IF(_days > 0 && _date < _latest - _days + 1, BLANK(), IF(COUNTROWS(FILTER(_rows, 'Daily Directory Trends'[Metric Status] = "Not measured")) > 0, BLANK(), SUMX(_rows, 'Daily Directory Trends'[Metric Value])))
+		formatString: #,0
+		displayFolder: Daily Trends
+		lineageTag: eec19475-e213-4f90-9c26-9539fc9cc1ad
+
+
+	measure 'Disabled AD Computer Accounts Daily' = VAR _days = SELECTEDVALUE('Daily Period'[Days], 0) VAR _latest = MIN(CALCULATE(MAX('Daily Directory Trends'[Date]), REMOVEFILTERS('Date')), MAXX(ALLSELECTED('Date'[Date]), 'Date'[Date])) VAR _date = MAX('Date'[Date]) VAR _domainSelected = ISFILTERED('Daily Domain'[Domain]) VAR _rows = CALCULATETABLE('Daily Directory Trends', KEEPFILTERS('Daily Directory Trends'[Source Name] = "AD Computers"), KEEPFILTERS('Daily Directory Trends'[Metric Name] = "DisabledAccounts"), KEEPFILTERS('Daily Directory Trends'[Source Day Status] = "Complete"), FILTER(ALL('Daily Directory Trends'[Domain Key]), IF(_domainSelected, 'Daily Directory Trends'[Domain Key] <> "__all__", 'Daily Directory Trends'[Domain Key] = "__all__"))) RETURN IF(_days > 0 && _date < _latest - _days + 1, BLANK(), IF(COUNTROWS(FILTER(_rows, 'Daily Directory Trends'[Metric Status] = "Not measured")) > 0, BLANK(), SUMX(_rows, 'Daily Directory Trends'[Metric Value])))
+		formatString: #,0
+		displayFolder: Daily Trends
+		lineageTag: 9c1a2f4f-a095-4861-a9b5-4221f12c3cda
+
+
+	measure 'Windows 10 Enabled Daily' = VAR _days = SELECTEDVALUE('Daily Period'[Days], 0) VAR _latest = MIN(CALCULATE(MAX('Daily Directory Trends'[Date]), REMOVEFILTERS('Date')), MAXX(ALLSELECTED('Date'[Date]), 'Date'[Date])) VAR _date = MAX('Date'[Date]) VAR _domainSelected = ISFILTERED('Daily Domain'[Domain]) VAR _rows = CALCULATETABLE('Daily Directory Trends', KEEPFILTERS('Daily Directory Trends'[Source Name] = "AD Computers"), KEEPFILTERS('Daily Directory Trends'[Metric Name] = "Windows 10 Enabled"), KEEPFILTERS('Daily Directory Trends'[Source Day Status] = "Complete"), FILTER(ALL('Daily Directory Trends'[Domain Key]), IF(_domainSelected, 'Daily Directory Trends'[Domain Key] <> "__all__", 'Daily Directory Trends'[Domain Key] = "__all__"))) RETURN IF(_days > 0 && _date < _latest - _days + 1, BLANK(), IF(COUNTROWS(FILTER(_rows, 'Daily Directory Trends'[Metric Status] = "Not measured")) > 0, BLANK(), SUMX(_rows, 'Daily Directory Trends'[Metric Value])))
+		formatString: #,0
+		displayFolder: Daily Trends
+		lineageTag: 40594a8c-77b0-468c-83c4-a818ac127848
+
+
+	measure 'Windows 11 Enabled Daily' = VAR _days = SELECTEDVALUE('Daily Period'[Days], 0) VAR _latest = MIN(CALCULATE(MAX('Daily Directory Trends'[Date]), REMOVEFILTERS('Date')), MAXX(ALLSELECTED('Date'[Date]), 'Date'[Date])) VAR _date = MAX('Date'[Date]) VAR _domainSelected = ISFILTERED('Daily Domain'[Domain]) VAR _rows = CALCULATETABLE('Daily Directory Trends', KEEPFILTERS('Daily Directory Trends'[Source Name] = "AD Computers"), KEEPFILTERS('Daily Directory Trends'[Metric Name] = "Windows 11 Enabled"), KEEPFILTERS('Daily Directory Trends'[Source Day Status] = "Complete"), FILTER(ALL('Daily Directory Trends'[Domain Key]), IF(_domainSelected, 'Daily Directory Trends'[Domain Key] <> "__all__", 'Daily Directory Trends'[Domain Key] = "__all__"))) RETURN IF(_days > 0 && _date < _latest - _days + 1, BLANK(), IF(COUNTROWS(FILTER(_rows, 'Daily Directory Trends'[Metric Status] = "Not measured")) > 0, BLANK(), SUMX(_rows, 'Daily Directory Trends'[Metric Value])))
+		formatString: #,0
+		displayFolder: Daily Trends
+		lineageTag: 0bca0c16-4e4a-49fb-ac5e-04d05d89c626
+
+
+	measure 'Windows 7 Enabled Daily' = VAR _days = SELECTEDVALUE('Daily Period'[Days], 0) VAR _latest = MIN(CALCULATE(MAX('Daily Directory Trends'[Date]), REMOVEFILTERS('Date')), MAXX(ALLSELECTED('Date'[Date]), 'Date'[Date])) VAR _date = MAX('Date'[Date]) VAR _domainSelected = ISFILTERED('Daily Domain'[Domain]) VAR _rows = CALCULATETABLE('Daily Directory Trends', KEEPFILTERS('Daily Directory Trends'[Source Name] = "AD Computers"), KEEPFILTERS('Daily Directory Trends'[Metric Name] = "Windows 7 Enabled"), KEEPFILTERS('Daily Directory Trends'[Source Day Status] = "Complete"), FILTER(ALL('Daily Directory Trends'[Domain Key]), IF(_domainSelected, 'Daily Directory Trends'[Domain Key] <> "__all__", 'Daily Directory Trends'[Domain Key] = "__all__"))) RETURN IF(_days > 0 && _date < _latest - _days + 1, BLANK(), IF(COUNTROWS(FILTER(_rows, 'Daily Directory Trends'[Metric Status] = "Not measured")) > 0, BLANK(), SUMX(_rows, 'Daily Directory Trends'[Metric Value])))
+		formatString: #,0
+		displayFolder: Daily Trends
+		lineageTag: f95a1eec-5aa1-45e0-89a5-7b50758af6af
+
+
+	measure 'Windows 8 Enabled Daily' = VAR _days = SELECTEDVALUE('Daily Period'[Days], 0) VAR _latest = MIN(CALCULATE(MAX('Daily Directory Trends'[Date]), REMOVEFILTERS('Date')), MAXX(ALLSELECTED('Date'[Date]), 'Date'[Date])) VAR _date = MAX('Date'[Date]) VAR _domainSelected = ISFILTERED('Daily Domain'[Domain]) VAR _rows = CALCULATETABLE('Daily Directory Trends', KEEPFILTERS('Daily Directory Trends'[Source Name] = "AD Computers"), KEEPFILTERS('Daily Directory Trends'[Metric Name] = "Windows 8 Enabled"), KEEPFILTERS('Daily Directory Trends'[Source Day Status] = "Complete"), FILTER(ALL('Daily Directory Trends'[Domain Key]), IF(_domainSelected, 'Daily Directory Trends'[Domain Key] <> "__all__", 'Daily Directory Trends'[Domain Key] = "__all__"))) RETURN IF(_days > 0 && _date < _latest - _days + 1, BLANK(), IF(COUNTROWS(FILTER(_rows, 'Daily Directory Trends'[Metric Status] = "Not measured")) > 0, BLANK(), SUMX(_rows, 'Daily Directory Trends'[Metric Value])))
+		formatString: #,0
+		displayFolder: Daily Trends
+		lineageTag: c9455c80-bb4f-4f71-a350-eebe58805b98
+
+
+	measure 'Windows 11 Share Daily' = DIVIDE([Windows 11 Enabled Daily], [Enabled AD Computer Accounts Daily])
+		formatString: 0.0%
+		displayFolder: Daily Trends
+		lineageTag: 617de2f2-e6db-441d-b538-c3d131250385
+
+
+	measure 'Windows 10 Share Daily' = DIVIDE([Windows 10 Enabled Daily], [Enabled AD Computer Accounts Daily])
+		formatString: 0.0%
+		displayFolder: Daily Trends
+		lineageTag: b1856602-5f6d-46d1-9e2c-3de379bb0ff0
+
+
+	measure 'Windows 10 Chart Daily' = IF(SELECTEDVALUE('Daily View'[View], "Count") = "Share", [Windows 10 Share Daily], [Windows 10 Enabled Daily])
+		displayFolder: Daily Trends
+		lineageTag: 3df3869a-5dfc-4a47-9960-ce338d12f952
+		formatStringDefinition = IF(SELECTEDVALUE('Daily View'[View], "Count") = "Share", "0.0%", "#,0")
+
+	measure 'Windows 11 Chart Daily' = IF(SELECTEDVALUE('Daily View'[View], "Count") = "Share", [Windows 11 Share Daily], [Windows 11 Enabled Daily])
+		displayFolder: Daily Trends
+		lineageTag: 11332aec-8800-45d5-8e53-c2c552bc5846
+		formatStringDefinition = IF(SELECTEDVALUE('Daily View'[View], "Count") = "Share", "0.0%", "#,0")
+
+	measure 'Enabled Users Card' = VAR _first = MINX(FILTER(ALLSELECTED('Date'[Date]), NOT ISBLANK([Enabled Users Daily])), 'Date'[Date]) VAR _last = MAXX(FILTER(ALLSELECTED('Date'[Date]), NOT ISBLANK([Enabled Users Daily])), 'Date'[Date]) VAR _a = CALCULATE([Enabled Users Daily], 'Date'[Date] = _first) VAR _b = CALCULATE([Enabled Users Daily], 'Date'[Date] = _last) RETURN IF(ISBLANK(_b), "Not measured", FORMAT(_b, "#,0") & "  |  " & FORMAT(_b-_a, "+#,0;-#,0;0"))
+		formatString: @
+		displayFolder: Daily Trends
+		lineageTag: a1cd078e-0f29-4e13-911e-b3e574b6d145
+
+
+	measure 'Disabled Users Card' = VAR _first = MINX(FILTER(ALLSELECTED('Date'[Date]), NOT ISBLANK([Disabled Users Daily])), 'Date'[Date]) VAR _last = MAXX(FILTER(ALLSELECTED('Date'[Date]), NOT ISBLANK([Disabled Users Daily])), 'Date'[Date]) VAR _a = CALCULATE([Disabled Users Daily], 'Date'[Date] = _first) VAR _b = CALCULATE([Disabled Users Daily], 'Date'[Date] = _last) RETURN IF(ISBLANK(_b), "Not measured", FORMAT(_b, "#,0") & "  |  " & FORMAT(_b-_a, "+#,0;-#,0;0"))
+		formatString: @
+		displayFolder: Daily Trends
+		lineageTag: 4dbe7a87-32eb-4481-ab31-0a56cc03a468
+
+
+	measure 'Windows 11 Share Card' = VAR _first = MINX(FILTER(ALLSELECTED('Date'[Date]), NOT ISBLANK([Windows 11 Share Daily])), 'Date'[Date]) VAR _last = MAXX(FILTER(ALLSELECTED('Date'[Date]), NOT ISBLANK([Windows 11 Share Daily])), 'Date'[Date]) VAR _a = CALCULATE([Windows 11 Share Daily], 'Date'[Date] = _first) VAR _b = CALCULATE([Windows 11 Share Daily], 'Date'[Date] = _last) RETURN IF(ISBLANK(_b), "Not measured", FORMAT(_b, "0.0%") & "  |  " & FORMAT((_b-_a)*100, "+0.0;-0.0;0.0") & " pp")
+		formatString: @
+		displayFolder: Daily Trends
+		lineageTag: 84206765-bfe3-48c3-9787-c1c26cd704bf
+
+
+	measure 'Windows 10 Remaining Card' = VAR _first = MINX(FILTER(ALLSELECTED('Date'[Date]), NOT ISBLANK([Windows 10 Enabled Daily])), 'Date'[Date]) VAR _last = MAXX(FILTER(ALLSELECTED('Date'[Date]), NOT ISBLANK([Windows 10 Enabled Daily])), 'Date'[Date]) VAR _a = CALCULATE([Windows 10 Enabled Daily], 'Date'[Date] = _first) VAR _b = CALCULATE([Windows 10 Enabled Daily], 'Date'[Date] = _last) RETURN IF(ISBLANK(_b), "Not measured", FORMAT(_b, "#,0") & "  |  " & FORMAT(_b-_a, "+#,0;-#,0;0"))
+		formatString: @
+		displayFolder: Daily Trends
+		lineageTag: 50441f20-7b85-443d-a959-65eb402bcacb
+
+
+	measure 'Last Qualified AD Users Day' = MAXX(FILTER(ALLSELECTED('Date'[Date]), NOT ISBLANK([Total AD Users Daily]) && NOT ISBLANK([Enabled Users Daily]) && NOT ISBLANK([Disabled Users Daily])), 'Date'[Date])
+		formatString: yyyy-MM-dd
+		displayFolder: Daily Trends
+		lineageTag: 184b4331-3354-486f-bcea-676c098d83d8
+
+
+	measure 'Last Fully Measured AD Users Day' = MAXX(FILTER(ALLSELECTED('Date'[Date]), NOT ISBLANK([Total AD Users Daily]) && NOT ISBLANK([Enabled Users Daily]) && NOT ISBLANK([Disabled Users Daily]) && NOT ISBLANK([Inactive 90 Days Users Daily])), 'Date'[Date])
+		formatString: yyyy-MM-dd
+		displayFolder: Daily Trends
+		lineageTag: 3ead0014-62c1-412c-a4f5-b21c9f74a263
+
+
+	measure 'Last Qualified AD Computers Day' = MAXX(FILTER(ALLSELECTED('Date'[Date]), NOT ISBLANK([Total AD Computers Daily]) && NOT ISBLANK([Enabled AD Computer Accounts Daily]) && NOT ISBLANK([Disabled AD Computer Accounts Daily]) && NOT ISBLANK([Windows 7 Enabled Daily]) && NOT ISBLANK([Windows 7 Disabled Daily]) && NOT ISBLANK([Windows 8 Enabled Daily]) && NOT ISBLANK([Windows 8 Disabled Daily]) && NOT ISBLANK([Windows 10 Enabled Daily]) && NOT ISBLANK([Windows 10 Disabled Daily]) && NOT ISBLANK([Windows 11 Enabled Daily]) && NOT ISBLANK([Windows 11 Disabled Daily])), 'Date'[Date])
+		formatString: yyyy-MM-dd
+		displayFolder: Daily Trends
+		lineageTag: f5f0b6ab-ed84-4eb1-beae-0f4fcb5b89c2
+
+
+	measure 'Last Fully Measured AD Computers Day' = MAXX(FILTER(ALLSELECTED('Date'[Date]), NOT ISBLANK([Total AD Computers Daily]) && NOT ISBLANK([Enabled AD Computer Accounts Daily]) && NOT ISBLANK([Disabled AD Computer Accounts Daily]) && NOT ISBLANK([Windows 7 Enabled Daily]) && NOT ISBLANK([Windows 7 Disabled Daily]) && NOT ISBLANK([Windows 8 Enabled Daily]) && NOT ISBLANK([Windows 8 Disabled Daily]) && NOT ISBLANK([Windows 10 Enabled Daily]) && NOT ISBLANK([Windows 10 Disabled Daily]) && NOT ISBLANK([Windows 11 Enabled Daily]) && NOT ISBLANK([Windows 11 Disabled Daily])), 'Date'[Date])
+		formatString: yyyy-MM-dd
+		displayFolder: Daily Trends
+		lineageTag: 0ed3371f-f194-4f2e-a7bc-03bdc0c50bfb
+
+
+	measure 'AD Users Partial Days' = CALCULATE(DISTINCTCOUNT('Daily Directory Trends'[Date Key]), REMOVEFILTERS('Daily Domain'), 'Daily Directory Trends'[Source Name] = "AD Users", 'Daily Directory Trends'[Domain Key] = "__all__", 'Daily Directory Trends'[Source Day Status] = "Partial capture")
+		formatString: #,0
+		displayFolder: Daily Trends
+		lineageTag: d55cb0cc-248b-4a8f-b1c7-ee6d52af108d
+
+
+	measure 'AD Users Incomplete Days' = CALCULATE(DISTINCTCOUNT('Daily Directory Trends'[Date Key]), REMOVEFILTERS('Daily Domain'), 'Daily Directory Trends'[Source Name] = "AD Users", 'Daily Directory Trends'[Domain Key] = "__all__", 'Daily Directory Trends'[Metric Status] = "Not measured")
+		formatString: #,0
+		displayFolder: Daily Trends
+		lineageTag: b9096532-48a1-4c1d-8a59-fc264e25f3ec
+
+
+	measure 'AD Computers Partial Days' = CALCULATE(DISTINCTCOUNT('Daily Directory Trends'[Date Key]), REMOVEFILTERS('Daily Domain'), 'Daily Directory Trends'[Source Name] = "AD Computers", 'Daily Directory Trends'[Domain Key] = "__all__", 'Daily Directory Trends'[Source Day Status] = "Partial capture")
+		formatString: #,0
+		displayFolder: Daily Trends
+		lineageTag: 3a6b4e79-c9c5-408b-a7eb-365c2d8a074a
+
+
+	measure 'AD Computers Incomplete Days' = CALCULATE(DISTINCTCOUNT('Daily Directory Trends'[Date Key]), REMOVEFILTERS('Daily Domain'), 'Daily Directory Trends'[Source Name] = "AD Computers", 'Daily Directory Trends'[Domain Key] = "__all__", 'Daily Directory Trends'[Metric Status] = "Not measured")
+		formatString: #,0
+		displayFolder: Daily Trends
+		lineageTag: 9cae0542-22ac-4bcd-a90a-d53bf3ada825
+
+
+	measure 'Directory Quality Text' = "AD Users: core " & FORMAT([Last Qualified AD Users Day], "dd MMM yyyy") & ", full " & FORMAT([Last Fully Measured AD Users Day], "dd MMM yyyy") & UNICHAR(10) & "AD Computers: core " & FORMAT([Last Qualified AD Computers Day], "dd MMM yyyy") & ", full " & FORMAT([Last Fully Measured AD Computers Day], "dd MMM yyyy")
+		formatString: @
+		displayFolder: Daily Trends
+		lineageTag: 1c5aaab8-52e4-4069-be6a-6f586a0e6952
+
+
+	measure 'Windows 11 Overtakes Windows 10 Day' = MINX(FILTER(ALL('Date'[Date]), VAR _w11 = CALCULATE([Windows 11 Enabled Daily], REMOVEFILTERS('Daily Period')) VAR _w10 = CALCULATE([Windows 10 Enabled Daily], REMOVEFILTERS('Daily Period')) RETURN NOT ISBLANK(_w11) && NOT ISBLANK(_w10) && _w11 > _w10), 'Date'[Date])
+		formatString: yyyy-MM-dd
+		displayFolder: Daily Trends
+		lineageTag: 1ffe20ff-568c-422f-8ef1-79c94eef8792
+
+
+	measure 'Persistent Domain Events' = CALCULATE(DISTINCTCOUNT('Daily Directory Trends'[Date Key]), REMOVEFILTERS('Daily Domain'), REMOVEFILTERS('Daily Domain'), 'Daily Directory Trends'[Domain Key] = "__all__", 'Daily Directory Trends'[Quality Event] = "Domain absent (persistent)")
+		formatString: #,0
+		displayFolder: Daily Trends
+		lineageTag: 3f994c6e-abbe-4c64-b18c-cb8f16b89740
+
+
+	measure 'Daily Domain Trust Text' = "Persistent domain absence events: Directory " & FORMAT([Persistent Domain Events], "0") & "  |  Mailbox " & FORMAT([Persistent Mailbox Domain Events], "0") & ". Retired domains leave the capture baseline after the configured consecutive-observation threshold."
+		formatString: @
+		displayFolder: Daily Trends
+		lineageTag: 3c4ad3c8-1e63-455b-8a75-4a17a2ba479b
+
+
+	measure 'Persistent Domain Absence Events' = [Persistent Domain Events] + [Persistent Mailbox Domain Events]
+		formatString: #,0
+		displayFolder: Daily Trends
+		lineageTag: 836a627e-c15d-4b59-b3ac-89a8ebd87588
+
+	measure 'Windows 7 Disabled Daily' = VAR _days = SELECTEDVALUE('Daily Period'[Days], 0) VAR _latest = MIN(CALCULATE(MAX('Daily Directory Trends'[Date]), REMOVEFILTERS('Date')), MAXX(ALLSELECTED('Date'[Date]), 'Date'[Date])) VAR _date = MAX('Date'[Date]) VAR _domainSelected = ISFILTERED('Daily Domain'[Domain]) VAR _rows = CALCULATETABLE('Daily Directory Trends', KEEPFILTERS('Daily Directory Trends'[Source Name] = "AD Computers"), KEEPFILTERS('Daily Directory Trends'[Metric Name] = "Windows 7 Disabled"), KEEPFILTERS('Daily Directory Trends'[Source Day Status] = "Complete"), FILTER(ALL('Daily Directory Trends'[Domain Key]), IF(_domainSelected, 'Daily Directory Trends'[Domain Key] <> "__all__", 'Daily Directory Trends'[Domain Key] = "__all__"))) RETURN IF(_days > 0 && _date < _latest - _days + 1, BLANK(), IF(COUNTROWS(FILTER(_rows, 'Daily Directory Trends'[Metric Status] = "Not measured")) > 0, BLANK(), SUMX(_rows, 'Daily Directory Trends'[Metric Value])))
+		formatString: #,0
+		displayFolder: Daily Trends
+		lineageTag: 88e26208-a4ce-4f56-bea4-b8a3194ef8e9
+
+	measure 'Windows 8 Disabled Daily' = VAR _days = SELECTEDVALUE('Daily Period'[Days], 0) VAR _latest = MIN(CALCULATE(MAX('Daily Directory Trends'[Date]), REMOVEFILTERS('Date')), MAXX(ALLSELECTED('Date'[Date]), 'Date'[Date])) VAR _date = MAX('Date'[Date]) VAR _domainSelected = ISFILTERED('Daily Domain'[Domain]) VAR _rows = CALCULATETABLE('Daily Directory Trends', KEEPFILTERS('Daily Directory Trends'[Source Name] = "AD Computers"), KEEPFILTERS('Daily Directory Trends'[Metric Name] = "Windows 8 Disabled"), KEEPFILTERS('Daily Directory Trends'[Source Day Status] = "Complete"), FILTER(ALL('Daily Directory Trends'[Domain Key]), IF(_domainSelected, 'Daily Directory Trends'[Domain Key] <> "__all__", 'Daily Directory Trends'[Domain Key] = "__all__"))) RETURN IF(_days > 0 && _date < _latest - _days + 1, BLANK(), IF(COUNTROWS(FILTER(_rows, 'Daily Directory Trends'[Metric Status] = "Not measured")) > 0, BLANK(), SUMX(_rows, 'Daily Directory Trends'[Metric Value])))
+		formatString: #,0
+		displayFolder: Daily Trends
+		lineageTag: 8ce92ea3-c084-4f8d-9297-c4043f65dd0b
+
+	measure 'Windows 10 Disabled Daily' = VAR _days = SELECTEDVALUE('Daily Period'[Days], 0) VAR _latest = MIN(CALCULATE(MAX('Daily Directory Trends'[Date]), REMOVEFILTERS('Date')), MAXX(ALLSELECTED('Date'[Date]), 'Date'[Date])) VAR _date = MAX('Date'[Date]) VAR _domainSelected = ISFILTERED('Daily Domain'[Domain]) VAR _rows = CALCULATETABLE('Daily Directory Trends', KEEPFILTERS('Daily Directory Trends'[Source Name] = "AD Computers"), KEEPFILTERS('Daily Directory Trends'[Metric Name] = "Windows 10 Disabled"), KEEPFILTERS('Daily Directory Trends'[Source Day Status] = "Complete"), FILTER(ALL('Daily Directory Trends'[Domain Key]), IF(_domainSelected, 'Daily Directory Trends'[Domain Key] <> "__all__", 'Daily Directory Trends'[Domain Key] = "__all__"))) RETURN IF(_days > 0 && _date < _latest - _days + 1, BLANK(), IF(COUNTROWS(FILTER(_rows, 'Daily Directory Trends'[Metric Status] = "Not measured")) > 0, BLANK(), SUMX(_rows, 'Daily Directory Trends'[Metric Value])))
+		formatString: #,0
+		displayFolder: Daily Trends
+		lineageTag: ea5ca5e6-d153-4233-b7f5-3f7c602fc5e0
+
+	measure 'Windows 11 Disabled Daily' = VAR _days = SELECTEDVALUE('Daily Period'[Days], 0) VAR _latest = MIN(CALCULATE(MAX('Daily Directory Trends'[Date]), REMOVEFILTERS('Date')), MAXX(ALLSELECTED('Date'[Date]), 'Date'[Date])) VAR _date = MAX('Date'[Date]) VAR _domainSelected = ISFILTERED('Daily Domain'[Domain]) VAR _rows = CALCULATETABLE('Daily Directory Trends', KEEPFILTERS('Daily Directory Trends'[Source Name] = "AD Computers"), KEEPFILTERS('Daily Directory Trends'[Metric Name] = "Windows 11 Disabled"), KEEPFILTERS('Daily Directory Trends'[Source Day Status] = "Complete"), FILTER(ALL('Daily Directory Trends'[Domain Key]), IF(_domainSelected, 'Daily Directory Trends'[Domain Key] <> "__all__", 'Daily Directory Trends'[Domain Key] = "__all__"))) RETURN IF(_days > 0 && _date < _latest - _days + 1, BLANK(), IF(COUNTROWS(FILTER(_rows, 'Daily Directory Trends'[Metric Status] = "Not measured")) > 0, BLANK(), SUMX(_rows, 'Daily Directory Trends'[Metric Value])))
+		formatString: #,0
+		displayFolder: Daily Trends
+		lineageTag: 6d3a3c71-9aba-46a3-90e7-7c39339f87a7
+
+	measure 'AD Users Quality Days Tooltip' = VAR _partial = CALCULATETABLE(VALUES('Daily Directory Trends'[Date]), REMOVEFILTERS('Daily Domain'), 'Daily Directory Trends'[Source Name] = "AD Users", 'Daily Directory Trends'[Domain Key] = "__all__", 'Daily Directory Trends'[Source Day Status] = "Partial capture") VAR _incomplete = CALCULATETABLE(VALUES('Daily Directory Trends'[Date]), REMOVEFILTERS('Daily Domain'), 'Daily Directory Trends'[Source Name] = "AD Users", 'Daily Directory Trends'[Domain Key] = "__all__", 'Daily Directory Trends'[Metric Status] = "Not measured") VAR _retired = CALCULATETABLE(VALUES('Daily Directory Trends'[Date]), REMOVEFILTERS('Daily Domain'), 'Daily Directory Trends'[Source Name] = "AD Users", 'Daily Directory Trends'[Domain Key] = "__all__", 'Daily Directory Trends'[Quality Event] = "Domain absent (persistent)") RETURN "Partial capture days: " & IF(COUNTROWS(_partial)=0, "None", CONCATENATEX(_partial, FORMAT('Daily Directory Trends'[Date], "yyyy-MM-dd"), ", ", 'Daily Directory Trends'[Date], ASC)) & UNICHAR(10) & "Incomplete days: " & IF(COUNTROWS(_incomplete)=0, "None", CONCATENATEX(_incomplete, FORMAT('Daily Directory Trends'[Date], "yyyy-MM-dd"), ", ", 'Daily Directory Trends'[Date], ASC)) & UNICHAR(10) & "Persistent domain event days: " & IF(COUNTROWS(_retired)=0, "None", CONCATENATEX(_retired, FORMAT('Daily Directory Trends'[Date], "yyyy-MM-dd"), ", ", 'Daily Directory Trends'[Date], ASC))
+		formatString: @
+		displayFolder: Daily Trends
+		lineageTag: e1b31718-72f8-4b02-98a8-3bda4a7bb0de
+
+	measure 'AD Computers Quality Days Tooltip' = VAR _partial = CALCULATETABLE(VALUES('Daily Directory Trends'[Date]), REMOVEFILTERS('Daily Domain'), 'Daily Directory Trends'[Source Name] = "AD Computers", 'Daily Directory Trends'[Domain Key] = "__all__", 'Daily Directory Trends'[Source Day Status] = "Partial capture") VAR _incomplete = CALCULATETABLE(VALUES('Daily Directory Trends'[Date]), REMOVEFILTERS('Daily Domain'), 'Daily Directory Trends'[Source Name] = "AD Computers", 'Daily Directory Trends'[Domain Key] = "__all__", 'Daily Directory Trends'[Metric Status] = "Not measured") VAR _retired = CALCULATETABLE(VALUES('Daily Directory Trends'[Date]), REMOVEFILTERS('Daily Domain'), 'Daily Directory Trends'[Source Name] = "AD Computers", 'Daily Directory Trends'[Domain Key] = "__all__", 'Daily Directory Trends'[Quality Event] = "Domain absent (persistent)") RETURN "Partial capture days: " & IF(COUNTROWS(_partial)=0, "None", CONCATENATEX(_partial, FORMAT('Daily Directory Trends'[Date], "yyyy-MM-dd"), ", ", 'Daily Directory Trends'[Date], ASC)) & UNICHAR(10) & "Incomplete days: " & IF(COUNTROWS(_incomplete)=0, "None", CONCATENATEX(_incomplete, FORMAT('Daily Directory Trends'[Date], "yyyy-MM-dd"), ", ", 'Daily Directory Trends'[Date], ASC)) & UNICHAR(10) & "Persistent domain event days: " & IF(COUNTROWS(_retired)=0, "None", CONCATENATEX(_retired, FORMAT('Daily Directory Trends'[Date], "yyyy-MM-dd"), ", ", 'Daily Directory Trends'[Date], ASC))
+		formatString: @
+		displayFolder: Daily Trends
+		lineageTag: 38fe82f5-fbfe-4c28-addf-100483e46fb4
+
+	column TenantKey
+		dataType: string
+		isHidden
+		lineageTag: f5e1e991-5f1e-43d3-9aad-73e5df838b44
+		summarizeBy: none
+		sourceColumn: TenantKey
+
+	column OrganizationKey
+		dataType: string
+		isHidden
+		lineageTag: 24ce04fd-8c55-4900-be01-a1fea9b5f0b2
+		summarizeBy: none
+		sourceColumn: OrganizationKey
+
+	column EnvironmentKey
+		dataType: string
+		isHidden
+		lineageTag: 26764919-ac08-466b-be19-23cee4c53f6d
+		summarizeBy: none
+		sourceColumn: EnvironmentKey
+
+	column TenantId
+		dataType: string
+		isHidden
+		lineageTag: 456fe168-cb37-4cb0-abfc-23aad1f6707c
+		summarizeBy: none
+		sourceColumn: TenantId
+
+	column 'Date Key'
+		dataType: int64
+		lineageTag: f6d90282-8c71-4527-be1b-8e1e55872613
+		summarizeBy: none
+		sourceColumn: Date Key
+
+	column Date
+		dataType: dateTime
+		lineageTag: 148b545e-586e-42dd-b45a-e2ab435463e5
+		summarizeBy: none
+		sourceColumn: Date
+
+	column 'Source Name'
+		dataType: string
+		lineageTag: e22ea88d-bab2-4224-89ef-4322fdcedf45
+		summarizeBy: none
+		sourceColumn: Source Name
+
+	column 'Domain Key'
+		dataType: string
+		isHidden
+		lineageTag: 1a147c3f-78c2-4087-8667-db28ace24aa1
+		summarizeBy: none
+		sourceColumn: Domain Key
+
+	column 'Domain Name'
+		dataType: string
+		lineageTag: c030897b-0d56-465f-9646-1ca7992f9b5f
+		summarizeBy: none
+		sourceColumn: Domain Name
+
+	column 'Metric Name'
+		dataType: string
+		lineageTag: 81b82fb9-a660-4da2-9948-4d46334c55e0
+		summarizeBy: none
+		sourceColumn: Metric Name
+
+	column 'Metric Unit'
+		dataType: string
+		lineageTag: 979cfb12-bcc6-4fbf-9357-f2068e5bf7b8
+		summarizeBy: none
+		sourceColumn: Metric Unit
+
+	column 'Metric Value'
+		dataType: double
+		lineageTag: e226c466-4786-417f-a588-d8a41ae4ccd7
+		summarizeBy: sum
+		sourceColumn: Metric Value
+
+	column 'Reading At'
+		dataType: dateTime
+		lineageTag: 36c6a8c8-9fe8-4810-a8bb-07e9dca989c6
+		summarizeBy: none
+		sourceColumn: Reading At
+
+	column 'Metric Status'
+		dataType: string
+		lineageTag: 8dfa1818-5117-4b81-84e8-74da1af0c5f8
+		summarizeBy: none
+		sourceColumn: Metric Status
+
+	column 'Source Day Status'
+		dataType: string
+		lineageTag: 13ee3039-1ff7-4df0-ad17-e353161423fd
+		summarizeBy: none
+		sourceColumn: Source Day Status
+
+	column 'Quality Event'
+		dataType: string
+		lineageTag: c99fff0c-bae2-4320-abfe-3ff5146bddea
+		summarizeBy: none
+		sourceColumn: Quality Event
+
+	column 'Quality Reason'
+		dataType: string
+		lineageTag: d77e3a9b-54ef-42ef-ae8f-4faf932b353e
+		summarizeBy: none
+		sourceColumn: Quality Reason
+
+	column 'Observed Domain Count'
+		dataType: int64
+		lineageTag: 671f5490-9f0a-44b5-83f9-cabd0ee5f087
+		summarizeBy: none
+		sourceColumn: Observed Domain Count
+
+	column 'Absent Domain Count'
+		dataType: int64
+		lineageTag: b5e241b6-06ff-49ab-9fef-75b88ce4b81a
+		summarizeBy: none
+		sourceColumn: Absent Domain Count
+
+	column 'Persistent Absent Domain Count'
+		dataType: int64
+		lineageTag: cefced4a-fd27-4914-801c-3b86cd8c77b7
+		summarizeBy: none
+		sourceColumn: Persistent Absent Domain Count
+
+	column 'Absent Prior Share (%)'
+		dataType: double
+		lineageTag: 70dc8939-c4be-4a31-9a27-1dfb907acd29
+		summarizeBy: none
+		sourceColumn: Absent Prior Share (%)
+
+	column 'Partial Threshold (%)'
+		dataType: double
+		lineageTag: 4d2cdf34-6487-4324-aa87-5b907fa9f85f
+		summarizeBy: none
+		sourceColumn: Partial Threshold (%)
+
+	column 'Reference Complete Day'
+		dataType: dateTime
+		lineageTag: 95601fdc-44ae-4d8c-8f2f-86282e7ff012
+		summarizeBy: none
+		sourceColumn: Reference Complete Day
+
+	partition 'Daily Directory Trends Import' = m
+		mode: import
+		source =
+				let
+				    Raw = Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("DailyDirectoryTrends.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]),
+				    Nulls = Table.ReplaceValue(Raw, "", null, Replacer.ReplaceValue, {"Metric Value", "Reference Complete Day"}),
+				    Typed = Table.TransformColumnTypes(Nulls, {{"TenantKey", type text}, {"OrganizationKey", type text}, {"EnvironmentKey", type text}, {"TenantId", type text}, {"Date Key", Int64.Type}, {"Date", type datetime}, {"Source Name", type text}, {"Domain Key", type text}, {"Domain Name", type text}, {"Metric Name", type text}, {"Metric Unit", type text}, {"Metric Value", type number}, {"Reading At", type datetime}, {"Metric Status", type text}, {"Source Day Status", type text}, {"Quality Event", type text}, {"Quality Reason", type text}, {"Observed Domain Count", Int64.Type}, {"Absent Domain Count", Int64.Type}, {"Persistent Absent Domain Count", Int64.Type}, {"Absent Prior Share (%)", type number}, {"Partial Threshold (%)", type number}, {"Reference Complete Day", type datetime}}, "en-US")
+				in
+				    Typed

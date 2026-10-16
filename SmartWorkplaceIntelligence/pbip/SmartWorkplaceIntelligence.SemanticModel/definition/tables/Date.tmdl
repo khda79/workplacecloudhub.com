@@ -93,7 +93,7 @@ table Date
 				let
 				    Native = Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("DimDate.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]),
 				    NativeDates = List.Transform(Table.Column(Native, "Date"), each Date.FromText(_, [Culture="en-US"])),
-				    StartDate = List.Min({#date(2025, 10, 1)} & NativeDates),
+				    StartDate = List.Min({#date(2025, 6, 25)} & NativeDates),
 				    EndDate = List.Max({#date(2027, 11, 9)} & NativeDates),
 				    Dates = List.Dates(StartDate, Duration.Days(EndDate - StartDate) + 1, #duration(1, 0, 0, 0)),
 				    Base = Table.FromList(Dates, Splitter.SplitByNothing(), {"Date"}),
