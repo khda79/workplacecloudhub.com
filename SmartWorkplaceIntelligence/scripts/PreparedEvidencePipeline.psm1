@@ -348,6 +348,25 @@ function Get-PreparedSourcePlan {
         if (-not $files.Count) { throw "Required observed history missing: $($entry.root)/$($entry.file)" }
         foreach ($file in $files) { $items.Add(@{Relative=[IO.Path]::GetRelativePath($root,$file.FullName);Kind='History'}) }
     }
+    if ($spec.PSObject.Properties['archivedHistory']) {
+        foreach ($entry in $spec.archivedHistory) {
+            if ([string]::IsNullOrWhiteSpace($entry.root) -or
+                [IO.Path]::GetFileName([string]$entry.file) -cne [string]$entry.file -or
+                [IO.Path]::GetFileName([string]$entry.manifest) -cne [string]$entry.manifest -or
+                [string]::IsNullOrWhiteSpace($entry.file) -or
+                [string]::IsNullOrWhiteSpace($entry.manifest)) { throw 'Invalid archived history source contract.' }
+            $folder = Get-PreparedChildPath $root $entry.root
+            if (-not (Test-Path -LiteralPath $folder -PathType Container)) { continue }
+            foreach ($weekFolder in Get-ChildItem -LiteralPath $folder -Directory | Where-Object Name -Match '^\d{4}-W\d{2}$') {
+                foreach ($name in @($entry.file,$entry.manifest)) {
+                    $file = Get-PreparedChildPath $weekFolder.FullName $name
+                    if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { throw "Archived history input missing: $file" }
+                    $kind = if ($name -ceq $entry.file) { 'ArchivedHistory' } else { 'ArchiveManifest' }
+                    $items.Add(@{Relative=[IO.Path]::GetRelativePath($root,$file);Kind=$kind})
+                }
+            }
+        }
+    }
     # Windows history discovery returns backslashes; contracts use slashes.
     # Normalize before de-duplication so one physical input is captured once.
     foreach ($entry in $items) { $entry.Relative = $entry.Relative.Replace('\','/') }
@@ -374,7 +393,7 @@ function Get-PreparedSourcePlan {
 }
 
 function Test-PreparedTenant {
-    param([string]$Path, [string]$TenantKey)
+    param([string]$Path, [string]$TenantKey, [switch]$AllowMissingTenantKey)
     # Match the source formats consumed by the evidence generators; never retry
     # malformed records with another separator or weaken the tenant checks.
     $fileName = [IO.Path]::GetFileName($Path)
@@ -387,7 +406,7 @@ function Test-PreparedTenant {
         $header = $parser.ReadFields()
         if (-not $header -or @($header | Sort-Object -Unique).Count -ne $header.Length -or @($header | Where-Object {[string]::IsNullOrWhiteSpace($_)}).Count) { throw 'Empty or duplicate CSV header.' }
         $index = [array]::IndexOf($header,'TenantKey')
-        if ($index -lt 0) { throw 'TenantKey column missing.' }
+        if ($index -lt 0 -and -not $AllowMissingTenantKey) { throw 'TenantKey column missing.' }
         $rows = 0L
         while (-not $parser.EndOfData) {
             $fields = $parser.ReadFields()
@@ -404,18 +423,35 @@ function Test-PreparedTenant {
 function Test-PreparedSourceTenants {
     param([object[]]$Plan, [string]$TenantKey, [string]$SnapshotRoot)
     $errors = [Collections.Generic.List[string]]::new()
-    $rows = 0L; $files = 0
+    $rows = 0L; $files = 0; $legacyArchived = 0
     foreach ($entry in $Plan | Where-Object { $_.Relative -like '*.csv' }) {
         $relative = $entry.Relative.Replace('\','/')
         $path = if ($SnapshotRoot) { Get-PreparedChildPath $SnapshotRoot $relative } else { $entry.SourcePath }
         try {
-            $check = Test-PreparedTenant -Path $path -TenantKey $TenantKey
+            if ($entry.Kind -eq 'ArchivedHistory') {
+                if ($relative -notmatch '^DATA-ALL/Intune/Applications/DiscoveredApps/SummaryHistory/(?<Week>\d{4}-W\d{2})/Intune_DiscoveredApps_Summary\.csv$') {
+                    throw 'Unrecognized legacy archived summary path.'
+                }
+                $week = $Matches.Week
+                $manifestRelative = $relative.Substring(0,$relative.LastIndexOf('/')+1) + 'summary.manifest.json.txt'
+                if (@($Plan | Where-Object Relative -CEQ $manifestRelative).Count -ne 1) { throw 'Archived summary manifest was not captured.' }
+                $manifestPath = if ($SnapshotRoot) { Get-PreparedChildPath $SnapshotRoot $manifestRelative } else { (@($Plan | Where-Object Relative -CEQ $manifestRelative)[0]).SourcePath }
+                $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+                if ($manifest.Week -cne $week -or $manifest.FileName -cne [IO.Path]::GetFileName($path) -or
+                    $manifest.SHA256 -cne (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash) {
+                    throw 'Archived summary provenance does not match its manifest.'
+                }
+                $check = Test-PreparedTenant -Path $path -TenantKey $TenantKey -AllowMissingTenantKey
+                if (-not $check.HasTenantKey) { $legacyArchived++ }
+            } else {
+                $check = Test-PreparedTenant -Path $path -TenantKey $TenantKey
+            }
             $rows += $check.Rows; $files++
         } catch { $errors.Add("${relative}: $($_.Exception.Message)") }
         if ($files -gt 0 -and $files % 25 -eq 0) { Write-Host ('[{0:yyyy-MM-dd HH:mm:ss}] Source tenant validation: {1} CSVs checked.' -f (Get-Date),$files) }
     }
     if ($errors.Count) { throw ("Source tenant validation failed ($($errors.Count) files):`n" + ($errors -join "`n")) }
-    [pscustomobject]@{CsvFiles=$files;Rows=$rows}
+    [pscustomobject]@{CsvFiles=$files;Rows=$rows;LegacyArchivedSummaries=$legacyArchived}
 }
 
 function Publish-PreparedEvidenceBatch {
@@ -767,7 +803,7 @@ function Invoke-PreparedEvidencePipeline {
         & (Get-Process -Id $PID).Path -NoProfile -File (Join-Path $PSScriptRoot 'Invoke-PreparedEvidenceBuild.ps1') -DataRoot $snapshot -OutputRoot $staging -AccountClassificationConfigPath $rules -AdCountryRulesPath $countryRulesPath @systemPolicyArgs 2>&1 |
             ForEach-Object { foreach ($line in ([string]$_ -split '\r?\n')) { $message='[{0:yyyy-MM-dd HH:mm:ss}] {1}' -f (Get-Date),$line; $message | Add-Content -LiteralPath $log; Write-Host $message } }
         if ($LASTEXITCODE -ne 0) { throw "Preparation failed. Retained diagnostics: $run" }
-        $provenance = @{Mode='RebuiltFromSnapshot';CapturePolicy='PerFileVerified';SelectedUtc=$selectedUtc;Sources=$plan;OptionalSourceIssues=$optionalIssues.ToArray();TenantValidation=$identity;LegacyTenantlessAllowed=$false;AccountRulesSHA256=(Get-FileHash $rules).Hash;Scripts=@(Get-ChildItem $PSScriptRoot -File | Where-Object Extension -In '.ps1','.psm1','.py','.cs' | ForEach-Object { @{File=$_.Name;SHA256=(Get-FileHash $_.FullName).Hash} })}
+        $provenance = @{Mode='RebuiltFromSnapshot';CapturePolicy='PerFileVerified';SelectedUtc=$selectedUtc;Sources=$plan;OptionalSourceIssues=$optionalIssues.ToArray();TenantValidation=$identity;LegacyTenantlessAllowed=($identity.LegacyArchivedSummaries -gt 0);LegacyTenantlessScope='Manifest-verified archived Intune discovered-application summaries only';AccountRulesSHA256=(Get-FileHash $rules).Hash;Scripts=@(Get-ChildItem $PSScriptRoot -File | Where-Object Extension -In '.ps1','.psm1','.py','.cs' | ForEach-Object { @{File=$_.Name;SHA256=(Get-FileHash $_.FullName).Hash} })}
         $provenance.NativeEvidence=@{ContractSHA256=(Get-FileHash -LiteralPath (Join-Path $script:ProductRoot 'config/native-output-contract.json.txt')).Hash;Audit=(Get-Content -LiteralPath $nativeAuditPath -Raw | ConvertFrom-Json)}
         $provenance.WindowsMigration = (Get-Content -LiteralPath (Join-Path $staging 'WindowsMigrationAudit.json.txt') -Raw | ConvertFrom-Json)
         $provenance.IntuneOperations=@{ContractSHA256=(Get-FileHash -LiteralPath (Join-Path $script:ProductRoot 'config/intune-operational-contract.json.txt')).Hash;SourcePolicySHA256=(Get-FileHash -LiteralPath $intuneSourcePolicyPath).Hash;Audit=(Get-Content -LiteralPath (Join-Path $staging 'IntuneOperationalAudit.json.txt') -Raw | ConvertFrom-Json)}
@@ -789,8 +825,8 @@ Export-ModuleMember -Function Get-PreparedSourcePlan, Invoke-PreparedEvidencePip
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDvPkyabhCWdsS4
-# d3uQq3+Lu8/8sb3n7oOEgFY4fzpP1aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAzQ4cowH5lkE1x
+# a63Qc0VV9AAyvuuVZtHFP5Sh0HCoFqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -923,31 +959,31 @@ Export-ModuleMember -Function Get-PreparedSourcePlan, Invoke-PreparedEvidencePip
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIJ5l8zoxJZLCDyuVEnpTcl9PDwG5B0x2NGfdwEFcA/bqMA0GCSqG
-# SIb3DQEBAQUABIIBgAw5hNPKwqJkaN3UrWrZ9s4dNj59H85IqC1e3nuOOAS7n1Ko
-# ayWe9CzrzSysvRwD9PBbYdV9qNsR9ex6nkiMIAU5eKa802XB9FuCIxV/jRJ8Vcbr
-# OEZp9acjkQY6pglT2sCLwOACHQd1CdMmRnE2GUZemnZCv2WI9m4m4Y9ym3HJxmVH
-# GIxWXdqRl93yttcwgeOP+4+HnWwCBlctGWweo37EK8Jo4eaPFtfVp+rzLKfuH21v
-# hsBINdc9vLODaeuMbGzYsJxTlLc0mlHqXH+FPm6GOBUXKn5xr6XaQkrwJ8Y4e9s8
-# pBr93rRrknjMkKt/7I4HxM2COZ4sqLS5zRMWly08ulxvR7jCEb3BzREuHzeUTU9M
-# xJvJyb0Dq8k/3f0Enu9PEvgwR9JWDD6Z42x2C3Y/FJV7TFK79pY8O1kTei5JoMQX
-# fI5MLlXhLY5SzeAfIOqm1Lpo0mZJIwAedL9ChPM01ay/bhDEOkrrTrJgp7Vj/+q+
-# ysvQImyOmUi1rfgcr6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIFZ+qvutiw/DrDkbNXf0pw7TlhctEhNAYbkIm04lv8Y0MA0GCSqG
+# SIb3DQEBAQUABIIBgC7dEl0jNip1HSikxW4rlyf58ApdGtYr73GA4THNS80VnKmC
+# g1MIyrVCZmsJESY2DDIyMS5lDUP9A1JBPXYwxp3vOp3Xcj8ZcgeDzhJcWKm977DW
+# Y4WoJZGS5IUz+QeOuU/1GKZuF214K0bQNKJv2GJ4sQs7Resw+PeNLpABuZfB4Glh
+# LJUbXiuSzRIHgxZoymC1kx8DlePyRGLYCpYUkm2H7ufc014CLgJfuSh6jdFQJK5j
+# Y4Ftnj3jubpKxqT1EsxA4nfXipo4Vn5rHq3bH/VUgolb4I4lr0LagfsWWQjgmknh
+# WgFkJ4C8mYkdI+6edNXNlpVs0htZonIBzBJsVAPNBN39DGjJ/4BO2gi2q111BaXM
+# Xl7N0ERFYtUEPlzfQvMNn9482xUUaT1q31FBfpv7KDLlghoLYxUDTrX2nsQhxqfO
+# S6gAq8n+7+N/WEXPYiYgk8XrAUz14yc6u87kxbtKvm2snPmNYCgHDRFXPcAJeE1B
+# YyiCNk0V8SF/+oqBHqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTUxNzA5
-# MzdaMC8GCSqGSIb3DQEJBDEiBCA58LpGciMfEsEe74Od0aCpDN1FFKotnkZaeoEZ
-# eTLEpTANBgkqhkiG9w0BAQEFAASCAgAzsiPiyNJQKVX7vQSK8rk7Dr5qlSTsDzFI
-# 0DkoGmowZLcHsdL26LRvaLBDIFquLLor1ArdBMZQ7kyyxM8R93kaYNp39Ez0RsdZ
-# Mc15KPcALPcrNApjxtUCU/z21C1gV0G9amdtIPCMOZXLO5lh1YahLym0AdS+pcfj
-# YNOqLRWFlR2+kIsph1LX03JP9b2m+L3ttQRNrlvL6GSFMbwz9yDfLZ+jlIxNwERL
-# lexUpOv74MsT/GMEIWGRY6SH9LR5TLidkIouM0wjYB9LxLl+ephtnwGTR4I0+Lhw
-# 7r/xYs3CF8Edb0NTzoQ7cYNsVtEXJG7UYtMcVvxX30QCwn4AkGdc9UkR+UGreHYF
-# Vp9Y7/Ov6t54fsK9r/IlDPWHVrqhXffWFrZnUShWhrtE5ud63CdpLEIWsVHW7CIl
-# 5TJgIkz3oX9dwNDv6GBvA2astuNxlhGVlMP/UHXzbH5L3zi+8e2bAoI+2syzU36V
-# vkr/1CdIBjyYvzyYlectnKiK+AJDpHT1BIwnkXmtnvMWZrl4lnY3K7wGwfEEF66b
-# Ell36j0rD+U/POBUxLuwMWUQPOZ5zBz4FlNlHCE8ZKt5WzArQMRYFHPjNSF49HVH
-# rV2z528qsCk8n8n1SpCPugs9IEzFLgmRNz1GRsWDFyHWSX4+qT8MR/Zbl5Q9Fi3G
-# kefyMb8sMQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTYwOTQz
+# MTBaMC8GCSqGSIb3DQEJBDEiBCAGWzJ+i3Nw5ri36cyqdSc3e+aouqi2EO3AazB7
+# ytZvwDANBgkqhkiG9w0BAQEFAASCAgBvDKYNLGFVw30OwMrqgxNEH0BTPG7pX9f8
+# vfm3PtY467km8v5jBRPzrWfOvE+72Mx2wXEqCoA4382jGQpGnBKr6wiVLi69K9oT
+# nVtaksBLygj7jL5ZBmvKvFTg4epAbtzkNxuMnFBhHCFS9rqH4sMXDPudQeJxuNfG
+# 6Bmpvz3+u3KA+JqP3SvXbCbBFVj8/lLPjGjx/czsD0HFCOhpQTsJCPyLAFsffeOu
+# 175zmaE//H8q7y1tGyHIR2iqWP94iJ+FWKROKKOftid5Seh6+1PyQBkPNiGtt1lR
+# wsu9doI0FK2/HOF6/FZbizgcryaJPuflzRxL65CH0T/xpwKfMtdorpwkEjmdEako
+# y1BzPb8zMcrQJRs0NlMZ0sMOhfhUqFalIgjCMGeauThsBu6CmktHGdAwqwoND5pF
+# H8q2lecxgyR6J3pqeKSNhAyv3BL1IdEk81ka4C6JqL1pS8u6Qm+gzNmKE3YUHPbm
+# F874YVOaic4DhPVCjSfnF1+p+nKsF6SuwkUdjdgbVhSJ+072a2cTNnw22FQAM56b
+# nSSS9uK+v5StvDj/RPkqllRkkgA/e1xeXfASvo/NwX9fJIcvnoVlLFyKHtzR8u6l
+# OEP7xmAp+Ja6F1oi1Oyhd0et6NAOMvLJTWxUV8mAYGZ/6bJWVbl9sUZEIghSPsXN
+# Lv6MQX6oLw==
 # SIG # End signature block

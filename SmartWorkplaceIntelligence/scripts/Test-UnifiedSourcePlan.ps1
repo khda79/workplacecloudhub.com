@@ -26,6 +26,10 @@ try {
     foreach($producer in $registry.Producers){Put "DATA-LAST/$($producer.Receipt)";Put ('DATA-LAST/'+$producer.Receipt.Replace('.current.json.txt','.run.json.txt'))}
     foreach($name in @($base.mappingFiles)+@($base.dailyFiles)){Put $name}
     foreach($spec in $base.history){Put "$($spec.root)/WeeklyHistory/2026-W41/$($spec.file)"}
+    foreach($spec in $base.archivedHistory){
+        Put "$($spec.root)/2026-W40/$($spec.file)"
+        Put "$($spec.root)/2026-W40/$($spec.manifest)"
+    }
     foreach($spec in $artifacts.history){
         Put "$($spec.root)/2026-W41/$($spec.file)"
         Put "$($spec.root)/2026-W41/manifest.json.txt"
@@ -50,6 +54,33 @@ try {
     foreach($spec in $artifacts.history){
         Check (@($plan | Where-Object Relative -CEQ "$($spec.root)/2026-W41/$($spec.file)").Count -eq 1) 'Shared migration history captured twice'
     }
+    foreach($spec in $base.archivedHistory){
+        Check (@($plan | Where-Object Relative -CEQ "$($spec.root)/2026-W40/$($spec.file)").Count -eq 1) 'Archived application summary was not captured'
+        Check (@($plan | Where-Object Relative -CEQ "$($spec.root)/2026-W40/$($spec.manifest)").Count -eq 1) 'Archived application summary manifest was not captured'
+        $missingManifest=Join-Path $root "$($spec.root)/2026-W40/$($spec.manifest)"
+        Remove-Item -LiteralPath $missingManifest -ErrorAction Stop
+        Reject {Get-PreparedSourcePlan -DataRoot $root -SourceContractPath $contract -MetadataOnly} 'Archived history input missing'
+        Put "$($spec.root)/2026-W40/$($spec.manifest)"
+        $archiveFile=Join-Path $root "$($spec.root)/2026-W40/$($spec.file)"
+        [IO.File]::WriteAllText($archiveFile,"AppId,DeviceCount$([Environment]::NewLine)synthetic-app,2$([Environment]::NewLine)")
+        $manifest=@{Week='2026-W40';FileName=$spec.file;SHA256=(Get-FileHash -LiteralPath $archiveFile -Algorithm SHA256).Hash}
+        $manifest | ConvertTo-Json | Set-Content -LiteralPath $missingManifest -Encoding utf8NoBOM
+        $archivePlan=@($plan | Where-Object { $_.Kind -in 'ArchivedHistory','ArchiveManifest' })
+        $module=Get-Module PreparedEvidencePipeline
+        $identity=& $module {param($selection,$tenant,$snapshot) Test-PreparedSourceTenants -Plan $selection -TenantKey $tenant -SnapshotRoot $snapshot} $archivePlan 'synthetic-tenant' $root
+        Check ($identity.LegacyArchivedSummaries -eq 1 -and $identity.CsvFiles -eq 1 -and $identity.Rows -eq 1) 'Manifest-verified tenantless archive was not qualified narrowly'
+        $manifest.SHA256='0'*64
+        $manifest | ConvertTo-Json | Set-Content -LiteralPath $missingManifest -Encoding utf8NoBOM
+        Reject {& $module {param($selection,$tenant,$snapshot) Test-PreparedSourceTenants -Plan $selection -TenantKey $tenant -SnapshotRoot $snapshot} $archivePlan 'synthetic-tenant' $root} 'provenance does not match'
+        $manifest.SHA256=(Get-FileHash -LiteralPath $archiveFile -Algorithm SHA256).Hash
+        $manifest | ConvertTo-Json | Set-Content -LiteralPath $missingManifest -Encoding utf8NoBOM
+        [IO.File]::WriteAllText($archiveFile,"TenantKey,AppId$([Environment]::NewLine)other-tenant,synthetic-app$([Environment]::NewLine)")
+        $manifest.SHA256=(Get-FileHash -LiteralPath $archiveFile -Algorithm SHA256).Hash
+        $manifest | ConvertTo-Json | Set-Content -LiteralPath $missingManifest -Encoding utf8NoBOM
+        Reject {& $module {param($selection,$tenant,$snapshot) Test-PreparedSourceTenants -Plan $selection -TenantKey $tenant -SnapshotRoot $snapshot} $archivePlan 'synthetic-tenant' $root} 'incompatible TenantKey'
+    }
+    $normalPlan=@($plan | Where-Object Relative -CEQ "DATA-LAST/$($base.currentFiles[0])")
+    Reject {& $module {param($selection,$tenant,$snapshot) Test-PreparedSourceTenants -Plan $selection -TenantKey $tenant -SnapshotRoot $snapshot} $normalPlan 'synthetic-tenant' $root} 'TenantKey column missing'
     $overlap='AD_Users_AllDomains.csv'
     Check (@($plan | Where-Object Relative -CEQ "DATA-LAST/$overlap")[0].Kind -eq 'Current') 'Native overlap weakened Intelligence publication freshness'
     $stale=Get-Item -LiteralPath (Join-Path $root "DATA-LAST/$overlap")
@@ -73,8 +104,8 @@ try {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBdbmVCvhAqsGAs
-# 0Lw0MbsIHPoia7nVKULVtDkA2Pt/0KCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAZCoV07pbrlL5/
+# Tc+iPFtYzppppcHrMrqAIApZAPKCKaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -207,31 +238,31 @@ try {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEICmWsotJrcN4NF79cjldVXMtPNvcpvHlYfPDJtwLFngdMA0GCSqG
-# SIb3DQEBAQUABIIBgJigYL0h9aeL8GCfBb2ka2CQ5Ppyqd3D21In6UAqvGQiekaz
-# xaFUAS6bYlpQtUAF41iCO4EQcBKvNrPfqb5aWsW5wTMRjwbmcnC+Tu070/i2Gl5C
-# O4T4p8yf2Bzqxi9oa8XIGZU9r9UaFtIfwjYy4guaz0xVzuTDSrRQwjZdgFqKz7Wu
-# +/1kMR3diZcgZ/YIpKqtCDv26lbUjxqiVoZK47TLilQGlT5u/DaeFfgSpxTt/DCk
-# AnG4PrYolkTYD8zoRTfAqehcSKZbIvUTWCxckKK2ZOsL6fpZVSWqz3vNwRFiedL9
-# Z+5llEn/XYw9eIB5y51C6IEa0IQGgnlBcW3tapoS3GisEz1NKWduKuditMv02GGM
-# 2TYUmGPY0GsV+AquFx/uWexLm/fVg8DortTyHO5MceOliNQP4K9xz8QuC42WRj+W
-# ciX3lk/sakqReSSYxY77Fur+bfa3PSJ3NhfdxwObIOEG1EhyQOJkOLybO+IVLn23
-# jQ8SaV1Q63+jcksZvKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEII8aSyOqFCNx20cXnOIv9XoTIPgYJLKPW8E0lY6jJ+jRMA0GCSqG
+# SIb3DQEBAQUABIIBgI8ThTkwdbvJ4/aGKyWO8fX4NA7sI8HIPxdUuSRWSZjsMS2I
+# OZrZIMJ9AX5JWTDkgkUC8llmOAU/ORiU4jOx8o4VQVZ5Wz7XbRAhpw10+v/2byhc
+# g/27rBonDzcdSPST8RPIzhtViulNTzl0hZctXs8zaosOILZisf/cZwFuNSo+LmDl
+# IibD1uFa8jKSpPX45ES5qyKxDeJ0STA4vwDIWYqQX40KjTaDWBdBiZcx46I7zzK+
+# m0jLz4Jkt36LNHiTColD3KX/TD3Q7E8bY21EXD361olib4py0UL+YBYoXjiWdSWF
+# Fjm09LUXieWpYG8ijaNWO3jvgxooE14NhtSyvePkzoxIjWTD+tpAifHdcQvgG2EV
+# HBhvpFOWWV3hYjhs8YfeJZiKegU0n2Beklw3yXL0pnyHWiVFBYPnk9ICSsUFkmYq
+# WI+6VpXgGr5vmEpxV9ap+4Tx3bJKIIt99bTLUjutha5EumH3CHtd5Fx/EXctfToZ
+# kYvXuSPFUwri9HYqh6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTQyMTIy
-# MDRaMC8GCSqGSIb3DQEJBDEiBCDXVIZX04QZMjDJzldwJiHax41oXUX02zHs02Lq
-# sSUX7jANBgkqhkiG9w0BAQEFAASCAgB42tUq4yW1/U6f2ljQkp1ZDwFqaYtfAdq8
-# pfO/S9coMtRiKWpx3ezP/YQAyBQfHotdAh6jcp/5TeQqsO9zp0aWzWf4i49xHnW6
-# BExf+gputMXXNdCswn0cFmg8HOQK6ilEd4lKo1ASoT2mNc7vNRTZ4rInp2jFrQKz
-# datCsQCIga1ywRTtKO2DuGQJVJAl0CWLYEcreFo4XwnGSWlyEYPE9BpLC7LHWFZp
-# iYyICl70PrZZ9UaiuprDZ09DEo2ZwXuEhek3/rTYDq9IvB2PjDYTM+SqrkggUhzf
-# 6JOptooOsjTBAxSqRUBC5rHFN2Rb7kcJ9rSowmyhHeLn6PyICVWfBDC1lG8MRsN7
-# eRqrEi8Ud5El3JQT/fsSY9FBO+t+ApTGcO1CZfOJFRqNWx/2jCaixEgII7GDMEKy
-# fM+kGOlpSjRQEFaDV4koej3uQepXcJMvd+mCeDt6/Lm3uZUEcqEv2fLxmhl0BUJy
-# bm5ZWGTga4lztebbq02/rsb6DYiECxFvFeUgPZjyPZLcZivVBZLm+sBDR2MlBGDo
-# 7MkpjgWQ5Ye7E8nGQlooFQJ5ouUrhnHFDa+fwX+VNd80kWs9taRhf2Jld2RDLj3Y
-# GfuXlDDai9/yvrfkmQk8Eu8nsapMWXfBP3zAp++94Ry9K3DniGPl1Sqf2ZK81f3O
-# xIxvzeUtUw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTYwOTQz
+# MTBaMC8GCSqGSIb3DQEJBDEiBCDU+NCHACgF0uJrenB2pH4l+S/l3pyNL8voEacN
+# FppQmTANBgkqhkiG9w0BAQEFAASCAgB5Jl4OcAVHi8EU/C3+shn2m/05IZfkaTVX
+# XZ0UdbB7ZUpz7ubm1I6K5Qo/hPAorlPzNCwD1PbVGGyh/98dB0qHyQ8exy4cw+ej
+# znvvgcwwciSm46gvYafp3/NsZL/5LU5DQvx6oiXWPUeACMhrXJnrBodoncT4dXYI
+# nTWvZr7vOhvBx8UV07k6EY67isf9lwIQNFYetK9RWoxcU+bKpyOyacWfrxSk1En3
+# 8aAgP+wXOnGKbf8Xalp/niAhacTHKlZKabwQIbI9Hf2U0TpiLSXq2EBTzUcKHQhN
+# R1gtj2164NiR8Ocs3vEV5wj+mzXjhCJVjofGm/2wlWuHRPvTbYFuxYBhDMAGpGvH
+# U5WzjWRy1ccYW9u9m8cS0WEk/QWNGjsmyPo4XIxDMNOyIX92rTA8MvW5Kw5bGf9j
+# Y3P/a+DxVdiq0eLwSQILChbVaZqhe8n6qbytqCe8j/SbjkKg3a2FeabUbMv7pDoR
+# jlVNgS0rMg486afVg993XXtPkRRFhn8k/9+taT8oR6jdsTc+U5qRjZO33I6Kj+do
+# DEQrWzzbiL4N6MZxAS2ytVC4PyQqmc7w6Jy+x0Ek4e5+jSrRYrvO/sBptQGTOdTa
+# OBXbPaJ/D1OciaCVBqXG/r6n6SAeBhdIRfm2lzYXlLqWuaNfPA0Qik2ElTXp2ppT
+# WAQ7IF/NpA==
 # SIG # End signature block

@@ -49,5 +49,12 @@
     {"root":"DATA-ALL/M365/Usage/Copilot", "file":"M365_Copilot_UserUsage.csv"},
     {"root":"DATA-ALL/Exchange/EXO", "file":"Exchange_EXO_Mailboxes_AllDomains.csv"},
     {"root":"DATA-ALL/Exchange/OnPrem/Mailboxes", "file":"Exchange_OnPrem_Mailboxes_AllDomains.csv"}
+  ],
+  "archivedHistory": [
+    {
+      "root": "DATA-ALL/Intune/Applications/DiscoveredApps/SummaryHistory",
+      "file": "Intune_DiscoveredApps_Summary.csv",
+      "manifest": "summary.manifest.json.txt"
+    }
   ]
 }
