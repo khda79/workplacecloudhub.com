@@ -2742,6 +2742,248 @@
       ]
     },
     {
+      "table": "Daily Directory Trends",
+      "file": "DailyDirectoryTrends.csv",
+      "source": "DATA-ALL daily statistics",
+      "stagingIncludesTenantKey": true,
+      "historyKey": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "Date Key",
+        "Source Name",
+        "Domain Key",
+        "Metric Name"
+      ],
+      "historyKeyVersion": 1,
+      "uniqueKey": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "Date Key",
+        "Source Name",
+        "Domain Key",
+        "Metric Name"
+      ],
+      "columns": [
+        {
+          "name": "TenantKey",
+          "type": "string"
+        },
+        {
+          "name": "OrganizationKey",
+          "type": "string"
+        },
+        {
+          "name": "EnvironmentKey",
+          "type": "string"
+        },
+        {
+          "name": "TenantId",
+          "type": "string"
+        },
+        {
+          "name": "Date Key",
+          "type": "int64"
+        },
+        {
+          "name": "Date",
+          "type": "dateTime"
+        },
+        {
+          "name": "Source Name",
+          "type": "string"
+        },
+        {
+          "name": "Domain Key",
+          "type": "string"
+        },
+        {
+          "name": "Domain Name",
+          "type": "string"
+        },
+        {
+          "name": "Metric Name",
+          "type": "string"
+        },
+        {
+          "name": "Metric Unit",
+          "type": "string"
+        },
+        {
+          "name": "Metric Value",
+          "type": "double"
+        },
+        {
+          "name": "Reading At",
+          "type": "dateTime"
+        },
+        {
+          "name": "Metric Status",
+          "type": "string"
+        },
+        {
+          "name": "Source Day Status",
+          "type": "string"
+        },
+        {
+          "name": "Quality Event",
+          "type": "string"
+        },
+        {
+          "name": "Quality Reason",
+          "type": "string"
+        },
+        {
+          "name": "Observed Domain Count",
+          "type": "int64"
+        },
+        {
+          "name": "Absent Domain Count",
+          "type": "int64"
+        },
+        {
+          "name": "Persistent Absent Domain Count",
+          "type": "int64"
+        },
+        {
+          "name": "Absent Prior Share (%)",
+          "type": "double"
+        },
+        {
+          "name": "Partial Threshold (%)",
+          "type": "double"
+        },
+        {
+          "name": "Reference Complete Day",
+          "type": "dateTime"
+        }
+      ]
+    },
+    {
+      "table": "Daily Mailbox Trends",
+      "file": "DailyMailboxTrends.csv",
+      "source": "DATA-ALL daily statistics",
+      "stagingIncludesTenantKey": true,
+      "historyKey": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "Date Key",
+        "Source Name",
+        "Domain Key",
+        "Metric Name"
+      ],
+      "historyKeyVersion": 1,
+      "uniqueKey": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "Date Key",
+        "Source Name",
+        "Domain Key",
+        "Metric Name"
+      ],
+      "columns": [
+        {
+          "name": "TenantKey",
+          "type": "string"
+        },
+        {
+          "name": "OrganizationKey",
+          "type": "string"
+        },
+        {
+          "name": "EnvironmentKey",
+          "type": "string"
+        },
+        {
+          "name": "TenantId",
+          "type": "string"
+        },
+        {
+          "name": "Date Key",
+          "type": "int64"
+        },
+        {
+          "name": "Date",
+          "type": "dateTime"
+        },
+        {
+          "name": "Source Name",
+          "type": "string"
+        },
+        {
+          "name": "Domain Key",
+          "type": "string"
+        },
+        {
+          "name": "Domain Name",
+          "type": "string"
+        },
+        {
+          "name": "Metric Name",
+          "type": "string"
+        },
+        {
+          "name": "Metric Unit",
+          "type": "string"
+        },
+        {
+          "name": "Metric Value",
+          "type": "double"
+        },
+        {
+          "name": "Reading At",
+          "type": "dateTime"
+        },
+        {
+          "name": "Metric Status",
+          "type": "string"
+        },
+        {
+          "name": "Source Day Status",
+          "type": "string"
+        },
+        {
+          "name": "Quality Event",
+          "type": "string"
+        },
+        {
+          "name": "Quality Reason",
+          "type": "string"
+        },
+        {
+          "name": "Observed Domain Count",
+          "type": "int64"
+        },
+        {
+          "name": "Absent Domain Count",
+          "type": "int64"
+        },
+        {
+          "name": "Persistent Absent Domain Count",
+          "type": "int64"
+        },
+        {
+          "name": "Absent Prior Share (%)",
+          "type": "double"
+        },
+        {
+          "name": "Partial Threshold (%)",
+          "type": "double"
+        },
+        {
+          "name": "Reference Complete Day",
+          "type": "dateTime"
+        }
+      ]
+    },
+    {
       "table": "Executive KPI Trends",
       "file": "ExecutiveKPITrends.csv",
       "historyKey": ["Date Key", "Metric Name"],
