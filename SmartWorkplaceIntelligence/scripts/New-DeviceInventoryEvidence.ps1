@@ -1,3 +1,4 @@
+# Version 1.1.0
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
@@ -12,7 +13,9 @@ param(
 
     [string]$SystemEvidenceOutputPath,
     [Nullable[double]]$DeviceSystemMaxObservationAgeHours,
-    [string]$DeviceSystemOffsetlessGraphTimeZoneId
+    [string]$DeviceSystemOffsetlessGraphTimeZoneId,
+    # Optional reference clock for reproducible offline preparation; defaults to the current time.
+    [Nullable[datetimeoffset]]$AsOfUtc
 )
 
 Set-StrictMode -Version Latest
@@ -317,7 +320,7 @@ $endpointPerformanceIndex = Get-PreferredLatestIndex -Rows $endpointPerformance 
 $endpointStartupIndex = Get-PreferredLatestIndex -Rows $endpointStartup -KeyProperty 'DeviceId' -PreferredProperty 'StopErrorCount' -DateProperty 'ReportRefreshDate'
 $hardwareConflictDeviceIds = Get-NormalizedValueSet -Values @($hardwareConflicts | ForEach-Object { @([string]$_.DeviceIds -split '[,;|\s]+' | Where-Object { $_ }) })
 $removalCandidateDeviceIds = Get-NormalizedValueSet -Values @($removalCandidates | ForEach-Object { $_.CandidateDeviceId })
-$now = Get-Date
+$now = if ($null -ne $AsOfUtc) { $AsOfUtc.UtcDateTime } else { Get-Date }
 
 $evidence = @(foreach ($device in $intune) {
     $deviceId = Get-NormalizedKey $device.'Device ID'
@@ -450,7 +453,8 @@ if ($SystemEvidenceOutputPath) {
     $systemPath=Get-RequiredCsv 'DATA-LAST\Intune_Devices_LocalSystem.csv'
     Assert-DeviceSystemCsvSchema -Path $systemPath
     $systemRows=@(Import-Csv -LiteralPath $systemPath)
-    $systemEvidence=@(New-DeviceSystemEvidence -SystemRows $systemRows -InventoryRows $intune -UserRows $users -PreparedInventoryRows $evidence -MaxObservationAgeHours $DeviceSystemMaxObservationAgeHours -OffsetlessGraphTimeZoneId $DeviceSystemOffsetlessGraphTimeZoneId)
+    $systemClock=@{}; if ($null -ne $AsOfUtc) { $systemClock['AsOfUtc']=$AsOfUtc }
+    $systemEvidence=@(New-DeviceSystemEvidence -SystemRows $systemRows -InventoryRows $intune -UserRows $users -PreparedInventoryRows $evidence -MaxObservationAgeHours $DeviceSystemMaxObservationAgeHours -OffsetlessGraphTimeZoneId $DeviceSystemOffsetlessGraphTimeZoneId @systemClock)
     New-Item -ItemType Directory -Path (Split-Path -Parent ([IO.Path]::GetFullPath($SystemEvidenceOutputPath))) -Force | Out-Null
     if ($systemEvidence.Count) {
         $systemEvidence | Export-Csv -LiteralPath $SystemEvidenceOutputPath -NoTypeInformation -Encoding utf8NoBOM

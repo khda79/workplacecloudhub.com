@@ -1,3 +1,4 @@
+# Version 1.1.0
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
@@ -6,11 +7,14 @@ param(
 
     [string]$AdoptionOutputPath = (Join-Path (Split-Path -Parent $PSScriptRoot) '_private\CollaborationAdoptionEvidence.csv'),
     [string]$ObjectOutputPath = (Join-Path (Split-Path -Parent $PSScriptRoot) '_private\CollaborationObjectEvidence.csv'),
-    [string]$TrendOutputPath = (Join-Path (Split-Path -Parent $PSScriptRoot) '_private\CollaborationTrendEvidence.csv')
+    [string]$TrendOutputPath = (Join-Path (Split-Path -Parent $PSScriptRoot) '_private\CollaborationTrendEvidence.csv'),
+    # Optional reference clock for reproducible offline preparation; defaults to the current time.
+    [Nullable[datetimeoffset]]$AsOfUtc
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+$script:ReferenceDate = if ($null -ne $AsOfUtc) { $AsOfUtc.UtcDateTime.Date } else { (Get-Date).Date }
 
 function Convert-ToInvariantDecimalText {
     param([AllowNull()][object]$Value)
@@ -37,7 +41,7 @@ function Get-SnapshotDate {
             if ($null -ne $date) { return $date }
         }
     }
-    return (Get-Date).Date
+    return $script:ReferenceDate
 }
 
 function Get-ActivityState {
@@ -176,7 +180,7 @@ $copilotProfile = Get-UsageProfile -Rows $copilot -Service 'Copilot' -RefreshCol
 $objectRows = @($objects)
 $adoption = foreach ($profile in @($teamsProfile, $sharePointProfile, $oneDriveProfile, $copilotProfile)) {
     $aggregate = if ($profile.Service -eq 'Copilot') { [pscustomobject]@{ Total = $profile.EligibleUsers; Active = $profile.ActiveUsers; Inactive = $profile.EligibleUsers - $profile.ActiveUsers; Orphaned = 0; External = 0; Storage = 0 } } else { Get-ObjectAggregate -Rows @($objectRows | Where-Object Service -eq $profile.Service) -Service $profile.Service }
-    $age = [math]::Max(0, ((Get-Date).Date - $profile.RefreshDate).Days)
+    $age = [math]::Max(0, ($script:ReferenceDate - $profile.RefreshDate).Days)
     [pscustomobject][ordered]@{
         Service = $profile.Service; 'Eligible Users' = $profile.EligibleUsers; 'Active Users 30D' = $profile.ActiveUsers; 'Active User Rate (%)' = Convert-ToInvariantDecimalText $profile.AdoptionRate
         'Service Objects' = $aggregate.Total; 'Active Objects 30D' = $aggregate.Active; 'Inactive Objects' = $aggregate.Inactive; 'Orphaned Objects' = $aggregate.Orphaned; 'Objects with External Access' = $aggregate.External

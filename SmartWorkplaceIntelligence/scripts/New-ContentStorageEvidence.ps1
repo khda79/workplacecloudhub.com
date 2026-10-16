@@ -1,3 +1,4 @@
+# Version 1.1.0
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
@@ -5,7 +6,9 @@ param(
     [string]$DataRoot,
 
     [string]$ObjectOutputPath = (Join-Path (Split-Path -Parent $PSScriptRoot) '_private\ContentStorageEvidence.csv'),
-    [string]$TrendOutputPath = (Join-Path (Split-Path -Parent $PSScriptRoot) '_private\ContentStorageTrendEvidence.csv')
+    [string]$TrendOutputPath = (Join-Path (Split-Path -Parent $PSScriptRoot) '_private\ContentStorageTrendEvidence.csv'),
+    # Optional reference clock for reproducible offline preparation; defaults to the current time.
+    [Nullable[datetimeoffset]]$AsOfUtc
 )
 
 Set-StrictMode -Version Latest
@@ -66,7 +69,7 @@ function Get-FreshnessState {
 $lastRoot = Join-Path $DataRoot 'DATA-LAST'
 $sharePoint = @(Import-Csv -LiteralPath (Join-Path $lastRoot 'M365_SPO_Sites.csv'))
 $oneDrive = @(Import-Csv -LiteralPath (Join-Path $lastRoot 'M365_OneDrive_Usage.csv'))
-$today = (Get-Date).Date
+$today = if ($null -ne $AsOfUtc) { $AsOfUtc.UtcDateTime.Date } else { (Get-Date).Date }
 $sharePointSnapshot = Get-SnapshotDate -Rows $sharePoint -CandidateColumns @('RunDateUtc')
 $oneDriveSnapshot = Get-SnapshotDate -Rows $oneDrive -CandidateColumns @('Report Refresh Date')
 

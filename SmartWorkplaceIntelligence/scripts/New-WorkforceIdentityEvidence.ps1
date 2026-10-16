@@ -1,4 +1,5 @@
-﻿[CmdletBinding()]
+﻿# Version 1.1.0
+[CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
     [ValidateScript({ Test-Path -LiteralPath $_ -PathType Container })]
@@ -25,11 +26,16 @@ param(
 
     [string]$SystemEvidencePath,
 
-    [string]$AccountClassificationConfigPath = (Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) 'SmartM365\SmartInventory\Config\AccountClassification.local.json')
+    [string]$AccountClassificationConfigPath = (Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) 'SmartM365\SmartInventory\Config\AccountClassification.local.json'),
+
+    # Optional reference clock for reproducible offline preparation; defaults to the current time.
+    [Nullable[datetimeoffset]]$AsOfUtc
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+$referenceUtc = if ($null -ne $AsOfUtc) { $AsOfUtc.ToUniversalTime() } else { [datetimeoffset]::UtcNow }
+$referenceDate = if ($null -ne $AsOfUtc) { $referenceUtc.UtcDateTime.Date } else { (Get-Date).Date }
 # Standalone/offline worker: load the shared leaf helper without tenant bootstrap.
 $importExcelHealthPath = Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) 'SmartM365/Modules/SmartM365.Core/SmartM365-ImportExcelHealth.ps1'
 if (-not (Test-Path -LiteralPath $importExcelHealthPath -PathType Leaf)) { throw 'Deploy the matching SmartM365 ImportExcel health helper alongside this prepared worker.' }
@@ -539,7 +545,7 @@ $activityRows = @(Import-Csv -LiteralPath $activityPath)
 Write-WorkforceDiagnostic 'Load AD users'
 $adUsers = @(Import-Csv -LiteralPath $adUsersPath)
 $consoleIndex=$null
-$consoleAsOfUtc=[datetimeoffset]::UtcNow
+$consoleAsOfUtc=$referenceUtc
 if($SystemEvidencePath) {
     if(-not (Test-Path -LiteralPath $SystemEvidencePath -PathType Leaf)){throw 'Prepared Device System evidence was not found.'}
     $consoleIndex=New-ConsoleActivityIndex -SystemRows @(Import-Csv -LiteralPath $SystemEvidencePath) -AdRows $adUsers -AsOfUtc $consoleAsOfUtc
@@ -587,7 +593,7 @@ foreach ($row in @(Import-Csv -LiteralPath $officeUsagePath)) {
     if (([string](Get-PropertyValue $row 'ReportPeriodRequested')).Trim() -ne 'D30') { throw 'M365_Apps_Usage_30D.csv does not contain the expected D30 report period.' }
     $usageUpn = Get-NormalizedKey (Get-PropertyValue $row 'User Principal Name')
     $usageDate = Convert-ToDateTimeOrNull (Get-PropertyValue $row 'Report Refresh Date')
-    if (-not $usageUpn -or $null -eq $usageDate -or $usageDate.Date -lt (Get-Date).Date.AddDays(-10)) { continue }
+    if (-not $usageUpn -or $null -eq $usageDate -or $usageDate.Date -lt $referenceDate.AddDays(-10)) { continue }
     if (-not $officeUsageByUpn.ContainsKey($usageUpn) -or $usageDate -gt $officeUsageByUpn[$usageUpn].ReportDate) {
         $officeUsageByUpn[$usageUpn] = [pscustomobject]@{ ReportDate = $usageDate; Row = $row }
     }

@@ -1,5 +1,5 @@
 [CmdletBinding()]
-# Version 1.1.0: preserve unavailable native capacity instead of coercing it to zero.
+# Version 1.2.0: preserve unavailable native capacity instead of coercing it to zero; optional -AsOfUtc reference clock.
 param(
     [Parameter(Mandatory = $true)]
     [ValidateScript({ Test-Path -LiteralPath $_ -PathType Container })]
@@ -11,11 +11,15 @@ param(
 
     [string]$OutputPath = (Join-Path (Split-Path -Parent $PSScriptRoot) '_private\LicenseEvidence.csv'),
 
-    [string]$OptimizationOutputPath = (Join-Path (Split-Path -Parent $PSScriptRoot) '_private\LicenseOptimizationEvidence.csv')
+    [string]$OptimizationOutputPath = (Join-Path (Split-Path -Parent $PSScriptRoot) '_private\LicenseOptimizationEvidence.csv'),
+
+    # Optional reference clock for reproducible offline preparation; defaults to the current time.
+    [Nullable[datetimeoffset]]$AsOfUtc
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+$referenceDate = if ($null -ne $AsOfUtc) { $AsOfUtc.UtcDateTime.Date } else { (Get-Date).Date }
 
 function Get-NormalizedKey {
     param([AllowNull()][object]$Value)
@@ -176,7 +180,7 @@ $evidence = foreach ($row in $capacity) {
             $mailboxSize = Convert-ToDoubleOrNull $mailbox.'Mailbox Size GB'
             $archiveDisabled = ([string]$mailbox.'Archive State').Trim() -eq 'Disabled'
             $officeUsage = if ($officeUsage180ByUpn.ContainsKey($upn)) { $officeUsage180ByUpn[$upn] } else { $null }
-            $desktopAppsNotUsed = $null -ne $officeUsage -and $officeUsage.ReportDate.Date -ge (Get-Date).Date.AddDays(-10) -and (Test-OfficeDesktopExplicitNoUse -Row $officeUsage.Row)
+            $desktopAppsNotUsed = $null -ne $officeUsage -and $officeUsage.ReportDate.Date -ge $referenceDate.AddDays(-10) -and (Test-OfficeDesktopExplicitNoUse -Row $officeUsage.Row)
             if ($null -ne $mailboxSize -and $mailboxSize -lt 2 -and $archiveDisabled -and $desktopAppsNotUsed) {
                 $e3ToF3ReviewCandidates++
                 $optimizationRows.Add([pscustomobject][ordered]@{
