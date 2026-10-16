@@ -26,10 +26,8 @@ SmartFinOps/**
 !SmartFinOps/
 !SmartFinOps/**/
 !SmartFinOps/**/.gitkeep
-SmartWorkplaceCMDB/**
-!SmartWorkplaceCMDB/
-!SmartWorkplaceCMDB/**/
-!SmartWorkplaceCMDB/**/.gitkeep
+# Retired standalone project: keep any local recovery copy out of source control.
+/SmartWorkplaceCMDB/
 .delete-empty/
 
 # Local documentation / agent notes
@@ -155,17 +153,7 @@ SmartM365/SharePointMigration/Tools/Python/**
 !/SmartFinOps/Config/SmartFinOps-Workplace-SourceContracts.json
 !/SmartFinOps/Config/SmartFinOps-Workplace-FrancePriceBaseline.json
 !/SmartFinOps/SmartFinOps.global.local.json.template
-!/SmartWorkplaceCMDB/README.md
-!/SmartWorkplaceCMDB/**/*.ps1
-!/SmartWorkplaceCMDB/**/*.psm1
-!/SmartWorkplaceCMDB/**/*.psd1
-!/SmartWorkplaceCMDB/**/*.cmd
-!/SmartWorkplaceCMDB/**/*.md
-!/SmartWorkplaceCMDB/**/*.py
-!/SmartWorkplaceCMDB/**/*.json.template
-!/SmartWorkplaceCMDB/Schema/**/*.json
-!/SmartWorkplaceCMDB/RELEASE.json
-!/SmartWorkplaceCMDB/Release/Files.json
+!/SmartWorkplaceIntelligence/README.md
 
 # Local agent notes and memories stay private even when Markdown is re-included above.
 BRANCHES.md
@@ -248,9 +236,6 @@ Logs/
 # Reports / exports
 Exports/
 Reports/
-!SmartWorkplaceCMDB/Reports/
-!SmartWorkplaceCMDB/Reports/**/
-!SmartWorkplaceCMDB/Reports/**/*.ps1
 CSV/
 Output/
 SmartM365/Data/**
@@ -259,28 +244,6 @@ SmartAzureVirtualDesktop/Data/**
 SmartCitrix/Data/**
 SmartFinOps/Data/**
 !SmartFinOps/SmartFinOps-Workplace.Release.json
-# SmartWorkplaceCMDB private tenant/runtime and Power BI artifacts.
-# Version only the reviewed generic project, never private working
-# projects, exports, caches or copied ReportData.
-SmartWorkplaceCMDB/Data/**
-SmartWorkplaceCMDB/PowerBI/CMDB-REPORTS/**
-# Reusable reader functions and test-only semantic references.
-!SmartWorkplaceCMDB/Tests/References/*.dax
-!SmartWorkplaceCMDB/PowerBI/Queries/prepared-read-session.pq
-!SmartWorkplaceCMDB/PowerBI/Queries/prepared-types-candidate.pq
-!SmartWorkplaceCMDB/Tests/prepared_dates.query.pq
-SmartWorkplaceCMDB/**/ReportData/**
-SmartWorkplaceCMDB/**/.pbi/**
-SmartWorkplaceCMDB/**/*.pbix
-SmartWorkplaceCMDB/**/*.pbip
-!SmartWorkplaceCMDB/PowerBI/Project/**
-SmartWorkplaceCMDB/PowerBI/Project/**/.pbi/**
-SmartWorkplaceCMDB/PowerBI/Project/**/localSettings.json
-SmartWorkplaceCMDB/**/*.abf
-SmartWorkplaceCMDB/**/*.csv
-SmartWorkplaceCMDB/**/*.parquet
-SmartWorkplaceCMDB/**/__pycache__/
-SmartWorkplaceCMDB/**/*.pyc
 
 # SmartWorkplaceIntelligence private, locally consolidated evidence.
 SmartWorkplaceIntelligence/_private/**
@@ -292,14 +255,6 @@ SmartWorkplaceIntelligence/**/SmartWorkplaceIntelligence-PersonaClassification.x
 SmartWorkplaceIntelligence/**/Personae-Keywords.xlsx
 *.inspect.ndjson
 
-# SmartWorkplaceCMDB local audit and review notes must never be published.
-# These rules intentionally follow the Markdown re-inclusion rules above.
-SmartWorkplaceCMDB/**/AUDIT-*.md
-SmartWorkplaceCMDB/**/*-AUDIT.md
-SmartWorkplaceCMDB/**/LOCAL-REVIEW*.md
-SmartWorkplaceCMDB/**/*-LOCAL-REVIEW.md
-SmartWorkplaceCMDB/.local-review/**
-SmartWorkplaceCMDB/.local/**
 
 # Local SmartInventory audit evidence
 /SmartM365/SmartInventory/AUDIT-*.md

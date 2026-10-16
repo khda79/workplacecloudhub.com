@@ -6,6 +6,11 @@
 
 ## Generic layer retirement — validated source, 2026-10-16
 
+The standalone legacy project is removed from the current repository after a
+verified external archive, including its private local files. Current reporting
+belongs to SmartWorkplaceIntelligence. Git history preserves the public legacy
+definitions; private recovery archives remain outside source control.
+
 The candidate removes four graph tables/CSV contracts (entities, aliases, links,
 endpoints), their four measures, five relationships and two calculated entity keys.
 It preserves 154 domain/model tables and 879 measures. The 235 entity-context

@@ -1,6 +1,6 @@
 # Private classification workbooks
 
-For the unified prepared contract, native CMDB coverage and staged server cutover, see [CMDB consolidation](../docs/CMDB-CONSOLIDATION.md). Deployment now requires Python 3.10+ in addition to PowerShell 7. No collector or preparation is run by the offline tests.
+For the unified prepared contract, native source coverage and retirement of the generic CMDB layer, see [native domain migration](../docs/CMDB-CONSOLIDATION.md). Deployment requires Python 3.10+ in addition to PowerShell 7. No collector or preparation is run by the offline tests.
 
 The two `*-template.xlsx` files are generic examples. They contain no customer site codes, job titles, or persona mappings. Copy and adapt them outside source control before loading a customer report.
 

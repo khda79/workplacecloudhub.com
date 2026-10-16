@@ -27,7 +27,7 @@ Infrastructure reads the farm configuration database name from `SPFarm.Configura
 
 ## Publication and qualification
 
-The SharePoint on-prem CSVs are intended for SmartWorkplaceIntelligence Power BI reporting. The collectors are not registered as SmartWorkplaceCMDB sources, and Power BI model integration is outside this collector change.
+The SharePoint on-prem CSVs are intended for SmartWorkplaceIntelligence Power BI reporting. Power BI model integration is outside this collector change.
 
 The scripts write run CSVs first. Empty datasets have headers. Infrastructure promotes current CSVs into tenant-specific `DATA-LAST` only after full collection. Content promotes the CSVs when collection reaches the end of the selected databases, including when `CollectionCoverage` records site or database anomalies. Its generic configured-output receipt has `Status=Completed` after the four current CSVs pass row, hash, and tenant checks. It does not qualify farm-wide completeness: `IsPartialInventory` is null and `FullInventoryQualified` is false for this receipt type. Consumers requiring complete Content coverage must inspect `CollectionCoverage` for the same `RunId` and reject statuses other than `Collected` and, when `ExcludePersonalSiteCollections=true`, `ExcludedPersonal`. The run log, summary email, and warning exit code 3 also identify incomplete coverage. A fatal global timeout or a publication failure leaves the previous receipt intact. A current CSV upload failure after local publication leaves its receipt intact and ends the run with warnings (exit code 3).
 

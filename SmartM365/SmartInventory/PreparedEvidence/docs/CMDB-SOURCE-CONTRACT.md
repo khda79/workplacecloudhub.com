@@ -1,4 +1,11 @@
-# SmartInventory to SmartWorkplaceCMDB source contract
+# Historical CMDB source and metric reference
+
+> The standalone CMDB consumer and its separate output are retired. This document
+> retains the historical field and qualification reference; its legacy preparation
+> commands and paths below are not current deployment instructions. Current
+> Workplace preparation produces `DATA-POWERBI` using the source and native output
+> contracts in `SmartWorkplaceIntelligence/config`. See
+> [Workplace Intelligence](../../../../SmartWorkplaceIntelligence/README.md).
 
 This is the native source/metric reference, not a private deployment qualification record.
 Executable preparation contract: 0.3.7 (`../cmdb-prepared-contract.json.txt`),
@@ -7,7 +14,8 @@ with 34 sources and 46 reporting tables. See [CMDB preparation](CMDB-PREPARATION
 ## Ownership and boundaries
 
 SmartInventory owns collection, collection fidelity, and preparation of the final
-CMDB reporting CSVs. SmartWorkplaceCMDB owns its semantic model and report.
+CMDB reporting CSVs in the historical architecture described below. The current
+semantic model and report belong to SmartWorkplaceIntelligence.
 Preparation reads canonical SmartInventory `DATA-LAST`, not Intelligence's
 `DATA-POWERBI`. Its final current-only output is `DATA-POWERBI-CMDB`, beside those
 directories under the configured private data root. On this workstation that is
