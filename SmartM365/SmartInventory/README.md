@@ -77,7 +77,7 @@ device-status date. A policy modification date is not substituted for it.
 - `M365Inventory/Security/`: Secure Score, authentication-method registration, and Conditional Access configuration evidence.
 - `M365Inventory/IntuneInventory/Security/`: Defender agent and firewall-health reports exported from Intune without changing device or policy state.
 - `ExchangeInventory/BackupProtection/`: Microsoft 365 Backup protection evidence for mailboxes, SharePoint sites, and OneDrive accounts.
-- `M365Inventory/Licensing/SmartM365-LicensePricing-Inventory.ps1`: normalization of a governed pricing source. The default source is the versioned France public-list baseline `M365_License_Prices_Public-France.csv`, with every row marked estimated; a private local configuration can replace it with reviewed customer-contract prices.
+- `M365Inventory/Licensing/SmartM365-LicensePricing-Inventory.ps1`: normalization of governed license prices (`M365_License_Prices.csv`) and optional Windows 10 ESU prices (`Windows_ESU_Prices.csv`). The versioned France public-list baseline `M365_License_Prices_Public-France.csv` (every row estimated) is merged with an optional private override; see [License pricing](#license-pricing).
 - `Launchers/Cloud/`: production launchers for cloud inventory scripts.
 - `Launchers/OnPremises/`: production launchers for Active Directory and Exchange on-premises inventory scripts.
 - `Launchers/Orchestrator/`: production launchers for orchestrator installation, start, stop, and restart operations.
@@ -91,6 +91,50 @@ Choose `Launchers/` to run a collector immediately on the current server, outsid
 Launcher names no longer carry a `-Prod` suffix. Test launchers are intentionally not maintained; use the PowerShell script parameters directly for targeted test execution.
 
 The Secure Score, authentication-method registration, Conditional Access, Intune endpoint-security, and governed public-France license-pricing collectors are enabled once daily in `Orchestrator/Orchestrator-Jobs.json.template`. Microsoft 365 Backup collectors remain scheduled but disabled until their service-app/controller prerequisite is available. `Policy.Read.All` and `SecurityEvents.Read.All` are new bootstrap permissions. Authentication registration and Microsoft 365 Backup reuse `AuditLog.Read.All` and `BackupRestore-Configuration.Read.All`. Intune endpoint-security reports reuse the temporary export-job permission `DeviceManagementManagedDevices.ReadWrite.All`.
+
+## License pricing
+
+`SmartM365-LicensePricing-Inventory.ps1` 1.1.0 publishes `M365_License_Prices.csv`
+(header unchanged) from three local settings:
+
+- `PricingSourceCsvPath`: the public baseline
+  `M365Inventory/Licensing/M365_License_Prices_Public-France.csv` (template default).
+  Prices are Microsoft France public list prices in EUR excluding VAT, per user per
+  month with annual commitment, `IsEstimated=True`. `EffectiveFrom` is the date the
+  price was observed and `ContractReference` the public page used.
+- `PricingOverrideCsvPath` (private, empty by default): reviewed contract prices with
+  the same columns. The public baseline is always read; a private row replaces every
+  public period of the same `SkuPartNumber` and `Currency`, and private-only SKUs are
+  added. `IsEstimated` and `PriceSource` show which rows are contract prices.
+- `EsuPricingCsvPath` (private, empty by default): Windows 10 Extended Security
+  Updates prices, published as `Windows_ESU_Prices.csv`, an optional output of the
+  collector's source receipt. Without it, ESU stays not valued and the file is not
+  published. There is no public ESU row because Microsoft publishes no EUR price.
+
+The private ESU CSV uses these columns:
+
+```text
+ProgramKey,CoverageYear,Currency,UnitPricePerDeviceYear,EffectiveFrom,EffectiveTo,IsCumulative,PriceSource,PricingBasis,ContractReference,IsEstimated
+```
+
+`ProgramKey` is `WIN10_ESU`, `CoverageYear` is 1 to 3, `Currency` must be `EUR` (no
+currency conversion), dates are `yyyy-MM-dd` and required, years must follow each
+other without overlapping, and `IsCumulative` states whether a later year also
+requires the earlier years.
+
+Migration: a local `PricingSourceCsvPath` that points to a file other than the public
+baseline keeps the former behaviour (the private file replaces the whole baseline) and
+logs a warning. Move those prices to `PricingOverrideCsvPath`, then point
+`PricingSourceCsvPath` back to the public baseline (or remove the local value so the
+template default applies). Setting both a private `PricingSourceCsvPath` and
+`PricingOverrideCsvPath` is refused. The runtime `.local.json` is created from its
+template when absent and missing template keys are added without changing local values.
+
+Not valued in the public baseline (no verifiable public EUR price per user):
+Exchange Online Archiving for Exchange Server, Teams Phone with calling plans, Intune
+Suite, Office 365 Extra File Storage, Copilot Studio (capacity billing), Dynamics 365
+attach, Team Members and Operations Activity licenses, Power Apps per app, and Project
+Online Premium. Provide contract prices through `PricingOverrideCsvPath` when needed.
 
 ## Timestamped CSV copies on SharePoint
 
