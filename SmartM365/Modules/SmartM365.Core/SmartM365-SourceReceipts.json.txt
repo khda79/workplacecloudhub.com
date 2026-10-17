@@ -1,5 +1,5 @@
 {
-  "Version": "1.0",
+  "Version": "1.1",
   "ScopeNote": "Configured output proof only; completeness of the entire tenant is not inferred.",
   "Producers": [
     {
@@ -279,7 +279,9 @@
       "Files": [
         "M365_License_Prices.csv"
       ],
-      "OptionalFiles": []
+      "OptionalFiles": [
+        "Windows_ESU_Prices.csv"
+      ]
     },
     {
       "Script": "SmartM365-PowerBIFabricActivity-Inventory.ps1",

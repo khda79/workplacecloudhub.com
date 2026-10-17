@@ -1,14 +1,18 @@
 ﻿#Requires -Version 7.0
 <#
 .SYNOPSIS
-Validates and normalizes a private, governed Microsoft 365 license-pricing CSV.
+Validates and normalizes the governed Microsoft 365 license-pricing CSV and optional Windows 10 ESU prices.
+The public France baseline is merged with an optional private override (PricingOverrideCsvPath): a private
+SKU+Currency replaces every public period of that SKU+Currency. A PricingSourceCsvPath pointing to another
+file keeps the former whole-replacement behaviour with a migration warning. Windows 10 ESU prices come only
+from a private EUR source (EsuPricingCsvPath) and are published as Windows_ESU_Prices.csv.
 .VERSION
-1.0.3
+1.1.0
 .REQUIREMENTS
-No Microsoft Graph permission. PricingSourceCsvPath must reference a private CSV.
+No Microsoft Graph permission. PricingSourceCsvPath must reference the public baseline or a private CSV.
 #>
 [CmdletBinding()]
-param([string]$Tenant='test',[string]$PricingSourceCsvPath,[switch]$ValidateOnly,[switch]$SelfTest,[switch]$EnableConfiguredExternalActions,[string]$OutputPath,[string]$LatestCsvFolderPath)
+param([string]$Tenant='test',[string]$PricingSourceCsvPath,[string]$PricingOverrideCsvPath,[string]$EsuPricingCsvPath,[switch]$ValidateOnly,[switch]$SelfTest,[switch]$EnableConfiguredExternalActions,[string]$OutputPath,[string]$LatestCsvFolderPath)
 # Local lifecycle only; no collection or publication is performed by this guard.
 $smartM365LifecycleRoot=$PSScriptRoot
 while ($smartM365LifecycleRoot -and -not (Test-Path -LiteralPath (Join-Path $smartM365LifecycleRoot 'Modules/SmartM365.Core/SmartM365-InventoryLifecycle.ps1') -PathType Leaf)) {
@@ -21,7 +25,7 @@ if(-not $smartM365LifecycleRoot){throw 'SmartM365 lifecycle support is missing; 
 $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -RequireReturn
 try {
 Set-StrictMode -Version Latest
-$ErrorActionPreference='Stop';$ScriptVersion='1.0.3';$script:Runtime=$null;$script:CompletionStatus='Success';$script:CompletionError=$null
+$ErrorActionPreference='Stop';$ScriptVersion='1.1.0';$script:Runtime=$null;$script:CompletionStatus='Success';$script:CompletionError=$null
 
 function ConvertTo-LicensePriceRows{
     param([object[]]$InputRows,[string]$RunId,[string]$CollectedAtUtc)
@@ -36,19 +40,99 @@ function ConvertTo-LicensePriceRows{
     }
     return @($rows)
 }
+
+# A private SKU+Currency replaces every public period of that SKU+Currency; private-only SKUs are added.
+function Merge-LicensePriceRows{
+    param([AllowEmptyCollection()][object[]]$PublicRows,[AllowEmptyCollection()][object[]]$OverrideRows)
+    $overridden=[System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach($row in $OverrideRows){[void]$overridden.Add(('{0}|{1}' -f $row.SkuPartNumber,$row.Currency))}
+    $kept=@($PublicRows|Where-Object{-not $overridden.Contains(('{0}|{1}' -f $_.SkuPartNumber,$_.Currency))})
+    return [pscustomobject]@{Rows=@($kept+@($OverrideRows));ReplacedPublicRows=($PublicRows.Count-$kept.Count);OverrideKeys=$overridden.Count}
+}
+
+function ConvertTo-WindowsEsuPriceRows{
+    param([object[]]$InputRows,[string]$RunId,[string]$CollectedAtUtc)
+    $rows=[System.Collections.Generic.List[object]]::new();$years=@{};$periods=@{}
+    $culture=[System.Globalization.CultureInfo]::InvariantCulture
+    foreach($row in $InputRows){
+        $program=[string](Get-SmartM365EvidenceProperty $row @('ProgramKey'));$currency=[string](Get-SmartM365EvidenceProperty $row @('Currency'))
+        if($program-cne'WIN10_ESU'){throw "Unsupported ESU program key: '$program'. Expected WIN10_ESU."}
+        # No currency conversion: only governed EUR prices are accepted.
+        if($currency-cne'EUR'){throw "Windows ESU prices must be in EUR; got '$currency' for $program."}
+        $year=0;if(-not[int]::TryParse([string](Get-SmartM365EvidenceProperty $row @('CoverageYear')),[ref]$year)-or $year-lt 1-or $year-gt 3){throw "CoverageYear must be 1, 2 or 3 for $program."}
+        $price=0.0;if(-not[double]::TryParse([string](Get-SmartM365EvidenceProperty $row @('UnitPricePerDeviceYear')),[System.Globalization.NumberStyles]::Number,$culture,[ref]$price)-or $price-lt 0){throw "Invalid UnitPricePerDeviceYear for $program year $year. Use an invariant non-negative number."}
+        $fromText=[string](Get-SmartM365EvidenceProperty $row @('EffectiveFrom'));$toText=[string](Get-SmartM365EvidenceProperty $row @('EffectiveTo'))
+        $from=[datetime]::MinValue;$to=[datetime]::MinValue
+        if(-not[datetime]::TryParseExact($fromText,'yyyy-MM-dd',$culture,[System.Globalization.DateTimeStyles]::None,[ref]$from)-or
+           -not[datetime]::TryParseExact($toText,'yyyy-MM-dd',$culture,[System.Globalization.DateTimeStyles]::None,[ref]$to)-or $from-gt $to){throw "ESU year $year needs EffectiveFrom <= EffectiveTo as yyyy-MM-dd."}
+        $cumulative=[string](Get-SmartM365EvidenceProperty $row @('IsCumulative'));$estimated=[string](Get-SmartM365EvidenceProperty $row @('IsEstimated'))
+        if($cumulative-notin@('True','False')-or $estimated-notin@('True','False')){throw "IsCumulative and IsEstimated must be True or False for ESU year $year."}
+        $key="$program|$currency";if(-not$years.ContainsKey($key)){$years[$key]=@{};$periods[$key]=[System.Collections.Generic.List[object]]::new()}
+        if($years[$key].ContainsKey($year)){throw "Duplicate ESU coverage year $year for $key."};$years[$key][$year]=$from
+        foreach($other in $periods[$key]){if($from-le $other.To-and $other.From-le $to){throw "ESU coverage periods overlap for $key."}}
+        $periods[$key].Add([pscustomobject]@{From=$from;To=$to})
+        $rows.Add([pscustomobject][ordered]@{RunId=$RunId;CollectedAtUtc=$CollectedAtUtc;CollectionStatus='GovernedInput';IsPartialInventory=$false;SourceScriptVersion=$ScriptVersion;ProgramKey=$program;CoverageYear=$year;Currency=$currency;UnitPricePerDeviceYear=$price;EffectiveFrom=$fromText;EffectiveTo=$toText;IsCumulative=$cumulative;PriceSource=[string](Get-SmartM365EvidenceProperty $row @('PriceSource'));PricingBasis=[string](Get-SmartM365EvidenceProperty $row @('PricingBasis'));ContractReference=[string](Get-SmartM365EvidenceProperty $row @('ContractReference'));IsEstimated=$estimated})
+    }
+    foreach($key in $years.Keys){
+        $ordered=@($years[$key].Keys|Sort-Object)
+        for($i=1;$i-lt $ordered.Count;$i++){if($years[$key][$ordered[$i]]-le $years[$key][$ordered[$i-1]]){throw "ESU coverage years must follow each other in time for $key."}}
+    }
+    return @($rows)
+}
+
+# PricingSourceCsvPath keeps its meaning; a private file there keeps the former whole-replacement behaviour.
+function Resolve-LicensePricingRows{
+    param([Parameter(Mandatory)][string]$SourcePath,[string]$OverridePath,[Parameter(Mandatory)][string]$PublicBaselinePath,[string]$RunId,[string]$CollectedAtUtc)
+    if(-not(Test-Path -LiteralPath $SourcePath -PathType Leaf)){throw 'PricingSourceCsvPath must reference an existing CSV.'}
+    # Same file, or a byte-identical copy reached through another path (mapped drive, UNC), is the public baseline.
+    $legacy=[System.IO.Path]::GetFullPath($SourcePath)-ine[System.IO.Path]::GetFullPath($PublicBaselinePath)-and
+        (Get-FileHash -LiteralPath $SourcePath -Algorithm SHA256).Hash-cne(Get-FileHash -LiteralPath $PublicBaselinePath -Algorithm SHA256).Hash
+    $hasOverride=-not[string]::IsNullOrWhiteSpace($OverridePath)
+    if($legacy-and $hasOverride){throw 'PricingSourceCsvPath points to a private file while PricingOverrideCsvPath is also set. Point PricingSourceCsvPath back to the public baseline and keep private prices in PricingOverrideCsvPath.'}
+    $sourceRows=@(ConvertTo-LicensePriceRows @(Import-Csv -LiteralPath $SourcePath) $RunId $CollectedAtUtc)
+    $messages=[System.Collections.Generic.List[object]]::new()
+    if($legacy){
+        $messages.Add([pscustomobject]@{Level='WARNING';Text=("PricingSourceCsvPath points to a file other than the public baseline; it replaces the whole public baseline (legacy behaviour, {0} row(s)). Migrate private prices to PricingOverrideCsvPath and point PricingSourceCsvPath back to the public baseline." -f $sourceRows.Count)})
+        return [pscustomobject]@{Mode='LegacyReplacement';Rows=$sourceRows;Messages=$messages.ToArray()}
+    }
+    if(-not $hasOverride){
+        $messages.Add([pscustomobject]@{Level='INFO';Text=("Public license price baseline used without private override: {0} row(s)." -f $sourceRows.Count)})
+        return [pscustomobject]@{Mode='PublicBaseline';Rows=$sourceRows;Messages=$messages.ToArray()}
+    }
+    if(-not(Test-Path -LiteralPath $OverridePath -PathType Leaf)){throw 'PricingOverrideCsvPath must reference an existing private CSV.'}
+    $overrideRows=@(ConvertTo-LicensePriceRows @(Import-Csv -LiteralPath $OverridePath) $RunId $CollectedAtUtc)
+    if($overrideRows.Count-eq 0){throw 'The private license price override contains no rows.'}
+    $merged=Merge-LicensePriceRows -PublicRows $sourceRows -OverrideRows $overrideRows
+    $messages.Add([pscustomobject]@{Level='INFO';Text=("Public baseline {0} row(s) merged with private override {1} row(s) for {2} SKU/currency key(s); {3} public row(s) replaced." -f $sourceRows.Count,$overrideRows.Count,$merged.OverrideKeys,$merged.ReplacedPublicRows)})
+    return [pscustomobject]@{Mode='PublicBaselineWithOverride';Rows=$merged.Rows;Messages=$messages.ToArray()}
+}
 if($SelfTest){Import-Module (Join-Path $PSScriptRoot '..\..\Common\SmartM365.EvidenceCollector.Common.psd1') -MinimumVersion '1.0.11' -Force;$sample=[pscustomobject]@{SkuPartNumber='SPE_E5';Currency='EUR';UnitPriceMonthly='42.50';EffectiveFrom='2026-01-01';EffectiveTo='2026-12-31';PriceSource='Contract'};$test=ConvertTo-LicensePriceRows @($sample) r n;if($test.Count-ne 1-or $test[0].UnitPriceMonthly-ne 42.5){throw 'License pricing self-test failed.'};'PASS: License pricing offline contract';$smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; return}
 try{
     $tenantContextPath=Join-Path (Split-Path (Split-Path (Split-Path $PSScriptRoot -Parent) -Parent) -Parent) 'Config\SmartM365-TenantContext.ps1';. $tenantContextPath
     $effectiveConfig=Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot
+    # Create the runtime JSON from its template when absent and add missing template keys without overwriting values.
+    Read-SmartM365JsonConfig -Path (Join-Path $PSScriptRoot 'SmartM365-LicensePricing-Inventory.local.json') -Required | Out-Null
     Import-Module (Join-Path $PSScriptRoot '..\..\Common\SmartM365.EvidenceCollector.Common.psd1') -MinimumVersion '1.0.11' -Force
     $script:Runtime=Initialize-SmartM365EvidenceRuntime -ScriptPath $PSCommandPath -EffectiveConfig $effectiveConfig -DefaultOutputRelativePath 'M365\Licensing\Pricing' -OutputPath $OutputPath -LatestCsvFolderPath $LatestCsvFolderPath -ValidateOnly:$ValidateOnly -EnableConfiguredExternalActions:$EnableConfiguredExternalActions
     Start-SmartM365SourceReceipt -ScriptPath $PSCommandPath -SourceRootPath $script:Runtime.LatestCsvFolderPath -ReadOnly:($ValidateOnly -or $SelfTest)
     if([string]::IsNullOrWhiteSpace($PricingSourceCsvPath)){$PricingSourceCsvPath=[string](Get-SmartM365EvidenceProperty $script:Runtime.Config @('PricingSourceCsvPath'))}
-    if([string]::IsNullOrWhiteSpace($PricingSourceCsvPath)-or -not(Test-Path -LiteralPath $PricingSourceCsvPath -PathType Leaf)){throw 'PricingSourceCsvPath must reference an existing private CSV.'}
-    $rows=ConvertTo-LicensePriceRows @(Import-Csv -LiteralPath $PricingSourceCsvPath) $script:Runtime.RunId $script:Runtime.CollectedAtUtc
+    if([string]::IsNullOrWhiteSpace($PricingSourceCsvPath)){throw 'PricingSourceCsvPath must reference an existing CSV.'}
+    if([string]::IsNullOrWhiteSpace($PricingOverrideCsvPath)){$PricingOverrideCsvPath=[string](Get-SmartM365EvidenceProperty $script:Runtime.Config @('PricingOverrideCsvPath'))}
+    if([string]::IsNullOrWhiteSpace($EsuPricingCsvPath)){$EsuPricingCsvPath=[string](Get-SmartM365EvidenceProperty $script:Runtime.Config @('EsuPricingCsvPath'))}
+    $resolved=Resolve-LicensePricingRows -SourcePath $PricingSourceCsvPath -OverridePath $PricingOverrideCsvPath -PublicBaselinePath (Join-Path $PSScriptRoot 'M365_License_Prices_Public-France.csv') -RunId $script:Runtime.RunId -CollectedAtUtc $script:Runtime.CollectedAtUtc
+    foreach($message in $resolved.Messages){Write-SmartM365EvidenceLog -Message $message.Text -Level $message.Level}
+    $rows=@($resolved.Rows)
     if($rows.Count-eq 0){throw 'The license pricing source contains no rows.'}
-    if($ValidateOnly){Write-SmartM365EvidenceLog -Message ("License pricing source valid; {0} governed row(s). No CSV published." -f $rows.Count) -Level SUCCESS;$smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; return}
+    $esuRows=@()
+    if([string]::IsNullOrWhiteSpace($EsuPricingCsvPath)){Write-SmartM365EvidenceLog -Message 'Windows 10 ESU prices are not configured (EsuPricingCsvPath); ESU remains Not valued and Windows_ESU_Prices.csv is not published.' -Level INFO}
+    else{
+        if(-not(Test-Path -LiteralPath $EsuPricingCsvPath -PathType Leaf)){throw 'EsuPricingCsvPath must reference an existing private CSV.'}
+        $esuRows=@(ConvertTo-WindowsEsuPriceRows @(Import-Csv -LiteralPath $EsuPricingCsvPath) $script:Runtime.RunId $script:Runtime.CollectedAtUtc)
+        if($esuRows.Count-eq 0){throw 'The Windows ESU price source contains no rows.'}
+    }
+    if($ValidateOnly){Write-SmartM365EvidenceLog -Message ("License pricing source valid ({0}); {1} governed row(s); {2} Windows ESU row(s). No CSV published." -f $resolved.Mode,$rows.Count,$esuRows.Count) -Level SUCCESS;$smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; return}
     Export-SmartM365EvidenceDataset $script:Runtime 'M365_License_Prices' $rows @('RunId','CollectedAtUtc','CollectionStatus','IsPartialInventory','SourceScriptVersion','SkuPartNumber','Currency','UnitPriceMonthly','BillingCadence','EffectiveFrom','EffectiveTo','PriceSource','PricingBasis','ContractReference','IsEstimated')|Out-Null
+    if($esuRows.Count-gt 0){Export-SmartM365EvidenceDataset $script:Runtime 'Windows_ESU_Prices' $esuRows @('RunId','CollectedAtUtc','CollectionStatus','IsPartialInventory','SourceScriptVersion','ProgramKey','CoverageYear','Currency','UnitPricePerDeviceYear','EffectiveFrom','EffectiveTo','IsCumulative','PriceSource','PricingBasis','ContractReference','IsEstimated')|Out-Null}
 
     $smartM365RunGuard.ReachedTerminal=$true
 }catch{
