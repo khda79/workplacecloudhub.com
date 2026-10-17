@@ -18,7 +18,7 @@ Microsoft 365 and Entra inventory scripts outside the Intune-specific surface.
 
 ## Microsoft 365 Licensing
 
-`Licensing/SmartM365-Licences-Inventory.ps1` 1.45 publishes normalized license and
+`Licensing/SmartM365-Licences-Inventory.ps1` 1.48 publishes normalized license and
 service-plan data without repeating user and product labels on every service-plan
 assignment.
 
@@ -30,25 +30,48 @@ assignment.
 | Exchange service plans | `M365_Licenses_ServicePlans.csv` | Existing enriched Exchange/SPE subset retained for compatibility. |
 | Tenant SKUs | `M365_Licenses_Tenant.csv` | Tenant subscription and capacity inventory. |
 | Licensing groups | `M365_Licenses_Groups.csv` | Groups discovered as license assignment sources. |
+| License report | `M365_Licenses_ReportSummary.csv`, `M365_Licenses_ReportCandidates.csv`, `M365_Licenses_ReportAssignmentIssues.csv`, `M365_Licenses_ReportGaps.csv`, `M365_Licenses_ReportSources.csv` | Recovery, E3-to-F3 review, assignment issues, gaps and source states of one snapshot; optional outputs of the licensing source receipt. |
 
-The license overview and recovery email is sent at most once per tenant and
-Europe/Paris calendar day, including runs with `-SendLicenseSummaryEmailOnly`.
-Each accepted mail attempt first publishes
-`DATA-LAST/M365_Licenses_ReportSnapshot.json.txt`. The single JSON document
-contains the exact seven overview products, four-suite recovery and activity
-counts, E3-to-F3 review, sections 06/07 mailbox and AD gaps, candidate details,
-source states and hashes, tenant key, rule version and a unique snapshot ID.
-The mail footer prints that ID. A failed snapshot publication stops the mail;
-when SharePoint upload is configured, that upload must also succeed. A skipped
-daily mail does not replace the last snapshot. Consumer reports should read this
-document rather than independently recalculating recovery or downgrade rules.
+Every full inventory (no `-MaxItems` or `-TopUsers`) publishes the license report,
+whether or not an email is sent: `DATA-LAST/M365_Licenses_ReportSnapshot.json.txt`
+and the five `M365_Licenses_Report*.csv` files. The single JSON document contains
+the exact seven overview products, four-suite recovery and activity counts,
+E3-to-F3 review, sections 06/07 mailbox and AD gaps, candidate details, source
+states and hashes, tenant key, rule version and a unique snapshot ID. Schema 2 is
+unchanged; the additive `Rendering` object carries the source provenance needed to
+render the email, and the additive `ReceiptRun` object names the licensing receipt
+run (`RunId`) that proves the licensing inputs. The report is built after the
+canonical licensing CSVs are published and before the source receipt completes.
+The licensing CSVs it reads are qualified by the active receipt's own publication
+hashes (SmartM365.Core `Get-SmartM365CurrentSourcePublication`) because the receipt
+is still running at that point; other producers' CSVs keep their own receipts.
+The five report CSVs are recorded as optional files of
+`SmartInventory_SmartM365-Licences-Inventory.current.json.txt`; the required
+files and the receipt status do not depend on them. The receipt records CSV files
+only: the snapshot `.json.txt` is not hashed in it. The snapshot is tied to the
+five CSVs by the `SnapshotId` carried on every CSV row, and to the receipt by
+`ReceiptRun.RunId`. An unavailable usage source
+leaves the related indicators `N/D` and the report is still published. If an
+integrity check prevents the report, the receipt still completes with the report
+files declared unpublished, the previous report files are left in place, and no
+email is sent. The log and the run state (`Notes` in the `.run.json.txt` file)
+state that the report present in `DATA-LAST` does not belong to the current
+receipt; consumers must treat a report absent from the current receipt as stale. When SharePoint upload is configured, the snapshot and the five CSVs are
+uploaded after registration; an upload failure is logged, noted in the run state,
+and the email is not sent. Consumer reports should read this document rather than independently
+recalculating recovery or downgrade rules.
 They must display the snapshot ID and date, reject mixed IDs across imported
 tables and preserve JSON `null` as N/D rather than a verified zero. The
 candidate lists contain user identifiers and names and require the same private
 access control as the existing license-user exports.
-The full collector completes and qualifies its source receipt before sending
-the email. A receipt failure stops the email instead of publishing unqualified
-recovery KPIs.
+The license overview and recovery email is sent at most once per tenant and
+Europe/Paris calendar day, including runs with `-SendLicenseSummaryEmailOnly`.
+It never recomputes: it renders the published snapshot after checking that the
+licensing receipt is completed for the tenant, that each report CSV has the hash
+recorded by that receipt, and that every report row carries the snapshot ID. The
+mail footer prints that ID. The full collector completes and qualifies its source
+receipt before sending the email. A receipt failure stops the email instead of
+publishing unqualified recovery KPIs.
 The licensing consumer accepts AD `PartialAccepted` coverage only from a completed,
 error-free AD producer with `ConsumerScopeQualified=true`, matching successful
 file/domain proofs and an unchanged CSV hash. All expected domains must be accounted
@@ -72,11 +95,10 @@ Its overview cards emphasize the used percentage, with used and enabled license
 counts below it; an unsubscribed product shows `N/A`.
 The three recovery KPI cards appear immediately below `License overview`, ahead
 of the suite and other-product cards and the numbered detail sections.
-In email-only mode, `-BypassLicenseUsersReceipt` can provisionally use a fresh
-`M365_Licenses_Users.csv` when its file receipt is missing or a new licensing
-collection is still running. During a running collection, the CSV must predate
-that run and remain unchanged during analysis. A failed or completed partial
-receipt is not bypassed; the email marks the affected indicators `N/D`.
+Email-only mode sends the report published by the last full inventory; it does
+not rebuild it. `-ForceAdCsvAnalysis` applies to a full inventory only and is
+rejected in email-only mode. The former `-BypassLicenseUsersReceipt` switch is
+removed: the full inventory qualifies its own licensing CSVs directly.
 By default, `DATA-LAST/M365_Licenses_SummaryEmail_SendState.json.txt` records
 delivery state. Set `LicenseSummaryMailStatePath` in the private local JSON to
 the same shared path on every collection host when runs can send from multiple
