@@ -93,6 +93,21 @@
                       "Entity": "Enterprise Operational Signals"
                     }
                   },
+                  "Property": "Enterprise Signal Detail"
+                }
+              },
+              "queryRef": "Enterprise Operational Signals.Enterprise Signal Detail",
+              "nativeQueryRef": "Enterprise Signal Detail",
+              "displayName": "Detail"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Enterprise Operational Signals"
+                    }
+                  },
                   "Property": "Enterprise Signal Covered"
                 }
               },
@@ -539,7 +554,7 @@
                     [
                       {
                         "Literal": {
-                          "Value": "'Underused governed license products'"
+                          "Value": "'Governed license SKUs with unassigned units'"
                         }
                       }
                     ]

@@ -2,6 +2,24 @@
 table 'License SKU Capacity'
 	lineageTag: c81068c8-efdf-4776-b0e4-22bcebe62244
 
+	/// Governed (not excluded) license SKUs of the Licences capacity file; BLANK when the file is not qualified for this batch (Not qualified) or absent (Not verified batch without decision files).
+	measure 'Governed License Products' = CALCULATE ( COUNTROWS ( 'License SKU Capacity' ), KEEPFILTERS ( 'License SKU Capacity'[Capacity Class] = "Governed" ) )
+		formatString: #,0
+		displayFolder: Licensing | Capacity
+		lineageTag: 25139152-cc08-41fd-b3af-f24cd3ccbc90
+
+	/// Governed SKUs with unassigned units (AvailableUnits > 0) in the Licences capacity file: a raw Licences fact, no SWI threshold. BLANK when the file is not qualified or absent.
+	measure 'Governed License SKUs With Unassigned Units' = CALCULATE ( COUNTROWS ( 'License SKU Capacity' ), KEEPFILTERS ( 'License SKU Capacity'[Capacity Class] = "Governed" ), KEEPFILTERS ( 'License SKU Capacity'[Available Units] > 0 ) )
+		formatString: #,0
+		displayFolder: Licensing | Capacity
+		lineageTag: da59ef56-5aa6-4480-978f-0b8973c29fbb
+
+	/// Unassigned units (AvailableUnits > 0) of governed SKUs in the Licences capacity file; BLANK when the file is not qualified or absent.
+	measure 'Unassigned Governed License Units' = SUMX ( FILTER ( 'License SKU Capacity', 'License SKU Capacity'[Capacity Class] = "Governed" && 'License SKU Capacity'[Available Units] > 0 ), 'License SKU Capacity'[Available Units] )
+		formatString: #,0
+		displayFolder: Licensing | Capacity
+		lineageTag: dc39c15f-2d11-4dfb-8879-3f6b96ca9734
+
 	measure 'Enabled License Units' = CALCULATE ( SUM ( 'License SKU Capacity'[Enabled Units] ), KEEPFILTERS ( 'License SKU Capacity'[Capacity Class] = "Governed" ) )
 		formatString: #,0
 		displayFolder: Licensing | Capacity

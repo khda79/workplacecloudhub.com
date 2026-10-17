@@ -9,7 +9,7 @@ table 'Enterprise Operational Signals'
 			    VAR _s = 'Enterprise Operational Signals'[Signal Sort]
 			    RETURN SWITCH(_s,
 			        1, [Observed Potentially Reclaimable Assignments],
-			        2, [Underused Governed License Products],
+			        2, [Governed License SKUs With Unassigned Units],
 			        3, [Large Mailboxes Without Archive],
 			        4, [Mailboxes With Extensive Delegation],
 			        5, [Mailboxes Inactive 180D+],
@@ -36,6 +36,14 @@ table 'Enterprise Operational Signals'
 		formatString: #,0
 		displayFolder: Enterprise Signals
 		lineageTag: ec55ec4c-fbd0-4268-9f96-e0218f34223c
+
+	/// Short evidence detail for the selected signal; currently the unassigned governed license units behind signal 2. BLANK for other signals.
+	measure 'Enterprise Signal Detail' =
+			VAR _units = [Unassigned Governed License Units]
+			RETURN IF ( SELECTEDVALUE ( 'Enterprise Operational Signals'[Signal Sort] ) = 2 && NOT ISBLANK ( _units ), FORMAT ( _units, "#,0" ) & " unassigned units" )
+		formatString: @
+		displayFolder: Enterprise Signals
+		lineageTag: f8008f79-a26e-4e36-ab19-9fb8290f3be9
 
 	/// Relevant covered population calculated from current source-backed evidence for the selected enterprise operational signal.
 	measure 'Enterprise Signal Covered' =
@@ -112,7 +120,7 @@ table 'Enterprise Operational Signals'
 				        type table [#"Signal Sort" = Int64.Type, Domain = text, #"Severity Label" = text, Signal = text, #"Risk Category" = text, #"Evidence Status" = text, #"Recommended Action" = text],
 				        {
 				            {1, "Licensing", "High", "Potentially reclaimable license assignments", "License optimization", "Observed", "Validate business need, then reclaim or reassign licenses from stale and never-used accounts."},
-				            {2, "Licensing", "Medium", "Underused governed license products", "Capacity optimization", "Observed", "Review renewal quantity and assignment policy before the next purchasing cycle."},
+				            {2, "Licensing", "Medium", "Governed license SKUs with unassigned units", "Capacity optimization", "Observed", "Review renewal quantity and assignment policy before the next purchasing cycle."},
 				            {3, "Messaging", "High", "Large mailboxes without archive", "Capacity and retention", "Observed", "Enable or validate archive and retention before quota pressure causes disruption."},
 				            {4, "Messaging", "High", "Mailboxes with extensive delegation", "Access governance", "Observed", "Review Full Access, Send As, and Send on Behalf assignments with mailbox owners."},
 				            {5, "Messaging", "Medium", "Mailboxes inactive for more than 180 days", "Lifecycle", "Observed", "Confirm ownership and retention requirements before deprovisioning or migration action."},
