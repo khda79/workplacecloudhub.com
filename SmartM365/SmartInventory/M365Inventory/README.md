@@ -67,8 +67,12 @@ Every row carries the report `SnapshotId`, `TenantKey` and `ReceiptRunId` (the
 licensing receipt `RunId`, equal to `ReceiptRun.RunId` in the snapshot).
 
 - `M365_Licenses_ReportSkuCandidates.csv`: one row per user and SKU.
-  - `Disabled account`, for every paid SKU except the free, trial and viral SKUs
-    listed in `LicenseDecisionExcludedSkus` of the local JSON. The account state
+  - `Disabled account`, for every paid SKU except the free, trial, viral and
+    capacity SKUs listed in the versioned
+    `Licensing/SmartM365-LicenseExclusions.json.txt` (SkuPartNumber, Reason,
+    Source). The local JSON can only add exclusions through
+    `LicenseDecisionAdditionalExcludedSkus`; it never removes a versioned one, so
+    repository updates of the list always reach the servers. The account state
     combines Entra and AD: disabled in both (or disabled in Entra for a cloud-only
     account) is `Recommended`; an Entra/AD conflict, or a synchronized account
     missing from AD, is `Review`; an account absent from the Entra export is not
@@ -107,7 +111,8 @@ licensing receipt `RunId`, equal to `ReceiptRun.RunId` in the snapshot).
 
 Suites are recognized by part number and, for the EEA and no-Teams editions, by
 SkuId GUID from the Microsoft product names and service plan identifiers CSV;
-unattended licenses stay out. A decision failure is logged as a warning and noted
+unattended licenses stay out. A missing or invalid exclusions or dependency file
+stops the decisions only. A decision failure is logged as a warning and noted
 in the run state; the report, its five CSVs and the email are not affected, and the
 two decision files are then declared unpublished in the receipt. Consumer reports should read this document rather than independently
 recalculating recovery or downgrade rules.
