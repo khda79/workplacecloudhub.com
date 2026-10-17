@@ -2,7 +2,7 @@
 .SYNOPSIS
 Producer-owned, current-only SmartInventory source receipts. Dot-sourced helper.
 .VERSION
-1.2.0
+1.3.0
 .NOTES
 Compatible with Windows PowerShell 5.1. No APIs, history or report refresh.
 #>
@@ -43,6 +43,7 @@ function Write-SmartM365SourceRunState {
     param($Context,[string]$Status,[string]$ErrorMessage='',[int]$Errors=0)
     $document=@{Owner='SmartInventory-SourceRun';ContractVersion='1.0';Status=$Status;Errors=$Errors;Error=$ErrorMessage;PublicationStarted=[bool]$Context.PublicationStarted;UnqualifiedPublication=[bool]$Context.UnqualifiedPublication;Files=@();IsPartialInventory=($Status -ne 'Completed');ConsumerScopeQualified=$false;Scope=$Context.Scope}
     foreach($field in @('TenantKey','OrganizationKey','EnvironmentKey','TenantId','Producer','ScriptVersion','RunId','StartedAtUtc')){$document[$field]=$Context[$field]}
+    if($Context.ContainsKey('RunNotes') -and $Context.RunNotes.Count){$document.Notes=@($Context.RunNotes)}
     $document.UpdatedAtUtc=[datetime]::UtcNow.ToString('o')
     if($Status -in @('Completed','Failed')){$document.CompletedAtUtc=$document.UpdatedAtUtc}
     Write-SmartM365CmdbReceiptDocument $Context $document -RunState
@@ -151,6 +152,28 @@ function Register-SmartM365SourceCsv {
     $context.PublishedHashes[$full]=(Get-FileHash -LiteralPath $full -Algorithm SHA256 -ErrorAction Stop).Hash
     if(-not $global:csvGeneratedPaths){$global:csvGeneratedPaths=New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)}
     if($global:csvGeneratedPaths -is [array]){$global:csvGeneratedPaths=@($global:csvGeneratedPaths)+@($full)}else{[void]$global:csvGeneratedPaths.Add($full)}
+}
+
+# Read-only view of the active run: lets a producer derive outputs from its own current publication.
+function Get-SmartM365CurrentSourcePublication {
+    [CmdletBinding()]
+    param()
+    $context=$script:SmartM365CmdbSourceContext
+    if(-not $context){return $null}
+    $hashes=[hashtable]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach($key in $context.PublishedHashes.Keys){$hashes[$key]=$context.PublishedHashes[$key]}
+    return [pscustomobject]@{Producer=[string]$context.Producer;RunId=[string]$context.RunId;StartedAtUtc=[string]$context.StartedAtUtc;SourceRoot=[string]$context.SourceRoot;Hashes=$hashes}
+}
+
+# Records a qualification of the active run in its run state, for example an output that was not republished.
+function Add-SmartM365SourceRunNote {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Message)
+    $context=$script:SmartM365CmdbSourceContext
+    if(-not $context){return}
+    if(-not $context.ContainsKey('RunNotes')){$context.RunNotes=[System.Collections.Generic.List[string]]::new()}
+    $context.RunNotes.Add($Message)
+    Write-SmartM365SourceRunState $context $(if($context.PublicationStarted){'Publishing'}else{'Collecting'})
 }
 
 function Complete-SmartM365SourceReceipt {
