@@ -1,6 +1,6 @@
 {
   "SchemaVersion": 1,
-  "Description": "Migration complexity scoring. Points per criterion: 0 below OnePointFrom, 1 up to TwoPointsAbove, 2 up to ThreePointsAbove, 3 above. Score = SUM(points x weight) / (3 x SUM(evaluated weights)) x 100.",
+  "Description": "Migration complexity scoring. Points per criterion: 0 below OnePointFrom, 1 up to TwoPointsAbove, 2 up to ThreePointsAbove, 3 above. Score = SUM(points x weight) / (3 x SUM(evaluated weights)) x 100. Deleted entries are restored from the template: set \"Enabled\": false on a criterion or floor rule to disable it.",
   "Settings": {
     "LargeFileGiB": 2,
     "PathLimit": 400,

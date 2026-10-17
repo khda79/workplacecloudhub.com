@@ -2,7 +2,7 @@
 .SYNOPSIS
     Runs offline launcher and dashboard regression checks using synthetic scans.
 .VERSION
-    1.0.1
+    1.0.2
 #>
 [CmdletBinding()]
 param([string]$PythonPath)
@@ -14,7 +14,9 @@ New-Item -ItemType Directory -Path $testRoot | Out-Null
 function Import-TestFunctions {
     param([string]$Path, [string[]]$Names)
     $tokens = $null; $parseErrors = $null
-    $ast = [Management.Automation.Language.Parser]::ParseFile($Path, [ref]$tokens, [ref]$parseErrors)
+    # Repository scripts are UTF-8 without BOM; Windows PowerShell 5.1 ParseFile would read them as ANSI.
+    $source = [IO.File]::ReadAllText($Path, [Text.Encoding]::UTF8)
+    $ast = [Management.Automation.Language.Parser]::ParseInput($source, $Path, [ref]$tokens, [ref]$parseErrors)
     if ($parseErrors.Count) { throw ($parseErrors | Out-String) }
     foreach ($name in $Names) {
         $node = $ast.Find({ param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name }, $true)

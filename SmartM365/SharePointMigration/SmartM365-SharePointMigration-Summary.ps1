@@ -2,7 +2,7 @@
 .SYNOPSIS
     Read-only portfolio summary for the SharePoint migration GUI.
 .VERSION
-    1.0.16
+    1.0.17
 #>
 
 . (Join-Path $PSScriptRoot 'Scripts\Launchers\SmartM365-SharePointMigration-LauncherCommon.ps1')
@@ -422,9 +422,15 @@ function Get-SmartM365ComplexityVisual {
 
 # Get-SmartM365ComplexityRequest lives in LauncherCommon so source scans can score complexity too.
 function Test-SmartM365ComplexityInput {
-    param($Recorded, [System.IO.FileInfo]$Expected)
+    param($Recorded, [System.IO.FileInfo]$Expected, [switch]$CompareTimestamp)
     if (-not $Expected) { return $null -eq $Recorded }
-    return $null -ne $Recorded -and [string]$Recorded.Name -ceq $Expected.Name -and [long]$Recorded.Length -eq $Expected.Length
+    if ($null -eq $Recorded -or [string]$Recorded.Name -cne $Expected.Name -or [long]$Recorded.Length -ne $Expected.Length) { return $false }
+    if (-not $CompareTimestamp) { return $true }
+    # Rewritten files keep their name (Entra cache, mapping); compare at second precision.
+    $recordedTicks = [long]$Recorded.LastWriteTimeUtcTicks
+    $expectedTicks = $Expected.LastWriteTimeUtc.Ticks
+    $second = [TimeSpan]::TicksPerSecond
+    return ($recordedTicks - ($recordedTicks % $second)) -eq ($expectedTicks - ($expectedTicks % $second))
 }
 
 function Get-SmartM365ComplexityPresentation {
@@ -446,8 +452,8 @@ function Get-SmartM365ComplexityPresentation {
         $inputs = $result.Inputs
         $current = (Test-SmartM365ComplexityInput $inputs.FileInventory $Request.FileScan) -and
             (Test-SmartM365ComplexityInput $inputs.PermissionInventory $Request.PermissionScan) -and
-            (Test-SmartM365ComplexityInput $inputs.EntraUsers $Request.EntraCache) -and
-            (Test-SmartM365ComplexityInput $inputs.PathMapping $Request.Mapping) -and
+            (Test-SmartM365ComplexityInput $inputs.EntraUsers $Request.EntraCache -CompareTimestamp) -and
+            (Test-SmartM365ComplexityInput $inputs.PathMapping $Request.Mapping -CompareTimestamp) -and
             [string]$inputs.TargetSiteUrl -ceq $Request.TargetSiteUrl -and
             $Request.ConfigHash -and [string]$inputs.ConfigSha256 -eq $Request.ConfigHash
     }

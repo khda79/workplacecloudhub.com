@@ -10,7 +10,7 @@
     filter is an error so a batch cannot accidentally scan an entire farm.
 
 .VERSION
-    1.0.2
+    1.0.3
 
 .EXAMPLE
     powershell.exe -NoProfile -File .\SmartM365-SharePointMigration-SourceScanBatch.ps1 -PlanOnly
@@ -251,32 +251,39 @@ function Add-BatchResult {
 }
 
 function Update-BatchMigrationComplexity {
-    # Informative score: computed once per migration after all phases; never changes the batch result.
-    param([object[]]$Migrations, [object]$Python, [string]$LocalCompare)
-    $scanned = @($script:Results | Where-Object { $_.Status -eq 'SUCCESS' } | ForEach-Object { $_.Migration } | Select-Object -Unique)
-    if ($scanned.Count -eq 0) { return }
+    # Informative score, computed right after the migration's last planned phase; never changes the batch result.
+    param([object]$Migration, [object]$Python, [string]$LocalCompare)
     try {
-        . (Join-Path $ProjectRoot 'Scripts\Launchers\SmartM365-SharePointMigration-LauncherCommon.ps1')
-        foreach ($name in @('migration_complexity.py', 'compare_sp_source_target_file_inventories.py',
-                'compare_sp_source_target_permissions.py', 'report_html.py', 'comparison_artifacts.py',
-                'comparison_history_chart.py')) {
-            Copy-VerifiedDependency -RelativePath ("Scripts\Compare\{0}" -f $name) -Destination (Join-Path $LocalCompare $name)
+        $scanned = @($script:Results | Where-Object { $_.Migration -eq $Migration.Name -and $_.Status -eq 'SUCCESS' }).Count -gt 0
+        if (-not $scanned -or -not $script:ComplexityHelpersLoaded) { return }
+        if ($null -eq $script:ComplexityDependenciesReady) {
+            $script:ComplexityDependenciesReady = $false
+            foreach ($name in @('migration_complexity.py', 'compare_sp_source_target_file_inventories.py',
+                    'compare_sp_source_target_permissions.py', 'report_html.py', 'comparison_artifacts.py',
+                    'comparison_history_chart.py')) {
+                Copy-VerifiedDependency -RelativePath ("Scripts\Compare\{0}" -f $name) -Destination (Join-Path $LocalCompare $name)
+            }
+            $script:ComplexityDependenciesReady = $true
         }
-    }
-    catch {
-        Write-BatchLine ("WARNING Migration complexity skipped; the GUI will calculate it: {0}" -f $_.Exception.Message)
-        return
-    }
-    foreach ($migration in @($Migrations | Where-Object { $scanned -contains $_.Name })) {
-        $result = Invoke-SmartM365MigrationComplexity -Migration $migration -ProjectRoot $ProjectRoot `
-            -SourceType ([string]$migration.Config.Source.Type) -PythonExecutable $Python.Executable `
+        if (-not $script:ComplexityDependenciesReady) { return }
+        $result = Invoke-SmartM365MigrationComplexity -Migration $Migration -ProjectRoot $ProjectRoot `
+            -SourceType ([string]$Migration.Config.Source.Type) -PythonExecutable $Python.Executable `
             -PythonArguments @($Python.Arguments) -ScriptPath (Join-Path $LocalCompare 'migration_complexity.py')
         foreach ($line in @($result.Output)) { Write-BatchLine ([string]$line) }
         if ($result.Status -eq 'Succeeded') {
-            Write-BatchLine ("Migration complexity updated for {0}: {1}" -f $migration.Name, $result.Message)
+            Write-BatchLine ("Migration complexity updated for {0}: {1}" -f $Migration.Name, $result.Message)
         }
         else {
-            Write-BatchLine ("WARNING Migration complexity not updated for {0} ({1}); the GUI will calculate it: {2}" -f $migration.Name, $result.Status, $result.Message)
+            Write-BatchLine ("WARNING Migration complexity not updated for {0} ({1}); the GUI will calculate it: {2}" -f $Migration.Name, $result.Status, $result.Message)
+        }
+    }
+    catch {
+        Write-BatchLine ("WARNING Migration complexity skipped for {0}; the GUI will calculate it: {1}" -f $Migration.Name, $_.Exception.Message)
+    }
+    finally {
+        if ($script:ComplexityPendingMarkers -and $script:ComplexityPendingMarkers.ContainsKey($Migration.Name)) {
+            Clear-SmartM365ComplexityPending -Path $script:ComplexityPendingMarkers[$Migration.Name]
+            $script:ComplexityPendingMarkers.Remove($Migration.Name)
         }
     }
 }
@@ -291,6 +298,14 @@ if ([string]::IsNullOrWhiteSpace($ProjectRoot)) {
     $ProjectRoot = Join-Path $PSScriptRoot '..\..\..'
 }
 $ProjectRoot = [System.IO.Path]::GetFullPath($ProjectRoot)
+$script:ComplexityHelpersLoaded = $false
+$script:ComplexityDependenciesReady = $null
+$script:ComplexityPendingMarkers = @{}
+try {
+    . (Join-Path $ProjectRoot 'Scripts\Launchers\SmartM365-SharePointMigration-LauncherCommon.ps1')
+    $script:ComplexityHelpersLoaded = $true
+}
+catch { Write-BatchLine ("WARNING Migration complexity helpers unavailable; the GUI will calculate it: {0}" -f $_.Exception.Message) }
 $LocalRunRoot = [System.IO.Path]::GetFullPath($LocalRunRoot)
 if ($LocalRunRoot.StartsWith('\\')) { throw 'LocalRunRoot must be on a local disk of the farm server.' }
 if (-not $PlanOnly) {
@@ -357,6 +372,12 @@ try {
     Copy-VerifiedDependency -RelativePath 'Scripts\Compare\scan_evidence.py' -Destination $manifestScript
     Copy-VerifiedDependency -RelativePath 'Scripts\console_lifecycle.py' -Destination (Join-Path $localRoot 'console_lifecycle.py')
     $python = Get-PythonCommand -LocalRoot $localRoot
+    if ($script:ComplexityHelpersLoaded) {
+        # Tell the GUI that this batch will calculate complexity after each migration's last phase.
+        foreach ($migration in $migrations) {
+            $script:ComplexityPendingMarkers[$migration.Name] = Set-SmartM365ComplexityPending -MigrationRoot $migration.Root -Reason "Source scan batch $batchId"
+        }
+    }
     foreach ($action in $actions) {
         Write-BatchLine ("Starting phase: {0}" -f $action)
         foreach ($migration in $migrations) {
@@ -424,9 +445,11 @@ try {
                 Write-BatchLine ("FAILED {0} {1}: {2}" -f $migration.Name, $action, $_.Exception.Message)
                 Add-BatchResult -Job $job -Status 'FAILED' -ExitCode 1 -OutputPath $outputPath -LogPath $logPath
             }
+            if ($action -eq $actions[-1]) {
+                Update-BatchMigrationComplexity -Migration $migration -Python $python -LocalCompare $localCompare
+            }
         }
     }
-    Update-BatchMigrationComplexity -Migrations $migrations -Python $python -LocalCompare $localCompare
 }
 catch {
     $script:BatchAborted = $true
@@ -434,6 +457,7 @@ catch {
     throw
 }
 finally {
+    foreach ($marker in @($script:ComplexityPendingMarkers.Values)) { Clear-SmartM365ComplexityPending -Path $marker }
     $summaryPath = Join-Path $batchRoot 'summary.csv'
     if ($script:Results.Count -gt 0) {
         $script:Results.ToArray() | Export-Csv -LiteralPath $summaryPath -NoTypeInformation -Encoding UTF8

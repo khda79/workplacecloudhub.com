@@ -2,7 +2,7 @@
 .SYNOPSIS
     Shared helpers for SharePoint migration launchers, source scan batches and the GUI.
 .VERSION
-    1.0.1
+    1.0.2
 #>
 
 function Get-LauncherProjectRoot {
@@ -118,9 +118,86 @@ function Get-SmartM365ComplexityEntraCache {
         return $null
     }
     $directory = Join-Path $ProjectRoot '_Local\EntraUsersCache'
-    if (-not (Test-Path -LiteralPath $directory -PathType Container)) { return $null }
-    return Get-ChildItem -LiteralPath $directory -Filter '*.csv' -File -ErrorAction SilentlyContinue |
+    # The GUI asks once per migration on each refresh: reuse the folder listing for a few seconds.
+    $memo = Get-Variable -Name SmartM365ComplexityEntraMemo -Scope Script -ValueOnly -ErrorAction SilentlyContinue
+    if ($memo -and $memo.Directory -eq $directory -and ((Get-Date) - $memo.At).TotalSeconds -lt 15) { return $memo.Item }
+    $item = $null
+    if (Test-Path -LiteralPath $directory -PathType Container) {
+        $item = Get-ChildItem -LiteralPath $directory -Filter '*.csv' -File -ErrorAction SilentlyContinue |
+            Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1
+    }
+    $script:SmartM365ComplexityEntraMemo = [pscustomobject]@{ Directory = $directory; At = Get-Date; Item = $item }
+    return $item
+}
+
+function Get-SmartM365ComplexityFileKey {
+    # Second precision: synchronized copies can truncate sub-second timestamps.
+    param([System.IO.FileInfo]$File)
+    if (-not $File) { return '' }
+    $ticks = $File.LastWriteTimeUtc.Ticks
+    return '{0}:{1}:{2}' -f $File.Name, $File.Length, ($ticks - ($ticks % [TimeSpan]::TicksPerSecond))
+}
+
+function Get-SmartM365ComplexityConfigHash {
+    param([string]$Path)
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return '' }
+    $item = Get-Item -LiteralPath $Path
+    $key = '{0}|{1}|{2}' -f $item.FullName, $item.Length, $item.LastWriteTimeUtc.Ticks
+    $memo = Get-Variable -Name SmartM365ComplexityConfigHashMemo -Scope Script -ValueOnly -ErrorAction SilentlyContinue
+    if ($memo -and $memo.Key -eq $key) { return $memo.Hash }
+    $hash = (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash
+    $script:SmartM365ComplexityConfigHashMemo = [pscustomobject]@{ Key = $key; Hash = $hash }
+    return $hash
+}
+
+# A source scan announces a pending complexity calculation so the GUI does not start the
+# same calculation meanwhile. Markers older than MaxAgeHours are ignored (interrupted scans).
+function Set-SmartM365ComplexityPending {
+    param([Parameter(Mandatory = $true)][string]$MigrationRoot, [string]$Reason = 'Source scan')
+    $path = Join-Path $MigrationRoot ('migration-complexity.pending.{0}.txt' -f [guid]::NewGuid().ToString('N'))
+    try {
+        Set-Content -LiteralPath $path -Value ('{0} {1} on {2}' -f (Get-Date).ToUniversalTime().ToString('o'), $Reason, $env:COMPUTERNAME) -Encoding UTF8 -ErrorAction Stop
+        return $path
+    }
+    catch { return '' }
+}
+
+function Clear-SmartM365ComplexityPending {
+    param([string]$Path)
+    if ([string]::IsNullOrWhiteSpace($Path)) { return }
+    Remove-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+}
+
+function Get-SmartM365ComplexityPending {
+    param([Parameter(Mandatory = $true)][string]$MigrationRoot, [double]$MaxAgeHours = 24)
+    if (-not (Test-Path -LiteralPath $MigrationRoot -PathType Container)) { return $null }
+    return Get-ChildItem -LiteralPath $MigrationRoot -Filter 'migration-complexity.pending.*.txt' -File -ErrorAction SilentlyContinue |
+        Where-Object { ((Get-Date).ToUniversalTime() - $_.LastWriteTimeUtc).TotalHours -lt $MaxAgeHours } |
         Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1
+}
+
+function Get-SmartM365PythonCommand {
+    <# Portable Tools\Python first, then python, then the py -3 launcher; each must start. #>
+    param([Parameter(Mandatory = $true)][string]$ProjectRoot, [switch]$LocalOnly)
+    $candidates = @([pscustomobject]@{ Executable = (Join-Path $ProjectRoot 'Tools\Python\python.exe'); Arguments = @(); Source = 'Portable' })
+    foreach ($name in @('python', 'py')) {
+        $command = Get-Command -Name $name -ErrorAction SilentlyContinue | Select-Object -First 1
+        if (-not $command -or ($LocalOnly -and [string]$command.Source -like '\\*')) { continue }
+        $arguments = if ($name -eq 'py') { @('-3') } else { @() }
+        $candidates += [pscustomobject]@{ Executable = $command.Source; Arguments = $arguments; Source = $(if ($name -eq 'py') { 'PyLauncher' } else { 'PATH' }) }
+    }
+    foreach ($candidate in $candidates) {
+        if (-not (Test-Path -LiteralPath $candidate.Executable -PathType Leaf)) { continue }
+        $previousPreference = $ErrorActionPreference
+        try {
+            $ErrorActionPreference = 'Continue'
+            & $candidate.Executable @($candidate.Arguments) --version *> $null
+            $exitCode = $LASTEXITCODE
+        }
+        finally { $ErrorActionPreference = $previousPreference }
+        if ($exitCode -eq 0) { return $candidate }
+    }
+    throw ('Python 3 is required. Expected portable Python at: {0}' -f (Join-Path $ProjectRoot 'Tools\Python\python.exe'))
 }
 
 function Get-SmartM365ComplexityScanInputs {
@@ -162,9 +239,7 @@ function Get-SmartM365ComplexityRequest {
     $targetSiteUrl = if ($cfg['Target']) { [string]$cfg['Target']['SiteUrl'] } else { '' }
     $configDirectory = Join-Path $ProjectRoot 'Config'
     $configPath = Join-Path $configDirectory 'migration-complexity.json.txt'
-    $configHash = if (Test-Path -LiteralPath $configPath -PathType Leaf) {
-        (Get-FileHash -LiteralPath $configPath -Algorithm SHA256).Hash
-    } else { '' }
+    $configHash = Get-SmartM365ComplexityConfigHash -Path $configPath
     if ([string]::IsNullOrWhiteSpace($ScriptPath)) { $ScriptPath = Join-Path $ProjectRoot 'Scripts\Compare\migration_complexity.py' }
     $output = Join-Path $Migration.Root 'migration-complexity.json.txt'
     $arguments = @(
@@ -178,9 +253,8 @@ function Get-SmartM365ComplexityRequest {
     if ($entraCache) { $arguments += @('--entra-users-csv', $entraCache.FullName) }
     if ($mapping) { $arguments += @('--path-mapping-file', $mapping.FullName) }
     if ($targetSiteUrl) { $arguments += @('--target-site-url', $targetSiteUrl) }
-    $inputKeys = foreach ($item in @($FileScan, $PermissionScan, $entraCache, $mapping)) {
-        if ($item) { '{0}:{1}' -f $item.Name, $item.Length } else { '' }
-    }
+    # Scans have unique timestamped names; the Entra cache and the mapping keep their name when rewritten.
+    $inputKeys = foreach ($item in @($FileScan, $PermissionScan, $entraCache, $mapping)) { Get-SmartM365ComplexityFileKey -File $item }
     $signature = (@($Migration.Name, $configHash, $targetSiteUrl) + @($inputKeys)) -join '|'
     [pscustomobject]@{
         Migration = $Migration.Name; Output = $output; Arguments = $arguments; Signature = $signature

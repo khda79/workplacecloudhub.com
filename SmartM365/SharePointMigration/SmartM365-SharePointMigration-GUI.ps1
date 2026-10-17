@@ -15,7 +15,7 @@
     the directory containing this GUI when launched from the shared toolkit.
 
 .VERSION
-    1.0.72
+    1.0.73
 #>
 
 #Requires -Version 7.4
@@ -28,7 +28,7 @@ param(
 )
 
 $script:AppName    = 'Smart SharePoint Migration'
-$script:AppVersion = '1.0.72'
+$script:AppVersion = '1.0.73'
 $script:ScriptRoot = $PSScriptRoot
 $script:FarmToolkitRoot = if ($FarmToolkitRoot) { $FarmToolkitRoot } else { $PSScriptRoot }
 $script:SummaryLastGoodRows = @{}
@@ -3048,25 +3048,43 @@ function Update-PortfolioInventoryRow {
     }
 }
 
-function Get-ComplexityPythonCommand {
-    $python = Join-Path $script:ScriptRoot 'Tools\Python\python.exe'
-    if (Test-Path -LiteralPath $python -PathType Leaf) { return $python }
-    $command = Get-Command python -ErrorAction SilentlyContinue
-    if ($command) { return $command.Source }
-    throw 'Python 3 is required (portable Tools\Python or a local installation).'
+function Set-ComplexityFailure {
+    param([string]$Signature, [string]$Message)
+    $script:ComplexityFailures[$Signature] = [pscustomobject]@{ Message = $Message; At = Get-Date }
+}
+
+function Get-ComplexityFailure {
+    # Failures expire so transient errors (locked or synchronizing CSV) are retried.
+    param([string]$Signature)
+    $failure = $script:ComplexityFailures[$Signature]
+    if (-not $failure) { return '' }
+    if (((Get-Date) - $failure.At).TotalMinutes -ge 10) {
+        $script:ComplexityFailures.Remove($Signature)
+        $script:ComplexityCompleted.Remove($Signature)
+        return ''
+    }
+    return $failure.Message
 }
 
 function Get-MigrationComplexity {
     param($Migration, [System.IO.FileInfo]$FileScan, [System.IO.FileInfo]$PermissionScan, [switch]$ReadOnly)
     $request = Get-SmartM365ComplexityRequest -Migration $Migration -ProjectRoot $script:ScriptRoot `
         -FileScan $FileScan -PermissionScan $PermissionScan
-    $failure = if ($request) { [string]$script:ComplexityFailures[$request.Signature] } else { '' }
+    $failure = if ($request) { Get-ComplexityFailure -Signature $request.Signature } else { '' }
     $value = Get-SmartM365ComplexityPresentation -Request $request -ErrorMessage $failure -ReadOnly:$ReadOnly
     if ($ReadOnly -or -not $request -or $value.State -notin @('Missing', 'Stale')) { return $value }
+    # A running source scan calculates complexity itself once its inventory is published.
+    $pending = Get-SmartM365ComplexityPending -MigrationRoot $Migration.Root
+    if ($pending) {
+        $value.Caption = 'Scan in progress'
+        $value.Tooltip = "A source scan will calculate complexity when it completes (since $($pending.LastWriteTime.ToString('yyyy-MM-dd HH:mm')))." +
+            "`n" + $value.Tooltip
+        return $value
+    }
     if ($script:ComplexityCompleted.ContainsKey($request.Signature)) {
         # A successful run that still does not match its inputs must not loop forever.
-        $script:ComplexityFailures[$request.Signature] = 'The calculated result does not match the current source scans or settings.'
-        return Get-SmartM365ComplexityPresentation -Request $request -ErrorMessage $script:ComplexityFailures[$request.Signature]
+        Set-ComplexityFailure -Signature $request.Signature -Message 'The calculated result does not match the current source scans or settings.'
+        return Get-SmartM365ComplexityPresentation -Request $request -ErrorMessage (Get-ComplexityFailure -Signature $request.Signature)
     }
     Request-ComplexityComputation -Request $request
     return $value
@@ -3100,16 +3118,16 @@ function Start-ComplexityJob {
     if ($script:ComplexityJob -or $script:ComplexityQueue.Count -eq 0) { return }
     $requests = @($script:ComplexityQueue.Values)
     $script:ComplexityQueue.Clear()
-    try { $python = Get-ComplexityPythonCommand }
+    try { $python = Get-SmartM365PythonCommand -ProjectRoot $script:ScriptRoot }
     catch {
-        foreach ($request in $requests) { $script:ComplexityFailures[$request.Signature] = $_.Exception.Message }
+        foreach ($request in $requests) { Set-ComplexityFailure -Signature $request.Signature -Message $_.Exception.Message }
         return
     }
     $script:ComplexityJobSignatures = @($requests | ForEach-Object { $_.Signature })
     $script:ComplexityJob = Start-ThreadJob -ScriptBlock {
         param($Python, $Requests)
         foreach ($request in $Requests) {
-            $output = @(& $Python @($request.Arguments) 2>&1 | ForEach-Object { [string]$_ })
+            $output = @(& $Python.Executable @($Python.Arguments) @($request.Arguments) 2>&1 | ForEach-Object { [string]$_ })
             [pscustomobject]@{
                 Migration = $request.Migration; Signature = $request.Signature
                 ExitCode = $LASTEXITCODE; Output = ($output -join "`n")
@@ -3133,19 +3151,19 @@ function Complete-ComplexityJob {
                 continue
             }
             $message = (@($result.Output -split "`r?`n" | Where-Object { $_ }) | Select-Object -Last 5) -join "`n"
-            $script:ComplexityFailures[$result.Signature] = "Exit code $($result.ExitCode). $message"
+            Set-ComplexityFailure -Signature $result.Signature -Message "Exit code $($result.ExitCode). $message"
             try {
                 $activity = New-SmartM365GuiActivity -ProjectRoot $script:ScriptRoot `
                     -Migration $result.Migration -Action 'MigrationComplexity'
                 Write-SmartM365GuiActivityEvent -Path $activity -Status 'Failed' -ExitCode $result.ExitCode `
-                    -Detail $script:ComplexityFailures[$result.Signature] -Migration $result.Migration
+                    -Detail "Exit code $($result.ExitCode). $message" -Migration $result.Migration
             }
             catch { }
         }
     }
     catch {
         foreach ($signature in $script:ComplexityJobSignatures) {
-            if (-not $finished.ContainsKey($signature)) { $script:ComplexityFailures[$signature] = $_.Exception.Message }
+            if (-not $finished.ContainsKey($signature)) { Set-ComplexityFailure -Signature $signature -Message $_.Exception.Message }
         }
     }
     finally {
@@ -3816,16 +3834,13 @@ function Invoke-GlobalComparisonReport {
     try {
         $action = if ($Kind -eq 'Files') { 'GlobalFileComparisonReport' } else { 'GlobalPermissionsComparisonReport' }
         $activity = New-SmartM365GuiActivity -ProjectRoot $script:ScriptRoot -Migration '<all>' -Action $action
-        $python = Join-Path $script:ScriptRoot 'Tools\Python\python.exe'
-        if (-not (Test-Path -LiteralPath $python -PathType Leaf)) {
-            $python = (Get-Command python -ErrorAction Stop).Source
-        }
+        $python = Get-SmartM365PythonCommand -ProjectRoot $script:ScriptRoot
         $generatorName = if ($Kind -eq 'Files') { 'build_global_report.py' } else { 'build_global_permissions_report.py' }
         $generator = Join-Path $script:ScriptRoot "Scripts\Compare\$generatorName"
         $migrationRoot = Join-Path $script:ScriptRoot 'Migrations'
         $reportDirectory = Join-Path $migrationRoot 'reports\global'
         if ($Kind -eq 'Permissions') { $reportDirectory = Join-Path $reportDirectory 'permissions' }
-        $result = @(& $python $generator --migrations-root $migrationRoot --output-directory $reportDirectory 2>&1)
+        $result = @(& $python.Executable @($python.Arguments) $generator --migrations-root $migrationRoot --output-directory $reportDirectory 2>&1)
         if ($LASTEXITCODE -ne 0) { throw ($result -join "`n") }
         $reportPath = [string]($result |
             ForEach-Object { ([string]$_).Trim() } |

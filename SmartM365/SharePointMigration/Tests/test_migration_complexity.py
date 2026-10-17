@@ -72,6 +72,33 @@ class MigrationComplexityTests(unittest.TestCase):
             inactive = next(row for row in result["Criteria"] if row["Id"] == "InactiveAccounts")
             self.assertFalse(inactive["Evaluated"])
 
+    def test_files_outside_the_path_mapping_are_skipped(self):
+        mappings = [("/sites/a", "/sites/target-a")]
+        self.assertEqual(complexity.projected_target_path("/sites/a/Docs/x.docx", mappings, "/sites/ignored"),
+                         "sites/target-a/Docs/x.docx")
+        self.assertEqual(complexity.projected_target_path("/sites/b/Docs/x.docx", mappings, "/sites/ignored"), "")
+        self.assertEqual(complexity.projected_target_path("/Docs/x.docx", [], "/sites/t"), "sites/t/Docs/x.docx")
+
+    def test_disabled_criterion_and_floor_rule_are_ignored(self):
+        with self.temporary_directory() as directory:
+            config, _ = complexity.load_config(self.config_dir(Path(directory)))
+            for criterion in config["Criteria"]:
+                if criterion["Id"] == "LibraryCount":
+                    criterion["Enabled"] = False
+            for rule in config["FloorRules"]:
+                rule["Enabled"] = False
+            values = {criterion["Id"]: (0, "") for criterion in config["Criteria"]
+                      if criterion["Id"] in complexity.FILE_CRITERIA}
+            values["LibraryCount"] = (500, "")
+            values["PathLimitFiles"] = (500, "")
+            result = complexity.score_migration(config, values)
+            library = next(row for row in result["Criteria"] if row["Id"] == "LibraryCount")
+            self.assertFalse(library["Evaluated"])
+            self.assertEqual(library["ValueDisplay"], "Disabled")
+            self.assertEqual(result["EvaluatedWeight"], 65)
+            self.assertEqual(result["FloorApplied"], [])
+            self.assertEqual(result["Level"], "Low")
+
     def test_end_to_end_metrics_from_source_scans(self):
         with self.temporary_directory() as directory:
             root = Path(directory)

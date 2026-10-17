@@ -2,7 +2,7 @@
 .SYNOPSIS
     Verify the migration complexity request and presentation without SharePoint access.
 .VERSION
-    1.0.1
+    1.0.2
 #>
 
 #Requires -Version 7.4
@@ -83,6 +83,30 @@ try {
     $stale = Get-SmartM365ComplexityPresentation -Request $newer
     Assert-Complexity ($stale.State -eq 'Stale' -and $stale.Caption -eq 'Updating' -and $stale.Text -eq 'Low') 'stale result must keep the previous level'
     Assert-Complexity ((Get-SmartM365ComplexityPresentation -Request $newer -ReadOnly).Caption -eq 'Outdated') 'read-only stale result must be outdated'
+    # A rewritten mapping with the same name and length must still make the result stale.
+    $mapping = Join-Path $testRoot 'migration.mapping.txt'
+    Set-Content -LiteralPath $mapping -Value '/ /sites/fixture' -Encoding ascii
+    $migration.Config.Comparison.PathMappingsFile = 'migration.mapping.txt'
+    $mapped = Invoke-SmartM365MigrationComplexity -Migration $migration -ProjectRoot $projectRoot -SourceType 'SP2019' -PythonExecutable $python
+    Assert-Complexity ($mapped.Status -eq 'Succeeded') "mapped calculation failed: $($mapped.Message)"
+    $mappedRequest = Get-SmartM365ComplexityRequest -Migration $migration -ProjectRoot $projectRoot `
+        -FileScan (Get-Item $fileScan) -PermissionScan (Get-Item $permissionScan)
+    Assert-Complexity ((Get-SmartM365ComplexityPresentation -Request $mappedRequest).State -eq 'Current') 'mapped result must be current'
+    (Get-Item $mapping).LastWriteTimeUtc = (Get-Item $mapping).LastWriteTimeUtc.AddMinutes(5)
+    $touched = Get-SmartM365ComplexityRequest -Migration $migration -ProjectRoot $projectRoot `
+        -FileScan (Get-Item $fileScan) -PermissionScan (Get-Item $permissionScan)
+    Assert-Complexity ($touched.Signature -ne $mappedRequest.Signature) 'a rewritten mapping must change the signature'
+    Assert-Complexity ((Get-SmartM365ComplexityPresentation -Request $touched).State -eq 'Stale') 'a rewritten mapping must make the result stale'
+
+    # Pending markers tell the GUI that a scan will calculate complexity itself.
+    $marker = Set-SmartM365ComplexityPending -MigrationRoot $testRoot -Reason 'Test'
+    Assert-Complexity ($null -ne (Get-SmartM365ComplexityPending -MigrationRoot $testRoot)) 'a fresh marker must be pending'
+    (Get-Item $marker).LastWriteTimeUtc = (Get-Date).ToUniversalTime().AddHours(-30)
+    Assert-Complexity ($null -eq (Get-SmartM365ComplexityPending -MigrationRoot $testRoot)) 'an old marker must be ignored'
+    Clear-SmartM365ComplexityPending -Path $marker
+    Assert-Complexity (-not (Test-Path -LiteralPath $marker)) 'the marker must be removed'
+    Assert-Complexity ([bool](Get-SmartM365PythonCommand -ProjectRoot $projectRoot).Executable) 'Python must be resolved'
+
     $failed = Get-SmartM365ComplexityPresentation -Request $newer -ErrorMessage 'boom'
     Assert-Complexity ($failed.State -eq 'Error' -and $failed.Tooltip -like '*boom*') 'failure must be visible'
 

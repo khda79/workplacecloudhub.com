@@ -7,7 +7,7 @@
     requested inventory, comparison, or permission action.
 
 .VERSION
-    1.0.30
+    1.0.31
 #>
 
 [CmdletBinding()]
@@ -60,7 +60,7 @@ $ErrorActionPreference = 'Stop'
 $script:LauncherPreviousConsoleMarker = [string]$env:SPMIG_CONSOLE_LIFECYCLE_ACTIVE
 $script:LauncherOwnsLifecycle = [string]::IsNullOrWhiteSpace($script:LauncherPreviousConsoleMarker)
 if ($script:LauncherOwnsLifecycle) {
-    Microsoft.PowerShell.Utility\Write-Host ('{0} Script  : {1} v{2}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $MyInvocation.MyCommand.Name, '1.0.30') -ForegroundColor Cyan
+    Microsoft.PowerShell.Utility\Write-Host ('{0} Script  : {1} v{2}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $MyInvocation.MyCommand.Name, '1.0.31') -ForegroundColor Cyan
 }
 $script:LauncherNonInteractive = [bool]$NonInteractive
 . (Join-Path -Path $PSScriptRoot -ChildPath '..\SmartM365-SharePointMigration-LauncherCommon.ps1')
@@ -161,31 +161,7 @@ function Write-LauncherSummary {
 }
 
 function Get-PythonCommand {
-    $portablePython = Join-Path -Path $ProjectRoot -ChildPath 'Tools\Python\python.exe'
-    if (Test-Path -LiteralPath $portablePython -PathType Leaf) {
-        & $portablePython --version *> $null
-        if ($LASTEXITCODE -eq 0) {
-            return [pscustomobject]@{ Executable = $portablePython; Arguments = @(); Source = 'Portable' }
-        }
-    }
-
-    $python = Get-Command -Name python -ErrorAction SilentlyContinue
-    if ($python) {
-        & $python.Source --version *> $null
-        if ($LASTEXITCODE -eq 0) {
-            return [pscustomobject]@{ Executable = $python.Source; Arguments = @(); Source = 'PATH' }
-        }
-    }
-
-    $pyLauncher = Get-Command -Name py -ErrorAction SilentlyContinue
-    if ($pyLauncher) {
-        & $pyLauncher.Source -3 --version *> $null
-        if ($LASTEXITCODE -eq 0) {
-            return [pscustomobject]@{ Executable = $pyLauncher.Source; Arguments = @('-3'); Source = 'PyLauncher' }
-        }
-    }
-
-    throw "Python 3 is required. Expected portable Python at: $portablePython"
+    Get-SmartM365PythonCommand -ProjectRoot $ProjectRoot
 }
 
 function Invoke-PythonScript {
@@ -953,7 +929,10 @@ function Invoke-PermissionInventoryScan {
 }
 
 function Invoke-SourceFileScan {
-    Invoke-FileInventoryScan -Side 'Source'
+    # The marker tells the GUI that this scan will calculate complexity itself.
+    $pending = Set-SmartM365ComplexityPending -MigrationRoot $MigrationRoot -Reason 'ScanSourceFiles'
+    try { Invoke-FileInventoryScan -Side 'Source' }
+    finally { Clear-SmartM365ComplexityPending -Path $pending }
 }
 
 function Invoke-TargetFileScan {
@@ -961,7 +940,9 @@ function Invoke-TargetFileScan {
 }
 
 function Invoke-SourcePermissionScan {
-    Invoke-PermissionInventoryScan -Side 'Source'
+    $pending = Set-SmartM365ComplexityPending -MigrationRoot $MigrationRoot -Reason 'ScanSourcePermissions'
+    try { Invoke-PermissionInventoryScan -Side 'Source' }
+    finally { Clear-SmartM365ComplexityPending -Path $pending }
 }
 
 function Invoke-TargetPermissionScan {

@@ -1,4 +1,4 @@
-__version__ = "1.0.0"
+__version__ = "1.0.1"
 """Score the intrinsic complexity of a migration from its source scans only.
 
 The score is independent from comparison progress: it describes the source estate
@@ -94,7 +94,14 @@ def load_config(config_dir):
         for name, key in (("Criteria", "Id"), ("Levels", "Name"), ("FloorRules", "CriterionId")):
             merged[name] = merge_keyed_list(default.get(name, []), current.get(name, []), key)
     if merged != current:
-        atomic_text(runtime, json.dumps(merged, ensure_ascii=False, indent=2) + "\n")
+        # The shared file can be read by another scan or GUI at the same time; the merged
+        # values are used in memory and the next calculation retries the self-heal.
+        try:
+            atomic_text(runtime, json.dumps(merged, ensure_ascii=False, indent=2) + "\n")
+        except OSError as error:
+            builtins.print(f"WARNING Could not update {runtime}: {error}", file=sys.stderr, flush=True)
+            if not runtime.exists():
+                raise
     validate_config(merged)
     return merged, runtime
 
@@ -153,13 +160,24 @@ def site_path(url):
     return "/" + path.strip("/") if path.strip("/") else ""
 
 
+def is_mapped_path(path, mappings):
+    lower = path.lower()
+    return any(lower == source.lower() or lower.startswith(source.rstrip("/").lower() + "/") for source, _ in mappings)
+
+
 def projected_target_path(server_relative_url, mappings, target_site_path):
+    """Destination path of a source file, or "" when a mapping file exists but excludes it."""
     text = normalize_sharegate_path_characters(decode_sharegate_path(strip_query_from_path(server_relative_url)))
     if not text.startswith("/"):
         text = "/" + text
-    mapped = apply_path_mappings(text, mappings)
-    if mapped == text and target_site_path and not text.lower().startswith(target_site_path.lower() + "/"):
+    if mappings:
+        if not is_mapped_path(text, mappings):
+            return ""
+        mapped = apply_path_mappings(text, mappings)
+    elif target_site_path and not text.lower().startswith(target_site_path.lower() + "/"):
         mapped = target_site_path + text
+    else:
+        mapped = text
     while "//" in mapped:
         mapped = mapped.replace("//", "/")
     return mapped.lstrip("/")
@@ -176,7 +194,7 @@ def file_metrics(path, settings, mappings, target_site_path):
     libraries = set()
     large = checked_out = excluded = 0
     target_paths = set()
-    over_limit = 0
+    over_limit = unmapped = 0
     for row in read_rows(path):
         files += 1
         row_size = to_number(row.get("SizeBytes"))
@@ -198,7 +216,10 @@ def file_metrics(path, settings, mappings, target_site_path):
         if risk_type:
             continue
         target = projected_target_path(row.get("ServerRelativeUrl") or row.get("FileUrl") or "", mappings, target_site_path)
-        if not target or target.lower() in target_paths:
+        if not target:
+            unmapped += 1
+            continue
+        if target.lower() in target_paths:
             continue
         target_paths.add(target.lower())
         if len(target) > path_limit or max((len(part) for part in target.split("/")), default=0) > segment_limit:
@@ -209,7 +230,8 @@ def file_metrics(path, settings, mappings, target_site_path):
         "SubsiteCount": (len(webs), "Distinct WebUrl values"),
         "LibraryCount": (len(libraries), "Distinct LibraryUrl values"),
         "AverageVersions": (round(versions / files, 2) if files else 0.0, "AVG(VersionsCount)"),
-        "PathLimitFiles": (over_limit, f"Projected target path > {path_limit} characters or segment > {segment_limit}"),
+        "PathLimitFiles": (over_limit, f"Projected target path > {path_limit} characters or segment > {segment_limit}; "
+                                       f"files outside the path mapping skipped: {unmapped:,}"),
         "LargeFiles": (large, f"SizeBytes > {format_number(float(settings.get('LargeFileGiB', 2)))} GiB"),
         "RiskyFiles": (checked_out + excluded, f"Checked out: {checked_out:,}; blocked or excluded: {excluded:,}"),
     }
@@ -277,14 +299,17 @@ def score_migration(config, values):
     weighted = 0.0
     evaluated_weight = 0.0
     for criterion in config["Criteria"]:
-        measured = values.get(criterion["Id"])
+        # Template self-heal re-adds deleted entries, so "Enabled": false is the way to disable one.
+        enabled = criterion.get("Enabled", True) is not False
+        measured = values.get(criterion["Id"]) if enabled else None
         bands = band_texts(criterion)
         row = {
             "Id": criterion["Id"], "Axis": criterion.get("Axis", ""), "Name": criterion.get("Name", criterion["Id"]),
             "Unit": criterion.get("Unit", ""), "Weight": criterion["Weight"], "Bands": bands,
-            "Evaluated": measured is not None, "Value": None, "ValueDisplay": "Not evaluated",
+            "Evaluated": measured is not None, "Value": None,
+            "ValueDisplay": "Not evaluated" if enabled else "Disabled",
             "Points": None, "WeightedPoints": None, "MaxWeightedPoints": criterion["Weight"] * 3,
-            "Band": "Not evaluated", "Detail": "",
+            "Band": "Not evaluated" if enabled else "Disabled in configuration", "Detail": "",
         }
         if measured is not None:
             value, detail = measured
@@ -306,7 +331,7 @@ def score_migration(config, values):
     for rule in config.get("FloorRules", []):
         row = by_id.get(rule.get("CriterionId"))
         minimum = rule.get("MinimumLevel")
-        if not row or row["Points"] is None or minimum not in level_rank or row["Points"] < rule.get("MinPoints", 3):
+        if rule.get("Enabled", True) is False or not row or row["Points"] is None or minimum not in level_rank or row["Points"] < rule.get("MinPoints", 3):
             continue
         floors.append(row["Id"])
         if level_rank[minimum] > level["MinScore"]:
@@ -318,7 +343,8 @@ def score_migration(config, values):
         "Score": score, "Level": level["Name"], "LevelColor": level.get("Color", "#1F2937"),
         "LevelBackground": level.get("Background", "#F0F4F8"),
         "ScoreLevel": level_for(score, config["Levels"])["Name"], "FloorApplied": floors,
-        "EvaluatedWeight": evaluated_weight, "TotalWeight": sum(item["Weight"] for item in config["Criteria"]),
+        "EvaluatedWeight": evaluated_weight,
+        "TotalWeight": sum(item["Weight"] for item in config["Criteria"] if item.get("Enabled", True) is not False),
         "TopDrivers": [row["Id"] for row in drivers], "Criteria": criteria_rows,
     }
 
