@@ -657,12 +657,18 @@ function Publish-PreparedEvidenceBatch {
             }
         }
         $artifacts=@()
+        $licenseQualification=$null
         if($ArtifactSnapshotRoot){
             $artifacts=@(Copy-PreparedArtifacts -SnapshotRoot $ArtifactSnapshotRoot -Destination $batch -TenantKey $TenantKey)
             Assert-PreparedArtifacts -BatchRoot $batch -Entries $artifacts -TenantKey $TenantKey
+            # License tables carry no history key: a Not qualified report is an explicit manifest state,
+            # never a historical coverage regression and never a failed batch.
+            $licenseQualification=Get-PreparedLicenseReportQualification -SnapshotRoot $ArtifactSnapshotRoot -TenantKey $TenantKey -Artifacts $artifacts
+            if($licenseQualification.State -eq 'Qualified'){Write-Information ("License report qualified by licensing receipt run {0} (snapshot {1})." -f $licenseQualification.ReceiptRunId,$licenseQualification.SnapshotId) -InformationAction Continue}
+            else{Write-Warning ("License report Not qualified; license tables are published empty. Reason: {0}" -f $licenseQualification.Reason)}
         }
         $manifest = [ordered]@{SchemaVersion=1;BatchId=$batchId;TenantKey=$TenantKey;CreatedUtc=[datetime]::UtcNow.ToString('O');Provenance=$Provenance;ContractSHA256=(Get-FileHash $ContractPath).Hash;HistoryKeyVersions=$historyKeyVersions;HistoryKeyResets=@($historyKeyResets);HistoryKeyInitializations=@($historyKeyInitializations);Files=@($validation.Files | ForEach-Object { @{File=$_.File;Rows=$_.Rows;Bytes=(Get-Item (Join-Path $batch $_.File)).Length;SHA256=$_.SHA256} })}
-        if($ArtifactSnapshotRoot){$manifest.Artifacts=$artifacts;$manifest.ArtifactContractSHA256=(Get-FileHash -LiteralPath (Join-Path $script:ProductRoot 'config/prepared-artifact-contract.json.txt')).Hash}
+        if($ArtifactSnapshotRoot){$manifest.Artifacts=$artifacts;$manifest.LicenseReportQualification=$licenseQualification;$manifest.ArtifactContractSHA256=(Get-FileHash -LiteralPath (Join-Path $script:ProductRoot 'config/prepared-artifact-contract.json.txt')).Hash}
         Write-PreparedJson (Join-Path $batch 'batch.json.txt') $manifest
         $pointer = @{SchemaVersion=1;BatchId=$batchId;TenantKey=$TenantKey;ManifestSHA256=(Get-FileHash (Join-Path $batch 'batch.json.txt')).Hash;PreviousBatchId=if($previous){$previous.BatchId}else{$null}}
         $pointerTemp = Join-Path $output ('current.'+$batchId+'.tmp')

@@ -5,10 +5,25 @@ function Get-PreparedArtifactContract {
     Get-Content -LiteralPath (Join-Path $PSScriptRoot '../config/prepared-artifact-contract.json.txt') -Raw | ConvertFrom-Json
 }
 
+function Get-PreparedOptionalArtifactFiles {
+    param([Parameter(Mandatory)]$Contract)
+    if(-not $Contract.PSObject.Properties['optionalCurrentFiles']){return @()}
+    $names=[Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach($entry in @($Contract.optionalCurrentFiles)){
+        if([string]::IsNullOrWhiteSpace($entry.file) -or [IO.Path]::GetFileName([string]$entry.file) -cne [string]$entry.file -or
+           -not $names.Add($entry.file) -or $entry.file -cin @($Contract.currentFiles) -or [int]$entry.maxAgeHours -lt 1 -or [int]$entry.maxAgeHours -gt 8760){
+            throw 'Invalid or duplicate optional artifact file.'
+        }
+    }
+    @($Contract.optionalCurrentFiles)
+}
+
 function Get-PreparedArtifactSources {
     param([Parameter(Mandatory)][string]$DataRoot)
     $contract=Get-PreparedArtifactContract
     foreach($name in $contract.currentFiles){@{Relative="DATA-LAST/$name";Kind='Current'}}
+    # Optional current files: missing or stale inputs are optional source issues, never a failed capture.
+    foreach($entry in @(Get-PreparedOptionalArtifactFiles $contract)){@{Relative="DATA-LAST/$($entry.file)";Kind='Current';IsOptional=$true;MaxAgeHours=[int]$entry.maxAgeHours}}
     foreach($spec in $contract.history){
         $root=Join-Path $DataRoot $spec.root
         $weeks=@(Get-ChildItem -LiteralPath $root -Directory | Where-Object Name -Match '^\d{4}-W\d{2}$' | Sort-Object Name)
@@ -31,6 +46,7 @@ function Test-PreparedArtifactName {
     $contract=Get-PreparedArtifactContract
     if($Name -ceq 'PreparedHistoryIndex.json.txt'){return $true}
     if($Name -cin @($contract.currentFiles | ForEach-Object {"Source-$_"})){return $true}
+    if($Name -cin @(Get-PreparedOptionalArtifactFiles $contract | ForEach-Object {"Source-$($_.file)"})){return $true}
     foreach($spec in $contract.history){
         $prefix='History-'+$spec.kind+'-\d{4}-W(?:0[1-9]|[1-4][0-9]|5[0-3])-'
         $names=@($spec.file,'manifest.json.txt')
@@ -70,11 +86,21 @@ function Copy-PreparedArtifacts {
     }
     foreach($name in $contract.currentFiles){
         if($name -like 'M365_Licenses_Report*.csv'){
+            # Another tenant is fatal. A row of another snapshot is a lineage defect: the report is
+            # copied and declared Not qualified by Get-PreparedLicenseReportQualification.
             foreach($row in Import-Csv -LiteralPath (Join-Path $SnapshotRoot "DATA-LAST/$name")){
-                if($row.TenantKey -cne $TenantKey -or $row.SnapshotId -cne $snapshot.SnapshotId){throw "License report snapshot mismatch: $name"}
+                if($row.TenantKey -cne $TenantKey){throw "License report tenant mismatch: $name"}
             }
         }
         Copy-One "DATA-LAST/$name" "Source-$name"
+    }
+    foreach($entry in @(Get-PreparedOptionalArtifactFiles $contract)){
+        $relative="DATA-LAST/$($entry.file)"
+        if(-not (Test-Path -LiteralPath (Join-Path $SnapshotRoot $relative) -PathType Leaf)){continue}
+        foreach($row in Import-Csv -LiteralPath (Join-Path $SnapshotRoot $relative)){
+            if($row.TenantKey -cne $TenantKey){throw "License report tenant mismatch: $($entry.file)"}
+        }
+        Copy-One $relative "Source-$($entry.file)"
     }
     foreach($spec in $contract.history){
         foreach($week in Get-ChildItem -LiteralPath (Join-Path $SnapshotRoot $spec.root) -Directory | Where-Object Name -Match '^\d{4}-W\d{2}$' | Sort-Object Name){
@@ -115,6 +141,8 @@ function Assert-PreparedArtifacts {
     if($index.SchemaVersion -ne 1 -or $index.TenantKey -cne $TenantKey){throw 'Invalid prepared history index.'}
     $referenced=[Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
     foreach($name in $required){$null=$referenced.Add($name)}
+    # Optional current files are declared by the contract, not by the history index.
+    foreach($entry in @(Get-PreparedOptionalArtifactFiles (Get-PreparedArtifactContract))){if($seen.Contains("Source-$($entry.file)")){$null=$referenced.Add("Source-$($entry.file)")}}
     $weeks=[Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
     foreach($entry in $index.Entries){
         if($entry.Kind -cnotin @('Mailbox','Windows') -or $entry.Week -notmatch '^\d{4}-W(?:0[1-9]|[1-4][0-9]|5[0-3])$' -or -not $weeks.Add("$($entry.Kind)/$($entry.Week)")){throw 'Invalid or duplicate history index entry.'}
@@ -131,7 +159,76 @@ function Assert-PreparedArtifacts {
     if($referenced.Count -ne $seen.Count){throw 'Unindexed historical artifact.'}
 }
 
-Export-ModuleMember -Function Get-PreparedArtifactSources,Copy-PreparedArtifacts,Assert-PreparedArtifacts,Test-PreparedArtifactName
+function Get-PreparedLicenseReportQualification {
+    # The license report is consumed only when the current licensing receipt records it:
+    # completed receipt, same tenant and producer, every report CSV hashed in Files and declared
+    # Published, snapshot ReceiptRun.RunId equal to the receipt RunId. A lineage defect yields
+    # "Not qualified" (empty tables in the report), never a failed batch or older values.
+    param([Parameter(Mandatory)][string]$SnapshotRoot,[Parameter(Mandatory)][string]$TenantKey,
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Artifacts)
+    $spec=(Get-PreparedArtifactContract).licenseReport
+    $last=Join-Path $SnapshotRoot 'DATA-LAST'
+    $hashes=@{}
+    foreach($entry in $Artifacts){$hashes[[string]$entry.File]=[string]$entry.SHA256}
+    $snapshot=Get-Content -LiteralPath (Join-Path $last $spec.snapshot) -Raw | ConvertFrom-Json
+    $result=[ordered]@{Version=1;State='Qualified';Reason='';SnapshotId=[string]$snapshot.SnapshotId;ReceiptRunId='';ReceiptSHA256='';Files=@()}
+    $receipt=$null;$receiptReason=''
+    $receiptPath=Join-Path $last $spec.receipt
+    if(-not (Test-Path -LiteralPath $receiptPath -PathType Leaf)){$receiptReason='Licensing receipt is not part of the capture.'}
+    else{
+        try{
+            $result.ReceiptSHA256=(Get-FileHash -LiteralPath $receiptPath -Algorithm SHA256).Hash
+            $receipt=Get-Content -LiteralPath $receiptPath -Raw | ConvertFrom-Json
+            $result.ReceiptRunId=[string]$receipt.RunId
+            if([string]$receipt.Producer -cne $spec.producer -or [string]$receipt.TenantKey -cne $TenantKey){$receiptReason='Licensing receipt belongs to another producer or tenant.'}
+            elseif([string]$receipt.Status -cne 'Completed'){$receiptReason=('Licensing receipt is {0}, not Completed.' -f $receipt.Status)}
+            elseif(-not $snapshot.PSObject.Properties['ReceiptRun'] -or $null -eq $snapshot.ReceiptRun){$receiptReason='Report snapshot names no licensing receipt run (produced outside a receipt run).'}
+            elseif([string]$snapshot.ReceiptRun.Producer -cne $spec.producer -or [string]$snapshot.ReceiptRun.RunId -cne [string]$receipt.RunId){$receiptReason='Report snapshot belongs to another licensing receipt run.'}
+        }catch{$receiptReason=('Licensing receipt is unreadable: {0}' -f $_.Exception.Message)}
+    }
+    $files=[Collections.Generic.List[object]]::new()
+    foreach($name in @($spec.reportFiles)+@($spec.decisionFiles)){
+        $decision=$name -cin @($spec.decisionFiles)
+        $artifact="Source-$name"
+        $state='Qualified';$reason=''
+        if(-not $hashes.ContainsKey($artifact)){$state='Absent';$reason='Not part of the licensing output used by this batch.'}
+        elseif($receiptReason){$state='Not qualified';$reason=$receiptReason}
+        else{
+            $record=@($receipt.Files | Where-Object {[string]$_.File -ceq $name})
+            $declared=@($receipt.OptionalFiles | Where-Object {[string]$_.File -ceq $name -and $_.Published -eq $true})
+            if($record.Count -ne 1 -or $declared.Count -ne 1){$state='Not qualified';$reason='File is not recorded as published by the current licensing receipt.'}
+            elseif([string]$record[0].SHA256 -ine $hashes[$artifact]){$state='Not qualified';$reason='File hash differs from the current licensing receipt.'}
+            else{
+                foreach($row in Import-Csv -LiteralPath (Join-Path $last $name)){
+                    if([string]$row.SnapshotId -cne [string]$snapshot.SnapshotId){$state='Not qualified';$reason='Rows belong to another report snapshot.';break}
+                    if($decision -and [string]$row.ReceiptRunId -cne [string]$receipt.RunId){$state='Not qualified';$reason='Rows belong to another licensing receipt run.';break}
+                }
+            }
+        }
+        $files.Add([ordered]@{File=$name;Kind=$(if($decision){'Decision'}else{'Report'});State=$state;Reason=$reason;SHA256=$(if($hashes.ContainsKey($artifact)){$hashes[$artifact]}else{''})})
+    }
+    $core=@($files | Where-Object {$_.Kind -eq 'Report' -and $_.State -ne 'Qualified'})
+    if($core.Count -gt 0){
+        $result.State='Not qualified'
+        $result.Reason=$(if($receiptReason){$receiptReason}else{'{0}: {1}' -f $core[0].File,$core[0].Reason})
+        # Decision files are never shown without their qualified report.
+        foreach($file in $files){if($file.Kind -eq 'Decision' -and $file.State -eq 'Qualified'){$file.State='Not qualified';$file.Reason='License report is not qualified.'}}
+    }
+    $result.Files=$files.ToArray()
+    [pscustomobject]$result
+}
+
+function Test-PreparedArtifactContractCompatible {
+    # A batch built with a previous artifact contract stays transferable when the current
+    # contract only adds optional files and lists the previous contract hash.
+    param([Parameter(Mandatory)][string]$ContractSHA256)
+    $path=Join-Path $PSScriptRoot '../config/prepared-artifact-contract.json.txt'
+    if($ContractSHA256 -ieq (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash){return $true}
+    $contract=Get-PreparedArtifactContract
+    return $contract.PSObject.Properties['compatibleContractSHA256'] -and $ContractSHA256 -cin @($contract.compatibleContractSHA256 | ForEach-Object {([string]$_).ToUpperInvariant()})
+}
+
+Export-ModuleMember -Function Get-PreparedArtifactSources,Copy-PreparedArtifacts,Assert-PreparedArtifacts,Test-PreparedArtifactName,Get-PreparedLicenseReportQualification,Test-PreparedArtifactContractCompatible
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor

@@ -23,7 +23,8 @@ try {
         @{Week='2026-W40';SnapshotCreatedAtUtc='2026-10-01T00:00:00Z'}|ConvertTo-Json|Set-Content -LiteralPath (Join-Path $dir 'manifest.json')
     }
     $plan=@(Get-PreparedArtifactSources -DataRoot $source)
-    Check ($plan.Count -eq ($spec.currentFiles.Count+4)) 'Incomplete capture plan.'
+    Check ($plan.Count -eq ($spec.currentFiles.Count+4+@($spec.optionalCurrentFiles).Count)) 'Incomplete capture plan.'
+    Check (@($plan | Where-Object { $_.ContainsKey('IsOptional') -and $_.IsOptional }).Count -eq @($spec.optionalCurrentFiles).Count) 'Optional license decision files are not optional capture items.'
     $entries=@(Copy-PreparedArtifacts -SnapshotRoot $source -Destination $dest -TenantKey 'synthetic')
     Assert-PreparedArtifacts -TenantKey 'synthetic' -BatchRoot $dest -Entries $entries
     Check ($entries.Count -eq ($spec.currentFiles.Count+5)) 'Incomplete artifact manifest.'

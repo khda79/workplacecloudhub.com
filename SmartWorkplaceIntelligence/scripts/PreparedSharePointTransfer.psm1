@@ -34,6 +34,22 @@ function Resolve-PreparedTransferContract {
     $intuneFiles=@($intuneContract.tables.file)
     $intunePresent=@($Manifest.Files | Where-Object File -in $intuneFiles)
     $contractFiltered=$false
+    # Batches built before New-LicensingEvidence was retired carry its two tables: restore their
+    # reviewed definitions at their original positions so the recorded contract hash still matches.
+    $legacyLicense=(Read-SmartM365JsonDocument (Join-Path $PSScriptRoot '../config/legacy-license-evidence-tables.json.txt')).Document
+    $legacyLicenseFiles=@($legacyLicense.Tables | ForEach-Object {[string]$_.table.file})
+    $legacyLicensePresent=@($Manifest.Files | Where-Object File -in $legacyLicenseFiles)
+    if($legacyLicensePresent.Count){
+        if($legacyLicensePresent.Count -ne $legacyLicenseFiles.Count -or @($legacyLicensePresent.File | Sort-Object -Unique).Count -ne $legacyLicenseFiles.Count){throw 'Incomplete legacy license evidence file set; transfer not started.'}
+        if(@($contract.tables | Where-Object file -in $legacyLicenseFiles).Count -eq 0){
+            $contract=$contract | ConvertTo-Json -Depth 30 | ConvertFrom-Json
+            $tables=[Collections.Generic.List[object]]::new()
+            foreach($table in @($contract.tables)){$tables.Add($table)}
+            foreach($entry in @($legacyLicense.Tables | Sort-Object {[int]$_.index})){$tables.Insert([int]$entry.index,$entry.table)}
+            $contract.tables=$tables.ToArray()
+            $contractFiltered=$true
+        }
+    }
     # Retain transfer of immutable pre-DailyTrends cohorts. A declared new
     # history cohort or a partial file pair must never fall back to legacy.
     $dailyFiles=@('DailyDirectoryTrends.csv','DailyMailboxTrends.csv')
@@ -171,8 +187,7 @@ function Get-PreparedTransferPlan {
         $files.Add([pscustomobject]@{Path=$path;Relative="batches/$id/$name";Bytes=$entry.Bytes;SHA256=$entry.SHA256})
     }
     if($manifest.PSObject.Properties['Artifacts']){
-        $artifactContract=Join-Path $PSScriptRoot '../config/prepared-artifact-contract.json.txt'
-        if(-not $manifest.PSObject.Properties['ArtifactContractSHA256'] -or $manifest.ArtifactContractSHA256 -ne (Get-FileHash -LiteralPath $artifactContract).Hash){throw 'Artifact contract mismatch.'}
+        if(-not $manifest.PSObject.Properties['ArtifactContractSHA256'] -or -not (Test-PreparedArtifactContractCompatible -ContractSHA256 ([string]$manifest.ArtifactContractSHA256))){throw 'Artifact contract mismatch.'}
         Assert-PreparedArtifacts -BatchRoot $folder -Entries @($manifest.Artifacts) -TenantKey $TenantKey
         foreach($entry in $manifest.Artifacts){
             if(-not $seen.Add($entry.File)){throw 'Artifact collides with a prepared table.'}

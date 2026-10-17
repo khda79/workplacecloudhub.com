@@ -22,6 +22,30 @@
     "Exchange_OnPrem_Mailboxes_AllDomains.csv",
     "Exchange_HybridIdentity_Issues.csv"
   ],
+  "optionalCurrentFiles": [
+    { "file": "M365_Licenses_ReportSkuCandidates.csv", "maxAgeHours": 168 },
+    { "file": "M365_Licenses_ReportSkuCapacity.csv", "maxAgeHours": 168 }
+  ],
+  "licenseReport": {
+    "receipt": "SmartInventory_SmartM365-Licences-Inventory.current.json.txt",
+    "producer": "SmartM365-Licences-Inventory.ps1",
+    "snapshot": "M365_Licenses_ReportSnapshot.json.txt",
+    "reportFiles": [
+      "M365_Licenses_ReportSummary.csv",
+      "M365_Licenses_ReportCandidates.csv",
+      "M365_Licenses_ReportGaps.csv",
+      "M365_Licenses_ReportSources.csv",
+      "M365_Licenses_ReportAssignmentIssues.csv"
+    ],
+    "decisionFiles": [
+      "M365_Licenses_ReportSkuCandidates.csv",
+      "M365_Licenses_ReportSkuCapacity.csv"
+    ]
+  },
+  "compatibleContractSHA256": [
+    "19AA5A0D3D6FFAED0E3FFF2A16B2A4FF4D269C65221DB1BB2BB0139B729B87B4",
+    "A007FF4C64A313913B4024BEE28D3AFF2DB9E952B6406EF3FF5E1FA5CE8CDABE"
+  ],
   "history": [
     {
       "kind": "Windows",

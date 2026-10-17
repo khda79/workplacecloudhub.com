@@ -54,6 +54,23 @@ try {
     $manifest=Get-Content (Join-Path $batch.BatchPath 'batch.json.txt') -Raw|ConvertFrom-Json
     Check ($manifest.Files.Count -eq $contract.tables.Count) 'Unified table set incomplete'
     Check ($manifest.Artifacts.Count -eq $artifacts.currentFiles.Count+5) 'Artifact set incomplete'
+    Check ($manifest.LicenseReportQualification.State -eq 'Not qualified' -and $manifest.LicenseReportQualification.Reason -like '*receipt*') 'Unproven license report must be declared Not qualified in the manifest'
+    # Batches built before New-LicensingEvidence was retired keep their two license tables and stay transferable.
+    $legacyLicense=(Read-SmartM365JsonDocument (Join-Path $PSScriptRoot '../config/legacy-license-evidence-tables.json.txt')).Document
+    $legacyContract=$contract | ConvertTo-Json -Depth 30 | ConvertFrom-Json
+    $legacyTables=[Collections.Generic.List[object]]::new();foreach($table in @($legacyContract.tables)){$legacyTables.Add($table)}
+    foreach($entry in @($legacyLicense.Tables | Sort-Object {[int]$_.index})){$legacyTables.Insert([int]$entry.index,$entry.table)}
+    $legacyContract.tables=$legacyTables.ToArray()
+    $legacyPath=Join-Path $root 'legacy-license-contract.json.txt';Json $legacyPath $legacyContract
+    $legacyManifest=$manifest | ConvertTo-Json -Depth 30 | ConvertFrom-Json
+    $legacyManifest.Files=@($legacyManifest.Files)+@($legacyLicense.Tables | ForEach-Object {[pscustomobject]@{File=$_.table.file}})
+    $legacyManifest.ContractSHA256=(Get-FileHash -LiteralPath $legacyPath).Hash
+    $resolved=& (Get-Module PreparedSharePointTransfer) {param($m,$p) Resolve-PreparedTransferContract -Manifest $m -ContractPath $p} $legacyManifest $basePath
+    Check ($resolved.tables.Count -eq $contract.tables.Count+2 -and @($resolved.tables | Where-Object table -eq 'License Evidence').Count -eq 1) 'Pre-retirement license cohort no longer transferable'
+    $partialManifest=$legacyManifest | ConvertTo-Json -Depth 30 | ConvertFrom-Json
+    $partialManifest.Files=@($partialManifest.Files | Where-Object File -ne 'LicenseOptimizationEvidence.csv')
+    $rejected=$false;try{& (Get-Module PreparedSharePointTransfer) {param($m,$p) Resolve-PreparedTransferContract -Manifest $m -ContractPath $p} $partialManifest $basePath|Out-Null}catch{$rejected=$_.Exception.Message -like '*legacy license*'}
+    Check $rejected 'Partial legacy license cohort accepted'
     # The deployed contract must still resolve a full native/endpoint cohort
     # published before the two daily trend tables existed.
     $preDailyContract=$contract | ConvertTo-Json -Depth 30 | ConvertFrom-Json
@@ -109,6 +126,25 @@ try {
     Check $failed 'Foreign snapshot published'
     Check ((Get-FileHash -LiteralPath (Join-Path $output 'current.json.txt')).Hash -eq $localPointer) 'Failed publication advanced local pointer'
     Check (@(Get-ChildItem (Join-Path $output 'batches') -Directory).Count -eq 1) 'Failed candidate payload was not cleaned'
+    # A Not qualified license report after a qualified one is a manifest state, never a coverage regression.
+    $last=Join-Path $capture 'DATA-LAST'
+    foreach($name in $artifacts.currentFiles){
+        $path=Join-Path $last $name
+        if($name -like '*.csv'){@{TenantKey='synthetic-unified';SnapshotId=('a'*32)}|Export-Csv -LiteralPath $path -NoTypeInformation}
+    }
+    $runId='synthetic-licensing-run'
+    Json (Join-Path $last 'M365_Licenses_ReportSnapshot.json.txt') @{TenantKey='synthetic-unified';SnapshotId=('a'*32);SchemaVersion=2;Products=@(1,2,3,4);OtherProducts=@(1,2,3);AssignmentIssues=@{Available=$false;Rows=@()};ReceiptRun=@{Producer='SmartM365-Licences-Inventory.ps1';RunId=$runId}}
+    $reportFiles=@($artifacts.licenseReport.reportFiles)
+    Json (Join-Path $last $artifacts.licenseReport.receipt) @{Producer='SmartM365-Licences-Inventory.ps1';TenantKey='synthetic-unified';Status='Completed';RunId=$runId
+        Files=@($reportFiles | ForEach-Object {@{File=$_;SHA256=(Get-FileHash -LiteralPath (Join-Path $last $_)).Hash}});OptionalFiles=@($reportFiles | ForEach-Object {@{File=$_;Published=$true}})}
+    $qualified=Publish-PreparedEvidenceBatch -StagingRoot $staging -OutputRoot $output -TenantKey 'synthetic-unified' -Provenance $provenance -ContractPath $contractPath -ArtifactSnapshotRoot $capture -SkipRetention
+    $qualifiedManifest=Get-Content (Join-Path $qualified.BatchPath 'batch.json.txt') -Raw|ConvertFrom-Json
+    Check ($qualifiedManifest.LicenseReportQualification.State -eq 'Qualified' -and $qualifiedManifest.LicenseReportQualification.ReceiptRunId -eq $runId) 'Recorded license report not qualified'
+    Remove-Item -LiteralPath (Join-Path $last $artifacts.licenseReport.receipt)
+    $unqualified=Publish-PreparedEvidenceBatch -StagingRoot $staging -OutputRoot $output -TenantKey 'synthetic-unified' -Provenance $provenance -ContractPath $contractPath -ArtifactSnapshotRoot $capture -SkipRetention 3>$null
+    $unqualifiedManifest=Get-Content (Join-Path $unqualified.BatchPath 'batch.json.txt') -Raw|ConvertFrom-Json
+    Check ($unqualifiedManifest.LicenseReportQualification.State -eq 'Not qualified' -and (Get-Content (Join-Path $output 'current.json.txt') -Raw|ConvertFrom-Json).BatchId -eq $unqualified.BatchId) 'Not qualified license report blocked the batch'
+    Check (@($contract.tables | Where-Object {$_.file -like 'License*' -and $_.PSObject.Properties['historyKey']}).Count -eq 0) 'A license table declares a historical key'
     'Unified publication/transfer offline checks passed: '+$checks
 } finally {
     $full=[IO.Path]::GetFullPath($root);$temp=[IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\')+'\'

@@ -28,7 +28,7 @@ function Reject([scriptblock]$Action,[string]$Pattern){
 $intuneSpec=(Read-SmartM365JsonDocument (Join-Path $PSScriptRoot '../config/intune-operational-contract.json.txt')).Document
 $baseCount=@($baseContract.tables).Count
 $extendedCount=@($extendedContract.tables).Count
-Check ($baseCount -eq 31+$intuneSpec.tables.Count) 'Expected legacy tables plus governed Intune and daily trend tables'
+Check ($baseCount -eq 29+$intuneSpec.tables.Count) 'Expected legacy tables plus governed Intune and daily trend tables (SWI license evidence retired)'
 Check (@($baseContract.tables | Where-Object table -in @('Daily Directory Trends','Daily Mailbox Trends')).Count -eq 2) 'Expected both governed daily trend tables'
 Check ($extendedCount -eq $baseCount+2) 'Expected endpoint protection extension'
 function New-Fixture([string]$Name,$Contract,[string]$ContractPath,[bool]$Endpoint){
@@ -152,7 +152,11 @@ $beforeDailyPath=Join-Path $root 'before-daily-contract.json.txt';Write-TestJson
 $beforeDailyFixture=New-Fixture -Name 'before-daily' -Contract $beforeDaily -ContractPath $beforeDailyPath -Endpoint $false
 $null=Check-Success -Fixture $beforeDailyFixture -Count ($baseCount-2)
 $legacyBase=$baseContract | ConvertTo-Json -Depth 30 | ConvertFrom-Json
-$legacyBase.tables=@($legacyBase.tables | Where-Object { $_.file -notin $intuneSpec.tables.file -and $_.table -notin @('Daily Directory Trends','Daily Mailbox Trends') })
+# Pre-Intune cohorts were built before New-LicensingEvidence was retired: restore its two tables at their original positions.
+$legacyLicense=Get-Content (Join-Path $PSScriptRoot '../config/legacy-license-evidence-tables.json.txt') -Raw | ConvertFrom-Json
+$legacyTables=[Collections.Generic.List[object]]::new();foreach($table in @($legacyBase.tables)){$legacyTables.Add($table)}
+foreach($entry in @($legacyLicense.Tables | Sort-Object {[int]$_.index})){$legacyTables.Insert([int]$entry.index,$entry.table)}
+$legacyBase.tables=@($legacyTables | Where-Object { $_.file -notin $intuneSpec.tables.file -and $_.table -notin @('Daily Directory Trends','Daily Mailbox Trends') })
 $legacyPath=Join-Path $root 'legacy-contract.json.txt';Write-TestJson $legacyPath $legacyBase
 Import-Module (Join-Path $PSScriptRoot 'EndpointProtectionEvidence.psm1') -Global
 $legacyExtended=Merge-EndpointProtectionContract $legacyBase $extension

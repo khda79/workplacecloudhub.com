@@ -1,9 +1,9 @@
-# Version 1.1.1
+# Version 1.2.0: license decisions come from the SmartInventory Licences report; New-LicensingEvidence is retired.
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)][string]$DataRoot,
     [Parameter(Mandatory)][string]$OutputRoot,
-    [ValidateSet('All','Estate','Workforce','Devices','Applications','IntuneOperations','Collaboration','Content','Mailbox','DailyTrends','Licensing','Security','Backup','Trust','Executive')]
+    [ValidateSet('All','Estate','Workforce','Devices','Applications','IntuneOperations','Collaboration','Content','Mailbox','DailyTrends','Security','Backup','Trust','Executive')]
     [string]$Only = 'All',
     [switch]$SkipWorkforceHistory,
     [switch]$ReuseStagedWorkforce,
@@ -105,7 +105,6 @@ Run 'Mailbox' 'New-MailboxEvidence.ps1' @('-DataRoot',$last,'-UserEvidencePath',
 $dailyTrendArgs=@('-DataRoot',$DataRoot,'-OutputRoot',$OutputRoot,'-PythonCommand',$PythonCommand,'-PartialThresholdPercent',[string]$DailyTrendsPartialThresholdPercent,'-PersistentAbsenceObservations',[string]$DailyTrendsPersistentAbsenceObservations)
 if($DailyTrendsQualificationPath){$dailyTrendArgs+=@('-QualificationPath',$DailyTrendsQualificationPath)}
 Run -Domain 'DailyTrends' -Script 'New-DailyTrendsEvidence.ps1' -Arguments $dailyTrendArgs
-Run 'Licensing' 'New-LicensingEvidence.ps1' (@('-DataRoot',$last,'-UserEvidencePath',(OutPath 'UserInventoryEvidence'),'-MailboxEvidencePath',(OutPath 'MailboxEvidence'),'-OutputPath',(OutPath 'LicenseEvidence'),'-OptimizationOutputPath',(OutPath 'LicenseOptimizationEvidence'))+$clockArgs)
 Run 'Security' 'New-SecurityEvidence.ps1' (@('-DataRoot',$last,'-ExtendedEvidenceRoot',$last,'-UserEvidencePath',(OutPath 'UserInventoryEvidence'),'-DeviceEvidencePath',(OutPath 'DeviceInventoryEvidence'),'-OutputPath',(OutPath 'SecurityControlEvidence'))+$clockUtcArgs)
 Run 'Backup' 'New-BackupResilienceEvidence.ps1' (@('-DataRoot',$last,'-OutputRoot',$OutputRoot)+$clockDateArgs)
 $intuneArgs=@('-DataRoot',$DataRoot,'-OutputRoot',$OutputRoot)
