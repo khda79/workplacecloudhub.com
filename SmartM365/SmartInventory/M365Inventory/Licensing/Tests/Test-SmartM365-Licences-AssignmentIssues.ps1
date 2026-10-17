@@ -21,7 +21,7 @@ Import-Module -Name $corePath -Force -ErrorAction Stop
 function Initialize-SmartM365ImportExcel {
   SmartM365.Core\Initialize-SmartM365ImportExcel -CheckOnly | Out-Null
 }
-$names = @('Get-LicensesCsvSource','Import-LicensesSourceCsv','Read-LicensesIndexedSource','Get-LicensesAssignmentIssues','Get-LicensesAlertSummary','New-LicensesRecoveryWorkbook','Publish-LicensesReportCsv')
+$names = @('Get-LicensesSuiteProduct','Get-LicensesOptionalProperty','Get-LicensesCsvSource','Import-LicensesSourceCsv','Read-LicensesIndexedSource','Get-LicensesAssignmentIssues','Get-LicensesAlertSummary','New-LicensesRecoveryWorkbook','Publish-LicensesReportCsv')
 foreach ($name in $names) {
   $definition = $ast.Find({param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name},$true)
   if (-not $definition) { throw "Missing function: $name" }

@@ -1,0 +1,49 @@
+{
+  "Version": "1.0",
+  "Purpose": "License dependency guard: a dependent license needs at least one qualifying license on the same user. Lists are fail-closed: a qualifying license that could not be verified on a dated Microsoft source is absent.",
+  "Dependencies": [
+    {
+      "Dependent": [ "Microsoft_365_Copilot", "M365_Copilot" ],
+      "QualifyingAnyOf": [
+        "SPE_E5", "SPE_E3", "M365_F1", "M365_F1_COMM", "SPE_F1",
+        "SPB", "O365_BUSINESS_PREMIUM", "O365_BUSINESS_ESSENTIALS", "SMB_BUSINESS_ESSENTIALS",
+        "OFFICESUBSCRIPTION", "O365_BUSINESS", "SMB_BUSINESS",
+        "ENTERPRISEPREMIUM", "ENTERPRISEPACK", "STANDARDPACK", "DESKLESSPACK",
+        "Microsoft_Teams_Enterprise_New", "Microsoft_Teams_EEA_New", "Teams_Ess",
+        "EXCHANGEENTERPRISE", "EXCHANGESTANDARD", "EXCHANGEDESKLESS",
+        "SHAREPOINTENTERPRISE", "SHAREPOINTSTANDARD",
+        "WACONEDRIVEENTERPRISE", "WACONEDRIVESTANDARD",
+        "PROJECTPREMIUM", "PROJECTPROFESSIONAL", "PROJECT_P1",
+        "VISIOCLIENT", "VISIO_PLAN2_DEPT", "VISIOONLINE_PLAN1", "VISIO_PLAN1_DEPT"
+      ],
+      "Source": "https://learn.microsoft.com/en-us/copilot/microsoft-365/microsoft-365-copilot-licensing",
+      "SourceDate": "2026-09-25",
+      "ObservedOn": "2026-10-17",
+      "Notes": "EEA (no Teams) editions, Clipchamp, Microsoft 365 E7 and department variants of Project are not listed: not verified as SKU strings."
+    },
+    {
+      "Dependent": [ "DYN365_PROJECT_OPERATIONS_ATTACH" ],
+      "QualifyingAnyOf": [ "DYN365_FINANCE", "DYN365_SCM", "Dynamics_365_Supply_Chain_Management_Premium", "DYN365_RETAIL" ],
+      "Source": "https://www.microsoft.com/licensing/guidance/Dynamics-365",
+      "SourceDate": "2026-03",
+      "ObservedOn": "2026-10-17",
+      "Notes": "Attach licenses may only be assigned to users with an appropriate qualifying base license (Dynamics 365 Licensing Guide, March 2026). Finance Premium, Human Resources, Relationship Sales and Sales Premium bases are not mapped to verified SKU strings."
+    },
+    {
+      "Dependent": [ "DYN365_FINANCE_ATTACH" ],
+      "QualifyingAnyOf": [ "DYN365_SCM", "Dynamics_365_Supply_Chain_Management_Premium", "DYN365_RETAIL" ],
+      "Source": "https://www.microsoft.com/licensing/guidance/Dynamics-365",
+      "SourceDate": "2026-03",
+      "ObservedOn": "2026-10-17",
+      "Notes": "Qualifying bases for Finance attach in the base/attach matrix."
+    },
+    {
+      "Dependent": [ "DYN365_SCM_ATTACH" ],
+      "QualifyingAnyOf": [ "DYN365_FINANCE", "DYN365_RETAIL" ],
+      "Source": "https://www.microsoft.com/licensing/guidance/Dynamics-365",
+      "SourceDate": "2026-03",
+      "ObservedOn": "2026-10-17",
+      "Notes": "Qualifying bases for Supply Chain Management attach in the base/attach matrix; Finance Premium is not mapped to a verified SKU string."
+    }
+  ]
+}

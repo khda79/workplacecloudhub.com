@@ -2,7 +2,7 @@
 .SYNOPSIS
   Offline checks for the license overview and recovery email.
 .VERSION
-1.1.0
+1.1.1
 #>
 
 [CmdletBinding()]
@@ -34,7 +34,7 @@ if ($reportIndex -lt 0 -or $completeIndex -lt 0 -or $mailIndex -lt 0 -or
   throw 'The full collector must publish its report, then qualify its source receipt, before sending the email.'
 }
 $names = @(
-  'Get-LicensesFocusedSummaryRows', 'Get-LicensesAdditionalOverviewRows', 'New-LicensesOverviewCardHtml',
+  'Get-LicensesSuiteProduct', 'Get-LicensesOptionalProperty', 'Get-LicensesFocusedSummaryRows', 'Get-LicensesAdditionalOverviewRows', 'New-LicensesOverviewCardHtml',
   'ConvertTo-LicensesActivityDate', 'ConvertTo-LicensesMailboxSizeGb', 'Get-LicensesQualifiedPartialAdCoverage', 'Get-LicensesCsvSource',
   'Import-LicensesSourceCsv', 'Read-LicensesIndexedSource', 'Get-LicensesMailboxGapSummary', 'Get-LicensesAdAccountActivitySummary', 'Get-LicensesFocusedUsageRows', 'Format-LicensesMetric',
   'Get-LicensesAlertSummary', 'New-LicensesRecoveryWorkbook', 'Publish-LicensesReportCsv', 'Publish-LicensesReportSnapshot', 'Write-LicensesDailyMailState', 'Enter-LicensesDailyMailGate',
@@ -196,7 +196,7 @@ if ($script:SentMail[0].BodyHtml -notmatch '(?s)License alerts.*>N/D</div>.*Awai
 foreach ($product in @('F1','F3','E3','E5')) {
   if ($script:SentMail[0].BodyHtml -notmatch ('>' + $product + '</td>')) { throw "Missing product '$product' in mail body." }
 }
-if ($script:SentMail[0].BodyHtml -like '*OTHER_SKU*' -or $script:SentMail[0].BodyHtml -like '*99*') {
+if ($script:SentMail[0].BodyHtml -like '*OTHER_SKU*' -or $script:SentMail[0].BodyHtml -match '>\s*99\s*<') {
   throw 'Unrelated SKU leaked into the focused summary email.'
 }
 

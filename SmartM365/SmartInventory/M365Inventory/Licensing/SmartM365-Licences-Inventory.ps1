@@ -10,8 +10,10 @@
   ForceLicenseSummaryEmail sends the report again even when it was already sent on the current Europe/Paris day.
   The report also lists target-suite users awaiting license capacity and other assignment errors from qualified existing CSVs.
   Qualified PartialAccepted AD coverage is usable but remains provisional; available allowlisted domains remain included.
+  Per-SKU decisions (disabled accounts on every paid SKU, Copilot without licensed activity, unassigned capacity, dependency guard) are published
+  as optional files M365_Licenses_ReportSkuCandidates.csv and M365_Licenses_ReportSkuCapacity.csv with the report snapshot identity.
 .VERSION
- 1.48
+ 1.49
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication; Microsoft.Graph.Identity.DirectoryManagement; Microsoft.Graph.Users; Microsoft.Graph.Groups; ImportExcel for the report attachment.
@@ -19,7 +21,7 @@
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
   Author: https://github.com/khda79/workplacecloudhub.com
-     Version : 1.48
+     Version : 1.49
   PowerShell: PowerShell 7+
   Minimum application permissions: Directory.Read.All, User.Read.All, Group.Read.All
   Requires: Microsoft.Graph.Authentication
@@ -602,6 +604,20 @@ function Send-LicensesInventorySuccessNotification {
   }
 }
 
+function Get-LicensesSuiteProduct {
+  param([AllowNull()][string]$SkuId, [AllowNull()][string]$SkuPartNumber)
+  # Suites by part number, plus EEA and no-Teams editions by SkuId GUID (Microsoft product names and service plan identifiers CSV).
+  # Unattended licenses are not user suites and stay out.
+  $part = ([string]$SkuPartNumber).Trim().ToUpperInvariant()
+  $id = ([string]$SkuId).Trim().ToLowerInvariant()
+  if ($part -in @('M365_F1','M365_F1_COMM') -or $id -in @('0666269f-b167-4c5b-a76f-fc574f2b1118')) { return 'Microsoft 365 F1' }
+  if ($part -eq 'SPE_F1' -or $id -in @('f7ee79a7-7aec-4ca4-9fb9-34d6b930ad87')) { return 'Microsoft 365 F3' }
+  if ($part -eq 'SPE_E3' -or $id -in @('dcf0408c-aaec-446c-afd4-43e3683943ea','c2fe850d-fbbb-4858-b67d-bd0c6e746da3','602e6573-55a3-46b1-a1a0-cc267991501a')) { return 'Microsoft 365 E3' }
+  if ($part -eq 'SPE_E5' -or $id -in @('18a4bd3f-0b5b-4887-b04f-61dd0ee15f5e','3271cf8e-2be5-4a09-a549-70fd05baaa17','1e988bf3-8b7c-4731-bec0-4e2a2946600c',
+      '6ee4114a-9b2d-4577-9e7a-49fa43d222d3','90277bc7-a6fe-4181-99d8-712b08b8d32b','a640eead-25f6-4bec-97e3-23cfd382d7c2')) { return 'Microsoft 365 E5' }
+  return ''
+}
+
 function Get-LicensesFocusedSummaryRows {
   param([Parameter(Mandatory)][AllowEmptyCollection()][object[]]$TenantRows)
 
@@ -616,7 +632,7 @@ function Get-LicensesFocusedSummaryRows {
     $consumed = [long]0
     $found = $false
     foreach ($tenantRow in $TenantRows) {
-      if ([string]$tenantRow.TenantSkuPartNumber -notin $product.PartNumbers) { continue }
+      if ((Get-LicensesSuiteProduct -SkuId (Get-LicensesOptionalProperty $tenantRow 'Id') -SkuPartNumber $tenantRow.TenantSkuPartNumber) -ne $product.Name) { continue }
       if ($null -eq $tenantRow.TenantPrepaidEnabled -or $null -eq $tenantRow.TenantConsumedUnits) {
         throw "License counts are unavailable for SKU '$($tenantRow.TenantSkuPartNumber)'."
       }
@@ -1196,8 +1212,9 @@ function Get-LicensesFocusedUsageRows {
             }
           }
         }
+        $rowProduct = Get-LicensesSuiteProduct -SkuId (Get-LicensesOptionalProperty $row 'SkuId') -SkuPartNumber $row.SkuPartNumber
         foreach ($product in $products) {
-          if ([string]$row.SkuPartNumber -notin $product.PartNumbers) { continue }
+          if ($rowProduct -ne $product.Name) { continue }
           $userId = $rowUserId
           if (-not $userId) { throw 'a target license row has no UserId' }
           $productUsers[$product.Name][$userId] = $true
@@ -1651,9 +1668,9 @@ function Get-LicensesAssignmentIssues {
   try {
     $skuProduct = @{}
     foreach ($tenantRow in $TenantRows) {
-      $part = ([string]$tenantRow.TenantSkuPartNumber).Trim().ToUpperInvariant()
+      $suite = Get-LicensesSuiteProduct -SkuId $tenantRow.Id -SkuPartNumber $tenantRow.TenantSkuPartNumber
       foreach ($product in $productParts.Keys) {
-        if ($part -notin $productParts[$product]) { continue }
+        if ($suite -ne $product) { continue }
         $skuId = ([string]$tenantRow.Id).Trim().ToLowerInvariant()
         if (-not $skuId) { throw "Tenant SKU ID is missing for $product." }
         if ($skuProduct.ContainsKey($skuId) -and $skuProduct[$skuId] -ne $product) { throw "Tenant SKU ID maps to multiple target suites: $skuId" }
@@ -1664,10 +1681,10 @@ function Get-LicensesAssignmentIssues {
     foreach ($row in (Import-LicensesSourceCsv -Source $sources[1])) {
       if ([string]$row.TenantKey -ine $TenantKey) { throw 'another tenant is present in effective license assignments' }
       $userId = ([string]$row.UserId).Trim().ToLowerInvariant()
-      $part = ([string]$row.SkuPartNumber).Trim().ToUpperInvariant()
+      $suite = Get-LicensesSuiteProduct -SkuId (Get-LicensesOptionalProperty $row 'SkuId') -SkuPartNumber $row.SkuPartNumber
       if (-not $userId) { throw 'effective license assignment has no UserId' }
       foreach ($product in $productParts.Keys) {
-        if ($part -in $productParts[$product]) { $effective["$userId|$product"] = $true; break }
+        if ($suite -eq $product) { $effective["$userId|$product"] = $true; break }
       }
     }
     $paths = @{}
@@ -2323,16 +2340,467 @@ function Enter-LicensesDailyMailGate {
   }
 }
 
+function Get-LicensesOptionalProperty {
+  param([AllowNull()]$InputObject, [Parameter(Mandatory)][string]$Name)
+  if ($null -eq $InputObject) { return $null }
+  $property = $InputObject.PSObject.Properties[$Name]
+  if ($property) { return $property.Value }
+  return $null
+}
+
+function Get-LicensesDecisionSettings {
+  param([AllowNull()]$Config)
+  # Settings come from the script local JSON; defaults match the committed template.
+  $excluded = @{}
+  foreach ($item in @(Get-ScriptLocalConfigValue -Config $Config -Name 'LicenseDecisionExcludedSkus' -DefaultValue @())) {
+    if ($null -eq $item) { continue }
+    $sku = ([string]$item.SkuPartNumber).Trim()
+    if (-not $sku) { throw 'LicenseDecisionExcludedSkus contains an entry without SkuPartNumber.' }
+    $excluded[$sku.ToUpperInvariant()] = [string]$item.Reason
+  }
+  $settings = [pscustomobject]@{
+    CopilotInactivityDays = [int](Get-ScriptLocalConfigValue -Config $Config -Name 'LicenseDecisionCopilotInactivityDays' -DefaultValue 60)
+    CopilotAssignmentGraceDays = [int](Get-ScriptLocalConfigValue -Config $Config -Name 'LicenseDecisionCopilotAssignmentGraceDays' -DefaultValue 30)
+    MailboxReviewSizeGB = [double](Get-ScriptLocalConfigValue -Config $Config -Name 'LicenseDecisionMailboxReviewSizeGB' -DefaultValue 50)
+    ExcludedSkus = $excluded
+  }
+  if ($settings.CopilotInactivityDays -lt 1 -or $settings.CopilotAssignmentGraceDays -lt 0 -or $settings.MailboxReviewSizeGB -le 0) {
+    throw 'License decision settings must be positive (inactivity days, grace days, mailbox review size).'
+  }
+  return $settings
+}
+
+function Read-LicensesDependencyRules {
+  param([Parameter(Mandatory)][string]$Path)
+  if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { throw "License dependency rules are missing: $Path" }
+  $document = [IO.File]::ReadAllText($Path) | ConvertFrom-Json -ErrorAction Stop
+  $rules = [System.Collections.Generic.List[object]]::new()
+  foreach ($dependency in @($document.Dependencies)) {
+    $dependents = @($dependency.Dependent | ForEach-Object { ([string]$_).Trim().ToUpperInvariant() } | Where-Object { $_ })
+    $qualifying = @($dependency.QualifyingAnyOf | ForEach-Object { ([string]$_).Trim().ToUpperInvariant() } | Where-Object { $_ })
+    if ($dependents.Count -eq 0 -or $qualifying.Count -eq 0 -or -not [string]$dependency.Source -or -not [string]$dependency.SourceDate) {
+      throw 'Each license dependency needs Dependent, QualifyingAnyOf, Source and SourceDate.'
+    }
+    $rules.Add([pscustomobject]@{ Dependents=$dependents; Qualifying=$qualifying; Source=[string]$dependency.Source; SourceDate=[string]$dependency.SourceDate })
+  }
+  return $rules.ToArray()
+}
+
+function Get-LicensesAccountState {
+  param([AllowNull()]$ActiveRow, [Parameter(Mandatory)]$AdSource, [System.Collections.IDictionary]$AdByImmutable, [System.Collections.IDictionary]$AdByUpn, [System.Collections.IDictionary]$DuplicateAdUpns)
+  # Entra and AD together; a disagreement is a review, never a removal.
+  if ($null -eq $ActiveRow) { return [pscustomobject]@{ State='Unknown'; Reason='Account not found in the Entra active users export'; Entra='N/D'; Ad='N/D' } }
+  $entra = ([string]$ActiveRow.AccountEnabled).Trim().ToLowerInvariant()
+  if ($entra -notin @('true','false')) { return [pscustomobject]@{ State='Unknown'; Reason='Entra account state is not measured'; Entra='N/D'; Ad='N/D' } }
+  $immutable = ([string]$ActiveRow.OnPremisesImmutableId).Trim().ToLowerInvariant()
+  if (-not $immutable) {
+    $state = if ($entra -eq 'false') { 'Disabled' } else { 'Enabled' }
+    return [pscustomobject]@{ State=$state; Reason='Cloud-only account'; Entra=$entra; Ad='Not synchronized' }
+  }
+  if (-not $AdSource.Ready) {
+    if ($entra -eq 'true') { return [pscustomobject]@{ State='Enabled'; Reason=''; Entra=$entra; Ad='N/D' } }
+    return [pscustomobject]@{ State='Review'; Reason='Entra disabled; AD state is not measured'; Entra=$entra; Ad='N/D' }
+  }
+  $upn = ([string]$ActiveRow.'User principal name').Trim().ToLowerInvariant()
+  $adRow = $null
+  if ($AdByImmutable.Contains($immutable)) { $adRow = $AdByImmutable[$immutable] }
+  elseif ($upn -and $AdByUpn.Contains($upn) -and -not $DuplicateAdUpns.Contains($upn)) { $adRow = $AdByUpn[$upn] }
+  if ($null -eq $adRow) {
+    if ($entra -eq 'true') { return [pscustomobject]@{ State='Enabled'; Reason=''; Entra=$entra; Ad='Not found' } }
+    $why = if ($AdSource.PartialScopeAccepted) { 'Entra disabled; AD account not found in the collected domains' } else { 'Entra disabled; synchronized AD account not found' }
+    return [pscustomobject]@{ State='Review'; Reason=$why; Entra=$entra; Ad='Not found' }
+  }
+  $ad = ([string]$adRow.Enabled).Trim().ToLowerInvariant()
+  if ($ad -notin @('true','false')) { return [pscustomobject]@{ State='Review'; Reason='AD account state is not measured'; Entra=$entra; Ad='N/D' } }
+  if ($entra -eq 'false' -and $ad -eq 'false') { return [pscustomobject]@{ State='Disabled'; Reason='Disabled in Entra and AD'; Entra=$entra; Ad=$ad } }
+  if ($entra -eq 'true' -and $ad -eq 'true') { return [pscustomobject]@{ State='Enabled'; Reason=''; Entra=$entra; Ad=$ad } }
+  $conflict = if ($entra -eq 'false') { 'Entra disabled but AD enabled' } else { 'AD disabled but Entra enabled' }
+  return [pscustomobject]@{ State='Review'; Reason="Directory state conflict: $conflict"; Entra=$entra; Ad=$ad }
+}
+
+function Get-LicensesMailboxGuard {
+  param([AllowNull()]$Mailbox, [bool]$SourceReady, [double]$ReviewSizeGB)
+  # Same retention checks as the suite recovery: size, archive, litigation and retention holds; unknown fails closed.
+  if (-not $SourceReady) { return [pscustomobject]@{ Status='Unknown'; Reason='EXO mailbox source is not qualified' } }
+  if ($null -eq $Mailbox) { return [pscustomobject]@{ Status='Unknown'; Reason='No observed EXO mailbox for the account' } }
+  if (([string]$Mailbox.NativeIdentityStatus).Trim() -ne 'Observed') { return [pscustomobject]@{ Status='Unknown'; Reason='EXO mailbox identity is not observed' } }
+  $size = ConvertTo-LicensesMailboxSizeGb $Mailbox.TotalItemSizeGB
+  $archive = ([string]$Mailbox.ArchiveStatus).Trim().ToLowerInvariant()
+  $litigation = ([string]$Mailbox.LitigationHoldEnabled).Trim().ToLowerInvariant()
+  $retention = ([string]$Mailbox.RetentionHoldEnabled).Trim().ToLowerInvariant()
+  if ($null -eq $size -or $archive -notin @('none','disabled','false','active','enabled','true') -or
+      $litigation -notin @('true','false') -or $retention -notin @('true','false')) {
+    return [pscustomobject]@{ Status='Unknown'; Reason='Mailbox size, archive or hold state is not measured' }
+  }
+  $blocked = @()
+  if ($size -gt $ReviewSizeGB) { $blocked += ('mailbox above {0} GB' -f $ReviewSizeGB) }
+  if ($archive -in @('active','enabled','true')) { $blocked += 'archive active' }
+  if ($litigation -eq 'true') { $blocked += 'litigation hold' }
+  if ($retention -eq 'true') { $blocked += 'retention hold' }
+  if ($blocked.Count -gt 0) { return [pscustomobject]@{ Status='Blocked'; Reason=('Mailbox retention: ' + ($blocked -join ', ')) } }
+  return [pscustomobject]@{ Status='Clear'; Reason='' }
+}
+
+function Get-LicensesCopilotUsageState {
+  param([Parameter(Mandatory)]$Source, [datetime]$AsOfUtc, [int]$MinimumPeriodDays = 60)
+  # Not measured, never zero: absent, stale, short-period or anonymized reports produce no candidate.
+  $state = [pscustomobject]@{ Measured=$false; Reason=''; Rows=@{}; WindowEnd=$null }
+  if (-not $Source.Ready) { $state.Reason = "Copilot usage report not qualified: $($Source.Reason)"; return $state }
+  try {
+    $rows = @(Import-LicensesSourceCsv -Source $Source)
+    if ($rows.Count -eq 0) { $state.Reason = 'Copilot usage report is empty'; return $state }
+    $refresh = $null; $index = @{}
+    foreach ($row in $rows) {
+      $period = ([string]$row.ReportPeriod).Trim()
+      if ($period -notmatch '^D(\d+)$' -or [int]$Matches[1] -lt $MinimumPeriodDays) { $state.Reason = 'Copilot usage report period is shorter than the inactivity window'; return $state }
+      $date = ConvertTo-LicensesActivityDate $row.ReportRefreshDate
+      if ($null -eq $date) { $state.Reason = 'Copilot usage report refresh date is missing'; return $state }
+      if ($null -eq $refresh) { $refresh = $date } elseif ($refresh -ne $date) { $state.Reason = 'Copilot usage report has mixed refresh dates'; return $state }
+      $upn = ([string]$row.UserPrincipalName).Trim().ToLowerInvariant()
+      if ($upn -notmatch '^[^@\s]+@[^@\s]+$') { $state.Reason = 'Copilot usage report user names are concealed (report anonymization)'; return $state }
+      if ($index.ContainsKey($upn)) { $state.Reason = 'Copilot usage report has duplicate user rows'; return $state }
+      $index[$upn] = $row
+    }
+    if ($refresh -lt $AsOfUtc.Date.AddDays(-14)) { $state.Reason = 'Copilot usage report refresh date is older than 14 days'; return $state }
+    $state.Measured = $true; $state.Rows = $index; $state.WindowEnd = $refresh
+  }
+  catch { $state.Reason = "Copilot usage report unreadable: $($_.Exception.Message)" }
+  return $state
+}
+
+function Get-LicensesCopilotActivity {
+  param([Parameter(Mandatory)]$Row)
+  # Only licensed Microsoft 365 Copilot app activity justifies the license; chat, Edge and agents do not.
+  $licensed = $null; $chat = $null
+  foreach ($column in @('Microsoft365CopilotLastActivityDate','TeamsCopilotLastActivityDate','WordCopilotLastActivityDate','ExcelCopilotLastActivityDate','PowerPointCopilotLastActivityDate','OutlookCopilotLastActivityDate','OneNoteCopilotLastActivityDate','LoopCopilotLastActivityDate')) {
+    $date = ConvertTo-LicensesActivityDate $Row.$column
+    if ($date -and (-not $licensed -or $date -gt $licensed)) { $licensed = $date }
+  }
+  foreach ($column in @('CopilotChatLastActivityDate','CopilotChatWorkLastActivityDate','CopilotChatWebLastActivityDate','EdgeLastActivityDate','CopilotAgentLastActivityDate')) {
+    $date = ConvertTo-LicensesActivityDate $Row.$column
+    if ($date -and (-not $chat -or $date -gt $chat)) { $chat = $date }
+  }
+  return [pscustomobject]@{ Licensed=$licensed; Chat=$chat }
+}
+
+function Get-LicensesSkuDecisions {
+  param(
+    [Parameter(Mandatory)][string]$Folder,
+    [Parameter(Mandatory)][string]$TenantKey,
+    [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$TenantRows,
+    [AllowNull()]$CurrentRunPublication,
+    [AllowEmptyCollection()][object[]]$RecoveryDetails = @(),
+    [AllowEmptyCollection()][object[]]$DowngradeDetails = @(),
+    [Parameter(Mandatory)]$Settings,
+    [Parameter(Mandatory)][object[]]$DependencyRules,
+    [datetime]$AsOfUtc = [datetime]::UtcNow
+  )
+  $licensesReceipt = 'SmartInventory_SmartM365-Licences-Inventory.current.json.txt'
+  $sources = [System.Collections.Generic.List[object]]::new()
+  $usersSource = Get-LicensesCsvSource -Folder $Folder -FileName 'M365_Licenses_Users.csv' -Columns @('TenantKey','UserId','SkuId','SkuPartNumber','Source','GroupsAssigningSku') -AsOfUtc $AsOfUtc -CollectorManifestName $licensesReceipt -RequireFileReceipt -CurrentRunPublication $CurrentRunPublication
+  $pathsSource = Get-LicensesCsvSource -Folder $Folder -FileName 'M365_Licenses_AssignmentPaths.csv' -Columns @('TenantKey','UserId','SkuId','AssignmentRoute','LastUpdatedDateTime') -AsOfUtc $AsOfUtc -CollectorManifestName $licensesReceipt -RequireFileReceipt -CurrentRunPublication $CurrentRunPublication
+  $catalogSource = Get-LicensesCsvSource -Folder $Folder -FileName 'M365_Licenses_ServicePlans_Catalog.csv' -Columns @('TenantKey','SkuId','PlanName') -AsOfUtc $AsOfUtc -CollectorManifestName $licensesReceipt -RequireFileReceipt -CurrentRunPublication $CurrentRunPublication
+  foreach ($source in @($usersSource,$pathsSource,$catalogSource)) {
+    $sources.Add($source)
+    if (-not $source.Ready) { throw "License decision source not qualified: $($source.Name): $($source.Reason)" }
+  }
+  $activeSource = Get-LicensesCsvSource -Folder $Folder -FileName 'M365_Users_Active.csv' -Columns @('TenantKey','Object Id','User principal name','AccountEnabled','OnPremisesImmutableId') -AsOfUtc $AsOfUtc -CollectorManifestName 'SmartInventory_SmartM365-ActiveUsers-Inventory.current.json.txt'
+  $adSource = Get-LicensesCsvSource -Folder $Folder -FileName 'AD_Users_AllDomains.csv' -Columns @('TenantKey','ImmutableId_AD','UserPrincipalName','Enabled') -AsOfUtc $AsOfUtc -CollectorManifestName 'SmartInventory_SmartM365-ActiveDirectory-Inventory.current.json.txt' -AllowQualifiedPartialAdScope
+  $exoSource = Get-LicensesCsvSource -Folder $Folder -FileName 'Exchange_EXO_Mailboxes_AllDomains.csv' -Columns @('TenantKey','ExternalDirectoryObjectId','RecipientTypeDetails','NativeIdentityStatus','TotalItemSizeGB','ArchiveStatus','LitigationHoldEnabled','RetentionHoldEnabled') -AsOfUtc $AsOfUtc -CollectorManifestName 'SmartInventory_SmartM365-EXO-Mailboxes-Inventory.current.json.txt'
+  $copilotSource = Get-LicensesCsvSource -Folder $Folder -FileName 'M365_Copilot_UserUsage.csv' -Columns @('TenantKey','ReportPeriod','ReportRefreshDate','UserPrincipalName','Microsoft365CopilotLastActivityDate','CopilotChatLastActivityDate') -AsOfUtc $AsOfUtc -CollectorManifestName 'SmartInventory_SmartM365-CopilotUsage-Inventory.current.json.txt'
+  $phoneSource = Get-LicensesCsvSource -Folder $Folder -FileName 'M365_Teams_PhoneAssignments.csv' -Columns @('TenantKey','AssignedPstnTargetId','TargetType') -AsOfUtc $AsOfUtc -CollectorManifestName 'SmartInventory_SmartM365-TeamsPhonePstnUsage-Inventory.current.json.txt'
+  foreach ($source in @($activeSource,$adSource,$exoSource,$copilotSource,$phoneSource)) { $sources.Add($source) }
+  if (-not $activeSource.Ready) { throw "License decision source not qualified: M365_Users_Active.csv: $($activeSource.Reason)" }
+
+  $skuById = @{}
+  foreach ($row in $TenantRows) {
+    $id = ([string]$row.Id).Trim().ToLowerInvariant()
+    if (-not $id) { throw 'Tenant SKU ID is missing.' }
+    $skuById[$id] = $row
+  }
+  $plansBySku = @{}
+  foreach ($row in (Import-LicensesSourceCsv -Source $catalogSource)) {
+    if ([string]$row.TenantKey -cne $TenantKey) { throw 'another tenant is present in the service-plan catalog' }
+    $id = ([string]$row.SkuId).Trim().ToLowerInvariant()
+    if (-not $plansBySku.ContainsKey($id)) { $plansBySku[$id] = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase) }
+    [void]$plansBySku[$id].Add(([string]$row.PlanName).Trim())
+  }
+  # Mailbox and archive plans grant a mailbox; EXCHANGE_S_FOUNDATION only supports other workloads.
+  $exchangePlans = @('EXCHANGE_S_ENTERPRISE','EXCHANGE_S_STANDARD','EXCHANGE_S_DESKLESS','EXCHANGE_S_ESSENTIALS','EXCHANGE_S_ARCHIVE_ADDON','EXCHANGE_S_ARCHIVE')
+  $hasPlan = { param($skuId, [string[]]$names) $set = $plansBySku[$skuId]; if (-not $set) { return $false }; foreach ($name in $names) { if ($set.Contains($name)) { return $true } }; return $false }
+
+  $assignments = @{}
+  $userIdentity = @{}
+  foreach ($row in (Import-LicensesSourceCsv -Source $usersSource)) {
+    if ([string]$row.TenantKey -cne $TenantKey) { throw 'another tenant is present in license assignments' }
+    $userId = ([string]$row.UserId).Trim().ToLowerInvariant(); $skuId = ([string]$row.SkuId).Trim().ToLowerInvariant()
+    if (-not $userId -or -not $skuId) { throw 'a license assignment has no UserId or SkuId' }
+    $key = "$userId|$skuId"
+    if (-not $assignments.ContainsKey($key)) {
+      $assignments[$key] = [pscustomobject]@{ UserId=$userId; SkuId=$skuId; SkuPartNumber=([string]$row.SkuPartNumber).Trim(); Route=([string]$row.Source).Trim(); Groups=([string]$row.GroupsAssigningSku).Trim() }
+    }
+    if (-not $userIdentity.ContainsKey($userId)) {
+      $userIdentity[$userId] = [pscustomobject]@{ UserPrincipalName=[string]$row.'User principal name'; DisplayName=[string]$row.'Display name' }
+    }
+  }
+  $pathDates = @{}
+  foreach ($row in (Import-LicensesSourceCsv -Source $pathsSource)) {
+    if ([string]$row.TenantKey -cne $TenantKey) { throw 'another tenant is present in license assignment paths' }
+    $key = '{0}|{1}' -f ([string]$row.UserId).Trim().ToLowerInvariant(), ([string]$row.SkuId).Trim().ToLowerInvariant()
+    if (-not $pathDates.ContainsKey($key)) { $pathDates[$key] = [System.Collections.Generic.List[object]]::new() }
+    $parsed = [datetimeoffset]::MinValue
+    $text = ([string]$row.LastUpdatedDateTime).Trim()
+    $pathDates[$key].Add($(if ($text -and [datetimeoffset]::TryParse($text, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::AssumeUniversal, [ref]$parsed)) { $parsed.UtcDateTime } else { $null }))
+  }
+  $skusByUser = @{}
+  foreach ($assignment in $assignments.Values) {
+    if (-not $skusByUser.ContainsKey($assignment.UserId)) { $skusByUser[$assignment.UserId] = [System.Collections.Generic.List[object]]::new() }
+    $skusByUser[$assignment.UserId].Add($assignment)
+  }
+  $wanted = @{}; foreach ($userId in $skusByUser.Keys) { $wanted[$userId] = $true }
+  $active = Read-LicensesIndexedSource -Source $activeSource -ExpectedTenantKey $TenantKey -KeyColumn 'Object Id' -WantedKeys $wanted -AsOfUtc $AsOfUtc
+  if (-not $active.Ready) { throw "License decision source not qualified: M365_Users_Active.csv: $($active.Source.Reason)" }
+  $wantedUpns = @{}; $wantedImmutable = @{}
+  foreach ($row in $active.Rows.Values) {
+    $upn = ([string]$row.'User principal name').Trim().ToLowerInvariant(); if ($upn) { $wantedUpns[$upn] = $true }
+    $immutable = ([string]$row.OnPremisesImmutableId).Trim().ToLowerInvariant(); if ($immutable) { $wantedImmutable[$immutable] = $true }
+  }
+  $adByImmutable = @{}; $adByUpn = @{}; $duplicateAdUpns = @{}
+  if ($adSource.Ready) {
+    try {
+      foreach ($row in (Import-LicensesSourceCsv -Source $adSource)) {
+        if ([string]$row.TenantKey -cne $TenantKey) { throw 'another tenant is present in AD users' }
+        if ($adSource.PartialScopeAccepted -and ([string]$row.DomainName).Trim() -notin @($adSource.DomainCoverage.CollectedDomains)) { throw 'AD CSV row is outside the qualified collected domains.' }
+        $immutable = ([string]$row.ImmutableId_AD).Trim().ToLowerInvariant(); $upn = ([string]$row.UserPrincipalName).Trim().ToLowerInvariant()
+        if ($immutable -and $wantedImmutable.ContainsKey($immutable)) {
+          if ($adByImmutable.ContainsKey($immutable)) { throw 'duplicate AD immutable ID' }
+          $adByImmutable[$immutable] = $row
+        }
+        if ($upn -and $wantedUpns.ContainsKey($upn)) { if ($adByUpn.ContainsKey($upn)) { $duplicateAdUpns[$upn] = $true } else { $adByUpn[$upn] = $row } }
+      }
+    }
+    catch { $adSource.Ready = $false; $adSource.Reason = $_.Exception.Message; $adByImmutable = @{}; $adByUpn = @{}; $duplicateAdUpns = @{} }
+  }
+  $mailboxes = Read-LicensesIndexedSource -Source $exoSource -ExpectedTenantKey $TenantKey -KeyColumn 'ExternalDirectoryObjectId' -WantedKeys $wanted -AsOfUtc $AsOfUtc
+  $resourceTargets = @{}
+  if ($phoneSource.Ready) {
+    try {
+      foreach ($row in (Import-LicensesSourceCsv -Source $phoneSource)) {
+        if ([string]$row.TenantKey -cne $TenantKey) { throw 'another tenant is present in phone assignments' }
+        if (([string]$row.TargetType) -match '(?i)resource') { $resourceTargets[([string]$row.AssignedPstnTargetId).Trim().ToLowerInvariant()] = $true }
+      }
+    }
+    catch { $phoneSource.Ready = $false; $phoneSource.Reason = $_.Exception.Message; $resourceTargets = @{} }
+  }
+  $copilotState = Get-LicensesCopilotUsageState -Source $copilotSource -AsOfUtc $AsOfUtc -MinimumPeriodDays $Settings.CopilotInactivityDays
+
+  # Suite candidates already counted in ReportCandidates are referenced, never recounted.
+  $referenced = @{}
+  foreach ($detail in $RecoveryDetails) { $referenced[('{0}|{1}' -f ([string]$detail.UserId).ToLowerInvariant(), [string]$detail.License)] = 'ReportCandidates:Recovery' }
+  foreach ($detail in $DowngradeDetails) { $key = '{0}|Microsoft 365 E3' -f ([string]$detail.UserId).ToLowerInvariant(); if (-not $referenced.ContainsKey($key)) { $referenced[$key] = 'ReportCandidates:E3 to F3 review' } }
+
+  $copilotParts = @('MICROSOFT_365_COPILOT','M365_COPILOT')
+  $rows = [System.Collections.Generic.List[object]]::new()
+  $stateByUser = @{}
+  $copilotUnmeasured = 0; $copilotGrace = 0
+  foreach ($userId in $skusByUser.Keys) {
+    $activeRow = if ($active.Rows.ContainsKey($userId) -and -not $active.Duplicates.ContainsKey($userId)) { $active.Rows[$userId] } else { $null }
+    $state = Get-LicensesAccountState -ActiveRow $activeRow -AdSource $adSource -AdByImmutable $adByImmutable -AdByUpn $adByUpn -DuplicateAdUpns $duplicateAdUpns
+    $stateByUser[$userId] = $state
+    $identity = $userIdentity[$userId]
+    $mailbox = if ($mailboxes.Ready -and $mailboxes.Rows.ContainsKey($userId) -and -not $mailboxes.Duplicates.ContainsKey($userId)) { $mailboxes.Rows[$userId] } else { $null }
+    $recipient = if ($mailbox) { ([string]$mailbox.RecipientTypeDetails).Trim() } else { '' }
+    $resourceReason = if ($recipient -in @('RoomMailbox','EquipmentMailbox','SchedulingMailbox')) { "Resource account ($recipient, sign-in blocked by design)" }
+      elseif ($resourceTargets.ContainsKey($userId)) { 'Resource account (Teams Phone resource account, sign-in blocked by design)' }
+      elseif (@(foreach ($owned in $skusByUser[$userId]) { if (& $hasPlan $owned.SkuId @('MCOEV_VIRTUALUSER')) { $owned } }).Count -gt 0) { 'Resource account (Teams Phone resource account license, sign-in blocked by design)' }
+      else { '' }
+    foreach ($assignment in $skusByUser[$userId]) {
+      $part = $assignment.SkuPartNumber.ToUpperInvariant()
+      $suiteKey = "$userId|$(Get-LicensesSuiteProduct -SkuId $assignment.SkuId -SkuPartNumber $assignment.SkuPartNumber)"
+      if ($Settings.ExcludedSkus.ContainsKey($part)) { continue }
+      $tenantSku = $skuById[$assignment.SkuId]
+      $base = [ordered]@{
+        CandidateType=''; Recommendation=''; Reason=''; SkuId=$assignment.SkuId; SkuPartNumber=$assignment.SkuPartNumber
+        SkuDisplayName=$(if ($tenantSku) { [string](Get-LicensesOptionalProperty $tenantSku 'TenantSkuDisplayName') } else { '' })
+        UserId=$userId; UserPrincipalName=$(if ($activeRow) { [string]$activeRow.'User principal name' } elseif ($identity) { $identity.UserPrincipalName } else { '' })
+        DisplayName=$(if ($identity) { $identity.DisplayName } else { '' })
+        EntraAccountEnabled=$state.Entra; AdAccountEnabled=$state.Ad; AccountState=$state.State
+        AssignmentRoutes=$assignment.Route; AssignedByGroupNames=$assignment.Groups
+        AssignmentLastUpdatedDateTime=''; LastLicensedActivityDate=''; LastChatActivityDate=''; ActivityWindowEnd=''
+        MailboxGuard='Not applicable'; ResourceAccount=$(if ($resourceReason) { 'Yes' } else { 'No' }); DependencyStatus='Not applicable'; DependentSkus=''; CountedIn=''
+      }
+      $dates = @(if ($pathDates.ContainsKey("$userId|$($assignment.SkuId)")) { $pathDates["$userId|$($assignment.SkuId)"] })
+      $knownDates = @($dates | Where-Object { $null -ne $_ })
+      if ($knownDates.Count -gt 0) { $base.AssignmentLastUpdatedDateTime = (@($knownDates | Sort-Object -Descending)[0]).ToString('o') }
+      if ($state.State -in @('Disabled','Review')) {
+        $base.CandidateType = 'Disabled account'
+        $reasons = [System.Collections.Generic.List[string]]::new()
+        $recommendation = 'Recommended'
+        if ($state.State -eq 'Review') { $recommendation = 'Review'; $reasons.Add($state.Reason) } else { $reasons.Add($state.Reason) }
+        if ($resourceReason) { $recommendation = 'Review'; $reasons.Add($resourceReason) }
+        if (& $hasPlan $assignment.SkuId $exchangePlans) {
+          $guard = Get-LicensesMailboxGuard -Mailbox $mailbox -SourceReady $mailboxes.Ready -ReviewSizeGB $Settings.MailboxReviewSizeGB
+          $base.MailboxGuard = if ($guard.Status -eq 'Clear') { 'Clear' } else { "$($guard.Status): $($guard.Reason)" }
+          if ($guard.Status -eq 'Blocked') { $recommendation = 'Blocked by dependency'; $reasons.Add($guard.Reason) }
+          elseif ($guard.Status -eq 'Unknown' -and $recommendation -ne 'Blocked by dependency') { $recommendation = 'Review'; $reasons.Add($guard.Reason) }
+        }
+        $countedIn = $referenced[$suiteKey]
+        if ($countedIn) { $base.CountedIn = $countedIn; $recommendation = 'Referenced'; $reasons.Insert(0, "Counted in $countedIn") }
+        $base.Recommendation = $recommendation; $base.Reason = ($reasons | Where-Object { $_ }) -join '; '
+        $rows.Add([pscustomobject]$base)
+        continue
+      }
+      $countedIn = $referenced[$suiteKey]
+      if ($state.State -eq 'Enabled' -and $countedIn) {
+        $base.CandidateType = 'Report candidate'; $base.Recommendation = 'Referenced'; $base.CountedIn = $countedIn; $base.Reason = "Counted in $countedIn"
+        $rows.Add([pscustomobject]$base)
+        continue
+      }
+      if ($state.State -ne 'Enabled' -or $part -notin $copilotParts) { continue }
+      if (-not $copilotState.Measured) { $copilotUnmeasured++; continue }
+      $upn = ([string]$base.UserPrincipalName).Trim().ToLowerInvariant()
+      if (-not $upn -or -not $copilotState.Rows.ContainsKey($upn)) { $copilotUnmeasured++; continue }
+      $activity = Get-LicensesCopilotActivity -Row $copilotState.Rows[$upn]
+      $windowEnd = $copilotState.WindowEnd; $cutoff = $windowEnd.AddDays(-$Settings.CopilotInactivityDays)
+      $base.ActivityWindowEnd = $windowEnd.ToString('yyyy-MM-dd')
+      $base.LastLicensedActivityDate = if ($activity.Licensed) { $activity.Licensed.ToString('yyyy-MM-dd') } else { '' }
+      $base.LastChatActivityDate = if ($activity.Chat) { $activity.Chat.ToString('yyyy-MM-dd') } else { '' }
+      if ($activity.Licensed -and $activity.Licensed -ge $cutoff) { continue }
+      $recommendation = 'Recommended'
+      $reasons = [System.Collections.Generic.List[string]]::new()
+      if ($knownDates.Count -eq 0 -or $knownDates.Count -ne $dates.Count) { $recommendation = 'Review'; $reasons.Add('Assignment date unknown') }
+      else {
+        # LastUpdatedDateTime is a lower bound of the assignment age; a recent update only delays the candidate.
+        $latest = @($knownDates | Sort-Object -Descending)[0]
+        if (($AsOfUtc - $latest).TotalDays -lt $Settings.CopilotAssignmentGraceDays) { $copilotGrace++; continue }
+      }
+      if ($activity.Chat -and $activity.Chat -ge $cutoff) { $recommendation = 'Review'; $reasons.Insert(0, 'Copilot Chat only') }
+      else { $reasons.Insert(0, ('No Microsoft 365 Copilot activity in {0} days' -f $Settings.CopilotInactivityDays)) }
+      $base.CandidateType = 'Copilot without activity'; $base.Recommendation = $recommendation; $base.Reason = $reasons -join '; '
+      $rows.Add([pscustomobject]$base)
+    }
+  }
+
+  # Dependency guard: a qualifying license is not removable while a dependent license on the same user would keep no qualifying license.
+  $byUserSku = @{}
+  $removableByUser = @{}
+  foreach ($row in $rows) {
+    $byUserSku["$($row.UserId)|$($row.SkuPartNumber.ToUpperInvariant())"] = $row
+    if ($row.Recommendation -in @('Recommended','Referenced')) {
+      if (-not $removableByUser.ContainsKey($row.UserId)) { $removableByUser[$row.UserId] = [System.Collections.Generic.List[string]]::new() }
+      $removableByUser[$row.UserId].Add($row.SkuPartNumber.ToUpperInvariant())
+    }
+  }
+  foreach ($row in $rows) {
+    if ($row.Recommendation -notin @('Recommended','Referenced')) { continue }
+    $part = $row.SkuPartNumber.ToUpperInvariant()
+    $owned = @(foreach ($assignment in $skusByUser[$row.UserId]) { $assignment.SkuPartNumber.ToUpperInvariant() })
+    $removable = @($removableByUser[$row.UserId])
+    $blockedBy = [System.Collections.Generic.List[string]]::new(); $together = [System.Collections.Generic.List[string]]::new()
+    foreach ($rule in $DependencyRules) {
+      if ($part -notin $rule.Qualifying) { continue }
+      # An E3 to F3 review keeps F3, which still qualifies when the rule lists it.
+      if ($row.CountedIn -eq 'ReportCandidates:E3 to F3 review' -and 'SPE_F1' -in $rule.Qualifying) { continue }
+      foreach ($dependent in @($owned | Where-Object { $_ -in $rule.Dependents })) {
+        $remaining = @($owned | Where-Object { $_ -in $rule.Qualifying -and $_ -notin $removable })
+        if ($remaining.Count -gt 0) { continue }
+        $dependentRow = $byUserSku["$($row.UserId)|$dependent"]
+        if ($dependentRow -and $dependentRow.Recommendation -in @('Recommended','Referenced')) { $together.Add($dependent) } else { $blockedBy.Add($dependent) }
+      }
+    }
+    if ($blockedBy.Count -gt 0) {
+      $row.DependencyStatus = 'Blocked by dependency'; $row.DependentSkus = (@($blockedBy | Sort-Object -Unique) -join ';')
+      if ($row.Recommendation -eq 'Recommended') { $row.Recommendation = 'Blocked by dependency' }
+      $row.Reason = (@($row.Reason, ('Dependent license keeps this license required: {0}' -f $row.DependentSkus)) | Where-Object { $_ }) -join '; '
+    }
+    elseif ($together.Count -gt 0) { $row.DependencyStatus = 'Dependents removed together'; $row.DependentSkus = (@($together | Sort-Object -Unique) -join ';') }
+    else { $row.DependencyStatus = 'Clear' }
+  }
+
+  $dynamicsPattern = '^(DYN365_|DYNAMICS_365|D365_)'
+  # One pass per collection: per-SKU counters instead of filtering every collection for every SKU.
+  $tally = @{}
+  foreach ($id in $skuById.Keys) { $tally[$id] = @{ Users=@{}; Disabled=0; Enabled=0; Recommended=0; Review=0; Blocked=0; Referenced=0 } }
+  foreach ($assignment in $assignments.Values) {
+    if (-not $tally.ContainsKey($assignment.SkuId)) { continue }
+    $counter = $tally[$assignment.SkuId]; $counter.Users[$assignment.UserId] = $true
+    $userState = $stateByUser[$assignment.UserId].State
+    if ($userState -eq 'Disabled') { $counter.Disabled++ } elseif ($userState -eq 'Enabled') { $counter.Enabled++ }
+  }
+  foreach ($row in $rows) {
+    if (-not $tally.ContainsKey($row.SkuId)) { continue }
+    switch ($row.Recommendation) { 'Recommended' { $tally[$row.SkuId].Recommended++ } 'Review' { $tally[$row.SkuId].Review++ } 'Blocked by dependency' { $tally[$row.SkuId].Blocked++ } 'Referenced' { $tally[$row.SkuId].Referenced++ } }
+  }
+  $capacity = foreach ($id in ($skuById.Keys | Sort-Object)) {
+    $tenantSku = $skuById[$id]; $part = ([string]$tenantSku.TenantSkuPartNumber).Trim(); $upper = $part.ToUpperInvariant()
+    $counter = $tally[$id]
+    $usage = 'Not applicable'; $usageReason = 'No usage criterion for this license'
+    if ($upper -in $copilotParts) {
+      if ($copilotState.Measured) { $usage = 'Measured'; $usageReason = ('Licensed Microsoft 365 Copilot activity, window ending {0}' -f $copilotState.WindowEnd.ToString('yyyy-MM-dd')) }
+      else { $usage = 'Not measured'; $usageReason = $copilotState.Reason }
+    }
+    elseif ($upper -match $dynamicsPattern) { $usage = 'Not measured'; $usageReason = 'No Dynamics 365 product telemetry; active users are a signal only' }
+    $enabled = [long]$tenantSku.TenantPrepaidEnabled; $consumed = [long]$tenantSku.TenantConsumedUnits
+    [pscustomobject][ordered]@{
+      SkuId=$id; SkuPartNumber=$part; SkuDisplayName=[string](Get-LicensesOptionalProperty $tenantSku 'TenantSkuDisplayName')
+      Excluded=[bool]$Settings.ExcludedSkus.ContainsKey($upper); ExclusionReason=$(if ($Settings.ExcludedSkus.ContainsKey($upper)) { $Settings.ExcludedSkus[$upper] } else { '' })
+      EnabledUnits=$enabled; WarningUnits=(Get-LicensesOptionalProperty $tenantSku 'TenantPrepaidWarning'); SuspendedUnits=(Get-LicensesOptionalProperty $tenantSku 'TenantPrepaidSuspended'); LockedOutUnits=(Get-LicensesOptionalProperty $tenantSku 'TenantPrepaidLockedOut')
+      ConsumedUnits=$consumed; AvailableUnits=($enabled - $consumed)
+      AssignedUsers=$counter.Users.Count
+      DisabledAccountUsers=$counter.Disabled
+      ActiveUsersUsageNotMeasured=$(if ($usage -eq 'Not measured') { $counter.Enabled } else { 0 })
+      RecommendedCandidates=$counter.Recommended; ReviewCandidates=$counter.Review
+      BlockedCandidates=$counter.Blocked; ReferencedCandidates=$counter.Referenced
+      CopilotGraceUsers=$(if ($upper -in $copilotParts) { $copilotGrace } else { 0 })
+      UsageEvidence=$usage; UsageEvidenceReason=$usageReason
+    }
+  }
+  $excludedRows = @($rows | Where-Object { $Settings.ExcludedSkus.ContainsKey($_.SkuPartNumber.ToUpperInvariant()) }).Count
+  if ($excludedRows -ne 0) { throw 'Excluded SKUs must not produce candidates.' }
+  return [pscustomobject]@{ Candidates=$rows.ToArray(); Capacity=@($capacity); Sources=$sources.ToArray(); CopilotMeasured=$copilotState.Measured; CopilotReason=$copilotState.Reason }
+}
+
+function Publish-LicensesSkuReportCsv {
+  param([Parameter(Mandatory)][string]$Folder, [Parameter(Mandatory)][string]$SnapshotId, [Parameter(Mandatory)][string]$TenantKey, [Parameter(Mandatory)][string]$ReceiptRunId, [Parameter(Mandatory)]$Decisions)
+  $candidateColumns = @('SnapshotId','TenantKey','ReceiptRunId','CandidateType','Recommendation','Reason','SkuId','SkuPartNumber','SkuDisplayName','UserId','UserPrincipalName','DisplayName','EntraAccountEnabled','AdAccountEnabled','AccountState','AssignmentRoutes','AssignedByGroupNames','AssignmentLastUpdatedDateTime','LastLicensedActivityDate','LastChatActivityDate','ActivityWindowEnd','MailboxGuard','ResourceAccount','DependencyStatus','DependentSkus','CountedIn')
+  $capacityColumns = @('SnapshotId','TenantKey','ReceiptRunId','SkuId','SkuPartNumber','SkuDisplayName','Excluded','ExclusionReason','EnabledUnits','WarningUnits','SuspendedUnits','LockedOutUnits','ConsumedUnits','AvailableUnits','AssignedUsers','DisabledAccountUsers','ActiveUsersUsageNotMeasured','RecommendedCandidates','ReviewCandidates','BlockedCandidates','ReferencedCandidates','CopilotGraceUsers','UsageEvidence','UsageEvidenceReason')
+  $identity = [ordered]@{ SnapshotId=$SnapshotId; TenantKey=$TenantKey; ReceiptRunId=$ReceiptRunId }
+  $paths = [System.Collections.Generic.List[string]]::new()
+  foreach ($spec in @(
+      @{ Name='M365_Licenses_ReportSkuCandidates.csv'; Columns=$candidateColumns; Rows=@($Decisions.Candidates) },
+      @{ Name='M365_Licenses_ReportSkuCapacity.csv'; Columns=$capacityColumns; Rows=@($Decisions.Capacity) })) {
+    $rows = @(foreach ($row in $spec.Rows) { $values = [ordered]@{} + $identity; foreach ($property in $row.PSObject.Properties) { $values[$property.Name] = $property.Value }; [pscustomobject]$values })
+    $path = Join-Path $Folder $spec.Name
+    $pending = "$path.$SnapshotId.pending"
+    try {
+      $lines = if ($rows.Count -gt 0) { @($rows | Select-Object -Property $spec.Columns | ConvertTo-Csv -NoTypeInformation) } else { @(($spec.Columns | ForEach-Object { '"{0}"' -f $_ }) -join ',') }
+      $bytes = [Text.UTF8Encoding]::new($false).GetBytes(($lines -join "`r`n") + "`r`n")
+      $stream = [IO.File]::Open($pending, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+      try { $stream.Write($bytes, 0, $bytes.Length); $stream.Flush($true) } finally { $stream.Dispose() }
+      [IO.File]::Move($pending, $path, $true)
+      $readBack = @(Import-Csv -LiteralPath $path -ErrorAction Stop)
+      if ($readBack.Count -ne $rows.Count -or @($readBack | Where-Object { $_.SnapshotId -cne $SnapshotId -or $_.ReceiptRunId -cne $ReceiptRunId }).Count -gt 0) {
+        throw "Published license SKU decision CSV does not match its snapshot: $($spec.Name)"
+      }
+      $paths.Add($path)
+    }
+    finally { if (Test-Path -LiteralPath $pending -PathType Leaf) { Remove-Item -LiteralPath $pending -Force -ErrorAction SilentlyContinue } }
+  }
+  return $paths.ToArray()
+}
+
 function Publish-LicensesRunReport {
   param(
     [Parameter(Mandatory)][string]$Folder,
     [Parameter(Mandatory)][string]$TenantKey,
     [Parameter(Mandatory)][string]$CollectedAtUtc,
     [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$TenantRows,
-    [switch]$ForceAdCsvAnalysis
+    [switch]$ForceAdCsvAnalysis,
+    [string]$DependencyRulesPath
   )
   $result = [pscustomobject]@{ Published=$false; UploadSatisfied=$false; SnapshotId=''; ReceiptRunId=''; Reason='' }
   $snapshot = $null
+  $skuDecisionPaths = @()
   try {
     # Licensing files are proven by the active receipt's own publication hashes; the receipt completes after the report.
     $publication = Get-SmartM365CurrentSourcePublication
@@ -2360,6 +2828,23 @@ function Publish-LicensesRunReport {
     $result.SnapshotId = [string]$snapshot.Id
     $result.Published = $true
     WriteLog -Message ("License report snapshot {0} published; its CSV files are optional outputs of the licensing receipt." -f $snapshot.Id) 'INFO'
+    # SKU decisions are additive: their failure never withdraws the published report.
+    try {
+      $settings = Get-LicensesDecisionSettings -Config $ScriptLocalConfig
+      if (-not $DependencyRulesPath) { $DependencyRulesPath = Join-Path $PSScriptRoot 'SmartM365-LicenseDependencies.json.txt' }
+      $rules = Read-LicensesDependencyRules -Path $DependencyRulesPath
+      $decisions = Get-LicensesSkuDecisions -Folder $Folder -TenantKey $TenantKey -TenantRows $TenantRows -CurrentRunPublication $proof -RecoveryDetails @(if ($usage) { $usage.RecoveryDetails }) -DowngradeDetails @(if ($usage) { $usage.DowngradeDetails }) -Settings $settings -DependencyRules $rules
+      $skuDecisionPaths = @(Publish-LicensesSkuReportCsv -Folder $Folder -SnapshotId $result.SnapshotId -TenantKey $TenantKey -ReceiptRunId $result.ReceiptRunId -Decisions $decisions)
+      foreach ($csvPath in $skuDecisionPaths) { Register-SmartM365SourceCsv -Path $csvPath }
+      if (-not $decisions.CopilotMeasured) { WriteLog -Message ("Copilot usage not measured: {0}. No Copilot candidate is produced." -f $decisions.CopilotReason) 'INFO' }
+      WriteLog -Message ("License SKU decisions published with snapshot {0}: {1} candidate row(s), {2} SKU capacity row(s)." -f $result.SnapshotId, @($decisions.Candidates).Count, @($decisions.Capacity).Count) 'INFO'
+    }
+    catch {
+      $skuDecisionPaths = @()
+      $note = 'License SKU decisions not published in this run: M365_Licenses_ReportSkuCandidates.csv and M365_Licenses_ReportSkuCapacity.csv in DATA-LAST belong to an earlier run and are not recorded by this receipt. Reason: {0}' -f $_.Exception.Message
+      WriteLog -Message ("{0} The license report is not affected." -f $note) 'WARNING'
+      try { Add-SmartM365SourceRunNote -Message $note } catch { WriteLog -Message ("License SKU decision note could not be added to the run state: {0}" -f $_.Exception.Message) 'WARNING' }
+    }
   }
   catch {
     $result.Reason = $_.Exception.Message
@@ -2381,6 +2866,14 @@ function Publish-LicensesRunReport {
     $note = 'License report {0} is recorded by this receipt but was not uploaded to SharePoint. Reason: {1}' -f $result.SnapshotId, $result.Reason
     WriteLog -Message ("{0} The summary email will not be sent." -f $note) 'WARNING'
     try { Add-SmartM365SourceRunNote -Message $note } catch { WriteLog -Message ("License report note could not be added to the run state: {0}" -f $_.Exception.Message) 'WARNING' }
+  }
+  foreach ($path in $skuDecisionPaths) {
+    try { $uploaded = Invoke-SmartM365SharePointCsvUpload -LocalFilePath $path } catch { $uploaded = $false }
+    if (-not $uploaded) {
+      $note = 'License SKU decision file {0} is recorded by this receipt but was not uploaded to SharePoint.' -f [IO.Path]::GetFileName($path)
+      WriteLog -Message $note 'WARNING'
+      try { Add-SmartM365SourceRunNote -Message $note } catch { WriteLog -Message ("License SKU decision note could not be added to the run state: {0}" -f $_.Exception.Message) 'WARNING' }
+    }
   }
   return $result
 }
@@ -3377,7 +3870,7 @@ function Publish-LicensesWeeklyHistory {
 # ==========================================================
 # Main
 # ==========================================================
-$ScriptVersion = "1.48"
+$ScriptVersion = "1.49"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LicensesCsvLogFolderPath' -DefaultValue $OutputPath
 $LatestCsvFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ''

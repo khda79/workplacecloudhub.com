@@ -1,5 +1,5 @@
 {
-  "Version": "1.1",
+  "Version": "1.2",
   "Producers": [
     {
       "Script": "SmartM365-ActiveUsers-Inventory.ps1",
@@ -76,7 +76,9 @@
         "M365_Licenses_ReportCandidates.csv",
         "M365_Licenses_ReportAssignmentIssues.csv",
         "M365_Licenses_ReportGaps.csv",
-        "M365_Licenses_ReportSources.csv"
+        "M365_Licenses_ReportSources.csv",
+        "M365_Licenses_ReportSkuCandidates.csv",
+        "M365_Licenses_ReportSkuCapacity.csv"
       ]
     },
     {
