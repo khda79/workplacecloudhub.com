@@ -1,4 +1,4 @@
-﻿# Version 1.1.0
+﻿# Version 1.2.0
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
@@ -42,6 +42,9 @@ if (-not (Test-Path -LiteralPath $importExcelHealthPath -PathType Leaf)) { throw
 . $importExcelHealthPath
 Initialize-SmartM365ImportExcel -SkipRepositoryRepair | Out-Null
 Import-Module (Join-Path $PSScriptRoot 'ConsoleActivityEvidence.psm1') -Force -ErrorAction Stop
+if (-not ('Workplace.Prepared.StrictCsv' -as [type])) {
+    Add-Type -Path (Join-Path $PSScriptRoot 'PreparedCsvReader.cs') -CompilerOptions '-optimize+'
+}
 $script:workforceStageClock=[Diagnostics.Stopwatch]::StartNew()
 $script:workforcePreviousStage='Startup'
 function Write-WorkforceDiagnostic {
@@ -364,6 +367,11 @@ function Import-SelectedCsvColumns {
         [string[]]$Columns
     )
 
+    # Compiled strict reader first; any other construct, a missing column and every failure
+    # fall back to Import-Csv below, so the selected values are unchanged.
+    $fastRows = [Workplace.Prepared.StrictCsv]::ReadColumns($Path, [char]',', [string[]]$Columns)
+    if ($null -ne $fastRows -and $fastRows.Length -gt 0) { return $fastRows }
+    Write-Host ('[{0:yyyy-MM-dd HH:mm:ss}] Workforce CSV read by Import-Csv: {1}' -f (Get-Date),[IO.Path]::GetFileName($Path))
     $sample = Import-Csv -LiteralPath $Path | Select-Object -First 1
     $headers = $sample.PSObject.Properties.Name
     foreach ($column in $Columns) {
@@ -452,8 +460,11 @@ function Get-ActivityClassification {
     $m365LastActivity = if ($null -ne $ActivityRow) { Convert-ToDateTimeOrNull (Get-PropertyValue $ActivityRow 'LastActivityDate') } else { $null }
     $adLastActivity = if ($null -ne $AdRow) { Convert-AdLogonDateTimeOrNull (Get-PropertyValue $AdRow 'LastLogonDate') } else { $null }
     $consoleLastActivity = if($IncludeConsole -and $null -ne $ConsoleActivity){$ConsoleActivity.Utc.UtcDateTime}else{$null}
-    $observedDates = @(@($m365LastActivity, $adLastActivity, $consoleLastActivity) | Where-Object { $null -ne $_ })
-    $lastActivity = if ($observedDates.Count -gt 0) { $observedDates | Sort-Object -Descending | Select-Object -First 1 } else { $null }
+    # Latest observed date; a direct loop avoids two pipelines per user.
+    $lastActivity = $null
+    foreach ($observedDate in @($m365LastActivity, $adLastActivity, $consoleLastActivity)) {
+        if ($null -ne $observedDate -and ($null -eq $lastActivity -or $observedDate -gt $lastActivity)) { $lastActivity = $observedDate }
+    }
     $days = if ($null -ne $lastActivity) { [math]::Max(0, [int][math]::Floor(($AsOfDate.Date - $lastActivity.Date).TotalDays)) } else { $null }
 
     if ($null -ne $m365LastActivity -and $null -ne $adLastActivity) {
@@ -1102,17 +1113,17 @@ foreach ($week in @($latestActiveByWeek.Keys | Sort-Object)) {
     $weekEntraRows = @(Import-SelectedCsvColumns -Path $latestActiveByWeek[$week].FullName -Columns @('Object Id', 'User principal name', 'AccountEnabled', 'UserType', 'OnPremisesSecurityIdentifier', 'OnPremisesImmutableId'))
     $weekPopulationLinks = if ($weekAdRows.Count -gt 0) { Resolve-AccountPopulationLink -EntraUsers $weekEntraRows -AdUsers $weekAdRows } else { $null }
     if ($null -eq $weekPopulationLinks) { Write-WorkforceDiagnostic "History $week - no AD snapshot, current population used" }
-    $weekActiveRows = @($weekEntraRows | Where-Object {
-        $candidateId = Get-NormalizedKey (Get-PropertyValue $_ 'Object Id')
-        $candidateUpn = Get-NormalizedKey (Get-PropertyValue $_ 'User principal name')
+    $weekActiveRows = @(foreach ($weekEntraRow in $weekEntraRows) {
+        $candidateId = Get-NormalizedKey (Get-PropertyValue $weekEntraRow 'Object Id')
+        $candidateUpn = Get-NormalizedKey (Get-PropertyValue $weekEntraRow 'User principal name')
         $inPopulation = if ($null -ne $weekPopulationLinks) {
             Test-WorkforceCandidate -CandidateId $candidateId -Links $weekPopulationLinks -CurrentLinks $currentPopulationLinks
         } else {
             ($candidateId -and $workforceEntraIds.Contains($candidateId)) -or ($candidateUpn -and $workforceUpns.Contains($candidateUpn))
         }
-        (Get-NormalizedKey (Get-PropertyValue $_ 'AccountEnabled')) -eq 'true' -and
-        (Get-NormalizedKey (Get-PropertyValue $_ 'UserType')) -eq 'member' -and
-        $inPopulation
+        if ((Get-NormalizedKey (Get-PropertyValue $weekEntraRow 'AccountEnabled')) -eq 'true' -and
+            (Get-NormalizedKey (Get-PropertyValue $weekEntraRow 'UserType')) -eq 'member' -and
+            $inPopulation) { $weekEntraRow }
     })
     $weekEntraRows = $null
     Write-WorkforceDiagnostic "History $week - load activity"
