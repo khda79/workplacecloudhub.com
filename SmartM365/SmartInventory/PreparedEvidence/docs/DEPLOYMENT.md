@@ -179,6 +179,8 @@ Keep memory.csv, stages.ndjson, environment.json and result.json for diagnosis. 
 Every source CSV must contain TenantKey and all rows must match the active tenant, including history. PreparedAllowLegacyTenantless must remain false: a global tenantless bypass is rejected. There is no exception registry. Unexpected empty output tables are rejected unless explicitly named in PreparedAllowEmptyTables.
 
 source validation uses semicolons for Exchange_OnPrem_Servers_Inventory.csv as well as daily statistics, matching the evidence generators. Other source CSVs use commas. The same strict record-shape and tenant checks apply to both formats; malformed files are not retried with a different separator. No source CSV conversion is needed.
+
+A compiled strict reader (`SmartWorkplaceIntelligence/scripts/PreparedCsvReader.cs`, deployed with the scripts) performs these checks for well-formed files. Blank lines, ambiguous quoting, a field-count or tenant mismatch and any read error send the file back to the original TextFieldParser check, so results and error messages are unchanged; the final validation log line reports how many files used that reference parser. The Workforce weekly history reads its selected columns with the same reader and falls back to Import-Csv in the same way. The native build and the SharePoint transfer log per-table and per-file durations (timings only, no values).
 #### Legacy tenant-key repair (manual only)
 
 `Repair-SmartM365-WorkplaceEvidence-TenantKeys.cmd` previews explicitly selected
