@@ -1,0 +1,242 @@
+/// Licences per-user, per-SKU decisions of the qualified report snapshot (M365_Licenses_ReportSkuCandidates.csv). Referenced rows are already counted in License Report Candidates. Empty when the batch does not qualify the file.
+table 'License SKU Candidates'
+	lineageTag: c2f7667a-b3f0-4764-adee-bf593a4ed1a2
+
+	measure 'License SKU Candidate Rows' = COUNTROWS ( 'License SKU Candidates' )
+		formatString: #,0
+		displayFolder: Licensing | SKU decisions
+		lineageTag: 2d36da98-f4f7-488c-8b10-d88b147d1277
+
+	measure 'License SKU Recommended Rows' = CALCULATE ( [License SKU Candidate Rows], KEEPFILTERS ( 'License SKU Candidates'[Recommendation] = "Recommended" ) )
+		formatString: #,0
+		displayFolder: Licensing | SKU decisions
+		lineageTag: aafbce99-6d92-4668-ab9e-3d9c8a6af235
+
+	measure 'License SKU Review Rows' = CALCULATE ( [License SKU Candidate Rows], KEEPFILTERS ( 'License SKU Candidates'[Recommendation] = "Review" ) )
+		formatString: #,0
+		displayFolder: Licensing | SKU decisions
+		lineageTag: c640604f-1cfd-4a08-9dfa-ff362b8da4a3
+
+	measure 'License SKU Blocked Rows' = CALCULATE ( [License SKU Candidate Rows], KEEPFILTERS ( 'License SKU Candidates'[Recommendation] = "Blocked by dependency" ) )
+		formatString: #,0
+		displayFolder: Licensing | SKU decisions
+		lineageTag: a67847c9-01fe-4069-af2a-d957799e28a1
+
+	column 'Snapshot ID'
+		dataType: string
+		lineageTag: 8a1b05b1-25bd-4d45-8628-0ce76d37990b
+		summarizeBy: none
+		sourceColumn: SnapshotId
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Tenant Key'
+		dataType: string
+		lineageTag: 5d123412-37c5-409d-a8ee-6011fd8f125c
+		summarizeBy: none
+		sourceColumn: TenantKey
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Receipt Run ID'
+		dataType: string
+		lineageTag: 26146c53-28ff-4b31-bcde-37b16d2f0585
+		summarizeBy: none
+		sourceColumn: ReceiptRunId
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Candidate Type'
+		dataType: string
+		lineageTag: b5323b3b-4067-4043-b887-af284157f102
+		summarizeBy: none
+		sourceColumn: CandidateType
+
+		annotation SummarizationSetBy = Automatic
+
+	column Recommendation
+		dataType: string
+		lineageTag: 58e51be8-0283-4777-918c-5a40ce29a1ee
+		summarizeBy: none
+		sourceColumn: Recommendation
+
+		annotation SummarizationSetBy = Automatic
+
+	column Reason
+		dataType: string
+		lineageTag: a270fa90-4fa3-46f5-b1dc-6f422fc9f1e3
+		summarizeBy: none
+		sourceColumn: Reason
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'SKU ID'
+		dataType: string
+		lineageTag: 133f1fe6-93cb-4daf-b598-92b4fe3487b0
+		summarizeBy: none
+		sourceColumn: SkuId
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'SKU Part Number'
+		dataType: string
+		lineageTag: 0250f35a-fbcf-4378-a6f9-76da58e9faad
+		summarizeBy: none
+		sourceColumn: SkuPartNumber
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'SKU Display Name'
+		dataType: string
+		lineageTag: 352d98bc-ef3e-4067-8cd3-ea6810633a0d
+		summarizeBy: none
+		sourceColumn: SkuDisplayName
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'User ID'
+		dataType: string
+		lineageTag: c4983a30-f96a-4629-8678-3e71dd17bc64
+		summarizeBy: none
+		sourceColumn: UserId
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'User Principal Name'
+		dataType: string
+		lineageTag: 32f9b68b-8bcd-4af4-8b45-7377facc5206
+		summarizeBy: none
+		sourceColumn: UserPrincipalName
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Display Name'
+		dataType: string
+		lineageTag: 9a3c5af6-1e27-45f8-b6c4-5e2d9e5640b3
+		summarizeBy: none
+		sourceColumn: DisplayName
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Entra Account Enabled'
+		dataType: string
+		lineageTag: 831e596e-eb97-4629-a9e6-e95685a7b433
+		summarizeBy: none
+		sourceColumn: EntraAccountEnabled
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'AD Account Enabled'
+		dataType: string
+		lineageTag: a799c2e6-8891-417d-bdd2-93039ba5176f
+		summarizeBy: none
+		sourceColumn: AdAccountEnabled
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Account State'
+		dataType: string
+		lineageTag: d5403d47-cbb8-4d94-a675-5b1a4e4c3775
+		summarizeBy: none
+		sourceColumn: AccountState
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Assignment Routes'
+		dataType: string
+		lineageTag: cda8c7f6-c5c9-4f2e-99b1-4b16abd9c666
+		summarizeBy: none
+		sourceColumn: AssignmentRoutes
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Assigned By Group Names'
+		dataType: string
+		lineageTag: 77735520-9dd1-452d-836b-004a2f91c356
+		summarizeBy: none
+		sourceColumn: AssignedByGroupNames
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Assignment Last Updated Date Time'
+		dataType: string
+		lineageTag: f84d44e9-f6f2-4d3f-87ab-7ea16b64214b
+		summarizeBy: none
+		sourceColumn: AssignmentLastUpdatedDateTime
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Last Licensed Activity Date'
+		dataType: string
+		lineageTag: 8c12b768-4917-41b0-91ba-445f4173d94f
+		summarizeBy: none
+		sourceColumn: LastLicensedActivityDate
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Last Chat Activity Date'
+		dataType: string
+		lineageTag: 2fb52420-0fc3-4528-abf3-32ddd9d8914a
+		summarizeBy: none
+		sourceColumn: LastChatActivityDate
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Activity Window End'
+		dataType: string
+		lineageTag: c50c9bd5-7c6e-49f7-99c2-89ad4db06814
+		summarizeBy: none
+		sourceColumn: ActivityWindowEnd
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Mailbox Guard'
+		dataType: string
+		lineageTag: 602c49da-8534-4676-b3f8-df7a349177fc
+		summarizeBy: none
+		sourceColumn: MailboxGuard
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Resource Account'
+		dataType: string
+		lineageTag: fdb57467-04a2-475a-ba73-6578eb2c8bcd
+		summarizeBy: none
+		sourceColumn: ResourceAccount
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Dependency Status'
+		dataType: string
+		lineageTag: 6f27aac2-f13b-49e3-ba43-604a2d8de846
+		summarizeBy: none
+		sourceColumn: DependencyStatus
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Dependent SKUs'
+		dataType: string
+		lineageTag: bfa0cea5-7d46-40e6-b138-8c89522ee671
+		summarizeBy: none
+		sourceColumn: DependentSkus
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Counted In'
+		dataType: string
+		lineageTag: 596af96f-cf59-4e60-93c6-e0472a0a85c7
+		summarizeBy: none
+		sourceColumn: CountedIn
+
+		annotation SummarizationSetBy = Automatic
+
+	partition 'License SKU Candidates' = m
+		mode: import
+		source =
+				let
+				    Columns = {"SnapshotId", "TenantKey", "ReceiptRunId", "CandidateType", "Recommendation", "Reason", "SkuId", "SkuPartNumber", "SkuDisplayName", "UserId", "UserPrincipalName", "DisplayName", "EntraAccountEnabled", "AdAccountEnabled", "AccountState", "AssignmentRoutes", "AssignedByGroupNames", "AssignmentLastUpdatedDateTime", "LastLicensedActivityDate", "LastChatActivityDate", "ActivityWindowEnd", "MailboxGuard", "ResourceAccount", "DependencyStatus", "DependentSkus", "CountedIn"},
+				    Raw = GetLicenseReportCsv("M365_Licenses_ReportSkuCandidates.csv", Columns)
+				in
+				    Raw
+
+	annotation PBI_ResultType = Table

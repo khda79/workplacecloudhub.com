@@ -20,13 +20,13 @@
                 "Measure": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "License Evidence"
+                      "Entity": "License SKU Capacity"
                     }
                   },
                   "Property": "Enabled License Units"
                 }
               },
-              "queryRef": "License Evidence.Enabled License Units",
+              "queryRef": "License SKU Capacity.Enabled License Units",
               "nativeQueryRef": "Enabled",
               "displayName": "Enabled"
             },
@@ -35,13 +35,13 @@
                 "Measure": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "License Evidence"
+                      "Entity": "License SKU Capacity"
                     }
                   },
                   "Property": "Consumed License Units"
                 }
               },
-              "queryRef": "License Evidence.Consumed License Units",
+              "queryRef": "License SKU Capacity.Consumed License Units",
               "nativeQueryRef": "Assigned",
               "displayName": "Assigned"
             },
@@ -50,14 +50,14 @@
                 "Measure": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "License Evidence"
+                      "Entity": "License SKU Capacity"
                     }
                   },
-                  "Property": "Available License Units"
+                  "Property": "Available License Units Label"
                 }
               },
-              "queryRef": "License Evidence.Available License Units",
-              "nativeQueryRef": "Available",
+              "queryRef": "License SKU Capacity.Available License Units Label",
+              "nativeQueryRef": "Available License Units Label",
               "displayName": "Available"
             },
             {
@@ -65,15 +65,34 @@
                 "Measure": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "License Evidence"
+                      "Entity": "License SKU Capacity"
                     }
                   },
                   "Property": "Observed License Capacity Utilization (%)"
                 }
               },
-              "queryRef": "License Evidence.Observed License Capacity Utilization (%)",
+              "queryRef": "License SKU Capacity.Observed License Capacity Utilization (%)",
               "nativeQueryRef": "Assignment rate (%)",
               "displayName": "Assignment rate (%)"
+            }
+          ]
+        },
+        "Tooltips": {
+          "projections": [
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "License SKU Capacity"
+                    }
+                  },
+                  "Property": "Over-assigned License Units"
+                }
+              },
+              "queryRef": "License SKU Capacity.Over-assigned License Units",
+              "nativeQueryRef": "Over-assigned License Units",
+              "displayName": "Over-assigned units"
             }
           ]
         }
@@ -529,6 +548,49 @@
               "expr": {
                 "Literal": {
                   "Value": "0D"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "subTitle": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "text": {
+              "expr": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "License Report Qualification"
+                    }
+                  },
+                  "Property": "License SKU Qualification Label"
+                }
+              }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "10D"
+                }
+              }
+            },
+            "fontColor": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#52606D'"
+                    }
+                  }
                 }
               }
             }

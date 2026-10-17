@@ -53,12 +53,31 @@
                       "Entity": "License Report Summary"
                     }
                   },
-                  "Property": "License Overview Family Available Units"
+                  "Property": "License Overview Family Available Label"
                 }
               },
-              "queryRef": "License Report Summary.License Overview Family Available Units",
-              "nativeQueryRef": "Available",
+              "queryRef": "License Report Summary.License Overview Family Available Label",
+              "nativeQueryRef": "License Overview Family Available Label",
               "displayName": "Available"
+            }
+          ]
+        },
+        "Tooltips": {
+          "projections": [
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "License Report Summary"
+                    }
+                  },
+                  "Property": "License Overview Family Over-assigned Units"
+                }
+              },
+              "queryRef": "License Report Summary.License Overview Family Over-assigned Units",
+              "nativeQueryRef": "License Overview Family Over-assigned Units",
+              "displayName": "Over-assigned units"
             }
           ]
         }
@@ -584,7 +603,37 @@
             "show": {
               "expr": {
                 "Literal": {
-                  "Value": "false"
+                  "Value": "true"
+                }
+              }
+            },
+            "text": {
+              "expr": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "License Report Qualification"
+                    }
+                  },
+                  "Property": "License Qualification Label"
+                }
+              }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "10D"
+                }
+              }
+            },
+            "fontColor": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#52606D'"
+                    }
+                  }
                 }
               }
             }

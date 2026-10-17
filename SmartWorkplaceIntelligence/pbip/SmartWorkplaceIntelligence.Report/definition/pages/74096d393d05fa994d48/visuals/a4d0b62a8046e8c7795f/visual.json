@@ -49,6 +49,21 @@
               "queryRef": "License Report Summary.License Report Enabled Units",
               "nativeQueryRef": "Enabled units",
               "displayName": "Enabled units"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "License Report Summary"
+                    }
+                  },
+                  "Property": "License Overview Family Over-assigned Units"
+                }
+              },
+              "queryRef": "License Report Summary.License Overview Family Over-assigned Units",
+              "nativeQueryRef": "License Overview Family Over-assigned Units",
+              "displayName": "Over-assigned units"
             }
           ]
         },
@@ -404,8 +419,13 @@
             },
             "text": {
               "expr": {
-                "Literal": {
-                  "Value": "'Current snapshot · capacities are not interchangeable'"
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "License Report Qualification"
+                    }
+                  },
+                  "Property": "License Subtitle Capacity Units"
                 }
               }
             },

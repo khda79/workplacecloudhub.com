@@ -1,0 +1,115 @@
+/// License report qualification of the pinned batch: one row for the report and one per license file. Shown on every license visual.
+table 'License Report Qualification'
+	lineageTag: 0e3f83b5-f3eb-4191-b160-a4fd711f5cae
+
+	measure 'License Qualification State' = CALCULATE ( SELECTEDVALUE ( 'License Report Qualification'[State] ), REMOVEFILTERS ( 'License Report Qualification' ), 'License Report Qualification'[Scope] = "License report" )
+		formatString: @
+		displayFolder: Licensing | Qualification
+		lineageTag: 09b96383-7d51-4d0c-86c6-e60374e4cea6
+
+	/// Visible on every license visual. Not qualified means empty tables, never older values.
+	measure 'License Qualification Label' =
+			VAR _state = [License Qualification State]
+			VAR _reason = CALCULATE ( SELECTEDVALUE ( 'License Report Qualification'[Reason] ), REMOVEFILTERS ( 'License Report Qualification' ), 'License Report Qualification'[Scope] = "License report" )
+			VAR _run = CALCULATE ( SELECTEDVALUE ( 'License Report Qualification'[Receipt Run ID] ), REMOVEFILTERS ( 'License Report Qualification' ), 'License Report Qualification'[Scope] = "License report" )
+			RETURN SWITCH (
+			    _state,
+			    "Qualified", "License report qualified by licensing run " & LEFT ( _run, 8 ) & " · evidence " & [License Report Evidence Status],
+			    "Not verified", "License report not verified: batch predates qualification · evidence " & [License Report Evidence Status],
+			    "Not qualified", "License report not qualified: " & _reason,
+			    "License report qualification unknown"
+			)
+		formatString: @
+		displayFolder: Licensing | Qualification
+		lineageTag: 6da8725a-3c5c-4358-95e1-58b924a963a9
+
+	measure 'License SKU Qualification Label' =
+			VAR _report = [License Qualification State]
+			VAR _state = CALCULATE ( SELECTEDVALUE ( 'License Report Qualification'[State] ), REMOVEFILTERS ( 'License Report Qualification' ), 'License Report Qualification'[Scope] = "M365_Licenses_ReportSkuCapacity.csv" )
+			VAR _reason = CALCULATE ( SELECTEDVALUE ( 'License Report Qualification'[Reason] ), REMOVEFILTERS ( 'License Report Qualification' ), 'License Report Qualification'[Scope] = "M365_Licenses_ReportSkuCapacity.csv" )
+			VAR _run = CALCULATE ( SELECTEDVALUE ( 'License Report Qualification'[Receipt Run ID] ), REMOVEFILTERS ( 'License Report Qualification' ), 'License Report Qualification'[Scope] = "License report" )
+			RETURN IF (
+			    _report = "Not qualified",
+			    [License Qualification Label],
+			    SWITCH (
+			        _state,
+			        "Qualified", "SKU capacity qualified by licensing run " & LEFT ( _run, 8 ),
+			        "Not verified", "SKU capacity not verified: batch predates qualification",
+			        "Absent", "SKU capacity not measured: not part of this batch",
+			        "SKU capacity not qualified: " & _reason
+			    )
+			)
+		formatString: @
+		displayFolder: Licensing | Qualification
+		lineageTag: 800f40f9-7976-4a3e-9171-380ad86a20b6
+
+	measure 'License Subtitle Capacity Units' = "Current snapshot · capacities are not interchangeable · " & [License Qualification Label]
+		formatString: @
+		displayFolder: Licensing | Qualification
+		lineageTag: 47a63380-331a-4619-8cd5-e9d0cb05ca35
+
+	measure 'License Subtitle Candidate Assignments' = "Candidate assignments, not distinct users · " & [License Qualification Label]
+		formatString: @
+		displayFolder: Licensing | Qualification
+		lineageTag: 8ef1e49b-ffbd-461a-81c3-db78a8e8ccdb
+
+	column Scope
+		dataType: string
+		lineageTag: 81a53da4-1e0c-4e37-8216-93d9cbe02189
+		summarizeBy: none
+		sourceColumn: Scope
+
+		annotation SummarizationSetBy = Automatic
+
+	column Kind
+		dataType: string
+		lineageTag: 2e869da7-8fcd-4b98-8d11-25a5978e0e2e
+		summarizeBy: none
+		sourceColumn: Kind
+
+		annotation SummarizationSetBy = Automatic
+
+	column State
+		dataType: string
+		lineageTag: df0b4f20-0e8e-4d7e-a7aa-e03e5a470e2b
+		summarizeBy: none
+		sourceColumn: State
+
+		annotation SummarizationSetBy = Automatic
+
+	column Reason
+		dataType: string
+		lineageTag: d9052ff5-4736-4d7d-8e89-960347e66e2c
+		summarizeBy: none
+		sourceColumn: Reason
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Snapshot ID'
+		dataType: string
+		lineageTag: 2283e2ad-07de-40d5-882c-75f25ba3405f
+		summarizeBy: none
+		sourceColumn: Snapshot ID
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Receipt Run ID'
+		dataType: string
+		lineageTag: 37c7bdde-a255-4d0e-b6f3-01ca83888b14
+		summarizeBy: none
+		sourceColumn: Receipt Run ID
+
+		annotation SummarizationSetBy = Automatic
+
+	partition 'License Report Qualification' = m
+		mode: import
+		source =
+				let
+				    Q = GetLicenseReportQualification(),
+				    Report = {[Scope = "License report", Kind = "Report", State = Q[State], Reason = Q[Reason], #"Snapshot ID" = Q[SnapshotId], #"Receipt Run ID" = Q[ReceiptRunId]]},
+				    Files = List.Transform(Q[Files], each [Scope = [File], Kind = [Kind], State = [State], Reason = [Reason], #"Snapshot ID" = Q[SnapshotId], #"Receipt Run ID" = Q[ReceiptRunId]]),
+				    Result = Table.FromRecords(Report & Files, type table [Scope = text, Kind = text, State = text, Reason = nullable text, #"Snapshot ID" = nullable text, #"Receipt Run ID" = nullable text])
+				in
+				    Result
+
+	annotation PBI_ResultType = Table

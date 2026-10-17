@@ -127,7 +127,7 @@ table 'License Report Summary'
 		displayFolder: Licensing | Mail parity
 		lineageTag: cd6bc4f5-85ed-4561-892a-ba65a3c8ad2a
 
-	measure 'License Report Available (%)' = IF([License Report Snapshot Consistent] = 1, DIVIDE(SUM('License Report Summary'[Available Units]), SUM('License Report Summary'[Enabled Units])))
+	measure 'License Report Available (%)' = IF([License Report Snapshot Consistent] = 1 && SUM('License Report Summary'[Available Units]) >= 0, DIVIDE(SUM('License Report Summary'[Available Units]), SUM('License Report Summary'[Enabled Units])))
 		formatString: 0.0%
 		displayFolder: Licensing | Mail parity
 		lineageTag: dc0fa845-d6b0-40da-8047-d59f75db04cf
@@ -288,27 +288,13 @@ table 'License Report Summary'
 		displayFolder: Assignment alerts
 		lineageTag: 74ea72cd-41bf-40b8-a1f7-33ab624375a2
 
-	/// Visual-level row guard for Licensing & Cost: show only complete selected products/families. Dynamics and Power BI map by the collector's SKU rules; partial family selection is not allocated. Does not modify or requalify published CSVs.
+	/// Visual-level row guard for Licensing & Cost: show only complete selected products/families. Families come from the Licences ReportProduct column (SmartInventory SKU rules, EEA suites by GUID); partial family selection is not allocated. Does not modify or requalify published CSVs.
 	measure 'License Report Inventory Selection Included' =
-			VAR _filtered = ISCROSSFILTERED ( 'License Evidence' )
+			VAR _filtered = ISCROSSFILTERED ( 'License SKU Capacity' )
 			VAR _product = SELECTEDVALUE ( 'License Report Summary'[Product] )
-			VAR _selected = VALUES ( 'License Evidence'[SKU Part Number] )
-			VAR _family = FILTER (
-			    ALL ( 'License Evidence' ),
-			    VAR _sku = UPPER ( TRIM ( 'License Evidence'[SKU Part Number] ) )
-			    RETURN SWITCH ( _product,
-			        "Microsoft 365 Copilot", _sku IN { "MICROSOFT_365_COPILOT", "M365_COPILOT" },
-			        "Power BI", _sku IN { "POWER_BI_PRO", "PBI_PREMIUM_PER_USER" },
-			        "Dynamics 365",
-			            ( LEFT ( _sku, 7 ) = "DYN365_" || LEFT ( _sku, 13 ) = "DYNAMICS_365_" )
-			            && NOT ( CONTAINSSTRING ( _sku, "SANDBOX" ) || CONTAINSSTRING ( _sku, "TRIAL" )
-			                || CONTAINSSTRING ( _sku, "PREVIEW" ) || CONTAINSSTRING ( _sku, "VIRAL" )
-			                || CONTAINSSTRING ( _sku, "FREE" ) || CONTAINSSTRING ( _sku, "DEMO" )
-			                || CONTAINSSTRING ( _sku, "TEST" ) ),
-			        'License Evidence'[License Product] = _product
-			    )
-			)
-			VAR _missing = COUNTROWS ( EXCEPT ( SELECTCOLUMNS ( _family, "SKU", 'License Evidence'[SKU Part Number] ), _selected ) )
+			VAR _selected = VALUES ( 'License SKU Capacity'[SKU Part Number] )
+			VAR _family = FILTER ( ALL ( 'License SKU Capacity' ), 'License SKU Capacity'[Report Product] = _product )
+			VAR _missing = COUNTROWS ( EXCEPT ( SELECTCOLUMNS ( _family, "SKU", 'License SKU Capacity'[SKU Part Number] ), _selected ) )
 			RETURN IF ( NOT _filtered, 1, IF ( COUNTROWS ( _family ) > 0 && _missing = 0, 1, 0 ) )
 		formatString: 0
 		isHidden
@@ -452,13 +438,57 @@ table 'License Report Summary'
 		displayFolder: Licensing | Overview display
 		lineageTag: 6309d494-5d7f-44cb-9c9c-58a34330f2c4
 
+	/// Consumed units above enabled units for the selected families (absolute value); BLANK when capacity is not over-assigned.
+	measure 'License Overview Family Over-assigned Units' =
+			VAR _available =
+			    IF (
+			        [License Report Snapshot Consistent] = 1
+			            && [License Report Inventory Selection Included] = 1,
+			        SUM ( 'License Report Summary'[Available Units] )
+			    )
+			RETURN IF ( _available < 0, -_available )
+		formatString: #,0
+		displayFolder: Licensing | Capacity
+		lineageTag: 18b00caa-f2cc-4adc-ace1-09f58828be92
+
+	/// Available units, or Over-assigned when consumed units exceed enabled units; the absolute value is in the tooltip.
+	measure 'License Overview Family Available Label' =
+			VAR _available =
+			    IF (
+			        [License Report Snapshot Consistent] = 1
+			            && [License Report Inventory Selection Included] = 1,
+			        SUM ( 'License Report Summary'[Available Units] )
+			    )
+			RETURN IF ( ISBLANK ( _available ), BLANK (), IF ( _available < 0, "Over-assigned", FORMAT ( _available, "#,0" ) ) )
+		formatString: @
+		displayFolder: Licensing | Capacity
+		lineageTag: bdfe7ca1-6d3b-4857-8607-490b54c2191d
+
+	/// Published available units per row, or Over-assigned when consumed units exceed enabled units.
+	measure 'License Report Available Label' =
+			VAR _available = IF ( [License Report Snapshot Consistent] = 1, SUM ( 'License Report Summary'[Available Units] ) )
+			RETURN IF ( ISBLANK ( _available ), BLANK (), IF ( _available < 0, "Over-assigned", FORMAT ( _available, "#,0" ) ) )
+		formatString: @
+		displayFolder: Licensing | Mail parity
+		lineageTag: 05e1a74e-c7b7-4a13-b77c-91e4a5855ed5
+
+	/// Consumed units above enabled units per row (absolute value); BLANK otherwise.
+	measure 'License Report Over-assigned Units' =
+			VAR _available = IF ( [License Report Snapshot Consistent] = 1, SUM ( 'License Report Summary'[Available Units] ) )
+			RETURN IF ( _available < 0, -_available )
+		formatString: #,0
+		displayFolder: Licensing | Mail parity
+		lineageTag: 0027fd01-5b1a-4e58-af79-cc7cd59b47a4
+
 	/// Overview available units for the fixed Product context, only when the full family is selected and the published snapshot is consistent. Excluded or unavailable evidence stays BLANK, never zero.
 	measure 'License Overview Family Available Units' =
-			IF (
-			    [License Report Snapshot Consistent] = 1
-			        && [License Report Inventory Selection Included] = 1,
-			    SUM ( 'License Report Summary'[Available Units] )
-			)
+			VAR _available =
+			    IF (
+			        [License Report Snapshot Consistent] = 1
+			            && [License Report Inventory Selection Included] = 1,
+			        SUM ( 'License Report Summary'[Available Units] )
+			    )
+			RETURN IF ( NOT ISBLANK ( _available ), MAX ( _available, 0 ) )
 		formatString: #,0
 		displayFolder: Licensing | Overview display
 		lineageTag: 191eeb9c-9e0c-4960-9805-fa9760bf7160
@@ -695,7 +725,7 @@ table 'License Report Summary'
 		source =
 				let
 				    Raw = GetLicenseReportCsv("M365_Licenses_ReportSummary.csv", {"SnapshotId", "TenantKey", "GeneratedAtUtc", "LicenseCollectedAtUtc", "Product", "Category", "EnabledUnits", "ConsumedUnits", "AvailableUnits", "Subscribed", "AssignedUsers", "RecoveryCandidates", "RecoveryUnknown", "DisabledUsers", "DisabledUnknown", "NoM365Activity", "NoM365ActivityUnknown", "MultipleTargetSuites", "MultipleTargetSuitesUnknown", "MultipleAssignedSkus", "MultipleAssignedSkusUnknown", "NoAdOrEntraActivity", "NoAdOrEntraActivityUnknown", "NoMailboxActivity", "NoMailboxActivityUnknown", "NoLocalAppsUse", "NoLocalAppsUseUnknown", "CandidatesPrimaryIntunePc", "CandidatesPrimaryIntunePcUnknown", "SharedMailboxesLicensed", "SharedUnder50Gb", "SharedRemovalCandidates", "SharedUnknown", "E3ToF3ReviewAssigned", "E3ToF3ReviewCandidates", "E3ToF3ReviewUnknown", "E3ToF3ReviewExcluded", "E3ToF3ReviewRecoveryExcluded", "EvidenceStatus", "WorkbookQualification"}),
-				    RowCheck = if Table.RowCount(Raw) >= 7 then Raw else error "License report CSV has too few rows",
+				    RowCheck = if not LicenseReportFileUsable("M365_Licenses_ReportSummary.csv") or Table.RowCount(Raw) >= 7 then Raw else error "License report CSV has too few rows",
 				    NonBlank = Table.ReplaceValue(RowCheck, "", null, Replacer.ReplaceValue, {"EnabledUnits", "ConsumedUnits", "AvailableUnits", "AssignedUsers", "RecoveryCandidates", "RecoveryUnknown", "DisabledUsers", "DisabledUnknown", "NoM365Activity", "NoM365ActivityUnknown", "MultipleTargetSuites", "MultipleTargetSuitesUnknown", "MultipleAssignedSkus", "MultipleAssignedSkusUnknown", "NoAdOrEntraActivity", "NoAdOrEntraActivityUnknown", "NoMailboxActivity", "NoMailboxActivityUnknown", "NoLocalAppsUse", "NoLocalAppsUseUnknown", "CandidatesPrimaryIntunePc", "CandidatesPrimaryIntunePcUnknown", "SharedMailboxesLicensed", "SharedUnder50Gb", "SharedRemovalCandidates", "SharedUnknown", "E3ToF3ReviewAssigned", "E3ToF3ReviewCandidates", "E3ToF3ReviewUnknown", "E3ToF3ReviewExcluded", "E3ToF3ReviewRecoveryExcluded", "GeneratedAtUtc"}),
 				    Renamed = Table.RenameColumns(NonBlank, {{"SnapshotId", "Snapshot ID"}, {"TenantKey", "Tenant Key"}, {"GeneratedAtUtc", "Generated At UTC"}, {"LicenseCollectedAtUtc", "License Snapshot UTC"}, {"EnabledUnits", "Enabled Units"}, {"ConsumedUnits", "Consumed Units"}, {"AvailableUnits", "Available Units"}, {"AssignedUsers", "Assigned Users"}, {"RecoveryCandidates", "Recovery Candidates"}, {"RecoveryUnknown", "Recovery Unknown"}, {"DisabledUsers", "Disabled Users"}, {"DisabledUnknown", "Disabled Unknown"}, {"NoM365Activity", "No M365 Activity"}, {"NoM365ActivityUnknown", "No M365 Activity Unknown"}, {"MultipleTargetSuites", "Multiple Target Suites"}, {"MultipleTargetSuitesUnknown", "Multiple Target Suites Unknown"}, {"MultipleAssignedSkus", "Multiple Assigned SKUs"}, {"MultipleAssignedSkusUnknown", "Multiple Assigned SKUs Unknown"}, {"NoAdOrEntraActivity", "No AD or Entra Activity"}, {"NoAdOrEntraActivityUnknown", "No AD or Entra Activity Unknown"}, {"NoMailboxActivity", "No Mailbox Activity"}, {"NoMailboxActivityUnknown", "No Mailbox Activity Unknown"}, {"NoLocalAppsUse", "No Local Apps Use"}, {"NoLocalAppsUseUnknown", "No Local Apps Use Unknown"}, {"CandidatesPrimaryIntunePc", "Candidates Primary Intune PC"}, {"CandidatesPrimaryIntunePcUnknown", "Candidates Primary Intune PC Unknown"}, {"SharedMailboxesLicensed", "Shared Mailboxes Licensed"}, {"SharedUnder50Gb", "Shared Under 50 GB"}, {"SharedRemovalCandidates", "Shared Removal Candidates"}, {"SharedUnknown", "Shared Unknown"}, {"E3ToF3ReviewAssigned", "E3 to F3 Review Assigned"}, {"E3ToF3ReviewCandidates", "E3 to F3 Review Candidates"}, {"E3ToF3ReviewUnknown", "E3 to F3 Review Unknown"}, {"E3ToF3ReviewExcluded", "E3 to F3 Review Excluded"}, {"E3ToF3ReviewRecoveryExcluded", "E3 to F3 Review Recovery Excluded"}, {"EvidenceStatus", "Evidence Status"}, {"WorkbookQualification", "Workbook Qualification"}}),
 				    WithAssignments = Table.RenameColumns(Renamed, {{"AssignmentCapacityWait", "Assignment Capacity Wait"}, {"AssignmentOtherErrors", "Assignment Other Errors"}, {"AssignmentEvidenceStatus", "Assignment Evidence Status"}}),

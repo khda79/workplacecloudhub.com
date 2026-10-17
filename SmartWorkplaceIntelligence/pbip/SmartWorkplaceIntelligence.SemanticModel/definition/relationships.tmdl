@@ -32,11 +32,6 @@ relationship 9187c498-78ab-4b52-ad4d-af3185bc6817
 	fromColumn: 'User Inventory Evidence'.'Evidence Date'
 	toColumn: LocalDateTable_7ed3f920-2740-4f06-b5e4-1235160ee31a.Date
 
-relationship ad7cd566-97b6-4435-97f9-e92dc29ea499
-	joinOnDateBehavior: datePartOnly
-	fromColumn: 'License Evidence'.'Snapshot Date'
-	toColumn: LocalDateTable_317cc133-7d7e-48f1-9f84-06cddef33d30.Date
-
 relationship 4fac74b3-c3f1-403f-80da-f825f9c641c6
 	joinOnDateBehavior: datePartOnly
 	fromColumn: 'Mailbox Evidence'.'Last Activity Date'
@@ -161,21 +156,6 @@ relationship de341192-97a0-4903-ae1b-8008d5143e3b
 	joinOnDateBehavior: datePartOnly
 	fromColumn: 'User Activity History Evidence'.'M365 Last Activity Date'
 	toColumn: LocalDateTable_5687bff7-bb24-402c-aec1-3a5d0ec7aa58.Date
-
-relationship a8ffeee3-5c94-4d3b-a29c-a0797ac5f7ea
-	joinOnDateBehavior: datePartOnly
-	fromColumn: 'License Optimization Evidence'.'Last Activity Date'
-	toColumn: LocalDateTable_623a6266-3731-4f68-93d0-284adc5d666e.Date
-
-relationship f595e7d9-5845-4f20-aa6a-b7e4757074d9
-	joinOnDateBehavior: datePartOnly
-	fromColumn: 'License Optimization Evidence'.'Last Office Desktop Activation Date'
-	toColumn: LocalDateTable_f6ef3481-f74c-4978-a1ae-1f67540b1732.Date
-
-relationship 7047d62c-e8ae-4866-a17c-d56696eb5b2e
-	joinOnDateBehavior: datePartOnly
-	fromColumn: 'License Optimization Evidence'.'Snapshot Date'
-	toColumn: LocalDateTable_28a09470-b7cb-47dd-b260-23fa1d527587.Date
 
 relationship 9e058c03-fdc3-4d80-80fa-fbe2ca4315e3
 	joinOnDateBehavior: datePartOnly

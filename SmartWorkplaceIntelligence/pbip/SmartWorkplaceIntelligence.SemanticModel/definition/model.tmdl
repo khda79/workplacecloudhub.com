@@ -9,7 +9,7 @@ model SmartWorkplaceIntelligence
 		legacyRedirects
 		returnErrorValuesAsNull
 
-annotation PBI_QueryOrder = ["Date","Tenant","Environment","Organization","Geography","Report Metadata","Executive KPI Trends","Device Inventory Evidence","User Inventory Evidence","License Evidence","Mailbox Evidence","Security Control Evidence","Enterprise Operational Signals","DataRoot","Device Risk Evidence Summary","User Activity History Evidence","Workforce Trend Evidence","Identity Reconciliation Evidence","Workforce Operational Signals","Windows Lifecycle Trend Evidence","Endpoint Experience Trend Evidence","Application Inventory Evidence","Application Trend Evidence","Application Operational Signals","Collaboration Adoption Evidence","Collaboration Object Evidence","Collaboration Trend Evidence","Collaboration Operational Signals","Content Storage Evidence","Content Storage Trend Evidence","Content Storage Operational Signals","Backup Mailbox Evidence","Backup Operational Signals","Data Trust Evidence","Data Trust Operational Signals","License Optimization Evidence","Device Directory Summary","SharePointSiteUrl","SharePointLibraryName","SharePointDataFolder","GetSmartInventoryFolder","GetSmartInventoryFile","License Report Summary","License Report Candidates","License Report Gaps","License Report Sources","PreparedSourceMode","PreparedEvidenceRoot","PreparedSharePointFolder","GetPreparedEvidenceFile","PreparedBatchId","GetLicenseReportSnapshot","GetLicenseReportCsv","License Report Assignment Issues"]
+annotation PBI_QueryOrder = ["Date","Tenant","Environment","Organization","Geography","Report Metadata","Executive KPI Trends","Device Inventory Evidence","User Inventory Evidence","Mailbox Evidence","Security Control Evidence","Enterprise Operational Signals","DataRoot","Device Risk Evidence Summary","User Activity History Evidence","Workforce Trend Evidence","Identity Reconciliation Evidence","Workforce Operational Signals","Windows Lifecycle Trend Evidence","Endpoint Experience Trend Evidence","Application Inventory Evidence","Application Trend Evidence","Application Operational Signals","Collaboration Adoption Evidence","Collaboration Object Evidence","Collaboration Trend Evidence","Collaboration Operational Signals","Content Storage Evidence","Content Storage Trend Evidence","Content Storage Operational Signals","Backup Mailbox Evidence","Backup Operational Signals","Data Trust Evidence","Data Trust Operational Signals","Device Directory Summary","SharePointSiteUrl","SharePointLibraryName","SharePointDataFolder","GetSmartInventoryFolder","GetSmartInventoryFile","License Report Summary","License Report Candidates","License Report Gaps","License Report Sources","PreparedSourceMode","PreparedEvidenceRoot","PreparedSharePointFolder","GetPreparedEvidenceFile","PreparedBatchId","GetLicenseReportSnapshot","GetLicenseReportCsv","License Report Assignment Issues","License SKU Capacity","License SKU Candidates","License Report Qualification"]
 
 annotation PBI_ProTooling = ["MCP-PBIModeling","DevMode"]
 
@@ -49,14 +49,12 @@ ref table 'Backup Mailbox Evidence'
 ref table 'Backup Operational Signals'
 ref table 'Data Trust Evidence'
 ref table 'Data Trust Operational Signals'
-ref table 'License Evidence'
 ref table 'Mailbox Evidence'
 ref table 'Security Control Evidence'
 ref table 'Enterprise Operational Signals'
 ref table 'Mailbox Exchange Version Catalog'
 ref table LocalDateTable_0b3d0881-ea5e-47e6-be43-df832464f67b
 ref table LocalDateTable_7ed3f920-2740-4f06-b5e4-1235160ee31a
-ref table LocalDateTable_317cc133-7d7e-48f1-9f84-06cddef33d30
 ref table LocalDateTable_64fabb92-bcfd-4bf8-bc58-fac647b4b957
 ref table LocalDateTable_7351d1a0-1eb4-4aea-9827-af128eb26629
 ref table LocalDateTable_09b9235b-b066-4958-97e2-848f2d2dddd1
@@ -75,7 +73,6 @@ ref table LocalDateTable_39fd069f-d4c0-4fbd-acf1-e67975dbf5d4
 ref table LocalDateTable_3bde06cb-1619-411f-a7f0-1e1435fac888
 ref table LocalDateTable_11d6eea0-46e2-4eb8-ba1b-53e58ca0be30
 ref table LocalDateTable_ac1cb02b-4ba7-4e8e-9125-ce7bdaddab0e
-ref table 'License Optimization Evidence'
 ref table 'Device Directory Summary'
 ref table LocalDateTable_0cd5f2d1-5431-442e-98f7-a997ef72119f
 ref table LocalDateTable_e67025e1-0027-4578-ac67-8d29bff0dee2
@@ -84,12 +81,12 @@ ref table 'Workforce License Review Selection'
 ref table LocalDateTable_a7bac2e8-dc96-494a-803b-01fa833a644d
 ref table LocalDateTable_9c75bf89-ef1c-44c2-a9c2-d4c0f8594ea3
 ref table LocalDateTable_5687bff7-bb24-402c-aec1-3a5d0ec7aa58
-ref table LocalDateTable_623a6266-3731-4f68-93d0-284adc5d666e
-ref table LocalDateTable_f6ef3481-f74c-4978-a1ae-1f67540b1732
-ref table LocalDateTable_28a09470-b7cb-47dd-b260-23fa1d527587
 ref table LocalDateTable_cdbfe80e-2839-456b-be8f-cb16ce0d35a5
 ref table 'Country Selection'
 ref table 'License Report Summary'
+ref table 'License Report Qualification'
+ref table 'License SKU Capacity'
+ref table 'License SKU Candidates'
 ref table 'License Report Candidates'
 ref table 'License Report Gaps'
 ref table 'License Report Sources'

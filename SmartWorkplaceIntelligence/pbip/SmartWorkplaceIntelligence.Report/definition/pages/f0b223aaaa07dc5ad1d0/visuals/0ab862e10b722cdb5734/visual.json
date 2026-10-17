@@ -20,13 +20,13 @@
                 "Measure": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "License Evidence"
+                      "Entity": "License SKU Capacity"
                     }
                   },
                   "Property": "Microsoft 365 Utilization (%)"
                 }
               },
-              "queryRef": "License Evidence.Microsoft 365 Utilization (%)",
+              "queryRef": "License SKU Capacity.Microsoft 365 Utilization (%)",
               "nativeQueryRef": "Microsoft 365 utilization (%)",
               "displayName": "Microsoft 365 utilization (%)"
             },
@@ -529,6 +529,49 @@
               "expr": {
                 "Literal": {
                   "Value": "4D"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "subTitle": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "text": {
+              "expr": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "License Report Qualification"
+                    }
+                  },
+                  "Property": "License SKU Qualification Label"
+                }
+              }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "10D"
+                }
+              }
+            },
+            "fontColor": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#52606D'"
+                    }
+                  }
                 }
               }
             }

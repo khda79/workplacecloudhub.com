@@ -20,13 +20,13 @@
                 "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "License Evidence"
+                      "Entity": "License SKU Capacity"
                     }
                   },
                   "Property": "Capacity Class"
                 }
               },
-              "queryRef": "License Evidence.Capacity Class",
+              "queryRef": "License SKU Capacity.Capacity Class",
               "nativeQueryRef": "Capacity Class",
               "active": true
             }

@@ -47,7 +47,7 @@ table 'License Report Sources'
 		source =
 				let
 					Raw = GetLicenseReportCsv("M365_Licenses_ReportSources.csv", {"SnapshotId", "TenantKey", "Name", "Ready", "Provisional", "Date", "Reason", "SHA256"}),
-					Checked = if Table.RowCount(Raw) >= 1 then Raw else error "License report source freshness CSV is empty",
+					Checked = if not LicenseReportFileUsable("M365_Licenses_ReportSources.csv") or Table.RowCount(Raw) >= 1 then Raw else error "License report source freshness CSV is empty",
 					Result = Table.RenameColumns(Checked, {{"SnapshotId", "Snapshot ID"}, {"TenantKey", "Tenant Key"}})
 				in
 					Result

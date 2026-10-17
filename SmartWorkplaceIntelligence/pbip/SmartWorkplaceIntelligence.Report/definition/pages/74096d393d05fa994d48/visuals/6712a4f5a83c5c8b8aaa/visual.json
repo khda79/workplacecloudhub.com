@@ -38,11 +38,11 @@
                       "Entity": "License Report Summary"
                     }
                   },
-                  "Property": "License Overview Family Available Units"
+                  "Property": "License Overview Family Available Label"
                 }
               },
-              "queryRef": "License Report Summary.License Overview Family Available Units",
-              "nativeQueryRef": "M365 remaining units",
+              "queryRef": "License Report Summary.License Overview Family Available Label",
+              "nativeQueryRef": "License Overview Family Available Label",
               "displayName": "M365 remaining units"
             },
             {
@@ -138,6 +138,21 @@
               "queryRef": "License Report Summary.License Report Assignment Status",
               "nativeQueryRef": "Assignment qualification",
               "displayName": "Assignment qualification"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "License Report Summary"
+                    }
+                  },
+                  "Property": "License Overview Family Over-assigned Units"
+                }
+              },
+              "queryRef": "License Report Summary.License Overview Family Over-assigned Units",
+              "nativeQueryRef": "License Overview Family Over-assigned Units",
+              "displayName": "Over-assigned units"
             }
           ]
         }
@@ -568,10 +583,10 @@
                 "Measure": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "License Report Summary"
+                      "Entity": "License Report Qualification"
                     }
                   },
-                  "Property": "License Report Evidence Status"
+                  "Property": "License Qualification Label"
                 }
               }
             },

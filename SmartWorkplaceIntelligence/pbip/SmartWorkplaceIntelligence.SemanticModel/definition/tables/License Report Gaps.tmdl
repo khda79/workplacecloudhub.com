@@ -274,7 +274,7 @@ table 'License Report Gaps'
 		source =
 				let
 				    Raw = GetLicenseReportCsv("M365_Licenses_ReportGaps.csv", {"SnapshotId", "TenantKey", "Section", "Metric", "Value", "EvidenceStatus"}),
-				    RowCheck = if Table.RowCount(Raw) >= 25 then Raw else error "License report CSV has too few rows",
+				    RowCheck = if not LicenseReportFileUsable("M365_Licenses_ReportGaps.csv") or Table.RowCount(Raw) >= 25 then Raw else error "License report CSV has too few rows",
 				    NonBlank = Table.ReplaceValue(RowCheck, "", null, Replacer.ReplaceValue, {"Value"}),
 				    Renamed = Table.RenameColumns(NonBlank, {{"SnapshotId", "Snapshot ID"}, {"TenantKey", "Tenant Key"}, {"EvidenceStatus", "Evidence Status"}}),
 				    Selected = Renamed,

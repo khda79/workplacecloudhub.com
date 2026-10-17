@@ -20,13 +20,13 @@
                 "Measure": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "License Evidence"
+                      "Entity": "License SKU Capacity"
                     }
                   },
                   "Property": "Observed Potentially Reclaimable Assignments"
                 }
               },
-              "queryRef": "License Evidence.Observed Potentially Reclaimable Assignments",
+              "queryRef": "License SKU Capacity.Observed Potentially Reclaimable Assignments",
               "nativeQueryRef": "Potentially Reclaimable Assignments",
               "displayName": "Potentially reclaimable assignments"
             },
@@ -603,6 +603,49 @@
             }
           }
         }
+      ],
+      "subTitle": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "text": {
+              "expr": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "License Report Qualification"
+                    }
+                  },
+                  "Property": "License SKU Qualification Label"
+                }
+              }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "10D"
+                }
+              }
+            },
+            "fontColor": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#52606D'"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
       ]
     }
   },
@@ -614,7 +657,7 @@
           "Measure": {
             "Expression": {
               "SourceRef": {
-                "Entity": "License Evidence"
+                "Entity": "License SKU Capacity"
               }
             },
             "Property": "Observed Potentially Reclaimable Assignments"

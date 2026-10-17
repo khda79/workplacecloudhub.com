@@ -368,8 +368,13 @@
             },
             "text": {
               "expr": {
-                "Literal": {
-                  "Value": "'Candidate assignments, not distinct users'"
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "License Report Qualification"
+                    }
+                  },
+                  "Property": "License Subtitle Candidate Assignments"
                 }
               }
             },

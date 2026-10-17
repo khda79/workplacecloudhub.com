@@ -97,6 +97,81 @@ expression PreparedBatchId = "" meta [IsParameterQuery=true, Type="Text", IsPara
 	annotation PBI_ResultType = Text
 
 /// Reads governed source artifacts from the same immutable DATA-POWERBI batch; original domain validation retained.
+/// Reads the pinned immutable batch manifest with the same pin, tenant and folder rules as GetPreparedEvidenceFile.
+expression GetPreparedBatchManifest =
+		() as record =>
+		let
+		    SafeSegment = (s as text) as text => if s = "" or Text.Contains(s, "/") or Text.Contains(s, "\") or Text.Contains(s, "..") then error "Invalid prepared path segment" else s,
+		    ReadFolder = (segments as list) as table =>
+		        if PreparedSourceMode = "Local" then
+		            Folder.Contents(Text.TrimEnd(PreparedEvidenceRoot, {"\", "/"}) & (if List.IsEmpty(segments) then "" else "\" & Text.Combine(List.Transform(segments, SafeSegment), "\")))
+		        else if PreparedSourceMode = "SharePoint" then
+		            let
+		                Root = SharePoint.Contents(SharePointSiteUrl, [ApiVersion=15]),
+		                Path = {SharePointLibraryName} & List.Select(Text.Split(SharePointDataFolder & "/" & PreparedSharePointFolder, "/"), each _ <> "") & List.Transform(segments, SafeSegment),
+		                Content = List.Accumulate(Path, Root, (parent, segment) =>
+		                    let found = Table.SelectRows(parent, each [Name] = segment)
+		                    in if Table.RowCount(found) = 1 then found{0}[Content] else error Error.Record("Prepared evidence", "Missing or ambiguous folder; wait for a complete batch", segment))
+		            in Content
+		        else error "PreparedSourceMode must be Local or SharePoint",
+		    ReadBinary = (segments as list) as binary =>
+		        if PreparedSourceMode = "Local" then
+		            File.Contents(Text.TrimEnd(PreparedEvidenceRoot, {"\", "/"}) & "\" & Text.Combine(List.Transform(segments, SafeSegment), "\"))
+		        else
+		            let
+		                Parent = ReadFolder(List.RemoveLastN(segments, 1)),
+		                Found = Table.SelectRows(Parent, each [Name] = SafeSegment(List.Last(segments)))
+		            in if Table.RowCount(Found) = 1 then Found{0}[Content] else error "Missing or ambiguous prepared file",
+		    ReadMetadata = (segments as list, name as text) as binary =>
+		        let
+		            Parent = ReadFolder(segments),
+		            Preferred = Table.SelectRows(Parent, each [Name] = name & ".json.txt"),
+		            Legacy = Table.SelectRows(Parent, each [Name] = name & ".json"),
+		            // Fallback only on ABSENCE, never after a read or JSON parse error.
+		            Selected = if Table.RowCount(Preferred) = 0 then Legacy else Preferred
+		        in if Table.RowCount(Selected) = 1 then Binary.Buffer(Selected{0}[Content]) else error "Missing or ambiguous prepared metadata",
+		    RequiredPin = if Text.Trim(PreparedBatchId) = "" then error "Set PreparedBatchId to the reviewed immutable unified batch before refresh" else SafeSegment(PreparedBatchId),
+		    ExpectedTenant = if Text.Trim(PreparedExpectedTenantKey) = "" then error "PreparedExpectedTenantKey is required" else PreparedExpectedTenantKey,
+		    Pointer = Json.Document(ReadMetadata({}, "current")),
+		    Manifest = Json.Document(ReadMetadata({"batches", RequiredPin}, "batch")),
+		    Checked = if Manifest[SchemaVersion] <> 1 or Manifest[BatchId] <> RequiredPin or Manifest[TenantKey] <> ExpectedTenant or Pointer[TenantKey] <> ExpectedTenant then error "Invalid prepared batch manifest" else Manifest
+		in
+		    Checked
+	lineageTag: 3ee1d505-902a-4038-bff9-aeae20a42f30
+
+/// License report qualification recorded by the preparation: Qualified, Not qualified (lineage defect, tables empty) or Not verified (batch predates qualification).
+expression GetLicenseReportQualification =
+		() as record =>
+		let
+		    Manifest = GetPreparedBatchManifest(),
+		    Names = List.Transform(Manifest[Files] & Record.FieldOrDefault(Manifest, "Artifacts", {}), each [File]),
+		    ReportFiles = {"M365_Licenses_ReportSummary.csv", "M365_Licenses_ReportCandidates.csv", "M365_Licenses_ReportGaps.csv", "M365_Licenses_ReportSources.csv", "M365_Licenses_ReportAssignmentIssues.csv"},
+		    DecisionFiles = {"M365_Licenses_ReportSkuCandidates.csv", "M365_Licenses_ReportSkuCapacity.csv"},
+		    Raw = Record.FieldOrDefault(Manifest, "LicenseReportQualification", null),
+		    Legacy = List.Transform(ReportFiles & DecisionFiles, (name) =>
+		        let present = List.Contains(Names, "Source-" & name)
+		        in [File = name, Kind = if List.Contains(DecisionFiles, name) then "Decision" else "Report",
+		            State = if present then "Not verified" else "Absent",
+		            Reason = if present then "Batch predates license report qualification" else "Not part of this batch"]),
+		    Valid = Raw <> null and Record.FieldOrDefault(Raw, "Version", null) = 1 and
+		        List.Contains({"Qualified", "Not qualified"}, Record.FieldOrDefault(Raw, "State", null)) and Value.Is(Record.FieldOrDefault(Raw, "Files", null), type list),
+		    Result = if Raw = null then [State = "Not verified", Reason = "Batch predates license report qualification", SnapshotId = null, ReceiptRunId = null, Files = Legacy]
+		        else if not Valid then error Error.Record("License report qualification", "Invalid license report qualification in the batch manifest")
+		        else [State = Raw[State], Reason = Raw[Reason], SnapshotId = Raw[SnapshotId], ReceiptRunId = Raw[ReceiptRunId], Files = Raw[Files]]
+		in
+		    Result
+	lineageTag: 2e82bd1a-e1ce-4971-947d-1042052a1d19
+
+/// True when the license report file may be shown: qualified by the current licensing receipt, or present in a batch that predates qualification (labelled Not verified).
+expression LicenseReportFileUsable =
+		(fileName as text) as logical =>
+		let
+		    Found = List.Select(GetLicenseReportQualification()[Files], each [File] = fileName),
+		    State = if List.Count(Found) = 1 then Found{0}[State] else "Absent"
+		in
+		    List.Contains({"Qualified", "Not verified"}, State)
+	lineageTag: 3b6414b6-c0b8-483a-a9b4-e14a292e84b8
+
 expression GetLicenseReportSnapshot =
 		() as record =>
 		let
@@ -132,8 +207,10 @@ expression GetLicenseReportSnapshot =
 expression GetLicenseReportCsv =
 		(fileName as text, expectedColumns as list) as table =>
 		let
-		    Allowed = {"M365_Licenses_ReportSummary.csv", "M365_Licenses_ReportCandidates.csv", "M365_Licenses_ReportGaps.csv", "M365_Licenses_ReportSources.csv", "M365_Licenses_ReportAssignmentIssues.csv"},
-		    Content = if not List.Contains(Allowed, fileName) then error "Unexpected license report CSV" else GetPreparedEvidenceFile("Source-" & fileName),
+		    Allowed = {"M365_Licenses_ReportSummary.csv", "M365_Licenses_ReportCandidates.csv", "M365_Licenses_ReportGaps.csv", "M365_Licenses_ReportSources.csv", "M365_Licenses_ReportAssignmentIssues.csv", "M365_Licenses_ReportSkuCandidates.csv", "M365_Licenses_ReportSkuCapacity.csv"},
+		    // Not qualified or absent files are never read: the table is empty, not an older value.
+		    Usable = if not List.Contains(Allowed, fileName) then error "Unexpected license report CSV" else LicenseReportFileUsable(fileName),
+		    Content = GetPreparedEvidenceFile("Source-" & fileName),
 		    // Accept only the legacy summary and its exact assignment-status extension.
 		    Buffered = Binary.Buffer(Content),
 		    Raw = Csv.Document(Buffered, [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv, ExtraValues=ExtraValues.Error]),
@@ -142,21 +219,27 @@ expression GetLicenseReportCsv =
 		        and expectedColumns{10} = "AssignedUsers"
 		        then List.InsertRange(expectedColumns, 11, {"AssignmentCapacityWait", "AssignmentOtherErrors", "AssignmentEvidenceStatus"})
 		        else expectedColumns,
+		    // Licences 1.49 published the SKU capacity without ReportProduct.
+		    LegacyCapacityColumns = List.RemoveItems(expectedColumns, {"ReportProduct"}),
 		    AcceptedColumns = if Header = expectedColumns then expectedColumns
 		        else if fileName = "M365_Licenses_ReportSummary.csv" and Header = ExtendedColumns then ExtendedColumns
+		        else if fileName = "M365_Licenses_ReportSkuCapacity.csv" and Header = LegacyCapacityColumns then LegacyCapacityColumns
 		        else error "License report CSV schema differs from the SmartM365 contract",
 		    StrictRows = Csv.Document(Buffered, [Delimiter=",", Columns=List.Count(AcceptedColumns), Encoding=65001, QuoteStyle=QuoteStyle.Csv, ExtraValues=ExtraValues.Error]),
 		    Rows = Table.PromoteHeaders(StrictRows, [PromoteAllScalars=true]),
 		    HeadersChecked = if fileName = "M365_Licenses_ReportSummary.csv" then
 		        if Header = ExtendedColumns and List.Count(Header) = 43 then Rows
 		        else Table.AddColumn(Table.AddColumn(Table.AddColumn(Rows, "AssignmentCapacityWait", each null, Int64.Type), "AssignmentOtherErrors", each null, Int64.Type), "AssignmentEvidenceStatus", each "Unknown", type text)
+		        else if fileName = "M365_Licenses_ReportSkuCapacity.csv" and AcceptedColumns = LegacyCapacityColumns then Table.ReorderColumns(Table.AddColumn(Rows, "ReportProduct", each ""), expectedColumns)
 		        else Table.SelectColumns(Rows, expectedColumns),
 		    Snapshot = GetLicenseReportSnapshot(),
 		    IdentityChecked = if Table.RowCount(HeadersChecked) = 0 or
 		        (List.Distinct(HeadersChecked[SnapshotId]) = {Snapshot[SnapshotId]} and List.Distinct(HeadersChecked[TenantKey]) = {Snapshot[TenantKey]})
-		        then HeadersChecked else error "License report CSV and email snapshot identities differ"
+		        then HeadersChecked else error "License report CSV and email snapshot identities differ",
+		    EmptyColumns = if fileName = "M365_Licenses_ReportSummary.csv" and List.Count(expectedColumns) = 40 and expectedColumns{10} = "AssignedUsers" then ExtendedColumns else expectedColumns,
+		    Result = if Usable then IdentityChecked else #table(EmptyColumns, {})
 		in
-		    IdentityChecked
+		    Result
 	lineageTag: a2931804-2243-4d2a-bf3d-3a271daf2f71
 
 /// Read normal local migration CSV inputs with strict header and schema validation. No frozen validation fallback.

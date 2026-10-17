@@ -146,7 +146,7 @@ table 'License Report Assignment Issues'
 				let
 				    Snapshot = GetLicenseReportSnapshot(),
 				    HasAssignment = Record.HasFields(Snapshot, "AssignmentIssues"),
-				    Assignment = if HasAssignment then Snapshot[AssignmentIssues] else [Available=false, Rows={}],
+				    Assignment = if HasAssignment and LicenseReportFileUsable("M365_Licenses_ReportAssignmentIssues.csv") then Snapshot[AssignmentIssues] else [Available=false, Rows={}],
 				    Columns = {"SnapshotId", "TenantKey", "Product", "Category", "UserId", "UserPrincipalName", "DisplayName", "IdentityStatus", "AccountEnabled", "UserType", "SkuIds", "AssignmentStates", "AssignmentError", "AssignmentRoutes", "AssignedByGroupIds", "AssignedByGroupNames", "HasEffectiveTargetSuite", "LastUpdatedDateTime", "AssignmentPaths"},
 				    Raw = if HasAssignment then GetLicenseReportCsv("M365_Licenses_ReportAssignmentIssues.csv", Columns) else #table(Columns, {}),
 				    SuiteProducts = List.Transform(Snapshot[Products], each [Product]),

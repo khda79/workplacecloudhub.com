@@ -38,11 +38,11 @@
                       "Entity": "License Report Summary"
                     }
                   },
-                  "Property": "License Overview Family Available Units"
+                  "Property": "License Overview Family Available Label"
                 }
               },
-              "queryRef": "License Report Summary.License Overview Family Available Units",
-              "nativeQueryRef": "M365 remaining units",
+              "queryRef": "License Report Summary.License Overview Family Available Label",
+              "nativeQueryRef": "License Overview Family Available Label",
               "displayName": "M365 remaining units"
             },
             {
@@ -134,6 +134,25 @@
               "queryRef": "Backup Mailbox Evidence.Expected Mailboxes Not Protected",
               "nativeQueryRef": "Expected mailboxes unprotected",
               "displayName": "Expected mailboxes unprotected"
+            }
+          ]
+        },
+        "Tooltips": {
+          "projections": [
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "License Report Summary"
+                    }
+                  },
+                  "Property": "License Overview Family Over-assigned Units"
+                }
+              },
+              "queryRef": "License Report Summary.License Overview Family Over-assigned Units",
+              "nativeQueryRef": "License Overview Family Over-assigned Units",
+              "displayName": "Over-assigned units"
             }
           ]
         }
@@ -555,14 +574,19 @@
             "show": {
               "expr": {
                 "Literal": {
-                  "Value": "false"
+                  "Value": "true"
                 }
               }
             },
             "text": {
               "expr": {
-                "Literal": {
-                  "Value": "''"
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "License Report Qualification"
+                    }
+                  },
+                  "Property": "License Qualification Label"
                 }
               }
             },
