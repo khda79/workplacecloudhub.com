@@ -9,6 +9,10 @@ Import-Module (Join-Path $PSScriptRoot 'IntuneOperationalEvidence.psm1')
 Import-Module (Join-Path $PSScriptRoot 'NativeEvidence.psm1')
 Import-Module (Join-Path $PSScriptRoot 'PreparedArtifacts.psm1')
 Import-Module (Join-Path $PSScriptRoot 'PreparedClassification.psm1')
+if (-not ('Workplace.Prepared.StrictCsv' -as [type])) {
+    Add-Type -Path (Join-Path $PSScriptRoot 'PreparedCsvReader.cs') -CompilerOptions '-optimize+'
+}
+$script:PreparedTenantReferenceParses = 0
 
 function Get-PreparedChildPath([string]$Root, [string]$Relative) {
     $base = [IO.Path]::GetFullPath($Root).TrimEnd([IO.Path]::DirectorySeparatorChar)
@@ -399,6 +403,10 @@ function Test-PreparedTenant {
     # malformed records with another separator or weaken the tenant checks.
     $fileName = [IO.Path]::GetFileName($Path)
     $delimiter = if ($fileName -like '*DailyStats.csv' -or $fileName -like 'SharePoint_OnPrem_*.csv' -or $fileName -eq 'Exchange_OnPrem_Servers_Inventory.csv') { ';' } else { ',' }
+    # Compiled strict reader first; any other construct and every failure are re-read below.
+    $fast = [Workplace.Prepared.StrictCsv]::CheckTenant($Path, [char]$delimiter, $TenantKey, [bool]$AllowMissingTenantKey)
+    if ($null -ne $fast) { return [pscustomobject]@{Rows=$fast.Rows;HasTenantKey=$fast.HasTenantKey} }
+    $script:PreparedTenantReferenceParses++
     $parser = [Microsoft.VisualBasic.FileIO.TextFieldParser]::new($Path)
     try {
         $parser.SetDelimiters([string]$delimiter)
@@ -425,6 +433,7 @@ function Test-PreparedSourceTenants {
     param([object[]]$Plan, [string]$TenantKey, [string]$SnapshotRoot)
     $errors = [Collections.Generic.List[string]]::new()
     $rows = 0L; $files = 0; $legacyArchived = 0
+    $script:PreparedTenantReferenceParses = 0
     foreach ($entry in $Plan | Where-Object { $_.Relative -like '*.csv' }) {
         $relative = $entry.Relative.Replace('\','/')
         $path = if ($SnapshotRoot) { Get-PreparedChildPath $SnapshotRoot $relative } else { $entry.SourcePath }
@@ -451,6 +460,7 @@ function Test-PreparedSourceTenants {
         } catch { $errors.Add("${relative}: $($_.Exception.Message)") }
         if ($files -gt 0 -and $files % 25 -eq 0) { Write-Host ('[{0:yyyy-MM-dd HH:mm:ss}] Source tenant validation: {1} CSVs checked.' -f (Get-Date),$files) }
     }
+    Write-Host ('[{0:yyyy-MM-dd HH:mm:ss}] Source tenant validation: {1} CSVs checked; {2} read by the reference parser.' -f (Get-Date),$files,$script:PreparedTenantReferenceParses)
     if ($errors.Count) { throw ("Source tenant validation failed ($($errors.Count) files):`n" + ($errors -join "`n")) }
     [pscustomobject]@{CsvFiles=$files;Rows=$rows;LegacyArchivedSummaries=$legacyArchived}
 }
