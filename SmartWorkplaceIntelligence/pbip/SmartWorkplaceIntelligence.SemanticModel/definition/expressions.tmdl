@@ -263,10 +263,23 @@ expression NativeEvidenceTypes =
 		                        and Text.At(Offset, 3) = ":"
 		                        and Text.Length(Text.Select(Offset, {"0".."9"})) = 4),
 		                WallClock = () as datetime =>
-		                    let Parsed = DateTime.FromText(TextValue,
-		                            [Format = "dd/MM/yyyy HH:mm:ss", Culture = "fr-FR"]),
-		                        Exact = DateTime.ToText(Parsed,
-		                            [Format = "dd/MM/yyyy HH:mm:ss", Culture = "fr-FR"]) = TextValue
+		                    let Length = Text.Length(TextValue), FractionDigits = Length - 20,
+		                        IsoDate = Length = 10 and Text.At(TextValue, 4) = "-"
+		                            and Text.At(TextValue, 7) = "-",
+		                        IsoTimestamp = Length >= 19 and Text.At(TextValue, 10) = "T",
+		                        Format = if IsoDate then "yyyy-MM-dd"
+		                            else if IsoTimestamp then
+		                                if Length = 19 then "yyyy-MM-dd'T'HH:mm:ss"
+		                                else if FractionDigits >= 1 and FractionDigits <= 7
+		                                    and Text.At(TextValue, 19) = "."
+		                                    and Text.Length(Text.Select(Text.Range(TextValue, 20),
+		                                        {"0".."9"})) = FractionDigits
+		                                then "yyyy-MM-dd'T'HH:mm:ss." & Text.Repeat("f", FractionDigits)
+		                                else error "Invalid source wall-clock date evidence."
+		                            else "dd/MM/yyyy HH:mm:ss",
+		                        Culture = if IsoDate or IsoTimestamp then "en-US" else "fr-FR",
+		                        Parsed = DateTime.FromText(TextValue, [Format = Format, Culture = Culture]),
+		                        Exact = DateTime.ToText(Parsed, [Format = Format, Culture = Culture]) = TextValue
 		                    in if Exact and Date.Year(DateTime.Date(Parsed)) >= 1900 then Parsed
 		                        else error "Invalid source wall-clock date evidence."
 		            in if EmptyAutopilotContact and TextValue = "01/01/0001 00:00:00" then null
