@@ -2,7 +2,7 @@
 .SYNOPSIS
   Offline checks for the license overview and recovery email.
 .VERSION
-1.0.3
+1.1.0
 #>
 
 [CmdletBinding()]
@@ -25,18 +25,21 @@ function Initialize-SmartM365ImportExcel {
 if (-not (Get-Command -Name Complete-SmartM365CmdbSourceReceipt -Module $coreModule.Name -ErrorAction SilentlyContinue)) {
   throw 'SmartM365.Core must export the source receipt completion command used before the email.'
 }
-if ($inventoryText.IndexOf("Complete-SmartM365CmdbSourceReceipt -Status 'Completed'") -lt 0 -or
-    $inventoryText.IndexOf("Complete-SmartM365CmdbSourceReceipt -Status 'Completed'") -gt
-    $inventoryText.IndexOf('Send-LicensesFocusedSummaryEmail -TenantRows $tenantRows.ToArray()') -or
+$reportIndex = $inventoryText.IndexOf('$licenseRunReport = Publish-LicensesRunReport -Folder $LatestCsvFolderPath')
+$completeIndex = $inventoryText.IndexOf("Complete-SmartM365CmdbSourceReceipt -Status 'Completed'")
+$mailIndex = $inventoryText.IndexOf('[void](Send-LicensesFocusedSummaryEmail -CsvFolderPath $LatestCsvFolderPath')
+if ($reportIndex -lt 0 -or $completeIndex -lt 0 -or $mailIndex -lt 0 -or
+    $reportIndex -gt $completeIndex -or $completeIndex -gt $mailIndex -or
     $inventoryText.IndexOf('Licensing source receipt could not be completed; summary email was not sent') -lt 0) {
-  throw 'The full collector must qualify its source receipt before sending the email.'
+  throw 'The full collector must publish its report, then qualify its source receipt, before sending the email.'
 }
 $names = @(
   'Get-LicensesFocusedSummaryRows', 'Get-LicensesAdditionalOverviewRows', 'New-LicensesOverviewCardHtml',
   'ConvertTo-LicensesActivityDate', 'ConvertTo-LicensesMailboxSizeGb', 'Get-LicensesQualifiedPartialAdCoverage', 'Get-LicensesCsvSource',
   'Import-LicensesSourceCsv', 'Read-LicensesIndexedSource', 'Get-LicensesMailboxGapSummary', 'Get-LicensesAdAccountActivitySummary', 'Get-LicensesFocusedUsageRows', 'Format-LicensesMetric',
   'Get-LicensesAlertSummary', 'New-LicensesRecoveryWorkbook', 'Publish-LicensesReportCsv', 'Publish-LicensesReportSnapshot', 'Write-LicensesDailyMailState', 'Enter-LicensesDailyMailGate',
-  'Send-LicensesFocusedSummaryEmail', 'Read-LicensesTenantSnapshot'
+  'Send-LicensesFocusedSummaryEmail', 'Read-LicensesTenantSnapshot', 'ConvertFrom-LicensesJsonElement', 'ConvertTo-LicensesCountTable',
+  'Read-LicensesPublishedReport'
 )
 $definitions = @($ast.FindAll({
   param($node)
@@ -79,6 +82,39 @@ function Send-SmartM365Mail {
   finally { $package.Dispose() }
   $script:SentMail.Add([pscustomobject]@{From=$From;To=$To;Subject=$Subject;BodyHtml=$BodyHtml;MailPurpose=$MailPurpose;BookSummary=$bookSummary;BookCandidates=$bookCandidates;BookDowngrade=$bookDowngrade;BookDates=$bookDates;AttachmentPath=$Attachments[0]}) | Out-Null
 }
+function Update-TestLicensesReceipt {
+  param([Parameter(Mandatory)][string]$Folder, [Parameter(Mandatory)][string[]]$CsvPaths)
+  # Records the report CSVs as optional files of the fixture licensing receipt, as Complete-SmartM365CmdbSourceReceipt does.
+  $path = Join-Path $Folder 'SmartInventory_SmartM365-Licences-Inventory.current.json.txt'
+  $receipt = if (Test-Path -LiteralPath $path) { Get-Content -LiteralPath $path -Raw | ConvertFrom-Json -AsHashtable } else { @{Status='Completed';IsPartialInventory=$false;Files=@()} }
+  $names = @($CsvPaths | ForEach-Object { [IO.Path]::GetFileName($_) })
+  $files = @(@($receipt.Files) | Where-Object { $_ -and [string]$_.File -notin $names })
+  foreach ($csv in $CsvPaths) {
+    $files += @{File=[IO.Path]::GetFileName($csv);Status='Success';IsPartialInventory=$false;Required=$false;SHA256=(Get-FileHash -LiteralPath $csv -Algorithm SHA256).Hash}
+  }
+  $receipt.Files = $files
+  $receipt.TenantKey = 'prod'
+  $receipt.Producer = 'SmartM365-Licences-Inventory.ps1'
+  if (-not $receipt.Status) { $receipt.Status = 'Completed' }
+  $receipt | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $path
+}
+function Publish-TestLicenseReport {
+  param([Parameter(Mandatory)][string]$Folder, [Parameter(Mandatory)][object[]]$TenantRows, [Parameter(Mandatory)][string]$CollectedAtUtc,
+        [switch]$ForceAdCsvAnalysis, [switch]$WithoutUsage)
+  # Publishes the report from completed fixture receipts, as the collector does before its receipt completes.
+  $summaryRows = @(Get-LicensesFocusedSummaryRows -TenantRows $TenantRows)
+  $additionalRows = @(Get-LicensesAdditionalOverviewRows -TenantRows $TenantRows)
+  $usage = $null
+  if (-not $WithoutUsage) {
+    try {
+      $usage = Get-LicensesFocusedUsageRows -CsvFolderPath $Folder -ExpectedTenantKey 'prod' -LicenseSnapshotUtc ([datetimeoffset]::Parse($CollectedAtUtc,[Globalization.CultureInfo]::InvariantCulture)) -ForceAdCsvAnalysis:$ForceAdCsvAnalysis
+    }
+    catch { $usage = $null }
+  }
+  $snapshot = Publish-LicensesReportSnapshot -Folder $Folder -TenantKey 'prod' -CollectedAtUtc $CollectedAtUtc -SummaryRows $summaryRows -AdditionalRows $additionalRows -Usage $usage -AssignmentIssues $null
+  Update-TestLicensesReceipt -Folder $Folder -CsvPaths $snapshot.CsvPaths
+  return $snapshot
+}
 function New-SmartM365EmailBody {
   param([string]$Title, [string]$Category, [string]$HostName, [string]$GeneratedAt, [string]$BodyHtml, [string]$Footer)
   $script:TemplateCalls.Add([pscustomobject]@{HostName=$HostName;GeneratedAt=$GeneratedAt;Footer=$Footer}) | Out-Null
@@ -94,6 +130,8 @@ $script:TemplateCalls = [System.Collections.Generic.List[object]]::new()
 $mailGateRoot = Join-Path $env:TEMP ('SmartM365-LicenseMailGate-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $mailGateRoot -Force | Out-Null
 $script:MailStatePath = Join-Path $mailGateRoot 'M365_Licenses_SummaryEmail_SendState.json.txt'
+$basicReportRoot = Join-Path $mailGateRoot 'basic-report'
+New-Item -ItemType Directory -Path $basicReportRoot -Force | Out-Null
 $rows = @(
   [pscustomobject]@{TenantSkuPartNumber='M365_F1';TenantPrepaidEnabled=10;TenantConsumedUnits=8}
   [pscustomobject]@{TenantSkuPartNumber='M365_F1_COMM';TenantPrepaidEnabled=5;TenantConsumedUnits=4}
@@ -110,6 +148,11 @@ $rows = @(
   [pscustomobject]@{TenantSkuPartNumber='POWER_BI_STANDARD';TenantPrepaidEnabled=1000000;TenantConsumedUnits=1000}
   [pscustomobject]@{TenantSkuPartNumber='OTHER_SKU';TenantPrepaidEnabled=99;TenantConsumedUnits=99}
 )
+$basicCollectedAt = '2026-10-06T10:00:00.0000000+00:00'
+$rows | ForEach-Object {
+  [pscustomobject]@{ TenantKey='prod'; TenantSkuPartNumber=$_.TenantSkuPartNumber; TenantPrepaidEnabled=$_.TenantPrepaidEnabled
+    TenantConsumedUnits=$_.TenantConsumedUnits; CollectedAtUtc=$basicCollectedAt }
+} | Export-Csv -LiteralPath (Join-Path $basicReportRoot 'M365_Licenses_Tenant.csv') -NoTypeInformation
 $summary = @(Get-LicensesFocusedSummaryRows -TenantRows $rows)
 Assert-Equal $summary.Count 4 'Product count'
 Assert-Equal $summary[0].Enabled 15 'F1 enabled sum'
@@ -135,11 +178,12 @@ if ((New-LicensesOverviewCardHtml -Row $summary[3] -Width 25 -Accent '#475569') 
   throw 'An unsubscribed overview card must show N/A as its primary value.'
 }
 
-Send-LicensesFocusedSummaryEmail -TenantRows $rows -CollectedAtUtc '2026-10-06T10:00:00Z' -ExpectedTenantKey 'prod' -MailStatePath $script:MailStatePath | Out-Null
+Publish-TestLicenseReport -Folder $basicReportRoot -TenantRows $rows -CollectedAtUtc $basicCollectedAt -WithoutUsage | Out-Null
+Send-LicensesFocusedSummaryEmail -CsvFolderPath $basicReportRoot -ExpectedTenantKey 'prod' -MailStatePath $script:MailStatePath | Out-Null
 Assert-Equal $script:SentMail.Count 1 'Sent mail count'
 $sentState = Get-Content -LiteralPath $script:MailStatePath -Raw | ConvertFrom-Json
 Assert-Equal $sentState.Status 'Sent' 'Daily send state'
-Send-LicensesFocusedSummaryEmail -TenantRows $rows -CollectedAtUtc '2026-10-06T10:00:00Z' -ExpectedTenantKey 'prod' -MailStatePath $script:MailStatePath | Out-Null
+Send-LicensesFocusedSummaryEmail -CsvFolderPath $basicReportRoot -ExpectedTenantKey 'prod' -MailStatePath $script:MailStatePath | Out-Null
 Assert-Equal $script:SentMail.Count 1 'Second send on the same Paris day is skipped'
 Assert-Equal $script:SentMail[0].BookSummary.Count 4 'Workbook summary has four target suites'
 Assert-Equal $script:SentMail[0].BookCandidates.Count 0 'Workbook with unavailable sources has no invented candidates'
@@ -157,14 +201,14 @@ if ($script:SentMail[0].BodyHtml -like '*OTHER_SKU*' -or $script:SentMail[0].Bod
 }
 
 $script:Sampled = $true
-Send-LicensesFocusedSummaryEmail -TenantRows $rows -CollectedAtUtc '2026-10-06T10:00:00Z' -ExpectedTenantKey 'prod' -MailStatePath $script:MailStatePath | Out-Null
+Send-LicensesFocusedSummaryEmail -CsvFolderPath $basicReportRoot -ExpectedTenantKey 'prod' -MailStatePath $script:MailStatePath | Out-Null
 Assert-Equal $script:SentMail.Count 1 'Sampled run sends no mail'
 $script:Sampled = $false
 $script:ScriptLocalConfig.EnableLicenseSummaryEmail = $false
-Send-LicensesFocusedSummaryEmail -TenantRows $rows -CollectedAtUtc '2026-10-06T10:00:00Z' -ExpectedTenantKey 'prod' -MailStatePath $script:MailStatePath | Out-Null
+Send-LicensesFocusedSummaryEmail -CsvFolderPath $basicReportRoot -ExpectedTenantKey 'prod' -MailStatePath $script:MailStatePath | Out-Null
 Assert-Equal $script:SentMail.Count 1 'Disabled summary sends no mail'
 $script:Sampled = $true
-Send-LicensesFocusedSummaryEmail -TenantRows $rows -CollectedAtUtc '2026-10-06T10:00:00Z' -ExpectedTenantKey 'prod' -MailStatePath $script:MailStatePath -Manual -ForceLicenseSummaryEmail | Out-Null
+Send-LicensesFocusedSummaryEmail -CsvFolderPath $basicReportRoot -ExpectedTenantKey 'prod' -MailStatePath $script:MailStatePath -Manual -ForceLicenseSummaryEmail | Out-Null
 Assert-Equal $script:SentMail.Count 2 'Explicit email-only mode sends mail'
 if ($script:SentMail[1].Subject -ne 'Microsoft 365 license overview and recovery' -or $script:SentMail[1].BodyHtml -notlike '*No new inventory was run*') {
   throw 'Email-only mode did not identify the existing CSV snapshot.'
@@ -196,22 +240,24 @@ try { Get-LicensesFocusedSummaryRows -TenantRows $badRows | Out-Null } catch { $
 Assert-Equal $threw $true 'Missing count is rejected'
 $failedPreparationPath = Join-Path $mailGateRoot 'failed-preparation.json.txt'
 $threw = $false
-try { Send-LicensesFocusedSummaryEmail -TenantRows $badRows -CollectedAtUtc '2026-10-06T10:00:00Z' -ExpectedTenantKey 'prod' -MailStatePath $failedPreparationPath -Manual | Out-Null } catch { $threw = $true }
-Assert-Equal $threw $true 'Preparation failure is reported'
+$unpublishedRoot = Join-Path $mailGateRoot 'unpublished-report'
+New-Item -ItemType Directory -Path $unpublishedRoot -Force | Out-Null
+try { Send-LicensesFocusedSummaryEmail -CsvFolderPath $unpublishedRoot -ExpectedTenantKey 'prod' -MailStatePath $failedPreparationPath -Manual | Out-Null } catch { $threw = $true }
+Assert-Equal $threw $true 'Missing published report is reported'
 Assert-Equal (Get-Item -LiteralPath $failedPreparationPath).Length 0 'Preparation failure leaves no daily send marker'
-Send-LicensesFocusedSummaryEmail -TenantRows $rows -CollectedAtUtc '2026-10-06T10:00:00Z' -ExpectedTenantKey 'prod' -MailStatePath $failedPreparationPath -Manual | Out-Null
+Send-LicensesFocusedSummaryEmail -CsvFolderPath $basicReportRoot -ExpectedTenantKey 'prod' -MailStatePath $failedPreparationPath -Manual | Out-Null
 Assert-Equal $script:SentMail.Count 3 'Preparation failure can be retried without force'
 
 $uncertainPath = Join-Path $mailGateRoot 'uncertain-send.json.txt'
 $script:FailMail = $true
 $threw = $false
-try { Send-LicensesFocusedSummaryEmail -TenantRows $rows -CollectedAtUtc '2026-10-06T10:00:00Z' -ExpectedTenantKey 'prod' -MailStatePath $uncertainPath -Manual | Out-Null } catch { $threw = $true }
+try { Send-LicensesFocusedSummaryEmail -CsvFolderPath $basicReportRoot -ExpectedTenantKey 'prod' -MailStatePath $uncertainPath -Manual | Out-Null } catch { $threw = $true }
 $script:FailMail = $false
 Assert-Equal $threw $true 'Transport failure is reported'
 Assert-Equal (Get-Content -LiteralPath $uncertainPath -Raw | ConvertFrom-Json).Status 'Pending' 'Uncertain delivery blocks automatic retry'
-Send-LicensesFocusedSummaryEmail -TenantRows $rows -CollectedAtUtc '2026-10-06T10:00:00Z' -ExpectedTenantKey 'prod' -MailStatePath $uncertainPath -Manual | Out-Null
+Send-LicensesFocusedSummaryEmail -CsvFolderPath $basicReportRoot -ExpectedTenantKey 'prod' -MailStatePath $uncertainPath -Manual | Out-Null
 Assert-Equal $script:SentMail.Count 3 'Uncertain delivery is not automatically repeated'
-Send-LicensesFocusedSummaryEmail -TenantRows $rows -CollectedAtUtc '2026-10-06T10:00:00Z' -ExpectedTenantKey 'prod' -MailStatePath $uncertainPath -Manual -ForceLicenseSummaryEmail | Out-Null
+Send-LicensesFocusedSummaryEmail -CsvFolderPath $basicReportRoot -ExpectedTenantKey 'prod' -MailStatePath $uncertainPath -Manual -ForceLicenseSummaryEmail | Out-Null
 Assert-Equal $script:SentMail.Count 4 'Explicit force retries uncertain delivery'
 
 $adRecentRow = [pscustomobject]@{Enabled='True';LastLogonDate=([datetime]::UtcNow.AddDays(-2).ToString('yyyy-MM-dd'))}
@@ -482,7 +528,7 @@ try {
 
   $script:SentMail.Clear()
   $script:TemplateCalls.Clear()
-  Send-LicensesFocusedSummaryEmail -TenantRows $rows -CollectedAtUtc ([datetimeoffset]::UtcNow.ToString('o')) -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -MailStatePath $script:MailStatePath -Manual -ForceLicenseSummaryEmail | Out-Null
+  Publish-TestLicenseReport -Folder $testRoot -TenantRows $rows -CollectedAtUtc ([datetimeoffset]::UtcNow.ToString('o')) | Out-Null; Send-LicensesFocusedSummaryEmail -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -MailStatePath $script:MailStatePath -Manual -ForceLicenseSummaryEmail | Out-Null
   Assert-Equal $script:SentMail.Count 1 'Enriched email sent'
   $reportSnapshotPath = Join-Path $testRoot 'M365_Licenses_ReportSnapshot.json.txt'
   $reportSnapshot = Get-Content -LiteralPath $reportSnapshotPath -Raw | ConvertFrom-Json
@@ -644,7 +690,7 @@ try {
   Assert-Equal $partialIntune.IntuneSourceReady $false 'Partial Intune file receipt is rejected'
   Assert-Equal @($partialIntune.Rows | Where-Object Product -eq 'Microsoft 365 F3')[0].Counts.RecoveryCandidates 1 'Intune source does not change recovery count'
   $script:SentMail.Clear()
-  Send-LicensesFocusedSummaryEmail -TenantRows $rows -CollectedAtUtc ([datetimeoffset]::UtcNow.ToString('o')) -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -MailStatePath $script:MailStatePath -Manual -ForceLicenseSummaryEmail | Out-Null
+  Publish-TestLicenseReport -Folder $testRoot -TenantRows $rows -CollectedAtUtc ([datetimeoffset]::UtcNow.ToString('o')) | Out-Null; Send-LicensesFocusedSummaryEmail -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -MailStatePath $script:MailStatePath -Manual -ForceLicenseSummaryEmail | Out-Null
   if ($script:SentMail[0].BodyHtml -notmatch '<td style="[^"]*">F3</td><td style="[^"]*">1</td><td style="[^"]*">0</td><td style="[^"]*">1</td><td style="[^"]*">N/D</td>') {
     throw 'Unqualified Intune PC source is not marked N/D in recovery table.'
   }
@@ -656,7 +702,7 @@ try {
   Assert-Equal $misaligned.Sources[0].Ready $false 'Misaligned license user source is not ready'
   Assert-Equal $misaligned.MailboxGap $null 'Misaligned license source makes both new sections N/D'
   $script:SentMail.Clear()
-  Send-LicensesFocusedSummaryEmail -TenantRows $rows -CollectedAtUtc ([datetimeoffset]::UtcNow.AddDays(-3).ToString('o')) -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -MailStatePath $script:MailStatePath -Manual -ForceLicenseSummaryEmail | Out-Null
+  Publish-TestLicenseReport -Folder $testRoot -TenantRows $rows -CollectedAtUtc ([datetimeoffset]::UtcNow.AddDays(-3).ToString('o')) | Out-Null; Send-LicensesFocusedSummaryEmail -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -MailStatePath $script:MailStatePath -Manual -ForceLicenseSummaryEmail | Out-Null
   $misalignedSnapshot = Get-Content -LiteralPath $reportSnapshotPath -Raw | ConvertFrom-Json
   $misalignedF3 = @($misalignedSnapshot.Products | Where-Object Product -eq 'Microsoft 365 F3')[0]
   Assert-Equal $misalignedF3.UsageAvailable $false 'Snapshot rejects misaligned license assignments'
@@ -755,7 +801,7 @@ try {
     if ($null -ne $partialSummary.NoObservedMatch) { throw 'Partial AD scope must not confirm missing AD matches.' }
 
     $script:SentMail.Clear()
-    Send-LicensesFocusedSummaryEmail -TenantRows $rows -CollectedAtUtc ([datetimeoffset]::UtcNow.ToString('o')) -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -MailStatePath $script:MailStatePath -Manual -ForceLicenseSummaryEmail | Out-Null
+    Publish-TestLicenseReport -Folder $testRoot -TenantRows $rows -CollectedAtUtc ([datetimeoffset]::UtcNow.ToString('o')) | Out-Null; Send-LicensesFocusedSummaryEmail -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -MailStatePath $script:MailStatePath -Manual -ForceLicenseSummaryEmail | Out-Null
     if ($script:SentMail[0].BodyHtml -notlike '*PROVISIONAL (*2/3 domains collected*' -or
         $script:SentMail[0].BodyHtml -notlike '*AD activity scope:*' -or
         $script:SentMail[0].BodyHtml -like '*FORCED AD CSV*') { throw 'Accepted partial AD scope is not visibly distinguished from a forced bypass.' }
@@ -832,7 +878,7 @@ try {
   Assert-Equal $forcedAd.AdSourceForced $true 'AD override is reported to the email builder'
   Assert-Equal $forcedF3.Counts.AdEntraInactive 1 'Forced AD CSV contributes only non-shared user inactivity'
   $script:SentMail.Clear()
-  Send-LicensesFocusedSummaryEmail -TenantRows $rows -CollectedAtUtc ([datetimeoffset]::UtcNow.ToString('o')) -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -MailStatePath $script:MailStatePath -Manual -ForceLicenseSummaryEmail -ForceAdCsvAnalysis | Out-Null
+  Publish-TestLicenseReport -Folder $testRoot -TenantRows $rows -CollectedAtUtc ([datetimeoffset]::UtcNow.ToString('o')) -ForceAdCsvAnalysis | Out-Null; Send-LicensesFocusedSummaryEmail -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -MailStatePath $script:MailStatePath -Manual -ForceLicenseSummaryEmail | Out-Null
   if ($script:SentMail[0].BodyHtml -notlike '*Provisional AD/Entra indicator*' -or
       $script:SentMail[0].BodyHtml -notlike '*PROVISIONAL (*FORCED AD CSV*') {
     throw 'Forced AD usage is not visibly qualified in the email.'
@@ -890,7 +936,7 @@ try {
   Assert-Equal $partialOnPrem.MailboxGap.UserMailboxes.Available $true 'EXO UserMailbox section remains available'
   Assert-Equal $partialOnPrem.MailboxGap.NoUserMailbox.Available $false 'Partial on-premises receipt makes section 07 N/D'
   $script:SentMail.Clear()
-  Send-LicensesFocusedSummaryEmail -TenantRows $rows -CollectedAtUtc ([datetimeoffset]::UtcNow.ToString('o')) -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -MailStatePath $script:MailStatePath -Manual -ForceLicenseSummaryEmail | Out-Null
+  Publish-TestLicenseReport -Folder $testRoot -TenantRows $rows -CollectedAtUtc ([datetimeoffset]::UtcNow.ToString('o')) | Out-Null; Send-LicensesFocusedSummaryEmail -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -MailStatePath $script:MailStatePath -Manual -ForceLicenseSummaryEmail | Out-Null
   if ($script:SentMail[0].BodyHtml -notlike '*Section 07 N/D*') { throw 'Unqualified on-premises source is not visible in the email.' }
   @{Status='Completed';IsPartialInventory=$false;ConsumerScopeQualified=$true;Files=@(@{File='Exchange_OnPrem_Mailboxes_AllDomains.csv';Status='Success';IsPartialInventory=$false;SHA256='BADHASH'})} |
     ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $onPremManifestPath
@@ -899,55 +945,81 @@ try {
   @{Status='Completed';IsPartialInventory=$false;ConsumerScopeQualified=$true;Files=@(@{File='Exchange_OnPrem_Mailboxes_AllDomains.csv';Status='Success';IsPartialInventory=$false;SHA256=$onPremHash})} |
     ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $onPremManifestPath
 
+  $licenseHashNow = (Get-FileHash -LiteralPath $licenseUsersPath -Algorithm SHA256).Hash
   @{Status='Completed';IsPartialInventory=$false;Files=@()} |
     ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $licenseManifestPath
   $oldReceipt = Get-LicensesFocusedUsageRows -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -AsOfUtc $today
-  Assert-Equal $oldReceipt.Rows[0].Available $false 'Old licensing receipt needs an explicit bypass'
-  $bypassedReceipt = Get-LicensesFocusedUsageRows -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -AsOfUtc $today -BypassLicenseUsersReceipt
-  Assert-Equal $bypassedReceipt.Rows[0].Available $true 'Bypass accepts fresh license-users CSV'
-  Assert-Equal $bypassedReceipt.LicenseSourceForced $true 'Bypass is recorded as provisional'
-  $script:SentMail.Clear()
-  Send-LicensesFocusedSummaryEmail -TenantRows $rows -CollectedAtUtc ([datetimeoffset]::UtcNow.ToString('o')) -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -MailStatePath $script:MailStatePath -Manual -ForceLicenseSummaryEmail -BypassLicenseUsersReceipt | Out-Null
-  if ($script:SentMail[0].BodyHtml -notlike '*Provisional license assignment indicators*' -or
-      $script:SentMail[0].BodyHtml -notlike '*PROVISIONAL (*license-users CSV absent*') {
-    throw 'The temporary licensing receipt bypass is not visible in the email.'
-  }
+  Assert-Equal $oldReceipt.Rows[0].Available $false 'A licensing receipt without the file record is not qualified'
+  @{Status='Running';IsPartialInventory=$true;Files=@()} |
+    ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $licenseManifestPath
+  $licenseFullPath = [IO.Path]::GetFullPath($licenseUsersPath)
+  $runProof = [pscustomobject]@{ RunId='current-run-test'; Hashes=@{ $licenseFullPath=$licenseHashNow } }
+  $currentRun = Get-LicensesFocusedUsageRows -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -AsOfUtc $today -CurrentRunPublication $runProof
+  Assert-Equal $currentRun.Rows[0].Available $true 'Current-run publication qualifies the licensing file while its receipt is running'
+  Assert-Equal $currentRun.Sources[0].Provenance 'current run publication' 'Current-run provenance is explicit'
+  Assert-Equal $currentRun.Sources[0].Forced $false 'Current-run publication is not a receipt bypass'
+  $wrongRun = Get-LicensesFocusedUsageRows -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -AsOfUtc $today `
+    -CurrentRunPublication ([pscustomobject]@{ RunId='current-run-test'; Hashes=@{ $licenseFullPath='BADHASH' } })
+  Assert-Equal $wrongRun.Rows[0].Available $false 'Current-run proof rejects a changed licensing file'
+  Assert-Equal $wrongRun.Sources[0].Reason 'file hash differs from the current-run publication' 'Changed licensing file reason'
+  $notPublished = Get-LicensesFocusedUsageRows -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -AsOfUtc $today `
+    -CurrentRunPublication ([pscustomobject]@{ RunId='current-run-test'; Hashes=@{} })
+  Assert-Equal $notPublished.Rows[0].Available $false 'Current-run proof requires a publication by this run'
+  $onPremCurrentHash = (Get-FileHash -LiteralPath $onPremPath -Algorithm SHA256).Hash
+  @{Status='Failed';IsPartialInventory=$true;ConsumerScopeQualified=$false;Files=@()} |
+    ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $onPremManifestPath
+  $foreignSource = Get-LicensesCsvSource -Folder $testRoot -FileName 'Exchange_OnPrem_Mailboxes_AllDomains.csv' -Columns @('TenantKey','ObjectGUID') -AsOfUtc $today `
+    -CollectorManifestName 'SmartInventory_SmartM365-Exchange-Local-Mailboxes-Inventory.current.json.txt' -RequireFileReceipt `
+    -CurrentRunPublication ([pscustomobject]@{ RunId='current-run-test'; Hashes=@{ ([IO.Path]::GetFullPath($onPremPath))=$onPremCurrentHash } })
+  Assert-Equal $foreignSource.Ready $false 'Current-run proof never replaces another producer receipt'
+  @{Status='Completed';IsPartialInventory=$false;ConsumerScopeQualified=$true;Files=@(@{File='Exchange_OnPrem_Mailboxes_AllDomains.csv';Status='Success';IsPartialInventory=$false;SHA256=$onPremCurrentHash})} |
+    ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $onPremManifestPath
   $licenseLastWriteUtc = (Get-Item -LiteralPath $licenseUsersPath).LastWriteTimeUtc
-  @{Status='Running';IsPartialInventory=$true;StartedAtUtc=$licenseLastWriteUtc.AddMinutes(5).ToString('o');Files=@()} |
-    ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $licenseManifestPath
-  $runningWithoutBypass = Get-LicensesFocusedUsageRows -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -AsOfUtc $today
-  Assert-Equal $runningWithoutBypass.Rows[0].Available $false 'Running receipt needs an explicit bypass'
-  $runningWithBypass = Get-LicensesFocusedUsageRows -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -AsOfUtc $today -BypassLicenseUsersReceipt
-  Assert-Equal $runningWithBypass.Rows[0].Available $true "Bypass accepts the prior CSV while a new collection is running ($($runningWithBypass.Sources[0].Reason))"
-  Assert-Equal $runningWithBypass.LicenseSourceForced $true 'Running receipt bypass is provisional'
-  $script:SentMail.Clear()
-  Send-LicensesFocusedSummaryEmail -TenantRows $rows -CollectedAtUtc ([datetimeoffset]::UtcNow.ToString('o')) -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -MailStatePath $script:MailStatePath -Manual -ForceLicenseSummaryEmail -BypassLicenseUsersReceipt | Out-Null
-  if ($script:SentMail[0].BodyHtml -notlike '*Provisional license assignment indicators*' -or
-      $script:SentMail[0].BodyHtml -notlike '*previous license-users CSV while a new collection is running*') {
-    throw 'The running licensing receipt bypass is not visible in the email.'
-  }
-  @{Status='Running';IsPartialInventory=$true;StartedAtUtc=$licenseLastWriteUtc.AddMinutes(-5).ToString('o');Files=@()} |
-    ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $licenseManifestPath
-  $inProgressCsv = Get-LicensesFocusedUsageRows -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -AsOfUtc $today -BypassLicenseUsersReceipt
-  Assert-Equal $inProgressCsv.Rows[0].Available $false 'Bypass rejects a CSV updated after the new collection started'
-  @{Status='Completed';IsPartialInventory=$true;StartedAtUtc=$licenseLastWriteUtc.AddMinutes(5).ToString('o');Files=@()} |
-    ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $licenseManifestPath
-  $partialReceipt = Get-LicensesFocusedUsageRows -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -AsOfUtc $today -BypassLicenseUsersReceipt
-  Assert-Equal $partialReceipt.Rows[0].Available $false 'Bypass does not accept a completed partial licensing receipt'
-  @{Status='Failed';IsPartialInventory=$true;Files=@()} |
-    ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $licenseManifestPath
-  $failedReceipt = Get-LicensesFocusedUsageRows -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -AsOfUtc $today -BypassLicenseUsersReceipt
-  Assert-Equal $failedReceipt.Rows[0].Available $false 'Bypass does not accept failed licensing receipt'
-  @{Status='Completed';IsPartialInventory=$false;Files=@(@{File='M365_Licenses_Users.csv';Status='Success';IsPartialInventory=$false;SHA256='BADHASH'})} |
-    ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $licenseManifestPath
-  $wrongHash = Get-LicensesFocusedUsageRows -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -AsOfUtc $today -BypassLicenseUsersReceipt
-  Assert-Equal $wrongHash.Rows[0].Available $false 'Bypass does not accept changed licensing CSV'
-  @{Status='Completed';IsPartialInventory=$false;Files=@()} |
-    ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $licenseManifestPath
   [System.IO.File]::SetLastWriteTimeUtc($licenseUsersPath, $today.AddDays(-20))
-  $staleLicense = Get-LicensesFocusedUsageRows -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -AsOfUtc $today -BypassLicenseUsersReceipt
-  Assert-Equal $staleLicense.Rows[0].Available $false 'Bypass does not accept stale licensing CSV'
+  $staleRun = Get-LicensesFocusedUsageRows -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -AsOfUtc $today -CurrentRunPublication $runProof
+  Assert-Equal $staleRun.Rows[0].Available $false 'Current-run proof does not bypass freshness'
   [System.IO.File]::SetLastWriteTimeUtc($licenseUsersPath, $licenseLastWriteUtc)
+
+  # Email-only mode renders only a report qualified by the current licensing receipt.
+  @{Status='Completed';IsPartialInventory=$false;Files=@(@{File='M365_Licenses_Users.csv';Status='Success';IsPartialInventory=$false;SHA256=$licenseHashNow})} |
+    ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $licenseManifestPath
+  $qualifiedReport = Publish-TestLicenseReport -Folder $testRoot -TenantRows $rows -CollectedAtUtc ([datetimeoffset]::UtcNow.ToString('o'))
+  $publishedRead = Read-LicensesPublishedReport -Folder $testRoot -TenantKey 'prod'
+  Assert-Equal $publishedRead.SnapshotId $qualifiedReport.Id 'Published report is read back by snapshot identity'
+  Assert-Equal @($publishedRead.SummaryRows).Count 4 'Published report keeps the four target suites'
+  Assert-Equal @($publishedRead.AdditionalRows).Count 3 'Published report keeps the three paid overview products'
+  Assert-Equal $publishedRead.Usage.Rows[2].Counts.GetType().Name 'Hashtable' 'Snapshot counts are restored as lookup tables'
+  $receiptText = Get-Content -LiteralPath $licenseManifestPath -Raw
+  $snapshotBytes = [IO.File]::ReadAllBytes($reportSnapshotPath)
+  $candidatesPath = Join-Path $testRoot 'M365_Licenses_ReportCandidates.csv'
+  $candidatesBytes = [IO.File]::ReadAllBytes($candidatesPath)
+  $rejections = @(
+    @{ Label='Changed report CSV'; Message='*differs from the current licensing receipt*'; Tenant='prod'
+       Arrange={ [IO.File]::WriteAllBytes($candidatesPath, [byte[]]($candidatesBytes + [byte[]](13,10))) } }
+    @{ Label='Running licensing receipt'; Message='*not a completed receipt*'; Tenant='prod'
+       Arrange={ ($receiptText | ConvertFrom-Json -AsHashtable) | ForEach-Object { $_.Status='Running'; $_ } | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $licenseManifestPath } }
+    @{ Label='Another tenant'; Message='*not a completed receipt*'; Tenant='test'; Arrange={} }
+    @{ Label='Report CSV absent from the receipt'; Message='*not recorded by the current licensing receipt*'; Tenant='prod'
+       Arrange={ ($receiptText | ConvertFrom-Json -AsHashtable) | ForEach-Object { $_.Files=@($_.Files | Where-Object { $_.File -ne 'M365_Licenses_ReportGaps.csv' }); $_ } | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $licenseManifestPath } }
+    @{ Label='Snapshot of another report'; Message='*belongs to another snapshot*'; Tenant='prod'
+       Arrange={ [IO.File]::WriteAllText($reportSnapshotPath, ([Text.Encoding]::UTF8.GetString($snapshotBytes).Replace($qualifiedReport.Id, [guid]::NewGuid().ToString('N')))) } }
+  )
+  foreach ($case in $rejections) {
+    & $case.Arrange
+    $rejectedGate = Join-Path $mailGateRoot ('rejected-' + [guid]::NewGuid().ToString('N') + '.json.txt')
+    $rejectedMessage = ''
+    try { Send-LicensesFocusedSummaryEmail -CsvFolderPath $testRoot -ExpectedTenantKey $case.Tenant -MailStatePath $rejectedGate -Manual | Out-Null }
+    catch { $rejectedMessage = $_.Exception.Message }
+    if ($rejectedMessage -notlike $case.Message) { throw "$($case.Label) was not rejected as expected: '$rejectedMessage'." }
+    Assert-Equal (Get-Item -LiteralPath $rejectedGate).Length 0 "$($case.Label) leaves no daily send marker"
+    Set-Content -LiteralPath $licenseManifestPath -Value $receiptText -NoNewline
+    [IO.File]::WriteAllBytes($reportSnapshotPath, $snapshotBytes)
+    [IO.File]::WriteAllBytes($candidatesPath, $candidatesBytes)
+  }
+  $script:SentMail.Clear()
+  Send-LicensesFocusedSummaryEmail -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -MailStatePath (Join-Path $mailGateRoot 'qualified-report.json.txt') -Manual | Out-Null
+  Assert-Equal $script:SentMail.Count 1 'Qualified published report is sent in email-only mode'
+  if ($script:SentMail[0].BodyHtml -notmatch [regex]::Escape("Snapshot: $($qualifiedReport.Id)")) { throw 'Email-only mode does not identify the published snapshot.' }
 }
 finally {
   if (Test-Path -LiteralPath $testRoot) { Remove-Item -LiteralPath $testRoot -Recurse -Force }
@@ -958,8 +1030,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCATvjQC5DL7s+5C
-# 5NQ/9/4EtFhPNb/pIeNyuDS/mKv6IqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCLOoWhoeLLPNH5
+# uwJmnBVeyDu6ErPSr5QKZuJt6HDEAKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1092,31 +1164,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIK0IX2yiphTH+go1nt+1sMsDGGRwNp5w6PWx+UgpkTN8MA0GCSqG
-# SIb3DQEBAQUABIIBgA86NKnDcF5ELDKnBhTCWrOfSNkh3hygBXP76hCyb6m1hguh
-# 0bGgGvYbh+g3oC0M0vsQ7LzY0ob01twsq4/Vncd41yekPjjLS5YEs6/NB0VXnlk2
-# K0Pi7Dtyf66WXerqpnqJ0abLgHMBDOLrJu0GRCINF/ZWzUqkOFjjV8mltY87JBak
-# v3GNJMOQll42ykiYNZ6JqaqCj86L7b9EGrE1G+7LIHSkBWe89MNN33SDCO/0gyaB
-# XDYYWLLWiLRm7Azq4KRsEwoNK2xnguqxOSdPPoV1bYZoAxwqN8tga/PVWAtGZ9yb
-# K4pfVFuSucJgpZffHPSw/3aKvSRx566TOV6exiXncevL2Aj6rmnvrxDyXrpISb8A
-# PWF2h54ep1F3PuADW3b30VJVpi1nsR6T057JIerg+v/FL+rSp9ff5r3AUIVBe+CQ
-# mzzHWygnqPbdv8vfUreVLxbMbEqFVUmM0juFyobNCdkYfHp2xZWI1aRKXlPI36zX
-# iGxAJhSJpGotBw+zpKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIAUIw5HlXNGMQjM/CUaBx86NknRLAukaruZyRZdmFhVtMA0GCSqG
+# SIb3DQEBAQUABIIBgKkvYyGLYJMd7d5OxqHLx8BxJRn8Llff+hUnuww/V5NB7bHj
+# juwQxjr4GO4D4RRfsTYVlPze9Alvqbrlj45hFCb5sbTyE0cnvm958v44kMeSwhHR
+# fxHBksquJ6QVAytlwAH9XIAMGzijSIzBREbD8hY+xZY43emK23cuKJYCQ4qI9+II
+# ec5Gd4V0rjAWHDqzMzPBal8VEKtAP1SDbp2MLPAuN0BlKavfocqcdZqFjM025hGl
+# DMYjbW7FUEsyp7LSVhnRIOfqeDVtprv+iIhRFEaWUwlMww1BkTY/A87DITMispem
+# ua8NpM+/7M8qjudKoSueJ7ZtjUln4u+IwhaWOiel+rDAASOtYsfR4BZG083/12W5
+# 1YcLHknE0c3YseqPZ4QrtNKLkhNiWcp3rqA1sJKaL81nFw0tEYI0YWBut+o6gvGz
+# Qljy/SXtxS7bzd55Jn+WU0oss8xdrKFibdI/Dh0ujMB1MeyNIeT3v8SNz9e9N8gH
+# cOwxZy2pJ5u/ETag4KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTQwODMw
-# MzJaMC8GCSqGSIb3DQEJBDEiBCBEUaqeWAxIMds/C78b+U/hOzx+cW+SJIKW56SP
-# 2TYQcDANBgkqhkiG9w0BAQEFAASCAgAJm0poHX39CqypMTQp0aWRR4GXDwKJ+yph
-# W3v/kQNHifzYU1YFfq0qhbb+06qiNHf3Bpx8f0yYaS/hYsRdzMv0xhhzdPEnoQ9g
-# NuKwFlH4bv4br94wMkIFbnIEQBJ7Ok1+NWF+rOwF9iNeox0c+veSI5Bt8PMU+SMr
-# UprnndatXGQ+Wo2k2h50woarUt7WMXYJoubwKTTsrlS+lpyz8fZIurkb+izKvDna
-# I/mO5KFkQyiBtOdWc9y3E0T2eNXF9DnLZ/vQb8rPdAAvf38G10xlpO7JaWCx+sld
-# 1Y5jpaKcrb1X+DVACGc7xdL91SVDIki17YJjAIdwmnc9BBRuEDVkxdo50/3V2M8E
-# wz0APrwSl5dWmr4dZunXyAjhsqRzPWxTxDBiCWckc37M1GoOrFHaP2VJh5JGjk2t
-# Am5f6j86LmBU36UnGZdiwXK/d9syFNbcgv2JFaBHkyUCwQFyNsCx8jGEJDyK7Qar
-# iSUjovFy0ZWux986JjpZoiuw61EzvLzFM/FSdO8lPzZLQCw4cPfiw6IjDPrbx7hu
-# Nbo/xbRyvq74KddXBS3j6ZK4uv+Dm9Zs6/TM/YigTbvHUjvdI90PabAn9ftuUScH
-# Hf5Jk4Hl/P6oJZvnRgJAHG4KtLZILf2+i6EKFJ4FpMWiLM4DuXN2hONwcN+uc8ko
-# Zph5U0b60A==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTcwNzE1
+# MDRaMC8GCSqGSIb3DQEJBDEiBCAEcJ9S8mfV6INvpnL8DTdZlw0HVnXMganFmULf
+# AAoL5DANBgkqhkiG9w0BAQEFAASCAgBUxop8cz4L8I//LHNYXicXl1yW9ITsIlRy
+# IY6Y7680kHrvMpJn9rpb8p7InDCv5JyjsxjTpdOmh1k30A3jUGkAidoQvIw0imif
+# a60l094pGm1IW5Y65OfiAL1nYmnh9/J0B636o1K/lXZUFQ6cqBqrlfr1fnRTdPrg
+# XckUV7djowdYcd+Mh5FyKLaff9hD6ueIRNX2fLOBRJrVp5zv6n0NsxV+afYeNtHF
+# I0wt+Ykeo79OD6QIn6iWuxQgjeSLRvRJ/1AucXxWHrSyKfaJo3zSW4E4bYl9dpuA
+# V++xpYApO9U+IVo1DmWn2MwYJwlRmJDR6H9I2kxk6vSmpIIva4zVhC7HvwqIs7he
+# aa/q73ZGAhuF9ivxgvbeJyKVft/MlnQqgIt9ZuR5Vz8Hq9COIjBhWiFN4VTSw7vZ
+# ZXaeAQdue0y0L/vBsBBJi/36YoAIfZkN2nW5iy7/3XSCl5XGsllTmaxIinUmYw5L
+# 4ya4U89RbiU944PgVjqY+dTCVFOVK1W1L3GD9fJGign7g3ppw4p/EKKtXb0z5jqk
+# +itOBB8ziqsvgIGB5WUfOLa0f81xkigTqp8Kgs1Y8U/bgsPcDef0LADmgYSBI9Na
+# PJkNSI1ceRZjyvqKb6r8T64YDPFZg1UId7BF1tBn8ocjITpjiaZMriSHAFbDF1lj
+# 9XjjvVPvOg==
 # SIG # End signature block

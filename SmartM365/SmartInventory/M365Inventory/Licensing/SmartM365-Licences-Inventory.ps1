@@ -4,14 +4,14 @@
   WeeklyHistory retains the detailed IsEnabled and PlanStatus representation.
   Detects Direct vs Group via user.LicenseAssignmentStates.assignedByGroup.
   Maps SKU & Service Plan friendly names from the Microsoft CSV (default: script folder).
-  SendLicenseSummaryEmailOnly sends the license overview and recovery summary from existing published CSVs without collecting again.
-  ForceAdCsvAnalysis uses a fresh, structurally valid AD CSV for this email when only its collector receipt is rejected.
-  BypassLicenseUsersReceipt temporarily accepts the fresh license-users CSV when its file receipt is missing or a new collection is running over a prior CSV.
+  Every full run publishes the license report (snapshot + M365_Licenses_Report*.csv) as optional outputs of its source receipt.
+  The email, including SendLicenseSummaryEmailOnly, renders that published report after checking it against the receipt; it never recomputes.
+  ForceAdCsvAnalysis (full runs only) uses a fresh, structurally valid AD CSV for the report when only its collector receipt is rejected.
   ForceLicenseSummaryEmail sends the report again even when it was already sent on the current Europe/Paris day.
   The report also lists target-suite users awaiting license capacity and other assignment errors from qualified existing CSVs.
   Qualified PartialAccepted AD coverage is usable but remains provisional; available allowlisted domains remain included.
 .VERSION
- 1.46
+ 1.48
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication; Microsoft.Graph.Identity.DirectoryManagement; Microsoft.Graph.Users; Microsoft.Graph.Groups; ImportExcel for the report attachment.
@@ -19,7 +19,7 @@
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
   Author: https://github.com/khda79/workplacecloudhub.com
-     Version : 1.46
+     Version : 1.48
   PowerShell: PowerShell 7+
   Minimum application permissions: Directory.Read.All, User.Read.All, Group.Read.All
   Requires: Microsoft.Graph.Authentication
@@ -42,7 +42,6 @@ param(
   [switch]$SendLicenseSummaryEmailOnly,
   [switch]$ForceLicenseSummaryEmail,
   [switch]$ForceAdCsvAnalysis,
-  [switch]$BypassLicenseUsersReceipt,
     [int]$MaxItems = 0
 )
 if ($PSBoundParameters.ContainsKey('MaxItems') -and $MaxItems -gt 0) {
@@ -257,7 +256,7 @@ $OrgDomain = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'OrgDom
 # ==========================================================
 $modulePath = & { $d = $PSScriptRoot; while ($d) { $p = Join-Path $d 'Modules\SmartM365.Core\SmartM365.Core.psd1'; if (Test-Path -LiteralPath $p) { return $p }; $parent = Split-Path -Path $d -Parent; if ($parent -eq $d) { break }; $d = $parent }; throw 'SmartM365.Core module not found.' }
 try {
-    Import-Module -Name $modulePath -MinimumVersion '1.0.86' -ErrorAction Stop
+    Import-Module -Name $modulePath -MinimumVersion '1.0.90' -ErrorAction Stop
 } catch {
     Write-Host "Failed to import SmartM365.Core module from '$modulePath' : $_" -ForegroundColor Red
     exit 1
@@ -754,7 +753,8 @@ function Get-LicensesCsvSource {
     [string]$CollectorManifestName = '',
     [switch]$RequireFileReceipt,
     [switch]$RequireConsumerScope,
-    [switch]$AllowQualifiedPartialAdScope
+    [switch]$AllowQualifiedPartialAdScope,
+    [AllowNull()]$CurrentRunPublication
   )
   $path = Join-Path -Path $Folder -ChildPath $FileName
   $source = [pscustomobject]@{ Name=$FileName; Path=$path; Ready=$false; Reason=''; Date=''; ModifiedUtc=$null; Provenance='CSV only'; Forced=$false; PartialScopeAccepted=$false; DomainCoverage=$null; SHA256=''; ReceiptPath=''; ReceiptHash=''; Proof=$null }
@@ -768,6 +768,17 @@ function Get-LicensesCsvSource {
   $foundColumns = @($header.TrimStart([char]0xFEFF).Replace('"','').Split(','))
   foreach ($column in $Columns) {
     if ($column -notin $foundColumns) { $source.Reason="missing column: $column"; return $source }
+  }
+  # During the licensing run its own receipt is still Running: prove the file by this run's publication instead.
+  if ($CurrentRunPublication -and $CollectorManifestName -ceq 'SmartInventory_SmartM365-Licences-Inventory.current.json.txt') {
+    $fullPath = [IO.Path]::GetFullPath($path)
+    if (-not $CurrentRunPublication.Hashes.ContainsKey($fullPath)) { $source.Reason = 'file was not published by the current licensing run'; return $source }
+    if ([string]$CurrentRunPublication.Hashes[$fullPath] -cne $source.SHA256) { $source.Reason = 'file hash differs from the current-run publication'; return $source }
+    $source.Provenance = 'current run publication'
+    $source.Proof = [pscustomobject]@{ RunId = [string]$CurrentRunPublication.RunId }
+    if ((Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash -cne $source.SHA256) { $source.Reason='source changed during validation'; return $source }
+    $source.Ready = $true
+    return $source
   }
   if ($CollectorManifestName) {
     $manifestPath = Join-Path -Path $Folder -ChildPath $CollectorManifestName
@@ -1148,7 +1159,7 @@ function Get-LicensesFocusedUsageRows {
     [datetimeoffset]$LicenseSnapshotUtc = [datetimeoffset]::MinValue,
     [datetime]$AsOfUtc = [datetime]::UtcNow,
     [switch]$ForceAdCsvAnalysis,
-    [switch]$BypassLicenseUsersReceipt
+    [AllowNull()]$CurrentRunPublication
   )
   $products = @(
     @{ Name='Microsoft 365 F1'; PartNumbers=@('M365_F1','M365_F1_COMM') }
@@ -1157,33 +1168,7 @@ function Get-LicensesFocusedUsageRows {
     @{ Name='Microsoft 365 E5'; PartNumbers=@('SPE_E5') }
   )
   $sources = [System.Collections.Generic.List[object]]::new()
-  $licenseSource = Get-LicensesCsvSource -Folder $CsvFolderPath -FileName 'M365_Licenses_Users.csv' -Columns @('TenantKey','UserId','SkuPartNumber') -AsOfUtc $AsOfUtc -CollectorManifestName 'SmartInventory_SmartM365-Licences-Inventory.current.json.txt' -RequireFileReceipt
-  $licenseReceiptBypassed = $false
-  $runningReceiptStartedUtc = $null
-  if ($BypassLicenseUsersReceipt -and -not $licenseSource.Ready -and $licenseSource.Reason -eq 'collector receipt is Running or partial') {
-    try {
-      $receiptPath = Join-Path -Path $CsvFolderPath -ChildPath 'SmartInventory_SmartM365-Licences-Inventory.current.json.txt'
-      $receipt = Get-Content -LiteralPath $receiptPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
-      if ([string]$receipt.Status -eq 'Running' -and $receipt.StartedAtUtc) {
-        $runningReceiptStartedUtc = if ($receipt.StartedAtUtc -is [datetime]) {
-          ([datetime]$receipt.StartedAtUtc).ToUniversalTime()
-        } else {
-          ([datetimeoffset]::Parse([string]$receipt.StartedAtUtc, [Globalization.CultureInfo]::InvariantCulture)).UtcDateTime
-        }
-      }
-    }
-    catch { $runningReceiptStartedUtc = $null }
-  }
-  $bypassMissingFileReceipt = $licenseSource.Reason -eq 'file missing from collector receipt'
-  $bypassPreviousCsvDuringRun = $null -ne $runningReceiptStartedUtc -and $licenseSource.ModifiedUtc -lt $runningReceiptStartedUtc
-  if ($BypassLicenseUsersReceipt -and -not $licenseSource.Ready -and ($bypassMissingFileReceipt -or $bypassPreviousCsvDuringRun)) {
-    $licenseSource = Get-LicensesCsvSource -Folder $CsvFolderPath -FileName 'M365_Licenses_Users.csv' -Columns @('TenantKey','UserId','SkuPartNumber') -AsOfUtc $AsOfUtc
-    if ($licenseSource.Ready -and $bypassPreviousCsvDuringRun -and $licenseSource.ModifiedUtc -ge $runningReceiptStartedUtc) {
-      $licenseSource.Ready = $false
-      $licenseSource.Reason = 'license-users CSV changed after the running collection started'
-    }
-    $licenseReceiptBypassed = $licenseSource.Ready
-  }
+  $licenseSource = Get-LicensesCsvSource -Folder $CsvFolderPath -FileName 'M365_Licenses_Users.csv' -Columns @('TenantKey','UserId','SkuPartNumber') -AsOfUtc $AsOfUtc -CollectorManifestName 'SmartInventory_SmartM365-Licences-Inventory.current.json.txt' -RequireFileReceipt -CurrentRunPublication $CurrentRunPublication
   if ($licenseSource.Ready -and $LicenseSnapshotUtc -ne [datetimeoffset]::MinValue -and
       [math]::Abs(($licenseSource.ModifiedUtc - $LicenseSnapshotUtc.UtcDateTime).TotalHours) -gt 24) {
     $licenseSource.Ready = $false
@@ -1195,17 +1180,6 @@ function Get-LicensesFocusedUsageRows {
   $targetSuitesByUser = @{}
   $allSkusByUser = @{}
   $licenseIdentityByUser = @{}
-  $bypassedCsvHash = $null
-  if ($licenseSource.Ready -and $licenseReceiptBypassed) {
-    try {
-      $bypassedCsvHash = (Get-FileHash -LiteralPath $licenseSource.Path -Algorithm SHA256 -ErrorAction Stop).Hash
-      if ($bypassPreviousCsvDuringRun -and (Get-Item -LiteralPath $licenseSource.Path -ErrorAction Stop).LastWriteTimeUtc -ge $runningReceiptStartedUtc) {
-        $licenseSource.Ready=$false
-        $licenseSource.Reason='license-users CSV changed after the running collection started'
-      }
-    }
-    catch { $licenseSource.Ready=$false; $licenseSource.Reason='license-users CSV could not be verified before reading' }
-  }
   if ($licenseSource.Ready) {
     try {
       foreach ($row in (Import-LicensesSourceCsv -Source $licenseSource)) {
@@ -1235,29 +1209,11 @@ function Get-LicensesFocusedUsageRows {
     }
     catch { $licenseSource.Ready=$false; $licenseSource.Reason=$_.Exception.Message }
   }
-  if ($licenseSource.Ready -and $licenseReceiptBypassed) {
-    try {
-      if ((Get-FileHash -LiteralPath $licenseSource.Path -Algorithm SHA256 -ErrorAction Stop).Hash -ne $bypassedCsvHash) {
-        $licenseSource.Ready=$false
-        $licenseSource.Reason='license-users CSV changed during analysis'
-      }
-      elseif ($bypassPreviousCsvDuringRun -and (Get-Item -LiteralPath $licenseSource.Path -ErrorAction Stop).LastWriteTimeUtc -ge $runningReceiptStartedUtc) {
-        $licenseSource.Ready=$false
-        $licenseSource.Reason='license-users CSV changed after the running collection started'
-      }
-    }
-    catch { $licenseSource.Ready=$false; $licenseSource.Reason='license-users CSV could not be verified after reading' }
-  }
   if (-not $licenseSource.Ready) {
     $unavailableRows = foreach ($product in $products) {
       [pscustomobject]@{ Product=$product.Name; Counts=@{}; Available=$false }
     }
-    return [pscustomobject]@{ Rows=@($unavailableRows); RecoveryDetails=@(); DowngradeReview=$null; DowngradeDetails=@(); Sources=$sources.ToArray(); SharedSourceReady=$false; IntuneSourceReady=$false; AdSourceForced=$false; LicenseSourceForced=$false; MailboxGap=$null; AdGapActivity=$null }
-  }
-  if ($licenseReceiptBypassed) {
-    $licenseSource.Forced = $true
-    $licenseSource.Provenance = if ($bypassPreviousCsvDuringRun) { 'previous license-users CSV while a new collection is running' } else { 'license-users CSV absent from the previous completed receipt' }
-    WriteLog -Message 'License users CSV analyzed without a file receipt; license assignment and recovery indicators are provisional.' 'WARNING'
+    return [pscustomobject]@{ Rows=@($unavailableRows); RecoveryDetails=@(); DowngradeReview=$null; DowngradeDetails=@(); Sources=$sources.ToArray(); SharedSourceReady=$false; IntuneSourceReady=$false; AdSourceForced=$false; MailboxGap=$null; AdGapActivity=$null }
   }
 
   $sharedSource = Get-LicensesCsvSource -Folder $CsvFolderPath -FileName 'Exchange_EXO_Mailboxes_AllDomains.csv' -Columns @(
@@ -1630,7 +1586,7 @@ function Get-LicensesFocusedUsageRows {
     throw 'E3 to F3 review categories do not reconcile with assigned E3 users.'
   }
   if ($e3ReviewDetails.Count -ne $e3Review.Candidates) { throw 'E3 to F3 review details do not reconcile with candidate count.' }
-  return [pscustomobject]@{ Rows=@($metricRows); RecoveryDetails=$recoveryDetails.ToArray(); DowngradeReview=$e3Review; DowngradeDetails=$e3ReviewDetails.ToArray(); Sources=$sources.ToArray(); SharedSourceReady=$mailboxes.Ready; IntuneSourceReady=$intuneSource.Ready; AdSourceForced=$adSource.Forced; LicenseSourceForced=$licenseSource.Forced; MailboxGap=$mailboxGap; AdGapActivity=$adGapActivity }
+  return [pscustomobject]@{ Rows=@($metricRows); RecoveryDetails=$recoveryDetails.ToArray(); DowngradeReview=$e3Review; DowngradeDetails=$e3ReviewDetails.ToArray(); Sources=$sources.ToArray(); SharedSourceReady=$mailboxes.Ready; IntuneSourceReady=$intuneSource.Ready; AdSourceForced=$adSource.Forced; MailboxGap=$mailboxGap; AdGapActivity=$adGapActivity }
 }
 
 function Format-LicensesMetric {
@@ -1654,7 +1610,8 @@ function Get-LicensesAssignmentIssues {
     [Parameter(Mandatory)][string]$TenantKey,
     [Parameter(Mandatory)][object[]]$TenantRows,
     [Parameter(Mandatory)][datetimeoffset]$LicenseSnapshotUtc,
-    [datetime]$AsOfUtc = [datetime]::UtcNow
+    [datetime]$AsOfUtc = [datetime]::UtcNow,
+    [AllowNull()]$CurrentRunPublication
   )
   $productParts = [ordered]@{
     'Microsoft 365 F1' = @('M365_F1','M365_F1_COMM')
@@ -1672,7 +1629,7 @@ function Get-LicensesAssignmentIssues {
   )
   $sources = [System.Collections.Generic.List[object]]::new()
   foreach ($spec in $specs) {
-    $source = Get-LicensesCsvSource -Folder $Folder -FileName $spec.File -Columns $spec.Columns -AsOfUtc $AsOfUtc -CollectorManifestName $spec.Receipt -RequireFileReceipt
+    $source = Get-LicensesCsvSource -Folder $Folder -FileName $spec.File -Columns $spec.Columns -AsOfUtc $AsOfUtc -CollectorManifestName $spec.Receipt -RequireFileReceipt -CurrentRunPublication $CurrentRunPublication
     if ($source.Ready -and $spec.File -ne 'M365_Users_Active.csv' -and
         [math]::Abs(($source.ModifiedUtc - $LicenseSnapshotUtc.UtcDateTime).TotalHours) -gt 24) {
       $source.Ready = $false
@@ -1834,7 +1791,7 @@ function New-LicensesRecoveryWorkbook {
       E3toF3ReviewCandidates = if ($product.Product -ne 'Microsoft 365 E3') { 'N/A' } elseif ($downgradeReview -and $downgradeReview.Available) { [long]$downgradeReview.Candidates } else { 'N/D' }
       AwaitingLicense = if ($AssignmentIssues -and $AssignmentIssues.Available) { [long]$AssignmentIssues.Counts[$product.Product].CapacityWait } else { 'N/D' }
       LicensingErrors = if ($AssignmentIssues -and $AssignmentIssues.Available) { [long]$AssignmentIssues.Counts[$product.Product].OtherErrors } else { 'N/D' }
-      Qualification = if (-not $available) { 'Source not qualified' } elseif ($Usage.LicenseSourceForced) { 'Provisional: license receipt bypassed' } else { 'Qualified' }
+      Qualification = if (-not $available) { 'Source not qualified' } else { 'Qualified' }
       LicenseSnapshotUtc = $CollectedAtUtc
     }
   }
@@ -2072,6 +2029,7 @@ function Publish-LicensesReportCsv {
       @($assignmentIssues).Count -ne @($Snapshot.AssignmentIssues.Rows).Count -or @($gaps).Count -ne 25) {
     throw 'License report CSV rows do not reconcile with the mail snapshot.'
   }
+  $publishedPaths = [System.Collections.Generic.List[string]]::new()
   foreach ($spec in @(
     @{ Name='M365_Licenses_ReportSummary.csv'; Columns=$summaryColumns; Rows=$summary },
     @{ Name='M365_Licenses_ReportCandidates.csv'; Columns=$candidateColumns; Rows=$candidates },
@@ -2092,13 +2050,12 @@ function Publish-LicensesReportCsv {
       if ($readBack.Count -ne @($spec.Rows).Count -or @($readBack | Where-Object { $_.SnapshotId -cne $Snapshot.SnapshotId }).Count -gt 0) {
         throw "Published license report CSV does not match its snapshot: $($spec.Name)"
       }
-      $uploadSetting = Get-Variable -Name EnableSharePointUpload -Scope Global -ErrorAction SilentlyContinue
-      if ($uploadSetting -and [bool]$uploadSetting.Value -and -not (Invoke-SmartM365SharePointCsvUpload -LocalFilePath $path)) {
-        throw "License report CSV was not uploaded to SharePoint: $($spec.Name)"
-      }
+      $publishedPaths.Add($path)
     }
     finally { if (Test-Path -LiteralPath $pending -PathType Leaf) { Remove-Item -LiteralPath $pending -Force -ErrorAction SilentlyContinue } }
   }
+  # Registration and upload belong to the caller so the receipt records the files before any copy.
+  return $publishedPaths.ToArray()
 }
 
 function Publish-LicensesReportSnapshot {
@@ -2109,7 +2066,8 @@ function Publish-LicensesReportSnapshot {
     [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$SummaryRows,
     [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$AdditionalRows,
     [AllowNull()]$Usage,
-    [AllowNull()]$AssignmentIssues
+    [AllowNull()]$AssignmentIssues,
+    [AllowNull()]$ReceiptRun
   )
   $snapshotId = [guid]::NewGuid().ToString('N')
   $metricByProduct = @{}
@@ -2255,7 +2213,24 @@ function Publish-LicensesReportSnapshot {
     AssignmentIssues = [ordered]@{ Available=[bool]$assignment.Available; Reason=[string]$assignment.Reason
       Counts=if ($assignment.Available) { $assignment.Counts } else { $null }; Rows=@($assignment.Rows) }
     Sources = $sources.ToArray()
+    # Additive in schema 2: lets the email render from the published snapshot without recomputation.
+    Rendering = [ordered]@{
+      UsageAvailable = [bool]$Usage
+      SharedSourceReady = [bool]($Usage -and $Usage.SharedSourceReady)
+      IntuneSourceReady = [bool]($Usage -and $Usage.IntuneSourceReady)
+      AdSourceForced = [bool]($Usage -and $Usage.AdSourceForced)
+      EntraStateReason = if ($Usage -and $Usage.MailboxGap -and $Usage.MailboxGap.UserMailboxes) { [string]$Usage.MailboxGap.UserMailboxes.EntraStateReason } else { '' }
+      UsageSources = @(if ($Usage) {
+        foreach ($source in @($Usage.Sources)) {
+          [ordered]@{ Name=[string]$source.Name; Ready=[bool]$source.Ready; Forced=[bool]$source.Forced
+            PartialScopeAccepted=[bool]($source.PSObject.Properties['PartialScopeAccepted'] -and $source.PartialScopeAccepted)
+            Date=[string]$source.Date; Provenance=[string]$source.Provenance; Reason=[string]$source.Reason }
+        }
+      })
+    }
   }
+  # Additive in schema 2: the licensing receipt run that proves this report's licensing inputs.
+  if ($ReceiptRun) { $snapshot.ReceiptRun = [ordered]@{ Producer=[string]$ReceiptRun.Producer; RunId=[string]$ReceiptRun.RunId; StartedAtUtc=[string]$ReceiptRun.StartedAtUtc } }
   $path = Join-Path $Folder 'M365_Licenses_ReportSnapshot.json.txt'
   $bytes = [Text.UTF8Encoding]::new($false).GetBytes(($snapshot | ConvertTo-Json -Depth 16 -Compress))
   $document = [Text.Encoding]::UTF8.GetString($bytes) | ConvertFrom-Json -ErrorAction Stop
@@ -2273,13 +2248,8 @@ function Publish-LicensesReportSnapshot {
     if ((Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash -ne $expectedHash) { throw 'Published license report snapshot hash differs.' }
   }
   finally { if (Test-Path -LiteralPath $pending -PathType Leaf) { Remove-Item -LiteralPath $pending -Force -ErrorAction SilentlyContinue } }
-  $uploadSetting = Get-Variable -Name EnableSharePointUpload -Scope Global -ErrorAction SilentlyContinue
-  if ($uploadSetting -and [bool]$uploadSetting.Value) {
-    $uploaded = Invoke-SmartM365SharePointCsvUpload -LocalFilePath $path
-    if (-not $uploaded) { throw 'License report snapshot was not uploaded to SharePoint; summary email was not sent.' }
-  }
-  Publish-LicensesReportCsv -Folder $Folder -Snapshot $snapshot
-  return [pscustomobject]@{ Id=$snapshotId; Path=$path; Data=$snapshot }
+  $csvPaths = @(Publish-LicensesReportCsv -Folder $Folder -Snapshot $snapshot)
+  return [pscustomobject]@{ Id=$snapshotId; Path=$path; Data=$snapshot; CsvPaths=$csvPaths }
 }
 
 function Write-LicensesDailyMailState {
@@ -2353,17 +2323,200 @@ function Enter-LicensesDailyMailGate {
   }
 }
 
+function Publish-LicensesRunReport {
+  param(
+    [Parameter(Mandatory)][string]$Folder,
+    [Parameter(Mandatory)][string]$TenantKey,
+    [Parameter(Mandatory)][string]$CollectedAtUtc,
+    [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$TenantRows,
+    [switch]$ForceAdCsvAnalysis
+  )
+  $result = [pscustomobject]@{ Published=$false; UploadSatisfied=$false; SnapshotId=''; ReceiptRunId=''; Reason='' }
+  $snapshot = $null
+  try {
+    # Licensing files are proven by the active receipt's own publication hashes; the receipt completes after the report.
+    $publication = Get-SmartM365CurrentSourcePublication
+    if (-not $publication -or $publication.Producer -cne 'SmartM365-Licences-Inventory.ps1' -or
+        [IO.Path]::GetFullPath($Folder).TrimEnd([char[]]'\/') -ine $publication.SourceRoot) {
+      throw 'No active licensing source receipt for this folder; the report cannot be qualified by the current run.'
+    }
+    $result.ReceiptRunId = [string]$publication.RunId
+    $proof = [pscustomobject]@{ RunId=[string]$publication.RunId; Hashes=$publication.Hashes }
+    $summaryRows = @(Get-LicensesFocusedSummaryRows -TenantRows $TenantRows)
+    $additionalRows = @(Get-LicensesAdditionalOverviewRows -TenantRows $TenantRows)
+    $snapshotTime = [datetimeoffset]::Parse($CollectedAtUtc, [Globalization.CultureInfo]::InvariantCulture)
+    $usage = $null
+    try {
+      $usage = Get-LicensesFocusedUsageRows -CsvFolderPath $Folder -ExpectedTenantKey $TenantKey -LicenseSnapshotUtc $snapshotTime -ForceAdCsvAnalysis:$ForceAdCsvAnalysis -CurrentRunPublication $proof
+    }
+    catch { WriteLog -Message ("Focused license usage metrics unavailable: {0}" -f $_.Exception.Message) 'WARNING' }
+    $assignmentIssues = $null
+    try {
+      $assignmentIssues = Get-LicensesAssignmentIssues -Folder $Folder -TenantKey $TenantKey -TenantRows $TenantRows -LicenseSnapshotUtc $snapshotTime -CurrentRunPublication $proof
+    }
+    catch { WriteLog -Message ("License assignment issues unavailable: {0}" -f $_.Exception.Message) 'WARNING' }
+    $snapshot = Publish-LicensesReportSnapshot -Folder $Folder -TenantKey $TenantKey -CollectedAtUtc $CollectedAtUtc -SummaryRows $summaryRows -AdditionalRows $additionalRows -Usage $usage -AssignmentIssues $assignmentIssues -ReceiptRun $publication
+    foreach ($csvPath in @($snapshot.CsvPaths)) { Register-SmartM365SourceCsv -Path $csvPath }
+    $result.SnapshotId = [string]$snapshot.Id
+    $result.Published = $true
+    WriteLog -Message ("License report snapshot {0} published; its CSV files are optional outputs of the licensing receipt." -f $snapshot.Id) 'INFO'
+  }
+  catch {
+    $result.Reason = $_.Exception.Message
+    $note = 'License report not republished in this run: M365_Licenses_ReportSnapshot.json.txt and M365_Licenses_Report*.csv in DATA-LAST belong to an earlier run and are not recorded by this receipt. Reason: {0}' -f $result.Reason
+    WriteLog -Message ("{0} The licensing receipt is not affected; the summary email will not be sent." -f $note) 'WARNING'
+    try { Add-SmartM365SourceRunNote -Message $note } catch { WriteLog -Message ("License report note could not be added to the run state: {0}" -f $_.Exception.Message) 'WARNING' }
+    return $result
+  }
+  $uploadSetting = Get-Variable -Name EnableSharePointUpload -Scope Global -ErrorAction SilentlyContinue
+  if (-not ($uploadSetting -and [bool]$uploadSetting.Value)) { $result.UploadSatisfied = $true; return $result }
+  try {
+    foreach ($path in @(@($snapshot.Path) + @($snapshot.CsvPaths))) {
+      if (-not (Invoke-SmartM365SharePointCsvUpload -LocalFilePath $path)) { throw ("License report file was not uploaded to SharePoint: {0}" -f [IO.Path]::GetFileName($path)) }
+    }
+    $result.UploadSatisfied = $true
+  }
+  catch {
+    $result.Reason = $_.Exception.Message
+    $note = 'License report {0} is recorded by this receipt but was not uploaded to SharePoint. Reason: {1}' -f $result.SnapshotId, $result.Reason
+    WriteLog -Message ("{0} The summary email will not be sent." -f $note) 'WARNING'
+    try { Add-SmartM365SourceRunNote -Message $note } catch { WriteLog -Message ("License report note could not be added to the run state: {0}" -f $_.Exception.Message) 'WARNING' }
+  }
+  return $result
+}
+
+function ConvertFrom-LicensesJsonElement {
+  param([Parameter(Mandatory)][System.Text.Json.JsonElement]$Element)
+  # System.Text.Json keeps ISO date strings as strings, unlike ConvertFrom-Json.
+  switch ($Element.ValueKind) {
+    'Object' {
+      $properties = [ordered]@{}
+      foreach ($property in $Element.EnumerateObject()) { $properties[$property.Name] = ConvertFrom-LicensesJsonElement -Element $property.Value }
+      return [pscustomobject]$properties
+    }
+    'Array' {
+      $items = [System.Collections.Generic.List[object]]::new()
+      foreach ($item in $Element.EnumerateArray()) { $items.Add((ConvertFrom-LicensesJsonElement -Element $item)) }
+      return ,$items.ToArray()
+    }
+    'String' { return $Element.GetString() }
+    'Number' {
+      $integer = 0L
+      if ($Element.TryGetInt64([ref]$integer)) { return $integer }
+      return $Element.GetDecimal()
+    }
+    'True' { return $true }
+    'False' { return $false }
+    default { return $null }
+  }
+}
+
+function ConvertTo-LicensesCountTable {
+  param([AllowNull()]$Value)
+  $table = @{}
+  if ($null -eq $Value) { return $table }
+  foreach ($property in $Value.PSObject.Properties) { $table[$property.Name] = $property.Value }
+  return $table
+}
+
+function Read-LicensesPublishedReport {
+  param(
+    [Parameter(Mandatory)][string]$Folder,
+    [Parameter(Mandatory)][string]$TenantKey
+  )
+  $receiptPath = Join-Path -Path $Folder -ChildPath 'SmartInventory_SmartM365-Licences-Inventory.current.json.txt'
+  if (-not (Test-Path -LiteralPath $receiptPath -PathType Leaf)) { throw 'Licensing source receipt is missing; the published license report cannot be qualified.' }
+  $receiptHash = (Get-FileHash -LiteralPath $receiptPath -Algorithm SHA256).Hash
+  $receipt = [IO.File]::ReadAllText($receiptPath) | ConvertFrom-Json -ErrorAction Stop
+  if ([string]$receipt.Status -cne 'Completed' -or [string]$receipt.TenantKey -cne $TenantKey -or
+      [string]$receipt.Producer -cne 'SmartM365-Licences-Inventory.ps1') {
+    throw 'Licensing source receipt is not a completed receipt of this tenant.'
+  }
+  Assert-SmartM365SourcePublication -ReceiptPath $receiptPath -Proof $receipt
+  $snapshotPath = Join-Path -Path $Folder -ChildPath 'M365_Licenses_ReportSnapshot.json.txt'
+  if (-not (Test-Path -LiteralPath $snapshotPath -PathType Leaf)) { throw 'Published license report snapshot is missing.' }
+  $snapshotBytes = [IO.File]::ReadAllBytes($snapshotPath)
+  $json = [System.Text.Json.JsonDocument]::Parse([System.ReadOnlyMemory[byte]]::new($snapshotBytes))
+  try { $document = ConvertFrom-LicensesJsonElement -Element $json.RootElement }
+  finally { $json.Dispose() }
+  if ($document.SchemaVersion -ne 2 -or [string]$document.TenantKey -cne $TenantKey -or [string]$document.SnapshotId -notmatch '^[a-f0-9]{32}$' -or
+      @($document.Products).Count -ne 4 -or @($document.OtherProducts).Count -ne 3 -or -not $document.PSObject.Properties['Rendering']) {
+    throw 'Published license report snapshot identity or structure is not supported.'
+  }
+  if ($document.PSObject.Properties['ReceiptRun'] -and [string]$document.ReceiptRun.RunId -cne [string]$receipt.RunId) {
+    throw 'Published license report snapshot belongs to another licensing receipt run.'
+  }
+  foreach ($name in @('M365_Licenses_ReportSummary.csv','M365_Licenses_ReportCandidates.csv','M365_Licenses_ReportAssignmentIssues.csv','M365_Licenses_ReportGaps.csv','M365_Licenses_ReportSources.csv')) {
+    $records = @($receipt.Files | Where-Object { [string]$_.File -ceq $name })
+    if ($records.Count -ne 1) { throw "License report CSV is not recorded by the current licensing receipt: $name" }
+    $path = Join-Path -Path $Folder -ChildPath $name
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf) -or (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash -cne [string]$records[0].SHA256) {
+      throw "License report CSV differs from the current licensing receipt: $name"
+    }
+    foreach ($row in (Import-Csv -LiteralPath $path -ErrorAction Stop)) {
+      if ([string]$row.TenantKey -cne $TenantKey -or [string]$row.SnapshotId -cne [string]$document.SnapshotId) { throw "License report CSV belongs to another snapshot: $name" }
+    }
+  }
+  if ((Get-FileHash -LiteralPath $receiptPath -Algorithm SHA256).Hash -cne $receiptHash -or
+      [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($snapshotBytes)) -cne (Get-FileHash -LiteralPath $snapshotPath -Algorithm SHA256).Hash) {
+    throw 'Published license report changed while it was being read.'
+  }
+
+  $rendering = $document.Rendering
+  $summaryRows = @(foreach ($product in @($document.Products)) {
+    [pscustomobject]@{ Product=[string]$product.Product; Enabled=[long]$product.Enabled; Consumed=[long]$product.Consumed; Subscribed=[bool]$product.Subscribed }
+  })
+  $additionalRows = @(foreach ($product in @($document.OtherProducts)) {
+    [pscustomobject]@{ Product=[string]$product.Product; Enabled=[long]$product.Enabled; Consumed=[long]$product.Consumed; Subscribed=[bool]$product.Subscribed }
+  })
+  $usage = $null
+  if ($rendering.UsageAvailable) {
+    $mailboxGap = $null
+    if ($null -ne $document.MailboxGap) {
+      $userMailboxes = $document.MailboxGap.UserMailboxes
+      $userMailboxes | Add-Member -NotePropertyName EntraStateReason -NotePropertyValue ([string]$rendering.EntraStateReason) -Force
+      $mailboxGap = [pscustomobject]@{ UserMailboxes=$userMailboxes; NoUserMailbox=$document.MailboxGap.NoUserMailbox }
+    }
+    $usage = [pscustomobject]@{
+      Rows = @(foreach ($product in @($document.Products)) {
+        [pscustomobject]@{ Product=[string]$product.Product; Counts=(ConvertTo-LicensesCountTable $product.Counts); Available=[bool]$product.UsageAvailable }
+      })
+      RecoveryDetails = @($document.RecoveryCandidates)
+      DowngradeReview = $document.E3ToF3Review
+      DowngradeDetails = @($document.DowngradeCandidates)
+      Sources = @($rendering.UsageSources)
+      SharedSourceReady = [bool]$rendering.SharedSourceReady
+      IntuneSourceReady = [bool]$rendering.IntuneSourceReady
+      AdSourceForced = [bool]$rendering.AdSourceForced
+      MailboxGap = $mailboxGap
+      AdGapActivity = $document.AdGapActivity
+    }
+  }
+  $issues = $document.AssignmentIssues
+  $assignmentIssues = $null
+  # 'assignment issues not analyzed' marks an absent analysis in the snapshot, not an unavailable source.
+  if ($issues.Available -or [string]$issues.Reason -cne 'assignment issues not analyzed') {
+    $counts = @{}
+    if ($issues.Available) { foreach ($property in $issues.Counts.PSObject.Properties) { $counts[$property.Name] = ConvertTo-LicensesCountTable $property.Value } }
+    $assignmentIssues = [pscustomobject]@{ Available=[bool]$issues.Available; Reason=[string]$issues.Reason; Counts=$counts; Rows=@($issues.Rows) }
+  }
+  return [pscustomobject]@{
+    SnapshotId = [string]$document.SnapshotId
+    CollectedAtUtc = [string]$document.LicenseCollectedAtUtc
+    SummaryRows = $summaryRows
+    AdditionalRows = $additionalRows
+    Usage = $usage
+    AssignmentIssues = $assignmentIssues
+  }
+}
+
 function Send-LicensesFocusedSummaryEmail {
   param(
-    [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$TenantRows,
-    [Parameter(Mandatory)][string]$CollectedAtUtc,
-    [string]$CsvFolderPath = '',
-    [string]$ExpectedTenantKey = '',
+    [Parameter(Mandatory)][string]$CsvFolderPath,
+    [Parameter(Mandatory)][string]$ExpectedTenantKey,
     [Parameter(Mandatory)][string]$MailStatePath,
     [switch]$Manual,
-    [switch]$ForceLicenseSummaryEmail,
-    [switch]$ForceAdCsvAnalysis,
-    [switch]$BypassLicenseUsersReceipt
+    [switch]$ForceLicenseSummaryEmail
   )
 
   if (-not $Manual -and -not [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'EnableLicenseSummaryEmail' -DefaultValue $true)) {
@@ -2391,26 +2544,14 @@ function Send-LicensesFocusedSummaryEmail {
       return $false
     }
 
-    $summaryRows = @(Get-LicensesFocusedSummaryRows -TenantRows $TenantRows)
-    $additionalRows = @(Get-LicensesAdditionalOverviewRows -TenantRows $TenantRows)
-    $usage = $null
-    if ($CsvFolderPath -and $ExpectedTenantKey) {
-      try {
-        $snapshotTime = [datetimeoffset]::Parse($CollectedAtUtc, [Globalization.CultureInfo]::InvariantCulture)
-        $usage = Get-LicensesFocusedUsageRows -CsvFolderPath $CsvFolderPath -ExpectedTenantKey $ExpectedTenantKey -LicenseSnapshotUtc $snapshotTime -ForceAdCsvAnalysis:$ForceAdCsvAnalysis -BypassLicenseUsersReceipt:$BypassLicenseUsersReceipt
-      }
-      catch { WriteLog -Message ("Focused license usage metrics unavailable: {0}" -f $_.Exception.Message) 'WARNING' }
-    }
-    $assignmentIssues = $null
-    if ($CsvFolderPath -and $ExpectedTenantKey) {
-      try {
-        $assignmentIssues = Get-LicensesAssignmentIssues -Folder $CsvFolderPath -TenantKey $ExpectedTenantKey -TenantRows $TenantRows -LicenseSnapshotUtc ([datetimeoffset]::Parse($CollectedAtUtc,[Globalization.CultureInfo]::InvariantCulture))
-      }
-      catch { WriteLog -Message ("License assignment issues unavailable: {0}" -f $_.Exception.Message) 'WARNING' }
-    }
-    $reportSnapshot = if ($CsvFolderPath) {
-      Publish-LicensesReportSnapshot -Folder $CsvFolderPath -TenantKey $ExpectedTenantKey -CollectedAtUtc $CollectedAtUtc -SummaryRows $summaryRows -AdditionalRows $additionalRows -Usage $usage -AssignmentIssues $assignmentIssues
-    } else { [pscustomobject]@{ Id='N/D' } }
+    # The email never recomputes: it renders the report already published and qualified by the receipt.
+    $publishedReport = Read-LicensesPublishedReport -Folder $CsvFolderPath -TenantKey $ExpectedTenantKey
+    $summaryRows = @($publishedReport.SummaryRows)
+    $additionalRows = @($publishedReport.AdditionalRows)
+    $usage = $publishedReport.Usage
+    $assignmentIssues = $publishedReport.AssignmentIssues
+    $CollectedAtUtc = $publishedReport.CollectedAtUtc
+    $reportSnapshot = [pscustomobject]@{ Id=$publishedReport.SnapshotId }
     $usageByProduct = @{}
     if ($usage) { foreach ($usageRow in $usage.Rows) { $usageByProduct[$usageRow.Product] = $usageRow } }
     $recoveryByProduct = @{}
@@ -2547,7 +2688,6 @@ function Send-LicensesFocusedSummaryEmail {
     } else { @('<li>Usage sources: N/D</li>') }
     $sourceNote = if ($Manual) { '<span style="color:#0f766e;font-weight:700;">Source: existing published CSV. No new inventory was run.</span>' } else { '<span style="color:#0f766e;font-weight:700;">Source: published inventory.</span>' }
     $adOverrideNote = if ($usage -and $usage.AdSourceForced) { '<div style="margin:0 0 16px;padding:11px 14px;background:#fff7ed;border-left:4px solid #d97706;font-size:12px;line-height:18px;color:#7c2d12;"><strong>Provisional AD/Entra indicator.</strong> The AD CSV was analyzed despite a rejected collector receipt. Confirm AD inventory completeness before using its inactivity counts for a license decision.</div>' } else { '' }
-    $licenseOverrideNote = if ($usage -and $usage.LicenseSourceForced) { '<div style="margin:0 0 16px;padding:11px 14px;background:#fff7ed;border-left:4px solid #d97706;font-size:12px;line-height:18px;color:#7c2d12;"><strong>Provisional license assignment indicators.</strong> The license-users CSV has no current completed file receipt. Confirm a new complete licensing collection before using recovery counts for a license decision.</div>' } else { '' }
     $subject = 'Microsoft 365 license overview and recovery'
     $assignmentStatusNote = if ($assignmentIssues -and -not $assignmentIssues.Available -and $assignmentIssues.Reason) {
       '<p style="margin:5px 0 14px;font-size:11px;color:#b45309;">Assignment issues N/D: {0}</p>' -f [System.Net.WebUtility]::HtmlEncode([string]$assignmentIssues.Reason)
@@ -2560,7 +2700,6 @@ function Send-LicensesFocusedSummaryEmail {
   <h1 style="margin:0 0 8px;font-size:24px;line-height:30px;color:#0f172a;">License overview and recovery</h1>
   <p style="margin:0 0 18px;font-size:12px;line-height:18px;color:#64748b;">$([System.Net.WebUtility]::HtmlEncode([string]$OrgDomain)) &nbsp;&middot;&nbsp; Snapshot $([System.Net.WebUtility]::HtmlEncode($CollectedAtUtc)) UTC</p>
   $adOverrideNote
-  $licenseOverrideNote
   <h2 style="margin:0 0 10px;font-size:18px;line-height:24px;color:#0f172a;">License overview</h2>
   <h3 style="margin:0 0 7px;font-size:14px;line-height:20px;color:#0f172a;">License alerts</h3>
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;background:#fff7ed;border:1px solid #fed7aa;">
@@ -3238,7 +3377,7 @@ function Publish-LicensesWeeklyHistory {
 # ==========================================================
 # Main
 # ==========================================================
-$ScriptVersion = "1.47"
+$ScriptVersion = "1.48"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LicensesCsvLogFolderPath' -DefaultValue $OutputPath
 $LatestCsvFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ''
@@ -3251,21 +3390,21 @@ if ($SendLicenseSummaryEmailOnly) {
   if ($MaxItems -gt 0 -or $TopUsers -gt 0 -or $FastSample -or $InteractiveAuth) {
     throw '-SendLicenseSummaryEmailOnly cannot be combined with collection or sampling switches.'
   }
+  if ($ForceAdCsvAnalysis) {
+    throw '-ForceAdCsvAnalysis applies to a full collection run; email-only mode sends the license report already published by that run.'
+  }
   if ([string]::IsNullOrWhiteSpace($LatestCsvFolderPath)) { throw 'LatestCsvFolderPath is required for email-only mode.' }
-  $tenantCsvPath = Join-Path -Path $LatestCsvFolderPath -ChildPath 'M365_Licenses_Tenant.csv'
   $expectedTenantKey = if ($global:SmartM365TenantKey) { [string]$global:SmartM365TenantKey } else { $Tenant }
-  $snapshot = Read-LicensesTenantSnapshot -Path $tenantCsvPath -ExpectedTenantKey $expectedTenantKey
   $global:AppId = [string]$AppId
   $global:TenantId = [string]$TenantId
   $global:Thumb = [string]$Thumb
   $global:Thumbprint = [string](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'Thumbprint' -DefaultValue $Thumb)
   $global:OrgDomain = [string]$OrgDomain
-  $mailSent = Send-LicensesFocusedSummaryEmail -TenantRows $snapshot.Rows -CollectedAtUtc $snapshot.CollectedAtUtc -CsvFolderPath $LatestCsvFolderPath -ExpectedTenantKey $expectedTenantKey -MailStatePath $licenseSummaryMailStatePath -Manual -ForceLicenseSummaryEmail:$ForceLicenseSummaryEmail -ForceAdCsvAnalysis:$ForceAdCsvAnalysis -BypassLicenseUsersReceipt:$BypassLicenseUsersReceipt
-  if ($mailSent) { Write-Host ("License summary email sent from existing CSV: {0}" -f $tenantCsvPath) }
+  $mailSent = Send-LicensesFocusedSummaryEmail -CsvFolderPath $LatestCsvFolderPath -ExpectedTenantKey $expectedTenantKey -MailStatePath $licenseSummaryMailStatePath -Manual -ForceLicenseSummaryEmail:$ForceLicenseSummaryEmail
+  if ($mailSent) { Write-Host ("License summary email sent from the published license report: {0}" -f $LatestCsvFolderPath) }
   else { Write-Host 'License summary email skipped: already sent or pending today (Europe/Paris).' }
   return
 }
-if ($BypassLicenseUsersReceipt) { throw '-BypassLicenseUsersReceipt requires -SendLicenseSummaryEmailOnly.' }
 $connectedGraphInThisRun = $false
 $currentOperation = "Initialize script environment"
 $usersProcessedCount = 0
@@ -3815,6 +3954,14 @@ $BaseFileName = "M365_Licenses_Groups"
   $tenantSkuRowCount = $tenantRows.Count
   $groupRowCount = $groupRows.Count
 
+  # Published before the receipt completes so its CSVs are recorded as optional outputs of this run.
+  $licenseRunReport = $null
+  if ($MaxItems -eq 0 -and $TopUsers -eq 0 -and -not (Test-SmartM365MaxItemsMode)) {
+    $currentOperation = 'Publish license report'
+    $licenseRunReport = Publish-LicensesRunReport -Folder $LatestCsvFolderPath -TenantKey $global:SmartM365TenantKey -CollectedAtUtc $skusCollectedAtUtc `
+      -TenantRows $tenantRows.ToArray() -ForceAdCsvAnalysis:$ForceAdCsvAnalysis
+  }
+
   $currentOperation = 'Complete licensing source receipt'
   Set-SmartM365CmdbSourceScope -CompleteScope ($MaxItems -eq 0 -and $TopUsers -eq 0) -Scope 'CMDB:skus,license_paths,plans,user_plans,groups'
   try {
@@ -3831,7 +3978,10 @@ $BaseFileName = "M365_Licenses_Groups"
   catch { throw ("Licensing source receipt could not be completed; summary email was not sent: {0}" -f $_.Exception.Message) }
 
   $currentOperation = 'Send focused license summary email'
-  [void](Send-LicensesFocusedSummaryEmail -TenantRows $tenantRows.ToArray() -CollectedAtUtc $skusCollectedAtUtc -CsvFolderPath $LatestCsvFolderPath -ExpectedTenantKey $global:SmartM365TenantKey -MailStatePath $licenseSummaryMailStatePath -ForceLicenseSummaryEmail:$ForceLicenseSummaryEmail -ForceAdCsvAnalysis:$ForceAdCsvAnalysis)
+  if ($licenseRunReport -and $licenseRunReport.Published -and $licenseRunReport.UploadSatisfied) {
+    [void](Send-LicensesFocusedSummaryEmail -CsvFolderPath $LatestCsvFolderPath -ExpectedTenantKey $global:SmartM365TenantKey -MailStatePath $licenseSummaryMailStatePath -ForceLicenseSummaryEmail:$ForceLicenseSummaryEmail)
+  }
+  else { WriteLog -Message 'Focused license summary email not sent: the license report was not published and uploaded in this run.' 'WARNING' }
 
   if ($connectedGraphInThisRun) {
     $currentOperation = "Disconnect Microsoft Graph"
@@ -3955,8 +4105,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAas5r/3ZSDNf0u
-# zsRw8WfWF1uF1Flmqm0XtX2XGEaQj6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD975rWm8nWPeDV
+# l6zqMOAxK6P2oyFmdpG1omi5owfbB6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -4089,31 +4239,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIFvw7XqtPVMdZjjalEHWncnEZS+5LncasSAUJOSG7Br0MA0GCSqG
-# SIb3DQEBAQUABIIBgKXZqRli5cPp6Rj5SkRim2U8OwXpaGbNQvgyqBQP06KZSUre
-# VgP29yfgleC2UffeLDggv6VPFjscNL5ZM4/mY6whPlhihKbw4QBMxG0MPdQICz9h
-# n7iOO4QbfYhCR2a9ULhA3yMTjEWabIZ4b6zp9n4sWwsoIETKLjzBrFxg6IQ6t9uo
-# TfiYNzeBkylyUBShaj8fM9OGh2H1xq+M8OTCiXxM52FLxSxz0lnlQNxzfN0TvhLg
-# UZYj3ZiY1BIH9cxkqvpo2TJ8gCtEtlMEq/5gbv9G073oPsi3GCDeFcuxFK5gd8yA
-# RFG7r18X4Bw8On7D9Q4yO0FpFAw+JVWme01NKP+37LeD6Z6ySi9sHShGtIbB9JPe
-# C83VD+mN+YFWTAfzWbipGu+xA75rCQFHmJ3HpThyGkBbbzeFewxdQcyI8NqUrF3F
-# 6w6jutgyz09ZH4vtX+ueDqsNIu5RqUpkB2KCyU9Nx0EItsaKMVRRWUuq6EH6iMuc
-# bFvMpDyf7cdld+HqFqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIKN3Ts1gy0GWQ6G63SmRSjL8s9DCvCK5bHzYpTXrjEd6MA0GCSqG
+# SIb3DQEBAQUABIIBgI/ubqtO6ydWIlrdFH/SpRYYdXTfHgd23GuVwgsbZCXOr3rk
+# kP/TxfxvbxotkTMZGJRaiaOclqKS3oeM7PziwLeRjjUf6omU5XaTwm2jwgUa+PV0
+# mzUjb+83DWzJk0NhW3FLBKdu8GmtVPE5gmED7StqWgBtca6a+fR8YJs11ggY92CL
+# AEU95lLjHr13UbOmRaldLia5Xv2ge/JKjNFTa1cxWvc9N0ICncLgkI6b2zdFhBzq
+# W7oidr7exz/sd+VkO9cjPmbmdYUDOVXrVnqSh/SQZMpZFabOalc+1C0bM5GIsk/Z
+# TVjbl2PPmC+BWNEFinmlF5rbL2rqOYEJk1G+aQkX923Hk6v8YPneBu5Roig6w35h
+# mxOYTJc7+B89pIU9qrnwWbg9MqMJl2i0e5dPZzbWpH3nl5n5q8yqkqib5s2Xq2f0
+# CMA3avCnvxsbex971Q6G1ftPf9dY+CEKnphgkEBKAo5CkXYHM8o5NLaE+jG2YNae
+# vNtlOF9pBcpIgZr+g6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTQxNTMw
-# MzBaMC8GCSqGSIb3DQEJBDEiBCABAwOpxANkrGamALccC7r5aUbmJM9RZ3UiJ76b
-# 5JKoyzANBgkqhkiG9w0BAQEFAASCAgB9ZmKVbkbNGAVrCeO1eHsf4pZk5gytvXVh
-# TTr45PrDDnDETUfYX9TRaeiysYA8ImWu3LDxUJLiaN7zaaOXsyWp7Lozn/enwO6D
-# vC0HiEMv5MoWwRRM1a58y94yMb8W0qnFwJcJjcZKd++Nplr/BJOOxNDNDkNgdyXu
-# 4cXHX1LVBgjN31qO/tkL8eS/MxjuhL3h/Fru7RqQodXJ28aDTMhcwkeT9IHxAIhQ
-# 4RQSRZ09KcUM3X0aw3fUtnvLHYWBqCeG6Dc1SZovuwHwNAWoVpHf8Mo/z/CzAcIc
-# NiCJLeYkiuUv+p8IVOVPxiidWMlGrnsyPBBDHi0z88tHt31AKFJqQtqHrZFfVtZR
-# O45SkYeJg4sdJ9jiHyoDUjaheTtCIBFz/PBYX8SjPu2a++Lr2vSVwgNwahfePYnc
-# 9Icp5XSLf2Pa2ZlczVTIwoU+qrrLGwI6ncJOXXUo3fucE3Q2as2qC390vFTlg4pI
-# rrZ1jAtDOPUh745xBGmQ5IjSczN9TYNLZYA/EdcLE5pQgIdBHYOqmbiMVDz0RPls
-# t1BDpyOIPgtQmMw9nemFkyZo7pDab3ZPAXbrNG4jXd7PXSeOZIYWt3cfvW1IDzC4
-# yTW9CsK0R3y/aP7unfjqZbQrLJlAsKGj9YlMR7rWGxkvOy2QH6dV5U80opPbYDOS
-# aNxMzX9uxw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTcwNzE1
+# MDRaMC8GCSqGSIb3DQEJBDEiBCDZ6RgLtMzu+eV1RXiAWMlHEwEN9xQP0cXpJ/rC
+# DwwbeTANBgkqhkiG9w0BAQEFAASCAgApKrULm05pUsNWfW1oJT/MawDkFHKyD7Do
+# M+s7Sh7fNgyduDSCGnQeWM/dTZZ+a/MmCa8QzE7O40uJhT3/4XhJzWb7Z0Fd/Kdg
+# /fsrQY8IxqW7Ah0Jl2cX3P/zijpcSeBBMkaPtrdHhTS1w7NsprdhBOkZasZ4Rhze
+# rxpk26cSUUuxHS/yb5NZihf+ZD4mqthZfttdwFLfqPb25qbTYi8yQBJs7eLhkQCs
+# gjgggNo/Srt4DdEEykqGDSrijn3xEIepGMfDV6biwivVT/TRN98R7iRB9biGeadQ
+# KzmTV7zIwjE+8a7w3gkpV5z5Qa1HB1Frzibn4I5abeEB8ZZiol2yYf//cBBmXbEK
+# 4A+bKYIrwyhVElTMrcpzSoXirl9Pe+nTuFXg8tDvg7ou0Emqm/hjOwCwmuDf6K6v
+# T+1LXzjvNGl7RtAwjP21T2RuNwqYl/9W4YgJLWDXAYf9MzCjure0FJDTUC/FErKv
+# pBCfIvfAuBuAaiiLxQvLfoFvRGTg+TmQEipkjCXPpNshuDZlP5jrTKFKD76qAF1Z
+# BdPSq2587hLEI8w5EVz+MsaDOQi1tV2EG+9digMQMpDy5FTxCjjdu/Q12X/0VWAr
+# 6K1twgcB5BylUYcFv/a96euKpBh2FwL7Voypy8+YBcRnv4rfDKggnlFQ0nzL0enb
+# N2FcDZihFA==
 # SIG # End signature block
