@@ -11,9 +11,10 @@
   The report also lists target-suite users awaiting license capacity and other assignment errors from qualified existing CSVs.
   Qualified PartialAccepted AD coverage is usable but remains provisional; available allowlisted domains remain included.
   Per-SKU decisions (disabled accounts on every paid SKU, Copilot without licensed activity, unassigned capacity, dependency guard) are published
-  as optional files M365_Licenses_ReportSkuCandidates.csv and M365_Licenses_ReportSkuCapacity.csv with the report snapshot identity.
+  as optional files M365_Licenses_ReportSkuCandidates.csv and M365_Licenses_ReportSkuCapacity.csv with the report snapshot identity;
+  ReportSkuCapacity names the report product family of each SKU (ReportProduct) so consumers never re-implement the SKU rules.
 .VERSION
- 1.49
+ 1.50
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication; Microsoft.Graph.Identity.DirectoryManagement; Microsoft.Graph.Users; Microsoft.Graph.Groups; ImportExcel for the report attachment.
@@ -21,7 +22,7 @@
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
   Author: https://github.com/khda79/workplacecloudhub.com
-     Version : 1.49
+     Version : 1.50
   PowerShell: PowerShell 7+
   Minimum application permissions: Directory.Read.All, User.Read.All, Group.Read.All
   Requires: Microsoft.Graph.Authentication
@@ -649,6 +650,15 @@ function Get-LicensesFocusedSummaryRows {
   }
 }
 
+function Get-LicensesOtherProduct {
+  param([AllowNull()][string]$SkuPartNumber)
+  $sku = ([string]$SkuPartNumber).Trim()
+  if ($sku -in @('Microsoft_365_Copilot','M365_COPILOT')) { return 'Microsoft 365 Copilot' }
+  if ($sku -match '^(DYN365_|DYNAMICS_365_)' -and $sku -notmatch '(SANDBOX|TRIAL|PREVIEW|VIRAL|FREE|DEMO|TEST)') { return 'Dynamics 365' }
+  if ($sku -in @('POWER_BI_PRO','PBI_PREMIUM_PER_USER')) { return 'Power BI' }
+  return ''
+}
+
 function Get-LicensesAdditionalOverviewRows {
   param([Parameter(Mandatory)][AllowEmptyCollection()][object[]]$TenantRows)
 
@@ -658,10 +668,7 @@ function Get-LicensesAdditionalOverviewRows {
   }
   foreach ($tenantRow in $TenantRows) {
     $sku = ([string]$tenantRow.TenantSkuPartNumber).Trim()
-    $name = if ($sku -in @('Microsoft_365_Copilot','M365_COPILOT')) { 'Microsoft 365 Copilot' }
-            elseif ($sku -match '^(DYN365_|DYNAMICS_365_)' -and $sku -notmatch '(SANDBOX|TRIAL|PREVIEW|VIRAL|FREE|DEMO|TEST)') { 'Dynamics 365' }
-            elseif ($sku -in @('POWER_BI_PRO','PBI_PREMIUM_PER_USER')) { 'Power BI' }
-            else { '' }
+    $name = Get-LicensesOtherProduct -SkuPartNumber $sku
     if (-not $name) { continue }
     if ($null -eq $tenantRow.TenantPrepaidEnabled -or $null -eq $tenantRow.TenantConsumedUnits) {
       throw "License counts are unavailable for SKU '$sku'."
@@ -2753,6 +2760,7 @@ function Get-LicensesSkuDecisions {
     $enabled = [long]$tenantSku.TenantPrepaidEnabled; $consumed = [long]$tenantSku.TenantConsumedUnits
     [pscustomobject][ordered]@{
       SkuId=$id; SkuPartNumber=$part; SkuDisplayName=[string](Get-LicensesOptionalProperty $tenantSku 'TenantSkuDisplayName')
+      ReportProduct=$(if ($suite = Get-LicensesSuiteProduct -SkuId $id -SkuPartNumber $part) { $suite } else { Get-LicensesOtherProduct -SkuPartNumber $part })
       Excluded=[bool]$Settings.ExcludedSkus.ContainsKey($upper); ExclusionReason=$(if ($Settings.ExcludedSkus.ContainsKey($upper)) { $Settings.ExcludedSkus[$upper] } else { '' })
       EnabledUnits=$enabled; WarningUnits=(Get-LicensesOptionalProperty $tenantSku 'TenantPrepaidWarning'); SuspendedUnits=(Get-LicensesOptionalProperty $tenantSku 'TenantPrepaidSuspended'); LockedOutUnits=(Get-LicensesOptionalProperty $tenantSku 'TenantPrepaidLockedOut')
       ConsumedUnits=$consumed; AvailableUnits=($enabled - $consumed)
@@ -2773,7 +2781,7 @@ function Get-LicensesSkuDecisions {
 function Publish-LicensesSkuReportCsv {
   param([Parameter(Mandatory)][string]$Folder, [Parameter(Mandatory)][string]$SnapshotId, [Parameter(Mandatory)][string]$TenantKey, [Parameter(Mandatory)][string]$ReceiptRunId, [Parameter(Mandatory)]$Decisions)
   $candidateColumns = @('SnapshotId','TenantKey','ReceiptRunId','CandidateType','Recommendation','Reason','SkuId','SkuPartNumber','SkuDisplayName','UserId','UserPrincipalName','DisplayName','EntraAccountEnabled','AdAccountEnabled','AccountState','AssignmentRoutes','AssignedByGroupNames','AssignmentLastUpdatedDateTime','LastLicensedActivityDate','LastChatActivityDate','ActivityWindowEnd','MailboxGuard','ResourceAccount','DependencyStatus','DependentSkus','CountedIn')
-  $capacityColumns = @('SnapshotId','TenantKey','ReceiptRunId','SkuId','SkuPartNumber','SkuDisplayName','Excluded','ExclusionReason','EnabledUnits','WarningUnits','SuspendedUnits','LockedOutUnits','ConsumedUnits','AvailableUnits','AssignedUsers','DisabledAccountUsers','ActiveUsersUsageNotMeasured','RecommendedCandidates','ReviewCandidates','BlockedCandidates','ReferencedCandidates','CopilotGraceUsers','UsageEvidence','UsageEvidenceReason')
+  $capacityColumns = @('SnapshotId','TenantKey','ReceiptRunId','SkuId','SkuPartNumber','SkuDisplayName','ReportProduct','Excluded','ExclusionReason','EnabledUnits','WarningUnits','SuspendedUnits','LockedOutUnits','ConsumedUnits','AvailableUnits','AssignedUsers','DisabledAccountUsers','ActiveUsersUsageNotMeasured','RecommendedCandidates','ReviewCandidates','BlockedCandidates','ReferencedCandidates','CopilotGraceUsers','UsageEvidence','UsageEvidenceReason')
   $identity = [ordered]@{ SnapshotId=$SnapshotId; TenantKey=$TenantKey; ReceiptRunId=$ReceiptRunId }
   $paths = [System.Collections.Generic.List[string]]::new()
   foreach ($spec in @(
@@ -3882,7 +3890,7 @@ function Publish-LicensesWeeklyHistory {
 # ==========================================================
 # Main
 # ==========================================================
-$ScriptVersion = "1.49"
+$ScriptVersion = "1.50"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LicensesCsvLogFolderPath' -DefaultValue $OutputPath
 $LatestCsvFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ''

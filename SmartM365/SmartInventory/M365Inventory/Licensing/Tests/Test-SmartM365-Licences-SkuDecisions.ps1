@@ -26,7 +26,7 @@ $ast = [System.Management.Automation.Language.Parser]::ParseFile($inventoryPath,
 if ($parseErrors.Count -gt 0) { throw ($parseErrors | Out-String) }
 $names = @(
   'ConvertTo-LicensesActivityDate', 'ConvertTo-LicensesMailboxSizeGb', 'Get-LicensesQualifiedPartialAdCoverage', 'Get-LicensesCsvSource',
-  'Import-LicensesSourceCsv', 'Read-LicensesIndexedSource', 'Get-LicensesSuiteProduct', 'Get-LicensesFocusedSummaryRows', 'Get-LicensesOptionalProperty', 'Get-LicensesDecisionSettings', 'Read-LicensesDependencyRules',
+  'Import-LicensesSourceCsv', 'Read-LicensesIndexedSource', 'Get-LicensesSuiteProduct', 'Get-LicensesOtherProduct', 'Get-LicensesFocusedSummaryRows', 'Get-LicensesOptionalProperty', 'Get-LicensesDecisionSettings', 'Read-LicensesDependencyRules',
   'Get-LicensesAccountState', 'Get-LicensesMailboxGuard', 'Get-LicensesCopilotUsageState', 'Get-LicensesCopilotActivity',
   'Get-LicensesSkuDecisions', 'Publish-LicensesSkuReportCsv'
 )
@@ -255,6 +255,7 @@ try {
   # Capacity.
   $capacity = @{}; foreach ($item in $decisions.Capacity) { $capacity[$item.SkuPartNumber] = $item }
   Check ($capacity.Count -eq $skus.Count) 'Every tenant SKU has a capacity row.'
+  Check ($capacity['SPE_E3'].ReportProduct -eq 'Microsoft 365 E3' -and $capacity["O365_w/o$([char]0xA0)Teams$([char]0xA0)Bundle_M3"].ReportProduct -eq 'Microsoft 365 E3' -and $capacity['Microsoft_365_Copilot'].ReportProduct -eq 'Microsoft 365 Copilot' -and $capacity['DYN365_FINANCE'].ReportProduct -eq 'Dynamics 365' -and $capacity['VISIOCLIENT'].ReportProduct -eq '') 'Capacity rows name the report product family with the Licences rules (suites by GUID, other products by part number).'
   Check ($capacity['POWER_BI_STANDARD'].Excluded -and $capacity['POWER_BI_STANDARD'].ExclusionReason) 'Excluded SKU keeps its exclusion reason.'
   Check ($capacity['SPE_E3'].AvailableUnits -eq 2 -and $capacity['SPE_E3'].UsageEvidence -eq 'Not applicable') 'Capacity counts unassigned units.'
   Check ($capacity['Microsoft_365_Copilot'].UsageEvidence -eq 'Measured' -and $capacity['Microsoft_365_Copilot'].CopilotGraceUsers -eq 1) 'Copilot usage is measured with grace users counted.'
@@ -267,6 +268,7 @@ try {
   $published = @(Import-Csv -LiteralPath $paths[0])
   Check ($published.Count -eq @($decisions.Candidates).Count -and @($published | Where-Object { $_.SnapshotId -ne 'snap-1' -or $_.ReceiptRunId -ne 'run-1' -or $_.TenantKey -ne 'prod' }).Count -eq 0) 'Candidate rows carry snapshot, tenant and receipt run.'
   Check (@(Import-Csv -LiteralPath $paths[1]).Count -eq $skus.Count) 'Capacity CSV holds one row per SKU.'
+  Check ((Get-Content -LiteralPath $paths[1] -TotalCount 1) -like '"SnapshotId","TenantKey","ReceiptRunId","SkuId","SkuPartNumber","SkuDisplayName","ReportProduct","Excluded",*') 'Capacity CSV header carries ReportProduct after SkuDisplayName.'
   Check (@(Get-ChildItem -LiteralPath $dataLast -Filter '*.pending').Count -eq 0) 'No pending file remains.'
   $empty = [pscustomobject]@{ Candidates=@(); Capacity=@() }
   $emptyPaths = @(Publish-LicensesSkuReportCsv -Folder $dataLast -SnapshotId 'snap-2' -TenantKey 'prod' -ReceiptRunId 'run-2' -Decisions $empty)
