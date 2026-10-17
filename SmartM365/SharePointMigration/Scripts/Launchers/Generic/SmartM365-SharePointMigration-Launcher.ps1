@@ -7,7 +7,7 @@
     requested inventory, comparison, or permission action.
 
 .VERSION
-    1.0.29
+    1.0.30
 #>
 
 [CmdletBinding()]
@@ -60,7 +60,7 @@ $ErrorActionPreference = 'Stop'
 $script:LauncherPreviousConsoleMarker = [string]$env:SPMIG_CONSOLE_LIFECYCLE_ACTIVE
 $script:LauncherOwnsLifecycle = [string]::IsNullOrWhiteSpace($script:LauncherPreviousConsoleMarker)
 if ($script:LauncherOwnsLifecycle) {
-    Microsoft.PowerShell.Utility\Write-Host ('{0} Script  : {1} v{2}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $MyInvocation.MyCommand.Name, '1.0.29') -ForegroundColor Cyan
+    Microsoft.PowerShell.Utility\Write-Host ('{0} Script  : {1} v{2}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $MyInvocation.MyCommand.Name, '1.0.30') -ForegroundColor Cyan
 }
 $script:LauncherNonInteractive = [bool]$NonInteractive
 . (Join-Path -Path $PSScriptRoot -ChildPath '..\SmartM365-SharePointMigration-LauncherCommon.ps1')
@@ -883,6 +883,28 @@ function Invoke-FileInventoryScan {
     Write-LauncherRunResult
     & $scriptPath @parameters
     Write-CsvScanManifest -CsvPath $parameters.OutputPath -Side $Side -Kind 'File' -Scope ([string]$inputValue)
+    if ($Side -eq 'Source') { Update-SourceMigrationComplexity }
+}
+
+function Update-SourceMigrationComplexity {
+    # Complexity is informative: a failure is reported but never fails the published scan.
+    try { $pythonCommand = Get-PythonCommand }
+    catch {
+        Write-Info ("Migration complexity not calculated; the GUI will calculate it: {0}" -f $_.Exception.Message) Yellow
+        return
+    }
+    Write-Info 'Calculating migration complexity from the latest source scans.' Cyan
+    $migrationInfo = [pscustomobject]@{ Name = $MigrationName; Root = $MigrationRoot; Config = $Config }
+    $result = Invoke-SmartM365MigrationComplexity -Migration $migrationInfo -ProjectRoot $ProjectRoot `
+        -SourceType (Get-MigrationEndpointType -Side 'Source') `
+        -PythonExecutable $pythonCommand.Executable -PythonArguments @($pythonCommand.Arguments)
+    foreach ($line in @($result.Output)) { Microsoft.PowerShell.Utility\Write-Host ([string]$line) }
+    if ($result.Status -eq 'Succeeded') {
+        Write-Info ("Migration complexity updated: {0}" -f $result.Message) Green
+    }
+    else {
+        Write-Info ("Migration complexity not updated ({0}); the GUI will calculate it: {1}" -f $result.Status, $result.Message) Yellow
+    }
 }
 
 function Invoke-PermissionInventoryScan {
@@ -927,6 +949,7 @@ function Invoke-PermissionInventoryScan {
     & $scriptPath @parameters
     $scopeValue = if ($parameters.ContainsKey('WebUrlsFile')) { $parameters.WebUrlsFile } elseif ($parameters.ContainsKey('SiteUrl')) { $parameters.SiteUrl } else { $parameters.WebApplicationUrl }
     Write-CsvScanManifest -CsvPath $parameters.OutputPath -Side $Side -Kind 'Permission' -Scope ([string]$scopeValue)
+    if ($Side -eq 'Source') { Update-SourceMigrationComplexity }
 }
 
 function Invoke-SourceFileScan {

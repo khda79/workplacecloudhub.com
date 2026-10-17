@@ -15,7 +15,7 @@
     the directory containing this GUI when launched from the shared toolkit.
 
 .VERSION
-    1.0.71
+    1.0.72
 #>
 
 #Requires -Version 7.4
@@ -28,7 +28,7 @@ param(
 )
 
 $script:AppName    = 'Smart SharePoint Migration'
-$script:AppVersion = '1.0.71'
+$script:AppVersion = '1.0.72'
 $script:ScriptRoot = $PSScriptRoot
 $script:FarmToolkitRoot = if ($FarmToolkitRoot) { $FarmToolkitRoot } else { $PSScriptRoot }
 $script:SummaryLastGoodRows = @{}
@@ -1871,11 +1871,12 @@ if ($ValidateOnly) {
 
 function Initialize-DiagnosticsLocalConfig {
     $configRoot = Join-Path $script:ScriptRoot 'Config'
-    foreach ($name in @('sharegate-diagnostics.columns', 'sharegate-diagnostics.rules')) {
+    # Python loaders self-heal missing keys; the GUI only creates absent runtime files at startup.
+    foreach ($name in @('sharegate-diagnostics.columns', 'sharegate-diagnostics.rules', 'migration-complexity')) {
         $template = Join-Path $configRoot ($name + '.json.template')
         $runtime = Join-Path $configRoot ($name + '.json.txt')
         if (-not (Test-Path -LiteralPath $template -PathType Leaf)) {
-            throw "Diagnostics configuration template is missing: $template"
+            throw "Configuration template is missing: $template"
         }
         if (Test-Path -LiteralPath $runtime -PathType Leaf) { continue }
         $temporary = Join-Path $configRoot ('.' + $name + '.' + [guid]::NewGuid().ToString('N') + '.tmp')
@@ -1897,7 +1898,7 @@ function Initialize-DiagnosticsLocalConfig {
 try { Initialize-DiagnosticsLocalConfig }
 catch {
     Close-SmartM365GuiSplash -Splash $script:Splash
-    [System.Windows.MessageBox]::Show("Failed to initialize local diagnostics configuration:`n$_", $script:AppName, 'OK', 'Error') | Out-Null
+    [System.Windows.MessageBox]::Show("Failed to initialize local configuration:`n$_", $script:AppName, 'OK', 'Error') | Out-Null
     exit 1
 }
 
@@ -3161,16 +3162,9 @@ function Refresh-WorkflowComplexity {
     if (-not $script:CurrentMigration) { return }
     $migration = $script:CurrentMigration
     try {
-        $cfg = $migration.Config
-        $name = [string]$cfg.Name
-        $type = Get-MigrationEndpointType $cfg 'Source'
-        $fileScan = Get-SmartM365LatestPortfolioScan -Directory (Join-Path $migration.Root $cfg.Output.SourceFileScans) `
-            -Filter "$type-FileInventory-$name-*.csv"
-        $permissionScan = Get-SmartM365LatestPortfolioScan -Directory (Join-Path $migration.Root $cfg.Output.SourcePermissionScans) `
-            -Filter "$type-PermissionInventory-$name-*.csv"
-        $value = Get-MigrationComplexity -Migration $migration `
-            -FileScan $(if ($fileScan) { $fileScan.File } else { $null }) `
-            -PermissionScan $(if ($permissionScan) { $permissionScan.File } else { $null })
+        $inputs = Get-SmartM365ComplexityScanInputs -Migration $migration `
+            -SourceType (Get-MigrationEndpointType $migration.Config 'Source')
+        $value = Get-MigrationComplexity -Migration $migration -FileScan $inputs.FileScan -PermissionScan $inputs.PermissionScan
     }
     catch {
         $value = [pscustomobject]@{ Text = 'Error'; Caption = ''; Visual = Get-SmartM365ComplexityVisual

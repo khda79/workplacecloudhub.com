@@ -2,7 +2,7 @@
 .SYNOPSIS
     Read-only portfolio summary for the SharePoint migration GUI.
 .VERSION
-    1.0.15
+    1.0.16
 #>
 
 . (Join-Path $PSScriptRoot 'Scripts\Launchers\SmartM365-SharePointMigration-LauncherCommon.ps1')
@@ -420,67 +420,7 @@ function Get-SmartM365ComplexityVisual {
     [pscustomobject]@{ Color = $Color; Background = $Background }
 }
 
-function Get-SmartM365ComplexityEntraCache {
-    param([Parameter(Mandatory)]$Migration, [Parameter(Mandatory)][string]$ProjectRoot)
-    $comparison = $Migration.Config['Comparison']
-    $configured = if ($comparison) { [string]$comparison['EntraUsersCachePath'] } else { '' }
-    if (-not [string]::IsNullOrWhiteSpace($configured)) {
-        $path = if ([IO.Path]::IsPathRooted($configured)) { $configured } else { Join-Path $Migration.Root $configured }
-        if (Test-Path -LiteralPath $path -PathType Leaf) { return Get-Item -LiteralPath $path }
-        return $null
-    }
-    $directory = Join-Path $ProjectRoot '_Local\EntraUsersCache'
-    if (-not (Test-Path -LiteralPath $directory -PathType Container)) { return $null }
-    return Get-ChildItem -LiteralPath $directory -Filter '*.csv' -File -ErrorAction SilentlyContinue |
-        Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1
-}
-
-function Get-SmartM365ComplexityRequest {
-    <# Inputs, arguments and signature of the source-only complexity score for one migration. #>
-    param(
-        [Parameter(Mandatory)]$Migration,
-        [Parameter(Mandatory)][string]$ProjectRoot,
-        [System.IO.FileInfo]$FileScan,
-        [System.IO.FileInfo]$PermissionScan
-    )
-    if (-not $FileScan) { return $null }
-    $cfg = $Migration.Config
-    $entraCache = if ($PermissionScan) { Get-SmartM365ComplexityEntraCache -Migration $Migration -ProjectRoot $ProjectRoot } else { $null }
-    $mapping = $null
-    $mappingName = if ($cfg['Comparison']) { [string]$cfg['Comparison']['PathMappingsFile'] } else { '' }
-    if (-not [string]::IsNullOrWhiteSpace($mappingName)) {
-        $mappingPath = if ([IO.Path]::IsPathRooted($mappingName)) { $mappingName } else { Join-Path $Migration.Root $mappingName }
-        if (Test-Path -LiteralPath $mappingPath -PathType Leaf) { $mapping = Get-Item -LiteralPath $mappingPath }
-    }
-    $targetSiteUrl = if ($cfg['Target']) { [string]$cfg['Target']['SiteUrl'] } else { '' }
-    $configDirectory = Join-Path $ProjectRoot 'Config'
-    $configPath = Join-Path $configDirectory 'migration-complexity.json.txt'
-    $configHash = if (Test-Path -LiteralPath $configPath -PathType Leaf) {
-        (Get-FileHash -LiteralPath $configPath -Algorithm SHA256).Hash
-    } else { '' }
-    $output = Join-Path $Migration.Root 'migration-complexity.json.txt'
-    $arguments = @(
-        (Join-Path $ProjectRoot 'Scripts\Compare\migration_complexity.py'),
-        '--migration-name', $Migration.Name,
-        '--file-inventory', $FileScan.FullName,
-        '--config-dir', $configDirectory,
-        '--output', $output
-    )
-    if ($PermissionScan) { $arguments += @('--permission-inventory', $PermissionScan.FullName) }
-    if ($entraCache) { $arguments += @('--entra-users-csv', $entraCache.FullName) }
-    if ($mapping) { $arguments += @('--path-mapping-file', $mapping.FullName) }
-    if ($targetSiteUrl) { $arguments += @('--target-site-url', $targetSiteUrl) }
-    $inputKeys = foreach ($item in @($FileScan, $PermissionScan, $entraCache, $mapping)) {
-        if ($item) { '{0}:{1}' -f $item.Name, $item.Length } else { '' }
-    }
-    $signature = (@($Migration.Name, $configHash, $targetSiteUrl) + @($inputKeys)) -join '|'
-    [pscustomobject]@{
-        Migration = $Migration.Name; Output = $output; Arguments = $arguments; Signature = $signature
-        FileScan = $FileScan; PermissionScan = $PermissionScan; EntraCache = $entraCache; Mapping = $mapping
-        TargetSiteUrl = $targetSiteUrl; ConfigHash = $configHash
-    }
-}
-
+# Get-SmartM365ComplexityRequest lives in LauncherCommon so source scans can score complexity too.
 function Test-SmartM365ComplexityInput {
     param($Recorded, [System.IO.FileInfo]$Expected)
     if (-not $Expected) { return $null -eq $Recorded }

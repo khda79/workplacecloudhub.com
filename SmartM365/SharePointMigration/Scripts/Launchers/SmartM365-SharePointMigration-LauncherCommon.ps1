@@ -1,3 +1,10 @@
+<#
+.SYNOPSIS
+    Shared helpers for SharePoint migration launchers, source scan batches and the GUI.
+.VERSION
+    1.0.1
+#>
+
 function Get-LauncherProjectRoot {
     param(
         [Parameter(Mandatory = $true)]
@@ -97,6 +104,123 @@ function Get-SmartM365InventoryScans {
             }
             [pscustomobject]@{ File=$file; Date=$date; Rows=$rows; Provenance=$provenance }
         } | Sort-Object @{Expression='Date'; Descending=$true}, @{Expression={ $_.File.Name }; Descending=$true})
+}
+
+# Migration complexity is scored from source scans only. Source scans compute it after
+# publishing a scan; the GUI recalculates only when the stored result does not match.
+function Get-SmartM365ComplexityEntraCache {
+    param([Parameter(Mandatory = $true)]$Migration, [Parameter(Mandatory = $true)][string]$ProjectRoot)
+    $comparison = $Migration.Config['Comparison']
+    $configured = if ($comparison) { [string]$comparison['EntraUsersCachePath'] } else { '' }
+    if (-not [string]::IsNullOrWhiteSpace($configured)) {
+        $path = Resolve-LauncherMigrationPath -MigrationRoot $Migration.Root -Path $configured
+        if (Test-Path -LiteralPath $path -PathType Leaf) { return Get-Item -LiteralPath $path }
+        return $null
+    }
+    $directory = Join-Path $ProjectRoot '_Local\EntraUsersCache'
+    if (-not (Test-Path -LiteralPath $directory -PathType Container)) { return $null }
+    return Get-ChildItem -LiteralPath $directory -Filter '*.csv' -File -ErrorAction SilentlyContinue |
+        Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1
+}
+
+function Get-SmartM365ComplexityScanInputs {
+    param([Parameter(Mandatory = $true)]$Migration, [Parameter(Mandatory = $true)][string]$SourceType)
+    $cfg = $Migration.Config
+    $result = @{ FileScan = $null; PermissionScan = $null }
+    if (-not $cfg['Output']) { return [pscustomobject]$result }
+    foreach ($spec in @(
+            @{ Key = 'FileScan'; Output = 'SourceFileScans'; Kind = 'File' },
+            @{ Key = 'PermissionScan'; Output = 'SourcePermissionScans'; Kind = 'Permission' })) {
+        $relative = [string]$cfg['Output'][$spec.Output]
+        if ([string]::IsNullOrWhiteSpace($relative)) { continue }
+        $directory = Resolve-LauncherMigrationPath -MigrationRoot $Migration.Root -Path $relative
+        $filter = '{0}-{1}Inventory-{2}-*.csv' -f $SourceType, $spec.Kind, [string]$cfg['Name']
+        $scan = @(Get-SmartM365InventoryScans -Directory $directory -Filter $filter -Recurse) | Select-Object -First 1
+        if ($scan) { $result[$spec.Key] = $scan.File }
+    }
+    return [pscustomobject]$result
+}
+
+function Get-SmartM365ComplexityRequest {
+    <# Inputs, arguments and signature of the source-only complexity score for one migration. #>
+    param(
+        [Parameter(Mandatory = $true)]$Migration,
+        [Parameter(Mandatory = $true)][string]$ProjectRoot,
+        [System.IO.FileInfo]$FileScan,
+        [System.IO.FileInfo]$PermissionScan,
+        [string]$ScriptPath = ''
+    )
+    if (-not $FileScan) { return $null }
+    $cfg = $Migration.Config
+    $entraCache = if ($PermissionScan) { Get-SmartM365ComplexityEntraCache -Migration $Migration -ProjectRoot $ProjectRoot } else { $null }
+    $mapping = $null
+    $mappingName = if ($cfg['Comparison']) { [string]$cfg['Comparison']['PathMappingsFile'] } else { '' }
+    if (-not [string]::IsNullOrWhiteSpace($mappingName)) {
+        $mappingPath = Resolve-LauncherMigrationPath -MigrationRoot $Migration.Root -Path $mappingName
+        if (Test-Path -LiteralPath $mappingPath -PathType Leaf) { $mapping = Get-Item -LiteralPath $mappingPath }
+    }
+    $targetSiteUrl = if ($cfg['Target']) { [string]$cfg['Target']['SiteUrl'] } else { '' }
+    $configDirectory = Join-Path $ProjectRoot 'Config'
+    $configPath = Join-Path $configDirectory 'migration-complexity.json.txt'
+    $configHash = if (Test-Path -LiteralPath $configPath -PathType Leaf) {
+        (Get-FileHash -LiteralPath $configPath -Algorithm SHA256).Hash
+    } else { '' }
+    if ([string]::IsNullOrWhiteSpace($ScriptPath)) { $ScriptPath = Join-Path $ProjectRoot 'Scripts\Compare\migration_complexity.py' }
+    $output = Join-Path $Migration.Root 'migration-complexity.json.txt'
+    $arguments = @(
+        $ScriptPath,
+        '--migration-name', $Migration.Name,
+        '--file-inventory', $FileScan.FullName,
+        '--config-dir', $configDirectory,
+        '--output', $output
+    )
+    if ($PermissionScan) { $arguments += @('--permission-inventory', $PermissionScan.FullName) }
+    if ($entraCache) { $arguments += @('--entra-users-csv', $entraCache.FullName) }
+    if ($mapping) { $arguments += @('--path-mapping-file', $mapping.FullName) }
+    if ($targetSiteUrl) { $arguments += @('--target-site-url', $targetSiteUrl) }
+    $inputKeys = foreach ($item in @($FileScan, $PermissionScan, $entraCache, $mapping)) {
+        if ($item) { '{0}:{1}' -f $item.Name, $item.Length } else { '' }
+    }
+    $signature = (@($Migration.Name, $configHash, $targetSiteUrl) + @($inputKeys)) -join '|'
+    [pscustomobject]@{
+        Migration = $Migration.Name; Output = $output; Arguments = $arguments; Signature = $signature
+        FileScan = $FileScan; PermissionScan = $PermissionScan; EntraCache = $entraCache; Mapping = $mapping
+        TargetSiteUrl = $targetSiteUrl; ConfigHash = $configHash
+    }
+}
+
+function Invoke-SmartM365MigrationComplexity {
+    <# Scores the latest source scans after a scan. Never throws: a failure must not fail the scan. #>
+    param(
+        [Parameter(Mandatory = $true)]$Migration,
+        [Parameter(Mandatory = $true)][string]$ProjectRoot,
+        [Parameter(Mandatory = $true)][string]$SourceType,
+        [Parameter(Mandatory = $true)][string]$PythonExecutable,
+        [string[]]$PythonArguments = @(),
+        [string]$ScriptPath = ''
+    )
+    try {
+        $inputs = Get-SmartM365ComplexityScanInputs -Migration $Migration -SourceType $SourceType
+        $request = Get-SmartM365ComplexityRequest -Migration $Migration -ProjectRoot $ProjectRoot `
+            -FileScan $inputs.FileScan -PermissionScan $inputs.PermissionScan -ScriptPath $ScriptPath
+        if (-not $request) {
+            return [pscustomobject]@{ Status = 'Skipped'; Message = 'No completed source file scan is available.'; Output = @() }
+        }
+        $previousPreference = $ErrorActionPreference
+        try {
+            $ErrorActionPreference = 'Continue'
+            $output = @(& $PythonExecutable @PythonArguments @($request.Arguments) 2>&1 | ForEach-Object { [string]$_ })
+            $exitCode = $LASTEXITCODE
+        }
+        finally { $ErrorActionPreference = $previousPreference }
+        if ($exitCode -ne 0) {
+            return [pscustomobject]@{ Status = 'Failed'; Message = "Python exit code $exitCode."; Output = $output }
+        }
+        return [pscustomobject]@{ Status = 'Succeeded'; Message = $request.Output; Output = $output }
+    }
+    catch {
+        return [pscustomobject]@{ Status = 'Failed'; Message = $_.Exception.Message; Output = @() }
+    }
 }
 
 # SIG # Begin signature block

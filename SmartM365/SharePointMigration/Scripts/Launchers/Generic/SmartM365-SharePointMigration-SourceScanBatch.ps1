@@ -10,7 +10,7 @@
     filter is an error so a batch cannot accidentally scan an entire farm.
 
 .VERSION
-    1.0.1
+    1.0.2
 
 .EXAMPLE
     powershell.exe -NoProfile -File .\SmartM365-SharePointMigration-SourceScanBatch.ps1 -PlanOnly
@@ -250,6 +250,37 @@ function Add-BatchResult {
     Write-BatchLine ("{0}: {1} {2} (exit {3}); CSV: {4}; log: {5}" -f $Status, $Job.Name, $Job.Action, $ExitCode, $OutputPath, $LogPath)
 }
 
+function Update-BatchMigrationComplexity {
+    # Informative score: computed once per migration after all phases; never changes the batch result.
+    param([object[]]$Migrations, [object]$Python, [string]$LocalCompare)
+    $scanned = @($script:Results | Where-Object { $_.Status -eq 'SUCCESS' } | ForEach-Object { $_.Migration } | Select-Object -Unique)
+    if ($scanned.Count -eq 0) { return }
+    try {
+        . (Join-Path $ProjectRoot 'Scripts\Launchers\SmartM365-SharePointMigration-LauncherCommon.ps1')
+        foreach ($name in @('migration_complexity.py', 'compare_sp_source_target_file_inventories.py',
+                'compare_sp_source_target_permissions.py', 'report_html.py', 'comparison_artifacts.py',
+                'comparison_history_chart.py')) {
+            Copy-VerifiedDependency -RelativePath ("Scripts\Compare\{0}" -f $name) -Destination (Join-Path $LocalCompare $name)
+        }
+    }
+    catch {
+        Write-BatchLine ("WARNING Migration complexity skipped; the GUI will calculate it: {0}" -f $_.Exception.Message)
+        return
+    }
+    foreach ($migration in @($Migrations | Where-Object { $scanned -contains $_.Name })) {
+        $result = Invoke-SmartM365MigrationComplexity -Migration $migration -ProjectRoot $ProjectRoot `
+            -SourceType ([string]$migration.Config.Source.Type) -PythonExecutable $Python.Executable `
+            -PythonArguments @($Python.Arguments) -ScriptPath (Join-Path $LocalCompare 'migration_complexity.py')
+        foreach ($line in @($result.Output)) { Write-BatchLine ([string]$line) }
+        if ($result.Status -eq 'Succeeded') {
+            Write-BatchLine ("Migration complexity updated for {0}: {1}" -f $migration.Name, $result.Message)
+        }
+        else {
+            Write-BatchLine ("WARNING Migration complexity not updated for {0} ({1}); the GUI will calculate it: {2}" -f $migration.Name, $result.Status, $result.Message)
+        }
+    }
+}
+
 $requestedNames = New-Object 'System.Collections.Generic.List[string]'
 foreach ($value in $MigrationNames) {
     foreach ($name in ($value -split ',')) {
@@ -395,6 +426,7 @@ try {
             }
         }
     }
+    Update-BatchMigrationComplexity -Migrations $migrations -Python $python -LocalCompare $localCompare
 }
 catch {
     $script:BatchAborted = $true

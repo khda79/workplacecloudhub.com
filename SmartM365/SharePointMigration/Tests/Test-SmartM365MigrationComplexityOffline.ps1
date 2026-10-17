@@ -2,7 +2,7 @@
 .SYNOPSIS
     Verify the migration complexity request and presentation without SharePoint access.
 .VERSION
-    1.0.0
+    1.0.1
 #>
 
 #Requires -Version 7.4
@@ -42,8 +42,12 @@ try {
     $migration = [pscustomobject]@{
         Name = 'Fixture'; Root = $testRoot
         Config = @{ Name = 'Fixture'; Target = @{ SiteUrl = 'https://target.test/sites/fixture' }
-            Comparison = @{ EntraUsersCachePath = 'missing-entra-cache.csv' } }
+            Comparison = @{ EntraUsersCachePath = 'missing-entra-cache.csv' }
+            Output = @{ SourceFileScans = 'scans\source\files'; SourcePermissionScans = 'scans\source\permissions' } }
     }
+    $inputs = Get-SmartM365ComplexityScanInputs -Migration $migration -SourceType 'SP2019'
+    Assert-Complexity ($inputs.FileScan.Name -eq (Split-Path $fileScan -Leaf) -and
+        $inputs.PermissionScan.Name -eq (Split-Path $permissionScan -Leaf)) 'latest source scans must be selected'
     Assert-Complexity ((Get-SmartM365ComplexityPresentation -Request $null).State -eq 'Unavailable') 'no source scan must be unavailable'
 
     $request = Get-SmartM365ComplexityRequest -Migration $migration -ProjectRoot $projectRoot `
@@ -54,8 +58,16 @@ try {
     $readOnly = Get-SmartM365ComplexityPresentation -Request $request -ReadOnly
     Assert-Complexity ($readOnly.Caption -eq 'Not evaluated') 'read-only views must not announce a calculation'
 
-    & $python @($request.Arguments) | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw "Complexity calculation failed with exit code $LASTEXITCODE." }
+    # Same path as the source scan launchers: the stored result must satisfy the GUI without recalculation.
+    $scanResult = Invoke-SmartM365MigrationComplexity -Migration $migration -ProjectRoot $projectRoot `
+        -SourceType 'SP2019' -PythonExecutable $python
+    Assert-Complexity ($scanResult.Status -eq 'Succeeded') "scan-side calculation failed: $($scanResult.Message)"
+    $broken = Invoke-SmartM365MigrationComplexity -Migration $migration -ProjectRoot $projectRoot `
+        -SourceType 'SP2019' -PythonExecutable $python -ScriptPath (Join-Path $testRoot 'missing.py')
+    Assert-Complexity ($broken.Status -eq 'Failed') 'a failed calculation must be reported without throwing'
+    $none = Invoke-SmartM365MigrationComplexity -Migration $migration -ProjectRoot $projectRoot `
+        -SourceType 'SP2016' -PythonExecutable $python
+    Assert-Complexity ($none.Status -eq 'Skipped') 'no source file scan must skip the calculation'
     $request = Get-SmartM365ComplexityRequest -Migration $migration -ProjectRoot $projectRoot `
         -FileScan (Get-Item $fileScan) -PermissionScan (Get-Item $permissionScan)
     $current = Get-SmartM365ComplexityPresentation -Request $request

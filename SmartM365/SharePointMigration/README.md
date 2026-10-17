@@ -164,12 +164,20 @@ cache is the migration's `Comparison.EntraUsersCachePath`, otherwise the newest
 never connects to Entra.
 
 Thresholds, weights, levels and floor rules live in
-`Config/migration-complexity.json.txt`, created and self-healed from the committed
-`Config/migration-complexity.json.template` (new template criteria are added,
-local values are kept). The result is stored as `migration-complexity.json.txt`
-in the migration folder with the scan names, sizes and settings hash it used.
-When a newer source scan, mapping file, Entra cache or setting is detected, the
-GUI keeps the previous level marked `Updating` and recalculates it in a
+`Config/migration-complexity.json.txt`. The GUI creates it from the committed
+`Config/migration-complexity.json.template` at startup if it is absent; every
+calculation self-heals it (new template criteria are added, local values are
+kept). The result is stored as `migration-complexity.json.txt` in the migration
+folder with the scan names, sizes and settings hash it used.
+
+Source scans calculate it: the generic launcher after each `ScanSourceFiles` or
+`ScanSourcePermissions`, and the farm source batch once per scanned migration
+after all phases, from a verified local copy of the Python scripts. This step is
+informative: a failure is logged as a warning and never fails the scan. The GUI
+calculates complexity only when no stored result matches the latest source
+scans, mapping file, Entra cache and settings (for example after an older scan,
+a changed setting, or an Entra cache only available on the GUI workstation). It
+then keeps the previous level marked `Updating` and recalculates it in a
 background job; failures stay visible in the tooltip and the activity log.
 ArchivedOverview reads stored results only and marks changed inputs `Outdated`.
 Expand **Complexity details** in Files & Permissions for each criterion's value,
