@@ -18,7 +18,7 @@ Microsoft 365 and Entra inventory scripts outside the Intune-specific surface.
 
 ## Microsoft 365 Licensing
 
-`Licensing/SmartM365-Licences-Inventory.ps1` 1.48 publishes normalized license and
+`Licensing/SmartM365-Licences-Inventory.ps1` 1.49 publishes normalized license and
 service-plan data without repeating user and product labels on every service-plan
 assignment.
 
@@ -31,6 +31,7 @@ assignment.
 | Tenant SKUs | `M365_Licenses_Tenant.csv` | Tenant subscription and capacity inventory. |
 | Licensing groups | `M365_Licenses_Groups.csv` | Groups discovered as license assignment sources. |
 | License report | `M365_Licenses_ReportSummary.csv`, `M365_Licenses_ReportCandidates.csv`, `M365_Licenses_ReportAssignmentIssues.csv`, `M365_Licenses_ReportGaps.csv`, `M365_Licenses_ReportSources.csv` | Recovery, E3-to-F3 review, assignment issues, gaps and source states of one snapshot; optional outputs of the licensing source receipt. |
+| License SKU decisions | `M365_Licenses_ReportSkuCandidates.csv`, `M365_Licenses_ReportSkuCapacity.csv` | Per-SKU candidates (disabled accounts, Copilot without licensed activity) and per-SKU capacity of the same snapshot; optional outputs of the licensing source receipt. |
 
 Every full inventory (no `-MaxItems` or `-TopUsers`) publishes the license report,
 whether or not an email is sent: `DATA-LAST/M365_Licenses_ReportSnapshot.json.txt`
@@ -58,7 +59,57 @@ email is sent. The log and the run state (`Notes` in the `.run.json.txt` file)
 state that the report present in `DATA-LAST` does not belong to the current
 receipt; consumers must treat a report absent from the current receipt as stale. When SharePoint upload is configured, the snapshot and the five CSVs are
 uploaded after registration; an upload failure is logged, noted in the run state,
-and the email is not sent. Consumer reports should read this document rather than independently
+and the email is not sent.
+
+Per-SKU license decisions are published with the same report snapshot, in two
+additive files that the email, the workbook and the five report CSVs do not use.
+Every row carries the report `SnapshotId`, `TenantKey` and `ReceiptRunId` (the
+licensing receipt `RunId`, equal to `ReceiptRun.RunId` in the snapshot).
+
+- `M365_Licenses_ReportSkuCandidates.csv`: one row per user and SKU.
+  - `Disabled account`, for every paid SKU except the free, trial and viral SKUs
+    listed in `LicenseDecisionExcludedSkus` of the local JSON. The account state
+    combines Entra and AD: disabled in both (or disabled in Entra for a cloud-only
+    account) is `Recommended`; an Entra/AD conflict, or a synchronized account
+    missing from AD, is `Review`; an account absent from the Entra export is not
+    counted. The existing suite recovery of the report still uses the Entra state.
+  - Exchange guard: a SKU holding an Exchange mailbox or archive service plan
+    (detected in `M365_Licenses_ServicePlans_Catalog.csv`, not by SKU name;
+    `EXCHANGE_S_FOUNDATION` excluded) is `Blocked by dependency` when the mailbox is
+    above `LicenseDecisionMailboxReviewSizeGB` (50 GB), has an active archive, a
+    litigation hold or a retention hold, and `Review` when one of these states is
+    unknown.
+  - Room, equipment and scheduling mailboxes and Teams Phone resource accounts
+    (`MCOEV_VIRTUALUSER` plan or a resource-account phone assignment) are never
+    plain candidates: `Review`, with the reason.
+  - `Copilot without activity`: no Microsoft 365 Copilot activity in the licensed
+    apps during `LicenseDecisionCopilotInactivityDays` (60) days ending at the report
+    refresh date. Copilot Chat, Edge or agent activity alone is `Review` with the
+    reason `Copilot Chat only`. An assignment updated less than
+    `LicenseDecisionCopilotAssignmentGraceDays` (30) days ago is not a candidate;
+    `LastUpdatedDateTime` is a lower bound of the assignment age (group
+    reprocessing refreshes it), so it can only delay a candidate. An unknown
+    assignment date is `Review`. A missing, stale or anonymized Copilot report, or
+    one whose period is shorter than the window, is `Not measured`: no candidate
+    and no zero.
+  - A suite already counted in `M365_Licenses_ReportCandidates.csv` (Recovery or E3
+    to F3 review) is `Referenced` with `CountedIn`, never counted again.
+  - Dependency guard (`Licensing/SmartM365-LicenseDependencies.json.txt`, dated
+    Microsoft sources): a qualifying license (Microsoft 365 suite for Copilot,
+    Dynamics 365 base for an attach license) whose removal would leave a kept
+    dependent license without a qualifying license is `Blocked by dependency`;
+    `Dependents removed together` marks a removal valued with its dependents.
+- `M365_Licenses_ReportSkuCapacity.csv`: one row per tenant SKU with enabled,
+  consumed and available units, assigned and disabled-account users, candidates by
+  recommendation, the exclusion reason and `UsageEvidence`: `Measured` for Copilot
+  when the report is qualified, `Not measured` for Dynamics 365 (active users are a
+  signal only, never a candidate) and `Not applicable` otherwise.
+
+Suites are recognized by part number and, for the EEA and no-Teams editions, by
+SkuId GUID from the Microsoft product names and service plan identifiers CSV;
+unattended licenses stay out. A decision failure is logged as a warning and noted
+in the run state; the report, its five CSVs and the email are not affected, and the
+two decision files are then declared unpublished in the receipt. Consumer reports should read this document rather than independently
 recalculating recovery or downgrade rules.
 They must display the snapshot ID and date, reject mixed IDs across imported
 tables and preserve JSON `null` as N/D rather than a verified zero. The
