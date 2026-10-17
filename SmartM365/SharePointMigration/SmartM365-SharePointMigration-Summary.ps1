@@ -2,7 +2,7 @@
 .SYNOPSIS
     Read-only portfolio summary for the SharePoint migration GUI.
 .VERSION
-    1.0.14
+    1.0.15
 #>
 
 . (Join-Path $PSScriptRoot 'Scripts\Launchers\SmartM365-SharePointMigration-LauncherCommon.ps1')
@@ -406,6 +406,177 @@ function Get-SmartM365PortfolioRow {
         GlobalComparisonTooltip = $globalTooltip
         Status = $status
         StatusTooltip = $statusTooltip
+        SourcePermissionScanFile = if ($sourcePermissions) { $sourcePermissions.File } else { $null }
+        ComplexityScore = $null
+        ComplexityText = '—'
+        ComplexityCaption = ''
+        ComplexityVisual = Get-SmartM365ComplexityVisual
+        ComplexityTooltip = 'Complexity has not been evaluated.'
+    }
+}
+
+function Get-SmartM365ComplexityVisual {
+    param([string]$Color = '#64748B', [string]$Background = '#F0F4F8')
+    [pscustomobject]@{ Color = $Color; Background = $Background }
+}
+
+function Get-SmartM365ComplexityEntraCache {
+    param([Parameter(Mandatory)]$Migration, [Parameter(Mandatory)][string]$ProjectRoot)
+    $comparison = $Migration.Config['Comparison']
+    $configured = if ($comparison) { [string]$comparison['EntraUsersCachePath'] } else { '' }
+    if (-not [string]::IsNullOrWhiteSpace($configured)) {
+        $path = if ([IO.Path]::IsPathRooted($configured)) { $configured } else { Join-Path $Migration.Root $configured }
+        if (Test-Path -LiteralPath $path -PathType Leaf) { return Get-Item -LiteralPath $path }
+        return $null
+    }
+    $directory = Join-Path $ProjectRoot '_Local\EntraUsersCache'
+    if (-not (Test-Path -LiteralPath $directory -PathType Container)) { return $null }
+    return Get-ChildItem -LiteralPath $directory -Filter '*.csv' -File -ErrorAction SilentlyContinue |
+        Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1
+}
+
+function Get-SmartM365ComplexityRequest {
+    <# Inputs, arguments and signature of the source-only complexity score for one migration. #>
+    param(
+        [Parameter(Mandatory)]$Migration,
+        [Parameter(Mandatory)][string]$ProjectRoot,
+        [System.IO.FileInfo]$FileScan,
+        [System.IO.FileInfo]$PermissionScan
+    )
+    if (-not $FileScan) { return $null }
+    $cfg = $Migration.Config
+    $entraCache = if ($PermissionScan) { Get-SmartM365ComplexityEntraCache -Migration $Migration -ProjectRoot $ProjectRoot } else { $null }
+    $mapping = $null
+    $mappingName = if ($cfg['Comparison']) { [string]$cfg['Comparison']['PathMappingsFile'] } else { '' }
+    if (-not [string]::IsNullOrWhiteSpace($mappingName)) {
+        $mappingPath = if ([IO.Path]::IsPathRooted($mappingName)) { $mappingName } else { Join-Path $Migration.Root $mappingName }
+        if (Test-Path -LiteralPath $mappingPath -PathType Leaf) { $mapping = Get-Item -LiteralPath $mappingPath }
+    }
+    $targetSiteUrl = if ($cfg['Target']) { [string]$cfg['Target']['SiteUrl'] } else { '' }
+    $configDirectory = Join-Path $ProjectRoot 'Config'
+    $configPath = Join-Path $configDirectory 'migration-complexity.json.txt'
+    $configHash = if (Test-Path -LiteralPath $configPath -PathType Leaf) {
+        (Get-FileHash -LiteralPath $configPath -Algorithm SHA256).Hash
+    } else { '' }
+    $output = Join-Path $Migration.Root 'migration-complexity.json.txt'
+    $arguments = @(
+        (Join-Path $ProjectRoot 'Scripts\Compare\migration_complexity.py'),
+        '--migration-name', $Migration.Name,
+        '--file-inventory', $FileScan.FullName,
+        '--config-dir', $configDirectory,
+        '--output', $output
+    )
+    if ($PermissionScan) { $arguments += @('--permission-inventory', $PermissionScan.FullName) }
+    if ($entraCache) { $arguments += @('--entra-users-csv', $entraCache.FullName) }
+    if ($mapping) { $arguments += @('--path-mapping-file', $mapping.FullName) }
+    if ($targetSiteUrl) { $arguments += @('--target-site-url', $targetSiteUrl) }
+    $inputKeys = foreach ($item in @($FileScan, $PermissionScan, $entraCache, $mapping)) {
+        if ($item) { '{0}:{1}' -f $item.Name, $item.Length } else { '' }
+    }
+    $signature = (@($Migration.Name, $configHash, $targetSiteUrl) + @($inputKeys)) -join '|'
+    [pscustomobject]@{
+        Migration = $Migration.Name; Output = $output; Arguments = $arguments; Signature = $signature
+        FileScan = $FileScan; PermissionScan = $PermissionScan; EntraCache = $entraCache; Mapping = $mapping
+        TargetSiteUrl = $targetSiteUrl; ConfigHash = $configHash
+    }
+}
+
+function Test-SmartM365ComplexityInput {
+    param($Recorded, [System.IO.FileInfo]$Expected)
+    if (-not $Expected) { return $null -eq $Recorded }
+    return $null -ne $Recorded -and [string]$Recorded.Name -ceq $Expected.Name -and [long]$Recorded.Length -eq $Expected.Length
+}
+
+function Get-SmartM365ComplexityPresentation {
+    <# Reads the stored complexity result and states whether it matches the current inputs. #>
+    param($Request, [string]$ErrorMessage = '', [switch]$ReadOnly)
+    $unavailable = [pscustomobject]@{
+        State = 'Unavailable'; Score = $null; Text = 'Scan needed'; Caption = 'No source scan'
+        Visual = Get-SmartM365ComplexityVisual; Tooltip = 'Complexity needs a source file inventory scan.'
+        Summary = 'Run a source file scan to evaluate complexity.'; Criteria = @(); Result = $null
+    }
+    if (-not $Request) { return $unavailable }
+    $result = $null
+    if (Test-Path -LiteralPath $Request.Output -PathType Leaf) {
+        try { $result = Get-Content -LiteralPath $Request.Output -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop }
+        catch { $result = $null }
+    }
+    $current = $false
+    if ($result -and [int]$result.SchemaVersion -eq 1 -and $result.Inputs) {
+        $inputs = $result.Inputs
+        $current = (Test-SmartM365ComplexityInput $inputs.FileInventory $Request.FileScan) -and
+            (Test-SmartM365ComplexityInput $inputs.PermissionInventory $Request.PermissionScan) -and
+            (Test-SmartM365ComplexityInput $inputs.EntraUsers $Request.EntraCache) -and
+            (Test-SmartM365ComplexityInput $inputs.PathMapping $Request.Mapping) -and
+            [string]$inputs.TargetSiteUrl -ceq $Request.TargetSiteUrl -and
+            $Request.ConfigHash -and [string]$inputs.ConfigSha256 -eq $Request.ConfigHash
+    }
+    if (-not $result -and $ReadOnly) {
+        return [pscustomobject]@{
+            State = 'Missing'; Score = $null; Text = '—'; Caption = 'Not evaluated'
+            Visual = Get-SmartM365ComplexityVisual; Tooltip = 'No complexity result is stored for this migration.'
+            Summary = 'No complexity result is stored for this migration.'; Criteria = @(); Result = $null
+        }
+    }
+    if (-not $result) {
+        $state = if ($ErrorMessage) { 'Error' } else { 'Missing' }
+        return [pscustomobject]@{
+            State = $state; Score = $null
+            Text = if ($ErrorMessage) { 'Error' } else { 'Computing' }
+            Caption = if ($ErrorMessage) { 'See tooltip' } else { 'Background job' }
+            Visual = Get-SmartM365ComplexityVisual
+            Tooltip = if ($ErrorMessage) { "Complexity calculation failed:`n$ErrorMessage" } else { 'Complexity is being calculated from the latest source scans.' }
+            Summary = if ($ErrorMessage) { "Calculation failed: $ErrorMessage" } else { 'Calculating complexity from the latest source scans.' }
+            Criteria = @(); Result = $null
+        }
+    }
+    $names = @{}
+    foreach ($criterion in @($result.Criteria)) { $names[[string]$criterion.Id] = [string]$criterion.Name }
+    $drivers = @($result.TopDrivers | ForEach-Object { $names[[string]$_] }) -join ', '
+    $lines = [System.Collections.Generic.List[string]]::new()
+    $lines.Add(('Complexity: {0} ({1}/100). Source scans only; independent from comparison progress.' -f $result.Level, $result.Score))
+    $lines.Add('Top drivers: ' + $(if ($drivers) { $drivers } else { 'none' }))
+    if (@($result.FloorApplied).Count) {
+        $lines.Add(('Floor rule applied ({0}): score level {1} raised to {2}.' -f
+            (@($result.FloorApplied | ForEach-Object { $names[[string]$_] }) -join ', '), $result.ScoreLevel, $result.Level))
+    }
+    if (@($result.MissingInputs).Count) {
+        $lines.Add('Partial: not evaluated without ' + (@($result.MissingInputs) -join ', ') + '.')
+    }
+    $lines.Add(('Files: {0}' -f $result.Inputs.FileInventory.Name))
+    $lines.Add(('Permissions: {0}' -f $(if ($result.Inputs.PermissionInventory) { $result.Inputs.PermissionInventory.Name } else { 'none' })))
+    $computed = [datetime]::MinValue
+    if ([datetime]::TryParse([string]$result.ComputedAtUtc, [Globalization.CultureInfo]::InvariantCulture,
+            [Globalization.DateTimeStyles]::RoundtripKind, [ref]$computed)) {
+        $lines.Add('Computed: ' + $computed.ToLocalTime().ToString('yyyy-MM-dd HH:mm'))
+    }
+    $state = 'Current'
+    $caption = '{0}/100' -f $result.Score
+    if ([string]$result.Status -eq 'Partial') { $caption += ' · partial' }
+    if (-not $current) {
+        $state = if ($ErrorMessage) { 'Error' } else { 'Stale' }
+        $caption = if ($ErrorMessage) { 'Update failed' } elseif ($ReadOnly) { 'Outdated' } else { 'Updating' }
+        $lines.Insert(0, $(if ($ErrorMessage) { "Update failed; showing the previous result.`n$ErrorMessage" }
+            elseif ($ReadOnly) { 'Source scans or settings changed after this result; read-only views do not recalculate.' }
+            else { 'Newer source scans or settings: recalculating in the background; showing the previous result.' }))
+    }
+    $criteria = foreach ($criterion in @($result.Criteria)) {
+        $bands = @($criterion.Bands)
+        [pscustomobject]@{
+            Axis = [string]$criterion.Axis; Criterion = [string]$criterion.Name
+            Value = [string]$criterion.ValueDisplay; Band = [string]$criterion.Band
+            Points = if ($criterion.Evaluated) { '{0} / 3' -f $criterion.Points } else { 'N/A' }
+            Weighted = if ($criterion.Evaluated) { '{0} / {1}' -f $criterion.WeightedPoints, $criterion.MaxWeightedPoints } else { 'N/A' }
+            Detail = [string]$criterion.Detail
+            Thresholds = @(for ($index = 0; $index -lt $bands.Count; $index++) { '{0} pt: {1}' -f $index, $bands[$index] }) -join "`n"
+        }
+    }
+    [pscustomobject]@{
+        State = $state; Score = [int]$result.Score; Text = [string]$result.Level; Caption = $caption
+        Visual = Get-SmartM365ComplexityVisual -Color ([string]$result.LevelColor) -Background ([string]$result.LevelBackground)
+        Tooltip = $lines -join "`n"
+        Summary = ('{0} · {1}/100 · top drivers: {2}' -f $result.Level, $result.Score, $(if ($drivers) { $drivers } else { 'none' }))
+        Criteria = @($criteria); Result = $result
     }
 }
 

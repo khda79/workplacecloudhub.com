@@ -15,7 +15,7 @@
     the directory containing this GUI when launched from the shared toolkit.
 
 .VERSION
-    1.0.70
+    1.0.71
 #>
 
 #Requires -Version 7.4
@@ -28,13 +28,18 @@ param(
 )
 
 $script:AppName    = 'Smart SharePoint Migration'
-$script:AppVersion = '1.0.70'
+$script:AppVersion = '1.0.71'
 $script:ScriptRoot = $PSScriptRoot
 $script:FarmToolkitRoot = if ($FarmToolkitRoot) { $FarmToolkitRoot } else { $PSScriptRoot }
 $script:SummaryLastGoodRows = @{}
 $script:SummaryLastErrorMessages = @{}
 $script:NextActivityCleanupUtc = $null
 $script:LastGlobalRefreshError = ''
+$script:ComplexityQueue = [ordered]@{}
+$script:ComplexityFailures = @{}
+$script:ComplexityCompleted = @{}
+$script:ComplexityJob = $null
+$script:ComplexityJobSignatures = @()
 Microsoft.PowerShell.Utility\Write-Host ('{0} Script  : {1} v{2}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $MyInvocation.MyCommand.Name, $script:AppVersion) -ForegroundColor Cyan
 
 Add-Type -AssemblyName PresentationFramework
@@ -715,7 +720,7 @@ function New-FarmDiagnosticsWindow {
                       AlternatingRowBackground="#F5F8FB" Background="White"
                       BorderThickness="0" HorizontalScrollBarVisibility="Auto"
                       VerticalScrollBarVisibility="Disabled" EnableRowVirtualization="True"
-                      FrozenColumnCount="6">
+                      FrozenColumnCount="7">
               <DataGrid.RowStyle>
                 <Style TargetType="DataGridRow">
                   <Setter Property="ToolTip" Value="{Binding StatusTooltip}"/>
@@ -738,6 +743,16 @@ function New-FarmDiagnosticsWindow {
                   <DataGridTemplateColumn.CellTemplate><DataTemplate>
                     <Border Style="{StaticResource PortfolioStatusBadge}" ToolTip="{Binding StatusTooltip}">
                       <TextBlock Text="{Binding Status}" FontSize="11" FontWeight="SemiBold" TextWrapping="Wrap" TextAlignment="Center" HorizontalAlignment="Center"/>
+                    </Border>
+                  </DataTemplate></DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
+                <DataGridTemplateColumn Header="Complexity" Width="105" SortMemberPath="ComplexityScore">
+                  <DataGridTemplateColumn.CellTemplate><DataTemplate>
+                    <Border Style="{StaticResource PortfolioBadge}" Background="{Binding ComplexityVisual.Background}" ToolTip="{Binding ComplexityTooltip}">
+                      <StackPanel HorizontalAlignment="Center">
+                        <TextBlock Text="{Binding ComplexityText}" Foreground="{Binding ComplexityVisual.Color}" FontSize="12" FontWeight="SemiBold" HorizontalAlignment="Center"/>
+                        <TextBlock Text="{Binding ComplexityCaption}" Foreground="#5F6B7A" FontSize="10" HorizontalAlignment="Center"/>
+                      </StackPanel>
                     </Border>
                   </DataTemplate></DataGridTemplateColumn.CellTemplate>
                 </DataGridTemplateColumn>
@@ -876,7 +891,7 @@ function New-FarmDiagnosticsWindow {
                       AlternatingRowBackground="#F5F8FB" Background="White"
                       BorderThickness="0" HorizontalScrollBarVisibility="Auto"
                       VerticalScrollBarVisibility="Disabled" EnableRowVirtualization="True"
-                      FrozenColumnCount="6">
+                      FrozenColumnCount="7">
               <DataGrid.RowStyle>
                 <Style TargetType="DataGridRow">
                   <Setter Property="ToolTip" Value="{Binding StatusTooltip}"/>
@@ -899,6 +914,16 @@ function New-FarmDiagnosticsWindow {
                   <DataGridTemplateColumn.CellTemplate><DataTemplate>
                     <Border Style="{StaticResource PortfolioStatusBadge}" ToolTip="{Binding StatusTooltip}">
                       <TextBlock Text="{Binding Status}" FontSize="11" FontWeight="SemiBold" TextWrapping="Wrap" TextAlignment="Center" HorizontalAlignment="Center"/>
+                    </Border>
+                  </DataTemplate></DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
+                <DataGridTemplateColumn Header="Complexity" Width="105" SortMemberPath="ComplexityScore">
+                  <DataGridTemplateColumn.CellTemplate><DataTemplate>
+                    <Border Style="{StaticResource PortfolioBadge}" Background="{Binding ComplexityVisual.Background}" ToolTip="{Binding ComplexityTooltip}">
+                      <StackPanel HorizontalAlignment="Center">
+                        <TextBlock Text="{Binding ComplexityText}" Foreground="{Binding ComplexityVisual.Color}" FontSize="12" FontWeight="SemiBold" HorizontalAlignment="Center"/>
+                        <TextBlock Text="{Binding ComplexityCaption}" Foreground="#5F6B7A" FontSize="10" HorizontalAlignment="Center"/>
+                      </StackPanel>
                     </Border>
                   </DataTemplate></DataGridTemplateColumn.CellTemplate>
                 </DataGridTemplateColumn>
@@ -990,11 +1015,13 @@ function New-FarmDiagnosticsWindow {
           </Grid.ColumnDefinitions>
           <Border Grid.Row="0" Grid.ColumnSpan="3" Background="#EAF5FC" BorderBrush="#C9E2F2"
                   BorderThickness="1" CornerRadius="8" Padding="14,10" Margin="0,0,0,14">
+            <StackPanel>
             <Grid>
               <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="190"/>
                 <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
               </Grid.ColumnDefinitions>
               <StackPanel Grid.Column="0" Margin="0,0,16,0">
                 <TextBlock Text="MIGRATION" Style="{StaticResource SectionLabel}" Margin="0,0,0,3"/>
@@ -1011,7 +1038,40 @@ function New-FarmDiagnosticsWindow {
                 <TextBlock x:Name="lblWorkflowTargetUrl" Text="—" FontSize="12" Foreground="#1F2937"
                            TextTrimming="CharacterEllipsis"/>
               </StackPanel>
+              <StackPanel Grid.Column="3" Margin="16,0,0,0" MinWidth="120">
+                <TextBlock Text="COMPLEXITY" Style="{StaticResource SectionLabel}" Margin="0,0,0,3"/>
+                <Border x:Name="badgeWorkflowComplexity" Style="{StaticResource PortfolioBadge}" Margin="0" Padding="8,2">
+                  <StackPanel Orientation="Horizontal">
+                    <TextBlock x:Name="lblWorkflowComplexity" Text="—" FontSize="12" FontWeight="SemiBold"/>
+                    <TextBlock x:Name="lblWorkflowComplexityCaption" Text="" FontSize="11" Foreground="#5F6B7A" Margin="6,0,0,0"/>
+                  </StackPanel>
+                </Border>
+              </StackPanel>
             </Grid>
+            <Expander x:Name="expWorkflowComplexity" Margin="0,8,0,0" IsExpanded="False">
+              <Expander.Header>
+                <TextBlock x:Name="lblWorkflowComplexitySummary" Text="Complexity details" FontSize="11" Foreground="#5F6B7A"/>
+              </Expander.Header>
+              <DataGrid x:Name="gridWorkflowComplexity" AutoGenerateColumns="False" IsReadOnly="True"
+                        CanUserAddRows="False" CanUserDeleteRows="False" HeadersVisibility="Column"
+                        GridLinesVisibility="None" RowHeight="24" ColumnHeaderHeight="28" Margin="0,6,0,0"
+                        AlternatingRowBackground="#F5F8FB" Background="White" BorderThickness="0"
+                        HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
+                <DataGrid.RowStyle>
+                  <Style TargetType="DataGridRow"><Setter Property="ToolTip" Value="{Binding Thresholds}"/></Style>
+                </DataGrid.RowStyle>
+                <DataGrid.Columns>
+                  <DataGridTextColumn Header="Axis" Binding="{Binding Axis}" Width="90"/>
+                  <DataGridTextColumn Header="Criterion" Binding="{Binding Criterion}" Width="230"/>
+                  <DataGridTextColumn Header="Value" Binding="{Binding Value}" Width="120"/>
+                  <DataGridTextColumn Header="Band reached" Binding="{Binding Band}" Width="150"/>
+                  <DataGridTextColumn Header="Points" Binding="{Binding Points}" Width="60"/>
+                  <DataGridTextColumn Header="Weighted" Binding="{Binding Weighted}" Width="75"/>
+                  <DataGridTextColumn Header="Basis" Binding="{Binding Detail}" Width="*" MinWidth="200"/>
+                </DataGrid.Columns>
+              </DataGrid>
+            </Expander>
+            </StackPanel>
           </Border>
           <StackPanel x:Name="panelFiles" Grid.Row="1" Grid.Column="0" Margin="0,0,14,0">
           <TextBlock Text="FILES" FontSize="16" FontWeight="SemiBold" Foreground="#1F2937" Margin="0,0,0,10"/>
@@ -1910,6 +1970,11 @@ $panelWorkflows   = ctrl 'panelWorkflows'
 $lblWorkflowMigration = ctrl 'lblWorkflowMigration'
 $lblWorkflowSourceUrl = ctrl 'lblWorkflowSourceUrl'
 $lblWorkflowTargetUrl = ctrl 'lblWorkflowTargetUrl'
+$badgeWorkflowComplexity = ctrl 'badgeWorkflowComplexity'
+$lblWorkflowComplexity = ctrl 'lblWorkflowComplexity'
+$lblWorkflowComplexityCaption = ctrl 'lblWorkflowComplexityCaption'
+$lblWorkflowComplexitySummary = ctrl 'lblWorkflowComplexitySummary'
+$gridWorkflowComplexity = ctrl 'gridWorkflowComplexity'
 $panelOperations  = ctrl 'panelOperations'
 $panelBatches = ctrl 'panelBatches'
 $panelDiagnostics = ctrl 'panelDiagnostics'
@@ -2616,6 +2681,7 @@ function Update-UI {
         [System.Windows.Media.Brushes]::Firebrick
     } else { [System.Windows.Media.SolidColorBrush]::new([System.Windows.Media.Color]::FromRgb(31, 41, 55)) }
     if ($targetScope.Mismatch) { $lblWorkflowTargetUrl.Text += '  [CONFIG DIFFERS]' }
+    Refresh-WorkflowComplexity
     Set-MigrationSiteButton -Button $btnOpenSourceSite -Scope $sourceScope
     Set-MigrationSiteButton -Button $btnOpenTargetSite -Scope $targetScope
     Set-MigrationSiteButton -Button $btnOpenSourceSitePerm -Scope $sourceScope
@@ -2981,6 +3047,145 @@ function Update-PortfolioInventoryRow {
     }
 }
 
+function Get-ComplexityPythonCommand {
+    $python = Join-Path $script:ScriptRoot 'Tools\Python\python.exe'
+    if (Test-Path -LiteralPath $python -PathType Leaf) { return $python }
+    $command = Get-Command python -ErrorAction SilentlyContinue
+    if ($command) { return $command.Source }
+    throw 'Python 3 is required (portable Tools\Python or a local installation).'
+}
+
+function Get-MigrationComplexity {
+    param($Migration, [System.IO.FileInfo]$FileScan, [System.IO.FileInfo]$PermissionScan, [switch]$ReadOnly)
+    $request = Get-SmartM365ComplexityRequest -Migration $Migration -ProjectRoot $script:ScriptRoot `
+        -FileScan $FileScan -PermissionScan $PermissionScan
+    $failure = if ($request) { [string]$script:ComplexityFailures[$request.Signature] } else { '' }
+    $value = Get-SmartM365ComplexityPresentation -Request $request -ErrorMessage $failure -ReadOnly:$ReadOnly
+    if ($ReadOnly -or -not $request -or $value.State -notin @('Missing', 'Stale')) { return $value }
+    if ($script:ComplexityCompleted.ContainsKey($request.Signature)) {
+        # A successful run that still does not match its inputs must not loop forever.
+        $script:ComplexityFailures[$request.Signature] = 'The calculated result does not match the current source scans or settings.'
+        return Get-SmartM365ComplexityPresentation -Request $request -ErrorMessage $script:ComplexityFailures[$request.Signature]
+    }
+    Request-ComplexityComputation -Request $request
+    return $value
+}
+
+function Update-PortfolioComplexityRow {
+    param($Row, $Migration, [switch]$ReadOnly)
+    try {
+        $value = Get-MigrationComplexity -Migration $Migration -FileScan $Row.SourceFileScanFile `
+            -PermissionScan $Row.SourcePermissionScanFile -ReadOnly:$ReadOnly
+    }
+    catch {
+        $value = [pscustomobject]@{ Score = $null; Text = 'Error'; Caption = 'See tooltip'
+            Visual = Get-SmartM365ComplexityVisual; Tooltip = "Complexity unavailable:`n$($_.Exception.Message)" }
+    }
+    $Row.ComplexityScore = $value.Score
+    $Row.ComplexityText = $value.Text
+    $Row.ComplexityCaption = $value.Caption
+    $Row.ComplexityVisual = $value.Visual
+    $Row.ComplexityTooltip = $value.Tooltip
+}
+
+function Request-ComplexityComputation {
+    param($Request)
+    if ($script:ComplexityJobSignatures -contains $Request.Signature) { return }
+    $script:ComplexityQueue[$Request.Migration] = $Request
+    Start-ComplexityJob
+}
+
+function Start-ComplexityJob {
+    if ($script:ComplexityJob -or $script:ComplexityQueue.Count -eq 0) { return }
+    $requests = @($script:ComplexityQueue.Values)
+    $script:ComplexityQueue.Clear()
+    try { $python = Get-ComplexityPythonCommand }
+    catch {
+        foreach ($request in $requests) { $script:ComplexityFailures[$request.Signature] = $_.Exception.Message }
+        return
+    }
+    $script:ComplexityJobSignatures = @($requests | ForEach-Object { $_.Signature })
+    $script:ComplexityJob = Start-ThreadJob -ScriptBlock {
+        param($Python, $Requests)
+        foreach ($request in $Requests) {
+            $output = @(& $Python @($request.Arguments) 2>&1 | ForEach-Object { [string]$_ })
+            [pscustomobject]@{
+                Migration = $request.Migration; Signature = $request.Signature
+                ExitCode = $LASTEXITCODE; Output = ($output -join "`n")
+            }
+        }
+    } -ArgumentList $python, $requests -ErrorAction Stop
+    $script:ComplexityTimer.Start()
+}
+
+function Complete-ComplexityJob {
+    $job = $script:ComplexityJob
+    if (-not $job -or $job.State -in @('Running', 'NotStarted')) { return }
+    $script:ComplexityTimer.Stop()
+    $finished = @{}
+    try {
+        if ($job.State -ne 'Completed') { throw "Background complexity job ended with state $($job.State)." }
+        foreach ($result in @(Receive-Job -Job $job -ErrorAction Stop)) {
+            $finished[$result.Signature] = $true
+            if ($result.ExitCode -eq 0) {
+                $script:ComplexityCompleted[$result.Signature] = $true
+                continue
+            }
+            $message = (@($result.Output -split "`r?`n" | Where-Object { $_ }) | Select-Object -Last 5) -join "`n"
+            $script:ComplexityFailures[$result.Signature] = "Exit code $($result.ExitCode). $message"
+            try {
+                $activity = New-SmartM365GuiActivity -ProjectRoot $script:ScriptRoot `
+                    -Migration $result.Migration -Action 'MigrationComplexity'
+                Write-SmartM365GuiActivityEvent -Path $activity -Status 'Failed' -ExitCode $result.ExitCode `
+                    -Detail $script:ComplexityFailures[$result.Signature] -Migration $result.Migration
+            }
+            catch { }
+        }
+    }
+    catch {
+        foreach ($signature in $script:ComplexityJobSignatures) {
+            if (-not $finished.ContainsKey($signature)) { $script:ComplexityFailures[$signature] = $_.Exception.Message }
+        }
+    }
+    finally {
+        Remove-Job -Job $job -Force -ErrorAction SilentlyContinue
+        $script:ComplexityJob = $null
+        $script:ComplexityJobSignatures = @()
+    }
+    if ($tabSummary.IsChecked) { Refresh-PortfolioSummary }
+    Refresh-WorkflowComplexity
+    Start-ComplexityJob
+}
+
+function Refresh-WorkflowComplexity {
+    if (-not $script:CurrentMigration) { return }
+    $migration = $script:CurrentMigration
+    try {
+        $cfg = $migration.Config
+        $name = [string]$cfg.Name
+        $type = Get-MigrationEndpointType $cfg 'Source'
+        $fileScan = Get-SmartM365LatestPortfolioScan -Directory (Join-Path $migration.Root $cfg.Output.SourceFileScans) `
+            -Filter "$type-FileInventory-$name-*.csv"
+        $permissionScan = Get-SmartM365LatestPortfolioScan -Directory (Join-Path $migration.Root $cfg.Output.SourcePermissionScans) `
+            -Filter "$type-PermissionInventory-$name-*.csv"
+        $value = Get-MigrationComplexity -Migration $migration `
+            -FileScan $(if ($fileScan) { $fileScan.File } else { $null }) `
+            -PermissionScan $(if ($permissionScan) { $permissionScan.File } else { $null })
+    }
+    catch {
+        $value = [pscustomobject]@{ Text = 'Error'; Caption = ''; Visual = Get-SmartM365ComplexityVisual
+            Tooltip = $_.Exception.Message; Summary = "unavailable: $($_.Exception.Message)"; Criteria = @() }
+    }
+    $converter = [System.Windows.Media.BrushConverter]::new()
+    $lblWorkflowComplexity.Text = $value.Text
+    $lblWorkflowComplexity.Foreground = $converter.ConvertFromString($value.Visual.Color)
+    $badgeWorkflowComplexity.Background = $converter.ConvertFromString($value.Visual.Background)
+    $badgeWorkflowComplexity.ToolTip = $value.Tooltip
+    $lblWorkflowComplexityCaption.Text = $value.Caption
+    $lblWorkflowComplexitySummary.Text = 'Complexity details: ' + $value.Summary
+    $gridWorkflowComplexity.ItemsSource = @($value.Criteria)
+}
+
 function Refresh-DiagnosticInventoryMetrics {
     if (-not $script:CurrentMigration) { return }
     $migration = $script:CurrentMigration
@@ -3015,6 +3220,7 @@ function Refresh-PortfolioSummary {
                 -SourceType (Get-MigrationEndpointType $migration.Config 'Source') `
                 -TargetType (Get-MigrationEndpointType $migration.Config 'Target')
             Update-PortfolioInventoryRow -Row $row
+            Update-PortfolioComplexityRow -Row $row -Migration $migration
             $rows.Add($row)
             $script:SummaryLastGoodRows[$migration.Name] = $row
             [void]$script:SummaryLastErrorMessages.Remove($migration.Name)
@@ -3062,6 +3268,8 @@ function Refresh-PortfolioSummary {
                     PermissionComparisonVisual = Get-SmartM365PortfolioRateVisual -Rate $null -Notice 'Refresh error'
                     GlobalComparisonRate = $null; GlobalComparisonTooltip = $message
                     GlobalComparisonVisual = Get-SmartM365PortfolioRateVisual -Rate $null -Notice 'Refresh error' -Caption 'Equal weighting'
+                    ComplexityScore = $null; ComplexityText = '—'; ComplexityCaption = 'Refresh error'
+                    ComplexityVisual = Get-SmartM365ComplexityVisual; ComplexityTooltip = $message
                     Status = 'Refresh error'; StatusTooltip = $message
                 })
             }
@@ -3111,6 +3319,8 @@ function Get-ArchivedOverviewRows {
             PermissionComparisonVisual = Get-SmartM365PortfolioRateVisual -Rate $null
             GlobalComparisonRate = $null; GlobalComparisonTooltip = $message
             GlobalComparisonVisual = Get-SmartM365PortfolioRateVisual -Rate $null -Caption 'Equal weighting'
+            ComplexityScore = $null; ComplexityText = '—'; ComplexityCaption = ''
+            ComplexityVisual = Get-SmartM365ComplexityVisual; ComplexityTooltip = $message
             Status = 'Config unavailable'; StatusTooltip = $message; StatusDetail = $message
         }
         if ($migration.Config) {
@@ -3123,6 +3333,7 @@ function Get-ArchivedOverviewRows {
                     -SourceType (Get-MigrationEndpointType $migration.Config 'Source') `
                     -TargetType (Get-MigrationEndpointType $migration.Config 'Target')
                 Update-PortfolioInventoryRow -Row $evidence
+                Update-PortfolioComplexityRow -Row $evidence -Migration $migration -ReadOnly
                 $evidence | Add-Member -NotePropertyName FolderPath -NotePropertyValue $migration.Root
                 $evidence.ComparisonVisual = Get-SmartM365PortfolioRateVisual -Rate $evidence.ComparisonRate -Caption $evidence.ComparisonDate
                 $evidence.PermissionComparisonVisual = Get-SmartM365PortfolioRateVisual -Rate $evidence.PermissionComparisonRate -Caption $evidence.PermissionComparisonDate
@@ -4523,6 +4734,9 @@ $script:DiagTimer.Add_Tick({
     if (-not $script:DiagProcess.HasExited) { Update-DiagnosticAnalysisProgress; return }
     Complete-DiagnosticAnalysis
 })
+$script:ComplexityTimer = [System.Windows.Threading.DispatcherTimer]::new()
+$script:ComplexityTimer.Interval = [TimeSpan]::FromSeconds(1)
+$script:ComplexityTimer.Add_Tick({ Complete-ComplexityJob })
 $script:CrossCheckTimer = [System.Windows.Threading.DispatcherTimer]::new()
 $script:CrossCheckTimer.Interval = [TimeSpan]::FromMilliseconds(500)
 $script:CrossCheckTimer.Add_Tick({
@@ -4593,6 +4807,8 @@ finally {
     $script:ActivityRetentionTimer.Stop()
     if ($script:DiagTimer) { $script:DiagTimer.Stop() }
     if ($script:CrossCheckTimer) { $script:CrossCheckTimer.Stop() }
+    if ($script:ComplexityTimer) { $script:ComplexityTimer.Stop() }
+    if ($script:ComplexityJob) { Remove-Job -Job $script:ComplexityJob -Force -ErrorAction SilentlyContinue }
     Write-SmartM365GuiActivityEvent -Path $script:SessionActivity -Status 'Closed' -ExitCode 0 `
         -Detail 'GUI window closed.'
 }

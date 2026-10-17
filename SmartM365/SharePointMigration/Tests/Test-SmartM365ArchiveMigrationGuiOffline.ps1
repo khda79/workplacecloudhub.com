@@ -1,6 +1,8 @@
 <#
 .SYNOPSIS
     Verifies the GUI archive routing using synthetic migration folders.
+.VERSION
+    1.0.1
 #>
 [CmdletBinding()]
 param()
@@ -23,7 +25,7 @@ $archivedGrid = [regex]::Match($guiText, '(?s)<DataGrid x:Name="gridArchivedOver
 $columnsPattern = '<DataGrid(?:Text|Template)Column Header="([^"]+)"'
 $activeColumns = @([regex]::Matches($activeGrid, $columnsPattern) | ForEach-Object { $_.Groups[1].Value })
 $archivedColumns = @([regex]::Matches($archivedGrid, $columnsPattern) | ForEach-Object { $_.Groups[1].Value })
-Assert-Archive ($activeColumns.Count -eq 12 -and
+Assert-Archive ($activeColumns.Count -eq 13 -and $activeColumns -contains 'Complexity' -and
     [string]::Join('|', $activeColumns) -eq [string]::Join('|', $archivedColumns)) `
     'ArchivedOverview columns no longer match Overview.'
 foreach ($control in @('lblArchivedMigrations', 'lblArchivedFilesCompared',
@@ -55,6 +57,12 @@ function Update-PortfolioInventoryRow {
     $Row.SourceInventoryDisplay = 'Files 10 · folders 2'
     $Row.TargetInventoryDisplay = 'Files 10 · folders 2'
 }
+function Update-PortfolioComplexityRow {
+    param($Row, $Migration, [switch]$ReadOnly)
+    # Archived rows must only read stored complexity results, never queue a calculation.
+    $Row | Add-Member -NotePropertyName ComplexityText -NotePropertyValue $(if ($ReadOnly) { 'ReadOnly' } else { 'Queued' }) -Force
+}
+function Get-SmartM365ComplexityVisual { [pscustomobject]@{ Color = '#64748B'; Background = '#F0F4F8' } }
 function Get-SmartM365PortfolioGapVisual { param($Days) [pscustomobject]@{ Band = 'Unavailable' } }
 function Get-SmartM365PortfolioRateVisual {
     param($Rate, $Date, [string]$Notice = '', [string]$Caption = '')
@@ -86,6 +94,7 @@ try {
         $archivedRows[0].GlobalComparisonRate -eq 98.5 -and
         $archivedRows[0].SourceInventoryDisplay -eq 'Files 10 · folders 2' -and
         $archivedRows[0].ComparisonVisual.Notice -eq '' -and
+        $archivedRows[0].ComplexityText -eq 'ReadOnly' -and
         $archivedRows[0].FolderPath -eq $destination) `
         'ArchivedOverview did not display the archived migration and its evidence.'
 

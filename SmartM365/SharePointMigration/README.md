@@ -116,11 +116,11 @@ files divided by source unique keys;
 the permission rate is matched permissions divided by source unique permission
 keys. An empty inventory or missing comparison has no rate.
 File and permission rates appear in large, color-coded cells after Migration,
-Gap (days), and Status, with comparison dates underneath and small progress bars.
+Gap (days), Status and Complexity, with comparison dates underneath and small progress bars.
 The Global comparison column is the equal-weight arithmetic mean of the two
 rates: `(files % + permissions %) / 2`. It has no value if either rate is unavailable.
 Newer scans mark the affected rates and their global average as `Recalculate`.
-Migration, Gap (days), Status, and the three rate columns stay visible during
+Migration, Gap (days), Status, Complexity and the three rate columns stay visible during
 horizontal scrolling. Compact rows and flexible URL columns fit nine migrations
 on a maximized 1920 x 1080 display at standard scaling.
 Gap badges use the unrounded file-scan time difference: green up to 12 hours,
@@ -136,6 +136,44 @@ its completion time, but the GUI does not recalculate its CSV hash on each
 refresh. Dates from legacy CSV filenames are identified in the tooltips.
 If one migration cannot be refreshed, its last successful values remain visible;
 the row tooltip and shared activity log show the refresh error.
+
+### Migration complexity
+
+The Complexity column (Overview and ArchivedOverview) and the Complexity card in
+the Files & Permissions header show a `Low`, `Moderate`, `High` or `Very high`
+level with a 0-100 score. It describes the source estate only, from the latest
+completed source file and permission scans, and is independent from the
+comparison rates. `Scripts/Compare/migration_complexity.py` scores 11 criteria
+from 0 to 3 points:
+
+| Axis | Criterion | Weight |
+|---|---|---|
+| Volume | Files, total size (GiB), subsites, libraries | 15, 15, 5, 5 |
+| History | Average `VersionsCount` per file | 10 |
+| Paths | Files whose projected destination path exceeds 400 characters or a segment exceeds 255 | 10 |
+| Risky files | Files over 2 GiB; checked-out, blocked or excluded files | 5, 5 |
+| Permissions | Objects with broken inheritance, users assigned directly, disabled or unresolved Entra accounts | 15, 10, 5 |
+
+`Score = SUM(points x weight) / (3 x SUM(evaluated weights)) x 100`. Levels
+start at 0, 25, 50 and 75. A floor rule raises the level to at least `High`
+when the path or broken-inheritance criterion reaches 3 points. Without a source
+permission scan or an Entra users cache, the affected criteria show `N/A`, are
+excluded from the denominator and the result is marked `partial`. The Entra
+cache is the migration's `Comparison.EntraUsersCachePath`, otherwise the newest
+`_Local/EntraUsersCache/*.csv` created by permission comparisons; the score
+never connects to Entra.
+
+Thresholds, weights, levels and floor rules live in
+`Config/migration-complexity.json.txt`, created and self-healed from the committed
+`Config/migration-complexity.json.template` (new template criteria are added,
+local values are kept). The result is stored as `migration-complexity.json.txt`
+in the migration folder with the scan names, sizes and settings hash it used.
+When a newer source scan, mapping file, Entra cache or setting is detected, the
+GUI keeps the previous level marked `Updating` and recalculates it in a
+background job; failures stay visible in the tooltip and the activity log.
+ArchivedOverview reads stored results only and marks changed inputs `Outdated`.
+Expand **Complexity details** in Files & Permissions for each criterion's value,
+band reached, points and basis; hover a row for its thresholds.
 Files and Permissions share one tab, with a vertical divider between their workflows.
 The file and permission scan selectors follow the newest completed CSV until an
 older scan is selected manually. Each source-versus-target comparison refreshes
@@ -1169,6 +1207,8 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Tests\Test-SmartM365Sh
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Tests\Test-SmartM365SharePointTransientOffline.ps1
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Tests\Test-SmartM365SiteLockLauncherOffline.ps1
 python -B -m unittest discover -s .\Tests -p test_comparisons.py
+python -B -m unittest discover -s .\Tests -p test_migration_complexity.py
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\Tests\Test-SmartM365MigrationComplexityOffline.ps1
 ```
 
 The tests use synthetic files, mocked external calls and mock inventory scripts.
