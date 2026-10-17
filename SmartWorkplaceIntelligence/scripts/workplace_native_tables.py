@@ -11,6 +11,7 @@ import hashlib
 import json
 import math
 import re
+import time
 from pathlib import Path
 
 from workplace_native_sources import rows, normalized as key, utc, application_coverage_status
@@ -144,6 +145,11 @@ def index(records, field):
     return result
 
 
+def log_timing(label, started):
+    """Operational duration on stdout; never includes values or identities."""
+    print(f'[{dt.datetime.now():%Y-%m-%d %H:%M:%S}] Native build timing: {label}; {time.perf_counter() - started:.1f}s', flush=True)
+
+
 def build_tables(source, output, contract, identity, evidence, now=None):
     tenant = identity['TenantKey']
     reference = now or dt.datetime.now(dt.timezone.utc)
@@ -154,6 +160,8 @@ def build_tables(source, output, contract, identity, evidence, now=None):
     proof = {f['File']: f for f in evidence['Files']}
     table_counts = {}
     findings = {}
+    # Each table duration includes the preparation done since the previous table.
+    table_started = [time.perf_counter()]
 
     def read(name):
         return rows(source / source_defs[name]['file'])
@@ -181,6 +189,8 @@ def build_tables(source, output, contract, identity, evidence, now=None):
                 writer.writerow({column: result.get(column, '') for column in definition['columns']})
                 count += 1
         table_counts[name] = count
+        log_timing(f'table {name} rows={count}', table_started[0])
+        table_started[0] = time.perf_counter()
 
     def finding(entity, entity_id, finding_type, message, severity='Warning', discriminator='', **links):
         fid = native_key(tenant, 'finding', entity, entity_id, finding_type, discriminator)

@@ -206,7 +206,9 @@ function Send-PreparedEvidenceBatch {
     $run=$null;$temp=$null;$journal=$null
     try {
         Convert-PreparedAuditNames -Root $scratch -Family transfers -TenantKey $TenantKey
+        $clock=[Diagnostics.Stopwatch]::StartNew()
         $plan=Get-PreparedTransferPlan $root $TenantKey $ContractPath $ExpectedBatchId
+        Write-Host ('[{0:yyyy-MM-dd HH:mm:ss}] SharePoint transfer plan verified: {1} files; {2:F1}s' -f (Get-Date),$plan.Files.Count,$clock.Elapsed.TotalSeconds)
         $run=Join-Path $scratch ('transfers/'+[guid]::NewGuid().ToString('N'))
         New-Item -ItemType Directory -Path $run -Force | Out-Null;Assert-TransferPath $run
         $auditPath=Resolve-SmartM365OwnedJsonPath -Path (Join-Path $run 'transfer.json') -Owner 'WorkplaceEvidence-Prepare/transfer' -Validate {param($document) if($document.TenantKey -ne $TenantKey){throw 'Transfer audit tenant mismatch.'}}
@@ -215,18 +217,24 @@ function Send-PreparedEvidenceBatch {
         foreach($file in $plan.Files){
             if($file.Relative -eq 'current.json.txt'){
                 # Verify local inputs again before activating the cloud batch.
+                $clock=[Diagnostics.Stopwatch]::StartNew()
                 if((Get-FileHash -LiteralPath $plan.PointerPath).Hash -ne $plan.PointerHash){throw 'Local current pointer changed during transfer.'}
                 foreach($source in $plan.Files){if((Get-FileHash -LiteralPath $source.Path).Hash -ne $source.SHA256){throw 'Local batch changed during transfer; cloud pointer not advanced.'}}
+                Write-Host ('[{0:yyyy-MM-dd HH:mm:ss}] Local batch re-verified before the root pointer: {1} files; {2:F1}s' -f (Get-Date),$plan.Files.Count,$clock.Elapsed.TotalSeconds)
                 $journal.PointerAttempted=$true
             }
+            $clock=[Diagnostics.Stopwatch]::StartNew()
             if((Get-FileHash -LiteralPath $file.Path).Hash -ne $file.SHA256){throw "Local file changed: $($file.Relative)"}
+            $localSeconds=$clock.Elapsed.TotalSeconds;$clock.Restart()
             if(-not (& $UploadFile $file.Path $file.Relative)){throw "Upload failed: $($file.Relative)"}
+            $uploadSeconds=$clock.Elapsed.TotalSeconds;$clock.Restart()
             if(-not (& $DownloadFile $temp $file.Relative)){throw "Read-back failed: $($file.Relative)"}
+            $downloadSeconds=$clock.Elapsed.TotalSeconds;$clock.Restart()
             Assert-TransferPath $temp
             if((Get-Item -LiteralPath $temp).Length -ne $file.Bytes -or (Get-FileHash -LiteralPath $temp).Hash -ne $file.SHA256){throw "Remote SHA256/size mismatch: $($file.Relative)"}
             Remove-Item -LiteralPath $temp -Force
             $journal.VerifiedFiles.Add($file.Relative)
-            Write-Host ('SharePoint verified {0}/{1}: {2}' -f $journal.VerifiedFiles.Count,$plan.Files.Count,$file.Relative)
+            Write-Host ('[{0:yyyy-MM-dd HH:mm:ss}] SharePoint verified {1}/{2}: {3}; bytes={4}; localHash={5:F1}s; upload={6:F1}s; readBack={7:F1}s; verify={8:F1}s' -f (Get-Date),$journal.VerifiedFiles.Count,$plan.Files.Count,$file.Relative,$file.Bytes,$localSeconds,$uploadSeconds,$downloadSeconds,$clock.Elapsed.TotalSeconds)
         }
         $journal.Status='Success'
         [pscustomobject]@{Status='PublishedAndReadBack';BatchId=$plan.BatchId;CsvFiles=$plan.CsvCount;VerifiedFiles=$journal.VerifiedFiles.Count;ExpectedFiles=$plan.Files.Count;ManifestSHA256=($plan.Files|Where-Object Relative -eq "batches/$($plan.BatchId)/batch.json.txt").SHA256;PointerVerified=$true;CsvRecalculated=$false;AuditPath=$auditPath}
