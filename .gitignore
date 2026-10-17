@@ -57,6 +57,7 @@ SmartFinOps/**
 !/SmartM365/Modules/SmartM365.Core/SmartM365-CmdbSources.json.txt
 !/SmartM365/Modules/SmartM365.Core/SmartM365-SourceReceipts.json.txt
 !/SmartM365/SmartInventory/M365Inventory/Licensing/SmartM365-LicenseDependencies.json.txt
+!/SmartM365/SmartInventory/M365Inventory/Licensing/SmartM365-LicenseExclusions.json.txt
 !/SmartM365/SmartInventory/PreparedEvidence/cmdb_tables.py
 !/SmartM365/SmartInventory/PreparedEvidence/cmdb-prepared-contract.json.txt
 !/SmartM365/SmartInventory/PreparedEvidence/cmdb-orchestrator-integration.json.txt

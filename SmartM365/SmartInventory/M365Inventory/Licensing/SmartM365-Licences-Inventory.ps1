@@ -2349,14 +2349,24 @@ function Get-LicensesOptionalProperty {
 }
 
 function Get-LicensesDecisionSettings {
-  param([AllowNull()]$Config)
-  # Settings come from the script local JSON; defaults match the committed template.
+  param([AllowNull()]$Config, [Parameter(Mandatory)][string]$ExclusionsPath)
+  # Exclusions are versioned with the script so repository updates always reach the servers;
+  # the local JSON can only add exclusions, never remove a versioned one.
+  if (-not (Test-Path -LiteralPath $ExclusionsPath -PathType Leaf)) { throw "License decision exclusions are missing: $ExclusionsPath" }
+  try { $document = [IO.File]::ReadAllText($ExclusionsPath) | ConvertFrom-Json -ErrorAction Stop }
+  catch { throw "License decision exclusions are not valid JSON: $($_.Exception.Message)" }
+  if (-not [string]$document.Version -or @($document.Exclusions).Count -eq 0) { throw 'License decision exclusions need a Version and at least one exclusion.' }
   $excluded = @{}
-  foreach ($item in @(Get-ScriptLocalConfigValue -Config $Config -Name 'LicenseDecisionExcludedSkus' -DefaultValue @())) {
+  foreach ($item in @($document.Exclusions)) {
+    $sku = ([string]$item.SkuPartNumber).Trim()
+    if (-not $sku -or -not ([string]$item.Reason).Trim()) { throw 'Each versioned license exclusion needs SkuPartNumber and Reason.' }
+    $excluded[$sku.ToUpperInvariant()] = [string]$item.Reason
+  }
+  foreach ($item in @(Get-ScriptLocalConfigValue -Config $Config -Name 'LicenseDecisionAdditionalExcludedSkus' -DefaultValue @())) {
     if ($null -eq $item) { continue }
     $sku = ([string]$item.SkuPartNumber).Trim()
-    if (-not $sku) { throw 'LicenseDecisionExcludedSkus contains an entry without SkuPartNumber.' }
-    $excluded[$sku.ToUpperInvariant()] = [string]$item.Reason
+    if (-not $sku -or -not ([string]$item.Reason).Trim()) { throw 'LicenseDecisionAdditionalExcludedSkus entries need SkuPartNumber and Reason.' }
+    if (-not $excluded.ContainsKey($sku.ToUpperInvariant())) { $excluded[$sku.ToUpperInvariant()] = 'Local: {0}' -f [string]$item.Reason }
   }
   $settings = [pscustomobject]@{
     CopilotInactivityDays = [int](Get-ScriptLocalConfigValue -Config $Config -Name 'LicenseDecisionCopilotInactivityDays' -DefaultValue 60)
@@ -2796,7 +2806,8 @@ function Publish-LicensesRunReport {
     [Parameter(Mandatory)][string]$CollectedAtUtc,
     [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$TenantRows,
     [switch]$ForceAdCsvAnalysis,
-    [string]$DependencyRulesPath
+    [string]$DependencyRulesPath,
+    [string]$ExclusionsPath
   )
   $result = [pscustomobject]@{ Published=$false; UploadSatisfied=$false; SnapshotId=''; ReceiptRunId=''; Reason='' }
   $snapshot = $null
@@ -2830,7 +2841,8 @@ function Publish-LicensesRunReport {
     WriteLog -Message ("License report snapshot {0} published; its CSV files are optional outputs of the licensing receipt." -f $snapshot.Id) 'INFO'
     # SKU decisions are additive: their failure never withdraws the published report.
     try {
-      $settings = Get-LicensesDecisionSettings -Config $ScriptLocalConfig
+      if (-not $ExclusionsPath) { $ExclusionsPath = Join-Path $PSScriptRoot 'SmartM365-LicenseExclusions.json.txt' }
+      $settings = Get-LicensesDecisionSettings -Config $ScriptLocalConfig -ExclusionsPath $ExclusionsPath
       if (-not $DependencyRulesPath) { $DependencyRulesPath = Join-Path $PSScriptRoot 'SmartM365-LicenseDependencies.json.txt' }
       $rules = Read-LicensesDependencyRules -Path $DependencyRulesPath
       $decisions = Get-LicensesSkuDecisions -Folder $Folder -TenantKey $TenantKey -TenantRows $TenantRows -CurrentRunPublication $proof -RecoveryDetails @(if ($usage) { $usage.RecoveryDetails }) -DowngradeDetails @(if ($usage) { $usage.DowngradeDetails }) -Settings $settings -DependencyRules $rules

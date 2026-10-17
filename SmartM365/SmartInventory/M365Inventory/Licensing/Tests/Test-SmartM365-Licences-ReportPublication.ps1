@@ -16,6 +16,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $inventoryPath = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\SmartM365-Licences-Inventory.ps1')).Path
 $rulesPath = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\SmartM365-LicenseDependencies.json.txt')).Path
+$exclusionsPath = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\SmartM365-LicenseExclusions.json.txt')).Path
 $coreManifest = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..\..\..\Modules\SmartM365.Core\SmartM365.Core.psd1')).Path
 $tokens = $null
 $parseErrors = $null
@@ -106,7 +107,7 @@ function Write-FixtureCsv {
   return $path
 }
 function Invoke-LicensingRun {
-  param([object[]]$TenantRowsOverride, [string]$DependencyRulesPath = $rulesPath)
+  param([object[]]$TenantRowsOverride, [string]$DependencyRulesPath = $rulesPath, [string]$ExclusionsPath = $exclusionsPath)
   # Same order as the collector: publish canonical CSVs, publish the report, then complete the receipt.
   $global:csvGeneratedPaths = $null
   Start-SmartM365CmdbSourceReceipt -ScriptPath $inventoryPath -SourceRootPath $dataLast
@@ -132,7 +133,7 @@ function Invoke-LicensingRun {
   )
   foreach ($path in $published) { Register-SmartM365SourceCsv -Path $path }
   $rowsForReport = if ($TenantRowsOverride) { $TenantRowsOverride } else { $tenantRows }
-  $report = Publish-LicensesRunReport -Folder $dataLast -TenantKey 'prod' -CollectedAtUtc $collectedAt -TenantRows $rowsForReport -DependencyRulesPath $DependencyRulesPath
+  $report = Publish-LicensesRunReport -Folder $dataLast -TenantKey 'prod' -CollectedAtUtc $collectedAt -TenantRows $rowsForReport -DependencyRulesPath $DependencyRulesPath -ExclusionsPath $ExclusionsPath
   Set-SmartM365CmdbSourceScope -CompleteScope $true -Scope 'CMDB:skus,license_paths,plans,user_plans,groups'
   $completed = Complete-SmartM365CmdbSourceReceipt -Status 'Completed'
   $runState = Get-Content -LiteralPath ($completed -replace '\.current\.json\.txt$','.run.json.txt') -Raw | ConvertFrom-Json
@@ -250,6 +251,14 @@ try {
   Check ($decisionFailure.Report.Published -and $decisionFailure.Receipt.Status -eq 'Completed') 'A SKU decision failure does not affect the report.'
   Check (@($decisionFailure.Receipt.Files | Where-Object { $_.File -in $reportNames }).Count -eq 5 -and @($decisionFailure.Receipt.Files | Where-Object { $_.File -in $decisionNames }).Count -eq 0) 'Only the report CSVs are recorded after a SKU decision failure.'
   Check (@($decisionFailure.RunState.Notes | Where-Object { $_ -like 'License SKU decisions not published in this run*belong to an earlier run*' }).Count -eq 1) 'SKU decision failure is recorded in the run state.'
+  $badExclusions = Join-Path $root 'invalid-exclusions.json'
+  Set-Content -LiteralPath $badExclusions -Value '{'
+  foreach ($case in @(@{ Name='missing'; Path=(Join-Path $root 'missing-exclusions.json') }, @{ Name='invalid'; Path=$badExclusions })) {
+    $exclusionFailure = Invoke-LicensingRun -ExclusionsPath $case.Path
+    Check ($exclusionFailure.Report.Published -and $exclusionFailure.Receipt.Status -eq 'Completed' -and @($exclusionFailure.Receipt.Files | Where-Object { $_.File -in $reportNames }).Count -eq 5) "Report is published with $($case.Name) versioned exclusions."
+    Check (@($exclusionFailure.Receipt.Files | Where-Object { $_.File -in $decisionNames }).Count -eq 0 -and @($exclusionFailure.RunState.Notes | Where-Object { $_ -like 'License SKU decisions not published in this run*' }).Count -eq 1) "No SKU decision CSV and a run note with $($case.Name) versioned exclusions."
+    Check (@($script:Log | Where-Object { $_ -like 'WARNING License SKU decisions not published*exclusions*' }).Count -ge 1) "Exclusion failure is logged as a warning ($($case.Name))."
+  }
 
   # 6. Accepted partial AD coverage stays provisional in the report.
   $scope = 'CMDB:ad_users,ad_computers,ad_domains,ad_groups,ad_objects,ad_members'

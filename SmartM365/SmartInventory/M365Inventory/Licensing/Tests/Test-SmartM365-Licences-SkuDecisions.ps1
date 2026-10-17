@@ -17,6 +17,7 @@ $ErrorActionPreference = 'Stop'
 $licensingFolder = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
 $inventoryPath = Join-Path $licensingFolder 'SmartM365-Licences-Inventory.ps1'
 $rulesPath = Join-Path $licensingFolder 'SmartM365-LicenseDependencies.json.txt'
+$exclusionsPath = Join-Path $licensingFolder 'SmartM365-LicenseExclusions.json.txt'
 $templatePath = Join-Path $licensingFolder 'SmartM365-Licences-Inventory.local.json.template'
 $coreManifest = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..\..\..\Modules\SmartM365.Core\SmartM365.Core.psd1')).Path
 $tokens = $null
@@ -92,11 +93,20 @@ function New-CopilotRow {
 }
 
 try {
-  # Configuration and rules: committed template and dependency file are the defaults.
+  # Configuration and rules: committed template, versioned exclusions and dependency file are the defaults.
   $template = Get-Content -LiteralPath $templatePath -Raw | ConvertFrom-Json -AsHashtable
-  $settings = Get-LicensesDecisionSettings -Config $template
+  Check (-not $template.ContainsKey('LicenseDecisionExcludedSkus') -and @($template['LicenseDecisionAdditionalExcludedSkus']).Count -eq 0) 'Template holds only an empty list of additional local exclusions.'
+  $settings = Get-LicensesDecisionSettings -Config $template -ExclusionsPath $exclusionsPath
   Check ($settings.CopilotInactivityDays -eq 60 -and $settings.CopilotAssignmentGraceDays -eq 30 -and $settings.MailboxReviewSizeGB -eq 50) 'Template carries the decision defaults.'
-  Check ($settings.ExcludedSkus.ContainsKey('POWER_BI_STANDARD') -and $settings.ExcludedSkus.ContainsKey('FLOW_FREE')) 'Template lists free and viral SKU exclusions.'
+  Check ($settings.ExcludedSkus.ContainsKey('POWER_BI_STANDARD') -and $settings.ExcludedSkus.ContainsKey('FLOW_FREE') -and $settings.ExcludedSkus.Count -eq 14) 'Versioned file lists free, trial, viral and capacity SKU exclusions.'
+  $local = Get-LicensesDecisionSettings -Config @{ LicenseDecisionAdditionalExcludedSkus=@(@{ SkuPartNumber='visioclient'; Reason='Local test' }, @{ SkuPartNumber='FLOW_FREE'; Reason='Local override attempt' }) } -ExclusionsPath $exclusionsPath
+  Check ($local.ExcludedSkus['VISIOCLIENT'] -eq 'Local: Local test' -and $local.ExcludedSkus['FLOW_FREE'] -notlike 'Local*' -and $local.ExcludedSkus.Count -eq 15) 'Local configuration adds exclusions and never replaces a versioned one.'
+  foreach ($case in @(@{ Name='missing'; Text=$null }, @{ Name='invalid JSON'; Text='{' }, @{ Name='entry without reason'; Text='{"Version":"1.0","Exclusions":[{"SkuPartNumber":"X"}]}' }, @{ Name='empty'; Text='{"Version":"1.0","Exclusions":[]}' })) {
+    $badExclusions = Join-Path $root ('exclusions-' + [guid]::NewGuid().ToString('N') + '.json')
+    if ($null -ne $case.Text) { Set-Content -LiteralPath $badExclusions -Value $case.Text }
+    $threw = $false; try { [void](Get-LicensesDecisionSettings -Config $template -ExclusionsPath $badExclusions) } catch { $threw = $true }
+    Check $threw "Versioned exclusions $($case.Name) are refused."
+  }
   $rules = @(Read-LicensesDependencyRules -Path $rulesPath)
   Check ($rules.Count -ge 4 -and @($rules | Where-Object { 'MICROSOFT_365_COPILOT' -in $_.Dependents -and 'SPE_E3' -in $_.Qualifying }).Count -eq 1) 'Copilot dependency is dated and lists E3.'
   Check (@($rules | Where-Object { 'DYN365_PROJECT_OPERATIONS_ATTACH' -in $_.Dependents -and 'DYN365_FINANCE' -in $_.Qualifying -and $_.SourceDate }).Count -eq 1) 'Dynamics attach dependency is dated.'
@@ -104,8 +114,8 @@ try {
   '{"Dependencies":[{"Dependent":["X"],"QualifyingAnyOf":["Y"]}]}' | Set-Content -LiteralPath $badRules
   $threw = $false; try { [void](Read-LicensesDependencyRules -Path $badRules) } catch { $threw = $true }
   Check $threw 'A dependency without a dated source is rejected.'
-  $threw = $false; try { [void](Get-LicensesDecisionSettings -Config @{ LicenseDecisionExcludedSkus=@(@{ Reason='x' }) }) } catch { $threw = $true }
-  Check $threw 'An exclusion without SkuPartNumber is rejected.'
+  $threw = $false; try { [void](Get-LicensesDecisionSettings -Config @{ LicenseDecisionAdditionalExcludedSkus=@(@{ Reason='x' }) } -ExclusionsPath $exclusionsPath) } catch { $threw = $true }
+  Check $threw 'A local exclusion without SkuPartNumber is rejected.'
 
   # Tenant catalog: Exchange plans are detected by service plan, never by SKU name.
   $skus = @(

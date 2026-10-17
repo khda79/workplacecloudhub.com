@@ -1,0 +1,76 @@
+{
+  "Version": "1.0",
+  "Purpose": "Versioned license decision exclusions: free, trial, viral and capacity SKUs never produce a per-SKU decision candidate. Local configuration can only add exclusions (LicenseDecisionAdditionalExcludedSkus), never remove one listed here.",
+  "Exclusions": [
+    {
+      "SkuPartNumber": "FLOW_FREE",
+      "Reason": "Free (Power Automate Free)",
+      "Source": "Product names and service plan identifiers for licensing.csv (Microsoft, product display name)"
+    },
+    {
+      "SkuPartNumber": "POWER_BI_STANDARD",
+      "Reason": "Free (Microsoft Fabric Free)",
+      "Source": "Product names and service plan identifiers for licensing.csv (Microsoft, product display name)"
+    },
+    {
+      "SkuPartNumber": "POWERAPPS_DEV",
+      "Reason": "Free (Power Apps for Developer)",
+      "Source": "Product names and service plan identifiers for licensing.csv (Microsoft, product display name)"
+    },
+    {
+      "SkuPartNumber": "POWERAPPS_VIRAL",
+      "Reason": "Trial (Power Apps Plan 2 Trial)",
+      "Source": "Product names and service plan identifiers for licensing.csv (Microsoft, product display name)"
+    },
+    {
+      "SkuPartNumber": "CCIBOTS_PRIVPREV_VIRAL",
+      "Reason": "Trial (Copilot Studio Viral Trial)",
+      "Source": "Product names and service plan identifiers for licensing.csv (Microsoft, product display name)"
+    },
+    {
+      "SkuPartNumber": "Power_Pages_vTrial_for_Makers",
+      "Reason": "Trial (Power Pages vTrial for Makers)",
+      "Source": "Product names and service plan identifiers for licensing.csv (Microsoft, product display name)"
+    },
+    {
+      "SkuPartNumber": "Microsoft_Teams_Exploratory_Dept",
+      "Reason": "Trial (Teams Exploratory)",
+      "Source": "Product names and service plan identifiers for licensing.csv (Microsoft, product display name)"
+    },
+    {
+      "SkuPartNumber": "RIGHTSMANAGEMENT_ADHOC",
+      "Reason": "Free (Rights Management Adhoc)",
+      "Source": "Product names and service plan identifiers for licensing.csv (Microsoft, product display name)"
+    },
+    {
+      "SkuPartNumber": "WINDOWS_STORE",
+      "Reason": "Free (Windows Store for Business)",
+      "Source": "Product names and service plan identifiers for licensing.csv (Microsoft, product display name)"
+    },
+    {
+      "SkuPartNumber": "STREAM",
+      "Reason": "Free (Microsoft Stream)",
+      "Source": "Product names and service plan identifiers for licensing.csv (Microsoft, product display name)"
+    },
+    {
+      "SkuPartNumber": "Microsoft_Teams_Rooms_Basic",
+      "Reason": "Free (Teams Rooms Basic)",
+      "Source": "Product names and service plan identifiers for licensing.csv (Microsoft, product display name)"
+    },
+    {
+      "SkuPartNumber": "PROJECT_MADEIRA_PREVIEW_IW_SKU",
+      "Reason": "Free (Business Central for IWs)",
+      "Source": "Product names and service plan identifiers for licensing.csv (Microsoft, product display name)"
+    },
+    {
+      "SkuPartNumber": "MICROSOFT_BUSINESS_CENTER",
+      "Reason": "Free (Microsoft Business Center)",
+      "Source": "Product names and service plan identifiers for licensing.csv (Microsoft, product display name)"
+    },
+    {
+      "SkuPartNumber": "Dynamics_365_for_Operations_Sandbox_Tier2_SKU",
+      "Reason": "Environment capacity, not a user license (sandbox)",
+      "Source": "Product names and service plan identifiers for licensing.csv (Microsoft, product display name)"
+    }
+  ]
+}
