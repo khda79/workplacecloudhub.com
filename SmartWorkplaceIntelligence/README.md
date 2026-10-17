@@ -146,6 +146,68 @@ The current production wrapper uses the default daily-trends settings
 manual qualification file). Exposing private overrides in its local JSON and
 forwarding them through the pipeline is a separate, deferred change.
 
+## License decisions from SmartInventory Licences
+
+Smart Workplace Intelligence no longer computes license recovery, dormancy or
+E3-to-F3 decisions. `New-LicensingEvidence.ps1` and its two tables
+(`License Evidence`, `License Optimization Evidence`) are retired. The report
+consumes the SmartInventory Licences report: the five `M365_Licenses_Report*.csv`
+files, the snapshot, and the two optional per-SKU files
+`M365_Licenses_ReportSkuCandidates.csv` and `M365_Licenses_ReportSkuCapacity.csv`
+(Licences 1.49 and later), copied as `Source-*` artifacts of the batch.
+
+Before the batch is published, the preparation checks the licensing receipt
+captured with it: completed receipt of the same tenant and producer, every
+report CSV recorded in `Files` with the captured SHA256 and declared
+`Published`, every row carrying the snapshot ID, decision rows carrying the
+receipt `RunId`, and snapshot `ReceiptRun.RunId` equal to the receipt `RunId`.
+The result is recorded in the batch manifest as `LicenseReportQualification`
+(state, reason, snapshot ID, receipt run ID, one entry per file).
+
+- `Qualified`: the license tables are loaded.
+- `Not qualified`: a lineage defect (for example a report produced outside the
+  receipt run or a file hash that differs). The batch is still published and the
+  other domains are unaffected; the license tables are loaded empty, never with
+  older values. Another tenant or an invalid snapshot structure still fails the
+  batch. License tables carry no historical comparison key, so this state is
+  never a coverage regression.
+- `Not verified`: a batch built before this qualification existed. Its values
+  are shown as that batch's state.
+
+Every license card, table and chart shows this state in its subtitle. The
+License Overview SKU slicer and capacity cards use `License SKU Capacity`:
+`Capacity Class` is `Governed` or `Excluded` from the versioned Licences
+exclusion list, and SKU families come from the Licences `ReportProduct` column
+(Licences 1.50; a 1.49 file is accepted with an empty family). The Risk Priority
+slicer and the Dormant 31-90D card are removed: they were SWI-only rules.
+Immutable batches built before the retirement remain transferable.
+
+### Deployment
+
+There is no ordering constraint between SmartInventory, the preparation and
+the report. The private PBIP is used in Power BI Desktop only, with no
+scheduled refresh. One rule applies: apply this checkout's model and report
+changes to the private PBIP (keeping its private source, expected tenant and
+`PreparedBatchId` parameters and its editor settings) before pointing its
+`PreparedBatchId` to a batch prepared by this version.
+
+If the private PBIP still has the retired tables when its `PreparedBatchId`
+points to such a batch, the Desktop refresh fails on `License Evidence` and
+`License Optimization Evidence` with `Invalid prepared batch manifest`
+(`LicenseEvidence.csv` is no longer in the batch). The updated PBIP refreshes
+older batches without error and labels their license data `Not verified`.
+
+A batch reported `Not qualified` means that the Licences report in `DATA-LAST`
+was not produced by the current licensing receipt run (for example a report
+written outside a collection run): run the Licences collection again before the
+next preparation. The preparation transcript states the result
+(`License report qualified by licensing receipt run ...` or a
+`License report Not qualified` warning with its reason).
+
+Available capacity is never shown as a negative number. When consumed units
+exceed enabled units the cards and tables show `Over-assigned`; the absolute
+value is in the card tooltip and in the `Over-assigned Units` table column.
+
 ## Further reading
 
 - [Prepared evidence reconstruction](docs/prepared-evidence-reconstruction.md)
