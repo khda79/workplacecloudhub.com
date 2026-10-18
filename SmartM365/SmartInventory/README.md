@@ -94,7 +94,7 @@ The Secure Score, authentication-method registration, Conditional Access, Intune
 
 ## License pricing
 
-`SmartM365-LicensePricing-Inventory.ps1` 1.1.0 publishes `M365_License_Prices.csv`
+`SmartM365-LicensePricing-Inventory.ps1` 1.1.1 publishes `M365_License_Prices.csv`
 (header unchanged) from three local settings:
 
 - `PricingSourceCsvPath`: the public baseline
@@ -121,6 +121,11 @@ ProgramKey,CoverageYear,Currency,UnitPricePerDeviceYear,EffectiveFrom,EffectiveT
 currency conversion), dates are `yyyy-MM-dd` and required, years must follow each
 other without overlapping, and `IsCumulative` states whether a later year also
 requires the earlier years.
+
+`UnitPriceMonthly` and `UnitPricePerDeviceYear` are published with a decimal point
+whatever the culture of the collection host (`37.78`, never `37,78`). Source prices,
+public or private, must use the same format: a decimal comma or a group separator is
+refused instead of being misread.
 
 Migration: a local `PricingSourceCsvPath` that points to a file other than the public
 baseline keeps the former behaviour (the private file replaces the whole baseline) and
