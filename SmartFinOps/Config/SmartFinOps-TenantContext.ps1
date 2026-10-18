@@ -2,15 +2,16 @@
 .SYNOPSIS
   SmartFinOps tenant context: global and tenant local JSON configuration, path tokens and console banners.
 .DESCRIPTION
-  Dot-sourced by the SmartFinOps scripts. -Tenant is the profile key (Data\<profile>, Archive). SmartM365LatestCsvFolderPath
+  Dot-sourced by the SmartFinOps V2 scripts. -Tenant is the profile key (Data\<profile>, Archive, Config\Tenants\<profile>.local.json
+  with its ProfileKey; a legacy TenantKey entry is renamed to ProfileKey before template synchronization). SmartM365LatestCsvFolderPath
   and SmartM365TenantKey (the organization TenantKey carried by the source receipts) set to __USE_SMARTM365__ (or left
   empty) are resolved through the SmartM365 tenant context of that profile only when a script asks for them; a failed
   resolution stops the script with the reason and never falls back to a default. A resolved path that still holds a
   {{token}} is refused.
 .VERSION
-1.2.0
+1.3.0
 #>
-$script:SmartFinOpsTenantContextVersion = '1.2.0'
+$script:SmartFinOpsTenantContextVersion = '1.3.0'
 $script:SmartFinOpsSmartM365Config = $null
 $script:SmartFinOpsUseSmartM365Markers = @('__USE_SMARTM365__', 'USE_SMARTM365')
 
@@ -237,6 +238,35 @@ function Sync-SmartFinOpsJsonConfigWithTemplate {
         throw ("Failed to synchronize local JSON '{0}' with template '{1}': {2}" -f $Path, $TemplatePath, $syncErrorMessage)
     }
 }
+function Convert-SmartFinOpsLegacyProfileKey {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Path)
+
+    # Profile files written before 1.3.0 name the profile key TenantKey; the template now holds ProfileKey.
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return }
+    try { $document = Get-Content -LiteralPath $Path -Raw -ErrorAction Stop | ConvertFrom-Json -AsHashtable -ErrorAction Stop }
+    catch { throw ("Failed to read configuration file '{0}': {1}" -f $Path, $_.Exception.Message) }
+    if ($null -eq $document -or -not $document.Contains('TenantKey')) { return }
+    $legacyValue = [string]$document['TenantKey']
+    if ($document.Contains('ProfileKey') -and -not [string]::IsNullOrWhiteSpace([string]$document['ProfileKey']) -and
+        -not [string]::IsNullOrWhiteSpace($legacyValue) -and [string]$document['ProfileKey'] -cne $legacyValue) {
+        throw ("Profile file '{0}' contains ProfileKey '{1}' and legacy TenantKey '{2}': keep a single ProfileKey." -f $Path, $document['ProfileKey'], $legacyValue)
+    }
+    $migrated = [ordered]@{}
+    foreach ($key in $document.Keys) {
+        if ($key -ceq 'TenantKey') {
+            if (-not $migrated.Contains('ProfileKey')) { $migrated['ProfileKey'] = $(if ($document.Contains('ProfileKey') -and -not [string]::IsNullOrWhiteSpace([string]$document['ProfileKey'])) { $document['ProfileKey'] } else { $legacyValue }) }
+            continue
+        }
+        if ($key -ceq 'ProfileKey' -and $migrated.Contains('ProfileKey')) { continue }
+        $migrated[$key] = $document[$key]
+    }
+    $tempPath = '{0}.tmp' -f $Path
+    $migrated | ConvertTo-Json -Depth 100 | Set-Content -LiteralPath $tempPath -Encoding UTF8 -ErrorAction Stop
+    Move-Item -LiteralPath $tempPath -Destination $Path -Force -ErrorAction Stop
+    Write-Host ("Updated local JSON: {0}; renamed legacy key TenantKey to ProfileKey ('{1}')" -f $Path, $migrated['ProfileKey']) -ForegroundColor Yellow
+}
+
 function Read-SmartFinOpsJsonConfig {
     [CmdletBinding()]
     param(
@@ -350,12 +380,12 @@ function Get-SmartFinOpsSmartM365LatestCsvFolderPath {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string]$RepositoryRootPath,
-        [Parameter(Mandatory)][string]$TenantKey
+        [Parameter(Mandatory)][string]$ProfileKey
     )
 
-    # Called only for SmartM365LatestCsvFolderPath = __USE_SMARTM365__ ($TenantKey is the profile key): never a default path.
-    $smartM365Config = Get-SmartFinOpsSmartM365Config -RepositoryRootPath $RepositoryRootPath -ProfileKey $TenantKey -Setting 'SmartM365LatestCsvFolderPath'
-    $prefix = "SmartM365LatestCsvFolderPath is __USE_SMARTM365__ but its resolution through SmartM365 failed for profile '$TenantKey'"
+    # Called only for SmartM365LatestCsvFolderPath = __USE_SMARTM365__: never a default path.
+    $smartM365Config = Get-SmartFinOpsSmartM365Config -RepositoryRootPath $RepositoryRootPath -ProfileKey $ProfileKey -Setting 'SmartM365LatestCsvFolderPath'
+    $prefix = "SmartM365LatestCsvFolderPath is __USE_SMARTM365__ but its resolution through SmartM365 failed for profile '$ProfileKey'"
     $resolved = [string](Resolve-SmartFinOpsExternalTokenValue -Value $smartM365Config.LatestCsvFolderPath -Config $smartM365Config)
     if ([string]::IsNullOrWhiteSpace($resolved)) { throw ("{0}: the SmartM365 context returned an empty LatestCsvFolderPath ({1})." -f $prefix, $script:SmartFinOpsSmartM365Config.ContextPath) }
     Assert-SmartFinOpsResolvedPath -Name 'SmartM365LatestCsvFolderPath (resolved through SmartM365)' -Value $resolved
@@ -383,22 +413,23 @@ function Get-SmartFinOpsEffectiveGlobalConfig {
     [CmdletBinding()]
     param(
         [string]$StartPath,
-        [string]$TenantKey = 'test'
+        [string]$ProfileKey = 'test'
     )
 
-    if ([string]::IsNullOrWhiteSpace($TenantKey)) { $TenantKey = 'test' }
+    if ([string]::IsNullOrWhiteSpace($ProfileKey)) { $ProfileKey = 'test' }
     $rootPath = Find-SmartFinOpsRoot -StartPath $StartPath
     $repositoryRootPath = Split-Path -Path $rootPath -Parent
     $scriptStartPath = if ([string]::IsNullOrWhiteSpace($StartPath)) { $rootPath } else { $StartPath }
     $scriptOutputRootPath = Join-Path -Path $scriptStartPath -ChildPath 'Output'
     $globalConfigPath = Join-Path -Path $rootPath -ChildPath 'SmartFinOps.global.local.json'
-    $tenantConfigPath = Join-Path -Path $rootPath -ChildPath ("Config\Tenants\{0}.local.json" -f $TenantKey)
+    $tenantConfigPath = Join-Path -Path $rootPath -ChildPath ("Config\Tenants\{0}.local.json" -f $ProfileKey)
 
     $globalConfig = Read-SmartFinOpsJsonConfig -Path $globalConfigPath
+    Convert-SmartFinOpsLegacyProfileKey -Path $tenantConfigPath
     $tenantConfig = Read-SmartFinOpsJsonConfig -Path $tenantConfigPath
 
-    if ($tenantConfig.Contains('TenantKey') -and -not [string]::IsNullOrWhiteSpace([string]$tenantConfig['TenantKey']) -and [string]$tenantConfig['TenantKey'] -ne $TenantKey) {
-        throw "Tenant profile key mismatch. File '$tenantConfigPath' contains TenantKey '$($tenantConfig['TenantKey'])' but requested '$TenantKey'."
+    if ($tenantConfig.Contains('ProfileKey') -and -not [string]::IsNullOrWhiteSpace([string]$tenantConfig['ProfileKey']) -and [string]$tenantConfig['ProfileKey'] -ne $ProfileKey) {
+        throw "Profile key mismatch. File '$tenantConfigPath' contains ProfileKey '$($tenantConfig['ProfileKey'])' but requested '$ProfileKey'."
     }
     foreach ($key in $tenantConfig.Keys) {
         $tenantValue = $tenantConfig[$key]
@@ -406,13 +437,15 @@ function Get-SmartFinOpsEffectiveGlobalConfig {
         $globalConfig[$key] = $tenantValue
     }
 
-    $globalConfig['TenantKey'] = $TenantKey
+    # {{ProfileKey}} names the profile; {{TenantKey}} stays a read alias for configurations written before 1.3.0.
+    $globalConfig['ProfileKey'] = $ProfileKey
+    $globalConfig['TenantKey'] = $ProfileKey
     $globalConfig['SmartFinOpsRootPath'] = $rootPath
     $globalConfig['RepositoryRootPath'] = $repositoryRootPath
     $globalConfig['ScriptOutputRootPath'] = $scriptOutputRootPath
 
     $defaultWorkspaceRootPath = $rootPath
-    $defaultTenantDataRootPath = '{{WorkspaceRootPath}}\Data\{{TenantKey}}'
+    $defaultTenantDataRootPath = '{{WorkspaceRootPath}}\Data\{{ProfileKey}}'
     $useScriptOutputFallback = $false
     if (-not $globalConfig.Contains('WorkspaceRootPath') -or [string]::IsNullOrWhiteSpace([string]$globalConfig['WorkspaceRootPath']) -or [string]$globalConfig['WorkspaceRootPath'] -in @('.', '{{SmartFinOpsRootPath}}')) {
         $candidateDataRoot = Join-Path -Path $rootPath -ChildPath 'Data'
@@ -421,14 +454,13 @@ function Get-SmartFinOpsEffectiveGlobalConfig {
         }
         else {
             $defaultWorkspaceRootPath = $scriptOutputRootPath
-            $defaultTenantDataRootPath = '{{WorkspaceRootPath}}\{{TenantKey}}'
+            $defaultTenantDataRootPath = '{{WorkspaceRootPath}}\{{ProfileKey}}'
             $useScriptOutputFallback = $true
         }
     }
 
     if (-not $globalConfig.Contains('WorkspaceRootPath') -or [string]::IsNullOrWhiteSpace([string]$globalConfig['WorkspaceRootPath'])) { $globalConfig['WorkspaceRootPath'] = $defaultWorkspaceRootPath }
-    if (-not $globalConfig.Contains('TenantDataRootPath') -or ($useScriptOutputFallback -and [string]$globalConfig['TenantDataRootPath'] -eq '{{WorkspaceRootPath}}\Data\{{TenantKey}}')) { $globalConfig['TenantDataRootPath'] = $defaultTenantDataRootPath }
-    if (-not $globalConfig.Contains('PriceBaselinePath')) { $globalConfig['PriceBaselinePath'] = '{{SmartFinOpsRootPath}}\Config\SmartFinOps-Workplace-FrancePriceBaseline.json' }
+    if (-not $globalConfig.Contains('TenantDataRootPath') -or ($useScriptOutputFallback -and [string]$globalConfig['TenantDataRootPath'] -in @('{{WorkspaceRootPath}}\Data\{{TenantKey}}', '{{WorkspaceRootPath}}\Data\{{ProfileKey}}'))) { $globalConfig['TenantDataRootPath'] = $defaultTenantDataRootPath }
     # Empty or __USE_SMARTM365__: resolved through SmartM365 only when a script asks for it (Get-SmartFinOpsConfigValue).
     if (-not $globalConfig.Contains('SmartM365LatestCsvFolderPath') -or
         [string]::IsNullOrWhiteSpace([string]$globalConfig['SmartM365LatestCsvFolderPath']) -or
@@ -439,13 +471,6 @@ function Get-SmartFinOpsEffectiveGlobalConfig {
         [string]$globalConfig['SmartM365TenantKey'] -in @('__USE_SMARTM365__', 'USE_SMARTM365')) {
         $globalConfig['SmartM365TenantKey'] = '__USE_SMARTM365__'
     }
-    if (-not $globalConfig.Contains('RetentionMaxCSV')) { $globalConfig['RetentionMaxCSV'] = 30 }
-    if (-not $globalConfig.Contains('RetentionMaxLogs')) { $globalConfig['RetentionMaxLogs'] = 30 }
-    if (-not $globalConfig.Contains('StaleUserDays')) { $globalConfig['StaleUserDays'] = 90 }
-    if (-not $globalConfig.Contains('StaleDeviceDays')) { $globalConfig['StaleDeviceDays'] = 60 }
-    if (-not $globalConfig.Contains('MaxSourceAgeHours')) { $globalConfig['MaxSourceAgeHours'] = 72 }
-    if (-not $globalConfig.Contains('LicenseCapacityWarningPercent')) { $globalConfig['LicenseCapacityWarningPercent'] = 95 }
-    if (-not $globalConfig.Contains('ReportTitle')) { $globalConfig['ReportTitle'] = 'SmartFinOps Workplace - Value and Decisions' }
 
     return [pscustomobject]$globalConfig
 }
@@ -489,68 +514,19 @@ function Get-SmartFinOpsConfigValue {
     if ($property.Value -is [string]) {
         $value = $property.Value.Trim()
         if ($Name -eq 'SmartM365LatestCsvFolderPath') {
-            if ($value -in $script:SmartFinOpsUseSmartM365Markers) { return Get-SmartFinOpsSmartM365LatestCsvFolderPath -RepositoryRootPath ([string]$script:SmartFinOpsGlobalConfig.RepositoryRootPath) -TenantKey ([string]$script:SmartFinOpsGlobalConfig.TenantKey) }
+            if ($value -in $script:SmartFinOpsUseSmartM365Markers) { return Get-SmartFinOpsSmartM365LatestCsvFolderPath -RepositoryRootPath ([string]$script:SmartFinOpsGlobalConfig.RepositoryRootPath) -ProfileKey ([string]$script:SmartFinOpsGlobalConfig.ProfileKey) }
             $resolvedPath = [string](Resolve-SmartFinOpsConfigTokenValue -Value $value)
             Assert-SmartFinOpsResolvedPath -Name 'SmartM365LatestCsvFolderPath' -Value $resolvedPath
             return (ConvertTo-SmartFinOpsFileSystemPath $resolvedPath)
         }
         if ($Name -eq 'SmartM365TenantKey') {
-            if ($value -in $script:SmartFinOpsUseSmartM365Markers) { return Get-SmartFinOpsSmartM365TenantKey -RepositoryRootPath ([string]$script:SmartFinOpsGlobalConfig.RepositoryRootPath) -ProfileKey ([string]$script:SmartFinOpsGlobalConfig.TenantKey) }
+            if ($value -in $script:SmartFinOpsUseSmartM365Markers) { return Get-SmartFinOpsSmartM365TenantKey -RepositoryRootPath ([string]$script:SmartFinOpsGlobalConfig.RepositoryRootPath) -ProfileKey ([string]$script:SmartFinOpsGlobalConfig.ProfileKey) }
             Assert-SmartFinOpsResolvedPath -Name 'SmartM365TenantKey' -Value $value
             return $value
         }
         if ([string]::IsNullOrWhiteSpace($value) -or $value -in @('__USE_GLOBAL__', 'USE_GLOBAL')) { return $DefaultValue }
     }
     return Resolve-SmartFinOpsConfigTokenValue -Value $property.Value
-}
-
-function Get-SmartFinOpsScriptLocalConfig {
-    [CmdletBinding()]
-    param([string]$ScriptPath)
-
-    $effectiveScriptPath = if ([string]::IsNullOrWhiteSpace($ScriptPath)) { $PSCommandPath } else { $ScriptPath }
-    if ([string]::IsNullOrWhiteSpace($effectiveScriptPath)) { return [pscustomobject]@{} }
-    $scriptFolder = Split-Path -Path $effectiveScriptPath -Parent
-    $scriptBaseName = [System.IO.Path]::GetFileNameWithoutExtension($effectiveScriptPath)
-    $configPath = Join-Path -Path $scriptFolder -ChildPath ("{0}.local.json" -f $scriptBaseName)
-    if (-not (Test-Path -LiteralPath $configPath)) { return [pscustomobject]@{} }
-    try { $config = Get-Content -LiteralPath $configPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
-        return (Sync-SmartFinOpsJsonConfigWithTemplate -Config $config -Path $configPath) }
-    catch { throw ("Failed to read local configuration '{0}': {1}" -f $configPath, $_.Exception.Message) }
-}
-
-function Get-SmartFinOpsScriptConfigValue {
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory = $true)]$Config,
-        [Parameter(Mandatory = $true)][string]$Name,
-        $DefaultValue = $null
-    )
-
-    $property = $Config.PSObject.Properties[$Name]
-    if ($null -ne $property -and $null -ne $property.Value) {
-        if ($property.Value -is [string]) {
-            $localValue = $property.Value.Trim()
-            if ($localValue -and $localValue -notin @('__USE_GLOBAL__', 'USE_GLOBAL')) { return Resolve-SmartFinOpsConfigTokenValue -Value $property.Value }
-        }
-        else { return Resolve-SmartFinOpsConfigTokenValue -Value $property.Value }
-    }
-    return Get-SmartFinOpsConfigValue -Name $Name -DefaultValue $DefaultValue
-}
-
-function Resolve-SmartFinOpsOutputRoots {
-    [CmdletBinding()]
-    param(
-        [string]$OutputRoot,
-        [string]$LatestOutputRoot,
-        [Parameter(Mandatory)][string]$AreaPath
-    )
-
-    if ($null -eq $script:SmartFinOpsGlobalConfig) { throw 'SmartFinOps tenant context has not been initialized.' }
-    $tenantDataRoot = Resolve-SmartFinOpsConfigTokenValue -Value '{{TenantDataRootPath}}'
-    $resolvedOutputRoot = if ([string]::IsNullOrWhiteSpace($OutputRoot)) { Join-Path -Path $tenantDataRoot -ChildPath 'Archive' } else { Resolve-SmartFinOpsConfigTokenValue -Value $OutputRoot }
-    $resolvedLatestOutputRoot = if ([string]::IsNullOrWhiteSpace($LatestOutputRoot)) { $tenantDataRoot } else { Resolve-SmartFinOpsConfigTokenValue -Value $LatestOutputRoot }
-    [pscustomobject]@{ OutputRoot = $resolvedOutputRoot; LatestOutputRoot = $resolvedLatestOutputRoot }
 }
 
 function Initialize-SmartFinOpsTenantContext {
@@ -562,7 +538,7 @@ function Initialize-SmartFinOpsTenantContext {
 
     if ([string]::IsNullOrWhiteSpace($Tenant)) { $Tenant = 'test' }
     $global:SmartFinOpsTenant = $Tenant
-    $script:SmartFinOpsGlobalConfig = Get-SmartFinOpsEffectiveGlobalConfig -StartPath $StartPath -TenantKey $Tenant
+    $script:SmartFinOpsGlobalConfig = Get-SmartFinOpsEffectiveGlobalConfig -StartPath $StartPath -ProfileKey $Tenant
     return $script:SmartFinOpsGlobalConfig
 }
 

@@ -3,7 +3,7 @@
 .SYNOPSIS
   Offline tests of the SmartFinOps tenant context: SmartM365 DATA-LAST resolution and console banners.
 .VERSION
-1.1.0
+1.2.0
 .NOTES
   Isolated temporary runtime with a synthetic SmartM365 tenant context (no local configuration or export).
   SmartM365LatestCsvFolderPath = __USE_SMARTM365__ must never fall back silently to a default path.
@@ -184,6 +184,42 @@ function Get-SmartM365EffectiveGlobalConfig {
   }
   finally { Pop-Location }
   Check ($relativeExit -eq 3 -and (Test-Path -LiteralPath (Join-Path $relative 'relout\SmartFinOps_Workplace-Valuation.current.json.txt')) -and @(Get-ChildItem -LiteralPath $cwd -Recurse -Force).Count -eq 0) "relative -OutputRoot resolved from the PowerShell location on the share (exit $relativeExit) $relativeRun"
+  #endregion
+
+  #region 7. Profile files: legacy TenantKey renamed to ProfileKey before template synchronization
+  $tenantsFolder = Join-Path $runtime 'SmartFinOps\Config\Tenants'
+  New-Item -ItemType Directory -Path $tenantsFolder -Force | Out-Null
+  Copy-Item -LiteralPath (Join-Path $project 'Config\Tenants\tenant.local.json.template') -Destination $tenantsFolder
+  $profileFile = Join-Path $tenantsFolder "$tenant.local.json"
+  # Profile-file errors are raised by the initialization itself: capture them too.
+  $getProfileResult = {
+    $command = "try { . '$context'; Initialize-SmartFinOpsTenantContext -Tenant '$tenant' -StartPath '$(Split-Path $context -Parent)' | Out-Null; 'OK|' + (Get-SmartFinOpsConfigValue -Name 'TenantDataRootPath') } catch { 'ERROR|' + `$_.Exception.Message }"
+    [string](@(& $pwsh -NoProfile -Command $command 2>&1 | ForEach-Object { [string]$_ } | Where-Object { $_ -match '^(OK|ERROR)\|' }) | Select-Object -Last 1)
+  }
+  ('{ "TenantKey": "' + $tenant + '", "SmartM365LatestCsvFolderPath": "__USE_GLOBAL__" }') | Set-Content -LiteralPath $profileFile -Encoding utf8NoBOM
+  $dataRoot = Get-ResolvedDataLast -Name 'TenantDataRootPath'
+  $migrated = Get-Content -LiteralPath $profileFile -Raw | ConvertFrom-Json
+  $names = @($migrated.PSObject.Properties.Name)
+  Check ($dataRoot -like 'OK|*' -and $names[0] -ceq 'ProfileKey' -and $migrated.ProfileKey -ceq $tenant -and $names -notcontains 'TenantKey' -and $names -contains 'SmartM365TenantKey') "legacy TenantKey renamed to ProfileKey in place, template key added, no 'test' profile injected ($dataRoot)"
+  Check ($dataRoot -like ('OK|*' + [IO.Path]::DirectorySeparatorChar + 'Data' + [IO.Path]::DirectorySeparatorChar + $tenant)) "TenantDataRootPath of the template resolves {{ProfileKey}} ($dataRoot)"
+  ('{ "TenantKey": "other" }') | Set-Content -LiteralPath $profileFile -Encoding utf8NoBOM
+  $mismatch = & $getProfileResult
+  Check ($mismatch -like 'ERROR|*' -and $mismatch.Contains("contains ProfileKey 'other' but requested '$tenant'")) "legacy TenantKey of another profile refused after renaming ($mismatch)"
+  $conflict = '{ "ProfileKey": "' + $tenant + '", "TenantKey": "other" }'
+  $conflict | Set-Content -LiteralPath $profileFile -Encoding utf8NoBOM
+  $conflictResult = & $getProfileResult
+  Check ($conflictResult -like 'ERROR|*' -and $conflictResult.Contains('keep a single ProfileKey') -and (Get-Content -LiteralPath $profileFile -Raw).Trim() -ceq $conflict) "ProfileKey and a different legacy TenantKey refused, file unchanged ($conflictResult)"
+  Remove-Item -LiteralPath $profileFile -Force
+  $globalFile = Join-Path $runtime 'SmartFinOps\SmartFinOps.global.local.json'
+  $globalBefore = Get-Content -LiteralPath $globalFile -Raw
+  try {
+    $legacyGlobal = $globalBefore | ConvertFrom-Json
+    $legacyGlobal.TenantDataRootPath = '{{WorkspaceRootPath}}\Legacy\{{TenantKey}}'
+    $legacyGlobal | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $globalFile -Encoding utf8NoBOM
+    $legacyRoot = Get-ResolvedDataLast -Name 'TenantDataRootPath'
+    Check ($legacyRoot -like ('OK|*' + [IO.Path]::DirectorySeparatorChar + 'Legacy' + [IO.Path]::DirectorySeparatorChar + $tenant)) "{{TenantKey}} remains a read alias of the profile key ($legacyRoot)"
+  }
+  finally { Set-Content -LiteralPath $globalFile -Value $globalBefore -NoNewline -Encoding utf8NoBOM }
   #endregion
 }
 finally {

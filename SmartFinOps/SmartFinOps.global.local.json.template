@@ -1,22 +1,9 @@
 {
-  "TenantKey": "test",
   "WorkspaceRootPath": "{{SmartFinOpsRootPath}}",
   "RepositoryRootPath": "{{RepositoryRootPath}}",
-  "TenantDataRootPath": "{{WorkspaceRootPath}}\\Data\\{{TenantKey}}",
+  "TenantDataRootPath": "{{WorkspaceRootPath}}\\Data\\{{ProfileKey}}",
   "SmartM365LatestCsvFolderPath": "__USE_SMARTM365__",
   "SmartM365TenantKey": "__USE_SMARTM365__",
-  "PriceBaselinePath": "{{SmartFinOpsRootPath}}\\Config\\SmartFinOps-Workplace-FrancePriceBaseline.json",
-  "RetentionMaxCSV": 30,
-  "StaleUserDays": 90,
-  "StaleDeviceDays": 60,
-  "MaxSourceAgeHours": 72,
-  "LicenseCapacityWarningPercent": 95,
-  "ReportTitle": "SmartFinOps Workplace - Value and Decisions",
-  "PriceModel": {
-    "Currency": "EUR",
-    "MonthlyUnitPriceBySkuPartNumber": {
-    }
-  },
   "Valuation": {
     "ContractsPath": "{{SmartFinOpsRootPath}}\\Config\\SmartFinOps-Contracts.local.json",
     "FreshnessDailyHours": 48,

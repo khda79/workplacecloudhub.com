@@ -17,7 +17,7 @@ Most tools are designed to run directly from their project folder. Local tenant 
 - `SmartAzureVirtualDesktop/`: Azure Virtual Desktop inventory, health, diagnostics, autoscale, FSLogix storage, and cost optimization scripts.
 - `SmartCitrix/`: Citrix on-premises and Citrix Cloud inventory scripts, with separate implementation areas for each platform model.
 - `SmartThinClient/`: Windows endpoint thin-client shell tooling for controlled Citrix, Azure Virtual Desktop, or web workspace access.
-- `SmartFinOps/`: **SmartFinOps Workplace Beta 1.5.0-beta.1**, read-only FinOps reporting that consumes SmartInventory exports and produces CSV plus HTML reports.
+- `SmartFinOps/`: **SmartFinOps Workplace V2**, read-only valuation of the SmartInventory license decisions (FinOps CSVs with their receipt plus an executive HTML report); the former beta stays available as a GitHub prerelease.
 - `SmartWorkplaceIntelligence/`: Power BI reporting over governed SmartM365 evidence, with source qualification, domain exploration, and observed histories.
 
 Additional project directories will be added over time.
@@ -169,7 +169,7 @@ The GUI uses delegated interactive Microsoft Graph authentication. It does not u
 
 ## SmartFinOps Tools
 
-`SmartFinOps/` contains read-only FinOps reporting tools. The first scope, **SmartFinOps Workplace**, consumes SmartM365 SmartInventory `DATA-LAST` CSV exports and produces optimization CSV files plus a standalone HTML report for Microsoft 365, Intune, Entra, Active Directory, and Exchange signals.
+`SmartFinOps/` contains read-only FinOps reporting tools. The first scope, **SmartFinOps Workplace V2**, values the license decisions published by SmartM365 SmartInventory in `DATA-LAST`, qualified by their source receipts: realizable, conditional and avoided amounts per lever, capped by contract terms, plus showback and an executive HTML report. It runs daily through the SmartInventory orchestrator. The former beta analyzer remains available as the [1.5.0-beta.1 prerelease](https://github.com/khda79/workplacecloudhub.com/releases/tag/smartfinops-workplace-v1.5.0-beta.1).
 
 ## SmartWorkplaceIntelligence
 

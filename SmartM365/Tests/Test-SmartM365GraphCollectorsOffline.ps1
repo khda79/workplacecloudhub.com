@@ -2,7 +2,7 @@
 .SYNOPSIS
 Synthetic regression tests for the complete SmartInventory Microsoft Graph collector audit.
 .VERSION
-1.0.22
+1.0.23
 #>
 [CmdletBinding()]
 param(
@@ -797,9 +797,8 @@ d1,p2,s9,1,u1,i9,firewallEnabled,,Not compliant,,,,
     Test-OfflineCase 'Consumer contracts retain required Graph CSV sources' {
         $intelligenceSchema=Get-Content -LiteralPath (Join-Path (Split-Path $SourceRoot -Parent) 'SmartWorkplaceIntelligence/config/source-schema.json') -Raw|ConvertFrom-Json
         $intelligenceSelection=Get-Content -LiteralPath (Join-Path (Split-Path $SourceRoot -Parent) 'SmartWorkplaceIntelligence/config/source-selection.json') -Raw|ConvertFrom-Json
-        $finops=Get-Content -LiteralPath (Join-Path (Split-Path $SourceRoot -Parent) 'SmartFinOps/Config/SmartFinOps-Workplace-SourceContracts.json') -Raw|ConvertFrom-Json
         $required=@('M365_Users_Active.csv','M365_Users_Activity.csv','M365_Licenses_Users.csv','M365_Entra_Devices.csv','Intune_Devices_Inventory.csv','Intune_Devices_Compliance.csv','Intune_Devices_UpgradeEligibility.csv','Intune_WindowsUpdate_Status.csv','M365_Teams_Teams.csv','M365_Teams_PhoneUserUsage.csv','M365_Copilot_UserUsage.csv')
-        $serialized=(ConvertTo-Json @($intelligenceSchema,$intelligenceSelection,$finops) -Depth 30)
+        $serialized=(ConvertTo-Json @($intelligenceSchema,$intelligenceSelection) -Depth 30)
         foreach($file in $required){Assert-Offline ($serialized.Contains($file)) "Consumer contract missing $file."}
     }
 

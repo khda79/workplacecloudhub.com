@@ -2,7 +2,7 @@
 .SYNOPSIS
 Synthetic regression tests for the bounded Teams Graph collector audit.
 .VERSION
-1.0.2
+1.0.3
 #>
 [CmdletBinding()]
 param(
@@ -71,7 +71,6 @@ $teamsPath = Join-Path $SourceRoot 'SmartInventory/M365Inventory/Teams/SmartM365
 $teamsPhonePath = Join-Path $SourceRoot 'SmartInventory/M365Inventory/Teams/SmartM365-TeamsPhonePstnUsage-Inventory.ps1'
 $intelligenceSchemaPath = Join-Path (Split-Path $SourceRoot -Parent) 'SmartWorkplaceIntelligence/config/source-schema.json'
 $intelligenceSelectionPath = Join-Path (Split-Path $SourceRoot -Parent) 'SmartWorkplaceIntelligence/config/source-selection.json'
-$finOpsContractPath = Join-Path (Split-Path $SourceRoot -Parent) 'SmartFinOps/Config/SmartFinOps-Workplace-SourceContracts.json'
 
 $teamsModule = Import-OfflineFunctions -Path $teamsPath -Names @(
     'IsoUtc',
@@ -403,9 +402,6 @@ try {
         foreach ($file in @('M365_Teams_Teams.csv', 'M365_Teams_Members.csv', 'M365_Teams_Channels.csv', 'M365_Teams_Guests.csv', 'M365_Teams_PhoneUserUsage.csv')) {
             Assert-Offline ($selection.includedFiles -contains $file) "Intelligence no longer selects $file."
         }
-        $contract = Get-Content -LiteralPath $finOpsContractPath -Raw | ConvertFrom-Json
-        $phone = @($contract.Sources | Where-Object Key -eq 'M365TeamsPhoneUserUsage')
-        Assert-Offline ($phone.Count -eq 1 -and $phone[0].FileNames -contains 'M365_Teams_PhoneUserUsage.csv') 'SmartFinOps Teams Phone source contract changed or disappeared.'
     }
 }
 finally {
