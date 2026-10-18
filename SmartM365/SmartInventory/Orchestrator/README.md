@@ -2,6 +2,44 @@
 
 `SmartM365-Inventory-Orchestrator.ps1` (v1.5.47) is a PowerShell 7 resident scheduler that runs the SmartInventory scripts (ActiveDirectoryInventory, ExchangeInventory, M365Inventory, IntuneInventory, ...) unattended.
 
+## Demo mode
+
+Double-click `Start-SmartM365-Inventory-Orchestrator-Demo.cmd` in this folder to open
+the normal WPF interface with fictional Contoso servers, jobs, dependencies, requests
+and seven days of history. Planning includes every job from the shipped neutral
+`Orchestrator-Jobs.json.template`, including disabled jobs, with the catalog's names,
+arguments, schedules, groups and dependencies. Servers and execution results remain
+fictional. No runtime job manifest is loaded. No tenant profile, authentication, administrator rights,
+shared Orchestrator folder or resident process is needed. PowerShell 7 and WPF are
+still required. The demo does not import operational management modules or load,
+create, synchronize or publish runtime configuration.
+
+All tabs remain available. Draft edits, publication, rebalance, maintenance, run/stop
+requests, cancellation and rollback are simulated in memory. Auto-refresh is disabled
+and the sample clock is fixed at `2026-10-18 09:30`. Closing the window discards edits.
+HTML and CSV exports contain only the filtered sample history and are written to a
+new per-launch folder under `%TEMP%\SmartM365-Demo\InventoryOrchestrator`. The exact
+path appears in Activity with a portable `%TEMP%` prefix. HTML reports retain the `DEMO - Sample data` label and use
+the same history columns as the normal export.
+
+```powershell
+pwsh -STA -NoProfile -ExecutionPolicy Bypass -File .\SmartM365-Inventory-Orchestrator-GUI.ps1 -Demo -DemoScenario Issues -DemoView Operations
+```
+
+Scenes: `Overview` (default), `Issues`, `Maintenance`. Initial views: `Dashboard`,
+`Operations`, `Planning`, `History`, `Requests`, `Servers and versions`, `Activity`.
+Use `-DemoWindowWidth` (default 1500) and `-DemoWindowHeight` (default 900) for captures.
+Copy `Orchestrator-Jobs.json.template`, the local demo helper, splash and branding assets
+with the GUI for portable use. A missing catalog produces an explicit startup error.
+Normal launch, `-ValidateOnly` and `-SmokeTest` retain their operational contracts.
+
+`-Demo -ValidateOnly` builds the sample WPF window without showing it or its splash
+and returns its model for offline validation. Run the targeted suite from the root:
+
+```powershell
+pwsh -STA -NoProfile -ExecutionPolicy Bypass -File .\SmartM365\Tests\Test-SmartM365GuiDemoOffline.ps1 -Application Orchestrator
+```
+
 ## Cancel remaining pipeline jobs
 
 Orchestrator **1.5.41**, Pipeline CLI **1.2.0** and GUI **1.3.2** support cooperative

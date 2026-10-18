@@ -1,0 +1,380 @@
+#Requires -Version 5.1
+<#
+.SYNOPSIS
+Exercises the two pilot demos with WPF events and forbidden operational commands.
+.VERSION
+1.0.0
+.NOTES
+Run RebootManager on PS5.1 or PS7; Orchestrator requires PS7.
+#>
+[CmdletBinding()]
+param(
+    [ValidateSet('RebootManager','Orchestrator')][string]$Application='RebootManager',
+    [string]$PreviewFolder='',
+    [switch]$InteractiveSmoke
+)
+$ErrorActionPreference='Stop'
+if([Threading.Thread]::CurrentThread.ApartmentState -ne [Threading.ApartmentState]::STA){throw 'Run with -STA.'}
+$script:DemoCheckCount=0
+function Assert-Demo {
+    param([bool]$Condition,[string]$Message)
+    if(-not $Condition){throw $Message}
+    $script:DemoCheckCount++
+}
+function Invoke-DemoClick {
+    param($Control)
+    $Control.RaiseEvent([System.Windows.RoutedEventArgs]::new([System.Windows.Controls.Button]::ClickEvent))
+}
+function Export-DemoPreview {
+    param($Window,[string]$Name)
+    if(-not $PreviewFolder){return}
+    [void][IO.Directory]::CreateDirectory($PreviewFolder)
+    $visual=$Window.Content
+    $width=[int]$Window.Width; $height=[int]$Window.Height-40
+    $visual.Measure([System.Windows.Size]::new($width,$height))
+    $visual.Arrange([System.Windows.Rect]::new(0,0,$width,$height))
+    $visual.UpdateLayout()
+    $visual.Dispatcher.Invoke([action]{},[System.Windows.Threading.DispatcherPriority]::ApplicationIdle)
+    $image=[System.Windows.Media.Imaging.RenderTargetBitmap]::new($width,$height,96,96,[System.Windows.Media.PixelFormats]::Pbgra32)
+    $background=[System.Windows.Media.DrawingVisual]::new()
+    $drawing=$background.RenderOpen()
+    $drawing.DrawRectangle($Window.Background,$null,[System.Windows.Rect]::new(0,0,$width,$height))
+    $drawing.Close()
+    $image.Render($background)
+    $image.Render($visual)
+    $encoder=[System.Windows.Media.Imaging.PngBitmapEncoder]::new()
+    $encoder.Frames.Add([System.Windows.Media.Imaging.BitmapFrame]::Create($image))
+    $stream=[IO.File]::Create((Join-Path $PreviewFolder ($Name+'.png')))
+    try{$encoder.Save($stream)}finally{$stream.Dispose()}
+}
+function Get-DemoProtectedHashes {
+    param([string[]]$Paths)
+    $result=@{}
+    foreach($path in $Paths){
+        $result[$path]=if(Test-Path -LiteralPath $path -PathType Leaf){(Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash}else{'ABSENT'}
+    }
+    return $result
+}
+# Any escape into platform discovery, auth, management or process launch fails the suite.
+function Get-CimInstance {throw 'Forbidden demo device discovery'}
+function Get-NetIPAddress {throw 'Forbidden demo IP discovery'}
+function Get-ItemProperty {throw 'Forbidden demo registry discovery'}
+function Restart-Computer {throw 'Forbidden demo restart'}
+function Start-Process {throw 'Forbidden demo process launch'}
+function Import-Module {throw 'Forbidden demo runtime module import'}
+function Initialize-SmartM365TenantContext {throw 'Forbidden demo tenant context'}
+function Start-SmartM365InventoryRun {throw 'Forbidden demo operational lifecycle'}
+function Connect-MgGraph {throw 'Forbidden demo authentication'}
+
+$smartRoot=Join-Path $PSScriptRoot '..'
+$rebootFolder=Join-Path $smartRoot 'Devices/DeviceRebootManager'
+$orchestratorFolder=Join-Path $smartRoot 'SmartInventory/Orchestrator'
+$protected=@(
+    (Join-Path $rebootFolder 'SmartM365-DeviceRebootManager-GUI.config.json'),
+    (Join-Path $env:APPDATA 'SmartM365/DeviceRebootManager/SmartM365-DeviceRebootManager.state.json'),
+    (Join-Path $env:APPDATA 'SmartM365/DeviceRebootManager/SmartM365-DeviceRebootManager.preferences.json'),
+    (Join-Path $env:APPDATA 'SmartM365/DeviceRebootManager/SmartM365-DeviceRebootManager.log'),
+    (Join-Path $orchestratorFolder 'SmartM365-Inventory-Orchestrator.local.json'),
+    (Join-Path $orchestratorFolder 'SmartM365-Inventory-Orchestrator.local.json.txt')
+)
+$before=Get-DemoProtectedHashes $protected
+try {
+    if($Application -eq 'RebootManager'){
+        $result=. (Join-Path $rebootFolder 'SmartM365-DeviceRebootManager-GUI.ps1') -Demo -ValidateOnly -ConfigPath 'Z:\DO-NOT-READ\private.json' -ResetRunState
+        Assert-Demo ($script:Window.Title -like '*DEMO*') 'Reboot demo identification missing.'
+        Assert-Demo ($script:Ui.DeviceIdentityText.Text -like 'CTSO-LAP-*') 'Real device identity leaked.'
+        Assert-Demo ($script:Ui.DeviceIdentityText.Text -like '*192.0.2.42*') 'Sample IP missing.'
+        $frozen=$script:SecondsRemaining
+        Start-Sleep -Milliseconds 1100
+        Assert-Demo ($script:SecondsRemaining -eq $frozen) 'Demo countdown is running.'
+        foreach($scene in @('Required','Recommended','Postponed')){
+            $script:Ui.DemoScenarioCombo.SelectedItem=$scene
+            Assert-Demo ($script:ForceMode -eq ($scene -ne 'Recommended')) "Wrong force mode for $scene"
+            Assert-Demo ($script:Ui.ActivityText.Text -like "*Scene: $scene*") 'Scenario selector did not update.'
+            Export-DemoPreview $script:Window ('reboot-'+$scene.ToLowerInvariant())
+        }
+        $script:Ui.DemoScenarioCombo.SelectedItem='Required'
+        Invoke-DemoClick $script:Ui.RestartButton
+        Assert-Demo ($script:Ui.NextActionText.Text -like '*not restarted*') 'Restart simulation did not complete.'
+        Invoke-DemoClick $script:Ui.PostponeButton
+        Assert-Demo ($script:PostponeCount -eq 1 -and $script:SecondsRemaining -eq 1500) 'Postponement simulation failed.'
+        Invoke-DemoClick $script:Ui.PostponeButton
+        Assert-Demo (-not $script:Ui.PostponeButton.IsEnabled) 'Postponement limit was not applied.'
+        $script:Ui.DemoScenarioCombo.SelectedItem='Recommended'
+        Invoke-DemoClick $script:Ui.LaterButton
+        Assert-Demo ($script:Ui.NextActionText.Text -like '*shown later*') 'Reminder simulation failed.'
+        $script:Ui.LanguageCombo.SelectedItem=@($script:Ui.LanguageCombo.Items | Where-Object Code -EQ 'fr')[0]
+        Assert-Demo ($script:SelectedLanguage -eq 'fr') 'Demo language switching failed.'
+        Assert-Demo ($script:Window.Title -like '*DEMO*') 'Language switching removed demo identification.'
+        $script:Window.Close()
+    } else {
+        if($PSVersionTable.PSVersion.Major -lt 7){throw 'Orchestrator requires PowerShell 7.'}
+        $result=. (Join-Path $orchestratorFolder 'SmartM365-Inventory-Orchestrator-GUI.ps1') -Demo -ValidateOnly -Tenant 'DO-NOT-LOAD' -SharedDataFolderPath 'Z:\DO-NOT-READ' -GuiLogFolderPath 'Z:\DO-NOT-WRITE'
+        $s=$script:OrchestratorDemo; $c=$s.Controls
+        $catalog=Get-Content -LiteralPath (Join-Path $orchestratorFolder 'Orchestrator-Jobs.json.template') -Raw|ConvertFrom-Json
+        $expectedJobs=$catalog.Jobs.Count
+        $expectedHistory=$expectedJobs*7
+        $originalTimes=$s.Data.Jobs[0].Times
+        Assert-Demo ($result.Mode -eq 'Demo') 'Demo validation did not return its model.'
+        Assert-Demo ($s.Data.Jobs.Count -eq $expectedJobs -and $s.Data.Servers.Count -eq 3) 'Sample model incomplete.'
+        Assert-Demo (@(Compare-Object @($catalog.Jobs.Name|Sort-Object) @($s.Data.Jobs.Name|Sort-Object)).Count -eq 0) 'Planning does not match the complete shipped catalog.'
+        Assert-Demo ($c.PlanningGrid.Items.Count -eq $expectedJobs) 'Planning grid omitted catalog jobs.'
+        Assert-Demo (@($s.Data.Jobs|Where-Object {-not $_.Enabled}).Count -eq @($catalog.Jobs|Where-Object {-not $_.Enabled}).Count) 'Disabled catalog jobs are missing.'
+        Assert-Demo (@($s.Data.Jobs|Where-Object Name -EQ 'M365-Usage-Inventory')[0].Arguments -eq '-Reports All') 'Catalog arguments were lost.'
+        foreach($sourceJob in $catalog.Jobs){
+            $sampleJob=@($s.Data.Jobs|Where-Object Name -EQ $sourceJob.Name)[0]
+            Assert-Demo ($sampleJob.Enabled -eq $sourceJob.Enabled -and $sampleJob.Times -eq ($sourceJob.Schedule.Times -join ', ') -and $sampleJob.Frequency -eq $sourceJob.Schedule.Type) ('Catalog schedule/state mismatch: '+$sourceJob.Name)
+            Assert-Demo ($sampleJob.DependsOn -eq ($sourceJob.DependsOn -join ', ')) ('Catalog dependencies lost: '+$sourceJob.Name)
+        }
+        Assert-Demo ($s.FilteredHistory.Count -eq $expectedHistory) 'Sample history incomplete.'
+        Assert-Demo (@($s.Data.History|Where-Object {[datetime]$_.EventTime -gt $s.Data.Clock}).Count -eq 0) 'History contains future sample executions.'
+        Assert-Demo (-not (Test-Path -LiteralPath $s.OutputRoot)) 'Demo wrote files during initialization.'
+        Assert-Demo ($c.RequestJobsGrid.Items.Count -eq 3) 'Request detail selection failed.'
+        foreach($view in @('Dashboard','Operations','Planning','History','Requests','Servers and versions','Activity')){
+            foreach($tab in $c.MainTabs.Items){if($tab.Header -eq $view){$c.MainTabs.SelectedItem=$tab}}
+            Assert-Demo ($c.MainTabs.SelectedItem.Header -eq $view) "Cannot navigate to $view"
+            Export-DemoPreview $s.Window ('orchestrator-'+($view -replace ' ','-').ToLowerInvariant())
+        }
+        $c.HistoryServerCombo.SelectedItem='CTSO-INV-01'
+        Invoke-DemoClick $c.HistoryRefreshButton
+        Assert-Demo ($s.FilteredHistory.Count -eq (@($s.Data.Jobs|Where-Object Server -EQ 'CTSO-INV-01').Count*7)) 'History server filter failed.'
+        $c.HistoryStatusCombo.SelectedItem='Failed'
+        Invoke-DemoClick $c.HistoryRefreshButton
+        Assert-Demo (@($s.FilteredHistory | Where-Object Status -NE 'Failed').Count -eq 0) 'History status filter failed.'
+        $c.HistoryServerCombo.SelectedItem='All';$c.HistoryStatusCombo.SelectedItem='All'
+        Invoke-DemoClick $c.HistoryRefreshButton
+        Invoke-DemoClick $c.ExportHtmlButton
+        $html=Join-Path $s.OutputRoot 'SmartM365-Orchestrator-History-DEMO.html'
+        Assert-Demo (Test-Path -LiteralPath $html) 'Demo HTML export missing.'
+        $htmlText=[IO.File]::ReadAllText($html)
+        Assert-Demo ($htmlText -like '*DEMO - Sample data*' -and $htmlText -like '*CTSO-INV-01*') 'HTML lacks sample identification or rows.'
+        Assert-Demo ([regex]::Matches($htmlText,'<tr>').Count -eq ($expectedHistory+1)) 'HTML report row count mismatch.'
+        Invoke-DemoClick $c.ExportCsvButton
+        Assert-Demo ((Import-Csv (Join-Path $s.OutputRoot 'SmartM365-Orchestrator-History-DEMO.csv')).Count -eq $expectedHistory) 'CSV report row count mismatch.'
+        Invoke-DemoClick $c.EnableMaintenanceButton
+        Assert-Demo $s.Data.Maintenance 'Maintenance simulation failed.'
+        Invoke-DemoClick $c.DisableMaintenanceButton
+        Assert-Demo (-not $s.Data.Maintenance) 'Maintenance resume simulation failed.'
+        $c.TimesBox.Text='06:45';Invoke-DemoClick $c.ApplyJobButton
+        Assert-Demo ($s.Data.Jobs[0].Times -eq '06:45') 'Job draft simulation failed.'
+        Invoke-DemoClick $c.RequestRunButton
+        Assert-Demo ($s.Data.Requests.Count -eq 2) 'Request simulation failed.'
+        Invoke-DemoClick $c.CancelAllRequestsButton
+        Assert-Demo (@($s.Data.Requests | Where-Object Pending -GT 0).Count -eq 0) 'Cancellation simulation failed.'
+        Invoke-DemoClick $c.StopRunningJobButton
+        Assert-Demo ($s.Data.Running.Count -eq 1) 'Stop simulation failed.'
+        Invoke-DemoClick $c.PublishButton
+        Assert-Demo ($s.Data.Versions.Count -eq 3) 'Publication simulation failed.'
+        Invoke-DemoClick $c.RebalanceButton
+        Invoke-DemoClick $c.RollbackButton
+        Assert-Demo ($s.Data.Jobs[0].Times -eq $originalTimes -and $s.Data.Jobs.Count -eq $expectedJobs) 'Demo reset failed.'
+        Assert-Demo ((New-OrchestratorDemoData -Scenario Issues).Incidents.Count -gt 0) 'Issues scene missing.'
+        Assert-Demo (New-OrchestratorDemoData -Scenario Maintenance).Maintenance 'Maintenance scene missing.'
+        $c.DemoScenarioCombo.SelectedItem='Issues'
+        Assert-Demo ($c.OperationsIncidentsGrid.Items.Count -eq 1) 'Issues selector failed.'
+        $c.MainTabs.SelectedIndex=1
+        Export-DemoPreview $s.Window 'orchestrator-issues'
+        $c.DemoScenarioCombo.SelectedItem='Maintenance'
+        Assert-Demo ($s.Data.Maintenance -and -not $c.EnableMaintenanceButton.IsEnabled) 'Maintenance selector failed.'
+        if($PreviewFolder){Copy-Item -LiteralPath $html -Destination (Join-Path $PreviewFolder 'orchestrator-history-demo.html')}
+        $s.Window.Close()
+    }
+    if($InteractiveSmoke){
+        # Exercise the real interactive entry path, including its six-second splash.
+        $script:DemoSmokeObserved=$false
+        $script:DemoSmokeApplication=$Application
+        $script:DemoSmokeClock=[Diagnostics.Stopwatch]::StartNew()
+        $script:DemoSmokeTimer=[System.Windows.Threading.DispatcherTimer]::new()
+        $script:DemoSmokeTimer.Interval=[timespan]::FromMilliseconds(250)
+        $script:DemoSmokeTimer.Add_Tick({
+            $target=if($script:DemoSmokeApplication -eq 'RebootManager'){$script:Window}else{$script:OrchestratorDemo.Window}
+            if($target -and $target.IsVisible -and $script:DemoSmokeClock.Elapsed.TotalSeconds -ge 8){
+                Export-DemoPreview $target ($script:DemoSmokeApplication.ToLowerInvariant()+'-interactive')
+                $script:DemoSmokeObserved=$true
+                $script:DemoSmokeTimer.Stop()
+                $target.Close()
+            }
+        })
+        $script:DemoSmokeTimer.Start()
+        try{
+            if($Application -eq 'RebootManager'){
+                . (Join-Path $rebootFolder 'SmartM365-DeviceRebootManager-GUI.ps1') -Demo
+            }else{
+                . (Join-Path $orchestratorFolder 'SmartM365-Inventory-Orchestrator-GUI.ps1') -Demo
+            }
+        }finally{$script:DemoSmokeTimer.Stop()}
+        Assert-Demo $script:DemoSmokeObserved 'The interactive demo window did not become visible.'
+    }
+    $after=Get-DemoProtectedHashes $protected
+    foreach($path in $protected){Assert-Demo ($before[$path] -eq $after[$path]) 'Operational configuration/state/log changed.'}
+    '[{0}] PASS: {1} demo, {2} offline WPF and isolation checks.' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'),$Application,$script:DemoCheckCount
+} catch {
+    [Console]::Error.WriteLine($_.Exception.ToString()+[Environment]::NewLine+$_.ScriptStackTrace)
+    exit 1
+}
+
+# SIG # Begin signature block
+# MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
+# BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCjwbsYt0ufhRta
+# RWoyo5/wgWAOEs1o2Ujjlknln9FuGqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
+# b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
+# ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
+# VQQDDBV3b3JrcGxhY2VjbG91ZGh1Yi5jb20xLDAqBgkqhkiG9w0BCQEWHWNvbnRh
+# Y3RAd29ya3BsYWNlY2xvdWRodWIuY29tMIIBojANBgkqhkiG9w0BAQEFAAOCAY8A
+# MIIBigKCAYEAse6XztERSyHn9DVqj8Rdv0qjc5owqvgAIGaYxBmfiQuoM48Fo4Xt
+# 1ovi9brLUtf55G4XgthNPCoanxfCRRg30IVRxaDfdPXJzYmgsM5tXlsuNU49lE7E
+# PJk3+jEOgSCt8NKzmVPKpNRG0NmK0a8wm12cceYZOZlSYE0+ZtT6wy5PQQjMUqIx
+# XnGjt4H0nfgZZa7D4FyARKOVg/Xr9sUq5jIn3zszvg4jjeb4b0DKJtfbHukhWc2Y
+# oVFgswxVBXCWIaBnfF/cjqMfK/CaToT2trVb4hG4qcQ31s1nR4keoRaOw/vyd6ap
+# rEtCsT22N/Jx0dz7fIo1tVyvIaVcHdN9LW3chn0en0OKZ6Ke1OH9wf2prl4KA6Ww
+# VzrAZrOlXTAItdK7D9kKO/HeJd4PZvO53oy1LdmMGLSz3OLB9e5q7yo8rfqi5Ka9
+# KzM2CrSzz1yphn/H90wz7Q2pm4FIlWdcj86A/0kmhYg+5Wqqbg1drrPXu4nEBwWN
+# /dzoGtKZKHTdAgMBAAGjgZYwgZMwDgYDVR0PAQH/BAQDAgeAMBMGA1UdJQQMMAoG
+# CCsGAQUFBwMDMD8GA1UdEQQ4MDaBHWNvbnRhY3RAd29ya3BsYWNlY2xvdWRodWIu
+# Y29tghV3b3JrcGxhY2VjbG91ZGh1Yi5jb20wDAYDVR0TAQH/BAIwADAdBgNVHQ4E
+# FgQUXIOOADQM78XfPAncirgCECedg9gwDQYJKoZIhvcNAQELBQADggGBADhZUB2R
+# 5J/Jw030xodhEWeCQ0vnJRaiEsjOxuArQREKH3lCrQ3UsUVl292d6LnQUSTH/jF7
+# rovEZ+JN2GQ/LCrXRaCuwCEGZKzlSEbtYWhfwDyj6GpIPq8Y4SeXyjdq4/rrI1bm
+# iTK4Sq7EoBlGJuX6l2nfvx1tTioSr11FoDfllJR7EYawRj9hBFJ0gG0b2SuYZMgW
+# gaDKefcnJDmOwcRNAZUII0ss8EeyANukWSkNN5ILZ+iKDpQgZxgDLPTiRguCyx45
+# PI5wrVTjV/pR7IrtSIfq8UladlrSZJyyDn3NV2ATvIZ6wNxbTmPFcE0uMg/EYzwd
+# Tek+CgXL3TxUKeldJM4YDWPimNBRhOPXzBDiOQIj6WNswt/KM1oDLnA00CNtciPN
+# dn+dXlneMvTEUah9wyt8o8tkLpoBw+KN+Bq/K0O1qPtS7umi70l45pPiej+mwbwq
+# ztcaoVD7a8ggHP1Vdp/rnafM4GtyCAE6b7U9Yzgvp1/a1kh7XffmqVhRRjCCBY0w
+# ggR1oAMCAQICEA6bGI750C3n79tQ4ghAGFowDQYJKoZIhvcNAQEMBQAwZTELMAkG
+# A1UEBhMCVVMxFTATBgNVBAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRp
+# Z2ljZXJ0LmNvbTEkMCIGA1UEAxMbRGlnaUNlcnQgQXNzdXJlZCBJRCBSb290IENB
+# MB4XDTIyMDgwMTAwMDAwMFoXDTMxMTEwOTIzNTk1OVowYjELMAkGA1UEBhMCVVMx
+# FTATBgNVBAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRpZ2ljZXJ0LmNv
+# bTEhMB8GA1UEAxMYRGlnaUNlcnQgVHJ1c3RlZCBSb290IEc0MIICIjANBgkqhkiG
+# 9w0BAQEFAAOCAg8AMIICCgKCAgEAv+aQc2jeu+RdSjwwIjBpM+zCpyUuySE98orY
+# WcLhKac9WKt2ms2uexuEDcQwH/MbpDgW61bGl20dq7J58soR0uRf1gU8Ug9SH8ae
+# FaV+vp+pVxZZVXKvaJNwwrK6dZlqczKU0RBEEC7fgvMHhOZ0O21x4i0MG+4g1ckg
+# HWMpLc7sXk7Ik/ghYZs06wXGXuxbGrzryc/NrDRAX7F6Zu53yEioZldXn1RYjgwr
+# t0+nMNlW7sp7XeOtyU9e5TXnMcvak17cjo+A2raRmECQecN4x7axxLVqGDgDEI3Y
+# 1DekLgV9iPWCPhCRcKtVgkEy19sEcypukQF8IUzUvK4bA3VdeGbZOjFEmjNAvwjX
+# WkmkwuapoGfdpCe8oU85tRFYF/ckXEaPZPfBaYh2mHY9WV1CdoeJl2l6SPDgohIb
+# Zpp0yt5LHucOY67m1O+SkjqePdwA5EUlibaaRBkrfsCUtNJhbesz2cXfSwQAzH0c
+# lcOP9yGyshG3u3/y1YxwLEFgqrFjGESVGnZifvaAsPvoZKYz0YkH4b235kOkGLim
+# dwHhD5QMIR2yVCkliWzlDlJRR3S+Jqy2QXXeeqxfjT/JvNNBERJb5RBQ6zHFynIW
+# IgnffEx1P2PsIV/EIFFrb7GrhotPwtZFX50g/KEexcCPorF+CiaZ9eRpL5gdLfXZ
+# qbId5RsCAwEAAaOCATowggE2MA8GA1UdEwEB/wQFMAMBAf8wHQYDVR0OBBYEFOzX
+# 44LScV1kTN8uZz/nupiuHA9PMB8GA1UdIwQYMBaAFEXroq/0ksuCMS1Ri6enIZ3z
+# bcgPMA4GA1UdDwEB/wQEAwIBhjB5BggrBgEFBQcBAQRtMGswJAYIKwYBBQUHMAGG
+# GGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBDBggrBgEFBQcwAoY3aHR0cDovL2Nh
+# Y2VydHMuZGlnaWNlcnQuY29tL0RpZ2lDZXJ0QXNzdXJlZElEUm9vdENBLmNydDBF
+# BgNVHR8EPjA8MDqgOKA2hjRodHRwOi8vY3JsMy5kaWdpY2VydC5jb20vRGlnaUNl
+# cnRBc3N1cmVkSURSb290Q0EuY3JsMBEGA1UdIAQKMAgwBgYEVR0gADANBgkqhkiG
+# 9w0BAQwFAAOCAQEAcKC/Q1xV5zhfoKN0Gz22Ftf3v1cHvZqsoYcs7IVeqRq7IviH
+# GmlUIu2kiHdtvRoU9BNKei8ttzjv9P+Aufih9/Jy3iS8UgPITtAq3votVs/59Pes
+# MHqai7Je1M/RQ0SbQyHrlnKhSLSZy51PpwYDE3cnRNTnf+hZqPC/Lwum6fI0POz3
+# A8eHqNJMQBk1RmppVLC4oVaO7KTVPeix3P0c2PR3WlxUjG/voVA9/HYJaISfb8rb
+# II01YBwCA8sgsKxYoA5AY8WYIsGyWfVVa88nq2x2zm8jLfR+cWojayL/ErhULSd+
+# 2DrZ8LaHlv1b0VysGMNNn3O3AamfV6peKOK5lDCCBrQwggScoAMCAQICEA3HrFcF
+# /yGZLkBDIgw6SYYwDQYJKoZIhvcNAQELBQAwYjELMAkGA1UEBhMCVVMxFTATBgNV
+# BAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRpZ2ljZXJ0LmNvbTEhMB8G
+# A1UEAxMYRGlnaUNlcnQgVHJ1c3RlZCBSb290IEc0MB4XDTI1MDUwNzAwMDAwMFoX
+# DTM4MDExNDIzNTk1OVowaTELMAkGA1UEBhMCVVMxFzAVBgNVBAoTDkRpZ2lDZXJ0
+# LCBJbmMuMUEwPwYDVQQDEzhEaWdpQ2VydCBUcnVzdGVkIEc0IFRpbWVTdGFtcGlu
+# ZyBSU0E0MDk2IFNIQTI1NiAyMDI1IENBMTCCAiIwDQYJKoZIhvcNAQEBBQADggIP
+# ADCCAgoCggIBALR4MdMKmEFyvjxGwBysddujRmh0tFEXnU2tjQ2UtZmWgyxU7UNq
+# EY81FzJsQqr5G7A6c+Gh/qm8Xi4aPCOo2N8S9SLrC6Kbltqn7SWCWgzbNfiR+2fk
+# HUiljNOqnIVD/gG3SYDEAd4dg2dDGpeZGKe+42DFUF0mR/vtLa4+gKPsYfwEu7EE
+# bkC9+0F2w4QJLVSTEG8yAR2CQWIM1iI5PHg62IVwxKSpO0XaF9DPfNBKS7Zazch8
+# NF5vp7eaZ2CVNxpqumzTCNSOxm+SAWSuIr21Qomb+zzQWKhxKTVVgtmUPAW35xUU
+# FREmDrMxSNlr/NsJyUXzdtFUUt4aS4CEeIY8y9IaaGBpPNXKFifinT7zL2gdFpBP
+# 9qh8SdLnEut/GcalNeJQ55IuwnKCgs+nrpuQNfVmUB5KlCX3ZA4x5HHKS+rqBvKW
+# xdCyQEEGcbLe1b8Aw4wJkhU1JrPsFfxW1gaou30yZ46t4Y9F20HHfIY4/6vHespY
+# MQmUiote8ladjS/nJ0+k6MvqzfpzPDOy5y6gqztiT96Fv/9bH7mQyogxG9QEPHrP
+# V6/7umw052AkyiLA6tQbZl1KhBtTasySkuJDpsZGKdlsjg4u70EwgWbVRSX1Wd4+
+# zoFpp4Ra+MlKM2baoD6x0VR4RjSpWM8o5a6D8bpfm4CLKczsG7ZrIGNTAgMBAAGj
+# ggFdMIIBWTASBgNVHRMBAf8ECDAGAQH/AgEAMB0GA1UdDgQWBBTvb1NK6eQGfHrK
+# 4pBW9i/USezLTjAfBgNVHSMEGDAWgBTs1+OC0nFdZEzfLmc/57qYrhwPTzAOBgNV
+# HQ8BAf8EBAMCAYYwEwYDVR0lBAwwCgYIKwYBBQUHAwgwdwYIKwYBBQUHAQEEazBp
+# MCQGCCsGAQUFBzABhhhodHRwOi8vb2NzcC5kaWdpY2VydC5jb20wQQYIKwYBBQUH
+# MAKGNWh0dHA6Ly9jYWNlcnRzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRS
+# b290RzQuY3J0MEMGA1UdHwQ8MDowOKA2oDSGMmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0
+# LmNvbS9EaWdpQ2VydFRydXN0ZWRSb290RzQuY3JsMCAGA1UdIAQZMBcwCAYGZ4EM
+# AQQCMAsGCWCGSAGG/WwHATANBgkqhkiG9w0BAQsFAAOCAgEAF877FoAc/gc9EXZx
+# ML2+C8i1NKZ/zdCHxYgaMH9Pw5tcBnPw6O6FTGNpoV2V4wzSUGvI9NAzaoQk97fr
+# PBtIj+ZLzdp+yXdhOP4hCFATuNT+ReOPK0mCefSG+tXqGpYZ3essBS3q8nL2UwM+
+# NMvEuBd/2vmdYxDCvwzJv2sRUoKEfJ+nN57mQfQXwcAEGCvRR2qKtntujB71WPYA
+# gwPyWLKu6RnaID/B0ba2H3LUiwDRAXx1Neq9ydOal95CHfmTnM4I+ZI2rVQfjXQA
+# 1WSjjf4J2a7jLzWGNqNX+DF0SQzHU0pTi4dBwp9nEC8EAqoxW6q17r0z0noDjs6+
+# BFo+z7bKSBwZXTRNivYuve3L2oiKNqetRHdqfMTCW/NmKLJ9M+MtucVGyOxiDf06
+# VXxyKkOirv6o02OoXN4bFzK0vlNMsvhlqgF2puE6FndlENSmE+9JGYxOGLS/D284
+# NHNboDGcmWXfwXRy4kbu4QFhOm0xJuF2EZAOk5eCkhSxZON3rGlHqhpB/8MluDez
+# ooIs8CVnrpHMiD2wL40mm53+/j7tFaxYKIqL0Q4ssd8xHZnIn/7GELH3IdvG2XlM
+# 9q7WP/UwgOkw/HQtyRN62JK4S1C8uw3PdBunvAZapsiI5YKdvlarEvf8EA+8hcpS
+# M9LHJmyrxaFtoza2zNaQ9k+5t1wwggbtMIIE1aADAgECAhAIT9wzT35FTtvDD4/5
+# khg1MA0GCSqGSIb3DQEBCwUAMGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdp
+# Q2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3Rh
+# bXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTEwHhcNMjYwODA1MDAwMDAwWhcN
+# MzcxMTA0MjM1OTU5WjBjMQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQs
+# IEluYy4xOzA5BgNVBAMTMkRpZ2lDZXJ0IFNIQTI1NiBSU0E0MDk2IFRpbWVzdGFt
+# cCBSZXNwb25kZXIgMjAyNiAxMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKC
+# AgEAtnum8sn+zUr41JtMZbP9OMYw+HwJDpG5xkIu/lqcfNYmMX81YmsUiHLbh9yk
+# peWBGKTLhYBrAN9Tdg/QEzG32XcObmgIblnr0CoQ3WSAeDZ6nH6X6VkFyYkJw3QB
+# JREwvm4UhLzSxmwPA7cFKRTEOMsmEEj6qJk/dqLEAL+oQYuOwE2UuiX1Vnul8YRe
+# IyWd4kgLn9gq6LNXM0UplkR6jL/QHxmb6fMoGBJYbnaUI7XD6cKDpekK2SVMld4i
+# DbzeHDtOaaxldH5IxuNusQ69nd8/ZXEiB5Hbxj3RlK13cX1W4DlFXKdv/CEhM8Cj
+# 1vvlmvhNroyPdRGbbpBlgyf8Wdu5N6ByhFwURn0U6ozlPoxN22v+fviUhP+6DR54
+# 7OZnpBMWDfei1f5sVGwiiW/KQTWOK97g+4RJpPzPNV4VYMAwO2jM2Aty2QYPVmOQ
+# TJm0msuXnJrSbl2gf9JylpkJlWXqk1Q4LJsxz+TELoQCZIljbgvTJgoPU2R12ydv
+# 8i1UqL/adelA0y7U9Pmmtbze9Xx3rtajC5SzQd1jgfwAwsa90v9YcSPdmeoyoBBA
+# /27cCL237l5DTYYPDLQ4ON3OLTGWnvRb6jDrf/T75gMRfUzSLCBQfBusm9+mSWRl
+# C/Df6S/e9Q8i13CuhzOT2Jx+V/nlbXM4QoBwlUAhelwwJT0CAwEAAaOCAZUwggGR
+# MAwGA1UdEwEB/wQCMAAwHQYDVR0OBBYEFBTJY4owLtRK+26U8+bjQH717M3iMB8G
+# A1UdIwQYMBaAFO9vU0rp5AZ8esrikFb2L9RJ7MtOMA4GA1UdDwEB/wQEAwIHgDAW
+# BgNVHSUBAf8EDDAKBggrBgEFBQcDCDCBlQYIKwYBBQUHAQEEgYgwgYUwJAYIKwYB
+# BQUHMAGGGGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBdBggrBgEFBQcwAoZRaHR0
+# cDovL2NhY2VydHMuZGlnaWNlcnQuY29tL0RpZ2lDZXJ0VHJ1c3RlZEc0VGltZVN0
+# YW1waW5nUlNBNDA5NlNIQTI1NjIwMjVDQTEuY3J0MF8GA1UdHwRYMFYwVKBSoFCG
+# Tmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRHNFRpbWVT
+# dGFtcGluZ1JTQTQwOTZTSEEyNTYyMDI1Q0ExLmNybDAgBgNVHSAEGTAXMAgGBmeB
+# DAEEAjALBglghkgBhv1sBwEwDQYJKoZIhvcNAQELBQADggIBAI3FOmEenVIK35ms
+# CYB+fShAsWvSYvLBItoNdAgQ2jIqrGsVsluXMJU/+mRebBc52s6lbKAvOVPXaizm
+# KkMLLflEEKDZQx4CkS2t8aHPjkXha3hYZ010htFa3dhNgmalH5vuWvh3tTCf4frT
+# S7gPtGc4Z/xaPhQ2AB1mR8eEe/WbH0RWHvVIl6VwQ3+g5FKNfN2N/DWJkf13w2H+
+# 2GfqEfbd35Ww8CvoYBjLNIDTadcPWdgsjsiOaK/7EsKJgLjUNIVgvcaFOLLQ/Glr
+# A+0ZHJoFUbOr5SJN8zykPspXIXlpDJY/gqFUZRROeab9GVgmhbdOJcD/63RhxPah
+# FUGbckRONqMe6DYAv6/mOG0pWd3cPStsdcS7buj5DyniwRY8yooMH6ptx5vpP/pZ
+# zBPBeZD2U4IsthyxB5Jaa8qrOkB5z160TXiM5ADMspZ0TfD9MJoq0tFpFPssKRFh
+# WeEDYPvcUuN7U7lvcdHl4ezQ3NT/7Ffs1sR1yh/LRbdZ3B3Vc6q2WmD8mDC0p9kz
+# l2o73iVtS946IkEj7FkRsZGww1teYxERROC745xrtjvcw9ZyyUjHZWGRIpJeMNsP
+# quCDf0fkyHtB+J4AiNZqCQk23rxh+KbpyMTNVKItJ5l92Svl20U9NbqMBOVYl1h5
+# 4NEYLJq1/xHWFKPNK903zJZA9P2DMYIFvjCCBboCAQEwYjBOMR4wHAYDVQQDDBV3
+# b3JrcGxhY2VjbG91ZGh1Yi5jb20xLDAqBgkqhkiG9w0BCQEWHWNvbnRhY3RAd29y
+# a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
+# AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
+# CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
+# hvcNAQkEMSIEIHREaZIAUSs+fI51+39ZZJxyRxxb9oiY5SGQi1AAIcr4MA0GCSqG
+# SIb3DQEBAQUABIIBgAPnvl2AuJBjUGMl29JLJuzEzMw/7x8YTQiVNMeFUVzrhupP
+# t8gjWABMhUYPMhOjDCG/pUN+pdy/PjhsyvYuOKz5nY4CYxA+umHJHs2rpCtg87+U
+# koff8XcUQHaR4y/PLHmrHFolF8AWiOn5vKYLMnzZ3FM3erUHEf3gxOrm/gbZcJgV
+# 5cRKZBLFfJI5XKk7iPXNOjRyFLs/V7oVU7HfKOI0ajl6pbrKfaKf7vuQdXSGTqTu
+# JsbBJYWnGLMKskgIpu7t9d4BAr/1mrRM132cOIPzZWXsNaKISGDYjW8+vNmD2gLi
+# 2pvF+asLipt5h2BcgMIMEEAUgLx2+lyX0eNmP9z7g6aK0YsJWk29AQyRi1F7WAYS
+# 1YZAXihM6b68Sr54Xzb/Pa7Ny7r70E+Tvzs0ZO0QVvVj7mqBZbegdMaWATDa3Whf
+# iJ4Vz0FJTO7zZ8WT67l9F/LWlDRMmuMF9tq8yK9Du/ntio+IzdpQNn5YGNmX7dYf
+# KC56VXqCgHe5D9QFp6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
+# RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
+# MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTgwMDQ2
+# MzhaMC8GCSqGSIb3DQEJBDEiBCDTSRdSu9aaiBKc2q6+BZuchkhQ0gaelumNQTlR
+# Fj3AhDANBgkqhkiG9w0BAQEFAASCAgBcTqnMxPm8E5ASmnG1LfZlv7NWsvb2CNmF
+# 2bYArOSZ5n2NnQl55CwqUZ0ckJtkHMnKM+qEfxRYVKYzZovCWuqVAmX1cDJUdgaG
+# 1aCJlfj0eDVGVXUJjo60CnVTTkyX8AsnNZw66YCbul0xJKzm5Hr/fnEfn3g0RiQR
+# /n/Zy7ayFRGS6jKOsopK7XoSAD75zcZpfbkJmw+2GkQX1Vf+YmNeyMJWP0B3Iht9
+# q39w5TTL4KI/C6Ow02hO8F34mxE90RRFxMCFCDtxIOb6HpBzFXBKgsizIwmEf75O
+# xpF4fubzHpcuJ73ZipmBHLQBvDYJoVheCYsbKpLHj16aUgy/hn2hFFCqWqmHG6cT
+# s+yfVwIQdixjvx1CdALPUibBIM97BT39+HiPoKQBJsoIFClCwRy1uC/vzc8MvgEK
+# P+yHuSX23wZnp/QcMPlEAqJ/00z9NngoGLTyZLDD+zCo/8bqd6o9zImARCcpLgh4
+# FWYZlzTa0Or/3MxqTNG0StuUoizScM+ExpoWV5C5D2TiqnNKj9JXLxr1vvfXWpBx
+# 8HOHkmsS4MdeATnxTd1mca44ObNXsgMhL/w5O2po1HI6yplgqmRFZHEotiPBu5XQ
+# 3Ya40hnF8nWCMtO1C29axfXjZfO+P/1pU/SQ6KMGcTUefPEwWXEhPAvgbVyMNbH7
+# O7Ok6PIAYg==
+# SIG # End signature block

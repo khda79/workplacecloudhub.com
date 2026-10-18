@@ -40,6 +40,33 @@ The PowerShell module is also available from the
 - The shipped PowerShell files are Authenticode-signed with the self-signed `workplacecloudhub.com` code-signing certificate, thumbprint `D70ECB7B00377EBFB76B304C08DFC6620584E114`. A valid file signature does not make that certificate trusted automatically on every endpoint; trust still depends on the local certificate stores and execution policy. Verify the published SHA-256 values as well as the expected signer before deployment.
 - The tool provides local restart notification and governance. Intune remains responsible for application assignment, rollout, retry, reporting, and rollback when the Win32 package is used.
 
+## Demo mode
+
+Double-click `Start-SmartM365-DeviceRebootManager-Demo.cmd` to open the normal WPF
+window with fictional Contoso data. Use the scene selector to show **Recommended**,
+**Required**, or **Postponed**, and the language selector to prepare localized captures.
+The countdown stays frozen. Restart, postpone and reminder actions are simulated
+in memory; they do not restart the computer or write operational state or preferences.
+The demo does not load runtime JSON, inspect the device, require administrator rights,
+or modify an installed copy. The title and content identify the data as a demo.
+
+```powershell
+powershell.exe -STA -NoProfile -ExecutionPolicy Bypass -File .\SmartM365-DeviceRebootManager-GUI.ps1 -Demo -DemoScenario Recommended -DefaultLanguage en
+```
+
+Use `-DemoWindowWidth` (default 1100) and `-DemoWindowHeight` (default 720) to adjust
+the window for captures. Keep the local demo helper, strings, splash and branding
+assets with the GUI when copying the application. Existing preview/test modes retain
+their original behavior; the demo is a separate startup path.
+
+`-Demo -ValidateOnly` builds the demo window without showing it or its splash and
+returns the WPF window and controls for offline validation. Run the targeted suite
+from the repository root:
+
+```powershell
+powershell.exe -STA -NoProfile -ExecutionPolicy Bypass -File .\SmartM365\Tests\Test-SmartM365GuiDemoOffline.ps1 -Application RebootManager
+```
+
 ## Configuration
 
 `SmartM365-DeviceRebootManager-GUI.ps1` loads runtime configuration in this order:

@@ -333,3 +333,11 @@ The repair script must remain self-contained. Do not add mandatory runtime depen
 - Previous `CentralLogs`, `PsExecLogs`, and `Reports` folders are archived under `Runs\<LOT>\<yyyyMMdd-HHmmss>\Archives` at the start of a LOT run by default.
 - Already enrolled computers are moved from `Computers.txt` to `ComputersAlreadyEnrolled.txt`.
 - Generated inventories, logs and reports are ignored by Git.
+
+## Offline demo mode
+
+Launch `Start-SmartM365-IntuneHybridJoinRepair-Demo.cmd` for screenshots and presentations. The original WPF screens, tabs and options remain available with fictional Contoso data and visibly marked simulated results. Use the Scene selector (`Overview`, `Issues`, `Completed`), or pass `-DemoScenario Issues`. `-DemoView` selects a named tab where available; `-DemoWindowWidth` and `-DemoWindowHeight` control the capture size.
+
+Business actions are simulated. Demo startup bypasses operational configuration, authentication, collection, remote commands and mail delivery. Edits remain in memory. **Export demo outputs** generates only synthetic files under a unique `%TEMP%\SmartM365-Demo\` session folder. HTML-capable tools retain their report views; notification campaigns preview every shipped language template with fictional tokens. No real tenant or device evidence is required.
+
+Keep the application folder, its original report/template sources, local branding assets, `SmartM365.GuiDemo.ps1`, `SmartM365.GuiDemo.Reports.ps1` and the local `*-Demo.ps1` profile together when copying the application. `-Demo -ValidateOnly` builds the WPF demo without displaying windows or opening files. Run `SmartM365/Tests/Test-SmartM365GuiDemoApplicationsOffline.ps1` in an STA process for offline interaction and export checks.

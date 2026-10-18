@@ -212,3 +212,11 @@ Un `GO` porte uniquement sur les contrôles activés et les preuves collectées 
 - Une licence cible déjà attribuée ne réclame plus un second siège disponible ; la capacité globale du batch continue de compter les destinataires non licenciés.
 - Comparaison des permissions interrompue en cas d'évidence incomplète ; conservation des SID et exclusion des ACE Full Access `Deny` côté local et EXO.
 - Tests hors connexion, guide d'installation et limites de validation explicités.
+
+## Offline demo mode
+
+Launch `Start-SmartM365-ExchangeMigrationReadiness-Demo.cmd` for screenshots and presentations. The original WPF screens, tabs and options remain available with fictional Contoso data and visibly marked simulated results. Use the Scene selector (`Overview`, `Issues`, `Completed`), or pass `-DemoScenario Issues`. `-DemoView` selects a named tab where available; `-DemoWindowWidth` and `-DemoWindowHeight` control the capture size.
+
+Business actions are simulated. Demo startup bypasses operational configuration, authentication, collection, remote commands and mail delivery. Edits remain in memory. **Export demo outputs** generates only synthetic files under a unique `%TEMP%\SmartM365-Demo\` session folder. HTML-capable tools retain their report views; notification campaigns preview every shipped language template with fictional tokens. No real tenant or device evidence is required.
+
+Keep the application folder, its original report/template sources, local branding assets, `SmartM365.GuiDemo.ps1`, `SmartM365.GuiDemo.Reports.ps1` and the local `*-Demo.ps1` profile together when copying the application. `-Demo -ValidateOnly` builds the WPF demo without displaying windows or opening files. Run `SmartM365/Tests/Test-SmartM365GuiDemoApplicationsOffline.ps1` in an STA process for offline interaction and export checks.

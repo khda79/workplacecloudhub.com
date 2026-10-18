@@ -3,7 +3,7 @@
     Smart Endpoint Diagnostics Analyzer.
 
 .VERSION
-    0.3.0
+    0.3.1
 
 .DESCRIPTION
     PowerShell/WPF analyzer for Microsoft Intune device diagnostics ZIP files
@@ -37,8 +37,18 @@ param(
     [double]$AITemperature = 0.3,
     [switch]$SkipCabExtraction,
     [switch]$SkipEventLogScan,
-    [switch]$ValidateOnly
+    [switch]$ValidateOnly,
+    [switch]$Demo,
+    [ValidateSet('Overview','Issues','Completed')][string]$DemoScenario = 'Overview',
+    [string]$DemoView = '',
+    [ValidateRange(1000,3840)][int]$DemoWindowWidth = 1500,
+    [ValidateRange(650,2160)][int]$DemoWindowHeight = 950
 )
+if ($Demo) {
+    . (Join-Path $PSScriptRoot 'SmartM365.GuiDemo.ps1')
+    Start-SmartM365GuiDemo -GuiScriptPath $PSCommandPath -ProfilePath (Join-Path $PSScriptRoot 'SmartM365-EndpointDiagnosticsAnalyzer-Demo.ps1') -Scenario $DemoScenario -View $DemoView -Width $DemoWindowWidth -Height $DemoWindowHeight -ValidateOnly:$ValidateOnly
+    return
+}
 
 function Test-SedaIsAdministrator {
     try {
@@ -123,7 +133,7 @@ Start-SedaElevatedSelf -Parameters $PSBoundParameters
 if ($AIApiKeyProtectedPath) { $AIApiKey = Get-SedaElevationApiKey $AIApiKeyProtectedPath }
 
 $script:AppName = 'Smart Endpoint Diagnostics Analyzer'
-$script:AppVersion = '0.3.0'
+$script:AppVersion = '0.3.1'
 $script:BasePath = Split-Path -Parent $MyInvocation.MyCommand.Path
 $script:LogoPath = Join-Path $script:BasePath 'WorkplaceCloudHub.ico'
 $script:WorkplaceLogoPath = Join-Path $script:BasePath 'WorkplaceCloudHub-lockup-WPF.png'
@@ -6366,8 +6376,8 @@ Start-SedaGui
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCrQqpNXg1+7rF/
-# E/wCGnc/6C62L9ig5gIMmiYnB7a+n6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBDqRLn1ODK+IZE
+# hFVM0vGJQSV/uqLNQMDFxbyQUwNB9aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -6500,31 +6510,31 @@ Start-SedaGui
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIFFrWWo24B7yvD9ERr3UhQ1JdokuFatQjlTBPfCA0o/aMA0GCSqG
-# SIb3DQEBAQUABIIBgFiDkUQoVNzZp7kr3sfyKMPaq+NiMdAS1EK0I0Bc5rEBOiC9
-# A/nRWnSJitHu3ncGcUmUL4TWr4y01MgPVxVIZBKUYIesc7Vryf5o7RAsAJocEf4o
-# w0RnqAe6mixp8ZwVYDwFiLx5sxd+4laXy05uWohdtQH/1TilQmKR32XyXP1KtFN0
-# NmDaxUiy0YrzqSldAIA9bIWyvQJygOPXYX2KwTwX8wGnWv6IyXqAqLwz+b26hLv/
-# tJ7+EQ4QhynXRZB2i7YXxBv+LnR5CCEPzYI0ggr7XU9wEh/sXWJy9r1WGsQKGMiZ
-# HP7NhqQK5Y7Cy3dtOjS2Zk0s5ebzjINXhW7I5zphBqSQgaL8u2lNLnfyRrZxDbCB
-# oVSQbJ48iqPI3sKEEZ51FNx4gOKhh/TM4BFXZ0Oy3eLdjgKKSSevyBgpuudkcIRc
-# 1wkApJ7lc0n/djwBQvrWhRVaYiotkJCIyWo+FFVvtzI0r4QGaH+9ZQFMpmUzrC/n
-# +nCXiCLk7SgOtGC/CqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEICpBCgeoAr4AQApITnAwYxwc4TJXFdDPDed4ZLP3Qy+qMA0GCSqG
+# SIb3DQEBAQUABIIBgHy5cqxjLmVuYJQ7gEaG5R8KBFJT9UZo/KxYOVFTNiexK5GK
+# 8o0ZBtrBm2W/iiNzQ2slYaTG/dSsFRFbkH3kiuyZcYCr1MO2Lp59K9KezuPuGL9X
+# iA8osMcXbytnWazs6k+neacAdQwOe57iEyj3JciNOJf4a5sscCbtXSUtAIzs0HAW
+# zT1ET0a5mYbAG9HE42UlFEptcZkQaBFsIUowE/PgYtYkOs6z7qnzWipi2sjBn02z
+# tbOcFAW4lBKf2u2TVTWYplscPC9sO2gDYfTlYaBErSTi+dgCCCvbwndF50l/RrlE
+# usvPS2BCMGJxy/JrvsPXPlq59Xapll0EmxjPeglNv8SHrZC+EFrGeAAfr4d0tF0b
+# Qc8YMBk1f0UKITOrFMTik9PhyTdZ+2rDs0SaIjLu7WlFuKa0M0agjEMOvVkkndnE
+# qOoof6RWHfoI4wdrcWmrY3tJTpmTdx7DAW/dF8cTb/fx9S8gOWJ7FYIyFVfHiiOk
+# QiXCSh6uXeVyNXKF7qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MDQxNTQw
-# MzRaMC8GCSqGSIb3DQEJBDEiBCAfPeih/8cS5/lFNEcQA7zTN7uCaQ6PefA2VlLf
-# EAZpBzANBgkqhkiG9w0BAQEFAASCAgCWo2QgEbVk+NRK7B06PHv/+mZqZEFgWfPz
-# fY4H8RLavBb90EfMr+hQCrroF3m5kipzOprLRxulLlCnnvGp9oLDKuPRuwi1B9B5
-# mYMwzDquOaBVKx0++H2l6LCuXbltaPUniSfc4lG3s/itbixzplC6v32hghVse3NR
-# qM9pRzImyVokmzDbenPf6AyzQm0wWoRAN1OKJjn8HRoSramwcElfctig9XTkDiCs
-# NztOZiP3Yvp+RAXphsk5zg1wroxnPaix4g7FzTW585QYdfYiD4PS/KHQAz9FSoTk
-# ljHDCO6nOb7Jj7bDmm2MNbomPehnX0I6L1vH+HzaMmFn3284RsdUekn6emu9ONvU
-# uDLh3ZwrmCsXSmsUho+jMXcNMGsKS4fFm3WX99Ur3FXzGAtS/9767VRe+OFUBmMD
-# sgZkwbSb6hdDaH3F6nQLLFYH2uE4sv9F4FK+6/r6K3BciYbk0qFou342u2vcj6Wv
-# Cuo8+zqlmaOR+r7wz0ABmT6rjMolgZq+HkIn2uzLDRkZmgiPst6x3bRqVchWZuTX
-# lpWMzXaGaPhVsH+IVOquyeURUaGejVushL/bGm9i8ixanNa93InORF7a4v+jpaKH
-# 4tjIQ2ImmEqFTkGCSXNPq2S8iEloMtiwK+xb8HrIIV3q4o8wjKHVGBOB9UaxkX5/
-# tBRugl2Xkg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTgwMDQ2
+# NDJaMC8GCSqGSIb3DQEJBDEiBCC011nhMyEuFc5iZlNSJXEgfvASF4viJZ7Wu76C
+# dVm2QjANBgkqhkiG9w0BAQEFAASCAgAHNTD65GJ+aVVop0K77hkFJMyE3emM6kAQ
+# 0MHbmE0k6ep0zUvn/z41QJiW5oWPNHXEZDkmICohz4W679cTbePA4HaFNc4cjsWe
+# FixH4hd63LZjeQBT/JdWM4zciLo3CyaZt2w20dA5D4MOjx8O3XcIIjIr3v12X/JN
+# y+5binDULddZsweofc6xhANdTyAH4ELWSVJCuYH4R7f3NH7nE7OSxeC8JpJbaoCJ
+# EBJJzGm1whjccKKtd1awNFPN01nM2vxyUptaX1Ua4zsuPtBYWmTf7LGON6aUeh4Y
+# Ej96j5KJauGDSwQXqzJh3BjmuV0t8o/nmQvXVNKP3/qKuXqIsD8Z2/gP+GR8nNUl
+# Wh1VkByKlWxeTWeTa9eXhagiHDQ9CTbcbt5mbQZd9grcGAYHmSi6OqpKuqPwDgsP
+# y7PHmRzKj5N8rsTMjxVarCm4Vz2wkjaFcjCNh16DKGueljpSxYO9VfWcitpU3eYw
+# PUzSTwHMLpHtczHnJhH0JimQ/LA8NNkF/sU+unvdjltLexAc+HPmINfuD6qwGZJL
+# 7FKM/s0sk3sEs4XptVw8/NPutnQF2/gX88YBYBP7X7LGrkR0qrSg9pjII/qsIOox
+# FAVd5RWq1/F814t++eUpOs4i0jZnt+46+FdPJYN7sr7R9NQHal77jhb3Fj33Pnzo
+# U/2QVlodNQ==
 # SIG # End signature block

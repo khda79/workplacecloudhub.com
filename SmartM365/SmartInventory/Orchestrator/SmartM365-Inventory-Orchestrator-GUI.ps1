@@ -30,7 +30,7 @@ Loads the complete WPF data model without showing the splash or main window.
 Intended only for isolated tests with SharedDataFolderPath pointing to a temporary folder.
 
 .VERSION
-1.3.13
+1.3.14
 #>
 [CmdletBinding()]
 param(
@@ -38,10 +38,19 @@ param(
     [string]$SharedDataFolderPath = '',
     [string]$GuiLogFolderPath = '',
     [switch]$ValidateOnly,
-    [switch]$SmokeTest
+    [switch]$SmokeTest,
+    [switch]$Demo,
+    [ValidateSet('Overview','Issues','Maintenance')]
+    [string]$DemoScenario = 'Overview',
+    [ValidateSet('Dashboard','Operations','Planning','History','Requests','Servers and versions','Activity')]
+    [string]$DemoView = 'Dashboard',
+    [ValidateRange(1180,3840)][int]$DemoWindowWidth = 1500,
+    [ValidateRange(720,2160)][int]$DemoWindowHeight = 900
 )
 
 # Local lifecycle only; no collection or publication is performed by this guard.
+$smartM365RunGuard = $null
+if (-not $Demo) {
 $smartM365LifecycleRoot=$PSScriptRoot
 while ($smartM365LifecycleRoot -and -not (Test-Path -LiteralPath (Join-Path $smartM365LifecycleRoot 'Modules/SmartM365.Core/SmartM365-InventoryLifecycle.ps1') -PathType Leaf)) {
     $smartM365LifecycleParent=Split-Path $smartM365LifecycleRoot -Parent
@@ -51,10 +60,11 @@ while ($smartM365LifecycleRoot -and -not (Test-Path -LiteralPath (Join-Path $sma
 if(-not $smartM365LifecycleRoot){throw 'SmartM365 lifecycle support is missing; update the complete runtime.'}
 . (Join-Path $smartM365LifecycleRoot 'Modules/SmartM365.Core/SmartM365-InventoryLifecycle.ps1')
 $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -RequireReturn
+}
 try {
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
-$script:AppVersion = '1.3.13'
+$script:AppVersion = '1.3.14'
 $script:StartupClock = [Diagnostics.Stopwatch]::StartNew()
 $script:Snapshot = $null
 $script:DraftJobs = $null
@@ -570,6 +580,12 @@ function Get-OrchestratorGuiPropertyValue {
     }
     return $Object.$Name
 }
+if ($Demo) {
+    . (Join-Path $PSScriptRoot 'SmartM365-Inventory-Orchestrator-Demo.ps1')
+    Invoke-OrchestratorDemo -Xaml $xaml -Scenario $DemoScenario -View $DemoView -Width $DemoWindowWidth -Height $DemoWindowHeight -ValidateOnly:$ValidateOnly
+    return
+}
+
 $script:GuiSplash = $null
 if (-not $ValidateOnly -and -not $SmokeTest) {
     if ([System.Threading.Thread]::CurrentThread.ApartmentState -ne [System.Threading.ApartmentState]::STA) {
@@ -2062,9 +2078,10 @@ $window.Add_Closing({
     $smartM365RunGuard.ReachedTerminal=$true
     $smartM365RunGuard.ReturnedNormally=$true
 } catch {
-    if ($_.Exception -isnot [Management.Automation.PipelineStoppedException] -and $_.Exception -isnot [OperationCanceledException]) { $smartM365RunGuard.ErrorRecord=$_ }
+    if ($smartM365RunGuard -and $_.Exception -isnot [Management.Automation.PipelineStoppedException] -and $_.Exception -isnot [OperationCanceledException]) { $smartM365RunGuard.ErrorRecord=$_ }
     throw
 } finally {
+    if ($smartM365RunGuard) {
     Complete-SmartM365InventoryRun -State $smartM365RunGuard -Cleanup {
         foreach($name in @('AutoRefreshTimer','RefreshTimer','CancellationTimer')){
             $timer=Get-Variable $name -Scope Script -ValueOnly -ErrorAction SilentlyContinue
@@ -2084,6 +2101,7 @@ $window.Add_Closing({
         }
     }
     if($smartM365RunGuard.ExitCode -eq 130){exit 130}
+    }
 }
 if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 
@@ -2091,8 +2109,8 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDvk3xwZUlBDH3e
-# qTsbQG8JGXL1/rlVmZ6QBPIOCTj3UaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC/QLD2uVDTIwVz
+# lHyfHwPqg8RncBT1qJg3IGfGVBIAvaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -2225,31 +2243,31 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIOf6eqeexjG8HqSzeg0fIw6jO4LttS3nIe4Vpq/1XaLgMA0GCSqG
-# SIb3DQEBAQUABIIBgGs9HDUFYMQrg9yyBAbqxGprRydCa28VuriOcJwSRM6L+ZZj
-# y++1Qw73cHjE+qXMtqektRfMsc5OVeKq3zNA43gY3utVkvCwvFZLOMjfyAnXnhNB
-# kOVQ1/lCkb1+K911ZpbvSBnEGEnKTEKuudphdcJp+8iHmLkycoGOkD1twtBUK+Xg
-# /NRQU/zhLoG+mjBNWSxBFvz0VjqpaXcdBQ7y+q8Srs/OAXycTgbFcDKXDMtOQmXH
-# 4ZdZEq66fP7X48vgwpE+9j6CtHmS1hSExaI7eSx6qlcSlYB6vV3KZ9XBQSpkahES
-# EjpEknb7tczGBG6YVBHnhwg4luBYQ9G+KueSzlW3gvK1HtDQZpsvKl1oLlr3IQmu
-# pwQeNZpXHXYE/P/fM1q+PBeXnMr+icTA7T6Qqx+WZAsgz1DldH86+850kKtPB3hc
-# 7DlPliKwJIUIZ5bbqrfNGc735x3UR5SlsgItQ+NNNZrYajdg7zK2jbLCzxjCLVCv
-# r6xeN5d0UTYNffjoiqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIMFpSRaQXbA9yEkPDeCsFQ2QEoCeU30wLQiutMk3D29BMA0GCSqG
+# SIb3DQEBAQUABIIBgBM9IXy16dZIUs1sJIopKQkpwYBLUIdT+1JIuuP1GhN+rppg
+# +qLMbkJNMWhb8CA/8HCTI3tnqF5Nw00pMLFZV0IfCWqAiLJjERMMTnkPTjwdNLno
+# T5T2ypGR7h73MeNdlnSDfujPLpAcn8Bo2TJYMqxcTVvjWoNWT778pHcJijU/mZjU
+# aZ880nsPTRuno4CU0bHNsxxMZFpqCSzhers1+0JtrzqPMLs34g/gQ+7S58kaHSaE
+# wDZos38hYBD3/uzTqgXOfMUS/AEdMMHIuegiZwcWyyCtUCKCiiOVO3HBzmk390ok
+# TK0/YcdzG+on9yDK4SohNs+fW0Z916KTiqNdMMbaq9oHzYBx6Pw7VfpUKYn1wnGK
+# kKDsgCmCSUSeLPFfvThlmtZZ0Q8bbs8mzXmpyGg2FpqhFUS1D5G3UUncHBGmE+77
+# hV3w3UFcbJLeHqMbalgXULkYIDKT7kg1N50hyOlja8rKZVu8/S5+jowBKtUFz9Kj
+# YxpPBXA26N97busWpaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTUwOTE2
-# MzNaMC8GCSqGSIb3DQEJBDEiBCCgj/aAaO+lHHilC9vzYjG/yS8BHp3pf2Lf+snS
-# dmOBHTANBgkqhkiG9w0BAQEFAASCAgCENzrHmiRlgbWMnlIaOSBo9oW3T4Dpe58p
-# k93+y3o6Mk70/THipI5A1IcLJ7kGWm3XZo2hMzIX99ykMp+CsQqq2yucznOd5i+E
-# /PnABdl7+zeHm3p9fb6NgW20Ih7k5AYi+B8IXkU3bd/RMVA7WYrx1cFZb57j8k6N
-# gxc/1hnTL/zviBlU0CgmlPJqk0jgHQqszp6gbp5miC7yGidcodObeq0hAEZj60DO
-# bf6SFtTzZ5HzCNgVQXIJ9hookk6jAdiNJBZeemljJdUgZCOd2KjamY5Uo6BA8ZkA
-# UpqeZPXV08UcadxRrd+X95AhozSMptbOpX9b+2AuXFh0vk+auAkYoX6EWAeCkkbM
-# w5zxQqEScBe/VC+mKiiao1wKqWysSGAYX8DtH8g5TNHQ4kZ3fL1Mobpk5DPduMBd
-# RqmMggH8fr/cfMs+I09a56kD61bNBg70V0bU+G49z5/mzpLxZpb9qMBZwrXDY2N0
-# Q48Ixtb7mhVGaYwc+MlS/IqW0H3H07BkLRyO5ZU6ioJyc+tFRUNHJ8IvEV+W4yO1
-# IS+bZEW06Nr3pR4XTksOKXwxxABXLJhdlxfvvU5Ck5GHZE+x4WGlu9rofYMpLgPW
-# lVH8ITDJ5t1dGcMh0CGCsSqDyqFeT/wmpoxKp1Jeju2zVh7enV2k/W1uDeANacd5
-# 6GLjRPWVmw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTgwMDQ2
+# MzhaMC8GCSqGSIb3DQEJBDEiBCD+bof7yEvWhxfMFDgX7l1HuWGuva2WvgdhcX/f
+# bai49jANBgkqhkiG9w0BAQEFAASCAgBVegH1/gPnsfY+eviahfhOGffHneaR4vB2
+# Tucf+14fVW9GFPy2BTE/xQB9X3WpDK5BZ7ShNEoFRglatfhduO6MQCLHSwWXP4Nl
+# 2OEemuIzJI1OTiEoT3pHchdu0fIFCDFzZem+IQjK5u9jhrlEChgx7HNY+rqncfBU
+# 3xHyqvvrxtR3mH7p7udP0VnuVRjOcBix3cqGjwMz+bDnv43Ki5XKn2BVkfweyWGf
+# v4SONIi7T2cX/weuwNl/eCbx8Se0zlpWnJMqpLo/DKLdqOWsyEwWhTZ9/J0l5JPx
+# gpeM67l/+0WLSUgo+HWPpstB2WhSlUO1GtiTsN5QwpFCL6u0jtENd/oTOXVVqXwu
+# RNWTOmW4WOLGBGxGCCOAMb0qY771JR9mf1p38y2H+Sj8z41cBZQWDU+Bgdml/OkI
+# FFoBmIsMqgwBww5AHmDDQ4/SfyDb33zGnyVikNcf+tI8j3tBywyfYMABZnwVzSfs
+# rgUgY8aDlIZsohMlOWCqoClBGeeYSThcqa/xHJvqeEYJEscZeGGa2ZwlhiJ1B/vO
+# TXu3prPIngkF0PPztiOnZhM8fzcxjVQp3lNwdo4g8KwE1/rQ3PxMY4JeTKH0hB0F
+# GjI/SYD5vsEuXJNfqeGuQ4lQzDDQ6ZWZbChNJ6PLtSnCW38GX223ZXHebpk2AKeV
+# VYQi+Sy8BQ==
 # SIG # End signature block
