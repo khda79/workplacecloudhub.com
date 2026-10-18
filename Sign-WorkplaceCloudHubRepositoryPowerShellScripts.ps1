@@ -11,6 +11,9 @@ With -PathListFile (used by the pre-push hook), only the listed files are inspec
 tree differs from <commit> (uncommitted work, possibly from another session) is left untouched: the
 committed version must already carry a valid signature, otherwise the run fails. In this mode the
 script exits with code 3 when it changed at least one file, so the hook can block the push.
+
+Signature blocks that are not the single trailing block (code after a block, several blocks) are
+removed before signing, keeping all other lines; unbalanced markers fail and leave the file unchanged.
 #>
 [CmdletBinding(SupportsShouldProcess = $true)]
 param(
@@ -169,8 +172,7 @@ function Get-CommittedFileSignature {
     }
 }
 
-function ConvertTo-WorkplaceCloudHubCrlf {
-    [CmdletBinding(SupportsShouldProcess = $true)]
+function Read-WorkplaceCloudHubText {
     param([Parameter(Mandatory = $true)][string]$Path)
 
     $bytes = [System.IO.File]::ReadAllBytes($Path)
@@ -197,18 +199,86 @@ function ConvertTo-WorkplaceCloudHubCrlf {
         $encoding = [System.Text.UTF8Encoding]::new($false, $true)
     }
 
-    $text = $encoding.GetString($bytes, $offset, $bytes.Length - $offset)
+    return [pscustomobject]@{
+        Encoding = $encoding
+        Preamble = $preamble
+        Text = $encoding.GetString($bytes, $offset, $bytes.Length - $offset)
+    }
+}
+
+function Write-WorkplaceCloudHubText {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)]$Content,
+        [Parameter(Mandatory = $true)][AllowEmptyString()][string]$Text
+    )
+
+    $contentBytes = $Content.Encoding.GetBytes($Text)
+    $bytes = if ($Content.Preamble.Length -gt 0) { [byte[]]($Content.Preamble + $contentBytes) } else { $contentBytes }
+    [System.IO.File]::WriteAllBytes($Path, $bytes)
+}
+
+function ConvertTo-WorkplaceCloudHubCrlf {
+    [CmdletBinding(SupportsShouldProcess = $true)]
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $content = Read-WorkplaceCloudHubText -Path $Path
+    $text = $content.Text
     $crlf = [string][char]13 + [char]10
     $lineEndingPattern = [regex]::Escape([string][char]13 + [char]10) + '|' + [regex]::Escape([string][char]13) + '|' + [regex]::Escape([string][char]10)
     $normalizedText = [regex]::Replace($text, $lineEndingPattern, $crlf)
     if ($normalizedText -ceq $text) { return $false }
 
-    $contentBytes = $encoding.GetBytes($normalizedText)
-    $normalizedBytes = if ($preamble.Length -gt 0) { [byte[]]($preamble + $contentBytes) } else { $contentBytes }
     if ($PSCmdlet.ShouldProcess($Path, 'Normalize line endings to CRLF before Authenticode signing')) {
-        [System.IO.File]::WriteAllBytes($Path, $normalizedBytes)
+        Write-WorkplaceCloudHubText -Path $Path -Content $content -Text $normalizedText
     }
     return $true
+}
+
+function Get-SignatureBlockLayout {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    # Lines are kept with their line endings so removing a block never touches the surrounding text.
+    $content = Read-WorkplaceCloudHubText -Path $Path
+    $lines = @([regex]::Matches($content.Text, '[^\r\n]*(?:\r\n|\r|\n)|[^\r\n]+$') | ForEach-Object { $_.Value })
+    $kept = New-Object System.Text.StringBuilder
+    $blockCount = 0
+    $inBlock = $false
+    $lastEndIndex = -1
+    for ($index = 0; $index -lt $lines.Count; $index++) {
+        $marker = $lines[$index].TrimEnd()
+        if ($marker -ceq '# SIG # Begin signature block') {
+            if ($inBlock) { throw "Unbalanced signature markers: nested Begin marker at line $($index + 1); file left unchanged." }
+            $inBlock = $true
+            continue
+        }
+        if ($marker -ceq '# SIG # End signature block') {
+            if (-not $inBlock) { throw "Unbalanced signature markers: End marker without Begin at line $($index + 1); file left unchanged." }
+            $inBlock = $false
+            $blockCount++
+            $lastEndIndex = $index
+            continue
+        }
+        if ($inBlock) {
+            if ($marker -and -not $marker.StartsWith('#')) { throw "Non-signature line inside a signature block at line $($index + 1); file left unchanged." }
+            continue
+        }
+        [void]$kept.Append($lines[$index])
+    }
+    if ($inBlock) { throw 'Unbalanced signature markers: Begin marker without End; file left unchanged.' }
+
+    # A single block followed only by blank lines is the normal layout that Set-AuthenticodeSignature replaces itself.
+    $trailingOnly = $true
+    for ($index = $lastEndIndex + 1; $index -lt $lines.Count; $index++) {
+        if ($lines[$index].Trim()) { $trailingOnly = $false; break }
+    }
+
+    return [pscustomobject]@{
+        Content = $content
+        BlockCount = $blockCount
+        NeedsRemoval = ($blockCount -gt 1 -or ($blockCount -eq 1 -and -not $trailingOnly))
+        TextWithoutBlocks = $kept.ToString()
+    }
 }
 $RepoRoot = [System.IO.Path]::GetFullPath($RepoRoot)
 if (-not (Test-Path -LiteralPath (Join-Path -Path $RepoRoot -ChildPath '.git'))) {
@@ -290,6 +360,9 @@ foreach ($file in $files) {
             continue
         }
 
+        # Validates the markers before any change so an unbalanced file is never modified.
+        $blockLayout = Get-SignatureBlockLayout -Path $file
+
         $lineEndingsChanged = $false
         if (-not $SkipLineEndingNormalization) {
             $lineEndingsChanged = ConvertTo-WorkplaceCloudHubCrlf -Path $file
@@ -302,6 +375,15 @@ foreach ($file in $files) {
         if (-not $Force -and -not $lineEndingsChanged -and [string]$signature.Status -eq 'Valid' -and $signerThumbprint -eq $normalizedThumbprint) {
             $skipped++
             continue
+        }
+
+        # Old blocks followed by code (or several blocks) make Set-AuthenticodeSignature fail with HashMismatch:
+        # remove every block, keeping all code before, between and after them, then sign.
+        if ($blockLayout.NeedsRemoval -and $PSCmdlet.ShouldProcess($file, "Remove $($blockLayout.BlockCount) misplaced signature block(s)")) {
+            $blockLayout = Get-SignatureBlockLayout -Path $file
+            Write-WorkplaceCloudHubText -Path $file -Content $blockLayout.Content -Text $blockLayout.TextWithoutBlocks
+            Write-Info "Removed $($blockLayout.BlockCount) misplaced signature block(s): $file"
+            if (-not $changedFiles.Contains($file)) { $changedFiles.Add($file) }
         }
 
         if ($PSCmdlet.ShouldProcess($file, 'Set Authenticode signature')) {
