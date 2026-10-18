@@ -80,6 +80,10 @@ function New-Transport($Fixture,[string]$Mode='ok'){
         if($state.Mode -eq 'mutate-uploaded' -and $relative.EndsWith('/validation.json.txt')){
             Add-Content -LiteralPath $state.MutatePath -Value 'Synthetic change after upload'
         }
+        if($state.Mode -in 'mutate-before-upload','mutate-before-upload-same-size' -and $state.Events.Count -eq 1){
+            if($state.Mode -eq 'mutate-before-upload'){Add-Content -LiteralPath $state.MutatePath -Value 'Synthetic change before upload'}
+            else{$bytes=[IO.File]::ReadAllBytes($state.MutatePath);$bytes[$bytes.Length-3]=$bytes[$bytes.Length-3] -bxor 1;[IO.File]::WriteAllBytes($state.MutatePath,$bytes)}
+        }
         $target=Join-Path $state.Remote $relative
         New-Item -ItemType Directory -Path (Split-Path $target -Parent) -Force | Out-Null
         Copy-Item -LiteralPath $local -Destination $target
@@ -244,6 +248,17 @@ try{
     Check (-not(Test-Path -LiteralPath (Join-Path $t.State.Remote 'current.json.txt'))) 'Changed local batch advanced the root pointer'
 }finally{[IO.File]::WriteAllBytes($localEndpoint,$original)}
 Check ((Snapshot-Fixture $extended) -eq $before) 'Mutation test did not restore the local batch'
+# A CSV changed after the plan but before its own upload: a size change fails before upload,
+# a same-size change is caught by the read-back SHA256; neither advances the root pointer.
+foreach($case in @(@{Mode='mutate-before-upload';Pattern='Local file changed'},@{Mode='mutate-before-upload-same-size';Pattern='Remote SHA256/size mismatch'})){
+    $original=[IO.File]::ReadAllBytes($localEndpoint)
+    try{
+        $t=New-Transport $extended $case.Mode;$t.State.MutatePath=$localEndpoint;$params=$t.Params
+        Reject {Send-PreparedEvidenceBatch @params 6>$null} $case.Pattern
+        Check (-not(Test-Path -LiteralPath (Join-Path $t.State.Remote 'current.json.txt'))) "Root pointer advanced: $($case.Mode)"
+    }finally{[IO.File]::WriteAllBytes($localEndpoint,$original)}
+}
+Check ((Snapshot-Fixture $extended) -eq $before) 'Pre-upload mutation tests did not restore the local batch'
 # Parallel hashing returns exactly the sequential SHA256 for every path, and rethrows read errors.
 $hashPaths=@(Get-ChildItem -LiteralPath $extended.Batch.BatchPath -File | ForEach-Object FullName)
 $parallel=& (Get-Module PreparedSharePointTransfer) {param($p) Get-PreparedFileHashMap $p} @($hashPaths+$hashPaths[0])

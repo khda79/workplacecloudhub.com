@@ -263,7 +263,10 @@ function Send-PreparedEvidenceBatch {
                 $journal.PointerAttempted=$true
             }
             $clock=[Diagnostics.Stopwatch]::StartNew()
-            if((Get-FileHash -LiteralPath $file.Path).Hash -ne $file.SHA256){throw "Local file changed: $($file.Relative)"}
+            # The plan already hashed every file and the read-back below compares the uploaded bytes with
+            # that SHA256; the full local re-verification before the root pointer covers later changes.
+            # A size check keeps the early failure without a third read of each file from the share.
+            if((Get-Item -LiteralPath $file.Path).Length -ne $file.Bytes){throw "Local file changed: $($file.Relative)"}
             $localSeconds=$clock.Elapsed.TotalSeconds;$clock.Restart()
             if(-not (& $UploadFile $file.Path $file.Relative)){throw "Upload failed: $($file.Relative)"}
             $uploadSeconds=$clock.Elapsed.TotalSeconds;$clock.Restart()
@@ -273,7 +276,7 @@ function Send-PreparedEvidenceBatch {
             if((Get-Item -LiteralPath $temp).Length -ne $file.Bytes -or (Get-FileHash -LiteralPath $temp).Hash -ne $file.SHA256){throw "Remote SHA256/size mismatch: $($file.Relative)"}
             Remove-Item -LiteralPath $temp -Force
             $journal.VerifiedFiles.Add($file.Relative)
-            Write-Host ('[{0:yyyy-MM-dd HH:mm:ss}] SharePoint verified {1}/{2}: {3}; bytes={4}; localHash={5:F1}s; upload={6:F1}s; readBack={7:F1}s; verify={8:F1}s' -f (Get-Date),$journal.VerifiedFiles.Count,$plan.Files.Count,$file.Relative,$file.Bytes,$localSeconds,$uploadSeconds,$downloadSeconds,$clock.Elapsed.TotalSeconds)
+            Write-Host ('[{0:yyyy-MM-dd HH:mm:ss}] SharePoint verified {1}/{2}: {3}; bytes={4}; localCheck={5:F1}s; upload={6:F1}s; readBack={7:F1}s; verify={8:F1}s' -f (Get-Date),$journal.VerifiedFiles.Count,$plan.Files.Count,$file.Relative,$file.Bytes,$localSeconds,$uploadSeconds,$downloadSeconds,$clock.Elapsed.TotalSeconds)
         }
         $journal.Status='Success'
         [pscustomobject]@{Status='PublishedAndReadBack';BatchId=$plan.BatchId;CsvFiles=$plan.CsvCount;VerifiedFiles=$journal.VerifiedFiles.Count;ExpectedFiles=$plan.Files.Count;ManifestSHA256=($plan.Files|Where-Object Relative -eq "batches/$($plan.BatchId)/batch.json.txt").SHA256;PointerVerified=$true;CsvRecalculated=$false;AuditPath=$auditPath}
