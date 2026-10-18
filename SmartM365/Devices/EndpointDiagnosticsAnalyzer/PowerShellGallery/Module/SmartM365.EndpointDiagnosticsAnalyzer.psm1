@@ -1,4 +1,10 @@
-﻿Set-StrictMode -Version Latest
+﻿<#
+.SYNOPSIS
+Validates or packages the complete application runtime, including offline demo dependencies.
+.VERSION
+1.0.1
+#>
+Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $script:ModuleName = 'SmartM365.EndpointDiagnosticsAnalyzer'
 
@@ -15,7 +21,7 @@ function Get-SmartM365EndpointDiagnosticsAnalyzer {
     $metadataPath = Join-Path $InstallPath 'SmartM365-EndpointDiagnosticsAnalyzer.installation.json'
     $metadata = $null
     if (Test-Path -LiteralPath $metadataPath -PathType Leaf) { try { $metadata=Get-Content $metadataPath -Raw|ConvertFrom-Json } catch {} }
-    $required = @('SmartM365-EndpointDiagnosticsAnalyzer.version.json.txt','SmartM365-EndpointDiagnosticsAnalyzer-GUI.ps1','HardwareReadiness.ps1','SmartM365.GuiSplash.ps1','Start-SmartM365-EndpointDiagnosticsAnalyzer-GUI.cmd','WorkplaceCloudHub-lockup-WPF.png','WorkplaceCloudHub.ico')
+    $required = @('SmartM365-EndpointDiagnosticsAnalyzer.version.json.txt','SmartM365-EndpointDiagnosticsAnalyzer-GUI.ps1','SmartM365.GuiDemo.ps1','SmartM365.GuiDemo.Reports.ps1','SmartM365-EndpointDiagnosticsAnalyzer-Demo.ps1','Start-SmartM365-EndpointDiagnosticsAnalyzer-Demo.cmd','HardwareReadiness.ps1','SmartM365.GuiSplash.ps1','Start-SmartM365-EndpointDiagnosticsAnalyzer-GUI.cmd','WorkplaceCloudHub-lockup-WPF.png','WorkplaceCloudHub.ico')
     $missing = @($required | Where-Object { -not (Test-Path -LiteralPath (Join-Path $InstallPath $_) -PathType Leaf) })
     $integrityIssues = @()
     try {
@@ -100,8 +106,8 @@ Export-ModuleMember -Function @('Get-SmartM365EndpointDiagnosticsAnalyzer','Inst
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCJN91SnWmeLBAX
-# 5Qh9sx9kEd8JM3rQwL9dgBdoBeNZ46CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBZXw+cD126sl4r
+# 1zU+ib7SU+el3lDbHu7C594DlORZS6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -234,31 +240,31 @@ Export-ModuleMember -Function @('Get-SmartM365EndpointDiagnosticsAnalyzer','Inst
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEILDBOzNzX5f452RU5PcALnFgGkUOTD3jxfv7IsOCKCC8MA0GCSqG
-# SIb3DQEBAQUABIIBgFQHeYVjAkrCjJtt2vn0wO32Vva5yWDcU8rET6tpODVj03XA
-# EanxsTPqXUWOl+3IAovG3EabA7M1IAjShfcDGm0tIVM1/iWalx8XWtrjpVPbov2r
-# RhMFW9V9lqvyDC6JiYt6/h/A9wFOADM+rEw7NjEge3fmCqlcPOufCsP0rrgmoWtb
-# WUjRP54nwMQzrcZu4cI9tqj6U4hOYUHjVMKeLuKIEvbcY/3Y4u3vVB1w9S9o/sBx
-# 1IN6TFmYmtqNM6NG+MeZNZqLC9a1gX02sgrb5KenJiL7LYbf4D52GRoTvPibOevw
-# J4yjBG5TgCB6+trzxxjEHA4H3znn4VR6TwuFgRPHxk2R4JBgSH/aDE+vJ3bKySma
-# 011hpdWanm0x1wV3ondnX400O7KH2JqpbZQYlLlo04Sici6aHtKJcivMcX0t2ihc
-# nuy7ClkyaeGjjbejsID2P8GlnYrGNLIsOuDUDoJxCFZ3ul18HtRoWT3eynKtPa07
-# BCKKPERC0SDYf6xY5aGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIH/z2cesfbQtr7yetjREB3w5d5xxbTYHymVXtijBziYpMA0GCSqG
+# SIb3DQEBAQUABIIBgBA0xAQAwgL4GGdlesLyXyH4yVvpgWVNiAr/lLrgVG/JXFR+
+# fSqdBlW9S2Kz4Kxi1J/jXZHojH7JXxEmEOQJNgccJvDs4mTuM9qVVlflYilZZndi
+# We/IqLO0+co3+BfwVnVwZmMGTKm8S/v4KtaivNutwcwatgy/+0HgLZbiaUnrEOSL
+# rrnnr16Tm4DS09bKVhA/rj9PWotvFRC7lUlmGc9NU5mTJruSZSlDRJwJV+rYw/jx
+# wYvlPFD3y7Qs3EOQv0ZQyWevDl6vZAIQOJQ439e/WnviybbHZcFHocq60TGzn2Kq
+# lynQtk767ApLN9ba8YViBtOCV3ichvs3Yg1lyBZgBNlofJSeG5cz/r4kuvstiKyw
+# AkaX/JsYw/ckhTfE3sa6VPwIQC20+hWz37RMOBpjFqNinI4x76SD+bsjcsc8tys+
+# x7CW60NV3bTgUrAfL0SZXvfg+oAOk1JliBqy9erEsnw8d4vBjsOe51pNrREqIr+h
+# 6G9s100NaN2wHtCUt6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDYxMzE3
-# MTZaMC8GCSqGSIb3DQEJBDEiBCC0nI8CBEvy1ATNFWtMogGKtJn4IERK/HFWLCTU
-# E5eMQDANBgkqhkiG9w0BAQEFAASCAgBlHRDWDtk2Rg63yKOfZry953YSdVXs303P
-# bG+H0N/K0Z5Yhkwi6vFyh7OBpr8UV10SRMSQmgrtaJoaRPGpbIYI0TUEkT5hM7Zv
-# /QzX6HagEEvZ5d3LH007LgkVt8DSopqFYVZK6jEbdxtf6zJmVLHiL0or36fbYoeO
-# R6u0Krl25OqlX6feDUG+Jbk/m4J0Rrb47rrs3PzTlxVzE3JXHNAyHzkk25A+XBbB
-# 6gcflEcDPlkFyYC90bOmVVfoRff4x2fH3JJEI4uk/SUFztt4KrQjPa1XLxNJtb35
-# MIZsoi1s7TSE+hSaRa2evyQSOxb4aG9035NYxqJVsMZS158RShKWMKYqb4f9liH+
-# 8YgiMOzdYx/6rFKl5MxnLQCXwmNL/H0k60ywo7iNKafemdInjUZ13pbkTSVqvDdW
-# GnHPQKqMB6x30k+QHh/ftXCQcCDIkJVy81NJdJIZLs4jYifVlU8ju/IH3u+bOU56
-# ttVu4fChnG0qNYutQ2vXfyChuToczwK5U1eEtjBYo5LeUb+PlR9irrSqvnRT1M13
-# KSYQh+eyhamwC73HuC66Xgg9O+Vtg+1Y0UXYBB0IDM+1DcqE/s3vjQ1o5CXeXyPH
-# 3iT726R29/f9F0nSCZ213Vwdorhhj4HeJ/CQ7FaXBNyv9mw5/ZAF003BR14CYw7l
-# CnddpwbFOw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTgwMjQw
+# MDdaMC8GCSqGSIb3DQEJBDEiBCARH626/HjfauO1KvZAxqIEf/skPULlJXOiDUv8
+# +W6osTANBgkqhkiG9w0BAQEFAASCAgBMI7WO6jI6+ESro9UapTYLY5BO88l7mPKh
+# N+xKjH2x8iar6itDf5KnuoLTCz1O5IkfOjd0MPIG9+3HN1f/SFrI7KoqDDEHnmR7
+# HEy5WRsKWGh+MjFHcv8VCexPUlAbaa79H360z1s+vinAgllKNk4AVuXi6jq0/mjm
+# hB9cKMFYh0vfN7il5nxiWt3X3R+TFjjSblelcKc7D7wRfEXv82YEjXIQmG/nI8I9
+# Be1i6I8nGeG9iqlrkDD0soAO8IDSlaLLI+ZMW4ITMgljkoxiOKRWEL7NSBbfiMmq
+# BDmi5INLjqVS4DELdECAUUymK/ADC17cK0lNPIuqAo1mFRhjupFgQ3FwpfnUW/Wl
+# eyZ5+pa1Wc3r5We7WT64ntRQWfl08gihWVjfX3nzNaRTfyGAUf0E8PMn3NksYhi/
+# tRtOYFsoRNsNgANpmcWgHIkSiE+auDZYBzM/oOixQPS6BfqJfP1qX896ljwIBBp2
+# ScnUsk/S+HqGyaQl/c1wRhB+EzemkIXSzbPq16D5f1mWq9PfbTs2zxTsOljgIgyr
+# Pojt2+RIzFGwjBzdMddSLq2nTm+dOtru41kNRYsS02CGfgvegY/fgsudz/SAqfOg
+# VxQzigm1r6DDwgHHUxGmJyXS6qc3RQe6eaO28WH8hot2asVK5mVGLdGYCT5fJ33Q
+# kt7HTq/3vg==
 # SIG # End signature block

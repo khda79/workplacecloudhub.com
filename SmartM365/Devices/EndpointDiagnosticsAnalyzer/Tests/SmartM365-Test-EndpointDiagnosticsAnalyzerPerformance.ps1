@@ -1,9 +1,9 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
     Isolated regression tests for analysis cache, progress and coverage.
 .VERSION
-    0.3.0
+    0.3.1
 #>
 [CmdletBinding()]
 param()
@@ -104,7 +104,7 @@ try {
     Assert-True ($capped.ScannedLogCount -eq 1 -and $capped.UnprocessedFileCount -eq 3) 'Cap coverage is misleading.'
     $guiText=Get-Content -LiteralPath $guiPath -Raw
     Assert-True ($guiText.Contains('$currentEnrollmentCount candidates / $enrollmentCount records')) 'Enrollment candidates are overclaimed.'
-    [pscustomobject]@{Result='PASS';PackageVersion='0.3.0';PowerShellVersion=[string]$PSVersionTable.PSVersion;RegistrySubtree=$true;CacheInvalidation=$true;CachePathRebinding=$true;EmptyCache=$true;CurrentPhaseProgress=$true;EvtxCoverage=$true;EnrollmentLabels=$true}
+    [pscustomobject]@{Result='PASS';PackageVersion=([string]([IO.File]::ReadAllText((Join-Path (Split-Path $PSScriptRoot -Parent) 'SmartM365-EndpointDiagnosticsAnalyzer.version.json.txt')) | ConvertFrom-Json).PackageVersion);PowerShellVersion=[string]$PSVersionTable.PSVersion;RegistrySubtree=$true;CacheInvalidation=$true;CachePathRebinding=$true;EmptyCache=$true;CurrentPhaseProgress=$true;EvtxCoverage=$true;EnrollmentLabels=$true}
 } finally {
     if (Test-Path -LiteralPath $AnalysisProgressPath) { Remove-Item -LiteralPath $AnalysisProgressPath -Force }
     $resolved=[IO.Path]::GetFullPath($tempRoot)
@@ -117,8 +117,8 @@ try {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCADPj4S62YXhp1J
-# kOarecpFh3QdZUQTvOOhB3CVVF28DaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBNXiPcmpW1c2Hy
+# Lp9iS2E9EA5bwxBib4WedbyRueKqbKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -251,31 +251,31 @@ try {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIF4GjnNMfME52kqwlBFoLRUUzNEJYiHFXfGY3hshq/KtMA0GCSqG
-# SIb3DQEBAQUABIIBgCMfb1qO21+icT+1eMLRUZXWR0t30nnkXT4QrYh3O8vluKeA
-# xDQL2LqyfsB4HXJ/TlylHPeVAXN7SvAWf2jdxdII5oDHEv2xTY+svm0s+hU/c2TU
-# BqNI6urVPjSNg/IN6pi90dF6JiWQ6vTf+FBX7lUTqvLBgPCceOdge6AdBNREP3mz
-# 9WhFWQTbysU2FcMTfOkT9YyK3DM9ptL/AqsrnrR+ViJlkH8E4GV+PEXsUovnGUfe
-# nRosA7+/Frc5YtzmBjXmCC5i3S9gUv8ujyvdFq0z16UAOp+WiUWsoW/EPDNrdKR7
-# D3VpGIbDnjfl+R+AR4rhVkqSRDAPUwrE56lZjkQmNlmPvU4pmMSa01iaIDFiywr+
-# uOe497KAwyikpXmgPzyyd08UkeftQgKd3G+7cgGk4t5FM3FXS5RyQMl+gVzcLqGB
-# /V/NCm9wH5C7DQNiE5IAInv5kk45N5jirJ3Wbw9m1gFKcOCJjgTsEIIVQ86WPYok
-# jMYtcJIfJoHRTO6zH6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIJsPDKK6GS24JzLn+DShx0NHmLT6qa6hKllucRWiNWCqMA0GCSqG
+# SIb3DQEBAQUABIIBgH2aWvQX/wG0qMFOegw6vGqCqQZWniOLErON0Nde0djVV3SE
+# jGqPMvWyeNUxtHZuaVVqXTPTYgoC54TMp2sOlcLHA+SQYfmhR1IwfM+SxOJLQB0E
+# auUYTn51jBp0tjpSWr5fDkt59zylrCnesAKUmIWmwMPT0aOffZ5zYr9+TeGrF04z
+# Yh3SmtLSljqeGGKtfuaIExcYEmZZVw+YOCst1gjSlqJB+5ty355LvESnj35zv4GG
+# a/qH77kJ8Bv6Hr7LkCPwdONTOyGXjYhsff/y7CdeMr7PqcU3r5C6bsLIOTZkzjos
+# kjRc4A+CjECDif9hP0Gp8ugXOQnq2+IEU8e2lVoWjZv36MYRZFvC8/Gg+bC3uEhh
+# 02dAB5RQHOKImCetu/rhrPR5ot9U+YGoyVJ9QOHuBMUg7x5lcgx1rs+Bm+4vyGw5
+# 9YdImiLVz182ft9I5udANPIeYa7JGTgN+3cqBMB7Pax0XUHSpJ8cA4uQodMvBjmo
+# Xn4iuJrFXeaUkStP4qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MDQxNTQw
-# MzlaMC8GCSqGSIb3DQEJBDEiBCAhuQs+VTBsscNjG9QXhjM49myS90gYPs+wcuSm
-# oOjMOTANBgkqhkiG9w0BAQEFAASCAgBijQBbeuIPLi1/+VWzq5XvI4HlfpptpGTe
-# Kzc1BlzqTSOz7BnNn+/sb0Rl18hs9zhngKfINDHjixbH75ITd5soQG9jJpVI06kg
-# 7hTVVrIMm1KJquSY7ncw1AstPwoGZoz09jplrwxOFKoZhmpA1uMCSOSzPTtTLSqV
-# 9gfaqt90rODWlWC1vvu0U5J1GcAB39nukxX4TomiuXZWUk1laEDi2Kl+Aht6YMgT
-# cC1ZBHTTR93O+0ASiv3Z4hNQO/kcqhoN+QSU2SUtOKFR+ewDTa7wnMdKwrUP6Iui
-# MMkHcRjXnq48PDwtNlDvgc3XJ+hOCo9cE3lj/GvHQY7ry/w41La1THeYwuLe1Hme
-# X95f/wfbGnYyy1Wgr44Zw9LlQNWRtxP7l5USA3UuFv4jHkkEx4ZF2z0mTP9sVztV
-# nspaEhDz26LNHbiH2286+/W/UPiEfqlX1KTEhXZ8J8KB3VnZIy+8GlXPs1YNNqlk
-# +uVhAJ2ZQcT/cCnVKmi12GCqaA9TdvtC84tWWXfmGALpPJM00aI7r9IhdjyC5PhG
-# 8CIY/KQ7J5VvrH00HEsr55DkNC33uzt6X31CLtXbAGV2WhaiisQNDaq85K/W8WQ5
-# vyXQDJkPxOFqm7ynHPZ5Y7zX3AeLrmHpL3u4SZ9VZtQYgPanuBfI8MsdDmALPpDy
-# G9mXZRshAw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTgwMzI1
+# MDVaMC8GCSqGSIb3DQEJBDEiBCDQCDQzirlah/9H0qGorQJM29c4ScKZiteBBfNq
+# BFYOszANBgkqhkiG9w0BAQEFAASCAgArhlSBvX5QOT/8YAHJZEZtf+fyS9nno6Sc
+# yrdPzQe1BgqwGilY09UERKLUV86X2SVLWuwtreXTeAZ+F2zqIltvu93GQpi/Hzdb
+# DhdfOuAmMWiWznJE2OaT9OpQRe0NyQFafH8WsWmHlpqfTAIoSpzigzAX/uVj+GFh
+# yAsAeDNhbL5pV7af+OllB8yGsTCKZMciIrZpRBwX3Hs4rXowZxw1t7sLuDwi36Qj
+# kWmaG9xqTvBmBxnPj54am+lVz08CJqXUcAnHtsZTHPqUdwSaSrOwwF9yqugM7wHK
+# RWns4uXo0qlQNJo1/QMfbO3wVlOWWoc/TpA+Q2+Og5NOVv4qppt8316Jyr2XIrt6
+# JuEr6bg46qIlrmwQTxmNM2LGk6dQBx3/mtUkdFOU5PrL7RKa5lZAdIb6s8RHzE75
+# AKYnJDhxU4pk3Ue9SI+vF87KUhCbr1Pgklpbx0wyYijHDDc0G4R2jzUTu/dtpuyB
+# SQasFmYbLlg/4Itu6rPvH2Iuvmv2vwrR0E0QuXCpUJv7AAvtsaddtUaAlawdJyPJ
+# NNHFztrlleb9Qq3FvwYpNY9etU+w3MXONm3DGkEdtmP0ruDWMTPFHRQ6/6VXOAIG
+# nO8hgoseRew7zZefAsPxB5FKjp5IiJBuC+tJSzGrj8KKQR2eqiNf/yBTZaxyEbpQ
+# tMJCOIDVvw==
 # SIG # End signature block
