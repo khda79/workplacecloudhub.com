@@ -2,7 +2,7 @@
 .SYNOPSIS
     Regression checks for inventory data fidelity, paged reads and workbook snapshots.
 .VERSION
-    1.0.4
+    1.0.5
 #>
 #Requires -Version 7.4
 $ErrorActionPreference = 'Stop'
@@ -35,7 +35,7 @@ foreach ($file in Get-ChildItem (Join-Path $root 'Scripts/Inventory') -Filter '*
     }
 }
 $permission=Join-Path $root 'Scripts/Inventory/SmartM365-SharePointTarget-PermissionInventory.ps1'
-Import-TestFunction $permission @('Connect-ToSPOWeb','Get-PnPGroupTitle','Get-AssociatedWebGroupNames','Invoke-SPORead','Get-SPOExceptionDetails','Get-SPORoleAssignmentIdentity','Get-RoleAssignmentRows','Get-PrincipalInfo','Get-PrincipalMembershipInfo','Get-EmptyPrincipalMembershipInfo','Add-SPOInheritanceRead','Get-SPOPageInheritance','Write-SPOItemError','Get-SPOPermissionListPage','Export-SPOPermissionPage','Export-ItemPermissionInventory','Write-InventoryError')
+Import-TestFunction $permission @('Connect-ToSPOWeb','Get-PnPGroupTitle','Get-AssociatedWebGroupNames','Invoke-SPORead','Get-SPOExceptionDetails','Get-SPORoleAssignmentIdentity','Get-RoleAssignmentRows','Get-PrincipalInfo','Get-PrincipalMembershipInfo','Get-EmptyPrincipalMembershipInfo','Add-SPOInheritanceRead','Get-SPOPageInheritance','Initialize-SPORoleAssignmentBatch','Write-SPOItemError','Get-SPOPermissionListPage','Export-SPOPermissionPage','Export-ItemPermissionInventory','Write-InventoryError')
 $script:SPOPermissionConnection='fixture'
 $script:SPOInheritanceLoad=$null; $script:SPOInheritanceItemType=$null
 $script:AssociatedWebGroupCache=@{}
@@ -143,6 +143,14 @@ try {
         }
     }
     Remove-Item $script:ErrorPath; $script:ErrorCsvCreated=$false
+    # Preloaded role assignments (batched path) must produce exactly the rows of the
+    # per-assignment path, without any further per-assignment request.
+    $script:RoleCalls=@{17=0;18=0}; $script:RoleFault='None'
+    $readRows=@(Get-RoleAssignmentRows -ObjectScope 'Item' -ObjectUrl 'https://example.test/sites/a/docs/folder' -ObjectTitle 'Fixture folder' -ItemId 501 -RoleAssignments $roles)
+    $script:RoleCalls=@{17=0;18=0}
+    $preloadedRows=@(Get-RoleAssignmentRows -ObjectScope 'Item' -ObjectUrl 'https://example.test/sites/a/docs/folder' -ObjectTitle 'Fixture folder' -ItemId 501 -RoleAssignments $roles -Preloaded)
+    Assert-True ($script:RoleCalls[17] -eq 0 -and $script:RoleCalls[18] -eq 0) 'Preloaded role assignments were read again one by one.'
+    Assert-True (($preloadedRows | ConvertTo-Json -Depth 3) -ceq ($readRows | ConvertTo-Json -Depth 3)) 'Preloaded role assignments changed the exported permission rows.'
 
     Add-Type @'
 using System;
@@ -326,6 +334,25 @@ public class ReliabilityContext {
     Export-ItemPermissionInventory -Web $web -List $list -CsvPath 'fixture.csv' -ProgressInterval 200
     $record=@(Import-Csv $script:ErrorPath -Delimiter ';')
     Assert-True ($script:Context.Queries -eq 2 -and $script:ErrorCsvCreated -and $script:Exported.Count -eq 0 -and $record[0].Message -match 'IDs 101-200.*Access denied') 'A failed middle batch was retried, silently accepted or lacked request context.'
+    # Batched role-assignment reads: two requests per 20 unique items; a batch that fails
+    # without a transient cause is left to the unchanged one-by-one path.
+    Add-Type @'
+public class BatchRoleContext {
+ public int Queries; public int Loads; public int FailQuery;
+ public void Load(object target) { Loads++; }
+ public void ExecuteQuery() { Queries++; if (Queries == FailQuery) throw new System.Exception("Access denied"); }
+}
+'@
+    $batchItems=@(foreach($id in 1..45) { [pscustomobject]@{ Id=$id; RoleAssignments=@($roles) } })
+    $script:Context=[BatchRoleContext]::new()
+    $loaded=Initialize-SPORoleAssignmentBatch -Items $batchItems -ListTitle 'Docs'
+    Assert-True ($loaded.Count -eq 45 -and $script:Context.Queries -eq 6 -and $script:Context.Loads -eq (45 + 45 * 2 * 2)) 'Role assignments were not read in two requests per batch of 20 items.'
+    $script:Context=[BatchRoleContext]::new(); $script:Context.FailQuery=3; $script:Delays.Clear()
+    $loaded=Initialize-SPORoleAssignmentBatch -Items $batchItems -ListTitle 'Docs'
+    Assert-True ($loaded.Count -eq 25 -and -not $loaded.Contains(21) -and -not $loaded.Contains(40) -and $loaded.Contains(41) -and $script:Delays.Count -eq 0) 'A failed batch was retried, preloaded, or stopped later batches.'
+    $loaded=Initialize-SPORoleAssignmentBatch -Items @() -ListTitle 'Docs'
+    Assert-True ($loaded.Count -eq 0) 'An empty page did not return an empty preload set.'
+
     $source=[IO.File]::ReadAllText($permission)
     Assert-True ($source -match 'if \(\$script:ErrorCsvCreated\)\s*\{\s*throw') 'Incomplete inventory publication guard was removed.'
 

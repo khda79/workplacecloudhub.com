@@ -37,7 +37,7 @@
     .\SmartM365-SharePointSource-FileInventory.ps1 -WebApplicationUrl "https://intranet" -IncludePermissionInventory
 
 .VERSION
-    1.0.9
+    1.0.10
 #>
 
 [CmdletBinding(DefaultParameterSetName = 'WebApplication')]
@@ -216,21 +216,29 @@ function Convert-SPFieldUserValueToString {
         return $null
     }
 
+    # Author/Editor repeat on most rows; resolving the SPUser costs a database round trip.
+    # The same raw "ID;#Name" value in the same site collection always resolves identically.
+    $cacheKey = '{0}|{1}' -f $Web.Site.ID, [string]$Value
+    if ($script:UserValueCache.ContainsKey($cacheKey)) {
+        return $script:UserValueCache[$cacheKey]
+    }
+
+    $result = [string]$Value
     try {
         $userValue = New-Object Microsoft.SharePoint.SPFieldUserValue($Web, [string]$Value)
         if ($userValue.User -and $userValue.User.Email) {
-            return ("{0} <{1}>" -f $userValue.User.Name, $userValue.User.Email)
+            $result = "{0} <{1}>" -f $userValue.User.Name, $userValue.User.Email
         }
-
-        if ($userValue.LookupValue) {
-            return $userValue.LookupValue
+        elseif ($userValue.LookupValue) {
+            $result = $userValue.LookupValue
         }
     }
     catch {
-        return [string]$Value
+        $result = [string]$Value
     }
 
-    return [string]$Value
+    $script:UserValueCache[$cacheKey] = $result
+    return $result
 }
 
 function Test-SystemLibrary {
@@ -993,6 +1001,8 @@ if (Test-Path -LiteralPath $LogPath) {
 
 $script:ErrorPath = $ErrorPath
 $script:CsvCreated = $false
+# Ordinal (case-sensitive) keys: a cached value is returned only for the exact same raw value.
+$script:UserValueCache = New-Object 'System.Collections.Generic.Dictionary[string,string]' ([StringComparer]::Ordinal)
 $script:ErrorCsvCreated = $false
 $script:TranscriptStarted = $false
 $script:InventoryStopRequested = $false

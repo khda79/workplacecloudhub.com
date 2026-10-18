@@ -10,7 +10,7 @@
     as possible so both inventories can be compared.
 
 .VERSION
-    1.1.8
+    1.1.9
 #>
 
 [CmdletBinding(DefaultParameterSetName = 'WebUrlsFile')]
@@ -659,7 +659,9 @@ function Get-RoleAssignmentRows {
         [string]$ItemFileSystemObjectType,
         [bool]$HasUniqueRoleAssignments,
         [string]$InheritedFrom,
-        $RoleAssignments
+        $RoleAssignments,
+        # Member and RoleDefinitionBindings were already loaded by Initialize-SPORoleAssignmentBatch.
+        [switch]$Preloaded
     )
 
     $assignmentIndex = 0
@@ -667,10 +669,15 @@ function Get-RoleAssignmentRows {
         $assignmentIndex++
         try {
             $label = "role assignment #{0} on '{1}' ({2})" -f $assignmentIndex, $ObjectUrl, (Get-SPORoleAssignmentIdentity $roleAssignment)
-            $properties = Invoke-SPORead -Label $label -Operation {
-                Get-PnPProperty -ClientObject $roleAssignment -Property Member,RoleDefinitionBindings -Connection $script:SPOPermissionConnection -ErrorAction Stop | Out-Null
-                # Multiple-property loads populate the client object without returning values.
+            $properties = if ($Preloaded) {
                 [pscustomobject]@{ Member = $roleAssignment.Member; Bindings = @($roleAssignment.RoleDefinitionBindings) }
+            }
+            else {
+                Invoke-SPORead -Label $label -Operation {
+                    Get-PnPProperty -ClientObject $roleAssignment -Property Member,RoleDefinitionBindings -Connection $script:SPOPermissionConnection -ErrorAction Stop | Out-Null
+                    # Multiple-property loads populate the client object without returning values.
+                    [pscustomobject]@{ Member = $roleAssignment.Member; Bindings = @($roleAssignment.RoleDefinitionBindings) }
+                }
             }
             $member = $properties.Member
             $bindings = @($properties.Bindings)
@@ -788,6 +795,8 @@ function Export-SPOPermissionPage {
     $rootFolder = Invoke-SPORead -Label "RootFolder collection" -Operation { Get-PnPProperty -ClientObject $List -Property RootFolder -Connection $script:SPOPermissionConnection -ErrorAction Stop }
     $listUrl = ConvertTo-AbsoluteSharePointUrl -WebUrl $Web.Url -ServerRelativeUrl $rootFolder.ServerRelativeUrl
     $inheritance = Get-SPOPageInheritance -PageItems $PageItems -Web $Web -List $List -ListUrl $listUrl
+    $uniqueItems = @($PageItems | Where-Object { $inheritance.ContainsKey([int]$_.Id) -and $inheritance[[int]$_.Id] })
+    $preloaded = Initialize-SPORoleAssignmentBatch -Items $uniqueItems -ListTitle $List.Title
     foreach ($item in $PageItems) {
         $State.Processed++
         $State.LastItem = "ID $($item.Id)"
@@ -797,7 +806,9 @@ function Export-SPOPermissionPage {
             }
             if (-not $inheritance.ContainsKey([int]$item.Id) -or -not $inheritance[[int]$item.Id]) { continue }
             $State.Unique++
-            $roleAssignments = Invoke-SPORead -Label "RoleAssignments collection" -Operation { Get-PnPProperty -ClientObject $item -Property RoleAssignments -Connection $script:SPOPermissionConnection -ErrorAction Stop }
+            $isPreloaded = $preloaded.Contains([int]$item.Id)
+            $roleAssignments = if ($isPreloaded) { @($item.RoleAssignments) }
+                else { Invoke-SPORead -Label "RoleAssignments collection" -Operation { Get-PnPProperty -ClientObject $item -Property RoleAssignments -Connection $script:SPOPermissionConnection -ErrorAction Stop } }
             $serverRelativeUrl = [string]$item.FieldValues.FileRef
             $absoluteUrl = ConvertTo-AbsoluteSharePointUrl -WebUrl $Web.Url -ServerRelativeUrl $serverRelativeUrl
             $fsObjType = if ([string]$item.FieldValues.FSObjType -eq '1') { 'Folder' } else { 'FileOrItem' }
@@ -828,7 +839,8 @@ function Export-SPOPermissionPage {
                     -ItemFileSystemObjectType $fsObjType `
                     -HasUniqueRoleAssignments $true `
                     -InheritedFrom '' `
-                    -RoleAssignments $roleAssignments)
+                    -RoleAssignments $roleAssignments `
+                    -Preloaded:$isPreloaded)
 
             Export-PermissionRows -Rows $rows -CsvPath $CsvPath
             $State.Exported += $rows.Count
@@ -837,6 +849,42 @@ function Export-SPOPermissionPage {
             Write-SPOItemError -Item $item -Web $Web -List $List -ListUrl $listUrl -Message $_.Exception.Message
         }
     }
+}
+
+function Initialize-SPORoleAssignmentBatch {
+    # Read the role assignments, members and permission levels of several unique items in
+    # two requests, instead of one request per item plus one per assignment. Items of a
+    # batch that still fails after retries are read one by one as before, with the same
+    # retries and error records, so no permission row is lost or changed.
+    param($Items, [string]$ListTitle)
+    $preloaded = New-Object 'System.Collections.Generic.HashSet[int]'
+    $pending = @($Items)
+    if ($pending.Count -eq 0) { return ,$preloaded }
+    $context = Get-PnPContext -Connection $script:SPOPermissionConnection
+    $batchSize = 20
+    for ($offset = 0; $offset -lt $pending.Count; $offset += $batchSize) {
+        $last = [Math]::Min($offset + $batchSize - 1, $pending.Count - 1)
+        $batch = @($pending[$offset..$last])
+        $label = "role assignment batch in {0} ({1} items; IDs {2}-{3})" -f $ListTitle, $batch.Count, $batch[0].Id, $batch[-1].Id
+        try {
+            Invoke-SPORead -Label $label -Operation {
+                foreach ($item in $batch) { $context.Load($item.RoleAssignments) }
+                $context.ExecuteQuery()
+                foreach ($item in $batch) {
+                    foreach ($assignment in $item.RoleAssignments) {
+                        $context.Load($assignment.Member)
+                        $context.Load($assignment.RoleDefinitionBindings)
+                    }
+                }
+                $context.ExecuteQuery()
+            } | Out-Null
+            foreach ($item in $batch) { [void]$preloaded.Add([int]$item.Id) }
+        }
+        catch {
+            Write-ConsoleWarning -Message ("Batched {0} failed; reading these items one by one: {1}" -f $label, (Get-SPOExceptionDetails $_.Exception))
+        }
+    }
+    return ,$preloaded
 }
 
 function Add-SPOInheritanceRead {
