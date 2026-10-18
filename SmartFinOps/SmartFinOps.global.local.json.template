@@ -21,5 +21,8 @@
     "FreshnessDailyHours": 48,
     "FreshnessWeeklyDays": 8,
     "ArchiveRetentionRuns": 30
+  },
+  "Report": {
+    "ShowbackMinimumGroupUsers": 5
   }
 }
