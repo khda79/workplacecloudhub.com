@@ -87,7 +87,7 @@ $history=Get-ActivityClassification -ActivityRow $cloud -AdRow $ad -AsOfDate ([d
 Assert-Test ($null -eq $history.ConsoleLastActivityDate -and $history.ActivitySource -eq 'Active Directory + Microsoft 365') 'The historical classification consumed the current console snapshot.'
 Assert-Test ((Get-ActivityClassification -ActivityRow $emptyCloud -AsOfDate $asOf.UtcDateTime.Date).ActivityState -eq 'Observed never used') 'Historical legacy classification was silently rewritten.'
 $pipeline=[IO.File]::ReadAllText((Join-Path $PSScriptRoot 'Invoke-PreparedEvidenceBuild.ps1'))
-Assert-Test ($pipeline.IndexOf("Run 'Devices' 'New-DeviceInventoryEvidence.ps1'") -lt $pipeline.IndexOf("Run 'Workforce' 'New-WorkforceIdentityEvidence.ps1'")) 'Workforce runs before current staged device evidence.'
+Assert-Test ($pipeline.IndexOf("Add-Task 'DeviceInventory' 'Devices' 'New-DeviceInventoryEvidence.ps1'") -lt $pipeline.IndexOf("Add-Task 'Workforce' 'Workforce' 'New-WorkforceIdentityEvidence.ps1'") -and $pipeline.Contains("Add-Task 'Workforce' 'Workforce' 'New-WorkforceIdentityEvidence.ps1' `$wf -DependsOn 'DeviceInventory'")) 'Workforce runs before current staged device evidence.'
 Assert-Test ($pipeline.Contains("'-SystemEvidencePath',(OutPath 'DeviceSystemEvidence')")) 'The prepared console source is not wired to workforce.'
 $historyCall=@($ast.FindAll({param($n) $n -is [Management.Automation.Language.AssignmentStatementAst] -and $n.Left.Extent.Text -eq '$weekClassification'},$true))
 Assert-Test ($historyCall.Count -eq 1 -and $historyCall[0].Extent.Text -notmatch 'ConsoleActivity|IncludeConsole') 'Historical weeks receive today console evidence.'

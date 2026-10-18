@@ -1,4 +1,4 @@
-# Version 1.2.0: license decisions come from the SmartInventory Licences report; New-LicensingEvidence is retired.
+# Version 1.3.0: independent generators can run in parallel (MaxParallelGenerators); 1 keeps the sequential order.
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)][string]$DataRoot,
@@ -22,11 +22,14 @@ param(
     [double]$DailyTrendsPartialThresholdPercent = 1,
     [int]$DailyTrendsPersistentAbsenceObservations = 7,
     # Optional reference clock passed to every generator; omitted means each generator uses the current time.
-    [Nullable[datetimeoffset]]$AsOfUtc
+    [Nullable[datetimeoffset]]$AsOfUtc,
+    # 1 runs the generators one after another with live output; higher values run independent
+    # generators concurrently, each in its own child process, and print each log when it completes.
+    [ValidateRange(1,8)][int]$MaxParallelGenerators = 1
 )
 
 # Offline preparation only. No collection, upload, Desktop control or promotion.
-# Each child process releases its memory before the next domain starts.
+# Each child process releases its memory when its domain completes.
 $ErrorActionPreference = 'Stop'
 $DataRoot = (Resolve-Path -LiteralPath $DataRoot).ProviderPath
 $last = Join-Path $DataRoot 'DATA-LAST'
@@ -39,13 +42,12 @@ New-Item -ItemType Directory -Path $OutputRoot -Force | Out-Null
 $shell = (Get-Process -Id $PID).Path
 if ($PSVersionTable.PSVersion.Major -lt 7) { throw 'PowerShell 7 is required.' }
 function OutPath([string]$Name) { Join-Path $OutputRoot ($Name + '.csv') }
-function Run([string]$Domain, [string]$Script, [object[]]$Arguments) {
+# Generators in their sequential order. DependsOn names the tasks whose staged outputs a
+# generator reads; a dependency excluded by -Only is treated as already staged.
+$script:tasks = [Collections.Generic.List[object]]::new()
+function Add-Task([string]$Id, [string]$Domain, [string]$Script, [object]$Arguments, [string[]]$DependsOn = @(), [scriptblock]$BeforeStart, [switch]$Native) {
     if ($Only -ne 'All' -and $Only -ne $Domain) { return }
-    $started = [datetime]::UtcNow
-    Write-Host ('[{0:O}] Starting {1}' -f $started, $Domain)
-    & $shell -NoProfile -File (Join-Path $PSScriptRoot $Script) @Arguments
-    if ($LASTEXITCODE -ne 0) { throw "Preparation failed: $Domain (exit $LASTEXITCODE). Nothing was published." }
-    Write-Host ('[{0:O}] Completed {1}: {2:n1} seconds' -f [datetime]::UtcNow, $Domain, ([datetime]::UtcNow - $started).TotalSeconds)
+    $script:tasks.Add([pscustomobject]@{Id=$Id;Domain=$Domain;Script=$Script;Arguments=$Arguments;DependsOn=@($DependsOn);BeforeStart=$BeforeStart;Native=[bool]$Native})
 }
 $clockArgs=@();$clockDateArgs=@();$clockUtcArgs=@()
 if ($null -ne $AsOfUtc) {
@@ -66,18 +68,17 @@ if ($Only -in @('All','Workforce') -and -not $ReuseStagedWorkforce -and $Account
     if ($null -ne $AccountClassificationExpectedBytes) { $classificationCheck.ExpectedBytes=$AccountClassificationExpectedBytes }
     $classificationStart = Test-PreparedClassificationCapture @classificationCheck
 }
-Run 'Estate' 'New-EnterpriseEstateEvidence.ps1' (@('-DataRoot',$DataRoot,'-OutputRoot',$OutputRoot)+$countryArgs)
+Add-Task 'Estate' 'Estate' 'New-EnterpriseEstateEvidence.ps1' (@('-DataRoot',$DataRoot,'-OutputRoot',$OutputRoot)+$countryArgs)
 if ($Only -eq 'All') {
     if (-not $NativeEvidenceAuditPath) { throw 'Unified preparation requires a receipt-qualified native capture audit.' }
-    Import-Module (Join-Path $PSScriptRoot 'NativeEvidence.psm1') -Force
-    Invoke-NativeEvidenceStage -LastRoot $last -TenantKey $TenantKey -AuditPath $NativeEvidenceAuditPath -OutputRoot $OutputRoot -PythonCommand $PythonCommand
+    Add-Task 'Native' 'All' $null @{LastRoot=$last;TenantKey=$TenantKey;AuditPath=$NativeEvidenceAuditPath;OutputRoot=$OutputRoot;PythonCommand=$PythonCommand} -Native
 }
 $deviceArgs=@('-DataRoot',$DataRoot,'-OutputPath',(OutPath 'DeviceInventoryEvidence'),'-SignalsOutputPath',(OutPath 'DeviceRiskEvidenceSummary'),'-DirectorySummaryOutputPath',(OutPath 'DeviceDirectorySummary'),'-SystemEvidenceOutputPath',(OutPath 'DeviceSystemEvidence'))
 if ($null -ne $DeviceSystemMaxObservationAgeHours) { $deviceArgs+=@('-DeviceSystemMaxObservationAgeHours',$DeviceSystemMaxObservationAgeHours) }
 if ($DeviceSystemOffsetlessGraphTimeZoneId) { $deviceArgs+=@('-DeviceSystemOffsetlessGraphTimeZoneId',$DeviceSystemOffsetlessGraphTimeZoneId) }
 $deviceArgs+=$clockArgs
 # Current workforce may use the current staged console evidence, never a future snapshot in history.
-Run 'Devices' 'New-DeviceInventoryEvidence.ps1' $deviceArgs
+Add-Task 'DeviceInventory' 'Devices' 'New-DeviceInventoryEvidence.ps1' $deviceArgs
 $wf = @('-DataRoot',$DataRoot,'-UserOutputPath',(OutPath 'UserInventoryEvidence'),'-HistoryOutputPath',(OutPath 'UserActivityHistoryEvidence'),'-TrendOutputPath',(OutPath 'WorkforceTrendEvidence'),'-IdentityOutputPath',(OutPath 'IdentityReconciliationEvidence'),'-SignalsOutputPath',(OutPath 'WorkforceOperationalSignals'))
 if ($Only -eq 'All') { $wf+=@('-SystemEvidencePath',(OutPath 'DeviceSystemEvidence')) }
 if ($AccountClassificationConfigPath) { $wf += @('-AccountClassificationConfigPath',$AccountClassificationConfigPath) }
@@ -88,35 +89,118 @@ if ($ReuseStagedWorkforce) {
         if (-not (Test-Path -LiteralPath (OutPath $name))) { throw "Missing staged workforce output: $name" }
     }
 } else {
+    $beforeWorkforce = $null
     if ($null -ne $classificationStart) {
-        $null = Test-PreparedClassificationCapture -Path $AccountClassificationConfigPath -Stage 'BeforeWorkforce' -ExpectedSHA256 $classificationStart.SHA256 -ExpectedBytes $classificationStart.Bytes
+        $beforeWorkforce = { $null = Test-PreparedClassificationCapture -Path $AccountClassificationConfigPath -Stage 'BeforeWorkforce' -ExpectedSHA256 $classificationStart.SHA256 -ExpectedBytes $classificationStart.Bytes }
     }
-    Run 'Workforce' 'New-WorkforceIdentityEvidence.ps1' $wf
+    Add-Task 'Workforce' 'Workforce' 'New-WorkforceIdentityEvidence.ps1' $wf -DependsOn 'DeviceInventory' -BeforeStart $beforeWorkforce
 }
 if ($EndpointProtectionPolicyPath) {
-    Run 'Devices' 'New-EndpointProtectionEvidence.ps1' (@('-DataRoot',$DataRoot,'-InventoryEvidencePath',(OutPath 'DeviceInventoryEvidence'),'-SystemEvidencePath',(OutPath 'DeviceSystemEvidence'),'-PolicyPath',$EndpointProtectionPolicyPath,'-OutputRoot',$OutputRoot)+$clockArgs)
+    Add-Task 'EndpointProtection' 'Devices' 'New-EndpointProtectionEvidence.ps1' (@('-DataRoot',$DataRoot,'-InventoryEvidencePath',(OutPath 'DeviceInventoryEvidence'),'-SystemEvidencePath',(OutPath 'DeviceSystemEvidence'),'-PolicyPath',$EndpointProtectionPolicyPath,'-OutputRoot',$OutputRoot)+$clockArgs) -DependsOn 'DeviceInventory'
 }
-Run 'Devices' 'New-WindowsMigrationEvidence.ps1' (@('-DataRoot',$DataRoot,'-PreparedInventoryPath',(OutPath 'DeviceInventoryEvidence'),'-OutputRoot',$OutputRoot)+$countryArgs)
-Run 'Devices' 'New-DeviceLifecycleExperienceTrendEvidence.ps1' @('-DataRoot',$DataRoot,'-WindowsOutputPath',(OutPath 'WindowsLifecycleTrendEvidence'),'-EndpointOutputPath',(OutPath 'EndpointExperienceTrendEvidence'))
-Run 'Applications' 'New-ApplicationInventoryEvidence.ps1' @('-DataRoot',$DataRoot,'-InventoryOutputPath',(OutPath 'ApplicationInventoryEvidence'),'-TrendOutputPath',(OutPath 'ApplicationTrendEvidence'))
-Run 'Collaboration' 'New-CollaborationEvidence.ps1' (@('-DataRoot',$DataRoot,'-AdoptionOutputPath',(OutPath 'CollaborationAdoptionEvidence'),'-ObjectOutputPath',(OutPath 'CollaborationObjectEvidence'),'-TrendOutputPath',(OutPath 'CollaborationTrendEvidence'))+$clockArgs)
-Run 'Content' 'New-ContentStorageEvidence.ps1' (@('-DataRoot',$DataRoot,'-ObjectOutputPath',(OutPath 'ContentStorageEvidence'),'-TrendOutputPath',(OutPath 'ContentStorageTrendEvidence'))+$clockArgs)
-Run 'Mailbox' 'New-MailboxEvidence.ps1' @('-DataRoot',$last,'-UserEvidencePath',(OutPath 'UserInventoryEvidence'),'-OutputPath',(OutPath 'MailboxEvidence'))
+Add-Task 'WindowsMigration' 'Devices' 'New-WindowsMigrationEvidence.ps1' (@('-DataRoot',$DataRoot,'-PreparedInventoryPath',(OutPath 'DeviceInventoryEvidence'),'-OutputRoot',$OutputRoot)+$countryArgs) -DependsOn 'DeviceInventory'
+Add-Task 'DeviceLifecycle' 'Devices' 'New-DeviceLifecycleExperienceTrendEvidence.ps1' @('-DataRoot',$DataRoot,'-WindowsOutputPath',(OutPath 'WindowsLifecycleTrendEvidence'),'-EndpointOutputPath',(OutPath 'EndpointExperienceTrendEvidence'))
+Add-Task 'Applications' 'Applications' 'New-ApplicationInventoryEvidence.ps1' @('-DataRoot',$DataRoot,'-InventoryOutputPath',(OutPath 'ApplicationInventoryEvidence'),'-TrendOutputPath',(OutPath 'ApplicationTrendEvidence'))
+Add-Task 'Collaboration' 'Collaboration' 'New-CollaborationEvidence.ps1' (@('-DataRoot',$DataRoot,'-AdoptionOutputPath',(OutPath 'CollaborationAdoptionEvidence'),'-ObjectOutputPath',(OutPath 'CollaborationObjectEvidence'),'-TrendOutputPath',(OutPath 'CollaborationTrendEvidence'))+$clockArgs)
+Add-Task 'Content' 'Content' 'New-ContentStorageEvidence.ps1' (@('-DataRoot',$DataRoot,'-ObjectOutputPath',(OutPath 'ContentStorageEvidence'),'-TrendOutputPath',(OutPath 'ContentStorageTrendEvidence'))+$clockArgs)
+Add-Task 'Mailbox' 'Mailbox' 'New-MailboxEvidence.ps1' @('-DataRoot',$last,'-UserEvidencePath',(OutPath 'UserInventoryEvidence'),'-OutputPath',(OutPath 'MailboxEvidence')) -DependsOn 'Workforce'
 $dailyTrendArgs=@('-DataRoot',$DataRoot,'-OutputRoot',$OutputRoot,'-PythonCommand',$PythonCommand,'-PartialThresholdPercent',[string]$DailyTrendsPartialThresholdPercent,'-PersistentAbsenceObservations',[string]$DailyTrendsPersistentAbsenceObservations)
 if($DailyTrendsQualificationPath){$dailyTrendArgs+=@('-QualificationPath',$DailyTrendsQualificationPath)}
-Run -Domain 'DailyTrends' -Script 'New-DailyTrendsEvidence.ps1' -Arguments $dailyTrendArgs
-Run 'Security' 'New-SecurityEvidence.ps1' (@('-DataRoot',$last,'-ExtendedEvidenceRoot',$last,'-UserEvidencePath',(OutPath 'UserInventoryEvidence'),'-DeviceEvidencePath',(OutPath 'DeviceInventoryEvidence'),'-OutputPath',(OutPath 'SecurityControlEvidence'))+$clockUtcArgs)
-Run 'Backup' 'New-BackupResilienceEvidence.ps1' (@('-DataRoot',$last,'-OutputRoot',$OutputRoot)+$clockDateArgs)
+Add-Task 'DailyTrends' 'DailyTrends' 'New-DailyTrendsEvidence.ps1' $dailyTrendArgs
+Add-Task 'Security' 'Security' 'New-SecurityEvidence.ps1' (@('-DataRoot',$last,'-ExtendedEvidenceRoot',$last,'-UserEvidencePath',(OutPath 'UserInventoryEvidence'),'-DeviceEvidencePath',(OutPath 'DeviceInventoryEvidence'),'-OutputPath',(OutPath 'SecurityControlEvidence'))+$clockUtcArgs) -DependsOn 'Workforce','DeviceInventory'
+Add-Task 'Backup' 'Backup' 'New-BackupResilienceEvidence.ps1' (@('-DataRoot',$last,'-OutputRoot',$OutputRoot)+$clockDateArgs)
 $intuneArgs=@('-DataRoot',$DataRoot,'-OutputRoot',$OutputRoot)
 if($TenantKey){$intuneArgs+=@('-TenantKey',$TenantKey)}
 if($IntuneSourcePolicyPath){$intuneArgs+=@('-SourcePolicyPath',$IntuneSourcePolicyPath)}
 $intuneArgs+=$clockArgs
-Run 'IntuneOperations' 'New-IntuneOperationalEvidence.ps1' $intuneArgs
+Add-Task 'IntuneOperations' 'IntuneOperations' 'New-IntuneOperationalEvidence.ps1' $intuneArgs
 $trustArgs=@('-DataRoot',$DataRoot,'-OutputPath',(OutPath 'DataTrustEvidence'))
 if($Only -eq 'All'){$trustArgs+=@('-IntuneOperationalAuditPath',(Join-Path $OutputRoot 'IntuneOperationalAudit.json.txt'))}
 $trustArgs+=$clockDateArgs+$clockUtcArgs
-Run 'Trust' 'New-DataTrustEvidence.ps1' $trustArgs
-Run 'Executive' 'New-ExecutiveTrendEvidence.ps1' @('-DataRoot',$DataRoot,'-OutputPath',(OutPath 'ExecutiveKPITrends'))
+Add-Task 'Trust' 'Trust' 'New-DataTrustEvidence.ps1' $trustArgs -DependsOn 'IntuneOperations'
+Add-Task 'Executive' 'Executive' 'New-ExecutiveTrendEvidence.ps1' @('-DataRoot',$DataRoot,'-OutputPath',(OutPath 'ExecutiveKPITrends'))
+
+function Write-TaskStart($Task) {
+    $started = [datetime]::UtcNow
+    if (-not $Task.Native) { Write-Host ('[{0:O}] Starting {1}' -f $started, $Task.Domain) }
+    $started
+}
+function Write-TaskEnd($Task, [datetime]$Started) {
+    if (-not $Task.Native) { Write-Host ('[{0:O}] Completed {1}: {2:n1} seconds' -f [datetime]::UtcNow, $Task.Domain, ([datetime]::UtcNow - $Started).TotalSeconds) }
+}
+if ($MaxParallelGenerators -le 1) {
+    # Sequential: the former order with live output.
+    foreach ($task in $script:tasks) {
+        if ($task.BeforeStart) { & $task.BeforeStart }
+        $started = Write-TaskStart $task
+        if ($task.Native) {
+            Import-Module (Join-Path $PSScriptRoot 'NativeEvidence.psm1') -Force
+            $nativeArgs = $task.Arguments
+            Invoke-NativeEvidenceStage @nativeArgs
+        } else {
+            $taskArgs = @($task.Arguments)
+            & $shell -NoProfile -File (Join-Path $PSScriptRoot $task.Script) @taskArgs
+            if ($LASTEXITCODE -ne 0) { throw "Preparation failed: $($task.Domain) (exit $LASTEXITCODE). Nothing was published." }
+        }
+        Write-TaskEnd $task $started
+    }
+} else {
+    # Parallel: ready tasks start in the order below (critical path and longest generators first);
+    # each runs in its own child process and its log is printed in one block when it completes.
+    $priority = @('DeviceInventory','Workforce','Native','IntuneOperations','Applications','DeviceLifecycle','Estate','Trust','Mailbox','Security','WindowsMigration','EndpointProtection','Executive','Backup','Collaboration','Content','DailyTrends')
+    $taskIds = @($script:tasks.Id)
+    $pending = [Collections.Generic.List[object]]::new()
+    foreach ($id in $priority) { foreach ($task in $script:tasks) { if ($task.Id -ceq $id) { $pending.Add($task) } } }
+    foreach ($task in $script:tasks) { if (-not $pending.Contains($task)) { $pending.Add($task) } }
+    $running = @{}
+    $completed = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+    $worker = {
+        param($Shell, $Root, $Task)
+        $lines = [Collections.Generic.List[string]]::new()
+        $exitCode = 0
+        try {
+            if ($Task.Native) {
+                Import-Module (Join-Path $Root 'NativeEvidence.psm1') -Force
+                $nativeArgs = $Task.Arguments
+                Invoke-NativeEvidenceStage @nativeArgs *>&1 | ForEach-Object { $lines.Add([string]$_) }
+            } else {
+                $taskArgs = @($Task.Arguments)
+                & $Shell -NoProfile -File (Join-Path $Root $Task.Script) @taskArgs 2>&1 | ForEach-Object { $lines.Add([string]$_) }
+                $exitCode = $LASTEXITCODE
+            }
+        } catch { $lines.Add($_.Exception.Message); $exitCode = 1 }
+        [pscustomobject]@{ExitCode=$exitCode;Lines=$lines.ToArray()}
+    }
+    try {
+        while ($pending.Count -gt 0 -or $running.Count -gt 0) {
+            foreach ($task in @($pending)) {
+                if ($running.Count -ge $MaxParallelGenerators) { break }
+                if (@($task.DependsOn | Where-Object { $_ -in $taskIds -and -not $completed.Contains($_) }).Count -gt 0) { continue }
+                if ($task.BeforeStart) { & $task.BeforeStart }
+                $started = Write-TaskStart $task
+                $job = Start-ThreadJob -ScriptBlock $worker -ArgumentList $shell,$PSScriptRoot,$task
+                $running[$job.Id] = [pscustomobject]@{Task=$task;Job=$job;Started=$started}
+                [void]$pending.Remove($task)
+            }
+            if ($running.Count -eq 0) { throw 'Preparation failed: generator dependencies cannot be satisfied. Nothing was published.' }
+            $finished = Wait-Job -Job @($running.Values | ForEach-Object Job) -Any
+            $entry = $running[$finished.Id]
+            $running.Remove($finished.Id)
+            $result = @(Receive-Job -Job $finished -Wait -AutoRemoveJob -ErrorAction Stop) | Where-Object { $null -ne $_ -and $_.PSObject.Properties['ExitCode'] } | Select-Object -Last 1
+            if ($null -eq $result) { throw "Preparation failed: $($entry.Task.Domain) returned no result. Nothing was published." }
+            foreach ($line in $result.Lines) { foreach ($part in ($line -split '\r?\n')) { Write-Host $part } }
+            if ($result.ExitCode -ne 0) { throw "Preparation failed: $($entry.Task.Domain) (exit $($result.ExitCode)). Nothing was published." }
+            Write-TaskEnd $entry.Task $entry.Started
+            [void]$completed.Add($entry.Task.Id)
+        }
+    } finally {
+        # On failure, stop the generators still running; this script publishes nothing.
+        foreach ($entry in @($running.Values)) {
+            Stop-Job -Job $entry.Job -ErrorAction SilentlyContinue
+            Remove-Job -Job $entry.Job -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
 Write-Host 'Preparation finished. Outputs are staging only; schema/data validation and promotion are separate steps.'
 
 # SIG # Begin signature block

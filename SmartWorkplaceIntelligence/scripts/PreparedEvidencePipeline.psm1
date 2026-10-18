@@ -731,7 +731,8 @@ function Invoke-PreparedEvidencePipeline {
         [int]$MaxSourceAgeHours=168, [hashtable]$AgeOverrides=@{}, [switch]$AllowLegacyTenantless,
         [string[]]$AllowEmptyTables=@(), [switch]$ValidateOnly, [string]$MappingRoot,$AdCountryConfiguration,
         [string]$PythonCommand='python',
-        [Nullable[double]]$DeviceSystemMaxObservationAgeHours, [string]$DeviceSystemOffsetlessGraphTimeZoneId)
+        [Nullable[double]]$DeviceSystemMaxObservationAgeHours, [string]$DeviceSystemOffsetlessGraphTimeZoneId,
+        [ValidateRange(1,8)][int]$MaxParallelGenerators=1)
     # Read only the two non-secret preparation settings from the effective tenant profile.
     if ($null -eq $DeviceSystemMaxObservationAgeHours -and $null -ne $AdCountryConfiguration) {
         $policyValue=if ($AdCountryConfiguration -is [Collections.IDictionary]) {$AdCountryConfiguration['DeviceSystemMaxObservationAgeHours']} else {$property=$AdCountryConfiguration.PSObject.Properties['DeviceSystemMaxObservationAgeHours']; if($null -ne $property){$property.Value}}
@@ -828,7 +829,7 @@ function Invoke-PreparedEvidencePipeline {
         if ($DeviceSystemOffsetlessGraphTimeZoneId) {$systemPolicyArgs+=@('-DeviceSystemOffsetlessGraphTimeZoneId',$DeviceSystemOffsetlessGraphTimeZoneId)}
         $null = Test-PreparedClassificationCapture -Path $rules -Stage 'BeforeBuild' -ExpectedSHA256 $classificationCapture.Captured.SHA256 -ExpectedBytes $classificationCapture.Captured.Bytes
         $systemPolicyArgs+=@('-AccountClassificationExpectedSHA256',$classificationCapture.Captured.SHA256,'-AccountClassificationExpectedBytes',[string]$classificationCapture.Captured.Bytes)
-        & (Get-Process -Id $PID).Path -NoProfile -File (Join-Path $PSScriptRoot 'Invoke-PreparedEvidenceBuild.ps1') -DataRoot $snapshot -OutputRoot $staging -AccountClassificationConfigPath $rules -AdCountryRulesPath $countryRulesPath @systemPolicyArgs 2>&1 |
+        & (Get-Process -Id $PID).Path -NoProfile -File (Join-Path $PSScriptRoot 'Invoke-PreparedEvidenceBuild.ps1') -DataRoot $snapshot -OutputRoot $staging -AccountClassificationConfigPath $rules -AdCountryRulesPath $countryRulesPath -MaxParallelGenerators $MaxParallelGenerators @systemPolicyArgs 2>&1 |
             ForEach-Object { foreach ($line in ([string]$_ -split '\r?\n')) { $message='[{0:yyyy-MM-dd HH:mm:ss}] {1}' -f (Get-Date),$line; $message | Add-Content -LiteralPath $log; Write-Host $message } }
         if ($LASTEXITCODE -ne 0) { throw "Preparation failed. Retained diagnostics: $run" }
         $provenance = @{Mode='RebuiltFromSnapshot';CapturePolicy='PerFileVerified';SelectedUtc=$selectedUtc;Sources=$plan;OptionalSourceIssues=$optionalIssues.ToArray();TenantValidation=$identity;LegacyTenantlessAllowed=($identity.LegacyArchivedSummaries -gt 0);LegacyTenantlessScope='Manifest-verified archived Intune discovered-application summaries only';AccountRulesSHA256=(Get-FileHash $rules).Hash;Scripts=@(Get-ChildItem $PSScriptRoot -File | Where-Object Extension -In '.ps1','.psm1','.py','.cs' | ForEach-Object { @{File=$_.Name;SHA256=(Get-FileHash $_.FullName).Hash} })}

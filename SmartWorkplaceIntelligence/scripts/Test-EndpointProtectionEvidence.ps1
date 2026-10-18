@@ -191,7 +191,7 @@ $pipeline=Get-Content -LiteralPath (Join-Path $PSScriptRoot 'PreparedEvidencePip
 $build=Get-Content -LiteralPath (Join-Path $PSScriptRoot 'Invoke-PreparedEvidenceBuild.ps1') -Raw
 Assert-EP ($pipeline -match 'if \(\$endpointPolicy.Enabled\)' -and $pipeline -match '@endpointContractArgs') 'Opt-in publication contract not wired.'
 Assert-EP ($pipeline -match 'ConvertTo-EndpointProtectionPolicy -Configuration \$AdCountryConfiguration') 'Effective tenant configuration not wired.'
-Assert-EP ($build -match 'if \(\$EndpointProtectionPolicyPath\)' -and $build -match "Run 'Devices' 'New-EndpointProtectionEvidence.ps1'") 'Build generator not wired.'
+Assert-EP ($build -match 'if \(\$EndpointProtectionPolicyPath\)' -and $build -match "Add-Task 'EndpointProtection' 'Devices' 'New-EndpointProtectionEvidence.ps1'") 'Build generator not wired.'
 Assert-EP ($pipeline -match "'EndpointProtectionPolicy.json.txt','PreparedEndpointContract.json.txt'") 'Run-local endpoint policy cleanup not wired.'
 Write-Host "PASS: $script:checks endpoint protection checks. Synthetic scratch: $scratch"
 
