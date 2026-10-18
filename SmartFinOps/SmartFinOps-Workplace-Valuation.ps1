@@ -9,7 +9,7 @@
   FinOps_* CSVs with their own receipt.
   Unqualified input is reported as Not measured, never as zero or as an older value.
 .VERSION
-2.1.2
+2.1.3
 .NOTES
   Outputs: Data\<TenantKey>\FinOps_*.csv, SmartFinOps_Workplace-Valuation.current.json.txt and
   Archive\<FinOpsRunId>\ (same files plus the run log). Consumers must check the receipt
@@ -27,7 +27,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-$script:ScriptVersion = '2.1.2'
+$script:ScriptVersion = '2.1.3'
 $script:LogLines = [System.Collections.Generic.List[string]]::new()
 $script:Invariant = [Globalization.CultureInfo]::InvariantCulture
 
@@ -1086,10 +1086,11 @@ try {
 
   $dataLast = if ($SmartM365LatestCsvFolderPath) { $SmartM365LatestCsvFolderPath } else { [string](Get-SmartFinOpsConfigValue -Name 'SmartM365LatestCsvFolderPath') }
   Assert-SmartFinOpsResolvedPath -Name 'SmartM365LatestCsvFolderPath' -Value $dataLast
+  $dataLast = ConvertTo-SmartFinOpsFileSystemPath $dataLast
   if (-not $dataLast -or -not (Test-Path -LiteralPath $dataLast -PathType Container)) { throw "SmartM365 DATA-LAST folder not found: $dataLast" }
   $resolvedOutput = if ($OutputRoot) { $OutputRoot } else { [string](Resolve-SmartFinOpsConfigTokenValue -Value '{{TenantDataRootPath}}') }
   Assert-SmartFinOpsResolvedPath -Name 'TenantDataRootPath' -Value $resolvedOutput
-  $currentRoot = $resolvedOutput
+  $currentRoot = ConvertTo-SmartFinOpsFileSystemPath $resolvedOutput
   $archiveRoot = Join-Path $currentRoot 'Archive'
   $valuation = Get-SmartFinOpsConfigValue -Name 'Valuation'
   $dailyHours = [int]$(if ($null -ne (Get-FinOpsProperty $valuation 'FreshnessDailyHours')) { Get-FinOpsProperty $valuation 'FreshnessDailyHours' } else { 48 })
@@ -1101,6 +1102,7 @@ try {
     if ($configured) { [string](Resolve-SmartFinOpsConfigTokenValue -Value $configured) } else { Join-Path $PSScriptRoot 'Config\SmartFinOps-Contracts.local.json' }
   }
   Assert-SmartFinOpsResolvedPath -Name 'Valuation.ContractsPath' -Value $contractsFile
+  $contractsFile = ConvertTo-SmartFinOpsFileSystemPath $contractsFile
   Write-FinOpsLog "Sources: $dataLast"
   Write-FinOpsLog "Outputs: $currentRoot"
   $contracts = Get-FinOpsContracts -Path $contractsFile -TemplatePath (Join-Path $PSScriptRoot 'Config\SmartFinOps-Contracts.local.json.template')

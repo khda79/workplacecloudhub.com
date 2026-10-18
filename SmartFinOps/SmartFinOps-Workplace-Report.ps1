@@ -9,7 +9,7 @@
   FinOps_Showback or FinOps_Realization. A failed or inconsistent run gives a "Report not available" page
   with the reason and no figure; it replaces the current report so that no older figure stays visible.
 .VERSION
-2.2.1
+2.2.2
 .NOTES
   Output: Data\<TenantKey>\SmartFinOps_Workplace-Report.html and its log; copy of both in
   Archive\<FinOpsRunId>\ when that run is archived. Aggregates only: no user identifier, no external
@@ -24,7 +24,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-$script:ScriptVersion = '2.2.1'
+$script:ScriptVersion = '2.2.2'
 $script:LogLines = [System.Collections.Generic.List[string]]::new()
 $script:Invariant = [Globalization.CultureInfo]::InvariantCulture
 $script:ReceiptName = 'SmartFinOps_Workplace-Valuation.current.json.txt'
@@ -735,7 +735,7 @@ try {
   Initialize-SmartFinOpsTenantContext -Tenant $Tenant -StartPath $PSScriptRoot | Out-Null
   $resolvedRoot = if ($InputRoot) { $InputRoot } else { [string](Resolve-SmartFinOpsConfigTokenValue -Value '{{TenantDataRootPath}}') }
   Assert-SmartFinOpsResolvedPath -Name 'TenantDataRootPath' -Value $resolvedRoot
-  $root = $resolvedRoot
+  $root = ConvertTo-SmartFinOpsFileSystemPath $resolvedRoot
   $reportConfig = Get-SmartFinOpsConfigValue -Name 'Report'
   $minimum = Get-ReportProperty $reportConfig 'ShowbackMinimumGroupUsers'
   $minimumUsers = if ($null -eq $minimum -or [string]$minimum -eq '') { 5 } else { [int]$minimum }

@@ -6,9 +6,9 @@
   is resolved through the SmartM365 tenant context only when a script asks for it; a failed resolution stops the
   script with the reason and never falls back to a default path. A resolved path that still holds a {{token}} is refused.
 .VERSION
-1.1.0
+1.1.1
 #>
-$script:SmartFinOpsTenantContextVersion = '1.1.0'
+$script:SmartFinOpsTenantContextVersion = '1.1.1'
 $script:SmartFinOpsUseSmartM365Markers = @('__USE_SMARTM365__', 'USE_SMARTM365')
 
 function Write-SmartFinOpsStartupBanner {
@@ -106,6 +106,16 @@ function Write-SmartFinOpsCompletionBanner {
             Microsoft.PowerShell.Utility\Write-Warning ("SmartFinOps completion banner could not be written to '{0}': {1}" -f $effectiveLogPath, $_.Exception.Message)
         }
     }
+}
+
+function ConvertTo-SmartFinOpsFileSystemPath {
+    [CmdletBinding()]
+    param([AllowNull()][AllowEmptyString()][string]$Path)
+
+    # .NET reads a provider-qualified path (Microsoft.PowerShell.Core\FileSystem::\\server\share\...) or a relative
+    # path against the process directory: always hand it the plain absolute file-system path.
+    if ([string]::IsNullOrWhiteSpace($Path)) { return $Path }
+    return $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Path)
 }
 
 function Assert-SmartFinOpsResolvedPath {
@@ -245,9 +255,10 @@ function Find-SmartFinOpsRoot {
     [CmdletBinding()]
     param([string]$StartPath)
 
-    $searchRoot = if ([string]::IsNullOrWhiteSpace($StartPath)) { (Get-Location).Path } else { $StartPath }
+    # ProviderPath, never Path: on a UNC share Path is provider-qualified and breaks every derived path.
+    $searchRoot = if ([string]::IsNullOrWhiteSpace($StartPath)) { (Get-Location).ProviderPath } else { $StartPath }
     $resolvedSearchRoot = Resolve-Path -LiteralPath $searchRoot -ErrorAction SilentlyContinue
-    if ($null -ne $resolvedSearchRoot) { $searchRoot = $resolvedSearchRoot.Path }
+    if ($null -ne $resolvedSearchRoot) { $searchRoot = $resolvedSearchRoot.ProviderPath }
 
     while ($searchRoot) {
         if ((Test-Path -LiteralPath (Join-Path -Path $searchRoot -ChildPath 'SmartFinOps.global.local.json')) -or
@@ -330,7 +341,7 @@ function Get-SmartFinOpsSmartM365LatestCsvFolderPath {
     }
     if ([string]::IsNullOrWhiteSpace($resolved)) { throw ("{0}: the SmartM365 context returned an empty LatestCsvFolderPath ({1})." -f $prefix, $smartM365TenantContextPath) }
     Assert-SmartFinOpsResolvedPath -Name 'SmartM365LatestCsvFolderPath (resolved through SmartM365)' -Value $resolved
-    return $resolved
+    return (ConvertTo-SmartFinOpsFileSystemPath $resolved)
 }
 
 
@@ -443,7 +454,7 @@ function Get-SmartFinOpsConfigValue {
             if ($value -in $script:SmartFinOpsUseSmartM365Markers) { return Get-SmartFinOpsSmartM365LatestCsvFolderPath -RepositoryRootPath ([string]$script:SmartFinOpsGlobalConfig.RepositoryRootPath) -TenantKey ([string]$script:SmartFinOpsGlobalConfig.TenantKey) }
             $resolvedPath = [string](Resolve-SmartFinOpsConfigTokenValue -Value $value)
             Assert-SmartFinOpsResolvedPath -Name 'SmartM365LatestCsvFolderPath' -Value $resolvedPath
-            return $resolvedPath
+            return (ConvertTo-SmartFinOpsFileSystemPath $resolvedPath)
         }
         if ([string]::IsNullOrWhiteSpace($value) -or $value -in @('__USE_GLOBAL__', 'USE_GLOBAL')) { return $DefaultValue }
     }

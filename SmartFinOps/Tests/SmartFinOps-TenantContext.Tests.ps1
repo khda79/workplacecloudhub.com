@@ -126,6 +126,52 @@ function Get-SmartM365EffectiveGlobalConfig {
   $reportRun = Invoke-Script $report @('-InputRoot', (Join-Path $root '{{NoSuchToken}}'))
   Check ($reportRun.ExitCode -eq 1 -and $reportRun.Log.Contains('unresolved token {{NoSuchToken}}') -and $reportRun.Log.Contains(' SmartFinOps by WorkplaceCloudHub - Execution failed') -and $reportRun.Log.Contains(' Script    : SmartFinOps-Workplace-Report.ps1')) 'report: tokenized data root refused with a Failed banner'
   #endregion
+
+  #region 6. Run from a UNC path (\\localhost\<drive>$): plain file-system paths only, never provider-qualified
+  $toUnc = { param([string]$Path) '\\localhost\{0}${1}' -f $Path.Substring(0, 1), $Path.Substring(2) }
+  $uncRoot = & $toUnc $root
+  $uncRuntime = & $toUnc $runtime
+  Check (Test-Path -LiteralPath (Join-Path $uncRuntime 'SmartFinOps\SmartFinOps-Workplace-Valuation.ps1')) "UNC admin share reachable for the test: $uncRuntime"
+  # Like the real SmartM365 context, the synthetic one checks its local JSON with .NET, which reads a provider-qualified path as relative.
+  Set-Content -LiteralPath (Join-Path $runtime 'SmartM365\Config\SmartM365.global.local.json.txt') -Value '{}' -Encoding utf8NoBOM
+  Set-SmartM365Context @"
+function Get-SmartM365EffectiveGlobalConfig {
+  param([string]`$StartPath, [string]`$TenantKey)
+  `$local = Join-Path `$StartPath 'Config\SmartM365.global.local.json.txt'
+  if (-not [IO.File]::Exists(`$local)) { throw ('Local JSON not found: {0}' -f [IO.Path]::GetFullPath(`$local)) }
+  [pscustomobject]@{ WorkspaceRootPath='$uncRoot'; LatestCsvFolderPath='{{WorkspaceRootPath}}\DATA-LAST' }
+}
+"@
+  '{ }' | Set-Content -LiteralPath (Join-Path $runtime 'SmartFinOps\SmartFinOps.global.local.json') -Encoding utf8NoBOM
+  $cwd = Join-Path $root 'cwd'
+  New-Item -ItemType Directory -Path $cwd -Force | Out-Null
+  $dataRoot = Join-Path $runtime 'SmartFinOps\Data\contoso'
+  Push-Location -LiteralPath $cwd
+  try {
+    $uncEngine = & $pwsh -NoProfile -ExecutionPolicy Bypass -File (Join-Path $uncRuntime 'SmartFinOps\SmartFinOps-Workplace-Valuation.ps1') -Tenant $tenant 2>&1 | Out-String
+    $uncEngineExit = $LASTEXITCODE
+    $uncReport = & $pwsh -NoProfile -ExecutionPolicy Bypass -File (Join-Path $uncRuntime 'SmartFinOps\SmartFinOps-Workplace-Report.ps1') -Tenant $tenant 2>&1 | Out-String
+    $uncReportExit = $LASTEXITCODE
+  }
+  finally { Pop-Location }
+  Check ($uncEngineExit -eq 0 -and $uncEngine.Contains(('Sources: {0}\DATA-LAST' -f $uncRoot)) -and $uncEngine.Contains(('Outputs: {0}\SmartFinOps\Data\contoso' -f $uncRuntime))) "engine from UNC: DATA-LAST resolved through SmartM365, outputs on the share (exit $uncEngineExit) $uncEngine"
+  Check ((Test-Path -LiteralPath (Join-Path $dataRoot 'SmartFinOps_Workplace-Valuation.current.json.txt')) -and @(Get-ChildItem -LiteralPath $dataRoot -Filter 'FinOps_*.csv' -ErrorAction SilentlyContinue).Count -eq 7) 'engine from UNC: receipt and seven CSVs written under the UNC data root'
+  Check ($uncReportExit -eq 0 -and (Test-Path -LiteralPath (Join-Path $dataRoot 'SmartFinOps_Workplace-Report.html')) -and $uncReport.Contains(('Inputs: {0}\SmartFinOps\Data\contoso' -f $uncRuntime))) "report from UNC: page written under the UNC data root (exit $uncReportExit) $uncReport"
+  $written = @(Get-ChildItem -LiteralPath $dataRoot -Recurse -File -ErrorAction SilentlyContinue | Where-Object { $_.Extension -in '.txt', '.log', '.csv', '.html' } | ForEach-Object { Get-Content -LiteralPath $_.FullName -Raw })
+  Check (-not ($uncEngine + $uncReport + ($written -join '')).Contains('FileSystem::')) 'no provider-qualified path in console, logs or outputs'
+  Check (@(Get-ChildItem -LiteralPath $cwd -Recurse -Force).Count -eq 0) 'nothing written relative to the process working directory'
+  # A relative -OutputRoot is taken from the PowerShell location (here on the share), not from the process directory.
+  $relative = Join-Path $root 'relative'
+  New-Item -ItemType Directory -Path $relative -Force | Out-Null
+  Push-Location -LiteralPath $cwd
+  try {
+    $command = "Set-Location -LiteralPath '$(& $toUnc $relative)'; & '$(Join-Path $uncRuntime 'SmartFinOps\SmartFinOps-Workplace-Valuation.ps1')' -Tenant '$tenant' -OutputRoot 'relout'; exit `$LASTEXITCODE"
+    $relativeRun = & $pwsh -NoProfile -ExecutionPolicy Bypass -Command $command 2>&1 | Out-String
+    $relativeExit = $LASTEXITCODE
+  }
+  finally { Pop-Location }
+  Check ($relativeExit -eq 0 -and (Test-Path -LiteralPath (Join-Path $relative 'relout\SmartFinOps_Workplace-Valuation.current.json.txt')) -and @(Get-ChildItem -LiteralPath $cwd -Recurse -Force).Count -eq 0) "relative -OutputRoot resolved from the PowerShell location on the share (exit $relativeExit) $relativeRun"
+  #endregion
 }
 finally {
   if (-not $KeepEvidence -and (Test-Path -LiteralPath $root)) { Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue }
