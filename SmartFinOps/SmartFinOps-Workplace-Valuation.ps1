@@ -9,7 +9,7 @@
   FinOps_* CSVs with their own receipt.
   Unqualified input is reported as Not measured, never as zero or as an older value.
 .VERSION
-2.1.1
+2.1.2
 .NOTES
   Outputs: Data\<TenantKey>\FinOps_*.csv, SmartFinOps_Workplace-Valuation.current.json.txt and
   Archive\<FinOpsRunId>\ (same files plus the run log). Consumers must check the receipt
@@ -27,7 +27,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-$script:ScriptVersion = '2.1.1'
+$script:ScriptVersion = '2.1.2'
 $script:LogLines = [System.Collections.Generic.List[string]]::new()
 $script:Invariant = [Globalization.CultureInfo]::InvariantCulture
 
@@ -1069,21 +1069,27 @@ function Get-FinOpsControls {
 if ($MyInvocation.InvocationName -eq '.') { return }
 
 $exitCode = 0
-$runStart = if ($AsOfUtc) { ConvertTo-FinOpsUtc $AsOfUtc } else { [datetime]::UtcNow }
-if ($null -eq $runStart) { throw "Invalid -AsOfUtc value: $AsOfUtc" }
-$runId = '{0}-{1}' -f $runStart.ToString('yyyyMMddTHHmmssfffZ', $script:Invariant), [guid]::NewGuid().ToString('N').Substring(0, 8)
-$currentRoot = $null; $archiveDir = $null
+$startedAt = Get-Date
+$runId = ''; $currentRoot = $null; $archiveDir = $null; $csvFiles = 0
 try {
-  Write-FinOpsLog ("SmartFinOps Workplace Valuation {0} - tenant '{1}' - run {2}{3}" -f $script:ScriptVersion, $Tenant, $runId, $(if ($ValidateOnly) { ' - ValidateOnly (no file written)' } else { '' }))
   . (Join-Path $PSScriptRoot 'Config\SmartFinOps-TenantContext.ps1')
+  Write-SmartFinOpsStartupBanner
+  $runStart = if ($AsOfUtc) { ConvertTo-FinOpsUtc $AsOfUtc } else { [datetime]::UtcNow }
+  if ($null -eq $runStart) { throw "Invalid -AsOfUtc value: $AsOfUtc" }
+  $runId = '{0}-{1}' -f $runStart.ToString('yyyyMMddTHHmmssfffZ', $script:Invariant), [guid]::NewGuid().ToString('N').Substring(0, 8)
+  Write-FinOpsLog ("SmartFinOps Workplace Valuation {0} - tenant '{1}' - run {2}{3}" -f $script:ScriptVersion, $Tenant, $runId, $(if ($ValidateOnly) { ' - ValidateOnly (no file written)' } else { '' }))
+  Write-FinOpsLog ("Tenant context {0}" -f $script:SmartFinOpsTenantContextVersion)
   $config = Initialize-SmartFinOpsTenantContext -Tenant $Tenant -StartPath $PSScriptRoot
   $repositoryRoot = Split-Path -Path $PSScriptRoot -Parent
   $coreManifest = Join-Path $repositoryRoot 'SmartM365\Modules\SmartM365.Core\SmartM365.Core.psd1'
   Import-Module $coreManifest -MinimumVersion '1.0.90' -ErrorAction Stop | Out-Null
 
   $dataLast = if ($SmartM365LatestCsvFolderPath) { $SmartM365LatestCsvFolderPath } else { [string](Get-SmartFinOpsConfigValue -Name 'SmartM365LatestCsvFolderPath') }
+  Assert-SmartFinOpsResolvedPath -Name 'SmartM365LatestCsvFolderPath' -Value $dataLast
   if (-not $dataLast -or -not (Test-Path -LiteralPath $dataLast -PathType Container)) { throw "SmartM365 DATA-LAST folder not found: $dataLast" }
-  $currentRoot = if ($OutputRoot) { $OutputRoot } else { [string](Resolve-SmartFinOpsConfigTokenValue -Value '{{TenantDataRootPath}}') }
+  $resolvedOutput = if ($OutputRoot) { $OutputRoot } else { [string](Resolve-SmartFinOpsConfigTokenValue -Value '{{TenantDataRootPath}}') }
+  Assert-SmartFinOpsResolvedPath -Name 'TenantDataRootPath' -Value $resolvedOutput
+  $currentRoot = $resolvedOutput
   $archiveRoot = Join-Path $currentRoot 'Archive'
   $valuation = Get-SmartFinOpsConfigValue -Name 'Valuation'
   $dailyHours = [int]$(if ($null -ne (Get-FinOpsProperty $valuation 'FreshnessDailyHours')) { Get-FinOpsProperty $valuation 'FreshnessDailyHours' } else { 48 })
@@ -1094,6 +1100,7 @@ try {
     $configured = [string](Get-FinOpsProperty $valuation 'ContractsPath')
     if ($configured) { [string](Resolve-SmartFinOpsConfigTokenValue -Value $configured) } else { Join-Path $PSScriptRoot 'Config\SmartFinOps-Contracts.local.json' }
   }
+  Assert-SmartFinOpsResolvedPath -Name 'Valuation.ContractsPath' -Value $contractsFile
   Write-FinOpsLog "Sources: $dataLast"
   Write-FinOpsLog "Outputs: $currentRoot"
   $contracts = Get-FinOpsContracts -Path $contractsFile -TemplatePath (Join-Path $PSScriptRoot 'Config\SmartFinOps-Contracts.local.json.template')
@@ -1203,6 +1210,7 @@ try {
       Write-FinOpsCsv -Path $path -Columns $columns -Rows $rows
       $files.Add([ordered]@{ File=$name; Rows=$rows.Count; SHA256=(Get-FinOpsSha256 $path); Required=$true })
     }
+    $csvFiles = $files.Count
     $receipt = [ordered]@{
       Owner='SmartFinOps-Receipt'; ContractVersion='1.0'; TenantKey=$Tenant; Producer='SmartFinOps-Workplace-Valuation.ps1'; ScriptVersion=$script:ScriptVersion
       RunId=$runId; StartedAtUtc=$runStart.ToString('o'); CompletedAtUtc=[datetime]::UtcNow.ToString('o'); Status=$status
@@ -1251,9 +1259,19 @@ catch {
   }
 }
 finally {
+  $logPath = ''
   if (-not $ValidateOnly -and $archiveDir -and (Test-Path -LiteralPath $archiveDir)) {
-    [IO.File]::WriteAllLines((Join-Path $archiveDir $script:LogName), $script:LogLines, [Text.UTF8Encoding]::new($false))
+    $logPath = Join-Path $archiveDir $script:LogName
+    [IO.File]::WriteAllLines($logPath, $script:LogLines, [Text.UTF8Encoding]::new($false))
   }
+  # Completion banner on success and on failure (appended to the run log when there is one).
+  $bannerStatus = if ($exitCode -ne 0) { 'Failed' } else { 'Auto' }
+  $warnings = @($script:LogLines | Where-Object { $_ -match '^\S+ \S+ \[WARNING\]' }).Count
+  $errors = @($script:LogLines | Where-Object { $_ -match '^\S+ \S+ \[ERROR\]' }).Count
+  if (Get-Command -Name Write-SmartFinOpsCompletionBanner -ErrorAction SilentlyContinue) {
+    Write-SmartFinOpsCompletionBanner -Status $bannerStatus -ScriptName 'SmartFinOps-Workplace-Valuation.ps1' -StartedAt $startedAt -WarningCount $warnings -ErrorCount $errors -GeneratedCsvFiles $csvFiles -LogPath $logPath
+  }
+  else { Write-Host ("SmartFinOps-Workplace-Valuation.ps1: {0} (tenant context not loaded)" -f $(if ($exitCode -ne 0) { 'FAILED' } else { 'SUCCESS' })) }
 }
 exit $exitCode
 #endregion

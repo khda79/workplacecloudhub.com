@@ -3,7 +3,7 @@
 .SYNOPSIS
   Offline tests of the SmartFinOps Workplace V2 valuation engine.
 .VERSION
-1.1.0
+1.2.0
 .NOTES
   Synthetic contoso data only, in an isolated temporary runtime (no local configuration, export or tenant).
   Source receipts are produced by the real SmartM365.Core module commands.
@@ -255,7 +255,12 @@ try {
   }
   Check (Test-Path -LiteralPath (Join-Path $out "Archive\$($receipt.RunId)\SmartFinOps-Workplace-Valuation.log")) 'run log archived'
   $logLines = @(Get-Content -LiteralPath (Join-Path $out "Archive\$($receipt.RunId)\SmartFinOps-Workplace-Valuation.log"))
-  Check (@($logLines | Where-Object { $_ -notmatch '^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} \[' }).Count -eq 0) 'every log line is timestamped'
+  $bannerStart = [array]::IndexOf($logLines, '================================================================================')
+  Check ($bannerStart -gt 0 -and @($logLines[0..($bannerStart - 1)] | Where-Object { $_ -notmatch '^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} \[' }).Count -eq 0) 'every log line before the completion banner is timestamped'
+  $banner = ($logLines[$bannerStart..($logLines.Count - 1)] -join "`n")
+  Check ($banner.Contains(' SmartFinOps by WorkplaceCloudHub - Execution completed') -and $banner.Contains(' Script    : SmartFinOps-Workplace-Valuation.ps1') -and $banner.Contains(' CSV files : 7') -and $banner -match ' Duration  : \d{2}:\d{2}:\d{2}' -and $banner -match ' Status    : (SUCCESS|COMPLETED WITH WARNINGS)') "completion banner appended to the run log ($banner)"
+  Check ($run.Log.Contains(' SmartFinOps by WorkplaceCloudHub') -and $run.Log.Contains(' Website : https://workplacecloudhub.com') -and $run.Log.Contains(' Errors    : 0')) 'startup and completion banners on the console'
+  Check ($run.Log -match 'SmartFinOps Workplace Valuation 2\.1\.2' -and $run.Log -match 'Tenant context 1\.1\.0') 'engine and context versions logged at runtime'
   $expectedHeaders = @{
     'FinOps_Sources.csv'='TenantKey,FinOpsRunId,SnapshotId,ReceiptRunId,SourceFile,Producer,ReceiptFile,SourceReceiptRunId,ReceiptStatus,ReceiptCompletedAtUtc,Required,PublishedInReceipt,ExpectedSHA256,ActualSHA256,ExpectedRows,ActualRows,FreshnessThresholdHours,AgeHours,QualificationStatus,Reason,MissingDomains,ProvisionalLevers'
     'FinOps_Opportunities.csv'='TenantKey,FinOpsRunId,SnapshotId,ReceiptRunId,OpportunityKey,Lever,ValueClass,ValuationStatus,StatusReason,SourceFile,SourceCandidateType,SourceRecommendation,SourceReason,MailboxGuard,DependencyStatus,CountedIn,ReportProduct,SkuId,SkuPartNumber,TargetSkuPartNumber,UserId,UserPrincipalName,Units,UnitPriceMonthly,TargetUnitPriceMonthly,MonthlyAmount,AnnualAmount,Currency,PriceRowKey,PricingReceiptRunId,PriceSource,PriceIsEstimated,CapRank,ContractKey,RenewalDate,RealizableFrom,AdDomain,Country,Entity,Department,ShowbackJoinStatus'
@@ -471,6 +476,8 @@ try {
     $guardRun = Invoke-Engine -DataLast $guardFixture.Folder -Output $guardOut -Contracts $guardContracts -AsOfUtc ([datetime]::UtcNow.AddMinutes(5).ToString('o'))
     $guardReceipt = Read-Receipt $guardOut
     Check ($guardOk.ExitCode -eq 0 -and $guardRun.ExitCode -eq 1 -and $guardReceipt.Status -eq 'Failed') "guard failure ($(@($case.Keys)[0])): exit 1 and current receipt Failed"
+    Check ($guardRun.Log.Contains(' SmartFinOps by WorkplaceCloudHub - Execution failed') -and $guardRun.Log.Contains(' Status    : FAILED')) 'guard failure: completion banner Failed'
+    Check ((Get-Content -LiteralPath (Join-Path $guardOut "Archive\$($guardReceipt.RunId)\SmartFinOps-Workplace-Valuation.log") -Raw).Contains(' Status    : FAILED')) 'guard failure: Failed banner in the run log'
     Check ((Get-FileHash -LiteralPath (Join-Path $guardOut 'FinOps_Opportunities.csv')).Hash -eq $hashBefore) 'guard failure: current files kept (disqualified by receipt)'
     Check (@(Import-Csv -LiteralPath (Join-Path $guardOut "Archive\$($guardReceipt.RunId)\FinOps_Controls.csv") | Where-Object Status -eq 'Fail').Count -ge 1) 'guard failure: controls archived'
   }
@@ -478,6 +485,9 @@ try {
   $schemaOut = Join-Path $root 'schema-drift\out'
   $schemaRun = Invoke-Engine -DataLast $schema.Folder -Output $schemaOut -Contracts (Join-Path $root 'schema-drift\contracts.local.json')
   Check ($schemaRun.ExitCode -eq 1 -and (Read-Receipt $schemaOut).Status -eq 'Failed') 'unknown CandidateType fails the run'
+  Check ($schemaRun.Log.Contains(' Status    : FAILED') -and $schemaRun.Log.Contains('Run failed: Unknown CandidateType')) 'run error: Failed banner and logged reason'
+  $tokenRun = Invoke-Engine -DataLast (Join-Path $root '{{NoSuchToken}}\DATA-LAST') -Output (Join-Path $root 'token\out') -Contracts (Join-Path $root 'token\contracts.local.json')
+  Check ($tokenRun.ExitCode -eq 1 -and $tokenRun.Log.Contains('unresolved token {{NoSuchToken}}') -and $tokenRun.Log.Contains(' Status    : FAILED')) 'a DATA-LAST path with an unresolved token is refused'
   #endregion
 
   #region 10. Realization against the plateau baseline

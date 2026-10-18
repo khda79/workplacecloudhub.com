@@ -9,7 +9,7 @@
   FinOps_Showback or FinOps_Realization. A failed or inconsistent run gives a "Report not available" page
   with the reason and no figure; it replaces the current report so that no older figure stays visible.
 .VERSION
-2.2.0
+2.2.1
 .NOTES
   Output: Data\<TenantKey>\SmartFinOps_Workplace-Report.html and its log; copy of both in
   Archive\<FinOpsRunId>\ when that run is archived. Aggregates only: no user identifier, no external
@@ -24,7 +24,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-$script:ScriptVersion = '2.2.0'
+$script:ScriptVersion = '2.2.1'
 $script:LogLines = [System.Collections.Generic.List[string]]::new()
 $script:Invariant = [Globalization.CultureInfo]::InvariantCulture
 $script:ReceiptName = 'SmartFinOps_Workplace-Valuation.current.json.txt'
@@ -725,12 +725,17 @@ function Write-ReportFile {
 if ($MyInvocation.InvocationName -eq '.') { return }
 
 $exitCode = 0
+$startedAt = Get-Date
 $root = $null; $archiveDir = $null
 try {
-  Write-ReportLog ("SmartFinOps Workplace Report {0} - tenant '{1}'{2}" -f $script:ScriptVersion, $Tenant, $(if ($ValidateOnly) { ' - ValidateOnly (no file written)' } else { '' }))
   . (Join-Path $PSScriptRoot 'Config\SmartFinOps-TenantContext.ps1')
+  Write-SmartFinOpsStartupBanner
+  Write-ReportLog ("SmartFinOps Workplace Report {0} - tenant '{1}'{2}" -f $script:ScriptVersion, $Tenant, $(if ($ValidateOnly) { ' - ValidateOnly (no file written)' } else { '' }))
+  Write-ReportLog ("Tenant context {0}" -f $script:SmartFinOpsTenantContextVersion)
   Initialize-SmartFinOpsTenantContext -Tenant $Tenant -StartPath $PSScriptRoot | Out-Null
-  $root = if ($InputRoot) { $InputRoot } else { [string](Resolve-SmartFinOpsConfigTokenValue -Value '{{TenantDataRootPath}}') }
+  $resolvedRoot = if ($InputRoot) { $InputRoot } else { [string](Resolve-SmartFinOpsConfigTokenValue -Value '{{TenantDataRootPath}}') }
+  Assert-SmartFinOpsResolvedPath -Name 'TenantDataRootPath' -Value $resolvedRoot
+  $root = $resolvedRoot
   $reportConfig = Get-SmartFinOpsConfigValue -Name 'Report'
   $minimum = Get-ReportProperty $reportConfig 'ShowbackMinimumGroupUsers'
   $minimumUsers = if ($null -eq $minimum -or [string]$minimum -eq '') { 5 } else { [int]$minimum }
@@ -765,13 +770,27 @@ catch {
   Write-ReportLog ("Stack: {0}" -f ($_.ScriptStackTrace -replace '\r?\n', ' | ')) 'ERROR'
 }
 finally {
+  $logPath = ''
   if (-not $ValidateOnly -and $root -and (Test-Path -LiteralPath $root -PathType Container)) {
     $content = ($script:LogLines -join [Environment]::NewLine) + [Environment]::NewLine
     try {
       Write-ReportFile -Path (Join-Path $root $script:LogName) -Content $content
-      if ($archiveDir) { Write-ReportFile -Path (Join-Path $archiveDir $script:LogName) -Content $content }
+      $logPath = Join-Path $root $script:LogName
     }
     catch { Write-Host "Report log could not be written: $($_.Exception.Message)" -ForegroundColor Red }
+  }
+  # Completion banner on success and on failure; "Report not available" (exit 2) is a failed run.
+  $bannerStatus = if ($exitCode -ne 0) { 'Failed' } else { 'Auto' }
+  $warnings = @($script:LogLines | Where-Object { $_ -match '^\S+ \S+ \[WARNING\]' }).Count
+  $errors = @($script:LogLines | Where-Object { $_ -match '^\S+ \S+ \[ERROR\]' }).Count
+  if (Get-Command -Name Write-SmartFinOpsCompletionBanner -ErrorAction SilentlyContinue) {
+    Write-SmartFinOpsCompletionBanner -Status $bannerStatus -ScriptName 'SmartFinOps-Workplace-Report.ps1' -StartedAt $startedAt -WarningCount $warnings -ErrorCount $errors -GeneratedCsvFiles 0 -LogPath $logPath
+  }
+  else { Write-Host ("SmartFinOps-Workplace-Report.ps1: {0} (tenant context not loaded)" -f $(if ($exitCode -ne 0) { 'FAILED' } else { 'SUCCESS' })) }
+  # The archived log is a copy of the current one, banner included.
+  if ($logPath -and $archiveDir) {
+    try { Copy-Item -LiteralPath $logPath -Destination (Join-Path $archiveDir $script:LogName) -Force }
+    catch { Write-Host "Archived report log could not be written: $($_.Exception.Message)" -ForegroundColor Red }
   }
 }
 exit $exitCode

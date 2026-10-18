@@ -3,7 +3,7 @@
 .SYNOPSIS
   Offline tests of the SmartFinOps Workplace V2 executive HTML report.
 .VERSION
-1.0.0
+1.1.0
 .NOTES
   Synthetic FinOps_* fixtures and receipts only, in an isolated temporary runtime (no local configuration,
   export or tenant). The input contract is checked against the valuation engine output specification.
@@ -308,7 +308,15 @@ try {
   $validateRun = Invoke-Report $validate -ValidateOnly
   Check ($validateRun.ExitCode -eq 0 -and -not (Test-Path -LiteralPath (Join-Path $validate 'SmartFinOps_Workplace-Report.html')) -and -not (Test-Path -LiteralPath (Join-Path $validate 'SmartFinOps-Workplace-Report.log'))) 'ValidateOnly writes nothing'
   $logLines = @(Get-Content -LiteralPath (Join-Path $nominal 'SmartFinOps-Workplace-Report.log'))
-  Check ($logLines.Count -gt 0 -and @($logLines | Where-Object { $_ -notmatch '^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} \[' }).Count -eq 0 -and (Test-Path -LiteralPath (Join-Path $nominal "Archive\$runId\SmartFinOps-Workplace-Report.log"))) 'every log line is timestamped; log archived'
+  $bannerStart = [array]::IndexOf($logLines, '================================================================================')
+  Check ($bannerStart -gt 0 -and @($logLines[0..($bannerStart - 1)] | Where-Object { $_ -notmatch '^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} \[' }).Count -eq 0) 'every log line before the completion banner is timestamped'
+  Check (($logLines -join "`n").Contains(' SmartFinOps by WorkplaceCloudHub - Execution completed') -and ($logLines -join "`n").Contains(' Status    : SUCCESS') -and ($logLines -join "`n").Contains(' CSV files : 0')) 'completion banner appended to the report log'
+  Check ((Get-Content -LiteralPath (Join-Path $nominal "Archive\$runId\SmartFinOps-Workplace-Report.log") -Raw) -ceq (Get-Content -LiteralPath (Join-Path $nominal 'SmartFinOps-Workplace-Report.log') -Raw)) 'archived log is the current log, banner included'
+  Check ($run.Log.Contains(' SmartFinOps by WorkplaceCloudHub') -and $run.Log.Contains(' GitHub  : https://github.com/khda79/workplacecloudhub.com') -and $run.Log -match 'SmartFinOps Workplace Report 2\.2\.1' -and $run.Log -match 'Tenant context 1\.1\.0') 'startup banner and versions on the console'
+  $unavailable = Invoke-Report (New-ReportFixture 'banner-failed' -ChangeReceipt { param($r) $r.Status = 'Failed' })
+  Check ($unavailable.ExitCode -eq 2 -and $unavailable.Log.Contains(' SmartFinOps by WorkplaceCloudHub - Execution failed') -and $unavailable.Log.Contains(' Status    : FAILED')) 'report not available: completion banner Failed'
+  $missing = Invoke-Report (Join-Path $root 'no-such-folder')
+  Check ($missing.ExitCode -eq 1 -and $missing.Log.Contains('FinOps data folder not found') -and $missing.Log.Contains(' Status    : FAILED')) 'report error: Failed banner and logged reason'
   Check (@(Get-ChildItem -LiteralPath $nominal -Filter '*.tmp').Count -eq 0) 'no temporary file left'
   $windowsPowerShell = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
   if (Test-Path -LiteralPath $windowsPowerShell) {

@@ -1,4 +1,125 @@
-﻿function ConvertTo-SmartFinOpsHashtable {
+﻿<#
+.SYNOPSIS
+  SmartFinOps tenant context: global and tenant local JSON configuration, path tokens and console banners.
+.DESCRIPTION
+  Dot-sourced by the SmartFinOps scripts. SmartM365LatestCsvFolderPath set to __USE_SMARTM365__ (or left empty)
+  is resolved through the SmartM365 tenant context only when a script asks for it; a failed resolution stops the
+  script with the reason and never falls back to a default path. A resolved path that still holds a {{token}} is refused.
+.VERSION
+1.1.0
+#>
+$script:SmartFinOpsTenantContextVersion = '1.1.0'
+$script:SmartFinOpsUseSmartM365Markers = @('__USE_SMARTM365__', 'USE_SMARTM365')
+
+function Write-SmartFinOpsStartupBanner {
+    [CmdletBinding()]
+    param()
+
+    $bannerAlreadyShown = Get-Variable -Name SmartFinOpsBrandBannerConsoleShown -Scope Global -ValueOnly -ErrorAction SilentlyContinue
+    if ([bool]$bannerAlreadyShown) { return }
+
+    Set-Variable -Name SmartFinOpsBrandBannerConsoleShown -Scope Global -Value $true
+    Microsoft.PowerShell.Utility\Write-Host '================================================================================' -ForegroundColor DarkCyan
+    Microsoft.PowerShell.Utility\Write-Host ' SmartFinOps by WorkplaceCloudHub' -ForegroundColor Cyan
+    Microsoft.PowerShell.Utility\Write-Host ' Website : https://workplacecloudhub.com' -ForegroundColor Yellow
+    Microsoft.PowerShell.Utility\Write-Host ' GitHub  : https://github.com/khda79/workplacecloudhub.com' -ForegroundColor Yellow
+    Microsoft.PowerShell.Utility\Write-Host '================================================================================' -ForegroundColor DarkCyan
+}
+
+function Write-SmartFinOpsCompletionBanner {
+    [CmdletBinding()]
+    param(
+        [ValidateSet('Auto', 'Success', 'Failed', 'CompletedWithWarnings')]
+        [string]$Status = 'Auto',
+        [string]$ScriptName = '',
+        [AllowNull()][Nullable[datetime]]$StartedAt = $null,
+        [AllowNull()][Nullable[datetime]]$EndedAt = $null,
+        [int]$WarningCount = 0,
+        [int]$ErrorCount = 0,
+        [int]$GeneratedCsvFiles = 0,
+        [string]$LogPath = ''
+    )
+    # Same format as the SmartM365 completion banner; local copy so SmartFinOps does not depend on SmartM365 files.
+    if ($null -eq $EndedAt -or $EndedAt -eq [datetime]::MinValue) { $EndedAt = Get-Date }
+    if ($null -eq $StartedAt -or $StartedAt -eq [datetime]::MinValue) { $StartedAt = $EndedAt }
+    if ([string]::IsNullOrWhiteSpace($ScriptName)) { $ScriptName = 'SmartFinOps' }
+
+    if ($Status -eq 'Auto') {
+        $Status = if ($ErrorCount -gt 0) { 'Failed' } elseif ($WarningCount -gt 0) { 'CompletedWithWarnings' } else { 'Success' }
+    }
+
+    $statusLabel = switch ($Status) {
+        'Failed' { 'FAILED' }
+        'CompletedWithWarnings' { 'COMPLETED WITH WARNINGS' }
+        default { 'SUCCESS' }
+    }
+    $title = switch ($Status) {
+        'Failed' { 'Execution failed' }
+        'CompletedWithWarnings' { 'Execution completed with warnings' }
+        default { 'Execution completed' }
+    }
+    $statusColor = switch ($Status) {
+        'Failed' { 'Red' }
+        'CompletedWithWarnings' { 'Yellow' }
+        default { 'Green' }
+    }
+    $duration = $EndedAt - $StartedAt
+    $durationText = '{0:00}:{1:00}:{2:00}' -f ([int][Math]::Floor($duration.TotalHours)), $duration.Minutes, $duration.Seconds
+    $effectiveLogPath = if ([string]::IsNullOrWhiteSpace($LogPath)) { '' } else { [string]$LogPath }
+    $runKey = '{0}|{1}|{2}' -f $ScriptName, $StartedAt.Ticks, $effectiveLogPath
+    $existingRunKey = [string](Get-Variable -Name SmartFinOpsCompletionBannerRunKey -Scope Global -ValueOnly -ErrorAction SilentlyContinue)
+    if ($existingRunKey -eq $runKey) { return }
+
+    $lines = @(
+        '================================================================================',
+        (' SmartFinOps by WorkplaceCloudHub - {0}' -f $title),
+        (' Script    : {0}' -f $ScriptName),
+        (' Status    : {0}' -f $statusLabel),
+        (' Duration  : {0}' -f $durationText),
+        (' Warnings  : {0}' -f $WarningCount),
+        (' Errors    : {0}' -f $ErrorCount),
+        (' CSV files : {0}' -f $GeneratedCsvFiles)
+    )
+    if (-not [string]::IsNullOrWhiteSpace($effectiveLogPath)) {
+        $lines += (' Log       : {0}' -f $effectiveLogPath)
+    }
+    $lines += '================================================================================'
+
+    Set-Variable -Name SmartFinOpsCompletionBannerRunKey -Scope Global -Value $runKey
+    Microsoft.PowerShell.Utility\Write-Host $lines[0] -ForegroundColor DarkCyan
+    Microsoft.PowerShell.Utility\Write-Host $lines[1] -ForegroundColor Cyan
+    for ($i = 2; $i -lt ($lines.Count - 1); $i++) {
+        $color = if ($lines[$i] -like ' Status*') { $statusColor } else { 'Gray' }
+        Microsoft.PowerShell.Utility\Write-Host $lines[$i] -ForegroundColor $color
+    }
+    Microsoft.PowerShell.Utility\Write-Host $lines[-1] -ForegroundColor DarkCyan
+
+    if (-not [string]::IsNullOrWhiteSpace($effectiveLogPath)) {
+        try {
+            $logFolder = Split-Path -Path $effectiveLogPath -Parent
+            if (-not [string]::IsNullOrWhiteSpace($logFolder) -and -not (Test-Path -LiteralPath $logFolder)) {
+                New-Item -ItemType Directory -Path $logFolder -Force | Out-Null
+            }
+            Add-Content -LiteralPath $effectiveLogPath -Value $lines -Encoding UTF8
+        }
+        catch {
+            Microsoft.PowerShell.Utility\Write-Warning ("SmartFinOps completion banner could not be written to '{0}': {1}" -f $effectiveLogPath, $_.Exception.Message)
+        }
+    }
+}
+
+function Assert-SmartFinOpsResolvedPath {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Name,
+        [AllowNull()][AllowEmptyString()][string]$Value
+    )
+
+    $token = [regex]::Match([string]$Value, '\{\{[^{}]*\}\}')
+    if ($token.Success) { throw ("{0} still contains an unresolved token {1} after resolution: '{2}'. Fix the SmartFinOps or SmartM365 configuration, or pass the path explicitly." -f $Name, $token.Value, $Value) }
+}
+
+function ConvertTo-SmartFinOpsHashtable {
     [CmdletBinding()]
     param([AllowNull()]$InputObject)
 
@@ -189,18 +310,27 @@ function Get-SmartFinOpsSmartM365LatestCsvFolderPath {
         [Parameter(Mandatory)][string]$TenantKey
     )
 
+    # Called only for SmartM365LatestCsvFolderPath = __USE_SMARTM365__: every failure is explicit, never a default path.
     $smartM365RootPath = Join-Path -Path $RepositoryRootPath -ChildPath 'SmartM365'
     $smartM365TenantContextPath = Join-Path -Path $smartM365RootPath -ChildPath 'Config\SmartM365-TenantContext.ps1'
-    if (-not (Test-Path -LiteralPath $smartM365TenantContextPath)) { return '' }
+    $prefix = "SmartM365LatestCsvFolderPath is __USE_SMARTM365__ but its resolution through SmartM365 failed for tenant '$TenantKey'"
+    if (-not (Test-Path -LiteralPath $smartM365TenantContextPath -PathType Leaf)) {
+        throw ("{0}: SmartM365 tenant context not found: {1}. Set SmartM365LatestCsvFolderPath or pass -SmartM365LatestCsvFolderPath." -f $prefix, $smartM365TenantContextPath)
+    }
 
     try {
         . $smartM365TenantContextPath
         $smartM365Config = Get-SmartM365EffectiveGlobalConfig -StartPath $smartM365RootPath -TenantKey $TenantKey
-        return [string](Resolve-SmartFinOpsExternalTokenValue -Value $smartM365Config.LatestCsvFolderPath -Config $smartM365Config)
+        $resolved = [string](Resolve-SmartFinOpsExternalTokenValue -Value $smartM365Config.LatestCsvFolderPath -Config $smartM365Config)
     }
     catch {
-        return ''
+        $invocation = $_.InvocationInfo
+        $position = if ($invocation -and $invocation.ScriptName) { '{0}:{1}' -f $invocation.ScriptName, $invocation.ScriptLineNumber } elseif ($invocation) { 'line {0}' -f $invocation.ScriptLineNumber } else { 'unknown position' }
+        throw ("{0}: {1} (at {2}; context {3})" -f $prefix, $_.Exception.Message, $position, $smartM365TenantContextPath)
     }
+    if ([string]::IsNullOrWhiteSpace($resolved)) { throw ("{0}: the SmartM365 context returned an empty LatestCsvFolderPath ({1})." -f $prefix, $smartM365TenantContextPath) }
+    Assert-SmartFinOpsResolvedPath -Name 'SmartM365LatestCsvFolderPath (resolved through SmartM365)' -Value $resolved
+    return $resolved
 }
 
 
@@ -254,12 +384,11 @@ function Get-SmartFinOpsEffectiveGlobalConfig {
     if (-not $globalConfig.Contains('WorkspaceRootPath') -or [string]::IsNullOrWhiteSpace([string]$globalConfig['WorkspaceRootPath'])) { $globalConfig['WorkspaceRootPath'] = $defaultWorkspaceRootPath }
     if (-not $globalConfig.Contains('TenantDataRootPath') -or ($useScriptOutputFallback -and [string]$globalConfig['TenantDataRootPath'] -eq '{{WorkspaceRootPath}}\Data\{{TenantKey}}')) { $globalConfig['TenantDataRootPath'] = $defaultTenantDataRootPath }
     if (-not $globalConfig.Contains('PriceBaselinePath')) { $globalConfig['PriceBaselinePath'] = '{{SmartFinOpsRootPath}}\Config\SmartFinOps-Workplace-FrancePriceBaseline.json' }
-    $smartM365LatestCsvDefault = Get-SmartFinOpsSmartM365LatestCsvFolderPath -RepositoryRootPath $repositoryRootPath -TenantKey $TenantKey
-    if ([string]::IsNullOrWhiteSpace($smartM365LatestCsvDefault)) { $smartM365LatestCsvDefault = '{{RepositoryRootPath}}\SmartM365\Data\Tenants\{{TenantKey}}\DATA-LAST' }
+    # Empty or __USE_SMARTM365__: resolved through SmartM365 only when a script asks for it (Get-SmartFinOpsConfigValue).
     if (-not $globalConfig.Contains('SmartM365LatestCsvFolderPath') -or
         [string]::IsNullOrWhiteSpace([string]$globalConfig['SmartM365LatestCsvFolderPath']) -or
         [string]$globalConfig['SmartM365LatestCsvFolderPath'] -in @('__USE_SMARTM365__', 'USE_SMARTM365')) {
-        $globalConfig['SmartM365LatestCsvFolderPath'] = $smartM365LatestCsvDefault
+        $globalConfig['SmartM365LatestCsvFolderPath'] = '__USE_SMARTM365__'
     }
     if (-not $globalConfig.Contains('RetentionMaxCSV')) { $globalConfig['RetentionMaxCSV'] = 30 }
     if (-not $globalConfig.Contains('RetentionMaxLogs')) { $globalConfig['RetentionMaxLogs'] = 30 }
@@ -310,6 +439,12 @@ function Get-SmartFinOpsConfigValue {
     if ($null -eq $property -or $null -eq $property.Value) { return $DefaultValue }
     if ($property.Value -is [string]) {
         $value = $property.Value.Trim()
+        if ($Name -eq 'SmartM365LatestCsvFolderPath') {
+            if ($value -in $script:SmartFinOpsUseSmartM365Markers) { return Get-SmartFinOpsSmartM365LatestCsvFolderPath -RepositoryRootPath ([string]$script:SmartFinOpsGlobalConfig.RepositoryRootPath) -TenantKey ([string]$script:SmartFinOpsGlobalConfig.TenantKey) }
+            $resolvedPath = [string](Resolve-SmartFinOpsConfigTokenValue -Value $value)
+            Assert-SmartFinOpsResolvedPath -Name 'SmartM365LatestCsvFolderPath' -Value $resolvedPath
+            return $resolvedPath
+        }
         if ([string]::IsNullOrWhiteSpace($value) -or $value -in @('__USE_GLOBAL__', 'USE_GLOBAL')) { return $DefaultValue }
     }
     return Resolve-SmartFinOpsConfigTokenValue -Value $property.Value
