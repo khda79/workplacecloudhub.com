@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
 WPF launcher for SmartM365 Exchange user notification campaigns.
 
@@ -9,7 +9,7 @@ builds the PowerShell command line, launches the selected campaign, and streams
 output back to the operator.
 
 .VERSION
-1.0.4
+1.0.5
 #>
 [CmdletBinding()]
 param(
@@ -57,6 +57,7 @@ $script:LoadingWindow = $null
 $script:GuiSplash = $null
 $script:OutputBox = $null
 $script:CurrentProcess = $null
+$script:CurrentRunMonitor = $null
 $script:UiReady = $false
 $script:SelectedCampaignIndex = 0
 $script:AutoLanguageLabel = '(Auto)'
@@ -1489,18 +1490,65 @@ function Complete-Run {
 }
 
 function Invoke-CurrentRunStop {
-    if ($script:CurrentProcess -and -not $script:CurrentProcess.HasExited) {
-        try {
-            $script:CurrentProcess.Kill()
+    if (-not $script:CurrentProcess) { return }
+    try {
+        if (-not $script:CurrentProcess.HasExited) {
+            $script:CurrentProcess.Kill($true)
             Add-OutputLine 'Run stop requested.'
         }
-        catch {
-            Add-OutputLine ("Failed to stop run: {0}" -f $_.Exception.Message)
+    }
+    catch {
+        Add-OutputLine ("Failed to stop run: {0}" -f $_.Exception.Message)
+    }
+}
+
+function Stop-CurrentRunMonitor {
+    $monitor = $script:CurrentRunMonitor
+    if ($monitor) {
+        $monitor.Timer.Stop()
+        $monitor.Process.Dispose()
+    }
+    elseif ($script:CurrentProcess) { $script:CurrentProcess.Dispose() }
+    $script:CurrentRunMonitor = $null
+}
+
+function Update-CurrentRunOutput {
+    $monitor = $script:CurrentRunMonitor
+    if (-not $monitor) { return }
+    try {
+        # ReadLineAsync performs I/O without invoking PowerShell on worker threads.
+        # This pump and all UI updates run on the WPF dispatcher thread.
+        foreach ($streamName in @('Output', 'Error')) {
+            $stream = $monitor.$streamName
+            $remaining = 128
+            while (-not $stream.Closed -and $stream.Pending.IsCompleted -and $remaining-- -gt 0) {
+                $line = $stream.Pending.GetAwaiter().GetResult()
+                if ($null -eq $line) {
+                    $stream.Closed = $true
+                    break
+                }
+                if (-not [string]::IsNullOrWhiteSpace($line)) {
+                    Add-OutputLine ($stream.Prefix + $line)
+                }
+                $stream.Pending = $stream.Reader.ReadLineAsync()
+            }
         }
+        if ($monitor.Output.Closed -and $monitor.Error.Closed -and $monitor.Process.HasExited) {
+            $exitCode = $monitor.Process.ExitCode
+            Stop-CurrentRunMonitor
+            Complete-Run -ExitCode $exitCode
+        }
+    }
+    catch {
+        Add-OutputLine ("Output monitoring failed: {0}" -f $_.Exception.Message)
+        Invoke-CurrentRunStop
+        Stop-CurrentRunMonitor
+        Complete-Run -ExitCode 1
     }
 }
 
 function Invoke-CampaignRun {
+    if ($script:CurrentProcess) { return }
     $campaign = Get-SelectedCampaign
     Show-Status -Text 'Checking templates' -Color '#0078D4'
     if (-not (Show-ValidationResult -Campaign $campaign -TemplatesOnly)) {
@@ -1543,37 +1591,23 @@ function Invoke-CampaignRun {
 
         $process = New-Object System.Diagnostics.Process
         $process.StartInfo = $psi
-        $process.EnableRaisingEvents = $true
-        $process.add_OutputDataReceived({
-            param($processSender, $dataEvent)
-            $null = $processSender
-            if (-not [string]::IsNullOrWhiteSpace($dataEvent.Data)) {
-                $line = $dataEvent.Data
-                [void]$script:Window.Dispatcher.BeginInvoke([Action]{ Add-OutputLine $line })
-            }
-        })
-        $process.add_ErrorDataReceived({
-            param($processSender, $dataEvent)
-            $null = $processSender
-            if (-not [string]::IsNullOrWhiteSpace($dataEvent.Data)) {
-                $line = 'STDERR: ' + $dataEvent.Data
-                [void]$script:Window.Dispatcher.BeginInvoke([Action]{ Add-OutputLine $line })
-            }
-        })
-        $process.add_Exited({
-            param($processSender, $exitEvent)
-            $null = $exitEvent
-            $exitCode = $processSender.ExitCode
-            [void]$script:Window.Dispatcher.BeginInvoke([Action]{ Complete-Run -ExitCode $exitCode })
-        })
-
         $script:CurrentProcess = $process
         [void]$process.Start()
-        $process.BeginOutputReadLine()
-        $process.BeginErrorReadLine()
+        $timer = [System.Windows.Threading.DispatcherTimer]::new()
+        $timer.Interval = [TimeSpan]::FromMilliseconds(100)
+        $script:CurrentRunMonitor = [pscustomobject]@{
+            Process = $process
+            Timer = $timer
+            Output = [pscustomobject]@{ Reader=$process.StandardOutput; Pending=$process.StandardOutput.ReadLineAsync(); Closed=$false; Prefix='' }
+            Error = [pscustomobject]@{ Reader=$process.StandardError; Pending=$process.StandardError.ReadLineAsync(); Closed=$false; Prefix='STDERR: ' }
+        }
+        $timer.Add_Tick({ Update-CurrentRunOutput })
+        $timer.Start()
     }
     catch {
         Add-OutputLine ("Run failed: {0}" -f $_.Exception.Message)
+        Invoke-CurrentRunStop
+        Stop-CurrentRunMonitor
         Show-Status -Text 'Run failed' -Color '#B42318'
         $script:CurrentProcess = $null
         Show-RunState -Running $false
@@ -2099,6 +2133,7 @@ $script:Window.Add_Closing({
         }
         Invoke-CurrentRunStop
     }
+    Stop-CurrentRunMonitor
 })
 $script:Window.Add_ContentRendered({
     if ($script:GuiSplash) { Hide-SmartM365GuiSplash -Splash $script:GuiSplash }
@@ -2116,8 +2151,8 @@ else { Close-LoadingWindow }
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA9sHZfW9XdDuIo
-# xAZ0snoSGtNda9zFVcR198cdqA1YQKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD4aAW2gLpOSRQe
+# myLJ76KzeiJyTI4h1GGMzOGilyBcIaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -2250,31 +2285,31 @@ else { Close-LoadingWindow }
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEICkQSyfvXx6uYXp0I6xxPBLDZLljqUQv+YYmI6Y6pI9LMA0GCSqG
-# SIb3DQEBAQUABIIBgJ6duidTsNoy2BZOfBpGeIWDU//sbwHD3Npl2P+CiYxMmjCR
-# dL13KcJo9KHCrjcr6prt3qV51mDqiYmRH3cgxWTnve6/lWQxzhqrA7MW4zH6DJPu
-# +Hy4FS48MVZLPuv5vxSVVQTXVNgqloLUL3t7JCadSjeH1IISk+r3P+tOKZqSxSHw
-# j0gD5dMGKCzuiVUYUiOPY2pQ8d8uwmWXup3nWkvEEGL5FmpSXTdPBVrhHZVeWxB/
-# Vjp+MeTcJqcc5F4sENVNwmvckZ5HYJlbtLc/7LedpOtJnxoPDumzYnT6WtVp9RGJ
-# ovaenjz7cmUBDiGJAouny78WH+g+KsHtpvadEtJUZeUPFmmomCU4ttSYs6zCXDky
-# hqxCaF4h9d7DBa7mAnAICeWlbj1bxRh8MTJrWi85OgFmPo4jEAvNiBgSqiHr0sG5
-# 4c2ngAY3l1a/B2iX/Yi1+wJee0ITrv1uGE2Z/v6koIN0YafKfFe54uKc5xiyMiHG
-# ShVam9dC60c6xuecS6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIF14zmZplB89zZY+zUM2pwRGqvAq+RWlkhrNioBczV4NMA0GCSqG
+# SIb3DQEBAQUABIIBgED26xcubjzDotg9l79t2PbG1p9btDiI9mwHM+8cp65xoEWu
+# eOFqzi9+NNtEqijnGlDV2sJcKur5HbdHPeec2uIbxfKVnSyHye7ImYkT6vT4mfIF
+# puWL03Q7eV+URdFxSRNflIhB42hCo+BidoniYJcwB9fnb5LfOUutWv1u7S0XaVA3
+# ciISpxexmVBmDSlDr6ETe6MnBm5yTnbkLqQvVEwgSAtBCAykAQUjjL7V9QXcp74E
+# DjgqlAKhTd48oRcxw0/iUgTbhcqb2A6zGF8jPNr6Z//+odM1gXul7CgApnrOAFDE
+# 4tiGRVXYVQ7pcIJodPrs1TfEJauVPglQLk7qbsK6xRIbF08aanPHKH1fQCDlu2bu
+# uzP8zrGmTuzLRN87dPjSEu0vXdHJK8snqgMYQB2wNGt4Pf9wutq4vEbvy18hdiMT
+# pkkl4CehYcSxCiHU69R7AzdVUTJ+v6aCLruRQQFQZkNzTuATjgakZYpmJsZFGBLG
+# U9+cReUSxFBh2OorvKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTgwMDQ2
-# NDRaMC8GCSqGSIb3DQEJBDEiBCAhJdCcLax6nADFJWWSH223+LT5/ZCEP5t9I2UR
-# 4ayp/TANBgkqhkiG9w0BAQEFAASCAgAkW3BM3y3Uv1I3+/1xQWp/mGVnFgq++yG2
-# HO8QZTWa1XGDMDqalnddYLKSxu+qnBtRI8MPkt7+VF/0ZUett3g2XONkhctYahR+
-# aG8N9vZXJkB1xv6embo1yMEMw0fkUvB/CW9o1PKMGbefiJAHgxMIFpz5EEBHA9tU
-# i50xcDmEvBk3iBBRAwtEutX4Awwcpcq071ExxnHQpyLyA4GGhnzbIiTqTuufmQB/
-# nuJOuXm5eYznpDUtS2qk79RoyEOlxfu10dnouxqX7PyXurEE1YrIUvgGfj4jp35T
-# 3EC5Sg1WFdE1V2M6X8N1ZrNsxQpbm6zqUM31QHVPRtQhuy+78y/QGqS7S9kR2IKi
-# wjB9UfjprgViZIy4JAeyx1j1sBpbRs2sSwiKaFM/Pg/cDEtr1Erbsk7pio6trOEI
-# R3kBqMc8cStt6WJSXMUYcdWTCL0EbyYn21HC43hs2PV9CtsOOQde1MwrVIrb260M
-# iA6TeJG2l7NJkHaObhqHFn/l6XMkdWcKQeiNUXK8k/d9a1LhR4o6kmwZwjqDQdLY
-# Aoeoldts1aHZyqrvxAWUjdKUtYuOADrGuPRKPZeSeKzgf+8ux1NtnaZ8Dln25k4t
-# D5nPuRhfWsZKd/uWJfC/28vTrzL8kiCEp9KvzPCkHdL/Wb06E1tMpHyKfl1iGy5Z
-# gIL5TMQHuA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTgwMjQw
+# MTRaMC8GCSqGSIb3DQEJBDEiBCCwhaDSKgQ8AYhzgg1zyZOL/39Du4kmZzSuyY2O
+# t+LazDANBgkqhkiG9w0BAQEFAASCAgBgz8APaxzYkPWlLqe450lIa0ADXWJi+QPx
+# +BBZOU+b01AalNTbxCalMzrRI2aL/og5nUskMPgUG3cE8MT/r2CkJpE57zYvoT6L
+# hwp7CNK4rC2s6TZ1TSky02ZuaRYSyZxrTLN50hNCxVNeaHcSw7e4pXQi1p7bDdIz
+# qBODG2kbv3MciFhOnfOEphOqWCIgeeeU/Rd5uQdmdJa1CqUUuGw8fytKi9ShXSS2
+# ah44eBOAO0V4pgcz/PV3ryiVquXokU8A9NVpUX4MSmlUKWhphVrOFgdfJ//bX/M8
+# cLSgcnXORXnkLCMAEuIASu7B1IELDXctirXvPX3LROLdiwIbfk4QCwpwU1IUPtpL
+# WoMrFs2pL8EI8p6RyjOh2jt8dC59PqOLxSjLSA+stj8FBtqrVwzQkTQipwT/jGGR
+# QvW7oQ6X4Q4r/+fUNCMzMSTiAxEy7nG4Vdz7SqQQlBgYRvxFRx4e5cOAKzqiVnz+
+# Q/xdN0gCE6xGTRvY4O4j9ezznWbFYCsrsFaSOfDK/zOxDn8r/aLReyqpEaBqNpyz
+# vCv5WnT+fQO7RaAiHRoA/BCgohKJZSzLMVm8Q6dR8Uas+PL4sDl7q+m8sqLhRqFU
+# rx9ZOKL+6b+wm7xZEWgSHfcYUAPSjYtvYMhFBM8QbgKV83cqkGH/lY8CxZxNHF3w
+# 20DZgFvUcA==
 # SIG # End signature block

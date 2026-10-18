@@ -100,3 +100,16 @@ Launch `Start-SmartM365-ExchangeUserNotifications-Demo.cmd` for screenshots and 
 Business actions are simulated. Demo startup bypasses operational configuration, authentication, collection, remote commands and mail delivery. Edits remain in memory. **Export demo outputs** generates only synthetic files under a unique `%TEMP%\SmartM365-Demo\` session folder. HTML-capable tools retain their report views; notification campaigns preview every shipped language template with fictional tokens. No real tenant or device evidence is required.
 
 Keep the application folder, its original report/template sources, local branding assets, `SmartM365.GuiDemo.ps1`, `SmartM365.GuiDemo.Reports.ps1` and the local `*-Demo.ps1` profile together when copying the application. `-Demo -ValidateOnly` builds the WPF demo without displaying windows or opening files. Run `SmartM365/Tests/Test-SmartM365GuiDemoApplicationsOffline.ps1` in an STA process for offline interaction and export checks.
+
+
+## Local review correction (2026-10-18)
+
+Source version: GUI 1.0.5. Campaign stdout and stderr are read asynchronously and drained by a WPF dispatcher timer on the GUI thread. Completion waits for process exit and both streams to reach EOF; cancellation, startup failure and repeated runs clean up the monitor. No PowerShell scriptblock is attached to Process output/exit events on worker threads.
+
+Offline regression command from the repository root:
+
+```powershell
+pwsh -NoProfile -STA -ExecutionPolicy Bypass -File SmartM365/Tests/Test-SmartM365GuiReviewRegressionsOffline.ps1 -Case NotificationProcess
+```
+
+These checks use temporary files, harmless child processes or mocked operational boundaries. They do not qualify a real tenant, endpoint repair, campaign delivery or deployment. Demo assets remain local in `DemoAssets/`, ignored by Git, and must be refreshed after GUI changes. Live deployment requires separate qualification.

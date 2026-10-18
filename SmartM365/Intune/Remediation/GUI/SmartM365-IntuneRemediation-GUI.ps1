@@ -1,4 +1,4 @@
-#Requires -Version 7.0
+﻿#Requires -Version 7.0
 
 <#
 .SYNOPSIS
@@ -23,11 +23,11 @@
     - DeviceManagementConfiguration.Read.All
 
 .VERSION
-    1.2
+    1.3
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
-    Version: 1.1
+    Version: 1.3
 #>
 
 [CmdletBinding()]
@@ -2457,6 +2457,7 @@ function Reset-CloudRemediationHistory {
         throw 'Graph did not return an id for the duplicated remediation.'
     }
 
+    $originalDeleteAttempted = $false
     try {
         Write-GuiLog "Duplicate remediation created: $duplicateDisplayName ($newId)"
 
@@ -2468,6 +2469,7 @@ function Reset-CloudRemediationHistory {
             Write-GuiLog "No assignments to copy for $displayName ($id)."
         }
 
+        $originalDeleteAttempted = $true
         Invoke-MgGraphRequest -Method DELETE -Uri "$script:GraphBaseUri/deviceManagement/deviceHealthScripts/$id" -ErrorAction Stop | Out-Null
         Write-GuiLog "Original remediation deleted after duplicate validation: $displayName ($id)"
 
@@ -2478,6 +2480,13 @@ function Reset-CloudRemediationHistory {
         }
     }
     catch {
+        if ($originalDeleteAttempted) {
+            # A transport failure does not prove the server rejected DELETE.
+            # Keep the replacement until the operator can reconcile both IDs.
+            $message = "History reset could not confirm deletion of original $id. Replacement $newId was retained. Verify both objects before retrying or deleting either one."
+            Write-GuiLog "$message Error: $($_.Exception.Message)"
+            throw [InvalidOperationException]::new($message, $_.Exception)
+        }
         Write-GuiLog "History reset failed after duplicate creation. Cleaning up duplicate $newId..."
         try {
             Invoke-MgGraphRequest -Method DELETE -Uri "$script:GraphBaseUri/deviceManagement/deviceHealthScripts/$newId" -ErrorAction Stop | Out-Null
@@ -4512,8 +4521,8 @@ Update-ConnectionStatus
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC3kx2ynZrwaZdJ
-# CcDKDdK8vU5uNwc+WbfEiF+X4+pOFKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCd8mu1cR3uQV9X
+# nuYgR6KAcKxJMcAW2ARFnsca2Gi1B6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -4646,31 +4655,31 @@ Update-ConnectionStatus
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIOvfAfr2Eq2cdSXAwsKYWXoYbcMTMLMaCA8dYVOChDP9MA0GCSqG
-# SIb3DQEBAQUABIIBgFZYZuCESQdzX5Vxy5ekTERs5BM9h2I0xqBFxDssMNOd2eEq
-# WHh41LT3l5HhdvrvCVVRHSLzqGNQm0k/KW3d/+fNcVJGYqy51Q1qDnCSI4BLt6Kf
-# 7Ni/56pN/gPjmlirIba6VCYZ3yHX99XjL8qk6QpoZhy6pzUq36sjllyP9p7izhEW
-# GpkIpQMeSAII3gVemEurKctCTL0kx91fy1kpatMcn1wXEdzKV+8rtNa+snnqopB5
-# I7jPNMGVbr5yGBVvJ5gxxRXVcn5ssXXrR/7kV8e4Mop3jJT8BvnoySdhmEc9Il7p
-# 6C93i37wL6mtKOFPvxUKNiFjd8eRZN5rkYqdSrUGU02ppFRrQ4y3eVhdZtCkXW36
-# Pr5ZSN/Bg7R2iOpzJqsWCDMCfvwL7jW14qgz+AB2RvKjFyQ1K4dk38lq0uaE2BgO
-# gpLqb8RNGRtpla7FSRJ0FTcLis0ioWxEtgRgmVkEBqk8V+4xGgQBeVt6uUkty4bg
-# 4JtBcAYkd91UyFaIIqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIM30oBKqQAmQRtMVgVQkgxrtPlaoaKL/fGCyK0H/6joyMA0GCSqG
+# SIb3DQEBAQUABIIBgAI2v6DWCDbMCVEj6F5bnvRnA8j6/9D9VKNvyFn6A4P/v3L1
+# HiZXzpzIwAh+JPPxFkzsG5DDpteVOUAACxCgTLmGrempyt0N22/WFP7Y9nnuLDxK
+# ZARHlG4lijiFBPY28cV858ehLUVhocrHoQAesZUBffSWIjygQ6zAOxbPOmkUAopl
+# 1L14IXOlvIJ+P9Uzbcpxs/Flme4q9ex+4rxTEHbryZMP2vRAdGHP5whkj8xUzArw
+# Kz+7uyaXjJqSNVQjYYjKmkFbz77g0H/cdtyjbhZiSVs7Ti1Mg5Yb/Tu00NcXcxrI
+# 2rs1VfVivU2Z0hdOV0WuYobl4ZbAqFgp+NL/5weJuPURyy1aNFesOFZ7cZHCfwqd
+# aLRVMqQ/21aaZNHVdXxIMiH2187ydtn62US8VmxkvMAGkeevDGfTnqqkFoVTbsvF
+# k0eSniPJlNP7s9BFHa0YOSSL/BFkV5+fNVr7XCwGV/6AHclLitniWHw9h/61sw/T
+# bklSer5iX9vxWiuf0qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTgwMDQ2
-# MzdaMC8GCSqGSIb3DQEJBDEiBCCYBCMJayxzlf4hq0RmTSOWZ/0jAw2KONeOW0V0
-# UifJtjANBgkqhkiG9w0BAQEFAASCAgA5Ae7hDxMqaiEGNMn7jedeQxRv5ZSfy0BH
-# rSXNAGPVl0dLNh5ut6//g6THHN3B1xZecMkZUJ94fwotMUmm+l3lP/SC/MG9bJ7u
-# IUzSLv2hHEnWVSeGlna4x7UvY83/zf43przmnXN3Rkh5rbXg2u46gBh+J/KmfMjj
-# KB/rNEDw6/f9slpW78iIAdVRlje1OQyW+Pwl2Px3GjFdNsi4D8C7T4Ji0KjRI0Wl
-# jMOuRnO4FkAbsrMW56jDU6zFxAtjNDGJWdkQK8ePSPcs/5j8LH6K+vmHHEqCt6GY
-# Y9b6O0QIOKJTlF5aFSUcCKs+YoNEGY3P9XhnXapS2vyX6+oZtmNLRQJNfzsswAsI
-# 6zsQyTwCO22mZTtkU1U4/wGv1nHM6jFgMJ1g1YWIAX32HwtQI+ke2py64TExfiLD
-# BP/1LrqPZ3MZz6mjoTxD9DIZgkOn9lsTP+AK/HadwMkB6SqFIdDvJnTitvlK9bYG
-# VpjouDa5n4LQHVbB3AI7pVZtIXqU7kDDx/oYBJMNF8IMc1RHRdLB2aEW30j89/T6
-# rcw5POjV+TCRgQ/ClkQp3jg4fbcxmGIopJ0Qj136f0iTiVysaFGj6Dmt5Ct2XJu4
-# 44S4wlbwWcdjwqCwT7/fLJNVT6FrFnJHhEf5QM8NYsmz23dt40aZd9GOx/dsdq28
-# wmBDwmrH7g==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTgwMjQw
+# MTZaMC8GCSqGSIb3DQEJBDEiBCDH9sMr31/ZoXAqdHfLEhgoUSgHJzUU/yK64DXw
+# 47P54zANBgkqhkiG9w0BAQEFAASCAgBWF9O5UT2TU3WO/2L+kG8T2wVtqUyNf5EN
+# J57D0k7zMPVcjMLSMNmUuYJX3znqNiuTp0vEo7ABd6i7kNoOt8Kw073U1BmrJnJs
+# ccmdPTFLBXswN6FevNIokp7t0CZ2967AYjCSzjdDPjRl0BSiQmBS4yYDATp5sBqR
+# xrVpBHNY67DYO6Popr8xtu/KZrn9grhg/WPwrfRRhndb9dqeCJwmWJ4ItHYBgeeq
+# tPeUk6bo2u+S9aUdc1Fy8dZpJXIq/K/GzeAjOJm2R5wgGm+AO3ewTZoMG8RJpTEt
+# ufwvCoTKwZVxmzgjvVJjvw5aN7Omdp/InmhQ8bGJxXI88YL1iC+kFyf6MkeD/2EI
+# V7oqSrIk0KYHaYauLkBAgFPR1nW2QdqyyAhPYx90MfnbsTyaNRnWDXL0JliAZEwq
+# 1ETqdQf4MqzJDSG+VzsNPJueEOCz1FkvYNuwqc+rwu1xVsXqs/RE0c8Lag0gLGn0
+# U22WImej9O3tO4l02lOsUqoNKi9Ar6wyOH1rQ+8fEkHBvv+StLCMqzV/ejSzgEfu
+# XUUr2wTOoGLr895D8wQS42z9jY+HHPWxda07grjbNxOpSyyLq5mr2jOY1cLUG2qi
+# 1b0b176VH4ARIAzQew5ojXZy+J5WIE1mXkxOx2dTs5jPKdCcFyIirbqwTFVoQfhr
+# Pr07NkLBQw==
 # SIG # End signature block

@@ -83,3 +83,16 @@ PSScriptAnalyzer is installed from PowerShell Gallery for the current user if it
 ## Logs
 
 Activity is written to `Logs/SmartM365-IntuneRemediation-GUI.log` under this folder. At each launch, the previous log is archived with a timestamp in `Logs/` and the GUI keeps the 10 most recent log files.
+
+
+## Local review correction (2026-10-18)
+
+Source version: GUI 1.3. Reset history retains the replacement remediation once deleting the original has been attempted. A failed or missing DELETE response can mean the server already applied the operation; the GUI reports the original and replacement IDs for reconciliation and does not delete the replacement in this uncertain state. Failures before the original DELETE still roll back the replacement.
+
+Offline regression command from the repository root:
+
+```powershell
+pwsh -NoProfile -STA -ExecutionPolicy Bypass -File SmartM365/Tests/Test-SmartM365GuiReviewRegressionsOffline.ps1 -Case RemediationReset
+```
+
+These checks use temporary files, harmless child processes or mocked operational boundaries. They do not qualify a real tenant, endpoint repair, campaign delivery or deployment. Demo assets remain local in `DemoAssets/`, ignored by Git, and must be refreshed after GUI changes. Live deployment requires separate qualification.
