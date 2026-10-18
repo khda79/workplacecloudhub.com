@@ -299,3 +299,6 @@ desktop.ini
 /SmartM365/SharePointMigration/ArchivedMigrations/**
 !/SmartM365/SharePointMigration/ArchivedMigrations/
 !/SmartM365/SharePointMigration/ArchivedMigrations/.gitkeep
+
+# Local fictional GUI captures, demo reports and email previews.
+/SmartM365/**/DemoAssets/
