@@ -83,6 +83,8 @@ SmartFinOps/**
 !/SmartM365/Devices/Windows11UpgradeToolkit/Windows11UpgradeToolkit-Procedure-EN.pptx
 !/SmartM365/Intune/Remediation/GUI/WorkplaceCloudHub.ico
 !/SmartM365/Intune/Remediation/GUI/WorkplaceCloudHub-lockup-WPF.png
+!/SmartM365/Intune/IntunePackager/WorkplaceCloudHub.ico
+!/SmartM365/Intune/IntunePackager/WorkplaceCloudHub-lockup-WPF.png
 !/SmartM365/Exchange/ExchangeUserNotifications/WorkplaceCloudHub.ico
 !/SmartM365/Exchange/ExchangeUserNotifications/WorkplaceCloudHub-lockup-WPF.png
 !/SmartM365/SharePointMigration/WorkplaceCloudHub.ico

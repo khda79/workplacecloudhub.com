@@ -1,0 +1,57 @@
+{
+  "SchemaVersion": 1,
+  "Package": {
+    "SourceFolder": "%LOCALAPPDATA%\\SmartM365\\IntunePackager\\Samples\\Contoso-SampleApp\\Source",
+    "SetupFile": "ContosoSampleApp.msi",
+    "OutputFolder": "%LOCALAPPDATA%\\SmartM365\\IntunePackager\\Samples\\Contoso-SampleApp\\Output"
+  },
+  "App": {
+    "DisplayName": "Contoso Sample App (IntunePackager test)",
+    "Description": "Fictional sample package created by Smart IntunePackager. It only writes HKEY_LOCAL_MACHINE\\SOFTWARE\\Contoso\\IntunePackagerSample\\Version.",
+    "Publisher": "Contoso Ltd",
+    "Version": "1.0.0",
+    "Notes": "Smart IntunePackager validation package. Safe to delete.",
+    "InformationUrl": "https://workplacecloudhub.com",
+    "PrivacyInformationUrl": "",
+    "Developer": "Contoso Ltd",
+    "Owner": "Contoso IT",
+    "LogoPath": ""
+  },
+  "Program": {
+    "InstallCommandLine": "msiexec /i \"ContosoSampleApp.msi\" /qn /norestart",
+    "UninstallCommandLine": "msiexec /x {5F0C3B2A-6D41-4E8B-9A57-2C1D7E3F9B10} /qn /norestart",
+    "RunAsAccount": "system",
+    "DeviceRestartBehavior": "suppress",
+    "MaxRunTimeInMinutes": 30
+  },
+  "ReturnCodes": [
+    { "ReturnCode": 0, "Type": "success" },
+    { "ReturnCode": 1707, "Type": "success" },
+    { "ReturnCode": 3010, "Type": "softReboot" },
+    { "ReturnCode": 1641, "Type": "hardReboot" },
+    { "ReturnCode": 1618, "Type": "retry" }
+  ],
+  "Requirements": {
+    "Architectures": [ "x64", "arm64" ],
+    "MinimumWindowsRelease": "1607"
+  },
+  "Detection": {
+    "Type": "MsiProductCode",
+    "Msi": {
+      "ProductCode": "{5F0C3B2A-6D41-4E8B-9A57-2C1D7E3F9B10}",
+      "ProductVersionOperator": "greaterThanOrEqual",
+      "ProductVersion": "1.0.0"
+    },
+    "File": [],
+    "Registry": [],
+    "Script": {
+      "ScriptPath": "",
+      "EnforceSignatureCheck": false,
+      "RunAs32Bit": false
+    }
+  },
+  "Publish": {
+    "Mode": "Create",
+    "ExistingAppId": ""
+  }
+}

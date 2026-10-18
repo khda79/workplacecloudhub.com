@@ -1,0 +1,45 @@
+{
+  "Tenants": {
+    "test": {
+      "TenantId": "",
+      "AuthMode": "Delegated",
+      "DelegatedSignIn": "Auto",
+      "ClientId": "",
+      "CertificateThumbprint": ""
+    }
+  },
+  "Paths": {
+    "LogDirectory": "Logs",
+    "DefaultOutputFolder": "",
+    "ProfilesFolder": ""
+  },
+  "Logging": {
+    "MaxLogFiles": 10
+  },
+  "Gui": {
+    "LastTenant": ""
+  },
+  "Packaging": {
+    "Engine": "IntuneWinAppUtil",
+    "UseShortPathStaging": false,
+    "BuildTimeoutMinutes": 120
+  },
+  "ContentPrepTool": {
+    "Version": "1.8.7",
+    "DownloadUrl": "https://raw.githubusercontent.com/microsoft/Microsoft-Win32-Content-Prep-Tool/v1.8.7/IntuneWinAppUtil.exe",
+    "Sha256": "C1BA45B5CB939E84AF064BB7FF4B38FB3DFE33C8DC1078FD9B157672EAE671F6",
+    "StoragePath": "%LOCALAPPDATA%\\SmartM365\\IntunePackager\\Tools"
+  },
+  "Graph": {
+    "BaseUri": "https://graph.microsoft.com/beta",
+    "MaxRetries": 5,
+    "PollSeconds": 5,
+    "PollTimeoutMinutes": 30
+  },
+  "Upload": {
+    "BlockSizeMB": 16,
+    "MaxRetries": 5,
+    "RenewSasBeforeExpiryMinutes": 5,
+    "HttpTimeoutMinutes": 30
+  }
+}

@@ -1,15 +1,15 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-Offline interaction, view coverage and export checks for the eight demo applications.
+Offline interaction, view coverage and export checks for the nine demo applications.
 .VERSION
-1.0.0
+1.0.1
 .NOTES
 Run one application per STA process. No operational handler is loaded.
 #>
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)][ValidateSet('Registration','Analyzer','HybridJoin','Windows11','Readiness','Notifications','Remediation','SharePoint')][string]$Application,
+    [Parameter(Mandatory)][ValidateSet('Registration','Analyzer','HybridJoin','Windows11','Readiness','Notifications','Remediation','SharePoint','IntunePackager')][string]$Application,
     [string]$PreviewFolder='',
     [switch]$InteractiveSmoke
 )
@@ -26,6 +26,7 @@ $paths=@{
     Notifications='Exchange/ExchangeUserNotifications/SmartM365-ExchangeUserNotifications-GUI.ps1'
     Remediation='Intune/Remediation/GUI/SmartM365-IntuneRemediation-GUI.ps1'
     SharePoint='SharePointMigration/SmartM365-SharePointMigration-GUI.ps1'
+    IntunePackager='Intune/IntunePackager/SmartM365-IntunePackager-GUI.ps1'
 }
 $demoEntryPath=Join-Path $root $paths[$Application]
 $script:checks=0

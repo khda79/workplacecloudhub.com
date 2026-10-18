@@ -13,6 +13,7 @@ Use these local launchers for website screenshots and presentations. Every demo 
 | Exchange Migration Readiness | `Exchange/MigrationReadiness/Start-SmartM365-ExchangeMigrationReadiness-Demo.cmd` | Complete assessment check catalogue, mailbox views, native HTML and CSV |
 | Exchange User Notifications | `Exchange/ExchangeUserNotifications/Start-SmartM365-ExchangeUserNotifications-Demo.cmd` | All three campaigns and every shipped language template; summary email preview |
 | Intune Remediation | `Intune/Remediation/Start-SmartM365-IntuneRemediation-Demo.cmd` | Local/cloud packages, script editors, simulated lifecycle and execution CSV |
+| Intune Packager | `Intune/IntunePackager/Start-SmartM365-IntunePackager-Demo.cmd` | Package definition form, MSI/PSADT detection, dry-run payloads and simulated publication |
 | SharePoint Migration | `SharePointMigration/Start-SmartM365-SharePointMigration-Demo.cmd` | All eight panels, batch view, new migration wizard, farm window and eight HTML views |
 
 Six report-producing applications are covered: Orchestrator, Endpoint Diagnostics Analyzer, the two LOT launchers, Exchange Migration Readiness and SharePoint Migration. Notifications also exports its email templates as HTML previews.
@@ -24,7 +25,7 @@ Six report-producing applications are covered: Orchestrator, Endpoint Diagnostic
 3. Use **Export demo outputs**, then **Open demo outputs** to inspect the generated reports/previews. Each session owns a separate `%TEMP%\SmartM365-Demo\` folder.
 4. Capture the desired window or open an HTML preview in a browser. Keep the demo label visible in published examples.
 
-For the eight extended demos, optional arguments include:
+For the nine extended demos, optional arguments include:
 
 ```powershell
 .\Start-SmartM365-ExchangeMigrationReadiness-Demo.cmd -DemoScenario Issues -DemoView Results -DemoWindowWidth 1800 -DemoWindowHeight 1000
@@ -54,4 +55,4 @@ Use an STA PowerShell process and the application's required host (Windows Power
 
 The extended suite covers original named controls, all tabs, scene selection, real WPF button events, native/synthetic exports and email token replacement. It blocks operational commands. `-InteractiveSmoke` briefly displays the demo and closes only that demo window. These are offline/synthetic checks, not tenant or endpoint qualification.
 
-The maintained common host/report helper files live in `Modules/SmartM365.UI/` and are copied identically into the eight application script directories for standalone portability. The tests verify that these copies match. Each local profile reads only shipped neutral view/report/template sources; normal application launchers and operational startup paths remain separate.
+The maintained common host/report helper files live in `Modules/SmartM365.UI/` and are copied identically into the nine application script directories for standalone portability. The tests verify that these copies match. Each local profile reads only shipped neutral view/report/template sources; normal application launchers and operational startup paths remain separate.
