@@ -74,9 +74,12 @@ function Snapshot-Fixture($Fixture){
 function New-Transport($Fixture,[string]$Mode='ok'){
     $remote=Join-Path $root ('simulated-remote/'+[guid]::NewGuid().ToString('N'))
     New-Item -ItemType Directory -Path $remote -Force | Out-Null
-    $state=@{Remote=$remote;Mode=$Mode;Events=[Collections.Generic.List[string]]::new()}
+    $state=@{Remote=$remote;Mode=$Mode;Events=[Collections.Generic.List[string]]::new();MutatePath=$null}
     $upload={param($local,$relative)
         $state.Events.Add('U:'+$relative)
+        if($state.Mode -eq 'mutate-uploaded' -and $relative.EndsWith('/validation.json.txt')){
+            Add-Content -LiteralPath $state.MutatePath -Value 'Synthetic change after upload'
+        }
         $target=Join-Path $state.Remote $relative
         New-Item -ItemType Directory -Path (Split-Path $target -Parent) -Force | Out-Null
         Copy-Item -LiteralPath $local -Destination $target
@@ -232,6 +235,20 @@ $t=New-Transport $extended 'corrupt-endpoint';$params=$t.Params
 Reject {Send-PreparedEvidenceBatch @params} 'Remote SHA256/size mismatch'
 Check (-not(Test-Path -LiteralPath (Join-Path $t.State.Remote 'current.json.txt'))) 'Corrupt endpoint read-back advanced pointer'
 Check ((Snapshot-Fixture $extended) -eq $before) 'Failed endpoint read-back modified local batch'
+# A CSV changed after its own upload is caught by the parallel re-verification before the root pointer.
+$original=[IO.File]::ReadAllBytes($localEndpoint)
+try{
+    $t=New-Transport $extended 'mutate-uploaded';$t.State.MutatePath=$localEndpoint;$params=$t.Params
+    Reject {Send-PreparedEvidenceBatch @params 6>$null} 'Local batch changed during transfer; cloud pointer not advanced'
+    Check ($t.State.Events -contains "U:batches/$($extended.Batch.BatchId)/EndpointProtectionEvidence.csv") 'Mutated CSV was not uploaded before the pointer check'
+    Check (-not(Test-Path -LiteralPath (Join-Path $t.State.Remote 'current.json.txt'))) 'Changed local batch advanced the root pointer'
+}finally{[IO.File]::WriteAllBytes($localEndpoint,$original)}
+Check ((Snapshot-Fixture $extended) -eq $before) 'Mutation test did not restore the local batch'
+# Parallel hashing returns exactly the sequential SHA256 for every path, and rethrows read errors.
+$hashPaths=@(Get-ChildItem -LiteralPath $extended.Batch.BatchPath -File | ForEach-Object FullName)
+$parallel=& (Get-Module PreparedSharePointTransfer) {param($p) Get-PreparedFileHashMap $p} @($hashPaths+$hashPaths[0])
+foreach($path in $hashPaths){Check ($parallel[$path] -ceq (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash) "Parallel hash differs: $path"}
+Reject {& (Get-Module PreparedSharePointTransfer) {param($p) Get-PreparedFileHashMap $p} @($hashPaths[0],(Join-Path $root 'missing-file.csv'))} 'missing-file\.csv|does not exist|introuvable|n.existe pas'
 Write-Host "PASS: $script:checks synthetic base/endpoint contract, retry, provenance, hash, file-set and integrity checks. No tenant or network calls."
 
 # SIG # Begin signature block

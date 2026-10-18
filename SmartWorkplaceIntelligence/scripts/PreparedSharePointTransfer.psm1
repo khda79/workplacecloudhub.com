@@ -158,6 +158,23 @@ function Resolve-PreparedTransferContract {
     return $contract
 }
 
+function Get-PreparedFileHashMap([string[]]$Paths){
+    # Parallel reads only (the batch usually sits on a network share); callers still compare
+    # every hash individually and in their own order. The first read error is rethrown.
+    $results=@($Paths | Select-Object -Unique | ForEach-Object -ThrottleLimit 4 -Parallel {
+        $path=$_
+        try{[pscustomobject]@{Path=$path;Hash=(Get-FileHash -LiteralPath $path -Algorithm SHA256 -ErrorAction Stop).Hash;Error=$null}}
+        catch{[pscustomobject]@{Path=$path;Hash=$null;Error=$_.Exception.Message}}
+    })
+    $hashes=@{}
+    foreach($path in $Paths){
+        $result=@($results | Where-Object Path -CEQ $path)[0]
+        if($result.Error){throw $result.Error}
+        $hashes[$path]=$result.Hash
+    }
+    $hashes
+}
+
 function Get-PreparedTransferPlan {
     param([string]$Root,[string]$TenantKey,[string]$ContractPath,[string]$ExpectedBatchId)
     $pointerPath=Get-PreparedMetadataPath $Root 'current';Assert-TransferPath $pointerPath
@@ -178,13 +195,19 @@ function Get-PreparedTransferPlan {
     $expected=@($contract.tables.file)
     if(@($manifest.Files).Count -ne $expected.Count -or @($validation.Files).Count -ne $expected.Count -or $expected.Count -eq 0){throw 'Prepared file count differs from the contract.'}
     $files=[Collections.Generic.List[object]]::new();$seen=[Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    $csvEntries=[Collections.Generic.List[object]]::new()
     foreach($entry in $manifest.Files){
         $name=[string]$entry.File
         if($name -notmatch '^[A-Za-z0-9_-]+\.csv$' -or $name -cnotin $expected -or -not $seen.Add($name)){throw 'Unexpected, unsafe or duplicate CSV name.'}
         $path=Join-Path $folder $name;Assert-TransferPath $path
         $validated=@($validation.Files | Where-Object File -CEQ $name)
-        if($entry.SHA256 -notmatch '^[A-Fa-f0-9]{64}$' -or $validated.Count -ne 1 -or $validated[0].SHA256 -ne $entry.SHA256 -or $validated[0].Rows -ne $entry.Rows -or (Get-Item -LiteralPath $path).Length -ne $entry.Bytes -or (Get-FileHash -LiteralPath $path).Hash -ne $entry.SHA256){throw "Local CSV integrity mismatch: $name"}
-        $files.Add([pscustomobject]@{Path=$path;Relative="batches/$id/$name";Bytes=$entry.Bytes;SHA256=$entry.SHA256})
+        if($entry.SHA256 -notmatch '^[A-Fa-f0-9]{64}$' -or $validated.Count -ne 1 -or $validated[0].SHA256 -ne $entry.SHA256 -or $validated[0].Rows -ne $entry.Rows -or (Get-Item -LiteralPath $path).Length -ne $entry.Bytes){throw "Local CSV integrity mismatch: $name"}
+        $csvEntries.Add([pscustomobject]@{Name=$name;Path=$path;Entry=$entry})
+    }
+    $csvHashes=Get-PreparedFileHashMap @($csvEntries.Path)
+    foreach($csv in $csvEntries){
+        if($csvHashes[$csv.Path] -ne $csv.Entry.SHA256){throw "Local CSV integrity mismatch: $($csv.Name)"}
+        $files.Add([pscustomobject]@{Path=$csv.Path;Relative="batches/$id/$($csv.Name)";Bytes=$csv.Entry.Bytes;SHA256=$csv.Entry.SHA256})
     }
     if($manifest.PSObject.Properties['Artifacts']){
         if(-not $manifest.PSObject.Properties['ArtifactContractSHA256'] -or -not (Test-PreparedArtifactContractCompatible -ContractSHA256 ([string]$manifest.ArtifactContractSHA256))){throw 'Artifact contract mismatch.'}
@@ -234,7 +257,8 @@ function Send-PreparedEvidenceBatch {
                 # Verify local inputs again before activating the cloud batch.
                 $clock=[Diagnostics.Stopwatch]::StartNew()
                 if((Get-FileHash -LiteralPath $plan.PointerPath).Hash -ne $plan.PointerHash){throw 'Local current pointer changed during transfer.'}
-                foreach($source in $plan.Files){if((Get-FileHash -LiteralPath $source.Path).Hash -ne $source.SHA256){throw 'Local batch changed during transfer; cloud pointer not advanced.'}}
+                $currentHashes=Get-PreparedFileHashMap @($plan.Files.Path)
+                foreach($source in $plan.Files){if($currentHashes[$source.Path] -ne $source.SHA256){throw 'Local batch changed during transfer; cloud pointer not advanced.'}}
                 Write-Host ('[{0:yyyy-MM-dd HH:mm:ss}] Local batch re-verified before the root pointer: {1} files; {2:F1}s' -f (Get-Date),$plan.Files.Count,$clock.Elapsed.TotalSeconds)
                 $journal.PointerAttempted=$true
             }
