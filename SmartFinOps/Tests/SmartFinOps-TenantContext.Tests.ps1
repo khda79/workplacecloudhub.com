@@ -3,7 +3,7 @@
 .SYNOPSIS
   Offline tests of the SmartFinOps tenant context: SmartM365 DATA-LAST resolution and console banners.
 .VERSION
-1.0.0
+1.1.0
 .NOTES
   Isolated temporary runtime with a synthetic SmartM365 tenant context (no local configuration or export).
   SmartM365LatestCsvFolderPath = __USE_SMARTM365__ must never fall back silently to a default path.
@@ -56,8 +56,9 @@ function Invoke-Script {
 }
 
 function Get-ResolvedDataLast {
-  # Same calls as the engine: initialize the context, then ask for the configured DATA-LAST.
-  $command = ". '$context'; Initialize-SmartFinOpsTenantContext -Tenant '$tenant' -StartPath '$(Split-Path $context -Parent)' | Out-Null; try { 'OK|' + (Get-SmartFinOpsConfigValue -Name 'SmartM365LatestCsvFolderPath') } catch { 'ERROR|' + `$_.Exception.Message }"
+  param([string]$Name = 'SmartM365LatestCsvFolderPath')
+  # Same calls as the engine: initialize the context ($tenant is the profile key), then ask for the configured value.
+  $command = ". '$context'; Initialize-SmartFinOpsTenantContext -Tenant '$tenant' -StartPath '$(Split-Path $context -Parent)' | Out-Null; try { 'OK|' + (Get-SmartFinOpsConfigValue -Name '$Name') } catch { 'ERROR|' + `$_.Exception.Message }"
   # The context may first report a local JSON completed from the template: keep the answer line only.
   return [string](@(& $pwsh -NoProfile -Command $command 2>&1 | ForEach-Object { [string]$_ } | Where-Object { $_ -match '^(OK|ERROR)\|' }) | Select-Object -Last 1)
 }
@@ -76,8 +77,10 @@ function Get-SmartM365EffectiveGlobalConfig {
   Check ($run.ExitCode -eq 1 -and $run.Log.Contains('Run failed: SmartM365LatestCsvFolderPath is __USE_SMARTM365__ but its resolution through SmartM365 failed') -and $run.Log.Contains('boom from the SmartM365 configuration')) 'engine fails with the SmartM365 resolution reason'
   Check (-not $run.Log.Contains('DATA-LAST folder not found') -and -not ($run.Log -match 'SmartM365\\Data\\Tenants')) 'no silent fallback to the default DATA-LAST path'
   Check ($run.Log.Contains(' SmartFinOps by WorkplaceCloudHub') -and $run.Log.Contains(' SmartFinOps by WorkplaceCloudHub - Execution failed') -and $run.Log.Contains(' Status    : FAILED') -and $run.Log.Contains(' Script    : SmartFinOps-Workplace-Valuation.ps1') -and $run.Log.Contains(' CSV files : 0') -and $run.Log -match ' Errors    : [1-9]') 'engine failure: startup banner and Failed completion banner'
-  $explicit = Invoke-Script $engine @('-SmartM365LatestCsvFolderPath', $dataLast, '-OutputRoot', (Join-Path $root 'out2'), '-ContractsPath', (Join-Path $root 'contracts2.local.json'), '-ValidateOnly')
-  Check ($explicit.ExitCode -eq 0 -and -not $explicit.Log.Contains('resolution through SmartM365 failed') -and $explicit.Log.Contains(' Status    : ')) 'an explicit -SmartM365LatestCsvFolderPath never calls the SmartM365 context'
+  $explicit = Invoke-Script $engine @('-SmartM365LatestCsvFolderPath', $dataLast, '-SmartM365TenantKey', 'contoso-prod', '-OutputRoot', (Join-Path $root 'out2'), '-ContractsPath', (Join-Path $root 'contracts2.local.json'), '-ValidateOnly')
+  Check ($explicit.ExitCode -eq 0 -and -not $explicit.Log.Contains('resolution through SmartM365 failed') -and $explicit.Log.Contains(' Status    : ')) 'explicit -SmartM365LatestCsvFolderPath and -SmartM365TenantKey never call the SmartM365 context'
+  $tenantKeyFailure = Get-ResolvedDataLast 'SmartM365TenantKey'
+  Check ($tenantKeyFailure -like 'ERROR|SmartM365TenantKey is __USE_SMARTM365__ but its resolution through SmartM365 failed*' -and $tenantKeyFailure.Contains('boom from the SmartM365 configuration')) "TenantKey resolution failure is explicit (got $tenantKeyFailure)"
   #endregion
 
   #region 2. SmartM365 context missing
@@ -113,13 +116,21 @@ function Get-SmartM365EffectiveGlobalConfig {
   Set-SmartM365Context @"
 function Get-SmartM365EffectiveGlobalConfig {
   param([string]`$StartPath, [string]`$TenantKey)
-  [pscustomobject]@{ WorkspaceRootPath='$root'; LatestCsvFolderPath='{{WorkspaceRootPath}}\DATA-LAST' }
+  [pscustomobject]@{ WorkspaceRootPath='$root'; LatestCsvFolderPath='{{WorkspaceRootPath}}\DATA-LAST'; ProfileKey=`$TenantKey; TenantKey='contoso-prod' }
 }
 "@
   $resolved = Get-ResolvedDataLast
   Check ($resolved -ceq "OK|$dataLast") "SmartM365 tokens resolved (got $resolved)"
   '{ }' | Set-Content -LiteralPath (Join-Path $runtime 'SmartFinOps\SmartFinOps.global.local.json') -Encoding utf8NoBOM
   Check ((Get-ResolvedDataLast) -ceq "OK|$dataLast") 'an empty SmartFinOps setting also resolves through SmartM365'
+  Check ((Get-ResolvedDataLast 'SmartM365TenantKey') -ceq 'OK|contoso-prod') 'TenantKey of the profile resolved through SmartM365 (profile contoso, TenantKey contoso-prod)'
+  '{ "SmartM365TenantKey": "fabrikam-test" }' | Set-Content -LiteralPath (Join-Path $runtime 'SmartFinOps\SmartFinOps.global.local.json') -Encoding utf8NoBOM
+  Set-SmartM365Context 'function Get-SmartM365EffectiveGlobalConfig { throw "SmartM365 must not be called" }'
+  Check ((Get-ResolvedDataLast 'SmartM365TenantKey') -ceq 'OK|fabrikam-test') 'a TenantKey set in the SmartFinOps configuration is used without SmartM365'
+  '{ }' | Set-Content -LiteralPath (Join-Path $runtime 'SmartFinOps\SmartFinOps.global.local.json') -Encoding utf8NoBOM
+  Set-SmartM365Context 'function Get-SmartM365EffectiveGlobalConfig { [pscustomobject]@{ LatestCsvFolderPath="C:\x" } }'
+  $noKey = Get-ResolvedDataLast 'SmartM365TenantKey'
+  Check ($noKey -like 'ERROR|*returned no TenantKey*') "SmartM365 context without TenantKey refused (got $noKey)"
   #endregion
 
   #region 5. Report banners and tokenized data root
@@ -139,7 +150,7 @@ function Get-SmartM365EffectiveGlobalConfig {
   param([string]`$StartPath, [string]`$TenantKey)
   `$local = Join-Path `$StartPath 'Config\SmartM365.global.local.json.txt'
   if (-not [IO.File]::Exists(`$local)) { throw ('Local JSON not found: {0}' -f [IO.Path]::GetFullPath(`$local)) }
-  [pscustomobject]@{ WorkspaceRootPath='$uncRoot'; LatestCsvFolderPath='{{WorkspaceRootPath}}\DATA-LAST' }
+  [pscustomobject]@{ WorkspaceRootPath='$uncRoot'; LatestCsvFolderPath='{{WorkspaceRootPath}}\DATA-LAST'; ProfileKey=`$TenantKey; TenantKey='contoso-prod' }
 }
 "@
   '{ }' | Set-Content -LiteralPath (Join-Path $runtime 'SmartFinOps\SmartFinOps.global.local.json') -Encoding utf8NoBOM
@@ -155,6 +166,8 @@ function Get-SmartM365EffectiveGlobalConfig {
   }
   finally { Pop-Location }
   Check ($uncEngineExit -eq 0 -and $uncEngine.Contains(('Sources: {0}\DATA-LAST' -f $uncRoot)) -and $uncEngine.Contains(('Outputs: {0}\SmartFinOps\Data\contoso' -f $uncRuntime))) "engine from UNC: DATA-LAST resolved through SmartM365, outputs on the share (exit $uncEngineExit) $uncEngine"
+  $uncReceipt = Get-Content -LiteralPath (Join-Path $dataRoot 'SmartFinOps_Workplace-Valuation.current.json.txt') -Raw -ErrorAction SilentlyContinue | ConvertFrom-Json
+  Check ($null -ne $uncReceipt -and $uncReceipt.ProfileKey -ceq $tenant -and $uncReceipt.TenantKey -ceq 'contoso-prod' -and $uncEngine.Contains("Profile 'contoso' - TenantKey 'contoso-prod'")) 'engine from UNC: Data\<profile> with the TenantKey of the profile in the receipt'
   Check ((Test-Path -LiteralPath (Join-Path $dataRoot 'SmartFinOps_Workplace-Valuation.current.json.txt')) -and @(Get-ChildItem -LiteralPath $dataRoot -Filter 'FinOps_*.csv' -ErrorAction SilentlyContinue).Count -eq 7) 'engine from UNC: receipt and seven CSVs written under the UNC data root'
   Check ($uncReportExit -eq 0 -and (Test-Path -LiteralPath (Join-Path $dataRoot 'SmartFinOps_Workplace-Report.html')) -and $uncReport.Contains(('Inputs: {0}\SmartFinOps\Data\contoso' -f $uncRuntime))) "report from UNC: page written under the UNC data root (exit $uncReportExit) $uncReport"
   $written = @(Get-ChildItem -LiteralPath $dataRoot -Recurse -File -ErrorAction SilentlyContinue | Where-Object { $_.Extension -in '.txt', '.log', '.csv', '.html' } | ForEach-Object { Get-Content -LiteralPath $_.FullName -Raw })

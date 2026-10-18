@@ -9,7 +9,7 @@
   FinOps_Showback or FinOps_Realization. A failed or inconsistent run gives a "Report not available" page
   with the reason and no figure; it replaces the current report so that no older figure stays visible.
 .VERSION
-2.2.2
+2.2.3
 .NOTES
   Output: Data\<TenantKey>\SmartFinOps_Workplace-Report.html and its log; copy of both in
   Archive\<FinOpsRunId>\ when that run is archived. Aggregates only: no user identifier, no external
@@ -19,12 +19,13 @@
 param(
   [string]$Tenant = 'test',
   [string]$InputRoot,
+  [string]$SmartM365TenantKey,
   [switch]$ValidateOnly
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-$script:ScriptVersion = '2.2.2'
+$script:ScriptVersion = '2.2.3'
 $script:LogLines = [System.Collections.Generic.List[string]]::new()
 $script:Invariant = [Globalization.CultureInfo]::InvariantCulture
 $script:ReceiptName = 'SmartFinOps_Workplace-Valuation.current.json.txt'
@@ -194,7 +195,7 @@ function Get-ReportSorted {
 
 #region Qualification
 function Read-ReportInputs {
-  param([Parameter(Mandatory)][string]$Root, [Parameter(Mandatory)][string]$TenantKey)
+  param([Parameter(Mandatory)][string]$Root, [Parameter(Mandatory)][string]$ProfileKey, [Parameter(Mandatory)][string]$TenantKey)
   $result = [pscustomobject]@{ Available=$false; Reason=''; Receipt=$null; RunId=''; CompletedAtUtc=''; Data=@{}; Checks=[System.Collections.Generic.List[object]]::new() }
   $rule = ''
   $pass = { param([string]$Rule, [string]$Detail) $result.Checks.Add([pscustomobject]@{ Rule=$Rule; Status='Pass'; Detail=$Detail }) }
@@ -208,11 +209,11 @@ function Read-ReportInputs {
     $result.Receipt = $receipt
     $result.RunId = [string](Get-ReportProperty $receipt 'RunId')
     $result.CompletedAtUtc = ConvertTo-ReportJsonText (Get-ReportProperty $receipt 'CompletedAtUtc')
-    if ([string](Get-ReportProperty $receipt 'Owner') -cne 'SmartFinOps-Receipt' -or [string](Get-ReportProperty $receipt 'ContractVersion') -cne '1.0') { throw 'The valuation receipt has an unsupported owner or contract version.' }
+    if ([string](Get-ReportProperty $receipt 'Owner') -cne 'SmartFinOps-Receipt' -or [string](Get-ReportProperty $receipt 'ContractVersion') -cne '1.1') { throw 'The valuation receipt has an unsupported owner or contract version (1.1 required: run SmartFinOps-Workplace-Valuation.ps1 2.1.4 or later).' }
     $version = [string](Get-ReportProperty $receipt 'ScriptVersion')
-    if ($version -notmatch '^2\.1\.(\d+)$' -or [int]$Matches[1] -lt 1) { throw "The valuation engine version '$version' is not supported (2.1.1 or later 2.1.x required)." }
+    if ($version -notmatch '^2\.1\.(\d+)$' -or [int]$Matches[1] -lt 4) { throw "The valuation engine version '$version' is not supported (2.1.4 or later 2.1.x required)." }
     if ($result.RunId -notmatch '^\d{8}T\d{9}Z-[0-9a-f]{8}$') { throw 'The valuation receipt RunId is invalid.' }
-    & $pass $rule "Owner SmartFinOps-Receipt 1.0, engine $version"
+    & $pass $rule "Owner SmartFinOps-Receipt 1.1, engine $version"
 
     $rule = 'Q2 Status'
     $status = [string](Get-ReportProperty $receipt 'Status')
@@ -223,8 +224,10 @@ function Read-ReportInputs {
     & $pass $rule 'Completed'
 
     $rule = 'Q3 Tenant'
-    if ([string](Get-ReportProperty $receipt 'TenantKey') -cne $TenantKey) { throw 'The valuation receipt belongs to another tenant.' }
-    & $pass $rule $TenantKey
+    # The organization TenantKey is checked, not only the profile key used for the data folder.
+    if ([string](Get-ReportProperty $receipt 'TenantKey') -cne $TenantKey) { throw 'The valuation receipt belongs to another tenant (TenantKey differs).' }
+    if ([string](Get-ReportProperty $receipt 'ProfileKey') -cne $ProfileKey) { throw 'The valuation receipt belongs to another profile (ProfileKey differs).' }
+    & $pass $rule "TenantKey $TenantKey, profile $ProfileKey"
 
     $rule = 'Q4 Files'
     $files = @(Get-ReportProperty $receipt 'Files' | Where-Object { $null -ne $_ })
@@ -400,7 +403,7 @@ $Body
 
 function Get-ReportGeneratedLine {
   param([Parameter(Mandatory)][string]$Tenant, [string]$RunId)
-  return ('<p class="subtitle">Tenant: {0} | FinOps run: {1} | Generated: <span id="generated">{2}</span> UTC | Report {3}</p>' -f (ConvertTo-ReportHtml $Tenant), (ConvertTo-ReportHtml $(if ($RunId) { $RunId } else { 'unknown' })), [datetime]::UtcNow.ToString('yyyy-MM-dd HH:mm:ss', $script:Invariant), $script:ScriptVersion)
+  return ('<p class="subtitle">Profile: {0} | FinOps run: {1} | Generated: <span id="generated">{2}</span> UTC | Report {3}</p>' -f (ConvertTo-ReportHtml $Tenant), (ConvertTo-ReportHtml $(if ($RunId) { $RunId } else { 'unknown' })), [datetime]::UtcNow.ToString('yyyy-MM-dd HH:mm:ss', $script:Invariant), $script:ScriptVersion)
 }
 #endregion
 
@@ -730,12 +733,16 @@ $root = $null; $archiveDir = $null
 try {
   . (Join-Path $PSScriptRoot 'Config\SmartFinOps-TenantContext.ps1')
   Write-SmartFinOpsStartupBanner
-  Write-ReportLog ("SmartFinOps Workplace Report {0} - tenant '{1}'{2}" -f $script:ScriptVersion, $Tenant, $(if ($ValidateOnly) { ' - ValidateOnly (no file written)' } else { '' }))
+  Write-ReportLog ("SmartFinOps Workplace Report {0} - profile '{1}'{2}" -f $script:ScriptVersion, $Tenant, $(if ($ValidateOnly) { ' - ValidateOnly (no file written)' } else { '' }))
   Write-ReportLog ("Tenant context {0}" -f $script:SmartFinOpsTenantContextVersion)
   Initialize-SmartFinOpsTenantContext -Tenant $Tenant -StartPath $PSScriptRoot | Out-Null
   $resolvedRoot = if ($InputRoot) { $InputRoot } else { [string](Resolve-SmartFinOpsConfigTokenValue -Value '{{TenantDataRootPath}}') }
   Assert-SmartFinOpsResolvedPath -Name 'TenantDataRootPath' -Value $resolvedRoot
   $root = ConvertTo-SmartFinOpsFileSystemPath $resolvedRoot
+  $tenantKey = if ($SmartM365TenantKey) { $SmartM365TenantKey.Trim() } else { [string](Get-SmartFinOpsConfigValue -Name 'SmartM365TenantKey') }
+  Assert-SmartFinOpsResolvedPath -Name 'SmartM365TenantKey' -Value $tenantKey
+  if (-not $tenantKey) { throw 'SmartM365TenantKey is empty: set it in the SmartFinOps configuration, pass -SmartM365TenantKey, or leave __USE_SMARTM365__.' }
+  Write-ReportLog ("Profile '{0}' - TenantKey '{1}'{2}" -f $Tenant, $tenantKey, $(if ($SmartM365TenantKey) { ' (parameter)' } else { '' }))
   $reportConfig = Get-SmartFinOpsConfigValue -Name 'Report'
   $minimum = Get-ReportProperty $reportConfig 'ShowbackMinimumGroupUsers'
   $minimumUsers = if ($null -eq $minimum -or [string]$minimum -eq '') { 5 } else { [int]$minimum }
@@ -743,7 +750,7 @@ try {
   Write-ReportLog "Inputs: $root"
   if (-not (Test-Path -LiteralPath $root -PathType Container)) { throw "FinOps data folder not found: $root" }
 
-  $inputs = Read-ReportInputs -Root $root -TenantKey $Tenant
+  $inputs = Read-ReportInputs -Root $root -ProfileKey $Tenant -TenantKey $tenantKey
   foreach ($check in $inputs.Checks) { Write-ReportLog ('{0}: {1} - {2}' -f $check.Rule, $check.Status, $check.Detail) $(if ($check.Status -eq 'Pass') { 'INFO' } else { 'WARNING' }) }
   if ($inputs.Available) {
     $html = New-ReportPageContent -Inputs $inputs -Tenant $Tenant -MinimumGroupUsers $minimumUsers

@@ -3,7 +3,7 @@
 .SYNOPSIS
   Offline tests of the SmartFinOps Workplace V2 valuation engine.
 .VERSION
-1.2.0
+1.3.0
 .NOTES
   Synthetic contoso data only, in an isolated temporary runtime (no local configuration, export or tenant).
   Source receipts are produced by the real SmartM365.Core module commands.
@@ -20,7 +20,9 @@ $root = Join-Path ([IO.Path]::GetTempPath()) ('SmartFinOps-Valuation-' + [guid]:
 $runtime = Join-Path $root 'runtime'
 $engine = Join-Path $runtime 'SmartFinOps\SmartFinOps-Workplace-Valuation.ps1'
 $pwsh = (Get-Process -Id $PID).Path
-$tenant = 'contoso'
+# Profile 'prod' (Data\<profile>) whose organization TenantKey, carried by the receipts, is 'contoso-prod'.
+$tenant = 'contoso-prod'
+$profileKey = 'prod'
 $script:checks = 0
 $script:failures = [System.Collections.Generic.List[string]]::new()
 
@@ -38,6 +40,8 @@ foreach ($file in @('SmartFinOps-Workplace-Valuation.ps1','SmartFinOps.global.lo
 }
 New-Item -ItemType Directory -Path (Join-Path $runtime 'SmartM365\Modules') -Force | Out-Null
 Copy-Item -LiteralPath (Join-Path $repository 'SmartM365\Modules\SmartM365.Core') -Destination (Join-Path $runtime 'SmartM365\Modules') -Recurse
+# The TenantKey is fixed in the SmartFinOps configuration (no SmartM365 context in this runtime).
+'{ "SmartM365TenantKey": "contoso-prod" }' | Set-Content -LiteralPath (Join-Path $runtime 'SmartFinOps\SmartFinOps.global.local.json') -Encoding utf8NoBOM
 $coreManifest = Join-Path $repository 'SmartM365\Modules\SmartM365.Core\SmartM365.Core.psd1'
 Import-Module $coreManifest -MinimumVersion '1.0.90' -Force | Out-Null
 
@@ -222,10 +226,11 @@ function New-Contracts {
 }
 
 function Invoke-Engine {
-  param([string]$DataLast, [string]$Output, [string]$Contracts, [string]$AsOfUtc, [switch]$ValidateOnly)
-  $arguments = @('-NoProfile','-ExecutionPolicy','Bypass','-File',$engine,'-Tenant',$tenant,'-SmartM365LatestCsvFolderPath',$DataLast,'-OutputRoot',$Output,'-ContractsPath',$Contracts)
+  param([string]$DataLast, [string]$Output, [string]$Contracts, [string]$AsOfUtc, [switch]$ValidateOnly, [string[]]$Extra = @())
+  $arguments = @('-NoProfile','-ExecutionPolicy','Bypass','-File',$engine,'-Tenant',$profileKey,'-SmartM365LatestCsvFolderPath',$DataLast,'-OutputRoot',$Output,'-ContractsPath',$Contracts)
   if ($AsOfUtc) { $arguments += @('-AsOfUtc', $AsOfUtc) }
   if ($ValidateOnly) { $arguments += '-ValidateOnly' }
+  $arguments += $Extra
   $log = & $pwsh @arguments 2>&1 | Out-String
   return [pscustomobject]@{ ExitCode=$LASTEXITCODE; Log=$log }
 }
@@ -237,7 +242,7 @@ function Get-Kpi { param([object[]]$Rows, [string]$Key) return @($Rows | Where-O
 #endregion
 
 try {
-  $global:SmartM365TenantKey = $tenant; $global:SmartM365OrganizationKey = 'contoso'; $global:SmartM365EnvironmentKey = 'test'; $global:SmartM365TenantId = 'synthetic-tenant'
+  $global:SmartM365TenantKey = $tenant; $global:SmartM365OrganizationKey = 'contoso'; $global:SmartM365EnvironmentKey = 'prod'; $global:SmartM365TenantId = 'synthetic-tenant'
   $baseSkus = @([ordered]@{ SkuPartNumber='SPE_E3'; MinimumUnits=$null; ReserveUnits=$null }, [ordered]@{ SkuPartNumber='SPE_F1'; MinimumUnits=0; ReserveUnits=$null })
 
   #region 1. Nominal run: classes, statuses, amounts, contracts, outputs
@@ -249,6 +254,8 @@ try {
   Check ($run.ExitCode -eq 0) "nominal run exit code 0 (got $($run.ExitCode)) $($run.Log)"
   $receipt = Read-Receipt $out
   Check ($receipt.Status -eq 'Completed' -and $receipt.LicencesMeasured -and $receipt.SnapshotId -eq $base.SnapshotId -and $receipt.LicencesReceiptRunId -eq $base.LicencesRunId) 'nominal receipt Completed with snapshot and Licences RunId'
+  Check ($receipt.ContractVersion -eq '1.1' -and $receipt.ProfileKey -ceq $profileKey -and $receipt.TenantKey -ceq $tenant) 'receipt 1.1 carries the profile key and the organization TenantKey'
+  Check ($run.Log.Contains("Profile 'prod' - TenantKey 'contoso-prod'")) 'profile and TenantKey logged at startup'
   foreach ($file in $receipt.Files) {
     Check ((Get-FileHash -LiteralPath (Join-Path $out $file.File) -Algorithm SHA256).Hash -eq $file.SHA256) "receipt hash matches $($file.File)"
     Check ((Get-FileHash -LiteralPath (Join-Path $out "Archive\$($receipt.RunId)\$($file.File)") -Algorithm SHA256).Hash -eq $file.SHA256) "archive copy matches $($file.File)"
@@ -260,7 +267,7 @@ try {
   $banner = ($logLines[$bannerStart..($logLines.Count - 1)] -join "`n")
   Check ($banner.Contains(' SmartFinOps by WorkplaceCloudHub - Execution completed') -and $banner.Contains(' Script    : SmartFinOps-Workplace-Valuation.ps1') -and $banner.Contains(' CSV files : 7') -and $banner -match ' Duration  : \d{2}:\d{2}:\d{2}' -and $banner -match ' Status    : (SUCCESS|COMPLETED WITH WARNINGS)') "completion banner appended to the run log ($banner)"
   Check ($run.Log.Contains(' SmartFinOps by WorkplaceCloudHub') -and $run.Log.Contains(' Website : https://workplacecloudhub.com') -and $run.Log.Contains(' Errors    : 0')) 'startup and completion banners on the console'
-  Check ($run.Log -match 'SmartFinOps Workplace Valuation 2.1.3' -and $run.Log -match 'Tenant context 1.1.1') 'engine and context versions logged at runtime'
+  Check ($run.Log -match 'SmartFinOps Workplace Valuation 2.1.4' -and $run.Log -match 'Tenant context 1.2.0') 'engine and context versions logged at runtime'
   $expectedHeaders = @{
     'FinOps_Sources.csv'='TenantKey,FinOpsRunId,SnapshotId,ReceiptRunId,SourceFile,Producer,ReceiptFile,SourceReceiptRunId,ReceiptStatus,ReceiptCompletedAtUtc,Required,PublishedInReceipt,ExpectedSHA256,ActualSHA256,ExpectedRows,ActualRows,FreshnessThresholdHours,AgeHours,QualificationStatus,Reason,MissingDomains,ProvisionalLevers'
     'FinOps_Opportunities.csv'='TenantKey,FinOpsRunId,SnapshotId,ReceiptRunId,OpportunityKey,Lever,ValueClass,ValuationStatus,StatusReason,SourceFile,SourceCandidateType,SourceRecommendation,SourceReason,MailboxGuard,DependencyStatus,CountedIn,ReportProduct,SkuId,SkuPartNumber,TargetSkuPartNumber,UserId,UserPrincipalName,Units,UnitPriceMonthly,TargetUnitPriceMonthly,MonthlyAmount,AnnualAmount,Currency,PriceRowKey,PricingReceiptRunId,PriceSource,PriceIsEstimated,CapRank,ContractKey,RenewalDate,RealizableFrom,AdDomain,Country,Entity,Department,ShowbackJoinStatus'
@@ -403,6 +410,11 @@ try {
     $caseReceipt = Read-Receipt $caseOut
     Check ($caseRun.ExitCode -eq 0 -and -not $caseReceipt.LicencesMeasured -and @(Read-Output $caseOut 'FinOps_Opportunities.csv' | Where-Object Lever -ne 'L13').Count -eq 0) "$case : Licences not measured"
   }
+  # The profile key is not the TenantKey: comparing the receipts with it measures nothing.
+  $profileOut = Join-Path $root 'profile-as-tenant\out'
+  $profileRun = Invoke-Engine -DataLast $base.Folder -Output $profileOut -Contracts (Join-Path $root 'profile-as-tenant\contracts.local.json') -Extra @('-SmartM365TenantKey', $profileKey)
+  Check ($profileRun.ExitCode -eq 0 -and -not (Read-Receipt $profileOut).LicencesMeasured -and @(Read-Output $profileOut 'FinOps_Sources.csv' | Where-Object { $_.SourceFile -eq 'M365_Licenses_ReportSummary.csv' -and $_.Reason -eq 'source receipt tenant differs' }).Count -eq 1) 'receipts compared with the TenantKey, not with the profile key'
+  Check ($profileRun.Log.Contains("Profile 'prod' - TenantKey 'prod' (parameter)")) '-SmartM365TenantKey overrides the configuration'
   $staleOut = Join-Path $root 'stale\out'
   $staleRun = Invoke-Engine -DataLast $base.Folder -Output $staleOut -Contracts (Join-Path $root 'stale\contracts.local.json') -AsOfUtc ([datetime]::UtcNow.AddHours(49).ToString('o'))
   Check ($staleRun.ExitCode -eq 0 -and -not (Read-Receipt $staleOut).LicencesMeasured -and @(Read-Output $staleOut 'FinOps_Sources.csv' | Where-Object { $_.SourceFile -eq 'M365_Licenses_ReportSummary.csv' -and $_.Reason -like 'source is stale*' }).Count -eq 1) 'stale sources (> 48 h) are Not measured'

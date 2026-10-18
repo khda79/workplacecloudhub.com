@@ -9,9 +9,11 @@
   FinOps_* CSVs with their own receipt.
   Unqualified input is reported as Not measured, never as zero or as an older value.
 .VERSION
-2.1.3
+2.1.4
 .NOTES
-  Outputs: Data\<TenantKey>\FinOps_*.csv, SmartFinOps_Workplace-Valuation.current.json.txt and
+  -Tenant is the profile key (Data\<profile>, Archive); source receipts and rows are compared with the organization
+  TenantKey (SmartM365TenantKey, or -SmartM365TenantKey).
+  Outputs: Data\<profile>\FinOps_*.csv, SmartFinOps_Workplace-Valuation.current.json.txt and
   Archive\<FinOpsRunId>\ (same files plus the run log). Consumers must check the receipt
   (Status Completed, TenantKey, SHA256 per file) before reading any FinOps_* CSV.
 #>
@@ -19,6 +21,7 @@
 param(
   [string]$Tenant = 'test',
   [string]$SmartM365LatestCsvFolderPath,
+  [string]$SmartM365TenantKey,
   [string]$OutputRoot,
   [string]$ContractsPath,
   [string]$AsOfUtc,
@@ -27,7 +30,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-$script:ScriptVersion = '2.1.3'
+$script:ScriptVersion = '2.1.4'
 $script:LogLines = [System.Collections.Generic.List[string]]::new()
 $script:Invariant = [Globalization.CultureInfo]::InvariantCulture
 
@@ -1070,14 +1073,14 @@ if ($MyInvocation.InvocationName -eq '.') { return }
 
 $exitCode = 0
 $startedAt = Get-Date
-$runId = ''; $currentRoot = $null; $archiveDir = $null; $csvFiles = 0
+$runId = ''; $currentRoot = $null; $archiveDir = $null; $csvFiles = 0; $tenantKey = ''
 try {
   . (Join-Path $PSScriptRoot 'Config\SmartFinOps-TenantContext.ps1')
   Write-SmartFinOpsStartupBanner
   $runStart = if ($AsOfUtc) { ConvertTo-FinOpsUtc $AsOfUtc } else { [datetime]::UtcNow }
   if ($null -eq $runStart) { throw "Invalid -AsOfUtc value: $AsOfUtc" }
   $runId = '{0}-{1}' -f $runStart.ToString('yyyyMMddTHHmmssfffZ', $script:Invariant), [guid]::NewGuid().ToString('N').Substring(0, 8)
-  Write-FinOpsLog ("SmartFinOps Workplace Valuation {0} - tenant '{1}' - run {2}{3}" -f $script:ScriptVersion, $Tenant, $runId, $(if ($ValidateOnly) { ' - ValidateOnly (no file written)' } else { '' }))
+  Write-FinOpsLog ("SmartFinOps Workplace Valuation {0} - profile '{1}' - run {2}{3}" -f $script:ScriptVersion, $Tenant, $runId, $(if ($ValidateOnly) { ' - ValidateOnly (no file written)' } else { '' }))
   Write-FinOpsLog ("Tenant context {0}" -f $script:SmartFinOpsTenantContextVersion)
   $config = Initialize-SmartFinOpsTenantContext -Tenant $Tenant -StartPath $PSScriptRoot
   $repositoryRoot = Split-Path -Path $PSScriptRoot -Parent
@@ -1087,6 +1090,11 @@ try {
   $dataLast = if ($SmartM365LatestCsvFolderPath) { $SmartM365LatestCsvFolderPath } else { [string](Get-SmartFinOpsConfigValue -Name 'SmartM365LatestCsvFolderPath') }
   Assert-SmartFinOpsResolvedPath -Name 'SmartM365LatestCsvFolderPath' -Value $dataLast
   $dataLast = ConvertTo-SmartFinOpsFileSystemPath $dataLast
+  # Source receipts carry the organization TenantKey, not the profile key used for Data\<profile>.
+  $tenantKey = if ($SmartM365TenantKey) { $SmartM365TenantKey.Trim() } else { [string](Get-SmartFinOpsConfigValue -Name 'SmartM365TenantKey') }
+  Assert-SmartFinOpsResolvedPath -Name 'SmartM365TenantKey' -Value $tenantKey
+  if (-not $tenantKey) { throw 'SmartM365TenantKey is empty: set it in the SmartFinOps configuration, pass -SmartM365TenantKey, or leave __USE_SMARTM365__.' }
+  Write-FinOpsLog ("Profile '{0}' - TenantKey '{1}'{2}" -f $Tenant, $tenantKey, $(if ($SmartM365TenantKey) { ' (parameter)' } else { '' }))
   if (-not $dataLast -or -not (Test-Path -LiteralPath $dataLast -PathType Container)) { throw "SmartM365 DATA-LAST folder not found: $dataLast" }
   $resolvedOutput = if ($OutputRoot) { $OutputRoot } else { [string](Resolve-SmartFinOpsConfigTokenValue -Value '{{TenantDataRootPath}}') }
   Assert-SmartFinOpsResolvedPath -Name 'TenantDataRootPath' -Value $resolvedOutput
@@ -1124,7 +1132,7 @@ try {
   )
   $sources = @{}
   foreach ($spec in $specs) {
-    $record = Get-FinOpsSource -Folder $dataLast -FileName $spec.File -ReceiptFile $spec.Receipt -Producer $spec.Producer -TenantKey $Tenant -RunStartUtc $runStart -FreshnessHours $dailyHours -RequiredColumns $spec.Columns -Required:$spec.Required -AllowPartialAd:([bool]$spec['PartialAd'])
+    $record = Get-FinOpsSource -Folder $dataLast -FileName $spec.File -ReceiptFile $spec.Receipt -Producer $spec.Producer -TenantKey $tenantKey -RunStartUtc $runStart -FreshnessHours $dailyHours -RequiredColumns $spec.Columns -Required:$spec.Required -AllowPartialAd:([bool]$spec['PartialAd'])
     $sources[$spec.File] = $record
     Write-FinOpsLog ('Source {0}: {1}{2}' -f $spec.File, $record.QualificationStatus, $(if ($record.Reason) { " ($($record.Reason))" } else { '' })) $(if ($record.QualificationStatus -eq 'NotMeasured' -and $spec.Required) { 'WARNING' } else { 'INFO' })
   }
@@ -1143,7 +1151,7 @@ try {
     $snapshotRecord.SourceReceiptRunId = $receiptRun; $snapshotRecord.ReceiptStatus = 'Completed'; $snapshotRecord.PublishedInReceipt = $true
     $snapshotRecord.ReceiptCompletedAtUtc = $sources['M365_Licenses_ReportSummary.csv'].ReceiptCompletedAtUtc; $snapshotRecord.AgeHours = $sources['M365_Licenses_ReportSummary.csv'].AgeHours
     if ($snapshot.SchemaVersion -ne 2) { throw "unsupported snapshot SchemaVersion $($snapshot.SchemaVersion)" }
-    if ($snapshot.TenantKey -cne $Tenant) { throw 'snapshot tenant differs' }
+    if ($snapshot.TenantKey -cne $tenantKey) { throw 'snapshot tenant differs' }
     if (-not $snapshot.SnapshotId) { throw 'snapshot ID is missing' }
     if ($snapshot.ReceiptRunId -cne $receiptRun) { throw 'snapshot ReceiptRun.RunId differs from the Licences receipt RunId' }
     if ($null -eq (ConvertTo-FinOpsUtc $snapshot.GeneratedAtUtc)) { throw 'snapshot GeneratedAtUtc is invalid' }
@@ -1162,7 +1170,7 @@ try {
   }
   $sources[$snapshotRecord.SourceFile] = $snapshotRecord
 
-  $archiveRuns = Get-FinOpsArchiveRuns -ArchiveRoot $archiveRoot -TenantKey $Tenant
+  $archiveRuns = Get-FinOpsArchiveRuns -ArchiveRoot $archiveRoot -TenantKey $tenantKey
   $result = Invoke-FinOpsValuation -Sources $sources -RunStartUtc $runStart -Contracts $contracts -Snapshot $snapshot
   $realization = if ($result.Measured) { Get-FinOpsRealization -SkuRows $result.SkuRows -ArchiveRuns $archiveRuns -UsersSource $sources['M365_Licenses_Users.csv'] } else { [pscustomobject]@{ Rows=@(); ProtectedRuns=[System.Collections.Generic.HashSet[string]]::new() } }
   foreach ($trace in $result.ProvisionalTrace) {
@@ -1184,7 +1192,7 @@ try {
   $totalR = @($summary | Where-Object KpiKey -eq 'TOTAL_R')
   Write-FinOpsLog ('Licences measured: {0}; opportunities: {1}; TOTAL_R annual: {2} EUR; controls failed: {3}' -f $result.Measured, $result.Opportunities.Count, $(if ($totalR.Count -and [string]$totalR[0].AnnualAmount -ne '') { Format-FinOpsDecimal $totalR[0].AnnualAmount } else { 'n/a' }), $failed.Count)
 
-  $common = [ordered]@{ TenantKey=$Tenant; FinOpsRunId=$runId; SnapshotId=$result.SnapshotId; ReceiptRunId=$result.ReceiptRunId }
+  $common = [ordered]@{ TenantKey=$tenantKey; FinOpsRunId=$runId; SnapshotId=$result.SnapshotId; ReceiptRunId=$result.ReceiptRunId }
   $outputs = [ordered]@{
     'FinOps_Sources.csv' = @($sources.Values)
     'FinOps_Opportunities.csv' = $result.Opportunities
@@ -1214,7 +1222,7 @@ try {
     }
     $csvFiles = $files.Count
     $receipt = [ordered]@{
-      Owner='SmartFinOps-Receipt'; ContractVersion='1.0'; TenantKey=$Tenant; Producer='SmartFinOps-Workplace-Valuation.ps1'; ScriptVersion=$script:ScriptVersion
+      Owner='SmartFinOps-Receipt'; ContractVersion='1.1'; ProfileKey=$Tenant; TenantKey=$tenantKey; Producer='SmartFinOps-Workplace-Valuation.ps1'; ScriptVersion=$script:ScriptVersion
       RunId=$runId; StartedAtUtc=$runStart.ToString('o'); CompletedAtUtc=[datetime]::UtcNow.ToString('o'); Status=$status
       LicencesMeasured=$result.Measured; SnapshotId=$result.SnapshotId; LicencesReceiptRunId=$result.ReceiptRunId; Provisional=$result.Provisional; ProvisionalLevers=@($result.ProvisionalLevers); MissingDomains=$result.MissingDomains
       Inputs=@(foreach ($record in ($sources.Values | Sort-Object SourceFile)) { [ordered]@{ SourceFile=$record.SourceFile; SourceReceiptRunId=$record.SourceReceiptRunId; SHA256=$record.ActualSHA256; QualificationStatus=$record.QualificationStatus } })
@@ -1251,7 +1259,7 @@ catch {
   if (-not $ValidateOnly -and $currentRoot) {
     try {
       New-Item -ItemType Directory -Path $currentRoot -Force | Out-Null
-      $failedReceipt = [ordered]@{ Owner='SmartFinOps-Receipt'; ContractVersion='1.0'; TenantKey=$Tenant; Producer='SmartFinOps-Workplace-Valuation.ps1'; ScriptVersion=$script:ScriptVersion
+      $failedReceipt = [ordered]@{ Owner='SmartFinOps-Receipt'; ContractVersion='1.1'; ProfileKey=$Tenant; TenantKey=$tenantKey; Producer='SmartFinOps-Workplace-Valuation.ps1'; ScriptVersion=$script:ScriptVersion
         RunId=$runId; StartedAtUtc=$runStart.ToString('o'); CompletedAtUtc=[datetime]::UtcNow.ToString('o'); Status='Failed'; LicencesMeasured=$false; Error=$runError; Files=@() }
       Write-FinOpsJson -Path (Join-Path $currentRoot $script:ReceiptName) -Document $failedReceipt
       if (-not $archiveDir) { $archiveDir = Join-Path (Join-Path $currentRoot 'Archive') $runId; New-Item -ItemType Directory -Path $archiveDir -Force | Out-Null }

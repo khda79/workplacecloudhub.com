@@ -3,7 +3,7 @@
 .SYNOPSIS
   Offline tests of the SmartFinOps Workplace V2 executive HTML report.
 .VERSION
-1.1.0
+1.2.0
 .NOTES
   Synthetic FinOps_* fixtures and receipts only, in an isolated temporary runtime (no local configuration,
   export or tenant). The input contract is checked against the valuation engine output specification.
@@ -18,7 +18,10 @@ $root = Join-Path ([IO.Path]::GetTempPath()) ('SmartFinOps-Report-' + [guid]::Ne
 $runtime = Join-Path $root 'runtime'
 $report = Join-Path $runtime 'SmartFinOps\SmartFinOps-Workplace-Report.ps1'
 $pwsh = (Get-Process -Id $PID).Path
-$tenant = 'contoso'
+# Profile 'prod' whose organization TenantKey is 'contoso-prod'.
+$tenant = 'contoso-prod'
+$profileKey = 'prod'
+$baseConfig = '{ "SmartM365TenantKey": "contoso-prod" }'
 $runId = '20261018T000000000Z-abcdef12'
 $skuGuid = '11111111-2222-3333-4444-555555555555'
 $userGuid = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
@@ -36,6 +39,7 @@ foreach ($file in @('SmartFinOps-Workplace-Report.ps1','SmartFinOps-Workplace-Va
   New-Item -ItemType Directory -Path (Split-Path $target -Parent) -Force | Out-Null
   Copy-Item -LiteralPath (Join-Path $project $file) -Destination $target
 }
+$baseConfig | Set-Content -LiteralPath (Join-Path $runtime 'SmartFinOps\SmartFinOps.global.local.json') -Encoding utf8NoBOM
 
 #region Fixture
 $columns = [ordered]@{
@@ -161,7 +165,7 @@ function New-ReportFixture {
     [ordered]@{ File=$name; Rows=@($data[$name]).Count; SHA256=(Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash; Required=$true }
   }
   $receipt = [ordered]@{
-    Owner='SmartFinOps-Receipt'; ContractVersion='1.0'; TenantKey=$tenant; Producer='SmartFinOps-Workplace-Valuation.ps1'; ScriptVersion='2.1.1'
+    Owner='SmartFinOps-Receipt'; ContractVersion='1.1'; ProfileKey=$profileKey; TenantKey=$tenant; Producer='SmartFinOps-Workplace-Valuation.ps1'; ScriptVersion='2.1.4'
     RunId=$runId; StartedAtUtc='2026-10-18T00:00:00.0000000Z'; CompletedAtUtc='2026-10-18T00:02:00.0000000Z'; Status='Completed'
     LicencesMeasured=(-not $NotMeasured); SnapshotId=$values.SnapshotId; LicencesReceiptRunId=$values.ReceiptRunId; Provisional=(-not $NotMeasured); ProvisionalLevers=@($(if (-not $NotMeasured) { 'L4' })); MissingDomains=''
     Inputs=@(); Settings=[ordered]@{ FreshnessDailyHours=48; FreshnessWeeklyDays=8; ArchiveRetentionRuns=30; AsOfDate='2026-10-17'; ContractsFileSHA256='0123456789ABCDEF0123' }
@@ -176,11 +180,11 @@ function Invoke-Report {
   param([string]$Folder, [string]$Culture, [switch]$ValidateOnly)
   $arguments = @('-NoProfile','-ExecutionPolicy','Bypass')
   if ($Culture) {
-    $command = "[Globalization.CultureInfo]::CurrentCulture = '$Culture'; & '$report' -Tenant '$tenant' -InputRoot '$Folder'$(if ($ValidateOnly) { ' -ValidateOnly' }); exit `$LASTEXITCODE"
+    $command = "[Globalization.CultureInfo]::CurrentCulture = '$Culture'; & '$report' -Tenant '$profileKey' -InputRoot '$Folder'$(if ($ValidateOnly) { ' -ValidateOnly' }); exit `$LASTEXITCODE"
     $arguments += @('-Command', $command)
   }
   else {
-    $arguments += @('-File', $report, '-Tenant', $tenant, '-InputRoot', $Folder)
+    $arguments += @('-File', $report, '-Tenant', $profileKey, '-InputRoot', $Folder)
     if ($ValidateOnly) { $arguments += '-ValidateOnly' }
   }
   $log = & $pwsh @arguments 2>&1 | Out-String
@@ -221,6 +225,7 @@ try {
   foreach ($label in @('Catalogue estimate','Contract price','No price')) { Check ($html.Contains($label)) "price origin $label" }
   Check ($html.Contains('Over-assigned 2') -and $html.Contains('<strong>Renewal unknown</strong>') -and $html.Contains('No qualified baseline run yet')) 'over-assigned, renewal unknown and no baseline shown'
   Check ($html.Contains('Provisional figures for levers L4')) 'provisional banner with its levers'
+  Check ($html.Contains('Profile: prod |') -and $run.Log.Contains("Profile 'prod' - TenantKey 'contoso-prod'")) 'profile shown, TenantKey checked and logged'
   Check ($html.Contains('<svg class="bars"') -and $html.Contains('<table>')) 'inline SVG charts with tables'
   Check (-not $html.Contains('FLOW_FREE') -and $html.Contains('1 excluded SKU(s)')) 'excluded SKUs not listed'
   Check ($html.Contains('SPE_E3|Review') -and -not $html.Contains("$skuGuid|Review")) 'control keys show the SKU part number'
@@ -239,9 +244,9 @@ try {
   Check ($html.Contains('EUR 5,889') -and -not $html.Contains('>Finance<')) 'combined row reaches the threshold by adding the smallest group'
   Check (-not $html.Contains('>LU<') -and -not $html.Contains('EUR 4,322') -and -not $html.Contains('>FR<') -and $html.Contains('EUR 12,322')) 'a single small country is never shown alone'
   $configured = New-ReportFixture 'threshold'
-  '{ "Report": { "ShowbackMinimumGroupUsers": 1 } }' | Set-Content -LiteralPath (Join-Path $runtime 'SmartFinOps\SmartFinOps.global.local.json') -Encoding utf8NoBOM
+  '{ "SmartM365TenantKey": "contoso-prod", "Report": { "ShowbackMinimumGroupUsers": 1 } }' | Set-Content -LiteralPath (Join-Path $runtime 'SmartFinOps\SmartFinOps.global.local.json') -Encoding utf8NoBOM
   $runThreshold = Invoke-Report $configured
-  Remove-Item -LiteralPath (Join-Path $runtime 'SmartFinOps\SmartFinOps.global.local.json') -Force
+  $baseConfig | Set-Content -LiteralPath (Join-Path $runtime 'SmartFinOps\SmartFinOps.global.local.json') -Encoding utf8NoBOM
   Check ($runThreshold.ExitCode -eq 0 -and $runThreshold.Html.Contains('>Tiny<') -and $runThreshold.Html.Contains('EUR 778')) 'threshold read from the local configuration'
   #endregion
 
@@ -258,7 +263,10 @@ try {
     'receipt-missing' = @{ Drop=$true; Reason='receipt is missing' }
     'receipt-json' = @{ After={ param($f) Set-Content -LiteralPath (Join-Path $f 'SmartFinOps_Workplace-Valuation.current.json.txt') -Value '{ not json' }; Reason='not valid JSON' }
     'receipt-owner' = @{ Receipt={ param($r) $r.Owner = 'Other' }; Reason='unsupported owner' }
-    'engine-2.1.0' = @{ Receipt={ param($r) $r.ScriptVersion = '2.1.0' }; Reason='not supported' }
+    'engine-2.1.3' = @{ Receipt={ param($r) $r.ScriptVersion = '2.1.3' }; Reason='not supported' }
+    'contract-1.0' = @{ Receipt={ param($r) $r.ContractVersion = '1.0' }; Reason='unsupported owner or contract version' }
+    'tenantkey-is-profile' = @{ Receipt={ param($r) $r.TenantKey = 'prod' }; Reason='TenantKey differs' }
+    'other-profile' = @{ Receipt={ param($r) $r.ProfileKey = 'test' }; Reason='ProfileKey differs' }
     'receipt-failed' = @{ Receipt={ param($r) $r.Status = 'Failed'; $r.Error = '<b>boom</b>' }; Reason='Failed: &lt;b&gt;boom&lt;/b&gt;' }
     'publishing' = @{ Receipt={ param($r) $r.Status = 'Publishing' }; Reason='Publishing' }
     'tenant' = @{ Receipt={ param($r) $r.TenantKey = 'fabrikam' }; Reason='another tenant' }
@@ -312,7 +320,7 @@ try {
   Check ($bannerStart -gt 0 -and @($logLines[0..($bannerStart - 1)] | Where-Object { $_ -notmatch '^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} \[' }).Count -eq 0) 'every log line before the completion banner is timestamped'
   Check (($logLines -join "`n").Contains(' SmartFinOps by WorkplaceCloudHub - Execution completed') -and ($logLines -join "`n").Contains(' Status    : SUCCESS') -and ($logLines -join "`n").Contains(' CSV files : 0')) 'completion banner appended to the report log'
   Check ((Get-Content -LiteralPath (Join-Path $nominal "Archive\$runId\SmartFinOps-Workplace-Report.log") -Raw) -ceq (Get-Content -LiteralPath (Join-Path $nominal 'SmartFinOps-Workplace-Report.log') -Raw)) 'archived log is the current log, banner included'
-  Check ($run.Log.Contains(' SmartFinOps by WorkplaceCloudHub') -and $run.Log.Contains(' GitHub  : https://github.com/khda79/workplacecloudhub.com') -and $run.Log -match 'SmartFinOps Workplace Report 2.2.2' -and $run.Log -match 'Tenant context 1.1.1') 'startup banner and versions on the console'
+  Check ($run.Log.Contains(' SmartFinOps by WorkplaceCloudHub') -and $run.Log.Contains(' GitHub  : https://github.com/khda79/workplacecloudhub.com') -and $run.Log -match 'SmartFinOps Workplace Report 2.2.3' -and $run.Log -match 'Tenant context 1.2.0') 'startup banner and versions on the console'
   $unavailable = Invoke-Report (New-ReportFixture 'banner-failed' -ChangeReceipt { param($r) $r.Status = 'Failed' })
   Check ($unavailable.ExitCode -eq 2 -and $unavailable.Log.Contains(' SmartFinOps by WorkplaceCloudHub - Execution failed') -and $unavailable.Log.Contains(' Status    : FAILED')) 'report not available: completion banner Failed'
   $missing = Invoke-Report (Join-Path $root 'no-such-folder')

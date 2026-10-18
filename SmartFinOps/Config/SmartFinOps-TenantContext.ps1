@@ -2,13 +2,16 @@
 .SYNOPSIS
   SmartFinOps tenant context: global and tenant local JSON configuration, path tokens and console banners.
 .DESCRIPTION
-  Dot-sourced by the SmartFinOps scripts. SmartM365LatestCsvFolderPath set to __USE_SMARTM365__ (or left empty)
-  is resolved through the SmartM365 tenant context only when a script asks for it; a failed resolution stops the
-  script with the reason and never falls back to a default path. A resolved path that still holds a {{token}} is refused.
+  Dot-sourced by the SmartFinOps scripts. -Tenant is the profile key (Data\<profile>, Archive). SmartM365LatestCsvFolderPath
+  and SmartM365TenantKey (the organization TenantKey carried by the source receipts) set to __USE_SMARTM365__ (or left
+  empty) are resolved through the SmartM365 tenant context of that profile only when a script asks for them; a failed
+  resolution stops the script with the reason and never falls back to a default. A resolved path that still holds a
+  {{token}} is refused.
 .VERSION
-1.1.1
+1.2.0
 #>
-$script:SmartFinOpsTenantContextVersion = '1.1.1'
+$script:SmartFinOpsTenantContextVersion = '1.2.0'
+$script:SmartFinOpsSmartM365Config = $null
 $script:SmartFinOpsUseSmartM365Markers = @('__USE_SMARTM365__', 'USE_SMARTM365')
 
 function Write-SmartFinOpsStartupBanner {
@@ -314,6 +317,35 @@ function Resolve-SmartFinOpsExternalTokenValue {
     return $resolved
 }
 
+function Get-SmartFinOpsSmartM365Config {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$RepositoryRootPath,
+        [Parameter(Mandatory)][string]$ProfileKey,
+        [Parameter(Mandatory)][string]$Setting
+    )
+
+    # The SmartM365 effective configuration of the profile, read once per run; every failure is explicit.
+    if ($null -ne $script:SmartFinOpsSmartM365Config -and $script:SmartFinOpsSmartM365Config.ProfileKeyRequested -ceq $ProfileKey) { return $script:SmartFinOpsSmartM365Config.Config }
+    $smartM365RootPath = Join-Path -Path $RepositoryRootPath -ChildPath 'SmartM365'
+    $smartM365TenantContextPath = Join-Path -Path $smartM365RootPath -ChildPath 'Config\SmartM365-TenantContext.ps1'
+    $prefix = "$Setting is __USE_SMARTM365__ but its resolution through SmartM365 failed for profile '$ProfileKey'"
+    if (-not (Test-Path -LiteralPath $smartM365TenantContextPath -PathType Leaf)) {
+        throw ("{0}: SmartM365 tenant context not found: {1}. Set {2} in the SmartFinOps configuration or pass -{2}." -f $prefix, $smartM365TenantContextPath, $Setting)
+    }
+    try {
+        . $smartM365TenantContextPath
+        $smartM365Config = Get-SmartM365EffectiveGlobalConfig -StartPath $smartM365RootPath -TenantKey $ProfileKey
+    }
+    catch {
+        $invocation = $_.InvocationInfo
+        $position = if ($invocation -and $invocation.ScriptName) { '{0}:{1}' -f $invocation.ScriptName, $invocation.ScriptLineNumber } elseif ($invocation) { 'line {0}' -f $invocation.ScriptLineNumber } else { 'unknown position' }
+        throw ("{0}: {1} (at {2}; context {3})" -f $prefix, $_.Exception.Message, $position, $smartM365TenantContextPath)
+    }
+    $script:SmartFinOpsSmartM365Config = [pscustomobject]@{ ProfileKeyRequested=$ProfileKey; Config=$smartM365Config; ContextPath=$smartM365TenantContextPath }
+    return $smartM365Config
+}
+
 function Get-SmartFinOpsSmartM365LatestCsvFolderPath {
     [CmdletBinding()]
     param(
@@ -321,27 +353,29 @@ function Get-SmartFinOpsSmartM365LatestCsvFolderPath {
         [Parameter(Mandatory)][string]$TenantKey
     )
 
-    # Called only for SmartM365LatestCsvFolderPath = __USE_SMARTM365__: every failure is explicit, never a default path.
-    $smartM365RootPath = Join-Path -Path $RepositoryRootPath -ChildPath 'SmartM365'
-    $smartM365TenantContextPath = Join-Path -Path $smartM365RootPath -ChildPath 'Config\SmartM365-TenantContext.ps1'
-    $prefix = "SmartM365LatestCsvFolderPath is __USE_SMARTM365__ but its resolution through SmartM365 failed for tenant '$TenantKey'"
-    if (-not (Test-Path -LiteralPath $smartM365TenantContextPath -PathType Leaf)) {
-        throw ("{0}: SmartM365 tenant context not found: {1}. Set SmartM365LatestCsvFolderPath or pass -SmartM365LatestCsvFolderPath." -f $prefix, $smartM365TenantContextPath)
-    }
-
-    try {
-        . $smartM365TenantContextPath
-        $smartM365Config = Get-SmartM365EffectiveGlobalConfig -StartPath $smartM365RootPath -TenantKey $TenantKey
-        $resolved = [string](Resolve-SmartFinOpsExternalTokenValue -Value $smartM365Config.LatestCsvFolderPath -Config $smartM365Config)
-    }
-    catch {
-        $invocation = $_.InvocationInfo
-        $position = if ($invocation -and $invocation.ScriptName) { '{0}:{1}' -f $invocation.ScriptName, $invocation.ScriptLineNumber } elseif ($invocation) { 'line {0}' -f $invocation.ScriptLineNumber } else { 'unknown position' }
-        throw ("{0}: {1} (at {2}; context {3})" -f $prefix, $_.Exception.Message, $position, $smartM365TenantContextPath)
-    }
-    if ([string]::IsNullOrWhiteSpace($resolved)) { throw ("{0}: the SmartM365 context returned an empty LatestCsvFolderPath ({1})." -f $prefix, $smartM365TenantContextPath) }
+    # Called only for SmartM365LatestCsvFolderPath = __USE_SMARTM365__ ($TenantKey is the profile key): never a default path.
+    $smartM365Config = Get-SmartFinOpsSmartM365Config -RepositoryRootPath $RepositoryRootPath -ProfileKey $TenantKey -Setting 'SmartM365LatestCsvFolderPath'
+    $prefix = "SmartM365LatestCsvFolderPath is __USE_SMARTM365__ but its resolution through SmartM365 failed for profile '$TenantKey'"
+    $resolved = [string](Resolve-SmartFinOpsExternalTokenValue -Value $smartM365Config.LatestCsvFolderPath -Config $smartM365Config)
+    if ([string]::IsNullOrWhiteSpace($resolved)) { throw ("{0}: the SmartM365 context returned an empty LatestCsvFolderPath ({1})." -f $prefix, $script:SmartFinOpsSmartM365Config.ContextPath) }
     Assert-SmartFinOpsResolvedPath -Name 'SmartM365LatestCsvFolderPath (resolved through SmartM365)' -Value $resolved
     return (ConvertTo-SmartFinOpsFileSystemPath $resolved)
+}
+
+function Get-SmartFinOpsSmartM365TenantKey {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$RepositoryRootPath,
+        [Parameter(Mandatory)][string]$ProfileKey
+    )
+
+    # Called only for SmartM365TenantKey = __USE_SMARTM365__: the TenantKey (OrganizationKey-EnvironmentKey) of the SmartM365 profile.
+    $smartM365Config = Get-SmartFinOpsSmartM365Config -RepositoryRootPath $RepositoryRootPath -ProfileKey $ProfileKey -Setting 'SmartM365TenantKey'
+    $tenantKeyProperty = $smartM365Config.PSObject.Properties['TenantKey']
+    $tenantKey = if ($null -ne $tenantKeyProperty) { ([string]$tenantKeyProperty.Value).Trim() } else { '' }
+    if (-not $tenantKey) { throw ("SmartM365TenantKey is __USE_SMARTM365__ but the SmartM365 context of profile '{0}' returned no TenantKey ({1}). Set SmartM365TenantKey in the SmartFinOps configuration or pass -SmartM365TenantKey." -f $ProfileKey, $script:SmartFinOpsSmartM365Config.ContextPath) }
+    Assert-SmartFinOpsResolvedPath -Name 'SmartM365TenantKey (resolved through SmartM365)' -Value $tenantKey
+    return $tenantKey
 }
 
 
@@ -401,6 +435,10 @@ function Get-SmartFinOpsEffectiveGlobalConfig {
         [string]$globalConfig['SmartM365LatestCsvFolderPath'] -in @('__USE_SMARTM365__', 'USE_SMARTM365')) {
         $globalConfig['SmartM365LatestCsvFolderPath'] = '__USE_SMARTM365__'
     }
+    if (-not $globalConfig.Contains('SmartM365TenantKey') -or [string]::IsNullOrWhiteSpace([string]$globalConfig['SmartM365TenantKey']) -or
+        [string]$globalConfig['SmartM365TenantKey'] -in @('__USE_SMARTM365__', 'USE_SMARTM365')) {
+        $globalConfig['SmartM365TenantKey'] = '__USE_SMARTM365__'
+    }
     if (-not $globalConfig.Contains('RetentionMaxCSV')) { $globalConfig['RetentionMaxCSV'] = 30 }
     if (-not $globalConfig.Contains('RetentionMaxLogs')) { $globalConfig['RetentionMaxLogs'] = 30 }
     if (-not $globalConfig.Contains('StaleUserDays')) { $globalConfig['StaleUserDays'] = 90 }
@@ -455,6 +493,11 @@ function Get-SmartFinOpsConfigValue {
             $resolvedPath = [string](Resolve-SmartFinOpsConfigTokenValue -Value $value)
             Assert-SmartFinOpsResolvedPath -Name 'SmartM365LatestCsvFolderPath' -Value $resolvedPath
             return (ConvertTo-SmartFinOpsFileSystemPath $resolvedPath)
+        }
+        if ($Name -eq 'SmartM365TenantKey') {
+            if ($value -in $script:SmartFinOpsUseSmartM365Markers) { return Get-SmartFinOpsSmartM365TenantKey -RepositoryRootPath ([string]$script:SmartFinOpsGlobalConfig.RepositoryRootPath) -ProfileKey ([string]$script:SmartFinOpsGlobalConfig.TenantKey) }
+            Assert-SmartFinOpsResolvedPath -Name 'SmartM365TenantKey' -Value $value
+            return $value
         }
         if ([string]::IsNullOrWhiteSpace($value) -or $value -in @('__USE_GLOBAL__', 'USE_GLOBAL')) { return $DefaultValue }
     }
