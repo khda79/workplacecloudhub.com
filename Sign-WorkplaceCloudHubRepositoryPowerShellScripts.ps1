@@ -5,6 +5,12 @@ Signs repository PowerShell files with the workplacecloudhub.com Authenticode co
 .DESCRIPTION
 Signs PowerShell scripts/modules/manifests tracked by Git, with an option to include
 non-ignored untracked files. Intended for manual use and for the repository pre-push hook.
+
+With -PathListFile (used by the pre-push hook), only the listed files are inspected. Each line is
+"<commit><TAB><repo-relative path>". Untracked files are never touched. A listed file whose working
+tree differs from <commit> (uncommitted work, possibly from another session) is left untouched: the
+committed version must already carry a valid signature, otherwise the run fails. In this mode the
+script exits with code 3 when it changed at least one file, so the hook can block the push.
 #>
 [CmdletBinding(SupportsShouldProcess = $true)]
 param(
@@ -13,6 +19,7 @@ param(
     [string]$ExpectedSignerEmail = 'contact@workplacecloudhub.com',
     [string]$TimestampServer = 'http://timestamp.digicert.com',
     [string[]]$Extensions = @('.ps1', '.psm1', '.psd1', '.ps1xml'),
+    [string]$PathListFile,
     [switch]$IncludeUntracked,
     [switch]$Force,
     [switch]$SkipTrustInstall,
@@ -88,6 +95,80 @@ function Get-GitPowerShellFiles {
     })
 }
 
+function Get-PathListEntry {
+    param(
+        [Parameter(Mandatory = $true)][string]$Root,
+        [Parameter(Mandatory = $true)][string]$ListPath,
+        [Parameter(Mandatory = $true)][string[]]$Extensions
+    )
+
+    $tracked = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+    $trackedPaths = & git -C $Root -c core.quotePath=false ls-files --cached
+    if ($LASTEXITCODE -ne 0) { throw 'git ls-files failed.' }
+    foreach ($trackedPath in $trackedPaths) { if ($trackedPath) { [void]$tracked.Add($trackedPath) } }
+
+    $seen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+    $entries = New-Object System.Collections.Generic.List[object]
+    foreach ($line in [System.IO.File]::ReadAllLines($ListPath)) {
+        $parts = $line.Split([char]9, 2)
+        if ($parts.Count -ne 2 -or [string]::IsNullOrWhiteSpace($parts[0]) -or [string]::IsNullOrWhiteSpace($parts[1])) { continue }
+        $relativePath = $parts[1]
+        if ($Extensions -notcontains [System.IO.Path]::GetExtension($relativePath)) { continue }
+        if (-not $seen.Add($relativePath)) { continue }
+        if (-not $tracked.Contains($relativePath)) {
+            Write-Info "Not tracked, left untouched: $relativePath"
+            continue
+        }
+        $entries.Add([pscustomobject]@{
+            Commit = $parts[0]
+            RelativePath = $relativePath
+            FullPath = [System.IO.Path]::GetFullPath((Join-Path -Path $Root -ChildPath $relativePath))
+        })
+    }
+    return $entries.ToArray()
+}
+
+function Test-WorkingTreeMatchesCommit {
+    param(
+        [Parameter(Mandatory = $true)][string]$Root,
+        [Parameter(Mandatory = $true)][string]$Commit,
+        [Parameter(Mandatory = $true)][string]$RelativePath
+    )
+
+    & git -C $Root diff --quiet $Commit -- $RelativePath
+    if ($LASTEXITCODE -eq 0) { return $true }
+    if ($LASTEXITCODE -eq 1) { return $false }
+    throw "git diff failed for $RelativePath at $Commit."
+}
+
+function Get-CommittedFileSignature {
+    param(
+        [Parameter(Mandatory = $true)][string]$Root,
+        [Parameter(Mandatory = $true)][string]$Commit,
+        [Parameter(Mandatory = $true)][string]$RelativePath
+    )
+
+    # Checkout filters (eol=crlf) are applied so the bytes match what a checkout would write.
+    $tempPath = Join-Path -Path ([System.IO.Path]::GetTempPath()) -ChildPath ('wch-sign-{0}{1}' -f [guid]::NewGuid().ToString('N'), [System.IO.Path]::GetExtension($RelativePath))
+    $startInfo = New-Object System.Diagnostics.ProcessStartInfo
+    $startInfo.FileName = 'git'
+    $startInfo.Arguments = '-C "{0}" cat-file --filters "{1}:{2}"' -f $Root, $Commit, $RelativePath
+    $startInfo.UseShellExecute = $false
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.CreateNoWindow = $true
+    try {
+        $process = [System.Diagnostics.Process]::Start($startInfo)
+        $stream = [System.IO.File]::Create($tempPath)
+        try { $process.StandardOutput.BaseStream.CopyTo($stream) } finally { $stream.Dispose() }
+        $process.WaitForExit()
+        if ($process.ExitCode -ne 0) { throw "git cat-file failed for ${Commit}:$RelativePath." }
+        return Get-AuthenticodeSignature -FilePath $tempPath -ErrorAction Stop
+    }
+    finally {
+        Remove-Item -LiteralPath $tempPath -Force -ErrorAction SilentlyContinue
+    }
+}
+
 function ConvertTo-WorkplaceCloudHubCrlf {
     [CmdletBinding(SupportsShouldProcess = $true)]
     param([Parameter(Mandatory = $true)][string]$Path)
@@ -153,14 +234,48 @@ if (-not $SkipTrustInstall) {
     }
 }
 
-$files = @(Get-GitPowerShellFiles -Root $RepoRoot -Extensions $Extensions -IncludeUntracked:$IncludeUntracked)
-Write-Info ("Files to inspect: {0}" -f $files.Count)
-
 $signed = 0
 $skipped = 0
 $normalized = 0
 $failed = 0
 $failures = New-Object System.Collections.Generic.List[string]
+$changedFiles = New-Object System.Collections.Generic.List[string]
+
+if ($PathListFile) {
+    if ($IncludeUntracked) { throw '-IncludeUntracked cannot be combined with -PathListFile.' }
+    if (-not (Test-Path -LiteralPath $PathListFile -PathType Leaf)) { throw "Path list file not found: $PathListFile" }
+
+    $files = New-Object System.Collections.Generic.List[string]
+    foreach ($entry in @(Get-PathListEntry -Root $RepoRoot -ListPath $PathListFile -Extensions $Extensions)) {
+        if (-not (Test-Path -LiteralPath $entry.FullPath -PathType Leaf)) { continue }
+        try {
+            if (Test-WorkingTreeMatchesCommit -Root $RepoRoot -Commit $entry.Commit -RelativePath $entry.RelativePath) {
+                $files.Add($entry.FullPath)
+                continue
+            }
+
+            # Uncommitted changes (possibly another session's work): never modify the file.
+            $committedSignature = Get-CommittedFileSignature -Root $RepoRoot -Commit $entry.Commit -RelativePath $entry.RelativePath
+            $committedThumbprint = ''
+            if ($committedSignature.SignerCertificate) { $committedThumbprint = Normalize-Thumbprint $committedSignature.SignerCertificate.Thumbprint }
+            if ([string]$committedSignature.Status -eq 'Valid' -and ($committedThumbprint -eq $normalizedThumbprint -or (Test-MicrosoftAuthenticodeSignature -Signature $committedSignature))) {
+                Write-Info "Uncommitted changes, left untouched (committed version is signed): $($entry.RelativePath)"
+                $skipped++
+                continue
+            }
+            throw 'the committed version is not validly signed and the working tree has uncommitted changes, so the file was left untouched. Commit or discard those changes, then push again.'
+        }
+        catch {
+            $failed++
+            $failures.Add("$($entry.FullPath) :: $($_.Exception.Message)") | Out-Null
+        }
+    }
+    $files = $files.ToArray()
+}
+else {
+    $files = @(Get-GitPowerShellFiles -Root $RepoRoot -Extensions $Extensions -IncludeUntracked:$IncludeUntracked)
+}
+Write-Info ("Files to inspect: {0}" -f $files.Count)
 
 foreach ($file in $files) {
     if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { continue }
@@ -178,7 +293,10 @@ foreach ($file in $files) {
         $lineEndingsChanged = $false
         if (-not $SkipLineEndingNormalization) {
             $lineEndingsChanged = ConvertTo-WorkplaceCloudHubCrlf -Path $file
-            if ($lineEndingsChanged) { $normalized++ }
+            if ($lineEndingsChanged) {
+                $normalized++
+                $changedFiles.Add($file)
+            }
         }
 
         if (-not $Force -and -not $lineEndingsChanged -and [string]$signature.Status -eq 'Valid' -and $signerThumbprint -eq $normalizedThumbprint) {
@@ -208,6 +326,7 @@ foreach ($file in $files) {
                 throw "The signature is valid but no timestamp countersignature was returned by $TimestampServer."
             }
             $signed++
+            if (-not $changedFiles.Contains($file)) { $changedFiles.Add($file) }
         }
     }
     catch {
@@ -220,6 +339,10 @@ Write-Info ("Normalized={0}; Signed={1}; Skipped={2}; Failed={3}" -f $normalized
 if ($failed -gt 0) {
     $failures | ForEach-Object { Write-Host $_ -ForegroundColor Red }
     exit 1
+}
+if ($PathListFile -and $changedFiles.Count -gt 0) {
+    $changedFiles | ForEach-Object { Write-Info "Updated: $_" }
+    exit 3
 }
 
 # SIG # Begin signature block

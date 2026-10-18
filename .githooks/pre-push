@@ -49,6 +49,32 @@ if [ ! -f "$sign_script" ]; then
   exit 1
 fi
 
+# Only PowerShell files changed by the pushed commits are signed ("<commit><TAB><path>" per line).
+# Untracked files and uncommitted work of other sessions are never modified.
+sign_list="$(git rev-parse --absolute-git-dir)/pre-push-sign-list.txt"
+: > "$sign_list"
+zero=0000000000000000000000000000000000000000
+while read -r local_ref local_sha remote_ref remote_sha; do
+  [ -z "$local_sha" ] && continue
+  [ "$local_sha" = "$zero" ] && continue
+  if [ "$remote_sha" != "$zero" ] && git cat-file -e "$remote_sha^{commit}" 2>/dev/null; then
+    range="$remote_sha..$local_sha"
+  else
+    range="$local_sha --not --remotes"
+  fi
+  # shellcheck disable=SC2086
+  git -c core.quotePath=false log --format= --name-only --diff-filter=ACMR $range -- '*.ps1' '*.psm1' '*.psd1' '*.ps1xml' |
+    sort -u | awk -v sha="$local_sha" 'NF { print sha "\t" $0 }' >> "$sign_list"
+done <<EOF
+$pushed_refs
+EOF
+
+if [ ! -s "$sign_list" ]; then
+  rm -f "$sign_list"
+  echo "WorkplaceCloudHub pre-push: no PowerShell file changed in the pushed commits; signing skipped."
+  exit 0
+fi
+
 if command -v pwsh.exe >/dev/null 2>&1; then
   ps_cmd="pwsh.exe"
 elif command -v pwsh >/dev/null 2>&1; then
@@ -60,17 +86,16 @@ else
   exit 1
 fi
 
-"$ps_cmd" -NoProfile -ExecutionPolicy Bypass -File "$sign_script" -RepoRoot "$repo_root" -IncludeUntracked
+"$ps_cmd" -NoProfile -ExecutionPolicy Bypass -File "$sign_script" -RepoRoot "$repo_root" -PathListFile "$sign_list"
 rc=$?
+rm -f "$sign_list"
+if [ $rc -eq 3 ]; then
+  echo "WorkplaceCloudHub pre-push: signatures were updated. Commit the signature changes, then push again." >&2
+  exit 1
+fi
 if [ $rc -ne 0 ]; then
   echo "WorkplaceCloudHub pre-push: Authenticode signing failed." >&2
   exit $rc
-fi
-
-if ! git -C "$repo_root" diff --quiet -- '*.ps1' '*.psm1' '*.psd1' '*.ps1xml'; then
-  echo "WorkplaceCloudHub pre-push: signatures were updated. Commit the signature changes, then push again." >&2
-  git -C "$repo_root" status --short -- '*.ps1' '*.psm1' '*.psd1' '*.ps1xml' >&2
-  exit 1
 fi
 
 exit 0
