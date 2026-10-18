@@ -143,7 +143,7 @@ function New-Fixture {
     foreach ($item in $e3Recovery) { & $sku $item[0] 'sku-e3' 'SPE_E3' $(if ($item[0] -eq 'u1') { 'Disabled account' } else { 'Report candidate' }) 'Referenced' 'Counted in ReportCandidates:Recovery' 'Not applicable' 'ReportCandidates:Recovery' }
     & $sku 'u4' 'sku-e3' 'SPE_E3' 'Report candidate' 'Referenced' 'Counted' 'Not applicable' 'ReportCandidates:E3 to F3 review'
     & $sku 'u5' 'sku-dyn' 'DYN365_FINANCE' 'Disabled account' 'Recommended' 'Disabled in Entra and AD' 'Not applicable' ''
-    & $sku 'u6' 'sku-e3' 'SPE_E3' 'Disabled account' 'Review' 'EXO mailbox source is not qualified' 'Unknown: EXO mailbox source is not qualified' ''
+    & $sku 'u6' 'sku-e3' 'SPE_E3' 'Disabled account' 'Review' 'EXO mailbox source is not qualified' $(if ($Options['CleanMailbox']) { 'Not applicable' } else { 'Unknown: EXO mailbox source is not qualified' }) ''
     & $sku 'u7' 'sku-visio' 'VISIOCLIENT' 'Disabled account' 'Review' 'Entra disabled; AD state is not measured' 'Not applicable' ''
     & $sku 'u8' 'sku-e3' 'SPE_E3' 'Disabled account' 'Blocked by dependency' 'Mailbox retention: litigation hold' 'Blocked: Mailbox retention: litigation hold' ''
     & $sku 'u9' 'sku-f3' 'SPE_F1' 'Disabled account' 'Recommended' 'Disabled in Entra and AD' 'Clear' ''
@@ -251,7 +251,7 @@ try {
   New-Contracts $contracts $baseSkus
   $out = Join-Path $root 'base\out'
   $run = Invoke-Engine -DataLast $base.Folder -Output $out -Contracts $contracts
-  Check ($run.ExitCode -eq 0) "nominal run exit code 0 (got $($run.ExitCode)) $($run.Log)"
+  Check ($run.ExitCode -eq 3) "nominal run exit code 3, L5 mailbox not measured (got $($run.ExitCode)) $($run.Log)"
   $receipt = Read-Receipt $out
   Check ($receipt.Status -eq 'Completed' -and $receipt.LicencesMeasured -and $receipt.SnapshotId -eq $base.SnapshotId -and $receipt.LicencesReceiptRunId -eq $base.LicencesRunId) 'nominal receipt Completed with snapshot and Licences RunId'
   Check ($receipt.ContractVersion -eq '1.1' -and $receipt.ProfileKey -ceq $profileKey -and $receipt.TenantKey -ceq $tenant) 'receipt 1.1 carries the profile key and the organization TenantKey'
@@ -267,7 +267,15 @@ try {
   $banner = ($logLines[$bannerStart..($logLines.Count - 1)] -join "`n")
   Check ($banner.Contains(' SmartFinOps by WorkplaceCloudHub - Execution completed') -and $banner.Contains(' Script    : SmartFinOps-Workplace-Valuation.ps1') -and $banner.Contains(' CSV files : 7') -and $banner -match ' Duration  : \d{2}:\d{2}:\d{2}' -and $banner -match ' Status    : (SUCCESS|COMPLETED WITH WARNINGS)') "completion banner appended to the run log ($banner)"
   Check ($run.Log.Contains(' SmartFinOps by WorkplaceCloudHub') -and $run.Log.Contains(' Website : https://workplacecloudhub.com') -and $run.Log.Contains(' Errors    : 0')) 'startup and completion banners on the console'
-  Check ($run.Log -match 'SmartFinOps Workplace Valuation 2.1.4' -and $run.Log -match 'Tenant context 1.2.0') 'engine and context versions logged at runtime'
+  Check ($run.Log -match 'Starting SmartFinOps Workplace Valuation v2\.1\.5 ' -and $run.Log -match 'Tenant context 1.2.0') 'engine and context versions logged at runtime'
+  # Orchestrator contract: default success-evidence log pattern, 0 success, 3 completed with warnings.
+  $orchestratorEvidence = 'Execution context:|Environment initialized successfully|Starting .* v|(?s:Execution summary:.*Status:\s*(?:Success|CompletedWithWarnings).*Errors:\s*0)'
+  Check ($run.Log -match $orchestratorEvidence -and $banner.Contains(' Status    : COMPLETED WITH WARNINGS') -and $banner.Contains(' SmartFinOps by WorkplaceCloudHub - Execution completed with warnings')) 'warning run: exit 3, Completed with warnings banner, orchestrator success evidence'
+  $clean = New-Fixture 'clean' @{ CleanMailbox=$true }
+  $cleanContracts = Join-Path $root 'clean\contracts.local.json'
+  New-Contracts $cleanContracts $baseSkus
+  $cleanRun = Invoke-Engine -DataLast $clean.Folder -Output (Join-Path $root 'clean\out') -Contracts $cleanContracts
+  Check ($cleanRun.ExitCode -eq 0 -and $cleanRun.Log.Contains(' Status    : SUCCESS') -and $cleanRun.Log.Contains(' Warnings  : 0') -and $cleanRun.Log -match $orchestratorEvidence) "run without warning: exit 0 and Success banner (got $($cleanRun.ExitCode))"
   $expectedHeaders = @{
     'FinOps_Sources.csv'='TenantKey,FinOpsRunId,SnapshotId,ReceiptRunId,SourceFile,Producer,ReceiptFile,SourceReceiptRunId,ReceiptStatus,ReceiptCompletedAtUtc,Required,PublishedInReceipt,ExpectedSHA256,ActualSHA256,ExpectedRows,ActualRows,FreshnessThresholdHours,AgeHours,QualificationStatus,Reason,MissingDomains,ProvisionalLevers'
     'FinOps_Opportunities.csv'='TenantKey,FinOpsRunId,SnapshotId,ReceiptRunId,OpportunityKey,Lever,ValueClass,ValuationStatus,StatusReason,SourceFile,SourceCandidateType,SourceRecommendation,SourceReason,MailboxGuard,DependencyStatus,CountedIn,ReportProduct,SkuId,SkuPartNumber,TargetSkuPartNumber,UserId,UserPrincipalName,Units,UnitPriceMonthly,TargetUnitPriceMonthly,MonthlyAmount,AnnualAmount,Currency,PriceRowKey,PricingReceiptRunId,PriceSource,PriceIsEstimated,CapRank,ContractKey,RenewalDate,RealizableFrom,AdDomain,Country,Entity,Department,ShowbackJoinStatus'
@@ -361,7 +369,7 @@ try {
   $contractsPerm = Join-Path $root 'permuted\contracts.local.json'; New-Contracts $contractsPerm $baseSkus
   $outPerm = Join-Path $root 'permuted\out'
   $runPerm = Invoke-Engine -DataLast $perm.Folder -Output $outPerm -Contracts $contractsPerm
-  Check ($runPerm.ExitCode -eq 0) 'permuted run exit 0'
+  Check ($runPerm.ExitCode -eq 3) 'permuted run exit 3'
   foreach ($name in @('FinOps_Opportunities.csv','FinOps_SkuValuation.csv','FinOps_Showback.csv','FinOps_Summary.csv','FinOps_Controls.csv','FinOps_Realization.csv')) {
     $normalize = { param($path, $fixture) (Get-Content -LiteralPath $path -Raw) -replace '"\d{8}T\d{9}Z-[0-9a-f]{8}"', '"RUN"' -replace [regex]::Escape($fixture.LicencesRunId), 'LICRUN' -replace [regex]::Escape($fixture.SnapshotId), 'SNAP' -replace '"[0-9a-f]{32}"', '"PRICERUN"' }
     Check ((& $normalize (Join-Path $out $name) $base) -ceq (& $normalize (Join-Path $outPerm $name) $perm)) "deterministic sort: $name identical with permuted sources"
@@ -372,7 +380,7 @@ try {
   $outValidate = Join-Path $root 'validate\out'
   $contractsValidate = Join-Path $root 'validate\contracts.local.json'
   $runValidate = Invoke-Engine -DataLast $base.Folder -Output $outValidate -Contracts $contractsValidate -ValidateOnly
-  Check ($runValidate.ExitCode -eq 0 -and -not (Test-Path -LiteralPath $outValidate) -and -not (Test-Path -LiteralPath $contractsValidate)) 'ValidateOnly writes no output and no contracts file'
+  Check ($runValidate.ExitCode -eq 3 -and -not (Test-Path -LiteralPath $outValidate) -and -not (Test-Path -LiteralPath $contractsValidate)) 'ValidateOnly writes no output and no contracts file'
   #endregion
 
   #region 4. Contracts file created from template when absent
@@ -380,7 +388,7 @@ try {
   $contractsCreate = Join-Path $root 'create\contracts.local.json'
   $runCreate = Invoke-Engine -DataLast $base.Folder -Output $outCreate -Contracts $contractsCreate
   $created = Get-Content -LiteralPath $contractsCreate -Raw | ConvertFrom-Json
-  Check ($runCreate.ExitCode -eq 0 -and $created.SchemaVersion -eq 1 -and @($created.UnmappedSkus).Count -eq 5) 'contracts file created from template with UnmappedSkus'
+  Check ($runCreate.ExitCode -eq 3 -and $created.SchemaVersion -eq 1 -and @($created.UnmappedSkus).Count -eq 5) 'contracts file created from template with UnmappedSkus'
   #endregion
 
   #region 5. Qualification failures: Licences Not measured, never zero
@@ -398,7 +406,7 @@ try {
     $caseReceipt = Read-Receipt $caseOut
     $caseOpps = Read-Output $caseOut 'FinOps_Opportunities.csv'
     $caseSummary = Read-Output $caseOut 'FinOps_Summary.csv'
-    Check ($caseRun.ExitCode -eq 0 -and $caseReceipt.Status -eq 'Completed' -and -not $caseReceipt.LicencesMeasured) "$case : run completed with Licences not measured"
+    Check ($caseRun.ExitCode -eq 3 -and $caseReceipt.Status -eq 'Completed' -and -not $caseReceipt.LicencesMeasured) "$case : run completed with Licences not measured"
     Check (@($caseOpps | Where-Object Lever -ne 'L13').Count -eq 0 -and (Get-Kpi $caseSummary 'TOTAL_R').ValuationStatus -eq 'Not measured' -and (Get-Kpi $caseSummary 'TOTAL_R').AnnualAmount -eq '') "$case : no opportunity, TOTAL_R Not measured without amount"
     Check (@($caseSummary | Where-Object { $_.KpiKey -match '^(PRICE|FORECAST|SHOWBACK)\|' }).Count -eq 0) "$case : no breakdown row when Licences is not measured"
   }
@@ -408,16 +416,16 @@ try {
     $caseOut = Join-Path $root "$case\out"
     $caseRun = Invoke-Engine -DataLast $fixture.Folder -Output $caseOut -Contracts (Join-Path $root "$case\contracts.local.json")
     $caseReceipt = Read-Receipt $caseOut
-    Check ($caseRun.ExitCode -eq 0 -and -not $caseReceipt.LicencesMeasured -and @(Read-Output $caseOut 'FinOps_Opportunities.csv' | Where-Object Lever -ne 'L13').Count -eq 0) "$case : Licences not measured"
+    Check ($caseRun.ExitCode -eq 3 -and -not $caseReceipt.LicencesMeasured -and @(Read-Output $caseOut 'FinOps_Opportunities.csv' | Where-Object Lever -ne 'L13').Count -eq 0) "$case : Licences not measured"
   }
   # The profile key is not the TenantKey: comparing the receipts with it measures nothing.
   $profileOut = Join-Path $root 'profile-as-tenant\out'
   $profileRun = Invoke-Engine -DataLast $base.Folder -Output $profileOut -Contracts (Join-Path $root 'profile-as-tenant\contracts.local.json') -Extra @('-SmartM365TenantKey', $profileKey)
-  Check ($profileRun.ExitCode -eq 0 -and -not (Read-Receipt $profileOut).LicencesMeasured -and @(Read-Output $profileOut 'FinOps_Sources.csv' | Where-Object { $_.SourceFile -eq 'M365_Licenses_ReportSummary.csv' -and $_.Reason -eq 'source receipt tenant differs' }).Count -eq 1) 'receipts compared with the TenantKey, not with the profile key'
+  Check ($profileRun.ExitCode -eq 3 -and -not (Read-Receipt $profileOut).LicencesMeasured -and @(Read-Output $profileOut 'FinOps_Sources.csv' | Where-Object { $_.SourceFile -eq 'M365_Licenses_ReportSummary.csv' -and $_.Reason -eq 'source receipt tenant differs' }).Count -eq 1) 'receipts compared with the TenantKey, not with the profile key'
   Check ($profileRun.Log.Contains("Profile 'prod' - TenantKey 'prod' (parameter)")) '-SmartM365TenantKey overrides the configuration'
   $staleOut = Join-Path $root 'stale\out'
   $staleRun = Invoke-Engine -DataLast $base.Folder -Output $staleOut -Contracts (Join-Path $root 'stale\contracts.local.json') -AsOfUtc ([datetime]::UtcNow.AddHours(49).ToString('o'))
-  Check ($staleRun.ExitCode -eq 0 -and -not (Read-Receipt $staleOut).LicencesMeasured -and @(Read-Output $staleOut 'FinOps_Sources.csv' | Where-Object { $_.SourceFile -eq 'M365_Licenses_ReportSummary.csv' -and $_.Reason -like 'source is stale*' }).Count -eq 1) 'stale sources (> 48 h) are Not measured'
+  Check ($staleRun.ExitCode -eq 3 -and -not (Read-Receipt $staleOut).LicencesMeasured -and @(Read-Output $staleOut 'FinOps_Sources.csv' | Where-Object { $_.SourceFile -eq 'M365_Licenses_ReportSummary.csv' -and $_.Reason -like 'source is stale*' }).Count -eq 1) 'stale sources (> 48 h) are Not measured'
   #endregion
 
   #region 6. Pricing not qualified: Not valued, never zero
@@ -425,7 +433,7 @@ try {
   $noPriceOut = Join-Path $root 'no-pricing\out'
   $noPriceRun = Invoke-Engine -DataLast $noPrice.Folder -Output $noPriceOut -Contracts (Join-Path $root 'no-pricing\contracts.local.json')
   $noPriceOpps = Read-Output $noPriceOut 'FinOps_Opportunities.csv'
-  Check ($noPriceRun.ExitCode -eq 0 -and (Get-Opportunity $noPriceOpps 'L1|u1|sku-e3')[0].ValuationStatus -eq 'Not valued' -and (Get-Kpi (Read-Output $noPriceOut 'FinOps_Summary.csv') 'TOTAL_R').AnnualAmount -eq '') 'pricing missing: Not valued, empty totals'
+  Check ($noPriceRun.ExitCode -eq 3 -and (Get-Opportunity $noPriceOpps 'L1|u1|sku-e3')[0].ValuationStatus -eq 'Not valued' -and (Get-Kpi (Read-Output $noPriceOut 'FinOps_Summary.csv') 'TOTAL_R').AnnualAmount -eq '') 'pricing missing: Not valued, empty totals'
   #endregion
 
   #region 7. Partial AD: Provisional amounts, missing domains, showback Not measured
@@ -434,7 +442,7 @@ try {
   $partialRun = Invoke-Engine -DataLast $partial.Folder -Output $partialOut -Contracts (Join-Path $root 'partial\contracts.local.json')
   $partialOpps = Read-Output $partialOut 'FinOps_Opportunities.csv'
   $partialReceipt = Read-Receipt $partialOut
-  Check ($partialRun.ExitCode -eq 0 -and $partialReceipt.Provisional -and $partialReceipt.MissingDomains -eq 'west') 'partial AD: run Provisional with missing domain'
+  Check ($partialRun.ExitCode -eq 3 -and $partialReceipt.Provisional -and $partialReceipt.MissingDomains -eq 'west') 'partial AD: run Provisional with missing domain'
   Check ((Get-Opportunity $partialOpps 'L1|u1|sku-e3')[0].ValuationStatus -eq 'Provisional' -and (Get-Opportunity $partialOpps 'L1|u1|sku-e3')[0].AnnualAmount -eq '453.36') 'partial AD: amounts Provisional'
   Check ((Get-Opportunity $partialOpps 'L5|u7|sku-visio')[0].AdDomain -eq 'Not measured') 'partial AD: unmatched user showback Not measured'
   Check ((Get-Kpi (Read-Output $partialOut 'FinOps_Summary.csv') 'TOTAL_R').ValuationStatus -eq 'Provisional') 'partial AD: TOTAL_R Provisional'
@@ -449,7 +457,7 @@ try {
   $oneDriveOpps = Read-Output $oneDriveOut 'FinOps_Opportunities.csv'
   $oneDriveSummary = Read-Output $oneDriveOut 'FinOps_Summary.csv'
   $oneDriveSource = @(Read-Output $oneDriveOut 'FinOps_Sources.csv' | Where-Object SourceFile -eq 'M365_OneDrive_Usage.csv')
-  Check ($oneDriveRun.ExitCode -eq 0 -and (Get-Opportunity $oneDriveOpps 'L4|u4|sku-e3')[0].ValuationStatus -eq 'Provisional' -and (Get-Opportunity $oneDriveOpps 'L1|u1|sku-e3')[0].ValuationStatus -eq 'Valued') 'OneDrive provisional: only L4 Provisional'
+  Check ($oneDriveRun.ExitCode -eq 3 -and (Get-Opportunity $oneDriveOpps 'L4|u4|sku-e3')[0].ValuationStatus -eq 'Provisional' -and (Get-Opportunity $oneDriveOpps 'L1|u1|sku-e3')[0].ValuationStatus -eq 'Valued') 'OneDrive provisional: only L4 Provisional'
   Check ((Get-Kpi $oneDriveSummary 'TOTAL_R').ValuationStatus -eq 'Valued' -and (Get-Kpi $oneDriveSummary 'TOTAL_R').Provisional -eq 'False' -and (Get-Kpi $oneDriveSummary 'TOTAL_RC_E3_TO_F3').ValuationStatus -eq 'Provisional') 'OneDrive provisional: TOTAL_R Valued, E3 to F3 Provisional'
   Check ($oneDriveSource.Count -eq 1 -and $oneDriveSource[0].QualificationStatus -eq 'Provisional' -and $oneDriveSource[0].ProvisionalLevers -eq 'L4') 'OneDrive provisional: traced in FinOps_Sources with its lever'
   Check ((@((Read-Receipt $oneDriveOut).ProvisionalLevers) -join ';') -eq 'L4') 'OneDrive provisional: receipt lists the provisional levers'
@@ -459,7 +467,7 @@ try {
   $unknownOut = Join-Path $root 'unknown-provisional\out'
   $unknownRun = Invoke-Engine -DataLast $unknown.Folder -Output $unknownOut -Contracts (Join-Path $root 'unknown-provisional\contracts.local.json')
   $unknownOpps = Read-Output $unknownOut 'FinOps_Opportunities.csv'
-  Check ($unknownRun.ExitCode -eq 0 -and @($unknownOpps | Where-Object { $_.AnnualAmount -ne '' -and $_.ValuationStatus -ne 'Provisional' }).Count -eq 0 -and @(Read-Output $unknownOut 'FinOps_Sources.csv' | Where-Object SourceFile -eq 'Some_New_Source.csv')[0].ProvisionalLevers -eq 'L1;L2;L3;L4;L5;L6;L7;L8') 'unknown provisional source: every valued lever Provisional (fail-safe)'
+  Check ($unknownRun.ExitCode -eq 3 -and @($unknownOpps | Where-Object { $_.AnnualAmount -ne '' -and $_.ValuationStatus -ne 'Provisional' }).Count -eq 0 -and @(Read-Output $unknownOut 'FinOps_Sources.csv' | Where-Object SourceFile -eq 'Some_New_Source.csv')[0].ProvisionalLevers -eq 'L1;L2;L3;L4;L5;L6;L7;L8') 'unknown provisional source: every valued lever Provisional (fail-safe)'
   #endregion
 
   #region 8. Cap and reserve from the contracts file
@@ -468,13 +476,13 @@ try {
   $capRun = Invoke-Engine -DataLast $base.Folder -Output $capOut -Contracts $capContracts
   $capOpps = Read-Output $capOut 'FinOps_Opportunities.csv'
   $capE3 = @(Read-Output $capOut 'FinOps_SkuValuation.csv' | Where-Object SkuId -eq 'sku-e3')[0]
-  Check ($capRun.ExitCode -eq 0 -and $capE3.ReserveUnits -eq '1' -and $capE3.PoolUnits -eq '4' -and $capE3.CapUnits -eq '4' -and $capE3.RealizableUnits -eq '4' -and $capE3.ContractStatus -eq 'Covered') 'reserve 1 and cap EnabledUnits - MinimumUnits'
+  Check ($capRun.ExitCode -eq 3 -and $capE3.ReserveUnits -eq '1' -and $capE3.PoolUnits -eq '4' -and $capE3.CapUnits -eq '4' -and $capE3.RealizableUnits -eq '4' -and $capE3.ContractStatus -eq 'Covered') 'reserve 1 and cap EnabledUnits - MinimumUnits'
   Check ((Get-Opportunity $capOpps 'L7|sku-e3|Realizable')[0].Units -eq '1' -and (Get-Opportunity $capOpps 'L3|u3|sku-e3')[0].ValuationStatus -eq 'Valued') 'reserve reduces capacity units'
   $capOut2 = Join-Path $root 'cap2\out'; $capContracts2 = Join-Path $root 'cap2\contracts.local.json'
   New-Contracts $capContracts2 @([ordered]@{ SkuPartNumber='SPE_E3'; MinimumUnits=7; ReserveUnits=0 })
   $capRun2 = Invoke-Engine -DataLast $base.Folder -Output $capOut2 -Contracts $capContracts2
   $cap2Opps = Read-Output $capOut2 'FinOps_Opportunities.csv'
-  Check ($capRun2.ExitCode -eq 0 -and (Get-Opportunity $cap2Opps 'L2|u2|sku-e3')[0].ValuationStatus -eq 'Capped' -and (Get-Opportunity $cap2Opps 'L3|u3|sku-e3')[0].ValuationStatus -eq 'Capped' -and (Get-Opportunity $cap2Opps 'L1|u1|sku-e3')[0].ValuationStatus -eq 'Valued') 'cap: deterministic order capacity, L1, then L2/L3 capped'
+  Check ($capRun2.ExitCode -eq 3 -and (Get-Opportunity $cap2Opps 'L2|u2|sku-e3')[0].ValuationStatus -eq 'Capped' -and (Get-Opportunity $cap2Opps 'L3|u3|sku-e3')[0].ValuationStatus -eq 'Capped' -and (Get-Opportunity $cap2Opps 'L1|u1|sku-e3')[0].ValuationStatus -eq 'Valued') 'cap: deterministic order capacity, L1, then L2/L3 capped'
   Check ((Get-Kpi (Read-Output $capOut2 'FinOps_Summary.csv') 'TOTAL_R_ENABLED_INACTIVE').AnnualAmount -eq '') 'capped rows carry no amount'
   #endregion
 
@@ -487,7 +495,7 @@ try {
     $guardFixture = New-Fixture ('guard-' + [guid]::NewGuid().ToString('N').Substring(0,6)) $case
     $guardRun = Invoke-Engine -DataLast $guardFixture.Folder -Output $guardOut -Contracts $guardContracts -AsOfUtc ([datetime]::UtcNow.AddMinutes(5).ToString('o'))
     $guardReceipt = Read-Receipt $guardOut
-    Check ($guardOk.ExitCode -eq 0 -and $guardRun.ExitCode -eq 1 -and $guardReceipt.Status -eq 'Failed') "guard failure ($(@($case.Keys)[0])): exit 1 and current receipt Failed"
+    Check ($guardOk.ExitCode -eq 3 -and $guardRun.ExitCode -eq 1 -and $guardReceipt.Status -eq 'Failed') "guard failure ($(@($case.Keys)[0])): exit 1 and current receipt Failed"
     Check ($guardRun.Log.Contains(' SmartFinOps by WorkplaceCloudHub - Execution failed') -and $guardRun.Log.Contains(' Status    : FAILED')) 'guard failure: completion banner Failed'
     Check ((Get-Content -LiteralPath (Join-Path $guardOut "Archive\$($guardReceipt.RunId)\SmartFinOps-Workplace-Valuation.log") -Raw).Contains(' Status    : FAILED')) 'guard failure: Failed banner in the run log'
     Check ((Get-FileHash -LiteralPath (Join-Path $guardOut 'FinOps_Opportunities.csv')).Hash -eq $hashBefore) 'guard failure: current files kept (disqualified by receipt)'
@@ -509,12 +517,12 @@ try {
   $run1Id = (Read-Receipt $realOut).RunId
   $same = Invoke-Engine -DataLast $base.Folder -Output $realOut -Contracts $realContracts -AsOfUtc ([datetime]::UtcNow.AddMinutes(1).ToString('o'))
   $sameRows = Read-Output $realOut 'FinOps_Realization.csv'
-  Check ($same.ExitCode -eq 0 -and @($sameRows | Where-Object { $_.SkuId -eq 'sku-e3' -and $_.Status -eq 'No reduction observed' -and $_.RealizedUnits -eq '0' -and $_.BaselineFinOpsRunId -eq $run1Id }).Count -eq 1) 'no reduction: measured zero against the plateau baseline'
+  Check ($same.ExitCode -eq 3 -and @($sameRows | Where-Object { $_.SkuId -eq 'sku-e3' -and $_.Status -eq 'No reduction observed' -and $_.RealizedUnits -eq '0' -and $_.BaselineFinOpsRunId -eq $run1Id }).Count -eq 1) 'no reduction: measured zero against the plateau baseline'
   # u1 license removed, E3 enabled units 10 -> 6: removed 1 + baseline capacity 2 = 3 attributable, 1 not attributed.
   $after = New-Fixture 'after' @{ RemovedUsers=@('u1'); E3Enabled=6; E3Consumed=6 }
   $run2 = Invoke-Engine -DataLast $after.Folder -Output $realOut -Contracts $realContracts -AsOfUtc ([datetime]::UtcNow.AddMinutes(2).ToString('o'))
   $realRow = @(Read-Output $realOut 'FinOps_Realization.csv' | Where-Object SkuId -eq 'sku-e3')[0]
-  Check ($run1.ExitCode -eq 0 -and $run2.ExitCode -eq 0) 'realization runs exit 0'
+  Check ($run1.ExitCode -eq 3 -and $run2.ExitCode -eq 3) 'realization runs exit 3'
   Check ($realRow.BaselineFinOpsRunId -eq $run1Id -and $realRow.Decrease -eq '4' -and $realRow.RemovedCandidateLicenses -eq '1' -and $realRow.BaselineCapacityUnits -eq '2' -and $realRow.AttributableUnits -eq '3' -and $realRow.RealizedUnits -eq '3' -and $realRow.NotAttributedUnits -eq '1' -and $realRow.RealizedAnnualAmount -eq '1360.08' -and $realRow.Status -eq 'Realized') "realization capped and attributed (got $($realRow | ConvertTo-Json -Compress))"
   #endregion
 

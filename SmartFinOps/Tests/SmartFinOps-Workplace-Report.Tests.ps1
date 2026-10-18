@@ -214,7 +214,7 @@ try {
   $nominal = New-ReportFixture 'nominal'
   $run = Invoke-Report $nominal
   $html = $run.Html
-  Check ($run.ExitCode -eq 0) "nominal exit code 0 (got $($run.ExitCode)) $($run.Log)"
+  Check ($run.ExitCode -eq 3) "nominal exit code 3, provisional L4 (got $($run.ExitCode)) $($run.Log)"
   Check ((Test-Path -LiteralPath (Join-Path $nominal "Archive\$runId\SmartFinOps_Workplace-Report.html")) -and (Get-Content -LiteralPath (Join-Path $nominal "Archive\$runId\SmartFinOps_Workplace-Report.html") -Raw) -ceq $html) 'report archived with its run'
   $order = @('executive-summary','financial-potential','priority-decisions','trade-offs','capacity-forecast','realization','showback','assumptions','appendix' | ForEach-Object { $html.IndexOf("id=""$_""", [StringComparison]::Ordinal) })
   Check (@($order | Where-Object { $_ -lt 0 }).Count -eq 0 -and (($order | Sort-Object) -join ',') -eq ($order -join ',')) 'nine sections in the RULES order'
@@ -247,14 +247,14 @@ try {
   '{ "SmartM365TenantKey": "contoso-prod", "Report": { "ShowbackMinimumGroupUsers": 1 } }' | Set-Content -LiteralPath (Join-Path $runtime 'SmartFinOps\SmartFinOps.global.local.json') -Encoding utf8NoBOM
   $runThreshold = Invoke-Report $configured
   $baseConfig | Set-Content -LiteralPath (Join-Path $runtime 'SmartFinOps\SmartFinOps.global.local.json') -Encoding utf8NoBOM
-  Check ($runThreshold.ExitCode -eq 0 -and $runThreshold.Html.Contains('>Tiny<') -and $runThreshold.Html.Contains('EUR 778')) 'threshold read from the local configuration'
+  Check ($runThreshold.ExitCode -eq 3 -and $runThreshold.Html.Contains('>Tiny<') -and $runThreshold.Html.Contains('EUR 778')) 'threshold read from the local configuration'
   #endregion
 
   #region 5. Determinism
   $again = Invoke-Report $nominal
   Check ((Get-NormalizedHtml $again.Html) -ceq (Get-NormalizedHtml $html)) 'same inputs give the same HTML except the generation time'
   $french = Invoke-Report $nominal -Culture 'fr-FR'
-  Check ($french.ExitCode -eq 0 -and (Get-NormalizedHtml $french.Html) -ceq (Get-NormalizedHtml $html)) 'host culture does not change the HTML'
+  Check ($french.ExitCode -eq 3 -and (Get-NormalizedHtml $french.Html) -ceq (Get-NormalizedHtml $html)) 'host culture does not change the HTML'
   #endregion
 
   #region 6. Not available: qualification failures, never a figure
@@ -284,7 +284,7 @@ try {
     if ($spec['Drop']) { Remove-Item -LiteralPath (Join-Path $folder 'SmartFinOps_Workplace-Valuation.current.json.txt') -Force }
     if ($spec['After']) { & $spec['After'] $folder }
     $caseRun = Invoke-Report $folder
-    Check ($caseRun.ExitCode -eq 2 -and $caseRun.Html.Contains('<h1>Report not available</h1>')) "$case : Report not available page (exit $($caseRun.ExitCode))"
+    Check ($caseRun.ExitCode -eq 1 -and $caseRun.Html.Contains('<h1>Report not available</h1>')) "$case : Report not available page (exit $($caseRun.ExitCode))"
     Check ($caseRun.Html.Contains($spec.Reason)) "$case : reason shown ($($spec.Reason))"
     Check (@($figures | Where-Object { $caseRun.Html.Contains($_) }).Count -eq 0 -and $caseRun.Html -notmatch 'EUR \d') "$case : no figure shown"
   }
@@ -295,34 +295,42 @@ try {
     $r.Files[3].SHA256 = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash
   }
   $schemaRun = Invoke-Report $schema
-  Check ($schemaRun.ExitCode -eq 2 -and $schemaRun.Html.Contains('Schema mismatch: FinOps_Showback.csv')) 'schema drift refused'
+  Check ($schemaRun.ExitCode -eq 1 -and $schemaRun.Html.Contains('Schema mismatch: FinOps_Showback.csv')) 'schema drift refused'
   # A previous report is replaced: no older figure stays visible.
   $replace = New-ReportFixture 'replace'
   $first = Invoke-Report $replace
   Set-Content -LiteralPath (Join-Path $replace 'SmartFinOps_Workplace-Valuation.current.json.txt') -Value ((Get-Content -LiteralPath (Join-Path $replace 'SmartFinOps_Workplace-Valuation.current.json.txt') -Raw).Replace('"Completed"', '"Failed"')) -Encoding utf8NoBOM
   $second = Invoke-Report $replace
-  Check ($first.ExitCode -eq 0 -and $first.Html.Contains('EUR 12,346') -and $second.ExitCode -eq 2 -and -not $second.Html.Contains('12,346')) 'a failed run replaces the previous report'
+  Check ($first.ExitCode -eq 3 -and $first.Html.Contains('EUR 12,346') -and $second.ExitCode -eq 1 -and -not $second.Html.Contains('12,346')) 'a failed run replaces the previous report'
   #endregion
 
   #region 7. Licences not measured: report generated, everything Not measured
   $notMeasured = New-ReportFixture 'not-measured' -NotMeasured
   $nmRun = Invoke-Report $notMeasured
-  Check ($nmRun.ExitCode -eq 0 -and $nmRun.Html.Contains('Licences report not qualified') -and $nmRun.Html.Contains('<h1>Workplace FinOps report</h1>')) 'not measured: report generated with a status banner'
+  Check ($nmRun.ExitCode -eq 3 -and $nmRun.Html.Contains('Licences report not qualified') -and $nmRun.Html.Contains('<h1>Workplace FinOps report</h1>')) 'not measured: report generated with a status banner'
   Check ($nmRun.Html -notmatch 'EUR \d' -and $nmRun.Html.Contains('>Not measured</span>')) 'not measured: no amount, never EUR 0'
   #endregion
 
   #region 8. ValidateOnly, logs, PowerShell 7 only
   $validate = New-ReportFixture 'validate'
   $validateRun = Invoke-Report $validate -ValidateOnly
-  Check ($validateRun.ExitCode -eq 0 -and -not (Test-Path -LiteralPath (Join-Path $validate 'SmartFinOps_Workplace-Report.html')) -and -not (Test-Path -LiteralPath (Join-Path $validate 'SmartFinOps-Workplace-Report.log'))) 'ValidateOnly writes nothing'
+  Check ($validateRun.ExitCode -eq 3 -and -not (Test-Path -LiteralPath (Join-Path $validate 'SmartFinOps_Workplace-Report.html')) -and -not (Test-Path -LiteralPath (Join-Path $validate 'SmartFinOps-Workplace-Report.log'))) 'ValidateOnly writes nothing'
   $logLines = @(Get-Content -LiteralPath (Join-Path $nominal 'SmartFinOps-Workplace-Report.log'))
   $bannerStart = [array]::IndexOf($logLines, '================================================================================')
   Check ($bannerStart -gt 0 -and @($logLines[0..($bannerStart - 1)] | Where-Object { $_ -notmatch '^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} \[' }).Count -eq 0) 'every log line before the completion banner is timestamped'
-  Check (($logLines -join "`n").Contains(' SmartFinOps by WorkplaceCloudHub - Execution completed') -and ($logLines -join "`n").Contains(' Status    : SUCCESS') -and ($logLines -join "`n").Contains(' CSV files : 0')) 'completion banner appended to the report log'
+  Check (($logLines -join "`n").Contains(' SmartFinOps by WorkplaceCloudHub - Execution completed') -and ($logLines -join "`n").Contains(' Status    : COMPLETED WITH WARNINGS') -and ($logLines -join "`n").Contains(' CSV files : 0')) 'completion banner appended to the report log'
   Check ((Get-Content -LiteralPath (Join-Path $nominal "Archive\$runId\SmartFinOps-Workplace-Report.log") -Raw) -ceq (Get-Content -LiteralPath (Join-Path $nominal 'SmartFinOps-Workplace-Report.log') -Raw)) 'archived log is the current log, banner included'
-  Check ($run.Log.Contains(' SmartFinOps by WorkplaceCloudHub') -and $run.Log.Contains(' GitHub  : https://github.com/khda79/workplacecloudhub.com') -and $run.Log -match 'SmartFinOps Workplace Report 2.2.3' -and $run.Log -match 'Tenant context 1.2.0') 'startup banner and versions on the console'
+  Check ($run.Log.Contains(' SmartFinOps by WorkplaceCloudHub') -and $run.Log.Contains(' GitHub  : https://github.com/khda79/workplacecloudhub.com') -and $run.Log -match 'Starting SmartFinOps Workplace Report v2\.2\.4 ' -and $run.Log -match 'Tenant context 1.2.0') 'startup banner and versions on the console'
   $unavailable = Invoke-Report (New-ReportFixture 'banner-failed' -ChangeReceipt { param($r) $r.Status = 'Failed' })
-  Check ($unavailable.ExitCode -eq 2 -and $unavailable.Log.Contains(' SmartFinOps by WorkplaceCloudHub - Execution failed') -and $unavailable.Log.Contains(' Status    : FAILED')) 'report not available: completion banner Failed'
+  Check ($unavailable.ExitCode -eq 1 -and $unavailable.Log.Contains(' SmartFinOps by WorkplaceCloudHub - Execution failed') -and $unavailable.Log.Contains(' Status    : FAILED')) 'report not available: completion banner Failed'
+  Check ($unavailable.Log -match '\[ERROR\] Report not available: ') 'report not available: logged as an error'
+  Check ($nmRun.Log -match '\[WARNING\] Licences report not measured in run ' -and $nmRun.Log.Contains(' Status    : COMPLETED WITH WARNINGS')) 'not measured: completed with warnings'
+  Check ($run.Log -match '\[WARNING\] Provisional figures in run \S+ for levers L4\.') 'provisional run: warning lists the levers'
+  # Orchestrator contract: default success-evidence log pattern, 0 success, 3 completed with warnings, 1 failure.
+  $orchestratorEvidence = 'Execution context:|Environment initialized successfully|Starting .* v|(?s:Execution summary:.*Status:\s*(?:Success|CompletedWithWarnings).*Errors:\s*0)'
+  $clean = Invoke-Report (New-ReportFixture 'clean' -ChangeReceipt { param($r) $r.Provisional = $false; $r.ProvisionalLevers = @() })
+  Check ($clean.ExitCode -eq 0 -and $clean.Log.Contains(' Status    : SUCCESS') -and $clean.Log.Contains(' Warnings  : 0') -and $clean.Log -match $orchestratorEvidence) "final figures: exit 0 and Success banner (got $($clean.ExitCode))"
+  Check ($run.Log -match $orchestratorEvidence) 'startup line matches the orchestrator success evidence'
   $missing = Invoke-Report (Join-Path $root 'no-such-folder')
   Check ($missing.ExitCode -eq 1 -and $missing.Log.Contains('FinOps data folder not found') -and $missing.Log.Contains(' Status    : FAILED')) 'report error: Failed banner and logged reason'
   Check (@(Get-ChildItem -LiteralPath $nominal -Filter '*.tmp').Count -eq 0) 'no temporary file left'

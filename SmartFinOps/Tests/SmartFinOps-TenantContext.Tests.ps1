@@ -78,7 +78,7 @@ function Get-SmartM365EffectiveGlobalConfig {
   Check (-not $run.Log.Contains('DATA-LAST folder not found') -and -not ($run.Log -match 'SmartM365\\Data\\Tenants')) 'no silent fallback to the default DATA-LAST path'
   Check ($run.Log.Contains(' SmartFinOps by WorkplaceCloudHub') -and $run.Log.Contains(' SmartFinOps by WorkplaceCloudHub - Execution failed') -and $run.Log.Contains(' Status    : FAILED') -and $run.Log.Contains(' Script    : SmartFinOps-Workplace-Valuation.ps1') -and $run.Log.Contains(' CSV files : 0') -and $run.Log -match ' Errors    : [1-9]') 'engine failure: startup banner and Failed completion banner'
   $explicit = Invoke-Script $engine @('-SmartM365LatestCsvFolderPath', $dataLast, '-SmartM365TenantKey', 'contoso-prod', '-OutputRoot', (Join-Path $root 'out2'), '-ContractsPath', (Join-Path $root 'contracts2.local.json'), '-ValidateOnly')
-  Check ($explicit.ExitCode -eq 0 -and -not $explicit.Log.Contains('resolution through SmartM365 failed') -and $explicit.Log.Contains(' Status    : ')) 'explicit -SmartM365LatestCsvFolderPath and -SmartM365TenantKey never call the SmartM365 context'
+  Check ($explicit.ExitCode -eq 3 -and -not $explicit.Log.Contains('resolution through SmartM365 failed') -and $explicit.Log.Contains(' Status    : ')) 'explicit -SmartM365LatestCsvFolderPath and -SmartM365TenantKey never call the SmartM365 context'
   $tenantKeyFailure = Get-ResolvedDataLast 'SmartM365TenantKey'
   Check ($tenantKeyFailure -like 'ERROR|SmartM365TenantKey is __USE_SMARTM365__ but its resolution through SmartM365 failed*' -and $tenantKeyFailure.Contains('boom from the SmartM365 configuration')) "TenantKey resolution failure is explicit (got $tenantKeyFailure)"
   #endregion
@@ -165,11 +165,11 @@ function Get-SmartM365EffectiveGlobalConfig {
     $uncReportExit = $LASTEXITCODE
   }
   finally { Pop-Location }
-  Check ($uncEngineExit -eq 0 -and $uncEngine.Contains(('Sources: {0}\DATA-LAST' -f $uncRoot)) -and $uncEngine.Contains(('Outputs: {0}\SmartFinOps\Data\contoso' -f $uncRuntime))) "engine from UNC: DATA-LAST resolved through SmartM365, outputs on the share (exit $uncEngineExit) $uncEngine"
+  Check ($uncEngineExit -eq 3 -and $uncEngine.Contains(('Sources: {0}\DATA-LAST' -f $uncRoot)) -and $uncEngine.Contains(('Outputs: {0}\SmartFinOps\Data\contoso' -f $uncRuntime))) "engine from UNC: DATA-LAST resolved through SmartM365, outputs on the share (exit $uncEngineExit) $uncEngine"
   $uncReceipt = Get-Content -LiteralPath (Join-Path $dataRoot 'SmartFinOps_Workplace-Valuation.current.json.txt') -Raw -ErrorAction SilentlyContinue | ConvertFrom-Json
   Check ($null -ne $uncReceipt -and $uncReceipt.ProfileKey -ceq $tenant -and $uncReceipt.TenantKey -ceq 'contoso-prod' -and $uncEngine.Contains("Profile 'contoso' - TenantKey 'contoso-prod'")) 'engine from UNC: Data\<profile> with the TenantKey of the profile in the receipt'
   Check ((Test-Path -LiteralPath (Join-Path $dataRoot 'SmartFinOps_Workplace-Valuation.current.json.txt')) -and @(Get-ChildItem -LiteralPath $dataRoot -Filter 'FinOps_*.csv' -ErrorAction SilentlyContinue).Count -eq 7) 'engine from UNC: receipt and seven CSVs written under the UNC data root'
-  Check ($uncReportExit -eq 0 -and (Test-Path -LiteralPath (Join-Path $dataRoot 'SmartFinOps_Workplace-Report.html')) -and $uncReport.Contains(('Inputs: {0}\SmartFinOps\Data\contoso' -f $uncRuntime))) "report from UNC: page written under the UNC data root (exit $uncReportExit) $uncReport"
+  Check ($uncReportExit -eq 3 -and (Test-Path -LiteralPath (Join-Path $dataRoot 'SmartFinOps_Workplace-Report.html')) -and $uncReport.Contains(('Inputs: {0}\SmartFinOps\Data\contoso' -f $uncRuntime))) "report from UNC: page written under the UNC data root (exit $uncReportExit) $uncReport"
   $written = @(Get-ChildItem -LiteralPath $dataRoot -Recurse -File -ErrorAction SilentlyContinue | Where-Object { $_.Extension -in '.txt', '.log', '.csv', '.html' } | ForEach-Object { Get-Content -LiteralPath $_.FullName -Raw })
   Check (-not ($uncEngine + $uncReport + ($written -join '')).Contains('FileSystem::')) 'no provider-qualified path in console, logs or outputs'
   Check (@(Get-ChildItem -LiteralPath $cwd -Recurse -Force).Count -eq 0) 'nothing written relative to the process working directory'
@@ -183,7 +183,7 @@ function Get-SmartM365EffectiveGlobalConfig {
     $relativeExit = $LASTEXITCODE
   }
   finally { Pop-Location }
-  Check ($relativeExit -eq 0 -and (Test-Path -LiteralPath (Join-Path $relative 'relout\SmartFinOps_Workplace-Valuation.current.json.txt')) -and @(Get-ChildItem -LiteralPath $cwd -Recurse -Force).Count -eq 0) "relative -OutputRoot resolved from the PowerShell location on the share (exit $relativeExit) $relativeRun"
+  Check ($relativeExit -eq 3 -and (Test-Path -LiteralPath (Join-Path $relative 'relout\SmartFinOps_Workplace-Valuation.current.json.txt')) -and @(Get-ChildItem -LiteralPath $cwd -Recurse -Force).Count -eq 0) "relative -OutputRoot resolved from the PowerShell location on the share (exit $relativeExit) $relativeRun"
   #endregion
 }
 finally {

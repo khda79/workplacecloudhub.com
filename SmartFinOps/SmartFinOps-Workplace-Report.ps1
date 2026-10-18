@@ -9,7 +9,7 @@
   FinOps_Showback or FinOps_Realization. A failed or inconsistent run gives a "Report not available" page
   with the reason and no figure; it replaces the current report so that no older figure stays visible.
 .VERSION
-2.2.3
+2.2.4
 .NOTES
   Output: Data\<TenantKey>\SmartFinOps_Workplace-Report.html and its log; copy of both in
   Archive\<FinOpsRunId>\ when that run is archived. Aggregates only: no user identifier, no external
@@ -25,7 +25,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-$script:ScriptVersion = '2.2.3'
+$script:ScriptVersion = '2.2.4'
 $script:LogLines = [System.Collections.Generic.List[string]]::new()
 $script:Invariant = [Globalization.CultureInfo]::InvariantCulture
 $script:ReceiptName = 'SmartFinOps_Workplace-Valuation.current.json.txt'
@@ -733,7 +733,7 @@ $root = $null; $archiveDir = $null
 try {
   . (Join-Path $PSScriptRoot 'Config\SmartFinOps-TenantContext.ps1')
   Write-SmartFinOpsStartupBanner
-  Write-ReportLog ("SmartFinOps Workplace Report {0} - profile '{1}'{2}" -f $script:ScriptVersion, $Tenant, $(if ($ValidateOnly) { ' - ValidateOnly (no file written)' } else { '' }))
+  Write-ReportLog ("Starting SmartFinOps Workplace Report v{0} - profile '{1}'{2}" -f $script:ScriptVersion, $Tenant, $(if ($ValidateOnly) { ' - ValidateOnly (no file written)' } else { '' }))
   Write-ReportLog ("Tenant context {0}" -f $script:SmartFinOpsTenantContextVersion)
   Initialize-SmartFinOpsTenantContext -Tenant $Tenant -StartPath $PSScriptRoot | Out-Null
   $resolvedRoot = if ($InputRoot) { $InputRoot } else { [string](Resolve-SmartFinOpsConfigTokenValue -Value '{{TenantDataRootPath}}') }
@@ -755,11 +755,14 @@ try {
   if ($inputs.Available) {
     $html = New-ReportPageContent -Inputs $inputs -Tenant $Tenant -MinimumGroupUsers $minimumUsers
     Write-ReportLog ("Report built for run {0} (Licences measured: {1}; showback minimum group: {2} users)." -f $inputs.RunId, [bool](Get-ReportProperty $inputs.Receipt 'LicencesMeasured'), $minimumUsers)
+    # The page is complete, but its figures are not final: the run completes with warnings.
+    if (-not [bool](Get-ReportProperty $inputs.Receipt 'LicencesMeasured')) { Write-ReportLog ("Licences report not measured in run {0}: every figure is shown as Not measured." -f $inputs.RunId) 'WARNING' }
+    if ([bool](Get-ReportProperty $inputs.Receipt 'Provisional')) { Write-ReportLog ("Provisional figures in run {0} for levers {1}." -f $inputs.RunId, (@(Get-ReportProperty $inputs.Receipt 'ProvisionalLevers' | Where-Object { $_ }) -join ', ')) 'WARNING' }
   }
   else {
     $html = New-ReportUnavailablePage -Inputs $inputs -Tenant $Tenant
-    Write-ReportLog "Report not available: $($inputs.Reason)" 'WARNING'
-    $exitCode = 2
+    Write-ReportLog "Report not available: $($inputs.Reason)" 'ERROR'
+    $exitCode = 1
   }
   if ($ValidateOnly) { Write-ReportLog 'ValidateOnly: no file written.' }
   else {
@@ -786,14 +789,17 @@ finally {
     }
     catch { Write-Host "Report log could not be written: $($_.Exception.Message)" -ForegroundColor Red }
   }
-  # Completion banner on success and on failure; "Report not available" (exit 2) is a failed run.
-  $bannerStatus = if ($exitCode -ne 0) { 'Failed' } else { 'Auto' }
+  # Completion banner on success and on failure; "Report not available" (exit 1) is a failed run.
+  # Exit code contract (orchestrator): 0 success, 3 completed with warnings, 1 failure.
   $warnings = @($script:LogLines | Where-Object { $_ -match '^\S+ \S+ \[WARNING\]' }).Count
   $errors = @($script:LogLines | Where-Object { $_ -match '^\S+ \S+ \[ERROR\]' }).Count
+  if ($exitCode -eq 0 -and $errors -gt 0) { $exitCode = 1 }
+  elseif ($exitCode -eq 0 -and $warnings -gt 0) { $exitCode = 3 }
+  $bannerStatus = switch ($exitCode) { 0 { 'Success' } 3 { 'CompletedWithWarnings' } default { 'Failed' } }
   if (Get-Command -Name Write-SmartFinOpsCompletionBanner -ErrorAction SilentlyContinue) {
     Write-SmartFinOpsCompletionBanner -Status $bannerStatus -ScriptName 'SmartFinOps-Workplace-Report.ps1' -StartedAt $startedAt -WarningCount $warnings -ErrorCount $errors -GeneratedCsvFiles 0 -LogPath $logPath
   }
-  else { Write-Host ("SmartFinOps-Workplace-Report.ps1: {0} (tenant context not loaded)" -f $(if ($exitCode -ne 0) { 'FAILED' } else { 'SUCCESS' })) }
+  else { Write-Host ("SmartFinOps-Workplace-Report.ps1: {0} (tenant context not loaded)" -f $(switch ($exitCode) { 0 { 'SUCCESS' } 3 { 'COMPLETED WITH WARNINGS' } default { 'FAILED' } })) }
   # The archived log is a copy of the current one, banner included.
   if ($logPath -and $archiveDir) {
     try { Copy-Item -LiteralPath $logPath -Destination (Join-Path $archiveDir $script:LogName) -Force }

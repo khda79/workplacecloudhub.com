@@ -9,7 +9,7 @@
   FinOps_* CSVs with their own receipt.
   Unqualified input is reported as Not measured, never as zero or as an older value.
 .VERSION
-2.1.4
+2.1.5
 .NOTES
   -Tenant is the profile key (Data\<profile>, Archive); source receipts and rows are compared with the organization
   TenantKey (SmartM365TenantKey, or -SmartM365TenantKey).
@@ -30,7 +30,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-$script:ScriptVersion = '2.1.4'
+$script:ScriptVersion = '2.1.5'
 $script:LogLines = [System.Collections.Generic.List[string]]::new()
 $script:Invariant = [Globalization.CultureInfo]::InvariantCulture
 
@@ -1080,7 +1080,7 @@ try {
   $runStart = if ($AsOfUtc) { ConvertTo-FinOpsUtc $AsOfUtc } else { [datetime]::UtcNow }
   if ($null -eq $runStart) { throw "Invalid -AsOfUtc value: $AsOfUtc" }
   $runId = '{0}-{1}' -f $runStart.ToString('yyyyMMddTHHmmssfffZ', $script:Invariant), [guid]::NewGuid().ToString('N').Substring(0, 8)
-  Write-FinOpsLog ("SmartFinOps Workplace Valuation {0} - profile '{1}' - run {2}{3}" -f $script:ScriptVersion, $Tenant, $runId, $(if ($ValidateOnly) { ' - ValidateOnly (no file written)' } else { '' }))
+  Write-FinOpsLog ("Starting SmartFinOps Workplace Valuation v{0} - profile '{1}' - run {2}{3}" -f $script:ScriptVersion, $Tenant, $runId, $(if ($ValidateOnly) { ' - ValidateOnly (no file written)' } else { '' }))
   Write-FinOpsLog ("Tenant context {0}" -f $script:SmartFinOpsTenantContextVersion)
   $config = Initialize-SmartFinOpsTenantContext -Tenant $Tenant -StartPath $PSScriptRoot
   $repositoryRoot = Split-Path -Path $PSScriptRoot -Parent
@@ -1275,13 +1275,16 @@ finally {
     [IO.File]::WriteAllLines($logPath, $script:LogLines, [Text.UTF8Encoding]::new($false))
   }
   # Completion banner on success and on failure (appended to the run log when there is one).
-  $bannerStatus = if ($exitCode -ne 0) { 'Failed' } else { 'Auto' }
+  # Exit code contract (orchestrator): 0 success, 3 completed with warnings, 1 failure.
   $warnings = @($script:LogLines | Where-Object { $_ -match '^\S+ \S+ \[WARNING\]' }).Count
   $errors = @($script:LogLines | Where-Object { $_ -match '^\S+ \S+ \[ERROR\]' }).Count
+  if ($exitCode -eq 0 -and $errors -gt 0) { $exitCode = 1 }
+  elseif ($exitCode -eq 0 -and $warnings -gt 0) { $exitCode = 3 }
+  $bannerStatus = switch ($exitCode) { 0 { 'Success' } 3 { 'CompletedWithWarnings' } default { 'Failed' } }
   if (Get-Command -Name Write-SmartFinOpsCompletionBanner -ErrorAction SilentlyContinue) {
     Write-SmartFinOpsCompletionBanner -Status $bannerStatus -ScriptName 'SmartFinOps-Workplace-Valuation.ps1' -StartedAt $startedAt -WarningCount $warnings -ErrorCount $errors -GeneratedCsvFiles $csvFiles -LogPath $logPath
   }
-  else { Write-Host ("SmartFinOps-Workplace-Valuation.ps1: {0} (tenant context not loaded)" -f $(if ($exitCode -ne 0) { 'FAILED' } else { 'SUCCESS' })) }
+  else { Write-Host ("SmartFinOps-Workplace-Valuation.ps1: {0} (tenant context not loaded)" -f $(switch ($exitCode) { 0 { 'SUCCESS' } 3 { 'COMPLETED WITH WARNINGS' } default { 'FAILED' } })) }
 }
 exit $exitCode
 #endregion
