@@ -3,7 +3,7 @@
 .SYNOPSIS
   Offline tests of the SmartFinOps Workplace V2 valuation engine.
 .VERSION
-1.0.0
+1.1.0
 .NOTES
   Synthetic contoso data only, in an isolated temporary runtime (no local configuration, export or tenant).
   Source receipts are produced by the real SmartM365.Core module commands.
@@ -304,6 +304,21 @@ try {
   Check ((Get-Kpi $summary 'GAP|UserMailboxes|NoSkus').Units -eq '4' -and (Get-Kpi $summary 'GAP|AdGapActivity|NoObservedMatch').ValuationStatus -eq 'Not measured') 'one summary row per gap metric with its own value'
   Check (@($summary | Where-Object { $_.Lever -eq 'L12' -and $_.KpiKey -like 'DETAIL*' -and $_.Units -ne '' }).Count -eq 0) 'gap metrics never summed in summary'
   Check (@(Read-Output $out 'FinOps_Showback.csv' | Where-Object { $_.Lever -eq 'L12' -and $_.Units -ne '' }).Count -eq 0) 'gap metrics never summed in showback'
+  # 2.1.1 breakdowns: price origin, realizable date, showback value, distinct users per value.
+  foreach ($item in @(
+      @('PRICE|TOTAL_R|Estimated','6','4450.80',''), @('PRICE|TOTAL_R|Contract','1','312.00',''), @('PRICE|TOTAL_RC_E3_TO_F3|Estimated','1','349.44',''),
+      @('FORECAST|TOTAL_R|2027-03-31','5','2266.80',''), @('FORECAST|TOTAL_R|Renewal unknown','2','2496.00',''),
+      @('FORECAST|TOTAL_RC_E3_TO_F3|2027-03-31','1','349.44',''), @('FORECAST|TOTAL_E_REUSE|2027-03-31','1','103.92',''),
+      @('SHOWBACK|Country|TOTAL_R|FR','4','3544.08','4'), @('SHOWBACK|Country|TOTAL_R|ES','1','312.00','1'), @('SHOWBACK|Country|TOTAL_R|SKU level','2','906.72','0'),
+      @('SHOWBACK|Department|TOTAL_R|Finance','3','3090.72','3'), @('SHOWBACK|Department|TOTAL_R_ENABLED_INACTIVE|Finance','1','453.36','1'),
+      @('SHOWBACK|Country|USERS|FR','','','5'), @('SHOWBACK|Country|USERS|ES','','','5'), @('SHOWBACK|Country|USERS|Not attributed','','','1'),
+      @('SHOWBACK|Department|USERS|Finance','','','6'), @('SHOWBACK|Department|USERS|Care','','','5'))) {
+    $kpi = @($summary | Where-Object KpiKey -ceq $item[0])
+    Check ($kpi.Count -eq 1 -and $kpi[0].Units -eq $item[1] -and $kpi[0].AnnualAmount -eq $item[2] -and ($item[3] -eq '' -or $kpi[0].Users -eq $item[3])) "summary breakdown $($item[0]) = $($item[1])/$($item[2])/$($item[3]) (got $(if ($kpi.Count) { '{0}/{1}/{2}' -f $kpi[0].Units, $kpi[0].AnnualAmount, $kpi[0].Users } else { 'none' }))"
+  }
+  Check (@($summary | Where-Object { $_.KpiKey -like 'SHOWBACK|*|USERS|*' -and ($_.Units -ne '' -or $_.AnnualAmount -ne '') }).Count -eq 0) 'distinct-user rows carry no units or amount'
+  Check (@($summary | Where-Object { $_.KpiKey -like 'PRICE|TOTAL_R|*' }).Count -eq 2 -and @($summary | Where-Object { $_.KpiKey -like 'SHOWBACK|*|USERS|SKU level' }).Count -eq 0) 'breakdown keys well formed, no user count for SKU-level rows'
+  Check ((Get-Opportunity $opps 'L4|u4|sku-e3')[0].RealizableFrom -eq '2027-03-31' -and (Get-Opportunity $opps 'L4|u4|sku-e3')[0].ContractKey -eq 'EA-CONTOSO') 'E3 to F3 carries the contract terms of its SKU'
   $skus = Read-Output $out 'FinOps_SkuValuation.csv'
   $e3 = @($skus | Where-Object SkuId -eq 'sku-e3')[0]
   Check ($e3.PoolUnits -eq '5' -and $e3.RealizableUnits -eq '5' -and $e3.CapacityRealizableUnits -eq '2' -and $e3.CappedUnits -eq '0' -and $e3.ContractStatus -eq 'Commitment unknown' -and $e3.ReserveUnits -eq '0' -and $e3.NotMeasuredUnits -eq '1' -and $e3.BlockedUnits -eq '1' -and $e3.ReferencedUnits -eq '4') 'E3 SKU valuation pool and counters'
@@ -317,6 +332,9 @@ try {
   $controls = Read-Output $out 'FinOps_Controls.csv'
   Check (@($controls | Where-Object Status -ne 'Pass').Count -eq 0 -and @($controls | Where-Object Control -eq 'G6').Count -gt 0) 'all equivalence controls pass, G1-G6 present'
   foreach ($control in @('G1','G2','G3','G4','G5','G6')) { Check (@($controls | Where-Object Control -eq $control).Count -gt 0) "control $control present" }
+  foreach ($key in @('PRICE|TOTAL_R','FORECAST|TOTAL_RC_E3_TO_F3','SHOWBACK|Country|TOTAL_R','SHOWBACK|Department|TOTAL_E_REUSE','SHOWBACK|Entity|USERS')) {
+    Check (@($controls | Where-Object { $_.Control -eq 'G6' -and $_.Key -eq $key -and $_.Status -eq 'Pass' }).Count -eq 1) "G6 reconciles summary breakdown $key"
+  }
   $showback = Read-Output $out 'FinOps_Showback.csv'
   Check (@($showback | Where-Object { $_.Dimension -eq 'Department' -and $_.Lever -eq 'L3' -and $_.ValueClass -eq 'R' }).Count -ge 1) 'enabled inactive accounts shown as their own showback lever'
   Check (@($showback | Where-Object { $_.DimensionValue -eq 'SKU level' }).Count -gt 0) 'SKU-level rows allocated to SKU level'
@@ -370,6 +388,7 @@ try {
     $caseSummary = Read-Output $caseOut 'FinOps_Summary.csv'
     Check ($caseRun.ExitCode -eq 0 -and $caseReceipt.Status -eq 'Completed' -and -not $caseReceipt.LicencesMeasured) "$case : run completed with Licences not measured"
     Check (@($caseOpps | Where-Object Lever -ne 'L13').Count -eq 0 -and (Get-Kpi $caseSummary 'TOTAL_R').ValuationStatus -eq 'Not measured' -and (Get-Kpi $caseSummary 'TOTAL_R').AnnualAmount -eq '') "$case : no opportunity, TOTAL_R Not measured without amount"
+    Check (@($caseSummary | Where-Object { $_.KpiKey -match '^(PRICE|FORECAST|SHOWBACK)\|' }).Count -eq 0) "$case : no breakdown row when Licences is not measured"
   }
   $flagCases = [ordered]@{ 'optional-unpublished'=@{ NoSkuCapacity=$true }; 'snapshot-run'=@{ BadSnapshotRun=$true }; 'mixed-snapshot'=@{ MixedSnapshot=$true }; 'sku-runid'=@{ BadSkuRunId=$true } }
   foreach ($case in $flagCases.Keys) {
@@ -502,6 +521,18 @@ try {
   Check ($null -eq (ConvertTo-FinOpsDecimal '1,234.56') -and $null -eq (ConvertTo-FinOpsDecimal '1 234,5') -and $null -eq (ConvertTo-FinOpsDecimal '12a')) 'group separators and text rejected'
   $commaIndex = New-FinOpsPriceIndex -Source ([pscustomobject]@{ QualificationStatus='Qualified'; SourceReceiptRunId='r'; Rows=@([pscustomobject]@{ SkuPartNumber='SPE_E3'; Currency='EUR'; UnitPriceMonthly='37,78'; EffectiveFrom='2026-01-01'; EffectiveTo=''; PriceSource='a'; IsEstimated='True' }) }) -AsOfDate ([datetime]'2026-10-18')
   Check ((Get-FinOpsPrice $commaIndex 'SPE_E3').Price -eq [decimal]37.78) 'culture-formatted price 37,78 valued as 37.78'
+  Check ((Get-FinOpsPriceOrigin 'True') -eq 'Estimated' -and (Get-FinOpsPriceOrigin 'False') -eq 'Contract' -and (Get-FinOpsPriceOrigin '') -eq 'Unknown') 'price origin labels'
+  # G6 (2.1.1) detects a summary breakdown that no longer reconciles with its total.
+  $g6Opp = New-FinOpsOpportunity @{ OpportunityKey='L1|g6|s'; Lever='L1'; ValueClass='R'; ValuationStatus='Valued'; UserId='g6'; SkuId='s'; AnnualAmount=[decimal]10; PriceIsEstimated='True'; RealizableFrom='2027-03-31'; AdDomain='d'; Country='c'; Entity='e'; Department='p' }
+  $g6Valuation = [pscustomobject]@{ Measured=$true; Opportunities=@($g6Opp); MissingDomains=''; AsOfDate=[datetime]'2026-10-18'; PriceIndex=@{ RunId='r' } }
+  $g6Sources = @{}; foreach ($name in @('M365_Licenses_ReportCandidates.csv','M365_Licenses_ReportSkuCandidates.csv','M365_Licenses_ReportSummary.csv','M365_Licenses_ReportSkuCapacity.csv')) { $g6Sources[$name] = [pscustomobject]@{ Rows=@() } }
+  $g6Showback = Get-FinOpsShowback -Opportunities @($g6Opp)
+  $g6Summary = Get-FinOpsSummary -Valuation $g6Valuation
+  Check (@(Get-FinOpsControls -Sources $g6Sources -Valuation $g6Valuation -Showback $g6Showback -SummaryRows $g6Summary | Where-Object Status -eq 'Fail').Count -eq 0) 'G6 unit: consistent breakdowns pass'
+  @($g6Summary | Where-Object KpiKey -ceq 'PRICE|TOTAL_R|Estimated')[0].AnnualAmount = [decimal]9
+  @($g6Summary | Where-Object KpiKey -ceq 'SHOWBACK|Country|USERS|c')[0].Users = 2
+  $g6Failed = @(Get-FinOpsControls -Sources $g6Sources -Valuation $g6Valuation -Showback $g6Showback -SummaryRows $g6Summary | Where-Object Status -eq 'Fail' | ForEach-Object Key)
+  Check (($g6Failed -join ',') -eq 'PRICE|TOTAL_R,SHOWBACK|Country|USERS') "G6 unit: tampered breakdowns fail (got $($g6Failed -join ','))"
   $template = Join-Path $project 'Config\SmartFinOps-Contracts.local.json.template'
   foreach ($bad in @(
       @{ Name='date'; Skus=@([ordered]@{ SkuPartNumber='SPE_E3' }); Renewal='31/03/2027' },

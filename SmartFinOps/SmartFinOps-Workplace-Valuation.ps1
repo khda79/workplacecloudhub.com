@@ -9,7 +9,7 @@
   FinOps_* CSVs with their own receipt.
   Unqualified input is reported as Not measured, never as zero or as an older value.
 .VERSION
-2.1.0
+2.1.1
 .NOTES
   Outputs: Data\<TenantKey>\FinOps_*.csv, SmartFinOps_Workplace-Valuation.current.json.txt and
   Archive\<FinOpsRunId>\ (same files plus the run log). Consumers must check the receipt
@@ -27,7 +27,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-$script:ScriptVersion = '2.1.0'
+$script:ScriptVersion = '2.1.1'
 $script:LogLines = [System.Collections.Generic.List[string]]::new()
 $script:Invariant = [Globalization.CultureInfo]::InvariantCulture
 
@@ -179,6 +179,29 @@ $script:ValuedLevers = @('L1','L2','L3','L4','L5','L6','L7','L8')
 $script:ProvisionalLeversBySource = @{
   'M365_OneDrive_Usage.csv' = @('L4')
   'AD_Users_AllDomains.csv' = @('L1','L2','L3','L4','L5','L6')
+}
+# Valued totals of FinOps_Summary; each one is also broken down by PRICE, FORECAST and SHOWBACK (2.1.1).
+$script:SummaryTotals = @(
+  @{ Key='TOTAL_R'; Class='R'; Levers=@('L1','L2','L3','L5','L6','L7'); Note='Realizable at contract or renewal; excludes conditional E3 to F3' }
+  @{ Key='TOTAL_R_DISABLED_AND_SHARED'; Class='R'; Levers=@('L1','L2','L5'); Note='Disabled accounts and eligible shared mailboxes' }
+  @{ Key='TOTAL_R_ENABLED_INACTIVE'; Class='R'; Levers=@('L3'); Note='R - enabled accounts without M365 activity in 90 days' }
+  @{ Key='TOTAL_R_COPILOT'; Class='R'; Levers=@('L6'); Note='Copilot without licensed activity' }
+  @{ Key='TOTAL_R_CAPACITY'; Class='R'; Levers=@('L7'); Note='Unassigned units after reserve and cap' }
+  @{ Key='TOTAL_RC_E3_TO_F3'; Class='Rc'; Levers=@('L4'); Note='Conditional: outside TOTAL_R' }
+  @{ Key='TOTAL_E_REUSE'; Class='E'; Levers=@('L8'); Note='Purchase avoided by reusing units for users waiting for capacity' }
+)
+$script:ShowbackDimensions = @('AdDomain','Country','Entity','Department')
+
+function Get-FinOpsPriceOrigin {
+  param([AllowNull()]$PriceIsEstimated)
+  switch (([string]$PriceIsEstimated).Trim()) { 'True' { return 'Estimated' } 'False' { return 'Contract' } default { return 'Unknown' } }
+}
+
+function Get-FinOpsRealizableFrom {
+  param([Parameter(Mandatory)]$Opportunity)
+  $value = ([string]$Opportunity.RealizableFrom).Trim()
+  if ($value) { return $value }
+  return 'Renewal unknown'
 }
 #endregion
 
@@ -446,6 +469,8 @@ function Set-FinOpsOpportunityValue {
   if ($null -ne $TargetPrice) {
     if (-not $TargetPrice.Valued) { $Row.ValuationStatus = 'Not valued'; $Row.StatusReason = "target: $($TargetPrice.Reason)"; return }
     $Row.TargetUnitPriceMonthly = $TargetPrice.Price
+    # An estimated target price makes the difference estimated too.
+    if (Test-FinOpsTrue $TargetPrice.Estimated) { $Row.PriceIsEstimated = 'True' }
     $unit = [decimal]$Price.Price - [decimal]$TargetPrice.Price
     if ($unit -le 0) { $Row.ValuationStatus = 'Not valued'; $Row.StatusReason = 'target price is not lower than the current price'; return }
   }
@@ -642,7 +667,12 @@ function Invoke-FinOpsValuation {
         if ($null -ne $referencedSku[$refKey]) { $skuRow = $capacity[[string]$referencedSku[$refKey].SkuId] } else { $skuReason = 'SKU ambiguous: several referenced SKUs' }
       }
       else { $skuRow = & $resolveProductSku $product; if (-not $skuRow) { $skuReason = "SKU ambiguous or absent for product $product" } }
-      if ($skuRow) { $values.SkuId = [string]$skuRow.SkuId; $values.SkuPartNumber = [string]$skuRow.SkuPartNumber }
+      if ($skuRow) {
+        $values.SkuId = [string]$skuRow.SkuId; $values.SkuPartNumber = [string]$skuRow.SkuPartNumber
+        # Contract terms of the current SKU (the per-SKU pass sets the same values on L1-L3; L4 needs them for its forecast).
+        $terms = Get-FinOpsContractTerms -Contracts $Contracts -SkuPartNumber $values.SkuPartNumber -EnabledUnits ([long](ConvertTo-FinOpsLong $skuRow.EnabledUnits)) -RunDate $RunStartUtc.Date
+        $values.ContractKey = $terms.ContractKey; $values.RenewalDate = $terms.RenewalDate; $values.RealizableFrom = $terms.RealizableFrom
+      }
       $values.OpportunityKey = '{0}|{1}|{2}' -f $values.Lever, $values.UserId, $(if ($skuRow) { $values.SkuId } else { $product })
       $opportunity = New-FinOpsOpportunity $values
       if (-not $skuRow) { Clear-FinOpsOpportunityValue $opportunity 'Not valued' $skuReason }
@@ -873,7 +903,7 @@ function Get-FinOpsSummary {
     $rows.Add([pscustomobject]$values)
   }
   if (-not $Valuation.Measured) {
-    foreach ($key in @('TOTAL_R','TOTAL_R_DISABLED_AND_SHARED','TOTAL_R_ENABLED_INACTIVE','TOTAL_R_COPILOT','TOTAL_R_CAPACITY','TOTAL_RC_E3_TO_F3','TOTAL_E_REUSE')) {
+    foreach ($key in @($script:SummaryTotals | ForEach-Object Key)) {
       $values = [ordered]@{ KpiKey=$key; ValueClass=''; Lever=''; ValuationStatus='Not measured'; Users=''; Units=''; AnnualAmount='' }
       foreach ($k in $common.Keys) { $values[$k] = $common[$k] }
       $values.Provisional = $false
@@ -886,13 +916,34 @@ function Get-FinOpsSummary {
   $opps = $Valuation.Opportunities
   $valued = { param([string[]]$Levers, [string]$Class) @($opps | Where-Object { $_.Lever -in $Levers -and $_.ValueClass -eq $Class -and $_.ValuationStatus -in $script:ValuedStatuses }) }
   $status = 'Auto'
-  & $add 'TOTAL_R' 'R' 'L1;L2;L3;L5;L6;L7' $status (& $valued @('L1','L2','L3','L5','L6','L7') 'R') 'Realizable at contract or renewal; excludes conditional E3 to F3'
-  & $add 'TOTAL_R_DISABLED_AND_SHARED' 'R' 'L1;L2;L5' $status (& $valued @('L1','L2','L5') 'R') 'Disabled accounts and eligible shared mailboxes'
-  & $add 'TOTAL_R_ENABLED_INACTIVE' 'R' 'L3' $status (& $valued @('L3') 'R') 'R - enabled accounts without M365 activity in 90 days'
-  & $add 'TOTAL_R_COPILOT' 'R' 'L6' $status (& $valued @('L6') 'R') 'Copilot without licensed activity'
-  & $add 'TOTAL_R_CAPACITY' 'R' 'L7' $status (& $valued @('L7') 'R') 'Unassigned units after reserve and cap'
-  & $add 'TOTAL_RC_E3_TO_F3' 'Rc' 'L4' $status (& $valued @('L4') 'Rc') 'Conditional: outside TOTAL_R'
-  & $add 'TOTAL_E_REUSE' 'E' 'L8' $status (& $valued @('L8') 'E') 'Purchase avoided by reusing units for users waiting for capacity'
+  foreach ($total in $script:SummaryTotals) { & $add $total.Key $total.Class ($total.Levers -join ';') $status (& $valued $total.Levers $total.Class) $total.Note }
+  # Breakdowns of each valued total by price origin, realizable date and showback value; G6 reconciles them with the total.
+  foreach ($total in $script:SummaryTotals) {
+    $items = & $valued $total.Levers $total.Class
+    $leverText = $total.Levers -join ';'
+    foreach ($group in @($items | Group-Object -Property @{ Expression={ Get-FinOpsPriceOrigin $_.PriceIsEstimated } })) {
+      & $add ('PRICE|{0}|{1}' -f $total.Key, $group.Name) $total.Class $leverText $status $group.Group 'Price origin: Estimated (catalogue), Contract or Unknown'
+    }
+    foreach ($group in @($items | Group-Object -Property @{ Expression={ Get-FinOpsRealizableFrom $_ } })) {
+      & $add ('FORECAST|{0}|{1}' -f $total.Key, $group.Name) $total.Class $leverText $status $group.Group 'Realizable from (date or Renewal unknown)'
+    }
+    foreach ($dimension in $script:ShowbackDimensions) {
+      foreach ($group in @($items | Group-Object -Property $dimension)) {
+        & $add ('SHOWBACK|{0}|{1}|{2}' -f $dimension, $total.Key, $group.Group[0].$dimension) $total.Class $leverText $status $group.Group "Showback $dimension value"
+      }
+    }
+  }
+  # Distinct users per showback value (any lever and status): lets a consumer group small populations.
+  foreach ($dimension in $script:ShowbackDimensions) {
+    foreach ($group in @($opps | Where-Object { $_.UserId } | Group-Object -Property $dimension)) {
+      $aggregate = Get-FinOpsAggregate $group.Group
+      $values = [ordered]@{ KpiKey=('SHOWBACK|{0}|USERS|{1}' -f $dimension, $group.Group[0].$dimension); ValueClass=''; Lever=''; ValuationStatus=''; Users=$aggregate.Users; Units=''; AnnualAmount='' }
+      foreach ($k in $common.Keys) { $values[$k] = $common[$k] }
+      $values.Provisional = $false
+      $values.Note = 'Distinct users with at least one opportunity row'
+      $rows.Add([pscustomobject]$values)
+    }
+  }
   & $add 'TOTAL_E_ESU' 'E' 'L13' 'Not measured' @($opps | Where-Object Lever -eq 'L13') 'No ESU device population published by SmartInventory'
   & $add 'NOT_MEASURED_MAILBOX' 'S' 'L5' 'Not measured' @($opps | Where-Object { $_.Lever -eq 'L5' -and $_.ValuationStatus -eq 'Not measured' }) 'Mailbox state unknown during the Licences run (expected only when EXO failed)'
   foreach ($group in @($opps | Group-Object -Property @{ Expression={ '{0}|{1}|{2}' -f $_.ValueClass, $_.Lever, $_.ValuationStatus } })) {
@@ -911,7 +962,7 @@ function Get-FinOpsSummary {
 }
 
 function Get-FinOpsControls {
-  param([Parameter(Mandatory)][hashtable]$Sources, [Parameter(Mandatory)]$Valuation, [AllowEmptyCollection()][object[]]$Showback)
+  param([Parameter(Mandatory)][hashtable]$Sources, [Parameter(Mandatory)]$Valuation, [AllowEmptyCollection()][object[]]$Showback, [AllowEmptyCollection()][object[]]$SummaryRows = @())
   $controls = [System.Collections.Generic.List[object]]::new()
   $addCheck = { param([string]$Control, [string]$Key, $SourceCount, $FinOpsCount, [string]$Detail)
     $controls.Add([pscustomobject][ordered]@{ Control=$Control; Key=$Key; SourceCount=[string]$SourceCount; FinOpsCount=[string]$FinOpsCount; Status=$(if ([string]$SourceCount -ceq [string]$FinOpsCount) { 'Pass' } else { 'Fail' }); Detail=$Detail }) }
@@ -966,6 +1017,49 @@ function Get-FinOpsControls {
       $side[$group.Name] = '{0}|{1}' -f $units, (Format-FinOpsDecimal $(if ($amounts.Count) { [decimal]($amounts | Measure-Object -Sum).Sum } else { $null }))
     }
     foreach ($key in @($total.Keys + $side.Keys | Sort-Object -Unique)) { & $addCheck 'G6' "$dimension|$key" $total[$key] $side[$key] 'Showback units|amount vs opportunity totals' }
+  }
+  # G6 (2.1.1) Summary breakdowns reconcile with their total: units|amount, plus users for showback values.
+  # One pass over the Summary: totals by key, breakdown parts summed per family (PRICE|total, FORECAST|total, SHOWBACK|dimension|total).
+  $text = { param($value) if ($null -eq $value -or [string]$value -eq '') { '' } elseif ($value -is [decimal]) { Format-FinOpsDecimal $value } else { [string]$value } }
+  $totalRows = @{}; $buckets = @{}
+  foreach ($row in $SummaryRows) {
+    if ($null -eq $row) { continue }
+    $key = [string]$row.KpiKey
+    if (-not $key.Contains('|')) { if ($totalRows.ContainsKey($key)) { $totalRows[$key] = $null } else { $totalRows[$key] = $row }; continue }
+    $parts = $key.Split('|')
+    $bucketKey = switch -CaseSensitive ($parts[0]) { 'PRICE' { "PRICE|$($parts[1])" } 'FORECAST' { "FORECAST|$($parts[1])" } 'SHOWBACK' { "SHOWBACK|$($parts[1])|$($parts[2])" } default { $null } }
+    if (-not $bucketKey) { continue }
+    if (-not $buckets.ContainsKey($bucketKey)) { $buckets[$bucketKey] = [pscustomobject]@{ Units=[long]0; HasUnits=$false; Amount=[decimal]0; HasAmount=$false; Users=[long]0 } }
+    $bucket = $buckets[$bucketKey]
+    if ([string]$row.Units -ne '') { $bucket.Units += [long]$row.Units; $bucket.HasUnits = $true }
+    if ($null -ne $row.AnnualAmount -and [string]$row.AnnualAmount -ne '') { $bucket.Amount += [decimal]$row.AnnualAmount; $bucket.HasAmount = $true }
+    $bucket.Users += [long]$row.Users
+  }
+  $bucketText = {
+    param([string]$Key, [bool]$WithUsers)
+    $bucket = $buckets[$Key]
+    if ($null -eq $bucket) { $bucket = [pscustomobject]@{ Units=[long]0; HasUnits=$false; Amount=[decimal]0; HasAmount=$false; Users=[long]0 } }
+    $result = '{0}|{1}' -f $(if ($bucket.HasUnits) { $bucket.Units } else { '' }), $(if ($bucket.HasAmount) { Format-FinOpsDecimal $bucket.Amount } else { '' })
+    if ($WithUsers) { $result += '|' + $bucket.Users }
+    return $result
+  }
+  foreach ($total in $script:SummaryTotals) {
+    $totalRow = $totalRows[$total.Key]
+    if ($null -eq $totalRow) { & $addCheck 'G6' "SUMMARY|$($total.Key)" 'present once' 'missing or duplicated' 'Summary total present once'; continue }
+    $expected = '{0}|{1}' -f (& $text $totalRow.Units), (& $text $totalRow.AnnualAmount)
+    foreach ($family in @('PRICE', 'FORECAST') + @($script:ShowbackDimensions | ForEach-Object { "SHOWBACK|$_" })) {
+      $bucketKey = '{0}|{1}' -f $family, $total.Key
+      $withUsers = $family.StartsWith('SHOWBACK|', [StringComparison]::Ordinal)
+      $wanted = if ($withUsers) { '{0}|{1}' -f $expected, [long]$totalRow.Users } else { $expected }
+      & $addCheck 'G6' $bucketKey $wanted (& $bucketText $bucketKey $withUsers) $(if ($withUsers) { 'Summary showback values units|amount|users vs total' } else { 'Summary breakdown units|amount vs total' })
+    }
+  }
+  $allUsers = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+  foreach ($o in $opps) { if ($o.UserId) { [void]$allUsers.Add($o.UserId) } }
+  foreach ($dimension in $script:ShowbackDimensions) {
+    $bucketKey = 'SHOWBACK|{0}|USERS' -f $dimension
+    $users = if ($buckets.ContainsKey($bucketKey)) { $buckets[$bucketKey].Users } else { [long]0 }
+    & $addCheck 'G6' $bucketKey $allUsers.Count $users 'Summary distinct users per showback value vs distinct users'
   }
   return $controls.ToArray()
 }
@@ -1072,7 +1166,7 @@ try {
   if ($sources['AD_Users_AllDomains.csv'].QualificationStatus -eq 'Provisional' -and -not $sources['AD_Users_AllDomains.csv'].ProvisionalLevers) { $sources['AD_Users_AllDomains.csv'].ProvisionalLevers = 'Showback' }
   $showback = Get-FinOpsShowback -Opportunities $result.Opportunities
   $summary = Get-FinOpsSummary -Valuation $result
-  $controls = Get-FinOpsControls -Sources $sources -Valuation $result -Showback $showback
+  $controls = Get-FinOpsControls -Sources $sources -Valuation $result -Showback $showback -SummaryRows $summary
   $failed = @($controls | Where-Object Status -eq 'Fail')
   foreach ($control in $failed) { Write-FinOpsLog ('Control {0} failed: {1} source={2} finops={3}' -f $control.Control, $control.Key, $control.SourceCount, $control.FinOpsCount) 'ERROR' }
   $notMeasuredMailbox = @($result.Opportunities | Where-Object { $_.Lever -eq 'L5' -and $_.ValuationStatus -eq 'Not measured' }).Count
