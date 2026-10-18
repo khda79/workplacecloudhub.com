@@ -204,3 +204,57 @@ Readiness and control sources include Teams Phone assignments and detailed calls
 Freshness is separate: `Fresh`, `Stale`, `Unknown`, or `NotChecked`. Incomplete assessments explicitly state that zero financial totals do not prove zero opportunity.
 
 Readiness-only sources do not change license recommendations or financial potential. Files whose names contain `MAXITEMS` remain excluded.
+
+## V2 valuation engine (lot V2.1, in development)
+
+`SmartFinOps-Workplace-Valuation.ps1` 2.1.0 is the V2 engine. It runs beside the beta analyzer, which stays unchanged until it is retired. PowerShell 7 only, read-only, no API connection.
+
+```powershell
+.\SmartFinOps-Workplace-Valuation.ps1 -Tenant prod -ValidateOnly   # qualify sources and contracts, compute, write nothing
+.\SmartFinOps-Workplace-Valuation.ps1 -Tenant prod
+```
+
+The engine never recomputes a decision. It values what SmartInventory already published and qualifies every input with its producer source receipt (`Status=Completed`, tenant, SHA256 and row count per file, optional files `Published=true`, no publication in progress, completed within `Valuation.FreshnessDailyHours`, default 48 h):
+
+- the Licences report (`M365_Licenses_Report*.csv` and `M365_Licenses_ReportSnapshot.json.txt`): one `SnapshotId` on every row, snapshot `ReceiptRun.RunId` and per-SKU `ReceiptRunId` equal to the Licences receipt `RunId`, snapshot schema 2;
+- the per-SKU decisions (`M365_Licenses_ReportSkuCandidates.csv`, `M365_Licenses_ReportSkuCapacity.csv`) and `M365_Licenses_Users.csv`;
+- `M365_License_Prices.csv` and, when published, `Windows_ESU_Prices.csv`;
+- `AD_Users_AllDomains.csv` and `M365_Users_Active.csv` for showback only.
+
+An unqualified input is `Not measured`: no amount, never zero, never an older value. A missing price is `Not valued`. A source marked provisional in the Licences report makes `Provisional` only the levers that use it: `M365_OneDrive_Usage.csv` affects L4 (E3 to F3), `AD_Users_AllDomains.csv` the user levers L1 to L6, and any other provisional source every valued lever. `FinOps_Sources.csv` (`ProvisionalLevers`) and the receipt record which source made which lever provisional. Accepted partial AD coverage (`PartialAccepted`) lists the missing domains; their users are `Not measured` in the showback.
+
+### Value classes and levers
+
+`R` is realizable at contract or renewal, `Rc` conditionally realizable (outside the R total), `E` avoided cost or exposure, `S` a signal that is never monetized.
+
+| Lever | Source | Class |
+| --- | --- | --- |
+| L1, L2, L3 | `ReportCandidates` Recovery: disabled account, eligible shared mailbox under 50 GB, enabled account without M365 activity in 90 days (own KPI) | R |
+| L4 | `ReportCandidates` E3 to F3 review: E3 price minus F3 price | Rc |
+| L5 | `ReportSkuCandidates` disabled account. `Recommended` is R; `Referenced` keeps no amount (already counted); `Review` with an unknown mailbox state is `Not measured`; other reviews and `Blocked by dependency` are signals | R / S |
+| L6 | `ReportSkuCandidates` Copilot without activity (`Recommended` R, `Review` S); Copilot usage not measured | R / S |
+| L7 | `ReportSkuCapacity` unassigned units after reserve (excluded SKUs skipped) | R |
+| L8 | Users waiting for capacity (`ReportSummary`) served from the freed pool before any reduction | E |
+| L9, L10 | Over-assigned SKU; Dynamics 365 active users without product telemetry | S |
+| L11, L12 | Assignment issues; mailbox/AD gap metrics of the report (one row per metric, never summed) | S |
+| L13 | Windows 10 ESU: no device population is published by SmartInventory yet | E, `Not measured` |
+
+Prices come from the single EUR row of `M365_License_Prices.csv` effective on the snapshot date; amounts are an annual run-rate (monthly price x 12) with the date from which they are realizable. The SKU of a suite candidate is the SKU of its `Referenced` per-SKU row, or the only assigned SKU of that report product; otherwise the row is `Not valued`.
+
+### Capped realization
+
+Per SKU: pool = unassigned units - reserve + R candidates. Users waiting for capacity are served first (E). The rest is realizable up to `EnabledUnits - MinimumUnits` of the contract; units beyond the cap are `Capped`, in a fixed order (capacity, L1, L5, L2, L6, L3, then user ID).
+
+A realized saving is reported when `EnabledUnits` drops below the level of the previous qualified run. The baseline is the first run of that level: realized units = min(candidate licenses valued R during that level and no longer assigned + baseline capacity units, capped at the baseline realizable units; the drop). The rest of the drop is `not attributed`.
+
+### Outputs
+
+`Data\<TenantKey>\` holds `FinOps_Sources.csv`, `FinOps_Opportunities.csv`, `FinOps_SkuValuation.csv`, `FinOps_Showback.csv` (AD domain, country, entity, department), `FinOps_Summary.csv`, `FinOps_Realization.csv` and `FinOps_Controls.csv`, each sorted by its key, plus `SmartFinOps_Workplace-Valuation.current.json.txt`. Every row carries `TenantKey`, `FinOpsRunId`, `SnapshotId` and the Licences `ReceiptRunId`; valued rows also carry the price row key and pricing receipt run. `Archive\<FinOpsRunId>\` keeps the same files and the run log. `Valuation.ArchiveRetentionRuns` (default 30) limits the archive, but a run that is the baseline of a realization is never purged.
+
+Equivalence controls G1 to G6 compare the FinOps rows with the Licences counts (candidates by type and product, per-SKU recommendations, summary recovery counts, capacity counters, no double counting, showback totals). A failed control fails the run: the current files are kept but the receipt is `Failed`. **Every consumer must check the receipt (`Status=Completed`, `TenantKey`, SHA256 of each file) before reading a `FinOps_*` CSV.**
+
+### Contracts
+
+`Config/SmartFinOps-Contracts.local.json` (private, created from `Config/SmartFinOps-Contracts.local.json.template`) maps SKUs to contracts: `ContractKey`, `RenewalDate` (`yyyy-MM-dd`, empty means renewal unknown), `ReductionPolicy` (`AtRenewal`, `Anniversary`, `Monthly`, `Unknown`) and, per SKU, `MinimumUnits` and `ReserveUnits` (default `Defaults.ReserveUnitsPercent`, 0). Prices stay in the LicensePricing private override. Paid SKUs without a contract are added to `UnmappedSkus`; no date is invented.
+
+Tests: `Tests\SmartFinOps-Workplace-Valuation.Tests.ps1` (synthetic data, isolated runtime, real SmartM365.Core receipts).
