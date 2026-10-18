@@ -1,4 +1,4 @@
-﻿# Version 1.2.0
+﻿# Version 1.3.0
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
@@ -326,7 +326,9 @@ function Get-MultiIndex {
 
     $index = @{}
     foreach ($row in $Rows) {
-        $key = Get-NormalizedKey (Get-PropertyValue $row $PropertyName)
+        # Inline Get-PropertyValue + Get-NormalizedKey: same value, without two calls per row.
+        $property = if ($null -eq $row) { $null } else { $row.PSObject.Properties[$PropertyName] }
+        $key = if ($null -eq $property -or $null -eq $property.Value) { '' } else { ([string]$property.Value).Trim().ToLowerInvariant() }
         if (-not $key) { continue }
         if (-not $index.ContainsKey($key)) {
             $index[$key] = [System.Collections.Generic.List[object]]::new()
@@ -398,20 +400,29 @@ function Resolve-AccountPopulationLink {
     $typeByEntraId = @{}
     $matchedAnyAd = [System.Collections.Generic.HashSet[string]]::new()
     $explicitNonHuman = [System.Collections.Generic.HashSet[string]]::new()
+    # Same lookups as Get-PropertyValue/Get-NormalizedKey, inlined on this hot path (one pass per
+    # history week). Populations are cached per exact account type; the rules do not change in a run.
+    $populationByAccountType = [System.Collections.Generic.Dictionary[string, string]]::new([StringComparer]::Ordinal)
+    $lookupIndexes = @($entraBySidIndex, $entraByImmutableIdIndex, $entraByUpnIndex)
+    $lookupProperties = @('ObjectSID', 'ImmutableId_AD', 'UserPrincipalName')
+    $accountPopulation = $null
     foreach ($adUser in $AdUsers) {
-        $accountType = ([string](Get-PropertyValue $adUser 'AccountType')).Trim()
+        $property = if ($null -eq $adUser) { $null } else { $adUser.PSObject.Properties['AccountType'] }
+        $accountType = ([string]$(if ($null -eq $property) { $null } else { $property.Value })).Trim()
         if (-not $accountType) { $accountType = 'Unclassified Account' }
-        $accountPopulation = Get-ConfiguredAccountPopulation $accountType
+        if (-not $populationByAccountType.TryGetValue($accountType, [ref]$accountPopulation)) {
+            $accountPopulation = Get-ConfiguredAccountPopulation $accountType
+            $populationByAccountType[$accountType] = $accountPopulation
+        }
 
-        foreach ($lookup in @(
-            [pscustomobject]@{ Index = $entraBySidIndex; Value = (Get-PropertyValue $adUser 'ObjectSID') },
-            [pscustomobject]@{ Index = $entraByImmutableIdIndex; Value = (Get-PropertyValue $adUser 'ImmutableId_AD') },
-            [pscustomobject]@{ Index = $entraByUpnIndex; Value = (Get-PropertyValue $adUser 'UserPrincipalName') }
-        )) {
-            $key = Get-NormalizedKey $lookup.Value
-            if (-not $key -or -not $lookup.Index.ContainsKey($key)) { continue }
-            foreach ($candidate in $lookup.Index[$key]) {
-                $candidateId = Get-NormalizedKey (Get-PropertyValue $candidate 'Object Id')
+        for ($lookupNumber = 0; $lookupNumber -lt 3; $lookupNumber++) {
+            $lookupIndex = $lookupIndexes[$lookupNumber]
+            $property = if ($null -eq $adUser) { $null } else { $adUser.PSObject.Properties[$lookupProperties[$lookupNumber]] }
+            $key = if ($null -eq $property -or $null -eq $property.Value) { '' } else { ([string]$property.Value).Trim().ToLowerInvariant() }
+            if (-not $key -or -not $lookupIndex.ContainsKey($key)) { continue }
+            foreach ($candidate in $lookupIndex[$key]) {
+                $property = if ($null -eq $candidate) { $null } else { $candidate.PSObject.Properties['Object Id'] }
+                $candidateId = if ($null -eq $property -or $null -eq $property.Value) { '' } else { ([string]$property.Value).Trim().ToLowerInvariant() }
                 if (-not $candidateId) { continue }
                 [void]$matchedAnyAd.Add($candidateId)
                 if ($accountPopulation -eq 'Non-human') { [void]$explicitNonHuman.Add($candidateId) }
@@ -1114,16 +1125,22 @@ foreach ($week in @($latestActiveByWeek.Keys | Sort-Object)) {
     $weekPopulationLinks = if ($weekAdRows.Count -gt 0) { Resolve-AccountPopulationLink -EntraUsers $weekEntraRows -AdUsers $weekAdRows } else { $null }
     if ($null -eq $weekPopulationLinks) { Write-WorkforceDiagnostic "History $week - no AD snapshot, current population used" }
     $weekActiveRows = @(foreach ($weekEntraRow in $weekEntraRows) {
-        $candidateId = Get-NormalizedKey (Get-PropertyValue $weekEntraRow 'Object Id')
-        $candidateUpn = Get-NormalizedKey (Get-PropertyValue $weekEntraRow 'User principal name')
+        # Same keys as Get-NormalizedKey (Get-PropertyValue ...), inlined; the account state is
+        # checked first because the population test has no side effect.
+        $property = $weekEntraRow.PSObject.Properties['AccountEnabled']
+        if ($null -eq $property -or $null -eq $property.Value -or ([string]$property.Value).Trim().ToLowerInvariant() -ne 'true') { continue }
+        $property = $weekEntraRow.PSObject.Properties['UserType']
+        if ($null -eq $property -or $null -eq $property.Value -or ([string]$property.Value).Trim().ToLowerInvariant() -ne 'member') { continue }
+        $property = $weekEntraRow.PSObject.Properties['Object Id']
+        $candidateId = if ($null -eq $property -or $null -eq $property.Value) { '' } else { ([string]$property.Value).Trim().ToLowerInvariant() }
         $inPopulation = if ($null -ne $weekPopulationLinks) {
             Test-WorkforceCandidate -CandidateId $candidateId -Links $weekPopulationLinks -CurrentLinks $currentPopulationLinks
         } else {
+            $property = $weekEntraRow.PSObject.Properties['User principal name']
+            $candidateUpn = if ($null -eq $property -or $null -eq $property.Value) { '' } else { ([string]$property.Value).Trim().ToLowerInvariant() }
             ($candidateId -and $workforceEntraIds.Contains($candidateId)) -or ($candidateUpn -and $workforceUpns.Contains($candidateUpn))
         }
-        if ((Get-NormalizedKey (Get-PropertyValue $weekEntraRow 'AccountEnabled')) -eq 'true' -and
-            (Get-NormalizedKey (Get-PropertyValue $weekEntraRow 'UserType')) -eq 'member' -and
-            $inPopulation) { $weekEntraRow }
+        if ($inPopulation) { $weekEntraRow }
     })
     $weekEntraRows = $null
     Write-WorkforceDiagnostic "History $week - load activity"
