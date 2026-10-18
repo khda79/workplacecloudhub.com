@@ -207,12 +207,14 @@ Readiness-only sources do not change license recommendations or financial potent
 
 ## V2 valuation engine (lot V2.1)
 
-`SmartFinOps-Workplace-Valuation.ps1` 2.1.1 is the V2 engine. It runs beside the beta analyzer, which stays unchanged until it is retired. PowerShell 7 only, read-only, no API connection.
+`SmartFinOps-Workplace-Valuation.ps1` 2.1.2 is the V2 engine. It runs beside the beta analyzer, which stays unchanged until it is retired. PowerShell 7 only, read-only, no API connection.
 
 ```powershell
 .\SmartFinOps-Workplace-Valuation.ps1 -Tenant prod -ValidateOnly   # qualify sources and contracts, compute, write nothing
 .\SmartFinOps-Workplace-Valuation.ps1 -Tenant prod
 ```
+
+DATA-LAST comes from `-SmartM365LatestCsvFolderPath`, else from `SmartM365LatestCsvFolderPath` in the local configuration. When that setting is empty or `__USE_SMARTM365__`, it is resolved through the SmartM365 tenant context; if that resolution fails (context missing, error, empty path) the script stops with the reason and its position, and never falls back to a default path. A resolved path that still contains a `{{token}}` is refused. Both V2 scripts print the WorkplaceCloudHub startup banner and, also on failure, the completion banner (status, duration, warnings, errors, CSV files, log), which is appended to the run log.
 
 The engine never recomputes a decision. It values what SmartInventory already published and qualifies every input with its producer source receipt (`Status=Completed`, tenant, SHA256 and row count per file, optional files `Published=true`, no publication in progress, completed within `Valuation.FreshnessDailyHours`, default 48 h):
 
@@ -263,7 +265,7 @@ Tests: `Tests\SmartFinOps-Workplace-Valuation.Tests.ps1` (synthetic data, isolat
 
 ## V2 executive report (lot V2.2)
 
-`SmartFinOps-Workplace-Report.ps1` 2.2.0 turns the valuation outputs into one self-contained HTML page for management. PowerShell 7 only, read-only. It is a pure consumer: it reads only the seven `FinOps_*` CSVs and the valuation receipt, and computes no decision and no amount; it displays, sorts and groups what the engine (2.1.1 or a later 2.1.x) published.
+`SmartFinOps-Workplace-Report.ps1` 2.2.1 turns the valuation outputs into one self-contained HTML page for management. PowerShell 7 only, read-only. It is a pure consumer: it reads only the seven `FinOps_*` CSVs and the valuation receipt, and computes no decision and no amount; it displays, sorts and groups what the engine (2.1.1 or a later 2.1.x) published.
 
 ```powershell
 .\SmartFinOps-Workplace-Valuation.ps1 -Tenant prod
