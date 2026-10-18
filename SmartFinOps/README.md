@@ -207,14 +207,14 @@ Readiness-only sources do not change license recommendations or financial potent
 
 ## V2 valuation engine (lot V2.1)
 
-`SmartFinOps-Workplace-Valuation.ps1` 2.1.3 is the V2 engine. It runs beside the beta analyzer, which stays unchanged until it is retired. PowerShell 7 only, read-only, no API connection.
+`SmartFinOps-Workplace-Valuation.ps1` 2.1.4 is the V2 engine. It runs beside the beta analyzer, which stays unchanged until it is retired. PowerShell 7 only, read-only, no API connection.
 
 ```powershell
 .\SmartFinOps-Workplace-Valuation.ps1 -Tenant prod -ValidateOnly   # qualify sources and contracts, compute, write nothing
 .\SmartFinOps-Workplace-Valuation.ps1 -Tenant prod
 ```
 
-DATA-LAST comes from `-SmartM365LatestCsvFolderPath`, else from `SmartM365LatestCsvFolderPath` in the local configuration. When that setting is empty or `__USE_SMARTM365__`, it is resolved through the SmartM365 tenant context; if that resolution fails (context missing, error, empty path) the script stops with the reason and its position, and never falls back to a default path. A resolved path that still contains a `{{token}}` is refused, and every path handed to .NET is a plain absolute file-system path, so the scripts also run from a UNC share. Both V2 scripts print the WorkplaceCloudHub startup banner and, also on failure, the completion banner (status, duration, warnings, errors, CSV files, log), which is appended to the run log.
+`-Tenant` is the SmartM365 profile key: it names `Data\<profile>` and its archive. Source receipts and rows carry the organization TenantKey (OrganizationKey-EnvironmentKey), which can differ from the profile: it comes from `-SmartM365TenantKey`, else from `SmartM365TenantKey` in the local configuration, else (empty or `__USE_SMARTM365__`) from the SmartM365 tenant context of the profile, with the same explicit failure rules as DATA-LAST. The FinOps receipt (contract 1.1) records both `ProfileKey` and `TenantKey`; the FinOps CSV rows carry the TenantKey, and the report checks both. DATA-LAST comes from `-SmartM365LatestCsvFolderPath`, else from `SmartM365LatestCsvFolderPath` in the local configuration. When that setting is empty or `__USE_SMARTM365__`, it is resolved through the SmartM365 tenant context; if that resolution fails (context missing, error, empty path) the script stops with the reason and its position, and never falls back to a default path. A resolved path that still contains a `{{token}}` is refused, and every path handed to .NET is a plain absolute file-system path, so the scripts also run from a UNC share. Both V2 scripts print the WorkplaceCloudHub startup banner and, also on failure, the completion banner (status, duration, warnings, errors, CSV files, log), which is appended to the run log.
 
 The engine never recomputes a decision. It values what SmartInventory already published and qualifies every input with its producer source receipt (`Status=Completed`, tenant, SHA256 and row count per file, optional files `Published=true`, no publication in progress, completed within `Valuation.FreshnessDailyHours`, default 48 h):
 
@@ -265,7 +265,7 @@ Tests: `Tests\SmartFinOps-Workplace-Valuation.Tests.ps1` (synthetic data, isolat
 
 ## V2 executive report (lot V2.2)
 
-`SmartFinOps-Workplace-Report.ps1` 2.2.2 turns the valuation outputs into one self-contained HTML page for management. PowerShell 7 only, read-only. It is a pure consumer: it reads only the seven `FinOps_*` CSVs and the valuation receipt, and computes no decision and no amount; it displays, sorts and groups what the engine (2.1.1 or a later 2.1.x) published.
+`SmartFinOps-Workplace-Report.ps1` 2.2.3 turns the valuation outputs into one self-contained HTML page for management. PowerShell 7 only, read-only. It is a pure consumer: it reads only the seven `FinOps_*` CSVs and the valuation receipt, and computes no decision and no amount; it displays, sorts and groups what the engine (2.1.1 or a later 2.1.x) published.
 
 ```powershell
 .\SmartFinOps-Workplace-Valuation.ps1 -Tenant prod
@@ -273,7 +273,7 @@ Tests: `Tests\SmartFinOps-Workplace-Valuation.Tests.ps1` (synthetic data, isolat
 .\SmartFinOps-Workplace-Report.ps1 -Tenant prod -ValidateOnly # qualify and build, write nothing
 ```
 
-Before reading anything the report qualifies the run: receipt `Owner=SmartFinOps-Receipt` 1.0, `Status=Completed`, same tenant, exactly the seven files with their SHA256 and row counts (hashed and parsed from the same bytes), exact headers, one `FinOpsRunId`, `SnapshotId` and Licences `ReceiptRunId` on every row, and no failed equivalence control. Otherwise the page is "Report not available" with the reason and no figure; it replaces the current report so that no older figure stays visible, and the script exits with code 2. When the Licences report was not measured the report is still produced, with a status banner and every figure `Not measured`.
+Before reading anything the report qualifies the run: receipt `Owner=SmartFinOps-Receipt` 1.1 from engine 2.1.4 or later, `Status=Completed`, same TenantKey and profile, exactly the seven files with their SHA256 and row counts (hashed and parsed from the same bytes), exact headers, one `FinOpsRunId`, `SnapshotId` and Licences `ReceiptRunId` on every row, and no failed equivalence control. Otherwise the page is "Report not available" with the reason and no figure; it replaces the current report so that no older figure stays visible, and the script exits with code 2. When the Licences report was not measured the report is still produced, with a status banner and every figure `Not measured`.
 
 Sections follow the SmartFinOps rules: executive summary, financial potential (R with the enabled-inactive accounts shown separately, conditional E3 to F3 outside the total, cost avoidance, price origin), priority decisions, cost/quality/risk trade-offs (Review, Blocked, Not measured, Not valued, Capped, signals), capacity, renewals and forecast (`RealizableFrom`, renewal unknown), realization when a baseline exists, showback (AD domain, country, entity, department), assumptions and a folded technical appendix (report qualification, sources, controls G1 to G6). Statuses are always visible: an empty amount is shown as its status, never as zero; catalogue estimates and contract prices are labelled.
 
