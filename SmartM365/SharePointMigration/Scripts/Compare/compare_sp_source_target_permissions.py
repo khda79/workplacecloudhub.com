@@ -1,4 +1,4 @@
-__version__ = "1.0.1"
+__version__ = "1.0.2"
 import argparse
 import builtins
 import csv
@@ -8,6 +8,7 @@ import unicodedata
 import zipfile
 from collections import Counter, defaultdict
 from datetime import datetime
+from functools import lru_cache
 from pathlib import Path
 from urllib.parse import quote, unquote, urlparse
 
@@ -605,7 +606,18 @@ def replace_encoded_sharegate_character(match):
     return match.group(0)
 
 
+# Path normalization is pure but called for every permission row on the same webs,
+# lists and folders. Memoize it per replacement character (exact results); keep in
+# step with compare_sp_source_target_file_inventories.py.
+NORMALIZATION_CACHE_SIZE = 1 << 20
+
+
 def decode_sharegate_path(path):
+    return _decode_sharegate_path_cached(path, SHAREGATE_REPLACEMENT_CHARACTER)
+
+
+@lru_cache(maxsize=NORMALIZATION_CACHE_SIZE)
+def _decode_sharegate_path_cached(path, replacement_character):
     path = PERCENT_SEQUENCE_PATTERN.sub(replace_encoded_sharegate_character, path)
     return unquote(path)
 
@@ -634,6 +646,11 @@ def replace_edge_dots_and_spaces_before_extension(segment):
 
 
 def normalize_sharegate_segment(segment):
+    return _normalize_sharegate_segment_cached(segment, SHAREGATE_REPLACEMENT_CHARACTER)
+
+
+@lru_cache(maxsize=NORMALIZATION_CACHE_SIZE)
+def _normalize_sharegate_segment_cached(segment, replacement_character):
     if segment == "":
         return segment
 
@@ -659,6 +676,11 @@ def normalize_sharegate_path_characters(path):
 def normalize_path(value):
     if not value:
         return ""
+    return _normalize_path_cached(value, SHAREGATE_REPLACEMENT_CHARACTER)
+
+
+@lru_cache(maxsize=NORMALIZATION_CACHE_SIZE)
+def _normalize_path_cached(value, replacement_character):
     text = normalize_sharegate_path_characters(decode_sharegate_path(strip_query_from_path(value)))
     if not text.startswith("/"):
         text = "/" + text

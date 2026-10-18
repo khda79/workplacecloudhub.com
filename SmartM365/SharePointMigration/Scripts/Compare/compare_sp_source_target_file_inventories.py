@@ -1,4 +1,4 @@
-__version__ = "1.0.0"
+__version__ = "1.0.1"
 import argparse
 import builtins
 from collections import defaultdict
@@ -7,6 +7,7 @@ import html
 import json
 import re
 from datetime import datetime, timezone
+from functools import lru_cache
 from pathlib import Path
 from urllib.parse import quote, unquote, urlparse
 
@@ -545,7 +546,17 @@ def replace_literal_percent_sequence(match):
     return SHAREGATE_REPLACEMENT_CHARACTER + match.group(1)
 
 
+# Path normalization is pure but called several times per inventory row for the same
+# folders, libraries and webs. Memoize it per replacement character (exact results).
+NORMALIZATION_CACHE_SIZE = 1 << 20
+
+
 def decode_sharegate_path(path, literal_percent_sequences=False):
+    return _decode_sharegate_path_cached(path, literal_percent_sequences, SHAREGATE_REPLACEMENT_CHARACTER)
+
+
+@lru_cache(maxsize=NORMALIZATION_CACHE_SIZE)
+def _decode_sharegate_path_cached(path, literal_percent_sequences, replacement_character):
     if literal_percent_sequences:
         path = PERCENT_SEQUENCE_PATTERN.sub(replace_literal_percent_sequence, path)
         return unquote(path)
@@ -578,6 +589,11 @@ def replace_edge_dots_and_spaces_before_extension(segment):
 
 
 def normalize_sharegate_segment(segment):
+    return _normalize_sharegate_segment_cached(segment, SHAREGATE_REPLACEMENT_CHARACTER)
+
+
+@lru_cache(maxsize=NORMALIZATION_CACHE_SIZE)
+def _normalize_sharegate_segment_cached(segment, replacement_character):
     if segment == "":
         return segment
 
@@ -597,7 +613,11 @@ def normalize_sharegate_segment(segment):
 def normalize_sharegate_path_characters(path):
     if not path:
         return path
+    return _normalize_sharegate_path_characters_cached(path, SHAREGATE_REPLACEMENT_CHARACTER)
 
+
+@lru_cache(maxsize=NORMALIZATION_CACHE_SIZE)
+def _normalize_sharegate_path_characters_cached(path, replacement_character):
     segments = []
     for segment in path.split("/"):
         segments.append(normalize_sharegate_segment(segment))
