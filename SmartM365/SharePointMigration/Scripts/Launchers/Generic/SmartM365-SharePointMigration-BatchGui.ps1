@@ -2,7 +2,7 @@
 .SYNOPSIS
     Batch launcher UI and command helpers for the migration dashboard.
 .VERSION
-    1.0.1
+    1.0.2
 .DESCRIPTION
     Function-only library. Uses existing batch launchers and small batch summaries;
     never reads inventories or connects to a tenant to populate the dashboard.
@@ -191,7 +191,7 @@ function Start-SmartM365BatchFromGui {
         $request.Status='Starting'; $request.StartedUtc=[DateTimeOffset]::UtcNow.ToString('o'); $request.Computer=$env:COMPUTERNAME
         $request | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $path -Encoding utf8
         $worker=Join-Path $script:BatchGui.HelperRoot 'SmartM365-SharePointMigration-BatchGuiRun.ps1'
-        $process=Start-Process -FilePath (Join-Path $PSHOME 'pwsh.exe') -ArgumentList ('-NoExit -NoProfile -File "{0}" -RequestPath "{1}"' -f $worker,$path) -WindowStyle Normal -PassThru
+        $process=Start-Process -FilePath (Join-Path $PSHOME 'pwsh.exe') -ArgumentList ('-NoProfile -File "{0}" -RequestPath "{1}"' -f $worker,$path) -WindowStyle Normal -PassThru
         $script:BatchGui.Active[$Kind]=@{ Path=$path; Process=$process; Id=$id; Root=$request.Root; PlanOnly=[bool]$PlanOnly; Started=Get-Date }
         $script:BatchGui.View.FindName("batch${Kind}Status").Text=if($PlanOnly){'Opening preview console…'}else{'Starting batch in a separate console…'}
         Update-SmartM365BatchControls

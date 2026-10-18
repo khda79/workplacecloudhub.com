@@ -2,10 +2,11 @@
 .SYNOPSIS
     Run an existing CMD batch launcher in a dedicated dashboard console.
 .VERSION
-    1.0.0
+    1.0.1
 .DESCRIPTION
     Internal launcher. The JSON request is data, not PowerShell code. Records the
-    actual child exit code independently of whether the console stays open.
+    actual child exit code; the console closes after a successful batch and waits
+    for Enter after a failure or a preview.
 #>
 #requires -Version 7.4
 [CmdletBinding()]
@@ -45,6 +46,10 @@ try {
 } finally {
     if($request){$request.FinishedUtc=[DateTimeOffset]::UtcNow.ToString('o');Save-BatchReceipt $request;Write-Host ('[{0}] Batch status: {1}; exit code: {2}; receipt: {3}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'),$request.Status,$request.ExitCode,$RequestPath)}
     if($process){$process.Dispose()}
+}
+# The console closes by itself after a successful batch; failures and previews stay readable.
+if((-not $request -or $request.Status -ne 'Succeeded') -and $env:SPMIG_NO_CLOSE_PROMPT -ne '1' -and [Environment]::UserInteractive -and -not [Console]::IsInputRedirected){
+    try{[void](Microsoft.PowerShell.Utility\Read-Host ('[{0}] {1}. Press Enter to close this window' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'),$(if($request){$request.Status}else{'Failed'})))}catch{[void]$_}
 }
 if($request -and $request.ExitCode -ne 0){exit $request.ExitCode}
 

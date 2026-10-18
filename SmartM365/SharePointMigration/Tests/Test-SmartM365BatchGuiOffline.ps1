@@ -5,7 +5,7 @@
     Uses synthetic launchers and summaries only. No SharePoint, Graph, real scans
     or prerequisite probes are invoked. Renders the WPF tab at two window widths.
 .VERSION
-    1.0.1
+    1.0.2
 #>
 #requires -Version 7.4
 [CmdletBinding()]
@@ -23,6 +23,8 @@ $temp=Join-Path $env:TEMP ('SmartM365-BatchGuiTest-'+[guid]::NewGuid().ToString(
 $root=Join-Path $temp 'Tool kit & migration'
 [void](New-Item -ItemType Directory -Path $root -Force)
 $script:Clicked=@()
+# Worker consoles wait for Enter after a failure or preview; the offline test must never block.
+$env:SPMIG_NO_CLOSE_PROMPT='1'
 try {
     # Missing, empty and single-row summaries must remain arrays under StrictMode.
     $summaryFixtureRoot=Join-Path $temp 'summary fixtures'
@@ -144,7 +146,8 @@ exit 9
     # Only the synthetic launcher above runs; capture the intended visible-window options.
     function Start-Process {
         param($FilePath,$ArgumentList,$WindowStyle,[switch]$PassThru)
-        Assert-BatchGui ($WindowStyle -eq 'Normal' -and $ArgumentList -like '-NoExit *') 'Batch console is not configured as a visible independent console.'
+        # The console closes by itself on success: no -NoExit, BatchGuiRun pauses only on failure or preview.
+        Assert-BatchGui ($WindowStyle -eq 'Normal' -and $ArgumentList -like '-NoProfile *' -and $ArgumentList -notlike '*-NoExit*') 'Batch console is not configured as a visible self-closing console.'
         $path=[regex]::Match($ArgumentList,'-RequestPath "([^"]+)"').Groups[1].Value
         Assert-BatchGui ([bool]$path) 'GUI request path missing.'
         & $FilePath -NoProfile -File (Join-Path $generic 'SmartM365-SharePointMigration-BatchGuiRun.ps1') -RequestPath $path | Out-Null
@@ -195,6 +198,7 @@ exit 9
     }
     Write-Host '[PASS] Batch GUI offline: CMD routing, previews, failure receipts, summaries, scope, prerequisites gate and WPF events.'
 }finally{
+    Remove-Item Env:SPMIG_NO_CLOSE_PROMPT -ErrorAction SilentlyContinue
     Stop-SmartM365BatchGui
     if($window){$window.Close()}
     # Delete only the unique synthetic directory created above.

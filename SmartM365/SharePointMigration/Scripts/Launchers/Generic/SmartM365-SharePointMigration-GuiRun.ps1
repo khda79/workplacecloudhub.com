@@ -2,7 +2,7 @@
 .SYNOPSIS
     Runs a SharePointMigration entry script.
 .VERSION
-    1.0.3
+    1.0.4
 #>
 [CmdletBinding()]
 param(
@@ -126,6 +126,12 @@ finally {
         catch { Microsoft.PowerShell.Utility\Write-Host ('{0} Could not record cancellation: {1}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $_.Exception.Message) -ForegroundColor Yellow }
     }
     Complete-SmartM365MigrationConsoleLifecycle -Context $script:ConsoleLifecycleContext -Failure $script:ConsoleLifecycleFailure -Status $script:ConsoleLifecycleStatus
+    # The dashboard console closes by itself on SUCCESS; keep failures and cancellations readable.
+    if ($script:ConsoleLifecycleStatus -ne 'SUCCESS' -and $env:SPMIG_NO_CLOSE_PROMPT -ne '1' -and
+        [Environment]::UserInteractive -and -not [Console]::IsInputRedirected) {
+        try { [void](Microsoft.PowerShell.Utility\Read-Host ('{0} {1}. Press Enter to close this window' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $script:ConsoleLifecycleStatus)) }
+        catch { [void]$_ }
+    }
 }
 
 # SIG # Begin signature block

@@ -15,7 +15,7 @@
     the directory containing this GUI when launched from the shared toolkit.
 
 .VERSION
-    1.0.74
+    1.0.75
 #>
 
 #Requires -Version 7.4
@@ -38,7 +38,7 @@ if ($Demo) {
 }
 
 $script:AppName    = 'Smart SharePoint Migration'
-$script:AppVersion = '1.0.74'
+$script:AppVersion = '1.0.75'
 $script:ScriptRoot = $PSScriptRoot
 $script:FarmToolkitRoot = if ($FarmToolkitRoot) { $FarmToolkitRoot } else { $PSScriptRoot }
 $script:SummaryLastGoodRows = @{}
@@ -2602,7 +2602,8 @@ function Invoke-MigrationAction {
             $script:AppName, 'OK', 'Error') | Out-Null
         return
     }
-    $args    = @('-NoExit', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$launcher`"",
+    # No -NoExit: GuiRun closes its console on SUCCESS and waits for Enter otherwise.
+    $args    = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$launcher`"",
                  '-ActivityPath', "`"$activity`"", '-MigrationName', "`"$migName`"")
     if ($OperationPath) { $args += @('-OperationPath', "`"$OperationPath`"") }
     else { $args += @('-Action', $Action) }

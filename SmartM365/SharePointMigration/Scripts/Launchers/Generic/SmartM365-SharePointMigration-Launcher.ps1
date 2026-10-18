@@ -7,7 +7,7 @@
     requested inventory, comparison, or permission action.
 
 .VERSION
-    1.0.31
+    1.0.32
 #>
 
 [CmdletBinding()]
@@ -60,7 +60,7 @@ $ErrorActionPreference = 'Stop'
 $script:LauncherPreviousConsoleMarker = [string]$env:SPMIG_CONSOLE_LIFECYCLE_ACTIVE
 $script:LauncherOwnsLifecycle = [string]::IsNullOrWhiteSpace($script:LauncherPreviousConsoleMarker)
 if ($script:LauncherOwnsLifecycle) {
-    Microsoft.PowerShell.Utility\Write-Host ('{0} Script  : {1} v{2}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $MyInvocation.MyCommand.Name, '1.0.31') -ForegroundColor Cyan
+    Microsoft.PowerShell.Utility\Write-Host ('{0} Script  : {1} v{2}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $MyInvocation.MyCommand.Name, '1.0.32') -ForegroundColor Cyan
 }
 $script:LauncherNonInteractive = [bool]$NonInteractive
 . (Join-Path -Path $PSScriptRoot -ChildPath '..\SmartM365-SharePointMigration-LauncherCommon.ps1')
@@ -270,6 +270,11 @@ function Open-DirectoryInExplorer {
     )
 
     if ($script:LauncherNonInteractive) { return }
+    if ($env:SPMIG_GUI_RUN_ID) {
+        # Dashboard runs close on SUCCESS; reports stay reachable from the dashboard buttons.
+        Write-Info ("Results folder: {0}" -f $Path) DarkCyan
+        return
+    }
 
     try {
         $resolvedPath = [string](Resolve-Path -LiteralPath $Path).ProviderPath
