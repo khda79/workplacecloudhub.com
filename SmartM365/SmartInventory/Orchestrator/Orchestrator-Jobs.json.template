@@ -185,7 +185,10 @@
       "Arguments": "",
       "Enabled": true,
       "Group": "M365",
-      "DependsOn": [],
+      "DependsOn": [
+        "EXO-Mailboxes-Inventory-Fast"
+      ],
+      "DependencyMode": "LatestOccurrence",
       "AllowedServers": [],
       "TimeoutMinutes": 1380,
       "MaxRetries": 1,
@@ -194,7 +197,7 @@
       "Schedule": {
         "Type": "Daily",
         "Times": [
-          "00:45"
+          "04:45"
         ],
         "MissedRunPolicy": "RunOnce",
         "DaysOfWeek": []
