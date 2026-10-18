@@ -3,7 +3,7 @@
 Starts the Windows 11 Upgrade LOT launcher GUI.
 
 .VERSION
-0.1.54
+0.1.55
 #>
 param(
     [switch]$ValidateOnly,
@@ -102,7 +102,7 @@ function Write-ToolkitConfig {
         $lines.Add(('{0}={1}' -f $name,$value))
     }
 
-    Set-Content -LiteralPath $Path -Encoding ASCII -Value @($lines)
+    [IO.File]::WriteAllLines($Path, $lines.ToArray(), [Text.UTF8Encoding]::new($true))
 }
 
 function Get-ToolkitConfigValue {
@@ -511,18 +511,20 @@ function New-GuiLaunchCommandFile {
     $launchPath = Join-Path $launcherRoot ('{0}_{1}.cmd' -f $safePrefix,(Get-Date -Format 'yyyyMMdd-HHmmss-fff'))
     $launchLines = New-Object System.Collections.Generic.List[string]
     $launchLines.Add('@echo off')
+    $launchLines.Add('chcp 65001 >nul')
     $launchLines.Add('setlocal DisableDelayedExpansion')
     $launchLines.Add('echo GUI launcher : %~f0')
     if (-not [string]::IsNullOrWhiteSpace($WindowTitle)) {
         $launchLines.Add(('title {0}' -f (ConvertTo-CmdWindowTitle -Value $WindowTitle)))
     }
-    $launchLines.Add(('cd /d {0}' -f (ConvertTo-CmdArgument -Value $WorkingDirectory)))
+    $launchLines.Add(('pushd {0} || exit /b 1' -f (ConvertTo-CmdArgument -Value $WorkingDirectory)))
     foreach ($command in @($Commands)) {
         if (-not [string]::IsNullOrWhiteSpace($command)) {
             $launchLines.Add($command)
         }
     }
     $launchLines.Add('set "EXITCODE=%ERRORLEVEL%"')
+    $launchLines.Add('popd')
     if ($PauseWhenDone) {
         $launchLines.Add('echo.')
         $launchLines.Add('echo Finished with exit code %EXITCODE%.')
@@ -530,7 +532,7 @@ function New-GuiLaunchCommandFile {
     }
     $launchLines.Add('exit /b %EXITCODE%')
 
-    Set-Content -LiteralPath $launchPath -Value $launchLines -Encoding ASCII -Force
+    [IO.File]::WriteAllLines($launchPath, $launchLines.ToArray(), [Text.UTF8Encoding]::new($false))
     if (-not [string]::IsNullOrWhiteSpace($EvidenceDirectory)) {
         New-Item -ItemType Directory -Path $EvidenceDirectory -Force | Out-Null
         $evidencePath = Join-Path $EvidenceDirectory 'GuiLaunchCommand.cmd'
@@ -3198,8 +3200,8 @@ try {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC1n3ClmrmJ064p
-# JEslt1Rc5/8lgCpANgCHqft1TjWsgKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA8ndbtrjGX9Ha/
+# QBEGhH2/dRxJ3ehR9PLxtLkW/BLiPaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -3332,31 +3334,31 @@ try {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEILobnjTvpS//ImILW/ObI0PYAxurJwrpuSnejYNPx0qeMA0GCSqG
-# SIb3DQEBAQUABIIBgC7lEbHi+4ez020RJX4qJAnaJEA1wsz/0WraC3N9eRndiDbt
-# FKVwvBigXwfUBqJkTO8JHTgiuVqs9t92r1URF2FK1rcVUrASBa7euYfQ29vKFXNT
-# hsDI8sF/OGl6peDsZE3eevDO/Qv1TaFniRxu532qVeypPsxoBMpF/Jc2Gsttbyju
-# b4X8G4DqMMxny4TLoq3oUD9QrnnbSttMOS0j0FTl2U3u+RlzIKEP3X6EyHJP1XA1
-# XX2Z9YAd7njg+VbtKs6L3ez3zEayO2q1+U7fuUHaMJDAaFa3KhE+OZMh5WTJYhBS
-# Bze8RuHeq0gGO8Gg2ehsv/+V0mDxELRtBLZ4IgKmVEDWUhl2QaJLN1AgQQ8xvMK1
-# Nw2WT4g/DKRoXhGLNgaSK2TZPjQEZM8zXzzKYg7PmTEln2xKYlD8qmu4KlXupUZm
-# dnmdrh3tmYVF604o4ei9olrNfN7rPFiu30Ht1+8DA8X5BTJxl+aLyM1z/mu2fmch
-# IvPegR72Omz4TGY3fqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIIXln4/JlM2u26iozoluURvLE99Hcz5ACb9zrbvF6As0MA0GCSqG
+# SIb3DQEBAQUABIIBgAbmwsIPwopA+52VOXJwrGd5Zg3iFCHObFrEoOqh68gdRaJ8
+# NY5u9ekR7c/yhxTy2DxVPzdYN4k0XfuCcJeaYDdQbIyBQoZ0NUevyfITZ+1t0Byi
+# xsyJva63MZnSNJUxsgjYMbvnJFdUnhrhUvaRcEsunmg+z4TNo5p6s6CCrAOB5XVq
+# T7bZBwzKRRYHp6I0woOa9CN3gsO4vDsCvZZU78jpMNKhjZ22hBzLT5J0JIrob1wM
+# zuxqpkGlX9+0OiHUtOqIhgRL2gUXZgrOkxLiUkX2O0haIRibe8KIPRQP9XFvH0bs
+# FNgudVcxKtXlyBSRplQh3u9bWLm67MBZ8y96h7EpZI+LyyAariOX0mO94PRJy70k
+# PG6bfw7J9BGq0tYST7iWicFUx9BPaL8BeT0eCgekHhOjUaNwbU66wa0cHtEU5/NT
+# EHD3Y3mp5a0T3OC30+gkpvr9RKI10pZZLyHJv9XBaaOFsR23XUQn5YA9qKDmD9eK
+# zwRCNBAUaGaVY78ZwqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTgwMDQ2
-# NDBaMC8GCSqGSIb3DQEJBDEiBCDfWqZ1dkA26R5XqAwwpmk/Sg+A5mOP2xit+yM/
-# k2hubjANBgkqhkiG9w0BAQEFAASCAgBcOmRrH7Kz/dKAnnomGowGa2OBoQSMI8RL
-# GZGNoZdGBFYLEcCtpgr66QXtHWbVPnADBAHMEdL/Nx/hJO2o0eNopImJxi4vMDI+
-# xTSwL1/qw1mFMrOUPJGJ7ZDkQ9cCAkYHU3VYISR00zxO7pJ/N3hcbuM1siBMQe7j
-# Bvd7lemfTtpc1AnXaVJcXxLwiElctN8xfW8fdM1H/tzzN5PbGLM/6g8bn8bT+P/Y
-# OT/kI2wHuMKprlL+4iF2NTUxBLBbRVknPOYrYAaf+6kj05owsy0fW7Lvd+bw0F6g
-# MRchqsI/gKEKI6Y+QJFNUKCrbpaboi1TpwZLUV9pay45ec+S8Xnq3Sy2xOhtwSRc
-# vxm7KrGhgbUaCbInxOo3FJV0LZ1r1Z5k8rkXHrdxg6Rwv+5J1+WUIwGwAtk0t0UN
-# aySsioQrd/tFjYC57Dk6pmTLLHUQQsIWvRLNhtHwd3AiQEUYDLYawSX3l99B8hnl
-# P1YZXN3rjlDvb9RStQyadYbcdK/yaRJzm/zmetJxNTpB4CbStkzrlkloOBV3CPCD
-# FKUhSLIRJqbL3V2YHWitJa3VW05bI9foCfeSdo8e0N5zT+bgQX8xvpMBNM3xTPuM
-# MROojq/H5ok8heLyWUHSyXuJnCZxnjI1br72DinaT/9zCiPBOZadJdj5w480Ps6b
-# ltq4PY25bg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTgwMjQw
+# MTNaMC8GCSqGSIb3DQEJBDEiBCAv6wAUaC8VZSa5pCrqadWilpgivqO7QneZO+IJ
+# SUrkOjANBgkqhkiG9w0BAQEFAASCAgBlY9dlbteZekY/L8i7IK4fluskF3WQYAbA
+# WmX4xcR+l4FpohZ2cHc+/bJxCanAh21g0jhHU8aIvSrrz9pBdvqxTCAIlYxRn3L0
+# r4tPImuqbIpyVlGcbkYpdbatYh2/9QkikWqIa5Ul7RsMgvPZI3nC1D89DCfk4gtX
+# w03m8i7Z7xmjCwvKjLp9PlUtGabaTguqr1iKptsXSgbqifv21xk3IrbVlOZSobqy
+# /3zDy6n5Eczw1rgpF7B2Hizke9cAWQn4x/6Ehi4yXsg/6r8DtrFXUjR2raFSrrSD
+# A4344eJHSINyNl7o1MpPjsvHWLPNGZMYtm4yKtyejIlXh49Ie2CLD5+o35t5QAb1
+# mtbiMqk3Q49GPT8VsIsPQLW1dKg+XNtYEpA+Paf/PQDWkqt2ETknLCrPqLXSwthK
+# IYdVFG0mT1BYNn1gZaAffAMa0CT535jZkyM9mNLxub0GAfDV37LrhC/Hy8DuW+0L
+# wRO3HBdwYDXJwEchB/jRSsr3KJN16X3kBaxMCIgHx7ESjItQJXhC7UR3ZkYJ7Fol
+# 25AsBL6G4do9ECdJ2tGICxUTSmsJar00YlUvGB5+yvCXiYc6jqqZsXFjG7VNIFGG
+# d9xfKD43fo+mw71eFCiBW5M1Tq0NT9rYqArrJzebaFNyZkvzGNK4hqO0Fe0NWCWd
+# FUk0ilhUqA==
 # SIG # End signature block

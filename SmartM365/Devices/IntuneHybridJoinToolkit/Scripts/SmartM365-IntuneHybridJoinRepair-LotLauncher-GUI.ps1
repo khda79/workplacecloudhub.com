@@ -3,7 +3,7 @@
 Starts the Intune Hybrid Join repair LOT launcher GUI.
 
 .VERSION
-1.19
+1.20
 #>
 param(
     [switch]$ValidateOnly,
@@ -21,7 +21,7 @@ if ($Demo) {
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-$GuiVersion = '1.19'
+$GuiVersion = '1.20'
 
 function Get-ToolkitRoot {
     $scriptPath = $PSCommandPath
@@ -137,7 +137,7 @@ function Write-ToolkitConfig {
         $lines.Add(('{0}={1}' -f $name,$value))
     }
 
-    Set-Content -LiteralPath $Path -Encoding ASCII -Value @($lines)
+    [IO.File]::WriteAllLines($Path, $lines.ToArray(), [Text.UTF8Encoding]::new($true))
 }
 
 function Get-ToolkitConfigValue {
@@ -362,6 +362,18 @@ function New-ToolkitLotFolder {
     return $lotPath
 }
 
+function Assert-CmdLiteralValue {
+    param(
+        [AllowNull()][string]$Value,
+        [string]$Context = 'CMD value'
+    )
+
+    if ($null -eq $Value) { return }
+    if ($Value.IndexOf([char]0) -ge 0 -or $Value -match '[\r\n"%!]' ) {
+        throw ("{0} contains a character that cannot be represented safely in a generated CMD launcher. Remove quotes, percent signs, exclamation marks, or line breaks." -f $Context)
+    }
+}
+
 function ConvertTo-CmdArgument {
     param([string]$Value)
 
@@ -369,16 +381,26 @@ function ConvertTo-CmdArgument {
         return '""'
     }
 
-    return '"' + ($Value -replace '"', '\"') + '"'
+    Assert-CmdLiteralValue -Value $Value -Context 'CMD argument'
+    if ($Value -match '^[A-Za-z0-9_:\\./=-]+$') {
+        return $Value
+    }
+
+    return ('"{0}"' -f $Value)
 }
 
 function ConvertTo-CmdSetCommand {
     param(
         [string]$Name,
-        [string]$Value
+        [AllowNull()][string]$Value
     )
 
-    return 'set "{0}={1}"' -f $Name, ($Value -replace '"', '\"')
+    if ($Name -notmatch '^[A-Za-z_][A-Za-z0-9_]*$') {
+        throw "Invalid environment variable name: $Name"
+    }
+
+    Assert-CmdLiteralValue -Value $Value -Context ("Environment variable {0}" -f $Name)
+    return ('set "{0}={1}"' -f $Name, $Value)
 }
 
 
@@ -464,17 +486,19 @@ function New-GuiLaunchCommandFile {
     $launchPath = Join-Path $launcherRoot ('{0}_{1}.cmd' -f $safePrefix,(Get-Date -Format 'yyyyMMdd-HHmmss-fff'))
     $launchLines = New-Object System.Collections.Generic.List[string]
     $launchLines.Add('@echo off')
-    $launchLines.Add('setlocal')
+    $launchLines.Add('chcp 65001 >nul')
+    $launchLines.Add('setlocal DisableDelayedExpansion')
     if (-not [string]::IsNullOrWhiteSpace($WindowTitle)) {
         $launchLines.Add(('title {0}' -f (ConvertTo-CmdWindowTitle -Value $WindowTitle)))
     }
-    $launchLines.Add(('cd /d {0}' -f (ConvertTo-CmdArgument -Value $WorkingDirectory)))
+    $launchLines.Add(('pushd {0} || exit /b 1' -f (ConvertTo-CmdArgument -Value $WorkingDirectory)))
     foreach ($command in @($Commands)) {
         if (-not [string]::IsNullOrWhiteSpace($command)) {
             $launchLines.Add($command)
         }
     }
     $launchLines.Add('set "EXITCODE=%ERRORLEVEL%"')
+    $launchLines.Add('popd')
     if ($PauseWhenDone) {
         $launchLines.Add('echo.')
         $launchLines.Add('echo Finished with exit code %EXITCODE%.')
@@ -482,7 +506,7 @@ function New-GuiLaunchCommandFile {
     }
     $launchLines.Add('exit /b %EXITCODE%')
 
-    Set-Content -LiteralPath $launchPath -Value $launchLines -Encoding ASCII -Force
+    [IO.File]::WriteAllLines($launchPath, $launchLines.ToArray(), [Text.UTF8Encoding]::new($false))
     return $launchPath
 }
 
@@ -492,7 +516,9 @@ function Start-GuiLaunchCommandFile {
         [Parameter(Mandatory = $true)][string]$WorkingDirectory
     )
 
-    Start-Process -FilePath 'cmd.exe' -ArgumentList @('/c', (ConvertTo-CmdArgument -Value $LaunchCommandPath)) -WorkingDirectory $WorkingDirectory -Verb RunAs | Out-Null
+    Assert-CmdLiteralValue -Value $LaunchCommandPath -Context 'GUI launcher path'
+    $cmdArguments = '/d /s /c ""{0}""' -f $LaunchCommandPath
+    Start-Process -FilePath 'cmd.exe' -ArgumentList $cmdArguments -WorkingDirectory $WorkingDirectory -Verb RunAs | Out-Null
 }
 
 function Start-LotHtmlReportOpenWatcher {
@@ -1991,8 +2017,8 @@ try {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAjfMpTeSU2NKfA
-# dd3LCT2NU9YKXUQ1Iz52/P++7jVMYaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCgPdGKSKxjGaif
+# Hy+9H2vF8ASWT4C3v9w7vo9saGibyKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -2125,31 +2151,31 @@ try {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIPkfZCJlb7U8dx3EFUjLHqd3HmDKMnDADTBY0cXBwIBEMA0GCSqG
-# SIb3DQEBAQUABIIBgCIHII/svmaW4oGWsFOJ6oFDw6DN9s8aMhVmZ4ApIZDdjMHD
-# EX/Rm84FPzspwuWOpZFezoa+znhV6YsbZOg86q6KWxZQYjVz/5VSr+bkzSTp3LiD
-# 5NXkcIQzI7ZUAePfWu5hpboKq7IJINbIwleohvFDggxgak32/MC/HDHBBz8mhqYO
-# wyTeUJ2F+KnrQbQSJsVGBtO/R+hyU6pl+Qn+QZvheP9lXyBcgM4Yg6xZ+0X8j7U2
-# w8IQWmIfx6kY5g1FHN7cIcSlDsC2e1FD52iDElU3yWXuZaRahQcvmRhWeQ9fZ0OC
-# jM0s43FN7LIf9Dng/tQPBAv0mbHwsJauOXbQSyuzVA3We1IMF7bPeYoBxXBmVhcN
-# WFpMG/hhatClXb5/5iTofDPEfX+8gV/+NgknL7P6igEJZpCr1hwL2NY/8e4lE7pH
-# QlTukKEhX6pf49KbfDbzY0xi72i6/NTd3xqElNhj/veTX6Rjlv0Xe8q3B8cSxnUu
-# lBQyh3+C7Yf9S1jEZ6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEILGikSkWwnGmTVZdky3Q7gXwBNj3ktVusMY1VG1Liz1YMA0GCSqG
+# SIb3DQEBAQUABIIBgCbZuCJCOE8NhnCo2Z1UnSHS059q1WN1CR36KVqmdc7Cl/7M
+# 6mmUxHJKApMR2EvzH3bMUtqjttjSj7zHi+Oinw/0ESBAovR/oixhTYxdrvaScXTG
+# mleob3rlAkHo6nOFtthlcaIaL6gMkDZdzCCrcK5q0Siljl/D2IA7GLJryyJMZ8dv
+# rJDzSAaYivRGVV80PPFZAIRb2sLcsWv/81LGOFVoGCZhJ17aKcqf0mYNBDZcQzIH
+# EH6MdMfDSqNTU0f/8349Z7TUy/mnJ6gjpZ68aQBshgAfDtKj4IAaiq6X/pPHuoGM
+# bxGzRlGbQgzGha0LGa2SVBZbgt0FHok33ombgdlcDkP8QckWqcy2Kavk+lILszfP
+# 7ISudV7dxmATtstLQLoM0Lbomf5Dl/Hgqk5UJbXd9MMj2clALhVmRWBuBFyociO/
+# P6NmtIEo+WaqfFZ8TKGd6V6K9255I4oouVVCEghUr1jda4L5rFnAF7IAKTWpUYVV
+# U1nCmgTUbXs8MgBlBaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTgwMDQ2
-# MzNaMC8GCSqGSIb3DQEJBDEiBCAnTXVBPTBYSCrwx7IqsWNgiv0ETzwXg62+TyQA
-# SRvbYjANBgkqhkiG9w0BAQEFAASCAgBW98Bk89LC1dgBc7FdMJ4xeXAYQOJlg1V1
-# UmRYzMdxP5YzK//RiOtlrSZjGzfp19mGnK+yTTcRYfFjwNG9aVqZFVoJgpWKPY4k
-# FQCY9vsgQkvBeqfgcvCmSTZht9kZUTg/tneOi1hL1Mt5A0xtEWJrwyGDbi0iI+Am
-# 6+lixvC6sgZrdraXmg68XUSLiDII+2iNdQLz5Qq6FcqwmIoPJs8ynVFHlVo0WP9a
-# d2ffws1PTkLVz0jXSm5+KsPV9QeldrD8Sbz6VSAsRqwTcy8ktvkkd+7pPh8b5LDr
-# OMQ7Fz3IBzB6G0sbPJa2Oc7yttBMYtotEhtkuWvMWYWnp3G8/MAfTWj5XT28JQYb
-# Yeqjtb3M7d/sJ5GyrioL+1zr6lyfl10LxdrDvZPyv0D0pP9XEakF3NXnukqazThW
-# rEY6Dvg4nE2uHpJm96Cp7vT+vqxyJr5WHPWjQzkwzI7N0E9OXOPc/VKf9VuXmgd8
-# xM9NO55O+Gv9NkkQI57ITtoqfVCVW/rV18R2sEMslhr9fWZ/b+YCHPKxZJ7hKRQ1
-# kwQi89r0zI/yThfWkWI2yk+YmC9dNZb+bvzdrTlj6GqbJjT34jbLMKf86Tml6ViE
-# wc5dU6Yi3/pTdviIPZGws/E5lpX8Eb5TwTi+WWVxRQ3hiVLydh9l64yzSPRXOuA3
-# Bi0VdgAOhA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTgwMjU2
+# MjlaMC8GCSqGSIb3DQEJBDEiBCA87QL2uanpIOUSeUBCY4uw3q5i6KTLrP6cTzGR
+# mH/C4DANBgkqhkiG9w0BAQEFAASCAgAe8iyCW8GL/ncfkZm+ea1HR7LbKd5H1tkA
+# IbuNoThafZKJKBznO3H52aQi1s4nrR62xrgHvKMCC83BD8q1mBnYx/Pu07cKJW6D
+# 111Dd8Nvb50Xf8gSwUvHgQJAVGgt5VtsmEZBtVnq1KWVfqDVftWDaWV8pYI+jEGZ
+# gakvo7yjYUg7GFe41YlbrhgrG4iWWNrDy25BQ7lwCx6Nxi7c+UqK3TZAr5FRlOkE
+# Amg7/ghTNukVHZArM57ol73ywD/RwjdkFU9OxVdMoAeWGY1ZU7foLBrbGlFIqvF5
+# SI5NzxgKYyFhh4i9KdLOLp5dOjCCZLVHQh6oAMJsfi+TpJozVddOITzipfLx5y5l
+# cIwxw34fQbYT50Tvtu8xemaSwIg7pOt5lJpVPb1yvXVPKAx9uw4mgYJslU4yUdGV
+# vJgsoPkHpdZ2e4yUtH5w0OS63apYcs0/n80l3DLbtY5pBStXYPiKrxJSaG8aQN0B
+# hc9pEsSl50aGEDY61DgW87EmXHkGi2sjF69QK8X8lkBErIKXHri+R/5klsq/lCNx
+# bUbpO+8RjBb8opN9COdraGzoUcpZKcM3WPojwHaDld9OTrfA+kcjAwJrDdiy7x2k
+# oryDDmIKeU/Jg0y1AHPcEdGbM0xizMOSFvY0a6htUbapqodQtpDelvZKYNf7tX8J
+# 6EKficKsrw==
 # SIG # End signature block

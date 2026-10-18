@@ -220,3 +220,16 @@ Launch `Start-SmartM365-ExchangeMigrationReadiness-Demo.cmd` for screenshots and
 Business actions are simulated. Demo startup bypasses operational configuration, authentication, collection, remote commands and mail delivery. Edits remain in memory. **Export demo outputs** generates only synthetic files under a unique `%TEMP%\SmartM365-Demo\` session folder. HTML-capable tools retain their report views; notification campaigns preview every shipped language template with fictional tokens. No real tenant or device evidence is required.
 
 Keep the application folder, its original report/template sources, local branding assets, `SmartM365.GuiDemo.ps1`, `SmartM365.GuiDemo.Reports.ps1` and the local `*-Demo.ps1` profile together when copying the application. `-Demo -ValidateOnly` builds the WPF demo without displaying windows or opening files. Run `SmartM365/Tests/Test-SmartM365GuiDemoApplicationsOffline.ps1` in an STA process for offline interaction and export checks.
+
+
+## Local review correction (2026-10-18)
+
+Source version: GUI 1.11.19. Changing or reloading a batch clears the previous assessment, exports, results grids, counters and permission baseline actions. Comparing permissions also verifies that the assessment belongs to the loaded batch. The assessment module version remains 1.11.18 because its logic is unchanged.
+
+Offline regression command from the repository root:
+
+```powershell
+pwsh -NoProfile -STA -ExecutionPolicy Bypass -File SmartM365/Tests/Test-SmartM365AppReviewDataPathsOffline.ps1 -Case ReadinessState
+```
+
+These checks use temporary files, harmless child processes or mocked operational boundaries. They do not qualify a real tenant, endpoint repair, campaign delivery or deployment. Demo assets remain local in `DemoAssets/`, ignored by Git, and must be refreshed after GUI changes. Live deployment requires separate qualification.

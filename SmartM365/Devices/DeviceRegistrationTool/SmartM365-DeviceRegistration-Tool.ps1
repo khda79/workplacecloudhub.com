@@ -1,6 +1,6 @@
-<#
+﻿<#
 .VERSION
-1.1
+1.2
 
 .SYNOPSIS
 SmartM365 local device registration diagnostic and repair tool.
@@ -160,7 +160,7 @@ if ($ValidateOnly) { throw 'For offline GUI validation, specify -Demo -ValidateO
 
 
 $Script:ToolName = "Smart DeviceRegistration Tool"
-$Script:Version = "1.1"
+$Script:Version = "1.2"
 $Script:RunId = Get-Date -Format "yyyyMMdd_HHmmss_fff"
 $Script:ComputerName = $env:COMPUTERNAME
 $Script:RunLogPath = $null
@@ -1644,6 +1644,8 @@ function Remove-DeviceRegistrationMdmEnrollment {
             "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\MDM\Enrollments\$id"
         )
 
+        $backedUpPaths = New-Object System.Collections.Generic.List[string]
+        $backupFailed = $false
         foreach ($regPath in $registryPaths) {
             $psPath = "Registry::$regPath"
             if (-not (Test-Path -LiteralPath $psPath)) { continue }
@@ -1652,11 +1654,24 @@ function Remove-DeviceRegistrationMdmEnrollment {
             $backupFile = Join-Path $backupDir ("{0}_{1}.reg" -f $safeId, $safeRegName)
             try {
                 $exportOutput = & reg.exe export $regPath $backupFile /y 2>&1
-                if ($LASTEXITCODE -ne 0) {
-                    $warnings.Add(("Registry export failed before removal. Path={0}; ExitCode={1}; Output={2}" -f $regPath, $LASTEXITCODE, (ConvertTo-CleanNativeOutput -Output $exportOutput)))
+                $exportExitCode = $LASTEXITCODE
+                if ($exportExitCode -ne 0) {
+                    throw ("Registry export failed. ExitCode={0}; Output={1}" -f $exportExitCode, (ConvertTo-CleanNativeOutput -Output $exportOutput))
                 }
-
-                Remove-Item -LiteralPath $psPath -Recurse -Force -ErrorAction Stop
+                if (-not (Test-Path -LiteralPath $backupFile -PathType Leaf) -or (Get-Item -LiteralPath $backupFile -ErrorAction Stop).Length -le 0) {
+                    throw 'Registry export did not produce a non-empty backup.'
+                }
+                $backedUpPaths.Add($regPath)
+            }
+            catch {
+                $backupFailed = $true
+                $errors.Add(("Enrollment cleanup blocked before any removal. Id={0}; BackupPath={1}; Error={2}" -f $id, $backupFile, $_.Exception.Message))
+            }
+        }
+        if ($backupFailed) { continue }
+        foreach ($regPath in $backedUpPaths) {
+            try {
+                Remove-Item -LiteralPath ("Registry::$regPath") -Recurse -Force -ErrorAction Stop
                 $removedItems.Add($regPath)
             }
             catch {
@@ -3924,8 +3939,8 @@ exit $cliResult.ExitCode
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA9fg4aK8Zc1vEW
-# HuPVSUFUBOn0jIh77lVXevvECsun/aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAwhn8GKocfLMTL
+# 6GIyo868EAXge0HoSFLNV7gKYQyrQKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -4058,31 +4073,31 @@ exit $cliResult.ExitCode
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIIR9yGVtoSBrDIreuZPYQyoN6+yMDboKA0ogpfRHXtpyMA0GCSqG
-# SIb3DQEBAQUABIIBgK83GGyuM1p0DhXTxInPS220N9BhXgNl6gjNudavf3Wq10VF
-# PjgewvmQmPf7XBLQ5uTIzKcNxYff+oFGnJ4nnyaWG3TeIjMM0Wy01syjuejr57AF
-# K5zHxqQ0ZPL/OGa0nAiNRKd/94EFs3lUuYpfFr2XGHdIcUrIN6K+jnl+uvy3vBv/
-# 7XshSl1QSvDPdtx73zZReeznX/BcXvjTQih4GMhMOELs7XFdBkmw15Hjy4Cd7FTa
-# RA+fn0qQNZXFbe/BJYF76W8ph+BiVIadfxKtcX9BjhEDy1oyCHNcDIsC2klBRtcp
-# xRTNe6Rv5Z3JVo3JRgVrLoIg2VBBSzD/z7laM5IoV8X1QgABB+sc/YuV0poMcYo3
-# aGF6oNsfoyBhhpDwI/axr0W2Q/zB5mbtV3gQDJaRLm48ZabXwR+chfoXoCaHFlQW
-# nW0mUaERGjx2ky1Wotv9qyP1x4piGV0LlB7AZvitTVn3E/V8Th6sD2AE3M6aHFDm
-# WoDNT/ld2drV4wlGe6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIDWo1d0wybtFzc1EZjCecV2nuDuZgno0/KvwlA5BZ6p4MA0GCSqG
+# SIb3DQEBAQUABIIBgH+NUA6wouUYoqD8vqdiOh2+qtY98/OgtbWum4t2Cx2g13wQ
+# DjKlzFotisHd+eAT5XnQN7qTDVW00fu7KTZCrxCQAEjj07tQAPbFW63qHWC6KfnD
+# 2hjYsdb/y11GXOoJCc/dYFmAgcOWujG9+Td8ZBDnnrznd3+qdeC5ddaeOaI52TZo
+# ZakL7bWy3Ua/h6FUfdfU5yc8E3iqJ8PoUnnZYXJ44VPnS3yvedAk5xeDwHtpuo/8
+# CVKc0lz5RqHtaKXB6dsJxhPF8gskcVpg+Gz3/e5a67IjEu98i/bEsDaKxn1Y2EA8
+# DFOjavzOzTlkLENJZfvMtXsx9dn8ge6OtOugkPSA1oEvO4prwYkfbcb0jHXfFpVa
+# 15FO3kM5Qq7XEoCHs1Y9bTONIhVlLio9ZU7rFBRmwZelkbugrEbMCvXG0RXBPlev
+# tA4BpWiyjVIctQWQGChEgCgBxob5B5rCkuRTj0Dpkw7kG5dPJxVnD9WH+48RwPJH
+# DJj4irFl/e4dQdzbgqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTgwMDQ2
-# MzVaMC8GCSqGSIb3DQEJBDEiBCDXrD4dWvd5SodFPQLEnYIOii12ey+D5Nlj6nnX
-# F1p78DANBgkqhkiG9w0BAQEFAASCAgAbRWv+JGEiDFfwQHjOHTlRjTWynFIAZsfJ
-# sPwrm3jG4J2d03v5n1VEmbgGTj9CadoQjJSudXKSgYetB9J4pwyi1+oI2Hy8btaq
-# 5SXBET5w6QC1Ew/0pQvtFEM1+FX3jN8WFO2rwFbtx/5MyAgH98yngC9EaIIlAdk9
-# UfzV16cVIaoYrwM2PL/NyaCG1WSLWAeu8J+8cOA/D6c7l1W6DMslDknQjTpmdnGp
-# o94/DOews/kF3n9mfTbVzTr7KU5DFNzPKve577z5Fc79GWZkIu6gtStgg9jx/Krr
-# wZ7hXMSEmKyG4Hpukk1TFQian2/7c3gM5q9Ju/PrZwT5gDFk/9BpzuBFYA8nLlLR
-# tODioaUyLs3i9qDPVXDImOHZBQHnksIgZb0Udrw6pyNgRMt8YG2X9Y9DwxCk4l99
-# MVWTp31ovP5PjoP5wYjLa1V9tp/Hc7gTH+/BtJwcaquQsz/ILFUEJ6sLFtd5aWu4
-# sHukwxBwdrFt9QpMbUH4TktCB0w4E7UF6KQyL2IP2Vw2ZszUTT3jXuG5DFA/0kYG
-# 7q52LkCHX8aYoCvmAcAamEWUoWLwvToPvQNAXgeuS5HZYhOO4AFfFXxSCPTXuKKD
-# HOHRttrWRLcn1X67BU36EvDg/IBfQ4OS4847dJYfrkx3DX4UUx6tLkAMNWqJwaqt
-# Ye9QqlDhJw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTgwMjQw
+# MDRaMC8GCSqGSIb3DQEJBDEiBCAa7+DbZ/CTNPBzsw1NJcz7qqpS9g34dX1m5Gge
+# iIZ9/TANBgkqhkiG9w0BAQEFAASCAgApUqHuogAemPTHjY+v9+8omYORkVhHIYYU
+# 4JY3pio8LIGu41MoI4RqbcyuQOJoeovbzWoW3ZgNTJ9QWqX6HYZPRutZjhXTGQiY
+# Bi19d4Mxmk0smGWhm89jFT8HL0yj7M5fZdfpkxvZS2YgkVtqHo1KbPrwCL4GM+HI
+# m0KKtli+GGbfoizf4XGPwX6DdTG9poGTAnmTQg4lJLPVia6Mp4XK3+i7Cd6Fwq7R
+# OPkfxyOy/HR+LiS5JvHhHkyx0XeCg59syGEqsr5OUz+0xN1vfuBe3xxmU4YhmmDw
+# BDr+9gml46j5jAPCJd8UECayqwviJGy40fqt7gGvZF+sLz5wqogu64VGNwX+jzae
+# EdDGtEQFgDl01Ng93MDxxQRw79VWCvJqulEky0fcRXwDQDim5+EXjjh7mlCzAGLf
+# DHM/fRnxAZ+/neXOPIpGYeMievbUzJigOEUnGCfCcRujnS65eC7dgGEI5ITqcsq7
+# 21E8dH503pMTzHNEL7xQ3AJBNqVM6KR52NvU+4shRKQ8+0+irRowNxdNFRFoedU3
+# T0KBMtz5FaB2Thq24LFYKlSrixCPooVPuWEeCpI9xdDuOfT49ket6PEB9Kt9k3eF
+# 3yORMdZHw+wnGcQJXM8kLrvE8MFlxTkQ06/Ejl9Upcn6zufhskehIeGfY7u5LX1c
+# E88W/0TC0Q==
 # SIG # End signature block

@@ -3,7 +3,7 @@
 Interactive read-only preflight application for Exchange hybrid migration batches.
 
 .VERSION
-1.11.18
+1.11.19
 #>
 #requires -Version 7.0
 
@@ -38,7 +38,7 @@ trap {
     }
     exit 1
 }
-$script:AppVersion = '1.11.18'
+$script:AppVersion = '1.11.19'
 $script:Batch = $null
 $script:Assessment = $null
 $script:Export = $null
@@ -434,7 +434,7 @@ $xaml = @'
                 </Grid.ColumnDefinitions>
                 <TextBlock x:Name="FooterText" Text="Read-only mode - no tenant or directory changes" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"/>
                 <ProgressBar x:Name="RunProgress" Grid.Column="1" Height="12" Minimum="0" Maximum="100" Value="0" Margin="12,0"/>
-                <TextBlock x:Name="VersionText" Grid.Column="2" Text="v1.11.17" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"/>
+                <TextBlock x:Name="VersionText" Grid.Column="2" Text="v1.11.19" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"/>
             </Grid>
         </Border>
     </Grid>
@@ -1092,7 +1092,26 @@ function Initialize-SemrSessionLog {
 
 Initialize-SemrSessionLog
 
+function Clear-SemrAssessmentState {
+    $script:Assessment = $null
+    $script:Export = $null
+    $script:AssessmentBatchPath = ''
+    foreach ($name in @('SummaryGrid','FindingsGrid','GlobalFindingsGrid','PermissionsGrid')) {
+        $controls[$name].ItemsSource = $null
+    }
+    foreach ($name in @('GoCountText','WarningCountText','NoGoCountText','UnknownCountText')) {
+        $controls[$name].Text = '0'
+    }
+    $controls.OpenOutputButton.IsEnabled = $false
+    $controls.ComparePermissionsButton.IsEnabled = $false
+    $controls.RunProgress.Value = 0
+}
+
 function Import-SemrCsvToGui {
+    Clear-SemrAssessmentState
+    $script:Batch = $null
+    $controls.BatchGrid.ItemsSource = $null
+    $controls.RunButton.IsEnabled = $false
     try {
         if (-not $script:ProgressWindow -or $script:ProgressWindow.State.Completed) { [void](Start-SemrProgressWindow -Title 'Loading migration batch' -Stage 'Preparing CSV import' -Detail 'Please wait while the file is analyzed.') }
         Update-SemrProgressWindow -Stage 'Detecting encoding and delimiter' -Detail $controls.CsvPathBox.Text.Trim() -Indeterminate
@@ -1143,6 +1162,18 @@ $controls.BrowseCsvButton.Add_Click({
     }
 })
 
+$controls.CsvPathBox.Add_TextChanged({
+    if ($script:IsBusy) { return }
+    $script:Batch = $null
+    $controls.BatchGrid.ItemsSource = $null
+    $controls.CsvMetadataText.Text = 'Load the selected CSV to validate its mailbox rows.'
+    $controls.RunButton.IsEnabled = $false
+    Clear-SemrAssessmentState
+})
+$controls.CsvPathBox.Add_LostKeyboardFocus({
+    if (-not $script:IsBusy -and -not $script:Batch -and $controls.CsvPathBox.Text.Trim()) { Import-SemrCsvToGui }
+})
+
 $controls.AssessmentPhaseCombo.Add_SelectionChanged({
     if ($script:IsBusy) { return }
     $phase = Get-SemrSelectedAssessmentPhase
@@ -1185,8 +1216,7 @@ $controls.RunButton.Add_Click({
     $runOutcome = 'NOT_STARTED'
     try {
         $script:CancelRequested = $false
-        $script:Assessment = $null
-        $script:Export = $null
+        Clear-SemrAssessmentState
         $script:CurrentRunId = "SEMR-{0}" -f (Get-Date -Format 'yyyyMMdd-HHmmss')
         $script:RunStartedAt = Get-Date
         $script:CurrentDiagnosticPhase = 'Preparing assessment'
@@ -1381,6 +1411,7 @@ $controls.RunButton.Add_Click({
             Set-SemrProcessingStatus -Message "$Stage - $Detail" -SkipActivity
         }
         $script:Export = Export-SemrAssessment -Assessment $script:Assessment -OutputRoot (Resolve-SemrOutputRoot) -ProgressCallback $exportProgress
+        $script:AssessmentBatchPath = [string]$script:Batch.Path
         $controls.SummaryGrid.ItemsSource = @($script:Assessment.Summary);$controls.FindingsGrid.ItemsSource = @($script:Assessment.Findings);$controls.GlobalFindingsGrid.ItemsSource = @($script:Assessment.GlobalFindings);$controls.PermissionsGrid.ItemsSource = @($script:Assessment.PermissionsBaseline)
         $controls.OpenOutputButton.IsEnabled = $true
         $controls.ComparePermissionsButton.IsEnabled = (Test-Path -LiteralPath $script:Export.PermissionsPath)
@@ -1445,6 +1476,10 @@ $controls.ClearFilterButton.Add_Click({ $controls.MailboxFilterBox.Text = '' })
 $controls.ComparePermissionsButton.Add_Click({
     try {
         if (-not $script:Batch -or -not $script:Export) { return }
+        if ($script:AssessmentBatchPath -ne [string]$script:Batch.Path) {
+            Clear-SemrAssessmentState
+            throw 'The permission baseline belongs to a different batch. Run the selected batch assessment first.'
+        }
         Switch-SemrBusyState -Busy $true -Message 'Collecting current Exchange Online permissions...'
         $progressAction = {
             param($Current, $Total, $Mailbox, $Phase)
@@ -1527,8 +1562,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAhSd8WNv52j08x
-# 3GZH3c2/OissCfm8laCwKFN0DvtF76CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCaTrerGqrNGhOt
+# K0nGjFqzlO1PQJeqvY4+smujRM+pcaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1661,31 +1696,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIEmpnKEM//zpCm0etO9BpjFsjQJHuspYD3/AipPWMsu3MA0GCSqG
-# SIb3DQEBAQUABIIBgChH0OvfinEbwdtJIg4L/yrWdVkXdKc8AOQn1XczQPhKSnAx
-# /lajuMiQmY5BYCSH1BX4CTnFEjvvUz5m3x6LMYklMUoY/S/Q+9znaD4MAyUcROLD
-# fePPvyt8mCglg4aHm8/LNzluwwfOylbDfcS0oySId3018KLd94BV8gETwj9BYTBv
-# YtORMBfCw2DnIeev2IPUAJ6ZSa9GMMCA8K111rZlg6JySSBJHjGqDSoE/gWIWXM/
-# 3eXVRXts32oKhmIrC9oSvABWhqBJy7qZSghaW3gQbhiG2Buq3CnogjfDX4e9nd8F
-# 58nfCQs3TlRcHsZ3A2T0VLMLp+ayCUPcf5erEGyMrkfmGV4xqDVA0XDprkP5DRAY
-# i1vdxvSq9ue3iKpUExlHM1i8xaOwgxnRbcIJEwQqE8ORSmN7pKS+cwIw6sx1yL5v
-# aCFkZsblSHbxRz+pEwzC9IKBK8mA1EkAqfSX2ovM3TUTDJHuu3Htl8R5my6X5vuB
-# +OKU1071MGZ+pbIjyaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEINBWBj8S7huAK4ewi5JvELVMcRXF2nERTQGjJriZAAYvMA0GCSqG
+# SIb3DQEBAQUABIIBgDEOmaGyjSqb3mdGw3Hmbru8Ih7R/PeYBIRQw0tmkxgSmpIr
+# 2cA6WRsSMIzApEAUf+prsjtYmSPOZMiAVKqDjvNypDk6ztL+SYg/YOYyV8klgYhU
+# k2JNykXjMWB6jZ/fd3pbyNYcIefvsr5+IWkumzuTahzPQc+jsJMtOJS8Bi35oQO+
+# 5Un9kh+dOgeb1Wap/lD9IK+acP0trwSPNzWX1/ijaPVYPyRJyR1xyBtxPDtDFo0v
+# i8XB5ZyMLCAR43dEn2RyuiEgl7zH7aXYlKS7v1jekQ19SuBzTHxt7LioSPhndgx1
+# 4pus9paF2jttaN/k8/fnJSdK3xJWJOrDXS5O2cM8JsE3N+uKgkMmjR9pFlpO08Nn
+# RMcsYoDxDlturr+FnwzMLOF0NncYyzC/aardz/HrNB9fXLj8Og1y1xYxrQaa3s/O
+# ThoqpXxeqGj7+Yqst9fJ1bLeKDjBHfHt3Newl8pKupQ5BbkdmcFjwA5R7OtNgiM9
+# 6BN+/S5cjONbBB4QcKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTgwMDQ2
-# MzRaMC8GCSqGSIb3DQEJBDEiBCBCFAW25SjeTfQDQEahqfQVkSDGHel33SJBCgCP
-# 5WFQwDANBgkqhkiG9w0BAQEFAASCAgA4xnaAE8/8VbQmWlV3Ao0X9cgFjimeN9nx
-# dCgkSWLMjzPFfsjjZhOcwRZ/iaoBS/KUS5YYGEy0W5rmxeeywjsPhu7awvNzIq+q
-# CuEzpcj3fWkre8cR2yO2lv3iwyBwbWE9zZs/k6V6jKSkULLjRElZsY4HDyQQQGAt
-# yxUK0ZswDith9FmyGn5e+4MODYMAWVZ2TmuFpjgSBYa2PDUO80CLA9bk/E/H64GC
-# 60vcOmtRI4GeepYSMzhKxnalbcRnX3x5Ky3p26ES3A1wx4jZud7VMH+/QmaoG/MD
-# /sBTEHxdaLXG1byU+q1j5it8e5cYfbm9kYDsJfwiSM4XqUb3zzZ0R9x0ZSaGDzja
-# tgwddU21DtmUUTUEL0/vIyFoddq4w5eGbS9Cpwak3MN4uebsa7y3mBFTm6j8I9pN
-# eMxQVFECbJXZBxEBpqwJbzFDDj54lD7M9rcoWVz1CIKQxRIL9zEvOtx3jarQMpvW
-# WTOJgSiDYVsaZNhJSnjKR1EzFeZvdU/l6fmZ/13RwfO96xjcMmv6o2mwMmakmFyC
-# TH3L+71BShKjiWudgTSIfk0U1+b61neDYDpO41/uPTcTg21xwrGjzD7DR9J96gZo
-# xgwy6Z4OSNlYZEe6vC+xs5Z+4hseafSZZOPvaw3/2N6Ae5FspUFtTNZzmvwKmCmj
-# IQRpFjMDVQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTgwMjU2
+# MzFaMC8GCSqGSIb3DQEJBDEiBCDmml/51+HXykklbzkrAdGG7l3e7weY/7Tr9h6S
+# lxLoiDANBgkqhkiG9w0BAQEFAASCAgAhHOgDHAfmm7mVKzNZxH4IvYDEvXvIYvoK
+# dfpxbIO+FP+am10oxxxggi77V3otS2nJIp2czKZVoMXVpBkw8shKUhabLcicHoq2
+# 1smhKZp4EBLOTQofMzCw6x1Cm8dV/rjNDkEFH3WY8AfjQlRLciKLXmlzpB5kR7wp
+# CjA1u1mSasoYq78bAwXtEAh404nFltlnFpYEPG5aP53lPquCSEXaXa+YoAB8oVO7
+# /kZ/VWbZ59D6fS1BEKTt9kMcRRmcmQnsYWM8uBeu6iDqRli8zk2BF5dCw01Ozohj
+# frNzYfV0nq8Q3ngpjGH7SjeipzvVqBrYwLsMtBdYrDLGrS0G4rKjzZ2sjoCx/XQ+
+# pUmke/eZqecApT963RukW6JFUbBJb3Z6fos5zqoGd1DOtZ1jfIjl0Q6Te1dODLbx
+# wZ250DG8Sagv6Pu7ulKFj+qSCSeMvR4Ix4pZtq5auwvLpwJsic/l/X3wcITOhSUQ
+# 2qOikLl1ORecNwKxSa7/AWja9uSY0xvlVzYUPI87SBwlUHgdYgUSWSaNNyc6iBlz
+# vpnsBZ+O+dHL0hkCYhdeDnxV+17tWb5SpbVZctIkwKPVzegQI30SiOa3A6XtQyDy
+# Hhw2Moz7dSepYV8UwXZN4ug02OqS/glcQnAkLVtTww2JWyVhXMfT/lg0tIlnFA0G
+# 7QIiV01Jzg==
 # SIG # End signature block

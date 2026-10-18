@@ -317,3 +317,16 @@ Launch `Start-SmartM365-DeviceRegistration-Demo.cmd` for screenshots and present
 Business actions are simulated. Demo startup bypasses operational configuration, authentication, collection, remote commands and mail delivery. Edits remain in memory. **Export demo outputs** generates only synthetic files under a unique `%TEMP%\SmartM365-Demo\` session folder. HTML-capable tools retain their report views; notification campaigns preview every shipped language template with fictional tokens. No real tenant or device evidence is required.
 
 Keep the application folder, its original report/template sources, local branding assets, `SmartM365.GuiDemo.ps1`, `SmartM365.GuiDemo.Reports.ps1` and the local `*-Demo.ps1` profile together when copying the application. `-Demo -ValidateOnly` builds the WPF demo without displaying windows or opening files. Run `SmartM365/Tests/Test-SmartM365GuiDemoApplicationsOffline.ps1` in an STA process for offline interaction and export checks.
+
+
+## Local review correction (2026-10-18)
+
+Source version: 1.2. Enrollment cleanup exports every existing registry key for an enrollment ID and verifies each backup is nonempty before removing any registry key or EnterpriseMgmt task for that ID. An export failure blocks that enrollment cleanup and returns a failure with the backup path. The autonomous Hybrid Join endpoint applies the same protection.
+
+Offline regression command from the repository root:
+
+```powershell
+pwsh -NoProfile -STA -ExecutionPolicy Bypass -File SmartM365/Tests/Test-SmartM365AppReviewDataPathsOffline.ps1 -Case EnrollmentBackup
+```
+
+These checks use temporary files, harmless child processes or mocked operational boundaries. They do not qualify a real tenant, endpoint repair, campaign delivery or deployment. Demo assets remain local in `DemoAssets/`, ignored by Git, and must be refreshed after GUI changes. Live deployment requires separate qualification.
