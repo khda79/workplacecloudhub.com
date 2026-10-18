@@ -45,6 +45,8 @@ editing the template.
 | M365-ConditionalAccess-Inventory | Daily 02:20 |
 | Intune-EndpointSecurityHealth-Inventory | Daily 02:30 |
 | M365-LicensePricing-Inventory | Daily 05:30 |
+| SmartFinOps-Workplace-Valuation | Daily 05:45 |
+| SmartFinOps-Workplace-Report | Daily 05:45 |
 | WorkplaceEvidence-Prepare | Daily 09:00 |
 | M365-WorkplaceScope-Inventory | Daily 22:00 |
 | Intune-Configurations-Inventory | Daily 04:30 |
@@ -105,6 +107,14 @@ Preparation does not renew acquisition dates or silently fall back to unrelated
 old exports. An active receipt, an unavailable/invalid source or an expired
 acquisition can still delay or reject preparation. A failed preparation does not
 replace the last published cohort; consumers must display its actual age.
+
+SmartFinOps Valuation and Report use `LatestOccurrence`: Valuation needs today's
+Licences, LicensePricing, AD and active-users occurrences, so it waits for Licences
+(about 07:50 on weekdays, 18:00 on Saturday) instead of valuing the previous day's
+report. A dependency that fails and is not recovered within 1080 minutes ends the
+occurrence `BlockedDependencyTimeout`; no FinOps run happens that day. A future
+`WorkplaceEvidence-Prepare` dependency on FinOps should use its `FreshSuccess` rule
+so preparation is never delayed until Saturday evening.
 
 There is no 100-percent cross-source synchronization requirement. Cross-source
 identity differences can occur between acquisitions, even with this timetable.

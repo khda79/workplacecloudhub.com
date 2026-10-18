@@ -310,7 +310,7 @@ try {
     }
     Assert-True (@($missingExternalActionOptIns).Count -eq 0) ("Jobs declaring EnableConfiguredExternalActions must opt in explicitly: {0}" -f (@($missingExternalActionOptIns) -join ', '))
     $productionSelection = Get-SmartM365OrchestratorPipelineSelection -JobsDocument $productionDocument -Pipeline Full
-    Assert-True ($productionSelection.SelectedCount -eq 48) 'Template Full selection must contain the 48 enabled non-manual jobs.'
+    Assert-True ($productionSelection.SelectedCount -eq 50) 'Template Full selection must contain the 50 enabled non-manual jobs.'
     Assert-True ($productionSelection.ExcludedCount -eq 4) 'Full selection must exclude the four disabled jobs.'
     Assert-True (@($productionDocument.Jobs | Where-Object Name -eq 'CmdbEvidence-Prepare').Count -eq 0) 'Retired CMDB preparation must not remain in the template.'
     Assert-True (@($productionSelection.IgnoredDependencies).Count -eq 3) 'The 3 disabled Backup dependencies of WorkplaceEvidence-Prepare must be ignored, not block Full.'

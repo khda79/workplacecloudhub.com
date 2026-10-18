@@ -1096,6 +1096,75 @@
       "EstimatedDurationMinutes": 2
     },
     {
+      "Name": "SmartFinOps-Workplace-Valuation",
+      "ScriptPath": "..\\..\\SmartFinOps\\SmartFinOps-Workplace-Valuation.ps1",
+      "Arguments": "",
+      "Enabled": true,
+      "Group": "FinOps",
+      "DependsOn": [
+        "M365-Licences-Inventory",
+        "M365-LicensePricing-Inventory",
+        "AD-Inventory",
+        "M365-ActiveUsers-Inventory"
+      ],
+      "DependencyMode": "LatestOccurrence",
+      "DependencyWaitTimeoutMinutes": 1080,
+      "ConcurrencyKey": "SmartFinOps-Workplace",
+      "AllowedServers": [],
+      "TimeoutMinutes": 90,
+      "MaxRetries": 1,
+      "RetryDelaySeconds": 300,
+      "ContinueOnError": false,
+      "Schedule": {
+        "Type": "Daily",
+        "Times": [
+          "05:45"
+        ],
+        "MissedRunPolicy": "RunOnce",
+        "DaysOfWeek": []
+      },
+      "AssignmentMode": "Elected",
+      "RequiredCapabilities": [
+        "SharedRuntime"
+      ],
+      "RequiredGraphAppRoles": [],
+      "PowerShellEdition": "PowerShell7",
+      "EstimatedDurationMinutes": 5
+    },
+    {
+      "Name": "SmartFinOps-Workplace-Report",
+      "ScriptPath": "..\\..\\SmartFinOps\\SmartFinOps-Workplace-Report.ps1",
+      "Arguments": "",
+      "Enabled": true,
+      "Group": "FinOps",
+      "DependsOn": [
+        "SmartFinOps-Workplace-Valuation"
+      ],
+      "DependencyMode": "LatestOccurrence",
+      "DependencyWaitTimeoutMinutes": 1110,
+      "ConcurrencyKey": "SmartFinOps-Workplace",
+      "AllowedServers": [],
+      "TimeoutMinutes": 30,
+      "MaxRetries": 1,
+      "RetryDelaySeconds": 120,
+      "ContinueOnError": true,
+      "Schedule": {
+        "Type": "Daily",
+        "Times": [
+          "05:45"
+        ],
+        "MissedRunPolicy": "RunOnce",
+        "DaysOfWeek": []
+      },
+      "AssignmentMode": "Elected",
+      "RequiredCapabilities": [
+        "SharedRuntime"
+      ],
+      "RequiredGraphAppRoles": [],
+      "PowerShellEdition": "PowerShell7",
+      "EstimatedDurationMinutes": 1
+    },
+    {
       "Name": "Exchange-HybridIdentity-Issues",
       "ScriptPath": "ExchangeInventory\\Migration\\SmartM365-Exchange-HybridIdentity-Issues-Inventory.ps1",
       "Arguments": "",
