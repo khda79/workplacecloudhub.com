@@ -2,7 +2,7 @@
 .SYNOPSIS
     Prepare a validated, versioned SmartWorkplaceIntelligence batch after raw collectors.
 .VERSION
-    0.2.0
+    0.3.0
 .NOTES
     PowerShell 7. SharePoint mapping reads use the tenant configuration unless Offline.
     Deployment must include the sibling SmartWorkplaceIntelligence/scripts, config and reference folders.
@@ -220,6 +220,10 @@ try {
     }
     $phase='Prepare and validate'
     $preparedPython=if($config['PreparedPythonCommand']){[string]$config['PreparedPythonCommand']}else{'python'}
+    # Independent generators run concurrently (1 = sequential); the default keeps one vCPU free on a 4-vCPU server.
+    $preparedParallel=ConfigValue 'PreparedMaxParallelGenerators'
+    $preparedParallel=if($null -eq $preparedParallel -or [string]$preparedParallel -eq ''){3}else{[int]$preparedParallel}
+    if($preparedParallel -lt 1 -or $preparedParallel -gt 8){throw 'PreparedMaxParallelGenerators must be between 1 and 8.'}
     $params = @{
         DataRoot=$data;OutputRoot=$output;WorkRoot=$work;TenantKey=$effective.TenantKey
         AccountClassificationConfigPath=$accountClassificationPath
@@ -231,6 +235,7 @@ try {
         ValidateOnly=[bool]$ValidateOnly
         MappingRoot=$mappingRoot
         PythonCommand=$preparedPython
+        MaxParallelGenerators=$preparedParallel
     }
     $result = Invoke-PreparedEvidencePipeline @params
     if (-not $ValidateOnly) { WriteLog -Message "Local batch published and validated: $($result.BatchId); CSV files=$($result.Files); path=$($result.BatchPath). Cloud transfer is a separate step." -Level INFO }

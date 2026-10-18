@@ -5,6 +5,7 @@
   "WorkplaceIntelligenceRootPath": "",
   "PreparedWorkRootPath": "",
   "PreparedPythonCommand": "python",
+  "PreparedMaxParallelGenerators": 3,
   "PreparedMaxSourceAgeHours": 168,
   "PreparedSourceAgeOverrides": {
     "M365_License_Prices.csv": 744,
