@@ -15,5 +15,11 @@
     "Currency": "EUR",
     "MonthlyUnitPriceBySkuPartNumber": {
     }
+  },
+  "Valuation": {
+    "ContractsPath": "{{SmartFinOpsRootPath}}\\Config\\SmartFinOps-Contracts.local.json",
+    "FreshnessDailyHours": 48,
+    "FreshnessWeeklyDays": 8,
+    "ArchiveRetentionRuns": 30
   }
 }

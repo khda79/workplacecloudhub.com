@@ -1,0 +1,535 @@
+#Requires -Version 7.0
+<#
+.SYNOPSIS
+  Offline tests of the SmartFinOps Workplace V2 valuation engine.
+.VERSION
+1.0.0
+.NOTES
+  Synthetic contoso data only, in an isolated temporary runtime (no local configuration, export or tenant).
+  Source receipts are produced by the real SmartM365.Core module commands.
+#>
+[CmdletBinding()]
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidGlobalVars','',Justification='Synthetic Core identity globals are saved and restored in finally.')]
+param([switch]$KeepEvidence)
+
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+$project = Split-Path $PSScriptRoot -Parent
+$repository = Split-Path $project -Parent
+$root = Join-Path ([IO.Path]::GetTempPath()) ('SmartFinOps-Valuation-' + [guid]::NewGuid().ToString('N'))
+$runtime = Join-Path $root 'runtime'
+$engine = Join-Path $runtime 'SmartFinOps\SmartFinOps-Workplace-Valuation.ps1'
+$pwsh = (Get-Process -Id $PID).Path
+$tenant = 'contoso'
+$script:checks = 0
+$script:failures = [System.Collections.Generic.List[string]]::new()
+
+function Check {
+  param([bool]$Condition, [string]$Message)
+  $script:checks++
+  if (-not $Condition) { $script:failures.Add($Message); Write-Host "FAIL $Message" -ForegroundColor Red }
+}
+
+# Isolated runtime: engine, its config helpers and templates, and the real SmartM365.Core module.
+foreach ($file in @('SmartFinOps-Workplace-Valuation.ps1','SmartFinOps.global.local.json.template','Config\SmartFinOps-TenantContext.ps1','Config\SmartFinOps-Contracts.local.json.template')) {
+  $target = Join-Path $runtime "SmartFinOps\$file"
+  New-Item -ItemType Directory -Path (Split-Path $target -Parent) -Force | Out-Null
+  Copy-Item -LiteralPath (Join-Path $project $file) -Destination $target
+}
+New-Item -ItemType Directory -Path (Join-Path $runtime 'SmartM365\Modules') -Force | Out-Null
+Copy-Item -LiteralPath (Join-Path $repository 'SmartM365\Modules\SmartM365.Core') -Destination (Join-Path $runtime 'SmartM365\Modules') -Recurse
+$coreManifest = Join-Path $repository 'SmartM365\Modules\SmartM365.Core\SmartM365.Core.psd1'
+Import-Module $coreManifest -MinimumVersion '1.0.90' -Force | Out-Null
+
+$scriptPaths = @{
+  Licences = Join-Path $repository 'SmartM365\SmartInventory\M365Inventory\Licensing\SmartM365-Licences-Inventory.ps1'
+  Pricing = Join-Path $repository 'SmartM365\SmartInventory\M365Inventory\Licensing\SmartM365-LicensePricing-Inventory.ps1'
+  AD = Join-Path $repository 'SmartM365\SmartInventory\ActiveDirectoryInventory\SmartM365-ActiveDirectory-Inventory.ps1'
+  Users = Join-Path $repository 'SmartM365\SmartInventory\M365Inventory\Users\SmartM365-ActiveUsers-Inventory.ps1'
+}
+$scopes = @{ Licences='CMDB:skus,license_paths,plans,user_plans,groups'; AD='CMDB:ad_users,ad_computers,ad_domains,ad_groups,ad_objects,ad_members'; Users='CMDB:users' }
+
+$saved = @{}
+foreach ($name in @('SmartM365TenantKey','SmartM365OrganizationKey','SmartM365EnvironmentKey','SmartM365TenantId','csvGeneratedPaths')) {
+  $variable = Get-Variable -Name $name -Scope Global -ErrorAction SilentlyContinue
+  $saved[$name] = @{ Exists=($null -ne $variable); Value=$(if ($variable) { $variable.Value } else { $null }) }
+}
+
+#region Fixture
+function Write-FixtureCsv {
+  param([string]$Folder, [string]$Name, [object[]]$Rows, [switch]$Reverse)
+  $path = Join-Path $Folder $Name
+  $ordered = if ($Reverse) { [object[]]@($Rows)[($Rows.Count - 1)..0] } else { $Rows }
+  $ordered | Export-Csv -LiteralPath $path -NoTypeInformation -Encoding utf8NoBOM
+  return $path
+}
+
+function New-Receipt {
+  param([string]$Folder, [string]$Producer, [string[]]$Paths, [hashtable]$DomainCoverage, [scriptblock]$BeforeComplete)
+  $global:csvGeneratedPaths = $null
+  if ($Producer -eq 'Pricing') { Start-SmartM365SourceReceipt -ScriptPath $scriptPaths.Pricing -SourceRootPath $Folder }
+  else { Start-SmartM365CmdbSourceReceipt -ScriptPath $scriptPaths[$Producer] -SourceRootPath $Folder }
+  $publication = Get-SmartM365CurrentSourcePublication
+  foreach ($path in $Paths) { Register-SmartM365SourceCsv -Path $path }
+  if ($BeforeComplete) { & $BeforeComplete $publication }
+  if ($Producer -ne 'Pricing') {
+    if ($DomainCoverage) { Set-SmartM365CmdbSourceScope -CompleteScope $false -Scope $scopes[$Producer] -DomainCoverage $DomainCoverage }
+    else { Set-SmartM365CmdbSourceScope -CompleteScope $true -Scope $scopes[$Producer] }
+  }
+  $completed = Complete-SmartM365CmdbSourceReceipt -Status 'Completed'
+  if ($completed -notlike '*.current.json.txt') { throw "Fixture receipt failed for $Producer" }
+  return $publication.RunId
+}
+
+function New-Fixture {
+  param([string]$Name, [hashtable]$Options = @{})
+  $folder = Join-Path $root "$Name\DATA-LAST"
+  New-Item -ItemType Directory -Path $folder -Force | Out-Null
+  $t = $tenant; $snapshotId = 'snap-' + $Name
+  $reverse = [bool]$Options['Reverse']
+  $e3Enabled = if ($Options.ContainsKey('E3Enabled')) { $Options.E3Enabled } else { 10 }
+  $e3Consumed = if ($Options.ContainsKey('E3Consumed')) { $Options.E3Consumed } else { 8 }
+  $removed = @(if ($Options.ContainsKey('RemovedUsers')) { $Options.RemovedUsers })
+  $e3Recovery = @(@('u1','Disabled account'),@('u2','Eligible shared mailbox under 50 GB'),@('u3','No M365 activity in 90 days') | Where-Object { $_[0] -notin $removed })
+  $collected = [datetimeoffset]::UtcNow.ToString('o')
+
+  # Licences canonical files (required by its receipt).
+  $users = @(
+    foreach ($pair in @(@('u1','sku-e3'),@('u2','sku-e3'),@('u3','sku-e3'),@('u4','sku-e3'),@('u5','sku-dyn'),@('u6','sku-e3'),@('u7','sku-visio'),@('u8','sku-e3'),@('u9','sku-f3'),@('u10','sku-cop'),@('u11','sku-cop'))) {
+      if ($pair[0] -in $removed) { continue }
+      [pscustomobject][ordered]@{ TenantKey=$t; UserId=$pair[0]; SkuId=$pair[1]; SkuPartNumber=''; 'User principal name'="$($pair[0])@contoso.invalid" }
+    }
+  )
+  $licencePaths = @(
+    Write-FixtureCsv $folder 'M365_Licenses_Tenant.csv' @([pscustomobject]@{ TenantKey=$t; Id='sku-e3'; TenantSkuPartNumber='SPE_E3' })
+    Write-FixtureCsv $folder 'M365_Licenses_AssignmentPaths.csv' @([pscustomobject]@{ TenantKey=$t; UserId='u1'; SkuId='sku-e3' })
+    Write-FixtureCsv $folder 'M365_Licenses_Users.csv' $users -Reverse:$reverse
+    Write-FixtureCsv $folder 'M365_Licenses_ServicePlans_Catalog.csv' @([pscustomobject]@{ TenantKey=$t; SkuId='sku-e3'; PlanName='EXCHANGE_S_ENTERPRISE' })
+    Write-FixtureCsv $folder 'M365_Licenses_UserServicePlanStates.csv' @([pscustomobject]@{ TenantKey=$t; UserId='u1'; StateCode='A' })
+    Write-FixtureCsv $folder 'M365_EntraGroups_All.csv' @([pscustomobject]@{ TenantKey=$t; GroupId='g1' })
+  )
+  $suite = { param($product, $recovery, $wait) [pscustomobject][ordered]@{ SnapshotId=$snapshotId; TenantKey=$t; GeneratedAtUtc=$collected; Product=$product; Category='Suite'; AssignmentCapacityWait=$wait; RecoveryCandidates=$recovery } }
+  $summary = @(
+    & $suite 'Microsoft 365 E3' $(if ($Options.ContainsKey('SummaryE3Recovery')) { $Options.SummaryE3Recovery } else { $e3Recovery.Count }) 0
+    & $suite 'Microsoft 365 F3' 0 1
+    & $suite 'Microsoft 365 E5' 0 0
+    & $suite 'Microsoft 365 F1' 0 0
+    [pscustomobject][ordered]@{ SnapshotId=$snapshotId; TenantKey=$t; GeneratedAtUtc=$collected; Product='Microsoft 365 Copilot'; Category='Other paid product'; AssignmentCapacityWait=''; RecoveryCandidates='' }
+  )
+  $candidates = @(
+    foreach ($item in $e3Recovery) { [pscustomobject][ordered]@{ SnapshotId=$snapshotId; TenantKey=$t; CandidateType='Recovery'; Product='Microsoft 365 E3'; UserId=$item[0]; UserPrincipalName="$($item[0])@contoso.invalid"; Reason=$item[1] } }
+    [pscustomobject][ordered]@{ SnapshotId=$snapshotId; TenantKey=$t; CandidateType=$(if ($Options['UnknownType']) { 'Unknown type' } else { 'E3 to F3 review' }); Product='Microsoft 365 E3'; UserId='u4'; UserPrincipalName='u4@contoso.invalid'; Reason='Manual downgrade review' }
+  )
+  if ($Options['MixedSnapshot']) { $candidates[0].SnapshotId = 'snap-other' }
+  $issues = @([pscustomobject][ordered]@{ SnapshotId=$snapshotId; TenantKey=$t; Product='Microsoft 365 F3'; Category='Capacity wait'; UserId='u12' })
+  $gaps = @(
+    [pscustomobject][ordered]@{ SnapshotId=$snapshotId; TenantKey=$t; Section='UserMailboxes'; Metric='NoSkus'; Value='4'; EvidenceStatus='Qualified' }
+    [pscustomobject][ordered]@{ SnapshotId=$snapshotId; TenantKey=$t; Section='AdGapActivity'; Metric='NoObservedMatch'; Value=''; EvidenceStatus='N/D' }
+  )
+  $provisional = [bool]$Options['Provisional']
+  $reportSources = @(
+    [pscustomobject][ordered]@{ SnapshotId=$snapshotId; TenantKey=$t; Name='AD_Users_AllDomains.csv'; Ready='True'; Provisional=$(if ($provisional) { 'True' } else { 'False' }); Reason=$(if ($provisional) { 'Qualified partial AD scope' } else { '' }) }
+    [pscustomobject][ordered]@{ SnapshotId=$snapshotId; TenantKey=$t; Name='Exchange_EXO_Mailboxes_AllDomains.csv'; Ready='True'; Provisional='False'; Reason='' }
+    [pscustomobject][ordered]@{ SnapshotId=$snapshotId; TenantKey=$t; Name='M365_OneDrive_Usage.csv'; Ready='True'; Provisional=$(if ($Options['OneDriveProvisional']) { 'True' } else { 'False' }); Reason='' }
+  )
+  if ($Options['ProvisionalSource']) { $reportSources += [pscustomobject][ordered]@{ SnapshotId=$snapshotId; TenantKey=$t; Name=$Options.ProvisionalSource; Ready='True'; Provisional='True'; Reason='No receipt' } }
+  $sku = { param($user, $skuId, $part, $type, $recommendation, $reason, $guard, $countedIn)
+    [pscustomobject][ordered]@{ SnapshotId=$snapshotId; TenantKey=$t; ReceiptRunId='RUNID'; CandidateType=$type; Recommendation=$recommendation; Reason=$reason; SkuId=$skuId; SkuPartNumber=$part; UserId=$user; UserPrincipalName="$user@contoso.invalid"; MailboxGuard=$guard; DependencyStatus='Clear'; CountedIn=$countedIn } }
+  $skuCandidates = @(
+    foreach ($item in $e3Recovery) { & $sku $item[0] 'sku-e3' 'SPE_E3' $(if ($item[0] -eq 'u1') { 'Disabled account' } else { 'Report candidate' }) 'Referenced' 'Counted in ReportCandidates:Recovery' 'Not applicable' 'ReportCandidates:Recovery' }
+    & $sku 'u4' 'sku-e3' 'SPE_E3' 'Report candidate' 'Referenced' 'Counted' 'Not applicable' 'ReportCandidates:E3 to F3 review'
+    & $sku 'u5' 'sku-dyn' 'DYN365_FINANCE' 'Disabled account' 'Recommended' 'Disabled in Entra and AD' 'Not applicable' ''
+    & $sku 'u6' 'sku-e3' 'SPE_E3' 'Disabled account' 'Review' 'EXO mailbox source is not qualified' 'Unknown: EXO mailbox source is not qualified' ''
+    & $sku 'u7' 'sku-visio' 'VISIOCLIENT' 'Disabled account' 'Review' 'Entra disabled; AD state is not measured' 'Not applicable' ''
+    & $sku 'u8' 'sku-e3' 'SPE_E3' 'Disabled account' 'Blocked by dependency' 'Mailbox retention: litigation hold' 'Blocked: Mailbox retention: litigation hold' ''
+    & $sku 'u9' 'sku-f3' 'SPE_F1' 'Disabled account' 'Recommended' 'Disabled in Entra and AD' 'Clear' ''
+    & $sku 'u10' 'sku-cop' 'Microsoft_365_Copilot' 'Copilot without activity' 'Recommended' 'No Microsoft 365 Copilot activity in 60 days' 'Not applicable' ''
+    & $sku 'u11' 'sku-cop' 'Microsoft_365_Copilot' 'Copilot without activity' 'Review' 'Copilot Chat only' 'Not applicable' ''
+  )
+  $e3Referenced = @($skuCandidates | Where-Object { $_.SkuId -eq 'sku-e3' -and $_.Recommendation -eq 'Referenced' }).Count
+  $cap = { param($skuId, $part, $product, $excluded, $enabled, $consumed, $assigned, $rec, $rev, $blk, $ref, $usage, $notMeasured)
+    [pscustomobject][ordered]@{ SnapshotId=$snapshotId; TenantKey=$t; ReceiptRunId='RUNID'; SkuId=$skuId; SkuPartNumber=$part; SkuDisplayName=$part; ReportProduct=$product; Excluded=$excluded
+      EnabledUnits=$enabled; ConsumedUnits=$consumed; AvailableUnits=($enabled - $consumed); AssignedUsers=$assigned; ActiveUsersUsageNotMeasured=$notMeasured
+      RecommendedCandidates=$rec; ReviewCandidates=$rev; BlockedCandidates=$blk; ReferencedCandidates=$ref; UsageEvidence=$usage; UsageEvidenceReason=$(if ($usage -eq 'Not measured') { 'No Dynamics 365 product telemetry; active users are a signal only' } else { '' }) } }
+  $capacity = @(
+    & $cap 'sku-e3' 'SPE_E3' 'Microsoft 365 E3' 'False' $e3Enabled $e3Consumed $e3Consumed 0 1 1 $e3Referenced 'Not applicable' 0
+    & $cap 'sku-f3' 'SPE_F1' 'Microsoft 365 F3' 'False' 5 5 5 1 0 0 0 'Not applicable' 0
+    & $cap 'sku-cop' 'Microsoft_365_Copilot' 'Microsoft 365 Copilot' 'False' 3 3 3 1 1 0 0 'Measured' 0
+    & $cap 'sku-dyn' 'DYN365_FINANCE' 'Dynamics 365' 'False' 2 3 3 1 0 0 0 'Not measured' 2
+    & $cap 'sku-free' 'FLOW_FREE' '' 'True' 10000 5 5 0 0 0 0 'Not applicable' 0
+    & $cap 'sku-visio' 'VISIOCLIENT' '' 'False' 4 2 2 0 1 0 0 'Not applicable' 0
+  )
+  if ($Options['G4Mismatch']) { $capacity[0].ReviewCandidates = 5 }
+  $reportPaths = [ordered]@{}
+  $licRunId = New-Receipt -Folder $folder -Producer 'Licences' -Paths $licencePaths -BeforeComplete {
+    param($publication)
+    foreach ($row in @($skuCandidates) + @($capacity)) { $row.ReceiptRunId = $publication.RunId }
+    if ($Options['BadSkuRunId']) { $capacity[0].ReceiptRunId = 'other-run' }
+    $reportPaths['M365_Licenses_ReportSummary.csv'] = Write-FixtureCsv $folder 'M365_Licenses_ReportSummary.csv' $summary -Reverse:$reverse
+    $reportPaths['M365_Licenses_ReportCandidates.csv'] = Write-FixtureCsv $folder 'M365_Licenses_ReportCandidates.csv' $candidates -Reverse:$reverse
+    $reportPaths['M365_Licenses_ReportAssignmentIssues.csv'] = Write-FixtureCsv $folder 'M365_Licenses_ReportAssignmentIssues.csv' $issues
+    $reportPaths['M365_Licenses_ReportGaps.csv'] = Write-FixtureCsv $folder 'M365_Licenses_ReportGaps.csv' $gaps -Reverse:$reverse
+    $reportPaths['M365_Licenses_ReportSources.csv'] = Write-FixtureCsv $folder 'M365_Licenses_ReportSources.csv' $reportSources
+    $reportPaths['M365_Licenses_ReportSkuCandidates.csv'] = Write-FixtureCsv $folder 'M365_Licenses_ReportSkuCandidates.csv' $skuCandidates -Reverse:$reverse
+    if (-not $Options['NoSkuCapacity']) { $reportPaths['M365_Licenses_ReportSkuCapacity.csv'] = Write-FixtureCsv $folder 'M365_Licenses_ReportSkuCapacity.csv' $capacity -Reverse:$reverse }
+    foreach ($path in $reportPaths.Values) { Register-SmartM365SourceCsv -Path $path }
+    $snapshot = [ordered]@{ SchemaVersion=2; LogicVersion='1.44'; SnapshotId=$snapshotId; TenantKey=$t; GeneratedAtUtc=$collected
+      ReceiptRun=[ordered]@{ Producer='SmartM365-Licences-Inventory.ps1'; RunId=$(if ($Options['BadSnapshotRun']) { 'other-run' } else { $publication.RunId }); StartedAtUtc=$publication.StartedAtUtc } }
+    $snapshot | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $folder 'M365_Licenses_ReportSnapshot.json.txt') -Encoding utf8NoBOM
+  }
+  if ($Options['NoSkuCapacity']) {
+    # An older decision file left in DATA-LAST that the current receipt declares unpublished.
+    Write-FixtureCsv $folder 'M365_Licenses_ReportSkuCapacity.csv' $capacity | Out-Null
+  }
+
+  if (-not $Options['NoPricing']) {
+    $prices = @(
+      [pscustomobject][ordered]@{ TenantKey=$t; SkuPartNumber='SPE_E3'; Currency='EUR'; UnitPriceMonthly='30.00'; EffectiveFrom='2020-01-01'; EffectiveTo='2026-01-01'; PriceSource='Old price'; IsEstimated='True' }
+      [pscustomobject][ordered]@{ TenantKey=$t; SkuPartNumber='SPE_E3'; Currency='EUR'; UnitPriceMonthly='37.78'; EffectiveFrom='2026-01-01'; EffectiveTo=''; PriceSource='Microsoft France public list price'; IsEstimated='True' }
+      [pscustomobject][ordered]@{ TenantKey=$t; SkuPartNumber='SPE_F1'; Currency='EUR'; UnitPriceMonthly='8,66'; EffectiveFrom='2026-01-01'; EffectiveTo=''; PriceSource='Microsoft France public list price'; IsEstimated='True' }
+      [pscustomobject][ordered]@{ TenantKey=$t; SkuPartNumber='Microsoft_365_Copilot'; Currency='EUR'; UnitPriceMonthly='26.00'; EffectiveFrom='2026-01-01'; EffectiveTo=''; PriceSource='Contract'; IsEstimated='False' }
+      [pscustomobject][ordered]@{ TenantKey=$t; SkuPartNumber='DYN365_FINANCE'; Currency='EUR'; UnitPriceMonthly='182.00'; EffectiveFrom='2026-01-01'; EffectiveTo=''; PriceSource='Microsoft France public list price'; IsEstimated='True' }
+      [pscustomobject][ordered]@{ TenantKey=$t; SkuPartNumber='VISIOCLIENT'; Currency='USD'; UnitPriceMonthly='15.00'; EffectiveFrom='2026-01-01'; EffectiveTo=''; PriceSource='USD only'; IsEstimated='True' }
+    )
+    $pricePath = Write-FixtureCsv $folder 'M365_License_Prices.csv' $prices
+    New-Receipt -Folder $folder -Producer 'Pricing' -Paths @($pricePath) | Out-Null
+  }
+
+  $activeUsers = @(foreach ($index in 1..11) { [pscustomobject][ordered]@{ TenantKey=$t; 'Object Id'="u$index"; 'User principal name'="u$index@contoso.invalid"; OnPremisesImmutableId="imm$index"; Department=$(if ($index % 2) { 'Finance' } else { 'Care' }) } })
+  New-Receipt -Folder $folder -Producer 'Users' -Paths @(Write-FixtureCsv $folder 'M365_Users_Active.csv' $activeUsers) | Out-Null
+  $adUsers = @(foreach ($index in 1..11) { if ($index -eq 7) { continue }; [pscustomobject][ordered]@{ TenantKey=$t; DomainName=$(if ($index -le 5) { 'north.contoso.invalid' } else { 'south.contoso.invalid' }); ImmutableId_AD="imm$index"; UserPrincipalName="u$index@contoso.invalid"; Country=$(if ($index -le 5) { 'FR' } else { 'ES' }); EntityLabel="Site $($index % 3)" } })
+  $adPaths = @(Write-FixtureCsv $folder 'AD_Users_AllDomains.csv' $adUsers)
+  foreach ($name in @('AD_Computers_AllDomains.csv','AD_Domains_AllDomains.csv','AD_Groups_AllDomains.csv','AD_DirectoryObjects_AllDomains.csv','AD_GroupMemberships_AllDomains.csv')) { $adPaths += Write-FixtureCsv $folder $name @([pscustomobject]@{ TenantKey=$t; Name='x' }) }
+  $coverage = if ($Options['PartialAd']) { @{ ExpectedDomains=@('north','south','west'); CollectedDomains=@('north','south'); UnavailableDomains=@('west'); NonBlockingDomainErrors=@('west') } } else { $null }
+  New-Receipt -Folder $folder -Producer 'AD' -Paths $adPaths -DomainCoverage $coverage | Out-Null
+  return [pscustomobject]@{ Folder=$folder; LicencesRunId=$licRunId; SnapshotId=$snapshotId }
+}
+
+function Set-ReceiptField {
+  param([string]$Folder, [string]$Receipt, [scriptblock]$Change)
+  $path = Join-Path $Folder $Receipt
+  $document = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json -AsHashtable
+  & $Change $document
+  $document | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $path -Encoding utf8NoBOM
+}
+
+function New-Contracts {
+  param([string]$Path, [object[]]$Skus)
+  $document = [ordered]@{ SchemaVersion=1; Defaults=[ordered]@{ ReserveUnitsPercent=0; ReductionPolicy='Unknown' }
+    Contracts=@([ordered]@{ ContractKey='EA-CONTOSO'; Type='EA'; Reference=''; StartDate='2024-04-01'; RenewalDate='2027-03-31'; NoticeDays=90; ReductionPolicy='AtRenewal'; Skus=$Skus }); UnmappedSkus=@() }
+  New-Item -ItemType Directory -Path (Split-Path $Path -Parent) -Force | Out-Null
+  $document | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $Path -Encoding utf8NoBOM
+}
+
+function Invoke-Engine {
+  param([string]$DataLast, [string]$Output, [string]$Contracts, [string]$AsOfUtc, [switch]$ValidateOnly)
+  $arguments = @('-NoProfile','-ExecutionPolicy','Bypass','-File',$engine,'-Tenant',$tenant,'-SmartM365LatestCsvFolderPath',$DataLast,'-OutputRoot',$Output,'-ContractsPath',$Contracts)
+  if ($AsOfUtc) { $arguments += @('-AsOfUtc', $AsOfUtc) }
+  if ($ValidateOnly) { $arguments += '-ValidateOnly' }
+  $log = & $pwsh @arguments 2>&1 | Out-String
+  return [pscustomobject]@{ ExitCode=$LASTEXITCODE; Log=$log }
+}
+
+function Read-Output { param([string]$Output, [string]$Name) return @(Import-Csv -LiteralPath (Join-Path $Output $Name) -Encoding utf8) }
+function Read-Receipt { param([string]$Output) return (Get-Content -LiteralPath (Join-Path $Output 'SmartFinOps_Workplace-Valuation.current.json.txt') -Raw | ConvertFrom-Json) }
+function Get-Opportunity { param([object[]]$Rows, [string]$Key) return @($Rows | Where-Object OpportunityKey -eq $Key) }
+function Get-Kpi { param([object[]]$Rows, [string]$Key) return @($Rows | Where-Object KpiKey -eq $Key)[0] }
+#endregion
+
+try {
+  $global:SmartM365TenantKey = $tenant; $global:SmartM365OrganizationKey = 'contoso'; $global:SmartM365EnvironmentKey = 'test'; $global:SmartM365TenantId = 'synthetic-tenant'
+  $baseSkus = @([ordered]@{ SkuPartNumber='SPE_E3'; MinimumUnits=$null; ReserveUnits=$null }, [ordered]@{ SkuPartNumber='SPE_F1'; MinimumUnits=0; ReserveUnits=$null })
+
+  #region 1. Nominal run: classes, statuses, amounts, contracts, outputs
+  $base = New-Fixture 'base'
+  $contracts = Join-Path $root 'base\contracts.local.json'
+  New-Contracts $contracts $baseSkus
+  $out = Join-Path $root 'base\out'
+  $run = Invoke-Engine -DataLast $base.Folder -Output $out -Contracts $contracts
+  Check ($run.ExitCode -eq 0) "nominal run exit code 0 (got $($run.ExitCode)) $($run.Log)"
+  $receipt = Read-Receipt $out
+  Check ($receipt.Status -eq 'Completed' -and $receipt.LicencesMeasured -and $receipt.SnapshotId -eq $base.SnapshotId -and $receipt.LicencesReceiptRunId -eq $base.LicencesRunId) 'nominal receipt Completed with snapshot and Licences RunId'
+  foreach ($file in $receipt.Files) {
+    Check ((Get-FileHash -LiteralPath (Join-Path $out $file.File) -Algorithm SHA256).Hash -eq $file.SHA256) "receipt hash matches $($file.File)"
+    Check ((Get-FileHash -LiteralPath (Join-Path $out "Archive\$($receipt.RunId)\$($file.File)") -Algorithm SHA256).Hash -eq $file.SHA256) "archive copy matches $($file.File)"
+  }
+  Check (Test-Path -LiteralPath (Join-Path $out "Archive\$($receipt.RunId)\SmartFinOps-Workplace-Valuation.log")) 'run log archived'
+  $logLines = @(Get-Content -LiteralPath (Join-Path $out "Archive\$($receipt.RunId)\SmartFinOps-Workplace-Valuation.log"))
+  Check (@($logLines | Where-Object { $_ -notmatch '^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} \[' }).Count -eq 0) 'every log line is timestamped'
+  $expectedHeaders = @{
+    'FinOps_Sources.csv'='TenantKey,FinOpsRunId,SnapshotId,ReceiptRunId,SourceFile,Producer,ReceiptFile,SourceReceiptRunId,ReceiptStatus,ReceiptCompletedAtUtc,Required,PublishedInReceipt,ExpectedSHA256,ActualSHA256,ExpectedRows,ActualRows,FreshnessThresholdHours,AgeHours,QualificationStatus,Reason,MissingDomains,ProvisionalLevers'
+    'FinOps_Opportunities.csv'='TenantKey,FinOpsRunId,SnapshotId,ReceiptRunId,OpportunityKey,Lever,ValueClass,ValuationStatus,StatusReason,SourceFile,SourceCandidateType,SourceRecommendation,SourceReason,MailboxGuard,DependencyStatus,CountedIn,ReportProduct,SkuId,SkuPartNumber,TargetSkuPartNumber,UserId,UserPrincipalName,Units,UnitPriceMonthly,TargetUnitPriceMonthly,MonthlyAmount,AnnualAmount,Currency,PriceRowKey,PricingReceiptRunId,PriceSource,PriceIsEstimated,CapRank,ContractKey,RenewalDate,RealizableFrom,AdDomain,Country,Entity,Department,ShowbackJoinStatus'
+    'FinOps_SkuValuation.csv'='TenantKey,FinOpsRunId,SnapshotId,ReceiptRunId,SkuId,SkuPartNumber,SkuDisplayName,ReportProduct,Excluded,EnabledUnits,ConsumedUnits,AvailableUnits,ReserveUnits,MinimumUnits,CandidateUnitsR,PoolUnits,ReusedUnits,ReducibleUnits,CapUnits,RealizableUnits,CapacityRealizableUnits,CappedUnits,ReviewUnits,NotMeasuredUnits,BlockedUnits,ReferencedUnits,UnitPriceMonthly,PriceRowKey,PriceIsEstimated,RealizableAnnualAmount,AvoidedAnnualAmount,ValuationStatus,ContractKey,ContractStatus,ReductionPolicy,RenewalDate,RealizableFrom,UsageEvidence'
+    'FinOps_Showback.csv'='TenantKey,FinOpsRunId,SnapshotId,ReceiptRunId,Dimension,DimensionValue,Lever,ValueClass,ValuationStatus,Users,Units,AnnualAmount,Currency,Provisional'
+    'FinOps_Summary.csv'='TenantKey,FinOpsRunId,SnapshotId,ReceiptRunId,KpiKey,ValueClass,Lever,ValuationStatus,Users,Units,AnnualAmount,Currency,Provisional,MissingDomains,SnapshotGeneratedAtUtc,PricingReceiptRunId,Note'
+    'FinOps_Realization.csv'='TenantKey,FinOpsRunId,SnapshotId,ReceiptRunId,SkuId,SkuPartNumber,BaselineFinOpsRunId,BaselineSnapshotId,EnabledUnitsBefore,EnabledUnitsAfter,Decrease,RemovedCandidateLicenses,BaselineCapacityUnits,AttributableUnits,RealizedUnits,NotAttributedUnits,UnitPriceMonthly,PriceRowKey,RealizedAnnualAmount,Status'
+    'FinOps_Controls.csv'='TenantKey,FinOpsRunId,SnapshotId,ReceiptRunId,Control,Key,SourceCount,FinOpsCount,Status,Detail'
+  }
+  foreach ($name in $expectedHeaders.Keys) {
+    $header = (Get-Content -LiteralPath (Join-Path $out $name) -TotalCount 1).Replace('"','')
+    Check ($header -ceq $expectedHeaders[$name]) "exact header $name"
+  }
+  $opps = Read-Output $out 'FinOps_Opportunities.csv'
+  Check (@($opps | Where-Object { $_.TenantKey -ne $tenant -or $_.SnapshotId -ne $base.SnapshotId -or $_.ReceiptRunId -ne $base.LicencesRunId -or $_.FinOpsRunId -ne $receipt.RunId }).Count -eq 0) 'every row carries TenantKey, FinOpsRunId, SnapshotId and ReceiptRunId'
+  $expect = @(
+    @('L1|u1|sku-e3','R','Valued','453.36'), @('L2|u2|sku-e3','R','Valued','453.36'), @('L3|u3|sku-e3','R','Valued','453.36'),
+    @('L4|u4|sku-e3','Rc','Valued','349.44'), @('L5|u5|sku-dyn','R','Valued','2184.00'), @('L5|u1|sku-e3','R','Referenced',''),
+    @('L0|u2|sku-e3','R','Referenced',''), @('L5|u6|sku-e3','S','Not measured',''), @('L5|u7|sku-visio','S','Review',''),
+    @('L5|u8|sku-e3','S','Blocked',''), @('L5|u9|sku-f3','R','Reused',''), @('L6|u10|sku-cop','R','Valued','312.00'), @('L6|u11|sku-cop','S','Review',''),
+    @('L7|sku-e3|Realizable','R','Valued','906.72'), @('L7|sku-visio|Realizable','R','Not valued',''), @('L8|sku-f3|Reuse','E','Valued','103.92'),
+    @('L9|sku-dyn|OverAssigned','S','Signal',''), @('L10|sku-dyn|UsageNotMeasured','S','Not measured',''), @('L13|WIN10_ESU','E','Not measured',''),
+    @('L11|Microsoft 365 F3|Capacity wait','S','Signal',''), @('L12|AdGapActivity|NoObservedMatch','S','Not measured',''), @('L12|UserMailboxes|NoSkus','S','Signal','')
+  )
+  foreach ($item in $expect) {
+    $row = Get-Opportunity $opps $item[0]
+    Check ($row.Count -eq 1) "opportunity $($item[0]) present once"
+    if ($row.Count -eq 1) { Check ($row[0].ValueClass -ceq $item[1] -and $row[0].ValuationStatus -ceq $item[2] -and $row[0].AnnualAmount -ceq $item[3]) "opportunity $($item[0]) = $($item[1])/$($item[2])/$($item[3]) (got $($row[0].ValueClass)/$($row[0].ValuationStatus)/$($row[0].AnnualAmount))" }
+  }
+  Check (@($opps | Where-Object { $_.ValuationStatus -notin @('Valued','Provisional') -and $_.AnnualAmount -ne '' }).Count -eq 0) 'amounts only on Valued/Provisional rows'
+  Check (@($opps | Where-Object { $_.AnnualAmount -eq '0.00' }).Count -eq 0) 'no zero amount'
+  $l1 = (Get-Opportunity $opps 'L1|u1|sku-e3')[0]
+  Check ($l1.PriceRowKey -eq 'SPE_E3|EUR|2026-01-01|' -and $l1.PricingReceiptRunId -and $l1.PriceIsEstimated -eq 'True' -and $l1.ContractKey -eq 'EA-CONTOSO' -and $l1.RealizableFrom -eq '2027-03-31') 'price row traced and contract terms on R row'
+  Check ($l1.AdDomain -eq 'north.contoso.invalid' -and $l1.Country -eq 'FR' -and $l1.Department -eq 'Finance' -and $l1.ShowbackJoinStatus -eq 'ImmutableId') 'showback joined by immutable ID'
+  $u7 = (Get-Opportunity $opps 'L5|u7|sku-visio')[0]
+  Check ($u7.AdDomain -eq 'Not attributed' -and $u7.Department -eq 'Finance') 'unmatched AD user is Not attributed when AD is complete'
+  Check ((Get-Opportunity $opps 'L5|u7|sku-visio')[0].StatusReason -like 'Entra disabled*') 'review reason carried'
+  Check ((Get-Opportunity $opps 'L4|u4|sku-e3')[0].TargetSkuPartNumber -eq 'SPE_F1') 'E3 to F3 target SKU from ReportProduct'
+  $summary = Read-Output $out 'FinOps_Summary.csv'
+  foreach ($pair in @(@('TOTAL_R','4762.80'),@('TOTAL_R_DISABLED_AND_SHARED','3090.72'),@('TOTAL_R_ENABLED_INACTIVE','453.36'),@('TOTAL_R_COPILOT','312.00'),@('TOTAL_R_CAPACITY','906.72'),@('TOTAL_RC_E3_TO_F3','349.44'),@('TOTAL_E_REUSE','103.92'))) {
+    $kpi = Get-Kpi $summary $pair[0]
+    Check ($kpi.AnnualAmount -eq $pair[1] -and $kpi.ValuationStatus -eq 'Valued') "KPI $($pair[0]) = $($pair[1]) (got $($kpi.AnnualAmount))"
+  }
+  Check ((Get-Kpi $summary 'NOT_MEASURED_MAILBOX').Units -eq '1' -and (Get-Kpi $summary 'NOT_MEASURED_MAILBOX').AnnualAmount -eq '') 'mailbox Not measured KPI counted without amount'
+  Check ((Get-Kpi $summary 'TOTAL_E_ESU').ValuationStatus -eq 'Not measured') 'ESU Not measured in V2.1'
+  Check ((Get-Kpi $summary 'GAP|UserMailboxes|NoSkus').Units -eq '4' -and (Get-Kpi $summary 'GAP|AdGapActivity|NoObservedMatch').ValuationStatus -eq 'Not measured') 'one summary row per gap metric with its own value'
+  Check (@($summary | Where-Object { $_.Lever -eq 'L12' -and $_.KpiKey -like 'DETAIL*' -and $_.Units -ne '' }).Count -eq 0) 'gap metrics never summed in summary'
+  Check (@(Read-Output $out 'FinOps_Showback.csv' | Where-Object { $_.Lever -eq 'L12' -and $_.Units -ne '' }).Count -eq 0) 'gap metrics never summed in showback'
+  $skus = Read-Output $out 'FinOps_SkuValuation.csv'
+  $e3 = @($skus | Where-Object SkuId -eq 'sku-e3')[0]
+  Check ($e3.PoolUnits -eq '5' -and $e3.RealizableUnits -eq '5' -and $e3.CapacityRealizableUnits -eq '2' -and $e3.CappedUnits -eq '0' -and $e3.ContractStatus -eq 'Commitment unknown' -and $e3.ReserveUnits -eq '0' -and $e3.NotMeasuredUnits -eq '1' -and $e3.BlockedUnits -eq '1' -and $e3.ReferencedUnits -eq '4') 'E3 SKU valuation pool and counters'
+  Check ($e3.RealizableAnnualAmount -eq '2266.80') "E3 realizable amount (got $($e3.RealizableAnnualAmount))"
+  $f3 = @($skus | Where-Object SkuId -eq 'sku-f3')[0]
+  Check ($f3.ReusedUnits -eq '1' -and $f3.AvoidedAnnualAmount -eq '103.92' -and $f3.ContractStatus -eq 'Covered' -and $f3.CapUnits -eq '5') 'F3 reuse served before reduction'
+  Check (@($skus | Where-Object SkuId -eq 'sku-free')[0].PoolUnits -eq '0') 'excluded SKU has no capacity lever'
+  Check (@($skus | Where-Object SkuId -eq 'sku-dyn')[0].ContractStatus -eq 'No contract' -and @($skus | Where-Object SkuId -eq 'sku-dyn')[0].RealizableFrom -eq 'Renewal unknown') 'SKU without contract: renewal unknown'
+  $contractsAfter = Get-Content -LiteralPath $contracts -Raw | ConvertFrom-Json
+  Check ((@($contractsAfter.UnmappedSkus) -join ',') -eq 'DYN365_FINANCE,Microsoft_365_Copilot,VISIOCLIENT') "UnmappedSkus completed without invented dates (got $(@($contractsAfter.UnmappedSkus) -join ','))"
+  $controls = Read-Output $out 'FinOps_Controls.csv'
+  Check (@($controls | Where-Object Status -ne 'Pass').Count -eq 0 -and @($controls | Where-Object Control -eq 'G6').Count -gt 0) 'all equivalence controls pass, G1-G6 present'
+  foreach ($control in @('G1','G2','G3','G4','G5','G6')) { Check (@($controls | Where-Object Control -eq $control).Count -gt 0) "control $control present" }
+  $showback = Read-Output $out 'FinOps_Showback.csv'
+  Check (@($showback | Where-Object { $_.Dimension -eq 'Department' -and $_.Lever -eq 'L3' -and $_.ValueClass -eq 'R' }).Count -ge 1) 'enabled inactive accounts shown as their own showback lever'
+  Check (@($showback | Where-Object { $_.DimensionValue -eq 'SKU level' }).Count -gt 0) 'SKU-level rows allocated to SKU level'
+  $sources = Read-Output $out 'FinOps_Sources.csv'
+  Check (@($sources | Where-Object { $_.SourceFile -like 'M365_Licenses_Report*' -and $_.QualificationStatus -ne 'Qualified' }).Count -eq 0 -and @($sources | Where-Object SourceFile -eq 'Windows_ESU_Prices.csv')[0].QualificationStatus -eq 'NotMeasured') 'Licences sources qualified; absent ESU Not measured'
+  $realization = Read-Output $out 'FinOps_Realization.csv'
+  Check (@($realization | Where-Object { $_.Status -notlike 'Not measured: no qualified baseline run' }).Count -eq 0) 'first run: realization not measured (no baseline)'
+  #endregion
+
+  #region 2. Determinism: permuted source rows give identical outputs
+  $perm = New-Fixture 'permuted' @{ Reverse=$true }
+  $contractsPerm = Join-Path $root 'permuted\contracts.local.json'; New-Contracts $contractsPerm $baseSkus
+  $outPerm = Join-Path $root 'permuted\out'
+  $runPerm = Invoke-Engine -DataLast $perm.Folder -Output $outPerm -Contracts $contractsPerm
+  Check ($runPerm.ExitCode -eq 0) 'permuted run exit 0'
+  foreach ($name in @('FinOps_Opportunities.csv','FinOps_SkuValuation.csv','FinOps_Showback.csv','FinOps_Summary.csv','FinOps_Controls.csv','FinOps_Realization.csv')) {
+    $normalize = { param($path, $fixture) (Get-Content -LiteralPath $path -Raw) -replace '"\d{8}T\d{9}Z-[0-9a-f]{8}"', '"RUN"' -replace [regex]::Escape($fixture.LicencesRunId), 'LICRUN' -replace [regex]::Escape($fixture.SnapshotId), 'SNAP' -replace '"[0-9a-f]{32}"', '"PRICERUN"' }
+    Check ((& $normalize (Join-Path $out $name) $base) -ceq (& $normalize (Join-Path $outPerm $name) $perm)) "deterministic sort: $name identical with permuted sources"
+  }
+  #endregion
+
+  #region 3. ValidateOnly writes nothing
+  $outValidate = Join-Path $root 'validate\out'
+  $contractsValidate = Join-Path $root 'validate\contracts.local.json'
+  $runValidate = Invoke-Engine -DataLast $base.Folder -Output $outValidate -Contracts $contractsValidate -ValidateOnly
+  Check ($runValidate.ExitCode -eq 0 -and -not (Test-Path -LiteralPath $outValidate) -and -not (Test-Path -LiteralPath $contractsValidate)) 'ValidateOnly writes no output and no contracts file'
+  #endregion
+
+  #region 4. Contracts file created from template when absent
+  $outCreate = Join-Path $root 'create\out'
+  $contractsCreate = Join-Path $root 'create\contracts.local.json'
+  $runCreate = Invoke-Engine -DataLast $base.Folder -Output $outCreate -Contracts $contractsCreate
+  $created = Get-Content -LiteralPath $contractsCreate -Raw | ConvertFrom-Json
+  Check ($runCreate.ExitCode -eq 0 -and $created.SchemaVersion -eq 1 -and @($created.UnmappedSkus).Count -eq 5) 'contracts file created from template with UnmappedSkus'
+  #endregion
+
+  #region 5. Qualification failures: Licences Not measured, never zero
+  $cases = [ordered]@{
+    'receipt-failed' = { param($f) Set-ReceiptField $f.Folder 'SmartInventory_SmartM365-Licences-Inventory.current.json.txt' { param($d) $d.Status = 'Failed' } }
+    'receipt-tenant' = { param($f) Set-ReceiptField $f.Folder 'SmartInventory_SmartM365-Licences-Inventory.current.json.txt' { param($d) $d.TenantKey = 'fabrikam' } }
+    'hash-mismatch' = { param($f) Add-Content -LiteralPath (Join-Path $f.Folder 'M365_Licenses_ReportCandidates.csv') -Value '"snap","contoso","Recovery","Microsoft 365 E3","u99","u99@contoso.invalid","Disabled account"' }
+    'publishing' = { param($f) $p = Join-Path $f.Folder 'SmartInventory_SmartM365-Licences-Inventory.run.json.txt'; $d = Get-Content $p -Raw | ConvertFrom-Json -AsHashtable; $d.Status = 'Publishing'; $d | ConvertTo-Json -Depth 8 | Set-Content $p -Encoding utf8NoBOM }
+  }
+  foreach ($case in $cases.Keys) {
+    $fixture = New-Fixture $case
+    & $cases[$case] $fixture
+    $caseOut = Join-Path $root "$case\out"
+    $caseRun = Invoke-Engine -DataLast $fixture.Folder -Output $caseOut -Contracts (Join-Path $root "$case\contracts.local.json")
+    $caseReceipt = Read-Receipt $caseOut
+    $caseOpps = Read-Output $caseOut 'FinOps_Opportunities.csv'
+    $caseSummary = Read-Output $caseOut 'FinOps_Summary.csv'
+    Check ($caseRun.ExitCode -eq 0 -and $caseReceipt.Status -eq 'Completed' -and -not $caseReceipt.LicencesMeasured) "$case : run completed with Licences not measured"
+    Check (@($caseOpps | Where-Object Lever -ne 'L13').Count -eq 0 -and (Get-Kpi $caseSummary 'TOTAL_R').ValuationStatus -eq 'Not measured' -and (Get-Kpi $caseSummary 'TOTAL_R').AnnualAmount -eq '') "$case : no opportunity, TOTAL_R Not measured without amount"
+  }
+  $flagCases = [ordered]@{ 'optional-unpublished'=@{ NoSkuCapacity=$true }; 'snapshot-run'=@{ BadSnapshotRun=$true }; 'mixed-snapshot'=@{ MixedSnapshot=$true }; 'sku-runid'=@{ BadSkuRunId=$true } }
+  foreach ($case in $flagCases.Keys) {
+    $fixture = New-Fixture $case $flagCases[$case]
+    $caseOut = Join-Path $root "$case\out"
+    $caseRun = Invoke-Engine -DataLast $fixture.Folder -Output $caseOut -Contracts (Join-Path $root "$case\contracts.local.json")
+    $caseReceipt = Read-Receipt $caseOut
+    Check ($caseRun.ExitCode -eq 0 -and -not $caseReceipt.LicencesMeasured -and @(Read-Output $caseOut 'FinOps_Opportunities.csv' | Where-Object Lever -ne 'L13').Count -eq 0) "$case : Licences not measured"
+  }
+  $staleOut = Join-Path $root 'stale\out'
+  $staleRun = Invoke-Engine -DataLast $base.Folder -Output $staleOut -Contracts (Join-Path $root 'stale\contracts.local.json') -AsOfUtc ([datetime]::UtcNow.AddHours(49).ToString('o'))
+  Check ($staleRun.ExitCode -eq 0 -and -not (Read-Receipt $staleOut).LicencesMeasured -and @(Read-Output $staleOut 'FinOps_Sources.csv' | Where-Object { $_.SourceFile -eq 'M365_Licenses_ReportSummary.csv' -and $_.Reason -like 'source is stale*' }).Count -eq 1) 'stale sources (> 48 h) are Not measured'
+  #endregion
+
+  #region 6. Pricing not qualified: Not valued, never zero
+  $noPrice = New-Fixture 'no-pricing' @{ NoPricing=$true }
+  $noPriceOut = Join-Path $root 'no-pricing\out'
+  $noPriceRun = Invoke-Engine -DataLast $noPrice.Folder -Output $noPriceOut -Contracts (Join-Path $root 'no-pricing\contracts.local.json')
+  $noPriceOpps = Read-Output $noPriceOut 'FinOps_Opportunities.csv'
+  Check ($noPriceRun.ExitCode -eq 0 -and (Get-Opportunity $noPriceOpps 'L1|u1|sku-e3')[0].ValuationStatus -eq 'Not valued' -and (Get-Kpi (Read-Output $noPriceOut 'FinOps_Summary.csv') 'TOTAL_R').AnnualAmount -eq '') 'pricing missing: Not valued, empty totals'
+  #endregion
+
+  #region 7. Partial AD: Provisional amounts, missing domains, showback Not measured
+  $partial = New-Fixture 'partial' @{ PartialAd=$true; Provisional=$true }
+  $partialOut = Join-Path $root 'partial\out'
+  $partialRun = Invoke-Engine -DataLast $partial.Folder -Output $partialOut -Contracts (Join-Path $root 'partial\contracts.local.json')
+  $partialOpps = Read-Output $partialOut 'FinOps_Opportunities.csv'
+  $partialReceipt = Read-Receipt $partialOut
+  Check ($partialRun.ExitCode -eq 0 -and $partialReceipt.Provisional -and $partialReceipt.MissingDomains -eq 'west') 'partial AD: run Provisional with missing domain'
+  Check ((Get-Opportunity $partialOpps 'L1|u1|sku-e3')[0].ValuationStatus -eq 'Provisional' -and (Get-Opportunity $partialOpps 'L1|u1|sku-e3')[0].AnnualAmount -eq '453.36') 'partial AD: amounts Provisional'
+  Check ((Get-Opportunity $partialOpps 'L5|u7|sku-visio')[0].AdDomain -eq 'Not measured') 'partial AD: unmatched user showback Not measured'
+  Check ((Get-Kpi (Read-Output $partialOut 'FinOps_Summary.csv') 'TOTAL_R').ValuationStatus -eq 'Provisional') 'partial AD: TOTAL_R Provisional'
+  Check ((Get-Opportunity $partialOpps 'L7|sku-e3|Realizable')[0].ValuationStatus -eq 'Valued' -and (Get-Opportunity $partialOpps 'L8|sku-f3|Reuse')[0].ValuationStatus -eq 'Valued') 'partial AD: capacity levers not using AD stay Valued'
+  Check (@(Read-Output $partialOut 'FinOps_Sources.csv' | Where-Object SourceFile -eq 'AD_Users_AllDomains.csv')[0].ProvisionalLevers -eq 'L1;L2;L3;L4;L5;L6') 'partial AD: provisional levers traced on the AD source'
+  #endregion
+
+  #region 7b. Provisional per lever: OneDrive only affects E3 to F3; an unknown source affects every valued lever
+  $oneDrive = New-Fixture 'onedrive' @{ OneDriveProvisional=$true }
+  $oneDriveOut = Join-Path $root 'onedrive\out'
+  $oneDriveRun = Invoke-Engine -DataLast $oneDrive.Folder -Output $oneDriveOut -Contracts (Join-Path $root 'onedrive\contracts.local.json')
+  $oneDriveOpps = Read-Output $oneDriveOut 'FinOps_Opportunities.csv'
+  $oneDriveSummary = Read-Output $oneDriveOut 'FinOps_Summary.csv'
+  $oneDriveSource = @(Read-Output $oneDriveOut 'FinOps_Sources.csv' | Where-Object SourceFile -eq 'M365_OneDrive_Usage.csv')
+  Check ($oneDriveRun.ExitCode -eq 0 -and (Get-Opportunity $oneDriveOpps 'L4|u4|sku-e3')[0].ValuationStatus -eq 'Provisional' -and (Get-Opportunity $oneDriveOpps 'L1|u1|sku-e3')[0].ValuationStatus -eq 'Valued') 'OneDrive provisional: only L4 Provisional'
+  Check ((Get-Kpi $oneDriveSummary 'TOTAL_R').ValuationStatus -eq 'Valued' -and (Get-Kpi $oneDriveSummary 'TOTAL_R').Provisional -eq 'False' -and (Get-Kpi $oneDriveSummary 'TOTAL_RC_E3_TO_F3').ValuationStatus -eq 'Provisional') 'OneDrive provisional: TOTAL_R Valued, E3 to F3 Provisional'
+  Check ($oneDriveSource.Count -eq 1 -and $oneDriveSource[0].QualificationStatus -eq 'Provisional' -and $oneDriveSource[0].ProvisionalLevers -eq 'L4') 'OneDrive provisional: traced in FinOps_Sources with its lever'
+  Check ((@((Read-Receipt $oneDriveOut).ProvisionalLevers) -join ';') -eq 'L4') 'OneDrive provisional: receipt lists the provisional levers'
+  $sbRows = @(Read-Output $oneDriveOut 'FinOps_Showback.csv' | Where-Object { $_.Lever -eq 'L4' })
+  Check ($sbRows.Count -gt 0 -and @($sbRows | Where-Object Provisional -ne 'True').Count -eq 0 -and @(Read-Output $oneDriveOut 'FinOps_Showback.csv' | Where-Object { $_.Lever -eq 'L1' -and $_.Provisional -ne 'False' }).Count -eq 0) 'OneDrive provisional: showback flag per lever'
+  $unknown = New-Fixture 'unknown-provisional' @{ ProvisionalSource='Some_New_Source.csv' }
+  $unknownOut = Join-Path $root 'unknown-provisional\out'
+  $unknownRun = Invoke-Engine -DataLast $unknown.Folder -Output $unknownOut -Contracts (Join-Path $root 'unknown-provisional\contracts.local.json')
+  $unknownOpps = Read-Output $unknownOut 'FinOps_Opportunities.csv'
+  Check ($unknownRun.ExitCode -eq 0 -and @($unknownOpps | Where-Object { $_.AnnualAmount -ne '' -and $_.ValuationStatus -ne 'Provisional' }).Count -eq 0 -and @(Read-Output $unknownOut 'FinOps_Sources.csv' | Where-Object SourceFile -eq 'Some_New_Source.csv')[0].ProvisionalLevers -eq 'L1;L2;L3;L4;L5;L6;L7;L8') 'unknown provisional source: every valued lever Provisional (fail-safe)'
+  #endregion
+
+  #region 8. Cap and reserve from the contracts file
+  $capOut = Join-Path $root 'cap\out'; $capContracts = Join-Path $root 'cap\contracts.local.json'
+  New-Contracts $capContracts @([ordered]@{ SkuPartNumber='SPE_E3'; MinimumUnits=6; ReserveUnits=1 })
+  $capRun = Invoke-Engine -DataLast $base.Folder -Output $capOut -Contracts $capContracts
+  $capOpps = Read-Output $capOut 'FinOps_Opportunities.csv'
+  $capE3 = @(Read-Output $capOut 'FinOps_SkuValuation.csv' | Where-Object SkuId -eq 'sku-e3')[0]
+  Check ($capRun.ExitCode -eq 0 -and $capE3.ReserveUnits -eq '1' -and $capE3.PoolUnits -eq '4' -and $capE3.CapUnits -eq '4' -and $capE3.RealizableUnits -eq '4' -and $capE3.ContractStatus -eq 'Covered') 'reserve 1 and cap EnabledUnits - MinimumUnits'
+  Check ((Get-Opportunity $capOpps 'L7|sku-e3|Realizable')[0].Units -eq '1' -and (Get-Opportunity $capOpps 'L3|u3|sku-e3')[0].ValuationStatus -eq 'Valued') 'reserve reduces capacity units'
+  $capOut2 = Join-Path $root 'cap2\out'; $capContracts2 = Join-Path $root 'cap2\contracts.local.json'
+  New-Contracts $capContracts2 @([ordered]@{ SkuPartNumber='SPE_E3'; MinimumUnits=7; ReserveUnits=0 })
+  $capRun2 = Invoke-Engine -DataLast $base.Folder -Output $capOut2 -Contracts $capContracts2
+  $cap2Opps = Read-Output $capOut2 'FinOps_Opportunities.csv'
+  Check ($capRun2.ExitCode -eq 0 -and (Get-Opportunity $cap2Opps 'L2|u2|sku-e3')[0].ValuationStatus -eq 'Capped' -and (Get-Opportunity $cap2Opps 'L3|u3|sku-e3')[0].ValuationStatus -eq 'Capped' -and (Get-Opportunity $cap2Opps 'L1|u1|sku-e3')[0].ValuationStatus -eq 'Valued') 'cap: deterministic order capacity, L1, then L2/L3 capped'
+  Check ((Get-Kpi (Read-Output $capOut2 'FinOps_Summary.csv') 'TOTAL_R_ENABLED_INACTIVE').AnnualAmount -eq '') 'capped rows carry no amount'
+  #endregion
+
+  #region 9. Equivalence guard failure keeps files disqualified
+  $guardOut = Join-Path $root 'guard\out'; $guardContracts = Join-Path $root 'guard\contracts.local.json'
+  New-Contracts $guardContracts $baseSkus
+  $guardOk = Invoke-Engine -DataLast $base.Folder -Output $guardOut -Contracts $guardContracts
+  $hashBefore = (Get-FileHash -LiteralPath (Join-Path $guardOut 'FinOps_Opportunities.csv')).Hash
+  foreach ($case in @(@{ SummaryE3Recovery=2 }, @{ G4Mismatch=$true })) {
+    $guardFixture = New-Fixture ('guard-' + [guid]::NewGuid().ToString('N').Substring(0,6)) $case
+    $guardRun = Invoke-Engine -DataLast $guardFixture.Folder -Output $guardOut -Contracts $guardContracts -AsOfUtc ([datetime]::UtcNow.AddMinutes(5).ToString('o'))
+    $guardReceipt = Read-Receipt $guardOut
+    Check ($guardOk.ExitCode -eq 0 -and $guardRun.ExitCode -eq 1 -and $guardReceipt.Status -eq 'Failed') "guard failure ($(@($case.Keys)[0])): exit 1 and current receipt Failed"
+    Check ((Get-FileHash -LiteralPath (Join-Path $guardOut 'FinOps_Opportunities.csv')).Hash -eq $hashBefore) 'guard failure: current files kept (disqualified by receipt)'
+    Check (@(Import-Csv -LiteralPath (Join-Path $guardOut "Archive\$($guardReceipt.RunId)\FinOps_Controls.csv") | Where-Object Status -eq 'Fail').Count -ge 1) 'guard failure: controls archived'
+  }
+  $schema = New-Fixture 'schema-drift' @{ UnknownType=$true }
+  $schemaOut = Join-Path $root 'schema-drift\out'
+  $schemaRun = Invoke-Engine -DataLast $schema.Folder -Output $schemaOut -Contracts (Join-Path $root 'schema-drift\contracts.local.json')
+  Check ($schemaRun.ExitCode -eq 1 -and (Read-Receipt $schemaOut).Status -eq 'Failed') 'unknown CandidateType fails the run'
+  #endregion
+
+  #region 10. Realization against the plateau baseline
+  $realOut = Join-Path $root 'real\out'; $realContracts = Join-Path $root 'real\contracts.local.json'
+  New-Contracts $realContracts $baseSkus
+  $run1 = Invoke-Engine -DataLast $base.Folder -Output $realOut -Contracts $realContracts
+  $run1Id = (Read-Receipt $realOut).RunId
+  $same = Invoke-Engine -DataLast $base.Folder -Output $realOut -Contracts $realContracts -AsOfUtc ([datetime]::UtcNow.AddMinutes(1).ToString('o'))
+  $sameRows = Read-Output $realOut 'FinOps_Realization.csv'
+  Check ($same.ExitCode -eq 0 -and @($sameRows | Where-Object { $_.SkuId -eq 'sku-e3' -and $_.Status -eq 'No reduction observed' -and $_.RealizedUnits -eq '0' -and $_.BaselineFinOpsRunId -eq $run1Id }).Count -eq 1) 'no reduction: measured zero against the plateau baseline'
+  # u1 license removed, E3 enabled units 10 -> 6: removed 1 + baseline capacity 2 = 3 attributable, 1 not attributed.
+  $after = New-Fixture 'after' @{ RemovedUsers=@('u1'); E3Enabled=6; E3Consumed=6 }
+  $run2 = Invoke-Engine -DataLast $after.Folder -Output $realOut -Contracts $realContracts -AsOfUtc ([datetime]::UtcNow.AddMinutes(2).ToString('o'))
+  $realRow = @(Read-Output $realOut 'FinOps_Realization.csv' | Where-Object SkuId -eq 'sku-e3')[0]
+  Check ($run1.ExitCode -eq 0 -and $run2.ExitCode -eq 0) 'realization runs exit 0'
+  Check ($realRow.BaselineFinOpsRunId -eq $run1Id -and $realRow.Decrease -eq '4' -and $realRow.RemovedCandidateLicenses -eq '1' -and $realRow.BaselineCapacityUnits -eq '2' -and $realRow.AttributableUnits -eq '3' -and $realRow.RealizedUnits -eq '3' -and $realRow.NotAttributedUnits -eq '1' -and $realRow.RealizedAnnualAmount -eq '1360.08' -and $realRow.Status -eq 'Realized') "realization capped and attributed (got $($realRow | ConvertTo-Json -Compress))"
+  #endregion
+
+  #region 11. Archive retention never purges a realization baseline
+  . $engine -Tenant $tenant
+  . (Join-Path $runtime 'SmartFinOps\Config\SmartFinOps-TenantContext.ps1')
+  $retRoot = Join-Path $root 'retention'
+  foreach ($index in 1..5) { New-Item -ItemType Directory -Path (Join-Path $retRoot ('2026010{0}T000000000Z-0000000{0}' -f $index)) -Force | Out-Null }
+  New-Item -ItemType Directory -Path (Join-Path $retRoot 'not-a-run') -Force | Out-Null
+  $protected = [System.Collections.Generic.HashSet[string]]::new([string[]]@('20260101T000000000Z-00000001'))
+  Invoke-FinOpsArchiveRetention -ArchiveRoot $retRoot -KeepRuns 2 -ProtectedRuns $protected -CurrentRunId '20260105T000000000Z-00000005'
+  $left = @(Get-ChildItem -LiteralPath $retRoot -Directory | ForEach-Object Name | Sort-Object)
+  Check (($left -join ',') -eq '20260101T000000000Z-00000001,20260104T000000000Z-00000004,20260105T000000000Z-00000005,not-a-run') "retention keeps newest runs, protected baseline and foreign folders (got $($left -join ','))"
+  #endregion
+
+  #region 12. Unit checks: sort, prices, contracts
+  $sorted = Get-FinOpsSortedRows -Rows @([pscustomobject]@{ K='b' }, [pscustomobject]@{ K='A' }, [pscustomobject]@{ K='a2' }) -KeyColumns @('K')
+  Check ((@($sorted | ForEach-Object K) -join ',') -eq 'A,a2,b') 'ordinal case-insensitive sort'
+  $index = New-FinOpsPriceIndex -Source ([pscustomobject]@{ QualificationStatus='Qualified'; SourceReceiptRunId='r'; Rows=@(
+    [pscustomobject]@{ SkuPartNumber='X'; Currency='EUR'; UnitPriceMonthly='1'; EffectiveFrom='2026-01-01'; EffectiveTo=''; PriceSource='a'; IsEstimated='True' }
+    [pscustomobject]@{ SkuPartNumber='X'; Currency='EUR'; UnitPriceMonthly='2'; EffectiveFrom='2026-06-01'; EffectiveTo=''; PriceSource='b'; IsEstimated='True' }
+    [pscustomobject]@{ SkuPartNumber='Y'; Currency='EUR'; UnitPriceMonthly='3'; EffectiveFrom='2027-01-01'; EffectiveTo=''; PriceSource='c'; IsEstimated='True' }) }) -AsOfDate ([datetime]'2026-10-18')
+  Check (-not (Get-FinOpsPrice $index 'X').Valued -and (Get-FinOpsPrice $index 'X').Reason -like 'more than one*') 'two effective prices: Not valued'
+  Check (-not (Get-FinOpsPrice $index 'Y').Valued) 'future price only: Not valued'
+  Check ((ConvertTo-FinOpsDecimal '37,78') -eq [decimal]37.78 -and (ConvertTo-FinOpsDecimal '37.78') -eq [decimal]37.78 -and (ConvertTo-FinOpsDecimal '182') -eq [decimal]182) 'decimal comma and point read as decimal separators'
+  Check ($null -eq (ConvertTo-FinOpsDecimal '1,234.56') -and $null -eq (ConvertTo-FinOpsDecimal '1 234,5') -and $null -eq (ConvertTo-FinOpsDecimal '12a')) 'group separators and text rejected'
+  $commaIndex = New-FinOpsPriceIndex -Source ([pscustomobject]@{ QualificationStatus='Qualified'; SourceReceiptRunId='r'; Rows=@([pscustomobject]@{ SkuPartNumber='SPE_E3'; Currency='EUR'; UnitPriceMonthly='37,78'; EffectiveFrom='2026-01-01'; EffectiveTo=''; PriceSource='a'; IsEstimated='True' }) }) -AsOfDate ([datetime]'2026-10-18')
+  Check ((Get-FinOpsPrice $commaIndex 'SPE_E3').Price -eq [decimal]37.78) 'culture-formatted price 37,78 valued as 37.78'
+  $template = Join-Path $project 'Config\SmartFinOps-Contracts.local.json.template'
+  foreach ($bad in @(
+      @{ Name='date'; Skus=@([ordered]@{ SkuPartNumber='SPE_E3' }); Renewal='31/03/2027' },
+      @{ Name='duplicate'; Skus=@([ordered]@{ SkuPartNumber='SPE_E3' }, [ordered]@{ SkuPartNumber='spe_e3' }); Renewal='2027-03-31' },
+      @{ Name='negative'; Skus=@([ordered]@{ SkuPartNumber='SPE_E3'; MinimumUnits=-1 }); Renewal='2027-03-31' })) {
+    $path = Join-Path $root "contracts-$($bad.Name).json"
+    New-Contracts $path $bad.Skus
+    if ($bad.Name -eq 'date') { (Get-Content $path -Raw).Replace('2027-03-31', $bad.Renewal) | Set-Content $path -Encoding utf8NoBOM }
+    $failed = $false; try { Get-FinOpsContracts -Path $path -TemplatePath $template | Out-Null } catch { $failed = $true }
+    Check $failed "invalid contracts rejected: $($bad.Name)"
+  }
+  #endregion
+
+  #region 13. PowerShell 7 only
+  $windowsPowerShell = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
+  if (Test-Path -LiteralPath $windowsPowerShell) {
+    $ps5 = & $windowsPowerShell -NoProfile -ExecutionPolicy Bypass -File $engine -Tenant $tenant -ValidateOnly 2>&1 | Out-String
+    Check ($LASTEXITCODE -ne 0 -and $ps5 -match '7\.0') 'Windows PowerShell 5.1 is refused'
+  }
+  #endregion
+}
+finally {
+  foreach ($name in $saved.Keys) {
+    if ($saved[$name].Exists) { Set-Variable -Name $name -Scope Global -Value $saved[$name].Value } else { Remove-Variable -Name $name -Scope Global -ErrorAction SilentlyContinue }
+  }
+  if (-not $KeepEvidence -and (Test-Path -LiteralPath $root)) { Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue }
+  elseif ($KeepEvidence) { Write-Host "Evidence kept: $root" }
+}
+
+if ($script:failures.Count) { Write-Host ("SmartFinOps valuation tests: {0} failure(s) / {1} checks" -f $script:failures.Count, $script:checks) -ForegroundColor Red; exit 1 }
+Write-Host ("SmartFinOps valuation tests: PASS ({0} checks)" -f $script:checks) -ForegroundColor Green

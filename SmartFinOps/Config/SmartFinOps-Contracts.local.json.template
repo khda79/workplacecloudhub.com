@@ -1,0 +1,26 @@
+{
+  "SchemaVersion": 1,
+  "Defaults": {
+    "ReserveUnitsPercent": 0,
+    "ReductionPolicy": "Unknown"
+  },
+  "Contracts": [
+    {
+      "ContractKey": "__CONTRACT_KEY__",
+      "Type": "EA|MCA-E|CSP-NCE|Other",
+      "Reference": "",
+      "StartDate": "",
+      "RenewalDate": "",
+      "NoticeDays": null,
+      "ReductionPolicy": "AtRenewal",
+      "Skus": [
+        {
+          "SkuPartNumber": "",
+          "MinimumUnits": null,
+          "ReserveUnits": null
+        }
+      ]
+    }
+  ],
+  "UnmappedSkus": []
+}
