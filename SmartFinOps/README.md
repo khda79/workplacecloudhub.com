@@ -207,7 +207,7 @@ Readiness-only sources do not change license recommendations or financial potent
 
 ## V2 valuation engine (lot V2.1, in development)
 
-`SmartFinOps-Workplace-Valuation.ps1` 2.1.0 is the V2 engine. It runs beside the beta analyzer, which stays unchanged until it is retired. PowerShell 7 only, read-only, no API connection.
+`SmartFinOps-Workplace-Valuation.ps1` 2.1.1 is the V2 engine. It runs beside the beta analyzer, which stays unchanged until it is retired. PowerShell 7 only, read-only, no API connection.
 
 ```powershell
 .\SmartFinOps-Workplace-Valuation.ps1 -Tenant prod -ValidateOnly   # qualify sources and contracts, compute, write nothing
@@ -251,10 +251,13 @@ A realized saving is reported when `EnabledUnits` drops below the level of the p
 
 `Data\<TenantKey>\` holds `FinOps_Sources.csv`, `FinOps_Opportunities.csv`, `FinOps_SkuValuation.csv`, `FinOps_Showback.csv` (AD domain, country, entity, department), `FinOps_Summary.csv`, `FinOps_Realization.csv` and `FinOps_Controls.csv`, each sorted by its key, plus `SmartFinOps_Workplace-Valuation.current.json.txt`. Every row carries `TenantKey`, `FinOpsRunId`, `SnapshotId` and the Licences `ReceiptRunId`; valued rows also carry the price row key and pricing receipt run. `Archive\<FinOpsRunId>\` keeps the same files and the run log. `Valuation.ArchiveRetentionRuns` (default 30) limits the archive, but a run that is the baseline of a realization is never purged.
 
-Equivalence controls G1 to G6 compare the FinOps rows with the Licences counts (candidates by type and product, per-SKU recommendations, summary recovery counts, capacity counters, no double counting, showback totals). A failed control fails the run: the current files are kept but the receipt is `Failed`. **Every consumer must check the receipt (`Status=Completed`, `TenantKey`, SHA256 of each file) before reading a `FinOps_*` CSV.**
+`FinOps_Summary.csv` carries the totals (`TOTAL_R`, `TOTAL_R_DISABLED_AND_SHARED`, `TOTAL_R_ENABLED_INACTIVE`, `TOTAL_R_COPILOT`, `TOTAL_R_CAPACITY`, `TOTAL_RC_E3_TO_F3`, `TOTAL_E_REUSE`, `TOTAL_E_ESU`), one `DETAIL|class|lever|status` row per group and one `GAP|section|metric` row per gap metric. Since 2.1.1 each valued total is also broken down, so that a report never has to add amounts: `PRICE|<total>|Estimated|Contract|Unknown` (price origin from `IsEstimated`; an E3 to F3 difference is estimated when either price is), `FORECAST|<total>|<RealizableFrom>` (date or `Renewal unknown`) and `SHOWBACK|<dimension>|<total>|<value>`; `SHOWBACK|<dimension>|USERS|<value>` gives the distinct users with at least one opportunity row for that value. E3 to F3 rows now carry the contract terms of their SKU (`ContractKey`, `RenewalDate`, `RealizableFrom`).
+
+Equivalence controls G1 to G6 compare the FinOps rows with the Licences counts (candidates by type and product, per-SKU recommendations, summary recovery counts, capacity counters, no double counting, showback totals and, since 2.1.1, every Summary breakdown against its total: units and amount, plus users for showback values). A failed control fails the run: the current files are kept but the receipt is `Failed`. **Every consumer must check the receipt (`Status=Completed`, `TenantKey`, SHA256 of each file) before reading a `FinOps_*` CSV.**
 
 ### Contracts
 
 `Config/SmartFinOps-Contracts.local.json` (private, created from `Config/SmartFinOps-Contracts.local.json.template`) maps SKUs to contracts: `ContractKey`, `RenewalDate` (`yyyy-MM-dd`, empty means renewal unknown), `ReductionPolicy` (`AtRenewal`, `Anniversary`, `Monthly`, `Unknown`) and, per SKU, `MinimumUnits` and `ReserveUnits` (default `Defaults.ReserveUnitsPercent`, 0). Prices stay in the LicensePricing private override. Paid SKUs without a contract are added to `UnmappedSkus`; no date is invented.
 
 Tests: `Tests\SmartFinOps-Workplace-Valuation.Tests.ps1` (synthetic data, isolated runtime, real SmartM365.Core receipts).
+
