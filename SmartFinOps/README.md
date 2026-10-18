@@ -205,7 +205,7 @@ Freshness is separate: `Fresh`, `Stale`, `Unknown`, or `NotChecked`. Incomplete 
 
 Readiness-only sources do not change license recommendations or financial potential. Files whose names contain `MAXITEMS` remain excluded.
 
-## V2 valuation engine (lot V2.1, in development)
+## V2 valuation engine (lot V2.1)
 
 `SmartFinOps-Workplace-Valuation.ps1` 2.1.1 is the V2 engine. It runs beside the beta analyzer, which stays unchanged until it is retired. PowerShell 7 only, read-only, no API connection.
 
@@ -261,3 +261,20 @@ Equivalence controls G1 to G6 compare the FinOps rows with the Licences counts (
 
 Tests: `Tests\SmartFinOps-Workplace-Valuation.Tests.ps1` (synthetic data, isolated runtime, real SmartM365.Core receipts).
 
+## V2 executive report (lot V2.2)
+
+`SmartFinOps-Workplace-Report.ps1` 2.2.0 turns the valuation outputs into one self-contained HTML page for management. PowerShell 7 only, read-only. It is a pure consumer: it reads only the seven `FinOps_*` CSVs and the valuation receipt, and computes no decision and no amount; it displays, sorts and groups what the engine (2.1.1 or a later 2.1.x) published.
+
+```powershell
+.\SmartFinOps-Workplace-Valuation.ps1 -Tenant prod
+.\SmartFinOps-Workplace-Report.ps1 -Tenant prod              # Data\<TenantKey>\SmartFinOps_Workplace-Report.html
+.\SmartFinOps-Workplace-Report.ps1 -Tenant prod -ValidateOnly # qualify and build, write nothing
+```
+
+Before reading anything the report qualifies the run: receipt `Owner=SmartFinOps-Receipt` 1.0, `Status=Completed`, same tenant, exactly the seven files with their SHA256 and row counts (hashed and parsed from the same bytes), exact headers, one `FinOpsRunId`, `SnapshotId` and Licences `ReceiptRunId` on every row, and no failed equivalence control. Otherwise the page is "Report not available" with the reason and no figure; it replaces the current report so that no older figure stays visible, and the script exits with code 2. When the Licences report was not measured the report is still produced, with a status banner and every figure `Not measured`.
+
+Sections follow the SmartFinOps rules: executive summary, financial potential (R with the enabled-inactive accounts shown separately, conditional E3 to F3 outside the total, cost avoidance, price origin), priority decisions, cost/quality/risk trade-offs (Review, Blocked, Not measured, Not valued, Capped, signals), capacity, renewals and forecast (`RealizableFrom`, renewal unknown), realization when a baseline exists, showback (AD domain, country, entity, department), assumptions and a folded technical appendix (report qualification, sources, controls G1 to G6). Statuses are always visible: an empty amount is shown as its status, never as zero; catalogue estimates and contract prices are labelled.
+
+Confidentiality: aggregates only. No user name, UPN or user ID is rendered (detail stays in the CSVs); free text that quotes an e-mail address or a GUID is masked. In the showback, values with fewer than `Report.ShowbackMinimumGroupUsers` users (default 5) are combined into "Other (groups under N users)"; when that row alone would stay under the threshold, the smallest other values join it, so no value can be deduced by subtraction. The page is self-contained (inline CSS and SVG, no script, no external resource, every value HTML-encoded) and deterministic: the same inputs give the same HTML except the generation time. The log is written next to the page; both are copied to `Archive\<FinOpsRunId>\` when that run is archived.
+
+Tests: `Tests\SmartFinOps-Workplace-Report.Tests.ps1` (synthetic FinOps fixtures, input contract checked against the engine output specification).
