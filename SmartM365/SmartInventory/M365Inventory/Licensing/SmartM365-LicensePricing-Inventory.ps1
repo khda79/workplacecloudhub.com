@@ -7,7 +7,7 @@ SKU+Currency replaces every public period of that SKU+Currency. A PricingSourceC
 file keeps the former whole-replacement behaviour with a migration warning. Windows 10 ESU prices come only
 from a private EUR source (EsuPricingCsvPath) and are published as Windows_ESU_Prices.csv.
 .VERSION
-1.1.0
+1.1.1
 .REQUIREMENTS
 No Microsoft Graph permission. PricingSourceCsvPath must reference the public baseline or a private CSV.
 #>
@@ -25,7 +25,7 @@ if(-not $smartM365LifecycleRoot){throw 'SmartM365 lifecycle support is missing; 
 $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -RequireReturn
 try {
 Set-StrictMode -Version Latest
-$ErrorActionPreference='Stop';$ScriptVersion='1.1.0';$script:Runtime=$null;$script:CompletionStatus='Success';$script:CompletionError=$null
+$ErrorActionPreference='Stop';$ScriptVersion='1.1.1';$script:Runtime=$null;$script:CompletionStatus='Success';$script:CompletionError=$null
 
 function ConvertTo-LicensePriceRows{
     param([object[]]$InputRows,[string]$RunId,[string]$CollectedAtUtc)
@@ -33,10 +33,10 @@ function ConvertTo-LicensePriceRows{
     foreach($row in $InputRows){
         $sku=[string](Get-SmartM365EvidenceProperty $row @('SkuPartNumber'));$currency=[string](Get-SmartM365EvidenceProperty $row @('Currency'));$priceText=[string](Get-SmartM365EvidenceProperty $row @('UnitPriceMonthly'))
         if([string]::IsNullOrWhiteSpace($sku)-or $currency-notmatch'^[A-Z]{3}$'){throw "Invalid SKU or ISO currency in license pricing source: '$sku' / '$currency'."}
-        $price=0.0;if(-not[double]::TryParse($priceText,[System.Globalization.NumberStyles]::Number,[System.Globalization.CultureInfo]::InvariantCulture,[ref]$price)-or $price-lt 0){throw "Invalid UnitPriceMonthly for SKU '$sku'. Use an invariant non-negative number."}
+        $price=0.0;if($priceText.Trim()-notmatch'^\d+(\.\d+)?$'-or -not[double]::TryParse($priceText,[System.Globalization.NumberStyles]::Number,[System.Globalization.CultureInfo]::InvariantCulture,[ref]$price)-or $price-lt 0){throw "Invalid UnitPriceMonthly for SKU '$sku'. Use an invariant non-negative number (decimal point, no group separator)."}
         $from=[string](Get-SmartM365EvidenceProperty $row @('EffectiveFrom'));$to=[string](Get-SmartM365EvidenceProperty $row @('EffectiveTo'));$key="$sku|$currency|$from|$to";if($seen.ContainsKey($key)){throw "Duplicate license price period: $key"};$seen[$key]=$true
         if($from-and $to-and [datetime]$from-gt[datetime]$to){throw "EffectiveFrom is after EffectiveTo for SKU '$sku'."}
-        $rows.Add([pscustomobject][ordered]@{RunId=$RunId;CollectedAtUtc=$CollectedAtUtc;CollectionStatus='GovernedInput';IsPartialInventory=$false;SourceScriptVersion=$ScriptVersion;SkuPartNumber=$sku;Currency=$currency;UnitPriceMonthly=$price;BillingCadence=[string](Get-SmartM365EvidenceProperty $row @('BillingCadence') 'Monthly');EffectiveFrom=$from;EffectiveTo=$to;PriceSource=[string](Get-SmartM365EvidenceProperty $row @('PriceSource'));PricingBasis=[string](Get-SmartM365EvidenceProperty $row @('PricingBasis'));ContractReference=[string](Get-SmartM365EvidenceProperty $row @('ContractReference'));IsEstimated=[string](Get-SmartM365EvidenceProperty $row @('IsEstimated') 'False')})
+        $rows.Add([pscustomobject][ordered]@{RunId=$RunId;CollectedAtUtc=$CollectedAtUtc;CollectionStatus='GovernedInput';IsPartialInventory=$false;SourceScriptVersion=$ScriptVersion;SkuPartNumber=$sku;Currency=$currency;UnitPriceMonthly=$price.ToString([System.Globalization.CultureInfo]::InvariantCulture);BillingCadence=[string](Get-SmartM365EvidenceProperty $row @('BillingCadence') 'Monthly');EffectiveFrom=$from;EffectiveTo=$to;PriceSource=[string](Get-SmartM365EvidenceProperty $row @('PriceSource'));PricingBasis=[string](Get-SmartM365EvidenceProperty $row @('PricingBasis'));ContractReference=[string](Get-SmartM365EvidenceProperty $row @('ContractReference'));IsEstimated=[string](Get-SmartM365EvidenceProperty $row @('IsEstimated') 'False')})
     }
     return @($rows)
 }
@@ -60,7 +60,7 @@ function ConvertTo-WindowsEsuPriceRows{
         # No currency conversion: only governed EUR prices are accepted.
         if($currency-cne'EUR'){throw "Windows ESU prices must be in EUR; got '$currency' for $program."}
         $year=0;if(-not[int]::TryParse([string](Get-SmartM365EvidenceProperty $row @('CoverageYear')),[ref]$year)-or $year-lt 1-or $year-gt 3){throw "CoverageYear must be 1, 2 or 3 for $program."}
-        $price=0.0;if(-not[double]::TryParse([string](Get-SmartM365EvidenceProperty $row @('UnitPricePerDeviceYear')),[System.Globalization.NumberStyles]::Number,$culture,[ref]$price)-or $price-lt 0){throw "Invalid UnitPricePerDeviceYear for $program year $year. Use an invariant non-negative number."}
+        $priceText=[string](Get-SmartM365EvidenceProperty $row @('UnitPricePerDeviceYear'));$price=0.0;if($priceText.Trim()-notmatch'^\d+(\.\d+)?$'-or -not[double]::TryParse($priceText,[System.Globalization.NumberStyles]::Number,$culture,[ref]$price)-or $price-lt 0){throw "Invalid UnitPricePerDeviceYear for $program year $year. Use an invariant non-negative number (decimal point, no group separator)."}
         $fromText=[string](Get-SmartM365EvidenceProperty $row @('EffectiveFrom'));$toText=[string](Get-SmartM365EvidenceProperty $row @('EffectiveTo'))
         $from=[datetime]::MinValue;$to=[datetime]::MinValue
         if(-not[datetime]::TryParseExact($fromText,'yyyy-MM-dd',$culture,[System.Globalization.DateTimeStyles]::None,[ref]$from)-or
@@ -71,7 +71,7 @@ function ConvertTo-WindowsEsuPriceRows{
         if($years[$key].ContainsKey($year)){throw "Duplicate ESU coverage year $year for $key."};$years[$key][$year]=$from
         foreach($other in $periods[$key]){if($from-le $other.To-and $other.From-le $to){throw "ESU coverage periods overlap for $key."}}
         $periods[$key].Add([pscustomobject]@{From=$from;To=$to})
-        $rows.Add([pscustomobject][ordered]@{RunId=$RunId;CollectedAtUtc=$CollectedAtUtc;CollectionStatus='GovernedInput';IsPartialInventory=$false;SourceScriptVersion=$ScriptVersion;ProgramKey=$program;CoverageYear=$year;Currency=$currency;UnitPricePerDeviceYear=$price;EffectiveFrom=$fromText;EffectiveTo=$toText;IsCumulative=$cumulative;PriceSource=[string](Get-SmartM365EvidenceProperty $row @('PriceSource'));PricingBasis=[string](Get-SmartM365EvidenceProperty $row @('PricingBasis'));ContractReference=[string](Get-SmartM365EvidenceProperty $row @('ContractReference'));IsEstimated=$estimated})
+        $rows.Add([pscustomobject][ordered]@{RunId=$RunId;CollectedAtUtc=$CollectedAtUtc;CollectionStatus='GovernedInput';IsPartialInventory=$false;SourceScriptVersion=$ScriptVersion;ProgramKey=$program;CoverageYear=$year;Currency=$currency;UnitPricePerDeviceYear=$price.ToString([System.Globalization.CultureInfo]::InvariantCulture);EffectiveFrom=$fromText;EffectiveTo=$toText;IsCumulative=$cumulative;PriceSource=[string](Get-SmartM365EvidenceProperty $row @('PriceSource'));PricingBasis=[string](Get-SmartM365EvidenceProperty $row @('PricingBasis'));ContractReference=[string](Get-SmartM365EvidenceProperty $row @('ContractReference'));IsEstimated=$estimated})
     }
     foreach($key in $years.Keys){
         $ordered=@($years[$key].Keys|Sort-Object)

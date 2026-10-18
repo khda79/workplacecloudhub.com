@@ -4,7 +4,7 @@
 Synthetic checks of the LicensePricing public baseline, private override merge, legacy replacement mode,
 Windows 10 ESU price validation and optional receipt registration. No tenant, API, mail or synchronized data access.
 .VERSION
-1.0.0
+1.1.0
 #>
 [CmdletBinding()]
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidGlobalVars','',Justification='Synthetic Core identity globals are saved and restored in finally.')]
@@ -26,8 +26,8 @@ $definitions = @($ast.FindAll({ param($n) $n -is [System.Management.Automation.L
 if ($definitions.Count -ne $names.Count) { throw 'LicensePricing functions are missing.' }
 foreach ($definition in $definitions) { Invoke-Expression $definition.Extent.Text }
 # Read by the extracted collector functions (SourceScriptVersion).
-$ScriptVersion = '1.1.0'
-if ($ast.Extent.Text -notmatch "\`$ScriptVersion='1\.1\.0'" -or $ast.Extent.Text -notmatch '(?m)^\.VERSION\s*\r?\n1\.1\.0') { throw 'Header and runtime versions must both be 1.1.0.' }
+$ScriptVersion = '1.1.1'
+if ($ast.Extent.Text -notmatch "\`$ScriptVersion='1\.1\.1'" -or $ast.Extent.Text -notmatch '(?m)^\.VERSION\s*\r?\n1\.1\.1') { throw 'Header and runtime versions must both be 1.1.1.' }
 
 $temporary = Join-Path ([IO.Path]::GetTempPath()) ('SmartInventory-LicensePricing-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $temporary | Out-Null
@@ -103,7 +103,7 @@ try {
     'WIN10_ESU,2,EUR,110.00,2026-11-01,2027-10-31,True,Contoso agreement,Per device per ESU year,CONTOSO-ESU-1,False',
     'WIN10_ESU,3,EUR,220.00,2027-11-01,2028-10-31,True,Contoso agreement,Per device per ESU year,CONTOSO-ESU-1,False')
   $esu = @(ConvertTo-WindowsEsuPriceRows @(Import-Csv -LiteralPath (Write-Fixture 'esu.csv' $esuLines)) r c)
-  Check ($esu.Count -eq 3 -and $esu[1].UnitPricePerDeviceYear -eq 110 -and $esu[1].IsCumulative -eq 'True' -and $esu[0].SourceScriptVersion -eq '1.1.0') 'Valid ESU years are normalized.'
+  Check ($esu.Count -eq 3 -and $esu[1].UnitPricePerDeviceYear -eq 110 -and $esu[1].IsCumulative -eq 'True' -and $esu[0].SourceScriptVersion -eq '1.1.1') 'Valid ESU years are normalized.'
   $invalid = [ordered]@{
     'USD price' = @($esuHeader, 'WIN10_ESU,1,USD,61.00,2025-11-01,2026-10-31,True,A,B,C,True')
     'Unknown program' = @($esuHeader, 'WIN11_ESU,1,EUR,1.00,2025-11-01,2026-10-31,True,A,B,C,True')
@@ -142,7 +142,30 @@ try {
     Check ([bool]$optional[0].Published -eq $withEsu -and (@($receipt.Files | Where-Object File -eq 'Windows_ESU_Prices.csv').Count -eq [int]$withEsu)) "ESU publication is recorded only when published (published=$withEsu)."
   }
 
-  # 7. Template exposes the private keys; the collector creates and completes its runtime JSON.
+  # 7. Invariant prices whatever the host culture (fr-FR exported a double as "37,78").
+  $savedCulture = [Globalization.CultureInfo]::CurrentCulture
+  try {
+    [Globalization.CultureInfo]::CurrentCulture = [Globalization.CultureInfo]::GetCultureInfo('fr-FR')
+    Check ((1.5).ToString() -eq '1,5') 'The fr-FR culture is active for the following checks.'
+    $frRows = @((Resolve-LicensePricingRows -SourcePath $baselinePath -OverridePath $override -PublicBaselinePath $baselinePath -RunId r -CollectedAtUtc c).Rows)
+    $frCsv = @($frRows | ConvertTo-Csv -NoTypeInformation | ConvertFrom-Csv)
+    Check (@($frCsv | Where-Object { $_.SkuPartNumber -ceq 'SPE_F1' -and $_.Currency -eq 'EUR' })[0].UnitPriceMonthly -ceq '8.66') 'fr-FR: public price written as 8.66.'
+    Check (@($frCsv | Where-Object { $_.SkuPartNumber -ceq 'SPE_E3' -and $_.EffectiveFrom -eq '2026-01-01' })[0].UnitPriceMonthly -ceq '30') 'fr-FR: private price written with the invariant format.'
+    Check (@($frCsv | Where-Object { $_.UnitPriceMonthly -match ',' }).Count -eq 0) 'fr-FR: no decimal comma in UnitPriceMonthly.'
+    $frEsu = @(@(ConvertTo-WindowsEsuPriceRows @(Import-Csv -LiteralPath (Write-Fixture 'esu-fr.csv' @($esuHeader, 'WIN10_ESU,1,EUR,55.25,2025-11-01,2026-10-31,True,A,B,C,False'))) r c) | ConvertTo-Csv -NoTypeInformation | ConvertFrom-Csv)
+    Check ($frEsu[0].UnitPricePerDeviceYear -ceq '55.25') 'fr-FR: ESU price written as 55.25.'
+    $frFile = Join-Path $temporary 'prices-fr.csv'
+    $frRows | Export-Csv -LiteralPath $frFile -NoTypeInformation -Encoding utf8NoBOM
+    Check (-not ((Get-Content -LiteralPath $frFile -Raw) -match '"\d+,\d+"')) 'fr-FR: exported CSV has no decimal comma value.'
+  }
+  finally { [Globalization.CultureInfo]::CurrentCulture = $savedCulture }
+  foreach ($bad in @('"30,00"', '"1,234.50"', '1 234.5')) {
+    $path = Write-Fixture ('override-bad-' + [guid]::NewGuid().ToString('N').Substring(0, 6) + '.csv') @($priceHeader, "SPE_E3,EUR,$bad,Monthly,2026-01-01,,A,B,C,False")
+    Assert-Throws { Resolve-LicensePricingRows -SourcePath $baselinePath -OverridePath $path -PublicBaselinePath $baselinePath -RunId r -CollectedAtUtc c } '*Invalid UnitPriceMonthly*' "Price $bad is refused instead of being misread."
+  }
+  Assert-Throws { ConvertTo-WindowsEsuPriceRows @(Import-Csv -LiteralPath (Write-Fixture 'esu-comma.csv' @($esuHeader, 'WIN10_ESU,1,EUR,"55,25",2025-11-01,2026-10-31,True,A,B,C,False'))) r c } '*Invalid UnitPricePerDeviceYear*' 'ESU price with a decimal comma is refused.'
+
+  # 8. Template exposes the private keys; the collector creates and completes its runtime JSON.
   $template = Get-Content -LiteralPath (Join-Path $licensingFolder 'SmartM365-LicensePricing-Inventory.local.json.template') -Raw | ConvertFrom-Json
   Check ($template.PSObject.Properties['PricingOverrideCsvPath'] -and $template.PricingOverrideCsvPath -eq '' -and $template.PSObject.Properties['EsuPricingCsvPath'] -and $template.EsuPricingCsvPath -eq '') 'Template exposes empty private override and ESU keys.'
   Check ($ast.Extent.Text -match "Read-SmartM365JsonConfig -Path \(Join-Path \`$PSScriptRoot 'SmartM365-LicensePricing-Inventory\.local\.json'\) -Required") 'Runtime JSON is created and completed from the template.'
