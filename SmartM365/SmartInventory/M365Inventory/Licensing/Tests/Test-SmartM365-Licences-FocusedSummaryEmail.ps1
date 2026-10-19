@@ -2,7 +2,7 @@
 .SYNOPSIS
   Offline checks for the license overview and recovery email.
 .VERSION
-1.1.1
+1.1.2
 #>
 
 [CmdletBinding()]
@@ -97,6 +97,16 @@ function Update-TestLicensesReceipt {
   $receipt.Producer = 'SmartM365-Licences-Inventory.ps1'
   if (-not $receipt.Status) { $receipt.Status = 'Completed' }
   $receipt | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $path
+}
+function Update-TestUserActivityReceipt {
+  param([Parameter(Mandatory)][string]$Folder)
+  # Licences uses a usage report only when the completed UserActivity receipt lists it with the same hash.
+  $files = foreach ($name in @('M365_Users_Activity.csv','M365_Mailbox_Usage.csv','M365_Email_Activity.csv','M365_Apps_Usage_180D.csv','M365_OneDrive_Usage.csv')) {
+    $csv = Join-Path $Folder $name
+    if (Test-Path -LiteralPath $csv) { @{File=$name;Status='Success';IsPartialInventory=$false;Required=($name -eq 'M365_Users_Activity.csv');SHA256=(Get-FileHash -LiteralPath $csv -Algorithm SHA256).Hash} }
+  }
+  @{Status='Completed';IsPartialInventory=$false;TenantKey='prod';Producer='SmartM365-M365UserActivity-Inventory.ps1';Files=@($files)} | ConvertTo-Json -Depth 6 |
+    Set-Content -LiteralPath (Join-Path $Folder 'SmartInventory_SmartM365-M365UserActivity-Inventory.current.json.txt')
 }
 function Publish-TestLicenseReport {
   param([Parameter(Mandatory)][string]$Folder, [Parameter(Mandatory)][object[]]$TenantRows, [Parameter(Mandatory)][string]$CollectedAtUtc,
@@ -413,6 +423,7 @@ try {
   @(
     [pscustomobject]@{TenantKey='prod';'Owner Principal Name'='u6@example.invalid';'Is Deleted'='False';'Storage Used (Byte)'='1073741824';'Report Refresh Date'=$refresh;'Report Period'='180'}
   ) | Export-Csv -LiteralPath $oneDrivePath -NoTypeInformation
+  Update-TestUserActivityReceipt -Folder $testRoot
 
   $intunePath = Join-Path $testRoot 'Intune_Devices_Inventory.csv'
   @(
@@ -601,6 +612,7 @@ try {
   $oneDriveRows = @(Import-Csv -LiteralPath $oneDrivePath)
   $oneDriveRows[0].'Storage Used (Byte)' = '2147483648'
   $oneDriveRows | Export-Csv -LiteralPath $oneDrivePath -NoTypeInformation
+  Update-TestUserActivityReceipt -Folder $testRoot
   $oneDriveBoundary = Get-LicensesFocusedUsageRows -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -AsOfUtc $today
   Assert-Equal $oneDriveBoundary.DowngradeReview.Candidates 0 'OneDrive at 2 GB is excluded'
   Assert-Equal @($oneDriveBoundary.DowngradeDetails).Count 0 'Boundary user is absent from E3 to F3 detail'
@@ -615,10 +627,12 @@ try {
   Remove-Item -LiteralPath $emptyReviewPath -Force
   $oneDriveRows[0].'Storage Used (Byte)' = ''
   $oneDriveRows | Export-Csv -LiteralPath $oneDrivePath -NoTypeInformation
+  Update-TestUserActivityReceipt -Folder $testRoot
   $oneDriveMissing = Get-LicensesFocusedUsageRows -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -AsOfUtc $today
   Assert-Equal $oneDriveMissing.DowngradeReview.Unknown 1 'Missing OneDrive size is N/D'
   $oneDriveRows[0].'Storage Used (Byte)' = '1073741824'
   $oneDriveRows | Export-Csv -LiteralPath $oneDrivePath -NoTypeInformation
+  Update-TestUserActivityReceipt -Folder $testRoot
   if ($script:SentMail[0].BodyHtml -notmatch '<td style="[^"]*">E3</td><td style="[^"]*">2</td><td style="[^"]*">1</td>' -or
       $script:SentMail[0].BodyHtml -notlike '*Disabled users and activity/overlap indicators exclude identified shared mailboxes*') {
     throw 'The email does not separate disabled user accounts from shared mailboxes.'
@@ -903,6 +917,7 @@ try {
   $staleApps = @(Import-Csv -LiteralPath $appsPath)
   foreach ($row in $staleApps) { $row.'Report Refresh Date' = $today.AddDays(-20).ToString('yyyy-MM-dd') }
   $staleApps | Export-Csv -LiteralPath $appsPath -NoTypeInformation
+  Update-TestUserActivityReceipt -Folder $testRoot
   $usage = Get-LicensesFocusedUsageRows -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -AsOfUtc $today
   $e5 = @($usage.Rows | Where-Object Product -eq 'Microsoft 365 E5')[0]
   Assert-Equal $e5.Counts.LocalAppsInactive 0 'Stale Apps report is not treated as no use'

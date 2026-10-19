@@ -14,7 +14,7 @@
   as optional files M365_Licenses_ReportSkuCandidates.csv and M365_Licenses_ReportSkuCapacity.csv with the report snapshot identity;
   ReportSkuCapacity names the report product family of each SKU (ReportProduct) so consumers never re-implement the SKU rules.
 .VERSION
- 1.50
+ 1.51
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication; Microsoft.Graph.Identity.DirectoryManagement; Microsoft.Graph.Users; Microsoft.Graph.Groups; ImportExcel for the report attachment.
@@ -22,7 +22,7 @@
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
   Author: https://github.com/khda79/workplacecloudhub.com
-     Version : 1.50
+     Version : 1.51
   PowerShell: PowerShell 7+
   Minimum application permissions: Directory.Read.All, User.Read.All, Group.Read.All
   Requires: Microsoft.Graph.Authentication
@@ -1347,23 +1347,16 @@ function Get-LicensesFocusedUsageRows {
     @{ Name='M365_Mailbox_Usage.csv'; Key='User Principal Name'; Columns=@('TenantKey','User Principal Name','Report Period','Report Refresh Date','Last Activity Date','Is Deleted'); Refresh='Report Refresh Date'; Period='Report Period'; Expected='180' }
     @{ Name='M365_Email_Activity.csv'; Key='User Principal Name'; Columns=@('TenantKey','User Principal Name','Report Period','Report Refresh Date','Last Activity Date','Is Deleted','Send Count','Read Count'); Refresh='Report Refresh Date'; Period='Report Period'; Expected='180' }
     @{ Name='M365_Apps_Usage_180D.csv'; Key='User Principal Name'; Columns=@('TenantKey','User Principal Name','Report Period','Report Refresh Date','Last Activity Date','Windows','Mac'); Refresh='Report Refresh Date'; Period='Report Period'; Expected='180' }
+    @{ Name='M365_OneDrive_Usage.csv'; Key='Owner Principal Name'; Columns=@('TenantKey','Owner Principal Name','Is Deleted','Storage Used (Byte)','Report Refresh Date','Report Period'); Refresh='Report Refresh Date'; Period='Report Period'; Expected='180' }
   )
+  # Usage reports are used only when the completed UserActivity receipt lists them with the same hash.
   $reports = @{}
   foreach ($definition in $reportDefinitions) {
-    $source = Get-LicensesCsvSource -Folder $CsvFolderPath -FileName $definition.Name -Columns $definition.Columns -AsOfUtc $AsOfUtc -CollectorManifestName 'SmartInventory_SmartM365-M365UserActivity-Inventory.current.json.txt'
+    $source = Get-LicensesCsvSource -Folder $CsvFolderPath -FileName $definition.Name -Columns $definition.Columns -AsOfUtc $AsOfUtc -CollectorManifestName 'SmartInventory_SmartM365-M365UserActivity-Inventory.current.json.txt' -RequireFileReceipt
     $sources.Add($source)
     $reports[$definition.Name] = Read-LicensesIndexedSource -Source $source -ExpectedTenantKey $ExpectedTenantKey -KeyColumn $definition.Key -WantedKeys $wantedUpns -AsOfUtc $AsOfUtc -RefreshColumn $definition.Refresh -PeriodColumn $definition.Period -ExpectedPeriod $definition.Expected
   }
-
-  $oneDriveSource = Get-LicensesCsvSource -Folder $CsvFolderPath -FileName 'M365_OneDrive_Usage.csv' -Columns @(
-    'TenantKey','Owner Principal Name','Is Deleted','Storage Used (Byte)','Report Refresh Date','Report Period'
-  ) -AsOfUtc $AsOfUtc
-  $sources.Add($oneDriveSource)
-  $oneDrive = Read-LicensesIndexedSource -Source $oneDriveSource -ExpectedTenantKey $ExpectedTenantKey -KeyColumn 'Owner Principal Name' -WantedKeys $wantedUpns -AsOfUtc $AsOfUtc -RefreshColumn 'Report Refresh Date' -PeriodColumn 'Report Period' -ExpectedPeriod '180'
-  if ($oneDrive.Ready) {
-    $oneDriveSource.Forced = $true
-    $oneDriveSource.Provenance = 'CSV only; no matching current file receipt'
-  }
+  $oneDrive = $reports['M365_OneDrive_Usage.csv']
 
   $cutoff = $AsOfUtc.Date.AddDays(-90)
   $recoveryDetails = [System.Collections.Generic.List[object]]::new()
@@ -3248,7 +3241,7 @@ function Send-LicensesFocusedSummaryEmail {
   <p style="margin:7px 0 0;font-size:11px;line-height:16px;color:#64748b;">The attached Excel workbook lists each qualified recovery candidate once per license, with the recovery reason, Intune primary-PC indicator, last AD logon date and last M365 activity date. Its Summary sheet reconciles with this table. Activity dates are sortable Excel dates; an empty date cell means no qualified date was observed. AD LastLogonDate is replicated and approximate. Dates are not populated for identified shared mailboxes.</p>
   <h2 style="margin:22px 0 8px;font-size:16px;line-height:22px;color:#0f172a;">03 &nbsp; E3 to F3 downgrade review</h2>
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="$tableStyle"><thead><tr><th style="$headStyle">E3 assignments</th><th style="$headStyle">Review candidates</th><th style="$headStyle">N/D</th><th style="$headStyle">Excluded by checks</th><th style="$headStyle">Already in recovery</th></tr></thead><tbody><tr><td style="$cell">$e3ReviewAssigned</td><td style="$cell"><strong style="color:#0f766e;">$e3ReviewCandidates</strong></td><td style="$cell">$e3ReviewUnknown</td><td style="$cell">$e3ReviewExcluded</td><td style="$cell">$e3ReviewRecovery</td></tr></tbody></table>
-  <p style="margin:7px 0 0;font-size:11px;line-height:16px;color:#64748b;">The attached Excel workbook has an E3 to F3 review tab listing every qualified review candidate and the values used by these checks. Review candidates are enabled E3 UserMailbox users with mailbox size below 2 GB, no active archive or hold, no Windows/Mac Apps use in the 180-day report, OneDrive storage below 2 GB, and no second F1/F3/E5 suite. Missing or unqualified data is N/D. This is a manual downgrade review, not a recoverable E3 license count: confirm frontline eligibility, required E3 features, device rights and the commercial contract before changing a license. OneDrive usage comes from a CSV without a matching current file receipt and is provisional.</p>
+  <p style="margin:7px 0 0;font-size:11px;line-height:16px;color:#64748b;">The attached Excel workbook has an E3 to F3 review tab listing every qualified review candidate and the values used by these checks. Review candidates are enabled E3 UserMailbox users with mailbox size below 2 GB, no active archive or hold, no Windows/Mac Apps use in the 180-day report, OneDrive storage below 2 GB, and no second F1/F3/E5 suite. Missing or unqualified data is N/D. This is a manual downgrade review, not a recoverable E3 license count: confirm frontline eligibility, required E3 features, device rights and the commercial contract before changing a license. Usage reports, including OneDrive, are used only when the completed UserActivity receipt lists them with the same hash.</p>
   <h2 style="margin:22px 0 8px;font-size:16px;line-height:22px;color:#0f172a;">04 &nbsp; Activity and overlap</h2>
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="$tableStyle"><thead><tr><th style="$headStyle">License</th><th style="$headStyle">No AD or Entra activity (90d)</th><th style="$headStyle">No mailbox activity (90d)</th><th style="$headStyle">No local Apps use (180d)</th><th style="$headStyle">Multiple assigned SKUs</th></tr></thead><tbody>$($activityRows -join "`n")</tbody></table>
   <h2 style="margin:22px 0 8px;font-size:16px;line-height:22px;color:#0f172a;">05 &nbsp; Licensed shared mailboxes</h2>
@@ -3890,7 +3883,7 @@ function Publish-LicensesWeeklyHistory {
 # ==========================================================
 # Main
 # ==========================================================
-$ScriptVersion = "1.50"
+$ScriptVersion = "1.51"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LicensesCsvLogFolderPath' -DefaultValue $OutputPath
 $LatestCsvFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ''

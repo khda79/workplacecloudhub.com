@@ -18,7 +18,7 @@ Microsoft 365 and Entra inventory scripts outside the Intune-specific surface.
 
 ## Microsoft 365 Licensing
 
-`Licensing/SmartM365-Licences-Inventory.ps1` 1.49 publishes normalized license and
+`Licensing/SmartM365-Licences-Inventory.ps1` 1.51 publishes normalized license and
 service-plan data without repeating user and product labels on every service-plan
 assignment.
 
@@ -173,8 +173,12 @@ replicated and approximate. The email also has a separate E3-to-F3 review
 indicator for enabled E3 users with an observed UserMailbox below 2 GB, no
 archive or hold, no Windows/Mac Apps use, OneDrive storage below 2 GB, and no
 second target suite. Existing recovery candidates are excluded from that review.
-Missing input remains `N/D`. The OneDrive usage CSV is fresh-data checked but
-is marked provisional because no matching current file receipt is available.
+Missing input remains `N/D`. The five usage reports (`M365_Users_Activity.csv`,
+`M365_Mailbox_Usage.csv`, `M365_Email_Activity.csv`, `M365_Apps_Usage_180D.csv`,
+`M365_OneDrive_Usage.csv`) are used only when the completed UserActivity receipt
+lists them with the same SHA256 (fail-closed: a missing, running or failed receipt,
+an unlisted file or a different hash leaves the source N/D with its reason), then
+their tenant, report period and refresh date (14 days) are checked.
 Frontline eligibility and required E3 features require a manual review before
 changing a license.
 The same workbook has an `E3 to F3 review` sheet listing each qualified review
