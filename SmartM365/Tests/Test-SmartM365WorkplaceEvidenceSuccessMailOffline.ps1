@@ -3,7 +3,7 @@
 .SYNOPSIS
     Synthetic completion-email regression tests; no tenant or transport is executed.
 .VERSION
-    1.0.0
+    1.0.1
 #>
 [CmdletBinding()]
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter','',Justification='Transport stubs retain production signatures without performing I/O.')]
@@ -27,12 +27,12 @@ foreach($definition in @(@{Tree=$ast;Name='Send-PreparedSuccessMail'},@{Tree=$tr
 # Execute the real entry-point tail and transfer branch with stubbed producers and mail.
 # This covers placement/guards as well as the HTML builder, without importing Core.
 $main=@($ast.FindAll({param($node) $node -is [Management.Automation.Language.TryStatementAst]},$true) | Where-Object {
-    @($_.Body.Statements | Where-Object {$_.Extent.Text -match '^\$result\s*=\s*Invoke-PreparedEvidencePipeline'}).Count -eq 1
+    @($_.Body.Statements | Where-Object {$_.Extent.Text -match '^\$result\s*=\s*Invoke-PreparedStep\s*\{\s*Invoke-PreparedEvidencePipeline'}).Count -eq 1
 })
 if($main.Count -ne 1){throw 'Expected one preparation try block.'}
 $statements=@($main[0].Body.Statements)
 $start=0
-while($start -lt $statements.Count -and $statements[$start].Extent.Text -notmatch '^\$result\s*=\s*Invoke-PreparedEvidencePipeline'){$start++}
+while($start -lt $statements.Count -and $statements[$start].Extent.Text -notmatch '^\$result\s*=\s*Invoke-PreparedStep\s*\{\s*Invoke-PreparedEvidencePipeline'){$start++}
 $normal=[scriptblock]::Create(($statements[$start..($statements.Count-1)].Extent.Text -join "`n"))
 $transferBranch=@($statements | Where-Object {$_.Extent.Text -match '^if\s*\(\$TransferOnly\)'})
 if($transferBranch.Count -ne 1){throw 'Expected one transfer-only branch.'}
@@ -67,6 +67,8 @@ function Send-PreparedEvidenceBatch {
     return $script:receipt
 }
 function Invoke-PostTransferRetention {param($VerifiedTransfer) $script:events.Add('retention')}
+function Invoke-PreparedStep {param([scriptblock]$Action) & $Action}
+function Register-PreparedRunCsvFiles {param($PreparedResult)}
 function WriteLog {param($Message,$Level)}
 function Send-SmartM365TeamsNotification {param($Title,$Message,$Level,$Channel,$ResultSummary,$Facts) $script:events.Add('teams')}
 function SendEmailHtmlReport {
@@ -154,8 +156,8 @@ try {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCycv+pDDenmWPD
-# ipa04ddh2keai1JWZoZbzug+z7PBcqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC8aMfh/9x6ag+W
+# TNxVDOVIGdH4h7WoAJXgxDP0ihhEqaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -288,31 +290,31 @@ try {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIBw8aD2PoOrBSpgwKsbIwf2k1l9S6zH4LN5Hp4MrR2kTMA0GCSqG
-# SIb3DQEBAQUABIIBgHczo8Hqw7Ln6Alzdho2Nr9UrM3gLu8VTSP2Up+r+Y59t5NQ
-# ozC9j9MP0x3bT3FePBXAG9msoR2T0HTQEajAyvJvOkPRZJ+f/qcNh7ebjPaWqiYm
-# F6ovqGcEDGYxHyblYTizQ6OVr9yxadLisRc6HnZb6n8lFey3y1aLxyhd0dT7Y/lZ
-# Qf9Z5qpl2YMExGmsqRLJi6/elDebI5j3MYKXjFKquNUAYHopUtl09PfYa6dbdEj2
-# FIQq5ziYG7rwPjN4aWS9G8dBUJz11pozxAKwBbEjyqyoFeFX1UbGBdL6R9dqFk2J
-# KwdHW6VTTWjtR99eh9DbMVR9iHCt8aAmu8pjuoQmVqzEaXu0f9HI9arFuvX/wGev
-# TN8sEz0t8TaDAg/pCLNv7N72tmofXRvwdWTZS46J4v9gcaR4cRMyCT6X7aCAyHeu
-# Pp/omqOBmFW61xcWArH6bPvxyilRPMSysFsjrDpKZ0Bsz1oTUU/M7zIzdE2O6l3V
-# PRgS5J3HBsd1W5ZHvqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEICmc/2WH8PhhVru6pHA0XZ9AxF4ixqGf1IcD3EVH/kxiMA0GCSqG
+# SIb3DQEBAQUABIIBgLC+RrIgRVr3vBzdDgsvNnJqT+iLkc87/gYxMsVF43tX6laz
+# QcLa8n5yCX7YJEucNpoEAfXb/tp9l6oahvibfvxytuKMGSwIZC+9kFuAQ2Ie1wDW
+# j3T0EXRSeKixXK+FVV9rEtVRAM1FNPo4cCVyn+wq8f98hVrhCfpf9OC3vi9K9L0I
+# qUJcqCwp5L4rzeNDrOaJvMp0/cVX971pBZBTXUq09TndzIlSVGLc85T11KVKW+uG
+# CDeKZbdTzmkc2JUwLCPcG320LDjmWFtBbWK5JLO1P1LnASWBxnrHm04TS37kwT74
+# AHHifqJvy5LTsyBcQbeOEHm4LUzqL9lu1yql/LFRHj0WDapfgkw9WioIrwtgFSl5
+# N+6Yw5kH3j2xLFSCaAH1Dp5E2S9WUxAvP61okKF5Af8KnDdzIYRgSlk2tPTlfK+n
+# P9+7+uHJTKOES5IwzjO/pNdRxa09B0v7bf8TeBQEPc8b+5Z82/ve+MblY2xqnHBm
+# 25iBso1uOGs/xjemRKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTkyMjI2
-# MTdaMC8GCSqGSIb3DQEJBDEiBCBzmbNCsInNrpa9LV53Qq6HYkW9d1EhkQPMFdz5
-# 6NY5iDANBgkqhkiG9w0BAQEFAASCAgB2CeGQ2LIW9Kbg7l64mAErcfHrsHalop+F
-# +O4hfusKEdmDdUcI0DQOwRAVOFCgLPMLZWgvahpoSzurnEEcOZzCx3KSZeVdhg/+
-# LqP2MDRcDaoSP99bBGARaTcUxdIKMBTagiGIwE3GUzuhB536cbtm/2GMiU9czcYL
-# NfiI0nhKLhTj+I0l7h+JjBC57azfsnUWL2fxaUt54A57BX0ucnvodVrdzhZ0L0hL
-# DtdDxRnvI//b2zq4k5LplHQEtkKTqe+vIWQwQmlByj9aqHsl7en6Q11ap99GVi+e
-# lEm9f8bv61P2hTV961CEny4aLpw9/cdIVRwPQmHuIfpjWKtcm4z38AUeeNCVsWiv
-# zpO8gyd3NhsCkb0i1BwDiLa6XQiOHbfGxO2S+JOICfTxwjWmHDpN0xmrUVbJrspj
-# 6rSs1IOgxvtdxix9EZABh46CzD1AnEBG4VviRUPKyhuroE7r9HmfBhmiWiJj4Aj8
-# g/2HIxb/hvG4d2EQVc0m3o4VZ7rSzNLa8XhNCd3jWW1Yz+2R7nioZ5YUa/ZZzMHT
-# AXLyG2a44OlwFyFz3kPKZ6uZ3h9TldbvvnX+dpAxrU9x3HJj/7AsltbgYEHfsTM+
-# Y01mROyCTP6QVu8pt5iIC+dWjYIu33PQLhOUMj1Y7wEZa9agVLFTsJtCr2cXFiCL
-# QCtfNhHWWw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTkyMzQ0
+# NDZaMC8GCSqGSIb3DQEJBDEiBCC4iR/sBMFAlauroj7th0fdboHdL6J2nu349T5j
+# yg5/SzANBgkqhkiG9w0BAQEFAASCAgBceZ9t/wgIiuT0lPgKCgU2bDGDKytsIuqh
+# eNV4m6adHlh1AHEvsMxFvqQvKfjoIDUTRcM0yLSaShS9HYyBqcE9hANPEE1ZSJCt
+# Yy3giF/d5LcCW+ieLvhZqvZb0ae70G6pw6qIwJAVYD4Txuux6HJHn3EfFKS2o7+V
+# VEn1qEhvJJ/lhHpJg3MnIgjRIwe38334co3T6m2yIbXJoqw4GbrlN/Hgrm9sbNzR
+# 0GzISC4p7ZKyijMnm7+s+Pyx9+G4m5nI1XioqWCNCKSVDd/wPjGvCC7OhCxDh8U8
+# 0SuZrDRmuGfMf7a/0fVuKMlCxUe+EzYGEEPhKy9ezc/xtUFEovisdHAHrz5b0cMA
+# 2p1BZ+nQKyyKLlEjY1Hg/+Q4EgWHVUmDZMW/G6WWAf3KQGioqvjy58K7mDprTOGn
+# K+zvMWHCXINnKf/ePxloresE5ld/+e67UINAjOv+alAT7z8jOmejzZ+bDbIyU2qZ
+# M4Xn0MMOWHxXraItQhQyXDwsJq+OLnow3Dl3pmwTbkASTZgmsg15YEgrZ+179Jq5
+# E9y3/AaLgudbDvN+v+1UwzGKQml/g2BCyOQogX9ySUi9CtYU/akPhHICbpCn1z1V
+# +uTqDoAUVxTPs7Hhgx8aZor4PC5PoE3Q/qZ8N74C0dIcSdjLLPUvXOpdsa3MT4nP
+# rp9kNBF0dA==
 # SIG # End signature block

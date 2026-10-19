@@ -239,6 +239,17 @@ ValidateOnly, failed transfers and local publication alone cannot trigger couple
 retirement. No additional scheduled task is installed. A retention exception is
 logged separately and leaves successful publication and its pointer intact.
 
+Blocked retention is also reported as a warning, with `Plan.BlockedReasons` in
+the main execution log. A standalone retention command keeps its own completion
+banner; the wrapper uses `-NoCompletionBanner` to emit only the overall result.
+To inspect an existing incident without rerunning preparation or retention,
+read the saved plan's `BlockedReasons` and rows with `State = Blocked`, plus the
+saved journal. A consumer registry qualification failure requires reviewing the
+complete consumer list and pinned batches. A target mismatch requires checking
+the private configured target against the saved resolved target. Do not enable
+Auto or bypass either check to clear a warning. Rows without verified published
+chain membership remain blocked independently of those configuration checks.
+
 `PreparedRetention` is added from the wrapper's committed template when its
 runtime configuration is loaded; existing local values are preserved. Private
 configuration and registry deployment are operator actions, separate from Git.

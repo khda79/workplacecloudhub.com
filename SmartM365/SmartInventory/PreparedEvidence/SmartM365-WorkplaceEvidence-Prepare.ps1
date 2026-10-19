@@ -1,8 +1,8 @@
-﻿<#
+<#
 .SYNOPSIS
     Prepare a validated, versioned SmartWorkplaceIntelligence batch after raw collectors.
 .VERSION
-    0.4.3
+    0.4.4
 .NOTES
     PowerShell 7. SharePoint mapping reads use the tenant configuration unless Offline.
     Deployment must include the sibling SmartWorkplaceIntelligence/scripts, config and reference folders.
@@ -37,6 +37,41 @@ $mappingRoot = ''
 $batchUploadEnabled = $false
 $transfer = $null
 $transcriptStarted = $false
+function Invoke-PreparedStep {
+    param([Parameter(Mandatory)][scriptblock]$Action)
+    # Native child processes flatten warning records into console text. Restore their
+    # severity before the shared completion summary, keeping success output unchanged.
+    & $Action 3>&1 6>&1 | ForEach-Object {
+        if ($_ -is [Management.Automation.WarningRecord]) {
+            WriteLog -Message $_.Message -Level WARNING
+        } elseif ($_ -is [Management.Automation.InformationRecord]) {
+            foreach ($line in ([string]$_.MessageData -split '\r?\n')) {
+                if ($line -match '^(?:\[\d{4}-\d{2}-\d{2}[^\]]*\]\s*)*(?:WARNING|AVERTISSEMENT)\s*:\s*(.*)$') {
+                    WriteLog -Message $Matches[1] -Level WARNING
+                } elseif ($_.Tags -contains 'PSHOST') {
+                    Write-Host $line
+                } else {
+                    Write-Information -MessageData $line -Tags $_.Tags -InformationAction Continue
+                }
+            }
+        } else { $_ }
+    }
+}
+function Register-PreparedRunCsvFiles {
+    param([Parameter(Mandatory)]$PreparedResult)
+    # The validation receipt lists prepared tables only, excluding Source/History artifacts.
+    $receipt=Get-Content -LiteralPath (Join-Path $PreparedResult.BatchPath 'validation.json.txt') -Raw | ConvertFrom-Json
+    $names=@($receipt.Files.File)
+    if ($receipt.Passed -ne $true -or $receipt.SchemaOnly -ne $false -or $names.Count -lt 1 -or
+        $names.Count -ne $PreparedResult.Files -or @($names | Sort-Object -Unique).Count -ne $names.Count -or
+        @($names | Where-Object {$_ -cnotmatch '^[A-Za-z0-9_-]+\.csv$'}).Count) {
+        throw 'Prepared CSV counter requires the matching successful validation receipt.'
+    }
+    if (-not $global:csvGeneratedPaths) {
+        $global:csvGeneratedPaths=[Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    }
+    foreach ($name in $names) { [void]$global:csvGeneratedPaths.Add((Join-Path $PreparedResult.BatchPath $name)) }
+}
 function ConvertTo-PreparedAgeOverrides {
     param([AllowNull()]$InputObject)
     $result = @{}
@@ -59,10 +94,16 @@ function ConvertTo-PreparedAgeOverrides {
 function Invoke-PostTransferRetention($VerifiedTransfer) {
     # Retention failure must never enter the preparation/publication failure path.
     try {
-        $retention = & (Join-Path $product 'scripts/Invoke-PreparedSharePointRetention.ps1') -Tenant $Tenant -Mode Configured `
-            -ConfigurationPath (Get-SmartM365JsonReadPath (Join-Path $PSScriptRoot "$scriptName.local.json")) `
-            -ExpectedPublishedBatchId $VerifiedTransfer.BatchId -ExpectedPointerSHA256 $VerifiedTransfer.PointerSHA256
-        WriteLog -Message "Post-transfer retention: $($retention.Status); plan=$($retention.PlanPath); journal=$($retention.JournalPath)." -Level INFO
+        $retention = Invoke-PreparedStep {
+            & (Join-Path $product 'scripts/Invoke-PreparedSharePointRetention.ps1') -Tenant $Tenant -Mode Configured `
+                -ConfigurationPath (Get-SmartM365JsonReadPath (Join-Path $PSScriptRoot "$scriptName.local.json")) `
+                -ExpectedPublishedBatchId $VerifiedTransfer.BatchId -ExpectedPointerSHA256 $VerifiedTransfer.PointerSHA256 -NoCompletionBanner
+        }
+        $level=if($retention.Status -in @('Blocked','PartialOrBlocked')){'WARNING'}else{'INFO'}
+        $reasons=if($retention.PSObject.Properties['Plan'] -and @($retention.Plan.BlockedReasons).Count){
+            ' Reasons: '+(@($retention.Plan.BlockedReasons) -join '; ')
+        }else{''}
+        WriteLog -Message "Post-transfer retention: $($retention.Status); plan=$($retention.PlanPath); journal=$($retention.JournalPath).$reasons" -Level $level
     } catch {
         WriteLog -Message "Batch publication remains verified; retention incomplete: $($_.Exception.Message)" -Level WARNING
     }
@@ -220,7 +261,7 @@ try {
     }
     if ($TransferOnly) {
         $phase='SharePoint existing-batch transfer'
-        $transfer=Send-PreparedEvidenceBatch @transferParameters -ExpectedBatchId $ExpectedBatchId
+        $transfer=Invoke-PreparedStep { Send-PreparedEvidenceBatch @transferParameters -ExpectedBatchId $ExpectedBatchId }
         Assert-PreparedTransferResult -Result $transfer -ExpectedBatchId $ExpectedBatchId
         Invoke-PostTransferRetention $transfer
         WriteLog -Message "Transfer complete: batch=$($transfer.BatchId); CSVs=$($transfer.CsvFiles); verified files=$($transfer.VerifiedFiles); pointer verified=$($transfer.PointerVerified); audit=$($transfer.AuditPath). No collection, mapping download or CSV generation." -Level INFO
@@ -258,7 +299,7 @@ try {
             SharePointMigrationWorkbookFileName=[string](ConfigValue 'PreparedSharePointMigrationWorkbookFileName')
             SharePointMigrationBindingsFileName=[string](ConfigValue 'PreparedSharePointMigrationBindingsFileName')
         }
-        $mappingRoot = Receive-PreparedMappingWorkbooks -DataRoot $data -DownloadFile $downloadMapping -MailboxMigrationExceptionsEnabled:$mappingExceptions -PythonCommand ([string](ConfigValue 'PreparedPythonCommand')) @migrationMappingArgs
+        $mappingRoot = Invoke-PreparedStep { Receive-PreparedMappingWorkbooks -DataRoot $data -DownloadFile $downloadMapping -MailboxMigrationExceptionsEnabled:$mappingExceptions -PythonCommand ([string](ConfigValue 'PreparedPythonCommand')) @migrationMappingArgs }
         WriteLog -Message "Classification workbooks downloaded, validated and retained in DATA: $data. Mailbox exceptions enabled=$mappingExceptions; this run uses its isolated validated mapping set." -Level INFO
     }
     if ($WorkforceDiagnostic) {
@@ -308,11 +349,12 @@ try {
         }
         if ($bindingPath) { $params.MailboxMigrationBindingsPath=$bindingPath }
     }
-    $result = Invoke-PreparedEvidencePipeline @params
+    $result = Invoke-PreparedStep { Invoke-PreparedEvidencePipeline @params }
+    if (-not $ValidateOnly) { Register-PreparedRunCsvFiles -PreparedResult $result }
     if (-not $ValidateOnly) { WriteLog -Message "Local batch published and validated: $($result.BatchId); CSV files=$($result.Files); path=$($result.BatchPath). Cloud transfer is a separate step." -Level INFO }
     if (-not $ValidateOnly -and $batchUploadEnabled) {
         $phase='SharePoint batch transfer'
-        $transfer=Send-PreparedEvidenceBatch @transferParameters -ExpectedBatchId $result.BatchId
+        $transfer=Invoke-PreparedStep { Send-PreparedEvidenceBatch @transferParameters -ExpectedBatchId $result.BatchId }
         Assert-PreparedTransferResult -Result $transfer -ExpectedBatchId $result.BatchId
         Invoke-PostTransferRetention $transfer
         WriteLog -Message "SharePoint batch and pointer verified: $($transfer.BatchId); files=$($transfer.VerifiedFiles); audit=$($transfer.AuditPath)." -Level INFO
@@ -353,9 +395,9 @@ try {
 } finally {
     $smartM365RunGuard.InCleanup=$true
 
-    if ($mappingRoot) { try { Remove-PreparedMappingWorkbooks -DataRoot $data -MappingRoot $mappingRoot } catch { Write-Warning "Downloaded mapping cleanup incomplete: $($_.Exception.Message)" } }
-    if ($transcriptStarted) { try { Stop-SmartM365RunTranscript | Out-Null; Update-SmartM365TimestampedTranscript -Path $global:logTranscriptFile } catch { Write-Warning "Transcript finalization failed: $($_.Exception.Message)" } }
-    if ($coreLoaded) { Complete-SmartM365ExecutionContext -Status $(if($failure){'Failed'}else{'Success'}) -ErrorRecord $failure -FailureStage $(if($failure){$phase}else{''}) }
+    if ($mappingRoot) { try { Invoke-PreparedStep { Remove-PreparedMappingWorkbooks -DataRoot $data -MappingRoot $mappingRoot } | Out-Null } catch { WriteLog -Message "Downloaded mapping cleanup incomplete: $($_.Exception.Message)" -Level WARNING } }
+    if ($transcriptStarted) { try { Stop-SmartM365RunTranscript | Out-Null; Update-SmartM365TimestampedTranscript -Path $global:logTranscriptFile } catch { WriteLog -Message "Transcript finalization failed: $($_.Exception.Message)" -Level WARNING } }
+    if ($coreLoaded) { Complete-SmartM365ExecutionContext -Status $(if($failure){'Failed'}else{'Auto'}) -ErrorRecord $failure -FailureStage $(if($failure){$phase}else{''}) }
     else { Write-SmartM365CompletionBanner -Status 'Failed' }
 }
 if ($failure) { $smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; $smartM365RunGuard.ExitCode=(1); exit $smartM365RunGuard.ExitCode }
@@ -370,12 +412,11 @@ if ($failure) { $smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.Exp
 }
 if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 
-
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDveM5QqjPYMbYq
-# ITYalH9JuMiL9WZvvePomrSTVV4IcaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAqhE+J2d3l8Wcb
+# cFq+sqzXZJC07Y96aCWP1ya+5ABsuqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -508,31 +549,31 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIPU3XN5SzoR7fDekEAtPKlmPWnobg8o8xql7CZ9l1wdRMA0GCSqG
-# SIb3DQEBAQUABIIBgGbf7956gJDBr8lvRl4HAEhWvn6BCuoU4b8LMmu4CL9L/8Os
-# Ua75AhsGUX79puCZ6EFSmhci9mxpq+h8h7kwC4L+xvBsyq8HSISGqGudw9YrX7oB
-# +Ppv7E/cGaa062lCxdYnNHL+7rF/5D/WRhi69MEhifaaQyrsOYxV7vzu5mKZEddc
-# qF2CmiZopWApwqLYxPVhrbGIE6SAK4TOoGBLk7baiQJpgS7OAtOeMt3vp6bmb6GK
-# DQYW2cAL1lEUkIyEFeD8+kcs7G+47g6BQnAvnYGWEWlEmGRLsYZWWxjvSX5y0o7j
-# alTc8tCSr8AFr7+PDCaJmw/oHKmI4zoXP/Zrk3/JLuqxIWCTuNMdzn8l8KAOVfV2
-# YpcWx59+lOHnHcI+X2cL7iPitC+usQOKEmH23IIxxjW6EkVSi4ZZ8ZIQ23rHGuuV
-# FUgBl/nEiJeLz2NTnwLy6nKu01VxkJjpSkDOLmXsYJB/7y1++3BDMSXAo0JtpFcV
-# j5Ew3ySCXaHKDMuC4KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIN5bFPy48zcCCjGLoGva9krl90wItE5H0EQhFsP/vA4UMA0GCSqG
+# SIb3DQEBAQUABIIBgIjBiCRnUfmCC1OlmQCn95/WX2oS9gzhOR7f3c16uao2Uday
+# EU/909W7utGxJ0H8lBWw+lYPvjUrG0w9FqtTGtm1jr0721SADydLU2bAEZYs9mtV
+# T+doCUtV2MHUSM6uYuSSStHwqdIb1BXLGuNuUuN5ns+UunIkYeZQJwNEJYt4+44n
+# SOxIxXa9czBdUS/jEwM/6WFVg3pRPuHI+WNsQzwzwDs0GqGW+eIJZCgoTOg72JGl
+# M+Onm4un/zrRs94xRTpgq+n1M6Cn+e2nCoT2VHNNs3Ix3GXS1xeHkPA1MZoxUM60
+# j8gcRMAnitER/zppbSIQpZDtetzu6teqiuzeJkhFmylp8FDAa3wM5CV5erGd2gLC
+# KIYkL2qJko8FFwshkXCA7g5bs1fbm57JLjJ34le6Ex0r4psk/XL/6KFoRZoMqWfk
+# UgSh48C4iEE5bcAaVPQkUSp0U0tQyrhWBUFzvL7ZslrD8wIbP9JKzJibulW4k5es
+# fDYo2D3cBgqWCNtntqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTkyMjI2
-# MTdaMC8GCSqGSIb3DQEJBDEiBCBdL1gwKf1tyJpLAv44szSda2KkwHf6FDr7VA2/
-# AdGYUzANBgkqhkiG9w0BAQEFAASCAgCgUC7RebIh9MjWTvtqrfP0BWJEcerHSai+
-# hF0xpfQCmi4fOVOcfY+H5TcpiqJ4c8Q996rHqciynbXMQZm7GF5IN2g6IsVULJD7
-# l1ehhgZboeIcf1TNEPRByRIB2hd3SdHYFtrzEMfsgEXXbuv4X/TK8WHabbAAcVZy
-# SUp8Bu7eLYy/Jyrnfm/COihk5Ew1A6qBwDqqLLcR08MKkp2sY0b1FPAA0VJ2lxG6
-# 5mCQEOtdE6dhSlQhA0D1FHDx3fkffKxInI1lrT5StWdCySa16xGL4mKb9zNE13k8
-# ekrsb9VbLwnk4WcP5c0KkCV042VYLX2D0ngypivHA88txFgNuCr3mId1cI0szVYJ
-# wMit8eO/89L02EQToYmMtIFsu+bq0aiJ/q+S88WNLGaZt95DezpDdlzcIYdWWb8y
-# kQ8R5rAaxnN7VJnVPEWbp9agzubTyEX3ed6KZy4YRTR7ldLblUKL7TTr3CczHD5k
-# hQbWqSOnzRsyvQaZzSGPjFITlaUfqj3TesS8oD7JrEJhjZ01yop8bO6n2ddptCYy
-# 5RQLgpg25hs7rRaUAkkTdAJp6XMnUvo/SCZbW0pvF1WC3wrX6OjaBIm+ag+ZzOt5
-# fGrZfIBiLj6q2OUxnwHztNgvy12OaQY5zot4//7zfibk8zO//z8cfajvmDJo5XCL
-# 9RiPXEtlXg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTkyMzQ0
+# NDVaMC8GCSqGSIb3DQEJBDEiBCCK1GC97kYOPPjjVZB4kkT7AOTi9Y9sVOKkqQjy
+# ukL0FzANBgkqhkiG9w0BAQEFAASCAgAUYdufnVvmPszvm8/0+bQSVcC+060DoJUo
+# N1Z9uES6b3EOe/y7xFrAl4rKVA+6ulRodqMxhpCrlYoj4az+fvmKM9F1VuxL3PEt
+# 0fL9Ig/Xk0nLZW7fR2g4N9EbX+tJTlyVDG3hm8EVxCD7XVqXfivv7JVCtkHPh+5c
+# 6zAiIBG0UoxnYBXg421dvjjRNyzCgtKPGjcgOfONl2EZzMMWeVlTXPZswYhKzgsg
+# sx5IReJ4HrGsEal1XCkCsnllxrHVM8DMFIDEhhsvu9XaMqp25z+ULsHM23xqYJnz
+# c1ppuDcOftrFqYnfWHVxWnuCblWsQDy6NrpzCQHT8KIOBewF7tO6faxSxUEUPdhe
+# qp+JAjibljUnp8Q8+DN5n9McibtjLOnZQ+2wJG9B+TcYJ4tT65JxdLWGscaii1RV
+# CiyzpLWt+Kof+FhhhozB0NtciRZaWgJ6RpJLfoUviLPfCSnBRrhUHhctzoe9rU3+
+# 9bUDBF3xb6W9M5Jy9ZJM87++cD9wiBjvPeujo5gLvfjsSGBSG02mvNPc7IRgek9l
+# Kq6TYiVIJU+36Jzvk9Uotd8PI1LEsy/Mnqkdymshj4SAoC/egOMlWS/dY6xMUKD7
+# wIHZ9GyTxhZXyRbuS3gy8yj7bfdWK9QT7o6QK6lma3Bg4RqyxHsce/AsR2+dCYo7
+# lmRuvo9yQg==
 # SIG # End signature block

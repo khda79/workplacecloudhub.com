@@ -64,6 +64,14 @@ Mail delivery errors follow the existing error path under the
 `Success email notification` phase; an already verified batch remains published.
 Check that phase before rerunning preparation solely because a notification failed.
 
+The final CSV count includes validated prepared tables published by this run,
+excluding captured source/history artifacts. It remains available if a later
+transfer fails. Validation and transfer-only modes generate no CSVs.
+Warnings from child generators are relayed into the shared execution counter;
+blocked retention adds a warning with its plan reasons. Such runs complete with
+warnings while preserving an already verified batch. Embedded retention leaves
+the completion banner to the preparation wrapper.
+
 Online Intelligence runs download both classification workbooks under the tenant
 DATA root (beside DATA-LAST and DATA-ALL), not under the OS temporary directory.
 Both workbooks must pass structural validation before replacing the retained
