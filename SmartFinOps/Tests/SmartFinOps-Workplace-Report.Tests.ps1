@@ -3,7 +3,7 @@
 .SYNOPSIS
   Offline tests of the SmartFinOps Workplace V2 executive HTML report.
 .VERSION
-1.4.0
+1.4.1
 .NOTES
   Synthetic FinOps_* fixtures and receipts only, in an isolated temporary runtime (no local configuration,
   export or tenant). The input contract is checked against the valuation engine output specification.
@@ -354,6 +354,21 @@ try {
   $parisMidnight = Send-ReportDailyEmail @mailArgs -Send $fake -NowUtc ([datetimeoffset]'2026-10-20T22:30:00Z')
   Check ($parisMidnight -eq 'Sent' -and (Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json).LocalDate -ceq '2026-10-21') 'the day follows Europe/Paris time (22:30 UTC is already the next day)'
 
+  # The real state writer on a UNC path (\\localhost\<drive>$), as a DATA-LAST on a share: same gate, nothing else written.
+  $uncFolder = Join-Path $mailRoot 'unc'
+  New-Item -ItemType Directory -Path $uncFolder -Force | Out-Null
+  $uncState = '\\localhost\{0}${1}' -f $uncFolder.Substring(0, 1), (Join-Path $uncFolder 'SmartFinOps_Workplace-Report_DailyEmail_SendState.json.txt').Substring(2)
+  $before = $sent.Count
+  $uncFirst = Send-ReportDailyEmail @mailArgs -StatePath $uncState -Send $fake -NowUtc $day1
+  $uncAgain = Send-ReportDailyEmail @mailArgs -StatePath $uncState -Send $fake -NowUtc $day1.AddHours(2)
+  $uncRecord = Get-Content -LiteralPath (Join-Path $uncFolder 'SmartFinOps_Workplace-Report_DailyEmail_SendState.json.txt') -Raw | ConvertFrom-Json
+  Check ($uncFirst -eq 'Sent' -and $uncAgain -eq 'Skipped' -and $sent.Count -eq $before + 1 -and $uncRecord.Status -ceq 'Sent' -and $uncRecord.LocalDate -ceq '2026-10-19' -and $uncRecord.TenantKey -ceq $tenant) "UNC state path: one mail, state Sent, second run skipped ($uncFirst, $uncAgain)"
+  $uncFailState = $uncState -replace 'SendState\.json\.txt$', 'FailState.json.txt'
+  $uncFailed = Send-ReportDailyEmail @mailArgs -StatePath $uncFailState -Send { throw 'transport down' } -NowUtc $day1
+  Check ($uncFailed -eq 'Failed' -and (Get-Content -LiteralPath (Join-Path $uncFolder 'SmartFinOps_Workplace-Report_DailyEmail_FailState.json.txt') -Raw | ConvertFrom-Json).Status -ceq 'Pending') 'UNC state path: send failure keeps the state Pending'
+  $uncFiles = @(Get-ChildItem -LiteralPath $uncFolder -Force | ForEach-Object Name | Sort-Object) -join ','
+  Check ($uncFiles -ceq 'SmartFinOps_Workplace-Report_DailyEmail_FailState.json.txt,SmartFinOps_Workplace-Report_DailyEmail_SendState.json.txt') "UNC state path: only the state files, no lock, journal or temporary file ($uncFiles)"
+
   $nmInputs = Read-ReportInputs -Root $notMeasured -ProfileKey $profileKey -TenantKey $tenant
   $nmContent = Get-ReportDailyEmailContent -Inputs $nmInputs -Tenant $profileKey
   Check ($nmContent.Status -ceq 'NotMeasured' -and $nmContent.Subject.EndsWith('Licences report not measured') -and -not ($nmContent.BodyHtml -match 'EUR \d') -and $nmContent.BodyHtml.Contains('no amount is published')) 'Licences not measured: status mail with the reason, no amount'
@@ -397,7 +412,7 @@ try {
   $bannerStart = [array]::IndexOf($logLines, '================================================================================')
   Check ($bannerStart -gt 0 -and @($logLines[0..($bannerStart - 1)] | Where-Object { $_ -notmatch '^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} \[' }).Count -eq 0) 'every log line before the completion banner is timestamped'
   Check (($logLines -join "`n").Contains(' SmartFinOps by WorkplaceCloudHub - Execution completed') -and ($logLines -join "`n").Contains(' Status    : COMPLETED WITH WARNINGS') -and ($logLines -join "`n").Contains(' CSV files : 0')) 'completion banner appended to the report log'
-  Check ($run.Log.Contains(' SmartFinOps by WorkplaceCloudHub') -and $run.Log.Contains(' GitHub  : https://github.com/khda79/workplacecloudhub.com') -and $run.Log -match 'Starting SmartFinOps Workplace Report v2\.4\.0 ' -and $run.Log -match 'Tenant context 1.4.1') 'startup banner and versions on the console'
+  Check ($run.Log.Contains(' SmartFinOps by WorkplaceCloudHub') -and $run.Log.Contains(' GitHub  : https://github.com/khda79/workplacecloudhub.com') -and $run.Log -match 'Starting SmartFinOps Workplace Report v2\.4\.1 ' -and $run.Log -match 'Tenant context 1.4.1') 'startup banner and versions on the console'
   $unavailable = Invoke-Report (New-ReportFixture 'banner-failed' -ChangeReceipt { param($r) $r.Status = 'Failed' })
   Check ($unavailable.ExitCode -eq 1 -and $unavailable.Log.Contains(' SmartFinOps by WorkplaceCloudHub - Execution failed') -and $unavailable.Log.Contains(' Status    : FAILED')) 'report not available: completion banner Failed'
   Check ($unavailable.Log -match '\[ERROR\] Report not available: ') 'report not available: logged as an error'

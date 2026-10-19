@@ -3,7 +3,7 @@
 .SYNOPSIS
   Offline tests of the SmartFinOps Workplace V2 valuation engine.
 .VERSION
-1.4.1
+1.4.2
 .NOTES
   Synthetic contoso data only, in an isolated temporary runtime (no local configuration, export or tenant).
   Source receipts are produced by the real SmartM365.Core module commands.
@@ -278,7 +278,7 @@ try {
   $banner = ($logLines[$bannerStart..($logLines.Count - 1)] -join "`n")
   Check ($banner.Contains(' SmartFinOps by WorkplaceCloudHub - Execution completed') -and $banner.Contains(' Script    : SmartFinOps-Workplace-Valuation.ps1') -and $banner.Contains(' CSV files : 7') -and $banner -match ' Duration  : \d{2}:\d{2}:\d{2}' -and $banner -match ' Status    : (SUCCESS|COMPLETED WITH WARNINGS)') "completion banner appended to the run log ($banner)"
   Check ($run.Log.Contains(' SmartFinOps by WorkplaceCloudHub') -and $run.Log.Contains(' Website : https://workplacecloudhub.com') -and $run.Log.Contains(' Errors    : 0')) 'startup and completion banners on the console'
-  Check ($run.Log -match 'Starting SmartFinOps Workplace Valuation v2\.2\.1 ' -and $run.Log -match 'Tenant context 1.4.1') 'engine and context versions logged at runtime'
+  Check ($run.Log -match 'Starting SmartFinOps Workplace Valuation v2\.2\.2 ' -and $run.Log -match 'Tenant context 1.4.1') 'engine and context versions logged at runtime'
   # Orchestrator contract: default success-evidence log pattern, 0 success, 3 completed with warnings.
   $orchestratorEvidence = 'Execution context:|Environment initialized successfully|Starting .* v|(?s:Execution summary:.*Status:\s*(?:Success|CompletedWithWarnings).*Errors:\s*0)'
   Check ($run.Log -match $orchestratorEvidence -and $banner.Contains(' Status    : COMPLETED WITH WARNINGS') -and $banner.Contains(' SmartFinOps by WorkplaceCloudHub - Execution completed with warnings')) 'warning run: exit 3, Completed with warnings banner, orchestrator success evidence'

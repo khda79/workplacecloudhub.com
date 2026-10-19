@@ -9,7 +9,7 @@
   FinOps_Showback or FinOps_Realization. A failed or inconsistent run gives a "Report not available" page
   with the reason and no figure; it replaces the current report so that no older figure stays visible.
 .VERSION
-2.4.0
+2.4.1
 .NOTES
   Input and output: the SmartM365 DATA-LAST of the profile (SmartFinOps_Workplace-Report.html), a copy in
   DATA-ALL\FinOps\Workplace\<FinOpsRunId>\ when that run is in the history, and the log in
@@ -32,7 +32,10 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-$script:ScriptVersion = '2.4.0'
+$script:ScriptVersion = '2.4.1'
+# Run with -File, this script scope is the global scope: SmartM365 session values (LogPath, SmartM365TenantKey, ...)
+# set by the mail and upload helpers would overwrite script variables of the same name. Names here never collide.
+$script:TenantKeyParameter = [string]$SmartM365TenantKey
 $script:LogLines = [System.Collections.Generic.List[string]]::new()
 $script:Invariant = [Globalization.CultureInfo]::InvariantCulture
 $script:ReceiptName = 'SmartFinOps_Workplace-Valuation.current.json.txt'
@@ -910,7 +913,7 @@ if ($MyInvocation.InvocationName -eq '.') { return }
 
 $exitCode = 0
 $startedAt = Get-Date
-$root = $null; $archiveDir = $null; $logPath = ''; $sharePoint = $null
+$root = $null; $archiveDir = $null; $runLogPath = ''; $sharePoint = $null
 try {
   . (Join-Path $PSScriptRoot 'Config\SmartFinOps-TenantContext.ps1')
   Write-SmartFinOpsStartupBanner
@@ -920,17 +923,17 @@ try {
   # SmartM365 data tree of the profile: valuation outputs and the page in DATA-LAST, run history in DATA-ALL, log in LOG-ALL.
   $layout = Get-SmartFinOpsDataLayout -DataLast $SmartM365LatestCsvFolderPath -DataAll $SmartM365DataAllRootPath -LogAll $SmartM365LogAllRootPath
   $root = $layout.DataLast
-  $logPath = Join-Path (Join-Path $layout.LogAll 'SmartFinOps-Workplace-Report') ('SmartFinOps-Workplace-Report-{0}.log' -f $startedAt.ToString('yyyy-MM-dd_HH-mm-ss', $script:Invariant))
-  $tenantKey = if ($SmartM365TenantKey) { $SmartM365TenantKey.Trim() } else { [string](Get-SmartFinOpsConfigValue -Name 'SmartM365TenantKey') }
+  $runLogPath = Join-Path (Join-Path $layout.LogAll 'SmartFinOps-Workplace-Report') ('SmartFinOps-Workplace-Report-{0}.log' -f $startedAt.ToString('yyyy-MM-dd_HH-mm-ss', $script:Invariant))
+  $tenantKey = if ($script:TenantKeyParameter) { $script:TenantKeyParameter.Trim() } else { [string](Get-SmartFinOpsConfigValue -Name 'SmartM365TenantKey') }
   Assert-SmartFinOpsResolvedPath -Name 'SmartM365TenantKey' -Value $tenantKey
   if (-not $tenantKey) { throw 'SmartM365TenantKey is empty: set it in the SmartFinOps configuration, pass -SmartM365TenantKey, or leave __USE_SMARTM365__.' }
-  Write-ReportLog ("Profile '{0}' - TenantKey '{1}'{2}" -f $Tenant, $tenantKey, $(if ($SmartM365TenantKey) { ' (parameter)' } else { '' }))
+  Write-ReportLog ("Profile '{0}' - TenantKey '{1}'{2}" -f $Tenant, $tenantKey, $(if ($script:TenantKeyParameter) { ' (parameter)' } else { '' }))
   $reportConfig = Get-SmartFinOpsConfigValue -Name 'Report'
   $minimum = Get-ReportProperty $reportConfig 'ShowbackMinimumGroupUsers'
   $minimumUsers = if ($null -eq $minimum -or [string]$minimum -eq '') { 5 } else { [int]$minimum }
   if ($minimumUsers -lt 1) { throw 'Report.ShowbackMinimumGroupUsers must be a positive integer.' }
   Write-ReportLog "Inputs and page: $root"
-  Write-ReportLog "Log: $logPath"
+  Write-ReportLog "Log: $runLogPath"
   if (-not $ValidateOnly) {
     $sharePoint = Get-SmartFinOpsSharePointConfiguration -TenantKey $tenantKey
     if (-not $sharePoint.Enabled) { Write-ReportLog 'SharePoint upload disabled.'; $sharePoint = $null }
@@ -976,7 +979,7 @@ try {
     else {
       try {
         $effective = Initialize-SmartFinOpsSmartM365Context -ProfileKey $Tenant -TenantKey $tenantKey
-        Import-Module (Join-Path (Split-Path -Path $PSScriptRoot -Parent) 'SmartM365\Modules\SmartM365.Core\SmartM365.Core.psd1') -MinimumVersion '1.0.90' -ErrorAction Stop | Out-Null
+        Import-Module (Join-Path (Split-Path -Path $PSScriptRoot -Parent) 'SmartM365\Modules\SmartM365.Core\SmartM365.Core.psd1') -MinimumVersion '1.0.91' -ErrorAction Stop | Out-Null
         $recipients = @{}
         foreach ($pair in @(@('DailyEmailTo', 'To'), @('DailyEmailFrom', 'From'))) {
           $value = [string](Get-ReportProperty $reportConfig $pair[0])
@@ -988,7 +991,7 @@ try {
           $recipients[$pair[1]] = $value.Trim()
         }
         # The SmartM365 mail copy is written next to the report log; the footer names this script.
-        $mailLogFolder = Split-Path -Path $logPath -Parent
+        $mailLogFolder = Split-Path -Path $runLogPath -Parent
         New-Item -ItemType Directory -Path $mailLogFolder -Force | Out-Null
         foreach ($session in @(@('LogPath', $mailLogFolder), @('SmartM365ScriptFileName', 'SmartFinOps-Workplace-Report.ps1'), @('SmartM365ScriptVersion', $script:ScriptVersion))) { Set-Variable -Name $session[0] -Scope Global -Value $session[1] }
         $transport = { param($Message) [void](SmartM365.Core\Send-SmartM365Mail -From $Message.From -To $Message.To -Subject $Message.Subject -BodyHtml $Message.BodyHtml -MailPurpose Report -Attachments $Message.Attachments -AllowAttachments -SuppressAttachmentLinks) }
@@ -1005,18 +1008,18 @@ catch {
   Write-ReportLog ("Stack: {0}" -f ($_.ScriptStackTrace -replace '\r?\n', ' | ')) 'ERROR'
 }
 finally {
-  if (-not $ValidateOnly -and $logPath) {
+  if (-not $ValidateOnly -and $runLogPath) {
     try {
-      New-Item -ItemType Directory -Path (Split-Path $logPath -Parent) -Force | Out-Null
-      Write-ReportFile -Path $logPath -Content (($script:LogLines -join [Environment]::NewLine) + [Environment]::NewLine)
+      New-Item -ItemType Directory -Path (Split-Path $runLogPath -Parent) -Force | Out-Null
+      Write-ReportFile -Path $runLogPath -Content (($script:LogLines -join [Environment]::NewLine) + [Environment]::NewLine)
       # The SharePoint copy is the log without the completion banner, which is appended locally right after.
-      if ($sharePoint -and -not (Send-ReportSharePointFile -SharePoint $sharePoint -Path $logPath)) {
-        Write-ReportFile -Path $logPath -Content (($script:LogLines -join [Environment]::NewLine) + [Environment]::NewLine)
+      if ($sharePoint -and -not (Send-ReportSharePointFile -SharePoint $sharePoint -Path $runLogPath)) {
+        Write-ReportFile -Path $runLogPath -Content (($script:LogLines -join [Environment]::NewLine) + [Environment]::NewLine)
       }
     }
-    catch { Write-Host "Report log could not be written: $($_.Exception.Message)" -ForegroundColor Red; $logPath = '' }
+    catch { Write-Host "Report log could not be written: $($_.Exception.Message)" -ForegroundColor Red; $runLogPath = '' }
   }
-  else { $logPath = '' }
+  else { $runLogPath = '' }
   # Completion banner on success and on failure; "Report not available" (exit 1) is a failed run.
   # Exit code contract (orchestrator): 0 success, 3 completed with warnings, 1 failure.
   $warnings = @($script:LogLines | Where-Object { $_ -match '^\S+ \S+ \[WARNING\]' }).Count
@@ -1025,7 +1028,7 @@ finally {
   elseif ($exitCode -eq 0 -and $warnings -gt 0) { $exitCode = 3 }
   $bannerStatus = switch ($exitCode) { 0 { 'Success' } 3 { 'CompletedWithWarnings' } default { 'Failed' } }
   if (Get-Command -Name Write-SmartFinOpsCompletionBanner -ErrorAction SilentlyContinue) {
-    Write-SmartFinOpsCompletionBanner -Status $bannerStatus -ScriptName 'SmartFinOps-Workplace-Report.ps1' -StartedAt $startedAt -WarningCount $warnings -ErrorCount $errors -GeneratedCsvFiles 0 -LogPath $logPath
+    Write-SmartFinOpsCompletionBanner -Status $bannerStatus -ScriptName 'SmartFinOps-Workplace-Report.ps1' -StartedAt $startedAt -WarningCount $warnings -ErrorCount $errors -GeneratedCsvFiles 0 -LogPath $runLogPath
   }
   else { Write-Host ("SmartFinOps-Workplace-Report.ps1: {0} (tenant context not loaded)" -f $(switch ($exitCode) { 0 { 'SUCCESS' } 3 { 'COMPLETED WITH WARNINGS' } default { 'FAILED' } })) }
 }

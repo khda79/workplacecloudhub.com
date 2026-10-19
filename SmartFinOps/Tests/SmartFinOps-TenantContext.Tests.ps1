@@ -3,7 +3,7 @@
 .SYNOPSIS
   Offline tests of the SmartFinOps tenant context: SmartM365 DATA-LAST resolution and console banners.
 .VERSION
-1.4.1
+1.4.2
 .NOTES
   Isolated temporary runtime with a synthetic SmartM365 tenant context (no local configuration or export).
   SmartM365LatestCsvFolderPath = __USE_SMARTM365__ must never fall back silently to a default path.
@@ -299,6 +299,30 @@ function Get-SmartM365EffectiveGlobalConfig {
   Check ($reportExit -eq 3 -and (Test-Path -LiteralPath (Join-Path $realLast 'SmartFinOps_Workplace-Report.html')) -and $report.Contains("SmartM365 context of profile 'prod'") -and -not $report.Contains('Tenant profile mismatch') -and -not $report.Contains('Graph app-only connection values are missing')) "report with the real SmartM365 context: local page, upload attempted with the prod identity, exit 3 (got $reportExit)"
   $jsonAfter = & $runtimeJsonFiles
   Check ((($jsonBefore -join '|') -ceq ($jsonAfter -join '|')) -and -not (Test-Path -LiteralPath (Join-Path $realSmartM365 'Config\Tenants\test.local.json')) -and -not (Test-Path -LiteralPath (Join-Path $realSmartM365 'Config\Tenants\test.local.json.txt'))) "no SmartM365 runtime JSON created (before: $($jsonBefore -join ', '); after: $($jsonAfter -join ', '))"
+  # Run log: the log written, uploaded and named in the completion banner is the log file announced at start.
+  $logPair = { param([string]$Output) [pscustomobject]@{ Start=$(if ($Output -match '\[INFO\] Log: (.+?)\r?\n') { $Matches[1].Trim() } else { '' }); End=$(if ($Output -match '(?m)^ Log       : (.+?)\s*$') { $Matches[1].Trim() } else { '' }) } }
+  $engineLog = & $logPair $upload
+  Check ($engineLog.Start -and $engineLog.Start -ceq $engineLog.End -and (Test-Path -LiteralPath $engineLog.Start -PathType Leaf) -and $upload.Contains("SharePoint upload failed for $($engineLog.Start)")) "valuation: banner log = start log file, upload attempted for it ($($engineLog.Start) / $($engineLog.End))"
+
+  # Daily email as in production: scripts on an unqualified UNC share, only the SmartM365 folder qualified, real
+  # SmartM365.Core mail path. The synthetic identity cannot get a token, so no mail ever leaves.
+  $toUnc = { param([string]$Path) '\\localhost\{0}${1}' -f $Path.Substring(0, 1), $Path.Substring(2) }
+  $policyLocal = Join-Path $realSmartM365 'Config\SmartM365-JsonTransport.policy.local.json.txt'
+  [ordered]@{ QualifiedUncRoots=@(& $toUnc $realSmartM365) } | ConvertTo-Json | Set-Content -LiteralPath $policyLocal -Encoding utf8NoBOM
+  '{ "Report": { "EnableDailyEmail": true, "DailyEmailTo": "finops@contoso.invalid", "DailyEmailFrom": "reports@contoso.invalid" } }' | Set-Content -LiteralPath (Join-Path $real 'SmartFinOps\SmartFinOps.global.local.json') -Encoding utf8NoBOM
+  $mailOutput = & $pwsh -NoProfile -ExecutionPolicy Bypass -File (& $toUnc $realReport) -Tenant prod -ForceEmail 2>&1 | Out-String
+  $mailExit = $LASTEXITCODE
+  $noMail | Set-Content -LiteralPath (Join-Path $real 'SmartFinOps\SmartFinOps.global.local.json') -Encoding utf8NoBOM
+  Remove-Item -LiteralPath $policyLocal -Force
+  $mailLog = & $logPair $mailOutput
+  $reportLogFolder = Join-Path $workplace 'Data\Tenants\prod\LOG-ALL\SmartFinOps-Workplace-Report'
+  $mailState = Get-Content -LiteralPath (Join-Path $realLast 'SmartFinOps_Workplace-Report_DailyEmail_SendState.json.txt') -Raw -ErrorAction SilentlyContinue | ConvertFrom-Json
+  Check ($mailExit -eq 3 -and -not $mailOutput.Contains('requires qualification') -and $mailOutput -match '\[WARNING\] Daily email failed: ' -and $null -ne $mailState -and $mailState.Status -ceq 'Pending') "report from an unqualified UNC folder: no JSON qualification error, the mail reaches the transport and fails on the token, state Pending (exit $mailExit)"
+  Check (-not @(Get-ChildItem -LiteralPath (Join-Path $real 'SmartFinOps') -File | Where-Object { $_.Name -like 'SmartFinOps-Workplace-Report.local.json*' }).Count) 'no caller local JSON created next to the report'
+  Check ($mailLog.Start -and $mailLog.Start -ceq $mailLog.End -and (Split-Path $mailLog.Start -Parent) -ceq $reportLogFolder -and (Test-Path -LiteralPath $mailLog.Start -PathType Leaf)) "after the mail: banner log = start log file ($($mailLog.Start) / $($mailLog.End))"
+  Check ("$(Get-Content -LiteralPath $mailLog.Start -Raw -ErrorAction SilentlyContinue)".Contains(' SmartFinOps by WorkplaceCloudHub - Execution completed') -and -not $mailOutput.Contains('completion banner could not be written')) 'completion banner appended to the start log file'
+  Check ($mailOutput.Contains("SharePoint upload failed for $($mailLog.Start)") -and -not $mailOutput.Contains("SharePoint upload failed for ${reportLogFolder}:") -and -not $mailOutput.Contains('is a directory') -and -not $mailOutput.Contains('Access to the path')) 'upload attempted for the log file, never for its folder'
+  Check (@(Get-ChildItem -LiteralPath $reportLogFolder -File -Filter '*.htm*').Count -ge 1) 'SmartM365 mail copy written next to the report log'
   $zeroIdentity = Get-Content -LiteralPath $prodProfilePath -Raw | ConvertFrom-Json
   $zeroIdentity.AppId = '00000000-0000-0000-0000-000000000000'
   $zeroIdentity | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $prodProfilePath -Encoding utf8NoBOM

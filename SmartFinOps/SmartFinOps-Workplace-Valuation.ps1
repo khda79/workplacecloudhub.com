@@ -9,7 +9,7 @@
   FinOps_* CSVs with their own receipt.
   Unqualified input is reported as Not measured, never as zero or as an older value.
 .VERSION
-2.2.1
+2.2.2
 .NOTES
   -Tenant is the profile key; source receipts and rows are compared with the organization TenantKey (SmartM365TenantKey,
   or -SmartM365TenantKey). Folders: the SmartM365 DATA-LAST, DATA-ALL and LOG-ALL of the profile.
@@ -32,7 +32,10 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-$script:ScriptVersion = '2.2.1'
+$script:ScriptVersion = '2.2.2'
+# Run with -File, this script scope is the global scope: SmartM365 session values (LogPath, SmartM365TenantKey, ...)
+# set by the upload helpers would overwrite script variables of the same name. Names here never collide.
+$script:TenantKeyParameter = [string]$SmartM365TenantKey
 $script:LogLines = [System.Collections.Generic.List[string]]::new()
 $script:Invariant = [Globalization.CultureInfo]::InvariantCulture
 
@@ -1124,7 +1127,7 @@ if ($MyInvocation.InvocationName -eq '.') { return }
 
 $exitCode = 0
 $startedAt = Get-Date
-$runId = ''; $currentRoot = $null; $archiveDir = $null; $csvFiles = 0; $tenantKey = ''; $logPath = ''; $logFile = ''; $sharePoint = $null
+$runId = ''; $currentRoot = $null; $archiveDir = $null; $csvFiles = 0; $tenantKey = ''; $runLogPath = ''; $logFile = ''; $sharePoint = $null
 try {
   . (Join-Path $PSScriptRoot 'Config\SmartFinOps-TenantContext.ps1')
   Write-SmartFinOpsStartupBanner
@@ -1142,12 +1145,12 @@ try {
   $layout = Get-SmartFinOpsDataLayout -DataLast $SmartM365LatestCsvFolderPath -DataAll $SmartM365DataAllRootPath -LogAll $SmartM365LogAllRootPath
   $dataLast = $layout.DataLast
   $logFile = 'SmartFinOps-Workplace-Valuation-{0}.log' -f $startedAt.ToString('yyyy-MM-dd_HH-mm-ss', $script:Invariant)
-  $logPath = Join-Path (Join-Path $layout.LogAll 'SmartFinOps-Workplace-Valuation') $logFile
+  $runLogPath = Join-Path (Join-Path $layout.LogAll 'SmartFinOps-Workplace-Valuation') $logFile
   # Source receipts carry the organization TenantKey, not the profile key used for Data\<profile>.
-  $tenantKey = if ($SmartM365TenantKey) { $SmartM365TenantKey.Trim() } else { [string](Get-SmartFinOpsConfigValue -Name 'SmartM365TenantKey') }
+  $tenantKey = if ($script:TenantKeyParameter) { $script:TenantKeyParameter.Trim() } else { [string](Get-SmartFinOpsConfigValue -Name 'SmartM365TenantKey') }
   Assert-SmartFinOpsResolvedPath -Name 'SmartM365TenantKey' -Value $tenantKey
   if (-not $tenantKey) { throw 'SmartM365TenantKey is empty: set it in the SmartFinOps configuration, pass -SmartM365TenantKey, or leave __USE_SMARTM365__.' }
-  Write-FinOpsLog ("Profile '{0}' - TenantKey '{1}'{2}" -f $Tenant, $tenantKey, $(if ($SmartM365TenantKey) { ' (parameter)' } else { '' }))
+  Write-FinOpsLog ("Profile '{0}' - TenantKey '{1}'{2}" -f $Tenant, $tenantKey, $(if ($script:TenantKeyParameter) { ' (parameter)' } else { '' }))
   $currentRoot = $dataLast
   $archiveRoot = $layout.HistoryRoot
   if (-not $ValidateOnly) {
@@ -1169,7 +1172,7 @@ try {
   $contractsFile = ConvertTo-SmartFinOpsFileSystemPath $contractsFile
   Write-FinOpsLog "Sources and current outputs: $dataLast"
   Write-FinOpsLog "History: $archiveRoot"
-  Write-FinOpsLog "Log: $logPath"
+  Write-FinOpsLog "Log: $runLogPath"
   $contracts = Get-FinOpsContracts -Path $contractsFile -TemplatePath (Join-Path $PSScriptRoot 'Config\SmartFinOps-Contracts.local.json.template')
 
   $licReceipt = 'SmartInventory_SmartM365-Licences-Inventory.current.json.txt'; $licProducer = 'SmartM365-Licences-Inventory.ps1'
@@ -1338,16 +1341,16 @@ catch {
   }
 }
 finally {
-  if (-not $ValidateOnly -and $logPath) {
+  if (-not $ValidateOnly -and $runLogPath) {
     try {
-      New-Item -ItemType Directory -Path (Split-Path $logPath -Parent) -Force | Out-Null
-      [IO.File]::WriteAllLines($logPath, $script:LogLines, [Text.UTF8Encoding]::new($false))
+      New-Item -ItemType Directory -Path (Split-Path $runLogPath -Parent) -Force | Out-Null
+      [IO.File]::WriteAllLines($runLogPath, $script:LogLines, [Text.UTF8Encoding]::new($false))
       # The SharePoint copy is the log without the completion banner, which is appended locally right after.
-      if ($sharePoint -and -not (Send-FinOpsSharePointFile -SharePoint $sharePoint -Path $logPath)) { [IO.File]::WriteAllLines($logPath, $script:LogLines, [Text.UTF8Encoding]::new($false)) }
+      if ($sharePoint -and -not (Send-FinOpsSharePointFile -SharePoint $sharePoint -Path $runLogPath)) { [IO.File]::WriteAllLines($runLogPath, $script:LogLines, [Text.UTF8Encoding]::new($false)) }
     }
-    catch { Write-FinOpsLog ("Run log could not be written: {0}" -f $_.Exception.Message) 'WARNING'; $logPath = '' }
+    catch { Write-FinOpsLog ("Run log could not be written: {0}" -f $_.Exception.Message) 'WARNING'; $runLogPath = '' }
   }
-  else { $logPath = '' }
+  else { $runLogPath = '' }
   # Completion banner on success and on failure (appended to the run log when there is one).
   # Exit code contract (orchestrator): 0 success, 3 completed with warnings, 1 failure.
   $warnings = @($script:LogLines | Where-Object { $_ -match '^\S+ \S+ \[WARNING\]' }).Count
@@ -1356,7 +1359,7 @@ finally {
   elseif ($exitCode -eq 0 -and $warnings -gt 0) { $exitCode = 3 }
   $bannerStatus = switch ($exitCode) { 0 { 'Success' } 3 { 'CompletedWithWarnings' } default { 'Failed' } }
   if (Get-Command -Name Write-SmartFinOpsCompletionBanner -ErrorAction SilentlyContinue) {
-    Write-SmartFinOpsCompletionBanner -Status $bannerStatus -ScriptName 'SmartFinOps-Workplace-Valuation.ps1' -StartedAt $startedAt -WarningCount $warnings -ErrorCount $errors -GeneratedCsvFiles $csvFiles -LogPath $logPath
+    Write-SmartFinOpsCompletionBanner -Status $bannerStatus -ScriptName 'SmartFinOps-Workplace-Valuation.ps1' -StartedAt $startedAt -WarningCount $warnings -ErrorCount $errors -GeneratedCsvFiles $csvFiles -LogPath $runLogPath
   }
   else { Write-Host ("SmartFinOps-Workplace-Valuation.ps1: {0} (tenant context not loaded)" -f $(switch ($exitCode) { 0 { 'SUCCESS' } 3 { 'COMPLETED WITH WARNINGS' } default { 'FAILED' } })) }
 }
