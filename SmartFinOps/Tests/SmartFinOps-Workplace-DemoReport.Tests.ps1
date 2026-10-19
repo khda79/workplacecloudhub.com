@@ -3,7 +3,7 @@
 .SYNOPSIS
   Offline tests of the SmartFinOps Workplace demo report generator.
 .VERSION
-1.2.0
+1.3.0
 .NOTES
   Runs Demo\SmartFinOps-Workplace-DemoReport.ps1 (real engine and report on synthetic contoso data) into a temporary
   folder, then checks the page, its manifest, the DEMO banner, the statuses it must show and the leak scanner.
@@ -48,7 +48,7 @@ try {
 
     #region 2. Manifest
     Check ($manifest.Owner -eq 'SmartFinOps-DemoReport' -and $manifest.TenantKey -eq 'contoso-demo' -and $manifest.LeakScan -eq 'Passed' -and $manifest.SourceCommit -eq 'test-commit') 'manifest identity, tenant key, leak scan and source commit'
-    Check ($manifest.ValuationVersion -match '^\d+\.\d+\.\d+$' -and $manifest.ReportVersion -match '^\d+\.\d+\.\d+$' -and $manifest.GeneratorVersion -eq '1.0.2' -and $manifest.FixtureVersion -eq '1.0.0') 'manifest versions'
+    Check ($manifest.ValuationVersion -match '^\d+\.\d+\.\d+$' -and $manifest.ReportVersion -match '^\d+\.\d+\.\d+$' -and $manifest.GeneratorVersion -eq '1.0.3' -and $manifest.FixtureVersion -eq '1.1.0') 'manifest versions'
     Check (@($manifest.ValuationExitCodes).Count -eq 2 -and @($manifest.ValuationExitCodes | Where-Object { $_ -notin @(0,3) }).Count -eq 0 -and $manifest.ReportExitCode -in @(0,3)) 'two valuation runs and the report ended with 0 or 3'
     Check ($manifest.ReportSHA256 -eq (Get-FileHash -LiteralPath $page -Algorithm SHA256).Hash) 'manifest hash matches the page'
     Check (-not ((Get-Content -LiteralPath $manifestPath -Raw) -match '(?i)[a-z]:\\|\\\\|temp')) 'manifest holds no local path'
@@ -58,8 +58,11 @@ try {
     Check ([regex]::Matches($html, '<p class="demo-banner" role="note"><strong>DEMO</strong>').Count -eq 1 -and $html.Contains('<title>DEMO - ')) 'one DEMO banner and a DEMO title'
     Check ($html.Contains('contoso.invalid') -and $html.Contains("Valuation $($manifest.ValuationVersion) and Report $($manifest.ReportVersion)")) 'banner names the fictional organization and the versions'
     Check ($html -notmatch '(?i)Report not available') 'figures published (report available)'
-    foreach ($status in @('Provisional','Not valued','Review','Blocked','Capped','Not measured','Realized','Reused')) { Check ($html.Contains($status)) "page shows status $status" }
-    Check ($html.Contains('AD domains not collected: west')) 'partial AD scope shown'
+    foreach ($status in @('Final','Not valued','Review','Blocked','Capped','Not measured','Realized','Reused')) { Check ($html.Contains($status)) "page shows status $status" }
+    # Complete source receipts (fixture 1.1.0): Final figures, no provisional source, no missing AD domain, every run exit 0.
+    Check ($html.Contains('Final figures') -and -not $html.Contains('Provisional figures') -and $html.Contains('0 provisional')) 'figures are Final, no provisional source'
+    Check (-not $html.Contains('AD domains not collected')) 'every AD domain collected'
+    Check (@($manifest.ValuationExitCodes | Where-Object { $_ -ne 0 }).Count -eq 0 -and $manifest.ReportExitCode -eq 0) "valuation and report end with exit code 0 (got $(@($manifest.ValuationExitCodes) -join ',') / $($manifest.ReportExitCode))"
     Check ($html -match 'enabled accounts without M365 activity in 90 days' -and $html -match 'E3 to F3 \(not in the R total\)') 'enabled inactive accounts and conditional E3 to F3 shown separately'
     Check ($html -notmatch '(?i)<script|https?://(?!www\.w3\.org/2000/svg)') 'no script and no external resource'
     Check ([regex]::Matches($html, '(?i)<img\b').Count -eq 1 -and $html.Contains('<img alt="WorkplaceCloudHub" ') -and -not $html.Contains('class="client-logo"')) 'one image only, the WorkplaceCloudHub logo: never a client logo'

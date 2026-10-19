@@ -8,15 +8,15 @@
   2. Writes a fictional SmartInventory DATA-LAST (SmartFinOps-Workplace-DemoFixture.ps1, contoso.invalid) with real
      SmartM365.Core source receipts, in two stages: a baseline plateau, then the current day after a reduction.
   3. Runs SmartFinOps-Workplace-Valuation.ps1 on each stage, then SmartFinOps-Workplace-Report.ps1, unchanged, with
-     SharePoint upload and the daily email disabled. Exit codes 0 and 3 are accepted (the demo includes provisional
-     amounts); 1 or a "Report not available" page fails the run. The report runs with -NoClientLogo: the SmartM365
+     SharePoint upload and the daily email disabled. Exit codes 0 and 3 are accepted (the demo data gives 0: Final
+     figures, 1.0.3); 1 or a "Report not available" page fails the run. The report runs with -NoClientLogo: the SmartM365
      mail branding of this computer is never read, so the demo never shows a client logo (1.0.2).
   4. Adds a visible DEMO banner, scans the page for leaks (e-mail addresses, GUIDs, IP addresses, file-system paths,
      host or user names of this computer, private terms, foreign domains or URLs, any image other than the
      WorkplaceCloudHub logo) and writes the page and a manifest
      to -OutputPath.
 .VERSION
-1.0.2
+1.0.3
 .NOTES
   Read-only and offline: no API call, no SharePoint upload, no mail. -OutputPath must lie outside the SmartFinOps
   code folder. The page and its manifest are generated files: never commit them.
@@ -33,7 +33,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-$script:ScriptVersion = '1.0.2'
+$script:ScriptVersion = '1.0.3'
 $script:Invariant = [Globalization.CultureInfo]::InvariantCulture
 $script:DemoTenantKey = 'contoso-demo'
 $script:DemoProfileKey = 'demo'
@@ -244,7 +244,7 @@ try {
     Owner='SmartFinOps-DemoReport'; GeneratorVersion=$script:ScriptVersion; FixtureVersion=$script:DemoFixtureVersion
     ValuationVersion=$versions.Valuation; ReportVersion=$versions.Report; SourceCommit=$SourceCommit
     GeneratedAtUtc=[datetime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ', $script:Invariant); TenantKey=$script:DemoTenantKey
-    Scenario='Baseline plateau then current day after a reduction; partial AD scope (domain west not collected)'
+    Scenario='Baseline plateau then current day after a reduction; complete source receipts (Final figures)'
     ValuationExitCodes=@($valuationExitCodes); ReportExitCode=$reportRun.ExitCode
     ReportFile=$script:ReportFileName; ReportSHA256=(Get-FileHash -LiteralPath $pagePath -Algorithm SHA256).Hash
     LeakScan='Passed'; PrivateTermsChecked=$privateTerms.Count

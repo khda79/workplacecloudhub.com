@@ -9,17 +9,19 @@
   as the SmartInventory collectors do. Nothing is read from a tenant, a directory or a local export.
   Stage 'Baseline' is the previous plateau (four more disabled E3 accounts, 186 enabled E3 units); stage 'Current'
   is the day after the reduction (180 units), so the report also shows a realized saving.
-  Statuses covered: Valued, Provisional (partial AD scope, domain west not collected), Not valued (USD price only),
-  Review, Blocked by dependency, Not measured (mailbox state unknown), Capped (contract minimum), Reused (capacity wait).
+  Every source receipt is complete (all four AD domains collected, no provisional Licences report source), so the
+  figures are Final (1.1.0). Statuses covered: Valued, Not valued (USD price only), Review (Copilot Chat only, AD state
+  not measured, room mailbox), Blocked by dependency, Not measured (Windows 10 ESU, Dynamics 365 usage),
+  Capped (contract minimum), Reused (capacity wait).
 .VERSION
-1.0.0
+1.1.0
 .NOTES
   Fictional data only: user IDs u001..u243, UPNs under contoso.invalid, no GUID, no address, no real name.
 #>
 
 Set-StrictMode -Version Latest
 
-$script:DemoFixtureVersion = '1.0.0'
+$script:DemoFixtureVersion = '1.1.0'
 
 function Write-SmartFinOpsDemoCsv {
   param([Parameter(Mandatory)][string]$Folder, [Parameter(Mandatory)][string]$Name, [Parameter(Mandatory)][object[]]$Rows)
@@ -126,7 +128,7 @@ function New-SmartFinOpsDemoFixture {
     [pscustomobject][ordered]@{ SnapshotId=$snapshotId; TenantKey=$t; Section='AdGapActivity'; Metric='NoObservedMatch'; Value=''; EvidenceStatus='N/D' }
   )
   $reportSources = @(
-    [pscustomobject][ordered]@{ SnapshotId=$snapshotId; TenantKey=$t; Name='AD_Users_AllDomains.csv'; Ready='True'; Provisional='True'; Reason='Qualified partial AD scope: domain west not collected' }
+    [pscustomobject][ordered]@{ SnapshotId=$snapshotId; TenantKey=$t; Name='AD_Users_AllDomains.csv'; Ready='True'; Provisional='False'; Reason='' }
     [pscustomobject][ordered]@{ SnapshotId=$snapshotId; TenantKey=$t; Name='Exchange_EXO_Mailboxes_AllDomains.csv'; Ready='True'; Provisional='False'; Reason='' }
     [pscustomobject][ordered]@{ SnapshotId=$snapshotId; TenantKey=$t; Name='M365_OneDrive_Usage.csv'; Ready='True'; Provisional='False'; Reason='' }
   )
@@ -145,7 +147,7 @@ function New-SmartFinOpsDemoFixture {
   }
   & $addSku 41 'sku-e3' 'Disabled account' 'Blocked by dependency' 'Mailbox retention: litigation hold' 'Blocked: Mailbox retention: litigation hold' ''
   & $addSku 85 'sku-e3' 'Disabled account' 'Blocked by dependency' 'Mailbox retention: litigation hold' 'Blocked: Mailbox retention: litigation hold' ''
-  & $addSku 130 'sku-e3' 'Disabled account' 'Review' 'EXO mailbox source is not qualified' 'Unknown: EXO mailbox source is not qualified' ''
+  & $addSku 130 'sku-e3' 'Disabled account' 'Review' 'Room mailbox: resource account' 'Not applicable' ''
   foreach ($index in @(8,19,33) + @(if ($Stage -eq 'Baseline') { 6,17 })) { & $addSku $index 'sku-copilot' 'Disabled account' 'Recommended' 'Disabled in Entra and AD' 'Not applicable' '' }
   foreach ($index in 3,11,21,29,35) { & $addSku $index 'sku-copilot' 'Copilot without activity' 'Recommended' 'No Microsoft 365 Copilot activity in 60 days' 'Not applicable' '' }
   foreach ($index in 14,30) { & $addSku $index 'sku-copilot' 'Copilot without activity' 'Review' 'Copilot Chat only' 'Not applicable' '' }
@@ -207,14 +209,13 @@ function New-SmartFinOpsDemoFixture {
   $activeUsers = @(foreach ($index in $population) { $userId = & $id $index
       [pscustomobject][ordered]@{ TenantKey=$t; 'Object Id'=$userId; 'User principal name'=(& $upn $userId); OnPremisesImmutableId="imm-$userId"; Department=$departments[$index % $departments.Count] } })
   Publish-SmartFinOpsDemoReceipt -Folder $Folder -ScriptPath $ProducerScripts.Users -Paths @(Write-SmartFinOpsDemoCsv $Folder 'M365_Users_Active.csv' $activeUsers) -Scope 'CMDB:users' | Out-Null
-  $adUsers = @(foreach ($index in $population) { $domain = & $domainOf $index; if ($domain -eq 'west') { continue }; $userId = & $id $index
+  $adUsers = @(foreach ($index in $population) { $domain = & $domainOf $index; $userId = & $id $index
       [pscustomobject][ordered]@{ TenantKey=$t; DomainName="$domain.contoso.invalid"; ImmutableId_AD="imm-$userId"; UserPrincipalName=(& $upn $userId); Country=$countryOf[$domain]; EntityLabel=('Site {0}' -f [char](65 + ($index % 5))) } })
   $adPaths = @(Write-SmartFinOpsDemoCsv $Folder 'AD_Users_AllDomains.csv' $adUsers)
   foreach ($name in @('AD_Computers_AllDomains.csv','AD_Domains_AllDomains.csv','AD_Groups_AllDomains.csv','AD_DirectoryObjects_AllDomains.csv','AD_GroupMemberships_AllDomains.csv')) {
     $adPaths += Write-SmartFinOpsDemoCsv $Folder $name @([pscustomobject][ordered]@{ TenantKey=$t; Name='demo' })
   }
-  $coverage = @{ ExpectedDomains=@('north','south','east','west'); CollectedDomains=@('north','south','east'); UnavailableDomains=@('west'); NonBlockingDomainErrors=@('west') }
-  Publish-SmartFinOpsDemoReceipt -Folder $Folder -ScriptPath $ProducerScripts.AD -Paths $adPaths -Scope 'CMDB:ad_users,ad_computers,ad_domains,ad_groups,ad_objects,ad_members' -DomainCoverage $coverage | Out-Null
+  Publish-SmartFinOpsDemoReceipt -Folder $Folder -ScriptPath $ProducerScripts.AD -Paths $adPaths -Scope 'CMDB:ad_users,ad_computers,ad_domains,ad_groups,ad_objects,ad_members' | Out-Null
 
   return [pscustomobject]@{ Folder=$Folder; SnapshotId=$snapshotId; LicencesRunId=$licencesRunId; Stage=$Stage }
 }
