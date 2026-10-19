@@ -2,7 +2,7 @@
 .SYNOPSIS
 Synthetic regression tests for shared inventory identity and atomic persistence.
 .VERSION
-1.1.13
+1.1.14
 #>
 [CmdletBinding()]
 param(
@@ -37,7 +37,12 @@ function Import-OfflineFunctions {
     if($Names -contains 'Copy-SmartM365FileAtomically'){
         $helperAst=[Management.Automation.Language.Parser]::ParseFile((Join-Path $SourceRoot 'Modules/SmartM365.Core/SmartM365-CmdbReceipt.ps1'),[ref]$tokens,[ref]$errors)
         $register=$helperAst.Find({param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Register-SmartM365SourceCsv'},$true)
-        $definitions+=@('$script:SmartM365CmdbSourceContext=$null',$register.Extent.Text)
+        $publication=$helperAst.Find({param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Start-SmartM365SourcePublication'},$true)
+        $definitions+=@('$script:SmartM365CmdbSourceContext=$null',$register.Extent.Text,$publication.Extent.Text)
+    }
+    if($Names -contains 'Complete-SmartM365ExecutionContext'){
+        $lifecycleAst=[Management.Automation.Language.Parser]::ParseFile((Join-Path $SourceRoot 'Modules/SmartM365.Core/SmartM365-InventoryLifecycle.ps1'),[ref]$tokens,[ref]$errors)
+        $definitions+=@($lifecycleAst.Find({param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Get-SmartM365InventoryCompletionStatus'},$true).Extent.Text)
     }
     # Only the named function definitions run. No module initializers, tenant loader,
     # collector entry point, credentials, task scheduler, mail or network calls.
@@ -611,8 +616,9 @@ try {
                 }
             }
         }
-        # 23 since PreparedEvidence/SmartM365-WorkplaceEvidence-Prepare.ps1 sends its run mail.
-        Assert-Offline ($mailFiles.Count -eq 23) "Expected 23 SmartInventory mail-capable scripts, found $($mailFiles.Count)."
+        # 24: WorkplaceEvidence-Prepare run mail (23), ProxyAddresses merged into the mailbox report (22),
+        # SharePoint on-prem Content and Infrastructure daily summaries (24).
+        Assert-Offline ($mailFiles.Count -eq 24) "Expected 24 SmartInventory mail-capable scripts, found $($mailFiles.Count)."
         Assert-Offline ($directBypasses.Count -eq 0) ("Direct mail transports bypass shared normalization: {0}" -f ($directBypasses -join '; '))
         foreach ($mailFile in $mailFiles) {
             $mailSource = [IO.File]::ReadAllText($mailFile)

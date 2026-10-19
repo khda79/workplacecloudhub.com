@@ -2,7 +2,7 @@
 .SYNOPSIS
 Synthetic regression tests for the bounded Teams Graph collector audit.
 .VERSION
-1.0.3
+1.0.4
 #>
 [CmdletBinding()]
 param(
@@ -327,7 +327,7 @@ try {
 
     Test-OfflineCase 'Teams alert mail subject stays concise' {
         $source = Get-Content -LiteralPath $teamsPath -Raw
-        Assert-Offline ($source -match '\$subject="\[\$\(\$worst\.ToUpperInvariant\(\)\)\] Microsoft Teams Inventory"') 'Teams alert subject is not the approved concise title.'
+        Assert-Offline ($source -match '\$subject="\[\$\(\$worst\.ToUpperInvariant\(\)\)\] Microsoft Teams Inventory \| \$\(\$summary\.OwnerlessTeams\) ownerless \| \$\(\$summary\.HighQuotaTeams\) above storage threshold"') 'Teams alert subject is not the approved title with ownerless and storage counts.'
         Assert-Offline ($source -notmatch '\$subject="(?:SMART ?365|\[SmartM365\])') 'Teams alert subject still hard-codes a legacy product prefix.'
     }
 

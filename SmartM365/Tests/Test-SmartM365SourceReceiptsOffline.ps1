@@ -3,7 +3,7 @@
 .SYNOPSIS
 Synthetic shared source-receipt qualification. No tenant, API, mail or synchronized data access.
 .VERSION
-1.0.3
+1.0.4
 #>
 [CmdletBinding()]
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidGlobalVars','',Justification='Synthetic Core globals are saved and restored in finally.')]
@@ -13,6 +13,29 @@ param()
 Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
 $root=Split-Path $PSScriptRoot -Parent
+# Receipt-capable module floors; collectors may require any later version of the same module.
+function Test-SmartM365ModuleFloor($Ast){
+    $floors=@{'SmartM365.Core'=[version]'1.0.72';'SmartM365-WindowsPowerShell5'=[version]'1.0.50';'SmartM365.EvidenceCollector.Common'=[version]'1.0.8'}
+    $text=$Ast.Extent.Text; $found=0
+    foreach($cmd in $Ast.FindAll({param($n) $n -is [Management.Automation.Language.CommandAst] -and $n.GetCommandName() -eq 'Import-Module'},$true)){
+        $binding=[Management.Automation.Language.StaticParameterBinder]::BindCommand($cmd,$true)
+        if(-not $binding.BoundParameters.ContainsKey('MinimumVersion')){continue}
+        $value=$binding.BoundParameters['MinimumVersion'].Value
+        $versionText=if($value -is [Management.Automation.Language.VariableExpressionAst]){
+            @($Ast.FindAll({param($n) $n -is [Management.Automation.Language.AssignmentStatementAst] -and $n.Left.Extent.Text -eq $value.Extent.Text},$true) | ForEach-Object {$_.Right.Extent.Text}) -join ' '
+        } else { $value.Extent.Text }
+        $versions=@([regex]::Matches($versionText,'\d+\.\d+\.\d+') | ForEach-Object {[version]$_.Value})
+        $candidates=@($floors.Keys | Where-Object { $text -match ([regex]::Escape($_)+'\.psd1') })
+        $nameText=if($binding.BoundParameters.ContainsKey('Name')){$binding.BoundParameters['Name'].Value.Extent.Text}else{''}
+        $named=@($candidates | Where-Object { $nameText -match [regex]::Escape($_) })
+        if($named.Count -eq 1){$candidates=$named}
+        if($candidates.Count -eq 0 -or $versions.Count -eq 0){continue}
+        $minimum=($candidates | ForEach-Object {$floors[$_]} | Measure-Object -Minimum).Minimum
+        if(@($versions | Where-Object {$_ -lt $minimum}).Count){return $false}
+        $found++
+    }
+    return $found -gt 0
+}
 $helper=Join-Path $root 'Modules/SmartM365.Core/SmartM365-CmdbReceipt.ps1'
 $registry=Get-Content (Join-Path (Split-Path $helper) 'SmartM365-SourceReceipts.json.txt') -Raw | ConvertFrom-Json
 $temporary=Join-Path ([IO.Path]::GetTempPath()) ('SmartInventory-SourceReceiptTests-'+[guid]::NewGuid().ToString('N'))
@@ -76,7 +99,7 @@ try {
         Check ($e.Count -eq 0) ('Collector syntax failed: '+$definition.Script)
         $commands=$ast.FindAll({param($a) $a -is [Management.Automation.Language.CommandAst]},$true)
         Check (@($commands | Where-Object {$_.GetCommandName() -match '^Start-(Core)?SmartM365SourceReceipt$'}).Count -eq 1) ('Startup coverage missing: '+$definition.Script)
-        Check ($ast.Extent.Text -match "1\.0\.87|1\.0\.57|1\.0\.11|1\.0\.72|1\.0\.50|1\.0\.54|1\.0\.55|1\.0\.8") ('Required module guard missing: '+$definition.Script)
+        Check (Test-SmartM365ModuleFloor $ast) ('Required module guard missing: '+$definition.Script)
         Check (@($commands | Where-Object {$_.GetCommandName() -match '^Complete-(Core)?SmartM365(ExecutionContext|EvidenceRuntime|SourceReceipt)$'}).Count -gt 0) ('Completion coverage missing: '+$definition.Script)
     }
     # Repeated attempts must retain proof bytes and acquisition dates until a qualified replacement.

@@ -3,7 +3,7 @@
 .SYNOPSIS
 Offline CMDB run-log policy and actual terminal-cleanup checks.
 .VERSION
-1.0.0
+1.0.1
 .NOTES
 Extracts code only. Synthetic settings and completion callbacks; no tenant
 initialization, collector, real transcript, authentication or SharePoint request.
@@ -21,7 +21,9 @@ Assert-True ($parseErrors.Count -eq 0) 'Preparation parser failed.'
 $helpers=@($ast.FindAll({param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Get-SmartM365CmdbLogUploadEnabled'},$true))
 Assert-True ($helpers.Count -eq 1) 'Missing log upload policy.'
 . ([scriptblock]::Create($helpers[0].Extent.Text))
-$tries=@($ast.EndBlock.Statements | Where-Object {$_ -is [Management.Automation.Language.TryStatementAst]})
+$lifecycle=@($ast.EndBlock.Statements | Where-Object {$_ -is [Management.Automation.Language.TryStatementAst]})
+Assert-True ($lifecycle.Count -eq 1 -and $lifecycle[0].Finally.Extent.Text -match 'Complete-SmartM365InventoryRun') 'Expected one outer inventory run lifecycle.'
+$tries=@($lifecycle[0].Body.Statements | Where-Object {$_ -is [Management.Automation.Language.TryStatementAst]})
 Assert-True ($tries.Count -eq 1) 'Expected one preparation lifecycle.'
 $text=$tries[0].Finally.Extent.Text
 $finish=[scriptblock]::Create($text.Substring(1,$text.Length-2))
@@ -56,7 +58,8 @@ function Complete-SmartM365ExecutionContext {
     $script:observedClosed=$CloseTranscriptBeforeUpload.IsPresent
     if($script:throwCompletion){throw 'Synthetic completion failure.'}
 }
-function Stop-Transcript { $script:fallbackStops++ }
+function Stop-SmartM365RunTranscript { $script:fallbackStops++ }
+$smartM365RunGuard=[pscustomobject]@{InCleanup=$false}
 $names=@('EnableSharePointUpload','EnableTeamsNotifications','SmtpServer','From','To','ErrorMailTo',
     'SharePointSiteHostname','SharePointSitePath','SharePointLibraryDisplayName','SharePointTargetFolderPath','AppId','TenantId','Thumb','Thumbprint')
 $original=@{}

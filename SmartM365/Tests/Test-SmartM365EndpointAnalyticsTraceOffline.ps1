@@ -3,7 +3,7 @@
 .SYNOPSIS
 Offline Endpoint Analytics logging, transcript and rejected-row evidence tests.
 .VERSION
-1.0.3
+1.0.4
 .NOTES
 Loads production AST functions and the main try/finally only. Configuration, Core
 actions, Graph calls, downloads, delays and CSV publication are simulated.
@@ -22,17 +22,35 @@ $path = Join-Path (Split-Path $PSScriptRoot -Parent) 'SmartInventory/M365Invento
 $tokens = $null; $errors = $null
 $ast = [Management.Automation.Language.Parser]::ParseFile($path,[ref]$tokens,[ref]$errors)
 if ($errors.Count) { throw 'Endpoint Analytics parse failed.' }
-$definitions = @($ast.EndBlock.Statements |
+# The collector body runs inside the shared inventory run lifecycle guard.
+$lifecycle = @($ast.EndBlock.Statements |
+    Where-Object { $_ -is [Management.Automation.Language.TryStatementAst] -and $_.Finally -and $_.Finally.Extent.Text -match 'Complete-SmartM365InventoryRun' })
+if ($lifecycle.Count -ne 1) { throw 'Expected one inventory run lifecycle guard.' }
+$statements = $lifecycle[0].Body.Statements
+$definitions = @($statements |
     Where-Object { $_ -is [Management.Automation.Language.FunctionDefinitionAst] } |
     ForEach-Object { $_.Extent.Text })
-$main = @($ast.EndBlock.Statements |
+$lifecyclePath = Join-Path (Split-Path $PSScriptRoot -Parent) 'Modules/SmartM365.Core/SmartM365-InventoryLifecycle.ps1'
+$lifecycleAst = [Management.Automation.Language.Parser]::ParseFile($lifecyclePath,[ref]$tokens,[ref]$errors)
+if ($errors.Count) { throw 'Inventory lifecycle parse failed.' }
+foreach ($name in @('Start-SmartM365RunTranscript','Stop-SmartM365RunTranscript','Set-SmartM365InventoryConnectionOwnership','Test-SmartM365InterruptedRun')) {
+    $node = $lifecycleAst.Find({ param($item) $item -is [Management.Automation.Language.FunctionDefinitionAst] -and $item.Name -eq $name },$true)
+    if (-not $node) { throw "Missing lifecycle function: $name" }
+    $definitions += $node.Extent.Text
+}
+$main = @($statements |
     Where-Object { $_ -is [Management.Automation.Language.TryStatementAst] })[-1].Extent.Text
-$terminal = @($ast.EndBlock.Statements |
+$terminal = @($statements |
     Where-Object { $_ -is [Management.Automation.Language.ExitStatementAst] })
-if ($terminal.Count -ne 1 -or $terminal[0].Extent.Text -ne 'exit (Get-EAExitCode)') {
+if ($terminal.Count -ne 1 -or $terminal[0].Extent.Text -ne 'exit $smartM365RunGuard.ExitCode') {
     throw 'Expected one production terminal exit after the main try/finally.'
 }
-if ($terminal[0].Extent.StartOffset -lt $ast.EndBlock.Statements.Where({
+$terminalIndex = [array]::IndexOf(@($statements), $terminal[0])
+$exitAssignment = @($statements)[$terminalIndex - 1]
+if ($exitAssignment.Extent.Text -ne '$smartM365RunGuard.ExitCode=((Get-EAExitCode))') {
+    throw 'Terminal exit code must come from Get-EAExitCode.'
+}
+if ($terminal[0].Extent.StartOffset -lt $statements.Where({
     $_ -is [Management.Automation.Language.TryStatementAst]
 })[-1].Extent.EndOffset) { throw 'Exit must follow cleanup.' }
 $exitDefinition = @($definitions | Where-Object { $_ -match '^function Get-EAExitCode' })[0]
@@ -52,6 +70,7 @@ foreach ($case in @(
 Set-StrictMode -Version Latest
 `$ErrorActionPreference='Stop'
 $exitDefinition
+`$smartM365RunGuard=[pscustomobject]@{ExitCode=0}
 `$script:CompletionStatus='$($case.Status)'
 try { $failure }
 finally {
@@ -59,6 +78,7 @@ finally {
     `$global:SmartM365ErrorCount=$($case.Errors)
     Write-Output 'TRACE_CLEANUP_COMPLETED'
 }
+$($exitAssignment.Extent.Text)
 $($terminal[0].Extent.Text)
 Write-Output 'UNREACHABLE_AFTER_EXIT'
 "@
@@ -97,6 +117,9 @@ try {
         Set-StrictMode -Version Latest
         foreach ($definition in $Definitions) { . ([scriptblock]::Create($definition)) }
         $script:Main = [scriptblock]::Create($Main)
+        $script:IncludeBatteryHealth = $false
+        $script:BatteryHealthSelected = $false
+        $script:smartM365RunGuard = [pscustomobject]@{InCleanup=$false;ReachedTerminal=$false;ExplicitExit=$false;ReturnedNormally=$false;ErrorRecord=$null;ExitCode=0}
         $script:Root = $FixtureRoot
         $script:Checks = $ExitChecks
         function Assert-Test {

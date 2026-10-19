@@ -7,7 +7,7 @@ Executes selected AST statements with synthetic configuration and mocked externa
 actions. Child processes execute only extracted cleanup blocks, never collectors.
 No tenant configuration, authentication, acquisition, upload or mail is used.
 .VERSION
-1.0.0
+1.0.1
 #>
 [CmdletBinding()]
 param()
@@ -31,6 +31,16 @@ function Import-Function($Ast,[string]$Name) {
     if ($null -eq $node) { throw "Missing function: $Name" }
     Set-Item -Path "Function:script:$Name" -Value ([scriptblock]::Create($node.Body.Extent.Text.TrimStart('{').TrimEnd('}')))
 }
+function Get-InventoryRunBody($Ast) {
+    # Collector bodies run inside the shared inventory run lifecycle guard when the collector has one.
+    $outer=@($Ast.EndBlock.Statements | Where-Object {
+        $_ -is [Management.Automation.Language.TryStatementAst] -and $null -ne $_.Finally -and
+        $_.Finally.Extent.Text -match 'Complete-SmartM365InventoryRun'
+    })
+    Assert-True ($outer.Count -le 1) 'Inventory run lifecycle guard is ambiguous.'
+    if ($outer.Count -eq 1) { return $outer[0].Body.Statements }
+    $Ast.EndBlock.Statements
+}
 $producers=@(
     'SmartInventory/ActiveDirectoryInventory/SmartM365-ActiveDirectory-Inventory.ps1',
     'SmartInventory/M365Inventory/Devices/SmartM365-EntraDevices-Inventory.ps1',
@@ -40,11 +50,11 @@ foreach ($producer in $producers | Select-Object -Skip 1) {
     $ast=Read-Ast $producer
     Import-Function $ast 'Get-ScriptLocalConfigValue'
     Import-Function $ast 'Resolve-SmartM365ConfigValue'
-    $assignment=@($ast.EndBlock.Statements | Where-Object {
+    $assignment=@((Get-InventoryRunBody $ast) | Where-Object {
         $_ -is [Management.Automation.Language.AssignmentStatementAst] -and $_.Left.Extent.Text -eq '$LatestCsvFolderPath'
     })
     Assert-True ($assignment.Count -eq 1) 'Latest source path must be explicitly initialized once.'
-    $guard=@($ast.EndBlock.Statements | Where-Object {
+    $guard=@((Get-InventoryRunBody $ast) | Where-Object {
         $_ -is [Management.Automation.Language.IfStatementAst] -and $_.Extent.Text -like '*LatestCsvFolderPath must resolve*'
     })
     Assert-True ($guard.Count -eq 1) 'Missing explicit source-path configuration gate.'
@@ -90,6 +100,7 @@ $global:LogPath=$null; $global:RetentionMaxLogs=30; $OutputPath='C:\Synthetic'
 function WriteLog { param($Message,$Level) Write-Output $Message }
 function Clear-SmartM365AdReferenceXlsxCache {}
 function Stop-Transcript {}
+function Stop-SmartM365RunTranscript {}
 function Update-SmartM365TimestampedTranscript { param($Path) }
 function Remove-SmartM365TimestampedFilesOlderThan { param($FolderPath,$FilePattern,$RetentionDays,[switch]$RequireCurrentRunPublication,$LogFile) }
 function RemoveOldFiles { param($Path,$Filter,$KeepCount,$LogFile) }
@@ -102,10 +113,11 @@ function Complete-SmartM365ExecutionContext {
     Write-Output 'SUMMARY_REACHED'
 }
 $script:mockSummaryFailure=$false
+$smartM365RunGuard=[pscustomobject]@{InCleanup=$false;ReachedTerminal=$true;ErrorRecord=$null}
 '@
 foreach ($producer in $producers) {
     $ast=Read-Ast $producer
-    $terminal=@($ast.EndBlock.Statements | Where-Object {
+    $terminal=@((Get-InventoryRunBody $ast) | Where-Object {
         $_ -is [Management.Automation.Language.TryStatementAst] -and $null -ne $_.Finally -and
         $_.Finally.Extent.Text -like '*Complete-SmartM365ExecutionContext*'
     })
@@ -137,7 +149,7 @@ foreach ($producer in $producers) {
 }
 
 $autopatch=Read-Ast 'SmartInventory/M365Inventory/IntuneInventory/WindowsUpdate/AutopatchAlerts/SmartM365-Intune-WindowsAutopatch-Alerts-Inventory.ps1'
-$main=@($autopatch.EndBlock.Statements | Where-Object {
+$main=@((Get-InventoryRunBody $autopatch) | Where-Object {
     $_ -is [Management.Automation.Language.TryStatementAst] -and $_.Body.Extent.Text -like '*Start-CoreSmartM365CmdbSourceReceipt*'
 })
 Assert-True ($main.Count -eq 1) 'Receipt startup is outside protected initialization.'
@@ -150,6 +162,7 @@ Case 'Autopatch imports Core before starting its receipt or Graph acquisition' {
 foreach ($scenario in @('Success','ModuleFailure','ReceiptFailure')) {
     Case "Autopatch actual main block with mocked external actions / $scenario" {
         Remove-Item Function:script:Start-CoreSmartM365CmdbSourceReceipt -ErrorAction SilentlyContinue
+        $smartM365RunGuard=[pscustomobject]@{InCleanup=$false;ReachedTerminal=$false;ErrorRecord=$null}
         $script:scenario=$scenario; $script:events=[Collections.Generic.List[string]]::new()
         $script:CompletionStatus='Success'; $script:CompletionError=$null; $script:TranscriptStarted=$false
         $script:GraphTransientRetryCount=0; $global:SmartM365WarningCount=0; $global:SmartM365ErrorCount=0

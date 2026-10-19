@@ -3,7 +3,7 @@
 .SYNOPSIS
 Offline byte equivalence, validation, atomic-copy and bounded performance tests.
 .VERSION
-1.0.2
+1.0.3
 #>
 [CmdletBinding()]
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidGlobalVars','',Justification='Synthetic Core globals in an isolated offline test process.')]
@@ -228,7 +228,7 @@ try {
     }
     Assert-Csv ((ConvertTo-Json -InputObject $rows -Depth 10 -Compress) -ceq $before) 'Source objects were mutated.'
     $collector=Get-Content (Join-Path $root 'SmartInventory/M365Inventory/WorkplaceScope/SmartM365-WorkplaceScope-Inventory.ps1') -Raw
-    Assert-Csv ($collector -match '-NoWeeklyHistory -SingleSerialization' -and $collector -match "-MinimumVersion '1.0.71'") 'WorkplaceScope optimization guard missing.'
+    Assert-Csv ($collector -match '-NoWeeklyHistory -SingleSerialization' -and $collector -match "SmartM365\.Core\.psd1'\) -MinimumVersion '(\d+\.\d+\.\d+)'" -and [version]$Matches[1] -ge [version]'1.0.71') 'WorkplaceScope optimization guard missing.'
     if($BenchmarkRows -gt 0) {
         $timings=& $module {param($count,$folder,$c)
             $d=@(for($i=0;$i -lt $count;$i++){[pscustomobject]@{GroupId='group';MemberId=[string]$i;MembershipKind='Direct';CollectionStatus='Collected';RunId='synthetic';CollectedAtUtc='2026-01-01T00:00:00Z';Label='synthetic'}})

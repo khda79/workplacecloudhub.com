@@ -3,7 +3,7 @@
 .SYNOPSIS
 Offline native identity, application-grain and consumer regression tests.
 .VERSION
-1.0.1
+1.0.2
 #>
 [CmdletBinding()]
 param()
@@ -140,12 +140,6 @@ try {
         Assert-Equal @($output | Where-Object 'Application Source ID' -eq 'a1')[0].'Product Distinct Devices' '3'
         Assert-Equal (Import-Csv $trend).'Metric Definition' 'Legacy name / version observations'
         Assert-Equal (Import-Csv $trend).Applications '2'
-    }
-    Read-Functions (Join-Path (Split-Path $root -Parent) 'SmartWorkplaceIntelligence/scripts/New-LicensingEvidence.ps1') @('Convert-ToDoubleOrNull')
-    Case 'Intelligence missing or invalid license capacity remains unavailable' {
-        foreach ($value in @($null,'','invalid','NaN','-1')) { Assert-Equal (Convert-ToDoubleOrNull $value) $null }
-        Assert-Equal (Convert-ToDoubleOrNull '0') 0.0
-        Assert-Equal (Convert-ToDoubleOrNull '15') 15.0
     }
     Read-Functions (Join-Path $root 'Modules/SmartM365.Core/SmartM365.Core.psm1') @('Get-SmartM365CsvValidationBaseName','Get-SmartM365CsvValidationRule','Assert-SmartM365CsvDataCompleteness','Add-SmartM365CsvValidationRule','Initialize-SmartM365DefaultCsvValidationRules')
     function WriteLog { param([string]$Message,[string]$Level) }

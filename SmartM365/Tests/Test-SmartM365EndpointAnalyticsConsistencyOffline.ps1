@@ -3,7 +3,7 @@
 .SYNOPSIS
 Offline Endpoint Analytics fresh-export consistency and publication boundary tests.
 .VERSION
-1.0.3
+1.0.4
 .NOTES
 Loads AST functions only; all export jobs, downloads, delays and publication are mocked.
 Does not import Core, read tenant configuration or execute a collector entrypoint.
@@ -28,6 +28,8 @@ $module = New-Module -Name SyntheticEndpointConsistency -ScriptBlock {
     Set-StrictMode -Version Latest
     foreach ($definition in $Definitions) { . ([scriptblock]::Create($definition)) }
     $script:Checks = 0
+    $script:IncludeBatteryHealth = $false
+    $script:BatteryHealthSelected = $false
     function Assert-Test {
         param([bool]$Condition,[string]$Message)
         $script:Checks++
@@ -55,6 +57,8 @@ $module = New-Module -Name SyntheticEndpointConsistency -ScriptBlock {
         $script:OutputPath = 'synthetic-history'
         $script:LatestCsvFolderPath = 'synthetic-current'
         $script:IncludeStartupProcesses = $true
+        $script:IncludeBatteryHealth = $false
+        $script:BatteryHealthSelected = $false
     }
     function Start-EAExportJob {
         param($Report,$EffectiveReportName)

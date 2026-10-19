@@ -3,7 +3,7 @@
 .SYNOPSIS
     Synthetic Teams and SharePoint workbook/mail regressions; no dependency repair.
 .VERSION
-    1.0.3
+    1.0.4
 #>
 [CmdletBinding()]
 param()
@@ -145,7 +145,7 @@ if ($spoHtml -notmatch 'Sites to review' -or $spoHtml -notmatch 'Action required
 if ($spoHtml -notmatch 'List &amp; One' -or $spoHtml -match 'List & One' -or $spoHtml -match '<a\s') { throw 'SPO mail escaping or default link behavior is invalid.' }
 if ([regex]::Matches($spoHtml,'https://example.invalid/a').Count -ne 1 -or $spoHtml -notmatch 'Inactive with date</div>\s*<div[^>]*>1') { throw 'SPO priority or dated-inactivity count is invalid.' }
 if ($spoHtml -notmatch 'Sites without an activity date: 1' -or $spoHtml -notmatch 'Sites without Graph enrichment: 1') { throw 'SPO evidence coverage is missing.' }
-if ($spoHtml -notmatch 'Tenant utilization \(estimated\)' -or $spoHtml -notmatch '0.55%' -or $spoHtml -notmatch '91(?:&#160;|,)024 GB estimated capacity' -or $spoHtml -notmatch 'License estimate: 1 TB \+ 10 GB x 9000' -or $spoHtml -match 'Not measured') { throw 'SPO must show estimated utilization, the capacity basis, and avoid an unmeasured card.' }
+if ($spoHtml -notmatch 'Tenant utilization \(estimated\)' -or $spoHtml -notmatch '0.55%' -or $spoHtml -notmatch '91(?:&#160;|&#8239;|,|\u00A0|\u202F)024 GB estimated capacity' -or $spoHtml -notmatch 'License estimate: 1 TB \+ 10 GB x 9000' -or $spoHtml -match 'Not measured') { throw 'SPO must show estimated utilization, the capacity basis, and avoid an unmeasured card.' }
 if ($spoHtml -notmatch 'colspan="2"' -or $spoHtml -notmatch 'background:#eef2ff') { throw 'SPO KPI grid does not use the Exchange-style wide card.' }
 if ($spoHtml.IndexOf('<h2>Summary</h2>') -gt $spoHtml.IndexOf('Action required') -or $spoHtml -notmatch 'Priority' -or $spoHtml -notmatch 'Site storage above 90%' -or $spoHtml -notmatch 'No activity recorded for over 180 days') { throw 'SPO KPI grid must precede the action summary, which shows source thresholds.' }
 $spoSummary.TenantStorageCapacityGB = 1000

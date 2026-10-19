@@ -2,7 +2,7 @@
 .SYNOPSIS
 Synthetic regression tests for non-Graph SmartInventory CSV publication paths.
 .VERSION
-1.0.12
+1.0.13
 #>
 [CmdletBinding()]
 param(
@@ -45,7 +45,7 @@ function New-IssueExporterModule {
     )
     $definitions=@(Get-FunctionText -Path $corePath -Names $coreNames)
     $definitions+=@('$script:SmartM365CmdbSourceContext=$null')
-    $definitions+=@(Get-FunctionText -Path (Join-Path $SourceRoot 'Modules/SmartM365.Core/SmartM365-CmdbReceipt.ps1') -Names @('Register-SmartM365SourceCsv'))
+    $definitions+=@(Get-FunctionText -Path (Join-Path $SourceRoot 'Modules/SmartM365.Core/SmartM365-CmdbReceipt.ps1') -Names @('Register-SmartM365SourceCsv','Start-SmartM365SourcePublication'))
     $exporterFunctions=@('Log','Warn','FlattenPath','CopyCsv','ExportIssues')
     if ($CollectorPath -like '*Windows11-Readiness-Issues-Inventory.ps1') {
         $exporterFunctions+='Remove-LegacyReadinessArchive'
@@ -540,7 +540,7 @@ try {
         $exchangeCompletionLine = '$completionStatus = if ($script:ServersAndStorageWarningCount -gt 0) { ''CompletedWithWarnings'' } else { ''Success'' }'
         Assert-Offline ([regex]::Matches($exchange,[regex]::Escape($exchangeCompletionLine)).Count -eq 2) 'Exchange completion does not propagate collector warnings.'
         Assert-Offline ($exchange -match '\$reportedWarningCount\s*=\s+\$exchangeReadinessWarningRows\.Count\s*\+\s*\$lowSpaceRows\.Count') 'Exchange readiness and capacity warnings are not included in completion reporting.'
-        $warningExitPattern = [regex]::Escape('$script:CompletionStatus = $completionStatus') + '[\s\S]{0,180}' + [regex]::Escape('exit 3')
+        $warningExitPattern = [regex]::Escape('$script:CompletionStatus = $completionStatus') + '[\s\S]{0,320}' + '(?:exit 3|\$smartM365RunGuard\.ExitCode=\(3\);\s*exit \$smartM365RunGuard\.ExitCode)'
         Assert-Offline ([regex]::Matches($exchange,$warningExitPattern).Count -eq 2) 'Exchange warnings do not return the orchestrator warning exit code.'
         Assert-Offline ($mailbox -match 'Invoke-SmartM365MailboxDailySummaryMail\s+-MarkerPath') 'Mailbox summary email is not protected by the daily guard.'
         Assert-Offline (($winUpdate | Select-String -Pattern 'SMART365 - \[\$reportStatus\] WinUpdate Feature Update' -AllMatches).Matches.Count -eq 2) 'WinUpdate alert subject lacks the SMART365 prefix.'
