@@ -3,7 +3,7 @@
 .SYNOPSIS
   Offline tests of the SmartFinOps Workplace demo report generator.
 .VERSION
-1.0.0
+1.1.0
 .NOTES
   Runs Demo\SmartFinOps-Workplace-DemoReport.ps1 (real engine and report on synthetic contoso data) into a temporary
   folder, then checks the page, its manifest, the DEMO banner, the statuses it must show and the leak scanner.
@@ -48,7 +48,7 @@ try {
 
     #region 2. Manifest
     Check ($manifest.Owner -eq 'SmartFinOps-DemoReport' -and $manifest.TenantKey -eq 'contoso-demo' -and $manifest.LeakScan -eq 'Passed' -and $manifest.SourceCommit -eq 'test-commit') 'manifest identity, tenant key, leak scan and source commit'
-    Check ($manifest.ValuationVersion -match '^\d+\.\d+\.\d+$' -and $manifest.ReportVersion -match '^\d+\.\d+\.\d+$' -and $manifest.GeneratorVersion -eq '1.0.0' -and $manifest.FixtureVersion -eq '1.0.0') 'manifest versions'
+    Check ($manifest.ValuationVersion -match '^\d+\.\d+\.\d+$' -and $manifest.ReportVersion -match '^\d+\.\d+\.\d+$' -and $manifest.GeneratorVersion -eq '1.0.1' -and $manifest.FixtureVersion -eq '1.0.0') 'manifest versions'
     Check (@($manifest.ValuationExitCodes).Count -eq 2 -and @($manifest.ValuationExitCodes | Where-Object { $_ -notin @(0,3) }).Count -eq 0 -and $manifest.ReportExitCode -in @(0,3)) 'two valuation runs and the report ended with 0 or 3'
     Check ($manifest.ReportSHA256 -eq (Get-FileHash -LiteralPath $page -Algorithm SHA256).Hash) 'manifest hash matches the page'
     Check (-not ((Get-Content -LiteralPath $manifestPath -Raw) -match '(?i)[a-z]:\\|\\\\|temp')) 'manifest holds no local path'
@@ -65,7 +65,39 @@ try {
     #endregion
   }
 
-  #region 4. Leak scanner
+  #region 4. Outside a Git repository and without -ForbiddenTermsPath: no private term list, generation still succeeds (1.0.0 failed here)
+  $isolated = Join-Path $root 'no-git'
+  $repository = Split-Path $project -Parent
+  $needed = @(
+    'SmartFinOps\Demo\SmartFinOps-Workplace-DemoReport.ps1', 'SmartFinOps\Demo\SmartFinOps-Workplace-DemoFixture.ps1'
+    'SmartFinOps\SmartFinOps-Workplace-Valuation.ps1', 'SmartFinOps\SmartFinOps-Workplace-Report.ps1', 'SmartFinOps\SmartFinOps.global.local.json.template'
+    'SmartFinOps\Config\SmartFinOps-TenantContext.ps1', 'SmartFinOps\Config\SmartFinOps-Contracts.local.json.template'
+    'SmartM365\SmartInventory\M365Inventory\Licensing\SmartM365-Licences-Inventory.ps1', 'SmartM365\SmartInventory\M365Inventory\Licensing\SmartM365-LicensePricing-Inventory.ps1'
+    'SmartM365\SmartInventory\ActiveDirectoryInventory\SmartM365-ActiveDirectory-Inventory.ps1', 'SmartM365\SmartInventory\M365Inventory\Users\SmartM365-ActiveUsers-Inventory.ps1'
+  )
+  foreach ($relative in $needed) {
+    $target = Join-Path $isolated $relative
+    New-Item -ItemType Directory -Path (Split-Path $target -Parent) -Force | Out-Null
+    Copy-Item -LiteralPath (Join-Path $repository $relative) -Destination $target
+  }
+  # Tracked module files only, as the generator copies them (no local configuration, lock or log).
+  $coreSource = Join-Path $repository 'SmartM365\Modules\SmartM365.Core'
+  foreach ($file in Get-ChildItem -LiteralPath $coreSource -File -Recurse | Where-Object { $_.Name -notlike '*.local.json*' -and $_.Extension -notin @('.lock','.log') }) {
+    $target = Join-Path (Join-Path $isolated 'SmartM365\Modules\SmartM365.Core') ([IO.Path]::GetRelativePath($coreSource, $file.FullName))
+    New-Item -ItemType Directory -Path (Split-Path $target -Parent) -Force | Out-Null
+    Copy-Item -LiteralPath $file.FullName -Destination $target
+  }
+  & git -C $isolated rev-parse --git-dir 2>$null | Out-Null
+  Check ($LASTEXITCODE -ne 0) 'isolated copy is outside any Git repository'
+  $noTermsOut = Join-Path $root 'out-no-terms'
+  $noTermsLog = & $pwsh -NoProfile -ExecutionPolicy Bypass -File (Join-Path $isolated 'SmartFinOps\Demo\SmartFinOps-Workplace-DemoReport.ps1') -OutputPath $noTermsOut 2>&1 | Out-String
+  $noTermsExit = $LASTEXITCODE
+  Check ($noTermsExit -eq 0 -and $noTermsLog.Contains('Leak scan passed (0 private term(s) checked)')) "generation without a private term list succeeds (got $noTermsExit) $noTermsLog"
+  $noTermsManifest = Join-Path $noTermsOut 'SmartFinOps_Workplace-Report.demo.manifest.json'
+  Check ((Test-Path -LiteralPath $noTermsManifest) -and (Get-Content -LiteralPath $noTermsManifest -Raw | ConvertFrom-Json).PrivateTermsChecked -eq 0) 'manifest records 0 private terms checked'
+  #endregion
+
+  #region 5. Leak scanner
   . $generator
   $clean = '<html><head><title>x</title><style>p{}</style></head><body><p>north.contoso.invalid 2.4.1 12:30:45 contoso-demo https://workplacecloudhub.com</p><svg xmlns="http://www.w3.org/2000/svg"></svg></body></html>'
   Check (@(Test-DemoLeak -Html $clean).Count -eq 0) 'clean page passes the leak scan'

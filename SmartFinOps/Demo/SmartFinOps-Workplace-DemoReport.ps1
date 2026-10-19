@@ -14,7 +14,7 @@
      host or user names of this computer, private terms, foreign domains or URLs) and writes the page and a manifest
      to -OutputPath.
 .VERSION
-1.0.0
+1.0.1
 .NOTES
   Read-only and offline: no API call, no SharePoint upload, no mail. -OutputPath must lie outside the SmartFinOps
   code folder. The page and its manifest are generated files: never commit them.
@@ -31,7 +31,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-$script:ScriptVersion = '1.0.0'
+$script:ScriptVersion = '1.0.1'
 $script:Invariant = [Globalization.CultureInfo]::InvariantCulture
 $script:DemoTenantKey = 'contoso-demo'
 $script:DemoProfileKey = 'demo'
@@ -222,7 +222,8 @@ try {
   # 4. DEMO banner, leak scan, outputs.
   $bannerText = 'Fictional sample data for the organization contoso.invalid. No tenant, directory, mailbox or license was read. Built from synthetic SmartInventory exports by SmartFinOps Workplace Valuation {0} and Report {1}.' -f $versions.Valuation, $versions.Report
   $html = Add-DemoBanner -Html $html -Text $bannerText
-  $privateTerms = Get-DemoPrivateTermList -Path $ForbiddenTermsPath -RepositoryRoot $repository
+  # @() keeps an empty or single-term list an array: a bare empty return is $null, and .Count fails in strict mode.
+  [string[]]$privateTerms = @(Get-DemoPrivateTermList -Path $ForbiddenTermsPath -RepositoryRoot $repository)
   $localValues = @($env:USERNAME, $env:COMPUTERNAME, $env:USERDOMAIN, $env:USERDNSDOMAIN, $workspace, [IO.Path]::GetTempPath().TrimEnd('\'), $repository)
   $findings = @(Test-DemoLeak -Html $html -PrivateTerms $privateTerms -LocalValues $localValues)
   if ($findings.Count -gt 0) { throw "Leak scan failed:`n - $($findings -join "`n - ")" }
