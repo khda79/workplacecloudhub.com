@@ -3,7 +3,7 @@
 .SYNOPSIS
   Offline tests of the SmartFinOps Workplace V2 executive HTML report.
 .VERSION
-1.2.1
+1.3.0
 .NOTES
   Synthetic FinOps_* fixtures and receipts only, in an isolated temporary runtime (no local configuration,
   export or tenant). The input contract is checked against the valuation engine output specification.
@@ -21,7 +21,7 @@ $pwsh = (Get-Process -Id $PID).Path
 # Profile 'prod' whose organization TenantKey is 'contoso-prod'.
 $tenant = 'contoso-prod'
 $profileKey = 'prod'
-$baseConfig = '{ "SmartM365TenantKey": "contoso-prod" }'
+$baseConfig = '{ "SmartM365TenantKey": "contoso-prod", "EnableSharePointUpload": false }'
 $runId = '20261018T000000000Z-abcdef12'
 $skuGuid = '11111111-2222-3333-4444-555555555555'
 $userGuid = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
@@ -154,8 +154,9 @@ function Get-FixtureData {
 
 function New-ReportFixture {
   param([string]$Name, [switch]$NotMeasured, [scriptblock]$ChangeData, [scriptblock]$ChangeReceipt)
-  $folder = Join-Path $root "$Name\data"
-  New-Item -ItemType Directory -Path (Join-Path $folder "Archive\$runId") -Force | Out-Null
+  # SmartM365 data tree of the profile: the valuation outputs in DATA-LAST, the run history in DATA-ALL, logs in LOG-ALL.
+  $folder = Join-Path $root "$Name\DATA-LAST"
+  New-Item -ItemType Directory -Path $folder, (Join-Path $root "$Name\DATA-ALL\FinOps\Workplace\$runId"), (Join-Path $root "$Name\LOG-ALL") -Force | Out-Null
   $data = Get-FixtureData -NotMeasured:$NotMeasured
   if ($ChangeData) { & $ChangeData $data }
   $values = @{ TenantKey=$tenant; FinOpsRunId=$runId; SnapshotId=$(if ($NotMeasured) { '' } else { 'snap-1' }); ReceiptRunId=$(if ($NotMeasured) { '' } else { 'licrun0001' }) }
@@ -176,15 +177,19 @@ function New-ReportFixture {
   return $folder
 }
 
+function Get-TenantFolder { param([string]$Folder, [string]$Name) return (Join-Path (Split-Path $Folder -Parent) $Name) }
+function Get-ReportLogPath { param([string]$Folder) return @(Get-ChildItem -LiteralPath (Get-TenantFolder $Folder 'LOG-ALL\SmartFinOps-Workplace-Report') -Filter 'SmartFinOps-Workplace-Report-*.log' -ErrorAction SilentlyContinue | Sort-Object Name | ForEach-Object FullName | Select-Object -Last 1) }
+
 function Invoke-Report {
   param([string]$Folder, [string]$Culture, [switch]$ValidateOnly)
   $arguments = @('-NoProfile','-ExecutionPolicy','Bypass')
+  $dataAll = Get-TenantFolder $Folder 'DATA-ALL'; $logAll = Get-TenantFolder $Folder 'LOG-ALL'
   if ($Culture) {
-    $command = "[Globalization.CultureInfo]::CurrentCulture = '$Culture'; & '$report' -Tenant '$profileKey' -InputRoot '$Folder'$(if ($ValidateOnly) { ' -ValidateOnly' }); exit `$LASTEXITCODE"
+    $command = "[Globalization.CultureInfo]::CurrentCulture = '$Culture'; & '$report' -Tenant '$profileKey' -SmartM365LatestCsvFolderPath '$Folder' -SmartM365DataAllRootPath '$dataAll' -SmartM365LogAllRootPath '$logAll'$(if ($ValidateOnly) { ' -ValidateOnly' }); exit `$LASTEXITCODE"
     $arguments += @('-Command', $command)
   }
   else {
-    $arguments += @('-File', $report, '-Tenant', $profileKey, '-InputRoot', $Folder)
+    $arguments += @('-File', $report, '-Tenant', $profileKey, '-SmartM365LatestCsvFolderPath', $Folder, '-SmartM365DataAllRootPath', $dataAll, '-SmartM365LogAllRootPath', $logAll)
     if ($ValidateOnly) { $arguments += '-ValidateOnly' }
   }
   $log = & $pwsh @arguments 2>&1 | Out-String
@@ -215,7 +220,8 @@ try {
   $run = Invoke-Report $nominal
   $html = $run.Html
   Check ($run.ExitCode -eq 3) "nominal exit code 3, provisional L4 (got $($run.ExitCode)) $($run.Log)"
-  Check ((Test-Path -LiteralPath (Join-Path $nominal "Archive\$runId\SmartFinOps_Workplace-Report.html")) -and (Get-Content -LiteralPath (Join-Path $nominal "Archive\$runId\SmartFinOps_Workplace-Report.html") -Raw) -ceq $html) 'report archived with its run'
+  $historyPage = Get-TenantFolder $nominal "DATA-ALL\FinOps\Workplace\$runId\SmartFinOps_Workplace-Report.html"
+  Check ((Test-Path -LiteralPath $historyPage) -and (Get-Content -LiteralPath $historyPage -Raw) -ceq $html) 'report copied into the run history (DATA-ALL\FinOps\Workplace\<RunId>)'
   $order = @('executive-summary','financial-potential','priority-decisions','trade-offs','capacity-forecast','realization','showback','assumptions','appendix' | ForEach-Object { $html.IndexOf("id=""$_""", [StringComparison]::Ordinal) })
   Check (@($order | Where-Object { $_ -lt 0 }).Count -eq 0 -and (($order | Sort-Object) -join ',') -eq ($order -join ',')) 'nine sections in the RULES order'
   Check ($html.Contains('title="EUR 12345.67">EUR 12,346</span>') -and $html.Contains('EUR 2,222') -and $html.Contains('EUR 349') -and $html.Contains('EUR 104')) 'totals displayed from FinOps_Summary'
@@ -244,7 +250,7 @@ try {
   Check ($html.Contains('EUR 5,889') -and -not $html.Contains('>Finance<')) 'combined row reaches the threshold by adding the smallest group'
   Check (-not $html.Contains('>LU<') -and -not $html.Contains('EUR 4,322') -and -not $html.Contains('>FR<') -and $html.Contains('EUR 12,322')) 'a single small country is never shown alone'
   $configured = New-ReportFixture 'threshold'
-  '{ "SmartM365TenantKey": "contoso-prod", "Report": { "ShowbackMinimumGroupUsers": 1 } }' | Set-Content -LiteralPath (Join-Path $runtime 'SmartFinOps\SmartFinOps.global.local.json') -Encoding utf8NoBOM
+  '{ "SmartM365TenantKey": "contoso-prod", "EnableSharePointUpload": false, "Report": { "ShowbackMinimumGroupUsers": 1 } }' | Set-Content -LiteralPath (Join-Path $runtime 'SmartFinOps\SmartFinOps.global.local.json') -Encoding utf8NoBOM
   $runThreshold = Invoke-Report $configured
   $baseConfig | Set-Content -LiteralPath (Join-Path $runtime 'SmartFinOps\SmartFinOps.global.local.json') -Encoding utf8NoBOM
   Check ($runThreshold.ExitCode -eq 3 -and $runThreshold.Html.Contains('>Tiny<') -and $runThreshold.Html.Contains('EUR 778')) 'threshold read from the local configuration'
@@ -264,6 +270,7 @@ try {
     'receipt-json' = @{ After={ param($f) Set-Content -LiteralPath (Join-Path $f 'SmartFinOps_Workplace-Valuation.current.json.txt') -Value '{ not json' }; Reason='not valid JSON' }
     'receipt-owner' = @{ Receipt={ param($r) $r.Owner = 'Other' }; Reason='unsupported owner' }
     'engine-2.1.3' = @{ Receipt={ param($r) $r.ScriptVersion = '2.1.3' }; Reason='not supported' }
+    'engine-2.3.0' = @{ Receipt={ param($r) $r.ScriptVersion = '2.3.0' }; Reason='not supported' }
     'contract-1.0' = @{ Receipt={ param($r) $r.ContractVersion = '1.0' }; Reason='unsupported owner or contract version' }
     'tenantkey-is-profile' = @{ Receipt={ param($r) $r.TenantKey = 'prod' }; Reason='TenantKey differs' }
     'other-profile' = @{ Receipt={ param($r) $r.ProfileKey = 'test' }; Reason='ProfileKey differs' }
@@ -314,13 +321,15 @@ try {
   #region 8. ValidateOnly, logs, PowerShell 7 only
   $validate = New-ReportFixture 'validate'
   $validateRun = Invoke-Report $validate -ValidateOnly
-  Check ($validateRun.ExitCode -eq 3 -and -not (Test-Path -LiteralPath (Join-Path $validate 'SmartFinOps_Workplace-Report.html')) -and -not (Test-Path -LiteralPath (Join-Path $validate 'SmartFinOps-Workplace-Report.log'))) 'ValidateOnly writes nothing'
-  $logLines = @(Get-Content -LiteralPath (Join-Path $nominal 'SmartFinOps-Workplace-Report.log'))
+  Check ($validateRun.ExitCode -eq 3 -and -not (Test-Path -LiteralPath (Join-Path $validate 'SmartFinOps_Workplace-Report.html')) -and @(Get-ChildItem -LiteralPath (Get-TenantFolder $validate 'LOG-ALL') -Recurse -File).Count -eq 0) 'ValidateOnly writes nothing'
+  $nominalLog = Get-ReportLogPath $nominal
+  Check ($null -ne $nominalLog -and (Split-Path $nominalLog -Leaf) -cmatch '^SmartFinOps-Workplace-Report-\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}\.log$') "report log in LOG-ALL\SmartFinOps-Workplace-Report ($nominalLog)"
+  Check (@(Get-ChildItem -LiteralPath $nominal -Filter '*.log').Count -eq 0 -and @(Get-ChildItem -LiteralPath (Get-TenantFolder $nominal 'DATA-ALL') -Recurse -Filter '*.log').Count -eq 0) 'no report log in DATA-LAST or in the run history'
+  $logLines = @(Get-Content -LiteralPath $nominalLog)
   $bannerStart = [array]::IndexOf($logLines, '================================================================================')
   Check ($bannerStart -gt 0 -and @($logLines[0..($bannerStart - 1)] | Where-Object { $_ -notmatch '^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} \[' }).Count -eq 0) 'every log line before the completion banner is timestamped'
   Check (($logLines -join "`n").Contains(' SmartFinOps by WorkplaceCloudHub - Execution completed') -and ($logLines -join "`n").Contains(' Status    : COMPLETED WITH WARNINGS') -and ($logLines -join "`n").Contains(' CSV files : 0')) 'completion banner appended to the report log'
-  Check ((Get-Content -LiteralPath (Join-Path $nominal "Archive\$runId\SmartFinOps-Workplace-Report.log") -Raw) -ceq (Get-Content -LiteralPath (Join-Path $nominal 'SmartFinOps-Workplace-Report.log') -Raw)) 'archived log is the current log, banner included'
-  Check ($run.Log.Contains(' SmartFinOps by WorkplaceCloudHub') -and $run.Log.Contains(' GitHub  : https://github.com/khda79/workplacecloudhub.com') -and $run.Log -match 'Starting SmartFinOps Workplace Report v2\.2\.4 ' -and $run.Log -match 'Tenant context 1.3.0') 'startup banner and versions on the console'
+  Check ($run.Log.Contains(' SmartFinOps by WorkplaceCloudHub') -and $run.Log.Contains(' GitHub  : https://github.com/khda79/workplacecloudhub.com') -and $run.Log -match 'Starting SmartFinOps Workplace Report v2\.3\.0 ' -and $run.Log -match 'Tenant context 1.4.0') 'startup banner and versions on the console'
   $unavailable = Invoke-Report (New-ReportFixture 'banner-failed' -ChangeReceipt { param($r) $r.Status = 'Failed' })
   Check ($unavailable.ExitCode -eq 1 -and $unavailable.Log.Contains(' SmartFinOps by WorkplaceCloudHub - Execution failed') -and $unavailable.Log.Contains(' Status    : FAILED')) 'report not available: completion banner Failed'
   Check ($unavailable.Log -match '\[ERROR\] Report not available: ') 'report not available: logged as an error'
@@ -331,8 +340,10 @@ try {
   $clean = Invoke-Report (New-ReportFixture 'clean' -ChangeReceipt { param($r) $r.Provisional = $false; $r.ProvisionalLevers = @() })
   Check ($clean.ExitCode -eq 0 -and $clean.Log.Contains(' Status    : SUCCESS') -and $clean.Log.Contains(' Warnings  : 0') -and $clean.Log -match $orchestratorEvidence) "final figures: exit 0 and Success banner (got $($clean.ExitCode))"
   Check ($run.Log -match $orchestratorEvidence) 'startup line matches the orchestrator success evidence'
-  $missing = Invoke-Report (Join-Path $root 'no-such-folder')
-  Check ($missing.ExitCode -eq 1 -and $missing.Log.Contains('FinOps data folder not found') -and $missing.Log.Contains(' Status    : FAILED')) 'report error: Failed banner and logged reason'
+  $engine22 = Invoke-Report (New-ReportFixture 'engine-2.2.0' -ChangeReceipt { param($r) $r.ScriptVersion = '2.2.0' })
+  Check ($engine22.ExitCode -eq 3 -and $engine22.Html.Contains('<h1>Workplace FinOps report</h1>')) "engine 2.2.x receipt accepted (exit $($engine22.ExitCode))"
+  $missing = Invoke-Report (Join-Path $root 'no-such-tenant\DATA-LAST')
+  Check ($missing.ExitCode -eq 1 -and $missing.Log.Contains('SmartM365LatestCsvFolderPath folder not found') -and $missing.Log.Contains('never creates the SmartM365 data roots') -and $missing.Log.Contains(' Status    : FAILED')) 'report error: missing DATA-LAST refused, Failed banner and logged reason'
   Check (@(Get-ChildItem -LiteralPath $nominal -Filter '*.tmp').Count -eq 0) 'no temporary file left'
   $windowsPowerShell = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
   if (Test-Path -LiteralPath $windowsPowerShell) {

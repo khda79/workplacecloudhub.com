@@ -2,18 +2,27 @@
 .SYNOPSIS
   SmartFinOps tenant context: global and tenant local JSON configuration, path tokens and console banners.
 .DESCRIPTION
-  Dot-sourced by the SmartFinOps V2 scripts. -Tenant is the profile key (Data\<profile>, Archive, Config\Tenants\<profile>.local.json
-  with its ProfileKey; a legacy TenantKey entry is renamed to ProfileKey before template synchronization). SmartM365LatestCsvFolderPath
-  and SmartM365TenantKey (the organization TenantKey carried by the source receipts) set to __USE_SMARTM365__ (or left
-  empty) are resolved through the SmartM365 tenant context of that profile only when a script asks for them; a failed
-  resolution stops the script with the reason and never falls back to a default. A resolved path that still holds a
-  {{token}} is refused.
+  Dot-sourced by the SmartFinOps V2 scripts. -Tenant is the profile key (Config\Tenants\<profile>.local.json with its
+  ProfileKey; a legacy TenantKey entry is renamed to ProfileKey before template synchronization). SmartM365LatestCsvFolderPath,
+  SmartM365DataAllRootPath, SmartM365LogAllRootPath, SmartM365TenantKey (the organization TenantKey carried by the source
+  receipts) and EnableSharePointUpload set to __USE_SMARTM365__ (or left empty) are resolved through the SmartM365 tenant
+  context of that profile only when a script asks for them; a failed resolution stops the script with the reason and
+  never falls back to a default. A resolved path that still holds a {{token}} is refused. Get-SmartFinOpsDataLayout
+  returns the SmartM365 DATA-LAST, DATA-ALL and LOG-ALL folders of the profile, which must be existing siblings.
 .VERSION
-1.3.0
+1.4.0
 #>
-$script:SmartFinOpsTenantContextVersion = '1.3.0'
+$script:SmartFinOpsTenantContextVersion = '1.4.0'
 $script:SmartFinOpsSmartM365Config = $null
 $script:SmartFinOpsUseSmartM365Markers = @('__USE_SMARTM365__', 'USE_SMARTM365')
+# SmartFinOps path setting -> SmartM365 key and the leaf name the resolved folder must have.
+$script:SmartFinOpsSmartM365Paths = [ordered]@{
+    SmartM365LatestCsvFolderPath = @('LatestCsvFolderPath', 'DATA-LAST')
+    SmartM365DataAllRootPath = @('DataAllRootPath', 'DATA-ALL')
+    SmartM365LogAllRootPath = @('LogAllRootPath', 'LOG-ALL')
+}
+# SmartM365 SharePoint upload settings used by the SmartFinOps uploads (values come from the SmartM365 context only).
+$script:SmartFinOpsSharePointKeys = @('SharePointSiteHostname', 'SharePointSitePath', 'SharePointLibraryDisplayName', 'SharePointTargetFolderPath', 'AppId', 'TenantId', 'Thumb')
 
 function Write-SmartFinOpsStartupBanner {
     [CmdletBinding()]
@@ -305,19 +314,6 @@ function Find-SmartFinOpsRoot {
     throw "SmartFinOps root not found from '$StartPath'."
 }
 
-function Test-SmartFinOpsWritableDirectory {
-    [CmdletBinding()]
-    param([Parameter(Mandatory)][string]$Path)
-
-    try {
-        New-Item -Path $Path -ItemType Directory -Force | Out-Null
-        $probePath = Join-Path -Path $Path -ChildPath ('.smartfinops-write-test-{0}.tmp' -f [guid]::NewGuid().ToString('N'))
-        Set-Content -LiteralPath $probePath -Value 'test' -Encoding UTF8 -ErrorAction Stop
-        Remove-Item -LiteralPath $probePath -Force -ErrorAction SilentlyContinue
-        return $true
-    }
-    catch { return $false }
-}
 function Resolve-SmartFinOpsExternalTokenValue {
     [CmdletBinding()]
     param(
@@ -376,20 +372,32 @@ function Get-SmartFinOpsSmartM365Config {
     return $smartM365Config
 }
 
-function Get-SmartFinOpsSmartM365LatestCsvFolderPath {
+function Get-SmartFinOpsSmartM365PathValue {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string]$RepositoryRootPath,
-        [Parameter(Mandatory)][string]$ProfileKey
+        [Parameter(Mandatory)][string]$ProfileKey,
+        [Parameter(Mandatory)][string]$Setting
     )
 
-    # Called only for SmartM365LatestCsvFolderPath = __USE_SMARTM365__: never a default path.
-    $smartM365Config = Get-SmartFinOpsSmartM365Config -RepositoryRootPath $RepositoryRootPath -ProfileKey $ProfileKey -Setting 'SmartM365LatestCsvFolderPath'
-    $prefix = "SmartM365LatestCsvFolderPath is __USE_SMARTM365__ but its resolution through SmartM365 failed for profile '$ProfileKey'"
-    $resolved = [string](Resolve-SmartFinOpsExternalTokenValue -Value $smartM365Config.LatestCsvFolderPath -Config $smartM365Config)
-    if ([string]::IsNullOrWhiteSpace($resolved)) { throw ("{0}: the SmartM365 context returned an empty LatestCsvFolderPath ({1})." -f $prefix, $script:SmartFinOpsSmartM365Config.ContextPath) }
-    Assert-SmartFinOpsResolvedPath -Name 'SmartM365LatestCsvFolderPath (resolved through SmartM365)' -Value $resolved
-    return (ConvertTo-SmartFinOpsFileSystemPath $resolved)
+    # Called only for a SmartM365 path setting = __USE_SMARTM365__: never a default path.
+    $smartM365Key = $script:SmartFinOpsSmartM365Paths[$Setting][0]
+    $smartM365Config = Get-SmartFinOpsSmartM365Config -RepositoryRootPath $RepositoryRootPath -ProfileKey $ProfileKey -Setting $Setting
+    $prefix = "$Setting is __USE_SMARTM365__ but its resolution through SmartM365 failed for profile '$ProfileKey'"
+    $property = $smartM365Config.PSObject.Properties[$smartM365Key]
+    $resolved = if ($null -ne $property) { [string](Resolve-SmartFinOpsExternalTokenValue -Value $property.Value -Config $smartM365Config) } else { '' }
+    if ([string]::IsNullOrWhiteSpace($resolved)) { throw ("{0}: the SmartM365 context returned an empty {1} ({2})." -f $prefix, $smartM365Key, $script:SmartFinOpsSmartM365Config.ContextPath) }
+    Assert-SmartFinOpsResolvedPath -Name ("{0} (resolved through SmartM365)" -f $Setting) -Value $resolved
+    $resolved = ConvertTo-SmartFinOpsFileSystemPath $resolved
+    # SmartM365 falls back to an Output folder next to the script when its Data root is not writable: never write there.
+    $outputProperty = $smartM365Config.PSObject.Properties['ScriptOutputRootPath']
+    if ($null -ne $outputProperty -and -not [string]::IsNullOrWhiteSpace([string]$outputProperty.Value)) {
+        $outputRoot = ([IO.Path]::GetFullPath((ConvertTo-SmartFinOpsFileSystemPath ([string]$outputProperty.Value)))).TrimEnd('\') + '\'
+        if (([IO.Path]::GetFullPath($resolved).TrimEnd('\') + '\').StartsWith($outputRoot, [StringComparison]::OrdinalIgnoreCase)) {
+            throw ("{0}: {1} resolves to the SmartM365 Output fallback ({2}); configure the SmartM365 data roots of the profile." -f $prefix, $smartM365Key, $resolved)
+        }
+    }
+    return $resolved
 }
 
 function Get-SmartFinOpsSmartM365TenantKey {
@@ -419,8 +427,6 @@ function Get-SmartFinOpsEffectiveGlobalConfig {
     if ([string]::IsNullOrWhiteSpace($ProfileKey)) { $ProfileKey = 'test' }
     $rootPath = Find-SmartFinOpsRoot -StartPath $StartPath
     $repositoryRootPath = Split-Path -Path $rootPath -Parent
-    $scriptStartPath = if ([string]::IsNullOrWhiteSpace($StartPath)) { $rootPath } else { $StartPath }
-    $scriptOutputRootPath = Join-Path -Path $scriptStartPath -ChildPath 'Output'
     $globalConfigPath = Join-Path -Path $rootPath -ChildPath 'SmartFinOps.global.local.json'
     $tenantConfigPath = Join-Path -Path $rootPath -ChildPath ("Config\Tenants\{0}.local.json" -f $ProfileKey)
 
@@ -442,34 +448,13 @@ function Get-SmartFinOpsEffectiveGlobalConfig {
     $globalConfig['TenantKey'] = $ProfileKey
     $globalConfig['SmartFinOpsRootPath'] = $rootPath
     $globalConfig['RepositoryRootPath'] = $repositoryRootPath
-    $globalConfig['ScriptOutputRootPath'] = $scriptOutputRootPath
 
-    $defaultWorkspaceRootPath = $rootPath
-    $defaultTenantDataRootPath = '{{WorkspaceRootPath}}\Data\{{ProfileKey}}'
-    $useScriptOutputFallback = $false
-    if (-not $globalConfig.Contains('WorkspaceRootPath') -or [string]::IsNullOrWhiteSpace([string]$globalConfig['WorkspaceRootPath']) -or [string]$globalConfig['WorkspaceRootPath'] -in @('.', '{{SmartFinOpsRootPath}}')) {
-        $candidateDataRoot = Join-Path -Path $rootPath -ChildPath 'Data'
-        if (Test-SmartFinOpsWritableDirectory -Path $candidateDataRoot) {
-            $defaultWorkspaceRootPath = $rootPath
-        }
-        else {
-            $defaultWorkspaceRootPath = $scriptOutputRootPath
-            $defaultTenantDataRootPath = '{{WorkspaceRootPath}}\{{ProfileKey}}'
-            $useScriptOutputFallback = $true
-        }
-    }
-
-    if (-not $globalConfig.Contains('WorkspaceRootPath') -or [string]::IsNullOrWhiteSpace([string]$globalConfig['WorkspaceRootPath'])) { $globalConfig['WorkspaceRootPath'] = $defaultWorkspaceRootPath }
-    if (-not $globalConfig.Contains('TenantDataRootPath') -or ($useScriptOutputFallback -and [string]$globalConfig['TenantDataRootPath'] -in @('{{WorkspaceRootPath}}\Data\{{TenantKey}}', '{{WorkspaceRootPath}}\Data\{{ProfileKey}}'))) { $globalConfig['TenantDataRootPath'] = $defaultTenantDataRootPath }
     # Empty or __USE_SMARTM365__: resolved through SmartM365 only when a script asks for it (Get-SmartFinOpsConfigValue).
-    if (-not $globalConfig.Contains('SmartM365LatestCsvFolderPath') -or
-        [string]::IsNullOrWhiteSpace([string]$globalConfig['SmartM365LatestCsvFolderPath']) -or
-        [string]$globalConfig['SmartM365LatestCsvFolderPath'] -in @('__USE_SMARTM365__', 'USE_SMARTM365')) {
-        $globalConfig['SmartM365LatestCsvFolderPath'] = '__USE_SMARTM365__'
-    }
-    if (-not $globalConfig.Contains('SmartM365TenantKey') -or [string]::IsNullOrWhiteSpace([string]$globalConfig['SmartM365TenantKey']) -or
-        [string]$globalConfig['SmartM365TenantKey'] -in @('__USE_SMARTM365__', 'USE_SMARTM365')) {
-        $globalConfig['SmartM365TenantKey'] = '__USE_SMARTM365__'
+    foreach ($key in @(@($script:SmartFinOpsSmartM365Paths.Keys) + @('SmartM365TenantKey', 'EnableSharePointUpload'))) {
+        if (-not $globalConfig.Contains($key) -or ($globalConfig[$key] -is [string] -and
+            ([string]::IsNullOrWhiteSpace([string]$globalConfig[$key]) -or [string]$globalConfig[$key] -in $script:SmartFinOpsUseSmartM365Markers))) {
+            $globalConfig[$key] = '__USE_SMARTM365__'
+        }
     }
 
     return [pscustomobject]$globalConfig
@@ -513,10 +498,10 @@ function Get-SmartFinOpsConfigValue {
     if ($null -eq $property -or $null -eq $property.Value) { return $DefaultValue }
     if ($property.Value -is [string]) {
         $value = $property.Value.Trim()
-        if ($Name -eq 'SmartM365LatestCsvFolderPath') {
-            if ($value -in $script:SmartFinOpsUseSmartM365Markers) { return Get-SmartFinOpsSmartM365LatestCsvFolderPath -RepositoryRootPath ([string]$script:SmartFinOpsGlobalConfig.RepositoryRootPath) -ProfileKey ([string]$script:SmartFinOpsGlobalConfig.ProfileKey) }
+        if ($script:SmartFinOpsSmartM365Paths.Contains($Name)) {
+            if ($value -in $script:SmartFinOpsUseSmartM365Markers) { return Get-SmartFinOpsSmartM365PathValue -RepositoryRootPath ([string]$script:SmartFinOpsGlobalConfig.RepositoryRootPath) -ProfileKey ([string]$script:SmartFinOpsGlobalConfig.ProfileKey) -Setting $Name }
             $resolvedPath = [string](Resolve-SmartFinOpsConfigTokenValue -Value $value)
-            Assert-SmartFinOpsResolvedPath -Name 'SmartM365LatestCsvFolderPath' -Value $resolvedPath
+            Assert-SmartFinOpsResolvedPath -Name $Name -Value $resolvedPath
             return (ConvertTo-SmartFinOpsFileSystemPath $resolvedPath)
         }
         if ($Name -eq 'SmartM365TenantKey') {
@@ -527,6 +512,79 @@ function Get-SmartFinOpsConfigValue {
         if ([string]::IsNullOrWhiteSpace($value) -or $value -in @('__USE_GLOBAL__', 'USE_GLOBAL')) { return $DefaultValue }
     }
     return Resolve-SmartFinOpsConfigTokenValue -Value $property.Value
+}
+
+function Get-SmartFinOpsDataLayout {
+    [CmdletBinding()]
+    param(
+        [string]$DataLast,
+        [string]$DataAll,
+        [string]$LogAll
+    )
+
+    # SmartM365 data tree of the profile: DATA-LAST (current files), DATA-ALL (history), LOG-ALL (logs).
+    if ($null -eq $script:SmartFinOpsGlobalConfig) { throw 'SmartFinOps tenant context has not been initialized.' }
+    $overrides = @{ SmartM365LatestCsvFolderPath = $DataLast; SmartM365DataAllRootPath = $DataAll; SmartM365LogAllRootPath = $LogAll }
+    $folders = [ordered]@{}
+    foreach ($setting in $script:SmartFinOpsSmartM365Paths.Keys) {
+        $value = if ($overrides[$setting]) { [string]$overrides[$setting] } else { [string](Get-SmartFinOpsConfigValue -Name $setting) }
+        Assert-SmartFinOpsResolvedPath -Name $setting -Value $value
+        if ([string]::IsNullOrWhiteSpace($value)) { throw "$setting is empty." }
+        $path = [IO.Path]::GetFullPath((ConvertTo-SmartFinOpsFileSystemPath $value)).TrimEnd('\')
+        $leaf = $script:SmartFinOpsSmartM365Paths[$setting][1]
+        if ((Split-Path -Path $path -Leaf) -ne $leaf) { throw ("{0} must name a folder called {1}: {2}" -f $setting, $leaf, $path) }
+        if (-not (Test-Path -LiteralPath $path -PathType Container)) { throw ("{0} folder not found: {1}. SmartFinOps never creates the SmartM365 data roots." -f $setting, $path) }
+        $folders[$leaf] = $path
+    }
+    $parents = @($folders.Values | ForEach-Object { (Split-Path -Path $_ -Parent).TrimEnd('\') } | Sort-Object -Unique)
+    if ($parents.Count -ne 1) { throw ("DATA-LAST, DATA-ALL and LOG-ALL must be sibling folders of the same tenant data root: {0}" -f (@($folders.Values) -join ' | ')) }
+    [pscustomobject]@{
+        TenantDataRoot = $parents[0]
+        DataLast = $folders['DATA-LAST']
+        DataAll = $folders['DATA-ALL']
+        LogAll = $folders['LOG-ALL']
+        HistoryRoot = Join-Path -Path $folders['DATA-ALL'] -ChildPath 'FinOps\Workplace'
+    }
+}
+
+function Get-SmartFinOpsSharePointConfiguration {
+    [CmdletBinding()]
+    param()
+
+    # EnableSharePointUpload: true/false, or __USE_SMARTM365__ (default) for the SmartM365 setting of the profile.
+    # Site, library, target folder and app-only identity always come from the SmartM365 context of the profile.
+    if ($null -eq $script:SmartFinOpsGlobalConfig) { throw 'SmartFinOps tenant context has not been initialized.' }
+    $configured = $script:SmartFinOpsGlobalConfig.PSObject.Properties['EnableSharePointUpload']
+    $value = if ($null -ne $configured) { $configured.Value } else { '__USE_SMARTM365__' }
+    $smartM365Config = $null
+    if ($value -is [string] -and $value.Trim() -in $script:SmartFinOpsUseSmartM365Markers) {
+        $smartM365Config = Get-SmartFinOpsSmartM365Config -RepositoryRootPath ([string]$script:SmartFinOpsGlobalConfig.RepositoryRootPath) -ProfileKey ([string]$script:SmartFinOpsGlobalConfig.ProfileKey) -Setting 'EnableSharePointUpload'
+        $property = $smartM365Config.PSObject.Properties['EnableSharePointUpload']
+        $value = if ($null -ne $property) { $property.Value } else { $false }
+    }
+    $enabled = $false
+    if ($value -is [bool]) { $enabled = $value }
+    elseif (-not [bool]::TryParse([string]$value, [ref]$enabled)) { throw ("EnableSharePointUpload must be true, false or __USE_SMARTM365__ (got '{0}')." -f $value) }
+    $settings = [ordered]@{}
+    $missing = [System.Collections.Generic.List[string]]::new()
+    if ($enabled) {
+        if ($null -eq $smartM365Config) { $smartM365Config = Get-SmartFinOpsSmartM365Config -RepositoryRootPath ([string]$script:SmartFinOpsGlobalConfig.RepositoryRootPath) -ProfileKey ([string]$script:SmartFinOpsGlobalConfig.ProfileKey) -Setting 'EnableSharePointUpload' }
+        foreach ($key in $script:SmartFinOpsSharePointKeys) {
+            $property = $smartM365Config.PSObject.Properties[$key]
+            if ($null -eq $property -and $key -eq 'Thumb') { $property = $smartM365Config.PSObject.Properties['Thumbprint'] }
+            $resolved = if ($null -ne $property) { [string](Resolve-SmartFinOpsExternalTokenValue -Value $property.Value -Config $smartM365Config) } else { '' }
+            if ([string]::IsNullOrWhiteSpace($resolved) -or $resolved -match '\{\{' -or $resolved.Trim() -in @('__USE_GLOBAL__', 'USE_GLOBAL')) { $missing.Add($key); continue }
+            $settings[$key] = $resolved.Trim()
+        }
+    }
+    [pscustomobject]@{
+        Enabled = $enabled
+        Missing = @($missing)
+        Parameters = $(if ($enabled -and $missing.Count -eq 0) {
+            @{ Enabled = $true; SiteHostname = $settings.SharePointSiteHostname; SitePath = $settings.SharePointSitePath; LibraryDisplayName = $settings.SharePointLibraryDisplayName
+               TargetFolderPath = $settings.SharePointTargetFolderPath; AppId = $settings.AppId; TenantId = $settings.TenantId; Thumbprint = $settings.Thumb }
+        } else { $null })
+    }
 }
 
 function Initialize-SmartFinOpsTenantContext {

@@ -1,5 +1,8 @@
 {
   "ProfileKey": "test",
   "SmartM365LatestCsvFolderPath": "__USE_GLOBAL__",
-  "SmartM365TenantKey": "__USE_GLOBAL__"
+  "SmartM365DataAllRootPath": "__USE_GLOBAL__",
+  "SmartM365LogAllRootPath": "__USE_GLOBAL__",
+  "SmartM365TenantKey": "__USE_GLOBAL__",
+  "EnableSharePointUpload": "__USE_GLOBAL__"
 }

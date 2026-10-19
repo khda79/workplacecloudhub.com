@@ -3,7 +3,7 @@
 .SYNOPSIS
   Offline tests of the SmartFinOps Workplace V2 valuation engine.
 .VERSION
-1.3.0
+1.4.0
 .NOTES
   Synthetic contoso data only, in an isolated temporary runtime (no local configuration, export or tenant).
   Source receipts are produced by the real SmartM365.Core module commands.
@@ -41,7 +41,7 @@ foreach ($file in @('SmartFinOps-Workplace-Valuation.ps1','SmartFinOps.global.lo
 New-Item -ItemType Directory -Path (Join-Path $runtime 'SmartM365\Modules') -Force | Out-Null
 Copy-Item -LiteralPath (Join-Path $repository 'SmartM365\Modules\SmartM365.Core') -Destination (Join-Path $runtime 'SmartM365\Modules') -Recurse
 # The TenantKey is fixed in the SmartFinOps configuration (no SmartM365 context in this runtime).
-'{ "SmartM365TenantKey": "contoso-prod" }' | Set-Content -LiteralPath (Join-Path $runtime 'SmartFinOps\SmartFinOps.global.local.json') -Encoding utf8NoBOM
+'{ "SmartM365TenantKey": "contoso-prod", "EnableSharePointUpload": false }' | Set-Content -LiteralPath (Join-Path $runtime 'SmartFinOps\SmartFinOps.global.local.json') -Encoding utf8NoBOM
 $coreManifest = Join-Path $repository 'SmartM365\Modules\SmartM365.Core\SmartM365.Core.psd1'
 Import-Module $coreManifest -MinimumVersion '1.0.90' -Force | Out-Null
 
@@ -227,7 +227,15 @@ function New-Contracts {
 
 function Invoke-Engine {
   param([string]$DataLast, [string]$Output, [string]$Contracts, [string]$AsOfUtc, [switch]$ValidateOnly, [string[]]$Extra = @())
-  $arguments = @('-NoProfile','-ExecutionPolicy','Bypass','-File',$engine,'-Tenant',$profileKey,'-SmartM365LatestCsvFolderPath',$DataLast,'-OutputRoot',$Output,'-ContractsPath',$Contracts)
+  # $Output is a tenant data root (DATA-LAST, DATA-ALL, LOG-ALL): the fixture sources are copied into its DATA-LAST,
+  # where the engine also publishes its current outputs, exactly as in the SmartM365 data tree.
+  if ($DataLast.Contains('{{')) { $last = $DataLast; $all = Join-Path $Output 'DATA-ALL'; $logs = Join-Path $Output 'LOG-ALL' }
+  else {
+    $last = Join-Path $Output 'DATA-LAST'; $all = Join-Path $Output 'DATA-ALL'; $logs = Join-Path $Output 'LOG-ALL'
+    New-Item -ItemType Directory -Path $last, $all, $logs -Force | Out-Null
+    Get-ChildItem -LiteralPath $DataLast -File | Copy-Item -Destination $last -Force
+  }
+  $arguments = @('-NoProfile','-ExecutionPolicy','Bypass','-File',$engine,'-Tenant',$profileKey,'-SmartM365LatestCsvFolderPath',$last,'-SmartM365DataAllRootPath',$all,'-SmartM365LogAllRootPath',$logs,'-ContractsPath',$Contracts)
   if ($AsOfUtc) { $arguments += @('-AsOfUtc', $AsOfUtc) }
   if ($ValidateOnly) { $arguments += '-ValidateOnly' }
   $arguments += $Extra
@@ -235,8 +243,10 @@ function Invoke-Engine {
   return [pscustomobject]@{ ExitCode=$LASTEXITCODE; Log=$log }
 }
 
-function Read-Output { param([string]$Output, [string]$Name) return @(Import-Csv -LiteralPath (Join-Path $Output $Name) -Encoding utf8) }
-function Read-Receipt { param([string]$Output) return (Get-Content -LiteralPath (Join-Path $Output 'SmartFinOps_Workplace-Valuation.current.json.txt') -Raw | ConvertFrom-Json) }
+function Read-Output { param([string]$Output, [string]$Name) return @(Import-Csv -LiteralPath (Join-Path $Output "DATA-LAST\$Name") -Encoding utf8) }
+function Read-Receipt { param([string]$Output) return (Get-Content -LiteralPath (Join-Path $Output 'DATA-LAST\SmartFinOps_Workplace-Valuation.current.json.txt') -Raw | ConvertFrom-Json) }
+function Get-HistoryPath { param([string]$Output, [string]$RunId, [string]$Name) return (Join-Path $Output "DATA-ALL\FinOps\Workplace\$RunId\$Name") }
+function Get-RunLogPath { param([string]$Output, $Receipt) return (Join-Path $Output ([string]$Receipt.LogFile).Replace('/', '\')) }
 function Get-Opportunity { param([object[]]$Rows, [string]$Key) return @($Rows | Where-Object OpportunityKey -eq $Key) }
 function Get-Kpi { param([object[]]$Rows, [string]$Key) return @($Rows | Where-Object KpiKey -eq $Key)[0] }
 #endregion
@@ -257,17 +267,18 @@ try {
   Check ($receipt.ContractVersion -eq '1.1' -and $receipt.ProfileKey -ceq $profileKey -and $receipt.TenantKey -ceq $tenant) 'receipt 1.1 carries the profile key and the organization TenantKey'
   Check ($run.Log.Contains("Profile 'prod' - TenantKey 'contoso-prod'")) 'profile and TenantKey logged at startup'
   foreach ($file in $receipt.Files) {
-    Check ((Get-FileHash -LiteralPath (Join-Path $out $file.File) -Algorithm SHA256).Hash -eq $file.SHA256) "receipt hash matches $($file.File)"
-    Check ((Get-FileHash -LiteralPath (Join-Path $out "Archive\$($receipt.RunId)\$($file.File)") -Algorithm SHA256).Hash -eq $file.SHA256) "archive copy matches $($file.File)"
+    Check ((Get-FileHash -LiteralPath (Join-Path $out "DATA-LAST\$($file.File)") -Algorithm SHA256).Hash -eq $file.SHA256) "receipt hash matches $($file.File) in DATA-LAST"
+    Check ((Get-FileHash -LiteralPath (Get-HistoryPath $out $receipt.RunId $file.File) -Algorithm SHA256).Hash -eq $file.SHA256) "history copy in DATA-ALL\FinOps\Workplace matches $($file.File)"
   }
-  Check (Test-Path -LiteralPath (Join-Path $out "Archive\$($receipt.RunId)\SmartFinOps-Workplace-Valuation.log")) 'run log archived'
-  $logLines = @(Get-Content -LiteralPath (Join-Path $out "Archive\$($receipt.RunId)\SmartFinOps-Workplace-Valuation.log"))
+  Check (([string]$receipt.LogFile) -cmatch '^LOG-ALL/SmartFinOps-Workplace-Valuation/SmartFinOps-Workplace-Valuation-\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}\.log$' -and (Test-Path -LiteralPath (Get-RunLogPath $out $receipt))) "run log in LOG-ALL\SmartFinOps-Workplace-Valuation, named by the receipt ($($receipt.LogFile))"
+  Check (-not (Test-Path -LiteralPath (Get-HistoryPath $out $receipt.RunId 'SmartFinOps-Workplace-Valuation.log')) -and @(Get-ChildItem -LiteralPath (Join-Path $out 'DATA-LAST') -Filter '*.log').Count -eq 0) 'no log in DATA-LAST or in the run history'
+  $logLines = @(Get-Content -LiteralPath (Get-RunLogPath $out $receipt))
   $bannerStart = [array]::IndexOf($logLines, '================================================================================')
   Check ($bannerStart -gt 0 -and @($logLines[0..($bannerStart - 1)] | Where-Object { $_ -notmatch '^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} \[' }).Count -eq 0) 'every log line before the completion banner is timestamped'
   $banner = ($logLines[$bannerStart..($logLines.Count - 1)] -join "`n")
   Check ($banner.Contains(' SmartFinOps by WorkplaceCloudHub - Execution completed') -and $banner.Contains(' Script    : SmartFinOps-Workplace-Valuation.ps1') -and $banner.Contains(' CSV files : 7') -and $banner -match ' Duration  : \d{2}:\d{2}:\d{2}' -and $banner -match ' Status    : (SUCCESS|COMPLETED WITH WARNINGS)') "completion banner appended to the run log ($banner)"
   Check ($run.Log.Contains(' SmartFinOps by WorkplaceCloudHub') -and $run.Log.Contains(' Website : https://workplacecloudhub.com') -and $run.Log.Contains(' Errors    : 0')) 'startup and completion banners on the console'
-  Check ($run.Log -match 'Starting SmartFinOps Workplace Valuation v2\.1\.5 ' -and $run.Log -match 'Tenant context 1.3.0') 'engine and context versions logged at runtime'
+  Check ($run.Log -match 'Starting SmartFinOps Workplace Valuation v2\.2\.0 ' -and $run.Log -match 'Tenant context 1.4.0') 'engine and context versions logged at runtime'
   # Orchestrator contract: default success-evidence log pattern, 0 success, 3 completed with warnings.
   $orchestratorEvidence = 'Execution context:|Environment initialized successfully|Starting .* v|(?s:Execution summary:.*Status:\s*(?:Success|CompletedWithWarnings).*Errors:\s*0)'
   Check ($run.Log -match $orchestratorEvidence -and $banner.Contains(' Status    : COMPLETED WITH WARNINGS') -and $banner.Contains(' SmartFinOps by WorkplaceCloudHub - Execution completed with warnings')) 'warning run: exit 3, Completed with warnings banner, orchestrator success evidence'
@@ -286,7 +297,7 @@ try {
     'FinOps_Controls.csv'='TenantKey,FinOpsRunId,SnapshotId,ReceiptRunId,Control,Key,SourceCount,FinOpsCount,Status,Detail'
   }
   foreach ($name in $expectedHeaders.Keys) {
-    $header = (Get-Content -LiteralPath (Join-Path $out $name) -TotalCount 1).Replace('"','')
+    $header = (Get-Content -LiteralPath (Join-Path $out "DATA-LAST\$name") -TotalCount 1).Replace('"','')
     Check ($header -ceq $expectedHeaders[$name]) "exact header $name"
   }
   $opps = Read-Output $out 'FinOps_Opportunities.csv'
@@ -372,7 +383,7 @@ try {
   Check ($runPerm.ExitCode -eq 3) 'permuted run exit 3'
   foreach ($name in @('FinOps_Opportunities.csv','FinOps_SkuValuation.csv','FinOps_Showback.csv','FinOps_Summary.csv','FinOps_Controls.csv','FinOps_Realization.csv')) {
     $normalize = { param($path, $fixture) (Get-Content -LiteralPath $path -Raw) -replace '"\d{8}T\d{9}Z-[0-9a-f]{8}"', '"RUN"' -replace [regex]::Escape($fixture.LicencesRunId), 'LICRUN' -replace [regex]::Escape($fixture.SnapshotId), 'SNAP' -replace '"[0-9a-f]{32}"', '"PRICERUN"' }
-    Check ((& $normalize (Join-Path $out $name) $base) -ceq (& $normalize (Join-Path $outPerm $name) $perm)) "deterministic sort: $name identical with permuted sources"
+    Check ((& $normalize (Join-Path $out "DATA-LAST\$name") $base) -ceq (& $normalize (Join-Path $outPerm "DATA-LAST\$name") $perm)) "deterministic sort: $name identical with permuted sources"
   }
   #endregion
 
@@ -380,7 +391,7 @@ try {
   $outValidate = Join-Path $root 'validate\out'
   $contractsValidate = Join-Path $root 'validate\contracts.local.json'
   $runValidate = Invoke-Engine -DataLast $base.Folder -Output $outValidate -Contracts $contractsValidate -ValidateOnly
-  Check ($runValidate.ExitCode -eq 3 -and -not (Test-Path -LiteralPath $outValidate) -and -not (Test-Path -LiteralPath $contractsValidate)) 'ValidateOnly writes no output and no contracts file'
+  Check ($runValidate.ExitCode -eq 3 -and @(Get-ChildItem -LiteralPath (Join-Path $outValidate 'DATA-LAST') -Filter 'FinOps_*').Count -eq 0 -and -not (Test-Path -LiteralPath (Join-Path $outValidate 'DATA-LAST\SmartFinOps_Workplace-Valuation.current.json.txt')) -and -not (Test-Path -LiteralPath (Join-Path $outValidate 'DATA-ALL\FinOps')) -and @(Get-ChildItem -LiteralPath (Join-Path $outValidate 'LOG-ALL') -Recurse -File).Count -eq 0 -and -not (Test-Path -LiteralPath $contractsValidate)) 'ValidateOnly writes no output, history, log or contracts file'
   #endregion
 
   #region 4. Contracts file created from template when absent
@@ -490,16 +501,16 @@ try {
   $guardOut = Join-Path $root 'guard\out'; $guardContracts = Join-Path $root 'guard\contracts.local.json'
   New-Contracts $guardContracts $baseSkus
   $guardOk = Invoke-Engine -DataLast $base.Folder -Output $guardOut -Contracts $guardContracts
-  $hashBefore = (Get-FileHash -LiteralPath (Join-Path $guardOut 'FinOps_Opportunities.csv')).Hash
+  $hashBefore = (Get-FileHash -LiteralPath (Join-Path $guardOut 'DATA-LAST\FinOps_Opportunities.csv')).Hash
   foreach ($case in @(@{ SummaryE3Recovery=2 }, @{ G4Mismatch=$true })) {
     $guardFixture = New-Fixture ('guard-' + [guid]::NewGuid().ToString('N').Substring(0,6)) $case
     $guardRun = Invoke-Engine -DataLast $guardFixture.Folder -Output $guardOut -Contracts $guardContracts -AsOfUtc ([datetime]::UtcNow.AddMinutes(5).ToString('o'))
     $guardReceipt = Read-Receipt $guardOut
     Check ($guardOk.ExitCode -eq 3 -and $guardRun.ExitCode -eq 1 -and $guardReceipt.Status -eq 'Failed') "guard failure ($(@($case.Keys)[0])): exit 1 and current receipt Failed"
     Check ($guardRun.Log.Contains(' SmartFinOps by WorkplaceCloudHub - Execution failed') -and $guardRun.Log.Contains(' Status    : FAILED')) 'guard failure: completion banner Failed'
-    Check ((Get-Content -LiteralPath (Join-Path $guardOut "Archive\$($guardReceipt.RunId)\SmartFinOps-Workplace-Valuation.log") -Raw).Contains(' Status    : FAILED')) 'guard failure: Failed banner in the run log'
-    Check ((Get-FileHash -LiteralPath (Join-Path $guardOut 'FinOps_Opportunities.csv')).Hash -eq $hashBefore) 'guard failure: current files kept (disqualified by receipt)'
-    Check (@(Import-Csv -LiteralPath (Join-Path $guardOut "Archive\$($guardReceipt.RunId)\FinOps_Controls.csv") | Where-Object Status -eq 'Fail').Count -ge 1) 'guard failure: controls archived'
+    Check ((Get-Content -LiteralPath (Get-RunLogPath $guardOut $guardReceipt) -Raw).Contains(' Status    : FAILED')) 'guard failure: Failed banner in the run log'
+    Check ((Get-FileHash -LiteralPath (Join-Path $guardOut 'DATA-LAST\FinOps_Opportunities.csv')).Hash -eq $hashBefore) 'guard failure: current files kept (disqualified by receipt)'
+    Check (@(Import-Csv -LiteralPath (Get-HistoryPath $guardOut $guardReceipt.RunId 'FinOps_Controls.csv') | Where-Object Status -eq 'Fail').Count -ge 1) 'guard failure: controls kept in the run history'
   }
   $schema = New-Fixture 'schema-drift' @{ UnknownType=$true }
   $schemaOut = Join-Path $root 'schema-drift\out'
@@ -526,16 +537,34 @@ try {
   Check ($realRow.BaselineFinOpsRunId -eq $run1Id -and $realRow.Decrease -eq '4' -and $realRow.RemovedCandidateLicenses -eq '1' -and $realRow.BaselineCapacityUnits -eq '2' -and $realRow.AttributableUnits -eq '3' -and $realRow.RealizedUnits -eq '3' -and $realRow.NotAttributedUnits -eq '1' -and $realRow.RealizedAnnualAmount -eq '1360.08' -and $realRow.Status -eq 'Realized') "realization capped and attributed (got $($realRow | ConvertTo-Json -Compress))"
   #endregion
 
-  #region 11. Archive retention never purges a realization baseline
+  #region 11. Guarded retention: only SmartFinOps runs of this TenantKey under DATA-ALL\FinOps\Workplace, never a baseline
   . $engine -Tenant $tenant
   . (Join-Path $runtime 'SmartFinOps\Config\SmartFinOps-TenantContext.ps1')
-  $retRoot = Join-Path $root 'retention'
-  foreach ($index in 1..5) { New-Item -ItemType Directory -Path (Join-Path $retRoot ('2026010{0}T000000000Z-0000000{0}' -f $index)) -Force | Out-Null }
-  New-Item -ItemType Directory -Path (Join-Path $retRoot 'not-a-run') -Force | Out-Null
+  $retTenantRoot = Join-Path $root 'retention'
+  $retRoot = Join-Path $retTenantRoot 'DATA-ALL\FinOps\Workplace'
+  $writeRunReceipt = { param($name, $key) $folder = Join-Path $retRoot $name; New-Item -ItemType Directory -Path $folder -Force | Out-Null
+    ([ordered]@{ Owner='SmartFinOps-Receipt'; ContractVersion='1.1'; TenantKey=$key; RunId=$name; Status='Completed' } | ConvertTo-Json) | Set-Content -LiteralPath (Join-Path $folder 'SmartFinOps_Workplace-Valuation.current.json.txt') -Encoding utf8NoBOM }
+  foreach ($index in 1..6) { & $writeRunReceipt ('2026010{0}T000000000Z-0000000{0}' -f $index) $tenant }
+  & $writeRunReceipt '20251201T000000000Z-000000aa' 'fabrikam-prod'
+  New-Item -ItemType Directory -Path (Join-Path $retRoot '20251202T000000000Z-000000bb'), (Join-Path $retRoot 'not-a-run'), (Join-Path $retRoot '20251203T000000000Z-000000CC'), (Join-Path $retRoot '20251204T000000000Z-000000dd-copy') -Force | Out-Null
+  & $writeRunReceipt '20251205T000000000Z-000000ee' $tenant
+  Set-Content -LiteralPath (Join-Path $retRoot '20251205T000000000Z-000000ee\SmartFinOps_Workplace-Valuation.current.json.txt') -Value ((Get-Content -LiteralPath (Join-Path $retRoot '20251205T000000000Z-000000ee\SmartFinOps_Workplace-Valuation.current.json.txt') -Raw).Replace('20251205T000000000Z-000000ee', '20251205T000000000Z-000000ff')) -Encoding utf8NoBOM
+  & $writeRunReceipt 'not-a-run' $tenant
+  foreach ($other in @('DATA-LAST', 'LOG-ALL\SmartFinOps-Workplace-Valuation')) { New-Item -ItemType Directory -Path (Join-Path $retTenantRoot "$other\20251206T000000000Z-00000011") -Force | Out-Null }
   $protected = [System.Collections.Generic.HashSet[string]]::new([string[]]@('20260101T000000000Z-00000001'))
-  Invoke-FinOpsArchiveRetention -ArchiveRoot $retRoot -KeepRuns 2 -ProtectedRuns $protected -CurrentRunId '20260105T000000000Z-00000005'
+  $remoteCalls = [System.Collections.Generic.List[string]]::new()
+  $script:LogLines.Clear()
+  Invoke-FinOpsArchiveRetention -ArchiveRoot $retRoot -KeepRuns 2 -ProtectedRuns $protected -CurrentRunId '20260106T000000000Z-00000006' -TenantKey $tenant -RemoveRemote { param($folder, $name) $remoteCalls.Add("$name|$folder") }
   $left = @(Get-ChildItem -LiteralPath $retRoot -Directory | ForEach-Object Name | Sort-Object)
-  Check (($left -join ',') -eq '20260101T000000000Z-00000001,20260104T000000000Z-00000004,20260105T000000000Z-00000005,not-a-run') "retention keeps newest runs, protected baseline and foreign folders (got $($left -join ','))"
+  $expectedLeft = @('20251201T000000000Z-000000aa','20251202T000000000Z-000000bb','20251203T000000000Z-000000CC','20251204T000000000Z-000000dd-copy','20251205T000000000Z-000000ee','20260101T000000000Z-00000001','20260105T000000000Z-00000005','20260106T000000000Z-00000006','not-a-run') | Sort-Object
+  Check (($left -join ',') -ceq ($expectedLeft -join ',')) "retention removes only old SmartFinOps runs of this TenantKey; baseline, other tenant, missing or foreign receipt and non-conforming folders stay (got $($left -join ','))"
+  Check ((@($remoteCalls | ForEach-Object { $_.Split('|')[0] }) | Sort-Object) -join ',' -ceq '20260102T000000000Z-00000002,20260103T000000000Z-00000003,20260104T000000000Z-00000004' -and @($remoteCalls | Where-Object { $_.Split('|')[1] -ceq (Join-Path $retRoot $_.Split('|')[0]) }).Count -eq 3) "SharePoint removal requested for exactly the locally removed run folders (got $(@($remoteCalls) -join ','))"
+  $removedLines = @($script:LogLines | Where-Object { $_ -match 'Archive retention: removed run (\S+) \(' })
+  Check ($removedLines.Count -eq 3 -and @($removedLines | Where-Object { $_ -match [regex]::Escape($retRoot) }).Count -eq 3) 'each removal logged with its full path'
+  Check ((Test-Path -LiteralPath (Join-Path $retTenantRoot 'DATA-LAST\20251206T000000000Z-00000011')) -and (Test-Path -LiteralPath (Join-Path $retTenantRoot 'LOG-ALL\SmartFinOps-Workplace-Valuation\20251206T000000000Z-00000011'))) 'nothing removed in DATA-LAST or LOG-ALL'
+  $refused = $false
+  try { Invoke-FinOpsArchiveRetention -ArchiveRoot (Join-Path $retTenantRoot 'DATA-LAST') -KeepRuns 0 -ProtectedRuns $protected -CurrentRunId 'x' -TenantKey $tenant } catch { $refused = $_.Exception.Message -like 'Archive retention refused*' }
+  Check ($refused -and (Test-Path -LiteralPath (Join-Path $retTenantRoot 'DATA-LAST\20251206T000000000Z-00000011'))) 'retention refused outside DATA-ALL\FinOps\Workplace'
   #endregion
 
   #region 12. Unit checks: sort, prices, contracts

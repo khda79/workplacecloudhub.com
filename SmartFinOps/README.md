@@ -2,7 +2,7 @@
 
 SmartFinOps is a read-only decision-support project that applies FinOps principles to workplace technology. Its objective is not limited to reducing spend: it shows what each euro buys, what can be released at contract or renewal, what can be reused, and what remains a review or a signal.
 
-SmartFinOps Workplace V2 values the license decisions already published by SmartM365 SmartInventory. It consumes `DATA-LAST` exports and their source receipts only; it does not connect to Microsoft Graph, Azure or any other API, and it never changes a license, mailbox or account.
+SmartFinOps Workplace V2 values the license decisions already published by SmartM365 SmartInventory. It consumes `DATA-LAST` exports and their source receipts only and writes its results into the same SmartM365 data tree of the profile. Its only API call is the optional SharePoint mirror of its own files (Microsoft Graph, `Sites.Selected`, through SmartM365.Core); it reads nothing from Graph, Azure or any other API, and it never changes a license, mailbox or account.
 
 | Script | Role |
 | --- | --- |
@@ -26,25 +26,26 @@ At load, missing keys are added from the matching template without overwriting l
 
 | Key | Meaning |
 | --- | --- |
-| `WorkspaceRootPath`, `RepositoryRootPath` | Roots used by the path tokens (`{{SmartFinOpsRootPath}}` and `{{RepositoryRootPath}}` by default). |
-| `TenantDataRootPath` | Output folder of the profile, `{{WorkspaceRootPath}}\Data\{{ProfileKey}}` by default. |
-| `SmartM365LatestCsvFolderPath` | SmartInventory `DATA-LAST`; `__USE_SMARTM365__` resolves it through the SmartM365 context of the profile and stops on any resolution failure. |
+| `RepositoryRootPath` | Repository root, used to find the SmartM365 context (`{{RepositoryRootPath}}` by default). |
+| `SmartM365LatestCsvFolderPath` | SmartInventory `DATA-LAST`: sources, current FinOps outputs and the report page. `__USE_SMARTM365__` resolves it through the SmartM365 context of the profile and stops on any resolution failure. |
+| `SmartM365DataAllRootPath`, `SmartM365LogAllRootPath` | SmartM365 `DATA-ALL` (FinOps run history) and `LOG-ALL` (FinOps logs), resolved the same way. |
 | `SmartM365TenantKey` | Organization TenantKey carried by the source receipts; `__USE_SMARTM365__` resolves it the same way. |
+| `EnableSharePointUpload` | `true`, `false` or `__USE_SMARTM365__` (default: the SmartM365 setting of the profile). Site, library, folder and app-only identity always come from the SmartM365 context. |
 | `Valuation` | `ContractsPath`, `FreshnessDailyHours` (48), `FreshnessWeeklyDays` (8), `ArchiveRetentionRuns` (30). |
 | `Report` | `ShowbackMinimumGroupUsers` (5). |
 
-`-Tenant` is the profile key. A profile file names it `ProfileKey`, which must match `-Tenant`. Since tenant context 1.3.0 a profile file written with the former `TenantKey` entry is migrated in place to `ProfileKey` before template synchronization; a file holding a different `ProfileKey` and `TenantKey` is refused. `{{TenantKey}}` remains accepted as an alias of `{{ProfileKey}}` in path values. Beta-only keys (`PriceModel`, `StaleUserDays`, `StaleDeviceDays`, `MaxSourceAgeHours`, `LicenseCapacityWarningPercent`, `ReportTitle`, `PriceBaselinePath`, `RetentionMaxCSV`, `RetentionMaxLogs`) are no longer read and can be removed from local files.
+`-Tenant` is the profile key. A profile file names it `ProfileKey`, which must match `-Tenant`. Since tenant context 1.3.0 a profile file written with the former `TenantKey` entry is migrated in place to `ProfileKey` before template synchronization; a file holding a different `ProfileKey` and `TenantKey` is refused. `{{TenantKey}}` remains accepted as an alias of `{{ProfileKey}}` in path values. Since tenant context 1.4.0 `WorkspaceRootPath`, `TenantDataRootPath` and the former `Output` fallback no longer exist: SmartFinOps writes only into the SmartM365 data tree of the profile. Beta-only keys (`PriceModel`, `StaleUserDays`, `StaleDeviceDays`, `MaxSourceAgeHours`, `LicenseCapacityWarningPercent`, `ReportTitle`, `PriceBaselinePath`, `RetentionMaxCSV`, `RetentionMaxLogs`) are no longer read and can be removed from local files.
 
 ## V2 valuation engine (lot V2.1)
 
-`SmartFinOps-Workplace-Valuation.ps1` 2.1.5 is the V2 engine. PowerShell 7 only, read-only, no API connection.
+`SmartFinOps-Workplace-Valuation.ps1` 2.2.0 is the V2 engine. PowerShell 7 only, read-only on the tenant; its only API call is the optional SharePoint mirror of its outputs.
 
 ```powershell
 .\SmartFinOps-Workplace-Valuation.ps1 -Tenant prod -ValidateOnly   # qualify sources and contracts, compute, write nothing
 .\SmartFinOps-Workplace-Valuation.ps1 -Tenant prod
 ```
 
-`-Tenant` is the SmartM365 profile key: it names `Data\<profile>` and its archive. Source receipts and rows carry the organization TenantKey (OrganizationKey-EnvironmentKey), which can differ from the profile: it comes from `-SmartM365TenantKey`, else from `SmartM365TenantKey` in the local configuration, else (empty or `__USE_SMARTM365__`) from the SmartM365 tenant context of the profile, with the same explicit failure rules as DATA-LAST. The FinOps receipt (contract 1.1) records both `ProfileKey` and `TenantKey`; the FinOps CSV rows carry the TenantKey, and the report checks both. DATA-LAST comes from `-SmartM365LatestCsvFolderPath`, else from `SmartM365LatestCsvFolderPath` in the local configuration. When that setting is empty or `__USE_SMARTM365__`, it is resolved through the SmartM365 tenant context; if that resolution fails (context missing, error, empty path) the script stops with the reason and its position, and never falls back to a default path. A resolved path that still contains a `{{token}}` is refused, and every path handed to .NET is a plain absolute file-system path, so the scripts also run from a UNC share. Both V2 scripts print the WorkplaceCloudHub startup banner and, also on failure, the completion banner (status, duration, warnings, errors, CSV files, log), which is appended to the run log.
+`-Tenant` is the SmartM365 profile key: it selects the SmartM365 data tree of that profile. Source receipts and rows carry the organization TenantKey (OrganizationKey-EnvironmentKey), which can differ from the profile: it comes from `-SmartM365TenantKey`, else from `SmartM365TenantKey` in the local configuration, else (empty or `__USE_SMARTM365__`) from the SmartM365 tenant context of the profile, with the same explicit failure rules as DATA-LAST. The FinOps receipt (contract 1.1) records both `ProfileKey` and `TenantKey`; the FinOps CSV rows carry the TenantKey, and the report checks both. DATA-LAST comes from `-SmartM365LatestCsvFolderPath`, else from `SmartM365LatestCsvFolderPath` in the local configuration (DATA-ALL and LOG-ALL likewise, from `-SmartM365DataAllRootPath` and `-SmartM365LogAllRootPath`). When a setting is empty or `__USE_SMARTM365__`, it is resolved through the SmartM365 tenant context; if that resolution fails (context missing, error, empty path) the script stops with the reason and its position, and never falls back to a default path. A resolved path that still contains a `{{token}}` is refused, and every path handed to .NET is a plain absolute file-system path, so the scripts also run from a UNC share. Both V2 scripts print the WorkplaceCloudHub startup banner and, also on failure, the completion banner (status, duration, warnings, errors, CSV files, log), which is appended to the run log.
 
 The engine never recomputes a decision. It values what SmartInventory already published and qualifies every input with its producer source receipt (`Status=Completed`, tenant, SHA256 and row count per file, optional files `Published=true`, no publication in progress, completed within `Valuation.FreshnessDailyHours`, default 48 h):
 
@@ -81,7 +82,7 @@ A realized saving is reported when `EnabledUnits` drops below the level of the p
 
 ### Outputs
 
-`Data\<TenantKey>\` holds `FinOps_Sources.csv`, `FinOps_Opportunities.csv`, `FinOps_SkuValuation.csv`, `FinOps_Showback.csv` (AD domain, country, entity, department), `FinOps_Summary.csv`, `FinOps_Realization.csv` and `FinOps_Controls.csv`, each sorted by its key, plus `SmartFinOps_Workplace-Valuation.current.json.txt`. Every row carries `TenantKey`, `FinOpsRunId`, `SnapshotId` and the Licences `ReceiptRunId`; valued rows also carry the price row key and pricing receipt run. `Archive\<FinOpsRunId>\` keeps the same files and the run log. `Valuation.ArchiveRetentionRuns` (default 30) limits the archive, but a run that is the baseline of a realization is never purged.
+`DATA-LAST` holds `FinOps_Sources.csv`, `FinOps_Opportunities.csv`, `FinOps_SkuValuation.csv`, `FinOps_Showback.csv` (AD domain, country, entity, department), `FinOps_Summary.csv`, `FinOps_Realization.csv` and `FinOps_Controls.csv`, each sorted by its key, plus `SmartFinOps_Workplace-Valuation.current.json.txt`. Every row carries `TenantKey`, `FinOpsRunId`, `SnapshotId` and the Licences `ReceiptRunId`; valued rows also carry the price row key and pricing receipt run. `DATA-ALL\FinOps\Workplace\<FinOpsRunId>\` keeps the same files and receipt (the run history, read for realization baselines); the run log is `LOG-ALL\SmartFinOps-Workplace-Valuation\SmartFinOps-Workplace-Valuation-<yyyy-MM-dd_HH-mm-ss>.log`, named in the receipt (`LogFile`). `Valuation.ArchiveRetentionRuns` (default 30) limits the history; see the retention rules below.
 
 `FinOps_Summary.csv` carries the totals (`TOTAL_R`, `TOTAL_R_DISABLED_AND_SHARED`, `TOTAL_R_ENABLED_INACTIVE`, `TOTAL_R_COPILOT`, `TOTAL_R_CAPACITY`, `TOTAL_RC_E3_TO_F3`, `TOTAL_E_REUSE`, `TOTAL_E_ESU`), one `DETAIL|class|lever|status` row per group and one `GAP|section|metric` row per gap metric. Since 2.1.1 each valued total is also broken down, so that a report never has to add amounts: `PRICE|<total>|Estimated|Contract|Unknown` (price origin from `IsEstimated`; an E3 to F3 difference is estimated when either price is), `FORECAST|<total>|<RealizableFrom>` (date or `Renewal unknown`) and `SHOWBACK|<dimension>|<total>|<value>`; `SHOWBACK|<dimension>|USERS|<value>` gives the distinct users with at least one opportunity row for that value. E3 to F3 rows now carry the contract terms of their SKU (`ContractKey`, `RenewalDate`, `RealizableFrom`).
 
@@ -95,19 +96,19 @@ Tests: `Tests\SmartFinOps-Workplace-Valuation.Tests.ps1` (synthetic data, isolat
 
 ## V2 executive report (lot V2.2)
 
-`SmartFinOps-Workplace-Report.ps1` 2.2.4 turns the valuation outputs into one self-contained HTML page for management. PowerShell 7 only, read-only. It is a pure consumer: it reads only the seven `FinOps_*` CSVs and the valuation receipt, and computes no decision and no amount; it displays, sorts and groups what the engine (2.1.1 or a later 2.1.x) published.
+`SmartFinOps-Workplace-Report.ps1` 2.3.0 turns the valuation outputs into one self-contained HTML page for management. PowerShell 7 only, read-only. It is a pure consumer: it reads only the seven `FinOps_*` CSVs and the valuation receipt, and computes no decision and no amount; it displays, sorts and groups what the engine (2.1.4 to 2.2.x) published.
 
 ```powershell
 .\SmartFinOps-Workplace-Valuation.ps1 -Tenant prod
-.\SmartFinOps-Workplace-Report.ps1 -Tenant prod              # Data\<TenantKey>\SmartFinOps_Workplace-Report.html
+.\SmartFinOps-Workplace-Report.ps1 -Tenant prod              # DATA-LAST\SmartFinOps_Workplace-Report.html
 .\SmartFinOps-Workplace-Report.ps1 -Tenant prod -ValidateOnly # qualify and build, write nothing
 ```
 
-Before reading anything the report qualifies the run: receipt `Owner=SmartFinOps-Receipt` 1.1 from engine 2.1.4 or later, `Status=Completed`, same TenantKey and profile, exactly the seven files with their SHA256 and row counts (hashed and parsed from the same bytes), exact headers, one `FinOpsRunId`, `SnapshotId` and Licences `ReceiptRunId` on every row, and no failed equivalence control. Otherwise the page is "Report not available" with the reason and no figure; it replaces the current report so that no older figure stays visible, and the script exits with code 1. When the Licences report was not measured the report is still produced, with a status banner and every figure `Not measured`.
+Before reading anything the report qualifies the run: receipt `Owner=SmartFinOps-Receipt` 1.1 from engine 2.1.4 to 2.2.x, `Status=Completed`, same TenantKey and profile, exactly the seven files with their SHA256 and row counts (hashed and parsed from the same bytes), exact headers, one `FinOpsRunId`, `SnapshotId` and Licences `ReceiptRunId` on every row, and no failed equivalence control. Otherwise the page is "Report not available" with the reason and no figure; it replaces the current report so that no older figure stays visible, and the script exits with code 1. When the Licences report was not measured the report is still produced, with a status banner and every figure `Not measured`.
 
 Sections follow the SmartFinOps rules: executive summary, financial potential (R with the enabled-inactive accounts shown separately, conditional E3 to F3 outside the total, cost avoidance, price origin), priority decisions, cost/quality/risk trade-offs (Review, Blocked, Not measured, Not valued, Capped, signals), capacity, renewals and forecast (`RealizableFrom`, renewal unknown), realization when a baseline exists, showback (AD domain, country, entity, department), assumptions and a folded technical appendix (report qualification, sources, controls G1 to G6). Statuses are always visible: an empty amount is shown as its status, never as zero; catalogue estimates and contract prices are labelled.
 
-Confidentiality: aggregates only. No user name, UPN or user ID is rendered (detail stays in the CSVs); free text that quotes an e-mail address or a GUID is masked. In the showback, values with fewer than `Report.ShowbackMinimumGroupUsers` users (default 5) are combined into "Other (groups under N users)"; when that row alone would stay under the threshold, the smallest other values join it, so no value can be deduced by subtraction. The page is self-contained (inline CSS and SVG, no script, no external resource, every value HTML-encoded) and deterministic: the same inputs give the same HTML except the generation time. The log is written next to the page; both are copied to `Archive\<FinOpsRunId>\` when that run is archived.
+Confidentiality: aggregates only. No user name, UPN or user ID is rendered (detail stays in the CSVs); free text that quotes an e-mail address or a GUID is masked. In the showback, values with fewer than `Report.ShowbackMinimumGroupUsers` users (default 5) are combined into "Other (groups under N users)"; when that row alone would stay under the threshold, the smallest other values join it, so no value can be deduced by subtraction. The page is self-contained (inline CSS and SVG, no script, no external resource, every value HTML-encoded) and deterministic: the same inputs give the same HTML except the generation time. The page is copied into `DATA-ALL\FinOps\Workplace\<FinOpsRunId>\` when that run is in the history; the log is `LOG-ALL\SmartFinOps-Workplace-Report\SmartFinOps-Workplace-Report-<yyyy-MM-dd_HH-mm-ss>.log`.
 
 Tests: `Tests\SmartFinOps-Workplace-Report.Tests.ps1` (synthetic FinOps fixtures, input contract checked against the engine output specification).
 
@@ -122,8 +123,8 @@ The SmartInventory orchestrator runs both V2 scripts every day for the prod prof
 
 - `LatestOccurrence` requires today's occurrence of every dependency, which is why the jobs start after Licences (04:45) and LicensePricing (05:30). A Licences report from the previous day is never valued as today's. When a dependency fails, the jobs wait for a successful recovery run; otherwise they end `BlockedDependencyTimeout` and FinOps does not run that day. The rule applies to all four dependencies.
 - On weekdays Licences ends around 07:50 and both jobs finish before `WorkplaceEvidence-Prepare` (08:30). On Saturday Licences ends around 18:00 after the full Friday EXO inventory; the 1080-minute wait covers it (until 23:45).
-- Elected, `SharedRuntime` only (no Graph), PowerShell 7, shared `ConcurrencyKey` `SmartFinOps-Workplace`, timeouts 90 and 30 min (deliberately below the 1380-minute daily policy, reported by its audit), one retry. Valuation has `ContinueOnError=false`: a failed valuation blocks the report.
-- Outputs stay in `Data\<profile>` of the checkout the orchestrators run from; all servers must use the same checkout so the archive and realization baselines stay in one place.
+- Elected, `Graph` (`Sites.Selected`, for the SharePoint mirror) and `SharedRuntime`, PowerShell 7, shared `ConcurrencyKey` `SmartFinOps-Workplace`, timeouts 90 and 30 min (deliberately below the 1380-minute daily policy, reported by its audit), one retry. Valuation has `ContinueOnError=false`: a failed valuation blocks the report.
+- Outputs go to the SmartM365 data tree of the profile (see below), shared by every orchestrator server.
 
 Exit codes of both scripts follow their completion banner, as the orchestrator expects:
 
@@ -139,3 +140,26 @@ Launchers:
 
 - direct: `Start-SmartFinOps-Workplace-Valuation-Prod.cmd`, then `Start-SmartFinOps-Workplace-Report-Prod.cmd` (this folder);
 - through the orchestrators: `SmartM365/SmartInventory/LaunchersByOrchestrator/Request-SmartFinOps-Workplace-Valuation.cmd` and `Request-SmartFinOps-Workplace-Report.cmd` (add `-IncludeDependencies` to collect the sources first).
+
+## Data location and SharePoint mirror (lot V2.4c)
+
+Since engine 2.2.0, report 2.3.0 and tenant context 1.4.0 SmartFinOps writes into the SmartM365 data tree of the profile, like the SmartInventory collectors, and never into its code folder (except the private contracts file, which records `UnmappedSkus`):
+
+| Content | Location |
+| --- | --- |
+| Seven `FinOps_*.csv`, `SmartFinOps_Workplace-Valuation.current.json.txt`, `SmartFinOps_Workplace-Report.html` | `DATA-LAST\` |
+| Run history (files, receipt and report page of each run) | `DATA-ALL\FinOps\Workplace\<FinOpsRunId>\` |
+| Logs | `LOG-ALL\SmartFinOps-Workplace-Valuation\` and `LOG-ALL\SmartFinOps-Workplace-Report\` |
+
+The three roots are read from the SmartM365 context of the profile (`LatestCsvFolderPath`, `DataAllRootPath`, `LogAllRootPath`) unless overridden. A run stops when a root keeps a `{{token}}`, is not called `DATA-LAST`, `DATA-ALL` or `LOG-ALL`, does not exist (SmartFinOps never creates them), is not a sibling of the other two under the same tenant data root, or lies under the SmartM365 `Output` fallback. `FinOps_` and `SmartFinOps_` names do not collide with SmartInventory files, and the SmartWorkplaceIntelligence preparation copies only the files of its own contract.
+
+History retention keeps the `Valuation.ArchiveRetentionRuns` most recent runs. It only ever removes a folder directly under `DATA-ALL\FinOps\Workplace\` whose name is exactly `yyyyMMddTHHmmssfffZ-xxxxxxxx` (lowercase hexadecimal) and that holds a SmartFinOps receipt of the same TenantKey and run; never the current run, never a realization baseline, never anything in `DATA-LAST` or `LOG-ALL`. Each removal is logged with its path. Logs are not purged. A run without a measured Licences report removes nothing.
+
+With `EnableSharePointUpload` (the SmartM365 setting by default), both scripts mirror their files to the same relative paths under the SmartM365 SharePoint target folder, with the SmartM365.Core upload helper and the SmartM365 app-only identity (`Sites.Selected`):
+
+- the engine uploads the run history first, then a `Publishing` current receipt, the seven current CSVs, and the `Completed` receipt last; when a current file fails to upload, the completed receipt is withheld, so the SharePoint copy stays disqualified;
+- a failed run uploads its `Failed` receipt; the report uploads its page (current and history) and both scripts upload their log (without the completion banner, appended locally afterwards);
+- a run removed by retention is also removed from SharePoint (site recycle bin), only for the same run folder;
+- an incomplete SmartM365 SharePoint configuration or any upload failure is a warning: the local files stay valid and the run ends with code 3, never as a plain success.
+
+Runs written before 2.2.0 under `SmartFinOps\Data\<profile>` are not migrated or read; the first run in the SmartM365 data tree starts a new realization baseline.

@@ -9,20 +9,22 @@
   FinOps_* CSVs with their own receipt.
   Unqualified input is reported as Not measured, never as zero or as an older value.
 .VERSION
-2.1.5
+2.2.0
 .NOTES
-  -Tenant is the profile key (Data\<profile>, Archive); source receipts and rows are compared with the organization
-  TenantKey (SmartM365TenantKey, or -SmartM365TenantKey).
-  Outputs: Data\<profile>\FinOps_*.csv, SmartFinOps_Workplace-Valuation.current.json.txt and
-  Archive\<FinOpsRunId>\ (same files plus the run log). Consumers must check the receipt
-  (Status Completed, TenantKey, SHA256 per file) before reading any FinOps_* CSV.
+  -Tenant is the profile key; source receipts and rows are compared with the organization TenantKey (SmartM365TenantKey,
+  or -SmartM365TenantKey). Folders: the SmartM365 DATA-LAST, DATA-ALL and LOG-ALL of the profile.
+  Outputs: DATA-LAST\FinOps_*.csv and SmartFinOps_Workplace-Valuation.current.json.txt; history in
+  DATA-ALL\FinOps\Workplace\<FinOpsRunId>\ (same files); log in LOG-ALL\SmartFinOps-Workplace-Valuation\. With SharePoint
+  upload enabled (SmartM365 setting by default), files are mirrored to the same relative paths. Consumers must check the
+  receipt (Status Completed, TenantKey, SHA256 per file) before reading any FinOps_* CSV.
 #>
 [CmdletBinding()]
 param(
   [string]$Tenant = 'test',
   [string]$SmartM365LatestCsvFolderPath,
   [string]$SmartM365TenantKey,
-  [string]$OutputRoot,
+  [string]$SmartM365DataAllRootPath,
+  [string]$SmartM365LogAllRootPath,
   [string]$ContractsPath,
   [string]$AsOfUtc,
   [switch]$ValidateOnly
@@ -30,7 +32,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-$script:ScriptVersion = '2.1.5'
+$script:ScriptVersion = '2.2.0'
 $script:LogLines = [System.Collections.Generic.List[string]]::new()
 $script:Invariant = [Globalization.CultureInfo]::InvariantCulture
 
@@ -172,7 +174,6 @@ $script:OutputSpecs = [ordered]@{
   'FinOps_Controls.csv' = @{ Key=@('Control','Key'); Columns=@('Control','Key','SourceCount','FinOpsCount','Status','Detail') }
 }
 $script:ReceiptName = 'SmartFinOps_Workplace-Valuation.current.json.txt'
-$script:LogName = 'SmartFinOps-Workplace-Valuation.log'
 $script:RecoveryLevers = @{ 'Disabled account'='L1'; 'Eligible shared mailbox under 50 GB'='L2'; 'No M365 activity in 90 days'='L3' }
 $script:CapRankByLever = @{ L1=1; L5=2; L2=3; L6=4; L3=5 }
 $script:ValuedStatuses = @('Valued','Provisional')
@@ -574,16 +575,66 @@ function Get-FinOpsRealization {
 }
 
 function Invoke-FinOpsArchiveRetention {
-  param([Parameter(Mandatory)][string]$ArchiveRoot, [Parameter(Mandatory)][int]$KeepRuns, [Parameter(Mandatory)]$ProtectedRuns, [Parameter(Mandatory)][string]$CurrentRunId)
-  if (-not (Test-Path -LiteralPath $ArchiveRoot -PathType Container)) { return }
-  $directories = @(Get-ChildItem -LiteralPath $ArchiveRoot -Directory | Where-Object { $_.Name -match '^\d{8}T\d{9}Z-[0-9a-f]{8}$' } | Sort-Object Name -Descending)
-  $kept = 0
-  foreach ($directory in $directories) {
-    $kept++
-    if ($kept -le $KeepRuns -or $directory.Name -ceq $CurrentRunId -or $ProtectedRuns.Contains($directory.Name)) { continue }
-    Remove-Item -LiteralPath $directory.FullName -Recurse -Force
-    Write-FinOpsLog "Archive retention: removed run $($directory.Name)"
+  param(
+    [Parameter(Mandatory)][string]$ArchiveRoot, [Parameter(Mandatory)][int]$KeepRuns, [Parameter(Mandatory)]$ProtectedRuns,
+    [Parameter(Mandatory)][string]$CurrentRunId, [Parameter(Mandatory)][string]$TenantKey, [scriptblock]$RemoveRemote
+  )
+  # Only SmartFinOps run folders directly under DATA-ALL\FinOps\Workplace, named yyyyMMddTHHmmssfffZ-xxxxxxxx and
+  # holding a SmartFinOps receipt of this TenantKey and run, are ever removed; a realization baseline never is.
+  $root = [IO.Path]::GetFullPath($ArchiveRoot).TrimEnd('\')
+  if (-not $root.EndsWith('\DATA-ALL\FinOps\Workplace', [StringComparison]::OrdinalIgnoreCase)) { throw "Archive retention refused: $root is not a DATA-ALL\FinOps\Workplace folder." }
+  if (-not (Test-Path -LiteralPath $root -PathType Container)) { return }
+  $owned = [System.Collections.Generic.List[object]]::new()
+  foreach ($directory in @(Get-ChildItem -LiteralPath $root -Directory -Force | Where-Object { $_.Name -cmatch '^\d{8}T\d{9}Z-[0-9a-f]{8}$' } | Sort-Object Name -Descending)) {
+    $isOwned = $false
+    if (-not ($directory.Attributes -band [IO.FileAttributes]::ReparsePoint) -and [IO.Path]::GetFullPath($directory.Parent.FullName).TrimEnd('\') -ieq $root) {
+      $receiptPath = Join-Path $directory.FullName $script:ReceiptName
+      try {
+        if (Test-Path -LiteralPath $receiptPath -PathType Leaf) {
+          $receipt = (Read-FinOpsJsonText $receiptPath) | ConvertFrom-Json
+          $isOwned = ($receipt.Owner -ceq 'SmartFinOps-Receipt' -and $receipt.TenantKey -ceq $TenantKey -and $receipt.RunId -ceq $directory.Name)
+        }
+      }
+      catch { $isOwned = $false }
+    }
+    if ($isOwned) { $owned.Add($directory) } else { Write-FinOpsLog "Archive retention: kept $($directory.Name) (not a SmartFinOps run of this TenantKey)" }
   }
+  $rank = 0
+  foreach ($directory in $owned) {
+    $rank++
+    if ($rank -le $KeepRuns -or $directory.Name -ceq $CurrentRunId -or $ProtectedRuns.Contains($directory.Name)) { continue }
+    Remove-Item -LiteralPath $directory.FullName -Recurse -Force
+    Write-FinOpsLog "Archive retention: removed run $($directory.Name) ($($directory.FullName))"
+    if ($RemoveRemote) { & $RemoveRemote $directory.FullName $directory.Name }
+  }
+}
+
+function Send-FinOpsSharePointFile {
+  param([Parameter(Mandatory)]$SharePoint, [Parameter(Mandatory)][string]$Path)
+  # SmartM365 upload to the same DATA-LAST / DATA-ALL / LOG-ALL relative path; the helper reports failure by returning nothing.
+  $parameters = $SharePoint.Parameters
+  $record = $null
+  try { $record = SmartM365.Core\Invoke-SmartM365SharePointCsvUpload -LocalFilePath $Path -EnsureParentFolders @parameters }
+  catch { Write-FinOpsLog ("SharePoint upload failed for {0}: {1}" -f $Path, $_.Exception.Message) 'WARNING'; return $false }
+  if ($null -eq $record -or -not ($record.PSObject.Properties['SharePointPath'] -and $record.SharePointPath)) {
+    Write-FinOpsLog "SharePoint upload failed for ${Path}: the SmartM365 upload returned no result (see the messages above)." 'WARNING'
+    return $false
+  }
+  Write-FinOpsLog "SharePoint uploaded: $($record.SharePointPath)"
+  return $true
+}
+
+function Invoke-FinOpsSharePointRetention {
+  param([Parameter(Mandatory)]$SharePoint, [Parameter(Mandatory)][string]$Folder, [Parameter(Mandatory)][string]$RunId)
+  # Mirror of a local retention removal: the remote path is derived from the same DATA-ALL\FinOps\Workplace\<RunId> folder.
+  $relative = SmartM365.Core\Get-SmartM365SharePointRelativeFilePath -LocalFilePath $Folder
+  if ($relative -cne "DATA-ALL/FinOps/Workplace/$RunId") { Write-FinOpsLog "SharePoint retention refused for ${Folder}: unexpected relative path '$relative'." 'WARNING'; return }
+  $parameters = $SharePoint.Parameters
+  $removed = $false
+  try { $removed = [bool](SmartM365.Core\Remove-SmartM365SharePointFile -LocalFilePath $Folder @parameters) }
+  catch { $removed = $false }
+  if ($removed) { Write-FinOpsLog "SharePoint retention: removed run $RunId ($relative)" }
+  else { Write-FinOpsLog "SharePoint retention failed for run $RunId ($relative); the remote copy stays." 'WARNING' }
 }
 #endregion
 
@@ -1073,7 +1124,7 @@ if ($MyInvocation.InvocationName -eq '.') { return }
 
 $exitCode = 0
 $startedAt = Get-Date
-$runId = ''; $currentRoot = $null; $archiveDir = $null; $csvFiles = 0; $tenantKey = ''
+$runId = ''; $currentRoot = $null; $archiveDir = $null; $csvFiles = 0; $tenantKey = ''; $logPath = ''; $logFile = ''; $sharePoint = $null
 try {
   . (Join-Path $PSScriptRoot 'Config\SmartFinOps-TenantContext.ps1')
   Write-SmartFinOpsStartupBanner
@@ -1087,19 +1138,24 @@ try {
   $coreManifest = Join-Path $repositoryRoot 'SmartM365\Modules\SmartM365.Core\SmartM365.Core.psd1'
   Import-Module $coreManifest -MinimumVersion '1.0.90' -ErrorAction Stop | Out-Null
 
-  $dataLast = if ($SmartM365LatestCsvFolderPath) { $SmartM365LatestCsvFolderPath } else { [string](Get-SmartFinOpsConfigValue -Name 'SmartM365LatestCsvFolderPath') }
-  Assert-SmartFinOpsResolvedPath -Name 'SmartM365LatestCsvFolderPath' -Value $dataLast
-  $dataLast = ConvertTo-SmartFinOpsFileSystemPath $dataLast
+  # SmartM365 data tree of the profile: sources and current outputs in DATA-LAST, history in DATA-ALL, log in LOG-ALL.
+  $layout = Get-SmartFinOpsDataLayout -DataLast $SmartM365LatestCsvFolderPath -DataAll $SmartM365DataAllRootPath -LogAll $SmartM365LogAllRootPath
+  $dataLast = $layout.DataLast
+  $logFile = 'SmartFinOps-Workplace-Valuation-{0}.log' -f $startedAt.ToString('yyyy-MM-dd_HH-mm-ss', $script:Invariant)
+  $logPath = Join-Path (Join-Path $layout.LogAll 'SmartFinOps-Workplace-Valuation') $logFile
   # Source receipts carry the organization TenantKey, not the profile key used for Data\<profile>.
   $tenantKey = if ($SmartM365TenantKey) { $SmartM365TenantKey.Trim() } else { [string](Get-SmartFinOpsConfigValue -Name 'SmartM365TenantKey') }
   Assert-SmartFinOpsResolvedPath -Name 'SmartM365TenantKey' -Value $tenantKey
   if (-not $tenantKey) { throw 'SmartM365TenantKey is empty: set it in the SmartFinOps configuration, pass -SmartM365TenantKey, or leave __USE_SMARTM365__.' }
   Write-FinOpsLog ("Profile '{0}' - TenantKey '{1}'{2}" -f $Tenant, $tenantKey, $(if ($SmartM365TenantKey) { ' (parameter)' } else { '' }))
-  if (-not $dataLast -or -not (Test-Path -LiteralPath $dataLast -PathType Container)) { throw "SmartM365 DATA-LAST folder not found: $dataLast" }
-  $resolvedOutput = if ($OutputRoot) { $OutputRoot } else { [string](Resolve-SmartFinOpsConfigTokenValue -Value '{{TenantDataRootPath}}') }
-  Assert-SmartFinOpsResolvedPath -Name 'TenantDataRootPath' -Value $resolvedOutput
-  $currentRoot = ConvertTo-SmartFinOpsFileSystemPath $resolvedOutput
-  $archiveRoot = Join-Path $currentRoot 'Archive'
+  $currentRoot = $dataLast
+  $archiveRoot = $layout.HistoryRoot
+  if (-not $ValidateOnly) {
+    $sharePoint = Get-SmartFinOpsSharePointConfiguration
+    if (-not $sharePoint.Enabled) { Write-FinOpsLog 'SharePoint upload disabled.'; $sharePoint = $null }
+    elseif ($sharePoint.Missing.Count) { Write-FinOpsLog ("SharePoint upload enabled but the SmartM365 configuration is incomplete (missing: {0}); no file is uploaded." -f ($sharePoint.Missing -join ', ')) 'WARNING'; $sharePoint = $null }
+    else { Write-FinOpsLog ("SharePoint upload enabled: {0}{1}, library '{2}', folder '{3}'." -f $sharePoint.Parameters.SiteHostname, $sharePoint.Parameters.SitePath, $sharePoint.Parameters.LibraryDisplayName, $sharePoint.Parameters.TargetFolderPath) }
+  }
   $valuation = Get-SmartFinOpsConfigValue -Name 'Valuation'
   $dailyHours = [int]$(if ($null -ne (Get-FinOpsProperty $valuation 'FreshnessDailyHours')) { Get-FinOpsProperty $valuation 'FreshnessDailyHours' } else { 48 })
   $weeklyDays = [int]$(if ($null -ne (Get-FinOpsProperty $valuation 'FreshnessWeeklyDays')) { Get-FinOpsProperty $valuation 'FreshnessWeeklyDays' } else { 8 })
@@ -1111,8 +1167,9 @@ try {
   }
   Assert-SmartFinOpsResolvedPath -Name 'Valuation.ContractsPath' -Value $contractsFile
   $contractsFile = ConvertTo-SmartFinOpsFileSystemPath $contractsFile
-  Write-FinOpsLog "Sources: $dataLast"
-  Write-FinOpsLog "Outputs: $currentRoot"
+  Write-FinOpsLog "Sources and current outputs: $dataLast"
+  Write-FinOpsLog "History: $archiveRoot"
+  Write-FinOpsLog "Log: $logPath"
   $contracts = Get-FinOpsContracts -Path $contractsFile -TemplatePath (Join-Path $PSScriptRoot 'Config\SmartFinOps-Contracts.local.json.template')
 
   $licReceipt = 'SmartInventory_SmartM365-Licences-Inventory.current.json.txt'; $licProducer = 'SmartM365-Licences-Inventory.ps1'
@@ -1223,7 +1280,7 @@ try {
     $csvFiles = $files.Count
     $receipt = [ordered]@{
       Owner='SmartFinOps-Receipt'; ContractVersion='1.1'; ProfileKey=$Tenant; TenantKey=$tenantKey; Producer='SmartFinOps-Workplace-Valuation.ps1'; ScriptVersion=$script:ScriptVersion
-      RunId=$runId; StartedAtUtc=$runStart.ToString('o'); CompletedAtUtc=[datetime]::UtcNow.ToString('o'); Status=$status
+      RunId=$runId; StartedAtUtc=$runStart.ToString('o'); CompletedAtUtc=[datetime]::UtcNow.ToString('o'); Status=$status; LogFile="LOG-ALL/SmartFinOps-Workplace-Valuation/$logFile"
       LicencesMeasured=$result.Measured; SnapshotId=$result.SnapshotId; LicencesReceiptRunId=$result.ReceiptRunId; Provisional=$result.Provisional; ProvisionalLevers=@($result.ProvisionalLevers); MissingDomains=$result.MissingDomains
       Inputs=@(foreach ($record in ($sources.Values | Sort-Object SourceFile)) { [ordered]@{ SourceFile=$record.SourceFile; SourceReceiptRunId=$record.SourceReceiptRunId; SHA256=$record.ActualSHA256; QualificationStatus=$record.QualificationStatus } })
       Settings=[ordered]@{ FreshnessDailyHours=$dailyHours; FreshnessWeeklyDays=$weeklyDays; ArchiveRetentionRuns=$keepRuns; AsOfDate=$result.AsOfDate.ToString('yyyy-MM-dd'); ContractsFileSHA256=$(if (Test-Path -LiteralPath $contractsFile) { Get-FinOpsSha256 $contractsFile } else { '' }) }
@@ -1231,24 +1288,36 @@ try {
       Controls=[ordered]@{ Status=$(if ($failed.Count) { 'Fail' } elseif ($result.Measured) { 'Pass' } else { 'Not applicable' }); FailedCount=$failed.Count }
     }
     Write-FinOpsJson -Path (Join-Path $archiveDir $script:ReceiptName) -Document $receipt
-    New-Item -ItemType Directory -Path $currentRoot -Force | Out-Null
+    if ($sharePoint) { foreach ($name in @(@($outputs.Keys) + $script:ReceiptName)) { [void](Send-FinOpsSharePointFile -SharePoint $sharePoint -Path (Join-Path $archiveDir $name)) } }
     $currentReceipt = Join-Path $currentRoot $script:ReceiptName
     if ($status -eq 'Completed') {
-      # Disqualify the current files while they are replaced, then publish the completed receipt.
+      # Disqualify the current files while they are replaced (locally and on SharePoint), then publish the completed receipt last.
       $publishing = [ordered]@{} + $receipt; $publishing.Status = 'Publishing'
       Write-FinOpsJson -Path $currentReceipt -Document $publishing
+      $remoteReady = $true
+      if ($sharePoint) { $remoteReady = Send-FinOpsSharePointFile -SharePoint $sharePoint -Path $currentReceipt }
       foreach ($name in $outputs.Keys) { Copy-Item -LiteralPath (Join-Path $archiveDir $name) -Destination (Join-Path $currentRoot $name) -Force }
       foreach ($file in $files) { if ((Get-FinOpsSha256 (Join-Path $currentRoot $file.File)) -cne $file.SHA256) { throw "Published file differs from the archive: $($file.File)" } }
+      if ($sharePoint -and $remoteReady) { foreach ($name in $outputs.Keys) { if (-not (Send-FinOpsSharePointFile -SharePoint $sharePoint -Path (Join-Path $currentRoot $name))) { $remoteReady = $false } } }
       Write-FinOpsJson -Path $currentReceipt -Document $receipt
       Write-FinOpsLog "Published FinOps outputs and receipt ($status)."
+      if ($sharePoint) {
+        # The completed receipt is uploaded only after every current file; otherwise SharePoint keeps a disqualifying receipt.
+        if ($remoteReady) { [void](Send-FinOpsSharePointFile -SharePoint $sharePoint -Path $currentReceipt) }
+        else { Write-FinOpsLog 'SharePoint current files incomplete: the completed receipt is not uploaded, so the SharePoint copy stays disqualified.' 'WARNING' }
+      }
     }
     else {
       # Failed guard: current files stay but the receipt disqualifies them.
       Write-FinOpsJson -Path $currentReceipt -Document $receipt
       Write-FinOpsLog 'Equivalence guard failed: current FinOps files kept but disqualified by the receipt.' 'ERROR'
+      if ($sharePoint) { [void](Send-FinOpsSharePointFile -SharePoint $sharePoint -Path $currentReceipt) }
     }
     # Without a measured Licences report the realization baselines are unknown: no purge.
-    if ($result.Measured) { Invoke-FinOpsArchiveRetention -ArchiveRoot $archiveRoot -KeepRuns $keepRuns -ProtectedRuns $realization.ProtectedRuns -CurrentRunId $runId }
+    if ($result.Measured) {
+      $removeRemote = if ($sharePoint) { $remote = $sharePoint; { param($folder, $name) Invoke-FinOpsSharePointRetention -SharePoint $remote -Folder $folder -RunId $name }.GetNewClosure() } else { $null }
+      Invoke-FinOpsArchiveRetention -ArchiveRoot $archiveRoot -KeepRuns $keepRuns -ProtectedRuns $realization.ProtectedRuns -CurrentRunId $runId -TenantKey $tenantKey -RemoveRemote $removeRemote
+    }
   }
 }
 catch {
@@ -1258,22 +1327,27 @@ catch {
   Write-FinOpsLog ("Stack: {0}" -f ($_.ScriptStackTrace -replace '\r?\n', ' | ')) 'ERROR'
   if (-not $ValidateOnly -and $currentRoot) {
     try {
-      New-Item -ItemType Directory -Path $currentRoot -Force | Out-Null
       $failedReceipt = [ordered]@{ Owner='SmartFinOps-Receipt'; ContractVersion='1.1'; ProfileKey=$Tenant; TenantKey=$tenantKey; Producer='SmartFinOps-Workplace-Valuation.ps1'; ScriptVersion=$script:ScriptVersion
-        RunId=$runId; StartedAtUtc=$runStart.ToString('o'); CompletedAtUtc=[datetime]::UtcNow.ToString('o'); Status='Failed'; LicencesMeasured=$false; Error=$runError; Files=@() }
+        RunId=$runId; StartedAtUtc=$runStart.ToString('o'); CompletedAtUtc=[datetime]::UtcNow.ToString('o'); Status='Failed'; LogFile="LOG-ALL/SmartFinOps-Workplace-Valuation/$logFile"; LicencesMeasured=$false; Error=$runError; Files=@() }
       Write-FinOpsJson -Path (Join-Path $currentRoot $script:ReceiptName) -Document $failedReceipt
-      if (-not $archiveDir) { $archiveDir = Join-Path (Join-Path $currentRoot 'Archive') $runId; New-Item -ItemType Directory -Path $archiveDir -Force | Out-Null }
+      if (-not $archiveDir) { $archiveDir = Join-Path $archiveRoot $runId; New-Item -ItemType Directory -Path $archiveDir -Force | Out-Null }
       Write-FinOpsJson -Path (Join-Path $archiveDir $script:ReceiptName) -Document $failedReceipt
+      if ($sharePoint) { [void](Send-FinOpsSharePointFile -SharePoint $sharePoint -Path (Join-Path $currentRoot $script:ReceiptName)) }
     }
     catch { Write-FinOpsLog ("Failed receipt could not be written: {0}" -f $_.Exception.Message) 'ERROR' }
   }
 }
 finally {
-  $logPath = ''
-  if (-not $ValidateOnly -and $archiveDir -and (Test-Path -LiteralPath $archiveDir)) {
-    $logPath = Join-Path $archiveDir $script:LogName
-    [IO.File]::WriteAllLines($logPath, $script:LogLines, [Text.UTF8Encoding]::new($false))
+  if (-not $ValidateOnly -and $logPath) {
+    try {
+      New-Item -ItemType Directory -Path (Split-Path $logPath -Parent) -Force | Out-Null
+      [IO.File]::WriteAllLines($logPath, $script:LogLines, [Text.UTF8Encoding]::new($false))
+      # The SharePoint copy is the log without the completion banner, which is appended locally right after.
+      if ($sharePoint -and -not (Send-FinOpsSharePointFile -SharePoint $sharePoint -Path $logPath)) { [IO.File]::WriteAllLines($logPath, $script:LogLines, [Text.UTF8Encoding]::new($false)) }
+    }
+    catch { Write-FinOpsLog ("Run log could not be written: {0}" -f $_.Exception.Message) 'WARNING'; $logPath = '' }
   }
+  else { $logPath = '' }
   # Completion banner on success and on failure (appended to the run log when there is one).
   # Exit code contract (orchestrator): 0 success, 3 completed with warnings, 1 failure.
   $warnings = @($script:LogLines | Where-Object { $_ -match '^\S+ \S+ \[WARNING\]' }).Count

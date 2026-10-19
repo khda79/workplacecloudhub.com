@@ -9,30 +9,33 @@
   FinOps_Showback or FinOps_Realization. A failed or inconsistent run gives a "Report not available" page
   with the reason and no figure; it replaces the current report so that no older figure stays visible.
 .VERSION
-2.2.4
+2.3.0
 .NOTES
-  Output: Data\<TenantKey>\SmartFinOps_Workplace-Report.html and its log; copy of both in
-  Archive\<FinOpsRunId>\ when that run is archived. Aggregates only: no user identifier, no external
-  resource, no script, every value HTML-encoded. Same inputs give the same HTML except the generation time.
+  Input and output: the SmartM365 DATA-LAST of the profile (SmartFinOps_Workplace-Report.html), a copy in
+  DATA-ALL\FinOps\Workplace\<FinOpsRunId>\ when that run is in the history, and the log in
+  LOG-ALL\SmartFinOps-Workplace-Report\; mirrored to SharePoint when upload is enabled (SmartM365 setting by default).
+  Aggregates only: no user identifier, no external resource, no script, every value HTML-encoded. Same inputs give the
+  same HTML except the generation time.
 #>
 [CmdletBinding()]
 param(
   [string]$Tenant = 'test',
-  [string]$InputRoot,
+  [string]$SmartM365LatestCsvFolderPath,
+  [string]$SmartM365DataAllRootPath,
+  [string]$SmartM365LogAllRootPath,
   [string]$SmartM365TenantKey,
   [switch]$ValidateOnly
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-$script:ScriptVersion = '2.2.4'
+$script:ScriptVersion = '2.3.0'
 $script:LogLines = [System.Collections.Generic.List[string]]::new()
 $script:Invariant = [Globalization.CultureInfo]::InvariantCulture
 $script:ReceiptName = 'SmartFinOps_Workplace-Valuation.current.json.txt'
 $script:ReportName = 'SmartFinOps_Workplace-Report.html'
-$script:LogName = 'SmartFinOps-Workplace-Report.log'
 
-#region Input contract (engine 2.1.1 or later 2.1.x)
+#region Input contract (engine 2.1.4 to 2.2.x)
 $script:CommonColumns = @('TenantKey','FinOpsRunId','SnapshotId','ReceiptRunId')
 $script:InputColumns = [ordered]@{
   'FinOps_Sources.csv' = @('SourceFile','Producer','ReceiptFile','SourceReceiptRunId','ReceiptStatus','ReceiptCompletedAtUtc','Required','PublishedInReceipt','ExpectedSHA256','ActualSHA256','ExpectedRows','ActualRows','FreshnessThresholdHours','AgeHours','QualificationStatus','Reason','MissingDomains','ProvisionalLevers')
@@ -211,7 +214,9 @@ function Read-ReportInputs {
     $result.CompletedAtUtc = ConvertTo-ReportJsonText (Get-ReportProperty $receipt 'CompletedAtUtc')
     if ([string](Get-ReportProperty $receipt 'Owner') -cne 'SmartFinOps-Receipt' -or [string](Get-ReportProperty $receipt 'ContractVersion') -cne '1.1') { throw 'The valuation receipt has an unsupported owner or contract version (1.1 required: run SmartFinOps-Workplace-Valuation.ps1 2.1.4 or later).' }
     $version = [string](Get-ReportProperty $receipt 'ScriptVersion')
-    if ($version -notmatch '^2\.1\.(\d+)$' -or [int]$Matches[1] -lt 4) { throw "The valuation engine version '$version' is not supported (2.1.4 or later 2.1.x required)." }
+    # Same input contract from engine 2.1.4 to 2.2.x (2.2.0 moved the files to the SmartM365 data tree, not their content).
+    $supported = ($version -match '^2\.1\.(\d+)$' -and [int]$Matches[1] -ge 4) -or $version -match '^2\.2\.\d+$'
+    if (-not $supported) { throw "The valuation engine version '$version' is not supported (2.1.4 or later, up to 2.2.x)." }
     if ($result.RunId -notmatch '^\d{8}T\d{9}Z-[0-9a-f]{8}$') { throw 'The valuation receipt RunId is invalid.' }
     & $pass $rule "Owner SmartFinOps-Receipt 1.1, engine $version"
 
@@ -725,20 +730,36 @@ function Write-ReportFile {
 #endregion
 
 #region Main
+function Send-ReportSharePointFile {
+  param([Parameter(Mandatory)]$SharePoint, [Parameter(Mandatory)][string]$Path)
+  # SmartM365 upload to the same DATA-LAST / DATA-ALL / LOG-ALL relative path; the helper reports failure by returning nothing.
+  $parameters = $SharePoint.Parameters
+  $record = $null
+  try { $record = SmartM365.Core\Invoke-SmartM365SharePointCsvUpload -LocalFilePath $Path -EnsureParentFolders @parameters }
+  catch { Write-ReportLog ("SharePoint upload failed for {0}: {1}" -f $Path, $_.Exception.Message) 'WARNING'; return $false }
+  if ($null -eq $record -or -not ($record.PSObject.Properties['SharePointPath'] -and $record.SharePointPath)) {
+    Write-ReportLog "SharePoint upload failed for ${Path}: the SmartM365 upload returned no result (see the messages above)." 'WARNING'
+    return $false
+  }
+  Write-ReportLog "SharePoint uploaded: $($record.SharePointPath)"
+  return $true
+}
+
 if ($MyInvocation.InvocationName -eq '.') { return }
 
 $exitCode = 0
 $startedAt = Get-Date
-$root = $null; $archiveDir = $null
+$root = $null; $archiveDir = $null; $logPath = ''; $sharePoint = $null
 try {
   . (Join-Path $PSScriptRoot 'Config\SmartFinOps-TenantContext.ps1')
   Write-SmartFinOpsStartupBanner
   Write-ReportLog ("Starting SmartFinOps Workplace Report v{0} - profile '{1}'{2}" -f $script:ScriptVersion, $Tenant, $(if ($ValidateOnly) { ' - ValidateOnly (no file written)' } else { '' }))
   Write-ReportLog ("Tenant context {0}" -f $script:SmartFinOpsTenantContextVersion)
   Initialize-SmartFinOpsTenantContext -Tenant $Tenant -StartPath $PSScriptRoot | Out-Null
-  $resolvedRoot = if ($InputRoot) { $InputRoot } else { [string](Resolve-SmartFinOpsConfigTokenValue -Value '{{TenantDataRootPath}}') }
-  Assert-SmartFinOpsResolvedPath -Name 'TenantDataRootPath' -Value $resolvedRoot
-  $root = ConvertTo-SmartFinOpsFileSystemPath $resolvedRoot
+  # SmartM365 data tree of the profile: valuation outputs and the page in DATA-LAST, run history in DATA-ALL, log in LOG-ALL.
+  $layout = Get-SmartFinOpsDataLayout -DataLast $SmartM365LatestCsvFolderPath -DataAll $SmartM365DataAllRootPath -LogAll $SmartM365LogAllRootPath
+  $root = $layout.DataLast
+  $logPath = Join-Path (Join-Path $layout.LogAll 'SmartFinOps-Workplace-Report') ('SmartFinOps-Workplace-Report-{0}.log' -f $startedAt.ToString('yyyy-MM-dd_HH-mm-ss', $script:Invariant))
   $tenantKey = if ($SmartM365TenantKey) { $SmartM365TenantKey.Trim() } else { [string](Get-SmartFinOpsConfigValue -Name 'SmartM365TenantKey') }
   Assert-SmartFinOpsResolvedPath -Name 'SmartM365TenantKey' -Value $tenantKey
   if (-not $tenantKey) { throw 'SmartM365TenantKey is empty: set it in the SmartFinOps configuration, pass -SmartM365TenantKey, or leave __USE_SMARTM365__.' }
@@ -747,8 +768,17 @@ try {
   $minimum = Get-ReportProperty $reportConfig 'ShowbackMinimumGroupUsers'
   $minimumUsers = if ($null -eq $minimum -or [string]$minimum -eq '') { 5 } else { [int]$minimum }
   if ($minimumUsers -lt 1) { throw 'Report.ShowbackMinimumGroupUsers must be a positive integer.' }
-  Write-ReportLog "Inputs: $root"
-  if (-not (Test-Path -LiteralPath $root -PathType Container)) { throw "FinOps data folder not found: $root" }
+  Write-ReportLog "Inputs and page: $root"
+  Write-ReportLog "Log: $logPath"
+  if (-not $ValidateOnly) {
+    $sharePoint = Get-SmartFinOpsSharePointConfiguration
+    if (-not $sharePoint.Enabled) { Write-ReportLog 'SharePoint upload disabled.'; $sharePoint = $null }
+    elseif ($sharePoint.Missing.Count) { Write-ReportLog ("SharePoint upload enabled but the SmartM365 configuration is incomplete (missing: {0}); no file is uploaded." -f ($sharePoint.Missing -join ', ')) 'WARNING'; $sharePoint = $null }
+    else {
+      Import-Module (Join-Path (Split-Path -Path $PSScriptRoot -Parent) 'SmartM365\Modules\SmartM365.Core\SmartM365.Core.psd1') -MinimumVersion '1.0.90' -ErrorAction Stop | Out-Null
+      Write-ReportLog ("SharePoint upload enabled: {0}{1}, library '{2}', folder '{3}'." -f $sharePoint.Parameters.SiteHostname, $sharePoint.Parameters.SitePath, $sharePoint.Parameters.LibraryDisplayName, $sharePoint.Parameters.TargetFolderPath)
+    }
+  }
 
   $inputs = Read-ReportInputs -Root $root -ProfileKey $Tenant -TenantKey $tenantKey
   foreach ($check in $inputs.Checks) { Write-ReportLog ('{0}: {1} - {2}' -f $check.Rule, $check.Status, $check.Detail) $(if ($check.Status -eq 'Pass') { 'INFO' } else { 'WARNING' }) }
@@ -767,11 +797,15 @@ try {
   if ($ValidateOnly) { Write-ReportLog 'ValidateOnly: no file written.' }
   else {
     Write-ReportFile -Path (Join-Path $root $script:ReportName) -Content $html
-    if ($inputs.RunId -match '^\d{8}T\d{9}Z-[0-9a-f]{8}$') {
-      $candidate = Join-Path (Join-Path $root 'Archive') $inputs.RunId
+    if ($inputs.RunId -cmatch '^\d{8}T\d{9}Z-[0-9a-f]{8}$') {
+      $candidate = Join-Path $layout.HistoryRoot $inputs.RunId
       if (Test-Path -LiteralPath $candidate -PathType Container) { $archiveDir = $candidate; Write-ReportFile -Path (Join-Path $archiveDir $script:ReportName) -Content $html }
     }
-    Write-ReportLog ("Report written: {0}{1}" -f (Join-Path $root $script:ReportName), $(if ($archiveDir) { ' (archived with the run)' } else { '' }))
+    Write-ReportLog ("Report written: {0}{1}" -f (Join-Path $root $script:ReportName), $(if ($archiveDir) { ' (copy in the run history)' } else { '' }))
+    if ($sharePoint) {
+      if ($archiveDir) { [void](Send-ReportSharePointFile -SharePoint $sharePoint -Path (Join-Path $archiveDir $script:ReportName)) }
+      [void](Send-ReportSharePointFile -SharePoint $sharePoint -Path (Join-Path $root $script:ReportName))
+    }
   }
 }
 catch {
@@ -780,15 +814,18 @@ catch {
   Write-ReportLog ("Stack: {0}" -f ($_.ScriptStackTrace -replace '\r?\n', ' | ')) 'ERROR'
 }
 finally {
-  $logPath = ''
-  if (-not $ValidateOnly -and $root -and (Test-Path -LiteralPath $root -PathType Container)) {
-    $content = ($script:LogLines -join [Environment]::NewLine) + [Environment]::NewLine
+  if (-not $ValidateOnly -and $logPath) {
     try {
-      Write-ReportFile -Path (Join-Path $root $script:LogName) -Content $content
-      $logPath = Join-Path $root $script:LogName
+      New-Item -ItemType Directory -Path (Split-Path $logPath -Parent) -Force | Out-Null
+      Write-ReportFile -Path $logPath -Content (($script:LogLines -join [Environment]::NewLine) + [Environment]::NewLine)
+      # The SharePoint copy is the log without the completion banner, which is appended locally right after.
+      if ($sharePoint -and -not (Send-ReportSharePointFile -SharePoint $sharePoint -Path $logPath)) {
+        Write-ReportFile -Path $logPath -Content (($script:LogLines -join [Environment]::NewLine) + [Environment]::NewLine)
+      }
     }
-    catch { Write-Host "Report log could not be written: $($_.Exception.Message)" -ForegroundColor Red }
+    catch { Write-Host "Report log could not be written: $($_.Exception.Message)" -ForegroundColor Red; $logPath = '' }
   }
+  else { $logPath = '' }
   # Completion banner on success and on failure; "Report not available" (exit 1) is a failed run.
   # Exit code contract (orchestrator): 0 success, 3 completed with warnings, 1 failure.
   $warnings = @($script:LogLines | Where-Object { $_ -match '^\S+ \S+ \[WARNING\]' }).Count
@@ -800,11 +837,6 @@ finally {
     Write-SmartFinOpsCompletionBanner -Status $bannerStatus -ScriptName 'SmartFinOps-Workplace-Report.ps1' -StartedAt $startedAt -WarningCount $warnings -ErrorCount $errors -GeneratedCsvFiles 0 -LogPath $logPath
   }
   else { Write-Host ("SmartFinOps-Workplace-Report.ps1: {0} (tenant context not loaded)" -f $(switch ($exitCode) { 0 { 'SUCCESS' } 3 { 'COMPLETED WITH WARNINGS' } default { 'FAILED' } })) }
-  # The archived log is a copy of the current one, banner included.
-  if ($logPath -and $archiveDir) {
-    try { Copy-Item -LiteralPath $logPath -Destination (Join-Path $archiveDir $script:LogName) -Force }
-    catch { Write-Host "Archived report log could not be written: $($_.Exception.Message)" -ForegroundColor Red }
-  }
 }
 exit $exitCode
 #endregion
