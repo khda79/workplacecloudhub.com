@@ -181,7 +181,13 @@ function Get-SmartM365CallerLocalConfig {
     foreach ($frame in Get-PSCallStack) {
         $scriptPath = $frame.ScriptName
         if ([string]::IsNullOrWhiteSpace($scriptPath) -or $scriptPath -notmatch '\.ps1$') { continue }
-        $configPath = Join-Path -Path (Split-Path -Path $scriptPath -Parent) -ChildPath ("{0}.local.json" -f [System.IO.Path]::GetFileNameWithoutExtension($scriptPath)); $configPath = Resolve-SmartM365JsonConfigurationPath -Path $configPath
+        $configPath = Join-Path -Path (Split-Path -Path $scriptPath -Parent) -ChildPath ("{0}.local.json" -f [System.IO.Path]::GetFileNameWithoutExtension($scriptPath))
+        # A caller without a local JSON under either name has nothing to read: skip it before any JSON activation, so an
+        # unqualified caller folder (for example another product on a UNC share) is never resolved. An existing file
+        # keeps the full resolution below, including the UNC qualification check.
+        $configNames = Get-SmartM365JsonNames -Path $configPath
+        if (-not (Test-Path -LiteralPath $configNames.Legacy) -and -not (Test-Path -LiteralPath $configNames.Preferred)) { continue }
+        $configPath = Resolve-SmartM365JsonConfigurationPath -Path $configPath
         if (-not (Test-Path -LiteralPath $configPath)) { continue }
         try { return Get-Content -LiteralPath $configPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop }
         catch {
