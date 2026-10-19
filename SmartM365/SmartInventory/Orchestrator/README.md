@@ -382,7 +382,7 @@ Recommended production values for the three-server deployment:
 ```json
 "PeerMonitoringEnabled": true,
 "PeerJobMonitoringEnabled": true,
-"ExpectedOrchestratorServers": ["CPPV-CAPTSE-001", "CPPV-CAPTSE-002", "CPPV-EXCSRV-113"],
+"ExpectedOrchestratorServers": ["SRV01", "SRV02", "EXCH01"],
 "PeerMonitoringCheckIntervalSeconds": 60,
 "PeerHeartbeatStaleMinutes": 5,
 "PeerMonitoringConfirmationChecks": 2,
@@ -392,9 +392,9 @@ Recommended production values for the three-server deployment:
 "PeerAlertMailRetryMinutes": 15,
 "PeerRecoveryEmailEnabled": true,
 "MaxConcurrencyByServer": {
-  "CPPV-CAPTSE-001": 6,
-  "CPPV-CAPTSE-002": 9,
-  "CPPV-EXCSRV-113": 6
+  "SRV01": 6,
+  "SRV02": 9,
+  "EXCH01": 6
 },
 "AtomicWriteRetrySeconds": 30
 ```
@@ -458,7 +458,7 @@ The planner assigns each elected job on its own. `DependsOn` constrains executio
 
 ```json
 "ServerJobPolicies": {
-  "CPPV-EXCSRV-113": {
+  "EXCH01": {
     "OnlyJobsRequiring": ["ExchangeOnPrem"]
   }
 }
@@ -485,7 +485,7 @@ Before launching an elected occurrence, the owner must create its shared claim w
 
 ### Concurrency, queueing, dependencies, overlap
 
-- Global `MaxConcurrency` (default 2 in code, 6 in the production local configuration), optionally overridden for the current host through `MaxConcurrencyByServer`. Jobs due beyond the limit stay queued (their occurrence remains due, never lost), are published as `BlockedByServerConcurrency`, and start as soon as a slot frees. Re-adopted jobs count toward the limit. The production template sets `CPPV-CAPTSE-001=6`, `CPPV-CAPTSE-002=9` and `CPPV-EXCSRV-113=6`; this local map must be present on all three servers.
+- Global `MaxConcurrency` (default 2 in code, 6 in the production local configuration), optionally overridden for the current host through `MaxConcurrencyByServer`. Jobs due beyond the limit stay queued (their occurrence remains due, never lost), are published as `BlockedByServerConcurrency`, and start as soon as a slot frees. Re-adopted jobs count toward the limit. The production template sets `SRV01=6`, `SRV02=9` and `EXCH01=6`; this local map must be present on all three servers.
 - `ConcurrencyKey` is enforced through an atomic lease in shared storage. Jobs sharing the key cannot run simultaneously anywhere in the cluster. A waiting occurrence is published as `BlockedByConcurrencyKey`; the lease follows detached/re-adopted jobs, is atomically aligned with the active timeout deadline after every recycle, and is released when the run ends, including before a retry delay.
 - `DependsOn`: jobs due at the same occurrence run chained in topological order (the manifest is rejected at load time on a cycle). A dependent waits while a parent is running, due, or pending a retry. If a parent with `ContinueOnError=false` finally fails, dependents due at the same occurrence are marked `BlockedDependencyFailed`. If a dependency wait exceeds `DependencyWaitTimeoutMinutes`, the occurrence is marked `BlockedDependencyTimeout`.
 - Overlap guards:

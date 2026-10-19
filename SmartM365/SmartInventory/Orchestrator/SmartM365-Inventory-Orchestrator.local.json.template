@@ -31,9 +31,9 @@
   "PeerRecoveryEmailEnabled": true,
   "MaxConcurrency": 6,
   "MaxConcurrencyByServer": {
-    "CPPV-CAPTSE-001": 6,
-    "CPPV-CAPTSE-002": 9,
-    "CPPV-EXCSRV-113": 6
+    "SRV01": 6,
+    "SRV02": 9,
+    "EXCH01": 6
   },
   "MaxLifetimeHours": 24,
   "AtomicWriteRetrySeconds": 30,
