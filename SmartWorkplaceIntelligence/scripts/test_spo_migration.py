@@ -170,6 +170,17 @@ class MigrationTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             m.merge_history([], prior, 'sample-prod', 'sample-project', 'new', '2026-10-20')
 
+    def test_empty_register_snapshot_retains_the_latest_observation_time(self):
+        first = resolve()['History']
+        afternoon = '2026-10-19T23:00:00+00:00'
+        gone = m.merge_history([], first, 'sample-prod', 'sample-project', 'removed', '2026-10-19', afternoon)
+        latest = max(gone, key=lambda row: (row['Capture UTC'], row['Snapshot ID']))
+        self.assertEqual(latest['Snapshot ID'], 'removed')
+        self.assertFalse(latest['Present In Register'])
+        self.assertEqual(latest['Business Unit'], first[0]['Business Unit'])
+        self.assertEqual(latest['Actual Date'], first[0]['Actual Date'])
+        self.assertEqual(first[0]['Snapshot ID'], resolve()['History'][0]['Snapshot ID'])
+
     def test_template_has_no_operations(self):
         p = Path(__file__).resolve().parents[1] / 'config/templates/SmartWorkplaceIntelligence-Migration-to-SPO.xlsx'
         parameters, data = m.read_workbook(p)

@@ -16,7 +16,7 @@ from pathlib import Path
 from urllib.parse import unquote, urlsplit
 from xml.etree import ElementTree as ET
 
-VERSION = '1.0.0'
+VERSION = '1.0.1'
 CONTRACT = Path(__file__).resolve().parents[1] / 'config/sharepoint-migration-contract.json.txt'
 UTC = dt.timezone.utc
 TABLES = {'MigrationSP': 'tblMigrationSP', 'MigrationSharedFolders': 'tblMigrationSharedFolders',
@@ -549,7 +549,7 @@ def resolve(parameters, tables, tenant, webs, collections_rows, source_states, a
     return output
 
 
-def merge_history(current, previous, tenant, project, snapshot, snapshot_date):
+def merge_history(current, previous, tenant, project, snapshot, snapshot_date, captured_utc=''):
     """Preserve the old attributes and explicitly record disappearance/reopening."""
     if any(r.get('TenantKey') != tenant for r in previous):
         raise ValueError('Historical tenant/project mismatch')
@@ -567,7 +567,8 @@ def merge_history(current, previous, tenant, project, snapshot, snapshot_date):
             latest[op] = row
     for key, row in latest.items():
         if key not in present:
-            current.append(dict(row, **{'Snapshot ID': snapshot, 'Snapshot Date': snapshot_date, 'History Key': token(snapshot, key), 'Present In Register': False}))
+            current.append(dict(row, **{'Snapshot ID': snapshot, 'Snapshot Date': snapshot_date, 'History Key': token(snapshot, key),
+                                       'Present In Register': False, 'Capture UTC': captured_utc or row.get('Capture UTC', '')}))
     result.update({r['History Key']: r for r in current})
     return sorted(result.values(), key=lambda r: (r['Snapshot Date'], r.get('Capture UTC', ''), r['Operation Key']))
 
@@ -634,7 +635,7 @@ def build(args):
         summary = output['SourceSummary'][-1]
         # Rebuild new history rows after target observation qualification.
         output['History'] = [dict(r, **{'History Key': token(r['Snapshot ID'], r['Operation Key'])}) for r in output['Plan']]
-        output['History'] = merge_history(output['History'], previous, args.tenant, parameters['ProjectKey'], summary['Snapshot ID'], summary['Snapshot Date'])
+        output['History'] = merge_history(output['History'], previous, args.tenant, parameters['ProjectKey'], summary['Snapshot ID'], summary['Snapshot Date'], asof.isoformat())
     write_outputs(output, Path(args.output_root))
     audit = {'Version': VERSION, 'Enabled': args.enabled, 'TenantKey': args.tenant, 'AsOfUtc': asof.isoformat(),
              'Rows': {k: len(v) for k, v in output.items()}, 'CollectionOrRefreshPerformed': False}
