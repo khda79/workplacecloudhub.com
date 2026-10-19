@@ -8,11 +8,14 @@
   receipts) and EnableSharePointUpload set to __USE_SMARTM365__ (or left empty) are resolved through the SmartM365 tenant
   context of that profile only when a script asks for them; a failed resolution stops the script with the reason and
   never falls back to a default. A resolved path that still holds a {{token}} is refused. Get-SmartFinOpsDataLayout
-  returns the SmartM365 DATA-LAST, DATA-ALL and LOG-ALL folders of the profile, which must be existing siblings.
+  returns the SmartM365 DATA-LAST, DATA-ALL and LOG-ALL folders of the profile, which must be existing siblings. Before any
+  SharePoint upload, Initialize-SmartFinOpsSmartM365Context initializes the SmartM365 context of the same profile (Graph
+  identity and SharePoint target of that profile); a SmartM365 context of another profile is refused, and SmartFinOps never
+  creates a SmartM365 runtime JSON.
 .VERSION
-1.4.0
+1.4.1
 #>
-$script:SmartFinOpsTenantContextVersion = '1.4.0'
+$script:SmartFinOpsTenantContextVersion = '1.4.1'
 $script:SmartFinOpsSmartM365Config = $null
 $script:SmartFinOpsUseSmartM365Markers = @('__USE_SMARTM365__', 'USE_SMARTM365')
 # SmartFinOps path setting -> SmartM365 key and the leaf name the resolved folder must have.
@@ -343,6 +346,22 @@ function Resolve-SmartFinOpsExternalTokenValue {
     return $resolved
 }
 
+function Assert-SmartFinOpsSmartM365Profile {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$ProfileKey)
+
+    # A SmartM365 context of another profile in this session would give its identity and SharePoint target to SmartFinOps.
+    $loaded = [string](Get-Variable -Name SmartM365ProfileKey -Scope Global -ValueOnly -ErrorAction SilentlyContinue)
+    $loadedConfig = Get-Variable -Name SmartM365GlobalConfig -Scope Global -ValueOnly -ErrorAction SilentlyContinue
+    $configProfile = ''
+    if ($null -ne $loadedConfig -and $null -ne $loadedConfig.PSObject.Properties['ProfileKey']) { $configProfile = [string]$loadedConfig.PSObject.Properties['ProfileKey'].Value }
+    foreach ($other in @($loaded, $configProfile)) {
+        if (-not [string]::IsNullOrWhiteSpace($other) -and $other.Trim() -ine $ProfileKey.Trim()) {
+            throw ("A SmartM365 context of profile '{0}' is already loaded in this session; SmartFinOps profile '{1}' refuses to use it." -f $other.Trim(), $ProfileKey)
+        }
+    }
+}
+
 function Get-SmartFinOpsSmartM365Config {
     [CmdletBinding()]
     param(
@@ -358,6 +377,13 @@ function Get-SmartFinOpsSmartM365Config {
     $prefix = "$Setting is __USE_SMARTM365__ but its resolution through SmartM365 failed for profile '$ProfileKey'"
     if (-not (Test-Path -LiteralPath $smartM365TenantContextPath -PathType Leaf)) {
         throw ("{0}: SmartM365 tenant context not found: {1}. Set {2} in the SmartFinOps configuration or pass -{2}." -f $prefix, $smartM365TenantContextPath, $Setting)
+    }
+    Assert-SmartFinOpsSmartM365Profile -ProfileKey $ProfileKey
+    # The SmartM365 context creates a missing runtime JSON from its template: SmartFinOps never lets it do so.
+    foreach ($runtimePath in @((Join-Path $smartM365RootPath 'Config\SmartM365.global.local.json'), (Join-Path $smartM365RootPath ("Config\Tenants\{0}.local.json" -f $ProfileKey)))) {
+        if (-not ((Test-Path -LiteralPath $runtimePath -PathType Leaf) -or (Test-Path -LiteralPath ($runtimePath + '.txt') -PathType Leaf))) {
+            throw ("{0}: SmartM365 runtime configuration not found: {1} (or .txt). SmartFinOps never creates SmartM365 runtime JSON; configure the SmartM365 profile first." -f $prefix, $runtimePath)
+        }
     }
     try {
         . $smartM365TenantContextPath
@@ -547,9 +573,45 @@ function Get-SmartFinOpsDataLayout {
     }
 }
 
+function Initialize-SmartFinOpsSmartM365Context {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$ProfileKey,
+        [string]$TenantKey
+    )
+
+    # Same initialization as a SmartM365 script of this profile, after the runtime-file and profile checks.
+    $repositoryRootPath = [string]$script:SmartFinOpsGlobalConfig.RepositoryRootPath
+    $null = Get-SmartFinOpsSmartM365Config -RepositoryRootPath $repositoryRootPath -ProfileKey $ProfileKey -Setting 'EnableSharePointUpload'
+    $smartM365RootPath = Join-Path -Path $repositoryRootPath -ChildPath 'SmartM365'
+    $contextPath = Join-Path -Path $smartM365RootPath -ChildPath 'Config\SmartM365-TenantContext.ps1'
+    try {
+        . $contextPath
+        # SmartFinOps already printed its own banner.
+        Set-Variable -Name SmartM365BrandBannerConsoleShown -Scope Global -Value $true
+        $effective = Initialize-SmartM365TenantContext -Tenant $ProfileKey -StartPath $smartM365RootPath
+    }
+    catch { throw ("The SmartM365 context of profile '{0}' could not be initialized: {1}" -f $ProfileKey, $_.Exception.Message) }
+    $loadedProfile = [string](Get-Variable -Name SmartM365ProfileKey -Scope Global -ValueOnly -ErrorAction SilentlyContinue)
+    if ($loadedProfile -ine $ProfileKey) { throw ("The SmartM365 context loaded profile '{0}' instead of '{1}'." -f $loadedProfile, $ProfileKey) }
+    $loadedTenantKey = [string](Get-Variable -Name SmartM365TenantKey -Scope Global -ValueOnly -ErrorAction SilentlyContinue)
+    if (-not [string]::IsNullOrWhiteSpace($TenantKey) -and $loadedTenantKey -cne $TenantKey) {
+        throw ("The SmartM365 context of profile '{0}' has TenantKey '{1}', SmartFinOps expects '{2}'." -f $ProfileKey, $loadedTenantKey, $TenantKey)
+    }
+    return $effective
+}
+
+function Test-SmartFinOpsConfiguredValue {
+    param([AllowNull()][string]$Value)
+    # Same rule as SmartM365: empty, __USE_GLOBAL__ and all-zero placeholders are not configured; tokens are not resolved values.
+    if ([string]::IsNullOrWhiteSpace($Value)) { return $false }
+    $text = $Value.Trim()
+    return -not ($text -in @('__USE_GLOBAL__', 'USE_GLOBAL') -or $text -match '\{\{' -or $text -match '^0{8}-0{4}-0{4}-0{4}-0{12}$' -or $text -match '^0{40}$')
+}
+
 function Get-SmartFinOpsSharePointConfiguration {
     [CmdletBinding()]
-    param()
+    param([string]$TenantKey)
 
     # EnableSharePointUpload: true/false, or __USE_SMARTM365__ (default) for the SmartM365 setting of the profile.
     # Site, library, target folder and app-only identity always come from the SmartM365 context of the profile.
@@ -568,17 +630,33 @@ function Get-SmartFinOpsSharePointConfiguration {
     $settings = [ordered]@{}
     $missing = [System.Collections.Generic.List[string]]::new()
     if ($enabled) {
-        if ($null -eq $smartM365Config) { $smartM365Config = Get-SmartFinOpsSmartM365Config -RepositoryRootPath ([string]$script:SmartFinOpsGlobalConfig.RepositoryRootPath) -ProfileKey ([string]$script:SmartFinOpsGlobalConfig.ProfileKey) -Setting 'EnableSharePointUpload' }
+        # Upload identity and target are those of the SmartM365 context of this profile, initialized as for a SmartM365 script.
+        $profileKey = [string]$script:SmartFinOpsGlobalConfig.ProfileKey
+        $effective = Initialize-SmartFinOpsSmartM365Context -ProfileKey $profileKey -TenantKey $TenantKey
         foreach ($key in $script:SmartFinOpsSharePointKeys) {
-            $property = $smartM365Config.PSObject.Properties[$key]
-            if ($null -eq $property -and $key -eq 'Thumb') { $property = $smartM365Config.PSObject.Properties['Thumbprint'] }
-            $resolved = if ($null -ne $property) { [string](Resolve-SmartFinOpsExternalTokenValue -Value $property.Value -Config $smartM365Config) } else { '' }
-            if ([string]::IsNullOrWhiteSpace($resolved) -or $resolved -match '\{\{' -or $resolved.Trim() -in @('__USE_GLOBAL__', 'USE_GLOBAL')) { $missing.Add($key); continue }
-            $settings[$key] = $resolved.Trim()
+            $candidates = if ($key -eq 'Thumb') { @('Thumb', 'Thumbprint') } else { @($key) }
+            $resolved = ''
+            foreach ($candidate in $candidates) {
+                $property = $effective.PSObject.Properties[$candidate]
+                $value = if ($null -ne $property) { [string](Resolve-SmartFinOpsExternalTokenValue -Value $property.Value -Config $effective) } else { '' }
+                if (Test-SmartFinOpsConfiguredValue $value) { $resolved = $value.Trim(); break }
+            }
+            if (-not $resolved) { $missing.Add($key); continue }
+            $settings[$key] = $resolved
+        }
+        if ($missing.Count -eq 0) {
+            # The SmartM365.Core SharePoint helpers read this identity from the session, like any SmartM365 script.
+            $sessionValues = [ordered]@{
+                AppId = $settings.AppId; TenantId = $settings.TenantId; Thumb = $settings.Thumb; Thumbprint = $settings.Thumb; EnableSharePointUpload = $true
+                SharePointSiteHostname = $settings.SharePointSiteHostname; SharePointSitePath = $settings.SharePointSitePath
+                SharePointLibraryDisplayName = $settings.SharePointLibraryDisplayName; SharePointTargetFolderPath = $settings.SharePointTargetFolderPath
+            }
+            foreach ($name in $sessionValues.Keys) { Set-Variable -Name $name -Scope Global -Value $sessionValues[$name] }
         }
     }
     [pscustomobject]@{
         Enabled = $enabled
+        ProfileKey = [string]$script:SmartFinOpsGlobalConfig.ProfileKey
         Missing = @($missing)
         Parameters = $(if ($enabled -and $missing.Count -eq 0) {
             @{ Enabled = $true; SiteHostname = $settings.SharePointSiteHostname; SitePath = $settings.SharePointSitePath; LibraryDisplayName = $settings.SharePointLibraryDisplayName

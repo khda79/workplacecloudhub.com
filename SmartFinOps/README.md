@@ -38,7 +38,7 @@ At load, missing keys are added from the matching template without overwriting l
 
 ## V2 valuation engine (lot V2.1)
 
-`SmartFinOps-Workplace-Valuation.ps1` 2.2.0 is the V2 engine. PowerShell 7 only, read-only on the tenant; its only API call is the optional SharePoint mirror of its outputs.
+`SmartFinOps-Workplace-Valuation.ps1` 2.2.1 is the V2 engine. PowerShell 7 only, read-only on the tenant; its only API call is the optional SharePoint mirror of its outputs.
 
 ```powershell
 .\SmartFinOps-Workplace-Valuation.ps1 -Tenant prod -ValidateOnly   # qualify sources and contracts, compute, write nothing
@@ -96,7 +96,7 @@ Tests: `Tests\SmartFinOps-Workplace-Valuation.Tests.ps1` (synthetic data, isolat
 
 ## V2 executive report (lot V2.2)
 
-`SmartFinOps-Workplace-Report.ps1` 2.3.0 turns the valuation outputs into one self-contained HTML page for management. PowerShell 7 only, read-only. It is a pure consumer: it reads only the seven `FinOps_*` CSVs and the valuation receipt, and computes no decision and no amount; it displays, sorts and groups what the engine (2.1.4 to 2.2.x) published.
+`SmartFinOps-Workplace-Report.ps1` 2.3.1 turns the valuation outputs into one self-contained HTML page for management. PowerShell 7 only, read-only. It is a pure consumer: it reads only the seven `FinOps_*` CSVs and the valuation receipt, and computes no decision and no amount; it displays, sorts and groups what the engine (2.1.4 to 2.2.x) published.
 
 ```powershell
 .\SmartFinOps-Workplace-Valuation.ps1 -Tenant prod
@@ -143,7 +143,7 @@ Launchers:
 
 ## Data location and SharePoint mirror (lot V2.4c)
 
-Since engine 2.2.0, report 2.3.0 and tenant context 1.4.0 SmartFinOps writes into the SmartM365 data tree of the profile, like the SmartInventory collectors, and never into its code folder (except the private contracts file, which records `UnmappedSkus`):
+Since engine 2.2.0, report 2.3.0 and tenant context 1.4.0 (upload context fixed in 2.2.1, 2.3.1 and 1.4.1) SmartFinOps writes into the SmartM365 data tree of the profile, like the SmartInventory collectors, and never into its code folder (except the private contracts file, which records `UnmappedSkus`):
 
 | Content | Location |
 | --- | --- |
@@ -155,7 +155,7 @@ The three roots are read from the SmartM365 context of the profile (`LatestCsvFo
 
 History retention keeps the `Valuation.ArchiveRetentionRuns` most recent runs. It only ever removes a folder directly under `DATA-ALL\FinOps\Workplace\` whose name is exactly `yyyyMMddTHHmmssfffZ-xxxxxxxx` (lowercase hexadecimal) and that holds a SmartFinOps receipt of the same TenantKey and run; never the current run, never a realization baseline, never anything in `DATA-LAST` or `LOG-ALL`. Each removal is logged with its path. Logs are not purged. A run without a measured Licences report removes nothing.
 
-With `EnableSharePointUpload` (the SmartM365 setting by default), both scripts mirror their files to the same relative paths under the SmartM365 SharePoint target folder, with the SmartM365.Core upload helper and the SmartM365 app-only identity (`Sites.Selected`):
+With `EnableSharePointUpload` (the SmartM365 setting by default), both scripts mirror their files to the same relative paths under the SmartM365 SharePoint data root (`<target>/DATA/DATA-LAST`, `DATA/DATA-ALL`, `DATA/LOG-ALL`, as for SmartM365, a legacy `.../CSV` target being read as `.../DATA`), with the SmartM365.Core upload helper and the SmartM365 app-only identity (`Sites.Selected`). Before any upload the scripts initialize the SmartM365 context of the same profile (`Initialize-SmartM365TenantContext`), which gives the SmartM365.Core helpers the Graph identity and SharePoint target of that profile, as for a SmartM365 script. A SmartM365 context of another profile already loaded in the session is refused, the context must report the same TenantKey, and SmartFinOps never creates a SmartM365 runtime JSON: a profile without its SmartM365 global and profile files stops with an explicit error.
 
 - the engine uploads the run history first, then a `Publishing` current receipt, the seven current CSVs, and the `Completed` receipt last; when a current file fails to upload, the completed receipt is withheld, so the SharePoint copy stays disqualified;
 - a failed run uploads its `Failed` receipt; the report uploads its page (current and history) and both scripts upload their log (without the completion banner, appended locally afterwards);

@@ -3,7 +3,7 @@
 .SYNOPSIS
   Offline tests of the SmartFinOps tenant context: SmartM365 DATA-LAST resolution and console banners.
 .VERSION
-1.3.0
+1.4.0
 .NOTES
   Isolated temporary runtime with a synthetic SmartM365 tenant context (no local configuration or export).
   SmartM365LatestCsvFolderPath = __USE_SMARTM365__ must never fall back silently to a default path.
@@ -44,6 +44,9 @@ $dataLast = Join-Path $root 'DATA-LAST'
 $dataAll = Join-Path $root 'DATA-ALL'
 $logAll = Join-Path $root 'LOG-ALL'
 New-Item -ItemType Directory -Path $dataLast, $dataAll, $logAll -Force | Out-Null
+# The synthetic SmartM365 contexts below stand for a configured profile: its runtime JSON files exist.
+New-Item -ItemType Directory -Path (Join-Path $runtime 'SmartM365\Config\Tenants') -Force | Out-Null
+foreach ($runtimeJson in @('SmartM365\Config\SmartM365.global.local.json.txt', "SmartM365\Config\Tenants\$tenant.local.json.txt")) { Set-Content -LiteralPath (Join-Path $runtime $runtimeJson) -Value '{}' -Encoding utf8NoBOM }
 
 function Set-SmartM365Context {
   param([string]$Body)
@@ -252,28 +255,62 @@ function Get-SmartM365EffectiveGlobalConfig {
   Check ($fallback -like 'ERROR|*' -and $fallback.Contains('SmartM365 Output fallback')) "a SmartM365 path under its Output fallback is refused ($fallback)"
   #endregion
 
-  #region 9. SharePoint upload: incomplete or failing SmartM365 settings give exit 3, never a false success
-  $contextWithUpload = {
-    param([string]$Extra)
-    Set-SmartM365Context @"
-function Get-SmartM365EffectiveGlobalConfig {
-  param([string]`$StartPath, [string]`$TenantKey)
-  [pscustomobject]@{ WorkspaceRootPath='$root'; LatestCsvFolderPath='{{WorkspaceRootPath}}\DATA-LAST'; DataAllRootPath='{{WorkspaceRootPath}}\DATA-ALL'; LogAllRootPath='{{WorkspaceRootPath}}\LOG-ALL'; ProfileKey=`$TenantKey; TenantKey='contoso-prod'; EnableSharePointUpload=`$true$Extra }
-}
-"@
+  #region 9. SharePoint upload through the real SmartM365 context of the profile (no synthetic context)
+  # Real SmartM365 tenant context, JSON transport and SmartM365.Core; profile prod only, no test profile file.
+  $real = Join-Path $root 'real'
+  $realSmartM365 = Join-Path $real 'SmartM365'
+  foreach ($file in @('SmartFinOps-Workplace-Valuation.ps1','SmartFinOps-Workplace-Report.ps1','SmartFinOps.global.local.json.template','Config\SmartFinOps-TenantContext.ps1','Config\SmartFinOps-Contracts.local.json.template')) {
+    $target = Join-Path $real "SmartFinOps\$file"
+    New-Item -ItemType Directory -Path (Split-Path $target -Parent) -Force | Out-Null
+    Copy-Item -LiteralPath (Join-Path $project $file) -Destination $target
   }
-  & $contextWithUpload ''
-  $incomplete = Invoke-Script $engine @('-ContractsPath', (Join-Path $root 'contracts-sp.local.json'))
-  $spReceipt = Get-Content -LiteralPath (Join-Path $dataLast 'SmartFinOps_Workplace-Valuation.current.json.txt') -Raw | ConvertFrom-Json
-  Check ($incomplete.ExitCode -eq 3 -and $incomplete.Log.Contains('SharePoint upload enabled but the SmartM365 configuration is incomplete (missing: SharePointSiteHostname, SharePointSitePath, SharePointLibraryDisplayName, SharePointTargetFolderPath, AppId, TenantId, Thumb)') -and $spReceipt.Status -ceq 'Completed') "upload enabled with incomplete settings: warning, exit 3, local outputs published (exit $($incomplete.ExitCode))"
-  $reportIncomplete = Invoke-Script $report @()
-  Check ($reportIncomplete.ExitCode -eq 3 -and $reportIncomplete.Log.Contains('SharePoint upload enabled but the SmartM365 configuration is incomplete') -and (Test-Path -LiteralPath (Join-Path $dataLast 'SmartFinOps_Workplace-Report.html'))) "report: incomplete upload settings give exit 3 and the local page (exit $($reportIncomplete.ExitCode))"
-  & $contextWithUpload "; SharePointSiteHostname='contoso.sharepoint.invalid'; SharePointSitePath='/sites/finops'; SharePointLibraryDisplayName='Documents'; SharePointTargetFolderPath='SMART-M365/DATA'; AppId='00000000-0000-0000-0000-000000000001'; TenantId='00000000-0000-0000-0000-000000000002'; Thumb='0000000000000000000000000000000000000000'"
-  $failing = Invoke-Script $engine @('-ContractsPath', (Join-Path $root 'contracts-sp.local.json'))
-  $failingReceipt = Get-Content -LiteralPath (Join-Path $dataLast 'SmartFinOps_Workplace-Valuation.current.json.txt') -Raw | ConvertFrom-Json
-  Check ($failing.ExitCode -eq 3 -and $failing.Log.Contains('SharePoint upload failed for') -and $failing.Log.Contains('the completed receipt is not uploaded') -and $failingReceipt.Status -ceq 'Completed') "upload failure: warnings, completed receipt withheld from SharePoint, exit 3, local outputs valid (exit $($failing.ExitCode))"
+  '{ }' | Set-Content -LiteralPath (Join-Path $real 'SmartFinOps\SmartFinOps.global.local.json') -Encoding utf8NoBOM
+  foreach ($file in @('Config\SmartM365-TenantContext.ps1','Config\SmartM365-JsonTransport.policy.psd1','Config\SmartM365.global.local.json.template','Config\Tenants\tenant.local.json.template')) {
+    $target = Join-Path $realSmartM365 $file
+    New-Item -ItemType Directory -Path (Split-Path $target -Parent) -Force | Out-Null
+    Copy-Item -LiteralPath (Join-Path $repository "SmartM365\$file") -Destination $target
+  }
+  New-Item -ItemType Directory -Path (Join-Path $realSmartM365 'Modules') -Force | Out-Null
+  Copy-Item -LiteralPath (Join-Path $repository 'SmartM365\Modules\SmartM365.Core') -Destination (Join-Path $realSmartM365 'Modules') -Recurse
+  $workplace = Join-Path $real 'WORKPLACE'
+  foreach ($folder in @('DATA-LAST','DATA-ALL','LOG-ALL')) { New-Item -ItemType Directory -Path (Join-Path $workplace "Data\Tenants\prod\$folder") -Force | Out-Null }
+  '{}' | Set-Content -LiteralPath (Join-Path $realSmartM365 'Config\SmartM365.global.local.json.txt') -Encoding utf8NoBOM
+  $prodProfile = [ordered]@{ ProfileKey='prod'; OrganizationKey='contoso'; EnvironmentKey='prod'; TenantKey='contoso-prod'; TenantId='11111111-2222-3333-4444-555555555555'
+    AppId='66666666-7777-8888-9999-000000000001'; Thumb='ABCDEF0123456789ABCDEF0123456789ABCDEF01'; WorkspaceRootPath=$workplace
+    EnableSharePointUpload=$true; SharePointSiteHostname='contoso.sharepoint.invalid'; SharePointSitePath='/sites/finops'; SharePointLibraryDisplayName='Documents'; SharePointTargetFolderPath='SMART-M365/CSV' }
+  $prodProfilePath = Join-Path $realSmartM365 'Config\Tenants\prod.local.json.txt'
+  $prodProfile | ConvertTo-Json | Set-Content -LiteralPath $prodProfilePath -Encoding utf8NoBOM
+  $runtimeJsonFiles = { @(Get-ChildItem -LiteralPath (Join-Path $realSmartM365 'Config') -Recurse -File | Where-Object { $_.Name -match '\.json(\.txt)?$' } | ForEach-Object { $_.FullName.Substring($realSmartM365.Length) } | Sort-Object) }
+  $jsonBefore = & $runtimeJsonFiles
+  $realEngine = Join-Path $real 'SmartFinOps\SmartFinOps-Workplace-Valuation.ps1'
+  $realReport = Join-Path $real 'SmartFinOps\SmartFinOps-Workplace-Report.ps1'
+  $realLast = Join-Path $workplace 'Data\Tenants\prod\DATA-LAST'
+  $upload = & $pwsh -NoProfile -ExecutionPolicy Bypass -File $realEngine -Tenant prod 2>&1 | Out-String
+  $uploadExit = $LASTEXITCODE
+  $uploadReceipt = Get-Content -LiteralPath (Join-Path $realLast 'SmartFinOps_Workplace-Valuation.current.json.txt') -Raw -ErrorAction SilentlyContinue | ConvertFrom-Json
+  Check ($uploadExit -eq 3 -and $null -ne $uploadReceipt -and $uploadReceipt.Status -ceq 'Completed' -and $uploadReceipt.TenantKey -ceq 'contoso-prod') "real SmartM365 context: paths and TenantKey of profile prod, local outputs published, exit 3 (got $uploadExit)"
+  Check ($upload.Contains("SharePoint upload enabled (SmartM365 context of profile 'prod'): contoso.sharepoint.invalid/sites/finops, library 'Documents', data root 'SMART-M365/DATA' (DATA-LAST, DATA-ALL, LOG-ALL).")) 'upload target from the prod profile, SmartM365 data root convention (SMART-M365/CSV -> SMART-M365/DATA)'
+  Check (-not $upload.Contains('Tenant profile mismatch') -and -not $upload.Contains('Graph app-only connection values are missing') -and -not $upload.Contains('Created required local configuration') -and -not $upload.Contains('Created missing global local configuration')) 'no test profile and no missing Graph identity: the SmartM365 helpers use the prod identity'
+  Check ($upload.Contains('SharePoint upload failed for') -and $upload.Contains('the completed receipt is not uploaded')) 'upload failure (synthetic identity): warnings, completed receipt withheld from SharePoint'
+  $report = & $pwsh -NoProfile -ExecutionPolicy Bypass -File $realReport -Tenant prod 2>&1 | Out-String
+  $reportExit = $LASTEXITCODE
+  Check ($reportExit -eq 3 -and (Test-Path -LiteralPath (Join-Path $realLast 'SmartFinOps_Workplace-Report.html')) -and $report.Contains("SmartM365 context of profile 'prod'") -and -not $report.Contains('Tenant profile mismatch') -and -not $report.Contains('Graph app-only connection values are missing')) "report with the real SmartM365 context: local page, upload attempted with the prod identity, exit 3 (got $reportExit)"
+  $jsonAfter = & $runtimeJsonFiles
+  Check ((($jsonBefore -join '|') -ceq ($jsonAfter -join '|')) -and -not (Test-Path -LiteralPath (Join-Path $realSmartM365 'Config\Tenants\test.local.json')) -and -not (Test-Path -LiteralPath (Join-Path $realSmartM365 'Config\Tenants\test.local.json.txt'))) "no SmartM365 runtime JSON created (before: $($jsonBefore -join ', '); after: $($jsonAfter -join ', '))"
+  $zeroIdentity = Get-Content -LiteralPath $prodProfilePath -Raw | ConvertFrom-Json
+  $zeroIdentity.AppId = '00000000-0000-0000-0000-000000000000'
+  $zeroIdentity | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $prodProfilePath -Encoding utf8NoBOM
+  $incomplete = & $pwsh -NoProfile -ExecutionPolicy Bypass -File $realEngine -Tenant prod 2>&1 | Out-String
+  Check ($LASTEXITCODE -eq 3 -and $incomplete.Contains('SharePoint upload enabled but the SmartM365 configuration is incomplete (missing: AppId)')) 'placeholder SmartM365 identity: upload skipped with a warning, exit 3'
+  $missingProfile = & $pwsh -NoProfile -ExecutionPolicy Bypass -File $realEngine -Tenant prod2 2>&1 | Out-String
+  $missingExit = $LASTEXITCODE
+  Check ($missingExit -eq 1 -and $missingProfile.Contains('SmartM365 runtime configuration not found') -and $missingProfile.Contains('never creates SmartM365 runtime JSON') -and -not (Test-Path -LiteralPath (Join-Path $realSmartM365 'Config\Tenants\prod2.local.json.txt')) -and -not (Test-Path -LiteralPath (Join-Path $realSmartM365 'Config\Tenants\prod2.local.json'))) "a profile without SmartM365 runtime JSON is refused and nothing is created (exit $missingExit)"
+  $realContext = Join-Path $real 'SmartFinOps\Config\SmartFinOps-TenantContext.ps1'
+  $otherCommand = "try { . '$realContext'; Initialize-SmartFinOpsTenantContext -Tenant 'prod' -StartPath '$(Split-Path $realContext -Parent)' | Out-Null; `$global:SmartM365ProfileKey = 'test'; Get-SmartFinOpsSharePointConfiguration -TenantKey 'contoso-prod' | Out-Null; 'OK|' } catch { 'ERROR|' + `$_.Exception.Message }"
+  $other = [string](@(& $pwsh -NoProfile -Command $otherCommand 2>&1 | ForEach-Object { [string]$_ } | Where-Object { $_ -match '^(OK|ERROR)\|' }) | Select-Object -Last 1)
+  Check ($other -like "ERROR|*A SmartM365 context of profile 'test' is already loaded*") "a SmartM365 context of another profile is refused ($other)"
   '{ "EnableSharePointUpload": "maybe" }' | Set-Content -LiteralPath (Join-Path $runtime 'SmartFinOps\SmartFinOps.global.local.json') -Encoding utf8NoBOM
-  $invalid = Invoke-Script $engine @('-ContractsPath', (Join-Path $root 'contracts-sp.local.json'))
+  $invalid = Invoke-Script $engine @('-SmartM365LatestCsvFolderPath', $dataLast, '-SmartM365DataAllRootPath', $dataAll, '-SmartM365LogAllRootPath', $logAll, '-SmartM365TenantKey', 'contoso-prod', '-ContractsPath', (Join-Path $root 'contracts-sp.local.json'))
   Check ($invalid.ExitCode -eq 1 -and $invalid.Log.Contains('EnableSharePointUpload must be true, false or __USE_SMARTM365__')) 'an invalid EnableSharePointUpload value is refused'
   '{ }' | Set-Content -LiteralPath (Join-Path $runtime 'SmartFinOps\SmartFinOps.global.local.json') -Encoding utf8NoBOM
   #endregion

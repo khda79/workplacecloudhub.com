@@ -9,7 +9,7 @@
   FinOps_Showback or FinOps_Realization. A failed or inconsistent run gives a "Report not available" page
   with the reason and no figure; it replaces the current report so that no older figure stays visible.
 .VERSION
-2.3.0
+2.3.1
 .NOTES
   Input and output: the SmartM365 DATA-LAST of the profile (SmartFinOps_Workplace-Report.html), a copy in
   DATA-ALL\FinOps\Workplace\<FinOpsRunId>\ when that run is in the history, and the log in
@@ -29,7 +29,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-$script:ScriptVersion = '2.3.0'
+$script:ScriptVersion = '2.3.1'
 $script:LogLines = [System.Collections.Generic.List[string]]::new()
 $script:Invariant = [Globalization.CultureInfo]::InvariantCulture
 $script:ReceiptName = 'SmartFinOps_Workplace-Valuation.current.json.txt'
@@ -771,12 +771,12 @@ try {
   Write-ReportLog "Inputs and page: $root"
   Write-ReportLog "Log: $logPath"
   if (-not $ValidateOnly) {
-    $sharePoint = Get-SmartFinOpsSharePointConfiguration
+    $sharePoint = Get-SmartFinOpsSharePointConfiguration -TenantKey $tenantKey
     if (-not $sharePoint.Enabled) { Write-ReportLog 'SharePoint upload disabled.'; $sharePoint = $null }
     elseif ($sharePoint.Missing.Count) { Write-ReportLog ("SharePoint upload enabled but the SmartM365 configuration is incomplete (missing: {0}); no file is uploaded." -f ($sharePoint.Missing -join ', ')) 'WARNING'; $sharePoint = $null }
     else {
       Import-Module (Join-Path (Split-Path -Path $PSScriptRoot -Parent) 'SmartM365\Modules\SmartM365.Core\SmartM365.Core.psd1') -MinimumVersion '1.0.90' -ErrorAction Stop | Out-Null
-      Write-ReportLog ("SharePoint upload enabled: {0}{1}, library '{2}', folder '{3}'." -f $sharePoint.Parameters.SiteHostname, $sharePoint.Parameters.SitePath, $sharePoint.Parameters.LibraryDisplayName, $sharePoint.Parameters.TargetFolderPath)
+      Write-ReportLog ("SharePoint upload enabled (SmartM365 context of profile '{0}'): {1}{2}, library '{3}', data root '{4}' (DATA-LAST, DATA-ALL, LOG-ALL)." -f $sharePoint.ProfileKey, $sharePoint.Parameters.SiteHostname, $sharePoint.Parameters.SitePath, $sharePoint.Parameters.LibraryDisplayName, (SmartM365.Core\ConvertTo-SmartM365SharePointDataRootPath -TargetFolderPath $sharePoint.Parameters.TargetFolderPath))
     }
   }
 

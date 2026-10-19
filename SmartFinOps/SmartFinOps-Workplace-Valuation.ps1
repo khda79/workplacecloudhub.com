@@ -9,7 +9,7 @@
   FinOps_* CSVs with their own receipt.
   Unqualified input is reported as Not measured, never as zero or as an older value.
 .VERSION
-2.2.0
+2.2.1
 .NOTES
   -Tenant is the profile key; source receipts and rows are compared with the organization TenantKey (SmartM365TenantKey,
   or -SmartM365TenantKey). Folders: the SmartM365 DATA-LAST, DATA-ALL and LOG-ALL of the profile.
@@ -32,7 +32,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-$script:ScriptVersion = '2.2.0'
+$script:ScriptVersion = '2.2.1'
 $script:LogLines = [System.Collections.Generic.List[string]]::new()
 $script:Invariant = [Globalization.CultureInfo]::InvariantCulture
 
@@ -1151,10 +1151,10 @@ try {
   $currentRoot = $dataLast
   $archiveRoot = $layout.HistoryRoot
   if (-not $ValidateOnly) {
-    $sharePoint = Get-SmartFinOpsSharePointConfiguration
+    $sharePoint = Get-SmartFinOpsSharePointConfiguration -TenantKey $tenantKey
     if (-not $sharePoint.Enabled) { Write-FinOpsLog 'SharePoint upload disabled.'; $sharePoint = $null }
     elseif ($sharePoint.Missing.Count) { Write-FinOpsLog ("SharePoint upload enabled but the SmartM365 configuration is incomplete (missing: {0}); no file is uploaded." -f ($sharePoint.Missing -join ', ')) 'WARNING'; $sharePoint = $null }
-    else { Write-FinOpsLog ("SharePoint upload enabled: {0}{1}, library '{2}', folder '{3}'." -f $sharePoint.Parameters.SiteHostname, $sharePoint.Parameters.SitePath, $sharePoint.Parameters.LibraryDisplayName, $sharePoint.Parameters.TargetFolderPath) }
+    else { Write-FinOpsLog ("SharePoint upload enabled (SmartM365 context of profile '{0}'): {1}{2}, library '{3}', data root '{4}' (DATA-LAST, DATA-ALL, LOG-ALL)." -f $sharePoint.ProfileKey, $sharePoint.Parameters.SiteHostname, $sharePoint.Parameters.SitePath, $sharePoint.Parameters.LibraryDisplayName, (SmartM365.Core\ConvertTo-SmartM365SharePointDataRootPath -TargetFolderPath $sharePoint.Parameters.TargetFolderPath)) }
   }
   $valuation = Get-SmartFinOpsConfigValue -Name 'Valuation'
   $dailyHours = [int]$(if ($null -ne (Get-FinOpsProperty $valuation 'FreshnessDailyHours')) { Get-FinOpsProperty $valuation 'FreshnessDailyHours' } else { 48 })
