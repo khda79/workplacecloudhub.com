@@ -31,7 +31,7 @@ try {
         Check ($result.Rows -eq 1 -and $result.HasTenantKey) "Valid source rejected: $path"
     }
     $plan = @($server, $comma, $daily | ForEach-Object {
-        [pscustomobject]@{ Relative = 'DATA-LAST/' + [IO.Path]::GetFileName($_); SourcePath = $_ }
+        [pscustomobject]@{ Relative = 'DATA-LAST/' + [IO.Path]::GetFileName($_); SourcePath = $_; Kind = 'Current' }
     })
     $result = & $module { param($p) Test-PreparedSourceTenants -Plan $p -TenantKey 'synthetic-test' } $plan
     Check ($result.CsvFiles -eq 3 -and $result.Rows -eq 3) 'Mixed source preflight failed'

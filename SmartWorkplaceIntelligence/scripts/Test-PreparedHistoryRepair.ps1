@@ -57,7 +57,8 @@ try {
     [IO.File]::WriteAllText($empty,"`"Value`",`"Note`"`r`n",[Text.Encoding]::Unicode)
     $result=Invoke-PreparedHistoryTenantRepair @repair -Apply
     Check ($result.Applied -and $result.Files -eq 2 -and $result.Status -eq 'Completed') 'Repair result failed'
-    $audit=Get-Content (Join-Path $result.BackupPath 'repair.json') -Raw | ConvertFrom-Json
+    Check (-not (Test-Path -LiteralPath (Join-Path $result.BackupPath 'repair.json'))) 'Legacy audit name written'
+    $audit=(Read-SmartM365JsonDocument (Join-Path $result.BackupPath 'repair.json')).Document
     Check ($audit.Status -eq 'Completed' -and @($audit.Files | Where-Object Status -ne 'Repaired').Count -eq 0) 'Audit incomplete'
     $backup=Join-Path $result.BackupPath 'originals/DATA-ALL/Example/WeeklyHistory/2026-W28/Example.csv'
     Check ((Get-FileHash $backup).Hash -eq $originalHash) 'Original-byte backup missing'

@@ -58,7 +58,7 @@ function Resolve-PreparedTransferContract {
     $dailySupplied=@($contract.tables | Where-Object file -in $dailyFiles)
     if($dailyPresent.Count -eq 0){
         $dailyDeclared=$Manifest.PSObject.Properties['HistoryKeyVersions'] -and
-            @($Manifest.HistoryKeyVersions.PSObject.Properties.Name | Where-Object {$_ -in $dailyTables}).Count -gt 0
+            @($dailyTables | Where-Object {$Manifest.HistoryKeyVersions.PSObject.Properties[$_]}).Count -gt 0
         if($dailyDeclared){throw 'Incomplete daily trends file set; transfer not started.'}
         if($dailySupplied.Count){
             if($dailySupplied.Count -ne 2){throw 'Incomplete supplied daily trends contract; transfer not started.'}

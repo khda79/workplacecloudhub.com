@@ -26,12 +26,12 @@ exit $RequestedExit
         Check ($result.Samples -ge 2) 'External memory samples missing'
         Check ($result.LastStage -eq 'Synthetic allocation') 'Last stage lost'
         Check ($result.SampledPeakPrivateBytes -gt 0 -and -not $result.Publication) 'Process memory or no-publication flag incorrect'
-        Check (Test-Path (Join-Path $run 'result.json')) 'Result missing after worker exit'
+        Check ((Read-SmartM365JsonDocument (Join-Path $run 'result.json')).Document.ExitCode -eq $exitCode) 'Result missing after worker exit'
         Check ((Get-Content (Join-Path $run 'worker.stdout.log') -Raw) -match 'synthetic stdout') 'stdout capture failed'
         Check ((Get-Content (Join-Path $run 'worker.stderr.log') -Raw) -match 'synthetic stderr') 'stderr capture failed'
         $samples=@(Import-Csv (Join-Path $run 'memory.csv'))
         Check ($samples[-1].Exited -eq 'True') 'Terminal sample missing'
-        $environment=Get-Content (Join-Path $run 'environment.json') -Raw | ConvertFrom-Json
+        $environment=(Read-SmartM365JsonDocument (Join-Path $run 'environment.json')).Document
         Check ($environment.Is64BitProcess -and $environment.SampleIntervalSeconds -eq 5) 'Wrong measurement runtime or frequency'
     }
     # Load only the instrumentation helper via AST, never the business script.
@@ -41,6 +41,8 @@ exit $RequestedExit
     Check ($errors.Count -eq 0) 'Workforce syntax failed'
     $node=$ast.Find({param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Write-WorkforceDiagnostic'},$true)
     . ([scriptblock]::Create($node.Extent.Text))
+    $script:workforcePreviousStage=''
+    $script:workforceStageClock=[Diagnostics.Stopwatch]::StartNew()
     $DiagnosticStagePath=$null
     Check (@(Write-WorkforceDiagnostic 'Disabled').Count -eq 0) 'Disabled instrumentation emitted pipeline data'
     $DiagnosticStagePath=Join-Path $root 'stages-test.ndjson'
