@@ -4,7 +4,7 @@
 Synthetic maintenance mail admission and transition tests. Production entrypoints,
 authentication and mail transports are never executed. Run in PS7 and PS5.1.
 .VERSION
-1.0.0
+1.0.1
 #>
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidGlobalVars','',Justification='Tests emulate the existing Core global runtime context and restore it afterwards.')]
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter','',Justification='Transport and branding mock signatures match production helpers without performing external actions.')]
@@ -56,6 +56,7 @@ try {
             function script:Get-ModuleLocalConfig {$script:Caller}
             function script:Get-ModuleLocalConfigValue {param($Config,$Name,$DefaultValue) if($Config.PSObject.Properties[$Name]){$Config.$Name}else{$DefaultValue}}
             function script:WriteLog {param($Message,$Level)}
+            function script:Test-SmartM365InterruptedRun {$false}
             function script:Format-SmartM365MailSubject {param($Subject) $Subject}
             function script:Convert-SmartM365MailBodyLocalPathsToSharePointLinks {param($BodyHtml) $BodyHtml}
             function script:ConvertTo-SmartM365EmailBody {param($BodyHtml,$Subject,$Category) $BodyHtml}

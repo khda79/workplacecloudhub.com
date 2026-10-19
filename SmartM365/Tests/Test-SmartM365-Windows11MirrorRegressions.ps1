@@ -1,4 +1,10 @@
 ﻿#requires -Version 7.0
+<#
+.SYNOPSIS
+Offline regression tests for Windows 11 readiness issues and the orchestrator SharePoint mirror.
+.VERSION
+1.0.1
+#>
 $ErrorActionPreference='Stop'
 $root=Join-Path ([IO.Path]::GetTempPath()) ('SmartM365-W11Mirror-'+[guid]::NewGuid().ToString('N'))
 $null=New-Item -ItemType Directory $root
@@ -29,6 +35,7 @@ Import-Module (Join-Path $PSScriptRoot '../Modules/SmartM365.Core/SmartM365.Json
 $orch=Join-Path $PSScriptRoot '../SmartInventory/Orchestrator/SmartM365-Inventory-Orchestrator.ps1'
 . ([scriptblock]::Create((LoadFunctions $orch @('Get-OrchestratorSharePointMirrorRelativePath','Test-OrchestratorSharePointMirrorFile','Get-OrchestratorSharePointMirrorSnapshot')) -join "`n"))
 function Write-OrchestratorLog {param($Message,$Level)}
+function Update-OrchestratorHeartbeatDuringLongOperation {}
 $shared=Join-Path $root 'DATA-ALL/Orchestrator';$null=New-Item -ItemType Directory (Join-Path $shared 'Election/Concurrency'),(Join-Path $shared 'Config') -Force
 $lease=Join-Path $shared 'Election/Concurrency/Test.json.txt';$config=Join-Path $shared 'Config/Settings.json.txt'
 [IO.File]::WriteAllText($lease,'{}');[IO.File]::WriteAllText($config,'{}')

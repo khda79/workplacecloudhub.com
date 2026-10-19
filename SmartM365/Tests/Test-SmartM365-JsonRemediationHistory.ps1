@@ -1,4 +1,10 @@
 #requires -Version 7.0
+<#
+.SYNOPSIS
+Offline JSON transport tests for remediation history files.
+.VERSION
+1.0.1
+#>
 [CmdletBinding()]
 param()
 $ErrorActionPreference='Stop'
@@ -29,7 +35,7 @@ try {
     $docs[(Join-Path $folder 'Assignments.json')]='[]'
     $hashes=@{}
     foreach($path in $docs.Keys){[IO.File]::WriteAllText($path,$docs[$path],[Text.UTF8Encoding]::new($true));$hashes[$path]=(Get-FileHash $path).Hash}
-    & $transport { function script:Get-SmartM365JsonTransportPolicy { @{Mode='JsonText';QualifiedUncRoots=@()} } }
+    & $transport { function script:Get-SmartM365JsonTransportPolicy { @{Mode='JsonText';QualifiedUncRoots=@();QualifiedLocalDataRoots=@()} } }
     Convert-OwnedRemediationExportHistory $root fixture | Out-Null
     foreach($path in $docs.Keys){Check ((Get-FileHash "$path.txt").Hash -eq $hashes[$path] -and !(Test-Path $path)) 'Historical remediation bytes changed.'}
     Check ($script:JsonUnqualifiedExportFolders -contains $incomplete) 'Unproven incomplete export was not protected from retention.'

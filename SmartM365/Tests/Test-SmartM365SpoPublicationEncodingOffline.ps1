@@ -3,7 +3,7 @@
 .SYNOPSIS
 Offline byte-level tests for SPO publication and CMDB receipt encoding.
 .VERSION
-1.0.2
+1.0.3
 .NOTES
 Loads AST functions only. Never imports Core, reads tenant configuration,
 executes a collector, connects to Graph, or uploads to SharePoint.
@@ -32,7 +32,7 @@ $definitions = @(
     Read-TestFunctions (Join-Path $root 'Modules/SmartM365.Core/SmartM365.Core.psm1') @(
         'Write-SmartM365CsvAtomically', 'Write-SmartM365PreparedCsvAtomically', 'Publish-SmartM365Csv', 'Export-SmartM365Csv')
     Read-TestFunctions (Join-Path $root 'SmartInventory/M365Inventory/SharePoint/SmartM365-SPO-Inventory.ps1') @('Export-SpoEntityCsv')
-    Read-TestFunctions (Join-Path $root 'Modules/SmartM365.Core/SmartM365-CmdbReceipt.ps1') @('Get-SmartM365CmdbCsvReceipt','Register-SmartM365SourceCsv')
+    Read-TestFunctions (Join-Path $root 'Modules/SmartM365.Core/SmartM365-CmdbReceipt.ps1') @('Get-SmartM365CmdbCsvReceipt','Register-SmartM365SourceCsv','Start-SmartM365SourcePublication')
 )
 $module = New-Module -Name SyntheticSpoEncoding -ScriptBlock {
     param($Definitions)

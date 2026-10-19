@@ -1,4 +1,10 @@
 #requires -Version 7.0
+<#
+.SYNOPSIS
+Offline JSON transport tests for the Active Directory weekly history.
+.VERSION
+1.0.1
+#>
 [CmdletBinding()]
 param()
 $ErrorActionPreference='Stop'
@@ -26,11 +32,11 @@ function Check([bool]$Value,[string]$Message){if(!$Value){throw $Message};$scrip
 function Reject([scriptblock]$Action,[string]$Message){$failed=$false;try{& $Action|Out-Null}catch{$failed=$true};Check $failed $Message}
 try {
     $global:EnableSharePointUpload=$false
-    & $transport { function script:Get-SmartM365JsonTransportPolicy { @{Mode='Readers';QualifiedUncRoots=@()} } }
+    & $transport { function script:Get-SmartM365JsonTransportPolicy { @{Mode='Readers';QualifiedUncRoots=@();QualifiedLocalDataRoots=@()} } }
     Save-WeeklyInventoryHistory -SourceFiles $source -RequiredSourceFiles $source -HistoryRootPath $history -RetentionWeeks 0
     $legacy=(Get-ChildItem $history -Recurse -Filter manifest.json -File).FullName
     $hash=(Get-FileHash $legacy).Hash
-    & $transport { function script:Get-SmartM365JsonTransportPolicy { @{Mode='JsonText';QualifiedUncRoots=@()} } }
+    & $transport { function script:Get-SmartM365JsonTransportPolicy { @{Mode='JsonText';QualifiedUncRoots=@();QualifiedLocalDataRoots=@()} } }
     Save-WeeklyInventoryHistory -SourceFiles $source -RequiredSourceFiles $source -HistoryRootPath $history -RetentionWeeks 0
     Check ((Get-FileHash "$legacy.txt").Hash -eq $hash) 'AD conversion changed historical bytes.'
     Check (!(Test-Path $legacy)) 'AD conversion left legacy file.'

@@ -1,4 +1,10 @@
 #requires -Version 7.0
+<#
+.SYNOPSIS
+Offline tests for preferred JSON configuration readers in SmartInventory collectors.
+.VERSION
+1.0.1
+#>
 [CmdletBinding()]
 param()
 $ErrorActionPreference = 'Stop'
@@ -40,7 +46,8 @@ foreach ($file in Get-ChildItem -LiteralPath $inventory -Recurse -File -Filter '
     [IO.File]::WriteAllText($template,'{"JsonReaderProbe":"created"}',[Text.UTF8Encoding]::new($true))
     $created=& $syntheticScript
     if($created.JsonReaderProbe -ne 'created'){throw "Configuration creation failed: $($file.Name)"}
-    if((Get-FileHash $path).Hash -ne (Get-FileHash $template).Hash){throw "Configuration template bytes changed: $($file.Name)"}
+    if(Test-Path -LiteralPath $path){throw "Legacy configuration name created: $($file.Name)"}
+    if((Get-FileHash ($path+'.txt')).Hash -ne (Get-FileHash $template).Hash){throw "Configuration template bytes changed: $($file.Name)"}
     $passed++
 }
 [pscustomobject]@{Passed=$passed;FixtureRoot=$fixtureRoot;Evidence='Extracted configuration functions only; no collector execution'}

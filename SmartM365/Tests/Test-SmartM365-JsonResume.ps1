@@ -1,3 +1,9 @@
+<#
+.SYNOPSIS
+Offline JSON transport tests for collector resume state.
+.VERSION
+1.0.1
+#>
 [CmdletBinding()]
 param()
 $ErrorActionPreference='Stop'
@@ -23,10 +29,10 @@ $script:passed=0
 function Check([bool]$Value,[string]$Message){if(!$Value){throw $Message};$script:passed++}
 function Reject([scriptblock]$Action,[string]$Message){$failed=$false;try{& $Action|Out-Null}catch{$failed=$true};Check $failed $Message}
 try {
-    & $transport { function script:Get-SmartM365JsonTransportPolicy { @{Mode='Readers';QualifiedUncRoots=@()} } }
+    & $transport { function script:Get-SmartM365JsonTransportPolicy { @{Mode='Readers';QualifiedUncRoots=@();QualifiedLocalDataRoots=@()} } }
     Save-DiscoveredAppsResumeState -Path $path -PartialPath $partial -TimestampedPath $timestamped -Mode All -TargetCount 2 -ResumeContractVersion 3 -TargetAppIdsHash synthetic -ProcessedAppIds app1 -ProcessedCount 1 -SkippedCount 0 -DetailRows 1 -ActualDeviceCounts @{app1=1}
     $hash=(Get-FileHash $path).Hash;$partialHash=(Get-FileHash $partial).Hash
-    & $transport { function script:Get-SmartM365JsonTransportPolicy { @{Mode='JsonText';QualifiedUncRoots=@()} } }
+    & $transport { function script:Get-SmartM365JsonTransportPolicy { @{Mode='JsonText';QualifiedUncRoots=@();QualifiedLocalDataRoots=@()} } }
     $state=Get-DiscoveredAppsResumeState $path
     Check ((Get-FileHash "$path.txt").Hash -eq $hash -and !(Test-Path $path)) 'Checkpoint migration changed bytes.'
     Check ($state.ProcessedCount -eq 1 -and $state.ProcessedAppIds[0] -eq 'app1') 'Checkpoint migration lost IDs or counts.'

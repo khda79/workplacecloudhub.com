@@ -3,7 +3,7 @@
 Verifies that unchanged weekly manifests are not uploaded again.
 
 .VERSION
-1.0
+1.1
 #>
 [CmdletBinding()]
 param()
@@ -20,6 +20,7 @@ $csv = Join-Path $root 'Inventory.csv'
 $script:passed = 0
 function Check([bool]$Value,[string]$Message) { if (-not $Value) { throw $Message }; $script:passed++ }
 function WriteLog { param($Message,$Level) }
+function Test-SmartM365InterruptedRun { $false }
 function Connect-SmartM365GraphForSharePointUpload { param($AppId,$TenantId,$Thumbprint) $true }
 function Get-SmartM365JsonTransportPolicy { @{Mode='JsonText'} }
 function Read-SmartM365JsonDocument { param($Path) [pscustomobject]@{Path=$Path} }

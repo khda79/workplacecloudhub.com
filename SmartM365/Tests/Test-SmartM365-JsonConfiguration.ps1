@@ -3,7 +3,7 @@
 .SYNOPSIS
 Offline JSON configuration creation, enrichment and transport regression tests.
 .VERSION
-1.0.0
+1.0.1
 .NOTES
 Only synthetic TEMP files and the public CMDB template are read. No tenant
 configuration, collector, authentication, mail or upload is executed.
@@ -20,7 +20,7 @@ $script:passed = 0
 function Check([bool]$Value,[string]$Message) { if (-not $Value) { throw $Message }; $script:passed++ }
 function Reject([scriptblock]$Action,[string]$Message) { $failed=$false;try { & $Action | Out-Null } catch { $failed=$true };Check $failed $Message }
 try {
-    & $module { function script:Get-SmartM365JsonTransportPolicy { @{ Mode='Readers'; QualifiedUncRoots=@() } } }
+    & $module { function script:Get-SmartM365JsonTransportPolicy { @{ Mode='Readers'; QualifiedUncRoots=@();QualifiedLocalDataRoots=@()} } }
     $path = Join-Path $root 'owner.local.json'
     [IO.File]::WriteAllText($path, '{ "Setting": 42 }', [Text.UTF8Encoding]::new($true))
     $hash = (Get-FileHash $path).Hash
@@ -33,7 +33,7 @@ try {
     [IO.File]::WriteAllText("$path.txt", '{')
     Reject { Read-SmartM365JsonConfig $path -Required } 'Invalid preferred config silently fell back.'
     [IO.File]::Delete("$path.txt")
-    & $module { function script:Get-SmartM365JsonTransportPolicy { @{ Mode='JsonText'; QualifiedUncRoots=@() } } }
+    & $module { function script:Get-SmartM365JsonTransportPolicy { @{ Mode='JsonText'; QualifiedUncRoots=@();QualifiedLocalDataRoots=@()} } }
     Check ((Read-SmartM365JsonConfig $path -Required).Setting -eq 42) 'Active config migration failed.'
     Check ((Get-FileHash "$path.txt").Hash -eq $hash -and -not (Test-Path $path)) 'Config migration modified bytes.'
     $newPath = Join-Path $root 'new.local.json'

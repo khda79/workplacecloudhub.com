@@ -1,4 +1,10 @@
-﻿[CmdletBinding()]
+﻿<#
+.SYNOPSIS
+Offline tests for weekly history label compatibility.
+.VERSION
+1.0.1
+#>
+[CmdletBinding()]
 param()
 $ErrorActionPreference='Stop'
 Import-Module (Join-Path $PSScriptRoot '../Modules/SmartM365.Core/SmartM365.JsonTransport.psd1') -Force
@@ -32,7 +38,7 @@ function Fixture($Name,$Relative,$Label) {
     @{Root=$history;Legacy=$legacy;Document=$doc;Hash=(Get-FileHash $legacy).Hash;Csv=$csv;CsvHash=(Get-FileHash $csv).Hash}
 }
 try {
-    & $transport {function script:Get-SmartM365JsonTransportPolicy {@{Mode='JsonText';QualifiedUncRoots=@()}}}
+    & $transport {function script:Get-SmartM365JsonTransportPolicy {@{Mode='JsonText';QualifiedUncRoots=@();QualifiedLocalDataRoots=@()}}}
     # Start with the production failure: a named historical manifest read by the generic CSV helper.
     foreach($family in $families) {
         foreach($stored in @($family.Labels)+@('SmartM365 inventory')) {

@@ -3,7 +3,7 @@
 Offline tests of the weekly history JSON transition and changed-only SharePoint publication.
 
 .VERSION
-1.1
+1.2
 #>
 [CmdletBinding()]
 param()
@@ -45,11 +45,11 @@ try {
         $oldLegacy = Join-Path $oldWeek 'manifest.json'
         $hash = (Get-FileHash $legacy).Hash
         $oldHash = (Get-FileHash $oldLegacy).Hash
-        & $transport { function script:Get-SmartM365JsonTransportPolicy { @{Mode='Readers';QualifiedUncRoots=@()} } }
+        & $transport { function script:Get-SmartM365JsonTransportPolicy { @{Mode='Readers';QualifiedUncRoots=@();QualifiedLocalDataRoots=@()} } }
         $script:uploads=@()
         Save-SmartM365WeeklyInventoryHistory -SourceFiles $source -HistoryRootPath $history -HistoryLabel Synthetic -RetentionWeeks 0
         Check ((Get-FileHash $legacy).Hash -eq $hash) 'Reader rollout rewrote an unchanged historical manifest.'
-        & $transport { function script:Get-SmartM365JsonTransportPolicy { @{Mode='JsonText';QualifiedUncRoots=@()} } }
+        & $transport { function script:Get-SmartM365JsonTransportPolicy { @{Mode='JsonText';QualifiedUncRoots=@();QualifiedLocalDataRoots=@()} } }
         $script:uploads=@()
         Save-SmartM365WeeklyInventoryHistory -SourceFiles $source -HistoryRootPath $history -HistoryLabel Synthetic -RetentionWeeks 0 -UploadChangedFilesOnly
         Check ((Get-FileHash "$legacy.txt").Hash -eq $hash -and -not (Test-Path $legacy)) 'Current manifest bytes changed during migration.'

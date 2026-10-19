@@ -1,4 +1,10 @@
 #requires -Version 7.0
+<#
+.SYNOPSIS
+Offline JSON transport tests for distributed orchestrator state.
+.VERSION
+1.0.1
+#>
 [CmdletBinding()]
 param()
 $ErrorActionPreference='Stop'
@@ -14,13 +20,13 @@ $script:passed=0
 function Check([bool]$Value,[string]$Message){if(!$Value){throw $Message};$script:passed++}
 function Reject([scriptblock]$Action,[string]$Message){$failed=$false;try{& $Action|Out-Null}catch{$failed=$true};Check $failed $Message}
 try {
-    & $transport { function script:Get-SmartM365JsonTransportPolicy { @{Mode='Readers';QualifiedUncRoots=@()} } }
+    & $transport { function script:Get-SmartM365JsonTransportPolicy { @{Mode='Readers';QualifiedUncRoots=@();QualifiedLocalDataRoots=@()} } }
     $occurrence=[datetime]::UtcNow
     $claim=Enter-SmartM365OrchestratorOccurrenceClaim -ClaimsRootPath $claims -JobName Fixture -Occurrence $occurrence -OwnerServer SYNTHETIC-A -PlanId synthetic
     $lease=Enter-SmartM365OrchestratorConcurrencyLease -LeasesRootPath $leases -ConcurrencyKey fixture -JobName Fixture -Occurrence $occurrence -OwnerServer SYNTHETIC-A
     $claimHash=(Get-FileHash $claim.ClaimPath).Hash;$leaseHash=(Get-FileHash $lease.LeasePath).Hash
-    & $transport { function script:Get-SmartM365JsonTransportPolicy { @{Mode='JsonText';QualifiedUncRoots=@()} } }
-    & $distributed { function script:Get-SmartM365JsonTransportPolicy { @{Mode='JsonText';QualifiedUncRoots=@()} } }
+    & $transport { function script:Get-SmartM365JsonTransportPolicy { @{Mode='JsonText';QualifiedUncRoots=@();QualifiedLocalDataRoots=@()} } }
+    & $distributed { function script:Get-SmartM365JsonTransportPolicy { @{Mode='JsonText';QualifiedUncRoots=@();QualifiedLocalDataRoots=@()} } }
     Convert-SmartM365OrchestratorDistributedHistory -ClaimsRootPath $claims -LeasesRootPath $leases
     $readClaim=Get-SmartM365OrchestratorOccurrenceClaim -ClaimsRootPath $claims -JobName Fixture -Occurrence $occurrence
     $readLease=Get-SmartM365OrchestratorConcurrencyLease -LeasesRootPath $leases -ConcurrencyKey fixture
@@ -106,7 +112,7 @@ try {
                 param($moduleFile,$claimRoot,$when,$server)
                 $ErrorActionPreference='Stop'
                 Import-Module $moduleFile -Force
-                & (Get-Module SmartM365.JsonTransport) { function script:Get-SmartM365JsonTransportPolicy { @{Mode='JsonText';QualifiedUncRoots=@()} } }
+                & (Get-Module SmartM365.JsonTransport) { function script:Get-SmartM365JsonTransportPolicy { @{Mode='JsonText';QualifiedUncRoots=@();QualifiedLocalDataRoots=@()} } }
                 Enter-SmartM365OrchestratorOccurrenceClaim -ClaimsRootPath $claimRoot -JobName Concurrent -Occurrence $when -OwnerServer $server -PlanId synthetic
             } -ArgumentList $modulePath,$contended,$occurrence,$owner
         }

@@ -1,4 +1,10 @@
 #requires -Version 7.0
+<#
+.SYNOPSIS
+Offline JSON transport tests for orchestrator pipeline requests.
+.VERSION
+1.0.1
+#>
 [CmdletBinding()]
 param()
 $ErrorActionPreference='Stop'
@@ -12,12 +18,12 @@ function Check([bool]$Value,[string]$Message){if(!$Value){throw $Message};$scrip
 function Reject([scriptblock]$Action,[string]$Message){$failed=$false;try{& $Action|Out-Null}catch{$failed=$true};Check $failed $Message}
 try {
     $selection=[pscustomobject]@{SelectedJobs=@([pscustomobject]@{Name='Fixture';Group='Intune';Enabled=$true;AssignmentMode='Elected';DependsOn=@();RequiredCapabilities=@('SharedRuntime')})}
-    & $transport { function script:Get-SmartM365JsonTransportPolicy { @{Mode='Readers';QualifiedUncRoots=@()} } }
+    & $transport { function script:Get-SmartM365JsonTransportPolicy { @{Mode='Readers';QualifiedUncRoots=@();QualifiedLocalDataRoots=@()} } }
     $request=New-SmartM365OrchestratorPipelineRequest -SharedDataFolderPath $root -Tenant fixture -Pipeline Intune -Selection $selection -ManifestHash ABC -RequestedBy synthetic -RequestedFrom synthetic
     $legacyRequest=$request.RequestPath
     $legacyJob=Get-SmartM365OrchestratorPipelineJobStatusPath -SharedDataFolderPath $root -BatchId $request.BatchId -JobName Fixture
     $requestHash=(Get-FileHash $legacyRequest).Hash;$jobHash=(Get-FileHash $legacyJob).Hash
-    & $transport { function script:Get-SmartM365JsonTransportPolicy { @{Mode='JsonText';QualifiedUncRoots=@()} } }
+    & $transport { function script:Get-SmartM365JsonTransportPolicy { @{Mode='JsonText';QualifiedUncRoots=@();QualifiedLocalDataRoots=@()} } }
     $status=Get-SmartM365OrchestratorPipelineRunStatus -SharedDataFolderPath $root -BatchId $request.BatchId
     Check ($status.BatchId -eq $request.BatchId -and $status.PendingCount -eq 1) 'Pipeline migration changed batch or status.'
     Check ((Get-FileHash "$legacyRequest.txt").Hash -eq $requestHash -and !(Test-Path $legacyRequest)) 'Request migration changed bytes.'

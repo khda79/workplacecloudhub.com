@@ -2,7 +2,7 @@
 .SYNOPSIS
 Offline tests for the seven-day detailed archive retention policy.
 .VERSION
-1.1.0
+1.1.1
 #>
 #requires -Version 7.0
 [CmdletBinding()]
@@ -127,21 +127,21 @@ $sharedModuleCases = @(
         Name = 'SmartM365.Core'
         Path = Join-Path $smartM365Root 'Modules\SmartM365.Core\SmartM365.Core.psm1'
         ManifestPath = Join-Path $smartM365Root 'Modules\SmartM365.Core\SmartM365.Core.psd1'
-        ExpectedVersion = '1.0.88'
+        MinimumVersion = '1.0.88'
         ExplicitExport = $false
     },
     [pscustomobject]@{
         Name = 'SmartM365 Windows PowerShell 5 compatibility module'
         Path = Join-Path $smartM365Root 'Modules\SmartM365.Core\Compatibility\WindowsPowerShell5\SmartM365-WindowsPowerShell5.psm1'
         ManifestPath = Join-Path $smartM365Root 'Modules\SmartM365.Core\Compatibility\WindowsPowerShell5\SmartM365-WindowsPowerShell5.psd1'
-        ExpectedVersion = '1.0.58'
+        MinimumVersion = '1.0.58'
         ExplicitExport = $true
     }
 )
 
 foreach ($moduleCase in $sharedModuleCases) {
     $manifest = Import-PowerShellDataFile -LiteralPath $moduleCase.ManifestPath
-    Assert-True ([string]$manifest.ModuleVersion -eq $moduleCase.ExpectedVersion) "$($moduleCase.Name) version"
+    Assert-True ([version]$manifest.ModuleVersion -ge [version]$moduleCase.MinimumVersion) "$($moduleCase.Name) version"
     if ($moduleCase.ExplicitExport) {
         Assert-True ($manifest.FunctionsToExport -contains 'Remove-SmartM365TimestampedFilesOlderThan') "$($moduleCase.Name) exports the timestamp retention helper"
         Assert-True ($manifest.FunctionsToExport -contains 'Remove-SmartM365TimestampedDirectoriesOlderThan') "$($moduleCase.Name) exports the timestamp directory retention helper"

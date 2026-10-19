@@ -1,4 +1,10 @@
-﻿[CmdletBinding()]
+﻿<#
+.SYNOPSIS
+Offline regression tests for weekly history, issue history, Autopatch and mailbox finalization.
+.VERSION
+1.0.1
+#>
+[CmdletBinding()]
 param([ValidateSet('History','Issue','Autopatch','Mailbox','All')][string]$Case='All')
 $ErrorActionPreference='Stop'
 Import-Module (Join-Path $PSScriptRoot '../Modules/SmartM365.Core/SmartM365.JsonTransport.psd1') -Force
@@ -18,7 +24,7 @@ function Definition($Path,$Name) {
     $node.Extent.Text
 }
 try {
-    & $module {function script:Get-SmartM365JsonTransportPolicy { @{Mode='JsonText';QualifiedUncRoots=@()} }}
+    & $module {function script:Get-SmartM365JsonTransportPolicy { @{Mode='JsonText';QualifiedUncRoots=@();QualifiedLocalDataRoots=@()} }}
     if($Case -in 'History','All') {
         $mailboxLabels=@('Exchange on-prem mailboxes','Exchange on-prem remote mailboxes','Exchange on-prem mailbox daily stats')
         foreach($label in @('SmartM365 inventory') + $mailboxLabels) {
@@ -185,7 +191,7 @@ try {
     if($Case -in 'Mailbox','All') {
         $path=Join-Path $PSScriptRoot '../SmartInventory/ExchangeInventory/OnPremises/Mailboxes/SmartM365-Exchange-Local-Mailboxes-Inventory.ps1'
         $ast=[Management.Automation.Language.Parser]::ParseFile($path,[ref]$null,[ref]$null)
-        $failure=$ast.Find({param($n)$n -is [Management.Automation.Language.IfStatementAst] -and $n.Clauses[0].Item1.Extent.Text -eq '$InventoryCompletedSuccessfully -eq $false'},$true)
+        $failure=$ast.Find({param($n)$n -is [Management.Automation.Language.IfStatementAst] -and $n.Clauses[0].Item1.Extent.Text -eq '-not $InventoryCompletedSuccessfully -and -not (Test-SmartM365InterruptedRun)'},$true)
         Check ($null -ne $failure) 'Mailbox final failure branch missing.'
         foreach($scenario in @('record','fallback','success')) {
             $fixture=Join-Path $root ("Mailbox-$scenario.ps1")
@@ -195,6 +201,7 @@ try {
                 '$InventoryCompletedSuccessfully=$Scenario -eq "success"'
                 '$InventoryFailureRecord=if($Scenario -eq "record"){try{throw "Synthetic inventory failure"}catch{$_}}else{$null}'
                 'function Stop-SmartM365TranscriptSafely {}'
+                'function Test-SmartM365InterruptedRun {$false}'
                 'function Complete-SmartM365ExecutionContext {param($Status,$FailureStage,$ErrorRecord)}'
                 ('if ('+$failure.Clauses[0].Item1.Extent.Text+') '+$failure.Clauses[0].Item2.Extent.Text)
             )

@@ -1,3 +1,9 @@
+<#
+.SYNOPSIS
+Offline JSON transport tests for regenerated publication receipts.
+.VERSION
+1.0.1
+#>
 [CmdletBinding()]
 param()
 $ErrorActionPreference='Stop'
@@ -15,7 +21,7 @@ $script:passed=0
 function Check([bool]$Value,[string]$Message){if(!$Value){throw $Message};$script:passed++}
 function Reject([scriptblock]$Action,[string]$Message){$failed=$false;try{& $Action|Out-Null}catch{$failed=$true};Check $failed $Message}
 try {
-    & $module { function script:Get-SmartM365JsonTransportPolicy { @{Mode='JsonText';QualifiedUncRoots=@()} } }
+    & $module { function script:Get-SmartM365JsonTransportPolicy { @{Mode='JsonText';QualifiedUncRoots=@();QualifiedLocalDataRoots=@()} } }
     [IO.File]::WriteAllBytes($path,$oldBytes)
     $hash=(Get-FileHash $path).Hash
     Reject { Publish-SmartM365RegeneratedJsonBytes $path -Owner Synthetic -Bytes ([Text.Encoding]::UTF8.GetBytes('{')) -Validate $validate } 'Invalid regenerated JSON accepted.'
