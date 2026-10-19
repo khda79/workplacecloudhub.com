@@ -2,7 +2,7 @@
 .SYNOPSIS
     Prepare a validated, versioned SmartWorkplaceIntelligence batch after raw collectors.
 .VERSION
-    0.4.2
+    0.4.3
 .NOTES
     PowerShell 7. SharePoint mapping reads use the tenant configuration unless Offline.
     Deployment must include the sibling SmartWorkplaceIntelligence/scripts, config and reference folders.
@@ -35,6 +35,7 @@ $phase = 'Configuration'
 $output = ''
 $mappingRoot = ''
 $batchUploadEnabled = $false
+$transfer = $null
 $transcriptStarted = $false
 function ConvertTo-PreparedAgeOverrides {
     param([AllowNull()]$InputObject)
@@ -65,6 +66,37 @@ function Invoke-PostTransferRetention($VerifiedTransfer) {
     } catch {
         WriteLog -Message "Batch publication remains verified; retention incomplete: $($_.Exception.Message)" -Level WARNING
     }
+}
+function Send-PreparedSuccessMail {
+    param([Parameter(Mandatory)][string]$BatchId,
+        [Parameter(Mandatory)][ValidateRange(1,[int]::MaxValue)][int]$CsvFiles,
+        [AllowNull()]$VerifiedTransfer)
+    if ($Offline -or $ValidateOnly -or $WorkforceDiagnostic -or $RepairLegacyHistory -or $ConvertMetadata) { return }
+    if ($batchUploadEnabled) {
+        Assert-PreparedTransferResult -Result $VerifiedTransfer -ExpectedBatchId $BatchId
+        if ($VerifiedTransfer.CsvFiles -ne $CsvFiles) { throw 'Success email requires consistent local and transferred CSV counts.' }
+    }
+    $ended=Get-Date
+    $started=Get-Variable -Name SmartM365ExecutionStartTime -Scope Global -ValueOnly -ErrorAction SilentlyContinue
+    $logPath=Get-Variable -Name LogTextFile -Scope Global -ValueOnly -ErrorAction SilentlyContinue
+    $details=[ordered]@{
+        'Tenant'=$effective.TenantKey
+        'Batch ID'=$BatchId
+        'Operation'=$(if($TransferOnly){'Existing-batch transfer (no CSV generation)'}else{'Preparation and validation'})
+        'Prepared CSV files'=$CsvFiles
+        'Completed at'=$ended.ToString('o')
+        'Duration'=$(if($started){($ended-[datetime]$started).ToString('c')}else{'Not measured'})
+        'Output root'=$output
+        'SharePoint transfer'=$(if($batchUploadEnabled){'Batch files and current pointer read back and verified'}else{'Disabled; local batch only'})
+        'Log'=$logPath
+    }
+    if ($batchUploadEnabled) { $details['Verified SharePoint files']=$VerifiedTransfer.VerifiedFiles }
+    $rows=foreach($label in $details.Keys) {
+        '<tr><th>{0}</th><td>{1}</td></tr>' -f [Net.WebUtility]::HtmlEncode($label),[Net.WebUtility]::HtmlEncode([string]$details[$label])
+    }
+    $body='<h2>Workplace evidence completed</h2><table>'+($rows -join '')+'</table><p>Review the execution log for source-quality and retention warnings. Power BI refresh and publication are separate operations.</p>'
+    # Use the shared sender/recipient and Graph/SMTP configuration; no attachments.
+    SendEmailHtmlReport -Subject "$scriptName completed - batch $BatchId" -BodyHtml $body -MailPurpose Report -AllowAttachments:$false
 }
 try {
     if ($PSVersionTable.PSVersion.Major -lt 7) { throw 'PowerShell 7 is required.' }
@@ -192,6 +224,8 @@ try {
         Assert-PreparedTransferResult -Result $transfer -ExpectedBatchId $ExpectedBatchId
         Invoke-PostTransferRetention $transfer
         WriteLog -Message "Transfer complete: batch=$($transfer.BatchId); CSVs=$($transfer.CsvFiles); verified files=$($transfer.VerifiedFiles); pointer verified=$($transfer.PointerVerified); audit=$($transfer.AuditPath). No collection, mapping download or CSV generation." -Level INFO
+        $phase='Success email notification'
+        Send-PreparedSuccessMail -BatchId $transfer.BatchId -CsvFiles $transfer.CsvFiles -VerifiedTransfer $transfer
         $smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; return
     }
     if ($RepairLegacyHistory) {
@@ -286,6 +320,9 @@ try {
     $recap = if ($ValidateOnly) { "Source preflight: $($result.SourceFiles) files; $($result.Identity.CsvFiles) CSVs and $($result.Identity.Rows) rows checked; no generation/publication." } else { "$($result.Files) prepared CSVs; observed history retained; batch $($result.BatchId)." }
     WriteLog -Message $recap -Level INFO
     if (-not ($Offline -or $ValidateOnly -or $WorkforceDiagnostic)) {
+        $phase='Success email notification'
+        Send-PreparedSuccessMail -BatchId $result.BatchId -CsvFiles $result.Files -VerifiedTransfer $transfer
+        $phase='Success Teams notification'
         Send-SmartM365TeamsNotification -Title $scriptName -Message 'Preparation completed.' -Level SUCCESS -Channel Infos -ResultSummary $recap -Facts @{Tenant=$effective.TenantKey;Output=$output} | Out-Null
     }
 

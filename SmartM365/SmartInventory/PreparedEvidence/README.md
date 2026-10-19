@@ -52,6 +52,18 @@ Cloud launchers under `SmartInventory/Launchers/Cloud` select the existing prod 
 Unlike CMDB validation, Intelligence `-ValidateOnly` reads SharePoint mappings
 and can upload execution logs. See the deployment guide before running.
 
+Successful online preparation and `-TransferOnly` runs send an HTML completion
+email through the existing SmartM365 sender, recipients and Graph/SMTP settings.
+No additional mail configuration is required. The summary includes the tenant,
+batch ID, CSV count, duration, output root, log and transfer status, without
+attachments. When batch upload is enabled, the email is sent only after the batch
+and current pointer have been read back and verified. When upload is disabled,
+the summary explicitly reports a local batch only. Offline, validation, diagnostic,
+history repair and metadata conversion modes do not send completion emails.
+Mail delivery errors follow the existing error path under the
+`Success email notification` phase; an already verified batch remains published.
+Check that phase before rerunning preparation solely because a notification failed.
+
 Online Intelligence runs download both classification workbooks under the tenant
 DATA root (beside DATA-LAST and DATA-ALL), not under the OS temporary directory.
 Both workbooks must pass structural validation before replacing the retained
