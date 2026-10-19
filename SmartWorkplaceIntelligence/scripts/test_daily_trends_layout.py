@@ -1,0 +1,121 @@
+"""Offline checks for daily trends navigation, filtering, bindings and geometry."""
+import json
+import os
+from pathlib import Path
+import re
+import unittest
+
+PBIP = Path(os.environ.get('SMARTWORKPLACE_PBIP') or (Path(__file__).resolve().parents[1] / 'pbip'))
+REPORT = PBIP / 'SmartWorkplaceIntelligence.Report' / 'definition'
+MODEL = PBIP / 'SmartWorkplaceIntelligence.SemanticModel' / 'definition'
+NAMES = ['AD user accounts', 'Windows AD accounts', 'Mailbox migration', 'Domain detail']
+
+
+def read(path):
+    return json.loads(path.read_text(encoding='utf-8-sig'))
+
+
+def overlaps(a, b):
+    return (a['x'] < b['x'] + b['width'] and b['x'] < a['x'] + a['width'] and
+            a['y'] < b['y'] + b['height'] and b['y'] < a['y'] + a['height'])
+
+
+class DailyTrendsLayoutTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.order = read(REPORT / 'pages/pages.json')['pageOrder']
+        cls.all_pages = [read(REPORT / 'pages' / page / 'page.json') for page in cls.order]
+        cls.page = next(page for page in cls.all_pages if page['name'] == 'daily-directory-mailbox-trends')
+        cls.containers = [read(file) for file in sorted((REPORT / 'pages' / cls.page['name'] / 'visuals').glob('*/visual.json'))]
+        cls.pages = [next(v for v in cls.containers if v.get('visualGroup', {}).get('displayName') == name) for name in NAMES]
+        cls.shared = [v for v in cls.containers if 'visual' in v and not v.get('parentGroupName')]
+        cls.visuals = {g['name']: [v for v in cls.containers if v.get('parentGroupName') == g['name']] for g in cls.pages}
+
+    def test_navigation_and_canvas(self):
+        self.assertEqual(len(self.order), 28)
+        anchor = next(p['name'] for p in self.all_pages if p['displayName'] == 'Operational Overview')
+        start = self.order.index(anchor) + 1
+        self.assertEqual(self.order[start], self.page['name'])
+        self.assertEqual(self.page['displayName'], 'Directory & Mailbox Daily Trends')
+        self.assertEqual((self.page['width'], self.page['height'], self.page['displayOption']), (1920, 1080, 'FitToPage'))
+        self.assertEqual([g['isHidden'] for g in self.pages], [False, True, True, True])
+        nav = next(v['visual'] for v in self.shared if v['visual']['visualType'] == 'bookmarkNavigator')
+        group_name = nav['objects']['bookmarks'][0]['properties']['bookmarkGroup']['expr']['Literal']['Value'].strip("'")
+        index = read(REPORT / 'bookmarks/bookmarks.json')
+        group = next(g for g in index['items'] if g['name'] == group_name)
+        self.assertEqual(len(group['children']), 4)
+        for number, name in enumerate(group['children']):
+            mark = read(REPORT / 'bookmarks' / (name + '.bookmark.json'))
+            self.assertEqual(mark['displayName'], NAMES[number])
+            self.assertTrue(mark['options']['suppressData'], 'Tabs must preserve slicer selections')
+            self.assertTrue(mark['options']['suppressActiveSection'])
+            self.assertTrue(mark['options']['applyOnlyToTargetVisuals'])
+            self.assertEqual(set(mark['options']['targetVisualNames']), {g['name'] for g in self.pages})
+            state = mark['explorationState']['sections'][self.page['name']]
+            self.assertEqual(state['visualContainers'], {}, 'Bookmarks must not store filter/query state')
+            self.assertEqual([state['visualContainerGroups'][g['name']]['isHidden'] for g in self.pages], [i != number for i in range(4)])
+
+    def test_geometry_has_no_overlap_or_clipping(self):
+        for page in self.pages:
+            visuals = self.shared + self.visuals[page['name']]
+            for number, visual in enumerate(visuals):
+                a = visual['position']
+                self.assertGreaterEqual(a['x'], 0)
+                self.assertGreaterEqual(a['y'], 0)
+                self.assertLessEqual(a['x'] + a['width'], self.page['width'])
+                self.assertLessEqual(a['y'] + a['height'], self.page['height'])
+                for other in visuals[number + 1:]:
+                    self.assertFalse(overlaps(a, other['position']), (page['name'], visual['name'], other['name']))
+
+    def test_one_native_chart_per_subject_and_matrix_only_in_details(self):
+        for number, page in enumerate(self.pages):
+            types = [v['visual']['visualType'] for v in self.visuals[page['name']]]
+            self.assertEqual(types.count('lineChart'), 1 if number < 3 else 0)
+            self.assertEqual(types.count('pivotTable'), 1 if number == 3 else 0)
+
+    def test_common_filters_are_shared_once_and_not_in_bookmarks(self):
+        slicers = [v for v in self.shared if v['visual']['visualType'] == 'slicer']
+        self.assertEqual(len(slicers), 3)
+        for table in ['Daily Period', 'Daily Domain', 'Date']:
+            self.assertEqual(sum(table in json.dumps(v['visual']['query']) for v in slicers), 1)
+        self.assertTrue(all(not v['visual'].get('syncGroup') for v in slicers))
+        extra = [v for g in self.pages for v in self.visuals[g['name']] if v['visual']['visualType'] == 'slicer']
+        self.assertEqual(len(extra), 1)
+        self.assertIn('Daily View', json.dumps(extra[0]))
+
+    def test_chart_grain_gaps_and_reading_tooltips(self):
+        expected = [('Axis Enabled Users', 'Axis Disabled Users', 'Axis AD Users Reading Day'),
+                    ('Axis Windows 10 Chart', 'Axis Windows 11 Chart', 'Axis AD Computers Reading Day'),
+                    ('Axis On-premises Mailboxes', 'Axis Exchange Online Remote', 'Axis Exchange Online Share', 'Axis Mailbox Reading Day')]
+        for page, required in zip(self.pages, expected):
+            container = next(v for v in self.visuals[page['name']] if v['visual']['visualType'] == 'lineChart')
+            chart = container['visual']
+            value = json.dumps(container)
+            for name in (*required, 'Axis Date', 'Axis Grain Subtitle', 'Axis Point Visible'):
+                self.assertIn(name, value)
+            self.assertEqual(chart['objects']['categoryAxis'][0]['properties']['axisType']['expr']['Literal']['Value'], "'Categorical'")
+            self.assertIn('Quality Tooltip', value)
+        mailbox = next(v['visual'] for v in self.visuals[self.pages[2]['name']] if v['visual']['visualType'] == 'lineChart')
+        self.assertIn('y2Axis', mailbox['objects'])
+
+    def test_detail_values_and_changes_are_separate(self):
+        matrix = next(v['visual'] for v in self.visuals[self.pages[3]['name']] if v['visual']['visualType'] == 'pivotTable')
+        values = matrix['query']['queryState']['Values']['projections']
+        self.assertEqual(len(values), 12)
+        self.assertEqual(len({p['nativeQueryRef'] for p in values}), 12, 'Matrix aliases must be unique')
+        self.assertEqual(len({p['displayName'] for p in values}), 12, 'Matrix headers must identify each value/change')
+        self.assertEqual(sum(p['field']['Measure']['Property'].endswith('Value Text') for p in values), 6)
+        self.assertEqual(sum(p['field']['Measure']['Property'].endswith('Change Text') for p in values), 6)
+
+    def test_display_helpers_only_extract_existing_card_text(self):
+        for table, count in [('Daily Directory Trends', 8), ('Daily Mailbox Trends', 4)]:
+            text = (MODEL / 'tables' / (table + '.tmdl')).read_text(encoding='utf-8-sig')
+            helpers = re.findall(r"^\tmeasure '([^']+(?:Value|Change) Text)' = (.+)$", text, re.M)
+            self.assertEqual(len(helpers), count)
+            for _, expression in helpers:
+                self.assertRegex(expression, r'^VAR _text = \[[^\]]+ Card\] VAR _separator = SEARCH')
+                self.assertNotRegex(expression, r'CALCULATE|SUMX|FILTER|ALLSELECTED')
+
+
+if __name__ == '__main__':
+    unittest.main()

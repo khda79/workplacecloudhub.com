@@ -1,0 +1,39 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/bookmark/2.1.0/schema.json",
+  "displayName": "AD user accounts",
+  "name": "bf6e5721270ee694da00",
+  "options": {
+    "applyOnlyToTargetVisuals": true,
+    "targetVisualNames": [
+      "890248bf5fea920d9dfc",
+      "86b338ccf32bc5b85f2f",
+      "6a395e2d27c705d81a9e",
+      "03f5bee42350372600c6"
+    ],
+    "suppressActiveSection": true,
+    "suppressData": true
+  },
+  "explorationState": {
+    "version": "1.0",
+    "activeSection": "daily-directory-mailbox-trends",
+    "sections": {
+      "daily-directory-mailbox-trends": {
+        "visualContainers": {},
+        "visualContainerGroups": {
+          "890248bf5fea920d9dfc": {
+            "isHidden": false
+          },
+          "86b338ccf32bc5b85f2f": {
+            "isHidden": true
+          },
+          "6a395e2d27c705d81a9e": {
+            "isHidden": true
+          },
+          "03f5bee42350372600c6": {
+            "isHidden": true
+          }
+        }
+      }
+    }
+  }
+}

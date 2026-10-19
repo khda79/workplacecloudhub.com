@@ -1,0 +1,17 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "name": "6a395e2d27c705d81a9e",
+  "position": {
+    "x": 0,
+    "y": 0,
+    "width": 1920,
+    "height": 1080,
+    "z": 3,
+    "tabOrder": 3
+  },
+  "visualGroup": {
+    "displayName": "Mailbox migration",
+    "groupMode": "ScaleMode"
+  },
+  "isHidden": true
+}

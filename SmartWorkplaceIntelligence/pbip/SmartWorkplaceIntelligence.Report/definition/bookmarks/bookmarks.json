@@ -455,6 +455,16 @@
       "children": [
         "59a6484db5b071cf6d52"
       ]
+    },
+    {
+      "name": "80d83479f6abbd1e246d",
+      "displayName": "Directory & Mailbox Daily Trends views",
+      "children": [
+        "bf6e5721270ee694da00",
+        "f1b335d5283503af4c77",
+        "43c8933b8732cd98740b",
+        "bad4096794087b6ee34a"
+      ]
     }
   ]
 }

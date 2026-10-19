@@ -379,3 +379,58 @@ table 'Daily Directory Trends'
 				    Typed = Table.TransformColumnTypes(Nulls, {{"TenantKey", type text}, {"OrganizationKey", type text}, {"EnvironmentKey", type text}, {"TenantId", type text}, {"Date Key", Int64.Type}, {"Date", type datetime}, {"Source Name", type text}, {"Domain Key", type text}, {"Domain Name", type text}, {"Metric Name", type text}, {"Metric Unit", type text}, {"Metric Value", type number}, {"Reading At", type datetime}, {"Metric Status", type text}, {"Source Day Status", type text}, {"Quality Event", type text}, {"Quality Reason", type text}, {"Observed Domain Count", Int64.Type}, {"Absent Domain Count", Int64.Type}, {"Persistent Absent Domain Count", Int64.Type}, {"Absent Prior Share (%)", type number}, {"Partial Threshold (%)", type number}, {"Reference Complete Day", type datetime}}, "en-US")
 				in
 				    Typed
+
+	/// Display-only value extracted from [Enabled Users Card]; all qualification and period calculations remain in the existing card measure.
+	measure 'Enabled Users Value Text' = VAR _text = [Enabled Users Card] VAR _separator = SEARCH("|", _text, 1, 0) RETURN IF(_separator = 0, _text, TRIM(LEFT(_text, _separator - 1)))
+		isHidden
+		displayFolder: Daily trends presentation
+		lineageTag: bfca6377-59c8-4e45-bfc9-e66bcb64c57c
+
+
+	/// Display-only change extracted from [Enabled Users Card]; all qualification and period calculations remain in the existing card measure.
+	measure 'Enabled Users Change Text' = VAR _text = [Enabled Users Card] VAR _separator = SEARCH("|", _text, 1, 0) RETURN IF(_separator = 0, BLANK(), TRIM(MID(_text, _separator + 1, LEN(_text))))
+		isHidden
+		displayFolder: Daily trends presentation
+		lineageTag: b6c2f4cc-dc6e-4321-b0b9-e27811749bed
+
+
+	/// Display-only value extracted from [Disabled Users Card]; all qualification and period calculations remain in the existing card measure.
+	measure 'Disabled Users Value Text' = VAR _text = [Disabled Users Card] VAR _separator = SEARCH("|", _text, 1, 0) RETURN IF(_separator = 0, _text, TRIM(LEFT(_text, _separator - 1)))
+		isHidden
+		displayFolder: Daily trends presentation
+		lineageTag: 022d40ba-3abe-4e85-9aaa-a43d2c57451a
+
+
+	/// Display-only change extracted from [Disabled Users Card]; all qualification and period calculations remain in the existing card measure.
+	measure 'Disabled Users Change Text' = VAR _text = [Disabled Users Card] VAR _separator = SEARCH("|", _text, 1, 0) RETURN IF(_separator = 0, BLANK(), TRIM(MID(_text, _separator + 1, LEN(_text))))
+		isHidden
+		displayFolder: Daily trends presentation
+		lineageTag: 6382794f-2995-497f-8019-58e8af549428
+
+
+	/// Display-only value extracted from [Windows 10 Remaining Card]; all qualification and period calculations remain in the existing card measure.
+	measure 'Windows 10 Remaining Value Text' = VAR _text = [Windows 10 Remaining Card] VAR _separator = SEARCH("|", _text, 1, 0) RETURN IF(_separator = 0, _text, TRIM(LEFT(_text, _separator - 1)))
+		isHidden
+		displayFolder: Daily trends presentation
+		lineageTag: 2f36360d-d238-4997-a5ce-b7f72e7e4671
+
+
+	/// Display-only change extracted from [Windows 10 Remaining Card]; all qualification and period calculations remain in the existing card measure.
+	measure 'Windows 10 Remaining Change Text' = VAR _text = [Windows 10 Remaining Card] VAR _separator = SEARCH("|", _text, 1, 0) RETURN IF(_separator = 0, BLANK(), TRIM(MID(_text, _separator + 1, LEN(_text))))
+		isHidden
+		displayFolder: Daily trends presentation
+		lineageTag: 54366d48-d974-4d1f-ad73-17b60fa9ef59
+
+
+	/// Display-only value extracted from [Windows 11 Share Card]; all qualification and period calculations remain in the existing card measure.
+	measure 'Windows 11 Share Value Text' = VAR _text = [Windows 11 Share Card] VAR _separator = SEARCH("|", _text, 1, 0) RETURN IF(_separator = 0, _text, TRIM(LEFT(_text, _separator - 1)))
+		isHidden
+		displayFolder: Daily trends presentation
+		lineageTag: 949ca25b-90da-456d-8b29-a158afbbb7d2
+
+
+	/// Display-only change extracted from [Windows 11 Share Card]; all qualification and period calculations remain in the existing card measure.
+	measure 'Windows 11 Share Change Text' = VAR _text = [Windows 11 Share Card] VAR _separator = SEARCH("|", _text, 1, 0) RETURN IF(_separator = 0, BLANK(), TRIM(MID(_text, _separator + 1, LEN(_text))))
+		isHidden
+		displayFolder: Daily trends presentation
+		lineageTag: 0519ac96-ab53-490d-a256-c9a93cc08673

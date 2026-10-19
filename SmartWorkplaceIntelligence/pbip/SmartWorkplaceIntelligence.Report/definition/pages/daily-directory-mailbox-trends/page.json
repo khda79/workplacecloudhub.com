@@ -3,7 +3,7 @@
   "name": "daily-directory-mailbox-trends",
   "displayName": "Directory & Mailbox Daily Trends",
   "displayOption": "FitToPage",
-  "height": 1840,
+  "height": 1080,
   "width": 1920,
   "objects": {
     "background": [

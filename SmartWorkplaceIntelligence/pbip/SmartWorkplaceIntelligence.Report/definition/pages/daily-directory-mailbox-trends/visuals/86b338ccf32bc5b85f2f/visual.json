@@ -1,0 +1,17 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "name": "86b338ccf32bc5b85f2f",
+  "position": {
+    "x": 0,
+    "y": 0,
+    "width": 1920,
+    "height": 1080,
+    "z": 2,
+    "tabOrder": 2
+  },
+  "visualGroup": {
+    "displayName": "Windows AD accounts",
+    "groupMode": "ScaleMode"
+  },
+  "isHidden": true
+}
