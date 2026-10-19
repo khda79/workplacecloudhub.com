@@ -32,7 +32,11 @@ planning cards. It is disabled by default and does not rewrite historical trends
 Publication alone no longer retires local batch payloads. After a successful
 SharePoint transfer and verified root pointer, the wrapper invokes coupled
 server/SharePoint retention. `PreparedRetention.Mode` defaults to `Preview`:
-plans and journals are produced without archiving or removing batches. Private
+fast metadata inventories and journals are produced without downloading payloads,
+archiving or removing batches. Candidates are not SHA256-qualified actions:
+metadata previews cannot be applied. `-Mode Preview -Verification Full` creates
+a complete content-verified plan for manual review. Apply and configured Auto
+retain the full inventory and pre-removal SHA256 checks. Private
 activation of `Auto`, after server qualification, applies each newly generated
 and revalidated plan without a daily approval or another scheduled task.
 

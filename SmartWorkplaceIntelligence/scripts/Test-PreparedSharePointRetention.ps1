@@ -2,7 +2,7 @@
 .SYNOPSIS
     Synthetic retention regression tests. File-backed fake SharePoint; no tenant or network.
 .VERSION
-    1.0.0
+    1.1.0
 #>
 [CmdletBinding()]
 param([Parameter(Mandatory)][string]$TestRoot,[switch]$AdapterOnly)
@@ -44,17 +44,19 @@ function Fixture {
     $target=[ordered]@{TenantId='synthetic-tenant';ClientId='synthetic-app';SiteId='synthetic-site';DriveId='synthetic-drive';RootId='root';BatchesId='batches';RootPath='Example/DATA/DATA-POWERBI';AccessEvidenceSHA256=('A'*64)}
     $q=[ordered]@{Status='Qualified';PolicyVersion='PreparedBatchRetention/v1';ReviewedBy='Synthetic operator';ReviewedUtc='2026-01-01T00:00:00Z';Coordination='SharedServerPublicationLock';ServerOutputRoot=$output;RegistrySHA256=(Get-FileHash $registry).Hash;ModuleSHA256=(Get-FileHash $modulePath).Hash;AccessEvidenceSHA256=('A'*64);WriterExclusionEvidence='Synthetic isolated file-backed transport, no other writers';ExclusiveCloudWritersConfirmed=$true;RecoverabilityConfirmed=$true}
     Json $config @{PreparedRetention=@{Mode='Preview';PlanMaxAgeHours=24;Target=$target;Qualification=$q}}
-    $state=@{Remote=$remote;Target=$target;Events=[Collections.Generic.List[string]]::new();FailArchive=$false;FailArchiveAt=0;Archives=0;FailDownload=$false;FailRecycleAt=0;Recycles=0;Uncertain=$false;ChangeAfterArchive=$false;ChangePayloadAfterArchive=$false;Linked=$false;WrongParent=$false;Recycled=@{};Hook=$null}
+    $state=@{Remote=$remote;Target=$target;Events=[Collections.Generic.List[string]]::new();FailArchive=$false;FailArchiveAt=0;Archives=0;FailDownload=$false;FailPayloadDownload=$false;PayloadDownloads=0;ReceiptDownloads=0;FailRecycleAt=0;Recycles=0;Uncertain=$false;ChangeAfterArchive=$false;ChangePayloadAfterArchive=$false;Linked=$false;WrongParent=$false;Recycled=@{};Hook=$null}
     $describe={if($state.Hook){& $state.Hook};[pscustomobject]$state.Target}.GetNewClosure()
     $list={param($parent)
         $folder=if($parent -eq 'root'){$state.Remote}else{Join-Path $state.Remote $parent}
         if(-not(Test-Path $folder)){throw 'Synthetic missing remote parent'}
         foreach($item in Get-ChildItem -LiteralPath $folder -Force){
             $relative=[IO.Path]::GetRelativePath($state.Remote,$item.FullName).Replace('\','/')
-            [pscustomobject]@{Id=$relative;Name=$item.Name;ParentId=$(if($state.WrongParent){'wrong'}else{$parent});Kind=$(if($item.PSIsContainer){'Folder'}else{'File'});Linked=$state.Linked;Bytes=$(if($item.PSIsContainer){0}else{$item.Length});ETag=$(if($item.PSIsContainer){'stable-folder-etag'}else{(Get-FileHash $item.FullName).Hash})}
+            [pscustomobject]@{Id=$relative;Name=$item.Name;ParentId=$(if($state.WrongParent){'wrong'}else{$parent});Kind=$(if($item.PSIsContainer){'Folder'}else{'File'});Linked=$state.Linked;Bytes=$(if($item.PSIsContainer){0}else{$item.Length});ETag=$(if($item.PSIsContainer){'stable-folder-etag'}else{[string]$item.Length+'-'+$item.LastWriteTimeUtc.Ticks})}
         }
     }.GetNewClosure()
     $download={param($id,$destination)
+        if([IO.Path]::GetFileName($id) -in @('current.json.txt','batch.json.txt','validation.json.txt')){$state.ReceiptDownloads++}
+        else {$state.PayloadDownloads++;if($state.FailPayloadDownload){throw 'Synthetic forbidden payload download'}}
         if($state.FailDownload){return $false}
         Copy-Item -LiteralPath (Join-Path $state.Remote $id) -Destination $destination
         $true
@@ -80,7 +82,7 @@ function Fixture {
         'Recycled'
     }.GetNewClosure()
     $absent={param($id) -not(Test-Path -LiteralPath (Join-Path $state.Remote $id))}.GetNewClosure()
-    [pscustomobject]@{Root=$root;Output=$output;Remote=$remote;Work=$work;Config=$config;Registry=$registry;Ids=$ids;State=$state;Args=@{OutputRoot=$output;TenantKey='synthetic';ConfigurationPath=$config;ConsumersPath=$registry;WorkRoot=$work;Transport=@{Describe=$describe;List=$list;Download=$download;Archive=$archive;Recycle=$recycle;IsAbsent=$absent}}}
+    [pscustomobject]@{Root=$root;Output=$output;Remote=$remote;Work=$work;Config=$config;Registry=$registry;Ids=$ids;State=$state;Args=@{OutputRoot=$output;TenantKey='synthetic';ConfigurationPath=$config;ConsumersPath=$registry;WorkRoot=$work;Verification='Full';Transport=@{Describe=$describe;List=$list;Download=$download;Archive=$archive;Recycle=$recycle;IsAbsent=$absent}}}
 }
 function SetAuto($f){$c=Get-Content $f.Config -Raw | ConvertFrom-Json -Depth 70;$c.PreparedRetention.Mode='Auto';Json $f.Config $c}
 function Requalify($f){$c=Get-Content $f.Config -Raw | ConvertFrom-Json -Depth 70;$c.PreparedRetention.Qualification.RegistrySHA256=(Get-FileHash $f.Registry).Hash;Json $f.Config $c}
@@ -99,6 +101,56 @@ function AdvanceFixture($f,[int]$Day){
 }
 
 if(-not $AdapterOnly){
+# Fast Preview must never request payload bytes, even when the registry is not yet qualified.
+$f=Fixture;$a=@{}+$f.Args;$a.Remove('Verification');$f.State.FailPayloadDownload=$true
+$held=[IO.File]::Open((Join-Path $f.Output ('batches/'+$f.Ids[0]+'/Example.csv')),'Open','ReadWrite','None')
+try {$p=Invoke-PreparedBatchRetention @a}finally{$held.Dispose()}
+Check ($p.Status -ceq 'Preview' -and $p.Plan.Verification -ceq 'Metadata' -and -not $p.Plan.ApplySupported) 'Default Preview must be metadata-only and non-applicable'
+Check ($f.State.PayloadDownloads -eq 0 -and $f.State.ReceiptDownloads -eq 19) 'Fast Preview downloaded payloads or unexpected receipts'
+Check (@($p.Plan.Rows | Where-Object State -CEQ 'Protected').Count -eq 8) 'Fast Preview lost current/previous/consumer protections'
+Check (@($p.Plan.Rows | Where-Object State -CEQ 'Candidate').Count -eq 4 -and @($p.Plan.Rows | Where-Object State -CEQ 'Eligible').Count -eq 0) 'Metadata candidates were presented as fully verified eligible actions'
+Check (@($p.Plan.Rows | Where-Object PayloadSHA256Verified).Count -eq 0) 'Fast Preview claimed payload SHA256 evidence'
+Check ($f.State.Events.Count -eq 0 -and @(Get-ChildItem (Join-Path $f.Output 'batches')).Count -eq 6) 'Fast Preview mutated batches'
+$reads=$f.State.ReceiptDownloads
+Reject {Invoke-PreparedBatchRetention @a -Mode Apply -PlanPath $p.PlanPath -PlanSHA256 $p.PlanSHA256} 'Full verification plan'
+Check ($f.State.ReceiptDownloads -eq $reads -and $f.State.Recycles -eq 0) 'Metadata plan Apply did not fail before remote scanning'
+
+$f=Fixture;$a=@{}+$f.Args;$a.Verification='Metadata';$r=Get-Content $f.Registry -Raw|ConvertFrom-Json -Depth 70
+$r.Qualification.Status='Unqualified';$r.Qualification.DeclaredConsumersComplete=$false;Json $f.Registry $r
+$p=Invoke-PreparedBatchRetention @a
+Check ($p.Status -ceq 'Blocked' -and $p.Plan.ProtectedBatchIds -ccontains $f.Ids[2]) 'Unqualified but structurally valid consumer pins must remain visible and fail closed'
+Check (@($p.Plan.Rows|Where-Object {$_.BatchId -ceq $f.Ids[2] -and $_.State -ceq 'Protected'}).Count -eq 2) 'Unqualified registry hid the old pinned batch'
+
+foreach($case in 'MissingPayload','WrongSize','MissingReceipt','DifferentReceipts'){
+    $f=Fixture;$a=@{}+$f.Args;$a.Verification='Metadata';$folder=Join-Path $f.Remote ('batches/'+$f.Ids[1])
+    switch($case){
+        MissingPayload {Remove-Item (Join-Path $folder 'Example.csv')}
+        WrongSize {Add-Content (Join-Path $folder 'Example.csv') 'changed'}
+        MissingReceipt {Remove-Item (Join-Path $folder 'validation.json.txt')}
+        DifferentReceipts {Add-Content (Join-Path $folder 'validation.json.txt') ' '}
+    }
+    $p=Invoke-PreparedBatchRetention @a
+    Check (@($p.Plan.Rows|Where-Object {$_.BatchId -ceq $f.Ids[1] -and $_.State -ceq 'Blocked'}).Count -gt 0) "$case was accepted by metadata Preview"
+    Check ($f.State.PayloadDownloads -eq 0 -and $f.State.Recycles -eq 0) "$case triggered payload download or removal"
+}
+
+# A same-size payload corruption is explicitly unmeasured in Metadata, then rejected by Full.
+$f=Fixture;$a=@{}+$f.Args;$a.Verification='Metadata';$payload=Join-Path $f.Remote ('batches/'+$f.Ids[1]+'/Example.csv')
+$text=[IO.File]::ReadAllText($payload);[IO.File]::WriteAllText($payload,$text.Replace('fixture','fixturX'))
+$p=Invoke-PreparedBatchRetention @a
+Check (@($p.Plan.Rows|Where-Object {$_.BatchId -ceq $f.Ids[1] -and $_.State -ceq 'Candidate'}).Count -eq 2) 'Same-size corruption must remain unmeasured, never fully verified in metadata Preview'
+$a.Verification='Full';$full=Invoke-PreparedBatchRetention @a
+Check (@($full.Plan.Rows|Where-Object {$_.Storage -ceq 'SharePoint' -and $_.BatchId -ceq $f.Ids[1] -and $_.State -ceq 'Blocked'}).Count -eq 1) 'Full verification missed same-size corruption'
+$a.Verification='Metadata'
+$r=Invoke-PreparedBatchRetention @a -Mode Apply -PlanPath $full.PlanPath -PlanSHA256 $full.PlanSHA256
+Check ($r.Status -ceq 'Completed' -and (Test-Path $payload)) 'Manual Apply weakened full verification or removed a corrupt batch'
+Check ($r.Plan.Verification -ceq 'Full' -and $f.State.PayloadDownloads -gt 0) 'Apply accepted Metadata instead of performing full verification'
+
+$f=Fixture;$a=@{}+$f.Args;$a.Verification='Metadata';SetAuto $f
+$p=Invoke-PreparedBatchRetention @a -Mode Configured
+Check ($p.Status -ceq 'Completed' -and $p.Plan.Verification -ceq 'Full' -and $f.State.PayloadDownloads -gt 0) 'Configured Auto weakened full SHA256 verification'
+Check ((Test-Path (Join-Path $f.Output ('batches/'+$f.Ids[2]))) -and (Test-Path (Join-Path $f.Remote ('batches/'+$f.Ids[2])))) 'Auto lost the old consumer pin'
+
 $f=Fixture;$a=$f.Args;$p=Invoke-PreparedBatchRetention @a
 Check ($p.Status -ceq 'Preview') 'Qualified preview failed'
 Check ($f.State.Events.Count -eq 0) 'Preview called archive/recycle'
@@ -303,8 +355,8 @@ Write-Host "PASS: $script:checks synthetic retention checks. No tenant, network,
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC1CletTpvLRa5w
-# FZ4pQM+Orev8bRa0M5wwDRF5QpW2gqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBPb8WZHNDOoNIA
+# J9+IeSeyJ3QceudvUL2CWZrlmuPiP6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -437,31 +489,31 @@ Write-Host "PASS: $script:checks synthetic retention checks. No tenant, network,
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEINfnONaWOFhnY2yUKCnTORdrzDsGwVp1/VvdoJdLkqCeMA0GCSqG
-# SIb3DQEBAQUABIIBgKXEUe0dfStZb02S1aotWXoQBUUgyA4A0MDNSZhInMH56ChS
-# MadM3txDudJBVlH6E7Svg8gCBX6ij7Wx9/G6F9OJPqjQwzZM2BfNO1LVszMKW4ja
-# kJ6nVytf2vN0gHyrdckpcxNEkHqEvvm8WY5RB8lb9BTBhmzuxvV0Xe9tuMLh7SwK
-# VSDMi9DPwLEh5Nte7vadSGX4epz7Uc3bQs0M9s/qgW2m3zgccmBL45ZcWBQmf+Wh
-# ciHUE02KkLz8o0n1YiH7CTiSOX/daf4WFN+7jvI6jUjQ5hWRbKXZMSvaQoJe7D87
-# Gx3fXk01Pkx+NZ9yaQsO1NOFWm87uUQ2FJcYEP4TzNkfdwwWH0DXratshRzE4lPA
-# p+SIDMxoJt+qnaA9grVY60sVpgUOVBUcytcavcO696jIUluuwcdBx1TYJoUEqoTp
-# BOPmTgtBcKXVFyUJfT1ZooO/J2pH56mjwO17F7ZjOOI/uy77YmhdD2ulbrtmvc/o
-# Q6ZfJbvFsMZGVX2UiaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEINrVKr+sZdY9pSTQPvARCOSl0TWOt4fuUMD2/B3roSgdMA0GCSqG
+# SIb3DQEBAQUABIIBgAzuLSe3X7X3jhEDcLeAgTGM8ZzAA6LpHEvrkc0w4PcPutx/
+# 2AOGSKqpZ6ABlvas0H4CsyvU1iu3D/xcgDEJGMLZVWj6U/P9ci0NcTO1lDxOx1NG
+# gZPEZVKhaZTH4gkXBTd0Ujdr4z2fb1e/ClDHf9PhQXBm1i374XVfr0xHOh8TaBIE
+# 3icmb/lpB/P+MljO2qH+TjqDfUALdCInOv29KUNuqNyCpLQIbQzJ4y0yi5EIRWhn
+# 7tz36iKrRS1qbMfo04sGRtaycP9ocyw+FcdJYalqA9CpNVkvjAwUnb2H6lN5M7Qi
+# KPtNp/7bZEUm9m/BReqB5heNk9w/IGKr69JKG5/jsEU+0k93U2QR1d/SzdCc0ML4
+# nSK08AMaeNHKHBvcyYJ//JU9cYoRRE158jeTCtOdvra7rfh2RCb7c739PQZB/Yr1
+# AJGYpsqb6LwLrScJnilz5YJ6h+qdQxcbcZg+NePesvYYA1vU5YX0Glxjgc3ueYTM
+# weBHhtWGQ4slmJObuqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTkxOTQ3
-# MTVaMC8GCSqGSIb3DQEJBDEiBCCHCqO7WnganHw6p+9wt0WULSeZkZ1tvqtvkJwR
-# Y5bHdzANBgkqhkiG9w0BAQEFAASCAgBSNropIW/qIma0kQT52g0T5/e64PVSlv+p
-# OLXyCmiGvl1JVf1NoaPXZAawJ/ZAn9eXPL0D4hFmfsSLFsx9XSqk5T9XrP/sBIIH
-# mRJHzP7msCBTjxSusZiGHtJULTvkxKCju2OmtvVBaO9wIVbI8Lm7MR0ZiZ8uCVWy
-# fkP9/hIT5k1AYZ9dpWBlEEGLuyBN5xmJMI5mmQ5JwSPakvvfMK5YzVxCaveIlC7o
-# xerqCY/6SiWCZsFbX9fpOg8zShR9h17AIgtxl/BxZf+09SUoCf3TGs5YzynAnD0+
-# fjkYIKnBP8H08C2PVM2sr32DWFegDrLx23E8MarvXA8qtH7HqFWAohICGB8/u/Q2
-# 9t1ZI50XG6vPvFWMM+UswmIthf2eneEGzS4/V9EBLuA2kfIGfjHgRncLTZXP3REU
-# 7+vNpm/7ra7/y6H70hopIvFOChM2sa3QFKHnviC2Oux+mmr70oUIltwV+nQDzZcU
-# NR9B6jtEvK4R8oaq0xEknqsIQzd0hmrfX2JKMdSfEnoglTCh7zH1IJSZExB6mEHd
-# 2/FVBnPqOlHHRpt2sZ5i5xCqe1uVU3gi3/1Mg7GZ7IXSqAaz2Q9jj0eK4mffQJpO
-# etJ3ElPZP/Q+V4ZAhWScazG/U5qsNY45T7E2T3vVzBJOv8ukkrbyTqPX7KMpTRlI
-# rrYImUM1qQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTkyMTIy
+# MzhaMC8GCSqGSIb3DQEJBDEiBCASbwLDBSUBJ/Omw96HjnvxXIA3PSMGwz6c0Roo
+# XGU0VzANBgkqhkiG9w0BAQEFAASCAgB/c40qEvFdEAIUGvbgIcB6GyoQ6inOQrpS
+# GgQ1Ji2cSDRVEDrtJwWZW0yaeRfpPcqMZyTqSbkxklI7VGM/sOrt6saaX0ag7Y5g
+# 5FlXMET2o8JnYalKq8c8bgje5L3eyZ+kxQIAwwrFEci4+qfBwjC19OH5KugEbp0G
+# S38DeXzzJlYyMAv0dL7F0UUTFHdbVCR4bB88QcEkjuaRUhI1I+/SVqa7q4ATMTSf
+# qhQIVqGOzpc8eyG8JU/f2+rc0/NfhErU3BX44LGtWpeF55L/vy8ag02c8cnvMKpD
+# ptrboMOwxlVrV0zQsJO+8T027TrR1UiF7NUhcm+u+TkMW6HQDfKBI8ocR3VKtvgc
+# C72Nnftfkg/RSPKEpHqUyRTaLGB/a2hbXoIQVCVzxlc/WIlU1laXB0j3Ed/XVZkG
+# N+86a36eTZL2t7FBIeMA8HiwXPMGIwao0XP+TLEst9QrRvp0VLWsRAUi341fTC/Y
+# ig6Y7xOlPlaBH9uFG+ojzM55rIqpeBAGpPQhHDUzSjaS45JPXjTN7SfWQXeqNtYh
+# So9c8UIHRNl712e0RzqsUWZ7As8IRAmYMJumh+v0mXAaOrgcDK7ciVMGkSOmOIwu
+# KILHZerpVpNftmdCGZSUF2nYX/xVqXrGTubgS+dPmPXCXrSGtFpBqtWcyVkOw6PO
+# T4H47yExsA==
 # SIG # End signature block

@@ -262,15 +262,25 @@ review and matching qualification fingerprint. A server cannot discover all
 distributed reports. Register a consumer before it starts using an older batch;
 coordinate reference changes with the same publication authority.
 
-First run the standalone command in Preview on the authoritative server. Its
+First run the standalone command in Preview on the authoritative server. Preview
+defaults to `-Verification Metadata`: it lists every file's identity and size,
+reads the three small receipts per batch and both root pointers, and validates
+their ownership, manifest/validation consistency and declared file sets. It never
+downloads or hashes payload CSVs/artifacts, including on the local server. Its
 private `plan.json.txt` contains resolved target IDs, live access-evidence hash,
 configuration/registry/module hashes, both pointers, protection reasons and the
-complete per-store file inventory with SHA256, logical bytes, validation results
-and `Protected`, `Eligible` or `Blocked` decisions. An invalid policy still
+per-store inventory with logical bytes and `Protected`, `Candidate` or `Blocked`
+decisions. Payload SHA256 values are explicitly unmeasured, not copied from the
+manifest as if they were measured. Same-size payload corruption is not detectable
+by this inventory. Structurally valid pins remain visible even while the registry
+is unqualified; the qualification failure still blocks all application.
+An invalid policy still
 produces a blocked plan when inventory access is available. Authentication,
 enumeration or read-back failures can instead stop with a failure journal.
-Inventory hashes stream payloads through one temporary file; expect significant
-network traffic. Files are rechecked before removal. Bytes are logical payload
+For a complete content audit, use `-Mode Preview -Verification Full`. It streams
+remote payloads through one temporary file and hashes local files; expect
+significant network traffic. Progress identifies each SharePoint batch. Files
+are rechecked before removal. Bytes are logical payload
 sizes, not a promise of disk or SharePoint quota reclamation.
 
 Qualification requires `Status=Qualified`, `PolicyVersion=PreparedBatchRetention/v1`,
@@ -308,11 +318,21 @@ is individually blocked; other independently qualified lots can proceed. Verifie
 archived publication links permit traversal through previously retired batches.
 
 The manual entry point is `SmartWorkplaceIntelligence/scripts/Invoke-PreparedSharePointRetention.ps1`.
-`-Tenant <profile> -Mode Preview` creates an inspectable plan. To apply that exact
-reviewed plan, use `-Mode Apply -PlanPath <private-plan.json.txt> -PlanSHA256 <hash>`.
+`-Tenant <profile> -Mode Preview` creates a fast inspectable inventory, marked
+`Verification=Metadata` and `ApplySupported=false`. Apply rejects this inventory
+before downloading any remote file. To obtain an applicable plan, first use
+`-Mode Preview -Verification Full`, review that newly generated plan, then use
+`-Mode Apply -PlanPath <private-plan.json.txt> -PlanSHA256 <hash>`.
 Manual Apply also requires qualified controls and fresh state; it cannot bypass
-protections or use a stale plan. `-Mode Configured` follows the private mode and
-is the wrapper's automatic path. Installing or testing code never activates Auto.
+protections or use a stale plan. Plan schema 2 records the verification level;
+older plans must be regenerated. Apply and configured Auto always run the complete
+SHA256 inventory and pre-removal verification, regardless of `-Verification`.
+`-Mode Configured` follows the private mode and
+is the wrapper's automatic path. In private Preview mode it uses the fast
+inventory. No synchronized workstation-copy mode is provided. The common server
+lock remains held during either inventory so its two pointers are coordinated.
+Installing or testing code never activates Auto. A module change invalidates its
+existing qualification fingerprint; qualify the deployed implementation again.
 
 Before each removal, the three receipts are archived under `retired/<batch-id>`
 on the server and SharePoint with byte/hash verification and remote read-back.

@@ -2,7 +2,7 @@
 .SYNOPSIS
     Qualified, coupled server/SharePoint batch retention. Preview is the default.
 .VERSION
-    1.0.0
+    1.1.0
 #>
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -90,12 +90,14 @@ function Read-RetentionLockedDocument([string]$Path) {
         [pscustomobject]@{Stream=$stream;Value=$value;SHA256=(Get-RetentionHash $bytes)}
     } catch {$stream.Dispose();throw}
 }
-function Assert-RetentionRegistry($Registry,[string]$TenantKey,[string]$TenantId) {
+function Assert-RetentionRegistry($Registry,[string]$TenantKey,[string]$TenantId,[switch]$ReferencesOnly) {
     if($Registry.SchemaVersion -is [string] -or $Registry.SchemaVersion -ne 1 -or $Registry.TenantKey -cne $TenantKey -or $Registry.TenantId -ine $TenantId){throw 'Consumer registry schema/tenant mismatch.'}
+    if(-not $ReferencesOnly){
     $qualification=$Registry.Qualification
     if($qualification.Status -cne 'Qualified' -or $qualification.DeclaredConsumersComplete -isnot [bool] -or $qualification.DeclaredConsumersComplete -ne $true -or
        [string]::IsNullOrWhiteSpace($qualification.ReviewedBy)){throw 'Consumer registry is not explicitly qualified.'}
     Assert-RetentionReviewedUtc $qualification.ReviewedUtc
+    }
     $seen=[Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
     foreach($entry in @($Registry.Consumers)){
         Assert-RetentionBatchId $entry.BatchId
@@ -151,6 +153,7 @@ function Get-RetentionRemoteChildren($Transport,[string]$ParentId) {
 }
 function Test-RetentionBatch($Batch,[string]$TenantKey) {
     try {
+        $metadataOnly=(Get-RetentionValue $Batch 'Verification' 'Full') -ceq 'Metadata'
         Assert-RetentionBatchId $Batch.BatchId
         if($Batch.Invalid){throw $Batch.Invalid}
         if($Batch.Storage -ceq 'SharePoint' -and [string]::IsNullOrWhiteSpace($Batch.ETag)){throw 'Remote batch lacks a conditional removal eTag.'}
@@ -167,17 +170,18 @@ function Test-RetentionBatch($Batch,[string]$TenantKey) {
         foreach($entry in @($m.Files)+@(Get-RetentionValue $m 'Artifacts' @())){
             $name=[string]$entry.File
             if($name -cnotmatch '^[A-Za-z0-9_-]+\.(csv|json\.txt)$' -or -not $expected.Add($name) -or -not $map.ContainsKey($name)){throw 'Unexpected/unsafe/missing declared file.'}
-            if(($entry.Bytes -isnot [int] -and $entry.Bytes -isnot [long]) -or $entry.Bytes -lt 0 -or $entry.SHA256 -notmatch '^[A-Fa-f0-9]{64}$' -or [long]$entry.Bytes -ne $map[$name].Bytes -or $entry.SHA256 -ine $map[$name].SHA256){throw 'Declared file hash/size mismatch.'}
+            if(($entry.Bytes -isnot [int] -and $entry.Bytes -isnot [long]) -or $entry.Bytes -lt 0 -or $entry.SHA256 -notmatch '^[A-Fa-f0-9]{64}$' -or [long]$entry.Bytes -ne $map[$name].Bytes -or
+               (-not $metadataOnly -and $entry.SHA256 -ine $map[$name].SHA256)){throw 'Declared file hash/size mismatch.'}
         }
         foreach($entry in @($m.Files)){
             $validated=@($v.Files | Where-Object File -CEQ $entry.File)
             if(($entry.Rows -isnot [int] -and $entry.Rows -isnot [long]) -or $entry.Rows -lt 0 -or $validated.Count -ne 1 -or $validated[0].SHA256 -ine $entry.SHA256 -or $validated[0].Rows -ne $entry.Rows){throw 'CSV validation record mismatch.'}
         }
         if($map.Count -ne $expected.Count){throw 'Unexpected batch content.'}
-        [pscustomobject]@{Valid=$true;Reason='Manifest, receipts and all payload hashes verified';PreviousBatchId=$p.PreviousBatchId}
+        [pscustomobject]@{Valid=$true;Reason=$(if($metadataOnly){'Receipts and file metadata verified; payload SHA256 not measured'}else{'Manifest, receipts and all payload hashes verified'});PreviousBatchId=$p.PreviousBatchId}
     } catch {[pscustomobject]@{Valid=$false;Reason=$_.Exception.Message;PreviousBatchId=$null}}
 }
-function Get-RetentionSnapshot([string]$OutputRoot,$Transport,[string]$Scratch,[string]$TenantKey) {
+function Get-RetentionSnapshot([string]$OutputRoot,$Transport,[string]$Scratch,[string]$TenantKey,[ValidateSet('Metadata','Full')][string]$Verification='Full') {
     $target=& $Transport.Describe
     $pointerPath=Get-RetentionChild $OutputRoot 'current.json.txt'
     $localPointer=Get-Content -LiteralPath $pointerPath -Raw | ConvertFrom-Json
@@ -205,21 +209,27 @@ function Get-RetentionSnapshot([string]$OutputRoot,$Transport,[string]$Scratch,[
                 if($file.PSIsContainer){throw 'Unexpected nested folder in batch.'}
                 $value=$null
                 if($file.Name -in @('current.json.txt','batch.json.txt','validation.json.txt')){$value=Get-Content -LiteralPath $file.FullName -Raw | ConvertFrom-Json -Depth 70}
-                $files.Add([pscustomobject]@{Name=$file.Name;Id=$file.FullName;ETag='';Bytes=$file.Length;SHA256=(Get-FileHash -LiteralPath $file.FullName).Hash;Value=$value})
+                $hash=if($Verification -ceq 'Full' -or $file.Name -in @('current.json.txt','batch.json.txt','validation.json.txt')){(Get-FileHash -LiteralPath $file.FullName).Hash}else{$null}
+                $files.Add([pscustomobject]@{Name=$file.Name;Id=$file.FullName;ETag='';Bytes=$file.Length;SHA256=$hash;Value=$value})
             }
         } catch {$invalid=$_.Exception.Message}
-        $batches.Add([pscustomobject]@{Storage='Local';BatchId=$directory.Name;Id=$directory.FullName;ETag='';Files=$files.ToArray();Invalid=$invalid})
+        $batches.Add([pscustomobject]@{Storage='Local';BatchId=$directory.Name;Id=$directory.FullName;ETag='';Files=$files.ToArray();Invalid=$invalid;Verification=$Verification})
     }
     foreach($directory in @(Get-RetentionRemoteChildren $Transport $target.BatchesId)){
+        Write-Host ('[{0:yyyy-MM-dd HH:mm:ss}] Retention {1}: SharePoint batch {2}' -f (Get-Date),$Verification,$directory.Name)
         $files=[Collections.Generic.List[object]]::new();$invalid=''
         try {
             if($directory.Kind -cne 'Folder'){throw 'Unexpected remote batch item.'}
             foreach($file in @(Get-RetentionRemoteChildren $Transport $directory.Id)){
                 if($file.Kind -cne 'File'){throw 'Unexpected nested remote batch folder.'}
-                $files.Add((Read-RetentionRemoteFile $Transport $file $Scratch))
+                if($Verification -ceq 'Full' -or $file.Name -in @('current.json.txt','batch.json.txt','validation.json.txt')){
+                    $files.Add((Read-RetentionRemoteFile $Transport $file $Scratch))
+                }else{
+                    $files.Add([pscustomobject]@{Name=$file.Name;Id=$file.Id;ETag=$file.ETag;Bytes=$file.Bytes;SHA256=$null;Value=$null})
+                }
             }
         } catch {$invalid=$_.Exception.Message}
-        $batches.Add([pscustomobject]@{Storage='SharePoint';BatchId=$directory.Name;Id=$directory.Id;ETag=$directory.ETag;Files=$files.ToArray();Invalid=$invalid})
+        $batches.Add([pscustomobject]@{Storage='SharePoint';BatchId=$directory.Name;Id=$directory.Id;ETag=$directory.ETag;Files=$files.ToArray();Invalid=$invalid;Verification=$Verification})
     }
     $archives=[Collections.Generic.List[object]]::new()
     $retired=Get-RetentionChild $OutputRoot 'retired'
@@ -236,7 +246,7 @@ function Get-RetentionSnapshot([string]$OutputRoot,$Transport,[string]$Scratch,[
             } catch {Write-Verbose "Archived chain link ignored: $($_.Exception.Message)"}
         }
     }
-    [pscustomobject]@{Target=$target;LocalPointer=$localPointer;LocalPointerSHA256=$localHash;RemotePointer=$cloudPointer.Value;RemotePointerSHA256=$cloudPointer.SHA256;Batches=$batches.ToArray();ArchivedLinks=$archives.ToArray()}
+    [pscustomobject]@{Verification=$Verification;Target=$target;LocalPointer=$localPointer;LocalPointerSHA256=$localHash;RemotePointer=$cloudPointer.Value;RemotePointerSHA256=$cloudPointer.SHA256;Batches=$batches.ToArray();ArchivedLinks=$archives.ToArray()}
 }
 function New-RetentionPlan($Snapshot,$Registry,[string]$RegistryHash,[string]$ConfigurationHash,[string]$OutputRoot,$Settings,[string]$TenantKey) {
     $blocked=[Collections.Generic.List[string]]::new();$protected=@{}
@@ -245,7 +255,7 @@ function New-RetentionPlan($Snapshot,$Registry,[string]$RegistryHash,[string]$Co
         $p=$Snapshot.($store+'Pointer');Protect $p.BatchId ($store+' current');Protect $p.PreviousBatchId ($store+' previous')
     }
     if($Snapshot.LocalPointerSHA256 -cne $Snapshot.RemotePointerSHA256){$blocked.Add('Local and remote publication pointers differ.')}
-    try {Assert-RetentionRegistry $Registry $TenantKey $Snapshot.Target.TenantId;foreach($entry in @($Registry.Consumers)){Protect $entry.BatchId ('Consumer: '+$entry.ConsumerId+'; '+$entry.Reason)}}
+    try {Assert-RetentionRegistry $Registry $TenantKey $Snapshot.Target.TenantId -ReferencesOnly;foreach($entry in @($Registry.Consumers)){Protect $entry.BatchId ('Consumer: '+$entry.ConsumerId+'; '+$entry.Reason)};Assert-RetentionRegistry $Registry $TenantKey $Snapshot.Target.TenantId}
     catch {$blocked.Add($_.Exception.Message)}
     try {Assert-RetentionTarget $Snapshot.Target $Settings.Target;Assert-RetentionQualification $Settings $Snapshot.Target $RegistryHash $OutputRoot}
     catch {$blocked.Add($_.Exception.Message)}
@@ -270,10 +280,10 @@ function New-RetentionPlan($Snapshot,$Registry,[string]$RegistryHash,[string]$Co
         foreach($b in @($byId.Values | Sort-Object BatchId)){
             $check=$valid[$storage+'|'+$b.BatchId];$state='Blocked';$reason=$check.Reason
             if($protected.ContainsKey($b.BatchId)){$state='Protected';$reason=$protected[$b.BatchId].ToArray() -join '; '}
-            elseif($check.Valid -and $chain.Contains($b.BatchId)){$state='Eligible'}
+            elseif($check.Valid -and $chain.Contains($b.BatchId)){$state=if($Snapshot.Verification -ceq 'Metadata'){'Candidate'}else{'Eligible'}}
             elseif($check.Valid){$reason='No verified published-chain membership.'}
             $logicalBytes=0L;foreach($file in $b.Files){$logicalBytes+=[long]$file.Bytes}
-            $rows.Add([pscustomobject]@{Storage=$storage;BatchId=$b.BatchId;Id=$b.Id;ETag=$b.ETag;State=$state;Reason=$reason;Valid=$check.Valid;Files=$b.Files;FileCount=$b.Files.Count;LogicalBytes=$logicalBytes})
+            $rows.Add([pscustomobject]@{Storage=$storage;BatchId=$b.BatchId;Id=$b.Id;ETag=$b.ETag;State=$state;Reason=$reason;Valid=$check.Valid;Verification=$Snapshot.Verification;PayloadSHA256Verified=($check.Valid -and $Snapshot.Verification -ceq 'Full');Files=$b.Files;FileCount=$b.Files.Count;LogicalBytes=$logicalBytes})
         }
     }
     foreach($id in $protected.Keys){if(-not @($Snapshot.Batches | Where-Object BatchId -CEQ $id).Count){$blocked.Add("Protected batch is absent from both stores: $id")}}
@@ -283,18 +293,19 @@ function New-RetentionPlan($Snapshot,$Registry,[string]$RegistryHash,[string]$Co
         $left=@($copies[0].Files | Sort-Object Name | Select-Object Name,Bytes,SHA256)
         $right=@($copies[1].Files | Sort-Object Name | Select-Object Name,Bytes,SHA256)
         if((Get-RetentionObjectHash $left) -cne (Get-RetentionObjectHash $right)){
-            foreach($row in $copies){if($row.State -ceq 'Eligible'){$row.State='Blocked';$row.Reason='Local/SharePoint immutable batch contents disagree.'}}
+            foreach($row in $copies){if($row.State -cin @('Eligible','Candidate')){$row.State='Blocked';$row.Reason='Local/SharePoint immutable batch contents disagree.'}}
             if($protected.ContainsKey($group.Name)){$blocked.Add("Protected batch copies disagree: $($group.Name)")}
         }
     }
-    [pscustomobject]@{SchemaVersion=1;PolicyVersion=$script:RetentionPolicyVersion;PlanId=[guid]::NewGuid().ToString('N');CreatedUtc=[datetime]::UtcNow.ToString('O');TenantKey=$TenantKey;OutputRoot=$OutputRoot;RegistrySHA256=$RegistryHash;ConfigurationSHA256=$ConfigurationHash;ModuleSHA256=$script:RetentionModuleSHA256;SnapshotSHA256=(Get-RetentionObjectHash $Snapshot);Target=$Snapshot.Target;LocalPointer=$Snapshot.LocalPointer;RemotePointer=$Snapshot.RemotePointer;ProtectedBatchIds=@($protected.Keys | Sort-Object);BlockedReasons=$blocked.ToArray();Rows=$rows.ToArray()}
+    [pscustomobject]@{SchemaVersion=2;Verification=$Snapshot.Verification;ApplySupported=($Snapshot.Verification -ceq 'Full');PolicyVersion=$script:RetentionPolicyVersion;PlanId=[guid]::NewGuid().ToString('N');CreatedUtc=[datetime]::UtcNow.ToString('O');TenantKey=$TenantKey;OutputRoot=$OutputRoot;RegistrySHA256=$RegistryHash;ConfigurationSHA256=$ConfigurationHash;ModuleSHA256=$script:RetentionModuleSHA256;SnapshotSHA256=(Get-RetentionObjectHash $Snapshot);Target=$Snapshot.Target;LocalPointer=$Snapshot.LocalPointer;RemotePointer=$Snapshot.RemotePointer;ProtectedBatchIds=@($protected.Keys | Sort-Object);BlockedReasons=$blocked.ToArray();Rows=$rows.ToArray()}
 }
 function Assert-RetentionPlan($Plan,$Fresh,[int]$MaxAgeHours) {
+    foreach($candidate in $Plan,$Fresh){if($candidate.SchemaVersion -ne 2 -or $candidate.Verification -cne 'Full' -or $candidate.ApplySupported -isnot [bool] -or -not $candidate.ApplySupported){throw 'Application requires a Full verification plan; metadata previews cannot authorize removal.'}}
     if($MaxAgeHours -lt 1 -or $MaxAgeHours -gt 168){throw 'Plan maximum age must be 1..168 hours.'}
     $created=if($Plan.CreatedUtc -is [datetime]){$Plan.CreatedUtc.ToUniversalTime()}else{[DateTimeOffset]::Parse([string]$Plan.CreatedUtc).UtcDateTime}
     $age=[datetime]::UtcNow-$created
     if($age.TotalHours -gt $MaxAgeHours -or $age.TotalSeconds -lt 0){throw 'Retention plan is stale.'}
-    foreach($key in 'SchemaVersion','PolicyVersion','TenantKey','OutputRoot','RegistrySHA256','ConfigurationSHA256','ModuleSHA256','SnapshotSHA256'){
+    foreach($key in 'SchemaVersion','Verification','ApplySupported','PolicyVersion','TenantKey','OutputRoot','RegistrySHA256','ConfigurationSHA256','ModuleSHA256','SnapshotSHA256'){
         if($Plan.$key -cne $Fresh.$key){throw "Retention plan changed/stale: $key"}
     }
     if((Get-RetentionObjectHash $Plan.Rows) -cne (Get-RetentionObjectHash $Fresh.Rows) -or
@@ -377,7 +388,8 @@ function Invoke-PreparedBatchRetention {
     param([Parameter(Mandatory)][string]$OutputRoot,[Parameter(Mandatory)][string]$TenantKey,
         [Parameter(Mandatory)][string]$ConfigurationPath,[Parameter(Mandatory)][string]$ConsumersPath,
         [Parameter(Mandatory)][string]$WorkRoot,[Parameter(Mandatory)]$Transport,
-        [ValidateSet('Configured','Preview','Apply')][string]$Mode='Preview',[string]$PlanPath,[string]$PlanSHA256,
+        [ValidateSet('Configured','Preview','Apply')][string]$Mode='Preview',
+        [ValidateSet('Metadata','Full')][string]$Verification='Metadata',[string]$PlanPath,[string]$PlanSHA256,
         [string]$ExpectedPublishedBatchId,[string]$ExpectedPointerSHA256)
     $root=[IO.Path]::GetFullPath($OutputRoot).TrimEnd('\','/');Assert-RetentionPath $root
     if((Split-Path $root -Leaf) -cne 'DATA-POWERBI'){throw 'Retention requires the exact server DATA-POWERBI root.'}
@@ -394,17 +406,27 @@ function Invoke-PreparedBatchRetention {
         if($settings.Mode -cnotin @('Preview','Auto')){throw 'PreparedRetention.Mode must be Preview or Auto.'}
         if($Mode -ceq 'Apply' -and (-not $PlanPath -or $PlanSHA256 -cnotmatch '^[A-Fa-f0-9]{64}$')){throw 'Manual Apply requires PlanPath and PlanSHA256.'}
         $apply=$Mode -ceq 'Apply' -or ($Mode -ceq 'Configured' -and $settings.Mode -ceq 'Auto')
+        # A caller cannot weaken application checks with the Preview setting.
+        $effectiveVerification=if($apply){'Full'}else{$Verification}
+        if($Mode -ceq 'Apply'){
+            $planLock=Read-RetentionLockedDocument $PlanPath
+            if($planLock.SHA256 -ine $PlanSHA256){throw 'Approved retention plan hash mismatch.'}
+            $approved=$planLock.Value
+            if((Get-RetentionValue $approved 'SchemaVersion') -ne 2 -or (Get-RetentionValue $approved 'Verification') -cne 'Full' -or
+               (Get-RetentionValue $approved 'ApplySupported') -isnot [bool] -or -not $approved.ApplySupported){throw 'Application requires a Full verification plan; metadata previews cannot authorize removal.'}
+        }
         $run=Get-RetentionChild $work ('retention/'+[guid]::NewGuid().ToString('N'))
         New-Item -ItemType Directory -Path $run -Force | Out-Null
         $journalPath=Join-Path $run 'journal.json.txt'
         $journal=[ordered]@{SchemaVersion=1;Status='Planning';StartedUtc=[datetime]::UtcNow.ToString('O');PlanPath='';PlanSHA256='';Events=[Collections.Generic.List[object]]::new();Error=$null}
+        Write-RetentionDocument $journalPath $journal
         # A missing registry is never synthesized from the neutral template.
         try {$registry=Read-RetentionLockedDocument $ConsumersPath;$registryValue=$registry.Value;$registryHash=$registry.SHA256}
         catch {$registryValue=[pscustomobject]@{};$registryHash='MissingOrInvalid'}
-        $snapshot=Get-RetentionSnapshot $root $Transport $run $TenantKey
+        $snapshot=Get-RetentionSnapshot $root $Transport $run $TenantKey -Verification $effectiveVerification
         $fresh=New-RetentionPlan $snapshot $registryValue $registryHash $config.SHA256 $root $settings $TenantKey
         foreach($incident in @(Get-RetentionUnresolvedIncidents $work)){
-            foreach($row in @($fresh.Rows | Where-Object {$_.BatchId -ceq $incident -and $_.State -ceq 'Eligible'})){
+            foreach($row in @($fresh.Rows | Where-Object {$_.BatchId -ceq $incident -and $_.State -cin @('Eligible','Candidate')})){
                 $row.State='Blocked';$row.Reason='Unresolved prior removal intent/outcome; operator reconciliation required.'
             }
         }
@@ -414,8 +436,7 @@ function Invoke-PreparedBatchRetention {
         $newHash=(Get-FileHash -LiteralPath $newPath).Hash
         $plan=$fresh
         if($Mode -ceq 'Apply'){
-            $planLock=Read-RetentionLockedDocument $PlanPath
-            if($planLock.SHA256 -ine $PlanSHA256){throw 'Approved retention plan hash mismatch.'};$plan=$planLock.Value
+            $plan=$planLock.Value
         } else {$PlanPath=$newPath;$PlanSHA256=$newHash}
         $journal.PlanPath=$PlanPath;$journal.PlanSHA256=$PlanSHA256
         $journal.Status=if($fresh.BlockedReasons.Count){'Blocked'}else{'Preview'}
@@ -608,8 +629,8 @@ Export-ModuleMember -Function Invoke-PreparedBatchRetention,New-PreparedRetentio
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBK3sxE4SwawN34
-# JUTMgJCk57tf33DaQM2RjoyEirx2YaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDOh6YqLZMnzhFk
+# 9v4E5zSGlKSZvPGy8/Hfu5oQMYQobaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -742,31 +763,31 @@ Export-ModuleMember -Function Invoke-PreparedBatchRetention,New-PreparedRetentio
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIEdQFMqyoblKAnCfuPNchbhClOTYA8VY/NqMubxI9fWNMA0GCSqG
-# SIb3DQEBAQUABIIBgAaUYCr7KsG1DqItZVM14fdn2Q+D0jGnuLI5tyjaK0tcaOo/
-# 5dXiV1Ypzk+BlVKxuAdgcydcgSi29G3ZFdjUJlc5mbFjZ3sGI2LlOVcY+lZD4PF3
-# 2g60yqXz2xklrQB1AW2gKrza/tw9jeAZwKqsBxE26EArze2I65Gftheu/NwixYn/
-# 8+LnojbVnI7buGrL3GEp/z4qIW2XhDDwfs7r33w9+EqxBIhLtgG9XSgn6xGaL0us
-# M7Ja6ibo9l5ylbk2pHyIsCYczrg/7V3TzzLg8x0D5cp/P1yqRtWEttjMtLULlGa7
-# UwtVktvoC3VAzDyVaT6bR/sPRJ02/EauKUuXqoQLLzclLj2xKWNeFNrfEvulz8EC
-# dUrFl6fvqfsr+BamVfesjlClfdBFGdFDy+zFQR3MCq/It+uF8jpg3c7pehKWJsih
-# Yp98Ix8nVAn+rCx7SoWnmBqQwBdYP/o5lDkktlAOJptptla6SIfIVr9U95ehfdSA
-# n9Hc0LyTwNS6y1YpPqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIORApfvVbRGZqfx1QU7gxxE4DTcpXwLckShrdwnc8+WUMA0GCSqG
+# SIb3DQEBAQUABIIBgFOaeROWgcje1M9L4tNddC27fFoEuMna+iV5qqJy8RekgqYo
+# PDY3ER3VKr2rb6T1AkiCESEZnuSGbl7Bb3x+/riZHjb7oZSDy8GFHmKweef/aHmm
+# C17rQZFS7M4y1qxbImpNZGE1sQRuL4ECMYr0GEcFf+G1B+Pun1kDOCiwnvg3Ys8b
+# pIwGyGq5NVX9ZY0eZ2wQlJtEnnlsrZkhnfTE9DqPHGCdDZlXuG3sBRnTtUHXdN0w
+# 51izRnUafkyxiCHtRxDLVCqxGKO7zAz+1tPa6q0c1hknrcc5u2eAuTjHNnKU8719
+# B6tj8iIFdbuGL86bNQcMtPwnRXywcmpEkaU12sBy3Ac163mf925fqMYc7hR+kDYW
+# RPjKU2wkA9cI76Uf0FwbLKsjVCPFsPfJfKMhj0qajHS/XhKbahZCuuYBrJGwVnaf
+# PUgg03jH+y3GpIvlKuY6x0ltTdaUaugd98MFAi+Ot80F6lZaUNRxXSZzCCr+76Kj
+# uz0v9SPzeAt3K8IuxqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTkxOTQ3
-# MTRaMC8GCSqGSIb3DQEJBDEiBCBYuzQypPKlyhS1MrogMfJrFDahSpkYLcJcZ9vj
-# 58R48DANBgkqhkiG9w0BAQEFAASCAgAmDfPFPWa2WZeAle0dGkkd8zygAmaGfy2g
-# SVvhkjR+WJLoNqkObl8YL9m4Ancsvy6Na3vfKw80ZupoWLRKCMYK8HpgQgfZj4Hx
-# 9SYoavK8YYow3/KfoyIWProHG3OADGsx0dgPdHgnWOuVNZpX4O9fevqAT/s9hUZI
-# 5Agh61J76OoVnw+D1+1gLAQdEzgA9VI9McMj0vLV+9B+fMssbLshdOHCfCHV2YHD
-# FAafFjF85Hme+9g9Z8OBzGBP7IW0h3vMrMZtMMC9TWcf8wGoLnXnsKx9J2k0lVjm
-# Vc2gmXDNZHF+dURW+v0+tZAdCjEFAGNstUbuuWbwDj1pYNtEnoxPsP+Q4W4TihkZ
-# 5i4Ls9TxfP0+TfhFVS+lwrlmQHRt/17GAEFWP8qz01cwv9Gd3NCyqwiKAe8DfFrG
-# 1kuAvETVCieip+VOZX/uyJL+n0EntiOMzQj8sta8NIPy5A+wZYCDbBCGERA4O5O8
-# wUX/hzZ3YVySTEyB+K0hJ0Y1GxwsqFTLs2gLcgvOxjG32UuqzMaeNpdmV0c2WVAf
-# VAkghicb0QgkVLxjgzzPCojgcmV+4tNJCYE7GXioykFuBhn1YMoGrpsxaiaBgRwG
-# A3eT0Ho9KtrcnC2NBJgHVEfz44MMPqyJQ0Y7eQgZYRWHPk1jBhV/9z/tBRGVwtZy
-# FPCNdDtY4g==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTkyMTIy
+# MzdaMC8GCSqGSIb3DQEJBDEiBCA4WVRGPzttR4B32vFC+J9WJqTKIJSQmbZFzpIw
+# tmo/ADANBgkqhkiG9w0BAQEFAASCAgAeoZpQI9C8S4xonzCVhXUSTqGkjCNrjtkd
+# rt5mFX6YC/B12KArgU8WEBZ2cOBcniKPUO/sYNcElWbkh9g/rWCW4D+P9VsVxA/E
+# QONJiFAUasVnpPp67Qb1NxvgjhF66QuCTGqicc4koehMDMPRXJ9rS1ChovjJQi6o
+# GujMf2snUS5P+gerCEZ8qa8IsjjR2ZVfILFUAEf3TNT4VsdMcG/f2S1lPQ8YPy50
+# csAsLCVxVOpJPq2Wp+fGldX3c/TrJ3FTGM52qNkbXEAPWbHNvvJgRP4k1A/hxQFc
+# CsbIFnXIzN3DaFVJatu/nlOyseLPRYdVpj6a0zfJjIOeVf/6Xg875DHYm93socT9
+# qdzGT2eTU9Mr19Q+zGcLLtpgpGEcG37Rrr6AkH+JMThWUqyqwfxlneBd+XKXak2b
+# Pg27CU31GloN2Fj7+ccUtKzpQ4lwaPAJkzxwpuQWc6WnqSBwF9MpzrFilMWdfQxm
+# /8VkvbIIyFE4W/P39vSYQbOmvGmVrJldeYFyPDhoSBZVurqaGWW1rgWHbRI0ny/r
+# bMwvccsYbntJMZsLest1DV9+XwTVSDOjSH778QnlZMqIZ2ul7poDbooVlFwiM8jW
+# j2s1EU3r7ixh03g11vdVa+Y3KiBS/58iRVSQypB+FOpklyiLjQiL6QiBpz+2dm4l
+# l5EW4HYIWg==
 # SIG # End signature block
