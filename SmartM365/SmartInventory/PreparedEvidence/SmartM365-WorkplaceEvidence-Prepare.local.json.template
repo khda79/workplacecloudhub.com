@@ -16,6 +16,34 @@
   },
   "PreparedAllowLegacyTenantless": false,
   "PreparedAllowEmptyTables": [],
+  "PreparedRetention": {
+    "Mode": "Preview",
+    "ConsumersPath": "",
+    "PlanMaxAgeHours": 24,
+    "Target": {
+      "TenantId": "",
+      "ClientId": "",
+      "SiteId": "",
+      "DriveId": "",
+      "RootId": "",
+      "BatchesId": "",
+      "RootPath": ""
+    },
+    "Qualification": {
+      "Status": "Unqualified",
+      "PolicyVersion": "PreparedBatchRetention/v1",
+      "ReviewedBy": "",
+      "ReviewedUtc": null,
+      "Coordination": "SharedServerPublicationLock",
+      "ServerOutputRoot": "",
+      "RegistrySHA256": "",
+      "ModuleSHA256": "",
+      "AccessEvidenceSHA256": "",
+      "WriterExclusionEvidence": "",
+      "ExclusiveCloudWritersConfirmed": false,
+      "RecoverabilityConfirmed": false
+    }
+  },
   "EnableSharePointUpload": true,
   "PreparedSharePointFolderPath": "",
   "PreparedMappingSharePointFolderPath": "",

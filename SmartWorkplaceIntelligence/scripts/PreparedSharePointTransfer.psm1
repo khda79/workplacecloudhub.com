@@ -1,3 +1,4 @@
+# Version: 1.1.0
 Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
 Import-Module (Join-Path $PSScriptRoot 'PreparedMetadata.psm1') -Force
@@ -290,7 +291,7 @@ function Send-PreparedEvidenceBatch {
             Write-Host ('[{0:yyyy-MM-dd HH:mm:ss}] SharePoint verified {1}/{2}: {3}; bytes={4}; localCheck={5:F1}s; upload={6:F1}s; readBack={7:F1}s; verify={8:F1}s' -f (Get-Date),$journal.VerifiedFiles.Count,$plan.Files.Count,$file.Relative,$file.Bytes,$localSeconds,$uploadSeconds,$downloadSeconds,$clock.Elapsed.TotalSeconds)
         }
         $journal.Status='Success'
-        [pscustomobject]@{Status='PublishedAndReadBack';BatchId=$plan.BatchId;CsvFiles=$plan.CsvCount;VerifiedFiles=$journal.VerifiedFiles.Count;ExpectedFiles=$plan.Files.Count;ManifestSHA256=($plan.Files|Where-Object Relative -eq "batches/$($plan.BatchId)/batch.json.txt").SHA256;PointerVerified=$true;CsvRecalculated=$false;AuditPath=$auditPath}
+        [pscustomobject]@{Status='PublishedAndReadBack';BatchId=$plan.BatchId;CsvFiles=$plan.CsvCount;VerifiedFiles=$journal.VerifiedFiles.Count;ExpectedFiles=$plan.Files.Count;ManifestSHA256=($plan.Files|Where-Object Relative -eq "batches/$($plan.BatchId)/batch.json.txt").SHA256;PointerSHA256=$plan.PointerHash;PointerVerified=$true;CsvRecalculated=$false;AuditPath=$auditPath}
     } catch {
         if($journal){$journal.Status='Failed';$journal.Error=$_.Exception.Message}
         if($journal -and $journal.PointerAttempted){throw "Cloud pointer publication was attempted but completion is not confirmed. Do not refresh Power BI; retry the same batch. $($_.Exception.Message)"}
@@ -364,8 +365,8 @@ Export-ModuleMember -Function Resolve-PreparedSharePointFolder,Send-PreparedEvid
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCo4nfiOdLgwpzt
-# dpjrAv4Bt9qE1Ck6TIu4fRTuzuHA46CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBtxkyELk/TQWU+
+# 0DPIFl+74r6DOzHbUfQgeipjZ1Y9vaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -498,31 +499,31 @@ Export-ModuleMember -Function Resolve-PreparedSharePointFolder,Send-PreparedEvid
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIJYiuAbSY3rbdg+2zVINsZmd8417/UB/i3zyRyXJdHLwMA0GCSqG
-# SIb3DQEBAQUABIIBgI4HEeBnTjZR+tQhspH8wHDIXzk6F+8Biqx20RnEKk/5olhs
-# 2LCrjJbrYAzNY9mOEg4rvFtLeF1KTdt7EXGJZ3tNOCDj9Lm2FmoS8E1zefI7DZ8Z
-# BtRyH1y/TUp4KjB6BcrrXFAF2XAvrKGIQSESgn+udUiyoAEQo1VMJDauNT4H0tMf
-# fTQI0xTSMVHbGJDLd4Nbb75yzHVHASlMZ5PTMhfjgWd4fkifSWttvqYsYUoDXYDi
-# zu6nbzou6FxNw7SdR96uL3hDo5tZaXLOVEeNCcAjV7aDzKJowuuTc09LS8LdNW18
-# 9tmV4DVyVYsJ8AN6la90TuW2pk2/9+GnydemZGh6Bj+GvzcRRvjRfEK0+yfYG2w0
-# fN3yUz8DsoMswQG5Ddz58+uzBWWzEHXoyOFYfdtuc0DJXtZCxV0y1G0+N5Wl1+sQ
-# O6YZ3eXte+DeSBK2NFbgW8OhYBtbKoUqIYsbGzq7+6h4YGn1pJc68m++VBIcC13j
-# bx2Dal9Rb+aicwPZDKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIA5+zb1vJeWrG/0qiMOJX3DjIG2WfwizelQzuyy+Pf6DMA0GCSqG
+# SIb3DQEBAQUABIIBgJ0VGVblDXKGmXC70kBYY5SZXLlApaybzYVbXQ9w8qzy6Bii
+# Jq/POEm+ceLsKy28h+b3Wrm3yu/DWruhDLah7UBQNDfMOozHAcwRgFQ6133/kSUF
+# 8AyU7XN/iNuioLNijy4EBKs29xh7FX5XfhOngTXPaVLxrsKw0AQU31DerLFPt7lq
+# +TnveE4Gg7/YZQ2g4TRClD9uwQVOM1wRJ7IYwt4czBhw0KacpPggFCkoAO5tF+e4
+# 12dYILsxaXekTMDPS/3ql41q684ljH7vI/zE3iryfNpLBLpvUxP3tToyKVpcKwQ9
+# aUz+LZZlMZe2d0hoIIR19agcxCemqpkRbdA2ZLctWKEhaTe0hQhtpnQVTcuQYcPL
+# lShleI/8OJLZbmBOxaTiP6xTgfa/KAIWt5q/j6XZzbEQB97g3UEmr9fzq8ti3Xm2
+# mQNP9VdCJSRV+sKzElz3T2Xrepc1oEbg88WMtbbkUHtYCpigIBJmKuzSUU4tVgvS
+# NPrAkp3lnodSG5UQtKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTkxNTI2
-# MDhaMC8GCSqGSIb3DQEJBDEiBCDuyO/k619ch1r/lz9ByHnP0MN91ZGBaGRnvPG5
-# y+o8aDANBgkqhkiG9w0BAQEFAASCAgAveGeTpq6zmQOCpJ4w7DCLUEp8jRe01InY
-# RF+j1FeGYXNcONCn+/g+JxOswnJZzVaCV70cy0Jfq57bgCDZkEy8aHREbRfDz+x2
-# f2khUmbG+B2jOPWpAy0YcIYP2OJdj0IHZ0YeDhvzaZIRxRt7HIVHv+AhmyXDvZBq
-# ugVf1EshWOPH3NPXv/pcB+/wdfRJ8AkNn6CBz4vPkpZYYhkzFnVS7EE3KFR9NG2T
-# QvHBX8VXKPdyRrSUfkC7wwoULsomzuYHI5W3N7h5BCYg3jpFGmm8ohg62MiMGBDH
-# EBUaXOdO2ziwAXtakEGT0exo1rd6woPEftEkU9TPhp6vQxEpFt9fxBisePHOHrpg
-# Pu/J//M8yakYgk3KlEYWqy5/HRpxU8kYxKbOkP2vZBY99ezoDyzuUBYE01/+vS6D
-# 2k41q0nNsZPDh4K/J0QldbaEsgqz9qTF8tqQZm6FD0xLFWCttEopkZ1OOcB1B9yb
-# ZLtSocKxVxPxkR8m9ctdY2GxgRCVZrYtV48w+RmPWKWGYoqOAhNZjmAoZV8cmRVR
-# jxPbWFiiM4XHCxP7F64+Bhf92euSe8Vg8rDo36Z1C7aY+f3FmHhy6HfQ0JC1xk1n
-# Yhcj79OJdyvxsv18gMI68PVKyF5a+WXpoozJ39iZ+etZzExR/2Vj2C1pCYvn/vxE
-# 0l8hMLjnGA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTkxOTQ3
+# MTNaMC8GCSqGSIb3DQEJBDEiBCBXHtqN4qC+uVJdcg/INzU1OvcturZOQAKEKoKI
+# bDN79zANBgkqhkiG9w0BAQEFAASCAgCCP4luS1LIf8ppKkVxyVMPKTFWKOroDiZz
+# VHj6Qpx1QiufLOgsSl5penLCUWYf9vWHAkteUxjlzbgD8jXLQK+5KW4OIt069HR3
+# JqbywcJPilmgZA+oweD+8rO9shaQRfz64STXkJUz+vwHvTfEn4jl8PHHUAaPjD6R
+# 3wD/hQFqp7cRqnlNNKXsD41TH0lCYf0jlL6OzR/P0V7E8XBHzAut8INMwZjQ4LGQ
+# EIS4MkEXaw04DhWMc25tyuAvXGGAHV0zVE8lqNThdItkNIfcA8FQm0hRhxVKG/is
+# EGdZtJb0kb+sh+rHNSsJxQ5MtCKdl2w0VLWeFnf/zmhXhSVnyRfumw3aJxiXqph9
+# naPTLUjMLCYg5Rq2aZaQvB44hKjpwe8t4wTeUVBDprYp9maXKKLSKVGXlAo684jS
+# ELcVDhSw94tL2y7CXEKdI7v2o6TkLnW+Tdf1dwrzj1LXpmxev6LZBReEvFfW1Pel
+# lLOKXrjoRrjujpQAqjT0LkcQCnwp7Ls/kIGdMEFeblNQbQ9DmbYJ+XVUlM2G4Qtc
+# vKaVpbs+vmd2EkjJHZKfbCjeSpvuOX1RITgSjjPk4jO0kEu+dZYV2YztxKcCH+we
+# i3AV/F4Al0vAvHzOEhZGb2qKSbz0/qzRnmkqcDhIhJjEWzBSUfdhP/hn74jbP8gW
+# 0sFi4VyBTg==
 # SIG # End signature block

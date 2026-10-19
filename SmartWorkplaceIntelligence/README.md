@@ -23,6 +23,31 @@ planning cards. It is disabled by default and does not rewrite historical trends
 4. Power BI consumes the qualified batch. Report refresh and save are separate
    operations from collection and preparation.
 
+## Qualified batch retention
+
+Publication alone no longer retires local batch payloads. After a successful
+SharePoint transfer and verified root pointer, the wrapper invokes coupled
+server/SharePoint retention. `PreparedRetention.Mode` defaults to `Preview`:
+plans and journals are produced without archiving or removing batches. Private
+activation of `Auto`, after server qualification, applies each newly generated
+and revalidated plan without a daily approval or another scheduled task.
+
+Both stores protect the current batch, its predecessor, and every batch in the
+qualified private consumer registry. An old protected batch does not stop the
+remaining chain traversal. Missing/incomplete historical metadata, unexpected
+content and unproven publication-chain membership remain blocked. There is no
+age-only policy, automatic expiry of consumer protections or PBIP discovery.
+
+The registry template is `config/templates/PreparedBatchConsumers.json.template`.
+Keep its private runtime copy beside the preparation wrapper. An operator must
+review all declared distributed consumers; a local PBIP scan cannot establish
+completeness. The template is deliberately empty and unqualified.
+
+See [server qualification, activation and recovery](../SmartM365/SmartInventory/PreparedEvidence/docs/DEPLOYMENT.md#qualified-coupled-batch-retention)
+for the exact configuration fields, coordination conditions, plan/hash workflow,
+recovery limitations and offline tests. Until activation, local payloads can grow.
+Retention errors never roll back or replace a correctly published root pointer.
+
 Deploy `SmartM365` and `SmartWorkplaceIntelligence` as matching sibling folders,
 or explicitly configure `WorkplaceIntelligenceRootPath`. Preparation requires
 PowerShell 7 and Python 3.10 or later.

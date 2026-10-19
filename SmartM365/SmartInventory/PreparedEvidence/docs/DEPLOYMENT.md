@@ -204,7 +204,7 @@ Publication writes each tenant-prefixed table to a temporary file in the new bat
 
 ### Versioned output and refresh
 
-DATA-POWERBI/current.json.txt selects an immutable batches/<batch-id> directory containing 24 CSVs, batch.json.txt, validation.json.txt and a matching current.json.txt pointer copy. The content remains JSON; only the transport filename changes. Only a fully validated batch advances the root pointer. The current and immediately previous valid batches remain recoverable; older published CSV batches are retired only after a successful replacement. Their small manifests/validation receipts remain under retired/. Failed publication payloads are removed while diagnostics remain under failed/. No raw history is deleted. Outputs are single-tenant and must not be combined as a multi-tenant model.
+DATA-POWERBI/current.json.txt selects an immutable batches/<batch-id> directory containing the cohort's declared CSVs/artifacts, batch.json.txt, validation.json.txt and a matching current.json.txt pointer copy. The content remains JSON; only the transport filename changes. Only a fully validated batch advances the root pointer. Publication alone retains existing batch payloads. Qualified coupled retention, described below, runs only after successful SharePoint transfer/read-back. Failed publication payloads are removed while diagnostics remain under failed/. No raw history is deleted. Outputs are single-tenant and must not be combined as a multi-tenant model.
 #### Legacy metadata conversion (manual only)
 
 Current metadata uses `.json.txt`. Readers prefer it and reject malformed preferred
@@ -218,7 +218,7 @@ Current inputs need no conversion; installing code never runs it automatically.
 
 Normal success or failure removes this run's source/staging copies and downloaded mappings, retaining capture/run audits, failure diagnostics and preparation logs. The shared JSON transport resolves these audit filenames, preferring `.json.txt`. An interrupted run's owned, marked source/staging payload is cleaned on the next run under the preparation locks. Unmarked legacy scratch folders, foreign-tenant folders and unrecognized batch folders are never automatically deleted. Cleanup refuses paths outside the declared root and symbolic links/junctions. A deletion failure is reported rather than silently presented as reclaimed disk space. Old batches without a verifiable publication receipt are retained with a warning. Small private logs/audits are not automatically purged; monitor disk space. No existing production folders are retroactively cleaned merely by installing this update.
 
-Collectors may update raw sources after capture. Avoid overlapping prepared-output transfer/replacement with Power BI refresh: local atomic pointer replacement is not an atomic SharePoint transfer or a cross-query transaction. Verify transfer completion first; PreparedBatchId can pin a verified immutable batch, but a pin older than the two retained local batches is not supported by this retention policy. Publisher SHA256 checks and Power Query byte-length checks have different scope. This cleanup is local; it does not delete remote SharePoint batches.
+Collectors may update raw sources after capture. Avoid overlapping prepared-output transfer/replacement with Power BI refresh: local atomic pointer replacement is not an atomic SharePoint transfer or a cross-query transaction. Verify transfer completion first. PreparedBatchId can pin a verified immutable batch; declare that batch in the qualified consumer registry before allowing retention. Publisher SHA256 checks and Power Query byte-length checks have different scope. Raw-source/staging cleanup remains local and separate from coupled batch retention.
 
 Direct SharePoint transfer uses the shared Core uploader and downloader and requires the existing site read/write grant. When PreparedSharePointFolderPath is blank, the target is the normal SharePointTargetFolderPath after the shared CSV-to-DATA normalization, with `/DATA-POWERBI` appended. An explicit override must identify a library-relative DATA-POWERBI folder outside raw/log folders. Required configuration is checked before expensive generation. Missing destination folders are provisioned by the existing Core helper. No tenant URL or credential is hard-coded.
 
@@ -229,6 +229,131 @@ The local publication lock is held during transfer to block replacement/retireme
 Normal runs transfer when EnableSharePointUpload is enabled (template default true ; an existing runtime JSON keeps its local value). The scheduler entry alone does not change that setting. TransferOnly is a manual recovery mode, not a replacement preparation job. Qualify the actual remote transfer; synthetic transport tests do not establish live SharePoint success.
 
 ## Qualification boundary
+
+### Qualified coupled batch retention
+
+Deploy the reviewed preparation, transfer and retention components together.
+The wrapper calls retention after both normal transfer and `TransferOnly`
+success, passing the published batch ID and verified pointer SHA256. Offline,
+ValidateOnly, failed transfers and local publication alone cannot trigger coupled
+retirement. No additional scheduled task is installed. A retention exception is
+logged separately and leaves successful publication and its pointer intact.
+
+`PreparedRetention` is added from the wrapper's committed template when its
+runtime configuration is loaded; existing local values are preserved. Private
+configuration and registry deployment are operator actions, separate from Git.
+
+| Setting | Contract |
+| --- | --- |
+| `Mode` | `Preview` by default. Set private runtime to `Auto` only after qualification. |
+| `ConsumersPath` | Blank selects `SmartM365-WorkplaceEvidence-Prepare.consumers.json.txt` beside the wrapper configuration. Missing/invalid registries block application. |
+| `PlanMaxAgeHours` | 24 by default; accepted range 1..168 hours. This expires plans, never protections. |
+| `Target` | Exact `TenantId`, `ClientId`, `SiteId`, `DriveId`, `RootId`, `BatchesId`, library-relative `RootPath` ending in `DATA-POWERBI`. No customer defaults. |
+| `Qualification` | Initially `Unqualified`. Requires the evidence below; a boolean alone cannot authorize retirement. |
+
+Copy the neutral consumer template from
+`SmartWorkplaceIntelligence/config/templates/PreparedBatchConsumers.json.template`
+to the private wrapper directory. Set the tenant identity, qualified review
+(`Status`, `ReviewedBy`, UTC `ReviewedUtc`, `DeclaredConsumersComplete=true`) and
+`Consumers`. Every entry requires `ConsumerId`, `BatchId`, `Reason`, UTC
+`ReviewedUtc`. A consumer may protect several batches; duplicate pairs are
+rejected. There is no automatic expiry. Changes require a new explicit registry
+review and matching qualification fingerprint. A server cannot discover all
+distributed reports. Register a consumer before it starts using an older batch;
+coordinate reference changes with the same publication authority.
+
+First run the standalone command in Preview on the authoritative server. Its
+private `plan.json.txt` contains resolved target IDs, live access-evidence hash,
+configuration/registry/module hashes, both pointers, protection reasons and the
+complete per-store file inventory with SHA256, logical bytes, validation results
+and `Protected`, `Eligible` or `Blocked` decisions. An invalid policy still
+produces a blocked plan when inventory access is available. Authentication,
+enumeration or read-back failures can instead stop with a failure journal.
+Inventory hashes stream payloads through one temporary file; expect significant
+network traffic. Files are rechecked before removal. Bytes are logical payload
+sizes, not a promise of disk or SharePoint quota reclamation.
+
+Qualification requires `Status=Qualified`, `PolicyVersion=PreparedBatchRetention/v1`,
+the operator and UTC review date, canonical `ServerOutputRoot`, `RegistrySHA256`,
+`ModuleSHA256` of PreparedSharePointRetention.psm1, `AccessEvidenceSHA256`,
+`Coordination=SharedServerPublicationLock`, documented `WriterExclusionEvidence`,
+`ExclusiveCloudWritersConfirmed=true` and `RecoverabilityConfirmed=true`.
+Obtain hashes from the actual deployed files and live Preview, never example
+values. Qualify the existing backlog too; incomplete old formats remain blocked.
+Changing a published batch does not invalidate this policy qualification.
+Changing the implementation, registry, target or reviewed access evidence does.
+
+All prepared-output publishers and retention workers must use the SAME
+authoritative server/SMB DATA-POWERBI root and its exclusive `.publication.lock`.
+Retention holds that lock across planning and application, and read-only file
+handles exclude writes/replacement of the private configuration and registry.
+The publication handle is checked with a durable read/write round trip before
+mutations; an unusable handle stops the operation.
+The live access fingerprint includes the server root ACL and both SharePoint
+root/batches permission listings. A site owner must additionally qualify inherited
+group membership, other app grants, administrative access procedures and exclusion
+of direct SharePoint/OneDrive writers for the entire operation. These cannot be
+proven exhaustively by the API listings. If that exclusivity is not enforceable,
+leave Preview enabled. Never treat a synchronized copy as this server authority.
+Never use a synchronized review-workstation data copy as a retention target.
+Folder eTags are additional preconditions, not a lock on descendant contents.
+
+After qualification, set `Mode=Auto` privately. Each successful publication then
+creates and fingerprints a fresh plan, verifies it under the common lock and
+applies its eligible actions without manual per-plan approval. Current/previous
+from both pointers and all consumers form one protection set. Pointer divergence,
+missing qualification or changed global controls block the whole application.
+A lot with incomplete receipts, unexpected content or unknown chain membership
+is individually blocked; other independently qualified lots can proceed. Verified
+archived publication links permit traversal through previously retired batches.
+
+The manual entry point is `SmartWorkplaceIntelligence/scripts/Invoke-PreparedSharePointRetention.ps1`.
+`-Tenant <profile> -Mode Preview` creates an inspectable plan. To apply that exact
+reviewed plan, use `-Mode Apply -PlanPath <private-plan.json.txt> -PlanSHA256 <hash>`.
+Manual Apply also requires qualified controls and fresh state; it cannot bypass
+protections or use a stale plan. `-Mode Configured` follows the private mode and
+is the wrapper's automatic path. Installing or testing code never activates Auto.
+
+Before each removal, the three receipts are archived under `retired/<batch-id>`
+on the server and SharePoint with byte/hash verification and remote read-back.
+Different existing receipts cause an error. Cloud removal uses Graph v1.0
+`DELETE /drives/{drive-id}/items/{item-id}` with `If-Match`; Microsoft documents
+this API as a recycle-bin operation, not permanent deletion. No purge endpoint,
+bypass-lock header or automatic restore operation is used. See
+[Graph driveItem deletion](https://learn.microsoft.com/en-us/graph/api/driveitem-delete?view=graph-rest-1.0)
+and [folder eTag limitations](https://learn.microsoft.com/en-us/graph/api/resources/driveitem?view=graph-rest-1.0).
+Keep the existing `Sites.Selected` site write grant; permission/read-back failures
+block retention, never justify silently broadening application permissions.
+
+SharePoint recycle-bin retention is generally 93 days and can end earlier if an
+authorized operator purges it; policies/holds can retain additional copies.
+Qualification must include an operator recovery procedure and an actual later
+recovery check before production activation. A Graph 204 and absence check prove
+the item was removed from the active location, not a tested restoration or freed
+storage. See [SharePoint recovery conditions](https://learn.microsoft.com/en-us/sharepoint/sharepoint-data-deletion)
+and [Purview retention](https://learn.microsoft.com/en-us/purview/retention-policies-sharepoint).
+
+Cloud retirement precedes the corresponding local payload removal. Journals
+persist intent before requests, then record confirmed recycle, local retirement,
+blocked actions or uncertain outcomes. Mutating requests are never blindly
+retried. A fresh automatic run may finish an intact local lot only when an
+unchanged, hash-verified prior plan/journal confirms that exact remote retirement;
+new protections are evaluated first. An uncertain response, partially removed
+local payload or conflicting history requires operator reconciliation and a fresh
+plan. Preserve unresolved runs and their original receipts in a private incident
+archive; remove them from the active `retention/` history only after that explicit
+reconciliation, never merely to unblock Auto. Do not reuse an old plan after a partial application. Receipts, plans and
+journals have no automatic purge in this change; monitor their storage.
+
+Run synthetic tests only against a dedicated scratch directory:
+`Test-PreparedSharePointRetention.ps1 -TestRoot <scratch>`.
+The suite uses file-backed fake SharePoint and synthetic tenants, including
+Preview, automatic/manual application, protections across stores, archived links,
+stale plans, unsafe targets, lock contention, archive errors and partial recovery.
+Also run existing transfer, endpoint/unified transfer, metadata, configuration,
+capture/retention, publication and lifecycle-cleanup suites. Offline checks do not
+qualify server SMB coordination, SharePoint permissions/recovery or OneDrive
+synchronization. Deployment, real qualification and activation remain separate.
 
 Validate the deployed revision and specific batch. Source capture, business counts,
 history retention, verified transfer, synchronization and Desktop/Service refresh

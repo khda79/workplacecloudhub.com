@@ -1,4 +1,5 @@
 # Offline, single-tenant preparation and versioned local publication. No tenant APIs.
+# Version: 1.1.0
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $script:ProductRoot = Split-Path -Parent $PSScriptRoot
@@ -154,34 +155,9 @@ function Remove-PreparedMappingWorkbooks([Alias('DataRoot')][string]$WorkRoot, [
 }
 
 function Remove-PreparedObsoleteBatches([string]$OutputRoot, $Pointer) {
-    # Follow only the published chain, never sweep arbitrary or failed folders.
-    $keep = @($Pointer.BatchId,$Pointer.PreviousBatchId)
-    if (-not $Pointer.PreviousBatchId) { return }
-    foreach ($id in $keep) { if ($id -notmatch '^\d{8}T\d{9}Z-[a-f0-9]{8}$') { throw 'Invalid protected batch ID.' } }
-    $previousPath = Get-PreparedMetadataPath (Get-PreparedChildPath $OutputRoot "batches/$($Pointer.PreviousBatchId)") 'current' -Optional
-    if (-not $previousPath) { return }
-    $previous = Get-Content -LiteralPath $previousPath -Raw | ConvertFrom-Json
-    if ($previous.BatchId -ne $Pointer.PreviousBatchId -or $previous.TenantKey -ne $Pointer.TenantKey) { throw 'Previous batch receipt mismatch.' }
-    $candidate = $previous.PreviousBatchId
-    $seen = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
-    while ($candidate) {
-        if ($candidate -notmatch '^\d{8}T\d{9}Z-[a-f0-9]{8}$' -or $candidate -in $keep -or -not $seen.Add($candidate)) { throw 'Invalid or cyclic batch retention chain.' }
-        $relative = "batches/$candidate"
-        $folder = Get-PreparedChildPath $OutputRoot $relative
-        if (-not (Test-Path -LiteralPath $folder)) { break } # Already retired on an earlier run.
-        $receiptPath = Get-PreparedMetadataPath $folder 'current'
-        $receipt = Get-Content -LiteralPath $receiptPath -Raw | ConvertFrom-Json
-        $manifestPath = Get-PreparedMetadataPath $folder 'batch'
-        $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
-        if ($receipt.BatchId -ne $candidate -or $manifest.BatchId -ne $candidate -or $receipt.TenantKey -ne $Pointer.TenantKey -or $manifest.TenantKey -ne $Pointer.TenantKey -or (Get-FileHash -LiteralPath $manifestPath).Hash -ne $receipt.ManifestSHA256) { throw 'Old batch ownership/hash mismatch; retained.' }
-        $candidate = $receipt.PreviousBatchId
-        # Preserve small audit receipts, but not duplicate historical CSV payloads.
-        $audit = Get-PreparedChildPath $OutputRoot "retired/$($receipt.BatchId)"
-        New-Item -ItemType Directory -Path $audit -Force | Out-Null
-        foreach ($name in 'current','batch','validation') { Copy-Item -LiteralPath (Get-PreparedMetadataPath $folder $name) -Destination (Join-Path $audit ($name+'.json.txt')) -ErrorAction Stop }
-        Remove-PreparedOwnedPath $OutputRoot $relative
-        Write-Host ('[{0:yyyy-MM-dd HH:mm:ss}] Retired prepared batch {1}; audit retained, raw history untouched.' -f (Get-Date),$receipt.BatchId)
-    }
+    # Compatibility entry for old callers: publication alone no longer authorizes payload retirement.
+    # Coupled retention runs after cloud pointer verification, with a qualified consumer registry.
+    Write-Verbose "Batch $($Pointer.BatchId) retained under $OutputRoot; coupled retention is a post-transfer operation."
 }
 
 function Undo-PreparedMappingReplacement {
@@ -880,8 +856,8 @@ Export-ModuleMember -Function Get-PreparedSourcePlan, Invoke-PreparedEvidencePip
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDx4qR/RZBWuiuT
-# 3XX+wBspMHWUM5ZfPhEGkL3LBRLjgaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBup1Qze7asj/5e
+# PzdzVF2udrzeGMM3II4LfJBddnzDP6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1014,31 +990,31 @@ Export-ModuleMember -Function Get-PreparedSourcePlan, Invoke-PreparedEvidencePip
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIN8xaSkM+o3BBKoMMLmtR3Yf+LopzFfKmvOHsjgaC8b4MA0GCSqG
-# SIb3DQEBAQUABIIBgHQdBC61UW6yuqbu++dWgitZCV2d7sWbhwh881q5fk9L3P12
-# ZroFfEuVBk6dYZNGbtKBabKSBFalfJs3IJlWPQh83iVO+6Lx1UydGzHwEmv1/PZp
-# Tsy31OGQLQXQNjknniShCTjxh+o55DxcWZZ8ZZvJZ7B/cJZboqo8Lma2CChPO/4P
-# a/LkasVt45TH7zkXCslyWavdLLWQ4dry/T80qx+a3tDxb2q6tEfnep1I8bqu1cq0
-# tEJe1TWruCCZKwRmGT3EsCEPoOnQCp72Qmi2E6j+d05a3g2UOewXGqXjqTbkNmKg
-# 7qiW8fm8O/lRiV1siJ6yv82V/UWc88z9G21TWIMSulLvTLMqK/yJsBlTBfRrIHx9
-# HFGsXjVLAo5Vmxwk/1S7aE2XUWVbngFli6WpS0DxglRobTCUnUhsHwIYvI5lmKWY
-# YQjW3kK8bCDmxvGL6flI0Leb8Jk9towVGYX/V7w7H8xKMwp1iIDQRgVzeWwkCr5I
-# Ka9uqNg4DjA2T8H2T6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEINJST/xLe67o1iVx1Ln2X6MSTpWZxwXEuuWmmFk9ZD4VMA0GCSqG
+# SIb3DQEBAQUABIIBgDuV0vUO8irCpVfLvSI1vxoEhFDRmjGKrOwqQZi8cdPxrXZe
+# KCgw7HhwLWvmOOGN/dnX65swfBKiNhkRIH84dJ7SB1LXjc1BFTPlG4IGQksMb2nq
+# F15Scm4LrNjNLTmYj9W50+JRH0fxl2IaqcemOCrpGD1SspF09QSLQLce3b2M7fSO
+# scKmdfN9cIYkTUpzQXg+XxWWRfzdz30uOmbTLe8uo10+d68A3PQv9xG2PQds+8jC
+# l4SzuEwoU5YkbL3q1Cf0TZEqu6SfNCm3V1nd/eM2TKuJUB0wFwlFJ1uqLH4roy3L
+# IqBmHnpIz4dszYso6Hos8Akid3kzEFqKzrvb75c54sMGgWQxin5paQ0GQ6z5zaQk
+# 3At21KOp6brrsg646jQL88izmAZwwQRIgs5chYpwyZqtOVi9pzLV7CLH8y/RCL+h
+# 3zIbl4NwoKa/j9m7P62OLk9V0KOa/Or6lDvq7imLI0trJPa5iSfQNa1rPet+p1oX
+# WxW/JkKXeMAIBp0cNqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTkxNTAz
-# MzNaMC8GCSqGSIb3DQEJBDEiBCD51K9PXeU9TSONZa+EDaI1ku3xtKvXfVd37Z2c
-# fmWj4jANBgkqhkiG9w0BAQEFAASCAgCB5ffvMNFby5NkVi3gC52Qr7m6nhmpLN4v
-# QGWJynmQNGSTcEvn8hjrozvSRm/rlmiBvtxhTLsC8dnx6/Hynhz2dCng0pUF+A3H
-# BOKBlx1Vn9grAbT8bsTTLocJ/DVHX2mfreXYfTesx+jggHIZtOn66GRrTVKJNdu7
-# Q2snl4BVjn8EoZQZA5jwirGwyEt8a5ztOkyqITa9+neDuyLrglyneEO3kxzqaETP
-# /ux0Sf0pdnvbILhho/tWgxga8lX8TCLXmqNWy1rCKyHA6wIAda3zTJnwG5x7JCDR
-# JZF3g+nlAAZuhEU6AZuyzPM4NRBEiysZzBkcC+uMnaidBegSR9TgvkyqtoJHkYxE
-# ZV3oByHeACvETt0T3cX558fNLcbhxgcOdoovL8nTroae5y10bq9f5iedvstyApQp
-# zYQL2ntA8wc45Lr7aFupLvQEa2OzzAj1qAnNHvZEAPuzAoXmqWYnWLHG8zaNfDyX
-# 9GI/S+0wXqwY0bqZcjRV5/Ft52oIj21wRjAMM6F443G6B7J/GdrvQgAag+I2vc//
-# grVSEp4u9uF4MMIyPJsHk38rc8/VAHpCF67wqfXPFTmkEUqYUNyQprCENUe86i8x
-# soq7VCyqMizALlxMjzgHYn2WBPqkcpMOAOKkYlJqxTTOnetxlclu6SCwgQPB53TX
-# i62eLUpxxg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTkxOTQ3
+# MTJaMC8GCSqGSIb3DQEJBDEiBCBAopYUoE9fd83XcOHiyb0vVpdNFCjs24ezobsG
+# x+I4tzANBgkqhkiG9w0BAQEFAASCAgB+6pYqvplCRwmz9UOOmFeOD8bI4Adq1loi
+# z0HHvM7QEc1ZwItdXh+Id5/1Toi3LRNDt1xlPxvVHcDgqaZm7WJb32X9yz8uztSW
+# UmtU1QlfEEYdpdpsXEnWjVehApJ6EuDEAVjrlXi/qhK4P7kBlp2/PgGNtZwE3qsM
+# iK6QctsFJHGAFkrC5etjpGghICBYmeXNOIW6bw5SFfUvQesxWhqUfwKVjVgHHQP+
+# fZpVDzLc31E9lse5/zFoq9DDgr6nIr+G3QnjiWN7RV2pYukgBYdXeVcoJAWQIHu5
+# bq1Z/JUy2pccLPlvvnfhoPk4dqQzhTBwmAODFa26+rNKmdFv6qMTzOmcHkZAf2xf
+# mGbfvfOG/IqSwfc98W46CJ/WBKohWb3fdLVb8eu97vIXln3ctapKytuHljU69T+/
+# HQDL8FVGpKgPDlS8lsX7S4arETVOvV+EWKzHFX2GGQBL2ITGqCsAo7hdW5cpp6ak
+# xHGG4NsfTKntIe5cj2Ey9TQJIZE2Fr/ixIjGmcZ5ejoA+mSujJIr1womWDh1B7Se
+# IL0Hlq2o/Mm2LUmAeHL4fg8xJ8frdmVGew0Bf/uWyF8JtbuHTj1F0iRhO+boVxL7
+# muhjsKtGHmxdhFifSopc+IkIVNsQmiE2q5g1HfBN53ZGQ6RUtTBp0IMQAGgclydt
+# XKGsKOgrtQ==
 # SIG # End signature block

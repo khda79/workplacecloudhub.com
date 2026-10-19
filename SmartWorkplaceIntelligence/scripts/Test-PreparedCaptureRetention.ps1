@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param([Parameter(Mandatory)][string]$TestRoot)
 # Synthetic local fixtures. Never invoke tenant collectors or touch production roots.
+# Version: 1.1.0
 $ErrorActionPreference='Stop'
 $fixture=Join-Path ([IO.Path]::GetFullPath($TestRoot)) ([guid]::NewGuid().ToString('N'))
 $raw=Join-Path $fixture 'raw'; $work=Join-Path $fixture 'work'; $output=Join-Path $raw 'DATA-POWERBI'
@@ -95,7 +96,7 @@ try {
     @{Owner='PreparedEvidencePipeline/v1';RunId=$foreignId;TenantKey='another-test';DataRoot=$raw} | ConvertTo-Json | Set-Content (Join-Path $foreign 'run.json')
     Reject {& $module {param($w,$id,$r) Clear-PreparedRunPayload $w $id $r 'synthetic-test'} $work $foreignId $raw} 'ownership mismatch'
     Check (Test-Path (Join-Path $foreign 'source/keep.csv')) 'Foreign-tenant payload removed'
-    # Four publications retain only current + previous; audit and history stay.
+    # Publication alone retains all payloads; qualified coupled retention runs after transfer.
     $staging=Join-Path $fixture 'staging';New-Item -ItemType Directory -Path $staging | Out-Null
     $contract=Join-Path $fixture 'output-contract.json'
     @{tables=@(@{table='Test Trend';file='Trend.csv';historyKey=@('Date');uniqueKey=@('Date');columns=@(@{name='Date';type='dateTime'},@{name='Value';type='int64'})})} | ConvertTo-Json -Depth 8 | Set-Content $contract
@@ -104,15 +105,14 @@ try {
     $published=@(foreach($i in 1..4){@([pscustomobject]@{Date='2026-01-01';Value=$i}) | Export-Csv (Join-Path $staging 'Trend.csv') -NoTypeInformation;Publish-PreparedEvidenceBatch @pub})
     $pointer=Get-Content (Join-Path $output 'current.json.txt') -Raw | ConvertFrom-Json
     Check ($pointer.BatchId -eq $published[3].BatchId -and $pointer.PreviousBatchId -eq $published[2].BatchId) 'Wrong protected batch pair'
-    Check (@(Get-ChildItem (Join-Path $output 'batches') -Directory).Count -eq 2) 'Retention did not keep exactly two batches'
-    Check (@(Get-ChildItem (Join-Path $output 'retired') -Directory).Count -eq 2) 'Retired audit missing'
-    Check (@(Get-ChildItem (Join-Path $output 'retired') -Recurse -Filter '*.csv').Count -eq 0) 'Retired CSV payload retained'
+    Check (@(Get-ChildItem (Join-Path $output 'batches') -Directory).Count -eq 4) 'Publication retired payload before qualified cloud retention'
+    Check (-not (Test-Path (Join-Path $output 'retired'))) 'Publication created a retirement archive without qualification'
     Check ((Get-FileHash $csv).Hash -eq $rawHash) 'Retention changed raw data'
     $pointerHash=(Get-FileHash (Join-Path $output 'current.json.txt')).Hash
     @([pscustomobject]@{Date='2026-01-01';Value='bad'}) | Export-Csv (Join-Path $staging 'Trend.csv') -NoTypeInformation
     Reject {Publish-PreparedEvidenceBatch @pub} 'Batch validation failed'
     Check ((Get-FileHash (Join-Path $output 'current.json.txt')).Hash -eq $pointerHash) 'Failure advanced current pointer'
-    Check (@(Get-ChildItem (Join-Path $output 'batches') -Directory).Count -eq 2) 'Failure removed a good batch or leaked CSVs'
+    Check (@(Get-ChildItem (Join-Path $output 'batches') -Directory).Count -eq 4) 'Failure removed a good batch or leaked CSVs'
     Check (@(Get-ChildItem (Join-Path $output 'failed') -Recurse -Filter failure.json.txt).Count -eq 1) 'Publication failure diagnostic missing'
     $unknown=Join-Path $output 'batches/unowned'
     New-Item -ItemType Directory -Path $unknown | Out-Null
@@ -132,8 +132,8 @@ try {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCRwVMgqM1HXcg4
-# SQ9gpIgUupLesniKohmVzepDPDohlaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDx19UU29Rkzc8K
+# jQVWADSSxyBUgyd3cNbQCr/2oVZgo6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -266,31 +266,31 @@ try {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIGbvx/M9m6SjqAlY2CMJxAncVZMVaV0z0N/+42GNDdqYMA0GCSqG
-# SIb3DQEBAQUABIIBgEHL5B+YJHVVkM4wREH0gzhP9GZ+nVtdDPodwa6lr71iJzJq
-# OOnWu/nPr1LnDuZdcRxaDYHgYCNtXlw9T/wIcegVN3OQzcC+cvniBbe0rrycvjbJ
-# ylJlssfL86i/pRb/Wsh1SXc34ehonOCYos8koO5a9kEX1qc5SOfWYJVDrzS312oH
-# sNbmS7vT19pr6xhPhoW913/wAjDp1pr2ONvhfrGpQB72O9puHcdR36EMDIU9oRZ9
-# TUPTYFzwoi2P8F5zEHGt81SEv+v7XCRzDLOYKXv//99DPLFc48Y8NpMNtXKAUOif
-# MrtPLko/0fwrxmVvT8RBmaOcjzz/vTXBOzvBIArIhmc65jAHW54JDQ63JeAHEJDJ
-# CzQtb+XCJXpqiLtKvTY8PksOrnhHXAWocSQTl+0FucqOlk1QxqpgvWMfBPBTvttE
-# dX1FyfY3HmIQMtt6bO+f0tvxfX9YNkhuKuBkh8O9FgBzlgubAsb2Oiln9s6NGMTn
-# ZafcoN8ntHMXma9bEqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEINDk5MgPn6Ha3Sszki8w6dNuop5yxNRhFMq8ykBK/d3eMA0GCSqG
+# SIb3DQEBAQUABIIBgAm5mum151nd4rboFTMu2IVpPwz9LXmLXEIMohK41fOjo4UJ
+# 6bUQdOBEvrR/q7UdhyCXCCMrBHmqRVR3tGdY8jOVu0vH9TTFW9wSIR8y7JSi8iRA
+# GfVO3M+v2BY82nveHGLXXe+BqLfDq4X7vfTb1coNjRLd23Z+rWzJ23NLpe4VRRZ+
+# BuLaCly3w4yn4CbiJ8xURoetqnhnUL0G8+pCzhR0bQF5d3g+LhwlWlPRBDOGdxa7
+# t1cNbiiUjwLczuZPoZZelF8qW0LfIe5gXGN0GUWlvzWAQviWwBlphWo/8Y8hzkXS
+# q38mu42awkquac6Tur5YLkhGWVpt52ijPHvzc4dPMC8XpZs687ARZtOFabz5rKBj
+# v5b9Fb8ilz9gFDWBeRjYM2Tprq0/mkY8CDTHsx//C4THHZTSolEfcdvffSITUtyc
+# 0f2qVLvA6w4EtQJV3iQxDed5zA6lDrJ9dsLKs7Jombk1E5fPjkwBBmyRobDuTLkL
+# 2waxf3SBx0I4LU9JaaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTMyMjQy
-# MTZaMC8GCSqGSIb3DQEJBDEiBCD4mE5mvnt/tk2quRZeMqdYk2c+MCsrorVf0xXb
-# I75V+TANBgkqhkiG9w0BAQEFAASCAgBtZiapTpdHuqN6uH/qftL/59U8aEndKLoK
-# bUUFkDfbTFoDRAX0rOsRhZ7xRq8S/2Y57dVng5wTke2DHKmCsNOk1173l6TmYuvq
-# 96VGiBvcYdXqrEmYEKyHVtqPWSHg/W6npdhb9kBHnlnpbvWGzJwM2Aj4LuInwhXG
-# Q7FWMf9B8qvJ0i3NRdjqVX0E1CubL5pbJKV6ezugT/Bd3BSrLCIJGSBzeyvUvCQk
-# U+hVpd/tPbgocQTtjhhBMWrHrPephohOmuBQmdokTJ2RhqfFMpvh1Pm/wjJLWOjb
-# LPbH6N44e6MYkyhgnEKDp7xi7cLRvSzFzoPTHLiAvUlqcsr3e0So7jNly96miVzn
-# 4ePj1xlPP7PcmH1vcvfstnSeQvgJR0TFFAohNaDwLqgls+bxjc1/atj6AaI9vbzu
-# aKglM2Ee/n4ZmLB0mnu7LIS9Ejqpk4gZjZFk0RQWTTCUmSWO+1rrFUkwNuXrMWY0
-# sJSCfWnxpkffMa9S9ryuODAK8TWoqZtadAwcInXPUUNX+dHHu5rkj1CbZsDLa0Pr
-# ffi86vmLOZMgfaihX5adBKKX0Xl0artPyPP7p2sBNnwL5oBl/2f0bN/BPMvlx6Ni
-# rPrPfRiwNx6yT1FoZqyRBJdYQvlyFlBbv1s1P32e9pLHlnxOUJ83dGEib3IgfCwj
-# iL8x+bsPbg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTkxOTQ3
+# MTNaMC8GCSqGSIb3DQEJBDEiBCAYQoPUFgWMvC3Jzj1VGFWrBwlJx8Ho56aH6O5S
+# HFOsSjANBgkqhkiG9w0BAQEFAASCAgBrEwkC5FlpEN548JcEYdjeYxJF93xRafb3
+# oGYwSZnmNZrxBu2vzUt8S/+GcNNQU9FeVetXT8Ec2VyGfzkBVkZnrl9pfko0bTW8
+# ciJE2OTLogWTi5AdLseEQ32xhY89F3G/Su0wmyxnYcSNju1idcU9i0miSR8iiTbi
+# UvPYTEX7YSm426LzS924Sosn/zqlPw73mdaewuXNtxQkRwrM2jBabE7nUHIeI891
+# dFdt30JhbQF+M0/BMkXjwlNVIXnVKApJoJkypcQcFhTKjdVlBhuUlVkJaUEs3ipE
+# nya715VsW0WiK0DWnemgbHhIDfAgYGQYGnxGXLVfWdPlu1iGHjjixM9JlBxuieP9
+# C1F7WbHBSZmjC0H7+X0c4XaYiEhMe7tGImyrBamuQsLXwjSdwqutB1ghVJ9035+r
+# Fp6zm71+xG+Gtz1qBkSMZLyXE2xf/DtjsI8UazifOlvECBSxtBqOSNF00KERJppg
+# b9iD3zcyaQfYSz7u0qcWcQLsZbDmDwmYGVffjUSZ6Ep8ns+7UE2E36JOkhQXY2dl
+# 1TFhfyMAzPq8lWN0+qE9sC7aEgnoeuux8HvGZnOuiUDQubqF0VrPt/vCDK6JD0do
+# 28+Uj59fgxcIYdjR7am/Q1b45R24NCHWVWxscX+m6zGyXKxSm8OB2XfeGZQs+Oww
+# WakIRI5SvQ==
 # SIG # End signature block
