@@ -179,3 +179,18 @@ Runs written before 2.2.0 under `SmartFinOps\Data\<profile>` are not migrated or
 `Start-SmartFinOps-Workplace-Prod.cmd` runs the valuation, then the report only when the valuation ended with 0 or 3, so that no report is built on an older valuation. Its exit code is the most severe of the two (1 > 3 > 0). The separate launchers and the orchestrator jobs are unchanged.
 
 Tests: `Tests\SmartFinOps-Workplace-Report.Tests.ps1` (daily email with a simulated transport: one mail per day, `-ForceEmail`, Europe/Paris day, status mails, no identifier, send failure) and `Tests\SmartFinOps-Workplace-Launcher.Tests.ps1` (combined launcher with stub scripts). No test sends a real mail.
+
+## Demo report
+
+`Demo/SmartFinOps-Workplace-DemoReport.ps1` builds a demo of the executive report from synthetic data only, with the real engine and report:
+
+```powershell
+.\Demo\SmartFinOps-Workplace-DemoReport.ps1 -OutputPath C:\Temp\SmartFinOps-Demo
+```
+
+- `Demo/SmartFinOps-Workplace-DemoFixture.ps1` writes a fictional SmartInventory `DATA-LAST` (organization `contoso.invalid`, 240 users, four AD domains) and publishes it with the real SmartM365.Core source receipts: a baseline plateau, then the current day after a reduction, so the page also shows a realized saving. The scenario covers Valued, Provisional (partial AD scope), Not valued (USD price only), Review, Blocked, Not measured, Capped and Reused.
+- The generator copies the engine, the report, the tenant context, the templates and the tracked SmartM365.Core files into a temporary runtime, with SharePoint upload and the daily email disabled; no local configuration, profile, export or tenant is read. Exit codes 0 and 3 of the engine and the report are accepted; 1 or a "Report not available" page fails the run.
+- The page gets a visible DEMO banner, then a leak scan refuses e-mail addresses, GUIDs, IP addresses, file-system and UNC paths, user, host and domain names of the computer, the private terms of the local Git guard, any domain other than `contoso.invalid`, external URLs and scripts.
+- Outputs: `SmartFinOps_Workplace-Report.demo.html` and `SmartFinOps_Workplace-Report.demo.manifest.json` (versions, exit codes, SHA256) in `-OutputPath`, which must lie outside this folder. They are generated files: never commit them. The WorkplaceCloudHub website rebuilds its demo from `origin/main` with this script.
+
+Tests: `Tests\SmartFinOps-Workplace-DemoReport.Tests.ps1` (generation, manifest, DEMO banner, statuses shown, leak scanner cases, output folder guard).
