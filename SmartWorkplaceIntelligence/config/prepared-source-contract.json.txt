@@ -36,6 +36,7 @@
   ],
   "mappingFiles": ["SmartWorkplaceIntelligence-PersonaClassification.xlsx", "SmartWorkplaceIntelligence-SiteClassification.xlsx"],
   "mailboxMigrationExceptionsFile": "SmartWorkplaceIntelligence-MailboxMigrationExceptions.xlsx",
+  "sharePointMigrationContract": "sharepoint-migration-contract.json.txt",
   "dailyFiles": ["DATA-ALL/ActiveDirectory/Inventory/AD_Users_DailyStats.csv", "DATA-ALL/ActiveDirectory/Inventory/AD_Computers_DailyStats.csv", "DATA-ALL/Exchange/OnPrem/MailboxReports/Exchange_OnPrem_Mailboxes_DailyStats.csv"],
   "history": [
     {"root":"DATA-ALL/M365/Users/ActiveUsers", "file":"M365_Users_Active.csv"},

@@ -1,0 +1,8 @@
+{
+  "SchemaVersion": 1,
+  "Identity": { "TenantKey": "", "ProjectKey": "" },
+  "ApprovedHostMappings": {},
+  "SchemeIndependentMatching": true,
+  "Bindings": [],
+  "TargetBindings": []
+}

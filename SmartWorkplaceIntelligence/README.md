@@ -8,6 +8,10 @@ not proof of effective on-device behavior.
 
 ## Data flow
 
+The optional [Migration to SharePoint Online](docs/SPO-MIGRATION.md) feature
+combines private SharePoint on-prem and shared-folder planning with qualified
+inventory observations. Public templates contain no tenant data.
+
 The optional [mailbox migration exception register](docs/MAILBOX-MIGRATION-EXCEPTIONS.md)
 adds a private English Excel input, confirmed native identity matching, and dated
 planning cards. It is disabled by default and does not rewrite historical trends.

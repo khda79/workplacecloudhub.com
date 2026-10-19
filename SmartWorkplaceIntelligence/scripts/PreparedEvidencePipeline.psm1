@@ -1,5 +1,5 @@
 # Offline, single-tenant preparation and versioned local publication. No tenant APIs.
-# Version: 1.1.0
+# Version: 1.2.0
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $script:ProductRoot = Split-Path -Parent $PSScriptRoot
@@ -10,6 +10,7 @@ Import-Module (Join-Path $PSScriptRoot 'IntuneOperationalEvidence.psm1')
 Import-Module (Join-Path $PSScriptRoot 'NativeEvidence.psm1')
 Import-Module (Join-Path $PSScriptRoot 'PreparedArtifacts.psm1')
 Import-Module (Join-Path $PSScriptRoot 'PreparedClassification.psm1')
+Import-Module (Join-Path $PSScriptRoot 'SharePointMigrationEvidence.psm1')
 if (-not ('Workplace.Prepared.StrictCsv' -as [type])) {
     Add-Type -Path (Join-Path $PSScriptRoot 'PreparedCsvReader.cs') -CompilerOptions '-optimize+'
 }
@@ -180,7 +181,10 @@ function Undo-PreparedMappingReplacement {
 function Receive-PreparedMappingWorkbooks {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$DataRoot, [Parameter(Mandatory)][scriptblock]$DownloadFile,
-        [switch]$MailboxMigrationExceptionsEnabled, [string]$PythonCommand='python')
+        [switch]$MailboxMigrationExceptionsEnabled, [string]$PythonCommand='python',
+        [switch]$SharePointMigrationEnabled,
+        [string]$SharePointMigrationWorkbookFileName='SmartWorkplaceIntelligence-Migration-to-SPO.xlsx',
+        [string]$SharePointMigrationBindingsFileName='')
     $data = (Resolve-Path -LiteralPath $DataRoot -ErrorAction Stop).ProviderPath
     if (-not (Test-Path -LiteralPath $data -PathType Container)) { throw 'Mapping DataRoot must be an existing directory.' }
     $mappingParent=Get-Item -LiteralPath (Join-Path $data 'mappings') -Force -ErrorAction SilentlyContinue
@@ -197,6 +201,16 @@ function Receive-PreparedMappingWorkbooks {
         'SmartWorkplaceIntelligence-SiteClassification.xlsx' = @('Settings','SiteTypes','Sites')
     }
     if ($MailboxMigrationExceptionsEnabled) { $required['SmartWorkplaceIntelligence-MailboxMigrationExceptions.xlsx'] = @('Exceptions','Guide') }
+    if ($SharePointMigrationEnabled) {
+        Assert-SharePointMigrationFileName $SharePointMigrationWorkbookFileName
+        Assert-SharePointMigrationFileName $SharePointMigrationBindingsFileName -AllowEmpty
+        if ($required.Contains($SharePointMigrationWorkbookFileName) -or $SharePointMigrationWorkbookFileName -notlike '*.xlsx') { throw 'Invalid or colliding migration workbook file name.' }
+        $required[$SharePointMigrationWorkbookFileName]=@('Overview','MigrationSP','MigrationSharedFolders','Parameters','LegacyWebs','LegacyCollections')
+        if ($SharePointMigrationBindingsFileName) {
+            if ($required.Contains($SharePointMigrationBindingsFileName) -or $SharePointMigrationBindingsFileName -notlike '*.json.txt') { throw 'Invalid or colliding migration registry file name.' }
+            $required[$SharePointMigrationBindingsFileName]=@()
+        }
+    }
     try {
     New-Item -ItemType Directory -Path $folder -Force | Out-Null
     foreach ($name in $required.Keys) {
@@ -204,6 +218,11 @@ function Receive-PreparedMappingWorkbooks {
         $receipt = & $DownloadFile $path $name
         if (-not $receipt -or -not (Test-Path -LiteralPath $path -PathType Leaf) -or (Get-Item -LiteralPath $path).Length -eq 0) {
             throw "Required SharePoint mapping download failed: $name. No cached fallback is allowed."
+        }
+        if ($SharePointMigrationEnabled -and $SharePointMigrationBindingsFileName -and $name -ceq $SharePointMigrationBindingsFileName) {
+            $null=Get-Content -LiteralPath $path -Raw | ConvertFrom-Json -ErrorAction Stop
+            $hashes[$name]=(Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash
+            continue
         }
         $archive = $null
         try {
@@ -230,7 +249,14 @@ function Receive-PreparedMappingWorkbooks {
         }
         $hashes[$name] = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash
     }
-    # Prepare both replacements and rollback copies before touching either retained workbook.
+    if ($SharePointMigrationEnabled) {
+        $migrationValidation=@('-B',(Join-Path $PSScriptRoot 'workplace_spo_migration.py'),'--validate-workbook',(Join-Path $folder $SharePointMigrationWorkbookFileName))
+        if($SharePointMigrationBindingsFileName){$migrationValidation+=@('--bindings',(Join-Path $folder $SharePointMigrationBindingsFileName))}
+        $python=Get-Command $PythonCommand -CommandType Application -ErrorAction Stop | Select-Object -First 1
+        & $python.Source @migrationValidation | ForEach-Object { Write-Information $_ -InformationAction Continue }
+        if($LASTEXITCODE -ne 0){throw 'Invalid migration workbook or approval registry. Retained mappings unchanged.'}
+    }
+    # Prepare replacements and rollback copies before touching retained mappings.
     $promotion = Join-Path $folder 'promotion'
     $rollback = Join-Path $folder 'rollback'
     New-Item -ItemType Directory -Path $promotion,$rollback -Force | Out-Null
@@ -301,6 +327,9 @@ function Get-PreparedSourcePlan {
         [ValidateRange(1,8760)][int]$MaxSourceAgeHours = 168,
         [hashtable]$AgeOverrides = @{}, [string]$MappingRoot, [switch]$MetadataOnly,
         [switch]$MailboxMigrationExceptionsEnabled,
+        [switch]$SharePointMigrationEnabled,
+        [string]$SharePointMigrationWorkbookFileName='SmartWorkplaceIntelligence-Migration-to-SPO.xlsx',
+        [string]$SharePointMigrationBindingsFileName='',
         [Collections.Generic.List[object]]$OptionalSourceIssues)
     $root = (Resolve-Path -LiteralPath $DataRoot).ProviderPath
     $spec = (Read-SmartM365JsonDocument $SourceContractPath).Document
@@ -332,6 +361,17 @@ function Get-PreparedSourcePlan {
     if ($MailboxMigrationExceptionsEnabled) {
         if (-not $spec.PSObject.Properties['mailboxMigrationExceptionsFile'] -or $spec.mailboxMigrationExceptionsFile -cne 'SmartWorkplaceIntelligence-MailboxMigrationExceptions.xlsx') { throw 'Missing reviewed mailbox migration exception mapping contract.' }
         $items.Add(@{Relative=$spec.mailboxMigrationExceptionsFile;Kind='Mapping'})
+    }
+    if ($SharePointMigrationEnabled) {
+        Assert-SharePointMigrationFileName $SharePointMigrationWorkbookFileName
+        Assert-SharePointMigrationFileName $SharePointMigrationBindingsFileName -AllowEmpty
+        if(-not $spec.PSObject.Properties['sharePointMigrationContract'] -or $spec.sharePointMigrationContract -cne 'sharepoint-migration-contract.json.txt'){throw 'Missing migration source group contract.'}
+        if($SharePointMigrationWorkbookFileName -in $spec.mappingFiles -or $SharePointMigrationBindingsFileName -in $spec.mappingFiles){throw 'Migration inputs collide with classification workbooks.'}
+        $items.Add(@{Relative=$SharePointMigrationWorkbookFileName;Kind='Mapping'})
+        if($SharePointMigrationBindingsFileName){$items.Add(@{Relative=$SharePointMigrationBindingsFileName;Kind='Mapping'})}
+        foreach($entry in Get-SharePointMigrationSourceItems -DataRoot $root){
+            if($entry.Relative -notin @($items | ForEach-Object {$_.Relative})){$items.Add($entry)}
+        }
     }
     foreach ($name in $spec.dailyFiles) { $items.Add(@{Relative=$name;Kind='History'}) }
     foreach ($entry in $spec.history) {
@@ -481,7 +521,7 @@ function Publish-PreparedEvidenceBatch {
         if (Test-Path -LiteralPath (Join-Path $output 'current.json')) { throw 'Legacy prepared metadata is preserved while JSON transport policy is Readers. Activate the approved JsonText deployment before publication.' }
         $previousPath = Get-PreparedMetadataPath $output 'current' -Optional
         $previous = if ($previousPath) { Get-Content -LiteralPath $previousPath -Raw | ConvertFrom-Json } else { $null }
-        if ($ExpectedPreviousBatchId -and (-not $previous -or $previous.BatchId -ne $ExpectedPreviousBatchId)) { throw 'Published batch changed since staging; no publication performed.' }
+        if ($ExpectedPreviousBatchId -and (($ExpectedPreviousBatchId -eq '__NONE__' -and $previous) -or ($ExpectedPreviousBatchId -ne '__NONE__' -and (-not $previous -or $previous.BatchId -ne $ExpectedPreviousBatchId)))) { throw 'Published batch changed since staging; no publication performed.' }
         if ($previous -and $previous.TenantKey -ne $TenantKey) { throw 'Output root belongs to another tenant.' }
         $contractReceipt = Read-SmartM365JsonDocument $ContractPath
         $ContractPath = $contractReceipt.Path
@@ -720,6 +760,12 @@ function Invoke-PreparedEvidencePipeline {
         [string[]]$AllowEmptyTables=@(), [switch]$ValidateOnly, [string]$MappingRoot,$AdCountryConfiguration,
         [string]$PythonCommand='python',
         [switch]$MailboxMigrationExceptionsEnabled, [string]$MailboxMigrationBindingsPath,
+        [switch]$SharePointMigrationEnabled,
+        [string]$SharePointMigrationWorkbookFileName='SmartWorkplaceIntelligence-Migration-to-SPO.xlsx',
+        [string]$SharePointMigrationBindingsFileName='',
+        [string]$SharePointMigrationTargetTenantUrl='',
+        [ValidateRange(1,3650)][int]$SharePointMigrationReviewMaxAgeDays=7,
+        [string]$SharePointMigrationReportingTimeZoneId='UTC',
         [Nullable[double]]$DeviceSystemMaxObservationAgeHours, [string]$DeviceSystemOffsetlessGraphTimeZoneId,
         [ValidateRange(1,8)][int]$MaxParallelGenerators=1)
     # Read only the two non-secret preparation settings from the effective tenant profile.
@@ -753,7 +799,10 @@ function Invoke-PreparedEvidencePipeline {
         }
         $selectedUtc=[datetime]::UtcNow.ToString('O')
         $optionalIssues = [Collections.Generic.List[object]]::new()
-        $plan = @(Get-PreparedSourcePlan -DataRoot $root -MaxSourceAgeHours $MaxSourceAgeHours -AgeOverrides $AgeOverrides -MappingRoot $MappingRoot -MetadataOnly -OptionalSourceIssues $optionalIssues -MailboxMigrationExceptionsEnabled:$MailboxMigrationExceptionsEnabled)
+        $migrationSourceArgs=@{SharePointMigrationEnabled=[bool]$SharePointMigrationEnabled;SharePointMigrationWorkbookFileName=$SharePointMigrationWorkbookFileName;SharePointMigrationBindingsFileName=$SharePointMigrationBindingsFileName}
+        $plan = @(Get-PreparedSourcePlan -DataRoot $root -MaxSourceAgeHours $MaxSourceAgeHours -AgeOverrides $AgeOverrides -MappingRoot $MappingRoot -MetadataOnly -OptionalSourceIssues $optionalIssues -MailboxMigrationExceptionsEnabled:$MailboxMigrationExceptionsEnabled @migrationSourceArgs)
+        $migrationPrevious=Get-SharePointMigrationHistoryCapture -OutputRoot $OutputRoot -TenantKey $TenantKey
+        if($migrationPrevious.Entry){$plan+= $migrationPrevious.Entry}
         if ($MailboxMigrationExceptionsEnabled -and $MailboxMigrationBindingsPath) {
             $bindingFile=Get-Item -LiteralPath $MailboxMigrationBindingsPath -ErrorAction Stop
             $plan+= [pscustomobject]@{Relative='MailboxMigrationBindings.json.txt';SourcePath=$bindingFile.FullName;Kind='Mapping';Bytes=$bindingFile.Length;ModifiedUtc=$bindingFile.LastWriteTimeUtc.ToString('O');SHA256=$null;IsOptional=$false;MaxAgeHours=$null}
@@ -767,12 +816,22 @@ function Invoke-PreparedEvidencePipeline {
         $captured=[Collections.Generic.List[object]]::new()
         foreach ($entry in $plan) {
             $copy = Copy-PreparedStableSource -Entry $entry -SnapshotRoot $snapshot -MaxSourceAgeHours $MaxSourceAgeHours -AgeOverrides $AgeOverrides -OptionalSourceIssues $optionalIssues
+            if($entry.Relative -ceq 'MigrationHistory/SharePointMigrationHistoryEvidence.csv' -and $copy.SHA256 -ne $entry.SHA256){throw 'Validated migration predecessor changed during capture.'}
             if ($null -ne $copy) { $captured.Add($copy) }
             if ($captured.Count % 25 -eq 0) { Write-Host ('[{0:yyyy-MM-dd HH:mm:ss}] Stable source copies: {1}/{2}.' -f (Get-Date),$captured.Count,$plan.Count) }
         }
         $plan=$captured.ToArray()
         Write-PreparedJson (Join-Path $run 'capture.json') @{SelectedUtc=$selectedUtc;Sources=$plan;OptionalSourceIssues=$optionalIssues.ToArray();Policy='Per-file verified capture; Intune operational groups additionally require matching complete source receipts. Later raw updates belong to the next run.'}
         $identity = Test-PreparedSourceTenants -Plan $plan -TenantKey $TenantKey -SnapshotRoot $snapshot
+        $intuneSourcePolicyPath=Join-Path $run 'IntuneSourcePolicy.json.txt'
+        Write-PreparedJson $intuneSourcePolicyPath @{MaxSourceAgeHours=$MaxSourceAgeHours;AgeOverrides=$AgeOverrides}
+        if($SharePointMigrationEnabled){
+            $migrationValidation=@('-B',(Join-Path $PSScriptRoot 'workplace_spo_migration.py'),'--validate-workbook',(Join-Path $snapshot $SharePointMigrationWorkbookFileName),'--tenant',$TenantKey,'--validate-sources','--data-root',$snapshot,'--as-of',$selectedUtc,'--source-policy',$intuneSourcePolicyPath)
+            if($SharePointMigrationBindingsFileName){$migrationValidation+=@('--bindings',(Join-Path $snapshot $SharePointMigrationBindingsFileName))}
+            $python=Get-Command $PythonCommand -CommandType Application -ErrorAction Stop | Select-Object -First 1
+            & $python.Source @migrationValidation | ForEach-Object { Write-Information $_ -InformationAction Continue }
+            if($LASTEXITCODE -ne 0){throw 'Migration inputs or receipt payloads failed preflight; no build or publication performed.'}
+        }
         $sourceSpec=(Read-SmartM365JsonDocument (Join-Path $script:ProductRoot 'config/prepared-source-contract.json')).Document
         $nativeEnabled=$sourceSpec.PSObject.Properties['nativeEvidence'] -and $sourceSpec.nativeEvidence
         $nativeAuditPath=Join-Path $run 'NativeEvidenceAudit.json.txt'
@@ -802,15 +861,22 @@ function Invoke-PreparedEvidencePipeline {
         Write-PreparedJson $countryRulesPath @{TenantKey=$TenantKey;AdDomainCountryMappings=$adCountryRules.Domains;AdComputerNameCountryPrefixes=$adCountryRules.Prefixes}
         $log = Join-Path $run 'preparation.log'
         $systemPolicyArgs=@('-NativeEvidenceAuditPath',$nativeAuditPath,'-PythonCommand',$PythonCommand)
+        $systemPolicyArgs+=@('-SharePointMigrationWorkbookFileName',$SharePointMigrationWorkbookFileName,'-SharePointMigrationReviewMaxAgeDays',[string]$SharePointMigrationReviewMaxAgeDays,'-SharePointMigrationReportingTimeZoneId',$SharePointMigrationReportingTimeZoneId,'-SharePointMigrationMaxSourceAgeHours',[string]$MaxSourceAgeHours)
+        if($SharePointMigrationEnabled){
+            $systemPolicyArgs+='-SharePointMigrationEnabled'
+            if($SharePointMigrationBindingsFileName){$systemPolicyArgs+=@('-SharePointMigrationBindingsFileName',$SharePointMigrationBindingsFileName)}
+            if($SharePointMigrationTargetTenantUrl){$systemPolicyArgs+=@('-SharePointMigrationTargetTenantUrl',$SharePointMigrationTargetTenantUrl)}
+        }
+        if($migrationPrevious.Entry){$systemPolicyArgs+=@('-SharePointMigrationPreviousHistoryPath',(Join-Path $snapshot 'MigrationHistory/SharePointMigrationHistoryEvidence.csv'))}
         if ($MailboxMigrationExceptionsEnabled) {
             $systemPolicyArgs+='-MailboxMigrationExceptionsEnabled'
             if ($MailboxMigrationBindingsPath) { $systemPolicyArgs+=@('-MailboxMigrationBindingsPath',(Join-Path $snapshot 'MailboxMigrationBindings.json.txt')) }
         }
-        $intuneSourcePolicyPath=Join-Path $run 'IntuneSourcePolicy.json.txt'
-        Write-PreparedJson $intuneSourcePolicyPath @{MaxSourceAgeHours=$MaxSourceAgeHours;AgeOverrides=$AgeOverrides}
         $systemPolicyArgs+=@('-TenantKey',$TenantKey,'-IntuneSourcePolicyPath',$intuneSourcePolicyPath)
         $baseContract=Get-Content -LiteralPath (Get-SmartM365JsonReadPath (Join-Path $script:ProductRoot 'config/prepared-evidence-contract.json')) -Raw | ConvertFrom-Json
         $baseContract=Merge-NativeEvidenceContract -BaseContract $baseContract
+        $migrationContract=Get-Content -LiteralPath (Join-Path $script:ProductRoot 'config/sharepoint-migration-contract.json.txt') -Raw | ConvertFrom-Json
+        $baseContract.tables=@($baseContract.tables)+@($migrationContract.tables)
         if ($MailboxMigrationExceptionsEnabled) {
             $exceptionContract=Get-Content -LiteralPath (Join-Path $script:ProductRoot 'config/mailbox-migration-exceptions-contract.json.txt') -Raw | ConvertFrom-Json
             $baseContract.tables=@($baseContract.tables)+@($exceptionContract.tables)
@@ -835,6 +901,7 @@ function Invoke-PreparedEvidencePipeline {
         if ($LASTEXITCODE -ne 0) { throw "Preparation failed. Retained diagnostics: $run" }
         $provenance = @{Mode='RebuiltFromSnapshot';CapturePolicy='PerFileVerified';SelectedUtc=$selectedUtc;Sources=$plan;OptionalSourceIssues=$optionalIssues.ToArray();TenantValidation=$identity;LegacyTenantlessAllowed=($identity.LegacyArchivedSummaries -gt 0);LegacyTenantlessScope='Manifest-verified archived Intune discovered-application summaries only';AccountRulesSHA256=(Get-FileHash $rules).Hash;Scripts=@(Get-ChildItem $PSScriptRoot -File | Where-Object Extension -In '.ps1','.psm1','.py','.cs' | ForEach-Object { @{File=$_.Name;SHA256=(Get-FileHash $_.FullName).Hash} })}
         $provenance.NativeEvidence=@{ContractSHA256=(Get-FileHash -LiteralPath (Join-Path $script:ProductRoot 'config/native-output-contract.json.txt')).Hash;Audit=(Get-Content -LiteralPath $nativeAuditPath -Raw | ConvertFrom-Json)}
+        $provenance.SharePointMigration=@{ContractSHA256=(Get-FileHash -LiteralPath (Join-Path $script:ProductRoot 'config/sharepoint-migration-contract.json.txt')).Hash;Audit=(Get-Content -LiteralPath (Join-Path $staging 'SharePointMigrationAudit.json.txt') -Raw | ConvertFrom-Json)}
         if ($MailboxMigrationExceptionsEnabled) { $provenance.MailboxMigrationExceptions=@{ContractSHA256=(Get-FileHash -LiteralPath (Join-Path $script:ProductRoot 'config/mailbox-migration-exceptions-contract.json.txt')).Hash;Audit=(Get-Content -LiteralPath (Join-Path $staging 'MailboxMigrationExceptionsAudit.json.txt') -Raw | ConvertFrom-Json)} }
         $provenance.WindowsMigration = (Get-Content -LiteralPath (Join-Path $staging 'WindowsMigrationAudit.json.txt') -Raw | ConvertFrom-Json)
         $provenance.IntuneOperations=@{ContractSHA256=(Get-FileHash -LiteralPath (Join-Path $script:ProductRoot 'config/intune-operational-contract.json.txt')).Hash;SourcePolicySHA256=(Get-FileHash -LiteralPath $intuneSourcePolicyPath).Hash;Audit=(Get-Content -LiteralPath (Join-Path $staging 'IntuneOperationalAudit.json.txt') -Raw | ConvertFrom-Json)}
@@ -842,7 +909,8 @@ function Invoke-PreparedEvidencePipeline {
         $provenance.DeviceSystemPolicy=@{MaxObservationAgeHours=$DeviceSystemMaxObservationAgeHours;OffsetlessGraphTimeZoneId=$DeviceSystemOffsetlessGraphTimeZoneId;HardwareFreshness='Platform timestamp is context only; not hardware collection time.'}
         $provenance.WorkforceActivity=@{DefinitionVersion='AD-M365-Console-v1';CurrentSources=@('Active Directory','Microsoft 365','Qualified local console');ConsoleIdentity='Exact unique tenant-scoped AD SID and unique AD-to-Entra link';ConsoleScope='Last observed local interactive user per device; partial coverage; RDP excluded';HistoricalSources=@('Active Directory','Microsoft 365');CurrentConsoleInjectedIntoHistory=$false}
         if ($endpointPolicy.Enabled) {$provenance.EndpointProtectionPolicy=@{PolicyVersion=$endpointPolicy.PolicyVersion;SHA256=(Get-FileHash -LiteralPath $endpointPolicyPath).Hash;Qualification='Antivirus and EDR evaluated separately; unknown is not healthy.'}}
-        Publish-PreparedEvidenceBatch -StagingRoot $staging -OutputRoot $OutputRoot -TenantKey $TenantKey -Provenance $provenance -AllowEmptyTables $AllowEmptyTables -ArtifactSnapshotRoot $snapshot @endpointContractArgs
+        $migrationPublicationArgs=@{ExpectedPreviousBatchId=$migrationPrevious.BatchId}
+        Publish-PreparedEvidenceBatch -StagingRoot $staging -OutputRoot $OutputRoot -TenantKey $TenantKey -Provenance $provenance -AllowEmptyTables $AllowEmptyTables -ArtifactSnapshotRoot $snapshot @endpointContractArgs @migrationPublicationArgs
     } catch {
         if ($run) { try { Write-PreparedJson (Join-Path $run 'failure.json') @{Error=$_.Exception.Message;Utc=[datetime]::UtcNow.ToString('O')} } catch { Write-Warning 'Could not write run failure diagnostic.' } }
         throw
@@ -854,10 +922,10 @@ function Invoke-PreparedEvidencePipeline {
 Export-ModuleMember -Function Get-PreparedSourcePlan, Invoke-PreparedEvidencePipeline, Publish-PreparedEvidenceBatch, Receive-PreparedMappingWorkbooks, Remove-PreparedMappingWorkbooks
 
 # SIG # Begin signature block
-# MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
+# MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBup1Qze7asj/5e
-# PzdzVF2udrzeGMM3II4LfJBddnzDP6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBoYPXwuwscgRFa
+# VN3eLBSWx8kCvdRDRAci8sVT0kB4fKCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -882,139 +950,19 @@ Export-ModuleMember -Function Get-PreparedSourcePlan, Invoke-PreparedEvidencePip
 # PI5wrVTjV/pR7IrtSIfq8UladlrSZJyyDn3NV2ATvIZ6wNxbTmPFcE0uMg/EYzwd
 # Tek+CgXL3TxUKeldJM4YDWPimNBRhOPXzBDiOQIj6WNswt/KM1oDLnA00CNtciPN
 # dn+dXlneMvTEUah9wyt8o8tkLpoBw+KN+Bq/K0O1qPtS7umi70l45pPiej+mwbwq
-# ztcaoVD7a8ggHP1Vdp/rnafM4GtyCAE6b7U9Yzgvp1/a1kh7XffmqVhRRjCCBY0w
-# ggR1oAMCAQICEA6bGI750C3n79tQ4ghAGFowDQYJKoZIhvcNAQEMBQAwZTELMAkG
-# A1UEBhMCVVMxFTATBgNVBAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRp
-# Z2ljZXJ0LmNvbTEkMCIGA1UEAxMbRGlnaUNlcnQgQXNzdXJlZCBJRCBSb290IENB
-# MB4XDTIyMDgwMTAwMDAwMFoXDTMxMTEwOTIzNTk1OVowYjELMAkGA1UEBhMCVVMx
-# FTATBgNVBAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRpZ2ljZXJ0LmNv
-# bTEhMB8GA1UEAxMYRGlnaUNlcnQgVHJ1c3RlZCBSb290IEc0MIICIjANBgkqhkiG
-# 9w0BAQEFAAOCAg8AMIICCgKCAgEAv+aQc2jeu+RdSjwwIjBpM+zCpyUuySE98orY
-# WcLhKac9WKt2ms2uexuEDcQwH/MbpDgW61bGl20dq7J58soR0uRf1gU8Ug9SH8ae
-# FaV+vp+pVxZZVXKvaJNwwrK6dZlqczKU0RBEEC7fgvMHhOZ0O21x4i0MG+4g1ckg
-# HWMpLc7sXk7Ik/ghYZs06wXGXuxbGrzryc/NrDRAX7F6Zu53yEioZldXn1RYjgwr
-# t0+nMNlW7sp7XeOtyU9e5TXnMcvak17cjo+A2raRmECQecN4x7axxLVqGDgDEI3Y
-# 1DekLgV9iPWCPhCRcKtVgkEy19sEcypukQF8IUzUvK4bA3VdeGbZOjFEmjNAvwjX
-# WkmkwuapoGfdpCe8oU85tRFYF/ckXEaPZPfBaYh2mHY9WV1CdoeJl2l6SPDgohIb
-# Zpp0yt5LHucOY67m1O+SkjqePdwA5EUlibaaRBkrfsCUtNJhbesz2cXfSwQAzH0c
-# lcOP9yGyshG3u3/y1YxwLEFgqrFjGESVGnZifvaAsPvoZKYz0YkH4b235kOkGLim
-# dwHhD5QMIR2yVCkliWzlDlJRR3S+Jqy2QXXeeqxfjT/JvNNBERJb5RBQ6zHFynIW
-# IgnffEx1P2PsIV/EIFFrb7GrhotPwtZFX50g/KEexcCPorF+CiaZ9eRpL5gdLfXZ
-# qbId5RsCAwEAAaOCATowggE2MA8GA1UdEwEB/wQFMAMBAf8wHQYDVR0OBBYEFOzX
-# 44LScV1kTN8uZz/nupiuHA9PMB8GA1UdIwQYMBaAFEXroq/0ksuCMS1Ri6enIZ3z
-# bcgPMA4GA1UdDwEB/wQEAwIBhjB5BggrBgEFBQcBAQRtMGswJAYIKwYBBQUHMAGG
-# GGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBDBggrBgEFBQcwAoY3aHR0cDovL2Nh
-# Y2VydHMuZGlnaWNlcnQuY29tL0RpZ2lDZXJ0QXNzdXJlZElEUm9vdENBLmNydDBF
-# BgNVHR8EPjA8MDqgOKA2hjRodHRwOi8vY3JsMy5kaWdpY2VydC5jb20vRGlnaUNl
-# cnRBc3N1cmVkSURSb290Q0EuY3JsMBEGA1UdIAQKMAgwBgYEVR0gADANBgkqhkiG
-# 9w0BAQwFAAOCAQEAcKC/Q1xV5zhfoKN0Gz22Ftf3v1cHvZqsoYcs7IVeqRq7IviH
-# GmlUIu2kiHdtvRoU9BNKei8ttzjv9P+Aufih9/Jy3iS8UgPITtAq3votVs/59Pes
-# MHqai7Je1M/RQ0SbQyHrlnKhSLSZy51PpwYDE3cnRNTnf+hZqPC/Lwum6fI0POz3
-# A8eHqNJMQBk1RmppVLC4oVaO7KTVPeix3P0c2PR3WlxUjG/voVA9/HYJaISfb8rb
-# II01YBwCA8sgsKxYoA5AY8WYIsGyWfVVa88nq2x2zm8jLfR+cWojayL/ErhULSd+
-# 2DrZ8LaHlv1b0VysGMNNn3O3AamfV6peKOK5lDCCBrQwggScoAMCAQICEA3HrFcF
-# /yGZLkBDIgw6SYYwDQYJKoZIhvcNAQELBQAwYjELMAkGA1UEBhMCVVMxFTATBgNV
-# BAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRpZ2ljZXJ0LmNvbTEhMB8G
-# A1UEAxMYRGlnaUNlcnQgVHJ1c3RlZCBSb290IEc0MB4XDTI1MDUwNzAwMDAwMFoX
-# DTM4MDExNDIzNTk1OVowaTELMAkGA1UEBhMCVVMxFzAVBgNVBAoTDkRpZ2lDZXJ0
-# LCBJbmMuMUEwPwYDVQQDEzhEaWdpQ2VydCBUcnVzdGVkIEc0IFRpbWVTdGFtcGlu
-# ZyBSU0E0MDk2IFNIQTI1NiAyMDI1IENBMTCCAiIwDQYJKoZIhvcNAQEBBQADggIP
-# ADCCAgoCggIBALR4MdMKmEFyvjxGwBysddujRmh0tFEXnU2tjQ2UtZmWgyxU7UNq
-# EY81FzJsQqr5G7A6c+Gh/qm8Xi4aPCOo2N8S9SLrC6Kbltqn7SWCWgzbNfiR+2fk
-# HUiljNOqnIVD/gG3SYDEAd4dg2dDGpeZGKe+42DFUF0mR/vtLa4+gKPsYfwEu7EE
-# bkC9+0F2w4QJLVSTEG8yAR2CQWIM1iI5PHg62IVwxKSpO0XaF9DPfNBKS7Zazch8
-# NF5vp7eaZ2CVNxpqumzTCNSOxm+SAWSuIr21Qomb+zzQWKhxKTVVgtmUPAW35xUU
-# FREmDrMxSNlr/NsJyUXzdtFUUt4aS4CEeIY8y9IaaGBpPNXKFifinT7zL2gdFpBP
-# 9qh8SdLnEut/GcalNeJQ55IuwnKCgs+nrpuQNfVmUB5KlCX3ZA4x5HHKS+rqBvKW
-# xdCyQEEGcbLe1b8Aw4wJkhU1JrPsFfxW1gaou30yZ46t4Y9F20HHfIY4/6vHespY
-# MQmUiote8ladjS/nJ0+k6MvqzfpzPDOy5y6gqztiT96Fv/9bH7mQyogxG9QEPHrP
-# V6/7umw052AkyiLA6tQbZl1KhBtTasySkuJDpsZGKdlsjg4u70EwgWbVRSX1Wd4+
-# zoFpp4Ra+MlKM2baoD6x0VR4RjSpWM8o5a6D8bpfm4CLKczsG7ZrIGNTAgMBAAGj
-# ggFdMIIBWTASBgNVHRMBAf8ECDAGAQH/AgEAMB0GA1UdDgQWBBTvb1NK6eQGfHrK
-# 4pBW9i/USezLTjAfBgNVHSMEGDAWgBTs1+OC0nFdZEzfLmc/57qYrhwPTzAOBgNV
-# HQ8BAf8EBAMCAYYwEwYDVR0lBAwwCgYIKwYBBQUHAwgwdwYIKwYBBQUHAQEEazBp
-# MCQGCCsGAQUFBzABhhhodHRwOi8vb2NzcC5kaWdpY2VydC5jb20wQQYIKwYBBQUH
-# MAKGNWh0dHA6Ly9jYWNlcnRzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRS
-# b290RzQuY3J0MEMGA1UdHwQ8MDowOKA2oDSGMmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0
-# LmNvbS9EaWdpQ2VydFRydXN0ZWRSb290RzQuY3JsMCAGA1UdIAQZMBcwCAYGZ4EM
-# AQQCMAsGCWCGSAGG/WwHATANBgkqhkiG9w0BAQsFAAOCAgEAF877FoAc/gc9EXZx
-# ML2+C8i1NKZ/zdCHxYgaMH9Pw5tcBnPw6O6FTGNpoV2V4wzSUGvI9NAzaoQk97fr
-# PBtIj+ZLzdp+yXdhOP4hCFATuNT+ReOPK0mCefSG+tXqGpYZ3essBS3q8nL2UwM+
-# NMvEuBd/2vmdYxDCvwzJv2sRUoKEfJ+nN57mQfQXwcAEGCvRR2qKtntujB71WPYA
-# gwPyWLKu6RnaID/B0ba2H3LUiwDRAXx1Neq9ydOal95CHfmTnM4I+ZI2rVQfjXQA
-# 1WSjjf4J2a7jLzWGNqNX+DF0SQzHU0pTi4dBwp9nEC8EAqoxW6q17r0z0noDjs6+
-# BFo+z7bKSBwZXTRNivYuve3L2oiKNqetRHdqfMTCW/NmKLJ9M+MtucVGyOxiDf06
-# VXxyKkOirv6o02OoXN4bFzK0vlNMsvhlqgF2puE6FndlENSmE+9JGYxOGLS/D284
-# NHNboDGcmWXfwXRy4kbu4QFhOm0xJuF2EZAOk5eCkhSxZON3rGlHqhpB/8MluDez
-# ooIs8CVnrpHMiD2wL40mm53+/j7tFaxYKIqL0Q4ssd8xHZnIn/7GELH3IdvG2XlM
-# 9q7WP/UwgOkw/HQtyRN62JK4S1C8uw3PdBunvAZapsiI5YKdvlarEvf8EA+8hcpS
-# M9LHJmyrxaFtoza2zNaQ9k+5t1wwggbtMIIE1aADAgECAhAIT9wzT35FTtvDD4/5
-# khg1MA0GCSqGSIb3DQEBCwUAMGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdp
-# Q2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3Rh
-# bXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTEwHhcNMjYwODA1MDAwMDAwWhcN
-# MzcxMTA0MjM1OTU5WjBjMQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQs
-# IEluYy4xOzA5BgNVBAMTMkRpZ2lDZXJ0IFNIQTI1NiBSU0E0MDk2IFRpbWVzdGFt
-# cCBSZXNwb25kZXIgMjAyNiAxMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKC
-# AgEAtnum8sn+zUr41JtMZbP9OMYw+HwJDpG5xkIu/lqcfNYmMX81YmsUiHLbh9yk
-# peWBGKTLhYBrAN9Tdg/QEzG32XcObmgIblnr0CoQ3WSAeDZ6nH6X6VkFyYkJw3QB
-# JREwvm4UhLzSxmwPA7cFKRTEOMsmEEj6qJk/dqLEAL+oQYuOwE2UuiX1Vnul8YRe
-# IyWd4kgLn9gq6LNXM0UplkR6jL/QHxmb6fMoGBJYbnaUI7XD6cKDpekK2SVMld4i
-# DbzeHDtOaaxldH5IxuNusQ69nd8/ZXEiB5Hbxj3RlK13cX1W4DlFXKdv/CEhM8Cj
-# 1vvlmvhNroyPdRGbbpBlgyf8Wdu5N6ByhFwURn0U6ozlPoxN22v+fviUhP+6DR54
-# 7OZnpBMWDfei1f5sVGwiiW/KQTWOK97g+4RJpPzPNV4VYMAwO2jM2Aty2QYPVmOQ
-# TJm0msuXnJrSbl2gf9JylpkJlWXqk1Q4LJsxz+TELoQCZIljbgvTJgoPU2R12ydv
-# 8i1UqL/adelA0y7U9Pmmtbze9Xx3rtajC5SzQd1jgfwAwsa90v9YcSPdmeoyoBBA
-# /27cCL237l5DTYYPDLQ4ON3OLTGWnvRb6jDrf/T75gMRfUzSLCBQfBusm9+mSWRl
-# C/Df6S/e9Q8i13CuhzOT2Jx+V/nlbXM4QoBwlUAhelwwJT0CAwEAAaOCAZUwggGR
-# MAwGA1UdEwEB/wQCMAAwHQYDVR0OBBYEFBTJY4owLtRK+26U8+bjQH717M3iMB8G
-# A1UdIwQYMBaAFO9vU0rp5AZ8esrikFb2L9RJ7MtOMA4GA1UdDwEB/wQEAwIHgDAW
-# BgNVHSUBAf8EDDAKBggrBgEFBQcDCDCBlQYIKwYBBQUHAQEEgYgwgYUwJAYIKwYB
-# BQUHMAGGGGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBdBggrBgEFBQcwAoZRaHR0
-# cDovL2NhY2VydHMuZGlnaWNlcnQuY29tL0RpZ2lDZXJ0VHJ1c3RlZEc0VGltZVN0
-# YW1waW5nUlNBNDA5NlNIQTI1NjIwMjVDQTEuY3J0MF8GA1UdHwRYMFYwVKBSoFCG
-# Tmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRHNFRpbWVT
-# dGFtcGluZ1JTQTQwOTZTSEEyNTYyMDI1Q0ExLmNybDAgBgNVHSAEGTAXMAgGBmeB
-# DAEEAjALBglghkgBhv1sBwEwDQYJKoZIhvcNAQELBQADggIBAI3FOmEenVIK35ms
-# CYB+fShAsWvSYvLBItoNdAgQ2jIqrGsVsluXMJU/+mRebBc52s6lbKAvOVPXaizm
-# KkMLLflEEKDZQx4CkS2t8aHPjkXha3hYZ010htFa3dhNgmalH5vuWvh3tTCf4frT
-# S7gPtGc4Z/xaPhQ2AB1mR8eEe/WbH0RWHvVIl6VwQ3+g5FKNfN2N/DWJkf13w2H+
-# 2GfqEfbd35Ww8CvoYBjLNIDTadcPWdgsjsiOaK/7EsKJgLjUNIVgvcaFOLLQ/Glr
-# A+0ZHJoFUbOr5SJN8zykPspXIXlpDJY/gqFUZRROeab9GVgmhbdOJcD/63RhxPah
-# FUGbckRONqMe6DYAv6/mOG0pWd3cPStsdcS7buj5DyniwRY8yooMH6ptx5vpP/pZ
-# zBPBeZD2U4IsthyxB5Jaa8qrOkB5z160TXiM5ADMspZ0TfD9MJoq0tFpFPssKRFh
-# WeEDYPvcUuN7U7lvcdHl4ezQ3NT/7Ffs1sR1yh/LRbdZ3B3Vc6q2WmD8mDC0p9kz
-# l2o73iVtS946IkEj7FkRsZGww1teYxERROC745xrtjvcw9ZyyUjHZWGRIpJeMNsP
-# quCDf0fkyHtB+J4AiNZqCQk23rxh+KbpyMTNVKItJ5l92Svl20U9NbqMBOVYl1h5
-# 4NEYLJq1/xHWFKPNK903zJZA9P2DMYIFvjCCBboCAQEwYjBOMR4wHAYDVQQDDBV3
-# b3JrcGxhY2VjbG91ZGh1Yi5jb20xLDAqBgkqhkiG9w0BCQEWHWNvbnRhY3RAd29y
-# a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
-# AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
-# CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEINJST/xLe67o1iVx1Ln2X6MSTpWZxwXEuuWmmFk9ZD4VMA0GCSqG
-# SIb3DQEBAQUABIIBgDuV0vUO8irCpVfLvSI1vxoEhFDRmjGKrOwqQZi8cdPxrXZe
-# KCgw7HhwLWvmOOGN/dnX65swfBKiNhkRIH84dJ7SB1LXjc1BFTPlG4IGQksMb2nq
-# F15Scm4LrNjNLTmYj9W50+JRH0fxl2IaqcemOCrpGD1SspF09QSLQLce3b2M7fSO
-# scKmdfN9cIYkTUpzQXg+XxWWRfzdz30uOmbTLe8uo10+d68A3PQv9xG2PQds+8jC
-# l4SzuEwoU5YkbL3q1Cf0TZEqu6SfNCm3V1nd/eM2TKuJUB0wFwlFJ1uqLH4roy3L
-# IqBmHnpIz4dszYso6Hos8Akid3kzEFqKzrvb75c54sMGgWQxin5paQ0GQ6z5zaQk
-# 3At21KOp6brrsg646jQL88izmAZwwQRIgs5chYpwyZqtOVi9pzLV7CLH8y/RCL+h
-# 3zIbl4NwoKa/j9m7P62OLk9V0KOa/Or6lDvq7imLI0trJPa5iSfQNa1rPet+p1oX
-# WxW/JkKXeMAIBp0cNqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
-# CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
-# RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
-# MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTkxOTQ3
-# MTJaMC8GCSqGSIb3DQEJBDEiBCBAopYUoE9fd83XcOHiyb0vVpdNFCjs24ezobsG
-# x+I4tzANBgkqhkiG9w0BAQEFAASCAgB+6pYqvplCRwmz9UOOmFeOD8bI4Adq1loi
-# z0HHvM7QEc1ZwItdXh+Id5/1Toi3LRNDt1xlPxvVHcDgqaZm7WJb32X9yz8uztSW
-# UmtU1QlfEEYdpdpsXEnWjVehApJ6EuDEAVjrlXi/qhK4P7kBlp2/PgGNtZwE3qsM
-# iK6QctsFJHGAFkrC5etjpGghICBYmeXNOIW6bw5SFfUvQesxWhqUfwKVjVgHHQP+
-# fZpVDzLc31E9lse5/zFoq9DDgr6nIr+G3QnjiWN7RV2pYukgBYdXeVcoJAWQIHu5
-# bq1Z/JUy2pccLPlvvnfhoPk4dqQzhTBwmAODFa26+rNKmdFv6qMTzOmcHkZAf2xf
-# mGbfvfOG/IqSwfc98W46CJ/WBKohWb3fdLVb8eu97vIXln3ctapKytuHljU69T+/
-# HQDL8FVGpKgPDlS8lsX7S4arETVOvV+EWKzHFX2GGQBL2ITGqCsAo7hdW5cpp6ak
-# xHGG4NsfTKntIe5cj2Ey9TQJIZE2Fr/ixIjGmcZ5ejoA+mSujJIr1womWDh1B7Se
-# IL0Hlq2o/Mm2LUmAeHL4fg8xJ8frdmVGew0Bf/uWyF8JtbuHTj1F0iRhO+boVxL7
-# muhjsKtGHmxdhFifSopc+IkIVNsQmiE2q5g1HfBN53ZGQ6RUtTBp0IMQAGgclydt
-# XKGsKOgrtQ==
+# ztcaoVD7a8ggHP1Vdp/rnafM4GtyCAE6b7U9Yzgvp1/a1kh7XffmqVhRRjGCApQw
+# ggKQAgEBMGIwTjEeMBwGA1UEAwwVd29ya3BsYWNlY2xvdWRodWIuY29tMSwwKgYJ
+# KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
+# 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
+# gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCB57bGu3KQ85JTnaeoF07BH
+# wFPAba31a9LBSou1JhV/UTANBgkqhkiG9w0BAQEFAASCAYCrhmbtRTr7K6wmtUm9
+# bZoR+OBfIJgb4UiNFVbjuVOVzH5J6OSC9NycQLtix9uwmfMiMzF7/MBT55fxUlBE
+# YjY9LYWu72XgCSM0dnwK/N60M3MJG+OZzlQXwrZDq7xXoGprdFBYHrhiTBgTh8Cn
+# wpq3lEoCcAuqR8jrWYR/WJ1nWX6mE7yg2XDAuIzhMQFFkCNRKmPordaYPTKDNPlv
+# 4sQSCpbwBKNVEG8DeNfe+wyNc9XaHOHzy5v3Yb2t2aF2kr8ZakYKcw86wnT/PYL0
+# au8UgnUfnGEykUhI9sfC5LKsMK2mEfoxG2C6wP3YAd5hxjnx/wi+h7O8wAFfHnKM
+# 7C6pKxum+v2jZ35IXj5oRj6IZhTvNChNdBTO7SMMGA2mEs3lKxgM+ePtqJH2jlT0
+# uTF52mtjLq5Zsbznkib7v9Wf303kfMwTizVFGbUtQPalEADd0Abkg/Ke4pZQpsSj
+# BewXR/errKF6xaVre/MDoGKWxyi5y7pAaIRFWP3TgeNXpoI=
 # SIG # End signature block

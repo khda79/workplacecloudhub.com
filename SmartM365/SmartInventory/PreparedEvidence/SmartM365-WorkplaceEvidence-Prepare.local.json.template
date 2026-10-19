@@ -7,6 +7,12 @@
   "PreparedPythonCommand": "python",
   "PreparedMailboxMigrationExceptionsEnabled": false,
   "PreparedMailboxMigrationBindingsPath": "",
+  "PreparedSharePointMigrationEnabled": false,
+  "PreparedSharePointMigrationWorkbookFileName": "SmartWorkplaceIntelligence-Migration-to-SPO.xlsx",
+  "PreparedSharePointMigrationBindingsFileName": "",
+  "PreparedSharePointMigrationTargetTenantUrl": "",
+  "PreparedSharePointMigrationReviewMaxAgeDays": 7,
+  "PreparedSharePointMigrationReportingTimeZoneId": "UTC",
   "PreparedMaxParallelGenerators": 3,
   "PreparedMaxSourceAgeHours": 168,
   "PreparedSourceAgeOverrides": {
