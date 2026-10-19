@@ -1,6 +1,6 @@
 ﻿@{
     RootModule = 'SmartM365.JsonTransport.psm1'
-    ModuleVersion = '1.0.6'
+    ModuleVersion = '1.0.7'
     GUID = 'ccf5a4b1-c253-4e30-98a8-d794f1ad995e'
     Author = 'WorkplaceCloudHub'
     PowerShellVersion = '5.1'

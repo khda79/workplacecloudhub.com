@@ -185,7 +185,11 @@ function ConvertFrom-SmartM365JsonBytes {
     $reader = [IO.StreamReader]::new($memory, [Text.UTF8Encoding]::new($false, $true), $true)
     try { $content = $reader.ReadToEnd() } finally { $reader.Dispose(); $memory.Dispose() }
     if ([string]::IsNullOrWhiteSpace($content)) { throw 'Blank JSON payload.' }
-    $document = ConvertFrom-Json -InputObject $content -ErrorAction Stop
+    try { $document = ConvertFrom-Json -InputObject $content -ErrorAction Stop }
+    catch {
+        $_.Exception.Data['SmartM365JsonInvalidSyntax'] = $true
+        throw
+    }
     if ($null -eq $document -and $content.TrimStart().StartsWith('[')) { $document = @() }
     if ($null -eq $document) { throw 'Null JSON payload cannot represent a valid owned state.' }
     if ($Validate) { & $Validate $document | Out-Null }
@@ -359,6 +363,15 @@ function Get-SmartM365JsonTransportPolicy {
     return $policy
 }
 
+function Get-SmartM365JsonLockErrorCode {
+    param([Parameter(Mandatory)][Exception]$Exception)
+    for ($errorCause = $Exception; $null -ne $errorCause; $errorCause = $errorCause.InnerException) {
+        $code = $errorCause.HResult -band 65535
+        if ($code -in @(32, 33)) { return $code }
+    }
+    return 0
+}
+
 function Write-SmartM365JsonBytesAtomically {
     [CmdletBinding()]
     param(
@@ -368,7 +381,9 @@ function Write-SmartM365JsonBytesAtomically {
         [string]$ExpectedSHA256 = '',
         [switch]$RetireLegacyAfterPublication,
         [string]$Owner = '',
-        [int]$LockTimeoutSeconds = 10
+        [int]$LockTimeoutSeconds = 10,
+        # Configuration enrichment can wait longer without changing other callers' budgets.
+        [ValidateRange(0, 3600)][int]$ReplacementTimeoutSeconds = $LockTimeoutSeconds
     )
     $names = Get-SmartM365JsonNames $Path
     # Caller chooses the deployment-phase path. Serialization is never performed here.
@@ -399,19 +414,16 @@ function Write-SmartM365JsonBytesAtomically {
             }
             if ([IO.File]::Exists($names.Legacy)) { $legacyHash = (Get-FileHash -LiteralPath $names.Legacy -Algorithm SHA256).Hash }
         }
-        if ($ExpectedSHA256 -eq 'ABSENT') {
-            if (Test-Path -LiteralPath $target) { throw [IO.IOException]::new('JSON target was created by another writer.') }
-        } elseif ($ExpectedSHA256) {
-            if (-not [IO.File]::Exists($target) -or (Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash -ne $ExpectedSHA256) {
-                throw 'JSON target changed since it was read; refusing a lost update.'
-            }
-        }
         $stream = [IO.File]::Open($temporary, 'CreateNew', 'Write', 'None')
         try { $stream.Write($Bytes, 0, $Bytes.Length); $stream.Flush($true) } finally { $stream.Dispose() }
         $expected = Get-SmartM365JsonHash $Bytes
         if ((Get-FileHash -LiteralPath $temporary -Algorithm SHA256).Hash -ne $expected) { throw 'Staged JSON integrity check failed.' }
         if ($legacyHash) { Write-SmartM365JsonMigrationEvent $names.Journal $Owner 'ReplacementPrepared' $expected $legacyHash }
-        $publishDeadline = [datetime]::UtcNow.AddSeconds($LockTimeoutSeconds)
+        $publishWatch = [Diagnostics.Stopwatch]::StartNew()
+        $retryDelayMilliseconds = 250
+        $attempt = 0
+        $lastLockError = $null
+        $lockCode = 0
         if ([IO.File]::Exists($target)) {
             $attributes = [IO.File]::GetAttributes($target)
             if ($attributes -band [IO.FileAttributes]::ReadOnly) {
@@ -420,20 +432,46 @@ function Write-SmartM365JsonBytesAtomically {
             }
         }
         while ($true) {
-            foreach ($candidate in @($target, $temporary, $backup)) { Assert-SmartM365JsonUnlinkedPath $candidate -AllowQualifiedDataRoot }
+            if ($null -ne $lastLockError -and $publishWatch.Elapsed.TotalSeconds -ge $ReplacementTimeoutSeconds) {
+                $failure = [IO.IOException]::new(("Atomic replacement timed out for '{0}' after {1:N1}s and {2} attempt(s): destination remains locked (Win32 {3})." -f $target, $publishWatch.Elapsed.TotalSeconds, $attempt, $lockCode), $lastLockError)
+                $failure.Data['SmartM365JsonFailureKind'] = 'LockTimeout'
+                throw $failure
+            }
+            $attempt++
             try {
+                foreach ($candidate in @($target, $temporary, $backup)) { Assert-SmartM365JsonUnlinkedPath $candidate -AllowQualifiedDataRoot }
+                # An external writer may have changed the destination during a retry delay.
+                if ($ExpectedSHA256 -eq 'ABSENT') {
+                    if (Test-Path -LiteralPath $target) { throw 'JSON target was created by another writer.' }
+                } elseif ($ExpectedSHA256) {
+                    # Native IO preserves Win32 lock codes that PS5 Get-FileHash can discard.
+                    if (-not [IO.File]::Exists($target) -or (Get-SmartM365JsonHash -Bytes ([IO.File]::ReadAllBytes($target))) -ne $ExpectedSHA256) {
+                        throw 'JSON target changed since it was read; refusing a lost update.'
+                    }
+                }
                 if ([IO.File]::Exists($target)) {
                     # No non-atomic emulation when the filesystem cannot replace atomically.
                     [IO.File]::Replace($temporary, $target, $backup)
                 } else { [IO.File]::Move($temporary, $target) }
                 $published = $true
                 break
-            } catch [IO.IOException] {
-                if ([datetime]::UtcNow -ge $publishDeadline -or -not [IO.File]::Exists($temporary)) { throw [IO.IOException]::new("Atomic replacement failed for '$target': $($_.Exception.Message)", $_.Exception) }
-            } catch [UnauthorizedAccessException] {
-                if ([datetime]::UtcNow -ge $publishDeadline -or -not [IO.File]::Exists($temporary)) { throw [IO.IOException]::new("Atomic replacement failed for '$target': $($_.Exception.Message)", $_.Exception) }
+            } catch {
+                $lockCode = Get-SmartM365JsonLockErrorCode -Exception $_.Exception
+                if (-not $lockCode -or -not [IO.File]::Exists($temporary)) {
+                    throw [IO.IOException]::new("Atomic replacement failed for '$target': $($_.Exception.Message)", $_.Exception)
+                }
+                $lastLockError = $_.Exception
+                $remainingMilliseconds = [Math]::Ceiling(($ReplacementTimeoutSeconds - $publishWatch.Elapsed.TotalSeconds) * 1000)
+                if ($remainingMilliseconds -gt 0) {
+                    $delay = [int][Math]::Min($retryDelayMilliseconds, $remainingMilliseconds)
+                    Write-Information ("[{0}] JSON destination locked (Win32 {1}): {2}; attempt={3}; retry in {4:N2}s; timeout={5}s." -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $lockCode, $target, $attempt, ($delay / 1000.0), $ReplacementTimeoutSeconds) -InformationAction Continue
+                    Start-Sleep -Milliseconds $delay
+                    $retryDelayMilliseconds = [Math]::Min(5000, $retryDelayMilliseconds * 2)
+                }
             }
-            Start-Sleep -Milliseconds 100
+        }
+        if ($attempt -gt 1) {
+            Write-Information ("[{0}] JSON replacement succeeded after {1} attempt(s), {2:N1}s: {3}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $attempt, $publishWatch.Elapsed.TotalSeconds, $target) -InformationAction Continue
         }
         if ((Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash -ne $expected) { throw "Published JSON integrity failure; previous version retained at $backup" }
         if ($legacyHash) {

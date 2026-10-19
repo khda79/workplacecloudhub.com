@@ -1,4 +1,4 @@
-Import-Module (Join-Path $PSScriptRoot '../Modules/SmartM365.Core/SmartM365.JsonTransport.psd1') -MinimumVersion '1.0.0' -Global -ErrorAction Stop
+Import-Module (Join-Path $PSScriptRoot '../Modules/SmartM365.Core/SmartM365.JsonTransport.psd1') -MinimumVersion '1.0.7' -Global -ErrorAction Stop
 <#
 .SYNOPSIS
 Loads SmartM365 global and tenant configuration context.
@@ -7,7 +7,7 @@ Loads SmartM365 global and tenant configuration context.
 Merges global and tenant local JSON configuration, resolves workspace paths, and exposes the effective tenant context used by SmartM365 scripts.
 
 .VERSION
-1.0.9
+1.0.10
 #>
 function Write-SmartM365StartupBanner {
     [CmdletBinding()]
@@ -249,7 +249,8 @@ function Sync-SmartM365JsonConfigWithTemplate {
         [Parameter(Mandatory)]$Config,
         [Parameter(Mandatory)][string]$Path,
         [string]$TemplatePath,
-        [string]$ExpectedSHA256 = ''
+        [string]$ExpectedSHA256 = '',
+        [ValidateRange(0, 3600)][int]$ConfigurationWriteTimeoutSeconds = 60
     )
 
     if ([string]::IsNullOrWhiteSpace($TemplatePath)) {
@@ -277,7 +278,7 @@ function Sync-SmartM365JsonConfigWithTemplate {
         if ($addedKeys.Count -gt 0) {
             $bytes = [Text.UTF8Encoding]::new($false).GetBytes(($Config | ConvertTo-Json -Depth 100) + [Environment]::NewLine)
             if (-not $ExpectedSHA256) { throw 'Template update requires the hash of the configuration that was read.' }
-            Write-SmartM365JsonBytesAtomically -Path $Path -Bytes $bytes -ExpectedSHA256 $ExpectedSHA256 -Validate {
+            Write-SmartM365JsonBytesAtomically -Path $Path -Bytes $bytes -ExpectedSHA256 $ExpectedSHA256 -ReplacementTimeoutSeconds $ConfigurationWriteTimeoutSeconds -Validate {
                 param($document)
                 if ($document -isnot [System.Management.Automation.PSCustomObject]) { throw 'Configuration must remain an object.' }
             } | Out-Null
@@ -287,40 +288,45 @@ function Sync-SmartM365JsonConfigWithTemplate {
     }
     catch {
         $syncErrorMessage = [string]$PSItem.Exception.Message
-        throw ("Failed to synchronize local JSON '{0}' with template '{1}': {2}" -f $Path, $TemplatePath, $syncErrorMessage)
+        throw [InvalidOperationException]::new(("Failed to synchronize local JSON '{0}' with template '{1}': {2}" -f $Path, $TemplatePath, $syncErrorMessage), $_.Exception)
     }
 }
 function Read-SmartM365JsonConfig {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string]$Path,
-        [switch]$Required
+        [switch]$Required,
+        [ValidateRange(0, 3600)][int]$ConfigurationWriteTimeoutSeconds = 60
     )
 
-    $Path = Resolve-SmartM365JsonConfigurationPath -Path $Path
-    if (-not (Test-Path -LiteralPath $Path)) {
-        if ($Required) {
-            $templatePath = Get-SmartM365JsonTemplatePath -Path $Path
-            Initialize-SmartM365LocalJsonFromTemplate -Path $Path -TemplatePath $templatePath -ConfigDescription 'required local configuration' | Out-Null
-        }
-        else {
-            return [ordered]@{}
-        }
-    }
-
+    $phase = 'read'
     try {
+        $Path = Resolve-SmartM365JsonConfigurationPath -Path $Path
+        if (-not (Test-Path -LiteralPath $Path)) {
+            if ($Required) {
+                $phase = 'initialization'
+                $templatePath = Get-SmartM365JsonTemplatePath -Path $Path
+                Initialize-SmartM365LocalJsonFromTemplate -Path $Path -TemplatePath $templatePath -ConfigDescription 'required local configuration' | Out-Null
+            }
+            else {
+                return [ordered]@{}
+            }
+        }
         $read = Read-SmartM365JsonDocument -Path $Path
         $config = ConvertTo-SmartM365Hashtable -InputObject $read.Document
-        return (Sync-SmartM365JsonConfigWithTemplate -Config $config -Path $read.Path -ExpectedSHA256 $read.SHA256)
+        $phase = 'template update'
+        return (Sync-SmartM365JsonConfigWithTemplate -Config $config -Path $read.Path -ExpectedSHA256 $read.SHA256 -ConfigurationWriteTimeoutSeconds $ConfigurationWriteTimeoutSeconds)
     }
     catch {
-        $message = @(
-            ("Failed to read configuration file '{0}': {1}" -f $Path, $_.Exception.Message),
-            'The file is not valid JSON. Check quotes, commas, and Windows paths.',
-            'Windows paths in JSON must escape backslashes, for example "Z:\\GIT\\SmartM365", or use forward slashes, for example "Z:/GIT/SmartM365".',
-            'Do not write paths with single backslashes such as "Z:\GIT\SmartM365" because JSON treats sequences like \e as invalid escapes.'
-        )
-        throw ($message -join [Environment]::NewLine)
+        $invalidSyntax = $false
+        for ($cause = $_.Exception; $null -ne $cause; $cause = $cause.InnerException) {
+            if ($cause.Data['SmartM365JsonInvalidSyntax']) { $invalidSyntax = $true }
+        }
+        $message = @(("Failed to load configuration file '{0}' during {1}: {2}" -f $Path, $phase, $_.Exception.Message))
+        if ($invalidSyntax) {
+            $message += 'Invalid JSON syntax. Check quotes, commas, and escaped backslashes in Windows paths.'
+        }
+        throw [InvalidOperationException]::new(($message -join [Environment]::NewLine), $_.Exception)
     }
 }
 
