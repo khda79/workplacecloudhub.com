@@ -9,11 +9,13 @@
   FinOps_Showback or FinOps_Realization. A failed or inconsistent run gives a "Report not available" page
   with the reason and no figure; it replaces the current report so that no older figure stays visible.
 .VERSION
-2.3.1
+2.4.0
 .NOTES
   Input and output: the SmartM365 DATA-LAST of the profile (SmartFinOps_Workplace-Report.html), a copy in
   DATA-ALL\FinOps\Workplace\<FinOpsRunId>\ when that run is in the history, and the log in
   LOG-ALL\SmartFinOps-Workplace-Report\; mirrored to SharePoint when upload is enabled (SmartM365 setting by default).
+  Daily email (Report.EnableDailyEmail, default true): once per Europe/Paris day and profile (-ForceEmail sends again),
+  aggregates only, the page attached, through the SmartM365 mail transport of the profile; never in -ValidateOnly.
   Aggregates only: no user identifier, no external resource, no script, every value HTML-encoded. Same inputs give the
   same HTML except the generation time.
 #>
@@ -24,16 +26,18 @@ param(
   [string]$SmartM365DataAllRootPath,
   [string]$SmartM365LogAllRootPath,
   [string]$SmartM365TenantKey,
+  [switch]$ForceEmail,
   [switch]$ValidateOnly
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-$script:ScriptVersion = '2.3.1'
+$script:ScriptVersion = '2.4.0'
 $script:LogLines = [System.Collections.Generic.List[string]]::new()
 $script:Invariant = [Globalization.CultureInfo]::InvariantCulture
 $script:ReceiptName = 'SmartFinOps_Workplace-Valuation.current.json.txt'
 $script:ReportName = 'SmartFinOps_Workplace-Report.html'
+$script:DailyEmailStateName = 'SmartFinOps_Workplace-Report_DailyEmail_SendState.json.txt'
 
 #region Input contract (engine 2.1.4 to 2.2.x)
 $script:CommonColumns = @('TenantKey','FinOpsRunId','SnapshotId','ReceiptRunId')
@@ -717,6 +721,163 @@ function New-ReportPageContent {
 }
 #endregion
 
+#region Daily email
+function Write-ReportDailyMailState {
+  param([Parameter(Mandatory)][System.IO.FileStream]$Stream, [Parameter(Mandatory)][AllowEmptyCollection()][byte[]]$Bytes)
+  $Stream.SetLength(0)
+  $Stream.Position = 0
+  $Stream.Write($Bytes, 0, $Bytes.Length)
+  $Stream.Flush($true)
+}
+
+function Enter-ReportDailyMailGate {
+  param([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)][string]$TenantKey, [switch]$Force, [datetimeoffset]$NowUtc = [datetimeoffset]::UtcNow)
+  # Same gate as the SmartM365 Licences summary: one mail per Europe/Paris day, exclusive state file, Pending before sending.
+  if (-not (Test-Path -LiteralPath (Split-Path -Path $Path -Parent) -PathType Container)) { throw "Daily email state folder does not exist: $Path" }
+  $timeZone = try { [TimeZoneInfo]::FindSystemTimeZoneById('Romance Standard Time') } catch { [TimeZoneInfo]::FindSystemTimeZoneById('Europe/Paris') }
+  $day = [TimeZoneInfo]::ConvertTime($NowUtc, $timeZone).ToString('yyyy-MM-dd', $script:Invariant)
+  $stream = [System.IO.File]::Open($Path, [System.IO.FileMode]::OpenOrCreate, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
+  try {
+    if ($stream.Length -gt 16384) { throw "Daily email state is unexpectedly large: $Path" }
+    $previous = [byte[]]::new([int]$stream.Length)
+    if ($previous.Length -gt 0) {
+      $stream.Position = 0
+      $read = 0
+      while ($read -lt $previous.Length) {
+        $count = $stream.Read($previous, $read, $previous.Length - $read)
+        if ($count -eq 0) { throw "Daily email state could not be read: $Path" }
+        $read += $count
+      }
+      $state = $null
+      try {
+        $state = [Text.Encoding]::UTF8.GetString($previous) | ConvertFrom-Json -AsHashtable -ErrorAction Stop
+        if ($state -isnot [System.Collections.IDictionary] -or -not $state.Contains('TenantKey') -or -not $state.Contains('LocalDate') -or
+            [string]$state.Status -notin @('Sent', 'Pending') -or [string]$state.LocalDate -notmatch '^\d{4}-\d{2}-\d{2}$') { throw 'Invalid daily email state structure.' }
+      }
+      catch {
+        if (-not $Force) { throw "Daily email state is unreadable; use -ForceEmail after checking delivery: $Path" }
+        $state = $null
+      }
+      if ($state -and [string]$state.TenantKey -cne $TenantKey) { throw "Daily email state belongs to another tenant: $Path" }
+      if ($state -and [string]$state.LocalDate -eq $day -and -not $Force) {
+        $reason = if ([string]$state.Status -eq 'Sent') { "already sent on $day" } else { "delivery is pending or uncertain on $day" }
+        $stream.Dispose()
+        return [pscustomobject]@{ Skip=$true; Reason=$reason; Stream=$null; Day=$day; PreviousBytes=$previous }
+      }
+    }
+    $pending = [ordered]@{ TenantKey=$TenantKey; LocalDate=$day; Status='Pending'; LastAttemptUtc=$NowUtc.ToString('o') }
+    Write-ReportDailyMailState -Stream $stream -Bytes ([Text.UTF8Encoding]::new($false).GetBytes(($pending | ConvertTo-Json -Compress)))
+    return [pscustomobject]@{ Skip=$false; Reason=''; Stream=$stream; Day=$day; PreviousBytes=$previous }
+  }
+  catch {
+    $stream.Dispose()
+    throw
+  }
+}
+
+function Test-ReportIdentifierFree {
+  param([AllowNull()][string]$Text)
+  # The mail and its attachment carry aggregates only: no e-mail address or UPN, no GUID.
+  if ([string]::IsNullOrEmpty($Text)) { return $true }
+  if ($Text -match '[A-Za-z0-9._%+''-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+') { return $false }
+  return -not ($Text -match '(?i)\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b')
+}
+
+function Get-ReportDailyEmailContent {
+  param([Parameter(Mandatory)]$Inputs, [Parameter(Mandatory)][string]$Tenant, [string]$ReportUrl)
+  # Aggregates already published by the engine and qualified by the report; nothing is recomputed.
+  $cell = 'padding:6px 10px;border-bottom:1px solid #dde7f0;font-size:13px;'
+  $head = 'padding:6px 10px;border-bottom:2px solid #b9ddf7;font-size:12px;text-align:left;color:#005a9e;'
+  $table = { param([string[]]$Headers, [object[]]$Rows)
+    $lines = [System.Collections.Generic.List[string]]::new()
+    $lines.Add('<table role="presentation" cellpadding="0" cellspacing="0" style="border-collapse:collapse;width:100%;margin:6px 0 14px 0;"><thead><tr>')
+    foreach ($h in $Headers) { $lines.Add(('<th style="{0}">{1}</th>' -f $head, (ConvertTo-ReportHtml $h))) }
+    $lines.Add('</tr></thead><tbody>')
+    foreach ($row in $Rows) { $lines.Add('<tr>' + ((@($row) | ForEach-Object { '<td style="{0}">{1}</td>' -f $cell, (ConvertTo-ReportHtml (ConvertTo-ReportSafeText $_)) }) -join '') + '</tr>') }
+    $lines.Add('</tbody></table>')
+    $lines -join "`n"
+  }
+  $link = if ($ReportUrl) { '<p style="font-size:13px;">Full report on SharePoint: <a href="{0}">{1}</a> (also attached).</p>' -f (ConvertTo-ReportHtml $ReportUrl), (ConvertTo-ReportHtml $script:ReportName) } else { '<p style="font-size:13px;">The full report is attached.</p>' }
+  if (-not $Inputs.Available) {
+    $reason = ConvertTo-ReportHtml (ConvertTo-ReportSafeText $Inputs.Reason)
+    return [pscustomobject]@{ Status='NotAvailable'; Subject='SmartFinOps Workplace - Daily valuation - report not available'; Attach=$false
+      BodyHtml=('<p style="font-size:14px;"><strong>Report not available.</strong> No figure is published for profile {0} today.</p><p style="font-size:13px;">Reason: {1}</p><p style="font-size:12px;color:#5f6b7a;">The last valuation run did not qualify; no older figure is reused.</p>' -f (ConvertTo-ReportHtml $Tenant), $reason) }
+  }
+  $receipt = $Inputs.Receipt
+  $summary = @($Inputs.Data['FinOps_Summary.csv'])
+  $sources = @($Inputs.Data['FinOps_Sources.csv'])
+  $kpi = @{}; foreach ($row in $summary) { $kpi[[string]$row.KpiKey] = $row }
+  $sourceRows = @(foreach ($status in @('Qualified','Provisional','NotMeasured')) { ,@($(if ($status -eq 'NotMeasured') { 'Not measured' } else { $status }), [string]@($sources | Where-Object { [string]$_.QualificationStatus -ceq $status }).Count) })
+  $sourcesHtml = & $table @('Source state', 'Sources') $sourceRows
+  if (-not [bool](Get-ReportProperty $receipt 'LicencesMeasured')) {
+    return [pscustomobject]@{ Status='NotMeasured'; Subject='SmartFinOps Workplace - Daily valuation - Licences report not measured'; Attach=$true
+      BodyHtml=('<p style="font-size:14px;"><strong>Licences report not qualified.</strong> Every figure of run {0} is Not measured; no amount is published and no older value is reused.</p>{1}{2}' -f (ConvertTo-ReportHtml $Inputs.RunId), $sourcesHtml, $link) }
+  }
+  $amount = { param([string]$Key) $row = $kpi[$Key]; if ($null -eq $row) { return 'Not measured' }
+    $text = Get-ReportEurText $row.AnnualAmount
+    if ($text) { if ([string]$row.ValuationStatus -ceq 'Provisional') { "$text (provisional)" } else { $text } }
+    elseif ($row.ValuationStatus -and [string]$row.ValuationStatus -cne 'Valued') { [string]$row.ValuationStatus } else { 'None identified' } }
+  $totals = @(
+    ,@('Realizable reduction (R), annual', (& $amount 'TOTAL_R'))
+    ,@('of which enabled accounts without M365 activity in 90 days', (& $amount 'TOTAL_R_ENABLED_INACTIVE'))
+    ,@('Conditional E3 to F3 (not in the R total)', (& $amount 'TOTAL_RC_E3_TO_F3'))
+    ,@('Cost avoidance (E): reuse for users waiting for capacity', (& $amount 'TOTAL_E_REUSE'))
+    ,@('Cost avoidance (E): Windows 10 ESU', (& $amount 'TOTAL_E_ESU')))
+  $detail = @($summary | Where-Object { ([string]$_.KpiKey).StartsWith('DETAIL|', [StringComparison]::Ordinal) })
+  $signals = @(foreach ($status in @('Blocked', 'Review')) {
+    $units = [long]0; $users = [long]0
+    foreach ($row in @($detail | Where-Object { [string]$_.ValuationStatus -ceq $status })) { $u = ConvertTo-ReportLong $row.Units; if ($null -ne $u) { $units += $u }; $n = ConvertTo-ReportLong $row.Users; if ($null -ne $n) { $users += $n } }
+    ,@($status, $units.ToString('#,##0', $script:Invariant), $users.ToString('#,##0', $script:Invariant)) })
+  $prices = @(foreach ($origin in @(@('Estimated', 'Catalogue estimate'), @('Contract', 'Contract price'), @('Unknown', 'No price flag'))) { ,@($origin[1], (& $amount ('PRICE|TOTAL_R|' + $origin[0]))) })
+  $provisional = [bool](Get-ReportProperty $receipt 'Provisional')
+  $banner = if ($provisional) { '<p style="font-size:13px;padding:8px 10px;background:#fff7e6;border-left:3px solid #d97706;">Provisional figures for levers {0}: a source they use is provisional.</p>' -f (ConvertTo-ReportHtml ((@(Get-ReportProperty $receipt 'ProvisionalLevers' | Where-Object { $_ })) -join ', ')) } else { '' }
+  $body = ('<p style="font-size:14px;">Daily valuation of profile {0}, run {1}. Amounts in EUR excluding VAT, annual run-rate.</p>{2}' -f (ConvertTo-ReportHtml $Tenant), (ConvertTo-ReportHtml $Inputs.RunId), $banner) +
+    '<h3 style="font-size:14px;color:#1f2937;">Financial potential</h3>' + (& $table @('Indicator', 'Annual amount') $totals) +
+    '<h3 style="font-size:14px;color:#1f2937;">Main signals (all levers)</h3>' + (& $table @('Status', 'Units', 'Users') $signals) +
+    '<h3 style="font-size:14px;color:#1f2937;">Price origin of R</h3>' + (& $table @('Price origin', 'Annual amount') $prices) +
+    '<h3 style="font-size:14px;color:#1f2937;">Sources</h3>' + $sourcesHtml + $link
+  return [pscustomobject]@{ Status=$(if ($provisional) { 'Provisional' } else { 'Final' }); Subject=$(if ($provisional) { 'SmartFinOps Workplace - Daily valuation - provisional figures' } else { 'SmartFinOps Workplace - Daily valuation' }); Attach=$true; BodyHtml=$body }
+}
+
+function Send-ReportDailyEmail {
+  param(
+    [Parameter(Mandatory)]$Inputs, [Parameter(Mandatory)][string]$Tenant, [Parameter(Mandatory)][string]$TenantKey,
+    [Parameter(Mandatory)][string]$PagePath, [Parameter(Mandatory)][string]$StatePath, [string]$ReportUrl,
+    [Parameter(Mandatory)][string]$From, [Parameter(Mandatory)][string]$To, [switch]$Force,
+    [Parameter(Mandatory)][scriptblock]$Send, [datetimeoffset]$NowUtc = [datetimeoffset]::UtcNow
+  )
+  # Returns Sent, Skipped or Failed; a failure is a warning (the page stays written), never a run error.
+  $gate = $null; $sendStarted = $false
+  try {
+    $gate = Enter-ReportDailyMailGate -Path $StatePath -TenantKey $TenantKey -Force:$Force -NowUtc $NowUtc
+    if ($gate.Skip) { Write-ReportLog ("Daily email skipped: {0} (Europe/Paris). Use -ForceEmail to send again." -f $gate.Reason); return 'Skipped' }
+    $content = Get-ReportDailyEmailContent -Inputs $Inputs -Tenant $Tenant -ReportUrl $ReportUrl
+    $attachments = @()
+    if ($content.Attach) {
+      if (-not (Test-Path -LiteralPath $PagePath -PathType Leaf)) { throw "Report page not found for the attachment: $PagePath" }
+      if (-not (Test-ReportIdentifierFree ([IO.File]::ReadAllText($PagePath)))) { throw 'The report page contains an identifier pattern (e-mail address or GUID); nothing is sent.' }
+      $attachments = @($PagePath)
+    }
+    if (-not (Test-ReportIdentifierFree ($content.Subject + $content.BodyHtml))) { throw 'The daily email body contains an identifier pattern (e-mail address or GUID); nothing is sent.' }
+    $sendStarted = $true
+    & $Send ([pscustomobject]@{ From=$From; To=$To; Subject=$content.Subject; BodyHtml=$content.BodyHtml; Attachments=$attachments; Status=$content.Status })
+    $sent = [ordered]@{ TenantKey=$TenantKey; LocalDate=$gate.Day; Status='Sent'; SentAtUtc=[datetimeoffset]::UtcNow.ToString('o'); Content=$content.Status }
+    Write-ReportDailyMailState -Stream $gate.Stream -Bytes ([Text.UTF8Encoding]::new($false).GetBytes(($sent | ConvertTo-Json -Compress)))
+    Write-ReportLog ("Daily email sent ({0}){1}." -f $content.Status, $(if ($attachments.Count) { ' with the report attached' } else { '' }))
+    return 'Sent'
+  }
+  catch {
+    if ($gate -and -not $gate.Skip -and -not $sendStarted) {
+      try { Write-ReportDailyMailState -Stream $gate.Stream -Bytes $gate.PreviousBytes }
+      catch { Write-ReportLog ("Daily email state could not be restored: {0}" -f $_.Exception.Message) 'WARNING' }
+    }
+    Write-ReportLog ("Daily email failed: {0}{1}" -f $_.Exception.Message, $(if ($sendStarted) { ' (state kept Pending: no automatic resend today; use -ForceEmail after checking delivery)' } else { '' })) 'WARNING'
+    return 'Failed'
+  }
+  finally { if ($gate -and $gate.Stream) { $gate.Stream.Dispose() } }
+}
+#endregion
+
 #region Output
 function Write-ReportFile {
   param([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)][string]$Content)
@@ -742,7 +903,7 @@ function Send-ReportSharePointFile {
     return $false
   }
   Write-ReportLog "SharePoint uploaded: $($record.SharePointPath)"
-  return $true
+  return $record
 }
 
 if ($MyInvocation.InvocationName -eq '.') { return }
@@ -802,9 +963,39 @@ try {
       if (Test-Path -LiteralPath $candidate -PathType Container) { $archiveDir = $candidate; Write-ReportFile -Path (Join-Path $archiveDir $script:ReportName) -Content $html }
     }
     Write-ReportLog ("Report written: {0}{1}" -f (Join-Path $root $script:ReportName), $(if ($archiveDir) { ' (copy in the run history)' } else { '' }))
+    $pageRecord = $null
     if ($sharePoint) {
       if ($archiveDir) { [void](Send-ReportSharePointFile -SharePoint $sharePoint -Path (Join-Path $archiveDir $script:ReportName)) }
-      [void](Send-ReportSharePointFile -SharePoint $sharePoint -Path (Join-Path $root $script:ReportName))
+      $pageRecord = Send-ReportSharePointFile -SharePoint $sharePoint -Path (Join-Path $root $script:ReportName)
+    }
+    # Daily email, after the page is written (and uploaded): a mail problem is a warning, the page stays.
+    $emailSetting = Get-ReportProperty $reportConfig 'EnableDailyEmail'
+    $emailEnabled = $true
+    if ($null -ne $emailSetting -and [string]$emailSetting -ne '' -and -not [bool]::TryParse([string]$emailSetting, [ref]$emailEnabled)) { throw "Report.EnableDailyEmail must be true or false (got '$emailSetting')." }
+    if (-not $emailEnabled) { Write-ReportLog 'Daily email disabled (Report.EnableDailyEmail).' }
+    else {
+      try {
+        $effective = Initialize-SmartFinOpsSmartM365Context -ProfileKey $Tenant -TenantKey $tenantKey
+        Import-Module (Join-Path (Split-Path -Path $PSScriptRoot -Parent) 'SmartM365\Modules\SmartM365.Core\SmartM365.Core.psd1') -MinimumVersion '1.0.90' -ErrorAction Stop | Out-Null
+        $recipients = @{}
+        foreach ($pair in @(@('DailyEmailTo', 'To'), @('DailyEmailFrom', 'From'))) {
+          $value = [string](Get-ReportProperty $reportConfig $pair[0])
+          if ([string]::IsNullOrWhiteSpace($value) -or $value.Trim() -in @('__USE_SMARTM365__', 'USE_SMARTM365')) {
+            $property = $effective.PSObject.Properties[$pair[1]]
+            $value = if ($null -ne $property) { [string]$property.Value } else { '' }
+          }
+          if ($value.Trim() -in @('__USE_GLOBAL__', 'USE_GLOBAL') -or [string]::IsNullOrWhiteSpace($value)) { throw ("no {0}: set Report.{1} or the SmartM365 {0} of profile '{2}'." -f $pair[1], $pair[0], $Tenant) }
+          $recipients[$pair[1]] = $value.Trim()
+        }
+        # The SmartM365 mail copy is written next to the report log; the footer names this script.
+        $mailLogFolder = Split-Path -Path $logPath -Parent
+        New-Item -ItemType Directory -Path $mailLogFolder -Force | Out-Null
+        foreach ($session in @(@('LogPath', $mailLogFolder), @('SmartM365ScriptFileName', 'SmartFinOps-Workplace-Report.ps1'), @('SmartM365ScriptVersion', $script:ScriptVersion))) { Set-Variable -Name $session[0] -Scope Global -Value $session[1] }
+        $transport = { param($Message) [void](SmartM365.Core\Send-SmartM365Mail -From $Message.From -To $Message.To -Subject $Message.Subject -BodyHtml $Message.BodyHtml -MailPurpose Report -Attachments $Message.Attachments -AllowAttachments -SuppressAttachmentLinks) }
+        $reportUrl = if ($pageRecord -and $pageRecord.PSObject.Properties['WebUrl']) { [string]$pageRecord.WebUrl } else { '' }
+        [void](Send-ReportDailyEmail -Inputs $inputs -Tenant $Tenant -TenantKey $tenantKey -PagePath (Join-Path $root $script:ReportName) -StatePath (Join-Path $root $script:DailyEmailStateName) -ReportUrl $reportUrl -From $recipients.From -To $recipients.To -Force:$ForceEmail -Send $transport)
+      }
+      catch { Write-ReportLog ("Daily email skipped: {0}" -f $_.Exception.Message) 'WARNING' }
     }
   }
 }

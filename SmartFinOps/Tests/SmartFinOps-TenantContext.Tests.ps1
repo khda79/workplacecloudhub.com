@@ -3,7 +3,7 @@
 .SYNOPSIS
   Offline tests of the SmartFinOps tenant context: SmartM365 DATA-LAST resolution and console banners.
 .VERSION
-1.4.0
+1.4.1
 .NOTES
   Isolated temporary runtime with a synthetic SmartM365 tenant context (no local configuration or export).
   SmartM365LatestCsvFolderPath = __USE_SMARTM365__ must never fall back silently to a default path.
@@ -40,6 +40,8 @@ foreach ($file in @('SmartFinOps-Workplace-Valuation.ps1','SmartFinOps-Workplace
 New-Item -ItemType Directory -Path (Join-Path $runtime 'SmartM365\Modules'), (Split-Path $smartM365Context -Parent) -Force | Out-Null
 Copy-Item -LiteralPath (Join-Path $repository 'SmartM365\Modules\SmartM365.Core') -Destination (Join-Path $runtime 'SmartM365\Modules') -Recurse
 '{ "SmartM365LatestCsvFolderPath": "__USE_SMARTM365__" }' | Set-Content -LiteralPath (Join-Path $runtime 'SmartFinOps\SmartFinOps.global.local.json') -Encoding utf8NoBOM
+# No test sends a mail: every SmartFinOps configuration written here disables the daily email.
+$noMail = '{ "Report": { "EnableDailyEmail": false } }'
 $dataLast = Join-Path $root 'DATA-LAST'
 $dataAll = Join-Path $root 'DATA-ALL'
 $logAll = Join-Path $root 'LOG-ALL'
@@ -126,13 +128,13 @@ function Get-SmartM365EffectiveGlobalConfig {
 "@
   $resolved = Get-ResolvedDataLast
   Check ($resolved -ceq "OK|$dataLast") "SmartM365 tokens resolved (got $resolved)"
-  '{ }' | Set-Content -LiteralPath (Join-Path $runtime 'SmartFinOps\SmartFinOps.global.local.json') -Encoding utf8NoBOM
+  $noMail | Set-Content -LiteralPath (Join-Path $runtime 'SmartFinOps\SmartFinOps.global.local.json') -Encoding utf8NoBOM
   Check ((Get-ResolvedDataLast) -ceq "OK|$dataLast") 'an empty SmartFinOps setting also resolves through SmartM365'
   Check ((Get-ResolvedDataLast 'SmartM365TenantKey') -ceq 'OK|contoso-prod') 'TenantKey of the profile resolved through SmartM365 (profile contoso, TenantKey contoso-prod)'
   '{ "SmartM365TenantKey": "fabrikam-test" }' | Set-Content -LiteralPath (Join-Path $runtime 'SmartFinOps\SmartFinOps.global.local.json') -Encoding utf8NoBOM
   Set-SmartM365Context 'function Get-SmartM365EffectiveGlobalConfig { throw "SmartM365 must not be called" }'
   Check ((Get-ResolvedDataLast 'SmartM365TenantKey') -ceq 'OK|fabrikam-test') 'a TenantKey set in the SmartFinOps configuration is used without SmartM365'
-  '{ }' | Set-Content -LiteralPath (Join-Path $runtime 'SmartFinOps\SmartFinOps.global.local.json') -Encoding utf8NoBOM
+  $noMail | Set-Content -LiteralPath (Join-Path $runtime 'SmartFinOps\SmartFinOps.global.local.json') -Encoding utf8NoBOM
   Set-SmartM365Context 'function Get-SmartM365EffectiveGlobalConfig { [pscustomobject]@{ LatestCsvFolderPath="C:\x" } }'
   $noKey = Get-ResolvedDataLast 'SmartM365TenantKey'
   Check ($noKey -like 'ERROR|*returned no TenantKey*') "SmartM365 context without TenantKey refused (got $noKey)"
@@ -158,7 +160,7 @@ function Get-SmartM365EffectiveGlobalConfig {
   [pscustomobject]@{ WorkspaceRootPath='$uncRoot'; LatestCsvFolderPath='{{WorkspaceRootPath}}\DATA-LAST'; DataAllRootPath='{{WorkspaceRootPath}}\DATA-ALL'; LogAllRootPath='{{WorkspaceRootPath}}\LOG-ALL'; ProfileKey=`$TenantKey; TenantKey='contoso-prod'; EnableSharePointUpload=`$false }
 }
 "@
-  '{ }' | Set-Content -LiteralPath (Join-Path $runtime 'SmartFinOps\SmartFinOps.global.local.json') -Encoding utf8NoBOM
+  $noMail | Set-Content -LiteralPath (Join-Path $runtime 'SmartFinOps\SmartFinOps.global.local.json') -Encoding utf8NoBOM
   $cwd = Join-Path $root 'cwd'
   New-Item -ItemType Directory -Path $cwd -Force | Out-Null
   Push-Location -LiteralPath $cwd
@@ -250,7 +252,7 @@ function Get-SmartM365EffectiveGlobalConfig {
   [pscustomobject]@{ ScriptOutputRootPath='$fallbackRoot'; LatestCsvFolderPath='$fallbackRoot\Tenants\contoso\DATA-LAST'; TenantKey='contoso-prod' }
 }
 "@
-  '{ }' | Set-Content -LiteralPath (Join-Path $runtime 'SmartFinOps\SmartFinOps.global.local.json') -Encoding utf8NoBOM
+  $noMail | Set-Content -LiteralPath (Join-Path $runtime 'SmartFinOps\SmartFinOps.global.local.json') -Encoding utf8NoBOM
   $fallback = Get-ResolvedDataLast
   Check ($fallback -like 'ERROR|*' -and $fallback.Contains('SmartM365 Output fallback')) "a SmartM365 path under its Output fallback is refused ($fallback)"
   #endregion
@@ -264,7 +266,7 @@ function Get-SmartM365EffectiveGlobalConfig {
     New-Item -ItemType Directory -Path (Split-Path $target -Parent) -Force | Out-Null
     Copy-Item -LiteralPath (Join-Path $project $file) -Destination $target
   }
-  '{ }' | Set-Content -LiteralPath (Join-Path $real 'SmartFinOps\SmartFinOps.global.local.json') -Encoding utf8NoBOM
+  $noMail | Set-Content -LiteralPath (Join-Path $real 'SmartFinOps\SmartFinOps.global.local.json') -Encoding utf8NoBOM
   foreach ($file in @('Config\SmartM365-TenantContext.ps1','Config\SmartM365-JsonTransport.policy.psd1','Config\SmartM365.global.local.json.template','Config\Tenants\tenant.local.json.template')) {
     $target = Join-Path $realSmartM365 $file
     New-Item -ItemType Directory -Path (Split-Path $target -Parent) -Force | Out-Null
@@ -312,7 +314,7 @@ function Get-SmartM365EffectiveGlobalConfig {
   '{ "EnableSharePointUpload": "maybe" }' | Set-Content -LiteralPath (Join-Path $runtime 'SmartFinOps\SmartFinOps.global.local.json') -Encoding utf8NoBOM
   $invalid = Invoke-Script $engine @('-SmartM365LatestCsvFolderPath', $dataLast, '-SmartM365DataAllRootPath', $dataAll, '-SmartM365LogAllRootPath', $logAll, '-SmartM365TenantKey', 'contoso-prod', '-ContractsPath', (Join-Path $root 'contracts-sp.local.json'))
   Check ($invalid.ExitCode -eq 1 -and $invalid.Log.Contains('EnableSharePointUpload must be true, false or __USE_SMARTM365__')) 'an invalid EnableSharePointUpload value is refused'
-  '{ }' | Set-Content -LiteralPath (Join-Path $runtime 'SmartFinOps\SmartFinOps.global.local.json') -Encoding utf8NoBOM
+  $noMail | Set-Content -LiteralPath (Join-Path $runtime 'SmartFinOps\SmartFinOps.global.local.json') -Encoding utf8NoBOM
   #endregion
 }
 finally {

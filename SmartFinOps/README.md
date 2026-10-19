@@ -32,7 +32,7 @@ At load, missing keys are added from the matching template without overwriting l
 | `SmartM365TenantKey` | Organization TenantKey carried by the source receipts; `__USE_SMARTM365__` resolves it the same way. |
 | `EnableSharePointUpload` | `true`, `false` or `__USE_SMARTM365__` (default: the SmartM365 setting of the profile). Site, library, folder and app-only identity always come from the SmartM365 context. |
 | `Valuation` | `ContractsPath`, `FreshnessDailyHours` (48), `FreshnessWeeklyDays` (8), `ArchiveRetentionRuns` (30). |
-| `Report` | `ShowbackMinimumGroupUsers` (5). |
+| `Report` | `ShowbackMinimumGroupUsers` (5); daily email: `EnableDailyEmail` (true), `DailyEmailTo` and `DailyEmailFrom` (`__USE_SMARTM365__`: the SmartM365 `To` and `From` of the profile). |
 
 `-Tenant` is the profile key. A profile file names it `ProfileKey`, which must match `-Tenant`. Since tenant context 1.3.0 a profile file written with the former `TenantKey` entry is migrated in place to `ProfileKey` before template synchronization; a file holding a different `ProfileKey` and `TenantKey` is refused. `{{TenantKey}}` remains accepted as an alias of `{{ProfileKey}}` in path values. Since tenant context 1.4.0 `WorkspaceRootPath`, `TenantDataRootPath` and the former `Output` fallback no longer exist: SmartFinOps writes only into the SmartM365 data tree of the profile. Beta-only keys (`PriceModel`, `StaleUserDays`, `StaleDeviceDays`, `MaxSourceAgeHours`, `LicenseCapacityWarningPercent`, `ReportTitle`, `PriceBaselinePath`, `RetentionMaxCSV`, `RetentionMaxLogs`) are no longer read and can be removed from local files.
 
@@ -96,7 +96,7 @@ Tests: `Tests\SmartFinOps-Workplace-Valuation.Tests.ps1` (synthetic data, isolat
 
 ## V2 executive report (lot V2.2)
 
-`SmartFinOps-Workplace-Report.ps1` 2.3.1 turns the valuation outputs into one self-contained HTML page for management. PowerShell 7 only, read-only. It is a pure consumer: it reads only the seven `FinOps_*` CSVs and the valuation receipt, and computes no decision and no amount; it displays, sorts and groups what the engine (2.1.4 to 2.2.x) published.
+`SmartFinOps-Workplace-Report.ps1` 2.4.0 turns the valuation outputs into one self-contained HTML page for management. PowerShell 7 only, read-only. It is a pure consumer: it reads only the seven `FinOps_*` CSVs and the valuation receipt, and computes no decision and no amount; it displays, sorts and groups what the engine (2.1.4 to 2.2.x) published.
 
 ```powershell
 .\SmartFinOps-Workplace-Valuation.ps1 -Tenant prod
@@ -138,7 +138,7 @@ With the current Licences report, `M365_OneDrive_Usage.csv` is provisional (no s
 
 Launchers:
 
-- direct: `Start-SmartFinOps-Workplace-Valuation-Prod.cmd`, then `Start-SmartFinOps-Workplace-Report-Prod.cmd` (this folder);
+- direct: `Start-SmartFinOps-Workplace-Prod.cmd` (Valuation then Report, see below), or `Start-SmartFinOps-Workplace-Valuation-Prod.cmd` and `Start-SmartFinOps-Workplace-Report-Prod.cmd` separately (this folder);
 - through the orchestrators: `SmartM365/SmartInventory/LaunchersByOrchestrator/Request-SmartFinOps-Workplace-Valuation.cmd` and `Request-SmartFinOps-Workplace-Report.cmd` (add `-IncludeDependencies` to collect the sources first).
 
 ## Data location and SharePoint mirror (lot V2.4c)
@@ -163,3 +163,19 @@ With `EnableSharePointUpload` (the SmartM365 setting by default), both scripts m
 - an incomplete SmartM365 SharePoint configuration or any upload failure is a warning: the local files stay valid and the run ends with code 3, never as a plain success.
 
 Runs written before 2.2.0 under `SmartFinOps\Data\<profile>` are not migrated or read; the first run in the SmartM365 data tree starts a new realization baseline.
+
+## Daily email and combined launcher (lot V2.5)
+
+`SmartFinOps-Workplace-Report.ps1` 2.4.0 sends one daily email per profile after the page is written (and uploaded):
+
+- once per Europe/Paris day, with the same gate as the SmartM365 Licences summary: an exclusive state file `DATA-LAST\SmartFinOps_Workplace-Report_DailyEmail_SendState.json.txt`, `Pending` before sending and `Sent` after; `-ForceEmail` sends again; never in `-ValidateOnly`;
+- through the SmartM365 mail transport of the profile (`Send-SmartM365Mail` after the SmartM365 context of the profile is initialized): `SendMailMode` Graph, SMTP or Both, the maintenance recipient policy, the `[SMART 365] - [<tenant>] - ` subject prefix of the profile, and the HTML copy of the mail in `LOG-ALL\SmartFinOps-Workplace-Report\`. No job declares `Mail.Send` (SmartM365 convention), so the orchestrator configuration does not change;
+- recipients: `Report.DailyEmailTo` and `Report.DailyEmailFrom`, or the SmartM365 `To` and `From` of the profile with `__USE_SMARTM365__` (default); `Report.EnableDailyEmail` (default true) turns it off;
+- subject `SmartFinOps Workplace - Daily valuation`, with `- provisional figures`, `- Licences report not measured` or `- report not available` when relevant;
+- body: aggregates already published by the engine only (R total, of which enabled accounts without activity, conditional E3 to F3 outside the total, cost avoidance E, Blocked and Review signals, price origin of R, source states), English labels, the SharePoint link of the page when the upload succeeded, and the page attached. Before sending, the body and the attachment are checked: an e-mail address, a UPN or a GUID blocks the mail;
+- Licences not measured or report not available: a status email with the reason and no amount (no attachment when the report is not available); never a zero or an older value;
+- a mail problem (transport error, missing recipients, SmartM365 context unavailable, identifier found) is a warning: the page stays written and the run ends with code 3. After a failed send the day stays `Pending`, so no second mail is sent automatically that day.
+
+`Start-SmartFinOps-Workplace-Prod.cmd` runs the valuation, then the report only when the valuation ended with 0 or 3, so that no report is built on an older valuation. Its exit code is the most severe of the two (1 > 3 > 0). The separate launchers and the orchestrator jobs are unchanged.
+
+Tests: `Tests\SmartFinOps-Workplace-Report.Tests.ps1` (daily email with a simulated transport: one mail per day, `-ForceEmail`, Europe/Paris day, status mails, no identifier, send failure) and `Tests\SmartFinOps-Workplace-Launcher.Tests.ps1` (combined launcher with stub scripts). No test sends a real mail.

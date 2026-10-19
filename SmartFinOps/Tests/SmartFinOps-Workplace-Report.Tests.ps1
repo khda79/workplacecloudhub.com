@@ -3,7 +3,7 @@
 .SYNOPSIS
   Offline tests of the SmartFinOps Workplace V2 executive HTML report.
 .VERSION
-1.3.1
+1.4.0
 .NOTES
   Synthetic FinOps_* fixtures and receipts only, in an isolated temporary runtime (no local configuration,
   export or tenant). The input contract is checked against the valuation engine output specification.
@@ -21,7 +21,8 @@ $pwsh = (Get-Process -Id $PID).Path
 # Profile 'prod' whose organization TenantKey is 'contoso-prod'.
 $tenant = 'contoso-prod'
 $profileKey = 'prod'
-$baseConfig = '{ "SmartM365TenantKey": "contoso-prod", "EnableSharePointUpload": false }'
+# No test ever sends a mail: the daily email is disabled here and exercised below with a simulated transport.
+$baseConfig = '{ "SmartM365TenantKey": "contoso-prod", "EnableSharePointUpload": false, "Report": { "EnableDailyEmail": false } }'
 $runId = '20261018T000000000Z-abcdef12'
 $skuGuid = '11111111-2222-3333-4444-555555555555'
 $userGuid = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
@@ -250,7 +251,7 @@ try {
   Check ($html.Contains('EUR 5,889') -and -not $html.Contains('>Finance<')) 'combined row reaches the threshold by adding the smallest group'
   Check (-not $html.Contains('>LU<') -and -not $html.Contains('EUR 4,322') -and -not $html.Contains('>FR<') -and $html.Contains('EUR 12,322')) 'a single small country is never shown alone'
   $configured = New-ReportFixture 'threshold'
-  '{ "SmartM365TenantKey": "contoso-prod", "EnableSharePointUpload": false, "Report": { "ShowbackMinimumGroupUsers": 1 } }' | Set-Content -LiteralPath (Join-Path $runtime 'SmartFinOps\SmartFinOps.global.local.json') -Encoding utf8NoBOM
+  '{ "SmartM365TenantKey": "contoso-prod", "EnableSharePointUpload": false, "Report": { "ShowbackMinimumGroupUsers": 1, "EnableDailyEmail": false } }' | Set-Content -LiteralPath (Join-Path $runtime 'SmartFinOps\SmartFinOps.global.local.json') -Encoding utf8NoBOM
   $runThreshold = Invoke-Report $configured
   $baseConfig | Set-Content -LiteralPath (Join-Path $runtime 'SmartFinOps\SmartFinOps.global.local.json') -Encoding utf8NoBOM
   Check ($runThreshold.ExitCode -eq 3 -and $runThreshold.Html.Contains('>Tiny<') -and $runThreshold.Html.Contains('EUR 778')) 'threshold read from the local configuration'
@@ -318,6 +319,73 @@ try {
   Check ($nmRun.Html -notmatch 'EUR \d' -and $nmRun.Html.Contains('>Not measured</span>')) 'not measured: no amount, never EUR 0'
   #endregion
 
+  #region 9. Daily email: one per Europe/Paris day, aggregates only, simulated transport (never a real send)
+  Check ($run.Log.Contains('Daily email disabled (Report.EnableDailyEmail).')) 'daily email disabled by configuration'
+  # Dot-sourcing binds the report parameters in this scope: -Tenant would overwrite $tenant (same name, case-insensitive).
+  $organizationTenantKey = $tenant
+  . $report -Tenant $profileKey
+  $tenant = $organizationTenantKey
+  $mailRoot = Join-Path $root 'mail'
+  New-Item -ItemType Directory -Path $mailRoot -Force | Out-Null
+  $statePath = Join-Path $mailRoot 'SmartFinOps_Workplace-Report_DailyEmail_SendState.json.txt'
+  $nominalInputs = Read-ReportInputs -Root $nominal -ProfileKey $profileKey -TenantKey $tenant
+  $page = Join-Path $nominal 'SmartFinOps_Workplace-Report.html'
+  $sent = [System.Collections.Generic.List[object]]::new()
+  $fake = { param($Message) $sent.Add($Message) }
+  $day1 = [datetimeoffset]'2026-10-19T04:00:00Z'
+  $mailArgs = @{ Inputs=$nominalInputs; Tenant=$profileKey; TenantKey=$tenant; PagePath=$page; StatePath=$statePath; ReportUrl='https://contoso.sharepoint.invalid/sites/finops/Shared%20Documents/SMART-M365/DATA/DATA-LAST/SmartFinOps_Workplace-Report.html'; From='sender.invalid'; To='recipients.invalid' }
+  $script:LogLines.Clear()
+  $first = Send-ReportDailyEmail @mailArgs -Send $fake -NowUtc $day1
+  $message = if ($sent.Count) { $sent[0] } else { $null }
+  Check ($first -eq 'Sent' -and $sent.Count -eq 1 -and $message.Subject -ceq 'SmartFinOps Workplace - Daily valuation - provisional figures' -and $message.Status -ceq 'Provisional') "first run of the day sends one mail ($first)"
+  Check ($message.BodyHtml.Contains('Realizable reduction (R), annual') -and $message.BodyHtml.Contains('of which enabled accounts without M365 activity in 90 days') -and $message.BodyHtml.Contains('Conditional E3 to F3 (not in the R total)') -and $message.BodyHtml.Contains('Cost avoidance (E)') -and $message.BodyHtml.Contains('>Blocked<') -and $message.BodyHtml.Contains('>Review<') -and $message.BodyHtml.Contains('Catalogue estimate') -and $message.BodyHtml.Contains('Contract price') -and $message.BodyHtml.Contains('Not measured')) 'body: R, enabled-inactive, conditional E3 to F3, E, Blocked/Review signals, price origin and source states'
+  Check ($message.BodyHtml.Contains('EUR ') -and $message.BodyHtml.Contains('Full report on SharePoint: <a href="https://contoso.sharepoint.invalid/') -and @($message.Attachments).Count -eq 1 -and $message.Attachments[0] -ceq $page) 'body: amounts, SharePoint link and the report page attached'
+  $attachmentText = [IO.File]::ReadAllText($page)
+  $identifier = '(?i)[a-z0-9._%+''-]+@[a-z0-9-]+(\.[a-z0-9-]+)+|\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b'
+  Check (-not ($message.BodyHtml -match $identifier) -and -not $message.BodyHtml.Contains('alice.secret') -and -not $message.BodyHtml.Contains($userGuid) -and -not ($attachmentText -match $identifier)) 'no UPN, e-mail address, UserId or GUID in the body or the attachment'
+  $state = Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json
+  Check ($state.Status -ceq 'Sent' -and $state.LocalDate -ceq '2026-10-19' -and $state.TenantKey -ceq $tenant) 'state Sent for the Europe/Paris day'
+  $again = Send-ReportDailyEmail @mailArgs -Send $fake -NowUtc $day1.AddHours(10)
+  Check ($again -eq 'Skipped' -and $sent.Count -eq 1 -and ($script:LogLines -join "`n").Contains('already sent on 2026-10-19')) 'second run the same day: no mail'
+  $forced = Send-ReportDailyEmail @mailArgs -Send $fake -NowUtc $day1.AddHours(11) -Force
+  Check ($forced -eq 'Sent' -and $sent.Count -eq 2) '-ForceEmail sends again the same day'
+  $nextDay = Send-ReportDailyEmail @mailArgs -Send $fake -NowUtc $day1.AddDays(1)
+  Check ($nextDay -eq 'Sent' -and $sent.Count -eq 3) 'next Europe/Paris day: a new mail'
+  $parisMidnight = Send-ReportDailyEmail @mailArgs -Send $fake -NowUtc ([datetimeoffset]'2026-10-20T22:30:00Z')
+  Check ($parisMidnight -eq 'Sent' -and (Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json).LocalDate -ceq '2026-10-21') 'the day follows Europe/Paris time (22:30 UTC is already the next day)'
+
+  $nmInputs = Read-ReportInputs -Root $notMeasured -ProfileKey $profileKey -TenantKey $tenant
+  $nmContent = Get-ReportDailyEmailContent -Inputs $nmInputs -Tenant $profileKey
+  Check ($nmContent.Status -ceq 'NotMeasured' -and $nmContent.Subject.EndsWith('Licences report not measured') -and -not ($nmContent.BodyHtml -match 'EUR \d') -and $nmContent.BodyHtml.Contains('no amount is published')) 'Licences not measured: status mail with the reason, no amount'
+  $unavailableInputs = Read-ReportInputs -Root (New-ReportFixture 'mail-unavailable' -ChangeReceipt { param($r) $r.Status = 'Failed' }) -ProfileKey $profileKey -TenantKey $tenant
+  $naContent = Get-ReportDailyEmailContent -Inputs $unavailableInputs -Tenant $profileKey
+  Check ($naContent.Status -ceq 'NotAvailable' -and -not $naContent.Attach -and $naContent.Subject.EndsWith('report not available') -and $naContent.BodyHtml.Contains('Reason:') -and -not (($naContent.BodyHtml -replace '<[^>]+>', '') -match '\d')) 'report not available: status mail with the reason, no figure, no attachment'
+  $naState = Join-Path $mailRoot 'na-state.json.txt'
+  $naSent = Send-ReportDailyEmail @mailArgs -Inputs $unavailableInputs -StatePath $naState -Send $fake -NowUtc $day1
+  Check ($naSent -eq 'Sent' -and @($sent[$sent.Count - 1].Attachments).Count -eq 0) 'report not available: the status mail is sent without attachment'
+
+  $failState = Join-Path $mailRoot 'fail-state.json.txt'
+  $script:LogLines.Clear()
+  $failed = Send-ReportDailyEmail @mailArgs -StatePath $failState -Send { throw 'SMTP relay refused the message' } -NowUtc $day1
+  Check ($failed -eq 'Failed' -and ($script:LogLines -join "`n") -match '\[WARNING\] Daily email failed: SMTP relay refused the message' -and (Get-Content -LiteralPath $failState -Raw | ConvertFrom-Json).Status -ceq 'Pending') 'send failure: warning, state Pending (no automatic resend the same day)'
+  Check ((Send-ReportDailyEmail @mailArgs -StatePath $failState -Send $fake -NowUtc $day1.AddHours(1)) -eq 'Skipped') 'after an uncertain delivery no second mail the same day without -ForceEmail'
+  $leakPage = Join-Path $mailRoot 'leak.html'
+  Set-Content -LiteralPath $leakPage -Value '<html><body>owner alice.secret@contoso.invalid</body></html>' -Encoding utf8NoBOM
+  $leakState = Join-Path $mailRoot 'leak-state.json.txt'
+  $before = $sent.Count
+  $leak = Send-ReportDailyEmail @mailArgs -PagePath $leakPage -StatePath $leakState -Send $fake -NowUtc $day1
+  Check ($leak -eq 'Failed' -and $sent.Count -eq $before -and (Get-Item -LiteralPath $leakState).Length -eq 0) 'an identifier in the attachment blocks the mail before sending; the day stays free'
+
+  # End to end: the mail problem is a warning (exit 3), the page stays written; never a mail in -ValidateOnly.
+  $mailRun = New-ReportFixture 'mail-run' -ChangeReceipt { param($r) $r.Provisional = $false; $r.ProvisionalLevers = @() }
+  '{ "SmartM365TenantKey": "contoso-prod", "EnableSharePointUpload": false, "Report": { "EnableDailyEmail": true } }' | Set-Content -LiteralPath (Join-Path $runtime 'SmartFinOps\SmartFinOps.global.local.json') -Encoding utf8NoBOM
+  $mailRunResult = Invoke-Report $mailRun
+  $mailValidate = Invoke-Report $mailRun -ValidateOnly
+  $baseConfig | Set-Content -LiteralPath (Join-Path $runtime 'SmartFinOps\SmartFinOps.global.local.json') -Encoding utf8NoBOM
+  Check ($mailRunResult.ExitCode -eq 3 -and $mailRunResult.Log -match '\[WARNING\] Daily email skipped: ' -and $mailRunResult.Html.Contains('<h1>Workplace FinOps report</h1>')) "mail not possible (no SmartM365 context in this runtime): warning, exit 3, page written (exit $($mailRunResult.ExitCode))"
+  Check ($mailValidate.ExitCode -eq 0 -and -not ($mailValidate.Log -match 'Daily email')) 'ValidateOnly never prepares or sends a mail'
+  #endregion
+
   #region 8. ValidateOnly, logs, PowerShell 7 only
   $validate = New-ReportFixture 'validate'
   $validateRun = Invoke-Report $validate -ValidateOnly
@@ -329,7 +397,7 @@ try {
   $bannerStart = [array]::IndexOf($logLines, '================================================================================')
   Check ($bannerStart -gt 0 -and @($logLines[0..($bannerStart - 1)] | Where-Object { $_ -notmatch '^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} \[' }).Count -eq 0) 'every log line before the completion banner is timestamped'
   Check (($logLines -join "`n").Contains(' SmartFinOps by WorkplaceCloudHub - Execution completed') -and ($logLines -join "`n").Contains(' Status    : COMPLETED WITH WARNINGS') -and ($logLines -join "`n").Contains(' CSV files : 0')) 'completion banner appended to the report log'
-  Check ($run.Log.Contains(' SmartFinOps by WorkplaceCloudHub') -and $run.Log.Contains(' GitHub  : https://github.com/khda79/workplacecloudhub.com') -and $run.Log -match 'Starting SmartFinOps Workplace Report v2\.3\.1 ' -and $run.Log -match 'Tenant context 1.4.1') 'startup banner and versions on the console'
+  Check ($run.Log.Contains(' SmartFinOps by WorkplaceCloudHub') -and $run.Log.Contains(' GitHub  : https://github.com/khda79/workplacecloudhub.com') -and $run.Log -match 'Starting SmartFinOps Workplace Report v2\.4\.0 ' -and $run.Log -match 'Tenant context 1.4.1') 'startup banner and versions on the console'
   $unavailable = Invoke-Report (New-ReportFixture 'banner-failed' -ChangeReceipt { param($r) $r.Status = 'Failed' })
   Check ($unavailable.ExitCode -eq 1 -and $unavailable.Log.Contains(' SmartFinOps by WorkplaceCloudHub - Execution failed') -and $unavailable.Log.Contains(' Status    : FAILED')) 'report not available: completion banner Failed'
   Check ($unavailable.Log -match '\[ERROR\] Report not available: ') 'report not available: logged as an error'

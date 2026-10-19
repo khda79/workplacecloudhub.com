@@ -12,6 +12,9 @@
     "ArchiveRetentionRuns": 30
   },
   "Report": {
-    "ShowbackMinimumGroupUsers": 5
+    "ShowbackMinimumGroupUsers": 5,
+    "EnableDailyEmail": true,
+    "DailyEmailTo": "__USE_SMARTM365__",
+    "DailyEmailFrom": "__USE_SMARTM365__"
   }
 }
