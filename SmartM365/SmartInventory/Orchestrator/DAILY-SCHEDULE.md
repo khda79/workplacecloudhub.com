@@ -48,7 +48,7 @@ editing the template.
 | SmartFinOps-Workplace-Valuation | Daily 05:45 |
 | SmartFinOps-Workplace-Report | Daily 05:45 |
 | WorkplaceEvidence-Prepare | Daily 07:45 |
-| M365-WorkplaceScope-Inventory | Daily 22:00 |
+| M365-WorkplaceScope-Inventory | Daily 18:00 |
 | Intune-Configurations-Inventory | Daily 04:30 |
 | Intune-ManagedApps-Inventory | Daily 05:00 |
 | Intune-EnrollmentFailures-Inventory | Daily 05:30 |
@@ -60,8 +60,15 @@ collection, with no afternoon repeat. Readiness runs once at 07:00 and unified
 Intelligence preparation at 07:45. The mailbox chain (EXO Fast, permissions,
 licences, hybrid-identity analysis) starts as soon as its sources succeed; see
 Dependencies and freshness.
-There is no separate CMDB preparation job. WorkplaceScope starts at 22:00 the preceding
-evening because collection can take several hours.
+There is no separate CMDB preparation job. WorkplaceScope starts at 18:00 the preceding
+evening because collection can take several hours. It shares the `AD-WorkplaceScope`
+concurrency key with AD-Inventory: the two memory-heavy collections never run at the
+same time anywhere in the cluster. WorkplaceScope normally ends long before AD starts at
+00:10; its 480-minute timeout bounds how long it can hold AD back (02:00 without a
+retry). AD-Inventory has a 240-minute timeout. A server restart during the evening can
+interrupt WorkplaceScope; its catch-up run then delays AD by the remaining collection
+time. The timeout-policy audit therefore reports AD as an intentional mismatch; do not
+reset it with `Set-SmartM365-OrchestratorTimeoutPolicy.ps1 -Execute`.
 
 SyncHealth runs every two hours at minute 20 and skips missed monitoring slots;
 migration-job inventory runs at 06:00, 12:00 and 18:00. These monitoring exceptions
@@ -101,9 +108,11 @@ makes CSVs contemporaneous nor bypasses the analysis scripts' own source checks.
 
 The mailbox chain uses `LatestOccurrence`. EXO Fast, permissions and licences are
 due at 00:15 and start as soon as their dependencies of the same night succeed
-(Fast after AD and active users; permissions and licences after Fast), each with
-a 1080-minute dependency wait. Hybrid-identity analysis is due at 01:00 with a
-1380-minute wait: it only runs on the same night's AD, Fast, permissions,
+(Fast after AD and active users; permissions and licences after Fast). Fast waits
+up to 1080 minutes for its dependencies; permissions and licences wait up to 1380
+minutes because on Saturday they start only after the Friday full EXO run has
+released the `EXOMailboxes` key, as late as 22:46 in the observed history.
+Hybrid-identity analysis is due at 01:00 with a 1380-minute wait: it only runs on the same night's AD, Fast, permissions,
 licences, domains and Exchange 2016 outputs, and no longer reuses an older
 permissions export when permissions finish late. A job that uses
 `LatestOccurrence` must not be scheduled earlier than any of its dependencies,
@@ -119,6 +128,9 @@ Preparation does not renew acquisition dates or silently fall back to unrelated
 old exports. An active receipt, an unavailable/invalid source or an expired
 acquisition can still delay or reject preparation. A failed preparation does not
 replace the last published cohort; consumers must display its actual age.
+When WorkplaceScope is assigned as a `Pinned` producer, its freshness gate waits
+while any job holds its concurrency key, so preparation also waits for a running
+AD-Inventory through the shared `AD-WorkplaceScope` key.
 
 SmartFinOps Valuation and Report use `LatestOccurrence`: Valuation needs today's
 Licences, LicensePricing, AD and active-users occurrences, so it waits for Licences

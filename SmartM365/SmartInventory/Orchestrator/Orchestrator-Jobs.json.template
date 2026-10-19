@@ -7,8 +7,9 @@
       "Enabled": true,
       "Group": "AD",
       "DependsOn": [],
+      "ConcurrencyKey": "AD-WorkplaceScope",
       "AllowedServers": [],
-      "TimeoutMinutes": 170,
+      "TimeoutMinutes": 240,
       "MaxRetries": 1,
       "RetryDelaySeconds": 600,
       "ContinueOnError": true,
@@ -194,7 +195,7 @@
       "MaxRetries": 1,
       "RetryDelaySeconds": 300,
       "ContinueOnError": true,
-      "DependencyWaitTimeoutMinutes": 1080,
+      "DependencyWaitTimeoutMinutes": 1380,
       "Schedule": {
         "Type": "Daily",
         "Times": [
@@ -450,7 +451,7 @@
       "MaxRetries": 1,
       "RetryDelaySeconds": 600,
       "ContinueOnError": true,
-      "DependencyWaitTimeoutMinutes": 1080,
+      "DependencyWaitTimeoutMinutes": 1380,
       "Schedule": {
         "Type": "Daily",
         "Times": [
@@ -1620,13 +1621,13 @@
       "ContinueOnError": false,
       "MaxRetries": 1,
       "RetryDelaySeconds": 600,
-      "ConcurrencyKey": "M365-WorkplaceScope-Inventory",
-      "TimeoutMinutes": 720,
+      "ConcurrencyKey": "AD-WorkplaceScope",
+      "TimeoutMinutes": 480,
       "EstimatedDurationMinutes": 360,
       "Schedule": {
         "Type": "Daily",
         "Times": [
-          "22:00"
+          "18:00"
         ],
         "DaysOfWeek": [],
         "MissedRunPolicy": "RunOnce"
