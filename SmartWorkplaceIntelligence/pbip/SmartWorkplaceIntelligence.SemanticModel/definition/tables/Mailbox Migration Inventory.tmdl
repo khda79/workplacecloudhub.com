@@ -214,19 +214,21 @@ table 'Mailbox Migration Inventory'
 				    Yes = (v as any) as logical => List.Contains({"true", "yes", "1"}, Key(v)),
 				    Field = (r as record, n as text) as any => Record.FieldOrDefault(r, n, null),
 				    Has = (v as any, terms as list) as logical => List.AnyTrue(List.Transform(terms, each Text.Contains(Key(v), _))),
-				    Prepared = ReadMigrationCsv(GetPreparedEvidenceFile("MailboxEvidence.csv"), {"TenantKey", "Primary SMTP Address", "Country", "Exchange Version"}),
+				    ReadFile = CreateMailboxMigrationReader(),
+				    Prepared = ReadMailboxMigrationCsv(ReadFile("MailboxEvidence.csv"), {"TenantKey", "Primary SMTP Address", "Country", "Exchange Version"}, {}),
 				    Tenants = List.Distinct(Prepared[TenantKey]),
 				    Tenant = if List.Count(Tenants) = 1 and Tenants{0} <> null and Text.Trim(Tenants{0}) <> "" then Tenants{0} else error "Prepared mailbox evidence must have one non-empty tenant",
-				    Read = (name as text, columns as list) as table =>
-				        let Source = ReadMigrationCsv(GetPreparedEvidenceFile("Source-" & name), {"TenantKey"} & columns)
-				        in if List.AllTrue(List.Transform(Source[TenantKey], each _ = Tenant)) then Table.Buffer(Source) else error Error.Record("Migration tenant", "Raw and prepared source tenant differ; keep previous model", name),
+				    Read = (name as text, columns as list, optional optionalColumns as nullable list) as table =>
+				        let Source = ReadMailboxMigrationCsv(ReadFile("Source-" & name), {"TenantKey"} & columns, if optionalColumns = null then {} else optionalColumns)
+				        in if List.AllTrue(List.Transform(Source[TenantKey], each _ = Tenant)) then Source else error Error.Record("Migration tenant", "Raw and prepared source tenant differ; keep previous model", name),
 				    GroupIndex = (source as table, column as text, unique as logical) as record =>
 				        let Keys = Table.AddColumn(source, "__key", each Key(Record.Field(_, column)), type text),
 				            Nonblank = Table.SelectRows(Keys, each [__key] <> ""),
-				            Groups = Table.Group(Nonblank, {"__key"}, {{"Rows", each Table.ToRecords(Table.RemoveColumns(_, {"__key"})), type list}}),
-				            Values = List.Transform(Groups[Rows], each if unique then (if List.Count(_) = 1 then _{0} else null) else _)
-				        in Record.FromList(Values, Groups[__key]),
-				    Mail = Read("Exchange_OnPrem_Mailboxes_AllDomains.csv", {"ExchangeGuid", "ObjectGUID", "RecipientType", "PrimarySMTPaddress", "DisplayName", "TotalItemSize-In-MB", "ArchiveTotalItemSize-In-MB", "FullAccessCount", "SendAsCount", "DomainName"}),
+				            Groups = Table.Group(Nonblank, {"__key"}, {{"Rows", each List.Buffer(Table.ToRecords(Table.RemoveColumns(_, {"__key"}))), type list}}),
+				            Pairs = List.Buffer(Table.ToRecords(Groups)),
+				            Values = List.Buffer(List.Transform(Pairs, each if unique then (if List.Count([Rows]) = 1 then [Rows]{0} else null) else [Rows]))
+				        in Record.FromList(Values, List.Transform(Pairs, each [__key])),
+				    Mail = Read("Exchange_OnPrem_Mailboxes_AllDomains.csv", {"ExchangeGuid", "ObjectGUID", "RecipientType", "PrimarySMTPaddress", "DisplayName", "TotalItemSize-In-MB", "ArchiveTotalItemSize-In-MB", "FullAccessCount", "SendAsCount", "DomainName"}, {"LitigationHoldEnabled", "RetentionHoldEnabled", "InPlaceHolds", "LargeItemCount-Over-35MB", "GrantSendOnBehalfTo", "CollectedAtUtc", "ArchiveStatus", "ArchiveState", "LargeItemCollectionStatus"}),
 				    Identity = Read("Exchange_HybridIdentity_Issues.csv", {"ObjectGUID", "Potential_Issue", "IssueCategory"}),
 				    Permissions = Read("Exchange_Mailboxes_AllSources_PermissionsByUser.csv", {"PrimarySMTPaddress", "HasCrossPremisesPermissions"}),
 				    Jobs = Read("Exchange_EXO_MigrationJobs.csv", {"EmailAddress", "MigrationUser", "BatchName", "BatchStatus", "UserStatus"}),
@@ -236,8 +238,8 @@ table 'Mailbox Migration Inventory'
 				    PermissionIndex = GroupIndex(Permissions, "PrimarySMTPaddress", true),
 				    JobIndex = GroupIndex(JobKeys, "__user", false),
 				    Local = Table.SelectRows(Mail, each not Text.StartsWith(Key([RecipientType]), "remote")),
-				    Qualified = Table.AddColumn(Local, "__id", each if Key([ExchangeGuid]) <> "" then Key([ExchangeGuid]) else Key([ObjectGUID]), type text),
-				    Ids = Qualified[__id],
+				    Qualified = Table.Buffer(Table.AddColumn(Local, "__id", each if Key([ExchangeGuid]) <> "" then Key([ExchangeGuid]) else Key([ObjectGUID]), type text)),
+				    Ids = List.Buffer(Qualified[__id]),
 				    Checked = if not List.Contains(Ids, "") and List.Count(Ids) = List.Count(List.Distinct(Ids)) then Qualified else error "Missing or duplicate mailbox identity; previous inventory must be retained",
 				    Project = (r as record) as record =>
 				        let

@@ -259,6 +259,54 @@ expression ReadMigrationCsv =
 		    Checked
 	lineageTag: 25ff69f8-08ac-4896-ae1f-f3eb16c544da
 
+/// Mailbox Inventory only: one validated manifest per reader invocation, shared by its five file reads. No cache across refreshes.
+expression CreateMailboxMigrationReader =
+		() as function =>
+		let
+		    SafeSegment = (s as text) as text => if s = "" or Text.Contains(s, "/") or Text.Contains(s, "\") or Text.Contains(s, "..") then error "Invalid prepared path segment" else s,
+		    BatchId = if Text.Trim(PreparedBatchId) = "" then error "Set PreparedBatchId to the reviewed immutable unified batch before refresh" else SafeSegment(PreparedBatchId),
+		    Manifest = GetPreparedBatchManifest(),
+		    Entries = List.Buffer(Manifest[Files] & Record.FieldOrDefault(Manifest, "Artifacts", {})),
+		    Read = (fileName as text) as binary =>
+		        let
+		            Name = SafeSegment(fileName),
+		            Selected = List.Select(Entries, each [File] = Name),
+		            Entry = if List.Count(Selected) = 1 then Selected{0} else error "Invalid prepared batch manifest",
+		            Content = if PreparedSourceMode = "Local" then
+		                File.Contents(Text.TrimEnd(PreparedEvidenceRoot, {"\", "/"}) & "\batches\" & BatchId & "\" & Name)
+		                else if PreparedSourceMode = "SharePoint" then
+		                    let
+		                        Root = SharePoint.Contents(SharePointSiteUrl, [ApiVersion=15]),
+		                        Path = {SharePointLibraryName} & List.Select(Text.Split(SharePointDataFolder & "/" & PreparedSharePointFolder, "/"), each _ <> "") & {"batches", BatchId},
+		                        Parent = List.Accumulate(Path, Root, (parent, segment) =>
+		                            let found = Table.SelectRows(parent, each [Name] = segment)
+		                            in if Table.RowCount(found) = 1 then found{0}[Content] else error Error.Record("Prepared evidence", "Missing or ambiguous folder; wait for a complete batch", segment)),
+		                        Found = Table.SelectRows(Parent, each [Name] = Name)
+		                    in if Table.RowCount(Found) = 1 then Found{0}[Content] else error "Missing or ambiguous prepared file"
+		                else error "PreparedSourceMode must be Local or SharePoint",
+		            Checked = if Binary.Length(Content) <> Entry[Bytes] then error "Prepared evidence transfer incomplete; previous imported model must be retained" else Content
+		        in Checked
+		in
+		    Read
+
+/// Mailbox Inventory only: inspect the first header line, validate before projection, then buffer only the required and present optional scalar columns.
+expression ReadMailboxMigrationCsv =
+		(content as binary, required as list, optionalColumns as list) as table =>
+		let
+		    Buffered = Binary.Buffer(content),
+		    HeaderLine = List.First(Lines.FromBinary(Buffered, QuoteStyle.None, false, 65001), ""),
+		    Separator = if Text.Contains(HeaderLine, ";") then ";" else ",",
+		    Raw = Csv.Document(Buffered, [Delimiter=Separator, Encoding=65001, QuoteStyle=QuoteStyle.Csv]),
+		    Headers = if Table.IsEmpty(Raw) then error "Migration source is empty; a schema header is required" else Record.FieldValues(Raw{0}),
+		    UniqueHeaders = if List.Count(Headers) = List.Count(List.Distinct(Headers)) and not List.Contains(Headers, null) and not List.Contains(Headers, "") then Raw else error "Duplicate or empty migration CSV headers",
+		    Promoted = Table.PromoteHeaders(UniqueHeaders, [PromoteAllScalars=true]),
+		    Missing = List.Difference(required, Table.ColumnNames(Promoted)),
+		    Checked = if List.IsEmpty(Missing) then Promoted else error Error.Record("Migration source schema", "Required columns are missing", Missing),
+		    Columns = List.Distinct(required & List.Intersect({optionalColumns, Table.ColumnNames(Checked)})),
+		    Projected = Table.SelectColumns(Checked, Columns, MissingField.Error)
+		in
+		    Table.Buffer(Projected)
+
 /// Observed migration history captured and indexed in the same immutable batch. No raw folder reads; original time/coverage semantics retained.
 expression ReadMigrationWeeklyHistory =
 		(kind as text, fileName as text, required as list, tenant as text) as list =>
