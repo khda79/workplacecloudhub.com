@@ -169,9 +169,22 @@ ref table 'Teams Site Links'
 ref table 'SharePoint Site Links'
 ref table 'SharePoint Tenant Capacity'
 ref table 'Collaboration Source Qualification'
-
-ref cultureInfo en-US
-
-
 ref table 'Mailbox Migration Exceptions'
 ref table 'Mailbox Migration Exception Summary'
+ref table 'SPO Migration Plan'
+ref table 'SPO Migration Web'
+ref table 'SPO Migration Collection'
+ref table 'SPO Migration Legacy Web'
+ref table 'SPO Migration Legacy Collection'
+ref table 'SPO Migration Scope'
+ref table 'SPO Migration Findings'
+ref table 'SPO Migration History'
+ref table 'SPO Migration Source Summary'
+ref table 'SPO Migration Source Type'
+ref table 'SPO Migration Business Unit'
+ref table 'SPO Migration Phase'
+ref table 'SPO Migration Project'
+ref table 'SPO Migration Operation'
+ref table 'SPO Migration Snapshot Date'
+
+ref cultureInfo en-US

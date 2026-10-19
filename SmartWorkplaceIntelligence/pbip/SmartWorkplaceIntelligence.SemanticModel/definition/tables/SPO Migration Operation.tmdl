@@ -1,0 +1,30 @@
+/// Migration reporting dimension; current and historical members retained.
+table 'SPO Migration Operation'
+	isHidden
+	lineageTag: 994d6972-b125-47a0-9310-45d92367d9cf
+
+	column 'Operation Key'
+		dataType: string
+		isHidden
+		lineageTag: e777cd6c-8f50-47d2-bdc2-235924ccb022
+		summarizeBy: none
+		sourceColumn: Operation Key
+
+	column 'Migration ID'
+		dataType: string
+		lineageTag: b6e13faf-ecce-4789-88d3-b8f096bd4412
+		summarizeBy: none
+		sourceColumn: Migration ID
+
+	column 'Source Type'
+		dataType: string
+		lineageTag: bf968fad-fb3f-4800-87fc-e22b0ac162ac
+		summarizeBy: none
+		sourceColumn: Source Type
+
+	partition 'SPO Migration Operation' = m
+		mode: import
+		source =
+				let
+				        Source = Table.Combine(List.Transform({#"SPO Migration Plan", #"SPO Migration History"}, each Table.SelectColumns(_, {"Operation Key", "Migration ID", "Source Type"})))
+				        in Table.Distinct(Source, {"Operation Key"})

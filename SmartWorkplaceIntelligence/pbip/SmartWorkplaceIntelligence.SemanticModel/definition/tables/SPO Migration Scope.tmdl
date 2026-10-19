@@ -1,0 +1,118 @@
+/// SPO means SharePoint Online. Grain: Scope Key; source: one selected immutable prepared batch.
+table 'SPO Migration Scope'
+	isHidden
+	lineageTag: 0840edef-d22c-466f-9051-4c37e6488d29
+
+	/// Prepared, tenant-qualified migration evidence: TenantKey.
+	column TenantKey
+		dataType: string
+		isHidden
+		lineageTag: 9863471d-de46-4e6d-9220-7cea2ca0b8b4
+		summarizeBy: none
+		sourceColumn: TenantKey
+
+	/// Prepared, tenant-qualified migration evidence: Project Key.
+	column 'Project Key'
+		dataType: string
+		isHidden
+		lineageTag: 201dfb19-62af-4575-b669-31bb5a7ccdc6
+		summarizeBy: none
+		sourceColumn: Project Key
+
+	/// Prepared, tenant-qualified migration evidence: Snapshot ID.
+	column 'Snapshot ID'
+		dataType: string
+		isHidden
+		lineageTag: 49346d66-3b22-447a-831d-0c2dedd8f206
+		summarizeBy: none
+		sourceColumn: Snapshot ID
+
+	/// Prepared, tenant-qualified migration evidence: Snapshot Date.
+	column 'Snapshot Date'
+		dataType: dateTime
+		formatString: yyyy-MM-dd
+		lineageTag: ed85ea05-c19d-411f-b1e9-a56b1f1fdfaa
+		summarizeBy: none
+		sourceColumn: Snapshot Date
+
+	/// Prepared, tenant-qualified migration evidence: Scope Key.
+	column 'Scope Key'
+		dataType: string
+		isHidden
+		lineageTag: 8f271fe0-70be-4be9-ac2e-8e4374d8caf0
+		summarizeBy: none
+		sourceColumn: Scope Key
+
+	/// Prepared, tenant-qualified migration evidence: Operation Key.
+	column 'Operation Key'
+		dataType: string
+		isHidden
+		lineageTag: 4ddd86b1-9cbb-411d-96c6-3a7e2503b114
+		summarizeBy: none
+		sourceColumn: Operation Key
+
+	/// Prepared, tenant-qualified migration evidence: Web Key.
+	column 'Web Key'
+		dataType: string
+		isHidden
+		lineageTag: 5e51c86f-8ec8-4f54-971b-eb7b2ce97b25
+		summarizeBy: none
+		sourceColumn: Web Key
+
+	/// Prepared, tenant-qualified migration evidence: Collection Key.
+	column 'Collection Key'
+		dataType: string
+		isHidden
+		lineageTag: 151748fe-b202-4bb1-b834-81296913c8fe
+		summarizeBy: none
+		sourceColumn: Collection Key
+
+	/// Prepared, tenant-qualified migration evidence: Coverage Kind.
+	column 'Coverage Kind'
+		dataType: string
+		lineageTag: d0a5310b-3fec-44f1-abb2-90350b038a77
+		summarizeBy: none
+		sourceColumn: Coverage Kind
+
+	/// Prepared, tenant-qualified migration evidence: Is Effective.
+	column 'Is Effective'
+		dataType: boolean
+		lineageTag: b68f9537-c8b5-44a8-8eb6-f6c24e831002
+		summarizeBy: none
+		sourceColumn: Is Effective
+
+	/// Prepared, tenant-qualified migration evidence: Is Direct.
+	column 'Is Direct'
+		dataType: boolean
+		lineageTag: 46d4f52f-d60c-4cac-9932-fed3055fd853
+		summarizeBy: none
+		sourceColumn: Is Direct
+
+	/// Prepared, tenant-qualified migration evidence: Effective Disposition.
+	column 'Effective Disposition'
+		dataType: string
+		lineageTag: b549a0d1-3e47-43fe-bd41-e1092839222b
+		summarizeBy: none
+		sourceColumn: Effective Disposition
+
+	/// Prepared, tenant-qualified migration evidence: Has Conflict.
+	column 'Has Conflict'
+		dataType: boolean
+		lineageTag: 834e32ab-1a0c-48fa-8146-d1a3581afde1
+		summarizeBy: none
+		sourceColumn: Has Conflict
+
+	column 'Project Identity'
+		dataType: string
+		isHidden
+		lineageTag: 0ce7c99c-01a0-487d-97ee-0bd74699b53c
+		sourceColumn: Project Identity
+
+	partition 'SPO Migration Scope' = m
+		mode: import
+		source =
+				let
+				    Source = GetSharePointMigrationEvidence("SharePointMigrationScopeEvidence.csv", {{"TenantKey", type text}, {"Project Key", type text}, {"Snapshot ID", type text}, {"Snapshot Date", type date}, {"Scope Key", type text}, {"Operation Key", type text}, {"Web Key", type text}, {"Collection Key", type text}, {"Coverage Kind", type text}, {"Is Effective", type logical}, {"Is Direct", type logical}, {"Effective Disposition", type text}, {"Has Conflict", type logical}}),
+				    Identity = Table.AddColumn(Source, "Project Identity", each Binary.ToText(Json.FromValue({[TenantKey], [Project Key]}), BinaryEncoding.Base64), type text),
+				    Categories = Table.TransformColumns(Identity, List.Transform(List.Intersect({{"Business Unit", "Phase"}, Table.ColumnNames(Identity)}), (c) => {c, each if _ = null then "(Unspecified)" else _, type text}))
+				in Categories

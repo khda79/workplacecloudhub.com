@@ -436,3 +436,36 @@ expression NativeEvidenceTypes =
 expression PreparedExpectedTenantKey = "" meta [IsParameterQuery=true, Type="Text", IsParameterQueryRequired=true]
 	lineageTag: fd94c8fb-7f6c-48b7-ac89-42afd49db4fe
 
+/// Optional complete nine-file group from the selected immutable batch. Old batches yield typed empty compatibility; corrupt or incomplete groups fail.
+expression GetSharePointMigrationEvidence =
+		(FileName as text, Schema as list) as table =>
+		let
+		    Expected = {"SharePointMigrationPlanEvidence.csv", "SharePointMigrationWebEvidence.csv", "SharePointMigrationCollectionEvidence.csv", "SharePointMigrationLegacyWebEvidence.csv", "SharePointMigrationLegacyCollectionEvidence.csv", "SharePointMigrationScopeEvidence.csv", "SharePointMigrationFindingEvidence.csv", "SharePointMigrationHistoryEvidence.csv", "SharePointMigrationSourceSummary.csv"},
+		    Manifest = GetPreparedBatchManifest(),
+		    Entries = List.Select(Manifest[Files], each List.Contains(Expected, [File])),
+		    Names = List.Transform(Entries, each [File]),
+		    GroupReady = if List.IsEmpty(Entries) then false else
+		        if List.Count(Names) = List.Count(Expected) and List.Count(List.Distinct(Names)) = List.Count(Expected)
+		        then true else error "Incomplete migration evidence group in selected batch",
+		    Allowed = if List.Contains(Expected, FileName) then FileName else error "Unexpected migration table",
+		    Empty = #table(List.Transform(Schema, each _{0}), {}),
+		    Parsed = if GroupReady then Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile(Allowed),
+		        [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]) else Empty,
+		    HeaderChecked = if Table.ColumnNames(Parsed) = List.Transform(Schema, each _{0}) then Parsed
+		        else error "Migration evidence schema mismatch",
+		    TenantChecked = if List.AnyTrue(List.Transform(Table.Column(HeaderChecked, "TenantKey"),
+		        each _ <> PreparedExpectedTenantKey)) then error "Foreign migration tenant" else HeaderChecked,
+		    Nulls = Table.ReplaceValue(TenantChecked, "", null, Replacer.ReplaceValue, Table.ColumnNames(TenantChecked)),
+		    Conversions = List.Transform(Schema, (s) => {s{0}, (v) => if v = null then null else
+		        if s{1} = type date then Date.FromText(v, [Culture="en-US"])
+		        else if s{1} = type datetime then DateTimeZone.RemoveZone(DateTimeZone.ToUtc(DateTimeZone.FromText(v)))
+		        else if s{1} = type logical then Logical.FromText(v)
+		        else if s{1} = Int64.Type then Int64.From(v, "en-US")
+		        else if s{1} = Currency.Type then Currency.From(v, "en-US") else v, s{1}}),
+		    Typed = Table.TransformColumns(Nulls, Conversions),
+		    Compatible = if not GroupReady and Allowed = "SharePointMigrationSourceSummary.csv" then
+		        Table.FromRecords({[TenantKey=PreparedExpectedTenantKey, Source="Migration workbook",
+		            Qualification="Not available in selected batch", #"Coverage State"="Not available in selected batch"]},
+		            Value.Type(Typed), MissingField.UseNull) else Typed
+		in Compatible
+	lineageTag: bb3c6976-2636-49d6-8cd5-2c7646e6be4a

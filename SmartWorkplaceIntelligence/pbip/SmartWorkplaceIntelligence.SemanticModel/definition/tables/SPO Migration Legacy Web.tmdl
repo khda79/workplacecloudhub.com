@@ -1,0 +1,88 @@
+/// SPO means SharePoint Online. Grain: Legacy Key; source: one selected immutable prepared batch.
+table 'SPO Migration Legacy Web'
+	isHidden
+	lineageTag: 9bf06ccc-ac90-4249-90c8-28ea28fd874f
+
+	/// Prepared, tenant-qualified migration evidence: TenantKey.
+	column TenantKey
+		dataType: string
+		isHidden
+		lineageTag: 8cb842c9-fc68-4716-b561-d84738ee8ea4
+		summarizeBy: none
+		sourceColumn: TenantKey
+
+	/// Prepared, tenant-qualified migration evidence: Project Key.
+	column 'Project Key'
+		dataType: string
+		isHidden
+		lineageTag: 4ba0d107-0b41-4ddd-98a4-5aa567b60acc
+		summarizeBy: none
+		sourceColumn: Project Key
+
+	/// Prepared, tenant-qualified migration evidence: Snapshot ID.
+	column 'Snapshot ID'
+		dataType: string
+		isHidden
+		lineageTag: 2e6cfe94-7158-40e1-a496-d9abde6121ea
+		summarizeBy: none
+		sourceColumn: Snapshot ID
+
+	/// Prepared, tenant-qualified migration evidence: Snapshot Date.
+	column 'Snapshot Date'
+		dataType: dateTime
+		formatString: yyyy-MM-dd
+		lineageTag: 3bd81e7b-971c-4938-a827-18fe740d79d3
+		summarizeBy: none
+		sourceColumn: Snapshot Date
+
+	/// Prepared, tenant-qualified migration evidence: Legacy Key.
+	column 'Legacy Key'
+		dataType: string
+		isHidden
+		lineageTag: abba9b76-7580-49e2-83a6-ffddd2c2542d
+		summarizeBy: none
+		sourceColumn: Legacy Key
+
+	/// Prepared, tenant-qualified migration evidence: Legacy ID.
+	column 'Legacy ID'
+		dataType: string
+		lineageTag: 74de1efa-bf83-477c-906b-e8d9fb5764e3
+		summarizeBy: none
+		sourceColumn: Legacy ID
+
+	/// Prepared, tenant-qualified migration evidence: Legacy Collection Key.
+	column 'Legacy Collection Key'
+		dataType: string
+		isHidden
+		lineageTag: 8027b8c2-9baa-446b-9709-f065326e62ef
+		summarizeBy: none
+		sourceColumn: Legacy Collection Key
+
+	/// Prepared, tenant-qualified migration evidence: Source URL.
+	column 'Source URL'
+		dataType: string
+		lineageTag: 385acb59-c3a0-4729-b9a1-e24193e44019
+		summarizeBy: none
+		sourceColumn: Source URL
+
+	/// Prepared, tenant-qualified migration evidence: Source Name.
+	column 'Source Name'
+		dataType: string
+		lineageTag: 61f6cd15-fd7c-423e-9f81-0fac946d8f38
+		summarizeBy: none
+		sourceColumn: Source Name
+
+	column 'Project Identity'
+		dataType: string
+		isHidden
+		lineageTag: 94b10aef-264b-4592-8f96-018edd7cdfd7
+		sourceColumn: Project Identity
+
+	partition 'SPO Migration Legacy Web' = m
+		mode: import
+		source =
+				let
+				    Source = GetSharePointMigrationEvidence("SharePointMigrationLegacyWebEvidence.csv", {{"TenantKey", type text}, {"Project Key", type text}, {"Snapshot ID", type text}, {"Snapshot Date", type date}, {"Legacy Key", type text}, {"Legacy ID", type text}, {"Legacy Collection Key", type text}, {"Source URL", type text}, {"Source Name", type text}}),
+				    Identity = Table.AddColumn(Source, "Project Identity", each Binary.ToText(Json.FromValue({[TenantKey], [Project Key]}), BinaryEncoding.Base64), type text),
+				    Categories = Table.TransformColumns(Identity, List.Transform(List.Intersect({{"Business Unit", "Phase"}, Table.ColumnNames(Identity)}), (c) => {c, each if _ = null then "(Unspecified)" else _, type text}))
+				in Categories

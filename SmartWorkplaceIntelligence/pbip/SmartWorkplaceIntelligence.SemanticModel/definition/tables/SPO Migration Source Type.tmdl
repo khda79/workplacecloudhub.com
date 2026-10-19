@@ -1,0 +1,13 @@
+/// Migration reporting dimension; current and historical members retained.
+table 'SPO Migration Source Type'
+	lineageTag: c5779a60-7600-481f-a524-1c44f82698da
+
+	column 'Source Type'
+		dataType: string
+		lineageTag: 1de9ad3c-cee9-4389-b44f-5c8178304bcc
+		summarizeBy: none
+		sourceColumn: Source Type
+
+	partition 'SPO Migration Source Type' = m
+		mode: import
+		source = let Source = Table.Combine({Table.SelectColumns(#"SPO Migration Plan", {"Source Type"}), Table.SelectColumns(#"SPO Migration History", {"Source Type"})}) in Table.Distinct(Source)

@@ -1,0 +1,168 @@
+/// SPO means SharePoint Online. Grain: Finding Key; source: one selected immutable prepared batch.
+table 'SPO Migration Findings'
+	lineageTag: 6184ce9c-c645-4bc2-aa75-2fe61eb16ddb
+
+	/// Business Review Findings. Operations use distinct source-type-qualified identities. Declared progress is separate from technical observation and validation.
+	measure 'SPO Business Review Findings' =
+			VAR _keys=FILTER(VALUES('SPO Migration Plan'[Operation Key]), [SPO Operations]>0) RETURN CALCULATE(DISTINCTCOUNT('SPO Migration Findings'[Operation Key]), TREATAS(_keys, 'SPO Migration Findings'[Operation Key]),
+			KEEPFILTERS('SPO Migration Findings'[Finding Rule] IN {"Decision pending","Missing planned date","Done without actual date","Imported date needs clarification","Target approval pending","Migration validation not documented","Inconsistent validation"}))
+		formatString: #,##0
+		displayFolder: Migration\Quality
+		lineageTag: c174dedf-aeea-43ff-beec-de0d74eeda16
+
+	/// Finding Count. Operations use distinct source-type-qualified identities. Declared progress is separate from technical observation and validation.
+	measure 'SPO Finding Count' = VAR _keys=FILTER(VALUES('SPO Migration Plan'[Operation Key]), [SPO Operations]>0) RETURN CALCULATE(COUNTROWS('SPO Migration Findings'), TREATAS(_keys,'SPO Migration Findings'[Operation Key]))
+		formatString: #,##0
+		displayFolder: Migration\Quality
+		lineageTag: 1005a680-42fc-4a1b-acfc-c3857141fb5f
+
+	/// Global Findings. Operations use distinct source-type-qualified identities. Declared progress is separate from technical observation and validation.
+	measure 'SPO Global Findings' = CALCULATE(COUNTROWS('SPO Migration Findings'), KEEPFILTERS(ISBLANK('SPO Migration Findings'[Operation Key])))
+		formatString: #,##0
+		displayFolder: Migration\Quality
+		lineageTag: d081678b-5c25-47df-9690-bcba132bbdc6
+
+	/// Visible Finding. Operations use distinct source-type-qualified identities. Declared progress is separate from technical observation and validation.
+	measure 'SPO Visible Finding' =
+			VAR _key=SELECTEDVALUE('SPO Migration Findings'[Operation Key]) VAR _keys=FILTER(VALUES('SPO Migration Plan'[Operation Key]), [SPO Operations]>0)
+			RETURN IF(ISBLANK(_key) || CONTAINS(_keys, 'SPO Migration Plan'[Operation Key], _key), 1)
+		formatString: #,##0
+		isHidden
+		displayFolder: Migration\Quality
+		lineageTag: cc843132-6e75-49d8-844e-613ad90bc4ff
+
+	/// Global Quality Context. Operations use distinct source-type-qualified identities. Declared progress is separate from technical observation and validation.
+	measure 'SPO Global Quality Context' =
+			VAR _available=COUNTROWS(FILTER('SPO Migration Source Summary', 'SPO Migration Source Summary'[Qualification]="Configured"))>0
+			RETURN IF(_available,"Source/global findings: " & FORMAT(COALESCE([SPO Global Findings],0),"#,##0") & ". Source-level findings are not attributable to a business unit or operation. Rule categories overlap.", [SPO Source Qualification Context])
+		formatString: General
+		displayFolder: Migration\Quality
+		lineageTag: 6fddcdf7-b03c-45b0-bf3d-4c1bce13a6cc
+
+	/// Prepared, tenant-qualified migration evidence: TenantKey.
+	column TenantKey
+		dataType: string
+		isHidden
+		lineageTag: bea86222-52c8-4249-975b-f3fb40c6f537
+		summarizeBy: none
+		sourceColumn: TenantKey
+
+	/// Prepared, tenant-qualified migration evidence: Project Key.
+	column 'Project Key'
+		dataType: string
+		isHidden
+		lineageTag: 42b7f0cf-a2ab-41a2-b369-82f9d69ac0fc
+		summarizeBy: none
+		sourceColumn: Project Key
+
+	/// Prepared, tenant-qualified migration evidence: Snapshot ID.
+	column 'Snapshot ID'
+		dataType: string
+		isHidden
+		lineageTag: 0be8f572-8dd9-4444-a8e4-b5f75b1399ef
+		summarizeBy: none
+		sourceColumn: Snapshot ID
+
+	/// Prepared, tenant-qualified migration evidence: Snapshot Date.
+	column 'Snapshot Date'
+		dataType: dateTime
+		formatString: yyyy-MM-dd
+		lineageTag: 4fe83aee-1307-4d90-9b35-7f1ae3a531ad
+		summarizeBy: none
+		sourceColumn: Snapshot Date
+
+	/// Prepared, tenant-qualified migration evidence: Finding Key.
+	column 'Finding Key'
+		dataType: string
+		isHidden
+		lineageTag: 4fe4ea23-8a07-45e9-9432-6d53978c3448
+		summarizeBy: none
+		sourceColumn: Finding Key
+
+	/// Prepared, tenant-qualified migration evidence: Operation Key.
+	column 'Operation Key'
+		dataType: string
+		isHidden
+		lineageTag: 412a6bb4-1fb8-4bbc-b8e4-ff8e372ebf94
+		summarizeBy: none
+		sourceColumn: Operation Key
+
+	/// Prepared, tenant-qualified migration evidence: Source Type.
+	column 'Source Type'
+		dataType: string
+		lineageTag: 04f46175-51d0-4013-80c1-9bab50e01bf3
+		summarizeBy: none
+		sourceColumn: Source Type
+
+	/// Prepared, tenant-qualified migration evidence: Migration ID.
+	column 'Migration ID'
+		dataType: string
+		lineageTag: 6accc198-29b8-4075-a917-6e7a5645b68d
+		summarizeBy: none
+		sourceColumn: Migration ID
+
+	/// Prepared, tenant-qualified migration evidence: Source Name.
+	column 'Source Name'
+		dataType: string
+		lineageTag: 2aa77bec-0ee2-4ccf-a70c-32c348092afa
+		summarizeBy: none
+		sourceColumn: Source Name
+
+	/// Prepared, tenant-qualified migration evidence: Severity.
+	column Severity
+		dataType: string
+		lineageTag: 64b17ca9-4592-46ea-a3a2-41cd286afd47
+		summarizeBy: none
+		sourceColumn: Severity
+
+	/// Prepared, tenant-qualified migration evidence: Finding Rule.
+	column 'Finding Rule'
+		dataType: string
+		lineageTag: c0470bdf-9a4d-4116-a1a8-3786a653f699
+		summarizeBy: none
+		sourceColumn: Finding Rule
+
+	/// Prepared, tenant-qualified migration evidence: Observed Value.
+	column 'Observed Value'
+		dataType: string
+		lineageTag: bb4758eb-f453-444b-86ac-84565f5e1703
+		summarizeBy: none
+		sourceColumn: Observed Value
+
+	/// Prepared, tenant-qualified migration evidence: Expected Action.
+	column 'Expected Action'
+		dataType: string
+		lineageTag: 52022269-5bf5-4403-8c44-04d07963393c
+		summarizeBy: none
+		sourceColumn: Expected Action
+
+	/// Prepared, tenant-qualified migration evidence: Source Reference.
+	column 'Source Reference'
+		dataType: string
+		lineageTag: 18954fc4-d4b3-4a07-b1ec-6578895b86ed
+		summarizeBy: none
+		sourceColumn: Source Reference
+
+	/// Prepared, tenant-qualified migration evidence: Capture UTC.
+	column 'Capture UTC'
+		dataType: dateTime
+		isHidden
+		formatString: yyyy-MM-dd HH:mm
+		lineageTag: 7d4ba327-b2ed-40b5-ac6f-3a487701a0a1
+		summarizeBy: none
+		sourceColumn: Capture UTC
+
+	column 'Project Identity'
+		dataType: string
+		isHidden
+		lineageTag: 918e3eb0-337f-4a8a-8b40-f51f113044cc
+		sourceColumn: Project Identity
+
+	partition 'SPO Migration Findings' = m
+		mode: import
+		source =
+				let
+				    Source = GetSharePointMigrationEvidence("SharePointMigrationFindingEvidence.csv", {{"TenantKey", type text}, {"Project Key", type text}, {"Snapshot ID", type text}, {"Snapshot Date", type date}, {"Finding Key", type text}, {"Operation Key", type text}, {"Source Type", type text}, {"Migration ID", type text}, {"Source Name", type text}, {"Severity", type text}, {"Finding Rule", type text}, {"Observed Value", type text}, {"Expected Action", type text}, {"Source Reference", type text}, {"Capture UTC", type datetime}}),
+				    Identity = Table.AddColumn(Source, "Project Identity", each Binary.ToText(Json.FromValue({[TenantKey], [Project Key]}), BinaryEncoding.Base64), type text),
+				    Categories = Table.TransformColumns(Identity, List.Transform(List.Intersect({{"Business Unit", "Phase"}, Table.ColumnNames(Identity)}), (c) => {c, each if _ = null then "(Unspecified)" else _, type text}))
+				in Categories

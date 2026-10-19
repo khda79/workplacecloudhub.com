@@ -358,7 +358,6 @@ relationship TeamsSiteLinks_ObservedSite
 	fromColumn: 'Teams Site Links'.'Site ID'
 	toColumn: 'SharePoint Site Links'.'Site ID'
 
-
 relationship rel_daily_directory_date
 	fromColumn: 'Daily Directory Trends'.'Date Key'
 	toColumn: Date.'Date Key'
@@ -374,3 +373,94 @@ relationship rel_daily_directory_domain
 relationship rel_daily_mailbox_domain
 	fromColumn: 'Daily Mailbox Trends'.'Domain Key'
 	toColumn: 'Daily Domain'.'Domain Key'
+
+relationship SpoMigration1
+	fromColumn: 'SPO Migration Plan'.'Source Type'
+	toColumn: 'SPO Migration Source Type'.'Source Type'
+
+relationship SpoMigration2
+	fromColumn: 'SPO Migration Plan'.'Business Unit'
+	toColumn: 'SPO Migration Business Unit'.'Business Unit'
+
+relationship SpoMigration3
+	fromColumn: 'SPO Migration Plan'.Phase
+	toColumn: 'SPO Migration Phase'.Phase
+
+relationship SpoMigration4
+	fromColumn: 'SPO Migration Plan'.'Operation Key'
+	toColumn: 'SPO Migration Operation'.'Operation Key'
+
+relationship SpoMigration5
+	fromColumn: 'SPO Migration History'.'Source Type'
+	toColumn: 'SPO Migration Source Type'.'Source Type'
+
+relationship SpoMigration6
+	fromColumn: 'SPO Migration History'.'Business Unit'
+	toColumn: 'SPO Migration Business Unit'.'Business Unit'
+
+relationship SpoMigration7
+	fromColumn: 'SPO Migration History'.Phase
+	toColumn: 'SPO Migration Phase'.Phase
+
+relationship SpoMigration8
+	fromColumn: 'SPO Migration History'.'Operation Key'
+	toColumn: 'SPO Migration Operation'.'Operation Key'
+
+relationship SpoMigration9
+	fromColumn: 'SPO Migration Plan'.'Project Identity'
+	toColumn: 'SPO Migration Project'.'Project Identity'
+
+relationship SpoMigration10
+	fromColumn: 'SPO Migration History'.'Project Identity'
+	toColumn: 'SPO Migration Project'.'Project Identity'
+
+relationship SpoMigration11
+	fromColumn: 'SPO Migration Source Summary'.'Project Identity'
+	toColumn: 'SPO Migration Project'.'Project Identity'
+
+relationship SpoMigration12
+	fromColumn: 'SPO Migration Findings'.'Project Identity'
+	toColumn: 'SPO Migration Project'.'Project Identity'
+
+relationship SpoMigration13
+	fromColumn: 'SPO Migration Legacy Web'.'Project Identity'
+	toColumn: 'SPO Migration Project'.'Project Identity'
+
+relationship SpoMigration14
+	fromColumn: 'SPO Migration Legacy Collection'.'Project Identity'
+	toColumn: 'SPO Migration Project'.'Project Identity'
+
+relationship SpoMigration15
+	fromColumn: 'SPO Migration Scope'.'Operation Key'
+	toColumn: 'SPO Migration Plan'.'Operation Key'
+
+relationship SpoMigration16
+	fromColumn: 'SPO Migration Scope'.'Web Key'
+	toColumn: 'SPO Migration Web'.'Web Key'
+
+relationship SpoMigration17
+	fromColumn: 'SPO Migration Web'.'Collection Key'
+	toColumn: 'SPO Migration Collection'.'Collection Key'
+
+relationship SpoMigration18
+	fromColumn: 'SPO Migration Web'.'Web Application Key'
+	toColumn: 'SharePoint On-prem Web Applications'.'Web Application Key'
+
+relationship SpoMigration19
+	fromColumn: 'SPO Migration History'.'Snapshot Date'
+	toColumn: 'SPO Migration Snapshot Date'.Date
+
+relationship SpoMigration20
+	isActive: false
+	fromColumn: 'SPO Migration Plan'.'Planned Date'
+	toColumn: Date.Date
+
+relationship SpoMigration21
+	isActive: false
+	fromColumn: 'SPO Migration Plan'.'Actual Date'
+	toColumn: Date.Date
+
+relationship SpoMigration22
+	isActive: false
+	fromColumn: 'SPO Migration Plan'.'Validation Date'
+	toColumn: Date.Date

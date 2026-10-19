@@ -1,0 +1,21 @@
+/// Migration reporting dimension; current and historical members retained.
+table 'SPO Migration Snapshot Date'
+	lineageTag: 70b8e8cd-58a8-4d8d-9337-4fe68a06927e
+
+	column Date
+		dataType: dateTime
+		formatString: yyyy-MM-dd
+		lineageTag: c49fb4db-222a-49ea-87f3-91a8e2ba188b
+		summarizeBy: none
+		sourceColumn: Date
+
+	partition 'SPO Migration Snapshot Date' = m
+		mode: import
+		source =
+				let
+				        Native = Table.SelectColumns(Date, {"Date"}),
+				        Historical = Table.RenameColumns(Table.SelectColumns(#"SPO Migration History", {"Snapshot Date"}), {{"Snapshot Date", "Date"}}),
+				        Bounds = List.RemoveNulls(Table.Column(Table.Combine({Native, Historical}), "Date")),
+				        Start = List.Min(Bounds), End = List.Max(Bounds),
+				        Result = Table.FromColumns({List.Dates(Start, Duration.Days(End-Start)+1, #duration(1,0,0,0))}, type table [Date=date])
+				        in Result

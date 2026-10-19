@@ -1,0 +1,138 @@
+/// SPO means SharePoint Online. Grain: TenantKey, Project Key, Snapshot ID, Source; source: one selected immutable prepared batch.
+table 'SPO Migration Source Summary'
+	lineageTag: 526bdd67-a876-47b4-9184-17c657f26272
+
+	/// Source Qualification Context. Operations use distinct source-type-qualified identities. Declared progress is separate from technical observation and validation.
+	measure 'SPO Source Qualification Context' = CONCATENATEX(VALUES('SPO Migration Source Summary'[Qualification]), 'SPO Migration Source Summary'[Qualification], ", ")
+		formatString: General
+		displayFolder: Migration\Quality
+		lineageTag: d2f9617b-55be-4d42-85bb-f6a131e475c8
+
+	/// Source Age Hours. Operations use distinct source-type-qualified identities. Declared progress is separate from technical observation and validation.
+	measure 'SPO Source Age Hours' = MAX('SPO Migration Source Summary'[Age Hours])
+		formatString: 0.0
+		displayFolder: Migration\Quality
+		lineageTag: 78585de5-25df-4276-89b9-28ce6c6129cf
+
+	/// Prepared, tenant-qualified migration evidence: TenantKey.
+	column TenantKey
+		dataType: string
+		isHidden
+		lineageTag: baf942b6-bdac-462b-b846-76df686d35dd
+		summarizeBy: none
+		sourceColumn: TenantKey
+
+	/// Prepared, tenant-qualified migration evidence: Project Key.
+	column 'Project Key'
+		dataType: string
+		isHidden
+		lineageTag: f4b4435c-7b37-44db-9cb8-14bb07be7316
+		summarizeBy: none
+		sourceColumn: Project Key
+
+	/// Prepared, tenant-qualified migration evidence: Snapshot ID.
+	column 'Snapshot ID'
+		dataType: string
+		isHidden
+		lineageTag: a2fb5613-5c65-44ef-96bb-ae4ae16943c5
+		summarizeBy: none
+		sourceColumn: Snapshot ID
+
+	/// Prepared, tenant-qualified migration evidence: Snapshot Date.
+	column 'Snapshot Date'
+		dataType: dateTime
+		formatString: yyyy-MM-dd
+		lineageTag: b76fb044-f2fc-4e5e-b89e-3b18a343e2f5
+		summarizeBy: none
+		sourceColumn: Snapshot Date
+
+	/// Prepared, tenant-qualified migration evidence: Source.
+	column Source
+		dataType: string
+		lineageTag: 78b78839-0fc6-4803-840d-da2466e1ba4f
+		summarizeBy: none
+		sourceColumn: Source
+
+	/// Prepared, tenant-qualified migration evidence: Source SHA256.
+	column 'Source SHA256'
+		dataType: string
+		isHidden
+		lineageTag: 3a188e09-763a-4ec0-9339-1fbc6cbf6fdc
+		summarizeBy: none
+		sourceColumn: Source SHA256
+
+	/// Prepared, tenant-qualified migration evidence: Binding SHA256.
+	column 'Binding SHA256'
+		dataType: string
+		isHidden
+		lineageTag: 5b2b8fdb-cd89-4704-afbd-85ebb959a84f
+		summarizeBy: none
+		sourceColumn: Binding SHA256
+
+	/// Prepared, tenant-qualified migration evidence: Captured UTC.
+	column 'Captured UTC'
+		dataType: dateTime
+		isHidden
+		formatString: yyyy-MM-dd HH:mm
+		lineageTag: c8d39ae2-2a99-4cba-a8f6-7571f93b7497
+		summarizeBy: none
+		sourceColumn: Captured UTC
+
+	/// Prepared, tenant-qualified migration evidence: Age Hours.
+	column 'Age Hours'
+		dataType: decimal
+		lineageTag: 14799e06-73c4-4a08-8237-643ac7b17b06
+		summarizeBy: none
+		sourceColumn: Age Hours
+
+	/// Prepared, tenant-qualified migration evidence: Qualification.
+	column Qualification
+		dataType: string
+		lineageTag: 7ffb5931-e7bb-4c0b-a07f-52c62cb284fe
+		summarizeBy: none
+		sourceColumn: Qualification
+
+	/// Prepared, tenant-qualified migration evidence: Coverage State.
+	column 'Coverage State'
+		dataType: string
+		lineageTag: 5d531bed-8080-49d9-8cfa-c88a80368f14
+		summarizeBy: none
+		sourceColumn: Coverage State
+
+	/// Prepared, tenant-qualified migration evidence: Run ID.
+	column 'Run ID'
+		dataType: string
+		isHidden
+		lineageTag: 80675477-4939-43a3-a161-d91ea443a05d
+		summarizeBy: none
+		sourceColumn: Run ID
+
+	/// Prepared, tenant-qualified migration evidence: Review Date.
+	column 'Review Date'
+		dataType: dateTime
+		formatString: yyyy-MM-dd
+		lineageTag: ddd11ad8-3887-4bc2-bb42-ddfab958ac87
+		summarizeBy: none
+		sourceColumn: Review Date
+
+	/// Prepared, tenant-qualified migration evidence: Review State.
+	column 'Review State'
+		dataType: string
+		lineageTag: 206921ab-3d05-45d6-a5c9-8f6e15787abc
+		summarizeBy: none
+		sourceColumn: Review State
+
+	column 'Project Identity'
+		dataType: string
+		isHidden
+		lineageTag: 9cb8ab87-566a-4318-9592-e134212dd5b1
+		sourceColumn: Project Identity
+
+	partition 'SPO Migration Source Summary' = m
+		mode: import
+		source =
+				let
+				    Source = GetSharePointMigrationEvidence("SharePointMigrationSourceSummary.csv", {{"TenantKey", type text}, {"Project Key", type text}, {"Snapshot ID", type text}, {"Snapshot Date", type date}, {"Source", type text}, {"Source SHA256", type text}, {"Binding SHA256", type text}, {"Captured UTC", type datetime}, {"Age Hours", Currency.Type}, {"Qualification", type text}, {"Coverage State", type text}, {"Run ID", type text}, {"Review Date", type date}, {"Review State", type text}}),
+				    Identity = Table.AddColumn(Source, "Project Identity", each Binary.ToText(Json.FromValue({[TenantKey], [Project Key]}), BinaryEncoding.Base64), type text),
+				    Categories = Table.TransformColumns(Identity, List.Transform(List.Intersect({{"Business Unit", "Phase"}, Table.ColumnNames(Identity)}), (c) => {c, each if _ = null then "(Unspecified)" else _, type text}))
+				in Categories

@@ -1,0 +1,423 @@
+/// SPO means SharePoint Online. Grain: History Key; source: one selected immutable prepared batch.
+table 'SPO Migration History'
+	lineageTag: 2c69ed49-a9ad-42b4-a257-00de3e6eafbd
+
+	/// Historical Migrate Operations. Operations use distinct source-type-qualified identities. Declared progress is separate from technical observation and validation.
+	measure 'SPO Historical Migrate Operations' =
+			VAR _day=CALCULATE(MAX('SPO Migration History'[Snapshot Date]), REMOVEFILTERS('SPO Migration Business Unit'), REMOVEFILTERS('SPO Migration Phase'), REMOVEFILTERS('SPO Migration Source Type'), REMOVEFILTERS('SPO Migration Operation'))
+			RETURN CALCULATE(DISTINCTCOUNT('SPO Migration History'[Operation Key]), KEEPFILTERS('SPO Migration History'[Snapshot Date]=_day), KEEPFILTERS('SPO Migration History'[Is Latest Daily Snapshot]=TRUE()), KEEPFILTERS('SPO Migration History'[Present In Register]=TRUE()), KEEPFILTERS('SPO Migration History'[Disposition]="MIGRATE"))
+		formatString: #,##0
+		displayFolder: Migration\History
+		lineageTag: 0e675677-290b-4d2b-83dd-9db3582b3da5
+
+	/// Historical Reported Done. Operations use distinct source-type-qualified identities. Declared progress is separate from technical observation and validation.
+	measure 'SPO Historical Reported Done' = VAR _n=[SPO Historical Migrate Operations] RETURN IF(_n>0, COALESCE(CALCULATE([SPO Historical Migrate Operations], KEEPFILTERS('SPO Migration History'[Execution Status]="DONE")),0))
+		formatString: #,##0
+		displayFolder: Migration\History
+		lineageTag: 6e6e5c64-66a7-40f0-819f-e93013c81388
+
+	/// Historical Validated Done. Operations use distinct source-type-qualified identities. Declared progress is separate from technical observation and validation.
+	measure 'SPO Historical Validated Done' = VAR _n=[SPO Historical Migrate Operations] RETURN IF(_n>0, COALESCE(CALCULATE([SPO Historical Reported Done], KEEPFILTERS('SPO Migration History'[Is Validated]=TRUE())),0))
+		formatString: #,##0
+		displayFolder: Migration\History
+		lineageTag: 72dc33dc-98cd-4562-adc5-6ccf96c15e85
+
+	/// Historical Completion. Operations use distinct source-type-qualified identities. Declared progress is separate from technical observation and validation.
+	measure 'SPO Historical Completion' = DIVIDE([SPO Historical Reported Done], [SPO Historical Migrate Operations])
+		formatString: 0.0%
+		displayFolder: Migration\History
+		lineageTag: 904d952e-905e-458c-ae51-dd3273673aea
+
+	/// Historical Removed Operations. Operations use distinct source-type-qualified identities. Declared progress is separate from technical observation and validation.
+	measure 'SPO Historical Removed Operations' = CALCULATE(DISTINCTCOUNT('SPO Migration History'[Operation Key]), KEEPFILTERS('SPO Migration History'[Is Latest Daily Snapshot]=TRUE()), KEEPFILTERS('SPO Migration History'[Present In Register]=FALSE()))
+		formatString: #,##0
+		displayFolder: Migration\History
+		lineageTag: 61236f4e-8c55-4480-bcde-db8e6d5a0342
+
+	/// Prepared, tenant-qualified migration evidence: TenantKey.
+	column TenantKey
+		dataType: string
+		isHidden
+		lineageTag: 43190ec1-e065-49ab-9ea1-438ba47c8429
+		summarizeBy: none
+		sourceColumn: TenantKey
+
+	/// Prepared, tenant-qualified migration evidence: Project Key.
+	column 'Project Key'
+		dataType: string
+		isHidden
+		lineageTag: de2942cc-23a0-41b1-897c-31b795b85a23
+		summarizeBy: none
+		sourceColumn: Project Key
+
+	/// Prepared, tenant-qualified migration evidence: Snapshot ID.
+	column 'Snapshot ID'
+		dataType: string
+		isHidden
+		lineageTag: ee2461b2-8eb7-40ea-85ad-b726c705df2a
+		summarizeBy: none
+		sourceColumn: Snapshot ID
+
+	/// Prepared, tenant-qualified migration evidence: Snapshot Date.
+	column 'Snapshot Date'
+		dataType: dateTime
+		formatString: yyyy-MM-dd
+		lineageTag: 19b69939-e218-468f-98ff-057ae95d5197
+		summarizeBy: none
+		sourceColumn: Snapshot Date
+
+	/// Prepared, tenant-qualified migration evidence: Operation Key.
+	column 'Operation Key'
+		dataType: string
+		isHidden
+		lineageTag: e484c38c-f391-41ee-97f8-31ca03b0c4dd
+		summarizeBy: none
+		sourceColumn: Operation Key
+
+	/// Prepared, tenant-qualified migration evidence: Migration ID.
+	column 'Migration ID'
+		dataType: string
+		lineageTag: bfcf3321-0c75-46aa-92da-cd0694f66b21
+		summarizeBy: none
+		sourceColumn: Migration ID
+
+	/// Prepared, tenant-qualified migration evidence: Source Type.
+	column 'Source Type'
+		dataType: string
+		lineageTag: c076b0b9-a218-4671-a9de-1be3b5d45594
+		summarizeBy: none
+		sourceColumn: Source Type
+
+	/// Prepared, tenant-qualified migration evidence: Business Unit.
+	column 'Business Unit'
+		dataType: string
+		lineageTag: 53a15acd-44b1-4dd7-9582-45022a79822c
+		summarizeBy: none
+		sourceColumn: Business Unit
+
+	/// Prepared, tenant-qualified migration evidence: Phase.
+	column Phase
+		dataType: string
+		lineageTag: 31e0c74f-e7cb-4aa7-b563-69402da6beb5
+		summarizeBy: none
+		sourceColumn: Phase
+
+	/// Prepared, tenant-qualified migration evidence: Project Scope Key.
+	column 'Project Scope Key'
+		dataType: string
+		isHidden
+		lineageTag: afd7edaa-f0af-4b7f-a233-2bafbe6bace4
+		summarizeBy: none
+		sourceColumn: Project Scope Key
+
+	/// Prepared, tenant-qualified migration evidence: Source Reference.
+	column 'Source Reference'
+		dataType: string
+		lineageTag: e0450961-8884-494a-9fd4-89f313847d9c
+		summarizeBy: none
+		sourceColumn: Source Reference
+
+	/// Prepared, tenant-qualified migration evidence: Source URL Aliases.
+	column 'Source URL Aliases'
+		dataType: string
+		isHidden
+		lineageTag: 3a3d21de-19de-4daf-9adf-6e6e7bb1c63b
+		summarizeBy: none
+		sourceColumn: Source URL Aliases
+
+	/// Prepared, tenant-qualified migration evidence: Source Name.
+	column 'Source Name'
+		dataType: string
+		lineageTag: 1ed08306-3267-4de3-9867-65102e37d707
+		summarizeBy: none
+		sourceColumn: Source Name
+
+	/// Prepared, tenant-qualified migration evidence: Disposition.
+	column Disposition
+		dataType: string
+		lineageTag: c3390d5d-3485-4418-99d9-2d17a6f2cc82
+		summarizeBy: none
+		sourceColumn: Disposition
+
+	/// Prepared, tenant-qualified migration evidence: Execution Status.
+	column 'Execution Status'
+		dataType: string
+		lineageTag: d99d9cb9-8854-4bfb-8f87-74366b5abbff
+		summarizeBy: none
+		sourceColumn: Execution Status
+
+	/// Prepared, tenant-qualified migration evidence: Validation Status.
+	column 'Validation Status'
+		dataType: string
+		lineageTag: 3c831886-efca-4c1b-a9e0-e9f57cdc4496
+		summarizeBy: none
+		sourceColumn: Validation Status
+
+	/// Prepared, tenant-qualified migration evidence: Validation Date.
+	column 'Validation Date'
+		dataType: dateTime
+		formatString: yyyy-MM-dd
+		lineageTag: 31589ac6-4cc4-432b-a2c8-f0c6ac1871ea
+		summarizeBy: none
+		sourceColumn: Validation Date
+
+	/// Prepared, tenant-qualified migration evidence: Planned Date.
+	column 'Planned Date'
+		dataType: dateTime
+		formatString: yyyy-MM-dd
+		lineageTag: 68c8f405-4852-4ded-94d8-c29b3b94652e
+		summarizeBy: none
+		sourceColumn: Planned Date
+
+	/// Prepared, tenant-qualified migration evidence: Actual Date.
+	column 'Actual Date'
+		dataType: dateTime
+		formatString: yyyy-MM-dd
+		lineageTag: 5d5cf84c-f5ea-46ad-92fb-9b47c2ba8b2e
+		summarizeBy: none
+		sourceColumn: Actual Date
+
+	/// Prepared, tenant-qualified migration evidence: Target URL.
+	column 'Target URL'
+		dataType: string
+		lineageTag: 5a9db515-0eeb-4780-9267-6f0f7f1e50ad
+		summarizeBy: none
+		sourceColumn: Target URL
+
+	/// Prepared, tenant-qualified migration evidence: Resolved Target URL.
+	column 'Resolved Target URL'
+		dataType: string
+		lineageTag: 2d97f4ac-c1b7-43ce-bd6c-7e25745ff8bb
+		summarizeBy: none
+		sourceColumn: Resolved Target URL
+
+	/// Prepared, tenant-qualified migration evidence: Target Review Status.
+	column 'Target Review Status'
+		dataType: string
+		lineageTag: 357a2f31-25a6-4579-9a94-d0fc8f4a7de8
+		summarizeBy: none
+		sourceColumn: Target Review Status
+
+	/// Prepared, tenant-qualified migration evidence: Target Mapping Level.
+	column 'Target Mapping Level'
+		dataType: string
+		lineageTag: cb6e7736-5133-402f-8020-521bb553aaa7
+		summarizeBy: none
+		sourceColumn: Target Mapping Level
+
+	/// Prepared, tenant-qualified migration evidence: Target Approval Evidence.
+	column 'Target Approval Evidence'
+		dataType: string
+		lineageTag: 03362da7-4648-4669-bdcb-69c764e4cc73
+		summarizeBy: none
+		sourceColumn: Target Approval Evidence
+
+	/// Prepared, tenant-qualified migration evidence: Target Observation.
+	column 'Target Observation'
+		dataType: string
+		lineageTag: 16500ad8-ed4a-4c7b-8996-e0b9ef96bd27
+		summarizeBy: none
+		sourceColumn: Target Observation
+
+	/// Prepared, tenant-qualified migration evidence: Target Precision Status.
+	column 'Target Precision Status'
+		dataType: string
+		lineageTag: 0280dddb-a00e-48dd-8cc3-a9f274353708
+		summarizeBy: none
+		sourceColumn: Target Precision Status
+
+	/// Prepared, tenant-qualified migration evidence: Source Object Type.
+	column 'Source Object Type'
+		dataType: string
+		lineageTag: 7cbb4d21-fb16-4559-85e3-90048a76362d
+		summarizeBy: none
+		sourceColumn: Source Object Type
+
+	/// Prepared, tenant-qualified migration evidence: Source Scope.
+	column 'Source Scope'
+		dataType: string
+		lineageTag: 3c8baf7d-8347-40af-8cb1-1441f60c54ea
+		summarizeBy: none
+		sourceColumn: Source Scope
+
+	/// Prepared, tenant-qualified migration evidence: Source Qualification.
+	column 'Source Qualification'
+		dataType: string
+		lineageTag: 3195d7ed-f293-4b97-b417-50f2fefb95c6
+		summarizeBy: none
+		sourceColumn: Source Qualification
+
+	/// Prepared, tenant-qualified migration evidence: Business Contact.
+	column 'Business Contact'
+		dataType: string
+		lineageTag: 0c75efa8-d7e7-4cd8-84e7-c697afa3d9cf
+		summarizeBy: none
+		sourceColumn: Business Contact
+
+	/// Prepared, tenant-qualified migration evidence: Comments.
+	column Comments
+		dataType: string
+		lineageTag: 8ddff496-f70d-4450-acf6-fa89777e1fc6
+		summarizeBy: none
+		sourceColumn: Comments
+
+	/// Prepared, tenant-qualified migration evidence: Permission Strategy.
+	column 'Permission Strategy'
+		dataType: string
+		lineageTag: 7f7e8e16-e56a-4013-9c16-fb0343232dbe
+		summarizeBy: none
+		sourceColumn: Permission Strategy
+
+	/// Prepared, tenant-qualified migration evidence: Audience.
+	column Audience
+		dataType: string
+		lineageTag: 3396e6a7-169d-40c3-9113-1cde42720010
+		summarizeBy: none
+		sourceColumn: Audience
+
+	/// Prepared, tenant-qualified migration evidence: Source Row.
+	column 'Source Row'
+		dataType: int64
+		isHidden
+		lineageTag: b927146c-2199-4dd4-b70d-4428f899effc
+		summarizeBy: none
+		sourceColumn: Source Row
+
+	/// Prepared, tenant-qualified migration evidence: Source SHA256.
+	column 'Source SHA256'
+		dataType: string
+		isHidden
+		lineageTag: 1b881a9e-72b4-4a48-b4f2-ddbf53ad0439
+		summarizeBy: none
+		sourceColumn: Source SHA256
+
+	/// Prepared, tenant-qualified migration evidence: Capture UTC.
+	column 'Capture UTC'
+		dataType: dateTime
+		isHidden
+		formatString: yyyy-MM-dd HH:mm
+		lineageTag: c0b3f0a6-1ee8-420d-a971-80bc9e1e36e6
+		summarizeBy: none
+		sourceColumn: Capture UTC
+
+	/// Prepared, tenant-qualified migration evidence: Native Web Count.
+	column 'Native Web Count'
+		dataType: int64
+		isHidden
+		lineageTag: 1e7b2103-af3f-4ddc-ba9e-4a0890693b26
+		summarizeBy: none
+		sourceColumn: Native Web Count
+
+	/// Prepared, tenant-qualified migration evidence: Is Validated.
+	column 'Is Validated'
+		dataType: boolean
+		isHidden
+		lineageTag: 7e911f38-6f72-419e-903c-acbbf03fc4cd
+		summarizeBy: none
+		sourceColumn: Is Validated
+
+	/// Prepared, tenant-qualified migration evidence: Requires Review.
+	column 'Requires Review'
+		dataType: boolean
+		isHidden
+		lineageTag: ad37113d-7745-4c62-b428-b037382cc224
+		summarizeBy: none
+		sourceColumn: Requires Review
+
+	/// Prepared, tenant-qualified migration evidence: Present In Register.
+	column 'Present In Register'
+		dataType: boolean
+		isHidden
+		lineageTag: b7eb7d41-597c-4d16-b9a1-4814f4a3b3c2
+		summarizeBy: none
+		sourceColumn: Present In Register
+
+	/// Prepared, tenant-qualified migration evidence: Imported Migration Date.
+	column 'Imported Migration Date'
+		dataType: dateTime
+		isHidden
+		formatString: yyyy-MM-dd
+		lineageTag: aea5aa83-ff0a-462c-9195-48111626ef8d
+		summarizeBy: none
+		sourceColumn: Imported Migration Date
+
+	/// Prepared, tenant-qualified migration evidence: Imported Date Meaning.
+	column 'Imported Date Meaning'
+		dataType: string
+		isHidden
+		lineageTag: 134b16dd-cfdb-44eb-8e66-8ab0196af434
+		summarizeBy: none
+		sourceColumn: Imported Date Meaning
+
+	/// Prepared, tenant-qualified migration evidence: Imported Target Site.
+	column 'Imported Target Site'
+		dataType: string
+		isHidden
+		lineageTag: 06240c45-2355-4afa-b1d7-016d3ad25df5
+		summarizeBy: none
+		sourceColumn: Imported Target Site
+
+	/// Prepared, tenant-qualified migration evidence: Imported Target Library.
+	column 'Imported Target Library'
+		dataType: string
+		isHidden
+		lineageTag: c42f057b-b00d-4f4e-a03f-13b18383d044
+		summarizeBy: none
+		sourceColumn: Imported Target Library
+
+	/// Prepared, tenant-qualified migration evidence: Imported Target Folder.
+	column 'Imported Target Folder'
+		dataType: string
+		isHidden
+		lineageTag: ee5b1769-ee10-460d-9f1c-3dd972f339a3
+		summarizeBy: none
+		sourceColumn: Imported Target Folder
+
+	/// Prepared, tenant-qualified migration evidence: Legacy Web ID.
+	column 'Legacy Web ID'
+		dataType: string
+		isHidden
+		lineageTag: 9f2d30ea-47bf-46bb-b148-5500f60654e3
+		summarizeBy: none
+		sourceColumn: Legacy Web ID
+
+	/// Prepared, tenant-qualified migration evidence: Next Action.
+	column 'Next Action'
+		dataType: string
+		lineageTag: 6c8f1cd2-86b8-4004-bffd-315b37037615
+		summarizeBy: none
+		sourceColumn: Next Action
+
+	/// Prepared, tenant-qualified migration evidence: History Key.
+	column 'History Key'
+		dataType: string
+		isHidden
+		lineageTag: 6f9f6f81-6947-416d-9786-1da8e1a48a70
+		summarizeBy: none
+		sourceColumn: History Key
+
+	column 'Project Identity'
+		dataType: string
+		isHidden
+		lineageTag: b7b5b5da-43fc-4226-8bdf-809c180a3c67
+		sourceColumn: Project Identity
+
+	column 'Is Latest Daily Snapshot'
+		dataType: boolean
+		isHidden
+		lineageTag: cb45a2d5-fa92-4c8a-a4f3-4f7d9980d083
+		sourceColumn: Is Latest Daily Snapshot
+
+	partition 'SPO Migration History' = m
+		mode: import
+		source =
+				let
+				    Source = GetSharePointMigrationEvidence("SharePointMigrationHistoryEvidence.csv", {{"TenantKey", type text}, {"Project Key", type text}, {"Snapshot ID", type text}, {"Snapshot Date", type date}, {"Operation Key", type text}, {"Migration ID", type text}, {"Source Type", type text}, {"Business Unit", type text}, {"Phase", type text}, {"Project Scope Key", type text}, {"Source Reference", type text}, {"Source URL Aliases", type text}, {"Source Name", type text}, {"Disposition", type text}, {"Execution Status", type text}, {"Validation Status", type text}, {"Validation Date", type date}, {"Planned Date", type date}, {"Actual Date", type date}, {"Target URL", type text}, {"Resolved Target URL", type text}, {"Target Review Status", type text}, {"Target Mapping Level", type text}, {"Target Approval Evidence", type text}, {"Target Observation", type text}, {"Target Precision Status", type text}, {"Source Object Type", type text}, {"Source Scope", type text}, {"Source Qualification", type text}, {"Business Contact", type text}, {"Comments", type text}, {"Permission Strategy", type text}, {"Audience", type text}, {"Source Row", Int64.Type}, {"Source SHA256", type text}, {"Capture UTC", type datetime}, {"Native Web Count", Int64.Type}, {"Is Validated", type logical}, {"Requires Review", type logical}, {"Present In Register", type logical}, {"Imported Migration Date", type date}, {"Imported Date Meaning", type text}, {"Imported Target Site", type text}, {"Imported Target Library", type text}, {"Imported Target Folder", type text}, {"Legacy Web ID", type text}, {"Next Action", type text}, {"History Key", type text}}),
+				    Identity = Table.AddColumn(Source, "Project Identity", each Binary.ToText(Json.FromValue({[TenantKey], [Project Key]}), BinaryEncoding.Base64), type text),
+				    Categories = Table.TransformColumns(Identity, List.Transform(List.Intersect({{"Business Unit", "Phase"}, Table.ColumnNames(Identity)}), (c) => {c, each if _ = null then "(Unspecified)" else _, type text})),
+				    Snapshots = Table.Group(Categories, {"Project Identity", "Snapshot Date", "Snapshot ID"}, {{"Observed", each List.Max([Capture UTC]), type nullable datetime}}),
+				    Daily = Table.Group(Snapshots, {"Project Identity", "Snapshot Date"}, {{"Latest", each Table.First(Table.Sort(_, {{"Observed", Order.Descending}, {"Snapshot ID", Order.Descending}}))[Snapshot ID], type text}}),
+				    Joined = Table.NestedJoin(Categories, {"Project Identity", "Snapshot Date", "Snapshot ID"}, Daily, {"Project Identity", "Snapshot Date", "Latest"}, "Daily Match", JoinKind.LeftOuter),
+				    Latest = Table.AddColumn(Joined, "Is Latest Daily Snapshot", each not Table.IsEmpty([Daily Match]), type logical),
+				    Result = Table.RemoveColumns(Latest, {"Daily Match"})
+				in Result

@@ -87,6 +87,14 @@ table Date
 		lineageTag: 560dfd06-28fa-4149-b9b9-887c55da89e0
 		summarizeBy: none
 
+	/// Monday of the reporting week; used for declared migration deadlines.
+	column 'Week Start' = 'Date'[Date]-WEEKDAY('Date'[Date],2)+1
+		dataType: dateTime
+		formatString: yyyy-MM-dd
+		displayFolder: Migration calendar
+		lineageTag: c6de11a2-30fd-4386-bbfe-ae02adad89b2
+		summarizeBy: none
+
 	partition 'Date Import' = m
 		mode: import
 		source =
@@ -108,4 +116,3 @@ table Date
 				    Reordered = Table.ReorderColumns(AddReportingPeriod, {"Date Key", "Date", "Month Start", "Month", "Month Number", "Quarter", "Year", "Reporting Period"})
 				in
 				    Reordered
-
