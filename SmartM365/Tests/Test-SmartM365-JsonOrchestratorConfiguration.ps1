@@ -1,4 +1,10 @@
 #requires -Version 7.0
+<#
+.SYNOPSIS
+Checks the orchestrator configuration transition from legacy .json to .json.txt on synthetic data.
+.VERSION
+1.0.1
+#>
 [CmdletBinding()]
 param()
 $ErrorActionPreference='Stop'
@@ -13,7 +19,8 @@ $script:passed=0
 function Check([bool]$Value,[string]$Message){if(!$Value){throw $Message};$script:passed++}
 function Reject([scriptblock]$Action,[string]$Message){$failed=$false;try{& $Action|Out-Null}catch{$failed=$true};Check $failed $Message}
 try {
-    & $transport { function script:Get-SmartM365JsonTransportPolicy { @{Mode='Readers';QualifiedUncRoots=@()} } }
+    & $transport { function script:Get-SmartM365JsonTransportPolicy { @{Mode='Readers';QualifiedUncRoots=@();QualifiedSharePointDrives=@();QualifiedLocalDataRoots=@()} } }
+    & $management { function script:Get-SmartM365JsonTransportPolicy { @{Mode='Readers';QualifiedUncRoots=@();QualifiedSharePointDrives=@();QualifiedLocalDataRoots=@()} } }
     $cluster=Get-Content (Join-Path $orchestrator 'Orchestrator-Cluster.json.template') -Raw|ConvertFrom-Json
     $snapshot=Initialize-SmartM365OrchestratorCentralConfiguration -SharedDataFolderPath $root -BootstrapJobsPath (Join-Path $orchestrator 'Orchestrator-Jobs.json.template') -BootstrapClusterDocument $cluster
     $oldJobs=$snapshot.Paths.JobsPath;$oldCluster=$snapshot.Paths.ClusterPath
@@ -22,8 +29,8 @@ try {
     $historical=Join-Path $version 'Orchestrator-Jobs.before.json'
     Copy-Item $oldJobs $historical
     $historyHash=(Get-FileHash $historical).Hash
-    & $transport { function script:Get-SmartM365JsonTransportPolicy { @{Mode='JsonText';QualifiedUncRoots=@()} } }
-    & $management { function script:Get-SmartM365JsonTransportPolicy { @{Mode='JsonText';QualifiedUncRoots=@()} } }
+    & $transport { function script:Get-SmartM365JsonTransportPolicy { @{Mode='JsonText';QualifiedUncRoots=@();QualifiedSharePointDrives=@();QualifiedLocalDataRoots=@()} } }
+    & $management { function script:Get-SmartM365JsonTransportPolicy { @{Mode='JsonText';QualifiedUncRoots=@();QualifiedSharePointDrives=@();QualifiedLocalDataRoots=@()} } }
     $current=Get-SmartM365OrchestratorConfigurationSnapshot $root
     Check ($current.JobsHash -eq $snapshot.JobsHash -and $current.ClusterHash -eq $snapshot.ClusterHash) 'Configuration migration changed content.'
     Check ($current.Paths.JobsPath.EndsWith('.json.txt') -and !(Test-Path $oldJobs) -and !(Test-Path $oldCluster)) 'Configuration paths did not migrate.'

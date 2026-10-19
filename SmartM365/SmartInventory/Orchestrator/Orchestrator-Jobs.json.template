@@ -1469,7 +1469,7 @@
     {
       "Name": "Intune-DiscoveredApps-Inventory",
       "ScriptPath": "M365Inventory\\IntuneInventory\\Applications\\SmartM365-Intune-DiscoveredApps-Inventory.ps1",
-      "Arguments": "",
+      "Arguments": "-DeviceDetailMode All -FreshDeviceDetails",
       "Enabled": true,
       "Group": "Intune",
       "DependsOn": [],
