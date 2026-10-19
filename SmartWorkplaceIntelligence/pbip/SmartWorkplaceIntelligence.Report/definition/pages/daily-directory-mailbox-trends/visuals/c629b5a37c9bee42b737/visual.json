@@ -3,9 +3,9 @@
   "name": "c629b5a37c9bee42b737",
   "position": {
     "x": 32,
-    "y": 448,
+    "y": 520,
     "width": 1856,
-    "height": 472,
+    "height": 400,
     "z": 9,
     "tabOrder": 9
   },
@@ -437,7 +437,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Mailbox migration \u00b7 on-premises and Exchange Online'"
+                  "Value": "'Mailbox migration · on-premises and Exchange Online'"
                 }
               }
             },

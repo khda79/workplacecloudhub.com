@@ -104,6 +104,17 @@ function Resolve-PreparedTransferContract {
             $contractFiltered=$true
         }elseif($nativeSupplied.Count -ne $nativeFiles.Count){throw 'Incomplete supplied native contract; transfer not started.'}
     }
+    $exceptionPath=Join-Path $PSScriptRoot '../config/mailbox-migration-exceptions-contract.json.txt'
+    $exceptionContract=(Read-SmartM365JsonDocument $exceptionPath).Document
+    $exceptionPresent=@($Manifest.Files | Where-Object File -in @($exceptionContract.tables.file))
+    $exceptionProof=$null
+    if($Manifest.PSObject.Properties['Provenance'] -and $Manifest.Provenance.PSObject.Properties['MailboxMigrationExceptions']){$exceptionProof=$Manifest.Provenance.MailboxMigrationExceptions}
+    if($exceptionPresent.Count -or $exceptionProof){
+        if($exceptionPresent.Count -ne 2 -or @($exceptionPresent.File | Sort-Object -Unique).Count -ne 2 -or -not $exceptionProof -or $exceptionProof.ContractSHA256 -ine (Get-FileHash -LiteralPath $exceptionPath).Hash){throw 'Mailbox migration exception file set or provenance is incomplete; transfer not started.'}
+        $supplied=@($contract.tables | Where-Object file -in @($exceptionContract.tables.file))
+        if($supplied.Count -eq 0){$contract.tables=@($contract.tables)+@($exceptionContract.tables);$contractFiltered=$true}
+        elseif($supplied.Count -ne 2){throw 'Incomplete supplied mailbox exception contract.'}
+    }
     $endpointFiles=@('EndpointProtectionPolicy.csv','EndpointProtectionEvidence.csv')
     $present=@($Manifest.Files | Where-Object { $_.File -in $endpointFiles })
     $endpointProvenance=$null

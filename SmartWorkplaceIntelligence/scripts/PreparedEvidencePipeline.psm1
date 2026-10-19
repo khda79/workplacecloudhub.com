@@ -203,7 +203,8 @@ function Undo-PreparedMappingReplacement {
 
 function Receive-PreparedMappingWorkbooks {
     [CmdletBinding()]
-    param([Parameter(Mandatory)][string]$DataRoot, [Parameter(Mandatory)][scriptblock]$DownloadFile)
+    param([Parameter(Mandatory)][string]$DataRoot, [Parameter(Mandatory)][scriptblock]$DownloadFile,
+        [switch]$MailboxMigrationExceptionsEnabled, [string]$PythonCommand='python')
     $data = (Resolve-Path -LiteralPath $DataRoot -ErrorAction Stop).ProviderPath
     if (-not (Test-Path -LiteralPath $data -PathType Container)) { throw 'Mapping DataRoot must be an existing directory.' }
     $mappingParent=Get-Item -LiteralPath (Join-Path $data 'mappings') -Force -ErrorAction SilentlyContinue
@@ -219,6 +220,7 @@ function Receive-PreparedMappingWorkbooks {
         'SmartWorkplaceIntelligence-PersonaClassification.xlsx' = @('Personas','Rules','Exclusions')
         'SmartWorkplaceIntelligence-SiteClassification.xlsx' = @('Settings','SiteTypes','Sites')
     }
+    if ($MailboxMigrationExceptionsEnabled) { $required['SmartWorkplaceIntelligence-MailboxMigrationExceptions.xlsx'] = @('Exceptions','Guide') }
     try {
     New-Item -ItemType Directory -Path $folder -Force | Out-Null
     foreach ($name in $required.Keys) {
@@ -245,6 +247,11 @@ function Receive-PreparedMappingWorkbooks {
             foreach ($sheet in $required[$name]) { if ($sheet -notin $sheets) { throw "Required worksheet missing: $sheet" } }
         } catch { throw "Invalid SharePoint mapping workbook '$name': $($_.Exception.Message)" }
         finally { if ($archive) { $archive.Dispose() } }
+        if ($name -eq 'SmartWorkplaceIntelligence-MailboxMigrationExceptions.xlsx') {
+            $python = Get-Command $PythonCommand -CommandType Application -ErrorAction Stop | Select-Object -First 1
+            & $python.Source -B (Join-Path $PSScriptRoot 'workplace_mailbox_exceptions.py') --validate-workbook $path | ForEach-Object { Write-Information $_ -InformationAction Continue }
+            if ($LASTEXITCODE -ne 0) { throw 'Invalid mailbox migration exception table. Retained mappings unchanged.' }
+        }
         $hashes[$name] = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash
     }
     # Prepare both replacements and rollback copies before touching either retained workbook.
@@ -317,6 +324,7 @@ function Get-PreparedSourcePlan {
         [string]$SourceContractPath = (Join-Path $script:ProductRoot 'config/prepared-source-contract.json'),
         [ValidateRange(1,8760)][int]$MaxSourceAgeHours = 168,
         [hashtable]$AgeOverrides = @{}, [string]$MappingRoot, [switch]$MetadataOnly,
+        [switch]$MailboxMigrationExceptionsEnabled,
         [Collections.Generic.List[object]]$OptionalSourceIssues)
     $root = (Resolve-Path -LiteralPath $DataRoot).ProviderPath
     $spec = (Read-SmartM365JsonDocument $SourceContractPath).Document
@@ -345,6 +353,10 @@ function Get-PreparedSourcePlan {
         }
     }
     foreach ($name in $spec.mappingFiles) { $items.Add(@{Relative=$name;Kind='Mapping'}) }
+    if ($MailboxMigrationExceptionsEnabled) {
+        if (-not $spec.PSObject.Properties['mailboxMigrationExceptionsFile'] -or $spec.mailboxMigrationExceptionsFile -cne 'SmartWorkplaceIntelligence-MailboxMigrationExceptions.xlsx') { throw 'Missing reviewed mailbox migration exception mapping contract.' }
+        $items.Add(@{Relative=$spec.mailboxMigrationExceptionsFile;Kind='Mapping'})
+    }
     foreach ($name in $spec.dailyFiles) { $items.Add(@{Relative=$name;Kind='History'}) }
     foreach ($entry in $spec.history) {
         $folder = Get-PreparedChildPath $root $entry.root
@@ -731,6 +743,7 @@ function Invoke-PreparedEvidencePipeline {
         [int]$MaxSourceAgeHours=168, [hashtable]$AgeOverrides=@{}, [switch]$AllowLegacyTenantless,
         [string[]]$AllowEmptyTables=@(), [switch]$ValidateOnly, [string]$MappingRoot,$AdCountryConfiguration,
         [string]$PythonCommand='python',
+        [switch]$MailboxMigrationExceptionsEnabled, [string]$MailboxMigrationBindingsPath,
         [Nullable[double]]$DeviceSystemMaxObservationAgeHours, [string]$DeviceSystemOffsetlessGraphTimeZoneId,
         [ValidateRange(1,8)][int]$MaxParallelGenerators=1)
     # Read only the two non-secret preparation settings from the effective tenant profile.
@@ -764,7 +777,11 @@ function Invoke-PreparedEvidencePipeline {
         }
         $selectedUtc=[datetime]::UtcNow.ToString('O')
         $optionalIssues = [Collections.Generic.List[object]]::new()
-        $plan = @(Get-PreparedSourcePlan -DataRoot $root -MaxSourceAgeHours $MaxSourceAgeHours -AgeOverrides $AgeOverrides -MappingRoot $MappingRoot -MetadataOnly -OptionalSourceIssues $optionalIssues)
+        $plan = @(Get-PreparedSourcePlan -DataRoot $root -MaxSourceAgeHours $MaxSourceAgeHours -AgeOverrides $AgeOverrides -MappingRoot $MappingRoot -MetadataOnly -OptionalSourceIssues $optionalIssues -MailboxMigrationExceptionsEnabled:$MailboxMigrationExceptionsEnabled)
+        if ($MailboxMigrationExceptionsEnabled -and $MailboxMigrationBindingsPath) {
+            $bindingFile=Get-Item -LiteralPath $MailboxMigrationBindingsPath -ErrorAction Stop
+            $plan+= [pscustomobject]@{Relative='MailboxMigrationBindings.json.txt';SourcePath=$bindingFile.FullName;Kind='Mapping';Bytes=$bindingFile.Length;ModifiedUtc=$bindingFile.LastWriteTimeUtc.ToString('O');SHA256=$null;IsOptional=$false;MaxAgeHours=$null}
+        }
         $runId=[guid]::NewGuid().ToString('N')
         $run = Get-PreparedChildPath $work $runId
         New-Item -ItemType Directory -Path $run -Force | Out-Null
@@ -809,11 +826,19 @@ function Invoke-PreparedEvidencePipeline {
         Write-PreparedJson $countryRulesPath @{TenantKey=$TenantKey;AdDomainCountryMappings=$adCountryRules.Domains;AdComputerNameCountryPrefixes=$adCountryRules.Prefixes}
         $log = Join-Path $run 'preparation.log'
         $systemPolicyArgs=@('-NativeEvidenceAuditPath',$nativeAuditPath,'-PythonCommand',$PythonCommand)
+        if ($MailboxMigrationExceptionsEnabled) {
+            $systemPolicyArgs+='-MailboxMigrationExceptionsEnabled'
+            if ($MailboxMigrationBindingsPath) { $systemPolicyArgs+=@('-MailboxMigrationBindingsPath',(Join-Path $snapshot 'MailboxMigrationBindings.json.txt')) }
+        }
         $intuneSourcePolicyPath=Join-Path $run 'IntuneSourcePolicy.json.txt'
         Write-PreparedJson $intuneSourcePolicyPath @{MaxSourceAgeHours=$MaxSourceAgeHours;AgeOverrides=$AgeOverrides}
         $systemPolicyArgs+=@('-TenantKey',$TenantKey,'-IntuneSourcePolicyPath',$intuneSourcePolicyPath)
         $baseContract=Get-Content -LiteralPath (Get-SmartM365JsonReadPath (Join-Path $script:ProductRoot 'config/prepared-evidence-contract.json')) -Raw | ConvertFrom-Json
         $baseContract=Merge-NativeEvidenceContract -BaseContract $baseContract
+        if ($MailboxMigrationExceptionsEnabled) {
+            $exceptionContract=Get-Content -LiteralPath (Join-Path $script:ProductRoot 'config/mailbox-migration-exceptions-contract.json.txt') -Raw | ConvertFrom-Json
+            $baseContract.tables=@($baseContract.tables)+@($exceptionContract.tables)
+        }
         $effectiveContractPath=Join-Path $run 'PreparedUnifiedContract.json.txt'
         $endpointContractArgs=@{ContractPath=$effectiveContractPath}; $endpointPolicyPath=$null
         if ($endpointPolicy.Enabled) {
@@ -834,6 +859,7 @@ function Invoke-PreparedEvidencePipeline {
         if ($LASTEXITCODE -ne 0) { throw "Preparation failed. Retained diagnostics: $run" }
         $provenance = @{Mode='RebuiltFromSnapshot';CapturePolicy='PerFileVerified';SelectedUtc=$selectedUtc;Sources=$plan;OptionalSourceIssues=$optionalIssues.ToArray();TenantValidation=$identity;LegacyTenantlessAllowed=($identity.LegacyArchivedSummaries -gt 0);LegacyTenantlessScope='Manifest-verified archived Intune discovered-application summaries only';AccountRulesSHA256=(Get-FileHash $rules).Hash;Scripts=@(Get-ChildItem $PSScriptRoot -File | Where-Object Extension -In '.ps1','.psm1','.py','.cs' | ForEach-Object { @{File=$_.Name;SHA256=(Get-FileHash $_.FullName).Hash} })}
         $provenance.NativeEvidence=@{ContractSHA256=(Get-FileHash -LiteralPath (Join-Path $script:ProductRoot 'config/native-output-contract.json.txt')).Hash;Audit=(Get-Content -LiteralPath $nativeAuditPath -Raw | ConvertFrom-Json)}
+        if ($MailboxMigrationExceptionsEnabled) { $provenance.MailboxMigrationExceptions=@{ContractSHA256=(Get-FileHash -LiteralPath (Join-Path $script:ProductRoot 'config/mailbox-migration-exceptions-contract.json.txt')).Hash;Audit=(Get-Content -LiteralPath (Join-Path $staging 'MailboxMigrationExceptionsAudit.json.txt') -Raw | ConvertFrom-Json)} }
         $provenance.WindowsMigration = (Get-Content -LiteralPath (Join-Path $staging 'WindowsMigrationAudit.json.txt') -Raw | ConvertFrom-Json)
         $provenance.IntuneOperations=@{ContractSHA256=(Get-FileHash -LiteralPath (Join-Path $script:ProductRoot 'config/intune-operational-contract.json.txt')).Hash;SourcePolicySHA256=(Get-FileHash -LiteralPath $intuneSourcePolicyPath).Hash;Audit=(Get-Content -LiteralPath (Join-Path $staging 'IntuneOperationalAudit.json.txt') -Raw | ConvertFrom-Json)}
         $provenance.AdCountryRulesSHA256=(Get-FileHash -LiteralPath $countryRulesPath).Hash

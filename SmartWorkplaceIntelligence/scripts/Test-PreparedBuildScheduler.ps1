@@ -1,4 +1,4 @@
-# Version 1.0.0
+# Version 1.1.0: optional retention task respects Native -> Exceptions -> Trust.
 [CmdletBinding()]
 param([Parameter(Mandatory)][string]$TestRoot)
 # Runs the real build dispatcher with simulated generators only; no production preparation.
@@ -34,6 +34,7 @@ if ($control.Fail -eq $name) { exit 3 }
 '@
 $generators = @('New-EnterpriseEstateEvidence','New-DeviceInventoryEvidence','New-WorkforceIdentityEvidence','New-EndpointProtectionEvidence','New-WindowsMigrationEvidence','New-DeviceLifecycleExperienceTrendEvidence','New-ApplicationInventoryEvidence','New-CollaborationEvidence','New-ContentStorageEvidence','New-MailboxEvidence','New-DailyTrendsEvidence','New-SecurityEvidence','New-BackupResilienceEvidence','New-IntuneOperationalEvidence','New-DataTrustEvidence','New-ExecutiveTrendEvidence')
 foreach ($name in $generators) { [IO.File]::WriteAllText((Join-Path $scripts ($name + '.ps1')), $stub) }
+[IO.File]::WriteAllText((Join-Path $scripts 'New-MailboxMigrationExceptions.ps1'), $stub)
 [IO.File]::WriteAllText((Join-Path $scripts 'NativeEvidence.psm1'),@'
 function Invoke-NativeEvidenceStage {
     param($LastRoot,$TenantKey,$AuditPath,$OutputRoot,$PythonCommand)
@@ -94,6 +95,12 @@ function Get-MaxConcurrency($Spans) {
     $max
 }
 try {
+    $exceptions = Invoke-Case -Name 'mailbox-exceptions' -Parallel 3 -Overrides @{} -Extra @('-MailboxMigrationExceptionsEnabled')
+    Check ($exceptions.ExitCode -eq 0) "Exception snapshot scheduling failed: $($exceptions.Output)"
+    Check ($exceptions.Spans['New-MailboxMigrationExceptions'].Start -ge $exceptions.Spans['Native'].End) 'Exception matching started before native qualification completed'
+    Check ($exceptions.Spans['New-DataTrustEvidence'].Start -ge $exceptions.Spans['New-MailboxMigrationExceptions'].End) 'Trust started before the exception audit existed'
+    $exceptionFailed = Invoke-Case -Name 'mailbox-exceptions-failed' -Parallel 3 -Overrides @{Fail='New-MailboxMigrationExceptions'} -Extra @('-MailboxMigrationExceptionsEnabled')
+    Check ($exceptionFailed.ExitCode -ne 0 -and -not $exceptionFailed.Spans.ContainsKey('New-DataTrustEvidence')) 'Trust started after exception matching failed'
     # Sequential: the former order, one generator at a time.
     $sequential = Invoke-Case 'sequential' 1 @{}
     Check ($sequential.ExitCode -eq 0) "Sequential build failed: $($sequential.Output)"

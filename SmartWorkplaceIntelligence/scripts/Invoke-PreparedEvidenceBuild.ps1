@@ -1,4 +1,4 @@
-# Version 1.3.0: independent generators can run in parallel (MaxParallelGenerators); 1 keeps the sequential order.
+# Version 1.4.0: optional mailbox retention snapshot follows native source qualification.
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)][string]$DataRoot,
@@ -18,6 +18,8 @@ param(
     [string]$IntuneSourcePolicyPath,
     [string]$NativeEvidenceAuditPath,
     [string]$PythonCommand='python',
+    [switch]$MailboxMigrationExceptionsEnabled,
+    [string]$MailboxMigrationBindingsPath,
     [string]$DailyTrendsQualificationPath,
     [double]$DailyTrendsPartialThresholdPercent = 1,
     [int]$DailyTrendsPersistentAbsenceObservations = 7,
@@ -104,6 +106,11 @@ Add-Task 'Applications' 'Applications' 'New-ApplicationInventoryEvidence.ps1' @(
 Add-Task 'Collaboration' 'Collaboration' 'New-CollaborationEvidence.ps1' (@('-DataRoot',$DataRoot,'-AdoptionOutputPath',(OutPath 'CollaborationAdoptionEvidence'),'-ObjectOutputPath',(OutPath 'CollaborationObjectEvidence'),'-TrendOutputPath',(OutPath 'CollaborationTrendEvidence'))+$clockArgs)
 Add-Task 'Content' 'Content' 'New-ContentStorageEvidence.ps1' (@('-DataRoot',$DataRoot,'-ObjectOutputPath',(OutPath 'ContentStorageEvidence'),'-TrendOutputPath',(OutPath 'ContentStorageTrendEvidence'))+$clockArgs)
 Add-Task 'Mailbox' 'Mailbox' 'New-MailboxEvidence.ps1' @('-DataRoot',$last,'-UserEvidencePath',(OutPath 'UserInventoryEvidence'),'-OutputPath',(OutPath 'MailboxEvidence')) -DependsOn 'Workforce'
+if ($MailboxMigrationExceptionsEnabled) {
+    $exceptionArgs=@('-DataRoot',$DataRoot,'-OutputRoot',$OutputRoot,'-TenantKey',$TenantKey,'-NativeEvidenceAuditPath',$NativeEvidenceAuditPath,'-PythonCommand',$PythonCommand,'-Enabled')
+    if ($MailboxMigrationBindingsPath) { $exceptionArgs+=@('-BindingsPath',$MailboxMigrationBindingsPath) }
+    Add-Task -Id 'MailboxExceptions' -Domain 'Mailbox' -Script 'New-MailboxMigrationExceptions.ps1' -Arguments $exceptionArgs -DependsOn 'Native'
+}
 $dailyTrendArgs=@('-DataRoot',$DataRoot,'-OutputRoot',$OutputRoot,'-PythonCommand',$PythonCommand,'-PartialThresholdPercent',[string]$DailyTrendsPartialThresholdPercent,'-PersistentAbsenceObservations',[string]$DailyTrendsPersistentAbsenceObservations)
 if($DailyTrendsQualificationPath){$dailyTrendArgs+=@('-QualificationPath',$DailyTrendsQualificationPath)}
 Add-Task 'DailyTrends' 'DailyTrends' 'New-DailyTrendsEvidence.ps1' $dailyTrendArgs
@@ -116,8 +123,9 @@ $intuneArgs+=$clockArgs
 Add-Task 'IntuneOperations' 'IntuneOperations' 'New-IntuneOperationalEvidence.ps1' $intuneArgs
 $trustArgs=@('-DataRoot',$DataRoot,'-OutputPath',(OutPath 'DataTrustEvidence'))
 if($Only -eq 'All'){$trustArgs+=@('-IntuneOperationalAuditPath',(Join-Path $OutputRoot 'IntuneOperationalAudit.json.txt'))}
+if($MailboxMigrationExceptionsEnabled){$trustArgs+=@('-MailboxMigrationExceptionsAuditPath',(Join-Path $OutputRoot 'MailboxMigrationExceptionsAudit.json.txt'))}
 $trustArgs+=$clockDateArgs+$clockUtcArgs
-Add-Task 'Trust' 'Trust' 'New-DataTrustEvidence.ps1' $trustArgs -DependsOn 'IntuneOperations'
+Add-Task 'Trust' 'Trust' 'New-DataTrustEvidence.ps1' $trustArgs -DependsOn 'IntuneOperations','MailboxExceptions'
 Add-Task 'Executive' 'Executive' 'New-ExecutiveTrendEvidence.ps1' @('-DataRoot',$DataRoot,'-OutputPath',(OutPath 'ExecutiveKPITrends'))
 
 function Write-TaskStart($Task) {

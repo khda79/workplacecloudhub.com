@@ -1,0 +1,138 @@
+/// Current immutable planning snapshot; disconnected from Date/Period intentionally. Domain scope is applied explicitly by measures. Historical daily observations are never rewritten.
+table 'Mailbox Migration Exceptions'
+	lineageTag: 470a8511-77db-4395-8acd-a960dcf112cf
+
+	column TenantKey
+		dataType: string
+		isHidden
+		lineageTag: b72238d8-d7f8-4df1-95e1-c1401825ec48
+		sourceColumn: TenantKey
+
+	column OrganizationKey
+		dataType: string
+		isHidden
+		lineageTag: 7c041bfb-6ed5-46dd-9252-3f8f6b59b11c
+		sourceColumn: OrganizationKey
+
+	column EnvironmentKey
+		dataType: string
+		isHidden
+		lineageTag: ac3064f8-d36f-499a-a0ee-4361a49c0dc1
+		sourceColumn: EnvironmentKey
+
+	column TenantId
+		dataType: string
+		isHidden
+		lineageTag: 7d5b7879-1ce2-4b4a-a169-e8308a4d5582
+		sourceColumn: TenantId
+
+	column 'Decision Key'
+		dataType: string
+		isHidden
+		lineageTag: 9b42dcfb-e944-4570-9bd6-b1414ae7d38e
+		sourceColumn: Decision Key
+
+	column 'Source Rows'
+		dataType: string
+		lineageTag: f4b7ae63-5632-4c58-9494-721b629972fd
+		sourceColumn: Source Rows
+
+	column 'Primary SMTP Address'
+		dataType: string
+		lineageTag: 14bef3bd-cfc1-44b6-a2db-b3098403483a
+		sourceColumn: Primary SMTP Address
+
+	column 'Retain On-premises'
+		dataType: string
+		lineageTag: b7a08a74-609b-4273-b127-b66f1abb7af3
+		sourceColumn: Retain On-premises
+
+	column Reason
+		dataType: string
+		lineageTag: c632cde8-0b95-4ad0-a773-a63c5f580e37
+		sourceColumn: Reason
+
+	column 'Decision Owner'
+		dataType: string
+		lineageTag: 3ad00b8b-1c2d-4311-ad7c-8bee5965648b
+		sourceColumn: Decision Owner
+
+	column 'Decision Date'
+		dataType: string
+		lineageTag: c909039b-1f5f-4fe0-bd10-c1eccdfcdddc
+		sourceColumn: Decision Date
+
+	column 'Review Date'
+		dataType: string
+		lineageTag: 88d4f3e5-74ef-4c3a-ae87-74fbad37b545
+		sourceColumn: Review Date
+
+	column 'Source Reference'
+		dataType: string
+		lineageTag: 9376477e-155e-437f-84a1-93251dcc21fa
+		sourceColumn: Source Reference
+
+	column 'Mailbox Identity'
+		dataType: string
+		lineageTag: 0c5dd408-a32b-47bc-96b4-2ed1c3d834f0
+		sourceColumn: Mailbox Identity
+
+	column 'Candidate Identity'
+		dataType: string
+		lineageTag: 91ea8e39-360d-44e3-b071-72822fe6a65e
+		sourceColumn: Candidate Identity
+
+	column 'Source Domain'
+		dataType: string
+		lineageTag: b1fa8487-a687-45a9-be9a-53f758a8be9e
+		sourceColumn: Source Domain
+
+	column 'Domain Key'
+		dataType: string
+		isHidden
+		lineageTag: ad87a6f2-1acc-44e6-92e0-18a5f88dfa45
+		sourceColumn: Domain Key
+
+	column Status
+		dataType: string
+		lineageTag: e01360d6-4eb0-4a3f-8d1b-7c50325e0598
+		sourceColumn: Status
+
+	column 'Requires Review'
+		dataType: int64
+		isHidden
+		lineageTag: a2b1a265-428a-4320-9e36-6488b3b66a8c
+		sourceColumn: Requires Review
+
+	column Retained
+		dataType: int64
+		isHidden
+		lineageTag: 3fc21bde-d8ae-40cd-bc46-aa15cb3b5db7
+		sourceColumn: Retained
+
+	column 'Documentation Warnings'
+		dataType: string
+		lineageTag: 68d44cce-6ca1-46cc-ad02-9a74fd039f9c
+		sourceColumn: Documentation Warnings
+
+	column 'Snapshot Date'
+		dataType: string
+		lineageTag: fa73b380-6074-4076-b3e8-7264b3363ddc
+		sourceColumn: Snapshot Date
+
+	partition 'Mailbox Migration Exceptions' = m
+		mode: import
+		source =
+				let
+				    Manifest = GetPreparedBatchManifest(),
+				    Names = {"MailboxMigrationExceptions.csv", "MailboxMigrationExceptionSummary.csv"},
+				    Present = List.Select(Manifest[Files], each List.Contains(Names, [File])),
+				    Declared = Record.HasFields(Record.FieldOrDefault(Manifest, "Provenance", []), "MailboxMigrationExceptions"),
+				    Columns = {"TenantKey", "OrganizationKey", "EnvironmentKey", "TenantId", "Decision Key", "Source Rows", "Primary SMTP Address", "Retain On-premises", "Reason", "Decision Owner", "Decision Date", "Review Date", "Source Reference", "Mailbox Identity", "Candidate Identity", "Source Domain", "Domain Key", "Status", "Requires Review", "Retained", "Documentation Warnings", "Snapshot Date"},
+				    Source = if List.Count(Present) = 0 and not Declared then #table(Columns, {})
+				        else if List.Count(Present) <> 2 or List.Count(List.Distinct(List.Transform(Present, each [File]))) <> 2 or not Declared then error "Incomplete mailbox migration exception batch; keep previous model"
+				        else Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("MailboxMigrationExceptions.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]),
+				    Checked = if Table.ColumnNames(Source) <> Columns then error "Mailbox migration exception schema mismatch" else if List.AnyTrue(List.Transform(Source[TenantKey], each _ <> PreparedExpectedTenantKey)) then error "Mailbox migration exception tenant mismatch" else Source,
+				    Typed = Table.TransformColumnTypes(Checked, {{"TenantKey", type text}, {"OrganizationKey", type text}, {"EnvironmentKey", type text}, {"TenantId", type text}, {"Decision Key", type text}, {"Source Rows", type text}, {"Primary SMTP Address", type text}, {"Retain On-premises", type text}, {"Reason", type text}, {"Decision Owner", type text}, {"Decision Date", type text}, {"Review Date", type text}, {"Source Reference", type text}, {"Mailbox Identity", type text}, {"Candidate Identity", type text}, {"Source Domain", type text}, {"Domain Key", type text}, {"Status", type text}, {"Requires Review", Int64.Type}, {"Retained", Int64.Type}, {"Documentation Warnings", type text}, {"Snapshot Date", type text}}, "en-US")
+				in
+				    Typed

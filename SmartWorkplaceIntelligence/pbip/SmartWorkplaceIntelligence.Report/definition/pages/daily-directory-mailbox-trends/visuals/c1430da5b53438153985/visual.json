@@ -47,6 +47,21 @@
               },
               "queryRef": "Daily Mailbox Trends.Mailbox Quality Days Tooltip",
               "nativeQueryRef": "Mailbox Quality Days Tooltip"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Migration Exception Summary"
+                    }
+                  },
+                  "Property": "Mailbox Exceptions Provenance"
+                }
+              },
+              "queryRef": "Mailbox Migration Exception Summary.Mailbox Exceptions Provenance",
+              "nativeQueryRef": "Mailbox Exceptions Provenance",
+              "displayName": "Mailbox Exceptions Provenance"
             }
           ]
         }

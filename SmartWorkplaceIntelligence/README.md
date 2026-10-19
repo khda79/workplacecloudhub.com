@@ -8,6 +8,10 @@ not proof of effective on-device behavior.
 
 ## Data flow
 
+The optional [mailbox migration exception register](docs/MAILBOX-MIGRATION-EXCEPTIONS.md)
+adds a private English Excel input, confirmed native identity matching, and dated
+planning cards. It is disabled by default and does not rewrite historical trends.
+
 1. SmartM365 SmartInventory owns collection and publishes tenant-scoped source
    CSVs, receipts, and histories.
 2. `SmartM365-WorkplaceEvidence-Prepare.ps1` calls the preparation components in

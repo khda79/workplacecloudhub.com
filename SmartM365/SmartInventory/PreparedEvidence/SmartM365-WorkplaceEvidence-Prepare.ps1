@@ -2,7 +2,7 @@
 .SYNOPSIS
     Prepare a validated, versioned SmartWorkplaceIntelligence batch after raw collectors.
 .VERSION
-    0.3.0
+    0.4.0
 .NOTES
     PowerShell 7. SharePoint mapping reads use the tenant configuration unless Offline.
     Deployment must include the sibling SmartWorkplaceIntelligence/scripts, config and reference folders.
@@ -206,8 +206,9 @@ try {
             param($destination, $name)
             SmartM365.Core\Invoke-SmartM365SharePointFileDownload -LocalFilePath $destination -SharePointRelativePath $name -Force @mappingConnection
         }.GetNewClosure()
-        $mappingRoot = Receive-PreparedMappingWorkbooks -DataRoot $data -DownloadFile $downloadMapping
-        WriteLog -Message "Both classification workbooks downloaded, validated and retained in DATA: $data. Previous copies replaced; this run uses its isolated validated pair." -Level INFO
+        $mappingExceptions=[bool](ConfigValue 'PreparedMailboxMigrationExceptionsEnabled') -and -not $WorkforceDiagnostic
+        $mappingRoot = Receive-PreparedMappingWorkbooks -DataRoot $data -DownloadFile $downloadMapping -MailboxMigrationExceptionsEnabled:$mappingExceptions -PythonCommand ([string](ConfigValue 'PreparedPythonCommand'))
+        WriteLog -Message "Classification workbooks downloaded, validated and retained in DATA: $data. Mailbox exceptions enabled=$mappingExceptions; this run uses its isolated validated mapping set." -Level INFO
     }
     if ($WorkforceDiagnostic) {
         $phase='Workforce memory diagnostic'
@@ -236,6 +237,19 @@ try {
         MappingRoot=$mappingRoot
         PythonCommand=$preparedPython
         MaxParallelGenerators=$preparedParallel
+        MailboxMigrationExceptionsEnabled=[bool](ConfigValue 'PreparedMailboxMigrationExceptionsEnabled')
+    }
+    if ($params.MailboxMigrationExceptionsEnabled) {
+        $bindingPath=[string](ConfigValue 'PreparedMailboxMigrationBindingsPath')
+        if ([string]::IsNullOrWhiteSpace($bindingPath)) {
+            $bindingPath=Join-Path $PSScriptRoot 'SmartM365-WorkplaceEvidence-Prepare.MailboxMigrationBindings.local.json'
+            # An absent default registry leaves address-only rows as candidates, never approved.
+            $bindingPath=[string](Get-SmartM365JsonReadPath -Path $bindingPath -Optional)
+        } else {
+            # Prefer .json.txt when present; explicit missing configuration is an error.
+            $bindingPath=Get-SmartM365JsonReadPath -Path $bindingPath
+        }
+        if ($bindingPath) { $params.MailboxMigrationBindingsPath=$bindingPath }
     }
     $result = Invoke-PreparedEvidencePipeline @params
     if (-not $ValidateOnly) { WriteLog -Message "Local batch published and validated: $($result.BatchId); CSV files=$($result.Files); path=$($result.BatchPath). Cloud transfer is a separate step." -Level INFO }

@@ -71,7 +71,8 @@ class DailyTrendsLayoutTests(unittest.TestCase):
         for number, page in enumerate(self.pages):
             types = [v['visual']['visualType'] for v in self.visuals[page['name']]]
             self.assertEqual(types.count('lineChart'), 1 if number < 3 else 0)
-            self.assertEqual(types.count('pivotTable'), 1 if number == 3 else 0)
+            self.assertEqual(types.count('pivotTable'), 2 if number == 3 else 0)
+            self.assertEqual(types.count('tableEx'), 1 if number == 3 else 0)
 
     def test_common_filters_are_shared_once_and_not_in_bookmarks(self):
         slicers = [v for v in self.shared if v['visual']['visualType'] == 'slicer']
@@ -99,7 +100,7 @@ class DailyTrendsLayoutTests(unittest.TestCase):
         self.assertIn('y2Axis', mailbox['objects'])
 
     def test_detail_values_and_changes_are_separate(self):
-        matrix = next(v['visual'] for v in self.visuals[self.pages[3]['name']] if v['visual']['visualType'] == 'pivotTable')
+        matrix = next(v['visual'] for v in self.visuals[self.pages[3]['name']] if v['name'] == 'be8bc7cefef068d1abd0')
         values = matrix['query']['queryState']['Values']['projections']
         self.assertEqual(len(values), 12)
         self.assertEqual(len({p['nativeQueryRef'] for p in values}), 12, 'Matrix aliases must be unique')
@@ -115,6 +116,18 @@ class DailyTrendsLayoutTests(unittest.TestCase):
             for _, expression in helpers:
                 self.assertRegex(expression, r'^VAR _text = \[[^\]]+ Card\] VAR _separator = SEARCH')
                 self.assertNotRegex(expression, r'CALCULATE|SUMX|FILTER|ALLSELECTED')
+
+    def test_planning_snapshot_and_history_are_explicit(self):
+        mailbox = self.visuals[self.pages[2]['name']]
+        cards = [v for v in mailbox if v['visual']['visualType'] == 'cardVisual' and v['position']['y'] == 312]
+        self.assertEqual(len(cards), 5)
+        self.assertEqual(sorted(v['position']['x'] for v in cards), [32, 408, 784, 1160, 1536])
+        for name in ['Retained on-premises', 'Remaining in migration scope', 'Exceptions requiring review', 'Planning snapshot', 'Observed history']:
+            self.assertIn(name, json.dumps(mailbox))
+        snapshot = (MODEL / 'tables/Mailbox Migration Exception Summary.tmdl').read_text(encoding='utf-8-sig')
+        self.assertNotRegex(snapshot, r"'Date'\[|'Daily Period'\[")
+        self.assertIn('Pending review', snapshot)
+        self.assertIn('Global Review Count', snapshot)
 
 
 if __name__ == '__main__':

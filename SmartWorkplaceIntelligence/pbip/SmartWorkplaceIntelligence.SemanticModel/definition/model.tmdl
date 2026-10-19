@@ -172,3 +172,6 @@ ref table 'Collaboration Source Qualification'
 
 ref cultureInfo en-US
 
+
+ref table 'Mailbox Migration Exceptions'
+ref table 'Mailbox Migration Exception Summary'

@@ -5,6 +5,8 @@
   "WorkplaceIntelligenceRootPath": "",
   "PreparedWorkRootPath": "",
   "PreparedPythonCommand": "python",
+  "PreparedMailboxMigrationExceptionsEnabled": false,
+  "PreparedMailboxMigrationBindingsPath": "",
   "PreparedMaxParallelGenerators": 3,
   "PreparedMaxSourceAgeHours": 168,
   "PreparedSourceAgeOverrides": {

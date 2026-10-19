@@ -155,6 +155,7 @@ SmartM365/SharePointMigration/Tools/Python/**
 !/SmartFinOps/**/*.json.template
 !/SmartFinOps/SmartFinOps.global.local.json.template
 !/SmartWorkplaceIntelligence/README.md
+!/SmartWorkplaceIntelligence/docs/MAILBOX-MIGRATION-EXCEPTIONS.md
 
 # Local agent notes and memories stay private even when Markdown is re-included above.
 BRANCHES.md
@@ -252,6 +253,8 @@ SmartWorkplaceIntelligence/**/.pbi/**
 SmartWorkplaceIntelligence/**/*.abf
 SmartWorkplaceIntelligence/**/*.pbix
 SmartWorkplaceIntelligence/**/SmartWorkplaceIntelligence-PersonaClassification.xlsx
+SmartWorkplaceIntelligence/**/SmartWorkplaceIntelligence-MailboxMigrationExceptions.xlsx
+!SmartWorkplaceIntelligence/config/templates/SmartWorkplaceIntelligence-MailboxMigrationExceptions.xlsx
 SmartWorkplaceIntelligence/**/Personae-Keywords.xlsx
 *.inspect.ndjson
 

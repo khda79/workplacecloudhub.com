@@ -1,0 +1,10 @@
+{
+  "Version": 1,
+  "Identity": {
+    "TenantKey": "",
+    "OrganizationKey": "",
+    "EnvironmentKey": "",
+    "TenantId": ""
+  },
+  "Bindings": []
+}

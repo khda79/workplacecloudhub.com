@@ -9,7 +9,8 @@ param(
     [datetime]$AsOfDate = (Get-Date).Date,
 
     [datetime]$AsOfUtc = [datetime]::UtcNow,
-    [string]$IntuneOperationalAuditPath
+    [string]$IntuneOperationalAuditPath,
+    [string]$MailboxMigrationExceptionsAuditPath
 )
 
 Set-StrictMode -Version Latest
@@ -189,6 +190,21 @@ if($IntuneOperationalAuditPath){
     Import-Module (Join-Path $PSScriptRoot 'IntuneOperationalEvidence.psm1') -Force
     $audit=Read-IntuneOperationalJson $IntuneOperationalAuditPath
     foreach($row in ConvertFrom-IntuneOperationalAudit -Audit $audit -AsOfUtc ([datetimeoffset]$AsOfUtc)){$evidence.Add($row)}
+}
+if ($MailboxMigrationExceptionsAuditPath) {
+    $audit=Get-Content -LiteralPath $MailboxMigrationExceptionsAuditPath -Raw | ConvertFrom-Json
+    $exceptionSummary=Import-Csv -LiteralPath (Join-Path (Split-Path $MailboxMigrationExceptionsAuditPath -Parent) 'MailboxMigrationExceptionSummary.csv') | Where-Object 'Domain Key' -EQ '__all__'
+    $review=[int]$exceptionSummary.'Review Count'
+    $evidence.Add([pscustomobject][ordered]@{
+        'Source Key'='Messaging|Mailbox migration exception register';'Evidence Domain'='Messaging'
+        'Source Name'='Mailbox migration exception register';'File Name'='SmartWorkplaceIntelligence-MailboxMigrationExceptions.xlsx'
+        'File State'='Present';'Schema State'='Qualified';'Expected Columns'='MailboxMigrationExceptions v1';'Missing Columns'=''
+        'Row Count'=[int]$audit.'Source Rows';'Column Count'=10;'Snapshot Date'=$audit.'Snapshot Date'
+        'Snapshot Basis'=('Qualified planning inventory; workbook SHA256 '+$audit.'Workbook SHA256'+'; captured '+$audit.'Captured UTC')
+        'Evidence Age Days'=[int]([datetime]$AsOfDate-[datetime]$audit.'Snapshot Date').TotalDays;'Freshness State'='Fresh'
+        'Decision Readiness'=$(if($review){'Review required'}else{'Ready'});'Evidence Status'=$(if($review){'Matched decisions only'}else{'Observed'})
+        'Recommended Action'='Confirm identity candidates in the private registry; inspect documentation warnings and review dates.';'Read Error'=''
+    })
 }
 New-Item -ItemType Directory -Path (Split-Path -Parent $OutputPath) -Force | Out-Null
 $evidence | Sort-Object 'Evidence Domain', 'Source Name' | Export-Csv -LiteralPath $OutputPath -NoTypeInformation -Encoding utf8

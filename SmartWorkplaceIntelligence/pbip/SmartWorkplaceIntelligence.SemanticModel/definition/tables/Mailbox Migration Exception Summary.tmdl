@@ -1,0 +1,202 @@
+/// Current immutable planning snapshot; disconnected from Date/Period intentionally. Domain scope is applied explicitly by measures. Historical daily observations are never rewritten.
+table 'Mailbox Migration Exception Summary'
+	lineageTag: 5c000c9d-e280-41e7-8be0-59dd6b01a63a
+
+	/// Planning snapshot from a verified register and the same qualified detailed local inventory; independent of historical Period/Date. Domain is applied explicitly; unknown-domain reviews block all scopes.
+	measure 'Mailbox Exception Source Status' = IF(COUNTROWS(ALL('Mailbox Migration Exception Summary')) = 0, "Not configured", CONCATENATEX(DISTINCT('Mailbox Migration Exception Summary'[Source Status]), 'Mailbox Migration Exception Summary'[Source Status], ", "))
+		displayFolder: Mailbox retention planning
+		lineageTag: 145d51da-82bc-4b78-892e-94d458762729
+
+	/// Planning snapshot from a verified register and the same qualified detailed local inventory; independent of historical Period/Date. Domain is applied explicitly; unknown-domain reviews block all scopes.
+	measure 'Mailbox Planning Inventory' =
+			VAR _selected = ISFILTERED('Daily Domain'[Domain]) || ISFILTERED('Daily Domain'[Domain Key])
+			VAR _domains = VALUES('Daily Domain'[Domain])
+			VAR _scope = FILTER(ALL('Mailbox Migration Exception Summary'), IF(_selected, 'Mailbox Migration Exception Summary'[Domain Key] <> "__all__" && 'Mailbox Migration Exception Summary'[Source Domain] IN _domains, 'Mailbox Migration Exception Summary'[Domain Key] = "__all__"))
+			RETURN IF([Mailbox Exception Source Status] <> "Qualified", BLANK(), COALESCE(SUMX(_scope, 'Mailbox Migration Exception Summary'[Inventory Count]), 0))
+		isHidden
+		displayFolder: Mailbox retention planning
+		lineageTag: 6a2e0eba-1caa-4d0a-a128-7606aa13baf2
+
+	/// Planning snapshot from a verified register and the same qualified detailed local inventory; independent of historical Period/Date. Domain is applied explicitly; unknown-domain reviews block all scopes.
+	measure 'Mailbox Planning Retained' =
+			VAR _selected = ISFILTERED('Daily Domain'[Domain]) || ISFILTERED('Daily Domain'[Domain Key])
+			VAR _domains = VALUES('Daily Domain'[Domain])
+			VAR _scope = FILTER(ALL('Mailbox Migration Exception Summary'), IF(_selected, 'Mailbox Migration Exception Summary'[Domain Key] <> "__all__" && 'Mailbox Migration Exception Summary'[Source Domain] IN _domains, 'Mailbox Migration Exception Summary'[Domain Key] = "__all__"))
+			RETURN IF([Mailbox Exception Source Status] <> "Qualified", BLANK(), COALESCE(SUMX(_scope, 'Mailbox Migration Exception Summary'[Retained Count]), 0))
+		isHidden
+		displayFolder: Mailbox retention planning
+		lineageTag: fe986838-d572-46bd-9f27-73db3cdf6883
+
+	/// Planning snapshot from a verified register and the same qualified detailed local inventory; independent of historical Period/Date. Domain is applied explicitly; unknown-domain reviews block all scopes.
+	measure 'Mailbox Planning Review' =
+			VAR _selected = ISFILTERED('Daily Domain'[Domain]) || ISFILTERED('Daily Domain'[Domain Key])
+			VAR _domains = VALUES('Daily Domain'[Domain])
+			VAR _scope = FILTER(ALL('Mailbox Migration Exception Summary'), IF(_selected, 'Mailbox Migration Exception Summary'[Domain Key] <> "__all__" && 'Mailbox Migration Exception Summary'[Source Domain] IN _domains, 'Mailbox Migration Exception Summary'[Domain Key] = "__all__"))
+			RETURN IF([Mailbox Exception Source Status] <> "Qualified", BLANK(), COALESCE(SUMX(_scope, 'Mailbox Migration Exception Summary'[Review Count]), 0) + IF(_selected, CALCULATE(MAX('Mailbox Migration Exception Summary'[Global Review Count]), ALL('Mailbox Migration Exception Summary')), 0))
+		isHidden
+		displayFolder: Mailbox retention planning
+		lineageTag: de5d87fb-588d-42a4-9192-afc5b7442857
+
+	/// Planning snapshot from a verified register and the same qualified detailed local inventory; independent of historical Period/Date. Domain is applied explicitly; unknown-domain reviews block all scopes.
+	measure 'Mailbox Planning Documentation' =
+			VAR _selected = ISFILTERED('Daily Domain'[Domain]) || ISFILTERED('Daily Domain'[Domain Key])
+			VAR _domains = VALUES('Daily Domain'[Domain])
+			VAR _scope = FILTER(ALL('Mailbox Migration Exception Summary'), IF(_selected, 'Mailbox Migration Exception Summary'[Domain Key] <> "__all__" && 'Mailbox Migration Exception Summary'[Source Domain] IN _domains, 'Mailbox Migration Exception Summary'[Domain Key] = "__all__"))
+			RETURN IF([Mailbox Exception Source Status] <> "Qualified", BLANK(), COALESCE(SUMX(_scope, 'Mailbox Migration Exception Summary'[Documentation Warning Count]), 0))
+		isHidden
+		displayFolder: Mailbox retention planning
+		lineageTag: 9eec3a9f-bffa-4bed-a0fa-ba183c40e759
+
+	/// Planning snapshot from a verified register and the same qualified detailed local inventory; independent of historical Period/Date. Domain is applied explicitly; unknown-domain reviews block all scopes.
+	measure 'Mailbox Retained Text' = IF([Mailbox Exception Source Status] <> "Qualified", "Not measured", FORMAT([Mailbox Planning Retained], "#,0") & IF([Mailbox Planning Review] > 0, " | Matched decisions only", ""))
+		displayFolder: Mailbox retention planning
+		lineageTag: 0c9d50f0-d4e0-4a0e-903c-7ec5f2dfbc38
+
+	/// Planning snapshot from a verified register and the same qualified detailed local inventory; independent of historical Period/Date. Domain is applied explicitly; unknown-domain reviews block all scopes.
+	measure 'Mailbox Exceptions Review Text' = IF([Mailbox Exception Source Status] <> "Qualified", "Not measured", FORMAT([Mailbox Planning Review], "#,0"))
+		displayFolder: Mailbox retention planning
+		lineageTag: 66afd8a8-3832-4564-8ffc-ccc202639a16
+
+	/// Planning snapshot from a verified register and the same qualified detailed local inventory; independent of historical Period/Date. Domain is applied explicitly; unknown-domain reviews block all scopes.
+	measure 'Mailbox Remaining Scope Text' = VAR _n = [Mailbox Planning Inventory] VAR _e = [Mailbox Planning Retained] RETURN IF([Mailbox Exception Source Status] <> "Qualified", "Not measured", IF([Mailbox Planning Review] > 0, "Pending review", IF(_e > _n, "Reconciliation error", FORMAT(_n - _e, "#,0"))))
+		displayFolder: Mailbox retention planning
+		lineageTag: 500a358b-497c-4cbe-b5fb-5955eac8ccad
+
+	/// Planning snapshot from a verified register and the same qualified detailed local inventory; independent of historical Period/Date. Domain is applied explicitly; unknown-domain reviews block all scopes.
+	measure 'Mailbox Planning Context' = IF([Mailbox Exception Source Status] <> "Qualified", "Planning snapshot | " & [Mailbox Exception Source Status] & " | Activate and prepare the reviewed exception register", "Planning snapshot: " & MAX('Mailbox Migration Exception Summary'[Snapshot Date]) & " | Local planning inventory N: " & FORMAT([Mailbox Planning Inventory], "#,0") & " | Documentation warnings: " & FORMAT([Mailbox Planning Documentation], "#,0") & " | Period and date range apply to history only")
+		displayFolder: Mailbox retention planning
+		lineageTag: f57ae5f6-ca24-4407-9638-084f6d1941b6
+
+	/// Planning snapshot from a verified register and the same qualified detailed local inventory; independent of historical Period/Date. Domain is applied explicitly; unknown-domain reviews block all scopes.
+	measure 'Mailbox Exceptions Provenance' = [Mailbox Planning Context] & UNICHAR(10) & "Source: SmartWorkplaceIntelligence-MailboxMigrationExceptions.xlsx" & UNICHAR(10) & "Workbook SHA256: " & MAX('Mailbox Migration Exception Summary'[Workbook SHA256]) & UNICHAR(10) & "Workbook modified UTC: " & MAX('Mailbox Migration Exception Summary'[Workbook Modified UTC]) & UNICHAR(10) & "Captured UTC: " & MAX('Mailbox Migration Exception Summary'[Captured UTC]) & UNICHAR(10) & "Confirmed bindings SHA256: " & MAX('Mailbox Migration Exception Summary'[Binding SHA256]) & UNICHAR(10) & "Missing reasons/owners and overdue reviews do not cancel a uniquely matched Yes. Review count concerns unresolved identity, decision and scope."
+		displayFolder: Mailbox retention planning
+		lineageTag: f7d34c82-5c13-4bc5-9cee-395c2b0c3dff
+
+	/// Planning snapshot from a verified register and the same qualified detailed local inventory; independent of historical Period/Date. Domain is applied explicitly; unknown-domain reviews block all scopes.
+	measure 'Mailbox Exception Visible' = VAR _selected = ISFILTERED('Daily Domain'[Domain]) || ISFILTERED('Daily Domain'[Domain Key]) VAR _domains = VALUES('Daily Domain'[Domain]) VAR _domain = SELECTEDVALUE('Mailbox Migration Exceptions'[Source Domain]) VAR _unknown = SELECTEDVALUE('Mailbox Migration Exceptions'[Domain Key]) = "__unknown__" RETURN IF(NOT _selected || _unknown || _domain IN _domains, 1, 0)
+		isHidden
+		displayFolder: Mailbox retention planning
+		lineageTag: f0f6e92f-47e7-40cf-9d1a-ca376af9dee6
+
+	column TenantKey
+		dataType: string
+		isHidden
+		lineageTag: 998cc290-6d6a-44dc-a40f-ac26359373a1
+		sourceColumn: TenantKey
+
+	column OrganizationKey
+		dataType: string
+		isHidden
+		lineageTag: 35753c4b-185b-445e-9ebd-3cc1e63ac8f2
+		sourceColumn: OrganizationKey
+
+	column EnvironmentKey
+		dataType: string
+		isHidden
+		lineageTag: e300215d-d70e-47ba-8d11-f8998fcc1abc
+		sourceColumn: EnvironmentKey
+
+	column TenantId
+		dataType: string
+		isHidden
+		lineageTag: 416f1dc9-b36b-4fe3-a8ae-a71cd84deece
+		sourceColumn: TenantId
+
+	column 'Domain Key'
+		dataType: string
+		isHidden
+		lineageTag: 5a3da00f-a53e-468f-b262-2869275d02a3
+		sourceColumn: Domain Key
+
+	column 'Source Domain'
+		dataType: string
+		lineageTag: 21395761-2567-44fa-b736-cc02686f99e6
+		sourceColumn: Source Domain
+
+	column 'Source Status'
+		dataType: string
+		lineageTag: faefb42d-f20d-4bc6-9fc8-a6f64c78270b
+		sourceColumn: Source Status
+
+	column 'Snapshot Date'
+		dataType: string
+		lineageTag: 376e5d0b-3499-4b4a-ba2f-7909476d2929
+		sourceColumn: Snapshot Date
+
+	column 'Inventory Count'
+		dataType: int64
+		isHidden
+		lineageTag: e7b52ff8-c7cf-45b0-a9d5-67de151d4451
+		sourceColumn: Inventory Count
+
+	column 'Retained Count'
+		dataType: int64
+		isHidden
+		lineageTag: 05ad2c28-69c1-4755-860f-3808635fd11e
+		sourceColumn: Retained Count
+
+	column 'Review Count'
+		dataType: int64
+		isHidden
+		lineageTag: a27afadb-1e32-4d5a-b41b-78a15c0d15fc
+		sourceColumn: Review Count
+
+	column 'Global Review Count'
+		dataType: int64
+		isHidden
+		lineageTag: 7fb1e2b5-2606-4386-b9f0-1b100ee78df2
+		sourceColumn: Global Review Count
+
+	column 'Remaining Count'
+		dataType: int64
+		isHidden
+		lineageTag: 0e1d21dc-a151-4f74-a13a-a4d9bb327ed8
+		sourceColumn: Remaining Count
+
+	column 'Documentation Warning Count'
+		dataType: int64
+		isHidden
+		lineageTag: 782c73ea-fefa-48c7-8d59-981cefcb9587
+		sourceColumn: Documentation Warning Count
+
+	column 'Workbook SHA256'
+		dataType: string
+		lineageTag: 77467b0e-54cf-4c81-ad6b-5d63edbdf39f
+		sourceColumn: Workbook SHA256
+
+	column 'Workbook Modified UTC'
+		dataType: string
+		lineageTag: 4c35521d-85a5-41c7-9f06-3ed1de151b08
+		sourceColumn: Workbook Modified UTC
+
+	column 'Captured UTC'
+		dataType: string
+		lineageTag: b7f3a5f0-5abc-4e43-b59b-41f6ccefe77d
+		sourceColumn: Captured UTC
+
+	column 'Binding SHA256'
+		dataType: string
+		lineageTag: db4f25ca-ff57-46ee-8c8a-cd2fd7791795
+		sourceColumn: Binding SHA256
+
+	column 'Source Rows'
+		dataType: int64
+		lineageTag: a7c39017-0f3d-4efd-bfe0-7aba270acfcb
+		sourceColumn: Source Rows
+
+	partition 'Mailbox Migration Exception Summary' = m
+		mode: import
+		source =
+				let
+				    Manifest = GetPreparedBatchManifest(),
+				    Names = {"MailboxMigrationExceptions.csv", "MailboxMigrationExceptionSummary.csv"},
+				    Present = List.Select(Manifest[Files], each List.Contains(Names, [File])),
+				    Declared = Record.HasFields(Record.FieldOrDefault(Manifest, "Provenance", []), "MailboxMigrationExceptions"),
+				    Columns = {"TenantKey", "OrganizationKey", "EnvironmentKey", "TenantId", "Domain Key", "Source Domain", "Source Status", "Snapshot Date", "Inventory Count", "Retained Count", "Review Count", "Global Review Count", "Remaining Count", "Documentation Warning Count", "Workbook SHA256", "Workbook Modified UTC", "Captured UTC", "Binding SHA256", "Source Rows"},
+				    Source = if List.Count(Present) = 0 and not Declared then #table(Columns, {})
+				        else if List.Count(Present) <> 2 or List.Count(List.Distinct(List.Transform(Present, each [File]))) <> 2 or not Declared then error "Incomplete mailbox migration exception batch; keep previous model"
+				        else Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("MailboxMigrationExceptionSummary.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]),
+				    Checked = if Table.ColumnNames(Source) <> Columns then error "Mailbox migration exception schema mismatch" else if List.AnyTrue(List.Transform(Source[TenantKey], each _ <> PreparedExpectedTenantKey)) then error "Mailbox migration exception tenant mismatch" else Source,
+				    Typed = Table.TransformColumnTypes(Checked, {{"TenantKey", type text}, {"OrganizationKey", type text}, {"EnvironmentKey", type text}, {"TenantId", type text}, {"Domain Key", type text}, {"Source Domain", type text}, {"Source Status", type text}, {"Snapshot Date", type text}, {"Inventory Count", Int64.Type}, {"Retained Count", Int64.Type}, {"Review Count", Int64.Type}, {"Global Review Count", Int64.Type}, {"Remaining Count", Int64.Type}, {"Documentation Warning Count", Int64.Type}, {"Workbook SHA256", type text}, {"Workbook Modified UTC", type text}, {"Captured UTC", type text}, {"Binding SHA256", type text}, {"Source Rows", Int64.Type}}, "en-US")
+				in
+				    Typed
