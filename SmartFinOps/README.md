@@ -134,7 +134,7 @@ Exit codes of both scripts follow their completion banner, as the orchestrator e
 | `3` | Completed with warnings: Licences not measured, a required source not measured, provisional amounts, disabled-account licenses not measured | Page built, but Licences not measured or figures provisional |
 | `1` | Run error or failed equivalence control (receipt `Failed`) | Report not available, or run error |
 
-With the current Licences report, `M365_OneDrive_Usage.csv` is provisional (no source receipt), so both jobs end with code 3 until that source has a receipt. ESU prices are optional and do not raise a warning. The first log line of each script (`Starting SmartFinOps Workplace ... v<version>`) is the success evidence the orchestrator looks for in the job log.
+Both jobs end with code 3 while a source of the Licences report is provisional. Since Licences 1.51, `M365_OneDrive_Usage.csv` is qualified by the UserActivity source receipt (or left unqualified with its reason) and no longer makes L4 provisional. ESU prices are optional and do not raise a warning. The first log line of each script (`Starting SmartFinOps Workplace ... v<version>`) is the success evidence the orchestrator looks for in the job log.
 
 Launchers:
 
