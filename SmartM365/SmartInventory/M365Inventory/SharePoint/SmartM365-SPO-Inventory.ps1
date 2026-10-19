@@ -58,7 +58,7 @@
     Uses delegated interactive Graph authentication instead of app-only certificate authentication.
 
 .VERSION
- 0.41
+ 0.42
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication; ImportExcel. PnP.PowerShell enables tenant capacity collection and optional sharing scans.
@@ -128,7 +128,7 @@ Set-StrictMode -Version Latest
 [System.Threading.Thread]::CurrentThread.CurrentUICulture = [System.Globalization.CultureInfo]::InvariantCulture
 $ErrorActionPreference = 'Stop'
 $MaximumFunctionCount = 32768
-$ScriptVersion = "0.41"
+$ScriptVersion = "0.42"
 $TenantCapacityEnabled = -not [bool]$SkipPnPTenantCapacity -and ([bool]$UsePnPTenantCapacity -or [bool](Get-Module -ListAvailable PnP.PowerShell | Select-Object -First 1))
 $CurrentOperation = 'Initialize'
 
@@ -722,14 +722,15 @@ function New-SpoHtmlSummary {
         $capacityDetail = 'Utilization unavailable for this run'
     }
     elseif ($estimatedCapacity) {
+        $approx = [string][char]0x2248
         if (-not [string]::IsNullOrWhiteSpace([string]$Summary.EstimatedTenantUtilizationPercent)) {
             $capacityLabel = 'Tenant utilization (estimated)'
-            $capacityValue = '≈ ' + ([double]$Summary.EstimatedTenantUtilizationPercent).ToString('N2') + '%'
-            $capacityDetail = ([double]$Summary.StorageUsedGB).ToString('N2') + ' GB used / ≈ ' + ([double]$Summary.EstimatedTenantCapacityGB).ToString('N0') + ' GB estimated capacity'
+            $capacityValue = "$approx " + ([double]$Summary.EstimatedTenantUtilizationPercent).ToString('N2') + '%'
+            $capacityDetail = ([double]$Summary.StorageUsedGB).ToString('N2') + " GB used / $approx " + ([double]$Summary.EstimatedTenantCapacityGB).ToString('N0') + ' GB estimated capacity'
         }
         else {
             $capacityLabel = 'Tenant capacity (estimated)'
-            $capacityValue = '≈ ' + ([double]$Summary.EstimatedTenantCapacityGB).ToString('N0') + ' GB'
+            $capacityValue = "$approx " + ([double]$Summary.EstimatedTenantCapacityGB).ToString('N0') + ' GB'
             $capacityDetail = 'Utilization unavailable for this inventory scope'
         }
     }
@@ -785,7 +786,7 @@ function New-SpoHtmlSummary {
         "<p style='margin:12px 0 0;'><b>Teams-linked sites:</b> $(ConvertTo-SpoHtml $teamsLinks.LinkedSites) / $(ConvertTo-SpoHtml $teamsLinks.TotalSites) ($(ConvertTo-SpoHtml $teamsLinks.Percent)%) SharePoint sites. Team sites: $(ConvertTo-SpoHtml $teamsLinks.ParentSites); private/shared channel sites: $(ConvertTo-SpoHtml $teamsLinks.ChannelSites).</p>"
     }else{
         $reason=if($teamsLinks){[string]$teamsLinks.Reason}else{'Teams site-link evidence was not assessed.'}
-        "<p style='margin:12px 0 0;'><b>Teams-linked sites:</b> unavailable — $(ConvertTo-SpoHtml $reason)</p>"
+        "<p style='margin:12px 0 0;'><b>Teams-linked sites:</b> unavailable $([char]0x2014) $(ConvertTo-SpoHtml $reason)</p>"
     }
     $teamsEvidence=if($teamsLinks -and $teamsLinks.Available){"<br>Teams site-link source run: $(ConvertTo-SpoHtml $teamsLinks.TeamsRunDateUtc); linked sites absent from the SPO usage-report scope: $(ConvertTo-SpoHtml ($teamsLinks.UnmatchedParentSites + $teamsLinks.UnmatchedChannelSites))."}else{''}
     $technical = 'RunId: {0}<br>Duration: {1}<br>Mode: {2}<br>Sites processed: {3}' -f (ConvertTo-SpoHtml $Summary.RunId),(ConvertTo-SpoHtml $Summary.Duration),(ConvertTo-SpoHtml $Summary.InventoryMode),(ConvertTo-SpoHtml $Summary.SitesProcessed)

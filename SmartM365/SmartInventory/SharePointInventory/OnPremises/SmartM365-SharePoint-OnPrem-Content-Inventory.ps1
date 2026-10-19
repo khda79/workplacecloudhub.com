@@ -2,7 +2,7 @@
 .SYNOPSIS
     Read-only SharePoint Server 2016/2019 site collection and web inventory.
 .VERSION
-    1.0.13
+    1.0.14
 .REQUIREMENTS
     Windows PowerShell 5.1 x64 on a SharePoint farm server; SharePoint Shell and content read access.
 #>
@@ -289,7 +289,7 @@ function Get-CollectionFailureStatus {
     if ($Message -eq 'CollectionTimeout') { return 'TimedOut' }
     if ($Message -eq 'GlobalTimeout') { return 'GlobalTimedOut' }
     if ($ErrorRecord -and $ErrorRecord.Exception -and ($ErrorRecord.Exception -is [UnauthorizedAccessException] -or $ErrorRecord.Exception.HResult -eq -2147024891)) { return 'AccessDenied' }
-    if ($Message -match 'access|denied|unauthorized|permission|acc[eè]s|refus[eé]') { return 'AccessDenied' }
+    if ($Message -match 'access|denied|unauthorized|permission|acc[e\u00E8]s|refus[e\u00E9]') { return 'AccessDenied' }
     return 'Failed'
 }
 
