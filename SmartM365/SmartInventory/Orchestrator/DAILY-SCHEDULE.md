@@ -121,9 +121,11 @@ the chain waits behind the Friday full EXO run (`EXOMailboxes` key) and finishes
 in the evening.
 
 Workplace retains the former CMDB producer dependencies. Its scheduler completion-age gate
-allows weekly Apps (240 hours), while the preparation contract independently
-enforces acquisition limits: core sources 48 hours; DiscoveredApps warning after
-168 hours and maximum 240 hours. This is not a 240-hour allowance for core CSVs.
+uses `DependencyMaxAgeHours = 48` as a floor: each dependency accepts the larger of
+48 hours and its automatic age (longest schedule gap plus 2 hours), so weekly Apps
+are accepted up to about 170 hours. The former 240-hour CMDB gate was not carried
+over. The preparation contract independently enforces acquisition limits: core
+sources 48 hours; DiscoveredApps warning after 168 hours and maximum 240 hours.
 Preparation does not renew acquisition dates or silently fall back to unrelated
 old exports. An active receipt, an unavailable/invalid source or an expired
 acquisition can still delay or reject preparation. A failed preparation does not
