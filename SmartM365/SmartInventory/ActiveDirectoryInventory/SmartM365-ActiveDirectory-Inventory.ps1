@@ -23,7 +23,7 @@
     - Sends an email notification in case of a global error (SendEmailHtmlReport)
 
 .VERSION
-1.63
+1.64
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; ActiveDirectory RSAT/Windows Server module; ImportExcel for the diagnostic mail workbook.
@@ -781,7 +781,7 @@ try {
 # ==========================================================
 # Initialization via SmartM365.Core
 # ==========================================================
-$ScriptVersion = "1.63"
+$ScriptVersion = "1.64"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $script:ExitCode = 0
 $globalError = $null
@@ -3371,6 +3371,9 @@ $($rows -join "`n")
         $combinedMembershipCsv = Join-Path $OutputPath 'AD_GroupMemberships_AllDomains.csv'
         Publish-SmartM365Csv -Data $nativeMemberships -TimestampedPath $combinedMembershipCsv -NoWeeklyHistory `
             -Columns @('TenantKey','GroupObjectGUID','GroupSID','MemberDistinguishedName','MemberObjectGUID','MemberSID','MemberObjectClass','MembershipKind','ResolutionStatus','CollectedAtUtc') | Out-Null
+        # The memberships are published; release them before the users and computers enrichments.
+        $nativeMemberships = $null
+        [System.GC]::Collect()
     }
 
     $workplaceClassificationWorkbooks = Get-SmartM365AdWorkplaceClassificationWorkbook
