@@ -2,7 +2,7 @@
 .SYNOPSIS
     Builds enriched Active Directory computer CSV columns required by the SmartWorkplace Power BI model.
 .VERSION
-1.8
+1.9
 #>
 
 function Invoke-SmartM365AdComputersEnrichedCsv {
@@ -19,6 +19,9 @@ function Invoke-SmartM365AdComputersEnrichedCsv {
         [string]$AccountClassificationConfigPath = (Join-Path (Split-Path -Parent $PSScriptRoot) 'Config\AccountClassification.local.json')
     )
 
+    $enrichmentVersion = '1.9'
+    $enrichmentTimer = [System.Diagnostics.Stopwatch]::StartNew()
+    WriteLog -Message ("AD computers enrichment {0} started" -f $enrichmentVersion)
     if (-not (Test-Path -LiteralPath $CombinedComputersCsv)) {
         WriteLog -Message ("AD computers enriched CSV skipped because source CSV is missing: {0}" -f $CombinedComputersCsv) -Level "WARNING"
         return $null
@@ -47,6 +50,10 @@ function Invoke-SmartM365AdComputersEnrichedCsv {
 
     function V($Row, [string[]]$Names) {
         if ($null -eq $Row) { return '' }
+        if ($Row -is [System.Collections.IDictionary]) {
+            foreach ($name in $Names) { if ($null -ne $Row[$name]) { return [string]$Row[$name] } }
+            return ''
+        }
         foreach ($name in $Names) {
             $property = $Row.PSObject.Properties[$name]
             if ($null -ne $property -and $null -ne $property.Value) { return [string]$property.Value }
@@ -231,7 +238,7 @@ function Build($AdVersion, $IntuneVersion) {
         return @($candidates)
     }
 
-    function LoadCsv($Name, [string]$PreferredPath = '') {
+    function LoadCsv($Name, [string[]]$Columns, [string]$PreferredPath = '') {
         $candidatePaths = New-Object System.Collections.Generic.List[string]
         $seenPaths = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
         if (-not [string]::IsNullOrWhiteSpace($PreferredPath) -and $seenPaths.Add($PreferredPath)) {
@@ -241,9 +248,27 @@ function Build($AdVersion, $IntuneVersion) {
             if ($seenPaths.Add($candidate)) { [void]$candidatePaths.Add($candidate) }
         }
 
+        # Only the columns read by this enrichment are kept in memory; a column missing from the file
+        # becomes a null value, which V() skips exactly like an absent property. Projected rows are hashtables:
+        # PowerShell row objects made every garbage collection measurably slower.
+        $projection = New-Object System.Collections.Generic.List[string]
+        $projectionSet = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+        foreach ($column in $Columns) { if ($projectionSet.Add($column)) { [void]$projection.Add($column) } }
+        $projectionNames = $projection.ToArray()
         foreach ($candidate in $candidatePaths) {
             if (Test-Path -LiteralPath $candidate) {
-                $rows = @(Import-Csv -LiteralPath $candidate -ErrorAction Stop)
+                $projectedRows = New-Object System.Collections.Generic.List[object]
+                Import-Csv -LiteralPath $candidate -ErrorAction Stop | & {
+                    process {
+                        $projected = [System.Collections.Hashtable]::new([System.StringComparer]::OrdinalIgnoreCase)
+                        foreach ($name in $projectionNames) {
+                            $property = $_.PSObject.Properties[$name]
+                            $projected[$name] = if ($null -ne $property) { $property.Value } else { $null }
+                        }
+                        [void]$projectedRows.Add($projected)
+                    }
+                }
+                $rows = $projectedRows.ToArray()
                 WriteLog -Message ("AD enrichment source loaded: {0} ({1} row(s))" -f $candidate, $rows.Count)
                 return $rows
             }
@@ -454,20 +479,24 @@ function Build($AdVersion, $IntuneVersion) {
         if ($eligibilityText -eq 'CAPABLE' -and -not $OsMinOk) { return '2 - To reinstall (no Intune)' }
         return '6 - To qualify'
     }
-    $intuneRows = @(LoadCsv 'Intune_Devices_Inventory.csv')
-    $entraRows = @(LoadCsv 'M365_Entra_Devices.csv')
-    $hardwareConflictRows = @(LoadCsv 'M365_Entra_Devices_HardwareIdConflicts.csv')
-    $localSystemRows = @(LoadCsv 'Intune_Devices_LocalSystem.csv')
-    $windowsUpdateRows = @(LoadCsv 'Intune_WindowsUpdate_Status.csv')
+    # Column lists must cover every name read through V() for the rows of each source.
+    $mailboxColumns = @('UserPrincipalName','PrimarySmtpAddress','TotalItemSizeGB','TotalItemSizeMB_Integer')
+    $onPremMailboxColumns = @('UserPrincipalName','PrimarySMTPaddress','PrimarySmtpAddress','WindowsEmailAddress','TotalItemSize-In-MB','TotalItemSizeGB')
+    $intuneRows = @(LoadCsv 'Intune_Devices_Inventory.csv' @('AzureADDeviceId_Norm','Azure AD Device ID','AzureADDeviceId','Entra DeviceId','EntraDeviceId','Device ID','DeviceId','OS version','OSVersion','OperatingSystemVersion','UpgradeEligibility','UpgradeEligibilityLabel','Total storage','TotalStorage','TotalStorageGB','Free storage','FreeStorage','FreeStorageGB','Primary user UPN','Primary user email address','UserPrincipalName','UPN','Last check-in','LastSyncDateTime','Model','Manufacturer','PhysicalMemoryGB','Intune registered','Enrollment date','EnrollmentDate','Ownership','Compliance','IsCompliant'))
+    $entraRows = @(LoadCsv 'M365_Entra_Devices.csv' @('DeviceId_Norm','DeviceId','DisplayName','DeviceName','Name','HardwareId','RegistrationDateTime','ApproximateLastSignInDateTime','ObjectId','IsPending','TrustType','trustType'))
+    $hardwareConflictRows = @(LoadCsv 'M365_Entra_Devices_HardwareIdConflicts.csv' @('HardwareId','DeviceCount'))
+    $localSystemRows = @(LoadCsv 'Intune_Devices_LocalSystem.csv' @('AzureADDeviceId_Norm','AzureADDeviceId','Azure AD Device ID','SecureBootStatus','BIOSVersion','LastRebootDate','LastBootUpTime'))
+    $windowsUpdateRows = @(LoadCsv 'Intune_WindowsUpdate_Status.csv' @('DeviceId_Norm','DeviceId','PolicyId','ExportDateTime','ReadinessExportDateTime','LastSyncDateTime','Last check-in','AggregateState_loc','AggregateState','CurrentDeviceUpdateStatus_loc','CurrentDeviceUpdateStatus','LatestAlertMessage_loc','LatestAlertMessage','BlockingReason','RiskBucket','UpgradeEligibility','UpgradeEligibilityLabel'))
     $currentRunAdUsersCsv = Join-Path -Path $OutputFolder -ChildPath 'AD_Users_AllDomains.csv'
     if (-not (Test-Path -LiteralPath $currentRunAdUsersCsv)) { $currentRunAdUsersCsv = Join-Path -Path $OutputFolder -ChildPath 'AD_Users_AllDomains_Brut.csv' }
-    $adUserRows = @(LoadCsv -Name 'AD_Users_AllDomains.csv' -PreferredPath $currentRunAdUsersCsv)
-    $licenseRows = @(LoadCsv 'M365_Licenses_Users.csv')
-    $exoMailboxRows = @(LoadCsv 'Exchange_EXO_Mailboxes_AllDomains.csv')
-    $exoMailboxStatsRows = @(LoadCsv 'Exchange_EXO_Mailboxes_AllDomains_Stats.csv')
-    $localMailboxRows = @(LoadCsv 'Exchange_OnPrem_Mailboxes_AllDomains.csv')
-    $remoteMailboxRows = @(LoadCsv 'Exchange_OnPrem_RemoteMailboxes_AllDomains.csv')
-    $win11IssueRows = @(LoadCsv 'Intune_Windows11_Readiness_Issues.csv')
+    $adUserRows = @(LoadCsv -Name 'AD_Users_AllDomains.csv' -Columns @('UserPrincipalName','EmailAddress','TargetAddress','SamAccountName','DomainAndSam','DomainNameShort','CanonicalName','DistinguishedName') -PreferredPath $currentRunAdUsersCsv)
+    $licenseRows = @(LoadCsv 'M365_Licenses_Users.csv' @('User principal name','UserPrincipalName','primarysmtp','SKU name','SkuPartNumber','GroupsAssigningSku'))
+    $exoMailboxRows = @(LoadCsv 'Exchange_EXO_Mailboxes_AllDomains.csv' $mailboxColumns)
+    $exoMailboxStatsRows = @(LoadCsv 'Exchange_EXO_Mailboxes_AllDomains_Stats.csv' $mailboxColumns)
+    $localMailboxRows = @(LoadCsv 'Exchange_OnPrem_Mailboxes_AllDomains.csv' $onPremMailboxColumns)
+    $remoteMailboxRows = @(LoadCsv 'Exchange_OnPrem_RemoteMailboxes_AllDomains.csv' $onPremMailboxColumns)
+    $win11IssueRows = @(LoadCsv 'Intune_Windows11_Readiness_Issues.csv' @('ObjectGUID_Norm','ObjectGUID','IssueCategory','Category'))
+    WriteLog -Message ("AD computers enrichment sources loaded in {0:N1} min; managed memory {1:N0} MB" -f $enrichmentTimer.Elapsed.TotalMinutes, ([GC]::GetTotalMemory($false) / 1MB))
 
     $intuneByAad = @{}
     foreach ($row in $intuneRows) {
@@ -609,8 +638,16 @@ function Build($AdVersion, $IntuneVersion) {
         'Has_ConfiguredGroup10'  = 'IsMemberOfConfiguredGroup10'
     }
     $enrichedRows = New-Object System.Collections.Generic.List[object]
+    $progressInterval = 2000
+    $sourceRowCount = $sourceRows.Count
+    $loopTimer = [System.Diagnostics.Stopwatch]::StartNew()
+    WriteLog -Message ("AD computers enrichment lookups built in {0:N1} min; enriching {1} computer row(s)" -f $enrichmentTimer.Elapsed.TotalMinutes, $sourceRowCount)
 
     foreach ($row in $sourceRows) {
+        # Periodic progress tells a slow run apart from a stalled one.
+        if ($enrichedRows.Count -gt 0 -and ($enrichedRows.Count % $progressInterval) -eq 0) {
+            WriteLog -Message ("AD computers enrichment progress: {0}/{1} row(s) ({2:N0}%); loop {3:N1} min; managed memory {4:N0} MB" -f $enrichedRows.Count, $sourceRowCount, (100.0 * $enrichedRows.Count / $sourceRowCount), $loopTimer.Elapsed.TotalMinutes, ([GC]::GetTotalMemory($false) / 1MB))
+        }
         $out = [ordered]@{}
         foreach ($property in $row.PSObject.Properties) { $out[$property.Name] = $property.Value }
         foreach ($column in $calculatedColumnsToAdd) { $out[$column] = '' }
@@ -859,6 +896,19 @@ function Build($AdVersion, $IntuneVersion) {
 
         [void]$enrichedRows.Add([pscustomobject]$out)
     }
+
+    # Sources and lookups are no longer needed; release them before the CSV writer copies the enriched rows.
+    $sourceRows = $null
+    $intuneRows = $null; $entraRows = $null; $hardwareConflictRows = $null; $localSystemRows = $null; $windowsUpdateRows = $null
+    $adUserRows = $null; $exoMailboxRows = $null; $exoMailboxStatsRows = $null; $localMailboxRows = $null; $remoteMailboxRows = $null; $win11IssueRows = $null
+    $intuneByAad = $null; $entraByDeviceId = $null; $entraByDeviceIdAll = $null; $entraByNameAll = $null; $hardwareCounts = $null; $localByAad = $null
+    $wuAnyByDevice = $null; $wuAnchorByDevice = $null; $wu24ByDevice = $null; $wu25ByDevice = $null
+    $usersByUpn = $null; $licensedUsersByUpn = $null; $usersBySam = $null; $usersByDomainAndSam = $null; $licenseByUpn = $null; $licenseGroupByUpn = $null
+    $mailboxByUpn = $null; $mailboxSizeByUpn = $null; $issuesByGuid = $null; $issueScoreByGuid = $null; $serverAdEntraByName = $null
+    $row = $null; $out = $null; $intune = $null; $entra = $null; $local = $null; $wuAny = $null; $wuAnchor = $null; $wu24 = $null; $wu25 = $null
+    $primaryUserRow = $null; $samUserRow = $null; $lastUserRow = $null; $lastUserMailbox = $null; $serverAdEntra = $null
+    [System.GC]::Collect()
+    WriteLog -Message ("AD computers enrichment loop completed in {0:N1} min; writing CSV; managed memory {1:N0} MB" -f $loopTimer.Elapsed.TotalMinutes, ([GC]::GetTotalMemory($false) / 1MB))
 
     $enrichedCsv = Join-Path -Path $OutputFolder -ChildPath 'AD_Computers_AllDomains.csv'
     $exportColumns = @()
