@@ -377,7 +377,7 @@ When the heartbeat is healthy and `PeerJobMonitoringEnabled` is true, the monito
 
 The heartbeat also publishes the health of the per-server state persistence. If a temporary SMB lock survives all configured retries, the resident process stays alive and continues supervision, heartbeat and peer monitoring, but pauses new launches until the state file can be written again. Healthy peers report this as a separate `StatePersistenceUnavailable` server-health issue.
 
-Recommended production values for the three-server deployment:
+Recommended production values for the three-server deployment (`SRV01`, `SRV02` and `EXCH01` are placeholders for the real computer names):
 
 ```json
 "PeerMonitoringEnabled": true,
@@ -398,6 +398,8 @@ Recommended production values for the three-server deployment:
 },
 "AtomicWriteRetrySeconds": 30
 ```
+
+The committed `SmartM365-Inventory-Orchestrator.local.json.template` keeps every server-keyed setting empty (`AllowedServers`, `ExpectedOrchestratorServers`, `MaxConcurrencyByServer`, `ElectionWeightsByServer`, `ServerJobPolicies`). Template enrichment adds missing keys recursively inside nested objects, so an example server name in the template would be copied into every runtime configuration at the next start.
 
 Each healthy server sends its own peer alert. Consequently, if one server is down in a three-server deployment, both surviving servers send an independently sourced alert.
 
@@ -485,7 +487,7 @@ Before launching an elected occurrence, the owner must create its shared claim w
 
 ### Concurrency, queueing, dependencies, overlap
 
-- Global `MaxConcurrency` (default 2 in code, 6 in the production local configuration), optionally overridden for the current host through `MaxConcurrencyByServer`. Jobs due beyond the limit stay queued (their occurrence remains due, never lost), are published as `BlockedByServerConcurrency`, and start as soon as a slot frees. Re-adopted jobs count toward the limit. The production template sets `SRV01=6`, `SRV02=9` and `EXCH01=6`; this local map must be present on all three servers.
+- Global `MaxConcurrency` (default 2 in code, 6 in the production local configuration), optionally overridden for the current host through `MaxConcurrencyByServer`. Jobs due beyond the limit stay queued (their occurrence remains due, never lost), are published as `BlockedByServerConcurrency`, and start as soon as a slot frees. Re-adopted jobs count toward the limit. The committed template leaves this map empty; the three-server example above (`SRV01=6`, `SRV02=9`, `EXCH01=6`) shows the expected shape, and the real map must be set in the local runtime configuration of all three servers.
 - `ConcurrencyKey` is enforced through an atomic lease in shared storage. Jobs sharing the key cannot run simultaneously anywhere in the cluster. A waiting occurrence is published as `BlockedByConcurrencyKey`; the lease follows detached/re-adopted jobs, is atomically aligned with the active timeout deadline after every recycle, and is released when the run ends, including before a retry delay.
 - `DependsOn`: jobs due at the same occurrence run chained in topological order (the manifest is rejected at load time on a cycle). A dependent waits while a parent is running, due, or pending a retry. If a parent with `ContinueOnError=false` finally fails, dependents due at the same occurrence are marked `BlockedDependencyFailed`. If a dependency wait exceeds `DependencyWaitTimeoutMinutes`, the occurrence is marked `BlockedDependencyTimeout`.
 - Overlap guards:

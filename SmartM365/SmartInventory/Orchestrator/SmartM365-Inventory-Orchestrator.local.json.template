@@ -30,11 +30,7 @@
   "PeerAlertMailRetryMinutes": 15,
   "PeerRecoveryEmailEnabled": true,
   "MaxConcurrency": 6,
-  "MaxConcurrencyByServer": {
-    "SRV01": 6,
-    "SRV02": 9,
-    "EXCH01": 6
-  },
+  "MaxConcurrencyByServer": {},
   "MaxLifetimeHours": 24,
   "AtomicWriteRetrySeconds": 30,
   "CentralConfigurationEnabled": true,
