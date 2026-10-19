@@ -1,4 +1,4 @@
-# Version: 1.1.0
+# Version: 1.1.1
 Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
 Import-Module (Join-Path $PSScriptRoot 'PreparedMetadata.psm1') -Force
@@ -104,6 +104,23 @@ function Resolve-PreparedTransferContract {
             $contract=Merge-NativeEvidenceContract -BaseContract $contract
             $contractFiltered=$true
         }elseif($nativeSupplied.Count -ne $nativeFiles.Count){throw 'Incomplete supplied native contract; transfer not started.'}
+    }
+    # Match preparation order: native, SharePoint migration, mailbox exceptions, endpoint.
+    # Resolve from immutable files/provenance, including disabled typed-empty cohorts.
+    $migrationPath=Join-Path $PSScriptRoot '../config/sharepoint-migration-contract.json.txt'
+    $migrationContract=(Read-SmartM365JsonDocument $migrationPath).Document
+    $migrationFiles=@($migrationContract.tables.file)
+    $migrationPresent=@($Manifest.Files | Where-Object File -in $migrationFiles)
+    $migrationProvenance=$null
+    if($Manifest.PSObject.Properties['Provenance'] -and $Manifest.Provenance.PSObject.Properties['SharePointMigration']){$migrationProvenance=$Manifest.Provenance.SharePointMigration}
+    if($migrationPresent.Count -or $null -ne $migrationProvenance){
+        if($migrationPresent.Count -ne $migrationFiles.Count -or @($migrationPresent.File | Sort-Object -Unique).Count -ne $migrationFiles.Count){throw 'Incomplete SharePoint migration file set; transfer not started.'}
+        if($null -eq $migrationProvenance -or -not $migrationProvenance.PSObject.Properties['ContractSHA256'] -or $migrationProvenance.ContractSHA256 -ine (Get-FileHash -LiteralPath $migrationPath).Hash){throw 'SharePoint migration contract provenance mismatch; transfer not started.'}
+        $migrationSupplied=@($contract.tables | Where-Object file -in $migrationFiles)
+        if($migrationSupplied.Count -eq 0){
+            $contract.tables=@($contract.tables)+@($migrationContract.tables)
+            $contractFiltered=$true
+        }elseif($migrationSupplied.Count -ne $migrationFiles.Count -or @($migrationSupplied.file | Sort-Object -Unique).Count -ne $migrationFiles.Count){throw 'Incomplete supplied SharePoint migration contract; transfer not started.'}
     }
     $exceptionPath=Join-Path $PSScriptRoot '../config/mailbox-migration-exceptions-contract.json.txt'
     $exceptionContract=(Read-SmartM365JsonDocument $exceptionPath).Document
@@ -365,8 +382,8 @@ Export-ModuleMember -Function Resolve-PreparedSharePointFolder,Send-PreparedEvid
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBtxkyELk/TQWU+
-# 0DPIFl+74r6DOzHbUfQgeipjZ1Y9vaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBDSKSUogq612mi
+# iw0ITwdiAdLY66tIOn3s0OUk7wriNKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -499,31 +516,31 @@ Export-ModuleMember -Function Resolve-PreparedSharePointFolder,Send-PreparedEvid
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIA5+zb1vJeWrG/0qiMOJX3DjIG2WfwizelQzuyy+Pf6DMA0GCSqG
-# SIb3DQEBAQUABIIBgJ0VGVblDXKGmXC70kBYY5SZXLlApaybzYVbXQ9w8qzy6Bii
-# Jq/POEm+ceLsKy28h+b3Wrm3yu/DWruhDLah7UBQNDfMOozHAcwRgFQ6133/kSUF
-# 8AyU7XN/iNuioLNijy4EBKs29xh7FX5XfhOngTXPaVLxrsKw0AQU31DerLFPt7lq
-# +TnveE4Gg7/YZQ2g4TRClD9uwQVOM1wRJ7IYwt4czBhw0KacpPggFCkoAO5tF+e4
-# 12dYILsxaXekTMDPS/3ql41q684ljH7vI/zE3iryfNpLBLpvUxP3tToyKVpcKwQ9
-# aUz+LZZlMZe2d0hoIIR19agcxCemqpkRbdA2ZLctWKEhaTe0hQhtpnQVTcuQYcPL
-# lShleI/8OJLZbmBOxaTiP6xTgfa/KAIWt5q/j6XZzbEQB97g3UEmr9fzq8ti3Xm2
-# mQNP9VdCJSRV+sKzElz3T2Xrepc1oEbg88WMtbbkUHtYCpigIBJmKuzSUU4tVgvS
-# NPrAkp3lnodSG5UQtKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIPhKLaONVXqfr4EbLvHO+SFXK01T6xMnWkzqNh2fOtglMA0GCSqG
+# SIb3DQEBAQUABIIBgI4zElLlWdaWwh8Eb4vbIgCRQ/oulPfQHnNkr42o2rtqRjIe
+# Yvmt8CnZ2nojPPQ+pjzyqFuMunqR7MML9ajEXZkfBIrbjwVo2Ln4sbT95C5QcdDA
+# Nq1RR7smj+3PCVI4kZfdAb783BZh6fH+BPEg9kg+KyjsVsR16uDj1RnCKGKLs+X5
+# wSgrz5Rju+Nll+G4lq03E6htnapxtTz+hNHk3LIfVOWgyIZRMylbgUXsiFSe58zT
+# H+Y33lrSHFkpYkQZkQBzMzFNWylzihxcr4yHunrT8WQnLRakrvoVCoZuyHZxl41C
+# 2HkxKaWtoowNcJiQF6Jnlwf0Q2apqq7wv909bLPerGA+6WXvid7aidVO3VP3xQ7F
+# pTci9IET7WqH72EbMZJXXgTVs7QsxLnJTknYgsP+WjYVf+wo+UDsYIX/wiKxeJ4m
+# tDw5pptQfhysBzn52WS+uoSW2UENFj2396DMC8XB7uhZN0zx+CXYidAeEQeM3v9F
+# JnhlEMqpJWSTNp72YaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTkxOTQ3
-# MTNaMC8GCSqGSIb3DQEJBDEiBCBXHtqN4qC+uVJdcg/INzU1OvcturZOQAKEKoKI
-# bDN79zANBgkqhkiG9w0BAQEFAASCAgCCP4luS1LIf8ppKkVxyVMPKTFWKOroDiZz
-# VHj6Qpx1QiufLOgsSl5penLCUWYf9vWHAkteUxjlzbgD8jXLQK+5KW4OIt069HR3
-# JqbywcJPilmgZA+oweD+8rO9shaQRfz64STXkJUz+vwHvTfEn4jl8PHHUAaPjD6R
-# 3wD/hQFqp7cRqnlNNKXsD41TH0lCYf0jlL6OzR/P0V7E8XBHzAut8INMwZjQ4LGQ
-# EIS4MkEXaw04DhWMc25tyuAvXGGAHV0zVE8lqNThdItkNIfcA8FQm0hRhxVKG/is
-# EGdZtJb0kb+sh+rHNSsJxQ5MtCKdl2w0VLWeFnf/zmhXhSVnyRfumw3aJxiXqph9
-# naPTLUjMLCYg5Rq2aZaQvB44hKjpwe8t4wTeUVBDprYp9maXKKLSKVGXlAo684jS
-# ELcVDhSw94tL2y7CXEKdI7v2o6TkLnW+Tdf1dwrzj1LXpmxev6LZBReEvFfW1Pel
-# lLOKXrjoRrjujpQAqjT0LkcQCnwp7Ls/kIGdMEFeblNQbQ9DmbYJ+XVUlM2G4Qtc
-# vKaVpbs+vmd2EkjJHZKfbCjeSpvuOX1RITgSjjPk4jO0kEu+dZYV2YztxKcCH+we
-# i3AV/F4Al0vAvHzOEhZGb2qKSbz0/qzRnmkqcDhIhJjEWzBSUfdhP/hn74jbP8gW
-# 0sFi4VyBTg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTkyMjI0
+# MDhaMC8GCSqGSIb3DQEJBDEiBCBLajd3MAlbCChL0rRHvOfufqvYKzDPHoJdDrSc
+# t6x2NzANBgkqhkiG9w0BAQEFAASCAgCteXiJ+UAHkvbKYeL+nCMDhj7tPbRhy/bU
+# rHQK/MF5jMYQ72oDxW3zTFwdUOKdr+7WYT2VbByuGy3bLlrCr5wqB90R6y4ua5TY
+# /9qqF6YUjTvhCHaReDjPDEqVDppEiwkwH17tKE4vPRNMuifSrZD5MCkUqLpbKDav
+# 8z49wQPqpK/WFGPW6Xr+LhxscvQnrHkbNohK0gcgu5hZy3vf+dejFr+9NSzTGUJ3
+# eIoBIa6gtVEJ32rHQSbtGVww7rcBZJbs16ZlJk6JkNLL1ND/hi1sho9jmkBiRBC3
+# HRSL3nnNvY8xyyL1VoVC92YW5RUSFuorR2CI1vGp3Oczcqx3RBpj/5AiqKWLar0q
+# U/sk8PzhIiBKRenX5eMeUeGhuL7xu3VZwFPYc7inf1mNG46p7YYWlB9/0cEfUmcY
+# vh5cQE25QWFY+7tKe3MSvCkyxcG3rmM6JO/pCis+eXEbpsjsjth6d8o9AmQBg3FE
+# qTq1c77+WecRvfC0eANXrGZriG+uNySSozWuxfxUtwIsWftdPZcWBCnw9dVsxIyI
+# L/7EAqx1q//FUj12DchYZOkUiHbppJd8z0uaNH/mt9mNfAecTSs85a3Svxkz0qZM
+# TtBwbSD89UGe3qtsHB5vUJKiPpuqmtI0z5uRXkKMRPSDQBHVAyyUrNUtw6sTJf4o
+# htLFvCNgPw==
 # SIG # End signature block

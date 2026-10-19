@@ -83,6 +83,14 @@ findings, history and source qualification. They belong to the same immutable
 batch. Disabled runs emit typed empty current tables and Not configured while
 retaining existing history.
 
+Transfer reconstructs the immutable contract in preparation order: native,
+SharePoint migration, optional mailbox exceptions, then endpoint protection.
+All nine migration files and their reviewed contract provenance are required
+when present; older batches without that group remain transferable. A contract
+hash mismatch blocks transfer before upload. After deploying matching code,
+use the existing wrapper's `-TransferOnly -ExpectedBatchId <batch-id>` to retry
+an already validated batch without downloading mappings or rebuilding CSVs.
+
 Reported completion is MIGRATE/DONE divided by all MIGRATE operations. Validated
 completion uses that denominator plus VALIDATED with a coherent, non-future
 validation date. Remaining execution excludes DONE/CANCELLED; cancelled work is
@@ -105,6 +113,7 @@ cached data and screenshots stay private. Synthetic test success does not prove
 production, Desktop rendering, content migration or Service behavior.
 
 Offline checks: `test_spo_migration.py`, `Test-SharePointMigrationEvidence.ps1`,
+`Test-SharePointMigrationTransfer.ps1`, `Test-UnifiedPreparedTransfer.ps1`,
 mapping acquisition, scheduler and prepared-batch regression suites.
 
 ## Report experience
