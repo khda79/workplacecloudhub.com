@@ -221,7 +221,12 @@ def resolve(rows, populations, identity, bindings=None, as_of=None):
             if item['issues']:
                 status = 'Identity conflict'
             elif item['identity'][0] == 'mailboxes':
-                status = 'Conflicting hosting observations' if item['identity'] in local_targets else 'Already in Exchange Online'
+                if item['identity'] in local_targets:
+                    status = 'Conflicting hosting observations'
+                elif decision == 'no' and by_smtp.get(address, set()) - {resolved}:
+                    status = 'Address reassigned / identity conflict'
+                else:
+                    status = 'Withdrawn - verified EXO' if decision == 'no' else 'Already in Exchange Online'
             elif item['identity'][0] == 'local_mailboxes' and item['target'] != item['identity']:
                 status = 'Conflicting hosting observations'
             elif item['identity'][0] == 'remote_mailboxes':
@@ -261,7 +266,7 @@ def resolve(rows, populations, identity, bindings=None, as_of=None):
         status = ('Conflicting retention decisions' if len(states) > 1 else
                   'Identity conflict' if len(statuses) > 1 else items[0]['_status'])
         first = items[0]
-        review = not status.startswith('Matched local')
+        review = not (status.startswith('Matched local') or status == 'Withdrawn - verified EXO')
         record = dict(identity)
         for field in ('Primary SMTP Address', 'Reason', 'Decision Owner', 'Decision Date', 'Review Date', 'Source Reference'):
             record[field] = '\n'.join(dict.fromkeys(str(r[field]) for r in items))

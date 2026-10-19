@@ -113,6 +113,92 @@ class MatchingTests(unittest.TestCase):
         self.assertEqual(rows[0]['Retained'], 0)
         self.assertEqual(rows[0]['Status'], 'Conflicting hosting observations')
 
+    def test_verified_exo_withdrawal_clears_review_and_global_block(self):
+        cloud = dict(IDENTITY, MailboxGuid=EXCHANGE, PrimarySmtpAddress='room@example.invalid')
+        inventory, rows = self.run_case([decision(**{'Retain On-premises': 'No'})],
+            locals=[local(ad=OTHER, exchange=OTHER, smtp='other@example.invalid')], cloud=[cloud])
+        self.assertEqual(rows[0]['Status'], 'Withdrawn - verified EXO')
+        self.assertEqual((rows[0]['Retained'], rows[0]['Requires Review']), (0, 0))
+        self.assertIn('Decision Owner missing', rows[0]['Documentation Warnings'])
+        summary = self.summary(inventory, rows)[0]
+        self.assertEqual((summary['Retained Count'], summary['Review Count'],
+            summary['Global Review Count'], summary['Remaining Count']), (0, 0, 0, 1))
+
+    def test_exo_withdrawal_requires_verified_identity_and_no_decision_conflict(self):
+        cloud = dict(IDENTITY, MailboxGuid=EXCHANGE, PrimarySmtpAddress='room@example.invalid')
+        cases = [
+            [decision(**{'Retain On-premises': 'No', 'Exchange GUID': ''})],
+            [decision(**{'Retain On-premises': 'No', 'Exchange GUID': 'bad-guid'})],
+            [decision(**{'Retain On-premises': 'No', 'Exchange GUID': OTHER})],
+            [decision(**{'Retain On-premises': 'Yes'})],
+            [decision(**{'Retain On-premises': ''})],
+            [decision(**{'Retain On-premises': 'No'}), decision(**{'Source Row': 9})]]
+        for case in cases:
+            with self.subTest(case=case):
+                _, rows = self.run_case(case, locals=[], cloud=[cloud])
+                self.assertTrue(all(r['Requires Review'] == 1 and r['Retained'] == 0 for r in rows))
+
+    def test_confirmed_exo_binding_and_remote_native_link_can_withdraw(self):
+        cloud = dict(IDENTITY, MailboxGuid=EXCHANGE, PrimarySmtpAddress='room@example.invalid')
+        _, rows = self.run_case([decision(**{'Retain On-premises': 'No', 'Exchange GUID': ''})],
+            locals=[], cloud=[cloud], bindings={'room@example.invalid': 'mailboxes|' + EXCHANGE})
+        self.assertEqual(rows[0]['Status'], 'Withdrawn - verified EXO')
+        remote = dict(IDENTITY, ObjectGuid=AD, ExchangeGuid=EXCHANGE, PrimarySmtpAddress='room@example.invalid')
+        _, rows = self.run_case([decision(**{'Retain On-premises': 'No', 'Exchange GUID': '', 'AD Object GUID': AD})],
+            locals=[], cloud=[cloud], remote=[remote])
+        self.assertEqual((rows[0]['Status'], rows[0]['Retained'], rows[0]['Requires Review']),
+            ('Withdrawn - verified EXO', 0, 0))
+
+    def test_exo_withdrawal_never_clears_hosting_smtp_or_pin_conflicts(self):
+        cloud = dict(IDENTITY, MailboxGuid=EXCHANGE, PrimarySmtpAddress='room@example.invalid')
+        no = decision(**{'Retain On-premises': 'No'})
+        for locals in ([local()], [local(exchange=OTHER)]):
+            with self.subTest(locals=locals):
+                _, rows = self.run_case([no], locals=locals, cloud=[cloud])
+                self.assertEqual((rows[0]['Retained'], rows[0]['Requires Review']), (0, 1))
+        _, rows = self.run_case([decision(**{'Retain On-premises': 'No', 'AD Object GUID': AD})],
+            locals=[local(exchange=OTHER, smtp='other@example.invalid')], cloud=[cloud])
+        self.assertEqual(rows[0]['Status'], 'Identity conflict')
+        _, rows = self.run_case([no], locals=[], cloud=[cloud],
+            bindings={'room@example.invalid': 'local_mailboxes|' + AD})
+        self.assertEqual(rows[0]['Status'], 'Identity conflict with confirmed binding')
+
+    def test_exo_withdrawal_reassigned_address_and_unresolved_remote_stay_review(self):
+        original = dict(IDENTITY, MailboxGuid=EXCHANGE, PrimarySmtpAddress='new@example.invalid')
+        reassigned = dict(IDENTITY, MailboxGuid=OTHER, PrimarySmtpAddress='room@example.invalid')
+        no = decision(**{'Retain On-premises': 'No'})
+        _, rows = self.run_case([no], locals=[], cloud=[original, reassigned])
+        self.assertEqual(rows[0]['Status'], 'Address reassigned / identity conflict')
+        remote = dict(IDENTITY, ObjectGuid=AD, ExchangeGuid=OTHER, PrimarySmtpAddress='room@example.invalid')
+        cloud = dict(IDENTITY, MailboxGuid=EXCHANGE, PrimarySmtpAddress='room@example.invalid')
+        _, rows = self.run_case([no], locals=[], cloud=[cloud], remote=[remote])
+        self.assertEqual(rows[0]['Requires Review'], 1)
+        _, rows = self.run_case([no], locals=[], remote=[remote])
+        self.assertEqual(rows[0]['Requires Review'], 1)
+
+    def test_exo_withdrawals_duplicate_once_with_provenance_and_changed_address(self):
+        cloud = dict(IDENTITY, MailboxGuid=EXCHANGE, PrimarySmtpAddress='new@example.invalid')
+        no = decision(**{'Retain On-premises': 'No', 'Source Reference': 'First source'})
+        duplicate = dict(no, **{'Source Row': 9, 'Source Reference': 'Second source'})
+        _, rows = self.run_case([no, duplicate], locals=[], cloud=[cloud])
+        self.assertEqual(len(rows), 1)
+        self.assertEqual((rows[0]['Status'], rows[0]['Retained'], rows[0]['Requires Review']),
+            ('Withdrawn - verified EXO', 0, 0))
+        self.assertEqual(rows[0]['Source Rows'], '8,9')
+        self.assertEqual(rows[0]['Source Reference'], 'First source\nSecond source')
+
+    def test_corrected_aliases_count_native_mailbox_once_and_keep_all_rows(self):
+        rows = [decision(**{'Primary SMTP Address': 'old@example.invalid', 'AD Object GUID': AD}),
+                decision(**{'Source Row': 9, 'AD Object GUID': AD})]
+        _, result = self.run_case(rows)
+        self.assertEqual(result[0]['Requires Review'], 1)
+        # Normalize the reviewed primary address while retaining both source rows.
+        rows[0]['Primary SMTP Address'] = 'room@example.invalid'
+        _, result = self.run_case(rows)
+        self.assertEqual(len(result), 1)
+        self.assertEqual((result[0]['Retained'], result[0]['Requires Review']), (1, 0))
+        self.assertEqual(result[0]['Source Rows'], '8,9')
+
     def test_empty_valid_and_unavailable(self):
         inventory, decisions = self.run_case([])
         row = self.summary(inventory, decisions)[0]

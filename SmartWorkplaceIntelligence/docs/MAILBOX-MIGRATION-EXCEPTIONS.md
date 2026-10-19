@@ -99,7 +99,13 @@ identity rule matches the existing detailed migration inventory: Exchange GUID,
 otherwise AD Object GUID. Missing or duplicate inventory identities fail the run.
 RemoteMailbox recipients alone prove neither a local physical mailbox nor an
 observed Exchange Online mailbox. Conflicting local/cloud hosting observations,
-EXO-only mailboxes and out-of-scope types require review and are not retained E.
+EXO-only retention decisions and out-of-scope types require review and are not
+retained E. An explicit `No` on a confirmed, unique EXO identity is
+`Withdrawn - verified EXO`: retained E=0 and review R=0. Confirmation requires
+valid technical GUIDs or a confirmed private binding; SMTP-only candidates never
+qualify. Hosting conflicts, reassigned addresses, unresolved competing remote
+recipients, contradictory GUIDs and conflicting Yes/No rows remain in review.
+Withdrawn rows retain their source references and documentation warnings.
 
 - **Retained on-premises (E):** unique, conflict-free local planning identities
   with a valid `Yes`. Identical duplicate decisions count once, with all source
