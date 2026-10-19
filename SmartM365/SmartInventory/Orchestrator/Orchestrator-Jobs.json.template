@@ -1125,9 +1125,12 @@
       },
       "AssignmentMode": "Elected",
       "RequiredCapabilities": [
+        "Graph",
         "SharedRuntime"
       ],
-      "RequiredGraphAppRoles": [],
+      "RequiredGraphAppRoles": [
+        "Sites.Selected"
+      ],
       "PowerShellEdition": "PowerShell7",
       "EstimatedDurationMinutes": 5
     },
@@ -1158,9 +1161,12 @@
       },
       "AssignmentMode": "Elected",
       "RequiredCapabilities": [
+        "Graph",
         "SharedRuntime"
       ],
-      "RequiredGraphAppRoles": [],
+      "RequiredGraphAppRoles": [
+        "Sites.Selected"
+      ],
       "PowerShellEdition": "PowerShell7",
       "EstimatedDurationMinutes": 1
     },
