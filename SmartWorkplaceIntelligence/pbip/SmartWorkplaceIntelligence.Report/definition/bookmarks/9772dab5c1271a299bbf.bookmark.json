@@ -1,0 +1,31 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/bookmark/2.1.0/schema.json",
+  "name": "9772dab5c1271a299bbf",
+  "displayName": "Observed history",
+  "options": {
+    "applyOnlyToTargetVisuals": true,
+    "targetVisualNames": [
+      "3b7aebbfb8249fe2aa74",
+      "7550e0fb27d1e79d9d99"
+    ],
+    "suppressActiveSection": true,
+    "suppressData": true
+  },
+  "explorationState": {
+    "version": "1.0",
+    "activeSection": "migration-to-sharepoint-online",
+    "sections": {
+      "migration-to-sharepoint-online": {
+        "visualContainers": {},
+        "visualContainerGroups": {
+          "3b7aebbfb8249fe2aa74": {
+            "isHidden": true
+          },
+          "7550e0fb27d1e79d9d99": {
+            "isHidden": false
+          }
+        }
+      }
+    }
+  }
+}

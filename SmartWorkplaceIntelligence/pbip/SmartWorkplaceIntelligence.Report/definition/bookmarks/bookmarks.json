@@ -465,6 +465,24 @@
         "43c8933b8732cd98740b",
         "bad4096794087b6ee34a"
       ]
+    },
+    {
+      "name": "fd613e18c7f7b3457dea",
+      "displayName": "Migration views",
+      "children": [
+        "72398166c99e6949c5d2",
+        "f9a0d0fc01235e58a932",
+        "98659d49759c9c94b738",
+        "7b05f3721eb6d3035558"
+      ]
+    },
+    {
+      "name": "5ff89d65c9ff68c28dfc",
+      "displayName": "Migration schedule modes",
+      "children": [
+        "8b7de51565202c517aff",
+        "9772dab5c1271a299bbf"
+      ]
     }
   ]
 }

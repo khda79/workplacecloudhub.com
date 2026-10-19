@@ -101,3 +101,30 @@ production, Desktop rendering, content migration or Service behavior.
 
 Offline checks: `test_spo_migration.py`, `Test-SharePointMigrationEvidence.ps1`,
 mapping acquisition, scheduler and prepared-batch regression suites.
+
+## Report experience
+
+The single Migration to SharePoint Online page follows On-prem Content & Storage.
+Progress, Schedule, Reconciliation and Quality are native bookmark views sharing
+source type, project, business unit and phase slicers. Switching views preserves
+filters. Clear slicers keeps the active view; filters in the native filter pane
+have their own clear control. Schedule has separate deadline and observed-history
+modes. Planned dates are grouped by Monday-starting week. Historical observations
+use markers without connecting unmeasured days. ActualDate has its own declared
+completion calendar. Snapshot dates never filter the current plan.
+
+Current and historical business attributes have separate fact relationships.
+Technical on-prem filtering uses explicit scope passage for operation measures;
+shared-folder operations remain included with a Not applicable technical context.
+The global webs-without-plan counter ignores business unit and phase because
+those webs have no attributable planning row. Source/global findings also remain
+visible separately from operation-level findings. Storage stays at collection
+grain and is available in reconciliation tooltips with its qualification.
+
+`migration_model_definitions.py` provides generic TOM definitions for Modeling
+MCP. `Build-SharePointMigrationPage.js` generates only this page and its bookmarks;
+it accepts an explicit PBIP root and a SMARTWORKPLACE_PYTHON executable. It does
+not refresh, launch Desktop or publish. Additional offline checks are
+`test_spo_migration_model.py` and `test_spo_migration_page.py`. Static acceptance
+does not qualify DAX execution, interactive filtering or Desktop rendering;
+those checks require a separately authorized refresh of a reviewed batch.

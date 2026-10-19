@@ -32,7 +32,7 @@ class DailyTrendsLayoutTests(unittest.TestCase):
         cls.visuals = {g['name']: [v for v in cls.containers if v.get('parentGroupName') == g['name']] for g in cls.pages}
 
     def test_navigation_and_canvas(self):
-        self.assertEqual(len(self.order), 28)
+        self.assertEqual(len(self.order), 29)
         anchor = next(p['name'] for p in self.all_pages if p['displayName'] == 'Operational Overview')
         start = self.order.index(anchor) + 1
         self.assertEqual(self.order[start], self.page['name'])
