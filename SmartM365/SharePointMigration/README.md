@@ -1225,6 +1225,22 @@ tenant permissions. The host-routing test needs PowerShell 7 and Windows
 PowerShell 5.1. ExecutionPolicy Bypass above is limited to the test processes;
 these results are not an AllSigned execution-policy certification.
 
+Run the five ShareGate tests (`Test-SmartM365ShareGatePrecheck`,
+`Test-SmartM365ShareGateWitness`, `Test-SmartM365ShareGatePilot`,
+`Test-SmartM365ShareGatePathCorrectionPilot` and
+`Test-SmartM365SharePointTransientOffline`) with `powershell.exe` only. The
+scripts they exercise refuse PowerShell 7 on purpose, so a `pwsh` run fails
+before any assertion.
+
+`Test-SharePointMigration.ps1` uses the bundled `Tools\Python\python.exe` by
+default. That runtime is not stored in Git, so a fresh clone or worktree has no
+copy. Pass an installed Python 3.10 or later explicitly:
+
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\Tests\Test-SharePointMigration.ps1 -PythonPath (Get-Command python).Source
+powershell -NoProfile -ExecutionPolicy Bypass -File .\Tests\Test-SharePointMigration.ps1 -PythonPath (Get-Command python).Source
+```
+
 ## Offline demo mode
 
 Launch `Start-SmartM365-SharePointMigration-Demo.cmd` for screenshots and presentations. The original WPF screens, tabs and options remain available with fictional Contoso data and visibly marked simulated results. Use the Scene selector (`Overview`, `Issues`, `Completed`), or pass `-DemoScenario Issues`. `-DemoView` selects a named tab where available; `-DemoWindowWidth` and `-DemoWindowHeight` control the capture size.

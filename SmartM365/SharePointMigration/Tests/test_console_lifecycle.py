@@ -53,7 +53,7 @@ class ConsoleLifecycleTests(unittest.TestCase):
         for path in files:
             with self.subTest(path=path.name):
                 ast.parse(path.read_text(encoding="utf-8-sig"), filename=str(path))
-                if path.name not in ("console_lifecycle.py", "report_html.py", "comparison_artifacts.py"):
+                if path.name not in ("console_lifecycle.py", "report_html.py", "comparison_artifacts.py", "comparison_history_chart.py"):
                     self.assertIn("run_console_script(", path.read_text(encoding="utf-8-sig"))
 
 

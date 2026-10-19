@@ -2,7 +2,7 @@
 .SYNOPSIS
     Offline Windows PowerShell console lifecycle contract tests.
 .VERSION
-    1.0.0
+    1.0.1
 #>
 #Requires -Version 5.1
 [CmdletBinding()]
@@ -40,7 +40,11 @@ try {
     $scriptRoot = Join-Path $PSScriptRoot '..\Scripts'
     $helpers = @('SmartM365-SharePointMigration-ConsoleLifecycle.ps1','SmartM365-SharePointMigration-LauncherCommon.ps1',
         'SmartM365-SharePointMigration-GuiActivity.ps1','SmartM365-SharePointMigration-FarmMaintenance.ps1',
-        'SmartM365-SharePointMigration-ShareGateReportReader.ps1','SmartM365-SharePointMigration-TransientEvidence.ps1')
+        'SmartM365-SharePointMigration-ShareGateReportReader.ps1','SmartM365-SharePointMigration-TransientEvidence.ps1',
+        # Dot-sourced libraries and the stdin/stdout JSON timestamp converter: a console banner would break their callers.
+        'Convert-ShareGateReportTimestamps.ps1','SmartM365-SharePointMigration-CrossCheck.ps1',
+        'SmartM365-SharePointMigration-DestinationPath.ps1','SmartM365-SharePointMigration-ImportExcel.ps1',
+        'SmartM365-SharePointMigration-PlacementEvidence.ps1','SmartM365-SharePointMigration-BatchGui.ps1')
     foreach ($entry in @(Get-ChildItem -LiteralPath $scriptRoot -Recurse -File -Filter '*.ps1')) {
         if ($entry.Name -in $helpers) { continue }
         $source = [IO.File]::ReadAllText($entry.FullName)

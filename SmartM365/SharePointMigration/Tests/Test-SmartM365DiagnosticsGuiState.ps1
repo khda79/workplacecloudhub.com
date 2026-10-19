@@ -2,7 +2,7 @@
 .SYNOPSIS
     Offline GUI checks for newest ShareGate report selection and cached analysis.
 .VERSION
-    1.0.9
+    1.0.10
 #>
 #Requires -Version 7.4
 [CmdletBinding()]
@@ -57,6 +57,7 @@ try {
     }
     $btnDiagAnalyze = [pscustomobject]@{ IsEnabled=$true }
     $btnDiagOpenReport = [pscustomobject]@{ IsEnabled=$true }
+    $btnDiagCopyMessage = [pscustomobject]@{ IsEnabled=$true; Content=''; ToolTip='' }
     $cardDiagSummary = [pscustomobject]@{ IsEnabled=$true }
     $panelDiagReview = [pscustomobject]@{ IsEnabled=$true }
     $btnFarmRun = [pscustomobject]@{ IsEnabled=$true }
