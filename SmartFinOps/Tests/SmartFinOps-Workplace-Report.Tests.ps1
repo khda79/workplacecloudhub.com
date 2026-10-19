@@ -3,7 +3,7 @@
 .SYNOPSIS
   Offline tests of the SmartFinOps Workplace V2 executive HTML report.
 .VERSION
-1.4.1
+1.5.0
 .NOTES
   Synthetic FinOps_* fixtures and receipts only, in an isolated temporary runtime (no local configuration,
   export or tenant). The input contract is checked against the valuation engine output specification.
@@ -73,7 +73,7 @@ function Get-FixtureData {
   param([switch]$NotMeasured)
   $kpi = { param($key, $class, $lever, $status, $users, $units, $amount, $note = '') [ordered]@{ KpiKey=$key; ValueClass=$class; Lever=$lever; ValuationStatus=$status; Users=$users; Units=$units; AnnualAmount=$amount; Currency='EUR'; Provisional=$(if ($status -eq 'Provisional') { 'True' } else { 'False' }); MissingDomains=''; SnapshotGeneratedAtUtc=$(if ($NotMeasured) { '' } else { '2026-10-17' }); PricingReceiptRunId='pricerun0001'; Note=$note } }
   if ($NotMeasured) {
-    $summary = @(foreach ($key in @('TOTAL_R','TOTAL_R_DISABLED_AND_SHARED','TOTAL_R_ENABLED_INACTIVE','TOTAL_R_COPILOT','TOTAL_R_CAPACITY','TOTAL_RC_E3_TO_F3','TOTAL_E_REUSE')) { & $kpi $key '' '' 'Not measured' '' '' '' 'Licences report not qualified' }; & $kpi 'TOTAL_E_ESU' 'E' 'L13' 'Not measured' 0 '' '' 'No ESU device population')
+    $summary = @(foreach ($key in @('TOTAL_R','TOTAL_R_CONFIRMED','TOTAL_R_DISABLED_AND_SHARED','TOTAL_R_ENABLED_INACTIVE','TOTAL_R_COPILOT','TOTAL_R_CAPACITY','TOTAL_RC_E3_TO_F3','TOTAL_E_REUSE')) { & $kpi $key '' '' 'Not measured' '' '' '' 'Licences report not qualified' }; & $kpi 'TOTAL_E_ESU' 'E' 'L13' 'Not measured' 0 '' '' 'No ESU device population')
     return @{
       'FinOps_Sources.csv' = @([ordered]@{ SourceFile='M365_Licenses_ReportSummary.csv'; QualificationStatus='NotMeasured'; Reason='source receipt is Failed' })
       'FinOps_Opportunities.csv' = @([ordered]@{ OpportunityKey='L13|WIN10_ESU'; Lever='L13'; ValueClass='E'; ValuationStatus='Not measured'; StatusReason='No ESU device population'; Units=''; Currency='EUR' })
@@ -83,6 +83,7 @@ function Get-FixtureData {
   }
   $summary = @(
     & $kpi 'TOTAL_R' 'R' 'L1;L2;L3;L5;L6;L7' 'Valued' 6 9 '12345.67' 'Realizable at contract or renewal'
+    & $kpi 'TOTAL_R_CONFIRMED' 'R' 'L1;L2;L5;L6;L7' 'Valued' 4 7 '10123.45'
     & $kpi 'TOTAL_R_DISABLED_AND_SHARED' 'R' 'L1;L2;L5' 'Valued' 3 3 '3000.00'
     & $kpi 'TOTAL_R_ENABLED_INACTIVE' 'R' 'L3' 'Valued' 2 2 '2222.22'
     & $kpi 'TOTAL_R_COPILOT' 'R' 'L6' 'Valued' 0 '' ''
@@ -223,8 +224,8 @@ try {
   Check ($run.ExitCode -eq 3) "nominal exit code 3, provisional L4 (got $($run.ExitCode)) $($run.Log)"
   $historyPage = Get-TenantFolder $nominal "DATA-ALL\FinOps\Workplace\$runId\SmartFinOps_Workplace-Report.html"
   Check ((Test-Path -LiteralPath $historyPage) -and (Get-Content -LiteralPath $historyPage -Raw) -ceq $html) 'report copied into the run history (DATA-ALL\FinOps\Workplace\<RunId>)'
-  $order = @('executive-summary','financial-potential','priority-decisions','trade-offs','capacity-forecast','realization','showback','assumptions','appendix' | ForEach-Object { $html.IndexOf("id=""$_""", [StringComparison]::Ordinal) })
-  Check (@($order | Where-Object { $_ -lt 0 }).Count -eq 0 -and (($order | Sort-Object) -join ',') -eq ($order -join ',')) 'nine sections in the RULES order'
+  $order = @('summary','financial-potential','priority-decisions','trade-offs','capacity-forecast','realization','showback','assumptions','appendix' | ForEach-Object { $html.IndexOf("id=""$_""", [StringComparison]::Ordinal) })
+  Check (@($order | Where-Object { $_ -lt 0 }).Count -eq 0 -and (($order | Sort-Object) -join ',') -eq ($order -join ',')) 'summary then eight sections in the RULES order'
   Check ($html.Contains('title="EUR 12345.67">EUR 12,346</span>') -and $html.Contains('EUR 2,222') -and $html.Contains('EUR 349') -and $html.Contains('EUR 104')) 'totals displayed from FinOps_Summary'
   Check ($html.Contains('None identified')) 'empty valued total shown as none identified, not zero'
   Check ($html.Contains('title="EUR 0.00">EUR 0</span>')) 'measured zero displayed as EUR 0'
@@ -238,10 +239,54 @@ try {
   Check ($html.Contains('SPE_E3|Review') -and -not $html.Contains("$skuGuid|Review")) 'control keys show the SKU part number'
   #endregion
 
+  #region 2b. Summary (2.5.0): published totals with their certainty, consistent with the detail
+  $summaryStart = $html.IndexOf('<section id="summary">', [StringComparison]::Ordinal)
+  $summaryEnd = $html.IndexOf('</section>', [Math]::Max(0, $summaryStart), [StringComparison]::Ordinal)
+  $summaryHtml = if ($summaryStart -ge 0) { $html.Substring($summaryStart, $summaryEnd - $summaryStart) } else { '' }
+  $detailHtml = if ($summaryStart -ge 0) { $html.Substring($summaryEnd) } else { '' }
+  Check ($summaryStart -gt 0 -and $summaryStart -lt $html.IndexOf('id="financial-potential"', [StringComparison]::Ordinal)) 'summary on top, before the detail'
+  $cards = @{}
+  foreach ($match in [regex]::Matches($summaryHtml, '<div class="metric [a-z-]+" data-kpi="([A-Z_0-9]+)">.*?</div></div>')) { $cards[$match.Groups[1].Value] = $match.Value }
+  Check ((@($cards.Keys | Sort-Object) -join ',') -ceq 'TOTAL_E_REUSE,TOTAL_R_CONFIRMED,TOTAL_R_ENABLED_INACTIVE,TOTAL_RC_E3_TO_F3') "four summary cards ($(@($cards.Keys | Sort-Object) -join ','))"
+  foreach ($pair in @(@('TOTAL_R_CONFIRMED','10123.45'), @('TOTAL_R_ENABLED_INACTIVE','2222.22'), @('TOTAL_RC_E3_TO_F3','349.44'), @('TOTAL_E_REUSE','103.92'))) {
+    Check ($cards.ContainsKey($pair[0]) -and $cards[$pair[0]].Contains(('title="EUR {0}"' -f $pair[1]))) "summary card $($pair[0]) shows the published amount $($pair[1])"
+    Check ($detailHtml.Contains(('title="EUR {0}"' -f $pair[1]))) "summary amount $($pair[1]) is the one of the detail"
+  }
+  Check ($cards['TOTAL_R_CONFIRMED'].Contains('>Final</span>') -and $cards['TOTAL_R_ENABLED_INACTIVE'].Contains('>To confirm</span>') -and $cards['TOTAL_R_ENABLED_INACTIVE'].Contains('enabled accounts without M365 activity in 90 days') -and $cards['TOTAL_RC_E3_TO_F3'].Contains('>Provisional</span>') -and $cards['TOTAL_RC_E3_TO_F3'].Contains('>Conditional - outside R total</span>') -and $cards['TOTAL_E_REUSE'].Contains('>Cost avoidance</span>')) 'each card shows its certainty; R to confirm separate from R confirmed'
+  Check ($summaryHtml.Contains('title="EUR 12345.67"') -and $summaryHtml.Contains('R confirmed + R to confirm (control G7)')) 'published TOTAL_R shown as the sum checked by G7, not recomputed'
+  $decisionRows = { param([string]$Fragment) @([regex]::Matches($Fragment, '<tr><td>(\d+)</td><td>(.*?)</td>.*?title="EUR ([0-9.]+)".*?</tr>') | ForEach-Object { '{0}|{1}|{2}' -f $_.Groups[1].Value, $_.Groups[2].Value, $_.Groups[3].Value }) }
+  $priorityStart = $html.IndexOf('<section id="priority-decisions"', [StringComparison]::Ordinal)
+  $priorityHtml = $html.Substring($priorityStart, $html.IndexOf('</section>', $priorityStart, [StringComparison]::Ordinal) - $priorityStart)
+  $topSummary = @(& $decisionRows $summaryHtml); $topPriority = @(& $decisionRows $priorityHtml | Select-Object -First 3)
+  Check ($topSummary.Count -eq 3 -and ($topSummary -join ';') -ceq ($topPriority -join ';') -and ($topSummary -join ';') -ceq '1|Unassigned units (L7)|7123.45;2|Enabled accounts without M365 activity in 90 days (L3)|2222.22;3|Disabled accounts (L1)|1000.00') "top 3 decisions are the first three priority decisions ($($topSummary -join ';'))"
+  Check ($html.Contains('<div class="card statusbar"><span class="badge prov">Provisional</span> <span>Provisional figures</span> <span class="note">Sources: 1 qualified, 1 provisional, 0 not measured</span></div>')) 'status bar: overall certainty and source states in one line'
+  Check ($summaryHtml.Contains('<span class="badge rev">Review</span> 1</span>') -and $summaryHtml.Contains('<span class="badge cap">Capped</span> 1</span>')) 'license units by status shown in the summary'
+  $pageTopRows = { param([string]$Fragment) @([regex]::Matches($Fragment, '<tr><td>\d</td>.*?</tr>') | ForEach-Object Value) }
+  $topRowsHtml = @(& $pageTopRows $summaryHtml)
+  Check ($topRowsHtml.Count -eq 3 -and @($topRowsHtml | Where-Object { $_ -match '<span class="badge (ok|tc|cond|av|prov|nv|nm|rev|blk|cap|reu|ref|sig)">[^<]+</span></td></tr>$' }).Count -eq 3) 'each top 3 row of the page ends with its certainty badge'
+  $rcTop = Invoke-Report (New-ReportFixture 'rc-top' -ChangeData { param($d) foreach ($row in $d['FinOps_Summary.csv']) { if ($row['KpiKey'] -ceq 'DETAIL|Rc|L4|Provisional') { $row['AnnualAmount'] = '9999.99' } } })
+  $rcSummary = $rcTop.Html.Substring($rcTop.Html.IndexOf('<section id="summary">', [StringComparison]::Ordinal)); $rcSummary = $rcSummary.Substring(0, $rcSummary.IndexOf('</section>', [StringComparison]::Ordinal))
+  $rcRows = @(& $pageTopRows $rcSummary)
+  Check ($rcRows.Count -eq 3 -and $rcRows[0].Contains('E3 to F3 review (L4)') -and $rcRows[0].Contains('<span class="badge cond">Conditional - outside R total</span>') -and @($rcRows | Where-Object { $_.Contains('outside R total') }).Count -eq 1) 'E3 to F3 in the top 3 of the page: Conditional - outside R total'
+  Check ($rcTop.Html.Contains('E3 to F3 review (L4)</td><td>Rc</td>') -and ([regex]::Matches($rcTop.Html, '>Conditional - outside R total</span>').Count -ge 3)) 'E3 to F3 also labelled Conditional - outside R total in Priority decisions and on its card'
+  $opens = [regex]::Matches($html, '<details open>')
+  $openAt = $html.IndexOf('<details open>', [StringComparison]::Ordinal)
+  Check ($opens.Count -eq 1 -and $openAt -gt $html.IndexOf('id="financial-potential"', [StringComparison]::Ordinal) -and $openAt -lt $priorityStart) 'only Financial potential is open'
+  foreach ($id in @('priority-decisions','trade-offs','capacity-forecast','realization','showback','assumptions','appendix')) { Check ($html.Contains("<section id=""$id"" class=""fold""><details><summary><h2>")) "section $id folded" }
+  Check ([regex]::Matches($html, '<details class="sub"><summary>By ').Count -eq 4) 'each showback dimension folds separately'
+  $noConfirmed = Invoke-Report (New-ReportFixture 'no-confirmed' -ChangeData { param($d) $d['FinOps_Summary.csv'] = @($d['FinOps_Summary.csv'] | Where-Object { $_['KpiKey'] -cne 'TOTAL_R_CONFIRMED' }) })
+  $noConfirmedCard = [regex]::Match($noConfirmed.Html, '<div class="metric [a-z-]+" data-kpi="TOTAL_R_CONFIRMED">.*?</div></div>').Value
+  Check ($noConfirmed.ExitCode -eq 3 -and $noConfirmedCard.Contains('>Not measured</span>') -and $noConfirmedCard.Contains('Published from valuation engine 2.2.3') -and -not $noConfirmedCard.Contains('EUR 10,123')) 'engine before 2.2.3: R confirmed Not measured, never computed by the report'
+  #endregion
+
   #region 3. Confidentiality, autonomy, escaping
   Check (-not $html.Contains('alice.secret') -and -not $html.Contains($userGuid) -and -not ($html -match '(?i)[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}')) 'no UPN, UserId or e-mail address in the HTML'
   Check (-not ($html -match '(?i)\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b')) 'no GUID in the HTML'
-  Check (-not ($html -match '(?i)https?:|//|<link|<script|\bsrc=|@import|url\(|<iframe|<img')) 'no external resource, no script'
+  $logos = [regex]::Matches($html, '<img alt="WorkplaceCloudHub" width="120" height="97" src="data:image/png;base64,([A-Za-z0-9+/=]+)">')
+  $logoBytes = if ($logos.Count -eq 1) { [Convert]::FromBase64String($logos[0].Groups[1].Value) } else { [byte[]]@() }
+  Check ($logos.Count -eq 1 -and $logoBytes.Length -gt 1000 -and $logoBytes.Length -le 20480 -and [Text.Encoding]::ASCII.GetString($logoBytes, 1, 3) -ceq 'PNG') "WorkplaceCloudHub logo embedded once as a PNG data URI under 20 KB ($($logoBytes.Length) bytes)"
+  $withoutLogo = if ($logos.Count -eq 1) { $html.Replace($logos[0].Value, '') } else { $html }
+  Check (-not ($withoutLogo -match '(?i)https?:|//|<link|<script|\bsrc=|@import|url\(|<iframe|<img|data:')) 'no external resource, no script, no other image (no client logo)'
   Check ($html.Contains('&lt;script&gt;alert(1)&lt;/script&gt; &amp; &quot;q&quot; &#39;x&#39;') -and $html.Contains('&lt;b&gt;E3 &amp; co&lt;/b&gt;')) 'CSV values HTML-encoded'
   Check ($html.Contains('Other reason')) 'reason quoting a user replaced'
   #endregion
@@ -338,7 +383,17 @@ try {
   $first = Send-ReportDailyEmail @mailArgs -Send $fake -NowUtc $day1
   $message = if ($sent.Count) { $sent[0] } else { $null }
   Check ($first -eq 'Sent' -and $sent.Count -eq 1 -and $message.Subject -ceq 'SmartFinOps Workplace - Daily valuation - provisional figures' -and $message.Status -ceq 'Provisional') "first run of the day sends one mail ($first)"
-  Check ($message.BodyHtml.Contains('Realizable reduction (R), annual') -and $message.BodyHtml.Contains('of which enabled accounts without M365 activity in 90 days') -and $message.BodyHtml.Contains('Conditional E3 to F3 (not in the R total)') -and $message.BodyHtml.Contains('Cost avoidance (E)') -and $message.BodyHtml.Contains('>Blocked<') -and $message.BodyHtml.Contains('>Review<') -and $message.BodyHtml.Contains('Catalogue estimate') -and $message.BodyHtml.Contains('Contract price') -and $message.BodyHtml.Contains('Not measured')) 'body: R, enabled-inactive, conditional E3 to F3, E, Blocked/Review signals, price origin and source states'
+  Check ($message.BodyHtml.Contains('>R confirmed<') -and $message.BodyHtml.Contains('R to confirm: enabled accounts without M365 activity in 90 days') -and $message.BodyHtml.Contains('Conditional E3 to F3 (not in the R total)') -and $message.BodyHtml.Contains('Cost avoidance: reuse for users waiting for capacity') -and $message.BodyHtml.Contains('Top 3 decisions') -and $message.BodyHtml.Contains('Sources: 1 qualified, 1 provisional, 0 not measured') -and $message.BodyHtml.Contains('Windows 10 ESU: Not measured')) 'body: R confirmed and R to confirm apart, conditional E3 to F3, cost avoidance, top 3 decisions, source states, statuses'
+  foreach ($amount in @('EUR 10,123','EUR 2,222','EUR 349','EUR 104','EUR 12,346','EUR 7,123','EUR 1,000')) { Check ($message.BodyHtml.Contains($amount)) "body shows the published amount $amount, as on the page" }
+  $mailTop = @([regex]::Matches($message.BodyHtml, '<td[^>]*>(\d)</td><td[^>]*>([^<]+)<div') | ForEach-Object { '{0}|{1}' -f $_.Groups[1].Value, [Net.WebUtility]::HtmlDecode($_.Groups[2].Value) })
+  Check (($mailTop -join ';') -ceq '1|Unassigned units (L7);2|Enabled accounts without M365 activity in 90 days (L3);3|Disabled accounts (L1)') "body: the same top 3 decisions as the page, in the same order ($($mailTop -join ';'))"
+  Check (-not ($message.BodyHtml -match '(?i)<img|<script|<link|url\(|<style')) 'body: inline styles only, no image, script or style sheet'
+  $mailTopRows = { param([string]$Body) @([regex]::Matches($Body, '<tr><td style="[^"]*">\d</td>.*?</tr>') | ForEach-Object Value) }
+  $mailRows = @(& $mailTopRows $message.BodyHtml)
+  Check ($mailRows.Count -eq 3 -and @($mailRows | Where-Object { $_ -match '<td style="[^"]*"><span style="display:inline-block;[^"]*">[^<]+</span></td></tr>$' }).Count -eq 3) 'each top 3 row of the mail ends with its certainty badge'
+  $rcInputs = Read-ReportInputs -Root (New-ReportFixture 'mail-rc-top' -ChangeData { param($d) foreach ($row in $d['FinOps_Summary.csv']) { if ($row['KpiKey'] -ceq 'DETAIL|Rc|L4|Provisional') { $row['AnnualAmount'] = '9999.99' } } }) -ProfileKey $profileKey -TenantKey $tenant
+  $rcMail = @(& $mailTopRows (Get-ReportDailyEmailContent -Inputs $rcInputs -Tenant $profileKey).BodyHtml)
+  Check ($rcMail.Count -eq 3 -and $rcMail[0].Contains('E3 to F3 review (L4)') -and $rcMail[0].Contains('>Conditional - outside R total</span>') -and @($rcMail | Where-Object { $_.Contains('outside R total') }).Count -eq 1) 'E3 to F3 in the top 3 of the mail: Conditional - outside R total'
   Check ($message.BodyHtml.Contains('EUR ') -and $message.BodyHtml.Contains('Full report on SharePoint: <a href="https://contoso.sharepoint.invalid/') -and @($message.Attachments).Count -eq 1 -and $message.Attachments[0] -ceq $page) 'body: amounts, SharePoint link and the report page attached'
   $attachmentText = [IO.File]::ReadAllText($page)
   $identifier = '(?i)[a-z0-9._%+''-]+@[a-z0-9-]+(\.[a-z0-9-]+)+|\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b'
@@ -412,7 +467,7 @@ try {
   $bannerStart = [array]::IndexOf($logLines, '================================================================================')
   Check ($bannerStart -gt 0 -and @($logLines[0..($bannerStart - 1)] | Where-Object { $_ -notmatch '^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} \[' }).Count -eq 0) 'every log line before the completion banner is timestamped'
   Check (($logLines -join "`n").Contains(' SmartFinOps by WorkplaceCloudHub - Execution completed') -and ($logLines -join "`n").Contains(' Status    : COMPLETED WITH WARNINGS') -and ($logLines -join "`n").Contains(' CSV files : 0')) 'completion banner appended to the report log'
-  Check ($run.Log.Contains(' SmartFinOps by WorkplaceCloudHub') -and $run.Log.Contains(' GitHub  : https://github.com/khda79/workplacecloudhub.com') -and $run.Log -match 'Starting SmartFinOps Workplace Report v2\.4\.1 ' -and $run.Log -match 'Tenant context 1.4.1') 'startup banner and versions on the console'
+  Check ($run.Log.Contains(' SmartFinOps by WorkplaceCloudHub') -and $run.Log.Contains(' GitHub  : https://github.com/khda79/workplacecloudhub.com') -and $run.Log -match 'Starting SmartFinOps Workplace Report v2\.5\.0 ' -and $run.Log -match 'Tenant context 1.4.1') 'startup banner and versions on the console'
   $unavailable = Invoke-Report (New-ReportFixture 'banner-failed' -ChangeReceipt { param($r) $r.Status = 'Failed' })
   Check ($unavailable.ExitCode -eq 1 -and $unavailable.Log.Contains(' SmartFinOps by WorkplaceCloudHub - Execution failed') -and $unavailable.Log.Contains(' Status    : FAILED')) 'report not available: completion banner Failed'
   Check ($unavailable.Log -match '\[ERROR\] Report not available: ') 'report not available: logged as an error'
