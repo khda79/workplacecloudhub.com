@@ -12,15 +12,15 @@ editing the template.
 | AD-Inventory | Daily 00:10 |
 | AD-HealthCheck | Daily 05:00 |
 | M365-ActiveUsers-Inventory | Daily 00:15 |
-| M365-Licences-Inventory | Daily 00:45 |
+| M365-Licences-Inventory | Daily 00:15, chained after EXO Fast |
 | M365-EntraDevices-Inventory | Daily 00:25 |
 | M365-Teams-Inventory | Daily 03:30 |
 | M365-SPO-Inventory | Daily 03:45 |
 | Intune-Devices-Inventory | Daily 00:35 |
 | Intune-Devices-Compliance-Inventory | Daily 01:30 |
 | Intune-WindowsAutopilot-Inventory | Daily 04:00 |
-| EXO-Mailboxes-Permissions | Daily 05:00 |
-| EXO-Mailboxes-Inventory-Fast | Daily 03:15 |
+| EXO-Mailboxes-Permissions | Daily 00:15, chained after EXO Fast |
+| EXO-Mailboxes-Inventory-Fast | Daily 00:15, chained after AD and active users |
 | EXO-AcceptedDomains-Inventory | Daily 00:10 |
 | Mailboxes-PermissionsByUser-Report | Daily 08:30 |
 | Exchange2016-Local-Mailboxes-Inventory | Daily 00:35 |
@@ -35,7 +35,7 @@ editing the template.
 | Intune-AutopatchAlerts-Inventory | Daily 03:10 |
 | Intune-Windows11-Readiness-Issues | Daily 07:00 |
 | Intune-WinUpdate-Status | Daily 02:00 |
-| Exchange-HybridIdentity-Issues | Daily 08:00 |
+| Exchange-HybridIdentity-Issues | Daily 01:00, chained after its sources |
 | M365-CopilotUsage-Inventory | Daily 05:00 |
 | M365-TeamsPhonePstnUsage-Inventory | Daily 05:15 |
 | Intune-EndpointAnalytics-Inventory | Daily 02:45 |
@@ -47,7 +47,7 @@ editing the template.
 | M365-LicensePricing-Inventory | Daily 05:30 |
 | SmartFinOps-Workplace-Valuation | Daily 05:45 |
 | SmartFinOps-Workplace-Report | Daily 05:45 |
-| WorkplaceEvidence-Prepare | Daily 09:00 |
+| WorkplaceEvidence-Prepare | Daily 07:45 |
 | M365-WorkplaceScope-Inventory | Daily 22:00 |
 | Intune-Configurations-Inventory | Daily 04:30 |
 | Intune-ManagedApps-Inventory | Daily 05:00 |
@@ -56,8 +56,10 @@ editing the template.
 | EXO-MigrationJobs-Inventory | Daily 06:00, 12:00, 18:00 |
 
 The five central identity, device and license producers have one overnight
-collection, with no afternoon repeat. Readiness runs once at 07:00,
-hybrid-identity analysis at 08:00 and unified Intelligence preparation at 09:00.
+collection, with no afternoon repeat. Readiness runs once at 07:00 and unified
+Intelligence preparation at 07:45. The mailbox chain (EXO Fast, permissions,
+licences, hybrid-identity analysis) starts as soon as its sources succeed; see
+Dependencies and freshness.
 There is no separate CMDB preparation job. WorkplaceScope starts at 22:00 the preceding
 evening because collection can take several hours.
 
@@ -93,11 +95,21 @@ the effective schedule. Git deployment alone is not that publication.
 
 ## Dependencies and freshness
 
-Readiness and hybrid-identity analysis use `FreshSuccess` with a 48-hour
-scheduler floor. A newer occurrence is not required when an adequate completed
-success exists. This gate neither makes CSVs contemporaneous nor bypasses the
-analysis scripts' own source checks. Mailbox permissions and the permissions
-report retain their existing dependency semantics.
+Readiness uses `FreshSuccess` with a 48-hour scheduler floor. A newer occurrence
+is not required when an adequate completed success exists. This gate neither
+makes CSVs contemporaneous nor bypasses the analysis scripts' own source checks.
+
+The mailbox chain uses `LatestOccurrence`. EXO Fast, permissions and licences are
+due at 00:15 and start as soon as their dependencies of the same night succeed
+(Fast after AD and active users; permissions and licences after Fast), each with
+a 1080-minute dependency wait. Hybrid-identity analysis is due at 01:00 with a
+1380-minute wait: it only runs on the same night's AD, Fast, permissions,
+licences, domains and Exchange 2016 outputs, and no longer reuses an older
+permissions export when permissions finish late. A job that uses
+`LatestOccurrence` must not be scheduled earlier than any of its dependencies,
+otherwise the previous day's dependency occurrence would satisfy it. On Saturday
+the chain waits behind the Friday full EXO run (`EXOMailboxes` key) and finishes
+in the evening.
 
 Workplace retains the former CMDB producer dependencies. Its scheduler completion-age gate
 allows weekly Apps (240 hours), while the preparation contract independently
@@ -110,7 +122,7 @@ replace the last published cohort; consumers must display its actual age.
 
 SmartFinOps Valuation and Report use `LatestOccurrence`: Valuation needs today's
 Licences, LicensePricing, AD and active-users occurrences, so it waits for Licences
-(about 07:50 on weekdays, 18:00 on Saturday) instead of valuing the previous day's
+(usually finished before 05:45 on weekdays, about 19:00 on Saturday) instead of valuing the previous day's
 report. A dependency that fails and is not recovered within 1080 minutes ends the
 occurrence `BlockedDependencyTimeout`; no FinOps run happens that day. A future
 `WorkplaceEvidence-Prepare` dependency on FinOps should use its `FreshSuccess` rule

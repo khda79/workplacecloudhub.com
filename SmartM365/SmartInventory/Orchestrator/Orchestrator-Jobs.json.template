@@ -194,10 +194,11 @@
       "MaxRetries": 1,
       "RetryDelaySeconds": 300,
       "ContinueOnError": true,
+      "DependencyWaitTimeoutMinutes": 1080,
       "Schedule": {
         "Type": "Daily",
         "Times": [
-          "04:45"
+          "00:15"
         ],
         "MissedRunPolicy": "RunOnce",
         "DaysOfWeek": []
@@ -382,10 +383,11 @@
       "MaxRetries": 1,
       "RetryDelaySeconds": 600,
       "ContinueOnError": false,
+      "DependencyWaitTimeoutMinutes": 1080,
       "Schedule": {
         "Type": "Daily",
         "Times": [
-          "03:15"
+          "00:15"
         ],
         "DaysOfWeek": [],
         "MissedRunPolicy": "RunOnce"
@@ -448,10 +450,11 @@
       "MaxRetries": 1,
       "RetryDelaySeconds": 600,
       "ContinueOnError": true,
+      "DependencyWaitTimeoutMinutes": 1080,
       "Schedule": {
         "Type": "Daily",
         "Times": [
-          "05:00"
+          "00:15"
         ],
         "MissedRunPolicy": "RunOnce",
         "DaysOfWeek": []
@@ -1191,10 +1194,11 @@
       "MaxRetries": 1,
       "RetryDelaySeconds": 300,
       "ContinueOnError": true,
+      "DependencyWaitTimeoutMinutes": 1380,
       "Schedule": {
         "Type": "Daily",
         "Times": [
-          "08:00"
+          "01:00"
         ],
         "MissedRunPolicy": "RunOnce",
         "DaysOfWeek": []
@@ -1205,8 +1209,7 @@
       ],
       "RequiredGraphAppRoles": [],
       "EstimatedDurationMinutes": 5,
-      "DependencyMode": "FreshSuccess",
-      "DependencyMaxAgeHours": 48
+      "DependencyMode": "LatestOccurrence"
     },
     {
       "Name": "Mailboxes-PermissionsByUser-Report",
@@ -1315,7 +1318,7 @@
       "Schedule": {
         "Type": "Daily",
         "Times": [
-          "09:00"
+          "07:45"
         ],
         "MissedRunPolicy": "RunOnce",
         "DaysOfWeek": []
