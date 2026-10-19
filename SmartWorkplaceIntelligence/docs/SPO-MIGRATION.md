@@ -63,6 +63,11 @@ not deletion. Explicit DELETE/DONE remains declared completion; still-observed
 sources generate review findings. Shared-folder paths are checked syntactically,
 without claiming SMB existence, volume or effective permissions.
 
+The receipt publisher RunId and collector CSV RunId are separate identities.
+Every receipt entry must belong to its successful publication; non-empty CSV
+rows must share one collector RunId within each producer group. Content and
+infrastructure captures may have different collector RunIds.
+
 SPO usage sites provide site observations, not an exhaustive existence census.
 Relative targets retain their original text. Destinations outside the configured
 SPO tenant are not qualified; non-observation is not proof of migration failure.

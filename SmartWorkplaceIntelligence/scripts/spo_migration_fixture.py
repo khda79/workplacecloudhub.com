@@ -72,12 +72,14 @@ def fixture(root):
     write('SharePoint_OnPrem_CollectionCoverage.csv',[dict(native,Status='Complete')])
     infra=[]
     for suffix in ['Farms','WebApplications','WebApplicationZones','ContentDatabases','Servers','ServiceApplications']:
-        name='SharePoint_OnPrem_'+suffix+'.csv';write(name,[native]);infra.append(name)
+        name='SharePoint_OnPrem_'+suffix+'.csv';write(name,[dict(native,RunId='infrastructure-collection-run')]);infra.append(name)
     def receipt(producer,names):
+        publication_run='publication-'+producer
         entries=[]
         for name in names:
-            entries.append({'File':name,'Rows':len(m.read_csv(last/name,';')),'SHA256':m.sha(last/name)})
-        document={'Owner':'SmartInventory-SourceReceipt','ContractVersion':'1.2','TenantKey':'sample-prod','RunId':'run-a',
+            entries.append({'File':name,'Rows':len(m.read_csv(last/name,';')),'SHA256':m.sha(last/name),
+                            'RunId':publication_run,'Status':'Success'})
+        document={'Owner':'SmartInventory-SourceReceipt','ContractVersion':'1.2','TenantKey':'sample-prod','RunId':publication_run,
                   'Producer':producer+'.ps1','Status':'Completed','CompletedAtUtc':'2026-10-19T10:00:00Z',
                   'ConsumerScopeQualified':False,'FullInventoryQualified':False,'ScopeQualification':'ConfiguredOutputsOnly',
                   'Files':entries,'RequiredFiles':names}

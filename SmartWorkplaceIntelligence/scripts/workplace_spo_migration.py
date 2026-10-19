@@ -16,7 +16,7 @@ from pathlib import Path
 from urllib.parse import unquote, urlsplit
 from xml.etree import ElementTree as ET
 
-VERSION = '1.0.1'
+VERSION = '1.0.2'
 CONTRACT = Path(__file__).resolve().parents[1] / 'config/sharepoint-migration-contract.json.txt'
 UTC = dt.timezone.utc
 TABLES = {'MigrationSP': 'tblMigrationSP', 'MigrationSharedFolders': 'tblMigrationSharedFolders',
@@ -208,6 +208,9 @@ def inventory(last, producer, tenant, asof, maximum=168, overrides=None):
     receipt = json.loads(path.read_text(encoding='utf-8-sig'))
     if receipt.get('Owner') != 'SmartInventory-SourceReceipt' or receipt.get('TenantKey') != tenant or receipt.get('Producer') != producer + '.ps1' or receipt.get('Status') not in ('Completed', 'CompletedWithWarnings'):
         raise ValueError('Invalid SharePoint producer receipt identity or status')
+    publication_run = text(receipt.get('RunId'))
+    if not publication_run:
+        raise ValueError('Missing SharePoint receipt publication RunId')
     captured = utc(receipt['CompletedAtUtc'])
     age = (asof - captured).total_seconds() / 3600
     overrides = overrides or {}
@@ -215,10 +218,13 @@ def inventory(last, producer, tenant, asof, maximum=168, overrides=None):
     if age < -5 / 60 or age > group_limit:
         raise ValueError('SharePoint capture is stale or in the future')
     files = {}
+    inventory_run = None
     for entry in receipt.get('Files', []):
         name = entry.get('File')
         if not name or Path(name).name != name or '/' in name or '\\' in name or name in files:
             raise ValueError('Invalid or duplicate receipt filename')
+        if entry.get('RunId') != publication_run or entry.get('Status') != 'Success':
+            raise ValueError('Invalid SharePoint receipt entry publication identity or status: ' + name)
         candidate = last / name
         limit = float(overrides.get(name, maximum))
         observed_age = (asof - utc(entry.get('CompletedAtUtc', receipt['CompletedAtUtc']))).total_seconds() / 3600
@@ -229,8 +235,18 @@ def inventory(last, producer, tenant, asof, maximum=168, overrides=None):
         rows = read_csv(candidate, ';')
         if len(rows) != entry.get('Rows'):
             raise ValueError('SharePoint receipt row count mismatch')
-        if any(r.get('TenantKey') != tenant or r.get('RunId') != receipt.get('RunId') for r in rows):
-            raise ValueError('Cross-tenant or mixed-run SharePoint capture')
+        # Collectors own their CSV RunId; the receipt publisher owns a separate RunId.
+        # Match receipt entries to the publication, and CSV rows to one inventory run.
+        for row_number, row in enumerate(rows, 2):
+            if row.get('TenantKey') != tenant:
+                raise ValueError(f'SharePoint CSV tenant mismatch: {name}, row {row_number}')
+            row_run = text(row.get('RunId'))
+            if not row_run:
+                raise ValueError(f'Missing SharePoint CSV inventory RunId: {name}, row {row_number}')
+            if inventory_run is None:
+                inventory_run = row_run
+            elif row_run != inventory_run:
+                raise ValueError(f'Mixed SharePoint CSV inventory RunId: {name}, row {row_number}')
         files[name] = rows
     if not set(receipt.get('RequiredFiles', [])).issubset(files):
         raise ValueError('Incomplete SharePoint receipt group')

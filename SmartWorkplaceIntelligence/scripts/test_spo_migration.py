@@ -1,5 +1,6 @@
 """Synthetic offline checks; no client fixtures or production preparation."""
 import copy
+import csv
 import datetime as dt
 import json
 from pathlib import Path
@@ -214,6 +215,79 @@ class MigrationTests(unittest.TestCase):
             for spec in contract['tables']:
                 with (root/spec['file']).open(encoding='utf-8-sig') as stream:
                     self.assertEqual(next(m.csv.reader(stream)), [c['name'] for c in spec['columns']])
+
+
+class InventoryReceiptTests(unittest.TestCase):
+    producer = 'SmartM365-SharePoint-OnPrem-Content-Inventory'
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.last = Path(self.temp.name)
+        self.receipt_path = self.last / ('SmartInventory_' + self.producer + '.current.json.txt')
+
+    def write(self, groups, entry_changes=None):
+        entries = []
+        for index, rows in enumerate(groups):
+            path = self.last / f'SharePoint_OnPrem_Sample{index}.csv'
+            with path.open('w', encoding='utf-8-sig', newline='') as stream:
+                writer = csv.DictWriter(stream, fieldnames=['TenantKey', 'RunId'], delimiter=';')
+                writer.writeheader()
+                writer.writerows(rows)
+            entry = {'File': path.name, 'Rows': len(rows), 'SHA256': m.sha(path), 'RunId': 'publication-run', 'Status': 'Success'}
+            entry.update(entry_changes or {})
+            entries.append(entry)
+        self.receipt = {'Owner': 'SmartInventory-SourceReceipt', 'ContractVersion': '1.2', 'TenantKey': 'sample-prod',
+                        'Producer': self.producer + '.ps1', 'Status': 'Completed', 'RunId': 'publication-run',
+                        'CompletedAtUtc': NOW.isoformat(), 'Files': entries, 'RequiredFiles': [e['File'] for e in entries]}
+        self.receipt_path.write_text(json.dumps(self.receipt))
+
+    def check(self):
+        return m.inventory(self.last, self.producer, 'sample-prod', NOW)
+
+    def test_distinct_publication_and_collector_runs_are_valid(self):
+        rows = [{'TenantKey': 'sample-prod', 'RunId': 'collector-run'}]
+        self.write([rows, rows, []])
+        files, state = self.check()
+        self.assertEqual(len(files), 3)
+        self.assertEqual(state['Run ID'], 'publication-run')
+        self.assertEqual(state['Qualification'], 'Observed only')
+
+    def test_rejects_mixed_csv_runs_across_files(self):
+        self.write([[{'TenantKey': 'sample-prod', 'RunId': run}] for run in ['collector-a', 'collector-b']])
+        with self.assertRaisesRegex(ValueError, 'Mixed SharePoint CSV inventory RunId.*Sample1'):
+            self.check()
+
+    def test_rejects_mixed_csv_runs_within_a_file(self):
+        self.write([[{'TenantKey': 'sample-prod', 'RunId': run} for run in ['collector-a', 'collector-b']]])
+        with self.assertRaisesRegex(ValueError, 'Mixed SharePoint CSV inventory RunId.*row 3'):
+            self.check()
+
+    def test_rejects_cross_tenant_rows_and_missing_inventory_run(self):
+        for row, expected in [({'TenantKey': 'other', 'RunId': 'collector-run'}, 'CSV tenant mismatch'),
+                              ({'TenantKey': 'sample-prod', 'RunId': ''}, 'Missing SharePoint CSV inventory RunId')]:
+            with self.subTest(row=row):
+                self.write([[row]])
+                with self.assertRaisesRegex(ValueError, expected):
+                    self.check()
+
+    def test_receipt_entries_must_match_the_publication(self):
+        for change in [{'RunId': 'other-publication'}, {'RunId': ''}, {'Status': 'Failed'}]:
+            with self.subTest(change=change):
+                self.write([[{'TenantKey': 'sample-prod', 'RunId': 'collector-run'}]], change)
+                with self.assertRaisesRegex(ValueError, 'receipt entry publication identity or status'):
+                    self.check()
+
+    def test_still_rejects_tampered_payload_and_wrong_row_count(self):
+        row = [{'TenantKey': 'sample-prod', 'RunId': 'collector-run'}]
+        self.write([row])
+        with (self.last / self.receipt['Files'][0]['File']).open('a') as stream:
+            stream.write('tamper')
+        with self.assertRaisesRegex(ValueError, 'payload mismatch'):
+            self.check()
+        self.write([row], {'Rows': 2})
+        with self.assertRaisesRegex(ValueError, 'row count mismatch'):
+            self.check()
 
 
 if __name__ == '__main__':
