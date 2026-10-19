@@ -1,5 +1,6 @@
 ﻿Import-Module (Join-Path $PSScriptRoot 'SmartM365.SharePointJsonTransition.psd1') -MinimumVersion '1.0.4' -Global -ErrorAction Stop
 Import-Module (Join-Path $PSScriptRoot 'SmartM365.JsonTransport.psd1') -MinimumVersion '1.0.2' -Global -ErrorAction Stop
+. (Join-Path $PSScriptRoot 'SmartM365-DailyCaptureRetention.ps1')
 . (Join-Path $PSScriptRoot 'SmartM365-CmdbReceipt.ps1')
 . (Join-Path $PSScriptRoot 'SmartM365-MailMaintenance.ps1')
 . (Join-Path $PSScriptRoot 'SmartM365-ImportExcelHealth.ps1')
@@ -1358,6 +1359,7 @@ function RemoveOldFiles {
         [string]$LogFile
     )
 
+    if ((Get-Command Test-SmartM365DailyCapturePath -ErrorAction SilentlyContinue) -and (Test-SmartM365DailyCapturePath $Path)) { return }
     if (Test-SmartM365InterruptedRun) { return }; if (-not (Test-Path -LiteralPath $Path)) { return }
     if ([string]::IsNullOrWhiteSpace($LogFile) -and -not [string]::IsNullOrWhiteSpace([string]$global:LogTextFile)) {
         $LogFile = [string]$global:LogTextFile
@@ -1449,6 +1451,7 @@ function Remove-SmartM365TimestampedFilesOlderThan {
         [string]$LogFile
     )
 
+    if ((Get-Command Test-SmartM365DailyCapturePath -ErrorAction SilentlyContinue) -and (Test-SmartM365DailyCapturePath $FolderPath)) { return }
     if (Test-SmartM365InterruptedRun) { return }; if (-not (Test-Path -LiteralPath $FolderPath -PathType Container)) { return }
     if ([string]::IsNullOrWhiteSpace($LogFile) -and -not [string]::IsNullOrWhiteSpace([string]$global:LogTextFile)) {
         $LogFile = [string]$global:LogTextFile
@@ -5109,6 +5112,7 @@ function Remove-SmartM365SharePointTimestampedCsvOlderThan {
     )
 
     $result = [pscustomobject]@{ Deleted = 0; Failed = 0; Kept = 0 }
+    if ((Get-Command Test-SmartM365DailyCapturePath -ErrorAction SilentlyContinue) -and (Test-SmartM365DailyCapturePath $TimestampedPath)) { return $result }
     if (-not $Enabled) { return $result }
     $currentName = [IO.Path]::GetFileName($TimestampedPath)
     $nameMatch = [regex]::Match($currentName, '^(?<Prefix>.+)_(?<Stamp>\d{8}[-_]\d{6})\.(?<Extension>csv|xlsx)$', [Text.RegularExpressions.RegexOptions]::IgnoreCase)
@@ -6349,7 +6353,7 @@ function Disconnect-SmartM365CloudSession {
 
 Export-ModuleMember -Function `
     Start-SmartM365CmdbSourceReceipt, Set-SmartM365CmdbSourceScope, Complete-SmartM365CmdbSourceReceipt, Start-SmartM365SourceReceipt, Complete-SmartM365SourceReceipt, Assert-SmartM365SourcePublication, Register-SmartM365SourceCsv, Get-SmartM365CurrentSourcePublication, Add-SmartM365SourceRunNote, `
-    Format-SmartM365LogLine, Update-SmartM365TimestampedTranscript, WriteLog, Write-Log, Get-SmartM365ModuleDiagnosticText, Write-SmartM365LoadedModuleVersions, Write-SmartM365ExecutionContext, Write-SmartM365CompletionBanner, Complete-SmartM365ExecutionContext, Test-FileLocked, RemoveOldFiles, Remove-SmartM365TimestampedFilesOlderThan, Remove-SmartM365TimestampedDirectoriesOlderThan, Remove-OldFiles, EnsureExchangePSSnapinLoaded, `
+    Enable-SmartM365DailyCaptureRetention, Format-SmartM365LogLine, Update-SmartM365TimestampedTranscript, WriteLog, Write-Log, Get-SmartM365ModuleDiagnosticText, Write-SmartM365LoadedModuleVersions, Write-SmartM365ExecutionContext, Write-SmartM365CompletionBanner, Complete-SmartM365ExecutionContext, Test-FileLocked, RemoveOldFiles, Remove-SmartM365TimestampedFilesOlderThan, Remove-SmartM365TimestampedDirectoriesOlderThan, Remove-OldFiles, EnsureExchangePSSnapinLoaded, `
     Set-SmartM365CoreContext, Get-SmartM365MaxItemsValue, Test-SmartM365MaxItemsMode, Get-SmartM365MaxItemsSuffix, Set-SmartM365MaxItemsMode, Add-SmartM365MaxItemsSuffixToCsvPath, Add-SmartM365MaxItemsSuffixToBaseName, Add-SmartM365MaxItemsMailBanner, Add-SmartM365MaxItemsSubjectPrefix, Get-SmartM365MailTenantName, Format-SmartM365MailSubject, Get-SmartM365MailScriptContext, Add-SmartM365MailExecutionFooter, Limit-SmartM365RowsForMaxItems, Get-SmartM365CsvValidationBaseName, Get-SmartM365CsvValidationRule, Assert-SmartM365CsvDataCompleteness, Add-SmartM365CsvValidationRule, Initialize-SmartM365DefaultCsvValidationRules, Add-SmartM365TenantKey, Repair-SmartM365CsvTenantKeySchema, Write-SmartM365CsvAtomically, Add-SmartM365CsvRowsAtomically, Copy-SmartM365FileAtomically, Write-SmartM365TextAtomically, Publish-SmartM365Csv, Export-SmartM365Csv, Export-SmartM365CsvFromConvert, `
     ConvertTo-SmartM365ConfigBoolean, Get-SmartM365MailBrandingConfig, ConvertTo-SmartM365MailLogoDataUri, Add-SmartM365MailBranding, ConvertToRecipientArray, ConvertTo-SmartM365EmailHtmlText, New-SmartM365EmailKpiGridHtml, New-SmartM365EmailTableHtml, New-SmartM365EmailBody, ConvertTo-SmartM365EmailBody, Get-SmartM365SharePointUploadRecordForLocalFile, Convert-SmartM365MailBodyLocalPathsToSharePointLinks, NewSimpleEmailBody, ConvertBytesToSizeString, GetFileList, `
     NewTableEmailBody, NewTableFilesEmailBody, SendEmailHtmlReport, Send-SmartM365Mail, Send-SmartM365GraphMail, SendFileListEmailReport, Send-SmartM365TeamsNotification, `

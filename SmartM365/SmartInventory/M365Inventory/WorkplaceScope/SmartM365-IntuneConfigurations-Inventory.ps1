@@ -3,7 +3,7 @@
 .SYNOPSIS
 Collects Intune configuration definitions, assignments, and reported device states.
 .VERSION
-1.1.1
+1.1.2
 #>
 [CmdletBinding()]
 param(
@@ -48,6 +48,7 @@ try {
     $smartRoot = Split-Path (Split-Path (Split-Path $PSScriptRoot -Parent) -Parent) -Parent
     . (Join-Path $smartRoot 'Config/SmartM365-TenantContext.ps1')
     $effective = Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot
+    Import-Module (Join-Path $smartRoot 'Modules/SmartM365.Core/SmartM365.Core.psd1') -MinimumVersion '1.0.92' -Global -ErrorAction Stop
     Import-Module (Join-Path $smartRoot 'SmartInventory/Common/SmartM365.EvidenceCollector.Common.psd1') -MinimumVersion '1.0.11' -Force
     $script:Runtime = Initialize-SmartM365EvidenceRuntime -ScriptPath $PSCommandPath -EffectiveConfig $effective `
         -DefaultOutputRelativePath 'Intune/WorkplaceScope/Configurations' -OutputPath $OutputPath `
@@ -55,6 +56,7 @@ try {
         -EnableConfiguredExternalActions:$EnableConfiguredExternalActions
     Start-SmartM365SourceReceipt -ScriptPath $PSCommandPath -SourceRootPath $script:Runtime.LatestCsvFolderPath `
         -ReadOnly:($ValidateOnly -or $MaxItems -gt 0)
+    Enable-SmartM365DailyCaptureRetention -OutputRoot $script:Runtime.OutputPath
     Connect-SmartM365EvidenceGraph $script:Runtime @('DeviceManagementConfiguration.Read.All','DeviceManagementManagedDevices.ReadWrite.All') -InteractiveAuth:$InteractiveAuth
     Invoke-SmartM365Preflight -ScriptName 'SmartM365-IntuneConfigurations-Inventory' `
         -OutputPaths @($script:Runtime.OutputPath,$script:Runtime.LatestCsvFolderPath) `

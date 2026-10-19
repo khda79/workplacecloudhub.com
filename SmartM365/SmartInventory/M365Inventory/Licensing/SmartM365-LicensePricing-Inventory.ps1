@@ -7,7 +7,7 @@ SKU+Currency replaces every public period of that SKU+Currency. A PricingSourceC
 file keeps the former whole-replacement behaviour with a migration warning. Windows 10 ESU prices come only
 from a private EUR source (EsuPricingCsvPath) and are published as Windows_ESU_Prices.csv.
 .VERSION
-1.1.1
+1.1.2
 .REQUIREMENTS
 No Microsoft Graph permission. PricingSourceCsvPath must reference the public baseline or a private CSV.
 #>
@@ -25,7 +25,7 @@ if(-not $smartM365LifecycleRoot){throw 'SmartM365 lifecycle support is missing; 
 $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -RequireReturn
 try {
 Set-StrictMode -Version Latest
-$ErrorActionPreference='Stop';$ScriptVersion='1.1.1';$script:Runtime=$null;$script:CompletionStatus='Success';$script:CompletionError=$null
+$ErrorActionPreference='Stop';$ScriptVersion='1.1.2';$script:Runtime=$null;$script:CompletionStatus='Success';$script:CompletionError=$null
 
 function ConvertTo-LicensePriceRows{
     param([object[]]$InputRows,[string]$RunId,[string]$CollectedAtUtc)
@@ -112,9 +112,11 @@ try{
     $effectiveConfig=Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot
     # Create the runtime JSON from its template when absent and add missing template keys without overwriting values.
     Read-SmartM365JsonConfig -Path (Join-Path $PSScriptRoot 'SmartM365-LicensePricing-Inventory.local.json') -Required | Out-Null
+    Import-Module (Join-Path $PSScriptRoot '..\..\..\Modules\SmartM365.Core\SmartM365.Core.psd1') -MinimumVersion '1.0.92' -Global -ErrorAction Stop
     Import-Module (Join-Path $PSScriptRoot '..\..\Common\SmartM365.EvidenceCollector.Common.psd1') -MinimumVersion '1.0.11' -Force
     $script:Runtime=Initialize-SmartM365EvidenceRuntime -ScriptPath $PSCommandPath -EffectiveConfig $effectiveConfig -DefaultOutputRelativePath 'M365\Licensing\Pricing' -OutputPath $OutputPath -LatestCsvFolderPath $LatestCsvFolderPath -ValidateOnly:$ValidateOnly -EnableConfiguredExternalActions:$EnableConfiguredExternalActions
     Start-SmartM365SourceReceipt -ScriptPath $PSCommandPath -SourceRootPath $script:Runtime.LatestCsvFolderPath -ReadOnly:($ValidateOnly -or $SelfTest)
+    Enable-SmartM365DailyCaptureRetention -OutputRoot $script:Runtime.OutputPath
     if([string]::IsNullOrWhiteSpace($PricingSourceCsvPath)){$PricingSourceCsvPath=[string](Get-SmartM365EvidenceProperty $script:Runtime.Config @('PricingSourceCsvPath'))}
     if([string]::IsNullOrWhiteSpace($PricingSourceCsvPath)){throw 'PricingSourceCsvPath must reference an existing CSV.'}
     if([string]::IsNullOrWhiteSpace($PricingOverrideCsvPath)){$PricingOverrideCsvPath=[string](Get-SmartM365EvidenceProperty $script:Runtime.Config @('PricingOverrideCsvPath'))}

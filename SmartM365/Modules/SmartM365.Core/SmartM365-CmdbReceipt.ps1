@@ -2,9 +2,10 @@
 .SYNOPSIS
 Producer-owned, current-only SmartInventory source receipts. Dot-sourced helper.
 .VERSION
-1.3.0
+1.3.1
 .NOTES
-Compatible with Windows PowerShell 5.1. No APIs, history or report refresh.
+Compatible with Windows PowerShell 5.1. Optional daily capture maintenance is
+delegated to Core only for explicitly opted-in producers; no collection or report refresh.
 #>
 [CmdletBinding()]
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidGlobalVars','',Justification='Core identity and current-run CSV publication contract; this helper does not change these globals.')]
@@ -80,6 +81,7 @@ function Start-SmartM365CmdbSourceReceipt {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$ScriptPath,[string]$SourceRootPath,[switch]$ReadOnly,[switch]$ConfiguredOutputs,[hashtable]$ScopeParameters=@{})
     if($script:SmartM365CmdbSourceContext){throw 'A CMDB source receipt is already active in this module.'}
+    if (Get-Command Test-SmartM365DailyCapturePath -ErrorAction SilentlyContinue) { $script:SmartM365DailyCapture=$null }
     $script:SmartM365SourceReceiptUploadPaths=@()
     if($ReadOnly -or (Test-SmartM365MaxItemsMode)){return}
     $registryPath=if($ConfiguredOutputs){Join-Path (Split-Path $script:SmartM365CmdbRegistryPath) 'SmartM365-SourceReceipts.json.txt'}else{$script:SmartM365CmdbRegistryPath}
@@ -307,6 +309,10 @@ function Complete-SmartM365CmdbSourceReceipt {
         }
         Write-SmartM365SourceRunState $context $document.Status $reason $document.Errors
         $script:SmartM365SourceReceiptUploadPaths+=@($context.RunPath)
+        if ($complete -and (Get-Command Invoke-SmartM365DailyCaptureRetention -ErrorAction SilentlyContinue)) {
+            try { Invoke-SmartM365DailyCaptureRetention -Context $context -Proof ([pscustomobject]$document) }
+            catch { WriteLog -Message ('Daily capture retention refused; source CSVs and receipt preserved: {0}' -f $_.Exception.Message) -Level WARNING }
+        }
         if(-not $complete){WriteLog -Message "Source qualification rejected for '$($context.Producer)': $reason Native CSVs remain preserved." -Level WARNING}
         if($complete){return $context.ReceiptPath}else{return $context.RunPath}
     }finally{if($context.Lock){$context.Lock.Dispose()};$script:SmartM365CmdbSourceContext=$null}

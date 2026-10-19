@@ -17,7 +17,7 @@ columns remain empty after a v1 fallback.
 This collector never requests or exports prompt text.
 
 .VERSION
-1.0.4
+1.0.5
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -65,7 +65,7 @@ if ($PSBoundParameters.ContainsKey('MaxItems') -and $MaxItems -gt 0) {
 }
 
 $ErrorActionPreference = 'Stop'
-$ScriptVersion = '1.0.4'
+$ScriptVersion = '1.0.5'
 $TaskName = "SmartM365-CopilotUsage-Inventory v$ScriptVersion"
 $runId = Get-Date -Format 'yyyyMMdd_HHmmss'
 $rawReportPath = $null
@@ -454,7 +454,7 @@ $logPath = Join-Path -Path $logFolder -ChildPath ("{0}_{1}.log" -f $logFileBaseN
 $rawReportPath = Join-Path -Path $runOutputRoot -ChildPath ("M365_Copilot_UserUsage_Source_{0}.csv" -f $runId)
 
 $modulePath = Join-Path -Path ([string](Get-SmartM365ConfigValue -Name 'SmartM365RootPath' -DefaultValue (Split-Path -Path $PSScriptRoot -Parent))) -ChildPath 'Modules\SmartM365.Core\SmartM365.Core.psd1'
-Import-Module -Name $modulePath -MinimumVersion '1.0.87' -Force -ErrorAction Stop
+Import-Module -Name $modulePath -MinimumVersion '1.0.92' -Force -ErrorAction Stop
 
 $global:RetentionMaxCSV = [int](Get-SmartM365ConfigValue -Name 'RetentionMaxCSV' -DefaultValue 30)
 $global:RetentionMaxLogs = [int](Get-SmartM365ConfigValue -Name 'RetentionMaxLogs' -DefaultValue 30)
@@ -517,6 +517,7 @@ try {
     }
 
     Start-SmartM365SourceReceipt -ScriptPath $PSCommandPath -SourceRootPath $LatestCsvFolderPath -ReadOnly:$ValidateOnly -ScopeParameters @{Period=$Period;ReportVersion=$ReportVersion}
+    Enable-SmartM365DailyCaptureRetention -OutputRoot $OutputPath
     Start-SmartM365RunTranscript -Path $global:logTranscriptFile -Append | Out-Null
     WriteLog ("Starting {0}. Tenant={1}; Period={2}; RequestedReportVersion={3}; RunId={4}" -f $TaskName, $Tenant, $Period, $ReportVersion, $runId) 'INFO'
 

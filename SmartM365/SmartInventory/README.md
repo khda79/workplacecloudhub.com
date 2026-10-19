@@ -66,6 +66,51 @@ partial-export option. Windows Update reports the source and coverage of
 `DaysSinceLastStatus`; the field remains blank when the export has no suitable
 device-status date. A policy modification date is not substituted for it.
 
+## Daily capture retention
+
+Core 1.0.92 adds receipt-qualified daily capture retention for eight producers:
+M365 UserActivity, Copilot Usage, M365 WorkplaceScope, Intune Configurations,
+Intune Managed Apps, Licences, License Pricing, and Windows Autopatch Alerts.
+Other collectors keep their existing retention behavior.
+
+After a successful source receipt, while its producer lock is still held, the
+policy keeps the last complete published set for each of seven calendar days
+(today plus six preceding days). Completion dates use Europe/Paris, including
+daylight-saving transitions. A later failed run or a smaller same-day export
+selection cannot displace a complete set. Completion qualifies the configured
+exports; it does not establish whole-tenant collection completeness.
+
+The policy reuses matching current-run timestamped CSVs. When a receipt member
+has no matching timestamped copy, it creates a byte-verified copy under
+`DailyCaptures/<RunId>/`. This matters for collectors that previously retained
+only some of their exports. CSV schemas, current source receipts and weekly
+snapshots are unchanged. Capture metadata records identity, completion date,
+exact paths, sizes and SHA256 under `DailyCaptureRecords/<producer>/`; metadata
+records are kept after their payload is retired. No archive is created.
+
+Per-file count/age cleanup is bypassed only inside the opted-in output root.
+For Usage and Copilot this root is the parent of the run folders, rather than
+the current run folder. Whole-set retention runs only after receipt completion;
+it verifies retained captures and every candidate before deletion. If SharePoint
+upload is enabled, captures and their metadata must be uploaded and read back
+with matching SHA256 first. Remote deletion uses the inspected item ID and
+`If-Match` ETag; a remote refusal stops local deletion.
+
+`WeeklyHistory`, `DATA-LAST`, `Corrections`, source receipts and manifests are
+excluded. Unindexed legacy CSVs are preserved: old run dates alone are not
+completion proof, and this change does not infer or repair old capture records.
+Metadata corruption, linked paths, missing/changed retained files, locked files,
+or uncertain remote results stop further cleanup and produce a warning. Deletion
+of a multi-file set is not an atomic transaction; inspect the retained metadata
+and run log after an interrupted or partially completed cleanup.
+An output root containing a filesystem link disables both daily retention and
+legacy cleanup with a warning, while allowing collection to continue.
+
+Offline regression coverage is available through
+`Tests/Test-SmartM365DailyCaptureRetentionOffline.ps1`. It uses temporary
+synthetic data and mocked SharePoint only; deployment and real server/SharePoint
+qualification remain separate.
+
 ## Organization
 
 - `ActiveDirectoryInventory/`: Active Directory inventory and reporting.

@@ -8,7 +8,7 @@ report, and publishes stable CSV files into the tenant DATA-LAST folder for
 SmartFinOps and downstream inventory analysis.
 
 .VERSION
-1.30
+1.31
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication; Microsoft.Graph.Reports.
@@ -47,7 +47,7 @@ if ($PSBoundParameters.ContainsKey('MaxItems') -and $MaxItems -gt 0) {
 }
 
 $ErrorActionPreference = 'Stop'
-$ScriptVersion = "1.30"
+$ScriptVersion = "1.31"
 $TaskName = "SmartM365-M365UserActivity-Inventory v$ScriptVersion"
 $runId = Get-Date -Format 'yyyyMMdd_HHmmss'
 
@@ -591,7 +591,7 @@ $logFolder = Join-Path -Path $logAllRoot -ChildPath $logFileBaseName
 $logPath = Join-Path -Path $logFolder -ChildPath ("{0}_{1}.log" -f $logFileBaseName,$runId)
 
 $modulePath = Join-Path -Path ([string](Get-SmartM365ConfigValue -Name 'SmartM365RootPath' -DefaultValue (Split-Path -Path $PSScriptRoot -Parent))) -ChildPath 'Modules\SmartM365.Core\SmartM365.Core.psd1'
-Import-Module -Name $modulePath -MinimumVersion '1.0.85' -Force -ErrorAction Stop
+Import-Module -Name $modulePath -MinimumVersion '1.0.92' -Force -ErrorAction Stop
 
 $global:RetentionMaxCSV = [int](Get-SmartM365ConfigValue -Name 'RetentionMaxCSV' -DefaultValue 30)
 $global:RetentionMaxLogs = [int](Get-SmartM365ConfigValue -Name 'RetentionMaxLogs' -DefaultValue 30)
@@ -634,6 +634,7 @@ try {
     Start-Transcript -Path $global:logTranscriptFile -Append | Out-Null
     try {
         Start-SmartM365CmdbSourceReceipt -ScriptPath $PSCommandPath -SourceRootPath $LatestCsvFolderPath -ReadOnly:$ValidateOnly
+        Enable-SmartM365DailyCaptureRetention -OutputRoot $OutputPath
     }
     catch {
         $lockError = $_.Exception

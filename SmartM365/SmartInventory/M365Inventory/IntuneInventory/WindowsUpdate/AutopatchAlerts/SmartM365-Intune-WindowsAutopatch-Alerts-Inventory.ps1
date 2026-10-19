@@ -44,7 +44,7 @@ Uses device code authentication.
 .EXAMPLE
 pwsh -File .\SmartM365-Intune-WindowsAutopatch-Alerts-Inventory.ps1
 .VERSION
-1.24
+1.25
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication.
@@ -139,7 +139,7 @@ function Import-SmartM365CorePreflight {
     while ($searchRoot) {
         $modulePath = Join-Path -Path $searchRoot -ChildPath 'Modules\SmartM365.Core\SmartM365.Core.psd1'
         if (Test-Path -LiteralPath $modulePath) {
-            Import-Module -Name $modulePath -MinimumVersion '1.0.87' -Prefix Core -ErrorAction Stop
+            Import-Module -Name $modulePath -MinimumVersion '1.0.92' -Prefix Core -ErrorAction Stop
             return
         }
 
@@ -321,7 +321,7 @@ if ([string]::IsNullOrWhiteSpace($OutputFolder)) {
 if ([string]::IsNullOrWhiteSpace($LatestCsvFolderPath)) {
     $LatestCsvFolderPath = $OutputFolder
 }
-$ScriptVersion = "1.24"
+$ScriptVersion = "1.25"
 $ScriptName = [System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
 $StartTime = Get-Date
 $RunStamp = $StartTime.ToString('yyyyMMdd_HHmmss')
@@ -729,6 +729,7 @@ try {
     Test-Ps7
     Import-SmartM365CorePreflight
     Start-CoreSmartM365CmdbSourceReceipt -ScriptPath $PSCommandPath -SourceRootPath $LatestCsvFolderPath
+    Enable-CoreSmartM365DailyCaptureRetention -OutputRoot $OutputFolder
     Import-RequiredModule -Name Microsoft.Graph.Authentication
 
     Write-Log -Message ("Starting {0} v{1}" -f $ScriptName, $ScriptVersion)

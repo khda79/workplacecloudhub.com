@@ -3,7 +3,7 @@
 .SYNOPSIS
 Collect native Entra direct membership and Intune policy/assignment evidence.
 .VERSION
-1.0.10
+1.0.11
 .NOTES
 Candidate collector. Not automatically scheduled until production qualification.
 Graph beta membership avoids the documented v1.0 service-principal omission.
@@ -31,13 +31,14 @@ try {
     $smartRoot = Split-Path (Split-Path (Split-Path $PSScriptRoot -Parent) -Parent) -Parent
     . (Join-Path $smartRoot 'Config/SmartM365-TenantContext.ps1')
     $effective = Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot
-    Import-Module (Join-Path $smartRoot 'Modules/SmartM365.Core/SmartM365.Core.psd1') -MinimumVersion '1.0.87' -ErrorAction Stop
+    Import-Module (Join-Path $smartRoot 'Modules/SmartM365.Core/SmartM365.Core.psd1') -MinimumVersion '1.0.92' -ErrorAction Stop
     Import-Module (Join-Path $PSScriptRoot '../../Common/SmartM365.EvidenceCollector.Common.psd1') -MinimumVersion '1.0.11' -ErrorAction Stop
     Import-Module (Join-Path $PSScriptRoot '../../Common/SmartM365.WorkplaceSource.psd1') -MinimumVersion '1.0.0' -ErrorAction Stop
     $script:Runtime = Initialize-SmartM365EvidenceRuntime -ScriptPath $PSCommandPath -EffectiveConfig $effective `
         -DefaultOutputRelativePath 'M365/WorkplaceScope' -OutputPath $OutputPath -LatestCsvFolderPath $LatestCsvFolderPath `
         -ValidateOnly:$ValidateOnly -EnableConfiguredExternalActions:$EnableConfiguredExternalActions
     Start-SmartM365CmdbSourceReceipt -ScriptPath $PSCommandPath -SourceRootPath $script:Runtime.LatestCsvFolderPath -ReadOnly:($ValidateOnly -or $MaxItems -gt 0)
+    Enable-SmartM365DailyCaptureRetention -OutputRoot $script:Runtime.OutputPath
     Start-SmartM365RunTranscript -Path $global:logTranscriptFile -Append | Out-Null
     $transcriptStarted = $true
     Initialize-SmartM365ImportExcel | Out-Null
