@@ -3,7 +3,7 @@
 .SYNOPSIS
 Collect native Entra direct membership and Intune policy/assignment evidence.
 .VERSION
-1.0.9
+1.0.10
 .NOTES
 Candidate collector. Not automatically scheduled until production qualification.
 Graph beta membership avoids the documented v1.0 service-principal omission.
@@ -149,16 +149,20 @@ try {
         Invoke-SmartM365Preflight -ScriptName 'SmartM365-WorkplaceScope-Inventory' -RequiredGraphApplicationPermissions @('Member.Read.Hidden') | Out-Null
     }
     Write-SmartM365EvidenceLog "Reading direct memberships for $($groups.Count) Entra groups. This can be a long-running inventory."
-    $seenGroups = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    # Membership rows are validated while they are collected, with the publication rule of
+    # M365_EntraGroupMemberships_All: non-empty GroupId/MemberId and unique (GroupId, MemberId) after trim and
+    # lowercase. Distinct groups and distinct members per group make every pair distinct without a global set.
+    $membershipTimer = [Diagnostics.Stopwatch]::StartNew()
+    $seenGroups = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
     foreach ($group in $groups) {
-        if (-not $group.Id -or -not $seenGroups.Add([string]$group.Id)) { throw 'Missing or duplicate Entra group identity.' }
+        if ([string]::IsNullOrWhiteSpace([string]$group.Id) -or -not $seenGroups.Add(([string]$group.Id).Trim().ToLowerInvariant())) { throw 'Missing or duplicate Entra group identity.' }
         $memberRead = Get-WorkplaceDirectMembers -GroupId $group.Id
         if ($memberRead.Absent) { $absentGroups.Add([string]$group.Id); continue }
         $members = @($memberRead.Members)
         $collected = [datetime]::UtcNow.ToString('o')
-        $seen = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+        $seen = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
         foreach ($member in $members) {
-            if (-not $member.Id -or -not $seen.Add([string]$member.Id)) { throw 'Missing or duplicate Entra member identity.' }
+            if ([string]::IsNullOrWhiteSpace([string]$member.Id) -or -not $seen.Add(([string]$member.Id).Trim().ToLowerInvariant())) { throw 'Missing or duplicate Entra member identity.' }
             $memberships.Add([pscustomobject][ordered]@{
                 GroupId=$group.Id; MemberId=$member.Id
                 MemberType=Get-WorkplaceSourceValue $member @('@odata.type','OdataType')
@@ -174,6 +178,8 @@ try {
             GroupCollectedAtUtc=$groupCatalogCollectedAtUtc
         })
     }
+    if ($memberships.Count -gt 0 -and [string]::IsNullOrWhiteSpace([string]$script:Runtime.RunId)) { throw 'Missing RunId on Entra membership rows.' }
+    Write-SmartM365EvidenceLog ("Direct membership collection completed in {0:N1} min: {1} membership row(s) validated while collected." -f $membershipTimer.Elapsed.TotalMinutes, $memberships.Count)
     if ($absentGroups.Count) {
         # Corroborate targeted 404s with a successful fresh full enumeration.
         $freshIds = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
@@ -229,7 +235,12 @@ try {
         @{Name='Intune_Policies_All';Rows=$policies.ToArray();Columns=@('PolicyId','PolicyFamily','DisplayName','Description','Platforms','Technologies','FeatureUpdateVersion','CreatedDateTime','LastModifiedDateTime','NativeEvidenceJson','AssignmentCollectionStatus','RunId','CollectedAtUtc')},
         @{Name='Intune_PolicyAssignments_All';Rows=$assignments.ToArray();Columns=@('PolicyFamily','PolicyId','AssignmentId','TargetType','GroupId','AssignmentFilterId','AssignmentFilterType','NativeTargetJson','RunId','CollectedAtUtc')}
     )
-    foreach ($export in $exports) { Assert-SmartM365CsvDataCompleteness -Data $export.Rows -BaseFileName $export.Name -Columns $export.Columns | Out-Null }
+    # Memberships were validated while collected and are exported first: Publish-SmartM365Csv applies the full rule
+    # again before any file is written, so a second in-memory pass here is not needed.
+    foreach ($export in $exports) {
+        if ($export.Name -eq 'M365_EntraGroupMemberships_All') { continue }
+        Assert-SmartM365CsvDataCompleteness -Data $export.Rows -BaseFileName $export.Name -Columns $export.Columns | Out-Null
+    }
     foreach ($export in $exports) {
         Export-SmartM365EvidenceDataset $script:Runtime $export.Name $export.Rows $export.Columns -NoWeeklyHistory -SingleSerialization | Out-Null
     }
