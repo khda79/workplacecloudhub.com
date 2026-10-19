@@ -3,7 +3,7 @@
 .SYNOPSIS
   Offline tests of the SmartFinOps Workplace demo report generator.
 .VERSION
-1.1.0
+1.2.0
 .NOTES
   Runs Demo\SmartFinOps-Workplace-DemoReport.ps1 (real engine and report on synthetic contoso data) into a temporary
   folder, then checks the page, its manifest, the DEMO banner, the statuses it must show and the leak scanner.
@@ -48,7 +48,7 @@ try {
 
     #region 2. Manifest
     Check ($manifest.Owner -eq 'SmartFinOps-DemoReport' -and $manifest.TenantKey -eq 'contoso-demo' -and $manifest.LeakScan -eq 'Passed' -and $manifest.SourceCommit -eq 'test-commit') 'manifest identity, tenant key, leak scan and source commit'
-    Check ($manifest.ValuationVersion -match '^\d+\.\d+\.\d+$' -and $manifest.ReportVersion -match '^\d+\.\d+\.\d+$' -and $manifest.GeneratorVersion -eq '1.0.1' -and $manifest.FixtureVersion -eq '1.0.0') 'manifest versions'
+    Check ($manifest.ValuationVersion -match '^\d+\.\d+\.\d+$' -and $manifest.ReportVersion -match '^\d+\.\d+\.\d+$' -and $manifest.GeneratorVersion -eq '1.0.2' -and $manifest.FixtureVersion -eq '1.0.0') 'manifest versions'
     Check (@($manifest.ValuationExitCodes).Count -eq 2 -and @($manifest.ValuationExitCodes | Where-Object { $_ -notin @(0,3) }).Count -eq 0 -and $manifest.ReportExitCode -in @(0,3)) 'two valuation runs and the report ended with 0 or 3'
     Check ($manifest.ReportSHA256 -eq (Get-FileHash -LiteralPath $page -Algorithm SHA256).Hash) 'manifest hash matches the page'
     Check (-not ((Get-Content -LiteralPath $manifestPath -Raw) -match '(?i)[a-z]:\\|\\\\|temp')) 'manifest holds no local path'
@@ -62,6 +62,8 @@ try {
     Check ($html.Contains('AD domains not collected: west')) 'partial AD scope shown'
     Check ($html -match 'enabled accounts without M365 activity in 90 days' -and $html -match 'E3 to F3 \(not in the R total\)') 'enabled inactive accounts and conditional E3 to F3 shown separately'
     Check ($html -notmatch '(?i)<script|https?://(?!www\.w3\.org/2000/svg)') 'no script and no external resource'
+    Check ([regex]::Matches($html, '(?i)<img\b').Count -eq 1 -and $html.Contains('<img alt="WorkplaceCloudHub" ') -and -not $html.Contains('class="client-logo"')) 'one image only, the WorkplaceCloudHub logo: never a client logo'
+    Check ($log.Contains('Report run without client logo (-NoClientLogo confirmed).')) 'the generator forces the report without SmartM365 branding'
     #endregion
   }
 
@@ -101,6 +103,7 @@ try {
   . $generator
   $clean = '<html><head><title>x</title><style>p{}</style></head><body><p>north.contoso.invalid 2.4.1 12:30:45 contoso-demo https://workplacecloudhub.com</p><svg xmlns="http://www.w3.org/2000/svg"></svg></body></html>'
   Check (@(Test-DemoLeak -Html $clean).Count -eq 0) 'clean page passes the leak scan'
+  Check (@(Test-DemoLeak -Html $clean.Replace('</body>', '<div class="logo"><img alt="WorkplaceCloudHub" width="120" height="97" src="data:image/png;base64,AAAA"></div></body>')).Count -eq 0) 'the WorkplaceCloudHub logo alone passes the leak scan'
   $cases = [ordered]@{
     'e-mail address or UPN' = 'contact user1@fabrikam.invalid'
     'GUID' = '11111111-2222-3333-4444-555555555555'
@@ -113,6 +116,7 @@ try {
     'foreign domain' = 'mail.fabrikam.com'
     'external URL' = 'see https://cdn.fabrikam.invalid/x.js'
     'tenant key other than' = 'tenant fabrikam-prod'
+    'image other than the WorkplaceCloudHub logo' = '<img alt="Client" src="data:image/png;base64,AAAA">'
   }
   foreach ($case in $cases.GetEnumerator()) {
     $findings = @(Test-DemoLeak -Html ($clean.Replace('</body>', "<p>$($case.Value)</p></body>")))

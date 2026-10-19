@@ -9,7 +9,7 @@
   FinOps_* CSVs with their own receipt.
   Unqualified input is reported as Not measured, never as zero or as an older value.
 .VERSION
-2.2.3
+2.2.4
 .NOTES
   -Tenant is the profile key; source receipts and rows are compared with the organization TenantKey (SmartM365TenantKey,
   or -SmartM365TenantKey). Folders: the SmartM365 DATA-LAST, DATA-ALL and LOG-ALL of the profile.
@@ -32,7 +32,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-$script:ScriptVersion = '2.2.3'
+$script:ScriptVersion = '2.2.4'
 # Run with -File, this script scope is the global scope: SmartM365 session values (LogPath, SmartM365TenantKey, ...)
 # set by the upload helpers would overwrite script variables of the same name. Names here never collide.
 $script:TenantKeyParameter = [string]$SmartM365TenantKey
@@ -306,6 +306,17 @@ function Get-FinOpsSource {
     $record.Rows = $null
   }
   return $record
+}
+
+function Get-FinOpsProvisionalReasonLine {
+  param([AllowEmptyCollection()][object[]]$Trace, [Parameter(Mandatory)][hashtable]$Sources)
+  # One log line per provisional source: the Licences reason, else the detail published in FinOps_Sources, never empty (2.2.4).
+  foreach ($item in $Trace) {
+    $detail = ([string]$item.Reason).Trim()
+    if (-not $detail -and $Sources.ContainsKey($item.Source)) { $detail = ([string]$Sources[$item.Source].Reason).Trim() }
+    if (-not $detail) { $detail = 'source status Provisional' }
+    '{0} -> {1}: {2}' -f $item.Source, $item.Levers, $detail
+  }
 }
 
 function Set-FinOpsSourceNotMeasured {
@@ -1261,7 +1272,7 @@ try {
   foreach ($control in $failed) { Write-FinOpsLog ('Control {0} failed: {1} source={2} finops={3}' -f $control.Control, $control.Key, $control.SourceCount, $control.FinOpsCount) 'ERROR' }
   $notMeasuredMailbox = @($result.Opportunities | Where-Object { $_.Lever -eq 'L5' -and $_.ValuationStatus -eq 'Not measured' }).Count
   if ($notMeasuredMailbox) { Write-FinOpsLog "$notMeasuredMailbox disabled-account license(s) not measured: mailbox state unknown during the Licences run (EXO not qualified)." 'WARNING' }
-  if ($result.Provisional) { Write-FinOpsLog ('Provisional amounts: {0}' -f ($result.ProvisionalReasons -join ' | ')) 'WARNING' }
+  if ($result.Provisional) { Write-FinOpsLog ('Provisional amounts: {0}' -f (@(Get-FinOpsProvisionalReasonLine -Trace @($result.ProvisionalTrace) -Sources $sources) -join ' | ')) 'WARNING' }
   $totalR = @($summary | Where-Object KpiKey -eq 'TOTAL_R')
   Write-FinOpsLog ('Licences measured: {0}; opportunities: {1}; TOTAL_R annual: {2} EUR; controls failed: {3}' -f $result.Measured, $result.Opportunities.Count, $(if ($totalR.Count -and [string]$totalR[0].AnnualAmount -ne '') { Format-FinOpsDecimal $totalR[0].AnnualAmount } else { 'n/a' }), $failed.Count)
 

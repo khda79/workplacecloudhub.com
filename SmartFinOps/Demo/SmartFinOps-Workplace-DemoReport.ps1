@@ -9,12 +9,14 @@
      SmartM365.Core source receipts, in two stages: a baseline plateau, then the current day after a reduction.
   3. Runs SmartFinOps-Workplace-Valuation.ps1 on each stage, then SmartFinOps-Workplace-Report.ps1, unchanged, with
      SharePoint upload and the daily email disabled. Exit codes 0 and 3 are accepted (the demo includes provisional
-     amounts); 1 or a "Report not available" page fails the run.
+     amounts); 1 or a "Report not available" page fails the run. The report runs with -NoClientLogo: the SmartM365
+     mail branding of this computer is never read, so the demo never shows a client logo (1.0.2).
   4. Adds a visible DEMO banner, scans the page for leaks (e-mail addresses, GUIDs, IP addresses, file-system paths,
-     host or user names of this computer, private terms, foreign domains or URLs) and writes the page and a manifest
+     host or user names of this computer, private terms, foreign domains or URLs, any image other than the
+     WorkplaceCloudHub logo) and writes the page and a manifest
      to -OutputPath.
 .VERSION
-1.0.1
+1.0.2
 .NOTES
   Read-only and offline: no API call, no SharePoint upload, no mail. -OutputPath must lie outside the SmartFinOps
   code folder. The page and its manifest are generated files: never commit them.
@@ -31,7 +33,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-$script:ScriptVersion = '1.0.1'
+$script:ScriptVersion = '1.0.2'
 $script:Invariant = [Globalization.CultureInfo]::InvariantCulture
 $script:DemoTenantKey = 'contoso-demo'
 $script:DemoProfileKey = 'demo'
@@ -110,6 +112,9 @@ function Test-DemoLeak {
     if ($domain -eq 'contoso.invalid' -or $domain.EndsWith('.contoso.invalid') -or $domain -in @('www.w3.org','workplacecloudhub.com')) { continue }
     $findings.Add("foreign domain: $domain"); break
   }
+  # Only the WorkplaceCloudHub logo may be an image: never a client logo (1.0.2).
+  $images = [regex]::Matches($Html, '(?i)<img\b[^>]*>')
+  if ($images.Count -gt 1 -or @($images | Where-Object { $_.Value -cnotmatch '^<img alt="WorkplaceCloudHub" ' }).Count -gt 0) { $findings.Add(('image other than the WorkplaceCloudHub logo: {0} image(s) in the page' -f $images.Count)) }
   foreach ($match in [regex]::Matches($Html, '(?i)https?://[^\s"''<>)]+')) {
     $url = $match.Value
     if ($url -ceq 'http://www.w3.org/2000/svg' -or $url -like 'https://workplacecloudhub.com*') { continue }
@@ -213,8 +218,11 @@ try {
     if ($failedControls.Count -gt 0) { throw "Valuation ($stage): $($failedControls.Count) equivalence control(s) did not pass." }
     Write-DemoLog "Valuation $stage completed (exit code $($run.ExitCode), run $($receipt.RunId))."
   }
-  $reportRun = Invoke-DemoScript -Path $report -Arguments $rootArguments
+  # -NoClientLogo: the report never reads the SmartM365 branding of this computer (no client logo in a demo).
+  $reportRun = Invoke-DemoScript -Path $report -Arguments ($rootArguments + @('-NoClientLogo'))
   if ($reportRun.ExitCode -notin @(0,3)) { throw "Report ended with exit code $($reportRun.ExitCode).`n$($reportRun.Output)" }
+  if (-not ([string]$reportRun.Output).Contains('Client logo disabled (-NoClientLogo).')) { throw 'The report did not confirm that the client logo is disabled.' }
+  Write-DemoLog 'Report run without client logo (-NoClientLogo confirmed).'
   $html = [IO.File]::ReadAllText((Join-Path $roots.Last 'SmartFinOps_Workplace-Report.html'))
   if ($html -match '(?i)<h1>\s*Report not available') { throw 'The report page is "Report not available".' }
   Write-DemoLog "Report completed (exit code $($reportRun.ExitCode))."

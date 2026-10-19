@@ -3,7 +3,7 @@
 .SYNOPSIS
   Offline tests of the SmartFinOps Workplace V2 valuation engine.
 .VERSION
-1.4.3
+1.4.4
 .NOTES
   Synthetic contoso data only, in an isolated temporary runtime (no local configuration, export or tenant).
   Source receipts are produced by the real SmartM365.Core module commands.
@@ -278,7 +278,7 @@ try {
   $banner = ($logLines[$bannerStart..($logLines.Count - 1)] -join "`n")
   Check ($banner.Contains(' SmartFinOps by WorkplaceCloudHub - Execution completed') -and $banner.Contains(' Script    : SmartFinOps-Workplace-Valuation.ps1') -and $banner.Contains(' CSV files : 7') -and $banner -match ' Duration  : \d{2}:\d{2}:\d{2}' -and $banner -match ' Status    : (SUCCESS|COMPLETED WITH WARNINGS)') "completion banner appended to the run log ($banner)"
   Check ($run.Log.Contains(' SmartFinOps by WorkplaceCloudHub') -and $run.Log.Contains(' Website : https://workplacecloudhub.com') -and $run.Log.Contains(' Errors    : 0')) 'startup and completion banners on the console'
-  Check ($run.Log -match 'Starting SmartFinOps Workplace Valuation v2\.2\.3 ' -and $run.Log -match 'Tenant context 1.4.1') 'engine and context versions logged at runtime'
+  Check ($run.Log -match 'Starting SmartFinOps Workplace Valuation v2\.2\.4 ' -and $run.Log -match 'Tenant context 1.4.1') 'engine and context versions logged at runtime'
   # Orchestrator contract: default success-evidence log pattern, 0 success, 3 completed with warnings.
   $orchestratorEvidence = 'Execution context:|Environment initialized successfully|Starting .* v|(?s:Execution summary:.*Status:\s*(?:Success|CompletedWithWarnings).*Errors:\s*0)'
   Check ($run.Log -match $orchestratorEvidence -and $banner.Contains(' Status    : COMPLETED WITH WARNINGS') -and $banner.Contains(' SmartFinOps by WorkplaceCloudHub - Execution completed with warnings')) 'warning run: exit 3, Completed with warnings banner, orchestrator success evidence'
@@ -474,6 +474,9 @@ try {
   Check ((Get-Kpi $oneDriveSummary 'TOTAL_R').ValuationStatus -eq 'Valued' -and (Get-Kpi $oneDriveSummary 'TOTAL_R').Provisional -eq 'False' -and (Get-Kpi $oneDriveSummary 'TOTAL_RC_E3_TO_F3').ValuationStatus -eq 'Provisional') 'OneDrive provisional: TOTAL_R Valued, E3 to F3 Provisional'
   Check ($oneDriveSource.Count -eq 1 -and $oneDriveSource[0].QualificationStatus -eq 'Provisional' -and $oneDriveSource[0].ProvisionalLevers -eq 'L4') 'OneDrive provisional: traced in FinOps_Sources with its lever'
   Check ((@((Read-Receipt $oneDriveOut).ProvisionalLevers) -join ';') -eq 'L4') 'OneDrive provisional: receipt lists the provisional levers'
+  # 2.2.4: an empty Licences reason logs the detail published in FinOps_Sources, never an empty reason.
+  $oneDriveReason = [regex]::Match($oneDriveRun.Log, 'Provisional amounts: [^\r\n]*').Value
+  Check ($oneDriveReason -ceq 'Provisional amounts: M365_OneDrive_Usage.csv -> L4: Provisional in the Licences report' -and $oneDriveSource[0].Reason -ceq 'Provisional in the Licences report') "OneDrive provisional: log reason = published detail ($oneDriveReason)"
   $sbRows = @(Read-Output $oneDriveOut 'FinOps_Showback.csv' | Where-Object { $_.Lever -eq 'L4' })
   Check ($sbRows.Count -gt 0 -and @($sbRows | Where-Object Provisional -ne 'True').Count -eq 0 -and @(Read-Output $oneDriveOut 'FinOps_Showback.csv' | Where-Object { $_.Lever -eq 'L1' -and $_.Provisional -ne 'False' }).Count -eq 0) 'OneDrive provisional: showback flag per lever'
   $unknown = New-Fixture 'unknown-provisional' @{ ProvisionalSource='Some_New_Source.csv' }
@@ -603,6 +606,9 @@ try {
   Check ($g7Failed.Count -eq 1) 'G7 unit: tampered TOTAL_R fails'
   $g7Missing = @($g7Summary | Where-Object KpiKey -cne 'TOTAL_R_CONFIRMED')
   Check (@(Get-FinOpsControls -Sources $g6Sources -Valuation $g6Valuation -Showback $g6Showback -SummaryRows $g7Missing | Where-Object { $_.Control -eq 'G7' -and $_.Status -eq 'Fail' }).Count -eq 1) 'G7 unit: missing TOTAL_R_CONFIRMED fails'
+  $reasonSources = @{ 'A.csv'=[pscustomobject]@{ Reason='' }; 'B.csv'=[pscustomobject]@{ Reason='Published detail' } }
+  $reasons = @(Get-FinOpsProvisionalReasonLine -Trace @([pscustomobject]@{ Source='A.csv'; Levers='L4'; Reason='' }, [pscustomobject]@{ Source='B.csv'; Levers='L1;L2'; Reason=' ' }, [pscustomobject]@{ Source='C.csv'; Levers='L6'; Reason='Licences reason' }) -Sources $reasonSources)
+  Check (($reasons -join '|') -ceq 'A.csv -> L4: source status Provisional|B.csv -> L1;L2: Published detail|C.csv -> L6: Licences reason') "provisional reasons: Licences reason, else published detail, else source status Provisional ($($reasons -join '|'))"
   $template = Join-Path $project 'Config\SmartFinOps-Contracts.local.json.template'
   foreach ($bad in @(
       @{ Name='date'; Skus=@([ordered]@{ SkuPartNumber='SPE_E3' }); Renewal='31/03/2027' },

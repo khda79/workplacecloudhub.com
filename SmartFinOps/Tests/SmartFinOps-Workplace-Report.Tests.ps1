@@ -3,7 +3,7 @@
 .SYNOPSIS
   Offline tests of the SmartFinOps Workplace V2 executive HTML report.
 .VERSION
-1.5.0
+1.6.0
 .NOTES
   Synthetic FinOps_* fixtures and receipts only, in an isolated temporary runtime (no local configuration,
   export or tenant). The input contract is checked against the valuation engine output specification.
@@ -277,6 +277,11 @@ try {
   $noConfirmed = Invoke-Report (New-ReportFixture 'no-confirmed' -ChangeData { param($d) $d['FinOps_Summary.csv'] = @($d['FinOps_Summary.csv'] | Where-Object { $_['KpiKey'] -cne 'TOTAL_R_CONFIRMED' }) })
   $noConfirmedCard = [regex]::Match($noConfirmed.Html, '<div class="metric [a-z-]+" data-kpi="TOTAL_R_CONFIRMED">.*?</div></div>').Value
   Check ($noConfirmed.ExitCode -eq 3 -and $noConfirmedCard.Contains('>Not measured</span>') -and $noConfirmedCard.Contains('Published from valuation engine 2.2.3') -and -not $noConfirmedCard.Contains('EUR 10,123')) 'engine before 2.2.3: R confirmed Not measured, never computed by the report'
+  # 2.5.1: reused units (L8) are not people: units only, never "Users: 0"; other cards unchanged.
+  Check ($cards['TOTAL_E_REUSE'].Contains('Units: 1</div>') -and -not $cards['TOTAL_E_REUSE'].Contains('Users:') -and $cards['TOTAL_R_ENABLED_INACTIVE'].Contains('Units: 2 | Users: 2') -and $cards['TOTAL_R_CONFIRMED'].Contains('Units: 7 | Users: 4')) "L8 card shows units only; other cards unchanged ($([regex]::Match($cards['TOTAL_E_REUSE'], 'Units[^<]*').Value))"
+  Check (-not $html.Contains('Users: 0') -and $html.Contains('<tr><td>Cost avoidance: reuse for users waiting for capacity</td><td>E</td><td>L8</td><td class="num"><span class="none" title="Counted in license units, not people">n/a</span></td><td class="num">1</td>') -and $html.Contains('<tr><td>of which unassigned units</td><td>R</td><td>L7</td><td class="num"><span class="none" title="Counted in license units, not people">n/a</span></td><td class="num">4</td>')) 'Financial potential: no user count for units without people'
+  Check ($html.Contains('<td>R</td><td>Unassigned units (L7)</td><td><span class="badge ok">Valued</span></td><td class="num"><span class="none" title="Counted in license units, not people">n/a</span></td><td class="num">4</td>') -and $html.Contains('<td>R</td><td>Disabled accounts (L1)</td><td><span class="badge ok">Valued</span></td><td class="num">1</td>')) 'By lever and status: same rule, real user counts unchanged'
+  Check ($run.ExitCode -eq 3 -and $run.Log -match '\[WARNING\] Client logo not shown: SmartM365 branding of profile ''prod'' unavailable: ' -and [regex]::Matches($html, '<img ').Count -eq 1 -and -not $html.Contains('class="client-logo"')) 'no SmartM365 branding in the test runtime: page without client logo, warning logged'
   #endregion
 
   #region 3. Confidentiality, autonomy, escaping
@@ -424,6 +429,50 @@ try {
   $uncFiles = @(Get-ChildItem -LiteralPath $uncFolder -Force | ForEach-Object Name | Sort-Object) -join ','
   Check ($uncFiles -ceq 'SmartFinOps_Workplace-Report_DailyEmail_FailState.json.txt,SmartFinOps_Workplace-Report_DailyEmail_SendState.json.txt') "UNC state path: only the state files, no lock, journal or temporary file ($uncFiles)"
 
+  Check (-not $message.BodyHtml.Contains('Users:')) 'mail: no user count (L8 units are not people), otherwise unchanged'
+
+  # 2.5.1 client logo: SmartM365 mail branding helpers, synthetic logo files written here (no real client logo).
+  Import-Module (Join-Path (Split-Path $project -Parent) 'SmartM365\Modules\SmartM365.Core\SmartM365.Core.psd1') -Force -ErrorAction Stop
+  $logoRoot = Join-Path $mailRoot 'logo'
+  New-Item -ItemType Directory -Path $logoRoot -Force | Out-Null
+  $pngBytes = [Convert]::FromBase64String('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==')
+  $okLogo = Join-Path $logoRoot 'client.png'; [IO.File]::WriteAllBytes($okLogo, $pngBytes)
+  $bigLogo = Join-Path $logoRoot 'big.png'; [IO.File]::WriteAllBytes($bigLogo, [byte[]]($pngBytes + [byte[]]::new(3000)))
+  $badLogo = Join-Path $logoRoot 'bad.png'; [IO.File]::WriteAllText($badLogo, 'not an image')
+  $toUri = { param($Path, $MaxKB) SmartM365.Core\ConvertTo-SmartM365MailLogoDataUri -Path $Path -MaxKB $MaxKB }
+  $branding = { param([bool]$Enabled, [string]$Path, [int]$MaxKB) [pscustomobject]@{ Enabled=$Enabled; ClientName='Contoso <Demo> & Co'; ClientLogoPath=$Path; ClientLogoMaxKB=$MaxKB } }
+  $present = Get-ReportClientLogo -Branding (& $branding $true $okLogo 200) -ToDataUri $toUri
+  Check ($present.DataUri.StartsWith('data:image/png;base64,iVBORw0KGgo', [StringComparison]::Ordinal) -and -not $present.Reason -and $present.ClientName -ceq 'Contoso <Demo> & Co') 'client logo present: PNG data URI from the SmartM365 branding helper'
+  foreach ($case in @(
+      @{ Name='no branding'; Branding=(& $branding $true '' 200); Reason='no client logo configured (MailClientLogoPath)' }
+      @{ Name='branding disabled'; Branding=(& $branding $false $okLogo 200); Reason='mail branding disabled (MailBrandingEnabled)' }
+      @{ Name='file missing'; Branding=(& $branding $true (Join-Path $logoRoot 'missing.png') 200); Reason='logo file not found (missing.png)' }
+      @{ Name='too large'; Branding=(& $branding $true $bigLogo 1); Reason='logo larger than 1 KB (big.png)' }
+      @{ Name='unreadable'; Branding=(& $branding $true $badLogo 200); Reason='logo is not a readable PNG, JPEG or GIF image (bad.png)' })) {
+    $logo = Get-ReportClientLogo -Branding $case.Branding -ToDataUri $toUri
+    Check (-not $logo.DataUri -and $logo.Reason -ceq $case.Reason) "client logo $($case.Name): no logo, reason '$($logo.Reason)'"
+    # No branding configured: INFO; a configured logo that cannot be used: WARNING with the reason.
+    $notConfigured = $case.Name -in @('no branding', 'branding disabled')
+    $script:LogLines.Clear()
+    Write-ReportClientLogoStatus -ClientLogo $logo -Tenant $profileKey
+    $expected = if ($notConfigured) { '[INFO] Client logo: none ({0}).' -f $case.Reason } else { '[WARNING] Client logo not shown: {0}.' -f $case.Reason }
+    Check ($logo.NotConfigured -eq $notConfigured -and $script:LogLines.Count -eq 1 -and $script:LogLines[0].EndsWith($expected)) "client logo $($case.Name): logged as $(if ($notConfigured) { 'INFO' } else { 'WARNING' }) ($($script:LogLines -join ' | '))"
+  }
+  $absent = Get-ReportClientLogo -Branding $null -ToDataUri $toUri
+  $script:LogLines.Clear(); Write-ReportClientLogoStatus -ClientLogo $absent -Tenant $profileKey
+  Check ($absent.NotConfigured -and -not $absent.DataUri -and $script:LogLines[0].EndsWith('[INFO] Client logo: none (no SmartM365 mail branding).')) 'no branding object: INFO, no logo'
+  $script:LogLines.Clear(); Write-ReportClientLogoStatus -ClientLogo $present -Tenant $profileKey
+  Check ($script:LogLines[0].EndsWith("[INFO] Client logo: Contoso <Demo> & Co (SmartM365 mail branding of profile 'prod').")) 'client logo shown: INFO line'
+  $throwing = Get-ReportClientLogo -Branding (& $branding $true $okLogo 200) -ToDataUri { throw 'helper failure' }
+  Check (-not $throwing.DataUri -and $throwing.Reason -ceq 'logo could not be read (client.png)') 'client logo: a failing helper never fails the report'
+  $logoPage = New-ReportPageContent -Inputs $nominalInputs -Tenant $profileKey -MinimumGroupUsers 5 -ClientLogo $present
+  $images = @([regex]::Matches($logoPage, '<img [^>]*>') | ForEach-Object Value)
+  Check ($images.Count -eq 2 -and $images[0] -ceq ('<img alt="Contoso &lt;Demo&gt; &amp; Co" src="{0}">' -f $present.DataUri) -and $images[1].StartsWith('<img alt="WorkplaceCloudHub"', [StringComparison]::Ordinal)) 'page with client logo: client logo first (alt = client name, encoded), WorkplaceCloudHub logo second'
+  Check ($logoPage.IndexOf('class="client-logo"', [StringComparison]::Ordinal) -lt $logoPage.IndexOf('<div class="pill">', [StringComparison]::Ordinal) -and $logoPage.IndexOf('<div class="pill">', [StringComparison]::Ordinal) -lt $logoPage.IndexOf('<div class="logo">', [StringComparison]::Ordinal)) 'client logo at the top left of the header, WorkplaceCloudHub logo on the right'
+  $logoFree = $logoPage; foreach ($image in $images) { $logoFree = $logoFree.Replace($image, '') }
+  Check (-not ($logoFree -match '(?i)https?:|//|<link|<script|\bsrc=|@import|url\(|<iframe|<img|data:')) 'page with client logo: both logos embedded, no other resource'
+  Check ((New-ReportUnavailablePage -Inputs (Read-ReportInputs -Root (New-ReportFixture 'logo-unavailable' -ChangeReceipt { param($r) $r.Status = 'Failed' }) -ProfileKey $profileKey -TenantKey $tenant) -Tenant $profileKey -ClientLogo $present).Contains('<div class="client-logo"><img alt="Contoso') ) 'report not available page keeps the client logo, no figure'
+
   $nmInputs = Read-ReportInputs -Root $notMeasured -ProfileKey $profileKey -TenantKey $tenant
   $nmContent = Get-ReportDailyEmailContent -Inputs $nmInputs -Tenant $profileKey
   Check ($nmContent.Status -ceq 'NotMeasured' -and $nmContent.Subject.EndsWith('Licences report not measured') -and -not ($nmContent.BodyHtml -match 'EUR \d') -and $nmContent.BodyHtml.Contains('no amount is published')) 'Licences not measured: status mail with the reason, no amount'
@@ -467,7 +516,7 @@ try {
   $bannerStart = [array]::IndexOf($logLines, '================================================================================')
   Check ($bannerStart -gt 0 -and @($logLines[0..($bannerStart - 1)] | Where-Object { $_ -notmatch '^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} \[' }).Count -eq 0) 'every log line before the completion banner is timestamped'
   Check (($logLines -join "`n").Contains(' SmartFinOps by WorkplaceCloudHub - Execution completed') -and ($logLines -join "`n").Contains(' Status    : COMPLETED WITH WARNINGS') -and ($logLines -join "`n").Contains(' CSV files : 0')) 'completion banner appended to the report log'
-  Check ($run.Log.Contains(' SmartFinOps by WorkplaceCloudHub') -and $run.Log.Contains(' GitHub  : https://github.com/khda79/workplacecloudhub.com') -and $run.Log -match 'Starting SmartFinOps Workplace Report v2\.5\.0 ' -and $run.Log -match 'Tenant context 1.4.1') 'startup banner and versions on the console'
+  Check ($run.Log.Contains(' SmartFinOps by WorkplaceCloudHub') -and $run.Log.Contains(' GitHub  : https://github.com/khda79/workplacecloudhub.com') -and $run.Log -match 'Starting SmartFinOps Workplace Report v2\.5\.1 ' -and $run.Log -match 'Tenant context 1.4.1') 'startup banner and versions on the console'
   $unavailable = Invoke-Report (New-ReportFixture 'banner-failed' -ChangeReceipt { param($r) $r.Status = 'Failed' })
   Check ($unavailable.ExitCode -eq 1 -and $unavailable.Log.Contains(' SmartFinOps by WorkplaceCloudHub - Execution failed') -and $unavailable.Log.Contains(' Status    : FAILED')) 'report not available: completion banner Failed'
   Check ($unavailable.Log -match '\[ERROR\] Report not available: ') 'report not available: logged as an error'
@@ -477,6 +526,8 @@ try {
   $orchestratorEvidence = 'Execution context:|Environment initialized successfully|Starting .* v|(?s:Execution summary:.*Status:\s*(?:Success|CompletedWithWarnings).*Errors:\s*0)'
   $clean = Invoke-Report (New-ReportFixture 'clean' -ChangeReceipt { param($r) $r.Provisional = $false; $r.ProvisionalLevers = @() })
   Check ($clean.ExitCode -eq 0 -and $clean.Log.Contains(' Status    : SUCCESS') -and $clean.Log.Contains(' Warnings  : 0') -and $clean.Log -match $orchestratorEvidence) "final figures: exit 0 and Success banner (got $($clean.ExitCode))"
+  Check ($clean.Log -match '\[WARNING\] Client logo not shown: ' -and $clean.ExitCode -eq 0) 'a client logo warning never changes the exit code'
+  Check ($validateRun.Log.Contains('Client logo not resolved in -ValidateOnly.') -and -not ($validateRun.Log -match 'Client logo not shown')) 'ValidateOnly never resolves the SmartM365 branding'
   Check ($run.Log -match $orchestratorEvidence) 'startup line matches the orchestrator success evidence'
   $engine22 = Invoke-Report (New-ReportFixture 'engine-2.2.0' -ChangeReceipt { param($r) $r.ScriptVersion = '2.2.0' })
   Check ($engine22.ExitCode -eq 3 -and $engine22.Html.Contains('<h1>Workplace FinOps report</h1>')) "engine 2.2.x receipt accepted (exit $($engine22.ExitCode))"

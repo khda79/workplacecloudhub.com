@@ -9,9 +9,13 @@
   FinOps_Showback or FinOps_Realization. A failed or inconsistent run gives a "Report not available" page
   with the reason and no figure; it replaces the current report so that no older figure stays visible.
   Layout (2.5.0): a summary on top (four published totals with their certainty, top 3 decisions, source states), then
-  the detail in folding sections; SmartM365 GUI charter, WorkplaceCloudHub logo embedded, no client logo.
+  the detail in folding sections; SmartM365 GUI charter, WorkplaceCloudHub logo embedded.
+  Client logo (2.5.1): the SmartM365 mail branding of the profile (MailClientLogoPath, MailClientLogoMaxKB, MailClientName)
+  embedded as a data URI at the top left. No branding configured (absent, disabled, no MailClientLogoPath): INFO line.
+  A configured logo that cannot be used: page without client logo and a WARNING that does not change the exit code.
+  -NoClientLogo (used by the demo generator) never resolves the branding.
 .VERSION
-2.5.0
+2.5.1
 .NOTES
   Input and output: the SmartM365 DATA-LAST of the profile (SmartFinOps_Workplace-Report.html), a copy in
   DATA-ALL\FinOps\Workplace\<FinOpsRunId>\ when that run is in the history, and the log in
@@ -29,12 +33,13 @@ param(
   [string]$SmartM365LogAllRootPath,
   [string]$SmartM365TenantKey,
   [switch]$ForceEmail,
+  [switch]$NoClientLogo,
   [switch]$ValidateOnly
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-$script:ScriptVersion = '2.5.0'
+$script:ScriptVersion = '2.5.1'
 # Run with -File, this script scope is the global scope: SmartM365 session values (LogPath, SmartM365TenantKey, ...)
 # set by the mail and upload helpers would overwrite script variables of the same name. Names here never collide.
 $script:TenantKeyParameter = [string]$SmartM365TenantKey
@@ -43,6 +48,8 @@ $script:Invariant = [Globalization.CultureInfo]::InvariantCulture
 $script:ReceiptName = 'SmartFinOps_Workplace-Valuation.current.json.txt'
 $script:ReportName = 'SmartFinOps_Workplace-Report.html'
 $script:DailyEmailStateName = 'SmartFinOps_Workplace-Report_DailyEmail_SendState.json.txt'
+# A client logo problem is logged as a WARNING with this prefix but never changes the exit code (2.5.1).
+$script:ClientLogoWarningPrefix = 'Client logo not shown: '
 
 #region Input contract (engine 2.1.4 to 2.2.x)
 $script:CommonColumns = @('TenantKey','FinOpsRunId','SnapshotId','ReceiptRunId')
@@ -313,6 +320,9 @@ $script:Css = @'
     .head { display: flex; justify-content: space-between; align-items: center; gap: 20px; padding: 20px 24px; }
     .logo { flex: none; border: 1px solid #dde7f0; border-radius: 8px; padding: 8px 12px; background: #ffffff; }
     .logo img { display: block; width: 120px; height: auto; }
+    .client-logo { margin-bottom: 10px; }
+    .client-logo img { display: block; max-width: 200px; max-height: 56px; width: auto; height: auto; }
+    .head-text { min-width: 0; }
     h1 { margin: 10px 0 6px; font-size: 26px; font-weight: 600; }
     h2 { margin: 0; font-size: 17px; font-weight: 600; }
     h3 { margin: 18px 0 8px; font-size: 14px; }
@@ -360,8 +370,8 @@ $script:Css = @'
     .bars rect { fill: #0078d4; }
     details.sub > summary { cursor: pointer; font-weight: 600; margin: 12px 0 6px; }
     footer { color: #5f6b7a; font-size: 12px; text-align: center; padding: 16px 0 0; }
-    @media (max-width: 860px) { .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .head { flex-direction: column-reverse; align-items: flex-start; } }
-    @media (max-width: 520px) { .grid { grid-template-columns: 1fr; } .page { padding: 12px; } }
+    @media (max-width: 860px) { .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .head { flex-direction: column; align-items: flex-start; } }
+    @media (max-width: 520px) { .grid { grid-template-columns: 1fr; } .page { padding: 12px; } .logo img { width: 88px; } }
     @media print { body { background: #ffffff; } .page { max-width: none; padding: 0; } section { break-inside: avoid; } }
 '@
 
@@ -610,6 +620,13 @@ function Get-ReportLeverLabel {
 
 function Get-ReportLeverNumber { param([string]$Lever) $n = 0; if ([int]::TryParse(([string]$Lever).TrimStart('L'), [ref]$n)) { return $n } return 99 }
 
+function Format-ReportUserCount {
+  param([AllowNull()]$Users, [AllowNull()]$Units)
+  # Units without people (reused or unassigned units): no user count is shown, never "0" (2.5.1).
+  if ([string]$Users -eq '0' -and (ConvertTo-ReportLong $Units) -gt 0) { return '<span class="none" title="Counted in license units, not people">n/a</span>' }
+  return (Format-ReportCount $Users)
+}
+
 function Get-ReportCertaintyBadge {
   param([AllowNull()][string]$Certainty)
   $map = @{ 'Final'='ok'; 'To confirm'='tc'; 'Conditional - outside R total'='cond'; 'Cost avoidance'='av' }
@@ -657,9 +674,50 @@ function Get-ReportGeneratedLine {
 }
 
 function Get-ReportHeadCard {
-  param([Parameter(Mandatory)][string]$Title, [Parameter(Mandatory)][string[]]$Lines)
-  $text = ('  <div><div class="pill">SmartFinOps Workplace</div>' + "`n" + "  <h1>$(ConvertTo-ReportHtml $Title)</h1>" + "`n" + (($Lines | ForEach-Object { "  $_" }) -join "`n") + "`n  </div>")
+  param([Parameter(Mandatory)][string]$Title, [Parameter(Mandatory)][string[]]$Lines, $ClientLogo)
+  # Client logo (SmartM365 mail branding of the profile) at the top left; WorkplaceCloudHub logo on the right.
+  $client = ''
+  if ($ClientLogo -and $ClientLogo.DataUri) { $client = ('<div class="client-logo"><img alt="{0}" src="{1}"></div>' -f (ConvertTo-ReportHtml $(if ($ClientLogo.ClientName) { $ClientLogo.ClientName } else { 'Client logo' })), $ClientLogo.DataUri) }
+  $text = ('  <div class="head-text">' + $client + '<div class="pill">SmartFinOps Workplace</div>' + "`n" + "  <h1>$(ConvertTo-ReportHtml $Title)</h1>" + "`n" + (($Lines | ForEach-Object { "  $_" }) -join "`n") + "`n  </div>")
   return ('<div class="card head">' + "`n" + $text + "`n" + ('  <div class="logo">{0}</div>' -f (Get-ReportLogoHtml)) + "`n</div>")
+}
+#endregion
+
+#region Client logo (SmartM365 mail branding of the profile)
+function Get-ReportClientLogo {
+  param([AllowNull()]$Branding, [Parameter(Mandatory)][scriptblock]$ToDataUri)
+  # Same values as the SmartM365 mails: MailBrandingEnabled, MailClientName, MailClientLogoPath, MailClientLogoMaxKB.
+  # Returns DataUri (empty when no logo is shown), the Reason and NotConfigured (no branding: INFO, not a WARNING);
+  # never throws for a logo problem.
+  $name = [string](Get-ReportProperty $Branding 'ClientName')
+  $path = [string](Get-ReportProperty $Branding 'ClientLogoPath')
+  $maxKb = 200; [void][int]::TryParse([string](Get-ReportProperty $Branding 'ClientLogoMaxKB'), [ref]$maxKb)
+  $result = [pscustomobject]@{ DataUri=''; ClientName=$name; Reason=''; NotConfigured=$false }
+  if ($null -eq $Branding) { $result.Reason = 'no SmartM365 mail branding'; $result.NotConfigured = $true; return $result }
+  if (-not [bool](Get-ReportProperty $Branding 'Enabled')) { $result.Reason = 'mail branding disabled (MailBrandingEnabled)'; $result.NotConfigured = $true; return $result }
+  if ([string]::IsNullOrWhiteSpace($path)) { $result.Reason = 'no client logo configured (MailClientLogoPath)'; $result.NotConfigured = $true; return $result }
+  $leaf = [IO.Path]::GetFileName($path.Trim())
+  $data = ''
+  try { $data = [string](& $ToDataUri $path $maxKb) } catch { $data = '' }
+  if (-not $data) {
+    $result.Reason = if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { "logo file not found ($leaf)" } elseif ((Get-Item -LiteralPath $path).Length -gt [int64]$maxKb * 1KB) { "logo larger than $maxKb KB ($leaf)" } else { "logo could not be read ($leaf)" }
+    return $result
+  }
+  $match = [regex]::Match($data, '^data:image/(png|jpeg|gif);base64,([A-Za-z0-9+/]+={0,2})$')
+  $bytes = $null
+  if ($match.Success) { try { $bytes = [Convert]::FromBase64String($match.Groups[2].Value) } catch { $bytes = $null } }
+  $signature = if ($null -eq $bytes -or $bytes.Length -lt 8) { '' } else { [Convert]::ToHexString($bytes, 0, 8) }
+  $valid = $match.Success -and (($match.Groups[1].Value -ceq 'png' -and $signature -ceq '89504E470D0A1A0A') -or ($match.Groups[1].Value -ceq 'jpeg' -and $signature.StartsWith('FFD8FF')) -or ($match.Groups[1].Value -ceq 'gif' -and $signature.StartsWith('47494638')))
+  if (-not $valid) { $result.Reason = "logo is not a readable PNG, JPEG or GIF image ($leaf)"; return $result }
+  $result.DataUri = $data
+  return $result
+}
+function Write-ReportClientLogoStatus {
+  param([Parameter(Mandatory)]$ClientLogo, [Parameter(Mandatory)][string]$Tenant)
+  # Shown: INFO. Not configured: INFO. Configured but unusable or branding unavailable: WARNING (never counted in the exit code).
+  if ($ClientLogo.DataUri) { Write-ReportLog ("Client logo: {0} (SmartM365 mail branding of profile '{1}')." -f $(if ($ClientLogo.ClientName) { $ClientLogo.ClientName } else { 'no client name' }), $Tenant) }
+  elseif ($ClientLogo.NotConfigured) { Write-ReportLog ("Client logo: none ({0})." -f $ClientLogo.Reason) }
+  else { Write-ReportLog ($script:ClientLogoWarningPrefix + $ClientLogo.Reason + '.') 'WARNING' }
 }
 #endregion
 
@@ -717,8 +775,8 @@ function Get-ReportSourcesText {
 
 #region Not available page
 function New-ReportUnavailablePage {
-  param([Parameter(Mandatory)]$Inputs, [Parameter(Mandatory)][string]$Tenant)
-  $header = (Get-ReportHeadCard -Title 'Report not available' -Lines @((Get-ReportGeneratedLine -Tenant $Tenant -RunId $Inputs.RunId)))
+  param([Parameter(Mandatory)]$Inputs, [Parameter(Mandatory)][string]$Tenant, $ClientLogo)
+  $header = (Get-ReportHeadCard -Title 'Report not available' -Lines @((Get-ReportGeneratedLine -Tenant $Tenant -RunId $Inputs.RunId)) -ClientLogo $ClientLogo)
   $body = [System.Text.StringBuilder]::new()
   [void]$body.AppendLine('<section><h2>Why</h2>')
   [void]$body.AppendLine(('<div class="banner stop">{0}</div>' -f (ConvertTo-ReportHtml (ConvertTo-ReportSafeText $Inputs.Reason))))
@@ -733,7 +791,7 @@ function New-ReportUnavailablePage {
 
 #region Report page
 function New-ReportPageContent {
-  param([Parameter(Mandatory)]$Inputs, [Parameter(Mandatory)][string]$Tenant, [Parameter(Mandatory)][int]$MinimumGroupUsers)
+  param([Parameter(Mandatory)]$Inputs, [Parameter(Mandatory)][string]$Tenant, [Parameter(Mandatory)][int]$MinimumGroupUsers, $ClientLogo)
   $receipt = $Inputs.Receipt
   $summary = @($Inputs.Data['FinOps_Summary.csv'])
   $skus = @($Inputs.Data['FinOps_SkuValuation.csv'])
@@ -756,7 +814,7 @@ function New-ReportPageContent {
   $header = [System.Text.StringBuilder]::new()
   [void]$header.AppendLine((Get-ReportHeadCard -Title 'Workplace FinOps report' -Lines @(
     (Get-ReportGeneratedLine -Tenant $Tenant -RunId $Inputs.RunId),
-    ('<p class="subtitle">Licences snapshot: {0} | Amounts: EUR excluding VAT, annual run-rate</p>' -f (ConvertTo-ReportHtml $(if ($snapshotDate) { $snapshotDate } else { 'not measured' }))))))
+    ('<p class="subtitle">Licences snapshot: {0} | Amounts: EUR excluding VAT, annual run-rate</p>' -f (ConvertTo-ReportHtml $(if ($snapshotDate) { $snapshotDate } else { 'not measured' })))) -ClientLogo $ClientLogo))
   $overallText = switch -CaseSensitive ($model.Overall) { 'Final' { 'Final figures' } 'Provisional' { 'Provisional figures' } default { 'Licences report not measured' } }
   [void]$header.AppendLine(('<div class="card statusbar">{0} <span>{1}</span> <span class="note">{2}</span></div>' -f (Get-ReportCertaintyBadge $(if ($model.Overall -ceq 'Final') { 'Final' } else { $model.Overall })), (ConvertTo-ReportHtml $overallText), (ConvertTo-ReportHtml (Get-ReportSourcesText $model))))
   if (-not $measured) { [void]$header.AppendLine('<div class="banner stop">Licences report not qualified: every figure is <strong>Not measured</strong>. See the technical appendix for the source qualification.</div>') }
@@ -775,7 +833,8 @@ function New-ReportPageContent {
     $row = $card.Row
     $value = if ($row -and (Format-ReportEur $row.AnnualAmount)) { Format-ReportEur $row.AnnualAmount } else { Get-ReportAmountCell '' $card.Status }
     $badges = @(Get-ReportCertaintyBadge $card.Certainty) + @($(if ($card.Tag) { Get-ReportCertaintyBadge $card.Tag }))
-    $meta = if ($row -and ($row.Units -or ([string]$row.Users -and [string]$row.Users -ne '0'))) { 'Units: {0} | Users: {1}' -f $(if ($row.Units) { Format-ReportCount $row.Units } else { '-' }), (Format-ReportCount $row.Users) } else { '' }
+    $meta = if ($row -and [string]$row.Users -eq '0' -and (ConvertTo-ReportLong $row.Units) -gt 0) { 'Units: {0}' -f (Format-ReportCount $row.Units) }
+      elseif ($row -and ($row.Units -or ([string]$row.Users -and [string]$row.Users -ne '0'))) { 'Units: {0} | Users: {1}' -f $(if ($row.Units) { Format-ReportCount $row.Units } else { '-' }), (Format-ReportCount $row.Users) } else { '' }
     [void]$body.AppendLine(('<div class="metric {0}" data-kpi="{1}"><div class="label">{2}</div><div class="value">{3}</div><div>{4}</div><div class="detail">{5}</div><div class="detail">{6}</div></div>' -f $card.Class, $card.Key, (ConvertTo-ReportHtml $card.Label), $value, ($badges -join ' '), (ConvertTo-ReportHtml $meta), (ConvertTo-ReportHtml $card.Detail)))
   }
   [void]$body.AppendLine('</div>')
@@ -802,7 +861,7 @@ function New-ReportPageContent {
   $kpiRows = foreach ($key in $script:Totals.Keys) {
     $row = & $get $key
     if ($null -eq $row) { ,@((ConvertTo-ReportHtml $script:Totals[$key]), '', '', '', '', (Get-ReportBadge 'Not measured'), ''); continue }
-    ,@((ConvertTo-ReportHtml $script:Totals[$key]), (ConvertTo-ReportHtml $row.ValueClass), (ConvertTo-ReportHtml ($row.Lever -replace ';', ', ')), (Format-ReportCount $row.Users), (Format-ReportCount $row.Units), (Get-ReportAmountCell $row.AnnualAmount $row.ValuationStatus), (ConvertTo-ReportHtml (ConvertTo-ReportSafeText $row.Note)))
+    ,@((ConvertTo-ReportHtml $script:Totals[$key]), (ConvertTo-ReportHtml $row.ValueClass), (ConvertTo-ReportHtml ($row.Lever -replace ';', ', ')), (Format-ReportUserCount $row.Users $row.Units), (Format-ReportCount $row.Units), (Get-ReportAmountCell $row.AnnualAmount $row.ValuationStatus), (ConvertTo-ReportHtml (ConvertTo-ReportSafeText $row.Note)))
   }
   Add-ReportTable $body @('Indicator','Class','Levers','Users','Units','Annual amount','Note') @($kpiRows) @(3,4,5)
   [void]$body.AppendLine('<p class="note">R = R confirmed + R to confirm (control G7). The "of which" lines detail R confirmed and are never added to it. E3 to F3 is conditional and cost avoidance is not a reduction.</p>')
@@ -819,7 +878,7 @@ function New-ReportPageContent {
   $classOrder = @{ R=0; Rc=1; E=2; S=3 }
   $sortedDetail = @(Get-ReportSorted $detailRows { param($x) @($(if ($classOrder.ContainsKey([string]$x.ValueClass)) { $classOrder[[string]$x.ValueClass] } else { 9 }), (Get-ReportLeverNumber $x.Lever), [string]$x.ValuationStatus) })
   Add-ReportTable $body @('Class','Lever','Status','Users','Units','Annual amount') @($sortedDetail | Where-Object { $_.Lever -ne 'L12' } | ForEach-Object {
-    ,@((ConvertTo-ReportHtml $_.ValueClass), (Get-ReportLeverLabel $_.Lever), (Get-ReportBadge $_.ValuationStatus), (Format-ReportCount $_.Users), (Format-ReportCount $_.Units), $(if ($_.AnnualAmount) { Get-ReportAmountCell $_.AnnualAmount $_.ValuationStatus } else { '' }))
+    ,@((ConvertTo-ReportHtml $_.ValueClass), (Get-ReportLeverLabel $_.Lever), (Get-ReportBadge $_.ValuationStatus), (Format-ReportUserCount $_.Users $_.Units), (Format-ReportCount $_.Units), $(if ($_.AnnualAmount) { Get-ReportAmountCell $_.AnnualAmount $_.ValuationStatus } else { '' }))
   }) @(3,4,5) 'No opportunity: the Licences report is not measured.'
   [void]$body.AppendLine('<h3>By SKU</h3>')
   $skuSorted = @(Get-ReportSorted @($skus | Where-Object { $_.Excluded -ne 'True' -and ((ConvertTo-ReportLong $_.CandidateUnitsR) -gt 0 -or (ConvertTo-ReportLong $_.CapacityRealizableUnits) -gt 0 -or (ConvertTo-ReportLong $_.ReusedUnits) -gt 0 -or (ConvertTo-ReportLong $_.CappedUnits) -gt 0) }) { param($x) @($(if ($null -ne (ConvertTo-ReportDecimal $x.RealizableAnnualAmount)) { ConvertTo-ReportDecimal $x.RealizableAnnualAmount } else { [decimal]-1 }), [string]$x.SkuPartNumber) } -Descending)
@@ -1245,17 +1304,35 @@ try {
     }
   }
 
+  # Client logo: SmartM365 mail branding of the profile; any problem is a non-blocking warning (exit code unchanged).
+  $clientLogo = $null
+  if ($ValidateOnly) { Write-ReportLog 'Client logo not resolved in -ValidateOnly.' }
+  elseif ($NoClientLogo) { Write-ReportLog 'Client logo disabled (-NoClientLogo).' }
+  else {
+    try {
+      $null = Initialize-SmartFinOpsSmartM365Context -ProfileKey $Tenant -TenantKey $tenantKey
+      Import-Module (Join-Path (Split-Path -Path $PSScriptRoot -Parent) 'SmartM365\Modules\SmartM365.Core\SmartM365.Core.psd1') -MinimumVersion '1.0.91' -ErrorAction Stop | Out-Null
+      $brandingLogFolder = Split-Path -Path $runLogPath -Parent
+      New-Item -ItemType Directory -Path $brandingLogFolder -Force | Out-Null
+      Set-Variable -Name LogPath -Scope Global -Value $brandingLogFolder
+      $clientLogo = Get-ReportClientLogo -Branding (SmartM365.Core\Get-SmartM365MailBrandingConfig) -ToDataUri { param($Path, $MaxKB) SmartM365.Core\ConvertTo-SmartM365MailLogoDataUri -Path $Path -MaxKB $MaxKB }
+    }
+    catch { $clientLogo = [pscustomobject]@{ DataUri=''; ClientName=''; Reason=("SmartM365 branding of profile '{0}' unavailable: {1}" -f $Tenant, $_.Exception.Message); NotConfigured=$false } }
+    Write-ReportClientLogoStatus -ClientLogo $clientLogo -Tenant $Tenant
+    if (-not $clientLogo.DataUri) { $clientLogo = $null }
+  }
+
   $inputs = Read-ReportInputs -Root $root -ProfileKey $Tenant -TenantKey $tenantKey
   foreach ($check in $inputs.Checks) { Write-ReportLog ('{0}: {1} - {2}' -f $check.Rule, $check.Status, $check.Detail) $(if ($check.Status -eq 'Pass') { 'INFO' } else { 'WARNING' }) }
   if ($inputs.Available) {
-    $html = New-ReportPageContent -Inputs $inputs -Tenant $Tenant -MinimumGroupUsers $minimumUsers
+    $html = New-ReportPageContent -Inputs $inputs -Tenant $Tenant -MinimumGroupUsers $minimumUsers -ClientLogo $clientLogo
     Write-ReportLog ("Report built for run {0} (Licences measured: {1}; showback minimum group: {2} users)." -f $inputs.RunId, [bool](Get-ReportProperty $inputs.Receipt 'LicencesMeasured'), $minimumUsers)
     # The page is complete, but its figures are not final: the run completes with warnings.
     if (-not [bool](Get-ReportProperty $inputs.Receipt 'LicencesMeasured')) { Write-ReportLog ("Licences report not measured in run {0}: every figure is shown as Not measured." -f $inputs.RunId) 'WARNING' }
     if ([bool](Get-ReportProperty $inputs.Receipt 'Provisional')) { Write-ReportLog ("Provisional figures in run {0} for levers {1}." -f $inputs.RunId, (@(Get-ReportProperty $inputs.Receipt 'ProvisionalLevers' | Where-Object { $_ }) -join ', ')) 'WARNING' }
   }
   else {
-    $html = New-ReportUnavailablePage -Inputs $inputs -Tenant $Tenant
+    $html = New-ReportUnavailablePage -Inputs $inputs -Tenant $Tenant -ClientLogo $clientLogo
     Write-ReportLog "Report not available: $($inputs.Reason)" 'ERROR'
     $exitCode = 1
   }
@@ -1323,7 +1400,7 @@ finally {
   else { $runLogPath = '' }
   # Completion banner on success and on failure; "Report not available" (exit 1) is a failed run.
   # Exit code contract (orchestrator): 0 success, 3 completed with warnings, 1 failure.
-  $warnings = @($script:LogLines | Where-Object { $_ -match '^\S+ \S+ \[WARNING\]' }).Count
+  $warnings = @($script:LogLines | Where-Object { $_ -match '^\S+ \S+ \[WARNING\]' -and -not $_.Contains('[WARNING] ' + $script:ClientLogoWarningPrefix) }).Count
   $errors = @($script:LogLines | Where-Object { $_ -match '^\S+ \S+ \[ERROR\]' }).Count
   if ($exitCode -eq 0 -and $errors -gt 0) { $exitCode = 1 }
   elseif ($exitCode -eq 0 -and $warnings -gt 0) { $exitCode = 3 }
