@@ -46,6 +46,15 @@ remaining chain traversal. Missing/incomplete historical metadata, unexpected
 content and unproven publication-chain membership remain blocked. There is no
 age-only policy, automatic expiry of consumer protections or PBIP discovery.
 
+Local empty, idle JSON transport/SharePoint-transition locks are recognized only
+when their exact owner is a declared batch JSON. They remain in the physical
+inventory but are excluded from cross-store payload comparison. Active, nonempty,
+unknown or remote sidecars remain blocking. Local helper writers are excluded
+through archival/removal by retained lock handles. Compact schema-3 plans retain
+file identities, sizes and measured raw SHA256 values instead of receipt bodies;
+full receipt validation, archival and pre-removal hashing are unchanged. Older
+plans must be regenerated.
+
 The registry template is `config/templates/PreparedBatchConsumers.json.template`.
 Keep its private runtime copy beside the preparation wrapper. An operator must
 review all declared distributed consumers; a local PBIP scan cannot establish

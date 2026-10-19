@@ -1,8 +1,8 @@
-<#
+﻿<#
 .SYNOPSIS
     Qualified, coupled server/SharePoint batch retention. Preview is the default.
 .VERSION
-    1.1.0
+    1.2.0
 #>
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -151,6 +151,39 @@ function Get-RetentionRemoteChildren($Transport,[string]$ParentId) {
         $item
     }
 }
+function Get-RetentionTechnicalLockOwner([string]$Name,$ExpectedNames) {
+    # Only sidecars emitted by JsonTransport / SharePointJsonTransition, for a declared JSON.
+    foreach($owner in $ExpectedNames){
+        if($owner -cmatch '\.json\.txt$' -and
+           ($Name -ceq ($owner.Substring(0,$owner.Length-4)+'.transport.lock') -or
+            $Name -ceq ($owner+'.sharepoint-transition.lock'))){return $owner}
+    }
+    $null
+}
+function Open-RetentionTechnicalLock($File) {
+    Assert-RetentionPath $File.Id
+    if((Split-Path $File.Id -Leaf) -cne $File.Name -or $File.Bytes -ne 0){throw 'Invalid technical lock identity/size.'}
+    $handle=$null
+    try {
+        # Open existing only; deny helper writers, allow hashing and final directory removal.
+        $handle=[IO.File]::Open($File.Id,'Open','Read',([IO.FileShare]::Read -bor [IO.FileShare]::Delete))
+        if($handle.Length -ne 0){throw 'Technical lock must be empty.'}
+        $handle
+    } catch {if($handle){$handle.Dispose()};throw "Technical lock unavailable or nonempty: $($File.Name)"}
+}
+function Get-RetentionFileEvidence($Files) {
+    # Raw receipt SHA256 binds every original byte, including unprojected provenance.
+    foreach($file in $Files){$file | Select-Object Name,Id,ETag,Bytes,SHA256}
+}
+function Get-RetentionSnapshotEvidence($Snapshot) {
+    $batches=@(foreach($batch in $Snapshot.Batches){
+        [pscustomobject]@{Storage=$batch.Storage;BatchId=$batch.BatchId;Id=$batch.Id;ETag=$batch.ETag;
+            Invalid=$batch.Invalid;Verification=$batch.Verification;Files=@(Get-RetentionFileEvidence $batch.Files)}
+    })
+    [pscustomobject]@{Verification=$Snapshot.Verification;Target=$Snapshot.Target;LocalPointer=$Snapshot.LocalPointer;
+        LocalPointerSHA256=$Snapshot.LocalPointerSHA256;RemotePointer=$Snapshot.RemotePointer;
+        RemotePointerSHA256=$Snapshot.RemotePointerSHA256;Batches=$batches;ArchivedLinks=$Snapshot.ArchivedLinks}
+}
 function Test-RetentionBatch($Batch,[string]$TenantKey) {
     try {
         $metadataOnly=(Get-RetentionValue $Batch 'Verification' 'Full') -ceq 'Metadata'
@@ -177,9 +210,15 @@ function Test-RetentionBatch($Batch,[string]$TenantKey) {
             $validated=@($v.Files | Where-Object File -CEQ $entry.File)
             if(($entry.Rows -isnot [int] -and $entry.Rows -isnot [long]) -or $entry.Rows -lt 0 -or $validated.Count -ne 1 -or $validated[0].SHA256 -ine $entry.SHA256 -or $validated[0].Rows -ne $entry.Rows){throw 'CSV validation record mismatch.'}
         }
-        if($map.Count -ne $expected.Count){throw 'Unexpected batch content.'}
-        [pscustomobject]@{Valid=$true;Reason=$(if($metadataOnly){'Receipts and file metadata verified; payload SHA256 not measured'}else{'Manifest, receipts and all payload hashes verified'});PreviousBatchId=$p.PreviousBatchId}
-    } catch {[pscustomobject]@{Valid=$false;Reason=$_.Exception.Message;PreviousBatchId=$null}}
+        $technicalLocks=@(foreach($file in $Batch.Files){
+            if($expected.Contains($file.Name)){continue}
+            if($Batch.Storage -cne 'Local' -or -not (Get-RetentionTechnicalLockOwner $file.Name $expected)){throw 'Unexpected batch content.'}
+            if($file.Id -cne (Get-RetentionChild $Batch.Id $file.Name)){throw 'Technical lock escaped batch.'}
+            $handle=Open-RetentionTechnicalLock $file
+            try {$file.Name} finally {$handle.Dispose()}
+        })
+        [pscustomobject]@{Valid=$true;Reason=$(if($metadataOnly){'Receipts and file metadata verified; payload SHA256 not measured'}else{'Manifest, receipts and all payload hashes verified'});PreviousBatchId=$p.PreviousBatchId;TechnicalLockNames=$technicalLocks}
+    } catch {[pscustomobject]@{Valid=$false;Reason=$_.Exception.Message;PreviousBatchId=$null;TechnicalLockNames=@()}}
 }
 function Get-RetentionSnapshot([string]$OutputRoot,$Transport,[string]$Scratch,[string]$TenantKey,[ValidateSet('Metadata','Full')][string]$Verification='Full') {
     $target=& $Transport.Describe
@@ -283,24 +322,24 @@ function New-RetentionPlan($Snapshot,$Registry,[string]$RegistryHash,[string]$Co
             elseif($check.Valid -and $chain.Contains($b.BatchId)){$state=if($Snapshot.Verification -ceq 'Metadata'){'Candidate'}else{'Eligible'}}
             elseif($check.Valid){$reason='No verified published-chain membership.'}
             $logicalBytes=0L;foreach($file in $b.Files){$logicalBytes+=[long]$file.Bytes}
-            $rows.Add([pscustomobject]@{Storage=$storage;BatchId=$b.BatchId;Id=$b.Id;ETag=$b.ETag;State=$state;Reason=$reason;Valid=$check.Valid;Verification=$Snapshot.Verification;PayloadSHA256Verified=($check.Valid -and $Snapshot.Verification -ceq 'Full');Files=$b.Files;FileCount=$b.Files.Count;LogicalBytes=$logicalBytes})
+            $rows.Add([pscustomobject]@{Storage=$storage;BatchId=$b.BatchId;Id=$b.Id;ETag=$b.ETag;State=$state;Reason=$reason;Valid=$check.Valid;ValidationReason=$check.Reason;Verification=$Snapshot.Verification;PayloadSHA256Verified=($check.Valid -and $Snapshot.Verification -ceq 'Full');Files=@(Get-RetentionFileEvidence $b.Files);TechnicalLockNames=@($check.TechnicalLockNames);FileCount=$b.Files.Count;LogicalBytes=$logicalBytes})
         }
     }
     foreach($id in $protected.Keys){if(-not @($Snapshot.Batches | Where-Object BatchId -CEQ $id).Count){$blocked.Add("Protected batch is absent from both stores: $id")}}
     foreach($group in @($rows.ToArray() | Group-Object BatchId)){
         if($group.Count -ne 2){continue}
         $copies=@($group.Group)
-        $left=@($copies[0].Files | Sort-Object Name | Select-Object Name,Bytes,SHA256)
-        $right=@($copies[1].Files | Sort-Object Name | Select-Object Name,Bytes,SHA256)
-        if((Get-RetentionObjectHash $left) -cne (Get-RetentionObjectHash $right)){
+        $left=@($copies[0].Files | Where-Object Name -CNotIn $copies[0].TechnicalLockNames | Sort-Object Name | Select-Object Name,Bytes,SHA256)
+        $right=@($copies[1].Files | Where-Object Name -CNotIn $copies[1].TechnicalLockNames | Sort-Object Name | Select-Object Name,Bytes,SHA256)
+        if(-not $copies[0].Valid -or -not $copies[1].Valid -or (Get-RetentionObjectHash $left) -cne (Get-RetentionObjectHash $right)){
             foreach($row in $copies){if($row.State -cin @('Eligible','Candidate')){$row.State='Blocked';$row.Reason='Local/SharePoint immutable batch contents disagree.'}}
             if($protected.ContainsKey($group.Name)){$blocked.Add("Protected batch copies disagree: $($group.Name)")}
         }
     }
-    [pscustomobject]@{SchemaVersion=2;Verification=$Snapshot.Verification;ApplySupported=($Snapshot.Verification -ceq 'Full');PolicyVersion=$script:RetentionPolicyVersion;PlanId=[guid]::NewGuid().ToString('N');CreatedUtc=[datetime]::UtcNow.ToString('O');TenantKey=$TenantKey;OutputRoot=$OutputRoot;RegistrySHA256=$RegistryHash;ConfigurationSHA256=$ConfigurationHash;ModuleSHA256=$script:RetentionModuleSHA256;SnapshotSHA256=(Get-RetentionObjectHash $Snapshot);Target=$Snapshot.Target;LocalPointer=$Snapshot.LocalPointer;RemotePointer=$Snapshot.RemotePointer;ProtectedBatchIds=@($protected.Keys | Sort-Object);BlockedReasons=$blocked.ToArray();Rows=$rows.ToArray()}
+    [pscustomobject]@{SchemaVersion=3;Verification=$Snapshot.Verification;ApplySupported=($Snapshot.Verification -ceq 'Full');PolicyVersion=$script:RetentionPolicyVersion;PlanId=[guid]::NewGuid().ToString('N');CreatedUtc=[datetime]::UtcNow.ToString('O');TenantKey=$TenantKey;OutputRoot=$OutputRoot;RegistrySHA256=$RegistryHash;ConfigurationSHA256=$ConfigurationHash;ModuleSHA256=$script:RetentionModuleSHA256;SnapshotSHA256=(Get-RetentionObjectHash (Get-RetentionSnapshotEvidence $Snapshot));Target=$Snapshot.Target;LocalPointer=$Snapshot.LocalPointer;RemotePointer=$Snapshot.RemotePointer;ProtectedBatchIds=@($protected.Keys | Sort-Object);BlockedReasons=$blocked.ToArray();Rows=$rows.ToArray()}
 }
 function Assert-RetentionPlan($Plan,$Fresh,[int]$MaxAgeHours) {
-    foreach($candidate in $Plan,$Fresh){if($candidate.SchemaVersion -ne 2 -or $candidate.Verification -cne 'Full' -or $candidate.ApplySupported -isnot [bool] -or -not $candidate.ApplySupported){throw 'Application requires a Full verification plan; metadata previews cannot authorize removal.'}}
+    foreach($candidate in $Plan,$Fresh){if($candidate.SchemaVersion -ne 3 -or $candidate.Verification -cne 'Full' -or $candidate.ApplySupported -isnot [bool] -or -not $candidate.ApplySupported){throw 'Application requires a current Full verification plan; metadata previews cannot authorize removal.'}}
     if($MaxAgeHours -lt 1 -or $MaxAgeHours -gt 168){throw 'Plan maximum age must be 1..168 hours.'}
     $created=if($Plan.CreatedUtc -is [datetime]){$Plan.CreatedUtc.ToUniversalTime()}else{[DateTimeOffset]::Parse([string]$Plan.CreatedUtc).UtcDateTime}
     $age=[datetime]::UtcNow-$created
@@ -412,7 +451,7 @@ function Invoke-PreparedBatchRetention {
             $planLock=Read-RetentionLockedDocument $PlanPath
             if($planLock.SHA256 -ine $PlanSHA256){throw 'Approved retention plan hash mismatch.'}
             $approved=$planLock.Value
-            if((Get-RetentionValue $approved 'SchemaVersion') -ne 2 -or (Get-RetentionValue $approved 'Verification') -cne 'Full' -or
+            if((Get-RetentionValue $approved 'SchemaVersion') -ne 3 -or (Get-RetentionValue $approved 'Verification') -cne 'Full' -or
                (Get-RetentionValue $approved 'ApplySupported') -isnot [bool] -or -not $approved.ApplySupported){throw 'Application requires a Full verification plan; metadata previews cannot authorize removal.'}
         }
         $run=Get-RetentionChild $work ('retention/'+[guid]::NewGuid().ToString('N'))
@@ -448,6 +487,7 @@ function Invoke-PreparedBatchRetention {
         foreach($row in @($plan.Rows | Where-Object State -CEQ 'Eligible' | Sort-Object @{Expression={if($_.Storage -ceq 'SharePoint'){0}else{1}}},BatchId)){
             $event=[ordered]@{Storage=$row.Storage;BatchId=$row.BatchId;Id=$row.Id;State='Checking';Utc=[datetime]::UtcNow.ToString('O');Error=$null}
             $journal.Events.Add($event);Write-RetentionDocument $journalPath $journal
+            $technicalHandles=[Collections.Generic.List[IO.FileStream]]::new()
             try {
                 Assert-RetentionLock $lock
                 $liveTarget=& $Transport.Describe;Assert-RetentionTarget $liveTarget $plan.Target
@@ -456,6 +496,14 @@ function Invoke-PreparedBatchRetention {
                 $pointerItems=@(Get-RetentionRemoteChildren $Transport $liveTarget.RootId | Where-Object Name -CEQ 'current.json.txt')
                 if($pointerItems.Count -ne 1 -or (Read-RetentionRemoteFile $Transport $pointerItems[0] $run).SHA256 -cne $snapshot.RemotePointerSHA256){throw 'Remote pointer changed during application.'}
                 if($row.BatchId -cin @($plan.ProtectedBatchIds)){throw 'Protected batch cannot be retired.'}
+                # Also guard local sidecars before cloud retirement, retaining handles through removal.
+                foreach($localRow in @($plan.Rows | Where-Object {$_.Storage -ceq 'Local' -and $_.BatchId -ceq $row.BatchId})){
+                    foreach($name in $localRow.TechnicalLockNames){
+                        $file=@($localRow.Files | Where-Object Name -CEQ $name)
+                        if($file.Count -ne 1){throw 'Technical lock missing from approved inventory.'}
+                        $technicalHandles.Add((Open-RetentionTechnicalLock $file[0]))
+                    }
+                }
                 if($row.Storage -ceq 'Local'){
                     $remoteRow=@($plan.Rows | Where-Object { $_.Storage -ceq 'SharePoint' -and $_.BatchId -ceq $row.BatchId })
                     $confirmed=@($journal.Events | Where-Object {$_.Storage -ceq 'SharePoint' -and $_.BatchId -ceq $row.BatchId -and $_.State -ceq 'Recycled'})
@@ -502,7 +550,7 @@ function Invoke-PreparedBatchRetention {
                 $event.State=if($event.State -ceq 'RemovalRequested'){'Uncertain'}else{'Blocked'}
                 Write-RetentionDocument $journalPath $journal
                 throw
-            }
+            } finally {foreach($handle in $technicalHandles){$handle.Dispose()}}
         }
         $journal.Status='Completed';Write-RetentionDocument $journalPath $journal
         [pscustomobject]@{Status='Completed';PlanPath=$PlanPath;PlanSHA256=$PlanSHA256;JournalPath=$journalPath;Plan=$plan}
@@ -626,11 +674,12 @@ function New-PreparedRetentionGraphTransport {
 
 Export-ModuleMember -Function Invoke-PreparedBatchRetention,New-PreparedRetentionGraphTransport
 
+
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDOh6YqLZMnzhFk
-# 9v4E5zSGlKSZvPGy8/Hfu5oQMYQobaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAO0cxCMgu+5Szs
+# zT094ZXCYvQzinaLcSbdgZEMan8leqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -763,31 +812,31 @@ Export-ModuleMember -Function Invoke-PreparedBatchRetention,New-PreparedRetentio
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIORApfvVbRGZqfx1QU7gxxE4DTcpXwLckShrdwnc8+WUMA0GCSqG
-# SIb3DQEBAQUABIIBgFOaeROWgcje1M9L4tNddC27fFoEuMna+iV5qqJy8RekgqYo
-# PDY3ER3VKr2rb6T1AkiCESEZnuSGbl7Bb3x+/riZHjb7oZSDy8GFHmKweef/aHmm
-# C17rQZFS7M4y1qxbImpNZGE1sQRuL4ECMYr0GEcFf+G1B+Pun1kDOCiwnvg3Ys8b
-# pIwGyGq5NVX9ZY0eZ2wQlJtEnnlsrZkhnfTE9DqPHGCdDZlXuG3sBRnTtUHXdN0w
-# 51izRnUafkyxiCHtRxDLVCqxGKO7zAz+1tPa6q0c1hknrcc5u2eAuTjHNnKU8719
-# B6tj8iIFdbuGL86bNQcMtPwnRXywcmpEkaU12sBy3Ac163mf925fqMYc7hR+kDYW
-# RPjKU2wkA9cI76Uf0FwbLKsjVCPFsPfJfKMhj0qajHS/XhKbahZCuuYBrJGwVnaf
-# PUgg03jH+y3GpIvlKuY6x0ltTdaUaugd98MFAi+Ot80F6lZaUNRxXSZzCCr+76Kj
-# uz0v9SPzeAt3K8IuxqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIMtycoqDrwOg5r9oBNDV7St9Du4GtIg4FxLt45nHSXMyMA0GCSqG
+# SIb3DQEBAQUABIIBgJCKQbGIWIghu8XT1u5lQ5gFSJcWjjr/XLgyeq2afBSn3ePA
+# oOEAck3EGX5U2Wx+fpqtixdVfhHqS4aN+3Ii3ik1OKMAi1FCQvflNvvNYccWa6uM
+# JGgcMJhNKGrSzopp2fmsSCkQFxvJK6hVMt28dfngnxyRFxm0aiOf4z5bS6PKXnxa
+# ybWgRuvwkhOi5BI34Qa18iCHsWOiWWTzxiXoqCe1X1/IUxPHPojjpOJli7PQpYaa
+# QCFcca6Vzl/LLwN+QhZsPJ5QAP13WZWHxmG+ss2fzrBgU+B473UBeorWGs0lsP39
+# +c8zPHnJeSPVPlI16S+xqJYkRmtsYURyoUeRu6YvUSn/GxeImreBlmW2Ch3A6kUn
+# GEiR7D0WKN8M+U4JUyijPKeQmPNYCdUO84JKFJrJnjiZ4l3XnPLYNymgwvtvaaaK
+# zPev7VRbS2/F9ZgcniL+icMkgmE4EgLPGjpK0uFFViYBJidHeufSEbNgRago4Beo
+# rCNhDgJ85gIOQLQuDKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTkyMTIy
-# MzdaMC8GCSqGSIb3DQEJBDEiBCA4WVRGPzttR4B32vFC+J9WJqTKIJSQmbZFzpIw
-# tmo/ADANBgkqhkiG9w0BAQEFAASCAgAeoZpQI9C8S4xonzCVhXUSTqGkjCNrjtkd
-# rt5mFX6YC/B12KArgU8WEBZ2cOBcniKPUO/sYNcElWbkh9g/rWCW4D+P9VsVxA/E
-# QONJiFAUasVnpPp67Qb1NxvgjhF66QuCTGqicc4koehMDMPRXJ9rS1ChovjJQi6o
-# GujMf2snUS5P+gerCEZ8qa8IsjjR2ZVfILFUAEf3TNT4VsdMcG/f2S1lPQ8YPy50
-# csAsLCVxVOpJPq2Wp+fGldX3c/TrJ3FTGM52qNkbXEAPWbHNvvJgRP4k1A/hxQFc
-# CsbIFnXIzN3DaFVJatu/nlOyseLPRYdVpj6a0zfJjIOeVf/6Xg875DHYm93socT9
-# qdzGT2eTU9Mr19Q+zGcLLtpgpGEcG37Rrr6AkH+JMThWUqyqwfxlneBd+XKXak2b
-# Pg27CU31GloN2Fj7+ccUtKzpQ4lwaPAJkzxwpuQWc6WnqSBwF9MpzrFilMWdfQxm
-# /8VkvbIIyFE4W/P39vSYQbOmvGmVrJldeYFyPDhoSBZVurqaGWW1rgWHbRI0ny/r
-# bMwvccsYbntJMZsLest1DV9+XwTVSDOjSH778QnlZMqIZ2ul7poDbooVlFwiM8jW
-# j2s1EU3r7ixh03g11vdVa+Y3KiBS/58iRVSQypB+FOpklyiLjQiL6QiBpz+2dm4l
-# l5EW4HYIWg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTkyMTUx
+# MzRaMC8GCSqGSIb3DQEJBDEiBCAh1n+rK8t41OKE5aexh2eP7wLq0QhjVS+r1Pwb
+# zIVmGDANBgkqhkiG9w0BAQEFAASCAgArmsGXE3tU2wk64fewEzQJfGyxBVymXjpn
+# +g5wWve6tkU+b7pyxii8p8ZrPuyOHs9AHMYTv2+ZfcQ704ZlzsJQ5kCqvHMfjW24
+# vsuCE2rVHUQ4XFzfzJdnKAUgEhjPljEzzXQDGk//gA4GLJpX9+Mpz5ptGClubJr0
+# MJFXIokhBtHra63dD+WGovTkSNyljEd3LlvjdP9M9axh9/BopEUIIX5ODVnv8mrz
+# +tLbNVUTaX5mFSFN19y/7HpBnuz7ImvJbWJalr3964ml+ClpTM4XMIS7FH8nMra1
+# lM7X3fPCkt/l6gN0f8qOdU/epmmjFpvvBCoz5ttAUiMGtIcyOmDNl9R8lQr1jGtb
+# v+/28ddmdShUDtpsitiAuXeQ9GOwr8Vpb66oQKV/p+r4XMqDQc4igeTGchygtj2Z
+# aefqZ3qZtxLR5XCgCkcBklXMBM9y33ik80fa15xWjHCj0jC4tCmrXAremgvkEkCj
+# 22gm8LhVSTJD+dt9cWYXiB0EbmQrx+WbAFkxVL5BDFVYqEvxOcgymUDvJFRngZ0Y
+# IyJiFb3Xs3aiouBsrFHH0feV2h7itiFcYE0vxfSB86o0x5rssFIPus2/gifg7TOX
+# 1K0OVKdMWaPDiH9TLsb1s5f9bpc/EjszeyKciN4u+dBgdBzHgZ6CA6yPgsaXzpl6
+# t8T/ch/Q4A==
 # SIG # End signature block

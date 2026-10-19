@@ -264,7 +264,7 @@ coordinate reference changes with the same publication authority.
 
 First run the standalone command in Preview on the authoritative server. Preview
 defaults to `-Verification Metadata`: it lists every file's identity and size,
-reads the three small receipts per batch and both root pointers, and validates
+reads the three receipts per batch and both root pointers, and validates
 their ownership, manifest/validation consistency and declared file sets. It never
 downloads or hashes payload CSVs/artifacts, including on the local server. Its
 private `plan.json.txt` contains resolved target IDs, live access-evidence hash,
@@ -274,6 +274,20 @@ decisions. Payload SHA256 values are explicitly unmeasured, not copied from the
 manifest as if they were measured. Same-size payload corruption is not detectable
 by this inventory. Structurally valid pins remain visible even while the registry
 is unqualified; the qualification failure still blocks all application.
+Plans use schema 3: parsed receipt bodies/provenance are not embedded. Each raw
+receipt's measured SHA256, byte length and identity remain in the file inventory
+and snapshot fingerprint. Receipt validation still precedes projection; original
+receipts are archived and verified before removal. Regenerate older plans.
+
+The only permitted extra local files are empty, idle sidecars named exactly
+`<owner>.json.transport.lock` or `<owner>.json.txt.sharepoint-transition.lock`,
+where the corresponding `<owner>.json.txt` is a receipt or declared JSON artifact.
+They remain in the physical inventory, counts, snapshot and pre-removal checks;
+only cross-store content comparison excludes them. Active/inaccessible, nonempty,
+orphaned, unknown or remote sidecars block the affected copies. Before cloud or
+local retirement, local sidecars are reopened without creating them and held
+against helper writes through archival and removal. No sidecar is deleted by
+Preview. Protected rows expose `ValidationReason` separately from pin reasons.
 An invalid policy still
 produces a blocked plan when inventory access is available. Authentication,
 enumeration or read-back failures can instead stop with a failure journal.

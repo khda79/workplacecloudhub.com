@@ -1,8 +1,8 @@
-<#
+﻿<#
 .SYNOPSIS
     Synthetic retention regression tests. File-backed fake SharePoint; no tenant or network.
 .VERSION
-    1.1.0
+    1.2.0
 #>
 [CmdletBinding()]
 param([Parameter(Mandatory)][string]$TestRoot,[switch]$AdapterOnly)
@@ -44,7 +44,7 @@ function Fixture {
     $target=[ordered]@{TenantId='synthetic-tenant';ClientId='synthetic-app';SiteId='synthetic-site';DriveId='synthetic-drive';RootId='root';BatchesId='batches';RootPath='Example/DATA/DATA-POWERBI';AccessEvidenceSHA256=('A'*64)}
     $q=[ordered]@{Status='Qualified';PolicyVersion='PreparedBatchRetention/v1';ReviewedBy='Synthetic operator';ReviewedUtc='2026-01-01T00:00:00Z';Coordination='SharedServerPublicationLock';ServerOutputRoot=$output;RegistrySHA256=(Get-FileHash $registry).Hash;ModuleSHA256=(Get-FileHash $modulePath).Hash;AccessEvidenceSHA256=('A'*64);WriterExclusionEvidence='Synthetic isolated file-backed transport, no other writers';ExclusiveCloudWritersConfirmed=$true;RecoverabilityConfirmed=$true}
     Json $config @{PreparedRetention=@{Mode='Preview';PlanMaxAgeHours=24;Target=$target;Qualification=$q}}
-    $state=@{Remote=$remote;Target=$target;Events=[Collections.Generic.List[string]]::new();FailArchive=$false;FailArchiveAt=0;Archives=0;FailDownload=$false;FailPayloadDownload=$false;PayloadDownloads=0;ReceiptDownloads=0;FailRecycleAt=0;Recycles=0;Uncertain=$false;ChangeAfterArchive=$false;ChangePayloadAfterArchive=$false;Linked=$false;WrongParent=$false;Recycled=@{};Hook=$null}
+    $state=@{Remote=$remote;Target=$target;Events=[Collections.Generic.List[string]]::new();FailArchive=$false;FailArchiveAt=0;Archives=0;FailDownload=$false;FailPayloadDownload=$false;PayloadDownloads=0;ReceiptDownloads=0;FailRecycleAt=0;Recycles=0;Uncertain=$false;ChangeAfterArchive=$false;ChangePayloadAfterArchive=$false;Linked=$false;WrongParent=$false;Recycled=@{};Hook=$null;ArchiveHook=$null}
     $describe={if($state.Hook){& $state.Hook};[pscustomobject]$state.Target}.GetNewClosure()
     $list={param($parent)
         $folder=if($parent -eq 'root'){$state.Remote}else{Join-Path $state.Remote $parent}
@@ -63,6 +63,7 @@ function Fixture {
     }.GetNewClosure()
     $archive={param($path,$relative)
         $state.Archives++;$state.Events.Add('Archive:'+$relative)
+        if($state.ArchiveHook){& $state.ArchiveHook}
         if($state.FailArchive -or ($state.FailArchiveAt -and $state.Archives -eq $state.FailArchiveAt)){return $false}
         $destination=Join-Path $state.Remote $relative
         New-Item -ItemType Directory -Path (Split-Path $destination -Parent) -Force | Out-Null
@@ -99,8 +100,114 @@ function AdvanceFixture($f,[int]$Day){
     Json (Join-Path $f.Output 'current.json.txt') $pointer
     Json (Join-Path $f.Remote 'current.json.txt') $pointer
 }
+function UpdateFixtureManifest($f,[string]$Id,$Manifest){
+    $folder=Join-Path $f.Output ('batches/'+$Id)
+    Json (Join-Path $folder 'batch.json.txt') $Manifest
+    $pointer=Get-Content (Join-Path $folder 'current.json.txt') -Raw|ConvertFrom-Json
+    $pointer.ManifestSHA256=(Get-FileHash (Join-Path $folder 'batch.json.txt')).Hash
+    Json (Join-Path $folder 'current.json.txt') $pointer
+    Copy-Item -LiteralPath $folder -Destination (Join-Path $f.Remote 'batches') -Recurse -Force
+    if($Id -ceq $f.Ids[-1]){Json (Join-Path $f.Output 'current.json.txt') $pointer;Json (Join-Path $f.Remote 'current.json.txt') $pointer}
+}
+function AddFixtureTechnicalLocks($f){
+    foreach($id in $f.Ids){
+        $folder=Join-Path $f.Output ('batches/'+$id);$artifact=Join-Path $folder 'Source-Example.json.txt'
+        Json $artifact @{Source='synthetic'}
+        $manifest=Get-Content (Join-Path $folder 'batch.json.txt') -Raw|ConvertFrom-Json
+        $manifest | Add-Member Artifacts @(@{File='Source-Example.json.txt';Bytes=(Get-Item $artifact).Length;SHA256=(Get-FileHash $artifact).Hash})
+        UpdateFixtureManifest $f $id $manifest
+        foreach($owner in 'current.json.txt','batch.json.txt','validation.json.txt','Source-Example.json.txt'){
+            foreach($name in ($owner.Substring(0,$owner.Length-4)+'.transport.lock'),($owner+'.sharepoint-transition.lock')){
+                [IO.File]::WriteAllBytes((Join-Path $folder $name),[byte[]]@())
+            }
+        }
+    }
+}
 
 if(-not $AdapterOnly){
+# Known idle locks belong to local infrastructure, remain in physical evidence, and do not split copies.
+foreach($verification in 'Metadata','Full'){
+    $f=Fixture;AddFixtureTechnicalLocks $f;$a=@{}+$f.Args;$a.Verification=$verification
+    $p=Invoke-PreparedBatchRetention @a
+    Check ($p.Status -ceq 'Preview' -and @($p.Plan.Rows|Where-Object {-not $_.Valid}).Count -eq 0) "$verification rejected known idle JSON locks"
+    Check (@($p.Plan.Rows|Where-Object State -CEQ 'Protected').Count -eq 8) "$verification lost protected batches with locks"
+    Check (@($p.Plan.Rows|Where-Object {$_.Storage -ceq 'Local' -and $_.TechnicalLockNames.Count -eq 8 -and $_.FileCount -eq 13}).Count -eq 6) 'Physical lock inventory was dropped'
+    Check (@($p.Plan.Rows.Files|Where-Object {$_.PSObject.Properties['Value']}).Count -eq 0) 'Plan embeds parsed receipt bodies'
+    Check ($p.Plan.SchemaVersion -eq 3 -and (Get-Item $p.PlanPath).Length -lt 150000) 'Compact plan schema/size regression'
+    if($verification -ceq 'Metadata'){
+        Check ($f.State.PayloadDownloads -eq 0 -and $f.State.Recycles -eq 0) 'Lock-aware metadata Preview downloaded payloads or recycled'
+    }else{
+        $lockPath=Join-Path $f.Output ('batches/'+$f.Ids[1]+'/batch.json.transport.lock')
+        $probe=@{Calls=0}
+        $f.State.ArchiveHook={
+            if(Test-Path $lockPath){
+                $denied=$false;try{$h=[IO.File]::Open($lockPath,'Open','ReadWrite','None');$h.Dispose()}catch{$denied=$true}
+                if(-not $denied){throw 'Technical helper writer was not excluded during archive/removal'}
+                $probe.Calls++
+            }
+        }.GetNewClosure()
+        # Check only this batch's archival window; unrelated batch locks need not be held.
+        $hook=$f.State.ArchiveHook
+        $fixtureState=$f.State;$fixtureId=$f.Ids[1]
+        $f.State.ArchiveHook={if($fixtureState.Events[-1] -like ('Archive:retired/'+$fixtureId+'/*')){& $hook}}.GetNewClosure()
+        $r=Invoke-PreparedBatchRetention @a -Mode Apply -PlanPath $p.PlanPath -PlanSHA256 $p.PlanSHA256
+        Check ($r.Status -ceq 'Completed' -and $f.State.Recycles -eq 2 -and $probe.Calls -eq 6) 'Full compact plan/lock-guarded retirement failed'
+        Check ((Test-Path (Join-Path $f.Output ('batches/'+$f.Ids[2]))) -and (Test-Path (Join-Path $f.Remote ('batches/'+$f.Ids[2])))) 'Full compact application removed consumer pin'
+    }
+}
+foreach($verification in 'Metadata','Full'){
+    foreach($case in 'Unknown','Orphan','CsvOwner','WrongCase','Nonempty','Active','Remote'){
+        $f=Fixture;$a=@{}+$f.Args;$a.Verification=$verification
+        $folder=Join-Path $f.Output ('batches/'+$f.Ids[1]);$held=$null
+        $name=switch($case){Unknown {'other.lock'};Orphan {'missing.json.transport.lock'};CsvOwner {'Example.csv.sharepoint-transition.lock'};WrongCase {'Batch.json.transport.lock'};default {'batch.json.transport.lock'}}
+        if($case -ceq 'Remote'){$folder=Join-Path $f.Remote ('batches/'+$f.Ids[1])}
+        $path=Join-Path $folder $name;[IO.File]::WriteAllBytes($path,[byte[]]@())
+        if($case -ceq 'Nonempty'){[IO.File]::WriteAllText($path,'owner data')}
+        if($case -ceq 'Active'){$held=[IO.File]::Open($path,'Open','ReadWrite','None')}
+        try {$p=Invoke-PreparedBatchRetention @a}finally{if($held){$held.Dispose()}}
+        Check (@($p.Plan.Rows|Where-Object {$_.BatchId -ceq $f.Ids[1] -and $_.State -ceq 'Blocked'}).Count -eq 2) "$verification $case lock did not block both copies"
+        Check ($f.State.Recycles -eq 0 -and (Test-Path $path)) "$verification $case lock was modified or removed"
+    }
+}
+# Active locks on protected batches stay visible as a validation failure, never become deletion candidates.
+$f=Fixture;$a=@{}+$f.Args;$a.Verification='Metadata'
+$path=Join-Path $f.Output ('batches/'+$f.Ids[2]+'/batch.json.transport.lock');[IO.File]::WriteAllBytes($path,[byte[]]@())
+$held=[IO.File]::Open($path,'Open','ReadWrite','None')
+try {$p=Invoke-PreparedBatchRetention @a}finally{$held.Dispose()}
+$row=@($p.Plan.Rows|Where-Object {$_.Storage -ceq 'Local' -and $_.BatchId -ceq $f.Ids[2]})[0]
+Check ($row.State -ceq 'Protected' -and -not $row.Valid -and $row.ValidationReason -match 'Technical lock unavailable') 'Protected active-lock diagnostic was hidden'
+Check ($p.Status -ceq 'Blocked' -and $f.State.Recycles -eq 0) 'Protected active-lock disagreement did not block application'
+# Recheck availability after a reviewed plan, before cloud mutation.
+$f=Fixture;AddFixtureTechnicalLocks $f;$a=$f.Args;$p=Invoke-PreparedBatchRetention @a
+$path=Join-Path $f.Output ('batches/'+$f.Ids[1]+'/batch.json.transport.lock');$held=[IO.File]::Open($path,'Open','ReadWrite','None')
+try {Reject {Invoke-PreparedBatchRetention @a -Mode Apply -PlanPath $p.PlanPath -PlanSHA256 $p.PlanSHA256} 'changed|differ|blocked'}finally{$held.Dispose()}
+Check ($f.State.Recycles -eq 0) 'Newly active technical lock permitted cloud retirement'
+$f=Fixture;AddFixtureTechnicalLocks $f;$a=$f.Args;$p=Invoke-PreparedBatchRetention @a
+$race=@{Calls=0;Handle=$null};$path=Join-Path $f.Output ('batches/'+$f.Ids[1]+'/batch.json.transport.lock')
+$f.State.Hook={
+    $race.Calls++
+    if($race.Calls -eq 2){$race.Handle=[IO.File]::Open($path,'Open','ReadWrite','None')}
+}.GetNewClosure()
+try {Reject {Invoke-PreparedBatchRetention @a -Mode Apply -PlanPath $p.PlanPath -PlanSHA256 $p.PlanSHA256} 'Technical lock unavailable'}finally{if($race.Handle){$race.Handle.Dispose()}}
+Check ($f.State.Recycles -eq 0 -and $f.State.Archives -eq 0) 'Lock activated after snapshot was missed before archival/cloud retirement'
+# Large provenance remains bound by raw hashes but never copied into plans or snapshot serialization.
+$f=Fixture;$a=@{}+$f.Args;$a.Verification='Metadata';$id=$f.Ids[-1]
+$manifest=Get-Content (Join-Path $f.Output ('batches/'+$id+'/batch.json.txt')) -Raw|ConvertFrom-Json
+$manifest | Add-Member Provenance ('SYNTHETIC-PROVENANCE-' + ('x'*2000000));UpdateFixtureManifest $f $id $manifest
+$p=Invoke-PreparedBatchRetention @a;$text=Get-Content $p.PlanPath -Raw
+Check ($text.Length -lt 60000 -and $text -notmatch 'SYNTHETIC-PROVENANCE|"Value"') 'Large provenance leaked into compact plan'
+$receipt=@($p.Plan.Rows|Where-Object {$_.Storage -ceq 'Local' -and $_.BatchId -ceq $id})[0].Files|Where-Object Name -CEQ 'batch.json.txt'
+Check ($receipt.SHA256 -ceq (Get-FileHash (Join-Path $f.Output ('batches/'+$id+'/batch.json.txt'))).Hash) 'Compact plan lost original manifest fingerprint'
+$manifest.Provenance=$manifest.Provenance.Replace('xxxx','yyyy');UpdateFixtureManifest $f $id $manifest
+$changed=Invoke-PreparedBatchRetention @a
+Check ($p.Plan.SnapshotSHA256 -cne $changed.Plan.SnapshotSHA256) 'Omitted provenance changed without changing snapshot fingerprint'
+# Old schemas and modifications to compact evidence cannot authorize removal.
+$f=Fixture;$a=$f.Args;$p=Invoke-PreparedBatchRetention @a
+$old=Get-Content $p.PlanPath -Raw|ConvertFrom-Json -Depth 70;$old.SchemaVersion=2;Json $p.PlanPath $old
+Reject {Invoke-PreparedBatchRetention @a -Mode Apply -PlanPath $p.PlanPath -PlanSHA256 (Get-FileHash $p.PlanPath).Hash} 'Full verification plan'
+$p=Invoke-PreparedBatchRetention @a;$tampered=Get-Content $p.PlanPath -Raw|ConvertFrom-Json -Depth 70;$tampered.Rows[0].Files[0].SHA256='F'*64;Json $p.PlanPath $tampered
+Reject {Invoke-PreparedBatchRetention @a -Mode Apply -PlanPath $p.PlanPath -PlanSHA256 (Get-FileHash $p.PlanPath).Hash} 'actions/protections'
+Check ($f.State.Recycles -eq 0) 'Changed compact evidence authorized removal'
 # Fast Preview must never request payload bytes, even when the registry is not yet qualified.
 $f=Fixture;$a=@{}+$f.Args;$a.Remove('Verification');$f.State.FailPayloadDownload=$true
 $held=[IO.File]::Open((Join-Path $f.Output ('batches/'+$f.Ids[0]+'/Example.csv')),'Open','ReadWrite','None')
@@ -352,11 +459,12 @@ try {
 }
 Write-Host "PASS: $script:checks synthetic retention checks. No tenant, network, production data or runtime configuration accessed. Fixtures: $base"
 
+
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBPb8WZHNDOoNIA
-# J9+IeSeyJ3QceudvUL2CWZrlmuPiP6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAMq78AFVkJMaCK
+# 484cF+j10vDrj2m0NIZO85vufbEC76CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -489,31 +597,31 @@ Write-Host "PASS: $script:checks synthetic retention checks. No tenant, network,
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEINrVKr+sZdY9pSTQPvARCOSl0TWOt4fuUMD2/B3roSgdMA0GCSqG
-# SIb3DQEBAQUABIIBgAzuLSe3X7X3jhEDcLeAgTGM8ZzAA6LpHEvrkc0w4PcPutx/
-# 2AOGSKqpZ6ABlvas0H4CsyvU1iu3D/xcgDEJGMLZVWj6U/P9ci0NcTO1lDxOx1NG
-# gZPEZVKhaZTH4gkXBTd0Ujdr4z2fb1e/ClDHf9PhQXBm1i374XVfr0xHOh8TaBIE
-# 3icmb/lpB/P+MljO2qH+TjqDfUALdCInOv29KUNuqNyCpLQIbQzJ4y0yi5EIRWhn
-# 7tz36iKrRS1qbMfo04sGRtaycP9ocyw+FcdJYalqA9CpNVkvjAwUnb2H6lN5M7Qi
-# KPtNp/7bZEUm9m/BReqB5heNk9w/IGKr69JKG5/jsEU+0k93U2QR1d/SzdCc0ML4
-# nSK08AMaeNHKHBvcyYJ//JU9cYoRRE158jeTCtOdvra7rfh2RCb7c739PQZB/Yr1
-# AJGYpsqb6LwLrScJnilz5YJ6h+qdQxcbcZg+NePesvYYA1vU5YX0Glxjgc3ueYTM
-# weBHhtWGQ4slmJObuqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIDfWzJcje2JDCJDYY5yw0vE2hPhJNXIqA4XqgpYwIyhBMA0GCSqG
+# SIb3DQEBAQUABIIBgGxWYPnX+u17vBl2pPbe9qWWX80NzcYM56cWSzRssgnz6/1t
+# hg/4oPNAYlS5OZo544Bmi5eeJdsR5Hb/18aBiky4UzN3jzzs0uXayHEGp6p2VJfR
+# 6QaMxVMhrbkSaUcCrDmBoPMPX1qL/IknTF/y+Vpz4SHpAtFEzfLZdnnxO1upkNip
+# xRPmYe58c5DzqmD9ykLMMkkK0R2J+nNaaND6UlxdRr+mPieH5JSwmUC9Ek/Ur9g4
+# MzvcatFyazpMiqpOm0gYzBwUh60CB6ehOGsvTEyyb3naBlgv2YaJjd+MO6TH4XrG
+# yX/ZkUqjZnc/9eg4N4P5MQtOmoVLxcwl7IBvq8Ei2I5HJArbrqAIFJzz58if6kam
+# F5AdVepla8RK0ZWxI8UtS+0Qt6Ofwk3v+Sc+CuvNH/4fqpgK4Kls4HzwK2GpDyOL
+# E79R/U3fU23XBxYDXVDvWOhvKs1JrkCP9MYHchKZ1GQK+1qAiI6qchlov9g4cc16
+# 42kMZyCN3j4BKr9HfKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTkyMTIy
-# MzhaMC8GCSqGSIb3DQEJBDEiBCASbwLDBSUBJ/Omw96HjnvxXIA3PSMGwz6c0Roo
-# XGU0VzANBgkqhkiG9w0BAQEFAASCAgB/c40qEvFdEAIUGvbgIcB6GyoQ6inOQrpS
-# GgQ1Ji2cSDRVEDrtJwWZW0yaeRfpPcqMZyTqSbkxklI7VGM/sOrt6saaX0ag7Y5g
-# 5FlXMET2o8JnYalKq8c8bgje5L3eyZ+kxQIAwwrFEci4+qfBwjC19OH5KugEbp0G
-# S38DeXzzJlYyMAv0dL7F0UUTFHdbVCR4bB88QcEkjuaRUhI1I+/SVqa7q4ATMTSf
-# qhQIVqGOzpc8eyG8JU/f2+rc0/NfhErU3BX44LGtWpeF55L/vy8ag02c8cnvMKpD
-# ptrboMOwxlVrV0zQsJO+8T027TrR1UiF7NUhcm+u+TkMW6HQDfKBI8ocR3VKtvgc
-# C72Nnftfkg/RSPKEpHqUyRTaLGB/a2hbXoIQVCVzxlc/WIlU1laXB0j3Ed/XVZkG
-# N+86a36eTZL2t7FBIeMA8HiwXPMGIwao0XP+TLEst9QrRvp0VLWsRAUi341fTC/Y
-# ig6Y7xOlPlaBH9uFG+ojzM55rIqpeBAGpPQhHDUzSjaS45JPXjTN7SfWQXeqNtYh
-# So9c8UIHRNl712e0RzqsUWZ7As8IRAmYMJumh+v0mXAaOrgcDK7ciVMGkSOmOIwu
-# KILHZerpVpNftmdCGZSUF2nYX/xVqXrGTubgS+dPmPXCXrSGtFpBqtWcyVkOw6PO
-# T4H47yExsA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTkyMTUx
+# MzRaMC8GCSqGSIb3DQEJBDEiBCA8Hg4Vo7/ZaMYSztu1JOreJuQjaoCVia3cIm9N
+# KWOjPjANBgkqhkiG9w0BAQEFAASCAgBub8aFnDWzqUBtI10m3iP16kYogjlxbwzM
+# Mv+W3HhQ095NUeqphGh96gHWU2o8zgQxdUgHdfhfInkpJdruwb5lxGb0/VRH1Y5L
+# ry9DcAU103fyojG+ODzk1ChReQv4X8teQPsoFV9Ovr8jcGn8cNJHU5Dj33AkTw2a
+# Qn5oGSYWXQgSV9DsbXKKd+cCSWTfPj31qfr3B7w7HTZjvx0lAzRm8DuaZ5hcG7N7
+# NGy1rwJkiuBRlSVMwvAUiDQIIZuaJ3A75Mh59a5gM9c7vJGZnMqT8tmnQZAShcLZ
+# 3wMe1JnG+821KDiwAhthxU8e84dR6EFAs6ePnmUSSvjo+9ZgpaTAg64C7oCDUyp9
+# Ic17fpMp29M3z+Ch/2p0yrwHPfuVzJ7IVJpTJqgdnBi6i+v9itVnsV5kj7min49N
+# INusj7Sv4gX0/OIl7K85qSx9lRzBoojFFVfoL127kqIPaOdf/37WQ0AJnTo3ofAa
+# 31so1vT0+Smm6qTF/ub+mqJ6mJdKBXM6m6STHUUBo2Osh7wkCq+1lVlDmkvBWf0v
+# gv8rlwH/Dijl67YOfceUV7IRxMXKSOZkLNbr4j6DZAs2gLcB/hIufQBxqgoAncRt
+# ga0qyerqpWcZq9ExN33DVPSnUGRsNAN75zBKKef+ahZpQN7PVmzivO6bU01HG3Sd
+# Pw/fthZYIw==
 # SIG # End signature block
