@@ -9,7 +9,7 @@
   FinOps_* CSVs with their own receipt.
   Unqualified input is reported as Not measured, never as zero or as an older value.
 .VERSION
-2.2.2
+2.2.3
 .NOTES
   -Tenant is the profile key; source receipts and rows are compared with the organization TenantKey (SmartM365TenantKey,
   or -SmartM365TenantKey). Folders: the SmartM365 DATA-LAST, DATA-ALL and LOG-ALL of the profile.
@@ -32,7 +32,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-$script:ScriptVersion = '2.2.2'
+$script:ScriptVersion = '2.2.3'
 # Run with -File, this script scope is the global scope: SmartM365 session values (LogPath, SmartM365TenantKey, ...)
 # set by the upload helpers would overwrite script variables of the same name. Names here never collide.
 $script:TenantKeyParameter = [string]$SmartM365TenantKey
@@ -190,6 +190,7 @@ $script:ProvisionalLeversBySource = @{
 # Valued totals of FinOps_Summary; each one is also broken down by PRICE, FORECAST and SHOWBACK (2.1.1).
 $script:SummaryTotals = @(
   @{ Key='TOTAL_R'; Class='R'; Levers=@('L1','L2','L3','L5','L6','L7'); Note='Realizable at contract or renewal; excludes conditional E3 to F3' }
+  @{ Key='TOTAL_R_CONFIRMED'; Class='R'; Levers=@('L1','L2','L5','L6','L7'); Note='R without the enabled accounts without activity (TOTAL_R_ENABLED_INACTIVE)' }
   @{ Key='TOTAL_R_DISABLED_AND_SHARED'; Class='R'; Levers=@('L1','L2','L5'); Note='Disabled accounts and eligible shared mailboxes' }
   @{ Key='TOTAL_R_ENABLED_INACTIVE'; Class='R'; Levers=@('L3'); Note='R - enabled accounts without M365 activity in 90 days' }
   @{ Key='TOTAL_R_COPILOT'; Class='R'; Levers=@('L6'); Note='Copilot without licensed activity' }
@@ -1110,6 +1111,18 @@ function Get-FinOpsControls {
       $wanted = if ($withUsers) { '{0}|{1}' -f $expected, [long]$totalRow.Users } else { $expected }
       & $addCheck 'G6' $bucketKey $wanted (& $bucketText $bucketKey $withUsers) $(if ($withUsers) { 'Summary showback values units|amount|users vs total' } else { 'Summary breakdown units|amount vs total' })
     }
+  }
+  # G7 (2.2.3) TOTAL_R splits exactly into TOTAL_R_CONFIRMED and TOTAL_R_ENABLED_INACTIVE (units|amount; users may overlap).
+  $split = @('TOTAL_R', 'TOTAL_R_CONFIRMED', 'TOTAL_R_ENABLED_INACTIVE') | ForEach-Object { $totalRows[$_] }
+  if (@($split | Where-Object { $null -eq $_ }).Count) { & $addCheck 'G7' 'TOTAL_R' 'present once' 'missing or duplicated' 'TOTAL_R, TOTAL_R_CONFIRMED and TOTAL_R_ENABLED_INACTIVE present once' }
+  else {
+    $part = [pscustomobject]@{ Units=[long]0; HasUnits=$false; Amount=[decimal]0; HasAmount=$false }
+    foreach ($row in @($split[1], $split[2])) {
+      if ([string]$row.Units -ne '') { $part.Units += [long]$row.Units; $part.HasUnits = $true }
+      if ($null -ne $row.AnnualAmount -and [string]$row.AnnualAmount -ne '') { $part.Amount += [decimal]$row.AnnualAmount; $part.HasAmount = $true }
+    }
+    $parts = '{0}|{1}' -f $(if ($part.HasUnits) { $part.Units } else { '' }), $(if ($part.HasAmount) { Format-FinOpsDecimal $part.Amount } else { '' })
+    & $addCheck 'G7' 'TOTAL_R' ('{0}|{1}' -f (& $text $split[0].Units), (& $text $split[0].AnnualAmount)) $parts 'TOTAL_R units|amount vs TOTAL_R_CONFIRMED + TOTAL_R_ENABLED_INACTIVE'
   }
   $allUsers = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
   foreach ($o in $opps) { if ($o.UserId) { [void]$allUsers.Add($o.UserId) } }

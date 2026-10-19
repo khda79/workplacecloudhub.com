@@ -3,7 +3,7 @@
 .SYNOPSIS
   Offline tests of the SmartFinOps Workplace V2 valuation engine.
 .VERSION
-1.4.2
+1.4.3
 .NOTES
   Synthetic contoso data only, in an isolated temporary runtime (no local configuration, export or tenant).
   Source receipts are produced by the real SmartM365.Core module commands.
@@ -278,7 +278,7 @@ try {
   $banner = ($logLines[$bannerStart..($logLines.Count - 1)] -join "`n")
   Check ($banner.Contains(' SmartFinOps by WorkplaceCloudHub - Execution completed') -and $banner.Contains(' Script    : SmartFinOps-Workplace-Valuation.ps1') -and $banner.Contains(' CSV files : 7') -and $banner -match ' Duration  : \d{2}:\d{2}:\d{2}' -and $banner -match ' Status    : (SUCCESS|COMPLETED WITH WARNINGS)') "completion banner appended to the run log ($banner)"
   Check ($run.Log.Contains(' SmartFinOps by WorkplaceCloudHub') -and $run.Log.Contains(' Website : https://workplacecloudhub.com') -and $run.Log.Contains(' Errors    : 0')) 'startup and completion banners on the console'
-  Check ($run.Log -match 'Starting SmartFinOps Workplace Valuation v2\.2\.2 ' -and $run.Log -match 'Tenant context 1.4.1') 'engine and context versions logged at runtime'
+  Check ($run.Log -match 'Starting SmartFinOps Workplace Valuation v2\.2\.3 ' -and $run.Log -match 'Tenant context 1.4.1') 'engine and context versions logged at runtime'
   # Orchestrator contract: default success-evidence log pattern, 0 success, 3 completed with warnings.
   $orchestratorEvidence = 'Execution context:|Environment initialized successfully|Starting .* v|(?s:Execution summary:.*Status:\s*(?:Success|CompletedWithWarnings).*Errors:\s*0)'
   Check ($run.Log -match $orchestratorEvidence -and $banner.Contains(' Status    : COMPLETED WITH WARNINGS') -and $banner.Contains(' SmartFinOps by WorkplaceCloudHub - Execution completed with warnings')) 'warning run: exit 3, Completed with warnings banner, orchestrator success evidence'
@@ -326,10 +326,12 @@ try {
   Check ((Get-Opportunity $opps 'L5|u7|sku-visio')[0].StatusReason -like 'Entra disabled*') 'review reason carried'
   Check ((Get-Opportunity $opps 'L4|u4|sku-e3')[0].TargetSkuPartNumber -eq 'SPE_F1') 'E3 to F3 target SKU from ReportProduct'
   $summary = Read-Output $out 'FinOps_Summary.csv'
-  foreach ($pair in @(@('TOTAL_R','4762.80'),@('TOTAL_R_DISABLED_AND_SHARED','3090.72'),@('TOTAL_R_ENABLED_INACTIVE','453.36'),@('TOTAL_R_COPILOT','312.00'),@('TOTAL_R_CAPACITY','906.72'),@('TOTAL_RC_E3_TO_F3','349.44'),@('TOTAL_E_REUSE','103.92'))) {
+  foreach ($pair in @(@('TOTAL_R','4762.80'),@('TOTAL_R_CONFIRMED','4309.44'),@('TOTAL_R_DISABLED_AND_SHARED','3090.72'),@('TOTAL_R_ENABLED_INACTIVE','453.36'),@('TOTAL_R_COPILOT','312.00'),@('TOTAL_R_CAPACITY','906.72'),@('TOTAL_RC_E3_TO_F3','349.44'),@('TOTAL_E_REUSE','103.92'))) {
     $kpi = Get-Kpi $summary $pair[0]
     Check ($kpi.AnnualAmount -eq $pair[1] -and $kpi.ValuationStatus -eq 'Valued') "KPI $($pair[0]) = $($pair[1]) (got $($kpi.AnnualAmount))"
   }
+  $splitR = @('TOTAL_R','TOTAL_R_CONFIRMED','TOTAL_R_ENABLED_INACTIVE') | ForEach-Object { Get-Kpi $summary $_ }
+  Check ([long]$splitR[0].Units -eq [long]$splitR[1].Units + [long]$splitR[2].Units -and [decimal]$splitR[0].AnnualAmount -eq [decimal]$splitR[1].AnnualAmount + [decimal]$splitR[2].AnnualAmount -and $splitR[1].Lever -eq 'L1;L2;L5;L6;L7') 'TOTAL_R_CONFIRMED + TOTAL_R_ENABLED_INACTIVE = TOTAL_R (units and amount), levers without L3'
   Check ((Get-Kpi $summary 'NOT_MEASURED_MAILBOX').Units -eq '1' -and (Get-Kpi $summary 'NOT_MEASURED_MAILBOX').AnnualAmount -eq '') 'mailbox Not measured KPI counted without amount'
   Check ((Get-Kpi $summary 'TOTAL_E_ESU').ValuationStatus -eq 'Not measured') 'ESU Not measured in V2.1'
   Check ((Get-Kpi $summary 'GAP|UserMailboxes|NoSkus').Units -eq '4' -and (Get-Kpi $summary 'GAP|AdGapActivity|NoObservedMatch').ValuationStatus -eq 'Not measured') 'one summary row per gap metric with its own value'
@@ -361,9 +363,9 @@ try {
   $contractsAfter = Get-Content -LiteralPath $contracts -Raw | ConvertFrom-Json
   Check ((@($contractsAfter.UnmappedSkus) -join ',') -eq 'DYN365_FINANCE,Microsoft_365_Copilot,VISIOCLIENT') "UnmappedSkus completed without invented dates (got $(@($contractsAfter.UnmappedSkus) -join ','))"
   $controls = Read-Output $out 'FinOps_Controls.csv'
-  Check (@($controls | Where-Object Status -ne 'Pass').Count -eq 0 -and @($controls | Where-Object Control -eq 'G6').Count -gt 0) 'all equivalence controls pass, G1-G6 present'
-  foreach ($control in @('G1','G2','G3','G4','G5','G6')) { Check (@($controls | Where-Object Control -eq $control).Count -gt 0) "control $control present" }
-  foreach ($key in @('PRICE|TOTAL_R','FORECAST|TOTAL_RC_E3_TO_F3','SHOWBACK|Country|TOTAL_R','SHOWBACK|Department|TOTAL_E_REUSE','SHOWBACK|Entity|USERS')) {
+  Check (@($controls | Where-Object Status -ne 'Pass').Count -eq 0 -and @($controls | Where-Object Control -eq 'G6').Count -gt 0) 'all equivalence controls pass, G1-G7 present'
+  foreach ($control in @('G1','G2','G3','G4','G5','G6','G7')) { Check (@($controls | Where-Object Control -eq $control).Count -gt 0) "control $control present" }
+  foreach ($key in @('PRICE|TOTAL_R','PRICE|TOTAL_R_CONFIRMED','FORECAST|TOTAL_R_CONFIRMED','SHOWBACK|Department|TOTAL_R_CONFIRMED','FORECAST|TOTAL_RC_E3_TO_F3','SHOWBACK|Country|TOTAL_R','SHOWBACK|Department|TOTAL_E_REUSE','SHOWBACK|Entity|USERS')) {
     Check (@($controls | Where-Object { $_.Control -eq 'G6' -and $_.Key -eq $key -and $_.Status -eq 'Pass' }).Count -eq 1) "G6 reconciles summary breakdown $key"
   }
   $showback = Read-Output $out 'FinOps_Showback.csv'
@@ -592,6 +594,15 @@ try {
   @($g6Summary | Where-Object KpiKey -ceq 'SHOWBACK|Country|USERS|c')[0].Users = 2
   $g6Failed = @(Get-FinOpsControls -Sources $g6Sources -Valuation $g6Valuation -Showback $g6Showback -SummaryRows $g6Summary | Where-Object Status -eq 'Fail' | ForEach-Object Key)
   Check (($g6Failed -join ',') -eq 'PRICE|TOTAL_R,SHOWBACK|Country|USERS') "G6 unit: tampered breakdowns fail (got $($g6Failed -join ','))"
+  # G7 (2.2.3) detects a TOTAL_R that no longer splits into confirmed and enabled-inactive amounts.
+  $g7Summary = Get-FinOpsSummary -Valuation $g6Valuation
+  $g7Pass = @(Get-FinOpsControls -Sources $g6Sources -Valuation $g6Valuation -Showback $g6Showback -SummaryRows $g7Summary | Where-Object Control -eq 'G7')
+  Check ($g7Pass.Count -eq 1 -and $g7Pass[0].Status -eq 'Pass' -and $g7Pass[0].FinOpsCount -eq '1|10.00') "G7 unit: R split passes (got $(@($g7Pass | ForEach-Object { '{0}={1}' -f $_.Status, $_.FinOpsCount }) -join ','))"
+  @($g7Summary | Where-Object KpiKey -ceq 'TOTAL_R')[0].AnnualAmount = [decimal]11
+  $g7Failed = @(Get-FinOpsControls -Sources $g6Sources -Valuation $g6Valuation -Showback $g6Showback -SummaryRows $g7Summary | Where-Object { $_.Control -eq 'G7' -and $_.Status -eq 'Fail' })
+  Check ($g7Failed.Count -eq 1) 'G7 unit: tampered TOTAL_R fails'
+  $g7Missing = @($g7Summary | Where-Object KpiKey -cne 'TOTAL_R_CONFIRMED')
+  Check (@(Get-FinOpsControls -Sources $g6Sources -Valuation $g6Valuation -Showback $g6Showback -SummaryRows $g7Missing | Where-Object { $_.Control -eq 'G7' -and $_.Status -eq 'Fail' }).Count -eq 1) 'G7 unit: missing TOTAL_R_CONFIRMED fails'
   $template = Join-Path $project 'Config\SmartFinOps-Contracts.local.json.template'
   foreach ($bad in @(
       @{ Name='date'; Skus=@([ordered]@{ SkuPartNumber='SPE_E3' }); Renewal='31/03/2027' },
