@@ -15,7 +15,7 @@ Existing completed legacy proofs remain readable. Existing Running/Failed proofs
 
 Failed attempts publish their run state without re-uploading an older proof as new evidence. Successful attempts publish both metadata files using the configured shared upload behavior. Synchronization can deliver files out of order; hashes and proof validation remain mandatory. A local run-state file or local file lock alone is not a distributed lock across SharePoint-synchronized copies.
 
-## Staged source publication (Core 1.0.93, helper 1.4.0; artifacts Core 1.0.94, helper 1.4.1)
+## Staged source publication (Core 1.0.93, helper 1.4.0; artifacts Core 1.0.95, helper 1.4.1)
 
 A producer that calls `Enable-SmartM365StagedSourcePublication` right after starting its receipt never changes DATA-LAST before it completes. Its DATA-LAST CSVs are written to `DATA-LAST\.staging\<producer>\<RunId>\` (same volume, so each promotion is an atomic replace). The run state declares `StagedPublication: true` and stays Collecting during the whole collection.
 

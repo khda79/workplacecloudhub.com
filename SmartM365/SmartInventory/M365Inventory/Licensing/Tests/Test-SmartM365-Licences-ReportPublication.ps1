@@ -40,7 +40,7 @@ if ($definitions.Count -ne $names.Count) { throw 'License report functions are m
 foreach ($definition in $definitions) { Invoke-Expression $definition.Extent.Text }
 
 # The production module: a missing export fails here exactly as it would in the collector.
-$coreModule = Import-Module $coreManifest -MinimumVersion '1.0.94' -Force -PassThru
+$coreModule = Import-Module $coreManifest -MinimumVersion '1.0.95' -Force -PassThru
 
 $script:checks = 0
 function Check {

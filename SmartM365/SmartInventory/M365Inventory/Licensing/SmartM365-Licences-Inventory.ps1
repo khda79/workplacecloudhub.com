@@ -5,7 +5,7 @@
   Detects Direct vs Group via user.LicenseAssignmentStates.assignedByGroup.
   Maps SKU & Service Plan friendly names from the Microsoft CSV (default: script folder).
   Every full run publishes the license report (snapshot + M365_Licenses_Report*.csv) as optional outputs of its source receipt.
-  DATA-LAST changes only when a run completes: CSVs and report snapshot are staged and promoted with the receipt (Core 1.0.94).
+  DATA-LAST changes only when a run completes: CSVs and report snapshot are staged and promoted with the receipt (Core 1.0.95).
   The email, including SendLicenseSummaryEmailOnly, renders that published report after checking it against the receipt; it never recomputes.
   ForceAdCsvAnalysis (full runs only) uses a fresh, structurally valid AD CSV for the report when only its collector receipt is rejected.
   ForceLicenseSummaryEmail sends the report again even when it was already sent on the current Europe/Paris day.
@@ -260,7 +260,7 @@ $OrgDomain = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'OrgDom
 # ==========================================================
 $modulePath = & { $d = $PSScriptRoot; while ($d) { $p = Join-Path $d 'Modules\SmartM365.Core\SmartM365.Core.psd1'; if (Test-Path -LiteralPath $p) { return $p }; $parent = Split-Path -Path $d -Parent; if ($parent -eq $d) { break }; $d = $parent }; throw 'SmartM365.Core module not found.' }
 try {
-    Import-Module -Name $modulePath -MinimumVersion '1.0.94' -ErrorAction Stop
+    Import-Module -Name $modulePath -MinimumVersion '1.0.95' -ErrorAction Stop
 } catch {
     Write-Host "Failed to import SmartM365.Core module from '$modulePath' : $_" -ForegroundColor Red
     exit 1
