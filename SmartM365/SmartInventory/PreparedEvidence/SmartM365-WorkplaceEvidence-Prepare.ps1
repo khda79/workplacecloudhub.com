@@ -2,7 +2,7 @@
 .SYNOPSIS
     Prepare a validated, versioned SmartWorkplaceIntelligence batch after raw collectors.
 .VERSION
-    0.4.4
+    0.4.5
 .NOTES
     PowerShell 7. SharePoint mapping reads use the tenant configuration unless Offline.
     Deployment must include the sibling SmartWorkplaceIntelligence/scripts, config and reference folders.
@@ -46,7 +46,9 @@ function Invoke-PreparedStep {
             WriteLog -Message $_.Message -Level WARNING
         } elseif ($_ -is [Management.Automation.InformationRecord]) {
             foreach ($line in ([string]$_.MessageData -split '\r?\n')) {
-                if ($line -match '^(?:\[\d{4}-\d{2}-\d{2}[^\]]*\]\s*)*(?:WARNING|AVERTISSEMENT)\s*:\s*(.*)$') {
+                # Child hosts attached to a VT console colour warnings; match the text without ANSI sequences.
+                $plain = $line -replace "$([char]27)\[[0-?]*[ -/]*[@-~]", ''
+                if ($plain -match '^(?:\[\d{4}-\d{2}-\d{2}[^\]]*\]\s*)*(?:WARNING|AVERTISSEMENT)\s*:\s*(.*)$') {
                     WriteLog -Message $Matches[1] -Level WARNING
                 } elseif ($_.Tags -contains 'PSHOST') {
                     Write-Host $line

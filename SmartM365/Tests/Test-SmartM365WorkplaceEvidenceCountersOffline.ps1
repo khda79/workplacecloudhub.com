@@ -3,7 +3,7 @@
 .SYNOPSIS
     Synthetic entry-point counters and retention diagnostics; no real preparation or transport.
 .VERSION
-    1.0.0
+    1.0.1
 #>
 [CmdletBinding()]
 param([Parameter(Mandatory)][string]$TestRoot)
@@ -133,6 +133,19 @@ try {
         if($LASTEXITCODE -ne 0){throw 'Synthetic warning child failed'}
     }
     Check ($global:SmartM365WarningCount -eq 5) 'Native process warnings were dropped or duplicate messages were collapsed'
+    # Children attached to a VT console colour their warnings (production job logs: ESC[33;1mWARNING: ...).
+    $colored=Join-Path $root 'synthetic-colored-child.ps1'
+    "`$PSStyle.OutputRendering='Ansi'; Write-Warning 'Colored native warning'; Write-Host 'colored normal output'" | Set-Content -LiteralPath $colored
+    Invoke-PreparedStep {
+        & $shell -NoProfile -ExecutionPolicy Bypass -File $colored 2>&1 | ForEach-Object {Write-Host ('[2026-01-01 01:00:00] '+[string]$_)}
+        if($LASTEXITCODE -ne 0){throw 'Synthetic colored warning child failed'}
+    }
+    Check ($global:SmartM365WarningCount -eq 6) 'An ANSI-colored native warning was not counted'
+    $escape=[char]27
+    Invoke-PreparedStep {Write-Host "[2026-01-01 01:00:00] $escape[33;1mWARNING: Escaped relay warning$escape[0m"}
+    Check ($global:SmartM365WarningCount -eq 7) 'A relayed ANSI warning line was not counted'
+    $logged=Get-Content -LiteralPath $global:LogTextFile -Raw
+    Check ($logged -match 'Colored native warning' -and $logged -match 'Escaped relay warning' -and -not $logged.Contains([string]$escape)) 'ANSI warnings were not logged as plain text'
     Reset-Fixture;$script:childWarnings=8;$script:batchUploadEnabled=$true;RetentionControl 'Blocked'
     . $normal
     Check ($global:csvGeneratedPaths.Count -eq 2) 'Prepared CSV count includes artifacts or missed publication'
