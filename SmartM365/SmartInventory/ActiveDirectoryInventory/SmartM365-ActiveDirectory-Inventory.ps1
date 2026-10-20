@@ -23,7 +23,7 @@
     - Sends an email notification in case of a global error (SendEmailHtmlReport)
 
 .VERSION
-1.64
+1.65
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; ActiveDirectory RSAT/Windows Server module; ImportExcel for the diagnostic mail workbook.
@@ -772,7 +772,7 @@ if ($PSVersionTable.PSVersion.Major -lt 7) {
 # ==========================================================
 $modulePath = & { $d = $PSScriptRoot; while ($d) { $p = Join-Path $d 'Modules\SmartM365.Core\SmartM365.Core.psd1'; if (Test-Path -LiteralPath $p) { return $p }; $parent = Split-Path -Path $d -Parent; if ($parent -eq $d) { break }; $d = $parent }; throw 'SmartM365.Core module not found.' }
 try {
-    Import-Module -Name $modulePath -MinimumVersion '1.0.87' -ErrorAction Stop
+    Import-Module -Name $modulePath -MinimumVersion '1.0.93' -ErrorAction Stop
 } catch {
     Write-Host ("Failed to import SmartM365.Core module from '{0}' : {1}" -f $modulePath, $_) -ForegroundColor Red
     $smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; $smartM365RunGuard.ExitCode=(1); exit $smartM365RunGuard.ExitCode
@@ -781,7 +781,7 @@ try {
 # ==========================================================
 # Initialization via SmartM365.Core
 # ==========================================================
-$ScriptVersion = "1.64"
+$ScriptVersion = "1.65"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $script:ExitCode = 0
 $globalError = $null
@@ -790,6 +790,8 @@ $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'Activ
 try {
     $InitializeOutputPath = InitializeScriptEnvironment -OutputPathInit $OutputPath -LogFileName $(($MyInvocation.MyCommand.Name) -replace '\.ps1$','') -CallerScriptPath $PSCommandPath
     Start-SmartM365CmdbSourceReceipt -ScriptPath $PSCommandPath -SourceRootPath (Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue '') -ReadOnly:($DomainWorker -or $ReportOnly -or $DuplicateAnalysisOnly)
+    # DATA-LAST changes only when this run completes; workers and report-only modes hold no receipt.
+    Enable-SmartM365StagedSourcePublication
     Start-SmartM365RunTranscript -Path $global:LogTranscriptFile -Append
 
     WriteLog -Message ("Script environment initialized at {0}" -f $InitializeOutputPath)
@@ -1103,6 +1105,23 @@ try {
         Invoke-SmartM365AdFileOperationWithRetry -OperationName 'publish file' -Path $DestinationPath -Action {
             Copy-SmartM365FileAtomically -SourcePath $SourcePath -DestinationPath $DestinationPath
         } | Out-Null
+    }
+
+    # Copies a CSV to DATA-LAST: to its staged copy while staging is active, with the SharePoint copy
+    # of the DATA-LAST file deferred to the promotion. Returns the upload record of a direct publication.
+    function Publish-SmartM365AdLatestCopy {
+        param(
+            [Parameter(Mandatory = $true)][string]$SourcePath,
+            [Parameter(Mandatory = $true)][string]$DestinationPath
+        )
+
+        $writePath = if (Get-Command -Name Resolve-SmartM365SourcePublicationPath -ErrorAction SilentlyContinue) { Resolve-SmartM365SourcePublicationPath -Path $DestinationPath } else { $DestinationPath }
+        Copy-SmartM365FileAtomically -SourcePath $SourcePath -DestinationPath $writePath
+        if ($writePath -cne $DestinationPath) {
+            Add-SmartM365StagedPublicationAction -Path $DestinationPath -SharePointUpload
+            return $null
+        }
+        return (Invoke-SmartM365SharePointCsvUpload -LocalFilePath $DestinationPath)
     }
 
     function Add-SmartM365AdGeneratedCsvPath {
@@ -1746,9 +1765,8 @@ try {
             }
 
             $latestFilePath = Join-Path -Path $LatestFolderPath -ChildPath ([System.IO.Path]::GetFileName($OutputFilePath))
-            Copy-SmartM365FileAtomically -SourcePath $OutputFilePath -DestinationPath $latestFilePath
+            Publish-SmartM365AdLatestCopy -SourcePath $OutputFilePath -DestinationPath $latestFilePath | Out-Null
             WriteLog -Message ("Daily report CSV copied to LatestCsvFolderPath: {0}" -f $latestFilePath)
-            Invoke-SmartM365SharePointCsvUpload -LocalFilePath $latestFilePath | Out-Null
         }
 
         Invoke-SmartM365SharePointCsvUpload -LocalFilePath $OutputFilePath | Out-Null
@@ -2403,10 +2421,9 @@ $($rows -join "`n")
             }
 
             $latestSummaryPath = Join-Path -Path $LatestFolderPath -ChildPath ([System.IO.Path]::GetFileName($summaryCsvPath))
-            Copy-SmartM365FileAtomically -SourcePath $summaryCsvPath -DestinationPath $latestSummaryPath
+            $latestUpload = Publish-SmartM365AdLatestCopy -SourcePath $summaryCsvPath -DestinationPath $latestSummaryPath
             WriteLog -Message ("AD daily summary copied to LatestCsvFolderPath: {0}" -f $latestSummaryPath)
 
-            $latestUpload = Invoke-SmartM365SharePointCsvUpload -LocalFilePath $latestSummaryPath
             $latestUpload = Add-SmartM365SharePointUploadLabel -UploadRecord $latestUpload -Label 'AD daily summary (DATA-LAST)'
             if ($latestUpload) { $summarySharePointUploads += $latestUpload }
         }
@@ -3417,11 +3434,10 @@ $($rows -join "`n")
             foreach ($combinedCsv in (@($combinedDomainsCsv, $combinedIdentitiesCsv, $combinedMembershipCsv, $combinedUsersCsv, $combinedUsersEnrichedCsv, $combinedComputersCsv, $combinedComputersEnrichedCsv, $combinedGroupsCsv, $combinedOusCsv, $combinedContactsCsv) | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })) {
                 if (Test-Path -Path $combinedCsv) {
                     $destinationFile = Join-Path $destinationRootPath ([System.IO.Path]::GetFileName($combinedCsv))
-                    Copy-SmartM365FileAtomically -SourcePath $combinedCsv -DestinationPath $destinationFile
+                    Publish-SmartM365AdLatestCopy -SourcePath $combinedCsv -DestinationPath $destinationFile | Out-Null
                     [void]$global:csvGeneratedPaths.Add($destinationFile)
                     WriteLog -Message ("Copied combined CSV '{0}' to '{1}'" -f $combinedCsv, $destinationFile)
                     Invoke-SmartM365SharePointCsvUpload -LocalFilePath $combinedCsv | Out-Null
-                    Invoke-SmartM365SharePointCsvUpload -LocalFilePath $destinationFile | Out-Null
                 }
                 else {
                     WriteLog -Message ("Combined CSV not found, skipping copy: {0}" -f $combinedCsv)
@@ -3780,9 +3796,8 @@ $($rows -join "`n")
                         if ($sourceUpload) { $duplicateSharePointUploads += $sourceUpload }
 
                         $destinationFile = Join-Path $destinationRootPath ([System.IO.Path]::GetFileName($duplicateCsv))
-                        Copy-SmartM365FileAtomically -SourcePath $duplicateCsv -DestinationPath $destinationFile
+                        $latestUpload = Publish-SmartM365AdLatestCopy -SourcePath $duplicateCsv -DestinationPath $destinationFile
                         WriteLog -Message ("Copied '{0}' to '{1}'" -f $duplicateCsv, $destinationFile)
-                        $latestUpload = Invoke-SmartM365SharePointCsvUpload -LocalFilePath $destinationFile
                         $latestUpload = Add-SmartM365SharePointUploadLabel -UploadRecord $latestUpload -Label ("{0} (DATA-LAST)" -f $duplicateLabel)
                         if ($latestUpload) { $duplicateSharePointUploads += $latestUpload }
                     }
