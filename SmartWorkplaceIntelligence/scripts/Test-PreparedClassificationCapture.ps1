@@ -1,4 +1,4 @@
-# Version 1.0.0
+# Version 1.0.1: fixture generators include SharePointMigration (always scheduled by the dispatcher).
 [CmdletBinding()]
 param([Parameter(Mandatory)][string]$TestRoot)
 # Synthetic rules and simulated child generators only; no production preparation.
@@ -108,7 +108,7 @@ if ($control.Mode -eq 'Tamper') { [IO.File]::WriteAllText($control.Path,$control
 param($DataRoot,$UserOutputPath,$HistoryOutputPath,$TrendOutputPath,$IdentityOutputPath,$SignalsOutputPath,$SystemEvidencePath,$AccountClassificationConfigPath)
 [IO.File]::WriteAllText((Join-Path (Split-Path $UserOutputPath -Parent) 'Workforce.started'),'synthetic')
 '@)
-foreach ($name in @('New-WindowsMigrationEvidence','New-DeviceLifecycleExperienceTrendEvidence','New-ApplicationInventoryEvidence','New-CollaborationEvidence','New-ContentStorageEvidence','New-MailboxEvidence','New-DailyTrendsEvidence','New-LicensingEvidence','New-SecurityEvidence','New-BackupResilienceEvidence','New-IntuneOperationalEvidence','New-DataTrustEvidence','New-ExecutiveTrendEvidence')) {
+foreach ($name in @('New-SharePointMigrationEvidence','New-WindowsMigrationEvidence','New-DeviceLifecycleExperienceTrendEvidence','New-ApplicationInventoryEvidence','New-CollaborationEvidence','New-ContentStorageEvidence','New-MailboxEvidence','New-DailyTrendsEvidence','New-LicensingEvidence','New-SecurityEvidence','New-BackupResilienceEvidence','New-IntuneOperationalEvidence','New-DataTrustEvidence','New-ExecutiveTrendEvidence')) {
     [IO.File]::WriteAllText((Join-Path $scripts ($name + '.ps1')),'exit 0')
 }
 $shell = (Get-Process -Id $PID).Path
