@@ -1,4 +1,8 @@
 {
+  "MailPowerBiEnabled": "__USE_GLOBAL__",
+  "MailPowerBiUrl": "",
+  "MailPowerBiLogoPath": "__USE_GLOBAL__",
+  "MailPowerBiLinkText": "__USE_GLOBAL__",
   "ProfileKey": "tenant",
   "OrganizationKey": "contoso",
   "EnvironmentKey": "test",

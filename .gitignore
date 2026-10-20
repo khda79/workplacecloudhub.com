@@ -6,6 +6,8 @@ SmartM365/**
 !SmartM365/
 !SmartM365/**/
 !SmartM365/**/.gitkeep
+# Generic (non client-specific) mail branding assets shipped with the repo.
+!SmartM365/Config/Branding/Assets/SmartPowerBI-logo.png
 SmartAzure/**
 !SmartAzure/
 !SmartAzure/**/

@@ -1,4 +1,8 @@
 {
+  "MailPowerBiEnabled": false,
+  "MailPowerBiUrl": "",
+  "MailPowerBiLogoPath": "Config/Branding/Assets/SmartPowerBI-logo.png",
+  "MailPowerBiLinkText": "Click here to open the Power BI dashboard",
   "DefaultTenant": "test",
   "SmartM365RootPath": ".",
   "WorkspaceRootPath": "{{SmartM365RootPath}}",

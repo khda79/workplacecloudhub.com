@@ -3155,6 +3155,10 @@ function Get-SmartM365MailBrandingConfig {
         ClientName = [string](Get-MailBrandingValue -Name 'MailClientName' -DefaultValue '')
         ClientLogoPath = [string](Get-MailBrandingValue -Name 'MailClientLogoPath' -DefaultValue '')
         ClientLogoMaxKB = $maxLogoKb
+        PowerBiEnabled = ConvertTo-SmartM365ConfigBoolean -Value (Get-MailBrandingValue -Name 'MailPowerBiEnabled' -DefaultValue $false) -DefaultValue $false
+        PowerBiUrl = [string](Get-MailBrandingValue -Name 'MailPowerBiUrl' -DefaultValue '')
+        PowerBiLogoPath = [string](Get-MailBrandingValue -Name 'MailPowerBiLogoPath' -DefaultValue 'Config/Branding/Assets/SmartPowerBI-logo.png')
+        PowerBiLinkText = [string](Get-MailBrandingValue -Name 'MailPowerBiLinkText' -DefaultValue 'Click here to open the Power BI dashboard')
         FooterProductName = [string](Get-MailBrandingValue -Name 'MailFooterProductName' -DefaultValue 'workplacecloudhub.com')
         FooterWebsiteUrl = [string](Get-MailBrandingValue -Name 'MailFooterWebsiteUrl' -DefaultValue 'https://workplacecloudhub.com/')
         FooterGitHubLabel = [string](Get-MailBrandingValue -Name 'MailFooterGitHubLabel' -DefaultValue 'khda79/workplacecloudhub.com')
@@ -3218,25 +3222,56 @@ function Add-SmartM365MailBranding {
     $githubLabel = ConvertTo-SmartM365EmailHtmlText $branding.FooterGitHubLabel
     $githubUrl = ConvertTo-SmartM365EmailHtmlText $branding.FooterGitHubUrl
 
-    $logoHtml = ''
+    $clientHtml = ''
+    $powerBiHtml = ''
+    $powerBiCellPadding = '0'
     if ($branding.Enabled) {
         $logoDataUri = ConvertTo-SmartM365MailLogoDataUri -Path $branding.ClientLogoPath -MaxKB $branding.ClientLogoMaxKB
         if (-not [string]::IsNullOrWhiteSpace($logoDataUri)) {
             $safeLogoDataUri = ConvertTo-SmartM365EmailHtmlText $logoDataUri
-            $logoHtml = "<td align=`"center`" style=`"padding:0;vertical-align:middle;text-align:center;`"><img src=`"$safeLogoDataUri`" alt=`"$clientName`" width=`"92`" style=`"display:block;margin:0 auto;width:92px;max-width:92px;height:auto;border:0;outline:none;text-decoration:none;`" /></td>"
+            $clientHtml = "<img src=`"$safeLogoDataUri`" alt=`"$clientName`" width=`"92`" style=`"display:block;margin:0;width:92px;max-width:92px;height:auto;border:0;outline:none;text-decoration:none;`" />"
+        }
+        elseif (-not [string]::IsNullOrWhiteSpace($clientName)) {
+            $clientHtml = "<span style=`"font-size:16px;line-height:22px;color:#0f172a;font-weight:700;`">$clientName</span>"
+        }
+
+        if ($branding.PowerBiEnabled -and -not [string]::IsNullOrWhiteSpace($branding.PowerBiUrl)) {
+            $powerBiUri = $null
+            if ($branding.PowerBiUrl -notmatch '^https://' -or $branding.PowerBiUrl -match '[\r\n]' -or
+                -not [uri]::TryCreate($branding.PowerBiUrl, [UriKind]::Absolute, [ref]$powerBiUri) -or
+                [string]::IsNullOrWhiteSpace($powerBiUri.Host)) {
+                WriteLog -Message 'Mail Power BI link ignored: MailPowerBiUrl must be an absolute https:// URL.' -Level 'WARNING'
+            }
+            else {
+                $powerBiUrl = ConvertTo-SmartM365EmailHtmlText $branding.PowerBiUrl
+                $powerBiLinkText = ConvertTo-SmartM365EmailHtmlText $branding.PowerBiLinkText
+                # Relative Power BI assets are rooted at SmartM365, independent of the caller's working directory.
+                $powerBiLogoPath = Resolve-SmartM365ConfigValue -Value $branding.PowerBiLogoPath
+                if (-not [string]::IsNullOrWhiteSpace($powerBiLogoPath) -and -not [IO.Path]::IsPathRooted($powerBiLogoPath)) {
+                    $powerBiLogoPath = Join-Path (Join-Path $PSScriptRoot '../..') $powerBiLogoPath
+                }
+                $powerBiLogoDataUri = ConvertTo-SmartM365MailLogoDataUri -Path $powerBiLogoPath -MaxKB $branding.ClientLogoMaxKB
+                if (-not [string]::IsNullOrWhiteSpace($powerBiLogoDataUri)) {
+                    # Balance the link line below the image to align the two logo centers.
+                    $powerBiCellPadding = '24px 0 0 0'
+                    $safePowerBiLogoDataUri = ConvertTo-SmartM365EmailHtmlText $powerBiLogoDataUri
+                    $powerBiHtml = @"
+<a href="$powerBiUrl" target="_blank" rel="noopener"><img src="$safePowerBiLogoDataUri" alt="Power BI" height="48" style="height:48px;width:auto;border:0;outline:none;text-decoration:none;" /></a><br />
+"@
+                }
+                $powerBiHtml += @"
+<a href="$powerBiUrl" target="_blank" rel="noopener" style="font-family:Segoe UI,Arial,sans-serif;font-size:12px;line-height:18px;color:#0f6cbd;text-decoration:underline;">$powerBiLinkText</a>
+"@
+                $powerBiHtml = @"
+<table role="presentation" align="right" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
+  <tr><td align="center" style="padding:0;text-align:center;">$powerBiHtml</td></tr>
+</table>
+"@
+            }
         }
     }
-
-    $clientLabelHtml = ''
-    if ($branding.Enabled -and [string]::IsNullOrWhiteSpace($logoHtml) -and -not [string]::IsNullOrWhiteSpace($clientName)) {
-        $clientLabelHtml = @"
-<td style="vertical-align:middle;">
-  <div style="font-size:16px;line-height:22px;color:#0f172a;font-weight:700;">$clientName</div>
-</td>
-"@
-    }
     $headerHtml = ''
-    if ($branding.Enabled -and (-not [string]::IsNullOrWhiteSpace($logoHtml) -or -not [string]::IsNullOrWhiteSpace($clientLabelHtml))) {
+    if ($branding.Enabled -and (-not [string]::IsNullOrWhiteSpace($clientHtml) -or -not [string]::IsNullOrWhiteSpace($powerBiHtml))) {
         $headerHtml = @"
 <!-- SmartM365MailBranding:v1 -->
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f6f8;padding:12px 0 6px 0;border-collapse:collapse;">
@@ -3246,7 +3281,10 @@ function Add-SmartM365MailBranding {
         <tr>
           <td align="center" style="padding:0 24px 6px 24px;">
             <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;">
-              <tr>$logoHtml$clientLabelHtml</tr>
+              <tr>
+                <td align="left" style="padding:0;vertical-align:middle;text-align:left;">$clientHtml</td>
+                <td align="right" style="padding:$powerBiCellPadding;vertical-align:middle;text-align:right;">$powerBiHtml</td>
+              </tr>
             </table>
           </td>
         </tr>
@@ -3279,7 +3317,7 @@ function Add-SmartM365MailBranding {
 "@
 
     if ($BodyHtml -match '(?is)<body\b[^>]*>') {
-        $branded = [regex]::Replace($BodyHtml, '(?is)(<body\b[^>]*>)', ('$1' + "`n" + $headerHtml), 1)
+        $branded = [regex]::Replace($BodyHtml, '(?is)(<body\b[^>]*>)', ('$1' + "`n" + $headerHtml.Replace('$', '$$')), 1)
         if ($branded -match '(?is)</body>') {
             $branded = [regex]::Replace($branded, '(?is)</body>', ($footerHtml + "`n" + '</body>'), 1)
             return Add-SmartM365MailExecutionFooter -BodyHtml $branded
@@ -6381,8 +6419,8 @@ Export-ModuleMember -Function `
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB5bx+tnHxPY4CF
-# Yk1jCzhObON9LHI6XZY+LQlkjeMSkqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCpv3XyTUPTTm7u
+# whwabc1GPttRh+iCIIaFTGbn6LvCQaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -6515,31 +6553,31 @@ Export-ModuleMember -Function `
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIIdlWE/YyUkWAT/C1+g0bxwuUZ/J5bbDo9aER7cLTTuJMA0GCSqG
-# SIb3DQEBAQUABIIBgKH/9nfPu8xvH+IogqjIGycsOmKLJFXHBFeR3FuYxHjTlFEJ
-# JwpflITpyBGaH5mNrxfBJ9j8pJXWVNzccoo2VWNa14gxpQkJa4RBBAwzLZ5OZiDc
-# aXTcnyB4rXU4lhxw3NIYgaVJZThZDEn/jpEQY+oLYWL5lqr0+Y5X2goXwBOKoRYT
-# zQqfyIW9ry5hVOCwqRkmYWvk2JtR26OzNWOlsMyLi6YwouPyR8tmqzh1vsdF5cKn
-# 859iSB8Z5FF38YQlAGp8N1mRS3Y+mi4/trP+hiXRjrHYrzLLku2aRDzS2c/Wf0os
-# uRh+da7FhYgs7bFI5OMLrX/kK9AZ/Ca958dDO5noW7MwnW09bPiycO4lLHnxU+Ey
-# DdaO2NUNiYV9TqKaBIsp8aAYaqkuXl9MUfBkMPTxObGFy7f9D/8o7KBNuTxqjn2l
-# fsGg6nyJoW6hLif2r2x7gkdNT2iewda5w7DzsLsVlzlSskSp9qBX/idahBU+cFZW
-# SLK5D647gHE9/SyntKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIN9HzeLpJmPs7UVG5Y8EomYSp/r6gLrG2bzD+KTnF2JqMA0GCSqG
+# SIb3DQEBAQUABIIBgGGW6ZwcRPeXuVI4SWVTibW53ZovClI5XVy2oidoXi48yGAu
+# WVv4tN+n4rKjsB2SyTnpopQUaI3zR5455+VhLsHaBhZxO/yTyheuy29LN7wqodhX
+# /fVvnaLRQepfm6vIN+rYdsJYDVcNt/Hn6ZGn19OE0WB1idf/cQNS8FomLHoRTmgf
+# 74NfTLoEcneqn+XBB52mG4HUzSxvdVZovmgNEVe2I0T9APsJFjhWdYLKPQtJb8mU
+# ovxs0x1PhjMGYbq8vdz8d0ec9nIHqg1iMg57nAwX07W0fzo9lJ4/rkr1J758Mbjw
+# I4jUR3jzuoLF45qsUoXfxJXuSZu5Ie5Cdz26qr8TdTQ0hz/dMNy8kl4V5YqnqjFg
+# TUM7IU/5q9VS1jzwkDlBbz++zAS24FR49WDZQ35uJCYpidQA3nDjsWUfDaqdjWM5
+# U5nGgbvxApK4jfxCc9zyp0OkSasEeIFdxWJiRnzSPt9pE9LQdPT66VJxC2OT8Q+w
+# tOD0K69MfKY7nBFuMKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjAwNjIx
-# NDNaMC8GCSqGSIb3DQEJBDEiBCDstaw50Uww8JTJ7uCGYQZyLdSUQ83aHU0GYn9B
-# ctX1ZjANBgkqhkiG9w0BAQEFAASCAgA0N4Ruei4Tp2Sjt8o7j7cxrkmPVAl95p3M
-# cuKPmL4Bp3MPIaKwSSxsxJSFSCehK/5mYUPaaSNn8FNYxDC8JVfXRk0w16JYs1cs
-# Bn8LPBqogkhFoToWF54kiz0qtMe9ne6ltshb50jhWK/6wIJRwD6gJmTqkVXnTTjK
-# FNbscm1ur/3FLXPORmKWee2D36UuR8/SBfJNw0CIQY8dDqV5bcUBNhtBIjO6UvYr
-# FZbVdHjvIOrj+Tp8Sq19lxSuEFcDlv5Wz6Zvn50oJpYr4mOlX35E805Q4kSvHbzW
-# UBASdLnNnJyrCbnwx29Ka6ZMcKu2D2x6iyjLcydpi6+AxrpTL6ZYeWCIdxzOgkzQ
-# mKMoPHmxrqJBxF3QGryZ69L3ABNA5Qj/r9DUkcaqXm53+vFIqJaLndpm5ATiyGwa
-# 47YnLpQbTFKSkYJRb3upGYdiIL399rYD/8cXV7vk3j6uJXiW8kWBuxvw8K7Q6R1/
-# ZCxH1aQ4f6I01NlXapYVYcAyvrMo6AKmNrQaNo+24MGLGUW+50TSxbaWfVdmDKcE
-# HsqV9hrx9gId7IejcyeO1TDFopaZWdwIt/XepB3Ncu6j6HlNr5Ez0K7m1TAZmubd
-# UZh5bXLL86l0rVQWZXoe+99vfpOda7ORNsnSRthTene4fiEWSkx9095LfLj/bDb5
-# SVqJ2dAkeA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjAxMzUz
+# MzhaMC8GCSqGSIb3DQEJBDEiBCATkPvv6Ws7Sm3OdvAZCZaKoEBOWGFxp6HOw7hc
+# Xm2ySjANBgkqhkiG9w0BAQEFAASCAgBxUReDqtc78Vzpab1gZ9KGrJ3NhyJdIg5s
+# yNwdjU/up6VJtW4hKvSqPBIkhvy4RSsoYx55yr9iN3WuZrq4EyW6fLsrgIWBGfwY
+# QbKQR1cVjsYmMOHVXGdPQvcpeg2HH3OgrwkdRLaz/og3WtG81mdWllQ5Q9DcM+Fk
+# bpATaf65cLnGU8oG0OLjYGkmuYkptP3mLVOVrS6cHhX3gjqsmEg/aWPE7ndXAtso
+# VeRdj2T0yz6zZB82bbpqQZXdaZWSyWlAojVf69z/0UWnrWx/dZ1b/ewGfAZpTyBg
+# YGV/GjoneV4vBTSC8g1bjUQThblNxmjQMa2UiSG7LrSsiTIwG35DtZd/0KHL/GMb
+# m19CwFf5UUYD8iUBtN4swBe3ug5VvcUBt6ugz4lyOjqrN1EqrQTfqn93jywU7xQZ
+# dlBlrUdwwxdUWkSdPP5r011C97yRaAEYoP/n9ZTJX/q03MOEdq/TliGa/YDmGrzS
+# rJHrQzJeVJEd2YlGl1n4HrmG98LObFvsZX3sX8nR3iF7XFTUdHf9EEyLnq1Bm75a
+# U46Zuggd+AzVXQm8TYxPcdXdG6/7w3IWAlb4vxdNkfDeqtkd6IjInqxQTBGy5Mmx
+# cD1q9IwQ46gR7TgDUS/A7/i7DDw+RYS/gD0sA1dJLdEh7Xl4wd4qBg89ibuN1miu
+# wSjZaIdkHg==
 # SIG # End signature block
