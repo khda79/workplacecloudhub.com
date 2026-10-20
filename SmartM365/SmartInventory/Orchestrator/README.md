@@ -1,6 +1,6 @@
 # SmartM365 Inventory Orchestrator
 
-`SmartM365-Inventory-Orchestrator.ps1` (v1.5.47) is a PowerShell 7 resident scheduler that runs the SmartInventory scripts (ActiveDirectoryInventory, ExchangeInventory, M365Inventory, IntuneInventory, ...) unattended.
+`SmartM365-Inventory-Orchestrator.ps1` (v1.5.53) is a PowerShell 7 resident scheduler that runs the SmartInventory scripts (ActiveDirectoryInventory, ExchangeInventory, M365Inventory, IntuneInventory, ...) unattended.
 
 ## Demo mode
 
@@ -482,6 +482,7 @@ Before launching an elected occurrence, the owner must create its shared claim w
 - `MissedRunPolicy`:
   - `RunOnce` (default): a missed occurrence (orchestrator stopped or server off at the scheduled time) is caught up exactly once at restart. Several missed occurrences collapse into a single catch-up run (the most recent one).
   - `Skip`: missed occurrences are recorded as `Skipped` at startup and the job waits for its next occurrence.
+- Elected `RunOnce` catch-up (1.5.53): before launching a due occurrence of an `Elected` job, the owner reads the shared claims of that job. When the cluster already holds a `Success` or `CompletedWithWarnings` claim for a newer occurrence, or one whose run started at or after the due occurrence (late catch-up, forced or pipeline run), the due occurrence is recorded as `Skipped` with the covering claim in the log and is not launched. This prevents a new owner, after an election change or a schedule change (for example 08:30 moved to 07:45), from replaying the previous day's occurrence that another server already covered. The same occurrence is still handled by its own shared claim; failed, running, unreadable or inconsistent claims never cover, so the occurrence then runs as before. Offline test: `Tests/Test-SmartM365OrchestratorElectedCatchUpOffline.ps1`.
 - A brand-new job (no state yet) is initialized fast-forwarded: occurrences from before the job existed are not treated as missed. Note: re-enabling a long-disabled `RunOnce` job may trigger one catch-up run of its most recent occurrence (within the 8-day lookback window).
 - Occurrences are computed in server local time.
 

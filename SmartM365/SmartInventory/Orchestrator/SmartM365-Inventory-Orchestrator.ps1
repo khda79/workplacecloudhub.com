@@ -101,7 +101,7 @@ detailed tables for the last 24 hours and 7 days, then exits without acquiring t
 lock or launching inventory jobs.
 
 .VERSION
-1.5.52
+1.5.53
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -114,7 +114,7 @@ lock or launching inventory jobs.
     inside its own child process.
 
 .NOTES
-    Version : 1.5.52
+    Version : 1.5.53
     Author: https://github.com/khda79/workplacecloudhub.com
     Exit codes: 0 = normal end (recycle, DryRun, Once, summary sent), 1 = fatal error or summary send failure,
     2 = configuration or manifest error at startup, 3 = another live instance holds the lock,
@@ -151,7 +151,7 @@ $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -Requi
 try {
 $ErrorActionPreference = 'Stop'
 
-$ScriptVersion = "1.5.52"
+$ScriptVersion = "1.5.53"
 $ScriptName = 'SmartM365-Inventory-Orchestrator'
 $global:SmartM365ScriptFileName = [System.IO.Path]::GetFileName($PSCommandPath)
 $global:SmartM365ScriptVersion = $ScriptVersion
@@ -1665,6 +1665,64 @@ function Test-OrchestratorOccurrenceCoveredByOverlap {
     $covered = $startedUtc.UtcDateTime -lt $expectedUtc -and $completedUtc.UtcDateTime -ge $expectedUtc
     if ($covered) { $script:DependencyFreshCache[$cacheKey] = @{ Status = $true; Until = $Now.AddMinutes(10) } }
     return $covered
+}
+
+function Get-OrchestratorOccurrenceCoveredByLaterClaim {
+    # A due elected occurrence is already covered when the cluster holds a successful claim for a
+    # newer occurrence, or one started at or after the due occurrence (late catch-up, forced run).
+    # Unreadable or inconsistent claims never cover: the occurrence then runs as before.
+    param(
+        [Parameter(Mandatory = $true)]$Job,
+        [Parameter(Mandatory = $true)][datetime]$ExpectedOccurrence,
+        [Parameter(Mandatory = $true)][datetime]$Now
+    )
+
+    $expectedUtc = $ExpectedOccurrence.ToUniversalTime()
+    $nowUtc = $Now.ToUniversalTime()
+    $cacheKey = 'covered-later|{0}|{1}' -f $Job.Name, $expectedUtc.ToString('o')
+    if ($script:DependencyFreshCache.ContainsKey($cacheKey) -and $Now -lt $script:DependencyFreshCache[$cacheKey].Until) {
+        return $script:DependencyFreshCache[$cacheKey].Status
+    }
+    $script:DependencyFreshCache[$cacheKey] = @{ Status = $null; Until = $Now.AddMinutes(2) }
+
+    $jobFolder = Join-Path -Path $script:Settings.ElectionClaimsPath -ChildPath ([string]$Job.Name)
+    if (-not (Test-Path -LiteralPath $jobFolder -PathType Container)) { return $null }
+    # The same occurrence is handled by the peer claim check; older occurrences only count when
+    # their run started at or after the due occurrence.
+    $expectedStamp = $expectedUtc.ToString('yyyyMMddTHHmmssfffZ', [Globalization.CultureInfo]::InvariantCulture)
+    $windowStartUtc = $expectedUtc.AddDays(-8)
+    $stamps = @(Get-ChildItem -LiteralPath $jobFolder -File -Force -ErrorAction Stop |
+        ForEach-Object {
+            $occurrenceUtc = Get-OrchestratorClaimOccurrenceUtc -FileName $_.Name
+            if ($null -ne $occurrenceUtc -and $occurrenceUtc -ge $windowStartUtc -and $occurrenceUtc -le $nowUtc) { $_.Name.Substring(0, 19) }
+        } |
+        Where-Object { $_ -cne $expectedStamp } |
+        Sort-Object -Unique -Descending)
+
+    foreach ($stamp in $stamps) {
+        $claimPath = Join-Path -Path $jobFolder -ChildPath ($stamp + '.json')
+        if (-not (Get-SmartM365JsonReadPath $claimPath -Optional)) { continue }
+        try { $claim = (Read-SmartM365JsonDocument $claimPath).Document }
+        catch { continue }
+        if ([string]$claim.JobName -ne [string]$Job.Name -or [string]$claim.Status -notin @('Success', 'CompletedWithWarnings')) { continue }
+        $claimOccurrenceUtc = ConvertTo-OrchestratorUtcTime -Value $claim.OccurrenceUtc
+        $startedUtc = ConvertTo-OrchestratorUtcTime -Value $claim.CreatedAtUtc
+        $completedUtc = ConvertTo-OrchestratorUtcTime -Value $claim.UpdatedAtUtc
+        if ($null -eq $claimOccurrenceUtc -or $null -eq $startedUtc -or $null -eq $completedUtc) { continue }
+        if ($claimOccurrenceUtc.UtcDateTime.ToString('yyyyMMddTHHmmssfffZ', [Globalization.CultureInfo]::InvariantCulture) -cne $stamp) { continue }
+        if ($completedUtc.UtcDateTime -lt $startedUtc.UtcDateTime -or $completedUtc.UtcDateTime -gt $nowUtc) { continue }
+        if ($claimOccurrenceUtc.UtcDateTime -gt $expectedUtc -or $startedUtc.UtcDateTime -ge $expectedUtc) {
+            $coverage = [pscustomobject]@{
+                Occurrence = $claimOccurrenceUtc.LocalDateTime
+                Started = $startedUtc.LocalDateTime
+                Status = [string]$claim.Status
+                OwnerServer = if ($claim.PSObject.Properties['OwnerServer']) { [string]$claim.OwnerServer } else { 'unknown' }
+            }
+            $script:DependencyFreshCache[$cacheKey] = @{ Status = $coverage; Until = $Now.AddMinutes(10) }
+            return $coverage
+        }
+    }
+    return $null
 }
 
 function Get-LatestPastOccurrence {
@@ -5330,6 +5388,19 @@ function Invoke-LaunchPhase {
             }
         }
         if ($null -eq $occurrence) { continue }
+
+        # RunOnce catch-up of an elected job: after an ownership or schedule change, the new owner
+        # must not replay an occurrence that a newer or later-started cluster run already covered.
+        if ($reason -eq 'due' -and $job.AssignmentMode -eq 'Elected') {
+            $coverage = $null
+            try { $coverage = Get-OrchestratorOccurrenceCoveredByLaterClaim -Job $job -ExpectedOccurrence $occurrence -Now $Now }
+            catch { Write-OrchestratorRuntimeUpdateWarning -Key ("covered-later:{0}" -f $name) -Message ("Job {0}: shared claims could not be read to check whether occurrence {1} is already covered; it runs as scheduled: {2}" -f $name, $occurrence.ToString('yyyy-MM-dd HH:mm'), $_.Exception.Message) -Now $Now }
+            if ($null -ne $coverage) {
+                Set-OccurrenceSkipped -JobName $name -Occurrence $occurrence -Reason ("covered by shared claim of occurrence {0} owned by {1} with status {2}, started {3}" -f $coverage.Occurrence.ToString('yyyy-MM-dd HH:mm'), $coverage.OwnerServer, $coverage.Status, $coverage.Started.ToString('yyyy-MM-dd HH:mm'))
+                Clear-DependencyWaitLog -JobName $name
+                continue
+            }
+        }
 
         # Cross-job overlap guard. Jobs sharing a ConcurrencyKey are serialized,
         # including jobs launched earlier in the same scheduler tick.
