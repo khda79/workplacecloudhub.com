@@ -2,7 +2,7 @@
 .SYNOPSIS
 Runs offline pipeline and production-manifest contract tests for the SmartM365 orchestrator.
 .VERSION
-1.1.5
+1.1.6
 #>
 #Requires -Version 7.0
 [CmdletBinding()]
@@ -246,6 +246,8 @@ try {
         function script:Get-OrchestratorDependencyMaxAge { param($DependencyJob, $OverrideHours, $Now) $null = $DependencyJob, $OverrideHours, $Now; 26 }
         function script:Get-OrchestratorDependencyFreshStatus { param($DependencyJob, $MaxAgeHours, $Now) $null = $DependencyJob, $MaxAgeHours, $Now; $script:FreshStatus }
         function script:Get-OrchestratorSharedDependencyStatus { param($Job, $Now) $null = $Job, $Now; $script:SharedStatus }
+        function script:Get-OrchestratorDependencyActivity { param($DependencyJob, $DownstreamOccurrence, $Now) $null = $DependencyJob, $DownstreamOccurrence, $Now; [pscustomobject]@{ State = $script:ActivityState; Detail = 'synthetic' } }
+        $script:ActivityState = 'Clear'
         function script:Test-JobAllowedOnServer { param($Job) $null = $Job; $true }
         function script:Get-JobState { param($JobName) $null = $JobName; @{ LastStatus = $script:LegacyStatus; PendingRetry = $null } }
         function script:Write-OrchestratorRuntimeUpdateWarning { param($Key, $Message, $Now) $null = $Key, $Message, $Now }
@@ -257,6 +259,7 @@ try {
         $latest = [pscustomobject]@{ Name = 'Consumer'; DependencyMode = 'LatestOccurrence'; DependencyMaxAgeHours = 0 }
         $r = [ordered]@{}
         $script:FreshStatus = 'Ready'; $r.FreshReady = Get-OrchestratorExternalDependencyStatus -Job $fresh -DependencyName Elected -Now $script:Now
+        $script:ActivityState = 'Waiting'; $r.FreshActive = Get-OrchestratorExternalDependencyStatus -Job $fresh -DependencyName Elected -Now $script:Now; $script:ActivityState = 'Clear'
         $script:FreshStatus = 'Waiting'; $r.FreshStale = Get-OrchestratorExternalDependencyStatus -Job $fresh -DependencyName Elected -Now $script:Now
         $script:SharedStatus = 'Ready'; $r.SharedReady = Get-OrchestratorExternalDependencyStatus -Job $latest -DependencyName Elected -Now $script:Now
         $script:SharedStatus = 'Failed'; $r.SharedFailed = Get-OrchestratorExternalDependencyStatus -Job $latest -DependencyName Elected -Now $script:Now
@@ -267,7 +270,7 @@ try {
         $r.Unknown = Get-OrchestratorExternalDependencyStatus -Job $latest -DependencyName Missing -Now $script:Now
         [pscustomobject]$r
     }
-    $expectedExternal = [ordered]@{ FreshReady = 'Ready'; FreshStale = 'Waiting'; SharedReady = 'Ready'; SharedFailed = 'Failed'; SharedRunning = 'Waiting'; LegacySuccess = 'Ready'; LegacyFailed = 'Failed'; Disabled = 'Ready'; Unknown = 'Failed' }
+    $expectedExternal = [ordered]@{ FreshReady = 'Ready'; FreshActive = 'Waiting'; FreshStale = 'Waiting'; SharedReady = 'Ready'; SharedFailed = 'Failed'; SharedRunning = 'Waiting'; LegacySuccess = 'Ready'; LegacyFailed = 'Failed'; Disabled = 'Ready'; Unknown = 'Failed' }
     foreach ($case in $expectedExternal.Keys) {
         Assert-True ($externalResults.$case -eq $expectedExternal[$case]) "External dependency case $case returned '$($externalResults.$case)', expected '$($expectedExternal[$case])'."
     }

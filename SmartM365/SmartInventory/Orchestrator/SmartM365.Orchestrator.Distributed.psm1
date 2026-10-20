@@ -1,7 +1,7 @@
 ﻿Set-StrictMode -Version Latest
 Import-Module (Join-Path $PSScriptRoot '../../Modules/SmartM365.Core/SmartM365.JsonTransport.psd1') -MinimumVersion '1.0.2' -Global -ErrorAction Stop
 
-$script:DistributedModuleVersion = '1.1.11'
+$script:DistributedModuleVersion = '1.1.12'
 
 function Resolve-DistributedJsonPath {
     param([Parameter(Mandatory)][string]$Path)
@@ -1173,6 +1173,107 @@ function Get-SmartM365OrchestratorPinnedDependencyReadiness {
     return [pscustomobject]$result
 }
 
+function Get-SmartM365OrchestratorSourceRunState {
+    <# Read-only view of a producer run state (SmartInventory_<script>.run.json) beside the shared DATA-LAST. #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$SharedDataFolderPath,
+        [Parameter(Mandatory)]$Job
+    )
+    $result = [ordered]@{ Known = $false; StagedPublication = $false; Status = ''; StartedAtUtc = $null; Detail = 'Producer run state unavailable' }
+    try {
+        $scriptName = [IO.Path]::GetFileName([string]$Job.ScriptPath)
+        if ($scriptName -notmatch '^SmartM365-[A-Za-z0-9-]+\.ps1$') { $result.Detail = 'Producer script has no run state'; return [pscustomobject]$result }
+        if ([IO.Path]::GetFileName($SharedDataFolderPath.TrimEnd([char[]]'\/')) -cne 'Orchestrator') { return [pscustomobject]$result }
+        $dataAll = Split-Path -Path $SharedDataFolderPath -Parent
+        if ([IO.Path]::GetFileName($dataAll) -cne 'DATA-ALL') { return [pscustomobject]$result }
+        $latest = Join-Path (Split-Path -Path $dataAll -Parent) 'DATA-LAST'
+        $runPath = Join-Path $latest ('SmartInventory_{0}.run.json' -f [IO.Path]::GetFileNameWithoutExtension($scriptName))
+        $readPath = Get-SmartM365JsonReadPath -Path $runPath -Optional
+        if (-not $readPath) { $result.Detail = 'Producer run state is absent'; return [pscustomobject]$result }
+        if ((Get-Item -LiteralPath $readPath).Attributes -band [IO.FileAttributes]::ReparsePoint) { return [pscustomobject]$result }
+        $run = (Read-SmartM365JsonDocument -Path $runPath).Document
+        if ([string]$run.Owner -cne 'SmartInventory-SourceRun' -or [string]$run.Producer -cne $scriptName -or
+            [string]$run.Status -notin @('Collecting', 'Publishing', 'Completed', 'Failed')) { $result.Detail = 'Producer run state is invalid'; return [pscustomobject]$result }
+        $staged = $run.PSObject.Properties['StagedPublication']
+        $result.Known = $true
+        $result.StagedPublication = $null -ne $staged -and $staged.Value -is [bool] -and [bool]$staged.Value
+        $result.Status = [string]$run.Status
+        $started = [datetimeoffset]::MinValue
+        if ([datetimeoffset]::TryParse([string]$run.StartedAtUtc, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::AssumeUniversal, [ref]$started)) { $result.StartedAtUtc = $started.UtcDateTime }
+        $result.Detail = 'Producer run {0}{1}' -f $result.Status, $(if ($result.StagedPublication) { ', staged publication' } else { ', direct publication' })
+    }
+    catch { $result.Known = $false; $result.Detail = 'Producer run state could not be read: ' + $_.Exception.Message }
+    return [pscustomobject]$result
+}
+
+function Get-SmartM365OrchestratorDependencyActivity {
+    <#
+    FreshSuccess companion gate: may a downstream occurrence start while this dependency is active?
+    - An active run (claim Claimed, Running or RetryScheduled within its safe window) expected to end
+      by the downstream occurrence (occurrence + estimated duration) blocks until it ends.
+    - A longer active run blocks unless its producer publishes through staging and is not promoting:
+      such a run leaves DATA-LAST untouched, so the last fresh success stays consistent.
+    - A due occurrence without a claim blocks during the claim grace only, if it was expected to end
+      by the downstream occurrence; afterwards it is queued, skipped or blocked elsewhere.
+    Otherwise the dependency is Clear and the freshness rule applies. Read-only.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$ClaimsRootPath,
+        [Parameter(Mandatory)]$DependencyJob,
+        [Parameter(Mandatory)][datetime]$DownstreamOccurrence,
+        [Parameter(Mandatory)][datetime]$Now,
+        [AllowNull()]$LatestPastOccurrence = $null,
+        [int]$ClaimGraceMinutes = 15,
+        [AllowNull()]$RunState = $null
+    )
+    $nowUtc = $Now.ToUniversalTime()
+    $downstreamUtc = $DownstreamOccurrence.ToUniversalTime()
+    $estimate = 60.0
+    if ($DependencyJob.PSObject.Properties['EstimatedDurationMinutes'] -and [double]$DependencyJob.EstimatedDurationMinutes -gt 0) { $estimate = [double]$DependencyJob.EstimatedDurationMinutes }
+    $folder = Join-Path -Path $ClaimsRootPath -ChildPath (ConvertTo-SafeFileName ([string]$DependencyJob.Name))
+    $claimed = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+    $active = $null
+    if (Test-Path -LiteralPath $folder -PathType Container) {
+        foreach ($file in @(Get-ChildItem -LiteralPath $folder -File -Force -ErrorAction Stop)) {
+            # Only canonical claim files; stale archives and takeover locks are not executions.
+            if ($file.Name -notmatch '^(\d{8}T\d{9}Z)\.json(?:\.txt)?$') { continue }
+            $occurrenceUtc = [datetime]::ParseExact($Matches[1], 'yyyyMMddTHHmmssfffZ', [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::AssumeUniversal -bor [Globalization.DateTimeStyles]::AdjustToUniversal)
+            $stamp = $Matches[1]
+            if (-not $claimed.Add($stamp)) { continue }
+            if ($occurrenceUtc -gt $nowUtc -or $occurrenceUtc -lt $nowUtc.AddDays(-8)) { continue }
+            $claim = (Read-SmartM365JsonDocument -Path (Join-Path -Path $folder -ChildPath ($stamp + '.json'))).Document
+            if ([string]$claim.JobName -ne [string]$DependencyJob.Name) { throw "Dependency claim identity mismatch: $($file.Name)" }
+            if ([string]$claim.Status -notin @('Claimed', 'Running', 'RetryScheduled')) { continue }
+            # An expired non-terminal claim belongs to a lost owner; claim takeover handles it.
+            $safeUntil = [datetimeoffset]::MinValue
+            if ([datetimeoffset]::TryParse([string]$claim.SafeUntilUtc, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::AssumeUniversal, [ref]$safeUntil) -and $safeUntil.UtcDateTime -lt $nowUtc) { continue }
+            if ($null -eq $active -or $occurrenceUtc -gt $active.OccurrenceUtc) { $active = [pscustomobject]@{ OccurrenceUtc = $occurrenceUtc; Status = [string]$claim.Status } }
+        }
+    }
+    if ($null -ne $active) {
+        $label = '{0} for occurrence {1}' -f $active.Status, $active.OccurrenceUtc.ToLocalTime().ToString('yyyy-MM-dd HH:mm')
+        if ($active.OccurrenceUtc.AddMinutes($estimate) -le $downstreamUtc) {
+            return [pscustomobject]@{ State = 'Waiting'; Detail = "$label, expected to finish before this occurrence" }
+        }
+        if ($null -ne $RunState -and $RunState.Known -and $RunState.StagedPublication -and $RunState.Status -ne 'Publishing') {
+            return [pscustomobject]@{ State = 'Clear'; Detail = "$label, staged publication leaves DATA-LAST unchanged" }
+        }
+        $reason = if ($null -ne $RunState -and $RunState.Known -and $RunState.Status -eq 'Publishing') { 'promoting its CSVs' } else { 'may rewrite DATA-LAST during the run' }
+        return [pscustomobject]@{ State = 'Waiting'; Detail = "$label, $reason" }
+    }
+    if ($null -ne $LatestPastOccurrence) {
+        $dueUtc = ([datetime]$LatestPastOccurrence).ToUniversalTime()
+        if (-not $claimed.Contains($dueUtc.ToString('yyyyMMddTHHmmssfffZ', [Globalization.CultureInfo]::InvariantCulture)) -and
+            $dueUtc -le $nowUtc -and ($nowUtc - $dueUtc).TotalMinutes -le [math]::Max(1, $ClaimGraceMinutes) -and
+            $dueUtc.AddMinutes($estimate) -le $downstreamUtc) {
+            return [pscustomobject]@{ State = 'Waiting'; Detail = 'occurrence {0} is due and not started yet' -f $dueUtc.ToLocalTime().ToString('yyyy-MM-dd HH:mm') }
+        }
+    }
+    return [pscustomobject]@{ State = 'Clear'; Detail = 'No active execution' }
+}
+
 Export-ModuleMember -Function @(
     'Get-SmartM365OrchestratorServerCapability',
     'Test-SmartM365OrchestratorCapabilityMatch',
@@ -1187,7 +1288,9 @@ Export-ModuleMember -Function @(
     'Exit-SmartM365OrchestratorConcurrencyLease',
     'Convert-SmartM365OrchestratorDistributedHistory',
     'Get-SmartM365OrchestratorFreshProducerReceipt',
-    'Get-SmartM365OrchestratorPinnedDependencyReadiness'
+    'Get-SmartM365OrchestratorPinnedDependencyReadiness',
+    'Get-SmartM365OrchestratorSourceRunState',
+    'Get-SmartM365OrchestratorDependencyActivity'
 )
 
 # SIG # Begin signature block

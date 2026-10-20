@@ -101,7 +101,7 @@ detailed tables for the last 24 hours and 7 days, then exits without acquiring t
 lock or launching inventory jobs.
 
 .VERSION
-1.5.51
+1.5.52
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -114,7 +114,7 @@ lock or launching inventory jobs.
     inside its own child process.
 
 .NOTES
-    Version : 1.5.51
+    Version : 1.5.52
     Author: https://github.com/khda79/workplacecloudhub.com
     Exit codes: 0 = normal end (recycle, DryRun, Once, summary sent), 1 = fatal error or summary send failure,
     2 = configuration or manifest error at startup, 3 = another live instance holds the lock,
@@ -151,7 +151,7 @@ $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -Requi
 try {
 $ErrorActionPreference = 'Stop'
 
-$ScriptVersion = "1.5.51"
+$ScriptVersion = "1.5.52"
 $ScriptName = 'SmartM365-Inventory-Orchestrator'
 $global:SmartM365ScriptFileName = [System.IO.Path]::GetFileName($PSCommandPath)
 $global:SmartM365ScriptVersion = $ScriptVersion
@@ -1760,6 +1760,24 @@ function Get-OrchestratorDependencyFreshStatus {
         }
     }
     return 'Waiting'
+}
+
+function Get-OrchestratorDependencyActivity {
+    # FreshSuccess never releases a downstream occurrence while a dependency that should have finished
+    # before it is still running or awaiting a retry, even if an older success is fresh.
+    param(
+        [Parameter(Mandatory = $true)]$DependencyJob,
+        [Parameter(Mandatory = $true)][datetime]$DownstreamOccurrence,
+        [Parameter(Mandatory = $true)][datetime]$Now
+    )
+
+    $scriptName = [IO.Path]::GetFileName([string]$DependencyJob.ScriptPath)
+    # A script shared by several jobs has one run state that cannot identify the running job.
+    $sharedScript = @($script:Manifest.OrderedJobs | Where-Object { $_.Enabled -and [IO.Path]::GetFileName([string]$_.ScriptPath) -ieq $scriptName }).Count -gt 1
+    $runState = if ($sharedScript) { $null } else { Get-SmartM365OrchestratorSourceRunState -SharedDataFolderPath $script:Settings.SharedDataFolderPath -Job $DependencyJob }
+    return Get-SmartM365OrchestratorDependencyActivity -ClaimsRootPath $script:Settings.ElectionClaimsPath -DependencyJob $DependencyJob `
+        -DownstreamOccurrence $DownstreamOccurrence -Now $Now -LatestPastOccurrence (Get-LatestPastOccurrence -Job $DependencyJob -Now $Now) `
+        -ClaimGraceMinutes $script:Settings.ElectionClaimGraceMinutes -RunState $runState
 }
 
 # ==========================================================
@@ -4673,6 +4691,9 @@ function Get-OrchestratorExternalDependencyStatus {
     if ($Job.DependencyMode -eq 'FreshSuccess') {
         $maxAgeHours = Get-OrchestratorDependencyMaxAge -DependencyJob $dependencyJob -OverrideHours ([int]$Job.DependencyMaxAgeHours) -Now $Now
         try {
+            # A request starts now: a dependency that should already have finished must not be running.
+            if ([string]$dependencyJob.AssignmentMode -eq 'Elected' -and
+                (Get-OrchestratorDependencyActivity -DependencyJob $dependencyJob -DownstreamOccurrence $Now -Now $Now).State -ne 'Clear') { return 'Waiting' }
             if ((Get-OrchestratorDependencyFreshStatus -DependencyJob $dependencyJob -MaxAgeHours $maxAgeHours -Now $Now) -eq 'Ready') { return 'Ready' }
         }
         catch {
@@ -5397,6 +5418,14 @@ function Invoke-LaunchPhase {
                 }
                 if ($script:Settings.DistributedSchedulingEnabled -and $null -ne $depJob -and $depJob.Enabled -and $depJob.AssignmentMode -eq 'Elected') {
                     if ($job.DependencyMode -eq 'FreshSuccess') {
+                        $activity = $null
+                        try { $activity = Get-OrchestratorDependencyActivity -DependencyJob $depJob -DownstreamOccurrence $occurrence -Now $Now }
+                        catch { Write-OrchestratorRuntimeUpdateWarning -Key ("dependency-activity:{0}:{1}" -f $name, $dep) -Message ("Job {0}: activity of dependency {1} could not be read; waiting: {2}" -f $name, $dep, $_.Exception.Message) -Now $Now }
+                        if ($null -eq $activity -or $activity.State -ne 'Clear') {
+                            $deferred = $true
+                            $blockingDependencies.Add(("{0} ({1})" -f $dep, $(if ($null -eq $activity) { 'activity unknown' } else { $activity.Detail })))
+                            continue
+                        }
                         $maxAgeHours = Get-OrchestratorDependencyMaxAge -DependencyJob $depJob -OverrideHours ([int]$job.DependencyMaxAgeHours) -Now $Now
                         $freshStatus = 'Waiting'
                         try { $freshStatus = Get-OrchestratorDependencyFreshStatus -DependencyJob $depJob -MaxAgeHours $maxAgeHours -Now $Now }

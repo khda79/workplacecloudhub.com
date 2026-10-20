@@ -502,6 +502,19 @@ Producer-receipt fallback accepts the legacy CMDB owner (contract 1.1, retaining
 
 Offline regression suites: `Tests/Test-SmartM365OrchestratorFreshReceiptOffline.ps1`, `Tests/Test-SmartM365OrchestratorPinnedDependenciesOffline.ps1` and `Tests/Test-SmartM365OrchestratorSharedDependenciesOffline.ps1`. They use synthetic temporary state only; no collector, preparation or server configuration change is required.
 
+### Active elected dependencies under FreshSuccess (1.5.52)
+
+A fresh success no longer releases a consumer while the same dependency is executing again. For each `Elected` dependency, the scheduled gate, the external pipeline-dependency gate and GUI readiness read its shared occurrence claims first:
+
+- a claim `Claimed`, `Running` or `RetryScheduled` (within its safe window) whose occurrence plus `EstimatedDurationMinutes` falls at or before the consumer occurrence blocks the consumer until the dependency succeeds or finally fails: a morning producer in retry delays preparation instead of letting it read a CSV that the retry rewrites;
+- a longer active run (a weekly collection, or a catch-up consumer occurrence from the previous day) blocks unless the producer run state (`SmartInventory_<script>.run.json`) declares `StagedPublication` and is not `Publishing`: a staged run leaves DATA-LAST untouched, so the last fresh success stays consistent. A script shared by several jobs cannot prove this and keeps blocking;
+- a due occurrence without a claim blocks only during `ElectionClaimGraceMinutes`, and only when it was expected to finish before the consumer occurrence; afterwards it is queued (for example behind a concurrency key), skipped or blocked, and freshness applies;
+- an occurrence scheduled after the consumer occurrence never blocks it.
+
+Once the dependency is idle, `FreshSuccess` applies unchanged: a final failure today with a success yesterday within the freshness window still releases the consumer, whose own source checks remain fail-closed. `DependencyWaitTimeoutMinutes` still bounds every wait. Deploy together with the SmartM365.Core staged source publication (1.0.93): before it, a running weekly DiscoveredApps collection would hold Sunday preparation until it ends.
+
+Offline regression suite: `Tests/Test-SmartM365OrchestratorDependencyActivityOffline.ps1`.
+
 ### Supervision, timeout, retries
 
 - Each tick checks running children: exit code and duration are captured on exit; `TimeoutMinutes` triggers a full process-tree kill (`taskkill /T /F`). `TimeoutMinutes` may exceed 1440 for jobs longer than 24 hours. The committed production manifest uses 1380 minutes for a daily schedule with one execution time and 8640 minutes for a weekly schedule with exactly one day and one execution time. To migrate an existing shared configuration safely, first run `Set-SmartM365-OrchestratorTimeoutPolicy.ps1 -SharedDataFolderPath <OrchestratorRoot>` for preview, then repeat with `-Execute` to create the audited version. Startup and manifest reload log a `Timeout policy audit` line with counts and mismatches from the active central manifest.

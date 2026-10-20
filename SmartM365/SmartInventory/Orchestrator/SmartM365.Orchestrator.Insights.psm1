@@ -233,6 +233,24 @@ function Get-SmartM365OrchestratorDependencyReadiness {
             }
             [pscustomobject]$row; continue
         }
+        if ($mode -eq 'FreshSuccess' -and [string](Get-InsightsProperty $dependency 'AssignmentMode' '') -eq 'Elected') {
+            # Same activity rule as the scheduler, evaluated for a start now.
+            $scriptName = [IO.Path]::GetFileName([string](Get-InsightsProperty $dependency 'ScriptPath' ''))
+            $sharedScript = @($JobsDocument.Jobs | Where-Object { [bool](Get-InsightsProperty $_ 'Enabled' $false) -and [IO.Path]::GetFileName([string](Get-InsightsProperty $_ 'ScriptPath' '')) -ieq $scriptName }).Count -gt 1
+            $runState = if ($sharedScript) { $null } else { Get-SmartM365OrchestratorSourceRunState -SharedDataFolderPath $SharedDataFolderPath -Job $dependency }
+            $latestPast = @(Get-SmartM365OrchestratorScheduleOccurrences -Schedule $dependency.Schedule -From $Now.AddDays(-8) -To $Now | Select-Object -Last 1)
+            $activity = $null
+            try {
+                $activity = Get-SmartM365OrchestratorDependencyActivity -ClaimsRootPath $claimsRoot -DependencyJob $dependency -DownstreamOccurrence $Now -Now $Now `
+                    -LatestPastOccurrence $(if ($latestPast.Count) { $latestPast[0] } else { $null }) -RunState $runState
+            }
+            catch { $activity = [pscustomobject]@{ State = 'Waiting'; Detail = 'Dependency activity could not be read: ' + $_.Exception.Message } }
+            if ($activity.State -ne 'Clear') {
+                $row.State = 'Waiting'; $row.Detail = $activity.Detail
+                $row.MaxAgeHours = [math]::Round($maxAgeHours, 1)
+                [pscustomobject]$row; continue
+            }
+        }
         $successClaim = Get-InsightsLatestSuccessClaim -ClaimsRoot $claimsRoot -JobName $dependencyName
         $successUtc = if ($null -ne $successClaim) { $successClaim.UpdatedUtc } else { $null }
         $runSuccess = @($Runs | Where-Object { $_.JobName -eq $dependencyName -and $_.Status -in $script:InsightsTerminalSuccess } | Select-Object -First 1)
