@@ -3,7 +3,7 @@
 .SYNOPSIS
 Offline transcript lifecycle and truthful trace-publication status regression tests.
 .VERSION
-1.0.1
+1.0.2
 #>
 [CmdletBinding()]
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidGlobalVars','',Justification='Isolated synthetic Core execution globals in this offline test process.')]
@@ -164,7 +164,7 @@ try {
     }
     $collector=Get-Content -LiteralPath (Join-Path $root 'SmartInventory/M365Inventory/WorkplaceScope/SmartM365-WorkplaceScope-Inventory.ps1') -Raw
     Assert-Trace ($collector -match '-CloseTranscriptBeforeUpload:\$transcriptStarted') 'WorkplaceScope did not delegate transcript ownership.'
-    Assert-Trace ($collector -match "-MinimumVersion '1.0.87'") 'WorkplaceScope Core version guard missing.'
+    Assert-Trace ($collector -match "SmartM365\.Core\.psd1'\) -MinimumVersion '(\d+\.\d+\.\d+)'" -and [version]$Matches[1] -ge [version]'1.0.87') 'WorkplaceScope Core version guard missing.'
     $results | Format-Table -AutoSize
     if (@($results | Where-Object { -not $_.Passed }).Count) { throw 'Offline transcript completion regression failed.' }
     Write-Output ("PASS: {0} offline completion scenarios; no authentication, mail or SharePoint calls." -f $results.Count)

@@ -7,7 +7,7 @@ Executes selected AST statements with synthetic configuration and mocked externa
 actions. Child processes execute only extracted cleanup blocks, never collectors.
 No tenant configuration, authentication, acquisition, upload or mail is used.
 .VERSION
-1.0.1
+1.0.2
 #>
 [CmdletBinding()]
 param()
@@ -194,6 +194,7 @@ foreach ($scenario in @('Success','ModuleFailure','ReceiptFailure')) {
         function Get-QualityUpdatePolicyMap { @{} }
         function Import-ExportedCsv { param($ReportName,$Select,$Filter) }
         function Group-AlertSummary { param($Details) }
+        function Enable-CoreSmartM365DailyCaptureRetention { param($OutputRoot) $null=$OutputRoot }
         function Publish-CoreSmartM365Csv { param($Data,$TimestampedPath,$LatestPath,$Columns) $script:events.Add('Publish') }
         function Remove-CoreSmartM365TimestampedFilesOlderThan { param($FolderPath,$FilePattern,$RetentionDays,$LogFile) }
         function Disconnect-MgGraph {}

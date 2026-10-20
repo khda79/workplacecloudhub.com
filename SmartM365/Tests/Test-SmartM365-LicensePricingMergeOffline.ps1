@@ -4,7 +4,7 @@
 Synthetic checks of the LicensePricing public baseline, private override merge, legacy replacement mode,
 Windows 10 ESU price validation and optional receipt registration. No tenant, API, mail or synchronized data access.
 .VERSION
-1.1.0
+1.1.1
 #>
 [CmdletBinding()]
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidGlobalVars','',Justification='Synthetic Core identity globals are saved and restored in finally.')]
@@ -25,9 +25,12 @@ $names = @('ConvertTo-LicensePriceRows','Merge-LicensePriceRows','ConvertTo-Wind
 $definitions = @($ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $names -contains $n.Name }, $true))
 if ($definitions.Count -ne $names.Count) { throw 'LicensePricing functions are missing.' }
 foreach ($definition in $definitions) { Invoke-Expression $definition.Extent.Text }
+# Header and runtime versions must match and include the invariant decimal fix (1.1.1).
+$headerVersion = [regex]::Match($ast.Extent.Text, '(?m)^\.VERSION\s*\r?\n(\d+\.\d+\.\d+)').Groups[1].Value
+$runtimeVersion = [regex]::Match($ast.Extent.Text, "\`$ScriptVersion='(\d+\.\d+\.\d+)'").Groups[1].Value
+if (-not $headerVersion -or $headerVersion -ne $runtimeVersion -or [version]$headerVersion -lt [version]'1.1.1') { throw "Header and runtime versions must match and be at least 1.1.1 (header '$headerVersion', runtime '$runtimeVersion')." }
 # Read by the extracted collector functions (SourceScriptVersion).
-$ScriptVersion = '1.1.1'
-if ($ast.Extent.Text -notmatch "\`$ScriptVersion='1\.1\.1'" -or $ast.Extent.Text -notmatch '(?m)^\.VERSION\s*\r?\n1\.1\.1') { throw 'Header and runtime versions must both be 1.1.1.' }
+$ScriptVersion = $runtimeVersion
 
 $temporary = Join-Path ([IO.Path]::GetTempPath()) ('SmartInventory-LicensePricing-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $temporary | Out-Null
@@ -103,7 +106,7 @@ try {
     'WIN10_ESU,2,EUR,110.00,2026-11-01,2027-10-31,True,Contoso agreement,Per device per ESU year,CONTOSO-ESU-1,False',
     'WIN10_ESU,3,EUR,220.00,2027-11-01,2028-10-31,True,Contoso agreement,Per device per ESU year,CONTOSO-ESU-1,False')
   $esu = @(ConvertTo-WindowsEsuPriceRows @(Import-Csv -LiteralPath (Write-Fixture 'esu.csv' $esuLines)) r c)
-  Check ($esu.Count -eq 3 -and $esu[1].UnitPricePerDeviceYear -eq 110 -and $esu[1].IsCumulative -eq 'True' -and $esu[0].SourceScriptVersion -eq '1.1.1') 'Valid ESU years are normalized.'
+  Check ($esu.Count -eq 3 -and $esu[1].UnitPricePerDeviceYear -eq 110 -and $esu[1].IsCumulative -eq 'True' -and $esu[0].SourceScriptVersion -eq $runtimeVersion) 'Valid ESU years are normalized.'
   $invalid = [ordered]@{
     'USD price' = @($esuHeader, 'WIN10_ESU,1,USD,61.00,2025-11-01,2026-10-31,True,A,B,C,True')
     'Unknown program' = @($esuHeader, 'WIN11_ESU,1,EUR,1.00,2025-11-01,2026-10-31,True,A,B,C,True')
