@@ -1309,7 +1309,12 @@
         "M365-WorkplaceScope-Inventory",
         "M365-VerifiedDomains-Inventory",
         "Intune-WindowsAutopilot-Inventory",
-        "Intune-AutopatchAlerts-Inventory"
+        "Intune-AutopatchAlerts-Inventory",
+        "Intune-DeviceSystem-Inventory",
+        "EXO-MigrationJobs-Inventory",
+        "Intune-Configurations-Inventory",
+        "Intune-ManagedApps-Inventory",
+        "Intune-EnrollmentFailures-Inventory"
       ],
       "AllowedServers": [],
       "TimeoutMinutes": 1380,

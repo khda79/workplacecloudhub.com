@@ -3,7 +3,7 @@
 .SYNOPSIS
 Validate the single daily inventory cycle and weekly exceptions offline.
 .VERSION
-1.1.0
+1.2.0
 .NOTES
 Reads the repository template and an optional additional local manifest.
 No tenant initialization, collectors, scheduling, authentication or publication.
@@ -167,6 +167,15 @@ foreach ($path in $paths) {
         @($prepare.DependsOn) -notcontains 'EXO-Mailboxes-Inventory' -and
         @($prepare.DependsOn) -contains 'M365-WorkplaceScope-Inventory' -and
         @($prepare.DependsOn) -contains 'Intune-DiscoveredApps-Inventory') 'Workplace preparation depends on weekly stats or lost a former CMDB producer.'
+    # Every enabled producer of a CSV that preparation reads is a dependency, except the weekly full EXO
+    # run (Saturday delay), the optional health check and the report that runs after preparation.
+    foreach ($producer in @('Intune-DeviceSystem-Inventory','EXO-MigrationJobs-Inventory','Intune-Configurations-Inventory','Intune-ManagedApps-Inventory','Intune-EnrollmentFailures-Inventory')) {
+        Assert-True (@($prepare.DependsOn) -contains $producer) "Workplace preparation lost source producer dependency: $producer"
+    }
+    foreach ($excluded in @('AD-HealthCheck','Mailboxes-PermissionsByUser-Report')) {
+        Assert-True (@($prepare.DependsOn) -notcontains $excluded) "Workplace preparation waits for a non-blocking source: $excluded"
+    }
+    Assert-True (@($prepare.DependsOn | Sort-Object -Unique).Count -eq @($prepare.DependsOn).Count) 'Workplace preparation lists a dependency twice.'
     $apps = @($document.Jobs | Where-Object Name -eq 'Intune-DiscoveredApps-Inventory')[0]
     Assert-True ([string]$apps.Arguments -ceq '-DeviceDetailMode All -FreshDeviceDetails') 'Weekly application acquisition is no longer complete and fresh.'
     $full = @($document.Jobs | Where-Object Name -eq 'EXO-Mailboxes-Inventory')[0]

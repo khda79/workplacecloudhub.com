@@ -120,6 +120,15 @@ otherwise the previous day's dependency occurrence would satisfy it. On Saturday
 the chain waits behind the Friday full EXO run (`EXOMailboxes` key) and finishes
 in the evening.
 
+Workplace depends on every enabled job that produces a CSV it reads, including the
+device local-system, migration-job and the three Intune configuration, managed-app and
+enrollment-failure producers. Three producers are deliberately not dependencies: the weekly
+full `EXO-Mailboxes-Inventory` (it would hold preparation until Saturday afternoon), the
+optional `AD-HealthCheck` source (a dependency would make it blocking) and
+`Mailboxes-PermissionsByUser-Report`, which runs after preparation and replaces one file
+atomically. Template synchronization does not extend an existing `DependsOn` array: add
+new dependencies to the shared jobs file explicitly.
+
 Workplace retains the former CMDB producer dependencies. Its scheduler completion-age gate
 uses `DependencyMaxAgeHours = 48` as a floor: each dependency accepts the larger of
 48 hours and its automatic age (longest schedule gap plus 2 hours), so weekly Apps
