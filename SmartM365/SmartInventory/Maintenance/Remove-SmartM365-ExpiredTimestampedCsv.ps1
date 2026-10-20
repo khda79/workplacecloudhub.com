@@ -36,7 +36,7 @@ CSV report of every decision. Defaults to %TEMP%\SmartM365-ExpiredTimestampedCsv
 Deletes the planned files. Omit for preview only.
 
 .VERSION
-1.0
+1.1
 
 .NOTES
 Author: https://github.com/khda79/workplacecloudhub.com
@@ -59,7 +59,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-$ScriptVersion = '1.0'
+$ScriptVersion = '1.1'
 
 $tenantContextPath = Join-Path -Path $PSScriptRoot -ChildPath '..\..\Config\SmartM365-TenantContext.ps1'
 if (-not (Test-Path -LiteralPath $tenantContextPath -PathType Leaf)) { throw "SmartM365 tenant context not found: $tenantContextPath" }
@@ -116,7 +116,8 @@ function Get-RecordedWeek {
 
 Write-Host ("Scanning {0} (retention {1} days, cutoff {2:yyyy-MM-dd HH:mm})..." -f $dataAllRoot, $RetentionDays, $cutoff)
 $latestNames = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
-foreach ($latest in @(Get-ChildItem -LiteralPath $dataLastRoot -Recurse -File -Filter '*.csv' -ErrorAction Stop)) { [void]$latestNames.Add($latest.Name) }
+# Source staging holds unpromoted copies: they do not prove a latest export.
+foreach ($latest in @(Get-ChildItem -LiteralPath $dataLastRoot -Recurse -File -Filter '*.csv' -ErrorAction Stop | Where-Object { $_.FullName -notmatch '[\\/]\.staging[\\/]' })) { [void]$latestNames.Add($latest.Name) }
 
 $decisions = [Collections.Generic.List[object]]::new()
 foreach ($file in @(Get-ChildItem -LiteralPath $dataAllRoot -Recurse -File -Filter '*.csv' -ErrorAction Stop)) {

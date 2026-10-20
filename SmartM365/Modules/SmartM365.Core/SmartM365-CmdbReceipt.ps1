@@ -1,11 +1,13 @@
-﻿<#
+<#
 .SYNOPSIS
 Producer-owned, current-only SmartInventory source receipts. Dot-sourced helper.
 .VERSION
-1.3.1
+1.4.0
 .NOTES
 Compatible with Windows PowerShell 5.1. Optional daily capture maintenance is
 delegated to Core only for explicitly opted-in producers; no collection or report refresh.
+Opted-in producers stage their DATA-LAST CSVs under DATA-LAST\.staging\<producer>\<run> and
+promote them, receipt last, only when the run completes; DATA-LAST is untouched otherwise.
 #>
 [CmdletBinding()]
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidGlobalVars','',Justification='Core identity and current-run CSV publication contract; this helper does not change these globals.')]
@@ -43,6 +45,8 @@ function Write-SmartM365CmdbReceiptDocument {
 function Write-SmartM365SourceRunState {
     param($Context,[string]$Status,[string]$ErrorMessage='',[int]$Errors=0)
     $document=@{Owner='SmartInventory-SourceRun';ContractVersion='1.0';Status=$Status;Errors=$Errors;Error=$ErrorMessage;PublicationStarted=[bool]$Context.PublicationStarted;UnqualifiedPublication=[bool]$Context.UnqualifiedPublication;Files=@();IsPartialInventory=($Status -ne 'Completed');ConsumerScopeQualified=$false;Scope=$Context.Scope}
+    # Read by the orchestrator: a staged run leaves DATA-LAST untouched until Publishing.
+    if($Context.ContainsKey('StagedPublication') -and $Context.StagedPublication){$document.StagedPublication=$true}
     foreach($field in @('TenantKey','OrganizationKey','EnvironmentKey','TenantId','Producer','ScriptVersion','RunId','StartedAtUtc')){$document[$field]=$Context[$field]}
     if($Context.ContainsKey('RunNotes') -and $Context.RunNotes.Count){$document.Notes=@($Context.RunNotes)}
     $document.UpdatedAtUtc=[datetime]::UtcNow.ToString('o')
@@ -70,6 +74,11 @@ function Start-SmartM365SourcePublication {
     if(-not $context -or [IO.Path]::GetExtension($Path) -ine '.csv'){return}
     $full=[IO.Path]::GetFullPath($Path)
     if([IO.Path]::GetDirectoryName($full).TrimEnd([char[]]'\/') -ine $context.SourceRoot){return}
+    # A direct DATA-LAST write voids the staging guarantee for the rest of this run.
+    if($context.StagedPublication){
+        $context.StagedPublication=$false
+        WriteLog -Message "Staged source publication bypassed by a direct DATA-LAST write: $full" -Level WARNING
+    }
     if(-not $context.PublicationStarted){
         $context.PublicationStarted=$true;$context.UnqualifiedPublication=$true
         try{Write-SmartM365SourceRunState $context Publishing}
@@ -111,6 +120,7 @@ function Start-SmartM365CmdbSourceReceipt {
         RequiredScope=[string]$producers[0].Scope;ScopeQualified=[bool]$ConfiguredOutputs;Scope=$(if($ConfiguredOutputs){'ConfiguredOutputs'}else{'NotDeclared'});Started=$false;Lock=$null
         ConfiguredOutputs=[bool]$ConfiguredOutputs;PublishedHashes=@{};OptionalFiles=@(if($producers[0].PSObject.Properties['OptionalFiles']){$producers[0].OptionalFiles})
         ScopeParameters=$effectiveScope
+        StagedPublication=$false;StagingRoot='';StagedFiles=@{};StagedActions=New-Object 'Collections.Generic.List[object]'
     }
     foreach($field in @('TenantKey','OrganizationKey','EnvironmentKey','TenantId','ScriptVersion')){if(-not $context[$field]){throw "Missing producer identity: $field"}}
     try{
@@ -149,11 +159,100 @@ function Register-SmartM365SourceCsv {
     $context=$script:SmartM365CmdbSourceContext
     if(-not $context -or [IO.Path]::GetExtension($Path) -ine '.csv'){return}
     $full=[IO.Path]::GetFullPath($Path)
-    if([IO.Path]::GetDirectoryName($full).TrimEnd([char[]]'\/') -ine $context.SourceRoot){return}
+    $directory=[IO.Path]::GetDirectoryName($full).TrimEnd([char[]]'\/')
+    if($context.StagedPublication -and $directory -ieq $context.StagingRoot){
+        # Recorded under its canonical name; the staged copy is promoted at completion.
+        $canonical=Join-Path $context.SourceRoot ([IO.Path]::GetFileName($full))
+        $context.StagedFiles[$canonical]=$full
+        $context.PublishedHashes[$canonical]=(Get-FileHash -LiteralPath $full -Algorithm SHA256 -ErrorAction Stop).Hash
+        if(-not $global:csvGeneratedPaths){$global:csvGeneratedPaths=New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)}
+        if($global:csvGeneratedPaths -is [array]){$global:csvGeneratedPaths=@($global:csvGeneratedPaths)+@($canonical)}else{[void]$global:csvGeneratedPaths.Add($canonical)}
+        return
+    }
+    if($directory -ine $context.SourceRoot){return}
     Start-SmartM365SourcePublication -Path $full
     $context.PublishedHashes[$full]=(Get-FileHash -LiteralPath $full -Algorithm SHA256 -ErrorAction Stop).Hash
     if(-not $global:csvGeneratedPaths){$global:csvGeneratedPaths=New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)}
     if($global:csvGeneratedPaths -is [array]){$global:csvGeneratedPaths=@($global:csvGeneratedPaths)+@($full)}else{[void]$global:csvGeneratedPaths.Add($full)}
+}
+
+# Opt-in, after the receipt starts: this run writes its DATA-LAST CSVs to a private staging folder.
+function Enable-SmartM365StagedSourcePublication {
+    [CmdletBinding()]
+    param()
+    $context=$script:SmartM365CmdbSourceContext
+    if(-not $context){return}
+    if($context.PublicationStarted){throw 'Staged source publication must be enabled before the first DATA-LAST write.'}
+    $producerRoot=Join-Path (Join-Path $context.SourceRoot '.staging') ([IO.Path]::GetFileNameWithoutExtension($context.Producer))
+    foreach($folder in @((Join-Path $context.SourceRoot '.staging'),$producerRoot)){
+        if((Test-Path -LiteralPath $folder) -and ((Get-Item -LiteralPath $folder -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)){throw 'Linked source staging folder is not accepted.'}
+    }
+    if(-not(Test-Path -LiteralPath $producerRoot -PathType Container)){New-Item -ItemType Directory -Path $producerRoot -Force | Out-Null}
+    # The producer lock is held: every other run folder of this producer is an orphan of a crash.
+    foreach($orphan in @(Get-ChildItem -LiteralPath $producerRoot -Force -ErrorAction Stop)){
+        if($orphan.Attributes -band [IO.FileAttributes]::ReparsePoint){throw "Linked source staging entry is not accepted: $($orphan.FullName)"}
+        Remove-Item -LiteralPath $orphan.FullName -Recurse -Force -ErrorAction Stop
+        WriteLog -Message "Orphaned source staging removed: $($orphan.FullName)" -Level INFO
+    }
+    $context.StagingRoot=[IO.Path]::GetFullPath((Join-Path $producerRoot $context.RunId)).TrimEnd([char[]]'\/')
+    New-Item -ItemType Directory -Path $context.StagingRoot | Out-Null
+    $context.StagedPublication=$true
+    Write-SmartM365SourceRunState $context Collecting
+    WriteLog -Message "Staged source publication enabled; DATA-LAST is updated only after a complete run: $($context.StagingRoot)" -Level INFO
+}
+
+# Write target for a canonical DATA-LAST CSV: its staged copy while staging is active, else unchanged.
+function Resolve-SmartM365SourcePublicationPath {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Path)
+    $context=$script:SmartM365CmdbSourceContext
+    if(-not $context -or -not $context.StagedPublication -or [IO.Path]::GetExtension($Path) -ine '.csv'){return $Path}
+    $full=[IO.Path]::GetFullPath($Path)
+    if([IO.Path]::GetDirectoryName($full).TrimEnd([char[]]'\/') -ine $context.SourceRoot){return $Path}
+    return (Join-Path $context.StagingRoot ([IO.Path]::GetFileName($full)))
+}
+
+# Follow-up of a staged CSV (SharePoint copy, WeeklyHistory, producer callback), run only after its promotion.
+function Add-SmartM365StagedPublicationAction {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Path,[string]$TimestampedPath='',[switch]$SharePointUpload,[switch]$WeeklyHistory,[scriptblock]$Callback,[object[]]$ArgumentList=@())
+    $context=$script:SmartM365CmdbSourceContext
+    if(-not $context -or -not $context.StagedPublication){throw 'No staged source publication is active.'}
+    $context.StagedActions.Add([pscustomobject]@{Path=[IO.Path]::GetFullPath($Path);TimestampedPath=$TimestampedPath;SharePointUpload=[bool]$SharePointUpload;WeeklyHistory=[bool]$WeeklyHistory;Callback=$Callback;ArgumentList=@($ArgumentList)})
+}
+
+function Remove-SmartM365SourceStaging {
+    param([Parameter(Mandatory)]$Context)
+    if(-not $Context.StagingRoot -or -not(Test-Path -LiteralPath $Context.StagingRoot)){return}
+    try{Remove-Item -LiteralPath $Context.StagingRoot -Recurse -Force -ErrorAction Stop}
+    catch{WriteLog -Message ("Source staging could not be removed; the next run removes it: {0}" -f $_.Exception.Message) -Level WARNING}
+}
+
+# Moves every staged CSV over its canonical file. The caller writes the receipt afterwards.
+function Publish-SmartM365StagedSourceSet {
+    param([Parameter(Mandatory)]$Context,[Parameter(Mandatory)][object[]]$Records)
+    $Context.PublicationStarted=$true;$Context.UnqualifiedPublication=$true
+    Write-SmartM365SourceRunState $Context Publishing
+    foreach($record in $Records){
+        $canonical=Join-Path $Context.SourceRoot $record.File
+        if(-not $Context.StagedFiles.ContainsKey($canonical)){continue}
+        $staged=$Context.StagedFiles[$canonical]
+        if((Test-Path -LiteralPath $canonical) -and ((Get-Item -LiteralPath $canonical).Attributes -band [IO.FileAttributes]::ReparsePoint)){throw "Linked canonical CSV is not accepted: $canonical"}
+        if(Test-Path -LiteralPath $canonical){[IO.File]::Replace($staged,$canonical,[Management.Automation.Language.NullString]::Value,$true)}else{[IO.File]::Move($staged,$canonical)}
+        if((Get-FileHash -LiteralPath $canonical -Algorithm SHA256).Hash -cne $record.SHA256){throw "Promoted CSV differs from its staged copy: $canonical"}
+        WriteLog -Message "CSV latest copy written to: $canonical (promoted from source staging)" -Level INFO
+    }
+}
+
+function Invoke-SmartM365StagedPublicationFollowUp {
+    param([Parameter(Mandatory)]$Context)
+    foreach($action in $Context.StagedActions.ToArray()){
+        try{
+            if($action.SharePointUpload -and (Test-Path -LiteralPath $action.Path)){Invoke-SmartM365SharePointCsvUpload -LocalFilePath $action.Path | Out-Null}
+            if($action.WeeklyHistory){Invoke-SmartM365WeeklyInventoryHistoryForCsv -SourceFiles @($action.Path) -TimestampedPath $action.TimestampedPath}
+            if($action.Callback){$arguments=@($action.ArgumentList);& $action.Callback @arguments}
+        }catch{WriteLog -Message ("Post-publication step failed for {0}; DATA-LAST and its receipt are published: {1}" -f $action.Path,$_.Exception.Message) -Level WARNING}
+    }
 }
 
 # Read-only view of the active run: lets a producer derive outputs from its own current publication.
@@ -274,17 +373,28 @@ function Complete-SmartM365CmdbSourceReceipt {
                 if($published.Count -eq 0){throw 'No canonical CSV was published in this run.'}
                 foreach($name in $context.ExpectedFiles){if($published -notcontains $name){throw "Required canonical CSV was not published in this run: $name"}}
                 foreach($name in $published){
-                    $path=Join-Path $context.SourceRoot $name
+                    $canonical=Join-Path $context.SourceRoot $name
+                    $path=if($context.StagedFiles.ContainsKey($canonical)){$context.StagedFiles[$canonical]}else{$canonical}
                     $record=Get-SmartM365CmdbCsvReceipt -Path $path -TenantKey $context.TenantKey -Identity $context
-                    if($context.PublishedHashes.ContainsKey($path) -and $context.PublishedHashes[$path] -cne $record.SHA256){throw 'CSV changed after current-run publication.'}
+                    $record.File=$name
+                    if($context.PublishedHashes.ContainsKey($canonical) -and $context.PublishedHashes[$canonical] -cne $record.SHA256){throw 'CSV changed after current-run publication.'}
                     foreach($field in @('Producer','ScriptVersion','RunId','StartedAtUtc')){$record[$field]=$context[$field]}
                     $record.CompletedAtUtc=[datetime]::UtcNow.ToString('o');$record.Status='Success'
                     $record.Errors=0;$record.IsPartialInventory=$(if($context.ConfiguredOutputs){$null}else{$context.ContainsKey('DomainCoverage') -and $null -ne $context.DomainCoverage});$record.Scope=$context.Scope
                     if($context.ContainsKey('DomainCoverage') -and $context.DomainCoverage){$record.DomainCoverage=$context.DomainCoverage}
                     $record.Required=$context.ExpectedFiles -contains $name;$files+=$record
                 }
-                foreach($record in $files){if((Get-FileHash -LiteralPath (Join-Path $context.SourceRoot $record.File) -Algorithm SHA256).Hash -ne $record.SHA256){throw 'CSV changed while completing the producer batch.'}}
+                foreach($record in $files){
+                    $canonical=Join-Path $context.SourceRoot $record.File
+                    $current=if($context.StagedFiles.ContainsKey($canonical)){$context.StagedFiles[$canonical]}else{$canonical}
+                    if((Get-FileHash -LiteralPath $current -Algorithm SHA256).Hash -ne $record.SHA256){throw 'CSV changed while completing the producer batch.'}
+                }
             }catch{$complete=$false;$reason=$_.Exception.Message;$files=@()}
+            # Staged CSVs replace DATA-LAST only now, under the Publishing fence; the receipt follows them.
+            if($complete -and $context.StagedFiles.Count){
+                try{Publish-SmartM365StagedSourceSet -Context $context -Records $files}
+                catch{$complete=$false;$reason='Staged source promotion failed: '+$_.Exception.Message;$files=@()}
+            }
         }else{$reason=if($Status -eq 'Cancelled'){'Producer cancelled by operator before completion.'}else{'Producer failed, restricted/unavailable scope, or full-scope declaration missing.'}}
         $document=@{}
         foreach($field in @('Owner','ContractVersion','TenantKey','OrganizationKey','EnvironmentKey','TenantId','Producer','ScriptVersion','RunId','StartedAtUtc')){$document[$field]=$context[$field]}
@@ -313,9 +423,10 @@ function Complete-SmartM365CmdbSourceReceipt {
             try { Invoke-SmartM365DailyCaptureRetention -Context $context -Proof ([pscustomobject]$document) }
             catch { WriteLog -Message ('Daily capture retention refused; source CSVs and receipt preserved: {0}' -f $_.Exception.Message) -Level WARNING }
         }
+        if($complete -and $context.StagedPublication){Invoke-SmartM365StagedPublicationFollowUp -Context $context}
         if(-not $complete){WriteLog -Message "Source qualification rejected for '$($context.Producer)': $reason Native CSVs remain preserved." -Level WARNING}
         if($complete){return $context.ReceiptPath}else{return $context.RunPath}
-    }finally{if($context.Lock){$context.Lock.Dispose()};$script:SmartM365CmdbSourceContext=$null}
+    }finally{Remove-SmartM365SourceStaging -Context $context;if($context.Lock){$context.Lock.Dispose()};$script:SmartM365CmdbSourceContext=$null}
 }
 
 # SIG # Begin signature block

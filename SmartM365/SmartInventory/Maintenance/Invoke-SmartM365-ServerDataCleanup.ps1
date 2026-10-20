@@ -9,6 +9,9 @@ byte-identical old M365 Usage run folders, linked obsolete prepared batches afte
 retaining their receipts, and timestamped CSV copies qualified by weekly
 manifests. Every other file is inventoried for review. The script is standalone.
 
+.VERSION
+1.0.1
+
 .EXAMPLE
 ./Invoke-SmartM365-ServerDataCleanup.ps1 -Tenant prod -DataRootPath '<server DATA root>'
 ./Invoke-SmartM365-ServerDataCleanup.ps1 -Tenant prod -DataRootPath '<server DATA root>' -Execute
@@ -97,7 +100,8 @@ function Get-DirectoryState {
 function Get-TimestampedCsvDecisions {
     $cutoff = (Get-Date).AddDays(-7)
     $latestNames = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
-    foreach ($latest in @(Get-ChildItem -LiteralPath $dataLast -File -Recurse -Filter '*.csv')) {
+    # Source staging holds unpromoted copies: they do not prove a latest export.
+    foreach ($latest in @(Get-ChildItem -LiteralPath $dataLast -File -Recurse -Filter '*.csv' | Where-Object { $_.FullName -notmatch '[\\/]\.staging[\\/]' })) {
         [void]$latestNames.Add($latest.Name)
     }
     $weekCache = @{}
@@ -385,7 +389,8 @@ $inventory = foreach ($file in $allFiles) {
         }
     }
     if ($action -eq 'Review') {
-        if ($relative -match '^DATA-LAST[\\/]') { $action = 'Keep'; $reason = 'Canonical latest export.' }
+        if ($relative -match '^DATA-LAST[\\/]\.staging[\\/]') { $action = 'Keep'; $reason = 'Source staging of a running or interrupted producer run; its producer removes it.' }
+        elseif ($relative -match '^DATA-LAST[\\/]') { $action = 'Keep'; $reason = 'Canonical latest export.' }
         elseif ($relative -match '^DATA-POWERBI-CMDB[\\/]') { $action = 'Keep'; $reason = 'Legacy CMDB rollback cohort pending acceptance.' }
         elseif ($relative -match '^DATA-POWERBI[\\/]batches[\\/]') { $reason = 'Prepared batch outside verified retirement chain.' }
         elseif ($relative -match '^DATA-REPAIR-BACKUPS[\\/]') { $reason = 'Recovery evidence requires audit review.' }

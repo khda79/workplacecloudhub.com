@@ -15,7 +15,17 @@ Existing completed legacy proofs remain readable. Existing Running/Failed proofs
 
 Failed attempts publish their run state without re-uploading an older proof as new evidence. Successful attempts publish both metadata files using the configured shared upload behavior. Synchronization can deliver files out of order; hashes and proof validation remain mandatory. A local run-state file or local file lock alone is not a distributed lock across SharePoint-synchronized copies.
 
-Orchestrator scheduling and dependency success history are unchanged. CMDB freshness stays 48 hours for normal sources and 240 hours for weekly application evidence, with its existing 168-hour warning. Intelligence source capture and stable history keys are unchanged.
+## Staged source publication (Core 1.0.93, helper 1.4.0)
+
+A producer that calls `Enable-SmartM365StagedSourcePublication` right after starting its receipt never changes DATA-LAST before it completes. Its DATA-LAST CSVs are written to `DATA-LAST\.staging\<producer>\<RunId>\` (same volume, so each promotion is an atomic replace). The run state declares `StagedPublication: true` and stays Collecting during the whole collection.
+
+At completion, a qualified run is verified on its staged copies, then promoted: the run state is set to Publishing with `UnqualifiedPublication`, every CSV replaces its canonical file and is re-hashed, and only then is the new proof written, last. A consumer comparing hashes with the proof during promotion sees a mismatch or the Publishing fence, never a mixed set accepted as valid. If promotion fails part-way, no proof is written and the publication stays unqualified until the next complete run. A failed, cancelled or interrupted run leaves DATA-LAST, the previous proof and its qualification untouched.
+
+The SharePoint copy and WeeklyHistory of the promoted CSVs, and producer callbacks such as cache manifests, run after the proof; a failure there is a warning. `.staging` is never uploaded. The staging folder is removed at completion; a folder left by a crash is removed at the next start of the same producer, under its exclusive lock. A direct DATA-LAST write during a staged run removes the declaration for the rest of that run. Maintenance scripts that walk DATA-LAST ignore `.staging`.
+
+Opted-in producers: IntuneConfigurations, IntuneManagedApps, IntuneEnrollmentFailures and Intune DiscoveredApps. Other producers keep direct publication. The orchestrator reads the declaration: under `FreshSuccess`, a long staged run does not hold its consumers back, while an unstaged one does.
+
+Orchestrator dependency success history is unchanged. CMDB freshness stays 48 hours for normal sources and 240 hours for weekly application evidence, with its existing 168-hour warning. Intelligence source capture and stable history keys are unchanged.
 
 Offline regression commands (no collectors, tenant calls, uploads or live data):
 
@@ -24,5 +34,6 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File SmartM365/Tests/Test-SmartM365Sour
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File SmartM365/Tests/Test-SmartM365SourceReceiptsOffline.ps1
 pwsh -NoProfile -ExecutionPolicy Bypass -File SmartM365/Tests/Test-SmartM365CmdbProducerReceipts.ps1
 pwsh -NoProfile -ExecutionPolicy Bypass -File SmartM365/Tests/Test-SmartM365SourceReceiptReadersOffline.ps1
+pwsh -NoProfile -ExecutionPolicy Bypass -File SmartM365/Tests/Test-SmartM365StagedSourcePublicationOffline.ps1
 python -B -m unittest discover -s SmartM365/Tests -p 'test_cmdb*.py'
 ```

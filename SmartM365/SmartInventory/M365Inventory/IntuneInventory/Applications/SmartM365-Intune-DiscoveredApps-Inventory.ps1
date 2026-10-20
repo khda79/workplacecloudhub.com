@@ -41,10 +41,10 @@
 .PARAMETER DelayMs
     Milliseconds to wait between each managedDevices Graph call to avoid throttling.
     Default: 300. Increase if 429 errors persist (e.g. 500 or 1000).
-    Version : 1.34
+    Version : 1.35
 
 .VERSION
-1.34
+1.35
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication.
@@ -53,7 +53,7 @@
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
     Script  : Intune-DiscoveredApps-Inventory
-    Version : 1.34
+    Version : 1.35
     Requires: Microsoft.Graph.Authentication module
               SmartM365.Core module (Modules\SmartM365.Core\SmartM365.Core.psd1)
     Local configuration: DiscoveredAppsCsvLogFolderPath -> output folder (DATA-ALL\M365-Inventory\Output-Windows-Discovered apps)
@@ -332,7 +332,7 @@ $Thumb = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'Thumb' -De
 # ==========================================================
 $modulePath = & { $d = $PSScriptRoot; while ($d) { $p = Join-Path $d 'Modules\SmartM365.Core\SmartM365.Core.psd1'; if (Test-Path -LiteralPath $p) { return $p }; $parent = Split-Path -Path $d -Parent; if ($parent -eq $d) { break }; $d = $parent }; throw 'SmartM365.Core module not found.' }
 try {
-    Import-Module -Name $modulePath -MinimumVersion '1.0.87' -ErrorAction Stop
+    Import-Module -Name $modulePath -MinimumVersion '1.0.93' -ErrorAction Stop
 } catch {
     Write-Host "Failed to import SmartM365.Core module from '$modulePath': $_" -ForegroundColor Red
     $smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; $smartM365RunGuard.ExitCode=(1); exit $smartM365RunGuard.ExitCode
@@ -341,7 +341,7 @@ try {
 # ==========================================================
 # Script metadata
 # ==========================================================
-$ScriptVersion = "1.34"
+$ScriptVersion = "1.35"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion"
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'DiscoveredAppsCsvLogFolderPath' -DefaultValue $OutputPath
 if (-not $PSBoundParameters.ContainsKey('DelayMs')) {
@@ -419,6 +419,8 @@ try {
         -OutputPathInit $OutputPath `
         -LogFileName    ($MyInvocation.MyCommand.Name -replace '\.ps1$', '')
         Start-SmartM365CmdbSourceReceipt -ScriptPath $PSCommandPath -SourceRootPath (Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue '') -ReadOnly:$DryRun
+        # The weekly collection runs for about a day: DATA-LAST changes only when it completes.
+        Enable-SmartM365StagedSourcePublication
     Start-SmartM365RunTranscript -Path $global:logTranscriptFile -Append
 
     WriteLog -Message "Script environment initialized at $InitializeOutputPath"
@@ -1873,7 +1875,11 @@ function Complete-DiscoveredAppsStreamExport {
     $localLatestPath = Join-Path -Path $OutputPath -ChildPath ("$BaseFileName.csv")
     $globalLatestPath = Join-Path -Path $GlobalPath -ChildPath ("$BaseFileName.csv")
     Copy-DiscoveredAppsFileAtomically -SourcePath $TimestampedPath -DestinationPath $localLatestPath
-    Copy-DiscoveredAppsFileAtomically -SourcePath $TimestampedPath -DestinationPath $globalLatestPath
+    # Staged runs write the DATA-LAST copy to source staging; it is promoted with the receipt.
+    $globalWritePath = Resolve-SmartM365SourcePublicationPath -Path $globalLatestPath
+    $globalStaged = $globalWritePath -cne $globalLatestPath
+    Copy-DiscoveredAppsFileAtomically -SourcePath $TimestampedPath -DestinationPath $globalWritePath
+    Register-SmartM365SourceCsv -Path $globalWritePath
 
     if (-not $global:csvGeneratedPaths) {
         $global:csvGeneratedPaths = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
@@ -1882,7 +1888,10 @@ function Complete-DiscoveredAppsStreamExport {
     [void]$global:csvGeneratedPaths.Add($localLatestPath)
     [void]$global:csvGeneratedPaths.Add($globalLatestPath)
 
-    if (Get-Command -Name Invoke-SmartM365SharePointCsvUpload -ErrorAction SilentlyContinue) {
+    if ($globalStaged) {
+        Add-SmartM365StagedPublicationAction -Path $globalLatestPath -SharePointUpload
+    }
+    elseif (Get-Command -Name Invoke-SmartM365SharePointCsvUpload -ErrorAction SilentlyContinue) {
         Invoke-SmartM365SharePointCsvUpload -LocalFilePath $globalLatestPath | Out-Null
     }
 
@@ -2364,7 +2373,16 @@ try {
                     $deviceDetailManifestRoots = @($OutputPath, $(if ([string]::IsNullOrWhiteSpace($globalPath)) { $OutputPath } else { $globalPath })) | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } | Select-Object -Unique
                     foreach ($deviceDetailManifestRoot in $deviceDetailManifestRoots) {
                         $deviceDetailLatestForManifest = Join-Path -Path $deviceDetailManifestRoot -ChildPath ("$detailBaseFileName.csv")
-                        Write-DiscoveredAppsDeviceDetailCacheManifest -CsvPath $deviceDetailLatestForManifest -StatsById $deviceDetailManifestStatsById | Out-Null
+                        if ((Resolve-SmartM365SourcePublicationPath -Path $deviceDetailLatestForManifest) -cne $deviceDetailLatestForManifest) {
+                            # The cache manifest describes the promoted DATA-LAST file, so it follows the promotion.
+                            Add-SmartM365StagedPublicationAction -Path $deviceDetailLatestForManifest -Callback {
+                                param($CsvPath, $StatsById)
+                                Write-DiscoveredAppsDeviceDetailCacheManifest -CsvPath $CsvPath -StatsById $StatsById | Out-Null
+                            } -ArgumentList @($deviceDetailLatestForManifest, $deviceDetailManifestStatsById)
+                        }
+                        else {
+                            Write-DiscoveredAppsDeviceDetailCacheManifest -CsvPath $deviceDetailLatestForManifest -StatsById $deviceDetailManifestStatsById | Out-Null
+                        }
                     }
                     Remove-Item -LiteralPath $script:DeviceDetailResumePath -Force -ErrorAction SilentlyContinue
                 }
@@ -2404,10 +2422,12 @@ try {
         $summaryBaseFileName = Add-SmartM365MaxItemsSuffixToBaseName -BaseFileName 'Intune_DiscoveredApps_Summary'
         $summaryLatestRoot = if ([string]::IsNullOrWhiteSpace($globalPath)) { $OutputPath } else { $globalPath }
         $summaryLatestPath = Join-Path -Path $summaryLatestRoot -ChildPath "$summaryBaseFileName.csv"
-        if (-not (Test-Path -LiteralPath $summaryLatestPath -PathType Leaf)) {
-            throw "Discovered Apps publication gate failed: Summary latest CSV was not created: $summaryLatestPath"
+        # A staged run validates the copy that its completion will promote.
+        $summaryWrittenPath = Resolve-SmartM365SourcePublicationPath -Path $summaryLatestPath
+        if (-not (Test-Path -LiteralPath $summaryWrittenPath -PathType Leaf)) {
+            throw "Discovered Apps publication gate failed: Summary latest CSV was not created: $summaryWrittenPath"
         }
-        $publishedSummary = @(Import-Csv -LiteralPath $summaryLatestPath)
+        $publishedSummary = @(Import-Csv -LiteralPath $summaryWrittenPath)
         if ($publishedSummary.Count -ne $summaryRecords.Count) {
             throw "Discovered Apps publication gate failed: Summary latest row count is $($publishedSummary.Count); expected $($summaryRecords.Count). Path: $summaryLatestPath"
         }
@@ -2427,15 +2447,16 @@ try {
         if ($script:DeviceDetailCompleted -and -not (Test-SmartM365MaxItemsMode)) {
             $deviceDetailLatestRoot = if ([string]::IsNullOrWhiteSpace($globalPath)) { $OutputPath } else { $globalPath }
             $deviceDetailLatestPath = Join-Path -Path $deviceDetailLatestRoot -ChildPath "$detailBaseFileName.csv"
-            if (-not (Test-Path -LiteralPath $deviceDetailLatestPath -PathType Leaf)) {
-                throw "Discovered Apps publication gate failed: finalized AppDeviceRelations latest CSV was not found for WeeklyHistory: $deviceDetailLatestPath"
+            $deviceDetailWrittenPath = Resolve-SmartM365SourcePublicationPath -Path $deviceDetailLatestPath
+            if (-not (Test-Path -LiteralPath $deviceDetailWrittenPath -PathType Leaf)) {
+                throw "Discovered Apps publication gate failed: finalized AppDeviceRelations latest CSV was not found for WeeklyHistory: $deviceDetailWrittenPath"
             }
 
             $weeklyHistoryRoot = Join-Path -Path $OutputPath -ChildPath 'WeeklyHistory'
             $weeklySummaryHistoryRoot = Join-Path -Path $OutputPath -ChildPath 'SummaryHistory'
             $weeklyRetentionWeeks = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'WeeklyHistoryRetentionWeeks' -DefaultValue 5)
             Save-DiscoveredAppsHistoricalSummaries -WeeklyHistoryRoot $weeklyHistoryRoot -SummaryHistoryRoot $weeklySummaryHistoryRoot -RetentionWeeks $weeklyRetentionWeeks
-            Add-SmartM365WeeklyHistory -SourceCsvPaths @($summaryLatestPath, $deviceDetailLatestPath) -HistoryRootPath $weeklyHistoryRoot -OverwriteExisting -UploadChangedFilesOnly | Out-Null
+            Add-SmartM365WeeklyHistory -SourceCsvPaths @($summaryWrittenPath, $deviceDetailWrittenPath) -HistoryRootPath $weeklyHistoryRoot -OverwriteExisting -UploadChangedFilesOnly | Out-Null
             WriteLog -Message "Summary and AppDeviceRelations WeeklyHistory publication completed in one batch: $weeklyHistoryRoot" "INFO"
 
             if ($DeviceDetailMode -eq 'All' -and $MaxApps -eq 0) {

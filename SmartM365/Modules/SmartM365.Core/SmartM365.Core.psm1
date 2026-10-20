@@ -2419,18 +2419,22 @@ function Publish-SmartM365Csv {
     [void]$global:csvGeneratedPaths.Add($TimestampedPath)
 
     $publishedPath = $TimestampedPath
+    # An opted-in producer writes its DATA-LAST copy to source staging; it is promoted at completion.
+    $latestWritePath = if ([string]::IsNullOrWhiteSpace($LatestPath) -or -not (Get-Command -Name Resolve-SmartM365SourcePublicationPath -ErrorAction SilentlyContinue)) { $LatestPath } else { Resolve-SmartM365SourcePublicationPath -Path $LatestPath }
+    $latestStaged = -not [string]::IsNullOrWhiteSpace($LatestPath) -and $latestWritePath -cne $LatestPath
     if (-not [string]::IsNullOrWhiteSpace($LatestPath)) {
         if ($SingleSerialization) {
             if (-not [string]::Equals([IO.Path]::GetFullPath($TimestampedPath),[IO.Path]::GetFullPath($LatestPath),[StringComparison]::OrdinalIgnoreCase)) {
-                Copy-SmartM365FileAtomically -SourcePath $TimestampedPath -DestinationPath $LatestPath -VerifyHash
+                Copy-SmartM365FileAtomically -SourcePath $TimestampedPath -DestinationPath $latestWritePath -VerifyHash
             }
         }
         else {
-            Write-SmartM365CsvAtomically -Data $Data -Path $LatestPath -Columns $Columns -Encoding $Encoding -Delimiter $Delimiter -NoTenantKey:$NoTenantKey
+            Write-SmartM365CsvAtomically -Data $Data -Path $latestWritePath -Columns $Columns -Encoding $Encoding -Delimiter $Delimiter -NoTenantKey:$NoTenantKey
         }
-        WriteLog -Message ("CSV latest copy written to: {0}" -f $LatestPath)
+        if ($latestStaged) { WriteLog -Message ("CSV latest copy staged for {0}: {1}" -f $LatestPath, $latestWritePath) }
+        else { WriteLog -Message ("CSV latest copy written to: {0}" -f $LatestPath) }
         [void]$global:csvGeneratedPaths.Add($LatestPath)
-        $publishedPath = $LatestPath
+        $publishedPath = $latestWritePath
     }
 
     if ($RetentionMaxCsv -lt 0) {
@@ -2448,7 +2452,7 @@ function Publish-SmartM365Csv {
     $sharePointUploads = @()
     if (-not $NoSharePointUpload) {
         $uploadCandidates = @($TimestampedPath)
-        if (-not [string]::IsNullOrWhiteSpace($LatestPath)) { $uploadCandidates += $LatestPath }
+        if (-not [string]::IsNullOrWhiteSpace($LatestPath) -and -not $latestStaged) { $uploadCandidates += $LatestPath }
         foreach ($uploadCandidate in @($uploadCandidates | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } | Sort-Object -Unique)) {
             if (-not (Test-Path -LiteralPath $uploadCandidate)) { continue }
             $uploadRecord = Invoke-SmartM365SharePointCsvUpload -LocalFilePath $uploadCandidate
@@ -2465,8 +2469,13 @@ function Publish-SmartM365Csv {
     if (Test-SmartM365MaxItemsMode) {
         WriteLog -Message 'WeeklyHistory publication skipped because MaxItems test mode is active.' -Level 'WARNING'
     }
-    elseif (-not $NoWeeklyHistory) {
+    elseif (-not $NoWeeklyHistory -and -not $latestStaged) {
         Invoke-SmartM365WeeklyInventoryHistoryForCsv -SourceFiles @($publishedPath) -TimestampedPath $TimestampedPath
+    }
+    if ($latestStaged) {
+        # The DATA-LAST copy and its history follow the promotion of a complete run.
+        Add-SmartM365StagedPublicationAction -Path $LatestPath -TimestampedPath $TimestampedPath `
+            -SharePointUpload:(-not $NoSharePointUpload) -WeeklyHistory:(-not $NoWeeklyHistory -and -not (Test-SmartM365MaxItemsMode))
     }
 
     return [pscustomobject]@{
@@ -5411,11 +5420,14 @@ function ExportAndCopyCsv {
     $attempt = 0
     $globalCopyDone = $false
 
+    # An opted-in producer writes its DATA-LAST copy to source staging; it is promoted at completion.
+    $globalWritePath = if (Get-Command -Name Resolve-SmartM365SourcePublicationPath -ErrorAction SilentlyContinue) { Resolve-SmartM365SourcePublicationPath -Path $csvFilePath3 } else { $csvFilePath3 }
+    $globalStaged = $globalWritePath -cne $csvFilePath3
     while (-not $globalCopyDone -and $attempt -lt $maxRetries) {
         $attempt++
         try {
-            Copy-SmartM365FileAtomically -SourcePath $csvFilePath2 -DestinationPath $csvFilePath3
-            WriteLog -Message "CSV copied to global path: $csvFilePath3"
+            Copy-SmartM365FileAtomically -SourcePath $csvFilePath2 -DestinationPath $globalWritePath
+            WriteLog -Message $(if ($globalStaged) { "CSV staged for global path: $csvFilePath3" } else { "CSV copied to global path: $csvFilePath3" })
             [void]$global:csvGeneratedPaths.Add($csvFilePath3)
             $globalCopyDone = $true
         } catch {
@@ -5433,7 +5445,7 @@ function ExportAndCopyCsv {
         RemoveOldFiles -FolderPath $OutputPath -FilePattern "$BaseFileName`_*.csv" -MaxFiles $global:RetentionMaxCSV
     }
 
-    Invoke-SmartM365SharePointCsvUpload -LocalFilePath $csvFilePath3
+    if (-not $globalStaged) { Invoke-SmartM365SharePointCsvUpload -LocalFilePath $csvFilePath3 }
 
     $historySourcePath = $csvFilePath3
     if ($SkipWeeklyHistory) {
@@ -5442,8 +5454,12 @@ function ExportAndCopyCsv {
     elseif (Test-SmartM365MaxItemsMode) {
         WriteLog -Message 'WeeklyHistory publication skipped because MaxItems test mode is active.' -Level 'WARNING'
     }
-    else {
+    elseif (-not $globalStaged) {
         Invoke-SmartM365WeeklyInventoryHistoryForCsv -SourceFiles @($historySourcePath) -TimestampedPath $csvFilePath1
+    }
+    if ($globalStaged) {
+        Add-SmartM365StagedPublicationAction -Path $csvFilePath3 -TimestampedPath $csvFilePath1 -SharePointUpload `
+            -WeeklyHistory:(-not $SkipWeeklyHistory -and -not (Test-SmartM365MaxItemsMode))
     }
 
     WriteLog -Message "CSV export completed: $csvFilePath1"
@@ -6352,7 +6368,7 @@ function Disconnect-SmartM365CloudSession {
 #endregion
 
 Export-ModuleMember -Function `
-    Start-SmartM365CmdbSourceReceipt, Set-SmartM365CmdbSourceScope, Complete-SmartM365CmdbSourceReceipt, Start-SmartM365SourceReceipt, Complete-SmartM365SourceReceipt, Assert-SmartM365SourcePublication, Register-SmartM365SourceCsv, Get-SmartM365CurrentSourcePublication, Add-SmartM365SourceRunNote, `
+    Start-SmartM365CmdbSourceReceipt, Set-SmartM365CmdbSourceScope, Complete-SmartM365CmdbSourceReceipt, Start-SmartM365SourceReceipt, Complete-SmartM365SourceReceipt, Assert-SmartM365SourcePublication, Register-SmartM365SourceCsv, Get-SmartM365CurrentSourcePublication, Add-SmartM365SourceRunNote, Enable-SmartM365StagedSourcePublication, Resolve-SmartM365SourcePublicationPath, Add-SmartM365StagedPublicationAction, `
     Enable-SmartM365DailyCaptureRetention, Format-SmartM365LogLine, Update-SmartM365TimestampedTranscript, WriteLog, Write-Log, Get-SmartM365ModuleDiagnosticText, Write-SmartM365LoadedModuleVersions, Write-SmartM365ExecutionContext, Write-SmartM365CompletionBanner, Complete-SmartM365ExecutionContext, Test-FileLocked, RemoveOldFiles, Remove-SmartM365TimestampedFilesOlderThan, Remove-SmartM365TimestampedDirectoriesOlderThan, Remove-OldFiles, EnsureExchangePSSnapinLoaded, `
     Set-SmartM365CoreContext, Get-SmartM365MaxItemsValue, Test-SmartM365MaxItemsMode, Get-SmartM365MaxItemsSuffix, Set-SmartM365MaxItemsMode, Add-SmartM365MaxItemsSuffixToCsvPath, Add-SmartM365MaxItemsSuffixToBaseName, Add-SmartM365MaxItemsMailBanner, Add-SmartM365MaxItemsSubjectPrefix, Get-SmartM365MailTenantName, Format-SmartM365MailSubject, Get-SmartM365MailScriptContext, Add-SmartM365MailExecutionFooter, Limit-SmartM365RowsForMaxItems, Get-SmartM365CsvValidationBaseName, Get-SmartM365CsvValidationRule, Assert-SmartM365CsvDataCompleteness, Add-SmartM365CsvValidationRule, Initialize-SmartM365DefaultCsvValidationRules, Add-SmartM365TenantKey, Repair-SmartM365CsvTenantKeySchema, Write-SmartM365CsvAtomically, Add-SmartM365CsvRowsAtomically, Copy-SmartM365FileAtomically, Write-SmartM365TextAtomically, Publish-SmartM365Csv, Export-SmartM365Csv, Export-SmartM365CsvFromConvert, `
     ConvertTo-SmartM365ConfigBoolean, Get-SmartM365MailBrandingConfig, ConvertTo-SmartM365MailLogoDataUri, Add-SmartM365MailBranding, ConvertToRecipientArray, ConvertTo-SmartM365EmailHtmlText, New-SmartM365EmailKpiGridHtml, New-SmartM365EmailTableHtml, New-SmartM365EmailBody, ConvertTo-SmartM365EmailBody, Get-SmartM365SharePointUploadRecordForLocalFile, Convert-SmartM365MailBodyLocalPathsToSharePointLinks, NewSimpleEmailBody, ConvertBytesToSizeString, GetFileList, `

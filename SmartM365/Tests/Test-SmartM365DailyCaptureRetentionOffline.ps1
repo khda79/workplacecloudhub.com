@@ -3,7 +3,7 @@
 .SYNOPSIS
 Synthetic daily capture, preservation and conditional SharePoint deletion tests.
 .VERSION
-1.0.0
+1.0.1
 #>
 [CmdletBinding()]
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidGlobalVars','',Justification='Synthetic Core globals are saved and restored in finally.')]
@@ -268,7 +268,8 @@ try {
     foreach($relative in $sources){
         $text=[IO.File]::ReadAllText((Join-Path $root ('SmartInventory/'+$relative)))
         if($text -notmatch 'Enable-(?:Core)?SmartM365DailyCaptureRetention -OutputRoot \$(?:OutputPath|OutputFolder|script:Runtime.OutputPath)'){throw "Missing daily capture wiring: $relative"}
-        if($text -notmatch "-MinimumVersion '1.0.92'"){throw "Missing Core module floor: $relative"}
+        # Daily capture needs Core 1.0.92; a later floor (staged publication, 1.0.93) also qualifies.
+        if($text -notmatch "-MinimumVersion '1\.0\.(?:9[2-9]|[1-9]\d\d)'"){throw "Missing Core module floor: $relative"}
         $result.Checks++
     }
     "PASS: Daily capture retention $($result.Checks) checks; synthetic local files and mocked SharePoint only."

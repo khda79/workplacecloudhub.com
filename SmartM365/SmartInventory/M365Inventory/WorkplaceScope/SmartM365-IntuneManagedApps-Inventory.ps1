@@ -3,7 +3,7 @@
 .SYNOPSIS
 Collects Intune managed apps, assignments, and reported installation states.
 .VERSION
-1.2.3
+1.2.4
 #>
 [CmdletBinding()]
 param(
@@ -142,7 +142,7 @@ try {
     $smartRoot = Split-Path (Split-Path (Split-Path $PSScriptRoot -Parent) -Parent) -Parent
     . (Join-Path $smartRoot 'Config/SmartM365-TenantContext.ps1')
     $effective = Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot
-    Import-Module (Join-Path $smartRoot 'Modules/SmartM365.Core/SmartM365.Core.psd1') -MinimumVersion '1.0.92' -Global -ErrorAction Stop
+    Import-Module (Join-Path $smartRoot 'Modules/SmartM365.Core/SmartM365.Core.psd1') -MinimumVersion '1.0.93' -Global -ErrorAction Stop
     Import-Module (Join-Path $smartRoot 'SmartInventory/Common/SmartM365.EvidenceCollector.Common.psd1') -MinimumVersion '1.0.11' -Force
     $script:Runtime = Initialize-SmartM365EvidenceRuntime -ScriptPath $PSCommandPath -EffectiveConfig $effective `
         -DefaultOutputRelativePath 'Intune/WorkplaceScope/ManagedApps' -OutputPath $OutputPath `
@@ -150,6 +150,8 @@ try {
         -EnableConfiguredExternalActions:$EnableConfiguredExternalActions
     Start-SmartM365SourceReceipt -ScriptPath $PSCommandPath -SourceRootPath $script:Runtime.LatestCsvFolderPath `
         -ReadOnly:($ValidateOnly -or $MaxItems -gt 0)
+    # DATA-LAST changes only when this run completes; a failed or running run leaves the previous set intact.
+    Enable-SmartM365StagedSourcePublication
     Enable-SmartM365DailyCaptureRetention -OutputRoot $script:Runtime.OutputPath
     Connect-SmartM365EvidenceGraph $script:Runtime @('DeviceManagementApps.Read.All','DeviceManagementManagedDevices.ReadWrite.All') -InteractiveAuth:$InteractiveAuth
     Invoke-SmartM365Preflight -ScriptName 'SmartM365-IntuneManagedApps-Inventory' `
