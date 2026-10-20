@@ -140,10 +140,33 @@ table 'License Report Assignment Issues'
 		summarizeBy: none
 		sourceColumn: Assignment Paths
 
+	/// Actual prepared batch used by this query. Technical provenance only; empty tables have no observable batch.
+	column 'Loaded Batch ID'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 15ad9c6b-c452-4b26-8371-c8a165a10163
+		summarizeBy: none
+		sourceColumn: Loaded Batch ID
+
 	partition 'License Report Assignment Issues' = m
 		mode: import
 		source =
 				let
+				    Readers = CreatePreparedReaders(),
+				    GetPreparedEvidenceFile = Readers[GetPreparedEvidenceFile],
+				    GetPreparedBatchManifest = Readers[GetPreparedBatchManifest],
+				    GetLicenseReportQualification = Readers[GetLicenseReportQualification],
+				    LicenseReportFileUsable = Readers[LicenseReportFileUsable],
+				    GetLicenseReportSnapshot = Readers[GetLicenseReportSnapshot],
+				    GetLicenseReportCsv = Readers[GetLicenseReportCsv],
+				    ReadMigrationCsv = Readers[ReadMigrationCsv],
+				    CreateMailboxMigrationReader = Readers[CreateMailboxMigrationReader],
+				    ReadMailboxMigrationCsv = Readers[ReadMailboxMigrationCsv],
+				    ReadMigrationWeeklyHistory = Readers[ReadMigrationWeeklyHistory],
+				    GetSharePointOnPremCsv = Readers[GetSharePointOnPremCsv],
+				    GetSharePointMigrationEvidence = Readers[GetSharePointMigrationEvidence],
+				    BusinessRows = (let
 				    Snapshot = GetLicenseReportSnapshot(),
 				    HasAssignment = Record.HasFields(Snapshot, "AssignmentIssues"),
 				    Assignment = if HasAssignment and LicenseReportFileUsable("M365_Licenses_ReportAssignmentIssues.csv") then Snapshot[AssignmentIssues] else [Available=false, Rows={}],
@@ -174,5 +197,6 @@ table 'License Report Assignment Issues'
 				    English = Table.ReplaceValue(UtcDate, "N/D", "Unknown", Replacer.ReplaceValue, {"Assigning Groups", "Identity Status"}),
 				    NormalizedUserId = Table.TransformColumns(English, {{"User ID", each Text.Lower(Text.Trim(_)), type text}})
 				in
-				    NormalizedUserId
-
+				    NormalizedUserId)
+				in
+				    Readers[Finish](BusinessRows)

@@ -140,7 +140,32 @@ table 'Native Hybrid Coverage'
 		summarizeBy: none
 		sourceColumn: SourceCollectedDateTime
 
+	/// Actual prepared batch used by this query. Technical provenance only; empty tables have no observable batch.
+	column 'Loaded Batch ID'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 8ab10417-cceb-423f-8b64-3230fba1bd54
+		summarizeBy: none
+		sourceColumn: Loaded Batch ID
+
 	partition 'Native Hybrid Coverage' = m
 		mode: import
-		source = NativeEvidenceTypes(Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("FactHybridIdentityCoverage.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]), {[name="TenantKey", dataType="String"], [name="OrganizationKey", dataType="String"], [name="EnvironmentKey", dataType="String"], [name="TenantId", dataType="String"], [name="EntityType", dataType="String"], [name="OnPremisesCount", dataType="Int64"], [name="CloudCount", dataType="Int64"], [name="MatchedCount", dataType="Int64"], [name="OnPremisesOnlyCount", dataType="Int64"], [name="CloudOnlyCount", dataType="Int64"], [name="DuplicateOnPremisesKeyCount", dataType="Int64"], [name="DuplicateCloudKeyCount", dataType="Int64"], [name="MatchRatio", dataType="Double"], [name="MatchMethod", dataType="String"], [name="SourceCollectedDateTime", dataType="DateTime"]})
-
+		source =
+				let
+				    Readers = CreatePreparedReaders(),
+				    GetPreparedEvidenceFile = Readers[GetPreparedEvidenceFile],
+				    GetPreparedBatchManifest = Readers[GetPreparedBatchManifest],
+				    GetLicenseReportQualification = Readers[GetLicenseReportQualification],
+				    LicenseReportFileUsable = Readers[LicenseReportFileUsable],
+				    GetLicenseReportSnapshot = Readers[GetLicenseReportSnapshot],
+				    GetLicenseReportCsv = Readers[GetLicenseReportCsv],
+				    ReadMigrationCsv = Readers[ReadMigrationCsv],
+				    CreateMailboxMigrationReader = Readers[CreateMailboxMigrationReader],
+				    ReadMailboxMigrationCsv = Readers[ReadMailboxMigrationCsv],
+				    ReadMigrationWeeklyHistory = Readers[ReadMigrationWeeklyHistory],
+				    GetSharePointOnPremCsv = Readers[GetSharePointOnPremCsv],
+				    GetSharePointMigrationEvidence = Readers[GetSharePointMigrationEvidence],
+				    BusinessRows = (NativeEvidenceTypes(Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("FactHybridIdentityCoverage.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]), {[name="TenantKey", dataType="String"], [name="OrganizationKey", dataType="String"], [name="EnvironmentKey", dataType="String"], [name="TenantId", dataType="String"], [name="EntityType", dataType="String"], [name="OnPremisesCount", dataType="Int64"], [name="CloudCount", dataType="Int64"], [name="MatchedCount", dataType="Int64"], [name="OnPremisesOnlyCount", dataType="Int64"], [name="CloudOnlyCount", dataType="Int64"], [name="DuplicateOnPremisesKeyCount", dataType="Int64"], [name="DuplicateCloudKeyCount", dataType="Int64"], [name="MatchRatio", dataType="Double"], [name="MatchMethod", dataType="String"], [name="SourceCollectedDateTime", dataType="DateTime"]}))
+				in
+				    Readers[Finish](BusinessRows)

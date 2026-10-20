@@ -140,14 +140,38 @@ table 'Endpoint Experience Trend Evidence'
 		summarizeBy: none
 		sourceColumn: Evidence Status
 
+	/// Actual prepared batch used by this query. Technical provenance only; empty tables have no observable batch.
+	column 'Loaded Batch ID'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 7f7d3da2-53b2-49cd-bf72-4294127c2823
+		summarizeBy: none
+		sourceColumn: Loaded Batch ID
+
 	partition 'Endpoint Experience Trend Evidence Import' = m
 		mode: import
 		source =
 				let
+				    Readers = CreatePreparedReaders(),
+				    GetPreparedEvidenceFile = Readers[GetPreparedEvidenceFile],
+				    GetPreparedBatchManifest = Readers[GetPreparedBatchManifest],
+				    GetLicenseReportQualification = Readers[GetLicenseReportQualification],
+				    LicenseReportFileUsable = Readers[LicenseReportFileUsable],
+				    GetLicenseReportSnapshot = Readers[GetLicenseReportSnapshot],
+				    GetLicenseReportCsv = Readers[GetLicenseReportCsv],
+				    ReadMigrationCsv = Readers[ReadMigrationCsv],
+				    CreateMailboxMigrationReader = Readers[CreateMailboxMigrationReader],
+				    ReadMailboxMigrationCsv = Readers[ReadMailboxMigrationCsv],
+				    ReadMigrationWeeklyHistory = Readers[ReadMigrationWeeklyHistory],
+				    GetSharePointOnPremCsv = Readers[GetSharePointOnPremCsv],
+				    GetSharePointMigrationEvidence = Readers[GetSharePointMigrationEvidence],
+				    BusinessRows = (let
 				    Raw = Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("EndpointExperienceTrendEvidence.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]),
 				    Selected = Table.SelectColumns(Raw, {"Snapshot Date", "Snapshot Week", "Endpoint Analytics Covered Devices", "Endpoint Analytics Score", "Endpoint Analytics Below 50 Devices", "Startup Covered Devices", "Startup Score", "Startup Below 50 Devices", "App Reliability Covered Devices", "App Reliability Score", "Devices with Stop Errors", "Devices with Boot Time over 60s", "Devices with Sign-in Time over 30s", "Evidence Status"}),
 				    Nulls = Table.ReplaceValue(Selected, "", null, Replacer.ReplaceValue, {"Snapshot Date", "Endpoint Analytics Covered Devices", "Endpoint Analytics Score", "Endpoint Analytics Below 50 Devices", "Startup Covered Devices", "Startup Score", "Startup Below 50 Devices", "App Reliability Covered Devices", "App Reliability Score", "Devices with Stop Errors", "Devices with Boot Time over 60s", "Devices with Sign-in Time over 30s"}),
 				    Typed = Table.TransformColumnTypes(Nulls, {{"Snapshot Date", type datetime}, {"Snapshot Week", type text}, {"Endpoint Analytics Covered Devices", Int64.Type}, {"Endpoint Analytics Score", type number}, {"Endpoint Analytics Below 50 Devices", Int64.Type}, {"Startup Covered Devices", Int64.Type}, {"Startup Score", type number}, {"Startup Below 50 Devices", Int64.Type}, {"App Reliability Covered Devices", Int64.Type}, {"App Reliability Score", type number}, {"Devices with Stop Errors", Int64.Type}, {"Devices with Boot Time over 60s", Int64.Type}, {"Devices with Sign-in Time over 30s", Int64.Type}, {"Evidence Status", type text}}, "en-US")
 				in
-				    Typed
-
+				    Typed)
+				in
+				    Readers[Finish](BusinessRows)

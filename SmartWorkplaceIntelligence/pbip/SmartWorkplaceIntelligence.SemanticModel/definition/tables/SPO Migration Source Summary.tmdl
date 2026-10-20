@@ -128,11 +128,36 @@ table 'SPO Migration Source Summary'
 		lineageTag: 9cb8ab87-566a-4318-9592-e134212dd5b1
 		sourceColumn: Project Identity
 
+	/// Actual prepared batch used by this query. Technical provenance only; empty tables have no observable batch.
+	column 'Loaded Batch ID'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 8a5662a5-4cd7-4e71-928b-ec0316bcb9d9
+		summarizeBy: none
+		sourceColumn: Loaded Batch ID
+
 	partition 'SPO Migration Source Summary' = m
 		mode: import
 		source =
 				let
+				    Readers = CreatePreparedReaders(),
+				    GetPreparedEvidenceFile = Readers[GetPreparedEvidenceFile],
+				    GetPreparedBatchManifest = Readers[GetPreparedBatchManifest],
+				    GetLicenseReportQualification = Readers[GetLicenseReportQualification],
+				    LicenseReportFileUsable = Readers[LicenseReportFileUsable],
+				    GetLicenseReportSnapshot = Readers[GetLicenseReportSnapshot],
+				    GetLicenseReportCsv = Readers[GetLicenseReportCsv],
+				    ReadMigrationCsv = Readers[ReadMigrationCsv],
+				    CreateMailboxMigrationReader = Readers[CreateMailboxMigrationReader],
+				    ReadMailboxMigrationCsv = Readers[ReadMailboxMigrationCsv],
+				    ReadMigrationWeeklyHistory = Readers[ReadMigrationWeeklyHistory],
+				    GetSharePointOnPremCsv = Readers[GetSharePointOnPremCsv],
+				    GetSharePointMigrationEvidence = Readers[GetSharePointMigrationEvidence],
+				    BusinessRows = (let
 				    Source = GetSharePointMigrationEvidence("SharePointMigrationSourceSummary.csv", {{"TenantKey", type text}, {"Project Key", type text}, {"Snapshot ID", type text}, {"Snapshot Date", type date}, {"Source", type text}, {"Source SHA256", type text}, {"Binding SHA256", type text}, {"Captured UTC", type datetime}, {"Age Hours", Currency.Type}, {"Qualification", type text}, {"Coverage State", type text}, {"Run ID", type text}, {"Review Date", type date}, {"Review State", type text}}),
 				    Identity = Table.AddColumn(Source, "Project Identity", each Binary.ToText(Json.FromValue({[TenantKey], [Project Key]}), BinaryEncoding.Base64), type text),
 				    Categories = Table.TransformColumns(Identity, List.Transform(List.Intersect({{"Business Unit", "Phase"}, Table.ColumnNames(Identity)}), (c) => {c, each if _ = null then "(Unspecified)" else _, type text}))
-				in Categories
+				in Categories)
+				in
+				    Readers[Finish](BusinessRows)

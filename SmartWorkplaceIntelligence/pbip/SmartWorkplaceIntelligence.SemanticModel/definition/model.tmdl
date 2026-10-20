@@ -186,5 +186,6 @@ ref table 'SPO Migration Phase'
 ref table 'SPO Migration Project'
 ref table 'SPO Migration Operation'
 ref table 'SPO Migration Snapshot Date'
+ref table 'Loaded Batch Audit'
 
 ref cultureInfo en-US

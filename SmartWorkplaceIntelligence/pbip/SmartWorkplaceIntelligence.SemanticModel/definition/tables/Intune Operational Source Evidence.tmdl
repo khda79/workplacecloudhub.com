@@ -131,10 +131,33 @@ table 'Intune Operational Source Evidence'
 		summarizeBy: none
 		sourceColumn: Qualification
 
+	/// Actual prepared batch used by this query. Technical provenance only; empty tables have no observable batch.
+	column 'Loaded Batch ID'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: ae76796d-cff5-40a3-847a-c24b10f14d6f
+		summarizeBy: none
+		sourceColumn: Loaded Batch ID
+
 	partition 'Intune Operational Source Evidence' = m
 		mode: import
 		source =
 				let
+				    Readers = CreatePreparedReaders(),
+				    GetPreparedEvidenceFile = Readers[GetPreparedEvidenceFile],
+				    GetPreparedBatchManifest = Readers[GetPreparedBatchManifest],
+				    GetLicenseReportQualification = Readers[GetLicenseReportQualification],
+				    LicenseReportFileUsable = Readers[LicenseReportFileUsable],
+				    GetLicenseReportSnapshot = Readers[GetLicenseReportSnapshot],
+				    GetLicenseReportCsv = Readers[GetLicenseReportCsv],
+				    ReadMigrationCsv = Readers[ReadMigrationCsv],
+				    CreateMailboxMigrationReader = Readers[CreateMailboxMigrationReader],
+				    ReadMailboxMigrationCsv = Readers[ReadMailboxMigrationCsv],
+				    ReadMigrationWeeklyHistory = Readers[ReadMigrationWeeklyHistory],
+				    GetSharePointOnPremCsv = Readers[GetSharePointOnPremCsv],
+				    GetSharePointMigrationEvidence = Readers[GetSharePointMigrationEvidence],
+				    BusinessRows = (let
 				    Raw = ReadMigrationCsv(GetPreparedEvidenceFile("IntuneOperationalSourceEvidence.csv"), {"TenantKey", "EvidenceKey", "SourceGroup", "Availability", "Producer", "ScriptVersion", "ReceiptRunId", "BusinessRunId", "ReceiptSHA256", "CompletedUTC", "ScopeQualification", "FullInventoryQualified", "ConsumerScopeQualified", "FileCount", "RowCount", "Qualification"}),
 				    Selected = Table.SelectColumns(Raw, {"TenantKey", "EvidenceKey", "SourceGroup", "Availability", "Producer", "ScriptVersion", "ReceiptRunId", "BusinessRunId", "ReceiptSHA256", "CompletedUTC", "ScopeQualification", "FullInventoryQualified", "ConsumerScopeQualified", "FileCount", "RowCount", "Qualification"}),
 				    Tenants = List.Distinct(Selected[TenantKey]),
@@ -143,5 +166,6 @@ table 'Intune Operational Source Evidence'
 				    Key = (values as list) as nullable text => if List.AnyTrue(List.Transform(values, each _ = null or Text.Trim(Text.From(_)) = "")) then null else Text.Combine(List.Transform(values, each Text.From(Text.Length(Text.From(_))) & ":" & Text.From(_)), "|"),
 				    Typed = Table.TransformColumns(Validated, {{"TenantKey", each _, type nullable text}, {"EvidenceKey", each _, type nullable text}, {"SourceGroup", each _, type nullable text}, {"Availability", each _, type nullable text}, {"Producer", each _, type nullable text}, {"ScriptVersion", each _, type nullable text}, {"ReceiptRunId", each _, type nullable text}, {"BusinessRunId", each _, type nullable text}, {"ReceiptSHA256", each _, type nullable text}, {"CompletedUTC", ParseUtc, type nullable datetime}, {"ScopeQualification", each _, type nullable text}, {"FullInventoryQualified", each _, type nullable text}, {"ConsumerScopeQualified", each _, type nullable text}, {"FileCount", each if _ = null or Text.Trim(_) = "" then null else Int64.From(Number.FromText(_, "en-US")), type nullable number}, {"RowCount", each if _ = null or Text.Trim(_) = "" then null else Int64.From(Number.FromText(_, "en-US")), type nullable number}, {"Qualification", each _, type nullable text}})
 				in
-				    Typed
-
+				    Typed)
+				in
+				    Readers[Finish](BusinessRows)

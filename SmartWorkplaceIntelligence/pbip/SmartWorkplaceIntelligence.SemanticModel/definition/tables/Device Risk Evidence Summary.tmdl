@@ -50,14 +50,38 @@ table 'Device Risk Evidence Summary'
 		summarizeBy: sum
 		sourceColumn: Source Findings
 
+	/// Actual prepared batch used by this query. Technical provenance only; empty tables have no observable batch.
+	column 'Loaded Batch ID'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: f2d94e28-bdba-48dc-854d-a89a6aa66980
+		summarizeBy: none
+		sourceColumn: Loaded Batch ID
+
 	partition 'Device Risk Evidence Summary Import' = m
 		mode: import
 		source =
 				let
+				    Readers = CreatePreparedReaders(),
+				    GetPreparedEvidenceFile = Readers[GetPreparedEvidenceFile],
+				    GetPreparedBatchManifest = Readers[GetPreparedBatchManifest],
+				    GetLicenseReportQualification = Readers[GetLicenseReportQualification],
+				    LicenseReportFileUsable = Readers[LicenseReportFileUsable],
+				    GetLicenseReportSnapshot = Readers[GetLicenseReportSnapshot],
+				    GetLicenseReportCsv = Readers[GetLicenseReportCsv],
+				    ReadMigrationCsv = Readers[ReadMigrationCsv],
+				    CreateMailboxMigrationReader = Readers[CreateMailboxMigrationReader],
+				    ReadMailboxMigrationCsv = Readers[ReadMailboxMigrationCsv],
+				    ReadMigrationWeeklyHistory = Readers[ReadMigrationWeeklyHistory],
+				    GetSharePointOnPremCsv = Readers[GetSharePointOnPremCsv],
+				    GetSharePointMigrationEvidence = Readers[GetSharePointMigrationEvidence],
+				    BusinessRows = (let
 				    Raw = Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("DeviceRiskEvidenceSummary.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]),
 				    Selected = Table.SelectColumns(Raw, {"Signal Sort", "Signal", "Affected Devices", "Covered Devices", "Managed Devices Affected", "Managed Devices Covered", "Source Findings"}),
 				    Nulls = Table.ReplaceValue(Selected, "", null, Replacer.ReplaceValue, {"Signal Sort", "Affected Devices", "Covered Devices", "Managed Devices Affected", "Managed Devices Covered", "Source Findings"}),
 				    Typed = Table.TransformColumnTypes(Nulls, {{"Signal Sort", Int64.Type}, {"Signal", type text}, {"Affected Devices", Int64.Type}, {"Covered Devices", Int64.Type}, {"Managed Devices Affected", Int64.Type}, {"Managed Devices Covered", Int64.Type}, {"Source Findings", Int64.Type}}, "en-US")
 				in
-				    Typed
-
+				    Typed)
+				in
+				    Readers[Finish](BusinessRows)

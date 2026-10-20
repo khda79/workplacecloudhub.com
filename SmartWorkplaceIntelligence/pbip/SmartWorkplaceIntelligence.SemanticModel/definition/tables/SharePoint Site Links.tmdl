@@ -124,11 +124,35 @@ table 'SharePoint Site Links'
 		summarizeBy: none
 		sourceColumn: Link Coverage Qualified
 
+	/// Actual prepared batch used by this query. Technical provenance only; empty tables have no observable batch.
+	column 'Loaded Batch ID'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: d99c47af-e61a-4e1a-b2fc-ce85e9ea3784
+		summarizeBy: none
+		sourceColumn: Loaded Batch ID
+
 	partition 'SharePoint Site Links' = m
 		mode: import
 		source =
 				let
+				    Readers = CreatePreparedReaders(),
+				    GetPreparedEvidenceFile = Readers[GetPreparedEvidenceFile],
+				    GetPreparedBatchManifest = Readers[GetPreparedBatchManifest],
+				    GetLicenseReportQualification = Readers[GetLicenseReportQualification],
+				    LicenseReportFileUsable = Readers[LicenseReportFileUsable],
+				    GetLicenseReportSnapshot = Readers[GetLicenseReportSnapshot],
+				    GetLicenseReportCsv = Readers[GetLicenseReportCsv],
+				    ReadMigrationCsv = Readers[ReadMigrationCsv],
+				    CreateMailboxMigrationReader = Readers[CreateMailboxMigrationReader],
+				    ReadMailboxMigrationCsv = Readers[ReadMailboxMigrationCsv],
+				    ReadMigrationWeeklyHistory = Readers[ReadMigrationWeeklyHistory],
+				    GetSharePointOnPremCsv = Readers[GetSharePointOnPremCsv],
+				    GetSharePointMigrationEvidence = Readers[GetSharePointMigrationEvidence],
+				    BusinessRows = (let
 				 Source = Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("SharePointSiteLinkEvidence.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]),
 				 Typed = NativeEvidenceTypes(Source, {[name="TenantKey", dataType="String"], [name="Site ID", dataType="String"], [name="Site", dataType="String"], [name="Site URL", dataType="String"], [name="Teams Link State", dataType="String"], [name="Link Count", dataType="Int64"], [name="Storage Used GB", dataType="Double"], [name="Collection Scope", dataType="String"], [name="Usage Report Date", dataType="DateOnly"], [name="Collected UTC", dataType="DateTime"], [name="Link Coverage Qualified", dataType="Boolean"]})
-				in Typed
-
+				in Typed)
+				in
+				    Readers[Finish](BusinessRows)

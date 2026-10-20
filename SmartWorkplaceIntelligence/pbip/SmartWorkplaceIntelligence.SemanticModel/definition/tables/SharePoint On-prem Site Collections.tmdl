@@ -255,10 +255,33 @@ table 'SharePoint On-prem Site Collections'
 		lineageTag: 3085d223-c973-41c9-892d-70615cb41983
 		sourceColumn: Secondary Owner Display
 
+	/// Actual prepared batch used by this query. Technical provenance only; empty tables have no observable batch.
+	column 'Loaded Batch ID'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 4a731f21-172f-4bfe-8b77-e1eb26c42522
+		summarizeBy: none
+		sourceColumn: Loaded Batch ID
+
 	partition 'SharePoint On-prem Site Collections' = m
 		mode: import
 		source =
 				let
+				    Readers = CreatePreparedReaders(),
+				    GetPreparedEvidenceFile = Readers[GetPreparedEvidenceFile],
+				    GetPreparedBatchManifest = Readers[GetPreparedBatchManifest],
+				    GetLicenseReportQualification = Readers[GetLicenseReportQualification],
+				    LicenseReportFileUsable = Readers[LicenseReportFileUsable],
+				    GetLicenseReportSnapshot = Readers[GetLicenseReportSnapshot],
+				    GetLicenseReportCsv = Readers[GetLicenseReportCsv],
+				    ReadMigrationCsv = Readers[ReadMigrationCsv],
+				    CreateMailboxMigrationReader = Readers[CreateMailboxMigrationReader],
+				    ReadMailboxMigrationCsv = Readers[ReadMailboxMigrationCsv],
+				    ReadMigrationWeeklyHistory = Readers[ReadMigrationWeeklyHistory],
+				    GetSharePointOnPremCsv = Readers[GetSharePointOnPremCsv],
+				    GetSharePointMigrationEvidence = Readers[GetSharePointMigrationEvidence],
+				    BusinessRows = (let
 				    Raw = GetSharePointOnPremCsv("SharePoint_OnPrem_SiteCollections.csv", {"TenantKey", "FarmId", "RunId", "WebApplicationId", "ContentDatabaseId", "SiteCollectionId", "Url", "StorageBytes", "QuotaLimitBytes", "LockState", "LockStatus", "CollectionStatus"}, {"QuotaUsagePercent", "QuotaUsageStatus", "SiteCategory", "SiteCategoryStatus", "CollectedAtUtc", "OwnerLogin", "SecondaryOwnerLogin", "LastContentModifiedUtc", "LockIssue"}),
 				    Nulls = Table.ReplaceValue(Raw, "", null, Replacer.ReplaceValue, {"StorageBytes", "QuotaLimitBytes", "QuotaUsagePercent", "CollectedAtUtc", "LastContentModifiedUtc"}),
 				    Typed = Table.TransformColumnTypes(Nulls, {{"StorageBytes", Int64.Type}, {"QuotaLimitBytes", Int64.Type}, {"QuotaUsagePercent", type number}, {"CollectedAtUtc", type datetime}, {"LastContentModifiedUtc", type datetime}}, "en-US"),
@@ -274,5 +297,6 @@ table 'SharePoint On-prem Site Collections'
 				    PrimaryDisplay = Table.AddColumn(CategoryDisplay, "Primary Owner Display", each let v = try Text.Trim(Text.From([Primary Owner])) otherwise "" in if v = null or v = "" then "(not reported)" else List.Last(Text.Split(v, "|")), type text),
 				    SecondaryDisplay = Table.AddColumn(PrimaryDisplay, "Secondary Owner Display", each let v = try Text.Trim(Text.From([Secondary Owner])) otherwise "" in if v = null or v = "" then "(none)" else List.Last(Text.Split(v, "|")), type text)
 				in
-				    SecondaryDisplay
-
+				    SecondaryDisplay)
+				in
+				    Readers[Finish](BusinessRows)

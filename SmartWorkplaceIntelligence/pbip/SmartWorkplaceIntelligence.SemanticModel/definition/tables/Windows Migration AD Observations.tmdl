@@ -62,16 +62,40 @@ table 'Windows Migration AD Observations'
 		lineageTag: cb6cd9c2-c0ba-408f-8cfe-5fe350a475fe
 		sourceColumn: Next Action
 
+	/// Actual prepared batch used by this query. Technical provenance only; empty tables have no observable batch.
+	column 'Loaded Batch ID'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: bb7a04a6-eda1-409a-854b-e20557d77cef
+		summarizeBy: none
+		sourceColumn: Loaded Batch ID
+
 	/// Rebuilt from tenant-qualified local source snapshots by the prepared evidence pipeline. Versioned batch reader; missing/incomplete outputs fail, never fall back to frozen recovery JSON. No live collection; AD absence is not proof of non-enrollment.
 	partition 'Windows AD Unlinked Evidence Rebuilt' = m
 		mode: import
 		source =
 				let
+				    Readers = CreatePreparedReaders(),
+				    GetPreparedEvidenceFile = Readers[GetPreparedEvidenceFile],
+				    GetPreparedBatchManifest = Readers[GetPreparedBatchManifest],
+				    GetLicenseReportQualification = Readers[GetLicenseReportQualification],
+				    LicenseReportFileUsable = Readers[LicenseReportFileUsable],
+				    GetLicenseReportSnapshot = Readers[GetLicenseReportSnapshot],
+				    GetLicenseReportCsv = Readers[GetLicenseReportCsv],
+				    ReadMigrationCsv = Readers[ReadMigrationCsv],
+				    CreateMailboxMigrationReader = Readers[CreateMailboxMigrationReader],
+				    ReadMailboxMigrationCsv = Readers[ReadMailboxMigrationCsv],
+				    ReadMigrationWeeklyHistory = Readers[ReadMigrationWeeklyHistory],
+				    GetSharePointOnPremCsv = Readers[GetSharePointOnPremCsv],
+				    GetSharePointMigrationEvidence = Readers[GetSharePointMigrationEvidence],
+				    BusinessRows = (let
 				    Source = Csv.Document(GetPreparedEvidenceFile("WindowsMigrationADObservations.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]),
 				    Headers = Table.PromoteHeaders(Source, [PromoteAllScalars=true]),
 				    Required = Table.SelectColumns(Headers, {"AD Object GUID","Device Name","Source Domain","OS Version","Intune Evidence","Autopatch Evidence","Country","Qualification","Next Action"}),
 				    Nulls = Required,
 				    Typed = Table.TransformColumnTypes(Nulls, {{"AD Object GUID", type text},{"Device Name", type text},{"Source Domain", type text},{"OS Version", type text},{"Intune Evidence", type text},{"Autopatch Evidence", type text},{"Country", type text},{"Qualification", type text},{"Next Action", type text}}, "en-US")
 				in
-				    Typed
-
+				    Typed)
+				in
+				    Readers[Finish](BusinessRows)

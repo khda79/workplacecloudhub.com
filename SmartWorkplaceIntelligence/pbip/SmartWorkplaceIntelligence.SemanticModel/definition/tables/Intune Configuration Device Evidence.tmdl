@@ -228,10 +228,33 @@ table 'Intune Configuration Device Evidence'
 		summarizeBy: none
 		sourceColumn: Device Key
 
+	/// Actual prepared batch used by this query. Technical provenance only; empty tables have no observable batch.
+	column 'Loaded Batch ID'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 76d94818-72a1-45b2-b302-06a219c69fb1
+		summarizeBy: none
+		sourceColumn: Loaded Batch ID
+
 	partition 'Intune Configuration Device Evidence' = m
 		mode: import
 		source =
 				let
+				    Readers = CreatePreparedReaders(),
+				    GetPreparedEvidenceFile = Readers[GetPreparedEvidenceFile],
+				    GetPreparedBatchManifest = Readers[GetPreparedBatchManifest],
+				    GetLicenseReportQualification = Readers[GetLicenseReportQualification],
+				    LicenseReportFileUsable = Readers[LicenseReportFileUsable],
+				    GetLicenseReportSnapshot = Readers[GetLicenseReportSnapshot],
+				    GetLicenseReportCsv = Readers[GetLicenseReportCsv],
+				    ReadMigrationCsv = Readers[ReadMigrationCsv],
+				    CreateMailboxMigrationReader = Readers[CreateMailboxMigrationReader],
+				    ReadMailboxMigrationCsv = Readers[ReadMailboxMigrationCsv],
+				    ReadMigrationWeeklyHistory = Readers[ReadMigrationWeeklyHistory],
+				    GetSharePointOnPremCsv = Readers[GetSharePointOnPremCsv],
+				    GetSharePointMigrationEvidence = Readers[GetSharePointMigrationEvidence],
+				    BusinessRows = (let
 				    Raw = ReadMigrationCsv(GetPreparedEvidenceFile("IntuneConfigurationDeviceEvidence.csv"), {"TenantKey", "EvidenceKey", "ReceiptRunId", "BusinessRunId", "SourceFile", "SourceSHA256", "SourceRecord", "CollectionUTC", "PolicyId", "IntuneDeviceId", "UPN", "PolicyName", "DeviceName", "PolicyInCollectedCatalog", "PolicyStatus", "ReportedApplicationState", "ReportStatus", "LastModifiedTimeUtc", "SourceStatusUTC", "SourceStatusTimeBasis", "CatalogMatch", "InventoryMatch", "HealthQualification"}),
 				    Selected = Table.SelectColumns(Raw, {"TenantKey", "EvidenceKey", "ReceiptRunId", "BusinessRunId", "SourceFile", "SourceSHA256", "SourceRecord", "CollectionUTC", "PolicyId", "IntuneDeviceId", "UPN", "PolicyName", "DeviceName", "PolicyInCollectedCatalog", "PolicyStatus", "ReportedApplicationState", "ReportStatus", "LastModifiedTimeUtc", "SourceStatusUTC", "SourceStatusTimeBasis", "CatalogMatch", "InventoryMatch", "HealthQualification"}),
 				    Tenants = List.Distinct(Selected[TenantKey]),
@@ -242,5 +265,6 @@ table 'Intune Configuration Device Evidence'
 				    WithPolicyKey = Table.AddColumn(Typed, "Policy Key", each Key({[TenantKey], [PolicyId]}), type nullable text),
 				    WithDeviceKey = Table.AddColumn(WithPolicyKey, "Device Key", each Key({[TenantKey], [IntuneDeviceId]}), type nullable text)
 				in
-				    WithDeviceKey
-
+				    WithDeviceKey)
+				in
+				    Readers[Finish](BusinessRows)

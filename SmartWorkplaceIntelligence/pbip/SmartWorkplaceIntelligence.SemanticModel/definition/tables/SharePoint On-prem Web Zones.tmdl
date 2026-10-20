@@ -74,14 +74,38 @@ table 'SharePoint On-prem Web Zones'
 		lineageTag: b44280e9-fc5e-45dc-ac14-3747f25bf714
 		sourceColumn: Public URL
 
+	/// Actual prepared batch used by this query. Technical provenance only; empty tables have no observable batch.
+	column 'Loaded Batch ID'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 4d79a408-b096-4687-88ea-7b0ed9847807
+		summarizeBy: none
+		sourceColumn: Loaded Batch ID
+
 	partition 'SharePoint On-prem Web Zones' = m
 		mode: import
 		source =
 				let
+				    Readers = CreatePreparedReaders(),
+				    GetPreparedEvidenceFile = Readers[GetPreparedEvidenceFile],
+				    GetPreparedBatchManifest = Readers[GetPreparedBatchManifest],
+				    GetLicenseReportQualification = Readers[GetLicenseReportQualification],
+				    LicenseReportFileUsable = Readers[LicenseReportFileUsable],
+				    GetLicenseReportSnapshot = Readers[GetLicenseReportSnapshot],
+				    GetLicenseReportCsv = Readers[GetLicenseReportCsv],
+				    ReadMigrationCsv = Readers[ReadMigrationCsv],
+				    CreateMailboxMigrationReader = Readers[CreateMailboxMigrationReader],
+				    ReadMailboxMigrationCsv = Readers[ReadMailboxMigrationCsv],
+				    ReadMigrationWeeklyHistory = Readers[ReadMigrationWeeklyHistory],
+				    GetSharePointOnPremCsv = Readers[GetSharePointOnPremCsv],
+				    GetSharePointMigrationEvidence = Readers[GetSharePointMigrationEvidence],
+				    BusinessRows = (let
 				    Raw = GetSharePointOnPremCsv("SharePoint_OnPrem_WebApplicationZones.csv", {"TenantKey", "FarmId", "RunId", "WebApplicationId", "Zone", "PublicUrl", "AuthenticationMode", "ClaimsAuthentication", "AuthenticationProviders", "CollectionStatus"}, {}),
 				    FarmKey = Table.AddColumn(Raw, "Farm Key", each [TenantKey] & "|" & [FarmId], type text),
 				    WebKey = Table.AddColumn(FarmKey, "Web Application Key", each [TenantKey] & "|" & [FarmId] & "|" & [WebApplicationId], type text),
 				    Renamed = Table.RenameColumns(WebKey, {{"TenantKey", "Tenant Key"}, {"FarmId", "Farm ID"}, {"RunId", "Run ID"}, {"WebApplicationId", "Web Application ID"}, {"Zone", "Zone"}, {"PublicUrl", "Public URL"}, {"AuthenticationMode", "Authentication Mode"}, {"ClaimsAuthentication", "Claims Authentication"}, {"AuthenticationProviders", "Authentication Providers"}, {"CollectionStatus", "Collection Status"}})
 				in
-				    Renamed
-
+				    Renamed)
+				in
+				    Readers[Finish](BusinessRows)

@@ -37,11 +37,11 @@ table 'License SKU Capacity'
 		lineageTag: 40ed817b-69c0-494c-aa75-5a7c42124b1d
 
 	/// Consumed units above enabled units, summed over over-assigned governed SKUs (absolute value).
-	measure 'Over-assigned License Units' =
-			SUMX ( FILTER ( 'License SKU Capacity', 'License SKU Capacity'[Capacity Class] = "Governed" ), MAX ( -'License SKU Capacity'[Available Units], 0 ) )
+	measure 'Over-assigned License Units' = SUMX ( FILTER ( 'License SKU Capacity', 'License SKU Capacity'[Capacity Class] = "Governed" ), MAX ( -'License SKU Capacity'[Available Units], 0 ) )
 		formatString: #,0
 		displayFolder: Licensing | Capacity
 		lineageTag: 454a69ff-640a-4ecc-a412-f6f52f530a0c
+
 	/// Available units of governed SKUs, or Over-assigned when the selection only has over-assigned capacity; the absolute value is in the tooltip.
 	measure 'Available License Units Label' =
 			VAR _available = [Available License Units]
@@ -400,10 +400,33 @@ table 'License SKU Capacity'
 
 		annotation SummarizationSetBy = Automatic
 
+	/// Actual prepared batch used by this query. Technical provenance only; empty tables have no observable batch.
+	column 'Loaded Batch ID'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: cbf39599-f841-42be-b539-393b1e77b3f6
+		summarizeBy: none
+		sourceColumn: Loaded Batch ID
+
 	partition 'License SKU Capacity' = m
 		mode: import
 		source =
 				let
+				    Readers = CreatePreparedReaders(),
+				    GetPreparedEvidenceFile = Readers[GetPreparedEvidenceFile],
+				    GetPreparedBatchManifest = Readers[GetPreparedBatchManifest],
+				    GetLicenseReportQualification = Readers[GetLicenseReportQualification],
+				    LicenseReportFileUsable = Readers[LicenseReportFileUsable],
+				    GetLicenseReportSnapshot = Readers[GetLicenseReportSnapshot],
+				    GetLicenseReportCsv = Readers[GetLicenseReportCsv],
+				    ReadMigrationCsv = Readers[ReadMigrationCsv],
+				    CreateMailboxMigrationReader = Readers[CreateMailboxMigrationReader],
+				    ReadMailboxMigrationCsv = Readers[ReadMailboxMigrationCsv],
+				    ReadMigrationWeeklyHistory = Readers[ReadMigrationWeeklyHistory],
+				    GetSharePointOnPremCsv = Readers[GetSharePointOnPremCsv],
+				    GetSharePointMigrationEvidence = Readers[GetSharePointMigrationEvidence],
+				    BusinessRows = (let
 				    Columns = {"SnapshotId", "TenantKey", "ReceiptRunId", "SkuId", "SkuPartNumber", "SkuDisplayName", "ReportProduct", "Excluded", "ExclusionReason", "EnabledUnits", "WarningUnits", "SuspendedUnits", "LockedOutUnits", "ConsumedUnits", "AvailableUnits", "AssignedUsers", "DisabledAccountUsers", "ActiveUsersUsageNotMeasured", "RecommendedCandidates", "ReviewCandidates", "BlockedCandidates", "ReferencedCandidates", "CopilotGraceUsers", "UsageEvidence", "UsageEvidenceReason"},
 				    Raw = GetLicenseReportCsv("M365_Licenses_ReportSkuCapacity.csv", Columns),
 				    Nulls = Table.ReplaceValue(Raw, "", null, Replacer.ReplaceValue, {"EnabledUnits", "WarningUnits", "SuspendedUnits", "LockedOutUnits", "ConsumedUnits", "AvailableUnits", "AssignedUsers", "DisabledAccountUsers", "ActiveUsersUsageNotMeasured", "RecommendedCandidates", "ReviewCandidates", "BlockedCandidates", "ReferencedCandidates", "CopilotGraceUsers", "ReportProduct", "ExclusionReason"}),
@@ -411,6 +434,8 @@ table 'License SKU Capacity'
 				    Class = Table.AddColumn(Product, "Capacity Class", each if [Excluded] = "True" then "Excluded" else "Governed", type text),
 				    Typed = Table.TransformColumnTypes(Class, {{"Excluded", type logical}} & List.Transform({"EnabledUnits", "WarningUnits", "SuspendedUnits", "LockedOutUnits", "ConsumedUnits", "AvailableUnits", "AssignedUsers", "DisabledAccountUsers", "ActiveUsersUsageNotMeasured", "RecommendedCandidates", "ReviewCandidates", "BlockedCandidates", "ReferencedCandidates", "CopilotGraceUsers"}, each {_, Int64.Type}), "en-US")
 				in
-				    Typed
+				    Typed)
+				in
+				    Readers[Finish](BusinessRows)
 
 	annotation PBI_ResultType = Table

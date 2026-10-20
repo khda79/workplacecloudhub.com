@@ -55,6 +55,24 @@ table 'Report Metadata'
 		displayFolder: Report footer
 		lineageTag: 6419c96c-92ed-4a44-8656-500affbf531b
 
+	/// Unfiltered table-vote majority (ties use the smallest ID); empty tables explicitly unobservable.
+	measure 'Loaded Batch Banner' =
+			VAR _all = ALL('Loaded Batch Audit')
+			VAR _known = FILTER(_all, [Loaded Rows] > 0 && NOT ISBLANK([Loaded Batch ID]))
+			VAR _ids = DISTINCT(SELECTCOLUMNS(_known, "Id", [Loaded Batch ID]))
+			VAR _votes = ADDCOLUMNS(_ids, "Tables", VAR _id = [Id] RETURN COUNTROWS(FILTER(_known, [Loaded Batch ID] = _id)))
+			VAR _winner = TOPN(1, _votes, [Tables], DESC, [Id], ASC)
+			VAR _majority = CONCATENATEX(_winner, [Id], "")
+			VAR _other = COUNTROWS(FILTER(_known, [Loaded Batch ID] <> _majority))
+			VAR _empty = COUNTROWS(FILTER(_all, [Loaded Rows] = 0 || ISBLANK([Loaded Rows])))
+			VAR _missing = COUNTROWS(FILTER(_all, [Loaded Rows] > 0 && ISBLANK([Loaded Batch ID])))
+			RETURN
+			IF(COUNTROWS(_ids) > 1, "Mixed batches | Majority: " & _majority & " | Other tables: " & FORMAT(_other,"0"),
+			   IF(COUNTROWS(_ids) = 1, "Loaded batch: " & _majority, "Loaded batch: Not observed"))
+			& " | Empty tables (batch unobservable): " & FORMAT(_empty,"0")
+			& IF(_missing > 0, " | Missing provenance: " & FORMAT(_missing,"0"), "")
+		lineageTag: da192672-ca2e-42ed-aec6-10f2888f8c89
+
 	/// Business attribute Product Version.
 	column 'Product Version'
 		dataType: string
@@ -82,4 +100,3 @@ table 'Report Metadata'
 				    })
 				in
 				    Source
-

@@ -218,7 +218,32 @@ table 'Native User Device Link'
 		summarizeBy: none
 		sourceColumn: DeviceSyncStatus
 
+	/// Actual prepared batch used by this query. Technical provenance only; empty tables have no observable batch.
+	column 'Loaded Batch ID'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: fe455a05-6bb4-42bc-a640-159aa8d92c40
+		summarizeBy: none
+		sourceColumn: Loaded Batch ID
+
 	partition 'Native User Device Link' = m
 		mode: import
-		source = NativeEvidenceTypes(Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("FactUserDeviceRelationship.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]), {[name="TenantKey", dataType="String"], [name="OrganizationKey", dataType="String"], [name="EnvironmentKey", dataType="String"], [name="TenantId", dataType="String"], [name="TenantRelationshipKey", dataType="String"], [name="TenantUserKey", dataType="String"], [name="TenantDeviceKey", dataType="String"], [name="CmdbRelationshipId", dataType="String"], [name="CmdbUserId", dataType="String"], [name="CmdbDeviceId", dataType="String"], [name="RelationshipType", dataType="String"], [name="ConfidenceScore", dataType="Double"], [name="SourceSystem", dataType="String"], [name="Account", dataType="String"], [name="Device", dataType="String"], [name="DeviceSelection", dataType="String"], [name="DeviceCompliance", dataType="String"], [name="DeviceSyncStatus", dataType="String"]})
-
+		source =
+				let
+				    Readers = CreatePreparedReaders(),
+				    GetPreparedEvidenceFile = Readers[GetPreparedEvidenceFile],
+				    GetPreparedBatchManifest = Readers[GetPreparedBatchManifest],
+				    GetLicenseReportQualification = Readers[GetLicenseReportQualification],
+				    LicenseReportFileUsable = Readers[LicenseReportFileUsable],
+				    GetLicenseReportSnapshot = Readers[GetLicenseReportSnapshot],
+				    GetLicenseReportCsv = Readers[GetLicenseReportCsv],
+				    ReadMigrationCsv = Readers[ReadMigrationCsv],
+				    CreateMailboxMigrationReader = Readers[CreateMailboxMigrationReader],
+				    ReadMailboxMigrationCsv = Readers[ReadMailboxMigrationCsv],
+				    ReadMigrationWeeklyHistory = Readers[ReadMigrationWeeklyHistory],
+				    GetSharePointOnPremCsv = Readers[GetSharePointOnPremCsv],
+				    GetSharePointMigrationEvidence = Readers[GetSharePointMigrationEvidence],
+				    BusinessRows = (NativeEvidenceTypes(Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("FactUserDeviceRelationship.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]), {[name="TenantKey", dataType="String"], [name="OrganizationKey", dataType="String"], [name="EnvironmentKey", dataType="String"], [name="TenantId", dataType="String"], [name="TenantRelationshipKey", dataType="String"], [name="TenantUserKey", dataType="String"], [name="TenantDeviceKey", dataType="String"], [name="CmdbRelationshipId", dataType="String"], [name="CmdbUserId", dataType="String"], [name="CmdbDeviceId", dataType="String"], [name="RelationshipType", dataType="String"], [name="ConfidenceScore", dataType="Double"], [name="SourceSystem", dataType="String"], [name="Account", dataType="String"], [name="Device", dataType="String"], [name="DeviceSelection", dataType="String"], [name="DeviceCompliance", dataType="String"], [name="DeviceSyncStatus", dataType="String"]}))
+				in
+				    Readers[Finish](BusinessRows)

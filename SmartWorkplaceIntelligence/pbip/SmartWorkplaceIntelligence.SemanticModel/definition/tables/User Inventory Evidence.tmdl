@@ -744,10 +744,33 @@ table 'User Inventory Evidence'
 		summarizeBy: none
 		sourceColumn: Console Activity Match Method
 
+	/// Actual prepared batch used by this query. Technical provenance only; empty tables have no observable batch.
+	column 'Loaded Batch ID'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 615e96c9-0a57-4479-a2be-488bb31b4dfd
+		summarizeBy: none
+		sourceColumn: Loaded Batch ID
+
 	partition 'User Inventory Evidence Import' = m
 		mode: import
 		source =
 				let
+				    Readers = CreatePreparedReaders(),
+				    GetPreparedEvidenceFile = Readers[GetPreparedEvidenceFile],
+				    GetPreparedBatchManifest = Readers[GetPreparedBatchManifest],
+				    GetLicenseReportQualification = Readers[GetLicenseReportQualification],
+				    LicenseReportFileUsable = Readers[LicenseReportFileUsable],
+				    GetLicenseReportSnapshot = Readers[GetLicenseReportSnapshot],
+				    GetLicenseReportCsv = Readers[GetLicenseReportCsv],
+				    ReadMigrationCsv = Readers[ReadMigrationCsv],
+				    CreateMailboxMigrationReader = Readers[CreateMailboxMigrationReader],
+				    ReadMailboxMigrationCsv = Readers[ReadMailboxMigrationCsv],
+				    ReadMigrationWeeklyHistory = Readers[ReadMigrationWeeklyHistory],
+				    GetSharePointOnPremCsv = Readers[GetSharePointOnPremCsv],
+				    GetSharePointMigrationEvidence = Readers[GetSharePointMigrationEvidence],
+				    BusinessRows = (let
 				    Raw = Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("UserInventoryEvidence.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]),
 				    OptionalNames = {"Console Last Activity UTC", "Console Activity Evidence State", "Console Activity Device Count", "Console Activity Match Method"},
 				    Compatible = List.Accumulate(OptionalNames, Raw, (t, n) => if Table.HasColumns(t, n) then t else Table.AddColumn(t, n, each if n = "Console Activity Evidence State" then "Not supplied" else if n = "Console Activity Match Method" then "None" else null, type nullable text)),
@@ -756,5 +779,6 @@ table 'User Inventory Evidence'
 				    ConsoleTimes = Table.TransformColumns(Nulls, {{"Console Last Activity UTC", each if _ = null then null else if not Text.EndsWith(_, "Z") then error "Prepared console activity timestamp requires an explicit UTC Z suffix" else DateTimeZone.RemoveZone(DateTimeZone.SwitchZone(DateTimeZone.FromText(_, [Culture="en-US"]), 0)), type nullable datetime}}),
 				    Typed = Table.TransformColumnTypes(ConsoleTimes, {{"User Source ID", type text}, {"User Principal Name", type text}, {"Display Name", type text}, {"Country", type text}, {"Department", type text}, {"Department Evidence State", type text}, {"Manager", type text}, {"Manager Evidence State", type text}, {"Account State", type text}, {"User Type", type text}, {"Workforce Status", type text}, {"Activity State", type text}, {"Activity Evidence Status", type text}, {"Days Since Last Activity", Int64.Type}, {"Last Activity Date", type datetime}, {"Last Activity Workload", type text}, {"Identity Match Status", type text}, {"Identity Match Method", type text}, {"M365 License Count", Int64.Type}, {"Has M365 License", type text}, {"Duplicate UPN State", type text}, {"Attention Priority", type text}, {"Evidence Date", type datetime}, {"Account Type", type text}, {"Account Population", type text}, {"Account Classification Rule Version", type text}, {"Job Title", type text}, {"Job Title Evidence State", type text}, {"AD Last Activity Date", type datetime}, {"M365 Last Activity Date", type datetime}, {"Activity Source", type text}, {"Workforce Persona", type text}, {"Persona Match State", type text}, {"Persona Matched Keywords", type text}, {"MFA Registration State", type text}, {"Has Microsoft 365 F3", type text}, {"Has Microsoft 365 E3", type text}, {"Has Microsoft 365 E5", type text}, {"Exchange Usage State (30D)", type text}, {"Teams Usage State (30D)", type text}, {"SharePoint Usage State (30D)", type text}, {"OneDrive Usage State (30D)", type text}, {"M365 Usage Report Date", type datetime}, {"Office Desktop Activation State (30D)", type text}, {"Office Desktop Usage State (30D)", type text}, {"Office Desktop Usage Report Date", type datetime}, {"Directory Site Code", type text}, {"Site Type", type text}, {"Site Match State", type text}, {"Persona Classification Source", type text}, {"Console Last Activity UTC", type datetime}, {"Console Activity Evidence State", type text}, {"Console Activity Device Count", Int64.Type}, {"Console Activity Match Method", type text}}, "en-US")
 				in
-				    Typed
-
+				    Typed)
+				in
+				    Readers[Finish](BusinessRows)

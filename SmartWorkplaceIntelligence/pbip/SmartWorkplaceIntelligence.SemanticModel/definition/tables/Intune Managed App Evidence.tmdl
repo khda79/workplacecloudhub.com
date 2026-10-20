@@ -197,10 +197,33 @@ table 'Intune Managed App Evidence'
 		summarizeBy: none
 		sourceColumn: Application Key
 
+	/// Actual prepared batch used by this query. Technical provenance only; empty tables have no observable batch.
+	column 'Loaded Batch ID'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 14264c6e-d33f-471a-963f-3e6974710178
+		summarizeBy: none
+		sourceColumn: Loaded Batch ID
+
 	partition 'Intune Managed App Evidence' = m
 		mode: import
 		source =
 				let
+				    Readers = CreatePreparedReaders(),
+				    GetPreparedEvidenceFile = Readers[GetPreparedEvidenceFile],
+				    GetPreparedBatchManifest = Readers[GetPreparedBatchManifest],
+				    GetLicenseReportQualification = Readers[GetLicenseReportQualification],
+				    LicenseReportFileUsable = Readers[LicenseReportFileUsable],
+				    GetLicenseReportSnapshot = Readers[GetLicenseReportSnapshot],
+				    GetLicenseReportCsv = Readers[GetLicenseReportCsv],
+				    ReadMigrationCsv = Readers[ReadMigrationCsv],
+				    CreateMailboxMigrationReader = Readers[CreateMailboxMigrationReader],
+				    ReadMailboxMigrationCsv = Readers[ReadMailboxMigrationCsv],
+				    ReadMigrationWeeklyHistory = Readers[ReadMigrationWeeklyHistory],
+				    GetSharePointOnPremCsv = Readers[GetSharePointOnPremCsv],
+				    GetSharePointMigrationEvidence = Readers[GetSharePointMigrationEvidence],
+				    BusinessRows = (let
 				    Raw = ReadMigrationCsv(GetPreparedEvidenceFile("IntuneManagedAppEvidence.csv"), {"TenantKey", "EvidenceKey", "ReceiptRunId", "BusinessRunId", "SourceFile", "SourceSHA256", "SourceRecord", "CollectionUTC", "ApplicationId", "DisplayName", "Publisher", "AppType", "DisplayVersion", "InCollectedCatalog", "StatusSource", "ObservedRows", "ReportedInstalledRows", "ReportedFailureRows", "ReportedNotInstalledRows", "PendingRows", "NotApplicableRows", "UnknownRows", "MeasurementState", "HealthQualification"}),
 				    Selected = Table.SelectColumns(Raw, {"TenantKey", "EvidenceKey", "ReceiptRunId", "BusinessRunId", "SourceFile", "SourceSHA256", "SourceRecord", "CollectionUTC", "ApplicationId", "DisplayName", "Publisher", "AppType", "DisplayVersion", "InCollectedCatalog", "StatusSource", "ObservedRows", "ReportedInstalledRows", "ReportedFailureRows", "ReportedNotInstalledRows", "PendingRows", "NotApplicableRows", "UnknownRows", "MeasurementState", "HealthQualification"}),
 				    Tenants = List.Distinct(Selected[TenantKey]),
@@ -210,5 +233,6 @@ table 'Intune Managed App Evidence'
 				    Typed = Table.TransformColumns(Validated, {{"TenantKey", each _, type nullable text}, {"EvidenceKey", each _, type nullable text}, {"ReceiptRunId", each _, type nullable text}, {"BusinessRunId", each _, type nullable text}, {"SourceFile", each _, type nullable text}, {"SourceSHA256", each _, type nullable text}, {"SourceRecord", each if _ = null or Text.Trim(_) = "" then null else Int64.From(Number.FromText(_, "en-US")), type nullable number}, {"CollectionUTC", ParseUtc, type nullable datetime}, {"ApplicationId", each _, type nullable text}, {"DisplayName", each _, type nullable text}, {"Publisher", each _, type nullable text}, {"AppType", each _, type nullable text}, {"DisplayVersion", each _, type nullable text}, {"InCollectedCatalog", each _, type nullable text}, {"StatusSource", each _, type nullable text}, {"ObservedRows", each if _ = null or Text.Trim(_) = "" then null else Int64.From(Number.FromText(_, "en-US")), type nullable number}, {"ReportedInstalledRows", each if _ = null or Text.Trim(_) = "" then null else Int64.From(Number.FromText(_, "en-US")), type nullable number}, {"ReportedFailureRows", each if _ = null or Text.Trim(_) = "" then null else Int64.From(Number.FromText(_, "en-US")), type nullable number}, {"ReportedNotInstalledRows", each if _ = null or Text.Trim(_) = "" then null else Int64.From(Number.FromText(_, "en-US")), type nullable number}, {"PendingRows", each if _ = null or Text.Trim(_) = "" then null else Int64.From(Number.FromText(_, "en-US")), type nullable number}, {"NotApplicableRows", each if _ = null or Text.Trim(_) = "" then null else Int64.From(Number.FromText(_, "en-US")), type nullable number}, {"UnknownRows", each if _ = null or Text.Trim(_) = "" then null else Int64.From(Number.FromText(_, "en-US")), type nullable number}, {"MeasurementState", each _, type nullable text}, {"HealthQualification", each _, type nullable text}}),
 				    WithApplicationKey = Table.AddColumn(Typed, "Application Key", each Key({[TenantKey], [ApplicationId]}), type nullable text)
 				in
-				    WithApplicationKey
-
+				    WithApplicationKey)
+				in
+				    Readers[Finish](BusinessRows)

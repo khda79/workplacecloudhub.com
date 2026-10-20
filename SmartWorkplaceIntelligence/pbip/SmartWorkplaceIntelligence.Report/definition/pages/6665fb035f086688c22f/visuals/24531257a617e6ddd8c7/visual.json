@@ -388,21 +388,33 @@
             "show": {
               "expr": {
                 "Literal": {
-                  "Value": "false"
+                  "Value": "true"
                 }
               }
             },
             "text": {
               "expr": {
-                "Literal": {
-                  "Value": "''"
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Report Metadata"
+                    }
+                  },
+                  "Property": "Loaded Batch Banner"
                 }
               }
             },
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "12D"
+                  "Value": "14D"
+                }
+              }
+            },
+            "titleWrap": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
                 }
               }
             },

@@ -51,18 +51,15 @@ def m_text(value):
 
 
 def expression(name):
-    source = (DEFINITION / 'expressions.tmdl').read_text(encoding='utf-8-sig')
-    match = re.search(r'^expression ' + re.escape(name) + r' =\n(.*?)(?=^\S|\Z)',
-                      source, re.M | re.S)
-    if not match:
-        raise AssertionError('Expression not found: ' + name)
-    body = re.split(r'^\t(?:lineageTag:|annotation )', match.group(1), maxsplit=1, flags=re.M)[0]
-    return textwrap.dedent(body).strip()
+    from test_prepared_latest_m import expression as read_expression
+    return read_expression(name)
 
 
 def partition():
     source = (DEFINITION / 'tables/Mailbox Migration Inventory.tmdl').read_text(encoding='utf-8-sig')
     match = re.search(r'\t\tsource = ```\n(.*?)\n\t+```', source, re.S)
+    if not match:
+        match = re.search(r'\t\tsource =\n(.*?)(?=\n\tannotation|\Z)', source, re.S)
     if not match:
         raise AssertionError('Mailbox partition not found')
     return textwrap.dedent(match.group(1)).strip()
@@ -141,6 +138,11 @@ def source_bindings(files, mode):
         'in Table.AddColumn(files,"Name",each Text.AfterDelimiter([Path],"\\",{0,RelativePosition.FromEnd}))',
         'File.Contents=(path as text)=>Table.SelectRows(SyntheticFiles,each [Path]=path){0}[Content]',
         'SharePoint.Contents=(url as text, options as record)=>' + folder(tree),
+        'Web.Contents=(url as text, options as record)=>'
+        'if Text.EndsWith(options[RelativePath],"/RootFolder") then Json.FromValue([ServerRelativeUrl="/Documents"]) '
+        'else let name=if Text.Contains(options[RelativePath],"current.json.txt") then "current.json.txt" else "current.json", '
+        'found=Table.SelectRows(SyntheticFiles,each [Path]="C:\\synthetic\\" & name) '
+        'in if Table.RowCount(found)=1 then found{0}[Content] else Value.ReplaceMetadata(Text.ToBinary(""),[Response.Status=404])',
     ]
 
 
@@ -148,11 +150,13 @@ def differential(files, check='true', error=False, mode='Local', overrides=None)
     bindings = source_bindings(files, mode)
     for name, replacement in (overrides or {}).items():
         bindings = [replacement if b.startswith(name + '=') else b for b in bindings]
-    names = ['GetPreparedEvidenceFile', 'GetPreparedBatchManifest', 'ReadMigrationCsv',
+    names = ['PreparedReadFolder', 'CreatePreparedReaders', 'NativeEvidenceTypes',
+             'GetPreparedEvidenceFile', 'GetPreparedBatchManifest', 'ReadMigrationCsv',
              'CreateMailboxMigrationReader', 'ReadMailboxMigrationCsv']
     bindings += [n + '=(' + expression(n) + ')' for n in names]
     bindings += ['Before=(' + BASELINE.read_text(encoding='utf-8') + ')', 'After=(' + partition() + ')',
-                 'Serialize=(t)=>Binary.Buffer(Json.FromValue([Columns=Table.ColumnNames(t),Rows=Table.ToRows(t)]))',
+                 'Serialize=(t)=>let business=Table.RemoveColumns(t,{"Loaded Batch ID"},MissingField.Ignore) '
+                 'in Binary.Buffer(Json.FromValue([Columns=Table.ColumnNames(business),Rows=Table.ToRows(business)]))',
                  'Old=try Serialize(Before)', 'New=try Serialize(After)']
     if error:
         result = 'Old[HasError] and New[HasError] and Old[Error][Message]=New[Error][Message]'
@@ -242,7 +246,8 @@ def cases():
     add('Remote account excluded before identity check', binaries(rows), check='Table.RowCount(After)=1')
     rows = fixture()
     rows[MAIL] = []
-    add('Header-only mailbox source', binaries(rows), check='Table.RowCount(After)=0 and List.Count(Table.ColumnNames(After))=26')
+    add('Header-only mailbox source', binaries(rows), check='Table.RowCount(After)=0 and '
+        'List.Count(Table.ColumnNames(After))=27 and List.Contains(Table.ColumnNames(After),"Loaded Batch ID")')
     for name in REQUIRED:
         rows = fixture()
         rows[name][0]['TenantKey'] = 'different-synthetic-tenant'
@@ -301,15 +306,17 @@ def cases():
 class MailboxMigrationMTests(unittest.TestCase):
     def test_scope_and_materialization_contract(self):
         candidate = partition()
+        business = candidate.split('BusinessRows = (', 1)[1].rsplit(')\nin\n', 1)[0]
         old = BASELINE.read_text(encoding='utf-8')
         # Business projection, risk precedence and output types must stay byte-identical.
-        self.assertEqual(candidate[candidate.index('    Project ='):].strip(),
+        self.assertEqual(business[business.index('    Project ='):].strip(),
                          old[old.index('    Project ='):].strip())
         self.assertEqual(candidate.count('CreateMailboxMigrationReader()'), 1)
         self.assertNotIn('GetPreparedEvidenceFile(', candidate)
-        self.assertEqual(expression('CreateMailboxMigrationReader').count('GetPreparedBatchManifest()'), 1)
-        self.assertIn('Entries = List.Buffer(', expression('CreateMailboxMigrationReader'))
-        reader = expression('ReadMailboxMigrationCsv')
+        factory = expression('CreatePreparedReaders')
+        self.assertIn('ManifestEntries = List.Buffer(', factory)
+        self.assertIn('CreateMailboxMigrationReader = () as function => GetPreparedEvidenceFile', factory)
+        reader = factory.split('    ReadMailboxMigrationCsv = ', 1)[1].split(',\n    ReadMigrationWeeklyHistory = ', 1)[0]
         self.assertNotIn('Text.FromBinary', reader)
         self.assertIn('List.First(Lines.FromBinary(', reader)
         self.assertIn('Table.Buffer(Projected)', reader)

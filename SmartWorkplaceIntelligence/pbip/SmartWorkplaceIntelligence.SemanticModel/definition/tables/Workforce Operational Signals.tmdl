@@ -79,14 +79,38 @@ table 'Workforce Operational Signals'
 		summarizeBy: none
 		sourceColumn: Source Scope
 
+	/// Actual prepared batch used by this query. Technical provenance only; empty tables have no observable batch.
+	column 'Loaded Batch ID'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 22a7c674-2a26-45ee-a82c-021ff97a6e52
+		summarizeBy: none
+		sourceColumn: Loaded Batch ID
+
 	partition 'Workforce Operational Signals Import' = m
 		mode: import
 		source =
 				let
+				    Readers = CreatePreparedReaders(),
+				    GetPreparedEvidenceFile = Readers[GetPreparedEvidenceFile],
+				    GetPreparedBatchManifest = Readers[GetPreparedBatchManifest],
+				    GetLicenseReportQualification = Readers[GetLicenseReportQualification],
+				    LicenseReportFileUsable = Readers[LicenseReportFileUsable],
+				    GetLicenseReportSnapshot = Readers[GetLicenseReportSnapshot],
+				    GetLicenseReportCsv = Readers[GetLicenseReportCsv],
+				    ReadMigrationCsv = Readers[ReadMigrationCsv],
+				    CreateMailboxMigrationReader = Readers[CreateMailboxMigrationReader],
+				    ReadMailboxMigrationCsv = Readers[ReadMailboxMigrationCsv],
+				    ReadMigrationWeeklyHistory = Readers[ReadMigrationWeeklyHistory],
+				    GetSharePointOnPremCsv = Readers[GetSharePointOnPremCsv],
+				    GetSharePointMigrationEvidence = Readers[GetSharePointMigrationEvidence],
+				    BusinessRows = (let
 				    Raw = Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("WorkforceOperationalSignals.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]),
 				    Selected = Table.SelectColumns(Raw, {"Severity Label", "Signal", "Risk Category", "Affected Users", "Covered Population", "Affected Estate (%)", "Evidence Status", "Recommended Action", "Source Scope"}),
 				    Nulls = Table.ReplaceValue(Selected, "", null, Replacer.ReplaceValue, {"Affected Users", "Covered Population", "Affected Estate (%)"}),
 				    Typed = Table.TransformColumnTypes(Nulls, {{"Severity Label", type text}, {"Signal", type text}, {"Risk Category", type text}, {"Affected Users", Int64.Type}, {"Covered Population", Int64.Type}, {"Affected Estate (%)", type number}, {"Evidence Status", type text}, {"Recommended Action", type text}, {"Source Scope", type text}}, "en-US")
 				in
-				    Typed
-
+				    Typed)
+				in
+				    Readers[Finish](BusinessRows)

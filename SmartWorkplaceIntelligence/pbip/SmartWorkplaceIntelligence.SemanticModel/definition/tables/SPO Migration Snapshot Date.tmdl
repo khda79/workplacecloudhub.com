@@ -9,13 +9,48 @@ table 'SPO Migration Snapshot Date'
 		summarizeBy: none
 		sourceColumn: Date
 
+	/// Actual prepared batch used by this query. Technical provenance only; empty tables have no observable batch.
+	column 'Loaded Batch ID'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: c577a671-3c3b-4c99-b92b-17c64e04d7a4
+		summarizeBy: none
+		sourceColumn: Loaded Batch ID
+
 	partition 'SPO Migration Snapshot Date' = m
 		mode: import
 		source =
 				let
+				    Readers = CreatePreparedReaders(),
+				    GetPreparedEvidenceFile = Readers[GetPreparedEvidenceFile],
+				    GetPreparedBatchManifest = Readers[GetPreparedBatchManifest],
+				    GetLicenseReportQualification = Readers[GetLicenseReportQualification],
+				    LicenseReportFileUsable = Readers[LicenseReportFileUsable],
+				    GetLicenseReportSnapshot = Readers[GetLicenseReportSnapshot],
+				    GetLicenseReportCsv = Readers[GetLicenseReportCsv],
+				    ReadMigrationCsv = Readers[ReadMigrationCsv],
+				    CreateMailboxMigrationReader = Readers[CreateMailboxMigrationReader],
+				    ReadMailboxMigrationCsv = Readers[ReadMailboxMigrationCsv],
+				    ReadMigrationWeeklyHistory = Readers[ReadMigrationWeeklyHistory],
+				    GetSharePointOnPremCsv = Readers[GetSharePointOnPremCsv],
+				    GetSharePointMigrationEvidence = Readers[GetSharePointMigrationEvidence],
+				    #"SPO Migration History" = (let
+				    Source = GetSharePointMigrationEvidence("SharePointMigrationHistoryEvidence.csv", {{"TenantKey", type text}, {"Project Key", type text}, {"Snapshot ID", type text}, {"Snapshot Date", type date}, {"Operation Key", type text}, {"Migration ID", type text}, {"Source Type", type text}, {"Business Unit", type text}, {"Phase", type text}, {"Project Scope Key", type text}, {"Source Reference", type text}, {"Source URL Aliases", type text}, {"Source Name", type text}, {"Disposition", type text}, {"Execution Status", type text}, {"Validation Status", type text}, {"Validation Date", type date}, {"Planned Date", type date}, {"Actual Date", type date}, {"Target URL", type text}, {"Resolved Target URL", type text}, {"Target Review Status", type text}, {"Target Mapping Level", type text}, {"Target Approval Evidence", type text}, {"Target Observation", type text}, {"Target Precision Status", type text}, {"Source Object Type", type text}, {"Source Scope", type text}, {"Source Qualification", type text}, {"Business Contact", type text}, {"Comments", type text}, {"Permission Strategy", type text}, {"Audience", type text}, {"Source Row", Int64.Type}, {"Source SHA256", type text}, {"Capture UTC", type datetime}, {"Native Web Count", Int64.Type}, {"Is Validated", type logical}, {"Requires Review", type logical}, {"Present In Register", type logical}, {"Imported Migration Date", type date}, {"Imported Date Meaning", type text}, {"Imported Target Site", type text}, {"Imported Target Library", type text}, {"Imported Target Folder", type text}, {"Legacy Web ID", type text}, {"Next Action", type text}, {"History Key", type text}}),
+				    Identity = Table.AddColumn(Source, "Project Identity", each Binary.ToText(Json.FromValue({[TenantKey], [Project Key]}), BinaryEncoding.Base64), type text),
+				    Categories = Table.TransformColumns(Identity, List.Transform(List.Intersect({{"Business Unit", "Phase"}, Table.ColumnNames(Identity)}), (c) => {c, each if _ = null then "(Unspecified)" else _, type text})),
+				    Snapshots = Table.Group(Categories, {"Project Identity", "Snapshot Date", "Snapshot ID"}, {{"Observed", each List.Max([Capture UTC]), type nullable datetime}}),
+				    Daily = Table.Group(Snapshots, {"Project Identity", "Snapshot Date"}, {{"Latest", each Table.First(Table.Sort(_, {{"Observed", Order.Descending}, {"Snapshot ID", Order.Descending}}))[Snapshot ID], type text}}),
+				    Joined = Table.NestedJoin(Categories, {"Project Identity", "Snapshot Date", "Snapshot ID"}, Daily, {"Project Identity", "Snapshot Date", "Latest"}, "Daily Match", JoinKind.LeftOuter),
+				    Latest = Table.AddColumn(Joined, "Is Latest Daily Snapshot", each not Table.IsEmpty([Daily Match]), type logical),
+				    Result = Table.RemoveColumns(Latest, {"Daily Match"})
+				in Result),
+				    BusinessRows = (let
 				        Native = Table.SelectColumns(Date, {"Date"}),
 				        Historical = Table.RenameColumns(Table.SelectColumns(#"SPO Migration History", {"Snapshot Date"}), {{"Snapshot Date", "Date"}}),
 				        Bounds = List.RemoveNulls(Table.Column(Table.Combine({Native, Historical}), "Date")),
 				        Start = List.Min(Bounds), End = List.Max(Bounds),
 				        Result = Table.FromColumns({List.Dates(Start, Duration.Days(End-Start)+1, #duration(1,0,0,0))}, type table [Date=date])
-				        in Result
+				        in Result)
+				in
+				    Readers[Finish](BusinessRows)

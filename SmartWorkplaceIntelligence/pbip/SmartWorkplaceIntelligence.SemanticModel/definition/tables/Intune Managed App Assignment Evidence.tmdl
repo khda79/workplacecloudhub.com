@@ -135,10 +135,33 @@ table 'Intune Managed App Assignment Evidence'
 		summarizeBy: none
 		sourceColumn: Application Key
 
+	/// Actual prepared batch used by this query. Technical provenance only; empty tables have no observable batch.
+	column 'Loaded Batch ID'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 650a1f0e-8146-4f65-926d-c59f16eff794
+		summarizeBy: none
+		sourceColumn: Loaded Batch ID
+
 	partition 'Intune Managed App Assignment Evidence' = m
 		mode: import
 		source =
 				let
+				    Readers = CreatePreparedReaders(),
+				    GetPreparedEvidenceFile = Readers[GetPreparedEvidenceFile],
+				    GetPreparedBatchManifest = Readers[GetPreparedBatchManifest],
+				    GetLicenseReportQualification = Readers[GetLicenseReportQualification],
+				    LicenseReportFileUsable = Readers[LicenseReportFileUsable],
+				    GetLicenseReportSnapshot = Readers[GetLicenseReportSnapshot],
+				    GetLicenseReportCsv = Readers[GetLicenseReportCsv],
+				    ReadMigrationCsv = Readers[ReadMigrationCsv],
+				    CreateMailboxMigrationReader = Readers[CreateMailboxMigrationReader],
+				    ReadMailboxMigrationCsv = Readers[ReadMailboxMigrationCsv],
+				    ReadMigrationWeeklyHistory = Readers[ReadMigrationWeeklyHistory],
+				    GetSharePointOnPremCsv = Readers[GetSharePointOnPremCsv],
+				    GetSharePointMigrationEvidence = Readers[GetSharePointMigrationEvidence],
+				    BusinessRows = (let
 				    Raw = ReadMigrationCsv(GetPreparedEvidenceFile("IntuneManagedAppAssignmentEvidence.csv"), {"TenantKey", "EvidenceKey", "ReceiptRunId", "BusinessRunId", "SourceFile", "SourceSHA256", "SourceRecord", "CollectionUTC", "ApplicationId", "AssignmentId", "Intent", "TargetType", "GroupId", "AssignmentFilterId", "AssignmentFilterType", "CatalogMatch"}),
 				    Selected = Table.SelectColumns(Raw, {"TenantKey", "EvidenceKey", "ReceiptRunId", "BusinessRunId", "SourceFile", "SourceSHA256", "SourceRecord", "CollectionUTC", "ApplicationId", "AssignmentId", "Intent", "TargetType", "GroupId", "AssignmentFilterId", "AssignmentFilterType", "CatalogMatch"}),
 				    Tenants = List.Distinct(Selected[TenantKey]),
@@ -148,5 +171,6 @@ table 'Intune Managed App Assignment Evidence'
 				    Typed = Table.TransformColumns(Validated, {{"TenantKey", each _, type nullable text}, {"EvidenceKey", each _, type nullable text}, {"ReceiptRunId", each _, type nullable text}, {"BusinessRunId", each _, type nullable text}, {"SourceFile", each _, type nullable text}, {"SourceSHA256", each _, type nullable text}, {"SourceRecord", each if _ = null or Text.Trim(_) = "" then null else Int64.From(Number.FromText(_, "en-US")), type nullable number}, {"CollectionUTC", ParseUtc, type nullable datetime}, {"ApplicationId", each _, type nullable text}, {"AssignmentId", each _, type nullable text}, {"Intent", each _, type nullable text}, {"TargetType", each _, type nullable text}, {"GroupId", each _, type nullable text}, {"AssignmentFilterId", each _, type nullable text}, {"AssignmentFilterType", each _, type nullable text}, {"CatalogMatch", each _, type nullable text}}),
 				    WithApplicationKey = Table.AddColumn(Typed, "Application Key", each Key({[TenantKey], [ApplicationId]}), type nullable text)
 				in
-				    WithApplicationKey
-
+				    WithApplicationKey)
+				in
+				    Readers[Finish](BusinessRows)

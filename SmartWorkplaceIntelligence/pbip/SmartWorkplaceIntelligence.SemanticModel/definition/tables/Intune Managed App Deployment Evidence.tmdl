@@ -234,10 +234,33 @@ table 'Intune Managed App Deployment Evidence'
 		summarizeBy: none
 		sourceColumn: Device Key
 
+	/// Actual prepared batch used by this query. Technical provenance only; empty tables have no observable batch.
+	column 'Loaded Batch ID'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 70a0a104-c327-4993-8793-daa4fe55acf5
+		summarizeBy: none
+		sourceColumn: Loaded Batch ID
+
 	partition 'Intune Managed App Deployment Evidence' = m
 		mode: import
 		source =
 				let
+				    Readers = CreatePreparedReaders(),
+				    GetPreparedEvidenceFile = Readers[GetPreparedEvidenceFile],
+				    GetPreparedBatchManifest = Readers[GetPreparedBatchManifest],
+				    GetLicenseReportQualification = Readers[GetLicenseReportQualification],
+				    LicenseReportFileUsable = Readers[LicenseReportFileUsable],
+				    GetLicenseReportSnapshot = Readers[GetLicenseReportSnapshot],
+				    GetLicenseReportCsv = Readers[GetLicenseReportCsv],
+				    ReadMigrationCsv = Readers[ReadMigrationCsv],
+				    CreateMailboxMigrationReader = Readers[CreateMailboxMigrationReader],
+				    ReadMailboxMigrationCsv = Readers[ReadMailboxMigrationCsv],
+				    ReadMigrationWeeklyHistory = Readers[ReadMigrationWeeklyHistory],
+				    GetSharePointOnPremCsv = Readers[GetSharePointOnPremCsv],
+				    GetSharePointMigrationEvidence = Readers[GetSharePointMigrationEvidence],
+				    BusinessRows = (let
 				    Raw = ReadMigrationCsv(GetPreparedEvidenceFile("IntuneManagedAppDeploymentEvidence.csv"), {"TenantKey", "EvidenceKey", "ReceiptRunId", "BusinessRunId", "SourceFile", "SourceSHA256", "SourceRecord", "CollectionUTC", "ApplicationId", "DeviceId", "UserPrincipalName", "AppVersion", "Platform", "InstallState", "ReportedDeploymentState", "InstallStateDetail", "ErrorCode", "LastModifiedDateTime", "SourceStatusUTC", "SourceStatusTimeBasis", "CatalogMatch", "InventoryMatch", "HealthQualification"}),
 				    Selected = Table.SelectColumns(Raw, {"TenantKey", "EvidenceKey", "ReceiptRunId", "BusinessRunId", "SourceFile", "SourceSHA256", "SourceRecord", "CollectionUTC", "ApplicationId", "DeviceId", "UserPrincipalName", "AppVersion", "Platform", "InstallState", "ReportedDeploymentState", "InstallStateDetail", "ErrorCode", "LastModifiedDateTime", "SourceStatusUTC", "SourceStatusTimeBasis", "CatalogMatch", "InventoryMatch", "HealthQualification"}),
 				    Tenants = List.Distinct(Selected[TenantKey]),
@@ -248,5 +271,6 @@ table 'Intune Managed App Deployment Evidence'
 				    WithApplicationKey = Table.AddColumn(Typed, "Application Key", each Key({[TenantKey], [ApplicationId]}), type nullable text),
 				    WithDeviceKey = Table.AddColumn(WithApplicationKey, "Device Key", each Key({[TenantKey], [DeviceId]}), type nullable text)
 				in
-				    WithDeviceKey
-
+				    WithDeviceKey)
+				in
+				    Readers[Finish](BusinessRows)

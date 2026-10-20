@@ -407,11 +407,34 @@ table 'Windows Migration Evidence'
 		summarizeBy: none
 		sourceColumn: Eligibility Match Status
 
+	/// Actual prepared batch used by this query. Technical provenance only; empty tables have no observable batch.
+	column 'Loaded Batch ID'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 47bfb4c4-25e1-436e-b188-0b0eb252a885
+		summarizeBy: none
+		sourceColumn: Loaded Batch ID
+
 	/// Rebuilt from tenant-qualified local source snapshots by the prepared evidence pipeline. Versioned batch reader; missing/incomplete outputs fail, never fall back to frozen recovery JSON. No live collection; AD absence is not proof of non-enrollment.
 	partition 'Windows Migration Evidence' = m
 		mode: import
 		source =
 				let
+				    Readers = CreatePreparedReaders(),
+				    GetPreparedEvidenceFile = Readers[GetPreparedEvidenceFile],
+				    GetPreparedBatchManifest = Readers[GetPreparedBatchManifest],
+				    GetLicenseReportQualification = Readers[GetLicenseReportQualification],
+				    LicenseReportFileUsable = Readers[LicenseReportFileUsable],
+				    GetLicenseReportSnapshot = Readers[GetLicenseReportSnapshot],
+				    GetLicenseReportCsv = Readers[GetLicenseReportCsv],
+				    ReadMigrationCsv = Readers[ReadMigrationCsv],
+				    CreateMailboxMigrationReader = Readers[CreateMailboxMigrationReader],
+				    ReadMailboxMigrationCsv = Readers[ReadMailboxMigrationCsv],
+				    ReadMigrationWeeklyHistory = Readers[ReadMigrationWeeklyHistory],
+				    GetSharePointOnPremCsv = Readers[GetSharePointOnPremCsv],
+				    GetSharePointMigrationEvidence = Readers[GetSharePointMigrationEvidence],
+				    BusinessRows = (let
 				    Source = Csv.Document(GetPreparedEvidenceFile("WindowsMigrationEvidence.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]),
 				    Headers = Table.PromoteHeaders(Source, [PromoteAllScalars=true]),
 				    Required = Table.SelectColumns(Headers, {"Device Source ID","Device Name","Country","Primary User UPN","OS Version","Windows Release","Intune State","Autopatch Registration","Upgrade Eligibility","Hardware Reasons","Free Disk GB","Disk Review","Legacy Build Review","Update State","Update Action","Last Intune Sync","Migration Status","Risk Priority","Next Action","Evidence Date","Country Basis","AD Domain","AD Domain Match Status","Inventory Source","Inventory Observation Date","Eligibility Observation Date","Eligibility OS Version","Eligibility Match Status","Autopatch Policy State","Autopatch Device Status","Autopatch Blocking Reason","Autopatch Alert","Autopatch Observation Date","Windows 11 Policy State","Windows 11 Device Status","Windows 11 Blocking Reason","Windows 11 Alert","Windows 11 Observation Date"}),
@@ -423,5 +446,6 @@ table 'Windows Migration Evidence'
 				            Parsed = if Text.Contains(raw, "T") then DateTimeZone.FromText(raw, [Culture="en-US"]) else DateTime.AddZone(DateTime.FromText(raw, [Culture="en-US"]), 0)
 				        in DateTimeZone.ToText(DateTimeZone.SwitchZone(Parsed, 0), "yyyy-MM-dd'T'HH:mm:ss.fff'Z'", "en-US"), type text}})
 				in
-				    PreservedObservationUtc
-
+				    PreservedObservationUtc)
+				in
+				    Readers[Finish](BusinessRows)

@@ -151,14 +151,38 @@ table 'User Activity History Evidence'
 		lineageTag: 3e853ce0-a172-4fdd-a488-2704bbb8f719
 		sourceColumn: Confirmed Human
 
+	/// Actual prepared batch used by this query. Technical provenance only; empty tables have no observable batch.
+	column 'Loaded Batch ID'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 43360851-bfbc-4648-a394-f78d2df78ae4
+		summarizeBy: none
+		sourceColumn: Loaded Batch ID
+
 	partition 'User Activity History Evidence Import' = m
 		mode: import
 		source =
 				let
+				    Readers = CreatePreparedReaders(),
+				    GetPreparedEvidenceFile = Readers[GetPreparedEvidenceFile],
+				    GetPreparedBatchManifest = Readers[GetPreparedBatchManifest],
+				    GetLicenseReportQualification = Readers[GetLicenseReportQualification],
+				    LicenseReportFileUsable = Readers[LicenseReportFileUsable],
+				    GetLicenseReportSnapshot = Readers[GetLicenseReportSnapshot],
+				    GetLicenseReportCsv = Readers[GetLicenseReportCsv],
+				    ReadMigrationCsv = Readers[ReadMigrationCsv],
+				    CreateMailboxMigrationReader = Readers[CreateMailboxMigrationReader],
+				    ReadMailboxMigrationCsv = Readers[ReadMailboxMigrationCsv],
+				    ReadMigrationWeeklyHistory = Readers[ReadMigrationWeeklyHistory],
+				    GetSharePointOnPremCsv = Readers[GetSharePointOnPremCsv],
+				    GetSharePointMigrationEvidence = Readers[GetSharePointMigrationEvidence],
+				    BusinessRows = (let
 				    Raw = Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("UserActivityHistoryEvidence.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]),
 				    Selected = Table.SelectColumns(Raw, {"Snapshot Date", "Date Key", "Week Label", "User Source ID", "Activity State", "Activity Evidence Status", "Days Since Last Activity", "Last Activity Date", "AD Last Activity Date", "M365 Last Activity Date", "Activity Source", "User Principal Name", "Confirmed Human"}),
 				    Nulls = Table.ReplaceValue(Selected, "", null, Replacer.ReplaceValue, {"Snapshot Date", "Date Key", "Days Since Last Activity", "Last Activity Date", "AD Last Activity Date", "M365 Last Activity Date", "Confirmed Human"}),
 				    Typed = Table.TransformColumnTypes(Nulls, {{"Snapshot Date", type datetime}, {"Date Key", Int64.Type}, {"Week Label", type text}, {"User Source ID", type text}, {"Activity State", type text}, {"Activity Evidence Status", type text}, {"Days Since Last Activity", Int64.Type}, {"Last Activity Date", type datetime}, {"AD Last Activity Date", type datetime}, {"M365 Last Activity Date", type datetime}, {"Activity Source", type text}, {"User Principal Name", type text}, {"Confirmed Human", type logical}}, "en-US")
 				in
-				    Typed
-
+				    Typed)
+				in
+				    Readers[Finish](BusinessRows)

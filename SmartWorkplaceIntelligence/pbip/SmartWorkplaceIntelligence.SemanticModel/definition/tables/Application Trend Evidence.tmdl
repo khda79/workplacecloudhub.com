@@ -168,14 +168,38 @@ table 'Application Trend Evidence'
 		summarizeBy: none
 		sourceColumn: Evidence Status
 
+	/// Actual prepared batch used by this query. Technical provenance only; empty tables have no observable batch.
+	column 'Loaded Batch ID'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: d0318a40-595a-4730-9f98-bc28292128be
+		summarizeBy: none
+		sourceColumn: Loaded Batch ID
+
 	partition 'Application Trend Evidence Import' = m
 		mode: import
 		source =
 				let
+				    Readers = CreatePreparedReaders(),
+				    GetPreparedEvidenceFile = Readers[GetPreparedEvidenceFile],
+				    GetPreparedBatchManifest = Readers[GetPreparedBatchManifest],
+				    GetLicenseReportQualification = Readers[GetLicenseReportQualification],
+				    LicenseReportFileUsable = Readers[LicenseReportFileUsable],
+				    GetLicenseReportSnapshot = Readers[GetLicenseReportSnapshot],
+				    GetLicenseReportCsv = Readers[GetLicenseReportCsv],
+				    ReadMigrationCsv = Readers[ReadMigrationCsv],
+				    CreateMailboxMigrationReader = Readers[CreateMailboxMigrationReader],
+				    ReadMailboxMigrationCsv = Readers[ReadMailboxMigrationCsv],
+				    ReadMigrationWeeklyHistory = Readers[ReadMigrationWeeklyHistory],
+				    GetSharePointOnPremCsv = Readers[GetSharePointOnPremCsv],
+				    GetSharePointMigrationEvidence = Readers[GetSharePointMigrationEvidence],
+				    BusinessRows = (let
 				    Raw = Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("ApplicationTrendEvidence.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]),
 				    Selected = Table.SelectColumns(Raw, {"Snapshot Date", "Date Key", "Snapshot Week", "Applications", "Application Versions", "Publishers", "Application Install Observations", "Fragmented Applications", "Highly Fragmented Applications", "Installations Outside Dominant Version", "Long Tail Versions", "Unknown Publisher Versions", "Standardization Opportunity Rate (%)", "Dominant Version Coverage (%)", "Evidence Status"}),
 				    Nulls = Table.ReplaceValue(Selected, "", null, Replacer.ReplaceValue, {"Snapshot Date", "Date Key", "Applications", "Application Versions", "Publishers", "Application Install Observations", "Fragmented Applications", "Highly Fragmented Applications", "Installations Outside Dominant Version", "Long Tail Versions", "Unknown Publisher Versions", "Standardization Opportunity Rate (%)", "Dominant Version Coverage (%)"}),
 				    Typed = Table.TransformColumnTypes(Nulls, {{"Snapshot Date", type datetime}, {"Date Key", Int64.Type}, {"Snapshot Week", type text}, {"Applications", Int64.Type}, {"Application Versions", Int64.Type}, {"Publishers", Int64.Type}, {"Application Install Observations", Int64.Type}, {"Fragmented Applications", Int64.Type}, {"Highly Fragmented Applications", Int64.Type}, {"Installations Outside Dominant Version", Int64.Type}, {"Long Tail Versions", Int64.Type}, {"Unknown Publisher Versions", Int64.Type}, {"Standardization Opportunity Rate (%)", type number}, {"Dominant Version Coverage (%)", type number}, {"Evidence Status", type text}}, "en-US")
 				in
-				    Typed
-
+				    Typed)
+				in
+				    Readers[Finish](BusinessRows)

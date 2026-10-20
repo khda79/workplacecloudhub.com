@@ -94,15 +94,39 @@ table 'SharePoint On-prem Farms'
 		lineageTag: cde3b580-3368-4a1b-8f56-afee6668cb8a
 		sourceColumn: Farm Key
 
+	/// Actual prepared batch used by this query. Technical provenance only; empty tables have no observable batch.
+	column 'Loaded Batch ID'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 3cd6863e-df0a-46e5-8d1c-93592507da05
+		summarizeBy: none
+		sourceColumn: Loaded Batch ID
+
 	partition 'SharePoint On-prem Farms' = m
 		mode: import
 		source =
 				let
+				    Readers = CreatePreparedReaders(),
+				    GetPreparedEvidenceFile = Readers[GetPreparedEvidenceFile],
+				    GetPreparedBatchManifest = Readers[GetPreparedBatchManifest],
+				    GetLicenseReportQualification = Readers[GetLicenseReportQualification],
+				    LicenseReportFileUsable = Readers[LicenseReportFileUsable],
+				    GetLicenseReportSnapshot = Readers[GetLicenseReportSnapshot],
+				    GetLicenseReportCsv = Readers[GetLicenseReportCsv],
+				    ReadMigrationCsv = Readers[ReadMigrationCsv],
+				    CreateMailboxMigrationReader = Readers[CreateMailboxMigrationReader],
+				    ReadMailboxMigrationCsv = Readers[ReadMailboxMigrationCsv],
+				    ReadMigrationWeeklyHistory = Readers[ReadMigrationWeeklyHistory],
+				    GetSharePointOnPremCsv = Readers[GetSharePointOnPremCsv],
+				    GetSharePointMigrationEvidence = Readers[GetSharePointMigrationEvidence],
+				    BusinessRows = (let
 				    Raw = GetSharePointOnPremCsv("SharePoint_OnPrem_Farms.csv", {"TenantKey", "FarmId", "RunId", "CollectedAtUtc", "FarmVersion", "BuildVersion", "ServerCount", "ServiceApplicationCount", "CollectionStatus"}, {}),
 				    Nulls = Table.ReplaceValue(Raw, "", null, Replacer.ReplaceValue, {"CollectedAtUtc", "ServerCount", "ServiceApplicationCount"}),
 				    Typed = Table.TransformColumnTypes(Nulls, {{"CollectedAtUtc", type datetime}, {"ServerCount", Int64.Type}, {"ServiceApplicationCount", Int64.Type}}, "en-US"),
 				    FarmKey = Table.AddColumn(Typed, "Farm Key", each [TenantKey] & "|" & [FarmId], type text),
 				    Renamed = Table.RenameColumns(FarmKey, {{"TenantKey", "Tenant Key"}, {"FarmId", "Farm ID"}, {"RunId", "Run ID"}, {"CollectedAtUtc", "Collected At UTC"}, {"FarmVersion", "Farm Version"}, {"BuildVersion", "Build Version"}, {"ServerCount", "Reported Server Count"}, {"ServiceApplicationCount", "Reported Service Application Count"}, {"CollectionStatus", "Collection Status"}})
 				in
-				    Renamed
-
+				    Renamed)
+				in
+				    Readers[Finish](BusinessRows)

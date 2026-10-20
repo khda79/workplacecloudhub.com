@@ -907,10 +907,33 @@ table 'Device System Evidence'
 		summarizeBy: none
 		sourceColumn: Last Console Logon SID
 
+	/// Actual prepared batch used by this query. Technical provenance only; empty tables have no observable batch.
+	column 'Loaded Batch ID'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: d0508ddb-999e-4473-ac50-6644e2ca9936
+		summarizeBy: none
+		sourceColumn: Loaded Batch ID
+
 	partition 'Device System Evidence' = m
 		mode: import
 		source =
 				let
+				    Readers = CreatePreparedReaders(),
+				    GetPreparedEvidenceFile = Readers[GetPreparedEvidenceFile],
+				    GetPreparedBatchManifest = Readers[GetPreparedBatchManifest],
+				    GetLicenseReportQualification = Readers[GetLicenseReportQualification],
+				    LicenseReportFileUsable = Readers[LicenseReportFileUsable],
+				    GetLicenseReportSnapshot = Readers[GetLicenseReportSnapshot],
+				    GetLicenseReportCsv = Readers[GetLicenseReportCsv],
+				    ReadMigrationCsv = Readers[ReadMigrationCsv],
+				    CreateMailboxMigrationReader = Readers[CreateMailboxMigrationReader],
+				    ReadMailboxMigrationCsv = Readers[ReadMailboxMigrationCsv],
+				    ReadMigrationWeeklyHistory = Readers[ReadMigrationWeeklyHistory],
+				    GetSharePointOnPremCsv = Readers[GetSharePointOnPremCsv],
+				    GetSharePointMigrationEvidence = Readers[GetSharePointMigrationEvidence],
+				    BusinessRows = (let
 				    Source = ReadMigrationCsv(GetPreparedEvidenceFile("DeviceSystemEvidence.csv"), {"TenantKey", "Device System Key", "Device Source ID", "Device Name", "Azure AD Device ID", "Primary User UPN", "Country", "Country Basis", "Inventory Match", "Prepared Inventory Match", "Observation Raw", "Observation UTC", "Observation Time Basis", "Observation Age Hours", "Freshness", "Freshness Max Age Hours", "Prepared UTC", "Secure Boot State", "Secure Boot Raw", "BIOS Version", "BIOS Date", "BIOS Date Quality", "Firmware Type", "Firmware Raw", "Last Boot Time", "Last Boot Quality", "Local Encryption State", "Inventory Encryption State", "Encryption Comparison", "VBS State", "VBS Raw", "VBS Hardware Requirements", "VBS Hardware Raw", "Credential Guard State", "Credential Guard Raw", "Management State", "Management Raw", "Compliance State", "Compliance Raw", "Inventory Compliance State", "Compliance Comparison", "Last Sync Raw", "Last Sync UTC", "Last Sync Time Basis", "Third Party AV State", "Third Party AV Raw", "Third Party AV Products", "Expected AV Name", "Expected AV State", "Expected AV Raw", "AV Qualification", "AV Comparison", "Windows Update Reboot Required", "Windows Update Reboot Raw", "BitLocker OS Protection", "BitLocker OS Protection Raw", "BitLocker OS Conversion", "BitLocker OS Conversion Raw", "Data Quality Issues"}),
 				    OptionalNames = {"Local Data Source", "Local Data Freshness", "Last Console Logon Status", "Last Console Logon User", "Last Console Logon UTC", "Last Console Logon Quality", "Last Console Logon SID"},
 				    Compatible = List.Accumulate(OptionalNames, Source, (t, n) => if Table.HasColumns(t, n) then t else Table.AddColumn(t, n, each if n = "Local Data Source" then "LegacyPlatformScript" else if n = "Local Data Freshness" then "Not reported" else if n = "Last Console Logon Status" then "NotCollected" else null, type nullable text)),
@@ -919,5 +942,6 @@ table 'Device System Evidence'
 				    TypedDates = Table.TransformColumns(Selected, {{"Observation UTC", ParseUtc, type nullable datetime}, {"Prepared UTC", ParseUtc, type nullable datetime}, {"Last Sync UTC", ParseUtc, type nullable datetime}, {"Last Console Logon UTC", ParseUtc, type nullable datetime}}),
 				    TypedNumbers = Table.TransformColumns(TypedDates, {{"Observation Age Hours", each if _ = null or Text.Trim(_) = "" then null else Number.FromText(_, "en-US"), type nullable number}, {"Freshness Max Age Hours", each if _ = null or Text.Trim(_) = "" then null else Number.FromText(_, "en-US"), type nullable number}}),
 				    Typed = Table.TransformColumnTypes(TypedNumbers, {{"TenantKey", type text}, {"Device System Key", type text}, {"Device Source ID", type text}, {"Device Name", type text}, {"Azure AD Device ID", type text}, {"Primary User UPN", type text}, {"Country", type text}, {"Country Basis", type text}, {"Inventory Match", type text}, {"Prepared Inventory Match", type text}, {"Observation Raw", type text}, {"Observation Time Basis", type text}, {"Freshness", type text}, {"Secure Boot State", type text}, {"Secure Boot Raw", type text}, {"BIOS Version", type text}, {"BIOS Date", type text}, {"BIOS Date Quality", type text}, {"Firmware Type", type text}, {"Firmware Raw", type text}, {"Last Boot Time", type text}, {"Last Boot Quality", type text}, {"Local Encryption State", type text}, {"Inventory Encryption State", type text}, {"Encryption Comparison", type text}, {"VBS State", type text}, {"VBS Raw", type text}, {"VBS Hardware Requirements", type text}, {"VBS Hardware Raw", type text}, {"Credential Guard State", type text}, {"Credential Guard Raw", type text}, {"Management State", type text}, {"Management Raw", type text}, {"Compliance State", type text}, {"Compliance Raw", type text}, {"Inventory Compliance State", type text}, {"Compliance Comparison", type text}, {"Last Sync Raw", type text}, {"Last Sync Time Basis", type text}, {"Third Party AV State", type text}, {"Third Party AV Raw", type text}, {"Third Party AV Products", type text}, {"Expected AV Name", type text}, {"Expected AV State", type text}, {"Expected AV Raw", type text}, {"AV Qualification", type text}, {"AV Comparison", type text}, {"Windows Update Reboot Required", type text}, {"Windows Update Reboot Raw", type text}, {"BitLocker OS Protection", type text}, {"BitLocker OS Protection Raw", type text}, {"BitLocker OS Conversion", type text}, {"BitLocker OS Conversion Raw", type text}, {"Data Quality Issues", type text}, {"Local Data Source", type text}, {"Local Data Freshness", type text}, {"Last Console Logon Status", type text}, {"Last Console Logon User", type text}, {"Last Console Logon Quality", type text}, {"Last Console Logon SID", type text}})
-				in Typed
-
+				in Typed)
+				in
+				    Readers[Finish](BusinessRows)

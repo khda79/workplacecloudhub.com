@@ -124,14 +124,38 @@ table 'Windows Lifecycle Trend Evidence'
 		summarizeBy: none
 		sourceColumn: Evidence Status
 
+	/// Actual prepared batch used by this query. Technical provenance only; empty tables have no observable batch.
+	column 'Loaded Batch ID'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: c3a18630-b345-4bae-bbdf-dc57601f9cb2
+		summarizeBy: none
+		sourceColumn: Loaded Batch ID
+
 	partition 'Windows Lifecycle Trend Evidence Import' = m
 		mode: import
 		source =
 				let
+				    Readers = CreatePreparedReaders(),
+				    GetPreparedEvidenceFile = Readers[GetPreparedEvidenceFile],
+				    GetPreparedBatchManifest = Readers[GetPreparedBatchManifest],
+				    GetLicenseReportQualification = Readers[GetLicenseReportQualification],
+				    LicenseReportFileUsable = Readers[LicenseReportFileUsable],
+				    GetLicenseReportSnapshot = Readers[GetLicenseReportSnapshot],
+				    GetLicenseReportCsv = Readers[GetLicenseReportCsv],
+				    ReadMigrationCsv = Readers[ReadMigrationCsv],
+				    CreateMailboxMigrationReader = Readers[CreateMailboxMigrationReader],
+				    ReadMailboxMigrationCsv = Readers[ReadMailboxMigrationCsv],
+				    ReadMigrationWeeklyHistory = Readers[ReadMigrationWeeklyHistory],
+				    GetSharePointOnPremCsv = Readers[GetSharePointOnPremCsv],
+				    GetSharePointMigrationEvidence = Readers[GetSharePointMigrationEvidence],
+				    BusinessRows = (let
 				    Raw = Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("WindowsLifecycleTrendEvidence.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]),
 				    Selected = Table.SelectColumns(Raw, {"Snapshot Date", "Snapshot Week", "Managed Devices", "Windows Devices", "Windows 10 Devices", "Windows 11 Devices", "Windows 11 Adoption (%)", "Evidence Status"}),
 				    Nulls = Table.ReplaceValue(Selected, "", null, Replacer.ReplaceValue, {"Snapshot Date", "Managed Devices", "Windows Devices", "Windows 10 Devices", "Windows 11 Devices", "Windows 11 Adoption (%)"}),
 				    Typed = Table.TransformColumnTypes(Nulls, {{"Snapshot Date", type datetime}, {"Snapshot Week", type text}, {"Managed Devices", Int64.Type}, {"Windows Devices", Int64.Type}, {"Windows 10 Devices", Int64.Type}, {"Windows 11 Devices", Int64.Type}, {"Windows 11 Adoption (%)", type number}, {"Evidence Status", type text}}, "en-US")
 				in
-				    Typed
-
+				    Typed)
+				in
+				    Readers[Finish](BusinessRows)

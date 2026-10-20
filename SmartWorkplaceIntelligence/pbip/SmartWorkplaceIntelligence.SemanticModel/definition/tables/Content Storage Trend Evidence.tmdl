@@ -129,14 +129,38 @@ table 'Content Storage Trend Evidence'
 
 		annotation SummarizationSetBy = Automatic
 
+	/// Actual prepared batch used by this query. Technical provenance only; empty tables have no observable batch.
+	column 'Loaded Batch ID'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 912876fe-30fa-4ea4-9195-ba5351dfc1f2
+		summarizeBy: none
+		sourceColumn: Loaded Batch ID
+
 	partition 'Content Storage Trend Evidence Import' = m
 		mode: import
 		source =
 				let
+				    Readers = CreatePreparedReaders(),
+				    GetPreparedEvidenceFile = Readers[GetPreparedEvidenceFile],
+				    GetPreparedBatchManifest = Readers[GetPreparedBatchManifest],
+				    GetLicenseReportQualification = Readers[GetLicenseReportQualification],
+				    LicenseReportFileUsable = Readers[LicenseReportFileUsable],
+				    GetLicenseReportSnapshot = Readers[GetLicenseReportSnapshot],
+				    GetLicenseReportCsv = Readers[GetLicenseReportCsv],
+				    ReadMigrationCsv = Readers[ReadMigrationCsv],
+				    CreateMailboxMigrationReader = Readers[CreateMailboxMigrationReader],
+				    ReadMailboxMigrationCsv = Readers[ReadMailboxMigrationCsv],
+				    ReadMigrationWeeklyHistory = Readers[ReadMigrationWeeklyHistory],
+				    GetSharePointOnPremCsv = Readers[GetSharePointOnPremCsv],
+				    GetSharePointMigrationEvidence = Readers[GetSharePointMigrationEvidence],
+				    BusinessRows = (let
 				    Raw = Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("ContentStorageTrendEvidence.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]),
 				    Selected = Table.SelectColumns(Raw, {"Snapshot Date", "Date Key", "Snapshot Week", "SharePoint Sites", "SharePoint Storage Used GB", "SharePoint Storage Allocated GB", "SharePoint Storage Utilization (%)", "Inactive SharePoint Sites", "Orphaned SharePoint Sites", "Sites at 80%+ Quota", "Evidence Status"}),
 				    Nulls = Table.ReplaceValue(Selected, "", null, Replacer.ReplaceValue, {"Snapshot Date", "Date Key", "SharePoint Sites", "SharePoint Storage Used GB", "SharePoint Storage Allocated GB", "SharePoint Storage Utilization (%)", "Inactive SharePoint Sites", "Orphaned SharePoint Sites", "Sites at 80%+ Quota"}),
 				    Typed = Table.TransformColumnTypes(Nulls, {{"Snapshot Date", type datetime}, {"Date Key", Int64.Type}, {"Snapshot Week", type text}, {"SharePoint Sites", Int64.Type}, {"SharePoint Storage Used GB", type number}, {"SharePoint Storage Allocated GB", type number}, {"SharePoint Storage Utilization (%)", type number}, {"Inactive SharePoint Sites", Int64.Type}, {"Orphaned SharePoint Sites", Int64.Type}, {"Sites at 80%+ Quota", Int64.Type}, {"Evidence Status", type text}}, "en-US")
 				in
-				    Typed
-
+				    Typed)
+				in
+				    Readers[Finish](BusinessRows)

@@ -86,10 +86,33 @@ table 'All Devices Evidence'
 		lineageTag: fb76432d-9f39-4fa3-b49e-36f3e5b23c1b
 		summarizeBy: none
 
+	/// Actual prepared batch used by this query. Technical provenance only; empty tables have no observable batch.
+	column 'Loaded Batch ID'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 8c44fcbd-4e34-4201-b675-a638294df6e7
+		summarizeBy: none
+		sourceColumn: Loaded Batch ID
+
 	partition 'All Devices Evidence' = m
 		mode: import
 		source =
 				let
+				    Readers = CreatePreparedReaders(),
+				    GetPreparedEvidenceFile = Readers[GetPreparedEvidenceFile],
+				    GetPreparedBatchManifest = Readers[GetPreparedBatchManifest],
+				    GetLicenseReportQualification = Readers[GetLicenseReportQualification],
+				    LicenseReportFileUsable = Readers[LicenseReportFileUsable],
+				    GetLicenseReportSnapshot = Readers[GetLicenseReportSnapshot],
+				    GetLicenseReportCsv = Readers[GetLicenseReportCsv],
+				    ReadMigrationCsv = Readers[ReadMigrationCsv],
+				    CreateMailboxMigrationReader = Readers[CreateMailboxMigrationReader],
+				    ReadMailboxMigrationCsv = Readers[ReadMailboxMigrationCsv],
+				    ReadMigrationWeeklyHistory = Readers[ReadMigrationWeeklyHistory],
+				    GetSharePointOnPremCsv = Readers[GetSharePointOnPremCsv],
+				    GetSharePointMigrationEvidence = Readers[GetSharePointMigrationEvidence],
+				    BusinessRows = (let
 				    Source = ReadMigrationCsv(GetPreparedEvidenceFile("AllDevicesEvidence.csv"), {"TenantKey", "Device Key", "Inventory Source", "Platform", "Country", "Country Basis", "Match Basis", "AD Observation UTC", "Intune Observation UTC"}),
 				    Selected = Table.SelectColumns(Source, {"TenantKey", "Device Key", "Inventory Source", "Platform", "Country", "Country Basis", "Match Basis", "AD Observation UTC", "Intune Observation UTC"}),
 				    Typed = Table.TransformColumnTypes(Selected, {{"TenantKey", type text}, {"Device Key", type text}, {"Inventory Source", type text}, {"Platform", type text}, {"Country", type text}, {"Country Basis", type text}, {"Match Basis", type text}, {"AD Observation UTC", type text}, {"Intune Observation UTC", type text}}),
@@ -98,5 +121,6 @@ table 'All Devices Evidence'
 				    in DateTimeZone.ToText(DateTimeZone.SwitchZone(Parsed, 0), "yyyy-MM-dd'T'HH:mm:ss'Z'", "en-US"),
 				    NormalizedUtc = Table.TransformColumns(Typed, {{"AD Observation UTC", NormalizeUtc, type text}, {"Intune Observation UTC", NormalizeUtc, type text}})
 				in
-				    NormalizedUtc
-
+				    NormalizedUtc)
+				in
+				    Readers[Finish](BusinessRows)

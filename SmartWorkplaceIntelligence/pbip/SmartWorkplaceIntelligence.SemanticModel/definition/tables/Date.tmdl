@@ -95,10 +95,33 @@ table Date
 		lineageTag: c6de11a2-30fd-4386-bbfe-ae02adad89b2
 		summarizeBy: none
 
+	/// Actual prepared batch used by this query. Technical provenance only; empty tables have no observable batch.
+	column 'Loaded Batch ID'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 57f9d619-0f00-4695-aef1-955d6892aef3
+		summarizeBy: none
+		sourceColumn: Loaded Batch ID
+
 	partition 'Date Import' = m
 		mode: import
 		source =
 				let
+				    Readers = CreatePreparedReaders(),
+				    GetPreparedEvidenceFile = Readers[GetPreparedEvidenceFile],
+				    GetPreparedBatchManifest = Readers[GetPreparedBatchManifest],
+				    GetLicenseReportQualification = Readers[GetLicenseReportQualification],
+				    LicenseReportFileUsable = Readers[LicenseReportFileUsable],
+				    GetLicenseReportSnapshot = Readers[GetLicenseReportSnapshot],
+				    GetLicenseReportCsv = Readers[GetLicenseReportCsv],
+				    ReadMigrationCsv = Readers[ReadMigrationCsv],
+				    CreateMailboxMigrationReader = Readers[CreateMailboxMigrationReader],
+				    ReadMailboxMigrationCsv = Readers[ReadMailboxMigrationCsv],
+				    ReadMigrationWeeklyHistory = Readers[ReadMigrationWeeklyHistory],
+				    GetSharePointOnPremCsv = Readers[GetSharePointOnPremCsv],
+				    GetSharePointMigrationEvidence = Readers[GetSharePointMigrationEvidence],
+				    BusinessRows = (let
 				    Native = Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("DimDate.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]),
 				    NativeDates = List.Transform(Table.Column(Native, "Date"), each Date.FromText(_, [Culture="en-US"])),
 				    StartDate = List.Min({#date(2025, 6, 25)} & NativeDates),
@@ -115,4 +138,6 @@ table Date
 				    AddReportingPeriod = Table.AddColumn(AddYear, "Reporting Period", each Date.ToText([Date], "yyyy-MM", "en-US"), type text),
 				    Reordered = Table.ReorderColumns(AddReportingPeriod, {"Date Key", "Date", "Month Start", "Month", "Month Number", "Quarter", "Year", "Reporting Period"})
 				in
-				    Reordered
+				    Reordered)
+				in
+				    Readers[Finish](BusinessRows)

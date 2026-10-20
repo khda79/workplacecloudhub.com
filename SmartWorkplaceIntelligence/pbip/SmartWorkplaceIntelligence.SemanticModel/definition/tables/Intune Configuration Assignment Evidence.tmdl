@@ -135,10 +135,33 @@ table 'Intune Configuration Assignment Evidence'
 		summarizeBy: none
 		sourceColumn: Policy Key
 
+	/// Actual prepared batch used by this query. Technical provenance only; empty tables have no observable batch.
+	column 'Loaded Batch ID'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 51d6348c-f729-450f-80f9-e6473fe75f09
+		summarizeBy: none
+		sourceColumn: Loaded Batch ID
+
 	partition 'Intune Configuration Assignment Evidence' = m
 		mode: import
 		source =
 				let
+				    Readers = CreatePreparedReaders(),
+				    GetPreparedEvidenceFile = Readers[GetPreparedEvidenceFile],
+				    GetPreparedBatchManifest = Readers[GetPreparedBatchManifest],
+				    GetLicenseReportQualification = Readers[GetLicenseReportQualification],
+				    LicenseReportFileUsable = Readers[LicenseReportFileUsable],
+				    GetLicenseReportSnapshot = Readers[GetLicenseReportSnapshot],
+				    GetLicenseReportCsv = Readers[GetLicenseReportCsv],
+				    ReadMigrationCsv = Readers[ReadMigrationCsv],
+				    CreateMailboxMigrationReader = Readers[CreateMailboxMigrationReader],
+				    ReadMailboxMigrationCsv = Readers[ReadMailboxMigrationCsv],
+				    ReadMigrationWeeklyHistory = Readers[ReadMigrationWeeklyHistory],
+				    GetSharePointOnPremCsv = Readers[GetSharePointOnPremCsv],
+				    GetSharePointMigrationEvidence = Readers[GetSharePointMigrationEvidence],
+				    BusinessRows = (let
 				    Raw = ReadMigrationCsv(GetPreparedEvidenceFile("IntuneConfigurationAssignmentEvidence.csv"), {"TenantKey", "EvidenceKey", "ReceiptRunId", "BusinessRunId", "SourceFile", "SourceSHA256", "SourceRecord", "CollectionUTC", "PolicyId", "PolicyFamily", "AssignmentId", "TargetType", "GroupId", "AssignmentFilterId", "AssignmentFilterType", "CatalogMatch"}),
 				    Selected = Table.SelectColumns(Raw, {"TenantKey", "EvidenceKey", "ReceiptRunId", "BusinessRunId", "SourceFile", "SourceSHA256", "SourceRecord", "CollectionUTC", "PolicyId", "PolicyFamily", "AssignmentId", "TargetType", "GroupId", "AssignmentFilterId", "AssignmentFilterType", "CatalogMatch"}),
 				    Tenants = List.Distinct(Selected[TenantKey]),
@@ -148,5 +171,6 @@ table 'Intune Configuration Assignment Evidence'
 				    Typed = Table.TransformColumns(Validated, {{"TenantKey", each _, type nullable text}, {"EvidenceKey", each _, type nullable text}, {"ReceiptRunId", each _, type nullable text}, {"BusinessRunId", each _, type nullable text}, {"SourceFile", each _, type nullable text}, {"SourceSHA256", each _, type nullable text}, {"SourceRecord", each if _ = null or Text.Trim(_) = "" then null else Int64.From(Number.FromText(_, "en-US")), type nullable number}, {"CollectionUTC", ParseUtc, type nullable datetime}, {"PolicyId", each _, type nullable text}, {"PolicyFamily", each _, type nullable text}, {"AssignmentId", each _, type nullable text}, {"TargetType", each _, type nullable text}, {"GroupId", each _, type nullable text}, {"AssignmentFilterId", each _, type nullable text}, {"AssignmentFilterType", each _, type nullable text}, {"CatalogMatch", each _, type nullable text}}),
 				    WithPolicyKey = Table.AddColumn(Typed, "Policy Key", each Key({[TenantKey], [PolicyId]}), type nullable text)
 				in
-				    WithPolicyKey
-
+				    WithPolicyKey)
+				in
+				    Readers[Finish](BusinessRows)

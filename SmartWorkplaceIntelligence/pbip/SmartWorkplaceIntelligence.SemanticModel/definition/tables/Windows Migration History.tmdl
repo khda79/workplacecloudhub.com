@@ -62,11 +62,34 @@ table 'Windows Migration History'
 		lineageTag: 71f9f8d0-60e8-403c-a928-172570e47a92
 		sourceColumn: Evidence Note
 
+	/// Actual prepared batch used by this query. Technical provenance only; empty tables have no observable batch.
+	column 'Loaded Batch ID'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 07f097e0-7b66-4cc7-a17f-9a317686d0cc
+		summarizeBy: none
+		sourceColumn: Loaded Batch ID
+
 	/// Normal SmartM365 local inputs through DataRoot / PreparedEvidenceRoot. No dependency on frozen report-validation JSON. Source qualification is retained; no collection is triggered.
 	partition 'Windows Migration History' = m
 		mode: import
-		source = ```
+		source =
 				let
+				    Readers = CreatePreparedReaders(),
+				    GetPreparedEvidenceFile = Readers[GetPreparedEvidenceFile],
+				    GetPreparedBatchManifest = Readers[GetPreparedBatchManifest],
+				    GetLicenseReportQualification = Readers[GetLicenseReportQualification],
+				    LicenseReportFileUsable = Readers[LicenseReportFileUsable],
+				    GetLicenseReportSnapshot = Readers[GetLicenseReportSnapshot],
+				    GetLicenseReportCsv = Readers[GetLicenseReportCsv],
+				    ReadMigrationCsv = Readers[ReadMigrationCsv],
+				    CreateMailboxMigrationReader = Readers[CreateMailboxMigrationReader],
+				    ReadMailboxMigrationCsv = Readers[ReadMailboxMigrationCsv],
+				    ReadMigrationWeeklyHistory = Readers[ReadMigrationWeeklyHistory],
+				    GetSharePointOnPremCsv = Readers[GetSharePointOnPremCsv],
+				    GetSharePointMigrationEvidence = Readers[GetSharePointMigrationEvidence],
+				    BusinessRows = (let
 				    Prepared = ReadMigrationCsv(GetPreparedEvidenceFile("WindowsMigrationEvidence.csv"), {"TenantKey"}),
 				    Tenants = List.Distinct(Prepared[TenantKey]),
 				    Tenant = if List.Count(Tenants) = 1 and Tenants{0} <> null and Text.Trim(Tenants{0}) <> "" then Tenants{0} else error "Prepared device evidence must have one tenant",
@@ -88,6 +111,6 @@ table 'Windows Migration History'
 				    Result = Table.FromRecords(List.Transform(Snapshots, Project), {"Snapshot Date", "Snapshot Week", "Windows 10 Devices", "Windows 11 Devices", "Excluded Ambiguous Keys", "Evidence Status", "Evidence Note"}, MissingField.Error)
 				in
 				    Table.TransformColumnTypes(Result, {{"Snapshot Date", type date}, {"Windows 10 Devices", type number}, {"Windows 11 Devices", type number}, {"Excluded Ambiguous Keys", type number}}, "en-US")
-				
-				```
-
+				)
+				in
+				    Readers[Finish](BusinessRows)

@@ -126,14 +126,38 @@ table 'Workforce Trend Evidence'
 		summarizeBy: sum
 		sourceColumn: Confirmed Human Users
 
+	/// Actual prepared batch used by this query. Technical provenance only; empty tables have no observable batch.
+	column 'Loaded Batch ID'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: f19cce30-612a-4da7-8b09-0cc437946a12
+		summarizeBy: none
+		sourceColumn: Loaded Batch ID
+
 	partition 'Workforce Trend Evidence Import' = m
 		mode: import
 		source =
 				let
+				    Readers = CreatePreparedReaders(),
+				    GetPreparedEvidenceFile = Readers[GetPreparedEvidenceFile],
+				    GetPreparedBatchManifest = Readers[GetPreparedBatchManifest],
+				    GetLicenseReportQualification = Readers[GetLicenseReportQualification],
+				    LicenseReportFileUsable = Readers[LicenseReportFileUsable],
+				    GetLicenseReportSnapshot = Readers[GetLicenseReportSnapshot],
+				    GetLicenseReportCsv = Readers[GetLicenseReportCsv],
+				    ReadMigrationCsv = Readers[ReadMigrationCsv],
+				    CreateMailboxMigrationReader = Readers[CreateMailboxMigrationReader],
+				    ReadMailboxMigrationCsv = Readers[ReadMailboxMigrationCsv],
+				    ReadMigrationWeeklyHistory = Readers[ReadMigrationWeeklyHistory],
+				    GetSharePointOnPremCsv = Readers[GetSharePointOnPremCsv],
+				    GetSharePointMigrationEvidence = Readers[GetSharePointMigrationEvidence],
+				    BusinessRows = (let
 				    Raw = Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("WorkforceTrendEvidence.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]),
 				    Selected = Table.SelectColumns(Raw, {"Snapshot Date", "Date Key", "Week Label", "Enabled Workforce Accounts", "Activity Covered Users", "Activity Evidence Coverage", "Active Workforce", "Accounts Without Activity >30D", "Evidence Status", "Confirmed Human Users"}),
 				    Nulls = Table.ReplaceValue(Selected, "", null, Replacer.ReplaceValue, {"Snapshot Date", "Date Key", "Enabled Workforce Accounts", "Activity Covered Users", "Activity Evidence Coverage", "Active Workforce", "Accounts Without Activity >30D", "Confirmed Human Users"}),
 				    Typed = Table.TransformColumnTypes(Nulls, {{"Snapshot Date", type datetime}, {"Date Key", Int64.Type}, {"Week Label", type text}, {"Enabled Workforce Accounts", Int64.Type}, {"Activity Covered Users", Int64.Type}, {"Activity Evidence Coverage", type number}, {"Active Workforce", Int64.Type}, {"Accounts Without Activity >30D", Int64.Type}, {"Evidence Status", type text}, {"Confirmed Human Users", Int64.Type}}, "en-US")
 				in
-				    Typed
-
+				    Typed)
+				in
+				    Readers[Finish](BusinessRows)

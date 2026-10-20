@@ -720,10 +720,33 @@ table 'License Report Summary'
 		summarizeBy: none
 		sourceColumn: Assignment Evidence Status
 
+	/// Actual prepared batch used by this query. Technical provenance only; empty tables have no observable batch.
+	column 'Loaded Batch ID'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: d6bec7c2-058c-4837-849f-001d391600d6
+		summarizeBy: none
+		sourceColumn: Loaded Batch ID
+
 	partition 'License Report Summary Import' = m
 		mode: import
 		source =
 				let
+				    Readers = CreatePreparedReaders(),
+				    GetPreparedEvidenceFile = Readers[GetPreparedEvidenceFile],
+				    GetPreparedBatchManifest = Readers[GetPreparedBatchManifest],
+				    GetLicenseReportQualification = Readers[GetLicenseReportQualification],
+				    LicenseReportFileUsable = Readers[LicenseReportFileUsable],
+				    GetLicenseReportSnapshot = Readers[GetLicenseReportSnapshot],
+				    GetLicenseReportCsv = Readers[GetLicenseReportCsv],
+				    ReadMigrationCsv = Readers[ReadMigrationCsv],
+				    CreateMailboxMigrationReader = Readers[CreateMailboxMigrationReader],
+				    ReadMailboxMigrationCsv = Readers[ReadMailboxMigrationCsv],
+				    ReadMigrationWeeklyHistory = Readers[ReadMigrationWeeklyHistory],
+				    GetSharePointOnPremCsv = Readers[GetSharePointOnPremCsv],
+				    GetSharePointMigrationEvidence = Readers[GetSharePointMigrationEvidence],
+				    BusinessRows = (let
 				    Raw = GetLicenseReportCsv("M365_Licenses_ReportSummary.csv", {"SnapshotId", "TenantKey", "GeneratedAtUtc", "LicenseCollectedAtUtc", "Product", "Category", "EnabledUnits", "ConsumedUnits", "AvailableUnits", "Subscribed", "AssignedUsers", "RecoveryCandidates", "RecoveryUnknown", "DisabledUsers", "DisabledUnknown", "NoM365Activity", "NoM365ActivityUnknown", "MultipleTargetSuites", "MultipleTargetSuitesUnknown", "MultipleAssignedSkus", "MultipleAssignedSkusUnknown", "NoAdOrEntraActivity", "NoAdOrEntraActivityUnknown", "NoMailboxActivity", "NoMailboxActivityUnknown", "NoLocalAppsUse", "NoLocalAppsUseUnknown", "CandidatesPrimaryIntunePc", "CandidatesPrimaryIntunePcUnknown", "SharedMailboxesLicensed", "SharedUnder50Gb", "SharedRemovalCandidates", "SharedUnknown", "E3ToF3ReviewAssigned", "E3ToF3ReviewCandidates", "E3ToF3ReviewUnknown", "E3ToF3ReviewExcluded", "E3ToF3ReviewRecoveryExcluded", "EvidenceStatus", "WorkbookQualification"}),
 				    RowCheck = if not LicenseReportFileUsable("M365_Licenses_ReportSummary.csv") or Table.RowCount(Raw) >= 7 then Raw else error "License report CSV has too few rows",
 				    NonBlank = Table.ReplaceValue(RowCheck, "", null, Replacer.ReplaceValue, {"EnabledUnits", "ConsumedUnits", "AvailableUnits", "AssignedUsers", "RecoveryCandidates", "RecoveryUnknown", "DisabledUsers", "DisabledUnknown", "NoM365Activity", "NoM365ActivityUnknown", "MultipleTargetSuites", "MultipleTargetSuitesUnknown", "MultipleAssignedSkus", "MultipleAssignedSkusUnknown", "NoAdOrEntraActivity", "NoAdOrEntraActivityUnknown", "NoMailboxActivity", "NoMailboxActivityUnknown", "NoLocalAppsUse", "NoLocalAppsUseUnknown", "CandidatesPrimaryIntunePc", "CandidatesPrimaryIntunePcUnknown", "SharedMailboxesLicensed", "SharedUnder50Gb", "SharedRemovalCandidates", "SharedUnknown", "E3ToF3ReviewAssigned", "E3ToF3ReviewCandidates", "E3ToF3ReviewUnknown", "E3ToF3ReviewExcluded", "E3ToF3ReviewRecoveryExcluded", "GeneratedAtUtc"}),
@@ -732,5 +755,6 @@ table 'License Report Summary'
 				    Selected = Table.ReplaceValue(WithAssignments, "N/D", "Unknown", Replacer.ReplaceValue, {"Assignment Evidence Status"}),
 				    Typed = Table.TransformColumnTypes(Selected, {{"Assignment Capacity Wait", Int64.Type}, {"Assignment Other Errors", Int64.Type}, {"Enabled Units", Int64.Type}, {"Consumed Units", Int64.Type}, {"Available Units", Int64.Type}, {"Assigned Users", Int64.Type}, {"Recovery Candidates", Int64.Type}, {"Recovery Unknown", Int64.Type}, {"Disabled Users", Int64.Type}, {"Disabled Unknown", Int64.Type}, {"No M365 Activity", Int64.Type}, {"No M365 Activity Unknown", Int64.Type}, {"Multiple Target Suites", Int64.Type}, {"Multiple Target Suites Unknown", Int64.Type}, {"Multiple Assigned SKUs", Int64.Type}, {"Multiple Assigned SKUs Unknown", Int64.Type}, {"No AD or Entra Activity", Int64.Type}, {"No AD or Entra Activity Unknown", Int64.Type}, {"No Mailbox Activity", Int64.Type}, {"No Mailbox Activity Unknown", Int64.Type}, {"No Local Apps Use", Int64.Type}, {"No Local Apps Use Unknown", Int64.Type}, {"Candidates Primary Intune PC", Int64.Type}, {"Candidates Primary Intune PC Unknown", Int64.Type}, {"Shared Mailboxes Licensed", Int64.Type}, {"Shared Under 50 GB", Int64.Type}, {"Shared Removal Candidates", Int64.Type}, {"Shared Unknown", Int64.Type}, {"E3 to F3 Review Assigned", Int64.Type}, {"E3 to F3 Review Candidates", Int64.Type}, {"E3 to F3 Review Unknown", Int64.Type}, {"E3 to F3 Review Excluded", Int64.Type}, {"E3 to F3 Review Recovery Excluded", Int64.Type}, {"Generated At UTC", type datetime}}, "en-US")
 				in
-				    Typed
-
+				    Typed)
+				in
+				    Readers[Finish](BusinessRows)

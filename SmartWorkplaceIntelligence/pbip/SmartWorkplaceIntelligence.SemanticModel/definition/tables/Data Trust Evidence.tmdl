@@ -263,14 +263,38 @@ table 'Data Trust Evidence'
 
 		annotation SummarizationSetBy = Automatic
 
+	/// Actual prepared batch used by this query. Technical provenance only; empty tables have no observable batch.
+	column 'Loaded Batch ID'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 04b55749-121c-40de-9bc0-09ba8344b0f3
+		summarizeBy: none
+		sourceColumn: Loaded Batch ID
+
 	partition 'Data Trust Evidence Import' = m
 		mode: import
 		source =
 				let
+				    Readers = CreatePreparedReaders(),
+				    GetPreparedEvidenceFile = Readers[GetPreparedEvidenceFile],
+				    GetPreparedBatchManifest = Readers[GetPreparedBatchManifest],
+				    GetLicenseReportQualification = Readers[GetLicenseReportQualification],
+				    LicenseReportFileUsable = Readers[LicenseReportFileUsable],
+				    GetLicenseReportSnapshot = Readers[GetLicenseReportSnapshot],
+				    GetLicenseReportCsv = Readers[GetLicenseReportCsv],
+				    ReadMigrationCsv = Readers[ReadMigrationCsv],
+				    CreateMailboxMigrationReader = Readers[CreateMailboxMigrationReader],
+				    ReadMailboxMigrationCsv = Readers[ReadMailboxMigrationCsv],
+				    ReadMigrationWeeklyHistory = Readers[ReadMigrationWeeklyHistory],
+				    GetSharePointOnPremCsv = Readers[GetSharePointOnPremCsv],
+				    GetSharePointMigrationEvidence = Readers[GetSharePointMigrationEvidence],
+				    BusinessRows = (let
 				    Raw = Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("DataTrustEvidence.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]),
 				    Selected = Table.SelectColumns(Raw, {"Source Key", "Evidence Domain", "Source Name", "File Name", "File State", "Schema State", "Expected Columns", "Missing Columns", "Row Count", "Column Count", "Snapshot Date", "Snapshot Basis", "Evidence Age Days", "Freshness State", "Decision Readiness", "Evidence Status", "Recommended Action", "Read Error"}),
 				    Nulls = Table.ReplaceValue(Selected, "", null, Replacer.ReplaceValue, {"Row Count", "Column Count", "Snapshot Date", "Evidence Age Days"}),
 				    Typed = Table.TransformColumnTypes(Nulls, {{"Source Key", type text}, {"Evidence Domain", type text}, {"Source Name", type text}, {"File Name", type text}, {"File State", type text}, {"Schema State", type text}, {"Expected Columns", type text}, {"Missing Columns", type text}, {"Row Count", Int64.Type}, {"Column Count", Int64.Type}, {"Snapshot Date", type datetime}, {"Snapshot Basis", type text}, {"Evidence Age Days", Int64.Type}, {"Freshness State", type text}, {"Decision Readiness", type text}, {"Evidence Status", type text}, {"Recommended Action", type text}, {"Read Error", type text}}, "en-US")
 				in
-				    Typed
-
+				    Typed)
+				in
+				    Readers[Finish](BusinessRows)

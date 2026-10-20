@@ -108,11 +108,35 @@ table 'Teams Site Links'
 		summarizeBy: none
 		sourceColumn: Collected UTC
 
+	/// Actual prepared batch used by this query. Technical provenance only; empty tables have no observable batch.
+	column 'Loaded Batch ID'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: b14be578-a5ed-4d3d-97e7-a70c8c1dc4ad
+		summarizeBy: none
+		sourceColumn: Loaded Batch ID
+
 	partition 'Teams Site Links' = m
 		mode: import
 		source =
 				let
+				    Readers = CreatePreparedReaders(),
+				    GetPreparedEvidenceFile = Readers[GetPreparedEvidenceFile],
+				    GetPreparedBatchManifest = Readers[GetPreparedBatchManifest],
+				    GetLicenseReportQualification = Readers[GetLicenseReportQualification],
+				    LicenseReportFileUsable = Readers[LicenseReportFileUsable],
+				    GetLicenseReportSnapshot = Readers[GetLicenseReportSnapshot],
+				    GetLicenseReportCsv = Readers[GetLicenseReportCsv],
+				    ReadMigrationCsv = Readers[ReadMigrationCsv],
+				    CreateMailboxMigrationReader = Readers[CreateMailboxMigrationReader],
+				    ReadMailboxMigrationCsv = Readers[ReadMailboxMigrationCsv],
+				    ReadMigrationWeeklyHistory = Readers[ReadMigrationWeeklyHistory],
+				    GetSharePointOnPremCsv = Readers[GetSharePointOnPremCsv],
+				    GetSharePointMigrationEvidence = Readers[GetSharePointMigrationEvidence],
+				    BusinessRows = (let
 				 Source = Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("TeamsSiteLinkEvidence.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]),
 				 Typed = NativeEvidenceTypes(Source, {[name="TenantKey", dataType="String"], [name="Link Key", dataType="String"], [name="Team ID", dataType="String"], [name="Team", dataType="String"], [name="Channel ID", dataType="String"], [name="Channel", dataType="String"], [name="Link Type", dataType="String"], [name="Site ID", dataType="String"], [name="Link Status", dataType="String"], [name="Resolution", dataType="String"], [name="Site URL", dataType="String"], [name="Receipt Run ID", dataType="String"], [name="Business Run ID", dataType="String"], [name="Collected UTC", dataType="DateTime"]})
-				in Typed
-
+				in Typed)
+				in
+				    Readers[Finish](BusinessRows)

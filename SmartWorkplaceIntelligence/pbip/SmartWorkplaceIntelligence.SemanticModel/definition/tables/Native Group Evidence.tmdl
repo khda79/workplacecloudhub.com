@@ -146,7 +146,32 @@ table 'Native Group Evidence'
 		summarizeBy: none
 		sourceColumn: ObservedPathStatus
 
+	/// Actual prepared batch used by this query. Technical provenance only; empty tables have no observable batch.
+	column 'Loaded Batch ID'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 391d8666-3e8b-420c-80b6-b179b56570e0
+		summarizeBy: none
+		sourceColumn: Loaded Batch ID
+
 	partition 'Native Group Evidence' = m
 		mode: import
-		source = NativeEvidenceTypes(Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("DimGroup.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]), {[name="TenantKey", dataType="String"], [name="OrganizationKey", dataType="String"], [name="EnvironmentKey", dataType="String"], [name="TenantId", dataType="String"], [name="TenantGroupKey", dataType="String"], [name="CmdbGroupId", dataType="String"], [name="DisplayName", dataType="String"], [name="MailEnabled", dataType="Boolean"], [name="SecurityEnabled", dataType="Boolean"], [name="GroupTypes", dataType="String"], [name="GroupSelection", dataType="String"], [name="SourceGroupId", dataType="String"], [name="MemberStatus", dataType="String"], [name="OwnerStatus", dataType="String"], [name="SourceCollectedDateTime", dataType="DateTime"], [name="ObservedPathCount", dataType="Int64"], [name="ObservedPathStatus", dataType="String"]})
-
+		source =
+				let
+				    Readers = CreatePreparedReaders(),
+				    GetPreparedEvidenceFile = Readers[GetPreparedEvidenceFile],
+				    GetPreparedBatchManifest = Readers[GetPreparedBatchManifest],
+				    GetLicenseReportQualification = Readers[GetLicenseReportQualification],
+				    LicenseReportFileUsable = Readers[LicenseReportFileUsable],
+				    GetLicenseReportSnapshot = Readers[GetLicenseReportSnapshot],
+				    GetLicenseReportCsv = Readers[GetLicenseReportCsv],
+				    ReadMigrationCsv = Readers[ReadMigrationCsv],
+				    CreateMailboxMigrationReader = Readers[CreateMailboxMigrationReader],
+				    ReadMailboxMigrationCsv = Readers[ReadMailboxMigrationCsv],
+				    ReadMigrationWeeklyHistory = Readers[ReadMigrationWeeklyHistory],
+				    GetSharePointOnPremCsv = Readers[GetSharePointOnPremCsv],
+				    GetSharePointMigrationEvidence = Readers[GetSharePointMigrationEvidence],
+				    BusinessRows = (NativeEvidenceTypes(Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("DimGroup.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]), {[name="TenantKey", dataType="String"], [name="OrganizationKey", dataType="String"], [name="EnvironmentKey", dataType="String"], [name="TenantId", dataType="String"], [name="TenantGroupKey", dataType="String"], [name="CmdbGroupId", dataType="String"], [name="DisplayName", dataType="String"], [name="MailEnabled", dataType="Boolean"], [name="SecurityEnabled", dataType="Boolean"], [name="GroupTypes", dataType="String"], [name="GroupSelection", dataType="String"], [name="SourceGroupId", dataType="String"], [name="MemberStatus", dataType="String"], [name="OwnerStatus", dataType="String"], [name="SourceCollectedDateTime", dataType="DateTime"], [name="ObservedPathCount", dataType="Int64"], [name="ObservedPathStatus", dataType="String"]}))
+				in
+				    Readers[Finish](BusinessRows)

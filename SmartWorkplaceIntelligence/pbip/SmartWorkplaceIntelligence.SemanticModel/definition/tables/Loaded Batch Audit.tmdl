@@ -1,0 +1,158 @@
+/// One row per prepared query, derived from imported columns only. Empty tables cannot expose their batch.
+table 'Loaded Batch Audit'
+	isHidden
+	lineageTag: a3225076-67ea-4ab0-ad56-548f7628b8b2
+
+	column 'Table Name'
+		dataType: string
+		isHidden
+		lineageTag: f8c31ba1-c38f-499e-8ad7-0a24e6095b94
+		summarizeBy: none
+		sourceColumn: [Table Name]
+
+	column 'Loaded Batch ID'
+		dataType: string
+		isHidden
+		lineageTag: 2c45886c-9084-4924-9fe9-3bb52fb15400
+		summarizeBy: none
+		sourceColumn: [Loaded Batch ID]
+
+	column 'Loaded Rows'
+		dataType: int64
+		isHidden
+		lineageTag: 5c3e377d-63f3-4390-93fd-c28c30328db1
+		summarizeBy: none
+		sourceColumn: [Loaded Rows]
+
+	partition 'Loaded Batch Audit' = calculated
+		mode: import
+		source =
+				UNION(
+				ROW("Table Name", "AD Computer Evidence", "Loaded Batch ID", MAXX('AD Computer Evidence', 'AD Computer Evidence'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('AD Computer Evidence')),
+				ROW("Table Name", "AD Domain Evidence", "Loaded Batch ID", MAXX('AD Domain Evidence', 'AD Domain Evidence'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('AD Domain Evidence')),
+				ROW("Table Name", "AD Group Evidence", "Loaded Batch ID", MAXX('AD Group Evidence', 'AD Group Evidence'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('AD Group Evidence')),
+				ROW("Table Name", "AD Membership Evidence", "Loaded Batch ID", MAXX('AD Membership Evidence', 'AD Membership Evidence'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('AD Membership Evidence')),
+				ROW("Table Name", "AD Object Evidence", "Loaded Batch ID", MAXX('AD Object Evidence', 'AD Object Evidence'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('AD Object Evidence')),
+				ROW("Table Name", "AD User Evidence", "Loaded Batch ID", MAXX('AD User Evidence', 'AD User Evidence'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('AD User Evidence')),
+				ROW("Table Name", "All Accounts Evidence", "Loaded Batch ID", MAXX('All Accounts Evidence', 'All Accounts Evidence'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('All Accounts Evidence')),
+				ROW("Table Name", "All Devices Evidence", "Loaded Batch ID", MAXX('All Devices Evidence', 'All Devices Evidence'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('All Devices Evidence')),
+				ROW("Table Name", "Application Inventory Evidence", "Loaded Batch ID", MAXX('Application Inventory Evidence', 'Application Inventory Evidence'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Application Inventory Evidence')),
+				ROW("Table Name", "Application Trend Evidence", "Loaded Batch ID", MAXX('Application Trend Evidence', 'Application Trend Evidence'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Application Trend Evidence')),
+				ROW("Table Name", "Autopilot Evidence", "Loaded Batch ID", MAXX('Autopilot Evidence', 'Autopilot Evidence'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Autopilot Evidence')),
+				ROW("Table Name", "Backup Mailbox Evidence", "Loaded Batch ID", MAXX('Backup Mailbox Evidence', 'Backup Mailbox Evidence'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Backup Mailbox Evidence')),
+				ROW("Table Name", "Collaboration Adoption Evidence", "Loaded Batch ID", MAXX('Collaboration Adoption Evidence', 'Collaboration Adoption Evidence'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Collaboration Adoption Evidence')),
+				ROW("Table Name", "Collaboration Object Evidence", "Loaded Batch ID", MAXX('Collaboration Object Evidence', 'Collaboration Object Evidence'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Collaboration Object Evidence')),
+				ROW("Table Name", "Collaboration Source Qualification", "Loaded Batch ID", MAXX('Collaboration Source Qualification', 'Collaboration Source Qualification'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Collaboration Source Qualification')),
+				ROW("Table Name", "Collaboration Trend Evidence", "Loaded Batch ID", MAXX('Collaboration Trend Evidence', 'Collaboration Trend Evidence'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Collaboration Trend Evidence')),
+				ROW("Table Name", "Content Storage Evidence", "Loaded Batch ID", MAXX('Content Storage Evidence', 'Content Storage Evidence'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Content Storage Evidence')),
+				ROW("Table Name", "Content Storage Trend Evidence", "Loaded Batch ID", MAXX('Content Storage Trend Evidence', 'Content Storage Trend Evidence'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Content Storage Trend Evidence')),
+				ROW("Table Name", "Daily Directory Trends", "Loaded Batch ID", MAXX('Daily Directory Trends', 'Daily Directory Trends'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Daily Directory Trends')),
+				ROW("Table Name", "Daily Mailbox Trends", "Loaded Batch ID", MAXX('Daily Mailbox Trends', 'Daily Mailbox Trends'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Daily Mailbox Trends')),
+				ROW("Table Name", "Data Trust Evidence", "Loaded Batch ID", MAXX('Data Trust Evidence', 'Data Trust Evidence'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Data Trust Evidence')),
+				ROW("Table Name", "Date", "Loaded Batch ID", MAXX('Date', 'Date'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Date')),
+				ROW("Table Name", "Device Directory Summary", "Loaded Batch ID", MAXX('Device Directory Summary', 'Device Directory Summary'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Device Directory Summary')),
+				ROW("Table Name", "Device Inventory Evidence", "Loaded Batch ID", MAXX('Device Inventory Evidence', 'Device Inventory Evidence'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Device Inventory Evidence')),
+				ROW("Table Name", "Device Risk Evidence Summary", "Loaded Batch ID", MAXX('Device Risk Evidence Summary', 'Device Risk Evidence Summary'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Device Risk Evidence Summary')),
+				ROW("Table Name", "Device Source Evidence", "Loaded Batch ID", MAXX('Device Source Evidence', 'Device Source Evidence'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Device Source Evidence')),
+				ROW("Table Name", "Device System Evidence", "Loaded Batch ID", MAXX('Device System Evidence', 'Device System Evidence'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Device System Evidence')),
+				ROW("Table Name", "Endpoint Experience Trend Evidence", "Loaded Batch ID", MAXX('Endpoint Experience Trend Evidence', 'Endpoint Experience Trend Evidence'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Endpoint Experience Trend Evidence')),
+				ROW("Table Name", "Endpoint Protection Evidence", "Loaded Batch ID", MAXX('Endpoint Protection Evidence', 'Endpoint Protection Evidence'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Endpoint Protection Evidence')),
+				ROW("Table Name", "Endpoint Protection Policy", "Loaded Batch ID", MAXX('Endpoint Protection Policy', 'Endpoint Protection Policy'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Endpoint Protection Policy')),
+				ROW("Table Name", "Entra Membership Evidence", "Loaded Batch ID", MAXX('Entra Membership Evidence', 'Entra Membership Evidence'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Entra Membership Evidence')),
+				ROW("Table Name", "Executive KPI Trends", "Loaded Batch ID", MAXX('Executive KPI Trends', 'Executive KPI Trends'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Executive KPI Trends')),
+				ROW("Table Name", "Hardware Coverage Evidence", "Loaded Batch ID", MAXX('Hardware Coverage Evidence', 'Hardware Coverage Evidence'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Hardware Coverage Evidence')),
+				ROW("Table Name", "Identity Reconciliation Evidence", "Loaded Batch ID", MAXX('Identity Reconciliation Evidence', 'Identity Reconciliation Evidence'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Identity Reconciliation Evidence')),
+				ROW("Table Name", "Intune Configuration Assignment Evidence", "Loaded Batch ID", MAXX('Intune Configuration Assignment Evidence', 'Intune Configuration Assignment Evidence'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Intune Configuration Assignment Evidence')),
+				ROW("Table Name", "Intune Configuration Device Evidence", "Loaded Batch ID", MAXX('Intune Configuration Device Evidence', 'Intune Configuration Device Evidence'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Intune Configuration Device Evidence')),
+				ROW("Table Name", "Intune Configuration Policy Evidence", "Loaded Batch ID", MAXX('Intune Configuration Policy Evidence', 'Intune Configuration Policy Evidence'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Intune Configuration Policy Evidence')),
+				ROW("Table Name", "Intune Configuration Setting Evidence", "Loaded Batch ID", MAXX('Intune Configuration Setting Evidence', 'Intune Configuration Setting Evidence'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Intune Configuration Setting Evidence')),
+				ROW("Table Name", "Intune Enrollment Failure Evidence", "Loaded Batch ID", MAXX('Intune Enrollment Failure Evidence', 'Intune Enrollment Failure Evidence'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Intune Enrollment Failure Evidence')),
+				ROW("Table Name", "Intune Managed App Assignment Evidence", "Loaded Batch ID", MAXX('Intune Managed App Assignment Evidence', 'Intune Managed App Assignment Evidence'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Intune Managed App Assignment Evidence')),
+				ROW("Table Name", "Intune Managed App Deployment Evidence", "Loaded Batch ID", MAXX('Intune Managed App Deployment Evidence', 'Intune Managed App Deployment Evidence'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Intune Managed App Deployment Evidence')),
+				ROW("Table Name", "Intune Managed App Evidence", "Loaded Batch ID", MAXX('Intune Managed App Evidence', 'Intune Managed App Evidence'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Intune Managed App Evidence')),
+				ROW("Table Name", "Intune Operational Source Evidence", "Loaded Batch ID", MAXX('Intune Operational Source Evidence', 'Intune Operational Source Evidence'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Intune Operational Source Evidence')),
+				ROW("Table Name", "License Report Assignment Issues", "Loaded Batch ID", MAXX('License Report Assignment Issues', 'License Report Assignment Issues'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('License Report Assignment Issues')),
+				ROW("Table Name", "License Report Candidates", "Loaded Batch ID", MAXX('License Report Candidates', 'License Report Candidates'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('License Report Candidates')),
+				ROW("Table Name", "License Report Gaps", "Loaded Batch ID", MAXX('License Report Gaps', 'License Report Gaps'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('License Report Gaps')),
+				ROW("Table Name", "License Report Qualification", "Loaded Batch ID", MAXX('License Report Qualification', 'License Report Qualification'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('License Report Qualification')),
+				ROW("Table Name", "License Report Sources", "Loaded Batch ID", MAXX('License Report Sources', 'License Report Sources'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('License Report Sources')),
+				ROW("Table Name", "License Report Summary", "Loaded Batch ID", MAXX('License Report Summary', 'License Report Summary'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('License Report Summary')),
+				ROW("Table Name", "License SKU Candidates", "Loaded Batch ID", MAXX('License SKU Candidates', 'License SKU Candidates'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('License SKU Candidates')),
+				ROW("Table Name", "License SKU Capacity", "Loaded Batch ID", MAXX('License SKU Capacity', 'License SKU Capacity'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('License SKU Capacity')),
+				ROW("Table Name", "Mailbox Evidence", "Loaded Batch ID", MAXX('Mailbox Evidence', 'Mailbox Evidence'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Mailbox Evidence')),
+				ROW("Table Name", "Mailbox Migration Batches", "Loaded Batch ID", MAXX('Mailbox Migration Batches', 'Mailbox Migration Batches'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Mailbox Migration Batches')),
+				ROW("Table Name", "Mailbox Migration Exception Summary", "Loaded Batch ID", MAXX('Mailbox Migration Exception Summary', 'Mailbox Migration Exception Summary'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Mailbox Migration Exception Summary')),
+				ROW("Table Name", "Mailbox Migration Exceptions", "Loaded Batch ID", MAXX('Mailbox Migration Exceptions', 'Mailbox Migration Exceptions'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Mailbox Migration Exceptions')),
+				ROW("Table Name", "Mailbox Migration Inventory", "Loaded Batch ID", MAXX('Mailbox Migration Inventory', 'Mailbox Migration Inventory'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Mailbox Migration Inventory')),
+				ROW("Table Name", "Mailbox Migration Weekly History", "Loaded Batch ID", MAXX('Mailbox Migration Weekly History', 'Mailbox Migration Weekly History'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Mailbox Migration Weekly History')),
+				ROW("Table Name", "Native AD Intune Coverage", "Loaded Batch ID", MAXX('Native AD Intune Coverage', 'Native AD Intune Coverage'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Native AD Intune Coverage')),
+				ROW("Table Name", "Native Application Ranking", "Loaded Batch ID", MAXX('Native Application Ranking', 'Native Application Ranking'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Native Application Ranking')),
+				ROW("Table Name", "Native Compliance Evidence", "Loaded Batch ID", MAXX('Native Compliance Evidence', 'Native Compliance Evidence'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Native Compliance Evidence')),
+				ROW("Table Name", "Native Configuration Catalog", "Loaded Batch ID", MAXX('Native Configuration Catalog', 'Native Configuration Catalog'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Native Configuration Catalog')),
+				ROW("Table Name", "Native Country Evidence", "Loaded Batch ID", MAXX('Native Country Evidence', 'Native Country Evidence'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Native Country Evidence')),
+				ROW("Table Name", "Native Device Application", "Loaded Batch ID", MAXX('Native Device Application', 'Native Device Application'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Native Device Application')),
+				ROW("Table Name", "Native Device Evidence", "Loaded Batch ID", MAXX('Native Device Evidence', 'Native Device Evidence'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Native Device Evidence')),
+				ROW("Table Name", "Native Discovered Application", "Loaded Batch ID", MAXX('Native Discovered Application', 'Native Discovered Application'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Native Discovered Application')),
+				ROW("Table Name", "Native EXO Mailbox", "Loaded Batch ID", MAXX('Native EXO Mailbox', 'Native EXO Mailbox'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Native EXO Mailbox')),
+				ROW("Table Name", "Native Endpoint Score Evidence", "Loaded Batch ID", MAXX('Native Endpoint Score Evidence', 'Native Endpoint Score Evidence'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Native Endpoint Score Evidence')),
+				ROW("Table Name", "Native Entity Finding", "Loaded Batch ID", MAXX('Native Entity Finding', 'Native Entity Finding'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Native Entity Finding')),
+				ROW("Table Name", "Native Group Evidence", "Loaded Batch ID", MAXX('Native Group Evidence', 'Native Group Evidence'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Native Group Evidence')),
+				ROW("Table Name", "Native Hardware Evidence", "Loaded Batch ID", MAXX('Native Hardware Evidence', 'Native Hardware Evidence'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Native Hardware Evidence')),
+				ROW("Table Name", "Native Hybrid Coverage", "Loaded Batch ID", MAXX('Native Hybrid Coverage', 'Native Hybrid Coverage'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Native Hybrid Coverage')),
+				ROW("Table Name", "Native License Assignment", "Loaded Batch ID", MAXX('Native License Assignment', 'Native License Assignment'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Native License Assignment')),
+				ROW("Table Name", "Native License SKU", "Loaded Batch ID", MAXX('Native License SKU', 'Native License SKU'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Native License SKU')),
+				ROW("Table Name", "Native Mailbox Hosting", "Loaded Batch ID", MAXX('Native Mailbox Hosting', 'Native Mailbox Hosting'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Native Mailbox Hosting')),
+				ROW("Table Name", "Native Managed Device Evidence", "Loaded Batch ID", MAXX('Native Managed Device Evidence', 'Native Managed Device Evidence'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Native Managed Device Evidence')),
+				ROW("Table Name", "Native Quality Finding", "Loaded Batch ID", MAXX('Native Quality Finding', 'Native Quality Finding'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Native Quality Finding')),
+				ROW("Table Name", "Native Relationship Summary", "Loaded Batch ID", MAXX('Native Relationship Summary', 'Native Relationship Summary'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Native Relationship Summary')),
+				ROW("Table Name", "Native Service Plan", "Loaded Batch ID", MAXX('Native Service Plan', 'Native Service Plan'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Native Service Plan')),
+				ROW("Table Name", "Native SharePoint Site", "Loaded Batch ID", MAXX('Native SharePoint Site', 'Native SharePoint Site'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Native SharePoint Site')),
+				ROW("Table Name", "Native Source Health", "Loaded Batch ID", MAXX('Native Source Health', 'Native Source Health'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Native Source Health')),
+				ROW("Table Name", "Native Team", "Loaded Batch ID", MAXX('Native Team', 'Native Team'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Native Team')),
+				ROW("Table Name", "Native Team Membership", "Loaded Batch ID", MAXX('Native Team Membership', 'Native Team Membership'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Native Team Membership')),
+				ROW("Table Name", "Native Update Alert Evidence", "Loaded Batch ID", MAXX('Native Update Alert Evidence', 'Native Update Alert Evidence'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Native Update Alert Evidence')),
+				ROW("Table Name", "Native Update Policy Evidence", "Loaded Batch ID", MAXX('Native Update Policy Evidence', 'Native Update Policy Evidence'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Native Update Policy Evidence')),
+				ROW("Table Name", "Native Upgrade Eligibility", "Loaded Batch ID", MAXX('Native Upgrade Eligibility', 'Native Upgrade Eligibility'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Native Upgrade Eligibility')),
+				ROW("Table Name", "Native User Device Link", "Loaded Batch ID", MAXX('Native User Device Link', 'Native User Device Link'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Native User Device Link')),
+				ROW("Table Name", "Native User Evidence", "Loaded Batch ID", MAXX('Native User Evidence', 'Native User Evidence'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Native User Evidence')),
+				ROW("Table Name", "Native User License", "Loaded Batch ID", MAXX('Native User License', 'Native User License'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Native User License')),
+				ROW("Table Name", "Native User Service Plan", "Loaded Batch ID", MAXX('Native User Service Plan', 'Native User Service Plan'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Native User Service Plan')),
+				ROW("Table Name", "Native Workload Activity", "Loaded Batch ID", MAXX('Native Workload Activity', 'Native Workload Activity'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Native Workload Activity')),
+				ROW("Table Name", "SPO Migration Business Unit", "Loaded Batch ID", MAXX('SPO Migration Business Unit', 'SPO Migration Business Unit'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('SPO Migration Business Unit')),
+				ROW("Table Name", "SPO Migration Collection", "Loaded Batch ID", MAXX('SPO Migration Collection', 'SPO Migration Collection'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('SPO Migration Collection')),
+				ROW("Table Name", "SPO Migration Findings", "Loaded Batch ID", MAXX('SPO Migration Findings', 'SPO Migration Findings'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('SPO Migration Findings')),
+				ROW("Table Name", "SPO Migration History", "Loaded Batch ID", MAXX('SPO Migration History', 'SPO Migration History'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('SPO Migration History')),
+				ROW("Table Name", "SPO Migration Legacy Collection", "Loaded Batch ID", MAXX('SPO Migration Legacy Collection', 'SPO Migration Legacy Collection'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('SPO Migration Legacy Collection')),
+				ROW("Table Name", "SPO Migration Legacy Web", "Loaded Batch ID", MAXX('SPO Migration Legacy Web', 'SPO Migration Legacy Web'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('SPO Migration Legacy Web')),
+				ROW("Table Name", "SPO Migration Operation", "Loaded Batch ID", MAXX('SPO Migration Operation', 'SPO Migration Operation'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('SPO Migration Operation')),
+				ROW("Table Name", "SPO Migration Phase", "Loaded Batch ID", MAXX('SPO Migration Phase', 'SPO Migration Phase'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('SPO Migration Phase')),
+				ROW("Table Name", "SPO Migration Plan", "Loaded Batch ID", MAXX('SPO Migration Plan', 'SPO Migration Plan'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('SPO Migration Plan')),
+				ROW("Table Name", "SPO Migration Project", "Loaded Batch ID", MAXX('SPO Migration Project', 'SPO Migration Project'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('SPO Migration Project')),
+				ROW("Table Name", "SPO Migration Scope", "Loaded Batch ID", MAXX('SPO Migration Scope', 'SPO Migration Scope'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('SPO Migration Scope')),
+				ROW("Table Name", "SPO Migration Snapshot Date", "Loaded Batch ID", MAXX('SPO Migration Snapshot Date', 'SPO Migration Snapshot Date'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('SPO Migration Snapshot Date')),
+				ROW("Table Name", "SPO Migration Source Summary", "Loaded Batch ID", MAXX('SPO Migration Source Summary', 'SPO Migration Source Summary'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('SPO Migration Source Summary')),
+				ROW("Table Name", "SPO Migration Source Type", "Loaded Batch ID", MAXX('SPO Migration Source Type', 'SPO Migration Source Type'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('SPO Migration Source Type')),
+				ROW("Table Name", "SPO Migration Web", "Loaded Batch ID", MAXX('SPO Migration Web', 'SPO Migration Web'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('SPO Migration Web')),
+				ROW("Table Name", "Security Control Evidence", "Loaded Batch ID", MAXX('Security Control Evidence', 'Security Control Evidence'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Security Control Evidence')),
+				ROW("Table Name", "SharePoint On-prem Collection Coverage", "Loaded Batch ID", MAXX('SharePoint On-prem Collection Coverage', 'SharePoint On-prem Collection Coverage'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('SharePoint On-prem Collection Coverage')),
+				ROW("Table Name", "SharePoint On-prem Content Databases", "Loaded Batch ID", MAXX('SharePoint On-prem Content Databases', 'SharePoint On-prem Content Databases'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('SharePoint On-prem Content Databases')),
+				ROW("Table Name", "SharePoint On-prem Farms", "Loaded Batch ID", MAXX('SharePoint On-prem Farms', 'SharePoint On-prem Farms'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('SharePoint On-prem Farms')),
+				ROW("Table Name", "SharePoint On-prem Servers", "Loaded Batch ID", MAXX('SharePoint On-prem Servers', 'SharePoint On-prem Servers'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('SharePoint On-prem Servers')),
+				ROW("Table Name", "SharePoint On-prem Service Applications", "Loaded Batch ID", MAXX('SharePoint On-prem Service Applications', 'SharePoint On-prem Service Applications'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('SharePoint On-prem Service Applications')),
+				ROW("Table Name", "SharePoint On-prem Site Collections", "Loaded Batch ID", MAXX('SharePoint On-prem Site Collections', 'SharePoint On-prem Site Collections'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('SharePoint On-prem Site Collections')),
+				ROW("Table Name", "SharePoint On-prem Web Applications", "Loaded Batch ID", MAXX('SharePoint On-prem Web Applications', 'SharePoint On-prem Web Applications'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('SharePoint On-prem Web Applications')),
+				ROW("Table Name", "SharePoint On-prem Web Zones", "Loaded Batch ID", MAXX('SharePoint On-prem Web Zones', 'SharePoint On-prem Web Zones'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('SharePoint On-prem Web Zones')),
+				ROW("Table Name", "SharePoint Site Links", "Loaded Batch ID", MAXX('SharePoint Site Links', 'SharePoint Site Links'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('SharePoint Site Links')),
+				ROW("Table Name", "SharePoint Tenant Capacity", "Loaded Batch ID", MAXX('SharePoint Tenant Capacity', 'SharePoint Tenant Capacity'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('SharePoint Tenant Capacity')),
+				ROW("Table Name", "Teams Site Links", "Loaded Batch ID", MAXX('Teams Site Links', 'Teams Site Links'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Teams Site Links')),
+				ROW("Table Name", "Tenant Evidence", "Loaded Batch ID", MAXX('Tenant Evidence', 'Tenant Evidence'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Tenant Evidence')),
+				ROW("Table Name", "User Activity History Evidence", "Loaded Batch ID", MAXX('User Activity History Evidence', 'User Activity History Evidence'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('User Activity History Evidence')),
+				ROW("Table Name", "User Inventory Evidence", "Loaded Batch ID", MAXX('User Inventory Evidence', 'User Inventory Evidence'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('User Inventory Evidence')),
+				ROW("Table Name", "Verified Domain Evidence", "Loaded Batch ID", MAXX('Verified Domain Evidence', 'Verified Domain Evidence'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Verified Domain Evidence')),
+				ROW("Table Name", "Windows Lifecycle Trend Evidence", "Loaded Batch ID", MAXX('Windows Lifecycle Trend Evidence', 'Windows Lifecycle Trend Evidence'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Windows Lifecycle Trend Evidence')),
+				ROW("Table Name", "Windows Migration AD Observations", "Loaded Batch ID", MAXX('Windows Migration AD Observations', 'Windows Migration AD Observations'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Windows Migration AD Observations')),
+				ROW("Table Name", "Windows Migration Evidence", "Loaded Batch ID", MAXX('Windows Migration Evidence', 'Windows Migration Evidence'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Windows Migration Evidence')),
+				ROW("Table Name", "Windows Migration History", "Loaded Batch ID", MAXX('Windows Migration History', 'Windows Migration History'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Windows Migration History')),
+				ROW("Table Name", "Workforce Operational Signals", "Loaded Batch ID", MAXX('Workforce Operational Signals', 'Workforce Operational Signals'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Workforce Operational Signals')),
+				ROW("Table Name", "Workforce Trend Evidence", "Loaded Batch ID", MAXX('Workforce Trend Evidence', 'Workforce Trend Evidence'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Workforce Trend Evidence'))
+				)

@@ -322,7 +322,32 @@ table 'Native User Evidence'
 		lineageTag: 0b9d8f5c-d36a-40c1-9a01-20ed16768571
 		summarizeBy: none
 
+	/// Actual prepared batch used by this query. Technical provenance only; empty tables have no observable batch.
+	column 'Loaded Batch ID'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: cde536d9-02cd-4bb8-ae10-4f996ef5818b
+		summarizeBy: none
+		sourceColumn: Loaded Batch ID
+
 	partition 'Native User Evidence' = m
 		mode: import
-		source = NativeEvidenceTypes(Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("DimUser.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]), {[name="TenantKey", dataType="String"], [name="OrganizationKey", dataType="String"], [name="EnvironmentKey", dataType="String"], [name="TenantId", dataType="String"], [name="TenantUserKey", dataType="String"], [name="CmdbUserId", dataType="String"], [name="UserPrincipalName", dataType="String"], [name="DisplayName", dataType="String"], [name="AccountEnabled", dataType="Boolean"], [name="UserType", dataType="String"], [name="Department", dataType="String"], [name="JobTitle", dataType="String"], [name="CountryCode", dataType="String"], [name="CountryLabel", dataType="String"], [name="CountryStatus", dataType="String"], [name="LastSignInDateTime", dataType="DateTime", allowSourceWallClock=true], [name="LastNonInteractiveSignInDateTime", dataType="DateTime", allowSourceWallClock=true], [name="LastSuccessfulSignInDateTime", dataType="DateTime", allowSourceWallClock=true], [name="ActivityState", dataType="String"], [name="ConfidenceScore", dataType="Double"], [name="AccountStatusLabel", dataType="String"], [name="DisplayNameLabel", dataType="String"], [name="UserPrincipalNameLabel", dataType="String"], [name="DepartmentLabel", dataType="String"], [name="UserTypeLabel", dataType="String"], [name="UserSelection", dataType="String"], [name="SourceUserId", dataType="String"], [name="CreationRaw", dataType="String"], [name="CreationUtcDateTime", dataType="DateTime"], [name="CreationStatus", dataType="String"], [name="SourceCollectedDateTime", dataType="DateTime"], [name="ManagerStatus", dataType="String"], [name="UserActivityStatus", dataType="String"]})
-
+		source =
+				let
+				    Readers = CreatePreparedReaders(),
+				    GetPreparedEvidenceFile = Readers[GetPreparedEvidenceFile],
+				    GetPreparedBatchManifest = Readers[GetPreparedBatchManifest],
+				    GetLicenseReportQualification = Readers[GetLicenseReportQualification],
+				    LicenseReportFileUsable = Readers[LicenseReportFileUsable],
+				    GetLicenseReportSnapshot = Readers[GetLicenseReportSnapshot],
+				    GetLicenseReportCsv = Readers[GetLicenseReportCsv],
+				    ReadMigrationCsv = Readers[ReadMigrationCsv],
+				    CreateMailboxMigrationReader = Readers[CreateMailboxMigrationReader],
+				    ReadMailboxMigrationCsv = Readers[ReadMailboxMigrationCsv],
+				    ReadMigrationWeeklyHistory = Readers[ReadMigrationWeeklyHistory],
+				    GetSharePointOnPremCsv = Readers[GetSharePointOnPremCsv],
+				    GetSharePointMigrationEvidence = Readers[GetSharePointMigrationEvidence],
+				    BusinessRows = (NativeEvidenceTypes(Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("DimUser.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]), {[name="TenantKey", dataType="String"], [name="OrganizationKey", dataType="String"], [name="EnvironmentKey", dataType="String"], [name="TenantId", dataType="String"], [name="TenantUserKey", dataType="String"], [name="CmdbUserId", dataType="String"], [name="UserPrincipalName", dataType="String"], [name="DisplayName", dataType="String"], [name="AccountEnabled", dataType="Boolean"], [name="UserType", dataType="String"], [name="Department", dataType="String"], [name="JobTitle", dataType="String"], [name="CountryCode", dataType="String"], [name="CountryLabel", dataType="String"], [name="CountryStatus", dataType="String"], [name="LastSignInDateTime", dataType="DateTime", allowSourceWallClock=true], [name="LastNonInteractiveSignInDateTime", dataType="DateTime", allowSourceWallClock=true], [name="LastSuccessfulSignInDateTime", dataType="DateTime", allowSourceWallClock=true], [name="ActivityState", dataType="String"], [name="ConfidenceScore", dataType="Double"], [name="AccountStatusLabel", dataType="String"], [name="DisplayNameLabel", dataType="String"], [name="UserPrincipalNameLabel", dataType="String"], [name="DepartmentLabel", dataType="String"], [name="UserTypeLabel", dataType="String"], [name="UserSelection", dataType="String"], [name="SourceUserId", dataType="String"], [name="CreationRaw", dataType="String"], [name="CreationUtcDateTime", dataType="DateTime"], [name="CreationStatus", dataType="String"], [name="SourceCollectedDateTime", dataType="DateTime"], [name="ManagerStatus", dataType="String"], [name="UserActivityStatus", dataType="String"]}))
+				in
+				    Readers[Finish](BusinessRows)

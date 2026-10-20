@@ -197,10 +197,33 @@ table 'Native Discovered Application'
 		lineageTag: 1f135a10-b4b2-4a04-ab08-88f879bcb3bc
 		summarizeBy: none
 
+	/// Actual prepared batch used by this query. Technical provenance only; empty tables have no observable batch.
+	column 'Loaded Batch ID'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 810395d5-f009-4c22-bac5-a4448ef99f8a
+		summarizeBy: none
+		sourceColumn: Loaded Batch ID
+
 	partition 'Native Discovered Application' = m
 		mode: import
 		source =
 				let
+				    Readers = CreatePreparedReaders(),
+				    GetPreparedEvidenceFile = Readers[GetPreparedEvidenceFile],
+				    GetPreparedBatchManifest = Readers[GetPreparedBatchManifest],
+				    GetLicenseReportQualification = Readers[GetLicenseReportQualification],
+				    LicenseReportFileUsable = Readers[LicenseReportFileUsable],
+				    GetLicenseReportSnapshot = Readers[GetLicenseReportSnapshot],
+				    GetLicenseReportCsv = Readers[GetLicenseReportCsv],
+				    ReadMigrationCsv = Readers[ReadMigrationCsv],
+				    CreateMailboxMigrationReader = Readers[CreateMailboxMigrationReader],
+				    ReadMailboxMigrationCsv = Readers[ReadMailboxMigrationCsv],
+				    ReadMigrationWeeklyHistory = Readers[ReadMigrationWeeklyHistory],
+				    GetSharePointOnPremCsv = Readers[GetSharePointOnPremCsv],
+				    GetSharePointMigrationEvidence = Readers[GetSharePointMigrationEvidence],
+				    BusinessRows = (let
 				    Source = NativeEvidenceTypes(Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("DimDetectedApplication.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]), {[name="TenantKey", dataType="String"], [name="OrganizationKey", dataType="String"], [name="EnvironmentKey", dataType="String"], [name="TenantId", dataType="String"], [name="TenantApplicationKey", dataType="String"], [name="AppId", dataType="String"], [name="SourceApplicationKey", dataType="String"], [name="DisplayName", dataType="String"], [name="Version", dataType="String"], [name="Publisher", dataType="String"], [name="DeviceCount", dataType="Int64"], [name="ReportedDeviceCount", dataType="Int64"], [name="ExactRelatedDeviceCount", dataType="Int64"], [name="ResolvedDeviceCount", dataType="Int64"], [name="UnresolvedDeviceCount", dataType="Int64"], [name="RelationshipCoverageStatus", dataType="String"], [name="Platform", dataType="String"], [name="SourceCollectedDateTime", dataType="DateTime"]}),
 				    // Preserve the established product identity: strip/casefold(name, publisher, platform).
 				    // Unicode 16.0 casefold mapping; intrinsic constant, no external reader or CSV mutation.
@@ -214,5 +237,6 @@ table 'Native Discovered Application'
 				            {Normalize([DisplayName]), Normalize([Publisher]), Normalize([Platform])},
 				            TextEncoding.Utf8), BinaryEncoding.Hex)), type text)
 				in
-				    WithProductKey
-
+				    WithProductKey)
+				in
+				    Readers[Finish](BusinessRows)

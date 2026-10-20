@@ -136,10 +136,33 @@ table 'SharePoint On-prem Content Databases'
 		lineageTag: 7d0e45ce-1365-4a44-b6cb-82f2d76365fb
 		sourceColumn: Content Database Key
 
+	/// Actual prepared batch used by this query. Technical provenance only; empty tables have no observable batch.
+	column 'Loaded Batch ID'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: ccd61785-0421-4c5b-9317-bd4bb4e51394
+		summarizeBy: none
+		sourceColumn: Loaded Batch ID
+
 	partition 'SharePoint On-prem Content Databases' = m
 		mode: import
 		source =
 				let
+				    Readers = CreatePreparedReaders(),
+				    GetPreparedEvidenceFile = Readers[GetPreparedEvidenceFile],
+				    GetPreparedBatchManifest = Readers[GetPreparedBatchManifest],
+				    GetLicenseReportQualification = Readers[GetLicenseReportQualification],
+				    LicenseReportFileUsable = Readers[LicenseReportFileUsable],
+				    GetLicenseReportSnapshot = Readers[GetLicenseReportSnapshot],
+				    GetLicenseReportCsv = Readers[GetLicenseReportCsv],
+				    ReadMigrationCsv = Readers[ReadMigrationCsv],
+				    CreateMailboxMigrationReader = Readers[CreateMailboxMigrationReader],
+				    ReadMailboxMigrationCsv = Readers[ReadMailboxMigrationCsv],
+				    ReadMigrationWeeklyHistory = Readers[ReadMigrationWeeklyHistory],
+				    GetSharePointOnPremCsv = Readers[GetSharePointOnPremCsv],
+				    GetSharePointMigrationEvidence = Readers[GetSharePointMigrationEvidence],
+				    BusinessRows = (let
 				    Raw = GetSharePointOnPremCsv("SharePoint_OnPrem_ContentDatabases.csv", {"TenantKey", "FarmId", "RunId", "WebApplicationId", "ContentDatabaseId", "Name", "DatabaseServer", "Status", "SiteCollectionCount", "IsReadOnly", "CollectionStatus", "DatabaseSizeStatus", "NeedsUpgradeIncludeChildren", "NeedsUpgradeStatus"}, {}),
 				    Nulls = Table.ReplaceValue(Raw, "", null, Replacer.ReplaceValue, {"SiteCollectionCount"}),
 				    Typed = Table.TransformColumnTypes(Nulls, {{"SiteCollectionCount", Int64.Type}}, "en-US"),
@@ -148,5 +171,6 @@ table 'SharePoint On-prem Content Databases'
 				    DbKey = Table.AddColumn(WebKey, "Content Database Key", each [TenantKey] & "|" & [FarmId] & "|" & [ContentDatabaseId], type text),
 				    Renamed = Table.RenameColumns(DbKey, {{"TenantKey", "Tenant Key"}, {"FarmId", "Farm ID"}, {"RunId", "Run ID"}, {"WebApplicationId", "Web Application ID"}, {"ContentDatabaseId", "Content Database ID"}, {"Name", "Content Database"}, {"DatabaseServer", "Database Server"}, {"Status", "Database Status"}, {"SiteCollectionCount", "Reported Site Collection Count"}, {"IsReadOnly", "Database Read Only"}, {"CollectionStatus", "Collection Status"}, {"DatabaseSizeStatus", "Database Size Status"}, {"NeedsUpgradeIncludeChildren", "Needs Upgrade"}, {"NeedsUpgradeStatus", "Upgrade Evidence Status"}})
 				in
-				    Renamed
-
+				    Renamed)
+				in
+				    Readers[Finish](BusinessRows)

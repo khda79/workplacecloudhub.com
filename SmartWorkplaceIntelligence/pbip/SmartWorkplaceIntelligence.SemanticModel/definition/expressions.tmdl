@@ -40,325 +40,52 @@ expression PreparedSharePointFolder = "DATA-POWERBI" meta [IsParameterQuery=true
 
 	annotation PBI_ResultType = Text
 
-/// Requires an explicit immutable reviewed batch and expected tenant. Reads only declared batch tables/artifacts, checks size and pointer tenant. SHA256 verified by preparation and transfer, not recomputed by M.
-expression GetPreparedEvidenceFile =
-		(fileName as text) as binary =>
-		let
-		    SafeSegment = (s as text) as text => if s = "" or Text.Contains(s, "/") or Text.Contains(s, "\") or Text.Contains(s, "..") then error "Invalid prepared path segment" else s,
-		    ReadFolder = (segments as list) as table =>
-		        if PreparedSourceMode = "Local" then
-		            Folder.Contents(Text.TrimEnd(PreparedEvidenceRoot, {"\", "/"}) & (if List.IsEmpty(segments) then "" else "\" & Text.Combine(List.Transform(segments, SafeSegment), "\")))
-		        else if PreparedSourceMode = "SharePoint" then
-		            let
-		                Root = SharePoint.Contents(SharePointSiteUrl, [ApiVersion=15]),
-		                Path = {SharePointLibraryName} & List.Select(Text.Split(SharePointDataFolder & "/" & PreparedSharePointFolder, "/"), each _ <> "") & List.Transform(segments, SafeSegment),
-		                Content = List.Accumulate(Path, Root, (parent, segment) =>
-		                    let found = Table.SelectRows(parent, each [Name] = segment)
-		                    in if Table.RowCount(found) = 1 then found{0}[Content] else error Error.Record("Prepared evidence", "Missing or ambiguous folder; wait for a complete batch", segment))
-		            in Content
-		        else error "PreparedSourceMode must be Local or SharePoint",
-		    ReadBinary = (segments as list) as binary =>
-		        if PreparedSourceMode = "Local" then
-		            File.Contents(Text.TrimEnd(PreparedEvidenceRoot, {"\", "/"}) & "\" & Text.Combine(List.Transform(segments, SafeSegment), "\"))
-		        else
-		            let
-		                Parent = ReadFolder(List.RemoveLastN(segments, 1)),
-		                Found = Table.SelectRows(Parent, each [Name] = SafeSegment(List.Last(segments)))
-		            in if Table.RowCount(Found) = 1 then Found{0}[Content] else error "Missing or ambiguous prepared file",
-		    ReadMetadata = (segments as list, name as text) as binary =>
-		        let
-		            Parent = ReadFolder(segments),
-		            Preferred = Table.SelectRows(Parent, each [Name] = name & ".json.txt"),
-		            Legacy = Table.SelectRows(Parent, each [Name] = name & ".json"),
-		            // Fallback only on ABSENCE, never after a read or JSON parse error.
-		            Selected = if Table.RowCount(Preferred) = 0 then Legacy else Preferred
-		        in if Table.RowCount(Selected) = 1 then Binary.Buffer(Selected{0}[Content]) else error "Missing or ambiguous prepared metadata",
-		    RequiredPin = if Text.Trim(PreparedBatchId) = "" then error "Set PreparedBatchId to the reviewed immutable unified batch before refresh" else SafeSegment(PreparedBatchId),
-		    ExpectedTenant = if Text.Trim(PreparedExpectedTenantKey) = "" then error "PreparedExpectedTenantKey is required" else PreparedExpectedTenantKey,
-		    PointerBytes = if RequiredPin <> "" then ReadMetadata({}, "current") else error "Missing prepared batch pin",
-		    Pointer = Json.Document(PointerBytes),
-		    BatchId = RequiredPin,
-		    Manifest = Json.Document(ReadMetadata({"batches", BatchId}, "batch")),
-		    Selected = List.Select(Manifest[Files] & Record.FieldOrDefault(Manifest, "Artifacts", {}), each [File] = SafeSegment(fileName)),
-		    Entry = if Manifest[SchemaVersion] <> 1 or Manifest[BatchId] <> BatchId or Manifest[TenantKey] <> ExpectedTenant or Pointer[TenantKey] <> ExpectedTenant or List.Count(Selected) <> 1 then error "Invalid prepared batch manifest" else Selected{0},
-		    // Stream payloads: buffering an entire CSV exceeds the 2 GiB binary buffer limit.
-		    Content = ReadBinary({"batches", BatchId, SafeSegment(fileName)}),
-		    // Size guard rejects incomplete synchronized files. SHA256 is checked by the publisher, not by M.
-		    Checked = if Binary.Length(Content) <> Entry[Bytes] then error "Prepared evidence transfer incomplete; previous imported model must be retained" else Content,
-		    StablePointer = if PreparedBatchId <> "" or Binary.ToText(PointerBytes, BinaryEncoding.Base64) = Binary.ToText(ReadMetadata({}, "current"), BinaryEncoding.Base64) then Checked else error "Prepared batch changed during read; refresh after preparation finishes"
-		in
-		    StablePointer
+/// Read from one selected batch with existing schema and identity checks. Latest verifies pointer stability per read; loaded provenance detects cross-table mixtures.
+expression GetPreparedEvidenceFile = (fileName as text) as binary => CreatePreparedReaders()[GetPreparedEvidenceFile](fileName)
 	lineageTag: 1a2449ff-1655-4999-b5f5-61649746d24f
 
-/// Required immutable unified batch ID. Remains empty until the server batch is validated; refresh fails closed instead of mixing current pointers.
-expression PreparedBatchId = "" meta [IsParameterQuery=true, Type="Text", IsParameterQueryRequired=true]
+/// Latest selects the validated published pointer automatically. An explicit ID pins a batch. Cross-table consistency is reported from loaded provenance.
+expression PreparedBatchId = "Latest" meta [IsParameterQuery=true, Type="Text", IsParameterQueryRequired=true]
 	lineageTag: 340fbb26-2a1c-4c79-a41c-3e024ed2a776
 
 	annotation PBI_ResultType = Text
 
-/// Reads governed source artifacts from the same immutable DATA-POWERBI batch; original domain validation retained.
-/// Reads the pinned immutable batch manifest with the same pin, tenant and folder rules as GetPreparedEvidenceFile.
-expression GetPreparedBatchManifest =
-		() as record =>
-		let
-		    SafeSegment = (s as text) as text => if s = "" or Text.Contains(s, "/") or Text.Contains(s, "\") or Text.Contains(s, "..") then error "Invalid prepared path segment" else s,
-		    ReadFolder = (segments as list) as table =>
-		        if PreparedSourceMode = "Local" then
-		            Folder.Contents(Text.TrimEnd(PreparedEvidenceRoot, {"\", "/"}) & (if List.IsEmpty(segments) then "" else "\" & Text.Combine(List.Transform(segments, SafeSegment), "\")))
-		        else if PreparedSourceMode = "SharePoint" then
-		            let
-		                Root = SharePoint.Contents(SharePointSiteUrl, [ApiVersion=15]),
-		                Path = {SharePointLibraryName} & List.Select(Text.Split(SharePointDataFolder & "/" & PreparedSharePointFolder, "/"), each _ <> "") & List.Transform(segments, SafeSegment),
-		                Content = List.Accumulate(Path, Root, (parent, segment) =>
-		                    let found = Table.SelectRows(parent, each [Name] = segment)
-		                    in if Table.RowCount(found) = 1 then found{0}[Content] else error Error.Record("Prepared evidence", "Missing or ambiguous folder; wait for a complete batch", segment))
-		            in Content
-		        else error "PreparedSourceMode must be Local or SharePoint",
-		    ReadBinary = (segments as list) as binary =>
-		        if PreparedSourceMode = "Local" then
-		            File.Contents(Text.TrimEnd(PreparedEvidenceRoot, {"\", "/"}) & "\" & Text.Combine(List.Transform(segments, SafeSegment), "\"))
-		        else
-		            let
-		                Parent = ReadFolder(List.RemoveLastN(segments, 1)),
-		                Found = Table.SelectRows(Parent, each [Name] = SafeSegment(List.Last(segments)))
-		            in if Table.RowCount(Found) = 1 then Found{0}[Content] else error "Missing or ambiguous prepared file",
-		    ReadMetadata = (segments as list, name as text) as binary =>
-		        let
-		            Parent = ReadFolder(segments),
-		            Preferred = Table.SelectRows(Parent, each [Name] = name & ".json.txt"),
-		            Legacy = Table.SelectRows(Parent, each [Name] = name & ".json"),
-		            // Fallback only on ABSENCE, never after a read or JSON parse error.
-		            Selected = if Table.RowCount(Preferred) = 0 then Legacy else Preferred
-		        in if Table.RowCount(Selected) = 1 then Binary.Buffer(Selected{0}[Content]) else error "Missing or ambiguous prepared metadata",
-		    RequiredPin = if Text.Trim(PreparedBatchId) = "" then error "Set PreparedBatchId to the reviewed immutable unified batch before refresh" else SafeSegment(PreparedBatchId),
-		    ExpectedTenant = if Text.Trim(PreparedExpectedTenantKey) = "" then error "PreparedExpectedTenantKey is required" else PreparedExpectedTenantKey,
-		    Pointer = Json.Document(ReadMetadata({}, "current")),
-		    Manifest = Json.Document(ReadMetadata({"batches", RequiredPin}, "batch")),
-		    Checked = if Manifest[SchemaVersion] <> 1 or Manifest[BatchId] <> RequiredPin or Manifest[TenantKey] <> ExpectedTenant or Pointer[TenantKey] <> ExpectedTenant then error "Invalid prepared batch manifest" else Manifest
-		in
-		    Checked
+/// Read from one selected batch with existing schema and identity checks. Latest verifies pointer stability per read; loaded provenance detects cross-table mixtures.
+expression GetPreparedBatchManifest = () as record => CreatePreparedReaders()[GetPreparedBatchManifest]()
 	lineageTag: 3ee1d505-902a-4038-bff9-aeae20a42f30
 
-/// License report qualification recorded by the preparation: Qualified, Not qualified (lineage defect, tables empty) or Not verified (batch predates qualification).
-expression GetLicenseReportQualification =
-		() as record =>
-		let
-		    Manifest = GetPreparedBatchManifest(),
-		    Names = List.Transform(Manifest[Files] & Record.FieldOrDefault(Manifest, "Artifacts", {}), each [File]),
-		    ReportFiles = {"M365_Licenses_ReportSummary.csv", "M365_Licenses_ReportCandidates.csv", "M365_Licenses_ReportGaps.csv", "M365_Licenses_ReportSources.csv", "M365_Licenses_ReportAssignmentIssues.csv"},
-		    DecisionFiles = {"M365_Licenses_ReportSkuCandidates.csv", "M365_Licenses_ReportSkuCapacity.csv"},
-		    Raw = Record.FieldOrDefault(Manifest, "LicenseReportQualification", null),
-		    Legacy = List.Transform(ReportFiles & DecisionFiles, (name) =>
-		        let present = List.Contains(Names, "Source-" & name)
-		        in [File = name, Kind = if List.Contains(DecisionFiles, name) then "Decision" else "Report",
-		            State = if present then "Not verified" else "Absent",
-		            Reason = if present then "Batch predates license report qualification" else "Not part of this batch"]),
-		    Valid = Raw <> null and Record.FieldOrDefault(Raw, "Version", null) = 1 and
-		        List.Contains({"Qualified", "Not qualified"}, Record.FieldOrDefault(Raw, "State", null)) and Value.Is(Record.FieldOrDefault(Raw, "Files", null), type list),
-		    Result = if Raw = null then [State = "Not verified", Reason = "Batch predates license report qualification", SnapshotId = null, ReceiptRunId = null, Files = Legacy]
-		        else if not Valid then error Error.Record("License report qualification", "Invalid license report qualification in the batch manifest")
-		        else [State = Raw[State], Reason = Raw[Reason], SnapshotId = Raw[SnapshotId], ReceiptRunId = Raw[ReceiptRunId], Files = Raw[Files]]
-		in
-		    Result
+/// Read from one selected batch with existing schema and identity checks. Latest verifies pointer stability per read; loaded provenance detects cross-table mixtures.
+expression GetLicenseReportQualification = () as record => CreatePreparedReaders()[GetLicenseReportQualification]()
 	lineageTag: 2e82bd1a-e1ce-4971-947d-1042052a1d19
 
-/// True when the license report file may be shown: qualified by the current licensing receipt, or present in a batch that predates qualification (labelled Not verified).
-expression LicenseReportFileUsable =
-		(fileName as text) as logical =>
-		let
-		    Found = List.Select(GetLicenseReportQualification()[Files], each [File] = fileName),
-		    State = if List.Count(Found) = 1 then Found{0}[State] else "Absent"
-		in
-		    List.Contains({"Qualified", "Not verified"}, State)
+/// Read from one selected batch with existing schema and identity checks. Latest verifies pointer stability per read; loaded provenance detects cross-table mixtures.
+expression LicenseReportFileUsable = (fileName as text) as logical => CreatePreparedReaders()[LicenseReportFileUsable](fileName)
 	lineageTag: 3b6414b6-c0b8-483a-a9b4-e14a292e84b8
 
-expression GetLicenseReportSnapshot =
-		() as record =>
-		let
-		    FileName = "M365_Licenses_ReportSnapshot.json.txt",
-		    Content = GetPreparedEvidenceFile("Source-" & FileName),
-		    Snapshot = Json.Document(Binary.Buffer(Content)),
-		    SchemaVersion = Record.FieldOrDefault(Snapshot, "SchemaVersion", null),
-		    SupportedVersion = List.Contains({1, 2}, SchemaVersion),
-		    BaseValid = try
-		        Text.Length(Text.From(Snapshot[SnapshotId])) = 32 and
-		        Text.Length(Text.Trim(Text.From(Snapshot[TenantKey]))) > 0 and
-		        Value.Is(Snapshot[Products], type list) and List.Count(Snapshot[Products]) = 4 and
-		        Value.Is(Snapshot[OtherProducts], type list) and List.Count(Snapshot[OtherProducts]) = 3
-		        otherwise false,
-		    AssignmentValid = if SchemaVersion = 1 then true else try
-		        Value.Is(Snapshot[AssignmentIssues], type record) and
-		        Value.Is(Snapshot[AssignmentIssues][Available], type logical) and
-		        Value.Is(Snapshot[AssignmentIssues][Rows], type list) and
-		        (if Snapshot[AssignmentIssues][Available]
-		            then Value.Is(Snapshot[AssignmentIssues][Counts], type record)
-		            else List.IsEmpty(Snapshot[AssignmentIssues][Rows]))
-		        otherwise false,
-		    Checked = if not SupportedVersion then
-		        error Error.Record("License report snapshot", "Unsupported SmartInventory license report snapshot schema version", [Actual=SchemaVersion, Supported={1, 2}])
-		        else if BaseValid <> true or AssignmentValid <> true then
-		        error Error.Record("License report snapshot", "Invalid SmartInventory license report snapshot structure", [SchemaVersion=SchemaVersion])
-		        else Snapshot
-		in
-		    Checked
+/// Read from one selected batch with existing schema and identity checks. Latest verifies pointer stability per read; loaded provenance detects cross-table mixtures.
+expression GetLicenseReportSnapshot = () as record => CreatePreparedReaders()[GetLicenseReportSnapshot]()
 	lineageTag: 62c7ccc9-3b11-4ab8-aeda-9be8e172c2d3
 
-/// Reads governed source artifacts from the same immutable DATA-POWERBI batch; original domain validation retained.
-expression GetLicenseReportCsv =
-		(fileName as text, expectedColumns as list) as table =>
-		let
-		    Allowed = {"M365_Licenses_ReportSummary.csv", "M365_Licenses_ReportCandidates.csv", "M365_Licenses_ReportGaps.csv", "M365_Licenses_ReportSources.csv", "M365_Licenses_ReportAssignmentIssues.csv", "M365_Licenses_ReportSkuCandidates.csv", "M365_Licenses_ReportSkuCapacity.csv"},
-		    // Not qualified or absent files are never read: the table is empty, not an older value.
-		    Usable = if not List.Contains(Allowed, fileName) then error "Unexpected license report CSV" else LicenseReportFileUsable(fileName),
-		    Content = GetPreparedEvidenceFile("Source-" & fileName),
-		    // Accept only the legacy summary and its exact assignment-status extension.
-		    Buffered = Binary.Buffer(Content),
-		    Raw = Csv.Document(Buffered, [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv, ExtraValues=ExtraValues.Error]),
-		    Header = if Table.IsEmpty(Raw) then error "License report CSV is empty" else Record.FieldValues(Raw{0}),
-		    ExtendedColumns = if fileName = "M365_Licenses_ReportSummary.csv" and List.Count(expectedColumns) = 40
-		        and expectedColumns{10} = "AssignedUsers"
-		        then List.InsertRange(expectedColumns, 11, {"AssignmentCapacityWait", "AssignmentOtherErrors", "AssignmentEvidenceStatus"})
-		        else expectedColumns,
-		    // Licences 1.49 published the SKU capacity without ReportProduct.
-		    LegacyCapacityColumns = List.RemoveItems(expectedColumns, {"ReportProduct"}),
-		    AcceptedColumns = if Header = expectedColumns then expectedColumns
-		        else if fileName = "M365_Licenses_ReportSummary.csv" and Header = ExtendedColumns then ExtendedColumns
-		        else if fileName = "M365_Licenses_ReportSkuCapacity.csv" and Header = LegacyCapacityColumns then LegacyCapacityColumns
-		        else error "License report CSV schema differs from the SmartM365 contract",
-		    StrictRows = Csv.Document(Buffered, [Delimiter=",", Columns=List.Count(AcceptedColumns), Encoding=65001, QuoteStyle=QuoteStyle.Csv, ExtraValues=ExtraValues.Error]),
-		    Rows = Table.PromoteHeaders(StrictRows, [PromoteAllScalars=true]),
-		    HeadersChecked = if fileName = "M365_Licenses_ReportSummary.csv" then
-		        if Header = ExtendedColumns and List.Count(Header) = 43 then Rows
-		        else Table.AddColumn(Table.AddColumn(Table.AddColumn(Rows, "AssignmentCapacityWait", each null, Int64.Type), "AssignmentOtherErrors", each null, Int64.Type), "AssignmentEvidenceStatus", each "Unknown", type text)
-		        else if fileName = "M365_Licenses_ReportSkuCapacity.csv" and AcceptedColumns = LegacyCapacityColumns then Table.ReorderColumns(Table.AddColumn(Rows, "ReportProduct", each ""), expectedColumns)
-		        else Table.SelectColumns(Rows, expectedColumns),
-		    Snapshot = GetLicenseReportSnapshot(),
-		    IdentityChecked = if Table.RowCount(HeadersChecked) = 0 or
-		        (List.Distinct(HeadersChecked[SnapshotId]) = {Snapshot[SnapshotId]} and List.Distinct(HeadersChecked[TenantKey]) = {Snapshot[TenantKey]})
-		        then HeadersChecked else error "License report CSV and email snapshot identities differ",
-		    EmptyColumns = if fileName = "M365_Licenses_ReportSummary.csv" and List.Count(expectedColumns) = 40 and expectedColumns{10} = "AssignedUsers" then ExtendedColumns else expectedColumns,
-		    Result = if Usable then IdentityChecked else #table(EmptyColumns, {})
-		in
-		    Result
+/// Read from one selected batch with existing schema and identity checks. Latest verifies pointer stability per read; loaded provenance detects cross-table mixtures.
+expression GetLicenseReportCsv = (fileName as text, expectedColumns as list) as table => CreatePreparedReaders()[GetLicenseReportCsv](fileName, expectedColumns)
 	lineageTag: a2931804-2243-4d2a-bf3d-3a271daf2f71
 
-/// Read normal local migration CSV inputs with strict header and schema validation. No frozen validation fallback.
-expression ReadMigrationCsv =
-		(content as binary, required as list) as table =>
-		let
-		    Buffered = Binary.Buffer(content),
-		    HeaderLine = Text.BeforeDelimiter(Text.FromBinary(Buffered, TextEncoding.Utf8) & "#(lf)", "#(lf)"),
-		    Separator = if Text.Contains(HeaderLine, ";") then ";" else ",",
-		    Raw = Csv.Document(Buffered, [Delimiter=Separator, Encoding=65001, QuoteStyle=QuoteStyle.Csv]),
-		    Headers = if Table.IsEmpty(Raw) then error "Migration source is empty; a schema header is required" else Record.FieldValues(Raw{0}),
-		    UniqueHeaders = if List.Count(Headers) = List.Count(List.Distinct(Headers)) and not List.Contains(Headers, null) and not List.Contains(Headers, "") then Raw else error "Duplicate or empty migration CSV headers",
-		    Promoted = Table.PromoteHeaders(UniqueHeaders, [PromoteAllScalars=true]),
-		    Missing = List.Difference(required, Table.ColumnNames(Promoted)),
-		    Checked = if List.IsEmpty(Missing) then Promoted else error Error.Record("Migration source schema", "Required columns are missing", Missing)
-		in
-		    Checked
+/// Read from one selected batch with existing schema and identity checks. Latest verifies pointer stability per read; loaded provenance detects cross-table mixtures.
+expression ReadMigrationCsv = (content as binary, required as list) as table => CreatePreparedReaders()[ReadMigrationCsv](content, required)
 	lineageTag: 25ff69f8-08ac-4896-ae1f-f3eb16c544da
 
-/// Mailbox Inventory only: one validated manifest per reader invocation, shared by its five file reads. No cache across refreshes.
-expression CreateMailboxMigrationReader =
-		() as function =>
-		let
-		    SafeSegment = (s as text) as text => if s = "" or Text.Contains(s, "/") or Text.Contains(s, "\") or Text.Contains(s, "..") then error "Invalid prepared path segment" else s,
-		    BatchId = if Text.Trim(PreparedBatchId) = "" then error "Set PreparedBatchId to the reviewed immutable unified batch before refresh" else SafeSegment(PreparedBatchId),
-		    Manifest = GetPreparedBatchManifest(),
-		    Entries = List.Buffer(Manifest[Files] & Record.FieldOrDefault(Manifest, "Artifacts", {})),
-		    Read = (fileName as text) as binary =>
-		        let
-		            Name = SafeSegment(fileName),
-		            Selected = List.Select(Entries, each [File] = Name),
-		            Entry = if List.Count(Selected) = 1 then Selected{0} else error "Invalid prepared batch manifest",
-		            Content = if PreparedSourceMode = "Local" then
-		                File.Contents(Text.TrimEnd(PreparedEvidenceRoot, {"\", "/"}) & "\batches\" & BatchId & "\" & Name)
-		                else if PreparedSourceMode = "SharePoint" then
-		                    let
-		                        Root = SharePoint.Contents(SharePointSiteUrl, [ApiVersion=15]),
-		                        Path = {SharePointLibraryName} & List.Select(Text.Split(SharePointDataFolder & "/" & PreparedSharePointFolder, "/"), each _ <> "") & {"batches", BatchId},
-		                        Parent = List.Accumulate(Path, Root, (parent, segment) =>
-		                            let found = Table.SelectRows(parent, each [Name] = segment)
-		                            in if Table.RowCount(found) = 1 then found{0}[Content] else error Error.Record("Prepared evidence", "Missing or ambiguous folder; wait for a complete batch", segment)),
-		                        Found = Table.SelectRows(Parent, each [Name] = Name)
-		                    in if Table.RowCount(Found) = 1 then Found{0}[Content] else error "Missing or ambiguous prepared file"
-		                else error "PreparedSourceMode must be Local or SharePoint",
-		            Checked = if Binary.Length(Content) <> Entry[Bytes] then error "Prepared evidence transfer incomplete; previous imported model must be retained" else Content
-		        in Checked
-		in
-		    Read
+/// Read from one selected batch with existing schema and identity checks. Latest verifies pointer stability per read; loaded provenance detects cross-table mixtures.
+expression CreateMailboxMigrationReader = () as function => CreatePreparedReaders()[CreateMailboxMigrationReader]()
 
-/// Mailbox Inventory only: inspect the first header line, validate before projection, then buffer only the required and present optional scalar columns.
-expression ReadMailboxMigrationCsv =
-		(content as binary, required as list, optionalColumns as list) as table =>
-		let
-		    Buffered = Binary.Buffer(content),
-		    HeaderLine = List.First(Lines.FromBinary(Buffered, QuoteStyle.None, false, 65001), ""),
-		    Separator = if Text.Contains(HeaderLine, ";") then ";" else ",",
-		    Raw = Csv.Document(Buffered, [Delimiter=Separator, Encoding=65001, QuoteStyle=QuoteStyle.Csv]),
-		    Headers = if Table.IsEmpty(Raw) then error "Migration source is empty; a schema header is required" else Record.FieldValues(Raw{0}),
-		    UniqueHeaders = if List.Count(Headers) = List.Count(List.Distinct(Headers)) and not List.Contains(Headers, null) and not List.Contains(Headers, "") then Raw else error "Duplicate or empty migration CSV headers",
-		    Promoted = Table.PromoteHeaders(UniqueHeaders, [PromoteAllScalars=true]),
-		    Missing = List.Difference(required, Table.ColumnNames(Promoted)),
-		    Checked = if List.IsEmpty(Missing) then Promoted else error Error.Record("Migration source schema", "Required columns are missing", Missing),
-		    Columns = List.Distinct(required & List.Intersect({optionalColumns, Table.ColumnNames(Checked)})),
-		    Projected = Table.SelectColumns(Checked, Columns, MissingField.Error)
-		in
-		    Table.Buffer(Projected)
+/// Read from one selected batch with existing schema and identity checks. Latest verifies pointer stability per read; loaded provenance detects cross-table mixtures.
+expression ReadMailboxMigrationCsv = (content as binary, required as list, optionalColumns as list) as table => CreatePreparedReaders()[ReadMailboxMigrationCsv](content, required, optionalColumns)
 
-/// Observed migration history captured and indexed in the same immutable batch. No raw folder reads; original time/coverage semantics retained.
-expression ReadMigrationWeeklyHistory =
-		(kind as text, fileName as text, required as list, tenant as text) as list =>
-		let
-		    Scope = if kind = "Mailbox" and fileName = "Exchange_OnPrem_Mailboxes_AllDomains.csv" then kind
-		        else if kind = "Windows" and fileName = "Intune_Devices_Inventory.csv" then kind
-		        else error "Unsupported migration history scope",
-		    Index = Json.Document(GetPreparedEvidenceFile("PreparedHistoryIndex.json.txt")),
-		    Entries = if Index[SchemaVersion] = 1 and Index[TenantKey] = tenant then Index[Entries] else error "Invalid prepared history identity",
-		    Weeks = List.Select(Entries, each [Kind] = Scope and [SourceFile] = fileName),
-		    ReadWeek = (week as record) as record =>
-		        let
-		            Name = week[Week],
-		            Year = Number.FromText(Text.Start(Name, 4), "en-US"),
-		            Number = Number.FromText(Text.End(Name, 2), "en-US"),
-		            Monday = Date.AddWeeks(Date.StartOfWeek(#date(Year, 1, 4), Day.Monday), Number - 1),
-		            CheckedWeek = if Number >= 1 and Number <= 53 then Monday else error "Invalid ISO history week",
-		            Manifest = Json.Document(GetPreparedEvidenceFile(week[Manifest])),
-		            ManifestWeek = Record.FieldOrDefault(Manifest, "Week", Name),
-		            CheckedManifest = if ManifestWeek = Name then Manifest else error "History manifest week differs from folder",
-		            Stamps = Record.FieldOrDefault(CheckedManifest, "FileSnapshotCreatedAtUtc", []),
-		            Stamp = Record.FieldOrDefault(Stamps, fileName, Record.FieldOrDefault(CheckedManifest, "SnapshotCreatedAtUtc", null)),
-		            Date = if Stamp <> null and Text.Trim(Text.From(Stamp)) <> "" then Date.FromText(Text.Start(Text.From(Stamp), 10), [Culture="en-US"]) else CheckedWeek,
-		            Source = ReadMigrationCsv(GetPreparedEvidenceFile(week[File]), required),
-		            HasTenant = Table.HasColumns(Source, {"TenantKey"}),
-		            AllScoped = HasTenant and List.AllTrue(List.Transform(Table.Column(Source, "TenantKey"), each _ = tenant)),
-		            Rows = if HasTenant then Table.SelectRows(Source, each [TenantKey] = tenant or [TenantKey] = "" or [TenantKey] = null) else Source,
-		            Issues = if kind <> "Mailbox" or week[Issues] = null then null else ReadMigrationCsv(GetPreparedEvidenceFile(week[Issues]), {}),
-		            NoCollectionIssues = Issues <> null and Table.IsEmpty(Issues)
-		        in
-		            [Week=Name, Date=Date, HasRecordedDate=Stamp <> null and Text.Trim(Text.From(Stamp)) <> "", AllTenantScoped=AllScoped, Rows=Rows, NoCollectionIssues=NoCollectionIssues, ExcludedOtherTenantRows=Table.RowCount(Source)-Table.RowCount(Rows)],
-		    Result = List.Transform(Weeks, ReadWeek)
-		in
-		    Result
+/// Read from one selected batch with existing schema and identity checks. Latest verifies pointer stability per read; loaded provenance detects cross-table mixtures.
+expression ReadMigrationWeeklyHistory = (kind as text, fileName as text, required as list, tenant as text) as list => CreatePreparedReaders()[ReadMigrationWeeklyHistory](kind, fileName, required, tenant)
 	lineageTag: b15da87d-590d-4358-a6e1-f31d226b18b8
 
-/// Reads governed source artifacts from the same immutable DATA-POWERBI batch; original domain validation retained.
-expression GetSharePointOnPremCsv =
-		(FileName as text, RequiredColumns as list, OptionalColumns as list) as table =>
-		let
-		    Allowed = {"SharePoint_OnPrem_Farms.csv", "SharePoint_OnPrem_Servers.csv", "SharePoint_OnPrem_ServiceApplications.csv", "SharePoint_OnPrem_WebApplications.csv", "SharePoint_OnPrem_WebApplicationZones.csv", "SharePoint_OnPrem_ContentDatabases.csv", "SharePoint_OnPrem_SiteCollections.csv", "SharePoint_OnPrem_SiteAdministrators.csv", "SharePoint_OnPrem_Webs.csv", "SharePoint_OnPrem_CollectionCoverage.csv"},
-		    NameChecked = if List.Contains(Allowed, FileName) then FileName else error Error.Record("SharePoint on-prem source", "Unexpected CSV name", FileName),
-		    Content = GetPreparedEvidenceFile("Source-" & NameChecked),
-		    Parsed = Csv.Document(Binary.Buffer(Content), [Delimiter=";", Encoding=65001, QuoteStyle=QuoteStyle.Csv]),
-		    Headers = Table.PromoteHeaders(Parsed, [PromoteAllScalars=true]),
-		    Missing = List.Difference(RequiredColumns, Table.ColumnNames(Headers)),
-		    Checked = if List.IsEmpty(Missing) then Headers else error Error.Record("SharePoint on-prem schema", "Required CSV columns are missing", [File=FileName, Columns=Missing]),
-		    OptionalReady = Table.HasColumns(Checked, OptionalColumns),
-		    Selected = Table.SelectColumns(Checked, RequiredColumns & OptionalColumns, MissingField.UseNull),
-		    WithSchema = Table.AddColumn(Selected, "Optional Schema Ready", each OptionalReady, type logical)
-		in
-		    WithSchema
+/// Read from one selected batch with existing schema and identity checks. Latest verifies pointer stability per read; loaded provenance detects cross-table mixtures.
+expression GetSharePointOnPremCsv = (FileName as text, RequiredColumns as list, OptionalColumns as list) as table => CreatePreparedReaders()[GetSharePointOnPremCsv](FileName, RequiredColumns, OptionalColumns)
 	lineageTag: 694f1b88-74ed-459f-9f5a-b93ff719702b
 
 /// Strict native evidence types, preserving missing values and explicit time qualifications.
@@ -436,9 +163,257 @@ expression NativeEvidenceTypes =
 expression PreparedExpectedTenantKey = "" meta [IsParameterQuery=true, Type="Text", IsParameterQueryRequired=true]
 	lineageTag: fd94c8fb-7f6c-48b7-ac89-42afd49db4fe
 
-/// Optional complete nine-file group from the selected immutable batch. Old batches yield typed empty compatibility; corrupt or incomplete groups fail.
-expression GetSharePointMigrationEvidence =
-		(FileName as text, Schema as list) as table =>
+/// Read from one selected batch with existing schema and identity checks. Latest verifies pointer stability per read; loaded provenance detects cross-table mixtures.
+expression GetSharePointMigrationEvidence = (FileName as text, Schema as list) as table => CreatePreparedReaders()[GetSharePointMigrationEvidence](FileName, Schema)
+	lineageTag: bb3c6976-2636-49d6-8cd5-2c7646e6be4a
+
+/// Prepared storage navigation. Private Service deployment must use its SharePoint-only adapter.
+expression PreparedReadFolder =
+		// Internal transport; callers validate path segments. phase distinguishes selection and verification in synthetic tests.
+		(segments as list, optional phase as nullable text) as table =>
+		        if PreparedSourceMode = "Local" then
+		            Folder.Contents(Text.TrimEnd(PreparedEvidenceRoot, {"\", "/"}) & (if List.IsEmpty(segments) then "" else "\" & Text.Combine(segments, "\")))
+		        else if PreparedSourceMode = "SharePoint" and List.IsEmpty(segments) then
+		            let
+		                // A fresh HTTP read is required: connector navigation can reuse cached content.
+		                Library = Json.Document(Web.Contents(SharePointSiteUrl, [
+		                    RelativePath="_api/web/lists/GetByTitle('" & Uri.EscapeDataString(Text.Replace(SharePointLibraryName, "'", "''")) & "')/RootFolder",
+		                    Query=[#"$select"="ServerRelativeUrl"], Headers=[Accept="application/json;odata=nometadata"], IsRetry=true])),
+		                RootPath = Library[ServerRelativeUrl] & "/" & Text.Trim(SharePointDataFolder & "/" & PreparedSharePointFolder, "/"),
+		                Fetch = (name as text) as nullable binary =>
+		                    let
+		                        Response = Web.Contents(SharePointSiteUrl, [
+		                            RelativePath="_api/web/GetFileByServerRelativeUrl('" & Uri.EscapeDataString(Text.Replace(RootPath & "/" & name, "'", "''")) & "')/$value",
+		                            ManualStatusHandling={404}, IsRetry=true]),
+		                        Status = Record.FieldOrDefault(Value.Metadata(Response), "Response.Status", 200)
+		                    in if Status = 404 then null else Binary.Buffer(Response),
+		                Preferred = Fetch("current.json.txt"),
+		                Name = if Preferred = null then "current.json" else "current.json.txt",
+		                Content = if Preferred = null then Fetch("current.json") else Preferred
+		            in if Content = null then #table({"Name", "Content"}, {}) else #table({"Name", "Content"}, {{Name, Content}})
+		        else if PreparedSourceMode = "SharePoint" then
+		            let
+		                Root = SharePoint.Contents(SharePointSiteUrl, [ApiVersion=15]),
+		                Path = {SharePointLibraryName} & List.Select(Text.Split(SharePointDataFolder & "/" & PreparedSharePointFolder, "/"), each _ <> "") & segments,
+		                Content = List.Accumulate(Path, Root, (parent, segment) =>
+		                    let found = Table.SelectRows(parent, each [Name] = segment)
+		                    in if Table.RowCount(found) = 1 then found{0}[Content] else error Error.Record("Prepared evidence", "Missing or ambiguous folder; wait for a complete batch", segment))
+		            in Content
+		        else error "PreparedSourceMode must be Local or SharePoint"
+	lineageTag: f5c05c66-b6fd-4970-9b0b-d75385f88127
+
+/// One batch context per evaluated query. Latest follows the validated published pointer; per-read stability is not a cross-table transaction.
+expression CreatePreparedReaders =
+		(optional FolderReader as nullable function) as record =>
+		let
+		    SafeSegment = (s as text) as text =>
+		        if s = "" or Text.Contains(s, "/") or Text.Contains(s, "\") or Text.Contains(s, "..")
+		        then error "Invalid prepared path segment" else s,
+		    Folder = if FolderReader = null then PreparedReadFolder else FolderReader,
+		    ReadMetadata = (segments as list, name as text, phase as text) as binary =>
+		        let
+		            Parent = Folder(segments, phase),
+		            Preferred = Table.SelectRows(Parent, each [Name] = name & ".json.txt"),
+		            Legacy = Table.SelectRows(Parent, each [Name] = name & ".json"),
+		            Selected = if Table.RowCount(Preferred) = 0 then Legacy else Preferred
+		        in if Table.RowCount(Selected) = 1 then Binary.Buffer(Selected{0}[Content])
+		           else error "Missing or ambiguous prepared metadata",
+		    Pin = if Text.Trim(PreparedBatchId) = "" then error "PreparedBatchId is required: Latest or an explicit batch ID" else PreparedBatchId,
+		    IsLatest = Pin = "Latest",
+		    ExpectedTenant = if Text.Trim(PreparedExpectedTenantKey) = "" then error "PreparedExpectedTenantKey is required" else PreparedExpectedTenantKey,
+		    PointerBytes = ReadMetadata({}, "current", "select"),
+		    Pointer = Json.Document(PointerBytes),
+		    PointerValid = Pointer[SchemaVersion] = 1 and Pointer[TenantKey] = ExpectedTenant,
+		    BatchId = if not PointerValid then error "Invalid prepared pointer identity"
+		              else SafeSegment(if IsLatest then Pointer[BatchId] else Pin),
+		    Manifest = Json.Document(ReadMetadata({"batches", BatchId}, "batch", "manifest")),
+		    ManifestValid = Manifest[SchemaVersion] = 1 and Manifest[BatchId] = BatchId and Manifest[TenantKey] = ExpectedTenant,
+		    ManifestEntries = List.Buffer(Manifest[Files] & Record.FieldOrDefault(Manifest, "Artifacts", {})),
+		    CheckStable = (phase as text) as logical =>
+		        if not IsLatest then true
+		        else if Binary.ToText(PointerBytes, BinaryEncoding.Base64) =
+		                Binary.ToText(ReadMetadata({}, "current", phase), BinaryEncoding.Base64)
+		             then true else error "Prepared batch changed during read; retry at the next scheduled refresh",
+		    GetPreparedBatchManifest = () as record =>
+		        if not ManifestValid then error "Invalid prepared batch manifest"
+		        else if CheckStable("verify-manifest") then Manifest else error "Unstable prepared pointer",
+		    GetPreparedEvidenceFile = (fileName as text) as binary =>
+		        let
+		            CheckedManifest = GetPreparedBatchManifest(),
+		            Name = SafeSegment(fileName),
+		            Entries = if CheckedManifest[BatchId] = BatchId then List.Select(ManifestEntries, each [File] = Name) else error "Prepared batch identity mismatch",
+		            Entry = if List.Count(Entries) = 1 then Entries{0} else error "Invalid prepared batch file membership",
+		            Files = Folder({"batches", BatchId}, "payload"),
+		            Found = Table.SelectRows(Files, each [Name] = Name),
+		            Content = if Table.RowCount(Found) = 1 then Found{0}[Content] else error "Missing or ambiguous prepared file",
+		            // Force the size check before the end-of-read pointer check. Do not buffer large payloads.
+		            Checked = if Binary.Length(Content) <> Entry[Bytes] then error "Prepared evidence transfer incomplete"
+		                      else if CheckStable("verify-payload") then Content else error "Unstable prepared pointer"
+		        in Checked,
+		    CreateMailboxMigrationReader = () as function => GetPreparedEvidenceFile,
+		    GetLicenseReportQualification = () as record =>
+		let
+		    Manifest = GetPreparedBatchManifest(),
+		    Names = List.Transform(Manifest[Files] & Record.FieldOrDefault(Manifest, "Artifacts", {}), each [File]),
+		    ReportFiles = {"M365_Licenses_ReportSummary.csv", "M365_Licenses_ReportCandidates.csv", "M365_Licenses_ReportGaps.csv", "M365_Licenses_ReportSources.csv", "M365_Licenses_ReportAssignmentIssues.csv"},
+		    DecisionFiles = {"M365_Licenses_ReportSkuCandidates.csv", "M365_Licenses_ReportSkuCapacity.csv"},
+		    Raw = Record.FieldOrDefault(Manifest, "LicenseReportQualification", null),
+		    Legacy = List.Transform(ReportFiles & DecisionFiles, (name) =>
+		        let present = List.Contains(Names, "Source-" & name)
+		        in [File = name, Kind = if List.Contains(DecisionFiles, name) then "Decision" else "Report",
+		            State = if present then "Not verified" else "Absent",
+		            Reason = if present then "Batch predates license report qualification" else "Not part of this batch"]),
+		    Valid = Raw <> null and Record.FieldOrDefault(Raw, "Version", null) = 1 and
+		        List.Contains({"Qualified", "Not qualified"}, Record.FieldOrDefault(Raw, "State", null)) and Value.Is(Record.FieldOrDefault(Raw, "Files", null), type list),
+		    Result = if Raw = null then [State = "Not verified", Reason = "Batch predates license report qualification", SnapshotId = null, ReceiptRunId = null, Files = Legacy]
+		        else if not Valid then error Error.Record("License report qualification", "Invalid license report qualification in the batch manifest")
+		        else [State = Raw[State], Reason = Raw[Reason], SnapshotId = Raw[SnapshotId], ReceiptRunId = Raw[ReceiptRunId], Files = Raw[Files]]
+		in
+		    Result,
+		    LicenseReportFileUsable = (fileName as text) as logical =>
+		let
+		    Found = List.Select(GetLicenseReportQualification()[Files], each [File] = fileName),
+		    State = if List.Count(Found) = 1 then Found{0}[State] else "Absent"
+		in
+		    List.Contains({"Qualified", "Not verified"}, State),
+		    GetLicenseReportSnapshot = () as record =>
+		let
+		    FileName = "M365_Licenses_ReportSnapshot.json.txt",
+		    Content = GetPreparedEvidenceFile("Source-" & FileName),
+		    Snapshot = Json.Document(Binary.Buffer(Content)),
+		    SchemaVersion = Record.FieldOrDefault(Snapshot, "SchemaVersion", null),
+		    SupportedVersion = List.Contains({1, 2}, SchemaVersion),
+		    BaseValid = try
+		        Text.Length(Text.From(Snapshot[SnapshotId])) = 32 and
+		        Text.Length(Text.Trim(Text.From(Snapshot[TenantKey]))) > 0 and
+		        Value.Is(Snapshot[Products], type list) and List.Count(Snapshot[Products]) = 4 and
+		        Value.Is(Snapshot[OtherProducts], type list) and List.Count(Snapshot[OtherProducts]) = 3
+		        otherwise false,
+		    AssignmentValid = if SchemaVersion = 1 then true else try
+		        Value.Is(Snapshot[AssignmentIssues], type record) and
+		        Value.Is(Snapshot[AssignmentIssues][Available], type logical) and
+		        Value.Is(Snapshot[AssignmentIssues][Rows], type list) and
+		        (if Snapshot[AssignmentIssues][Available]
+		            then Value.Is(Snapshot[AssignmentIssues][Counts], type record)
+		            else List.IsEmpty(Snapshot[AssignmentIssues][Rows]))
+		        otherwise false,
+		    Checked = if not SupportedVersion then
+		        error Error.Record("License report snapshot", "Unsupported SmartInventory license report snapshot schema version", [Actual=SchemaVersion, Supported={1, 2}])
+		        else if BaseValid <> true or AssignmentValid <> true then
+		        error Error.Record("License report snapshot", "Invalid SmartInventory license report snapshot structure", [SchemaVersion=SchemaVersion])
+		        else Snapshot
+		in
+		    Checked,
+		    GetLicenseReportCsv = (fileName as text, expectedColumns as list) as table =>
+		let
+		    Allowed = {"M365_Licenses_ReportSummary.csv", "M365_Licenses_ReportCandidates.csv", "M365_Licenses_ReportGaps.csv", "M365_Licenses_ReportSources.csv", "M365_Licenses_ReportAssignmentIssues.csv", "M365_Licenses_ReportSkuCandidates.csv", "M365_Licenses_ReportSkuCapacity.csv"},
+		    // Not qualified or absent files are never read: the table is empty, not an older value.
+		    Usable = if not List.Contains(Allowed, fileName) then error "Unexpected license report CSV" else LicenseReportFileUsable(fileName),
+		    Content = GetPreparedEvidenceFile("Source-" & fileName),
+		    // Accept only the legacy summary and its exact assignment-status extension.
+		    Buffered = Binary.Buffer(Content),
+		    Raw = Csv.Document(Buffered, [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv, ExtraValues=ExtraValues.Error]),
+		    Header = if Table.IsEmpty(Raw) then error "License report CSV is empty" else Record.FieldValues(Raw{0}),
+		    ExtendedColumns = if fileName = "M365_Licenses_ReportSummary.csv" and List.Count(expectedColumns) = 40
+		        and expectedColumns{10} = "AssignedUsers"
+		        then List.InsertRange(expectedColumns, 11, {"AssignmentCapacityWait", "AssignmentOtherErrors", "AssignmentEvidenceStatus"})
+		        else expectedColumns,
+		    // Licences 1.49 published the SKU capacity without ReportProduct.
+		    LegacyCapacityColumns = List.RemoveItems(expectedColumns, {"ReportProduct"}),
+		    AcceptedColumns = if Header = expectedColumns then expectedColumns
+		        else if fileName = "M365_Licenses_ReportSummary.csv" and Header = ExtendedColumns then ExtendedColumns
+		        else if fileName = "M365_Licenses_ReportSkuCapacity.csv" and Header = LegacyCapacityColumns then LegacyCapacityColumns
+		        else error "License report CSV schema differs from the SmartM365 contract",
+		    StrictRows = Csv.Document(Buffered, [Delimiter=",", Columns=List.Count(AcceptedColumns), Encoding=65001, QuoteStyle=QuoteStyle.Csv, ExtraValues=ExtraValues.Error]),
+		    Rows = Table.PromoteHeaders(StrictRows, [PromoteAllScalars=true]),
+		    HeadersChecked = if fileName = "M365_Licenses_ReportSummary.csv" then
+		        if Header = ExtendedColumns and List.Count(Header) = 43 then Rows
+		        else Table.AddColumn(Table.AddColumn(Table.AddColumn(Rows, "AssignmentCapacityWait", each null, Int64.Type), "AssignmentOtherErrors", each null, Int64.Type), "AssignmentEvidenceStatus", each "Unknown", type text)
+		        else if fileName = "M365_Licenses_ReportSkuCapacity.csv" and AcceptedColumns = LegacyCapacityColumns then Table.ReorderColumns(Table.AddColumn(Rows, "ReportProduct", each ""), expectedColumns)
+		        else Table.SelectColumns(Rows, expectedColumns),
+		    Snapshot = GetLicenseReportSnapshot(),
+		    IdentityChecked = if Table.RowCount(HeadersChecked) = 0 or
+		        (List.Distinct(HeadersChecked[SnapshotId]) = {Snapshot[SnapshotId]} and List.Distinct(HeadersChecked[TenantKey]) = {Snapshot[TenantKey]})
+		        then HeadersChecked else error "License report CSV and email snapshot identities differ",
+		    EmptyColumns = if fileName = "M365_Licenses_ReportSummary.csv" and List.Count(expectedColumns) = 40 and expectedColumns{10} = "AssignedUsers" then ExtendedColumns else expectedColumns,
+		    Result = if Usable then IdentityChecked else #table(EmptyColumns, {})
+		in
+		    Result,
+		    ReadMigrationCsv = (content as binary, required as list) as table =>
+		let
+		    Buffered = Binary.Buffer(content),
+		    HeaderLine = Text.BeforeDelimiter(Text.FromBinary(Buffered, TextEncoding.Utf8) & "#(lf)", "#(lf)"),
+		    Separator = if Text.Contains(HeaderLine, ";") then ";" else ",",
+		    Raw = Csv.Document(Buffered, [Delimiter=Separator, Encoding=65001, QuoteStyle=QuoteStyle.Csv]),
+		    Headers = if Table.IsEmpty(Raw) then error "Migration source is empty; a schema header is required" else Record.FieldValues(Raw{0}),
+		    UniqueHeaders = if List.Count(Headers) = List.Count(List.Distinct(Headers)) and not List.Contains(Headers, null) and not List.Contains(Headers, "") then Raw else error "Duplicate or empty migration CSV headers",
+		    Promoted = Table.PromoteHeaders(UniqueHeaders, [PromoteAllScalars=true]),
+		    Missing = List.Difference(required, Table.ColumnNames(Promoted)),
+		    Checked = if List.IsEmpty(Missing) then Promoted else error Error.Record("Migration source schema", "Required columns are missing", Missing)
+		in
+		    Checked,
+		    ReadMailboxMigrationCsv = (content as binary, required as list, optionalColumns as list) as table =>
+		let
+		    Buffered = Binary.Buffer(content),
+		    HeaderLine = List.First(Lines.FromBinary(Buffered, QuoteStyle.None, false, 65001), ""),
+		    Separator = if Text.Contains(HeaderLine, ";") then ";" else ",",
+		    Raw = Csv.Document(Buffered, [Delimiter=Separator, Encoding=65001, QuoteStyle=QuoteStyle.Csv]),
+		    Headers = if Table.IsEmpty(Raw) then error "Migration source is empty; a schema header is required" else Record.FieldValues(Raw{0}),
+		    UniqueHeaders = if List.Count(Headers) = List.Count(List.Distinct(Headers)) and not List.Contains(Headers, null) and not List.Contains(Headers, "") then Raw else error "Duplicate or empty migration CSV headers",
+		    Promoted = Table.PromoteHeaders(UniqueHeaders, [PromoteAllScalars=true]),
+		    Missing = List.Difference(required, Table.ColumnNames(Promoted)),
+		    Checked = if List.IsEmpty(Missing) then Promoted else error Error.Record("Migration source schema", "Required columns are missing", Missing),
+		    Columns = List.Distinct(required & List.Intersect({optionalColumns, Table.ColumnNames(Checked)})),
+		    Projected = Table.SelectColumns(Checked, Columns, MissingField.Error)
+		in
+		    Table.Buffer(Projected),
+		    ReadMigrationWeeklyHistory = (kind as text, fileName as text, required as list, tenant as text) as list =>
+		let
+		    Scope = if kind = "Mailbox" and fileName = "Exchange_OnPrem_Mailboxes_AllDomains.csv" then kind
+		        else if kind = "Windows" and fileName = "Intune_Devices_Inventory.csv" then kind
+		        else error "Unsupported migration history scope",
+		    Index = Json.Document(GetPreparedEvidenceFile("PreparedHistoryIndex.json.txt")),
+		    Entries = if Index[SchemaVersion] = 1 and Index[TenantKey] = tenant then Index[Entries] else error "Invalid prepared history identity",
+		    Weeks = List.Select(Entries, each [Kind] = Scope and [SourceFile] = fileName),
+		    ReadWeek = (week as record) as record =>
+		        let
+		            Name = week[Week],
+		            Year = Number.FromText(Text.Start(Name, 4), "en-US"),
+		            Number = Number.FromText(Text.End(Name, 2), "en-US"),
+		            Monday = Date.AddWeeks(Date.StartOfWeek(#date(Year, 1, 4), Day.Monday), Number - 1),
+		            CheckedWeek = if Number >= 1 and Number <= 53 then Monday else error "Invalid ISO history week",
+		            Manifest = Json.Document(GetPreparedEvidenceFile(week[Manifest])),
+		            ManifestWeek = Record.FieldOrDefault(Manifest, "Week", Name),
+		            CheckedManifest = if ManifestWeek = Name then Manifest else error "History manifest week differs from folder",
+		            Stamps = Record.FieldOrDefault(CheckedManifest, "FileSnapshotCreatedAtUtc", []),
+		            Stamp = Record.FieldOrDefault(Stamps, fileName, Record.FieldOrDefault(CheckedManifest, "SnapshotCreatedAtUtc", null)),
+		            Date = if Stamp <> null and Text.Trim(Text.From(Stamp)) <> "" then Date.FromText(Text.Start(Text.From(Stamp), 10), [Culture="en-US"]) else CheckedWeek,
+		            Source = ReadMigrationCsv(GetPreparedEvidenceFile(week[File]), required),
+		            HasTenant = Table.HasColumns(Source, {"TenantKey"}),
+		            AllScoped = HasTenant and List.AllTrue(List.Transform(Table.Column(Source, "TenantKey"), each _ = tenant)),
+		            Rows = if HasTenant then Table.SelectRows(Source, each [TenantKey] = tenant or [TenantKey] = "" or [TenantKey] = null) else Source,
+		            Issues = if kind <> "Mailbox" or week[Issues] = null then null else ReadMigrationCsv(GetPreparedEvidenceFile(week[Issues]), {}),
+		            NoCollectionIssues = Issues <> null and Table.IsEmpty(Issues)
+		        in
+		            [Week=Name, Date=Date, HasRecordedDate=Stamp <> null and Text.Trim(Text.From(Stamp)) <> "", AllTenantScoped=AllScoped, Rows=Rows, NoCollectionIssues=NoCollectionIssues, ExcludedOtherTenantRows=Table.RowCount(Source)-Table.RowCount(Rows)],
+		    Result = List.Transform(Weeks, ReadWeek)
+		in
+		    Result,
+		    GetSharePointOnPremCsv = (FileName as text, RequiredColumns as list, OptionalColumns as list) as table =>
+		let
+		    Allowed = {"SharePoint_OnPrem_Farms.csv", "SharePoint_OnPrem_Servers.csv", "SharePoint_OnPrem_ServiceApplications.csv", "SharePoint_OnPrem_WebApplications.csv", "SharePoint_OnPrem_WebApplicationZones.csv", "SharePoint_OnPrem_ContentDatabases.csv", "SharePoint_OnPrem_SiteCollections.csv", "SharePoint_OnPrem_SiteAdministrators.csv", "SharePoint_OnPrem_Webs.csv", "SharePoint_OnPrem_CollectionCoverage.csv"},
+		    NameChecked = if List.Contains(Allowed, FileName) then FileName else error Error.Record("SharePoint on-prem source", "Unexpected CSV name", FileName),
+		    Content = GetPreparedEvidenceFile("Source-" & NameChecked),
+		    Parsed = Csv.Document(Binary.Buffer(Content), [Delimiter=";", Encoding=65001, QuoteStyle=QuoteStyle.Csv]),
+		    Headers = Table.PromoteHeaders(Parsed, [PromoteAllScalars=true]),
+		    Missing = List.Difference(RequiredColumns, Table.ColumnNames(Headers)),
+		    Checked = if List.IsEmpty(Missing) then Headers else error Error.Record("SharePoint on-prem schema", "Required CSV columns are missing", [File=FileName, Columns=Missing]),
+		    OptionalReady = Table.HasColumns(Checked, OptionalColumns),
+		    Selected = Table.SelectColumns(Checked, RequiredColumns & OptionalColumns, MissingField.UseNull),
+		    WithSchema = Table.AddColumn(Selected, "Optional Schema Ready", each OptionalReady, type logical)
+		in
+		    WithSchema,
+		    GetSharePointMigrationEvidence = (FileName as text, Schema as list) as table =>
 		let
 		    Expected = {"SharePointMigrationPlanEvidence.csv", "SharePointMigrationWebEvidence.csv", "SharePointMigrationCollectionEvidence.csv", "SharePointMigrationLegacyWebEvidence.csv", "SharePointMigrationLegacyCollectionEvidence.csv", "SharePointMigrationScopeEvidence.csv", "SharePointMigrationFindingEvidence.csv", "SharePointMigrationHistoryEvidence.csv", "SharePointMigrationSourceSummary.csv"},
 		    Manifest = GetPreparedBatchManifest(),
@@ -467,5 +442,10 @@ expression GetSharePointMigrationEvidence =
 		        Table.FromRecords({[TenantKey=PreparedExpectedTenantKey, Source="Migration workbook",
 		            Qualification="Not available in selected batch", #"Coverage State"="Not available in selected batch"]},
 		            Value.Type(Typed), MissingField.UseNull) else Typed
-		in Compatible
-	lineageTag: bb3c6976-2636-49d6-8cd5-2c7646e6be4a
+		in Compatible,
+		    Finish = (Rows as table) as table =>
+		        if GetPreparedBatchManifest()[BatchId] <> BatchId then error "Prepared batch identity mismatch"
+		        else Table.AddColumn(Rows, "Loaded Batch ID", each BatchId, type text)
+		in
+		    [BatchId=BatchId, Finish=Finish, GetPreparedEvidenceFile=GetPreparedEvidenceFile, GetPreparedBatchManifest=GetPreparedBatchManifest, GetLicenseReportQualification=GetLicenseReportQualification, LicenseReportFileUsable=LicenseReportFileUsable, GetLicenseReportSnapshot=GetLicenseReportSnapshot, GetLicenseReportCsv=GetLicenseReportCsv, ReadMigrationCsv=ReadMigrationCsv, CreateMailboxMigrationReader=CreateMailboxMigrationReader, ReadMailboxMigrationCsv=ReadMailboxMigrationCsv, ReadMigrationWeeklyHistory=ReadMigrationWeeklyHistory, GetSharePointOnPremCsv=GetSharePointOnPremCsv, GetSharePointMigrationEvidence=GetSharePointMigrationEvidence]
+	lineageTag: 26f34f0c-24ee-421f-94a6-123ea48fb2ec

@@ -271,7 +271,32 @@ table 'Native Hardware Evidence'
 		summarizeBy: none
 		sourceColumn: MemoryStatus
 
+	/// Actual prepared batch used by this query. Technical provenance only; empty tables have no observable batch.
+	column 'Loaded Batch ID'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 3078ec61-765e-45b2-8755-d3ab4fa0acee
+		summarizeBy: none
+		sourceColumn: Loaded Batch ID
+
 	partition 'Native Hardware Evidence' = m
 		mode: import
-		source = NativeEvidenceTypes(Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("DeviceHardware.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]), {[name="TenantKey", dataType="String"], [name="OrganizationKey", dataType="String"], [name="EnvironmentKey", dataType="String"], [name="TenantId", dataType="String"], [name="TenantDeviceKey", dataType="String"], [name="ManagedDeviceId", dataType="String"], [name="SerialNumber", dataType="String"], [name="Manufacturer", dataType="String"], [name="Model", dataType="String"], [name="Storage", dataType="String"], [name="PhysicalMemoryGiB", dataType="Double"], [name="StorageStatus", dataType="String"], [name="MemoryStatus", dataType="String"], [name="HardwareCollectedDateTime", dataType="DateTime"], [name="InventoryCollectedDateTime", dataType="DateTime"], [name="CollectionCoverage", dataType="String"], [name="CollectionMode", dataType="String"]})
-
+		source =
+				let
+				    Readers = CreatePreparedReaders(),
+				    GetPreparedEvidenceFile = Readers[GetPreparedEvidenceFile],
+				    GetPreparedBatchManifest = Readers[GetPreparedBatchManifest],
+				    GetLicenseReportQualification = Readers[GetLicenseReportQualification],
+				    LicenseReportFileUsable = Readers[LicenseReportFileUsable],
+				    GetLicenseReportSnapshot = Readers[GetLicenseReportSnapshot],
+				    GetLicenseReportCsv = Readers[GetLicenseReportCsv],
+				    ReadMigrationCsv = Readers[ReadMigrationCsv],
+				    CreateMailboxMigrationReader = Readers[CreateMailboxMigrationReader],
+				    ReadMailboxMigrationCsv = Readers[ReadMailboxMigrationCsv],
+				    ReadMigrationWeeklyHistory = Readers[ReadMigrationWeeklyHistory],
+				    GetSharePointOnPremCsv = Readers[GetSharePointOnPremCsv],
+				    GetSharePointMigrationEvidence = Readers[GetSharePointMigrationEvidence],
+				    BusinessRows = (NativeEvidenceTypes(Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("DeviceHardware.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]), {[name="TenantKey", dataType="String"], [name="OrganizationKey", dataType="String"], [name="EnvironmentKey", dataType="String"], [name="TenantId", dataType="String"], [name="TenantDeviceKey", dataType="String"], [name="ManagedDeviceId", dataType="String"], [name="SerialNumber", dataType="String"], [name="Manufacturer", dataType="String"], [name="Model", dataType="String"], [name="Storage", dataType="String"], [name="PhysicalMemoryGiB", dataType="Double"], [name="StorageStatus", dataType="String"], [name="MemoryStatus", dataType="String"], [name="HardwareCollectedDateTime", dataType="DateTime"], [name="InventoryCollectedDateTime", dataType="DateTime"], [name="CollectionCoverage", dataType="String"], [name="CollectionMode", dataType="String"]}))
+				in
+				    Readers[Finish](BusinessRows)

@@ -41,11 +41,8 @@ def m_text(value):
 
 
 def expression(name):
-    match = re.search(r'^expression ' + re.escape(name) + r' =\r?\n(.*?)(?=^\tlineageTag:)',
-                      EXPRESSIONS.read_text(encoding='utf-8-sig'), re.M | re.S)
-    if not match:
-        raise AssertionError(name + ' expression not found')
-    return textwrap.dedent(match.group(1)).strip()
+    from test_prepared_latest_m import expression as read_expression
+    return read_expression(name)
 
 
 def partition(table):
@@ -98,7 +95,8 @@ def qualification(state, reason='', capacity_state='Qualified'):
 @unittest.skipUnless(PQTEST, 'Set PQTEST_PATH to run actual Power Query M regression tests')
 class LicenseReportMTests(unittest.TestCase):
     def evaluate(self, root, batch_id, body):
-        names = ['GetPreparedEvidenceFile', 'GetPreparedBatchManifest', 'GetLicenseReportQualification', 'LicenseReportFileUsable',
+        names = ['PreparedReadFolder', 'CreatePreparedReaders', 'NativeEvidenceTypes',
+                 'GetPreparedEvidenceFile', 'GetPreparedBatchManifest', 'GetLicenseReportQualification', 'LicenseReportFileUsable',
                  'GetLicenseReportSnapshot', 'GetLicenseReportCsv']
         bindings = [
             'PreparedSourceMode = "Local"', 'PreparedEvidenceRoot = ' + m_text(str(root)), 'PreparedBatchId = ' + m_text(batch_id),

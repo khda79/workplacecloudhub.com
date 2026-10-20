@@ -12,8 +12,9 @@ const metadata=snapshot.model?{tables:snapshot.model.tables.map(t=>({name:t.name
 const tables=new Map(metadata.tables.map(t=>[t.name,t]));
 let checks=0;
 function check(test,message){assert(test,message);checks++;}
-check(order.pageOrder.length===28,'Expected 28 pages including the daily directory and mailbox trends');
-check(new Set(order.pageOrder).size===28,'Duplicate page registration');
+check(order.pageOrder.length===29,'Expected 29 pages including daily trends and SharePoint migration');
+check(new Set(order.pageOrder).size===29,'Duplicate page registration');
+check(order.pageOrder.includes('migration-to-sharepoint-online'),'SharePoint migration page preserved');
 const pages=order.pageOrder.map(p=>read(path.join(def,'pages',p,'page.json')));
 check(!pages.some(p=>p.displayName==='CMDB')&&pages[1].displayName==='Operational Overview','Existing business pages preserved');
 const all=[];
@@ -31,6 +32,12 @@ function bindings(value,file){
 for(const item of all)bindings(item.value,item.file);
 const facets=read(new URL('../config/consolidation-report-facets.json.txt',import.meta.url)).facets;
 const visuals=all.filter(x=>x.file.endsWith(path.join('visual.json'))).map(x=>x.value);
+const trustPage=pages.find(p=>p.displayName==='Data Trust');
+const trustBanner=all.find(x=>x.file.startsWith(path.join(def,'pages',trustPage.name,'visuals')+path.sep)
+ && x.value.visual?.visualContainerObjects?.title?.some(t=>t.properties?.text?.expr?.Measure?.Property==='Loaded Batch Banner'));
+check(!!trustBanner,'Data Trust loaded-batch diagnostic must be bound');
+check(!trustBanner.value.parentGroupName,'Loaded-batch diagnostic must remain outside bookmark-switched groups');
+check(trustBanner.value.visual.visualContainerObjects.title[0].properties.show.expr.Literal.Value==='true','Loaded-batch diagnostic must be visible');
 for(const facet of facets){
  const page=pages.find(p=>p.displayName===facet.page);
  check(!!page,`Missing destination page ${facet.page}`);

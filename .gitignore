@@ -158,6 +158,7 @@ SmartM365/SharePointMigration/Tools/Python/**
 !/SmartFinOps/SmartFinOps.global.local.json.template
 !/SmartWorkplaceIntelligence/README.md
 !/SmartWorkplaceIntelligence/docs/MAILBOX-MIGRATION-EXCEPTIONS.md
+!/SmartWorkplaceIntelligence/docs/PREPARED-LATEST.md
 
 # Local agent notes and memories stay private even when Markdown is re-included above.
 BRANCHES.md

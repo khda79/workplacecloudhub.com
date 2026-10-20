@@ -196,14 +196,38 @@ table 'Collaboration Adoption Evidence'
 
 		annotation SummarizationSetBy = Automatic
 
+	/// Actual prepared batch used by this query. Technical provenance only; empty tables have no observable batch.
+	column 'Loaded Batch ID'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: f229de2b-6d48-4391-ab14-37fb7382c7c0
+		summarizeBy: none
+		sourceColumn: Loaded Batch ID
+
 	partition 'Collaboration Adoption Evidence Import' = m
 		mode: import
 		source =
 				let
+				    Readers = CreatePreparedReaders(),
+				    GetPreparedEvidenceFile = Readers[GetPreparedEvidenceFile],
+				    GetPreparedBatchManifest = Readers[GetPreparedBatchManifest],
+				    GetLicenseReportQualification = Readers[GetLicenseReportQualification],
+				    LicenseReportFileUsable = Readers[LicenseReportFileUsable],
+				    GetLicenseReportSnapshot = Readers[GetLicenseReportSnapshot],
+				    GetLicenseReportCsv = Readers[GetLicenseReportCsv],
+				    ReadMigrationCsv = Readers[ReadMigrationCsv],
+				    CreateMailboxMigrationReader = Readers[CreateMailboxMigrationReader],
+				    ReadMailboxMigrationCsv = Readers[ReadMailboxMigrationCsv],
+				    ReadMigrationWeeklyHistory = Readers[ReadMigrationWeeklyHistory],
+				    GetSharePointOnPremCsv = Readers[GetSharePointOnPremCsv],
+				    GetSharePointMigrationEvidence = Readers[GetSharePointMigrationEvidence],
+				    BusinessRows = (let
 				    Raw = Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("CollaborationAdoptionEvidence.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]),
 				    Selected = Table.SelectColumns(Raw, {"Service", "Eligible Users", "Active Users 30D", "Active User Rate (%)", "Service Objects", "Active Objects 30D", "Inactive Objects", "Orphaned Objects", "Objects with External Access", "Storage Used GB", "Usage Refresh Date", "Evidence Age Days", "Freshness State", "Evidence Status"}),
 				    Nulls = Table.ReplaceValue(Selected, "", null, Replacer.ReplaceValue, {"Eligible Users", "Active Users 30D", "Active User Rate (%)", "Service Objects", "Active Objects 30D", "Inactive Objects", "Orphaned Objects", "Objects with External Access", "Storage Used GB", "Usage Refresh Date", "Evidence Age Days"}),
 				    Typed = Table.TransformColumnTypes(Nulls, {{"Service", type text}, {"Eligible Users", Int64.Type}, {"Active Users 30D", Int64.Type}, {"Active User Rate (%)", type number}, {"Service Objects", Int64.Type}, {"Active Objects 30D", Int64.Type}, {"Inactive Objects", Int64.Type}, {"Orphaned Objects", Int64.Type}, {"Objects with External Access", Int64.Type}, {"Storage Used GB", type number}, {"Usage Refresh Date", type datetime}, {"Evidence Age Days", Int64.Type}, {"Freshness State", type text}, {"Evidence Status", type text}}, "en-US")
 				in
-				    Typed
-
+				    Typed)
+				in
+				    Readers[Finish](BusinessRows)

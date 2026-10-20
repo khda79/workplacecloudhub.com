@@ -62,7 +62,32 @@ table 'Native Application Ranking'
 		summarizeBy: none
 		sourceColumn: ReportedDeviceCount
 
+	/// Actual prepared batch used by this query. Technical provenance only; empty tables have no observable batch.
+	column 'Loaded Batch ID'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: b39f7b60-cc7e-4143-8f20-0ab090ec7a6c
+		summarizeBy: none
+		sourceColumn: Loaded Batch ID
+
 	partition 'Native Application Ranking' = m
 		mode: import
-		source = NativeEvidenceTypes(Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("TopApplication.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]), {[name="ApplicationProduct", dataType="String"], [name="DisplayName", dataType="String"], [name="Publisher", dataType="String"], [name="Platform", dataType="String"], [name="VersionCount", dataType="Int64"], [name="ReportedDeviceCount", dataType="Int64"]})
-
+		source =
+				let
+				    Readers = CreatePreparedReaders(),
+				    GetPreparedEvidenceFile = Readers[GetPreparedEvidenceFile],
+				    GetPreparedBatchManifest = Readers[GetPreparedBatchManifest],
+				    GetLicenseReportQualification = Readers[GetLicenseReportQualification],
+				    LicenseReportFileUsable = Readers[LicenseReportFileUsable],
+				    GetLicenseReportSnapshot = Readers[GetLicenseReportSnapshot],
+				    GetLicenseReportCsv = Readers[GetLicenseReportCsv],
+				    ReadMigrationCsv = Readers[ReadMigrationCsv],
+				    CreateMailboxMigrationReader = Readers[CreateMailboxMigrationReader],
+				    ReadMailboxMigrationCsv = Readers[ReadMailboxMigrationCsv],
+				    ReadMigrationWeeklyHistory = Readers[ReadMigrationWeeklyHistory],
+				    GetSharePointOnPremCsv = Readers[GetSharePointOnPremCsv],
+				    GetSharePointMigrationEvidence = Readers[GetSharePointMigrationEvidence],
+				    BusinessRows = (NativeEvidenceTypes(Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("TopApplication.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]), {[name="ApplicationProduct", dataType="String"], [name="DisplayName", dataType="String"], [name="Publisher", dataType="String"], [name="Platform", dataType="String"], [name="VersionCount", dataType="Int64"], [name="ReportedDeviceCount", dataType="Int64"]}))
+				in
+				    Readers[Finish](BusinessRows)

@@ -176,7 +176,32 @@ table 'Native EXO Mailbox'
 		summarizeBy: none
 		sourceColumn: ArchiveStatusLabel
 
+	/// Actual prepared batch used by this query. Technical provenance only; empty tables have no observable batch.
+	column 'Loaded Batch ID'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 6d651928-4469-41e7-802d-e0bda54962d9
+		summarizeBy: none
+		sourceColumn: Loaded Batch ID
+
 	partition 'Native EXO Mailbox' = m
 		mode: import
-		source = NativeEvidenceTypes(Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("FactMailbox.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]), {[name="TenantKey", dataType="String"], [name="OrganizationKey", dataType="String"], [name="EnvironmentKey", dataType="String"], [name="TenantId", dataType="String"], [name="TenantMailboxKey", dataType="String"], [name="TenantUserKey", dataType="String"], [name="CmdbMailboxId", dataType="String"], [name="CmdbUserId", dataType="String"], [name="RecipientTypeDetails", dataType="String"], [name="ArchiveStatus", dataType="String"], [name="SourceSystem", dataType="String"], [name="DisplayName", dataType="String"], [name="PrimarySmtpAddress", dataType="String"], [name="LinkStatusLabel", dataType="String"], [name="DisplayNameLabel", dataType="String"], [name="PrimarySmtpAddressLabel", dataType="String"], [name="RecipientTypeDetailsLabel", dataType="String"], [name="ArchiveStatusLabel", dataType="String"]})
-
+		source =
+				let
+				    Readers = CreatePreparedReaders(),
+				    GetPreparedEvidenceFile = Readers[GetPreparedEvidenceFile],
+				    GetPreparedBatchManifest = Readers[GetPreparedBatchManifest],
+				    GetLicenseReportQualification = Readers[GetLicenseReportQualification],
+				    LicenseReportFileUsable = Readers[LicenseReportFileUsable],
+				    GetLicenseReportSnapshot = Readers[GetLicenseReportSnapshot],
+				    GetLicenseReportCsv = Readers[GetLicenseReportCsv],
+				    ReadMigrationCsv = Readers[ReadMigrationCsv],
+				    CreateMailboxMigrationReader = Readers[CreateMailboxMigrationReader],
+				    ReadMailboxMigrationCsv = Readers[ReadMailboxMigrationCsv],
+				    ReadMigrationWeeklyHistory = Readers[ReadMigrationWeeklyHistory],
+				    GetSharePointOnPremCsv = Readers[GetSharePointOnPremCsv],
+				    GetSharePointMigrationEvidence = Readers[GetSharePointMigrationEvidence],
+				    BusinessRows = (NativeEvidenceTypes(Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("FactMailbox.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]), {[name="TenantKey", dataType="String"], [name="OrganizationKey", dataType="String"], [name="EnvironmentKey", dataType="String"], [name="TenantId", dataType="String"], [name="TenantMailboxKey", dataType="String"], [name="TenantUserKey", dataType="String"], [name="CmdbMailboxId", dataType="String"], [name="CmdbUserId", dataType="String"], [name="RecipientTypeDetails", dataType="String"], [name="ArchiveStatus", dataType="String"], [name="SourceSystem", dataType="String"], [name="DisplayName", dataType="String"], [name="PrimarySmtpAddress", dataType="String"], [name="LinkStatusLabel", dataType="String"], [name="DisplayNameLabel", dataType="String"], [name="PrimarySmtpAddressLabel", dataType="String"], [name="RecipientTypeDetailsLabel", dataType="String"], [name="ArchiveStatusLabel", dataType="String"]}))
+				in
+				    Readers[Finish](BusinessRows)

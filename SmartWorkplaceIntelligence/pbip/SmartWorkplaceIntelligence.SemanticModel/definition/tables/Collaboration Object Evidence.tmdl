@@ -216,14 +216,38 @@ table 'Collaboration Object Evidence'
 
 		annotation SummarizationSetBy = Automatic
 
+	/// Actual prepared batch used by this query. Technical provenance only; empty tables have no observable batch.
+	column 'Loaded Batch ID'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 0deac3ad-a1b6-42f8-b495-8b468090fb72
+		summarizeBy: none
+		sourceColumn: Loaded Batch ID
+
 	partition 'Collaboration Object Evidence Import' = m
 		mode: import
 		source =
 				let
+				    Readers = CreatePreparedReaders(),
+				    GetPreparedEvidenceFile = Readers[GetPreparedEvidenceFile],
+				    GetPreparedBatchManifest = Readers[GetPreparedBatchManifest],
+				    GetLicenseReportQualification = Readers[GetLicenseReportQualification],
+				    LicenseReportFileUsable = Readers[LicenseReportFileUsable],
+				    GetLicenseReportSnapshot = Readers[GetLicenseReportSnapshot],
+				    GetLicenseReportCsv = Readers[GetLicenseReportCsv],
+				    ReadMigrationCsv = Readers[ReadMigrationCsv],
+				    CreateMailboxMigrationReader = Readers[CreateMailboxMigrationReader],
+				    ReadMailboxMigrationCsv = Readers[ReadMailboxMigrationCsv],
+				    ReadMigrationWeeklyHistory = Readers[ReadMigrationWeeklyHistory],
+				    GetSharePointOnPremCsv = Readers[GetSharePointOnPremCsv],
+				    GetSharePointMigrationEvidence = Readers[GetSharePointMigrationEvidence],
+				    BusinessRows = (let
 				    Raw = Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("CollaborationObjectEvidence.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]),
 				    Selected = Table.SelectColumns(Raw, {"Object ID", "Object Name", "Service", "Object Type", "Visibility", "Activity State", "Days Since Last Activity", "Last Activity Date", "Owner State", "Owner Count", "Member Count", "Guest Count", "External Access State", "Storage Used GB", "Risk Priority", "Risk Signal", "Recommended Action", "Snapshot Date", "Evidence Status"}),
 				    Nulls = Table.ReplaceValue(Selected, "", null, Replacer.ReplaceValue, {"Days Since Last Activity", "Last Activity Date", "Owner Count", "Member Count", "Guest Count", "Storage Used GB", "Snapshot Date"}),
 				    Typed = Table.TransformColumnTypes(Nulls, {{"Object ID", type text}, {"Object Name", type text}, {"Service", type text}, {"Object Type", type text}, {"Visibility", type text}, {"Activity State", type text}, {"Days Since Last Activity", Int64.Type}, {"Last Activity Date", type datetime}, {"Owner State", type text}, {"Owner Count", Int64.Type}, {"Member Count", Int64.Type}, {"Guest Count", Int64.Type}, {"External Access State", type text}, {"Storage Used GB", type number}, {"Risk Priority", type text}, {"Risk Signal", type text}, {"Recommended Action", type text}, {"Snapshot Date", type datetime}, {"Evidence Status", type text}}, "en-US")
 				in
-				    Typed
-
+				    Typed)
+				in
+				    Readers[Finish](BusinessRows)

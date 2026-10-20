@@ -62,13 +62,37 @@ table 'SharePoint On-prem Service Applications'
 		lineageTag: 9e874d3d-cae3-47df-8aa7-ea75a6ced424
 		sourceColumn: Farm Key
 
+	/// Actual prepared batch used by this query. Technical provenance only; empty tables have no observable batch.
+	column 'Loaded Batch ID'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: ca0ee7e1-8de8-4a16-9bbe-52eabd300651
+		summarizeBy: none
+		sourceColumn: Loaded Batch ID
+
 	partition 'SharePoint On-prem Service Applications' = m
 		mode: import
 		source =
 				let
+				    Readers = CreatePreparedReaders(),
+				    GetPreparedEvidenceFile = Readers[GetPreparedEvidenceFile],
+				    GetPreparedBatchManifest = Readers[GetPreparedBatchManifest],
+				    GetLicenseReportQualification = Readers[GetLicenseReportQualification],
+				    LicenseReportFileUsable = Readers[LicenseReportFileUsable],
+				    GetLicenseReportSnapshot = Readers[GetLicenseReportSnapshot],
+				    GetLicenseReportCsv = Readers[GetLicenseReportCsv],
+				    ReadMigrationCsv = Readers[ReadMigrationCsv],
+				    CreateMailboxMigrationReader = Readers[CreateMailboxMigrationReader],
+				    ReadMailboxMigrationCsv = Readers[ReadMailboxMigrationCsv],
+				    ReadMigrationWeeklyHistory = Readers[ReadMigrationWeeklyHistory],
+				    GetSharePointOnPremCsv = Readers[GetSharePointOnPremCsv],
+				    GetSharePointMigrationEvidence = Readers[GetSharePointMigrationEvidence],
+				    BusinessRows = (let
 				    Raw = GetSharePointOnPremCsv("SharePoint_OnPrem_ServiceApplications.csv", {"TenantKey", "FarmId", "RunId", "ServiceApplicationId", "Name", "TypeName", "Status", "ApplicationPool", "CollectionStatus"}, {}),
 				    FarmKey = Table.AddColumn(Raw, "Farm Key", each [TenantKey] & "|" & [FarmId], type text),
 				    Renamed = Table.RenameColumns(FarmKey, {{"TenantKey", "Tenant Key"}, {"FarmId", "Farm ID"}, {"RunId", "Run ID"}, {"ServiceApplicationId", "Service Application ID"}, {"Name", "Service Application"}, {"TypeName", "Service Type"}, {"Status", "Service Status"}, {"ApplicationPool", "Application Pool"}, {"CollectionStatus", "Collection Status"}})
 				in
-				    Renamed
-
+				    Renamed)
+				in
+				    Readers[Finish](BusinessRows)

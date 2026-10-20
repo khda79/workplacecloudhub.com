@@ -150,7 +150,32 @@ table 'Native Update Alert Evidence'
 		summarizeBy: none
 		sourceColumn: SourceSystem
 
+	/// Actual prepared batch used by this query. Technical provenance only; empty tables have no observable batch.
+	column 'Loaded Batch ID'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 9ce4b224-85af-4707-ab45-5ee7babd3b3f
+		summarizeBy: none
+		sourceColumn: Loaded Batch ID
+
 	partition 'Native Update Alert Evidence' = m
 		mode: import
-		source = NativeEvidenceTypes(Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("FactWindowsUpdateAlert.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]), {[name="TenantKey", dataType="String"], [name="OrganizationKey", dataType="String"], [name="EnvironmentKey", dataType="String"], [name="TenantId", dataType="String"], [name="TenantUpdateAlertKey", dataType="String"], [name="SourceReport", dataType="String"], [name="DeviceId", dataType="String"], [name="DeviceName", dataType="String"], [name="PolicyId", dataType="String"], [name="EventDateTimeUTC", dataType="String"], [name="LastWUScanTimeUTC", dataType="String"], [name="AggregateState", dataType="String"], [name="CurrentDeviceUpdateStatus", dataType="String"], [name="LatestAlertMessage", dataType="String"], [name="SourceCollectedDateTime", dataType="DateTime"], [name="SourceSystem", dataType="String"]})
-
+		source =
+				let
+				    Readers = CreatePreparedReaders(),
+				    GetPreparedEvidenceFile = Readers[GetPreparedEvidenceFile],
+				    GetPreparedBatchManifest = Readers[GetPreparedBatchManifest],
+				    GetLicenseReportQualification = Readers[GetLicenseReportQualification],
+				    LicenseReportFileUsable = Readers[LicenseReportFileUsable],
+				    GetLicenseReportSnapshot = Readers[GetLicenseReportSnapshot],
+				    GetLicenseReportCsv = Readers[GetLicenseReportCsv],
+				    ReadMigrationCsv = Readers[ReadMigrationCsv],
+				    CreateMailboxMigrationReader = Readers[CreateMailboxMigrationReader],
+				    ReadMailboxMigrationCsv = Readers[ReadMailboxMigrationCsv],
+				    ReadMigrationWeeklyHistory = Readers[ReadMigrationWeeklyHistory],
+				    GetSharePointOnPremCsv = Readers[GetSharePointOnPremCsv],
+				    GetSharePointMigrationEvidence = Readers[GetSharePointMigrationEvidence],
+				    BusinessRows = (NativeEvidenceTypes(Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("FactWindowsUpdateAlert.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]), {[name="TenantKey", dataType="String"], [name="OrganizationKey", dataType="String"], [name="EnvironmentKey", dataType="String"], [name="TenantId", dataType="String"], [name="TenantUpdateAlertKey", dataType="String"], [name="SourceReport", dataType="String"], [name="DeviceId", dataType="String"], [name="DeviceName", dataType="String"], [name="PolicyId", dataType="String"], [name="EventDateTimeUTC", dataType="String"], [name="LastWUScanTimeUTC", dataType="String"], [name="AggregateState", dataType="String"], [name="CurrentDeviceUpdateStatus", dataType="String"], [name="LatestAlertMessage", dataType="String"], [name="SourceCollectedDateTime", dataType="DateTime"], [name="SourceSystem", dataType="String"]}))
+				in
+				    Readers[Finish](BusinessRows)

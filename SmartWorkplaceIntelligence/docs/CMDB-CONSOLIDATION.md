@@ -114,9 +114,9 @@ The transfer validates the complete composed contract, all tables, all artifacts
 
 ## Reader and integrity boundary
 
-All runtime model readers use `GetPreparedEvidenceFile`. Direct license, on-prem SharePoint and migration reads have been replaced by artifacts in the pinned batch. Static neutral reference catalogs remain independent.
+All runtime model readers use `GetPreparedEvidenceFile` within a shared per-query batch context. Direct license, on-prem SharePoint and migration reads use artifacts in that selected batch. Static neutral reference catalogs remain independent.
 
-`PreparedExpectedTenantKey` and `PreparedBatchId` must be set explicitly after the first unified server batch is validated. Public source defaults are blank and fail closed. The private tenant parameter is preserved; its batch parameter remains intentionally unpinned until that first validated cohort. Opening the project is not permission to refresh it.
+`PreparedExpectedTenantKey` must identify the intended tenant. Required `PreparedBatchId` now defaults to `Latest`, following the validated published pointer; a nonempty explicit ID still pins a batch. The public expected tenant remains blank and fails closed until configured. See [Latest deployment and loaded-batch diagnostics](PREPARED-LATEST.md). Opening the project is not permission to refresh it.
 
 SHA256 verification is performed by preparation, read-only batch validation and transfer. Power Query verifies the expected tenant, manifest membership, expected size, fixed batch and stable bytes; it does **not** independently recompute SHA256. Do not describe the M reader alone as cryptographic verification of every file.
 

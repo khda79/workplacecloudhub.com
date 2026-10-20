@@ -62,15 +62,39 @@ table 'SharePoint On-prem Servers'
 		lineageTag: ba90d14c-e08e-4e5e-970b-7a3ebe9f311d
 		sourceColumn: Farm Key
 
+	/// Actual prepared batch used by this query. Technical provenance only; empty tables have no observable batch.
+	column 'Loaded Batch ID'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 38668ae0-021f-4ac2-bbbf-10f3315d50c0
+		summarizeBy: none
+		sourceColumn: Loaded Batch ID
+
 	partition 'SharePoint On-prem Servers' = m
 		mode: import
 		source =
 				let
+				    Readers = CreatePreparedReaders(),
+				    GetPreparedEvidenceFile = Readers[GetPreparedEvidenceFile],
+				    GetPreparedBatchManifest = Readers[GetPreparedBatchManifest],
+				    GetLicenseReportQualification = Readers[GetLicenseReportQualification],
+				    LicenseReportFileUsable = Readers[LicenseReportFileUsable],
+				    GetLicenseReportSnapshot = Readers[GetLicenseReportSnapshot],
+				    GetLicenseReportCsv = Readers[GetLicenseReportCsv],
+				    ReadMigrationCsv = Readers[ReadMigrationCsv],
+				    CreateMailboxMigrationReader = Readers[CreateMailboxMigrationReader],
+				    ReadMailboxMigrationCsv = Readers[ReadMailboxMigrationCsv],
+				    ReadMigrationWeeklyHistory = Readers[ReadMigrationWeeklyHistory],
+				    GetSharePointOnPremCsv = Readers[GetSharePointOnPremCsv],
+				    GetSharePointMigrationEvidence = Readers[GetSharePointMigrationEvidence],
+				    BusinessRows = (let
 				    Raw = GetSharePointOnPremCsv("SharePoint_OnPrem_Servers.csv", {"TenantKey", "FarmId", "RunId", "ServerId", "ServerName", "Role", "Status", "CollectionStatus"}, {}),
 				    Nulls = Table.ReplaceValue(Raw, "", null, Replacer.ReplaceValue, {}),
 				    Typed = Table.TransformColumnTypes(Nulls, {}, "en-US"),
 				    FarmKey = Table.AddColumn(Typed, "Farm Key", each [TenantKey] & "|" & [FarmId], type text),
 				    Renamed = Table.RenameColumns(FarmKey, {{"TenantKey", "Tenant Key"}, {"FarmId", "Farm ID"}, {"RunId", "Run ID"}, {"ServerId", "Server ID"}, {"ServerName", "Server Name"}, {"Role", "Role"}, {"Status", "Server Status"}, {"CollectionStatus", "Collection Status"}})
 				in
-				    Renamed
-
+				    Renamed)
+				in
+				    Readers[Finish](BusinessRows)

@@ -110,10 +110,33 @@ table 'All Accounts Evidence'
 		lineageTag: bd09f327-c40e-4438-a8b1-154859f5a550
 		summarizeBy: none
 
+	/// Actual prepared batch used by this query. Technical provenance only; empty tables have no observable batch.
+	column 'Loaded Batch ID'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 94971a9e-98d9-4978-a9fd-1c30a5d149ec
+		summarizeBy: none
+		sourceColumn: Loaded Batch ID
+
 	partition 'All Accounts Evidence' = m
 		mode: import
 		source =
 				let
+				    Readers = CreatePreparedReaders(),
+				    GetPreparedEvidenceFile = Readers[GetPreparedEvidenceFile],
+				    GetPreparedBatchManifest = Readers[GetPreparedBatchManifest],
+				    GetLicenseReportQualification = Readers[GetLicenseReportQualification],
+				    LicenseReportFileUsable = Readers[LicenseReportFileUsable],
+				    GetLicenseReportSnapshot = Readers[GetLicenseReportSnapshot],
+				    GetLicenseReportCsv = Readers[GetLicenseReportCsv],
+				    ReadMigrationCsv = Readers[ReadMigrationCsv],
+				    CreateMailboxMigrationReader = Readers[CreateMailboxMigrationReader],
+				    ReadMailboxMigrationCsv = Readers[ReadMailboxMigrationCsv],
+				    ReadMigrationWeeklyHistory = Readers[ReadMigrationWeeklyHistory],
+				    GetSharePointOnPremCsv = Readers[GetSharePointOnPremCsv],
+				    GetSharePointMigrationEvidence = Readers[GetSharePointMigrationEvidence],
+				    BusinessRows = (let
 				    Source = ReadMigrationCsv(GetPreparedEvidenceFile("AllAccountsEvidence.csv"), {"TenantKey", "Account Key", "Inventory Source", "Account Kind", "AD State", "Entra State", "Entra User Type", "Country", "Country Basis", "Match Basis", "UPN Comparison", "AD Observation UTC", "Entra Observation UTC"}),
 				    Selected = Table.SelectColumns(Source, {"TenantKey", "Account Key", "Inventory Source", "Account Kind", "AD State", "Entra State", "Entra User Type", "Country", "Country Basis", "Match Basis", "UPN Comparison", "AD Observation UTC", "Entra Observation UTC"}),
 				    Typed = Table.TransformColumnTypes(Selected, {{"TenantKey", type text}, {"Account Key", type text}, {"Inventory Source", type text}, {"Account Kind", type text}, {"AD State", type text}, {"Entra State", type text}, {"Entra User Type", type text}, {"Country", type text}, {"Country Basis", type text}, {"Match Basis", type text}, {"UPN Comparison", type text}, {"AD Observation UTC", type text}, {"Entra Observation UTC", type text}}),
@@ -122,5 +145,6 @@ table 'All Accounts Evidence'
 				    in DateTimeZone.ToText(DateTimeZone.SwitchZone(Parsed, 0), "yyyy-MM-dd'T'HH:mm:ss'Z'", "en-US"),
 				    NormalizedUtc = Table.TransformColumns(Typed, {{"AD Observation UTC", NormalizeUtc, type text}, {"Entra Observation UTC", NormalizeUtc, type text}})
 				in
-				    NormalizedUtc
-
+				    NormalizedUtc)
+				in
+				    Readers[Finish](BusinessRows)

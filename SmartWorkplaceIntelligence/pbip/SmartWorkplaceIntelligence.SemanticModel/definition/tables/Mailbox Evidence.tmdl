@@ -261,14 +261,38 @@ table 'Mailbox Evidence'
 		summarizeBy: sum
 		sourceColumn: Total Storage GB
 
+	/// Actual prepared batch used by this query. Technical provenance only; empty tables have no observable batch.
+	column 'Loaded Batch ID'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 95de6753-1652-4ec7-86fd-318a6a837122
+		summarizeBy: none
+		sourceColumn: Loaded Batch ID
+
 	partition 'Mailbox Evidence Import' = m
 		mode: import
 		source =
 				let
+				    Readers = CreatePreparedReaders(),
+				    GetPreparedEvidenceFile = Readers[GetPreparedEvidenceFile],
+				    GetPreparedBatchManifest = Readers[GetPreparedBatchManifest],
+				    GetLicenseReportQualification = Readers[GetLicenseReportQualification],
+				    LicenseReportFileUsable = Readers[LicenseReportFileUsable],
+				    GetLicenseReportSnapshot = Readers[GetLicenseReportSnapshot],
+				    GetLicenseReportCsv = Readers[GetLicenseReportCsv],
+				    ReadMigrationCsv = Readers[ReadMigrationCsv],
+				    CreateMailboxMigrationReader = Readers[CreateMailboxMigrationReader],
+				    ReadMailboxMigrationCsv = Readers[ReadMailboxMigrationCsv],
+				    ReadMigrationWeeklyHistory = Readers[ReadMigrationWeeklyHistory],
+				    GetSharePointOnPremCsv = Readers[GetSharePointOnPremCsv],
+				    GetSharePointMigrationEvidence = Readers[GetSharePointMigrationEvidence],
+				    BusinessRows = (let
 				    Raw = Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("MailboxEvidence.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]),
 				    Selected = Table.SelectColumns(Raw, {"Mailbox Key", "Primary SMTP Address", "Display Name", "Country", "Hosting Location", "Exchange Version", "Mailbox Type", "Recipient Type", "Operational State", "Mailbox Size GB", "Archive State", "Archive Size GB", "Delegation Count", "Delegation Types", "Forwarding State", "Last Activity Date", "Hosting State", "Risk Priority", "Risk Signal", "Recommended Action", "Evidence Status", "Total Storage GB"}),
 				    Nulls = Table.ReplaceValue(Selected, "", null, Replacer.ReplaceValue, {"Mailbox Size GB", "Archive Size GB", "Delegation Count", "Last Activity Date", "Total Storage GB"}),
 				    Typed = Table.TransformColumnTypes(Nulls, {{"Mailbox Key", type text}, {"Primary SMTP Address", type text}, {"Display Name", type text}, {"Country", type text}, {"Hosting Location", type text}, {"Exchange Version", type text}, {"Mailbox Type", type text}, {"Recipient Type", type text}, {"Operational State", type text}, {"Mailbox Size GB", type number}, {"Archive State", type text}, {"Archive Size GB", type number}, {"Delegation Count", Int64.Type}, {"Delegation Types", type text}, {"Forwarding State", type text}, {"Last Activity Date", type datetime}, {"Hosting State", type text}, {"Risk Priority", type text}, {"Risk Signal", type text}, {"Recommended Action", type text}, {"Evidence Status", type text}, {"Total Storage GB", type number}}, "en-US")
 				in
-				    Typed
-
+				    Typed)
+				in
+				    Readers[Finish](BusinessRows)

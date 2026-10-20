@@ -170,7 +170,8 @@ ordinary runs. No existing table's historical coverage may regress.
 Confirm that `DATA-POWERBI/current.json.txt` selects the new validated batch,
 and that any configured SharePoint transfer and read-back verification
 completed before relying on a synchronized destination. Set the private
-PBIP's `PreparedBatchId` to that reviewed immutable batch while retaining the
+PBIP's `PreparedBatchId` to that reviewed immutable batch, or use `Latest`
+after deploying the [automatic reader](docs/PREPARED-LATEST.md), retaining the
 private source and expected-tenant parameters. Then refresh Desktop, verify
 the new page and the existing 30-day trends, and publish through the approved
 deployment process.
@@ -230,12 +231,15 @@ Immutable batches built before the retirement remain transferable.
 
 ### Deployment
 
-There is no ordering constraint between SmartInventory, the preparation and
-the report. The private PBIP is used in Power BI Desktop only, with no
-scheduled refresh. One rule applies: apply this checkout's model and report
+The published model can use scheduled Service refresh through its
+SharePoint-only transport. Apply this checkout's model and report
 changes to the private PBIP (keeping its private source, expected tenant and
 `PreparedBatchId` parameters and its editor settings) before pointing its
-`PreparedBatchId` to a batch prepared by this version.
+`PreparedBatchId` to a batch prepared by this version. For automatic selection,
+follow the [Latest deployment order](docs/PREPARED-LATEST.md): integrate
+definitions, republish, then set `Latest` in both Service and the private PBIP,
+then configure the schedule. The checkout default is `Latest`; a blank value
+fails. No publication or refresh is implied by editing the checkout.
 
 If the private PBIP still has the retired tables when its `PreparedBatchId`
 points to such a batch, the Desktop refresh fails on `License Evidence` and

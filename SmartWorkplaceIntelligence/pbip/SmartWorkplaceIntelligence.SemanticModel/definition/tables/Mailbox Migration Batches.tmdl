@@ -68,11 +68,34 @@ table 'Mailbox Migration Batches'
 		lineageTag: d42eb10e-e493-4a79-8688-5f3c36e0c5b2
 		sourceColumn: Evidence Note
 
+	/// Actual prepared batch used by this query. Technical provenance only; empty tables have no observable batch.
+	column 'Loaded Batch ID'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 5a562df3-6d3c-4e0b-8b49-678a1ca073f2
+		summarizeBy: none
+		sourceColumn: Loaded Batch ID
+
 	/// Same governed batch as all Workplace evidence; original migration qualification retained.
 	partition 'Mailbox Migration Batches' = m
 		mode: import
-		source = ```
+		source =
 				let
+				    Readers = CreatePreparedReaders(),
+				    GetPreparedEvidenceFile = Readers[GetPreparedEvidenceFile],
+				    GetPreparedBatchManifest = Readers[GetPreparedBatchManifest],
+				    GetLicenseReportQualification = Readers[GetLicenseReportQualification],
+				    LicenseReportFileUsable = Readers[LicenseReportFileUsable],
+				    GetLicenseReportSnapshot = Readers[GetLicenseReportSnapshot],
+				    GetLicenseReportCsv = Readers[GetLicenseReportCsv],
+				    ReadMigrationCsv = Readers[ReadMigrationCsv],
+				    CreateMailboxMigrationReader = Readers[CreateMailboxMigrationReader],
+				    ReadMailboxMigrationCsv = Readers[ReadMailboxMigrationCsv],
+				    ReadMigrationWeeklyHistory = Readers[ReadMigrationWeeklyHistory],
+				    GetSharePointOnPremCsv = Readers[GetSharePointOnPremCsv],
+				    GetSharePointMigrationEvidence = Readers[GetSharePointMigrationEvidence],
+				    BusinessRows = (let
 				    Key = (v as any) as text => if v = null then "" else Text.Lower(Text.Trim(Text.From(v))),
 				    Num = (v as any) as nullable number => if v = null or Text.Trim(Text.From(v)) = "" then null else try Number.FromText(Text.From(v), "en-US") otherwise null,
 				    Prepared = ReadMigrationCsv(GetPreparedEvidenceFile("MailboxEvidence.csv"), {"TenantKey"}),
@@ -91,6 +114,6 @@ table 'Mailbox Migration Batches'
 				    Result = Table.FromRecords(List.Transform(Table.ToRecords(Groups), Project), {"Batch GUID", "Batch Name", "Batch Status", "Migration Direction", "Total Mailboxes", "Failed Mailboxes", "Warnings", "Last Sync", "Observation Date", "Evidence Note"}, MissingField.Error)
 				in
 				    Table.TransformColumnTypes(Result, {{"Total Mailboxes", type number}, {"Failed Mailboxes", type number}, {"Warnings", type number}}, "en-US")
-				
-				```
-
+				)
+				in
+				    Readers[Finish](BusinessRows)

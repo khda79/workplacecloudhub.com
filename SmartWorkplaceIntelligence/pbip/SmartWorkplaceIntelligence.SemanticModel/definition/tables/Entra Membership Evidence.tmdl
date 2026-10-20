@@ -118,7 +118,32 @@ table 'Entra Membership Evidence'
 		summarizeBy: none
 		sourceColumn: SourceCollectedDateTime
 
+	/// Actual prepared batch used by this query. Technical provenance only; empty tables have no observable batch.
+	column 'Loaded Batch ID'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 9549735d-0876-4852-bacd-d8c684bacc99
+		summarizeBy: none
+		sourceColumn: Loaded Batch ID
+
 	partition 'Entra Membership Evidence' = m
 		mode: import
-		source = NativeEvidenceTypes(Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("EntraGroupMembership.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]), {[name="TenantKey", dataType="String"], [name="OrganizationKey", dataType="String"], [name="EnvironmentKey", dataType="String"], [name="TenantId", dataType="String"], [name="TenantMembershipKey", dataType="String"], [name="TenantGroupKey", dataType="String"], [name="TenantUserKey", dataType="String"], [name="TenantDeviceKey", dataType="String"], [name="NestedTenantGroupKey", dataType="String"], [name="MemberId", dataType="String"], [name="MemberType", dataType="String"], [name="MembershipKind", dataType="String"], [name="LinkStatus", dataType="String"], [name="SourceCollectedDateTime", dataType="DateTime"]})
-
+		source =
+				let
+				    Readers = CreatePreparedReaders(),
+				    GetPreparedEvidenceFile = Readers[GetPreparedEvidenceFile],
+				    GetPreparedBatchManifest = Readers[GetPreparedBatchManifest],
+				    GetLicenseReportQualification = Readers[GetLicenseReportQualification],
+				    LicenseReportFileUsable = Readers[LicenseReportFileUsable],
+				    GetLicenseReportSnapshot = Readers[GetLicenseReportSnapshot],
+				    GetLicenseReportCsv = Readers[GetLicenseReportCsv],
+				    ReadMigrationCsv = Readers[ReadMigrationCsv],
+				    CreateMailboxMigrationReader = Readers[CreateMailboxMigrationReader],
+				    ReadMailboxMigrationCsv = Readers[ReadMailboxMigrationCsv],
+				    ReadMigrationWeeklyHistory = Readers[ReadMigrationWeeklyHistory],
+				    GetSharePointOnPremCsv = Readers[GetSharePointOnPremCsv],
+				    GetSharePointMigrationEvidence = Readers[GetSharePointMigrationEvidence],
+				    BusinessRows = (NativeEvidenceTypes(Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("EntraGroupMembership.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]), {[name="TenantKey", dataType="String"], [name="OrganizationKey", dataType="String"], [name="EnvironmentKey", dataType="String"], [name="TenantId", dataType="String"], [name="TenantMembershipKey", dataType="String"], [name="TenantGroupKey", dataType="String"], [name="TenantUserKey", dataType="String"], [name="TenantDeviceKey", dataType="String"], [name="NestedTenantGroupKey", dataType="String"], [name="MemberId", dataType="String"], [name="MemberType", dataType="String"], [name="MembershipKind", dataType="String"], [name="LinkStatus", dataType="String"], [name="SourceCollectedDateTime", dataType="DateTime"]}))
+				in
+				    Readers[Finish](BusinessRows)

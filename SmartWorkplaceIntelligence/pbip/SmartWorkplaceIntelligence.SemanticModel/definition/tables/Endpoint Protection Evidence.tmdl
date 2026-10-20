@@ -212,14 +212,38 @@ table 'Endpoint Protection Evidence'
 		summarizeBy: none
 		sourceColumn: Exception Reason
 
+	/// Actual prepared batch used by this query. Technical provenance only; empty tables have no observable batch.
+	column 'Loaded Batch ID'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: c4b8cba3-cc11-42ac-b5b4-a7e19ce8b26e
+		summarizeBy: none
+		sourceColumn: Loaded Batch ID
+
 	partition 'Endpoint Protection Evidence' = m
 		mode: import
 		source =
 				let
+				    Readers = CreatePreparedReaders(),
+				    GetPreparedEvidenceFile = Readers[GetPreparedEvidenceFile],
+				    GetPreparedBatchManifest = Readers[GetPreparedBatchManifest],
+				    GetLicenseReportQualification = Readers[GetLicenseReportQualification],
+				    LicenseReportFileUsable = Readers[LicenseReportFileUsable],
+				    GetLicenseReportSnapshot = Readers[GetLicenseReportSnapshot],
+				    GetLicenseReportCsv = Readers[GetLicenseReportCsv],
+				    ReadMigrationCsv = Readers[ReadMigrationCsv],
+				    CreateMailboxMigrationReader = Readers[CreateMailboxMigrationReader],
+				    ReadMailboxMigrationCsv = Readers[ReadMailboxMigrationCsv],
+				    ReadMigrationWeeklyHistory = Readers[ReadMigrationWeeklyHistory],
+				    GetSharePointOnPremCsv = Readers[GetSharePointOnPremCsv],
+				    GetSharePointMigrationEvidence = Readers[GetSharePointMigrationEvidence],
+				    BusinessRows = (let
 				    Source = ReadMigrationCsv(GetPreparedEvidenceFile("EndpointProtectionEvidence.csv"), {"TenantKey", "Endpoint Protection Key", "Device Source ID", "Country", "Policy Version", "Scope ID", "Role", "Expected Product", "Expected Mode", "Evaluation State", "Evaluation Reason", "Registration State", "Evidence Source", "Observation UTC", "Freshness", "Exception Reason"}),
 				    Selected = Table.SelectColumns(Source, {"TenantKey", "Endpoint Protection Key", "Device Source ID", "Country", "Policy Version", "Scope ID", "Role", "Expected Product", "Expected Mode", "Evaluation State", "Evaluation Reason", "Registration State", "Evidence Source", "Observation UTC", "Freshness", "Exception Reason"}),
 				    ParseUtc = (raw as nullable text) as nullable datetime => if raw = null or Text.Trim(raw) = "" then null else if not Text.EndsWith(raw, "Z") then error "Endpoint Protection observation must be UTC Z" else DateTimeZone.RemoveZone(DateTimeZone.SwitchZone(DateTimeZone.FromText(raw, [Culture="en-US"]), 0)),
 				    TypedSpecial = Table.TransformColumns(Selected, {{"Observation UTC", ParseUtc, type nullable datetime}}),
 				    Typed = Table.TransformColumnTypes(TypedSpecial, {{"TenantKey", type text}, {"Endpoint Protection Key", type text}, {"Device Source ID", type text}, {"Country", type text}, {"Policy Version", type text}, {"Scope ID", type text}, {"Role", type text}, {"Expected Product", type text}, {"Expected Mode", type text}, {"Evaluation State", type text}, {"Evaluation Reason", type text}, {"Registration State", type text}, {"Evidence Source", type text}, {"Freshness", type text}, {"Exception Reason", type text}})
-				in Typed
-
+				in Typed)
+				in
+				    Readers[Finish](BusinessRows)

@@ -269,10 +269,33 @@ table 'License Report Gaps'
 		lineageTag: a7d713f4-2ea8-4c3c-b707-107823de88c8
 		sourceColumn: Evidence Status
 
+	/// Actual prepared batch used by this query. Technical provenance only; empty tables have no observable batch.
+	column 'Loaded Batch ID'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 269a8b9e-00ba-460b-a6c3-6ac8101fc77c
+		summarizeBy: none
+		sourceColumn: Loaded Batch ID
+
 	partition 'License Report Gaps Import' = m
 		mode: import
 		source =
 				let
+				    Readers = CreatePreparedReaders(),
+				    GetPreparedEvidenceFile = Readers[GetPreparedEvidenceFile],
+				    GetPreparedBatchManifest = Readers[GetPreparedBatchManifest],
+				    GetLicenseReportQualification = Readers[GetLicenseReportQualification],
+				    LicenseReportFileUsable = Readers[LicenseReportFileUsable],
+				    GetLicenseReportSnapshot = Readers[GetLicenseReportSnapshot],
+				    GetLicenseReportCsv = Readers[GetLicenseReportCsv],
+				    ReadMigrationCsv = Readers[ReadMigrationCsv],
+				    CreateMailboxMigrationReader = Readers[CreateMailboxMigrationReader],
+				    ReadMailboxMigrationCsv = Readers[ReadMailboxMigrationCsv],
+				    ReadMigrationWeeklyHistory = Readers[ReadMigrationWeeklyHistory],
+				    GetSharePointOnPremCsv = Readers[GetSharePointOnPremCsv],
+				    GetSharePointMigrationEvidence = Readers[GetSharePointMigrationEvidence],
+				    BusinessRows = (let
 				    Raw = GetLicenseReportCsv("M365_Licenses_ReportGaps.csv", {"SnapshotId", "TenantKey", "Section", "Metric", "Value", "EvidenceStatus"}),
 				    RowCheck = if not LicenseReportFileUsable("M365_Licenses_ReportGaps.csv") or Table.RowCount(Raw) >= 25 then Raw else error "License report CSV has too few rows",
 				    NonBlank = Table.ReplaceValue(RowCheck, "", null, Replacer.ReplaceValue, {"Value"}),
@@ -280,5 +303,6 @@ table 'License Report Gaps'
 				    Selected = Renamed,
 				    Typed = Table.TransformColumnTypes(Selected, {{"Value", Int64.Type}}, "en-US")
 				in
-				    Typed
-
+				    Typed)
+				in
+				    Readers[Finish](BusinessRows)

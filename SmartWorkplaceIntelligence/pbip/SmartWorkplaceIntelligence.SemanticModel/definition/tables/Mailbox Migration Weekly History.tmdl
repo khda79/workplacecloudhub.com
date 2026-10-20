@@ -44,11 +44,34 @@ table 'Mailbox Migration Weekly History'
 		lineageTag: 8137f2cf-3c04-43a6-8b63-603f7f05237f
 		sourceColumn: Evidence Note
 
+	/// Actual prepared batch used by this query. Technical provenance only; empty tables have no observable batch.
+	column 'Loaded Batch ID'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 44901691-186d-4047-84dc-dcefd209efb3
+		summarizeBy: none
+		sourceColumn: Loaded Batch ID
+
 	/// Normal SmartM365 local inputs through DataRoot / PreparedEvidenceRoot. No dependency on frozen report-validation JSON. Source qualification is retained; no collection is triggered.
 	partition 'Mailbox Migration History Rebuilt' = m
 		mode: import
-		source = ```
+		source =
 				let
+				    Readers = CreatePreparedReaders(),
+				    GetPreparedEvidenceFile = Readers[GetPreparedEvidenceFile],
+				    GetPreparedBatchManifest = Readers[GetPreparedBatchManifest],
+				    GetLicenseReportQualification = Readers[GetLicenseReportQualification],
+				    LicenseReportFileUsable = Readers[LicenseReportFileUsable],
+				    GetLicenseReportSnapshot = Readers[GetLicenseReportSnapshot],
+				    GetLicenseReportCsv = Readers[GetLicenseReportCsv],
+				    ReadMigrationCsv = Readers[ReadMigrationCsv],
+				    CreateMailboxMigrationReader = Readers[CreateMailboxMigrationReader],
+				    ReadMailboxMigrationCsv = Readers[ReadMailboxMigrationCsv],
+				    ReadMigrationWeeklyHistory = Readers[ReadMigrationWeeklyHistory],
+				    GetSharePointOnPremCsv = Readers[GetSharePointOnPremCsv],
+				    GetSharePointMigrationEvidence = Readers[GetSharePointMigrationEvidence],
+				    BusinessRows = (let
 				    Prepared = ReadMigrationCsv(GetPreparedEvidenceFile("MailboxEvidence.csv"), {"TenantKey"}),
 				    Tenants = List.Distinct(Prepared[TenantKey]),
 				    Tenant = if List.Count(Tenants) = 1 and Tenants{0} <> null and Text.Trim(Tenants{0}) <> "" then Tenants{0} else error "Prepared mailbox evidence must have one tenant",
@@ -63,6 +86,6 @@ table 'Mailbox Migration Weekly History'
 				    Result = Table.FromRecords(List.Transform(Snapshots, Project), {"Snapshot Date", "Snapshot Week", "Observed Local Mailboxes", "Provisional Local Mailboxes", "Evidence Status", "Evidence Note"}, MissingField.Error)
 				in
 				    Table.TransformColumnTypes(Result, {{"Snapshot Date", type date}, {"Provisional Local Mailboxes", type number}}, "en-US")
-				
-				```
-
+				)
+				in
+				    Readers[Finish](BusinessRows)
