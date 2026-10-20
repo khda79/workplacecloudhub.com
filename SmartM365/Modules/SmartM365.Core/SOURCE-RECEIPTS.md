@@ -23,7 +23,7 @@ At completion, a qualified run is verified on its staged copies, then promoted: 
 
 The SharePoint copy and WeeklyHistory of the promoted CSVs, and producer callbacks such as cache manifests, run after the proof; a failure there is a warning. `.staging` is never uploaded. The staging folder is removed at completion; a folder left by a crash is removed at the next start of the same producer, under its exclusive lock. A direct DATA-LAST write during a staged run removes the declaration for the rest of that run. Maintenance scripts that walk DATA-LAST ignore `.staging`.
 
-Opted-in producers: IntuneConfigurations, IntuneManagedApps, IntuneEnrollmentFailures and Intune DiscoveredApps. Other producers keep direct publication. The orchestrator reads the declaration: under `FreshSuccess`, a long staged run does not hold its consumers back, while an unstaged one does.
+Opted-in producers: IntuneConfigurations, IntuneManagedApps, IntuneEnrollmentFailures, Intune DiscoveredApps and EXO mailboxes (full and fast runs; permissions-only runs hold no receipt and Top100/DebugUPN diagnostics keep direct suffixed copies). Other producers keep direct publication. The orchestrator reads the declaration: under `FreshSuccess`, a long staged run does not hold its consumers back, while an unstaged one does.
 
 Orchestrator dependency success history is unchanged. CMDB freshness stays 48 hours for normal sources and 240 hours for weekly application evidence, with its existing 168-hour warning. Intelligence source capture and stable history keys are unchanged.
 
