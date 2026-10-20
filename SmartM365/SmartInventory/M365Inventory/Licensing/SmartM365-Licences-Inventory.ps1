@@ -15,7 +15,7 @@
   as optional files M365_Licenses_ReportSkuCandidates.csv and M365_Licenses_ReportSkuCapacity.csv with the report snapshot identity;
   ReportSkuCapacity names the report product family of each SKU (ReportProduct) so consumers never re-implement the SKU rules.
 .VERSION
- 1.53
+ 1.54
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication; Microsoft.Graph.Identity.DirectoryManagement; Microsoft.Graph.Users; Microsoft.Graph.Groups; ImportExcel for the report attachment.
@@ -2134,7 +2134,8 @@ function Publish-LicensesReportSnapshot {
     [ordered]@{ Product=[string]$row.Product; Enabled=[long]$row.Enabled; Consumed=[long]$row.Consumed; Subscribed=[bool]$row.Subscribed }
   }
   $sources = [System.Collections.Generic.List[object]]::new()
-  $tenantPath = Join-Path $Folder 'M365_Licenses_Tenant.csv'
+  # This run's tenant CSV: its staged copy while the run is staged, never the previous run's DATA-LAST file.
+  $tenantPath = Get-LicensesPublicationPath -Path (Join-Path $Folder 'M365_Licenses_Tenant.csv')
   if (-not (Test-Path -LiteralPath $tenantPath -PathType Leaf)) { throw 'Tenant license CSV is missing before report snapshot publication.' }
   $tenantHashBefore = (Get-FileHash -LiteralPath $tenantPath -Algorithm SHA256).Hash
   $tenantSource = Read-LicensesTenantSnapshot -Path $tenantPath -ExpectedTenantKey $TenantKey
@@ -3918,7 +3919,7 @@ function Publish-LicensesWeeklyHistory {
 # ==========================================================
 # Main
 # ==========================================================
-$ScriptVersion = "1.53"
+$ScriptVersion = "1.54"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LicensesCsvLogFolderPath' -DefaultValue $OutputPath
 $LatestCsvFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ''

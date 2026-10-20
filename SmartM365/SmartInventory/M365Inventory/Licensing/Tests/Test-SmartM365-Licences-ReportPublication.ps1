@@ -3,7 +3,7 @@
 .SYNOPSIS
   Offline checks for the license report published by every full licensing run and declared as optional receipt outputs.
 .VERSION
-1.1.1
+1.1.2
 .NOTES
   Synthetic data only. Uses the real SmartM365.Core receipt commands and exports; no tenant, Graph, mail or SharePoint access.
 #>
@@ -109,14 +109,14 @@ function Write-FixtureCsv {
 }
 function Invoke-LicensingRun {
   param([object[]]$TenantRowsOverride, [string]$DependencyRulesPath = $rulesPath, [string]$ExclusionsPath = $exclusionsPath,
-    [switch]$Staged, [string]$CompleteStatus = 'Completed', [scriptblock]$BeforeComplete)
+    [switch]$Staged, [string]$CompleteStatus = 'Completed', [scriptblock]$BeforeComplete, [int]$E3Enabled = 10)
   # Same order as the collector: publish canonical CSVs, publish the report, then complete the receipt.
   $global:csvGeneratedPaths = $null
   Start-SmartM365CmdbSourceReceipt -ScriptPath $inventoryPath -SourceRootPath $dataLast
   if ($Staged) { Enable-SmartM365StagedSourcePublication }
   $collectedAt = [datetimeoffset]::UtcNow.ToString('o')
   $tenantRows = @(
-    [pscustomobject]@{ TenantKey='prod'; Id='sku-e3'; TenantSkuPartNumber='SPE_E3'; TenantPrepaidEnabled=10; TenantConsumedUnits=8; CollectedAtUtc=$collectedAt }
+    [pscustomobject]@{ TenantKey='prod'; Id='sku-e3'; TenantSkuPartNumber='SPE_E3'; TenantPrepaidEnabled=$E3Enabled; TenantConsumedUnits=8; CollectedAtUtc=$collectedAt }
     [pscustomobject]@{ TenantKey='prod'; Id='sku-f3'; TenantSkuPartNumber='SPE_F1'; TenantPrepaidEnabled=5; TenantConsumedUnits=5; CollectedAtUtc=$collectedAt }
   )
   $published = @(
@@ -314,13 +314,16 @@ try {
   Check ((Get-Content -LiteralPath $receiptFile -Raw | ConvertFrom-Json).RunId -eq $receiptBefore.RunId) 'A failed staged licensing run replaced the receipt.'
   Check ($script:Uploads.Count -eq 0) 'A staged licensing run uploaded files before its promotion.'
   Check (@(Get-ChildItem -LiteralPath (Join-Path $dataLast '.staging/SmartM365-Licences-Inventory') -Force).Count -eq 0) 'A failed staged licensing run left its staging folder.'
-  $staged = Invoke-LicensingRun -Staged -BeforeComplete { $script:MidRun = Get-WatchedHashTable }
+  # Production case: this run's tenant capacity differs from the previous run's DATA-LAST tenant CSV.
+  $staged = Invoke-LicensingRun -Staged -E3Enabled 12 -BeforeComplete { $script:MidRun = Get-WatchedHashTable }
+  Check $staged.Report.Published 'A staged run with a changed tenant capacity did not publish its report.'
   Check (@($watched | Where-Object { $script:MidRun[$_] -ne $beforeStaged[$_] }).Count -eq 0) 'A staged licensing run changed DATA-LAST before its completion.'
   Check ($staged.Receipt.Status -eq 'Completed' -and $staged.Receipt.RunId -ne $receiptBefore.RunId) 'A complete staged licensing run did not publish its receipt.'
   foreach ($name in @($reportNames + $decisionNames + @('M365_Licenses_Users.csv', 'M365_Licenses_Tenant.csv'))) {
     $record = @($staged.Receipt.Files | Where-Object File -eq $name)
     Check ($record.Count -eq 1 -and $record[0].SHA256 -eq (Get-FileHash -LiteralPath (Join-Path $dataLast $name)).Hash) "Promoted licensing CSV and receipt disagree: $name"
   }
+  Check (@(Import-Csv -LiteralPath (Join-Path $dataLast 'M365_Licenses_Tenant.csv') | Where-Object { $_.TenantSkuPartNumber -eq 'SPE_E3' -and $_.TenantPrepaidEnabled -eq '12' }).Count -eq 1) 'The changed tenant capacity was not promoted.'
   $promotedSnapshot = Get-Content -LiteralPath (Join-Path $dataLast 'M365_Licenses_ReportSnapshot.json.txt') -Raw | ConvertFrom-Json
   Check ($promotedSnapshot.SnapshotId -eq $staged.Report.SnapshotId -and $promotedSnapshot.ReceiptRun.RunId -eq $staged.Receipt.RunId) 'The promoted report snapshot does not name the promoted receipt run.'
   Check ($staged.RunState.Status -eq 'Completed' -and -not $staged.RunState.UnqualifiedPublication -and $staged.RunState.StagedPublication) 'The staged licensing run state is not qualified.'
