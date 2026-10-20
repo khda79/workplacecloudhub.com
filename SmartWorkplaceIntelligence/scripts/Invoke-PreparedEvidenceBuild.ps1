@@ -187,7 +187,10 @@ if ($MaxParallelGenerators -le 1) {
             if ($Task.Native) {
                 Import-Module (Join-Path $Root 'NativeEvidence.psm1') -Force
                 $nativeArgs = $Task.Arguments
-                Invoke-NativeEvidenceStage @nativeArgs *>&1 | ForEach-Object { $lines.Add([string]$_) }
+                # A stringified WarningRecord loses its prefix; keep it so the entry point counts it.
+                Invoke-NativeEvidenceStage @nativeArgs *>&1 | ForEach-Object {
+                    if ($_ -is [Management.Automation.WarningRecord]) { $lines.Add('WARNING: ' + $_.Message) } else { $lines.Add([string]$_) }
+                }
             } else {
                 $taskArgs = @($Task.Arguments)
                 & $Shell -NoProfile -File (Join-Path $Root $Task.Script) @taskArgs 2>&1 | ForEach-Object { $lines.Add([string]$_) }

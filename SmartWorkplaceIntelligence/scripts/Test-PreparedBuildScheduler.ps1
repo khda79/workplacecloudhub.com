@@ -1,4 +1,4 @@
-# Version 1.1.0: optional retention task respects Native -> Exceptions -> Trust.
+# Version 1.2.0: a native-stage warning keeps its WARNING prefix in the parallel worker.
 [CmdletBinding()]
 param([Parameter(Mandatory)][string]$TestRoot)
 # Runs the real build dispatcher with simulated generators only; no production preparation.
@@ -43,6 +43,7 @@ function Invoke-NativeEvidenceStage {
     [IO.File]::WriteAllText((Join-Path $root 'Native.start'), [string][datetime]::UtcNow.Ticks)
     Start-Sleep -Milliseconds ([int]$control.SleepMilliseconds)
     Write-Host 'stub output Native'
+    if ($control.NativeWarning) { Write-Warning 'Native stage warning' }
     [IO.File]::WriteAllText((Join-Path $root 'Native.out'), "$TenantKey|$PythonCommand")
     [IO.File]::WriteAllText((Join-Path $root 'Native.end'), [string][datetime]::UtcNow.Ticks)
     if ($control.Fail -eq 'Native') { throw 'Native Workplace evidence validation failed. Nothing was published.' }
@@ -68,7 +69,7 @@ function Invoke-Case([string]$Name, [int]$Parallel, [hashtable]$Overrides, [stri
     New-Item -ItemType Directory -Path (Join-Path $raw 'DATA-LAST'),$staging,$events -Force | Out-Null
     $rules = Join-Path $case 'AccountClassification.json.txt'
     [IO.File]::WriteAllText($rules,$valid)
-    $control = @{SleepMilliseconds=400;Fail='';Mutate='';RulesPath=$rules;Changed=$changed}
+    $control = @{SleepMilliseconds=400;Fail='';Mutate='';RulesPath=$rules;Changed=$changed;NativeWarning=$false}
     foreach ($key in $Overrides.Keys) { $control[$key] = $Overrides[$key] }
     $control | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $events 'control.json.txt')
     $arguments = @('-NoProfile','-ExecutionPolicy','Bypass','-File',(Join-Path $scripts 'Invoke-PreparedEvidenceBuild.ps1'),'-DataRoot',$raw,'-OutputRoot',$staging,
@@ -127,6 +128,10 @@ try {
     }
     Check ($parallel.Output -match 'stage=BeforeWorkforce;') 'Parallel classification checkpoint missing'
     Check (@([regex]::Matches($parallel.Output,'Completed ')).Count -eq ($sequentialOrder.Count - 1)) 'Completion lines missing'
+
+    # A native-stage warning keeps its WARNING prefix when the parallel worker replays it.
+    $nativeWarning = Invoke-Case -Name 'native-warning' -Parallel 3 -Overrides @{NativeWarning=$true}
+    Check ($nativeWarning.ExitCode -eq 0 -and $nativeWarning.Output -match '(?m)^WARNING: Native stage warning\s*$') 'Parallel native warning lost its WARNING prefix'
 
     # A failed generator stops the build; its dependants never start.
     $failed = Invoke-Case 'failed' 3 @{Fail='New-IntuneOperationalEvidence'}

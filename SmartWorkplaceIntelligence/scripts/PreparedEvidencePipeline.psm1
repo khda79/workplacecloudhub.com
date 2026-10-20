@@ -896,8 +896,14 @@ function Invoke-PreparedEvidencePipeline {
         if ($DeviceSystemOffsetlessGraphTimeZoneId) {$systemPolicyArgs+=@('-DeviceSystemOffsetlessGraphTimeZoneId',$DeviceSystemOffsetlessGraphTimeZoneId)}
         $null = Test-PreparedClassificationCapture -Path $rules -Stage 'BeforeBuild' -ExpectedSHA256 $classificationCapture.Captured.SHA256 -ExpectedBytes $classificationCapture.Captured.Bytes
         $systemPolicyArgs+=@('-AccountClassificationExpectedSHA256',$classificationCapture.Captured.SHA256,'-AccountClassificationExpectedBytes',[string]$classificationCapture.Captured.Bytes)
-        & (Get-Process -Id $PID).Path -NoProfile -File (Join-Path $PSScriptRoot 'Invoke-PreparedEvidenceBuild.ps1') -DataRoot $snapshot -OutputRoot $staging -AccountClassificationConfigPath $rules -AdCountryRulesPath $countryRulesPath -MaxParallelGenerators $MaxParallelGenerators @systemPolicyArgs 2>&1 |
-            ForEach-Object { foreach ($line in ([string]$_ -split '\r?\n')) { $message='[{0:yyyy-MM-dd HH:mm:ss}] {1}' -f (Get-Date),$line; $message | Add-Content -LiteralPath $log; Write-Host $message } }
+        # Generators render warnings as plain text: relayed lines and the retained log never carry ANSI
+        # sequences that would hide the WARNING prefix from the entry-point counters.
+        $previousNoColor = $env:NO_COLOR
+        $env:NO_COLOR = '1'
+        try {
+            & (Get-Process -Id $PID).Path -NoProfile -File (Join-Path $PSScriptRoot 'Invoke-PreparedEvidenceBuild.ps1') -DataRoot $snapshot -OutputRoot $staging -AccountClassificationConfigPath $rules -AdCountryRulesPath $countryRulesPath -MaxParallelGenerators $MaxParallelGenerators @systemPolicyArgs 2>&1 |
+                ForEach-Object { foreach ($line in ([string]$_ -split '\r?\n')) { $message='[{0:yyyy-MM-dd HH:mm:ss}] {1}' -f (Get-Date),$line; $message | Add-Content -LiteralPath $log; Write-Host $message } }
+        } finally { if ($null -eq $previousNoColor) { Remove-Item -LiteralPath Env:\NO_COLOR -ErrorAction SilentlyContinue } else { $env:NO_COLOR = $previousNoColor } }
         if ($LASTEXITCODE -ne 0) { throw "Preparation failed. Retained diagnostics: $run" }
         $provenance = @{Mode='RebuiltFromSnapshot';CapturePolicy='PerFileVerified';SelectedUtc=$selectedUtc;Sources=$plan;OptionalSourceIssues=$optionalIssues.ToArray();TenantValidation=$identity;LegacyTenantlessAllowed=($identity.LegacyArchivedSummaries -gt 0);LegacyTenantlessScope='Manifest-verified archived Intune discovered-application summaries only';AccountRulesSHA256=(Get-FileHash $rules).Hash;Scripts=@(Get-ChildItem $PSScriptRoot -File | Where-Object Extension -In '.ps1','.psm1','.py','.cs' | ForEach-Object { @{File=$_.Name;SHA256=(Get-FileHash $_.FullName).Hash} })}
         $provenance.NativeEvidence=@{ContractSHA256=(Get-FileHash -LiteralPath (Join-Path $script:ProductRoot 'config/native-output-contract.json.txt')).Hash;Audit=(Get-Content -LiteralPath $nativeAuditPath -Raw | ConvertFrom-Json)}
