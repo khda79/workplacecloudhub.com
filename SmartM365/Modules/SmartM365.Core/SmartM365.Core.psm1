@@ -5752,11 +5752,14 @@ function ExportAndCopyCsvFromConvert {
         $attempt = 0
         $globalCopyDone = $false
 
+        # An opted-in producer writes its DATA-LAST copy to source staging; it is promoted at completion.
+        $globalWritePath = if (Get-Command -Name Resolve-SmartM365SourcePublicationPath -ErrorAction SilentlyContinue) { Resolve-SmartM365SourcePublicationPath -Path $csvFilePath3 } else { $csvFilePath3 }
+        $globalStaged = $globalWritePath -cne $csvFilePath3
         while (-not $globalCopyDone -and $attempt -lt $maxRetries) {
             $attempt++
             try {
-                Copy-SmartM365FileAtomically -SourcePath $csvFilePath1 -DestinationPath $csvFilePath3
-                WriteLog -Message "CSV copied to global path: $csvFilePath3"
+                Copy-SmartM365FileAtomically -SourcePath $csvFilePath1 -DestinationPath $globalWritePath
+                WriteLog -Message $(if ($globalStaged) { "CSV staged for global path: $csvFilePath3" } else { "CSV copied to global path: $csvFilePath3" })
                 [void]$global:csvGeneratedPaths.Add($csvFilePath3)
                 $globalCopyDone = $true
             } catch {
@@ -5774,7 +5777,7 @@ function ExportAndCopyCsvFromConvert {
             RemoveOldFiles -FolderPath $OutputPath -FilePattern "$BaseFileName`_*.csv" -MaxFiles $global:RetentionMaxCSV
         }
 
-        Invoke-SmartM365SharePointCsvUpload -LocalFilePath $csvFilePath3
+        if (-not $globalStaged) { Invoke-SmartM365SharePointCsvUpload -LocalFilePath $csvFilePath3 }
 
         $historySourcePath = $csvFilePath3
         if ($SkipWeeklyHistory) {
@@ -5783,8 +5786,12 @@ function ExportAndCopyCsvFromConvert {
         elseif (Test-SmartM365MaxItemsMode) {
             WriteLog -Message 'WeeklyHistory publication skipped because MaxItems test mode is active.' -Level 'WARNING'
         }
-        else {
+        elseif (-not $globalStaged) {
             Invoke-SmartM365WeeklyInventoryHistoryForCsv -SourceFiles @($historySourcePath) -TimestampedPath $csvFilePath1
+        }
+        if ($globalStaged) {
+            Add-SmartM365StagedPublicationAction -Path $csvFilePath3 -TimestampedPath $csvFilePath1 -SharePointUpload `
+                -WeeklyHistory:(-not $SkipWeeklyHistory -and -not (Test-SmartM365MaxItemsMode))
         }
 
     } catch {

@@ -4,7 +4,7 @@
   Offline checks for the per-SKU license decisions: disabled accounts on every paid SKU, Copilot without licensed activity,
   Exchange retention guard, resource accounts, dependency guard, exclusions and SKU capacity.
 .VERSION
-1.0.0
+1.0.1
 .NOTES
   Synthetic data only. Uses the real SmartM365.Core module; no tenant, Graph, mail or SharePoint access.
 #>
@@ -25,7 +25,7 @@ $parseErrors = $null
 $ast = [System.Management.Automation.Language.Parser]::ParseFile($inventoryPath, [ref]$tokens, [ref]$parseErrors)
 if ($parseErrors.Count -gt 0) { throw ($parseErrors | Out-String) }
 $names = @(
-  'ConvertTo-LicensesActivityDate', 'ConvertTo-LicensesMailboxSizeGb', 'Get-LicensesQualifiedPartialAdCoverage', 'Get-LicensesCsvSource',
+  'ConvertTo-LicensesActivityDate', 'ConvertTo-LicensesMailboxSizeGb', 'Get-LicensesQualifiedPartialAdCoverage', 'Get-LicensesCsvSource', 'Get-LicensesPublicationPath',
   'Import-LicensesSourceCsv', 'Read-LicensesIndexedSource', 'Get-LicensesSuiteProduct', 'Get-LicensesOtherProduct', 'Get-LicensesFocusedSummaryRows', 'Get-LicensesOptionalProperty', 'Get-LicensesDecisionSettings', 'Read-LicensesDependencyRules',
   'Get-LicensesAccountState', 'Get-LicensesMailboxGuard', 'Get-LicensesCopilotUsageState', 'Get-LicensesCopilotActivity',
   'Get-LicensesSkuDecisions', 'Publish-LicensesSkuReportCsv'

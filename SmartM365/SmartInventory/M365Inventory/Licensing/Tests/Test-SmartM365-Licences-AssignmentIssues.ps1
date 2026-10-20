@@ -2,7 +2,7 @@
 .SYNOPSIS
   Offline checks for failed license assignments in the mail and Power BI source.
 .VERSION
-1.0.1
+1.0.2
 #>
 
 [CmdletBinding()]
@@ -21,7 +21,7 @@ Import-Module -Name $corePath -Force -ErrorAction Stop
 function Initialize-SmartM365ImportExcel {
   SmartM365.Core\Initialize-SmartM365ImportExcel -CheckOnly | Out-Null
 }
-$names = @('Get-LicensesSuiteProduct','Get-LicensesOptionalProperty','Get-LicensesCsvSource','Import-LicensesSourceCsv','Read-LicensesIndexedSource','Get-LicensesAssignmentIssues','Get-LicensesAlertSummary','New-LicensesRecoveryWorkbook','Publish-LicensesReportCsv')
+$names = @('Get-LicensesSuiteProduct','Get-LicensesOptionalProperty','Get-LicensesCsvSource', 'Get-LicensesPublicationPath','Import-LicensesSourceCsv','Read-LicensesIndexedSource','Get-LicensesAssignmentIssues','Get-LicensesAlertSummary','New-LicensesRecoveryWorkbook','Publish-LicensesReportCsv')
 foreach ($name in $names) {
   $definition = $ast.Find({param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name},$true)
   if (-not $definition) { throw "Missing function: $name" }

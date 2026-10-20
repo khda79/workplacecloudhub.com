@@ -15,15 +15,17 @@ Existing completed legacy proofs remain readable. Existing Running/Failed proofs
 
 Failed attempts publish their run state without re-uploading an older proof as new evidence. Successful attempts publish both metadata files using the configured shared upload behavior. Synchronization can deliver files out of order; hashes and proof validation remain mandatory. A local run-state file or local file lock alone is not a distributed lock across SharePoint-synchronized copies.
 
-## Staged source publication (Core 1.0.93, helper 1.4.0)
+## Staged source publication (Core 1.0.93, helper 1.4.0; artifacts Core 1.0.94, helper 1.4.1)
 
 A producer that calls `Enable-SmartM365StagedSourcePublication` right after starting its receipt never changes DATA-LAST before it completes. Its DATA-LAST CSVs are written to `DATA-LAST\.staging\<producer>\<RunId>\` (same volume, so each promotion is an atomic replace). The run state declares `StagedPublication: true` and stays Collecting during the whole collection.
 
 At completion, a qualified run is verified on its staged copies, then promoted: the run state is set to Publishing with `UnqualifiedPublication`, every CSV replaces its canonical file and is re-hashed, and only then is the new proof written, last. A consumer comparing hashes with the proof during promotion sees a mismatch or the Publishing fence, never a mixed set accepted as valid. If promotion fails part-way, no proof is written and the publication stays unqualified until the next complete run. A failed, cancelled or interrupted run leaves DATA-LAST, the previous proof and its qualification untouched.
 
+A producer can declare a non-CSV DATA-LAST file with `Resolve-SmartM365SourcePublicationPath -Artifact` (for example the license report snapshot). It is staged and promoted after the CSVs and before the proof; an artifact the run did not write keeps its previous copy.
+
 The SharePoint copy and WeeklyHistory of the promoted CSVs, and producer callbacks such as cache manifests, run after the proof; a failure there is a warning. `.staging` is never uploaded. The staging folder is removed at completion; a folder left by a crash is removed at the next start of the same producer, under its exclusive lock. A direct DATA-LAST write during a staged run removes the declaration for the rest of that run. Maintenance scripts that walk DATA-LAST ignore `.staging`.
 
-Opted-in producers: IntuneConfigurations, IntuneManagedApps, IntuneEnrollmentFailures, Intune DiscoveredApps and EXO mailboxes (full and fast runs; permissions-only runs hold no receipt and Top100/DebugUPN diagnostics keep direct suffixed copies). Other producers keep direct publication. The orchestrator reads the declaration: under `FreshSuccess`, a long staged run does not hold its consumers back, while an unstaged one does.
+Opted-in producers: IntuneConfigurations, IntuneManagedApps, IntuneEnrollmentFailures, Intune DiscoveredApps and EXO mailboxes (full and fast runs; permissions-only runs hold no receipt and Top100/DebugUPN diagnostics keep direct suffixed copies) and Licences (licensing CSVs, report CSVs, SKU decisions and report snapshot; the report reads the staged copies of its own run and is uploaded after the promotion). Other producers keep direct publication. The orchestrator reads the declaration: under `FreshSuccess`, a long staged run does not hold its consumers back, while an unstaged one does.
 
 Orchestrator dependency success history is unchanged. CMDB freshness stays 48 hours for normal sources and 240 hours for weekly application evidence, with its existing 168-hour warning. Intelligence source capture and stable history keys are unchanged.
 

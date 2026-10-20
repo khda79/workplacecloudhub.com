@@ -3,7 +3,7 @@
 .SYNOPSIS
   Offline checks for the license report published by every full licensing run and declared as optional receipt outputs.
 .VERSION
-1.1.0
+1.1.1
 .NOTES
   Synthetic data only. Uses the real SmartM365.Core receipt commands and exports; no tenant, Graph, mail or SharePoint access.
 #>
@@ -24,11 +24,11 @@ $ast = [System.Management.Automation.Language.Parser]::ParseFile($inventoryPath,
 if ($parseErrors.Count -gt 0) { throw ($parseErrors | Out-String) }
 $names = @(
   'Get-LicensesSuiteProduct', 'Get-LicensesFocusedSummaryRows', 'Get-LicensesAdditionalOverviewRows', 'Get-LicensesOtherProduct', 'New-LicensesOverviewCardHtml', 'ConvertTo-LicensesActivityDate',
-  'ConvertTo-LicensesMailboxSizeGb', 'Get-LicensesQualifiedPartialAdCoverage', 'Get-LicensesCsvSource', 'Import-LicensesSourceCsv',
+  'ConvertTo-LicensesMailboxSizeGb', 'Get-LicensesQualifiedPartialAdCoverage', 'Get-LicensesCsvSource', 'Get-LicensesPublicationPath', 'Import-LicensesSourceCsv',
   'Read-LicensesIndexedSource', 'Get-LicensesMailboxGapSummary', 'Get-LicensesAdAccountActivitySummary', 'Get-LicensesFocusedUsageRows',
   'Format-LicensesMetric', 'Get-LicensesAssignmentIssues', 'Get-LicensesAlertSummary', 'New-LicensesRecoveryWorkbook', 'Publish-LicensesReportCsv',
   'Publish-LicensesReportSnapshot', 'Write-LicensesDailyMailState', 'Enter-LicensesDailyMailGate', 'Send-LicensesFocusedSummaryEmail',
-  'Read-LicensesTenantSnapshot', 'Publish-LicensesRunReport', 'ConvertFrom-LicensesJsonElement', 'ConvertTo-LicensesCountTable',
+  'Read-LicensesTenantSnapshot', 'Publish-LicensesRunReport', 'Invoke-LicensesReportUpload', 'ConvertFrom-LicensesJsonElement', 'ConvertTo-LicensesCountTable',
   'Read-LicensesPublishedReport', 'Get-LicensesOptionalProperty', 'Get-LicensesDecisionSettings', 'Read-LicensesDependencyRules', 'Get-LicensesAccountState',
   'Get-LicensesMailboxGuard', 'Get-LicensesCopilotUsageState', 'Get-LicensesCopilotActivity', 'Get-LicensesSkuDecisions', 'Publish-LicensesSkuReportCsv'
 )
@@ -40,7 +40,7 @@ if ($definitions.Count -ne $names.Count) { throw 'License report functions are m
 foreach ($definition in $definitions) { Invoke-Expression $definition.Extent.Text }
 
 # The production module: a missing export fails here exactly as it would in the collector.
-$coreModule = Import-Module $coreManifest -MinimumVersion '1.0.90' -Force -PassThru
+$coreModule = Import-Module $coreManifest -MinimumVersion '1.0.94' -Force -PassThru
 
 $script:checks = 0
 function Check {
@@ -102,15 +102,18 @@ function Write-ForeignReceipt {
 }
 function Write-FixtureCsv {
   param([string]$Name, [object[]]$Rows)
-  $path = Join-Path $dataLast $Name
+  # A staged licensing run writes its own CSVs to the copy that its completion promotes.
+  $path = Get-LicensesPublicationPath -Path (Join-Path $dataLast $Name)
   $Rows | Export-Csv -LiteralPath $path -NoTypeInformation -Encoding utf8NoBOM
   return $path
 }
 function Invoke-LicensingRun {
-  param([object[]]$TenantRowsOverride, [string]$DependencyRulesPath = $rulesPath, [string]$ExclusionsPath = $exclusionsPath)
+  param([object[]]$TenantRowsOverride, [string]$DependencyRulesPath = $rulesPath, [string]$ExclusionsPath = $exclusionsPath,
+    [switch]$Staged, [string]$CompleteStatus = 'Completed', [scriptblock]$BeforeComplete)
   # Same order as the collector: publish canonical CSVs, publish the report, then complete the receipt.
   $global:csvGeneratedPaths = $null
   Start-SmartM365CmdbSourceReceipt -ScriptPath $inventoryPath -SourceRootPath $dataLast
+  if ($Staged) { Enable-SmartM365StagedSourcePublication }
   $collectedAt = [datetimeoffset]::UtcNow.ToString('o')
   $tenantRows = @(
     [pscustomobject]@{ TenantKey='prod'; Id='sku-e3'; TenantSkuPartNumber='SPE_E3'; TenantPrepaidEnabled=10; TenantConsumedUnits=8; CollectedAtUtc=$collectedAt }
@@ -135,7 +138,9 @@ function Invoke-LicensingRun {
   $rowsForReport = if ($TenantRowsOverride) { $TenantRowsOverride } else { $tenantRows }
   $report = Publish-LicensesRunReport -Folder $dataLast -TenantKey 'prod' -CollectedAtUtc $collectedAt -TenantRows $rowsForReport -DependencyRulesPath $DependencyRulesPath -ExclusionsPath $ExclusionsPath
   Set-SmartM365CmdbSourceScope -CompleteScope $true -Scope 'CMDB:skus,license_paths,plans,user_plans,groups'
-  $completed = Complete-SmartM365CmdbSourceReceipt -Status 'Completed'
+  if ($BeforeComplete) { & $BeforeComplete }
+  $null = if ($CompleteStatus -eq 'Completed') { Complete-SmartM365CmdbSourceReceipt -Status 'Completed' } else { Complete-SmartM365CmdbSourceReceipt -Status $CompleteStatus -ErrorCount 1 }
+  $completed = Join-Path $dataLast 'SmartInventory_SmartM365-Licences-Inventory.current.json.txt'
   $runState = Get-Content -LiteralPath ($completed -replace '\.current\.json\.txt$','.run.json.txt') -Raw | ConvertFrom-Json
   return [pscustomobject]@{ Report=$report; Receipt=(Get-Content -LiteralPath $completed -Raw | ConvertFrom-Json); RunState=$runState }
 }
@@ -290,8 +295,46 @@ try {
   Check ($inventoryText -notmatch 'BypassLicenseUsersReceipt') 'The licensing receipt bypass switch is removed.'
   Check ($inventoryText -match "if \(\`$ForceAdCsvAnalysis\) \{\s*throw '-ForceAdCsvAnalysis applies to a full collection run") 'Email-only mode rejects ForceAdCsvAnalysis.'
   Check ($inventoryText -match '\$MaxItems -eq 0 -and \$TopUsers -eq 0 -and -not \(Test-SmartM365MaxItemsMode\)\) \{\s*\$currentOperation = ''Publish license report''') 'Sampled runs do not publish a license report.'
+
+  # 9. Staged run: CSVs, report CSVs and snapshot reach DATA-LAST together with the receipt, never before.
+  Check ($inventoryText -match "Start-SmartM365CmdbSourceReceipt [^\r\n]*\r?\n(\s*#[^\r\n]*\r?\n)*\s*Enable-SmartM365StagedSourcePublication") 'The collector enables staging right after its receipt.'
+  $watched = @($reportNames + $decisionNames + @('M365_Licenses_ReportSnapshot.json.txt', 'M365_Licenses_Users.csv', 'M365_Licenses_Tenant.csv', 'M365_Licenses_UserServicePlanStates.csv'))
+  $receiptFile = Join-Path $dataLast 'SmartInventory_SmartM365-Licences-Inventory.current.json.txt'
+  function Get-WatchedHashTable { $hashes = @{}; foreach ($name in $watched) { $file = Join-Path $dataLast $name; $hashes[$name] = if (Test-Path -LiteralPath $file) { (Get-FileHash -LiteralPath $file).Hash } else { '' } }; return $hashes }
+  $beforeStaged = Get-WatchedHashTable
+  $receiptBefore = Get-Content -LiteralPath $receiptFile -Raw | ConvertFrom-Json
+  $global:EnableSharePointUpload = $true
+  $script:Uploads.Clear()
+  $script:MidRun = $null
+  $failedStaged = Invoke-LicensingRun -Staged -CompleteStatus 'Failed' -BeforeComplete { $script:MidRun = Get-WatchedHashTable }
+  Check $failedStaged.Report.Published 'A staged run builds its report from its staged copies.'
+  Check (@($watched | Where-Object { $script:MidRun[$_] -ne $beforeStaged[$_] }).Count -eq 0) 'A running staged licensing run changed DATA-LAST.'
+  $afterFailed = Get-WatchedHashTable
+  Check (@($watched | Where-Object { $afterFailed[$_] -ne $beforeStaged[$_] }).Count -eq 0) 'A failed staged licensing run changed DATA-LAST.'
+  Check ((Get-Content -LiteralPath $receiptFile -Raw | ConvertFrom-Json).RunId -eq $receiptBefore.RunId) 'A failed staged licensing run replaced the receipt.'
+  Check ($script:Uploads.Count -eq 0) 'A staged licensing run uploaded files before its promotion.'
+  Check (@(Get-ChildItem -LiteralPath (Join-Path $dataLast '.staging/SmartM365-Licences-Inventory') -Force).Count -eq 0) 'A failed staged licensing run left its staging folder.'
+  $staged = Invoke-LicensingRun -Staged -BeforeComplete { $script:MidRun = Get-WatchedHashTable }
+  Check (@($watched | Where-Object { $script:MidRun[$_] -ne $beforeStaged[$_] }).Count -eq 0) 'A staged licensing run changed DATA-LAST before its completion.'
+  Check ($staged.Receipt.Status -eq 'Completed' -and $staged.Receipt.RunId -ne $receiptBefore.RunId) 'A complete staged licensing run did not publish its receipt.'
+  foreach ($name in @($reportNames + $decisionNames + @('M365_Licenses_Users.csv', 'M365_Licenses_Tenant.csv'))) {
+    $record = @($staged.Receipt.Files | Where-Object File -eq $name)
+    Check ($record.Count -eq 1 -and $record[0].SHA256 -eq (Get-FileHash -LiteralPath (Join-Path $dataLast $name)).Hash) "Promoted licensing CSV and receipt disagree: $name"
+  }
+  $promotedSnapshot = Get-Content -LiteralPath (Join-Path $dataLast 'M365_Licenses_ReportSnapshot.json.txt') -Raw | ConvertFrom-Json
+  Check ($promotedSnapshot.SnapshotId -eq $staged.Report.SnapshotId -and $promotedSnapshot.ReceiptRun.RunId -eq $staged.Receipt.RunId) 'The promoted report snapshot does not name the promoted receipt run.'
+  Check ($staged.RunState.Status -eq 'Completed' -and -not $staged.RunState.UnqualifiedPublication -and $staged.RunState.StagedPublication) 'The staged licensing run state is not qualified.'
+  Check ($staged.Report.UploadDeferred -and $script:Uploads.Count -eq 0) 'The staged report upload was not deferred to the promotion.'
+  $uploadedStaged = Invoke-LicensesReportUpload -Result $staged.Report -ReportPaths $staged.Report.ReportPaths -SkuPaths $staged.Report.SkuPaths
+  Check ($uploadedStaged.UploadSatisfied -and $script:Uploads.Count -eq 8 -and $script:Uploads[0] -eq 'M365_Licenses_ReportSnapshot.json.txt') 'The promoted report was not uploaded by canonical name.'
+  Check (@($staged.Report.ReportPaths + $staged.Report.SkuPaths | Where-Object { $_ -like '*.staging*' }).Count -eq 0) 'A staging path reached the report upload.'
+  Remove-Variable -Name EnableSharePointUpload -Scope Global -ErrorAction SilentlyContinue
+  $read = Read-LicensesPublishedReport -Folder $dataLast -TenantKey 'prod'
+  Check ($null -ne $read) 'The email reader accepts the promoted report.'
 }
 finally {
+  # Releases the producer lock if a check failed while a receipt was active.
+  try { Complete-SmartM365CmdbSourceReceipt -Status 'Failed' -ErrorCount 1 | Out-Null } catch { Write-Verbose $_.Exception.Message }
   foreach ($name in $saved.Keys) {
     if ($saved[$name].Exists) { Set-Variable -Name $name -Scope Global -Value $saved[$name].Value }
     else { Remove-Variable -Name $name -Scope Global -ErrorAction SilentlyContinue }

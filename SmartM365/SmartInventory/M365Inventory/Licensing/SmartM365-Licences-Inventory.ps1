@@ -5,6 +5,7 @@
   Detects Direct vs Group via user.LicenseAssignmentStates.assignedByGroup.
   Maps SKU & Service Plan friendly names from the Microsoft CSV (default: script folder).
   Every full run publishes the license report (snapshot + M365_Licenses_Report*.csv) as optional outputs of its source receipt.
+  DATA-LAST changes only when a run completes: CSVs and report snapshot are staged and promoted with the receipt (Core 1.0.94).
   The email, including SendLicenseSummaryEmailOnly, renders that published report after checking it against the receipt; it never recomputes.
   ForceAdCsvAnalysis (full runs only) uses a fresh, structurally valid AD CSV for the report when only its collector receipt is rejected.
   ForceLicenseSummaryEmail sends the report again even when it was already sent on the current Europe/Paris day.
@@ -14,7 +15,7 @@
   as optional files M365_Licenses_ReportSkuCandidates.csv and M365_Licenses_ReportSkuCapacity.csv with the report snapshot identity;
   ReportSkuCapacity names the report product family of each SKU (ReportProduct) so consumers never re-implement the SKU rules.
 .VERSION
- 1.52
+ 1.53
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication; Microsoft.Graph.Identity.DirectoryManagement; Microsoft.Graph.Users; Microsoft.Graph.Groups; ImportExcel for the report attachment.
@@ -259,7 +260,7 @@ $OrgDomain = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'OrgDom
 # ==========================================================
 $modulePath = & { $d = $PSScriptRoot; while ($d) { $p = Join-Path $d 'Modules\SmartM365.Core\SmartM365.Core.psd1'; if (Test-Path -LiteralPath $p) { return $p }; $parent = Split-Path -Path $d -Parent; if ($parent -eq $d) { break }; $d = $parent }; throw 'SmartM365.Core module not found.' }
 try {
-    Import-Module -Name $modulePath -MinimumVersion '1.0.92' -ErrorAction Stop
+    Import-Module -Name $modulePath -MinimumVersion '1.0.94' -ErrorAction Stop
 } catch {
     Write-Host "Failed to import SmartM365.Core module from '$modulePath' : $_" -ForegroundColor Red
     exit 1
@@ -767,6 +768,13 @@ function Get-LicensesQualifiedPartialAdCoverage {
   return $Manifest.DomainCoverage
 }
 
+# Write or read target of a DATA-LAST file of this run: its staged copy while Core staging is active.
+function Get-LicensesPublicationPath {
+  param([Parameter(Mandatory)][string]$Path,[switch]$Artifact)
+  if (-not (Get-Command -Name Resolve-SmartM365SourcePublicationPath -ErrorAction SilentlyContinue)) { return $Path }
+  return (Resolve-SmartM365SourcePublicationPath -Path $Path -Artifact:$Artifact)
+}
+
 function Get-LicensesCsvSource {
   param(
     [Parameter(Mandatory)][string]$Folder,
@@ -780,6 +788,13 @@ function Get-LicensesCsvSource {
     [AllowNull()]$CurrentRunPublication
   )
   $path = Join-Path -Path $Folder -ChildPath $FileName
+  $canonicalPath = [IO.Path]::GetFullPath($path)
+  $currentRunSource = $CurrentRunPublication -and $CollectorManifestName -ceq 'SmartInventory_SmartM365-Licences-Inventory.current.json.txt'
+  if ($currentRunSource) {
+    # A staged run has not promoted its CSVs yet: read the copy that its completion will promote.
+    $stagedPath = Get-LicensesPublicationPath -Path $path
+    if ($stagedPath -cne $path -and (Test-Path -LiteralPath $stagedPath -PathType Leaf)) { $path = $stagedPath }
+  }
   $source = [pscustomobject]@{ Name=$FileName; Path=$path; Ready=$false; Reason=''; Date=''; ModifiedUtc=$null; Provenance='CSV only'; Forced=$false; PartialScopeAccepted=$false; DomainCoverage=$null; SHA256=''; ReceiptPath=''; ReceiptHash=''; Proof=$null }
   if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { $source.Reason='missing'; return $source }
   $item = Get-Item -LiteralPath $path
@@ -793,10 +808,9 @@ function Get-LicensesCsvSource {
     if ($column -notin $foundColumns) { $source.Reason="missing column: $column"; return $source }
   }
   # During the licensing run its own receipt is still Running: prove the file by this run's publication instead.
-  if ($CurrentRunPublication -and $CollectorManifestName -ceq 'SmartInventory_SmartM365-Licences-Inventory.current.json.txt') {
-    $fullPath = [IO.Path]::GetFullPath($path)
-    if (-not $CurrentRunPublication.Hashes.ContainsKey($fullPath)) { $source.Reason = 'file was not published by the current licensing run'; return $source }
-    if ([string]$CurrentRunPublication.Hashes[$fullPath] -cne $source.SHA256) { $source.Reason = 'file hash differs from the current-run publication'; return $source }
+  if ($currentRunSource) {
+    if (-not $CurrentRunPublication.Hashes.ContainsKey($canonicalPath)) { $source.Reason = 'file was not published by the current licensing run'; return $source }
+    if ([string]$CurrentRunPublication.Hashes[$canonicalPath] -cne $source.SHA256) { $source.Reason = 'file hash differs from the current-run publication'; return $source }
     $source.Provenance = 'current run publication'
     $source.Proof = [pscustomobject]@{ RunId = [string]$CurrentRunPublication.RunId }
     if ((Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash -cne $source.SHA256) { $source.Reason='source changed during validation'; return $source }
@@ -2054,7 +2068,7 @@ function Publish-LicensesReportCsv {
     @{ Name='M365_Licenses_ReportGaps.csv'; Columns=$gapColumns; Rows=$gaps },
     @{ Name='M365_Licenses_ReportSources.csv'; Columns=$sourceColumns; Rows=$sources }
   )) {
-    $path = Join-Path $Folder $spec.Name
+    $path = Get-LicensesPublicationPath -Path (Join-Path $Folder $spec.Name)
     $pending = "$path.$($Snapshot.SnapshotId).pending"
     try {
       $lines = if (@($spec.Rows).Count -gt 0) { @($spec.Rows | Select-Object -Property $spec.Columns | ConvertTo-Csv -NoTypeInformation) }
@@ -2248,7 +2262,8 @@ function Publish-LicensesReportSnapshot {
   }
   # Additive in schema 2: the licensing receipt run that proves this report's licensing inputs.
   if ($ReceiptRun) { $snapshot.ReceiptRun = [ordered]@{ Producer=[string]$ReceiptRun.Producer; RunId=[string]$ReceiptRun.RunId; StartedAtUtc=[string]$ReceiptRun.StartedAtUtc } }
-  $path = Join-Path $Folder 'M365_Licenses_ReportSnapshot.json.txt'
+  # Promoted with the report CSVs and the receipt when the run is staged.
+  $path = Get-LicensesPublicationPath -Path (Join-Path $Folder 'M365_Licenses_ReportSnapshot.json.txt') -Artifact
   $bytes = [Text.UTF8Encoding]::new($false).GetBytes(($snapshot | ConvertTo-Json -Depth 16 -Compress))
   $document = [Text.Encoding]::UTF8.GetString($bytes) | ConvertFrom-Json -ErrorAction Stop
   if ([string]$document.SnapshotId -ne $snapshotId -or [string]$document.TenantKey -ne $TenantKey -or
@@ -2781,7 +2796,7 @@ function Publish-LicensesSkuReportCsv {
       @{ Name='M365_Licenses_ReportSkuCandidates.csv'; Columns=$candidateColumns; Rows=@($Decisions.Candidates) },
       @{ Name='M365_Licenses_ReportSkuCapacity.csv'; Columns=$capacityColumns; Rows=@($Decisions.Capacity) })) {
     $rows = @(foreach ($row in $spec.Rows) { $values = [ordered]@{} + $identity; foreach ($property in $row.PSObject.Properties) { $values[$property.Name] = $property.Value }; [pscustomobject]$values })
-    $path = Join-Path $Folder $spec.Name
+    $path = Get-LicensesPublicationPath -Path (Join-Path $Folder $spec.Name)
     $pending = "$path.$SnapshotId.pending"
     try {
       $lines = if ($rows.Count -gt 0) { @($rows | Select-Object -Property $spec.Columns | ConvertTo-Csv -NoTypeInformation) } else { @(($spec.Columns | ForEach-Object { '"{0}"' -f $_ }) -join ',') }
@@ -2866,10 +2881,25 @@ function Publish-LicensesRunReport {
     try { Add-SmartM365SourceRunNote -Message $note } catch { WriteLog -Message ("License report note could not be added to the run state: {0}" -f $_.Exception.Message) 'WARNING' }
     return $result
   }
+  $reportPaths = @(@($snapshot.Path) + @($snapshot.CsvPaths) | ForEach-Object { Join-Path $Folder ([IO.Path]::GetFileName([string]$_)) })
+  $skuPaths = @($skuDecisionPaths | ForEach-Object { Join-Path $Folder ([IO.Path]::GetFileName([string]$_)) })
+  if ([string]$snapshot.Path -cne $reportPaths[0]) {
+    # Staged: these copies reach DATA-LAST with the receipt; upload them after the completion.
+    $result | Add-Member -NotePropertyName UploadDeferred -NotePropertyValue $true
+    $result | Add-Member -NotePropertyName ReportPaths -NotePropertyValue $reportPaths
+    $result | Add-Member -NotePropertyName SkuPaths -NotePropertyValue $skuPaths
+    return $result
+  }
+  return (Invoke-LicensesReportUpload -Result $result -ReportPaths $reportPaths -SkuPaths $skuPaths)
+}
+
+function Invoke-LicensesReportUpload {
+  param([Parameter(Mandatory)]$Result,[AllowEmptyCollection()][string[]]$ReportPaths=@(),[AllowEmptyCollection()][string[]]$SkuPaths=@())
   $uploadSetting = Get-Variable -Name EnableSharePointUpload -Scope Global -ErrorAction SilentlyContinue
-  if (-not ($uploadSetting -and [bool]$uploadSetting.Value)) { $result.UploadSatisfied = $true; return $result }
+  if (-not ($uploadSetting -and [bool]$uploadSetting.Value)) { $Result.UploadSatisfied = $true; return $Result }
+  $result = $Result
   try {
-    foreach ($path in @(@($snapshot.Path) + @($snapshot.CsvPaths))) {
+    foreach ($path in $ReportPaths) {
       if (-not (Invoke-SmartM365SharePointCsvUpload -LocalFilePath $path)) { throw ("License report file was not uploaded to SharePoint: {0}" -f [IO.Path]::GetFileName($path)) }
     }
     $result.UploadSatisfied = $true
@@ -2880,7 +2910,7 @@ function Publish-LicensesRunReport {
     WriteLog -Message ("{0} The summary email will not be sent." -f $note) 'WARNING'
     try { Add-SmartM365SourceRunNote -Message $note } catch { WriteLog -Message ("License report note could not be added to the run state: {0}" -f $_.Exception.Message) 'WARNING' }
   }
-  foreach ($path in $skuDecisionPaths) {
+  foreach ($path in $SkuPaths) {
     try { $uploaded = Invoke-SmartM365SharePointCsvUpload -LocalFilePath $path } catch { $uploaded = $false }
     if (-not $uploaded) {
       $note = 'License SKU decision file {0} is recorded by this receipt but was not uploaded to SharePoint.' -f [IO.Path]::GetFileName($path)
@@ -3660,10 +3690,13 @@ function Publish-LicensesServicePlanStateCsvFile {
   [void]$global:csvGeneratedPaths.Add($currentPath)
   WriteLog -Message "CSV copied to: $currentPath" 'INFO'
 
+  $latestWritePath = $latestPath
   if ($latestPath -ine $currentPath) {
-    Copy-LicensesCsvAtomically -SourcePath $timestampedPath -DestinationPath $latestPath
+    # Shared atomic copy: Publishing fence, receipt registration and source staging when enabled.
+    $latestWritePath = Get-LicensesPublicationPath -Path $latestPath
+    Copy-SmartM365FileAtomically -SourcePath $timestampedPath -DestinationPath $latestWritePath -VerifyHash
     [void]$global:csvGeneratedPaths.Add($latestPath)
-    WriteLog -Message "CSV copied to global path: $latestPath" 'INFO'
+    WriteLog -Message $(if ($latestWritePath -cne $latestPath) { "CSV staged for global path: $latestPath" } else { "CSV copied to global path: $latestPath" }) 'INFO'
   }
 
   $global:csvFilePath1 = $timestampedPath
@@ -3674,12 +3707,13 @@ function Publish-LicensesServicePlanStateCsvFile {
     Remove-SmartM365TimestampedFilesOlderThan -FolderPath $CurrentOutputPath -FilePattern "$runBaseFileName`_*.csv" -RetentionDays 7 -LogFile $global:logTextFile
   }
 
-  Invoke-SmartM365SharePointCsvUpload -LocalFilePath $latestPath | Out-Null
+  if ($latestWritePath -cne $latestPath) { Add-SmartM365StagedPublicationAction -Path $latestPath -SharePointUpload }
+  else { Invoke-SmartM365SharePointCsvUpload -LocalFilePath $latestPath | Out-Null }
   WriteLog -Message 'Automatic WeeklyHistory publication skipped for this CSV; the caller will publish the validated dataset group.' 'INFO'
   return [pscustomobject]@{
     TimestampedPath = $timestampedPath
     CurrentPath     = $currentPath
-    PublishedPath   = $latestPath
+    PublishedPath   = $latestWritePath
     RowCount        = $ExpectedRows
   }
 }
@@ -3854,8 +3888,9 @@ function Publish-LicensesWeeklyHistory {
     $weeklySourceFiles = New-Object System.Collections.Generic.List[string]
     foreach ($latestName in $latestNames) {
       $latestPath = Join-Path -Path $LatestOutputPath -ChildPath $latestName
-      if ($global:csvGeneratedPaths -and $global:csvGeneratedPaths.Contains($latestPath) -and (Test-Path -LiteralPath $latestPath -PathType Leaf)) {
-        $weeklySourceFiles.Add($latestPath) | Out-Null
+      $runCopyPath = Get-LicensesPublicationPath -Path $latestPath
+      if ($global:csvGeneratedPaths -and $global:csvGeneratedPaths.Contains($latestPath) -and (Test-Path -LiteralPath $runCopyPath -PathType Leaf)) {
+        $weeklySourceFiles.Add($runCopyPath) | Out-Null
       }
     }
     $weeklySourceFiles.Add($detailedSourcePath) | Out-Null
@@ -3883,7 +3918,7 @@ function Publish-LicensesWeeklyHistory {
 # ==========================================================
 # Main
 # ==========================================================
-$ScriptVersion = "1.52"
+$ScriptVersion = "1.53"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LicensesCsvLogFolderPath' -DefaultValue $OutputPath
 $LatestCsvFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ''
@@ -3932,6 +3967,8 @@ try {
   $InitializeOutputPath = InitializeScriptEnvironment -OutputPath $OutputPath -LogFileName $(($MyInvocation.MyCommand.Name) -replace '\.ps1$','')
   $inventoryEnvironmentInitialized = $true
   Start-SmartM365CmdbSourceReceipt -ScriptPath $PSCommandPath -SourceRootPath (Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue '')
+  # DATA-LAST changes only when this run completes; a failed or running run leaves the previous set intact.
+  Enable-SmartM365StagedSourcePublication
   Start-Transcript -Path $global:logTranscriptFile -Append
   $transcriptStarted = $true
   WriteLog -Message "Script Environment initialized at $InitializeOutputPath"
@@ -4483,6 +4520,10 @@ $BaseFileName = "M365_Licenses_Groups"
     }
   }
   catch { throw ("Licensing source receipt could not be completed; summary email was not sent: {0}" -f $_.Exception.Message) }
+  if ($licenseRunReport -and $licenseRunReport.Published -and $licenseRunReport.PSObject.Properties['UploadDeferred']) {
+    $currentOperation = 'Upload promoted license report'
+    $licenseRunReport = Invoke-LicensesReportUpload -Result $licenseRunReport -ReportPaths $licenseRunReport.ReportPaths -SkuPaths $licenseRunReport.SkuPaths
+  }
 
   $currentOperation = 'Send focused license summary email'
   if ($licenseRunReport -and $licenseRunReport.Published -and $licenseRunReport.UploadSatisfied) {

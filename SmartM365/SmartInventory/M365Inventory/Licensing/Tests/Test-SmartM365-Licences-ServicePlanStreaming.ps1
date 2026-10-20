@@ -6,7 +6,7 @@
     and safe retirement of duplicate weekly files. No Graph connection or
     production CSV is used.
 .VERSION
-1.1
+1.2
 #>
 
 [CmdletBinding()]
@@ -32,6 +32,7 @@ $requiredFunctions = @(
     'Get-LicensesCsvDataRowCount',
     'Assert-LicensesServicePlanStateCsvFile',
     'Copy-LicensesCsvAtomically',
+    'Get-LicensesPublicationPath',
     'Publish-LicensesServicePlanStateCsvFile',
     'New-LicensesDetailedServicePlanHistorySource',
     'Get-LicensesIsoWeekName',
@@ -63,6 +64,8 @@ function Add-SmartM365MaxItemsSuffixToBaseName {
 function Get-SmartM365MaxItemsSuffix { return '_MAXITEMS-5' }
 function RemoveOldFiles {}
 function Invoke-SmartM365SharePointCsvUpload { param([string]$LocalFilePath) return $null }
+# Core atomic copy without an active source receipt: a plain verified copy.
+function Copy-SmartM365FileAtomically { param([string]$SourcePath,[string]$DestinationPath,[switch]$VerifyHash) $null = $VerifyHash; Copy-Item -LiteralPath $SourcePath -Destination $DestinationPath -Force }
 function Assert-Equal {
     param($Actual, $Expected, [string]$Label)
     if ($Actual -ne $Expected) { throw "$Label expected '$Expected', got '$Actual'." }
