@@ -2,7 +2,7 @@
 .SYNOPSIS
     Qualified, coupled server/SharePoint batch retention. Preview is the default.
 .VERSION
-    1.2.0
+    1.3.0
 #>
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -57,6 +57,8 @@ function Get-RetentionChild([string]$Root,[string]$Relative) {
 }
 function Assert-RetentionBatchId([string]$Id) {
     if($Id -cnotmatch '^\d{8}T\d{9}Z-[a-f0-9]{8}$'){throw 'Invalid retention batch ID.'}
+    $null=[datetime]::ParseExact($Id.Substring(0,19),"yyyyMMdd'T'HHmmssfff'Z'",[Globalization.CultureInfo]::InvariantCulture,
+        ([Globalization.DateTimeStyles]::AssumeUniversal -bor [Globalization.DateTimeStyles]::AdjustToUniversal))
 }
 function Assert-RetentionLock([IO.FileStream]$Stream) {
     if(-not $Stream.CanWrite -or $Stream.SafeFileHandle.IsClosed -or $Stream.SafeFileHandle.IsInvalid){throw 'Server publication lock was lost.'}
@@ -287,6 +289,20 @@ function Get-RetentionSnapshot([string]$OutputRoot,$Transport,[string]$Scratch,[
     }
     [pscustomobject]@{Verification=$Verification;Target=$target;LocalPointer=$localPointer;LocalPointerSHA256=$localHash;RemotePointer=$cloudPointer.Value;RemotePointerSHA256=$cloudPointer.SHA256;Batches=$batches.ToArray();ArchivedLinks=$archives.ToArray()}
 }
+function Get-RetentionMinimumBatches($Snapshot,$Validation) {
+    foreach($storage in 'Local','SharePoint'){
+        # IDs carry the validated UTC creation timestamp; file modification times are irrelevant.
+        $qualified=@($Snapshot.Batches | Where-Object {$_.Storage -ceq $storage -and $Validation[$storage+'|'+$_.BatchId].Valid} |
+            Sort-Object @{Expression={$_.BatchId.Substring(0,19)};Descending=$true},BatchId)
+        $ids=@()
+        if($qualified.Count){
+            $boundary=$qualified[[Math]::Min(1,$qualified.Count-1)].BatchId.Substring(0,19)
+            # Keep every tie at the second timestamp instead of arbitrarily dropping a valid copy.
+            $ids=@($qualified | Where-Object {[string]::CompareOrdinal($_.BatchId.Substring(0,19),$boundary) -ge 0} | ForEach-Object BatchId)
+        }
+        [pscustomobject]@{Storage=$storage;BatchIds=$ids}
+    }
+}
 function New-RetentionPlan($Snapshot,$Registry,[string]$RegistryHash,[string]$ConfigurationHash,[string]$OutputRoot,$Settings,[string]$TenantKey) {
     $blocked=[Collections.Generic.List[string]]::new();$protected=@{}
     function Protect([string]$Id,[string]$Reason){if($Id){if(-not $protected.ContainsKey($Id)){$protected[$Id]=[Collections.Generic.List[string]]::new()};$protected[$Id].Add($Reason)}}
@@ -300,6 +316,11 @@ function New-RetentionPlan($Snapshot,$Registry,[string]$RegistryHash,[string]$Co
     catch {$blocked.Add($_.Exception.Message)}
     $rows=[Collections.Generic.List[object]]::new();$valid=@{}
     foreach($b in @($Snapshot.Batches)){$valid[$b.Storage+'|'+$b.BatchId]=Test-RetentionBatch $b $TenantKey}
+    $minimum=@(Get-RetentionMinimumBatches $Snapshot $valid)
+    foreach($store in $minimum){
+        foreach($id in $store.BatchIds){Protect $id ("Newest valid $($store.Storage) batches; minimum two; $($Snapshot.Verification)")}
+        if($store.BatchIds.Count -lt 2){$blocked.Add("Fewer than two complete validated $($store.Storage) batches; retention minimum cannot be established.")}
+    }
     foreach($storage in 'Local','SharePoint'){
         $byId=@{};foreach($b in @($Snapshot.Batches | Where-Object Storage -CEQ $storage)){$byId[$b.BatchId]=$b}
         $chain=[Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
@@ -336,7 +357,7 @@ function New-RetentionPlan($Snapshot,$Registry,[string]$RegistryHash,[string]$Co
             if($protected.ContainsKey($group.Name)){$blocked.Add("Protected batch copies disagree: $($group.Name)")}
         }
     }
-    [pscustomobject]@{SchemaVersion=3;Verification=$Snapshot.Verification;ApplySupported=($Snapshot.Verification -ceq 'Full');PolicyVersion=$script:RetentionPolicyVersion;PlanId=[guid]::NewGuid().ToString('N');CreatedUtc=[datetime]::UtcNow.ToString('O');TenantKey=$TenantKey;OutputRoot=$OutputRoot;RegistrySHA256=$RegistryHash;ConfigurationSHA256=$ConfigurationHash;ModuleSHA256=$script:RetentionModuleSHA256;SnapshotSHA256=(Get-RetentionObjectHash (Get-RetentionSnapshotEvidence $Snapshot));Target=$Snapshot.Target;LocalPointer=$Snapshot.LocalPointer;RemotePointer=$Snapshot.RemotePointer;ProtectedBatchIds=@($protected.Keys | Sort-Object);BlockedReasons=$blocked.ToArray();Rows=$rows.ToArray()}
+    [pscustomobject]@{SchemaVersion=3;Verification=$Snapshot.Verification;ApplySupported=($Snapshot.Verification -ceq 'Full');PolicyVersion=$script:RetentionPolicyVersion;PlanId=[guid]::NewGuid().ToString('N');CreatedUtc=[datetime]::UtcNow.ToString('O');TenantKey=$TenantKey;OutputRoot=$OutputRoot;RegistrySHA256=$RegistryHash;ConfigurationSHA256=$ConfigurationHash;ModuleSHA256=$script:RetentionModuleSHA256;SnapshotSHA256=(Get-RetentionObjectHash (Get-RetentionSnapshotEvidence $Snapshot));Target=$Snapshot.Target;LocalPointer=$Snapshot.LocalPointer;RemotePointer=$Snapshot.RemotePointer;ProtectedBatchIds=@($protected.Keys | Sort-Object);MinimumRetainedBatches=$minimum;BlockedReasons=$blocked.ToArray();Rows=$rows.ToArray()}
 }
 function Assert-RetentionPlan($Plan,$Fresh,[int]$MaxAgeHours) {
     foreach($candidate in $Plan,$Fresh){if($candidate.SchemaVersion -ne 3 -or $candidate.Verification -cne 'Full' -or $candidate.ApplySupported -isnot [bool] -or -not $candidate.ApplySupported){throw 'Application requires a current Full verification plan; metadata previews cannot authorize removal.'}}
@@ -348,7 +369,8 @@ function Assert-RetentionPlan($Plan,$Fresh,[int]$MaxAgeHours) {
         if($Plan.$key -cne $Fresh.$key){throw "Retention plan changed/stale: $key"}
     }
     if((Get-RetentionObjectHash $Plan.Rows) -cne (Get-RetentionObjectHash $Fresh.Rows) -or
-       (Get-RetentionObjectHash $Plan.ProtectedBatchIds) -cne (Get-RetentionObjectHash $Fresh.ProtectedBatchIds)){throw 'Retention plan actions/protections differ from fresh validation.'}
+       (Get-RetentionObjectHash $Plan.ProtectedBatchIds) -cne (Get-RetentionObjectHash $Fresh.ProtectedBatchIds) -or
+       (Get-RetentionObjectHash (Get-RetentionValue $Plan 'MinimumRetainedBatches' @())) -cne (Get-RetentionObjectHash $Fresh.MinimumRetainedBatches)){throw 'Retention plan actions/protections differ from fresh validation.'}
     if(@($Plan.BlockedReasons).Count -or @($Fresh.BlockedReasons).Count){throw 'Retention application blocked by qualification.'}
 }
 function Save-RetentionReceipts($Row,[string]$OutputRoot,$Transport,[string]$Scratch) {
@@ -401,8 +423,11 @@ function Assert-RetentionBeforeRemoval($Row,$Snapshot,$Settings,$Transport,[stri
     if((Get-FileHash -LiteralPath (Join-Path $Root 'current.json.txt')).Hash -cne $Snapshot.LocalPointerSHA256){throw 'Local pointer changed before removal.'}
     $p=@(Get-RetentionRemoteChildren $Transport $target.RootId | Where-Object Name -CEQ 'current.json.txt')
     if($p.Count -ne 1 -or (Read-RetentionRemoteFile $Transport $p[0] $Scratch).SHA256 -cne $Snapshot.RemotePointerSHA256){throw 'Remote pointer changed before removal.'}
+    Assert-RetentionBatchUnchanged $Row $target $Transport $Root $Scratch
+}
+function Assert-RetentionBatchUnchanged($Row,$Target,$Transport,[string]$Root,[string]$Scratch) {
     if($Row.Storage -ceq 'SharePoint'){
-        $folder=@(Get-RetentionRemoteChildren $Transport $target.BatchesId | Where-Object Id -CEQ $Row.Id)
+        $folder=@(Get-RetentionRemoteChildren $Transport $Target.BatchesId | Where-Object Id -CEQ $Row.Id)
         if($folder.Count -ne 1 -or $folder[0].Name -cne $Row.BatchId -or $folder[0].Kind -cne 'Folder' -or $folder[0].ETag -cne $Row.ETag){throw 'Remote batch changed after archival.'}
         $files=@(Get-RetentionRemoteChildren $Transport $Row.Id)
         if($files.Count -ne $Row.FileCount){throw 'Remote content changed after archival.'}
@@ -419,6 +444,22 @@ function Assert-RetentionBeforeRemoval($Row,$Snapshot,$Settings,$Transport,[stri
         foreach($file in $files){
             Assert-RetentionPath $file.FullName;$expected=@($Row.Files | Where-Object Name -CEQ $file.Name)
             if($file.PSIsContainer -or $expected.Count -ne 1 -or $file.Length -ne $expected[0].Bytes -or (Get-FileHash -LiteralPath $file.FullName).Hash -cne $expected[0].SHA256){throw 'Local payload changed after archival.'}
+        }
+    }
+}
+function Assert-RetentionMinimumBeforeRemoval($Row,$Snapshot,$Minimum,$Transport,[string]$Root,[string]$Scratch) {
+    if($Snapshot.Verification -cne 'Full'){throw 'Retention minimum requires full payload verification.'}
+    foreach($storage in 'Local','SharePoint'){
+        $sets=@($Minimum | Where-Object Storage -CEQ $storage)
+        if($sets.Count -ne 1 -or @($sets[0].BatchIds | Select-Object -Unique).Count -lt 2){throw "Retention minimum missing for $storage."}
+        if($Row.BatchId -cin $sets[0].BatchIds){throw 'A newest retained batch cannot be retired.'}
+        foreach($id in $sets[0].BatchIds){
+            $copies=@($Snapshot.Batches | Where-Object {$_.Storage -ceq $storage -and $_.BatchId -ceq $id})
+            if($copies.Count -ne 1){throw "Retention minimum copy is ambiguous or absent: $storage/$id"}
+            $copy=$copies[0]
+            $retained=[pscustomobject]@{Storage=$storage;BatchId=$id;Id=$copy.Id;ETag=$copy.ETag;Files=$copy.Files;FileCount=$copy.Files.Count}
+            try {Assert-RetentionBatchUnchanged $retained $Snapshot.Target $Transport $Root $Scratch}
+            catch {throw "Retention minimum changed or unavailable: $storage/$id. $($_.Exception.Message)"}
         }
     }
 }
@@ -532,6 +573,8 @@ function Invoke-PreparedBatchRetention {
                 Save-RetentionReceipts $row $root $Transport $run
                 $event.State='Archived';Write-RetentionDocument $journalPath $journal
                 Assert-RetentionBeforeRemoval $row $snapshot $settings $Transport $registryHash $root $run
+                # Recheck all retained payloads on BOTH stores, including during partial-run recovery.
+                Assert-RetentionMinimumBeforeRemoval $row $snapshot $fresh.MinimumRetainedBatches $Transport $root $run
                 Assert-RetentionLock $lock
                 # Persist intent BEFORE the irreversible request; uncertain results are never blindly replayed.
                 $event.State='RemovalRequested';Write-RetentionDocument $journalPath $journal
@@ -678,8 +721,8 @@ Export-ModuleMember -Function Invoke-PreparedBatchRetention,New-PreparedRetentio
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAO0cxCMgu+5Szs
-# zT094ZXCYvQzinaLcSbdgZEMan8leqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA1VNuEKqSrZ3mo
+# L3rhEHZPuk2ECl0TBCdr/cgEGAqFYKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -812,31 +855,31 @@ Export-ModuleMember -Function Invoke-PreparedBatchRetention,New-PreparedRetentio
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIMtycoqDrwOg5r9oBNDV7St9Du4GtIg4FxLt45nHSXMyMA0GCSqG
-# SIb3DQEBAQUABIIBgJCKQbGIWIghu8XT1u5lQ5gFSJcWjjr/XLgyeq2afBSn3ePA
-# oOEAck3EGX5U2Wx+fpqtixdVfhHqS4aN+3Ii3ik1OKMAi1FCQvflNvvNYccWa6uM
-# JGgcMJhNKGrSzopp2fmsSCkQFxvJK6hVMt28dfngnxyRFxm0aiOf4z5bS6PKXnxa
-# ybWgRuvwkhOi5BI34Qa18iCHsWOiWWTzxiXoqCe1X1/IUxPHPojjpOJli7PQpYaa
-# QCFcca6Vzl/LLwN+QhZsPJ5QAP13WZWHxmG+ss2fzrBgU+B473UBeorWGs0lsP39
-# +c8zPHnJeSPVPlI16S+xqJYkRmtsYURyoUeRu6YvUSn/GxeImreBlmW2Ch3A6kUn
-# GEiR7D0WKN8M+U4JUyijPKeQmPNYCdUO84JKFJrJnjiZ4l3XnPLYNymgwvtvaaaK
-# zPev7VRbS2/F9ZgcniL+icMkgmE4EgLPGjpK0uFFViYBJidHeufSEbNgRago4Beo
-# rCNhDgJ85gIOQLQuDKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIJT3ApmbWWyfelGJoIIWWdyWSdc27ZDmPQcXLkX106ZfMA0GCSqG
+# SIb3DQEBAQUABIIBgEhulhFJgQmjh6i9jBD24WOuLFli7cn7+HY/t/moBkNUdfsd
+# RtSRDa4raEPli/8Rrjanv7wUpJag3MdUcRAmTVPbTCYmgoB4lNWbTtagCRaqjzEz
+# GBRXVVTzhVg+69PyeCzJYNiNXCo2t9QbbP2Mdggdnzg+aOsgfbzWOPT9S5wkqkQN
+# B6B/lJiUSXYYSu3T1EwNyZEBl0I0r/EtcYNkhxdoHbKz2x2cCCZgwWzWC8TbBUzx
+# Esr+O10sWK/pqsDnXIeiX3pAIC1hfOPvEtqi7ARi7yw89mhR4ohhAMZ9Nv0AB+0U
+# zJLBquvJoJ6LVKCC5xx9h6dXIUTLTeVYbxhS8uHXBMg3R13JCEd3xQdBBoVi/HeW
+# jRp2Asr69KpNXtTVVVMVyZi2Pap5bGCx8kk/7HIqo0HNjyce4TSZjO9vB9E3knyS
+# 0HOTO+owKWGEZImkcGH7PCcn1hHDgxcW1PdbBbHPobMxssu4z1oQsbVu6pZbqJZi
+# VSCVotQqLhDn82uL4KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTkyMTUx
-# MzRaMC8GCSqGSIb3DQEJBDEiBCAh1n+rK8t41OKE5aexh2eP7wLq0QhjVS+r1Pwb
-# zIVmGDANBgkqhkiG9w0BAQEFAASCAgArmsGXE3tU2wk64fewEzQJfGyxBVymXjpn
-# +g5wWve6tkU+b7pyxii8p8ZrPuyOHs9AHMYTv2+ZfcQ704ZlzsJQ5kCqvHMfjW24
-# vsuCE2rVHUQ4XFzfzJdnKAUgEhjPljEzzXQDGk//gA4GLJpX9+Mpz5ptGClubJr0
-# MJFXIokhBtHra63dD+WGovTkSNyljEd3LlvjdP9M9axh9/BopEUIIX5ODVnv8mrz
-# +tLbNVUTaX5mFSFN19y/7HpBnuz7ImvJbWJalr3964ml+ClpTM4XMIS7FH8nMra1
-# lM7X3fPCkt/l6gN0f8qOdU/epmmjFpvvBCoz5ttAUiMGtIcyOmDNl9R8lQr1jGtb
-# v+/28ddmdShUDtpsitiAuXeQ9GOwr8Vpb66oQKV/p+r4XMqDQc4igeTGchygtj2Z
-# aefqZ3qZtxLR5XCgCkcBklXMBM9y33ik80fa15xWjHCj0jC4tCmrXAremgvkEkCj
-# 22gm8LhVSTJD+dt9cWYXiB0EbmQrx+WbAFkxVL5BDFVYqEvxOcgymUDvJFRngZ0Y
-# IyJiFb3Xs3aiouBsrFHH0feV2h7itiFcYE0vxfSB86o0x5rssFIPus2/gifg7TOX
-# 1K0OVKdMWaPDiH9TLsb1s5f9bpc/EjszeyKciN4u+dBgdBzHgZ6CA6yPgsaXzpl6
-# t8T/ch/Q4A==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjAwMDQ4
+# NDNaMC8GCSqGSIb3DQEJBDEiBCCoD44oW2IvPisAH9zLHBYBsM4U6oeq5yVXkORV
+# tInMGzANBgkqhkiG9w0BAQEFAASCAgAaka0RLvMkEVgeX9BpXM7ixFSo6z5HF/PP
+# IIuXp8l0HgZGAr4E4vPGF+mTiN3alceFWnkPXelHu9mCZFwXDHSZ61pbB74p/Y82
+# 3GuXEANXUAwVDF0/Pww0leH1iasV7uI5x4evHXqoi28AEtT8OK+JDmtdsEbe7lUm
+# xzfZImfd76aAuh00lM8yfqJb+Oq1ZSCSyJLrhN8UHhFYC6cJ1VMvD5RbW72AA+j0
+# 2nYrUQ7n5W6QHxvo9KVF8c1lFifSbt+0UPTYRB/ZDpxa4nFV0Agq+wmnOttb8lOf
+# plwH4nnSfR9NHmvMhe9NDt70j9rMEv/1rlJm63/9ZiuyJBsgQ/09WS/gKpDaW7s1
+# inkcw3LDc0SDAihYt9VbrgWYAS/M7kFsgTeNOCzQZByasLASbCqs6FxdtsFK2ieR
+# pfToWMWYCx9ErBdymlPkobhn3CDNs+7qTJsIwzBZ43BAoOMYpmwXrahx54hYvUZ8
+# Mqlq03MqVxPmb+wnljOz93/aARue70QHF0jZ+qwOxfE/xYSB/3KISCusJOnaae5Y
+# 8ocQKxqw1Z4Ed1b0e/JPh7yjIpEzm3PJqwlc6qT/ChdO5bd+pRwjyjxSVqTaDQIh
+# SvQyS8QzF0ku2Se5OZqs2D7mKP87YHhAwIiYP9jRmSldy1C3XrJsMy2XKd8iNKJy
+# jkZm2vWJgQ==
 # SIG # End signature block

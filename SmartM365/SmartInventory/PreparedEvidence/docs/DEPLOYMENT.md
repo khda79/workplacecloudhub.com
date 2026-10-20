@@ -336,7 +336,27 @@ Folder eTags are additional preconditions, not a lock on descendant contents.
 After qualification, set `Mode=Auto` privately. Each successful publication then
 creates and fingerprints a fresh plan, verifies it under the common lock and
 applies its eligible actions without manual per-plan approval. Current/previous
-from both pointers and all consumers form one protection set. Pointer divergence,
+from both pointers, all consumers, and a minimum of the two newest complete valid
+batches on EACH store form one additive protection set. A batch selected by either
+store is protected on both; an absent SharePoint predecessor therefore cannot
+leave only the current cloud copy protected. The minimum uses the validated UTC
+timestamp in the batch ID, never file modification times. All ties at the second
+timestamp are retained. Incomplete, failed, schema-only or corrupt batches do not
+displace valid copies. Fewer than two valid copies on either store blocks all
+application. The plan exposes `MinimumRetainedBatches` per store.
+
+Metadata Preview selects this minimum provisionally from receipts, file sets and
+sizes, without downloading payloads or claiming SHA256 verification. Apply/Auto
+always recomputes it with Full verification. Immediately before EVERY cloud or
+local removal, including partial-run recovery, the selected retained copies on
+both stores are rechecked for identity, complete file sets and every payload hash.
+Missing, inaccessible or changed retained evidence stops further removal; no
+older replacement is silently selected during application. This adds payload
+read-back traffic per removal. The existing shared-lock and writer-exclusion
+qualification remains required; this minimum is not a substitute for recovery
+evidence. Existing plans must be regenerated after the module changes.
+
+Pointer divergence,
 missing qualification or changed global controls block the whole application.
 A lot with incomplete receipts, unexpected content or unknown chain membership
 is individually blocked; other independently qualified lots can proceed. Verified

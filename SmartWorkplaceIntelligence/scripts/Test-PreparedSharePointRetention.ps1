@@ -2,7 +2,7 @@
 .SYNOPSIS
     Synthetic retention regression tests. File-backed fake SharePoint; no tenant or network.
 .VERSION
-    1.2.0
+    1.3.0
 #>
 [CmdletBinding()]
 param([Parameter(Mandatory)][string]$TestRoot,[switch]$AdapterOnly)
@@ -123,8 +123,120 @@ function AddFixtureTechnicalLocks($f){
         }
     }
 }
+function RemoveFixtureBatchCopy($f,[string]$Storage,[string]$Id){
+    $root=if($Storage -ceq 'Local'){$f.Output}else{$f.Remote}
+    $path=[IO.Path]::GetFullPath((Join-Path $root ('batches/'+$Id)))
+    $expectedRoot=[IO.Path]::GetFullPath((Join-Path $root 'batches')).TrimEnd('\')+'\'
+    if($Id -notmatch '^\d{8}T\d{9}Z-[a-f0-9]{8}$' -or -not $path.StartsWith($expectedRoot,[StringComparison]::OrdinalIgnoreCase) -or
+       -not $path.StartsWith(([IO.Path]::GetFullPath($base).TrimEnd('\')+'\'),[StringComparison]::OrdinalIgnoreCase)){throw 'Unsafe synthetic fixture removal.'}
+    Remove-Item -LiteralPath $path -Recurse -Force
+}
+function AddUnpointedFixtureBatch($f,[string]$Id){
+    $source=Join-Path $f.Output ('batches/'+$f.Ids[-1]);$folder=Join-Path $f.Output ('batches/'+$Id)
+    Copy-Item -LiteralPath $source -Destination $folder -Recurse
+    $manifest=Get-Content (Join-Path $folder 'batch.json.txt') -Raw|ConvertFrom-Json
+    $manifest.BatchId=$Id
+    $pointer=Get-Content (Join-Path $folder 'current.json.txt') -Raw|ConvertFrom-Json
+    $pointer.BatchId=$Id;Json (Join-Path $folder 'current.json.txt') $pointer
+    UpdateFixtureManifest $f $Id $manifest
+}
 
 if(-not $AdapterOnly){
+# The minimum is independent of pointer adjacency and is additive across both stores.
+foreach($verification in 'Metadata','Full'){
+    $f=Fixture;$a=@{}+$f.Args;$a.Verification=$verification
+    RemoveFixtureBatchCopy $f 'SharePoint' $f.Ids[-2]
+    $p=Invoke-PreparedBatchRetention @a
+    $local=@($p.Plan.MinimumRetainedBatches|Where-Object Storage -CEQ 'Local')[0]
+    $cloud=@($p.Plan.MinimumRetainedBatches|Where-Object Storage -CEQ 'SharePoint')[0]
+    Check (($local.BatchIds -join ',') -ceq ($f.Ids[-1..-2] -join ',')) "$verification local minimum changed with remote predecessor absence"
+    Check (($cloud.BatchIds -join ',') -ceq (@($f.Ids[-1],$f.Ids[-3]) -join ',')) "$verification failed to protect the second available SharePoint batch"
+    Check (@($p.Plan.Rows|Where-Object {$_.BatchId -ceq $f.Ids[-3] -and $_.State -ceq 'Protected'}).Count -eq 2) 'A per-store minimum was not propagated to both copies'
+    foreach($id in $f.Ids[0],$f.Ids[2],$f.Ids[-2],$f.Ids[-1]){Check ($p.Plan.ProtectedBatchIds -ccontains $id) 'Existing pointer/consumer protection lost'}
+    Check ($f.State.Recycles -eq 0) 'Minimum planning removed data'
+    if($verification -ceq 'Metadata'){Check ($f.State.PayloadDownloads -eq 0) 'Metadata minimum downloaded payloads'}
+}
+# A complete newer batch outside the current pointer and timestamp ties are also retained.
+foreach($case in 'Newer','Tie'){
+    $f=Fixture;$a=$f.Args
+    $id=if($case -ceq 'Newer'){'20261007T000000000Z-00000007'}else{'20261005T000000000Z-00000009'}
+    AddUnpointedFixtureBatch $f $id
+    # Reverse modification-time order: the batch ID timestamp must remain authoritative.
+    foreach($root in $f.Output,$f.Remote){(Get-Item (Join-Path $root ('batches/'+$f.Ids[1]))).LastWriteTimeUtc=[datetime]::UtcNow.AddDays(30)}
+    $p=Invoke-PreparedBatchRetention @a
+    Check ($p.Plan.ProtectedBatchIds -ccontains $id) "$case batch was not retained"
+    Check (@($p.Plan.Rows|Where-Object {$_.BatchId -ceq $f.Ids[1] -and $_.State -ceq 'Eligible'}).Count -eq 2) 'Modification time incorrectly affected chronology'
+    $expected=if($case -ceq 'Tie'){3}else{2}
+    Check (@($p.Plan.MinimumRetainedBatches|Where-Object {$_.BatchIds.Count -ne $expected}).Count -eq 0) 'Minimum timestamp boundary/tie failed'
+    $r=Invoke-PreparedBatchRetention @a -Mode Apply -PlanPath $p.PlanPath -PlanSHA256 $p.PlanSHA256
+    Check ($r.Status -ceq 'Completed' -and $f.State.Recycles -eq 2) 'New minimum broke eligible older retirement'
+    foreach($root in $f.Output,$f.Remote){Check (Test-Path (Join-Path $root ('batches/'+$id))) 'Newest/tied copy was deleted'}
+}
+# A newer incomplete, schema-only, failed, corrupt or invalid-date batch cannot displace valid copies.
+foreach($case in 'MissingPayload','MissingReceipt','SchemaOnly','Failed','SameSizeCorruption','InvalidTimestamp'){
+    $f=Fixture;$a=$f.Args
+    $id=if($case -ceq 'InvalidTimestamp'){'20261307T000000000Z-00000007'}else{'20261007T000000000Z-00000007'}
+    AddUnpointedFixtureBatch $f $id
+    foreach($root in $f.Output,$f.Remote){
+        $folder=Join-Path $root ('batches/'+$id)
+        switch($case){
+            MissingPayload {[IO.File]::Delete((Join-Path $folder 'Example.csv'))}
+            MissingReceipt {[IO.File]::Delete((Join-Path $folder 'validation.json.txt'))}
+            SchemaOnly {$v=Get-Content (Join-Path $folder 'validation.json.txt') -Raw|ConvertFrom-Json;$v.SchemaOnly=$true;Json (Join-Path $folder 'validation.json.txt') $v}
+            Failed {$v=Get-Content (Join-Path $folder 'validation.json.txt') -Raw|ConvertFrom-Json;$v.Passed=$false;Json (Join-Path $folder 'validation.json.txt') $v}
+            SameSizeCorruption {$path=Join-Path $folder 'Example.csv';[IO.File]::WriteAllText($path,([IO.File]::ReadAllText($path).Replace('fixture','fixturX')))}
+        }
+    }
+    $p=Invoke-PreparedBatchRetention @a
+    foreach($store in $p.Plan.MinimumRetainedBatches){Check (($store.BatchIds -join ',') -ceq ($f.Ids[-1..-2] -join ',')) "$case displaced valid retained copies"}
+    Check (@($p.Plan.Rows|Where-Object {$_.BatchId -ceq $id -and $_.State -ceq 'Blocked'}).Count -eq 2) "$case became eligible"
+}
+# Missing/invalid second copies block all application; zero/one valid copies are never enough.
+foreach($count in 0,1,2){
+    $f=Fixture;$a=$f.Args
+    foreach($id in $f.Ids|Select-Object -First (6-$count)){RemoveFixtureBatchCopy $f 'SharePoint' $id}
+    $p=Invoke-PreparedBatchRetention @a
+    Check ((@($p.Plan.BlockedReasons|Where-Object {$_ -match 'Fewer than two'}).Count -gt 0) -eq ($count -lt 2)) 'Wrong minimum-count decision'
+    if($count -lt 2){
+        Reject {Invoke-PreparedBatchRetention @a -Mode Apply -PlanPath $p.PlanPath -PlanSHA256 $p.PlanSHA256} 'blocked by qualification'
+        Check ($f.State.Recycles -eq 0 -and $f.State.Archives -eq 0) 'Insufficient minimum reached archival/removal'
+    }
+}
+# Same-size corruption is provisional in Metadata; Full must select the older valid fallback.
+$f=Fixture;$a=@{}+$f.Args;$a.Verification='Metadata';$payload=Join-Path $f.Remote ('batches/'+$f.Ids[-2]+'/Example.csv')
+[IO.File]::WriteAllText($payload,([IO.File]::ReadAllText($payload).Replace('fixture','fixturX')))
+$p=Invoke-PreparedBatchRetention @a
+Check (@($p.Plan.Rows|Where-Object PayloadSHA256Verified).Count -eq 0 -and $f.State.PayloadDownloads -eq 0) 'Metadata minimum claimed full verification'
+$a.Verification='Full';$p=Invoke-PreparedBatchRetention @a
+$cloud=@($p.Plan.MinimumRetainedBatches|Where-Object Storage -CEQ 'SharePoint')[0]
+Check (($cloud.BatchIds -join ',') -ceq (@($f.Ids[-1],$f.Ids[-3]) -join ',')) 'Full did not replace corrupt second-newest with a valid older copy'
+Check ($p.Status -ceq 'Blocked') 'Corrupt existing predecessor lost its global protection'
+# Changed or removed retained payloads after planning/archival stop BEFORE the next deletion.
+foreach($storage in 'Local','SharePoint'){
+    foreach($case in 'Missing','Corrupt','DownloadFailure','BeforeLocalRemoval'){
+        if($storage -ceq 'Local' -and $case -ceq 'DownloadFailure'){continue}
+        $f=Fixture;SetAuto $f;$a=$f.Args;$state=$f.State
+        $root=if($storage -ceq 'Local'){$f.Output}else{$f.Remote}
+        $payload=Join-Path $root ('batches/'+$f.Ids[-1]+'/Example.csv')
+        $trigger=if($case -ceq 'BeforeLocalRemoval'){7}else{1}
+        $f.State.ArchiveHook={
+            if($state.Archives -eq $trigger){
+                if($case -ceq 'DownloadFailure'){$state.FailPayloadDownload=$true}
+                elseif($case -ceq 'Corrupt'){[IO.File]::WriteAllText($payload,([IO.File]::ReadAllText($payload).Replace('fixture','fixturX')))}
+                else {[IO.File]::Delete($payload)}
+            }
+        }.GetNewClosure()
+        Reject {Invoke-PreparedBatchRetention @a -Mode Configured} 'minimum changed|forbidden payload download'
+        $expectedRecycles=if($case -ceq 'BeforeLocalRemoval'){2}else{0}
+        Check ($f.State.Recycles -eq $expectedRecycles) "$storage/$case failed to stop before the next cloud recycle"
+        Check (@(Get-ChildItem (Join-Path $f.Output 'batches') -Directory).Count -eq 6) "$storage/$case removed a local batch"
+    }
+}
+# The new per-store protection evidence is part of the reviewed plan contract.
+$f=Fixture;$a=$f.Args;$p=Invoke-PreparedBatchRetention @a
+$tampered=Get-Content $p.PlanPath -Raw|ConvertFrom-Json -Depth 70;$tampered.MinimumRetainedBatches=@();Json $p.PlanPath $tampered
+Reject {Invoke-PreparedBatchRetention @a -Mode Apply -PlanPath $p.PlanPath -PlanSHA256 (Get-FileHash $p.PlanPath).Hash} 'actions/protections'
+Check ($f.State.Recycles -eq 0) 'Tampered minimum authorized removal'
 # Known idle locks belong to local infrastructure, remain in physical evidence, and do not split copies.
 foreach($verification in 'Metadata','Full'){
     $f=Fixture;AddFixtureTechnicalLocks $f;$a=@{}+$f.Args;$a.Verification=$verification
@@ -463,8 +575,8 @@ Write-Host "PASS: $script:checks synthetic retention checks. No tenant, network,
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAMq78AFVkJMaCK
-# 484cF+j10vDrj2m0NIZO85vufbEC76CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA5y2DPTSNXuyFu
+# uIGJxCrk+NWwngdZ82Vsb9E7+z2QmqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -597,31 +709,31 @@ Write-Host "PASS: $script:checks synthetic retention checks. No tenant, network,
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIDfWzJcje2JDCJDYY5yw0vE2hPhJNXIqA4XqgpYwIyhBMA0GCSqG
-# SIb3DQEBAQUABIIBgGxWYPnX+u17vBl2pPbe9qWWX80NzcYM56cWSzRssgnz6/1t
-# hg/4oPNAYlS5OZo544Bmi5eeJdsR5Hb/18aBiky4UzN3jzzs0uXayHEGp6p2VJfR
-# 6QaMxVMhrbkSaUcCrDmBoPMPX1qL/IknTF/y+Vpz4SHpAtFEzfLZdnnxO1upkNip
-# xRPmYe58c5DzqmD9ykLMMkkK0R2J+nNaaND6UlxdRr+mPieH5JSwmUC9Ek/Ur9g4
-# MzvcatFyazpMiqpOm0gYzBwUh60CB6ehOGsvTEyyb3naBlgv2YaJjd+MO6TH4XrG
-# yX/ZkUqjZnc/9eg4N4P5MQtOmoVLxcwl7IBvq8Ei2I5HJArbrqAIFJzz58if6kam
-# F5AdVepla8RK0ZWxI8UtS+0Qt6Ofwk3v+Sc+CuvNH/4fqpgK4Kls4HzwK2GpDyOL
-# E79R/U3fU23XBxYDXVDvWOhvKs1JrkCP9MYHchKZ1GQK+1qAiI6qchlov9g4cc16
-# 42kMZyCN3j4BKr9HfKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIIw+8KtpkRUnhiWJFexYuiZ4bXT+Nu6uuIC3KJIQiWU2MA0GCSqG
+# SIb3DQEBAQUABIIBgH0KAEQRu6K4qi50FVjmsC3+tPJBlRgt40jWJ54Di+5y1BpV
+# PxHAg3F19iS2sEttBaqXly48lPp9jY49ZAk+r+gzKiSnvRMYbV0bugsBQZSvhgXy
+# az4fn5TOjhoyM8Vui+QmHroTax4L+Vpm+hk/80LHiPLQTQNn0sE9MBIGqZWHH91F
+# b33Waa1hrL96rUwT7j/aqqkaUAEaNZ8RlhR40dtJsNJ+9LcAyuveyYLjwWMJuACm
+# LZAhqJNj0sTV6/HBfh6Jy45VNcSTuPKN9jBkwbWxq36toL03RrM2tLl6nHnjzyVD
+# VLZxg2wqTenc0yU8VWdlXsW7YItxUC48CBR0i9aApzl3DNShFppIkGXkzuSHygex
+# aXFvB1LhsYUiOdLWGIF02mPbA5mctzpFHCCfUXHL6p5j1f8xPk36dXVnUi80SK/L
+# xCvw+OGdhx1QBufXcpQWvGtWRHrGUT+aqD0Ik8AwV02yhT9afKJeNQHYoybiCWbZ
+# bXoZ1n/q9xYjqgLxSqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTkyMTUx
-# MzRaMC8GCSqGSIb3DQEJBDEiBCA8Hg4Vo7/ZaMYSztu1JOreJuQjaoCVia3cIm9N
-# KWOjPjANBgkqhkiG9w0BAQEFAASCAgBub8aFnDWzqUBtI10m3iP16kYogjlxbwzM
-# Mv+W3HhQ095NUeqphGh96gHWU2o8zgQxdUgHdfhfInkpJdruwb5lxGb0/VRH1Y5L
-# ry9DcAU103fyojG+ODzk1ChReQv4X8teQPsoFV9Ovr8jcGn8cNJHU5Dj33AkTw2a
-# Qn5oGSYWXQgSV9DsbXKKd+cCSWTfPj31qfr3B7w7HTZjvx0lAzRm8DuaZ5hcG7N7
-# NGy1rwJkiuBRlSVMwvAUiDQIIZuaJ3A75Mh59a5gM9c7vJGZnMqT8tmnQZAShcLZ
-# 3wMe1JnG+821KDiwAhthxU8e84dR6EFAs6ePnmUSSvjo+9ZgpaTAg64C7oCDUyp9
-# Ic17fpMp29M3z+Ch/2p0yrwHPfuVzJ7IVJpTJqgdnBi6i+v9itVnsV5kj7min49N
-# INusj7Sv4gX0/OIl7K85qSx9lRzBoojFFVfoL127kqIPaOdf/37WQ0AJnTo3ofAa
-# 31so1vT0+Smm6qTF/ub+mqJ6mJdKBXM6m6STHUUBo2Osh7wkCq+1lVlDmkvBWf0v
-# gv8rlwH/Dijl67YOfceUV7IRxMXKSOZkLNbr4j6DZAs2gLcB/hIufQBxqgoAncRt
-# ga0qyerqpWcZq9ExN33DVPSnUGRsNAN75zBKKef+ahZpQN7PVmzivO6bU01HG3Sd
-# Pw/fthZYIw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjAwMDQ4
+# NDRaMC8GCSqGSIb3DQEJBDEiBCCvrwQc8L9FY4HgUHh2A2/56PHDvoFW3oEQ/IZN
+# ECKkLjANBgkqhkiG9w0BAQEFAASCAgAFquZy8+kze/1hS0wn7dgQKATH88C2LLIp
+# aRhETepTVqW5JJSv7a1ccuIj4l496//lOli1yXpRd0PXztxBiAE0IlYgt0yVpJ+h
+# 1O6QxOUmDr78vLOsyDh0KhO2JbyL+eXqeSm5i+TcVEAfy4eRZzHYX5ulhoWq/qYi
+# KR5ziTm29gojsx7QSC59T0LDlFyRrmLKXe1sqZXPT9oJG5v4cdwUEoer2qS/JpVG
+# frANHJ9ghyUj8UeFupid/3KQdadXclGmUSyX28yRIlgExqnnzKZAC/JaR2bWgJCW
+# eG148OvpYyZelL3sb+8ysmsEYimGk3/1jeFqOr81Pb1lNB27ZF0iil5qgPjCqyM1
+# O+70Sv6zSxCAiBhGqpuCrtpRhtRxbNsrQVXeNINSQCryeweDHuyrkynih7KPE7LA
+# 5tPDQhyFq0UF3WQauKRlCgCODH0XactqQKMCoCpfQ9eKSIHJaGWSr6WtKZKOuUF2
+# 6y7WI75RKcMXc9s13swSAXQX6CWK99lVEC4+gAps4hjrQSqs3lK0x1C5RrOIw4Gg
+# DdJTKwSx/GSCfFphQiY6fDZxT4Rm425LEagpEo9OmWdVTSvzv3Oje3VSTIk+8cPV
+# EGnn/g07E2LgsuMFL2o1/b30rAR97MlMIU0B3hhp81KV/FNTdeWOEW4uuykKJhao
+# 27sKRndeNw==
 # SIG # End signature block
