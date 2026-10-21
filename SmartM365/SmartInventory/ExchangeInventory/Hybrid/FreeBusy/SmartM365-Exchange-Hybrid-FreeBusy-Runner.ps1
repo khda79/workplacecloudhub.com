@@ -12,13 +12,14 @@
     - makes ExchangeOnlineManagement available (installed for the current user from PSGallery when missing);
     - opens the Exchange Online session with prefix EO using the tenant app and its certificate only,
       and proves it is that app-only certificate session; it never signs in interactively;
-    - records which Exchange Online cmdlets Free/Busy Checker calls are not exposed to the app;
+    - records which Exchange Online cmdlets Free/Busy Checker calls are not exposed to the app, and gives each a
+      stand-in that reports it not authorized, so Free/Busy Checker (which calls them unguarded) runs to its end;
     - verifies the Free/Busy Checker copy (SHA256 and Microsoft signature) and runs it with
       -SkipVersionCheck only.
     Progress and results are written to the status file passed by the collector.
 
 .VERSION
-1.0.3
+1.0.4
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
 #>
@@ -33,7 +34,9 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-$RunnerVersion = '1.0.3'
+$RunnerVersion = '1.0.4'
+# Roles that expose an Exchange Online cmdlet the app may lack, named in the stand-in error.
+$FreeBusyStandInRoles = @{ 'Test-EOOAuthConnectivity' = 'Mail Recipients or Organization Transport Settings' }
 # Exchange on-premises cmdlets Free/Busy Checker needs from the Exchange Management Shell.
 $FreeBusyExchangeShellCmdlets = @('Get-RemoteMailbox', 'Get-OrganizationRelationship', 'Test-OAuthConnectivity')
 # Exchange Online cmdlets called by Free/Busy Checker with the EO prefix.
@@ -148,13 +151,26 @@ function Import-FreeBusyExchangeShell {
     return [pscustomobject]@{ Loaded = $true; Message = $null }
 }
 function Invoke-FreeBusyCheckerScript {
-    param([Parameter(Mandatory)][string]$Path)
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [AllowEmptyCollection()][string[]]$UnavailableCmdlets = @()
+    )
 
     # Free/Busy Checker expects default session settings: strict mode off (with -SkipVersionCheck it reads
     # $versionsUrl, which it never sets) and non-terminating errors written to its report, not thrown.
     # Both settings apply to this function scope only; the runner keeps its own.
     Set-StrictMode -Off
     $ErrorActionPreference = 'Continue'
+    # Free/Busy Checker calls its Exchange Online cmdlets without checking they exist; an unknown command
+    # would stop it. Each cmdlet the app cannot run gets a stand-in, local to this scope, that returns
+    # nothing and writes a non-terminating error: Free/Busy Checker then reports that check as failed
+    # (never OK) and continues. Get-EOMailbox is its connection test and keeps its own behavior.
+    foreach ($name in @($UnavailableCmdlets | Where-Object { $_ -match '^(Get|Test)-EO[A-Za-z]+$' -and $_ -ne 'Get-EOMailbox' })) {
+        $reason = if ($FreeBusyStandInRoles.ContainsKey($name)) { "$($FreeBusyStandInRoles[$name]) role required" } else { 'role not assigned' }
+        $message = "$name is not authorized for the tenant app ($reason); this check was not run."
+        $body = "[CmdletBinding()] param([Parameter(ValueFromRemainingArguments = `$true)][object[]]`$Remaining) Write-Error -Message '$($message.Replace("'", "''"))' -Category PermissionDenied"
+        Set-Item -Path "function:$name" -Value ([scriptblock]::Create($body))
+    }
     # -SkipVersionCheck alone: any other parameter selects a parameter set that lets the script update itself.
     & $Path -SkipVersionCheck
 }
@@ -263,12 +279,23 @@ try {
     $status.Stage = 'FreeBusyCheckerStarted'
     Save-FreeBusyRunnerStatus
     Set-Location -LiteralPath (Split-Path -Path $FreeBusyCheckerPath -Parent)
-    Invoke-FreeBusyCheckerScript -Path $FreeBusyCheckerPath
+    Invoke-FreeBusyCheckerScript -Path $FreeBusyCheckerPath -UnavailableCmdlets @($status.NotAuthorizedCmdlets)
     $status.Stage = 'FreeBusyCheckerReturned'
 }
 catch {
-    $status.RunStatus = 'RunnerFailed'
-    $status.Message = "Free/Busy Checker runner failed: $($_.Exception.Message)"
+    $unknownCommand = if ($_.Exception -is [System.Management.Automation.CommandNotFoundException]) { [string]$_.Exception.CommandName } else { '' }
+    if ($status.Stage -eq 'FreeBusyCheckerStarted' -and $unknownCommand -match '^(Get|Test)-EO[A-Za-z]+$') {
+        # Stopped only by an Exchange Online cmdlet the app cannot run: a partial Exchange Online result,
+        # not a runner failure; what Free/Busy Checker already reported is kept.
+        $status.NotAuthorizedCmdlets = @(@($status.NotAuthorizedCmdlets) + $unknownCommand | Select-Object -Unique)
+        $status.ExchangeOnline = 'NotAuthorizedPartial'
+        $status.ExchangeOnlineMessage = "Free/Busy Checker stopped at $unknownCommand, which the app cannot run."
+        $status.Stage = 'FreeBusyCheckerStoppedNotAuthorized'
+    }
+    else {
+        $status.RunStatus = 'RunnerFailed'
+        $status.Message = "Free/Busy Checker runner failed: $($_.Exception.Message)"
+    }
 }
 finally {
     if ($connected) { Disconnect-ExchangeOnline -Confirm:$false -ErrorAction SilentlyContinue }

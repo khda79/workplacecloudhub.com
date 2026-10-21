@@ -36,7 +36,11 @@ on the Exchange on-premises side and on the Exchange Online side, for DAuth and 
      `Get-ConnectionInformation` that it is that app-only certificate session. It never signs in
      interactively: without the settings, or if the session is not the right one, Exchange Online is
      `NotConnected` and the on-premises part still runs;
-   - records the Exchange Online cmdlets used by Free/Busy Checker that are not exposed to the app;
+   - records the Exchange Online cmdlets used by Free/Busy Checker that are not exposed to the app. Free/Busy
+     Checker calls them without checking they exist, so each one (except its connection test Get-EOMailbox) gets
+     a stand-in, local to the run, that returns nothing and writes a not authorized error: the check is reported
+     failed, then NotAuthorized, and Free/Busy Checker continues. A stop caused only by such a cmdlet is
+     `EXONotAuthorized`, not `RunnerFailed`;
    - runs Free/Busy Checker with `-SkipVersionCheck` alone (any other parameter would let it update
      itself).
 4. The collector reads the HTML report as text only (nothing is deserialized), masks values that can

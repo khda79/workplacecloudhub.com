@@ -10,14 +10,15 @@ Checker is never executed; Exchange Online and module installation are mocked. C
 - text-only HTML parsing: sections, checks, statuses, masking, command cells and headings skipped;
 - NotAuthorized checks, summary rows and run status for every outcome;
 - runner: Exchange Management Shell loaded first (ExchangeShellNotLoaded otherwise), no interactive sign-in,
-  app-only certificate session proven, CurrentUser module installation,
+  app-only certificate session proven, CurrentUser module installation, stand-ins for Exchange Online cmdlets
+  the app cannot run,
   Free/Busy Checker started with -SkipVersionCheck only, nothing deserialized;
 - child process: environment hand-off, time limit with process tree stop;
 - Free/Busy Checker run without the runner's strict mode and stop-on-error, which the runner keeps;
 - report: title and status in the mail banner, runs that did not happen never shown as healthy.
 
 .VERSION
-1.0.3
+1.0.4
 #>
 [CmdletBinding()]
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter','',Justification='Mocks keep the parameters of the commands they replace.')]
@@ -286,6 +287,43 @@ try {
     Assert-FreeBusy ((& $resolve ([pscustomobject]@{ Status = 'Exited' }) $shellStatus $false $false) -eq 'ExchangeShellNotLoaded') 'A shell that did not load is ExchangeShellNotLoaded, not a generic runner failure.'
     $shellSummary = @(& $module { param($r) New-FreeBusySummaryRow -Findings @() -RunStatus 'ExchangeShellNotLoaded' -RunMessage 'm' -RunnerStatus $r -DurationSeconds 5 -ServerName 'EXSRV01' -FreeBusyCheckerVersion 'v' -GenerationTime 't' } $shellStatus)
     Assert-FreeBusy (@($shellSummary | Where-Object { $_.SideStatus -ne 'NotRun' -or $_.MissingRoles }).Count -eq 0) 'A shell that did not load leaves every side NotRun.'
+
+    # Exchange Online cmdlets the app cannot run: Free/Busy Checker calls them unguarded, so each gets a stand-in.
+    $standInRoles = $runnerAst.Find({ param($n) $n -is [Management.Automation.Language.AssignmentStatementAst] -and $n.Left.Extent.Text -eq '$FreeBusyStandInRoles' }, $true)
+    $fakeExoChecker = Join-Path $tempRoot 'FakeExoChecker.ps1'
+    [IO.File]::WriteAllText($fakeExoChecker, (@(
+        'param([switch]$SkipVersionCheck)',
+        '$oauth = Test-EOOAuthConnectivity -Service EWS -TarGetUri $null -Mailbox ''user'' -ErrorAction SilentlyContinue -WarningAction SilentlyContinue',
+        'if ($oauth.ResultType.Value -like ''Success'') { ''OAUTH-OK'' } else { ''OAUTH-NOT-OK'' }',
+        '"OAUTH-ERROR=" + $Error[0].Exception.Message',
+        '$policy = Get-EOSharingPolicy | Select-Object Name',
+        '"FAKE-EXO-END oauthNull=$($null -eq $oauth) policyNull=$($null -eq $policy)"'
+    ) -join "`r`n"), [Text.UTF8Encoding]::new($false))
+    $catchClause = @($runnerAst.EndBlock.Statements | Where-Object { $_ -is [Management.Automation.Language.TryStatementAst] -and $_.Body.Extent.Text.Contains('Invoke-FreeBusyCheckerScript -Path') })[0].CatchClauses[0].Extent.Text
+    $exoHost = Join-Path $tempRoot 'ExoHost.ps1'
+    [IO.File]::WriteAllText($exoHost, (@(
+        'param([string]$Checker, [switch]$NoStandIn)',
+        'Set-StrictMode -Version Latest',
+        '$ErrorActionPreference = ''Stop''',
+        $standInRoles.Extent.Text,
+        $checkerFunction.Extent.Text,
+        '$status = [ordered]@{ Stage = ''FreeBusyCheckerStarted''; RunStatus = $null; Message = $null; ExchangeOnline = ''NotAuthorizedPartial''; ExchangeOnlineMessage = $null; NotAuthorizedCmdlets = @(''Test-EOOAuthConnectivity'', ''Get-EOSharingPolicy'') }',
+        'try { Invoke-FreeBusyCheckerScript -Path $Checker -UnavailableCmdlets $(if ($NoStandIn) { @() } else { @($status.NotAuthorizedCmdlets) }) }',
+        $catchClause,
+        '"STATUS=" + ($status | ConvertTo-Json -Compress)',
+        'if (Get-Command Test-EOOAuthConnectivity -ErrorAction SilentlyContinue) { ''STAND-IN-LEAKED'' }'
+    ) -join "`r`n"), [Text.UTF8Encoding]::new($false))
+    $ErrorActionPreference = 'Continue'
+    $standInRun = (& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $exoHost -Checker $fakeExoChecker 2>&1 | Out-String -Width 400)
+    $stoppedRun = (& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $exoHost -Checker $fakeExoChecker -NoStandIn 2>&1 | Out-String -Width 400)
+    $ErrorActionPreference = 'Stop'
+    $standInStatus = ([regex]::Match($standInRun, 'STATUS=(\{.*\})').Groups[1].Value) | ConvertFrom-Json
+    Assert-FreeBusy ($standInRun -match 'OAUTH-NOT-OK' -and $standInRun -match 'FAKE-EXO-END oauthNull=True policyNull=True' -and $standInRun -match 'OAUTH-ERROR=Test-EOOAuthConnectivity is not authorized for the tenant app \(Mail Recipients or Organization Transport Settings role required\)' -and $standInRun -match 'Get-EOSharingPolicy is not authorized for the tenant app \(role not assigned\)') "With stand-ins Free/Busy Checker runs to its end and the unauthorized check is never OK: $($standInRun.Trim())"
+    Assert-FreeBusy ($null -eq $standInStatus.RunStatus -and $standInStatus.Stage -eq 'FreeBusyCheckerStarted' -and $standInRun -notmatch 'STAND-IN-LEAKED') 'The stand-ins stay local to the Free/Busy Checker call and the run is not a failure.'
+    $stoppedStatus = ([regex]::Match($stoppedRun, 'STATUS=(\{.*\})').Groups[1].Value) | ConvertFrom-Json
+    Assert-FreeBusy ($stoppedRun -notmatch 'FAKE-EXO-END' -and $null -eq $stoppedStatus.RunStatus -and $stoppedStatus.Stage -eq 'FreeBusyCheckerStoppedNotAuthorized' -and $stoppedStatus.ExchangeOnline -eq 'NotAuthorizedPartial') "A stop caused only by an Exchange Online cmdlet the app cannot run is not a runner failure: $($stoppedRun.Trim())"
+    $stoppedRead = [pscustomobject]@{ Stage = $stoppedStatus.Stage; RunStatus = $stoppedStatus.RunStatus; ExchangeOnline = $stoppedStatus.ExchangeOnline; NotAuthorizedCmdlets = @($stoppedStatus.NotAuthorizedCmdlets) }
+    Assert-FreeBusy ((& $resolve ([pscustomobject]@{ Status = 'Exited' }) $stoppedRead $true $false) -eq 'EXONotAuthorized') 'That stop resolves to EXONotAuthorized and keeps the reported findings.'
     $installs = @($runnerAst.FindAll({ param($n) $n -is [Management.Automation.Language.CommandAst] -and $n.GetCommandName() -in @('Install-Module', 'Install-PackageProvider') }, $true))
     Assert-FreeBusy ($installs.Count -eq 2 -and @($installs | Where-Object { $_.Extent.Text -match '-Scope CurrentUser' -and $_.Extent.Text -match '-Force' }).Count -eq 2) 'Installations are CurrentUser and without prompt.'
     Assert-FreeBusy ($runnerAst.Extent.Text -match "\[Parameter\(Mandatory\)\]\[string\]\`$FreeBusyCheckerPath" -and $runnerAst.Extent.Text -notmatch 'param\([^)]*AppId') 'App identifiers do not travel on the runner command line.'
