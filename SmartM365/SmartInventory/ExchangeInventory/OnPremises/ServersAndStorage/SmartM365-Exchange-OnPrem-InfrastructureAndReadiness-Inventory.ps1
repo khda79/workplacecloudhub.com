@@ -30,7 +30,7 @@
     Conditional: Mail.Send is required only when Graph mail is used; Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
     Script Name : SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory.ps1
-    Version     : 1.6.10
+    Version     : 1.6.11
     Requirements:
       - Windows PowerShell 5.1 with Exchange 2016 Management Tools
       - Exchange 2016 read RBAC for Get-ExchangeServer, Get-MailboxDatabase,
@@ -187,7 +187,7 @@ $tenantContextPath = & {
 . $tenantContextPath
 
 $ScriptName = "SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory"
-$ScriptVersion = "1.6.10"
+$ScriptVersion = "1.6.11"
 $RunId = (Get-Date).ToString("yyyyMMdd-HHmmss")
 
 $script:SmartM365EffectiveConfig = Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot
@@ -1354,6 +1354,96 @@ function Get-MailboxDatabasePathInventory {
     }
 }
 
+function ConvertTo-ServersAndStorageDatabaseSectionHtml {
+    param(
+        [AllowNull()][object[]]$ReadinessInventory = @(),
+        [Parameter(Mandatory)][object]$Summary
+    )
+
+    # Use only this report's readiness rows, including when regenerating an old run.
+    $databaseRows = @($ReadinessInventory | Where-Object { $null -ne $_ -and $_.Category -eq 'MailboxDatabase' })
+    $collectorErrors = @($ReadinessInventory | Where-Object { $null -ne $_ -and $_.Category -eq 'CollectorError' -and $_.ObjectName -eq 'MailboxDatabase' })
+    $unnamedRows = @($databaseRows | Where-Object { [string]::IsNullOrWhiteSpace([string]$_.ObjectName) })
+    $databaseGroups = @($databaseRows | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_.ObjectName) } | Group-Object ObjectName | Sort-Object Name)
+    $mountedCount = 0
+    $notMountedCount = 0
+    $unknownCount = 0
+    $detailRows = @(foreach ($group in $databaseGroups) {
+        $values = @{}
+        $notes = New-Object 'System.Collections.Generic.List[string]'
+        foreach ($setting in @('Server', 'Mounted', 'DatabaseSize', 'AvailableNewMailboxSpace')) {
+            $settingRows = @($group.Group | Where-Object { $_.Setting -eq $setting })
+            $values[$setting] = $null
+            if ($settingRows.Count -gt 1) {
+                $notes.Add("${setting}: ambiguous duplicate records.")
+            }
+            elseif ($settingRows.Count -eq 0 -or [string]::IsNullOrWhiteSpace([string]$settingRows[0].Value)) {
+                $notes.Add("${setting}: missing.")
+            }
+            elseif ($settingRows[0].CollectionStatus -ne 'OK') {
+                $notes.Add("${setting}: collection not OK.")
+            }
+            else {
+                $values[$setting] = [string]$settingRows[0].Value
+            }
+        }
+
+        $mounted = $false
+        $status = 'Unknown'
+        $statusColor = '#64748b'
+        if ([bool]::TryParse([string]$values['Mounted'], [ref]$mounted)) {
+            if ($mounted) {
+                $status = 'Mounted'; $mountedCount++; $statusColor = '#166534'
+            }
+            else {
+                $status = 'Not mounted'; $notMountedCount++; $statusColor = '#9a3412'
+            }
+        }
+        else {
+            $unknownCount++
+            if ($null -ne $values['Mounted']) { $notes.Add('Mounted: unrecognized value.') }
+        }
+
+        "<tr><td>$(Format-HtmlValue $group.Name)</td><td>$(Format-HtmlValue $values['Server'])</td><td style='font-weight:700;color:$statusColor;'>$status</td><td>$(Format-HtmlValue $values['DatabaseSize'])</td><td>$(Format-HtmlValue $values['AvailableNewMailboxSpace'])</td><td>$(Format-HtmlValue $(if ($notes.Count) { $notes -join ' ' } else { 'OK' }))</td></tr>"
+    })
+
+    $coverageNote = 'Counters cover observed distinct database names, including recovery databases. Missing fields are N/A; missing or unrecognized Mounted values are Unknown.'
+    if ($collectorErrors.Count -gt 0) {
+        $coverageNote += ' MailboxDatabase collection failed: coverage is incomplete; observed counts are not estate totals.'
+    }
+    if ($unnamedRows.Count -gt 0) {
+        $coverageNote += " $($unnamedRows.Count) record(s) have no database name and cannot be counted or associated. Coverage is incomplete."
+    }
+    $totalCount = $databaseGroups.Count
+    if ($totalCount -eq 0) {
+        $totalCount = 'N/A'; $mountedCount = 'N/A'; $notMountedCount = 'N/A'; $unknownCount = 'N/A'
+        $coverageNote += ' No named database records are available; this does not prove that there are no databases.'
+        $detailRows = @('<tr><td colspan="6">No database details available (N/A).</td></tr>')
+    }
+
+@"
+      <h2>Mailbox databases</h2>
+      <div class="summary">
+        Total databases observed: <strong>$totalCount</strong> |
+        Mounted: <strong>$mountedCount</strong> |
+        Not mounted: <strong>$notMountedCount</strong> |
+        Unknown status: <strong>$unknownCount</strong>.<br>
+        $(Format-HtmlValue $coverageNote)<br>
+        Source: <strong>Exchange_OnPrem_MigrationReadiness_Config.csv</strong>, category MailboxDatabase, collected with Get-MailboxDatabase -Status.
+        Source run: <strong>$(Format-HtmlValue $Summary.RunId)</strong>; run date: <strong>$(Format-HtmlValue $Summary.ExecutionDate)</strong>. These values describe that run, not the time the email is read.
+      </div>
+      <table>
+        <thead><tr><th>Database</th><th>Server (reported)</th><th>Mounted status</th><th>Database size</th><th>Internal reusable space</th><th>Data notes</th></tr></thead>
+        <tbody>$($detailRows -join "`r`n")</tbody>
+      </table>
+      <div class="summary">
+        Sizes retain the units returned by Exchange. AvailableNewMailboxSpace is reusable space inside the database, not free disk space.<br>
+        Server is the association reported by Get-MailboxDatabase; detailed DAG copy states and per-copy servers are not collected and are not inferred here.<br>
+        Mailboxes per database: N/A. Mailboxes are collected separately; this report has no qualified cross-collection database match with mailbox provenance and freshness. Zero observed mailboxes would not prove an empty database.
+      </div>
+"@
+}
+
 function New-HtmlExecutiveSummary {
     param(
         [Parameter(Mandatory)]
@@ -1536,6 +1626,7 @@ function New-HtmlExecutiveSummary {
     } else {
         ""
     }
+    $databaseSection = ConvertTo-ServersAndStorageDatabaseSectionHtml -ReadinessInventory $ReadinessInventory -Summary $Summary
     $html = @"
 <!DOCTYPE html>
 <html>
@@ -1635,6 +1726,8 @@ td.num, th.num { text-align: right; }
       </table>
 
       $priorityIssuesSection
+
+      $databaseSection
 
       $statusSummarySection
 

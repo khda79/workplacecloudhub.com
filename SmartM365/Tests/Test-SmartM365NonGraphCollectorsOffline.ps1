@@ -2,7 +2,7 @@
 .SYNOPSIS
 Synthetic regression tests for non-Graph SmartInventory CSV publication paths.
 .VERSION
-1.0.14
+1.0.15
 #>
 [CmdletBinding()]
 param(
@@ -320,7 +320,7 @@ try {
     }
     Test-OfflineCase 'Exchange executive summary renders ERROR status in red' {
         $path=Join-Path $SourceRoot 'SmartInventory/ExchangeInventory/OnPremises/ServersAndStorage/SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory.ps1'
-        $definitions=@(Get-FunctionText -Path $path -Names @('Format-HtmlValue','New-HtmlExecutiveSummary'))
+        $definitions=@(Get-FunctionText -Path $path -Names @('Format-HtmlValue','ConvertTo-ServersAndStorageDatabaseSectionHtml','New-HtmlExecutiveSummary'))
         $module=New-Module -ScriptBlock ([scriptblock]::Create($definitions -join "`n"))
         $htmlPath=Join-Path $testRoot 'exchange-executive-summary.html'
         $summary=[pscustomobject]@{ExecutionDate='2026-09-21';RunId='synthetic';ExchangeServersCount=1;TotalLogicalProcessorCount=0;TotalMemoryGB=0;TotalDiskDriveCount=0;TotalDiskDriveSizeTB=0;ExchangeSchemaRangeUpper='N/A';ExchangeOrgObjectVersion='N/A'}
