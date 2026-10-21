@@ -2,7 +2,7 @@
 .SYNOPSIS
 Offline tests for the seven-day detailed archive retention policy.
 .VERSION
-1.1.2
+1.1.3
 #>
 #requires -Version 7.0
 [CmdletBinding()]
@@ -48,7 +48,7 @@ $cases = @(
         Path = Join-Path $smartM365Root 'SmartInventory\ExchangeInventory\Migration\SmartM365-Exchange-HybridIdentity-Issues-Inventory.ps1'
         Prefix = 'Exchange_HybridIdentity_Issues'
         Format = 'yyyyMMdd-HHmmss'
-        Version = '1.25'
+        MinimumVersion = '1.25'
         ArchiveWriteMarker = 'CopyCsv $main $archive'
         RetentionCallMarker = "Remove-DetailedArchiveFilesOlderThan -Folder (Join-Path `$OutputFolder 'Archive')"
     },
@@ -57,8 +57,7 @@ $cases = @(
         Path = Join-Path $smartM365Root 'SmartInventory\M365Inventory\IntuneInventory\WindowsUpdate\SmartM365-WinUpdate_Status_From_Intune.ps1'
         Prefix = 'Intune_WindowsUpdate_Status'
         Format = 'yyyyMMdd_HHmmss'
-        Version = '1.48'
-        RuntimeVersion = '1.52'
+        MinimumVersion = '1.48'
         ArchiveWriteMarker = 'Copy-FileAtomic -SourcePath $SourceCsv -DestinationFinal $archiveFinal'
         RetentionCallMarker = 'Remove-DetailedArchiveFilesOlderThan -Folder $ArchiveFolder'
     }
@@ -66,9 +65,10 @@ $cases = @(
 
 foreach ($case in $cases) {
     $source = Get-Content -LiteralPath $case.Path -Raw
-    Assert-True ($source -match ('(?m)^\s*\.VERSION\s*\r?\n' + [regex]::Escape($case.Version) + '\s*$')) "$($case.Name) metadata version"
-    $runtimeVersion = if ($case.PSObject.Properties['RuntimeVersion']) { $case.RuntimeVersion } else { $case.Version }
-    Assert-True ($source -match ('\$ScriptVersion\s*=\s*["'']' + [regex]::Escape($runtimeVersion) + '["'']')) "$($case.Name) runtime version"
+    # Version floor: later releases keep the retention contract; header and runtime versions must agree.
+    $headerVersion = [regex]::Match($source, '(?m)^\s*\.VERSION\s*\r?\n\s*([0-9]+(?:\.[0-9]+)+)\s*$').Groups[1].Value
+    Assert-True ($headerVersion -and [version]$headerVersion -ge [version]$case.MinimumVersion) "$($case.Name) metadata version"
+    Assert-True ($source -match ('\$ScriptVersion\s*=\s*["'']' + [regex]::Escape($headerVersion) + '["'']')) "$($case.Name) runtime version"
     Assert-True ($source -match '\[int\]\$DetailedArchiveRetentionDays\s*=\s*7') "$($case.Name) default retention is seven days"
     $localConfigTemplatePath = $case.Path -replace '\.ps1$', '.local.json.template'
     $weeklyHistoryEvidence = $source
