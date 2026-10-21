@@ -78,14 +78,17 @@ Run statuses in `Exchange_OnPrem_HealthChecker_Summary.csv`:
 | --- | --- |
 | `Completed` | Result read. `ResultSource`: `Local`, `OnDemand` or `Scheduled` (fallback, see `RunMessage`). |
 | `RemoteConnectionFailed` | The `C$` share or CIM/DCOM of the server is not reachable, or the result could not be copied. |
-| `TaskTriggerFailed` | Task not installed, files not deployed, start refused, or task logon failure. |
-| `TaskTimeout` | No result from the task within the per-server limit, or Health Checker stopped on the server. |
+| `TaskTriggerFailed` | Task not installed, files not deployed, start refused, task logon failure, or task not running and no fresh result after 3 minutes (last task result in hexadecimal: check local administrator rights, batch logon right and password). |
+| `TaskTimeout` | The task kept running without a result within the per-server limit, or Health Checker stopped on the server. |
 | `StaleResult` | The on-demand start failed and the last daily result is older than the limit. |
 | `NoOutput` | Health Checker ended without XML (including Exchange Management Shell load failure). |
 | `UnsafeWorkFolder` | The collector work folder or one of its parents is not restricted to administrators; nothing was run. |
 | `IntegrityFailed`, `NotElevated`, `Timeout`, `LaunchFailed`, `ParseFailed`, `NotRun` | As before. |
 
 Messages never contain a domain name, an address or a secret.
+
+An interrupted run (Ctrl+C) is never reported as a success: the banner shows `FAILED` with an
+error line, no receipt or success status is written, and the exit code is 130.
 
 ### Scheduled task installation
 
@@ -100,6 +103,11 @@ and could not use the CIM session. The launcher always uses Windows PowerShell 5
 .\Install-SmartM365-Exchange-HealthCheckerScheduledTask.ps1 -ComputerName 'EXSRV01' -Uninstall
 ```
 
+- Before any change on a server, the installer checks that the service account is a local
+  administrator there, directly or through domain groups (local group members over CIM/DCOM, the
+  account's groups from Active Directory with a read-only LDAP query, no credential asked). A server
+  where it is proven not to be is refused (error); when it cannot be determined (Active Directory
+  unavailable, local group nested in Administrators), a warning is written.
 - Validate on one server first with `-StartNow`: the installer waits for the run and prints its state
   (for example `Completed`, or `ExchangeShellFailed` when the account cannot load the Exchange
   Management Shell).
