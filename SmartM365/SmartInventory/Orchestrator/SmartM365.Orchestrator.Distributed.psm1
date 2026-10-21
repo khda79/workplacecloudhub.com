@@ -1,7 +1,7 @@
 ﻿Set-StrictMode -Version Latest
 Import-Module (Join-Path $PSScriptRoot '../../Modules/SmartM365.Core/SmartM365.JsonTransport.psd1') -MinimumVersion '1.0.2' -Global -ErrorAction Stop
 
-$script:DistributedModuleVersion = '1.1.13'
+$script:DistributedModuleVersion = '1.1.14'
 
 function Resolve-DistributedJsonPath {
     param([Parameter(Mandatory)][string]$Path)
@@ -558,11 +558,28 @@ function Get-SmartM365OrchestratorServerCapability {
             SMART_CERT_THUMBPRINT = $CertificateThumbprint
             SMART_ORGANIZATION = $Organization
         }
-        $graphScript = @'
+        # Cloud probes retry transient service errors (5xx, 408, 429, timeouts, connection resets) twice
+        # within the probe timeout; authorization errors (401, 403, AADSTS) fail at once.
+        $cloudProbeRetry = @'
+function Invoke-ProbeWithRetry([scriptblock]$Probe) {
+    for ($attempt = 1; ; $attempt++) {
+        try { return & $Probe }
+        catch {
+            $message = [string]$_.Exception.Message
+            $transient = $message -notmatch '(?i)\b(?:401|403)\b|Unauthorized|Forbidden|AADSTS' -and $message -match '(?i)\b(?:408|429|500|502|503|504)\b|InternalServerError|ServiceUnavailable|BadGateway|GatewayTimeout|TooManyRequests|throttl|timeout|timed out|temporarily unavailable|An error occurred while sending the request|connection (?:was )?(?:reset|closed|aborted|forcibly closed)'
+            if (-not $transient) { throw }
+            if ($attempt -ge 3) { throw ("Persistent transient error after {0} attempt(s): {1}" -f $attempt, $message) }
+            Start-Sleep -Seconds (5 * $attempt)
+        }
+    }
+}
+
+'@
+        $graphScript = $cloudProbeRetry + @'
 $ErrorActionPreference = 'Stop'
 try {
     Import-Module Microsoft.Graph.Authentication -ErrorAction Stop
-    Connect-MgGraph -TenantId $env:SMART_TENANT_ID -ClientId $env:SMART_APP_ID -CertificateThumbprint $env:SMART_CERT_THUMBPRINT -NoWelcome
+    Invoke-ProbeWithRetry { Connect-MgGraph -TenantId $env:SMART_TENANT_ID -ClientId $env:SMART_APP_ID -CertificateThumbprint $env:SMART_CERT_THUMBPRINT -NoWelcome }
     $roles = @((Get-MgContext).Scopes | Sort-Object -Unique)
     $result = @{ Ready = $true; Roles = $roles; Detail = "Read-only Graph authentication succeeded with $($roles.Count) application roles." }
 }
@@ -572,12 +589,14 @@ finally { Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null }
 '@
         $results.Add((Invoke-IsolatedCapabilityProbe -Name 'Graph' -EnginePath $pwshPath -ScriptText $graphScript -Environment $environment -TimeoutSeconds $ProbeTimeoutSeconds))
 
-        $exoScript = @'
+        $exoScript = $cloudProbeRetry + @'
 $ErrorActionPreference = 'Stop'
 try {
     Import-Module ExchangeOnlineManagement -ErrorAction Stop
-    Connect-ExchangeOnline -AppId $env:SMART_APP_ID -CertificateThumbprint $env:SMART_CERT_THUMBPRINT -Organization $env:SMART_ORGANIZATION -ShowBanner:$false
-    $null = Get-AcceptedDomain -ResultSize 1 -ErrorAction Stop
+    Invoke-ProbeWithRetry {
+        Connect-ExchangeOnline -AppId $env:SMART_APP_ID -CertificateThumbprint $env:SMART_CERT_THUMBPRINT -Organization $env:SMART_ORGANIZATION -ShowBanner:$false
+        $null = Get-AcceptedDomain -ResultSize 1 -ErrorAction Stop
+    }
     $result = @{ Ready = $true; Roles = @(); Detail = 'Read-only Exchange Online probe succeeded.' }
 }
 catch { $result = @{ Ready = $false; Roles = @(); Detail = $_.Exception.Message } }

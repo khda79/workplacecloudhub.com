@@ -2902,7 +2902,7 @@ function Get-SmartM365NetworkSetting {
     [CmdletBinding()]
     [OutputType([int])]
     param(
-        [Parameter(Mandatory)][ValidateSet('GraphTokenTimeoutSeconds','GraphRequestTimeoutSeconds','SharePointUploadTransferTimeoutSeconds','SharePointUploadChunkTimeoutSeconds','SharePointUploadFileTimeoutMinutes','GraphTokenMaxAttempts')][string]$Name
+        [Parameter(Mandatory)][ValidateSet('GraphTokenTimeoutSeconds','GraphRequestTimeoutSeconds','SharePointUploadTransferTimeoutSeconds','SharePointUploadChunkTimeoutSeconds','SharePointUploadFileTimeoutMinutes','GraphTokenMaxAttempts','GraphProbeMaxAttempts')][string]$Name
     )
     $defaults = @{
         GraphTokenTimeoutSeconds = @(60, 5, 600)
@@ -2911,6 +2911,7 @@ function Get-SmartM365NetworkSetting {
         SharePointUploadChunkTimeoutSeconds = @(300, 30, 3600)
         SharePointUploadFileTimeoutMinutes = @(60, 1, 1440)
         GraphTokenMaxAttempts = @(3, 1, 10)
+        GraphProbeMaxAttempts = @(4, 1, 10)
     }
     $default, $minimum, $maximum = $defaults[$Name]
     $value = $null
@@ -4573,6 +4574,63 @@ function Test-SmartM365GraphTransientError {
 
     return ($details -match '(?i)TooManyRequests|throttl|timeout|timed out|temporarily unavailable|An error occurred while sending the request|connection (?:was )?(?:reset|closed|aborted|forcibly closed)|SSL connection could not be established')
 }
+# HTTP status of a failed Graph call: from the response when present, else from the message of
+# Microsoft Graph SDK errors ("InternalServerError (Internal Server Error)", "Status: 500").
+function Get-SmartM365GraphErrorStatusCode {
+    [CmdletBinding()]
+    [OutputType([int])]
+    param([Parameter(Mandatory)]$ErrorRecord)
+
+    try { if ($ErrorRecord.Exception.Response) { return [int]$ErrorRecord.Exception.Response.StatusCode } } catch { Write-Verbose $_.Exception.Message }
+    # Microsoft Graph SDK cmdlets (Get-Mg*) expose the status without a response object.
+    try { if ($ErrorRecord.Exception.PSObject.Properties['ResponseStatusCode'] -and $ErrorRecord.Exception.ResponseStatusCode) { return [int]$ErrorRecord.Exception.ResponseStatusCode } } catch { Write-Verbose $_.Exception.Message }
+    try { if ($ErrorRecord.Exception.Data['StatusCode']) { return [int]$ErrorRecord.Exception.Data['StatusCode'] } } catch { Write-Verbose $_.Exception.Message }
+    $message = [string]$ErrorRecord.Exception.Message
+    $numeric = [regex]::Match($message, '(?i)(?:\bstatus(?: code)?:?\s*|does not indicate success:\s*)(\d{3})\b')
+    if ($numeric.Success) { return [int]$numeric.Groups[1].Value }
+    $named = [regex]::Match($message, '(?i)(?:does not indicate success:\s*|^)(?<Name>[A-Za-z]+)\s*\(')
+    if ($named.Success) {
+        $parsed = $null
+        if ([Enum]::TryParse([System.Net.HttpStatusCode], $named.Groups['Name'].Value, $true, [ref]$parsed) -and [int]$parsed -ge 400) { return [int]$parsed }
+    }
+    return $null
+}
+
+# Read-only Graph probe of the preflight. 401/403 and other definitive answers fail at once; 408, 429,
+# 5xx, timeouts and connection resets are retried with progressive waits that honour Retry-After.
+function Invoke-SmartM365GraphProbe {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Uri,
+        [string]$GraphAccessToken
+    )
+
+    $maxAttempts = Get-SmartM365NetworkSetting -Name 'GraphProbeMaxAttempts'
+    for ($attempt = 1; ; $attempt++) {
+        try {
+            if (-not [string]::IsNullOrWhiteSpace($GraphAccessToken)) {
+                $headers = @{ Authorization = "Bearer $GraphAccessToken" }
+                $null = Invoke-RestMethod -Method GET -Uri $Uri -Headers $headers -TimeoutSec (Get-SmartM365NetworkSetting -Name 'GraphRequestTimeoutSeconds') -ErrorAction Stop
+            }
+            else {
+                $null = Invoke-MgGraphRequest -Method GET -Uri $Uri -ErrorAction Stop
+            }
+            return [pscustomobject]@{ Success = $true; Transient = $false; Attempts = $attempt; StatusCode = $null; Message = '' }
+        }
+        catch {
+            $statusCode = Get-SmartM365GraphErrorStatusCode -ErrorRecord $_
+            $transient = $statusCode -notin @(401, 403) -and (Test-SmartM365GraphTransientError -ErrorRecord $_ -StatusCode $statusCode)
+            if (-not $transient -or $attempt -ge $maxAttempts) {
+                return [pscustomobject]@{ Success = $false; Transient = $transient; Attempts = $attempt; StatusCode = $statusCode; Message = [string]$_.Exception.Message }
+            }
+            $delay = Get-SmartM365GraphRetryAfterSeconds -ErrorRecord $_ -DefaultSeconds (15 * $attempt) -MaximumSeconds 120
+            $statusText = if ($statusCode) { $statusCode } else { 'unknown' }
+            WriteLog -Message ("Preflight Graph probe transient failure for {0}. Status={1}; attempt {2}/{3}; retrying in {4}s." -f $Uri, $statusText, $attempt, $maxAttempts, $delay) -Level 'WARNING'
+            Wait-SmartM365NetworkRetry -Seconds $delay -Operation 'Preflight Graph probe'
+        }
+    }
+}
+
 function Invoke-SmartM365GraphRestWithRetry {
     [CmdletBinding()]
     param(
@@ -6263,18 +6321,18 @@ function Invoke-SmartM365Preflight {
         if ($useAccessToken -or $null -ne (Get-MgContext -ErrorAction SilentlyContinue)) {
             foreach ($uri in $GraphProbeUris) {
                 if ([string]::IsNullOrWhiteSpace($uri)) { continue }
-                try {
-                    if ($useAccessToken) {
-                        $headers = @{ Authorization = "Bearer $GraphAccessToken" }
-                        $null = Invoke-RestMethod -Method GET -Uri $uri -Headers $headers -TimeoutSec (Get-SmartM365NetworkSetting -Name 'GraphRequestTimeoutSeconds') -ErrorAction Stop
-                    }
-                    else {
-                        $null = Invoke-MgGraphRequest -Method GET -Uri $uri -ErrorAction Stop
-                    }
-                    WriteLog -Message ("Preflight Graph permission OK: {0}" -f $uri) -Level "INFO"
+                $probe = Invoke-SmartM365GraphProbe -Uri $uri -GraphAccessToken $(if ($useAccessToken) { $GraphAccessToken } else { '' })
+                if ($probe.Success) {
+                    $attemptText = if ($probe.Attempts -gt 1) { " (after $($probe.Attempts) attempts)" } else { '' }
+                    WriteLog -Message ("Preflight Graph permission OK: {0}{1}" -f $uri, $attemptText) -Level "INFO"
                 }
-                catch {
-                    $failures.Add("Graph permission probe failed for '$uri': $($_.Exception.Message)")
+                elseif ($probe.Transient) {
+                    # Distinct from a permission failure: the service kept failing, the permission was not refused.
+                    $statusText = if ($probe.StatusCode) { $probe.StatusCode } else { 'unknown' }
+                    $failures.Add("Persistent transient Microsoft Graph error for '$uri' after $($probe.Attempts) attempt(s) (Status=$statusText); not a permission failure: $($probe.Message)")
+                }
+                else {
+                    $failures.Add("Graph permission probe failed for '$uri': $($probe.Message)")
                 }
             }
         }

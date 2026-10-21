@@ -3,7 +3,7 @@
 .SYNOPSIS
   Offline checks for users deleted from the directory while the licensing run collects them.
 .VERSION
-1.0.0
+1.0.1
 .NOTES
   Synthetic identifiers only (GUIDs and example.invalid). Graph calls are replaced by mocks; no tenant access.
 #>
@@ -21,6 +21,9 @@ $names = @('Invoke-GraphWithRetry', 'Test-LicensesGraphNotFound', 'Register-Lice
 $definitions = @($ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $names -contains $node.Name }, $true))
 if ($definitions.Count -ne $names.Count) { throw 'Deleted-user functions are missing.' }
 foreach ($definition in $definitions) { . ([scriptblock]::Create($definition.Extent.Text)) }
+# The retry classifies Graph errors with the Core status helper.
+$coreAst = [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..\..\..\Modules\SmartM365.Core\SmartM365.Core.psm1')).Path, [ref]$null, [ref]$null)
+. ([scriptblock]::Create($coreAst.Find({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Get-SmartM365GraphErrorStatusCode' }, $true).Extent.Text))
 
 $script:checks = 0
 function Check { param([bool]$Condition, [string]$Message) if (-not $Condition) { throw $Message }; $script:checks++ }
@@ -118,7 +121,7 @@ Check ($text -match "-Qualifications @\(\`$usersDeletedQualification") 'The dele
 Check ($text -match 'Add-SmartM365SourceRunNote -Message \(''\{0\}: users deleted') 'The deleted-user count does not reach the run state.'
 Check ($text -match '-UsersDeletedDuringCollection \(\[int\]\$userResolution\.UsersDeletedDuringCollection\)') 'The completion summary does not show the deleted-user count.'
 $version = [regex]::Match($text, '\.VERSION\r?\n\s*([0-9.]+)').Groups[1].Value
-Check ($version -eq '1.55' -and $text -match '\$ScriptVersion = "1\.55"') 'Header and runtime versions are not 1.55.'
+Check ($version -and [version]$version -ge [version]'1.55' -and $text -match ('\$ScriptVersion = "' + [regex]::Escape($version) + '"')) 'Header and runtime versions differ or predate 1.55.'
 
 "PASS: License deleted-user offline checks ($script:checks checks)."
 

@@ -18,7 +18,7 @@
   as optional files M365_Licenses_ReportSkuCandidates.csv and M365_Licenses_ReportSkuCapacity.csv with the report snapshot identity;
   ReportSkuCapacity names the report product family of each SKU (ReportProduct) so consumers never re-implement the SKU rules.
 .VERSION
- 1.55
+ 1.56
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication; Microsoft.Graph.Identity.DirectoryManagement; Microsoft.Graph.Users; Microsoft.Graph.Groups; ImportExcel for the report attachment.
@@ -263,7 +263,7 @@ $OrgDomain = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'OrgDom
 # ==========================================================
 $modulePath = & { $d = $PSScriptRoot; while ($d) { $p = Join-Path $d 'Modules\SmartM365.Core\SmartM365.Core.psd1'; if (Test-Path -LiteralPath $p) { return $p }; $parent = Split-Path -Path $d -Parent; if ($parent -eq $d) { break }; $d = $parent }; throw 'SmartM365.Core module not found.' }
 try {
-    Import-Module -Name $modulePath -MinimumVersion '1.0.95' -ErrorAction Stop
+    Import-Module -Name $modulePath -MinimumVersion '1.0.97' -ErrorAction Stop
 } catch {
     Write-Host "Failed to import SmartM365.Core module from '$modulePath' : $_" -ForegroundColor Red
     exit 1
@@ -409,10 +409,9 @@ function Invoke-GraphWithRetry {
   while ($true) {
     try { return & $ScriptBlock } catch {
       $attempt++; $msg=$_.Exception.Message
-      $statusCode=$null
-      try{if($_.Exception.Response){$statusCode=[int]$_.Exception.Response.StatusCode}}catch{}
-      if($null-eq$statusCode){try{$statusCode=[int]$_.Exception.Data['StatusCode']}catch{}}
-      $isTransient=$statusCode -in @(408,409,429,500,502,503,504) -or $msg -match '(?i)throttl|TooManyRequests|temporarily unavailable|timeout|timed out'
+      # Get-Mg* errors carry the status in ResponseStatusCode or only in the message (InternalServerError).
+      $statusCode=Get-SmartM365GraphErrorStatusCode -ErrorRecord $_
+      $isTransient=$statusCode -notin @(401,403) -and ($statusCode -in @(408,409,429,500,502,503,504) -or $msg -match '(?i)throttl|TooManyRequests|temporarily unavailable|timeout|timed out|An error occurred while sending the request|connection (?:was )?(?:reset|closed|aborted|forcibly closed)')
       if (-not $isTransient) { throw }
       if ($attempt -ge $MaxRetries) { throw "Max retry attempts reached: $msg" }
       $retryAfter=$null; try {
@@ -3991,7 +3990,7 @@ function Publish-LicensesWeeklyHistory {
 # ==========================================================
 # Main
 # ==========================================================
-$ScriptVersion = "1.55"
+$ScriptVersion = "1.56"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LicensesCsvLogFolderPath' -DefaultValue $OutputPath
 $LatestCsvFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ''
