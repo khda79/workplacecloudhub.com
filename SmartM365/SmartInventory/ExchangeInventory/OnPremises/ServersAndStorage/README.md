@@ -57,6 +57,11 @@ Health Checker always runs on the server it checks and is never given `-Server`:
   budget is used up is `NotRun`.
 - Health Checker needs an elevated session. Without it, no server is run and every row is
   `NotElevated`.
+- `HealthCheckerExcludedServers` (array, empty by default): servers that stay in the whole inventory
+  but that Health Checker never starts, contacts or runs. Names are matched case-insensitively on
+  the short name and the FQDN. Their summary row is `NotRun` with "excluded by configuration", with
+  no warning, and they are not counted in `ServersTotal`. The installer does not need to be run for
+  them.
 - Raw output (XML, text and debug log) contains the full server configuration. It stays on a local
   disk: the collector work folder (`HealthCheckerWorkFolderPath`, default
   `%ProgramFiles%\SmartM365\HealthChecker\Work`, shares refused) and `Output` on each server. The

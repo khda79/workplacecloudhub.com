@@ -26,7 +26,7 @@
     New-CimSession is used over DCOM only, to start the Health Checker scheduled task.
 
 .VERSION
-1.8.1
+1.8.2
 .REQUIREMENTS
     Windows PowerShell 5.1 on an Exchange 2016/on-premises management host.
     Modules/snap-ins: SmartM365 WindowsPowerShell5 compatibility module; Exchange Management snap-in.
@@ -37,7 +37,7 @@
     and the Health Checker scheduled task must be installed there.
 .NOTES
     Script Name : SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory.ps1
-    Version     : 1.8.1
+    Version     : 1.8.2
     Requirements:
       - Windows PowerShell 5.1 with Exchange 2016 Management Tools
       - Exchange 2016 read RBAC for Get-ExchangeServer, Get-MailboxDatabase,
@@ -48,6 +48,12 @@
       - PowerShell 5.1 or later
 
 .CHANGELOG
+    1.8.2
+      - New HealthCheckerExcludedServers setting (short names or FQDNs, case-insensitive): listed
+        servers stay in the inventory but Health Checker never starts or contacts them; their summary
+        row is NotRun "excluded by configuration", without warning, and they are not counted in
+        ServersTotal.
+
     1.8.1
       - Fixes the CIM/DCOM session options (1.8.0 mixed two parameter sets of New-CimSessionOption and
         could not start any remote task).
@@ -216,7 +222,7 @@ $tenantContextPath = & {
 . $tenantContextPath
 
 $ScriptName = "SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory"
-$ScriptVersion = "1.8.1"
+$ScriptVersion = "1.8.2"
 $RunId = (Get-Date).ToString("yyyyMMdd-HHmmss")
 # Vendored Microsoft CSS-Exchange Health Checker (see ThirdParty\CSS-Exchange\HealthChecker\PROVENANCE.md).
 $HealthCheckerRelativePath = 'ThirdParty\CSS-Exchange\HealthChecker\HealthChecker.ps1'
@@ -1122,6 +1128,13 @@ function Get-HealthCheckerSetting {
     if ($workRoot.StartsWith('\\') -or -not [System.IO.Path]::IsPathRooted($workRoot)) {
         throw "HealthCheckerWorkFolderPath must be a local absolute path, not a share: $workRoot"
     }
+    # Servers kept in the inventory but never contacted by Health Checker (short name or FQDN).
+    $excludedValue = Get-SmartM365EffectiveConfigValue -Name 'HealthCheckerExcludedServers' -DefaultValue @()
+    $excludedServers = @(foreach ($item in @($excludedValue)) {
+            if ($null -eq $item) { continue }
+            if ($item -isnot [string] -or [string]::IsNullOrWhiteSpace($item)) { throw 'HealthCheckerExcludedServers must be a JSON array of server names.' }
+            $item.Trim()
+        })
     # Only the last run is kept now; the former retention setting is ignored.
     if ($null -ne (Get-SmartM365EffectiveConfigValue -Name 'HealthCheckerKeepFailedRawOutputDays' -DefaultValue $null)) {
         Write-Log 'HealthCheckerKeepFailedRawOutputDays is no longer used and can be removed from the local configuration: only the last Health Checker run is kept.'
@@ -1131,6 +1144,7 @@ function Get-HealthCheckerSetting {
         TimeoutMinutesPerServer    = $perServerMinutes
         TotalBudgetMinutes         = $budgetMinutes
         MaxResultAgeHours          = $maxResultAgeHours
+        ExcludedServers            = $excludedServers
         WorkFolderPath             = $workRoot
         RemoteRootPath             = $HealthCheckerRemoteRootPath
         TaskPath                   = $HealthCheckerTaskPath
@@ -1615,6 +1629,23 @@ function Remove-HealthCheckerPreviousWorkFolder {
     }
 }
 
+function Test-HealthCheckerServerExcluded {
+    param(
+        [Parameter(Mandatory)][object]$Server,
+        [AllowNull()][AllowEmptyCollection()][string[]]$ExcludedServers
+    )
+
+    # Case-insensitive, on the short name and on the FQDN; a configured FQDN also matches the short name.
+    $name = [string]$Server.Name
+    $fqdn = if ($Server.PSObject.Properties['Fqdn']) { [string]$Server.Fqdn } else { '' }
+    foreach ($entry in @($ExcludedServers)) {
+        if ([string]::IsNullOrWhiteSpace($entry)) { continue }
+        $candidate = $entry.Trim()
+        if ($candidate -ieq $name -or ($fqdn -and $candidate -ieq $fqdn) -or ($candidate.Contains('.') -and $candidate.Split('.')[0] -ieq $name)) { return $true }
+    }
+    return $false
+}
+
 function Get-HealthCheckerServerComputerName {
     param([Parameter(Mandatory)][object]$Server)
 
@@ -1946,6 +1977,16 @@ function Invoke-ExchangeHealthCheckerInventory {
     $summaryRows = New-Object 'System.Collections.Generic.List[object]'
     $findingRows = New-Object 'System.Collections.Generic.List[object]'
     $serverNames = @($ExchangeServers | ForEach-Object { [string]$_.Name })
+    # Excluded servers keep a summary row but are never started, contacted or counted as failures.
+    $excludedList = if ($Settings.PSObject.Properties['ExcludedServers']) { @($Settings.ExcludedServers) } else { @() }
+    $excludedNames = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+    foreach ($server in $ExchangeServers) {
+        if (Test-HealthCheckerServerExcluded -Server $server -ExcludedServers $excludedList) { [void]$excludedNames.Add([string]$server.Name) }
+    }
+    $activeServers = @($ExchangeServers | Where-Object { -not $excludedNames.Contains([string]$_.Name) })
+    if ($excludedNames.Count -gt 0) {
+        Write-Log ("Health Checker excluded by configuration (HealthCheckerExcludedServers): {0}." -f (@($excludedNames) -join ', '))
+    }
     $runFolder = Join-Path -Path $Settings.WorkFolderPath -ChildPath $RunId
     $blockedStatus = $null
     $blockedMessage = $null
@@ -1994,7 +2035,7 @@ function Invoke-ExchangeHealthCheckerInventory {
     if (-not $blockedStatus) {
         $remoteRuns = New-Object 'System.Collections.Generic.List[object]'
         # 1. Remote servers start first, through their scheduled task, so they all run in parallel.
-        foreach ($server in @($ExchangeServers | Where-Object { [string]$_.Name -ne $LocalComputerName })) {
+        foreach ($server in @($activeServers | Where-Object { [string]$_.Name -ne $LocalComputerName })) {
             $serverName = [string]$server.Name
             $computer = Get-HealthCheckerServerComputerName -Server $server
             Write-Log ("Starting the Health Checker task on {0}." -f $serverName)
@@ -2002,7 +2043,7 @@ function Invoke-ExchangeHealthCheckerInventory {
         }
 
         # 2. The collector's own server runs in a local child process meanwhile.
-        foreach ($server in @($ExchangeServers | Where-Object { [string]$_.Name -eq $LocalComputerName })) {
+        foreach ($server in @($activeServers | Where-Object { [string]$_.Name -eq $LocalComputerName })) {
             $serverName = [string]$server.Name
             $remainingSeconds = [int][math]::Floor(($deadline - (Get-Date)).TotalSeconds)
             if ($remainingSeconds -lt 60) {
@@ -2037,6 +2078,10 @@ function Invoke-ExchangeHealthCheckerInventory {
     }
 
     foreach ($serverName in $serverNames) {
+        if ($excludedNames.Contains($serverName)) {
+            $summaryRows.Add((ConvertTo-HealthCheckerSummaryRow -ServerName $serverName -RunStatus 'NotRun' -RunMessage 'Health Checker was not run: excluded by configuration.' -HealthCheckerVersion $HealthCheckerVersion -Parsed $null)) | Out-Null
+            continue
+        }
         if ($blockedStatus) {
             $summaryRows.Add((ConvertTo-HealthCheckerSummaryRow -ServerName $serverName -RunStatus $blockedStatus -RunMessage $blockedMessage -HealthCheckerVersion $HealthCheckerVersion -Parsed $null)) | Out-Null
             continue
@@ -2084,9 +2129,9 @@ function Invoke-ExchangeHealthCheckerInventory {
     $processed = @($summaryRows | Where-Object { $_.RunStatus -eq 'Completed' }).Count
     foreach ($row in $summaryRows) {
         $row.ServersProcessed = $processed
-        $row.ServersTotal = $serverNames.Count
+        $row.ServersTotal = $activeServers.Count
     }
-    Write-Log ("Health Checker processed {0} of {1} server(s)." -f $processed, $serverNames.Count)
+    Write-Log ("Health Checker processed {0} of {1} server(s); {2} excluded by configuration." -f $processed, $activeServers.Count, $excludedNames.Count)
 
     return [pscustomobject]@{
         Summary  = $summaryRows.ToArray()
@@ -3257,169 +3302,3 @@ finally {
     if($smartM365RunGuard.ExitCode -eq 130){exit 130}
 }
 if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
-
-# SIG # Begin signature block
-# MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
-# BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB2gzvcFG6eynEw
-# 5LZHitqfmHFaw+ojWRAOpj16t6FCHKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
-# s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
-# b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
-# ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
-# VQQDDBV3b3JrcGxhY2VjbG91ZGh1Yi5jb20xLDAqBgkqhkiG9w0BCQEWHWNvbnRh
-# Y3RAd29ya3BsYWNlY2xvdWRodWIuY29tMIIBojANBgkqhkiG9w0BAQEFAAOCAY8A
-# MIIBigKCAYEAse6XztERSyHn9DVqj8Rdv0qjc5owqvgAIGaYxBmfiQuoM48Fo4Xt
-# 1ovi9brLUtf55G4XgthNPCoanxfCRRg30IVRxaDfdPXJzYmgsM5tXlsuNU49lE7E
-# PJk3+jEOgSCt8NKzmVPKpNRG0NmK0a8wm12cceYZOZlSYE0+ZtT6wy5PQQjMUqIx
-# XnGjt4H0nfgZZa7D4FyARKOVg/Xr9sUq5jIn3zszvg4jjeb4b0DKJtfbHukhWc2Y
-# oVFgswxVBXCWIaBnfF/cjqMfK/CaToT2trVb4hG4qcQ31s1nR4keoRaOw/vyd6ap
-# rEtCsT22N/Jx0dz7fIo1tVyvIaVcHdN9LW3chn0en0OKZ6Ke1OH9wf2prl4KA6Ww
-# VzrAZrOlXTAItdK7D9kKO/HeJd4PZvO53oy1LdmMGLSz3OLB9e5q7yo8rfqi5Ka9
-# KzM2CrSzz1yphn/H90wz7Q2pm4FIlWdcj86A/0kmhYg+5Wqqbg1drrPXu4nEBwWN
-# /dzoGtKZKHTdAgMBAAGjgZYwgZMwDgYDVR0PAQH/BAQDAgeAMBMGA1UdJQQMMAoG
-# CCsGAQUFBwMDMD8GA1UdEQQ4MDaBHWNvbnRhY3RAd29ya3BsYWNlY2xvdWRodWIu
-# Y29tghV3b3JrcGxhY2VjbG91ZGh1Yi5jb20wDAYDVR0TAQH/BAIwADAdBgNVHQ4E
-# FgQUXIOOADQM78XfPAncirgCECedg9gwDQYJKoZIhvcNAQELBQADggGBADhZUB2R
-# 5J/Jw030xodhEWeCQ0vnJRaiEsjOxuArQREKH3lCrQ3UsUVl292d6LnQUSTH/jF7
-# rovEZ+JN2GQ/LCrXRaCuwCEGZKzlSEbtYWhfwDyj6GpIPq8Y4SeXyjdq4/rrI1bm
-# iTK4Sq7EoBlGJuX6l2nfvx1tTioSr11FoDfllJR7EYawRj9hBFJ0gG0b2SuYZMgW
-# gaDKefcnJDmOwcRNAZUII0ss8EeyANukWSkNN5ILZ+iKDpQgZxgDLPTiRguCyx45
-# PI5wrVTjV/pR7IrtSIfq8UladlrSZJyyDn3NV2ATvIZ6wNxbTmPFcE0uMg/EYzwd
-# Tek+CgXL3TxUKeldJM4YDWPimNBRhOPXzBDiOQIj6WNswt/KM1oDLnA00CNtciPN
-# dn+dXlneMvTEUah9wyt8o8tkLpoBw+KN+Bq/K0O1qPtS7umi70l45pPiej+mwbwq
-# ztcaoVD7a8ggHP1Vdp/rnafM4GtyCAE6b7U9Yzgvp1/a1kh7XffmqVhRRjCCBY0w
-# ggR1oAMCAQICEA6bGI750C3n79tQ4ghAGFowDQYJKoZIhvcNAQEMBQAwZTELMAkG
-# A1UEBhMCVVMxFTATBgNVBAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRp
-# Z2ljZXJ0LmNvbTEkMCIGA1UEAxMbRGlnaUNlcnQgQXNzdXJlZCBJRCBSb290IENB
-# MB4XDTIyMDgwMTAwMDAwMFoXDTMxMTEwOTIzNTk1OVowYjELMAkGA1UEBhMCVVMx
-# FTATBgNVBAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRpZ2ljZXJ0LmNv
-# bTEhMB8GA1UEAxMYRGlnaUNlcnQgVHJ1c3RlZCBSb290IEc0MIICIjANBgkqhkiG
-# 9w0BAQEFAAOCAg8AMIICCgKCAgEAv+aQc2jeu+RdSjwwIjBpM+zCpyUuySE98orY
-# WcLhKac9WKt2ms2uexuEDcQwH/MbpDgW61bGl20dq7J58soR0uRf1gU8Ug9SH8ae
-# FaV+vp+pVxZZVXKvaJNwwrK6dZlqczKU0RBEEC7fgvMHhOZ0O21x4i0MG+4g1ckg
-# HWMpLc7sXk7Ik/ghYZs06wXGXuxbGrzryc/NrDRAX7F6Zu53yEioZldXn1RYjgwr
-# t0+nMNlW7sp7XeOtyU9e5TXnMcvak17cjo+A2raRmECQecN4x7axxLVqGDgDEI3Y
-# 1DekLgV9iPWCPhCRcKtVgkEy19sEcypukQF8IUzUvK4bA3VdeGbZOjFEmjNAvwjX
-# WkmkwuapoGfdpCe8oU85tRFYF/ckXEaPZPfBaYh2mHY9WV1CdoeJl2l6SPDgohIb
-# Zpp0yt5LHucOY67m1O+SkjqePdwA5EUlibaaRBkrfsCUtNJhbesz2cXfSwQAzH0c
-# lcOP9yGyshG3u3/y1YxwLEFgqrFjGESVGnZifvaAsPvoZKYz0YkH4b235kOkGLim
-# dwHhD5QMIR2yVCkliWzlDlJRR3S+Jqy2QXXeeqxfjT/JvNNBERJb5RBQ6zHFynIW
-# IgnffEx1P2PsIV/EIFFrb7GrhotPwtZFX50g/KEexcCPorF+CiaZ9eRpL5gdLfXZ
-# qbId5RsCAwEAAaOCATowggE2MA8GA1UdEwEB/wQFMAMBAf8wHQYDVR0OBBYEFOzX
-# 44LScV1kTN8uZz/nupiuHA9PMB8GA1UdIwQYMBaAFEXroq/0ksuCMS1Ri6enIZ3z
-# bcgPMA4GA1UdDwEB/wQEAwIBhjB5BggrBgEFBQcBAQRtMGswJAYIKwYBBQUHMAGG
-# GGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBDBggrBgEFBQcwAoY3aHR0cDovL2Nh
-# Y2VydHMuZGlnaWNlcnQuY29tL0RpZ2lDZXJ0QXNzdXJlZElEUm9vdENBLmNydDBF
-# BgNVHR8EPjA8MDqgOKA2hjRodHRwOi8vY3JsMy5kaWdpY2VydC5jb20vRGlnaUNl
-# cnRBc3N1cmVkSURSb290Q0EuY3JsMBEGA1UdIAQKMAgwBgYEVR0gADANBgkqhkiG
-# 9w0BAQwFAAOCAQEAcKC/Q1xV5zhfoKN0Gz22Ftf3v1cHvZqsoYcs7IVeqRq7IviH
-# GmlUIu2kiHdtvRoU9BNKei8ttzjv9P+Aufih9/Jy3iS8UgPITtAq3votVs/59Pes
-# MHqai7Je1M/RQ0SbQyHrlnKhSLSZy51PpwYDE3cnRNTnf+hZqPC/Lwum6fI0POz3
-# A8eHqNJMQBk1RmppVLC4oVaO7KTVPeix3P0c2PR3WlxUjG/voVA9/HYJaISfb8rb
-# II01YBwCA8sgsKxYoA5AY8WYIsGyWfVVa88nq2x2zm8jLfR+cWojayL/ErhULSd+
-# 2DrZ8LaHlv1b0VysGMNNn3O3AamfV6peKOK5lDCCBrQwggScoAMCAQICEA3HrFcF
-# /yGZLkBDIgw6SYYwDQYJKoZIhvcNAQELBQAwYjELMAkGA1UEBhMCVVMxFTATBgNV
-# BAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRpZ2ljZXJ0LmNvbTEhMB8G
-# A1UEAxMYRGlnaUNlcnQgVHJ1c3RlZCBSb290IEc0MB4XDTI1MDUwNzAwMDAwMFoX
-# DTM4MDExNDIzNTk1OVowaTELMAkGA1UEBhMCVVMxFzAVBgNVBAoTDkRpZ2lDZXJ0
-# LCBJbmMuMUEwPwYDVQQDEzhEaWdpQ2VydCBUcnVzdGVkIEc0IFRpbWVTdGFtcGlu
-# ZyBSU0E0MDk2IFNIQTI1NiAyMDI1IENBMTCCAiIwDQYJKoZIhvcNAQEBBQADggIP
-# ADCCAgoCggIBALR4MdMKmEFyvjxGwBysddujRmh0tFEXnU2tjQ2UtZmWgyxU7UNq
-# EY81FzJsQqr5G7A6c+Gh/qm8Xi4aPCOo2N8S9SLrC6Kbltqn7SWCWgzbNfiR+2fk
-# HUiljNOqnIVD/gG3SYDEAd4dg2dDGpeZGKe+42DFUF0mR/vtLa4+gKPsYfwEu7EE
-# bkC9+0F2w4QJLVSTEG8yAR2CQWIM1iI5PHg62IVwxKSpO0XaF9DPfNBKS7Zazch8
-# NF5vp7eaZ2CVNxpqumzTCNSOxm+SAWSuIr21Qomb+zzQWKhxKTVVgtmUPAW35xUU
-# FREmDrMxSNlr/NsJyUXzdtFUUt4aS4CEeIY8y9IaaGBpPNXKFifinT7zL2gdFpBP
-# 9qh8SdLnEut/GcalNeJQ55IuwnKCgs+nrpuQNfVmUB5KlCX3ZA4x5HHKS+rqBvKW
-# xdCyQEEGcbLe1b8Aw4wJkhU1JrPsFfxW1gaou30yZ46t4Y9F20HHfIY4/6vHespY
-# MQmUiote8ladjS/nJ0+k6MvqzfpzPDOy5y6gqztiT96Fv/9bH7mQyogxG9QEPHrP
-# V6/7umw052AkyiLA6tQbZl1KhBtTasySkuJDpsZGKdlsjg4u70EwgWbVRSX1Wd4+
-# zoFpp4Ra+MlKM2baoD6x0VR4RjSpWM8o5a6D8bpfm4CLKczsG7ZrIGNTAgMBAAGj
-# ggFdMIIBWTASBgNVHRMBAf8ECDAGAQH/AgEAMB0GA1UdDgQWBBTvb1NK6eQGfHrK
-# 4pBW9i/USezLTjAfBgNVHSMEGDAWgBTs1+OC0nFdZEzfLmc/57qYrhwPTzAOBgNV
-# HQ8BAf8EBAMCAYYwEwYDVR0lBAwwCgYIKwYBBQUHAwgwdwYIKwYBBQUHAQEEazBp
-# MCQGCCsGAQUFBzABhhhodHRwOi8vb2NzcC5kaWdpY2VydC5jb20wQQYIKwYBBQUH
-# MAKGNWh0dHA6Ly9jYWNlcnRzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRS
-# b290RzQuY3J0MEMGA1UdHwQ8MDowOKA2oDSGMmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0
-# LmNvbS9EaWdpQ2VydFRydXN0ZWRSb290RzQuY3JsMCAGA1UdIAQZMBcwCAYGZ4EM
-# AQQCMAsGCWCGSAGG/WwHATANBgkqhkiG9w0BAQsFAAOCAgEAF877FoAc/gc9EXZx
-# ML2+C8i1NKZ/zdCHxYgaMH9Pw5tcBnPw6O6FTGNpoV2V4wzSUGvI9NAzaoQk97fr
-# PBtIj+ZLzdp+yXdhOP4hCFATuNT+ReOPK0mCefSG+tXqGpYZ3essBS3q8nL2UwM+
-# NMvEuBd/2vmdYxDCvwzJv2sRUoKEfJ+nN57mQfQXwcAEGCvRR2qKtntujB71WPYA
-# gwPyWLKu6RnaID/B0ba2H3LUiwDRAXx1Neq9ydOal95CHfmTnM4I+ZI2rVQfjXQA
-# 1WSjjf4J2a7jLzWGNqNX+DF0SQzHU0pTi4dBwp9nEC8EAqoxW6q17r0z0noDjs6+
-# BFo+z7bKSBwZXTRNivYuve3L2oiKNqetRHdqfMTCW/NmKLJ9M+MtucVGyOxiDf06
-# VXxyKkOirv6o02OoXN4bFzK0vlNMsvhlqgF2puE6FndlENSmE+9JGYxOGLS/D284
-# NHNboDGcmWXfwXRy4kbu4QFhOm0xJuF2EZAOk5eCkhSxZON3rGlHqhpB/8MluDez
-# ooIs8CVnrpHMiD2wL40mm53+/j7tFaxYKIqL0Q4ssd8xHZnIn/7GELH3IdvG2XlM
-# 9q7WP/UwgOkw/HQtyRN62JK4S1C8uw3PdBunvAZapsiI5YKdvlarEvf8EA+8hcpS
-# M9LHJmyrxaFtoza2zNaQ9k+5t1wwggbtMIIE1aADAgECAhAIT9wzT35FTtvDD4/5
-# khg1MA0GCSqGSIb3DQEBCwUAMGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdp
-# Q2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3Rh
-# bXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTEwHhcNMjYwODA1MDAwMDAwWhcN
-# MzcxMTA0MjM1OTU5WjBjMQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQs
-# IEluYy4xOzA5BgNVBAMTMkRpZ2lDZXJ0IFNIQTI1NiBSU0E0MDk2IFRpbWVzdGFt
-# cCBSZXNwb25kZXIgMjAyNiAxMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKC
-# AgEAtnum8sn+zUr41JtMZbP9OMYw+HwJDpG5xkIu/lqcfNYmMX81YmsUiHLbh9yk
-# peWBGKTLhYBrAN9Tdg/QEzG32XcObmgIblnr0CoQ3WSAeDZ6nH6X6VkFyYkJw3QB
-# JREwvm4UhLzSxmwPA7cFKRTEOMsmEEj6qJk/dqLEAL+oQYuOwE2UuiX1Vnul8YRe
-# IyWd4kgLn9gq6LNXM0UplkR6jL/QHxmb6fMoGBJYbnaUI7XD6cKDpekK2SVMld4i
-# DbzeHDtOaaxldH5IxuNusQ69nd8/ZXEiB5Hbxj3RlK13cX1W4DlFXKdv/CEhM8Cj
-# 1vvlmvhNroyPdRGbbpBlgyf8Wdu5N6ByhFwURn0U6ozlPoxN22v+fviUhP+6DR54
-# 7OZnpBMWDfei1f5sVGwiiW/KQTWOK97g+4RJpPzPNV4VYMAwO2jM2Aty2QYPVmOQ
-# TJm0msuXnJrSbl2gf9JylpkJlWXqk1Q4LJsxz+TELoQCZIljbgvTJgoPU2R12ydv
-# 8i1UqL/adelA0y7U9Pmmtbze9Xx3rtajC5SzQd1jgfwAwsa90v9YcSPdmeoyoBBA
-# /27cCL237l5DTYYPDLQ4ON3OLTGWnvRb6jDrf/T75gMRfUzSLCBQfBusm9+mSWRl
-# C/Df6S/e9Q8i13CuhzOT2Jx+V/nlbXM4QoBwlUAhelwwJT0CAwEAAaOCAZUwggGR
-# MAwGA1UdEwEB/wQCMAAwHQYDVR0OBBYEFBTJY4owLtRK+26U8+bjQH717M3iMB8G
-# A1UdIwQYMBaAFO9vU0rp5AZ8esrikFb2L9RJ7MtOMA4GA1UdDwEB/wQEAwIHgDAW
-# BgNVHSUBAf8EDDAKBggrBgEFBQcDCDCBlQYIKwYBBQUHAQEEgYgwgYUwJAYIKwYB
-# BQUHMAGGGGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBdBggrBgEFBQcwAoZRaHR0
-# cDovL2NhY2VydHMuZGlnaWNlcnQuY29tL0RpZ2lDZXJ0VHJ1c3RlZEc0VGltZVN0
-# YW1waW5nUlNBNDA5NlNIQTI1NjIwMjVDQTEuY3J0MF8GA1UdHwRYMFYwVKBSoFCG
-# Tmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRHNFRpbWVT
-# dGFtcGluZ1JTQTQwOTZTSEEyNTYyMDI1Q0ExLmNybDAgBgNVHSAEGTAXMAgGBmeB
-# DAEEAjALBglghkgBhv1sBwEwDQYJKoZIhvcNAQELBQADggIBAI3FOmEenVIK35ms
-# CYB+fShAsWvSYvLBItoNdAgQ2jIqrGsVsluXMJU/+mRebBc52s6lbKAvOVPXaizm
-# KkMLLflEEKDZQx4CkS2t8aHPjkXha3hYZ010htFa3dhNgmalH5vuWvh3tTCf4frT
-# S7gPtGc4Z/xaPhQ2AB1mR8eEe/WbH0RWHvVIl6VwQ3+g5FKNfN2N/DWJkf13w2H+
-# 2GfqEfbd35Ww8CvoYBjLNIDTadcPWdgsjsiOaK/7EsKJgLjUNIVgvcaFOLLQ/Glr
-# A+0ZHJoFUbOr5SJN8zykPspXIXlpDJY/gqFUZRROeab9GVgmhbdOJcD/63RhxPah
-# FUGbckRONqMe6DYAv6/mOG0pWd3cPStsdcS7buj5DyniwRY8yooMH6ptx5vpP/pZ
-# zBPBeZD2U4IsthyxB5Jaa8qrOkB5z160TXiM5ADMspZ0TfD9MJoq0tFpFPssKRFh
-# WeEDYPvcUuN7U7lvcdHl4ezQ3NT/7Ffs1sR1yh/LRbdZ3B3Vc6q2WmD8mDC0p9kz
-# l2o73iVtS946IkEj7FkRsZGww1teYxERROC745xrtjvcw9ZyyUjHZWGRIpJeMNsP
-# quCDf0fkyHtB+J4AiNZqCQk23rxh+KbpyMTNVKItJ5l92Svl20U9NbqMBOVYl1h5
-# 4NEYLJq1/xHWFKPNK903zJZA9P2DMYIFvjCCBboCAQEwYjBOMR4wHAYDVQQDDBV3
-# b3JrcGxhY2VjbG91ZGh1Yi5jb20xLDAqBgkqhkiG9w0BCQEWHWNvbnRhY3RAd29y
-# a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
-# AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
-# CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIOyDrz21Hqtby4rT4Va9bGD9P3V6a+DXs+yxY9DOI3xvMA0GCSqG
-# SIb3DQEBAQUABIIBgE8X1tG5mJ2mrcIfljKMHu49/HVtkW79/PvWliz9m8VMl+Bb
-# 4SKhg4H0YC1ahie5QMJ9ysGRXLB+qvngDbXOCKEgJj7RpduRyhIitwP2OidFmyxn
-# rezds+6QVlwYBh/D+fzeIgWnbdmERKeXSpk0Yiig1r5qQWhFEm3Jm/Ahun5rZYsL
-# yauwM1UaVcVeqn9sOQ20VM0niIpeQ/wvafyFVV/zdyiukN/HynmEcLATM1EDEE4W
-# E6SyMEmHZs3BFQpaxkVJXkRv7Cezl1eacoNLp1wYZpaP5V0txZ2WfW1E2bRLlSI1
-# wS6dQngM502N3Oes35d8Gf/bXBrlcci0xNkGUqClOA1Mrf4PQRfGyzMO2mORhT9U
-# nUKJq9eg7j82c1J3xjUgVJrb2kyj2E/fXByYqUiVyeOl0x8c8YbcOkTCEFf1qHOP
-# ZQH+f9BkesjdNFS3Ok3jUQWOuamxP2GjMNHjOnRsTYGOZoU/rOVrRlZiY1+00IS6
-# jYMSzfVf3rMuFCbS1qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
-# CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
-# RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
-# MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjExODQy
-# MDBaMC8GCSqGSIb3DQEJBDEiBCALhmbFamaK8WPGZwEttacWYWRO0moOXjzip6qS
-# qw7xzzANBgkqhkiG9w0BAQEFAASCAgBuYHqR3q/t8Pw5caeNUeKgYvjaQekqTchr
-# NFdShuNvV50KilGSuAD7lBnywdFPZ5UyqXhlKkGss3isffk4/zllh0Bw4/haWfnF
-# 6GczZ1HqzJd3J04S+z3UDStFq4JhO1zmETDW9gZaPUe47IIE2YHhwVpXMvPmg8W6
-# xWqDnNeGegFYGiAqAmOJqicscCNVEO9flgD5VD49Q6cWpFoT/Zxa/slwDst02A7r
-# q6RgkgQyPU+aMCiDAuneLnuq0sXYQJVKiQO8Aowa18AkEB7k8SWqYKJtALwj9wZ2
-# 1YZSRIm5W0AIswL5+Amv6y+qgtmmPBRQcKWfnzqu10RhXGB281fMLquorvv+RRL/
-# W8mE1u1/LxETUI9qT8mhg/QENSjeTy5dsXG5I3ufSTy2PKiJnAkHO1k18Vn/t3Ku
-# TNm1vv5GxeVEAHbKKcxjIQYcn+OXXmdpT9Ms5eWO7EIWJuEvUINekpQFX2TDpoUv
-# Ro982c+Ylf7R6zoxBKJSxwOMG94FWUqpZ+TsDPor+Cvbi3eNE0+p/OdI9aQaD1BT
-# NVR2ytVGSNGZS3D1hjqLayhndGyrbly+OUy8PzdZcMFraItTyey3XDC/zDUGyOyh
-# g+H7x7AbcxqrCmnZYRyucC8t1g8VCrz3tphPurvO0g94VJ/CW7TGeaEZ9A+JQO9J
-# PpzpeZLWQA==
-# SIG # End signature block
