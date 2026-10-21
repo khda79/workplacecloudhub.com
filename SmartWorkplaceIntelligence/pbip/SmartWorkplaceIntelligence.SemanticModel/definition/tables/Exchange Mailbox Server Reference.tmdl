@@ -1,0 +1,45 @@
+/// Utility: same-batch native object GUID to captured mailbox server reference. This is not a complete active-server inventory. Joined explicitly by object identity and batch; no automatic relationship.
+table 'Exchange Mailbox Server Reference'
+	isHidden
+
+	column 'Object GUID'
+		dataType: string
+		isHidden
+		lineageTag: b7e93678-e790-4f26-bc02-d124609e3cd1
+		summarizeBy: none
+		sourceColumn: Object GUID
+
+	column 'Server Name'
+		dataType: string
+		isHidden
+		lineageTag: e0857e51-041c-4ed5-b0d1-997619ed390b
+		summarizeBy: none
+		sourceColumn: Server Name
+
+	column 'Loaded Batch ID'
+		dataType: string
+		isHidden
+		lineageTag: 9765cb8c-4a96-4d9f-a3ad-5bd7a7d1fbcd
+		summarizeBy: none
+		sourceColumn: Loaded Batch ID
+
+	partition 'Exchange Mailbox Server Reference' = m
+		mode: import
+		source =
+				let
+				    Readers = CreatePreparedReaders(),
+				    Source = Readers[ReadMailboxMigrationCsv](
+				        Readers[GetPreparedEvidenceFile]("Source-Exchange_OnPrem_Mailboxes_AllDomains.csv"),
+				        {"TenantKey", "ObjectGUID", "RecipientType"}, {"ServerName"}),
+				    TenantChecked = if List.AllTrue(List.Transform(Source[TenantKey], each _ = PreparedExpectedTenantKey))
+				        then Source else error "Mailbox server source tenant mismatch",
+				    Local = Table.SelectRows(TenantChecked, each not Text.StartsWith(Text.Lower([RecipientType]), "remote")),
+				    Keyed = Table.TransformColumns(Local, {{"ObjectGUID", each if _ = null then "" else Text.Lower(Text.Trim(_)), type text}}),
+				    Keys = List.Buffer(Keyed[ObjectGUID]),
+				    Checked = if not List.Contains(Keys, "") and List.Count(Keys) = List.Count(List.Distinct(Keys))
+				        then Keyed else error "Missing or duplicate native mailbox object identity",
+				    Projected = Table.RenameColumns(Table.SelectColumns(Checked, {"ObjectGUID", "ServerName"}, MissingField.UseNull),
+				        {{"ObjectGUID", "Object GUID"}, {"ServerName", "Server Name"}}),
+				    Display = Table.TransformColumns(Projected, {{"Server Name", each if _ = null or Text.Trim(_) = "" then "Not observed" else _, type text}})
+				in
+				    Readers[Finish](Display)

@@ -27,6 +27,9 @@ planning cards. It is disabled by default and does not rewrite historical trends
 4. Power BI consumes the qualified batch. Report refresh and save are separate
    operations from collection and preparation.
 
+The [Exchange migration licensing scenario](docs/EXCHANGE-LICENSING.md) documents
+identity reconciliation, retained SE exceptions and estimated E3/F3 purchases.
+
 ## Qualified batch retention
 
 Publication alone no longer retires local batch payloads. After a successful

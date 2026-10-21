@@ -1,0 +1,1135 @@
+/// One captured local mailbox per row. Unique same-batch native GUID/SID links only. Licensing review observations, never purchase quantities. Country is the existing mailbox evidence attribution; job titles do not establish frontline eligibility.
+table 'Exchange Mailbox Reconciliation'
+	lineageTag: c1b521b9-e2c6-40c9-9b57-8c9ac7307c4a
+
+	/// Same-batch mailbox grain. Not distinct licensed users, accessors, required CALs or purchase quantities.
+	measure 'Exchange Reconciled Mailboxes' = COUNTROWS('Exchange Mailbox Reconciliation')
+		formatString: #,0
+		displayFolder: Reconciliation
+
+	/// Same-batch mailbox grain. Not distinct licensed users, accessors, required CALs or purchase quantities.
+	measure 'Exchange Cloud Linked Mailboxes' = CALCULATE(COUNTROWS('Exchange Mailbox Reconciliation'),KEEPFILTERS('Exchange Mailbox Reconciliation'[Account Link]="Unique AD GUID + native SID"))
+		formatString: #,0
+		displayFolder: Reconciliation
+
+	/// Same-batch mailbox grain. Not distinct licensed users, accessors, required CALs or purchase quantities.
+	measure 'Exchange Observed Plan Mailboxes' = CALCULATE(COUNTROWS('Exchange Mailbox Reconciliation'),KEEPFILTERS('Exchange Mailbox Reconciliation'[Mailbox Plan Observation] IN {"Plan 1 observed","Plan 2 observed","Kiosk observed"}))
+		formatString: #,0
+		displayFolder: Reconciliation
+
+	/// Same-batch mailbox grain. Not distinct licensed users, accessors, required CALs or purchase quantities.
+	measure 'Exchange Retained Decision Mailboxes' = CALCULATE(COUNTROWS('Exchange Mailbox Reconciliation'),KEEPFILTERS('Exchange Mailbox Reconciliation'[Retained On-premises]="Matched retained decision"))
+		formatString: #,0
+		displayFolder: Reconciliation
+
+	/// Same-batch mailbox grain. Not distinct licensed users, accessors, required CALs or purchase quantities.
+	measure 'Exchange Referenced Servers' = CALCULATE(DISTINCTCOUNT('Exchange Mailbox Reconciliation'[Server Name]),KEEPFILTERS('Exchange Mailbox Reconciliation'[Server Name]<>""),KEEPFILTERS('Exchange Mailbox Reconciliation'[Server Name]<>"Not observed"))
+		formatString: #,0
+		displayFolder: Reconciliation
+
+	/// Same-batch mailbox grain. Not distinct licensed users, accessors, required CALs or purchase quantities.
+	measure 'Exchange Kiosk Size Reviews' = CALCULATE(COUNTROWS('Exchange Mailbox Reconciliation'),KEEPFILTERS('Exchange Mailbox Reconciliation'[Mailbox Type]="UserMailbox"),KEEPFILTERS('Exchange Mailbox Reconciliation'[Mailbox Plan Observation]="Kiosk observed"),KEEPFILTERS('Exchange Mailbox Reconciliation'[Mailbox Size GB]>2))
+		formatString: #,0
+		displayFolder: Reconciliation
+
+	/// Same-batch mailbox grain. Not distinct licensed users, accessors, required CALs or purchase quantities.
+	measure 'Exchange Licensing Review Note' = "Mailbox observations, not purchase quantities | F3 eligibility and contracts unverified | Server names are mailbox references, not a complete active-server inventory."
+		formatString: @
+		displayFolder: Reconciliation
+
+	/// Estimate under approved mailbox sizing assumptions. Not a contractual order. Distinct same-batch people; retained and unresolved exception identities never migrate automatically.
+	measure 'Exchange Scenario E3 Need' =
+			VAR _people=(VAR _scope=SELECTCOLUMNS('Exchange Mailbox Reconciliation',
+			    "Person",IF('Exchange Mailbox Reconciliation'[Cloud Account Key]<>"","cloud|" & 'Exchange Mailbox Reconciliation'[Cloud Account Key],
+			        IF('Exchange Mailbox Reconciliation'[AD Account Key]<>"","ad|" & 'Exchange Mailbox Reconciliation'[AD Account Key],"mailbox|" & 'Exchange Mailbox Reconciliation'[Mailbox GUID])),
+			    "Batch",'Exchange Mailbox Reconciliation'[Loaded Batch ID],
+			    "Cloud",'Exchange Mailbox Reconciliation'[Cloud Account Key],
+			    "Object",LOWER(TRIM('Exchange Mailbox Reconciliation'[Object GUID])),
+			    "Address",LOWER(TRIM('Exchange Mailbox Reconciliation'[Primary SMTP Address])),
+			    "Kind",'Exchange Mailbox Reconciliation'[Mailbox Type],
+			    "Size",'Exchange Mailbox Reconciliation'[Mailbox Size GB],
+			    "Archive",'Exchange Mailbox Reconciliation'[Archive State],
+			    "Hold",'Exchange Mailbox Reconciliation'[Hold and Retention],
+			    "Access",'Exchange Mailbox Reconciliation'[Full Access Count],
+			    "Send",'Exchange Mailbox Reconciliation'[Send As Count],
+			    "Behalf",'Exchange Mailbox Reconciliation'[Send On Behalf],
+			    "Retained",'Exchange Mailbox Reconciliation'[Retained On-premises],
+			    "Link",'Exchange Mailbox Reconciliation'[Account Link])
+			VAR _exceptions=SELECTCOLUMNS(FILTER('Mailbox Migration Exceptions',
+			    'Mailbox Migration Exceptions'[Requires Review]=1),
+			    "ExceptionBatch",'Mailbox Migration Exceptions'[Loaded Batch ID],
+			    "Identity",LOWER(TRIM('Mailbox Migration Exceptions'[Mailbox Identity])),
+			    "Candidate",LOWER(TRIM('Mailbox Migration Exceptions'[Candidate Identity])),
+			    "ExceptionAddress",LOWER(TRIM('Mailbox Migration Exceptions'[Primary SMTP Address])))
+			VAR _users=DISTINCT(SELECTCOLUMNS(FILTER(_scope,[Cloud]<>""),"User",[Cloud]))
+			VAR _batches=DISTINCT(SELECTCOLUMNS(_scope,"Batch",[Batch]))
+			VAR _plans=CALCULATETABLE(SELECTCOLUMNS(FILTER('Native User Service Plan',
+			    LOWER('Native User Service Plan'[IsEnabled] & "")="true" && 'Native User Service Plan'[AssignmentState]="Success" &&
+			    'Native User Service Plan'[ServicePlanName] IN {"EXCHANGE_S_STANDARD","EXCHANGE_S_ENTERPRISE","EXCHANGE_S_DESKLESS"}),
+			    "PlanUser",'Native User Service Plan'[TenantUserKey],"PlanBatch",'Native User Service Plan'[Loaded Batch ID],"Plan",'Native User Service Plan'[ServicePlanName]),
+			    TREATAS(_users,'Native User Service Plan'[TenantUserKey]),TREATAS(_batches,'Native User Service Plan'[Loaded Batch ID]))
+			VAR _allLicenses=CALCULATETABLE(SELECTCOLUMNS('Native User License',
+			    "LicenseUser",'Native User License'[TenantUserKey],"LicenseBatch",'Native User License'[Loaded Batch ID],
+			    "LicenseSku",'Native User License'[TenantSkuKey],"LicenseState",'Native User License'[AssignmentState]),
+			    TREATAS(_users,'Native User License'[TenantUserKey]),TREATAS(_batches,'Native User License'[Loaded Batch ID]))
+			VAR _licenses=FILTER(_allLicenses,[LicenseState] IN {"Active","Success"})
+			VAR _skus=SELECTCOLUMNS('Native License SKU',"SkuKey",'Native License SKU'[TenantSkuKey],
+			    "SkuBatch",'Native License SKU'[Loaded Batch ID],"SkuPart",'Native License SKU'[SkuPartNumber])
+			VAR _keys=DISTINCT(SELECTCOLUMNS(_scope,"Person",[Person],"Batch",[Batch]))
+			RETURN GENERATE(_keys,
+			    VAR _person=[Person] VAR _batch=[Batch]
+			    VAR _rows=FILTER(_scope,[Person]=_person && [Batch]=_batch)
+			    VAR _user=MAXX(_rows,[Cloud])
+			    VAR _local=COUNTROWS(FILTER(_rows,[Retained]="Matched retained decision"))>0
+			    VAR _remote=COUNTROWS(FILTER(_rows,[Retained]<>"Matched retained decision"))>0
+			    VAR _special=COUNTROWS(FILTER(_rows,[Kind]<>"UserMailbox"))>0
+			    VAR _pending=SUMX(_rows,VAR _object=[Object] VAR _address=[Address]
+			        RETURN IF(COUNTROWS(FILTER(_exceptions,[ExceptionBatch]=_batch &&
+			            ((_object<>"" && ([Identity]="local_mailboxes|" & _object || [Candidate]="local_mailboxes|" & _object)) ||
+			             (_address<>"" && [ExceptionAddress]=_address))))>0,1,0))>0
+			    VAR _unknown=COUNTROWS(FILTER(_rows,ISBLANK([Size]) || [Size]<0 || [Size]>100 ||
+			        NOT([Archive] IN {"None","Disabled","Local","Active","HostedProvisioned","HostedPending"}) ||
+			        NOT([Hold] IN {"None observed","Review - preserve settings"}) || ISBLANK([Access]) || ISBLANK([Send])))>0
+			    VAR _large=COUNTROWS(FILTER(_rows,[Size]>2 || NOT([Archive] IN {"None","Disabled"}) ||
+			        [Hold]="Review - preserve settings" || [Access]>0 || [Send]>0 || [Behalf]<>""))>0
+			    VAR _review=_batch="" || _user="" || COUNTROWS(FILTER(_rows,[Link]<>"Unique AD GUID + native SID"))>0 || (_local && _remote)
+			    VAR _bucket=SWITCH(TRUE(),_special,"Special",_local && NOT(_remote),"SE",_pending,"Register review",_review,"Identity review",
+			        _unknown,"Technical review",_large,"E3","F3")
+			    VAR _userPlans=FILTER(_plans,[PlanUser]=_user && [PlanBatch]=_batch && _user<>"")
+			    VAR _p2=COUNTROWS(FILTER(_userPlans,[Plan]="EXCHANGE_S_ENTERPRISE"))>0
+			    VAR _p1=COUNTROWS(FILTER(_userPlans,[Plan]="EXCHANGE_S_STANDARD"))>0
+			    VAR _kiosk=COUNTROWS(FILTER(_userPlans,[Plan]="EXCHANGE_S_DESKLESS"))>0
+			    VAR _assigned=SELECTCOLUMNS(FILTER(_licenses,[LicenseUser]=_user && [LicenseBatch]=_batch && _user<>""),"Key",[LicenseSku])
+			    VAR _suite=FILTER(_skus,[SkuKey] IN _assigned && [SkuBatch]=_batch)
+			    VAR _e3=COUNTROWS(FILTER(_suite,[SkuPart] IN {"SPE_E3","SPE_E5"}))>0
+			    VAR _f3=COUNTROWS(FILTER(_suite,[SkuPart]="SPE_F1"))>0
+			    VAR _covered=SWITCH(_bucket,"SE",IF(_e3 || _p1 || _p2,1,0),"E3",IF(_e3,1,0),
+			        "F3",IF(_f3 || _e3,1,0),0)
+			    VAR _failed=SELECTCOLUMNS(FILTER(_allLicenses,[LicenseUser]=_user && [LicenseBatch]=_batch &&
+			        NOT([LicenseState] IN {"Active","Success"})),"Key",[LicenseSku])
+			    VAR _failedTarget=COUNTROWS(FILTER(_skus,[SkuKey] IN _failed && [SkuBatch]=_batch &&
+			        ([SkuPart] IN {"SPE_E3","SPE_E5"} || (_bucket="F3" && [SkuPart]="SPE_F1"))))>0
+			    VAR _target=IF(_bucket IN {"E3","F3"} && _covered=0 && _failedTarget,"Assignment review",_bucket)
+			    VAR _planReview=_covered=1 && SWITCH(_bucket,"E3",NOT(_p2),"F3",NOT(_p2 || _p1 || _kiosk),FALSE())
+			    RETURN ROW("Product",_target,"Covered",_covered,"Plan Review",IF(_planReview,1,0))))
+			VAR _selected=FILTER(_people,[Product]="E3")
+			RETURN IF([Dataset Loaded Batch ID]<>"",COALESCE(COUNTROWS(_selected),0))
+		formatString: #,0
+		displayFolder: Migration licensing scenario
+
+	/// Estimate under approved mailbox sizing assumptions. Not a contractual order. Distinct same-batch people; retained and unresolved exception identities never migrate automatically.
+	measure 'Exchange Scenario E3 Covered' =
+			VAR _people=(VAR _scope=SELECTCOLUMNS('Exchange Mailbox Reconciliation',
+			    "Person",IF('Exchange Mailbox Reconciliation'[Cloud Account Key]<>"","cloud|" & 'Exchange Mailbox Reconciliation'[Cloud Account Key],
+			        IF('Exchange Mailbox Reconciliation'[AD Account Key]<>"","ad|" & 'Exchange Mailbox Reconciliation'[AD Account Key],"mailbox|" & 'Exchange Mailbox Reconciliation'[Mailbox GUID])),
+			    "Batch",'Exchange Mailbox Reconciliation'[Loaded Batch ID],
+			    "Cloud",'Exchange Mailbox Reconciliation'[Cloud Account Key],
+			    "Object",LOWER(TRIM('Exchange Mailbox Reconciliation'[Object GUID])),
+			    "Address",LOWER(TRIM('Exchange Mailbox Reconciliation'[Primary SMTP Address])),
+			    "Kind",'Exchange Mailbox Reconciliation'[Mailbox Type],
+			    "Size",'Exchange Mailbox Reconciliation'[Mailbox Size GB],
+			    "Archive",'Exchange Mailbox Reconciliation'[Archive State],
+			    "Hold",'Exchange Mailbox Reconciliation'[Hold and Retention],
+			    "Access",'Exchange Mailbox Reconciliation'[Full Access Count],
+			    "Send",'Exchange Mailbox Reconciliation'[Send As Count],
+			    "Behalf",'Exchange Mailbox Reconciliation'[Send On Behalf],
+			    "Retained",'Exchange Mailbox Reconciliation'[Retained On-premises],
+			    "Link",'Exchange Mailbox Reconciliation'[Account Link])
+			VAR _exceptions=SELECTCOLUMNS(FILTER('Mailbox Migration Exceptions',
+			    'Mailbox Migration Exceptions'[Requires Review]=1),
+			    "ExceptionBatch",'Mailbox Migration Exceptions'[Loaded Batch ID],
+			    "Identity",LOWER(TRIM('Mailbox Migration Exceptions'[Mailbox Identity])),
+			    "Candidate",LOWER(TRIM('Mailbox Migration Exceptions'[Candidate Identity])),
+			    "ExceptionAddress",LOWER(TRIM('Mailbox Migration Exceptions'[Primary SMTP Address])))
+			VAR _users=DISTINCT(SELECTCOLUMNS(FILTER(_scope,[Cloud]<>""),"User",[Cloud]))
+			VAR _batches=DISTINCT(SELECTCOLUMNS(_scope,"Batch",[Batch]))
+			VAR _plans=CALCULATETABLE(SELECTCOLUMNS(FILTER('Native User Service Plan',
+			    LOWER('Native User Service Plan'[IsEnabled] & "")="true" && 'Native User Service Plan'[AssignmentState]="Success" &&
+			    'Native User Service Plan'[ServicePlanName] IN {"EXCHANGE_S_STANDARD","EXCHANGE_S_ENTERPRISE","EXCHANGE_S_DESKLESS"}),
+			    "PlanUser",'Native User Service Plan'[TenantUserKey],"PlanBatch",'Native User Service Plan'[Loaded Batch ID],"Plan",'Native User Service Plan'[ServicePlanName]),
+			    TREATAS(_users,'Native User Service Plan'[TenantUserKey]),TREATAS(_batches,'Native User Service Plan'[Loaded Batch ID]))
+			VAR _allLicenses=CALCULATETABLE(SELECTCOLUMNS('Native User License',
+			    "LicenseUser",'Native User License'[TenantUserKey],"LicenseBatch",'Native User License'[Loaded Batch ID],
+			    "LicenseSku",'Native User License'[TenantSkuKey],"LicenseState",'Native User License'[AssignmentState]),
+			    TREATAS(_users,'Native User License'[TenantUserKey]),TREATAS(_batches,'Native User License'[Loaded Batch ID]))
+			VAR _licenses=FILTER(_allLicenses,[LicenseState] IN {"Active","Success"})
+			VAR _skus=SELECTCOLUMNS('Native License SKU',"SkuKey",'Native License SKU'[TenantSkuKey],
+			    "SkuBatch",'Native License SKU'[Loaded Batch ID],"SkuPart",'Native License SKU'[SkuPartNumber])
+			VAR _keys=DISTINCT(SELECTCOLUMNS(_scope,"Person",[Person],"Batch",[Batch]))
+			RETURN GENERATE(_keys,
+			    VAR _person=[Person] VAR _batch=[Batch]
+			    VAR _rows=FILTER(_scope,[Person]=_person && [Batch]=_batch)
+			    VAR _user=MAXX(_rows,[Cloud])
+			    VAR _local=COUNTROWS(FILTER(_rows,[Retained]="Matched retained decision"))>0
+			    VAR _remote=COUNTROWS(FILTER(_rows,[Retained]<>"Matched retained decision"))>0
+			    VAR _special=COUNTROWS(FILTER(_rows,[Kind]<>"UserMailbox"))>0
+			    VAR _pending=SUMX(_rows,VAR _object=[Object] VAR _address=[Address]
+			        RETURN IF(COUNTROWS(FILTER(_exceptions,[ExceptionBatch]=_batch &&
+			            ((_object<>"" && ([Identity]="local_mailboxes|" & _object || [Candidate]="local_mailboxes|" & _object)) ||
+			             (_address<>"" && [ExceptionAddress]=_address))))>0,1,0))>0
+			    VAR _unknown=COUNTROWS(FILTER(_rows,ISBLANK([Size]) || [Size]<0 || [Size]>100 ||
+			        NOT([Archive] IN {"None","Disabled","Local","Active","HostedProvisioned","HostedPending"}) ||
+			        NOT([Hold] IN {"None observed","Review - preserve settings"}) || ISBLANK([Access]) || ISBLANK([Send])))>0
+			    VAR _large=COUNTROWS(FILTER(_rows,[Size]>2 || NOT([Archive] IN {"None","Disabled"}) ||
+			        [Hold]="Review - preserve settings" || [Access]>0 || [Send]>0 || [Behalf]<>""))>0
+			    VAR _review=_batch="" || _user="" || COUNTROWS(FILTER(_rows,[Link]<>"Unique AD GUID + native SID"))>0 || (_local && _remote)
+			    VAR _bucket=SWITCH(TRUE(),_special,"Special",_local && NOT(_remote),"SE",_pending,"Register review",_review,"Identity review",
+			        _unknown,"Technical review",_large,"E3","F3")
+			    VAR _userPlans=FILTER(_plans,[PlanUser]=_user && [PlanBatch]=_batch && _user<>"")
+			    VAR _p2=COUNTROWS(FILTER(_userPlans,[Plan]="EXCHANGE_S_ENTERPRISE"))>0
+			    VAR _p1=COUNTROWS(FILTER(_userPlans,[Plan]="EXCHANGE_S_STANDARD"))>0
+			    VAR _kiosk=COUNTROWS(FILTER(_userPlans,[Plan]="EXCHANGE_S_DESKLESS"))>0
+			    VAR _assigned=SELECTCOLUMNS(FILTER(_licenses,[LicenseUser]=_user && [LicenseBatch]=_batch && _user<>""),"Key",[LicenseSku])
+			    VAR _suite=FILTER(_skus,[SkuKey] IN _assigned && [SkuBatch]=_batch)
+			    VAR _e3=COUNTROWS(FILTER(_suite,[SkuPart] IN {"SPE_E3","SPE_E5"}))>0
+			    VAR _f3=COUNTROWS(FILTER(_suite,[SkuPart]="SPE_F1"))>0
+			    VAR _covered=SWITCH(_bucket,"SE",IF(_e3 || _p1 || _p2,1,0),"E3",IF(_e3,1,0),
+			        "F3",IF(_f3 || _e3,1,0),0)
+			    VAR _failed=SELECTCOLUMNS(FILTER(_allLicenses,[LicenseUser]=_user && [LicenseBatch]=_batch &&
+			        NOT([LicenseState] IN {"Active","Success"})),"Key",[LicenseSku])
+			    VAR _failedTarget=COUNTROWS(FILTER(_skus,[SkuKey] IN _failed && [SkuBatch]=_batch &&
+			        ([SkuPart] IN {"SPE_E3","SPE_E5"} || (_bucket="F3" && [SkuPart]="SPE_F1"))))>0
+			    VAR _target=IF(_bucket IN {"E3","F3"} && _covered=0 && _failedTarget,"Assignment review",_bucket)
+			    VAR _planReview=_covered=1 && SWITCH(_bucket,"E3",NOT(_p2),"F3",NOT(_p2 || _p1 || _kiosk),FALSE())
+			    RETURN ROW("Product",_target,"Covered",_covered,"Plan Review",IF(_planReview,1,0))))
+			VAR _selected=FILTER(_people,[Product]="E3")
+			RETURN IF([Dataset Loaded Batch ID]<>"",COALESCE(SUMX(_selected,[Covered]),0))
+		formatString: #,0
+		displayFolder: Migration licensing scenario
+
+	/// Estimate under approved mailbox sizing assumptions. Not a contractual order. Distinct same-batch people; retained and unresolved exception identities never migrate automatically.
+	measure 'Exchange Scenario E3 Gap' = VAR _need=[Exchange Scenario E3 Need] VAR _covered=[Exchange Scenario E3 Covered] RETURN IF(NOT ISBLANK(_need),MAX(0,_need-_covered))
+		formatString: #,0
+		displayFolder: Migration licensing scenario
+
+	/// Estimate under approved mailbox sizing assumptions. Not a contractual order. Distinct same-batch people; retained and unresolved exception identities never migrate automatically.
+	measure 'Exchange Scenario E3 Available' =
+			VAR _batch=[Dataset Loaded Batch ID]
+			VAR _q=FILTER(ALL('License Report Qualification'),
+			    'License Report Qualification'[Loaded Batch ID]=_batch &&
+			    'License Report Qualification'[Scope]="M365_Licenses_ReportSkuCapacity.csv" &&
+			    'License Report Qualification'[State]="Qualified")
+			VAR _rows=FILTER(ALL('License SKU Capacity'),
+			    'License SKU Capacity'[Loaded Batch ID]=_batch && 'License SKU Capacity'[SKU Part Number]="SPE_E3" &&
+			    'License SKU Capacity'[Capacity Class]="Governed" && LOWER('License SKU Capacity'[Excluded] & "")="false")
+			VAR _snapshots=DISTINCT(SELECTCOLUMNS(_rows,"Snapshot",'License SKU Capacity'[Snapshot ID]))
+			VAR _ids=SELECTCOLUMNS(_rows,"Sku",'License SKU Capacity'[SKU ID])
+			VAR _valid=_batch<>"" && COUNTROWS(_q)=1 && COUNTROWS(_rows)>0 &&
+			    COUNTROWS(_snapshots)=1 && COUNTROWS(_ids)=COUNTROWS(DISTINCT(_ids)) &&
+			    COUNTROWS(FILTER(_rows,ISBLANK('License SKU Capacity'[Available Units]) ||
+			        'License SKU Capacity'[Available Units]<0 || 'License SKU Capacity'[SKU ID]="" || 'License SKU Capacity'[Snapshot ID]=""))=0
+			RETURN IF(_valid,SUMX(_rows,'License SKU Capacity'[Available Units]))
+		formatString: #,0
+		displayFolder: Migration licensing scenario
+
+	/// Estimate under approved mailbox sizing assumptions. Not a contractual order. Distinct same-batch people; retained and unresolved exception identities never migrate automatically.
+	measure 'Exchange Scenario E3 Buy' = VAR _gap=[Exchange Scenario E3 Gap] VAR _free=[Exchange Scenario E3 Available] RETURN IF(NOT ISBLANK(_gap) && NOT ISBLANK(_free),MAX(0,_gap-_free))
+		formatString: #,0
+		displayFolder: Migration licensing scenario
+
+	/// Estimate under approved mailbox sizing assumptions. Not a contractual order. Distinct same-batch people; retained and unresolved exception identities never migrate automatically.
+	measure 'Exchange Scenario E3 Buy Label' = VAR _n=[Exchange Scenario E3 Buy] RETURN IF(ISBLANK(_n),"To qualify",FORMAT(_n,"#,0"))
+		formatString: @
+		displayFolder: Migration licensing scenario
+
+	/// Estimate under approved mailbox sizing assumptions. Not a contractual order. Distinct same-batch people; retained and unresolved exception identities never migrate automatically.
+	measure 'Exchange Scenario F3 Need' =
+			VAR _people=(VAR _scope=SELECTCOLUMNS('Exchange Mailbox Reconciliation',
+			    "Person",IF('Exchange Mailbox Reconciliation'[Cloud Account Key]<>"","cloud|" & 'Exchange Mailbox Reconciliation'[Cloud Account Key],
+			        IF('Exchange Mailbox Reconciliation'[AD Account Key]<>"","ad|" & 'Exchange Mailbox Reconciliation'[AD Account Key],"mailbox|" & 'Exchange Mailbox Reconciliation'[Mailbox GUID])),
+			    "Batch",'Exchange Mailbox Reconciliation'[Loaded Batch ID],
+			    "Cloud",'Exchange Mailbox Reconciliation'[Cloud Account Key],
+			    "Object",LOWER(TRIM('Exchange Mailbox Reconciliation'[Object GUID])),
+			    "Address",LOWER(TRIM('Exchange Mailbox Reconciliation'[Primary SMTP Address])),
+			    "Kind",'Exchange Mailbox Reconciliation'[Mailbox Type],
+			    "Size",'Exchange Mailbox Reconciliation'[Mailbox Size GB],
+			    "Archive",'Exchange Mailbox Reconciliation'[Archive State],
+			    "Hold",'Exchange Mailbox Reconciliation'[Hold and Retention],
+			    "Access",'Exchange Mailbox Reconciliation'[Full Access Count],
+			    "Send",'Exchange Mailbox Reconciliation'[Send As Count],
+			    "Behalf",'Exchange Mailbox Reconciliation'[Send On Behalf],
+			    "Retained",'Exchange Mailbox Reconciliation'[Retained On-premises],
+			    "Link",'Exchange Mailbox Reconciliation'[Account Link])
+			VAR _exceptions=SELECTCOLUMNS(FILTER('Mailbox Migration Exceptions',
+			    'Mailbox Migration Exceptions'[Requires Review]=1),
+			    "ExceptionBatch",'Mailbox Migration Exceptions'[Loaded Batch ID],
+			    "Identity",LOWER(TRIM('Mailbox Migration Exceptions'[Mailbox Identity])),
+			    "Candidate",LOWER(TRIM('Mailbox Migration Exceptions'[Candidate Identity])),
+			    "ExceptionAddress",LOWER(TRIM('Mailbox Migration Exceptions'[Primary SMTP Address])))
+			VAR _users=DISTINCT(SELECTCOLUMNS(FILTER(_scope,[Cloud]<>""),"User",[Cloud]))
+			VAR _batches=DISTINCT(SELECTCOLUMNS(_scope,"Batch",[Batch]))
+			VAR _plans=CALCULATETABLE(SELECTCOLUMNS(FILTER('Native User Service Plan',
+			    LOWER('Native User Service Plan'[IsEnabled] & "")="true" && 'Native User Service Plan'[AssignmentState]="Success" &&
+			    'Native User Service Plan'[ServicePlanName] IN {"EXCHANGE_S_STANDARD","EXCHANGE_S_ENTERPRISE","EXCHANGE_S_DESKLESS"}),
+			    "PlanUser",'Native User Service Plan'[TenantUserKey],"PlanBatch",'Native User Service Plan'[Loaded Batch ID],"Plan",'Native User Service Plan'[ServicePlanName]),
+			    TREATAS(_users,'Native User Service Plan'[TenantUserKey]),TREATAS(_batches,'Native User Service Plan'[Loaded Batch ID]))
+			VAR _allLicenses=CALCULATETABLE(SELECTCOLUMNS('Native User License',
+			    "LicenseUser",'Native User License'[TenantUserKey],"LicenseBatch",'Native User License'[Loaded Batch ID],
+			    "LicenseSku",'Native User License'[TenantSkuKey],"LicenseState",'Native User License'[AssignmentState]),
+			    TREATAS(_users,'Native User License'[TenantUserKey]),TREATAS(_batches,'Native User License'[Loaded Batch ID]))
+			VAR _licenses=FILTER(_allLicenses,[LicenseState] IN {"Active","Success"})
+			VAR _skus=SELECTCOLUMNS('Native License SKU',"SkuKey",'Native License SKU'[TenantSkuKey],
+			    "SkuBatch",'Native License SKU'[Loaded Batch ID],"SkuPart",'Native License SKU'[SkuPartNumber])
+			VAR _keys=DISTINCT(SELECTCOLUMNS(_scope,"Person",[Person],"Batch",[Batch]))
+			RETURN GENERATE(_keys,
+			    VAR _person=[Person] VAR _batch=[Batch]
+			    VAR _rows=FILTER(_scope,[Person]=_person && [Batch]=_batch)
+			    VAR _user=MAXX(_rows,[Cloud])
+			    VAR _local=COUNTROWS(FILTER(_rows,[Retained]="Matched retained decision"))>0
+			    VAR _remote=COUNTROWS(FILTER(_rows,[Retained]<>"Matched retained decision"))>0
+			    VAR _special=COUNTROWS(FILTER(_rows,[Kind]<>"UserMailbox"))>0
+			    VAR _pending=SUMX(_rows,VAR _object=[Object] VAR _address=[Address]
+			        RETURN IF(COUNTROWS(FILTER(_exceptions,[ExceptionBatch]=_batch &&
+			            ((_object<>"" && ([Identity]="local_mailboxes|" & _object || [Candidate]="local_mailboxes|" & _object)) ||
+			             (_address<>"" && [ExceptionAddress]=_address))))>0,1,0))>0
+			    VAR _unknown=COUNTROWS(FILTER(_rows,ISBLANK([Size]) || [Size]<0 || [Size]>100 ||
+			        NOT([Archive] IN {"None","Disabled","Local","Active","HostedProvisioned","HostedPending"}) ||
+			        NOT([Hold] IN {"None observed","Review - preserve settings"}) || ISBLANK([Access]) || ISBLANK([Send])))>0
+			    VAR _large=COUNTROWS(FILTER(_rows,[Size]>2 || NOT([Archive] IN {"None","Disabled"}) ||
+			        [Hold]="Review - preserve settings" || [Access]>0 || [Send]>0 || [Behalf]<>""))>0
+			    VAR _review=_batch="" || _user="" || COUNTROWS(FILTER(_rows,[Link]<>"Unique AD GUID + native SID"))>0 || (_local && _remote)
+			    VAR _bucket=SWITCH(TRUE(),_special,"Special",_local && NOT(_remote),"SE",_pending,"Register review",_review,"Identity review",
+			        _unknown,"Technical review",_large,"E3","F3")
+			    VAR _userPlans=FILTER(_plans,[PlanUser]=_user && [PlanBatch]=_batch && _user<>"")
+			    VAR _p2=COUNTROWS(FILTER(_userPlans,[Plan]="EXCHANGE_S_ENTERPRISE"))>0
+			    VAR _p1=COUNTROWS(FILTER(_userPlans,[Plan]="EXCHANGE_S_STANDARD"))>0
+			    VAR _kiosk=COUNTROWS(FILTER(_userPlans,[Plan]="EXCHANGE_S_DESKLESS"))>0
+			    VAR _assigned=SELECTCOLUMNS(FILTER(_licenses,[LicenseUser]=_user && [LicenseBatch]=_batch && _user<>""),"Key",[LicenseSku])
+			    VAR _suite=FILTER(_skus,[SkuKey] IN _assigned && [SkuBatch]=_batch)
+			    VAR _e3=COUNTROWS(FILTER(_suite,[SkuPart] IN {"SPE_E3","SPE_E5"}))>0
+			    VAR _f3=COUNTROWS(FILTER(_suite,[SkuPart]="SPE_F1"))>0
+			    VAR _covered=SWITCH(_bucket,"SE",IF(_e3 || _p1 || _p2,1,0),"E3",IF(_e3,1,0),
+			        "F3",IF(_f3 || _e3,1,0),0)
+			    VAR _failed=SELECTCOLUMNS(FILTER(_allLicenses,[LicenseUser]=_user && [LicenseBatch]=_batch &&
+			        NOT([LicenseState] IN {"Active","Success"})),"Key",[LicenseSku])
+			    VAR _failedTarget=COUNTROWS(FILTER(_skus,[SkuKey] IN _failed && [SkuBatch]=_batch &&
+			        ([SkuPart] IN {"SPE_E3","SPE_E5"} || (_bucket="F3" && [SkuPart]="SPE_F1"))))>0
+			    VAR _target=IF(_bucket IN {"E3","F3"} && _covered=0 && _failedTarget,"Assignment review",_bucket)
+			    VAR _planReview=_covered=1 && SWITCH(_bucket,"E3",NOT(_p2),"F3",NOT(_p2 || _p1 || _kiosk),FALSE())
+			    RETURN ROW("Product",_target,"Covered",_covered,"Plan Review",IF(_planReview,1,0))))
+			VAR _selected=FILTER(_people,[Product]="F3")
+			RETURN IF([Dataset Loaded Batch ID]<>"",COALESCE(COUNTROWS(_selected),0))
+		formatString: #,0
+		displayFolder: Migration licensing scenario
+
+	/// Estimate under approved mailbox sizing assumptions. Not a contractual order. Distinct same-batch people; retained and unresolved exception identities never migrate automatically.
+	measure 'Exchange Scenario F3 Covered' =
+			VAR _people=(VAR _scope=SELECTCOLUMNS('Exchange Mailbox Reconciliation',
+			    "Person",IF('Exchange Mailbox Reconciliation'[Cloud Account Key]<>"","cloud|" & 'Exchange Mailbox Reconciliation'[Cloud Account Key],
+			        IF('Exchange Mailbox Reconciliation'[AD Account Key]<>"","ad|" & 'Exchange Mailbox Reconciliation'[AD Account Key],"mailbox|" & 'Exchange Mailbox Reconciliation'[Mailbox GUID])),
+			    "Batch",'Exchange Mailbox Reconciliation'[Loaded Batch ID],
+			    "Cloud",'Exchange Mailbox Reconciliation'[Cloud Account Key],
+			    "Object",LOWER(TRIM('Exchange Mailbox Reconciliation'[Object GUID])),
+			    "Address",LOWER(TRIM('Exchange Mailbox Reconciliation'[Primary SMTP Address])),
+			    "Kind",'Exchange Mailbox Reconciliation'[Mailbox Type],
+			    "Size",'Exchange Mailbox Reconciliation'[Mailbox Size GB],
+			    "Archive",'Exchange Mailbox Reconciliation'[Archive State],
+			    "Hold",'Exchange Mailbox Reconciliation'[Hold and Retention],
+			    "Access",'Exchange Mailbox Reconciliation'[Full Access Count],
+			    "Send",'Exchange Mailbox Reconciliation'[Send As Count],
+			    "Behalf",'Exchange Mailbox Reconciliation'[Send On Behalf],
+			    "Retained",'Exchange Mailbox Reconciliation'[Retained On-premises],
+			    "Link",'Exchange Mailbox Reconciliation'[Account Link])
+			VAR _exceptions=SELECTCOLUMNS(FILTER('Mailbox Migration Exceptions',
+			    'Mailbox Migration Exceptions'[Requires Review]=1),
+			    "ExceptionBatch",'Mailbox Migration Exceptions'[Loaded Batch ID],
+			    "Identity",LOWER(TRIM('Mailbox Migration Exceptions'[Mailbox Identity])),
+			    "Candidate",LOWER(TRIM('Mailbox Migration Exceptions'[Candidate Identity])),
+			    "ExceptionAddress",LOWER(TRIM('Mailbox Migration Exceptions'[Primary SMTP Address])))
+			VAR _users=DISTINCT(SELECTCOLUMNS(FILTER(_scope,[Cloud]<>""),"User",[Cloud]))
+			VAR _batches=DISTINCT(SELECTCOLUMNS(_scope,"Batch",[Batch]))
+			VAR _plans=CALCULATETABLE(SELECTCOLUMNS(FILTER('Native User Service Plan',
+			    LOWER('Native User Service Plan'[IsEnabled] & "")="true" && 'Native User Service Plan'[AssignmentState]="Success" &&
+			    'Native User Service Plan'[ServicePlanName] IN {"EXCHANGE_S_STANDARD","EXCHANGE_S_ENTERPRISE","EXCHANGE_S_DESKLESS"}),
+			    "PlanUser",'Native User Service Plan'[TenantUserKey],"PlanBatch",'Native User Service Plan'[Loaded Batch ID],"Plan",'Native User Service Plan'[ServicePlanName]),
+			    TREATAS(_users,'Native User Service Plan'[TenantUserKey]),TREATAS(_batches,'Native User Service Plan'[Loaded Batch ID]))
+			VAR _allLicenses=CALCULATETABLE(SELECTCOLUMNS('Native User License',
+			    "LicenseUser",'Native User License'[TenantUserKey],"LicenseBatch",'Native User License'[Loaded Batch ID],
+			    "LicenseSku",'Native User License'[TenantSkuKey],"LicenseState",'Native User License'[AssignmentState]),
+			    TREATAS(_users,'Native User License'[TenantUserKey]),TREATAS(_batches,'Native User License'[Loaded Batch ID]))
+			VAR _licenses=FILTER(_allLicenses,[LicenseState] IN {"Active","Success"})
+			VAR _skus=SELECTCOLUMNS('Native License SKU',"SkuKey",'Native License SKU'[TenantSkuKey],
+			    "SkuBatch",'Native License SKU'[Loaded Batch ID],"SkuPart",'Native License SKU'[SkuPartNumber])
+			VAR _keys=DISTINCT(SELECTCOLUMNS(_scope,"Person",[Person],"Batch",[Batch]))
+			RETURN GENERATE(_keys,
+			    VAR _person=[Person] VAR _batch=[Batch]
+			    VAR _rows=FILTER(_scope,[Person]=_person && [Batch]=_batch)
+			    VAR _user=MAXX(_rows,[Cloud])
+			    VAR _local=COUNTROWS(FILTER(_rows,[Retained]="Matched retained decision"))>0
+			    VAR _remote=COUNTROWS(FILTER(_rows,[Retained]<>"Matched retained decision"))>0
+			    VAR _special=COUNTROWS(FILTER(_rows,[Kind]<>"UserMailbox"))>0
+			    VAR _pending=SUMX(_rows,VAR _object=[Object] VAR _address=[Address]
+			        RETURN IF(COUNTROWS(FILTER(_exceptions,[ExceptionBatch]=_batch &&
+			            ((_object<>"" && ([Identity]="local_mailboxes|" & _object || [Candidate]="local_mailboxes|" & _object)) ||
+			             (_address<>"" && [ExceptionAddress]=_address))))>0,1,0))>0
+			    VAR _unknown=COUNTROWS(FILTER(_rows,ISBLANK([Size]) || [Size]<0 || [Size]>100 ||
+			        NOT([Archive] IN {"None","Disabled","Local","Active","HostedProvisioned","HostedPending"}) ||
+			        NOT([Hold] IN {"None observed","Review - preserve settings"}) || ISBLANK([Access]) || ISBLANK([Send])))>0
+			    VAR _large=COUNTROWS(FILTER(_rows,[Size]>2 || NOT([Archive] IN {"None","Disabled"}) ||
+			        [Hold]="Review - preserve settings" || [Access]>0 || [Send]>0 || [Behalf]<>""))>0
+			    VAR _review=_batch="" || _user="" || COUNTROWS(FILTER(_rows,[Link]<>"Unique AD GUID + native SID"))>0 || (_local && _remote)
+			    VAR _bucket=SWITCH(TRUE(),_special,"Special",_local && NOT(_remote),"SE",_pending,"Register review",_review,"Identity review",
+			        _unknown,"Technical review",_large,"E3","F3")
+			    VAR _userPlans=FILTER(_plans,[PlanUser]=_user && [PlanBatch]=_batch && _user<>"")
+			    VAR _p2=COUNTROWS(FILTER(_userPlans,[Plan]="EXCHANGE_S_ENTERPRISE"))>0
+			    VAR _p1=COUNTROWS(FILTER(_userPlans,[Plan]="EXCHANGE_S_STANDARD"))>0
+			    VAR _kiosk=COUNTROWS(FILTER(_userPlans,[Plan]="EXCHANGE_S_DESKLESS"))>0
+			    VAR _assigned=SELECTCOLUMNS(FILTER(_licenses,[LicenseUser]=_user && [LicenseBatch]=_batch && _user<>""),"Key",[LicenseSku])
+			    VAR _suite=FILTER(_skus,[SkuKey] IN _assigned && [SkuBatch]=_batch)
+			    VAR _e3=COUNTROWS(FILTER(_suite,[SkuPart] IN {"SPE_E3","SPE_E5"}))>0
+			    VAR _f3=COUNTROWS(FILTER(_suite,[SkuPart]="SPE_F1"))>0
+			    VAR _covered=SWITCH(_bucket,"SE",IF(_e3 || _p1 || _p2,1,0),"E3",IF(_e3,1,0),
+			        "F3",IF(_f3 || _e3,1,0),0)
+			    VAR _failed=SELECTCOLUMNS(FILTER(_allLicenses,[LicenseUser]=_user && [LicenseBatch]=_batch &&
+			        NOT([LicenseState] IN {"Active","Success"})),"Key",[LicenseSku])
+			    VAR _failedTarget=COUNTROWS(FILTER(_skus,[SkuKey] IN _failed && [SkuBatch]=_batch &&
+			        ([SkuPart] IN {"SPE_E3","SPE_E5"} || (_bucket="F3" && [SkuPart]="SPE_F1"))))>0
+			    VAR _target=IF(_bucket IN {"E3","F3"} && _covered=0 && _failedTarget,"Assignment review",_bucket)
+			    VAR _planReview=_covered=1 && SWITCH(_bucket,"E3",NOT(_p2),"F3",NOT(_p2 || _p1 || _kiosk),FALSE())
+			    RETURN ROW("Product",_target,"Covered",_covered,"Plan Review",IF(_planReview,1,0))))
+			VAR _selected=FILTER(_people,[Product]="F3")
+			RETURN IF([Dataset Loaded Batch ID]<>"",COALESCE(SUMX(_selected,[Covered]),0))
+		formatString: #,0
+		displayFolder: Migration licensing scenario
+
+	/// Estimate under approved mailbox sizing assumptions. Not a contractual order. Distinct same-batch people; retained and unresolved exception identities never migrate automatically.
+	measure 'Exchange Scenario F3 Gap' = VAR _need=[Exchange Scenario F3 Need] VAR _covered=[Exchange Scenario F3 Covered] RETURN IF(NOT ISBLANK(_need),MAX(0,_need-_covered))
+		formatString: #,0
+		displayFolder: Migration licensing scenario
+
+	/// Estimate under approved mailbox sizing assumptions. Not a contractual order. Distinct same-batch people; retained and unresolved exception identities never migrate automatically.
+	measure 'Exchange Scenario F3 Available' =
+			VAR _batch=[Dataset Loaded Batch ID]
+			VAR _q=FILTER(ALL('License Report Qualification'),
+			    'License Report Qualification'[Loaded Batch ID]=_batch &&
+			    'License Report Qualification'[Scope]="M365_Licenses_ReportSkuCapacity.csv" &&
+			    'License Report Qualification'[State]="Qualified")
+			VAR _rows=FILTER(ALL('License SKU Capacity'),
+			    'License SKU Capacity'[Loaded Batch ID]=_batch && 'License SKU Capacity'[SKU Part Number]="SPE_F1" &&
+			    'License SKU Capacity'[Capacity Class]="Governed" && LOWER('License SKU Capacity'[Excluded] & "")="false")
+			VAR _snapshots=DISTINCT(SELECTCOLUMNS(_rows,"Snapshot",'License SKU Capacity'[Snapshot ID]))
+			VAR _ids=SELECTCOLUMNS(_rows,"Sku",'License SKU Capacity'[SKU ID])
+			VAR _valid=_batch<>"" && COUNTROWS(_q)=1 && COUNTROWS(_rows)>0 &&
+			    COUNTROWS(_snapshots)=1 && COUNTROWS(_ids)=COUNTROWS(DISTINCT(_ids)) &&
+			    COUNTROWS(FILTER(_rows,ISBLANK('License SKU Capacity'[Available Units]) ||
+			        'License SKU Capacity'[Available Units]<0 || 'License SKU Capacity'[SKU ID]="" || 'License SKU Capacity'[Snapshot ID]=""))=0
+			RETURN IF(_valid,SUMX(_rows,'License SKU Capacity'[Available Units]))
+		formatString: #,0
+		displayFolder: Migration licensing scenario
+
+	/// Estimate under approved mailbox sizing assumptions. Not a contractual order. Distinct same-batch people; retained and unresolved exception identities never migrate automatically.
+	measure 'Exchange Scenario F3 Buy' = VAR _gap=[Exchange Scenario F3 Gap] VAR _free=[Exchange Scenario F3 Available] RETURN IF(NOT ISBLANK(_gap) && NOT ISBLANK(_free),MAX(0,_gap-_free))
+		formatString: #,0
+		displayFolder: Migration licensing scenario
+
+	/// Estimate under approved mailbox sizing assumptions. Not a contractual order. Distinct same-batch people; retained and unresolved exception identities never migrate automatically.
+	measure 'Exchange Scenario F3 Buy Label' = VAR _n=[Exchange Scenario F3 Buy] RETURN IF(ISBLANK(_n),"To qualify",FORMAT(_n,"#,0"))
+		formatString: @
+		displayFolder: Migration licensing scenario
+
+	/// Estimate under approved mailbox sizing assumptions. Not a contractual order. Distinct same-batch people; retained and unresolved exception identities never migrate automatically.
+	measure 'Exchange Scenario SE Need' =
+			VAR _people=(VAR _scope=SELECTCOLUMNS('Exchange Mailbox Reconciliation',
+			    "Person",IF('Exchange Mailbox Reconciliation'[Cloud Account Key]<>"","cloud|" & 'Exchange Mailbox Reconciliation'[Cloud Account Key],
+			        IF('Exchange Mailbox Reconciliation'[AD Account Key]<>"","ad|" & 'Exchange Mailbox Reconciliation'[AD Account Key],"mailbox|" & 'Exchange Mailbox Reconciliation'[Mailbox GUID])),
+			    "Batch",'Exchange Mailbox Reconciliation'[Loaded Batch ID],
+			    "Cloud",'Exchange Mailbox Reconciliation'[Cloud Account Key],
+			    "Object",LOWER(TRIM('Exchange Mailbox Reconciliation'[Object GUID])),
+			    "Address",LOWER(TRIM('Exchange Mailbox Reconciliation'[Primary SMTP Address])),
+			    "Kind",'Exchange Mailbox Reconciliation'[Mailbox Type],
+			    "Size",'Exchange Mailbox Reconciliation'[Mailbox Size GB],
+			    "Archive",'Exchange Mailbox Reconciliation'[Archive State],
+			    "Hold",'Exchange Mailbox Reconciliation'[Hold and Retention],
+			    "Access",'Exchange Mailbox Reconciliation'[Full Access Count],
+			    "Send",'Exchange Mailbox Reconciliation'[Send As Count],
+			    "Behalf",'Exchange Mailbox Reconciliation'[Send On Behalf],
+			    "Retained",'Exchange Mailbox Reconciliation'[Retained On-premises],
+			    "Link",'Exchange Mailbox Reconciliation'[Account Link])
+			VAR _exceptions=SELECTCOLUMNS(FILTER('Mailbox Migration Exceptions',
+			    'Mailbox Migration Exceptions'[Requires Review]=1),
+			    "ExceptionBatch",'Mailbox Migration Exceptions'[Loaded Batch ID],
+			    "Identity",LOWER(TRIM('Mailbox Migration Exceptions'[Mailbox Identity])),
+			    "Candidate",LOWER(TRIM('Mailbox Migration Exceptions'[Candidate Identity])),
+			    "ExceptionAddress",LOWER(TRIM('Mailbox Migration Exceptions'[Primary SMTP Address])))
+			VAR _users=DISTINCT(SELECTCOLUMNS(FILTER(_scope,[Cloud]<>""),"User",[Cloud]))
+			VAR _batches=DISTINCT(SELECTCOLUMNS(_scope,"Batch",[Batch]))
+			VAR _plans=CALCULATETABLE(SELECTCOLUMNS(FILTER('Native User Service Plan',
+			    LOWER('Native User Service Plan'[IsEnabled] & "")="true" && 'Native User Service Plan'[AssignmentState]="Success" &&
+			    'Native User Service Plan'[ServicePlanName] IN {"EXCHANGE_S_STANDARD","EXCHANGE_S_ENTERPRISE","EXCHANGE_S_DESKLESS"}),
+			    "PlanUser",'Native User Service Plan'[TenantUserKey],"PlanBatch",'Native User Service Plan'[Loaded Batch ID],"Plan",'Native User Service Plan'[ServicePlanName]),
+			    TREATAS(_users,'Native User Service Plan'[TenantUserKey]),TREATAS(_batches,'Native User Service Plan'[Loaded Batch ID]))
+			VAR _allLicenses=CALCULATETABLE(SELECTCOLUMNS('Native User License',
+			    "LicenseUser",'Native User License'[TenantUserKey],"LicenseBatch",'Native User License'[Loaded Batch ID],
+			    "LicenseSku",'Native User License'[TenantSkuKey],"LicenseState",'Native User License'[AssignmentState]),
+			    TREATAS(_users,'Native User License'[TenantUserKey]),TREATAS(_batches,'Native User License'[Loaded Batch ID]))
+			VAR _licenses=FILTER(_allLicenses,[LicenseState] IN {"Active","Success"})
+			VAR _skus=SELECTCOLUMNS('Native License SKU',"SkuKey",'Native License SKU'[TenantSkuKey],
+			    "SkuBatch",'Native License SKU'[Loaded Batch ID],"SkuPart",'Native License SKU'[SkuPartNumber])
+			VAR _keys=DISTINCT(SELECTCOLUMNS(_scope,"Person",[Person],"Batch",[Batch]))
+			RETURN GENERATE(_keys,
+			    VAR _person=[Person] VAR _batch=[Batch]
+			    VAR _rows=FILTER(_scope,[Person]=_person && [Batch]=_batch)
+			    VAR _user=MAXX(_rows,[Cloud])
+			    VAR _local=COUNTROWS(FILTER(_rows,[Retained]="Matched retained decision"))>0
+			    VAR _remote=COUNTROWS(FILTER(_rows,[Retained]<>"Matched retained decision"))>0
+			    VAR _special=COUNTROWS(FILTER(_rows,[Kind]<>"UserMailbox"))>0
+			    VAR _pending=SUMX(_rows,VAR _object=[Object] VAR _address=[Address]
+			        RETURN IF(COUNTROWS(FILTER(_exceptions,[ExceptionBatch]=_batch &&
+			            ((_object<>"" && ([Identity]="local_mailboxes|" & _object || [Candidate]="local_mailboxes|" & _object)) ||
+			             (_address<>"" && [ExceptionAddress]=_address))))>0,1,0))>0
+			    VAR _unknown=COUNTROWS(FILTER(_rows,ISBLANK([Size]) || [Size]<0 || [Size]>100 ||
+			        NOT([Archive] IN {"None","Disabled","Local","Active","HostedProvisioned","HostedPending"}) ||
+			        NOT([Hold] IN {"None observed","Review - preserve settings"}) || ISBLANK([Access]) || ISBLANK([Send])))>0
+			    VAR _large=COUNTROWS(FILTER(_rows,[Size]>2 || NOT([Archive] IN {"None","Disabled"}) ||
+			        [Hold]="Review - preserve settings" || [Access]>0 || [Send]>0 || [Behalf]<>""))>0
+			    VAR _review=_batch="" || _user="" || COUNTROWS(FILTER(_rows,[Link]<>"Unique AD GUID + native SID"))>0 || (_local && _remote)
+			    VAR _bucket=SWITCH(TRUE(),_special,"Special",_local && NOT(_remote),"SE",_pending,"Register review",_review,"Identity review",
+			        _unknown,"Technical review",_large,"E3","F3")
+			    VAR _userPlans=FILTER(_plans,[PlanUser]=_user && [PlanBatch]=_batch && _user<>"")
+			    VAR _p2=COUNTROWS(FILTER(_userPlans,[Plan]="EXCHANGE_S_ENTERPRISE"))>0
+			    VAR _p1=COUNTROWS(FILTER(_userPlans,[Plan]="EXCHANGE_S_STANDARD"))>0
+			    VAR _kiosk=COUNTROWS(FILTER(_userPlans,[Plan]="EXCHANGE_S_DESKLESS"))>0
+			    VAR _assigned=SELECTCOLUMNS(FILTER(_licenses,[LicenseUser]=_user && [LicenseBatch]=_batch && _user<>""),"Key",[LicenseSku])
+			    VAR _suite=FILTER(_skus,[SkuKey] IN _assigned && [SkuBatch]=_batch)
+			    VAR _e3=COUNTROWS(FILTER(_suite,[SkuPart] IN {"SPE_E3","SPE_E5"}))>0
+			    VAR _f3=COUNTROWS(FILTER(_suite,[SkuPart]="SPE_F1"))>0
+			    VAR _covered=SWITCH(_bucket,"SE",IF(_e3 || _p1 || _p2,1,0),"E3",IF(_e3,1,0),
+			        "F3",IF(_f3 || _e3,1,0),0)
+			    VAR _failed=SELECTCOLUMNS(FILTER(_allLicenses,[LicenseUser]=_user && [LicenseBatch]=_batch &&
+			        NOT([LicenseState] IN {"Active","Success"})),"Key",[LicenseSku])
+			    VAR _failedTarget=COUNTROWS(FILTER(_skus,[SkuKey] IN _failed && [SkuBatch]=_batch &&
+			        ([SkuPart] IN {"SPE_E3","SPE_E5"} || (_bucket="F3" && [SkuPart]="SPE_F1"))))>0
+			    VAR _target=IF(_bucket IN {"E3","F3"} && _covered=0 && _failedTarget,"Assignment review",_bucket)
+			    VAR _planReview=_covered=1 && SWITCH(_bucket,"E3",NOT(_p2),"F3",NOT(_p2 || _p1 || _kiosk),FALSE())
+			    RETURN ROW("Product",_target,"Covered",_covered,"Plan Review",IF(_planReview,1,0))))
+			VAR _selected=FILTER(_people,[Product]="SE")
+			RETURN IF([Dataset Loaded Batch ID]<>"",COALESCE(COUNTROWS(_selected),0))
+		formatString: #,0
+		displayFolder: Migration licensing scenario
+
+	/// Estimate under approved mailbox sizing assumptions. Not a contractual order. Distinct same-batch people; retained and unresolved exception identities never migrate automatically.
+	measure 'Exchange Scenario SE Covered' =
+			VAR _people=(VAR _scope=SELECTCOLUMNS('Exchange Mailbox Reconciliation',
+			    "Person",IF('Exchange Mailbox Reconciliation'[Cloud Account Key]<>"","cloud|" & 'Exchange Mailbox Reconciliation'[Cloud Account Key],
+			        IF('Exchange Mailbox Reconciliation'[AD Account Key]<>"","ad|" & 'Exchange Mailbox Reconciliation'[AD Account Key],"mailbox|" & 'Exchange Mailbox Reconciliation'[Mailbox GUID])),
+			    "Batch",'Exchange Mailbox Reconciliation'[Loaded Batch ID],
+			    "Cloud",'Exchange Mailbox Reconciliation'[Cloud Account Key],
+			    "Object",LOWER(TRIM('Exchange Mailbox Reconciliation'[Object GUID])),
+			    "Address",LOWER(TRIM('Exchange Mailbox Reconciliation'[Primary SMTP Address])),
+			    "Kind",'Exchange Mailbox Reconciliation'[Mailbox Type],
+			    "Size",'Exchange Mailbox Reconciliation'[Mailbox Size GB],
+			    "Archive",'Exchange Mailbox Reconciliation'[Archive State],
+			    "Hold",'Exchange Mailbox Reconciliation'[Hold and Retention],
+			    "Access",'Exchange Mailbox Reconciliation'[Full Access Count],
+			    "Send",'Exchange Mailbox Reconciliation'[Send As Count],
+			    "Behalf",'Exchange Mailbox Reconciliation'[Send On Behalf],
+			    "Retained",'Exchange Mailbox Reconciliation'[Retained On-premises],
+			    "Link",'Exchange Mailbox Reconciliation'[Account Link])
+			VAR _exceptions=SELECTCOLUMNS(FILTER('Mailbox Migration Exceptions',
+			    'Mailbox Migration Exceptions'[Requires Review]=1),
+			    "ExceptionBatch",'Mailbox Migration Exceptions'[Loaded Batch ID],
+			    "Identity",LOWER(TRIM('Mailbox Migration Exceptions'[Mailbox Identity])),
+			    "Candidate",LOWER(TRIM('Mailbox Migration Exceptions'[Candidate Identity])),
+			    "ExceptionAddress",LOWER(TRIM('Mailbox Migration Exceptions'[Primary SMTP Address])))
+			VAR _users=DISTINCT(SELECTCOLUMNS(FILTER(_scope,[Cloud]<>""),"User",[Cloud]))
+			VAR _batches=DISTINCT(SELECTCOLUMNS(_scope,"Batch",[Batch]))
+			VAR _plans=CALCULATETABLE(SELECTCOLUMNS(FILTER('Native User Service Plan',
+			    LOWER('Native User Service Plan'[IsEnabled] & "")="true" && 'Native User Service Plan'[AssignmentState]="Success" &&
+			    'Native User Service Plan'[ServicePlanName] IN {"EXCHANGE_S_STANDARD","EXCHANGE_S_ENTERPRISE","EXCHANGE_S_DESKLESS"}),
+			    "PlanUser",'Native User Service Plan'[TenantUserKey],"PlanBatch",'Native User Service Plan'[Loaded Batch ID],"Plan",'Native User Service Plan'[ServicePlanName]),
+			    TREATAS(_users,'Native User Service Plan'[TenantUserKey]),TREATAS(_batches,'Native User Service Plan'[Loaded Batch ID]))
+			VAR _allLicenses=CALCULATETABLE(SELECTCOLUMNS('Native User License',
+			    "LicenseUser",'Native User License'[TenantUserKey],"LicenseBatch",'Native User License'[Loaded Batch ID],
+			    "LicenseSku",'Native User License'[TenantSkuKey],"LicenseState",'Native User License'[AssignmentState]),
+			    TREATAS(_users,'Native User License'[TenantUserKey]),TREATAS(_batches,'Native User License'[Loaded Batch ID]))
+			VAR _licenses=FILTER(_allLicenses,[LicenseState] IN {"Active","Success"})
+			VAR _skus=SELECTCOLUMNS('Native License SKU',"SkuKey",'Native License SKU'[TenantSkuKey],
+			    "SkuBatch",'Native License SKU'[Loaded Batch ID],"SkuPart",'Native License SKU'[SkuPartNumber])
+			VAR _keys=DISTINCT(SELECTCOLUMNS(_scope,"Person",[Person],"Batch",[Batch]))
+			RETURN GENERATE(_keys,
+			    VAR _person=[Person] VAR _batch=[Batch]
+			    VAR _rows=FILTER(_scope,[Person]=_person && [Batch]=_batch)
+			    VAR _user=MAXX(_rows,[Cloud])
+			    VAR _local=COUNTROWS(FILTER(_rows,[Retained]="Matched retained decision"))>0
+			    VAR _remote=COUNTROWS(FILTER(_rows,[Retained]<>"Matched retained decision"))>0
+			    VAR _special=COUNTROWS(FILTER(_rows,[Kind]<>"UserMailbox"))>0
+			    VAR _pending=SUMX(_rows,VAR _object=[Object] VAR _address=[Address]
+			        RETURN IF(COUNTROWS(FILTER(_exceptions,[ExceptionBatch]=_batch &&
+			            ((_object<>"" && ([Identity]="local_mailboxes|" & _object || [Candidate]="local_mailboxes|" & _object)) ||
+			             (_address<>"" && [ExceptionAddress]=_address))))>0,1,0))>0
+			    VAR _unknown=COUNTROWS(FILTER(_rows,ISBLANK([Size]) || [Size]<0 || [Size]>100 ||
+			        NOT([Archive] IN {"None","Disabled","Local","Active","HostedProvisioned","HostedPending"}) ||
+			        NOT([Hold] IN {"None observed","Review - preserve settings"}) || ISBLANK([Access]) || ISBLANK([Send])))>0
+			    VAR _large=COUNTROWS(FILTER(_rows,[Size]>2 || NOT([Archive] IN {"None","Disabled"}) ||
+			        [Hold]="Review - preserve settings" || [Access]>0 || [Send]>0 || [Behalf]<>""))>0
+			    VAR _review=_batch="" || _user="" || COUNTROWS(FILTER(_rows,[Link]<>"Unique AD GUID + native SID"))>0 || (_local && _remote)
+			    VAR _bucket=SWITCH(TRUE(),_special,"Special",_local && NOT(_remote),"SE",_pending,"Register review",_review,"Identity review",
+			        _unknown,"Technical review",_large,"E3","F3")
+			    VAR _userPlans=FILTER(_plans,[PlanUser]=_user && [PlanBatch]=_batch && _user<>"")
+			    VAR _p2=COUNTROWS(FILTER(_userPlans,[Plan]="EXCHANGE_S_ENTERPRISE"))>0
+			    VAR _p1=COUNTROWS(FILTER(_userPlans,[Plan]="EXCHANGE_S_STANDARD"))>0
+			    VAR _kiosk=COUNTROWS(FILTER(_userPlans,[Plan]="EXCHANGE_S_DESKLESS"))>0
+			    VAR _assigned=SELECTCOLUMNS(FILTER(_licenses,[LicenseUser]=_user && [LicenseBatch]=_batch && _user<>""),"Key",[LicenseSku])
+			    VAR _suite=FILTER(_skus,[SkuKey] IN _assigned && [SkuBatch]=_batch)
+			    VAR _e3=COUNTROWS(FILTER(_suite,[SkuPart] IN {"SPE_E3","SPE_E5"}))>0
+			    VAR _f3=COUNTROWS(FILTER(_suite,[SkuPart]="SPE_F1"))>0
+			    VAR _covered=SWITCH(_bucket,"SE",IF(_e3 || _p1 || _p2,1,0),"E3",IF(_e3,1,0),
+			        "F3",IF(_f3 || _e3,1,0),0)
+			    VAR _failed=SELECTCOLUMNS(FILTER(_allLicenses,[LicenseUser]=_user && [LicenseBatch]=_batch &&
+			        NOT([LicenseState] IN {"Active","Success"})),"Key",[LicenseSku])
+			    VAR _failedTarget=COUNTROWS(FILTER(_skus,[SkuKey] IN _failed && [SkuBatch]=_batch &&
+			        ([SkuPart] IN {"SPE_E3","SPE_E5"} || (_bucket="F3" && [SkuPart]="SPE_F1"))))>0
+			    VAR _target=IF(_bucket IN {"E3","F3"} && _covered=0 && _failedTarget,"Assignment review",_bucket)
+			    VAR _planReview=_covered=1 && SWITCH(_bucket,"E3",NOT(_p2),"F3",NOT(_p2 || _p1 || _kiosk),FALSE())
+			    RETURN ROW("Product",_target,"Covered",_covered,"Plan Review",IF(_planReview,1,0))))
+			VAR _selected=FILTER(_people,[Product]="SE")
+			RETURN IF([Dataset Loaded Batch ID]<>"",COALESCE(SUMX(_selected,[Covered]),0))
+		formatString: #,0
+		displayFolder: Migration licensing scenario
+
+	/// Estimate under approved mailbox sizing assumptions. Not a contractual order. Distinct same-batch people; retained and unresolved exception identities never migrate automatically.
+	measure 'Exchange Scenario SE Gap' = VAR _need=[Exchange Scenario SE Need] VAR _covered=[Exchange Scenario SE Covered] RETURN IF(NOT ISBLANK(_need),MAX(0,_need-_covered))
+		formatString: #,0
+		displayFolder: Migration licensing scenario
+
+	/// Existing CAL stock, active SA, accessors and base/additive rights are not inventoried. Gap is exposure before those rights; never a net purchase quantity.
+	measure 'Exchange Scenario SE Buy Label' = "To qualify"
+		formatString: @
+		displayFolder: Migration licensing scenario
+
+	/// Estimate under approved mailbox sizing assumptions. Not a contractual order. Distinct same-batch people; retained and unresolved exception identities never migrate automatically.
+	measure 'Exchange Scenario Review People' =
+			VAR _people=(VAR _scope=SELECTCOLUMNS('Exchange Mailbox Reconciliation',
+			    "Person",IF('Exchange Mailbox Reconciliation'[Cloud Account Key]<>"","cloud|" & 'Exchange Mailbox Reconciliation'[Cloud Account Key],
+			        IF('Exchange Mailbox Reconciliation'[AD Account Key]<>"","ad|" & 'Exchange Mailbox Reconciliation'[AD Account Key],"mailbox|" & 'Exchange Mailbox Reconciliation'[Mailbox GUID])),
+			    "Batch",'Exchange Mailbox Reconciliation'[Loaded Batch ID],
+			    "Cloud",'Exchange Mailbox Reconciliation'[Cloud Account Key],
+			    "Object",LOWER(TRIM('Exchange Mailbox Reconciliation'[Object GUID])),
+			    "Address",LOWER(TRIM('Exchange Mailbox Reconciliation'[Primary SMTP Address])),
+			    "Kind",'Exchange Mailbox Reconciliation'[Mailbox Type],
+			    "Size",'Exchange Mailbox Reconciliation'[Mailbox Size GB],
+			    "Archive",'Exchange Mailbox Reconciliation'[Archive State],
+			    "Hold",'Exchange Mailbox Reconciliation'[Hold and Retention],
+			    "Access",'Exchange Mailbox Reconciliation'[Full Access Count],
+			    "Send",'Exchange Mailbox Reconciliation'[Send As Count],
+			    "Behalf",'Exchange Mailbox Reconciliation'[Send On Behalf],
+			    "Retained",'Exchange Mailbox Reconciliation'[Retained On-premises],
+			    "Link",'Exchange Mailbox Reconciliation'[Account Link])
+			VAR _exceptions=SELECTCOLUMNS(FILTER('Mailbox Migration Exceptions',
+			    'Mailbox Migration Exceptions'[Requires Review]=1),
+			    "ExceptionBatch",'Mailbox Migration Exceptions'[Loaded Batch ID],
+			    "Identity",LOWER(TRIM('Mailbox Migration Exceptions'[Mailbox Identity])),
+			    "Candidate",LOWER(TRIM('Mailbox Migration Exceptions'[Candidate Identity])),
+			    "ExceptionAddress",LOWER(TRIM('Mailbox Migration Exceptions'[Primary SMTP Address])))
+			VAR _users=DISTINCT(SELECTCOLUMNS(FILTER(_scope,[Cloud]<>""),"User",[Cloud]))
+			VAR _batches=DISTINCT(SELECTCOLUMNS(_scope,"Batch",[Batch]))
+			VAR _plans=CALCULATETABLE(SELECTCOLUMNS(FILTER('Native User Service Plan',
+			    LOWER('Native User Service Plan'[IsEnabled] & "")="true" && 'Native User Service Plan'[AssignmentState]="Success" &&
+			    'Native User Service Plan'[ServicePlanName] IN {"EXCHANGE_S_STANDARD","EXCHANGE_S_ENTERPRISE","EXCHANGE_S_DESKLESS"}),
+			    "PlanUser",'Native User Service Plan'[TenantUserKey],"PlanBatch",'Native User Service Plan'[Loaded Batch ID],"Plan",'Native User Service Plan'[ServicePlanName]),
+			    TREATAS(_users,'Native User Service Plan'[TenantUserKey]),TREATAS(_batches,'Native User Service Plan'[Loaded Batch ID]))
+			VAR _allLicenses=CALCULATETABLE(SELECTCOLUMNS('Native User License',
+			    "LicenseUser",'Native User License'[TenantUserKey],"LicenseBatch",'Native User License'[Loaded Batch ID],
+			    "LicenseSku",'Native User License'[TenantSkuKey],"LicenseState",'Native User License'[AssignmentState]),
+			    TREATAS(_users,'Native User License'[TenantUserKey]),TREATAS(_batches,'Native User License'[Loaded Batch ID]))
+			VAR _licenses=FILTER(_allLicenses,[LicenseState] IN {"Active","Success"})
+			VAR _skus=SELECTCOLUMNS('Native License SKU',"SkuKey",'Native License SKU'[TenantSkuKey],
+			    "SkuBatch",'Native License SKU'[Loaded Batch ID],"SkuPart",'Native License SKU'[SkuPartNumber])
+			VAR _keys=DISTINCT(SELECTCOLUMNS(_scope,"Person",[Person],"Batch",[Batch]))
+			RETURN GENERATE(_keys,
+			    VAR _person=[Person] VAR _batch=[Batch]
+			    VAR _rows=FILTER(_scope,[Person]=_person && [Batch]=_batch)
+			    VAR _user=MAXX(_rows,[Cloud])
+			    VAR _local=COUNTROWS(FILTER(_rows,[Retained]="Matched retained decision"))>0
+			    VAR _remote=COUNTROWS(FILTER(_rows,[Retained]<>"Matched retained decision"))>0
+			    VAR _special=COUNTROWS(FILTER(_rows,[Kind]<>"UserMailbox"))>0
+			    VAR _pending=SUMX(_rows,VAR _object=[Object] VAR _address=[Address]
+			        RETURN IF(COUNTROWS(FILTER(_exceptions,[ExceptionBatch]=_batch &&
+			            ((_object<>"" && ([Identity]="local_mailboxes|" & _object || [Candidate]="local_mailboxes|" & _object)) ||
+			             (_address<>"" && [ExceptionAddress]=_address))))>0,1,0))>0
+			    VAR _unknown=COUNTROWS(FILTER(_rows,ISBLANK([Size]) || [Size]<0 || [Size]>100 ||
+			        NOT([Archive] IN {"None","Disabled","Local","Active","HostedProvisioned","HostedPending"}) ||
+			        NOT([Hold] IN {"None observed","Review - preserve settings"}) || ISBLANK([Access]) || ISBLANK([Send])))>0
+			    VAR _large=COUNTROWS(FILTER(_rows,[Size]>2 || NOT([Archive] IN {"None","Disabled"}) ||
+			        [Hold]="Review - preserve settings" || [Access]>0 || [Send]>0 || [Behalf]<>""))>0
+			    VAR _review=_batch="" || _user="" || COUNTROWS(FILTER(_rows,[Link]<>"Unique AD GUID + native SID"))>0 || (_local && _remote)
+			    VAR _bucket=SWITCH(TRUE(),_special,"Special",_local && NOT(_remote),"SE",_pending,"Register review",_review,"Identity review",
+			        _unknown,"Technical review",_large,"E3","F3")
+			    VAR _userPlans=FILTER(_plans,[PlanUser]=_user && [PlanBatch]=_batch && _user<>"")
+			    VAR _p2=COUNTROWS(FILTER(_userPlans,[Plan]="EXCHANGE_S_ENTERPRISE"))>0
+			    VAR _p1=COUNTROWS(FILTER(_userPlans,[Plan]="EXCHANGE_S_STANDARD"))>0
+			    VAR _kiosk=COUNTROWS(FILTER(_userPlans,[Plan]="EXCHANGE_S_DESKLESS"))>0
+			    VAR _assigned=SELECTCOLUMNS(FILTER(_licenses,[LicenseUser]=_user && [LicenseBatch]=_batch && _user<>""),"Key",[LicenseSku])
+			    VAR _suite=FILTER(_skus,[SkuKey] IN _assigned && [SkuBatch]=_batch)
+			    VAR _e3=COUNTROWS(FILTER(_suite,[SkuPart] IN {"SPE_E3","SPE_E5"}))>0
+			    VAR _f3=COUNTROWS(FILTER(_suite,[SkuPart]="SPE_F1"))>0
+			    VAR _covered=SWITCH(_bucket,"SE",IF(_e3 || _p1 || _p2,1,0),"E3",IF(_e3,1,0),
+			        "F3",IF(_f3 || _e3,1,0),0)
+			    VAR _failed=SELECTCOLUMNS(FILTER(_allLicenses,[LicenseUser]=_user && [LicenseBatch]=_batch &&
+			        NOT([LicenseState] IN {"Active","Success"})),"Key",[LicenseSku])
+			    VAR _failedTarget=COUNTROWS(FILTER(_skus,[SkuKey] IN _failed && [SkuBatch]=_batch &&
+			        ([SkuPart] IN {"SPE_E3","SPE_E5"} || (_bucket="F3" && [SkuPart]="SPE_F1"))))>0
+			    VAR _target=IF(_bucket IN {"E3","F3"} && _covered=0 && _failedTarget,"Assignment review",_bucket)
+			    VAR _planReview=_covered=1 && SWITCH(_bucket,"E3",NOT(_p2),"F3",NOT(_p2 || _p1 || _kiosk),FALSE())
+			    RETURN ROW("Product",_target,"Covered",_covered,"Plan Review",IF(_planReview,1,0))))
+			RETURN IF([Dataset Loaded Batch ID]<>"",COALESCE(COUNTROWS(FILTER(_people,[Product] IN {"Register review","Identity review","Technical review","Assignment review"})),0))
+		formatString: #,0
+		displayFolder: Migration licensing scenario
+
+	/// Estimate under approved mailbox sizing assumptions. Not a contractual order. Distinct same-batch people; retained and unresolved exception identities never migrate automatically.
+	measure 'Exchange Scenario Plan Remediation' =
+			VAR _people=(VAR _scope=SELECTCOLUMNS('Exchange Mailbox Reconciliation',
+			    "Person",IF('Exchange Mailbox Reconciliation'[Cloud Account Key]<>"","cloud|" & 'Exchange Mailbox Reconciliation'[Cloud Account Key],
+			        IF('Exchange Mailbox Reconciliation'[AD Account Key]<>"","ad|" & 'Exchange Mailbox Reconciliation'[AD Account Key],"mailbox|" & 'Exchange Mailbox Reconciliation'[Mailbox GUID])),
+			    "Batch",'Exchange Mailbox Reconciliation'[Loaded Batch ID],
+			    "Cloud",'Exchange Mailbox Reconciliation'[Cloud Account Key],
+			    "Object",LOWER(TRIM('Exchange Mailbox Reconciliation'[Object GUID])),
+			    "Address",LOWER(TRIM('Exchange Mailbox Reconciliation'[Primary SMTP Address])),
+			    "Kind",'Exchange Mailbox Reconciliation'[Mailbox Type],
+			    "Size",'Exchange Mailbox Reconciliation'[Mailbox Size GB],
+			    "Archive",'Exchange Mailbox Reconciliation'[Archive State],
+			    "Hold",'Exchange Mailbox Reconciliation'[Hold and Retention],
+			    "Access",'Exchange Mailbox Reconciliation'[Full Access Count],
+			    "Send",'Exchange Mailbox Reconciliation'[Send As Count],
+			    "Behalf",'Exchange Mailbox Reconciliation'[Send On Behalf],
+			    "Retained",'Exchange Mailbox Reconciliation'[Retained On-premises],
+			    "Link",'Exchange Mailbox Reconciliation'[Account Link])
+			VAR _exceptions=SELECTCOLUMNS(FILTER('Mailbox Migration Exceptions',
+			    'Mailbox Migration Exceptions'[Requires Review]=1),
+			    "ExceptionBatch",'Mailbox Migration Exceptions'[Loaded Batch ID],
+			    "Identity",LOWER(TRIM('Mailbox Migration Exceptions'[Mailbox Identity])),
+			    "Candidate",LOWER(TRIM('Mailbox Migration Exceptions'[Candidate Identity])),
+			    "ExceptionAddress",LOWER(TRIM('Mailbox Migration Exceptions'[Primary SMTP Address])))
+			VAR _users=DISTINCT(SELECTCOLUMNS(FILTER(_scope,[Cloud]<>""),"User",[Cloud]))
+			VAR _batches=DISTINCT(SELECTCOLUMNS(_scope,"Batch",[Batch]))
+			VAR _plans=CALCULATETABLE(SELECTCOLUMNS(FILTER('Native User Service Plan',
+			    LOWER('Native User Service Plan'[IsEnabled] & "")="true" && 'Native User Service Plan'[AssignmentState]="Success" &&
+			    'Native User Service Plan'[ServicePlanName] IN {"EXCHANGE_S_STANDARD","EXCHANGE_S_ENTERPRISE","EXCHANGE_S_DESKLESS"}),
+			    "PlanUser",'Native User Service Plan'[TenantUserKey],"PlanBatch",'Native User Service Plan'[Loaded Batch ID],"Plan",'Native User Service Plan'[ServicePlanName]),
+			    TREATAS(_users,'Native User Service Plan'[TenantUserKey]),TREATAS(_batches,'Native User Service Plan'[Loaded Batch ID]))
+			VAR _allLicenses=CALCULATETABLE(SELECTCOLUMNS('Native User License',
+			    "LicenseUser",'Native User License'[TenantUserKey],"LicenseBatch",'Native User License'[Loaded Batch ID],
+			    "LicenseSku",'Native User License'[TenantSkuKey],"LicenseState",'Native User License'[AssignmentState]),
+			    TREATAS(_users,'Native User License'[TenantUserKey]),TREATAS(_batches,'Native User License'[Loaded Batch ID]))
+			VAR _licenses=FILTER(_allLicenses,[LicenseState] IN {"Active","Success"})
+			VAR _skus=SELECTCOLUMNS('Native License SKU',"SkuKey",'Native License SKU'[TenantSkuKey],
+			    "SkuBatch",'Native License SKU'[Loaded Batch ID],"SkuPart",'Native License SKU'[SkuPartNumber])
+			VAR _keys=DISTINCT(SELECTCOLUMNS(_scope,"Person",[Person],"Batch",[Batch]))
+			RETURN GENERATE(_keys,
+			    VAR _person=[Person] VAR _batch=[Batch]
+			    VAR _rows=FILTER(_scope,[Person]=_person && [Batch]=_batch)
+			    VAR _user=MAXX(_rows,[Cloud])
+			    VAR _local=COUNTROWS(FILTER(_rows,[Retained]="Matched retained decision"))>0
+			    VAR _remote=COUNTROWS(FILTER(_rows,[Retained]<>"Matched retained decision"))>0
+			    VAR _special=COUNTROWS(FILTER(_rows,[Kind]<>"UserMailbox"))>0
+			    VAR _pending=SUMX(_rows,VAR _object=[Object] VAR _address=[Address]
+			        RETURN IF(COUNTROWS(FILTER(_exceptions,[ExceptionBatch]=_batch &&
+			            ((_object<>"" && ([Identity]="local_mailboxes|" & _object || [Candidate]="local_mailboxes|" & _object)) ||
+			             (_address<>"" && [ExceptionAddress]=_address))))>0,1,0))>0
+			    VAR _unknown=COUNTROWS(FILTER(_rows,ISBLANK([Size]) || [Size]<0 || [Size]>100 ||
+			        NOT([Archive] IN {"None","Disabled","Local","Active","HostedProvisioned","HostedPending"}) ||
+			        NOT([Hold] IN {"None observed","Review - preserve settings"}) || ISBLANK([Access]) || ISBLANK([Send])))>0
+			    VAR _large=COUNTROWS(FILTER(_rows,[Size]>2 || NOT([Archive] IN {"None","Disabled"}) ||
+			        [Hold]="Review - preserve settings" || [Access]>0 || [Send]>0 || [Behalf]<>""))>0
+			    VAR _review=_batch="" || _user="" || COUNTROWS(FILTER(_rows,[Link]<>"Unique AD GUID + native SID"))>0 || (_local && _remote)
+			    VAR _bucket=SWITCH(TRUE(),_special,"Special",_local && NOT(_remote),"SE",_pending,"Register review",_review,"Identity review",
+			        _unknown,"Technical review",_large,"E3","F3")
+			    VAR _userPlans=FILTER(_plans,[PlanUser]=_user && [PlanBatch]=_batch && _user<>"")
+			    VAR _p2=COUNTROWS(FILTER(_userPlans,[Plan]="EXCHANGE_S_ENTERPRISE"))>0
+			    VAR _p1=COUNTROWS(FILTER(_userPlans,[Plan]="EXCHANGE_S_STANDARD"))>0
+			    VAR _kiosk=COUNTROWS(FILTER(_userPlans,[Plan]="EXCHANGE_S_DESKLESS"))>0
+			    VAR _assigned=SELECTCOLUMNS(FILTER(_licenses,[LicenseUser]=_user && [LicenseBatch]=_batch && _user<>""),"Key",[LicenseSku])
+			    VAR _suite=FILTER(_skus,[SkuKey] IN _assigned && [SkuBatch]=_batch)
+			    VAR _e3=COUNTROWS(FILTER(_suite,[SkuPart] IN {"SPE_E3","SPE_E5"}))>0
+			    VAR _f3=COUNTROWS(FILTER(_suite,[SkuPart]="SPE_F1"))>0
+			    VAR _covered=SWITCH(_bucket,"SE",IF(_e3 || _p1 || _p2,1,0),"E3",IF(_e3,1,0),
+			        "F3",IF(_f3 || _e3,1,0),0)
+			    VAR _failed=SELECTCOLUMNS(FILTER(_allLicenses,[LicenseUser]=_user && [LicenseBatch]=_batch &&
+			        NOT([LicenseState] IN {"Active","Success"})),"Key",[LicenseSku])
+			    VAR _failedTarget=COUNTROWS(FILTER(_skus,[SkuKey] IN _failed && [SkuBatch]=_batch &&
+			        ([SkuPart] IN {"SPE_E3","SPE_E5"} || (_bucket="F3" && [SkuPart]="SPE_F1"))))>0
+			    VAR _target=IF(_bucket IN {"E3","F3"} && _covered=0 && _failedTarget,"Assignment review",_bucket)
+			    VAR _planReview=_covered=1 && SWITCH(_bucket,"E3",NOT(_p2),"F3",NOT(_p2 || _p1 || _kiosk),FALSE())
+			    RETURN ROW("Product",_target,"Covered",_covered,"Plan Review",IF(_planReview,1,0))))
+			RETURN IF([Dataset Loaded Batch ID]<>"",COALESCE(SUMX(_people,[Plan Review]),0))
+		formatString: #,0
+		displayFolder: Migration licensing scenario
+
+	/// Estimate under approved mailbox sizing assumptions. Not a contractual order. Distinct same-batch people; retained and unresolved exception identities never migrate automatically.
+	measure 'Exchange Scenario Register Review Rows' = VAR _batch=[Dataset Loaded Batch ID] RETURN IF(_batch<>"",CALCULATE(COUNTROWS('Mailbox Migration Exceptions'),REMOVEFILTERS('Mailbox Migration Exceptions'),'Mailbox Migration Exceptions'[Loaded Batch ID]=_batch,'Mailbox Migration Exceptions'[Requires Review]=1))
+		formatString: #,0
+		displayFolder: Migration licensing scenario
+
+	/// Estimate under approved mailbox sizing assumptions. Not a contractual order. Distinct same-batch people; retained and unresolved exception identities never migrate automatically.
+	measure 'Exchange Scenario Row Target' =
+			VAR _people=(VAR _scope=SELECTCOLUMNS('Exchange Mailbox Reconciliation',
+			    "Person",IF('Exchange Mailbox Reconciliation'[Cloud Account Key]<>"","cloud|" & 'Exchange Mailbox Reconciliation'[Cloud Account Key],
+			        IF('Exchange Mailbox Reconciliation'[AD Account Key]<>"","ad|" & 'Exchange Mailbox Reconciliation'[AD Account Key],"mailbox|" & 'Exchange Mailbox Reconciliation'[Mailbox GUID])),
+			    "Batch",'Exchange Mailbox Reconciliation'[Loaded Batch ID],
+			    "Cloud",'Exchange Mailbox Reconciliation'[Cloud Account Key],
+			    "Object",LOWER(TRIM('Exchange Mailbox Reconciliation'[Object GUID])),
+			    "Address",LOWER(TRIM('Exchange Mailbox Reconciliation'[Primary SMTP Address])),
+			    "Kind",'Exchange Mailbox Reconciliation'[Mailbox Type],
+			    "Size",'Exchange Mailbox Reconciliation'[Mailbox Size GB],
+			    "Archive",'Exchange Mailbox Reconciliation'[Archive State],
+			    "Hold",'Exchange Mailbox Reconciliation'[Hold and Retention],
+			    "Access",'Exchange Mailbox Reconciliation'[Full Access Count],
+			    "Send",'Exchange Mailbox Reconciliation'[Send As Count],
+			    "Behalf",'Exchange Mailbox Reconciliation'[Send On Behalf],
+			    "Retained",'Exchange Mailbox Reconciliation'[Retained On-premises],
+			    "Link",'Exchange Mailbox Reconciliation'[Account Link])
+			VAR _exceptions=SELECTCOLUMNS(FILTER('Mailbox Migration Exceptions',
+			    'Mailbox Migration Exceptions'[Requires Review]=1),
+			    "ExceptionBatch",'Mailbox Migration Exceptions'[Loaded Batch ID],
+			    "Identity",LOWER(TRIM('Mailbox Migration Exceptions'[Mailbox Identity])),
+			    "Candidate",LOWER(TRIM('Mailbox Migration Exceptions'[Candidate Identity])),
+			    "ExceptionAddress",LOWER(TRIM('Mailbox Migration Exceptions'[Primary SMTP Address])))
+			VAR _users=DISTINCT(SELECTCOLUMNS(FILTER(_scope,[Cloud]<>""),"User",[Cloud]))
+			VAR _batches=DISTINCT(SELECTCOLUMNS(_scope,"Batch",[Batch]))
+			VAR _plans=CALCULATETABLE(SELECTCOLUMNS(FILTER('Native User Service Plan',
+			    LOWER('Native User Service Plan'[IsEnabled] & "")="true" && 'Native User Service Plan'[AssignmentState]="Success" &&
+			    'Native User Service Plan'[ServicePlanName] IN {"EXCHANGE_S_STANDARD","EXCHANGE_S_ENTERPRISE","EXCHANGE_S_DESKLESS"}),
+			    "PlanUser",'Native User Service Plan'[TenantUserKey],"PlanBatch",'Native User Service Plan'[Loaded Batch ID],"Plan",'Native User Service Plan'[ServicePlanName]),
+			    TREATAS(_users,'Native User Service Plan'[TenantUserKey]),TREATAS(_batches,'Native User Service Plan'[Loaded Batch ID]))
+			VAR _allLicenses=CALCULATETABLE(SELECTCOLUMNS('Native User License',
+			    "LicenseUser",'Native User License'[TenantUserKey],"LicenseBatch",'Native User License'[Loaded Batch ID],
+			    "LicenseSku",'Native User License'[TenantSkuKey],"LicenseState",'Native User License'[AssignmentState]),
+			    TREATAS(_users,'Native User License'[TenantUserKey]),TREATAS(_batches,'Native User License'[Loaded Batch ID]))
+			VAR _licenses=FILTER(_allLicenses,[LicenseState] IN {"Active","Success"})
+			VAR _skus=SELECTCOLUMNS('Native License SKU',"SkuKey",'Native License SKU'[TenantSkuKey],
+			    "SkuBatch",'Native License SKU'[Loaded Batch ID],"SkuPart",'Native License SKU'[SkuPartNumber])
+			VAR _keys=DISTINCT(SELECTCOLUMNS(_scope,"Person",[Person],"Batch",[Batch]))
+			RETURN GENERATE(_keys,
+			    VAR _person=[Person] VAR _batch=[Batch]
+			    VAR _rows=FILTER(_scope,[Person]=_person && [Batch]=_batch)
+			    VAR _user=MAXX(_rows,[Cloud])
+			    VAR _local=COUNTROWS(FILTER(_rows,[Retained]="Matched retained decision"))>0
+			    VAR _remote=COUNTROWS(FILTER(_rows,[Retained]<>"Matched retained decision"))>0
+			    VAR _special=COUNTROWS(FILTER(_rows,[Kind]<>"UserMailbox"))>0
+			    VAR _pending=SUMX(_rows,VAR _object=[Object] VAR _address=[Address]
+			        RETURN IF(COUNTROWS(FILTER(_exceptions,[ExceptionBatch]=_batch &&
+			            ((_object<>"" && ([Identity]="local_mailboxes|" & _object || [Candidate]="local_mailboxes|" & _object)) ||
+			             (_address<>"" && [ExceptionAddress]=_address))))>0,1,0))>0
+			    VAR _unknown=COUNTROWS(FILTER(_rows,ISBLANK([Size]) || [Size]<0 || [Size]>100 ||
+			        NOT([Archive] IN {"None","Disabled","Local","Active","HostedProvisioned","HostedPending"}) ||
+			        NOT([Hold] IN {"None observed","Review - preserve settings"}) || ISBLANK([Access]) || ISBLANK([Send])))>0
+			    VAR _large=COUNTROWS(FILTER(_rows,[Size]>2 || NOT([Archive] IN {"None","Disabled"}) ||
+			        [Hold]="Review - preserve settings" || [Access]>0 || [Send]>0 || [Behalf]<>""))>0
+			    VAR _review=_batch="" || _user="" || COUNTROWS(FILTER(_rows,[Link]<>"Unique AD GUID + native SID"))>0 || (_local && _remote)
+			    VAR _bucket=SWITCH(TRUE(),_special,"Special",_local && NOT(_remote),"SE",_pending,"Register review",_review,"Identity review",
+			        _unknown,"Technical review",_large,"E3","F3")
+			    VAR _userPlans=FILTER(_plans,[PlanUser]=_user && [PlanBatch]=_batch && _user<>"")
+			    VAR _p2=COUNTROWS(FILTER(_userPlans,[Plan]="EXCHANGE_S_ENTERPRISE"))>0
+			    VAR _p1=COUNTROWS(FILTER(_userPlans,[Plan]="EXCHANGE_S_STANDARD"))>0
+			    VAR _kiosk=COUNTROWS(FILTER(_userPlans,[Plan]="EXCHANGE_S_DESKLESS"))>0
+			    VAR _assigned=SELECTCOLUMNS(FILTER(_licenses,[LicenseUser]=_user && [LicenseBatch]=_batch && _user<>""),"Key",[LicenseSku])
+			    VAR _suite=FILTER(_skus,[SkuKey] IN _assigned && [SkuBatch]=_batch)
+			    VAR _e3=COUNTROWS(FILTER(_suite,[SkuPart] IN {"SPE_E3","SPE_E5"}))>0
+			    VAR _f3=COUNTROWS(FILTER(_suite,[SkuPart]="SPE_F1"))>0
+			    VAR _covered=SWITCH(_bucket,"SE",IF(_e3 || _p1 || _p2,1,0),"E3",IF(_e3,1,0),
+			        "F3",IF(_f3 || _e3,1,0),0)
+			    VAR _failed=SELECTCOLUMNS(FILTER(_allLicenses,[LicenseUser]=_user && [LicenseBatch]=_batch &&
+			        NOT([LicenseState] IN {"Active","Success"})),"Key",[LicenseSku])
+			    VAR _failedTarget=COUNTROWS(FILTER(_skus,[SkuKey] IN _failed && [SkuBatch]=_batch &&
+			        ([SkuPart] IN {"SPE_E3","SPE_E5"} || (_bucket="F3" && [SkuPart]="SPE_F1"))))>0
+			    VAR _target=IF(_bucket IN {"E3","F3"} && _covered=0 && _failedTarget,"Assignment review",_bucket)
+			    VAR _planReview=_covered=1 && SWITCH(_bucket,"E3",NOT(_p2),"F3",NOT(_p2 || _p1 || _kiosk),FALSE())
+			    RETURN ROW("Product",_target,"Covered",_covered,"Plan Review",IF(_planReview,1,0))))
+			VAR _products=DISTINCT(SELECTCOLUMNS(_people,"Target",[Product])) RETURN IF(COUNTROWS(_products)=1,CONCATENATEX(_products,[Target],""),"Multiple targets / review")
+		formatString: @
+		displayFolder: Migration licensing scenario
+
+	/// Estimate under approved mailbox sizing assumptions. Not a contractual order. Distinct same-batch people; retained and unresolved exception identities never migrate automatically.
+	measure 'Exchange Scenario Note' = "ESTIMATE: F3 <=2 GB, no archive/hold/delegation; frontline eligibility assumed. E3 for other known user cases <=100 GB. Assigned suites deducted even if a service plan needs repair; tenant stock assumed allocatable, shared across countries, not reserved. SE = confirmed retained users; CAL stock/SA and other accessors unknown. Unpriced people: " & FORMAT([Exchange Scenario Review People],"0") & " | Register rows to reconcile: " & FORMAT([Exchange Scenario Register Review Rows],"0") & " | Plan repairs (not purchases): " & FORMAT([Exchange Scenario Plan Remediation],"0")
+		formatString: @
+		displayFolder: Migration licensing scenario
+
+	column 'Mailbox GUID'
+		dataType: string
+		lineageTag: 0abd4866-797b-4d17-a2b6-a64dbc14f34e
+		summarizeBy: none
+		sourceColumn: [Mailbox GUID]
+
+	column 'Object GUID'
+		dataType: string
+		isHidden
+		lineageTag: f6ee481e-b41a-42c7-8bb8-7a5fd524827f
+		summarizeBy: none
+		sourceColumn: [Object GUID]
+
+	column Mailbox
+		dataType: string
+		lineageTag: d27c7b3a-023e-4b34-8cb9-d79faecef144
+		summarizeBy: none
+		sourceColumn: [Mailbox]
+
+	column 'Primary SMTP Address'
+		dataType: string
+		lineageTag: c07b5c2c-75c7-4c18-b9bd-65d708379254
+		summarizeBy: none
+		sourceColumn: [Primary SMTP Address]
+
+	column Country
+		dataType: string
+		lineageTag: d973c22e-1b7f-4002-9ca0-e644b61ae45a
+		summarizeBy: none
+		sourceColumn: [Country]
+
+	column 'Exchange Version'
+		dataType: string
+		lineageTag: 37e94951-fd5e-4e81-9be6-bf6ad88b2bc2
+		summarizeBy: none
+		sourceColumn: [Exchange Version]
+
+	column 'Mailbox Type'
+		dataType: string
+		lineageTag: 8087d89a-bc2a-46d8-812f-ecd2c3dc066b
+		summarizeBy: none
+		sourceColumn: [Mailbox Type]
+
+	column 'Server Name'
+		dataType: string
+		lineageTag: 472e819a-2f6c-499d-aa63-02eae0fe609f
+		summarizeBy: none
+		sourceColumn: [Server Name]
+
+	column 'Mailbox Size GB'
+		dataType: double
+		lineageTag: 590a06bb-b413-477e-baf2-5b383b09a686
+		summarizeBy: none
+		sourceColumn: [Mailbox Size GB]
+
+	column 'Loaded Batch ID'
+		dataType: string
+		isHidden
+		lineageTag: 503f359a-5c2f-456b-b158-e3bb239c9707
+		summarizeBy: none
+		sourceColumn: [Loaded Batch ID]
+
+	column 'Archive State'
+		dataType: string
+		lineageTag: 03f6db91-cafa-4f71-8864-e9a854b30d0e
+		summarizeBy: none
+		sourceColumn: [Archive State]
+
+	column 'Hold and Retention'
+		dataType: string
+		lineageTag: bfc462ab-ef3e-457c-b427-153075a40296
+		summarizeBy: none
+		sourceColumn: [Hold and Retention]
+
+	column 'Full Access Count'
+		dataType: double
+		isHidden
+		lineageTag: b6ebfb14-aecf-4f64-b7df-f8be244bd888
+		summarizeBy: none
+		sourceColumn: [Full Access Count]
+
+	column 'Send As Count'
+		dataType: double
+		isHidden
+		lineageTag: 5f6d6ca2-8f2d-40c4-8a7a-44d951ff02e3
+		summarizeBy: none
+		sourceColumn: [Send As Count]
+
+	column 'Send On Behalf'
+		dataType: string
+		lineageTag: c4abba85-33fa-4663-b64c-450de96c2660
+		summarizeBy: none
+		sourceColumn: [Send On Behalf]
+
+	column 'AD Account Key'
+		dataType: string
+		isHidden
+		lineageTag: 7b45a9e0-2332-4995-9be3-09904e23459d
+		summarizeBy: none
+		sourceColumn: [AD Account Key]
+
+	column 'Cloud Account Key'
+		dataType: string
+		isHidden
+		lineageTag: bbfe5d44-a3ef-4477-90fd-dead9f26e044
+		summarizeBy: none
+		sourceColumn: [Cloud Account Key]
+
+	column 'Account Link'
+		dataType: string
+		lineageTag: e0f672cf-9a6b-46b6-b176-79a65066a0fa
+		summarizeBy: none
+		sourceColumn: [Account Link]
+
+	column 'AD Account'
+		dataType: string
+		lineageTag: cf090ea1-c8b0-4751-96ff-a850770317b5
+		summarizeBy: none
+		sourceColumn: [AD Account]
+
+	column 'Entra Account'
+		dataType: string
+		lineageTag: f0b6e14b-1689-4677-97c4-621e07adc642
+		summarizeBy: none
+		sourceColumn: [Entra Account]
+
+	column 'AD Job Title'
+		dataType: string
+		lineageTag: 0cc73caf-090e-44ba-b5ef-004526a2f374
+		summarizeBy: none
+		sourceColumn: [AD Job Title]
+
+	column 'Entra Job Title'
+		dataType: string
+		lineageTag: 8d58c1e6-4638-4c1d-8077-310c5e4cc7b9
+		summarizeBy: none
+		sourceColumn: [Entra Job Title]
+
+	column 'Observed SKUs'
+		dataType: string
+		lineageTag: 7c04f99a-01b4-4d18-bf22-dadea22d3fed
+		summarizeBy: none
+		sourceColumn: [Observed SKUs]
+
+	column 'Successful Exchange Plans'
+		dataType: string
+		lineageTag: cc9f939e-5690-4cfc-b5aa-f4de846cd311
+		summarizeBy: none
+		sourceColumn: [Successful Exchange Plans]
+
+	column 'Other Exchange Plan States'
+		dataType: string
+		lineageTag: 04713191-72c3-49a9-946a-a722515ffc50
+		summarizeBy: none
+		sourceColumn: [Other Exchange Plan States]
+
+	column 'Mailbox Plan Observation'
+		dataType: string
+		lineageTag: 71c2200c-dac1-4221-bf17-1874f8766e43
+		summarizeBy: none
+		sourceColumn: [Mailbox Plan Observation]
+
+	column 'Retained On-premises'
+		dataType: string
+		lineageTag: 51e0bb3f-a349-4e63-b037-4641afbd4ff8
+		summarizeBy: none
+		sourceColumn: [Retained On-premises]
+
+	column 'F3 Review'
+		dataType: string
+		lineageTag: aa7caa2a-00f3-4b8c-8dad-a273b098da5a
+		summarizeBy: none
+		sourceColumn: [F3 Review]
+
+	column 'E3 Review'
+		dataType: string
+		lineageTag: e5ae54d8-90c4-4da3-8479-91476e5e3716
+		summarizeBy: none
+		sourceColumn: [E3 Review]
+
+	column 'SE CAL Review'
+		dataType: string
+		lineageTag: 88adf73c-46c8-48e4-900c-b268a910f029
+		summarizeBy: none
+		sourceColumn: [SE CAL Review]
+
+	column 'Licensing Decision'
+		dataType: string
+		lineageTag: 66967cc8-1126-4145-a873-8a12f994ebb5
+		summarizeBy: none
+		sourceColumn: [Licensing Decision]
+
+	partition 'Exchange Mailbox Reconciliation' = calculated
+		mode: import
+		source =
+				VAR _source0 = SELECTCOLUMNS('Exchange Mailbox Server Reference', "Loaded Batch ID", 'Exchange Mailbox Server Reference'[Loaded Batch ID], "Object GUID", 'Exchange Mailbox Server Reference'[Object GUID], "Server Name", 'Exchange Mailbox Server Reference'[Server Name])
+				VAR _source1 = SELECTCOLUMNS('AD User Evidence', "CloudMatchStatus", 'AD User Evidence'[CloudMatchStatus], "Loaded Batch ID", 'AD User Evidence'[Loaded Batch ID], "ObjectGUID", 'AD User Evidence'[ObjectGUID], "TenantADUserKey", 'AD User Evidence'[TenantADUserKey], "TenantUserKey", 'AD User Evidence'[TenantUserKey], "Title", 'AD User Evidence'[Title], "UserPrincipalName", 'AD User Evidence'[UserPrincipalName])
+				VAR _source2 = SELECTCOLUMNS('Native User Evidence', "JobTitle", 'Native User Evidence'[JobTitle], "Loaded Batch ID", 'Native User Evidence'[Loaded Batch ID], "TenantUserKey", 'Native User Evidence'[TenantUserKey], "UserPrincipalName", 'Native User Evidence'[UserPrincipalName])
+				VAR _source3 = SELECTCOLUMNS('Native User License', "Loaded Batch ID", 'Native User License'[Loaded Batch ID], "TenantSkuKey", 'Native User License'[TenantSkuKey], "TenantUserKey", 'Native User License'[TenantUserKey])
+				VAR _source4 = SELECTCOLUMNS('Native License SKU', "Loaded Batch ID", 'Native License SKU'[Loaded Batch ID], "SkuPartNumber", 'Native License SKU'[SkuPartNumber], "TenantSkuKey", 'Native License SKU'[TenantSkuKey])
+				VAR _source5 = FILTER(SELECTCOLUMNS('Native User Service Plan', "AssignmentState", 'Native User Service Plan'[AssignmentState], "IsEnabled", 'Native User Service Plan'[IsEnabled], "Loaded Batch ID", 'Native User Service Plan'[Loaded Batch ID], "ServicePlanName", 'Native User Service Plan'[ServicePlanName], "TenantUserKey", 'Native User Service Plan'[TenantUserKey]), LEFT([ServicePlanName],11)="EXCHANGE_S_")
+				VAR _source6 = SELECTCOLUMNS('Mailbox Migration Exceptions', "Loaded Batch ID", 'Mailbox Migration Exceptions'[Loaded Batch ID], "Mailbox Identity", 'Mailbox Migration Exceptions'[Mailbox Identity], "Requires Review", 'Mailbox Migration Exceptions'[Requires Review], "Retained", 'Mailbox Migration Exceptions'[Retained], "Status", 'Mailbox Migration Exceptions'[Status])
+				RETURN
+				GENERATE(
+				    SELECTCOLUMNS('Mailbox Migration Inventory',
+				        "Mailbox GUID", 'Mailbox Migration Inventory'[Mailbox GUID],
+				        "Object GUID", 'Mailbox Migration Inventory'[Object GUID],
+				        "Mailbox", 'Mailbox Migration Inventory'[Display Name],
+				        "Primary SMTP Address", 'Mailbox Migration Inventory'[Primary SMTP Address],
+				        "Country", 'Mailbox Migration Inventory'[Country],
+				        "Exchange Version", 'Mailbox Migration Inventory'[Exchange Version],
+				        "Mailbox Type", 'Mailbox Migration Inventory'[Mailbox Type],
+				        "Mailbox Size GB", 'Mailbox Migration Inventory'[Mailbox Size GB],
+				        "Loaded Batch ID", 'Mailbox Migration Inventory'[Loaded Batch ID],
+				        "Archive State", 'Mailbox Migration Inventory'[Archive State],
+				        "Hold and Retention", 'Mailbox Migration Inventory'[Hold and Retention],
+				        "Full Access Count", 'Mailbox Migration Inventory'[Full Access Count],
+				        "Send As Count", 'Mailbox Migration Inventory'[Send As Count],
+				        "Send On Behalf", 'Mailbox Migration Inventory'[Send On Behalf]),
+				    VAR _object = LOWER(TRIM([Object GUID]))
+				    VAR _batch = [Loaded Batch ID]
+				    VAR _servers = FILTER(_source0, _object <> "" && _batch <> "" &&
+				        [Object GUID] = _object && [Loaded Batch ID] = _batch)
+				    VAR _ad = FILTER(_source1, _object <> "" && _batch <> "" &&
+				        LOWER(TRIM([ObjectGUID])) = _object && [Loaded Batch ID] = _batch)
+				    VAR _adUnique = COUNTROWS(_ad) = 1
+				    VAR _adKey = IF(_adUnique, MAXX(_ad, [TenantADUserKey]))
+				    VAR _cloudKey = IF(_adUnique && MAXX(_ad, [CloudMatchStatus]) = "Unique native SID",
+				        MAXX(_ad, [TenantUserKey]))
+				    VAR _cloud = FILTER(_source2, _cloudKey <> "" &&
+				        [TenantUserKey] = _cloudKey && [Loaded Batch ID] = _batch)
+				    VAR _cloudUnique = COUNTROWS(_cloud) = 1
+				    VAR _user = IF(_cloudUnique, _cloudKey)
+				    VAR _licenses = FILTER(_source3, _user <> "" &&
+				        [TenantUserKey] = _user && [Loaded Batch ID] = _batch)
+				    VAR _skuKeys = SELECTCOLUMNS(_licenses, "Key", [TenantSkuKey])
+				    VAR _skus = FILTER(_source4, [TenantSkuKey] IN _skuKeys &&
+				        [Loaded Batch ID] = _batch)
+				    VAR _plans = FILTER(_source5, _user <> "" &&
+				        [TenantUserKey] = _user && [Loaded Batch ID] = _batch &&
+				        LEFT([ServicePlanName], 11) = "EXCHANGE_S_")
+				    VAR _success = FILTER(_plans, LOWER([IsEnabled]) = "true" &&
+				        [AssignmentState] = "Success")
+				    VAR _p1 = COUNTROWS(FILTER(_success, [ServicePlanName] = "EXCHANGE_S_STANDARD")) > 0
+				    VAR _p2 = COUNTROWS(FILTER(_success, [ServicePlanName] = "EXCHANGE_S_ENTERPRISE")) > 0
+				    VAR _kiosk = COUNTROWS(FILTER(_success, [ServicePlanName] = "EXCHANGE_S_DESKLESS")) > 0
+				    VAR _foundation = COUNTROWS(FILTER(_success, [ServicePlanName] = "EXCHANGE_S_FOUNDATION")) > 0
+				    VAR _planNames = DISTINCT(SELECTCOLUMNS(_success, "Plan", [ServicePlanName]))
+				    VAR _skuNames = DISTINCT(SELECTCOLUMNS(_skus, "SKU", [SkuPartNumber]))
+				    VAR _exception = FILTER(_source6, _object <> "" &&
+				        [Loaded Batch ID] = _batch &&
+				        LOWER([Mailbox Identity]) = "local_mailboxes|" & _object &&
+				        [Status] = "Matched local" && [Retained] = 1 &&
+				        [Requires Review] = 0)
+				    VAR _retained = COUNTROWS(_exception) > 0
+				    VAR _userMailbox = [Mailbox Type] = "UserMailbox"
+				    VAR _size = [Mailbox Size GB]
+				    VAR _sizeUnknown = ISBLANK(_size) || _size < 0
+				    VAR _features = NOT([Archive State] IN {"None", "Disabled", "Not observed", "Unknown", ""}) ||
+				        [Hold and Retention] = "Review - preserve settings" || [Full Access Count] > 0 ||
+				        [Send As Count] > 0 || [Send On Behalf] <> ""
+				    RETURN ROW(
+				        "Server Name", IF(COUNTROWS(_servers)=1,MAXX(_servers,[Server Name]),"Not observed"),
+				        "AD Account Key", _adKey,
+				        "Cloud Account Key", _user,
+				        "Account Link", IF(NOT(_adUnique), IF(COUNTROWS(_ad)>1,"Ambiguous AD identity","No same-batch AD identity"),
+				            IF(_cloudUnique,"Unique AD GUID + native SID",IF(COUNTROWS(_cloud)>1,"Ambiguous cloud identity","AD only; cloud unresolved"))),
+				        "AD Account", IF(_adUnique, MAXX(_ad, [UserPrincipalName])),
+				        "Entra Account", IF(_cloudUnique, MAXX(_cloud, [UserPrincipalName])),
+				        "AD Job Title", IF(_adUnique, MAXX(_ad, [Title])),
+				        "Entra Job Title", IF(_cloudUnique, MAXX(_cloud, [JobTitle])),
+				        "Observed SKUs", IF(_user="","Unknown - unresolved account",COALESCE(CONCATENATEX(_skuNames,[SKU],"; ",[SKU],ASC),"None observed")),
+				        "Successful Exchange Plans", IF(_user="","Unknown - unresolved account",COALESCE(CONCATENATEX(_planNames,[Plan],"; ",[Plan],ASC),"None observed")),
+				        "Other Exchange Plan States", CONCATENATEX(DISTINCT(SELECTCOLUMNS(FILTER(_plans,
+				            LOWER([IsEnabled]) <> "true" || [AssignmentState] <> "Success"),
+				            "State", [ServicePlanName] & ": " & [AssignmentState])),[State],"; ",[State],ASC),
+				        "Mailbox Plan Observation", SWITCH(TRUE(),_user="","Unknown - unresolved account",_p2,"Plan 2 observed",_p1,"Plan 1 observed",_kiosk,"Kiosk observed",_foundation,"Foundation only - no mailbox right","No mailbox plan observed"),
+				        "Retained On-premises", IF(_retained,"Matched retained decision","No matched retained decision; review register"),
+				        "F3 Review", SWITCH(TRUE(),NOT(_userMailbox),"Special mailbox - review accessors and features",
+				            _sizeUnknown,"Unknown mailbox size - review",_size>2,"Above 2 GB - Kiosk alone insufficient",
+				            _features,"Feature or delegation review required","At most 2 GB - frontline eligibility and usage unverified"),
+				        "E3 Review", SWITCH(TRUE(),NOT(_userMailbox),"Special mailbox rules; no automatic E3 requirement",
+				            NOT(_sizeUnknown) && _size>100,"Above 100 GB - quota and archive design review",
+				            NOT(_sizeUnknown) && _size>50,"Above 50 GB - Plan 2 or equivalent review",
+				            _features,"Archive, hold and delegation rights review","No E3 purchase conclusion; assess complete workload"),
+				        "SE CAL Review", IF(_p2,"Plan 2 observed - base/additive equivalency to verify",
+				            IF(_p1,"Plan 1 observed - base equivalency to verify","CAL coverage unverified; reconcile contracts and accessors")),
+				        "Licensing Decision", "Unqualified - contract, active coverage, accessors and frontline eligibility required")
+				)

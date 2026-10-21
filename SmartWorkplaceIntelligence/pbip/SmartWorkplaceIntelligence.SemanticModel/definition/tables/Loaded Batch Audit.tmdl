@@ -158,4 +158,6 @@ table 'Loaded Batch Audit'
 				,
 				ROW("Table Name", "Exchange On-prem Infrastructure", "Loaded Batch ID", MAXX('Exchange On-prem Infrastructure', 'Exchange On-prem Infrastructure'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Exchange On-prem Infrastructure')),
 				ROW("Table Name", "Exchange Mailbox Databases", "Loaded Batch ID", MAXX('Exchange Mailbox Databases', 'Exchange Mailbox Databases'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Exchange Mailbox Databases'))
+				,
+				ROW("Table Name", "Exchange Mailbox Server Reference", "Loaded Batch ID", MAXX('Exchange Mailbox Server Reference', 'Exchange Mailbox Server Reference'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Exchange Mailbox Server Reference'))
 				)
