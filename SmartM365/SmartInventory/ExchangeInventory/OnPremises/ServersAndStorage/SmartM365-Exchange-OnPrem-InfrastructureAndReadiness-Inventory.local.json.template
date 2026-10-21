@@ -26,5 +26,9 @@
   "WeeklyHistoryFolderPath": "{{DataAllRootPath}}\\Exchange\\OnPrem\\ServersAndStorage\\WeeklyHistory",
   "WeeklyHistoryRetentionWeeks": 52,
   "ExcludedServers": [],
+  "HealthCheckerTimeoutMinutesPerServer": 30,
+  "HealthCheckerTotalBudgetMinutes": 1320,
+  "HealthCheckerKeepFailedRawOutputDays": 7,
+  "HealthCheckerWorkFolderPath": "",
   "OutputRoot": "{{DataAllRootPath}}\\Exchange\\OnPrem\\ServersAndStorage"
 }

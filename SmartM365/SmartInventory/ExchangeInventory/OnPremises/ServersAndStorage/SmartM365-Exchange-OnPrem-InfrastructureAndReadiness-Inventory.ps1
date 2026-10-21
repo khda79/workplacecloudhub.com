@@ -10,6 +10,8 @@
     - Disk drives from Win32_DiskDrive
     - Optional Exchange mailbox database paths
     - Optional Exchange service health
+    - Optional Microsoft CSS-Exchange Health Checker findings and per-server summary
+      (vendored, SHA256 and Microsoft signature verified before every run)
     - Exchange schema and readiness configuration
     - Per-server decommissioning summary
     - Global CSV summary
@@ -22,15 +24,16 @@
     - WinRM / PowerShell Remoting
 
 .VERSION
-1.6.10
+1.7.0
 .REQUIREMENTS
     Windows PowerShell 5.1 on an Exchange 2016/on-premises management host.
     Modules/snap-ins: SmartM365 WindowsPowerShell5 compatibility module; Exchange Management snap-in.
     Minimum permissions: Exchange on-premises read access for Get-ExchangeServer and virtual directory/readiness cmdlets; WMI/DCOM read access to target servers for compute, disk and storage inventory.
     Conditional: Mail.Send is required only when Graph mail is used; Sites.Selected write is required only when SharePoint upload is enabled.
+    Conditional: -IncludeHealthChecker requires an elevated session (local administrator) on the Exchange server.
 .NOTES
     Script Name : SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory.ps1
-    Version     : 1.6.11
+    Version     : 1.7.0
     Requirements:
       - Windows PowerShell 5.1 with Exchange 2016 Management Tools
       - Exchange 2016 read RBAC for Get-ExchangeServer, Get-MailboxDatabase,
@@ -129,6 +132,8 @@ param(
 
     [switch]$IncludeMailboxDatabasePaths,
 
+    [switch]$IncludeHealthChecker,
+
     [switch]$SkipFqdnAndUseServerName,
 
     [string]$RegenerateHtmlReportFromFolder,
@@ -187,8 +192,12 @@ $tenantContextPath = & {
 . $tenantContextPath
 
 $ScriptName = "SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory"
-$ScriptVersion = "1.6.11"
+$ScriptVersion = "1.7.0"
 $RunId = (Get-Date).ToString("yyyyMMdd-HHmmss")
+# Vendored Microsoft CSS-Exchange Health Checker (see ThirdParty\CSS-Exchange\HealthChecker\PROVENANCE.md).
+$HealthCheckerRelativePath = 'ThirdParty\CSS-Exchange\HealthChecker\HealthChecker.ps1'
+$HealthCheckerVersion = '26.10.13.1644'
+$HealthCheckerExpectedSha256 = 'BF8758E96E8760226E3094D45A84909AFFA9F91167DE11F739D8E3D9343229DC'
 
 $script:SmartM365EffectiveConfig = Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot
 
@@ -561,7 +570,8 @@ function Export-ServersAndStorageCsv {
     param(
         [AllowNull()][object[]]$Data,
         [Parameter(Mandatory)]
-        [string]$Path
+        [string]$Path,
+        [string[]]$Columns = @()
     )
 
     Import-SmartM365CoreModule
@@ -571,7 +581,7 @@ function Export-ServersAndStorageCsv {
         Ensure-Directory -Path $latestCsvFolder
         $latestPath = Join-Path -Path $latestCsvFolder -ChildPath (Split-Path -Path $Path -Leaf)
     }
-    Publish-CoreSmartM365Csv -Data @($Data) -TimestampedPath $Path -LatestPath $latestPath -Delimiter ';' -NoSharePointUpload | Out-Null
+    Publish-CoreSmartM365Csv -Data @($Data) -TimestampedPath $Path -LatestPath $latestPath -Columns $Columns -Delimiter ';' -NoSharePointUpload | Out-Null
     $script:ServersAndStorageGeneratedCsvPaths.Add($Path) | Out-Null
     Invoke-ServersAndStorageSharePointUpload -LocalFilePath $Path
 
@@ -1050,6 +1060,472 @@ function Get-ExchangeServiceHealthSummary {
     }
 }
 
+function Get-HealthCheckerCsvColumn {
+    param([Parameter(Mandatory)][ValidateSet('Findings', 'Summary')][string]$Kind)
+
+    if ($Kind -eq 'Findings') {
+        return @('ServerName', 'Category', 'CategoryOrder', 'RowNumber', 'Check', 'Item', 'Status', 'Value', 'ValueMasked', 'Recommendation', 'HealthCheckerVersion', 'GenerationTime')
+    }
+    return @('ServerName', 'RunStatus', 'RunMessage', 'DurationSeconds', 'HealthCheckerVersion', 'GenerationTime', 'ExchangeVersion', 'BuildNumber', 'CumulativeUpdate', 'SecurityUpdate', 'LatestInstallTime', 'SecurityUpdateStatus', 'CumulativeUpdateOutOfDate', 'CumulativeUpdateDaysOld', 'EndOfLifeStatus', 'VulnerabilityCount', 'Vulnerabilities', 'ErrorCount', 'WarningCount', 'OkCount', 'InfoCount', 'ServersProcessed', 'ServersTotal')
+}
+
+function Get-HealthCheckerMaskingRule {
+    # Values of these checks can hold host names, addresses, certificates, domains or tenant/app identifiers.
+    return [pscustomobject]@{
+        Categories = @('Hybrid Information')
+        Checks     = @('Address', 'DNS Server', 'Internet Web Proxy', 'Http Proxy Setting', 'Http Proxy By Pass List', 'FriendlyName', 'Thumbprint', 'Certificate', 'Current Auth Certificate', 'Next Auth Certificate', 'TLS Certificate Name', 'TlsCertificateName', 'Internal Transport Certificate', 'Namespaces', 'Domain(s) configured for Hybrid use', 'Domain Trusts', 'On-Premises Smart Host Domain', 'Open Relay Wild Card Domain', 'Exchange Server Membership', 'Exchange Server Token Groups', 'Legacy Exchange Security Groups', 'AD Site', 'Location', 'Description', 'OAuth between Exchange Server and Exchange Online', 'OAuth between Exchange Server and Microsoft Teams')
+    }
+}
+
+function Get-HealthCheckerSetting {
+    $perServerMinutes = [int](Get-SmartM365EffectiveConfigValue -Name 'HealthCheckerTimeoutMinutesPerServer' -DefaultValue 30)
+    $budgetMinutes = [int](Get-SmartM365EffectiveConfigValue -Name 'HealthCheckerTotalBudgetMinutes' -DefaultValue 1320)
+    $keepDays = [int](Get-SmartM365EffectiveConfigValue -Name 'HealthCheckerKeepFailedRawOutputDays' -DefaultValue 7)
+    $workRoot = [string](Get-SmartM365EffectiveConfigValue -Name 'HealthCheckerWorkFolderPath' -DefaultValue '')
+    if ($perServerMinutes -lt 1 -or $perServerMinutes -gt 240) { throw "HealthCheckerTimeoutMinutesPerServer must be between 1 and 240." }
+    if ($budgetMinutes -lt 1 -or $budgetMinutes -gt 1440) { throw "HealthCheckerTotalBudgetMinutes must be between 1 and 1440." }
+    if ($keepDays -lt 0 -or $keepDays -gt 30) { throw "HealthCheckerKeepFailedRawOutputDays must be between 0 and 30." }
+    if ([string]::IsNullOrWhiteSpace($workRoot)) {
+        $workRoot = Join-Path -Path $env:ProgramData -ChildPath 'SmartM365\HealthChecker'
+    }
+    # Raw Health Checker files hold the full server configuration: they stay on a local disk only.
+    if ($workRoot.StartsWith('\\') -or -not [System.IO.Path]::IsPathRooted($workRoot)) {
+        throw "HealthCheckerWorkFolderPath must be a local absolute path, not a share: $workRoot"
+    }
+
+    return [pscustomobject]@{
+        TimeoutMinutesPerServer    = $perServerMinutes
+        TotalBudgetMinutes         = $budgetMinutes
+        KeepFailedRawOutputDays    = $keepDays
+        WorkFolderPath             = $workRoot
+    }
+}
+
+function Test-HealthCheckerScriptIntegrity {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$ExpectedSha256
+    )
+
+    $result = [pscustomobject]@{ IsValid = $false; Reason = $null; Sha256 = $null; SignatureStatus = $null; Signer = $null }
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        $result.Reason = "Health Checker script not found: $Path"
+        return $result
+    }
+
+    $result.Sha256 = (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash
+    if ($result.Sha256 -ne $ExpectedSha256.ToUpperInvariant()) {
+        $result.Reason = "SHA256 mismatch: expected $($ExpectedSha256.ToUpperInvariant()), found $($result.Sha256)."
+        return $result
+    }
+
+    $signature = Get-AuthenticodeSignature -FilePath $Path
+    $result.SignatureStatus = [string]$signature.Status
+    if ($signature.SignerCertificate) { $result.Signer = [string]$signature.SignerCertificate.Subject }
+    if ([string]$signature.Status -ne 'Valid' -or -not $signature.SignerCertificate) {
+        $result.Reason = "Authenticode signature is not valid (status $($signature.Status))."
+        return $result
+    }
+    $subject = [string]$signature.SignerCertificate.Subject
+    $issuer = [string]$signature.SignerCertificate.Issuer
+    if ($subject -notmatch '(^|,\s*)CN=Microsoft Corporation(,|$)' -or $subject -notmatch '(^|,\s*)O=Microsoft Corporation(,|$)' -or $issuer -notmatch '(^|,\s*)O=Microsoft Corporation(,|$)') {
+        $result.Reason = "Authenticode signer is not Microsoft Corporation: $subject"
+        return $result
+    }
+
+    $result.IsValid = $true
+    return $result
+}
+
+function Test-HealthCheckerElevation {
+    $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+    return (New-Object Security.Principal.WindowsPrincipal($identity)).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
+function Invoke-HealthCheckerProcess {
+    param(
+        [Parameter(Mandatory)][string]$ScriptPath,
+        [Parameter(Mandatory)][string]$ServerName,
+        [Parameter(Mandatory)][string]$OutputFolder,
+        [Parameter(Mandatory)][int]$TimeoutSeconds,
+        [string]$PowerShellPath = (Join-Path -Path $env:SystemRoot -ChildPath 'System32\WindowsPowerShell\v1.0\powershell.exe')
+    )
+
+    Ensure-Directory -Path $OutputFolder
+    $consolePath = Join-Path -Path $OutputFolder -ChildPath 'HealthChecker-Console.txt'
+    $errorPath = Join-Path -Path $OutputFolder -ChildPath 'HealthChecker-Errors.txt'
+    # A child process: Health Checker calls exit when it is not elevated, and a hung run can be killed.
+    $arguments = @('-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', ('"{0}"' -f $ScriptPath), '-Server', ('"{0}"' -f $ServerName), '-OutputFilePath', ('"{0}"' -f $OutputFolder), '-SkipVersionCheck')
+    $started = Get-Date
+    $result = [pscustomobject]@{ ServerName = $ServerName; Status = $null; Message = $null; ExitCode = $null; DurationSeconds = $null; XmlPath = $null }
+    try {
+        $process = Start-Process -FilePath $PowerShellPath -ArgumentList $arguments -PassThru -WindowStyle Hidden -RedirectStandardOutput $consolePath -RedirectStandardError $errorPath -ErrorAction Stop
+        $null = $process.Handle
+    }
+    catch {
+        $result.Status = 'LaunchFailed'
+        $result.Message = "Health Checker could not be started: $($_.Exception.Message)"
+        $result.DurationSeconds = [math]::Round(((Get-Date) - $started).TotalSeconds, 0)
+        return $result
+    }
+
+    if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
+        & taskkill.exe /PID $process.Id /T /F 2>&1 | Out-Null
+        try { [void]$process.WaitForExit(30000) } catch { Write-Verbose "Stopped Health Checker process already gone: $($_.Exception.Message)" }
+        $result.Status = 'Timeout'
+        $result.Message = "Health Checker exceeded the $([math]::Round($TimeoutSeconds / 60, 1)) minute limit and was stopped."
+        $result.DurationSeconds = [math]::Round(((Get-Date) - $started).TotalSeconds, 0)
+        return $result
+    }
+
+    $result.ExitCode = $process.ExitCode
+    $result.DurationSeconds = [math]::Round(((Get-Date) - $started).TotalSeconds, 0)
+    $xmlFiles = @(Get-ChildItem -LiteralPath $OutputFolder -Filter 'HealthChecker-*.xml' -File -ErrorAction SilentlyContinue | Where-Object { $_.Name -notlike 'HealthChecker-ScriptDebugObject*' -and $_.Name -notlike 'HealthChecker-ExchangeDCCoreRatio-*' } | Sort-Object LastWriteTime -Descending)
+    $consoleText = if (Test-Path -LiteralPath $consolePath -PathType Leaf) { [System.IO.File]::ReadAllText($consolePath) } else { '' }
+    if ($xmlFiles.Count -gt 0) {
+        $result.Status = 'Completed'
+        $result.XmlPath = $xmlFiles[0].FullName
+    }
+    elseif ($consoleText -match 'needs to be executed in elevated mode') {
+        $result.Status = 'NotElevated'
+        $result.Message = 'Health Checker requires an elevated (administrator) session.'
+    }
+    else {
+        $result.Status = 'NoOutput'
+        $result.Message = "Health Checker produced no XML result (exit code $($result.ExitCode))."
+    }
+    return $result
+}
+
+function ConvertTo-HealthCheckerSafeValue {
+    param([AllowNull()][object]$Value)
+
+    if ($null -eq $Value) { return $null }
+    $text = if ($Value -is [string]) { $Value } else { (@($Value) | ForEach-Object { [string]$_ }) -join '; ' }
+    $text = [regex]::Replace($text, '\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b', '[guid]')
+    $text = [regex]::Replace($text, '\b(?:\d{1,3}\.){3}\d{1,3}\b', '[ip]')
+    # IPv6 candidates are confirmed by the parser so clock times such as 06:00:00 are kept.
+    $text = [regex]::Replace($text, '(?<![\w:.])(?:[0-9a-fA-F]{0,4}:){2,7}[0-9a-fA-F]{0,4}(?![\w:])', [System.Text.RegularExpressions.MatchEvaluator]{
+            param($match)
+            $address = $null
+            if ($match.Value -notmatch '^\d{1,2}:\d{2}(:\d{2})?$' -and [System.Net.IPAddress]::TryParse($match.Value, [ref]$address) -and $address.AddressFamily -eq [System.Net.Sockets.AddressFamily]::InterNetworkV6) { return '[ip]' }
+            return $match.Value
+        })
+    $text = [regex]::Replace($text, '\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b', '[email]')
+    $text = [regex]::Replace($text, '\s+', ' ').Trim()
+    if ($text.Length -gt 1000) { $text = $text.Substring(0, 997) + '...' }
+    return $text
+}
+
+function Get-HealthCheckerLineValue {
+    param(
+        [AllowNull()][object]$Line,
+        [Parameter(Mandatory)][string]$Name
+    )
+
+    # Serialized entries can be plain strings when Export-Clixml ran out of depth.
+    if ($null -eq $Line) { return $null }
+    if ($Line -is [string]) { return $(if ($Name -eq 'DisplayValue') { $Line } else { $null }) }
+    $property = $Line.PSObject.Properties[$Name]
+    if ($null -eq $property) { return $null }
+    return $property.Value
+}
+
+function ConvertFrom-HealthCheckerXml {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$ServerName,
+        [Parameter(Mandatory)][string]$HealthCheckerVersion
+    )
+
+    $data = Import-Clixml -LiteralPath $Path
+    $displayResults = Get-HealthCheckerLineValue -Line $data -Name 'DisplayResults'
+    if ($displayResults -isnot [System.Collections.IDictionary] -or $displayResults.Count -eq 0) {
+        throw 'The Health Checker XML has no DisplayResults section.'
+    }
+
+    $masking = Get-HealthCheckerMaskingRule
+    $statusMap = @{ Red = 'Error'; Yellow = 'Warning'; Green = 'OK' }
+    $lines = New-Object 'System.Collections.Generic.List[object]'
+    $groups = @(foreach ($entry in $displayResults.GetEnumerator()) {
+        $order = 0
+        [void][int]::TryParse([string](Get-HealthCheckerLineValue -Line $entry.Key -Name 'DisplayOrder'), [ref]$order)
+        $categoryName = if ($entry.Key -is [string]) { $entry.Key } else { [string](Get-HealthCheckerLineValue -Line $entry.Key -Name 'Name') }
+        [pscustomobject]@{ Category = $categoryName; Order = $order; Lines = @($entry.Value) }
+    })
+    foreach ($group in @($groups | Sort-Object Order, Category)) {
+        $parentCheck = $null
+        foreach ($line in $group.Lines) {
+            if ($null -eq $line) { continue }
+            $name = [string](Get-HealthCheckerLineValue -Line $line -Name 'Name')
+            $tab = 0
+            [void][int]::TryParse([string](Get-HealthCheckerLineValue -Line $line -Name 'TabNumber'), [ref]$tab)
+            $testingName = [string](Get-HealthCheckerLineValue -Line $line -Name 'TestingName')
+            $isSubLine = $tab -gt 1 -or [string]::IsNullOrWhiteSpace($name) -or $name -in @('Error', 'Warning')
+            if (-not $isSubLine -or [string]::IsNullOrWhiteSpace($parentCheck)) {
+                $parentCheck = if ([string]::IsNullOrWhiteSpace($name)) { $testingName } else { $name }
+            }
+            # An Error/Warning line with its own testing name (for example "Out of Date") is its own check.
+            $check = if ($isSubLine -and -not [string]::IsNullOrWhiteSpace($testingName) -and $testingName -ne $name -and $testingName -notin @('Error', 'Warning')) { $testingName } else { $parentCheck }
+            $lines.Add([pscustomobject]@{
+                Category      = $group.Category
+                CategoryOrder = $group.Order
+                Check         = $check
+                Item          = $(if ($isSubLine -and -not [string]::IsNullOrWhiteSpace($name)) { $name } else { $null })
+                Name          = $name
+                WriteType     = [string](Get-HealthCheckerLineValue -Line $line -Name 'WriteType')
+                DisplayValue  = Get-HealthCheckerLineValue -Line $line -Name 'DisplayValue'
+                TestingName   = [string](Get-HealthCheckerLineValue -Line $line -Name 'TestingName')
+                CustomName    = [string](Get-HealthCheckerLineValue -Line $line -Name 'CustomName')
+                CustomValue   = [string](Get-HealthCheckerLineValue -Line $line -Name 'CustomValue')
+            }) | Out-Null
+        }
+    }
+
+    $findings = New-Object 'System.Collections.Generic.List[object]'
+    $generationTime = $null
+    $rowNumber = 0
+    foreach ($entry in $lines) {
+        $rowNumber++
+        $writeType = $entry.WriteType
+        $status = if ($statusMap.ContainsKey($writeType)) { $statusMap[$writeType] } else { 'Info' }
+        $effectiveName = if (-not [string]::IsNullOrWhiteSpace([string]$entry.Item) -and [string]$entry.Item -notin @('Error', 'Warning')) { [string]$entry.Item } else { [string]$entry.Check }
+        $masked = $entry.Category -in $masking.Categories -or $effectiveName -in $masking.Checks
+        $rawValue = if ($writeType -eq 'OutColumns') { '[table]' } else { $entry.DisplayValue }
+        $safeValue = ConvertTo-HealthCheckerSafeValue -Value $rawValue
+        $recommendation = if ($masked -or [string]::IsNullOrWhiteSpace($safeValue)) { $null } else { (@([regex]::Matches($safeValue, 'https?://[^\s;,)]+') | ForEach-Object { $_.Value.TrimEnd('.') }) | Select-Object -Unique) -join '; ' }
+        if ($entry.Category -eq 'Exchange Information' -and $entry.Check -eq 'Generation Time') { $generationTime = $safeValue }
+        $findings.Add([pscustomobject]@{
+            ServerName           = $ServerName
+            Category             = $entry.Category
+            CategoryOrder        = $entry.CategoryOrder
+            RowNumber            = $rowNumber
+            Check                = $entry.Check
+            Item                 = $entry.Item
+            Status               = $status
+            Value                = $(if ($masked) { '[masked]' } else { $safeValue })
+            ValueMasked          = $masked
+            Recommendation       = $(if ([string]::IsNullOrWhiteSpace($recommendation)) { $null } else { $recommendation })
+            HealthCheckerVersion = $HealthCheckerVersion
+            GenerationTime       = $null
+        }) | Out-Null
+    }
+    foreach ($finding in $findings) { $finding.GenerationTime = $generationTime }
+
+    # Same vulnerability matching as Health Checker's own -VulnerabilityReport.
+    $vulnerabilities = New-Object 'System.Collections.Generic.List[string]'
+    foreach ($entry in @($lines | Where-Object { $_.Category -eq 'Security Vulnerability' })) {
+        $name = $entry.Name
+        $cveName = ''
+        if ($name -eq 'Security Vulnerability') {
+            $cveName = if ($entry.CustomName -ne 'Security Vulnerability' -and -not [string]::IsNullOrWhiteSpace($entry.CustomName)) { $entry.CustomName } else { $entry.CustomValue }
+        }
+        elseif (($name -eq 'IIS module anomalies detected' -and $entry.CustomValue -eq 'True') -or (-not [string]::IsNullOrWhiteSpace($name) -and $name -ne 'IIS module anomalies detected')) {
+            $cveName = $name
+        }
+        if (-not [string]::IsNullOrWhiteSpace($cveName) -and -not $vulnerabilities.Contains($cveName)) { $vulnerabilities.Add($cveName) }
+    }
+
+    $exchangeLines = @($lines | Where-Object { $_.Category -eq 'Exchange Information' })
+    $firstValue = {
+        param([string]$CheckName)
+        $match = @($exchangeLines | Where-Object { $_.Check -eq $CheckName -and [string]::IsNullOrWhiteSpace([string]$_.Item) } | Select-Object -First 1)
+        if ($match.Count -eq 0) { return $null }
+        return ConvertTo-HealthCheckerSafeValue -Value $match[0].DisplayValue
+    }
+    $version = & $firstValue 'Version'
+    $exchangeTexts = @($exchangeLines | ForEach-Object { [string]$_.DisplayValue })
+    $outOfDateLine = @($exchangeLines | Where-Object { $_.TestingName -eq 'Out of Date' } | Select-Object -First 1)
+    $daysOld = $null
+    if ($outOfDateLine.Count -gt 0 -and [string]$outOfDateLine[0].DisplayValue -match 'build that is (\d+) days old') { $daysOld = [int]$Matches[1] }
+    $securityStatus = if ($exchangeTexts -match 'out of support and no longer receives SUs') { 'OutOfSupportNoSU' }
+        elseif ($exchangeTexts -match 'Not on the latest SU') { 'MissingLatestSU' }
+        elseif ($exchangeTexts -match 'Not on the latest Exchange Patch') { 'NewerPatchAvailable' }
+        elseif ($null -ne $version) { 'Latest' }
+        else { 'Unknown' }
+    $endOfLife = @($exchangeLines | Where-Object { $_.Check -eq 'End Of Life' } | Select-Object -First 1)
+    $endOfLifeStatus = if ($endOfLife.Count -eq 0) { 'Supported' } elseif ($endOfLife[0].WriteType -eq 'Red') { 'EndOfLifeSoonOrReached' } else { 'EndOfLifeWithinOneYear' }
+    $cumulativeUpdate = $null
+    $securityUpdate = $null
+    if ($version -match '\b(CU\s?\d+)\b') { $cumulativeUpdate = $Matches[1].Replace(' ', '') }
+    if ($version -match '\bCU\s?\d+\s+(.+)$') { $securityUpdate = $Matches[1].Trim() }
+
+    return [pscustomobject]@{
+        Findings        = $findings.ToArray()
+        Vulnerabilities = $vulnerabilities.ToArray()
+        Facts           = [pscustomobject]@{
+            GenerationTime            = $generationTime
+            ExchangeVersion           = $version
+            BuildNumber               = & $firstValue 'Build Number'
+            CumulativeUpdate          = $cumulativeUpdate
+            SecurityUpdate            = $securityUpdate
+            LatestInstallTime         = & $firstValue 'Latest Install Time (SU/CU)'
+            SecurityUpdateStatus      = $securityStatus
+            CumulativeUpdateOutOfDate = ($outOfDateLine.Count -gt 0)
+            CumulativeUpdateDaysOld   = $daysOld
+            EndOfLifeStatus           = $endOfLifeStatus
+            ErrorCount                = @($findings | Where-Object { $_.Status -eq 'Error' }).Count
+            WarningCount              = @($findings | Where-Object { $_.Status -eq 'Warning' }).Count
+            OkCount                   = @($findings | Where-Object { $_.Status -eq 'OK' }).Count
+            InfoCount                 = @($findings | Where-Object { $_.Status -eq 'Info' }).Count
+        }
+    }
+}
+
+function ConvertTo-HealthCheckerSummaryRow {
+    param(
+        [Parameter(Mandatory)][string]$ServerName,
+        [Parameter(Mandatory)][string]$RunStatus,
+        [AllowNull()][string]$RunMessage,
+        [AllowNull()][object]$DurationSeconds,
+        [Parameter(Mandatory)][string]$HealthCheckerVersion,
+        [AllowNull()][object]$Parsed
+    )
+
+    $facts = if ($Parsed) { $Parsed.Facts } else { $null }
+    return [pscustomobject]@{
+        ServerName                = $ServerName
+        RunStatus                 = $RunStatus
+        RunMessage                = $RunMessage
+        DurationSeconds           = $DurationSeconds
+        HealthCheckerVersion      = $HealthCheckerVersion
+        GenerationTime            = $(if ($facts) { $facts.GenerationTime } else { $null })
+        ExchangeVersion           = $(if ($facts) { $facts.ExchangeVersion } else { $null })
+        BuildNumber               = $(if ($facts) { $facts.BuildNumber } else { $null })
+        CumulativeUpdate          = $(if ($facts) { $facts.CumulativeUpdate } else { $null })
+        SecurityUpdate            = $(if ($facts) { $facts.SecurityUpdate } else { $null })
+        LatestInstallTime         = $(if ($facts) { $facts.LatestInstallTime } else { $null })
+        SecurityUpdateStatus      = $(if ($facts) { $facts.SecurityUpdateStatus } else { 'Unknown' })
+        CumulativeUpdateOutOfDate = $(if ($facts) { $facts.CumulativeUpdateOutOfDate } else { $null })
+        CumulativeUpdateDaysOld   = $(if ($facts) { $facts.CumulativeUpdateDaysOld } else { $null })
+        EndOfLifeStatus           = $(if ($facts) { $facts.EndOfLifeStatus } else { $null })
+        VulnerabilityCount        = $(if ($Parsed) { @($Parsed.Vulnerabilities).Count } else { $null })
+        Vulnerabilities           = $(if ($Parsed) { @($Parsed.Vulnerabilities) -join '; ' } else { $null })
+        ErrorCount                = $(if ($facts) { $facts.ErrorCount } else { $null })
+        WarningCount              = $(if ($facts) { $facts.WarningCount } else { $null })
+        OkCount                   = $(if ($facts) { $facts.OkCount } else { $null })
+        InfoCount                 = $(if ($facts) { $facts.InfoCount } else { $null })
+        ServersProcessed          = $null
+        ServersTotal              = $null
+    }
+}
+
+function Remove-HealthCheckerExpiredWorkFolder {
+    [CmdletBinding(SupportsShouldProcess)]
+    param(
+        [Parameter(Mandatory)][string]$WorkRoot,
+        [Parameter(Mandatory)][int]$KeepDays
+    )
+
+    if (-not (Test-Path -LiteralPath $WorkRoot -PathType Container)) { return }
+    $limit = (Get-Date).AddDays(-$KeepDays)
+    # Only run folders created by this collector (RunId format) are purged.
+    foreach ($folder in @(Get-ChildItem -LiteralPath $WorkRoot -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '^\d{8}-\d{6}$' -and $_.LastWriteTime -lt $limit })) {
+        if (-not $PSCmdlet.ShouldProcess($folder.FullName, 'Remove expired Health Checker work folder')) { continue }
+        try { Remove-Item -LiteralPath $folder.FullName -Recurse -Force -ErrorAction Stop }
+        catch { Write-Log ("Expired Health Checker work folder could not be removed: {0}. {1}" -f $folder.FullName, $_.Exception.Message) 'WARN' }
+    }
+}
+
+function Invoke-ExchangeHealthCheckerInventory {
+    param(
+        [Parameter(Mandatory)][object[]]$ExchangeServers,
+        [Parameter(Mandatory)][string]$SourceScriptPath,
+        [Parameter(Mandatory)][string]$ExpectedSha256,
+        [Parameter(Mandatory)][string]$HealthCheckerVersion,
+        [Parameter(Mandatory)][string]$RunId,
+        [Parameter(Mandatory)][object]$Settings
+    )
+
+    $summaryRows = New-Object 'System.Collections.Generic.List[object]'
+    $findingRows = New-Object 'System.Collections.Generic.List[object]'
+    $serverNames = @($ExchangeServers | ForEach-Object { [string]$_.Name })
+    $runFolder = Join-Path -Path $Settings.WorkFolderPath -ChildPath $RunId
+    $blockedStatus = $null
+    $blockedMessage = $null
+
+    Remove-HealthCheckerExpiredWorkFolder -WorkRoot $Settings.WorkFolderPath -KeepDays $Settings.KeepFailedRawOutputDays
+    $integrity = Test-HealthCheckerScriptIntegrity -Path $SourceScriptPath -ExpectedSha256 $ExpectedSha256
+    $runScriptPath = Join-Path -Path $runFolder -ChildPath 'HealthChecker.ps1'
+    if ($integrity.IsValid) {
+        Ensure-Directory -Path $runFolder
+        # The copy that runs is verified again, so a change after the first check is never executed.
+        [System.IO.File]::WriteAllBytes($runScriptPath, [System.IO.File]::ReadAllBytes($SourceScriptPath))
+        $integrity = Test-HealthCheckerScriptIntegrity -Path $runScriptPath -ExpectedSha256 $ExpectedSha256
+    }
+    if (-not $integrity.IsValid) {
+        $blockedStatus = 'IntegrityFailed'
+        $blockedMessage = "Health Checker was not run: $($integrity.Reason)"
+        Write-Log $blockedMessage 'WARN'
+    }
+    elseif (-not (Test-HealthCheckerElevation)) {
+        $blockedStatus = 'NotElevated'
+        $blockedMessage = 'Health Checker was not run: it requires an elevated (administrator) session on the Exchange server.'
+        Write-Log $blockedMessage 'WARN'
+    }
+    else {
+        Write-Log ("Health Checker {0} verified (SHA256 and Microsoft signature). Per-server limit: {1} min; total budget: {2} min." -f $HealthCheckerVersion, $Settings.TimeoutMinutesPerServer, $Settings.TotalBudgetMinutes)
+    }
+
+    $deadline = (Get-Date).AddMinutes($Settings.TotalBudgetMinutes)
+    foreach ($serverName in $serverNames) {
+        if ($blockedStatus) {
+            $summaryRows.Add((ConvertTo-HealthCheckerSummaryRow -ServerName $serverName -RunStatus $blockedStatus -RunMessage $blockedMessage -HealthCheckerVersion $HealthCheckerVersion -Parsed $null)) | Out-Null
+            continue
+        }
+        $remainingSeconds = [int][math]::Floor(($deadline - (Get-Date)).TotalSeconds)
+        if ($remainingSeconds -lt 60) {
+            $message = 'Health Checker was not run on this server: the total Health Checker time budget was used up by the previous servers.'
+            Write-Log ("{0}: {1}" -f $serverName, $message) 'WARN'
+            $summaryRows.Add((ConvertTo-HealthCheckerSummaryRow -ServerName $serverName -RunStatus 'NotRun' -RunMessage $message -HealthCheckerVersion $HealthCheckerVersion -Parsed $null)) | Out-Null
+            continue
+        }
+
+        $timeoutSeconds = [math]::Min($Settings.TimeoutMinutesPerServer * 60, $remainingSeconds)
+        $serverFolder = Join-Path -Path $runFolder -ChildPath ($serverName -replace '[^A-Za-z0-9._-]', '_')
+        Write-Log ("Running Health Checker for {0} (limit {1} min)." -f $serverName, [math]::Round($timeoutSeconds / 60, 1))
+        $run = Invoke-HealthCheckerProcess -ScriptPath $runScriptPath -ServerName $serverName -OutputFolder $serverFolder -TimeoutSeconds $timeoutSeconds
+        $parsed = $null
+        $status = $run.Status
+        $message = $run.Message
+        if ($status -eq 'Completed') {
+            try {
+                $parsed = ConvertFrom-HealthCheckerXml -Path $run.XmlPath -ServerName $serverName -HealthCheckerVersion $HealthCheckerVersion
+                foreach ($finding in $parsed.Findings) { $findingRows.Add($finding) | Out-Null }
+                Write-Log ("Health Checker for {0}: {1} finding(s), {2} vulnerability(ies), {3} error(s), {4} warning(s), {5}s." -f $serverName, @($parsed.Findings).Count, @($parsed.Vulnerabilities).Count, $parsed.Facts.ErrorCount, $parsed.Facts.WarningCount, $run.DurationSeconds)
+            }
+            catch {
+                $status = 'ParseFailed'
+                $message = "Health Checker XML could not be read: $($_.Exception.Message)"
+            }
+        }
+
+        if ($status -eq 'Completed') {
+            try { Remove-Item -LiteralPath $serverFolder -Recurse -Force -ErrorAction Stop }
+            catch { Write-Log ("Health Checker raw output could not be removed: {0}. {1}" -f $serverFolder, $_.Exception.Message) 'WARN' }
+        }
+        else {
+            Write-Log ("{0}: Health Checker {1}. {2} Raw output kept locally for {3} day(s) for diagnosis: {4}" -f $serverName, $status, $message, $Settings.KeepFailedRawOutputDays, $serverFolder) 'WARN'
+        }
+        $summaryRows.Add((ConvertTo-HealthCheckerSummaryRow -ServerName $serverName -RunStatus $status -RunMessage $message -DurationSeconds $run.DurationSeconds -HealthCheckerVersion $HealthCheckerVersion -Parsed $parsed)) | Out-Null
+    }
+
+    if (Test-Path -LiteralPath $runScriptPath -PathType Leaf) { Remove-Item -LiteralPath $runScriptPath -Force -ErrorAction SilentlyContinue }
+    if ((Test-Path -LiteralPath $runFolder -PathType Container) -and @(Get-ChildItem -LiteralPath $runFolder -Force).Count -eq 0) { Remove-Item -LiteralPath $runFolder -Force -ErrorAction SilentlyContinue }
+
+    $processed = @($summaryRows | Where-Object { $_.RunStatus -eq 'Completed' }).Count
+    foreach ($row in $summaryRows) {
+        $row.ServersProcessed = $processed
+        $row.ServersTotal = $serverNames.Count
+    }
+    Write-Log ("Health Checker processed {0} of {1} server(s)." -f $processed, $serverNames.Count)
+
+    return [pscustomobject]@{
+        Summary  = $summaryRows.ToArray()
+        Findings = $findingRows.ToArray()
+    }
+}
+
 function ConvertTo-ReadinessText {
     param([AllowNull()][object]$Value)
 
@@ -1444,6 +1920,71 @@ function ConvertTo-ServersAndStorageDatabaseSectionHtml {
 "@
 }
 
+function ConvertTo-ServersAndStorageHealthCheckerSectionHtml {
+    param(
+        [AllowNull()][object[]]$HealthCheckerSummary = @(),
+        [AllowNull()][object[]]$HealthCheckerFindings = @()
+    )
+
+    # No section when the run did not include Health Checker.
+    $summaryRows = @($HealthCheckerSummary | Where-Object { $null -ne $_ })
+    if ($summaryRows.Count -eq 0) { return '' }
+
+    $toInt = { param($Value) $number = 0; if ([int]::TryParse([string]$Value, [ref]$number)) { $number } else { 0 } }
+    $processed = @($summaryRows | Where-Object { [string]$_.RunStatus -eq 'Completed' }).Count
+    $vulnerabilityTotal = 0; $errorTotal = 0; $warningTotal = 0
+    foreach ($row in $summaryRows) {
+        $vulnerabilityTotal += & $toInt $row.VulnerabilityCount
+        $errorTotal += & $toInt $row.ErrorCount
+        $warningTotal += & $toInt $row.WarningCount
+    }
+    $healthCheckerVersion = @($summaryRows | ForEach-Object { [string]$_.HealthCheckerVersion } | Where-Object { $_ } | Select-Object -Unique) -join ', '
+
+    $sortedServers = @($summaryRows | Sort-Object @{ Expression = { & $toInt $_.VulnerabilityCount }; Descending = $true }, @{ Expression = { & $toInt $_.ErrorCount }; Descending = $true }, @{ Expression = { & $toInt $_.WarningCount }; Descending = $true }, ServerName)
+    $serverRowsHtml = foreach ($row in $sortedServers) {
+        $runStatus = [string]$row.RunStatus
+        $runClass = if ($runStatus -eq 'Completed') { 'status-ok' } else { 'status-warning' }
+        $vulnerabilityCount = & $toInt $row.VulnerabilityCount
+        $vulnerabilityClass = if ($vulnerabilityCount -gt 0) { 'status-error' } else { 'status-ok' }
+        $suStatus = [string]$row.SecurityUpdateStatus
+        $suClass = switch ($suStatus) { 'Latest' { 'status-ok'; break } 'NewerPatchAvailable' { 'status-review'; break } 'Unknown' { 'status-review'; break } default { 'status-error' } }
+        $vulnerabilityCell = if ($runStatus -eq 'Completed') { "<span class='badge $vulnerabilityClass'>$(Format-HtmlValue $vulnerabilityCount)</span>" } else { 'N/A' }
+        "<tr><td>$(Format-HtmlValue $row.ServerName)</td><td><span class='badge $runClass'>$(Format-HtmlValue $runStatus)</span></td><td>$(Format-HtmlValue $row.ExchangeVersion)</td><td>$(Format-HtmlValue $row.BuildNumber)</td><td><span class='badge $suClass'>$(Format-HtmlValue $suStatus)</span></td><td class='num'>$vulnerabilityCell</td><td class='num'>$(Format-HtmlValue $row.ErrorCount)</td><td class='num'>$(Format-HtmlValue $row.WarningCount)</td><td>$(Format-HtmlValue $(if ($runStatus -eq 'Completed') { $row.Vulnerabilities } else { $row.RunMessage }))</td></tr>"
+    }
+
+    $errorFindings = @($HealthCheckerFindings | Where-Object { $null -ne $_ -and [string]$_.Status -eq 'Error' } | Sort-Object @{ Expression = { if ([string]$_.Category -eq 'Security Vulnerability') { 0 } else { 1 } } }, ServerName, @{ Expression = { & $toInt $_.RowNumber } })
+    $shownErrors = @($errorFindings | Select-Object -First 100)
+    $errorRowsHtml = foreach ($finding in $shownErrors) {
+        $checkText = if ([string]::IsNullOrWhiteSpace([string]$finding.Item)) { $finding.Check } else { "$($finding.Check) - $($finding.Item)" }
+        "<tr><td>$(Format-HtmlValue $finding.ServerName)</td><td>$(Format-HtmlValue $finding.Category)</td><td>$(Format-HtmlValue $checkText)</td><td class='cell-value'>$(Format-HtmlValue $finding.Value)</td><td>$(Format-HtmlValue $finding.Recommendation)</td></tr>"
+    }
+    $errorsBlock = if ($shownErrors.Count -gt 0) {
+        $truncationNote = if ($errorFindings.Count -gt $shownErrors.Count) { "<div class='summary'>Showing the first $($shownErrors.Count) of $($errorFindings.Count) errors; all findings are in Exchange_OnPrem_HealthChecker_Findings.csv.</div>" } else { '' }
+@"
+      <h3>Vulnerabilities and errors <span>$(Format-HtmlValue $errorFindings.Count) records</span></h3>
+      <table class="readiness-table">
+        <thead><tr><th>Server</th><th>Area</th><th>Check</th><th>Value</th><th>More information</th></tr></thead>
+        <tbody>$($errorRowsHtml -join "`r`n")</tbody>
+      </table>
+      $truncationNote
+"@
+    } else { "<div class='summary'>No Health Checker error was reported for the processed servers.</div>" }
+
+@"
+      <h2>Exchange Health Checker</h2>
+      <div class="summary">
+        Microsoft CSS-Exchange Health Checker <strong>$(Format-HtmlValue $healthCheckerVersion)</strong> processed <strong>$processed</strong> of <strong>$($summaryRows.Count)</strong> server(s).
+        Vulnerabilities: <strong>$vulnerabilityTotal</strong> | Errors: <strong>$errorTotal</strong> | Warnings: <strong>$warningTotal</strong>.<br>
+        Servers that were not processed show N/A and the reason; their state is not measured. Values that can reveal host names, addresses, certificates or domains are masked in the CSV and in this report.
+      </div>
+      <table>
+        <thead><tr><th>Server</th><th>Run</th><th>Exchange version</th><th>Build</th><th>Security update</th><th class="num">Vulnerabilities</th><th class="num">Errors</th><th class="num">Warnings</th><th>Vulnerabilities / reason</th></tr></thead>
+        <tbody>$($serverRowsHtml -join "`r`n")</tbody>
+      </table>
+      $errorsBlock
+"@
+}
+
 function New-HtmlExecutiveSummary {
     param(
         [Parameter(Mandatory)]
@@ -1454,6 +1995,12 @@ function New-HtmlExecutiveSummary {
 
         [AllowNull()]
         [object[]]$ReadinessInventory = @(),
+
+        [AllowNull()]
+        [object[]]$HealthCheckerSummary = @(),
+
+        [AllowNull()]
+        [object[]]$HealthCheckerFindings = @(),
 
         [Parameter(Mandatory)]
         [string]$Path
@@ -1627,6 +2174,7 @@ function New-HtmlExecutiveSummary {
         ""
     }
     $databaseSection = ConvertTo-ServersAndStorageDatabaseSectionHtml -ReadinessInventory $ReadinessInventory -Summary $Summary
+    $healthCheckerSection = if (@($HealthCheckerSummary | Where-Object { $null -ne $_ }).Count -gt 0) { ConvertTo-ServersAndStorageHealthCheckerSectionHtml -HealthCheckerSummary $HealthCheckerSummary -HealthCheckerFindings $HealthCheckerFindings } else { '' }
     $html = @"
 <!DOCTYPE html>
 <html>
@@ -1727,6 +2275,8 @@ td.num, th.num { text-align: right; }
 
       $priorityIssuesSection
 
+      $healthCheckerSection
+
       $databaseSection
 
       $statusSummarySection
@@ -1788,8 +2338,13 @@ function Invoke-ServersAndStorageHtmlReportRegeneration {
     $summary = $summaryRows | Select-Object -First 1
     $perServerSummary = @(Import-ServersAndStorageExistingCsv -Path $perServerSummaryPath -Description 'per-server infrastructure summary')
     $exchangeReadinessInventory = @(Import-ServersAndStorageExistingCsv -Path $exchangeReadinessPath -Description 'Exchange readiness configuration')
+    # Health Checker CSVs exist only for runs made with -IncludeHealthChecker.
+    $healthCheckerSummaryPath = Join-Path $RunFolder "Exchange_OnPrem_HealthChecker_Summary.csv"
+    $healthCheckerFindingsPath = Join-Path $RunFolder "Exchange_OnPrem_HealthChecker_Findings.csv"
+    $healthCheckerSummary = if (Test-Path -LiteralPath $healthCheckerSummaryPath -PathType Leaf) { @(Import-ServersAndStorageExistingCsv -Path $healthCheckerSummaryPath -Description 'Health Checker summary') } else { @() }
+    $healthCheckerFindings = if (Test-Path -LiteralPath $healthCheckerFindingsPath -PathType Leaf) { @(Import-ServersAndStorageExistingCsv -Path $healthCheckerFindingsPath -Description 'Health Checker findings') } else { @() }
 
-    New-HtmlExecutiveSummary -Summary $summary -PerServerSummary @($perServerSummary) -ReadinessInventory @($exchangeReadinessInventory) -Path $htmlSummaryPath
+    New-HtmlExecutiveSummary -Summary $summary -PerServerSummary @($perServerSummary) -ReadinessInventory @($exchangeReadinessInventory) -HealthCheckerSummary @($healthCheckerSummary) -HealthCheckerFindings @($healthCheckerFindings) -Path $htmlSummaryPath
     Write-Log "HTML executive summary regenerated to: $htmlSummaryPath"
     Invoke-ServersAndStorageSharePointUpload -LocalFilePath $htmlSummaryPath
 
@@ -1835,7 +2390,7 @@ try {
     $configuredExcludedServers = @(Get-ConfiguredExcludedServers)
 
     Import-SmartM365CoreModule
-    Start-CoreSmartM365SourceReceipt -ScriptPath $PSCommandPath -SourceRootPath ([string](Get-SmartM365EffectiveConfigValue -Name 'LatestCsvFolderPath' -DefaultValue '')) -ScopeParameters @{IncludeServicesHealth=$IncludeServicesHealth;IncludeMailboxDatabasePaths=$IncludeMailboxDatabasePaths;ExcludedServers=($configuredExcludedServers -join ';')}
+    Start-CoreSmartM365SourceReceipt -ScriptPath $PSCommandPath -SourceRootPath ([string](Get-SmartM365EffectiveConfigValue -Name 'LatestCsvFolderPath' -DefaultValue '')) -ScopeParameters @{IncludeServicesHealth=$IncludeServicesHealth;IncludeMailboxDatabasePaths=$IncludeMailboxDatabasePaths;IncludeHealthChecker=$IncludeHealthChecker;ExcludedServers=($configuredExcludedServers -join ';')}
     Invoke-CoreSmartM365Preflight -ScriptName $ScriptName -OutputPaths @($OutputFolder,$LogFolder) | Out-Null
 
     Test-ExchangeShell
@@ -1936,6 +2491,35 @@ try {
         $databasePathsPath = Join-Path $OutputFolder "Exchange_OnPrem_MailboxDatabases_Paths.csv"
         Export-ServersAndStorageCsv -Data @($databasePaths) -Path $databasePathsPath
         Write-Log "Mailbox database path inventory exported to: $databasePathsPath"
+    }
+
+    $healthCheckerSummary = @()
+    $healthCheckerFindings = @()
+    if ($IncludeHealthChecker) {
+        Write-Log "Running Microsoft CSS-Exchange Health Checker $HealthCheckerVersion server by server."
+        $healthCheckerSettings = $null
+        try { $healthCheckerSettings = Get-HealthCheckerSetting }
+        catch {
+            # A wrong Health Checker setting skips Health Checker only; the inventory continues.
+            $configurationMessage = "Health Checker was not run: invalid configuration. $($_.Exception.Message)"
+            Write-Log $configurationMessage 'WARN'
+            $healthCheckerSummary = @(foreach ($server in $exchangeServers) {
+                $row = ConvertTo-HealthCheckerSummaryRow -ServerName ([string]$server.Name) -RunStatus 'NotRun' -RunMessage $configurationMessage -HealthCheckerVersion $HealthCheckerVersion -Parsed $null
+                $row.ServersProcessed = 0
+                $row.ServersTotal = $exchangeServers.Count
+                $row
+            })
+        }
+        if ($healthCheckerSettings) {
+            $healthCheckerResult = Invoke-ExchangeHealthCheckerInventory -ExchangeServers @($exchangeServers) -SourceScriptPath (Join-Path -Path $PSScriptRoot -ChildPath $HealthCheckerRelativePath) -ExpectedSha256 $HealthCheckerExpectedSha256 -HealthCheckerVersion $HealthCheckerVersion -RunId $RunId -Settings $healthCheckerSettings
+            $healthCheckerSummary = @($healthCheckerResult.Summary)
+            $healthCheckerFindings = @($healthCheckerResult.Findings)
+        }
+        $healthCheckerSummaryPath = Join-Path $OutputFolder "Exchange_OnPrem_HealthChecker_Summary.csv"
+        Export-ServersAndStorageCsv -Data @($healthCheckerSummary) -Path $healthCheckerSummaryPath -Columns (Get-HealthCheckerCsvColumn -Kind Summary)
+        $healthCheckerFindingsPath = Join-Path $OutputFolder "Exchange_OnPrem_HealthChecker_Findings.csv"
+        Export-ServersAndStorageCsv -Data @($healthCheckerFindings) -Path $healthCheckerFindingsPath -Columns (Get-HealthCheckerCsvColumn -Kind Findings)
+        Write-Log "Health Checker summary and findings exported to: $healthCheckerSummaryPath; $healthCheckerFindingsPath"
     }
 
     Write-Log "Collecting Exchange schema and readiness configuration."
@@ -2056,7 +2640,7 @@ try {
     Write-Log "Global summary exported to: $summaryPath"
 
     $htmlSummaryPath = Join-Path $OutputFolder "Exchange_OnPrem_InfrastructureAndReadiness_Report.html"
-    New-HtmlExecutiveSummary -Summary $summary -PerServerSummary $perServerSummary -ReadinessInventory $exchangeReadinessInventory -Path $htmlSummaryPath
+    New-HtmlExecutiveSummary -Summary $summary -PerServerSummary $perServerSummary -ReadinessInventory $exchangeReadinessInventory -HealthCheckerSummary @($healthCheckerSummary) -HealthCheckerFindings @($healthCheckerFindings) -Path $htmlSummaryPath
     Write-Log "HTML executive summary exported to: $htmlSummaryPath"
     Invoke-ServersAndStorageSharePointUpload -LocalFilePath $htmlSummaryPath
     Save-ServersAndStorageWeeklyHistory

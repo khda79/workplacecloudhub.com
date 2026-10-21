@@ -121,7 +121,9 @@
         "Exchange_OnPrem_Servers_LogicalDisks.csv",
         "Exchange_OnPrem_Servers_RemoteAccess.csv",
         "Exchange_OnPrem_Servers_ServiceHealth.csv",
-        "Exchange_OnPrem_MailboxDatabases_Paths.csv"
+        "Exchange_OnPrem_MailboxDatabases_Paths.csv",
+        "Exchange_OnPrem_HealthChecker_Summary.csv",
+        "Exchange_OnPrem_HealthChecker_Findings.csv"
       ]
     },
     {
