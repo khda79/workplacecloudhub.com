@@ -35,7 +35,7 @@ All calculation inputs are frozen and hashed in the existing capture lifecycle.
 ## Workbook contract
 
 Sheet `Exceptions`, structured table `MailboxMigrationExceptions`, headers on
-row 7 and data from row 8. Keep these ten headers and their order:
+row 7 and data from row 8. Keep these nine required headers and their order:
 
 1. Primary SMTP Address
 2. Retain On-premises
@@ -46,14 +46,19 @@ row 7 and data from row 8. Keep these ten headers and their order:
 7. Exchange GUID
 8. AD Object GUID
 9. Display Name
-10. Source Reference
+
+The legacy trailing `Source Reference` column is optional. The reader accepts
+either `A7:I<last-row>` without it or `A7:J<last-row>` with it, and supplies an
+empty source reference when absent. The current template has nine columns;
+existing ten-column workbooks remain valid.
+Deploy this reader before using a nine-column workbook on the preparation server.
 
 Enter values, not formulas, in the decision table. Use `Yes` to retain and `No`
 to withdraw a decision. Entirely empty rows are ignored. Dates must be actual
 Excel dates or ISO `yyyy-mm-dd` text. The reader follows the actual table range,
 including beyond 5,000 rows; extend Excel's optional formulas/dropdowns separately
 when exceeding the template's 5,000-row assistance range. Macros and external
-links are rejected. A source-reference cell records provenance, not identity.
+links are rejected. An optional source-reference cell records provenance, not identity.
 
 ## Identity and operator confirmation
 

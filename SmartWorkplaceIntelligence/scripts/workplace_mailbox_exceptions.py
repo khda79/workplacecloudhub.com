@@ -82,11 +82,13 @@ def read_register(path):
         if len(tables) != 1:
             raise ValueError('Exactly one MailboxMigrationExceptions table is required')
         table = tables[0]
-        if [c.get('name') for c in table.findall('.//{*}tableColumn')] != HEADERS or table.get('totalsRowCount', '0') != '0':
+        input_headers = [c.get('name') for c in table.findall('.//{*}tableColumn')]
+        if input_headers not in (HEADERS, HEADERS[:-1]) or table.get('totalsRowCount', '0') != '0':
             raise ValueError('Invalid exception table columns or totals row')
-        match = re.fullmatch(r'A7:J(\d+)', table.get('ref', ''))
+        last_column = 'J' if len(input_headers) == 10 else 'I'
+        match = re.fullmatch(r'A7:' + last_column + r'(\d+)', table.get('ref', ''))
         if not match or not 8 <= int(match[1]) <= 1048576:
-            raise ValueError('Exception table must start at A7:J8')
+            raise ValueError('Exception table must start at A7:' + last_column + '8')
         last_row = int(match[1])
         strings = []
         if 'xl/sharedStrings.xml' in archive.namelist():
@@ -98,7 +100,7 @@ def read_register(path):
                 continue
             cells = {}
             for cell in row:
-                ref = re.fullmatch(r'([A-J])(\d+)', cell.get('r', ''))
+                ref = re.fullmatch(r'([A-' + last_column + r'])(\d+)', cell.get('r', ''))
                 if not ref:
                     continue
                 if cell.find('{*}f') is not None:
@@ -118,13 +120,14 @@ def read_register(path):
                         raise ValueError('Invalid Excel decision date')
                     raw = (dt.date(1899, 12, 30) + dt.timedelta(days=int(serial))).isoformat()
                 cells[column] = raw
-            values = [cells.get(i, '') for i in range(10)]
+            values = [cells.get(i, '') for i in range(len(input_headers))]
             if number == 7:
                 header_seen = True
-                if values != HEADERS:
+                if values != input_headers:
                     raise ValueError('Worksheet headers differ from table metadata')
             elif any(str(v).strip() for v in values):
-                result.append(dict(zip(HEADERS, values), **{'Source Row': number}))
+                result.append(dict(dict.fromkeys(HEADERS, ''), **dict(zip(input_headers, values)),
+                                   **{'Source Row': number}))
         if not header_seen:
             raise ValueError('Worksheet header row is missing')
         return result

@@ -8,6 +8,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 import zipfile
+from xml.etree import ElementTree as ET
 
 import workplace_mailbox_exceptions as subject
 
@@ -291,11 +292,73 @@ class ProducerTests(unittest.TestCase):
 
 
 class WorkbookTests(unittest.TestCase):
+    def make_register(self, path, headers, values, last_column=None, worksheet_headers=None):
+        """Small synthetic XLSX fixture with the production table relationship."""
+        ns = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'
+        rel = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships'
+        last_column = last_column or chr(64 + len(headers))
+        sheet = ET.Element('worksheet', xmlns=ns)
+        data = ET.SubElement(sheet, 'sheetData')
+        for number, cells in [(7, worksheet_headers or headers), (8, values)]:
+            row = ET.SubElement(data, 'row', r=str(number))
+            for i, value in enumerate(cells):
+                cell = ET.SubElement(row, 'c', r=f'{chr(65+i)}{number}', t='inlineStr')
+                ET.SubElement(ET.SubElement(cell, 'is'), 't').text = value
+        ET.SubElement(ET.SubElement(sheet, 'tableParts', count='1'), 'tablePart', {f'{{{rel}}}id':'rId1'})
+        table = ET.Element('table', xmlns=ns, displayName='MailboxMigrationExceptions', ref=f'A7:{last_column}8')
+        columns = ET.SubElement(table, 'tableColumns', count=str(len(headers)))
+        for i, header in enumerate(headers):
+            ET.SubElement(columns, 'tableColumn', id=str(i+1), name=header)
+        with zipfile.ZipFile(path, 'w') as z:
+            z.writestr('xl/workbook.xml', f'<workbook xmlns="{ns}" xmlns:r="{rel}"><sheets><sheet name="Exceptions" r:id="rId1"/></sheets></workbook>')
+            z.writestr('xl/_rels/workbook.xml.rels', '<Relationships><Relationship Id="rId1" Target="worksheets/sheet1.xml"/></Relationships>')
+            z.writestr('xl/worksheets/_rels/sheet1.xml.rels', '<Relationships><Relationship Id="rId1" Target="../tables/table1.xml"/></Relationships>')
+            z.writestr('xl/worksheets/sheet1.xml', ET.tostring(sheet))
+            z.writestr('xl/tables/table1.xml', ET.tostring(table))
+
+    def test_nine_and_ten_columns_preserve_identity_decisions_and_dates(self):
+        values = ['room@example.invalid', 'Yes', 'Reviewed reason', 'Operator',
+                  '2026-10-19', '', EXCHANGE, AD, 'Room']
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / 'register.xlsx'
+            for headers, cells in [(subject.HEADERS[:-1], values),
+                                   (subject.HEADERS, values + [''])]:
+                self.make_register(path, headers, cells)
+                rows = subject.read_register(path)
+                self.assertEqual(rows, [dict(zip(subject.HEADERS, values + ['']), **{'Source Row':8})])
+                _, resolved = subject.resolve(rows, dict(local_mailboxes=[local()], mailboxes=[], remote_mailboxes=[]), IDENTITY, as_of=NOW)
+                self.assertEqual(resolved[0]['Status'], 'Matched local')
+            self.make_register(path, subject.HEADERS, values + ['Legacy provenance'])
+            self.assertEqual(subject.read_register(path)[0]['Source Reference'], 'Legacy provenance')
+
+    def test_nine_column_reader_keeps_strict_schema_and_range_guards(self):
+        headers = subject.HEADERS[:-1]
+        values = ['room@example.invalid', 'Yes', '', '', '', '', EXCHANGE, AD, 'Room']
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / 'register.xlsx'
+            cases = [
+                (headers, 'J', None),
+                (subject.HEADERS, 'I', None),
+                (headers[:-1], 'H', None),
+                (headers[:-1] + ['Unexpected'], 'I', None),
+                (headers[:6] + [headers[7], headers[6], headers[8]], 'I', None),
+                (headers, 'I', headers[:-1] + ['Wrong worksheet header']),
+            ]
+            for columns, last_column, sheet_headers in cases:
+                with self.subTest(columns=columns, last_column=last_column, sheet_headers=sheet_headers):
+                    self.make_register(path, columns, values, last_column, sheet_headers)
+                    with self.assertRaises(ValueError):
+                        subject.read_register(path)
+
     def test_neutral_template_is_valid_and_empty(self):
         template = Path(__file__).resolve().parents[1] / 'config/templates' / subject.WORKBOOK
         self.assertEqual(subject.read_register(template), [])
         with zipfile.ZipFile(template) as z:
+            table = ET.fromstring(z.read('xl/tables/table1.xml'))
+            self.assertEqual(table.get('ref'), 'A7:I8')
+            self.assertEqual([c.get('name') for c in table.findall('.//{*}tableColumn')], subject.HEADERS[:-1])
             text = ''.join(z.read(n).decode() for n in z.namelist() if n.endswith('.xml'))
+            self.assertNotIn('Source Reference', text)
             self.assertIsNone(re.search(r'[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+', text))
             self.assertNotIn('SourceData', text)
 
