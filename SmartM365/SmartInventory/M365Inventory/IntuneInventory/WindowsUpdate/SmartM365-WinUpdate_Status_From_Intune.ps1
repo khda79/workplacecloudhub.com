@@ -39,9 +39,9 @@ PARAMETERS
   -RiskTopN                  : Number of action-required devices shown in email (default: 10)
 
 VERSION
-  1.48
+  1.53
 .VERSION
-1.48
+1.53
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
     Minimum application permissions: DeviceManagementConfiguration.Read.All, DeviceManagementManagedDevices.Read.All
@@ -106,7 +106,7 @@ if ([string]::IsNullOrWhiteSpace($CsvTenantKey)) { throw 'The effective tenant c
 # ==========================================================
 # Version
 # ==========================================================
-$ScriptVersion = "1.52"
+$ScriptVersion = "1.53"
 
 # ==========================================================
 # App-only authentication parameters
@@ -1016,8 +1016,8 @@ function Start-IntuneExportJobRaw {
 }
 
 function Get-IntuneExportJob {
-    param([Parameter(Mandatory=$true)][string]$JobId,[Parameter(Mandatory=$true)][hashtable]$Headers)
-    return Invoke-GraphRestMethodWithRetry -Method GET -Uri "https://graph.microsoft.com/beta/deviceManagement/reports/exportJobs('$JobId')" -Headers $Headers -Operation "Get Intune export job"
+    param([Parameter(Mandatory=$true)][string]$JobId,[Parameter(Mandatory=$true)][hashtable]$Headers,[Parameter()][int]$MaxAttempts = 8)
+    return Invoke-GraphRestMethodWithRetry -Method GET -Uri "https://graph.microsoft.com/beta/deviceManagement/reports/exportJobs('$JobId')" -Headers $Headers -MaxAttempts $MaxAttempts -Operation "Get Intune export job"
 }
 
 function Wait-IntuneExportJobComplete {
@@ -1025,12 +1025,13 @@ function Wait-IntuneExportJobComplete {
         [Parameter(Mandatory=$true)][string]$JobId,
         [Parameter(Mandatory=$true)][hashtable]$Headers,
         [Parameter()][int]$TimeoutSeconds = 900,
-        [Parameter()][int]$PollSeconds = 5
+        [Parameter()][int]$PollSeconds = 5,
+        [Parameter()][int]$PollMaxAttempts = 8
     )
 
     $start = Get-Date
     while ($true) {
-        $job    = Get-IntuneExportJob -JobId $JobId -Headers $Headers
+        $job    = Get-IntuneExportJob -JobId $JobId -Headers $Headers -MaxAttempts $PollMaxAttempts
         $status = "$($job.status)".ToLowerInvariant()
         Write-Log "Export job status: $status" "INFO" "GRAPH"
 
@@ -1048,14 +1049,30 @@ function Wait-IntuneExportJobComplete {
 }
 
 function Download-ExportZip {
-    param([Parameter(Mandatory=$true)][string]$DownloadUrl,[Parameter(Mandatory=$true)][string]$DestinationZipPath,[Parameter(Mandatory=$true)][hashtable]$Headers)
+    param(
+        [Parameter(Mandatory=$true)][string]$DownloadUrl,
+        [Parameter(Mandatory=$true)][string]$DestinationZipPath,
+        [Parameter()][int]$MaxAttempts = 4
+    )
 
-    if (Test-Path $DestinationZipPath) { Remove-Item -Path $DestinationZipPath -Force -ErrorAction SilentlyContinue }
+    # The export url is a pre-signed (SAS) blob url: it must be downloaded
+    # without the Graph bearer token, which blob storage rejects with 403.
+    # Right after the job completes the blob can briefly be unavailable, so
+    # retry with a short backoff and keep the real storage error in the log.
     Write-Log "Downloading export ZIP..." "INFO" "DATA"
-    try { Invoke-WebRequest -Uri $DownloadUrl -OutFile $DestinationZipPath -UseBasicParsing }
-    catch {
-        Write-Log "Download without headers failed, retrying with Authorization header." "WARN" "DATA"
-        Invoke-WebRequest -Uri $DownloadUrl -OutFile $DestinationZipPath -UseBasicParsing -Headers $Headers
+    for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
+        if (Test-Path $DestinationZipPath) { Remove-Item -Path $DestinationZipPath -Force -ErrorAction SilentlyContinue }
+        try {
+            Invoke-WebRequest -Uri $DownloadUrl -OutFile $DestinationZipPath -UseBasicParsing
+            break
+        }
+        catch {
+            $statusCode = Get-GraphHttpStatusCode -ErrorRecord $_
+            if ($attempt -ge $MaxAttempts) { throw "Export ZIP download failed after $MaxAttempts attempt(s). Status=$statusCode; Error=$($_.Exception.Message)" }
+            $delay = 5 * [int][math]::Pow(2, $attempt - 1)
+            Write-Log "Export ZIP download failed. Status=$statusCode; attempt $attempt/$MaxAttempts; waiting ${delay}s. Error=$($_.Exception.Message)" "WARN" "DATA"
+            Start-Sleep -Seconds $delay
+        }
     }
     if (-not (Test-Path $DestinationZipPath)) { throw "ZIP download failed: $DestinationZipPath not found." }
 }
@@ -2172,31 +2189,43 @@ try {
         $policyId   = $p.PolicyId
         $policyName = $p.PolicyName
 
-        Refresh-GraphTokenIfNeeded -TenantId $TenantId -ClientId $AppId -Certificate $cert -Headers ([ref]$headers)
-
         Write-Log "Processing policy [$index/$($policies.Count)]: $policyName ($policyId)" "INFO" "GRAPH"
 
-        $filter = "(PolicyId eq '$policyId')"
-        $jobId  = $null
-
-        try {
-            $jobId = Start-IntuneExportJobRaw -ReportName $ReportName -Headers $headers -Filter $filter -Select $ReportSelect -LocalizationType $LocalizationType
-        }
-        catch {
-            $msg = Try-GetGraphErrorMessage -ErrorRecord $_
-            if ($msg) { Write-Log "Graph POST error for policy ${policyId}: $msg" "WARN" "GRAPH" }
-            if ($ReportSelect -and $ReportSelect.Count -gt 0) {
-                Write-Log "Retrying policy export without select." "WARN" "GRAPH"
-                $jobId = Start-IntuneExportJobRaw -ReportName $ReportName -Headers $headers -Filter $filter -Select $null -LocalizationType $LocalizationType
-            }
-            else { throw }
-        }
-
-        Write-Log "Export job created: $jobId" "INFO" "GRAPH"
-        $job = Wait-IntuneExportJobComplete -JobId $jobId -Headers $headers -TimeoutSeconds 900 -PollSeconds 5
-
+        $filter  = "(PolicyId eq '$policyId')"
         $zipPath = Join-Path $WorkPath ("{0}_{1}_{2}.zip" -f $ReportName, $RunStamp, $policyId)
-        Download-ExportZip -DownloadUrl $job.url -DestinationZipPath $zipPath -Headers $headers
+
+        # A single export job can stay unreachable (repeated 503 on its status
+        # url) or produce a url that cannot be downloaded while the service is
+        # healthy again for new jobs, so recreate the job once before failing.
+        $maxExportJobAttempts = 2
+        for ($exportJobAttempt = 1; $exportJobAttempt -le $maxExportJobAttempts; $exportJobAttempt++) {
+            Refresh-GraphTokenIfNeeded -TenantId $TenantId -ClientId $AppId -Certificate $cert -Headers ([ref]$headers)
+            $jobId = $null
+
+            try {
+                $jobId = Start-IntuneExportJobRaw -ReportName $ReportName -Headers $headers -Filter $filter -Select $ReportSelect -LocalizationType $LocalizationType
+            }
+            catch {
+                $msg = Try-GetGraphErrorMessage -ErrorRecord $_
+                if ($msg) { Write-Log "Graph POST error for policy ${policyId}: $msg" "WARN" "GRAPH" }
+                if ($ReportSelect -and $ReportSelect.Count -gt 0) {
+                    Write-Log "Retrying policy export without select." "WARN" "GRAPH"
+                    $jobId = Start-IntuneExportJobRaw -ReportName $ReportName -Headers $headers -Filter $filter -Select $null -LocalizationType $LocalizationType
+                }
+                else { throw }
+            }
+
+            Write-Log "Export job created: $jobId" "INFO" "GRAPH"
+            try {
+                $job = Wait-IntuneExportJobComplete -JobId $jobId -Headers $headers -TimeoutSeconds 900 -PollSeconds 5 -PollMaxAttempts 5
+                Download-ExportZip -DownloadUrl $job.url -DestinationZipPath $zipPath
+                break
+            }
+            catch {
+                if ($exportJobAttempt -ge $maxExportJobAttempts) { throw }
+                Write-Log "Export job $jobId for policy $policyId could not be completed: $($_.Exception.Message) Creating a new export job (attempt $($exportJobAttempt + 1)/$maxExportJobAttempts)." "WARN" "GRAPH"
+            }
+        }
         Write-Log "ZIP downloaded: $zipPath" "INFO" "DATA"
 
         $extractFolder = Join-Path $WorkPath ("Extract_{0}_{1}" -f $RunStamp, $policyId)
