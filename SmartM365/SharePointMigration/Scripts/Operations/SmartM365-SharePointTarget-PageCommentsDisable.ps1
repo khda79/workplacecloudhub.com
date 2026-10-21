@@ -9,7 +9,7 @@
     Set-SPOSite -CommentsOnSitePagesDisabled applies the setting at site collection level.
     SharePoint Online also applies it to the subsites in that site collection.
 .VERSION
-    1.0.0
+    3.0.0
 #>
 
 [CmdletBinding()]
