@@ -3,7 +3,7 @@
 .SYNOPSIS
 Validate the single daily inventory cycle and weekly exceptions offline.
 .VERSION
-1.2.4
+1.2.5
 .NOTES
 Reads the repository template and an optional additional local manifest.
 No tenant initialization, collectors, scheduling, authentication or publication.
@@ -74,6 +74,7 @@ $weekly = @{
         'EXO-Mailboxes-CalendarPermissions' = 'Tuesday,Thursday|20:00'
         'Exchange2016-Mailboxes-CalendarPermissions' = 'Monday,Wednesday,Friday|04:00'
         'Intune-DiscoveredApps-Inventory' = 'Saturday|20:00'
+        'Exchange2016-FreeBusy-Check' = 'Sunday|05:00'
 }
 $estimates = @{
         'M365-Licences-Inventory' = 90
@@ -81,6 +82,7 @@ $estimates = @{
         'Exchange2016-Local-Mailboxes-Inventory' = 150
         'Exchange2016-ProxyAddresses-Check' = 30
         'Exchange2016-Infrastructure-Inventory' = 90
+        'Exchange2016-FreeBusy-Check' = 15
         'M365-WorkplaceScope-Inventory' = 360
         'Intune-Devices-Compliance-Inventory' = 15
         'Intune-Configurations-Inventory' = 30
@@ -114,7 +116,7 @@ foreach ($path in $paths) {
     $document = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
     $validation = Test-SmartM365OrchestratorJobsDocument -Document $document
     Assert-True $validation.Valid ('Invalid jobs manifest: ' + ($validation.Errors -join '; '))
-    if ($isTemplate) { Assert-True ($document.Jobs.Count -eq 54) 'Expected 54 template jobs.' }
+    if ($isTemplate) { Assert-True ($document.Jobs.Count -eq 55) 'Expected 55 template jobs.' }
     Assert-True (@($document.Jobs | Where-Object Name -eq 'CmdbEvidence-Prepare').Count -eq 0) 'Retired CMDB preparation job is still present.'
     foreach ($name in @($daily.Keys | Where-Object { $isTemplate -or $_ -notin $newIntuneNames })) {
         $matches = @($document.Jobs | Where-Object Name -eq $name)
@@ -195,6 +197,14 @@ foreach ($path in $paths) {
     # Same concurrency key as the mailbox chain: it starts after the chain's estimated end.
     $chainEnd = [TimeSpan]::Parse('00:35').Add([TimeSpan]::FromMinutes(150))
     Assert-True ([TimeSpan]::Parse([string]@($exchangeInfrastructure.Schedule.Times)[0]) -ge $chainEnd) 'Exchange infrastructure (Health Checker) starts before the on-premises mailbox chain is expected to end.'
+    # Free/busy runs on an Exchange server under Windows PowerShell 5.1; Exchange Online is opened by the
+    # collector with the app certificate, so the pwsh Exchange Online probe is not a prerequisite.
+    $freeBusy = @($document.Jobs | Where-Object Name -eq 'Exchange2016-FreeBusy-Check')[0]
+    Assert-True ($freeBusy.PowerShellEdition -eq 'WindowsPowerShell' -and $freeBusy.ConcurrencyKey -eq 'ExchangeOnPremServer' -and
+        (@($freeBusy.RequiredCapabilities) -join ',') -ceq 'AD,ExchangeOnPrem,SharedRuntime') 'Free/busy check requirements changed.'
+    Assert-True ([string]::IsNullOrWhiteSpace([string]$freeBusy.Arguments) -and $freeBusy.LauncherPath -eq 'Launchers\OnPremises\Start-SmartM365-Exchange-Hybrid-FreeBusy-Inventory.cmd') 'Free/busy check launcher changed.'
+    # The collector's default Free/Busy Checker limit (30 minutes) plus publication must fit the job timeout.
+    Assert-True ([int]$freeBusy.TimeoutMinutes -ge 60 -and $freeBusy.Schedule.MissedRunPolicy -eq 'RunOnce') 'Free/busy check timeout or missed-run policy changed.'
     # Endpoint security exports get the same 1200-second budget as the manual launcher.
     $endpointSecurity = @($document.Jobs | Where-Object Name -eq 'Intune-EndpointSecurityHealth-Inventory')[0]
     $endpointSecurityArguments = @(([string]$endpointSecurity.Arguments) -split '\s+' | Where-Object { $_ })

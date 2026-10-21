@@ -87,6 +87,7 @@ do not trigger full identity/device/license recollection.
 | EXO-Mailboxes-CalendarPermissions | Tuesday, Thursday 20:00 |
 | Exchange2016-Mailboxes-CalendarPermissions | Monday, Wednesday, Friday 04:00 |
 | Intune-DiscoveredApps-Inventory | Saturday 20:00 |
+| Exchange2016-FreeBusy-Check | Sunday 05:00, Exchange hybrid free/busy check with CSS-Exchange Free/Busy Checker (same concurrency key as the other Exchange on-premises jobs) |
 
 Daily EXO Fast refreshes unrestricted mailbox details without live statistics.
 The unified Workplace job depends on that daily acquisition rather than the weekly live-stats
@@ -173,6 +174,7 @@ In particular, AD's observed duration does not imply error-free domain coverage.
 | Exchange2016-Local-Mailboxes-Inventory | 150 |
 | Exchange2016-ProxyAddresses-Check | 30 |
 | Exchange2016-Infrastructure-Inventory | 90 |
+| Exchange2016-FreeBusy-Check | 15 |
 | M365-WorkplaceScope-Inventory | 360 |
 | Intune-Configurations-Inventory | 30 |
 | Intune-ManagedApps-Inventory | 60 |

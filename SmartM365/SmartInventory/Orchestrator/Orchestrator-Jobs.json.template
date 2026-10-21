@@ -608,6 +608,39 @@
       "ConcurrencyKey": "ExchangeOnPremServer"
     },
     {
+      "Name": "Exchange2016-FreeBusy-Check",
+      "ScriptPath": "ExchangeInventory\\Hybrid\\FreeBusy\\SmartM365-Exchange-Hybrid-FreeBusy-Inventory.ps1",
+      "Arguments": "",
+      "Enabled": true,
+      "Group": "Exchange2016",
+      "DependsOn": [],
+      "AllowedServers": [],
+      "PowerShellEdition": "WindowsPowerShell",
+      "TimeoutMinutes": 120,
+      "MaxRetries": 1,
+      "RetryDelaySeconds": 600,
+      "ContinueOnError": true,
+      "Schedule": {
+        "Type": "Weekly",
+        "Times": [
+          "05:00"
+        ],
+        "MissedRunPolicy": "RunOnce",
+        "DaysOfWeek": [
+          "Sunday"
+        ]
+      },
+      "LauncherPath": "Launchers\\OnPremises\\Start-SmartM365-Exchange-Hybrid-FreeBusy-Inventory.cmd",
+      "AssignmentMode": "Elected",
+      "RequiredCapabilities": [
+        "AD",
+        "ExchangeOnPrem",
+        "SharedRuntime"
+      ],
+      "RequiredGraphAppRoles": [],
+      "EstimatedDurationMinutes": 15,
+      "ConcurrencyKey": "ExchangeOnPremServer"
+    },    {
       "Name": "Exchange2016-Mailboxes-CalendarPermissions",
       "ScriptPath": "ExchangeInventory\\OnPremises\\CalendarPermissions\\SmartM365-Exchange-MailboxCalendarPermissions-Inventory.ps1",
       "Arguments": "",
