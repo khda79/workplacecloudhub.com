@@ -2,7 +2,7 @@
 .SYNOPSIS
 Synthetic regression tests for non-Graph SmartInventory CSV publication paths.
 .VERSION
-1.0.13
+1.0.14
 #>
 [CmdletBinding()]
 param(
@@ -52,6 +52,8 @@ function New-IssueExporterModule {
     } else {
         $exporterFunctions+='Remove-DetailedArchiveFilesOlderThan'
     }
+    # Hybrid identity issues publish their DATA-LAST copies through the staged helper.
+    if ($CollectorPath -like '*HybridIdentity-Issues-Inventory.ps1') { $exporterFunctions+='PublishLatest' }
     $definitions+=@(Get-FunctionText -Path $CollectorPath -Names $exporterFunctions)
     $module=New-Module -ScriptBlock ([scriptblock]::Create(($definitions -join "`n")))
     & $module {

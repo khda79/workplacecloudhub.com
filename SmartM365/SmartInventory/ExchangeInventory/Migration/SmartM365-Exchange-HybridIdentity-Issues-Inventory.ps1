@@ -11,9 +11,11 @@ Generates Exchange hybrid identity issue tables for PowerBI from SmartInventory 
   Exchange_OnPrem_Mailboxes_AllDomains.csv, Exchange_OnPrem_RemoteMailboxes_AllDomains.csv,
   Exchange_EXO_Mailboxes_AllDomains.csv,
   M365_Users_Active.csv
+- DATA-LAST changes only when a run completes: the issue CSVs are staged and promoted with the receipt,
+  and their DATA-LAST SharePoint copies follow the promotion (SmartM365.Core 1.0.95).
 
 .VERSION
-1.24
+1.25
 #>
 #requires -Version 7.0
 [CmdletBinding()]
@@ -55,7 +57,7 @@ if ($MaxItems -gt 0) {
 }
 $ErrorActionPreference='Stop'
 $ScriptName='SmartM365-Exchange-HybridIdentity-Issues-Inventory'
-$ScriptVersion="1.24"
+$ScriptVersion="1.25"
 $RunStamp=Get-Date -Format 'yyyyMMdd-HHmmss'
 $RunStartedAt=Get-Date
 $script:WarningCount=0
@@ -148,6 +150,14 @@ function CopyCsv($s,$d){
     }
   }
 }
+# Copies a CSV to DATA-LAST: to its staged copy while staging is active, with the SharePoint copy of the
+# DATA-LAST file deferred to the promotion. Returns $true when the DATA-LAST file itself was written now.
+function PublishLatest($source,$dest){
+  $writePath=if(Get-Command -Name Resolve-SmartM365SourcePublicationPath -ErrorAction SilentlyContinue){Resolve-SmartM365SourcePublicationPath -Path $dest}else{$dest}
+  Copy-SmartM365FileAtomically -SourcePath $source -DestinationPath $writePath
+  if($writePath -cne $dest){ Add-SmartM365StagedPublicationAction -Path $dest -SharePointUpload; return $false }
+  $true
+}
 function Remove-DetailedArchiveFilesOlderThan {
   param(
     [Parameter(Mandatory=$true)][string]$Folder,
@@ -172,11 +182,12 @@ function Remove-DetailedArchiveFilesOlderThan {
 function ExportIssues($rows){
   foreach($f in @($OutputFolder,$LatestFolder,(Join-Path $OutputFolder 'Archive'))){ if(!(Test-Path $f)){New-Item -ItemType Directory -Path $f -Force|Out-Null} }
   $main=Join-Path $OutputFolder 'Exchange_HybridIdentity_Issues.csv'; $latest=Join-Path $LatestFolder 'Exchange_HybridIdentity_Issues.csv'; $archive=Join-Path (Join-Path $OutputFolder 'Archive') "Exchange_HybridIdentity_Issues_$RunStamp.csv"
-  $sortedRows=@($rows|Sort-Object IssueNumber,ObjectGUID,Potential_Issue); Assert-SmartM365CsvDataCompleteness -Data $sortedRows -TimestampedPath $main -LatestPath $latest; Write-SmartM365CsvAtomically -Data $sortedRows -Path $main -Encoding UTF8; CopyCsv $main $latest; CopyCsv $main $archive
+  $sortedRows=@($rows|Sort-Object IssueNumber,ObjectGUID,Potential_Issue); Assert-SmartM365CsvDataCompleteness -Data $sortedRows -TimestampedPath $main -LatestPath $latest; Write-SmartM365CsvAtomically -Data $sortedRows -Path $main -Encoding UTF8; $latestWritten=PublishLatest $main $latest; CopyCsv $main $archive
   Remove-DetailedArchiveFilesOlderThan -Folder (Join-Path $OutputFolder 'Archive') -BaseNameWithoutExt 'Exchange_HybridIdentity_Issues' -RetentionDays $DetailedArchiveRetentionDays
   $summary=@($rows|Group-Object IssueNumber,Potential_Issue,IssueCategory|Sort-Object Count -Descending|%{ $p=$_.Name -split ', ',3; [pscustomobject]@{IssueNumber=[int]$p[0];Potential_Issue=$p[1];IssueCategory=$p[2];Count=$_.Count} })
-  $sm=Join-Path $OutputFolder 'Exchange_HybridIdentity_Issues_Summary.csv'; $sl=Join-Path $LatestFolder 'Exchange_HybridIdentity_Issues_Summary.csv'; Assert-SmartM365CsvDataCompleteness -Data $summary -TimestampedPath $sm -LatestPath $sl; Write-SmartM365CsvAtomically -Data $summary -Path $sm -Encoding UTF8; CopyCsv $sm $sl
-  $files=@($main,$latest,$archive,$sm,$sl)
+  $sm=Join-Path $OutputFolder 'Exchange_HybridIdentity_Issues_Summary.csv'; $sl=Join-Path $LatestFolder 'Exchange_HybridIdentity_Issues_Summary.csv'; Assert-SmartM365CsvDataCompleteness -Data $summary -TimestampedPath $sm -LatestPath $sl; Write-SmartM365CsvAtomically -Data $summary -Path $sm -Encoding UTF8; $summaryWritten=PublishLatest $sm $sl
+  # A staged DATA-LAST copy is uploaded after its promotion, never the previous run's file now.
+  $files=@($main) + @(if($latestWritten){$latest}) + @($archive,$sm) + @(if($summaryWritten){$sl})
   $files
 }
 function PublishWeeklyHistory($files){
@@ -232,7 +243,7 @@ function PublishWeeklyHistory($files){
 $script:CompletionStatus = 'Auto'
 try{
   Log "Starting $ScriptName v$ScriptVersion"
-  $sr=Root; . (Join-Path $sr 'Config\SmartM365-TenantContext.ps1'); $script:Cfg=Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot; Import-Module -Name (Join-Path $sr 'Modules\SmartM365.Core\SmartM365.Core.psd1') -MinimumVersion '1.0.87' -Force; Initialize-SmartM365DefaultCsvValidationRules
+  $sr=Root; . (Join-Path $sr 'Config\SmartM365-TenantContext.ps1'); $script:Cfg=Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot; Import-Module -Name (Join-Path $sr 'Modules\SmartM365.Core\SmartM365.Core.psd1') -MinimumVersion '1.0.95' -Force; Initialize-SmartM365DefaultCsvValidationRules
   $lc=LocalConfig
   # Tenant domains are configuration, never code: the routing domain comes from the tenant context, the allowed TargetAddress domains from the local configuration.
   $remoteRoutingDomain=([string](Cfg $lc 'RemoteRoutingDomain' '')).Trim().TrimStart('@').ToLowerInvariant(); if($remoteRoutingDomain -notmatch '^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+mail\.onmicrosoft\.com$'){throw "RemoteRoutingDomain is missing or invalid in the tenant configuration: '$remoteRoutingDomain'."}
@@ -248,6 +259,8 @@ try{
   $global:SharePointSiteHostname=Cfg $lc 'SharePointSiteHostname' ''; $global:SharePointSitePath=Cfg $lc 'SharePointSitePath' ''; $global:SharePointLibraryDisplayName=Cfg $lc 'SharePointLibraryDisplayName' 'Documents'; $global:SharePointTargetFolderPath=Cfg $lc 'SharePointTargetFolderPath' ''; $global:AppId=Cfg $lc 'AppId' ''; $global:TenantId=Cfg $lc 'TenantId' ''; $global:Thumbprint=Cfg $lc 'Thumbprint' (Cfg $lc 'Thumb' '')
   InitializeScriptEnvironment -OutputPath $OutputFolder -LogFileName $ScriptName -CallerScriptPath $PSCommandPath | Out-Null
   Start-SmartM365SourceReceipt -ScriptPath $PSCommandPath -SourceRootPath $LatestFolder
+  # DATA-LAST changes only when this run completes; the inputs it reads belong to other producers.
+  Enable-SmartM365StagedSourcePublication
   Start-SmartM365RunTranscript -Path $global:logTranscriptFile -Append | Out-Null
   $script:LogReady=$true
   Log "Log environment initialized for $ScriptName v$ScriptVersion (EnableSharePointUpload=$($global:EnableSharePointUpload))."

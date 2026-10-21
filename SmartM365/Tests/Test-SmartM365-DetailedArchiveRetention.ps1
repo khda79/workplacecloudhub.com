@@ -2,7 +2,7 @@
 .SYNOPSIS
 Offline tests for the seven-day detailed archive retention policy.
 .VERSION
-1.1.1
+1.1.2
 #>
 #requires -Version 7.0
 [CmdletBinding()]
@@ -48,7 +48,7 @@ $cases = @(
         Path = Join-Path $smartM365Root 'SmartInventory\ExchangeInventory\Migration\SmartM365-Exchange-HybridIdentity-Issues-Inventory.ps1'
         Prefix = 'Exchange_HybridIdentity_Issues'
         Format = 'yyyyMMdd-HHmmss'
-        Version = '1.24'
+        Version = '1.25'
         ArchiveWriteMarker = 'CopyCsv $main $archive'
         RetentionCallMarker = "Remove-DetailedArchiveFilesOlderThan -Folder (Join-Path `$OutputFolder 'Archive')"
     },
