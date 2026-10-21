@@ -2,7 +2,7 @@
 .SYNOPSIS
 Synthetic regression tests for the complete SmartInventory Microsoft Graph collector audit.
 .VERSION
-1.0.24
+1.0.25
 #>
 [CmdletBinding()]
 param(
@@ -639,12 +639,12 @@ d1,p2,s9,1,u1,i9,firewallEnabled,,Not compliant,,,,
     }
 
     Test-OfflineCase 'Licensing retries transient HTTP 500 and honors Retry-After' {
-        $h=Import-OfflineFunctions 'Modules/SmartM365.Core/SmartM365.Core.psm1' @('Get-SmartM365GraphErrorStatusCode')
+        Import-Module (Join-Path $SourceRoot 'Modules/SmartM365.Core/SmartM365.Core.psd1') -MinimumVersion '1.0.98' -Force -WarningAction SilentlyContinue
         $m=Import-OfflineFunctions 'SmartInventory/M365Inventory/Licensing/SmartM365-Licences-Inventory.ps1' @('Invoke-GraphWithRetry')
-        try{&$m {$script:n=0;$script:slept=0;function script:Start-Sleep{param($Seconds)$script:slept=$Seconds}};$value=&$m {Invoke-GraphWithRetry -MaxRetries 3 -ScriptBlock {$script:n++;if($script:n-eq1){$e=[Exception]::new('synthetic 500');$e.Data['StatusCode']=500;$e.Data['Retry-After']=7;throw $e};'ok'}};$state=&$m {[pscustomobject]@{Calls=$script:n;Slept=$script:slept}};Assert-Offline ($value-eq'ok'-and$state.Calls-eq2-and$state.Slept-eq7) 'Licensing retry did not honor the transient status and Retry-After delay.'}finally{Remove-Module $m,$h -Force}
+        try{&$m {$script:n=0;$script:slept=0;function script:Start-Sleep{param($Seconds)$script:slept=$Seconds}};$value=&$m {Invoke-GraphWithRetry -MaxRetries 3 -ScriptBlock {$script:n++;if($script:n-eq1){$e=[Exception]::new('synthetic 500');$e.Data['StatusCode']=500;$e.Data['Retry-After']=7;throw $e};'ok'}};$state=&$m {[pscustomobject]@{Calls=$script:n;Slept=$script:slept}};Assert-Offline ($value-eq'ok'-and$state.Calls-eq2-and$state.Slept-eq7) 'Licensing retry did not honor the transient status and Retry-After delay.'}finally{Remove-Module $m -Force}
     }
     Test-OfflineCase 'Licensing retries a Graph SDK 500 known only by its message and never retries 403' {
-        $h=Import-OfflineFunctions 'Modules/SmartM365.Core/SmartM365.Core.psm1' @('Get-SmartM365GraphErrorStatusCode')
+        Import-Module (Join-Path $SourceRoot 'Modules/SmartM365.Core/SmartM365.Core.psd1') -MinimumVersion '1.0.98' -Force -WarningAction SilentlyContinue
         $m=Import-OfflineFunctions 'SmartInventory/M365Inventory/Licensing/SmartM365-Licences-Inventory.ps1' @('Invoke-GraphWithRetry')
         try{
             &$m {$script:n=0;function script:Start-Sleep{param($Seconds)$null=$Seconds};function script:Write-Warning{param($Message)$null=$Message}}
@@ -653,7 +653,7 @@ d1,p2,s9,1,u1,i9,firewallEnabled,,Not compliant,,,,
             &$m {$script:n=0}
             $failed=$false;try{&$m {Invoke-GraphWithRetry -MaxRetries 3 -ScriptBlock {$script:n++;$e=[Exception]::new('Forbidden (Forbidden): request timed out at gateway');$e.Data['StatusCode']=403;throw $e}}}catch{$failed=$_.Exception.Message -match 'Forbidden'}
             Assert-Offline ($failed-and(&$m {$script:n})-eq1) 'Licensing retried a 403.'
-        }finally{Remove-Module $m,$h -Force}
+        }finally{Remove-Module $m -Force}
     }
     Test-OfflineCase 'Remediations retries throttling and honors Retry-After' {
         $m=Import-OfflineFunctions $paths.Remediations @('Get-IntuneRemediationRetryDelaySeconds','Invoke-GraphGet')

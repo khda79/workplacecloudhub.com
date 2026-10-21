@@ -4510,6 +4510,10 @@ function Connect-SmartM365GraphForSharePointUpload {
         return $false
     }
 }
+<#
+.SYNOPSIS
+Wait before retrying a Graph call: the Retry-After of the response when present, else the default, capped.
+#>
 function Get-SmartM365GraphRetryAfterSeconds {
     [CmdletBinding()]
     param(
@@ -4539,6 +4543,10 @@ function Get-SmartM365GraphRetryAfterSeconds {
     return [math]::Min([math]::Max(1, $DefaultSeconds), $MaximumSeconds)
 }
 
+<#
+.SYNOPSIS
+True for transient Graph errors: 429/5xx, throttling, timeouts and connection resets.
+#>
 function Test-SmartM365GraphTransientError {
     [CmdletBinding()]
     param(
@@ -4574,8 +4582,11 @@ function Test-SmartM365GraphTransientError {
 
     return ($details -match '(?i)TooManyRequests|throttl|timeout|timed out|temporarily unavailable|An error occurred while sending the request|connection (?:was )?(?:reset|closed|aborted|forcibly closed)|SSL connection could not be established')
 }
-# HTTP status of a failed Graph call: from the response when present, else from the message of
-# Microsoft Graph SDK errors ("InternalServerError (Internal Server Error)", "Status: 500").
+<#
+.SYNOPSIS
+HTTP status of a failed Graph call: from the response when present, else from the message of Microsoft
+Graph SDK errors ("InternalServerError (Internal Server Error)", "Status: 500"). Exported for collectors.
+#>
 function Get-SmartM365GraphErrorStatusCode {
     [CmdletBinding()]
     [OutputType([int])]
@@ -6583,7 +6594,8 @@ Export-ModuleMember -Function `
     TestSharePath, InitializeScriptEnvironment, Connect-SmartM365GraphAppOnly, ConvertTo-SmartM365SharePointDataRootPath, Get-SmartM365SharePointRelativeFilePath, Initialize-SmartM365SharePointFolder, Invoke-SmartM365SharePointCsvUpload, Remove-SmartM365SharePointFile, Remove-SmartM365SharePointTimestampedCsvOlderThan, Invoke-SmartM365SharePointFileDownload, Resolve-SmartM365CsvPathWithSharePointFallback, Import-SmartM365CsvWithSharePointFallback, `
     ExportAndCopyCsv, ExportAndCopyCsvFromConvert, Save-SmartM365WeeklyInventoryHistory, Add-SmartM365WeeklyHistory, `
     NewRemoteScheduledTaskAndWait, `
-    Invoke-SmartM365Preflight, Initialize-SmartM365ImportExcel, Connect-SmartM365CloudSession, Disconnect-SmartM365CloudSession
+    Invoke-SmartM365Preflight, Initialize-SmartM365ImportExcel, Connect-SmartM365CloudSession, Disconnect-SmartM365CloudSession, `
+    Get-SmartM365GraphErrorStatusCode, Test-SmartM365GraphTransientError, Get-SmartM365GraphRetryAfterSeconds
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor

@@ -3,7 +3,7 @@
 .SYNOPSIS
   Offline checks for users deleted from the directory while the licensing run collects them.
 .VERSION
-1.0.1
+1.0.2
 .NOTES
   Synthetic identifiers only (GUIDs and example.invalid). Graph calls are replaced by mocks; no tenant access.
 #>
@@ -21,9 +21,8 @@ $names = @('Invoke-GraphWithRetry', 'Test-LicensesGraphNotFound', 'Register-Lice
 $definitions = @($ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $names -contains $node.Name }, $true))
 if ($definitions.Count -ne $names.Count) { throw 'Deleted-user functions are missing.' }
 foreach ($definition in $definitions) { . ([scriptblock]::Create($definition.Extent.Text)) }
-# The retry classifies Graph errors with the Core status helper.
-$coreAst = [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..\..\..\Modules\SmartM365.Core\SmartM365.Core.psm1')).Path, [ref]$null, [ref]$null)
-. ([scriptblock]::Create($coreAst.Find({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Get-SmartM365GraphErrorStatusCode' }, $true).Extent.Text))
+# The retry classifies Graph errors with the Core status helper, resolved through the module exports as in production.
+Import-Module (Join-Path $PSScriptRoot '..\..\..\..\Modules\SmartM365.Core\SmartM365.Core.psd1') -MinimumVersion '1.0.98' -Force -WarningAction SilentlyContinue
 
 $script:checks = 0
 function Check { param([bool]$Condition, [string]$Message) if (-not $Condition) { throw $Message }; $script:checks++ }
