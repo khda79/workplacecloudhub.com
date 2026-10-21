@@ -50,6 +50,7 @@ SmartFinOps/**
 !/SmartM365/**/*.html
 !/SmartM365/**/*.json.template
 !/SmartM365/SmartInventory/ExchangeInventory/OnPremises/ServersAndStorage/ThirdParty/CSS-Exchange/HealthChecker/LICENSE
+!/SmartM365/SmartInventory/ExchangeInventory/Hybrid/FreeBusy/ThirdParty/CSS-Exchange/FreeBusyChecker/LICENSE
 !/SmartM365/Devices/DeviceRebootManager/SmartM365-DeviceRebootManager.version.json.txt
 !/SmartM365/Devices/EndpointDiagnosticsAnalyzer/SmartM365-EndpointDiagnosticsAnalyzer.version.json.txt
 !/SmartM365/Devices/Windows11UpgradeToolkit/Windows11UpgradeToolkit.config.template
