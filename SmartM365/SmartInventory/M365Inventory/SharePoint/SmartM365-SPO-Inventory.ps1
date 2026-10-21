@@ -58,7 +58,7 @@
     Uses delegated interactive Graph authentication instead of app-only certificate authentication.
 
 .VERSION
- 0.42
+ 0.43
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication; ImportExcel. PnP.PowerShell enables tenant capacity collection and optional sharing scans.
@@ -128,7 +128,7 @@ Set-StrictMode -Version Latest
 [System.Threading.Thread]::CurrentThread.CurrentUICulture = [System.Globalization.CultureInfo]::InvariantCulture
 $ErrorActionPreference = 'Stop'
 $MaximumFunctionCount = 32768
-$ScriptVersion = "0.42"
+$ScriptVersion = "0.43"
 $TenantCapacityEnabled = -not [bool]$SkipPnPTenantCapacity -and ([bool]$UsePnPTenantCapacity -or [bool](Get-Module -ListAvailable PnP.PowerShell | Select-Object -First 1))
 $CurrentOperation = 'Initialize'
 
@@ -159,7 +159,7 @@ function Import-SmartM365CoreModule {
     $searchRoot = $PSScriptRoot
     while ($searchRoot) {
         $candidate = Join-Path -Path $searchRoot -ChildPath 'Modules\SmartM365.Core\SmartM365.Core.psd1'
-        if (Test-Path -LiteralPath $candidate) { Import-Module -Name $candidate -MinimumVersion '1.0.87' -Force -ErrorAction Stop; return }
+        if (Test-Path -LiteralPath $candidate) { Import-Module -Name $candidate -MinimumVersion '1.0.95' -Force -ErrorAction Stop; return }
         $parent = Split-Path -Path $searchRoot -Parent
         if ([string]::IsNullOrWhiteSpace($parent) -or $parent -eq $searchRoot) { break }
         $searchRoot = $parent
@@ -300,14 +300,17 @@ function Export-SpoEntityCsv {
     $latestPath = Join-Path -Path $LatestFolder -ChildPath ("{0}.csv" -f $BaseFileName)
     if (@($Data).Count -eq 0) {
         Write-SmartM365CsvAtomically -Data @() -Path $timestampedPath -Columns $Columns -Encoding utf8BOM
-        Write-SmartM365CsvAtomically -Data @() -Path $latestPath -Columns $Columns -Encoding utf8BOM
+        # A staged run writes its DATA-LAST copy to source staging; it is promoted with the receipt.
+        $latestWritePath = if (Get-Command -Name Resolve-SmartM365SourcePublicationPath -ErrorAction SilentlyContinue) { Resolve-SmartM365SourcePublicationPath -Path $latestPath } else { $latestPath }
+        Write-SmartM365CsvAtomically -Data @() -Path $latestWritePath -Columns $Columns -Encoding utf8BOM
         if (-not $DryRun) {
             $timestampedUpload = Invoke-SmartM365SharePointCsvUpload -LocalFilePath $timestampedPath
-            Invoke-SmartM365SharePointCsvUpload -LocalFilePath $latestPath | Out-Null
+            if ($latestWritePath -cne $latestPath) { Add-SmartM365StagedPublicationAction -Path $latestPath -SharePointUpload }
+            else { Invoke-SmartM365SharePointCsvUpload -LocalFilePath $latestPath | Out-Null }
             # Non-empty exports go through Export-SmartM365Csv, which applies the same retention.
             if ($timestampedUpload) { Remove-SmartM365SharePointTimestampedCsvOlderThan -TimestampedPath $timestampedPath -RetentionDays 7 | Out-Null }
         }
-        return [pscustomobject]@{ TimestampedPath=$timestampedPath; LatestPath=$latestPath }
+        return [pscustomobject]@{ TimestampedPath=$timestampedPath; LatestPath=$latestPath; PublishedPath=$latestWritePath }
     }
     # Final encoding must precede uploads, weekly snapshots and receipt hashing.
     $result = Export-SmartM365Csv -Data $Data -TimestampedPath $timestampedPath -LatestPath $latestPath -Columns $Columns -Encoding utf8BOM -NoWeeklyHistory:$NoWeeklyHistory
@@ -1312,7 +1315,11 @@ if ([string]::IsNullOrWhiteSpace($latestFolder)) { throw 'LatestCsvFolderPath co
 
 $CurrentOperation = 'InitializeScriptEnvironment'
 $initializedOutput = InitializeScriptEnvironment -OutputPath $scriptOutputPath -LogFileName ([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath))
-if (-not $MailOnly) { Start-SmartM365CmdbSourceReceipt -ScriptPath $PSCommandPath -SourceRootPath (Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue '') -ReadOnly:$DryRun }
+if (-not $MailOnly) {
+    Start-SmartM365CmdbSourceReceipt -ScriptPath $PSCommandPath -SourceRootPath (Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue '') -ReadOnly:$DryRun
+    # DATA-LAST changes only when this run completes; DryRun and MailOnly hold no receipt.
+    Enable-SmartM365StagedSourcePublication
+}
 if ([string]::IsNullOrWhiteSpace($global:WeeklyHistoryFolderPath)) {
     $global:WeeklyHistoryFolderPath = Join-Path -Path $initializedOutput -ChildPath 'WeeklyHistory'
 }
@@ -1567,7 +1574,9 @@ try {
         }
         if ($exportResult.LatestPath) {
             $generatedCsvPaths.Add($exportResult.LatestPath) | Out-Null
-            $weeklyHistorySourcePaths.Add($exportResult.LatestPath) | Out-Null
+            # WeeklyHistory reads this run's copy (staged until promotion), never the previous run's file.
+            $runCopyPath = if ($exportResult.PSObject.Properties['PublishedPath'] -and $exportResult.PublishedPath) { [string]$exportResult.PublishedPath } else { [string]$exportResult.LatestPath }
+            $weeklyHistorySourcePaths.Add($runCopyPath) | Out-Null
         }
     }
     if ($global:EnableWeeklyHistory -and -not (Test-SmartM365MaxItemsMode)) {

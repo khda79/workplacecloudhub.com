@@ -3,7 +3,7 @@
 .SYNOPSIS
     Microsoft Teams tenant inventory with CSV exports and HTML alert summary.
 .VERSION
- 0.44
+ 0.45
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication; ImportExcel.
@@ -57,7 +57,7 @@ if ($PSBoundParameters.ContainsKey('MaxItems') -and $MaxItems -gt 0) {
     }
 }
 $ErrorActionPreference='Stop'; Set-StrictMode -Version Latest
-$ScriptVersion="0.44"
+$ScriptVersion="0.45"
 $ScriptBaseName = [System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
 $TaskName = $ScriptBaseName
 $RunStarted=Get-Date; $RunDateUtc=$RunStarted.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ',[Globalization.CultureInfo]::InvariantCulture); $RunId=[guid]::NewGuid().ToString(); $CurrentOperation='Initialize'
@@ -67,7 +67,7 @@ $tenantContextPath=&{ $d=$PSScriptRoot; while($d){ foreach($c in @((Join-Path $d
 . $tenantContextPath
 $TenantContext=Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot
 $ctxDir=Split-Path $tenantContextPath -Parent; $SmartM365Root=if((Split-Path $ctxDir -Leaf)-ieq 'Config'){Split-Path $ctxDir -Parent}else{$ctxDir}
-Import-Module -Name (Join-Path $SmartM365Root 'Modules\SmartM365.Core\SmartM365.Core.psd1') -MinimumVersion '1.0.87' -Force -ErrorAction Stop
+Import-Module -Name (Join-Path $SmartM365Root 'Modules\SmartM365.Core\SmartM365.Core.psd1') -MinimumVersion '1.0.95' -Force -ErrorAction Stop
 $LocalConfigPath=Join-Path $PSScriptRoot "$ScriptBaseName.local.json"; $LocalConfigPath = Resolve-SmartM365JsonConfigurationPath -Path $LocalConfigPath; $LocalTemplatePath=(Get-SmartM365JsonTemplateName -Path $LocalConfigPath)
 if(-not(Test-Path -LiteralPath $LocalConfigPath)){Initialize-SmartM365LocalJsonFromTemplate -Path $LocalConfigPath -TemplatePath $LocalTemplatePath -ConfigDescription 'script local configuration'|Out-Null}
 $ScriptConfig=Get-Content -LiteralPath $LocalConfigPath -Raw|ConvertFrom-Json
@@ -536,9 +536,13 @@ function Export-InventoryCsv {
     $Columns = @('TenantKey', 'OrganizationKey', 'EnvironmentKey', 'TenantId') + @($Columns | Where-Object { $_ -inotmatch '^(TenantKey|OrganizationKey|EnvironmentKey|TenantId)$' })
     Assert-SmartM365CsvDataCompleteness -Data $Rows -Columns $Columns -TimestampedPath $TimestampedPath -LatestPath $LatestPath
     Write-TeamsCsvAtomically -Rows $Rows -Path $TimestampedPath -Columns $Columns
-    Write-TeamsCsvAtomically -Rows $Rows -Path $LatestPath -Columns $Columns
+    # DATA-LAST copy through the shared atomic copy: Publishing fence, receipt registration and source
+    # staging, so a running or failed run never changes DATA-LAST.
+    $latestWritePath = if (Get-Command -Name Resolve-SmartM365SourcePublicationPath -ErrorAction SilentlyContinue) { Resolve-SmartM365SourcePublicationPath -Path $LatestPath } else { $LatestPath }
+    Copy-SmartM365FileAtomically -SourcePath $TimestampedPath -DestinationPath $latestWritePath -VerifyHash
     [void]$GeneratedCsvPaths.Add($TimestampedPath)
-    [void]$GeneratedCsvPaths.Add($LatestPath)
+    # WeeklyHistory reads this run's copy, never the previous run's DATA-LAST file.
+    [void]$GeneratedCsvPaths.Add($latestWritePath)
     if (-not $global:csvGeneratedPaths) { $global:csvGeneratedPaths = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase) }
     [void]$global:csvGeneratedPaths.Add($TimestampedPath)
     [void]$global:csvGeneratedPaths.Add($LatestPath)
@@ -547,7 +551,8 @@ function Export-InventoryCsv {
     }
     else {
         $timestampedUpload = Invoke-SmartM365SharePointCsvUpload -LocalFilePath $TimestampedPath
-        Invoke-SmartM365SharePointCsvUpload -LocalFilePath $LatestPath | Out-Null
+        if ($latestWritePath -cne $LatestPath) { Add-SmartM365StagedPublicationAction -Path $LatestPath -SharePointUpload }
+        else { Invoke-SmartM365SharePointCsvUpload -LocalFilePath $LatestPath | Out-Null }
         # Same seven-day retention on SharePoint as on the server, once this run's copy is uploaded.
         if ($timestampedUpload) { Remove-SmartM365SharePointTimestampedCsvOlderThan -TimestampedPath $TimestampedPath -RetentionDays 7 | Out-Null }
     }
@@ -806,6 +811,8 @@ try{
   $smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; return
  }
  Start-SmartM365CmdbSourceReceipt -ScriptPath $PSCommandPath -SourceRootPath $LatestCsvFolderPath -ReadOnly:$DryRun
+ # DATA-LAST changes only when this run completes; DryRun holds no receipt.
+ Enable-SmartM365StagedSourcePublication
  $CurrentOperation='Connect Microsoft Graph'; Disconnect-SmartM365CloudSession -ExchangeOnline:$false -Graph:$true -VerboseDisconnect:$true; $conn=Connect-SmartM365CloudSession -ExchangeOnline:$false -Graph:$true -AppId $AppId -Thumbprint $Thumb -TenantId $TenantId -Organization $OrgDomain -GraphScopes @('Team.ReadBasic.All','TeamMember.Read.All','Channel.ReadBasic.All','Group.Read.All','Reports.Read.All'); if(-not$conn.GraphConnected){throw 'Microsoft Graph app-only connection failed.'}
  $CurrentOperation='Ensure ImportExcel module'; Ensure-TeamsImportExcelModule
  $CurrentOperation='Run preflight'; Invoke-SmartM365Preflight -ScriptName $TaskName -RequiredModules @('Microsoft.Graph.Authentication','ImportExcel') -OutputPaths @($OutputPath) -RequiredGraphApplicationPermissions @('Team.ReadBasic.All','TeamMember.Read.All','Channel.ReadBasic.All','Group.Read.All','Reports.Read.All','Sites.Read.All') -GraphProbeUris @('https://graph.microsoft.com/v1.0/organization','https://graph.microsoft.com/v1.0/groups?$top=1')|Out-Null

@@ -2,7 +2,7 @@
 .SYNOPSIS
 Synthetic regression tests for the bounded Teams Graph collector audit.
 .VERSION
-1.0.4
+1.0.5
 #>
 [CmdletBinding()]
 param(
@@ -303,6 +303,13 @@ try {
                 param($LiteralPath, $Destination, [switch]$Force, $ErrorAction)
                 if ($Destination -eq $latestPath) { throw 'Synthetic promotion failure before replacement.' }
                 [IO.File]::Move($LiteralPath, $Destination)
+            }
+            # The DATA-LAST copy goes through the Core atomic copy, which fails here before replacement.
+            function script:Copy-SmartM365FileAtomically {
+                param($SourcePath, $DestinationPath, [switch]$VerifyHash)
+                $null = $VerifyHash
+                if ($DestinationPath -eq $latestPath) { throw 'Synthetic promotion failure before replacement.' }
+                [IO.File]::Copy($SourcePath, $DestinationPath, $true)
             }
         } $latest
         $caught = $false
