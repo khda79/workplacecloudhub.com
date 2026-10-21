@@ -28,7 +28,7 @@
   "ExcludedServers": [],
   "HealthCheckerTimeoutMinutesPerServer": 30,
   "HealthCheckerTotalBudgetMinutes": 1320,
-  "HealthCheckerKeepFailedRawOutputDays": 7,
+  "HealthCheckerMaxResultAgeHours": 26,
   "HealthCheckerWorkFolderPath": "",
   "OutputRoot": "{{DataAllRootPath}}\\Exchange\\OnPrem\\ServersAndStorage"
 }

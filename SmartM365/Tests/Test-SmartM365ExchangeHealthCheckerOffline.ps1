@@ -8,12 +8,22 @@ Checker is never executed: process runs use a synthetic stand-in script. Covers:
 - reading a synthetic Health Checker XML exported like Health Checker does (Export-Clixml -Depth 2);
 - masking and scrubbing of sensitive values, status mapping, vulnerability matching, summary facts;
 - integrity check of the vendored file (valid, SHA256 mismatch, non-Microsoft signer);
-- child process run: arguments, completed, not elevated, timeout with process tree stop;
-- per-run orchestration: integrity failure, not elevated, time budget, raw output cleanup;
+- child process run: arguments (never -Server), completed, not elevated, timeout with process tree stop;
+- per-run orchestration: local server in a process, other servers through a stubbed task start,
+  result sources, scheduled fallback, StaleResult, TaskTimeout, integrity failure, not elevated,
+  time budget, only the last run kept, unsafe work folder, check again just before the start;
+- work folder: parents checked below Program Files, ProgramData or the drive root, Administrators
+  owner and administrators-only ACL, same parent check as the installer;
+- remote helpers: administrative share path, messages without domain, task logon failures,
+  runner state mapping, run token progress, result file name check, copy when changed;
+- local runner: constants and integrity check identical to the collector, no -Server, standalone,
+  status.json content, previous output removed, Exchange Management Shell failure;
+- installer: same task, folder and hash as the collector, classic account only, password handling,
+  CIM over DCOM, task settings, explicit folder permissions;
 - option disabled: no Health Checker call outside -IncludeHealthChecker and no report section.
 
 .VERSION
-1.0.0
+1.1.0
 #>
 [CmdletBinding()]
 param([string]$SourceRoot)
@@ -32,7 +42,11 @@ $ast = [Management.Automation.Language.Parser]::ParseFile($collectorPath, [ref]$
 if ($parseErrors.Count) { throw "Collector parse failed: $parseErrors" }
 $functionNames = @('Ensure-Directory', 'Format-HtmlValue', 'Get-HealthCheckerCsvColumn', 'Get-HealthCheckerMaskingRule', 'Get-HealthCheckerSetting',
     'Test-HealthCheckerScriptIntegrity', 'Test-HealthCheckerElevation', 'Invoke-HealthCheckerProcess', 'ConvertTo-HealthCheckerSafeValue',
-    'Get-HealthCheckerLineValue', 'ConvertFrom-HealthCheckerXml', 'ConvertTo-HealthCheckerSummaryRow', 'Remove-HealthCheckerExpiredWorkFolder',
+    'Get-HealthCheckerLineValue', 'ConvertFrom-HealthCheckerXml', 'ConvertTo-HealthCheckerSummaryRow', 'Remove-HealthCheckerPreviousWorkFolder',
+    'Get-HealthCheckerServerComputerName', 'ConvertTo-HealthCheckerAdminSharePath', 'ConvertTo-HealthCheckerRemoteMessage', 'ConvertTo-HealthCheckerUtcTime',
+    'Read-HealthCheckerRemoteStatus', 'Get-HealthCheckerTaskLogonFailure', 'ConvertFrom-HealthCheckerRunnerState', 'Resolve-HealthCheckerScheduledFallback',
+    'Copy-HealthCheckerRemoteFile', 'Start-HealthCheckerRemoteRun', 'Update-HealthCheckerRemoteRun', 'Complete-HealthCheckerRemoteRun',
+    'Get-HealthCheckerUnsafeAclEntry', 'Get-HealthCheckerWorkFolderAncestor', 'Set-HealthCheckerWorkFolderAclRule', 'Initialize-HealthCheckerWorkFolder',
     'Invoke-ExchangeHealthCheckerInventory', 'ConvertTo-ServersAndStorageHealthCheckerSectionHtml', 'ConvertTo-ServersAndStorageDatabaseSectionHtml',
     'New-HtmlExecutiveSummary')
 $definitions = foreach ($name in $functionNames) {
@@ -41,7 +55,7 @@ $definitions = foreach ($name in $functionNames) {
     $node.Extent.Text
 }
 $constants = @{}
-foreach ($constantName in @('HealthCheckerVersion', 'HealthCheckerExpectedSha256', 'HealthCheckerRelativePath')) {
+foreach ($constantName in @('HealthCheckerVersion', 'HealthCheckerExpectedSha256', 'HealthCheckerRelativePath', 'HealthCheckerRunnerFileName', 'HealthCheckerRemoteRootPath', 'HealthCheckerTaskPath', 'HealthCheckerTaskName')) {
     $assignment = $ast.Find({ param($n) $n -is [Management.Automation.Language.AssignmentStatementAst] -and $n.Left.Extent.Text -eq "`$$constantName" }, $true)
     if ($null -eq $assignment) { throw "Missing collector constant: $constantName" }
     $constants[$constantName] = $assignment.Right.Extent.Text.Trim("'", '"')
@@ -49,12 +63,17 @@ foreach ($constantName in @('HealthCheckerVersion', 'HealthCheckerExpectedSha256
 
 $module = New-Module -ScriptBlock ([scriptblock]::Create(($definitions -join "`n")))
 & $module {
+    param($Constants)
     Set-StrictMode -Version Latest
     $script:LogLines = New-Object 'System.Collections.Generic.List[string]'
     $script:Config = @{}
+    $script:LocalMode = $null
+    $script:HealthCheckerRemoteRootPath = $Constants.HealthCheckerRemoteRootPath
+    $script:HealthCheckerTaskPath = $Constants.HealthCheckerTaskPath
+    $script:HealthCheckerTaskName = $Constants.HealthCheckerTaskName
     function script:Write-Log { param($Message, $Level = 'INFO') $script:LogLines.Add(("[{0}] {1}" -f $Level, $Message)) | Out-Null }
     function script:Get-SmartM365EffectiveConfigValue { param($Name, $DefaultValue) if ($script:Config.ContainsKey($Name)) { return $script:Config[$Name] } return $DefaultValue }
-}
+} $constants
 
 $script:Checks = 0
 function Assert-HealthChecker {
@@ -193,7 +212,17 @@ try {
 
     # 3. Settings.
     $settings = & $module { $script:Config = @{}; Get-HealthCheckerSetting }
-    Assert-HealthChecker ($settings.TimeoutMinutesPerServer -eq 30 -and $settings.TotalBudgetMinutes -eq 1320 -and $settings.KeepFailedRawOutputDays -eq 7 -and $settings.WorkFolderPath -like '*\SmartM365\HealthChecker') 'Default settings.'
+    Assert-HealthChecker ($settings.TimeoutMinutesPerServer -eq 30 -and $settings.TotalBudgetMinutes -eq 1320 -and $settings.MaxResultAgeHours -eq 26 -and $settings.WorkFolderPath -eq (Join-Path $env:ProgramFiles 'SmartM365\HealthChecker\Work')) 'Default settings: the work folder is under Program Files.'
+    Assert-HealthChecker ($settings.RemoteRootPath -eq 'C:\Program Files\SmartM365\HealthChecker' -and $settings.TaskPath -eq '\WCH\' -and $settings.TaskName -eq 'SmartM365 Exchange Health Checker' -and $settings.PollSeconds -eq 15) 'Remote task settings come from the collector constants.'
+    Assert-HealthChecker (-not $settings.PSObject.Properties['KeepFailedRawOutputDays']) 'The failed raw output retention setting is gone.'
+    & $module { $script:LogLines.Clear(); $script:Config = @{ HealthCheckerKeepFailedRawOutputDays = 7 } }
+    [void](& $module { Get-HealthCheckerSetting })
+    $obsoleteLog = (& $module { $script:LogLines }) -join "`n"
+    Assert-HealthChecker ($obsoleteLog -match '\[INFO\] HealthCheckerKeepFailedRawOutputDays is no longer used') 'A former retention setting is ignored with an information line, not a warning.'
+    $ageRefused = $false
+    try { & $module { $script:Config = @{ HealthCheckerMaxResultAgeHours = 0 }; Get-HealthCheckerSetting } } catch { $ageRefused = $true }
+    Assert-HealthChecker $ageRefused 'An out-of-range result age limit is refused.'
+    & $module { $script:LogLines.Clear() }
     $uncRefused = $false
     try { & $module { $script:Config = @{ HealthCheckerWorkFolderPath = '\\server\share\hc' }; Get-HealthCheckerSetting } } catch { $uncRefused = $_.Exception.Message -match 'local absolute path' }
     Assert-HealthChecker $uncRefused 'A share as work folder is refused.'
@@ -211,16 +240,23 @@ Set-Content -LiteralPath (Join-Path $OutputFilePath 'fake-args.txt') -Value ("Se
 if ($mode -eq 'sleep') { Start-Sleep -Seconds 120; exit 0 }
 if ($mode -eq 'notadmin') { Write-Warning 'The script needs to be executed in elevated mode. Start the Exchange Management Shell as an Administrator.'; exit }
 if ($mode -eq 'nooutput') { exit 1 }
-Copy-Item -LiteralPath $env:SMARTM365_FAKE_HC_FIXTURE -Destination (Join-Path $OutputFilePath ("HealthChecker-{0}-20261021060000.xml" -f $Server[0].ToUpper()))
+if ($mode -eq 'noshell') { Write-Warning 'Failed to Load Exchange PowerShell Module...'; exit 1 }
+$name = if ($Server) { $Server[0].ToUpper() } else { $env:COMPUTERNAME.ToUpper() }
+Copy-Item -LiteralPath $env:SMARTM365_FAKE_HC_FIXTURE -Destination (Join-Path $OutputFilePath ("HealthChecker-{0}-20261021060000.xml" -f $name))
 '@, [Text.UTF8Encoding]::new($false))
     $env:SMARTM365_FAKE_HC_FIXTURE = $fixture
     try {
         $env:SMARTM365_FAKE_HC_MODE = 'ok'
         $okFolder = Join-Path $tempRoot 'run-ok'
         $ok = & $module { param($s, $o) Invoke-HealthCheckerProcess -ScriptPath $s -ServerName 'EXSRV01' -OutputFolder $o -TimeoutSeconds 120 } $fakeScript $okFolder
-        Assert-HealthChecker ($ok.Status -eq 'Completed' -and $ok.XmlPath -like '*HealthChecker-EXSRV01-*.xml') "A completed run returns its XML ($($ok.Status) $($ok.Message))."
+        Assert-HealthChecker ($ok.Status -eq 'Completed' -and $ok.XmlPath -like '*HealthChecker-*.xml') "A completed run returns its XML ($($ok.Status) $($ok.Message))."
         $fakeArgs = Get-Content -LiteralPath (Join-Path $okFolder 'fake-args.txt') -Raw
-        Assert-HealthChecker ($fakeArgs -match 'Server=EXSRV01;SkipVersionCheck=True') "Health Checker gets -Server and -SkipVersionCheck ($fakeArgs)."
+        Assert-HealthChecker ($fakeArgs -match 'Server=;SkipVersionCheck=True') "Health Checker gets -SkipVersionCheck and never -Server ($fakeArgs)."
+
+        # Checked again just before the start: a file swapped after the first check never runs.
+        $swappedFolder = Join-Path $tempRoot 'run-swapped'
+        $swapped = & $module { param($s, $o, $h) Invoke-HealthCheckerProcess -ScriptPath $s -ServerName 'EXSRV01' -OutputFolder $o -TimeoutSeconds 120 -ExpectedSha256 $h } $fakeScript $swappedFolder $constants.HealthCheckerExpectedSha256
+        Assert-HealthChecker ($swapped.Status -eq 'IntegrityFailed' -and $swapped.Message -match 'SHA256 mismatch' -and -not (Test-Path -LiteralPath (Join-Path $swappedFolder 'fake-args.txt'))) 'A file that no longer matches the expected SHA256 is not started.'
 
         $env:SMARTM365_FAKE_HC_MODE = 'notadmin'
         $notAdmin = & $module { param($s, $o) Invoke-HealthCheckerProcess -ScriptPath $s -ServerName 'EXSRV01' -OutputFolder $o -TimeoutSeconds 120 } $fakeScript (Join-Path $tempRoot 'run-notadmin')
@@ -244,72 +280,149 @@ Copy-Item -LiteralPath $env:SMARTM365_FAKE_HC_FIXTURE -Destination (Join-Path $O
         Remove-Item Env:\SMARTM365_FAKE_HC_FIXTURE -ErrorAction SilentlyContinue
     }
 
-    # 5. Orchestration with a stubbed runner.
-    $servers = @([pscustomobject]@{ Name = 'EXSRV01' }, [pscustomobject]@{ Name = 'EXSRV02' })
+    # 5. Orchestration: the local server runs in a stubbed process, remote servers through a stubbed start.
+    $servers = @([pscustomobject]@{ Name = 'EXSRV01' }, [pscustomobject]@{ Name = 'EXSRV02'; Fqdn = 'EXSRV02.corp.contoso.example' })
+    $remoteShare = Join-Path $tempRoot 'remote-EXSRV02'
+    New-Item -ItemType Directory -Path (Join-Path $remoteShare 'Raw') -Force | Out-Null
+    $runnerSource = Join-Path $collectorFolder $constants.HealthCheckerRunnerFileName
     & $module {
-        param($FixturePath)
+        param($FixturePath, $RemoteShare)
         $script:FixturePath = $FixturePath
+        $script:RemoteShare = $RemoteShare
         $script:ProcessCalls = New-Object 'System.Collections.Generic.List[object]'
+        $script:RemoteStarts = New-Object 'System.Collections.Generic.List[object]'
         $script:Elevated = $true
-        $script:StubDelaySeconds = 0
+        $script:RemoteMode = 'Completed'
+        $script:UnsafeWorkFolder = $false
+        $script:WorkFolderInitializations = New-Object 'System.Collections.Generic.List[string]'
         function script:Test-HealthCheckerElevation { return $script:Elevated }
+        # Setting the Administrators owner needs elevation: the folder preparation itself is tested separately.
+        function script:Initialize-HealthCheckerWorkFolder {
+            param($WorkRoot)
+            $script:WorkFolderInitializations.Add($WorkRoot) | Out-Null
+            if ($script:UnsafeWorkFolder) { throw 'A parent of the Health Checker work folder is not restricted to administrators (S-1-5-32-545 Modify): C:\Unsafe' }
+            New-Item -ItemType Directory -Path $WorkRoot -Force | Out-Null
+        }
         function script:Invoke-HealthCheckerProcess {
-            param($ScriptPath, $ServerName, $OutputFolder, $TimeoutSeconds)
-            $script:ProcessCalls.Add([pscustomobject]@{ ScriptPath = $ScriptPath; ServerName = $ServerName; TimeoutSeconds = $TimeoutSeconds; ScriptExists = (Test-Path -LiteralPath $ScriptPath) }) | Out-Null
+            param($ScriptPath, $ServerName, $OutputFolder, $TimeoutSeconds, $ExpectedSha256)
+            $script:ProcessCalls.Add([pscustomobject]@{ ScriptPath = $ScriptPath; ServerName = $ServerName; TimeoutSeconds = $TimeoutSeconds; ExpectedSha256 = $ExpectedSha256; ScriptExists = (Test-Path -LiteralPath $ScriptPath) }) | Out-Null
             Ensure-Directory -Path $OutputFolder
-            if ($script:StubDelaySeconds -gt 0) { Start-Sleep -Seconds $script:StubDelaySeconds }
-            if ($ServerName -eq 'EXSRV02') { return [pscustomobject]@{ ServerName = $ServerName; Status = 'Timeout'; Message = 'stopped'; ExitCode = $null; DurationSeconds = 5; XmlPath = $null } }
-            $xml = Join-Path $OutputFolder 'HealthChecker-EXSRV01-1.xml'
+            if ($script:LocalMode -eq 'Timeout') { return [pscustomobject]@{ ServerName = $ServerName; Status = 'Timeout'; Message = 'stopped'; ExitCode = $null; DurationSeconds = 5; XmlPath = $null } }
+            $xml = Join-Path $OutputFolder ("HealthChecker-{0}-1.xml" -f $ServerName)
             Copy-Item -LiteralPath $script:FixturePath -Destination $xml
             return [pscustomobject]@{ ServerName = $ServerName; Status = 'Completed'; Message = $null; ExitCode = 0; DurationSeconds = 12; XmlPath = $xml }
         }
-    } $fixture
+        function script:Start-HealthCheckerRemoteRun {
+            param($ServerName, $Computer, $VerifiedScriptPath, $RunnerSourcePath, $Settings)
+            $script:RemoteStarts.Add([pscustomobject]@{ ServerName = $ServerName; Computer = $Computer; VerifiedScriptPath = $VerifiedScriptPath; RunnerSourcePath = $RunnerSourcePath }) | Out-Null
+            $now = [DateTime]::UtcNow
+            $previous = [pscustomobject]@{ RunToken = 'old'; State = 'Completed'; Message = $null; StartedAtUtc = $now.AddHours(-3).ToString('o'); FinishedAtUtc = $now.AddHours(-2).ToString('o'); DurationSeconds = 150; XmlFileName = 'Raw\HealthChecker-EXSRV02-1.xml' }
+            $run = [pscustomobject]@{ ServerName = $ServerName; Computer = $Computer; Session = $null; OutputSharePath = $script:RemoteShare; PreviousStatus = $previous; WaitToken = $null; StartedAt = (Get-Date); Done = $false; Status = $null; Message = $null; RemoteStatus = $null }
+            Copy-Item -LiteralPath $script:FixturePath -Destination (Join-Path $script:RemoteShare 'Raw\HealthChecker-EXSRV02-1.xml') -Force
+            switch ($script:RemoteMode) {
+                'Completed' {
+                    $current = [pscustomobject]@{ RunToken = 'new'; State = 'Completed'; Message = $null; StartedAtUtc = $now.ToString('o'); FinishedAtUtc = $now.ToString('o'); DurationSeconds = 140; XmlFileName = 'Raw\HealthChecker-EXSRV02-1.xml' }
+                    [IO.File]::WriteAllText((Join-Path $script:RemoteShare 'status.json'), ($current | ConvertTo-Json))
+                }
+                'RunnerTimeout' {
+                    $current = [pscustomobject]@{ RunToken = 'new'; State = 'Timeout'; Message = 'Health Checker exceeded the 30 minute limit on the server and was stopped.'; StartedAtUtc = $now.ToString('o'); FinishedAtUtc = $now.ToString('o'); DurationSeconds = 1800; XmlFileName = $null }
+                    [IO.File]::WriteAllText((Join-Path $script:RemoteShare 'status.json'), ($current | ConvertTo-Json))
+                }
+                'TriggerFailed' { $run.Done = $true; $run.Status = 'TaskTriggerFailed'; $run.Message = 'The Health Checker task could not be started: access denied on EXSRV02.corp.contoso.example.' }
+                'TriggerFailedStale' { $previous.FinishedAtUtc = $now.AddHours(-30).ToString('o'); $run.Done = $true; $run.Status = 'TaskTriggerFailed'; $run.Message = 'start refused' }
+                'NoResult' { [IO.File]::WriteAllText((Join-Path $script:RemoteShare 'status.json'), ($previous | ConvertTo-Json)) }
+            }
+            return $run
+        }
+    } $fixture $remoteShare
     $workRoot = Join-Path $tempRoot 'work'
-    $runSettings = [pscustomobject]@{ TimeoutMinutesPerServer = 30; TotalBudgetMinutes = 1320; KeepFailedRawOutputDays = 7; WorkFolderPath = $workRoot }
+    $runSettings = [pscustomobject]@{ TimeoutMinutesPerServer = 30; TotalBudgetMinutes = 1320; MaxResultAgeHours = 26; WorkFolderPath = $workRoot; RemoteRootPath = 'C:\Program Files\SmartM365\HealthChecker'; TaskPath = '\WCH\'; TaskName = 'SmartM365 Exchange Health Checker'; PollSeconds = 0 }
     $invoke = {
-        param($Servers, $Source, $Hash, $Version, $Settings)
-        Invoke-ExchangeHealthCheckerInventory -ExchangeServers $Servers -SourceScriptPath $Source -ExpectedSha256 $Hash -HealthCheckerVersion $Version -RunId '20261021-060000' -Settings $Settings
+        param($Servers, $Source, $Runner, $Hash, $Version, $Settings)
+        Invoke-ExchangeHealthCheckerInventory -ExchangeServers $Servers -SourceScriptPath $Source -RunnerSourcePath $Runner -ExpectedSha256 $Hash -HealthCheckerVersion $Version -RunId '20261021-060000' -Settings $Settings -LocalComputerName 'EXSRV01'
     }
-    $result = & $module $invoke $servers $vendoredPath $constants.HealthCheckerExpectedSha256 $constants.HealthCheckerVersion $runSettings
+    $result = & $module $invoke $servers $vendoredPath $runnerSource $constants.HealthCheckerExpectedSha256 $constants.HealthCheckerVersion $runSettings
     $calls = @(& $module { $script:ProcessCalls })
-    Assert-HealthChecker ($calls.Count -eq 2 -and $calls[0].ScriptPath -like "$workRoot*" -and $calls[0].ScriptExists) 'Each server runs the verified copy in the local work folder.'
+    $starts = @(& $module { $script:RemoteStarts })
+    Assert-HealthChecker ($calls.Count -eq 1 -and $calls[0].ServerName -eq 'EXSRV01' -and $calls[0].ScriptPath -like "$workRoot*" -and $calls[0].ScriptExists) 'Only the collector server runs in a local process, from the verified copy.'
     Assert-HealthChecker ($calls[0].TimeoutSeconds -eq 1800) 'The per-server limit is applied.'
+    Assert-HealthChecker ($calls[0].ExpectedSha256 -eq $constants.HealthCheckerExpectedSha256) 'The local run checks the copy again just before starting it.'
+    Assert-HealthChecker (@(& $module { $script:WorkFolderInitializations }) -contains $workRoot) 'The work folder is restricted to administrators before the copy is written.'
+    Assert-HealthChecker ($starts.Count -eq 1 -and $starts[0].ServerName -eq 'EXSRV02' -and $starts[0].Computer -eq 'EXSRV02.corp.contoso.example' -and $starts[0].VerifiedScriptPath -like "$workRoot*" -and $starts[0].RunnerSourcePath -eq $runnerSource) 'Other servers start their task by FQDN, with the verified copy and the runner.'
     $summary = @($result.Summary)
-    Assert-HealthChecker ($summary.Count -eq 2 -and $summary[0].RunStatus -eq 'Completed' -and $summary[1].RunStatus -eq 'Timeout') 'Every server has a summary row with its run status.'
-    Assert-HealthChecker ($summary[0].ServersProcessed -eq 1 -and $summary[0].ServersTotal -eq 2 -and $summary[1].ServersProcessed -eq 1) 'Processed and total server counts are on every row.'
-    Assert-HealthChecker (@($result.Findings).Count -eq 17) 'Findings of the completed server are returned.'
+    Assert-HealthChecker ($summary.Count -eq 2 -and $summary[0].RunStatus -eq 'Completed' -and $summary[1].RunStatus -eq 'Completed') 'Both servers complete.'
+    Assert-HealthChecker ($summary[0].ResultSource -eq 'Local' -and $summary[0].ResultAgeHours -eq 0 -and $summary[1].ResultSource -eq 'OnDemand' -and $summary[1].DurationSeconds -eq 140) 'Result sources and remote duration are recorded.'
+    Assert-HealthChecker ($summary[0].ServersProcessed -eq 2 -and $summary[0].ServersTotal -eq 2) 'Processed and total server counts are on every row.'
+    Assert-HealthChecker (@($result.Findings).Count -eq 34) 'Findings of both servers are returned.'
     $runFolder = Join-Path $workRoot '20261021-060000'
-    Assert-HealthChecker (-not (Test-Path -LiteralPath (Join-Path $runFolder 'EXSRV01'))) 'Raw output of a completed server is deleted.'
-    Assert-HealthChecker (Test-Path -LiteralPath (Join-Path $runFolder 'EXSRV02')) 'Raw output of a failed server is kept for diagnosis.'
+    Assert-HealthChecker (-not (Test-Path -LiteralPath (Join-Path $runFolder 'EXSRV01')) -and -not (Test-Path -LiteralPath (Join-Path $runFolder 'EXSRV02'))) 'Raw output of completed servers is deleted.'
     Assert-HealthChecker (-not (Test-Path -LiteralPath (Join-Path $runFolder 'HealthChecker.ps1'))) 'The run copy of the script is removed.'
-    $logText = (& $module { $script:LogLines }) -join "`n"
-    Assert-HealthChecker ($logText -match '\[WARN\] EXSRV02: Health Checker Timeout' -and $logText -match 'processed 1 of 2') 'Failures are logged as warnings with the processed count.'
+    Assert-HealthChecker (Test-Path -LiteralPath (Join-Path $remoteShare 'Raw\HealthChecker-EXSRV02-1.xml')) 'Files on the server are left to its own next run.'
 
-    & $module { $script:ProcessCalls.Clear(); $script:LogLines.Clear() }
-    $integrityResult = & $module $invoke $servers $vendoredPath ('0' * 64) $constants.HealthCheckerVersion $runSettings
-    Assert-HealthChecker (@(& $module { $script:ProcessCalls }).Count -eq 0) 'Nothing runs when the integrity check fails.'
+    & $module { $script:ProcessCalls.Clear(); $script:LogLines.Clear(); $script:RemoteMode = 'RunnerTimeout'; $script:LocalMode = 'Timeout' }
+    $failed = & $module $invoke $servers $vendoredPath $runnerSource $constants.HealthCheckerExpectedSha256 $constants.HealthCheckerVersion $runSettings
+    $failedSummary = @($failed.Summary)
+    Assert-HealthChecker ($failedSummary[0].RunStatus -eq 'Timeout' -and $failedSummary[1].RunStatus -eq 'TaskTimeout' -and $failedSummary[1].RunMessage -match 'on the server') 'A local timeout is Timeout and a runner timeout is TaskTimeout.'
+    Assert-HealthChecker ($null -eq $failedSummary[1].ResultSource -and $failedSummary[0].ServersProcessed -eq 0) 'A failed server has no result source.'
+    Assert-HealthChecker (Test-Path -LiteralPath (Join-Path $runFolder 'EXSRV01')) 'Raw output of a failed local server is kept until the next run.'
+    $logText = (& $module { $script:LogLines }) -join "`n"
+    Assert-HealthChecker ($logText -match '\[WARN\] EXSRV02: Health Checker TaskTimeout' -and $logText -match 'until the next run' -and $logText -match 'processed 0 of 2') 'Failures are logged as warnings with the processed count.'
+
+    & $module { $script:RemoteMode = 'TriggerFailed'; $script:LocalMode = $null }
+    $fallback = & $module $invoke $servers $vendoredPath $runnerSource $constants.HealthCheckerExpectedSha256 $constants.HealthCheckerVersion $runSettings
+    $fallbackRow = @($fallback.Summary)[1]
+    Assert-HealthChecker ($fallbackRow.RunStatus -eq 'Completed' -and $fallbackRow.ResultSource -eq 'Scheduled' -and $fallbackRow.ResultAgeHours -ge 1.9 -and $fallbackRow.ResultAgeHours -le 2.1) "A failed start uses a recent scheduled result ($($fallbackRow.RunStatus) $($fallbackRow.ResultSource) $($fallbackRow.ResultAgeHours))."
+    Assert-HealthChecker ($fallbackRow.RunMessage -match 'TaskTriggerFailed' -and $fallbackRow.RunMessage -match 'EXSRV02' -and $fallbackRow.RunMessage -notmatch 'contoso') "The fallback message keeps the cause without the domain: $($fallbackRow.RunMessage)"
+    Assert-HealthChecker ($fallbackRow.DurationSeconds -eq 150 -and @($fallback.Findings | Where-Object { $_.ServerName -eq 'EXSRV02' }).Count -eq 17) 'The scheduled result is read.'
+
+    & $module { $script:RemoteMode = 'TriggerFailedStale' }
+    $stale = & $module $invoke $servers $vendoredPath $runnerSource $constants.HealthCheckerExpectedSha256 $constants.HealthCheckerVersion $runSettings
+    $staleRow = @($stale.Summary)[1]
+    Assert-HealthChecker ($staleRow.RunStatus -eq 'StaleResult' -and $staleRow.RunMessage -match '30 h old \(limit 26 h\)' -and $null -eq $staleRow.ResultSource -and @($stale.Findings | Where-Object { $_.ServerName -eq 'EXSRV02' }).Count -eq 0) "An old scheduled result is StaleResult and is not read ($($staleRow.RunMessage))."
+
+    & $module { $script:RemoteMode = 'NoResult' }
+    $shortSettings = [pscustomobject]@{ TimeoutMinutesPerServer = 0.05; TotalBudgetMinutes = 1320; MaxResultAgeHours = 26; WorkFolderPath = $workRoot; RemoteRootPath = 'C:\Program Files\SmartM365\HealthChecker'; TaskPath = '\WCH\'; TaskName = 'SmartM365 Exchange Health Checker'; PollSeconds = 1 }
+    $noResult = & $module $invoke $servers $vendoredPath $runnerSource $constants.HealthCheckerExpectedSha256 $constants.HealthCheckerVersion $shortSettings
+    Assert-HealthChecker (@($noResult.Summary)[1].RunStatus -eq 'TaskTimeout' -and @($noResult.Summary)[1].RunMessage -match 'No result from the Health Checker task') 'No new run within the limit is TaskTimeout, never the previous result.'
+    & $module { $script:RemoteMode = 'Completed' }
+
+    & $module { $script:ProcessCalls.Clear(); $script:RemoteStarts.Clear(); $script:LogLines.Clear() }
+    $integrityResult = & $module $invoke $servers $vendoredPath $runnerSource ('0' * 64) $constants.HealthCheckerVersion $runSettings
+    Assert-HealthChecker (@(& $module { $script:ProcessCalls }).Count -eq 0 -and @(& $module { $script:RemoteStarts }).Count -eq 0) 'Nothing runs or starts when the integrity check fails.'
     Assert-HealthChecker (@($integrityResult.Summary | Where-Object { $_.RunStatus -eq 'IntegrityFailed' -and $_.RunMessage -match 'SHA256 mismatch' }).Count -eq 2 -and @($integrityResult.Findings).Count -eq 0) 'Every server reports IntegrityFailed.'
     Assert-HealthChecker (((& $module { $script:LogLines }) -join "`n") -match '\[WARN\] Health Checker was not run') 'The integrity failure is a warning.'
 
-    & $module { $script:ProcessCalls.Clear(); $script:Elevated = $false }
-    $notElevatedResult = & $module $invoke $servers $vendoredPath $constants.HealthCheckerExpectedSha256 $constants.HealthCheckerVersion $runSettings
-    Assert-HealthChecker (@(& $module { $script:ProcessCalls }).Count -eq 0 -and @($notElevatedResult.Summary | Where-Object { $_.RunStatus -eq 'NotElevated' }).Count -eq 2) 'Nothing runs without elevation and every server reports NotElevated.'
+    $missingRunner = & $module $invoke $servers $vendoredPath (Join-Path $tempRoot 'no-runner.ps1') $constants.HealthCheckerExpectedSha256 $constants.HealthCheckerVersion $runSettings
+    Assert-HealthChecker (@(& $module { $script:RemoteStarts }).Count -eq 0 -and @($missingRunner.Summary | Where-Object { $_.RunStatus -eq 'IntegrityFailed' -and $_.RunMessage -match 'runner' }).Count -eq 2) 'A missing runner blocks the run.'
 
-    & $module { $script:ProcessCalls.Clear(); $script:Elevated = $true; $script:StubDelaySeconds = 3 }
-    $budgetSettings = [pscustomobject]@{ TimeoutMinutesPerServer = 30; TotalBudgetMinutes = 1.04; KeepFailedRawOutputDays = 7; WorkFolderPath = (Join-Path $tempRoot 'work-budget') }
-    $budgetResult = & $module $invoke $servers $vendoredPath $constants.HealthCheckerExpectedSha256 $constants.HealthCheckerVersion $budgetSettings
+    & $module { $script:ProcessCalls.Clear(); $script:RemoteStarts.Clear(); $script:LogLines.Clear(); $script:UnsafeWorkFolder = $true }
+    $unsafeWorkRoot = Join-Path $tempRoot 'work-unsafe'
+    $unsafeSettings = [pscustomobject]@{ TimeoutMinutesPerServer = 30; TotalBudgetMinutes = 1320; MaxResultAgeHours = 26; WorkFolderPath = $unsafeWorkRoot; RemoteRootPath = 'C:\Program Files\SmartM365\HealthChecker'; TaskPath = '\WCH\'; TaskName = 'SmartM365 Exchange Health Checker'; PollSeconds = 0 }
+    $unsafeResult = & $module $invoke $servers $vendoredPath $runnerSource $constants.HealthCheckerExpectedSha256 $constants.HealthCheckerVersion $unsafeSettings
+    Assert-HealthChecker (@(& $module { $script:ProcessCalls }).Count -eq 0 -and @(& $module { $script:RemoteStarts }).Count -eq 0 -and -not (Test-Path -LiteralPath (Join-Path $unsafeWorkRoot '20261021-060000'))) 'Nothing is copied, run or started when the work folder cannot be secured.'
+    Assert-HealthChecker (@($unsafeResult.Summary | Where-Object { $_.RunStatus -eq 'UnsafeWorkFolder' -and $_.RunMessage -match 'not restricted to administrators' }).Count -eq 2) 'Every server reports UnsafeWorkFolder.'
+    Assert-HealthChecker (((& $module { $script:LogLines }) -join "`n") -match '\[WARN\] Health Checker was not run: its work folder') 'An unsafe work folder is a warning.'
+    & $module { $script:UnsafeWorkFolder = $false }
+
+    & $module { $script:Elevated = $false }
+    $notElevatedResult = & $module $invoke $servers $vendoredPath $runnerSource $constants.HealthCheckerExpectedSha256 $constants.HealthCheckerVersion $runSettings
+    Assert-HealthChecker (@(& $module { $script:ProcessCalls }).Count -eq 0 -and @($notElevatedResult.Summary | Where-Object { $_.RunStatus -eq 'NotElevated' }).Count -eq 2) 'Nothing runs without elevation and every server reports NotElevated.'
+    & $module { $script:Elevated = $true }
+
+    $localOnly = @([pscustomobject]@{ Name = 'EXSRV01' })
+    $budgetSettings = [pscustomobject]@{ TimeoutMinutesPerServer = 30; TotalBudgetMinutes = 1.04; MaxResultAgeHours = 26; WorkFolderPath = (Join-Path $tempRoot 'work-budget'); RemoteRootPath = 'C:\Program Files\SmartM365\HealthChecker'; TaskPath = '\WCH\'; TaskName = 'SmartM365 Exchange Health Checker'; PollSeconds = 0 }
+    [void](& $module $invoke $localOnly $vendoredPath $runnerSource $constants.HealthCheckerExpectedSha256 $constants.HealthCheckerVersion $budgetSettings)
     $budgetCalls = @(& $module { $script:ProcessCalls })
     Assert-HealthChecker ($budgetCalls.Count -eq 1 -and $budgetCalls[0].TimeoutSeconds -le 63) "The limit never exceeds the remaining budget ($($budgetCalls[0].TimeoutSeconds)s)."
-    Assert-HealthChecker (@($budgetResult.Summary)[1].RunStatus -eq 'NotRun' -and @($budgetResult.Summary)[1].RunMessage -match 'budget') 'Servers left after the budget is used up are NotRun.'
-    & $module { $script:StubDelaySeconds = 0 }
+    $budgetSettings.TotalBudgetMinutes = 0.5
+    $budgetResult = & $module $invoke $localOnly $vendoredPath $runnerSource $constants.HealthCheckerExpectedSha256 $constants.HealthCheckerVersion $budgetSettings
+    Assert-HealthChecker (@($budgetResult.Summary)[0].RunStatus -eq 'NotRun' -and @($budgetResult.Summary)[0].RunMessage -match 'budget') 'A server left when the budget is used up is NotRun.'
 
-    # Expired work folders: only run folders older than the retention are removed.
+    # Only the last run is kept: earlier run folders are removed, other folders are left.
     $purgeRoot = Join-Path $tempRoot 'purge'
-    foreach ($name in @('20261001-010101', '20261020-010101', 'Keep-Me')) { New-Item -ItemType Directory -Path (Join-Path $purgeRoot $name) -Force | Out-Null }
-    (Get-Item (Join-Path $purgeRoot '20261001-010101')).LastWriteTime = (Get-Date).AddDays(-20)
-    (Get-Item (Join-Path $purgeRoot 'Keep-Me')).LastWriteTime = (Get-Date).AddDays(-20)
-    & $module { param($r) Remove-HealthCheckerExpiredWorkFolder -WorkRoot $r -KeepDays 7 } $purgeRoot
-    Assert-HealthChecker (-not (Test-Path (Join-Path $purgeRoot '20261001-010101')) -and (Test-Path (Join-Path $purgeRoot '20261020-010101')) -and (Test-Path (Join-Path $purgeRoot 'Keep-Me'))) 'Only expired run folders are purged.'
+    foreach ($name in @('20261001-010101', '20261020-010101', '20261021-060000', 'Keep-Me')) { New-Item -ItemType Directory -Path (Join-Path $purgeRoot $name) -Force | Out-Null }
+    & $module { param($r) Remove-HealthCheckerPreviousWorkFolder -WorkRoot $r -CurrentRunId '20261021-060000' } $purgeRoot
+    Assert-HealthChecker (-not (Test-Path (Join-Path $purgeRoot '20261001-010101')) -and -not (Test-Path (Join-Path $purgeRoot '20261020-010101')) -and (Test-Path (Join-Path $purgeRoot '20261021-060000')) -and (Test-Path (Join-Path $purgeRoot 'Keep-Me'))) 'Only the current run folder is kept.'
 
     # 6. Report section and disabled option.
     $sectionSummary = @($summaryRow, $notRunRow)
@@ -345,175 +458,198 @@ Copy-Item -LiteralPath $env:SMARTM365_FAKE_HC_FIXTURE -Destination (Join-Path $O
     Assert-HealthChecker ($collectorText -notmatch 'HealthChecker\.ps1[^\r\n]*-ScriptUpdateOnly') 'The collector never asks Health Checker to update itself.'
     $receiptContract = [IO.File]::ReadAllText((Join-Path $SourceRoot 'Modules/SmartM365.Core/SmartM365-SourceReceipts.json.txt'))
     Assert-HealthChecker ($receiptContract -match 'Exchange_OnPrem_HealthChecker_Summary\.csv' -and $receiptContract -match 'Exchange_OnPrem_HealthChecker_Findings\.csv') 'Both CSVs are optional receipt outputs.'
+
+    # 7. Remote helpers: paths, messages, task logon failures, runner states and the scheduled fallback.
+    Assert-HealthChecker ((& $module { ConvertTo-HealthCheckerAdminSharePath -Computer 'EXSRV02.corp.contoso.example' -LocalPath 'C:\Program Files\SmartM365\HealthChecker' }) -eq '\\EXSRV02.corp.contoso.example\C$\Program Files\SmartM365\HealthChecker') 'The remote root maps to the administrative share.'
+    $shareRefused = $false
+    try { & $module { ConvertTo-HealthCheckerAdminSharePath -Computer 'EXSRV02' -LocalPath '\\server\share' } } catch { $shareRefused = $true }
+    Assert-HealthChecker $shareRefused 'A remote root without a drive letter is refused.'
+    $cleanMessage = & $module { ConvertTo-HealthCheckerRemoteMessage -Message 'Access to \\EXSRV02.corp.contoso.example\C$ from 192.0.2.4 failed for EXSRV09.CORP.contoso.example.' -Computer 'EXSRV02.corp.contoso.example' }
+    Assert-HealthChecker ($cleanMessage -notmatch 'contoso|192\.0' -and $cleanMessage -match 'EXSRV02' -and $cleanMessage -match 'EXSRV09') "Remote messages keep host names without the domain or addresses: $cleanMessage"
+    Assert-HealthChecker ($null -eq (& $module { ConvertTo-HealthCheckerRemoteMessage -Message '' -Computer 'EXSRV02' })) 'An empty message stays empty.'
+    $logon = & $module { Get-HealthCheckerTaskLogonFailure -LastTaskResult ([uint32]2147943726) }
+    Assert-HealthChecker ($logon -match '0x8007052E' -and $logon -match 'wrong user name or password' -and $logon -match 'run the Health Checker task installer again') "A wrong password is reported with the installer action: $logon"
+    Assert-HealthChecker ((& $module { Get-HealthCheckerTaskLogonFailure -LastTaskResult ([int]-2147023511) }) -match "Log on as a batch job") 'A signed result code is read as the batch logon right failure.'
+    Assert-HealthChecker ($null -eq (& $module { Get-HealthCheckerTaskLogonFailure -LastTaskResult 0 }) -and $null -eq (& $module { Get-HealthCheckerTaskLogonFailure -LastTaskResult 267011 })) 'Success and not-yet-run results are not logon failures.'
+    $stateMap = @{ Completed = 'Completed'; Timeout = 'TaskTimeout'; IntegrityFailed = 'IntegrityFailed'; NotElevated = 'NotElevated'; LaunchFailed = 'LaunchFailed'; ExchangeShellFailed = 'NoOutput'; NoOutput = 'NoOutput'; Running = 'NoOutput' }
+    foreach ($state in $stateMap.Keys) {
+        $mapped = & $module { param($s) ConvertFrom-HealthCheckerRunnerState -RemoteStatus ([pscustomobject]@{ State = $s; Message = '' }) } $state
+        Assert-HealthChecker ($mapped.Status -eq $stateMap[$state]) "Runner state $state maps to $($stateMap[$state]) (found $($mapped.Status))."
+    }
+    $nowUtc = [DateTime]::UtcNow
+    $fresh = [pscustomobject]@{ State = 'Completed'; XmlFileName = 'Raw\HealthChecker-X-1.xml'; FinishedAtUtc = $nowUtc.AddHours(-5).ToString('o') }
+    $freshResult = & $module { param($r, $n) Resolve-HealthCheckerScheduledFallback -FailureStatus 'RemoteConnectionFailed' -FailureMessage 'unreachable.' -RemoteStatus $r -NowUtc $n -MaxResultAgeHours 26 } $fresh $nowUtc
+    Assert-HealthChecker ($freshResult.Status -eq 'Completed' -and $freshResult.UseResult -and $freshResult.ResultAgeHours -eq 5) 'A recent scheduled result is used.'
+    $fresh.FinishedAtUtc = $nowUtc.AddHours(-26.04).ToString('o')
+    $limitResult = & $module { param($r, $n) Resolve-HealthCheckerScheduledFallback -FailureStatus 'RemoteConnectionFailed' -FailureMessage 'x' -RemoteStatus $r -NowUtc $n -MaxResultAgeHours 26 } $fresh $nowUtc
+    Assert-HealthChecker ($limitResult.Status -eq 'Completed') 'A result at the age limit is still used.'
+    $fresh.FinishedAtUtc = [datetime]$nowUtc.AddHours(-48)
+    $oldResult = & $module { param($r, $n) Resolve-HealthCheckerScheduledFallback -FailureStatus 'TaskTriggerFailed' -FailureMessage 'x' -RemoteStatus $r -NowUtc $n -MaxResultAgeHours 26 } $fresh $nowUtc
+    Assert-HealthChecker ($oldResult.Status -eq 'StaleResult' -and -not $oldResult.UseResult -and $oldResult.ResultAgeHours -eq 48) 'An old result (DateTime from PowerShell 7 JSON) is StaleResult.'
+    foreach ($unusable in @($null, [pscustomobject]@{ State = 'NoOutput'; XmlFileName = $null; FinishedAtUtc = $nowUtc.ToString('o') }, [pscustomobject]@{ State = 'Completed'; XmlFileName = 'Raw\a.xml'; FinishedAtUtc = 'not a date' })) {
+        $kept = & $module { param($r, $n) Resolve-HealthCheckerScheduledFallback -FailureStatus 'TaskTriggerFailed' -FailureMessage 'kept' -RemoteStatus $r -NowUtc $n -MaxResultAgeHours 26 } $unusable $nowUtc
+        Assert-HealthChecker ($kept.Status -eq 'TaskTriggerFailed' -and $kept.Message -eq 'kept' -and -not $kept.UseResult) 'Without a usable result the failure status is kept.'
+    }
+
+    # Progress of a remote run is read from status.json: a new run token, or the awaited one.
+    $progressShare = Join-Path $tempRoot 'progress'
+    New-Item -ItemType Directory -Path $progressShare -Force | Out-Null
+    $writeStatus = { param($Token, $State) [IO.File]::WriteAllText((Join-Path $progressShare 'status.json'), ([pscustomobject]@{ RunToken = $Token; State = $State } | ConvertTo-Json)) }
+    $progressRun = [pscustomobject]@{ ServerName = 'EXSRV02'; Computer = 'EXSRV02'; Session = $null; OutputSharePath = $progressShare; PreviousStatus = [pscustomobject]@{ RunToken = 'old'; State = 'Completed' }; WaitToken = $null; StartedAt = (Get-Date); Done = $false; Status = $null; Message = $null; RemoteStatus = $null }
+    & $writeStatus 'old' 'Completed'
+    & $module { param($r, $s) Update-HealthCheckerRemoteRun -Run $r -Settings $s } $progressRun $runSettings
+    Assert-HealthChecker (-not $progressRun.Done) 'The previous run result is never taken for the new run.'
+    & $writeStatus 'new' 'Running'
+    & $module { param($r, $s) Update-HealthCheckerRemoteRun -Run $r -Settings $s } $progressRun $runSettings
+    Assert-HealthChecker (-not $progressRun.Done) 'A running run is awaited.'
+    & $writeStatus 'new' 'NoOutput'
+    & $module { param($r, $s) Update-HealthCheckerRemoteRun -Run $r -Settings $s } $progressRun $runSettings
+    Assert-HealthChecker ($progressRun.Done -and $progressRun.RemoteStatus.State -eq 'NoOutput') 'A finished new run is taken.'
+    $waitRun = [pscustomobject]@{ ServerName = 'EXSRV02'; Computer = 'EXSRV02'; Session = $null; OutputSharePath = $progressShare; PreviousStatus = [pscustomobject]@{ RunToken = 'daily'; State = 'Running' }; WaitToken = 'daily'; StartedAt = (Get-Date); Done = $false; Status = $null; Message = $null; RemoteStatus = $null }
+    & $writeStatus 'daily' 'Completed'
+    & $module { param($r, $s) Update-HealthCheckerRemoteRun -Run $r -Settings $s } $waitRun $runSettings
+    Assert-HealthChecker ($waitRun.Done -and $waitRun.RemoteStatus.State -eq 'Completed') 'A run already in progress at start time is awaited instead of a new one.'
+    $badName = [pscustomobject]@{ ServerName = 'EXSRV02'; Computer = 'EXSRV02'; Session = $null; OutputSharePath = $progressShare; PreviousStatus = $null; WaitToken = $null; StartedAt = (Get-Date); Done = $true; Status = $null; Message = $null; RemoteStatus = [pscustomobject]@{ State = 'Completed'; XmlFileName = '..\..\Windows\win.ini'; FinishedAtUtc = $nowUtc.ToString('o'); DurationSeconds = 1 } }
+    $badOutcome = & $module { param($r, $f, $s) Complete-HealthCheckerRemoteRun -Run $r -LocalFolder $f -Settings $s } $badName (Join-Path $tempRoot 'bad-name') $runSettings
+    Assert-HealthChecker ($badOutcome.Status -eq 'NoOutput' -and $null -eq $badOutcome.XmlPath) 'A result file name outside Raw\HealthChecker-*.xml is refused.'
+
+    # Server files are copied only when they differ.
+    $copySource = Join-Path $tempRoot 'copy-source.txt'
+    $copyTarget = Join-Path $tempRoot 'copy-target.txt'
+    [IO.File]::WriteAllText($copySource, 'v1')
+    Assert-HealthChecker ((& $module { param($s, $d) Copy-HealthCheckerRemoteFile -SourcePath $s -DestinationPath $d } $copySource $copyTarget) -eq $true) 'A missing file is copied.'
+    Assert-HealthChecker ((& $module { param($s, $d) Copy-HealthCheckerRemoteFile -SourcePath $s -DestinationPath $d } $copySource $copyTarget) -eq $false) 'An identical file is not copied again.'
+    [IO.File]::WriteAllText($copyTarget, 'tampered')
+    Assert-HealthChecker ((& $module { param($s, $d) Copy-HealthCheckerRemoteFile -SourcePath $s -DestinationPath $d } $copySource $copyTarget) -eq $true -and [IO.File]::ReadAllText($copyTarget) -eq 'v1') 'A file that differs is replaced.'
+
+    # 8. Local runner deployed to the servers.
+    $runnerPath = Join-Path $collectorFolder $constants.HealthCheckerRunnerFileName
+    $runnerAst = [Management.Automation.Language.Parser]::ParseFile($runnerPath, [ref]$tokens, [ref]$parseErrors)
+    if ($parseErrors.Count) { throw "Runner parse failed: $parseErrors" }
+    $runnerText = [IO.File]::ReadAllText($runnerPath)
+    foreach ($constantName in @('HealthCheckerVersion', 'HealthCheckerExpectedSha256')) {
+        $assignment = $runnerAst.Find({ param($n) $n -is [Management.Automation.Language.AssignmentStatementAst] -and $n.Left.Extent.Text -eq "`$$constantName" }, $true)
+        Assert-HealthChecker ($null -ne $assignment -and $assignment.Right.Extent.Text.Trim("'", '"') -eq $constants[$constantName]) "The runner $constantName matches the collector."
+    }
+    $collectorIntegrity = $ast.Find({ param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Test-HealthCheckerScriptIntegrity' }, $true).Extent.Text
+    $runnerIntegrity = $runnerAst.Find({ param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Test-HealthCheckerScriptIntegrity' }, $true).Extent.Text
+    Assert-HealthChecker ($runnerIntegrity -ceq $collectorIntegrity) 'The runner checks Health Checker exactly like the collector.'
+    Assert-HealthChecker (((@($runnerAst.ParamBlock.Parameters | ForEach-Object { $_.Name.VariablePath.UserPath })) -join ',') -eq 'TimeoutMinutes') 'The runner has no -Server parameter.'
+    Assert-HealthChecker ($runnerText -notmatch "'-Server'" -and $runnerText -notmatch 'SmartM365\.Core|Import-Module|InventoryLifecycle|TenantContext') 'The runner never passes -Server and is standalone (no repository module).'
+    Assert-HealthChecker ($runnerText -match 'WindowsPowerShell\\v1\.0\\powershell\.exe' -and $runnerText -match 'Global\\SmartM365-Exchange-HealthChecker-LocalRunner') 'The runner forces Windows PowerShell 5.1 and takes a machine-wide lock.'
+    $runnerFunctions = foreach ($node in $runnerAst.FindAll({ param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] }, $false)) { $node.Extent.Text }
+    $runnerModule = New-Module -ScriptBlock ([scriptblock]::Create(($runnerFunctions -join "`n")))
+    & $runnerModule {
+        param($Version, $Hash)
+        Set-StrictMode -Version Latest
+        $script:ScriptVersion = '1.0.0'; $script:HealthCheckerVersion = $Version; $script:HealthCheckerExpectedSha256 = $Hash
+        $script:IntegrityOk = $true
+        $script:RunnerElevated = $true
+    } $constants.HealthCheckerVersion $constants.HealthCheckerExpectedSha256
+    $runnerArgs = & $runnerModule { Get-LocalHealthCheckerArgument -ScriptPath 'C:\Root\Bin\HealthChecker.ps1' -RawFolder 'C:\Root\Output\Raw' }
+    Assert-HealthChecker (($runnerArgs -join ' ') -notmatch '-Server' -and ($runnerArgs -join ' ') -match '-OutputFilePath "C:\\Root\\Output\\Raw" -SkipVersionCheck') "The runner command line has no -Server ($($runnerArgs -join ' '))."
+
+    $env:SMARTM365_FAKE_HC_FIXTURE = $fixture
+    try {
+        $runnerRoot = Join-Path $tempRoot 'runner-root'
+        New-Item -ItemType Directory -Path (Join-Path $runnerRoot 'Bin'), (Join-Path $runnerRoot 'Output\Raw') -Force | Out-Null
+        Copy-Item -LiteralPath $fakeScript -Destination (Join-Path $runnerRoot 'Bin\HealthChecker.ps1')
+        [IO.File]::WriteAllText((Join-Path $runnerRoot 'Output\Raw\previous-run.txt'), 'old')
+
+        $integrityRun = & $runnerModule { param($r) Invoke-LocalHealthCheckerRun -RootFolder $r -TimeoutSeconds 120 } $runnerRoot
+        $statusFile = Get-Content -LiteralPath (Join-Path $runnerRoot 'Output\status.json') -Raw | ConvertFrom-Json
+        Assert-HealthChecker ($integrityRun.State -eq 'IntegrityFailed' -and $statusFile.State -eq 'IntegrityFailed' -and $statusFile.Message -match 'SHA256 mismatch') 'The runner refuses a file that is not the expected Health Checker.'
+        Assert-HealthChecker (-not (Test-Path -LiteralPath (Join-Path $runnerRoot 'Output\Raw\previous-run.txt'))) 'The previous run output is removed first.'
+        Assert-HealthChecker ($statusFile.Message -notmatch [regex]::Escape($runnerRoot) -and $statusFile.RunToken -match '^[0-9a-f-]{36}$' -and $statusFile.FinishedAtUtc -and $statusFile.RunnerVersion -eq '1.0.0') 'The status holds a run token, times and versions without local paths.'
+        $statusProperties = @($statusFile.PSObject.Properties.Name) -join ','
+        Assert-HealthChecker ($statusProperties -eq 'SchemaVersion,RunToken,State,Message,RunnerVersion,HealthCheckerVersion,StartedAtUtc,FinishedAtUtc,DurationSeconds,ExitCode,XmlFileName') "The status has no host or account field ($statusProperties)."
+
+        # The real check is replaced to run the synthetic stand-in; Microsoft's script is never run here.
+        & $runnerModule {
+            function script:Test-HealthCheckerScriptIntegrity { param($Path, $ExpectedSha256) [pscustomobject]@{ IsValid = $true; Reason = $null } }
+            function script:Test-LocalRunnerElevation { return $true }
+        }
+        $env:SMARTM365_FAKE_HC_MODE = 'ok'
+        $okRun = & $runnerModule { param($r) Invoke-LocalHealthCheckerRun -RootFolder $r -TimeoutSeconds 120 } $runnerRoot
+        Assert-HealthChecker ($okRun.State -eq 'Completed' -and $okRun.XmlFileName -match '^Raw\\HealthChecker-.+\.xml$' -and (Test-Path -LiteralPath (Join-Path (Join-Path $runnerRoot 'Output') $okRun.XmlFileName))) "A completed run records its XML relative to Output ($($okRun.XmlFileName))."
+        $runnerFakeArgs = Get-Content -LiteralPath (Join-Path $runnerRoot 'Output\Raw\fake-args.txt') -Raw
+        Assert-HealthChecker ($runnerFakeArgs -match 'Server=;SkipVersionCheck=True') "Health Checker gets no -Server from the runner ($runnerFakeArgs)."
+
+        $env:SMARTM365_FAKE_HC_MODE = 'noshell'
+        $shellRun = & $runnerModule { param($r) Invoke-LocalHealthCheckerRun -RootFolder $r -TimeoutSeconds 120 } $runnerRoot
+        Assert-HealthChecker ($shellRun.State -eq 'ExchangeShellFailed' -and $shellRun.Message -match 'task account') 'An Exchange Management Shell load failure is reported explicitly.'
+        Assert-HealthChecker (@(Get-ChildItem -LiteralPath (Join-Path $runnerRoot 'Output\Raw') -Filter '*.xml').Count -eq 0) 'Only the last run output is kept on the server.'
+    }
+    finally {
+        Remove-Item Env:\SMARTM365_FAKE_HC_MODE -ErrorAction SilentlyContinue
+        Remove-Item Env:\SMARTM365_FAKE_HC_FIXTURE -ErrorAction SilentlyContinue
+    }
+
+    # 9. Scheduled-task installer.
+    $installerPath = Join-Path $collectorFolder 'Install-SmartM365-Exchange-HealthCheckerScheduledTask.ps1'
+    $installerAst = [Management.Automation.Language.Parser]::ParseFile($installerPath, [ref]$tokens, [ref]$parseErrors)
+    if ($parseErrors.Count) { throw "Installer parse failed: $parseErrors" }
+    $installerText = [IO.File]::ReadAllText($installerPath)
+    $installerValue = { param($Name) $node = $installerAst.Find({ param($n) $n -is [Management.Automation.Language.AssignmentStatementAst] -and $n.Left.Extent.Text -eq "`$$Name" }, $true); if ($node) { $node.Right.Extent.Text.Trim("'", '"') } }
+    Assert-HealthChecker ((& $installerValue 'taskPath') -eq $constants.HealthCheckerTaskPath -and (& $installerValue 'taskName') -eq $constants.HealthCheckerTaskName -and (& $installerValue 'remoteRootPath') -eq $constants.HealthCheckerRemoteRootPath) 'The installer registers the task and folders the collector uses.'
+    Assert-HealthChecker ((& $installerValue 'healthCheckerExpectedSha256') -eq $constants.HealthCheckerExpectedSha256 -and (& $installerValue 'runnerFileName') -eq $constants.HealthCheckerRunnerFileName) 'The installer deploys the expected Health Checker and runner.'
+    $installerIntegrity = $installerAst.Find({ param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Test-HealthCheckerScriptIntegrity' }, $true).Extent.Text
+    Assert-HealthChecker ($installerIntegrity -ceq $collectorIntegrity) 'The installer checks Health Checker exactly like the collector before deploying it.'
+    Assert-HealthChecker ($installerText -notmatch '(?i)gmsa|managed service account|-LogonType') 'Only a classic service account is supported.'
+    $passwordLines = @($installerText -split "`r?`n" | Where-Object { $_ -match 'plainTextPassword' } | ForEach-Object { $_.Trim() })
+    $allowedPasswordLines = @('$plainTextPassword = $null', '$plainTextPassword = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($passwordPointer)', 'Password = $plainTextPassword')
+    Assert-HealthChecker (@($passwordLines | Where-Object { $_ -notin $allowedPasswordLines }).Count -eq 0 -and $installerText -match 'ZeroFreeBSTR\(\$passwordPointer\)') "The password is only passed to Register-ScheduledTask and cleared ($($passwordLines -join ' | '))."
+    Assert-HealthChecker ($installerText -match "Get-Credential @credentialParameters" -and $installerText -match "'s-1-5-18'" -and $installerText -match 'credentialSid -ne \$serviceAccountSid') 'The password is typed in Get-Credential for the named account, and SYSTEM is refused.'
+    Assert-HealthChecker ($installerText -match "-Protocol Dcom" -and $installerText -notmatch 'Invoke-Command|New-PSSession|Enter-PSSession|schtasks') 'The installer uses CIM over DCOM, never WinRM or schtasks.'
+    Assert-HealthChecker ($installerText -match "MultipleInstances IgnoreNew" -and $installerText -match "RunLevel = 'Highest'" -and $installerText -match "New-TimeSpan -Hours 1" -and $installerText -match '\[string\]\$DailyAt = ''01:00''') 'The task runs daily at 01:00, elevated, one run at a time, at most one hour.'
+    Assert-HealthChecker ((& $installerValue 'remoteRootPath') -like 'C:\Program Files\*') 'The elevated task runs from Program Files, where standard users cannot create files.'
+    Assert-HealthChecker ($installerText -match 'Assert-HealthCheckerParentFolder -Path \(Split-Path -Path \$rootShare -Parent\)\r?\n\s*Set-HealthCheckerFolder -Path \$rootShare') 'The parent folder is checked before the task folders are created.'
+    $installerFunctions = foreach ($name in @('Set-HealthCheckerFolderAclRule', 'ConvertTo-AdministrativeSharePath', 'Get-HealthCheckerUnsafeAclEntry')) { $installerAst.Find({ param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name }, $true).Extent.Text }
+    $installerModule = New-Module -ScriptBlock ([scriptblock]::Create(($installerFunctions -join "`n")))
+    Assert-HealthChecker ((& $installerModule { ConvertTo-AdministrativeSharePath -Computer 'EXSRV02' -LocalPath 'C:\Program Files\SmartM365\HealthChecker' }) -eq '\\EXSRV02\C$\Program Files\SmartM365\HealthChecker') 'The installer maps the remote root like the collector.'
+    $aclFolder = Join-Path $tempRoot 'acl'
+    New-Item -ItemType Directory -Path $aclFolder -Force | Out-Null
+    $currentSid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+    $aclResult = & $installerModule { param($p, $s) Set-HealthCheckerFolderAclRule -Acl (Get-Acl -LiteralPath $p) -ServiceAccountSid $s -ServiceAccountRight 'Modify' } $aclFolder $currentSid
+    $aclRules = @($aclResult.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]))
+    $ruleText = @($aclRules | ForEach-Object { '{0}={1}' -f $_.IdentityReference.Value, $_.FileSystemRights }) -join ';'
+    Assert-HealthChecker ($aclResult.AreAccessRulesProtected -and $aclRules.Count -eq 3 -and $ruleText -match 'S-1-5-18=FullControl' -and $ruleText -match 'S-1-5-32-544=FullControl' -and $ruleText -match ([regex]::Escape($currentSid) + '=Modify')) "Folder permissions are explicit: SYSTEM, Administrators and the service account only ($ruleText)."
+    $installerUnsafe = $installerAst.Find({ param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Get-HealthCheckerUnsafeAclEntry' }, $true).Extent.Text
+    $collectorUnsafe = $ast.Find({ param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Get-HealthCheckerUnsafeAclEntry' }, $true).Extent.Text
+    Assert-HealthChecker ($installerUnsafe -ceq $collectorUnsafe) 'The collector work folder and the server folders use the same parent check.'
+    $ancestors = @(& $module { Get-HealthCheckerWorkFolderAncestor -Path 'C:\Program Files\SmartM365\HealthChecker\Work' -TrustedBase @('C:\Program Files', 'C:\ProgramData') })
+    Assert-HealthChecker (($ancestors -join '|') -eq 'C:\Program Files\SmartM365\HealthChecker|C:\Program Files\SmartM365') "Every parent below Program Files is checked, nearest first ($($ancestors -join '|'))."
+    $dataAncestors = @(& $module { Get-HealthCheckerWorkFolderAncestor -Path 'C:\ProgramData\SmartM365\HealthChecker' -TrustedBase @('C:\Program Files', 'C:\ProgramData') })
+    Assert-HealthChecker (($dataAncestors -join '|') -eq 'C:\ProgramData\SmartM365') 'A configured ProgramData work folder has its SmartM365 parent checked.'
+    $otherAncestors = @(& $module { Get-HealthCheckerWorkFolderAncestor -Path 'D:\Tools\HealthChecker' -TrustedBase @('C:\Program Files') })
+    Assert-HealthChecker (($otherAncestors -join '|') -eq 'D:\Tools') 'Parents are checked up to the drive root.'
+    $workAcl = & $module { param($p) Set-HealthCheckerWorkFolderAclRule -Acl (Get-Acl -LiteralPath $p) } $aclFolder
+    $workRules = @($workAcl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]) | ForEach-Object { '{0}={1}' -f $_.IdentityReference.Value, $_.FileSystemRights })
+    Assert-HealthChecker ($workAcl.AreAccessRulesProtected -and $workAcl.GetOwner([Security.Principal.SecurityIdentifier]).Value -eq 'S-1-5-32-544' -and ($workRules -join ';') -eq 'S-1-5-18=FullControl;S-1-5-32-544=FullControl') "The work folder is owned by Administrators and only SYSTEM and Administrators have access ($($workRules -join ';'))."    Assert-HealthChecker ($aclResult.GetOwner([Security.Principal.SecurityIdentifier]).Value -eq 'S-1-5-32-544') 'Task folders are owned by Administrators.'
+    $newAcl = {
+        param([string]$Owner, [string[]]$Rules)
+        $sec = New-Object System.Security.AccessControl.DirectorySecurity
+        $sec.SetOwner((New-Object Security.Principal.SecurityIdentifier($Owner)))
+        foreach ($rule in $Rules) {
+            $sid, $right = $rule -split '='
+            $sec.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule((New-Object Security.Principal.SecurityIdentifier($sid)), [System.Security.AccessControl.FileSystemRights]$right, 'ContainerInherit, ObjectInherit', 'None', 'Allow')))
+        }
+        $sec
+    }
+    $safeParent = & $newAcl 'S-1-5-32-544' @('S-1-5-18=FullControl', 'S-1-5-32-544=FullControl', 'S-1-5-32-545=ReadAndExecute', 'S-1-3-0=FullControl', 'S-1-15-2-1=ReadAndExecute')
+    Assert-HealthChecker (@(& $installerModule { param($a) Get-HealthCheckerUnsafeAclEntry -Acl $a } $safeParent).Count -eq 0) 'A Program Files-like parent is accepted.'
+    $writableParent = & $newAcl 'S-1-5-32-544' @('S-1-5-32-544=FullControl', 'S-1-5-32-545=Modify')
+    $writableIssues = @(& $installerModule { param($a) Get-HealthCheckerUnsafeAclEntry -Acl $a } $writableParent)
+    Assert-HealthChecker ($writableIssues.Count -eq 1 -and $writableIssues[0] -match '^S-1-5-32-545 ') "A parent writable by Users is refused ($($writableIssues -join '; '))."
+    $userOwnedParent = & $newAcl 'S-1-5-32-545' @('S-1-5-32-544=FullControl')
+    Assert-HealthChecker (@(& $installerModule { param($a) Get-HealthCheckerUnsafeAclEntry -Acl $a } $userOwnedParent) -contains 'owner S-1-5-32-545') 'A parent owned by a non-administrator is refused.'
+    $createOnly = & $newAcl 'S-1-5-32-544' @('S-1-5-32-544=FullControl', 'S-1-5-11=CreateDirectories')
+    Assert-HealthChecker (@(& $installerModule { param($a) Get-HealthCheckerUnsafeAclEntry -Acl $a } $createOnly).Count -eq 1) 'A parent where others can create folders is refused: they could plant the task folder first.'
+    $inheritedFromProgramData = & $newAcl 'S-1-5-32-544' @('S-1-5-18=FullControl', 'S-1-5-32-544=FullControl', 'S-1-5-32-545=CreateDirectories, AppendData')
+    Assert-HealthChecker (@(& $module { param($a) Get-HealthCheckerUnsafeAclEntry -Acl $a } $inheritedFromProgramData).Count -eq 1) 'A parent with the ProgramData rights for Users is refused for the work folder.'
 }
 finally {
     Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
 }
 
 Write-Output ("PASS: {0} Health Checker checks; PowerShell {1}." -f $script:Checks, $PSVersionTable.PSVersion)
-
-# SIG # Begin signature block
-# MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
-# BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB6hrDEgXso2wvX
-# wc9RlTITwvxk6Cgw9vmB0ApsoaPhAKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
-# s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
-# b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
-# ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
-# VQQDDBV3b3JrcGxhY2VjbG91ZGh1Yi5jb20xLDAqBgkqhkiG9w0BCQEWHWNvbnRh
-# Y3RAd29ya3BsYWNlY2xvdWRodWIuY29tMIIBojANBgkqhkiG9w0BAQEFAAOCAY8A
-# MIIBigKCAYEAse6XztERSyHn9DVqj8Rdv0qjc5owqvgAIGaYxBmfiQuoM48Fo4Xt
-# 1ovi9brLUtf55G4XgthNPCoanxfCRRg30IVRxaDfdPXJzYmgsM5tXlsuNU49lE7E
-# PJk3+jEOgSCt8NKzmVPKpNRG0NmK0a8wm12cceYZOZlSYE0+ZtT6wy5PQQjMUqIx
-# XnGjt4H0nfgZZa7D4FyARKOVg/Xr9sUq5jIn3zszvg4jjeb4b0DKJtfbHukhWc2Y
-# oVFgswxVBXCWIaBnfF/cjqMfK/CaToT2trVb4hG4qcQ31s1nR4keoRaOw/vyd6ap
-# rEtCsT22N/Jx0dz7fIo1tVyvIaVcHdN9LW3chn0en0OKZ6Ke1OH9wf2prl4KA6Ww
-# VzrAZrOlXTAItdK7D9kKO/HeJd4PZvO53oy1LdmMGLSz3OLB9e5q7yo8rfqi5Ka9
-# KzM2CrSzz1yphn/H90wz7Q2pm4FIlWdcj86A/0kmhYg+5Wqqbg1drrPXu4nEBwWN
-# /dzoGtKZKHTdAgMBAAGjgZYwgZMwDgYDVR0PAQH/BAQDAgeAMBMGA1UdJQQMMAoG
-# CCsGAQUFBwMDMD8GA1UdEQQ4MDaBHWNvbnRhY3RAd29ya3BsYWNlY2xvdWRodWIu
-# Y29tghV3b3JrcGxhY2VjbG91ZGh1Yi5jb20wDAYDVR0TAQH/BAIwADAdBgNVHQ4E
-# FgQUXIOOADQM78XfPAncirgCECedg9gwDQYJKoZIhvcNAQELBQADggGBADhZUB2R
-# 5J/Jw030xodhEWeCQ0vnJRaiEsjOxuArQREKH3lCrQ3UsUVl292d6LnQUSTH/jF7
-# rovEZ+JN2GQ/LCrXRaCuwCEGZKzlSEbtYWhfwDyj6GpIPq8Y4SeXyjdq4/rrI1bm
-# iTK4Sq7EoBlGJuX6l2nfvx1tTioSr11FoDfllJR7EYawRj9hBFJ0gG0b2SuYZMgW
-# gaDKefcnJDmOwcRNAZUII0ss8EeyANukWSkNN5ILZ+iKDpQgZxgDLPTiRguCyx45
-# PI5wrVTjV/pR7IrtSIfq8UladlrSZJyyDn3NV2ATvIZ6wNxbTmPFcE0uMg/EYzwd
-# Tek+CgXL3TxUKeldJM4YDWPimNBRhOPXzBDiOQIj6WNswt/KM1oDLnA00CNtciPN
-# dn+dXlneMvTEUah9wyt8o8tkLpoBw+KN+Bq/K0O1qPtS7umi70l45pPiej+mwbwq
-# ztcaoVD7a8ggHP1Vdp/rnafM4GtyCAE6b7U9Yzgvp1/a1kh7XffmqVhRRjCCBY0w
-# ggR1oAMCAQICEA6bGI750C3n79tQ4ghAGFowDQYJKoZIhvcNAQEMBQAwZTELMAkG
-# A1UEBhMCVVMxFTATBgNVBAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRp
-# Z2ljZXJ0LmNvbTEkMCIGA1UEAxMbRGlnaUNlcnQgQXNzdXJlZCBJRCBSb290IENB
-# MB4XDTIyMDgwMTAwMDAwMFoXDTMxMTEwOTIzNTk1OVowYjELMAkGA1UEBhMCVVMx
-# FTATBgNVBAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRpZ2ljZXJ0LmNv
-# bTEhMB8GA1UEAxMYRGlnaUNlcnQgVHJ1c3RlZCBSb290IEc0MIICIjANBgkqhkiG
-# 9w0BAQEFAAOCAg8AMIICCgKCAgEAv+aQc2jeu+RdSjwwIjBpM+zCpyUuySE98orY
-# WcLhKac9WKt2ms2uexuEDcQwH/MbpDgW61bGl20dq7J58soR0uRf1gU8Ug9SH8ae
-# FaV+vp+pVxZZVXKvaJNwwrK6dZlqczKU0RBEEC7fgvMHhOZ0O21x4i0MG+4g1ckg
-# HWMpLc7sXk7Ik/ghYZs06wXGXuxbGrzryc/NrDRAX7F6Zu53yEioZldXn1RYjgwr
-# t0+nMNlW7sp7XeOtyU9e5TXnMcvak17cjo+A2raRmECQecN4x7axxLVqGDgDEI3Y
-# 1DekLgV9iPWCPhCRcKtVgkEy19sEcypukQF8IUzUvK4bA3VdeGbZOjFEmjNAvwjX
-# WkmkwuapoGfdpCe8oU85tRFYF/ckXEaPZPfBaYh2mHY9WV1CdoeJl2l6SPDgohIb
-# Zpp0yt5LHucOY67m1O+SkjqePdwA5EUlibaaRBkrfsCUtNJhbesz2cXfSwQAzH0c
-# lcOP9yGyshG3u3/y1YxwLEFgqrFjGESVGnZifvaAsPvoZKYz0YkH4b235kOkGLim
-# dwHhD5QMIR2yVCkliWzlDlJRR3S+Jqy2QXXeeqxfjT/JvNNBERJb5RBQ6zHFynIW
-# IgnffEx1P2PsIV/EIFFrb7GrhotPwtZFX50g/KEexcCPorF+CiaZ9eRpL5gdLfXZ
-# qbId5RsCAwEAAaOCATowggE2MA8GA1UdEwEB/wQFMAMBAf8wHQYDVR0OBBYEFOzX
-# 44LScV1kTN8uZz/nupiuHA9PMB8GA1UdIwQYMBaAFEXroq/0ksuCMS1Ri6enIZ3z
-# bcgPMA4GA1UdDwEB/wQEAwIBhjB5BggrBgEFBQcBAQRtMGswJAYIKwYBBQUHMAGG
-# GGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBDBggrBgEFBQcwAoY3aHR0cDovL2Nh
-# Y2VydHMuZGlnaWNlcnQuY29tL0RpZ2lDZXJ0QXNzdXJlZElEUm9vdENBLmNydDBF
-# BgNVHR8EPjA8MDqgOKA2hjRodHRwOi8vY3JsMy5kaWdpY2VydC5jb20vRGlnaUNl
-# cnRBc3N1cmVkSURSb290Q0EuY3JsMBEGA1UdIAQKMAgwBgYEVR0gADANBgkqhkiG
-# 9w0BAQwFAAOCAQEAcKC/Q1xV5zhfoKN0Gz22Ftf3v1cHvZqsoYcs7IVeqRq7IviH
-# GmlUIu2kiHdtvRoU9BNKei8ttzjv9P+Aufih9/Jy3iS8UgPITtAq3votVs/59Pes
-# MHqai7Je1M/RQ0SbQyHrlnKhSLSZy51PpwYDE3cnRNTnf+hZqPC/Lwum6fI0POz3
-# A8eHqNJMQBk1RmppVLC4oVaO7KTVPeix3P0c2PR3WlxUjG/voVA9/HYJaISfb8rb
-# II01YBwCA8sgsKxYoA5AY8WYIsGyWfVVa88nq2x2zm8jLfR+cWojayL/ErhULSd+
-# 2DrZ8LaHlv1b0VysGMNNn3O3AamfV6peKOK5lDCCBrQwggScoAMCAQICEA3HrFcF
-# /yGZLkBDIgw6SYYwDQYJKoZIhvcNAQELBQAwYjELMAkGA1UEBhMCVVMxFTATBgNV
-# BAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRpZ2ljZXJ0LmNvbTEhMB8G
-# A1UEAxMYRGlnaUNlcnQgVHJ1c3RlZCBSb290IEc0MB4XDTI1MDUwNzAwMDAwMFoX
-# DTM4MDExNDIzNTk1OVowaTELMAkGA1UEBhMCVVMxFzAVBgNVBAoTDkRpZ2lDZXJ0
-# LCBJbmMuMUEwPwYDVQQDEzhEaWdpQ2VydCBUcnVzdGVkIEc0IFRpbWVTdGFtcGlu
-# ZyBSU0E0MDk2IFNIQTI1NiAyMDI1IENBMTCCAiIwDQYJKoZIhvcNAQEBBQADggIP
-# ADCCAgoCggIBALR4MdMKmEFyvjxGwBysddujRmh0tFEXnU2tjQ2UtZmWgyxU7UNq
-# EY81FzJsQqr5G7A6c+Gh/qm8Xi4aPCOo2N8S9SLrC6Kbltqn7SWCWgzbNfiR+2fk
-# HUiljNOqnIVD/gG3SYDEAd4dg2dDGpeZGKe+42DFUF0mR/vtLa4+gKPsYfwEu7EE
-# bkC9+0F2w4QJLVSTEG8yAR2CQWIM1iI5PHg62IVwxKSpO0XaF9DPfNBKS7Zazch8
-# NF5vp7eaZ2CVNxpqumzTCNSOxm+SAWSuIr21Qomb+zzQWKhxKTVVgtmUPAW35xUU
-# FREmDrMxSNlr/NsJyUXzdtFUUt4aS4CEeIY8y9IaaGBpPNXKFifinT7zL2gdFpBP
-# 9qh8SdLnEut/GcalNeJQ55IuwnKCgs+nrpuQNfVmUB5KlCX3ZA4x5HHKS+rqBvKW
-# xdCyQEEGcbLe1b8Aw4wJkhU1JrPsFfxW1gaou30yZ46t4Y9F20HHfIY4/6vHespY
-# MQmUiote8ladjS/nJ0+k6MvqzfpzPDOy5y6gqztiT96Fv/9bH7mQyogxG9QEPHrP
-# V6/7umw052AkyiLA6tQbZl1KhBtTasySkuJDpsZGKdlsjg4u70EwgWbVRSX1Wd4+
-# zoFpp4Ra+MlKM2baoD6x0VR4RjSpWM8o5a6D8bpfm4CLKczsG7ZrIGNTAgMBAAGj
-# ggFdMIIBWTASBgNVHRMBAf8ECDAGAQH/AgEAMB0GA1UdDgQWBBTvb1NK6eQGfHrK
-# 4pBW9i/USezLTjAfBgNVHSMEGDAWgBTs1+OC0nFdZEzfLmc/57qYrhwPTzAOBgNV
-# HQ8BAf8EBAMCAYYwEwYDVR0lBAwwCgYIKwYBBQUHAwgwdwYIKwYBBQUHAQEEazBp
-# MCQGCCsGAQUFBzABhhhodHRwOi8vb2NzcC5kaWdpY2VydC5jb20wQQYIKwYBBQUH
-# MAKGNWh0dHA6Ly9jYWNlcnRzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRS
-# b290RzQuY3J0MEMGA1UdHwQ8MDowOKA2oDSGMmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0
-# LmNvbS9EaWdpQ2VydFRydXN0ZWRSb290RzQuY3JsMCAGA1UdIAQZMBcwCAYGZ4EM
-# AQQCMAsGCWCGSAGG/WwHATANBgkqhkiG9w0BAQsFAAOCAgEAF877FoAc/gc9EXZx
-# ML2+C8i1NKZ/zdCHxYgaMH9Pw5tcBnPw6O6FTGNpoV2V4wzSUGvI9NAzaoQk97fr
-# PBtIj+ZLzdp+yXdhOP4hCFATuNT+ReOPK0mCefSG+tXqGpYZ3essBS3q8nL2UwM+
-# NMvEuBd/2vmdYxDCvwzJv2sRUoKEfJ+nN57mQfQXwcAEGCvRR2qKtntujB71WPYA
-# gwPyWLKu6RnaID/B0ba2H3LUiwDRAXx1Neq9ydOal95CHfmTnM4I+ZI2rVQfjXQA
-# 1WSjjf4J2a7jLzWGNqNX+DF0SQzHU0pTi4dBwp9nEC8EAqoxW6q17r0z0noDjs6+
-# BFo+z7bKSBwZXTRNivYuve3L2oiKNqetRHdqfMTCW/NmKLJ9M+MtucVGyOxiDf06
-# VXxyKkOirv6o02OoXN4bFzK0vlNMsvhlqgF2puE6FndlENSmE+9JGYxOGLS/D284
-# NHNboDGcmWXfwXRy4kbu4QFhOm0xJuF2EZAOk5eCkhSxZON3rGlHqhpB/8MluDez
-# ooIs8CVnrpHMiD2wL40mm53+/j7tFaxYKIqL0Q4ssd8xHZnIn/7GELH3IdvG2XlM
-# 9q7WP/UwgOkw/HQtyRN62JK4S1C8uw3PdBunvAZapsiI5YKdvlarEvf8EA+8hcpS
-# M9LHJmyrxaFtoza2zNaQ9k+5t1wwggbtMIIE1aADAgECAhAIT9wzT35FTtvDD4/5
-# khg1MA0GCSqGSIb3DQEBCwUAMGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdp
-# Q2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3Rh
-# bXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTEwHhcNMjYwODA1MDAwMDAwWhcN
-# MzcxMTA0MjM1OTU5WjBjMQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQs
-# IEluYy4xOzA5BgNVBAMTMkRpZ2lDZXJ0IFNIQTI1NiBSU0E0MDk2IFRpbWVzdGFt
-# cCBSZXNwb25kZXIgMjAyNiAxMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKC
-# AgEAtnum8sn+zUr41JtMZbP9OMYw+HwJDpG5xkIu/lqcfNYmMX81YmsUiHLbh9yk
-# peWBGKTLhYBrAN9Tdg/QEzG32XcObmgIblnr0CoQ3WSAeDZ6nH6X6VkFyYkJw3QB
-# JREwvm4UhLzSxmwPA7cFKRTEOMsmEEj6qJk/dqLEAL+oQYuOwE2UuiX1Vnul8YRe
-# IyWd4kgLn9gq6LNXM0UplkR6jL/QHxmb6fMoGBJYbnaUI7XD6cKDpekK2SVMld4i
-# DbzeHDtOaaxldH5IxuNusQ69nd8/ZXEiB5Hbxj3RlK13cX1W4DlFXKdv/CEhM8Cj
-# 1vvlmvhNroyPdRGbbpBlgyf8Wdu5N6ByhFwURn0U6ozlPoxN22v+fviUhP+6DR54
-# 7OZnpBMWDfei1f5sVGwiiW/KQTWOK97g+4RJpPzPNV4VYMAwO2jM2Aty2QYPVmOQ
-# TJm0msuXnJrSbl2gf9JylpkJlWXqk1Q4LJsxz+TELoQCZIljbgvTJgoPU2R12ydv
-# 8i1UqL/adelA0y7U9Pmmtbze9Xx3rtajC5SzQd1jgfwAwsa90v9YcSPdmeoyoBBA
-# /27cCL237l5DTYYPDLQ4ON3OLTGWnvRb6jDrf/T75gMRfUzSLCBQfBusm9+mSWRl
-# C/Df6S/e9Q8i13CuhzOT2Jx+V/nlbXM4QoBwlUAhelwwJT0CAwEAAaOCAZUwggGR
-# MAwGA1UdEwEB/wQCMAAwHQYDVR0OBBYEFBTJY4owLtRK+26U8+bjQH717M3iMB8G
-# A1UdIwQYMBaAFO9vU0rp5AZ8esrikFb2L9RJ7MtOMA4GA1UdDwEB/wQEAwIHgDAW
-# BgNVHSUBAf8EDDAKBggrBgEFBQcDCDCBlQYIKwYBBQUHAQEEgYgwgYUwJAYIKwYB
-# BQUHMAGGGGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBdBggrBgEFBQcwAoZRaHR0
-# cDovL2NhY2VydHMuZGlnaWNlcnQuY29tL0RpZ2lDZXJ0VHJ1c3RlZEc0VGltZVN0
-# YW1waW5nUlNBNDA5NlNIQTI1NjIwMjVDQTEuY3J0MF8GA1UdHwRYMFYwVKBSoFCG
-# Tmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRHNFRpbWVT
-# dGFtcGluZ1JTQTQwOTZTSEEyNTYyMDI1Q0ExLmNybDAgBgNVHSAEGTAXMAgGBmeB
-# DAEEAjALBglghkgBhv1sBwEwDQYJKoZIhvcNAQELBQADggIBAI3FOmEenVIK35ms
-# CYB+fShAsWvSYvLBItoNdAgQ2jIqrGsVsluXMJU/+mRebBc52s6lbKAvOVPXaizm
-# KkMLLflEEKDZQx4CkS2t8aHPjkXha3hYZ010htFa3dhNgmalH5vuWvh3tTCf4frT
-# S7gPtGc4Z/xaPhQ2AB1mR8eEe/WbH0RWHvVIl6VwQ3+g5FKNfN2N/DWJkf13w2H+
-# 2GfqEfbd35Ww8CvoYBjLNIDTadcPWdgsjsiOaK/7EsKJgLjUNIVgvcaFOLLQ/Glr
-# A+0ZHJoFUbOr5SJN8zykPspXIXlpDJY/gqFUZRROeab9GVgmhbdOJcD/63RhxPah
-# FUGbckRONqMe6DYAv6/mOG0pWd3cPStsdcS7buj5DyniwRY8yooMH6ptx5vpP/pZ
-# zBPBeZD2U4IsthyxB5Jaa8qrOkB5z160TXiM5ADMspZ0TfD9MJoq0tFpFPssKRFh
-# WeEDYPvcUuN7U7lvcdHl4ezQ3NT/7Ffs1sR1yh/LRbdZ3B3Vc6q2WmD8mDC0p9kz
-# l2o73iVtS946IkEj7FkRsZGww1teYxERROC745xrtjvcw9ZyyUjHZWGRIpJeMNsP
-# quCDf0fkyHtB+J4AiNZqCQk23rxh+KbpyMTNVKItJ5l92Svl20U9NbqMBOVYl1h5
-# 4NEYLJq1/xHWFKPNK903zJZA9P2DMYIFvjCCBboCAQEwYjBOMR4wHAYDVQQDDBV3
-# b3JrcGxhY2VjbG91ZGh1Yi5jb20xLDAqBgkqhkiG9w0BCQEWHWNvbnRhY3RAd29y
-# a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
-# AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
-# CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIIk///gX/4F6W69dHlm5k2WO1a7gjm5V/j+3inmTtcPTMA0GCSqG
-# SIb3DQEBAQUABIIBgDSa2YHPzmAdhvCEWAK0H5nrybJvhOjqjZXosea9Y7rPTjoD
-# Yd0+mmgNl2ufEl3s4yJDzkIUS8dPajP546mHrkgr2E+OilyhxgS7FY2Iqi8tn8jK
-# sNrIfNV0FBGS4RXazuPbgfUJ+FrN+VZpCRCTT7VfiyHgF5KQC208O/4lvagSoJQj
-# Tr+S72EZORHT9tAnSAOSAO6jr3d+pabJVBdBn0YA2rj+amgy1a+0Nn8F89cHddr+
-# C5YWzr0cjhZNZY5SbEVLnH5UCUt2Bd25+w1h8KvM4bWdM+dj4qF6FJLmbrRizzgs
-# zgm/KwOwL9aTfOlKldVsOBw+l/v8HF+xSvWWjOZd5U+tiAQjfjtpKMLbGRlGxvAK
-# PrYbrSAbbMgw5WHpXIJVItOMwjImY8atXOOpK7VpP7/fMhsuVPWy5BIF4DxfxdcQ
-# 1nMfM/v+JA7ncV5jAJU+dq7YmNPRLCWNIwznr3xQqAO7jlR66C44JpjtbqHmXPBQ
-# cUM6IyXxA1X6dFCZgaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
-# CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
-# RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
-# MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjExNTU1
-# MjJaMC8GCSqGSIb3DQEJBDEiBCAoBtbL/7i3wFzC25MsrTQf7X3J3uClmUhIG/E/
-# vJ5C6DANBgkqhkiG9w0BAQEFAASCAgAU5JgXlYIcjyCBo6v2ckFmYsgDfcCnc6Cx
-# 4yWT4DW3TOhvhXP+psqYC1F3HUioG7Y7nwHM0SH598y1Cvam20G1nGIA44/xwaJn
-# QNCNZ2zJ3VyRA4HtGHnAo0hd/4e5sfJg7uxRV2LbUOl1tcHIscMrlJyjm/+avl8x
-# whC9E2PsJyE3slscmskO76q7HGrH9eXdEatSkvjzaQ6hYkfun98WgZIhFR5BywGF
-# MAumkc6P/GdHNwqx9lYuizToyFnddq54NbZggkQr7Y3imTuerzS+MVSJLLyA84XS
-# nyWR6aCLbcQProQgz/U2uNLQhtvsmRGHzG4W1Lef9aRbXUINsCO/c02V29xWJSvu
-# OC0LT0s1NM1FJnCpam9b9F/Rwd0fbpbK0VPGjNjMxbwOPQ96hrAAqOYTcEAXHC0a
-# nupUNIJgoP0NVyROWnu95Anh+CJj0LRsRMMYh14Y3Ply4UavbQj54N6f78+lh5pJ
-# D/xaxR1f1D3ZEs4r4xrygbyivcc8QsiuMB2lNrFps+znxu4MTFZBevvOf3Al2P3n
-# qpgtPd9GDdJrQ2eqPYU77au31JHMknGvj1VAY7PpSDRm8Knvzmjj2cPCZSlD9Cum
-# NtCA5kEHHasBYryhBVnymDfds/C163N/aRIyaRY36U9+NybgkKU+9zzRJKkDD+4J
-# JJMeQjWZdg==
-# SIG # End signature block

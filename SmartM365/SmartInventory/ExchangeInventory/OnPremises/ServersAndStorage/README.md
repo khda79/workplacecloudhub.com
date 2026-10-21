@@ -4,7 +4,9 @@ Exchange 2016 on-premises infrastructure and migration readiness inventory for s
 
 ## Scripts
 
-- `SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory.ps1`: inventories Exchange 2016 infrastructure through Exchange Management Shell plus WMI/DCOM only, then renders a full HTML readiness report. It does not use WinRM, PowerShell remoting, `Get-CimInstance`, or `New-CimSession`.
+- `SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory.ps1`: inventories Exchange 2016 infrastructure through Exchange Management Shell plus WMI/DCOM only, then renders a full HTML readiness report. It does not use WinRM, PowerShell remoting or `Get-CimInstance`; `New-CimSession` is used over DCOM only, to start the Health Checker scheduled task.
+- `Install-SmartM365-Exchange-HealthCheckerScheduledTask.ps1`: installs, updates or removes the Health Checker scheduled task on the other Exchange servers (launcher: `Launchers/OnPremises/Start-SmartM365-Exchange-HealthChecker-ScheduledTask-Installer.cmd`).
+- `SmartM365-Exchange-OnPrem-HealthChecker-LocalRunner.ps1`: deployed to each of those servers; runs Health Checker for the local server only.
 - Version 1.6.1 routes each timestamped/current CSV pair through the shared
   atomic exporter. A failed current promotion is terminating and does not replace
   the preceding valid current file. CSV schemas and readiness rules are unchanged.
@@ -23,36 +25,97 @@ Set `ExcludedServers` in the script's local JSON to an array of server names tha
 
 ## Exchange Health Checker (`-IncludeHealthChecker`)
 
-Version 1.7.0 can run Microsoft's [CSS-Exchange Health Checker](https://microsoft.github.io/CSS-Exchange/Diagnostics/HealthChecker/)
-on every collected server. The script is vendored unchanged under
+Microsoft's [CSS-Exchange Health Checker](https://microsoft.github.io/CSS-Exchange/Diagnostics/HealthChecker/)
+runs on every collected server. The script is vendored unchanged under
 `ThirdParty/CSS-Exchange/HealthChecker` (version, release, SHA256 and license in its `PROVENANCE.md`).
+Health Checker always runs on the server it checks and is never given `-Server`: PowerShell remoting
+(WinRM) is not needed.
 
 - Before running, the collector copies the vendored file to a local work folder and checks the copy:
   expected SHA256 and a valid Authenticode signature from Microsoft Corporation. On any mismatch
   Health Checker is not run (`RunStatus` `IntegrityFailed`, warning) and the rest of the inventory
   continues. It always runs with `-SkipVersionCheck`, so it never downloads or updates itself.
-- Servers are processed one at a time, each in its own Windows PowerShell 5.1 process, with a time
-  limit per server (`HealthCheckerTimeoutMinutesPerServer`, default 30) and a total budget
-  (`HealthCheckerTotalBudgetMinutes`, default 1320, below the orchestrator job timeout). A server
-  over its limit is stopped (`Timeout`); servers left when the budget is used up are `NotRun`.
+- **Collector server** (version 1.8.0): Health Checker runs in a local Windows PowerShell 5.1 process.
+- **Other servers**: each one runs Health Checker through the scheduled task
+  `\WCH\SmartM365 Exchange Health Checker`, which starts the local runner. The collector:
+  1. checks the files under `C:\Program Files\SmartM365\HealthChecker\Bin` through the `C$` share and
+     copies them again when their SHA256 differs;
+  2. starts all the tasks at once over CIM/DCOM, then runs the collector server itself;
+  3. waits for each server's `Output\status.json` and copies only the XML result.
+- The runner checks SHA256 and the Microsoft signature again before every run, takes a lock, removes
+  the previous run output and writes `status.json` (state, UTC times, exit code, XML file name and
+  versions, no host name or secret). The task also runs daily at 01:00.
+- Fallback: when the on-demand start fails (server unreachable, task missing, task logon failure),
+  the collector uses the last daily result if it is at most `HealthCheckerMaxResultAgeHours` old
+  (default 26; `ResultSource` `Scheduled`). An older result gives `StaleResult`.
+- Time limits: `HealthCheckerTimeoutMinutesPerServer` (default 30) per server and
+  `HealthCheckerTotalBudgetMinutes` (default 1320, below the orchestrator job timeout) for the run.
+  A server over its limit is `Timeout` locally or `TaskTimeout` remotely; a server left when the
+  budget is used up is `NotRun`.
 - Health Checker needs an elevated session. Without it, no server is run and every row is
   `NotElevated`.
-- Raw output (XML, text and debug log) contains the full server configuration. It is written only
-  to a local work folder (`HealthCheckerWorkFolderPath`, default `%ProgramData%\SmartM365\HealthChecker`,
-  shares refused), deleted once read, and kept `HealthCheckerKeepFailedRawOutputDays` days (default 7)
-  only when a server failed, for diagnosis. It is never published to DATA-ALL, DATA-LAST or SharePoint.
-- `Exchange_OnPrem_HealthChecker_Findings.csv`: one row per Health Checker result line (server,
-  category, check, item, status `OK`/`Warning`/`Error`/`Info`, value, `More information` links).
-  Values of checks that can reveal host names, addresses, certificates, domains or tenant/app
-  identifiers are replaced by `[masked]` (`ValueMasked`); GUIDs, IP and mail addresses are replaced
-  in every value.
-- `Exchange_OnPrem_HealthChecker_Summary.csv`: one row per server with the run status, Exchange
-  version, build, CU, SU, security update status (`Latest`, `NewerPatchAvailable`, `MissingLatestSU`,
-  `OutOfSupportNoSU`, `Unknown`), CU age when Health Checker reports it, vulnerability count and
-  names (same matching as Health Checker's `-VulnerabilityReport`), error/warning/OK/info counts and
-  the number of servers processed out of the total.
-- The report and email gain an Exchange Health Checker section (servers with vulnerabilities and
-  errors first, then the error list). Both CSVs are optional outputs of the source receipt.
+- Raw output (XML, text and debug log) contains the full server configuration. It stays on a local
+  disk: the collector work folder (`HealthCheckerWorkFolderPath`, default
+  `%ProgramFiles%\SmartM365\HealthChecker\Work`, shares refused) and `Output` on each server. The
+  verified copy of Health Checker runs elevated from the work folder, so the collector makes
+  Administrators its owner with an administrators-only ACL, refuses it (`UnsafeWorkFolder`) when a
+  parent is owned or writable by anyone else than SYSTEM, Administrators or TrustedInstaller, and
+  checks the copy again immediately before starting it. Only the last
+  run is kept on both sides; XML results are deleted once read. It is never published to DATA-ALL,
+  DATA-LAST or SharePoint. `HealthCheckerKeepFailedRawOutputDays` is no longer used.
+
+Run statuses in `Exchange_OnPrem_HealthChecker_Summary.csv`:
+
+| `RunStatus` | Meaning |
+| --- | --- |
+| `Completed` | Result read. `ResultSource`: `Local`, `OnDemand` or `Scheduled` (fallback, see `RunMessage`). |
+| `RemoteConnectionFailed` | The `C$` share or CIM/DCOM of the server is not reachable, or the result could not be copied. |
+| `TaskTriggerFailed` | Task not installed, files not deployed, start refused, or task logon failure. |
+| `TaskTimeout` | No result from the task within the per-server limit, or Health Checker stopped on the server. |
+| `StaleResult` | The on-demand start failed and the last daily result is older than the limit. |
+| `NoOutput` | Health Checker ended without XML (including Exchange Management Shell load failure). |
+| `UnsafeWorkFolder` | The collector work folder or one of its parents is not restricted to administrators; nothing was run. |
+| `IntegrityFailed`, `NotElevated`, `Timeout`, `LaunchFailed`, `ParseFailed`, `NotRun` | As before. |
+
+Messages never contain a domain name, an address or a secret.
+
+### Scheduled task installation
+
+Run once from the collector server, elevated, with an account that is local administrator of the
+target servers. Network from the collector server: RPC 135 and dynamic RPC ports (DCOM), SMB 445.
+
+```powershell
+.\Install-SmartM365-Exchange-HealthCheckerScheduledTask.ps1 -ComputerName 'EXSRV01' -ServiceAccount 'CONTOSO\svc-exchange-hc' -StartNow
+.\Install-SmartM365-Exchange-HealthCheckerScheduledTask.ps1 -ComputerName 'EXSRV02','EXSRV03' -ServiceAccount 'CONTOSO\svc-exchange-hc'
+.\Install-SmartM365-Exchange-HealthCheckerScheduledTask.ps1 -ComputerName 'EXSRV01' -Uninstall
+```
+
+- Validate on one server first with `-StartNow`: the installer waits for the run and prints its state
+  (for example `Completed`, or `ExchangeShellFailed` when the account cannot load the Exchange
+  Management Shell).
+- Files and permissions: under `C:\Program Files\SmartM365\HealthChecker`, where standard users
+  cannot create files (the task runs elevated). `Bin` (Health Checker and runner; service account
+  read) and `Output` (service account modify), owned by Administrators, SYSTEM and Administrators
+  full control, inheritance removed. A server whose `C:\Program Files\SmartM365` is owned or
+  writable by anyone else than SYSTEM, Administrators or TrustedInstaller is refused.
+- Task: Windows PowerShell 5.1, daily at `-DailyAt` (default `01:00`), highest privileges, a new start
+  is ignored while a run is in progress, stopped after one hour.
+- Running the installer again is safe; `-WhatIf` shows the changes without making them.
+
+Minimum rights:
+
+- **Task service account** (a dedicated domain account; SYSTEM is refused): local administrator of
+  each server, member of the Exchange role group **View-Only Organization Management**, and
+  **Log on as a batch job** (Task Scheduler grants it at registration unless a Group Policy
+  overrides it).
+- **Collector run account** (the orchestrator job account): local administrator of each server, for
+  the `C$` share and CIM/DCOM.
+
+Service account password: it is typed once in `Get-Credential` during installation and stored only
+by Task Scheduler; it is never written to a file, a log or the output. When it expires or is
+changed, run the installer again with the same servers and account: the task is updated in place.
+Until then the collector reports `TaskTriggerFailed` with the task logon failure, and uses the last
+daily result while it is recent enough.
 
 ## Database summary in the report and email
 

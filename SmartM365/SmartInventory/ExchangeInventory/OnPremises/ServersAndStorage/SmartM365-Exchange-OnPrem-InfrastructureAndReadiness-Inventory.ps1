@@ -11,7 +11,9 @@
     - Optional Exchange mailbox database paths
     - Optional Exchange service health
     - Optional Microsoft CSS-Exchange Health Checker findings and per-server summary
-      (vendored, SHA256 and Microsoft signature verified before every run)
+      (vendored, SHA256 and Microsoft signature verified before every run). The collector server runs
+      it locally; every other server runs it locally through its own scheduled task, started on
+      demand over CIM/DCOM (see Install-SmartM365-Exchange-HealthCheckerScheduledTask.ps1)
     - Exchange schema and readiness configuration
     - Per-server decommissioning summary
     - Global CSV summary
@@ -19,21 +21,23 @@
 
     This version does not use:
     - Get-CimInstance
-    - New-CimSession
     - Invoke-Command
     - WinRM / PowerShell Remoting
+    New-CimSession is used over DCOM only, to start the Health Checker scheduled task.
 
 .VERSION
-1.7.0
+1.8.0
 .REQUIREMENTS
     Windows PowerShell 5.1 on an Exchange 2016/on-premises management host.
     Modules/snap-ins: SmartM365 WindowsPowerShell5 compatibility module; Exchange Management snap-in.
     Minimum permissions: Exchange on-premises read access for Get-ExchangeServer and virtual directory/readiness cmdlets; WMI/DCOM read access to target servers for compute, disk and storage inventory.
     Conditional: Mail.Send is required only when Graph mail is used; Sites.Selected write is required only when SharePoint upload is enabled.
-    Conditional: -IncludeHealthChecker requires an elevated session (local administrator) on the Exchange server.
+    Conditional: -IncludeHealthChecker requires an elevated session (local administrator) on the Exchange server;
+    for the other servers, the run account must be local administrator of each of them (C$ share, CIM/DCOM)
+    and the Health Checker scheduled task must be installed there.
 .NOTES
     Script Name : SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory.ps1
-    Version     : 1.7.0
+    Version     : 1.8.0
     Requirements:
       - Windows PowerShell 5.1 with Exchange 2016 Management Tools
       - Exchange 2016 read RBAC for Get-ExchangeServer, Get-MailboxDatabase,
@@ -44,6 +48,19 @@
       - PowerShell 5.1 or later
 
 .CHANGELOG
+    1.8.0
+      - Runs Health Checker on remote servers through a local scheduled task started in parallel over
+        CIM/DCOM (WinRM is not used); the collector server still runs it in a local process.
+      - Never passes -Server to Health Checker; refreshes the server files when their SHA256 differs.
+      - Uses the daily scheduled result when the on-demand start fails and the result is recent enough
+        (HealthCheckerMaxResultAgeHours, default 26).
+      - New run statuses RemoteConnectionFailed, TaskTriggerFailed, TaskTimeout, StaleResult; new
+        Summary columns ResultSource and ResultAgeHours at the end.
+      - Keeps only the last Health Checker run; HealthCheckerKeepFailedRawOutputDays is no longer used.
+      - Moves the default work folder to %ProgramFiles%\SmartM365\HealthChecker\Work, owned by
+        Administrators with an administrators-only ACL; refuses unsafe parents (UnsafeWorkFolder) and
+        checks the copy again immediately before starting it.
+
     1.6.9
       - Uses English Excluded status in the HTML report and log.
 
@@ -192,12 +209,17 @@ $tenantContextPath = & {
 . $tenantContextPath
 
 $ScriptName = "SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory"
-$ScriptVersion = "1.7.0"
+$ScriptVersion = "1.8.0"
 $RunId = (Get-Date).ToString("yyyyMMdd-HHmmss")
 # Vendored Microsoft CSS-Exchange Health Checker (see ThirdParty\CSS-Exchange\HealthChecker\PROVENANCE.md).
 $HealthCheckerRelativePath = 'ThirdParty\CSS-Exchange\HealthChecker\HealthChecker.ps1'
 $HealthCheckerVersion = '26.10.13.1644'
 $HealthCheckerExpectedSha256 = 'BF8758E96E8760226E3094D45A84909AFFA9F91167DE11F739D8E3D9343229DC'
+# Remote servers run Health Checker locally through a scheduled task (see Install-SmartM365-Exchange-HealthCheckerScheduledTask.ps1).
+$HealthCheckerRunnerFileName = 'SmartM365-Exchange-OnPrem-HealthChecker-LocalRunner.ps1'
+$HealthCheckerRemoteRootPath = 'C:\Program Files\SmartM365\HealthChecker'
+$HealthCheckerTaskPath = '\WCH\'
+$HealthCheckerTaskName = 'SmartM365 Exchange Health Checker'
 
 $script:SmartM365EffectiveConfig = Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot
 
@@ -1066,7 +1088,7 @@ function Get-HealthCheckerCsvColumn {
     if ($Kind -eq 'Findings') {
         return @('ServerName', 'Category', 'CategoryOrder', 'RowNumber', 'Check', 'Item', 'Status', 'Value', 'ValueMasked', 'Recommendation', 'HealthCheckerVersion', 'GenerationTime')
     }
-    return @('ServerName', 'RunStatus', 'RunMessage', 'DurationSeconds', 'HealthCheckerVersion', 'GenerationTime', 'ExchangeVersion', 'BuildNumber', 'CumulativeUpdate', 'SecurityUpdate', 'LatestInstallTime', 'SecurityUpdateStatus', 'CumulativeUpdateOutOfDate', 'CumulativeUpdateDaysOld', 'EndOfLifeStatus', 'VulnerabilityCount', 'Vulnerabilities', 'ErrorCount', 'WarningCount', 'OkCount', 'InfoCount', 'ServersProcessed', 'ServersTotal')
+    return @('ServerName', 'RunStatus', 'RunMessage', 'DurationSeconds', 'HealthCheckerVersion', 'GenerationTime', 'ExchangeVersion', 'BuildNumber', 'CumulativeUpdate', 'SecurityUpdate', 'LatestInstallTime', 'SecurityUpdateStatus', 'CumulativeUpdateOutOfDate', 'CumulativeUpdateDaysOld', 'EndOfLifeStatus', 'VulnerabilityCount', 'Vulnerabilities', 'ErrorCount', 'WarningCount', 'OkCount', 'InfoCount', 'ServersProcessed', 'ServersTotal', 'ResultSource', 'ResultAgeHours')
 }
 
 function Get-HealthCheckerMaskingRule {
@@ -1080,24 +1102,33 @@ function Get-HealthCheckerMaskingRule {
 function Get-HealthCheckerSetting {
     $perServerMinutes = [int](Get-SmartM365EffectiveConfigValue -Name 'HealthCheckerTimeoutMinutesPerServer' -DefaultValue 30)
     $budgetMinutes = [int](Get-SmartM365EffectiveConfigValue -Name 'HealthCheckerTotalBudgetMinutes' -DefaultValue 1320)
-    $keepDays = [int](Get-SmartM365EffectiveConfigValue -Name 'HealthCheckerKeepFailedRawOutputDays' -DefaultValue 7)
+    $maxResultAgeHours = [int](Get-SmartM365EffectiveConfigValue -Name 'HealthCheckerMaxResultAgeHours' -DefaultValue 26)
     $workRoot = [string](Get-SmartM365EffectiveConfigValue -Name 'HealthCheckerWorkFolderPath' -DefaultValue '')
     if ($perServerMinutes -lt 1 -or $perServerMinutes -gt 240) { throw "HealthCheckerTimeoutMinutesPerServer must be between 1 and 240." }
     if ($budgetMinutes -lt 1 -or $budgetMinutes -gt 1440) { throw "HealthCheckerTotalBudgetMinutes must be between 1 and 1440." }
-    if ($keepDays -lt 0 -or $keepDays -gt 30) { throw "HealthCheckerKeepFailedRawOutputDays must be between 0 and 30." }
+    if ($maxResultAgeHours -lt 1 -or $maxResultAgeHours -gt 168) { throw "HealthCheckerMaxResultAgeHours must be between 1 and 168." }
     if ([string]::IsNullOrWhiteSpace($workRoot)) {
-        $workRoot = Join-Path -Path $env:ProgramData -ChildPath 'SmartM365\HealthChecker'
+        # Under Program Files, where standard users cannot create folders: the verified copy runs elevated from there.
+        $workRoot = Join-Path -Path $env:ProgramFiles -ChildPath 'SmartM365\HealthChecker\Work'
     }
     # Raw Health Checker files hold the full server configuration: they stay on a local disk only.
     if ($workRoot.StartsWith('\\') -or -not [System.IO.Path]::IsPathRooted($workRoot)) {
         throw "HealthCheckerWorkFolderPath must be a local absolute path, not a share: $workRoot"
     }
+    # Only the last run is kept now; the former retention setting is ignored.
+    if ($null -ne (Get-SmartM365EffectiveConfigValue -Name 'HealthCheckerKeepFailedRawOutputDays' -DefaultValue $null)) {
+        Write-Log 'HealthCheckerKeepFailedRawOutputDays is no longer used and can be removed from the local configuration: only the last Health Checker run is kept.'
+    }
 
     return [pscustomobject]@{
         TimeoutMinutesPerServer    = $perServerMinutes
         TotalBudgetMinutes         = $budgetMinutes
-        KeepFailedRawOutputDays    = $keepDays
+        MaxResultAgeHours          = $maxResultAgeHours
         WorkFolderPath             = $workRoot
+        RemoteRootPath             = $HealthCheckerRemoteRootPath
+        TaskPath                   = $HealthCheckerTaskPath
+        TaskName                   = $HealthCheckerTaskName
+        PollSeconds                = 15
     }
 }
 
@@ -1142,12 +1173,89 @@ function Test-HealthCheckerElevation {
     return (New-Object Security.Principal.WindowsPrincipal($identity)).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 }
 
+function Get-HealthCheckerUnsafeAclEntry {
+    param([Parameter(Mandatory = $true)][System.Security.AccessControl.FileSystemSecurity]$Acl)
+
+    # SYSTEM, Administrators, TrustedInstaller; CREATOR OWNER only grants rights to whoever creates a child.
+    $trustedSids = @('S-1-5-18', 'S-1-5-32-544', 'S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464')
+    $writeRights = [System.Security.AccessControl.FileSystemRights]'WriteData, AppendData, WriteExtendedAttributes, DeleteSubdirectoriesAndFiles, WriteAttributes, Delete, ChangePermissions, TakeOwnership'
+    $unsafe = New-Object System.Collections.Generic.List[string]
+    $owner = [string]$Acl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value
+    if ($owner -notin $trustedSids) { $unsafe.Add("owner $owner") }
+    foreach ($rule in @($Acl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier]))) {
+        $sid = [string]$rule.IdentityReference.Value
+        if ($rule.AccessControlType -ne [System.Security.AccessControl.AccessControlType]::Allow -or $sid -in $trustedSids -or $sid -eq 'S-1-3-0') { continue }
+        if (($rule.FileSystemRights -band $writeRights) -ne 0) { $unsafe.Add(('{0} {1}' -f $sid, $rule.FileSystemRights)) }
+    }
+    return $unsafe.ToArray()
+}
+
+function Get-HealthCheckerWorkFolderAncestor {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [string[]]$TrustedBase = @($env:ProgramFiles, ${env:ProgramFiles(x86)}, $env:ProgramData, $env:SystemRoot)
+    )
+
+    # Parents below the first system folder, nearest first; system folders and the drive root are trusted.
+    $bases = @($TrustedBase | Where-Object { $_ } | ForEach-Object { [System.IO.Path]::GetFullPath($_).TrimEnd('\') })
+    $ancestors = New-Object System.Collections.Generic.List[string]
+    $current = Split-Path -Path ([System.IO.Path]::GetFullPath($Path).TrimEnd('\')) -Parent
+    while ($current) {
+        $normalized = $current.TrimEnd('\')
+        if ($normalized.Length -le 2 -or $normalized -in $bases) { break }
+        $ancestors.Add($normalized)
+        $current = Split-Path -Path $normalized -Parent
+    }
+    return $ancestors.ToArray()
+}
+
+function Set-HealthCheckerWorkFolderAclRule {
+    param([Parameter(Mandatory)][System.Security.AccessControl.DirectorySecurity]$Acl)
+
+    # Administrators own the work folder; only SYSTEM and Administrators have access, inheritance removed.
+    $Acl.SetOwner((New-Object System.Security.Principal.SecurityIdentifier('S-1-5-32-544')))
+    $Acl.SetAccessRuleProtection($true, $false)
+    foreach ($existingRule in @($Acl.GetAccessRules($true, $false, [System.Security.Principal.SecurityIdentifier]))) {
+        [void]$Acl.RemoveAccessRuleSpecific($existingRule)
+    }
+    foreach ($sid in @('S-1-5-18', 'S-1-5-32-544')) {
+        $identity = New-Object System.Security.Principal.SecurityIdentifier($sid)
+        $Acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($identity, 'FullControl', 'ContainerInherit, ObjectInherit', 'None', 'Allow')))
+    }
+    return $Acl
+}
+
+function Initialize-HealthCheckerWorkFolder {
+    param([Parameter(Mandatory)][string]$WorkRoot)
+
+    # The verified Health Checker copy runs elevated from here: only administrators may change this folder or its parents.
+    $ancestors = @(Get-HealthCheckerWorkFolderAncestor -Path $WorkRoot)
+    [array]::Reverse($ancestors)
+    foreach ($ancestor in $ancestors) {
+        if (-not (Test-Path -LiteralPath $ancestor -PathType Container)) {
+            New-Item -ItemType Directory -Path $ancestor -Force | Out-Null
+            $ancestorAcl = Get-Acl -LiteralPath $ancestor
+            $ancestorAcl.SetOwner((New-Object System.Security.Principal.SecurityIdentifier('S-1-5-32-544')))
+            Set-Acl -LiteralPath $ancestor -AclObject $ancestorAcl
+        }
+        $unsafe = @(Get-HealthCheckerUnsafeAclEntry -Acl (Get-Acl -LiteralPath $ancestor))
+        if ($unsafe.Count -gt 0) {
+            throw ("A parent of the Health Checker work folder is not restricted to administrators ({0}): {1}" -f ($unsafe -join '; '), $ancestor)
+        }
+    }
+    if (-not (Test-Path -LiteralPath $WorkRoot -PathType Container)) {
+        New-Item -ItemType Directory -Path $WorkRoot -Force | Out-Null
+    }
+    Set-Acl -LiteralPath $WorkRoot -AclObject (Set-HealthCheckerWorkFolderAclRule -Acl (Get-Acl -LiteralPath $WorkRoot))
+}
+
 function Invoke-HealthCheckerProcess {
     param(
         [Parameter(Mandatory)][string]$ScriptPath,
         [Parameter(Mandatory)][string]$ServerName,
         [Parameter(Mandatory)][string]$OutputFolder,
         [Parameter(Mandatory)][int]$TimeoutSeconds,
+        [string]$ExpectedSha256,
         [string]$PowerShellPath = (Join-Path -Path $env:SystemRoot -ChildPath 'System32\WindowsPowerShell\v1.0\powershell.exe')
     )
 
@@ -1155,9 +1263,20 @@ function Invoke-HealthCheckerProcess {
     $consolePath = Join-Path -Path $OutputFolder -ChildPath 'HealthChecker-Console.txt'
     $errorPath = Join-Path -Path $OutputFolder -ChildPath 'HealthChecker-Errors.txt'
     # A child process: Health Checker calls exit when it is not elevated, and a hung run can be killed.
-    $arguments = @('-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', ('"{0}"' -f $ScriptPath), '-Server', ('"{0}"' -f $ServerName), '-OutputFilePath', ('"{0}"' -f $OutputFolder), '-SkipVersionCheck')
+    # No -Server: this runs for the local server only; remote servers run it through their own scheduled task.
+    $arguments = @('-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', ('"{0}"' -f $ScriptPath), '-OutputFilePath', ('"{0}"' -f $OutputFolder), '-SkipVersionCheck')
     $started = Get-Date
     $result = [pscustomobject]@{ ServerName = $ServerName; Status = $null; Message = $null; ExitCode = $null; DurationSeconds = $null; XmlPath = $null }
+    if ($ExpectedSha256) {
+        # Checked again immediately before the start, so the file that runs is the one just verified.
+        $integrity = Test-HealthCheckerScriptIntegrity -Path $ScriptPath -ExpectedSha256 $ExpectedSha256
+        if (-not $integrity.IsValid) {
+            $result.Status = 'IntegrityFailed'
+            $result.Message = "Health Checker was not run: $($integrity.Reason)"
+            $result.DurationSeconds = 0
+            return $result
+        }
+    }
     try {
         $process = Start-Process -FilePath $PowerShellPath -ArgumentList $arguments -PassThru -WindowStyle Hidden -RedirectStandardOutput $consolePath -RedirectStandardError $errorPath -ErrorAction Stop
         $null = $process.Handle
@@ -1379,7 +1498,9 @@ function ConvertTo-HealthCheckerSummaryRow {
         [AllowNull()][string]$RunMessage,
         [AllowNull()][object]$DurationSeconds,
         [Parameter(Mandatory)][string]$HealthCheckerVersion,
-        [AllowNull()][object]$Parsed
+        [AllowNull()][object]$Parsed,
+        [AllowNull()][string]$ResultSource,
+        [AllowNull()][object]$ResultAgeHours
     )
 
     $facts = if ($Parsed) { $Parsed.Facts } else { $null }
@@ -1407,34 +1528,347 @@ function ConvertTo-HealthCheckerSummaryRow {
         InfoCount                 = $(if ($facts) { $facts.InfoCount } else { $null })
         ServersProcessed          = $null
         ServersTotal              = $null
+        ResultSource              = $(if ($Parsed) { $ResultSource } else { $null })
+        ResultAgeHours            = $(if ($Parsed) { $ResultAgeHours } else { $null })
     }
 }
 
-function Remove-HealthCheckerExpiredWorkFolder {
+function Remove-HealthCheckerPreviousWorkFolder {
     [CmdletBinding(SupportsShouldProcess)]
     param(
         [Parameter(Mandatory)][string]$WorkRoot,
-        [Parameter(Mandatory)][int]$KeepDays
+        [Parameter(Mandatory)][string]$CurrentRunId
     )
 
     if (-not (Test-Path -LiteralPath $WorkRoot -PathType Container)) { return }
-    $limit = (Get-Date).AddDays(-$KeepDays)
-    # Only run folders created by this collector (RunId format) are purged.
-    foreach ($folder in @(Get-ChildItem -LiteralPath $WorkRoot -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '^\d{8}-\d{6}$' -and $_.LastWriteTime -lt $limit })) {
-        if (-not $PSCmdlet.ShouldProcess($folder.FullName, 'Remove expired Health Checker work folder')) { continue }
+    # Only the last run is kept: every earlier run folder created by this collector (RunId format) is removed.
+    foreach ($folder in @(Get-ChildItem -LiteralPath $WorkRoot -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '^\d{8}-\d{6}$' -and $_.Name -ne $CurrentRunId })) {
+        if (-not $PSCmdlet.ShouldProcess($folder.FullName, 'Remove previous Health Checker work folder')) { continue }
         try { Remove-Item -LiteralPath $folder.FullName -Recurse -Force -ErrorAction Stop }
-        catch { Write-Log ("Expired Health Checker work folder could not be removed: {0}. {1}" -f $folder.FullName, $_.Exception.Message) 'WARN' }
+        catch { Write-Log ("Previous Health Checker work folder could not be removed: {0}. {1}" -f $folder.FullName, $_.Exception.Message) 'WARN' }
     }
+}
+
+function Get-HealthCheckerServerComputerName {
+    param([Parameter(Mandatory)][object]$Server)
+
+    $fqdn = if ($Server.PSObject.Properties['Fqdn']) { [string]$Server.Fqdn } else { '' }
+    $skipFqdn = [bool](Get-Variable -Name 'SkipFqdnAndUseServerName' -ValueOnly -ErrorAction SilentlyContinue)
+    if ($skipFqdn -or [string]::IsNullOrWhiteSpace($fqdn)) { return [string]$Server.Name }
+    return $fqdn
+}
+
+function ConvertTo-HealthCheckerAdminSharePath {
+    param(
+        [Parameter(Mandatory)][string]$Computer,
+        [Parameter(Mandatory)][string]$LocalPath
+    )
+
+    if ($LocalPath -notmatch '^(?<Drive>[A-Za-z]):\\(?<Rest>.+)$') {
+        throw "Health Checker remote root must be a local absolute path with a drive letter: $LocalPath"
+    }
+    return ('\\{0}\{1}$\{2}' -f $Computer, $Matches['Drive'].ToUpperInvariant(), $Matches['Rest'])
+}
+
+function ConvertTo-HealthCheckerRemoteMessage {
+    param(
+        [AllowNull()][string]$Message,
+        [Parameter(Mandatory)][string]$Computer
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Message)) { return $null }
+    $text = $Message
+    $dot = $Computer.IndexOf('.')
+    if ($dot -gt 0) {
+        # Summary messages never carry the domain: host.domain becomes host.
+        $text = [regex]::Replace($text, '\.' + [regex]::Escape($Computer.Substring($dot + 1)) + '\b', '', [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+    }
+    $text = ConvertTo-HealthCheckerSafeValue -Value $text
+    if ($text.Length -gt 300) { $text = $text.Substring(0, 297) + '...' }
+    return $text
+}
+
+function ConvertTo-HealthCheckerUtcTime {
+    param([AllowNull()][object]$Value)
+
+    # Windows PowerShell keeps ISO 8601 strings from ConvertFrom-Json; PowerShell 7 returns DateTime.
+    if ($Value -is [datetime]) { return $Value.ToUniversalTime() }
+    $parsed = [datetime]::MinValue
+    if ([datetime]::TryParse([string]$Value, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind, [ref]$parsed)) {
+        return $parsed.ToUniversalTime()
+    }
+    return $null
+}
+
+function Read-HealthCheckerRemoteStatus {
+    param([Parameter(Mandatory)][string]$OutputSharePath)
+
+    $statusPath = Join-Path -Path $OutputSharePath -ChildPath 'status.json'
+    if (-not (Test-Path -LiteralPath $statusPath -PathType Leaf)) { return $null }
+    try { return ([System.IO.File]::ReadAllText($statusPath) | ConvertFrom-Json) }
+    catch { return $null }
+}
+
+function Get-HealthCheckerTaskLogonFailure {
+    param([AllowNull()][object]$LastTaskResult)
+
+    if ($null -eq $LastTaskResult) { return $null }
+    $code = [long]$LastTaskResult
+    if ($code -lt 0) { $code += 4294967296 }
+    # Task Scheduler results that mean the run account could not log on: the runner never started.
+    $reasons = @{
+        2147943726 = 'wrong user name or password'
+        2147943727 = 'account restriction'
+        2147943730 = 'password expired'
+        2147943731 = 'account disabled'
+        2147943785 = "'Log on as a batch job' right missing"
+        2147944309 = 'account locked out'
+    }
+    if (-not $reasons.ContainsKey($code)) { return $null }
+    return ("The Health Checker task could not log on (0x{0:X8}, {1}). If the service account password expired or changed, run the Health Checker task installer again." -f $code, $reasons[$code])
+}
+
+function ConvertFrom-HealthCheckerRunnerState {
+    param([Parameter(Mandatory)][object]$RemoteStatus)
+
+    $state = [string]$RemoteStatus.State
+    $message = [string]$RemoteStatus.Message
+    $status = switch ($state) {
+        'Completed' { 'Completed' }
+        'Timeout' { 'TaskTimeout' }
+        'IntegrityFailed' { 'IntegrityFailed' }
+        'NotElevated' { 'NotElevated' }
+        'LaunchFailed' { 'LaunchFailed' }
+        default { 'NoOutput' }
+    }
+    if ($status -eq 'NoOutput' -and [string]::IsNullOrWhiteSpace($message)) {
+        $message = "The Health Checker task ended with state '$state' and no XML result."
+    }
+    return [pscustomobject]@{ Status = $status; Message = $(if ($status -eq 'Completed') { $null } else { $message }) }
+}
+
+function Resolve-HealthCheckerScheduledFallback {
+    param(
+        [Parameter(Mandatory)][string]$FailureStatus,
+        [AllowNull()][string]$FailureMessage,
+        [AllowNull()][object]$RemoteStatus,
+        [Parameter(Mandatory)][datetime]$NowUtc,
+        [Parameter(Mandatory)][int]$MaxResultAgeHours
+    )
+
+    # Only used when the on-demand start failed: the runner did not run, so the last scheduled result is intact.
+    $result = [pscustomobject]@{ Status = $FailureStatus; Message = $FailureMessage; UseResult = $false; ResultAgeHours = $null }
+    if ($null -eq $RemoteStatus -or [string]$RemoteStatus.State -ne 'Completed' -or [string]::IsNullOrWhiteSpace([string]$RemoteStatus.XmlFileName)) { return $result }
+    $finished = ConvertTo-HealthCheckerUtcTime -Value $RemoteStatus.FinishedAtUtc
+    if ($null -eq $finished) { return $result }
+
+    $age = [math]::Max(0, [math]::Round(($NowUtc.ToUniversalTime() - $finished).TotalHours, 1))
+    $result.ResultAgeHours = $age
+    if ($age -le $MaxResultAgeHours) {
+        $result.Status = 'Completed'
+        $result.Message = "On-demand run failed ($FailureStatus): $FailureMessage Using the scheduled result from $age h ago."
+        $result.UseResult = $true
+    }
+    else {
+        $result.Status = 'StaleResult'
+        $result.Message = "On-demand run failed ($FailureStatus): $FailureMessage The last scheduled result is $age h old (limit $MaxResultAgeHours h)."
+    }
+    return $result
+}
+
+function Copy-HealthCheckerRemoteFile {
+    param(
+        [Parameter(Mandatory)][string]$SourcePath,
+        [Parameter(Mandatory)][string]$DestinationPath
+    )
+
+    $sourceHash = (Get-FileHash -LiteralPath $SourcePath -Algorithm SHA256).Hash
+    if ((Test-Path -LiteralPath $DestinationPath -PathType Leaf) -and (Get-FileHash -LiteralPath $DestinationPath -Algorithm SHA256).Hash -eq $sourceHash) { return $false }
+    Copy-Item -LiteralPath $SourcePath -Destination $DestinationPath -Force
+    if ((Get-FileHash -LiteralPath $DestinationPath -Algorithm SHA256).Hash -ne $sourceHash) {
+        throw "The deployed file does not match its source: $(Split-Path -Path $DestinationPath -Leaf)"
+    }
+    return $true
+}
+
+function Start-HealthCheckerRemoteRun {
+    param(
+        [Parameter(Mandatory)][string]$ServerName,
+        [Parameter(Mandatory)][string]$Computer,
+        [Parameter(Mandatory)][string]$VerifiedScriptPath,
+        [Parameter(Mandatory)][string]$RunnerSourcePath,
+        [Parameter(Mandatory)][object]$Settings
+    )
+
+    $run = [pscustomobject]@{
+        ServerName      = $ServerName
+        Computer        = $Computer
+        Session         = $null
+        OutputSharePath = $null
+        PreviousStatus  = $null
+        WaitToken       = $null
+        StartedAt       = Get-Date
+        Done            = $false
+        Status          = $null
+        Message         = $null
+        RemoteStatus    = $null
+    }
+    $fail = {
+        param($Status, $Message)
+        $run.Done = $true
+        $run.Status = $Status
+        $run.Message = $Message
+        return $run
+    }
+
+    $rootShare = ConvertTo-HealthCheckerAdminSharePath -Computer $Computer -LocalPath $Settings.RemoteRootPath
+    $binShare = Join-Path -Path $rootShare -ChildPath 'Bin'
+    $run.OutputSharePath = Join-Path -Path $rootShare -ChildPath 'Output'
+    $driveShare = ($rootShare -split '\\')[0..3] -join '\'
+    $shareReachable = $false
+    try { $shareReachable = Test-Path -LiteralPath $driveShare -PathType Container } catch { $shareReachable = $false }
+    if (-not $shareReachable) {
+        return (& $fail 'RemoteConnectionFailed' 'The administrative share of the server is not reachable (SMB 445 and administrator rights on the server are required).')
+    }
+    if (-not (Test-Path -LiteralPath $binShare -PathType Container)) {
+        return (& $fail 'TaskTriggerFailed' 'The Health Checker task is not installed on the server: run the Health Checker task installer.')
+    }
+
+    try {
+        # Files on the server are refreshed when they differ; the runner checks Health Checker again before running it.
+        [void](Copy-HealthCheckerRemoteFile -SourcePath $VerifiedScriptPath -DestinationPath (Join-Path -Path $binShare -ChildPath 'HealthChecker.ps1'))
+        [void](Copy-HealthCheckerRemoteFile -SourcePath $RunnerSourcePath -DestinationPath (Join-Path -Path $binShare -ChildPath (Split-Path -Path $RunnerSourcePath -Leaf)))
+    }
+    catch {
+        return (& $fail 'TaskTriggerFailed' ("Health Checker files could not be deployed to the server: {0}" -f $_.Exception.Message))
+    }
+    $run.PreviousStatus = Read-HealthCheckerRemoteStatus -OutputSharePath $run.OutputSharePath
+
+    try {
+        # DCOM, not WinRM: PowerShell remoting is disabled on the Exchange servers.
+        $run.Session = New-CimSession -ComputerName $Computer -SessionOption (New-CimSessionOption -Protocol Dcom -PacketPrivacy -PacketIntegrity) -ErrorAction Stop
+    }
+    catch {
+        return (& $fail 'RemoteConnectionFailed' ("The server could not be reached over CIM/DCOM (RPC 135 and dynamic ports): {0}" -f $_.Exception.Message))
+    }
+
+    try {
+        $task = Get-ScheduledTask -CimSession $run.Session -TaskPath $Settings.TaskPath -TaskName $Settings.TaskName -ErrorAction SilentlyContinue
+        if ($null -eq $task) {
+            return (& $fail 'TaskTriggerFailed' 'The Health Checker task is not registered on the server: run the Health Checker task installer.')
+        }
+        if ([string]$task.State -eq 'Running' -and $run.PreviousStatus -and [string]$run.PreviousStatus.State -eq 'Running') {
+            # A run is already in progress (for example the daily one): its result is awaited instead of starting another.
+            $run.WaitToken = [string]$run.PreviousStatus.RunToken
+        }
+        else {
+            Start-ScheduledTask -CimSession $run.Session -TaskPath $Settings.TaskPath -TaskName $Settings.TaskName -ErrorAction Stop
+        }
+    }
+    catch {
+        return (& $fail 'TaskTriggerFailed' ("The Health Checker task could not be started: {0}" -f $_.Exception.Message))
+    }
+    return $run
+}
+
+function Update-HealthCheckerRemoteRun {
+    param(
+        [Parameter(Mandatory)][object]$Run,
+        [Parameter(Mandatory)][object]$Settings
+    )
+
+    $current = Read-HealthCheckerRemoteStatus -OutputSharePath $Run.OutputSharePath
+    $previousToken = if ($Run.PreviousStatus) { [string]$Run.PreviousStatus.RunToken } else { '' }
+    $currentToken = if ($current) { [string]$current.RunToken } else { '' }
+    $isThisRun = if ($Run.WaitToken) { $currentToken -eq $Run.WaitToken } else { $currentToken -and $currentToken -ne $previousToken }
+    if ($isThisRun -and [string]$current.State -ne 'Running') {
+        $Run.Done = $true
+        $Run.RemoteStatus = $current
+        return
+    }
+    if ($isThisRun -or ((Get-Date) - $Run.StartedAt).TotalSeconds -lt 60) { return }
+
+    # No new run after a minute: a logon failure means the runner never started.
+    try {
+        $info = Get-ScheduledTaskInfo -CimSession $Run.Session -TaskPath $Settings.TaskPath -TaskName $Settings.TaskName -ErrorAction Stop
+        $logonFailure = Get-HealthCheckerTaskLogonFailure -LastTaskResult $info.LastTaskResult
+        if ($logonFailure) {
+            $Run.Done = $true
+            $Run.Status = 'TaskTriggerFailed'
+            $Run.Message = $logonFailure
+        }
+    }
+    catch {
+        Write-Verbose "Health Checker task information unavailable for $($Run.ServerName): $($_.Exception.Message)"
+    }
+}
+
+function Complete-HealthCheckerRemoteRun {
+    param(
+        [Parameter(Mandatory)][object]$Run,
+        [Parameter(Mandatory)][string]$LocalFolder,
+        [Parameter(Mandatory)][object]$Settings
+    )
+
+    if ($Run.Session) { Remove-CimSession -CimSession $Run.Session -ErrorAction SilentlyContinue; $Run.Session = $null }
+    $outcome = [pscustomobject]@{ Status = $Run.Status; Message = $Run.Message; DurationSeconds = $null; XmlPath = $null; ResultSource = $null; ResultAgeHours = $null }
+    $resultStatus = $null
+    if ($Run.RemoteStatus) {
+        $mapped = ConvertFrom-HealthCheckerRunnerState -RemoteStatus $Run.RemoteStatus
+        $outcome.Status = $mapped.Status
+        $outcome.Message = $mapped.Message
+        $outcome.DurationSeconds = $Run.RemoteStatus.DurationSeconds
+        $outcome.ResultSource = 'OnDemand'
+        if ($mapped.Status -eq 'Completed') { $resultStatus = $Run.RemoteStatus }
+    }
+    elseif ($outcome.Status -in @('RemoteConnectionFailed', 'TaskTriggerFailed') -and $Run.PreviousStatus) {
+        $fallback = Resolve-HealthCheckerScheduledFallback -FailureStatus $outcome.Status -FailureMessage $outcome.Message -RemoteStatus $Run.PreviousStatus -NowUtc ([DateTime]::UtcNow) -MaxResultAgeHours $Settings.MaxResultAgeHours
+        $outcome.Status = $fallback.Status
+        $outcome.Message = $fallback.Message
+        if ($fallback.UseResult) {
+            $resultStatus = $Run.PreviousStatus
+            $outcome.ResultSource = 'Scheduled'
+            $outcome.DurationSeconds = $Run.PreviousStatus.DurationSeconds
+        }
+    }
+    $outcome.Message = ConvertTo-HealthCheckerRemoteMessage -Message $outcome.Message -Computer $Run.Computer
+
+    if ($resultStatus) {
+        $finished = ConvertTo-HealthCheckerUtcTime -Value $resultStatus.FinishedAtUtc
+        if ($finished) { $outcome.ResultAgeHours = [math]::Max(0, [math]::Round(([DateTime]::UtcNow - $finished).TotalHours, 1)) }
+        $xmlName = [string]$resultStatus.XmlFileName
+        # Only the XML result is copied; debug files stay on the server until its next run.
+        if ($xmlName -notmatch '^Raw\\HealthChecker-[^\\/:]+\.xml$') {
+            $outcome.Status = 'NoOutput'
+            $outcome.Message = 'The Health Checker task reported an unexpected result file name.'
+            $outcome.ResultSource = $null
+            return $outcome
+        }
+        try {
+            Ensure-Directory -Path $LocalFolder
+            $localXml = Join-Path -Path $LocalFolder -ChildPath (Split-Path -Path $xmlName -Leaf)
+            Copy-Item -LiteralPath (Join-Path -Path $Run.OutputSharePath -ChildPath $xmlName) -Destination $localXml -Force -ErrorAction Stop
+            $outcome.XmlPath = $localXml
+        }
+        catch {
+            $outcome.Status = 'RemoteConnectionFailed'
+            $outcome.Message = ConvertTo-HealthCheckerRemoteMessage -Message ("The Health Checker result could not be copied from the server: {0}" -f $_.Exception.Message) -Computer $Run.Computer
+            $outcome.ResultSource = $null
+        }
+    }
+    return $outcome
 }
 
 function Invoke-ExchangeHealthCheckerInventory {
     param(
         [Parameter(Mandatory)][object[]]$ExchangeServers,
         [Parameter(Mandatory)][string]$SourceScriptPath,
+        [Parameter(Mandatory)][string]$RunnerSourcePath,
         [Parameter(Mandatory)][string]$ExpectedSha256,
         [Parameter(Mandatory)][string]$HealthCheckerVersion,
         [Parameter(Mandatory)][string]$RunId,
-        [Parameter(Mandatory)][object]$Settings
+        [Parameter(Mandatory)][object]$Settings,
+        [string]$LocalComputerName = $env:COMPUTERNAME
     )
 
     $summaryRows = New-Object 'System.Collections.Generic.List[object]'
@@ -1444,23 +1878,39 @@ function Invoke-ExchangeHealthCheckerInventory {
     $blockedStatus = $null
     $blockedMessage = $null
 
-    Remove-HealthCheckerExpiredWorkFolder -WorkRoot $Settings.WorkFolderPath -KeepDays $Settings.KeepFailedRawOutputDays
-    $integrity = Test-HealthCheckerScriptIntegrity -Path $SourceScriptPath -ExpectedSha256 $ExpectedSha256
     $runScriptPath = Join-Path -Path $runFolder -ChildPath 'HealthChecker.ps1'
-    if ($integrity.IsValid) {
-        Ensure-Directory -Path $runFolder
-        # The copy that runs is verified again, so a change after the first check is never executed.
-        [System.IO.File]::WriteAllBytes($runScriptPath, [System.IO.File]::ReadAllBytes($SourceScriptPath))
-        $integrity = Test-HealthCheckerScriptIntegrity -Path $runScriptPath -ExpectedSha256 $ExpectedSha256
-    }
-    if (-not $integrity.IsValid) {
-        $blockedStatus = 'IntegrityFailed'
-        $blockedMessage = "Health Checker was not run: $($integrity.Reason)"
-        Write-Log $blockedMessage 'WARN'
-    }
-    elseif (-not (Test-HealthCheckerElevation)) {
+    $integrity = $null
+    if (-not (Test-HealthCheckerElevation)) {
         $blockedStatus = 'NotElevated'
         $blockedMessage = 'Health Checker was not run: it requires an elevated (administrator) session on the Exchange server.'
+    }
+    else {
+        try { Initialize-HealthCheckerWorkFolder -WorkRoot $Settings.WorkFolderPath }
+        catch {
+            $blockedStatus = 'UnsafeWorkFolder'
+            $blockedMessage = "Health Checker was not run: its work folder cannot be restricted to administrators. $($_.Exception.Message)"
+        }
+    }
+    if (-not $blockedStatus) {
+        Remove-HealthCheckerPreviousWorkFolder -WorkRoot $Settings.WorkFolderPath -CurrentRunId $RunId
+        $integrity = Test-HealthCheckerScriptIntegrity -Path $SourceScriptPath -ExpectedSha256 $ExpectedSha256
+        if ($integrity.IsValid) {
+            Ensure-Directory -Path $runFolder
+            # The copy that runs is verified again, so a change after the first check is never executed.
+            [System.IO.File]::WriteAllBytes($runScriptPath, [System.IO.File]::ReadAllBytes($SourceScriptPath))
+            $integrity = Test-HealthCheckerScriptIntegrity -Path $runScriptPath -ExpectedSha256 $ExpectedSha256
+        }
+        if (-not $integrity.IsValid) {
+            $blockedStatus = 'IntegrityFailed'
+            $blockedMessage = "Health Checker was not run: $($integrity.Reason)"
+        }
+    }
+    if ($blockedStatus) {
+        Write-Log $blockedMessage 'WARN'
+    }
+    elseif (-not (Test-Path -LiteralPath $RunnerSourcePath -PathType Leaf)) {
+        $blockedStatus = 'IntegrityFailed'
+        $blockedMessage = 'Health Checker was not run: the local runner deployed to remote servers is missing from the collector folder.'
         Write-Log $blockedMessage 'WARN'
     }
     else {
@@ -1468,31 +1918,68 @@ function Invoke-ExchangeHealthCheckerInventory {
     }
 
     $deadline = (Get-Date).AddMinutes($Settings.TotalBudgetMinutes)
+    $outcomes = @{}
+    if (-not $blockedStatus) {
+        $remoteRuns = New-Object 'System.Collections.Generic.List[object]'
+        # 1. Remote servers start first, through their scheduled task, so they all run in parallel.
+        foreach ($server in @($ExchangeServers | Where-Object { [string]$_.Name -ne $LocalComputerName })) {
+            $serverName = [string]$server.Name
+            $computer = Get-HealthCheckerServerComputerName -Server $server
+            Write-Log ("Starting the Health Checker task on {0}." -f $serverName)
+            $remoteRuns.Add((Start-HealthCheckerRemoteRun -ServerName $serverName -Computer $computer -VerifiedScriptPath $runScriptPath -RunnerSourcePath $RunnerSourcePath -Settings $Settings)) | Out-Null
+        }
+
+        # 2. The collector's own server runs in a local child process meanwhile.
+        foreach ($server in @($ExchangeServers | Where-Object { [string]$_.Name -eq $LocalComputerName })) {
+            $serverName = [string]$server.Name
+            $remainingSeconds = [int][math]::Floor(($deadline - (Get-Date)).TotalSeconds)
+            if ($remainingSeconds -lt 60) {
+                $outcomes[$serverName] = [pscustomobject]@{ Status = 'NotRun'; Message = 'Health Checker was not run on this server: the total Health Checker time budget was used up.'; DurationSeconds = $null; XmlPath = $null; ResultSource = $null; ResultAgeHours = $null }
+                continue
+            }
+            $timeoutSeconds = [math]::Min($Settings.TimeoutMinutesPerServer * 60, $remainingSeconds)
+            $serverFolder = Join-Path -Path $runFolder -ChildPath ($serverName -replace '[^A-Za-z0-9._-]', '_')
+            Write-Log ("Running Health Checker locally for {0} (limit {1} min)." -f $serverName, [math]::Round($timeoutSeconds / 60, 1))
+            $local = Invoke-HealthCheckerProcess -ScriptPath $runScriptPath -ServerName $serverName -OutputFolder $serverFolder -TimeoutSeconds $timeoutSeconds -ExpectedSha256 $ExpectedSha256
+            $outcomes[$serverName] = [pscustomobject]@{ Status = $local.Status; Message = $local.Message; DurationSeconds = $local.DurationSeconds; XmlPath = $local.XmlPath; ResultSource = 'Local'; ResultAgeHours = 0 }
+        }
+
+        # 3. Remote results are awaited together, each within its own limit and the total budget.
+        while (@($remoteRuns | Where-Object { -not $_.Done }).Count -gt 0) {
+            foreach ($run in @($remoteRuns | Where-Object { -not $_.Done })) {
+                $runDeadline = $run.StartedAt.AddMinutes($Settings.TimeoutMinutesPerServer)
+                if ($deadline -lt $runDeadline) { $runDeadline = $deadline }
+                Update-HealthCheckerRemoteRun -Run $run -Settings $Settings
+                if (-not $run.Done -and (Get-Date) -ge $runDeadline) {
+                    $run.Done = $true
+                    $run.Status = 'TaskTimeout'
+                    $run.Message = ("No result from the Health Checker task within {0} min." -f [math]::Round(($runDeadline - $run.StartedAt).TotalMinutes, 1))
+                }
+            }
+            if (@($remoteRuns | Where-Object { -not $_.Done }).Count -gt 0) { Start-Sleep -Seconds $Settings.PollSeconds }
+        }
+        foreach ($run in $remoteRuns) {
+            $serverFolder = Join-Path -Path $runFolder -ChildPath ($run.ServerName -replace '[^A-Za-z0-9._-]', '_')
+            $outcomes[$run.ServerName] = Complete-HealthCheckerRemoteRun -Run $run -LocalFolder $serverFolder -Settings $Settings
+        }
+    }
+
     foreach ($serverName in $serverNames) {
         if ($blockedStatus) {
             $summaryRows.Add((ConvertTo-HealthCheckerSummaryRow -ServerName $serverName -RunStatus $blockedStatus -RunMessage $blockedMessage -HealthCheckerVersion $HealthCheckerVersion -Parsed $null)) | Out-Null
             continue
         }
-        $remainingSeconds = [int][math]::Floor(($deadline - (Get-Date)).TotalSeconds)
-        if ($remainingSeconds -lt 60) {
-            $message = 'Health Checker was not run on this server: the total Health Checker time budget was used up by the previous servers.'
-            Write-Log ("{0}: {1}" -f $serverName, $message) 'WARN'
-            $summaryRows.Add((ConvertTo-HealthCheckerSummaryRow -ServerName $serverName -RunStatus 'NotRun' -RunMessage $message -HealthCheckerVersion $HealthCheckerVersion -Parsed $null)) | Out-Null
-            continue
-        }
-
-        $timeoutSeconds = [math]::Min($Settings.TimeoutMinutesPerServer * 60, $remainingSeconds)
+        $outcome = $outcomes[$serverName]
         $serverFolder = Join-Path -Path $runFolder -ChildPath ($serverName -replace '[^A-Za-z0-9._-]', '_')
-        Write-Log ("Running Health Checker for {0} (limit {1} min)." -f $serverName, [math]::Round($timeoutSeconds / 60, 1))
-        $run = Invoke-HealthCheckerProcess -ScriptPath $runScriptPath -ServerName $serverName -OutputFolder $serverFolder -TimeoutSeconds $timeoutSeconds
         $parsed = $null
-        $status = $run.Status
-        $message = $run.Message
+        $status = $outcome.Status
+        $message = $outcome.Message
         if ($status -eq 'Completed') {
             try {
-                $parsed = ConvertFrom-HealthCheckerXml -Path $run.XmlPath -ServerName $serverName -HealthCheckerVersion $HealthCheckerVersion
+                $parsed = ConvertFrom-HealthCheckerXml -Path $outcome.XmlPath -ServerName $serverName -HealthCheckerVersion $HealthCheckerVersion
                 foreach ($finding in $parsed.Findings) { $findingRows.Add($finding) | Out-Null }
-                Write-Log ("Health Checker for {0}: {1} finding(s), {2} vulnerability(ies), {3} error(s), {4} warning(s), {5}s." -f $serverName, @($parsed.Findings).Count, @($parsed.Vulnerabilities).Count, $parsed.Facts.ErrorCount, $parsed.Facts.WarningCount, $run.DurationSeconds)
+                Write-Log ("Health Checker for {0} ({1}): {2} finding(s), {3} vulnerability(ies), {4} error(s), {5} warning(s), {6}s." -f $serverName, $outcome.ResultSource, @($parsed.Findings).Count, @($parsed.Vulnerabilities).Count, $parsed.Facts.ErrorCount, $parsed.Facts.WarningCount, $outcome.DurationSeconds)
+                if ($message) { Write-Log ("{0}: {1}" -f $serverName, $message) 'WARN' }
             }
             catch {
                 $status = 'ParseFailed'
@@ -1501,13 +1988,16 @@ function Invoke-ExchangeHealthCheckerInventory {
         }
 
         if ($status -eq 'Completed') {
-            try { Remove-Item -LiteralPath $serverFolder -Recurse -Force -ErrorAction Stop }
-            catch { Write-Log ("Health Checker raw output could not be removed: {0}. {1}" -f $serverFolder, $_.Exception.Message) 'WARN' }
+            if (Test-Path -LiteralPath $serverFolder -PathType Container) {
+                try { Remove-Item -LiteralPath $serverFolder -Recurse -Force -ErrorAction Stop }
+                catch { Write-Log ("Health Checker raw output could not be removed: {0}. {1}" -f $serverFolder, $_.Exception.Message) 'WARN' }
+            }
         }
         else {
-            Write-Log ("{0}: Health Checker {1}. {2} Raw output kept locally for {3} day(s) for diagnosis: {4}" -f $serverName, $status, $message, $Settings.KeepFailedRawOutputDays, $serverFolder) 'WARN'
+            $kept = if ($outcome.ResultSource -eq 'Local') { " Raw output kept locally until the next run: $serverFolder" } else { '' }
+            Write-Log ("{0}: Health Checker {1}. {2}{3}" -f $serverName, $status, $message, $kept) 'WARN'
         }
-        $summaryRows.Add((ConvertTo-HealthCheckerSummaryRow -ServerName $serverName -RunStatus $status -RunMessage $message -DurationSeconds $run.DurationSeconds -HealthCheckerVersion $HealthCheckerVersion -Parsed $parsed)) | Out-Null
+        $summaryRows.Add((ConvertTo-HealthCheckerSummaryRow -ServerName $serverName -RunStatus $status -RunMessage $message -DurationSeconds $outcome.DurationSeconds -HealthCheckerVersion $HealthCheckerVersion -Parsed $parsed -ResultSource $outcome.ResultSource -ResultAgeHours $outcome.ResultAgeHours)) | Out-Null
     }
 
     if (Test-Path -LiteralPath $runScriptPath -PathType Leaf) { Remove-Item -LiteralPath $runScriptPath -Force -ErrorAction SilentlyContinue }
@@ -2496,7 +2986,7 @@ try {
     $healthCheckerSummary = @()
     $healthCheckerFindings = @()
     if ($IncludeHealthChecker) {
-        Write-Log "Running Microsoft CSS-Exchange Health Checker $HealthCheckerVersion server by server."
+        Write-Log "Running Microsoft CSS-Exchange Health Checker ${HealthCheckerVersion}: locally on this server, through the scheduled task on the other servers."
         $healthCheckerSettings = $null
         try { $healthCheckerSettings = Get-HealthCheckerSetting }
         catch {
@@ -2511,7 +3001,7 @@ try {
             })
         }
         if ($healthCheckerSettings) {
-            $healthCheckerResult = Invoke-ExchangeHealthCheckerInventory -ExchangeServers @($exchangeServers) -SourceScriptPath (Join-Path -Path $PSScriptRoot -ChildPath $HealthCheckerRelativePath) -ExpectedSha256 $HealthCheckerExpectedSha256 -HealthCheckerVersion $HealthCheckerVersion -RunId $RunId -Settings $healthCheckerSettings
+            $healthCheckerResult = Invoke-ExchangeHealthCheckerInventory -ExchangeServers @($exchangeServers) -SourceScriptPath (Join-Path -Path $PSScriptRoot -ChildPath $HealthCheckerRelativePath) -RunnerSourcePath (Join-Path -Path $PSScriptRoot -ChildPath $HealthCheckerRunnerFileName) -ExpectedSha256 $HealthCheckerExpectedSha256 -HealthCheckerVersion $HealthCheckerVersion -RunId $RunId -Settings $healthCheckerSettings
             $healthCheckerSummary = @($healthCheckerResult.Summary)
             $healthCheckerFindings = @($healthCheckerResult.Findings)
         }

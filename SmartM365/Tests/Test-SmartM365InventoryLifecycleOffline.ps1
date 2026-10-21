@@ -2,7 +2,7 @@
 .SYNOPSIS
     Offline lifecycle regression: no collector, tenant initialization, preparation or provider request.
 .VERSION
-    1.0.1
+    1.0.2
 #>
 [CmdletBinding()]
 param([switch]$ReceiptOnly)
@@ -87,7 +87,7 @@ try {
         $_.FullName -notmatch '[\\/](Tests|TestRuns)[\\/]' -and
         [IO.File]::ReadAllText($_.FullName).Contains('Start-SmartM365InventoryRun -ScriptPath $PSCommandPath')
     })
-    Assert-Lifecycle ($targets.Count -eq 55) 'Approved envelope count changed'
+    Assert-Lifecycle ($targets.Count -eq 56) 'Approved envelope count changed'
     foreach($target in $targets){
         $ast=Read-LifecycleAst $target.FullName
         $outer=@($ast.EndBlock.Statements|Where-Object {$_ -is [Management.Automation.Language.TryStatementAst] -and $_.Finally -and $_.Finally.Extent.Text.Contains('Complete-SmartM365InventoryRun -State')})
