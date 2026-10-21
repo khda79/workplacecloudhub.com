@@ -16,7 +16,7 @@
     Progress and results are written to the status file passed by the collector.
 
 .VERSION
-1.0.0
+1.0.2
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
 #>
@@ -31,7 +31,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-$RunnerVersion = '1.0.0'
+$RunnerVersion = '1.0.2'
 # Exchange Online cmdlets called by Free/Busy Checker with the EO prefix.
 $FreeBusyExchangeOnlineCmdlets = @('Get-EOMailbox', 'Get-EOOrganizationRelationship', 'Get-EOFederatedOrganizationIdentifier', 'Get-EOSharingPolicy', 'Test-EOOrganizationRelationship', 'Get-EOIntraOrganizationConnector', 'Get-EOIntraOrganizationConfiguration', 'Get-EOOnPremisesOrganization', 'Get-EOAuthServer', 'Test-EOOAuthConnectivity')
 
@@ -111,6 +111,18 @@ function Install-FreeBusyExchangeOnlineModule {
     $module = Get-Module -ListAvailable -Name ExchangeOnlineManagement | Sort-Object Version -Descending | Select-Object -First 1
     if (-not $module -or $module.Version -lt $MinimumVersion) { throw "ExchangeOnlineManagement $MinimumVersion or later is still not available after installation." }
     return $module
+}
+
+function Invoke-FreeBusyCheckerScript {
+    param([Parameter(Mandatory)][string]$Path)
+
+    # Free/Busy Checker expects default session settings: strict mode off (with -SkipVersionCheck it reads
+    # $versionsUrl, which it never sets) and non-terminating errors written to its report, not thrown.
+    # Both settings apply to this function scope only; the runner keeps its own.
+    Set-StrictMode -Off
+    $ErrorActionPreference = 'Continue'
+    # -SkipVersionCheck alone: any other parameter selects a parameter set that lets the script update itself.
+    & $Path -SkipVersionCheck
 }
 
 function Connect-FreeBusyExchangeOnline {
@@ -199,8 +211,7 @@ try {
     $status.Stage = 'FreeBusyCheckerStarted'
     Save-FreeBusyRunnerStatus
     Set-Location -LiteralPath (Split-Path -Path $FreeBusyCheckerPath -Parent)
-    # -SkipVersionCheck alone: any other parameter selects a parameter set that lets the script update itself.
-    & $FreeBusyCheckerPath -SkipVersionCheck
+    Invoke-FreeBusyCheckerScript -Path $FreeBusyCheckerPath
     $status.Stage = 'FreeBusyCheckerReturned'
 }
 catch {

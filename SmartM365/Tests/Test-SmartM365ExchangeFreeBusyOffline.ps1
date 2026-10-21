@@ -11,10 +11,12 @@ Checker is never executed; Exchange Online and module installation are mocked. C
 - NotAuthorized checks, summary rows and run status for every outcome;
 - runner: no interactive sign-in, app-only certificate session proven, CurrentUser module installation,
   Free/Busy Checker started with -SkipVersionCheck only, nothing deserialized;
-- child process: environment hand-off, time limit with process tree stop.
+- child process: environment hand-off, time limit with process tree stop;
+- Free/Busy Checker run without the runner's strict mode and stop-on-error, which the runner keeps;
+- report: title and status in the mail banner, runs that did not happen never shown as healthy.
 
 .VERSION
-1.0.1
+1.0.2
 #>
 [CmdletBinding()]
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter','',Justification='Mocks keep the parameters of the commands they replace.')]
@@ -206,8 +208,41 @@ try {
     # 7. Runner: app-only session only, CurrentUser installation, -SkipVersionCheck only.
     $connects = @($runnerAst.FindAll({ param($n) $n -is [Management.Automation.Language.CommandAst] -and $n.GetCommandName() -eq 'Connect-ExchangeOnline' }, $true))
     Assert-FreeBusy ($connects.Count -eq 1 -and $connects[0].Extent.Text -match '-AppId \$AppId' -and $connects[0].Extent.Text -match '-CertificateThumbprint \$CertificateThumbprint' -and $connects[0].Extent.Text -match '-Prefix EO') 'Exchange Online is opened once, with the app and its certificate, prefix EO.'
-    $fbcCalls = @($runnerAst.FindAll({ param($n) $n -is [Management.Automation.Language.CommandAst] -and $n.CommandElements[0].Extent.Text -eq '$FreeBusyCheckerPath' }, $true))
-    Assert-FreeBusy ($fbcCalls.Count -eq 1 -and $fbcCalls[0].CommandElements.Count -eq 2 -and $fbcCalls[0].CommandElements[1].Extent.Text -eq '-SkipVersionCheck') 'Free/Busy Checker runs with -SkipVersionCheck only.'
+    $checkerFunction = $runnerAst.Find({ param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Invoke-FreeBusyCheckerScript' }, $true)
+    $fbcCalls = @($runnerAst.FindAll({ param($n) $n -is [Management.Automation.Language.CommandAst] -and $n.CommandElements[0].Extent.Text -in @('$FreeBusyCheckerPath', '$Path') }, $true))
+    Assert-FreeBusy ($null -ne $checkerFunction -and $fbcCalls.Count -eq 1 -and $checkerFunction.Extent.Text.Contains($fbcCalls[0].Extent.Text) -and
+        $fbcCalls[0].CommandElements.Count -eq 2 -and $fbcCalls[0].CommandElements[1].Extent.Text -eq '-SkipVersionCheck') 'Free/Busy Checker runs only through its function, with -SkipVersionCheck only.'
+    Assert-FreeBusy (@($runnerAst.FindAll({ param($n) $n -is [Management.Automation.Language.CommandAst] -and $n.GetCommandName() -eq 'Invoke-FreeBusyCheckerScript' }, $true)).Count -eq 1) 'The runner starts Free/Busy Checker once.'
+
+    # Free/Busy Checker reads variables it never sets (for example $versionsUrl with -SkipVersionCheck) and
+    # relies on non-terminating errors: a synthetic checker is run for real, in a separate process, under
+    # the runner's settings.
+    $fakeChecker = Join-Path $tempRoot 'FakeFreeBusyChecker.ps1'
+    [IO.File]::WriteAllText($fakeChecker, (@(
+        'param([switch]$SkipVersionCheck)',
+        'if (-not ([string]::IsNullOrEmpty($versionsUrl))) { ''unexpected'' }',
+        'Write-Error ''Synthetic non-terminating service error''',
+        '"FAKE-CHECKER-DONE SkipVersionCheck=$SkipVersionCheck"'
+    ) -join "`r`n"), [Text.UTF8Encoding]::new($false))
+    $strictHost = Join-Path $tempRoot 'StrictHost.ps1'
+    [IO.File]::WriteAllText($strictHost, (@(
+        'param([string]$Checker, [switch]$Direct)',
+        'Set-StrictMode -Version Latest',
+        '$ErrorActionPreference = ''Stop''',
+        $checkerFunction.Extent.Text,
+        'try { if ($Direct) { & $Checker -SkipVersionCheck } else { Invoke-FreeBusyCheckerScript -Path $Checker } } catch { "RUN-FAILED: $($_.Exception.Message)"; exit 1 }',
+        'try { $null = $notSetAfterRun; ''STRICT-OFF-AFTER'' } catch { ''STRICT-STILL-ON'' }',
+        'if ($ErrorActionPreference -eq ''Stop'') { ''STOP-STILL-ON'' }'
+    ) -join "`r`n"), [Text.UTF8Encoding]::new($false))
+    $ErrorActionPreference = 'Continue'
+    $strictRun = (& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $strictHost -Checker $fakeChecker 2>&1 | Out-String)
+    $strictExit = $LASTEXITCODE
+    $directRun = (& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $strictHost -Checker $fakeChecker -Direct 2>&1 | Out-String)
+    $directExit = $LASTEXITCODE
+    $ErrorActionPreference = 'Stop'
+    Assert-FreeBusy ($directExit -eq 1 -and $directRun -match 'RUN-FAILED') 'The synthetic checker fails when called directly under the runner settings (the call before runner 1.0.2).'
+    Assert-FreeBusy ($strictExit -eq 0 -and $strictRun -match 'FAKE-CHECKER-DONE SkipVersionCheck=True' -and $strictRun -match 'Synthetic non-terminating service error') "Free/Busy Checker runs to its end without strict mode and keeps its non-terminating errors: $($strictRun.Trim())"
+    Assert-FreeBusy ($strictRun -match 'STRICT-STILL-ON' -and $strictRun -match 'STOP-STILL-ON') 'The runner keeps strict mode and stop-on-error for its own code.'
     $installs = @($runnerAst.FindAll({ param($n) $n -is [Management.Automation.Language.CommandAst] -and $n.GetCommandName() -in @('Install-Module', 'Install-PackageProvider') }, $true))
     Assert-FreeBusy ($installs.Count -eq 2 -and @($installs | Where-Object { $_.Extent.Text -match '-Scope CurrentUser' -and $_.Extent.Text -match '-Force' }).Count -eq 2) 'Installations are CurrentUser and without prompt.'
     Assert-FreeBusy ($runnerAst.Extent.Text -match "\[Parameter\(Mandatory\)\]\[string\]\`$FreeBusyCheckerPath" -and $runnerAst.Extent.Text -notmatch 'param\([^)]*AppId') 'App identifiers do not travel on the runner command line.'
@@ -285,6 +320,30 @@ $state = @{ Stage = 'FreeBusyCheckerReturned'; RunStatus = $null; ExchangeOnline
     $report = & $module { param($s, $f) ConvertTo-FreeBusyReportHtml -Summary $s -Findings $f -RunStatus 'EXONotAuthorized' -RunMessage '<b>m</b>' } $summary $authorized
     Assert-FreeBusy ($report -match 'EXONotAuthorized' -and $report -match 'NotAuthorizedPartial' -and $report -match '&lt;b&gt;m&lt;/b&gt;') 'The report shows the statuses and encodes text.'
     Assert-FreeBusy ($report.IndexOf('>Error<') -lt $report.IndexOf('>NotAuthorized<')) 'Errors are listed before not authorized checks.'
+
+    # Mail banner: the shared branding puts the Power BI link beside the report title, in its hero banner.
+    $coreAst = Get-ScriptAst (Join-Path $SourceRoot 'Modules/SmartM365.Core/SmartM365.Core.psm1')
+    $brandingModule = New-Module -ScriptBlock ([scriptblock]::Create(((@('Add-SmartM365MailBranding', 'ConvertTo-SmartM365EmailHtmlText') | ForEach-Object { Get-FunctionText $coreAst $_ }) + @(
+        'function Get-SmartM365MailBrandingConfig { [pscustomobject]@{ Enabled = $true; ClientName = ''''; ClientLogoPath = ''''; ClientLogoMaxKB = 64; PowerBiEnabled = $true; PowerBiUrl = ''https://app.powerbi.com/groups/me/reports/synthetic''; PowerBiLinkText = ''Click here to open the Power BI dashboard''; PowerBiLogoPath = ''''; FooterProductName = ''SmartM365''; FooterWebsiteUrl = ''https://example.org''; FooterGitHubLabel = ''GitHub''; FooterGitHubUrl = ''https://example.org/git'' } }',
+        'function ConvertTo-SmartM365MailLogoDataUri { param($Path, $MaxKB) '''' }',
+        'function Resolve-SmartM365ConfigValue { param($Value) $Value }',
+        'function Add-SmartM365MailExecutionFooter { param($BodyHtml) $BodyHtml }',
+        'function WriteLog { param($Message, $Level) }'
+    )) -join "`n"))
+    $branded = & $brandingModule { param($h) Add-SmartM365MailBranding -BodyHtml $h } $report
+    $titleCell = [regex]::Match($branded, '(?is)<td align="left" valign="middle"[^>]*>(?<Title>.*?)</td>\s*<td align="right" valign="middle"[^>]*>(?<Link>.*?)</td>')
+    Assert-FreeBusy ($titleCell.Success -and $titleCell.Groups['Title'].Value -match 'Exchange Hybrid Free/Busy Configuration' -and $titleCell.Groups['Title'].Value -match 'Run status: <strong>EXONotAuthorized</strong>' -and $titleCell.Groups['Link'].Value -match 'Click here to open the Power BI dashboard') 'The mail banner shows the title and the run status beside the Power BI link.'
+    Assert-FreeBusy ($branded -notmatch 'background:#0f172a;text-align:right;') 'The Power BI link is not put in a separate empty banner.'
+    Assert-FreeBusy ($report -match '>Sides tested<' -and $report -match '>3 / 4<' -and $report -match '>Not authorized<') 'The report shows the tested sides and the counts.'
+
+    # A run that did not happen never reads as "no problem found" and shows no missing role.
+    $runnerFailedSummary = @(& $module { param($r) New-FreeBusySummaryRow -Findings @() -RunStatus 'RunnerFailed' -RunMessage 'Free/Busy Checker runner failed: synthetic.' -RunnerStatus $r -DurationSeconds 24 -ServerName 'EXSRV01' -FreeBusyCheckerVersion 'v' -GenerationTime 't' } $partial)
+    Assert-FreeBusy (@($runnerFailedSummary | Where-Object { $_.SideStatus -ne 'NotRun' -or $_.MissingRoles -or $_.NotAuthorizedCmdlets }).Count -eq 0) 'A run that did not happen lists no missing cmdlet or role.'
+    $failedReport = & $module { param($s) ConvertTo-FreeBusyReportHtml -Summary $s -Findings @() -RunStatus 'RunnerFailed' -RunMessage 'Free/Busy Checker runner failed: synthetic.' } $runnerFailedSummary
+    Assert-FreeBusy ($failedReport -match 'The check did not run: Free/Busy Checker runner failed: synthetic\.' -and $failedReport -notmatch 'No error, warning or not authorized check was reported') 'A run that did not happen says so and does not report "no problem".'
+    Assert-FreeBusy ($failedReport -match '>N/A<' -and $failedReport -match '>0 / 4<' -and $failedReport -notmatch 'Mail Recipients') 'A run that did not happen shows unmeasured counts and no missing role.'
+    $partialReport = & $module { param($s) ConvertTo-FreeBusyReportHtml -Summary $s -Findings @() -RunStatus 'EXONotConnected' -RunMessage 'm' } $notConnected
+    Assert-FreeBusy ($partialReport -match 'on the 1 side\(s\) that were measured' -and $partialReport -notmatch 'No error, warning or not authorized check was reported\.<') 'Unmeasured sides are not reported as healthy.'
     $collectorText = [IO.File]::ReadAllText($collectorPath)
     Assert-FreeBusy ($collectorText -match 'Exchange_Hybrid_FreeBusy_Summary\.csv' -and $collectorText -match 'Exchange_Hybrid_FreeBusy_Findings\.csv') 'Both CSVs are published.'
     $receipts = [IO.File]::ReadAllText((Join-Path $SourceRoot 'Modules/SmartM365.Core/SmartM365-SourceReceipts.json.txt')) | ConvertFrom-Json

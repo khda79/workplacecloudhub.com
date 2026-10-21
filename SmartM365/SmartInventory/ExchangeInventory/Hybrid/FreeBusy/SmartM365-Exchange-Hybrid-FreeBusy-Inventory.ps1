@@ -20,7 +20,7 @@
     folder (last run only) and are read as text only; they are never published.
 
 .VERSION
-1.0.1
+1.0.2
 .REQUIREMENTS
     Windows PowerShell 5.1, elevated, on an Exchange server with the Exchange Management Tools.
     Modules: SmartM365 WindowsPowerShell5 compatibility module; ActiveDirectory (Windows feature RSAT-AD-PowerShell);
@@ -29,7 +29,7 @@
     Conditional: Mail.Send is required only when Graph mail is used; Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
     Script Name : SmartM365-Exchange-Hybrid-FreeBusy-Inventory.ps1
-    Version     : 1.0.1
+    Version     : 1.0.2
     Author      : https://github.com/khda79/workplacecloudhub.com
 #>
 
@@ -77,7 +77,7 @@ $tenantContextPath = & {
 . $tenantContextPath
 
 $ScriptName = "SmartM365-Exchange-Hybrid-FreeBusy-Inventory"
-$ScriptVersion = "1.0.1"
+$ScriptVersion = "1.0.2"
 $RunId = (Get-Date).ToString("yyyyMMdd-HHmmss")
 # Vendored Microsoft CSS-Exchange Free/Busy Checker (see ThirdParty\CSS-Exchange\FreeBusyChecker\PROVENANCE.md).
 $FreeBusyCheckerRelativePath = 'ThirdParty\CSS-Exchange\FreeBusyChecker\FreeBusyChecker.ps1'
@@ -836,7 +836,8 @@ function New-FreeBusySummaryRow {
     $rows = foreach ($side in @('ExchangeOnPremises', 'ExchangeOnline')) {
         foreach ($auth in @('DAuth', 'OAuth')) {
             $sideRows = @($Findings | Where-Object { $_.Side -eq $side -and $_.Auth -eq $auth })
-            $sideCmdlets = @($notAuthorized | Where-Object { $side -eq 'ExchangeOnline' -and $scope.ContainsKey($_) -and $scope[$_].Auth -eq $auth })
+            # Missing cmdlets and roles are reported only when Free/Busy Checker actually ran.
+            $sideCmdlets = if ($blocking) { @() } else { @($notAuthorized | Where-Object { $side -eq 'ExchangeOnline' -and $scope.ContainsKey($_) -and $scope[$_].Auth -eq $auth }) }
             $sideStatus = if ($blocking) { 'NotRun' }
                 elseif ($side -eq 'ExchangeOnline' -and $exchangeOnline -eq 'NotConnected') { 'NotConnected' }
                 elseif ($sideCmdlets.Count -gt 0) { 'NotAuthorizedPartial' }
@@ -891,38 +892,86 @@ function ConvertTo-FreeBusyReportHtml {
     )
 
     $statusColor = if ($RunStatus -eq 'Completed') { '#166534' } elseif ($RunStatus -in @('EXONotConnected', 'EXONotAuthorized')) { '#9a3412' } else { '#b91c1c' }
+    $ran = $RunStatus -in @('Completed', 'EXONotConnected', 'EXONotAuthorized')
+    $measured = @($Summary | Where-Object { $_.SideStatus -in @('Completed', 'NotAuthorizedPartial') })
+    $sidesText = '{0} / {1}' -f $measured.Count, @($Summary).Count
+    $issues = @($Findings | Where-Object { $_.Status -in @('Error', 'NotAuthorized', 'Warning') } | Sort-Object @{ Expression = { switch ($_.Status) { 'Error' { 0 } 'NotAuthorized' { 1 } default { 2 } } } }, Side, Auth, RowNumber)
+    $errorCount = @($issues | Where-Object Status -eq 'Error').Count
+    $warningCount = @($issues | Where-Object Status -eq 'Warning').Count
+    $notAuthorizedCount = @($issues | Where-Object Status -eq 'NotAuthorized').Count
+    # Counts of a check that did not run are not measured: N/A, never 0.
+    $countText = { param($Value) if ($ran) { [string]$Value } else { 'N/A' } }
+
     $summaryRows = foreach ($row in $Summary) {
         $sideColor = switch ([string]$row.SideStatus) { 'Completed' { '#166534'; break } 'NotRun' { '#64748b'; break } default { '#9a3412' } }
-        "<tr><td>$(Format-HtmlValue $row.Side)</td><td>$(Format-HtmlValue $row.Auth)</td><td style='font-weight:700;color:$sideColor;'>$(Format-HtmlValue $row.SideStatus)</td><td style='text-align:right;'>$(Format-HtmlValue $row.ErrorCount)</td><td style='text-align:right;'>$(Format-HtmlValue $row.WarningCount)</td><td style='text-align:right;'>$(Format-HtmlValue $row.NotAuthorizedCount)</td><td>$(Format-HtmlValue $row.MissingRoles)</td></tr>"
+        "<tr><td>$(Format-HtmlValue $row.Side)</td><td>$(Format-HtmlValue $row.Auth)</td><td style='font-weight:700;color:$sideColor;'>$(Format-HtmlValue $row.SideStatus)</td><td class='num' style='text-align:right;'>$(Format-HtmlValue $row.ErrorCount)</td><td class='num' style='text-align:right;'>$(Format-HtmlValue $row.WarningCount)</td><td class='num' style='text-align:right;'>$(Format-HtmlValue $row.NotAuthorizedCount)</td><td>$(Format-HtmlValue $row.MissingRoles)</td></tr>"
     }
-    $issues = @($Findings | Where-Object { $_.Status -in @('Error', 'NotAuthorized', 'Warning') } | Sort-Object @{ Expression = { switch ($_.Status) { 'Error' { 0 } 'NotAuthorized' { 1 } default { 2 } } } }, Side, Auth, RowNumber)
     $shown = @($issues | Select-Object -First 100)
     $issueRows = foreach ($row in $shown) {
         $color = switch ([string]$row.Status) { 'Error' { '#b91c1c'; break } 'NotAuthorized' { '#9a3412'; break } default { '#a16207' } }
         "<tr><td style='font-weight:700;color:$color;'>$(Format-HtmlValue $row.Status)</td><td>$(Format-HtmlValue $row.Side)</td><td>$(Format-HtmlValue $row.Auth)</td><td>$(Format-HtmlValue $row.Category)</td><td>$(Format-HtmlValue $row.Item)</td><td>$(Format-HtmlValue $row.Value)</td></tr>"
     }
-    $issuesBlock = if ($shown.Count -gt 0) {
+    $issuesBlock = if (-not $ran) {
+        # A check that did not run found nothing: say so, never "no problem reported".
+        "<div class='summary' style='border:1px solid #fecaca;border-radius:8px;background:#fef2f2;padding:16px;font-size:14px;line-height:1.55;color:#7f1d1d;margin-bottom:22px;'>The check did not run: $(Format-HtmlValue $RunMessage) No result is available for this run; the free/busy configuration is not measured.</div>"
+    }
+    elseif ($shown.Count -gt 0) {
         $note = if ($issues.Count -gt $shown.Count) { "<p style='font-size:12px;color:#64748b;'>Showing the first $($shown.Count) of $($issues.Count) results; all are in Exchange_Hybrid_FreeBusy_Findings.csv.</p>" } else { '' }
-        "<h2 style='font-size:17px;'>Errors, not authorized checks and warnings</h2><table cellpadding='6' cellspacing='0' style='width:100%;border-collapse:collapse;font-size:12px;border:1px solid #e5e7eb;'><tr style='background:#f8fafc;'><th align='left'>Status</th><th align='left'>Side</th><th align='left'>Auth</th><th align='left'>Check</th><th align='left'>Item</th><th align='left'>Value</th></tr>$($issueRows -join "`r`n")</table>$note"
-    } else { "<p>No error, warning or not authorized check was reported.</p>" }
-    $message = if ([string]::IsNullOrWhiteSpace($RunMessage)) { '' } else { "<p>$(Format-HtmlValue $RunMessage)</p>" }
+        "<h2 style='font-size:17px;margin:0 0 10px 0;color:#0f172a;'>Errors, not authorized checks and warnings</h2><table cellpadding='6' cellspacing='0' style='width:100%;border-collapse:collapse;font-size:12px;border:1px solid #e5e7eb;'><tr style='background:#f8fafc;'><th align='left'>Status</th><th align='left'>Side</th><th align='left'>Auth</th><th align='left'>Check</th><th align='left'>Item</th><th align='left'>Value</th></tr>$($issueRows -join "`r`n")</table>$note"
+    }
+    elseif ($measured.Count -lt @($Summary).Count) {
+        "<p>No error, warning or not authorized check was reported on the $($measured.Count) side(s) that were measured. The other sides were not run or not connected: their state is unknown, not healthy.</p>"
+    }
+    else { "<p>No error, warning or not authorized check was reported.</p>" }
+    $message = if ($ran -and -not [string]::IsNullOrWhiteSpace($RunMessage)) { "<div class='summary' style='border:1px solid #e5e7eb;border-radius:8px;background:#ffffff;padding:16px;font-size:14px;line-height:1.55;color:#334155;margin-bottom:22px;'>$(Format-HtmlValue $RunMessage)</div>" } else { '' }
+    $card = {
+        param($Label, $Value, $Detail, $Border, $Background, $Accent)
+        "<td style='width:20%;vertical-align:top;border:1px solid $Border;border-radius:8px;padding:14px;background:$Background;color:#334155;'><div style='font-size:11px;text-transform:uppercase;color:#64748b;font-weight:800;'>$Label</div><div style='font-size:28px;font-weight:800;margin-top:4px;color:$Accent;'>$(Format-HtmlValue $Value)</div><div style='font-size:12px;color:#64748b;margin-top:2px;'>$Detail</div></td>"
+    }
+    $cards = @(
+        (& $card 'Run status' $RunStatus 'Free/Busy Checker run' '#dbe3ef' '#f8fafc' $statusColor),
+        (& $card 'Sides tested' $sidesText 'side and authentication checks measured' '#bfdbfe' '#eff6ff' '#1d4ed8'),
+        (& $card 'Errors' (& $countText $errorCount) 'configuration errors' '#fecaca' '#fef2f2' '#b91c1c'),
+        (& $card 'Warnings' (& $countText $warningCount) 'items to review' '#fed7aa' '#fff7ed' '#9a3412'),
+        (& $card 'Not authorized' (& $countText $notAuthorizedCount) 'Exchange Online checks the app cannot run' '#e9d5ff' '#faf5ff' '#7e22ce')
+    )
 
     return @"
 <!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>Exchange Hybrid Free/Busy</title></head>
-<body style="margin:0;padding:24px;background:#f6f8fb;font-family:Segoe UI,Arial,sans-serif;color:#0f172a;">
-<div style="max-width:1100px;margin:0 auto;background:#ffffff;border:1px solid #dbe3ef;border-radius:10px;padding:24px;">
-<div style="font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:#0f766e;font-weight:700;">Smart365 Exchange Hybrid</div>
-<h1 style="font-size:24px;margin:6px 0 12px 0;">Exchange hybrid free/busy configuration</h1>
-<p>Microsoft CSS-Exchange Free/Busy Checker $(Format-HtmlValue $FreeBusyCheckerVersion) - run status <strong style="color:$statusColor;">$(Format-HtmlValue $RunStatus)</strong>. RunId $(Format-HtmlValue $RunId).</p>
-$message
-<p style="font-size:12px;color:#64748b;">Sides that were not run or not connected show N/A: their state is not measured. Values that can reveal names, addresses, URLs, certificates or identifiers are masked. Not authorized checks are Exchange Online cmdlets the tenant app cannot run; they are not configuration errors.</p>
-<table cellpadding="6" cellspacing="0" style="width:100%;border-collapse:collapse;font-size:12px;border:1px solid #e5e7eb;">
-<tr style="background:#f8fafc;"><th align="left">Side</th><th align="left">Auth</th><th align="left">Status</th><th align="right">Errors</th><th align="right">Warnings</th><th align="right">Not authorized</th><th align="left">Missing roles</th></tr>
-$($summaryRows -join "`r`n")
-</table>
-$issuesBlock
-</div></body></html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Exchange Hybrid Free/Busy</title>
+</head>
+<body style="margin:0;padding:0;background:#f6f8fb;color:#0f172a;font-family:Segoe UI,Arial,sans-serif;">
+<div class="shell" style="max-width:1180px;margin:0 auto;padding:24px;font-family:Segoe UI,Arial,sans-serif;color:#0f172a;">
+  <div class="panel" style="background:#ffffff;border:1px solid #dbe3ef;border-radius:10px;overflow:hidden;">
+    <div class="hero" style="background:#0f766e;color:#ffffff;padding:24px 28px;">
+      <div class="eyebrow" style="font-size:12px;text-transform:uppercase;letter-spacing:.08em;opacity:.9;font-weight:700;color:#ffffff;">Smart365 Exchange Hybrid</div>
+      <h1 style="font-size:26px;line-height:1.25;margin:6px 0 0 0;color:#ffffff;">Exchange Hybrid Free/Busy Configuration</h1>
+      <div class="subtitle" style="margin-top:10px;font-size:13px;opacity:.95;color:#ffffff;">Microsoft CSS-Exchange Free/Busy Checker $(Format-HtmlValue $FreeBusyCheckerVersion) - RunId $(Format-HtmlValue $RunId)</div>
+      <div class="subtitle" style="margin-top:6px;font-size:13px;color:#ffffff;">Run status: <strong>$(Format-HtmlValue $RunStatus)</strong> - sides tested $(Format-HtmlValue $sidesText)</div>
+    </div>
+
+    <div class="content" style="padding:24px 28px;">
+      <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:separate;border-spacing:10px;border:0;margin:0 0 22px 0;font-size:12px;">
+        <tr>
+          $($cards -join "`r`n          ")
+        </tr>
+      </table>
+      $message
+      $issuesBlock
+      <h2 style="font-size:17px;margin:0 0 10px 0;color:#0f172a;">Sides and authentication</h2>
+      <table cellpadding="6" cellspacing="0" style="width:100%;border-collapse:collapse;font-size:12px;border:1px solid #e5e7eb;">
+        <tr style="background:#f8fafc;"><th align="left">Side</th><th align="left">Auth</th><th align="left">Status</th><th align="right">Errors</th><th align="right">Warnings</th><th align="right">Not authorized</th><th align="left">Missing roles</th></tr>
+        $($summaryRows -join "`r`n")
+      </table>
+      <div class="footer" style="margin-top:18px;padding-top:14px;border-top:1px solid #e5e7eb;font-size:12px;color:#64748b;line-height:1.5;">Sides that were not run or not connected show N/A: their state is not measured. Values that can reveal names, addresses, URLs, certificates or identifiers are masked. Not authorized checks are Exchange Online cmdlets the tenant app cannot run; they are not configuration errors.</div>
+    </div>
+  </div>
+</div>
+</body>
+</html>
 "@
 }
 
