@@ -1356,7 +1356,7 @@ function Send-SmartM365TeamsNotification {
         }
 
         $json = $payload | ConvertTo-Json -Depth 10
-        Invoke-RestMethod -Method POST -Uri $WebhookUrl -Body $json -ContentType 'application/json' -ErrorAction Stop | Out-Null
+        Invoke-RestMethod -Method POST -Uri $WebhookUrl -Body $json -ContentType 'application/json' -TimeoutSec 180 -ErrorAction Stop | Out-Null
         return $true
     }
     catch {
@@ -3227,7 +3227,7 @@ function Invoke-SmartM365Preflight {
                 try {
                     if ($useAccessToken) {
                         $headers = @{ Authorization = "Bearer $GraphAccessToken" }
-                        $null = Invoke-RestMethod -Method GET -Uri $uri -Headers $headers -ErrorAction Stop
+                        $null = Invoke-RestMethod -Method GET -Uri $uri -Headers $headers -TimeoutSec 180 -ErrorAction Stop
                     }
                     else {
                         $null = Invoke-MgGraphRequest -Method GET -Uri $uri -ErrorAction Stop
@@ -4135,6 +4135,8 @@ function Invoke-SmartM365SharePointLargeFileUpload {
                         Headers     = $headers
                         ContentType = 'application/octet-stream'
                         Body        = $chunk
+                        # A silent endpoint fails the chunk instead of holding the run.
+                        TimeoutSec  = 300
                         ErrorAction = 'Stop'
                     }
                     $invokeWebRequestCommand = Get-Command Invoke-WebRequest -ErrorAction Stop

@@ -2896,6 +2896,67 @@ function New-SmartM365GraphClientAssertion {
     return "$unsignedToken.$(ConvertTo-SmartM365Base64Url -Bytes $signature)"
 }
 
+# Network limits (seconds, or minutes for the file limit). A global variable or a key of the loaded
+# global configuration overrides the default; values outside the range keep the default.
+function Get-SmartM365NetworkSetting {
+    [CmdletBinding()]
+    [OutputType([int])]
+    param(
+        [Parameter(Mandatory)][ValidateSet('GraphTokenTimeoutSeconds','GraphRequestTimeoutSeconds','SharePointUploadTransferTimeoutSeconds','SharePointUploadChunkTimeoutSeconds','SharePointUploadFileTimeoutMinutes','GraphTokenMaxAttempts')][string]$Name
+    )
+    $defaults = @{
+        GraphTokenTimeoutSeconds = @(60, 5, 600)
+        GraphRequestTimeoutSeconds = @(180, 10, 3600)
+        SharePointUploadTransferTimeoutSeconds = @(900, 30, 7200)
+        SharePointUploadChunkTimeoutSeconds = @(300, 30, 3600)
+        SharePointUploadFileTimeoutMinutes = @(60, 1, 1440)
+        GraphTokenMaxAttempts = @(3, 1, 10)
+    }
+    $default, $minimum, $maximum = $defaults[$Name]
+    $value = $null
+    # Ignore keeps an absent setting out of $Error, which callers inspect after expected outcomes.
+    $variable = Get-Variable -Name $Name -Scope Global -ErrorAction Ignore
+    if ($null -ne $variable -and -not [string]::IsNullOrWhiteSpace([string]$variable.Value)) { $value = $variable.Value }
+    elseif ($null -ne ($loadedConfig = Get-Variable -Name SmartM365GlobalConfig -Scope Global -ValueOnly -ErrorAction Ignore)) {
+        # Only the configuration already loaded by the tenant context: no file discovery per request.
+        $property = $loadedConfig.PSObject.Properties[$Name]
+        if ($null -ne $property -and -not [string]::IsNullOrWhiteSpace([string]$property.Value)) { $value = $property.Value }
+    }
+    $parsed = 0
+    if ($null -eq $value -or -not [int]::TryParse([string]$value, [ref]$parsed) -or $parsed -lt $minimum -or $parsed -gt $maximum) { return [int]$default }
+    return $parsed
+}
+
+# Returns the timeout of one network call, shortened to the time left before the active per-file
+# deadline. Past the deadline, the call is refused with a clear, non-transient error.
+function Get-SmartM365NetworkCallTimeout {
+    [CmdletBinding()]
+    [OutputType([int])]
+    param(
+        [Parameter(Mandatory)][int]$TimeoutSeconds,
+        [string]$Operation = 'Network call'
+    )
+    $deadline = $script:SmartM365NetworkDeadline
+    if ($null -eq $deadline) { return $TimeoutSeconds }
+    $remaining = [int][math]::Floor(($deadline.ExpiresAtUtc - [datetime]::UtcNow).TotalSeconds)
+    if ($remaining -lt 1) {
+        $failure = [System.OperationCanceledException]::new(("{0} stopped: {1} exceeded its {2}-minute limit." -f $Operation, $deadline.Label, $deadline.Minutes))
+        $failure.Data['SmartM365DeadlineExceeded'] = $true
+        throw $failure
+    }
+    return [math]::Min($TimeoutSeconds, $remaining)
+}
+
+function Wait-SmartM365NetworkRetry {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][int]$Seconds,
+        [string]$Operation = 'Network call'
+    )
+    Start-Sleep -Seconds (Get-SmartM365NetworkCallTimeout -TimeoutSeconds ([math]::Max(1, $Seconds)) -Operation $Operation)
+    [void](Get-SmartM365NetworkCallTimeout -TimeoutSeconds 1 -Operation $Operation)
+}
+
 function Get-SmartM365GraphAccessToken {
     [CmdletBinding()]
     param(
@@ -2932,7 +2993,29 @@ function Get-SmartM365GraphAccessToken {
     }
 
     WriteLog -Message ("Acquiring Microsoft Graph REST token for {0}." -f $Purpose) -Level 'INFO'
-    $response = Invoke-RestMethod -Method POST -Uri $tokenUri -Body $body -ContentType 'application/x-www-form-urlencoded' -ErrorAction Stop
+    $tokenTimeoutSeconds = Get-SmartM365NetworkSetting -Name 'GraphTokenTimeoutSeconds'
+    $maxAttempts = Get-SmartM365NetworkSetting -Name 'GraphTokenMaxAttempts'
+    $response = $null
+    for ($attempt = 1; $null -eq $response; $attempt++) {
+        try {
+            $timeoutSeconds = Get-SmartM365NetworkCallTimeout -TimeoutSeconds $tokenTimeoutSeconds -Operation ("Microsoft Graph token request for {0}" -f $Purpose)
+            $response = Invoke-RestMethod -Method POST -Uri $tokenUri -Body $body -ContentType 'application/x-www-form-urlencoded' -TimeoutSec $timeoutSeconds -ErrorAction Stop
+        }
+        catch {
+            $statusCode = $null
+            try { if ($_.Exception.Response) { $statusCode = [int]$_.Exception.Response.StatusCode } } catch { $statusCode = $null }
+            $deadlineExceeded = [bool]$_.Exception.Data['SmartM365DeadlineExceeded']
+            if ($deadlineExceeded -or -not (Test-SmartM365GraphTransientError -ErrorRecord $_ -StatusCode $statusCode) -or $attempt -ge $maxAttempts) {
+                if ($deadlineExceeded) { throw }
+                $failure = [IO.IOException]::new(("{0}: Microsoft Graph token request failed after {1} attempt(s) (limit {2}s per attempt): {3}" -f $Purpose, $attempt, $tokenTimeoutSeconds, $_.Exception.Message), $_.Exception)
+                if ($statusCode) { $failure.Data['StatusCode'] = $statusCode }
+                throw $failure
+            }
+            $delay = Get-SmartM365GraphRetryAfterSeconds -ErrorRecord $_ -DefaultSeconds (5 * $attempt) -MaximumSeconds 60
+            WriteLog -Message ("Microsoft Graph token request for {0} transient failure: {1}; attempt {2}/{3}; retrying in {4}s." -f $Purpose, $_.Exception.Message, $attempt, $maxAttempts, $delay) -Level 'WARNING'
+            Wait-SmartM365NetworkRetry -Seconds $delay -Operation ("Microsoft Graph token request for {0}" -f $Purpose)
+        }
+    }
     if (-not $response.access_token) { throw ("{0}: token endpoint did not return an access token." -f $Purpose) }
 
     $expiresIn = 3599
@@ -2958,7 +3041,8 @@ function Invoke-SmartM365GraphFileDownloadWithRetry {
     for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
         try {
             $token = Get-SmartM365GraphAccessToken -Purpose $Operation
-            $params = @{ Method = 'GET'; Uri = $Uri; Headers = @{ Authorization = "Bearer $token" }; OutFile = $OutputFilePath; ErrorAction = 'Stop' }
+            $timeoutSeconds = Get-SmartM365NetworkCallTimeout -TimeoutSeconds (Get-SmartM365NetworkSetting -Name 'SharePointUploadTransferTimeoutSeconds') -Operation $Operation
+            $params = @{ Method = 'GET'; Uri = $Uri; Headers = @{ Authorization = "Bearer $token" }; OutFile = $OutputFilePath; TimeoutSec = $timeoutSeconds; ErrorAction = 'Stop' }
             $invokeWebRequestCommand = Get-Command Invoke-WebRequest -ErrorAction Stop
             if ($invokeWebRequestCommand.Parameters.ContainsKey('UseBasicParsing')) { $params.UseBasicParsing = $true }
             Invoke-WebRequest @params | Out-Null
@@ -2972,7 +3056,7 @@ function Invoke-SmartM365GraphFileDownloadWithRetry {
             $delay = Get-SmartM365GraphRetryAfterSeconds -ErrorRecord $_ -DefaultSeconds ($DefaultRetrySeconds * $attempt) -MaximumSeconds $MaximumRetrySeconds
             $statusText = if ($statusCode) { $statusCode } else { 'unknown' }
             WriteLog -Message ("{0} transient failure. Status={1}; attempt {2}/{3}; retrying in {4}s." -f $Operation, $statusText, $attempt, $MaxAttempts, $delay) -Level 'WARNING'
-            Start-Sleep -Seconds $delay
+            Wait-SmartM365NetworkRetry -Seconds $delay -Operation $Operation
         }
     }
 }
@@ -4159,6 +4243,7 @@ function Send-SmartM365TeamsNotification {
             -Uri $WebhookUrl `
             -ContentType 'application/json; charset=utf-8' `
             -Body ($payload | ConvertTo-Json -Depth 8) `
+            -TimeoutSec (Get-SmartM365NetworkSetting -Name 'GraphRequestTimeoutSeconds') `
             -ErrorAction Stop | Out-Null
 
         WriteLog -Message ("Teams notification sent: {0}" -f $Title) -Level 'SUCCESS'
@@ -4460,7 +4545,8 @@ function Test-SmartM365GraphTransientError {
         [AllowNull()][Nullable[int]]$StatusCode
     )
 
-    if ($StatusCode -in @(429, 500, 502, 503, 504)) { return $true }
+    if ($ErrorRecord.Exception.Data['SmartM365DeadlineExceeded']) { return $false }
+    if ($StatusCode -in @(408, 429, 500, 502, 503, 504)) { return $true }
 
     $details = [string]$ErrorRecord.Exception.Message
     try {
@@ -4485,7 +4571,7 @@ function Test-SmartM365GraphTransientError {
         return $true
     }
 
-    return ($details -match '(?i)TooManyRequests|throttl|timeout|temporarily unavailable')
+    return ($details -match '(?i)TooManyRequests|throttl|timeout|timed out|temporarily unavailable|An error occurred while sending the request|connection (?:was )?(?:reset|closed|aborted|forcibly closed)|SSL connection could not be established')
 }
 function Invoke-SmartM365GraphRestWithRetry {
     [CmdletBinding()]
@@ -4499,9 +4585,11 @@ function Invoke-SmartM365GraphRestWithRetry {
         [int]$MaximumRetrySeconds = 300,
         [string]$Operation = 'Graph request',
         [hashtable]$AdditionalHeaders = @{},
-        [switch]$AllowMissingJsonMetadata
+        [switch]$AllowMissingJsonMetadata,
+        [ValidateRange(0, 86400)][int]$TimeoutSeconds = 0
     )
 
+    if ($TimeoutSeconds -le 0) { $TimeoutSeconds = Get-SmartM365NetworkSetting -Name 'GraphRequestTimeoutSeconds' }
     if ($AllowMissingJsonMetadata -and ($Method -ne 'GET' -or $Uri -notmatch '^https://graph\.microsoft\.com/v1\.0/drives/[^/]+/root:/[^?]+\.json(?:\.txt)?$')) {
         throw 'Optional absence is limited to exact SharePoint JSON metadata lookups.'
     }
@@ -4512,6 +4600,7 @@ function Invoke-SmartM365GraphRestWithRetry {
                 Method      = $Method
                 Uri         = $Uri
                 Headers     = @{ Authorization = "Bearer $token" }
+                TimeoutSec  = (Get-SmartM365NetworkCallTimeout -TimeoutSeconds $TimeoutSeconds -Operation $Operation)
                 ErrorAction = 'Stop'
             }
             if (-not $params.ContainsKey('Headers')) { $params.Headers = @{} }
@@ -4574,7 +4663,7 @@ function Invoke-SmartM365GraphRestWithRetry {
             $delay = Get-SmartM365GraphRetryAfterSeconds -ErrorRecord $_ -DefaultSeconds ($DefaultRetrySeconds * $attempt) -MaximumSeconds $MaximumRetrySeconds
             $statusText = if ($statusCode) { $statusCode } else { 'unknown' }
             WriteLog -Message ("{0} transient failure. Status={1}; attempt {2}/{3}; retrying in {4}s." -f $Operation, $statusText, $attempt, $MaxAttempts, $delay) -Level "WARNING"
-            Start-Sleep -Seconds $delay
+            Wait-SmartM365NetworkRetry -Seconds $delay -Operation $Operation
         }
     }
 }
@@ -4606,6 +4695,7 @@ function Invoke-SmartM365SharePointLargeFileUpload {
     }
 
     $uploadUrl = [string]$session.uploadUrl
+    $chunkTimeoutSeconds = Get-SmartM365NetworkSetting -Name 'SharePointUploadChunkTimeoutSeconds'
     $lastUploadResponse = $null
     $stream = [System.IO.File]::OpenRead($LocalFilePath)
     try {
@@ -4635,6 +4725,7 @@ function Invoke-SmartM365SharePointLargeFileUpload {
                         Headers     = $headers
                         ContentType = 'application/octet-stream'
                         Body        = $chunk
+                        TimeoutSec  = (Get-SmartM365NetworkCallTimeout -TimeoutSeconds $chunkTimeoutSeconds -Operation 'SharePoint chunk upload')
                         ErrorAction = 'Stop'
                     }
                     $invokeWebRequestCommand = Get-Command Invoke-WebRequest -ErrorAction Stop
@@ -4695,7 +4786,7 @@ function Invoke-SmartM365SharePointLargeFileUpload {
                     $delay = Get-SmartM365GraphRetryAfterSeconds -ErrorRecord $_ -DefaultSeconds (10 * $attempt) -MaximumSeconds 300
                     $statusText = if ($statusCode) { $statusCode } else { 'unknown' }
                     WriteLog -Message ("SharePoint chunk upload transient failure. Status={0}; attempt {1}/4; retrying in {2}s." -f $statusText, $attempt, $delay) -Level "WARNING"
-                    Start-Sleep -Seconds $delay
+                    Wait-SmartM365NetworkRetry -Seconds $delay -Operation 'SharePoint chunk upload'
                 }
                 finally {
                     if ($null -ne $response -and $response -is [System.IDisposable]) { $response.Dispose() }
@@ -4897,7 +4988,16 @@ function Invoke-SmartM365SharePointCsvUpload {
         WriteLog -Message "SharePoint upload skipped: SharePointSiteHostname, SharePointSitePath, SharePointLibraryDisplayName or SharePointTargetFolderPath is missing." -Level "WARNING"
         return
     }
+    # One limit for the whole file, so a silent endpoint ends with a warning instead of holding the run.
+    $previousDeadline = $script:SmartM365NetworkDeadline
+    $fileLimitMinutes = Get-SmartM365NetworkSetting -Name 'SharePointUploadFileTimeoutMinutes'
+    $script:SmartM365NetworkDeadline = [pscustomobject]@{
+        ExpiresAtUtc = [datetime]::UtcNow.AddMinutes($fileLimitMinutes)
+        Minutes      = $fileLimitMinutes
+        Label        = ("SharePoint upload of {0}" -f [IO.Path]::GetFileName($LocalFilePath))
+    }
     if (-not (Connect-SmartM365GraphForSharePointUpload -AppId $AppId -TenantId $TenantId -Thumbprint $Thumbprint)) {
+        $script:SmartM365NetworkDeadline = $previousDeadline
         return
     }
 
@@ -4968,7 +5068,7 @@ function Invoke-SmartM365SharePointCsvUpload {
         else {
             $bytes = [System.IO.File]::ReadAllBytes($fileInfo.FullName)
             $uri = "https://graph.microsoft.com/v1.0/drives/{0}/root:/{1}:/content" -f $driveId, $targetPath
-            $uploadedItem = Invoke-SmartM365GraphRestWithRetry -Method PUT -Uri $uri -Body $bytes -ContentType 'application/octet-stream' -Operation 'Upload SharePoint file'
+            $uploadedItem = Invoke-SmartM365GraphRestWithRetry -Method PUT -Uri $uri -Body $bytes -ContentType 'application/octet-stream' -Operation 'Upload SharePoint file' -TimeoutSeconds (Get-SmartM365NetworkSetting -Name 'SharePointUploadTransferTimeoutSeconds')
         }
 
         if (-not $uploadedItem -or (-not $uploadedItem.webUrl -and -not $uploadedItem.id)) {
@@ -4987,6 +5087,9 @@ function Invoke-SmartM365SharePointCsvUpload {
     }
     catch {
         WriteLog -Message ("SharePoint upload failed but script continues: {0}" -f $_.Exception.Message) -Level "WARNING"
+    }
+    finally {
+        $script:SmartM365NetworkDeadline = $previousDeadline
     }
 }
 function Invoke-SmartM365GraphDeleteQuietly {
@@ -5008,6 +5111,7 @@ function Invoke-SmartM365GraphDeleteQuietly {
                 -Method DELETE `
                 -Uri $Uri `
                 -Headers @{ Authorization = "Bearer $token" } `
+                -TimeoutSec (Get-SmartM365NetworkCallTimeout -TimeoutSeconds (Get-SmartM365NetworkSetting -Name 'GraphRequestTimeoutSeconds') -Operation $Operation) `
                 -SkipHttpErrorCheck `
                 -StatusCodeVariable statusCodeValue `
                 -ResponseHeadersVariable responseHeadersValue `
@@ -5044,7 +5148,7 @@ function Invoke-SmartM365GraphDeleteQuietly {
                 }
             } catch {}
             WriteLog -Message ("{0} transient failure. Status={1}; attempt {2}/{3}; retrying in {4}s." -f $Operation, $statusCode, $attempt, $MaxAttempts, $delay) -Level 'WARNING'
-            Start-Sleep -Seconds $delay
+            Wait-SmartM365NetworkRetry -Seconds $delay -Operation $Operation
         }
         catch {
             $statusCode = $null
@@ -5058,7 +5162,7 @@ function Invoke-SmartM365GraphDeleteQuietly {
             $delay = Get-SmartM365GraphRetryAfterSeconds -ErrorRecord $_ -DefaultSeconds ($DefaultRetrySeconds * $attempt) -MaximumSeconds $MaximumRetrySeconds
             $statusText = if ($statusCode) { $statusCode } else { 'unknown' }
             WriteLog -Message ("{0} transient failure. Status={1}; attempt {2}/{3}; retrying in {4}s." -f $Operation, $statusText, $attempt, $MaxAttempts, $delay) -Level 'WARNING'
-            Start-Sleep -Seconds $delay
+            Wait-SmartM365NetworkRetry -Seconds $delay -Operation $Operation
         }
     }
 
@@ -6162,7 +6266,7 @@ function Invoke-SmartM365Preflight {
                 try {
                     if ($useAccessToken) {
                         $headers = @{ Authorization = "Bearer $GraphAccessToken" }
-                        $null = Invoke-RestMethod -Method GET -Uri $uri -Headers $headers -ErrorAction Stop
+                        $null = Invoke-RestMethod -Method GET -Uri $uri -Headers $headers -TimeoutSec (Get-SmartM365NetworkSetting -Name 'GraphRequestTimeoutSeconds') -ErrorAction Stop
                     }
                     else {
                         $null = Invoke-MgGraphRequest -Method GET -Uri $uri -ErrorAction Stop

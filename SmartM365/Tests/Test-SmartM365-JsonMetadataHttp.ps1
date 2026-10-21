@@ -1,4 +1,9 @@
-# Offline transport contract test: AST-only loading, no tenant startup or network.
+<#
+.SYNOPSIS
+ Offline transport contract test: AST-only loading, no tenant startup or network.
+.VERSION
+ 1.0.1
+#>
 [CmdletBinding()]
 param()
 $ErrorActionPreference='Stop'
@@ -6,7 +11,7 @@ $source=Join-Path $PSScriptRoot '../Modules/SmartM365.Core/SmartM365.Core.psm1'
 $tokens=$null;$parseErrors=$null
 $ast=[Management.Automation.Language.Parser]::ParseFile($source,[ref]$tokens,[ref]$parseErrors)
 if($parseErrors.Count){throw 'Core parse failed.'}
-foreach($name in 'Invoke-SmartM365GraphRestWithRetry','Test-SmartM365GraphTransientError'){
+foreach($name in 'Invoke-SmartM365GraphRestWithRetry','Test-SmartM365GraphTransientError','Get-SmartM365NetworkSetting','Get-SmartM365NetworkCallTimeout','Wait-SmartM365NetworkRetry'){
     $fn=$ast.Find({param($n)$n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name},$false)
     . ([scriptblock]::Create($fn.Extent.Text))
 }
@@ -21,8 +26,9 @@ function Get-SmartM365GraphRetryAfterSeconds {
     7
 }
 function Invoke-WebRequest {
-    param($Method,$Uri,$Headers,$ErrorAction,$ContentType,[switch]$SkipHttpErrorCheck)
+    param($Method,$Uri,$Headers,$ErrorAction,$ContentType,[switch]$SkipHttpErrorCheck,$TimeoutSec)
     Check $SkipHttpErrorCheck 'Expected metadata HTTP response still throws automatically.'
+    Check ($TimeoutSec -eq 180) 'Metadata lookup has no time limit.'
     $script:calls++
     $code=$script:codes.Dequeue()
     $response=[Net.Http.HttpResponseMessage]::new([Net.HttpStatusCode]$code)
@@ -32,7 +38,8 @@ function Invoke-WebRequest {
     [pscustomobject]@{StatusCode=$code;Content=$body;BaseResponse=$response}
 }
 function Invoke-RestMethod {
-    param($Method,$Uri,$Headers,$ErrorAction,$ContentType)
+    param($Method,$Uri,$Headers,$ErrorAction,$ContentType,$TimeoutSec)
+    $null=$TimeoutSec
     $script:normalCalls++
     throw 'Synthetic required request failure'
 }

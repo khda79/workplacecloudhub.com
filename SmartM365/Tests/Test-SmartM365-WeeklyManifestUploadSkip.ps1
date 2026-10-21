@@ -3,7 +3,7 @@
 Verifies that unchanged weekly manifests are not uploaded again.
 
 .VERSION
-1.1
+1.2
 #>
 [CmdletBinding()]
 param()
@@ -59,6 +59,9 @@ try {
         if ($errors.Count) { throw ($errors | Out-String) }
         $definition=$ast.Find({param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Invoke-SmartM365SharePointCsvUpload'},$true)
         . ([scriptblock]::Create($definition.Extent.Text))
+        # The Core upload reads its per-file limit from the shared network settings.
+        $setting=$ast.Find({param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Get-SmartM365NetworkSetting'},$true)
+        if ($setting) { . ([scriptblock]::Create($setting.Extent.Text)) }
         $script:SmartM365SharePointDriveIdCache=@{'host|/site|Docs'='drive'}
         $parameters=@{Enabled=$true;SiteHostname='host';SitePath='/site';LibraryDisplayName='Docs';TargetFolderPath='DATA-ALL'}
 
