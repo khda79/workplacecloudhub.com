@@ -87,8 +87,8 @@ Run statuses in `Exchange_OnPrem_HealthChecker_Summary.csv`:
 
 Messages never contain a domain name, an address or a secret.
 
-An interrupted run (Ctrl+C) is never reported as a success: the banner shows `FAILED` with an
-error line, no receipt or success status is written, and the exit code is 130.
+An interrupted run (Ctrl+C) is never reported as a success: the banner shows `CANCELLED` with a
+warning line, no receipt or success status is written, and the exit code is 130.
 
 ### Scheduled task installation
 
