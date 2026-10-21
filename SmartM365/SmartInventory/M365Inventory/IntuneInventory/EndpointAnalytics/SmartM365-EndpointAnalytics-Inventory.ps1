@@ -67,7 +67,7 @@ pwsh -File .\SmartM365-EndpointAnalytics-Inventory.ps1 -Tenant test -Reports All
 pwsh -File .\SmartM365-EndpointAnalytics-Inventory.ps1 -Tenant test -Reports All -IncludeBatteryHealth -ValidateOnly -Connect
 
 .VERSION
-1.1.2
+1.1.3
 .REQUIREMENTS
 PowerShell 7+.
 Modules: SmartM365.Core 1.0.69+; Microsoft.Graph.Authentication.
@@ -119,7 +119,7 @@ $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -Requi
 try {
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-$script:ScriptVersion = '1.1.2'
+$script:ScriptVersion = '1.1.3'
 $script:ScriptName = [System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
 $script:RunId = [guid]::NewGuid().Guid
 $script:CollectedAtUtc = [datetime]::UtcNow.ToString('o')
@@ -374,7 +374,7 @@ function Get-EAStatusCode {
     try { if ($ErrorRecord.Exception.Response.StatusCode) { return [int]$ErrorRecord.Exception.Response.StatusCode } }
     catch { Microsoft.PowerShell.Utility\Write-Debug "No HTTP response status was exposed: $($_.Exception.Message)" }
     # Graph SDK status or "HTTP 503"/"Status: 500" text; a number elsewhere (a URL) is not a status.
-    $coreStatus = Get-SmartM365GraphErrorStatusCode -ErrorRecord $ErrorRecord
+    $coreStatus = Get-CoreSmartM365GraphErrorStatusCode -ErrorRecord $ErrorRecord
     if ($coreStatus) { return [int]$coreStatus }
     if ([string]$ErrorRecord -match '(?i)TooManyRequests|throttl') { return 429 }
     return 0
@@ -413,7 +413,7 @@ function Invoke-EAGraphRequest {
         catch {
             $statusCode = Get-EAStatusCode $_
             # 401/403 never retried; 408/409/429/5xx, timeouts and connection resets retried.
-            $retryable = $statusCode -notin @(401,403) -and ($statusCode -in @(408,409,429,500,502,503,504) -or ($statusCode -eq 0 -and -not $_.Exception.Data['EndpointAnalyticsGrain'] -and (Test-SmartM365GraphTransientError -ErrorRecord $_ -StatusCode $null)))
+            $retryable = $statusCode -notin @(401,403) -and ($statusCode -in @(408,409,429,500,502,503,504) -or ($statusCode -eq 0 -and -not $_.Exception.Data['EndpointAnalyticsGrain'] -and (Test-CoreSmartM365GraphTransientError -ErrorRecord $_ -StatusCode $null)))
             if (-not $retryable -or $attempt -ge $RetryCount) { throw }
             $delay = Get-EARetryAfterSeconds $_ $attempt
             Write-EALog ("Graph transient failure HTTP {0}; retry {1}/{2} in {3}s: {4}" -f $statusCode,$attempt,$RetryCount,$delay,$Uri) WARNING
@@ -472,7 +472,7 @@ function Wait-EAExportJob {
 # Pre-signed storage URL: no Authorization header, real error logged, transient and not-yet-ready errors retried.
 function Invoke-EAWebDownload {
     param([Parameter(Mandatory)][string]$Uri, [Parameter(Mandatory)][string]$OutFile)
-    Invoke-SmartM365ExportFileDownload -Url $Uri -OutFile $OutFile -Operation 'Endpoint Analytics export download' -MaxAttempts ([Math]::Max(1,[Math]::Min(10,$MaxRetryCount))) | Out-Null
+    Invoke-CoreSmartM365ExportFileDownload -Url $Uri -OutFile $OutFile -Operation 'Endpoint Analytics export download' -MaxAttempts ([Math]::Max(1,[Math]::Min(10,$MaxRetryCount))) | Out-Null
 }
 
 function Import-EAExportedCsv {

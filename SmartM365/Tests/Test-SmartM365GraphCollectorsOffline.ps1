@@ -2,7 +2,7 @@
 .SYNOPSIS
 Synthetic regression tests for the complete SmartInventory Microsoft Graph collector audit.
 .VERSION
-1.0.26
+1.0.27
 #>
 [CmdletBinding()]
 param(
@@ -14,6 +14,8 @@ param(
 $ErrorActionPreference = 'Stop'
 # Collector functions call exported Core helpers (Graph error classification, export download), as in production.
 Import-Module (Join-Path (Split-Path $PSScriptRoot -Parent) 'Modules/SmartM365.Core/SmartM365.Core.psd1') -MinimumVersion '1.0.99' -Force -Global -WarningAction SilentlyContinue
+# Endpoint Analytics and Autopatch import Core with -Prefix Core: their functions call the prefixed names.
+Import-Module (Join-Path (Split-Path $PSScriptRoot -Parent) 'Modules/SmartM365.Core/SmartM365.Core.psd1') -MinimumVersion '1.0.99' -Prefix Core -Global -WarningAction SilentlyContinue
 if (-not $SourceRoot) { $SourceRoot = Split-Path $PSScriptRoot -Parent }
 $repoRoot = Split-Path $SourceRoot -Parent
 $results = New-Object 'System.Collections.Generic.List[object]'

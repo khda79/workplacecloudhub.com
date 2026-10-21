@@ -3,9 +3,10 @@
 .SYNOPSIS
 Offline guard: every SmartM365.Core function that a script or module outside Core calls is exported by
 the Core module, so the call resolves in production (tests that dot-source single Core functions do not
-prove that). A script that defines the function itself is not affected.
+prove that). A script that defines the function itself is not affected. A script that imports Core with
+-Prefix must call its functions by the prefixed name.
 .VERSION
-1.0.0
+1.0.1
 .NOTES
 Parses repository scripts only; imports the Core module without running any collector. No tenant,
 network or synchronized data access.
@@ -18,8 +19,15 @@ $root = Split-Path $PSScriptRoot -Parent
 $coreFolder = Join-Path $root 'Modules/SmartM365.Core'
 # Exports of every module of the Core folder (JSON transport functions come from their own module).
 $exported = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
-$modules = foreach ($manifest in Get-ChildItem -LiteralPath $coreFolder -File -Filter '*.psd1') { Import-Module $manifest.FullName -Force -PassThru }
+$modules = foreach ($manifest in Get-ChildItem -LiteralPath $coreFolder -File -Filter '*.psd1') { Import-Module $manifest.FullName -MinimumVersion '1.0.0' -Force -PassThru }
 foreach ($module in $modules) { foreach ($name in $module.ExportedFunctions.Keys) { [void]$exported.Add($name) } }
+$coreExports = [Collections.Generic.HashSet[string]]::new([string[]]@(($modules | Where-Object Name -eq 'SmartM365.Core').ExportedFunctions.Keys), [StringComparer]::OrdinalIgnoreCase)
+# Helper files that the scripts dot-source themselves (tenant context, inventory lifecycle) define their own names.
+$selfLoaded = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+foreach ($helper in @((Join-Path $root 'Config/SmartM365-TenantContext.ps1'), (Join-Path $coreFolder 'SmartM365-InventoryLifecycle.ps1'))) {
+    $helperAst = [Management.Automation.Language.Parser]::ParseFile($helper, [ref]$null, [ref]$null)
+    foreach ($function in $helperAst.FindAll({ param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] }, $true)) { [void]$selfLoaded.Add($function.Name) }
+}
 
 # Functions defined in the Core module file itself. Helper files it dot-sources (inventory lifecycle,
 # receipts...) are also dot-sourced by the scripts that use them, so they are not checked here.
@@ -37,8 +45,17 @@ $sources = Get-ChildItem -LiteralPath $root -Recurse -File -Include '*.ps1', '*.
 foreach ($source in $sources) {
     $ast = [Management.Automation.Language.Parser]::ParseFile($source.FullName, [ref]$null, [ref]$null)
     $local = [Collections.Generic.HashSet[string]]::new([string[]]@($ast.FindAll({ param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] }, $true) | ForEach-Object Name), [StringComparer]::OrdinalIgnoreCase)
+    # Core imported only with -Prefix (Import-Module ... -Prefix Core): unprefixed Core names do not resolve.
+    $prefixedOnly = $false
+    $coreImportPattern = 'SmartM365\.Core|coreManifest|\$modulePath|\$candidate'
+    $coreImports = @($ast.FindAll({ param($n) $n -is [Management.Automation.Language.CommandAst] -and $n.GetCommandName() -eq 'Import-Module' }, $true) | Where-Object { $_.Extent.Text -match $coreImportPattern -and $_.Extent.Text -notmatch 'EvidenceCollector|JsonTransport|SharePointJsonTransition' })
+    if ($coreImports.Count -gt 0 -and @($coreImports | Where-Object { $_.Extent.Text -notmatch '-Prefix\s+\w+' }).Count -eq 0) { $prefixedOnly = $true }
     foreach ($call in $ast.FindAll({ param($n) $n -is [Management.Automation.Language.CommandAst] }, $true)) {
         $name = $call.GetCommandName()
+        if ($name -and $prefixedOnly -and $coreExports.Contains($name) -and -not $local.Contains($name) -and -not $selfLoaded.Contains($name)) {
+            $violations.Add(('{0}:{1} {2} (Core is imported with -Prefix)' -f $source.FullName.Substring($root.Length + 1), $call.Extent.StartLineNumber, $name))
+            continue
+        }
         if (-not $name -or -not $hidden.Contains($name) -or $local.Contains($name)) { continue }
         # A script block run inside the module (& $coreModule { ... }) sees internal functions.
         $insideModule = $false

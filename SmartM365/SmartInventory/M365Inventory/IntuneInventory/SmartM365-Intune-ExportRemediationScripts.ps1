@@ -23,7 +23,7 @@
     Interactive delegated permission for Microsoft Graph PowerShell:
     - DeviceManagementScripts.Read.All
 .VERSION
-1.13
+1.14
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
     Version : 1.13
@@ -80,7 +80,7 @@ if ($PSBoundParameters.ContainsKey('MaxItems') -and $MaxItems -gt 0) {
 }
 
 $ErrorActionPreference = "Stop"
-$ScriptVersion = "1.13"
+$ScriptVersion = "1.14"
 
 $tenantContextPath = & {
     $d = $PSScriptRoot
@@ -669,7 +669,7 @@ function Stop-IntuneRemediationsTranscript {
                 $smartM365TranscriptPath = $smartM365TranscriptVariable.Value
             }
         }
-        if ($smartM365TranscriptPath) { Update-SmartM365TimestampedTranscript -Path $smartM365TranscriptPath }
+        if ($smartM365TranscriptPath) { Update-CoreSmartM365TimestampedTranscript -Path $smartM365TranscriptPath }
     }
     catch { }
     $script:SmartM365TranscriptStarted = $false

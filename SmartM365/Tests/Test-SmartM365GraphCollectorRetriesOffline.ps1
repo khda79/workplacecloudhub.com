@@ -5,7 +5,7 @@ Offline checks of the collector Graph retries and of the Intune export download:
 408/429/5xx, timeouts and connection resets are retried, and a pre-signed export URL is downloaded
 without an Authorization header, its real error logged without the URL signature.
 .VERSION
-1.0.0
+1.0.1
 .NOTES
 Collector functions are loaded from the AST with recorded stand-ins for Graph and storage. No tenant,
 Graph, storage, mail or synchronized data access.
@@ -19,6 +19,8 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
 $core = Import-Module (Join-Path $root 'Modules/SmartM365.Core/SmartM365.Core.psd1') -MinimumVersion '1.0.99' -Force -PassThru -Global
+# Endpoint Analytics and Autopatch import Core with -Prefix Core: their functions call the prefixed names.
+Import-Module (Join-Path $root 'Modules/SmartM365.Core/SmartM365.Core.psd1') -MinimumVersion '1.0.99' -Prefix Core -Global -WarningAction SilentlyContinue
 $script:checks = 0
 function Check { param([bool]$Condition, [string]$Message) if (-not $Condition) { throw $Message }; $script:checks++ }
 function New-HttpFailure([int]$Status, [string]$RetryAfter) {

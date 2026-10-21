@@ -44,7 +44,7 @@ Uses device code authentication.
 .EXAMPLE
 pwsh -File .\SmartM365-Intune-WindowsAutopatch-Alerts-Inventory.ps1
 .VERSION
-1.26
+1.27
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication.
@@ -321,7 +321,7 @@ if ([string]::IsNullOrWhiteSpace($OutputFolder)) {
 if ([string]::IsNullOrWhiteSpace($LatestCsvFolderPath)) {
     $LatestCsvFolderPath = $OutputFolder
 }
-$ScriptVersion = "1.26"
+$ScriptVersion = "1.27"
 $ScriptName = [System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
 $StartTime = Get-Date
 $RunStamp = $StartTime.ToString('yyyyMMdd_HHmmss')
@@ -416,7 +416,7 @@ function Get-AutopatchGraphStatusCode {
     param([Parameter(Mandatory = $true)]$ErrorRecord)
 
     # Response, Graph SDK status or "HTTP 503"/"Status: 500" text; a number elsewhere (a URL) is not a status.
-    $status = Get-SmartM365GraphErrorStatusCode -ErrorRecord $ErrorRecord
+    $status = Get-CoreSmartM365GraphErrorStatusCode -ErrorRecord $ErrorRecord
     if ($status) { return [int]$status }
     if ([string]$ErrorRecord -match '(?i)TooManyRequests|throttl') { return 429 }
     return 0
@@ -450,7 +450,7 @@ function Invoke-AutopatchGraphRequest {
         catch {
             $statusCode = Get-AutopatchGraphStatusCode -ErrorRecord $_
             # 401/403 never retried; 408/409/429/5xx, timeouts and connection resets retried.
-            $retryable = $statusCode -notin @(401, 403) -and ($statusCode -in @(408, 409, 429, 500, 502, 503, 504) -or ($statusCode -eq 0 -and (Test-SmartM365GraphTransientError -ErrorRecord $_ -StatusCode $null)))
+            $retryable = $statusCode -notin @(401, 403) -and ($statusCode -in @(408, 409, 429, 500, 502, 503, 504) -or ($statusCode -eq 0 -and (Test-CoreSmartM365GraphTransientError -ErrorRecord $_ -StatusCode $null)))
             if (-not $retryable -or $attempt -ge $MaxAttempts) { throw }
             $delay = Get-AutopatchGraphRetryDelaySeconds -ErrorRecord $_ -Attempt $attempt
             $script:GraphTransientRetryCount++
@@ -574,7 +574,7 @@ function Import-ExportedCsv {
 
     try {
         if ([string]::IsNullOrWhiteSpace([string]$completedJob.url)) { throw "Completed export job returned no URL for report [$ReportName]." }
-        Invoke-SmartM365ExportFileDownload -Url ([string]$completedJob.url) -OutFile $tempZip -Operation "Autopatch export download ($ReportName)" | Out-Null
+        Invoke-CoreSmartM365ExportFileDownload -Url ([string]$completedJob.url) -OutFile $tempZip -Operation "Autopatch export download ($ReportName)" | Out-Null
         Ensure-Folder -Path $tempFolder
         Expand-Archive -Path $tempZip -DestinationPath $tempFolder -Force
         $csvFile = Get-ChildItem -Path $tempFolder -Filter '*.csv' -File | Select-Object -First 1
