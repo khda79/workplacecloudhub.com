@@ -51,6 +51,21 @@ unmeasured, never healthy. An absent summary is an explicit Not captured marker,
 zero findings. The findings table on the view lists errors and warnings; values that
 can reveal host names, addresses, certificates or domains were masked at collection.
 
+## Hybrid free/busy (Messaging & Hybrid page)
+
+The Messaging & Hybrid page has a sixth view, Free/Busy, fed by the weekly
+Exchange2016-FreeBusy-Check job (Microsoft CSS-Exchange FreeBusyChecker):
+Exchange_Hybrid_FreeBusy_Summary.csv and Exchange_Hybrid_FreeBusy_Findings.csv,
+optional prepared sources kept up to 192 hours. A dedicated reader applies the same
+batch, tenant, header, column and stable-pointer checks as the infrastructure reader
+and loads two disconnected tables: one row per side (on-premises, Exchange Online) and
+authentication method (DAuth, OAuth), and one row per result item. A side that was not
+connected, not authorized (the app has no role for a test cmdlet) or not run is
+unmeasured, never healthy; the missing cmdlets and roles are listed. An absent summary
+is an explicit Not captured marker, never zero findings. The findings table on the view
+lists errors, warnings and not authorized checks; identifiers, domains, addresses and
+URLs were masked at collection.
+
 Report and model definitions require a future prepared batch containing the optional
 infrastructure artifacts before populated visual values can be qualified. Structural
 checks and synthetic tests do not refresh or publish a model.

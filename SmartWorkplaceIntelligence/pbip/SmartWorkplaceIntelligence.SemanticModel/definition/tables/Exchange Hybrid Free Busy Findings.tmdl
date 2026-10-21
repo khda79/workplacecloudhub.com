@@ -1,0 +1,86 @@
+/// One row per FreeBusyChecker result item (status OK, Warning, Error, Info or NotAuthorized). Selected immutable batch only. Microsoft CSS-Exchange FreeBusyChecker results for the on-premises and Exchange Online sides, DAuth and OAuth. A side that was not connected, not authorized or not run is unmeasured, never healthy. Values that can reveal host names, addresses, certificates, domains or identifiers are masked at collection. Disconnected: geographical and attribute filters do not apply.
+table 'Exchange Hybrid Free Busy Findings'
+	lineageTag: 5a584c5d-8b64-5f36-bd29-db3d29338c43
+
+	column 'Server Name'
+		dataType: string
+		lineageTag: 7a95645f-0740-5504-9ac7-16ce3d228057
+		summarizeBy: none
+		sourceColumn: Server Name
+
+	column Side
+		dataType: string
+		lineageTag: 8e54bd51-646d-5d94-8010-8bea9eb012f9
+		summarizeBy: none
+		sourceColumn: Side
+
+	column Auth
+		dataType: string
+		lineageTag: 1f190b58-cca8-578d-9aea-aa47134d7526
+		summarizeBy: none
+		sourceColumn: Auth
+
+	column Category
+		dataType: string
+		lineageTag: cc1ce6a0-b22f-526c-9605-0f533019b26d
+		summarizeBy: none
+		sourceColumn: Category
+
+	column 'Row Number'
+		dataType: int64
+		isHidden
+		lineageTag: a9399de6-84fe-5c2a-a563-e9249174728e
+		summarizeBy: none
+		sourceColumn: Row Number
+
+	column Item
+		dataType: string
+		lineageTag: c98e09c0-dcca-5777-8503-e5f7d489c28e
+		summarizeBy: none
+		sourceColumn: Item
+
+	column Status
+		dataType: string
+		lineageTag: edff6c8f-0802-5cea-9b85-74559c726180
+		summarizeBy: none
+		sourceColumn: Status
+
+	column Value
+		dataType: string
+		lineageTag: 2a0884c2-5768-5450-b77d-ca7d9535fd27
+		summarizeBy: none
+		sourceColumn: Value
+
+	column 'Value Masked'
+		dataType: boolean
+		lineageTag: b764dc04-5ff5-5f13-b1ed-1f914b3842f3
+		summarizeBy: none
+		sourceColumn: Value Masked
+
+	column 'Free Busy Checker Version'
+		dataType: string
+		lineageTag: d11433a9-4894-5218-a773-23eea1168c0e
+		summarizeBy: none
+		sourceColumn: Free Busy Checker Version
+
+	column 'Generation Time'
+		dataType: string
+		lineageTag: 352e97e4-5d8b-5cd8-b152-fc9b22832714
+		summarizeBy: none
+		sourceColumn: Generation Time
+
+	column 'Loaded Batch ID'
+		dataType: string
+		isHidden
+		lineageTag: 571c8434-1535-553e-a49c-feddffb2e012
+		summarizeBy: none
+		sourceColumn: Loaded Batch ID
+
+	partition 'Exchange Hybrid Free Busy Findings' = m
+		mode: import
+		source =
+				let
+				    Readers = CreatePreparedReaders(),
+				    BusinessRows = Readers[GetExchangeHybridFreeBusy]("Findings")
+				in
+				    Readers[Finish](BusinessRows)

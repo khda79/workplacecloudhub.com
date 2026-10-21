@@ -9,7 +9,8 @@
       "421d3be4994300ee3abf",
       "44b410e354eea9b64e0c",
       "509da9ee86e35c2c4711",
-      "daaf5c483406b36ac30c"
+      "daaf5c483406b36ac30c",
+      "0c39ccc925a4bca479c2"
     ],
     "suppressActiveSection": true,
     "suppressData": true
@@ -35,6 +36,9 @@
           },
           "daaf5c483406b36ac30c": {
             "isHidden": false
+          },
+          "0c39ccc925a4bca479c2": {
+            "isHidden": true
           }
         }
       }

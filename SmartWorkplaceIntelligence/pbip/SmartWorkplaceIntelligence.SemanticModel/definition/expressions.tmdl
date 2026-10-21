@@ -525,11 +525,79 @@ expression CreatePreparedReaders =
 		    ForcedRows = Table.RowCount(Result)
 		in
 		    if ForcedRows >= 0 and CheckStable("verify-infrastructure") then Result else error "Unstable Exchange infrastructure batch",
+		    // Exchange hybrid free/busy results (CSS-Exchange FreeBusyChecker): same source checks as the infrastructure reader, wide rows.
+		    GetExchangeHybridFreeBusy = (kind as text) as table =>
+		let
+		    Spec = if kind = "Summary" then [File="Exchange_Hybrid_FreeBusy_Summary.csv",
+		            Required={"TenantKey","ServerName","Side","Auth","RunStatus","SideStatus","OkCount","WarningCount","ErrorCount","NotAuthorizedCount"}]
+		        else if kind = "Findings" then [File="Exchange_Hybrid_FreeBusy_Findings.csv",
+		            Required={"TenantKey","ServerName","Side","Auth","Category","Item","Status","Value"}]
+		        else error "Unknown Exchange hybrid free/busy dataset",
+		    Name = "Source-" & Spec[File],
+		    SelectedManifest = GetPreparedBatchManifest(),
+		    Declared = SelectedManifest[Files] & Record.FieldOrDefault(SelectedManifest, "Artifacts", {}),
+		    Membership = List.Select(Declared, each [File] = Name),
+		    Present = if List.Count(Membership) = 0 then false
+		        else if List.Count(Membership) <> 1 then error "Duplicate Exchange hybrid free/busy declaration"
+		        else if List.Count(List.Select(Record.FieldOrDefault(SelectedManifest, "Artifacts", {}), each [File] = Name)) <> 1
+		             then error "Invalid Exchange hybrid free/busy artifact membership" else true,
+		    TextValue = (value as any) as text => if value = null then "" else Text.From(value, "en-US"),
+		    Parsed = if not Present then null else Csv.Document(GetPreparedEvidenceFile(Name),
+		        [Delimiter=";", Encoding=65001, QuoteStyle=QuoteStyle.Csv]),
+		    Header = if not Present then {} else if Table.IsEmpty(Parsed) then error "Empty Exchange hybrid free/busy CSV"
+		        else List.Transform(Record.FieldValues(Parsed{0}), each TextValue(_)),
+		    HeaderValid = not List.Contains(Header, "") and List.Count(List.Distinct(Header, Comparer.OrdinalIgnoreCase)) = List.Count(Header),
+		    Promoted = if not Present then null else if not HeaderValid then error "Invalid Exchange hybrid free/busy CSV header"
+		        else Table.PromoteHeaders(Parsed, [PromoteAllScalars=true]),
+		    Checked = if not Present then null else if Table.HasColumns(Promoted, Spec[Required]) then Promoted
+		        else error "Missing Exchange hybrid free/busy columns",
+		    Scoped = if not Present then null else if List.AllTrue(List.Transform(Table.Column(Checked, "TenantKey"),
+		        each _ = ExpectedTenant)) then Checked else error "Foreign Exchange hybrid free/busy tenant",
+		    SourceRows = if not Present then {} else Table.ToRecords(Scoped),
+		    Field = (row as record, column as text) as text => Text.Trim(TextValue(Record.FieldOrDefault(row, column, null))),
+		    // Counts are plain non-negative integers; anything else stays unknown.
+		    Count = (row as record, column as text) as nullable number =>
+		        let Candidate = Field(row, column)
+		        in if Candidate = "" or Text.Select(Candidate, {"0".."9"}) <> Candidate then null else Number.FromText(Candidate, "en-US"),
+		    State = if not Present then "Not captured in selected batch" else "Captured - no rows",
+		    SummarySchema = type table [#"Server Name"=text, Side=text, Auth=text, #"Run Status"=text, #"Side Status"=text,
+		        #"Run Message"=text, #"Not Authorized Cmdlets"=text, #"Missing Roles"=text, #"Duration Seconds"=nullable Int64.Type,
+		        #"Free Busy Checker Version"=text, #"Generation Time"=text, #"OK Count"=nullable Int64.Type,
+		        #"Warning Count"=nullable Int64.Type, #"Error Count"=nullable Int64.Type, #"Info Count"=nullable Int64.Type,
+		        #"Not Authorized Count"=nullable Int64.Type, #"Is Result"=logical, #"Source Available"=logical],
+		    SummaryRow = (row as record) as record =>
+		        [#"Server Name"=Field(row, "ServerName"), Side=Field(row, "Side"), Auth=Field(row, "Auth"),
+		         #"Run Status"=Field(row, "RunStatus"), #"Side Status"=Field(row, "SideStatus"), #"Run Message"=Field(row, "RunMessage"),
+		         #"Not Authorized Cmdlets"=Field(row, "NotAuthorizedCmdlets"), #"Missing Roles"=Field(row, "MissingRoles"),
+		         #"Duration Seconds"=Count(row, "DurationSeconds"), #"Free Busy Checker Version"=Field(row, "FreeBusyCheckerVersion"),
+		         #"Generation Time"=Field(row, "GenerationTime"), #"OK Count"=Count(row, "OkCount"),
+		         #"Warning Count"=Count(row, "WarningCount"), #"Error Count"=Count(row, "ErrorCount"), #"Info Count"=Count(row, "InfoCount"),
+		         #"Not Authorized Count"=Count(row, "NotAuthorizedCount"), #"Is Result"=true, #"Source Available"=true],
+		    // Absent or empty capture stays an explicit unknown marker, never a healthy zero.
+		    Marker = [#"Server Name"="Not recorded", Side="Not recorded", Auth="", #"Run Status"=State, #"Side Status"="Unknown",
+		        #"Run Message"="Free/busy summary " & Text.Lower(State), #"Not Authorized Cmdlets"="", #"Missing Roles"="",
+		        #"Duration Seconds"=null, #"Free Busy Checker Version"="", #"Generation Time"="", #"OK Count"=null,
+		        #"Warning Count"=null, #"Error Count"=null, #"Info Count"=null, #"Not Authorized Count"=null,
+		        #"Is Result"=false, #"Source Available"=Present],
+		    FindingsSchema = type table [#"Server Name"=text, Side=text, Auth=text, Category=text, #"Row Number"=nullable Int64.Type,
+		        Item=text, Status=text, Value=text, #"Value Masked"=logical, #"Free Busy Checker Version"=text, #"Generation Time"=text],
+		    FindingRow = (row as record) as record =>
+		        [#"Server Name"=Field(row, "ServerName"), Side=Field(row, "Side"), Auth=Field(row, "Auth"), Category=Field(row, "Category"),
+		         #"Row Number"=Count(row, "RowNumber"), Item=Field(row, "Item"), Status=Field(row, "Status"), Value=Field(row, "Value"),
+		         #"Value Masked"=Text.Lower(Field(row, "ValueMasked")) = "true",
+		         #"Free Busy Checker Version"=Field(row, "FreeBusyCheckerVersion"), #"Generation Time"=Field(row, "GenerationTime")],
+		    Result = if kind = "Summary" then Table.FromRecords(if List.IsEmpty(SourceRows) then {Marker} else List.Transform(SourceRows, SummaryRow), SummarySchema, MissingField.Error)
+		        else Table.Sort(Table.FromRecords(List.Transform(SourceRows, FindingRow), FindingsSchema, MissingField.Error),
+		            {{"Server Name", Order.Ascending}, {"Side", Order.Ascending}, {"Row Number", Order.Ascending}}),
+		    Buffered = Table.Buffer(Result),
+		    ForcedRows = Table.RowCount(Buffered)
+		in
+		    if ForcedRows >= 0 and CheckStable("verify-freebusy") then Buffered else error "Unstable Exchange hybrid free/busy batch",
 		    Finish = (Rows as table) as table =>
 		        if GetPreparedBatchManifest()[BatchId] <> BatchId then error "Prepared batch identity mismatch"
 		        else Table.AddColumn(Rows, "Loaded Batch ID", each BatchId, type text)
 		in
-		    [BatchId=BatchId, Finish=Finish, GetExchangeOnPremInfrastructure=GetExchangeOnPremInfrastructure, GetPreparedEvidenceFile=GetPreparedEvidenceFile, GetPreparedBatchManifest=GetPreparedBatchManifest, GetLicenseReportQualification=GetLicenseReportQualification, LicenseReportFileUsable=LicenseReportFileUsable, GetLicenseReportSnapshot=GetLicenseReportSnapshot, GetLicenseReportCsv=GetLicenseReportCsv, ReadMigrationCsv=ReadMigrationCsv, CreateMailboxMigrationReader=CreateMailboxMigrationReader, ReadMailboxMigrationCsv=ReadMailboxMigrationCsv, ReadMigrationWeeklyHistory=ReadMigrationWeeklyHistory, GetSharePointOnPremCsv=GetSharePointOnPremCsv, GetSharePointMigrationEvidence=GetSharePointMigrationEvidence]
+		    [BatchId=BatchId, Finish=Finish, GetExchangeOnPremInfrastructure=GetExchangeOnPremInfrastructure, GetExchangeHybridFreeBusy=GetExchangeHybridFreeBusy, GetPreparedEvidenceFile=GetPreparedEvidenceFile, GetPreparedBatchManifest=GetPreparedBatchManifest, GetLicenseReportQualification=GetLicenseReportQualification, LicenseReportFileUsable=LicenseReportFileUsable, GetLicenseReportSnapshot=GetLicenseReportSnapshot, GetLicenseReportCsv=GetLicenseReportCsv, ReadMigrationCsv=ReadMigrationCsv, CreateMailboxMigrationReader=CreateMailboxMigrationReader, ReadMailboxMigrationCsv=ReadMailboxMigrationCsv, ReadMigrationWeeklyHistory=ReadMigrationWeeklyHistory, GetSharePointOnPremCsv=GetSharePointOnPremCsv, GetSharePointMigrationEvidence=GetSharePointMigrationEvidence]
 	lineageTag: 26f34f0c-24ee-421f-94a6-123ea48fb2ec
 
 /// Every governed AD account type, including disabled/non-human accounts. Historical missing classification remains unknown. Prepared without materializing a new imported facet.

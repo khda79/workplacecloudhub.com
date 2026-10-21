@@ -20,6 +20,12 @@ try{
         $scan=Scan $path
         Check ($scan.Rows -eq 1 -and $scan.HasTenantKey) "Declared semicolon source failed: $name"
     }
+    foreach($name in @('Exchange_Hybrid_FreeBusy_Summary','Exchange_Hybrid_FreeBusy_Findings')){
+        $path=Join-Path $root "$name.csv"
+        '"TenantKey";"Name";"Detail"','"synthetic";"mail-one";"quoted; delimiter"'|Set-Content -LiteralPath $path
+        $scan=Scan $path
+        Check ($scan.Rows -eq 1 -and $scan.HasTenantKey) "Declared semicolon free/busy source failed: $name"
+    }
     $path=Join-Path $root 'Exchange_OnPrem_Servers_Compute.csv'
     foreach($bad in @(
         ('"TenantKey";"Name"'+"`n"+'"foreign";"mail-one"'),

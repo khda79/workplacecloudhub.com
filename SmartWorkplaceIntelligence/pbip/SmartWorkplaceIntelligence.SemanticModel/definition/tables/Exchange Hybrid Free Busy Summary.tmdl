@@ -1,0 +1,166 @@
+/// One row per FreeBusyChecker side and authentication method (on-premises / Exchange Online, DAuth / OAuth), or one explicit unknown marker when the summary was not captured. Selected immutable batch only. Microsoft CSS-Exchange FreeBusyChecker results for the on-premises and Exchange Online sides, DAuth and OAuth. A side that was not connected, not authorized or not run is unmeasured, never healthy. Values that can reveal host names, addresses, certificates, domains or identifiers are masked at collection. Disconnected: geographical and attribute filters do not apply.
+table 'Exchange Hybrid Free Busy Summary'
+	lineageTag: f5386d3c-f7e8-54fe-9231-4cc89e5cbc01
+
+	/// Selected immutable batch only. Microsoft CSS-Exchange FreeBusyChecker results for the on-premises and Exchange Online sides, DAuth and OAuth. A side that was not connected, not authorized or not run is unmeasured, never healthy. Values that can reveal host names, addresses, certificates, domains or identifiers are masked at collection.
+	measure 'Exchange Free Busy Checks Total' = VAR _n=CALCULATE(COUNTROWS('Exchange Hybrid Free Busy Summary'),KEEPFILTERS('Exchange Hybrid Free Busy Summary'[Is Result]=TRUE())) RETURN IF(_n>0,_n)
+		formatString: #,0
+		displayFolder: Free/Busy
+
+	/// Selected immutable batch only. Microsoft CSS-Exchange FreeBusyChecker results for the on-premises and Exchange Online sides, DAuth and OAuth. A side that was not connected, not authorized or not run is unmeasured, never healthy. Values that can reveal host names, addresses, certificates, domains or identifiers are masked at collection.
+	measure 'Exchange Free Busy Checks Completed' = IF(NOT ISBLANK([Exchange Free Busy Checks Total]),COALESCE(CALCULATE(COUNTROWS('Exchange Hybrid Free Busy Summary'),KEEPFILTERS('Exchange Hybrid Free Busy Summary'[Is Result]=TRUE()),KEEPFILTERS('Exchange Hybrid Free Busy Summary'[Side Status]="Completed")),0))
+		formatString: #,0
+		displayFolder: Free/Busy
+
+	/// Selected immutable batch only. Microsoft CSS-Exchange FreeBusyChecker results for the on-premises and Exchange Online sides, DAuth and OAuth. A side that was not connected, not authorized or not run is unmeasured, never healthy. Values that can reveal host names, addresses, certificates, domains or identifiers are masked at collection.
+	measure 'Exchange Free Busy Errors' = IF(NOT ISBLANK([Exchange Free Busy Checks Total]),CALCULATE(SUM('Exchange Hybrid Free Busy Summary'[Error Count]),KEEPFILTERS('Exchange Hybrid Free Busy Summary'[Is Result]=TRUE())))
+		formatString: #,0
+		displayFolder: Free/Busy
+
+	/// Selected immutable batch only. Microsoft CSS-Exchange FreeBusyChecker results for the on-premises and Exchange Online sides, DAuth and OAuth. A side that was not connected, not authorized or not run is unmeasured, never healthy. Values that can reveal host names, addresses, certificates, domains or identifiers are masked at collection.
+	measure 'Exchange Free Busy Warnings' = IF(NOT ISBLANK([Exchange Free Busy Checks Total]),CALCULATE(SUM('Exchange Hybrid Free Busy Summary'[Warning Count]),KEEPFILTERS('Exchange Hybrid Free Busy Summary'[Is Result]=TRUE())))
+		formatString: #,0
+		displayFolder: Free/Busy
+
+	/// Selected immutable batch only. Microsoft CSS-Exchange FreeBusyChecker results for the on-premises and Exchange Online sides, DAuth and OAuth. A side that was not connected, not authorized or not run is unmeasured, never healthy. Values that can reveal host names, addresses, certificates, domains or identifiers are masked at collection.
+	measure 'Exchange Free Busy Not Authorized Checks' = IF(NOT ISBLANK([Exchange Free Busy Checks Total]),CALCULATE(SUM('Exchange Hybrid Free Busy Summary'[Not Authorized Count]),KEEPFILTERS('Exchange Hybrid Free Busy Summary'[Is Result]=TRUE())))
+		formatString: #,0
+		displayFolder: Free/Busy
+
+	/// Selected immutable batch only. Microsoft CSS-Exchange FreeBusyChecker results for the on-premises and Exchange Online sides, DAuth and OAuth. A side that was not connected, not authorized or not run is unmeasured, never healthy. Values that can reveal host names, addresses, certificates, domains or identifiers are masked at collection.
+	measure 'Exchange Free Busy Status' = VAR _total=[Exchange Free Busy Checks Total] VAR _done=[Exchange Free Busy Checks Completed] VAR _run=CALCULATE(MAX('Exchange Hybrid Free Busy Summary'[Run Status]),KEEPFILTERS('Exchange Hybrid Free Busy Summary'[Is Result]=TRUE())) RETURN IF(ISBLANK(_total),"Not captured in selected batch | Free/busy results require the weekly Exchange2016-FreeBusy-Check job; unknown is not healthy.",FORMAT(_done,"0") & "/" & FORMAT(_total,"0") & " side checks completed | Run status: " & _run & " | Not connected, not authorized or not run checks are unmeasured, not healthy.")
+		formatString: @
+		displayFolder: Free/Busy
+
+	column 'Server Name'
+		dataType: string
+		lineageTag: 94162ec9-4343-509d-a5b3-90c27a38c37d
+		summarizeBy: none
+		sourceColumn: Server Name
+
+	column Side
+		dataType: string
+		lineageTag: 3563231e-d7a7-505c-8f34-d4be6fcc0c31
+		summarizeBy: none
+		sourceColumn: Side
+
+	column Auth
+		dataType: string
+		lineageTag: b52ee0f6-f2d0-5d33-b461-9afc7854c4e2
+		summarizeBy: none
+		sourceColumn: Auth
+
+	column 'Run Status'
+		dataType: string
+		lineageTag: d29981da-b119-5104-9de4-2acb3c12fe82
+		summarizeBy: none
+		sourceColumn: Run Status
+
+	column 'Side Status'
+		dataType: string
+		lineageTag: 9a806ce1-d0bc-595b-91d1-096aebb4b317
+		summarizeBy: none
+		sourceColumn: Side Status
+
+	column 'Run Message'
+		dataType: string
+		lineageTag: d6314824-ebd3-54d9-9fd6-d66dd553aca7
+		summarizeBy: none
+		sourceColumn: Run Message
+
+	column 'Not Authorized Cmdlets'
+		dataType: string
+		lineageTag: 11aae361-b815-5b23-93a0-d6c0a09d0b99
+		summarizeBy: none
+		sourceColumn: Not Authorized Cmdlets
+
+	column 'Missing Roles'
+		dataType: string
+		lineageTag: d985de96-1014-56d7-8393-6d3755c77142
+		summarizeBy: none
+		sourceColumn: Missing Roles
+
+	column 'Duration Seconds'
+		dataType: int64
+		formatString: #,0
+		isHidden
+		lineageTag: 80288af7-ffaf-528b-83b6-5c59c8a26fa6
+		summarizeBy: none
+		sourceColumn: Duration Seconds
+
+	column 'Free Busy Checker Version'
+		dataType: string
+		lineageTag: 0c77f618-34af-58ab-8982-bbb50d60ba62
+		summarizeBy: none
+		sourceColumn: Free Busy Checker Version
+
+	column 'Generation Time'
+		dataType: string
+		lineageTag: e179ebb3-e85f-5eb0-9da8-afdfd3d53b9e
+		summarizeBy: none
+		sourceColumn: Generation Time
+
+	column 'OK Count'
+		dataType: int64
+		formatString: #,0
+		lineageTag: b73f8659-18a1-5256-9804-e6102b736609
+		summarizeBy: none
+		sourceColumn: OK Count
+
+	column 'Warning Count'
+		dataType: int64
+		formatString: #,0
+		lineageTag: 9ac9919e-9c53-54de-a795-0e5b7660db19
+		summarizeBy: none
+		sourceColumn: Warning Count
+
+	column 'Error Count'
+		dataType: int64
+		formatString: #,0
+		lineageTag: 070f82c1-bf1b-5250-a6e0-80ca7be9fb1f
+		summarizeBy: none
+		sourceColumn: Error Count
+
+	column 'Info Count'
+		dataType: int64
+		formatString: #,0
+		lineageTag: a7eaf335-b142-5ef7-b630-8a0c526b0594
+		summarizeBy: none
+		sourceColumn: Info Count
+
+	column 'Not Authorized Count'
+		dataType: int64
+		formatString: #,0
+		lineageTag: b837999a-835e-546f-9002-8443a1a39727
+		summarizeBy: none
+		sourceColumn: Not Authorized Count
+
+	column 'Is Result'
+		dataType: boolean
+		isHidden
+		lineageTag: 643b9f24-bc91-501e-ba13-59ae876ffa22
+		summarizeBy: none
+		sourceColumn: Is Result
+
+	column 'Source Available'
+		dataType: boolean
+		isHidden
+		lineageTag: 3845816a-1c72-5497-824e-efc3d0bc18d4
+		summarizeBy: none
+		sourceColumn: Source Available
+
+	column 'Loaded Batch ID'
+		dataType: string
+		isHidden
+		lineageTag: 8550d2ac-1e2a-522c-929a-1db989342249
+		summarizeBy: none
+		sourceColumn: Loaded Batch ID
+
+	partition 'Exchange Hybrid Free Busy Summary' = m
+		mode: import
+		source =
+				let
+				    Readers = CreatePreparedReaders(),
+				    BusinessRows = Readers[GetExchangeHybridFreeBusy]("Summary")
+				in
+				    Readers[Finish](BusinessRows)

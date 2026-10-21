@@ -36,7 +36,9 @@
     { "file": "Exchange_OnPrem_Servers_ServiceHealth.csv", "maxAgeHours": 168, "delimiter": ";" },
     { "file": "Exchange_OnPrem_MailboxDatabases_Paths.csv", "maxAgeHours": 168, "delimiter": ";" },
     { "file": "Exchange_OnPrem_HealthChecker_Summary.csv", "maxAgeHours": 168, "delimiter": ";" },
-    { "file": "Exchange_OnPrem_HealthChecker_Findings.csv", "maxAgeHours": 168, "delimiter": ";" }
+    { "file": "Exchange_OnPrem_HealthChecker_Findings.csv", "maxAgeHours": 168, "delimiter": ";" },
+    { "file": "Exchange_Hybrid_FreeBusy_Summary.csv", "maxAgeHours": 192, "delimiter": ";" },
+    { "file": "Exchange_Hybrid_FreeBusy_Findings.csv", "maxAgeHours": 192, "delimiter": ";" }
   ],
   "licenseReport": {
     "receipt": "SmartInventory_SmartM365-Licences-Inventory.current.json.txt",
@@ -55,6 +57,7 @@
     ]
   },
   "compatibleContractSHA256": [
+    "D3FF41B3D4725E76CB65B50EF139FB07A5BA9B4792D3CF863D9F4863385B9095",
     "B37E2D279982FE9A5D2B7BD5CBB24DF756A5B1F713D0DC65E12DABA4A7AC532B",
     "446FF9F4DC552FCFC97C1CFA94EDD5853DFBCB239A179B94A967AC6357CF0C98",
     "19AA5A0D3D6FFAED0E3FFF2A16B2A4FF4D269C65221DB1BB2BB0139B729B87B4",
