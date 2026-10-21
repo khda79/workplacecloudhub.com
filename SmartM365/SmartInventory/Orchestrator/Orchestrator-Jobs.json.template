@@ -730,7 +730,7 @@
     {
       "Name": "Intune-EndpointSecurityHealth-Inventory",
       "ScriptPath": "M365Inventory\\IntuneInventory\\Security\\SmartM365-Intune-EndpointSecurityHealth-Inventory.ps1",
-      "Arguments": "-EnableConfiguredExternalActions",
+      "Arguments": "-EnableConfiguredExternalActions -ExportTimeoutSeconds 1200",
       "Enabled": true,
       "Group": "Intune",
       "DependsOn": [],

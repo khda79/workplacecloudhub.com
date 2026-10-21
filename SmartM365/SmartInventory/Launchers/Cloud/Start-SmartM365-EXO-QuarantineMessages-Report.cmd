@@ -1,5 +1,7 @@
 @echo off
 setlocal EnableExtensions EnableDelayedExpansion
+set "SMARTM365_LAUNCHER_TENANT=prod"
+if defined SMARTM365_ORCHESTRATOR_TENANT set "SMARTM365_LAUNCHER_TENANT=%SMARTM365_ORCHESTRATOR_TENANT%"
 
 set "UNC_WORK_DIR=%~dp0..\..\ExchangeInventory\Quarantine\."
 set "SCRIPT_DIR=%UNC_WORK_DIR%\"
@@ -23,6 +25,6 @@ if not defined PWSH (
     exit /b 1
 )
 
-"%PWSH%" -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_DIR%SmartM365-EXO-QuarantineMessages-Report.ps1" -Tenant prod -Connect
+"%PWSH%" -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_DIR%SmartM365-EXO-QuarantineMessages-Report.ps1" -Tenant "%SMARTM365_LAUNCHER_TENANT%" -Connect %*
 set "EXIT_CODE=%ERRORLEVEL%"
 exit /b %EXIT_CODE%

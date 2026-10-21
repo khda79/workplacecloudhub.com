@@ -70,6 +70,11 @@ interrupt WorkplaceScope; its catch-up run then delays AD by the remaining colle
 time. The timeout-policy audit therefore reports AD as an intentional mismatch; do not
 reset it with `Set-SmartM365-OrchestratorTimeoutPolicy.ps1 -Execute`.
 
+Endpoint security health passes `-ExportTimeoutSeconds 1200`, the value its manual
+launcher has always used, instead of the 600-second script default. Each of its three
+Intune report exports may therefore wait up to 20 minutes, one hour in total, well
+inside its 1380-minute job timeout.
+
 SyncHealth runs every two hours at minute 20 and skips missed monitoring slots;
 migration-job inventory runs at 06:00, 12:00 and 18:00. These monitoring exceptions
 do not trigger full identity/device/license recollection.

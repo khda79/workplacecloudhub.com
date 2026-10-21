@@ -23,6 +23,6 @@ if not defined PWSH (
     pause
     exit /b 1
 )
-"%PWSH%" -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_DIR%SmartM365-ActiveDirectory-HealthCheck.ps1" -Tenant "%SMARTM365_LAUNCHER_TENANT%"
+"%PWSH%" -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_DIR%SmartM365-ActiveDirectory-HealthCheck.ps1" -Tenant "%SMARTM365_LAUNCHER_TENANT%" %*
 set "EXIT_CODE=%ERRORLEVEL%"
 exit /b %EXIT_CODE%

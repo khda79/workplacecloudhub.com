@@ -3,7 +3,7 @@
 .SYNOPSIS
 Validate the single daily inventory cycle and weekly exceptions offline.
 .VERSION
-1.2.2
+1.2.3
 .NOTES
 Reads the repository template and an optional additional local manifest.
 No tenant initialization, collectors, scheduling, authentication or publication.
@@ -189,6 +189,12 @@ foreach ($path in $paths) {
     foreach ($switch in @('-IncludeServicesHealth', '-IncludeMailboxDatabasePaths')) {
         Assert-True ($infrastructureSwitches -contains $switch) "Exchange infrastructure no longer collects the prepared artifact enabled by $switch."
     }
+    # Endpoint security exports get the same 1200-second budget as the manual launcher.
+    $endpointSecurity = @($document.Jobs | Where-Object Name -eq 'Intune-EndpointSecurityHealth-Inventory')[0]
+    $endpointSecurityArguments = @(([string]$endpointSecurity.Arguments) -split '\s+' | Where-Object { $_ })
+    $exportTimeoutIndex = [array]::IndexOf($endpointSecurityArguments, '-ExportTimeoutSeconds')
+    Assert-True ($exportTimeoutIndex -ge 0 -and $endpointSecurityArguments[$exportTimeoutIndex + 1] -eq '1200') 'Endpoint security exports are back to the shorter 600-second script default.'
+    Assert-True ((3 * 1200 / 60) -lt [int]$endpointSecurity.TimeoutMinutes) 'Endpoint security export waits no longer fit inside the job timeout.'
     # The mailbox summary uses the same night's ProxyAddresses audit, which now runs first.
     $localMailboxes = @($document.Jobs | Where-Object Name -eq 'Exchange2016-Local-Mailboxes-Inventory')[0]
     Assert-True ((@($localMailboxes.DependsOn) -join ',') -ceq 'Exchange2016-ProxyAddresses-Check' -and $localMailboxes.DependencyMode -eq 'FreshSuccess') 'Local mailboxes no longer wait for a fresh ProxyAddresses check.'
