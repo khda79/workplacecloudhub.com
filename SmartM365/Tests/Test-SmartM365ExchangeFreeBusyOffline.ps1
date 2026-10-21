@@ -19,7 +19,7 @@ Checker is never executed; Exchange Online and module installation are mocked. C
 - OAuth only (Intra Organization Connector enabled): DAuth sides NotApplicable, not counted against the run.
 
 .VERSION
-1.0.5
+1.0.6
 #>
 [CmdletBinding()]
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter','',Justification='Mocks keep the parameters of the commands they replace.')]
@@ -71,7 +71,8 @@ $collectorFunctions = @('Test-FreeBusyOAuthOnly', 'Ensure-Directory', 'Format-Ht
     'Initialize-HealthCheckerWorkFolder', 'Invoke-FreeBusyRunnerProcess', 'Read-FreeBusyRunnerStatus', 'ConvertTo-FreeBusySafeValue', 'Get-FreeBusyMaskedItem',
     'ConvertFrom-FreeBusyCheckerHtml', 'Add-FreeBusyNotAuthorizedFinding', 'New-FreeBusySummaryRow', 'Resolve-FreeBusyRunStatus', 'ConvertTo-FreeBusyReportHtml', 'Clear-FreeBusyWorkFolder')
 $definitions = @("`$FreeBusyCheckerExpectedSha256 = '$($constants.FreeBusyCheckerExpectedSha256)'", "`$FreeBusyCheckerVersion = '$($constants.FreeBusyCheckerVersion)'", "`$RunId = '20261025-050000'", "`$FreeBusyDAuthNotApplicableReason = 'Intra Organization Connector enabled: free/busy uses OAuth, DAuth not checked'") + @($collectorFunctions | ForEach-Object { Get-FunctionText $collectorAst $_ })
-$module = New-Module -ScriptBlock ([scriptblock]::Create(($definitions -join "`n")))
+# The collector runs under Set-StrictMode -Version Latest: its functions are tested the same way.
+$module = New-Module -ScriptBlock ([scriptblock]::Create(((@('Set-StrictMode -Version Latest') + $definitions) -join "`n")))
 & $module {
     Set-StrictMode -Version Latest
     $script:LogLines = New-Object 'System.Collections.Generic.List[string]'
@@ -448,6 +449,53 @@ $state = @{ Stage = 'FreeBusyCheckerReturned'; RunStatus = $null; ExchangeOnline
     $completedOAuthOnly = @(& $module { param($f, $r) New-FreeBusySummaryRow -Findings $f -RunStatus 'Completed' -RunMessage $null -RunnerStatus $r -DurationSeconds 51 -ServerName 'EXSRV01' -FreeBusyCheckerVersion 'v' -GenerationTime 't' -OAuthOnly } @($findings | Where-Object { $_.Auth -eq 'OAuth' -or $_.Side -eq 'ExchangeOnPremises' } | ForEach-Object { $copy = $_.PSObject.Copy(); $copy.Auth = 'OAuth'; $copy; $copy2 = $_.PSObject.Copy(); $copy2.Side = 'ExchangeOnline'; $copy2.Auth = 'OAuth'; $copy2.Status = 'OK'; $copy2 }) (& $runner 'Connected' @()))
     $completedReport = & $module { param($s) ConvertTo-FreeBusyReportHtml -Summary $s -Findings @() -RunStatus 'Completed' -RunMessage $null } $completedOAuthOnly
     Assert-FreeBusy ($completedReport -match '>2 / 2<' -and $completedReport -match 'No error, warning or not authorized check was reported\.<' -and $completedReport -notmatch 'side\(s\) that were measured') 'Not applicable sides do not make a complete run look partial.'
+
+    # The real run of 22 October (strict mode, Windows PowerShell 5.1): OAuth only, one Exchange Online cmdlet
+    # not authorized, real findings on the OAuth sides only and none on the DAuth sides.
+    $realHtml = "<div><p> <span style='color: green;'>$oauthOnlyText</span></p></div>" + @"
+<table>
+<tr><th ColSpan='2' style='text-align:center; color:white;'>Exchange On Premise OAuth Configuration</th></tr>
+<tr><th ColSpan='2' style='color:white;'>Summary - Get-User ApplicationAccount</th></tr>
+<tr><td><b>Get-User ApplicationAccount</b></td><td>
+<div> <b>UserAccountControl: </b> <span style='color:red'>AccountDisabled</span></div>
+<div> <b>RecipientTypeDetails: </b> <span style='color:green'>LinkedUser</span></div>
+</td></tr>
+<tr><th ColSpan='2' style='color:white;'>Summary - Get-AuthServer</th></tr>
+<tr><td><b>Get-AuthServer</b></td><td>
+<div> <b>Enabled: </b> <span style='color:green'>True</span></div>
+<div> <b>Note: </b> informational</div>
+</td></tr>
+</table>
+<table>
+<tr><th ColSpan='2' style='text-align:center; color:white;'><b>Exchange Online OAuth Configuration</b></th></tr>
+<tr><th ColSpan='2' style='color:white;'>Summary - Get-IntraOrganizationConnector</th></tr>
+<tr><td><b>Get-IntraOrganizationConnector</b></td><td>
+<div> <b>Enabled: </b> <span style='color:green'>True</span></div>
+</td></tr>
+<tr><th ColSpan='2' style='color:white;'>Summary - Test-OAuthConnectivity</th></tr>
+<tr><td><b>Test-OAuthConnectivity</b></td><td>
+<div class='red'> <b> - OAuth Test was completed with Error.</b></div>
+</td></tr>
+</table>
+"@
+    $realRunner = [pscustomobject]@{ Stage = 'FreeBusyCheckerReturned'; RunStatus = $null; Message = $null; ExchangeOnline = 'NotAuthorizedPartial'; ExchangeOnlineMessage = 'Exchange Online cmdlets not available to the app: Test-EOOAuthConnectivity'; NotAuthorizedCmdlets = @('Test-EOOAuthConnectivity') }
+    $realResult = & $module {
+        param($h, $r)
+        $oauthOnly = Test-FreeBusyOAuthOnly -Html $h
+        $found = @(ConvertFrom-FreeBusyCheckerHtml -Html $h -ServerName 'EXSRV01' -FreeBusyCheckerVersion '26.06.06.1238' -GenerationTime 't')
+        $found = @(Add-FreeBusyNotAuthorizedFinding -Findings $found -NotAuthorizedCmdlets @($r.NotAuthorizedCmdlets) -ServerName 'EXSRV01' -FreeBusyCheckerVersion '26.06.06.1238' -GenerationTime 't' -OAuthOnly:$oauthOnly)
+        $status = Resolve-FreeBusyRunStatus -Process ([pscustomobject]@{ Status = 'Exited' }) -RunnerStatus $r -HtmlFound $true -ParseFailed $false -OAuthOnly:$oauthOnly
+        $rows = @(New-FreeBusySummaryRow -Findings $found -RunStatus $status -RunMessage $r.ExchangeOnlineMessage -RunnerStatus $r -DurationSeconds 51 -ServerName 'EXSRV01' -FreeBusyCheckerVersion '26.06.06.1238' -GenerationTime 't' -OAuthOnly:$oauthOnly)
+        $html = ConvertTo-FreeBusyReportHtml -Summary $rows -Findings $found -RunStatus $status -RunMessage $r.ExchangeOnlineMessage
+        [pscustomobject]@{ OAuthOnly = $oauthOnly; Findings = $found; Status = $status; Summary = $rows; Html = $html }
+    } $realHtml $realRunner
+    $byKey = @{}; foreach ($row in $realResult.Summary) { $byKey["$($row.Side)/$($row.Auth)"] = $row }
+    Assert-FreeBusy ($realResult.OAuthOnly -and $realResult.Status -eq 'EXONotAuthorized') 'The real run: OAuth only and EXONotAuthorized.'
+    Assert-FreeBusy (@($realResult.Findings | Where-Object Status -eq 'Error').Count -eq 1 -and @($realResult.Findings | Where-Object { $_.Status -eq 'NotAuthorized' -and $_.Category -eq 'Test-OAuthConnectivity' }).Count -eq 1) 'The real run keeps its single Error and one NotAuthorized check.'
+    Assert-FreeBusy ($byKey['ExchangeOnPremises/DAuth'].SideStatus -eq 'NotApplicable' -and $byKey['ExchangeOnline/DAuth'].SideStatus -eq 'NotApplicable' -and
+        $byKey['ExchangeOnPremises/OAuth'].SideStatus -eq 'Completed' -and $byKey['ExchangeOnPremises/OAuth'].ErrorCount -eq 1 -and
+        $byKey['ExchangeOnline/OAuth'].SideStatus -eq 'NotAuthorizedPartial' -and $byKey['ExchangeOnline/OAuth'].NotAuthorizedCmdlets -eq 'Test-EOOAuthConnectivity') 'The real run: DAuth NotApplicable, on-premises OAuth Completed with its error, Exchange Online OAuth partial.'
+    Assert-FreeBusy ($realResult.Html -match '>2 / 2<' -and $realResult.Html -match 'Run status: <strong>EXONotAuthorized</strong>') 'The real run report shows both applicable sides tested.'
     $collectorText = [IO.File]::ReadAllText($collectorPath)
     Assert-FreeBusy ($collectorText -match 'Exchange_Hybrid_FreeBusy_Summary\.csv' -and $collectorText -match 'Exchange_Hybrid_FreeBusy_Findings\.csv') 'Both CSVs are published.'
     $receipts = [IO.File]::ReadAllText((Join-Path $SourceRoot 'Modules/SmartM365.Core/SmartM365-SourceReceipts.json.txt')) | ConvertFrom-Json

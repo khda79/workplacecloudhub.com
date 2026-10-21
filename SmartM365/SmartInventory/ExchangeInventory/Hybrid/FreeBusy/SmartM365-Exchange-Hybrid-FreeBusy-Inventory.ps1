@@ -20,7 +20,7 @@
     folder (last run only) and are read as text only; they are never published.
 
 .VERSION
-1.0.5
+1.0.6
 .REQUIREMENTS
     Windows PowerShell 5.1, elevated, on an Exchange server with the Exchange Management Tools.
     Modules: SmartM365 WindowsPowerShell5 compatibility module; ActiveDirectory (Windows feature RSAT-AD-PowerShell);
@@ -29,7 +29,7 @@
     Conditional: Mail.Send is required only when Graph mail is used; Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
     Script Name : SmartM365-Exchange-Hybrid-FreeBusy-Inventory.ps1
-    Version     : 1.0.5
+    Version     : 1.0.6
     Author      : https://github.com/khda79/workplacecloudhub.com
 #>
 
@@ -77,7 +77,7 @@ $tenantContextPath = & {
 . $tenantContextPath
 
 $ScriptName = "SmartM365-Exchange-Hybrid-FreeBusy-Inventory"
-$ScriptVersion = "1.0.5"
+$ScriptVersion = "1.0.6"
 $RunId = (Get-Date).ToString("yyyyMMdd-HHmmss")
 # Vendored Microsoft CSS-Exchange Free/Busy Checker (see ThirdParty\CSS-Exchange\FreeBusyChecker\PROVENANCE.md).
 $FreeBusyCheckerRelativePath = 'ThirdParty\CSS-Exchange\FreeBusyChecker\FreeBusyChecker.ps1'
@@ -843,14 +843,15 @@ function New-FreeBusySummaryRow {
 
     $scope = Get-FreeBusyCmdletScope
     $blocking = $RunStatus -notin @('Completed', 'EXONotConnected', 'EXONotAuthorized')
-    $notAuthorized = if ($RunnerStatus) { @($RunnerStatus.NotAuthorizedCmdlets) } else { @() }
+    $notAuthorized = @(if ($RunnerStatus) { $RunnerStatus.NotAuthorizedCmdlets })
     $exchangeOnline = if ($RunnerStatus) { [string]$RunnerStatus.ExchangeOnline } else { 'NotConnected' }
     $rows = foreach ($side in @('ExchangeOnPremises', 'ExchangeOnline')) {
         foreach ($auth in @('DAuth', 'OAuth')) {
             $sideRows = @($Findings | Where-Object { $_.Side -eq $side -and $_.Auth -eq $auth })
             # Missing cmdlets and roles are reported only when Free/Busy Checker actually ran.
             $notApplicable = (-not $blocking) -and $OAuthOnly -and $auth -eq 'DAuth'
-            $sideCmdlets = if ($blocking -or $notApplicable) { @() } else { @($notAuthorized | Where-Object { $side -eq 'ExchangeOnline' -and $scope.ContainsKey($_) -and $scope[$_].Auth -eq $auth }) }
+            # @() outside the if: an if returning one cmdlet yields a scalar, and .Count on it fails under strict mode in 5.1.
+            $sideCmdlets = @(if (-not ($blocking -or $notApplicable)) { $notAuthorized | Where-Object { $side -eq 'ExchangeOnline' -and $scope.ContainsKey($_) -and $scope[$_].Auth -eq $auth } })
             $sideStatus = if ($blocking) { 'NotRun' }
                 elseif ($side -eq 'ExchangeOnline' -and $exchangeOnline -eq 'NotConnected') { 'NotConnected' }
                 elseif ($notApplicable) { 'NotApplicable' }
