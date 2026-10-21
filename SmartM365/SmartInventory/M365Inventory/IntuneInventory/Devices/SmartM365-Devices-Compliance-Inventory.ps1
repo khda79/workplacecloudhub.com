@@ -48,7 +48,7 @@ Uses interactive authentication instead of app-only certificate authentication.
     Version : 1.28
 
 .VERSION
-1.28
+1.29
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication.
@@ -326,7 +326,7 @@ $LogAllRootPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'L
 # ==========================================================
 $modulePath = & { $d = $PSScriptRoot; while ($d) { $p = Join-Path $d 'Modules\SmartM365.Core\SmartM365.Core.psd1'; if (Test-Path -LiteralPath $p) { return $p }; $parent = Split-Path -Path $d -Parent; if ($parent -eq $d) { break }; $d = $parent }; throw 'SmartM365.Core module not found.' }
 try {
-    Import-Module -Name $modulePath -MinimumVersion '1.0.87' -ErrorAction Stop
+    Import-Module -Name $modulePath -MinimumVersion '1.0.99' -ErrorAction Stop
 } catch {
     Write-Host "Failed to import SmartM365.Core module from '$modulePath' : $_" -ForegroundColor Red
     $smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; $smartM365RunGuard.ExitCode=(1); exit $smartM365RunGuard.ExitCode
@@ -335,7 +335,7 @@ try {
 # ==========================================================
 # Fixed output paths and transcript
 # ==========================================================
-$ScriptVersion = "1.28"
+$ScriptVersion = "1.29"
 $ScriptName = [System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
 $TaskName = "$ScriptName v$ScriptVersion"
 $ts = Get-Date -Format 'yyyyMMdd_HHmmss'
@@ -700,10 +700,11 @@ function Invoke-WithRetry {
             if ($script:GraphRequestDelayMs -gt 0) { Start-Sleep -Milliseconds $script:GraphRequestDelayMs }
             return & $Script
         } catch {
-            $statusCode = $null
-            try { if ($_.Exception.Response) { $statusCode = [int]$_.Exception.Response.StatusCode } } catch {}
+            # 401/403 never retried; 408/429/5xx, timeouts and connection resets retried.
+            $classification = Test-SmartM365GraphRetryableError -ErrorRecord $_
+            $statusCode = $classification.StatusCode
             $message = Get-ShortGraphErrorMessage -ErrorRecord $_
-            $isTransient = $statusCode -in @(429, 500, 502, 503, 504) -or $message -match 'TooManyRequests|throttl|timeout|temporarily unavailable|InternalServerError'
+            $isTransient = $classification.Retry
 
             if (-not $isTransient -or $attempt -ge $MaxAttempts) {
                 $statusText = if ($statusCode) { $statusCode } else { 'unknown' }
@@ -1277,6 +1278,15 @@ function Invoke-CompliancePolicyExport {
     }
 
     $downloadUrl = [string](Get-SafeProperty -Object $job -Name 'url')
+    # The download URL can lag the completed status by a few seconds.
+    for ($urlPoll = 1; [string]::IsNullOrWhiteSpace($downloadUrl) -and $urlPoll -le 3; $urlPoll++) {
+        Write-ComplianceWarning -Message ("The completed compliance settings export job has no download URL yet; polling again ({0}/3)." -f $urlPoll)
+        Start-Sleep -Seconds 5
+        $job = Invoke-WithRetry -Operation 'Poll Intune compliance settings export job' -Script {
+            Invoke-MgGraphRequest -Method GET -Uri "$exportUri/$([uri]::EscapeDataString($jobId))" -ErrorAction Stop
+        }
+        $downloadUrl = [string](Get-SafeProperty -Object $job -Name 'url')
+    }
     if ([string]::IsNullOrWhiteSpace($downloadUrl)) { throw 'The completed Intune compliance settings export job returned no download URL.' }
 
     $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("SmartM365-ComplianceExport-{0}" -f [guid]::NewGuid().ToString('N'))
@@ -1285,7 +1295,7 @@ function Invoke-CompliancePolicyExport {
         $extractPath = Join-Path $tempRoot 'content'
         $zipPath = Join-Path $tempRoot 'export.zip'
         New-Item -Path $extractPath -ItemType Directory -Force -ErrorAction Stop | Out-Null
-        Invoke-WebRequest -Uri $downloadUrl -OutFile $zipPath -ErrorAction Stop
+        Invoke-SmartM365ExportFileDownload -Url $downloadUrl -OutFile $zipPath -Operation 'Intune compliance settings export download' | Out-Null
         Expand-Archive -LiteralPath $zipPath -DestinationPath $extractPath -Force
         $csvFile = Get-ChildItem -LiteralPath $extractPath -Filter '*.csv' -File -Recurse | Select-Object -First 1
         if (-not $csvFile) { throw 'The Intune compliance settings export contained no CSV file.' }

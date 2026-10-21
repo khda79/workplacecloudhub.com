@@ -2,11 +2,13 @@
 .SYNOPSIS
 Offline regression tests for weekly history, issue history, Autopatch and mailbox finalization.
 .VERSION
-1.0.1
+1.0.2
 #>
 [CmdletBinding()]
 param([ValidateSet('History','Issue','Autopatch','Mailbox','All')][string]$Case='All')
 $ErrorActionPreference='Stop'
+# Collector functions call exported Core helpers (Graph error classification, export download), as in production.
+Import-Module (Join-Path (Split-Path $PSScriptRoot -Parent) 'Modules/SmartM365.Core/SmartM365.Core.psd1') -MinimumVersion '1.0.99' -Force -Global -WarningAction SilentlyContinue
 Import-Module (Join-Path $PSScriptRoot '../Modules/SmartM365.Core/SmartM365.JsonTransport.psd1') -Force
 $module=Get-Module SmartM365.JsonTransport
 $originalPolicy=& $module { (Get-Command Get-SmartM365JsonTransportPolicy).ScriptBlock }

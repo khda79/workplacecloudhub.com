@@ -44,7 +44,7 @@
     Version : 1.35
 
 .VERSION
-1.35
+1.36
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication.
@@ -332,7 +332,7 @@ $Thumb = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'Thumb' -De
 # ==========================================================
 $modulePath = & { $d = $PSScriptRoot; while ($d) { $p = Join-Path $d 'Modules\SmartM365.Core\SmartM365.Core.psd1'; if (Test-Path -LiteralPath $p) { return $p }; $parent = Split-Path -Path $d -Parent; if ($parent -eq $d) { break }; $d = $parent }; throw 'SmartM365.Core module not found.' }
 try {
-    Import-Module -Name $modulePath -MinimumVersion '1.0.93' -ErrorAction Stop
+    Import-Module -Name $modulePath -MinimumVersion '1.0.99' -ErrorAction Stop
 } catch {
     Write-Host "Failed to import SmartM365.Core module from '$modulePath': $_" -ForegroundColor Red
     $smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; $smartM365RunGuard.ExitCode=(1); exit $smartM365RunGuard.ExitCode
@@ -341,7 +341,7 @@ try {
 # ==========================================================
 # Script metadata
 # ==========================================================
-$ScriptVersion = "1.35"
+$ScriptVersion = "1.36"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion"
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'DiscoveredAppsCsvLogFolderPath' -DefaultValue $OutputPath
 if (-not $PSBoundParameters.ContainsKey('DelayMs')) {
@@ -568,17 +568,27 @@ function Invoke-GraphPagedRequest {
             try {
                 $script:Stat_GraphCalls++
                 $graphStatusCode = $null
-                $response = Invoke-MgGraphRequest -Method GET -Uri $currentUri -OutputType PSObject -SkipHttpErrorCheck -StatusCodeVariable graphStatusCode -ErrorAction Stop
+                $graphResponseHeaders = $null
+                $response = Invoke-MgGraphRequest -Method GET -Uri $currentUri -OutputType PSObject -SkipHttpErrorCheck -StatusCodeVariable graphStatusCode -ResponseHeadersVariable graphResponseHeaders -ErrorAction Stop
                 $statusCode = 0
                 try { $statusCode = [int]$graphStatusCode } catch {}
                 if ($statusCode -lt 200 -or $statusCode -ge 300) {
                     $message = Get-DiscoveredAppsGraphHttpErrorMessage -Response $response -StatusCode $statusCode
-                    $isTransient = $statusCode -in @(408, 409, 429, 500, 502, 503, 504) -or $message -match 'TooManyRequests|throttl|timeout|temporarily unavailable|InternalServerError'
+                    $isTransient = $statusCode -notin @(401, 403) -and ($statusCode -in @(408, 409, 429, 500, 502, 503, 504) -or $message -match 'TooManyRequests|throttl|timeout|temporarily unavailable|InternalServerError')
                     if (-not $isTransient -or $attempt -ge $MaxRetries) {
                         throw ("Graph request failed. Status={0}; Attempts={1}; Uri={2}; Message={3}" -f $statusCode, $attempt, $currentUri, $message)
                     }
 
-                    $retryAfter = Get-GraphRetryDelaySeconds -ErrorRecord $null -Attempt $attempt -DefaultSeconds $DefaultRetrySeconds -MaximumSeconds $script:GraphRetryMaxSeconds
+                    # The HTTP-status path has no error record: Retry-After comes from the response headers.
+                    $headerRecord = $null
+                    $serverRetryAfter = $null
+                    try { if ($graphResponseHeaders) { $serverRetryAfter = @($graphResponseHeaders['Retry-After'])[0] } } catch { $serverRetryAfter = $null }
+                    if ($serverRetryAfter) {
+                        $headerException = [Exception]::new('Retry-After from the Graph response.')
+                        $headerException.Data['Retry-After'] = [string]$serverRetryAfter
+                        $headerRecord = [Management.Automation.ErrorRecord]::new($headerException, 'GraphRetryAfter', 'NotSpecified', $null)
+                    }
+                    $retryAfter = Get-GraphRetryDelaySeconds -ErrorRecord $headerRecord -Attempt $attempt -DefaultSeconds $DefaultRetrySeconds -MaximumSeconds $script:GraphRetryMaxSeconds
                     $script:Stat_ThrottleRetries++
                     WriteLog -Message ("Graph transient failure on [$currentUri]. Status={0}; attempt {1}/{2}; waiting {3}s." -f $statusCode, $attempt, $MaxRetries, $retryAfter) 'INFO'
                     Start-Sleep -Seconds $retryAfter
@@ -611,11 +621,11 @@ function Invoke-GraphPagedRequest {
 
                 $success = $true
             } catch {
-                $statusCode = $null
-                try { if ($_.Exception.Response) { $statusCode = [int]$_.Exception.Response.StatusCode } } catch {}
+                $classification = Test-SmartM365GraphRetryableError -ErrorRecord $_ -RetryConflict
+                $statusCode = $classification.StatusCode
                 $message = Get-ShortGraphErrorMessage -ErrorRecord $_
                 if (-not $statusCode -and $message -match 'TooManyRequests|\b429\b') { $statusCode = 429 }
-                $isTransient = $statusCode -in @(408, 409, 429, 500, 502, 503, 504) -or $message -match 'TooManyRequests|throttl|timeout|temporarily unavailable|InternalServerError'
+                $isTransient = $classification.Retry -or ($statusCode -eq 429)
 
                 if (-not $isTransient -or $attempt -ge $MaxRetries) {
                     $statusText = if ($statusCode) { $statusCode } else { 'unknown' }

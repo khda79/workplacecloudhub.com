@@ -2,7 +2,7 @@
 .SYNOPSIS
 Synthetic regression tests for the complete SmartInventory Microsoft Graph collector audit.
 .VERSION
-1.0.25
+1.0.26
 #>
 [CmdletBinding()]
 param(
@@ -12,6 +12,8 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+# Collector functions call exported Core helpers (Graph error classification, export download), as in production.
+Import-Module (Join-Path (Split-Path $PSScriptRoot -Parent) 'Modules/SmartM365.Core/SmartM365.Core.psd1') -MinimumVersion '1.0.99' -Force -Global -WarningAction SilentlyContinue
 if (-not $SourceRoot) { $SourceRoot = Split-Path $PSScriptRoot -Parent }
 $repoRoot = Split-Path $SourceRoot -Parent
 $results = New-Object 'System.Collections.Generic.List[object]'
@@ -316,7 +318,7 @@ d1,p2,s9,1,u1,i9,firewallEnabled,,Not compliant,,,,
                     if($Method-eq'POST'){return [pscustomobject]@{id='synthetic-job'}}
                     return [pscustomobject]@{status='completed';url='https://example.invalid/synthetic.zip'}
                 }
-                function script:Invoke-WebRequest { param($Uri,$OutFile,$ErrorAction) [IO.File]::WriteAllBytes($OutFile,[byte[]]@()) }
+                function script:Invoke-SmartM365ExportFileDownload { param($Url,$OutFile,$Operation) $null=$Url,$Operation; [IO.File]::WriteAllBytes($OutFile,[byte[]]@()); $OutFile }
                 function script:Expand-Archive { param($LiteralPath,$DestinationPath,[switch]$Force) Copy-Item -LiteralPath $script:fixtureCsv -Destination (Join-Path $DestinationPath 'fixture.csv') -Force }
                 function script:Write-SmartM365CsvAtomically {
                     param($Data,$Path,$Columns)

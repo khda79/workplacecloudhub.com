@@ -4597,7 +4597,7 @@ function Get-SmartM365GraphErrorStatusCode {
     try { if ($ErrorRecord.Exception.PSObject.Properties['ResponseStatusCode'] -and $ErrorRecord.Exception.ResponseStatusCode) { return [int]$ErrorRecord.Exception.ResponseStatusCode } } catch { Write-Verbose $_.Exception.Message }
     try { if ($ErrorRecord.Exception.Data['StatusCode']) { return [int]$ErrorRecord.Exception.Data['StatusCode'] } } catch { Write-Verbose $_.Exception.Message }
     $message = [string]$ErrorRecord.Exception.Message
-    $numeric = [regex]::Match($message, '(?i)(?:\bstatus(?: code)?:?\s*|does not indicate success:\s*)(\d{3})\b')
+    $numeric = [regex]::Match($message, '(?i)(?:\bstatus(?: code)?:?\s*|\bHTTP\s+|does not indicate success:\s*)(\d{3})\b')
     if ($numeric.Success) { return [int]$numeric.Groups[1].Value }
     $named = [regex]::Match($message, '(?i)(?:does not indicate success:\s*|^)(?<Name>[A-Za-z]+)\s*\(')
     if ($named.Success) {
@@ -4605,6 +4605,69 @@ function Get-SmartM365GraphErrorStatusCode {
         if ([Enum]::TryParse([System.Net.HttpStatusCode], $named.Groups['Name'].Value, $true, [ref]$parsed) -and [int]$parsed -ge 400) { return [int]$parsed }
     }
     return $null
+}
+
+<#
+.SYNOPSIS
+One rule for collector retries: 401/403 never retried; 408, 429, 5xx (409 when requested), timeouts and
+connection resets retried. Returns the status so callers can log it. Exported for collectors.
+#>
+function Test-SmartM365GraphRetryableError {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$ErrorRecord,
+        [switch]$RetryConflict
+    )
+
+    $statusCode = Get-SmartM365GraphErrorStatusCode -ErrorRecord $ErrorRecord
+    $retryCodes = @(408, 429, 500, 502, 503, 504) + @(if ($RetryConflict) { 409 })
+    $retry = $statusCode -notin @(401, 403) -and ($statusCode -in $retryCodes -or (Test-SmartM365GraphTransientError -ErrorRecord $ErrorRecord -StatusCode $statusCode))
+    return [pscustomobject]@{ Retry = [bool]$retry; StatusCode = $statusCode }
+}
+
+<#
+.SYNOPSIS
+Downloads a completed Intune export (a pre-signed storage URL). No Authorization header is ever sent:
+storage rejects a bearer token on a signed URL with 403. Transient errors are retried with progressive
+waits; a 403/404 is retried only on the first attempts (the blob can lag the "completed" status). The real
+error is logged with its status; the signature of the URL never reaches the log. Exported for collectors.
+#>
+function Invoke-SmartM365ExportFileDownload {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Url,
+        [Parameter(Mandatory)][string]$OutFile,
+        [string]$Operation = 'Intune export download',
+        [ValidateRange(1, 10)][int]$MaxAttempts = 6,
+        [ValidateRange(0, 10)][int]$NotReadyAttempts = 3
+    )
+
+    $safeUrl = try { ([uri]$Url).GetLeftPart([UriPartial]::Path) } catch { '<invalid url>' }
+    $partial = '{0}.{1}.partial' -f $OutFile, [guid]::NewGuid().ToString('N')
+    for ($attempt = 1; ; $attempt++) {
+        try {
+            $params = @{ Method = 'GET'; Uri = $Url; OutFile = $partial; ErrorAction = 'Stop'; TimeoutSec = (Get-SmartM365NetworkCallTimeout -TimeoutSeconds (Get-SmartM365NetworkSetting -Name 'SharePointUploadTransferTimeoutSeconds') -Operation $Operation) }
+            Invoke-WebRequest @params | Out-Null
+            Move-Item -LiteralPath $partial -Destination $OutFile -Force
+            if ($attempt -gt 1) { WriteLog -Message ("{0} succeeded on attempt {1}: {2}" -f $Operation, $attempt, $safeUrl) -Level 'INFO' }
+            return $OutFile
+        }
+        catch {
+            if (Test-Path -LiteralPath $partial) { Remove-Item -LiteralPath $partial -Force -ErrorAction SilentlyContinue }
+            $statusCode = Get-SmartM365GraphErrorStatusCode -ErrorRecord $_
+            $notReady = $statusCode -in @(403, 404) -and $attempt -le $NotReadyAttempts
+            $transient = $statusCode -notin @(401, 403, 404) -and ($statusCode -in @(408, 429, 500, 502, 503, 504) -or (Test-SmartM365GraphTransientError -ErrorRecord $_ -StatusCode $statusCode))
+            $statusText = if ($statusCode) { $statusCode } else { 'unknown' }
+            if ((-not $notReady -and -not $transient) -or $attempt -ge $MaxAttempts) {
+                $failure = [IO.IOException]::new(("{0} failed after {1} attempt(s). Status={2}; Url={3}; Error={4}" -f $Operation, $attempt, $statusText, $safeUrl, $_.Exception.Message), $_.Exception)
+                if ($statusCode) { $failure.Data['StatusCode'] = $statusCode }
+                throw $failure
+            }
+            $delay = if ($notReady) { 5 * $attempt } else { Get-SmartM365GraphRetryAfterSeconds -ErrorRecord $_ -DefaultSeconds (10 * $attempt) -MaximumSeconds 120 }
+            WriteLog -Message ("{0} attempt {1}/{2} failed. Status={3}; Error={4}; retrying in {5}s: {6}" -f $Operation, $attempt, $MaxAttempts, $statusText, $_.Exception.Message, $delay, $safeUrl) -Level 'WARNING'
+            Wait-SmartM365NetworkRetry -Seconds $delay -Operation $Operation
+        }
+    }
 }
 
 # Read-only Graph probe of the preflight. 401/403 and other definitive answers fail at once; 408, 429,
@@ -6595,7 +6658,7 @@ Export-ModuleMember -Function `
     ExportAndCopyCsv, ExportAndCopyCsvFromConvert, Save-SmartM365WeeklyInventoryHistory, Add-SmartM365WeeklyHistory, `
     NewRemoteScheduledTaskAndWait, `
     Invoke-SmartM365Preflight, Initialize-SmartM365ImportExcel, Connect-SmartM365CloudSession, Disconnect-SmartM365CloudSession, `
-    Get-SmartM365GraphErrorStatusCode, Test-SmartM365GraphTransientError, Get-SmartM365GraphRetryAfterSeconds
+    Get-SmartM365GraphErrorStatusCode, Test-SmartM365GraphTransientError, Get-SmartM365GraphRetryAfterSeconds, Test-SmartM365GraphRetryableError, Invoke-SmartM365ExportFileDownload
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor

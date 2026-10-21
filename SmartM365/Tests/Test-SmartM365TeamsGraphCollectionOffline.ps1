@@ -2,7 +2,7 @@
 .SYNOPSIS
 Synthetic regression tests for the bounded Teams Graph collector audit.
 .VERSION
-1.0.5
+1.0.6
 #>
 [CmdletBinding()]
 param(
@@ -11,6 +11,8 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+# Collector functions call exported Core helpers (Graph error classification, export download), as in production.
+Import-Module (Join-Path (Split-Path $PSScriptRoot -Parent) 'Modules/SmartM365.Core/SmartM365.Core.psd1') -MinimumVersion '1.0.99' -Force -Global -WarningAction SilentlyContinue
 if (-not $SourceRoot) { $SourceRoot = Split-Path $PSScriptRoot -Parent }
 $results = New-Object 'System.Collections.Generic.List[object]'
 $testRoot = Join-Path ([IO.Path]::GetTempPath()) ('SmartInventory-TeamsGraph-' + [guid]::NewGuid().ToString('N'))

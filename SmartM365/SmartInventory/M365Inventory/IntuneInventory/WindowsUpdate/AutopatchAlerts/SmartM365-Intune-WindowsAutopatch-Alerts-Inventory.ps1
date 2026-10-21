@@ -44,7 +44,7 @@ Uses device code authentication.
 .EXAMPLE
 pwsh -File .\SmartM365-Intune-WindowsAutopatch-Alerts-Inventory.ps1
 .VERSION
-1.25
+1.26
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication.
@@ -139,7 +139,7 @@ function Import-SmartM365CorePreflight {
     while ($searchRoot) {
         $modulePath = Join-Path -Path $searchRoot -ChildPath 'Modules\SmartM365.Core\SmartM365.Core.psd1'
         if (Test-Path -LiteralPath $modulePath) {
-            Import-Module -Name $modulePath -MinimumVersion '1.0.92' -Prefix Core -ErrorAction Stop
+            Import-Module -Name $modulePath -MinimumVersion '1.0.99' -Prefix Core -ErrorAction Stop
             return
         }
 
@@ -321,7 +321,7 @@ if ([string]::IsNullOrWhiteSpace($OutputFolder)) {
 if ([string]::IsNullOrWhiteSpace($LatestCsvFolderPath)) {
     $LatestCsvFolderPath = $OutputFolder
 }
-$ScriptVersion = "1.25"
+$ScriptVersion = "1.26"
 $ScriptName = [System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
 $StartTime = Get-Date
 $RunStamp = $StartTime.ToString('yyyyMMdd_HHmmss')
@@ -415,10 +415,10 @@ function Connect-GraphSession {
 function Get-AutopatchGraphStatusCode {
     param([Parameter(Mandatory = $true)]$ErrorRecord)
 
-    try { if ($ErrorRecord.Exception.Response.StatusCode) { return [int]$ErrorRecord.Exception.Response.StatusCode } } catch {}
-    $text = [string]$ErrorRecord
-    if ($text -match '\b(408|409|429|500|502|503|504)\b') { return [int]$Matches[1] }
-    if ($text -match '(?i)TooManyRequests|throttl') { return 429 }
+    # Response, Graph SDK status or "HTTP 503"/"Status: 500" text; a number elsewhere (a URL) is not a status.
+    $status = Get-SmartM365GraphErrorStatusCode -ErrorRecord $ErrorRecord
+    if ($status) { return [int]$status }
+    if ([string]$ErrorRecord -match '(?i)TooManyRequests|throttl') { return 429 }
     return 0
 }
 
@@ -449,7 +449,9 @@ function Invoke-AutopatchGraphRequest {
         }
         catch {
             $statusCode = Get-AutopatchGraphStatusCode -ErrorRecord $_
-            if ($statusCode -notin @(408, 409, 429, 500, 502, 503, 504) -or $attempt -ge $MaxAttempts) { throw }
+            # 401/403 never retried; 408/409/429/5xx, timeouts and connection resets retried.
+            $retryable = $statusCode -notin @(401, 403) -and ($statusCode -in @(408, 409, 429, 500, 502, 503, 504) -or ($statusCode -eq 0 -and (Test-SmartM365GraphTransientError -ErrorRecord $_ -StatusCode $null)))
+            if (-not $retryable -or $attempt -ge $MaxAttempts) { throw }
             $delay = Get-AutopatchGraphRetryDelaySeconds -ErrorRecord $_ -Attempt $attempt
             $script:GraphTransientRetryCount++
             Write-Log -Message ("Graph transient failure HTTP {0}; retry {1}/{2} in {3}s: {4}" -f $statusCode, $attempt, $MaxAttempts, $delay, $Uri) -Level WARN
@@ -545,10 +547,12 @@ function Wait-ExportJob {
     )
 
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    $urlWaits = 0
     do {
         $job = Invoke-AutopatchGraphRequest -Method GET -Uri ("https://graph.microsoft.com/v1.0/deviceManagement/reports/exportJobs/{0}" -f $JobId)
         Write-Log -Message ("Export job [{0}] status: {1}" -f $JobId, $job.status)
-        if ($job.status -eq 'completed') { return $job }
+        # The download URL can lag the completed status by a few seconds.
+        if ($job.status -eq 'completed' -and (-not [string]::IsNullOrWhiteSpace([string]$job.url) -or ++$urlWaits -gt 3)) { return $job }
         if ($job.status -eq 'failed') { throw "Export job failed: $JobId" }
         Start-Sleep -Seconds $PollSeconds
     } while ((Get-Date) -lt $deadline)
@@ -569,7 +573,8 @@ function Import-ExportedCsv {
     $tempFolder = Join-Path -Path ([System.IO.Path]::GetTempPath()) -ChildPath ("{0}_{1}" -f $ReportName, $job.id)
 
     try {
-        Invoke-WebRequest -Uri $completedJob.url -OutFile $tempZip
+        if ([string]::IsNullOrWhiteSpace([string]$completedJob.url)) { throw "Completed export job returned no URL for report [$ReportName]." }
+        Invoke-SmartM365ExportFileDownload -Url ([string]$completedJob.url) -OutFile $tempZip -Operation "Autopatch export download ($ReportName)" | Out-Null
         Ensure-Folder -Path $tempFolder
         Expand-Archive -Path $tempZip -DestinationPath $tempFolder -Force
         $csvFile = Get-ChildItem -Path $tempFolder -Filter '*.csv' -File | Select-Object -First 1

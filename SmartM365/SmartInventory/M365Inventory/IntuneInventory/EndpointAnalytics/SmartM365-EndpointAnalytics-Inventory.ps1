@@ -67,7 +67,7 @@ pwsh -File .\SmartM365-EndpointAnalytics-Inventory.ps1 -Tenant test -Reports All
 pwsh -File .\SmartM365-EndpointAnalytics-Inventory.ps1 -Tenant test -Reports All -IncludeBatteryHealth -ValidateOnly -Connect
 
 .VERSION
-1.1.1
+1.1.2
 .REQUIREMENTS
 PowerShell 7+.
 Modules: SmartM365.Core 1.0.69+; Microsoft.Graph.Authentication.
@@ -119,7 +119,7 @@ $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -Requi
 try {
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-$script:ScriptVersion = '1.1.1'
+$script:ScriptVersion = '1.1.2'
 $script:ScriptName = [System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
 $script:RunId = [guid]::NewGuid().Guid
 $script:CollectedAtUtc = [datetime]::UtcNow.ToString('o')
@@ -262,7 +262,7 @@ function Initialize-EARuntime {
     if ((Split-Path -Path $moduleRoot -Leaf) -eq 'Config') { $moduleRoot = Split-Path -Path $moduleRoot -Parent }
     $coreManifest = Join-Path $moduleRoot 'Modules\SmartM365.Core\SmartM365.Core.psd1'
     if (-not (Test-Path -LiteralPath $coreManifest)) { throw "SmartM365.Core manifest was not found: $coreManifest" }
-    Import-Module -Name $coreManifest -MinimumVersion '1.0.87' -Prefix Core -Force -ErrorAction Stop
+    Import-Module -Name $coreManifest -MinimumVersion '1.0.99' -Prefix Core -Force -ErrorAction Stop
     $script:CoreImported = $true
 
     if ([string]::IsNullOrWhiteSpace($OutputPath)) {
@@ -373,7 +373,9 @@ function Get-EAStatusCode {
     if ($ErrorRecord.Exception -and $ErrorRecord.Exception.Data.Contains('StatusCode')) { return [int]$ErrorRecord.Exception.Data['StatusCode'] }
     try { if ($ErrorRecord.Exception.Response.StatusCode) { return [int]$ErrorRecord.Exception.Response.StatusCode } }
     catch { Microsoft.PowerShell.Utility\Write-Debug "No HTTP response status was exposed: $($_.Exception.Message)" }
-    if ([string]$ErrorRecord -match '\b(400|401|403|404|408|409|429|500|502|503|504)\b') { return [int]$Matches[1] }
+    # Graph SDK status or "HTTP 503"/"Status: 500" text; a number elsewhere (a URL) is not a status.
+    $coreStatus = Get-SmartM365GraphErrorStatusCode -ErrorRecord $ErrorRecord
+    if ($coreStatus) { return [int]$coreStatus }
     if ([string]$ErrorRecord -match '(?i)TooManyRequests|throttl') { return 429 }
     return 0
 }
@@ -410,7 +412,9 @@ function Invoke-EAGraphRequest {
         }
         catch {
             $statusCode = Get-EAStatusCode $_
-            if ($statusCode -notin @(408,409,429,500,502,503,504) -or $attempt -ge $RetryCount) { throw }
+            # 401/403 never retried; 408/409/429/5xx, timeouts and connection resets retried.
+            $retryable = $statusCode -notin @(401,403) -and ($statusCode -in @(408,409,429,500,502,503,504) -or ($statusCode -eq 0 -and -not $_.Exception.Data['EndpointAnalyticsGrain'] -and (Test-SmartM365GraphTransientError -ErrorRecord $_ -StatusCode $null)))
+            if (-not $retryable -or $attempt -ge $RetryCount) { throw }
             $delay = Get-EARetryAfterSeconds $_ $attempt
             Write-EALog ("Graph transient failure HTTP {0}; retry {1}/{2} in {3}s: {4}" -f $statusCode,$attempt,$RetryCount,$delay,$Uri) WARNING
             if (-not $NoSleep -and $delay -gt 0) { Start-Sleep -Seconds $delay }
@@ -440,6 +444,7 @@ function Wait-EAExportJob {
     )
     $deadline = [datetime]::UtcNow.AddSeconds($TimeoutSeconds)
     $poll = 0
+    $urlWaits = 0
     do {
         $poll++
         $job = if ($StatusProvider) { & $StatusProvider $poll } else {
@@ -449,7 +454,11 @@ function Wait-EAExportJob {
         $status = [string]$job.status
         Write-EALog ("Export job {0} status: {1}" -f $JobId,$status) DEBUG
         switch ($status.ToLowerInvariant()) {
-            'completed' { return $job }
+            'completed' {
+                # The download URL can lag the completed status by a few seconds.
+                if (-not [string]::IsNullOrWhiteSpace([string]$job.url) -or ++$urlWaits -gt 3) { return $job }
+                Write-EALog ("Export job {0} completed without a URL yet; polling again ({1}/3)." -f $JobId,$urlWaits) WARNING
+            }
             'failed' {
                 $failureText = if ($job.PSObject.Properties['error']) { [string]$job.error } else { 'No failure detail returned.' }
                 throw "Endpoint Analytics export job failed: $JobId. $failureText"
@@ -460,18 +469,10 @@ function Wait-EAExportJob {
     throw "Endpoint Analytics export job timed out after $TimeoutSeconds seconds: $JobId"
 }
 
+# Pre-signed storage URL: no Authorization header, real error logged, transient and not-yet-ready errors retried.
 function Invoke-EAWebDownload {
     param([Parameter(Mandatory)][string]$Uri, [Parameter(Mandatory)][string]$OutFile)
-    for ($attempt=1; $attempt -le $MaxRetryCount; $attempt++) {
-        try { Invoke-WebRequest -Uri $Uri -OutFile $OutFile -ErrorAction Stop; return }
-        catch {
-            $statusCode = Get-EAStatusCode $_
-            if ($statusCode -notin @(408,429,500,502,503,504) -or $attempt -ge $MaxRetryCount) { throw }
-            $delay = Get-EARetryAfterSeconds $_ $attempt
-            Write-EALog ("ZIP download retry {0}/{1} in {2}s (HTTP {3})." -f $attempt,$MaxRetryCount,$delay,$statusCode) WARNING
-            if ($delay -gt 0) { Start-Sleep -Seconds $delay }
-        }
-    }
+    Invoke-SmartM365ExportFileDownload -Url $Uri -OutFile $OutFile -Operation 'Endpoint Analytics export download' -MaxAttempts ([Math]::Max(1,[Math]::Min(10,$MaxRetryCount))) | Out-Null
 }
 
 function Import-EAExportedCsv {

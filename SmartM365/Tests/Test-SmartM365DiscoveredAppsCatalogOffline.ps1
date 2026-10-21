@@ -5,12 +5,14 @@ Offline regression tests for discovered application catalog identity and coverag
 Loads the actual collector helpers through AST. Graph responses, relation pages
 and log sinks are synthetic; no authentication, tenant config or CSV publication.
 .VERSION
-1.0.0
+1.0.1
 #>
 [CmdletBinding()]
 param()
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+# Collector functions call exported Core helpers (Graph error classification, export download), as in production.
+Import-Module (Join-Path (Split-Path $PSScriptRoot -Parent) 'Modules/SmartM365.Core/SmartM365.Core.psd1') -MinimumVersion '1.0.99' -Force -Global -WarningAction SilentlyContinue
 $sourcePath = Join-Path (Split-Path $PSScriptRoot -Parent) 'SmartInventory/M365Inventory/IntuneInventory/Applications/SmartM365-Intune-DiscoveredApps-Inventory.ps1'
 $tokens = $null; $parseErrors = $null
 $ast = [Management.Automation.Language.Parser]::ParseFile($sourcePath, [ref]$tokens, [ref]$parseErrors)
@@ -41,7 +43,8 @@ function WriteLog { param([string]$Message, [string]$Level) $script:logs.Add("$L
 function Start-Sleep { param([int]$Seconds, [int]$Milliseconds) }
 function Invoke-MgGraphRequest {
     [CmdletBinding()]
-    param($Method, $Uri, $OutputType, [switch]$SkipHttpErrorCheck, $StatusCodeVariable, $Body, $ContentType)
+    param($Method, $Uri, $OutputType, [switch]$SkipHttpErrorCheck, $StatusCodeVariable, $ResponseHeadersVariable, $Body, $ContentType)
+    if ($ResponseHeadersVariable) { Set-Variable -Name $ResponseHeadersVariable -Value @{} -Scope 1 }
     $script:requests.Add("$Method $Uri")
     if ($script:responses.Count -eq 0) { throw 'Unexpected synthetic Graph request.' }
     $fixture = $script:responses.Dequeue()

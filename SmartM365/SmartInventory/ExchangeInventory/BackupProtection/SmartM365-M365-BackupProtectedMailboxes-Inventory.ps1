@@ -33,7 +33,7 @@
     Limits the number of items for a test run without replacing canonical latest exports.
 
 .VERSION
-1.19
+1.20
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication.
@@ -103,7 +103,7 @@ $script:SmartM365EffectiveConfig = Initialize-SmartM365TenantContext -Tenant $Te
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $MaximumFunctionCount = 32768
-$ScriptVersion = "1.19"
+$ScriptVersion = "1.20"
 $TaskName = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion"
 $CurrentOperation = 'Initialize'
 $script:SmartM365GlobalConfig = $null
@@ -122,7 +122,7 @@ function Import-SmartM365CoreModule {
     while ($searchRoot) {
         $candidate = Join-Path -Path $searchRoot -ChildPath 'Modules\SmartM365.Core\SmartM365.Core.psd1'
         if (Test-Path -LiteralPath $candidate) {
-            Import-Module -Name $candidate -MinimumVersion '1.0.87' -Force -ErrorAction Stop
+            Import-Module -Name $candidate -MinimumVersion '1.0.99' -Force -ErrorAction Stop
             return
         }
         $parent = Split-Path -Path $searchRoot -Parent
@@ -313,14 +313,24 @@ function Invoke-SmartM365GraphCollectionRequest {
         }
         $pageIndex++
         WriteLog -Message ("Calling Graph (page {0}): {1}" -f $pageIndex, $nextUri) -Level DEBUG
-        try {
-            $rawJson = Invoke-MgGraphRequest -Method GET -Uri $nextUri -OutputType Json -ErrorAction Stop
-            $response = $rawJson | ConvertFrom-Json -ErrorAction Stop
-        }
-        catch {
-            $errorBody = Get-SmartM365GraphErrorBody -ErrorRecord $_
-            WriteLog -Message ("Graph request failed on page {0} (cumulative items so far: {1}). Error: {2} Body: {3}" -f $pageIndex, $items.Count, $_.Exception.Message, $errorBody) -Level ERROR
-            throw
+        # 401/403 fail at once; 408/429/5xx, timeouts and connection resets retried (Retry-After honoured).
+        $response = $null
+        for ($attempt = 1; $null -eq $response; $attempt++) {
+            try {
+                $rawJson = Invoke-MgGraphRequest -Method GET -Uri $nextUri -OutputType Json -ErrorAction Stop
+                $response = $rawJson | ConvertFrom-Json -ErrorAction Stop
+            }
+            catch {
+                $classification = Test-SmartM365GraphRetryableError -ErrorRecord $_
+                if (-not $classification.Retry -or $attempt -ge 6) {
+                    $errorBody = Get-SmartM365GraphErrorBody -ErrorRecord $_
+                    WriteLog -Message ("Graph request failed on page {0} after {1} attempt(s) (cumulative items so far: {2}). Status: {3} Error: {4} Body: {5}" -f $pageIndex, $attempt, $items.Count, $classification.StatusCode, $_.Exception.Message, $errorBody) -Level ERROR
+                    throw
+                }
+                $delay = Get-SmartM365GraphRetryAfterSeconds -ErrorRecord $_ -DefaultSeconds ([int][Math]::Min(120, 5 * [Math]::Pow(2, $attempt - 1))) -MaximumSeconds 300
+                WriteLog -Message ("Graph transient failure on page {0}. Status={1}; attempt {2}/6; retrying in {3}s." -f $pageIndex, $classification.StatusCode, $attempt, $delay) -Level WARNING
+                Start-Sleep -Seconds $delay
+            }
         }
         $valueProperty = $response.PSObject.Properties['value']
         if (-not $valueProperty -or $null -eq $valueProperty.Value) {

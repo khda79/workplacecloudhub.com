@@ -3,7 +3,7 @@
 .SYNOPSIS
     Microsoft Teams tenant inventory with CSV exports and HTML alert summary.
 .VERSION
- 0.45
+ 0.46
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication; ImportExcel.
@@ -57,7 +57,7 @@ if ($PSBoundParameters.ContainsKey('MaxItems') -and $MaxItems -gt 0) {
     }
 }
 $ErrorActionPreference='Stop'; Set-StrictMode -Version Latest
-$ScriptVersion="0.45"
+$ScriptVersion="0.46"
 $ScriptBaseName = [System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
 $TaskName = $ScriptBaseName
 $RunStarted=Get-Date; $RunDateUtc=$RunStarted.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ',[Globalization.CultureInfo]::InvariantCulture); $RunId=[guid]::NewGuid().ToString(); $CurrentOperation='Initialize'
@@ -67,7 +67,7 @@ $tenantContextPath=&{ $d=$PSScriptRoot; while($d){ foreach($c in @((Join-Path $d
 . $tenantContextPath
 $TenantContext=Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot
 $ctxDir=Split-Path $tenantContextPath -Parent; $SmartM365Root=if((Split-Path $ctxDir -Leaf)-ieq 'Config'){Split-Path $ctxDir -Parent}else{$ctxDir}
-Import-Module -Name (Join-Path $SmartM365Root 'Modules\SmartM365.Core\SmartM365.Core.psd1') -MinimumVersion '1.0.95' -Force -ErrorAction Stop
+Import-Module -Name (Join-Path $SmartM365Root 'Modules\SmartM365.Core\SmartM365.Core.psd1') -MinimumVersion '1.0.99' -Force -ErrorAction Stop
 $LocalConfigPath=Join-Path $PSScriptRoot "$ScriptBaseName.local.json"; $LocalConfigPath = Resolve-SmartM365JsonConfigurationPath -Path $LocalConfigPath; $LocalTemplatePath=(Get-SmartM365JsonTemplateName -Path $LocalConfigPath)
 if(-not(Test-Path -LiteralPath $LocalConfigPath)){Initialize-SmartM365LocalJsonFromTemplate -Path $LocalConfigPath -TemplatePath $LocalTemplatePath -ConfigDescription 'script local configuration'|Out-Null}
 $ScriptConfig=Get-Content -LiteralPath $LocalConfigPath -Raw|ConvertFrom-Json
@@ -274,7 +274,8 @@ function Invoke-TeamsGraphBatch {
         try{
             $batchResponse=Invoke-MgGraphRequest -Method POST -Uri $batchUri -Body $body -ContentType 'application/json' -ErrorAction Stop
         }catch{
-            if($attempt-ge$MaxAttempts){throw}
+            # 401/403 and other definitive answers fail at once; only transient transport errors retry.
+            if($attempt-ge$MaxAttempts-or-not(Test-SmartM365GraphRetryableError -ErrorRecord $_).Retry){throw}
             $fallbackDelay=[Math]::Min(60,[Math]::Pow(2,$attempt)*5)
             $delay=Get-TeamsRetryDelay -ErrorRecord $_ -DefaultSeconds ([int]$fallbackDelay) -MaximumSeconds 60
             WriteLog -Message ("Teams Graph batch transport failed; attempt {0}/{1}; retry in {2} s: {3}" -f $attempt,$MaxAttempts,$delay,$_.Exception.Message) -Level INFO

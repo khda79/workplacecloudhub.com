@@ -2,10 +2,12 @@
 .SYNOPSIS
 Runs offline contract tests for the three new Microsoft 365 security evidence collectors.
 .VERSION
-1.0.2
+1.0.3
 #>
 [CmdletBinding()]param()
 $ErrorActionPreference='Stop'
+# Collector functions call exported Core helpers (Graph error classification, export download), as in production.
+Import-Module (Join-Path (Split-Path $PSScriptRoot -Parent) 'Modules/SmartM365.Core/SmartM365.Core.psd1') -MinimumVersion '1.0.99' -Force -Global -WarningAction SilentlyContinue
 $scripts=@(
     'SmartInventory\M365Inventory\Security\SecureScore\SmartM365-SecureScore-Inventory.ps1',
     'SmartInventory\M365Inventory\Security\AuthenticationMethods\SmartM365-AuthenticationMethodsRegistration-Inventory.ps1',

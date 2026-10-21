@@ -43,7 +43,7 @@ Stops automatically after DebugDeviceCount devices have been dumped.
 Number of devices for which to dump hardwareInformation properties when -DebugHardwareInfo is active.
 Default: 3.
 .VERSION
-1.17
+1.18
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication.
@@ -282,7 +282,7 @@ $OrgDomain = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'OrgDom
 # ==========================================================
 $ModulePath = & { $d = $PSScriptRoot; while ($d) { $p = Join-Path $d 'Modules\SmartM365.Core\SmartM365.Core.psd1'; if (Test-Path -LiteralPath $p) { return $p }; $parent = Split-Path -Path $d -Parent; if ($parent -eq $d) { break }; $d = $parent }; throw 'SmartM365.Core module not found.' }
 try {
-    Import-Module -Name $ModulePath -MinimumVersion '1.0.87' -ErrorAction Stop
+    Import-Module -Name $ModulePath -MinimumVersion '1.0.99' -ErrorAction Stop
 } catch {
     Write-Host "Failed to import SmartM365.Core module from '$ModulePath' : $_" -ForegroundColor Red
     $smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; $smartM365RunGuard.ExitCode=(1); exit $smartM365RunGuard.ExitCode
@@ -386,13 +386,14 @@ function Invoke-GraphRequestWithRetry {
             }
         } catch {
             $attempt++
-            $msg = $_.Exception.Message
 
             $d = Get-GraphErrorDetails -ErrorRecord $_
 
-            $isRetryable = $d.HttpStatus -in @(408, 409, 429, 500, 502, 503, 504)
-            if ($msg -match "Too Many Requests" -or $msg -match "\b429\b") { $isRetryable = $true }
-            if ($msg -match "temporarily unavailable" -or $msg -match "timeout|timed out" -or $msg -match "The remote server returned an error") { $isRetryable = $true }
+            # Numeric status from the response, the Graph SDK or the message: 401/403 never retried;
+            # 408/409/429/5xx, timeouts and connection resets retried.
+            $classification = Test-SmartM365GraphRetryableError -ErrorRecord $_ -RetryConflict
+            $d.HttpStatus = $classification.StatusCode
+            $isRetryable = $classification.Retry
 
             if (-not $isRetryable -or $attempt -gt $MaxRetries) {
                 throw
@@ -404,7 +405,7 @@ function Invoke-GraphRequestWithRetry {
             if ($d.RetryAfterSeconds -and $d.RetryAfterSeconds -gt 0) {
                 $sleepSeconds = [int]$d.RetryAfterSeconds
             } else {
-                $sleepSeconds = [Math]::Min(60, [Math]::Pow(2, $attempt))
+                $sleepSeconds = Get-SmartM365GraphRetryAfterSeconds -ErrorRecord $_ -DefaultSeconds ([int][Math]::Min(60, [Math]::Pow(2, $attempt))) -MaximumSeconds 300
             }
 
             WriteLog -Message "Graph request throttled/failed (attempt $attempt/$MaxRetries). Sleeping $sleepSeconds sec. Uri=$Uri. HttpStatus=$($d.HttpStatus). RequestId=$($d.RequestId). Error=$($d.RawError)" "WARNING"
@@ -620,7 +621,7 @@ function Try-GetHardwareInfo {
 # ==========================================================
 # Initialization via SmartM365.Core
 # ==========================================================
-$ScriptVersion = "1.17"
+$ScriptVersion = "1.18"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'DeviceBiosCsvLogFolderPath' -DefaultValue $OutputPath
 try {

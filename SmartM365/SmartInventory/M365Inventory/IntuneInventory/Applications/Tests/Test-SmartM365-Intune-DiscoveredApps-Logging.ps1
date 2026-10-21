@@ -6,7 +6,7 @@
     sample/physical row labels, and quiet retirement of an already absent
     SharePoint legacy file. No Graph connection or production CSV is used.
 .VERSION
-1.2
+1.3
 #>
 
 [CmdletBinding()]
@@ -46,7 +46,7 @@ $coreAst = [System.Management.Automation.Language.Parser]::ParseFile($coreModule
 if ($coreParseErrors.Count -gt 0) { throw ($coreParseErrors | Out-String) }
 # The quiet delete bounds each call with the Core network limits (Core 1.0.96).
 $script:SmartM365NetworkDeadline = $null
-foreach ($coreFunctionName in @('Invoke-SmartM365GraphDeleteQuietly', 'Get-SmartM365NetworkSetting', 'Get-SmartM365NetworkCallTimeout', 'Wait-SmartM365NetworkRetry', 'Test-SmartM365GraphTransientError')) {
+foreach ($coreFunctionName in @('Invoke-SmartM365GraphDeleteQuietly', 'Get-SmartM365NetworkSetting', 'Get-SmartM365NetworkCallTimeout', 'Wait-SmartM365NetworkRetry', 'Test-SmartM365GraphTransientError', 'Get-SmartM365GraphErrorStatusCode', 'Test-SmartM365GraphRetryableError')) {
     $coreDefinition = $coreAst.FindAll({
         param($node)
         $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
@@ -79,8 +79,10 @@ function Invoke-MgGraphRequest {
         [string]$Body,
         [string]$ContentType,
         [switch]$SkipHttpErrorCheck,
-        [string]$StatusCodeVariable
+        [string]$StatusCodeVariable,
+        [string]$ResponseHeadersVariable
     )
+    if ($ResponseHeadersVariable) { Set-Variable -Name $ResponseHeadersVariable -Value @{} -Scope 1 }
     $script:GraphAttempt++
     if ($script:GraphAttempt -eq 1) {
         Set-Variable -Name $StatusCodeVariable -Value 429 -Scope 1

@@ -98,7 +98,7 @@ function Initialize-SmartM365EvidenceRuntime {
     $root = [string](Get-SmartM365EvidenceProperty $EffectiveConfig @('SmartM365RootPath'))
     $coreManifest = Join-Path $root 'Modules\SmartM365.Core\SmartM365.Core.psd1'
     # Keep receipt exports visible to the caller and preserve the loaded Core context.
-    Import-Module -Name $coreManifest -MinimumVersion '1.0.87' -Global -ErrorAction Stop
+    Import-Module -Name $coreManifest -MinimumVersion '1.0.99' -Global -ErrorAction Stop
     $dataAllRoot = [string](Get-SmartM365EvidenceProperty $config @('DataAllRootPath'))
     $resolvedOutput = if (-not [string]::IsNullOrWhiteSpace($OutputPath)) { $OutputPath } elseif (-not [string]::IsNullOrWhiteSpace([string](Get-SmartM365EvidenceProperty $config @('ScriptCsvLogFolderPath')))) { [string](Get-SmartM365EvidenceProperty $config @('ScriptCsvLogFolderPath')) } else { Join-Path $dataAllRoot $DefaultOutputRelativePath }
     $resolvedLatest = if (-not [string]::IsNullOrWhiteSpace($LatestCsvFolderPath)) { $LatestCsvFolderPath } else { [string](Get-SmartM365EvidenceProperty $config @('LatestCsvFolderPath')) }
@@ -130,11 +130,12 @@ function Connect-SmartM365EvidenceGraph {
 
 function Get-SmartM365EvidenceStatusCode {
     param([Parameter(Mandatory)]$ErrorRecord)
-    try { if ($ErrorRecord.Exception.Response.StatusCode) { return [int]$ErrorRecord.Exception.Response.StatusCode } } catch {}
+    # Response, Graph SDK status or "HTTP 503"/"Status: 500" text; a number elsewhere (a URL) is not a status.
+    $status = Get-SmartM365GraphErrorStatusCode -ErrorRecord $ErrorRecord
+    if ($status) { return [int]$status }
     $message = [string]$ErrorRecord.Exception.Message
     if ($message -match '(?i)\bTooManyRequests\b') { return 429 }
     if ($message -match '(?i)\bServiceUnavailable\b') { return 503 }
-    if ($message -match '(?<!\d)(?<Code>400|401|403|404|408|409|429|500|502|503|504)(?!\d)') { return [int]$Matches.Code }
     return 0
 }
 
@@ -174,7 +175,9 @@ function Invoke-SmartM365EvidenceGraphRequest {
         }
         catch {
             $status = Get-SmartM365EvidenceStatusCode $_
-            if ($status -notin @(408,409,429,500,502,503,504) -or $attempt -eq $MaxRetryCount) { throw }
+            # 401/403 never retried; 408/409/429/5xx, timeouts and connection resets retried.
+            $retryable = $status -notin @(401,403) -and ($status -in @(408,409,429,500,502,503,504) -or ($status -eq 0 -and (Test-SmartM365GraphTransientError -ErrorRecord $_ -StatusCode $null)))
+            if (-not $retryable -or $attempt -eq $MaxRetryCount) { throw }
             $backoffSeconds = [Math]::Min(120,[int](5*[Math]::Pow(2,$attempt-1)))
             $retryAfterSeconds = Get-SmartM365EvidenceRetryAfterSeconds $_
             $delaySeconds = if ($retryAfterSeconds -gt 0) { [Math]::Min(300,[Math]::Max($backoffSeconds,$retryAfterSeconds)) } else { $backoffSeconds }
@@ -232,12 +235,19 @@ function Invoke-SmartM365EvidenceExportReport {
     } while ([datetime]::UtcNow -lt $deadline)
     if ($status -ine 'completed') { throw "Intune export job timed out for $ReportName." }
     $downloadUrl = [string](Get-SmartM365EvidenceProperty $job @('url'))
+    # The download URL can lag the completed status by a few seconds.
+    for ($urlPoll = 1; [string]::IsNullOrWhiteSpace($downloadUrl) -and $urlPoll -le 3; $urlPoll++) {
+        Write-SmartM365EvidenceLog "Completed export job for $ReportName has no URL yet; polling again ($urlPoll/3)." 'WARNING'
+        Start-Sleep -Seconds $PollSeconds
+        $job = Invoke-SmartM365EvidenceGraphRequest -Uri "$uri/$([uri]::EscapeDataString($jobId))"
+        $downloadUrl = [string](Get-SmartM365EvidenceProperty $job @('url'))
+    }
     if ([string]::IsNullOrWhiteSpace($downloadUrl)) { throw "Completed export job returned no URL for $ReportName." }
     $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) "SmartM365-Evidence-$([guid]::NewGuid().Guid)"
     try {
         $extract = Join-Path $tempRoot 'content'; $zip = Join-Path $tempRoot 'export.zip'
         New-Item -Path $extract -ItemType Directory -Force | Out-Null
-        Invoke-WebRequest -Uri $downloadUrl -OutFile $zip -ErrorAction Stop
+        Invoke-SmartM365ExportFileDownload -Url $downloadUrl -OutFile $zip -Operation "Intune export download ($ReportName)" | Out-Null
         Expand-Archive -LiteralPath $zip -DestinationPath $extract -Force
         $csv = Get-ChildItem -LiteralPath $extract -Filter '*.csv' -File -Recurse | Select-Object -First 1
         if (-not $csv) { throw "No CSV found in the Intune export for $ReportName." }
