@@ -1,4 +1,4 @@
-"""Version 1.0.0: preserve reconciliation content while merging its report page."""
+"""Version 1.1.0: retained populations and emphasized estimated purchases."""
 import hashlib,json,os
 from pathlib import Path
 import unittest
@@ -40,10 +40,24 @@ class LicenseViewTests(unittest.TestCase):
         for product in ['E3','F3','SE']:
             v=read(page/uid('product-'+product)/'visual.json')
             names=[f['field']['Measure']['Property'] for f in v['visual']['query']['queryState']['Data']['projections']]
-            self.assertEqual(len(names),4)
-            self.assertIn('Exchange Scenario '+product+' Buy Label',names)
+            self.assertEqual(len(names),2 if product=='SE' else 3)
+            self.assertNotIn('Exchange Scenario '+product+' Buy Label',names)
+            purchase=read(page/uid('purchase-'+product)/'visual.json')
+            headline=purchase['visual']['query']['queryState']['Data']['projections']
+            expected='Exchange Scenario SE Required Label' if product=='SE' else 'Exchange Scenario '+product+' Buy Label'
+            self.assertEqual([f['field']['Measure']['Property'] for f in headline],[expected])
+            size=lambda visual:float(visual['visual']['objects']['value'][0]['properties']['fontSize']['expr']['Literal']['Value'].rstrip('D'))
+            self.assertGreater(size(purchase),size(v))
+            self.assertEqual(purchase['parentGroupName'],uid('group'))
         for p in page.glob('*/visual.json'):
             pos=read(p)['position'];self.assertLessEqual(pos['x']+pos['width'],1920);self.assertLessEqual(pos['y']+pos['height'],1080)
+
+    def test_mailbox_population_kpis_and_explicit_service_gap(self):
+        v=read(ROOT/'pages'/TARGET/'visuals'/uid('population')/'visual.json')
+        names=[f['field']['Measure']['Property'] for f in v['visual']['query']['queryState']['Data']['projections']]
+        self.assertEqual(names,['Exchange Population Total','Exchange Population Register Retained',
+            'Exchange Population Service Label','Exchange Population Potential Label'])
+        self.assertEqual(v['parentGroupName'],uid('group'))
 
     def test_accessibility_describes_licensing_not_infrastructure(self):
         page=ROOT/'pages'/TARGET/'visuals'

@@ -844,6 +844,150 @@ table 'Exchange Mailbox Reconciliation'
 		formatString: @
 		displayFolder: Migration licensing scenario
 
+	/// Distinct same-batch native mailbox GUIDs. Mailbox counts are not licence quantities. Confirmed register retention takes precedence over duplicate pending hints.
+	measure 'Exchange Population Total' =
+			VAR _mailboxes=(VAR _scope=SELECTCOLUMNS('Exchange Mailbox Reconciliation',
+			    "Mailbox",'Exchange Mailbox Reconciliation'[Mailbox GUID],
+			    "Batch",'Exchange Mailbox Reconciliation'[Loaded Batch ID],
+			    "Object",LOWER(TRIM('Exchange Mailbox Reconciliation'[Object GUID])),
+			    "Address",LOWER(TRIM('Exchange Mailbox Reconciliation'[Primary SMTP Address])),
+			    "Retained",'Exchange Mailbox Reconciliation'[Retained On-premises])
+			VAR _exceptions=SELECTCOLUMNS(FILTER('Mailbox Migration Exceptions',
+			    'Mailbox Migration Exceptions'[Requires Review]=1),
+			    "ExceptionBatch",'Mailbox Migration Exceptions'[Loaded Batch ID],
+			    "Identity",LOWER(TRIM('Mailbox Migration Exceptions'[Mailbox Identity])),
+			    "Candidate",LOWER(TRIM('Mailbox Migration Exceptions'[Candidate Identity])),
+			    "ExceptionAddress",LOWER(TRIM('Mailbox Migration Exceptions'[Primary SMTP Address])))
+			VAR _batches=DISTINCT(SELECTCOLUMNS(_scope,"Batch",[Batch]))
+			VAR _valid=COUNTROWS(_batches)=1 && COUNTROWS(FILTER(_scope,[Batch]="" || [Mailbox]=""))=0
+			VAR _keys=DISTINCT(SELECTCOLUMNS(_scope,"Mailbox",[Mailbox],"Batch",[Batch]))
+			RETURN GENERATE(FILTER(_keys,_valid),
+			    VAR _mailbox=[Mailbox] VAR _batch=[Batch]
+			    VAR _rows=FILTER(_scope,[Mailbox]=_mailbox && [Batch]=_batch)
+			    VAR _retained=COUNTROWS(FILTER(_rows,[Retained]="Matched retained decision"))>0
+			    VAR _pending=SUMX(_rows,VAR _object=[Object] VAR _address=[Address]
+			        RETURN IF(COUNTROWS(FILTER(_exceptions,[ExceptionBatch]=_batch &&
+			            ((_object<>"" && ([Identity]="local_mailboxes|" & _object || [Candidate]="local_mailboxes|" & _object)) ||
+			             (_address<>"" && [ExceptionAddress]=_address))))>0,1,0))>0
+			    RETURN ROW("Population",SWITCH(TRUE(),_retained,"Register retained",_pending,"Register review","Potential before service review"))))
+			RETURN IF(COUNTROWS(_mailboxes)>0,COALESCE(COUNTROWS(FILTER(_mailboxes,TRUE())),0))
+		formatString: #,0
+		displayFolder: Migration mailbox populations
+
+	/// Distinct same-batch native mailbox GUIDs. Mailbox counts are not licence quantities. Confirmed register retention takes precedence over duplicate pending hints.
+	measure 'Exchange Population Register Retained' =
+			VAR _mailboxes=(VAR _scope=SELECTCOLUMNS('Exchange Mailbox Reconciliation',
+			    "Mailbox",'Exchange Mailbox Reconciliation'[Mailbox GUID],
+			    "Batch",'Exchange Mailbox Reconciliation'[Loaded Batch ID],
+			    "Object",LOWER(TRIM('Exchange Mailbox Reconciliation'[Object GUID])),
+			    "Address",LOWER(TRIM('Exchange Mailbox Reconciliation'[Primary SMTP Address])),
+			    "Retained",'Exchange Mailbox Reconciliation'[Retained On-premises])
+			VAR _exceptions=SELECTCOLUMNS(FILTER('Mailbox Migration Exceptions',
+			    'Mailbox Migration Exceptions'[Requires Review]=1),
+			    "ExceptionBatch",'Mailbox Migration Exceptions'[Loaded Batch ID],
+			    "Identity",LOWER(TRIM('Mailbox Migration Exceptions'[Mailbox Identity])),
+			    "Candidate",LOWER(TRIM('Mailbox Migration Exceptions'[Candidate Identity])),
+			    "ExceptionAddress",LOWER(TRIM('Mailbox Migration Exceptions'[Primary SMTP Address])))
+			VAR _batches=DISTINCT(SELECTCOLUMNS(_scope,"Batch",[Batch]))
+			VAR _valid=COUNTROWS(_batches)=1 && COUNTROWS(FILTER(_scope,[Batch]="" || [Mailbox]=""))=0
+			VAR _keys=DISTINCT(SELECTCOLUMNS(_scope,"Mailbox",[Mailbox],"Batch",[Batch]))
+			RETURN GENERATE(FILTER(_keys,_valid),
+			    VAR _mailbox=[Mailbox] VAR _batch=[Batch]
+			    VAR _rows=FILTER(_scope,[Mailbox]=_mailbox && [Batch]=_batch)
+			    VAR _retained=COUNTROWS(FILTER(_rows,[Retained]="Matched retained decision"))>0
+			    VAR _pending=SUMX(_rows,VAR _object=[Object] VAR _address=[Address]
+			        RETURN IF(COUNTROWS(FILTER(_exceptions,[ExceptionBatch]=_batch &&
+			            ((_object<>"" && ([Identity]="local_mailboxes|" & _object || [Candidate]="local_mailboxes|" & _object)) ||
+			             (_address<>"" && [ExceptionAddress]=_address))))>0,1,0))>0
+			    RETURN ROW("Population",SWITCH(TRUE(),_retained,"Register retained",_pending,"Register review","Potential before service review"))))
+			RETURN IF(COUNTROWS(_mailboxes)>0,COALESCE(COUNTROWS(FILTER(_mailboxes,[Population]="Register retained")),0))
+		formatString: #,0
+		displayFolder: Migration mailbox populations
+
+	/// Distinct same-batch native mailbox GUIDs. Mailbox counts are not licence quantities. Confirmed register retention takes precedence over duplicate pending hints.
+	measure 'Exchange Population Register Review' =
+			VAR _mailboxes=(VAR _scope=SELECTCOLUMNS('Exchange Mailbox Reconciliation',
+			    "Mailbox",'Exchange Mailbox Reconciliation'[Mailbox GUID],
+			    "Batch",'Exchange Mailbox Reconciliation'[Loaded Batch ID],
+			    "Object",LOWER(TRIM('Exchange Mailbox Reconciliation'[Object GUID])),
+			    "Address",LOWER(TRIM('Exchange Mailbox Reconciliation'[Primary SMTP Address])),
+			    "Retained",'Exchange Mailbox Reconciliation'[Retained On-premises])
+			VAR _exceptions=SELECTCOLUMNS(FILTER('Mailbox Migration Exceptions',
+			    'Mailbox Migration Exceptions'[Requires Review]=1),
+			    "ExceptionBatch",'Mailbox Migration Exceptions'[Loaded Batch ID],
+			    "Identity",LOWER(TRIM('Mailbox Migration Exceptions'[Mailbox Identity])),
+			    "Candidate",LOWER(TRIM('Mailbox Migration Exceptions'[Candidate Identity])),
+			    "ExceptionAddress",LOWER(TRIM('Mailbox Migration Exceptions'[Primary SMTP Address])))
+			VAR _batches=DISTINCT(SELECTCOLUMNS(_scope,"Batch",[Batch]))
+			VAR _valid=COUNTROWS(_batches)=1 && COUNTROWS(FILTER(_scope,[Batch]="" || [Mailbox]=""))=0
+			VAR _keys=DISTINCT(SELECTCOLUMNS(_scope,"Mailbox",[Mailbox],"Batch",[Batch]))
+			RETURN GENERATE(FILTER(_keys,_valid),
+			    VAR _mailbox=[Mailbox] VAR _batch=[Batch]
+			    VAR _rows=FILTER(_scope,[Mailbox]=_mailbox && [Batch]=_batch)
+			    VAR _retained=COUNTROWS(FILTER(_rows,[Retained]="Matched retained decision"))>0
+			    VAR _pending=SUMX(_rows,VAR _object=[Object] VAR _address=[Address]
+			        RETURN IF(COUNTROWS(FILTER(_exceptions,[ExceptionBatch]=_batch &&
+			            ((_object<>"" && ([Identity]="local_mailboxes|" & _object || [Candidate]="local_mailboxes|" & _object)) ||
+			             (_address<>"" && [ExceptionAddress]=_address))))>0,1,0))>0
+			    RETURN ROW("Population",SWITCH(TRUE(),_retained,"Register retained",_pending,"Register review","Potential before service review"))))
+			RETURN IF(COUNTROWS(_mailboxes)>0,COALESCE(COUNTROWS(FILTER(_mailboxes,[Population]="Register review")),0))
+		formatString: #,0
+		displayFolder: Migration mailbox populations
+
+	/// Distinct same-batch native mailbox GUIDs. Mailbox counts are not licence quantities. Confirmed register retention takes precedence over duplicate pending hints.
+	measure 'Exchange Population Potential Before Service Review' =
+			VAR _mailboxes=(VAR _scope=SELECTCOLUMNS('Exchange Mailbox Reconciliation',
+			    "Mailbox",'Exchange Mailbox Reconciliation'[Mailbox GUID],
+			    "Batch",'Exchange Mailbox Reconciliation'[Loaded Batch ID],
+			    "Object",LOWER(TRIM('Exchange Mailbox Reconciliation'[Object GUID])),
+			    "Address",LOWER(TRIM('Exchange Mailbox Reconciliation'[Primary SMTP Address])),
+			    "Retained",'Exchange Mailbox Reconciliation'[Retained On-premises])
+			VAR _exceptions=SELECTCOLUMNS(FILTER('Mailbox Migration Exceptions',
+			    'Mailbox Migration Exceptions'[Requires Review]=1),
+			    "ExceptionBatch",'Mailbox Migration Exceptions'[Loaded Batch ID],
+			    "Identity",LOWER(TRIM('Mailbox Migration Exceptions'[Mailbox Identity])),
+			    "Candidate",LOWER(TRIM('Mailbox Migration Exceptions'[Candidate Identity])),
+			    "ExceptionAddress",LOWER(TRIM('Mailbox Migration Exceptions'[Primary SMTP Address])))
+			VAR _batches=DISTINCT(SELECTCOLUMNS(_scope,"Batch",[Batch]))
+			VAR _valid=COUNTROWS(_batches)=1 && COUNTROWS(FILTER(_scope,[Batch]="" || [Mailbox]=""))=0
+			VAR _keys=DISTINCT(SELECTCOLUMNS(_scope,"Mailbox",[Mailbox],"Batch",[Batch]))
+			RETURN GENERATE(FILTER(_keys,_valid),
+			    VAR _mailbox=[Mailbox] VAR _batch=[Batch]
+			    VAR _rows=FILTER(_scope,[Mailbox]=_mailbox && [Batch]=_batch)
+			    VAR _retained=COUNTROWS(FILTER(_rows,[Retained]="Matched retained decision"))>0
+			    VAR _pending=SUMX(_rows,VAR _object=[Object] VAR _address=[Address]
+			        RETURN IF(COUNTROWS(FILTER(_exceptions,[ExceptionBatch]=_batch &&
+			            ((_object<>"" && ([Identity]="local_mailboxes|" & _object || [Candidate]="local_mailboxes|" & _object)) ||
+			             (_address<>"" && [ExceptionAddress]=_address))))>0,1,0))>0
+			    RETURN ROW("Population",SWITCH(TRUE(),_retained,"Register retained",_pending,"Register review","Potential before service review"))))
+			RETURN IF(COUNTROWS(_mailboxes)>0,COALESCE(COUNTROWS(FILTER(_mailboxes,[Population]="Potential before service review")),0))
+		formatString: #,0
+		displayFolder: Migration mailbox populations
+
+	/// The prepared AD user source lacks governed AccountType; Workforce excludes non-human service accounts. Generic accounts and managed-service object classes are not substitutes. No service count or complete retained union can be inferred.
+	measure 'Exchange Population Service Label' = "Not captured"
+		formatString: @
+		displayFolder: Migration mailbox populations
+
+	/// Upper bound for the currently unquarantined mailbox pool, before service-account exclusion and technical checks. Excludes confirmed retained mailboxes and pending exact native-ID/SMTP hints, deduplicated. Not an EXO licence requirement.
+	measure 'Exchange Population Potential Label' =
+			VAR _n=[Exchange Population Potential Before Service Review]
+			RETURN IF(ISBLANK(_n),"Unknown", "At most " & FORMAT(_n,"#,0"))
+		formatString: @
+		displayFolder: Migration mailbox populations
+
+	/// Known minimum estimated SE user-licence scope: distinct confirmed retained user identities. Service-account scope, special-mailbox accessors and other accessors are incomplete. Observed equivalents are not subtracted from this total. Not a net purchase quantity.
+	measure 'Exchange Scenario SE Required Label' =
+			VAR _n=[Exchange Scenario SE Need]
+			RETURN IF(ISBLANK(_n),"Unknown",">= " & FORMAT(_n,"#,0"))
+		formatString: @
+		displayFolder: Migration mailbox populations
+
+	/// Distinct same-batch native mailbox GUIDs. Mailbox counts are not licence quantities. Confirmed register retention takes precedence over duplicate pending hints.
+	measure 'Exchange Population Note' = "INCOMPLETE SERVICE SCOPE: classification is not captured; Generic is not Service. Potential EXO excludes confirmed retention and " & FORMAT([Exchange Population Register Review],"0") & " other mailboxes with pending register hints; upper bound before service/technical review, not licence demand. SE = known minimum user scope; service accounts and other accessors uncounted. ESTIMATE: F3 <=2 GB, no archive/hold/delegation, frontline eligibility assumed; E3 for other known user cases <=100 GB. Assigned suites deducted; free tenant stock shared, assumed allocatable, not reserved. " & FORMAT([Exchange Scenario Register Review Rows],"0") & " register rows to reconcile; " & FORMAT([Exchange Scenario Review People],"0") & " unpriced people; " & FORMAT([Exchange Scenario Plan Remediation],"0") & " plan repairs, not purchases."
+		formatString: @
+		displayFolder: Migration mailbox populations
+
 	column 'Mailbox GUID'
 		dataType: string
 		lineageTag: 0abd4866-797b-4d17-a2b6-a64dbc14f34e

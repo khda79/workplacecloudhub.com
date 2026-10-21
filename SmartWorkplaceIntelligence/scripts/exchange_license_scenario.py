@@ -1,4 +1,4 @@
-"""Version 1.0.0: explicit mailbox migration sizing assumptions, not an order.
+"""Version 1.1.0: explicit mailbox migration sizing assumptions, not an order.
 
 Measures only: existing imported rows, keys, relationships and partitions remain
 unchanged. Register review rows quarantine migration candidates, never grant rights.
@@ -7,8 +7,8 @@ unchanged. Register review rows quarantine migration candidates, never grant rig
 TABLE = 'Exchange Mailbox Reconciliation'
 
 
-def people_expression():
-    return '''VAR _scope=SELECTCOLUMNS('Exchange Mailbox Reconciliation',
+def people_expression(account_classification=False):
+    expression='''VAR _scope=SELECTCOLUMNS('Exchange Mailbox Reconciliation',
     "Person",IF('Exchange Mailbox Reconciliation'[Cloud Account Key]<>"","cloud|" & 'Exchange Mailbox Reconciliation'[Cloud Account Key],
         IF('Exchange Mailbox Reconciliation'[AD Account Key]<>"","ad|" & 'Exchange Mailbox Reconciliation'[AD Account Key],"mailbox|" & 'Exchange Mailbox Reconciliation'[Mailbox GUID])),
     "Batch",'Exchange Mailbox Reconciliation'[Loaded Batch ID],
@@ -81,6 +81,17 @@ RETURN GENERATE(_keys,
     VAR _target=IF(_bucket IN {"E3","F3"} && _covered=0 && _failedTarget,"Assignment review",_bucket)
     VAR _planReview=_covered=1 && SWITCH(_bucket,"E3",NOT(_p2),"F3",NOT(_p2 || _p1 || _kiosk),FALSE())
     RETURN ROW("Product",_target,"Covered",_covered,"Plan Review",IF(_planReview,1,0)))'''
+    if account_classification:
+        from exchange_account_classification import classified_scope
+        expression=expression.replace('VAR _scope=','VAR _scopeRaw=',1)
+        expression=expression.replace('VAR _users=',classified_scope()+'\nVAR _users=',1)
+        expression=expression.replace('[Retained]="Matched retained decision"))>0',
+            '[Retained]="Matched retained decision" || [Service Retained]=1))>0',1)
+        expression=expression.replace('[Retained]<>"Matched retained decision"))>0',
+            '[Retained]<>"Matched retained decision" && [Service Retained]=0))>0',1)
+        expression=expression.replace('VAR _review=_batch=',
+            'VAR _classificationReview=COUNTROWS(FILTER(_rows,[Classification Known]=0))>0\n    VAR _review=_classificationReview || _batch=',1)
+    return expression
 
 
 def stock_expression(product):
@@ -103,7 +114,7 @@ VAR _valid=_batch<>"" && COUNTROWS(_q)=1 && COUNTROWS(_rows)>0 &&
 RETURN IF(_valid,SUMX(_rows,'License SKU Capacity'[Available Units]))'''
 
 
-def scenario_measures():
+def scenario_measures(account_classification=False):
     result=[]
     def add(name,expression,fmt='#,0',description=None):
         result.append(dict(name=name,expression=expression,formatString=fmt,displayFolder='Migration licensing scenario',
@@ -113,7 +124,7 @@ def scenario_measures():
             ('Need',f'[Product]="{product}"','COUNTROWS(_selected)'),
             ('Covered',f'[Product]="{product}"','SUMX(_selected,[Covered])')]:
             add(f'Exchange Scenario {product} {metric}',
-                'VAR _people=('+people_expression()+')\nVAR _selected=FILTER(_people,'+condition+')\n'
+                'VAR _people=('+people_expression(account_classification)+')\nVAR _selected=FILTER(_people,'+condition+')\n'
                 +'RETURN IF([Dataset Loaded Batch ID]<>"",COALESCE('+aggregate+',0))')
         add(f'Exchange Scenario {product} Gap',f'VAR _need=[Exchange Scenario {product} Need] VAR _covered=[Exchange Scenario {product} Covered] RETURN IF(NOT ISBLANK(_need),MAX(0,_need-_covered))')
         if product!='SE':
@@ -122,9 +133,19 @@ def scenario_measures():
             add(f'Exchange Scenario {product} Buy Label',f'VAR _n=[Exchange Scenario {product} Buy] RETURN IF(ISBLANK(_n),"To qualify",FORMAT(_n,"#,0"))','@')
         else:
             add('Exchange Scenario SE Buy Label','"To qualify"','@','Existing CAL stock, active SA, accessors and base/additive rights are not inventoried. Gap is exposure before those rights; never a net purchase quantity.')
-    add('Exchange Scenario Review People','VAR _people=('+people_expression()+')\nRETURN IF([Dataset Loaded Batch ID]<>"",COALESCE(COUNTROWS(FILTER(_people,[Product] IN {"Register review","Identity review","Technical review","Assignment review"})),0))')
-    add('Exchange Scenario Plan Remediation','VAR _people=('+people_expression()+')\nRETURN IF([Dataset Loaded Batch ID]<>"",COALESCE(SUMX(_people,[Plan Review]),0))')
+    add('Exchange Scenario Review People','VAR _people=('+people_expression(account_classification)+')\nRETURN IF([Dataset Loaded Batch ID]<>"",COALESCE(COUNTROWS(FILTER(_people,[Product] IN {"Register review","Identity review","Technical review","Assignment review"})),0))')
+    add('Exchange Scenario Plan Remediation','VAR _people=('+people_expression(account_classification)+')\nRETURN IF([Dataset Loaded Batch ID]<>"",COALESCE(SUMX(_people,[Plan Review]),0))')
     add('Exchange Scenario Register Review Rows','VAR _batch=[Dataset Loaded Batch ID] RETURN IF(_batch<>"",CALCULATE(COUNTROWS(\'Mailbox Migration Exceptions\'),REMOVEFILTERS(\'Mailbox Migration Exceptions\'),\'Mailbox Migration Exceptions\'[Loaded Batch ID]=_batch,\'Mailbox Migration Exceptions\'[Requires Review]=1))')
-    add('Exchange Scenario Row Target','VAR _people=('+people_expression()+')\nVAR _products=DISTINCT(SELECTCOLUMNS(_people,"Target",[Product])) RETURN IF(COUNTROWS(_products)=1,CONCATENATEX(_products,[Target],""),"Multiple targets / review")','@')
+    add('Exchange Scenario Row Target','VAR _people=('+people_expression(account_classification)+')\nVAR _products=DISTINCT(SELECTCOLUMNS(_people,"Target",[Product])) RETURN IF(COUNTROWS(_products)=1,CONCATENATEX(_products,[Target],""),"Multiple targets / review")','@')
     add('Exchange Scenario Note','''"ESTIMATE: F3 <=2 GB, no archive/hold/delegation; frontline eligibility assumed. E3 for other known user cases <=100 GB. Assigned suites deducted even if a service plan needs repair; tenant stock assumed allocatable, shared across countries, not reserved. SE = confirmed retained users; CAL stock/SA and other accessors unknown. Unpriced people: " & FORMAT([Exchange Scenario Review People],"0") & " | Register rows to reconcile: " & FORMAT([Exchange Scenario Register Review Rows],"0") & " | Plan repairs (not purchases): " & FORMAT([Exchange Scenario Plan Remediation],"0")''','@')
+    if account_classification:
+        from exchange_mailbox_populations import population_expression
+        for measure in result:
+            if measure['name'].endswith('Buy Label') and ' SE ' not in measure['name']:
+                product='E3' if ' E3 ' in measure['name'] else 'F3'
+                measure['expression']='VAR _mailboxes=('+population_expression(True)+')\n'+f'''VAR _n=[Exchange Scenario {product} Buy]
+VAR _known=COALESCE(SUMX(_mailboxes,[Classification Known]),0)
+RETURN IF(ISBLANK(_n) || _known=0,"Not captured",IF(_known<COUNTROWS(_mailboxes),">= ","") & FORMAT(_n,"#,0"))'''
+            if measure['name']=='Exchange Scenario Note':
+                measure['expression']=measure['expression'].replace('SE = confirmed retained users','SE = register/service retained users')
     return result

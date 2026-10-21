@@ -3,9 +3,9 @@
   "name": "1ff850b98794aefd9964",
   "position": {
     "x": 32,
-    "y": 312,
+    "y": 516,
     "width": 1856,
-    "height": 72,
+    "height": 100,
     "z": 3000,
     "tabOrder": 3000
   },
@@ -23,12 +23,12 @@
                       "Entity": "Exchange Mailbox Reconciliation"
                     }
                   },
-                  "Property": "Exchange Scenario Note"
+                  "Property": "Exchange Population Note"
                 }
               },
-              "queryRef": "Exchange Mailbox Reconciliation.Exchange Scenario Note",
-              "nativeQueryRef": "Sizing assumptions and scope",
-              "displayName": "Sizing assumptions and scope"
+              "queryRef": "Exchange Mailbox Reconciliation.Exchange Population Note",
+              "nativeQueryRef": "Population and sizing limitations",
+              "displayName": "Population and sizing limitations"
             }
           ]
         }
@@ -315,7 +315,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Licensing estimate assumptions, unpriced people, pending register rows and service plan repairs. These estimates are not confirmed purchase quantities.'"
+                  "Value": "'Mailbox retention, service classification and licence estimate limitations.'"
                 }
               }
             }

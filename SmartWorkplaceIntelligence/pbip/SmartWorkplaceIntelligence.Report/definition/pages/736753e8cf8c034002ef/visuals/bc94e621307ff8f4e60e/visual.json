@@ -3,9 +3,9 @@
   "name": "bc94e621307ff8f4e60e",
   "position": {
     "x": 32,
-    "y": 128,
+    "y": 312,
     "width": 608,
-    "height": 120,
+    "height": 80,
     "z": 3000,
     "tabOrder": 3000
   },
@@ -59,21 +59,6 @@
               "queryRef": "Exchange Mailbox Reconciliation.Exchange Scenario E3 Available",
               "nativeQueryRef": "Unassigned tenant stock",
               "displayName": "Unassigned tenant stock"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Exchange Mailbox Reconciliation"
-                    }
-                  },
-                  "Property": "Exchange Scenario E3 Buy Label"
-                }
-              },
-              "queryRef": "Exchange Mailbox Reconciliation.Exchange Scenario E3 Buy Label",
-              "nativeQueryRef": "To buy (estimate)",
-              "displayName": "To buy (estimate)"
             }
           ]
         }
@@ -93,7 +78,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "16D"
+                  "Value": "14D"
                 }
               }
             },
@@ -119,6 +104,13 @@
               "expr": {
                 "Literal": {
                   "Value": "true"
+                }
+              }
+            },
+            "bold": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
                 }
               }
             }
@@ -260,25 +252,32 @@
             "paddingUniform": {
               "expr": {
                 "Literal": {
-                  "Value": "0D"
+                  "Value": "0L"
                 }
               }
             },
             "rowCount": {
               "expr": {
                 "Literal": {
-                  "Value": "2L"
+                  "Value": "1L"
                 }
               }
             },
             "columnCount": {
               "expr": {
                 "Literal": {
-                  "Value": "2L"
+                  "Value": "3L"
                 }
               }
             },
             "autoGrid": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            },
+            "paddingIndividual": {
               "expr": {
                 "Literal": {
                   "Value": "false"
@@ -381,7 +380,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Evidence and active scope'"
+                  "Value": "'Microsoft 365 E3 | estimate; mailbox and licensing scope limitations are in the assumptions banner.'"
                 }
               }
             }
@@ -514,14 +513,14 @@
             "top": {
               "expr": {
                 "Literal": {
-                  "Value": "8D"
+                  "Value": "6D"
                 }
               }
             },
             "bottom": {
               "expr": {
                 "Literal": {
-                  "Value": "8D"
+                  "Value": "6D"
                 }
               }
             },
@@ -536,6 +535,26 @@
               "expr": {
                 "Literal": {
                   "Value": "8D"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "spacing": [
+        {
+          "properties": {
+            "spaceBelowTitleArea": {
+              "expr": {
+                "Literal": {
+                  "Value": "4D"
+                }
+              }
+            },
+            "verticalSpacing": {
+              "expr": {
+                "Literal": {
+                  "Value": "4D"
                 }
               }
             }

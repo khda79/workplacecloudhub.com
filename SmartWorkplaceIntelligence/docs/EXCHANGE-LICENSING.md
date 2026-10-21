@@ -39,9 +39,13 @@ SPE_F1 capacity rows, one snapshot and unique SKU IDs. Missing, mixed, duplicate
 negative or unqualified stock remains unknown. Stock is shared across countries,
 assumed allocatable and not reserved; recovery candidates are not free units.
 
-SE cards distinguish confirmed retained users, observed equivalency and residual
-CAL exposure. Existing CAL/SA stock, active contractual coverage and other
-accessors are not inventoried: net CAL purchases remain To qualify. Review rows
+SE cards show total required licences as a known minimum distinct retained-user
+scope, plus observed equivalents and scope without an observed equivalent.
+Existing equivalents are not deducted from that total; no SE To buy callout is
+displayed. CAL/SA stock, contractual coverage and other accessors remain unknown.
+See [mailbox populations and account types](EXCHANGE-MAILBOX-POPULATIONS.md) for
+the mailbox/user grain distinction, missing service classification and deferred
+activation of the complete same-batch account-type facet. Review rows
 are not distinct people and must not be added to the unpriced-person count.
 These are partial planning estimates, not a contractual purchase order.
 
