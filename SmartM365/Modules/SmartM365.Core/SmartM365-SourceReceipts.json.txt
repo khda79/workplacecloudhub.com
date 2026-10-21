@@ -127,6 +127,15 @@
       ]
     },
     {
+      "Script": "SmartM365-Exchange-Hybrid-FreeBusy-Inventory.ps1",
+      "Receipt": "SmartInventory_SmartM365-Exchange-Hybrid-FreeBusy-Inventory.current.json.txt",
+      "Scope": "ConfiguredOutputs",
+      "Files": [
+        "Exchange_Hybrid_FreeBusy_Summary.csv",
+        "Exchange_Hybrid_FreeBusy_Findings.csv"
+      ]
+    },
+    {
       "Script": "SmartM365-SharePoint-OnPrem-Infrastructure-Inventory.ps1",
       "Receipt": "SmartInventory_SmartM365-SharePoint-OnPrem-Infrastructure-Inventory.current.json.txt",
       "Scope": "ConfiguredOutputs",

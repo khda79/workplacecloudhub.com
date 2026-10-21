@@ -3,7 +3,7 @@
 .SYNOPSIS
 Synthetic shared source-receipt qualification. No tenant, API, mail or synchronized data access.
 .VERSION
-1.0.4
+1.0.5
 #>
 [CmdletBinding()]
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidGlobalVars','',Justification='Synthetic Core globals are saved and restored in finally.')]
@@ -257,7 +257,7 @@ try {
     Check ($rejected -and (Get-FileHash $legacyPath).Hash -eq $hash) 'Foreign metadata was overwritten.'
     $cmdb=Get-Content (Join-Path (Split-Path $helper) 'SmartM365-CmdbSources.json.txt') -Raw | ConvertFrom-Json
     $scripts=@($cmdb.Producers.Script)+@($registry.Producers.Script)
-    Check ($scripts.Count -eq 50 -and @($scripts | Select-Object -Unique).Count -eq 50) 'DATA-LAST receipt coverage is not 50 distinct producers.'
+    Check ($scripts.Count -eq 51 -and @($scripts | Select-Object -Unique).Count -eq 51) 'DATA-LAST receipt coverage is not 51 distinct producers.'
     "PASS: $script:checks shared receipt checks; PowerShell $($PSVersionTable.PSVersion). No production access."
 } finally {
     & $mock {if($script:SmartM365CmdbSourceContext -and $script:SmartM365CmdbSourceContext.Lock){$script:SmartM365CmdbSourceContext.Lock.Dispose()}}

@@ -9,7 +9,7 @@
     Vendored third-party scripts under a ThirdParty folder are skipped: they are kept as published.
 
 .VERSION
-1.10
+1.11
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
 #>
@@ -231,7 +231,9 @@ foreach ($scriptFile in $scriptFiles) {
         'smartm365\smartinventory\activedirectoryinventory\smartm365-activedirectory-usersenrichment.ps1',
         'smartm365\smartinventory\m365inventory\intuneinventory\devices\smartm365-detect-devicesysteminfo.ps1',
         # Deployed alone to Exchange servers without the repository: no shared banner module there.
-        'smartm365\smartinventory\exchangeinventory\onpremises\serversandstorage\smartm365-exchange-onprem-healthchecker-localrunner.ps1'
+        'smartm365\smartinventory\exchangeinventory\onpremises\serversandstorage\smartm365-exchange-onprem-healthchecker-localrunner.ps1',
+        # Child process of the free/busy collector, which already shows the banner.
+        'smartm365\smartinventory\exchangeinventory\hybrid\freebusy\smartm365-exchange-hybrid-freebusy-runner.ps1'
     )
     $isStartupBannerExcluded = $normalizedRelativePath -in $startupBannerExclusions
     if ($isSmartInventoryScript -and -not $isStartupBannerExcluded) {
