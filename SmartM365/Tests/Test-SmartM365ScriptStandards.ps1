@@ -6,9 +6,10 @@
     By default, this guard checks only changed SmartM365 scripts so legacy issues do not hide new regressions.
     Use -Scope All to scan all SmartM365 scripts, including SmartInventory, Setup, Communications,
     SharePointMigration, Devices, Intune Remediation, and future SmartM365 folders.
+    Vendored third-party scripts under a ThirdParty folder are skipped: they are kept as published.
 
 .VERSION
-1.8
+1.9
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
 #>
@@ -183,8 +184,9 @@ else {
 $results = New-Object 'System.Collections.Generic.List[object]'
 
 foreach ($scriptFile in $scriptFiles) {
-    $content = [System.IO.File]::ReadAllText($scriptFile.FullName)
     $relativePath = if ($repositoryRoot) { ConvertTo-RelativePath -RootPath $repositoryRoot -Path $scriptFile.FullName } else { ConvertTo-RelativePath -RootPath $script:SmartM365Root -Path $scriptFile.FullName }
+    if (('\' + $relativePath.Replace('/', '\')) -match '\\ThirdParty\\') { continue }
+    $content = [System.IO.File]::ReadAllText($scriptFile.FullName)
     $changeKey = [System.IO.Path]::GetFullPath($scriptFile.FullName).ToLowerInvariant()
     $change = if ($changedFiles.ContainsKey($changeKey)) { $changedFiles[$changeKey] } else { $null }
     $isChanged = $null -ne $change

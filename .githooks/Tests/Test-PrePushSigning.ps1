@@ -3,7 +3,7 @@
 End-to-end test of the WorkplaceCloudHub pre-push signing hook.
 
 .DESCRIPTION
-Version 1.0.0
+Version 1.1.0
 
 Builds a throwaway repository with a bare remote, installs the current pre-push hook and signing
 script, then pushes through the real hook. Checks that:
@@ -12,7 +12,9 @@ script, then pushes through the real hook. Checks that:
   byte-identical;
 - a pushed script whose committed version is unsigned and whose working tree has uncommitted
   changes is left untouched and the push is refused;
-- a push without PowerShell changes skips signing.
+- a push without PowerShell changes skips signing;
+- a vendored Microsoft-signed script under a ThirdParty folder is pushed byte for byte with its
+  Microsoft signature, and a tampered copy is refused and left untouched.
 
 Requires the workplacecloudhub.com code-signing certificate in Cert:\CurrentUser\My and access to
 the timestamp server.
@@ -20,6 +22,7 @@ the timestamp server.
 [CmdletBinding()]
 param(
     [string]$RepoRoot = (Split-Path -Path (Split-Path -Path $PSScriptRoot -Parent) -Parent),
+    [string]$ThirdPartySamplePath = (Join-Path -Path (Split-Path -Path (Split-Path -Path $PSScriptRoot -Parent) -Parent) -ChildPath 'SmartM365\SmartInventory\ExchangeInventory\OnPremises\ServersAndStorage\ThirdParty\CSS-Exchange\HealthChecker\HealthChecker.ps1'),
     [switch]$KeepTempRepository
 )
 
@@ -75,7 +78,7 @@ function Get-RemoteMain {
 
 $hookSource = Join-Path -Path $RepoRoot -ChildPath '.githooks\pre-push'
 $signerSource = Join-Path -Path $RepoRoot -ChildPath 'Sign-WorkplaceCloudHubRepositoryPowerShellScripts.ps1'
-foreach ($source in @($hookSource, $signerSource)) {
+foreach ($source in @($hookSource, $signerSource, $ThirdPartySamplePath)) {
     if (-not (Test-Path -LiteralPath $source -PathType Leaf)) { throw "Missing source file: $source" }
 }
 
@@ -99,7 +102,7 @@ try {
     New-Item -ItemType Directory -Path (Join-Path -Path $script:Work -ChildPath '.githooks') -Force | Out-Null
     Copy-Item -LiteralPath $hookSource -Destination (Join-Path -Path $script:Work -ChildPath '.githooks\pre-push')
     Copy-Item -LiteralPath $signerSource -Destination (Join-Path -Path $script:Work -ChildPath 'Sign-WorkplaceCloudHubRepositoryPowerShellScripts.ps1')
-    Write-LfFile -RelativePath '.gitattributes' -Lines @('* text=auto', '*.ps1 text eol=crlf', '.githooks/* text eol=lf')
+    Write-LfFile -RelativePath '.gitattributes' -Lines @('* text=auto', '*.ps1 text eol=crlf', '.githooks/* text eol=lf', '**/ThirdParty/** -text -eol -whitespace')
     Write-LfFile -RelativePath 'Tracked.ps1' -Lines @("Write-Output 'tracked'")
 
     # 1. Initial push: committed unsigned scripts are signed and the push is blocked.
@@ -178,6 +181,36 @@ try {
     Assert-True ((Get-FileHashValue 'Shared.ps1') -eq $sharedHash) 'Script with uncommitted changes is byte-identical after the push'
     $headCommit = [string](& git -C $script:Work rev-parse HEAD)
     Assert-True ((Get-RemoteMain) -eq $headCommit) 'Remote main matches the local commit'
+
+    # 6. Vendored Microsoft-signed script: pushed as is, never re-signed; a tampered copy is refused.
+    Invoke-GitChecked @('checkout', '--', 'Shared.ps1')
+    $vendorRelative = 'Tools\ThirdParty\Vendor\HealthChecker.ps1'
+    $vendorPath = Join-Path -Path $script:Work -ChildPath $vendorRelative
+    New-Item -ItemType Directory -Path (Split-Path -Path $vendorPath -Parent) -Force | Out-Null
+    [System.IO.File]::WriteAllBytes($vendorPath, [System.IO.File]::ReadAllBytes($ThirdPartySamplePath))
+    $vendorHash = Get-FileHashValue $vendorRelative
+    Invoke-GitChecked @('add', '--', $vendorRelative)
+    Invoke-GitChecked @('commit', '--quiet', '-m', 'add vendored script')
+    $push = Invoke-Git @('push', 'origin', 'main')
+    $vendorSignature = Get-AuthenticodeSignature -FilePath $vendorPath
+    Assert-True ($push.ExitCode -eq 0) 'Push of a vendored Microsoft-signed script succeeds without a signing commit'
+    Assert-True ($push.Output -match 'Third-party file left untouched') 'Hook reports the vendored script as third-party'
+    Assert-True ((Get-FileHashValue $vendorRelative) -eq $vendorHash) 'Vendored script is byte-identical after the push'
+    Assert-True ([string]$vendorSignature.Status -eq 'Valid' -and [string]$vendorSignature.SignerCertificate.Subject -match 'CN=Microsoft Corporation') 'Vendored script keeps its Microsoft signature'
+    $vendorBlob = [string](& git -C $script:Work rev-parse "HEAD:$($vendorRelative.Replace('\', '/'))")
+    Assert-True ([string](& git -C $script:Remote cat-file -s $vendorBlob) -eq [string](Get-Item -LiteralPath $ThirdPartySamplePath).Length) 'Remote stores the vendored script with its published size (no line ending conversion)'
+
+    $tampered = [System.IO.File]::ReadAllBytes($vendorPath)
+    $tampered[2000] = if ($tampered[2000] -eq 0x41) { [byte]0x42 } else { [byte]0x41 }
+    [System.IO.File]::WriteAllBytes($vendorPath, $tampered)
+    $tamperedHash = Get-FileHashValue $vendorRelative
+    Invoke-GitChecked @('commit', '--quiet', '-m', 'tamper vendored script', '--', $vendorRelative)
+    $remoteBefore = Get-RemoteMain
+    $push = Invoke-Git @('push', 'origin', 'main')
+    Assert-True ($push.ExitCode -ne 0) 'Push of a tampered vendored script is refused'
+    Assert-True ($push.Output -match 'no valid publisher signature') 'Refusal names the invalid publisher signature'
+    Assert-True ((Get-FileHashValue $vendorRelative) -eq $tamperedHash) 'Tampered vendored script is left untouched (not re-signed)'
+    Assert-True ((Get-RemoteMain) -eq $remoteBefore) 'Remote is unchanged after the refused vendored push'
 }
 finally {
     if ($KeepTempRepository) { Write-Host "Temporary repository kept: $tempRoot" }

@@ -14,6 +14,11 @@ script exits with code 3 when it changed at least one file, so the hook can bloc
 
 Signature blocks that are not the single trailing block (code after a block, several blocks) are
 removed before signing, keeping all other lines; unbalanced markers fail and leave the file unchanged.
+
+Vendored third-party files (repository-relative paths matching -ExcludedPathPatterns, by default any
+ThirdParty folder) are never modified: neither line endings nor signature. Their publisher signature
+must be Valid and must not be the workplacecloudhub.com certificate, otherwise the run fails so the
+published file can be restored.
 #>
 [CmdletBinding(SupportsShouldProcess = $true)]
 param(
@@ -22,6 +27,7 @@ param(
     [string]$ExpectedSignerEmail = 'contact@workplacecloudhub.com',
     [string]$TimestampServer = 'http://timestamp.digicert.com',
     [string[]]$Extensions = @('.ps1', '.psm1', '.psd1', '.ps1xml'),
+    [string[]]$ExcludedPathPatterns = @('ThirdParty/*', '*/ThirdParty/*'),
     [string]$PathListFile,
     [switch]$IncludeUntracked,
     [switch]$Force,
@@ -52,6 +58,30 @@ function Test-MicrosoftAuthenticodeSignature {
     $subject = [string]$Signature.SignerCertificate.Subject
     $issuer = [string]$Signature.SignerCertificate.Issuer
     return (($subject -match '(^|,\s*)O=Microsoft Corporation(,|$)' -or $subject -match '(^|,\s*)CN=Microsoft Corporation(,|$)') -and $issuer -match 'Microsoft')
+}
+
+function Get-RepositoryRelativePath {
+    param(
+        [Parameter(Mandatory = $true)][string]$Root,
+        [Parameter(Mandatory = $true)][string]$FullPath
+    )
+
+    $rootWithSeparator = $Root.TrimEnd('\', '/') + [System.IO.Path]::DirectorySeparatorChar
+    if (-not $FullPath.StartsWith($rootWithSeparator, [System.StringComparison]::OrdinalIgnoreCase)) { return $FullPath.Replace('\', '/') }
+    return $FullPath.Substring($rootWithSeparator.Length).Replace('\', '/')
+}
+
+function Test-ExcludedRepositoryPath {
+    param(
+        [Parameter(Mandatory = $true)][string]$RelativePath,
+        [AllowEmptyCollection()][string[]]$Patterns = @()
+    )
+
+    $normalizedPath = $RelativePath.Replace('\', '/')
+    foreach ($pattern in $Patterns) {
+        if (-not [string]::IsNullOrWhiteSpace($pattern) -and $normalizedPath -like $pattern.Replace('\', '/')) { return $true }
+    }
+    return $false
 }
 function Install-CertificateInCurrentUserStore {
     param(
@@ -306,6 +336,7 @@ if (-not $SkipTrustInstall) {
 
 $signed = 0
 $skipped = 0
+$excluded = 0
 $normalized = 0
 $failed = 0
 $failures = New-Object System.Collections.Generic.List[string]
@@ -318,6 +349,11 @@ if ($PathListFile) {
     $files = New-Object System.Collections.Generic.List[string]
     foreach ($entry in @(Get-PathListEntry -Root $RepoRoot -ListPath $PathListFile -Extensions $Extensions)) {
         if (-not (Test-Path -LiteralPath $entry.FullPath -PathType Leaf)) { continue }
+        if (Test-ExcludedRepositoryPath -RelativePath $entry.RelativePath -Patterns $ExcludedPathPatterns) {
+            # Third-party files are only verified, never modified, so uncommitted work does not matter here.
+            $files.Add($entry.FullPath)
+            continue
+        }
         try {
             if (Test-WorkingTreeMatchesCommit -Root $RepoRoot -Commit $entry.Commit -RelativePath $entry.RelativePath) {
                 $files.Add($entry.FullPath)
@@ -354,6 +390,16 @@ foreach ($file in $files) {
         $signature = Get-AuthenticodeSignature -FilePath $file -ErrorAction Stop
         $signerThumbprint = ''
         if ($signature.SignerCertificate) { $signerThumbprint = Normalize-Thumbprint $signature.SignerCertificate.Thumbprint }
+
+        $relativePath = Get-RepositoryRelativePath -Root $RepoRoot -FullPath $file
+        if (Test-ExcludedRepositoryPath -RelativePath $relativePath -Patterns $ExcludedPathPatterns) {
+            if ([string]$signature.Status -ne 'Valid' -or -not $signature.SignerCertificate -or $signerThumbprint -eq $normalizedThumbprint) {
+                throw "Third-party file excluded from signing has no valid publisher signature (status $($signature.Status)); it was left untouched. Restore the file exactly as published."
+            }
+            Write-Info "Third-party file left untouched (signed by $($signature.SignerCertificate.Subject)): $relativePath"
+            $excluded++
+            continue
+        }
 
         if (-not $Force -and [string]$signature.Status -eq 'Valid' -and (Test-MicrosoftAuthenticodeSignature -Signature $signature)) {
             $skipped++
@@ -417,7 +463,7 @@ foreach ($file in $files) {
     }
 }
 
-Write-Info ("Normalized={0}; Signed={1}; Skipped={2}; Failed={3}" -f $normalized, $signed, $skipped, $failed)
+Write-Info ("Normalized={0}; Signed={1}; Skipped={2}; ThirdParty={3}; Failed={4}" -f $normalized, $signed, $skipped, $excluded, $failed)
 if ($failed -gt 0) {
     $failures | ForEach-Object { Write-Host $_ -ForegroundColor Red }
     exit 1

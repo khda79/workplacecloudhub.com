@@ -9,5 +9,9 @@
 *.md text eol=lf
 .githooks/* text eol=lf
 
+# Vendored third-party files keep their published bytes: their publisher's Authenticode signature
+# covers the exact line endings, so Git must never convert them.
+**/ThirdParty/** -text -eol -whitespace
+
 # Tenant-specific values are restored locally by a private clean/smudge filter (see .git/config).
 SmartWorkplaceIntelligence/pbip/SmartWorkplaceIntelligence.SemanticModel/definition/expressions.tmdl filter=tenant-url
