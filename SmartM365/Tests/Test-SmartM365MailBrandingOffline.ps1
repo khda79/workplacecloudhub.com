@@ -1,9 +1,9 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
 Offline mail branding checks for both Core editions; no tenant loading or mail transport.
 .VERSION
-1.0.0
+1.0.1
 #>
 [CmdletBinding()]
 param(
@@ -97,12 +97,12 @@ foreach ($edition in $editions) {
         Assert-Branding ($html.Contains('href="' + $safeUrl + '"')) 'The escaped report URL is missing or was interpreted as a regex replacement.'
         Assert-Branding (([regex]::Matches($html, [regex]::Escape('href="' + $safeUrl + '"'))).Count -eq 2) 'Image and text must link to the same URL.'
         Assert-Branding ($html.Contains('Open &lt;dashboard&gt; &amp; &quot;details&quot; $1')) 'Link text must be escaped and preserve dollar characters.'
-        Assert-Branding ($html.Contains('<td align="left"') -and $html.Contains('<td align="right"')) 'Both aligned cells are required.'
-        Assert-Branding ($html -match 'align="left"[^>]*><img[^>]*width="92"') 'Client image must remain 92px and left aligned.'
+        Assert-Branding ($html.Contains('<td align="center"') -and $html.Contains('<td align="right"')) 'Centered client and right aligned dashboard are required.'
+        Assert-Branding ($html -match 'align="center"[^>]*><img[^>]*width="92"') 'Client image must remain 92px and centered.'
         Assert-Branding ($html.Contains('alt="Power BI" height="48"')) 'Power BI image height or alt text is missing.'
         Assert-Branding ($html.Contains($assetData)) 'The shipped PNG was not embedded from the module-relative location.'
         Assert-Branding (([regex]::Matches($html, 'target="_blank" rel="noopener"')).Count -eq 2) 'Both links must have safe target attributes.'
-        Assert-Branding ($html.Contains('color:#0f6cbd;text-decoration:underline;')) 'Link appearance changed.'
+        Assert-Branding ($html.Contains('color:#ffffff;text-decoration:underline;')) 'Link appearance changed.'
         Assert-Branding ($html.Contains('Body remains unchanged')) 'The original body was lost.'
         Assert-Branding ((& $runtime { $script:Warnings.Count }) -eq 0) 'Valid branding should not warn.'
         if ($null -ne $previousHtml) { Assert-Branding ($html -ceq $previousHtml) 'PS7 and PS5.1 branding HTML differ.' }
@@ -111,13 +111,40 @@ foreach ($edition in $editions) {
         Assert-Branding ($again -ceq $html) 'Already branded mail must not gain another banner.'
         Assert-Branding (([regex]::Matches($again, '<!-- SmartM365MailBranding:v1 -->')).Count -eq 1) 'The branding marker was duplicated.'
 
+        # Standard title content, metadata and status must survive the two-column layout.
+        $standard = & $runtime { New-SmartM365EmailBody -Title 'WinUpdate Feature Update status - FAILED' -HostName 'DEMO-HOST' -GeneratedAt '2026-10-21 12:00' -StatusBadge 'FAILED' -BodyHtml '<tr><td>REPORT-BODY</td></tr>' }
+        $standardHtml = & $runtime { param($Body) Add-SmartM365MailBranding $Body } $standard
+        $originalTitle = [regex]::Match($standard, '(?s)<!-- SmartM365MailTitle:start -->(.*?)<!-- SmartM365MailTitle:end -->').Groups[1].Value
+        $titleRegion = [regex]::Match($standardHtml, '(?s)<!-- SmartM365MailTitle:start -->(.*?)<!-- SmartM365MailTitle:end -->').Groups[1].Value
+        Assert-Branding ($titleRegion.Contains($originalTitle)) 'Title, Host, Generated and status markup must be preserved.'
+        Assert-Branding ($titleRegion.Contains('alt="Power BI"') -and $titleRegion.Contains('align="right"')) 'Power BI must sit inside the standard title banner.'
+        Assert-Branding (-not $standardHtml.Substring(0, $standardHtml.IndexOf('<!-- SmartM365MailTitle:start -->')).Contains('alt="Power BI"')) 'Power BI must not remain next to the client logo.'
+        Assert-Branding ($titleRegion.Contains('width="144"') -and $titleRegion.Contains('border:0;background:transparent')) 'The dashboard must have a bounded width and resist report table styles.'
+        Assert-Branding ($standardHtml.Contains('REPORT-BODY')) 'Report content must survive title decoration.'
+        Assert-Branding ((& $runtime { param($Body) Add-SmartM365MailBranding $Body } $standardHtml) -ceq $standardHtml) 'Standard title decoration must be idempotent.'
+        & $runtime { $script:GlobalConfig.MailPowerBiEnabled = $false }
+        $standardDisabled = & $runtime { param($Body) Add-SmartM365MailBranding $Body } $standard
+        Assert-Branding ($standardDisabled.Contains($originalTitle) -and -not $standardDisabled.Contains('width="144"')) 'Disabling Power BI must preserve the original title layout.'
+        & $runtime { $script:GlobalConfig.MailPowerBiEnabled = $true }
+
+        # Preserved reports have nested hero divs and broad table/td CSS, unlike the shared template.
+        $heroContent = '<div class="eyebrow" style="color:#ffffff;">Smart365 Exchange OnPrem - DEMO</div><h1 style="font-size:26px;line-height:32px;margin:6px 0;color:#ffffff;">Exchange On-Premises Infrastructure and Readiness</h1><div class="subtitle" style="font-size:13px;color:#ffffff;">Executive summary - DEMO $1<div>Generated: 2026-10-21 12:00</div></div>'
+        $hero = '<!doctype html><!-- SmartM365EmailTemplate:v1 --><html><head><style>body{margin:0;background:#f6f8fb;font-family:Segoe UI,Arial,sans-serif;}table{width:100%;border-collapse:collapse;border:1px solid #e5e7eb;border-radius:8px;}td{border-bottom:1px solid #e5e7eb;padding:9px 12px;color:#334155;}</style></head><body><div class="shell" style="max-width:1180px;margin:0 auto;padding:24px;"><div class="panel" style="border:1px solid #dbe3ef;border-radius:10px;overflow:hidden;background:white;"><div class="hero" style="background:#0f766e;color:#ffffff;padding:24px 28px;">' + $heroContent + '</div><div style="padding:24px 28px;">DEMO report body remains outside the banner.</div></div></div></body></html>'
+        $heroHtml = & $runtime { param($Body) Add-SmartM365MailBranding $Body } $hero
+        Assert-Branding ($heroHtml.Contains($heroContent)) 'Nested hero title content and literal dollar characters must survive.'
+        Assert-Branding ($heroHtml -match '(?s)<div class="hero"[^>]*>.*?alt="Power BI".*?</table>\s*</td>\s*</tr>\s*</table></div><div style="padding:24px 28px;">DEMO report body') 'Dashboard must stay inside the hero and not absorb the report body.'
+        Assert-Branding ($heroHtml.Contains('background:#0f766e;color:#ffffff;padding:24px 28px;')) 'The custom title background/padding must be preserved.'
+        Assert-Branding ((& $runtime { param($Body) Add-SmartM365MailBranding $Body } $heroHtml) -ceq $heroHtml) 'Hero decoration must be idempotent.'
+        $malformedHero = & $runtime { Add-SmartM365MailBranding '<div class="hero"><h1>Unclosed hero</h1>' }
+        Assert-Branding ($malformedHero.Contains('<div class="hero"><h1>Unclosed hero</h1>') -and $malformedHero.Contains('alt="Power BI"')) 'Unknown or unclosed layouts must preserve content and retain the fallback link.'
+
         & $runtime { $script:CallerConfig = [pscustomobject]@{ MailPowerBiUrl = 'https://example.invalid/tenant-dashboard'; MailPowerBiLinkText = 'Tenant dashboard' } }
         $override = & $runtime { Get-SmartM365MailBrandingConfig }
         Assert-Branding ($override.PowerBiUrl -eq 'https://example.invalid/tenant-dashboard' -and $override.PowerBiLinkText -eq 'Tenant dashboard') 'Explicit overrides must win.'
         & $runtime { $script:CallerConfig = [pscustomobject]@{}; $script:GlobalConfig.MailPowerBiEnabled = 'false' }
         $disabled = & $runtime { Add-SmartM365MailBranding '<p>Body</p>' }
         Assert-Branding (-not $disabled.Contains('alt="Power BI"') -and -not $disabled.Contains('example.invalid')) 'Disabled Power BI must emit no report link or image.'
-        Assert-Branding ($disabled -match 'align="left"[^>]*><img') 'Disabling Power BI must keep the client logo left aligned.'
+        Assert-Branding ($disabled -match 'align="center"[^>]*><img') 'Disabling Power BI must keep the client logo centered.'
         & $runtime { $script:GlobalConfig.MailPowerBiEnabled = 'true' }
         foreach ($invalidUrl in @('http://example.invalid/report', 'javascript:alert(1)', 'https://', '//example.invalid/report', "https://example.invalid/`r`ninvalid")) {
             & $runtime { param($Url) $script:GlobalConfig.MailPowerBiUrl = $Url; $script:Warnings = @() } $invalidUrl
@@ -144,10 +171,10 @@ foreach ($edition in $editions) {
         Assert-Branding ($oversize.Contains('DEMO &amp; Client')) 'Missing client logo must fall back to the escaped client name.'
         & $runtime { $script:CallerConfig = [pscustomobject]@{ MailClientLogoPath = 'missing-client.png' } }
         $label = & $runtime { Add-SmartM365MailBranding '<p>Body</p>' }
-        Assert-Branding ($label -match 'align="left"[^>]*><span[^>]*>DEMO &amp; Client</span>') 'Client name must be left aligned.'
+        Assert-Branding ($label -match 'align="center"[^>]*><span[^>]*>DEMO &amp; Client</span>') 'Client name must be centered.'
         & $runtime { $script:GlobalConfig.MailClientName = ''; $script:GlobalConfig.MailClientLogoPath = ''; $script:CallerConfig = [pscustomobject]@{} }
         $powerBiOnly = & $runtime { Add-SmartM365MailBranding '<p>Body</p>' }
-        Assert-Branding ($powerBiOnly.Contains('alt="Power BI"') -and $powerBiOnly -match 'align="left"[^>]*></td>') 'Power BI must render even without client branding.'
+        Assert-Branding ($powerBiOnly.Contains('alt="Power BI"') -and -not $powerBiOnly.Contains('width="92"')) 'Power BI must render even without client branding.'
         & $runtime { $script:GlobalConfig.MailBrandingEnabled = $false; $script:Warnings = @() }
         $noBranding = & $runtime { Add-SmartM365MailBranding '<p>Body</p>' }
         Assert-Branding (-not $noBranding.Contains('<img') -and -not $noBranding.Contains('example.invalid')) 'Branding disabled must suppress both header columns.'
@@ -169,6 +196,11 @@ foreach ($edition in $editions) {
                 Add-SmartM365MailBranding $body
             } $PreviewClientLogoPath
             [IO.File]::WriteAllText([IO.Path]::GetFullPath($PreviewPath), $preview, [Text.UTF8Encoding]::new($false))
+            $previewFolder = Split-Path ([IO.Path]::GetFullPath($PreviewPath)) -Parent
+            foreach ($fixture in @(@{ Name = 'exchange-onprem'; Body = $hero }, @{ Name = 'winupdate'; Body = $standard })) {
+                $fixtureHtml = & $runtime { param($Body) Add-SmartM365MailBranding $Body } $fixture.Body
+                [IO.File]::WriteAllText((Join-Path $previewFolder ($fixture.Name + '.html')), $fixtureHtml, [Text.UTF8Encoding]::new($false))
+            }
         }
     }
     finally { Remove-Module $runtime -ErrorAction SilentlyContinue }
@@ -178,8 +210,8 @@ Write-Output ("PASS: {0} mail branding assertions; both module editions." -f $sc
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBiDaSYXQ0s+WED
-# n0DwYWP40QW/zu0nTFwCGbO669nfqKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCNi/h9F7S3nghn
+# 0kbxV+vh26yOZ5mFf9QD3qgNRwWkt6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -312,31 +344,31 @@ Write-Output ("PASS: {0} mail branding assertions; both module editions." -f $sc
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIDb1ujF+JH3iCQN+l7Jb7toUcOauWnehFu/NcGK+E2eDMA0GCSqG
-# SIb3DQEBAQUABIIBgEkmireE3NtOaSGkEVMX8aVzQ8dpB4yeHH+29YIPlXSPB4Ip
-# NeYO7DwxN0hRFWFEmyzcQrExvtQ4r3GEWEfNn4bs2TAGHcjWJdqKXz3a2JZQ8dNP
-# oFjcQUZ6qHvgBWoRBRS670tq5W0iUP4Lej7JtTqpkkBiyv2QJ4i73O0xmADRveGk
-# iebECGLCktxsHYDP+4DwDqA3apJAPCGO8++z54wzvEb4Q4iIaPjnljAkEyKOjKsc
-# NL2hPyCnfDIT7pPtRxocaj3DCxrjhvukQJCorz8UWDxOMLL9hmYyKlQ2+KkFkSc5
-# eMoHvpkZpiYpl8x+Wb+HPaf7H0htPi9RjeU93jOQNo1I0epSPoGbAblSHiFhwVGQ
-# m9FNttFu/pEi9ysnLWKZYlQOn4S59egX6UYL2ry1+6Z4av1wucNot3WOPNaPHjEI
-# JLLHnr7lUQ4b8Xt+kCuMjDZyeZaCAdIDaXJC4WKGl3bfQZeIq4HnX2YCF02xjIHr
-# dlFjbIr1s4B0ptNeQ6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIDrPNK1eSWMjrtUECSkDXnsIXUYo9R67RMczGs8dnS0gMA0GCSqG
+# SIb3DQEBAQUABIIBgIyojeQ5JWJI/OQqtpqVbVHkLDeSuGoq+pjfX3v/jRoaGeu7
+# b+Z2HZWWdHA4CjXzBhpGWRCijk90DJYNMTjUASP+yEt6bbDCr7+fx82FD3wLgPkU
+# n3a9uddnd2gcsSbdcI+JjxYPuymh+DS57LhmhFPNPL3fYRDL72oN6h5yUm81o/ZA
+# wLW1/uIc8O9NzhGx0nTGaxyRHc6qxKrmjmxsFyTRUEXX5Aurf6TA1s5EQsr9piB/
+# 2I8PuOtianuzE9qp2qJrMd0+KsP0CSJS5ZdN8iY4G+E8dIWcmZg2+EbKxcOJ1PYM
+# UI/yiTnTpcn27p5KSsGCxs2a/LImVCVcWFCfJ0Ff4QLw6mcccsZDjAteIUSh2aIj
+# dtOuFclBKg43PFshCVTsu5rP2J3BZsxksDMe43fNVcxV7jjMnirgfOkkctAsIOvO
+# 9A/ttxNajDh2TjeFBv06CsxQ2XUr7x6+ZG4NVmELC99DkO3U3zJSf42bse2MthME
+# clGmG6uIBoup1SBxiqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjAxMzM4
-# MTBaMC8GCSqGSIb3DQEJBDEiBCAGNOh/DYz6NtLPPAm7CNkpHhpDnaXpKMu6BSKv
-# WCOabzANBgkqhkiG9w0BAQEFAASCAgB6XPU1O3YFT1MyXloQXaBdFPQgssqiovMf
-# 47fYOItDUSMpM1yL5BVcoFsb1MxR5rCT272ULKjkYsLo+V2GfnSERFU8ljd7rzOU
-# E1svoCmwUgw+cXzLVTWLwA2lM63zKalkSj9oBXjHyz6cwXUsEOAaT4fYDXoZKF+a
-# l9joesfosBT29rMgMlPdNLGe2fHFrpGFgWm4nhcOKfdZKPb/OflmIW+z44y5jKHV
-# 8tLhLeP5ROGJuExP4AZ9eRwclMTUYQ86MnrNd+WeKHL3LlgvJHalXAbtNIWqihTa
-# lu44TZdKk7snPm5EpHCFPdzrLgYkOVqKbM049rf+/2PRQzpuN+SW5H3e2jVv/mAz
-# 5rf1ywPjZbO0TwkEyAwvCz5tolBUUF//UFDPbm3grlUoHpiJY3EMksftB0JflD8y
-# AMNP9ONahdcrf7KZI3RTg2mGrFATM7p2mK9W+NL6QVfy6lIn8yDuYAx+ctUju6IH
-# jb+Q91RzTtS4P8notPbhICnBgwLAhPF9h2bew3jC+oChMX/cTaueWriSVr9GcnmU
-# 38W4NB2XrV4TqHoY9kcVCIlzu0T7g33gZlpQicNhJ2uUsxUpLBS6xvmQhErVgnQS
-# /hTPmcA2z5BRrVVVObdf96XdCHHVd+ZN0F0alyEaZxuCOO3Sp3tv4Ln/coAyuHdZ
-# Hibcq08EMg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjExNDIz
+# NDVaMC8GCSqGSIb3DQEJBDEiBCBlIYVOi/MT6R6sOF/beaVOPwx8BvOtYQVgo6pe
+# SxzReTANBgkqhkiG9w0BAQEFAASCAgBZynpRykN5OdeTlB1mBfhhABDRAqnzVJsa
+# Ce4nf6+ZtA6Nlo73ia2CR8kxYO69+hyf6quTtWjTF5s9MN9X+O8qzRa+dncAVzDJ
+# SiWXz8vZwHYaDJIKWcTq/r7yApOp1yYvfZeo522jo/pGu4ujhejrnzpzPjyZXfnD
+# KeDhs+dMnQFCTjAfVaZ6rOMp0XF7/UG1T0BUtOMkQpR23fi92gOIQPhhBTMdsP71
+# mobXgrW7N/EmIoFeMkn0JjZe2fJbS2GKLXl+EIT8pWzFclqm0+ArZOi+i119vmdX
+# Vpo0HqPVSMg/7keFG+7m7kmlNHr5+By9pl4zGbGOGTkToZxwR/hOivVfd1pE5rBE
+# rJArYjoEzX+793d3D/x6lnjEPJ18F+kBWgKOEUg9VZ2kt9s2tmeZs2Saa37SCiaR
+# B+MTc1r2qX8v8/beYqjlCiBg+GObnOZNoAr0kodRt8A7P7Fifo94n6VKNbP6OfJl
+# pBcp4lKpbmxvlXHM2RXtjN9NnC7FUvhX9WFNdkvQc0JxGdZeznVyI2j+KK9AEPRM
+# BdNltenIxa0XG7dbW0yisokrACnVi/+Fo5OAzF2r5xmWG4CtpEu6BbwwPaPAO81r
+# emu/Zlm+zYcGG8BlgOmuBRGOjGg0XgUzaQlcGCZEDj4gjXxg4yjOVtOMr9i8dFF5
+# 9nLKcukILw==
 # SIG # End signature block

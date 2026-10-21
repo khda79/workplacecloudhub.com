@@ -3309,12 +3309,11 @@ function Add-SmartM365MailBranding {
 
     $clientHtml = ''
     $powerBiHtml = ''
-    $powerBiCellPadding = '0'
     if ($branding.Enabled) {
         $logoDataUri = ConvertTo-SmartM365MailLogoDataUri -Path $branding.ClientLogoPath -MaxKB $branding.ClientLogoMaxKB
         if (-not [string]::IsNullOrWhiteSpace($logoDataUri)) {
             $safeLogoDataUri = ConvertTo-SmartM365EmailHtmlText $logoDataUri
-            $clientHtml = "<img src=`"$safeLogoDataUri`" alt=`"$clientName`" width=`"92`" style=`"display:block;margin:0;width:92px;max-width:92px;height:auto;border:0;outline:none;text-decoration:none;`" />"
+            $clientHtml = "<img src=`"$safeLogoDataUri`" alt=`"$clientName`" width=`"92`" style=`"display:block;margin:0 auto;width:92px;max-width:92px;height:auto;border:0;outline:none;text-decoration:none;`" />"
         }
         elseif (-not [string]::IsNullOrWhiteSpace($clientName)) {
             $clientHtml = "<span style=`"font-size:16px;line-height:22px;color:#0f172a;font-weight:700;`">$clientName</span>"
@@ -3337,50 +3336,77 @@ function Add-SmartM365MailBranding {
                 }
                 $powerBiLogoDataUri = ConvertTo-SmartM365MailLogoDataUri -Path $powerBiLogoPath -MaxKB $branding.ClientLogoMaxKB
                 if (-not [string]::IsNullOrWhiteSpace($powerBiLogoDataUri)) {
-                    # Balance the link line below the image to align the two logo centers.
-                    $powerBiCellPadding = '24px 0 0 0'
                     $safePowerBiLogoDataUri = ConvertTo-SmartM365EmailHtmlText $powerBiLogoDataUri
                     $powerBiHtml = @"
 <a href="$powerBiUrl" target="_blank" rel="noopener"><img src="$safePowerBiLogoDataUri" alt="Power BI" height="48" style="height:48px;width:auto;border:0;outline:none;text-decoration:none;" /></a><br />
 "@
                 }
                 $powerBiHtml += @"
-<a href="$powerBiUrl" target="_blank" rel="noopener" style="font-family:Segoe UI,Arial,sans-serif;font-size:12px;line-height:18px;color:#0f6cbd;text-decoration:underline;">$powerBiLinkText</a>
+<a href="$powerBiUrl" target="_blank" rel="noopener" style="font-family:Segoe UI,Arial,sans-serif;font-size:12px;line-height:18px;color:#ffffff;text-decoration:underline;">$powerBiLinkText</a>
 "@
                 $powerBiHtml = @"
-<table role="presentation" align="right" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
-  <tr><td align="center" style="padding:0;text-align:center;">$powerBiHtml</td></tr>
+<table role="presentation" align="right" width="144" border="0" cellpadding="0" cellspacing="0" style="width:144px;margin:0;border:0;border-radius:0;border-collapse:collapse;background:transparent;">
+  <tr><td align="center" valign="middle" style="padding:0;border:0;background:transparent;text-align:center;font-size:12px;line-height:18px;">$powerBiHtml</td></tr>
 </table>
 "@
             }
         }
     }
-    $headerHtml = ''
-    if ($branding.Enabled -and (-not [string]::IsNullOrWhiteSpace($clientHtml) -or -not [string]::IsNullOrWhiteSpace($powerBiHtml))) {
-        $headerHtml = @"
-<!-- SmartM365MailBranding:v1 -->
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f6f8;padding:12px 0 6px 0;border-collapse:collapse;">
-  <tr>
-    <td align="center">
-      <table role="presentation" width="760" cellpadding="0" cellspacing="0" style="width:760px;max-width:760px;border-collapse:collapse;">
-        <tr>
-          <td align="center" style="padding:0 24px 6px 24px;">
-            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;">
-              <tr>
-                <td align="left" style="padding:0;vertical-align:middle;text-align:left;">$clientHtml</td>
-                <td align="right" style="padding:$powerBiCellPadding;vertical-align:middle;text-align:right;">$powerBiHtml</td>
-              </tr>
-            </table>
-          </td>
-        </tr>
-      </table>
-    </td>
-  </tr>
+    $headerHtml = '<!-- SmartM365MailBranding:v1 -->'
+    if ($branding.Enabled -and -not [string]::IsNullOrWhiteSpace($clientHtml)) {
+        $headerHtml += @"
+<table role="presentation" width="100%" border="0" cellpadding="0" cellspacing="0" style="width:100%;margin:0;border:0;border-radius:0;border-collapse:collapse;background:#f4f6f8;">
+  <tr><td align="center" style="padding:16px 24px 0 24px;border:0;background:#f4f6f8;text-align:center;">$clientHtml</td></tr>
 </table>
 "@
     }
-    else {
-        $headerHtml = '<!-- SmartM365MailBranding:v1 -->'
+
+    if (-not [string]::IsNullOrWhiteSpace($powerBiHtml)) {
+        # The shared template exposes its title content without changing title/meta markup.
+        $titleMatch = [regex]::Match($BodyHtml, '(?is)<!-- SmartM365MailTitle:start -->(?<Content>.*?)<!-- SmartM365MailTitle:end -->')
+        $titleStart = -1
+        $titleLength = 0
+        if ($titleMatch.Success) {
+            $titleStart = $titleMatch.Groups['Content'].Index
+            $titleLength = $titleMatch.Groups['Content'].Length
+        }
+        else {
+            # Preserved reports use a hero div instead of the shared title cell.
+            # Match its closing div by depth so nested subtitle/status divs stay intact.
+            $heroMatch = [regex]::Match($BodyHtml, '(?is)<div\b[^>]*\bclass\s*=\s*["'']hero["''][^>]*>')
+            if ($heroMatch.Success) {
+                $contentStart = $heroMatch.Index + $heroMatch.Length
+                $depth = 1
+                foreach ($tag in [regex]::Matches($BodyHtml.Substring($contentStart), '(?is)</?div\b[^>]*>')) {
+                    if ($tag.Value -match '^</') { $depth-- } else { $depth++ }
+                    if ($depth -eq 0) {
+                        $titleStart = $contentStart
+                        $titleLength = $tag.Index
+                        break
+                    }
+                }
+            }
+        }
+        if ($titleStart -ge 0) {
+            $titleContent = $BodyHtml.Substring($titleStart, $titleLength)
+            $titleLayout = @"
+<table role="presentation" width="100%" border="0" cellpadding="0" cellspacing="0" style="width:100%;margin:0;border:0;border-radius:0;border-collapse:collapse;background:transparent;">
+  <tr>
+    <td align="left" valign="middle" style="padding:0 24px 0 0;border:0;background:transparent;color:#ffffff;text-align:left;vertical-align:middle;">$titleContent</td>
+    <td align="right" valign="middle" width="144" style="width:144px;padding:0;border:0;background:transparent;color:#ffffff;text-align:right;vertical-align:middle;">$powerBiHtml</td>
+  </tr>
+</table>
+"@
+            $BodyHtml = $BodyHtml.Substring(0, $titleStart) + $titleLayout + $BodyHtml.Substring($titleStart + $titleLength)
+        }
+        else {
+            # Arbitrary HTML without a known title region keeps a separate dark link band.
+            $headerHtml += @"
+<table role="presentation" width="100%" border="0" cellpadding="0" cellspacing="0" style="width:100%;margin:0;border:0;border-radius:0;border-collapse:collapse;background:#0f172a;">
+  <tr><td align="right" style="padding:20px 24px;border:0;background:#0f172a;text-align:right;">$powerBiHtml</td></tr>
+</table>
+"@
+        }
     }
 
     $footerHtml = @"
@@ -3640,10 +3666,12 @@ function New-SmartM365EmailBody {
         <table role="presentation" width="760" cellpadding="0" cellspacing="0" style="width:760px;max-width:760px;background:#ffffff;border:1px solid #d9e2ec;border-radius:6px;overflow:hidden;">
           <tr>
             <td style="background:#0f172a;color:#ffffff;padding:20px 24px;">
+              <!-- SmartM365MailTitle:start -->
               <div style="font-size:12px;text-transform:uppercase;color:#93c5fd;font-weight:700;">$htmlCategory</div>
               <div style="font-size:24px;line-height:30px;font-weight:700;margin-top:6px;">$htmlTitle</div>
               <div style="font-size:13px;color:#cbd5e1;margin-top:8px;">$metaHtml</div>
               $statusHtml
+              <!-- SmartM365MailTitle:end -->
             </td>
           </tr>
           $messageHtml
@@ -6664,8 +6692,8 @@ Export-ModuleMember -Function `
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD6d3ZGbCpigsNy
-# bVrbdSqI/MysdqCIbD2BhaH4mGWTUqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBGgHsg+8Jwc2hQ
+# CiovNZhEdDD4UUMNdLPfG0pSdHegYqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -6798,31 +6826,31 @@ Export-ModuleMember -Function `
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIMpXMAsdbAquWeWiDHrfI4dEBcHIE7v0F381S867rOF6MA0GCSqG
-# SIb3DQEBAQUABIIBgAowNcfYGU3rr9+sKpM8VNXgxUEkYxyRP5WNfRxIVxcSDeY5
-# 4x8bSCmd0BroaZ+riyVGllhSsZJILcT5isAkTNeWzUVM7Vo+QJxSfx0FNhMk7/Nh
-# znz9QhPw8KVFKJm79g37vLw6vemcGu7+eTBXrTr6oh81+11s8pOuLJWlLN1J9QiZ
-# ujxDvZAH4JyGaouHpRlETGyivqHW4x40TG/cG+nso/F+kwm2F5/dwYoKG6v37lvW
-# 5SzGwg2H4ArFV1VLjYIUHoI9HDmpBF2f2dIzw8XdwTOF/q7JB8KGxfjeeD/kmGRy
-# P91zDEU5yyGquCC5qwO1zHNc5EHZ/VhfUShsNOOwOLvoB8BKpeOW8GylUlmfP8iU
-# EBJNhV3G4i0dcPCkhVlY53CpogQRb7EiZuR1uIuzYrPAG6bJExPTbLE58HU7IcuE
-# AxUrWIi+cYFfQUD0vnM67l4eVlARaqPq4g6gdx9xzZA9EK6GFgPQqKghYB3lSu9X
-# 94Y1vz3DGCvGD9TC36GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIK95WreJSBpHWj8sjYW2y2u0KWA3mLhVLjZDa8JmYcxMMA0GCSqG
+# SIb3DQEBAQUABIIBgGz2Tlwg8L3j24CuwofhVxK67V9U+dH3PkiJ/4aYkn27fiD2
+# N6sptDMPGhMSG7R7AXUy+OcHoLNSuV8zJiUYhSfzNdEr7walHR/0noiulJhxRmm5
+# GhA9Oz10C4+Afyv6uQMrdCa6kW2MsDILKTibjvL7oyfNcWJzk2lJDqsUYJU/XGtk
+# bxdJddZeLtxyMo05ho2tO6c/ye+V7aCbEAIL7wObdwe5v55hdNmgIRFDkRIMypGF
+# 9tq9YfJ5SHo3SLmN46d8Ff36sygUiUz9MRZhOJdudGZQ0IN7fXltvOI3A1Xr3y/q
+# tizgvyLO+6+FE99gSxzYpttqdmZZZ8c61Jlt/R7Ww/wTjB84/Gk2TyX/PlXmgFFy
+# oy9EQkos13m5LD5hompDwa/rtoAFG9LVmgNuUbsDmDp08YqdyjErYxZw/82AhQL+
+# LXvPkxbQ2/Wi7FiM8hyHCyCXY3MBX+mllNHB3SJtdctxm4TsJ6K5AFcH2mU4fkgS
+# 1ZkfpaNt31caOSM3QqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjExNDA1
-# NTlaMC8GCSqGSIb3DQEJBDEiBCAI88dB+uM0lfG+TTZoF4fkZ64wzavJY8FAA7m0
-# bjJITjANBgkqhkiG9w0BAQEFAASCAgBEM16LrRU8VnPk+9wxuSRb/aAGZ6GRT7Hc
-# uze7MSCaTsH3vxqFczp0Ric0wTLo+E42hcigC32h5FuGugoTTR+/wyjPPn68oLz+
-# Y9tk7hfYlR6zSP5ecZ3smkWrIsoQzlSoPegknvyOWH46CIDc0WOCz8WrVk05pL2H
-# AMkl0NG++gF+USeo30pqgZvl9FolEqIAGNqeR8KKWVAP7sL+DpouQccmHNjNUJ0d
-# yu8Al61SRQQHGzhdL1E5zf8Flhq9BfGrPeDSRU5xtNKe86iAvbAMUv/taRk9Tpqy
-# CVQE9IAYyNMQctpeAt7b2q5jYt2KbDnjazMW5vSriWzlQl6xL+6PiGsjxceKqjZ4
-# elJ4/eIbVb+iiBclCkvaso+e1YkXnReFxdBx6ohurSql3EGRvmaeZA2KPxYb1waj
-# mVLtGU1eZXbopYJBhgfMtx5cL80vTIq7ocF4Sa7paE9NjqPlQsnShsPHiFDssKVS
-# 641hF7kKL8VkNThaXR0mhX1Ftoaev4gFRj0NfNVmELJkO7EVFf8V1TyzMp8Nvei2
-# rPRmYqIMCBkiXu3NFHk4M05q9tJG5whBLbkhjg5vAeR8QZv26i5D42JYzqSXCxGh
-# ACU9BZG2R30DfcoAYva/2NLQGNJckk+qYDNMBEbZXmZpqKdiS9pg0VMA6U0W62Gf
-# P8EvrFBqSg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjExNDIz
+# NDNaMC8GCSqGSIb3DQEJBDEiBCAXLuFVeYpshC66XJCZF2HubleyCYOVxY/4wAr5
+# KwnTOTANBgkqhkiG9w0BAQEFAASCAgAZK3diMu3uLCIuJYrM0KSl+ajFirR1Alrh
+# 9EMKtZ6AxJEpjZHJW5MwWZLEuQ53+NRG8z/PdvNuY3HQ4z5s1uvQ9uOvwFrzWXjh
+# hqNy4vqhgtmqspMMXwKN0KUasvyVk1aVyLO5UZov/qL4bl4uhj5SD0lERG8ryIrW
+# P3oEqrHxIb8FsMZGKvrOVUBVPxuZWvi687um1atnAVn/2g520Sv1l3hTcrQEchnm
+# axo2utKGP7r5u+qMLiBOMo8mv67wKsCgOSoweEMW3HUTuGS6Pg8MXPr7/eMUCgxH
+# 3olwQyPIqbeC0/hT0/R+qBnxiaeu02oG3A/6aS9Gxv4IWJnBMBDLfjvbONWpU+H1
+# z1azULhEDnqZy2iNLQgJcA6tXq8MsNp0zBhBHXskVm5X1d3SgWz3nJdHHqR+Tfz/
+# DDZNCi4KryVLcV7EoQQ3JFMsUrlZavpTuqTZI8uIjJF8bUq+toAO1HfU884FVb+i
+# 7Tg0DB5UkEm0usQoTGO2q7ExWbFEh4X83nKJ0fdaBgQKFInABjvn7dBSJq1JGIoh
+# 4zVrIBfWiH7J5rLinZnDEjfkZON5czFT4tIwd7ETmsWZRIYtBBb5oPJY52KaZal8
+# 9NWG6yIyB7v90cs6nL3xQj4V0+tMUkoYysLs/1KOMmDhEsqoWwPWr+uGRl5+nSnE
+# CEnObC4MYA==
 # SIG # End signature block
