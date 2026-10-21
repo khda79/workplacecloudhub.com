@@ -155,4 +155,7 @@ table 'Loaded Batch Audit'
 				ROW("Table Name", "Windows Migration History", "Loaded Batch ID", MAXX('Windows Migration History', 'Windows Migration History'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Windows Migration History')),
 				ROW("Table Name", "Workforce Operational Signals", "Loaded Batch ID", MAXX('Workforce Operational Signals', 'Workforce Operational Signals'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Workforce Operational Signals')),
 				ROW("Table Name", "Workforce Trend Evidence", "Loaded Batch ID", MAXX('Workforce Trend Evidence', 'Workforce Trend Evidence'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Workforce Trend Evidence'))
+				,
+				ROW("Table Name", "Exchange On-prem Infrastructure", "Loaded Batch ID", MAXX('Exchange On-prem Infrastructure', 'Exchange On-prem Infrastructure'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Exchange On-prem Infrastructure')),
+				ROW("Table Name", "Exchange Mailbox Databases", "Loaded Batch ID", MAXX('Exchange Mailbox Databases', 'Exchange Mailbox Databases'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Exchange Mailbox Databases'))
 				)

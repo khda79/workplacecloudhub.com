@@ -443,9 +443,85 @@ expression CreatePreparedReaders =
 		            Qualification="Not available in selected batch", #"Coverage State"="Not available in selected batch"]},
 		            Value.Type(Typed), MissingField.UseNull) else Typed
 		in Compatible,
+		    GetExchangeOnPremInfrastructure = () as table =>
+		let
+		    Schema = type table [Dataset=text, #"Source File"=text, #"Source Row Key"=text,
+		        #"Server Name"=text, Category=text, Attribute=text, Value=text,
+		        #"Numeric Value"=nullable number, #"Collection Status"=text,
+		        #"Source Available"=logical, #"Loaded Batch ID"=text],
+		    Sources = {
+		        [Dataset="Servers", File="Exchange_OnPrem_Servers_Inventory.csv", Server="Name", Required={"TenantKey","Name","AdminDisplayVersion","ServerRole"}],
+		        [Dataset="Compute", File="Exchange_OnPrem_Servers_Compute.csv", Server="ExchangeServerName", Required={"TenantKey","ExchangeServerName","CollectionStatus"}],
+		        [Dataset="Logical disks", File="Exchange_OnPrem_Servers_LogicalDisks.csv", Server="ExchangeServerName", Required={"TenantKey","ExchangeServerName","DeviceId","CollectionStatus"}],
+		        [Dataset="Physical disks", File="Exchange_OnPrem_Servers_DiskDrives.csv", Server="ExchangeServerName", Required={"TenantKey","ExchangeServerName","DeviceId","CollectionStatus"}],
+		        [Dataset="Remote access", File="Exchange_OnPrem_Servers_RemoteAccess.csv", Server="ExchangeServerName", Required={"TenantKey","ExchangeServerName","PingOk","WmiDcomOk"}],
+		        [Dataset="Per-server summary", File="Exchange_OnPrem_Infrastructure_PerServerSummary.csv", Server="ExchangeServerName", Required={"TenantKey","ExchangeServerName","ComputeCollectionStatus","DiskDriveCollectionStatus","LogicalDiskCollectionStatus"}],
+		        [Dataset="Readiness", File="Exchange_OnPrem_MigrationReadiness_Config.csv", Server=null, Required={"TenantKey","Category","ObjectName","Setting","Value","CollectionStatus"}],
+		        [Dataset="Inventory summary", File="Exchange_OnPrem_Servers_Inventory_Summary.csv", Server=null, Required={"TenantKey","RunId","ExchangeServersCount"}],
+		        [Dataset="Service health", File="Exchange_OnPrem_Servers_ServiceHealth.csv", Server="ServerName", Required={"TenantKey","ServerName","ServicesRunning","ServicesNotRunning","CollectionStatus"}],
+		        [Dataset="Database paths", File="Exchange_OnPrem_MailboxDatabases_Paths.csv", Server="ServerName", Required={"TenantKey","ServerName","DatabaseName","EdbFilePath","LogFolderPath","ErrorMessage"}]
+		    },
+		    SelectedManifest = GetPreparedBatchManifest(),
+		    Declared = SelectedManifest[Files] & Record.FieldOrDefault(SelectedManifest, "Artifacts", {}),
+		    TextValue = (value as any) as text => if value = null then "" else Text.From(value, "en-US"),
+		    Status = (row as record) as text =>
+		        let Recorded = TextValue(Record.FieldOrDefault(row, "CollectionStatus", null)),
+		            ErrorMessage = TextValue(Record.FieldOrDefault(row, "ErrorMessage", null)),
+		            Components = List.Transform({"ComputeCollectionStatus","DiskDriveCollectionStatus","LogicalDiskCollectionStatus"},
+		                each TextValue(Record.FieldOrDefault(row, _, null)))
+		        in if Recorded <> "" then Recorded else if ErrorMessage <> "" then "ERROR"
+		           else if List.Contains(Components, "ERROR") then "ERROR"
+		           else if List.Contains(Components, "WARNING") then "WARNING"
+		           else if List.AllTrue(List.Transform(Components, each _ = "OK")) then "OK"
+		           else "Observed - status not recorded",
+		    Placeholder = (spec as record, available as logical, state as text) as list =>
+		        {[Dataset=spec[Dataset], #"Source File"=spec[File], #"Source Row Key"=spec[File] & ":availability",
+		          #"Server Name"="", Category=spec[Dataset], Attribute="Source availability", Value=state,
+		          #"Numeric Value"=null, #"Collection Status"=state, #"Source Available"=available, #"Loaded Batch ID"=BatchId]},
+		    ReadSource = (spec as record) as list =>
+		        let Name = "Source-" & spec[File],
+		            Membership = List.Select(Declared, each [File] = Name),
+		            Present = if List.Count(Membership) = 0 then false
+		                else if List.Count(Membership) <> 1 then error "Duplicate Exchange infrastructure declaration"
+		                else if List.Count(List.Select(Record.FieldOrDefault(SelectedManifest, "Artifacts", {}), each [File] = Name)) <> 1
+		                     then error "Invalid Exchange infrastructure artifact membership" else true,
+		            Parsed = if not Present then null else Csv.Document(GetPreparedEvidenceFile(Name),
+		                [Delimiter=";", Encoding=65001, QuoteStyle=QuoteStyle.Csv]),
+		            Header = if not Present then {} else if Table.IsEmpty(Parsed) then error "Empty Exchange infrastructure CSV"
+		                else List.Transform(Record.FieldValues(Parsed{0}), each TextValue(_)),
+		            HeaderValid = not List.Contains(Header, "") and List.Count(List.Distinct(Header, Comparer.OrdinalIgnoreCase)) = List.Count(Header),
+		            Promoted = if not Present then null else if not HeaderValid then error "Invalid Exchange infrastructure CSV header"
+		                else Table.PromoteHeaders(Parsed, [PromoteAllScalars=true]),
+		            ColumnsChecked = if not Present then null else if Table.HasColumns(Promoted, spec[Required]) then Promoted
+		                else error "Missing Exchange infrastructure columns",
+		            Scoped = if not Present then null else if List.AllTrue(List.Transform(Table.Column(ColumnsChecked, "TenantKey"),
+		                each _ = ExpectedTenant)) then ColumnsChecked else error "Foreign Exchange infrastructure tenant",
+		            SourceRows = if not Present then {} else Table.ToRecords(Scoped),
+		            LongRows = if not Present then Placeholder(spec, false, "Not captured in selected batch")
+		                else if List.IsEmpty(SourceRows) then Placeholder(spec, true, "Captured - no rows")
+		                else List.Combine(List.Transform(List.Positions(SourceRows), (index) =>
+		                    let Row = SourceRows{index}, RowKey = spec[File] & ":" & Text.From(index+1, "en-US"),
+		                        ServerName = if spec[Server] = null then "" else TextValue(Record.Field(Row, spec[Server])),
+		                        Category = TextValue(Record.FieldOrDefault(Row, "Category", spec[Dataset])),
+		                        CollectionState = Status(Row)
+		                    in List.Transform(Record.FieldNames(Row), (attribute) =>
+		                        let Value = TextValue(Record.Field(Row, attribute)),
+		                            Candidate = Text.Trim(Value),
+		                            // Do not reinterpret localized or unit-bearing text as an invariant number.
+		                            Number = if Candidate = "" or Text.Select(Candidate, {"0".."9", "+", "-", ".", "e", "E"}) <> Candidate then null
+		                                else try Number.FromText(Candidate, "en-US") otherwise null
+		                        in [Dataset=spec[Dataset], #"Source File"=spec[File], #"Source Row Key"=RowKey,
+		                            #"Server Name"=ServerName, Category=Category, Attribute=attribute, Value=Value,
+		                            #"Numeric Value"=Number, #"Collection Status"=CollectionState,
+		                            #"Source Available"=true, #"Loaded Batch ID"=BatchId])))
+		        in LongRows,
+		    Result = Table.Buffer(Table.FromRecords(List.Combine(List.Transform(Sources, ReadSource)), Schema, MissingField.Error)),
+		    ForcedRows = Table.RowCount(Result)
+		in
+		    if ForcedRows >= 0 and CheckStable("verify-infrastructure") then Result else error "Unstable Exchange infrastructure batch",
 		    Finish = (Rows as table) as table =>
 		        if GetPreparedBatchManifest()[BatchId] <> BatchId then error "Prepared batch identity mismatch"
 		        else Table.AddColumn(Rows, "Loaded Batch ID", each BatchId, type text)
 		in
-		    [BatchId=BatchId, Finish=Finish, GetPreparedEvidenceFile=GetPreparedEvidenceFile, GetPreparedBatchManifest=GetPreparedBatchManifest, GetLicenseReportQualification=GetLicenseReportQualification, LicenseReportFileUsable=LicenseReportFileUsable, GetLicenseReportSnapshot=GetLicenseReportSnapshot, GetLicenseReportCsv=GetLicenseReportCsv, ReadMigrationCsv=ReadMigrationCsv, CreateMailboxMigrationReader=CreateMailboxMigrationReader, ReadMailboxMigrationCsv=ReadMailboxMigrationCsv, ReadMigrationWeeklyHistory=ReadMigrationWeeklyHistory, GetSharePointOnPremCsv=GetSharePointOnPremCsv, GetSharePointMigrationEvidence=GetSharePointMigrationEvidence]
+		    [BatchId=BatchId, Finish=Finish, GetExchangeOnPremInfrastructure=GetExchangeOnPremInfrastructure, GetPreparedEvidenceFile=GetPreparedEvidenceFile, GetPreparedBatchManifest=GetPreparedBatchManifest, GetLicenseReportQualification=GetLicenseReportQualification, LicenseReportFileUsable=LicenseReportFileUsable, GetLicenseReportSnapshot=GetLicenseReportSnapshot, GetLicenseReportCsv=GetLicenseReportCsv, ReadMigrationCsv=ReadMigrationCsv, CreateMailboxMigrationReader=CreateMailboxMigrationReader, ReadMailboxMigrationCsv=ReadMailboxMigrationCsv, ReadMigrationWeeklyHistory=ReadMigrationWeeklyHistory, GetSharePointOnPremCsv=GetSharePointOnPremCsv, GetSharePointMigrationEvidence=GetSharePointMigrationEvidence]
 	lineageTag: 26f34f0c-24ee-421f-94a6-123ea48fb2ec

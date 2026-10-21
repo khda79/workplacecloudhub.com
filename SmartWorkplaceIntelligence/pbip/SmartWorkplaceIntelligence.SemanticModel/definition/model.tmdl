@@ -187,5 +187,7 @@ ref table 'SPO Migration Project'
 ref table 'SPO Migration Operation'
 ref table 'SPO Migration Snapshot Date'
 ref table 'Loaded Batch Audit'
+ref table 'Exchange On-prem Infrastructure'
+ref table 'Exchange Mailbox Databases'
 
 ref cultureInfo en-US

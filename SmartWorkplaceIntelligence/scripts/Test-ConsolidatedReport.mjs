@@ -12,8 +12,9 @@ const metadata=snapshot.model?{tables:snapshot.model.tables.map(t=>({name:t.name
 const tables=new Map(metadata.tables.map(t=>[t.name,t]));
 let checks=0;
 function check(test,message){assert(test,message);checks++;}
-check(order.pageOrder.length===29,'Expected 29 pages including daily trends and SharePoint migration');
-check(new Set(order.pageOrder).size===29,'Duplicate page registration');
+check(order.pageOrder.length===30,'Expected 30 pages including On-prem Messaging');
+check(new Set(order.pageOrder).size===30,'Duplicate page registration');
+check(order.pageOrder.indexOf('on-prem-messaging')===order.pageOrder.indexOf('71a60a59e0eb52a7a7d0')+1,'On-prem Messaging must follow Messaging & Hybrid');
 check(order.pageOrder.includes('migration-to-sharepoint-online'),'SharePoint migration page preserved');
 const pages=order.pageOrder.map(p=>read(path.join(def,'pages',p,'page.json')));
 check(!pages.some(p=>p.displayName==='CMDB')&&pages[1].displayName==='Operational Overview','Existing business pages preserved');

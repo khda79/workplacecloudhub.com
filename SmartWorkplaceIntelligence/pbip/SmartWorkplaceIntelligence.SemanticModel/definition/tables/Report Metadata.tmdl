@@ -73,6 +73,63 @@ table 'Report Metadata'
 			& IF(_missing > 0, " | Missing provenance: " & FORMAT(_missing,"0"), "")
 		lineageTag: da192672-ca2e-42ed-aec6-10f2888f8c89
 
+	/// Single batch ID observed across imported nonempty evidence tables; blank for mixed or unavailable lineage.
+	measure 'Dataset Loaded Batch ID' =
+			VAR _known = FILTER(ALL('Loaded Batch Audit'), 'Loaded Batch Audit'[Loaded Rows] > 0 && NOT ISBLANK('Loaded Batch Audit'[Loaded Batch ID]))
+			VAR _ids = DISTINCT(SELECTCOLUMNS(_known, "Id", 'Loaded Batch Audit'[Loaded Batch ID]))
+			RETURN IF(COUNTROWS(_ids) = 1, CONCATENATEX(_ids, [Id], ""), BLANK())
+		isHidden
+		displayFolder: Report presentation
+		lineageTag: 17597244-0c1f-4c8f-a4fc-d0a376061422
+
+	/// Loaded batch UTC timestamp converted to Europe/Paris calendar date; not the age of each underlying collector.
+	measure 'Dataset Batch Date Paris' =
+			VAR _id = [Dataset Loaded Batch ID]
+			VAR _utc = IF(LEN(_id) >= 15, IFERROR(DATE(VALUE(LEFT(_id,4)),VALUE(MID(_id,5,2)),VALUE(MID(_id,7,2))) + TIME(VALUE(MID(_id,10,2)),VALUE(MID(_id,12,2)),VALUE(MID(_id,14,2))), BLANK()))
+			VAR _year = YEAR(_utc)
+			VAR _march = DATE(_year,3,31)
+			VAR _october = DATE(_year,10,31)
+			VAR _start = _march - MOD(WEEKDAY(_march,2),7) + TIME(1,0,0)
+			VAR _end = _october - MOD(WEEKDAY(_october,2),7) + TIME(1,0,0)
+			VAR _offset = IF(_utc >= _start && _utc < _end,2,1)
+			RETURN IF(NOT ISBLANK(_utc), INT(_utc + DIVIDE(_offset,24)))
+		formatString: yyyy-MM-dd
+		isHidden
+		displayFolder: Report presentation
+		lineageTag: 241f8225-ab53-40cc-812e-8a22d4e7a6bf
+
+	/// Loaded batch date (Europe/Paris) and ID, independent of page filters. Mixed lineage remains explicit.
+	measure 'Dataset Footer' =
+			VAR _id=[Dataset Loaded Batch ID]
+			RETURN IF(NOT ISBLANK(_id), "Dataset: " & FORMAT([Dataset Batch Date Paris],"dd/MM/yyyy") & " | " & _id, [Loaded Batch Banner])
+		displayFolder: Report presentation
+		lineageTag: b12182b7-b405-4a49-b0f9-ace7c3966d63
+
+	/// Red only when selected batch UTC age exceeds 26 hours. Missing or mixed provenance is amber here; the separate Mixed batches alert is unchanged.
+	measure 'Dataset Footer Color' = VAR _age=[Dataset Batch Age Hours] RETURN IF(ISBLANK(_age), "#805400", IF(_age>26, "#B42318", "#334155"))
+		formatString: @
+		isHidden
+		displayFolder: Dataset freshness
+		lineageTag: 095e9fc6-a57d-4e30-b653-fbb371a79bc0
+
+	/// Red only when selected batch UTC age exceeds 26 hours. Missing or mixed provenance is amber here; the separate Mixed batches alert is unchanged.
+	measure 'Dataset Batch Timestamp UTC' =
+			VAR _id = [Dataset Loaded Batch ID]
+			VAR _stamp = IF(LEN(_id)>=19 && MID(_id,9,1)="T" && MID(_id,19,1)="Z",
+			    IFERROR(DATE(VALUE(LEFT(_id,4)),VALUE(MID(_id,5,2)),VALUE(MID(_id,7,2))) +
+			        TIME(VALUE(MID(_id,10,2)),VALUE(MID(_id,12,2)),VALUE(MID(_id,14,2))) +
+			        DIVIDE(VALUE(MID(_id,16,3)),86400000),BLANK()))
+			RETURN IF(NOT ISBLANK(_stamp) && FORMAT(_stamp,"yyyyMMdd") & "T" & FORMAT(_stamp,"HHmmss") = LEFT(_id,15), _stamp)
+		formatString: yyyy-MM-dd HH:mm:ss
+		isHidden
+		displayFolder: Dataset freshness
+
+	/// Red only when selected batch UTC age exceeds 26 hours. Missing or mixed provenance is amber here; the separate Mixed batches alert is unchanged.
+	measure 'Dataset Batch Age Hours' = VAR _stamp=[Dataset Batch Timestamp UTC] RETURN IF(NOT ISBLANK(_stamp), DIVIDE(ROUND((UTCNOW()-_stamp)*86400000,0),3600000))
+		formatString: 0.00
+		isHidden
+		displayFolder: Dataset freshness
+
 	/// Business attribute Product Version.
 	column 'Product Version'
 		dataType: string

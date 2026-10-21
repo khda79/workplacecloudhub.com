@@ -1,0 +1,223 @@
+/// Utility observations, one row per database name plus explicit unassigned/missing evidence. Same-batch infrastructure and mailbox exports; not a complete inventory or DAG copy health certification. Disconnected: database slicers apply only to this table; geographical and attribute filters do not apply.
+table 'Exchange Mailbox Databases'
+	lineageTag: b7f4ce1c-b329-5f47-aa1c-3b55c0819627
+
+	/// Selected immutable batch only. Observed counts are not completeness or DAG health certification.
+	measure 'Exchange Observed Databases' = VAR _available=CALCULATE(COUNTROWS('Exchange Mailbox Databases'),'Exchange Mailbox Databases'[Database Source Available]=TRUE()) RETURN IF(_available>0,COALESCE(CALCULATE(COUNTROWS('Exchange Mailbox Databases'),KEEPFILTERS('Exchange Mailbox Databases'[Is Database]=TRUE()),KEEPFILTERS('Exchange Mailbox Databases'[Infrastructure Observed]=TRUE())),0))
+		formatString: #,0
+
+	/// Selected immutable batch only. Observed counts are not completeness or DAG health certification.
+	measure 'Exchange Database Observed Mailboxes' = SUM('Exchange Mailbox Databases'[Observed Mailboxes])
+		formatString: #,0
+
+	/// Selected immutable batch only. Observed counts are not completeness or DAG health certification.
+	measure 'Exchange Database Size GB' = SUM('Exchange Mailbox Databases'[Database Size GB])
+		formatString: #,0.00
+
+	/// Selected immutable batch only. Observed counts are not completeness or DAG health certification.
+	measure 'Exchange Database Reusable Space GB' = SUM('Exchange Mailbox Databases'[Reusable Internal Space GB])
+		formatString: #,0.00
+
+	/// Selected immutable batch only. Observed counts are not completeness or DAG health certification.
+	measure 'Exchange Database Count' = VAR _available=CALCULATE(COUNTROWS('Exchange Mailbox Databases'),'Exchange Mailbox Databases'[Database Source Available]=TRUE()) RETURN IF(_available>0,COALESCE(CALCULATE(COUNTROWS('Exchange Mailbox Databases'),KEEPFILTERS('Exchange Mailbox Databases'[Is Database]=TRUE()),KEEPFILTERS('Exchange Mailbox Databases'[Infrastructure Observed]=TRUE())),0))
+		formatString: #,0
+
+	/// Selected immutable batch only. Observed counts are not completeness or DAG health certification.
+	measure 'Exchange Database Unassigned Mailboxes' = CALCULATE(SUM('Exchange Mailbox Databases'[Observed Mailboxes]),'Exchange Mailbox Databases'[Is Database]=FALSE())
+		formatString: #,0
+
+	/// Selected immutable batch only. Observed counts are not completeness or DAG health certification.
+	measure 'Exchange Database Evidence Note' =
+			VAR _source=CALCULATE(COUNTROWS('Exchange Mailbox Databases'),REMOVEFILTERS('Exchange Mailbox Databases'),'Exchange Mailbox Databases'[Database Source Available]=TRUE())
+			VAR _missing=CALCULATE([Exchange Database Unassigned Mailboxes],REMOVEFILTERS('Exchange Mailbox Databases'))
+			RETURN IF(_source=0,"Database infrastructure not captured in selected batch; status, sizes and associated servers unknown. ","Observed database configuration; collections are not simultaneous. ") &
+			IF(NOT ISBLANK(_missing) && _missing>0,FORMAT(_missing,"0") & " mailboxes have no database name. ","") &
+			"Zero observed mailboxes is not proof of an empty database. DAG copy health is not captured."
+		formatString: @
+
+	column Database
+		dataType: string
+		lineageTag: 4b72ec0b-d64a-5702-a42c-ff3c7547143a
+		summarizeBy: none
+		sourceColumn: Database
+
+	column 'Server Name'
+		dataType: string
+		lineageTag: 13185b38-c776-50f0-8f9a-72ca5db696da
+		summarizeBy: none
+		sourceColumn: Server Name
+
+	column 'Database Status'
+		dataType: string
+		lineageTag: 8950d61e-6a45-5552-9eca-d6b83b15046a
+		summarizeBy: none
+		sourceColumn: Database Status
+
+	column 'Observed Mailboxes'
+		dataType: int64
+		isHidden
+		lineageTag: f62c6af3-ac10-5ef5-bf00-f8e5d3c95bf0
+		summarizeBy: none
+		sourceColumn: Observed Mailboxes
+
+	column 'Database Size'
+		dataType: string
+		lineageTag: 0b550c14-9c3e-512a-8b02-58b9198a4d83
+		summarizeBy: none
+		sourceColumn: Database Size
+
+	column 'Database Size GB'
+		dataType: double
+		isHidden
+		lineageTag: 6036ecb3-5283-5d88-bd1a-a43e2550510e
+		summarizeBy: none
+		sourceColumn: Database Size GB
+
+	column 'Reusable Internal Space'
+		dataType: string
+		lineageTag: b8741d8a-475a-5c32-92a7-36e9f813bae2
+		summarizeBy: none
+		sourceColumn: Reusable Internal Space
+
+	column 'Reusable Internal Space GB'
+		dataType: double
+		isHidden
+		lineageTag: de782cbd-5876-526e-a675-0de1d81ffea9
+		summarizeBy: none
+		sourceColumn: Reusable Internal Space GB
+
+	column 'Infrastructure Observed'
+		dataType: boolean
+		isHidden
+		lineageTag: 75ca382a-bbc1-5d41-bfdb-7f5e5ce0daa3
+		summarizeBy: none
+		sourceColumn: Infrastructure Observed
+
+	column 'Is Database'
+		dataType: boolean
+		isHidden
+		lineageTag: cdcba763-448c-5473-9357-c74294ac6250
+		summarizeBy: none
+		sourceColumn: Is Database
+
+	column 'Database Source Available'
+		dataType: boolean
+		isHidden
+		lineageTag: 76cfd93c-c4c0-5c55-9d99-b3240e9aa130
+		summarizeBy: none
+		sourceColumn: Database Source Available
+
+	column 'Mailbox Counts Available'
+		dataType: boolean
+		isHidden
+		lineageTag: 591ed220-f626-5f0a-b46e-38a063715f9b
+		summarizeBy: none
+		sourceColumn: Mailbox Counts Available
+
+	column 'Data Notes'
+		dataType: string
+		lineageTag: 8728e310-b4ac-5b10-b9c7-0abf1ddc5979
+		summarizeBy: none
+		sourceColumn: Data Notes
+
+	column 'Loaded Batch ID'
+		dataType: string
+		isHidden
+		lineageTag: 795fe218-4015-5cc9-b9a1-0a1cf18e8b79
+		summarizeBy: none
+		sourceColumn: Loaded Batch ID
+
+	partition 'Exchange Mailbox Databases' = m
+		mode: import
+		source =
+				let
+				    Readers = CreatePreparedReaders(),
+				    Manifest = Readers[GetPreparedBatchManifest](),
+				    Artifacts = Record.FieldOrDefault(Manifest, "Artifacts", {}),
+				    HasArtifact = (name as text) as logical =>
+				        let Matches = List.Select(Artifacts, each [File] = name)
+				        in if List.Count(Matches) > 1 then error "Duplicate database source artifact"
+				           else List.Count(Matches) = 1,
+				    DatabaseSourceAvailable = HasArtifact("Source-Exchange_OnPrem_MigrationReadiness_Config.csv"),
+				    MailboxSourceAvailable = HasArtifact("Source-Exchange_OnPrem_Mailboxes_AllDomains.csv"),
+				    Infrastructure = Readers[GetExchangeOnPremInfrastructure](),
+				    Long = Table.SelectRows(Infrastructure, each [Dataset] = "Readiness" and
+				        [Category] = "MailboxDatabase" and [Source Available]),
+				    TextValue = (value as any) as text => if value = null then "" else Text.Trim(Text.From(value, "en-US")),
+				    Normal = (value as any) as text => Text.Lower(TextValue(value)),
+				    Field = (rows as table, attribute as text) as text =>
+				        let Values = List.Distinct(Table.Column(Table.SelectRows(rows, each [Attribute] = attribute), "Value"))
+				        in if List.Count(Values) = 1 then TextValue(Values{0})
+				           else if List.IsEmpty(Values) then "" else "Conflicting values",
+				    // Infrastructure is long-form: first reconstruct one readiness property row.
+				    Properties = Table.Group(Long, {"Source Row Key"}, {{"Property", each [
+				        Name = Field(_, "ObjectName"), Setting = Field(_, "Setting"),
+				        Value = Field(_, "Value"), Status = List.Distinct([Collection Status])], type record}}),
+				    PropertyRows = List.Transform(Properties[Property], each _),
+				    Names = List.Distinct(List.Select(List.Transform(PropertyRows, each [Name]), each _ <> "" and _ <> "Conflicting values")),
+				    MailRaw = if not MailboxSourceAvailable then #table({"TenantKey","ObjectGUID","RecipientType","Database"}, {})
+				        else Readers[ReadMailboxMigrationCsv](
+				            Readers[GetPreparedEvidenceFile]("Source-Exchange_OnPrem_Mailboxes_AllDomains.csv"),
+				            {"TenantKey","ObjectGUID","RecipientType"}, {"Database"}),
+				    MailTenant = if List.AllTrue(List.Transform(MailRaw[TenantKey], each _ = PreparedExpectedTenantKey))
+				        then MailRaw else error "Foreign database mailbox source tenant",
+				    HasDatabaseColumn = MailboxSourceAvailable and Table.HasColumns(MailTenant, "Database"),
+				    Local = Table.SelectRows(MailTenant, each not Text.StartsWith(Normal([RecipientType]), "remote")),
+				    Keys = List.Transform(Local[ObjectGUID], each Normal(_)),
+				    MailChecked = if List.Contains(Keys, "") or List.Count(Keys) <> List.Count(List.Distinct(Keys))
+				        then error "Missing or duplicate database mailbox identity" else Local,
+				    MailRows = Table.ToRecords(MailChecked),
+				    MailDatabaseNames = if HasDatabaseColumn then List.Distinct(List.Select(
+				        List.Transform(MailRows, each TextValue([Database])), each _ <> "")) else {},
+				    AllNames = List.Sort(List.Distinct(Names & MailDatabaseNames, Comparer.OrdinalIgnoreCase)),
+				    ValueFor = (name as text, setting as text) as text =>
+				        let Rows = List.Select(PropertyRows, each Normal([Name]) = Normal(name) and [Setting] = setting),
+				            Values = List.Distinct(List.Transform(Rows, each [Value])),
+				            Good = List.AllTrue(List.Transform(Rows, each List.AllTrue(List.Transform([Status], each _ = "OK"))))
+				        in if not Good then "Collection error" else if List.Count(Values) = 1 then TextValue(Values{0})
+				           else if List.IsEmpty(Values) then "" else "Conflicting values",
+				    // Use the explicit byte count; never interpret localized/unit-bearing text as a bare number.
+				    BytesGB = (value as text) as nullable number =>
+				        let BytesText = try Text.BetweenDelimiters(value, "(", " bytes)") otherwise "",
+				            Clean = Text.Replace(BytesText, ",", ""),
+				            Good = Clean <> "" and Text.Select(Clean, {"0".."9"}) = Clean
+				        in if Good then try Number.FromText(Clean, "en-US") / 1073741824 otherwise null else null,
+				    Display = (value as text) as text => if value = "" then "Not recorded" else value,
+				    RowFor = (name as text) as record =>
+				        let Known = List.Contains(List.Transform(Names, each Normal(_)), Normal(name)),
+				            Mounted = ValueFor(name, "Mounted"), Size = ValueFor(name, "DatabaseSize"),
+				            Space = ValueFor(name, "AvailableNewMailboxSpace"), Server = ValueFor(name, "Server"),
+				            Status = if Normal(Mounted) = "true" then "Mounted" else if Normal(Mounted) = "false" then "Unmounted"
+				                else if Mounted = "Conflicting values" then "Conflicting" else "Unknown",
+				            Count = if HasDatabaseColumn then List.Count(List.Select(MailRows, each Normal([Database]) = Normal(name))) else null,
+				            Notes = List.Select({if not Known then "Database referenced by mailboxes only; infrastructure missing" else "",
+				                if Status = "Unknown" then "Mount status missing or collection failed" else "",
+				                if Server = "" then "Associated server missing" else "",
+				                if BytesGB(Size) = null then "Database size unavailable or unparseable" else "",
+				                if not HasDatabaseColumn then "Mailbox source or Database column missing" else "",
+				                if Count = 0 then "Zero observed mailboxes does not prove an empty database" else ""}, each _ <> "")
+				        in [Database=name, #"Server Name"=Display(Server), #"Database Status"=Status,
+				            #"Observed Mailboxes"=Count, #"Database Size"=Display(Size), #"Database Size GB"=BytesGB(Size),
+				            #"Reusable Internal Space"=Display(Space), #"Reusable Internal Space GB"=BytesGB(Space),
+				            #"Infrastructure Observed"=Known, #"Is Database"=true,
+				            #"Database Source Available"=DatabaseSourceAvailable, #"Mailbox Counts Available"=HasDatabaseColumn,
+				            #"Data Notes"=if List.IsEmpty(Notes) then "Observed in selected batch; collections are not simultaneous" else Text.Combine(Notes, " | ")],
+				    UnknownCount = if HasDatabaseColumn then List.Count(List.Select(MailRows, each Normal([Database]) = "")) else null,
+				    MissingRow = [Database="Database not recorded", #"Server Name"="Not recorded", #"Database Status"="Unknown",
+				        #"Observed Mailboxes"=UnknownCount, #"Database Size"="Not recorded", #"Database Size GB"=null,
+				        #"Reusable Internal Space"="Not recorded", #"Reusable Internal Space GB"=null,
+				        #"Infrastructure Observed"=false, #"Is Database"=false,
+				        #"Database Source Available"=DatabaseSourceAvailable, #"Mailbox Counts Available"=HasDatabaseColumn,
+				        #"Data Notes"=if not HasDatabaseColumn then "Mailbox source or Database column missing; counts unknown"
+				            else if UnknownCount > 0 then "Observed mailboxes without an assigned database name"
+				            else "Database infrastructure not captured in selected batch"],
+				    Records = List.Transform(AllNames, RowFor) & (if List.IsEmpty(AllNames) or not HasDatabaseColumn or UnknownCount > 0 then {MissingRow} else {}),
+				    Schema = type table [Database=text, #"Server Name"=text, #"Database Status"=text,
+				        #"Observed Mailboxes"=nullable number, #"Database Size"=text, #"Database Size GB"=nullable number,
+				        #"Reusable Internal Space"=text, #"Reusable Internal Space GB"=nullable number,
+				        #"Infrastructure Observed"=logical, #"Is Database"=logical, #"Database Source Available"=logical,
+				        #"Mailbox Counts Available"=logical, #"Data Notes"=text],
+				    Buffered = Table.Buffer(Table.FromRecords(Records, Schema, MissingField.Error)),
+				    Forced = Table.RowCount(Buffered)
+				in
+				    if Forced >= 0 then Readers[Finish](Buffered) else error "Database observations unavailable"

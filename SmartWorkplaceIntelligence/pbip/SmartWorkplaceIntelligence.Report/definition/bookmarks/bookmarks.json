@@ -483,6 +483,18 @@
         "8b7de51565202c517aff",
         "9772dab5c1271a299bbf"
       ]
+    },
+    {
+      "name": "5a974c8685ccb0801220",
+      "displayName": "On-prem Messaging views",
+      "children": [
+        "184a493aba10f148b052",
+        "ff40c0b166021deb3258",
+        "ef7bd5c8b8ba3586a517",
+        "51474060a6807964162c",
+        "8a6c0c6f671eb9b60265",
+        "1e1c42bb055b63c47c4e"
+      ]
     }
   ]
 }
