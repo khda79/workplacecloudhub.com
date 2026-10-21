@@ -1,0 +1,297 @@
+<#
+.SYNOPSIS
+Offline tests for the orchestrator launch prerequisites: application certificate (absent, expired,
+without private key, expiring soon), runtime and tenant data shares, cache, capability withdrawal,
+election exclusion, alerts, recovery and no impact when everything is ready.
+.VERSION
+1.0
+#>
+#requires -Version 7.0
+[CmdletBinding()]
+param()
+$ErrorActionPreference = 'Stop'
+$base = Join-Path $PSScriptRoot '../SmartInventory/Orchestrator'
+Import-Module (Join-Path $base 'SmartM365.Orchestrator.Distributed.psm1') -Force
+$script:passed = 0
+function Check($Value, $Message) { if (-not $Value) { throw $Message }; $script:passed++ }
+
+function New-TestCertificate {
+    param([int]$NotAfterDays, [int]$NotBeforeDays = -1, [switch]$NoPrivateKey)
+    $rsa = [Security.Cryptography.RSA]::Create(2048)
+    $request = [Security.Cryptography.X509Certificates.CertificateRequest]::new('CN=SmartM365 prerequisite test', $rsa, [Security.Cryptography.HashAlgorithmName]::SHA256, [Security.Cryptography.RSASignaturePadding]::Pkcs1)
+    $certificate = $request.CreateSelfSigned([datetimeoffset]::UtcNow.AddDays($NotBeforeDays), [datetimeoffset]::UtcNow.AddDays($NotAfterDays))
+    if ($NoPrivateKey) { return [Security.Cryptography.X509Certificates.X509Certificate2]::new($certificate.RawData) }
+    return $certificate
+}
+function New-Candidate($Certificate) { [pscustomobject]@{ StorePath = 'Cert:\CurrentUser\My'; Certificate = $Certificate } }
+
+$thumbprint = ('AB' * 20)
+$global:PrereqTestCandidates = @()
+$global:PrereqTestProviderCalls = 0
+$global:PrereqTestProvider = { param($requested) $global:PrereqTestProviderCalls++; @($global:PrereqTestCandidates) }
+$root = Join-Path ([IO.Path]::GetTempPath()) ('launch-prereq-' + [guid]::NewGuid().ToString('N'))
+$runtime = Join-Path $root 'Runtime'
+$dataAll = Join-Path $root 'DATA-ALL'
+$dataLast = Join-Path $root 'DATA-LAST'
+$logAll = Join-Path $root 'LOG-ALL'
+$readOnly = Join-Path $root 'ReadOnlyShare'
+foreach ($folder in @($runtime, $dataAll, $dataLast, $logAll, $readOnly)) { New-Item -ItemType Directory -Path $folder -Force | Out-Null }
+$scriptPath = Join-Path $runtime 'Collector.ps1'
+[IO.File]::WriteAllText($scriptPath, '# synthetic collector')
+$identity = [Security.Principal.WindowsIdentity]::GetCurrent().User
+$denyWrite = [Security.AccessControl.FileSystemAccessRule]::new($identity, [Security.AccessControl.FileSystemRights]'CreateFiles,AppendData', [Security.AccessControl.InheritanceFlags]'ContainerInherit,ObjectInherit', [Security.AccessControl.PropagationFlags]::None, [Security.AccessControl.AccessControlType]::Deny)
+$acl = Get-Acl -LiteralPath $readOnly
+$acl.AddAccessRule($denyWrite)
+Set-Acl -LiteralPath $readOnly -AclObject $acl
+
+try {
+    # ---------- Certificate readiness ----------
+    $now = [datetime]::UtcNow
+    $absent = Get-SmartM365OrchestratorCachedCertificateReadiness -Thumbprint $thumbprint -Cache @{} -CertificateProvider $global:PrereqTestProvider -NowUtc $now
+    Check (-not $absent.Ready -and $absent.Reason -eq 'NotFound') 'An absent certificate was not reported NotFound.'
+    Check ($absent.Detail -notmatch $thumbprint) 'The full thumbprint leaked into the readiness detail.'
+
+    $global:PrereqTestCandidates = @(New-Candidate (New-TestCertificate -NotBeforeDays -30 -NotAfterDays -1))
+    $expired = Get-SmartM365OrchestratorCachedCertificateReadiness -Thumbprint $thumbprint -Cache @{} -CertificateProvider $global:PrereqTestProvider -NowUtc $now
+    Check (-not $expired.Ready -and $expired.Reason -eq 'Expired' -and $expired.Detail -match 'expired on') 'An expired certificate was not reported Expired.'
+
+    $global:PrereqTestCandidates = @(New-Candidate (New-TestCertificate -NotAfterDays 200 -NoPrivateKey))
+    $noKey = Get-SmartM365OrchestratorCachedCertificateReadiness -Thumbprint $thumbprint -Cache @{} -CertificateProvider $global:PrereqTestProvider -NowUtc $now
+    Check (-not $noKey.Ready -and $noKey.Reason -eq 'NoPrivateKey') 'A certificate without private key was reported usable.'
+
+    $global:PrereqTestCandidates = @(New-Candidate (New-TestCertificate -NotAfterDays 10))
+    $soon = Get-SmartM365OrchestratorCachedCertificateReadiness -Thumbprint $thumbprint -Cache @{} -ExpiryWarningDays 30 -CertificateProvider $global:PrereqTestProvider -NowUtc $now
+    Check ($soon.Ready -and $soon.ExpiresSoon -and $soon.DaysRemaining -in 9, 10) 'A certificate expiring in 10 days was not flagged with a 30-day threshold.'
+    $notSoon = Get-SmartM365OrchestratorCachedCertificateReadiness -Thumbprint $thumbprint -Cache @{} -ExpiryWarningDays 5 -CertificateProvider $global:PrereqTestProvider -NowUtc $now
+    Check ($notSoon.Ready -and -not $notSoon.ExpiresSoon) 'A certificate outside the warning threshold was flagged.'
+
+    # An expired copy next to a valid one does not block; the valid one is used.
+    $global:PrereqTestCandidates = @((New-Candidate (New-TestCertificate -NotBeforeDays -30 -NotAfterDays -1)), (New-Candidate (New-TestCertificate -NotAfterDays 200)))
+    $mixed = Get-SmartM365OrchestratorCachedCertificateReadiness -Thumbprint $thumbprint -Cache @{} -CertificateProvider $global:PrereqTestProvider -NowUtc $now
+    Check ($mixed.Ready -and -not $mixed.ExpiresSoon) 'A valid certificate next to an expired copy was not used.'
+    Check (-not (Get-SmartM365OrchestratorCachedCertificateReadiness -Thumbprint '' -Cache @{} -NowUtc $now).Ready) 'An empty thumbprint was reported ready.'
+
+    # ---------- Cache ----------
+    $cache = @{}
+    $global:PrereqTestProviderCalls = 0
+    $null = Get-SmartM365OrchestratorCachedCertificateReadiness -Thumbprint $thumbprint -Cache $cache -CacheMinutes 5 -CertificateProvider $global:PrereqTestProvider -NowUtc $now
+    $null = Get-SmartM365OrchestratorCachedCertificateReadiness -Thumbprint $thumbprint -Cache $cache -CacheMinutes 5 -CertificateProvider $global:PrereqTestProvider -NowUtc $now.AddMinutes(4)
+    Check ($global:PrereqTestProviderCalls -eq 1) 'The certificate check was repeated inside the cache period.'
+    $null = Get-SmartM365OrchestratorCachedCertificateReadiness -Thumbprint $thumbprint -Cache $cache -CacheMinutes 5 -CertificateProvider $global:PrereqTestProvider -NowUtc $now.AddMinutes(6)
+    Check ($global:PrereqTestProviderCalls -eq 2) 'The certificate check was not repeated after the cache period.'
+
+    # ---------- Paths ----------
+    $dataChecks = @(
+        [pscustomobject]@{ Name = 'Tenant DATA-ALL root'; Path = $dataAll; Access = 'ReadWrite'; PathType = 'Container'; Capability = 'SharedRuntime' }
+        [pscustomobject]@{ Name = 'Tenant DATA-LAST root'; Path = $dataLast; Access = 'ReadWrite'; PathType = 'Container'; Capability = 'SharedRuntime' }
+        [pscustomobject]@{ Name = 'Tenant LOG-ALL root'; Path = $logAll; Access = 'ReadWrite'; PathType = 'Container'; Capability = 'SharedRuntime' }
+    )
+    $scriptCheck = [pscustomobject]@{ Name = 'Job script'; Path = $scriptPath; Access = 'Read'; PathType = 'Leaf'; Capability = '' }
+    $ready = Test-SmartM365OrchestratorLaunchPrerequisite -RequiredCapabilities @('SharedRuntime', 'Graph') -CertificateThumbprint $thumbprint -PathChecks (@($scriptCheck) + $dataChecks) -Cache @{} -CertificateProvider $global:PrereqTestProvider -NowUtc $now
+    Check ($ready.Ready -and @($ready.Failures).Count -eq 0) 'A fully ready job was blocked.'
+    Check (@(Get-ChildItem -LiteralPath $dataAll, $dataLast, $logAll -Force).Count -eq 0) 'Write probes left files behind.'
+
+    $global:PrereqTestProviderCalls = 0
+    $adOnly = Test-SmartM365OrchestratorLaunchPrerequisite -RequiredCapabilities @('SharedRuntime', 'AD') -CertificateThumbprint $thumbprint -PathChecks @($scriptCheck) -Cache @{} -CertificateProvider $global:PrereqTestProvider -NowUtc $now
+    Check ($adOnly.Ready -and $null -eq $adOnly.Certificate -and $global:PrereqTestProviderCalls -eq 0) 'The certificate was checked for a job without app-only cloud capability.'
+
+    $missingScript = [pscustomobject]@{ Name = 'Job script'; Path = (Join-Path $root 'MissingRuntime\Collector.ps1'); Access = 'Read'; PathType = 'Leaf'; Capability = '' }
+    $runtimeMissing = Test-SmartM365OrchestratorLaunchPrerequisite -RequiredCapabilities @('SharedRuntime') -PathChecks @($missingScript) -Cache @{} -NowUtc $now
+    Check (-not $runtimeMissing.Ready -and $runtimeMissing.Failures[0].JobSpecific -and @($runtimeMissing.Failures[0].Capabilities).Count -eq 0 -and $runtimeMissing.Failures[0].Detail -match 'not found') 'A missing runtime script was not reported as a job-specific failure.'
+
+    $readOnlyCheck = [pscustomobject]@{ Name = 'Tenant DATA-LAST root'; Path = $readOnly; Access = 'ReadWrite'; PathType = 'Container'; Capability = 'SharedRuntime' }
+    $readOnlyResult = Test-SmartM365OrchestratorLaunchPrerequisite -PathChecks @($readOnlyCheck) -Cache @{} -NowUtc $now
+    Check (-not $readOnlyResult.Ready -and -not $readOnlyResult.Failures[0].JobSpecific -and @($readOnlyResult.Failures[0].Capabilities) -contains 'SharedRuntime') 'A read-only data share was not reported as a SharedRuntime failure.'
+    $readOnlyRead = Test-SmartM365OrchestratorLaunchPrerequisite -PathChecks @([pscustomobject]@{ Name = 'Read share'; Path = $readOnly; Access = 'Read'; PathType = 'Container' }) -Cache @{} -NowUtc $now
+    Check $readOnlyRead.Ready 'A readable share failed a Read check.'
+
+    # Path cache: a share that disappears is seen only after the cache period.
+    $volatile = Join-Path $root 'Volatile'
+    New-Item -ItemType Directory -Path $volatile | Out-Null
+    $volatileCheck = [pscustomobject]@{ Name = 'Volatile'; Path = $volatile; Access = 'Read'; PathType = 'Container' }
+    $pathCache = @{}
+    Check (Test-SmartM365OrchestratorLaunchPrerequisite -PathChecks @($volatileCheck) -Cache $pathCache -CacheMinutes 5 -NowUtc $now).Ready 'The volatile folder was not ready.'
+    Remove-Item -LiteralPath $volatile -Force
+    Check (Test-SmartM365OrchestratorLaunchPrerequisite -PathChecks @($volatileCheck) -Cache $pathCache -CacheMinutes 5 -NowUtc $now.AddMinutes(2)).Ready 'The path cache was not used inside its period.'
+    Check (-not (Test-SmartM365OrchestratorLaunchPrerequisite -PathChecks @($volatileCheck) -Cache $pathCache -CacheMinutes 5 -NowUtc $now.AddMinutes(6)).Ready) 'A removed folder stayed ready after the cache period.'
+
+    # Server-level capability probe includes the tenant data roots.
+    $capabilityDocument = Get-SmartM365OrchestratorServerCapability -ServerName 'SERVER-A' -SharedDataFolderPath $dataAll -ProbeMode Static -DataPathChecks @($readOnlyCheck)
+    $sharedRuntime = @($capabilityDocument.Results | Where-Object Name -eq 'SharedRuntime')[0]
+    Check (-not $sharedRuntime.Ready -and 'SharedRuntime' -notin @($capabilityDocument.ReadyCapabilities)) 'The periodic probe ignored a read-only data root.'
+    Check ($null -ne $capabilityDocument.CertificateStatus -and $capabilityDocument.CertificateStatus.Reason -eq 'NotConfigured') 'The capability document does not publish the certificate status.'
+
+    # ---------- Election: BlockedJobs ----------
+    $electionJobs = @(
+        [pscustomobject]@{ Name = 'BlockedHere'; Enabled = $true; AssignmentMode = 'Elected'; DependsOn = @(); RequiredCapabilities = @('SharedRuntime'); RequiredGraphAppRoles = @(); EstimatedDurationMinutes = 600; Schedule = [pscustomobject]@{ Type = 'Daily'; Times = @('01:00'); DaysOfWeek = @() } }
+        [pscustomobject]@{ Name = 'Other'; Enabled = $true; AssignmentMode = 'Elected'; DependsOn = @(); RequiredCapabilities = @('SharedRuntime'); RequiredGraphAppRoles = @(); EstimatedDurationMinutes = 1; Schedule = [pscustomobject]@{ Type = 'Daily'; Times = @('02:00'); DaysOfWeek = @() } }
+    )
+    $electionCapabilities = @(
+        [pscustomobject]@{ ServerName = 'SERVER-A'; ReadyCapabilities = @('SharedRuntime'); GraphAppRoles = @(); BlockedJobs = @('BlockedHere') }
+        [pscustomobject]@{ ServerName = 'SERVER-B'; ReadyCapabilities = @('SharedRuntime'); GraphAppRoles = @() }
+    )
+    foreach ($weight in @(1.0, 100.0)) {
+        $plan = Get-SmartM365OrchestratorElectionPlan -Jobs $electionJobs -ServerCapabilities $electionCapabilities -ServerWeights @{ 'SERVER-A' = $weight; 'SERVER-B' = 1.0 }
+        Check ([string]($plan.Assignments | Where-Object JobName -eq 'BlockedHere').OwnerServer -eq 'SERVER-B') 'A job blocked on a server was still assigned to it.'
+    }
+    $onlyBlocked = Get-SmartM365OrchestratorElectionPlan -Jobs $electionJobs -ServerCapabilities @($electionCapabilities[0])
+    Check (@($onlyBlocked.UnassignedGroups | Where-Object { 'BlockedHere' -in @($_.Jobs) }).Count -eq 1 -and [string]($onlyBlocked.Assignments | Where-Object JobName -eq 'Other').OwnerServer -eq 'SERVER-A') 'The only server lost unrelated jobs or kept the blocked one.'
+
+    # ---------- Orchestrator gate, alerts and recovery ----------
+    $orchestratorPath = Join-Path $base 'SmartM365-Inventory-Orchestrator.ps1'
+    $ast = [Management.Automation.Language.Parser]::ParseFile($orchestratorPath, [ref]$null, [ref]$null)
+    function Get-FunctionText([string]$Name) { $ast.Find({ param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $Name }, $true).Extent.Text }
+    $launchPhase = Get-FunctionText 'Invoke-LaunchPhase'
+    $gateIndex = $launchPhase.IndexOf('Test-OrchestratorLaunchPrerequisiteGate')
+    Check ($gateIndex -gt 0 -and $gateIndex -lt $launchPhase.IndexOf('Enter-SmartM365OrchestratorMaintenanceGate') -and $gateIndex -lt $launchPhase.IndexOf('Enter-SmartM365OrchestratorConcurrencyLease') -and $gateIndex -lt $launchPhase.IndexOf('Enter-SmartM365OrchestratorOccurrenceClaim') -and $gateIndex -lt $launchPhase.IndexOf('Start-InventoryJob')) 'The prerequisite gate does not run before the gate, lease, claim and launch.'
+    Check ((Get-Content -LiteralPath $orchestratorPath -Raw).Contains('Invoke-OrchestratorPrerequisiteMonitoring -Now $now')) 'Prerequisite monitoring is not wired in the scheduler loop.'
+
+    $names = @('Get-OrchestratorPrerequisiteBlockTable', 'Get-OrchestratorTenantDataPathCheck', 'Get-OrchestratorJobPrerequisitePathCheck', 'Test-OrchestratorJobLaunchPrerequisite', 'Register-OrchestratorPrerequisiteFailure', 'Publish-OrchestratorEffectiveCapability', 'Test-OrchestratorLaunchPrerequisiteGate', 'Send-OrchestratorPrerequisiteAlert', 'Update-OrchestratorCertificateExpiryWarning', 'Invoke-OrchestratorPrerequisiteMonitoring', 'ConvertTo-OrchestratorUtcTime', 'Resolve-OrchestratorJobPath', 'Resolve-OrchestratorJobArguments')
+    $stubs = @'
+function Write-OrchestratorLog { param([string]$Message, [string]$Level = 'INFO') $script:Logs.Add([pscustomobject]@{ Level = $Level; Message = $Message }) }
+function Add-JobRunCsvRow { param($JobName, $ScheduledTime, $StartTime, $EndTime, $DurationSec, $ExitCode, $Status, $RetryCount, $LogPath) $script:Rows.Add([pscustomobject]@{ JobName = $JobName; Status = $Status; ScheduledTime = $ScheduledTime }) }
+function Set-OrchestratorPipelineJobStatus { param($BatchId, $JobName, $Status, $Attempt, $Detail) $script:PipelineStatuses.Add([pscustomobject]@{ JobName = $JobName; Status = $Status; Detail = $Detail }) }
+function Send-OrchestratorMail { param($Subject, $HtmlBody, [switch]$IsError) $script:Mails.Add([pscustomobject]@{ Subject = $Subject; IsError = [bool]$IsError }); return $true }
+function Write-FileAtomically { param($Path, $Content) [IO.File]::WriteAllText($Path, $Content) }
+function ConvertTo-HtmlText { param($Text) [Net.WebUtility]::HtmlEncode([string]$Text) }
+function Get-SmartM365ScriptConfigValue { param($Config, $Name, $DefaultValue) $DefaultValue }
+function Test-SmartM365OrchestratorLaunchPrerequisite { SmartM365.Orchestrator.Distributed\Test-SmartM365OrchestratorLaunchPrerequisite @args -CertificateProvider $global:PrereqTestProvider }
+function Get-SmartM365OrchestratorCachedCertificateReadiness { SmartM365.Orchestrator.Distributed\Get-SmartM365OrchestratorCachedCertificateReadiness @args -CertificateProvider $global:PrereqTestProvider }
+'@
+    $gate = New-Module -ScriptBlock ([scriptblock]::Create((($names | ForEach-Object { Get-FunctionText $_ }) -join "`n") + "`n" + $stubs))
+    $capabilityPath = Join-Path $root 'Orchestrator-Capabilities.json'
+    function Reset-Gate {
+        param([object[]]$TenantDataRoots = @())
+        & $gate {
+            param($CapabilityPath, $DataRoots)
+            $script:Logs = [Collections.Generic.List[object]]::new(); $script:Rows = [Collections.Generic.List[object]]::new()
+            $script:PipelineStatuses = [Collections.Generic.List[object]]::new(); $script:Mails = [Collections.Generic.List[object]]::new()
+            $script:Settings = [pscustomobject]@{
+                LaunchPrerequisiteChecksEnabled = $true; PrerequisiteCacheMinutes = 5; PrerequisitePathTimeoutSeconds = 10; PrerequisiteAlertRepeatHours = 24
+                CertificateExpiryWarningDays = 30; DependencyWaitTimeoutMinutes = 60; CapabilitiesPath = $CapabilityPath; TenantDataRoots = @($DataRoots)
+            }
+            $script:State = @{ Jobs = @{} }
+            $script:PrerequisiteCache = @{}; $script:PrerequisiteBlockedOccurrences = @{}; $script:ForcedPending = @(); $script:LastCertificateReadiness = $null
+            $script:ServerCapabilitiesBase = [pscustomobject]@{ ServerName = 'SERVER-A'; GeneratedAtUtc = '2026-10-21T00:00:00.0000000Z'; ReadyCapabilities = @('SharedRuntime', 'Graph', 'EXO', 'AD'); BlockedJobs = @(); PrerequisiteBlocks = @() }
+            $script:ServerCapabilities = $script:ServerCapabilitiesBase
+            $script:LastElectionPlanRefreshUtc = [datetime]::UtcNow
+            $script:Manifest = [pscustomobject]@{ JobsByName = @{} }
+            $script:Tenant = 'test'; $script:ScriptName = 'SmartM365-Inventory-Orchestrator'; $script:ScriptVersion = 'test'
+            $global:Thumbprint = 'AB' * 20
+        } $capabilityPath $TenantDataRoots
+    }
+    function New-Job([string]$Name, [string]$Mode, [string[]]$Capabilities, [string]$Script = $scriptPath) {
+        $job = [pscustomobject]@{ Name = $Name; AssignmentMode = $Mode; RequiredCapabilities = $Capabilities; ScriptPath = $Script; LauncherPath = ''; RequiredPaths = @(); DependencyWaitTimeoutMinutes = 0 }
+        & $gate { param($j) $script:Manifest.JobsByName[$j.Name] = $j } $job
+        return $job
+    }
+    function Invoke-Gate($Job, [datetime]$Occurrence, [string]$Reason = 'due', [switch]$IsForced, $PipelineInfo = $null, [datetime]$Now = (Get-Date)) {
+        & $gate { param($j, $o, $r, $f, $p, $n) Test-OrchestratorLaunchPrerequisiteGate -Job $j -Occurrence $o -Reason $r -IsForced:$f -PipelineInfo $p -Now $n } $Job $Occurrence $Reason ([bool]$IsForced) $PipelineInfo $Now
+    }
+    function Get-GateValue([scriptblock]$Script) { & $gate $Script }
+    $dataRoots = @([pscustomobject]@{ Name = 'Tenant DATA-LAST root'; Path = $dataLast })
+
+    # Everything ready: no row, no block, capabilities unchanged.
+    Reset-Gate -TenantDataRoots $dataRoots
+    $global:PrereqTestCandidates = @(New-Candidate (New-TestCertificate -NotAfterDays 200))
+    $graphJob = New-Job 'GraphJob' 'Elected' @('SharedRuntime', 'Graph')
+    $occurrence = (Get-Date).Date.AddHours(1)
+    Check (Invoke-Gate $graphJob $occurrence) 'A ready elected job was blocked.'
+    Check ((Get-GateValue { $script:Rows.Count + $script:Mails.Count + @($script:Logs | Where-Object Level -eq 'ERROR').Count + $script:State.PrerequisiteBlocks.Count }) -eq 0) 'A ready launch produced rows, mails, errors or blocks.'
+    Check (-not (Test-Path -LiteralPath $capabilityPath)) 'A ready launch rewrote the capability document.'
+    & $gate { param($n) Invoke-OrchestratorPrerequisiteMonitoring -Now $n } (Get-Date)
+    Check ((Get-GateValue { $script:Mails.Count }) -eq 0) 'Monitoring alerted while everything was ready.'
+
+    # Certificate absent: elected job not launched, cloud capabilities withdrawn, one row per occurrence.
+    Reset-Gate -TenantDataRoots $dataRoots
+    $global:PrereqTestCandidates = @()
+    $graphJob = New-Job 'GraphJob' 'Elected' @('SharedRuntime', 'Graph')
+    $now = Get-Date
+    Check (-not (Invoke-Gate $graphJob $occurrence -Now $now)) 'An elected Graph job was launched without certificate.'
+    $capabilities = Get-GateValue { $script:ServerCapabilities }
+    Check ('Graph' -notin @($capabilities.ReadyCapabilities) -and 'EXO' -notin @($capabilities.ReadyCapabilities) -and 'SharedRuntime' -in @($capabilities.ReadyCapabilities) -and 'AD' -in @($capabilities.ReadyCapabilities)) 'The certificate failure did not withdraw exactly the cloud capabilities.'
+    Check ((Get-GateValue { $script:LastElectionPlanRefreshUtc }) -eq [datetime]::MinValue) 'The election plan refresh was not forced.'
+    $published = Get-Content -LiteralPath $capabilityPath -Raw | ConvertFrom-Json
+    Check ('Graph' -notin @($published.ReadyCapabilities) -and @($published.PrerequisiteBlocks).Count -eq 1) 'The withdrawn capability was not published for the election.'
+    Check ((Get-GateValue { $script:ServerCapabilitiesBase.ReadyCapabilities }) -contains 'Graph') 'The probed capabilities were modified instead of overlaid.'
+    Check (-not (Invoke-Gate $graphJob $occurrence -Now $now.AddMinutes(1))) 'The blocked job was launched on the next tick.'
+    $rows = Get-GateValue { @($script:Rows) }
+    Check ($rows.Count -eq 1 -and $rows[0].Status -eq 'BlockedPrerequisite') 'The blocked occurrence was not recorded exactly once as BlockedPrerequisite.'
+    Check (@($rows | Where-Object Status -in 'Success', 'Failed', 'CompletedWithWarnings').Count -eq 0) 'A blocked occurrence was recorded as executed.'
+    Check (@(Get-GateValue { @($script:Logs) } | Where-Object { $_.Level -eq 'ERROR' -and $_.Message -match 'BlockedPrerequisite' -and $_.Message -match 'reassign' }).Count -eq 1) 'The block reason was not logged clearly.'
+    Check (Invoke-Gate (New-Job 'AdJob' 'Elected' @('SharedRuntime', 'AD')) $occurrence -Now $now) 'A job without cloud capability was blocked by the certificate.'
+
+    # Alert sent once, repeated after PrerequisiteAlertRepeatHours, then recovery.
+    & $gate { param($n) Invoke-OrchestratorPrerequisiteMonitoring -Now $n } $now
+    & $gate { param($n) Invoke-OrchestratorPrerequisiteMonitoring -Now $n } $now.AddMinutes(10)
+    $mails = Get-GateValue { @($script:Mails) }
+    Check ($mails.Count -eq 1 -and $mails[0].IsError -and $mails[0].Subject -match 'prerequisites missing') 'The missing prerequisite alert was not sent exactly once.'
+    & $gate { param($n) Invoke-OrchestratorPrerequisiteMonitoring -Now $n } $now.AddHours(25)
+    Check ((Get-GateValue { $script:Mails.Count }) -eq 2) 'The alert was not repeated after the repeat period.'
+    $global:PrereqTestCandidates = @(New-Candidate (New-TestCertificate -NotAfterDays 200))
+    & $gate { param($n) Invoke-OrchestratorPrerequisiteMonitoring -Now $n } $now.AddHours(26)
+    $mails = Get-GateValue { @($script:Mails) }
+    Check ($mails.Count -eq 3 -and $mails[2].Subject -match 'recovered' -and -not $mails[2].IsError) 'No recovery mail followed the restored certificate.'
+    Check ((Get-GateValue { $script:State.PrerequisiteBlocks.Count }) -eq 0 -and 'Graph' -in @((Get-GateValue { $script:ServerCapabilities }).ReadyCapabilities)) 'The restored certificate did not republish the cloud capabilities.'
+    Check (Invoke-Gate $graphJob $occurrence -Now $now.AddHours(26)) 'The recovered job stayed blocked.'
+
+    # Pinned job whose runtime script is missing: job-specific block, occurrence stays due.
+    Reset-Gate -TenantDataRoots $dataRoots
+    $pinned = New-Job 'PinnedJob' 'Pinned' @('SharedRuntime') (Join-Path $root 'MissingRuntime\Collector.ps1')
+    Check (-not (Invoke-Gate $pinned $occurrence)) 'A pinned job was launched without its runtime script.'
+    $capabilities = Get-GateValue { $script:ServerCapabilities }
+    Check (@($capabilities.BlockedJobs) -contains 'PinnedJob' -and @($capabilities.ReadyCapabilities).Count -eq 4) 'A missing script withdrew a server capability or was not job-specific.'
+    Check (@(Get-GateValue { @($script:Logs) } | Where-Object { $_.Message -match 'stays due' }).Count -eq 1) 'The pinned outcome was not explained.'
+    [IO.File]::WriteAllText((New-Item -ItemType Directory -Path (Join-Path $root 'MissingRuntime') -Force).FullName + '\Collector.ps1', '# restored')
+    & $gate { param($n) Invoke-OrchestratorPrerequisiteMonitoring -Now $n } (Get-Date).AddMinutes(6)
+    Check (@((Get-GateValue { $script:ServerCapabilities }).BlockedJobs).Count -eq 0) 'The restored script did not lift the job block.'
+
+    # Read-only data root: SharedRuntime withdrawn for every job.
+    Reset-Gate -TenantDataRoots @([pscustomobject]@{ Name = 'Tenant DATA-LAST root'; Path = $readOnly })
+    $global:PrereqTestCandidates = @(New-Candidate (New-TestCertificate -NotAfterDays 200))
+    Check (-not (Invoke-Gate (New-Job 'AdJob' 'Elected' @('SharedRuntime', 'AD')) $occurrence)) 'A job was launched with a read-only data root.'
+    Check ('SharedRuntime' -notin @((Get-GateValue { $script:ServerCapabilities }).ReadyCapabilities)) 'A read-only data root did not withdraw SharedRuntime.'
+
+    # Forced and pipeline requests.
+    Reset-Gate -TenantDataRoots $dataRoots
+    $global:PrereqTestCandidates = @()
+    & $gate { $script:ForcedPending = @('GraphJob', 'Other') }
+    Check (-not (Invoke-Gate (New-Job 'GraphJob' 'Pinned' @('Graph')) (Get-Date) -Reason 'forced' -IsForced)) 'A forced job was launched without certificate.'
+    Check ((@(Get-GateValue { $script:ForcedPending }) -join ',') -eq 'Other') 'The refused -Force request was not consumed.'
+    Reset-Gate -TenantDataRoots $dataRoots
+    $pipelineJob = New-Job 'GraphJob' 'Elected' @('Graph')
+    $recent = @{ BatchId = 'batch-1'; CreatedAtUtc = [datetime]::UtcNow.AddMinutes(-5); Attempt = 0 }
+    Check (-not (Invoke-Gate $pipelineJob $occurrence -Reason 'pipeline' -PipelineInfo $recent)) 'A pipeline job was launched without certificate.'
+    $statuses = Get-GateValue { @($script:PipelineStatuses) }
+    Check ($statuses.Count -eq 1 -and $statuses[0].Status -eq 'Pending' -and $statuses[0].Detail -match 'Waiting for launch prerequisites') 'The pipeline request did not show the prerequisite wait.'
+    $old = @{ BatchId = 'batch-1'; CreatedAtUtc = [datetime]::UtcNow.AddMinutes(-90); Attempt = 0 }
+    Check (-not (Invoke-Gate $pipelineJob $occurrence -Reason 'pipeline' -PipelineInfo $old)) 'A timed-out pipeline job was launched.'
+    Check ((Get-GateValue { @($script:PipelineStatuses) })[-1].Status -eq 'BlockedPrerequisite') 'The pipeline request was not closed as BlockedPrerequisite after the wait timeout.'
+
+    # Expiry warning: once per day.
+    Reset-Gate -TenantDataRoots $dataRoots
+    $global:PrereqTestCandidates = @(New-Candidate (New-TestCertificate -NotAfterDays 10))
+    $day = Get-Date
+    & $gate { param($n) Invoke-OrchestratorPrerequisiteMonitoring -Now $n } $day
+    & $gate { param($n) Invoke-OrchestratorPrerequisiteMonitoring -Now $n } $day.AddMinutes(45)
+    $mails = Get-GateValue { @($script:Mails) }
+    Check ($mails.Count -eq 1 -and $mails[0].Subject -match 'expires in (9|10) day') 'The certificate expiry warning was not sent exactly once.'
+    Check ((Get-GateValue { $script:LastCertificateReadiness }).ExpiresSoon) 'The expiry state was not kept for the heartbeat.'
+    & $gate { $script:Settings.CertificateExpiryWarningDays = 0 }
+    & $gate { param($n) $script:State.CertificateExpiryWarning.LastSentDate = ''; Invoke-OrchestratorPrerequisiteMonitoring -Now $n } $day.AddDays(1)
+    Check ((Get-GateValue { $script:Mails.Count }) -eq 1) 'The expiry warning was sent while disabled.'
+
+    # Checks disabled: no gate.
+    Reset-Gate -TenantDataRoots $dataRoots
+    $global:PrereqTestCandidates = @()
+    & $gate { $script:Settings.LaunchPrerequisiteChecksEnabled = $false }
+    Check (Invoke-Gate (New-Job 'GraphJob' 'Elected' @('Graph')) $occurrence) 'Disabled checks still blocked a launch.'
+}
+finally {
+    $acl = Get-Acl -LiteralPath $readOnly
+    [void]$acl.RemoveAccessRule($denyWrite)
+    Set-Acl -LiteralPath $readOnly -AclObject $acl
+    Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Variable -Name PrereqTestCandidates, PrereqTestProviderCalls, PrereqTestProvider, Thumbprint -Scope Global -ErrorAction SilentlyContinue
+}
+"Launch prerequisite offline tests passed: $script:passed checks."
