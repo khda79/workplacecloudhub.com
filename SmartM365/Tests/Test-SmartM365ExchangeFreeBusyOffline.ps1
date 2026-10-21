@@ -15,10 +15,11 @@ Checker is never executed; Exchange Online and module installation are mocked. C
   Free/Busy Checker started with -SkipVersionCheck only, nothing deserialized;
 - child process: environment hand-off, time limit with process tree stop;
 - Free/Busy Checker run without the runner's strict mode and stop-on-error, which the runner keeps;
-- report: title and status in the mail banner, runs that did not happen never shown as healthy.
+- report: title and status in the mail banner, runs that did not happen never shown as healthy;
+- OAuth only (Intra Organization Connector enabled): DAuth sides NotApplicable, not counted against the run.
 
 .VERSION
-1.0.4
+1.0.5
 #>
 [CmdletBinding()]
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter','',Justification='Mocks keep the parameters of the commands they replace.')]
@@ -65,11 +66,11 @@ foreach ($name in @('FreeBusyCheckerVersion', 'FreeBusyCheckerExpectedSha256', '
     $constants[$name] = $assignment.Right.Extent.Text.Trim("'", '"')
 }
 
-$collectorFunctions = @('Ensure-Directory', 'Format-HtmlValue', 'Get-FreeBusyCsvColumn', 'Get-FreeBusyCmdletScope', 'Get-FreeBusySetting', 'Test-FreeBusyCheckerIntegrity',
+$collectorFunctions = @('Test-FreeBusyOAuthOnly', 'Ensure-Directory', 'Format-HtmlValue', 'Get-FreeBusyCsvColumn', 'Get-FreeBusyCmdletScope', 'Get-FreeBusySetting', 'Test-FreeBusyCheckerIntegrity',
     'Test-FreeBusyRunnerIntegrity', 'Test-FreeBusyElevation', 'Get-HealthCheckerUnsafeAclEntry', 'Get-HealthCheckerWorkFolderAncestor', 'Set-HealthCheckerWorkFolderAclRule',
     'Initialize-HealthCheckerWorkFolder', 'Invoke-FreeBusyRunnerProcess', 'Read-FreeBusyRunnerStatus', 'ConvertTo-FreeBusySafeValue', 'Get-FreeBusyMaskedItem',
     'ConvertFrom-FreeBusyCheckerHtml', 'Add-FreeBusyNotAuthorizedFinding', 'New-FreeBusySummaryRow', 'Resolve-FreeBusyRunStatus', 'ConvertTo-FreeBusyReportHtml', 'Clear-FreeBusyWorkFolder')
-$definitions = @("`$FreeBusyCheckerExpectedSha256 = '$($constants.FreeBusyCheckerExpectedSha256)'", "`$FreeBusyCheckerVersion = '$($constants.FreeBusyCheckerVersion)'", "`$RunId = '20261025-050000'") + @($collectorFunctions | ForEach-Object { Get-FunctionText $collectorAst $_ })
+$definitions = @("`$FreeBusyCheckerExpectedSha256 = '$($constants.FreeBusyCheckerExpectedSha256)'", "`$FreeBusyCheckerVersion = '$($constants.FreeBusyCheckerVersion)'", "`$RunId = '20261025-050000'", "`$FreeBusyDAuthNotApplicableReason = 'Intra Organization Connector enabled: free/busy uses OAuth, DAuth not checked'") + @($collectorFunctions | ForEach-Object { Get-FunctionText $collectorAst $_ })
 $module = New-Module -ScriptBlock ([scriptblock]::Create(($definitions -join "`n")))
 & $module {
     Set-StrictMode -Version Latest
@@ -425,6 +426,28 @@ $state = @{ Stage = 'FreeBusyCheckerReturned'; RunStatus = $null; ExchangeOnline
     Assert-FreeBusy ($failedReport -match '>N/A<' -and $failedReport -match '>0 / 4<' -and $failedReport -notmatch 'Mail Recipients') 'A run that did not happen shows unmeasured counts and no missing role.'
     $partialReport = & $module { param($s) ConvertTo-FreeBusyReportHtml -Summary $s -Findings @() -RunStatus 'EXONotConnected' -RunMessage 'm' } $notConnected
     Assert-FreeBusy ($partialReport -match 'on the 1 side\(s\) that were measured' -and $partialReport -notmatch 'No error, warning or not authorized check was reported\.<') 'Unmeasured sides are not reported as healthy.'
+
+    # OAuth only: with the Intra Organization Connector enabled, Free/Busy Checker skips its DAuth checks.
+    $oauthOnlyText = 'Checking OAuth only as Free Busy Lookup is done using OAuth when the Intra Organization Connector is Enabled'
+    Assert-FreeBusy ($vendoredText.Contains($oauthOnlyText)) 'Free/Busy Checker still writes the OAuth-only message the collector detects.'
+    Assert-FreeBusy ((& $module { param($h) Test-FreeBusyOAuthOnly -Html $h } ("<div><p> <span style='color: green;'>$oauthOnlyText</span></p></div>" + $syntheticHtml)) -and -not (& $module { param($h) Test-FreeBusyOAuthOnly -Html $h } $syntheticHtml)) 'The OAuth-only message is detected only when present.'
+    $oauthFindings = @($findings | Where-Object Auth -eq 'OAuth')
+    $oauthOnlyRows = @(& $module { param($f) Add-FreeBusyNotAuthorizedFinding -Findings $f -NotAuthorizedCmdlets @('Test-EOOAuthConnectivity', 'Get-EOSharingPolicy') -ServerName 'EXSRV01' -FreeBusyCheckerVersion 'v' -GenerationTime 't' -OAuthOnly } $oauthFindings)
+    Assert-FreeBusy (@($oauthOnlyRows | Where-Object Item -eq 'Get-EOSharingPolicy').Count -eq 0 -and @($oauthOnlyRows | Where-Object { $_.Category -eq 'Test-OAuthConnectivity' -and $_.Status -eq 'NotAuthorized' }).Count -eq 1) 'A DAuth check that does not apply gets no NotAuthorized row; OAuth ones still do.'
+    $oauthOnlySummary = @(& $module { param($f, $r) New-FreeBusySummaryRow -Findings $f -RunStatus 'EXONotAuthorized' -RunMessage 'm' -RunnerStatus $r -DurationSeconds 51 -ServerName 'EXSRV01' -FreeBusyCheckerVersion 'v' -GenerationTime 't' -OAuthOnly } $oauthOnlyRows (& $runner 'NotAuthorizedPartial' @('Test-EOOAuthConnectivity', 'Get-EOSharingPolicy')))
+    $dauthRows = @($oauthOnlySummary | Where-Object Auth -eq 'DAuth')
+    Assert-FreeBusy ($dauthRows.Count -eq 2 -and @($dauthRows | Where-Object { $_.SideStatus -ne 'NotApplicable' -or $_.NotAuthorizedCmdlets -or $_.MissingRoles -or $null -ne $_.ErrorCount -or $_.RunMessage -ne 'Intra Organization Connector enabled: free/busy uses OAuth, DAuth not checked' }).Count -eq 0) 'Both DAuth sides are NotApplicable with the reason, no counts and no missing role.'
+    Assert-FreeBusy (@($oauthOnlySummary | Where-Object { $_.Side -eq 'ExchangeOnPremises' -and $_.Auth -eq 'OAuth' })[0].SideStatus -eq 'NotRun' -and @($oauthOnlySummary | Where-Object { $_.Side -eq 'ExchangeOnline' -and $_.Auth -eq 'OAuth' })[0].SideStatus -eq 'NotAuthorizedPartial') 'OAuth sides keep their own status.'
+    $failedOAuthOnly = @(& $module { New-FreeBusySummaryRow -Findings @() -RunStatus 'RunnerFailed' -RunMessage 'm' -RunnerStatus $null -DurationSeconds 1 -ServerName 'EXSRV01' -FreeBusyCheckerVersion 'v' -GenerationTime 't' -OAuthOnly })
+    Assert-FreeBusy (@($failedOAuthOnly | Where-Object SideStatus -ne 'NotRun').Count -eq 0) 'A run that did not happen stays NotRun everywhere, even when OAuth only was detected.'
+    $dauthOnlyMissing = & $runner 'NotAuthorizedPartial' @('Get-EOSharingPolicy')
+    Assert-FreeBusy ((& $module { param($r) Resolve-FreeBusyRunStatus -Process ([pscustomobject]@{ Status = 'Exited' }) -RunnerStatus $r -HtmlFound $true -ParseFailed $false -OAuthOnly } $dauthOnlyMissing) -eq 'Completed' -and
+        (& $module { param($r) Resolve-FreeBusyRunStatus -Process ([pscustomobject]@{ Status = 'Exited' }) -RunnerStatus $r -HtmlFound $true -ParseFailed $false } $dauthOnlyMissing) -eq 'EXONotAuthorized') 'A missing DAuth cmdlet does not degrade the run status when DAuth does not apply.'
+    $oauthOnlyReport = & $module { param($s, $f) ConvertTo-FreeBusyReportHtml -Summary $s -Findings $f -RunStatus 'EXONotAuthorized' -RunMessage 'm' } $oauthOnlySummary $oauthOnlyRows
+    Assert-FreeBusy ($oauthOnlyReport -match '>1 / 2<' -and $oauthOnlyReport -match "color:#64748b;'>NotApplicable<" -and $oauthOnlyReport -match 'Not applicable: Intra Organization Connector enabled: free/busy uses OAuth, DAuth not checked \(2 side\(s\)\)') 'The mail counts applicable sides only and shows NotApplicable in gray with its reason.'
+    $completedOAuthOnly = @(& $module { param($f, $r) New-FreeBusySummaryRow -Findings $f -RunStatus 'Completed' -RunMessage $null -RunnerStatus $r -DurationSeconds 51 -ServerName 'EXSRV01' -FreeBusyCheckerVersion 'v' -GenerationTime 't' -OAuthOnly } @($findings | Where-Object { $_.Auth -eq 'OAuth' -or $_.Side -eq 'ExchangeOnPremises' } | ForEach-Object { $copy = $_.PSObject.Copy(); $copy.Auth = 'OAuth'; $copy; $copy2 = $_.PSObject.Copy(); $copy2.Side = 'ExchangeOnline'; $copy2.Auth = 'OAuth'; $copy2.Status = 'OK'; $copy2 }) (& $runner 'Connected' @()))
+    $completedReport = & $module { param($s) ConvertTo-FreeBusyReportHtml -Summary $s -Findings @() -RunStatus 'Completed' -RunMessage $null } $completedOAuthOnly
+    Assert-FreeBusy ($completedReport -match '>2 / 2<' -and $completedReport -match 'No error, warning or not authorized check was reported\.<' -and $completedReport -notmatch 'side\(s\) that were measured') 'Not applicable sides do not make a complete run look partial.'
     $collectorText = [IO.File]::ReadAllText($collectorPath)
     Assert-FreeBusy ($collectorText -match 'Exchange_Hybrid_FreeBusy_Summary\.csv' -and $collectorText -match 'Exchange_Hybrid_FreeBusy_Findings\.csv') 'Both CSVs are published.'
     $receipts = [IO.File]::ReadAllText((Join-Path $SourceRoot 'Modules/SmartM365.Core/SmartM365-SourceReceipts.json.txt')) | ConvertFrom-Json

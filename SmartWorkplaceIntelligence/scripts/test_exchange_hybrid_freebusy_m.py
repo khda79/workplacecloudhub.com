@@ -90,6 +90,17 @@ def fixtures():
     add('Captured without rows is distinct from absence',
         {SUMMARY: infra.csv_bytes(SUMMARY_COLUMNS, []), FINDINGS: infra.csv_bytes(FINDING_COLUMNS, [])}, '''
         Table.RowCount(S) = 1 and S{0}[Source Available] = true and S{0}[Run Status] = "Captured - no rows" and Table.RowCount(F) = 0''')
+    oauth_only = dict(files)
+    oauth_only[SUMMARY] = infra.csv_bytes(SUMMARY_COLUMNS, [
+        summary_row('ExchangeOnPremises', 'DAuth', 'NotApplicable', '', '', '', '', ''),
+        summary_row('ExchangeOnPremises', 'OAuth', 'Completed', '44', '0', '1', '14', '0'),
+        summary_row('ExchangeOnline', 'DAuth', 'NotApplicable', '', '', '', '', ''),
+        summary_row('ExchangeOnline', 'OAuth', 'NotAuthorizedPartial', '6', '0', '0', '1', '1', 'Test-EOOAuthConnectivity', 'Mail Recipients')])
+    # DAuth sides that do not apply (Intra Organization Connector enabled) pass through with unmeasured counts.
+    add('NotApplicable DAuth sides keep their status and unmeasured counts', oauth_only, '''let
+        Na = Table.SelectRows(S, each [Side Status] = "NotApplicable")
+        in Table.RowCount(S) = 4 and Table.RowCount(Na) = 2 and List.AllTrue(Na[Is Result]) and
+           List.Distinct(Na[Auth]) = {"DAuth"} and List.Distinct(Na[Error Count]) = {null} and List.Distinct(Na[OK Count]) = {null}''')
     bad = dict(files)
     bad[SUMMARY] = infra.csv_bytes(SUMMARY_COLUMNS, [summary_row('ExchangeOnline', 'DAuth', 'Completed', '1', '0', '0', '0', '0', tenant='foreign')])
     bad[FINDINGS] = infra.csv_bytes(FINDING_COLUMNS, [finding_row('ExchangeOnline', 'DAuth', 1, 'OK', 'x', tenant='foreign')])
@@ -123,6 +134,20 @@ class HybridFreeBusyReaderTests(unittest.TestCase):
                 self.assertTrue(case['Passed'], case['Detail'])
         print('Executed ' + str(len(tests)) + ' synthetic Exchange hybrid free/busy M cases.')
 
+
+class HybridFreeBusyMeasureTests(unittest.TestCase):
+    def test_not_applicable_sides_are_neither_measured_nor_missing(self):
+        text = (DEFINITION / 'tables' / 'Exchange Hybrid Free Busy Summary.tmdl').read_text(encoding='utf-8-sig')
+        measures = {line.split("'")[1]: line for line in text.splitlines() if line.strip().startswith('measure ')}
+        total = measures['Exchange Free Busy Checks Total']
+        status = measures['Exchange Free Busy Status']
+        # Applicable sides only; a summary without NotApplicable rows keeps the former total.
+        self.assertIn('[Side Status]<>"NotApplicable"', total)
+        self.assertIn('RETURN IF(_all>0,_applicable)', total)
+        self.assertIn('[Side Status]="NotApplicable"', status)
+        self.assertIn('IF(_na>0,', status)
+        self.assertIn('not applicable: Intra Organization Connector enabled, free/busy uses OAuth', status)
+        self.assertNotIn('NotApplicable', measures['Exchange Free Busy Checks Completed'])
 
 if __name__ == '__main__':
     unittest.main()

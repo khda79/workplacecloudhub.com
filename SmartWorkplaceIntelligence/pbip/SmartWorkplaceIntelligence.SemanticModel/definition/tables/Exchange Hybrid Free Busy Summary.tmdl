@@ -3,7 +3,7 @@ table 'Exchange Hybrid Free Busy Summary'
 	lineageTag: f5386d3c-f7e8-54fe-9231-4cc89e5cbc01
 
 	/// Selected immutable batch only. Microsoft CSS-Exchange FreeBusyChecker results for the on-premises and Exchange Online sides, DAuth and OAuth. A side that was not connected, not authorized or not run is unmeasured, never healthy. Values that can reveal host names, addresses, certificates, domains or identifiers are masked at collection.
-	measure 'Exchange Free Busy Checks Total' = VAR _n=CALCULATE(COUNTROWS('Exchange Hybrid Free Busy Summary'),KEEPFILTERS('Exchange Hybrid Free Busy Summary'[Is Result]=TRUE())) RETURN IF(_n>0,_n)
+	measure 'Exchange Free Busy Checks Total' = VAR _all=CALCULATE(COUNTROWS('Exchange Hybrid Free Busy Summary'),KEEPFILTERS('Exchange Hybrid Free Busy Summary'[Is Result]=TRUE())) VAR _applicable=CALCULATE(COUNTROWS('Exchange Hybrid Free Busy Summary'),KEEPFILTERS('Exchange Hybrid Free Busy Summary'[Is Result]=TRUE()),KEEPFILTERS('Exchange Hybrid Free Busy Summary'[Side Status]<>"NotApplicable")) RETURN IF(_all>0,_applicable)
 		formatString: #,0
 		displayFolder: Free/Busy
 
@@ -28,7 +28,7 @@ table 'Exchange Hybrid Free Busy Summary'
 		displayFolder: Free/Busy
 
 	/// Selected immutable batch only. Microsoft CSS-Exchange FreeBusyChecker results for the on-premises and Exchange Online sides, DAuth and OAuth. A side that was not connected, not authorized or not run is unmeasured, never healthy. Values that can reveal host names, addresses, certificates, domains or identifiers are masked at collection.
-	measure 'Exchange Free Busy Status' = VAR _total=[Exchange Free Busy Checks Total] VAR _done=[Exchange Free Busy Checks Completed] VAR _run=CALCULATE(MAX('Exchange Hybrid Free Busy Summary'[Run Status]),KEEPFILTERS('Exchange Hybrid Free Busy Summary'[Is Result]=TRUE())) RETURN IF(ISBLANK(_total),"Not captured in selected batch | Free/busy results require the weekly Exchange2016-FreeBusy-Check job; unknown is not healthy.",FORMAT(_done,"0") & "/" & FORMAT(_total,"0") & " side checks completed | Run status: " & _run & " | Not connected, not authorized or not run checks are unmeasured, not healthy.")
+	measure 'Exchange Free Busy Status' = VAR _total=[Exchange Free Busy Checks Total] VAR _done=[Exchange Free Busy Checks Completed] VAR _run=CALCULATE(MAX('Exchange Hybrid Free Busy Summary'[Run Status]),KEEPFILTERS('Exchange Hybrid Free Busy Summary'[Is Result]=TRUE())) VAR _na=CALCULATE(COUNTROWS('Exchange Hybrid Free Busy Summary'),KEEPFILTERS('Exchange Hybrid Free Busy Summary'[Is Result]=TRUE()),KEEPFILTERS('Exchange Hybrid Free Busy Summary'[Side Status]="NotApplicable")) RETURN IF(ISBLANK(_total),"Not captured in selected batch | Free/busy results require the weekly Exchange2016-FreeBusy-Check job; unknown is not healthy.",FORMAT(_done,"0") & "/" & FORMAT(_total,"0") & " side checks completed | Run status: " & _run & IF(_na>0," | " & FORMAT(_na,"0") & " DAuth side check(s) not applicable: Intra Organization Connector enabled, free/busy uses OAuth","") & " | Not connected, not authorized or not run checks are unmeasured, not healthy.")
 		formatString: @
 		displayFolder: Free/Busy
 

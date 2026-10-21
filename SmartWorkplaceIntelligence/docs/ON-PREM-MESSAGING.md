@@ -61,7 +61,11 @@ batch, tenant, header, column and stable-pointer checks as the infrastructure re
 and loads two disconnected tables: one row per side (on-premises, Exchange Online) and
 authentication method (DAuth, OAuth), and one row per result item. A side that was not
 connected, not authorized (the app has no role for a test cmdlet) or not run is
-unmeasured, never healthy; the missing cmdlets and roles are listed. An absent summary
+unmeasured, never healthy; the missing cmdlets and roles are listed. When the Intra
+Organization Connector is enabled, FreeBusyChecker checks OAuth only: both DAuth sides
+are NotApplicable, excluded from the side check total and named in the status text,
+neither unmeasured nor errors. A summary without NotApplicable rows keeps the former
+totals. An absent summary
 is an explicit Not captured marker, never zero findings. The findings table on the view
 lists errors, warnings and not authorized checks; identifiers, domains, addresses and
 URLs were masked at collection.

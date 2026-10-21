@@ -52,10 +52,15 @@ on the Exchange on-premises side and on the Exchange Online side, for DAuth and 
 
 - `Exchange_Hybrid_FreeBusy_Summary.csv`: four rows per run (Exchange on-premises and Exchange Online,
   each for DAuth and OAuth) with `RunStatus`, `SideStatus` (`Completed`, `NotConnected`,
-  `NotAuthorizedPartial`, `NotRun`), the result counts, the cmdlets not available to the app and the
+  `NotAuthorizedPartial`, `NotRun`, `NotApplicable`), the result counts, the cmdlets not available to the app and the
   roles that contain them. Counts are empty when a side was not measured.
 - `Exchange_Hybrid_FreeBusy_Findings.csv`: one row per result line with side, authentication,
   check, item, status (`OK`, `Warning`, `Error`, `Info`, `NotAuthorized`) and the masked value.
+
+When the Intra Organization Connector is enabled, Free/Busy Checker checks OAuth only (free/busy then
+uses OAuth; `-Auth All` is not available with `-SkipVersionCheck`). Both DAuth sides are then
+`NotApplicable` with the reason in `RunMessage`: they count neither as measured nor as missing, and
+their Exchange Online cmdlets do not make the run `EXONotAuthorized`.
 
 `RunStatus` is `Completed`, `EXONotConnected`, `EXONotAuthorized` (some Exchange Online checks not
 available to the app; for example `Test-EOOAuthConnectivity` needs a role such as Mail Recipients),

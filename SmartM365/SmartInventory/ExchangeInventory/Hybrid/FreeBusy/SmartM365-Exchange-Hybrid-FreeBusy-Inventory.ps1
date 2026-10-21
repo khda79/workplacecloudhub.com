@@ -20,7 +20,7 @@
     folder (last run only) and are read as text only; they are never published.
 
 .VERSION
-1.0.4
+1.0.5
 .REQUIREMENTS
     Windows PowerShell 5.1, elevated, on an Exchange server with the Exchange Management Tools.
     Modules: SmartM365 WindowsPowerShell5 compatibility module; ActiveDirectory (Windows feature RSAT-AD-PowerShell);
@@ -29,7 +29,7 @@
     Conditional: Mail.Send is required only when Graph mail is used; Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
     Script Name : SmartM365-Exchange-Hybrid-FreeBusy-Inventory.ps1
-    Version     : 1.0.4
+    Version     : 1.0.5
     Author      : https://github.com/khda79/workplacecloudhub.com
 #>
 
@@ -77,7 +77,7 @@ $tenantContextPath = & {
 . $tenantContextPath
 
 $ScriptName = "SmartM365-Exchange-Hybrid-FreeBusy-Inventory"
-$ScriptVersion = "1.0.4"
+$ScriptVersion = "1.0.5"
 $RunId = (Get-Date).ToString("yyyyMMdd-HHmmss")
 # Vendored Microsoft CSS-Exchange Free/Busy Checker (see ThirdParty\CSS-Exchange\FreeBusyChecker\PROVENANCE.md).
 $FreeBusyCheckerRelativePath = 'ThirdParty\CSS-Exchange\FreeBusyChecker\FreeBusyChecker.ps1'
@@ -707,6 +707,15 @@ function ConvertTo-FreeBusySafeValue {
     return $text
 }
 
+# Free/Busy Checker checks OAuth only when the Intra Organization Connector is enabled and no -Auth is
+# given (-Auth would select a parameter set that lets it update itself): its DAuth checks do not apply.
+$FreeBusyDAuthNotApplicableReason = 'Intra Organization Connector enabled: free/busy uses OAuth, DAuth not checked'
+function Test-FreeBusyOAuthOnly {
+    param([AllowEmptyString()][string]$Html)
+
+    return [regex]::IsMatch($Html, '(?i)Checking OAuth only as Free Busy Lookup is done using OAuth when the Intra Organization Connector is Enabled')
+}
+
 function Get-FreeBusyMaskedItem {
     # Items whose values are identifiers, names, addresses or endpoints of the tenant or the organization.
     return @('Identity', 'Name', 'Domain Names', 'DomainNames', 'Domains', 'UserName', 'Forest Name', 'ForestName', 'ProxyUrl', 'TokenIssuerUris', 'TokenIssuerUri', 'Application Uri', 'ApplicationUri', 'TarGetApplicationUri', 'TargetApplicationUri', 'TarGetAutoDiscoverEpr', 'TargetAutodiscoverEpr', 'TarGetOwaURL', 'TargetOwaURL', 'TarGetSharingEpr', 'TargetSharingEpr', 'Thumbprint', 'Subject', 'Issuer', 'AccountNamespace', 'Delegation Federation Trust', 'DelegationFederationTrust', 'OrganizationGuid', 'ApplicationIdentifier', 'Realm', 'Token Issuer Metadata EPR', 'Token Issuer EPR', 'TokenIssuerMetadataEpr', 'TokenIssuerEpr', 'InternalUrl', 'ExternalUrl', 'DiscoveryEndpoint', 'OnPremiseDiscoveryEndpoint', 'TargetAddressDomains', 'TarGetAddressDomains', 'TargetServiceEpr', 'MetadataUrl', 'AuthMetadataUrl', 'Service Instance', 'HybridDomains', 'InboundConnector', 'OutboundConnector', 'OrganizationName', 'LinkedMailbox', 'Mailbox', 'CertificateThumbprint', 'CurrentCertificateThumbprint', 'NextCertificateThumbprint', 'PreviousCertificateThumbprint', 'ServiceName')
@@ -791,7 +800,8 @@ function Add-FreeBusyNotAuthorizedFinding {
         [AllowEmptyCollection()][string[]]$NotAuthorizedCmdlets = @(),
         [Parameter(Mandatory)][string]$ServerName,
         [Parameter(Mandatory)][string]$FreeBusyCheckerVersion,
-        [Parameter(Mandatory)][string]$GenerationTime
+        [Parameter(Mandatory)][string]$GenerationTime,
+        [switch]$OAuthOnly
     )
 
     # A cmdlet the app cannot run is reported as NotAuthorized, never as a configuration error.
@@ -802,6 +812,7 @@ function Add-FreeBusyNotAuthorizedFinding {
     foreach ($cmdlet in $NotAuthorizedCmdlets) {
         if (-not $scope.ContainsKey($cmdlet)) { continue }
         $target = $scope[$cmdlet]
+        if ($OAuthOnly -and $target.Auth -eq 'DAuth') { continue }
         $message = "Not available to the tenant app (missing Exchange role: $($target.Roles)); $cmdlet was not run."
         $matched = @($rows | Where-Object { $_.Side -eq 'ExchangeOnline' -and $_.Auth -eq $target.Auth -and $_.Category -eq $target.Category })
         foreach ($row in $matched) {
@@ -826,7 +837,8 @@ function New-FreeBusySummaryRow {
         [AllowNull()][object]$DurationSeconds,
         [Parameter(Mandatory)][string]$ServerName,
         [Parameter(Mandatory)][string]$FreeBusyCheckerVersion,
-        [Parameter(Mandatory)][string]$GenerationTime
+        [Parameter(Mandatory)][string]$GenerationTime,
+        [switch]$OAuthOnly
     )
 
     $scope = Get-FreeBusyCmdletScope
@@ -837,9 +849,11 @@ function New-FreeBusySummaryRow {
         foreach ($auth in @('DAuth', 'OAuth')) {
             $sideRows = @($Findings | Where-Object { $_.Side -eq $side -and $_.Auth -eq $auth })
             # Missing cmdlets and roles are reported only when Free/Busy Checker actually ran.
-            $sideCmdlets = if ($blocking) { @() } else { @($notAuthorized | Where-Object { $side -eq 'ExchangeOnline' -and $scope.ContainsKey($_) -and $scope[$_].Auth -eq $auth }) }
+            $notApplicable = (-not $blocking) -and $OAuthOnly -and $auth -eq 'DAuth'
+            $sideCmdlets = if ($blocking -or $notApplicable) { @() } else { @($notAuthorized | Where-Object { $side -eq 'ExchangeOnline' -and $scope.ContainsKey($_) -and $scope[$_].Auth -eq $auth }) }
             $sideStatus = if ($blocking) { 'NotRun' }
                 elseif ($side -eq 'ExchangeOnline' -and $exchangeOnline -eq 'NotConnected') { 'NotConnected' }
+                elseif ($notApplicable) { 'NotApplicable' }
                 elseif ($sideCmdlets.Count -gt 0) { 'NotAuthorizedPartial' }
                 elseif ($sideRows.Count -gt 0) { 'Completed' }
                 else { 'NotRun' }
@@ -849,17 +863,17 @@ function New-FreeBusySummaryRow {
                 Auth                   = $auth
                 RunStatus              = $RunStatus
                 SideStatus             = $sideStatus
-                RunMessage             = $RunMessage
+                RunMessage             = $(if ($sideStatus -eq 'NotApplicable') { $FreeBusyDAuthNotApplicableReason } else { $RunMessage })
                 NotAuthorizedCmdlets   = ($sideCmdlets -join '; ')
                 MissingRoles           = (@($sideCmdlets | ForEach-Object { $scope[$_].Roles } | Select-Object -Unique) -join '; ')
                 DurationSeconds        = $DurationSeconds
                 FreeBusyCheckerVersion = $FreeBusyCheckerVersion
                 GenerationTime         = $GenerationTime
-                OkCount                = $(if ($sideStatus -eq 'NotRun' -or $sideStatus -eq 'NotConnected') { $null } else { @($sideRows | Where-Object Status -eq 'OK').Count })
-                WarningCount           = $(if ($sideStatus -eq 'NotRun' -or $sideStatus -eq 'NotConnected') { $null } else { @($sideRows | Where-Object Status -eq 'Warning').Count })
-                ErrorCount             = $(if ($sideStatus -eq 'NotRun' -or $sideStatus -eq 'NotConnected') { $null } else { @($sideRows | Where-Object Status -eq 'Error').Count })
-                InfoCount              = $(if ($sideStatus -eq 'NotRun' -or $sideStatus -eq 'NotConnected') { $null } else { @($sideRows | Where-Object Status -eq 'Info').Count })
-                NotAuthorizedCount     = $(if ($sideStatus -eq 'NotRun' -or $sideStatus -eq 'NotConnected') { $null } else { @($sideRows | Where-Object Status -eq 'NotAuthorized').Count })
+                OkCount                = $(if ($sideStatus -in @('NotRun', 'NotConnected', 'NotApplicable')) { $null } else { @($sideRows | Where-Object Status -eq 'OK').Count })
+                WarningCount           = $(if ($sideStatus -in @('NotRun', 'NotConnected', 'NotApplicable')) { $null } else { @($sideRows | Where-Object Status -eq 'Warning').Count })
+                ErrorCount             = $(if ($sideStatus -in @('NotRun', 'NotConnected', 'NotApplicable')) { $null } else { @($sideRows | Where-Object Status -eq 'Error').Count })
+                InfoCount              = $(if ($sideStatus -in @('NotRun', 'NotConnected', 'NotApplicable')) { $null } else { @($sideRows | Where-Object Status -eq 'Info').Count })
+                NotAuthorizedCount     = $(if ($sideStatus -in @('NotRun', 'NotConnected', 'NotApplicable')) { $null } else { @($sideRows | Where-Object Status -eq 'NotAuthorized').Count })
             }
         }
     }
@@ -871,7 +885,8 @@ function Resolve-FreeBusyRunStatus {
         [AllowNull()][object]$Process,
         [AllowNull()][object]$RunnerStatus,
         [bool]$HtmlFound,
-        [bool]$ParseFailed
+        [bool]$ParseFailed,
+        [switch]$OAuthOnly
     )
 
     if ($Process -and $Process.Status -in @('LaunchFailed', 'Timeout')) { return $Process.Status }
@@ -879,7 +894,9 @@ function Resolve-FreeBusyRunStatus {
     if ($ParseFailed) { return 'ParseFailed' }
     if (-not $HtmlFound) { return 'NoOutput' }
     if ($RunnerStatus -and $RunnerStatus.ExchangeOnline -eq 'NotConnected') { return 'EXONotConnected' }
-    if ($RunnerStatus -and @($RunnerStatus.NotAuthorizedCmdlets).Count -gt 0) { return 'EXONotAuthorized' }
+    $scope = Get-FreeBusyCmdletScope
+    $applicable = @(@($(if ($RunnerStatus) { $RunnerStatus.NotAuthorizedCmdlets } else { @() })) | Where-Object { $_ -and -not ($OAuthOnly -and $scope.ContainsKey($_) -and $scope[$_].Auth -eq 'DAuth') })
+    if ($applicable.Count -gt 0) { return 'EXONotAuthorized' }
     return 'Completed'
 }
 
@@ -894,7 +911,10 @@ function ConvertTo-FreeBusyReportHtml {
     $statusColor = if ($RunStatus -eq 'Completed') { '#166534' } elseif ($RunStatus -in @('EXONotConnected', 'EXONotAuthorized')) { '#9a3412' } else { '#b91c1c' }
     $ran = $RunStatus -in @('Completed', 'EXONotConnected', 'EXONotAuthorized')
     $measured = @($Summary | Where-Object { $_.SideStatus -in @('Completed', 'NotAuthorizedPartial') })
-    $sidesText = '{0} / {1}' -f $measured.Count, @($Summary).Count
+    # Sides whose checks do not apply (DAuth when free/busy uses OAuth) are neither tested nor missing.
+    $applicable = @($Summary | Where-Object { $_.SideStatus -ne 'NotApplicable' })
+    $notApplicableRows = @($Summary | Where-Object { $_.SideStatus -eq 'NotApplicable' })
+    $sidesText = '{0} / {1}' -f $measured.Count, $applicable.Count
     $issues = @($Findings | Where-Object { $_.Status -in @('Error', 'NotAuthorized', 'Warning') } | Sort-Object @{ Expression = { switch ($_.Status) { 'Error' { 0 } 'NotAuthorized' { 1 } default { 2 } } } }, Side, Auth, RowNumber)
     $errorCount = @($issues | Where-Object Status -eq 'Error').Count
     $warningCount = @($issues | Where-Object Status -eq 'Warning').Count
@@ -903,8 +923,9 @@ function ConvertTo-FreeBusyReportHtml {
     $countText = { param($Value) if ($ran) { [string]$Value } else { 'N/A' } }
 
     $summaryRows = foreach ($row in $Summary) {
-        $sideColor = switch ([string]$row.SideStatus) { 'Completed' { '#166534'; break } 'NotRun' { '#64748b'; break } default { '#9a3412' } }
-        "<tr><td>$(Format-HtmlValue $row.Side)</td><td>$(Format-HtmlValue $row.Auth)</td><td style='font-weight:700;color:$sideColor;'>$(Format-HtmlValue $row.SideStatus)</td><td class='num' style='text-align:right;'>$(Format-HtmlValue $row.ErrorCount)</td><td class='num' style='text-align:right;'>$(Format-HtmlValue $row.WarningCount)</td><td class='num' style='text-align:right;'>$(Format-HtmlValue $row.NotAuthorizedCount)</td><td>$(Format-HtmlValue $row.MissingRoles)</td></tr>"
+        $sideColor = switch ([string]$row.SideStatus) { 'Completed' { '#166534'; break } { $_ -in @('NotRun', 'NotApplicable') } { '#64748b'; break } default { '#9a3412' } }
+        $note = if ($row.SideStatus -eq 'NotApplicable') { $row.RunMessage } else { $row.MissingRoles }
+        "<tr><td>$(Format-HtmlValue $row.Side)</td><td>$(Format-HtmlValue $row.Auth)</td><td style='font-weight:700;color:$sideColor;'>$(Format-HtmlValue $row.SideStatus)</td><td class='num' style='text-align:right;'>$(Format-HtmlValue $row.ErrorCount)</td><td class='num' style='text-align:right;'>$(Format-HtmlValue $row.WarningCount)</td><td class='num' style='text-align:right;'>$(Format-HtmlValue $row.NotAuthorizedCount)</td><td$(if ($row.SideStatus -eq 'NotApplicable') { " style='color:#64748b;'" })>$(Format-HtmlValue $note)</td></tr>"
     }
     $shown = @($issues | Select-Object -First 100)
     $issueRows = foreach ($row in $shown) {
@@ -919,10 +940,11 @@ function ConvertTo-FreeBusyReportHtml {
         $note = if ($issues.Count -gt $shown.Count) { "<p style='font-size:12px;color:#64748b;'>Showing the first $($shown.Count) of $($issues.Count) results; all are in Exchange_Hybrid_FreeBusy_Findings.csv.</p>" } else { '' }
         "<h2 style='font-size:17px;margin:0 0 10px 0;color:#0f172a;'>Errors, not authorized checks and warnings</h2><table cellpadding='6' cellspacing='0' style='width:100%;border-collapse:collapse;font-size:12px;border:1px solid #e5e7eb;'><tr style='background:#f8fafc;'><th align='left'>Status</th><th align='left'>Side</th><th align='left'>Auth</th><th align='left'>Check</th><th align='left'>Item</th><th align='left'>Value</th></tr>$($issueRows -join "`r`n")</table>$note"
     }
-    elseif ($measured.Count -lt @($Summary).Count) {
+    elseif ($measured.Count -lt $applicable.Count) {
         "<p>No error, warning or not authorized check was reported on the $($measured.Count) side(s) that were measured. The other sides were not run or not connected: their state is unknown, not healthy.</p>"
     }
     else { "<p>No error, warning or not authorized check was reported.</p>" }
+    $notApplicableNote = if ($ran -and $notApplicableRows.Count -gt 0) { "<p style='color:#64748b;'>Not applicable: $(Format-HtmlValue $notApplicableRows[0].RunMessage) ($($notApplicableRows.Count) side(s)).</p>" } else { '' }
     $message = if ($ran -and -not [string]::IsNullOrWhiteSpace($RunMessage)) { "<div class='summary' style='border:1px solid #e5e7eb;border-radius:8px;background:#ffffff;padding:16px;font-size:14px;line-height:1.55;color:#334155;margin-bottom:22px;'>$(Format-HtmlValue $RunMessage)</div>" } else { '' }
     $card = {
         param($Label, $Value, $Detail, $Border, $Background, $Accent)
@@ -930,7 +952,7 @@ function ConvertTo-FreeBusyReportHtml {
     }
     $cards = @(
         (& $card 'Run status' $RunStatus 'Free/Busy Checker run' '#dbe3ef' '#f8fafc' $statusColor),
-        (& $card 'Sides tested' $sidesText 'side and authentication checks measured' '#bfdbfe' '#eff6ff' '#1d4ed8'),
+        (& $card 'Sides tested' $sidesText 'applicable side and authentication checks measured' '#bfdbfe' '#eff6ff' '#1d4ed8'),
         (& $card 'Errors' (& $countText $errorCount) 'configuration errors' '#fecaca' '#fef2f2' '#b91c1c'),
         (& $card 'Warnings' (& $countText $warningCount) 'items to review' '#fed7aa' '#fff7ed' '#9a3412'),
         (& $card 'Not authorized' (& $countText $notAuthorizedCount) 'Exchange Online checks the app cannot run' '#e9d5ff' '#faf5ff' '#7e22ce')
@@ -961,9 +983,10 @@ function ConvertTo-FreeBusyReportHtml {
       </table>
       $message
       $issuesBlock
+      $notApplicableNote
       <h2 style="font-size:17px;margin:0 0 10px 0;color:#0f172a;">Sides and authentication</h2>
       <table cellpadding="6" cellspacing="0" style="width:100%;border-collapse:collapse;font-size:12px;border:1px solid #e5e7eb;">
-        <tr style="background:#f8fafc;"><th align="left">Side</th><th align="left">Auth</th><th align="left">Status</th><th align="right">Errors</th><th align="right">Warnings</th><th align="right">Not authorized</th><th align="left">Missing roles</th></tr>
+        <tr style="background:#f8fafc;"><th align="left">Side</th><th align="left">Auth</th><th align="left">Status</th><th align="right">Errors</th><th align="right">Warnings</th><th align="right">Not authorized</th><th align="left">Missing roles or note</th></tr>
         $($summaryRows -join "`r`n")
       </table>
       <div class="footer" style="margin-top:18px;padding-top:14px;border-top:1px solid #e5e7eb;font-size:12px;color:#64748b;line-height:1.5;">Sides that were not run or not connected show N/A: their state is not measured. Values that can reveal names, addresses, URLs, certificates or identifiers are masked. Not authorized checks are Exchange Online cmdlets the tenant app cannot run; they are not configuration errors.</div>
@@ -1006,6 +1029,7 @@ try {
     $runStatus = $null
     $runMessage = $null
     $htmlFound = $false
+$oauthOnly = $false
     $parseFailed = $false
 
     $settings = $null
@@ -1059,9 +1083,12 @@ try {
             if ($htmlFile.Count -gt 0) {
                 $htmlFound = $true
                 try {
-                    $findings = @(ConvertFrom-FreeBusyCheckerHtml -Html ([System.IO.File]::ReadAllText($htmlFile[0].FullName)) -ServerName $serverName -FreeBusyCheckerVersion $FreeBusyCheckerVersion -GenerationTime $generationTime)
+                    $htmlText = [System.IO.File]::ReadAllText($htmlFile[0].FullName)
+                    $oauthOnly = Test-FreeBusyOAuthOnly -Html $htmlText
+                    if ($oauthOnly) { Write-Log "Free/Busy Checker checked OAuth only: $FreeBusyDAuthNotApplicableReason." }
+                    $findings = @(ConvertFrom-FreeBusyCheckerHtml -Html $htmlText -ServerName $serverName -FreeBusyCheckerVersion $FreeBusyCheckerVersion -GenerationTime $generationTime)
                     if ($runnerStatus -and @($runnerStatus.NotAuthorizedCmdlets).Count -gt 0) {
-                        $findings = @(Add-FreeBusyNotAuthorizedFinding -Findings $findings -NotAuthorizedCmdlets @($runnerStatus.NotAuthorizedCmdlets) -ServerName $serverName -FreeBusyCheckerVersion $FreeBusyCheckerVersion -GenerationTime $generationTime)
+                        $findings = @(Add-FreeBusyNotAuthorizedFinding -Findings $findings -NotAuthorizedCmdlets @($runnerStatus.NotAuthorizedCmdlets) -ServerName $serverName -FreeBusyCheckerVersion $FreeBusyCheckerVersion -GenerationTime $generationTime -OAuthOnly:$oauthOnly)
                     }
                 }
                 catch {
@@ -1070,7 +1097,7 @@ try {
                     $runMessage = "The Free/Busy Checker report could not be read: $($_.Exception.Message)"
                 }
             }
-            $runStatus = Resolve-FreeBusyRunStatus -Process $process -RunnerStatus $runnerStatus -HtmlFound $htmlFound -ParseFailed $parseFailed
+            $runStatus = Resolve-FreeBusyRunStatus -Process $process -RunnerStatus $runnerStatus -HtmlFound $htmlFound -ParseFailed $parseFailed -OAuthOnly:$oauthOnly
             if (-not $runMessage) {
                 $runMessage = if ($process.Status -in @('LaunchFailed', 'Timeout')) { $process.Message }
                     elseif ($runnerStatus -and $runnerStatus.Message) { $runnerStatus.Message }
@@ -1084,7 +1111,7 @@ try {
     if ($runStatus -ne 'Completed') {
         Write-Log ("Free/Busy Checker run status {0}. {1} Raw output, if any, stays in the local work folder." -f $runStatus, $runMessage) 'WARN'
     }
-    $summary = @(New-FreeBusySummaryRow -Findings $findings -RunStatus $runStatus -RunMessage $runMessage -RunnerStatus $runnerStatus -DurationSeconds $(if ($process) { $process.DurationSeconds } else { $null }) -ServerName $serverName -FreeBusyCheckerVersion $FreeBusyCheckerVersion -GenerationTime $generationTime)
+    $summary = @(New-FreeBusySummaryRow -Findings $findings -RunStatus $runStatus -RunMessage $runMessage -RunnerStatus $runnerStatus -DurationSeconds $(if ($process) { $process.DurationSeconds } else { $null }) -ServerName $serverName -FreeBusyCheckerVersion $FreeBusyCheckerVersion -GenerationTime $generationTime -OAuthOnly:$oauthOnly)
     Write-Log ("Free/Busy Checker: {0} finding(s); {1} error(s); {2} not authorized check(s)." -f $findings.Count, @($findings | Where-Object Status -eq 'Error').Count, @($findings | Where-Object Status -eq 'NotAuthorized').Count)
 
     $summaryPath = Join-Path $OutputFolder 'Exchange_Hybrid_FreeBusy_Summary.csv'
