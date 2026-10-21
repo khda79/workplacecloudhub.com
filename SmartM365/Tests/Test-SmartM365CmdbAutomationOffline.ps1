@@ -3,7 +3,7 @@
 .SYNOPSIS
 Offline activation merge and preparation-to-publication boundary tests.
 .VERSION
-1.0.5
+1.0.6
 .NOTES
 Extracts helpers only; no tenant initialization, collections, authentication,
 SharePoint transport or shared configuration publication. Temporary fixtures only.
@@ -121,7 +121,8 @@ $own=[pscustomobject]@{Jobs=@($valid.Jobs | Where-Object Name -in @('CmdbEvidenc
 Assert-True (Test-SmartM365OrchestratorConfigurationConsistency -JobsDocument $own -ClusterDocument $cluster).Valid 'New job consistency rejected.'
 Import-Module (Join-Path $smartRoot 'SmartInventory/Orchestrator/SmartM365.Orchestrator.Pipeline.psm1') -Force
 $selection=Get-SmartM365OrchestratorPipelineSelection -JobsDocument $valid -JobName 'CmdbEvidence-Prepare' -IncludeDependencies
-Assert-True ($selection.SelectedJobs.Count -eq 18) 'Native producer omitted from dependency selection.'
+# 19 jobs: the mailbox inventory now also brings its ProxyAddresses check.
+Assert-True ($selection.SelectedJobs.Count -eq 19 -and @($selection.SelectedJobs | Where-Object Name -eq 'Exchange2016-ProxyAddresses-Check').Count -eq 1) 'Native producer omitted from dependency selection.'
 $contract=Get-Content (Join-Path $preparedRoot 'cmdb-prepared-contract.json.txt') -Raw | ConvertFrom-Json
 Assert-True ($contract.maxAgeHours -eq 48 -and $contract.freshnessGroups[0].maxAgeHours -eq 240 -and $contract.freshnessGroups[0].warningAgeHours -eq 168) 'Freshness policy changed.'
 $activation=Get-Content (Join-Path $preparedRoot 'SmartM365-CmdbEvidence-Orchestrator.ps1') -Raw

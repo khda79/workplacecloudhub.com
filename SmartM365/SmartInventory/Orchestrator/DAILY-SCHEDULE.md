@@ -23,8 +23,8 @@ editing the template.
 | EXO-Mailboxes-Inventory-Fast | Daily 00:15, chained after AD and active users |
 | EXO-AcceptedDomains-Inventory | Daily 00:10 |
 | Mailboxes-PermissionsByUser-Report | Daily 08:30 |
-| Exchange2016-Local-Mailboxes-Inventory | Daily 00:35 |
-| Exchange2016-ProxyAddresses-Check | Daily 03:15 |
+| Exchange2016-Local-Mailboxes-Inventory | Daily 00:35, after a fresh ProxyAddresses check |
+| Exchange2016-ProxyAddresses-Check | Daily 00:00 |
 | Exchange2016-Infrastructure-Inventory | Daily 00:00, with service health and mailbox database paths |
 | M365-Usage-Inventory | Daily 04:45 |
 | Intune-DeviceSystem-Inventory | Daily 01:15 |
@@ -166,6 +166,7 @@ In particular, AD's observed duration does not imply error-free domain coverage.
 | M365-Licences-Inventory | 90 |
 | AD-Inventory | 120 |
 | Exchange2016-Local-Mailboxes-Inventory | 150 |
+| Exchange2016-ProxyAddresses-Check | 30 |
 | M365-WorkplaceScope-Inventory | 360 |
 | Intune-Configurations-Inventory | 30 |
 | Intune-ManagedApps-Inventory | 60 |

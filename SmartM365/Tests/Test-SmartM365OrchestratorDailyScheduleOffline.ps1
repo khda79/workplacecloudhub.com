@@ -3,7 +3,7 @@
 .SYNOPSIS
 Validate the single daily inventory cycle and weekly exceptions offline.
 .VERSION
-1.2.1
+1.2.2
 .NOTES
 Reads the repository template and an optional additional local manifest.
 No tenant initialization, collectors, scheduling, authentication or publication.
@@ -38,7 +38,7 @@ $daily = @{
         'EXO-AcceptedDomains-Inventory' = '00:10'
         'Mailboxes-PermissionsByUser-Report' = '08:30'
         'Exchange2016-Local-Mailboxes-Inventory' = '00:35'
-        'Exchange2016-ProxyAddresses-Check' = '03:15'
+        'Exchange2016-ProxyAddresses-Check' = '00:00'
         'Exchange2016-Infrastructure-Inventory' = '00:00'
         'M365-Usage-Inventory' = '04:45'
         'Intune-DeviceSystem-Inventory' = '01:15'
@@ -79,6 +79,7 @@ $estimates = @{
         'M365-Licences-Inventory' = 90
         'AD-Inventory' = 120
         'Exchange2016-Local-Mailboxes-Inventory' = 150
+        'Exchange2016-ProxyAddresses-Check' = 30
         'M365-WorkplaceScope-Inventory' = 360
         'Intune-Devices-Compliance-Inventory' = 15
         'Intune-Configurations-Inventory' = 30
@@ -187,6 +188,17 @@ foreach ($path in $paths) {
     $infrastructureSwitches = @(([string]$exchangeInfrastructure.Arguments) -split '\s+' | Where-Object { $_ })
     foreach ($switch in @('-IncludeServicesHealth', '-IncludeMailboxDatabasePaths')) {
         Assert-True ($infrastructureSwitches -contains $switch) "Exchange infrastructure no longer collects the prepared artifact enabled by $switch."
+    }
+    # The mailbox summary uses the same night's ProxyAddresses audit, which now runs first.
+    $localMailboxes = @($document.Jobs | Where-Object Name -eq 'Exchange2016-Local-Mailboxes-Inventory')[0]
+    Assert-True ((@($localMailboxes.DependsOn) -join ',') -ceq 'Exchange2016-ProxyAddresses-Check' -and $localMailboxes.DependencyMode -eq 'FreshSuccess') 'Local mailboxes no longer wait for a fresh ProxyAddresses check.'
+    # One daily time: the 1380-minute timeout policy.
+    foreach ($name in @('M365-Teams-Inventory', 'M365-SPO-Inventory', 'Intune-WindowsAutopilot-Inventory', 'Exchange2016-ProxyAddresses-Check', 'Exchange2016-Local-Mailboxes-Inventory')) {
+        Assert-True (@($document.Jobs | Where-Object Name -eq $name)[0].TimeoutMinutes -eq 1380) "Daily job timeout is not 1380 minutes: $name"
+    }
+    # The template keeps the normal 48-hour freshness window; a server may widen it temporarily.
+    if ($isTemplate) {
+        Assert-True (@($document.Jobs | Where-Object Name -eq 'WorkplaceEvidence-Prepare')[0].DependencyMaxAgeHours -eq 48) 'Template workplace preparation freshness window is not 48 hours.'
     }
     $ad = @($document.Jobs | Where-Object Name -eq 'AD-Inventory')[0]
     $scope = @($document.Jobs | Where-Object Name -eq 'M365-WorkplaceScope-Inventory')[0]

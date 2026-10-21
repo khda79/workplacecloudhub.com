@@ -223,7 +223,9 @@
       "Arguments": "",
       "Enabled": true,
       "Group": "Exchange2016",
-      "DependsOn": [],
+      "DependsOn": [
+        "Exchange2016-ProxyAddresses-Check"
+      ],
       "AllowedServers": [],
       "PowerShellEdition": "WindowsPowerShell",
       "TimeoutMinutes": 1380,
@@ -246,7 +248,8 @@
         "SharedRuntime"
       ],
       "RequiredGraphAppRoles": [],
-      "EstimatedDurationMinutes": 150
+      "EstimatedDurationMinutes": 150,
+      "DependencyMode": "FreshSuccess"
     },
     {
       "Name": "Intune-Devices-BIOS-Inventory",
@@ -556,7 +559,7 @@
       "Schedule": {
         "Type": "Daily",
         "Times": [
-          "03:15"
+          "00:00"
         ],
         "MissedRunPolicy": "RunOnce",
         "DaysOfWeek": []
@@ -569,7 +572,7 @@
         "SharedRuntime"
       ],
       "RequiredGraphAppRoles": [],
-      "EstimatedDurationMinutes": 5,
+      "EstimatedDurationMinutes": 30,
       "ConcurrencyKey": "ExchangeOnPremServer"
     },
     {
@@ -1512,7 +1515,7 @@
       "Group": "M365",
       "DependsOn": [],
       "AllowedServers": [],
-      "TimeoutMinutes": 8640,
+      "TimeoutMinutes": 1380,
       "MaxRetries": 1,
       "RetryDelaySeconds": 300,
       "ContinueOnError": true,
@@ -1549,7 +1552,7 @@
         "M365-Teams-Inventory"
       ],
       "AllowedServers": [],
-      "TimeoutMinutes": 8640,
+      "TimeoutMinutes": 1380,
       "MaxRetries": 1,
       "RetryDelaySeconds": 600,
       "ContinueOnError": true,
@@ -1582,7 +1585,7 @@
       "Group": "Intune",
       "DependsOn": [],
       "AllowedServers": [],
-      "TimeoutMinutes": 8640,
+      "TimeoutMinutes": 1380,
       "MaxRetries": 1,
       "RetryDelaySeconds": 300,
       "ContinueOnError": true,
