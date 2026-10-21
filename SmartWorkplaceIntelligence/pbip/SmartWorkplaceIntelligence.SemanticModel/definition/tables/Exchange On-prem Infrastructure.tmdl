@@ -8,7 +8,7 @@ table 'Exchange On-prem Infrastructure'
 		displayFolder: Infrastructure
 
 	/// Observed selected-batch infrastructure. Missing captures and missing numeric observations stay blank. This is not a licensing, migration-readiness or effective health assertion.
-	measure 'Exchange Infrastructure Status' = VAR _n=[Exchange Infrastructure Captured Sources] RETURN IF(_n=0,"Not captured in selected batch | Infrastructure files require a future prepared batch; unknown is not healthy.",FORMAT(_n,"0") & "/10 source files captured | Observed configuration; inspect collection status and missing evidence.")
+	measure 'Exchange Infrastructure Status' = VAR _n=[Exchange Infrastructure Captured Sources] RETURN IF(_n=0,"Not captured in selected batch | Infrastructure files require a future prepared batch; unknown is not healthy.",FORMAT(_n,"0") & "/12 source files captured | Observed configuration; inspect collection status and missing evidence.")
 		formatString: @
 		displayFolder: Infrastructure
 

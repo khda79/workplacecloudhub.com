@@ -1,11 +1,11 @@
 # On-prem Messaging
 
 The page follows Messaging & Hybrid and provides Overview, Servers & compute,
-Storage, Databases, Readiness, and Collection & details views. It retains every attribute
-of ten optional Exchange infrastructure exports at source-file, record and
+Storage, Databases, Readiness, Collection & details and Health Checker views. It retains
+every attribute of twelve optional Exchange infrastructure exports at source-file, record and
 attribute grain: servers, compute, logical/physical disks, remote access,
-per-server summary, readiness, inventory summary, service health and database
-paths. Missing artifacts produce explicit Not captured markers, not healthy
+per-server summary, readiness, inventory summary, service health, database
+paths, and the CSS-Exchange Health Checker summary and findings. Missing artifacts produce explicit Not captured markers, not healthy
 zeroes. Empty captured sources are distinguished from absent captures. Detail
 views retain collection statuses, source file and record keys.
 
@@ -40,6 +40,16 @@ Country/AD Domain do not filter these global observations; Dataset, Server Name
 and Category slicers apply to attribute views. Databases has its own server
 slicer; database charts and KPIs share that table's filtering context.
 
+The Health Checker view uses the collector's Exchange_OnPrem_HealthChecker_Summary.csv
+and Exchange_OnPrem_HealthChecker_Findings.csv from the same selected batch. Two
+disconnected tables are rebuilt from the infrastructure observations: one row per
+server (run status, Exchange version and build, security update status, CU age when
+Health Checker reports it, vulnerability, error and warning counts) and one row per
+result line. A server whose run did not complete (timeout, not elevated, integrity
+check failed, not run) has a WARNING collection status and no measured counts: it is
+unmeasured, never healthy. An absent summary is an explicit Not captured marker, never
+zero findings. The findings table on the view lists errors and warnings; values that
+can reveal host names, addresses, certificates or domains were masked at collection.
 
 Report and model definitions require a future prepared batch containing the optional
 infrastructure artifacts before populated visual values can be qualified. Structural

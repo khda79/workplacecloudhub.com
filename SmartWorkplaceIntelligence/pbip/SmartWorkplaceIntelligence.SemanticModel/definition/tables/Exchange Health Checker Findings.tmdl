@@ -1,0 +1,103 @@
+/// One row per Health Checker result line of the servers it processed (status OK, Warning, Error or Info). Selected immutable batch only. Health Checker results describe the servers it processed; a server that did not complete is unmeasured, never healthy. Values that can reveal host names, addresses, certificates or domains are masked at collection. Disconnected: geographical and attribute filters do not apply.
+table 'Exchange Health Checker Findings'
+	lineageTag: e053e788-1868-5097-90fc-8608cdecce48
+
+	column 'Server Name'
+		dataType: string
+		lineageTag: faed870e-10a5-5312-b139-65c34f2f89e0
+		summarizeBy: none
+		sourceColumn: Server Name
+
+	column Category
+		dataType: string
+		lineageTag: fd6585ce-4d5a-5786-b03f-f0673b15e9d1
+		summarizeBy: none
+		sourceColumn: Category
+
+	column 'Category Order'
+		dataType: int64
+		isHidden
+		lineageTag: 724b2e93-c096-54da-b8e6-47fd452f27ef
+		summarizeBy: none
+		sourceColumn: Category Order
+
+	column 'Row Number'
+		dataType: int64
+		isHidden
+		lineageTag: 49ac9f8b-d88d-577d-b805-0f57986bf67e
+		summarizeBy: none
+		sourceColumn: Row Number
+
+	column Check
+		dataType: string
+		lineageTag: 0324c822-a51f-5eb9-8b1c-906de375968f
+		summarizeBy: none
+		sourceColumn: Check
+
+	column Item
+		dataType: string
+		lineageTag: ba784479-48b5-597b-a9d6-ad43b61ecf89
+		summarizeBy: none
+		sourceColumn: Item
+
+	column Status
+		dataType: string
+		lineageTag: 29dd3164-1156-56d2-ac77-11ed89c1904d
+		summarizeBy: none
+		sourceColumn: Status
+
+	column Value
+		dataType: string
+		lineageTag: b41a91c8-0522-546e-b7d4-f1d9b15ba6e2
+		summarizeBy: none
+		sourceColumn: Value
+
+	column 'Value Masked'
+		dataType: boolean
+		lineageTag: 3c3b803c-b695-5f67-b65c-c84d62fe81d4
+		summarizeBy: none
+		sourceColumn: Value Masked
+
+	column Recommendation
+		dataType: string
+		lineageTag: aa25f315-6dd1-5dfd-b61d-13ca38e3acff
+		summarizeBy: none
+		sourceColumn: Recommendation
+
+	column 'Loaded Batch ID'
+		dataType: string
+		isHidden
+		lineageTag: 5fe20763-541b-5632-b63c-af39667d7149
+		summarizeBy: none
+		sourceColumn: Loaded Batch ID
+
+	partition 'Exchange Health Checker Findings' = m
+		mode: import
+		source =
+				let
+				    Readers = CreatePreparedReaders(),
+				    Infrastructure = Readers[GetExchangeOnPremInfrastructure](),
+				    Long = Table.SelectRows(Infrastructure, each [Dataset] = "Health Checker findings"),
+				    Availability = Table.SelectRows(Long, each [Attribute] = "Source availability"),
+				    Data = Table.SelectRows(Long, each [Attribute] <> "Source availability"),
+				    // Infrastructure is long-form: rebuild one source row per Source Row Key.
+				    Groups = Table.Group(Data, {"Source Row Key"}, {{"Rows", each _, type table}}),
+				    Field = (rows as table, attribute as text) as text =>
+				        let Values = List.Distinct(Table.Column(Table.SelectRows(rows, each [Attribute] = attribute), "Value"))
+				        in if List.Count(Values) = 1 then Values{0} else if List.IsEmpty(Values) then "" else error "Conflicting Health Checker values",
+				    Number = (rows as table, attribute as text) as nullable number =>
+				        let Values = List.Distinct(Table.Column(Table.SelectRows(rows, each [Attribute] = attribute), "Numeric Value"))
+				        in if List.Count(Values) = 1 then Values{0} else if List.IsEmpty(Values) then null else error "Conflicting Health Checker values",
+				    RowFor = (rows as table) as record =>
+				        [#"Server Name"=Field(rows, "ServerName"), Category=Field(rows, "Category"), #"Category Order"=Number(rows, "CategoryOrder"),
+				         #"Row Number"=Number(rows, "RowNumber"), Check=Field(rows, "Check"), Item=Field(rows, "Item"), Status=Field(rows, "Status"),
+				         Value=Field(rows, "Value"), #"Value Masked"=Text.Lower(Field(rows, "ValueMasked")) = "true",
+				         Recommendation=Field(rows, "Recommendation")],
+				    Records = List.Transform(Groups[Rows], RowFor),
+				    Schema = type table [#"Server Name"=text, Category=text, #"Category Order"=nullable Int64.Type, #"Row Number"=nullable Int64.Type,
+				        Check=text, Item=text, Status=text, Value=text, #"Value Masked"=logical, Recommendation=text],
+				    Sorted = Table.Sort(Table.FromRecords(Records, Schema, MissingField.Error), {{"Server Name", Order.Ascending}, {"Row Number", Order.Ascending}}),
+				    BusinessRows = Table.Buffer(Sorted),
+				    Forced = Table.RowCount(BusinessRows)
+				in
+				    if Forced >= 0 then Readers[Finish](BusinessRows) else error "Health Checker findings unavailable"

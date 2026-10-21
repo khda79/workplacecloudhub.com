@@ -10,7 +10,8 @@
       "bd8e96fb039f108a2e0b",
       "14ca6e4346bf48e88b46",
       "41c8b28d70be3a19f375",
-      "89b24671f2563c708454"
+      "89b24671f2563c708454",
+      "7d3b91b927749e529a3d"
     ],
     "suppressActiveSection": true,
     "suppressData": true
@@ -38,6 +39,9 @@
             "isHidden": true
           },
           "89b24671f2563c708454": {
+            "isHidden": true
+          },
+          "7d3b91b927749e529a3d": {
             "isHidden": true
           }
         }

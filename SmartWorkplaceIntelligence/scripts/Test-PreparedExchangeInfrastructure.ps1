@@ -12,7 +12,8 @@ function Reject([scriptblock]$Action,[string]$Message){$failed=$false;try{& $Act
 try{
     $names=@('Servers_Inventory','Servers_Compute','Servers_LogicalDisks','Servers_DiskDrives',
         'Servers_RemoteAccess','Infrastructure_PerServerSummary','MigrationReadiness_Config',
-        'Servers_Inventory_Summary','Servers_ServiceHealth','MailboxDatabases_Paths')
+        'Servers_Inventory_Summary','Servers_ServiceHealth','MailboxDatabases_Paths',
+        'HealthChecker_Summary','HealthChecker_Findings')
     foreach($name in $names){
         $path=Join-Path $root "Exchange_OnPrem_$name.csv"
         '"TenantKey";"Name";"Detail"','"synthetic";"mail-one";"quoted; delimiter"'|Set-Content -LiteralPath $path

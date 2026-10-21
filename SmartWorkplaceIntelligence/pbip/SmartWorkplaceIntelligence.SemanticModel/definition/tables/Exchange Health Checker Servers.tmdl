@@ -1,0 +1,192 @@
+/// One row per Exchange server in the selected batch's Health Checker summary, or one explicit unknown marker when the summary was not captured. Selected immutable batch only. Health Checker results describe the servers it processed; a server that did not complete is unmeasured, never healthy. Values that can reveal host names, addresses, certificates or domains are masked at collection. Disconnected: geographical and attribute filters do not apply.
+table 'Exchange Health Checker Servers'
+	lineageTag: 4e5a5e6f-06bd-5c1b-9d89-e17d930161a5
+
+	/// Selected immutable batch only. Health Checker results describe the servers it processed; a server that did not complete is unmeasured, never healthy. Values that can reveal host names, addresses, certificates or domains are masked at collection.
+	measure 'Exchange Health Checker Servers Total' = VAR _n=CALCULATE(COUNTROWS('Exchange Health Checker Servers'),KEEPFILTERS('Exchange Health Checker Servers'[Is Server]=TRUE())) RETURN IF(_n>0,_n)
+		formatString: #,0
+		displayFolder: Health Checker
+
+	/// Selected immutable batch only. Health Checker results describe the servers it processed; a server that did not complete is unmeasured, never healthy. Values that can reveal host names, addresses, certificates or domains are masked at collection.
+	measure 'Exchange Health Checker Servers Processed' = IF(NOT ISBLANK([Exchange Health Checker Servers Total]),COALESCE(CALCULATE(COUNTROWS('Exchange Health Checker Servers'),KEEPFILTERS('Exchange Health Checker Servers'[Is Server]=TRUE()),KEEPFILTERS('Exchange Health Checker Servers'[Run Status]="Completed")),0))
+		formatString: #,0
+		displayFolder: Health Checker
+
+	/// Selected immutable batch only. Health Checker results describe the servers it processed; a server that did not complete is unmeasured, never healthy. Values that can reveal host names, addresses, certificates or domains are masked at collection.
+	measure 'Exchange Health Checker Vulnerabilities' = IF([Exchange Health Checker Servers Processed]>0,CALCULATE(SUM('Exchange Health Checker Servers'[Vulnerability Count]),KEEPFILTERS('Exchange Health Checker Servers'[Is Server]=TRUE()),KEEPFILTERS('Exchange Health Checker Servers'[Run Status]="Completed")))
+		formatString: #,0
+		displayFolder: Health Checker
+
+	/// Selected immutable batch only. Health Checker results describe the servers it processed; a server that did not complete is unmeasured, never healthy. Values that can reveal host names, addresses, certificates or domains are masked at collection.
+	measure 'Exchange Health Checker Errors' = IF([Exchange Health Checker Servers Processed]>0,CALCULATE(SUM('Exchange Health Checker Servers'[Error Count]),KEEPFILTERS('Exchange Health Checker Servers'[Is Server]=TRUE()),KEEPFILTERS('Exchange Health Checker Servers'[Run Status]="Completed")))
+		formatString: #,0
+		displayFolder: Health Checker
+
+	/// Selected immutable batch only. Health Checker results describe the servers it processed; a server that did not complete is unmeasured, never healthy. Values that can reveal host names, addresses, certificates or domains are masked at collection.
+	measure 'Exchange Health Checker Warnings' = IF([Exchange Health Checker Servers Processed]>0,CALCULATE(SUM('Exchange Health Checker Servers'[Warning Count]),KEEPFILTERS('Exchange Health Checker Servers'[Is Server]=TRUE()),KEEPFILTERS('Exchange Health Checker Servers'[Run Status]="Completed")))
+		formatString: #,0
+		displayFolder: Health Checker
+
+	/// Selected immutable batch only. Health Checker results describe the servers it processed; a server that did not complete is unmeasured, never healthy. Values that can reveal host names, addresses, certificates or domains are masked at collection.
+	measure 'Exchange Health Checker Status' = VAR _total=[Exchange Health Checker Servers Total] VAR _done=[Exchange Health Checker Servers Processed] RETURN IF(ISBLANK(_total),"Not captured in selected batch | Health Checker results require a run with -IncludeHealthChecker; unknown is not healthy.",FORMAT(_done,"0") & "/" & FORMAT(_total,"0") & " servers processed | Unprocessed servers are unmeasured, not healthy.")
+		formatString: @
+		displayFolder: Health Checker
+
+	column 'Server Name'
+		dataType: string
+		lineageTag: b4feba63-84ad-5173-8193-586360674674
+		summarizeBy: none
+		sourceColumn: Server Name
+
+	column 'Run Status'
+		dataType: string
+		lineageTag: a1537834-7786-5da1-a588-2409d47a55e5
+		summarizeBy: none
+		sourceColumn: Run Status
+
+	column 'Run Message'
+		dataType: string
+		lineageTag: 5bf79d49-356f-5a1d-9730-974ae09277ea
+		summarizeBy: none
+		sourceColumn: Run Message
+
+	column 'Exchange Version'
+		dataType: string
+		lineageTag: edcbf002-707a-5e81-886a-7c606ccf3e3d
+		summarizeBy: none
+		sourceColumn: Exchange Version
+
+	column 'Build Number'
+		dataType: string
+		lineageTag: d40b47c2-dfac-5318-8820-be569133f73c
+		summarizeBy: none
+		sourceColumn: Build Number
+
+	column 'Cumulative Update'
+		dataType: string
+		lineageTag: 239a292e-88aa-548f-9f9f-0784ff182b69
+		summarizeBy: none
+		sourceColumn: Cumulative Update
+
+	column 'Security Update'
+		dataType: string
+		lineageTag: 846e2f58-971a-50c1-a31e-ef3668578a07
+		summarizeBy: none
+		sourceColumn: Security Update
+
+	column 'Security Update Status'
+		dataType: string
+		lineageTag: 65a70d37-8c16-51d4-ad8c-32f09c5254c3
+		summarizeBy: none
+		sourceColumn: Security Update Status
+
+	column 'Cumulative Update Days Old'
+		dataType: int64
+		formatString: #,0
+		lineageTag: 053de3f0-9cad-55e2-9aeb-31ea386baf27
+		summarizeBy: none
+		sourceColumn: Cumulative Update Days Old
+
+	column 'Vulnerability Count'
+		dataType: int64
+		formatString: #,0
+		lineageTag: 653cf1f9-743f-5d31-a84c-6c2d4d5f4df2
+		summarizeBy: none
+		sourceColumn: Vulnerability Count
+
+	column Vulnerabilities
+		dataType: string
+		lineageTag: a4d00b41-e95c-51b8-9475-53f03253a39d
+		summarizeBy: none
+		sourceColumn: Vulnerabilities
+
+	column 'Error Count'
+		dataType: int64
+		formatString: #,0
+		lineageTag: 0dc2914c-465e-5ff9-b405-8ea3d95a744f
+		summarizeBy: none
+		sourceColumn: Error Count
+
+	column 'Warning Count'
+		dataType: int64
+		formatString: #,0
+		lineageTag: 6a4f1ab7-21ca-56ee-8771-4f2732f73ae0
+		summarizeBy: none
+		sourceColumn: Warning Count
+
+	column 'Health Checker Version'
+		dataType: string
+		lineageTag: f4b027c1-1baf-5440-9f67-b3947357b3d5
+		summarizeBy: none
+		sourceColumn: Health Checker Version
+
+	column 'Generation Time'
+		dataType: string
+		lineageTag: 32574f0d-9e5e-58b7-8648-1c326444fb78
+		summarizeBy: none
+		sourceColumn: Generation Time
+
+	column 'Is Server'
+		dataType: boolean
+		isHidden
+		lineageTag: 15f10b67-9477-50e6-8cc6-801e148b407e
+		summarizeBy: none
+		sourceColumn: Is Server
+
+	column 'Source Available'
+		dataType: boolean
+		isHidden
+		lineageTag: e7094ff3-d23b-5cec-9ec4-da7e04aacf6d
+		summarizeBy: none
+		sourceColumn: Source Available
+
+	column 'Loaded Batch ID'
+		dataType: string
+		isHidden
+		lineageTag: e08d9acc-cfb9-594d-a438-c79e69e6f91c
+		summarizeBy: none
+		sourceColumn: Loaded Batch ID
+
+	partition 'Exchange Health Checker Servers' = m
+		mode: import
+		source =
+				let
+				    Readers = CreatePreparedReaders(),
+				    Infrastructure = Readers[GetExchangeOnPremInfrastructure](),
+				    Long = Table.SelectRows(Infrastructure, each [Dataset] = "Health Checker summary"),
+				    Availability = Table.SelectRows(Long, each [Attribute] = "Source availability"),
+				    Data = Table.SelectRows(Long, each [Attribute] <> "Source availability"),
+				    // Infrastructure is long-form: rebuild one source row per Source Row Key.
+				    Groups = Table.Group(Data, {"Source Row Key"}, {{"Rows", each _, type table}}),
+				    Field = (rows as table, attribute as text) as text =>
+				        let Values = List.Distinct(Table.Column(Table.SelectRows(rows, each [Attribute] = attribute), "Value"))
+				        in if List.Count(Values) = 1 then Values{0} else if List.IsEmpty(Values) then "" else error "Conflicting Health Checker values",
+				    Number = (rows as table, attribute as text) as nullable number =>
+				        let Values = List.Distinct(Table.Column(Table.SelectRows(rows, each [Attribute] = attribute), "Numeric Value"))
+				        in if List.Count(Values) = 1 then Values{0} else if List.IsEmpty(Values) then null else error "Conflicting Health Checker values",
+				    RowFor = (rows as table) as record =>
+				        [#"Server Name"=Field(rows, "ServerName"), #"Run Status"=Field(rows, "RunStatus"), #"Run Message"=Field(rows, "RunMessage"),
+				         #"Exchange Version"=Field(rows, "ExchangeVersion"), #"Build Number"=Field(rows, "BuildNumber"),
+				         #"Cumulative Update"=Field(rows, "CumulativeUpdate"), #"Security Update"=Field(rows, "SecurityUpdate"),
+				         #"Security Update Status"=Field(rows, "SecurityUpdateStatus"), #"Cumulative Update Days Old"=Number(rows, "CumulativeUpdateDaysOld"),
+				         #"Vulnerability Count"=Number(rows, "VulnerabilityCount"), Vulnerabilities=Field(rows, "Vulnerabilities"),
+				         #"Error Count"=Number(rows, "ErrorCount"), #"Warning Count"=Number(rows, "WarningCount"),
+				         #"Health Checker Version"=Field(rows, "HealthCheckerVersion"), #"Generation Time"=Field(rows, "GenerationTime"),
+				         #"Is Server"=true, #"Source Available"=true],
+				    State = if Table.IsEmpty(Availability) then "Not captured in selected batch" else Availability{0}[Value],
+				    // Absent or empty capture stays an explicit unknown marker, never zero findings.
+				    Marker = [#"Server Name"="Not recorded", #"Run Status"=State, #"Run Message"="Health Checker summary " & Text.Lower(State),
+				        #"Exchange Version"="", #"Build Number"="", #"Cumulative Update"="", #"Security Update"="", #"Security Update Status"="Unknown",
+				        #"Cumulative Update Days Old"=null, #"Vulnerability Count"=null, Vulnerabilities="", #"Error Count"=null, #"Warning Count"=null,
+				        #"Health Checker Version"="", #"Generation Time"="", #"Is Server"=false,
+				        #"Source Available"=not Table.IsEmpty(Availability) and List.AllTrue(Availability[Source Available])],
+				    Records = if Table.IsEmpty(Groups) then {Marker} else List.Transform(Groups[Rows], RowFor),
+				    Schema = type table [#"Server Name"=text, #"Run Status"=text, #"Run Message"=text, #"Exchange Version"=text,
+				        #"Build Number"=text, #"Cumulative Update"=text, #"Security Update"=text, #"Security Update Status"=text,
+				        #"Cumulative Update Days Old"=nullable Int64.Type, #"Vulnerability Count"=nullable Int64.Type, Vulnerabilities=text,
+				        #"Error Count"=nullable Int64.Type, #"Warning Count"=nullable Int64.Type, #"Health Checker Version"=text,
+				        #"Generation Time"=text, #"Is Server"=logical, #"Source Available"=logical],
+				    BusinessRows = Table.Buffer(Table.FromRecords(Records, Schema, MissingField.Error)),
+				    Forced = Table.RowCount(BusinessRows)
+				in
+				    if Forced >= 0 then Readers[Finish](BusinessRows) else error "Health Checker server observations unavailable"

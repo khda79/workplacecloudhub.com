@@ -79,8 +79,8 @@ class ExchangeInfrastructureMTests(unittest.TestCase):
             values += ['64', 'quoted; value', '']
         return {SOURCE: csv_bytes(columns, [values])}
 
-    def test_missing_group_has_ten_explicit_unknown_rows(self):
-        self.evaluate(fixture(), '''[OK = Table.RowCount(Infrastructure) = 10 and
+    def test_missing_group_has_twelve_explicit_unknown_rows(self):
+        self.evaluate(fixture(), '''[OK = Table.RowCount(Infrastructure) = 12 and
             List.AllTrue(List.Transform(Infrastructure[Source Available], each _ = false)) and
             List.AllTrue(List.Transform(Infrastructure[Numeric Value], each _ = null)) and
             List.Distinct(Infrastructure[Loaded Batch ID]) = {"batch-a"}]''')
@@ -125,7 +125,7 @@ class ExchangeInfrastructureMTests(unittest.TestCase):
 
     def test_explicit_pin_does_not_follow_pointer_movement(self):
         self.evaluate(fixture(self.inventory(), pin='batch-a', change='verify-payload'),
-                      '[OK = Table.RowCount(Infrastructure) = 16 and List.Distinct(Infrastructure[Loaded Batch ID]) = {"batch-a"}]')
+                      '[OK = Table.RowCount(Infrastructure) = 18 and List.Distinct(Infrastructure[Loaded Batch ID]) = {"batch-a"}]')
 
     def test_error_status_in_summary_is_preserved(self):
         name = 'Source-Exchange_OnPrem_Infrastructure_PerServerSummary.csv'

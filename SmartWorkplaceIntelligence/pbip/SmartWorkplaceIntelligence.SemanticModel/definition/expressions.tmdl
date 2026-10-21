@@ -459,7 +459,10 @@ expression CreatePreparedReaders =
 		        [Dataset="Readiness", File="Exchange_OnPrem_MigrationReadiness_Config.csv", Server=null, Required={"TenantKey","Category","ObjectName","Setting","Value","CollectionStatus"}],
 		        [Dataset="Inventory summary", File="Exchange_OnPrem_Servers_Inventory_Summary.csv", Server=null, Required={"TenantKey","RunId","ExchangeServersCount"}],
 		        [Dataset="Service health", File="Exchange_OnPrem_Servers_ServiceHealth.csv", Server="ServerName", Required={"TenantKey","ServerName","ServicesRunning","ServicesNotRunning","CollectionStatus"}],
-		        [Dataset="Database paths", File="Exchange_OnPrem_MailboxDatabases_Paths.csv", Server="ServerName", Required={"TenantKey","ServerName","DatabaseName","EdbFilePath","LogFolderPath","ErrorMessage"}]
+		        [Dataset="Database paths", File="Exchange_OnPrem_MailboxDatabases_Paths.csv", Server="ServerName", Required={"TenantKey","ServerName","DatabaseName","EdbFilePath","LogFolderPath","ErrorMessage"}],
+		        [Dataset="Health Checker summary", File="Exchange_OnPrem_HealthChecker_Summary.csv", Server="ServerName", Required={"TenantKey","ServerName","RunStatus","SecurityUpdateStatus","VulnerabilityCount","ErrorCount","WarningCount"}],
+		        // Findings exist only for completed runs; their Status column is the health result, not a collection status.
+		        [Dataset="Health Checker findings", File="Exchange_OnPrem_HealthChecker_Findings.csv", Server="ServerName", Required={"TenantKey","ServerName","Category","Check","Status","Value"}, Collected="OK"]
 		    },
 		    SelectedManifest = GetPreparedBatchManifest(),
 		    Declared = SelectedManifest[Files] & Record.FieldOrDefault(SelectedManifest, "Artifacts", {}),
@@ -467,9 +470,12 @@ expression CreatePreparedReaders =
 		    Status = (row as record) as text =>
 		        let Recorded = TextValue(Record.FieldOrDefault(row, "CollectionStatus", null)),
 		            ErrorMessage = TextValue(Record.FieldOrDefault(row, "ErrorMessage", null)),
+		            RunStatus = TextValue(Record.FieldOrDefault(row, "RunStatus", null)),
 		            Components = List.Transform({"ComputeCollectionStatus","DiskDriveCollectionStatus","LogicalDiskCollectionStatus"},
 		                each TextValue(Record.FieldOrDefault(row, _, null)))
 		        in if Recorded <> "" then Recorded else if ErrorMessage <> "" then "ERROR"
+		           // A Health Checker server that did not complete is unmeasured, never healthy.
+		           else if RunStatus <> "" then (if RunStatus = "Completed" then "OK" else "WARNING")
 		           else if List.Contains(Components, "ERROR") then "ERROR"
 		           else if List.Contains(Components, "WARNING") then "WARNING"
 		           else if List.AllTrue(List.Transform(Components, each _ = "OK")) then "OK"
@@ -503,7 +509,7 @@ expression CreatePreparedReaders =
 		                    let Row = SourceRows{index}, RowKey = spec[File] & ":" & Text.From(index+1, "en-US"),
 		                        ServerName = if spec[Server] = null then "" else TextValue(Record.Field(Row, spec[Server])),
 		                        Category = TextValue(Record.FieldOrDefault(Row, "Category", spec[Dataset])),
-		                        CollectionState = Status(Row)
+		                        CollectionState = Record.FieldOrDefault(spec, "Collected", Status(Row))
 		                    in List.Transform(Record.FieldNames(Row), (attribute) =>
 		                        let Value = TextValue(Record.Field(Row, attribute)),
 		                            Candidate = Text.Trim(Value),
