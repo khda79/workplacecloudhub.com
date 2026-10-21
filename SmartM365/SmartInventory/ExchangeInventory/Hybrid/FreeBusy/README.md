@@ -22,6 +22,10 @@ on the Exchange on-premises side and on the Exchange Online side, for DAuth and 
    signature) and the runner (same bytes as the repository runner, signed by the collector's
    certificate when the collector is signed), and checks them again just before the start.
 3. The runner, in its own process with a time limit (`FreeBusyCheckerTimeoutMinutes`, default 30):
+   - loads the Exchange Management Shell first (Exchange's RemoteExchange.ps1 and
+     `Connect-ExchangeServer -auto`, cmdlets without prefix): Free/Busy Checker expects it and does not
+     load it. Get-RemoteMailbox, Get-OrganizationRelationship and Test-OAuthConnectivity are checked after
+     loading and again after the Exchange Online connection; otherwise the status is `ExchangeShellNotLoaded`;
    - checks the ActiveDirectory module (Windows feature; when missing the status is
      `ActiveDirectoryModuleMissing` with the command an administrator runs:
      `Install-WindowsFeature RSAT-AD-PowerShell`);
@@ -51,7 +55,7 @@ on the Exchange on-premises side and on the Exchange Online side, for DAuth and 
 
 `RunStatus` is `Completed`, `EXONotConnected`, `EXONotAuthorized` (some Exchange Online checks not
 available to the app; for example `Test-EOOAuthConnectivity` needs a role such as Mail Recipients),
-`ModuleInstallFailed`, `ActiveDirectoryModuleMissing`, `NotElevated`, `IntegrityFailed`,
+`ModuleInstallFailed`, `ActiveDirectoryModuleMissing`, `ExchangeShellNotLoaded`, `NotElevated`, `IntegrityFailed`,
 `UnsafeWorkFolder`, `ConfigurationInvalid`, `Timeout`, `LaunchFailed`, `RunnerFailed`, `NoOutput` or
 `ParseFailed`. Anything other than `Completed` is a warning; the CSVs are always published. A test
 that the Exchange Online service itself fails (for example `Test-EOOrganizationRelationship`

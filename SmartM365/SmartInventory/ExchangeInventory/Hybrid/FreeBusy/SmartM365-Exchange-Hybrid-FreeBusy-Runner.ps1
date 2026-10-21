@@ -7,6 +7,8 @@
     own Windows PowerShell process so a hung run can be stopped and Free/Busy Checker's own exit calls
     end this process only. It:
     - checks the ActiveDirectory module (Windows feature, never installed here);
+    - loads the Exchange Management Shell (local Exchange server session, cmdlets without prefix),
+      which Free/Busy Checker expects and does not load itself;
     - makes ExchangeOnlineManagement available (installed for the current user from PSGallery when missing);
     - opens the Exchange Online session with prefix EO using the tenant app and its certificate only,
       and proves it is that app-only certificate session; it never signs in interactively;
@@ -16,7 +18,7 @@
     Progress and results are written to the status file passed by the collector.
 
 .VERSION
-1.0.2
+1.0.3
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
 #>
@@ -31,7 +33,9 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-$RunnerVersion = '1.0.2'
+$RunnerVersion = '1.0.3'
+# Exchange on-premises cmdlets Free/Busy Checker needs from the Exchange Management Shell.
+$FreeBusyExchangeShellCmdlets = @('Get-RemoteMailbox', 'Get-OrganizationRelationship', 'Test-OAuthConnectivity')
 # Exchange Online cmdlets called by Free/Busy Checker with the EO prefix.
 $FreeBusyExchangeOnlineCmdlets = @('Get-EOMailbox', 'Get-EOOrganizationRelationship', 'Get-EOFederatedOrganizationIdentifier', 'Get-EOSharingPolicy', 'Test-EOOrganizationRelationship', 'Get-EOIntraOrganizationConnector', 'Get-EOIntraOrganizationConfiguration', 'Get-EOOnPremisesOrganization', 'Get-EOAuthServer', 'Test-EOOAuthConnectivity')
 
@@ -113,6 +117,36 @@ function Install-FreeBusyExchangeOnlineModule {
     return $module
 }
 
+function Import-FreeBusyExchangeShell {
+    param([Parameter(Mandatory)][string[]]$RequiredCmdlets)
+
+    # Free/Busy Checker calls the Exchange on-premises cmdlets directly and never loads the shell itself.
+    # RemoteExchange.ps1 and Connect-ExchangeServer are Exchange's own supported loader (local server
+    # session through IIS); they are written for default settings, kept to this function scope.
+    Set-StrictMode -Off
+    $ErrorActionPreference = 'Continue'
+    if (-not (Get-Command -Name $RequiredCmdlets[0] -ErrorAction SilentlyContinue)) {
+        if ([string]::IsNullOrWhiteSpace($env:ExchangeInstallPath)) {
+            return [pscustomobject]@{ Loaded = $false; Message = 'ExchangeInstallPath is not set: the Exchange Management Tools are not installed on this server.' }
+        }
+        $remoteExchange = Join-Path $env:ExchangeInstallPath 'bin\RemoteExchange.ps1'
+        if (-not (Test-Path -LiteralPath $remoteExchange -PathType Leaf)) {
+            return [pscustomobject]@{ Loaded = $false; Message = "RemoteExchange.ps1 was not found: $remoteExchange" }
+        }
+        try {
+            . $remoteExchange
+            Connect-ExchangeServer -auto -ClientApplication:ManagementShell
+        }
+        catch {
+            return [pscustomobject]@{ Loaded = $false; Message = "The Exchange Management Shell could not be loaded: $($_.Exception.Message)" }
+        }
+    }
+    $missing = @($RequiredCmdlets | Where-Object { -not (Get-Command -Name $_ -ErrorAction SilentlyContinue) })
+    if ($missing.Count -gt 0) {
+        return [pscustomobject]@{ Loaded = $false; Message = 'Exchange Management Shell cmdlets are unavailable: ' + ($missing -join ', ') }
+    }
+    return [pscustomobject]@{ Loaded = $true; Message = $null }
+}
 function Invoke-FreeBusyCheckerScript {
     param([Parameter(Mandatory)][string]$Path)
 
@@ -159,6 +193,16 @@ try {
         return
     }
 
+    # On-premises cmdlets first, without prefix; the Exchange Online session that follows uses the EO prefix.
+    $status.Stage = 'ExchangeShell'
+    Save-FreeBusyRunnerStatus
+    $shell = Import-FreeBusyExchangeShell -RequiredCmdlets $FreeBusyExchangeShellCmdlets
+    if (-not $shell.Loaded) {
+        $status.RunStatus = 'ExchangeShellNotLoaded'
+        $status.Message = $shell.Message
+        return
+    }
+
     $status.Stage = 'ExchangeOnlineModule'
     Save-FreeBusyRunnerStatus
     try {
@@ -199,6 +243,14 @@ try {
     else {
         $status.ExchangeOnline = 'NotConnected'
         $status.ExchangeOnlineMessage = $connection.Message
+    }
+
+    # The Exchange Online session must not hide the on-premises cmdlets.
+    $hidden = @($FreeBusyExchangeShellCmdlets | Where-Object { -not (Get-Command -Name $_ -ErrorAction SilentlyContinue) })
+    if ($hidden.Count -gt 0) {
+        $status.RunStatus = 'ExchangeShellNotLoaded'
+        $status.Message = 'Exchange Management Shell cmdlets are unavailable after the Exchange Online connection: ' + ($hidden -join ', ')
+        return
     }
 
     # Checked again immediately before the start, so the file that runs is the one just verified.

@@ -9,14 +9,15 @@ Checker is never executed; Exchange Online and module installation are mocked. C
 - vendored file integrity (valid, SHA256 mismatch, non-Microsoft signer) and report structure still parsed;
 - text-only HTML parsing: sections, checks, statuses, masking, command cells and headings skipped;
 - NotAuthorized checks, summary rows and run status for every outcome;
-- runner: no interactive sign-in, app-only certificate session proven, CurrentUser module installation,
+- runner: Exchange Management Shell loaded first (ExchangeShellNotLoaded otherwise), no interactive sign-in,
+  app-only certificate session proven, CurrentUser module installation,
   Free/Busy Checker started with -SkipVersionCheck only, nothing deserialized;
 - child process: environment hand-off, time limit with process tree stop;
 - Free/Busy Checker run without the runner's strict mode and stop-on-error, which the runner keeps;
 - report: title and status in the mail banner, runs that did not happen never shown as healthy.
 
 .VERSION
-1.0.2
+1.0.3
 #>
 [CmdletBinding()]
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter','',Justification='Mocks keep the parameters of the commands they replace.')]
@@ -243,6 +244,48 @@ try {
     Assert-FreeBusy ($directExit -eq 1 -and $directRun -match 'RUN-FAILED') 'The synthetic checker fails when called directly under the runner settings (the call before runner 1.0.2).'
     Assert-FreeBusy ($strictExit -eq 0 -and $strictRun -match 'FAKE-CHECKER-DONE SkipVersionCheck=True' -and $strictRun -match 'Synthetic non-terminating service error') "Free/Busy Checker runs to its end without strict mode and keeps its non-terminating errors: $($strictRun.Trim())"
     Assert-FreeBusy ($strictRun -match 'STRICT-STILL-ON' -and $strictRun -match 'STOP-STILL-ON') 'The runner keeps strict mode and stop-on-error for its own code.'
+
+    # Exchange Management Shell: Free/Busy Checker does not load it, the runner does, before Exchange Online.
+    $shellFunction = $runnerAst.Find({ param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Import-FreeBusyExchangeShell' }, $true)
+    $shellCall = $runnerAst.Find({ param($n) $n -is [Management.Automation.Language.CommandAst] -and $n.GetCommandName() -eq 'Import-FreeBusyExchangeShell' }, $true)
+    $exoCall = $runnerAst.Find({ param($n) $n -is [Management.Automation.Language.CommandAst] -and $n.GetCommandName() -eq 'Connect-FreeBusyExchangeOnline' }, $true)
+    $checkerCall = $runnerAst.Find({ param($n) $n -is [Management.Automation.Language.CommandAst] -and $n.GetCommandName() -eq 'Invoke-FreeBusyCheckerScript' }, $true)
+    Assert-FreeBusy ($null -ne $shellFunction -and $null -ne $shellCall -and $shellCall.Extent.StartOffset -lt $exoCall.Extent.StartOffset -and $exoCall.Extent.StartOffset -lt $checkerCall.Extent.StartOffset) 'The runner loads the Exchange Management Shell before Exchange Online and Free/Busy Checker.'
+    Assert-FreeBusy ($runnerAst.Extent.Text -match "\`$FreeBusyExchangeShellCmdlets = @\('Get-RemoteMailbox', 'Get-OrganizationRelationship', 'Test-OAuthConnectivity'\)" -and
+        @([regex]::Matches($runnerAst.Extent.Text, "RunStatus = 'ExchangeShellNotLoaded'")).Count -eq 2) 'The on-premises cmdlets are checked after loading and again after the Exchange Online connection.'
+    $fakeExchange = Join-Path $tempRoot 'FakeExchange'
+    New-Item -ItemType Directory -Path (Join-Path $fakeExchange 'bin') -Force | Out-Null
+    # Written for default settings like the real loader: it reads a variable it never sets.
+    [IO.File]::WriteAllText((Join-Path $fakeExchange 'bin\RemoteExchange.ps1'), (@(
+        'if ($exchangeLoaderNotSet) { ''unexpected'' }',
+        'function global:Connect-ExchangeServer { param([switch]$auto, $ClientApplication) foreach ($name in @(''Get-RemoteMailbox'', ''Get-OrganizationRelationship'', ''Test-OAuthConnectivity'')) { Set-Item -Path "function:global:$name" -Value { ''on-premises'' } } }'
+    ) -join "`r`n"), [Text.UTF8Encoding]::new($false))
+    $shellHost = Join-Path $tempRoot 'ShellHost.ps1'
+    [IO.File]::WriteAllText($shellHost, (@(
+        'param([string]$InstallPath)',
+        'Set-StrictMode -Version Latest',
+        '$ErrorActionPreference = ''Stop''',
+        $shellFunction.Extent.Text,
+        'if ($InstallPath) { $env:ExchangeInstallPath = $InstallPath } else { Remove-Item Env:\ExchangeInstallPath -ErrorAction SilentlyContinue }',
+        '$result = Import-FreeBusyExchangeShell -RequiredCmdlets @(''Get-RemoteMailbox'', ''Get-OrganizationRelationship'', ''Test-OAuthConnectivity'')',
+        '"LOADED=$($result.Loaded)|$($result.Message)"',
+        'if (Get-Command Get-RemoteMailbox -ErrorAction SilentlyContinue) { ''VISIBLE-TO-RUNNER'' }',
+        'try { $null = $notSetAfterShell; ''STRICT-OFF-AFTER'' } catch { ''STRICT-STILL-ON'' }'
+    ) -join "`r`n"), [Text.UTF8Encoding]::new($false))
+    $ErrorActionPreference = 'Continue'
+    $loadedRun = (& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $shellHost -InstallPath $fakeExchange 2>&1 | Out-String)
+    $noToolsRun = (& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $shellHost 2>&1 | Out-String)
+    $emptyExchange = Join-Path $tempRoot 'EmptyExchange'
+    New-Item -ItemType Directory -Path $emptyExchange -Force | Out-Null
+    $noLoaderRun = (& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $shellHost -InstallPath $emptyExchange 2>&1 | Out-String)
+    $ErrorActionPreference = 'Stop'
+    Assert-FreeBusy ($loadedRun -match 'LOADED=True\|' -and $loadedRun -match 'VISIBLE-TO-RUNNER' -and $loadedRun -match 'STRICT-STILL-ON') "The shell loader runs under the runner settings and its cmdlets are visible afterwards: $($loadedRun.Trim())"
+    Assert-FreeBusy ($noToolsRun -match 'LOADED=False\|ExchangeInstallPath is not set') 'Without the Exchange Management Tools the shell is reported not loaded.'
+    Assert-FreeBusy ($noLoaderRun -match 'LOADED=False\|RemoteExchange\.ps1 was not found') 'Without RemoteExchange.ps1 the shell is reported not loaded.'
+    $shellStatus = [pscustomobject]@{ Stage = 'ExchangeShell'; RunStatus = 'ExchangeShellNotLoaded'; Message = 'm'; ExchangeOnline = 'NotConnected'; ExchangeOnlineMessage = $null; NotAuthorizedCmdlets = @('Test-EOOAuthConnectivity') }
+    Assert-FreeBusy ((& $resolve ([pscustomobject]@{ Status = 'Exited' }) $shellStatus $false $false) -eq 'ExchangeShellNotLoaded') 'A shell that did not load is ExchangeShellNotLoaded, not a generic runner failure.'
+    $shellSummary = @(& $module { param($r) New-FreeBusySummaryRow -Findings @() -RunStatus 'ExchangeShellNotLoaded' -RunMessage 'm' -RunnerStatus $r -DurationSeconds 5 -ServerName 'EXSRV01' -FreeBusyCheckerVersion 'v' -GenerationTime 't' } $shellStatus)
+    Assert-FreeBusy (@($shellSummary | Where-Object { $_.SideStatus -ne 'NotRun' -or $_.MissingRoles }).Count -eq 0) 'A shell that did not load leaves every side NotRun.'
     $installs = @($runnerAst.FindAll({ param($n) $n -is [Management.Automation.Language.CommandAst] -and $n.GetCommandName() -in @('Install-Module', 'Install-PackageProvider') }, $true))
     Assert-FreeBusy ($installs.Count -eq 2 -and @($installs | Where-Object { $_.Extent.Text -match '-Scope CurrentUser' -and $_.Extent.Text -match '-Force' }).Count -eq 2) 'Installations are CurrentUser and without prompt.'
     Assert-FreeBusy ($runnerAst.Extent.Text -match "\[Parameter\(Mandatory\)\]\[string\]\`$FreeBusyCheckerPath" -and $runnerAst.Extent.Text -notmatch 'param\([^)]*AppId') 'App identifiers do not travel on the runner command line.'
