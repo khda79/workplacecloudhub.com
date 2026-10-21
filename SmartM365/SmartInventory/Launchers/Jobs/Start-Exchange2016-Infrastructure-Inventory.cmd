@@ -6,5 +6,5 @@ rem and the template Arguments. Extra options are appended. Use LaunchersByOrche
 rem production run through the elected server.
 
 set "SMARTINVENTORY_ROOT=%~dp0..\..\"
-call "%SMARTINVENTORY_ROOT%Launchers\OnPremises\Start-SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory.cmd" -IncludeServicesHealth -IncludeMailboxDatabasePaths %*
+call "%SMARTINVENTORY_ROOT%Launchers\OnPremises\Start-SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory.cmd" -IncludeServicesHealth -IncludeMailboxDatabasePaths -IncludeHealthChecker %*
 exit /b %ERRORLEVEL%

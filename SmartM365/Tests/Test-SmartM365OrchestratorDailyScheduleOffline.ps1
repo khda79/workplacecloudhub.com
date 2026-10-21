@@ -3,7 +3,7 @@
 .SYNOPSIS
 Validate the single daily inventory cycle and weekly exceptions offline.
 .VERSION
-1.2.3
+1.2.4
 .NOTES
 Reads the repository template and an optional additional local manifest.
 No tenant initialization, collectors, scheduling, authentication or publication.
@@ -39,7 +39,7 @@ $daily = @{
         'Mailboxes-PermissionsByUser-Report' = '08:30'
         'Exchange2016-Local-Mailboxes-Inventory' = '00:35'
         'Exchange2016-ProxyAddresses-Check' = '00:00'
-        'Exchange2016-Infrastructure-Inventory' = '00:00'
+        'Exchange2016-Infrastructure-Inventory' = '03:15'
         'M365-Usage-Inventory' = '04:45'
         'Intune-DeviceSystem-Inventory' = '01:15'
         'Intune-Devices-BIOS-Inventory' = '00:55'
@@ -80,6 +80,7 @@ $estimates = @{
         'AD-Inventory' = 120
         'Exchange2016-Local-Mailboxes-Inventory' = 150
         'Exchange2016-ProxyAddresses-Check' = 30
+        'Exchange2016-Infrastructure-Inventory' = 90
         'M365-WorkplaceScope-Inventory' = 360
         'Intune-Devices-Compliance-Inventory' = 15
         'Intune-Configurations-Inventory' = 30
@@ -183,12 +184,17 @@ foreach ($path in $paths) {
     $fast = @($document.Jobs | Where-Object Name -eq 'EXO-Mailboxes-Inventory-Fast')[0]
     Assert-True ($full.ConcurrencyKey -eq 'EXOMailboxes' -and $fast.ConcurrencyKey -eq $full.ConcurrencyKey) 'Concurrent full and fast EXO acquisition can launch.'
     Assert-True ([string]::IsNullOrWhiteSpace([string]$fast.Arguments)) 'Daily EXO Fast is restricted or collects live stats.'
-    # The prepared artifact contract expects the service health and mailbox database path CSVs.
+    # The prepared artifact contract expects the service health, mailbox database path and Health Checker CSVs.
     $exchangeInfrastructure = @($document.Jobs | Where-Object Name -eq 'Exchange2016-Infrastructure-Inventory')[0]
     $infrastructureSwitches = @(([string]$exchangeInfrastructure.Arguments) -split '\s+' | Where-Object { $_ })
-    foreach ($switch in @('-IncludeServicesHealth', '-IncludeMailboxDatabasePaths')) {
+    foreach ($switch in @('-IncludeServicesHealth', '-IncludeMailboxDatabasePaths', '-IncludeHealthChecker')) {
         Assert-True ($infrastructureSwitches -contains $switch) "Exchange infrastructure no longer collects the prepared artifact enabled by $switch."
     }
+    # Health Checker's default total budget (1320 minutes) plus the rest of the inventory must fit the job timeout.
+    Assert-True ([int]$exchangeInfrastructure.TimeoutMinutes -ge 1380) 'Exchange infrastructure timeout no longer covers the Health Checker budget.'
+    # Same concurrency key as the mailbox chain: it starts after the chain's estimated end.
+    $chainEnd = [TimeSpan]::Parse('00:35').Add([TimeSpan]::FromMinutes(150))
+    Assert-True ([TimeSpan]::Parse([string]@($exchangeInfrastructure.Schedule.Times)[0]) -ge $chainEnd) 'Exchange infrastructure (Health Checker) starts before the on-premises mailbox chain is expected to end.'
     # Endpoint security exports get the same 1200-second budget as the manual launcher.
     $endpointSecurity = @($document.Jobs | Where-Object Name -eq 'Intune-EndpointSecurityHealth-Inventory')[0]
     $endpointSecurityArguments = @(([string]$endpointSecurity.Arguments) -split '\s+' | Where-Object { $_ })

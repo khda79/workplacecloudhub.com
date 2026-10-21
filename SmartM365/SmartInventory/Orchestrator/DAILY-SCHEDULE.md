@@ -25,7 +25,7 @@ editing the template.
 | Mailboxes-PermissionsByUser-Report | Daily 08:30 |
 | Exchange2016-Local-Mailboxes-Inventory | Daily 00:35, after a fresh ProxyAddresses check |
 | Exchange2016-ProxyAddresses-Check | Daily 00:00 |
-| Exchange2016-Infrastructure-Inventory | Daily 00:00, with service health and mailbox database paths |
+| Exchange2016-Infrastructure-Inventory | Daily 03:15, after the on-premises mailbox chain (same concurrency key), with service health, mailbox database paths and CSS-Exchange Health Checker |
 | M365-Usage-Inventory | Daily 04:45 |
 | Intune-DeviceSystem-Inventory | Daily 01:15 |
 | Intune-Devices-BIOS-Inventory | Daily 00:55 |
@@ -172,6 +172,7 @@ In particular, AD's observed duration does not imply error-free domain coverage.
 | AD-Inventory | 120 |
 | Exchange2016-Local-Mailboxes-Inventory | 150 |
 | Exchange2016-ProxyAddresses-Check | 30 |
+| Exchange2016-Infrastructure-Inventory | 90 |
 | M365-WorkplaceScope-Inventory | 360 |
 | Intune-Configurations-Inventory | 30 |
 | Intune-ManagedApps-Inventory | 60 |
