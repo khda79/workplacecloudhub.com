@@ -84,8 +84,10 @@ Messages never contain a domain name, an address or a secret.
 
 ### Scheduled task installation
 
-Run once from the collector server, elevated, with an account that is local administrator of the
-target servers. Network from the collector server: RPC 135 and dynamic RPC ports (DCOM), SMB 445.
+Run once from the collector server, elevated, in Windows PowerShell 5.1, with an account that is
+local administrator of the target servers. Started from PowerShell 7, the installer restarts itself
+in Windows PowerShell 5.1: there, the ScheduledTasks module would run through Windows compatibility
+and could not use the CIM session. The launcher always uses Windows PowerShell 5.1. Network from the collector server: RPC 135 and dynamic RPC ports (DCOM), SMB 445.
 
 ```powershell
 .\Install-SmartM365-Exchange-HealthCheckerScheduledTask.ps1 -ComputerName 'EXSRV01' -ServiceAccount 'CONTOSO\svc-exchange-hc' -StartNow

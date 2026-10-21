@@ -25,7 +25,7 @@ Checker is never executed: process runs use a synthetic stand-in script. Covers:
 - option disabled: no Health Checker call outside -IncludeHealthChecker and no report section.
 
 .VERSION
-1.3.0
+1.4.0
 #>
 [CmdletBinding()]
 param([string]$SourceRoot)
@@ -718,6 +718,24 @@ Copy-Item -LiteralPath $env:SMARTM365_FAKE_HC_FIXTURE -Destination (Join-Path $O
     $collectorOption = $ast.Find({ param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'New-HealthCheckerDcomSessionOption' }, $true).Extent.Text
     $installerOption = $installerAst.Find({ param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'New-HealthCheckerDcomSessionOption' }, $true).Extent.Text
     Assert-HealthChecker ($collectorOption -ceq $installerOption) 'The collector and the installer use the same CIM options.'
+
+    # Windows PowerShell 5.1 only: under PowerShell 7 the ScheduledTasks module runs through Windows
+    # compatibility and receives CIM sessions deserialized.
+    $launcherText = [IO.File]::ReadAllText((Join-Path $SourceRoot 'SmartInventory/Launchers/OnPremises/Start-SmartM365-Exchange-HealthChecker-ScheduledTask-Installer.cmd'))
+    Assert-HealthChecker ($launcherText -match '"%WINDOWS_POWERSHELL%" -NoProfile -ExecutionPolicy Bypass -File "%INSTALLER_PATH%" -Interactive' -and $launcherText -match 'WindowsPowerShell\\v1\.0\\powershell\.exe' -and $launcherText -notmatch '(?i)pwsh') 'The installer launcher starts Windows PowerShell 5.1, never PowerShell 7.'
+    Assert-HealthChecker ($installerText -match "\`$isWindowsPowerShell = \`$PSVersionTable\.PSEdition -eq 'Desktop'" -and $installerText -match 'if \(-not \$isAdministrator -or -not \$isWindowsPowerShell\) \{' -and $installerText -match 'FilePath\s+= \$windowsPowerShellPath') 'The installer restarts itself in Windows PowerShell 5.1 when started from PowerShell 7.'
+    $relaunchIf = $installerAst.Find({ param($n) $n -is [Management.Automation.Language.IfStatementAst] -and $n.Clauses[0].Item1.Extent.Text -eq '-not $isAdministrator -or -not $isWindowsPowerShell' }, $true)
+    $firstCimUse = @($installerAst.FindAll({ param($n) $n -is [Management.Automation.Language.CommandAst] -and $n.GetCommandName() -in @('New-HealthCheckerCimSession', 'Register-ScheduledTask', 'Get-Credential') }, $true) | Sort-Object { $_.Extent.StartOffset })[0]
+    Assert-HealthChecker ($null -ne $relaunchIf -and $relaunchIf.Extent.EndOffset -lt $firstCimUse.Extent.StartOffset -and $relaunchIf.Clauses[0].Item2.Extent.Text -match 'exit \$smartM365RunGuard\.ExitCode') 'The restart happens before any credential or CIM use and ends the PowerShell 7 instance.'
+    $shellCheck = $ast.Find({ param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Test-ExchangeShell' }, $true)
+    $shellCall = @($ast.FindAll({ param($n) $n -is [Management.Automation.Language.CommandAst] -and $n.GetCommandName() -eq 'Test-ExchangeShell' }, $true))
+    Assert-HealthChecker ($shellCheck.Extent.Text -match "PSEdition -ne 'Desktop'" -and $shellCall.Count -eq 1 -and $shellCall[0].Extent.StartOffset -lt $hcCalls[0].Extent.StartOffset) 'The collector refuses PowerShell 7 before Health Checker can start.'
+    if ($PSVersionTable.PSEdition -eq 'Core') {
+        $shellModule = New-Module -ScriptBlock ([scriptblock]::Create($shellCheck.Extent.Text))
+        $refusedCore = $false
+        try { & $shellModule { Test-ExchangeShell } } catch { $refusedCore = $_.Exception.Message -match 'require Windows PowerShell 5\.1' }
+        Assert-HealthChecker $refusedCore 'Run under PowerShell 7, the collector stops with the Windows PowerShell 5.1 requirement.'
+    }
 
     # Server names: powershell -File passes 'A,B' as one string.
     $listFunction = $installerAst.Find({ param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'ConvertTo-HealthCheckerComputerList' }, $true).Extent.Text
