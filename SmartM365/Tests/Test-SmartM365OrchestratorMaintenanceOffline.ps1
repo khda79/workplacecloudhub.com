@@ -3,7 +3,7 @@
 .SYNOPSIS
 Offline maintenance, scheduler admission and GUI contract tests using synthetic shared data.
 .VERSION
-1.0.3
+1.0.4
 #>
 [CmdletBinding()]
 param([string]$Tenant = 'test')
@@ -102,6 +102,8 @@ try {
         function script:Save-OrchestratorState { $script:Saved++ }
         function script:Test-JobSelected {param($JobName) $true}
         function script:Test-JobAllowedOnServer {param($Job,[switch]$AllowManual) $true}
+        # Launch prerequisites have their own synthetic suite; this one assumes they are met.
+        function script:Test-OrchestratorLaunchPrerequisiteGate { param($Job,$Occurrence,$Reason,$Attempt,[switch]$IsForced,$PipelineInfo,$Now) $true }
         function script:Start-InventoryJob {param($Job,$Occurrence,$Attempt,$ClaimPath,$ConcurrencyLeasePath,$ConcurrencyLeaseId,$PipelineBatchId,$PipelineStatusPath) $script:Starts++}
         $s=Get-JobState Synthetic; $s.LastStatus='Failed';$s.LastScheduledOccurrence=$Cutoff.AddDays(-3).ToString('o');$s.Running=@{Pid=999999};$s.PendingRetry=@{ScheduledOccurrence=$Cutoff.AddDays(-2).ToString('o');Attempt=1;NotBefore=$Cutoff.AddDays(-1).ToString('o')}
         $m=Get-JobState ManualRetry;$m.PendingRetry=@{PipelineBatchId='synthetic-batch';ScheduledOccurrence=$Cutoff.AddDays(-1).ToString('o');Attempt=1;NotBefore=$Cutoff.AddDays(-1).ToString('o')}
@@ -148,6 +150,8 @@ try {
         function script:Write-DependencyWaitLog {param($JobName,$BlockingDependencies,$Now)}
         function script:Enter-SmartM365OrchestratorConcurrencyLease {param($LeasesRootPath,$ConcurrencyKey,$JobName,$Occurrence,$OwnerServer,$SafeMinutes,$HeartbeatRootPath,$HeartbeatStaleMinutes) $script:LeaseCalls++; @{Acquired=$true;LeasePath='synthetic';Lease=@{LeaseId='synthetic'}}}
         function script:Get-DueOccurrence {param($Job,$LastOccurrence,$Now) $Now}
+        # Launch prerequisites have their own synthetic suite; this one assumes they are met.
+        function script:Test-OrchestratorLaunchPrerequisiteGate { param($Job,$Occurrence,$Reason,$Attempt,[switch]$IsForced,$PipelineInfo,$Now) $true }
         function script:Start-InventoryJob {param($Job,$Occurrence,$Attempt,$ClaimPath,$ConcurrencyLeasePath,$ConcurrencyLeaseId,$PipelineBatchId,$PipelineStatusPath) $script:Starts++;$script:LastBatch=$PipelineBatchId;$script:State.Jobs[$Job.Name].PendingRetry=$null; if($script:ThrowStart){throw 'Synthetic launch failure'} }
         $script:ThrowStart=$false
         $s=Get-JobState ManualRetry; $s.PendingRetry=$null

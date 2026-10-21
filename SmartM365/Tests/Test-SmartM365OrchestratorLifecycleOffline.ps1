@@ -2,7 +2,7 @@
 .SYNOPSIS
 Synthetic lifecycle regression tests; no orchestrator entry point is executed.
 .VERSION
-1.0.4
+1.0.5
 #>
 [CmdletBinding()]
 param([string]$SourceRoot, [string]$ResultPath)
@@ -95,6 +95,8 @@ $results = New-Object 'System.Collections.Generic.List[object]'
     function script:Test-JobAllowedOnServer { param($Job,[switch]$AllowManual) return $true }
     function script:Get-DueOccurrence { param($Job,$LastOccurrence,$Now) return $null }
     function script:Clear-DependencyWaitLog { param($JobName) }
+    # Launch prerequisites have their own synthetic suite; this one assumes they are met.
+    function script:Test-OrchestratorLaunchPrerequisiteGate { param($Job,$Occurrence,$Reason,$Attempt,[switch]$IsForced,$PipelineInfo,$Now) $true }
     function script:Start-InventoryJob { param($Job,$Occurrence,$Attempt,$ClaimPath,$ConcurrencyLeasePath,$ConcurrencyLeaseId) $script:Launched++ }
     function script:Test-OrchestratorStatePersistenceReady { return $script:StatePersistenceHealthy }
     function script:Test-OrchestratorAuthenticodeFile { throw 'Unexpected launch preparation.' }

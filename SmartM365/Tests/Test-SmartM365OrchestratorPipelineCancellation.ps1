@@ -3,7 +3,7 @@
 .SYNOPSIS
 Offline cancellation tests. Synthetic temporary shared state; no collectors or tenant calls.
 .VERSION
-1.0.1
+1.0.2
 #>
 [CmdletBinding()]
 param()
@@ -185,6 +185,8 @@ try {
             function script:Get-SmartM365OrchestratorMaintenanceState { param($SharedDataFolderPath) $script:MaintenanceControl }
             function script:Test-SmartM365OrchestratorMaintenanceLaunch { param($State,$Origin,$Occurrence) $true }
             function script:Enter-SmartM365OrchestratorConcurrencyLease { param($LeasesRootPath,$ConcurrencyKey,$JobName,$Occurrence,$OwnerServer,$SafeMinutes,$HeartbeatRootPath,$HeartbeatStaleMinutes) $script:Leases++; throw 'Unexpected lease acquisition for cancelled work.' }
+            # Launch prerequisites have their own synthetic suite; this one assumes they are met.
+            function script:Test-OrchestratorLaunchPrerequisiteGate { param($Job,$Occurrence,$Reason,$Attempt,[switch]$IsForced,$PipelineInfo,$Now) $true }
             function script:Start-InventoryJob { param($Job,$Occurrence,$Attempt,$ClaimPath,$ConcurrencyLeasePath,$ConcurrencyLeaseId,$PipelineBatchId,$PipelineStatusPath) $script:Starts++; throw 'Unexpected collector launch.' }
             Invoke-LaunchPhase (Get-Date)
             $script:PipelinePending = @{}
