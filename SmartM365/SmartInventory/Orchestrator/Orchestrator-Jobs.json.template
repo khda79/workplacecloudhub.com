@@ -575,7 +575,7 @@
     {
       "Name": "Exchange2016-Infrastructure-Inventory",
       "ScriptPath": "ExchangeInventory\\OnPremises\\ServersAndStorage\\SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory.ps1",
-      "Arguments": "",
+      "Arguments": "-IncludeServicesHealth -IncludeMailboxDatabasePaths",
       "Enabled": true,
       "Group": "Exchange2016",
       "DependsOn": [],

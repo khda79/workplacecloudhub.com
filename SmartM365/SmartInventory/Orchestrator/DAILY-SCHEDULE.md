@@ -25,7 +25,7 @@ editing the template.
 | Mailboxes-PermissionsByUser-Report | Daily 08:30 |
 | Exchange2016-Local-Mailboxes-Inventory | Daily 00:35 |
 | Exchange2016-ProxyAddresses-Check | Daily 03:15 |
-| Exchange2016-Infrastructure-Inventory | Daily 00:00 |
+| Exchange2016-Infrastructure-Inventory | Daily 00:00, with service health and mailbox database paths |
 | M365-Usage-Inventory | Daily 04:45 |
 | Intune-DeviceSystem-Inventory | Daily 01:15 |
 | Intune-Devices-BIOS-Inventory | Daily 00:55 |

@@ -3,7 +3,7 @@
 .SYNOPSIS
 Validate the single daily inventory cycle and weekly exceptions offline.
 .VERSION
-1.2.0
+1.2.1
 .NOTES
 Reads the repository template and an optional additional local manifest.
 No tenant initialization, collectors, scheduling, authentication or publication.
@@ -182,6 +182,12 @@ foreach ($path in $paths) {
     $fast = @($document.Jobs | Where-Object Name -eq 'EXO-Mailboxes-Inventory-Fast')[0]
     Assert-True ($full.ConcurrencyKey -eq 'EXOMailboxes' -and $fast.ConcurrencyKey -eq $full.ConcurrencyKey) 'Concurrent full and fast EXO acquisition can launch.'
     Assert-True ([string]::IsNullOrWhiteSpace([string]$fast.Arguments)) 'Daily EXO Fast is restricted or collects live stats.'
+    # The prepared artifact contract expects the service health and mailbox database path CSVs.
+    $exchangeInfrastructure = @($document.Jobs | Where-Object Name -eq 'Exchange2016-Infrastructure-Inventory')[0]
+    $infrastructureSwitches = @(([string]$exchangeInfrastructure.Arguments) -split '\s+' | Where-Object { $_ })
+    foreach ($switch in @('-IncludeServicesHealth', '-IncludeMailboxDatabasePaths')) {
+        Assert-True ($infrastructureSwitches -contains $switch) "Exchange infrastructure no longer collects the prepared artifact enabled by $switch."
+    }
     $ad = @($document.Jobs | Where-Object Name -eq 'AD-Inventory')[0]
     $scope = @($document.Jobs | Where-Object Name -eq 'M365-WorkplaceScope-Inventory')[0]
     Assert-True ($ad.ConcurrencyKey -eq 'AD-WorkplaceScope' -and $scope.ConcurrencyKey -eq $ad.ConcurrencyKey) 'AD and WorkplaceScope collections can run at the same time.'
