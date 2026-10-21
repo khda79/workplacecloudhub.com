@@ -6,7 +6,7 @@
     sample/physical row labels, and quiet retirement of an already absent
     SharePoint legacy file. No Graph connection or production CSV is used.
 .VERSION
-1.1
+1.2
 #>
 
 [CmdletBinding()]
@@ -44,13 +44,17 @@ $coreTokens = $null
 $coreParseErrors = $null
 $coreAst = [System.Management.Automation.Language.Parser]::ParseFile($coreModulePath, [ref]$coreTokens, [ref]$coreParseErrors)
 if ($coreParseErrors.Count -gt 0) { throw ($coreParseErrors | Out-String) }
-$coreDeleteDefinition = $coreAst.FindAll({
-    param($node)
-    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
-        $node.Name -eq 'Invoke-SmartM365GraphDeleteQuietly'
-}, $true) | Select-Object -First 1
-if (-not $coreDeleteDefinition) { throw 'Invoke-SmartM365GraphDeleteQuietly was not found in SmartM365.Core.' }
-Invoke-Expression $coreDeleteDefinition.Extent.Text
+# The quiet delete bounds each call with the Core network limits (Core 1.0.96).
+$script:SmartM365NetworkDeadline = $null
+foreach ($coreFunctionName in @('Invoke-SmartM365GraphDeleteQuietly', 'Get-SmartM365NetworkSetting', 'Get-SmartM365NetworkCallTimeout', 'Wait-SmartM365NetworkRetry', 'Test-SmartM365GraphTransientError')) {
+    $coreDefinition = $coreAst.FindAll({
+        param($node)
+        $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+            $node.Name -eq $coreFunctionName
+    }, $true) | Select-Object -First 1
+    if (-not $coreDefinition) { throw "$coreFunctionName was not found in SmartM365.Core." }
+    Invoke-Expression $coreDefinition.Extent.Text
+}
 
 $script:TestLogs = [System.Collections.Generic.List[string]]::new()
 function WriteLog {
@@ -92,6 +96,9 @@ function Get-GraphRetryDelaySeconds {
 }
 function Start-Sleep { param([int]$Seconds, [int]$Milliseconds) }
 function Test-SmartM365MaxItemsMode { return $false }
+# No source staging in this test: DATA-LAST paths resolve to themselves (DiscoveredApps 1.35).
+function Resolve-SmartM365SourcePublicationPath { param([string]$Path, [switch]$Artifact) $null = $Artifact; return $Path }
+function Register-SmartM365SourceCsv { param([string]$Path) $null = $Path }
 function Remove-SmartM365SharePointFile {
     [CmdletBinding()]
     param([string]$LocalFilePath)
@@ -106,8 +113,10 @@ function Invoke-RestMethod {
         [hashtable]$Headers,
         [switch]$SkipHttpErrorCheck,
         [string]$StatusCodeVariable,
-        [string]$ResponseHeadersVariable
+        [string]$ResponseHeadersVariable,
+        [int]$TimeoutSec
     )
+    if ($TimeoutSec -lt 1) { throw 'The quiet delete has no time limit.' }
     Set-Variable -Name $StatusCodeVariable -Value 404 -Scope 1
     Set-Variable -Name $ResponseHeadersVariable -Value @{} -Scope 1
     return [pscustomobject]@{ error = [pscustomobject]@{ message = 'itemNotFound' } }
