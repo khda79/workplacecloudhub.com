@@ -3,7 +3,7 @@
 .SYNOPSIS
   Offline checks for users deleted from the directory while the licensing run collects them.
 .VERSION
-1.0.2
+1.0.3
 .NOTES
   Synthetic identifiers only (GUIDs and example.invalid). Graph calls are replaced by mocks; no tenant access.
 #>
@@ -113,7 +113,8 @@ Check ($null -eq (Assert-LicensesUserResolution -State @{ UserResolutionFailures
 # 6. Collector wiring: stage flag around the license details, classification in the catch, limit before export,
 #    qualification in the receipt, counter in the completion summary, one version.
 $text = [IO.File]::ReadAllText($inventoryPath)
-Check ($text -match '\$licenseDetailStage = \$true\s+\$licenseDetails = Invoke-GraphWithRetry \{ Get-MgUserLicenseDetail[^\r\n]*\s+\$licenseDetailStage = \$false') 'The license-detail call is not marked as the deletion stage.'
+# The snapshot re-read (Licences 1.58) stays inside the deletion stage: a user deleted meanwhile is excluded.
+Check ($text -match '(?s)\$licenseDetailStage = \$true\s+\$licenseDetails = Invoke-GraphWithRetry \{ Get-MgUserLicenseDetail[^\r\n]*.{0,600}?Resolve-LicensesUserSnapshot.{0,800}?\$licenseDetailStage = \$false') 'The license-detail call is not marked as the deletion stage.'
 Check ($text -match 'Register-LicensesUserFailure -ErrorRecord \$_ ') 'The user loop does not classify its failures.'
 Check ($text -match '\$usersDeletedQualification = Assert-LicensesUserResolution') 'The run does not apply the deleted-user rules.'
 Check ($text -match "-Qualifications @\(\`$usersDeletedQualification") 'The deleted-user count does not reach the receipt.'

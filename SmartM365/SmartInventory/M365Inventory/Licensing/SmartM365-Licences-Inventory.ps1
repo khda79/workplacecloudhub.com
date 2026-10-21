@@ -18,7 +18,7 @@
   as optional files M365_Licenses_ReportSkuCandidates.csv and M365_Licenses_ReportSkuCapacity.csv with the report snapshot identity;
   ReportSkuCapacity names the report product family of each SKU (ReportProduct) so consumers never re-implement the SKU rules.
 .VERSION
- 1.57
+ 1.58
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication; Microsoft.Graph.Identity.DirectoryManagement; Microsoft.Graph.Users; Microsoft.Graph.Groups; ImportExcel for the report attachment.
@@ -3442,6 +3442,51 @@ function To-GuidOrNull {
   return $null
 }
 
+# SKUs of the license details that the user's assignment states do not cover.
+function Get-LicensesUncoveredSkuId {
+  param([Parameter(Mandatory)]$User, [AllowNull()][object[]]$LicenseDetails)
+  $assigned = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+  foreach ($state in @($User.LicenseAssignmentStates)) { if ($null -ne $state -and $state.SkuId) { [void]$assigned.Add([string]$state.SkuId) } }
+  @(@($LicenseDetails) | Where-Object { $null -ne $_ -and $_.SkuId -and -not $assigned.Contains([string]$_.SkuId) } | ForEach-Object { [string]$_.SkuId } | Sort-Object -Unique)
+}
+
+# Assignment paths and service-plan states of one user come from one snapshot. When the license details
+# (read user by user) list a SKU that the user list (read at the start of the run) did not assign, the
+# license changed in between: the user and the license details are read again and used for both files.
+# An assignment is never inferred from license details; a gap after the fresh read fails the user.
+function Resolve-LicensesUserSnapshot {
+  param(
+    [Parameter(Mandatory)]$User,
+    [AllowNull()][object[]]$LicenseDetails,
+    [Parameter(Mandatory)][scriptblock]$ReadUser,
+    [Parameter(Mandatory)][scriptblock]$ReadLicenseDetails
+  )
+  $uncovered = @(Get-LicensesUncoveredSkuId -User $User -LicenseDetails $LicenseDetails)
+  if ($uncovered.Count -eq 0) { return [pscustomobject]@{ User = $User; LicenseDetails = @($LicenseDetails); Refreshed = $false; UncoveredSkuIds = @() } }
+  $freshUser = & $ReadUser
+  if ($null -eq $freshUser -or [string]$freshUser.Id -ne [string]$User.Id) { throw "License assignment re-read returned no record for user '$($User.Id)'." }
+  $freshDetails = @(& $ReadLicenseDetails)
+  $stillUncovered = @(Get-LicensesUncoveredSkuId -User $freshUser -LicenseDetails $freshDetails)
+  if ($stillUncovered.Count -gt 0) {
+    throw ("License details of user '{0}' list SKU(s) {1} without a license assignment state after a fresh read; no assignment is inferred." -f $User.Id, ($stillUncovered -join ','))
+  }
+  [pscustomobject]@{ User = $freshUser; LicenseDetails = $freshDetails; Refreshed = $true; UncoveredSkuIds = $uncovered }
+}
+
+# Same rule as the workplace preparation: every user/SKU pair of the service-plan states has an assignment path.
+function Assert-LicensesPlanStateCoverage {
+  param(
+    [Parameter(Mandatory)][AllowEmptyCollection()][System.Collections.Generic.List[object]]$AssignmentPaths,
+    [Parameter(Mandatory)][AllowEmptyCollection()][System.Collections.Generic.HashSet[string]]$PlanStatePairs
+  )
+  $pathPairs = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+  foreach ($row in $AssignmentPaths) { [void]$pathPairs.Add(('{0}|{1}' -f $row.UserId, $row.SkuId)) }
+  $missing = @($PlanStatePairs | Where-Object { -not $pathPairs.Contains($_) } | Sort-Object)
+  if ($missing.Count -gt 0) {
+    throw ("License collection is inconsistent: {0} user/SKU pair(s) have service-plan states without a license assignment path (first: {1}). Current CSV publication is stopped." -f $missing.Count, (@($missing | Select-Object -First 3) -join ', '))
+  }
+}
+
 function ConvertTo-LicensesAssignmentPathRows {
   param([Parameter(Mandatory)]$User, [datetimeoffset]$CollectedAtUtc = [datetimeoffset]::UtcNow)
   $userId = [string]$User.Id
@@ -3990,7 +4035,7 @@ function Publish-LicensesWeeklyHistory {
 # ==========================================================
 # Main
 # ==========================================================
-$ScriptVersion = "1.57"
+$ScriptVersion = "1.58"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LicensesCsvLogFolderPath' -DefaultValue $OutputPath
 $LatestCsvFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ''
@@ -4234,6 +4279,9 @@ try {
 
   $uTotal = ($users | Measure-Object).Count
   $uIndex = 0
+  # User/SKU pairs written to the service-plan states, checked against the assignment paths before publication.
+  $servicePlanStatePairs = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+  $userSnapshotRefreshes = 0
 
   foreach ($u in $users) {
     $uIndex++
@@ -4261,7 +4309,23 @@ try {
       # License details (Direct + Group)
       $licenseDetailStage = $true
       $licenseDetails = Invoke-GraphWithRetry { Get-MgUserLicenseDetail -UserId $uid -ErrorAction Stop }
+      # A license changed since the user list: paths and plans of this user come from one fresh read.
+      $snapshot = Resolve-LicensesUserSnapshot -User $u -LicenseDetails @($licenseDetails) `
+        -ReadUser { Invoke-GraphWithRetry { Get-MgUser -UserId $uid -Property "DisplayName","UserPrincipalName","Id","AssignedLicenses","Mail","ProxyAddresses","LicenseAssignmentStates" -ErrorAction Stop } } `
+        -ReadLicenseDetails { Invoke-GraphWithRetry { Get-MgUserLicenseDetail -UserId $uid -ErrorAction Stop } }
       $licenseDetailStage = $false
+      if ($snapshot.Refreshed) {
+        $userSnapshotRefreshes++
+        $u = $snapshot.User
+        $licenseDetails = $snapshot.LicenseDetails
+        while ($assignmentPaths.Count -gt $assignmentPathCountBefore) { $assignmentPaths.RemoveAt($assignmentPaths.Count - 1) }
+        foreach ($assignmentPath in @(ConvertTo-LicensesAssignmentPathRows -User $u -CollectedAtUtc ([datetimeoffset]::UtcNow))) { $assignmentPaths.Add($assignmentPath) }
+        $disabledPlansBySku = @{}
+        foreach ($al in (@($u.AssignedLicenses) | ForEach-Object { $_ })) {
+          if ($al.SkuId) { $disabledPlansBySku[$al.SkuId] = @($al.DisabledPlans) }
+        }
+        WriteLog -Message ("License assignment of user {0} changed during collection (SKU {1}); assignment paths and service plans use one fresh read." -f $uid, ($snapshot.UncoveredSkuIds -join ',')) 'WARNING'
+      }
       if (-not $licenseDetails -or $licenseDetails.Count -eq 0) { continue }
 
       # SKU names
@@ -4334,6 +4398,7 @@ try {
         # Compact user service-plan state fact and normalized service-plan catalog
         if ($ServicePlans) {
           $disabledIds = if ($disabledPlansBySku.ContainsKey($skuId)) { $disabledPlansBySku[$skuId] } else { @() }
+          [void]$servicePlanStatePairs.Add(('{0}|{1}' -f $uid, $skuId))
           foreach ($sp in $ld.ServicePlans) {
             $planDisplayName = Get-ServiceFriendly -PlanName $sp.ServicePlanName -PlanId $sp.ServicePlanId -ByName $null -ById $SvcMapById
             $isEnabled = (-not ($disabledIds -contains $sp.ServicePlanId))
@@ -4411,6 +4476,10 @@ try {
     try { Add-SmartM365SourceRunNote -Message ('{0}: users deleted from the directory during collection are excluded from the licensing CSVs.' -f $usersDeletedQualification) }
     catch { WriteLog -Message ("Deleted-user note could not be added to the run state: {0}" -f $_.Exception.Message) 'WARNING' }
   }
+
+  if ($userSnapshotRefreshes -gt 0) { WriteLog -Message ("Users whose license assignment changed during collection and were read again: {0}." -f $userSnapshotRefreshes) 'WARNING' }
+  $currentOperation = 'Check license assignment paths against user service-plan states'
+  Assert-LicensesPlanStateCoverage -AssignmentPaths $assignmentPaths -PlanStatePairs $servicePlanStatePairs
 
   $currentOperation = 'Export immutable license assignment paths'
   Assert-SmartM365CsvDataCompleteness -Data $directoryGroupRows -BaseFileName 'M365_EntraGroups_All' `
