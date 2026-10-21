@@ -1,4 +1,4 @@
-Import-Module (Join-Path $PSScriptRoot '../Modules/SmartM365.Core/SmartM365.JsonTransport.psd1') -MinimumVersion '1.0.7' -Global -ErrorAction Stop
+Import-Module (Join-Path $PSScriptRoot '../Modules/SmartM365.Core/SmartM365.JsonTransport.psd1') -MinimumVersion '1.0.8' -Global -ErrorAction Stop
 <#
 .SYNOPSIS
 Loads SmartM365 global and tenant configuration context.
@@ -7,7 +7,7 @@ Loads SmartM365 global and tenant configuration context.
 Merges global and tenant local JSON configuration, resolves workspace paths, and exposes the effective tenant context used by SmartM365 scripts.
 
 .VERSION
-1.0.10
+1.0.11
 #>
 function Write-SmartM365StartupBanner {
     [CmdletBinding()]
@@ -356,7 +356,7 @@ function Test-SmartM365WritableDirectory {
 
     try {
         New-Item -Path $Path -ItemType Directory -Force | Out-Null
-        $probePath = Join-Path -Path $Path -ChildPath ('.smartm365-write-test-{0}.tmp' -f [guid]::NewGuid().ToString('N'))
+        $probePath = Get-SmartM365SiblingTemporaryPath -Path (Join-Path -Path $Path -ChildPath 'probe') -Extension '.tmp'
         Set-Content -LiteralPath $probePath -Value 'test' -Encoding UTF8 -ErrorAction Stop
         Remove-Item -LiteralPath $probePath -Force -ErrorAction SilentlyContinue
         return $true

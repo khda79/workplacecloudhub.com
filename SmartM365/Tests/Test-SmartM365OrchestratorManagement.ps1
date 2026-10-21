@@ -2,7 +2,7 @@
 .SYNOPSIS
 Runs offline management and central-manifest migration tests for the SmartM365 orchestrator.
 .VERSION
-1.1.3
+1.1.4
 #>
 #Requires -Version 7.0
 [CmdletBinding()]
@@ -108,7 +108,12 @@ try {
     # A persistent lock exhausts the transport retry window (LockTimeout) or fails at once; both name the exact target.
     Assert-True -Condition ($persistentLockError -match ("Atomic replacement (?:failed|timed out) for '" + [regex]::Escape($persistentlyLockedPath) + "'")) -Message 'A persistent destination lock did not report the exact target path.'
     Assert-True -Condition ((Get-SmartM365OrchestratorFileHash -Path $persistentlyLockedPath) -eq $lockedHash) -Message 'A failed locked-file replacement changed the valid destination.'
-    Assert-True -Condition (@(Get-ChildItem -LiteralPath $temporaryRoot -Filter 'Persistently-Locked.json.*.tmp' -File).Count -eq 0) -Message 'A failed locked-file replacement left a temporary file behind.'
+    # JSON goes through the transport (short sibling names ~sm*): by design it keeps only the unpublished staging
+    # file for recovery, holding the rejected document, and never a backup of the destination.
+    $leftovers = @(Get-ChildItem -LiteralPath $temporaryRoot -File | Where-Object { $_.Name -like '~sm*' -or $_.Name -match '^Persistently-Locked\.json\..+\.(tmp|pending|previous)$' })
+    $staging = @($leftovers | Where-Object { $_.Name -like '~sm*.pending' })
+    Assert-True -Condition ($leftovers.Count -eq 1 -and $staging.Count -eq 1 -and [IO.File]::ReadAllText($staging[0].FullName) -match 'must-not-publish') -Message ('A failed locked-file replacement left unexpected temporary files: ' + (($leftovers | ForEach-Object Name) -join ', '))
+    Remove-Item -LiteralPath $staging[0].FullName -Force
 
     $transientlyLockedPath = Join-Path -Path $temporaryRoot -ChildPath 'Transiently-Locked.json'
     $transientReadyPath = Join-Path -Path $temporaryRoot -ChildPath 'Transiently-Locked.ready'

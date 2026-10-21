@@ -2,7 +2,7 @@
 .SYNOPSIS
 Receipt-qualified daily capture retention. Internal, opt-in Core helper.
 .VERSION
-1.0.0
+1.0.1
 #>
 [CmdletBinding()]
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidGlobalVars','',Justification='Reads the established Core publication/authentication context; does not introduce operational globals.')]
@@ -82,7 +82,7 @@ function Write-SmartM365DailyCaptureRecord {
     if ($actual -ine $ExpectedHash) { throw 'Capture metadata changed concurrently.' }
     $parent = Split-Path $Path -Parent
     if (-not (Test-Path -LiteralPath $parent)) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
-    $temporary = $Path + '.' + [guid]::NewGuid().ToString('N') + '.tmp'
+    $temporary = [IO.Path]::Combine([IO.Path]::GetDirectoryName($Path), ('~sm' + [guid]::NewGuid().ToString('N').Substring(0, 12) + '.tmp'))
     try {
         [IO.File]::WriteAllText($temporary,($Record | ConvertTo-Json -Depth 12),[Text.UTF8Encoding]::new($false))
         $check = if (Test-Path -LiteralPath $Path) {(Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash} else {'ABSENT'}

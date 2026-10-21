@@ -372,6 +372,23 @@ function Get-SmartM365JsonLockErrorCode {
     return 0
 }
 
+<#
+.SYNOPSIS
+Temporary file for an atomic replace: same folder (same volume), short name. A name built from the target
+name plus a GUID adds about 40 characters and fails under MAX_PATH (260) with Windows PowerShell 5.1 and
+the .NET Framework when the target already sits deep (launcher cache copies of the repository).
+#>
+function Get-SmartM365SiblingTemporaryPath {
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [ValidatePattern('^\.[A-Za-z0-9]{1,10}$')][string]$Extension = '.tmp'
+    )
+    $parent = [IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($Path))
+    [IO.Path]::Combine($parent, ('~sm{0}{1}' -f [guid]::NewGuid().ToString('N').Substring(0, 12), $Extension))
+}
+
 function Write-SmartM365JsonBytesAtomically {
     [CmdletBinding()]
     param(
@@ -391,8 +408,8 @@ function Write-SmartM365JsonBytesAtomically {
     foreach ($candidate in @($target, $names.Lock)) { Assert-SmartM365JsonUnlinkedPath $candidate -AllowQualifiedDataRoot }
     $null = ConvertFrom-SmartM365JsonBytes -Bytes $Bytes -Validate $Validate
     $lock = Enter-SmartM365JsonTransportLock $names.Lock $LockTimeoutSeconds
-    $temporary = $target + '.' + [guid]::NewGuid().ToString('N') + '.pending'
-    $backup = $target + '.' + [guid]::NewGuid().ToString('N') + '.previous'
+    $temporary = Get-SmartM365SiblingTemporaryPath -Path $target -Extension '.pending'
+    $backup = Get-SmartM365SiblingTemporaryPath -Path $target -Extension '.previous'
     $restoreAttributes = $null
     $published = $false
     try {
@@ -652,7 +669,7 @@ function Resolve-SmartM365JsonConfigurationPath {
     Resolve-SmartM365OwnedJsonPath -Path $Path -Owner ('Configuration:' + [IO.Path]::GetFileName($Path)) -Validate $validate
 }
 
-Export-ModuleMember -Function Get-SmartM365JsonNames, Get-SmartM365JsonReadPath, Read-SmartM365JsonDocument, Move-SmartM365OwnedJsonFile, Resolve-SmartM365JsonConfigurationPath, Get-SmartM365JsonTransportPolicy, Get-SmartM365JsonTemplateName, Resolve-SmartM365OwnedJsonPath, Write-SmartM365JsonBytesAtomically, Resolve-SmartM365WeeklyManifestPaths, Publish-SmartM365RegeneratedJsonBytes, Complete-SmartM365JsonConsumption
+Export-ModuleMember -Function Get-SmartM365JsonNames, Get-SmartM365JsonReadPath, Read-SmartM365JsonDocument, Move-SmartM365OwnedJsonFile, Resolve-SmartM365JsonConfigurationPath, Get-SmartM365JsonTransportPolicy, Get-SmartM365JsonTemplateName, Resolve-SmartM365OwnedJsonPath, Write-SmartM365JsonBytesAtomically, Resolve-SmartM365WeeklyManifestPaths, Publish-SmartM365RegeneratedJsonBytes, Complete-SmartM365JsonConsumption, Get-SmartM365SiblingTemporaryPath
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor

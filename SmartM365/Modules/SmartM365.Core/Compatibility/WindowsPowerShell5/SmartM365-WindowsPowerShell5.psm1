@@ -1,5 +1,5 @@
 ﻿Import-Module (Join-Path $PSScriptRoot '../../SmartM365.SharePointJsonTransition.psd1') -MinimumVersion '1.0.2' -Global -ErrorAction Stop
-Import-Module (Join-Path $PSScriptRoot '../../SmartM365.JsonTransport.psd1') -MinimumVersion '1.0.2' -Global -ErrorAction Stop
+Import-Module (Join-Path $PSScriptRoot '../../SmartM365.JsonTransport.psd1') -MinimumVersion '1.0.8' -Global -ErrorAction Stop
 . (Join-Path $PSScriptRoot '../../SmartM365-CmdbReceipt.ps1')
 . (Join-Path $PSScriptRoot '../../SmartM365-MailMaintenance.ps1')
 . (Join-Path $PSScriptRoot '../../SmartM365-ImportExcelHealth.ps1')
@@ -3165,7 +3165,7 @@ function Invoke-SmartM365Preflight {
                 $null = New-Item -Path $path -ItemType Directory -Force -ErrorAction Stop
             }
 
-            $probePath = Join-Path -Path $path -ChildPath (".smartm365-preflight-{0}.tmp" -f ([guid]::NewGuid().Guid))
+            $probePath = [IO.Path]::Combine($path, ('~sm' + [guid]::NewGuid().ToString('N').Substring(0, 12) + '.tmp'))
             Set-Content -LiteralPath $probePath -Value "SmartM365 preflight" -Encoding UTF8 -ErrorAction Stop
             Remove-Item -LiteralPath $probePath -Force -ErrorAction Stop
             WriteLog -Message ("Preflight output path writable: {0}" -f $path) -Level "INFO"
@@ -5044,7 +5044,7 @@ function Repair-SmartM365CsvTenantKeySchema {
     else {
         $parent = Split-Path -Path $Path -Parent
         if ([string]::IsNullOrWhiteSpace($parent)) { $parent = (Get-Location).Path }
-        $tempPath = Join-Path -Path $parent -ChildPath ((Split-Path -Path $Path -Leaf) + '.tenantkey.' + [guid]::NewGuid().ToString('N') + '.tmp')
+        $tempPath = [IO.Path]::Combine($parent, ('~sm' + [guid]::NewGuid().ToString('N').Substring(0, 12) + '.tmp'))
         try {
             $separatorCount = ([regex]::Matches($header, $d)).Count
             $fakeRow = (@('x') * ($separatorCount + 1)) -join ([string]$Delimiter)
@@ -5144,8 +5144,7 @@ function Copy-SmartM365FileAtomically {
         New-Item -Path $destinationParent -ItemType Directory -Force -ErrorAction Stop | Out-Null
     }
 
-    $destinationLeaf = Split-Path -Path $DestinationPath -Leaf
-    $temporaryPath = Join-Path -Path $destinationParent -ChildPath ("{0}.{1}.tmp" -f $destinationLeaf, [guid]::NewGuid().ToString('N'))
+    $temporaryPath = [IO.Path]::Combine($destinationParent, ('~sm' + [guid]::NewGuid().ToString('N').Substring(0, 12) + '.tmp'))
     try {
         Copy-Item -LiteralPath $SourcePath -Destination $temporaryPath -Force -ErrorAction Stop
         Start-SmartM365SourcePublication -Path $DestinationPath
@@ -5185,8 +5184,7 @@ function Add-SmartM365CsvRowsAtomically {
 
     $parent = Split-Path -Path $Path -Parent
     if ([string]::IsNullOrWhiteSpace($parent)) { $parent = (Get-Location).Path }
-    $leaf = Split-Path -Path $Path -Leaf
-    $temporaryPath = Join-Path -Path $parent -ChildPath ("{0}.{1}.tmp" -f $leaf, [guid]::NewGuid().ToString('N'))
+    $temporaryPath = [IO.Path]::Combine($parent, ('~sm' + [guid]::NewGuid().ToString('N').Substring(0, 12) + '.tmp'))
     try {
         $appendRows = if ($Columns.Count -gt 0) { @($Data) | Select-Object -Property $Columns } else { @($Data) }
         $existingHeader = [string](Get-Content -LiteralPath $Path -TotalCount 1 -ErrorAction Stop)
@@ -5221,8 +5219,7 @@ function Write-SmartM365TextAtomically {
     if (-not (Test-Path -LiteralPath $parent)) {
         New-Item -Path $parent -ItemType Directory -Force -ErrorAction Stop | Out-Null
     }
-    $leaf = Split-Path -Path $Path -Leaf
-    $temporaryPath = Join-Path -Path $parent -ChildPath ("{0}.{1}.tmp" -f $leaf, [guid]::NewGuid().ToString('N'))
+    $temporaryPath = [IO.Path]::Combine($parent, ('~sm' + [guid]::NewGuid().ToString('N').Substring(0, 12) + '.tmp'))
     try {
         Set-Content -LiteralPath $temporaryPath -Value $Content -Encoding $Encoding -ErrorAction Stop
         Start-SmartM365SourcePublication -Path $Path

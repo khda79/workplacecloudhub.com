@@ -1,5 +1,5 @@
 ﻿Import-Module (Join-Path $PSScriptRoot 'SmartM365.SharePointJsonTransition.psd1') -MinimumVersion '1.0.4' -Global -ErrorAction Stop
-Import-Module (Join-Path $PSScriptRoot 'SmartM365.JsonTransport.psd1') -MinimumVersion '1.0.2' -Global -ErrorAction Stop
+Import-Module (Join-Path $PSScriptRoot 'SmartM365.JsonTransport.psd1') -MinimumVersion '1.0.8' -Global -ErrorAction Stop
 . (Join-Path $PSScriptRoot 'SmartM365-DailyCaptureRetention.ps1')
 . (Join-Path $PSScriptRoot 'SmartM365-CmdbReceipt.ps1')
 . (Join-Path $PSScriptRoot 'SmartM365-MailMaintenance.ps1')
@@ -2146,7 +2146,7 @@ function Repair-SmartM365CsvTenantKeySchema {
     else {
         $parent = Split-Path -Path $Path -Parent
         if ([string]::IsNullOrWhiteSpace($parent)) { $parent = (Get-Location).Path }
-        $tempPath = Join-Path -Path $parent -ChildPath ((Split-Path -Path $Path -Leaf) + '.tenantkey.' + [guid]::NewGuid().ToString('N') + '.tmp')
+        $tempPath = [IO.Path]::Combine($parent, ('~sm' + [guid]::NewGuid().ToString('N').Substring(0, 12) + '.tmp'))
         try {
             $separatorCount = ([regex]::Matches($header, $d)).Count
             $fakeRow = (@('x') * ($separatorCount + 1)) -join ([string]$Delimiter)
@@ -2209,9 +2209,8 @@ function Write-SmartM365PreparedCsvAtomically {
     }
 
     $extension = [System.IO.Path]::GetExtension($Path)
-    $nameWithoutExtension = [System.IO.Path]::GetFileNameWithoutExtension($Path)
     if ([string]::IsNullOrWhiteSpace($extension)) { $extension = '.tmp' }
-    $tempPath = Join-Path -Path $parent -ChildPath ("{0}.{1}{2}" -f $nameWithoutExtension, [guid]::NewGuid().ToString('N'), $extension)
+    $tempPath = [IO.Path]::Combine($parent, ('~sm' + [guid]::NewGuid().ToString('N').Substring(0, 12) + $extension))
 
     try {
         $rows = @($Data)
@@ -2267,8 +2266,7 @@ function Copy-SmartM365FileAtomically {
         New-Item -Path $destinationParent -ItemType Directory -Force -ErrorAction Stop | Out-Null
     }
 
-    $destinationLeaf = Split-Path -Path $DestinationPath -Leaf
-    $temporaryPath = Join-Path -Path $destinationParent -ChildPath ("{0}.{1}.tmp" -f $destinationLeaf, [guid]::NewGuid().ToString('N'))
+    $temporaryPath = [IO.Path]::Combine($destinationParent, ('~sm' + [guid]::NewGuid().ToString('N').Substring(0, 12) + '.tmp'))
     $sourceGuard = $null
     try {
         if ($VerifyHash) {
@@ -2321,8 +2319,7 @@ function Add-SmartM365CsvRowsAtomically {
 
     $parent = Split-Path -Path $Path -Parent
     if ([string]::IsNullOrWhiteSpace($parent)) { $parent = (Get-Location).Path }
-    $leaf = Split-Path -Path $Path -Leaf
-    $temporaryPath = Join-Path -Path $parent -ChildPath ("{0}.{1}.tmp" -f $leaf, [guid]::NewGuid().ToString('N'))
+    $temporaryPath = [IO.Path]::Combine($parent, ('~sm' + [guid]::NewGuid().ToString('N').Substring(0, 12) + '.tmp'))
     try {
         $appendRows = if ($Columns.Count -gt 0) { @($Data) | Select-Object -Property $Columns } else { @($Data) }
         $existingHeader = [string](Get-Content -LiteralPath $Path -TotalCount 1 -ErrorAction Stop)
@@ -2357,8 +2354,7 @@ function Write-SmartM365TextAtomically {
     if (-not (Test-Path -LiteralPath $parent)) {
         New-Item -Path $parent -ItemType Directory -Force -ErrorAction Stop | Out-Null
     }
-    $leaf = Split-Path -Path $Path -Leaf
-    $temporaryPath = Join-Path -Path $parent -ChildPath ("{0}.{1}.tmp" -f $leaf, [guid]::NewGuid().ToString('N'))
+    $temporaryPath = [IO.Path]::Combine($parent, ('~sm' + [guid]::NewGuid().ToString('N').Substring(0, 12) + '.tmp'))
     try {
         Set-Content -LiteralPath $temporaryPath -Value $Content -Encoding $Encoding -ErrorAction Stop
         Start-SmartM365SourcePublication -Path $Path
@@ -4671,7 +4667,7 @@ function Invoke-SmartM365ExportFileDownload {
     )
 
     $safeUrl = try { ([uri]$Url).GetLeftPart([UriPartial]::Path) } catch { '<invalid url>' }
-    $partial = '{0}.{1}.partial' -f $OutFile, [guid]::NewGuid().ToString('N')
+    $partial = [IO.Path]::Combine([IO.Path]::GetDirectoryName($OutFile), ('~sm' + [guid]::NewGuid().ToString('N').Substring(0, 12) + '.partial'))
     for ($attempt = 1; ; $attempt++) {
         try {
             $params = @{ Method = 'GET'; Uri = $Url; OutFile = $partial; ErrorAction = 'Stop'; TimeoutSec = (Get-SmartM365NetworkCallTimeout -TimeoutSeconds (Get-SmartM365NetworkSetting -Name 'SharePointUploadTransferTimeoutSeconds') -Operation $Operation) }
@@ -5573,7 +5569,7 @@ function Invoke-SmartM365SharePointFileDownload {
                 Invoke-SmartM365GraphFileDownloadWithRetry -Uri $downloadUri -OutputFilePath $temporaryPath -Operation 'Download JSON bytes'
             }
             # Validate the remote document before touching any last valid local copy.
-            $temporary=$LocalFilePath+'.'+[guid]::NewGuid().ToString('N')+'.download'
+            $temporary=[IO.Path]::Combine([IO.Path]::GetDirectoryName($LocalFilePath), ('~sm' + [guid]::NewGuid().ToString('N').Substring(0, 12) + '.download'))
             [IO.File]::WriteAllBytes($temporary,$bytes)
             if([IO.File]::Exists($LocalFilePath)){[IO.File]::Replace($temporary,$LocalFilePath,$null)}
             else{[IO.File]::Move($temporary,$LocalFilePath)}
@@ -5791,7 +5787,7 @@ function Export-SmartM365CsvStreamAtomically {
         [switch]$NoTenantKey
     )
 
-    $temporaryPath = "$Path.$([guid]::NewGuid().ToString('N')).tmp"
+    $temporaryPath = [IO.Path]::Combine([IO.Path]::GetDirectoryName($Path), ('~sm' + [guid]::NewGuid().ToString('N').Substring(0, 12) + '.tmp'))
     try {
         $exportParameters = @{
             LiteralPath = $temporaryPath
@@ -6337,7 +6333,7 @@ function Invoke-SmartM365Preflight {
                 $null = New-Item -Path $path -ItemType Directory -Force -ErrorAction Stop
             }
 
-            $probePath = Join-Path -Path $path -ChildPath (".smartm365-preflight-{0}.tmp" -f ([guid]::NewGuid().Guid))
+            $probePath = [IO.Path]::Combine($path, ('~sm' + [guid]::NewGuid().ToString('N').Substring(0, 12) + '.tmp'))
             Set-Content -LiteralPath $probePath -Value "SmartM365 preflight" -Encoding UTF8 -ErrorAction Stop
             Remove-Item -LiteralPath $probePath -Force -ErrorAction Stop
             WriteLog -Message ("Preflight output path writable: {0}" -f $path) -Level "INFO"

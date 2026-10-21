@@ -1,10 +1,10 @@
 ﻿@{
     RootModule = 'SmartM365.JsonTransport.psm1'
-    ModuleVersion = '1.0.7'
+    ModuleVersion = '1.0.8'
     GUID = 'ccf5a4b1-c253-4e30-98a8-d794f1ad995e'
     Author = 'WorkplaceCloudHub'
     PowerShellVersion = '5.1'
-    FunctionsToExport = @('Get-SmartM365JsonNames','Get-SmartM365JsonReadPath','Read-SmartM365JsonDocument','Move-SmartM365OwnedJsonFile','Resolve-SmartM365JsonConfigurationPath','Get-SmartM365JsonTransportPolicy','Get-SmartM365JsonTemplateName','Resolve-SmartM365OwnedJsonPath','Write-SmartM365JsonBytesAtomically','Resolve-SmartM365WeeklyManifestPaths','Publish-SmartM365RegeneratedJsonBytes','Complete-SmartM365JsonConsumption')
+    FunctionsToExport = @('Get-SmartM365JsonNames','Get-SmartM365JsonReadPath','Read-SmartM365JsonDocument','Move-SmartM365OwnedJsonFile','Resolve-SmartM365JsonConfigurationPath','Get-SmartM365JsonTransportPolicy','Get-SmartM365JsonTemplateName','Resolve-SmartM365OwnedJsonPath','Write-SmartM365JsonBytesAtomically','Resolve-SmartM365WeeklyManifestPaths','Publish-SmartM365RegeneratedJsonBytes','Complete-SmartM365JsonConsumption','Get-SmartM365SiblingTemporaryPath')
     CmdletsToExport = @()
     VariablesToExport = @()
     AliasesToExport = @()

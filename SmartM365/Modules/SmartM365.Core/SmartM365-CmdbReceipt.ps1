@@ -2,7 +2,7 @@
 .SYNOPSIS
 Producer-owned, current-only SmartInventory source receipts. Dot-sourced helper.
 .VERSION
-1.4.1
+1.4.2
 .NOTES
 Compatible with Windows PowerShell 5.1. Optional daily capture maintenance is
 delegated to Core only for explicitly opted-in producers; no collection or report refresh.
@@ -35,7 +35,7 @@ function Write-SmartM365CmdbReceiptDocument {
         foreach($field in @('OrganizationKey','EnvironmentKey','TenantId','Producer')){if($existing.$field -cne $Context[$field]){throw 'CMDB receipt identity changed.'}}
         if($RunState -and $Context.Started -and $existing.RunId -ne $Context.RunId){throw 'Source run identity changed.'}
     }
-    $temporary=$path+'.'+[guid]::NewGuid().ToString('N')+'.tmp'
+    $temporary=[IO.Path]::Combine([IO.Path]::GetDirectoryName($path), ('~sm' + [guid]::NewGuid().ToString('N').Substring(0, 12) + '.tmp'))
     try{
         [IO.File]::WriteAllText($temporary,($Document | ConvertTo-Json -Depth 12),[Text.UTF8Encoding]::new($false))
         if(Test-Path -LiteralPath $path){[IO.File]::Replace($temporary,$path,[Management.Automation.Language.NullString]::Value,$true)}else{[IO.File]::Move($temporary,$path)}
