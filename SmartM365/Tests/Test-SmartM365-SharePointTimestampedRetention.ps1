@@ -1,9 +1,9 @@
 <#
 .SYNOPSIS
 Offline tests for the seven-day SharePoint retention of timestamped CSV copies (SmartM365.Core and
-the Windows PowerShell 5 compatibility module).
+the Windows PowerShell 5 compatibility module). Minute stamps (yyyyMMdd-HHmm) follow the server rule.
 .VERSION
-1.0.1
+1.1.0
 #>
 [CmdletBinding()]
 param([switch]$WindowsPowerShell5)
@@ -16,7 +16,7 @@ $modulePath = if ($WindowsPowerShell5) {
 else {
     Join-Path -Path $smartM365Root -ChildPath 'Modules\SmartM365.Core\SmartM365.Core.psd1'
 }
-$minimumVersion = if ($WindowsPowerShell5) { '1.0.46' } else { '1.0.62' }
+$minimumVersion = if ($WindowsPowerShell5) { '1.0.61' } else { '1.0.100' }
 $module = Import-Module -Name $modulePath -MinimumVersion $minimumVersion -Force -PassThru -ErrorAction Stop
 
 function Assert-True {
@@ -38,6 +38,8 @@ $retention = & $module {
         value = @(
             (& $file 'current' 'Report_20260930_120000.csv'),
             (& $file 'recent' 'Report_20260925_010000.csv'),
+            (& $file 'expiredmin' 'Report_20260901-0100.csv'),
+            (& $file 'recentmin' 'Report_20260929-2300.csv'),
             (& $file 'expired1' 'Report_20260920_010000.csv'),
             (& $file 'latest' 'Report.csv'),
             (& $file 'otherprefix' 'Report_Detail_20260901_010000.csv'),
@@ -72,18 +74,24 @@ $retention = & $module {
     $script:Deletes.Clear()
     # A workbook run copy only purges workbooks of the same prefix.
     $xlsx = Remove-SmartM365SharePointTimestampedCsvOlderThan -TimestampedPath 'C:\Data\DATA-ALL\Intune\Alerts\Report_20260930_120000.xlsx' -RetentionDays 7 -ReferenceTime ([datetime]'2026-09-30T13:00:00') -Enabled $true -SiteHostname 'tenant.sharepoint.test' -SitePath '/sites/S' -LibraryDisplayName 'Documents' -TargetFolderPath 'SMART-M365'
+    $xlsxDeletes = @($script:Deletes | Sort-Object)
+    $script:Deletes.Clear()
+    # A minute-stamped run copy (yyyyMMdd-HHmm) applies the same retention as the server.
+    $minute = Remove-SmartM365SharePointTimestampedCsvOlderThan -TimestampedPath 'C:\Data\DATA-ALL\Intune\Alerts\Report_20260930-1200.csv' -RetentionDays 7 -ReferenceTime ([datetime]'2026-09-30T13:00:00') -Enabled $true -SiteHostname 'tenant.sharepoint.test' -SitePath '/sites/S' -LibraryDisplayName 'Documents' -TargetFolderPath 'SMART-M365'
     $notTimestamped = Remove-SmartM365SharePointTimestampedCsvOlderThan -TimestampedPath 'C:\Data\DATA-LAST\Report.csv' -Enabled $true -SiteHostname 'h' -SitePath '/s' -LibraryDisplayName 'Documents' -TargetFolderPath 'T'
     New-Object psobject -Property @{
-        Result = $result; NotTimestamped = $notTimestamped; Xlsx = $xlsx; XlsxDeletes = @($script:Deletes | Sort-Object)
+        Result = $result; NotTimestamped = $notTimestamped; Xlsx = $xlsx; XlsxDeletes = $xlsxDeletes
+        Minute = $minute; MinuteDeletes = @($script:Deletes | Sort-Object)
         Deletes = $csvDeletes; Lists = @($script:Lists); Logs = @($script:Logs)
     }
 } $WindowsPowerShell5.IsPresent
 
-Assert-True (($retention.Deletes -join ',') -eq 'expired1,expired2') ("expired copies deleted: expected expired1,expired2, got {0}" -f ($retention.Deletes -join ','))
-Assert-True ($retention.Result.Deleted -eq 2 -and $retention.Result.Failed -eq 1 -and $retention.Result.Kept -eq 1) ("counters Deleted/Failed/Kept = {0}/{1}/{2}" -f $retention.Result.Deleted, $retention.Result.Failed, $retention.Result.Kept)
-Assert-True ($retention.Lists.Count -eq 4 -and $retention.Lists[0] -like '*/drives/drive1/root:/SMART-M365/DATA/DATA-ALL/Intune/Alerts:/children*') ("folder listing followed the next link from the CSV folder: {0}" -f ($retention.Lists -join ' | '))
-Assert-True (@($retention.Logs | Where-Object { $_ -like 'WARNING|*Report_20260810_010000.csv*' }).Count -eq 1) 'a failed deletion is reported as a warning'
+Assert-True (($retention.Deletes -join ',') -eq 'expired1,expired2,expiredmin') ("expired copies deleted: expected expired1,expired2,expiredmin, got {0}" -f ($retention.Deletes -join ','))
+Assert-True ($retention.Result.Deleted -eq 3 -and $retention.Result.Failed -eq 1 -and $retention.Result.Kept -eq 2) ("counters Deleted/Failed/Kept = {0}/{1}/{2}" -f $retention.Result.Deleted, $retention.Result.Failed, $retention.Result.Kept)
+Assert-True ($retention.Lists.Count -eq 6 -and $retention.Lists[0] -like '*/drives/drive1/root:/SMART-M365/DATA/DATA-ALL/Intune/Alerts:/children*') ("folder listing followed the next link from the CSV folder: {0}" -f ($retention.Lists -join ' | '))
+Assert-True (@($retention.Logs | Where-Object { $_ -like 'WARNING|*Report_20260810_010000.csv*' }).Count -eq 2) 'a failed deletion is reported as a warning (once per CSV retention call)'
 Assert-True (($retention.XlsxDeletes -join ',') -eq 'otherext' -and $retention.Xlsx.Deleted -eq 1) ("workbook retention deletes only expired workbooks: got {0}" -f ($retention.XlsxDeletes -join ','))
+Assert-True (($retention.MinuteDeletes -join ',') -eq 'expired1,expired2,expiredmin' -and $retention.Minute.Deleted -eq 3 -and $retention.Minute.Failed -eq 1 -and $retention.Minute.Kept -eq 3) ("minute-stamped run copy applies the retention: got {0}; Deleted/Failed/Kept = {1}/{2}/{3}" -f ($retention.MinuteDeletes -join ','), $retention.Minute.Deleted, $retention.Minute.Failed, $retention.Minute.Kept)
 Assert-True ($retention.NotTimestamped.Deleted -eq 0 -and $retention.NotTimestamped.Failed -eq 0) 'a latest (non-timestamped) path never triggers retention'
 
 $publish = & $module {
@@ -123,6 +131,7 @@ Assert-True ((@($publish) -join ',') -eq 'Report_20260930_120000.csv|7') ("Publi
 # Collectors that upload their run copies directly apply the same retention after a successful upload.
 $directUploaders = @{
     'SmartInventory\M365Inventory\Teams\SmartM365-Teams-Inventory.ps1' = @('if ($timestampedUpload) { Remove-SmartM365SharePointTimestampedCsvOlderThan -TimestampedPath $TimestampedPath', 'if($workbookUpload){Remove-SmartM365SharePointTimestampedCsvOlderThan -TimestampedPath $workbookPath')
+    'SmartInventory\ExchangeInventory\OnPremises\ProxyAddresses\SmartM365-Check-ProxyAddresses-Exchange.ps1' = @('Remove-SmartM365SharePointTimestampedCsvOlderThan -TimestampedPath $outWorkbook -RetentionDays 7')
     'SmartInventory\M365Inventory\SharePoint\SmartM365-SPO-Inventory.ps1' = @('if ($timestampedUpload) { Remove-SmartM365SharePointTimestampedCsvOlderThan -TimestampedPath $timestampedPath', 'if ($workbookUpload) { Remove-SmartM365SharePointTimestampedCsvOlderThan -TimestampedPath $workbookPath')
 }
 foreach ($relativePath in $directUploaders.Keys) {

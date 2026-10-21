@@ -62,7 +62,7 @@
     - Maintains logs and cleans up old files automatically.
 
 .VERSION
-1.31
+1.32
 .AUTHOR
     https://github.com/khda79/workplacecloudhub.com
     Minimum permissions: Windows PowerShell 5.1, Exchange 2016 Management snap-in, ActiveDirectory module, Exchange recipient read access, and AD read access.
@@ -509,7 +509,7 @@ $ErrorActionPreference = 'Stop'
     }
 
     #region Module Import and Initialization
-$ScriptVersion = "1.31"
+$ScriptVersion = "1.32"
     $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
     $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ProxyAddressesCsvLogFolderPath' -DefaultValue $OutputPath
     $LatestCsvFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ''
@@ -521,7 +521,7 @@ $ScriptVersion = "1.31"
 
     try {
         Write-Host "Loading module SmartM365-WindowsPowerShell5.psd1..."
-        Import-Module -Name (Join-ModulePath 'SmartM365-WindowsPowerShell5.psd1') -MinimumVersion '1.0.58' -ErrorAction Stop
+        Import-Module -Name (Join-ModulePath 'SmartM365-WindowsPowerShell5.psd1') -MinimumVersion '1.0.61' -ErrorAction Stop
         $InitializeOutputPath = InitializeScriptEnvironment -OutputPath $OutputPath -LogFileName $(($MyInvocation.MyCommand.Name) -replace '\.ps1$','')
         Start-SmartM365SourceReceipt -ScriptPath $PSCommandPath -SourceRootPath $LatestCsvFolderPath -ScopeParameters @{OrganizationalUnit=$OrganizationalUnit;AllOrganizationalUnit=$AllOrganizationalUnit;AddMissingAddress=[bool]$AddMissingAddress}
         Start-SmartM365RunTranscript -Path $global:logTranscriptFile -Append
@@ -1298,6 +1298,11 @@ $ScriptVersion = "1.31"
     foreach ($workbookUploadPath in @($outWorkbook, $latestWorkbook) | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } | Sort-Object -Unique) {
         $workbookUpload = Invoke-SmartM365SharePointCsvUpload -LocalFilePath $workbookUploadPath
         if ($workbookUpload) { $workbookSharePointUploads += $workbookUpload }
+    }
+    # The workbook bypasses Publish-SmartM365Csv: apply the same seven-day SharePoint retention once this run's copy is uploaded.
+    $outWorkbookFullPath = [IO.Path]::GetFullPath($outWorkbook)
+    if (@($workbookSharePointUploads | Where-Object { [string]::Equals([IO.Path]::GetFullPath([string]$_.LocalFilePath), $outWorkbookFullPath, [StringComparison]::OrdinalIgnoreCase) }).Count -gt 0) {
+        Remove-SmartM365SharePointTimestampedCsvOlderThan -TimestampedPath $outWorkbook -RetentionDays 7 | Out-Null
     }
     if ($workbookSharePointUploads.Count -gt 0) {
         $publishResults += [pscustomobject]@{ SharePointUploads = @($workbookSharePointUploads) }

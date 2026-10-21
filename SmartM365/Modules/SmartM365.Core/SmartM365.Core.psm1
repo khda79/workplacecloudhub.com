@@ -5378,6 +5378,7 @@ function Remove-SmartM365SharePointTimestampedCsvOlderThan {
     # Applies the server retention of run copies to SharePoint: the timestamped copies of one CSV or
     # workbook (<prefix>_yyyyMMdd_HHmmss.csv|.xlsx, same extension, same SharePoint folder) older
     # than RetentionDays are deleted. Latest copies and WeeklyHistory never match the pattern.
+    # Minute stamps (yyyyMMdd-HHmm) are accepted, as by the server-side timestamp retention.
     # Failures only produce warnings.
     [CmdletBinding(SupportsShouldProcess)]
     param(
@@ -5398,7 +5399,7 @@ function Remove-SmartM365SharePointTimestampedCsvOlderThan {
     if ((Get-Command Test-SmartM365DailyCapturePath -ErrorAction SilentlyContinue) -and (Test-SmartM365DailyCapturePath $TimestampedPath)) { return $result }
     if (-not $Enabled) { return $result }
     $currentName = [IO.Path]::GetFileName($TimestampedPath)
-    $nameMatch = [regex]::Match($currentName, '^(?<Prefix>.+)_(?<Stamp>\d{8}[-_]\d{6})\.(?<Extension>csv|xlsx)$', [Text.RegularExpressions.RegexOptions]::IgnoreCase)
+    $nameMatch = [regex]::Match($currentName, '^(?<Prefix>.+)_(?<Stamp>\d{8}[-_]\d{4}(?:\d{2})?)\.(?<Extension>csv|xlsx)$', [Text.RegularExpressions.RegexOptions]::IgnoreCase)
     if (-not $nameMatch.Success) { return $result }
     if ([string]::IsNullOrWhiteSpace($SiteHostname) -or [string]::IsNullOrWhiteSpace($SitePath) -or [string]::IsNullOrWhiteSpace($LibraryDisplayName) -or [string]::IsNullOrWhiteSpace($TargetFolderPath)) { return $result }
     if (-not (Connect-SmartM365GraphForSharePointUpload -AppId $AppId -TenantId $TenantId -Thumbprint $Thumbprint)) { return $result }
@@ -5423,9 +5424,9 @@ function Remove-SmartM365SharePointTimestampedCsvOlderThan {
         $relativeFilePath = Get-SmartM365SharePointRelativeFilePath -LocalFilePath $TimestampedPath
         $sharePointPath = (($targetRootPath.TrimEnd('/')) + '/' + $relativeFilePath.TrimStart('/'))
         $folderPath = $sharePointPath.Substring(0, $sharePointPath.LastIndexOf('/'))
-        $pattern = '^' + [regex]::Escape($nameMatch.Groups['Prefix'].Value) + '_(?<Stamp>\d{8}[-_]\d{6})\.' + [regex]::Escape($nameMatch.Groups['Extension'].Value) + '$'
+        $pattern = '^' + [regex]::Escape($nameMatch.Groups['Prefix'].Value) + '_(?<Stamp>\d{8}[-_]\d{4}(?:\d{2})?)\.' + [regex]::Escape($nameMatch.Groups['Extension'].Value) + '$'
         $cutoff = $ReferenceTime.AddDays(-$RetentionDays)
-        $formats = [string[]]@('yyyyMMdd_HHmmss', 'yyyyMMdd-HHmmss')
+        $formats = [string[]]@('yyyyMMdd_HHmmss', 'yyyyMMdd-HHmmss', 'yyyyMMdd_HHmm', 'yyyyMMdd-HHmm')
         $expired = New-Object System.Collections.ArrayList
         $uri = "https://graph.microsoft.com/v1.0/drives/{0}/root:/{1}:/children?`$select=id,name,file&`$top=999" -f $driveId, (ConvertTo-GraphDrivePath $folderPath)
         while (-not [string]::IsNullOrWhiteSpace($uri)) {

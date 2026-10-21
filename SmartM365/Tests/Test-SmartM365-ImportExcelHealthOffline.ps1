@@ -3,7 +3,7 @@
 .SYNOPSIS
     Synthetic ImportExcel startup/repair tests. Never touches installed modules or tenant data.
 .VERSION
-    1.0.1
+    1.0.2
 #>
 [CmdletBinding()]
 param([string]$TestRoot = (Join-Path ([IO.Path]::GetTempPath()) ('SmartM365-ImportExcelTests-' + [guid]::NewGuid().ToString('N'))))
@@ -269,7 +269,8 @@ $result=Initialize-SmartM365ImportExcel -SkipRepositoryRepair -RepairRoot $fixtu
     Assert-EP ($proxy -match "WindowsPowerShell/Modules/ImportExcel" -and $proxy -match 'Scope AllUsers -RequiredModuleRoot') 'ProxyAddresses AllUsers requirement unchanged'
     $startupCheck=$proxy.IndexOf('$script:ImportExcelManifestPath = Ensure-ProxyAddressesImportExcelAllUsers')
     Assert-EP ($startupCheck -gt 0 -and $startupCheck -lt $proxy.IndexOf('Add-PSSnapin $snapinName')) 'ProxyAddresses verifies security and Excel before loading Exchange'
-    Assert-EP ($proxy -match "MinimumVersion '1.0.58'") 'ProxyAddresses requires the fixed compatibility module'
+    $proxyMinimum=[regex]::Match($proxy,"SmartM365-WindowsPowerShell5\.psd1'\) -MinimumVersion '(?<V>[0-9.]+)'")
+    Assert-EP ($proxyMinimum.Success -and [version]$proxyMinimum.Groups['V'].Value -ge [version]'1.0.58') 'ProxyAddresses requires the fixed compatibility module (1.0.58 or later)'
     foreach($moduleRelative in @('Modules/SmartM365.Core/SmartM365.Core.psm1','Modules/SmartM365.Core/Compatibility/WindowsPowerShell5/SmartM365-WindowsPowerShell5.psm1')){
         $text=Get-Content (Join-Path $smartRoot $moduleRelative) -Raw
         Assert-EP ($text -match 'SmartM365-ImportExcelHealth.ps1' -and $text -match 'if \(\$moduleName -eq ''ImportExcel''\)') "Shared preflight routing: $moduleRelative"
