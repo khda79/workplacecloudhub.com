@@ -101,7 +101,7 @@ detailed tables for the last 24 hours and 7 days, then exits without acquiring t
 lock or launching inventory jobs.
 
 .VERSION
-1.5.53
+1.5.54
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -114,7 +114,7 @@ lock or launching inventory jobs.
     inside its own child process.
 
 .NOTES
-    Version : 1.5.53
+    Version : 1.5.54
     Author: https://github.com/khda79/workplacecloudhub.com
     Exit codes: 0 = normal end (recycle, DryRun, Once, summary sent), 1 = fatal error or summary send failure,
     2 = configuration or manifest error at startup, 3 = another live instance holds the lock,
@@ -151,7 +151,7 @@ $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -Requi
 try {
 $ErrorActionPreference = 'Stop'
 
-$ScriptVersion = "1.5.53"
+$ScriptVersion = "1.5.54"
 $ScriptName = 'SmartM365-Inventory-Orchestrator'
 $global:SmartM365ScriptFileName = [System.IO.Path]::GetFileName($PSCommandPath)
 $global:SmartM365ScriptVersion = $ScriptVersion
@@ -1211,6 +1211,22 @@ function ConvertTo-NormalizedJob {
         $dependencyMaxAgeHours = [int]$RawJob.DependencyMaxAgeHours
         if ($dependencyMaxAgeHours -lt 0) { $Errors.Add("Job '$name': DependencyMaxAgeHours cannot be negative.") }
     }
+    # Extra folders or files the job needs on this server, checked before each launch.
+    # Strings mean ReadWrite folders; objects are { Path; Access = Read|ReadWrite; PathType = Container|Leaf }.
+    $requiredPaths = @()
+    if ($RawJob.PSObject.Properties['RequiredPaths'] -and $null -ne $RawJob.RequiredPaths) {
+        foreach ($rawPath in @($RawJob.RequiredPaths)) {
+            if ($rawPath -is [string]) { $rawPath = [pscustomobject]@{ Path = $rawPath } }
+            $pathValue = if ($rawPath.PSObject.Properties['Path']) { ([string]$rawPath.Path).Trim() } else { '' }
+            $accessValue = if ($rawPath.PSObject.Properties['Access'] -and $rawPath.Access) { [string]$rawPath.Access } else { 'ReadWrite' }
+            $pathTypeValue = if ($rawPath.PSObject.Properties['PathType'] -and $rawPath.PathType) { [string]$rawPath.PathType } else { 'Container' }
+            if (-not $pathValue) { $Errors.Add("Job '$name': RequiredPaths entries need a Path."); continue }
+            if ($accessValue -notin @('Read', 'ReadWrite')) { $Errors.Add("Job '$name': RequiredPaths Access must be 'Read' or 'ReadWrite'.") }
+            if ($pathTypeValue -notin @('Container', 'Leaf')) { $Errors.Add("Job '$name': RequiredPaths PathType must be 'Container' or 'Leaf'.") }
+            if ($pathTypeValue -eq 'Leaf' -and $accessValue -eq 'ReadWrite') { $Errors.Add("Job '$name': RequiredPaths files can only be checked with Access 'Read'.") }
+            $requiredPaths += [pscustomobject]@{ Path = $pathValue; Access = $accessValue; PathType = $pathTypeValue }
+        }
+    }
     $powerShellEdition = 'PowerShell7'
     if ($RawJob.PSObject.Properties['PowerShellEdition'] -and $RawJob.PowerShellEdition) { $powerShellEdition = [string]$RawJob.PowerShellEdition }
     if ($powerShellEdition -notin @('PowerShell7', 'WindowsPowerShell')) {
@@ -1271,6 +1287,7 @@ function ConvertTo-NormalizedJob {
         DependencyMode = $dependencyMode
         DependencyMaxAgeHours = $dependencyMaxAgeHours
         PowerShellEdition = $powerShellEdition
+        RequiredPaths = $requiredPaths
         Schedule = [pscustomobject]@{
             Type = $scheduleType
             Times = $times
@@ -2568,6 +2585,9 @@ function Write-OrchestratorHeartbeat {
         PendingJobs = $pending
         ReadyCapabilities = if ($null -ne $script:ServerCapabilities) { @($script:ServerCapabilities.ReadyCapabilities) } else { @() }
         CapabilityGeneratedAtUtc = if ($null -ne $script:ServerCapabilities) { [string]$script:ServerCapabilities.GeneratedAtUtc } else { '' }
+        PrerequisiteBlocks = @(if ($script:State -is [hashtable] -and $script:State['PrerequisiteBlocks'] -is [hashtable]) { $script:State['PrerequisiteBlocks'].Values | ForEach-Object { @{ Name = [string]$_.Name; Jobs = @($_.Jobs); Capabilities = @($_.Capabilities); Detail = [string]$_.Detail; SinceUtc = [string]$_.SinceUtc } } })
+        CertificateNotAfterUtc = if ($null -ne $script:LastCertificateReadiness) { [string]$script:LastCertificateReadiness.NotAfterUtc } else { '' }
+        CertificateDaysRemaining = if ($null -ne $script:LastCertificateReadiness) { $script:LastCertificateReadiness.DaysRemaining } else { $null }
         ElectionPlanId = if ($null -ne $script:ElectionPlan) { [string]$script:ElectionPlan.PlanId } else { '' }
         ElectedJobsOwned = if ($null -ne $script:ElectionPlan) { @($script:ElectionPlan.Assignments | Where-Object { $_.OwnerServer -eq $env:COMPUTERNAME } | ForEach-Object { [string]$_.JobName } | Sort-Object) } else { @() }
         StatePersistenceHealthy = [bool]$script:StatePersistenceHealthy
@@ -4674,7 +4694,7 @@ function Update-OrchestratorPipelineRequests {
     foreach ($batchJob in @($run.Jobs)) { [void]$batchJobNames.Add([string]$batchJob.JobName) }
     $script:PipelineBatchJobNames = @{ ([string]$run.BatchId) = $batchJobNames }
     if ([string]$run.Tenant -ne [string]$Tenant) {
-        foreach ($jobStatus in @($run.Jobs | Where-Object { $_.Status -notin @('Success', 'CompletedWithWarnings', 'Failed', 'TimedOut', 'Interrupted', 'BlockedDependencyFailed', 'BlockedDependencyTimeout', 'Rejected', 'MissingStatus', 'Cancelled') })) {
+        foreach ($jobStatus in @($run.Jobs | Where-Object { $_.Status -notin @('Success', 'CompletedWithWarnings', 'Failed', 'TimedOut', 'Interrupted', 'BlockedDependencyFailed', 'BlockedDependencyTimeout', 'BlockedPrerequisite', 'Rejected', 'MissingStatus', 'Cancelled') })) {
             Set-OrchestratorPipelineJobStatus -BatchId $run.BatchId -JobName $jobStatus.JobName -Status Rejected -Detail ("Request tenant '{0}' does not match resident tenant '{1}'." -f $run.Tenant, $Tenant)
         }
         $script:PipelinePending = $pending
@@ -4865,24 +4885,362 @@ function Update-OrchestratorServerCapabilities {
             -CertificateThumbprint $global:Thumbprint `
             -Organization $script:Settings.ExchangeOnlineOrganization `
             -ProbeMode $script:Settings.CapabilityProbeMode `
-            -ProbeTimeoutSeconds $script:Settings.CapabilityProbeTimeoutSeconds
+            -ProbeTimeoutSeconds $script:Settings.CapabilityProbeTimeoutSeconds `
+            -DataPathChecks @(Get-OrchestratorTenantDataPathCheck) `
+            -PathTimeoutSeconds $script:Settings.PrerequisitePathTimeoutSeconds `
+            -CertificateExpiryWarningDays $script:Settings.CertificateExpiryWarningDays
         $capabilities | Add-Member -NotePropertyName ElectionWeight -NotePropertyValue $script:Settings.ElectionWeight -Force
         $localJobPolicy = if ($script:Settings.ServerJobPolicies.ContainsKey($env:COMPUTERNAME)) { $script:Settings.ServerJobPolicies[$env:COMPUTERNAME] } else { $null }
         $capabilities | Add-Member -NotePropertyName ServerJobPolicy -NotePropertyValue $localJobPolicy -Force
-        Write-FileAtomically -Path $script:Settings.CapabilitiesPath -Content ($capabilities | ConvertTo-Json -Depth 10)
-        $script:ServerCapabilities = $capabilities
-        $readyText = if (@($capabilities.ReadyCapabilities).Count -gt 0) { @($capabilities.ReadyCapabilities) -join ', ' } else { 'none' }
+        # Launch-time prerequisite blocks stay applied until their own re-check passes.
+        $script:ServerCapabilitiesBase = $capabilities
+        Publish-OrchestratorEffectiveCapability
+        $readyText = if (@($script:ServerCapabilities.ReadyCapabilities).Count -gt 0) { @($script:ServerCapabilities.ReadyCapabilities) -join ', ' } else { 'none' }
         $jobPolicyText = if ($null -ne $localJobPolicy) { 'only jobs requiring ' + (@($localJobPolicy.OnlyJobsRequiring) -join ', ') } else { 'none' }
         Write-OrchestratorLog -Message ("Automatic server capabilities refreshed: ready={0}; probeMode={1}; weight={2}; jobPolicy={3}; file={4}." -f $readyText, $capabilities.ProbeMode, $script:Settings.ElectionWeight, $jobPolicyText, $script:Settings.CapabilitiesPath)
         foreach ($probe in @($capabilities.Results | Where-Object { -not $_.Ready })) {
             Write-OrchestratorLog -Message ("Capability {0} unavailable: {1}" -f $probe.Name, $probe.Detail) -Level WARN
         }
-        $script:LastElectionPlanRefreshUtc = [datetime]::MinValue
+        foreach ($block in @($script:ServerCapabilities.PrerequisiteBlocks)) {
+            Write-OrchestratorLog -Message ("Launch prerequisite block kept until its re-check passes: {0}: {1}" -f $block.Name, $block.Detail) -Level WARN
+        }
     }
     catch {
         $script:ServerCapabilities = $null
+        $script:ServerCapabilitiesBase = $null
         Write-OrchestratorLog -Message ("Automatic capability detection failed; elected jobs fail closed: {0}" -f $_.Exception.Message) -Level ERROR
     }
+}
+
+# ==========================================================
+# Launch prerequisites (application certificate, shares)
+# ==========================================================
+function Get-OrchestratorPrerequisiteBlockTable {
+    # Persisted with the state: a recycle keeps the blocks published until a re-check passes.
+    if (-not $script:State.ContainsKey('PrerequisiteBlocks') -or $script:State.PrerequisiteBlocks -isnot [hashtable]) {
+        $script:State.PrerequisiteBlocks = @{}
+    }
+    return $script:State.PrerequisiteBlocks
+}
+
+function Get-OrchestratorTenantDataPathCheck {
+    return @(foreach ($root in @($script:Settings.TenantDataRoots)) {
+            [pscustomobject]@{ Name = [string]$root.Name; Path = [string]$root.Path; Access = 'ReadWrite'; PathType = 'Container'; Capability = 'SharedRuntime' }
+        })
+}
+
+function Get-OrchestratorJobPrerequisitePathCheck {
+    param([Parameter(Mandatory = $true)]$Job)
+
+    $checks = [System.Collections.Generic.List[object]]::new()
+    $checks.Add([pscustomobject]@{ Name = 'Job script'; Path = (Resolve-OrchestratorJobPath -Path $Job.ScriptPath); Access = 'Read'; PathType = 'Leaf'; Capability = '' })
+    if ($Job.PSObject.Properties['LauncherPath'] -and -not [string]::IsNullOrWhiteSpace([string]$Job.LauncherPath)) {
+        $checks.Add([pscustomobject]@{ Name = 'Job launcher'; Path = (Resolve-OrchestratorJobPath -Path ([string]$Job.LauncherPath)); Access = 'Read'; PathType = 'Leaf'; Capability = '' })
+    }
+    foreach ($dataCheck in @(Get-OrchestratorTenantDataPathCheck)) { $checks.Add($dataCheck) }
+    if ($Job.PSObject.Properties['RequiredPaths']) {
+        foreach ($requiredPath in @($Job.RequiredPaths)) {
+            $resolved = Resolve-OrchestratorJobPath -Path (Resolve-OrchestratorJobArguments -Arguments ([string]$requiredPath.Path))
+            $checks.Add([pscustomobject]@{ Name = 'Required path'; Path = $resolved; Access = [string]$requiredPath.Access; PathType = [string]$requiredPath.PathType; Capability = '' })
+        }
+    }
+    return $checks.ToArray()
+}
+
+function Test-OrchestratorJobLaunchPrerequisite {
+    param(
+        [Parameter(Mandatory = $true)]$Job,
+        [datetime]$NowUtc = [datetime]::UtcNow
+    )
+
+    try { $pathChecks = Get-OrchestratorJobPrerequisitePathCheck -Job $Job }
+    catch {
+        return [pscustomobject]@{
+            Ready = $false
+            Certificate = $null
+            Failures = @([pscustomobject]@{
+                    Key = 'JobPaths|' + $Job.Name; Kind = 'JobPaths'; Name = 'Job paths'; Path = ''; Access = 'Read'; PathType = 'Leaf'
+                    Capabilities = @(); JobSpecific = $true; Detail = ("Job paths could not be resolved: {0}" -f $_.Exception.Message)
+                })
+        }
+    }
+    return Test-SmartM365OrchestratorLaunchPrerequisite -RequiredCapabilities @($Job.RequiredCapabilities) -CertificateThumbprint ([string]$global:Thumbprint) -PathChecks $pathChecks -Cache $script:PrerequisiteCache -CacheMinutes $script:Settings.PrerequisiteCacheMinutes -PathTimeoutSeconds $script:Settings.PrerequisitePathTimeoutSeconds -CertificateExpiryWarningDays $script:Settings.CertificateExpiryWarningDays -ServerName $env:COMPUTERNAME -NowUtc $NowUtc
+}
+
+function Register-OrchestratorPrerequisiteFailure {
+    # Returns $true when the published capabilities must change.
+    param(
+        [Parameter(Mandatory = $true)][string]$JobName,
+        [Parameter(Mandatory = $true)][object[]]$Failures,
+        [datetime]$NowUtc = [datetime]::UtcNow
+    )
+
+    $blocks = Get-OrchestratorPrerequisiteBlockTable
+    $changed = $false
+    foreach ($failure in $Failures) {
+        $key = [string]$failure.Key
+        if (-not $blocks.ContainsKey($key)) {
+            $blocks[$key] = @{
+                Key = $key; Kind = [string]$failure.Kind; Name = [string]$failure.Name; Path = [string]$failure.Path
+                Access = [string]$failure.Access; PathType = [string]$failure.PathType
+                Capabilities = @($failure.Capabilities | ForEach-Object { [string]$_ }); JobSpecific = [bool]$failure.JobSpecific
+                Jobs = @(); Detail = [string]$failure.Detail; SinceUtc = $NowUtc.ToString('o'); LastCheckedUtc = $NowUtc.ToString('o')
+                AlertSentUtc = ''; AlertAttemptUtc = ''; AlertDetail = ''
+            }
+            if (@($blocks[$key].Capabilities).Count -gt 0) { $changed = $true }
+            $withdrawn = if (@($blocks[$key].Capabilities).Count -gt 0) { @($blocks[$key].Capabilities) -join ', ' } else { 'none (job-specific)' }
+            Write-OrchestratorLog -Message ("Launch prerequisite missing on {0}: {1} Capabilities withdrawn: {2}." -f $env:COMPUTERNAME, $failure.Detail, $withdrawn) -Level ERROR
+        }
+        $entry = $blocks[$key]
+        $entry.Detail = [string]$failure.Detail
+        $entry.LastCheckedUtc = $NowUtc.ToString('o')
+        if ($JobName -notin @($entry.Jobs)) {
+            $entry.Jobs = @(@($entry.Jobs) + $JobName | Sort-Object -Unique)
+            if ($entry.JobSpecific) { $changed = $true }
+        }
+    }
+    return $changed
+}
+
+function Publish-OrchestratorEffectiveCapability {
+    # Probed capabilities minus the prerequisites that failed at launch time; the election plan
+    # reads this file, so a withdrawn capability or job is reassigned to another eligible server.
+    if ($null -eq $script:ServerCapabilitiesBase) { return }
+    $blocks = @((Get-OrchestratorPrerequisiteBlockTable).Values)
+    $blockedCapabilities = @($blocks | ForEach-Object { @($_.Capabilities) } | Where-Object { $_ } | Sort-Object -Unique)
+    $blockedJobs = @($blocks | Where-Object { $_.JobSpecific } | ForEach-Object { @($_.Jobs) } | Where-Object { $_ } | Sort-Object -Unique)
+    $effective = [ordered]@{}
+    foreach ($property in $script:ServerCapabilitiesBase.PSObject.Properties) { $effective[$property.Name] = $property.Value }
+    $effective.ReadyCapabilities = @($script:ServerCapabilitiesBase.ReadyCapabilities | Where-Object { $_ -notin $blockedCapabilities })
+    $effective.BlockedJobs = $blockedJobs
+    $effective.PrerequisiteBlocks = @($blocks | Sort-Object { [string]$_.Key } | ForEach-Object {
+            [pscustomobject]@{ Name = [string]$_.Name; Kind = [string]$_.Kind; Path = [string]$_.Path; Capabilities = @($_.Capabilities); Jobs = @($_.Jobs); Detail = [string]$_.Detail; SinceUtc = [string]$_.SinceUtc }
+        })
+    $script:ServerCapabilities = [pscustomobject]$effective
+    $script:LastElectionPlanRefreshUtc = [datetime]::MinValue
+    Write-FileAtomically -Path $script:Settings.CapabilitiesPath -Content ($script:ServerCapabilities | ConvertTo-Json -Depth 10)
+}
+
+function Test-OrchestratorLaunchPrerequisiteGate {
+    # Runs before any lease or claim: a blocked occurrence is not consumed and stays due.
+    param(
+        [Parameter(Mandatory = $true)]$Job,
+        [Parameter(Mandatory = $true)][datetime]$Occurrence,
+        [Parameter(Mandatory = $true)][string]$Reason,
+        [int]$Attempt = 0,
+        [switch]$IsForced,
+        [AllowNull()]$PipelineInfo = $null,
+        [Parameter(Mandatory = $true)][datetime]$Now
+    )
+
+    if (-not $script:Settings.LaunchPrerequisiteChecksEnabled) { return $true }
+    $name = [string]$Job.Name
+    $nowUtc = $Now.ToUniversalTime()
+    $check = Test-OrchestratorJobLaunchPrerequisite -Job $Job -NowUtc $nowUtc
+    if ($check.Ready) {
+        [void]$script:PrerequisiteBlockedOccurrences.Remove($name)
+        return $true
+    }
+
+    $failures = @($check.Failures)
+    if (Register-OrchestratorPrerequisiteFailure -JobName $name -Failures $failures -NowUtc $nowUtc) {
+        try { Publish-OrchestratorEffectiveCapability }
+        catch { Write-OrchestratorLog -Message ("Withdrawn capabilities could not be published: {0}" -f $_.Exception.Message) -Level WARN }
+    }
+    $detail = ($failures | ForEach-Object { [string]$_.Detail }) -join ' '
+    $outcome = if ($IsForced) { '-Force request refused.' }
+    elseif ($Job.AssignmentMode -eq 'Elected') { 'The capability or job is withdrawn from this server so the election can reassign the occurrence to another eligible server.' }
+    else { 'The occurrence stays due and is retried here when the prerequisite check cache expires.' }
+    $occurrenceKey = $Occurrence.ToUniversalTime().ToString('o')
+    if (-not $script:PrerequisiteBlockedOccurrences.ContainsKey($name) -or $script:PrerequisiteBlockedOccurrences[$name] -ne $occurrenceKey) {
+        $script:PrerequisiteBlockedOccurrences[$name] = $occurrenceKey
+        try { Add-JobRunCsvRow -JobName $name -ScheduledTime $Occurrence -StartTime $null -EndTime $Now -DurationSec 0 -ExitCode $null -Status 'BlockedPrerequisite' -RetryCount $Attempt -LogPath '' }
+        catch { Write-OrchestratorLog -Message ("Job {0}: BlockedPrerequisite run row could not be written: {1}" -f $name, $_.Exception.Message) -Level WARN }
+        Write-OrchestratorLog -Message ("Job {0}: {1} occurrence {2} not launched on {3} (BlockedPrerequisite): {4} {5}" -f $name, $Reason, $Occurrence.ToString('yyyy-MM-dd HH:mm'), $env:COMPUTERNAME, $detail, $outcome) -Level ERROR
+        if ($null -ne $PipelineInfo -and $Reason -eq 'pipeline') {
+            Set-OrchestratorPipelineJobStatus -BatchId ([string]$PipelineInfo.BatchId) -JobName $name -Status Pending -Attempt $Attempt -Detail ("Waiting for launch prerequisites on {0}: {1}" -f $env:COMPUTERNAME, $detail)
+        }
+    }
+    if ($IsForced) { $script:ForcedPending = @($script:ForcedPending | Where-Object { $_ -ne $name }) }
+    if ($null -ne $PipelineInfo) {
+        $waitTimeout = [int]$Job.DependencyWaitTimeoutMinutes
+        if ($waitTimeout -le 0) { $waitTimeout = [int]$script:Settings.DependencyWaitTimeoutMinutes }
+        $waitMinutes = [int]([datetime]::UtcNow - [datetime]$PipelineInfo.CreatedAtUtc).TotalMinutes
+        if ($waitTimeout -gt 0 -and $waitMinutes -ge $waitTimeout) {
+            Set-OrchestratorPipelineJobStatus -BatchId ([string]$PipelineInfo.BatchId) -JobName $name -Status BlockedPrerequisite -Attempt $Attempt -Detail ("Launch prerequisites still missing on {0} after {1} min: {2}" -f $env:COMPUTERNAME, $waitMinutes, $detail)
+        }
+    }
+    return $false
+}
+
+function Send-OrchestratorPrerequisiteAlert {
+    param(
+        [Parameter(Mandatory = $true)][datetime]$NowUtc,
+        [AllowEmptyCollection()][object[]]$Recovered = @()
+    )
+
+    $server = [string]$env:COMPUTERNAME
+    $blocks = Get-OrchestratorPrerequisiteBlockTable
+    $nowOffset = [datetimeoffset]$NowUtc
+    $due = @($blocks.Values | Where-Object {
+            $attempt = ConvertTo-OrchestratorUtcTime -Value $_.AlertAttemptUtc
+            $sent = ConvertTo-OrchestratorUtcTime -Value $_.AlertSentUtc
+            if ($null -ne $attempt -and ($null -eq $sent -or $attempt -gt $sent) -and ($nowOffset - $attempt).TotalMinutes -lt 30) { $false }
+            else { $null -eq $sent -or [string]$_.AlertDetail -ne [string]$_.Detail -or ($nowOffset - $sent).TotalHours -ge $script:Settings.PrerequisiteAlertRepeatHours }
+        })
+    if ($due.Count -gt 0) {
+        $cell = "style='padding:5px;border:1px solid #DDDDDD;'"
+        $rows = foreach ($entry in @($blocks.Values | Sort-Object { [string]$_.Key })) {
+            $capabilities = if (@($entry.Capabilities).Count -gt 0) { @($entry.Capabilities) -join ', ' } else { 'job-specific' }
+            "<tr><td $cell>{0}</td><td $cell>{1}</td><td $cell>{2}</td><td $cell>{3}</td><td $cell>{4}</td></tr>" -f (ConvertTo-HtmlText -Text $entry.Name), (ConvertTo-HtmlText -Text $capabilities), (ConvertTo-HtmlText -Text (@($entry.Jobs) -join ', ')), (ConvertTo-HtmlText -Text $entry.SinceUtc), (ConvertTo-HtmlText -Text $entry.Detail)
+        }
+        $body = @"
+<html><body style='font-family:Segoe UI,Arial,sans-serif;font-size:13px;color:#1F2937;'>
+<h2 style='color:#D13438;'>Orchestrator launch prerequisites missing</h2>
+<p>Server <b>$(ConvertTo-HtmlText -Text $server)</b> did not launch job(s) for tenant <b>$(ConvertTo-HtmlText -Text $Tenant)</b> because a prerequisite is missing. No occurrence was consumed: elected jobs are reassigned to another eligible server when one exists, other jobs stay due on this server.</p>
+<table style='border-collapse:collapse;width:100%;'><thead><tr><th $cell>Prerequisite</th><th $cell>Withdrawn capabilities</th><th $cell>Jobs</th><th $cell>Since (UTC)</th><th $cell>Details</th></tr></thead><tbody>$($rows -join '')</tbody></table>
+<p>Check the application certificate (store, expiry, private key permission for the service account) and the shares used by the scripts and the tenant data roots.</p>
+<p style='color:#5F6B7A;'>Sent by $ScriptName v$ScriptVersion on $(ConvertTo-HtmlText -Text $server).</p>
+</body></html>
+"@
+        $sentNow = [bool](Send-OrchestratorMail -Subject "[SmartM365 Orchestrator][$Tenant] Launch prerequisites missing on $server" -HtmlBody $body -IsError)
+        foreach ($entry in $due) {
+            $entry.AlertAttemptUtc = $NowUtc.ToString('o')
+            if ($sentNow) { $entry.AlertSentUtc = $NowUtc.ToString('o'); $entry.AlertDetail = [string]$entry.Detail }
+        }
+    }
+
+    $recoveredAlerted = @($Recovered | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_.AlertSentUtc) })
+    if ($recoveredAlerted.Count -gt 0) {
+        $items = ($recoveredAlerted | ForEach-Object { '<li>{0}: {1}</li>' -f (ConvertTo-HtmlText -Text $_.Name), (ConvertTo-HtmlText -Text (@($_.Jobs) -join ', ')) }) -join ''
+        $body = @"
+<html><body style='font-family:Segoe UI,Arial,sans-serif;font-size:13px;color:#1F2937;'>
+<h2 style='color:#107C10;'>Orchestrator launch prerequisites recovered</h2>
+<p>Server <b>$(ConvertTo-HtmlText -Text $server)</b> verified again the following prerequisite(s) for tenant <b>$(ConvertTo-HtmlText -Text $Tenant)</b>; its capabilities are published again.</p>
+<ul>$items</ul>
+<p style='color:#5F6B7A;'>Sent by $ScriptName v$ScriptVersion on $(ConvertTo-HtmlText -Text $server).</p>
+</body></html>
+"@
+        $null = Send-OrchestratorMail -Subject "[SmartM365 Orchestrator][$Tenant] Launch prerequisites recovered on $server" -HtmlBody $body
+    }
+}
+
+function Update-OrchestratorCertificateExpiryWarning {
+    param([Parameter(Mandatory = $true)][datetime]$NowUtc)
+
+    if ($script:Settings.CertificateExpiryWarningDays -le 0 -or [string]::IsNullOrWhiteSpace([string]$global:Thumbprint)) { return }
+    $certificate = Get-SmartM365OrchestratorCachedCertificateReadiness -Thumbprint ([string]$global:Thumbprint) -Cache $script:PrerequisiteCache -CacheMinutes $script:Settings.PrerequisiteCacheMinutes -ExpiryWarningDays $script:Settings.CertificateExpiryWarningDays -NowUtc $NowUtc
+    $script:LastCertificateReadiness = $certificate
+    if (-not $certificate.Ready -or -not $certificate.ExpiresSoon) { return }
+    if (-not $script:State.ContainsKey('CertificateExpiryWarning') -or $script:State.CertificateExpiryWarning -isnot [hashtable]) {
+        $script:State.CertificateExpiryWarning = @{ LastSentDate = ''; LastAttemptUtc = '' }
+    }
+    $warning = $script:State.CertificateExpiryWarning
+    $today = $NowUtc.ToLocalTime().ToString('yyyy-MM-dd')
+    if ([string]$warning.LastSentDate -eq $today) { return }
+    $lastAttempt = ConvertTo-OrchestratorUtcTime -Value $warning.LastAttemptUtc
+    if ($null -ne $lastAttempt -and (([datetimeoffset]$NowUtc) - $lastAttempt).TotalMinutes -lt 30) { return }
+    $warning.LastAttemptUtc = $NowUtc.ToString('o')
+
+    $notAfter = (ConvertTo-OrchestratorUtcTime -Value $certificate.NotAfterUtc).ToString('yyyy-MM-dd HH:mm')
+    $message = "Application certificate expires in {0} day(s), on {1} UTC (warning threshold {2} days), on {3}. Renew it and install it with its private key for the service account on every orchestrator server before that date." -f $certificate.DaysRemaining, $notAfter, $script:Settings.CertificateExpiryWarningDays, $env:COMPUTERNAME
+    Write-OrchestratorLog -Message $message -Level WARN
+    $body = @"
+<html><body style='font-family:Segoe UI,Arial,sans-serif;font-size:13px;color:#1F2937;'>
+<h2 style='color:#FF8C00;'>Orchestrator application certificate expires soon</h2>
+<p>Tenant <b>$(ConvertTo-HtmlText -Text $Tenant)</b>: $(ConvertTo-HtmlText -Text $message)</p>
+<p>Once expired, Graph, Exchange Online and Teams jobs are no longer launched on this server.</p>
+<p style='color:#5F6B7A;'>Sent by $ScriptName v$ScriptVersion on $(ConvertTo-HtmlText -Text $env:COMPUTERNAME).</p>
+</body></html>
+"@
+    if (Send-OrchestratorMail -Subject "[SmartM365 Orchestrator][$Tenant] Application certificate expires in $($certificate.DaysRemaining) day(s) ($env:COMPUTERNAME)" -HtmlBody $body -IsError) {
+        $warning.LastSentDate = $today
+    }
+}
+
+function Invoke-OrchestratorPrerequisiteMonitoring {
+    # Re-checks recorded blocks (throttled by the cache duration), republishes recovered
+    # capabilities, sends deduplicated alerts and the certificate expiry warning.
+    param([Parameter(Mandatory = $true)][datetime]$Now)
+
+    $nowUtc = $Now.ToUniversalTime()
+    $nowOffset = [datetimeoffset]$nowUtc
+    $blocks = Get-OrchestratorPrerequisiteBlockTable
+    $recovered = [System.Collections.Generic.List[object]]::new()
+    $throttleMinutes = [math]::Max(1, [int]$script:Settings.PrerequisiteCacheMinutes)
+    foreach ($key in @($blocks.Keys)) {
+        $entry = $blocks[$key]
+        $lastChecked = ConvertTo-OrchestratorUtcTime -Value $entry.LastCheckedUtc
+        if ($null -ne $lastChecked -and ($nowOffset - $lastChecked).TotalMinutes -lt $throttleMinutes) { continue }
+        $knownJobs = @($entry.Jobs | Where-Object { $script:Manifest.JobsByName.ContainsKey([string]$_) })
+        $ready = $false
+        $detail = ''
+        if ($entry.JobSpecific -and $knownJobs.Count -eq 0) { $ready = $true }
+        elseif ($entry.Kind -eq 'Certificate') {
+            $certificate = Get-SmartM365OrchestratorCachedCertificateReadiness -Thumbprint ([string]$global:Thumbprint) -Cache $script:PrerequisiteCache -CacheMinutes $script:Settings.PrerequisiteCacheMinutes -ExpiryWarningDays $script:Settings.CertificateExpiryWarningDays -NowUtc $nowUtc
+            $ready = [bool]$certificate.Ready
+            $detail = [string]$certificate.Detail
+        }
+        elseif ($entry.Kind -eq 'Path') {
+            $capability = if (@($entry.Capabilities).Count -gt 0) { [string]@($entry.Capabilities)[0] } else { '' }
+            $pathCheck = [pscustomobject]@{ Name = $entry.Name; Path = $entry.Path; Access = $entry.Access; PathType = $entry.PathType; Capability = $capability }
+            $result = Test-SmartM365OrchestratorLaunchPrerequisite -PathChecks @($pathCheck) -Cache $script:PrerequisiteCache -CacheMinutes $script:Settings.PrerequisiteCacheMinutes -PathTimeoutSeconds $script:Settings.PrerequisitePathTimeoutSeconds -ServerName $env:COMPUTERNAME -NowUtc $nowUtc
+            $ready = [bool]$result.Ready
+            if (-not $ready) { $detail = [string]$result.Failures[0].Detail }
+        }
+        else {
+            $ready = $true
+            foreach ($jobName in $knownJobs) {
+                try { $null = Get-OrchestratorJobPrerequisitePathCheck -Job $script:Manifest.JobsByName[[string]$jobName] }
+                catch { $ready = $false; $detail = ("Job paths could not be resolved: {0}" -f $_.Exception.Message) }
+            }
+        }
+        $entry.LastCheckedUtc = $nowUtc.ToString('o')
+        if ($ready) {
+            [void]$blocks.Remove($key)
+            $recovered.Add($entry)
+            foreach ($jobName in @($entry.Jobs)) { [void]$script:PrerequisiteBlockedOccurrences.Remove([string]$jobName) }
+            $target = if ($entry.Path) { $entry.Path } else { $entry.Kind }
+            $jobsText = if (@($entry.Jobs).Count -gt 0) { @($entry.Jobs) -join ', ' } else { 'none' }
+            Write-OrchestratorLog -Message ("Launch prerequisite recovered on {0}: {1} ({2}); affected jobs: {3}." -f $env:COMPUTERNAME, $entry.Name, $target, $jobsText)
+        }
+        elseif ($detail) { $entry.Detail = $detail }
+    }
+    if ($recovered.Count -gt 0) {
+        try { Publish-OrchestratorEffectiveCapability }
+        catch { Write-OrchestratorLog -Message ("Recovered capabilities could not be published: {0}" -f $_.Exception.Message) -Level WARN }
+    }
+    Send-OrchestratorPrerequisiteAlert -NowUtc $nowUtc -Recovered $recovered.ToArray()
+    Update-OrchestratorCertificateExpiryWarning -NowUtc $nowUtc
+}
+
+function New-OrchestratorPrerequisiteSummaryHtml {
+    # Certificate expiry and open launch blocks of every server, from their published capabilities.
+    $cell = "style='padding:5px;border:1px solid #DDDDDD;'"
+    $servers = @($script:Settings.ExpectedOrchestratorServers + $env:COMPUTERNAME | ForEach-Object { ([string]$_).ToUpperInvariant() } | Where-Object { $_ } | Sort-Object -Unique)
+    $rows = foreach ($serverName in $servers) {
+        $certificateText = 'unknown'
+        $blocksText = 'none'
+        try {
+            $path = Join-Path -Path (Join-Path -Path $script:Settings.SharedDataFolderPath -ChildPath $serverName) -ChildPath 'Orchestrator-Capabilities.json'
+            if (Get-SmartM365JsonReadPath $path -Optional) {
+                $document = (Read-SmartM365JsonDocument $path).Document
+                if ($document.PSObject.Properties['CertificateStatus'] -and $null -ne $document.CertificateStatus) {
+                    $status = $document.CertificateStatus
+                    $notAfter = ConvertTo-OrchestratorUtcTime -Value $status.NotAfterUtc
+                    $certificateText = if ($status.Ready -and $null -ne $notAfter) {
+                        "valid until {0} UTC ({1} day(s){2})" -f $notAfter.ToString('yyyy-MM-dd'), $status.DaysRemaining, $(if ($status.ExpiresSoon) { ', renew soon' } else { '' })
+                    } else { [string]$status.Reason }
+                }
+                if ($document.PSObject.Properties['PrerequisiteBlocks'] -and @($document.PrerequisiteBlocks).Count -gt 0) {
+                    $blocksText = (@($document.PrerequisiteBlocks) | ForEach-Object { '{0}: {1}' -f $_.Name, $_.Detail }) -join ' | '
+                }
+            }
+        }
+        catch { $certificateText = 'capabilities unreadable: ' + $_.Exception.Message }
+        "<tr><td $cell>{0}</td><td $cell>{1}</td><td $cell>{2}</td></tr>" -f (ConvertTo-HtmlText -Text $serverName), (ConvertTo-HtmlText -Text $certificateText), (ConvertTo-HtmlText -Text $blocksText)
+    }
+    return "<table style='border-collapse:collapse;width:100%;'><thead><tr><th $cell>Server</th><th $cell>Application certificate</th><th $cell>Open launch prerequisite blocks</th></tr></thead><tbody>$($rows -join '')</tbody></table>"
 }
 
 function Get-LiveOrchestratorServerCapabilities {
@@ -5442,7 +5800,7 @@ function Invoke-LaunchPhase {
                 $dependencyStatus = Get-OrchestratorPipelineDependencyStatus -BatchId ([string]$pipelineInfo.BatchId) -JobName $dep
                 $dependencyJob = if ($script:Manifest.JobsByName.ContainsKey($dep)) { $script:Manifest.JobsByName[$dep] } else { $null }
                 if ($dependencyStatus -in @('Success', 'CompletedWithWarnings')) { continue }
-                if ($dependencyStatus -in @('Failed', 'TimedOut', 'Interrupted', 'Cancelled', 'BlockedDependencyFailed', 'BlockedDependencyTimeout', 'Rejected', 'MissingStatus')) {
+                if ($dependencyStatus -in @('Failed', 'TimedOut', 'Interrupted', 'Cancelled', 'BlockedDependencyFailed', 'BlockedDependencyTimeout', 'BlockedPrerequisite', 'Rejected', 'MissingStatus')) {
                     if ($null -eq $dependencyJob -or -not $dependencyJob.ContinueOnError) { $pipelineBlockedDependency = $dep; break }
                     continue
                 }
@@ -5581,6 +5939,10 @@ function Invoke-LaunchPhase {
             Write-OrchestratorRuntimeUpdateWarning -Key ("election-no-plan:{0}" -f $name) -Message ("Job {0}: elected occurrence {1} is queued because no shared election plan is available." -f $name, $occurrence.ToString('yyyy-MM-dd HH:mm')) -Now $Now
             continue
         }
+
+        # Certificate and shares are verified on this server before any lease or claim is taken.
+        $prerequisitePipelineInfo = if ($isPipeline) { $pipelineInfo } else { $null }
+        if (-not (Test-OrchestratorLaunchPrerequisiteGate -Job $job -Occurrence $occurrence -Reason $reason -Attempt $attempt -IsForced:$isForced -PipelineInfo $prerequisitePipelineInfo -Now $Now)) { continue }
 
         # Same short-lived gate as GUI transitions: activation cannot race process creation.
         $maintenanceGate = $null
@@ -5816,7 +6178,7 @@ function Get-OrchestratorJobRunStatistics {
     param([Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$Rows)
 
     $failureStatuses = @('Failed', 'TimedOut', 'Interrupted', 'Cancelled', 'BlockedDependencyFailed', 'BlockedDependencyTimeout')
-    $warningStatuses = @('CompletedWithWarnings', 'Retried', 'Skipped')
+    $warningStatuses = @('CompletedWithWarnings', 'Retried', 'Skipped', 'BlockedPrerequisite')
     return [pscustomobject]@{
         Total = @($Rows).Count
         Success = @($Rows | Where-Object { $_.Status -eq 'Success' }).Count
@@ -5832,7 +6194,7 @@ function Get-OrchestratorJobSummaryRows {
     )
 
     $failureStatuses = @('Failed', 'TimedOut', 'Interrupted', 'Cancelled', 'BlockedDependencyFailed', 'BlockedDependencyTimeout')
-    $warningStatuses = @('CompletedWithWarnings', 'Retried', 'Skipped')
+    $warningStatuses = @('CompletedWithWarnings', 'Retried', 'Skipped', 'BlockedPrerequisite')
     $summaryRows = [System.Collections.Generic.List[object]]::new()
 
     foreach ($jobGroup in @($Rows7Days | Group-Object -Property JobName)) {
@@ -5878,7 +6240,7 @@ function New-OrchestratorJobRunsTableHtml {
         $color = '#1F2937'
         if ($row.Status -eq 'Success') { $color = '#107C10' }
         elseif ($row.Status -in @('Failed', 'TimedOut', 'Interrupted', 'Cancelled', 'BlockedDependencyFailed', 'BlockedDependencyTimeout')) { $color = '#D13438' }
-        elseif ($row.Status -in @('CompletedWithWarnings', 'Skipped', 'Retried')) { $color = '#FF8C00' }
+        elseif ($row.Status -in @('CompletedWithWarnings', 'Skipped', 'Retried', 'BlockedPrerequisite')) { $color = '#FF8C00' }
 
         $tableRows += "<tr>" +
             "<td style='padding:3px 10px;border:1px solid #DDDDDD;'>$(ConvertTo-HtmlText -Text $row.JobName)</td>" +
@@ -5993,6 +6355,8 @@ function Send-OrchestratorExecutionSummary {
 <h3>Execution overview by job</h3>
 <p>One row per job across all orchestrator servers observed during the last 7 days. Counts include retries and skipped attempts.</p>
 $summaryTable
+<h3>Server launch prerequisites</h3>
+$(New-OrchestratorPrerequisiteSummaryHtml)
 <h3>Last 24 hours</h3>
 <p>$($stats24Hours.Total) execution(s): <span style='color:#107C10;font-weight:bold;'>$($stats24Hours.Success) success</span>, <span style='color:#D13438;font-weight:bold;'>$($stats24Hours.Failure) failure</span>, <span style='color:#FF8C00;font-weight:bold;'>$($stats24Hours.Warning) warning/skipped</span>.</p>
 $table24Hours
@@ -6428,6 +6792,10 @@ $script:StatePersistenceFailureCount = 0
 $script:StatePersistenceLastError = ''
 $script:LastStatePersistenceWarningUtc = [datetime]::MinValue
 $script:ServerCapabilities = $null
+$script:ServerCapabilitiesBase = $null
+$script:PrerequisiteCache = @{}
+$script:PrerequisiteBlockedOccurrences = @{}
+$script:LastCertificateReadiness = $null
 $script:ElectionPlan = $null
 $script:LastCapabilityRefreshUtc = [datetime]::MinValue
 $script:LastElectionPlanRefreshUtc = [datetime]::MinValue
@@ -6637,6 +7005,18 @@ try {
         ExchangeOnlineOrganization = $exchangeOnlineOrganization
         DependencyWaitLogIntervalMinutes = [math]::Max(0, (Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'DependencyWaitLogIntervalMinutes' -DefaultValue 30))
         DependencyWaitTimeoutMinutes = [math]::Max(0, (Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'DependencyWaitTimeoutMinutes' -DefaultValue 1440))
+        LaunchPrerequisiteChecksEnabled = Get-SmartM365ScriptConfigBool -Config $localConfig -Name 'LaunchPrerequisiteChecksEnabled' -DefaultValue $true
+        PrerequisiteCacheMinutes = [math]::Max(0, (Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'PrerequisiteCacheMinutes' -DefaultValue 5))
+        PrerequisitePathTimeoutSeconds = [math]::Max(2, (Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'PrerequisitePathTimeoutSeconds' -DefaultValue 10))
+        PrerequisiteAlertRepeatHours = [math]::Max(1, (Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'PrerequisiteAlertRepeatHours' -DefaultValue 24))
+        CertificateExpiryWarningDays = [math]::Max(0, (Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'CertificateExpiryWarningDays' -DefaultValue 30))
+        # Tenant data roots written by every job; they can live on other shares than the scripts.
+        TenantDataRoots = @(
+            foreach ($dataRoot in @(@{ Name = 'Tenant DATA-ALL root'; Key = 'DataAllRootPath' }, @{ Name = 'Tenant DATA-LAST root'; Key = 'LatestCsvFolderPath' }, @{ Name = 'Tenant LOG-ALL root'; Key = 'LogAllRootPath' })) {
+                $dataRootPath = [string](Get-SmartM365ScriptConfigValue -Config $localConfig -Name $dataRoot.Key -DefaultValue '')
+                if (-not [string]::IsNullOrWhiteSpace($dataRootPath) -and $dataRootPath -notmatch '\{\{[^}]+\}\}') { [pscustomobject]@{ Name = $dataRoot.Name; Path = $dataRootPath } }
+            }
+        )
         OrchestratorRunsCsvLockTimeoutSeconds = [math]::Max(1, (Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'OrchestratorRunsCsvLockTimeoutSeconds' -DefaultValue 300))
         OrchestratorHeartbeatLogIntervalMinutes = [math]::Max(0, (Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'OrchestratorHeartbeatLogIntervalMinutes' -DefaultValue 30))
         OrchestratorSharePointUploadIntervalMinutes = [math]::Max(0, (Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'OrchestratorSharePointUploadIntervalMinutes' -DefaultValue 60))
@@ -6931,6 +7311,12 @@ try {
         }
         if (Test-OrchestratorStatePersistenceReady) {
             Invoke-LaunchPhase -Now $now
+        }
+        try {
+            Invoke-OrchestratorPrerequisiteMonitoring -Now $now
+        }
+        catch {
+            Write-OrchestratorLog -Message ("Launch prerequisite monitoring failed without stopping the scheduler: {0}" -f $_.Exception.Message) -Level ERROR
         }
         Send-DailySummaryIfDue -Now $now
         Write-OrchestratorHeartbeat

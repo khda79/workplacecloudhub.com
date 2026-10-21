@@ -9,6 +9,7 @@ $script:PipelineTerminalStatuses = @(
     'Interrupted',
     'BlockedDependencyFailed',
     'BlockedDependencyTimeout',
+    'BlockedPrerequisite',
     'Rejected',
     'Cancelled',
     'MissingStatus'
@@ -274,7 +275,7 @@ function Get-SmartM365OrchestratorPipelineRunStatus {
     )
 
     $pending = @($jobs | Where-Object { [string]$_.Status -notin $script:PipelineTerminalStatuses })
-    $failed = @($jobs | Where-Object { [string]$_.Status -in @('Failed', 'TimedOut', 'Interrupted', 'BlockedDependencyFailed', 'BlockedDependencyTimeout', 'Rejected', 'MissingStatus') })
+    $failed = @($jobs | Where-Object { [string]$_.Status -in @('Failed', 'TimedOut', 'Interrupted', 'BlockedDependencyFailed', 'BlockedDependencyTimeout', 'BlockedPrerequisite', 'Rejected', 'MissingStatus') })
     $warnings = @($jobs | Where-Object { [string]$_.Status -eq 'CompletedWithWarnings' })
     $cancellationRequested = $null -ne $request.PSObject.Properties['Cancellation']
     $cancelled = @($jobs | Where-Object Status -eq 'Cancelled')
@@ -391,7 +392,7 @@ function Set-SmartM365OrchestratorPipelineJobStatus {
         [Parameter(Mandatory)][string]$SharedDataFolderPath,
         [Parameter(Mandatory)][string]$BatchId,
         [Parameter(Mandatory)][string]$JobName,
-        [Parameter(Mandatory)][ValidateSet('Pending', 'Starting', 'Running', 'RetryScheduled', 'Success', 'CompletedWithWarnings', 'Failed', 'TimedOut', 'Interrupted', 'BlockedDependencyFailed', 'BlockedDependencyTimeout', 'Rejected', 'Cancelled')][string]$Status,
+        [Parameter(Mandatory)][ValidateSet('Pending', 'Starting', 'Running', 'RetryScheduled', 'Success', 'CompletedWithWarnings', 'Failed', 'TimedOut', 'Interrupted', 'BlockedDependencyFailed', 'BlockedDependencyTimeout', 'BlockedPrerequisite', 'Rejected', 'Cancelled')][string]$Status,
         [int]$Attempt = 0,
         [string]$OwnerServer = '',
         [string]$Detail = '',

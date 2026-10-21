@@ -30,7 +30,7 @@ Loads the complete WPF data model without showing the splash or main window.
 Intended only for isolated tests with SharedDataFolderPath pointing to a temporary folder.
 
 .VERSION
-1.3.14
+1.3.15
 #>
 [CmdletBinding()]
 param(
@@ -64,7 +64,7 @@ $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -Requi
 try {
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
-$script:AppVersion = '1.3.14'
+$script:AppVersion = '1.3.15'
 $script:StartupClock = [Diagnostics.Stopwatch]::StartNew()
 $script:Snapshot = $null
 $script:DraftJobs = $null
@@ -91,7 +91,7 @@ $script:RefreshContext = [pscustomobject]@{
 $script:RefreshTimer = $null
 $script:PendingRefreshRequest = $null
 $script:LastSuccessfulRefresh = $null
-$script:HistoryFailureStatuses = @('Failed', 'TimedOut', 'Interrupted', 'BlockedDependencyFailed', 'BlockedDependencyTimeout')
+$script:HistoryFailureStatuses = @('Failed', 'TimedOut', 'Interrupted', 'BlockedDependencyFailed', 'BlockedDependencyTimeout', 'BlockedPrerequisite')
 $script:Controls = $null
 $script:GuiLogPath = ''
 $script:GuiLogWriteWarningShown = $false
@@ -1292,7 +1292,7 @@ function Get-GuiRefreshWork {
         if (-not (Test-Path -LiteralPath $root -PathType Container)) { throw "Shared data folder is unavailable: $root" }
         if ($InputData.Mode -eq 'History') {
             $rows = @(Get-SmartM365OrchestratorHistory -SharedDataFolderPath $root -From $InputData.HistoryFrom -To $InputData.HistoryTo -Server $InputData.HistoryServer -JobName $InputData.HistoryJob -Status $InputData.HistoryStatus)
-            if ($InputData.OnlyFailures) { $rows = @($rows | Where-Object { $_.Status -in @('Failed', 'TimedOut', 'Interrupted', 'BlockedDependencyFailed', 'BlockedDependencyTimeout') }) }
+            if ($InputData.OnlyFailures) { $rows = @($rows | Where-Object { $_.Status -in @('Failed', 'TimedOut', 'Interrupted', 'BlockedDependencyFailed', 'BlockedDependencyTimeout', 'BlockedPrerequisite') }) }
             return [pscustomobject]@{ Mode = 'History'; History = $rows; ReadAt = Get-Date }
         }
         $snapshot = $null; $recentRuns = @(); $servers = @(); $history = @(); $versions = @(); $owners = @{}
@@ -1738,7 +1738,7 @@ $script:Controls.FooterText.Text = 'Shared changes are validated, versioned and 
 $script:Controls.VersionText.Text = "v$($script:AppVersion)"
 $script:Controls.HistoryFromPicker.SelectedDate = (Get-Date).AddDays(-7).Date
 $script:Controls.HistoryToPicker.SelectedDate = (Get-Date).Date
-$script:Controls.HistoryStatusCombo.ItemsSource = @('All', 'Success', 'CompletedWithWarnings', 'Failed', 'TimedOut', 'Interrupted', 'BlockedDependencyFailed', 'BlockedDependencyTimeout', 'Skipped', 'Cancelled', 'Retried')
+$script:Controls.HistoryStatusCombo.ItemsSource = @('All', 'Success', 'CompletedWithWarnings', 'Failed', 'TimedOut', 'Interrupted', 'BlockedDependencyFailed', 'BlockedDependencyTimeout', 'BlockedPrerequisite', 'Skipped', 'Cancelled', 'Retried')
 $script:Controls.HistoryStatusCombo.SelectedIndex = 0
 
 $script:Controls.ScheduleTypeCombo.Add_SelectionChanged({ Update-ScheduleDaysControlState })

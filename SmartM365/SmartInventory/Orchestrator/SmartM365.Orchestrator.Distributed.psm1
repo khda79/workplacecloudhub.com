@@ -1,7 +1,7 @@
 ﻿Set-StrictMode -Version Latest
 Import-Module (Join-Path $PSScriptRoot '../../Modules/SmartM365.Core/SmartM365.JsonTransport.psd1') -MinimumVersion '1.0.2' -Global -ErrorAction Stop
 
-$script:DistributedModuleVersion = '1.1.12'
+$script:DistributedModuleVersion = '1.1.13'
 
 function Resolve-DistributedJsonPath {
     param([Parameter(Mandatory)][string]$Path)
@@ -125,27 +125,294 @@ function Write-JsonAtomically {
     }
 }
 
-function Get-CertificateReadiness {
+$script:CertificateCapabilities = @('Graph', 'EXO', 'TeamsPowerShell')
+
+function Get-MaskedThumbprint {
     param([string]$Thumbprint)
 
-    if ([string]::IsNullOrWhiteSpace($Thumbprint)) {
-        return [pscustomobject]@{ Ready = $false; Detail = 'Certificate thumbprint is not configured.' }
-    }
+    if ($Thumbprint.Length -le 8) { return $Thumbprint }
+    return '{0}...{1}' -f $Thumbprint.Substring(0, 4), $Thumbprint.Substring($Thumbprint.Length - 4)
+}
+
+function Get-SmartM365OrchestratorCertificateCandidate {
+    param(
+        [Parameter(Mandatory = $true)][string]$Thumbprint,
+        [string[]]$StorePaths = @('Cert:\CurrentUser\My', 'Cert:\LocalMachine\My')
+    )
 
     $normalized = ($Thumbprint -replace '\s', '').ToUpperInvariant()
-    foreach ($storePath in @('Cert:\CurrentUser\My', 'Cert:\LocalMachine\My')) {
-        $certificate = Get-ChildItem -LiteralPath $storePath -ErrorAction SilentlyContinue |
-            Where-Object { $_.Thumbprint -eq $normalized -and $_.NotAfter -gt (Get-Date) } |
-            Select-Object -First 1
-        if ($null -ne $certificate) {
-            return [pscustomobject]@{
-                Ready = $true
-                Detail = "Usable certificate found in $storePath; expires $($certificate.NotAfter.ToString('o'))."
+    foreach ($storePath in $StorePaths) {
+        foreach ($certificate in @(Get-ChildItem -LiteralPath $storePath -ErrorAction SilentlyContinue | Where-Object { $_.Thumbprint -eq $normalized })) {
+            [pscustomobject]@{ StorePath = $storePath; Certificate = $certificate }
+        }
+    }
+}
+
+function Test-CertificatePrivateKeyAccess {
+    param([Parameter(Mandatory = $true)][System.Security.Cryptography.X509Certificates.X509Certificate2]$Certificate)
+
+    if (-not $Certificate.HasPrivateKey) {
+        return [pscustomobject]@{ Ready = $false; Reason = 'NoPrivateKey'; Detail = 'the certificate has no associated private key' }
+    }
+    # A real signature proves that this account can open the key, not only that a key is linked.
+    $data = [Text.Encoding]::UTF8.GetBytes('SmartM365 orchestrator launch prerequisite')
+    try {
+        $rsa = [System.Security.Cryptography.X509Certificates.RSACertificateExtensions]::GetRSAPrivateKey($Certificate)
+        if ($null -ne $rsa) {
+            try { $null = $rsa.SignData($data, [System.Security.Cryptography.HashAlgorithmName]::SHA256, [System.Security.Cryptography.RSASignaturePadding]::Pkcs1) }
+            finally { $rsa.Dispose() }
+            return [pscustomobject]@{ Ready = $true; Reason = 'Ready'; Detail = 'private key usable' }
+        }
+        $ecdsa = [System.Security.Cryptography.X509Certificates.ECDsaCertificateExtensions]::GetECDsaPrivateKey($Certificate)
+        if ($null -ne $ecdsa) {
+            try { $null = $ecdsa.SignData($data, [System.Security.Cryptography.HashAlgorithmName]::SHA256) }
+            finally { $ecdsa.Dispose() }
+            return [pscustomobject]@{ Ready = $true; Reason = 'Ready'; Detail = 'private key usable' }
+        }
+        return [pscustomobject]@{ Ready = $false; Reason = 'NoPrivateKey'; Detail = 'the private key algorithm is not supported' }
+    }
+    catch {
+        $message = if ($null -ne $_.Exception.InnerException) { $_.Exception.InnerException.Message } else { $_.Exception.Message }
+        return [pscustomobject]@{ Ready = $false; Reason = 'PrivateKeyInaccessible'; Detail = ("the private key cannot be used by {0}: {1}" -f [Environment]::UserName, $message) }
+    }
+}
+
+function Get-CertificateReadiness {
+    param(
+        [string]$Thumbprint,
+        [int]$ExpiryWarningDays = 0,
+        [datetime]$NowUtc = [datetime]::UtcNow,
+        [AllowNull()][object[]]$Candidates = $null
+    )
+
+    $result = [ordered]@{
+        Ready = $false
+        Reason = 'NotConfigured'
+        Detail = 'Certificate thumbprint is not configured.'
+        StorePath = ''
+        NotAfterUtc = ''
+        DaysRemaining = $null
+        ExpiresSoon = $false
+    }
+    if ([string]::IsNullOrWhiteSpace($Thumbprint)) { return [pscustomobject]$result }
+
+    $normalized = ($Thumbprint -replace '\s', '').ToUpperInvariant()
+    $masked = Get-MaskedThumbprint -Thumbprint $normalized
+    if ($null -eq $Candidates) { $Candidates = @(Get-SmartM365OrchestratorCertificateCandidate -Thumbprint $normalized) }
+    $Candidates = @($Candidates | Where-Object { $null -ne $_ -and $null -ne $_.Certificate })
+    if ($Candidates.Count -eq 0) {
+        $result.Reason = 'NotFound'
+        $result.Detail = "Certificate $masked was not found in Cert:\CurrentUser\My or Cert:\LocalMachine\My for account $([Environment]::UserName)."
+        return [pscustomobject]$result
+    }
+
+    $valid = @($Candidates | Where-Object {
+            $_.Certificate.NotAfter.ToUniversalTime() -gt $NowUtc -and $_.Certificate.NotBefore.ToUniversalTime() -le $NowUtc
+        } | Sort-Object { $_.Certificate.NotAfter } -Descending)
+    if ($valid.Count -eq 0) {
+        $latest = @($Candidates | Sort-Object { $_.Certificate.NotAfter } -Descending)[0]
+        $notAfterUtc = $latest.Certificate.NotAfter.ToUniversalTime()
+        $result.Reason = 'Expired'
+        $result.StorePath = [string]$latest.StorePath
+        $result.NotAfterUtc = $notAfterUtc.ToString('o')
+        $result.DaysRemaining = [math]::Floor(($notAfterUtc - $NowUtc).TotalDays)
+        $result.Detail = if ($notAfterUtc -le $NowUtc) {
+            "Certificate $masked in $($latest.StorePath) expired on $($notAfterUtc.ToString('yyyy-MM-dd HH:mm')) UTC."
+        } else {
+            "Certificate $masked in $($latest.StorePath) is not valid yet."
+        }
+        return [pscustomobject]$result
+    }
+
+    $lastFailure = $null
+    foreach ($candidate in $valid) {
+        $keyAccess = Test-CertificatePrivateKeyAccess -Certificate $candidate.Certificate
+        $notAfterUtc = $candidate.Certificate.NotAfter.ToUniversalTime()
+        $result.StorePath = [string]$candidate.StorePath
+        $result.NotAfterUtc = $notAfterUtc.ToString('o')
+        $result.DaysRemaining = [math]::Floor(($notAfterUtc - $NowUtc).TotalDays)
+        if ($keyAccess.Ready) {
+            $result.Ready = $true
+            $result.Reason = 'Ready'
+            $result.ExpiresSoon = $ExpiryWarningDays -gt 0 -and $notAfterUtc -le $NowUtc.AddDays($ExpiryWarningDays)
+            $result.Detail = "Usable certificate $masked found in $($candidate.StorePath); private key usable; expires $($notAfterUtc.ToString('yyyy-MM-dd HH:mm')) UTC ($($result.DaysRemaining) day(s))."
+            return [pscustomobject]$result
+        }
+        $lastFailure = $keyAccess
+    }
+    $result.Reason = $lastFailure.Reason
+    $result.Detail = "Certificate $masked in $($result.StorePath) is not usable: $($lastFailure.Detail)."
+    return [pscustomobject]$result
+}
+
+$script:PathAccessProbeScript = @'
+param($Checks, $ServerName, $Results)
+for ($index = 0; $index -lt $Checks.Count; $index++) {
+    $check = $Checks[$index]
+    $path = [string]$check.Path
+    try {
+        if ([string]::IsNullOrWhiteSpace($path)) { throw 'The path is not configured.' }
+        if ([string]$check.PathType -eq 'Leaf') {
+            if (-not [IO.File]::Exists($path)) { throw "File not found: $path" }
+            $stream = [IO.File]::Open($path, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)
+            try { $null = $stream.Read([byte[]]::new(1), 0, 1) } finally { $stream.Dispose() }
+        }
+        else {
+            if (-not [IO.Directory]::Exists($path)) {
+                if ([string]$check.Access -ne 'ReadWrite') { throw "Folder not found: $path" }
+                $null = [IO.Directory]::CreateDirectory($path)
             }
+            $enumerator = [IO.Directory]::EnumerateFileSystemEntries($path).GetEnumerator()
+            try { $null = $enumerator.MoveNext() } finally { $enumerator.Dispose() }
+            if ([string]$check.Access -eq 'ReadWrite') {
+                $probe = [IO.Path]::Combine($path, ('.smartm365-prerequisite.{0}.{1}.tmp' -f $ServerName, [guid]::NewGuid().ToString('N')))
+                [IO.File]::WriteAllText($probe, [datetime]::UtcNow.ToString('o'))
+                [IO.File]::Delete($probe)
+            }
+        }
+        $Results[$index] = [pscustomobject]@{ Ready = $true; Detail = ('{0} access verified.' -f $check.Access) }
+    }
+    catch {
+        $exception = $_.Exception
+        while ($null -ne $exception.InnerException) { $exception = $exception.InnerException }
+        $Results[$index] = [pscustomobject]@{ Ready = $false; Detail = $exception.Message }
+    }
+}
+'@
+
+function Test-SmartM365OrchestratorPathAccess {
+    <# Checks folders or files with a hard time limit: an unreachable share must not stall a scheduler tick. #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$Checks,
+        [string]$ServerName = $env:COMPUTERNAME,
+        [int]$TimeoutSeconds = 10
+    )
+
+    if ($Checks.Count -eq 0) { return @() }
+    $results = [System.Collections.Concurrent.ConcurrentDictionary[int, object]]::new()
+    $powerShell = [powershell]::Create()
+    $completed = $false
+    try {
+        $null = $powerShell.AddScript($script:PathAccessProbeScript).AddArgument(@($Checks)).AddArgument((ConvertTo-SafeFileName $ServerName)).AddArgument($results)
+        $async = $powerShell.BeginInvoke()
+        $completed = $async.AsyncWaitHandle.WaitOne([math]::Max(1, $TimeoutSeconds) * 1000)
+        if ($completed) { try { $null = $powerShell.EndInvoke($async) } catch { Write-Verbose ("Path access probe ended with an error: {0}" -f $_.Exception.Message) } }
+    }
+    finally {
+        # A hung SMB call cannot be interrupted: the probe is abandoned and finishes on its own.
+        if ($completed) { $powerShell.Dispose() } else { $null = $powerShell.BeginStop($null, $null) }
+    }
+
+    for ($index = 0; $index -lt $Checks.Count; $index++) {
+        $check = $Checks[$index]
+        $probe = $null
+        if (-not $results.TryGetValue($index, [ref]$probe)) {
+            $probe = [pscustomobject]@{ Ready = $false; Detail = ("No answer within {0} second(s); the share is unreachable or hung." -f $TimeoutSeconds) }
+        }
+        [pscustomobject]@{
+            Name = [string]$check.Name
+            Path = [string]$check.Path
+            Access = [string]$check.Access
+            PathType = [string]$check.PathType
+            Ready = [bool]$probe.Ready
+            Detail = [string]$probe.Detail
+        }
+    }
+}
+
+function Test-PrerequisiteCacheEntry {
+    param([hashtable]$Cache, [string]$Key, [int]$CacheMinutes, [datetime]$NowUtc)
+
+    if ($CacheMinutes -le 0 -or -not $Cache.ContainsKey($Key)) { return $false }
+    $age = ($NowUtc - [datetime]$Cache[$Key].CheckedAtUtc).TotalMinutes
+    return ($age -ge 0 -and $age -lt $CacheMinutes)
+}
+
+function Get-SmartM365OrchestratorCachedCertificateReadiness {
+    [CmdletBinding()]
+    param(
+        [string]$Thumbprint,
+        [Parameter(Mandatory = $true)][hashtable]$Cache,
+        [int]$CacheMinutes = 5,
+        [int]$ExpiryWarningDays = 30,
+        [datetime]$NowUtc = [datetime]::UtcNow,
+        [scriptblock]$CertificateProvider = $null
+    )
+
+    $normalized = ([string]$Thumbprint -replace '\s', '').ToUpperInvariant()
+    $key = 'Certificate|' + $normalized
+    if (Test-PrerequisiteCacheEntry -Cache $Cache -Key $key -CacheMinutes $CacheMinutes -NowUtc $NowUtc) { return $Cache[$key].Result }
+    $candidates = $null
+    if ($null -ne $CertificateProvider -and $normalized) { $candidates = @(& $CertificateProvider $normalized) }
+    $readiness = Get-CertificateReadiness -Thumbprint $normalized -ExpiryWarningDays $ExpiryWarningDays -NowUtc $NowUtc -Candidates $candidates
+    $Cache[$key] = @{ CheckedAtUtc = $NowUtc; Result = $readiness }
+    return $readiness
+}
+
+function Test-SmartM365OrchestratorLaunchPrerequisite {
+    <#
+    Fast pre-launch gate. The certificate is checked for jobs that need app-only cloud access;
+    each path check is { Name; Path; Access = Read|ReadWrite; PathType = Container|Leaf; Capability }.
+    A failure with a Capability affects every job needing it; without one it is specific to the job.
+    #>
+    [CmdletBinding()]
+    param(
+        [string[]]$RequiredCapabilities = @(),
+        [string]$CertificateThumbprint = '',
+        [AllowEmptyCollection()][object[]]$PathChecks = @(),
+        [Parameter(Mandatory = $true)][hashtable]$Cache,
+        [int]$CacheMinutes = 5,
+        [int]$PathTimeoutSeconds = 10,
+        [int]$CertificateExpiryWarningDays = 30,
+        [string]$ServerName = $env:COMPUTERNAME,
+        [datetime]$NowUtc = [datetime]::UtcNow,
+        [scriptblock]$CertificateProvider = $null
+    )
+
+    $failures = [System.Collections.Generic.List[object]]::new()
+    $certificate = $null
+    if (@($RequiredCapabilities | Where-Object { $_ -in $script:CertificateCapabilities }).Count -gt 0) {
+        $certificate = Get-SmartM365OrchestratorCachedCertificateReadiness -Thumbprint $CertificateThumbprint -Cache $Cache -CacheMinutes $CacheMinutes -ExpiryWarningDays $CertificateExpiryWarningDays -NowUtc $NowUtc -CertificateProvider $CertificateProvider
+        if (-not $certificate.Ready) {
+            $failures.Add([pscustomobject]@{
+                Key = 'Certificate'; Kind = 'Certificate'; Name = 'Application certificate'; Path = ''; Access = ''; PathType = ''
+                Capabilities = @($script:CertificateCapabilities); JobSpecific = $false; Detail = [string]$certificate.Detail
+            })
         }
     }
 
-    return [pscustomobject]@{ Ready = $false; Detail = "Certificate $normalized was not found or is expired." }
+    $entries = @(foreach ($check in @($PathChecks | Where-Object { $null -ne $_ })) {
+            $pathType = if ([string]$check.PathType -eq 'Leaf') { 'Leaf' } else { 'Container' }
+            $access = if ([string]$check.Access -eq 'ReadWrite') { 'ReadWrite' } else { 'Read' }
+            [pscustomobject]@{
+                Key = 'Path|{0}|{1}|{2}' -f $access, $pathType, ([string]$check.Path).TrimEnd('\').ToUpperInvariant()
+                Name = [string]$check.Name; Path = [string]$check.Path; Access = $access; PathType = $pathType
+                Capability = if ($check.PSObject.Properties['Capability']) { [string]$check.Capability } else { '' }
+            }
+        })
+    $toProbe = @($entries | Where-Object { -not (Test-PrerequisiteCacheEntry -Cache $Cache -Key $_.Key -CacheMinutes $CacheMinutes -NowUtc $NowUtc) } | Group-Object Key | ForEach-Object { $_.Group[0] })
+    if ($toProbe.Count -gt 0) {
+        $probeResults = @(Test-SmartM365OrchestratorPathAccess -Checks $toProbe -ServerName $ServerName -TimeoutSeconds $PathTimeoutSeconds)
+        for ($index = 0; $index -lt $toProbe.Count; $index++) {
+            $Cache[$toProbe[$index].Key] = @{ CheckedAtUtc = $NowUtc; Result = $probeResults[$index] }
+        }
+    }
+    foreach ($entry in $entries) {
+        $probe = $Cache[$entry.Key].Result
+        if ($probe.Ready) { continue }
+        $failures.Add([pscustomobject]@{
+            Key = $entry.Key; Kind = 'Path'; Name = $entry.Name; Path = $entry.Path; Access = $entry.Access; PathType = $entry.PathType
+            Capabilities = @($entry.Capability | Where-Object { $_ }); JobSpecific = [string]::IsNullOrWhiteSpace($entry.Capability)
+            Detail = ("{0} ({1}, {2}) is not accessible: {3}" -f $entry.Name, $entry.Path, $entry.Access, $probe.Detail)
+        })
+    }
+
+    return [pscustomobject]@{
+        Ready = ($failures.Count -eq 0)
+        Failures = $failures.ToArray()
+        Certificate = $certificate
+    }
 }
 
 function Invoke-IsolatedCapabilityProbe {
@@ -236,11 +503,14 @@ function Get-SmartM365OrchestratorServerCapability {
         [string]$CertificateThumbprint,
         [string]$Organization,
         [ValidateSet('Static', 'ReadOnly')][string]$ProbeMode = 'ReadOnly',
-        [int]$ProbeTimeoutSeconds = 90
+        [int]$ProbeTimeoutSeconds = 90,
+        [AllowEmptyCollection()][object[]]$DataPathChecks = @(),
+        [int]$PathTimeoutSeconds = 10,
+        [int]$CertificateExpiryWarningDays = 0
     )
 
     $generatedAtUtc = [datetime]::UtcNow
-    $certificate = Get-CertificateReadiness -Thumbprint $CertificateThumbprint
+    $certificate = Get-CertificateReadiness -Thumbprint $CertificateThumbprint -ExpiryWarningDays $CertificateExpiryWarningDays -NowUtc $generatedAtUtc
     $results = [System.Collections.Generic.List[object]]::new()
 
     $probeFolder = Join-Path -Path $SharedDataFolderPath -ChildPath 'Election\Probe'
@@ -249,7 +519,15 @@ function Get-SmartM365OrchestratorServerCapability {
         $probePath = Join-Path -Path $probeFolder -ChildPath ('{0}.{1}.{2}.tmp' -f (ConvertTo-SafeFileName $ServerName), $PID, [guid]::NewGuid().ToString('N'))
         [System.IO.File]::WriteAllText($probePath, $generatedAtUtc.ToString('o'), [System.Text.UTF8Encoding]::new($false))
         Remove-Item -LiteralPath $probePath -Force -ErrorAction Stop
-        $results.Add((Get-CapabilityProbeResult -Name 'SharedRuntime' -Ready $true -Detail 'Shared election storage is writable.'))
+        # Tenant data roots (DATA-ALL, DATA-LAST, LOG-ALL) can live on other shares than the election folder.
+        $dataFailures = @(Test-SmartM365OrchestratorPathAccess -Checks $DataPathChecks -ServerName $ServerName -TimeoutSeconds $PathTimeoutSeconds | Where-Object { -not $_.Ready })
+        if ($dataFailures.Count -gt 0) {
+            $detail = ($dataFailures | ForEach-Object { "{0} ({1}, {2}) is not accessible: {3}" -f $_.Name, $_.Path, $_.Access, $_.Detail }) -join ' '
+            $results.Add((Get-CapabilityProbeResult -Name 'SharedRuntime' -Ready $false -Detail $detail))
+        }
+        else {
+            $results.Add((Get-CapabilityProbeResult -Name 'SharedRuntime' -Ready $true -Detail ("Shared election storage is writable; {0} tenant data root(s) verified." -f @($DataPathChecks).Count)))
+        }
     }
     catch {
         $results.Add((Get-CapabilityProbeResult -Name 'SharedRuntime' -Ready $false -Detail $_.Exception.Message))
@@ -365,6 +643,15 @@ finally {
         ReadyCapabilities = $readyCapabilities
         GraphAppRoles = @($graphResult.Roles | Sort-Object -Unique)
         Results = @($results)
+        CertificateStatus = [pscustomobject]@{
+            Ready = [bool]$certificate.Ready
+            Reason = [string]$certificate.Reason
+            NotAfterUtc = [string]$certificate.NotAfterUtc
+            DaysRemaining = $certificate.DaysRemaining
+            ExpiresSoon = [bool]$certificate.ExpiresSoon
+        }
+        BlockedJobs = @()
+        PrerequisiteBlocks = @()
     }
 }
 
@@ -513,7 +800,12 @@ function Get-SmartM365OrchestratorElectionPlan {
         }
         $candidates = @()
         foreach ($serverName in @($capabilitiesByServer.Keys | Sort-Object)) {
-            $match = Test-SmartM365OrchestratorCapabilityMatch -ServerCapabilities $capabilitiesByServer[$serverName] -RequiredCapabilities $requiredCapabilities -RequiredGraphAppRoles $requiredRoles
+            $serverCapability = $capabilitiesByServer[$serverName]
+            # A launch-time prerequisite failure specific to a job (missing script folder, RequiredPaths)
+            # excludes that server for the job only.
+            if ($serverCapability.PSObject.Properties['BlockedJobs'] -and
+                @($component | Where-Object { $_ -in @($serverCapability.BlockedJobs | ForEach-Object { [string]$_ }) }).Count -gt 0) { continue }
+            $match = Test-SmartM365OrchestratorCapabilityMatch -ServerCapabilities $serverCapability -RequiredCapabilities $requiredCapabilities -RequiredGraphAppRoles $requiredRoles
             if ($match.Eligible -and (Test-ServerJobPolicy -ServerName $serverName -Jobs $componentJobs -ServerJobPolicies $ServerJobPolicies)) { $candidates += $serverName }
         }
         $previousOwners = @(
@@ -1290,7 +1582,11 @@ Export-ModuleMember -Function @(
     'Get-SmartM365OrchestratorFreshProducerReceipt',
     'Get-SmartM365OrchestratorPinnedDependencyReadiness',
     'Get-SmartM365OrchestratorSourceRunState',
-    'Get-SmartM365OrchestratorDependencyActivity'
+    'Get-SmartM365OrchestratorDependencyActivity',
+    'Get-SmartM365OrchestratorCertificateCandidate',
+    'Get-SmartM365OrchestratorCachedCertificateReadiness',
+    'Test-SmartM365OrchestratorPathAccess',
+    'Test-SmartM365OrchestratorLaunchPrerequisite'
 )
 
 # SIG # Begin signature block

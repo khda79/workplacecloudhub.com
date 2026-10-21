@@ -10,7 +10,7 @@ Import-Module (Join-Path $PSScriptRoot 'SmartM365.Orchestrator.Distributed.psm1'
 $script:InsightsTerminalSuccess = @('Success', 'CompletedWithWarnings')
 $script:InsightsTerminalFailure = @('Failed', 'TimedOut', 'Interrupted', 'Cancelled')
 # Same lists as SmartM365.Orchestrator.Pipeline.psm1 (Get-SmartM365OrchestratorPipelineRunStatus).
-$script:InsightsPipelineFailure = @('Failed', 'TimedOut', 'Interrupted', 'BlockedDependencyFailed', 'BlockedDependencyTimeout', 'Rejected', 'MissingStatus')
+$script:InsightsPipelineFailure = @('Failed', 'TimedOut', 'Interrupted', 'BlockedDependencyFailed', 'BlockedDependencyTimeout', 'BlockedPrerequisite', 'Rejected', 'MissingStatus')
 $script:InsightsPipelineTerminal = @('Success', 'CompletedWithWarnings', 'Cancelled') + $script:InsightsPipelineFailure
 
 function Get-InsightsProperty {
