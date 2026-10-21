@@ -2,7 +2,7 @@
 .SYNOPSIS
 Runs offline pipeline and production-manifest contract tests for the SmartM365 orchestrator.
 .VERSION
-1.1.6
+1.1.7
 #>
 #Requires -Version 7.0
 [CmdletBinding()]
@@ -334,7 +334,7 @@ try {
     Assert-True (@(Get-ChildItem -LiteralPath (Join-Path $facadeRoot 'PipelineRuns') -Directory).Count -eq 1) 'The façade did not publish exactly one batch.'
 
     $launcherCheck = & (Join-Path $PSHOME 'pwsh.exe') -NoProfile -ExecutionPolicy Bypass -File (Join-Path -Path $orchestratorRoot -ChildPath 'New-SmartM365-OrchestratorJobLaunchers.ps1') -Check 2>&1
-    Assert-True ($LASTEXITCODE -eq 0) ("LaunchersByOrchestrator is not aligned with the jobs template: {0}" -f (@($launcherCheck) -join [Environment]::NewLine))
+    Assert-True ($LASTEXITCODE -eq 0) ("LaunchersByOrchestrator or Launchers\Jobs is not aligned with the jobs template: {0}" -f (@($launcherCheck) -join [Environment]::NewLine))
 
     foreach ($requiredHook in @(
         'Update-OrchestratorPipelineRequests',
