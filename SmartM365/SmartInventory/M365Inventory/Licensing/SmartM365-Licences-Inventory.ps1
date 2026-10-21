@@ -6,6 +6,9 @@
   Maps SKU & Service Plan friendly names from the Microsoft CSV (default: script folder).
   Every full run publishes the license report (snapshot + M365_Licenses_Report*.csv) as optional outputs of its source receipt.
   DATA-LAST changes only when a run completes: CSVs and report snapshot are staged and promoted with the receipt (Core 1.0.95).
+  A user whose license details return 404 is excluded only when GET /users/{id} confirms the deletion; the count is
+  bounded (LicenseDeletedUsersMaxCount, default 100, and LicenseDeletedUsersMaxPercent, default 1) and recorded
+  as the receipt qualification UsersDeletedDuringCollection. Any other user error still stops publication.
   The email, including SendLicenseSummaryEmailOnly, renders that published report after checking it against the receipt; it never recomputes.
   ForceAdCsvAnalysis (full runs only) uses a fresh, structurally valid AD CSV for the report when only its collector receipt is rejected.
   ForceLicenseSummaryEmail sends the report again even when it was already sent on the current Europe/Paris day.
@@ -15,7 +18,7 @@
   as optional files M365_Licenses_ReportSkuCandidates.csv and M365_Licenses_ReportSkuCapacity.csv with the report snapshot identity;
   ReportSkuCapacity names the report product family of each SKU (ReportProduct) so consumers never re-implement the SKU rules.
 .VERSION
- 1.54
+ 1.55
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication; Microsoft.Graph.Identity.DirectoryManagement; Microsoft.Graph.Users; Microsoft.Graph.Groups; ImportExcel for the report attachment.
@@ -424,6 +427,73 @@ function Invoke-GraphWithRetry {
   }
 }
 
+# True when an error (or one of its inner exceptions) is a Graph 404 / Request_ResourceNotFound.
+function Test-LicensesGraphNotFound {
+  param([Parameter(Mandatory)]$ErrorRecord)
+  $exception = if ($ErrorRecord -is [System.Management.Automation.ErrorRecord]) { $ErrorRecord.Exception } else { $ErrorRecord }
+  while ($exception) {
+    $status = $null
+    try { if ($exception.PSObject.Properties['ResponseStatusCode']) { $status = [int]$exception.ResponseStatusCode } } catch { $status = $null }
+    try { if ($null -eq $status -and $exception.Response) { $status = [int]$exception.Response.StatusCode } } catch { $status = $null }
+    if ($status -eq 404 -or [string]$exception.Message -match 'Request_ResourceNotFound|Status:\s*404\b') { return $true }
+    $exception = $exception.InnerException
+  }
+  return $false
+}
+
+# Classifies a failed user. Only a 404 on the license details, confirmed by a direct directory lookup,
+# counts as a user deleted during collection; its assignment paths are removed. Anything else is a failure.
+function Register-LicensesUserFailure {
+  param(
+    [Parameter(Mandatory)]$ErrorRecord,
+    [Parameter(Mandatory)][string]$UserId,
+    [Parameter(Mandatory)][bool]$LicenseDetailStage,
+    [Parameter(Mandatory)][AllowEmptyCollection()][System.Collections.Generic.List[object]]$AssignmentPaths,
+    [Parameter(Mandatory)][int]$AssignmentPathCountBefore,
+    [Parameter(Mandatory)][hashtable]$State
+  )
+  if ($LicenseDetailStage -and -not [string]::IsNullOrWhiteSpace($UserId) -and (Test-LicensesGraphNotFound -ErrorRecord $ErrorRecord)) {
+    $confirmed = $false
+    try {
+      $null = Invoke-GraphWithRetry { Get-MgUser -UserId $UserId -Property 'Id' -ErrorAction Stop }
+      WriteLog -Message ("License details returned 404 but user {0} still exists; the user counts as a resolution failure." -f $UserId) 'ERROR'
+    }
+    catch {
+      if (Test-LicensesGraphNotFound -ErrorRecord $_) { $confirmed = $true }
+      else { WriteLog -Message ("Deletion of user {0} could not be confirmed: {1}" -f $UserId, $_.Exception.Message) 'ERROR' }
+    }
+    if ($confirmed) {
+      while ($AssignmentPaths.Count -gt $AssignmentPathCountBefore) { $AssignmentPaths.RemoveAt($AssignmentPaths.Count - 1) }
+      $State.UsersDeletedDuringCollection = [int]$State.UsersDeletedDuringCollection + 1
+      WriteLog -Message ("User {0} was deleted from the directory during collection and is excluded from the licensing CSVs." -f $UserId) 'WARNING'
+      return 'Deleted'
+    }
+  }
+  $State.UserResolutionFailures = [int]$State.UserResolutionFailures + 1
+  return 'Failure'
+}
+
+# Stops publication on any unresolved user, or when more users were deleted than the configured limit.
+function Assert-LicensesUserResolution {
+  param(
+    [Parameter(Mandatory)][hashtable]$State,
+    [Parameter(Mandatory)][int]$ListedUsers,
+    [int]$MaxDeletedCount = 100,
+    [double]$MaxDeletedPercent = 1
+  )
+  if ([int]$State.UserResolutionFailures -gt 0) {
+    throw "License collection is incomplete: $([int]$State.UserResolutionFailures) user(s) could not be resolved. Current CSV publication is stopped."
+  }
+  $deleted = [int]$State.UsersDeletedDuringCollection
+  if ($deleted -eq 0) { return $null }
+  $limit = [int][math]::Min([math]::Max(0, $MaxDeletedCount), [math]::Ceiling([math]::Max(0, $ListedUsers) * [math]::Max(0, $MaxDeletedPercent) / 100.0))
+  if ($deleted -gt $limit) {
+    throw "License collection is incomplete: $deleted user(s) were deleted during collection, above the limit of $limit; a mass deletion needs review. Current CSV publication is stopped."
+  }
+  WriteLog -Message ("Users deleted during collection: {0} of {1} listed (limit {2}); they are excluded from the licensing CSVs." -f $deleted, $ListedUsers, $limit) 'WARNING'
+  return ('UsersDeletedDuringCollection={0}' -f $deleted)
+}
+
 function Ensure-GraphModules {
   [CmdletBinding()]
   param()
@@ -573,12 +643,13 @@ function Send-LicensesInventorySuccessNotification {
     [int]$ServicePlanRows,
     [int]$TenantSkuRows,
     [int]$GroupRows,
+    [int]$UsersDeletedDuringCollection = 0,
     [string]$OutputPath
   )
 
   try {
     $scriptName = [System.IO.Path]::GetFileName($PSCommandPath)
-    $resultSummary = "Microsoft 365 licenses inventory completed without error. Users processed: {0}; user license rows: {1}; service plan rows: {2}; tenant SKUs: {3}; groups: {4}." -f $UsersProcessed, $UserLicenseRows, $ServicePlanRows, $TenantSkuRows, $GroupRows
+    $resultSummary = "Microsoft 365 licenses inventory completed without error. Users processed: {0}; user license rows: {1}; service plan rows: {2}; tenant SKUs: {3}; groups: {4}; users deleted during collection (excluded): {5}." -f $UsersProcessed, $UserLicenseRows, $ServicePlanRows, $TenantSkuRows, $GroupRows, $UsersDeletedDuringCollection
     $facts = @{
       "Script name"         = $scriptName
       "Tenant/Organization" = $OrgDomain
@@ -587,6 +658,7 @@ function Send-LicensesInventorySuccessNotification {
       "Service plan rows"   = $ServicePlanRows
       "Tenant SKU rows"     = $TenantSkuRows
       "Group rows"          = $GroupRows
+      "Users deleted during collection" = $UsersDeletedDuringCollection
       "Output path"         = $OutputPath
       "Generated CSV files" = Get-GeneratedCsvSummary
       "Log path"            = $global:LogTextFile
@@ -3919,7 +3991,7 @@ function Publish-LicensesWeeklyHistory {
 # ==========================================================
 # Main
 # ==========================================================
-$ScriptVersion = "1.54"
+$ScriptVersion = "1.55"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LicensesCsvLogFolderPath' -DefaultValue $OutputPath
 $LatestCsvFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ''
@@ -4137,7 +4209,8 @@ try {
   WriteLog -Message "Resolving licenses and building rows..."
   $resultsUsers       = New-Object System.Collections.Generic.List[object]
   $assignmentPaths    = [System.Collections.Generic.List[object]]::new()
-  $userResolutionFailures = 0
+  $userResolution = @{ UserResolutionFailures = 0; UsersDeletedDuringCollection = 0 }
+  $usersDeletedQualification = $null
   $rowsPlansExchange  = New-Object System.Collections.Generic.List[object]
   $servicePlanCatalog = @{}
   # Tenant catalog includes plans in SKUs with no assigned users.
@@ -4168,6 +4241,8 @@ try {
     $pct = if ($uTotal -gt 0) { [math]::Floor(($uIndex * 100.0) / $uTotal) } else { 100 }
     Write-Progress -Activity "Processing users" -Status "[$uIndex/$uTotal] $($u.UserPrincipalName)" -PercentComplete $pct
 
+    $licenseDetailStage = $false
+    $assignmentPathCountBefore = $assignmentPaths.Count
     try {
       $upn         = $u.UserPrincipalName
       $displayName = $u.DisplayName
@@ -4185,7 +4260,9 @@ try {
       }
 
       # License details (Direct + Group)
+      $licenseDetailStage = $true
       $licenseDetails = Invoke-GraphWithRetry { Get-MgUserLicenseDetail -UserId $uid -ErrorAction Stop }
+      $licenseDetailStage = $false
       if (-not $licenseDetails -or $licenseDetails.Count -eq 0) { continue }
 
       # SKU names
@@ -4316,8 +4393,9 @@ try {
       }
     } catch {
       if ($_.Exception.Data['SmartM365FatalServicePlanStateWrite']) { throw }
-      $userResolutionFailures++
-      WriteLog -Message "Error processing user $($u.UserPrincipalName): $_" "ERROR"
+      $disposition = Register-LicensesUserFailure -ErrorRecord $_ -UserId ([string]$u.Id) -LicenseDetailStage $licenseDetailStage `
+        -AssignmentPaths $assignmentPaths -AssignmentPathCountBefore $assignmentPathCountBefore -State $userResolution
+      if ($disposition -ne 'Deleted') { WriteLog -Message "Error processing user $($u.UserPrincipalName): $_" "ERROR" }
     }
   }
   if ($servicePlanStateWriter) {
@@ -4327,8 +4405,12 @@ try {
     WriteLog -Message ("Disk-backed compact service-plan source completed: Rows={0:N0}; Size={1:N1} MB; WorkingSet={2:N1} MB." -f $servicePlanRowCount, ($stateBuildingFile.Length / 1MB), ((Get-Process -Id $PID).WorkingSet64 / 1MB)) 'INFO'
   }
   Write-Progress -Activity "Processing users" -Completed -Status "Done"
-  if ($userResolutionFailures -gt 0) {
-    throw "License collection is incomplete: $userResolutionFailures user(s) could not be resolved. Current CSV publication is stopped."
+  $usersDeletedQualification = Assert-LicensesUserResolution -State $userResolution -ListedUsers $uTotal `
+    -MaxDeletedCount ([int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LicenseDeletedUsersMaxCount' -DefaultValue 100)) `
+    -MaxDeletedPercent ([double](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LicenseDeletedUsersMaxPercent' -DefaultValue 1))
+  if ($usersDeletedQualification) {
+    try { Add-SmartM365SourceRunNote -Message ('{0}: users deleted from the directory during collection are excluded from the licensing CSVs.' -f $usersDeletedQualification) }
+    catch { WriteLog -Message ("Deleted-user note could not be added to the run state: {0}" -f $_.Exception.Message) 'WARNING' }
   }
 
   $currentOperation = 'Export immutable license assignment paths'
@@ -4508,7 +4590,8 @@ $BaseFileName = "M365_Licenses_Groups"
   }
 
   $currentOperation = 'Complete licensing source receipt'
-  Set-SmartM365CmdbSourceScope -CompleteScope ($MaxItems -eq 0 -and $TopUsers -eq 0) -Scope 'CMDB:skus,license_paths,plans,user_plans,groups'
+  Set-SmartM365CmdbSourceScope -CompleteScope ($MaxItems -eq 0 -and $TopUsers -eq 0) -Scope 'CMDB:skus,license_paths,plans,user_plans,groups' `
+    -Qualifications @($usersDeletedQualification | Where-Object { $_ })
   try {
     $completedReceiptPath = Complete-SmartM365CmdbSourceReceipt -Status 'Completed'
     if (-not $completedReceiptPath -or -not (Test-Path -LiteralPath $completedReceiptPath -PathType Leaf)) {
@@ -4565,6 +4648,7 @@ $BaseFileName = "M365_Licenses_Groups"
     -ServicePlanRows $servicePlanRowCount `
     -TenantSkuRows $tenantSkuRowCount `
     -GroupRows $groupRowCount `
+    -UsersDeletedDuringCollection ([int]$userResolution.UsersDeletedDuringCollection) `
     -OutputPath $OutputPath
 
   WriteLog -Message "$TaskName completed."
