@@ -20,10 +20,12 @@ Checker is never executed: process runs use a synthetic stand-in script. Covers:
   status.json content, previous output removed, Exchange Management Shell failure;
 - installer: same task, folder and hash as the collector, classic account only, password handling,
   CIM over DCOM, task settings, explicit folder permissions;
+- remote results: plain JSON lines only (size limit, strict schema, same findings as the XML),
+  Import-Clixml used only for XML produced on the collector server, generic ACL rights refused;
 - option disabled: no Health Checker call outside -IncludeHealthChecker and no report section.
 
 .VERSION
-1.1.0
+1.3.0
 #>
 [CmdletBinding()]
 param([string]$SourceRoot)
@@ -42,7 +44,7 @@ $ast = [Management.Automation.Language.Parser]::ParseFile($collectorPath, [ref]$
 if ($parseErrors.Count) { throw "Collector parse failed: $parseErrors" }
 $functionNames = @('Ensure-Directory', 'Format-HtmlValue', 'Get-HealthCheckerCsvColumn', 'Get-HealthCheckerMaskingRule', 'Get-HealthCheckerSetting',
     'Test-HealthCheckerScriptIntegrity', 'Test-HealthCheckerElevation', 'Invoke-HealthCheckerProcess', 'ConvertTo-HealthCheckerSafeValue',
-    'Get-HealthCheckerLineValue', 'ConvertFrom-HealthCheckerXml', 'ConvertTo-HealthCheckerSummaryRow', 'Remove-HealthCheckerPreviousWorkFolder',
+    'Get-HealthCheckerLineValue', 'ConvertTo-HealthCheckerResultLine', 'ConvertFrom-HealthCheckerResultLine', 'ConvertFrom-HealthCheckerXml', 'Read-HealthCheckerResultJson', 'ConvertTo-HealthCheckerSummaryRow', 'Remove-HealthCheckerPreviousWorkFolder',
     'Get-HealthCheckerServerComputerName', 'ConvertTo-HealthCheckerAdminSharePath', 'ConvertTo-HealthCheckerRemoteMessage', 'ConvertTo-HealthCheckerUtcTime',
     'Read-HealthCheckerRemoteStatus', 'Get-HealthCheckerTaskLogonFailure', 'ConvertFrom-HealthCheckerRunnerState', 'Resolve-HealthCheckerScheduledFallback',
     'Copy-HealthCheckerRemoteFile', 'Start-HealthCheckerRemoteRun', 'Update-HealthCheckerRemoteRun', 'Complete-HealthCheckerRemoteRun',
@@ -288,6 +290,7 @@ Copy-Item -LiteralPath $env:SMARTM365_FAKE_HC_FIXTURE -Destination (Join-Path $O
     & $module {
         param($FixturePath, $RemoteShare)
         $script:FixturePath = $FixturePath
+        $script:ResultJson = [pscustomobject]@{ SchemaVersion = 1; HealthCheckerVersion = 'x'; Lines = @(ConvertTo-HealthCheckerResultLine -Path $FixturePath) } | ConvertTo-Json -Depth 4 -Compress
         $script:RemoteShare = $RemoteShare
         $script:ProcessCalls = New-Object 'System.Collections.Generic.List[object]'
         $script:RemoteStarts = New-Object 'System.Collections.Generic.List[object]'
@@ -316,16 +319,16 @@ Copy-Item -LiteralPath $env:SMARTM365_FAKE_HC_FIXTURE -Destination (Join-Path $O
             param($ServerName, $Computer, $VerifiedScriptPath, $RunnerSourcePath, $Settings)
             $script:RemoteStarts.Add([pscustomobject]@{ ServerName = $ServerName; Computer = $Computer; VerifiedScriptPath = $VerifiedScriptPath; RunnerSourcePath = $RunnerSourcePath }) | Out-Null
             $now = [DateTime]::UtcNow
-            $previous = [pscustomobject]@{ RunToken = 'old'; State = 'Completed'; Message = $null; StartedAtUtc = $now.AddHours(-3).ToString('o'); FinishedAtUtc = $now.AddHours(-2).ToString('o'); DurationSeconds = 150; XmlFileName = 'Raw\HealthChecker-EXSRV02-1.xml' }
+            $previous = [pscustomobject]@{ RunToken = 'old'; State = 'Completed'; Message = $null; StartedAtUtc = $now.AddHours(-3).ToString('o'); FinishedAtUtc = $now.AddHours(-2).ToString('o'); DurationSeconds = 150; ResultFileName = 'result.json' }
             $run = [pscustomobject]@{ ServerName = $ServerName; Computer = $Computer; Session = $null; OutputSharePath = $script:RemoteShare; PreviousStatus = $previous; WaitToken = $null; StartedAt = (Get-Date); Done = $false; Status = $null; Message = $null; RemoteStatus = $null }
-            Copy-Item -LiteralPath $script:FixturePath -Destination (Join-Path $script:RemoteShare 'Raw\HealthChecker-EXSRV02-1.xml') -Force
+            [IO.File]::WriteAllText((Join-Path $script:RemoteShare 'result.json'), $script:ResultJson)
             switch ($script:RemoteMode) {
                 'Completed' {
-                    $current = [pscustomobject]@{ RunToken = 'new'; State = 'Completed'; Message = $null; StartedAtUtc = $now.ToString('o'); FinishedAtUtc = $now.ToString('o'); DurationSeconds = 140; XmlFileName = 'Raw\HealthChecker-EXSRV02-1.xml' }
+                    $current = [pscustomobject]@{ RunToken = 'new'; State = 'Completed'; Message = $null; StartedAtUtc = $now.ToString('o'); FinishedAtUtc = $now.ToString('o'); DurationSeconds = 140; ResultFileName = 'result.json' }
                     [IO.File]::WriteAllText((Join-Path $script:RemoteShare 'status.json'), ($current | ConvertTo-Json))
                 }
                 'RunnerTimeout' {
-                    $current = [pscustomobject]@{ RunToken = 'new'; State = 'Timeout'; Message = 'Health Checker exceeded the 30 minute limit on the server and was stopped.'; StartedAtUtc = $now.ToString('o'); FinishedAtUtc = $now.ToString('o'); DurationSeconds = 1800; XmlFileName = $null }
+                    $current = [pscustomobject]@{ RunToken = 'new'; State = 'Timeout'; Message = 'Health Checker exceeded the 30 minute limit on the server and was stopped.'; StartedAtUtc = $now.ToString('o'); FinishedAtUtc = $now.ToString('o'); DurationSeconds = 1800; ResultFileName = $null }
                     [IO.File]::WriteAllText((Join-Path $script:RemoteShare 'status.json'), ($current | ConvertTo-Json))
                 }
                 'TriggerFailed' { $run.Done = $true; $run.Status = 'TaskTriggerFailed'; $run.Message = 'The Health Checker task could not be started: access denied on EXSRV02.corp.contoso.example.' }
@@ -357,7 +360,7 @@ Copy-Item -LiteralPath $env:SMARTM365_FAKE_HC_FIXTURE -Destination (Join-Path $O
     $runFolder = Join-Path $workRoot '20261021-060000'
     Assert-HealthChecker (-not (Test-Path -LiteralPath (Join-Path $runFolder 'EXSRV01')) -and -not (Test-Path -LiteralPath (Join-Path $runFolder 'EXSRV02'))) 'Raw output of completed servers is deleted.'
     Assert-HealthChecker (-not (Test-Path -LiteralPath (Join-Path $runFolder 'HealthChecker.ps1'))) 'The run copy of the script is removed.'
-    Assert-HealthChecker (Test-Path -LiteralPath (Join-Path $remoteShare 'Raw\HealthChecker-EXSRV02-1.xml')) 'Files on the server are left to its own next run.'
+    Assert-HealthChecker (Test-Path -LiteralPath (Join-Path $remoteShare 'result.json')) 'Files on the server are left to its own next run.'
 
     & $module { $script:ProcessCalls.Clear(); $script:LogLines.Clear(); $script:RemoteMode = 'RunnerTimeout'; $script:LocalMode = 'Timeout' }
     $failed = & $module $invoke $servers $vendoredPath $runnerSource $constants.HealthCheckerExpectedSha256 $constants.HealthCheckerVersion $runSettings
@@ -477,7 +480,7 @@ Copy-Item -LiteralPath $env:SMARTM365_FAKE_HC_FIXTURE -Destination (Join-Path $O
         Assert-HealthChecker ($mapped.Status -eq $stateMap[$state]) "Runner state $state maps to $($stateMap[$state]) (found $($mapped.Status))."
     }
     $nowUtc = [DateTime]::UtcNow
-    $fresh = [pscustomobject]@{ State = 'Completed'; XmlFileName = 'Raw\HealthChecker-X-1.xml'; FinishedAtUtc = $nowUtc.AddHours(-5).ToString('o') }
+    $fresh = [pscustomobject]@{ State = 'Completed'; ResultFileName = 'result.json'; FinishedAtUtc = $nowUtc.AddHours(-5).ToString('o') }
     $freshResult = & $module { param($r, $n) Resolve-HealthCheckerScheduledFallback -FailureStatus 'RemoteConnectionFailed' -FailureMessage 'unreachable.' -RemoteStatus $r -NowUtc $n -MaxResultAgeHours 26 } $fresh $nowUtc
     Assert-HealthChecker ($freshResult.Status -eq 'Completed' -and $freshResult.UseResult -and $freshResult.ResultAgeHours -eq 5) 'A recent scheduled result is used.'
     $fresh.FinishedAtUtc = $nowUtc.AddHours(-26.04).ToString('o')
@@ -486,7 +489,7 @@ Copy-Item -LiteralPath $env:SMARTM365_FAKE_HC_FIXTURE -Destination (Join-Path $O
     $fresh.FinishedAtUtc = [datetime]$nowUtc.AddHours(-48)
     $oldResult = & $module { param($r, $n) Resolve-HealthCheckerScheduledFallback -FailureStatus 'TaskTriggerFailed' -FailureMessage 'x' -RemoteStatus $r -NowUtc $n -MaxResultAgeHours 26 } $fresh $nowUtc
     Assert-HealthChecker ($oldResult.Status -eq 'StaleResult' -and -not $oldResult.UseResult -and $oldResult.ResultAgeHours -eq 48) 'An old result (DateTime from PowerShell 7 JSON) is StaleResult.'
-    foreach ($unusable in @($null, [pscustomobject]@{ State = 'NoOutput'; XmlFileName = $null; FinishedAtUtc = $nowUtc.ToString('o') }, [pscustomobject]@{ State = 'Completed'; XmlFileName = 'Raw\a.xml'; FinishedAtUtc = 'not a date' })) {
+    foreach ($unusable in @($null, [pscustomobject]@{ State = 'NoOutput'; ResultFileName = $null; FinishedAtUtc = $nowUtc.ToString('o') }, [pscustomobject]@{ State = 'Completed'; ResultFileName = 'result.json'; FinishedAtUtc = 'not a date' }, [pscustomobject]@{ State = 'Completed'; ResultFileName = 'Raw\HealthChecker-X-1.xml'; FinishedAtUtc = $nowUtc.ToString('o') })) {
         $kept = & $module { param($r, $n) Resolve-HealthCheckerScheduledFallback -FailureStatus 'TaskTriggerFailed' -FailureMessage 'kept' -RemoteStatus $r -NowUtc $n -MaxResultAgeHours 26 } $unusable $nowUtc
         Assert-HealthChecker ($kept.Status -eq 'TaskTriggerFailed' -and $kept.Message -eq 'kept' -and -not $kept.UseResult) 'Without a usable result the failure status is kept.'
     }
@@ -509,9 +512,9 @@ Copy-Item -LiteralPath $env:SMARTM365_FAKE_HC_FIXTURE -Destination (Join-Path $O
     & $writeStatus 'daily' 'Completed'
     & $module { param($r, $s) Update-HealthCheckerRemoteRun -Run $r -Settings $s } $waitRun $runSettings
     Assert-HealthChecker ($waitRun.Done -and $waitRun.RemoteStatus.State -eq 'Completed') 'A run already in progress at start time is awaited instead of a new one.'
-    $badName = [pscustomobject]@{ ServerName = 'EXSRV02'; Computer = 'EXSRV02'; Session = $null; OutputSharePath = $progressShare; PreviousStatus = $null; WaitToken = $null; StartedAt = (Get-Date); Done = $true; Status = $null; Message = $null; RemoteStatus = [pscustomobject]@{ State = 'Completed'; XmlFileName = '..\..\Windows\win.ini'; FinishedAtUtc = $nowUtc.ToString('o'); DurationSeconds = 1 } }
+    $badName = [pscustomobject]@{ ServerName = 'EXSRV02'; Computer = 'EXSRV02'; Session = $null; OutputSharePath = $progressShare; PreviousStatus = $null; WaitToken = $null; StartedAt = (Get-Date); Done = $true; Status = $null; Message = $null; RemoteStatus = [pscustomobject]@{ State = 'Completed'; ResultFileName = '..\..\Windows\win.ini'; FinishedAtUtc = $nowUtc.ToString('o'); DurationSeconds = 1 } }
     $badOutcome = & $module { param($r, $f, $s) Complete-HealthCheckerRemoteRun -Run $r -LocalFolder $f -Settings $s } $badName (Join-Path $tempRoot 'bad-name') $runSettings
-    Assert-HealthChecker ($badOutcome.Status -eq 'NoOutput' -and $null -eq $badOutcome.XmlPath) 'A result file name outside Raw\HealthChecker-*.xml is refused.'
+    Assert-HealthChecker ($badOutcome.Status -eq 'NoOutput' -and $null -eq $badOutcome.JsonPath -and $null -eq $badOutcome.XmlPath) 'Only result.json is ever copied from a server.'
 
     # Server files are copied only when they differ.
     $copySource = Join-Path $tempRoot 'copy-source.txt'
@@ -521,6 +524,48 @@ Copy-Item -LiteralPath $env:SMARTM365_FAKE_HC_FIXTURE -Destination (Join-Path $O
     Assert-HealthChecker ((& $module { param($s, $d) Copy-HealthCheckerRemoteFile -SourcePath $s -DestinationPath $d } $copySource $copyTarget) -eq $false) 'An identical file is not copied again.'
     [IO.File]::WriteAllText($copyTarget, 'tampered')
     Assert-HealthChecker ((& $module { param($s, $d) Copy-HealthCheckerRemoteFile -SourcePath $s -DestinationPath $d } $copySource $copyTarget) -eq $true -and [IO.File]::ReadAllText($copyTarget) -eq 'v1') 'A file that differs is replaced.'
+
+    # Remote results: plain JSON lines, size limit, strict schema, same findings as the XML.
+    $plainLines = @(& $module { param($p) ConvertTo-HealthCheckerResultLine -Path $p } $fixture)
+    $jsonPath = Join-Path $tempRoot 'result.json'
+    [IO.File]::WriteAllText($jsonPath, ([pscustomobject]@{ SchemaVersion = 1; HealthCheckerVersion = 'x'; Lines = $plainLines } | ConvertTo-Json -Depth 4 -Compress))
+    $jsonLines = @(& $module { param($p) Read-HealthCheckerResultJson -Path $p } $jsonPath)
+    $fromJson = & $module { param($l) ConvertFrom-HealthCheckerResultLine -Lines $l -ServerName 'EXSRV01' -HealthCheckerVersion '26.10.13.1644' } $jsonLines
+    $fromXml = & $module { param($p) ConvertFrom-HealthCheckerXml -Path $p -ServerName 'EXSRV01' -HealthCheckerVersion '26.10.13.1644' } $fixture
+    Assert-HealthChecker ((@($fromJson.Findings) | ConvertTo-Json -Depth 3 -Compress) -ceq (@($fromXml.Findings) | ConvertTo-Json -Depth 3 -Compress) -and ($fromJson.Facts | ConvertTo-Json -Compress) -ceq ($fromXml.Facts | ConvertTo-Json -Compress)) 'Findings and facts from result.json equal those from the XML.'
+    Assert-HealthChecker (@($plainLines | Where-Object { $_.DisplayValue -isnot [string] -and $null -ne $_.DisplayValue }).Count -eq 0 -and @($plainLines | Where-Object { $_.WriteType -eq 'OutColumns' -and $null -ne $_.DisplayValue }).Count -eq 0) 'Result lines hold text only, and tables are not carried.'
+    $refusedJson = {
+        param([string]$Content, [int]$MaxBytes = 20MB)
+        $path = Join-Path $tempRoot ('bad-' + [guid]::NewGuid().ToString('N') + '.json')
+        [IO.File]::WriteAllText($path, $Content)
+        $refused = $false
+        try { [void](& $module { param($p, $m) Read-HealthCheckerResultJson -Path $p -MaxBytes $m } $path $MaxBytes) } catch { $refused = $true }
+        return $refused
+    }
+    Assert-HealthChecker (& $refusedJson ([IO.File]::ReadAllText($jsonPath)) 100) 'A result over the size limit is refused before it is read.'
+    Assert-HealthChecker (& $refusedJson '{"SchemaVersion":2,"Lines":[{"Category":"A"}]}') 'Another schema version is refused.'
+    Assert-HealthChecker (& $refusedJson '{"SchemaVersion":1,"Lines":[{"Category":"A","DisplayValue":{"Nested":"object"}}]}') 'A nested object in a field is refused.'
+    Assert-HealthChecker (& $refusedJson '{"SchemaVersion":1,"Lines":["text"]}') 'A line that is not an object is refused.'
+    Assert-HealthChecker (& $refusedJson '{"SchemaVersion":1,"Lines":[]}') 'A result without lines is refused.'
+    Assert-HealthChecker (& $refusedJson ([IO.File]::ReadAllText($fixture))) 'A CliXml document is never accepted as a remote result.'
+    $extraPath = Join-Path $tempRoot 'extra.json'
+    [IO.File]::WriteAllText($extraPath, '{"SchemaVersion":1,"Lines":[{"Category":"Exchange Information","CategoryOrder":"1","Check":"Name","Name":"Name","WriteType":"Grey","DisplayValue":42,"Unexpected":{"Type":"x"}}]}')
+    $extraLines = @(& $module { param($p) Read-HealthCheckerResultJson -Path $p } $extraPath)
+    Assert-HealthChecker ($extraLines.Count -eq 1 -and $extraLines[0].DisplayValue -ceq '42' -and $extraLines[0].CategoryOrder -eq 1 -and -not $extraLines[0].PSObject.Properties['Unexpected']) 'Only the expected fields are kept, as strings and numbers.'
+    $clixmlCalls = @($ast.FindAll({ param($n) $n -is [Management.Automation.Language.CommandAst] -and $n.GetCommandName() -eq 'Import-Clixml' }, $true))
+    $clixmlOwner = if ($clixmlCalls.Count -eq 1) { $node = $clixmlCalls[0].Parent; while ($node -and $node -isnot [Management.Automation.Language.FunctionDefinitionAst]) { $node = $node.Parent }; $node.Name } else { '' }
+    Assert-HealthChecker ($clixmlOwner -eq 'ConvertTo-HealthCheckerResultLine') 'Import-Clixml is used in one place only.'
+    $xmlParsers = @($ast.FindAll({ param($n) $n -is [Management.Automation.Language.CommandAst] -and $n.GetCommandName() -in @('ConvertFrom-HealthCheckerXml', 'ConvertTo-HealthCheckerResultLine') }, $true) | ForEach-Object { $node = $_.Parent; while ($node -and $node -isnot [Management.Automation.Language.FunctionDefinitionAst]) { $node = $node.Parent }; $node.Name } | Sort-Object -Unique)
+    Assert-HealthChecker (($xmlParsers -join ',') -eq 'ConvertFrom-HealthCheckerXml,Invoke-ExchangeHealthCheckerInventory') "XML is only read by the local-run path ($($xmlParsers -join ','))."
+    $remoteCompleteText = $ast.Find({ param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Complete-HealthCheckerRemoteRun' }, $true).Extent.Text
+    Assert-HealthChecker ($remoteCompleteText -notmatch '(?i)\.xml|Clixml') 'Nothing XML is copied from a server.'
+
+    # Generic rights are not mapped by .NET: GENERIC_WRITE or GENERIC_ALL for a non-administrator is refused.
+    foreach ($generic in @('GW', 'GA')) {
+        $genericAcl = New-Object System.Security.AccessControl.DirectorySecurity
+        $genericAcl.SetSecurityDescriptorSddlForm(('O:BAG:BAD:P(A;OICI;FA;;;BA)(A;OICIIO;{0};;;AU)' -f $generic))
+        Assert-HealthChecker (@(& $module { param($a) Get-HealthCheckerUnsafeAclEntry -Acl $a } $genericAcl).Count -eq 1) ("Generic right {0} for Authenticated Users is refused." -f $generic)
+    }
 
     # 8. Local runner deployed to the servers.
     $runnerPath = Join-Path $collectorFolder $constants.HealthCheckerRunnerFileName
@@ -534,6 +579,11 @@ Copy-Item -LiteralPath $env:SMARTM365_FAKE_HC_FIXTURE -Destination (Join-Path $O
     $collectorIntegrity = $ast.Find({ param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Test-HealthCheckerScriptIntegrity' }, $true).Extent.Text
     $runnerIntegrity = $runnerAst.Find({ param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Test-HealthCheckerScriptIntegrity' }, $true).Extent.Text
     Assert-HealthChecker ($runnerIntegrity -ceq $collectorIntegrity) 'The runner checks Health Checker exactly like the collector.'
+    foreach ($sharedName in @('Get-HealthCheckerLineValue', 'ConvertTo-HealthCheckerResultLine')) {
+        $collectorShared = $ast.Find({ param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $sharedName }, $true).Extent.Text
+        $runnerShared = $runnerAst.Find({ param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $sharedName }, $true)
+        Assert-HealthChecker ($null -ne $runnerShared -and $runnerShared.Extent.Text -ceq $collectorShared) "The runner converts results with the collector's $sharedName."
+    }
     Assert-HealthChecker (((@($runnerAst.ParamBlock.Parameters | ForEach-Object { $_.Name.VariablePath.UserPath })) -join ',') -eq 'TimeoutMinutes') 'The runner has no -Server parameter.'
     Assert-HealthChecker ($runnerText -notmatch "'-Server'" -and $runnerText -notmatch 'SmartM365\.Core|Import-Module|InventoryLifecycle|TenantContext') 'The runner never passes -Server and is standalone (no repository module).'
     Assert-HealthChecker ($runnerText -match 'WindowsPowerShell\\v1\.0\\powershell\.exe' -and $runnerText -match 'Global\\SmartM365-Exchange-HealthChecker-LocalRunner') 'The runner forces Windows PowerShell 5.1 and takes a machine-wide lock.'
@@ -542,7 +592,7 @@ Copy-Item -LiteralPath $env:SMARTM365_FAKE_HC_FIXTURE -Destination (Join-Path $O
     & $runnerModule {
         param($Version, $Hash)
         Set-StrictMode -Version Latest
-        $script:ScriptVersion = '1.0.0'; $script:HealthCheckerVersion = $Version; $script:HealthCheckerExpectedSha256 = $Hash
+        $script:ScriptVersion = '1.1.0'; $script:HealthCheckerVersion = $Version; $script:HealthCheckerExpectedSha256 = $Hash
         $script:IntegrityOk = $true
         $script:RunnerElevated = $true
     } $constants.HealthCheckerVersion $constants.HealthCheckerExpectedSha256
@@ -560,9 +610,9 @@ Copy-Item -LiteralPath $env:SMARTM365_FAKE_HC_FIXTURE -Destination (Join-Path $O
         $statusFile = Get-Content -LiteralPath (Join-Path $runnerRoot 'Output\status.json') -Raw | ConvertFrom-Json
         Assert-HealthChecker ($integrityRun.State -eq 'IntegrityFailed' -and $statusFile.State -eq 'IntegrityFailed' -and $statusFile.Message -match 'SHA256 mismatch') 'The runner refuses a file that is not the expected Health Checker.'
         Assert-HealthChecker (-not (Test-Path -LiteralPath (Join-Path $runnerRoot 'Output\Raw\previous-run.txt'))) 'The previous run output is removed first.'
-        Assert-HealthChecker ($statusFile.Message -notmatch [regex]::Escape($runnerRoot) -and $statusFile.RunToken -match '^[0-9a-f-]{36}$' -and $statusFile.FinishedAtUtc -and $statusFile.RunnerVersion -eq '1.0.0') 'The status holds a run token, times and versions without local paths.'
+        Assert-HealthChecker ($statusFile.Message -notmatch [regex]::Escape($runnerRoot) -and $statusFile.RunToken -match '^[0-9a-f-]{36}$' -and $statusFile.FinishedAtUtc -and $statusFile.RunnerVersion -eq '1.1.0') 'The status holds a run token, times and versions without local paths.'
         $statusProperties = @($statusFile.PSObject.Properties.Name) -join ','
-        Assert-HealthChecker ($statusProperties -eq 'SchemaVersion,RunToken,State,Message,RunnerVersion,HealthCheckerVersion,StartedAtUtc,FinishedAtUtc,DurationSeconds,ExitCode,XmlFileName') "The status has no host or account field ($statusProperties)."
+        Assert-HealthChecker ($statusProperties -eq 'SchemaVersion,RunToken,State,Message,RunnerVersion,HealthCheckerVersion,StartedAtUtc,FinishedAtUtc,DurationSeconds,ExitCode,ResultFileName') "The status has no host or account field ($statusProperties)."
 
         # The real check is replaced to run the synthetic stand-in; Microsoft's script is never run here.
         & $runnerModule {
@@ -571,7 +621,11 @@ Copy-Item -LiteralPath $env:SMARTM365_FAKE_HC_FIXTURE -Destination (Join-Path $O
         }
         $env:SMARTM365_FAKE_HC_MODE = 'ok'
         $okRun = & $runnerModule { param($r) Invoke-LocalHealthCheckerRun -RootFolder $r -TimeoutSeconds 120 } $runnerRoot
-        Assert-HealthChecker ($okRun.State -eq 'Completed' -and $okRun.XmlFileName -match '^Raw\\HealthChecker-.+\.xml$' -and (Test-Path -LiteralPath (Join-Path (Join-Path $runnerRoot 'Output') $okRun.XmlFileName))) "A completed run records its XML relative to Output ($($okRun.XmlFileName))."
+        $runnerJsonPath = Join-Path $runnerRoot 'Output\result.json'
+        Assert-HealthChecker ($okRun.State -eq 'Completed' -and $okRun.ResultFileName -eq 'result.json' -and (Test-Path -LiteralPath $runnerJsonPath)) "A completed run converts its XML to result.json on the server ($($okRun.State) $($okRun.Message))."
+        $runnerLines = @(& $module { param($p) Read-HealthCheckerResultJson -Path $p } $runnerJsonPath)
+        $runnerParsed = & $module { param($l) ConvertFrom-HealthCheckerResultLine -Lines $l -ServerName 'EXSRV01' -HealthCheckerVersion 'v' } $runnerLines
+        Assert-HealthChecker (@($runnerParsed.Findings).Count -eq 17 -and @($runnerParsed.Vulnerabilities).Count -eq 2) 'The collector reads the runner result.json into the same findings.'
         $runnerFakeArgs = Get-Content -LiteralPath (Join-Path $runnerRoot 'Output\Raw\fake-args.txt') -Raw
         Assert-HealthChecker ($runnerFakeArgs -match 'Server=;SkipVersionCheck=True') "Health Checker gets no -Server from the runner ($runnerFakeArgs)."
 
@@ -600,7 +654,7 @@ Copy-Item -LiteralPath $env:SMARTM365_FAKE_HC_FIXTURE -Destination (Join-Path $O
     $allowedPasswordLines = @('$plainTextPassword = $null', '$plainTextPassword = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($passwordPointer)', 'Password = $plainTextPassword')
     Assert-HealthChecker (@($passwordLines | Where-Object { $_ -notin $allowedPasswordLines }).Count -eq 0 -and $installerText -match 'ZeroFreeBSTR\(\$passwordPointer\)') "The password is only passed to Register-ScheduledTask and cleared ($($passwordLines -join ' | '))."
     Assert-HealthChecker ($installerText -match "Get-Credential @credentialParameters" -and $installerText -match "'s-1-5-18'" -and $installerText -match 'credentialSid -ne \$serviceAccountSid') 'The password is typed in Get-Credential for the named account, and SYSTEM is refused.'
-    Assert-HealthChecker ($installerText -match "-Protocol Dcom" -and $installerText -notmatch 'Invoke-Command|New-PSSession|Enter-PSSession|schtasks') 'The installer uses CIM over DCOM, never WinRM or schtasks.'
+    Assert-HealthChecker ($installerText -match 'New-HealthCheckerDcomSessionOption' -and $installerText -notmatch '-Protocol Dcom' -and $installerText -notmatch 'Invoke-Command|New-PSSession|Enter-PSSession|schtasks') 'The installer uses CIM over DCOM, never WinRM or schtasks.'
     Assert-HealthChecker ($installerText -match "MultipleInstances IgnoreNew" -and $installerText -match "RunLevel = 'Highest'" -and $installerText -match "New-TimeSpan -Hours 1" -and $installerText -match '\[string\]\$DailyAt = ''01:00''') 'The task runs daily at 01:00, elevated, one run at a time, at most one hour.'
     Assert-HealthChecker ((& $installerValue 'remoteRootPath') -like 'C:\Program Files\*') 'The elevated task runs from Program Files, where standard users cannot create files.'
     Assert-HealthChecker ($installerText -match 'Assert-HealthCheckerParentFolder -Path \(Split-Path -Path \$rootShare -Parent\)\r?\n\s*Set-HealthCheckerFolder -Path \$rootShare') 'The parent folder is checked before the task folders are created.'
@@ -647,6 +701,41 @@ Copy-Item -LiteralPath $env:SMARTM365_FAKE_HC_FIXTURE -Destination (Join-Path $O
     Assert-HealthChecker (@(& $installerModule { param($a) Get-HealthCheckerUnsafeAclEntry -Acl $a } $createOnly).Count -eq 1) 'A parent where others can create folders is refused: they could plant the task folder first.'
     $inheritedFromProgramData = & $newAcl 'S-1-5-32-544' @('S-1-5-18=FullControl', 'S-1-5-32-544=FullControl', 'S-1-5-32-545=CreateDirectories, AppendData')
     Assert-HealthChecker (@(& $module { param($a) Get-HealthCheckerUnsafeAclEntry -Acl $a } $inheritedFromProgramData).Count -eq 1) 'A parent with the ProgramData rights for Users is refused for the work folder.'
+
+    # CIM over DCOM: the session options are really built (no mock), from the code of both scripts.
+    foreach ($source in @(@{ Name = 'collector'; Ast = $ast }, @{ Name = 'installer'; Ast = $installerAst })) {
+        $optionFunction = $source.Ast.Find({ param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'New-HealthCheckerDcomSessionOption' }, $true)
+        Assert-HealthChecker ($null -ne $optionFunction) "The $($source.Name) builds its CIM options in New-HealthCheckerDcomSessionOption."
+        $optionModule = New-Module -ScriptBlock ([scriptblock]::Create($optionFunction.Extent.Text))
+        $option = & $optionModule { New-HealthCheckerDcomSessionOption }
+        Assert-HealthChecker ($option -is [Microsoft.Management.Infrastructure.Options.DComSessionOptions] -and $option.PacketPrivacy -and $option.PacketIntegrity -and [string]$option.Impersonation -eq 'Impersonate') "The $($source.Name) CIM options are DCOM with packet privacy and integrity ($($option.GetType().Name))."
+        $optionCalls = @($source.Ast.FindAll({ param($n) $n -is [Management.Automation.Language.CommandAst] -and $n.GetCommandName() -eq 'New-CimSessionOption' }, $true))
+        $outside = @($optionCalls | Where-Object { $node = $_.Parent; while ($node -and $node -isnot [Management.Automation.Language.FunctionDefinitionAst]) { $node = $node.Parent }; -not $node -or $node.Name -ne 'New-HealthCheckerDcomSessionOption' })
+        Assert-HealthChecker ($optionCalls.Count -eq 1 -and $outside.Count -eq 0) "The $($source.Name) builds CIM options in one place only."
+        $sessionCalls = @($source.Ast.FindAll({ param($n) $n -is [Management.Automation.Language.CommandAst] -and $n.GetCommandName() -eq 'New-CimSession' }, $true))
+        Assert-HealthChecker ($sessionCalls.Count -eq 1 -and $sessionCalls[0].Extent.Text -match '-SessionOption \(New-HealthCheckerDcomSessionOption\)') "The $($source.Name) opens its CIM session with those options."
+    }
+    $collectorOption = $ast.Find({ param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'New-HealthCheckerDcomSessionOption' }, $true).Extent.Text
+    $installerOption = $installerAst.Find({ param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'New-HealthCheckerDcomSessionOption' }, $true).Extent.Text
+    Assert-HealthChecker ($collectorOption -ceq $installerOption) 'The collector and the installer use the same CIM options.'
+
+    # Server names: powershell -File passes 'A,B' as one string.
+    $listFunction = $installerAst.Find({ param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'ConvertTo-HealthCheckerComputerList' }, $true).Extent.Text
+    $listModule = New-Module -ScriptBlock ([scriptblock]::Create($listFunction))
+    Assert-HealthChecker ((@(& $listModule { ConvertTo-HealthCheckerComputerList -Value @('EXSRV01,EXSRV02,EXSRV03') }) -join '|') -eq 'EXSRV01|EXSRV02|EXSRV03') 'A comma-separated single value gives one name per server.'
+    Assert-HealthChecker ((@(& $listModule { ConvertTo-HealthCheckerComputerList -Value @(' EXSRV01 ; EXSRV02,,', 'EXSRV01', 'EXSRV03') }) -join '|') -eq 'EXSRV01|EXSRV02|EXSRV03') 'Semicolons, spaces, empty entries and duplicates are handled.'
+    Assert-HealthChecker (@(& $listModule { ConvertTo-HealthCheckerComputerList -Value @() }).Count -eq 0 -and @(& $listModule { ConvertTo-HealthCheckerComputerList -Value $null }).Count -eq 0) 'No value gives no server.'
+    Assert-HealthChecker ($installerText -match '\$ComputerName = @\(ConvertTo-HealthCheckerComputerList -Value \$ComputerName\)' -and $installerText -match '\$ComputerName = @\(ConvertTo-HealthCheckerComputerList -Value \$candidateComputers\)' -and $installerText -notmatch "must not contain quotes, commas") 'Parameter and interactive names go through the same split, commas are allowed.'
+
+    # Every failure is counted, so the completion banner reports Failed with its error count.
+    $errorFunction = $installerAst.Find({ param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Write-InstallerError' }, $true).Extent.Text
+    $errorModule = New-Module -ScriptBlock ([scriptblock]::Create($errorFunction + "`nfunction Write-InstallerMessage { param(`$Message) `$script:Last = `$Message }"))
+    $global:SmartM365ErrorCount = 0
+    & $errorModule { Write-InstallerError 'EXSRV01: installation failed: x' }
+    Assert-HealthChecker ($global:SmartM365ErrorCount -eq 1 -and (& $errorModule { $script:Last }) -eq 'ERROR: EXSRV01: installation failed: x') 'An installer error is written and counted for the banner.'
+    Remove-Variable -Name SmartM365ErrorCount -Scope Global -ErrorAction SilentlyContinue
+    Assert-HealthChecker ($installerText -match 'Write-InstallerError \("\{0\}: installation failed' -and $installerText -match 'Write-InstallerError \("\{0\}: uninstall failed' -and $installerText -match 'Write-InstallerError \$_\.Exception\.Message' -and $installerText -match 'first run ended with') 'Validation errors, failed servers and failed first runs are counted.'
+    Assert-HealthChecker ($installerText -notmatch "InstallerCompletionStatus = 'CompletedWithWarnings' \}" -and ([regex]::Matches($installerText, "if \(\`$failedServers -gt 0\) \{ \`$script:InstallerCompletionStatus = 'Failed' \}")).Count -eq 2) 'A failed server makes the installation Failed.'
 }
 finally {
     Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue

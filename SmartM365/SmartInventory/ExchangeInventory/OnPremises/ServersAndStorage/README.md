@@ -41,10 +41,13 @@ Health Checker always runs on the server it checks and is never given `-Server`:
   1. checks the files under `C:\Program Files\SmartM365\HealthChecker\Bin` through the `C$` share and
      copies them again when their SHA256 differs;
   2. starts all the tasks at once over CIM/DCOM, then runs the collector server itself;
-  3. waits for each server's `Output\status.json` and copies only the XML result.
+  3. waits for each server's `Output\status.json` and copies only `Output\result.json`.
 - The runner checks SHA256 and the Microsoft signature again before every run, takes a lock, removes
-  the previous run output and writes `status.json` (state, UTC times, exit code, XML file name and
-  versions, no host name or secret). The task also runs daily at 01:00.
+  the previous run output, converts the Health Checker XML on the server into `result.json` (result
+  lines as strings and numbers only) and writes `status.json` (state, UTC times, exit code, result
+  file name and versions, no host name or secret). The task also runs daily at 01:00.
+- The collector never deserializes XML produced by another server: it reads `result.json` with a
+  20 MB limit and a strict schema. Only the collector server's own XML is read as XML.
 - Fallback: when the on-demand start fails (server unreachable, task missing, task logon failure),
   the collector uses the last daily result if it is at most `HealthCheckerMaxResultAgeHours` old
   (default 26; `ResultSource` `Scheduled`). An older result gives `StaleResult`.
@@ -101,6 +104,9 @@ target servers. Network from the collector server: RPC 135 and dynamic RPC ports
 - Task: Windows PowerShell 5.1, daily at `-DailyAt` (default `01:00`), highest privileges, a new start
   is ignored while a run is in progress, stopped after one hour.
 - Running the installer again is safe; `-WhatIf` shows the changes without making them.
+- `-ComputerName` also accepts one value separated by commas or semicolons, as passed by
+  `powershell -File` (for example `-ComputerName EXSRV01,EXSRV02`). Any failed server, validation error
+  or failed first run makes the installation end as `FAILED` with its error count.
 
 Minimum rights:
 

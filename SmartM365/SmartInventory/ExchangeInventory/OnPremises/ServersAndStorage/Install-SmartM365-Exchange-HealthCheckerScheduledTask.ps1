@@ -31,7 +31,8 @@ Running the installer again is safe: folders, permissions, files and the task ar
 same state.
 
 .PARAMETER ComputerName
-Exchange servers to install on or remove from. Required.
+Exchange servers to install on or remove from. Required. Several names can also be given as one string
+separated by commas or semicolons (powershell -File passes 'A,B' as a single value).
 
 .PARAMETER ServiceAccount
 Dedicated domain service account (DOMAIN\user or user@domain) used to run the task. SYSTEM and
@@ -60,7 +61,7 @@ Forces the guided interactive workflow. This is used by the CMD launcher.
 ./Install-SmartM365-Exchange-HealthCheckerScheduledTask.ps1 -ComputerName 'EXSRV01' -Uninstall
 
 .VERSION
-1.0.0
+1.0.1
 
 .REQUIREMENTS
     Windows PowerShell 5.1 or PowerShell 7, elevated (the script requests UAC elevation when needed).
@@ -119,6 +120,9 @@ $installerLogFolder = Join-Path -Path ([IO.Path]::GetTempPath()) -ChildPath 'Sma
 if (-not (Test-Path -LiteralPath $installerLogFolder)) { New-Item -ItemType Directory -Path $installerLogFolder -Force | Out-Null }
 $global:LogTextFile = Join-Path -Path $installerLogFolder -ChildPath ('{0}_{1}.log' -f $global:SmartM365ScriptName, $script:InstallerStartedAt.ToString('yyyyMMdd_HHmmss'))
 $script:InstallerCompletionStatus = 'Auto'
+# Read by the completion banner: every failure is counted, so a failed server never ends as a success.
+$global:SmartM365ErrorCount = 0
+$global:SmartM365WarningCount = 0
 
 Write-SmartM365StartupBanner
 
@@ -127,6 +131,26 @@ function Write-InstallerMessage {
     $line = '[{0}] {1}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $Message
     Microsoft.PowerShell.Utility\Write-Host $line
     Add-Content -LiteralPath $global:LogTextFile -Value $line -Encoding UTF8
+}
+
+function Write-InstallerError {
+    param([Parameter(Mandatory = $true)][string]$Message)
+    $global:SmartM365ErrorCount++
+    Write-InstallerMessage ('ERROR: {0}' -f $Message)
+}
+
+function ConvertTo-HealthCheckerComputerList {
+    param([AllowNull()][AllowEmptyCollection()][string[]]$Value)
+
+    # powershell -File passes 'A,B' as a single string: commas and semicolons separate names in every form.
+    $names = New-Object System.Collections.Generic.List[string]
+    foreach ($item in @($Value)) {
+        foreach ($part in ([string]$item -split '[,;]')) {
+            $name = $part.Trim()
+            if ($name -and -not ($names -contains $name)) { $names.Add($name) }
+        }
+    }
+    return $names.ToArray()
 }
 
 function Test-IsAdministrator {
@@ -281,7 +305,9 @@ function Get-HealthCheckerUnsafeAclEntry {
     foreach ($rule in @($Acl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier]))) {
         $sid = [string]$rule.IdentityReference.Value
         if ($rule.AccessControlType -ne [System.Security.AccessControl.AccessControlType]::Allow -or $sid -in $trustedSids -or $sid -eq 'S-1-3-0') { continue }
-        if (($rule.FileSystemRights -band $writeRights) -ne 0) { $unsafe.Add(('{0} {1}' -f $sid, $rule.FileSystemRights)) }
+        # Generic rights (GENERIC_ALL 0x10000000, GENERIC_WRITE 0x40000000) are not mapped by .NET: test them too.
+        $mask = [int64][int]$rule.FileSystemRights -band 4294967295
+        if (($mask -band [int64]$writeRights) -ne 0 -or ($mask -band 0x50000000) -ne 0) { $unsafe.Add(('{0} {1}' -f $sid, $rule.FileSystemRights)) }
     }
     return $unsafe.ToArray()
 }
@@ -334,12 +360,16 @@ function Copy-HealthCheckerFileIfChanged {
     return 'Copied'
 }
 
+function New-HealthCheckerDcomSessionOption {
+    # DCOM, not WinRM: PowerShell remoting is disabled on the Exchange servers. The DCOM parameter set
+    # (-Impersonation/-PacketPrivacy/-PacketIntegrity) returns DComSessionOptions; it cannot be combined with -Protocol.
+    return New-CimSessionOption -Impersonation Impersonate -PacketPrivacy -PacketIntegrity
+}
+
 function New-HealthCheckerCimSession {
     param([Parameter(Mandatory = $true)][string]$Computer)
 
-    # DCOM, not WinRM: PowerShell remoting is disabled on the Exchange servers.
-    $option = New-CimSessionOption -Protocol Dcom -PacketPrivacy -PacketIntegrity
-    return New-CimSession -ComputerName $Computer -SessionOption $option -ErrorAction Stop
+    return New-CimSession -ComputerName $Computer -SessionOption (New-HealthCheckerDcomSessionOption) -ErrorAction Stop
 }
 
 function Wait-HealthCheckerFirstRun {
@@ -364,7 +394,7 @@ function Wait-HealthCheckerFirstRun {
 $script:InteractiveMode = $Interactive -or $PSBoundParameters.Count -eq 0
 
 trap {
-    Write-InstallerMessage ('ERROR: {0}' -f $_.Exception.Message)
+    Write-InstallerError $_.Exception.Message
     $script:InstallerCompletionStatus = 'Failed'
     Wait-InteractiveClose
     Complete-InstallerExecution -Status 'Failed'
@@ -377,8 +407,8 @@ if (-not (Test-IsAdministrator)) {
         throw 'Windows PowerShell was not found for UAC elevation.'
     }
     foreach ($unsafeValue in @($ServiceAccount) + @($ComputerName)) {
-        if (-not [string]::IsNullOrWhiteSpace($unsafeValue) -and $unsafeValue -match '[\r\n",]') {
-            throw 'ServiceAccount and ComputerName must not contain quotes, commas or line breaks.'
+        if (-not [string]::IsNullOrWhiteSpace($unsafeValue) -and $unsafeValue -match '[\r\n"]') {
+            throw 'ServiceAccount and ComputerName must not contain quotes or line breaks.'
         }
     }
 
@@ -425,7 +455,7 @@ if ($script:InteractiveMode) {
 
     while ($true) {
         $candidateComputers = Read-Host ('[{0}] Exchange servers, separated by commas' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'))
-        $ComputerName = @($candidateComputers -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+        $ComputerName = @(ConvertTo-HealthCheckerComputerList -Value $candidateComputers)
         if ($ComputerName.Count -gt 0) { break }
         Write-InstallerMessage 'At least one server is required.'
     }
@@ -458,7 +488,7 @@ if ($script:InteractiveMode) {
     }
 }
 
-$ComputerName = @($ComputerName | ForEach-Object { ([string]$_).Trim() } | Where-Object { $_ } | Select-Object -Unique)
+$ComputerName = @(ConvertTo-HealthCheckerComputerList -Value $ComputerName)
 if ($ComputerName.Count -eq 0) {
     throw 'ComputerName is required.'
 }
@@ -496,14 +526,14 @@ if ($Uninstall) {
         }
         catch {
             $failedServers++
-            Write-InstallerMessage ("{0}: uninstall failed: {1}" -f $computer, $_.Exception.Message)
+            Write-InstallerError ("{0}: uninstall failed: {1}" -f $computer, $_.Exception.Message)
         }
         finally {
             if ($null -ne $session) { Remove-CimSession -CimSession $session -ErrorAction SilentlyContinue }
         }
     }
 
-    if ($failedServers -gt 0) { $script:InstallerCompletionStatus = 'CompletedWithWarnings' }
+    if ($failedServers -gt 0) { $script:InstallerCompletionStatus = 'Failed' }
     Wait-InteractiveClose
     Complete-InstallerExecution
     $smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; return
@@ -616,19 +646,22 @@ try {
                     throw ("no run result within {0} minutes (last task result 0x{1:X8}). A logon failure means a wrong password or a missing 'Log on as a batch job' right." -f $startNowWaitMinutes, [uint32]$info.LastTaskResult)
                 }
                 Write-InstallerMessage ("{0}: run result {1} in {2}s. {3}" -f $computer, $firstRun.State, $firstRun.DurationSeconds, $firstRun.Message)
-                if ([string]$firstRun.State -ne 'Completed') { $failedServers++ }
+                if ([string]$firstRun.State -ne 'Completed') {
+                    $failedServers++
+                    Write-InstallerError ("{0}: the task is installed but its first run ended with {1}." -f $computer, $firstRun.State)
+                }
             }
         }
         catch {
             $failedServers++
-            Write-InstallerMessage ("{0}: installation failed: {1}" -f $computer, $_.Exception.Message)
+            Write-InstallerError ("{0}: installation failed: {1}" -f $computer, $_.Exception.Message)
         }
         finally {
             if ($null -ne $session) { Remove-CimSession -CimSession $session -ErrorAction SilentlyContinue }
         }
     }
 
-    if ($failedServers -gt 0) { $script:InstallerCompletionStatus = 'CompletedWithWarnings' }
+    if ($failedServers -gt 0) { $script:InstallerCompletionStatus = 'Failed' }
     $smartM365RunGuard.ReachedTerminal=$true
 }
 finally {

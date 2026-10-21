@@ -16,11 +16,13 @@
       Authenticode signature, and refuses to run it otherwise;
     - starts Health Checker in a Windows PowerShell 5.1 child process for the local server only
       (never with -Server), with -SkipVersionCheck and a time limit;
-    - writes <root>\Output\status.json: state, UTC times, exit code, XML file name and versions.
+    - converts the Health Checker XML on the server into <root>\Output\result.json, which holds
+      strings and numbers only: the collector never deserializes XML that another server produced;
+    - writes <root>\Output\status.json: state, UTC times, exit code, result file name and versions.
       The status holds no host name, domain or secret.
 
     Raw output (XML, text and debug files) stays on the server under <root>\Output\Raw until the
-    next run. The collector copies only the XML file.
+    next run. The collector copies only result.json.
 
 .PARAMETER TimeoutMinutes
     Time limit for Health Checker. The child process tree is stopped when it is exceeded.
@@ -29,7 +31,7 @@
     powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "C:\Program Files\SmartM365\HealthChecker\Bin\SmartM365-Exchange-OnPrem-HealthChecker-LocalRunner.ps1"
 
 .VERSION
-1.0.0
+1.1.0
 
 .REQUIREMENTS
     Windows PowerShell 5.1 on an Exchange server, run elevated (scheduled task with highest privileges).
@@ -45,7 +47,7 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$ScriptVersion = '1.0.0'
+$ScriptVersion = '1.1.0'
 # Must match the collector constants (checked by the offline test).
 $HealthCheckerVersion = '26.10.13.1644'
 $HealthCheckerExpectedSha256 = 'BF8758E96E8760226E3094D45A84909AFFA9F91167DE11F739D8E3D9343229DC'
@@ -87,6 +89,72 @@ function Test-HealthCheckerScriptIntegrity {
     return $result
 }
 
+function Get-HealthCheckerLineValue {
+    param(
+        [AllowNull()][object]$Line,
+        [Parameter(Mandatory)][string]$Name
+    )
+
+    # Serialized entries can be plain strings when Export-Clixml ran out of depth.
+    if ($null -eq $Line) { return $null }
+    if ($Line -is [string]) { return $(if ($Name -eq 'DisplayValue') { $Line } else { $null }) }
+    $property = $Line.PSObject.Properties[$Name]
+    if ($null -eq $property) { return $null }
+    return $property.Value
+}
+
+function ConvertTo-HealthCheckerResultLine {
+    param([Parameter(Mandatory)][string]$Path)
+
+    # Import-Clixml is only used where the XML was produced (the server itself); the result lines
+    # hold strings and numbers only, so they can cross to the collector as JSON.
+    $data = Import-Clixml -LiteralPath $Path
+    $displayResults = Get-HealthCheckerLineValue -Line $data -Name 'DisplayResults'
+    if ($displayResults -isnot [System.Collections.IDictionary] -or $displayResults.Count -eq 0) {
+        throw 'The Health Checker XML has no DisplayResults section.'
+    }
+
+    $lines = New-Object 'System.Collections.Generic.List[object]'
+    $groups = @(foreach ($entry in $displayResults.GetEnumerator()) {
+        $order = 0
+        [void][int]::TryParse([string](Get-HealthCheckerLineValue -Line $entry.Key -Name 'DisplayOrder'), [ref]$order)
+        $categoryName = if ($entry.Key -is [string]) { $entry.Key } else { [string](Get-HealthCheckerLineValue -Line $entry.Key -Name 'Name') }
+        [pscustomobject]@{ Category = $categoryName; Order = $order; Lines = @($entry.Value) }
+    })
+    foreach ($group in @($groups | Sort-Object Order, Category)) {
+        $parentCheck = $null
+        foreach ($line in $group.Lines) {
+            if ($null -eq $line) { continue }
+            $name = [string](Get-HealthCheckerLineValue -Line $line -Name 'Name')
+            $tab = 0
+            [void][int]::TryParse([string](Get-HealthCheckerLineValue -Line $line -Name 'TabNumber'), [ref]$tab)
+            $testingName = [string](Get-HealthCheckerLineValue -Line $line -Name 'TestingName')
+            $isSubLine = $tab -gt 1 -or [string]::IsNullOrWhiteSpace($name) -or $name -in @('Error', 'Warning')
+            if (-not $isSubLine -or [string]::IsNullOrWhiteSpace($parentCheck)) {
+                $parentCheck = if ([string]::IsNullOrWhiteSpace($name)) { $testingName } else { $name }
+            }
+            # An Error/Warning line with its own testing name (for example "Out of Date") is its own check.
+            $check = if ($isSubLine -and -not [string]::IsNullOrWhiteSpace($testingName) -and $testingName -ne $name -and $testingName -notin @('Error', 'Warning')) { $testingName } else { $parentCheck }
+            $writeType = [string](Get-HealthCheckerLineValue -Line $line -Name 'WriteType')
+            $displayValue = Get-HealthCheckerLineValue -Line $line -Name 'DisplayValue'
+            $displayText = if ($writeType -eq 'OutColumns' -or $null -eq $displayValue) { $null } elseif ($displayValue -is [string]) { $displayValue } else { (@($displayValue) | ForEach-Object { [string]$_ }) -join '; ' }
+            $lines.Add([pscustomobject][ordered]@{
+                Category      = [string]$group.Category
+                CategoryOrder = [int]$group.Order
+                Check         = [string]$check
+                Item          = $(if ($isSubLine -and -not [string]::IsNullOrWhiteSpace($name)) { $name } else { $null })
+                Name          = $name
+                WriteType     = $writeType
+                DisplayValue  = $displayText
+                TestingName   = [string](Get-HealthCheckerLineValue -Line $line -Name 'TestingName')
+                CustomName    = [string](Get-HealthCheckerLineValue -Line $line -Name 'CustomName')
+                CustomValue   = [string](Get-HealthCheckerLineValue -Line $line -Name 'CustomValue')
+            }) | Out-Null
+        }
+    }
+    return $lines.ToArray()
+}
+
 function Test-LocalRunnerElevation {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
     return (New-Object Security.Principal.WindowsPrincipal($identity)).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
@@ -105,17 +173,25 @@ function Clear-LocalRunnerOutput {
     }
 }
 
+function Write-LocalRunnerJson {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][object]$Value
+    )
+
+    # Written to a temporary file then moved, so a reader never sees a partial file.
+    $temporaryPath = '{0}.{1}.tmp' -f $Path, [guid]::NewGuid().ToString('N')
+    [IO.File]::WriteAllText($temporaryPath, ($Value | ConvertTo-Json -Depth 4 -Compress), (New-Object System.Text.UTF8Encoding($false)))
+    Move-Item -LiteralPath $temporaryPath -Destination $Path -Force
+}
+
 function Write-LocalRunnerStatus {
     param(
         [Parameter(Mandatory)][string]$OutputFolder,
         [Parameter(Mandatory)][object]$Status
     )
 
-    # Written to a temporary file then moved, so a reader never sees a partial status.
-    $statusPath = Join-Path -Path $OutputFolder -ChildPath 'status.json'
-    $temporaryPath = Join-Path -Path $OutputFolder -ChildPath ('status.{0}.tmp' -f [guid]::NewGuid().ToString('N'))
-    [IO.File]::WriteAllText($temporaryPath, ($Status | ConvertTo-Json -Depth 3), (New-Object System.Text.UTF8Encoding($false)))
-    Move-Item -LiteralPath $temporaryPath -Destination $statusPath -Force
+    Write-LocalRunnerJson -Path (Join-Path -Path $OutputFolder -ChildPath 'status.json') -Value $Status
 }
 
 function New-LocalRunnerStatus {
@@ -132,7 +208,7 @@ function New-LocalRunnerStatus {
         FinishedAtUtc        = $null
         DurationSeconds      = $null
         ExitCode             = $null
-        XmlFileName          = $null
+        ResultFileName       = $null
     }
 }
 
@@ -233,7 +309,17 @@ function Invoke-LocalHealthCheckerRun {
         $status.State = $run.State
         $status.Message = $run.Message
         $status.ExitCode = $run.ExitCode
-        if ($run.XmlFileName) { $status.XmlFileName = 'Raw\' + $run.XmlFileName }
+        if ($run.State -eq 'Completed') {
+            try {
+                $lines = @(ConvertTo-HealthCheckerResultLine -Path (Join-Path -Path $rawFolder -ChildPath $run.XmlFileName))
+                Write-LocalRunnerJson -Path (Join-Path -Path $outputFolder -ChildPath 'result.json') -Value ([pscustomobject][ordered]@{ SchemaVersion = 1; HealthCheckerVersion = $HealthCheckerVersion; Lines = $lines })
+                $status.ResultFileName = 'result.json'
+            }
+            catch {
+                $status.State = 'ConvertFailed'
+                $status.Message = "The Health Checker XML could not be converted on the server: $($_.Exception.Message -replace [regex]::Escape($RootFolder), '<root>')"
+            }
+        }
     }
 
     $status.FinishedAtUtc = [DateTime]::UtcNow.ToString('o')

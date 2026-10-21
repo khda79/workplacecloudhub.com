@@ -26,7 +26,7 @@
     New-CimSession is used over DCOM only, to start the Health Checker scheduled task.
 
 .VERSION
-1.8.0
+1.8.1
 .REQUIREMENTS
     Windows PowerShell 5.1 on an Exchange 2016/on-premises management host.
     Modules/snap-ins: SmartM365 WindowsPowerShell5 compatibility module; Exchange Management snap-in.
@@ -37,7 +37,7 @@
     and the Health Checker scheduled task must be installed there.
 .NOTES
     Script Name : SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory.ps1
-    Version     : 1.8.0
+    Version     : 1.8.1
     Requirements:
       - Windows PowerShell 5.1 with Exchange 2016 Management Tools
       - Exchange 2016 read RBAC for Get-ExchangeServer, Get-MailboxDatabase,
@@ -48,6 +48,13 @@
       - PowerShell 5.1 or later
 
 .CHANGELOG
+    1.8.1
+      - Fixes the CIM/DCOM session options (1.8.0 mixed two parameter sets of New-CimSessionOption and
+        could not start any remote task).
+      - Never deserializes Health Checker XML from another server: its runner (1.1.0) converts the
+        result on the server into plain JSON lines, read here with a size limit and a strict schema.
+      - The work folder parent check also refuses generic write or full-control rights.
+
     1.8.0
       - Runs Health Checker on remote servers through a local scheduled task started in parallel over
         CIM/DCOM (WinRM is not used); the collector server still runs it in a local process.
@@ -209,7 +216,7 @@ $tenantContextPath = & {
 . $tenantContextPath
 
 $ScriptName = "SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory"
-$ScriptVersion = "1.8.0"
+$ScriptVersion = "1.8.1"
 $RunId = (Get-Date).ToString("yyyyMMdd-HHmmss")
 # Vendored Microsoft CSS-Exchange Health Checker (see ThirdParty\CSS-Exchange\HealthChecker\PROVENANCE.md).
 $HealthCheckerRelativePath = 'ThirdParty\CSS-Exchange\HealthChecker\HealthChecker.ps1'
@@ -1185,7 +1192,9 @@ function Get-HealthCheckerUnsafeAclEntry {
     foreach ($rule in @($Acl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier]))) {
         $sid = [string]$rule.IdentityReference.Value
         if ($rule.AccessControlType -ne [System.Security.AccessControl.AccessControlType]::Allow -or $sid -in $trustedSids -or $sid -eq 'S-1-3-0') { continue }
-        if (($rule.FileSystemRights -band $writeRights) -ne 0) { $unsafe.Add(('{0} {1}' -f $sid, $rule.FileSystemRights)) }
+        # Generic rights (GENERIC_ALL 0x10000000, GENERIC_WRITE 0x40000000) are not mapped by .NET: test them too.
+        $mask = [int64][int]$rule.FileSystemRights -band 4294967295
+        if (($mask -band [int64]$writeRights) -ne 0 -or ($mask -band 0x50000000) -ne 0) { $unsafe.Add(('{0} {1}' -f $sid, $rule.FileSystemRights)) }
     }
     return $unsafe.ToArray()
 }
@@ -1350,21 +1359,17 @@ function Get-HealthCheckerLineValue {
     return $property.Value
 }
 
-function ConvertFrom-HealthCheckerXml {
-    param(
-        [Parameter(Mandatory)][string]$Path,
-        [Parameter(Mandatory)][string]$ServerName,
-        [Parameter(Mandatory)][string]$HealthCheckerVersion
-    )
+function ConvertTo-HealthCheckerResultLine {
+    param([Parameter(Mandatory)][string]$Path)
 
+    # Import-Clixml is only used where the XML was produced (the server itself); the result lines
+    # hold strings and numbers only, so they can cross to the collector as JSON.
     $data = Import-Clixml -LiteralPath $Path
     $displayResults = Get-HealthCheckerLineValue -Line $data -Name 'DisplayResults'
     if ($displayResults -isnot [System.Collections.IDictionary] -or $displayResults.Count -eq 0) {
         throw 'The Health Checker XML has no DisplayResults section.'
     }
 
-    $masking = Get-HealthCheckerMaskingRule
-    $statusMap = @{ Red = 'Error'; Yellow = 'Warning'; Green = 'OK' }
     $lines = New-Object 'System.Collections.Generic.List[object]'
     $groups = @(foreach ($entry in $displayResults.GetEnumerator()) {
         $order = 0
@@ -1386,21 +1391,36 @@ function ConvertFrom-HealthCheckerXml {
             }
             # An Error/Warning line with its own testing name (for example "Out of Date") is its own check.
             $check = if ($isSubLine -and -not [string]::IsNullOrWhiteSpace($testingName) -and $testingName -ne $name -and $testingName -notin @('Error', 'Warning')) { $testingName } else { $parentCheck }
-            $lines.Add([pscustomobject]@{
-                Category      = $group.Category
-                CategoryOrder = $group.Order
-                Check         = $check
+            $writeType = [string](Get-HealthCheckerLineValue -Line $line -Name 'WriteType')
+            $displayValue = Get-HealthCheckerLineValue -Line $line -Name 'DisplayValue'
+            $displayText = if ($writeType -eq 'OutColumns' -or $null -eq $displayValue) { $null } elseif ($displayValue -is [string]) { $displayValue } else { (@($displayValue) | ForEach-Object { [string]$_ }) -join '; ' }
+            $lines.Add([pscustomobject][ordered]@{
+                Category      = [string]$group.Category
+                CategoryOrder = [int]$group.Order
+                Check         = [string]$check
                 Item          = $(if ($isSubLine -and -not [string]::IsNullOrWhiteSpace($name)) { $name } else { $null })
                 Name          = $name
-                WriteType     = [string](Get-HealthCheckerLineValue -Line $line -Name 'WriteType')
-                DisplayValue  = Get-HealthCheckerLineValue -Line $line -Name 'DisplayValue'
+                WriteType     = $writeType
+                DisplayValue  = $displayText
                 TestingName   = [string](Get-HealthCheckerLineValue -Line $line -Name 'TestingName')
                 CustomName    = [string](Get-HealthCheckerLineValue -Line $line -Name 'CustomName')
                 CustomValue   = [string](Get-HealthCheckerLineValue -Line $line -Name 'CustomValue')
             }) | Out-Null
         }
     }
+    return $lines.ToArray()
+}
 
+function ConvertFrom-HealthCheckerResultLine {
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Lines,
+        [Parameter(Mandatory)][string]$ServerName,
+        [Parameter(Mandatory)][string]$HealthCheckerVersion
+    )
+
+    $masking = Get-HealthCheckerMaskingRule
+    $statusMap = @{ Red = 'Error'; Yellow = 'Warning'; Green = 'OK' }
+    $lines = $Lines
     $findings = New-Object 'System.Collections.Generic.List[object]'
     $generationTime = $null
     $rowNumber = 0
@@ -1489,6 +1509,52 @@ function ConvertFrom-HealthCheckerXml {
             InfoCount                 = @($findings | Where-Object { $_.Status -eq 'Info' }).Count
         }
     }
+}
+
+function ConvertFrom-HealthCheckerXml {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$ServerName,
+        [Parameter(Mandatory)][string]$HealthCheckerVersion
+    )
+
+    # Only for XML produced on this server; results from other servers arrive as JSON.
+    $lines = @(ConvertTo-HealthCheckerResultLine -Path $Path)
+    return ConvertFrom-HealthCheckerResultLine -Lines $lines -ServerName $ServerName -HealthCheckerVersion $HealthCheckerVersion
+}
+
+function Read-HealthCheckerResultJson {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [int]$MaxBytes = 20MB
+    )
+
+    # Data from another server: size capped, strict schema, only the expected fields kept as strings or numbers.
+    $item = Get-Item -LiteralPath $Path -ErrorAction Stop
+    if ($item.Length -gt $MaxBytes) { throw ("The Health Checker result is larger than {0} MB." -f [math]::Round($MaxBytes / 1MB)) }
+    $document = [System.IO.File]::ReadAllText($Path) | ConvertFrom-Json
+    if ($null -eq $document -or $null -eq $document.PSObject.Properties['SchemaVersion'] -or [string]$document.SchemaVersion -ne '1' -or $null -eq $document.PSObject.Properties['Lines']) {
+        throw 'The Health Checker result does not follow the expected schema (version 1).'
+    }
+    $textFields = @('Category', 'Check', 'Item', 'Name', 'WriteType', 'DisplayValue', 'TestingName', 'CustomName', 'CustomValue')
+    $lines = New-Object 'System.Collections.Generic.List[object]'
+    foreach ($entry in @($document.Lines)) {
+        if ($null -eq $entry -or $entry -is [string] -or $entry -is [ValueType]) { throw 'The Health Checker result holds an unexpected line.' }
+        $record = [ordered]@{}
+        foreach ($field in $textFields) {
+            $property = $entry.PSObject.Properties[$field]
+            $value = if ($null -eq $property) { $null } else { $property.Value }
+            if ($null -ne $value -and $value -isnot [string] -and $value -isnot [ValueType]) { throw "The Health Checker result field $field is not a plain value." }
+            $record[$field] = $(if ($null -eq $value) { $null } else { [string]$value })
+        }
+        $order = 0
+        $orderProperty = $entry.PSObject.Properties['CategoryOrder']
+        if ($orderProperty) { [void][int]::TryParse([string]$orderProperty.Value, [ref]$order) }
+        $record['CategoryOrder'] = $order
+        $lines.Add([pscustomobject]$record) | Out-Null
+    }
+    if ($lines.Count -eq 0) { throw 'The Health Checker result has no lines.' }
+    return $lines.ToArray()
 }
 
 function ConvertTo-HealthCheckerSummaryRow {
@@ -1658,7 +1724,7 @@ function Resolve-HealthCheckerScheduledFallback {
 
     # Only used when the on-demand start failed: the runner did not run, so the last scheduled result is intact.
     $result = [pscustomobject]@{ Status = $FailureStatus; Message = $FailureMessage; UseResult = $false; ResultAgeHours = $null }
-    if ($null -eq $RemoteStatus -or [string]$RemoteStatus.State -ne 'Completed' -or [string]::IsNullOrWhiteSpace([string]$RemoteStatus.XmlFileName)) { return $result }
+    if ($null -eq $RemoteStatus -or [string]$RemoteStatus.State -ne 'Completed' -or [string]$RemoteStatus.ResultFileName -cne 'result.json') { return $result }
     $finished = ConvertTo-HealthCheckerUtcTime -Value $RemoteStatus.FinishedAtUtc
     if ($null -eq $finished) { return $result }
 
@@ -1689,6 +1755,12 @@ function Copy-HealthCheckerRemoteFile {
         throw "The deployed file does not match its source: $(Split-Path -Path $DestinationPath -Leaf)"
     }
     return $true
+}
+
+function New-HealthCheckerDcomSessionOption {
+    # DCOM, not WinRM: PowerShell remoting is disabled on the Exchange servers. The DCOM parameter set
+    # (-Impersonation/-PacketPrivacy/-PacketIntegrity) returns DComSessionOptions; it cannot be combined with -Protocol.
+    return New-CimSessionOption -Impersonation Impersonate -PacketPrivacy -PacketIntegrity
 }
 
 function Start-HealthCheckerRemoteRun {
@@ -1746,7 +1818,7 @@ function Start-HealthCheckerRemoteRun {
 
     try {
         # DCOM, not WinRM: PowerShell remoting is disabled on the Exchange servers.
-        $run.Session = New-CimSession -ComputerName $Computer -SessionOption (New-CimSessionOption -Protocol Dcom -PacketPrivacy -PacketIntegrity) -ErrorAction Stop
+        $run.Session = New-CimSession -ComputerName $Computer -SessionOption (New-HealthCheckerDcomSessionOption) -ErrorAction Stop
     }
     catch {
         return (& $fail 'RemoteConnectionFailed' ("The server could not be reached over CIM/DCOM (RPC 135 and dynamic ports): {0}" -f $_.Exception.Message))
@@ -1811,7 +1883,7 @@ function Complete-HealthCheckerRemoteRun {
     )
 
     if ($Run.Session) { Remove-CimSession -CimSession $Run.Session -ErrorAction SilentlyContinue; $Run.Session = $null }
-    $outcome = [pscustomobject]@{ Status = $Run.Status; Message = $Run.Message; DurationSeconds = $null; XmlPath = $null; ResultSource = $null; ResultAgeHours = $null }
+    $outcome = [pscustomobject]@{ Status = $Run.Status; Message = $Run.Message; DurationSeconds = $null; XmlPath = $null; JsonPath = $null; ResultSource = $null; ResultAgeHours = $null }
     $resultStatus = $null
     if ($Run.RemoteStatus) {
         $mapped = ConvertFrom-HealthCheckerRunnerState -RemoteStatus $Run.RemoteStatus
@@ -1836,19 +1908,19 @@ function Complete-HealthCheckerRemoteRun {
     if ($resultStatus) {
         $finished = ConvertTo-HealthCheckerUtcTime -Value $resultStatus.FinishedAtUtc
         if ($finished) { $outcome.ResultAgeHours = [math]::Max(0, [math]::Round(([DateTime]::UtcNow - $finished).TotalHours, 1)) }
-        $xmlName = [string]$resultStatus.XmlFileName
-        # Only the XML result is copied; debug files stay on the server until its next run.
-        if ($xmlName -notmatch '^Raw\\HealthChecker-[^\\/:]+\.xml$') {
+        # Only the plain JSON result is copied, never the Health Checker XML: deserializing XML from
+        # another server in the collector's Exchange session would trust that server with this account.
+        if ([string]$resultStatus.ResultFileName -cne 'result.json') {
             $outcome.Status = 'NoOutput'
-            $outcome.Message = 'The Health Checker task reported an unexpected result file name.'
+            $outcome.Message = 'The Health Checker task reported no result file or an unexpected one.'
             $outcome.ResultSource = $null
             return $outcome
         }
         try {
             Ensure-Directory -Path $LocalFolder
-            $localXml = Join-Path -Path $LocalFolder -ChildPath (Split-Path -Path $xmlName -Leaf)
-            Copy-Item -LiteralPath (Join-Path -Path $Run.OutputSharePath -ChildPath $xmlName) -Destination $localXml -Force -ErrorAction Stop
-            $outcome.XmlPath = $localXml
+            $localJson = Join-Path -Path $LocalFolder -ChildPath 'result.json'
+            Copy-Item -LiteralPath (Join-Path -Path $Run.OutputSharePath -ChildPath 'result.json') -Destination $localJson -Force -ErrorAction Stop
+            $outcome.JsonPath = $localJson
         }
         catch {
             $outcome.Status = 'RemoteConnectionFailed'
@@ -1934,14 +2006,14 @@ function Invoke-ExchangeHealthCheckerInventory {
             $serverName = [string]$server.Name
             $remainingSeconds = [int][math]::Floor(($deadline - (Get-Date)).TotalSeconds)
             if ($remainingSeconds -lt 60) {
-                $outcomes[$serverName] = [pscustomobject]@{ Status = 'NotRun'; Message = 'Health Checker was not run on this server: the total Health Checker time budget was used up.'; DurationSeconds = $null; XmlPath = $null; ResultSource = $null; ResultAgeHours = $null }
+                $outcomes[$serverName] = [pscustomobject]@{ Status = 'NotRun'; Message = 'Health Checker was not run on this server: the total Health Checker time budget was used up.'; DurationSeconds = $null; XmlPath = $null; JsonPath = $null; ResultSource = $null; ResultAgeHours = $null }
                 continue
             }
             $timeoutSeconds = [math]::Min($Settings.TimeoutMinutesPerServer * 60, $remainingSeconds)
             $serverFolder = Join-Path -Path $runFolder -ChildPath ($serverName -replace '[^A-Za-z0-9._-]', '_')
             Write-Log ("Running Health Checker locally for {0} (limit {1} min)." -f $serverName, [math]::Round($timeoutSeconds / 60, 1))
             $local = Invoke-HealthCheckerProcess -ScriptPath $runScriptPath -ServerName $serverName -OutputFolder $serverFolder -TimeoutSeconds $timeoutSeconds -ExpectedSha256 $ExpectedSha256
-            $outcomes[$serverName] = [pscustomobject]@{ Status = $local.Status; Message = $local.Message; DurationSeconds = $local.DurationSeconds; XmlPath = $local.XmlPath; ResultSource = 'Local'; ResultAgeHours = 0 }
+            $outcomes[$serverName] = [pscustomobject]@{ Status = $local.Status; Message = $local.Message; DurationSeconds = $local.DurationSeconds; XmlPath = $local.XmlPath; JsonPath = $null; ResultSource = 'Local'; ResultAgeHours = 0 }
         }
 
         # 3. Remote results are awaited together, each within its own limit and the total budget.
@@ -1976,7 +2048,13 @@ function Invoke-ExchangeHealthCheckerInventory {
         $message = $outcome.Message
         if ($status -eq 'Completed') {
             try {
-                $parsed = ConvertFrom-HealthCheckerXml -Path $outcome.XmlPath -ServerName $serverName -HealthCheckerVersion $HealthCheckerVersion
+                $parsed = if ($outcome.JsonPath) {
+                    # Another server's result: plain JSON lines only.
+                    ConvertFrom-HealthCheckerResultLine -Lines @(Read-HealthCheckerResultJson -Path $outcome.JsonPath) -ServerName $serverName -HealthCheckerVersion $HealthCheckerVersion
+                }
+                else {
+                    ConvertFrom-HealthCheckerXml -Path $outcome.XmlPath -ServerName $serverName -HealthCheckerVersion $HealthCheckerVersion
+                }
                 foreach ($finding in $parsed.Findings) { $findingRows.Add($finding) | Out-Null }
                 Write-Log ("Health Checker for {0} ({1}): {2} finding(s), {3} vulnerability(ies), {4} error(s), {5} warning(s), {6}s." -f $serverName, $outcome.ResultSource, @($parsed.Findings).Count, @($parsed.Vulnerabilities).Count, $parsed.Facts.ErrorCount, $parsed.Facts.WarningCount, $outcome.DurationSeconds)
                 if ($message) { Write-Log ("{0}: {1}" -f $serverName, $message) 'WARN' }
