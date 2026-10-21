@@ -24,7 +24,17 @@
   ],
   "optionalCurrentFiles": [
     { "file": "M365_Licenses_ReportSkuCandidates.csv", "maxAgeHours": 168 },
-    { "file": "M365_Licenses_ReportSkuCapacity.csv", "maxAgeHours": 168 }
+    { "file": "M365_Licenses_ReportSkuCapacity.csv", "maxAgeHours": 168 },
+    { "file": "Exchange_OnPrem_Servers_Inventory.csv", "maxAgeHours": 168, "delimiter": ";" },
+    { "file": "Exchange_OnPrem_Servers_Compute.csv", "maxAgeHours": 168, "delimiter": ";" },
+    { "file": "Exchange_OnPrem_Servers_LogicalDisks.csv", "maxAgeHours": 168, "delimiter": ";" },
+    { "file": "Exchange_OnPrem_Servers_DiskDrives.csv", "maxAgeHours": 168, "delimiter": ";" },
+    { "file": "Exchange_OnPrem_Servers_RemoteAccess.csv", "maxAgeHours": 168, "delimiter": ";" },
+    { "file": "Exchange_OnPrem_Infrastructure_PerServerSummary.csv", "maxAgeHours": 168, "delimiter": ";" },
+    { "file": "Exchange_OnPrem_MigrationReadiness_Config.csv", "maxAgeHours": 168, "delimiter": ";" },
+    { "file": "Exchange_OnPrem_Servers_Inventory_Summary.csv", "maxAgeHours": 168, "delimiter": ";" },
+    { "file": "Exchange_OnPrem_Servers_ServiceHealth.csv", "maxAgeHours": 168, "delimiter": ";" },
+    { "file": "Exchange_OnPrem_MailboxDatabases_Paths.csv", "maxAgeHours": 168, "delimiter": ";" }
   ],
   "licenseReport": {
     "receipt": "SmartInventory_SmartM365-Licences-Inventory.current.json.txt",
@@ -43,6 +53,7 @@
     ]
   },
   "compatibleContractSHA256": [
+    "446FF9F4DC552FCFC97C1CFA94EDD5853DFBCB239A179B94A967AC6357CF0C98",
     "19AA5A0D3D6FFAED0E3FFF2A16B2A4FF4D269C65221DB1BB2BB0139B729B87B4",
     "A007FF4C64A313913B4024BEE28D3AFF2DB9E952B6406EF3FF5E1FA5CE8CDABE"
   ],

@@ -1,5 +1,5 @@
 # Offline, single-tenant preparation and versioned local publication. No tenant APIs.
-# Version: 1.2.0
+# Version: 1.2.1
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $script:ProductRoot = Split-Path -Parent $PSScriptRoot
@@ -431,6 +431,13 @@ function Test-PreparedTenant {
     # malformed records with another separator or weaken the tenant checks.
     $fileName = [IO.Path]::GetFileName($Path)
     $delimiter = if ($fileName -like '*DailyStats.csv' -or $fileName -like 'SharePoint_OnPrem_*.csv' -or $fileName -eq 'Exchange_OnPrem_Servers_Inventory.csv') { ';' } else { ',' }
+    $artifactContract = Get-Content -LiteralPath (Join-Path $PSScriptRoot '../config/prepared-artifact-contract.json.txt') -Raw | ConvertFrom-Json
+    $optional = @(if ($artifactContract.PSObject.Properties['optionalCurrentFiles']) { $artifactContract.optionalCurrentFiles | Where-Object { [string]$_.file -ceq $fileName } })
+    if ($optional.Count -gt 1) { throw 'Duplicate optional source delimiter declaration.' }
+    if ($optional.Count -eq 1 -and $optional[0].PSObject.Properties['delimiter']) {
+        if ([string]$optional[0].delimiter -cnotin @(',', ';')) { throw 'Invalid optional source delimiter.' }
+        $delimiter = [string]$optional[0].delimiter
+    }
     # Compiled strict reader first; any other construct and every failure are re-read below.
     $fast = [Workplace.Prepared.StrictCsv]::CheckTenant($Path, [char]$delimiter, $TenantKey, [bool]$AllowMissingTenantKey)
     if ($null -ne $fast) { return [pscustomobject]@{Rows=$fast.Rows;HasTenantKey=$fast.HasTenantKey} }
@@ -930,8 +937,8 @@ Export-ModuleMember -Function Get-PreparedSourcePlan, Invoke-PreparedEvidencePip
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD0v/AGEFr30IyC
-# iYHng6zR5pJzjXU/TIOCH78gCKj3fKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAz7Hi8XOjHf17L
+# aYM9P5hyzNcvnOFmwCOQR3E6R0La5qCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1064,31 +1071,31 @@ Export-ModuleMember -Function Get-PreparedSourcePlan, Invoke-PreparedEvidencePip
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIP4jZ3XORKa9x9OdfrcEjsD22zKg3bI2THn5olzzZ6UwMA0GCSqG
-# SIb3DQEBAQUABIIBgGhEzNsGaXCalQGt+itGCmbibdy942T6XB02EhCMfVkMwARe
-# cI/9Z2EmigZ74xjezN4RK8HHiSaHq1nWhwpqkywFHYDPF0qUjzUhcDw5Qm6/iWSs
-# D5zzY7A5K0QJt7PB30uC2UwdDZ2m09vGQE6XGzRuqTSR7buUg0CqE2qRWTAmIbYo
-# fncLTZBnyNxFhnQpzhU03RgHHnJrzjRwsuO2Rv97XWT0tXHjNxGpPJIh7J0p6ZIO
-# ONH8GBJKbVlsNuiyWvaKa0izpuMfOhw/vWvUp3+2kWcblRLjHhYMFPJp2kFr8c8k
-# W2ftaL7Bdvbxg7PZScLEeS/5X2ZPYW9RkWc3KbbTkyclVb/zfVMeNVnyUhfSaSK7
-# TnqoWKkxai9Ax8Bx5JrynbuW32Ej/uKM0Laq2ca28m1DnNmEy2v4x/mZpL/4tfJe
-# UutvjPXN9R0Ac/33o+BymWgMKWZRC579vP8AoGUSaoN4gQyKmSUlewp6WD0zCdy9
-# UQ9deExffwHR1DpQ76GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIO6+RUeKTbrHtgy4+XU8otWCX44nIB4zjjXWYLSqvDTXMA0GCSqG
+# SIb3DQEBAQUABIIBgJntJd6fNYy9WdgSXdSRNyrF9h3V6MJowoIJ2SPhRNiDlOt3
+# M36bAk4lA6/XwOa6SXt1+cdGVzOB45pnyMfMGJ4xNncInJsDNk4hZyhWobX5mv/B
+# VYd8f4X53VJ7SQVwal4PxaRg/1hXniRgbX9ih213KnXBucyboFPJonWpmg256VGK
+# YwuTdEU5QnUIGDgvnH8uR7k9r2SYUutoNlfycqXMg9m73sO67BNabAOXD8a87sKS
+# 1Kuu/toNE7CMwGBNvbTVpiYZChuR9Inb4uDow10AtvjZRx0VyOOPz441KM+shKtA
+# FwbLNXE1NmdmUwFPC7teV0z4aQgoR48M+TEagatYeLs4JfL/SVNuW33K6RL1DGLa
+# +p+vnaJaVKEDDyiJ7UhtiWj7+W6k20KOXB7e/ouS20ZlkX7WNNSJsebxfJ6z2m//
+# eMfcl8iN+uUQps0T9NtvfWjFN1kMMaAmsYUB4ftoiEzSIDG6UXrOWeeb9Y4o/2XV
+# rQmTM+rLQ6fM+BkHgKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjAxMzM2
-# MTdaMC8GCSqGSIb3DQEJBDEiBCB8S8COIVt+MXDMeoMB0vn3Vb9EILeomo8gBZgv
-# KF/j6zANBgkqhkiG9w0BAQEFAASCAgCRGMmCIr8W2U35GDvm3tPuJ3HIlqb9YKPC
-# rspbZqDyMToxwOkoAikfCumuRwrBoF6r3boEEL3fvXxDImADclAK1lqZs1BeCijC
-# 6Ti4SAz0IuiKilXg7CEXSB/qkKf2UXn4ZupGWsaXw3RdSIEiHzRzwd1haZivEcHH
-# GgkRLjFL1Ko871tvmmuKfnEOzJs03g8k3U7SVXNVqXPaP2ee8/vWKU1FdhGZvNjQ
-# AStQj3VeInOknRjBRw7Mn9iLEO4D5m17SRh53JMD+aAdNuqRMvAmw4/WiwNJnzfS
-# OAWHPF7fnZbVXqR2V/xci7PWy6otupey+6bz7hEv2uAPAT2UQfS1VYWg0j/dizeP
-# 1OWi5/5ZyC6UIf/zMcCULllSJltC8I9x8Gxe9RoYyZeg6b0Gw5sEPcFTEsK2gBzP
-# l1BOZlZhfCp+yReXFcGKVLqmcvYv7aMJjjGBGqqUPezfcX7Rs+J5o+mnKK2pT4VJ
-# XBZ+lsSatOFmQU6qAdIsn+Uq19t9lB2c5CqXuimYSYpeIYUxugTsleByi115He6Z
-# rkhq4etJXT6Al62tM5wgptrF788foQAQz3cDExBaL3OSVe28M/8gkTgfrOF889NO
-# jJO8rUXFwtLX+UVCImc1CM99O36vYNfjt0IRx4Cnwd3zzTbQnJAnUApHgFrK2TNs
-# Be4WqY9Z0w==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjEwNzU5
+# MDJaMC8GCSqGSIb3DQEJBDEiBCA62mlZNhqesPkJ/KkOUtFV5bNVy7VebK4SCatr
+# ySQaHTANBgkqhkiG9w0BAQEFAASCAgBFgs1RoDqwpxQq38AH5QvRd2wWNx96C3f3
+# W503T6MF5Apz3aC/XaFpkimKtEwfZdfKR+XYhHhQo6neMwfRCQi5Y0IsIxVcHWS1
+# Q2w+IFT9VdVceb8IFZvsL61CYv0wOIn8GZRJjXe9Xa2Lv7wOHLQAu678j8eCgx1v
+# Zl2bzWccZUPwsiey7Cr39ihtngtoynnCtDhUZXX8P420zYHTlHvBK74hhhUn7YsE
+# YWgDY9hhAV7ElvlOWMR/5yGSUO+VN/Y+t1mrHMKfc+Vgjbw4n/fOrbEa64PgTMGe
+# srE+r/l6oGweWoc7vYI0aGLWl1v6ZqUFF/JJ2NUQO9jb+KW7GJmoQTqPoWFr1eW4
+# P+dRasQIDrRoiKkhkgflzQF3+7x39IP2tblpiAHuyGs8FCG+H8XMzc9wC0uAmcfg
+# //3wgXm9mLZ8bpWaKS/5WEmE/Apd/mtXR0UXcMQR32qTahanWL8Xi+pBnzvf0+DW
+# hbEUeupfchCVhoHuc67W3268kHkj+ODB1RrMhN3/B+/Nb2Y/XHs9IeMPdQqy3S2l
+# pZNuTjM+WDaqOYmzWBFfFHWfNNHE9Gp7UqsNREmv6Vt1IKQ2GSp5TODX3R3xKjj9
+# lHI9hwzU0Tzo9SsROVyx18j5vnVVyqtWta/gprH/cE6d3sgQrWUeEGkLzMJkzXie
+# Bp2QdKI7ow==
 # SIG # End signature block

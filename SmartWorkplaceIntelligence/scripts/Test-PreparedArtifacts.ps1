@@ -24,13 +24,43 @@ try {
     }
     $plan=@(Get-PreparedArtifactSources -DataRoot $source)
     Check ($plan.Count -eq ($spec.currentFiles.Count+4+@($spec.optionalCurrentFiles).Count)) 'Incomplete capture plan.'
-    Check (@($plan | Where-Object { $_.ContainsKey('IsOptional') -and $_.IsOptional }).Count -eq @($spec.optionalCurrentFiles).Count) 'Optional license decision files are not optional capture items.'
+    Check (@($plan | Where-Object { $_.ContainsKey('IsOptional') -and $_.IsOptional }).Count -eq @($spec.optionalCurrentFiles).Count) 'Optional artifact files are not optional capture items.'
     $entries=@(Copy-PreparedArtifacts -SnapshotRoot $source -Destination $dest -TenantKey 'synthetic')
     Assert-PreparedArtifacts -TenantKey 'synthetic' -BatchRoot $dest -Entries $entries
     Check ($entries.Count -eq ($spec.currentFiles.Count+5)) 'Incomplete artifact manifest.'
     foreach($entry in $entries|Where-Object SourceRelative -NE 'GeneratedFromVerifiedCapture'){
         Check ((Get-FileHash (Join-Path $source $entry.SourceRelative)).Hash -eq $entry.SHA256) 'Capture bytes changed.'
     }
+    Check (-not @($entries | Where-Object File -Like 'Source-Exchange_OnPrem_Servers_*').Count) 'Absent optional infrastructure was fabricated.'
+    $inventory=Join-Path $source 'DATA-LAST/Exchange_OnPrem_Servers_Inventory.csv'
+    $compute=Join-Path $source 'DATA-LAST/Exchange_OnPrem_Servers_Compute.csv'
+    '"TenantKey";"Name";"Description"', '"synthetic";"mail-one";"quoted; semicolon"' | Set-Content -LiteralPath $inventory
+    '"TenantKey";"ExchangeServerName";"MemoryGB"', '"synthetic";"mail-one";"64"' | Set-Content -LiteralPath $compute
+    $infraDest=Join-Path $root 'infrastructure';New-Item -ItemType Directory -Path $infraDest|Out-Null
+    $infraEntries=@(Copy-PreparedArtifacts -SnapshotRoot $source -Destination $infraDest -TenantKey 'synthetic')
+    Assert-PreparedArtifacts -TenantKey 'synthetic' -BatchRoot $infraDest -Entries $infraEntries
+    Check (@($infraEntries | Where-Object File -Like 'Source-Exchange_OnPrem_Servers_*').Count -eq 2) 'Semicolon infrastructure was not captured.'
+    Check ($infraEntries.Count -eq $entries.Count+2) 'Optional infrastructure changed required membership.'
+    $goodCompute=Get-Content -LiteralPath $compute -Raw
+    foreach($bad in @(
+        ('"TenantKey";"ExchangeServerName"'+"`n"+'"foreign";"mail-one"'),
+        ('"TenantKey";"ExchangeServerName"'+"`n"+'"";"mail-one"'),
+        ('"OtherKey";"ExchangeServerName"'+"`n"+'"synthetic";"mail-one"'),
+        ('"TenantKey";"TenantKey"'+"`n"+'"synthetic";"synthetic"'),
+        ('"TenantKey";"ExchangeServerName"'+"`n"+'"synthetic";"mail-one";"extra"')
+    )){
+        Set-Content -LiteralPath $compute -Value $bad
+        $badDest=Join-Path $root ([guid]::NewGuid().ToString('N'));New-Item -ItemType Directory -Path $badDest|Out-Null
+        Reject {Copy-PreparedArtifacts -SnapshotRoot $source -Destination $badDest -TenantKey 'synthetic'} 'Invalid optional infrastructure tenant/schema accepted.'
+        Check (-not (Test-Path -LiteralPath (Join-Path $badDest 'Source-Exchange_OnPrem_Servers_Compute.csv'))) 'Rejected optional infrastructure was copied.'
+    }
+    Set-Content -LiteralPath $compute -Value $goodCompute
+    $copied=Join-Path $infraDest 'Source-Exchange_OnPrem_Servers_Compute.csv'
+    '"TenantKey";"ExchangeServerName"', '"foreign";"mail-one"' | Set-Content -LiteralPath $copied
+    $copiedEntry=@($infraEntries | Where-Object File -CEQ 'Source-Exchange_OnPrem_Servers_Compute.csv')[0]
+    $copiedEntry.Bytes=(Get-Item -LiteralPath $copied).Length
+    $copiedEntry.SHA256=(Get-FileHash -LiteralPath $copied).Hash
+    Reject {Assert-PreparedArtifacts -TenantKey 'synthetic' -BatchRoot $infraDest -Entries $infraEntries} 'Foreign optional tenant accepted despite matching size/hash.'
     Check (-not (Test-PreparedArtifactName '../current.json.txt')) 'Traversal accepted.'
     Check (-not (Test-PreparedArtifactName 'Source-secret.json.txt')) 'Unknown artifact accepted.'
     Check (-not (Test-PreparedArtifactName 'History-Windows-2026-W54-manifest.json.txt')) 'Invalid ISO week accepted.'
@@ -54,8 +84,8 @@ try {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB9g6AZOe+pN3eq
-# p64FbyIT041xbAHlFcINrKPt9OhO/aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD6TzDlqK+/6I9L
+# oyBUGbNLBPzi4v/R4x9NhFVkrCU0NaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -188,31 +218,31 @@ try {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIOMmbjpHW7gH29O7FI5N11TrBKN8BnpC/PcUEHDFcd5EMA0GCSqG
-# SIb3DQEBAQUABIIBgI7/8WjP2I1ZctjpgUR/DNtHyGB1ElyJITK4XcdxWlpJkZ5t
-# YxV58KRFAuT3erndRZjhxUKKczbOBmLt2j2/NcwSm+cu3tRTg5c+QMGvRHQzcr+B
-# PhvKFMHBmxkRjPeVekLK+99g3F5PyJMrzdo1sxYUSNylNTtYtYD+57rZ74xBe0c7
-# FhiHlzTfc1PPNOueZ0OmCKI1dTan9wfM50lX7tqGBE0mQOCg+C4iFa4qsnTdssrl
-# JZijEhgGOdA178VtwQ8X99+mxoAXMeW4mZumWI8JL5grK4w4xBVapcmzElXvIaKD
-# 4RxZhawoE3FoQQ2EaaFBerFFMXIOm9FjPcGpj9NwGN9M8dCPsgd+W1VI8wdYUxuz
-# dq0wEy5nRmiIoX+YSJv3U6ttvAtrk7ecQG8CtADiRiFgmvVVbaIrELovb0bxv7Qg
-# 7enRjYADJxQ0UdPgFjR+QShhHfeWU0z5GuHjUH0dB2Iummv/8CM8Qt2xwxZu4ACb
-# J5PM72+F0Tg2q23tCqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEINCkzeYCHY3yUfLhexdJRbe267IcqokFwMi+RBHvk0LXMA0GCSqG
+# SIb3DQEBAQUABIIBgDDHgvOmqxQr1cYjRBl698sJBY0c1LfqQiAr9CpR8CJzuV5+
+# oHp6N74LynPmKWLlCye9IXEbVbZc2QvHAuIZo+nPABE7rZNY6yuFUrTU0BX2RAJ6
+# 7WXwgyNGWHrY44HVOo1yq/m2k2nim407jpxThBIjiE0vJuTVq0DR/+tL8NIJuWFb
+# Wi6MLygPGnpejSvfPQl1IL96omIPw3hmBTZv8ZtbAIdSi+NopNfAPTCxNnUPkBLR
+# s1ivfOxe3MWmcs2OT7SijOysn7vqDjbKVKAk/S3X3Cd2gacMNyJsu8dmDcM0ETRP
+# x/nH2laBQyJdH3UgtcCcuaprZp1TDE1F3OaXAn0hHilot2nZ3Dyd4vipkmQMcxpC
+# 9uj4wbBphDNKHYgF+CymgDSMOMnqrkuiVVABVCW22pF5P0ZNMe0FQfMMNjshxB17
+# r15tOuupHzIOXL8hyi4AvmSIYJQgWf+gfwFd2L9nEsfn95VIQ6XdgjFZphcAHTm1
+# L/0RuMYSB+LOiighxaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTcyMzE1
-# NTdaMC8GCSqGSIb3DQEJBDEiBCBUEufg6SicdE6COCWNHHEySWqdX7xjIEf45jfj
-# Yg1aMjANBgkqhkiG9w0BAQEFAASCAgChWUhT2pyQuWjS8qUCrAKtKi7vABP1+X82
-# YHJu9nh+jUyX7Hgk91bY+qrlJXmnWMQs70y/JQrD2HAeF0YoKQVmHJmGrKQc/7HH
-# t1DYWCUeozC2jUdbbKC2BsAAVKH90qba8l0twtwB05CVdpgsPnZdyskJ33fZ4iEf
-# o9MS0YUyFKLB0ZNHe8JNsN7RwxSvplZT82/oXRXaerBlTAeXszFPRNFFH+/9h04i
-# MGyPeOzdUmU8xq++aPmAcXmcFnLgyDBXcSl9FWkmzdl+6fvog0acc3IkREvuACu6
-# vPw8+YAyiNGQ6JRbvjO8FX6/Jywne3zUEqjjQVffFZtBV7uDSMkMiZoDBTd4iqp1
-# v/J1bQlCbBh9fVJTDvspF+TCIQ5pjrvi9xRGLpZnWS629gJMlPbMs/488vB6PUJO
-# +6QYz1HDsvsA4eYwL4ll+4NdDO61u64C9ZL80qFWD9BDx6U+h/EWRpJKOlmhYN/u
-# D7axQd4j0aGxeVZjara84YXMr5Pj5QkyxcOk+rZQG2yMWn1Av9A1FX0eVS3XS7T1
-# HxD0DM3ElWAeST05A0lxYKRAQRN2XUbP2FpXdIpzw2n6jOqNp6ixAY4awSvG0zFo
-# KfwJ3d6BAkuzmUiJn6zfwzq8qI6OHtXjgPdmpJE2EIHEOj3vopF87jjO0798ZlZI
-# c/vUs3Gobg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjEwNzU5
+# MDJaMC8GCSqGSIb3DQEJBDEiBCAQDIlRHmh0Or/lDYh5wQp6bIgD7gOeRLJmlylf
+# /6ItNjANBgkqhkiG9w0BAQEFAASCAgBjLaeJw0Tv45Yzucu62StELPGrIiZA6eS2
+# AUgUjiwUB66sGLbYssaVrzXw6QUSuEp/WbcaVFsHjxwWfUm/5a6Ma4m6NZ9Xtnzj
+# Jqzz0BiHArG3tXS0WDE1Qnuy0ozGveoSYYJfE7i9rOlf5GsVO07spnnwIIaP/Szn
+# 9HfmLiG78C3JyIeIxuczYc2M5yOZ/zBKcU8ukk2rBM3bM5SUZ1O4bknXuhuPRi6C
+# WozBYSwGMshGTtTtG2KapuzCox9kzwESeOZe27dC6cMwC95CHmqq6+n18jWJ9d5U
+# TXe/NlXNABW5L+xTzZ56Gk77qUIDWNnMmTsFtXjKv6I3W6d94k5c/qlTQjfS4NkS
+# uVol4oDY4fubUN9sSGRp4WcJEMb072FBmk0F8k2z0ZuGGFp2qrtKXLZjf/KJ0joT
+# GYRyVxooMbbuG3w8hS5EzvsrzhAhhzD3tj/i+R3f2uEBtYZ6RuwnWOR8p6LjVysN
+# 9xtD1vynH9CM5CQ1CXmwSmPoND+MyfhRxCYLoKGyU9wvmQ18B/hx3vqBaGnrCruq
+# IvGEAwKpIg5QM3K1X8qf5oQm8S19bYkY9T4GvOSZ7kLSuX9WE/7Jv9n8BFgQJRCg
+# ktND7GDVhcp0nGjFIgHkUKfZNwSCqXDfNHVvyti9wXadwO3Li3vvxVDA91lZh8G+
+# kIA5mT6X3Q==
 # SIG # End signature block

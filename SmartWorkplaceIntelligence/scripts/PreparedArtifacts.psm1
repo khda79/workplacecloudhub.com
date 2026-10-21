@@ -14,8 +14,35 @@ function Get-PreparedOptionalArtifactFiles {
            -not $names.Add($entry.file) -or $entry.file -cin @($Contract.currentFiles) -or [int]$entry.maxAgeHours -lt 1 -or [int]$entry.maxAgeHours -gt 8760){
             throw 'Invalid or duplicate optional artifact file.'
         }
+        if($entry.PSObject.Properties['delimiter'] -and [string]$entry.delimiter -cnotin @(',', ';')){
+            throw 'Invalid optional artifact delimiter.'
+        }
     }
     @($Contract.optionalCurrentFiles)
+}
+
+function Assert-PreparedArtifactTenant {
+    param([Parameter(Mandatory)][string]$Path,[Parameter(Mandatory)][string]$TenantKey,
+        [Parameter(Mandatory)]$Specification)
+    $delimiter=if($Specification.PSObject.Properties['delimiter']){[string]$Specification.delimiter}else{','}
+    $parser=[Microsoft.VisualBasic.FileIO.TextFieldParser]::new($Path)
+    try{
+        $parser.SetDelimiters($delimiter)
+        $parser.HasFieldsEnclosedInQuotes=$true
+        $parser.TrimWhiteSpace=$false
+        $header=$parser.ReadFields()
+        if(-not $header -or @($header | Sort-Object -Unique).Count -ne $header.Length -or
+           @($header | Where-Object {[string]::IsNullOrWhiteSpace($_)}).Count){throw 'Empty or duplicate optional artifact header.'}
+        $tenantIndex=[array]::IndexOf($header,'TenantKey')
+        if($tenantIndex -lt 0){throw "Optional artifact TenantKey missing: $($Specification.file)"}
+        while(-not $parser.EndOfData){
+            $fields=$parser.ReadFields()
+            if($fields.Length -ne $header.Length){throw "Malformed optional artifact record: $($Specification.file)"}
+            if([string]::IsNullOrWhiteSpace($fields[$tenantIndex]) -or $fields[$tenantIndex] -cne $TenantKey){
+                throw "Optional artifact tenant mismatch: $($Specification.file)"
+            }
+        }
+    }finally{$parser.Dispose()}
 }
 
 function Get-PreparedArtifactSources {
@@ -97,9 +124,7 @@ function Copy-PreparedArtifacts {
     foreach($entry in @(Get-PreparedOptionalArtifactFiles $contract)){
         $relative="DATA-LAST/$($entry.file)"
         if(-not (Test-Path -LiteralPath (Join-Path $SnapshotRoot $relative) -PathType Leaf)){continue}
-        foreach($row in Import-Csv -LiteralPath (Join-Path $SnapshotRoot $relative)){
-            if($row.TenantKey -cne $TenantKey){throw "License report tenant mismatch: $($entry.file)"}
-        }
+        Assert-PreparedArtifactTenant -Path (Join-Path $SnapshotRoot $relative) -TenantKey $TenantKey -Specification $entry
         Copy-One $relative "Source-$($entry.file)"
     }
     foreach($spec in $contract.history){
@@ -129,11 +154,14 @@ function Assert-PreparedArtifacts {
     param([Parameter(Mandatory)][string]$BatchRoot,[Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Entries,
         [Parameter(Mandatory)][string]$TenantKey)
     $seen=[Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    $optional=@(Get-PreparedOptionalArtifactFiles (Get-PreparedArtifactContract))
     foreach($entry in $Entries){
         if(-not (Test-PreparedArtifactName ([string]$entry.File)) -or -not $seen.Add($entry.File)){throw 'Unsafe or duplicate prepared artifact.'}
         $path=Join-Path $BatchRoot $entry.File
         if((Get-Item -LiteralPath $path).Attributes -band [IO.FileAttributes]::ReparsePoint){throw 'Artifact links are forbidden.'}
         if($entry.SHA256 -notmatch '^[A-Fa-f0-9]{64}$' -or (Get-Item -LiteralPath $path).Length -ne $entry.Bytes -or (Get-FileHash -LiteralPath $path).Hash -ne $entry.SHA256){throw "Artifact integrity mismatch: $($entry.File)"}
+        $specification=@($optional | Where-Object { "Source-$($_.file)" -ceq $entry.File })
+        if($specification.Count -eq 1){Assert-PreparedArtifactTenant -Path $path -TenantKey $TenantKey -Specification $specification[0]}
     }
     $required=@('PreparedHistoryIndex.json.txt')+@((Get-PreparedArtifactContract).currentFiles | ForEach-Object {"Source-$_"})
     foreach($name in $required){if(-not $seen.Contains($name)){throw "Required artifact missing: $name"}}
@@ -233,8 +261,8 @@ Export-ModuleMember -Function Get-PreparedArtifactSources,Copy-PreparedArtifacts
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCnPPzap7VWbxbS
-# 91tGaU2cNcSJQVq0MX2rVrWuVxF/T6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBAPz6wOwjZ4vul
+# c1D+PPYSPoRz0Gma6wBPQL8Uf7F9WKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -367,31 +395,31 @@ Export-ModuleMember -Function Get-PreparedArtifactSources,Copy-PreparedArtifacts
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIJ61pM4w2b+faHfQPMi8oEkXjv4oVD/mdFfwudPza7pIMA0GCSqG
-# SIb3DQEBAQUABIIBgCRXVvVDoe1dflm0nczMKhPOkUAePPDp3QcJ5fHNR1G/nbWf
-# PsB5EuK7cIdkXT7KRnsIW8EWJWWF4gTSR/RCCoRhrTJgziQ5ALLcGTRXsTA4GCne
-# ikb9j1lycuFx+WBEuUpN8mPfbYtg4kbvmbBu1/sSNQs27GZhBaiC6LzaorS9NZJT
-# SubwINeu2cT4HqPuKGmBSTm4hf31dFzlCE5ne4sr9t4Eu+ha8QYGgD7ijBofh4ut
-# E7MRx1sBmfggtcA4Tb5BD2Z9raWJJaxUGBV1Yvh8MHq2iM4Pu2J36Ufn0zVqhNyI
-# EtUEmQD3jkCOEXbHOhv6nR0lM1O7CVGIAghET+XlN4nPI8HtzM8fQlWiNVWBlng0
-# bxutu9GuVoWIOfTqWmzTXSwDFAI9tQ8rOznBES7kC4FS3cbdj5q88b4IGrKVvS/n
-# IXYAwmVVjm5rIBc88i/B2QIrSQ1tdM1yIkwTJgK+MwL80jxuzcjAi3ldPx63ypc7
-# ATjrRPTPnqf5hizUPqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIEhNUh9E5gRKLg57thO5/ThHEpPoFzZnruHB8iYHnL9FMA0GCSqG
+# SIb3DQEBAQUABIIBgGtdPflIi2CkT7cFVHiBBDTL2Sjw0WMCW0HR4Mg5qwbe+UJ9
+# G2pDnMyN8Qp6dNOmhEwy59uaE5JqQ3XZl2zavaZ26YvboHgCL4Fnyc00i3wiN74S
+# cgga3r+YG8yblivMisPxYcslpj1Jdtj1YJp3Xxnb8mzOpbPZc1UQephbsrZ1H8fe
+# QLYhsloLEFuKL8aNAYJzk44uJ39GV4VNVpBhL46g0ssGTE3RiNWMPaFQXYjVX4e5
+# 7oAFHJAvups4pvcPfbxOH5T0xODUuP8lZ5jQWCbwxkAPtJ5enERVWT9Y6xLBH7fK
+# 0Jh/9EvYgQgfb1GMKY+O8nD7GmvaOKKk7psmNsqbuEYCexNT1Q0mLmiCdd77YvTq
+# KJFWcqlbNMl6K/oKwMhh3qDmfV08zoxcfj6MOvBqdwVmAad7EGp/UZR6g4oMcwxz
+# QdBkCn+w3yDAv25LTJpxkI+f9l+cZSLiZMeppISFS4VyaNegGvPD/DxhIo9WLhKy
+# s5osOi4sLwXGi5kANqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTcyMzE1
-# NTZaMC8GCSqGSIb3DQEJBDEiBCA+TMYnHtEE5TJlXH8uTJdrojUgUViIja6fwlc2
-# J1yyljANBgkqhkiG9w0BAQEFAASCAgAS+3uVOB9Bp2Wc2w3/Pxt5SWoAAMAarVNX
-# NTb9ASRmq/d4orlJSYcBRrsKm4y8G9zF1j30S3ZOxfkme3HqKwBU2leyldJVgtfo
-# 14J42UD0tdvF34TDvC4wLdoUjAH5RQHddJK+6N3/JcrBAWaV3Lahr16KzBfKv7Qv
-# nPfSCQPz5/6DlsCaIlkdvftGNVUt1X/l+PyPM9e6+DJkkpjQeyiyXQSg9zflS/0o
-# jH/nAdCYmZVswrE+fm7tHNbpyCdwjKgRBvpIO6xOJXDUkTdjjuzKgSakhhHPWrEm
-# FWgg5cnVWeqMRhUdM1a41Mj31YQz7sMGhabZuNxt5VfCoS/IDLetZ53ejZkROpG1
-# n1jWEXVVprObBCHvyFdaQepXVcrRNJG9rVsTLBMlg7CQuDMwzwUmIcqhm4fon3nG
-# LR1n5s+DfFdKq/bnC4yQVplJ+TzsYJXVb0vW8cWKWNLXnWw2Ttatk1KwaqWPbNNG
-# Oogq0nM4GZmzACzNxMkD8Fo4HDxh9qb1XkmQdsZODUchacsxNGeD+2lwB2o85SKU
-# dnBXAuv8CTKkl47wYusWo9S0Bf3Z39Sn3SusgCMDFklYZlBA4eu1/eRpa9Aa53SC
-# dGbY+lriM419qfpbDF9ihUBGP+1S1HIrbE7bdTgMTIkIZJpg0+Nzzv9iKC9RqLgb
-# c0DUJxV/kA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjEwNzU5
+# MDFaMC8GCSqGSIb3DQEJBDEiBCAdJ6VGHJDH3NUemZLZhVtlKzg7ivY7zm8cpL9P
+# E/xjgzANBgkqhkiG9w0BAQEFAASCAgAG6SQpNnGo1NCQs+yw6qRL1mAMwoHBO/SA
+# fzxnGdaX1zbdmV5Q2AsbzFpWNRy+m5B8tNANqsnoNQBW/iCNAjIFhoKQHMaLfERe
+# k3bQ9DF19fCjWiB4Eb6R91+YxZoW9p9bhlxEFyAxykGllN4sEnH2JMKK7gE27N3a
+# DmLOH4EJ9L/9tfaKtKOtRj6vTZLaqXYKDUGz0gf5YUAmD9J1vEwCFvRtsfdlg0dW
+# /6ggG20atozMPBp9guLtU3y9YTZfAoSOi6MdvbUq499OUQLlZqNI12yVC6Mr++lv
+# i3OdF3SBZ5YUSS57eMFoop4I/8nIzSURRmfewESWRP559bNY0BhxHPI3X/zHyEy4
+# XJJpl/TD3mbXES/44CtTtysbS69C3vEMnh56nAUghHSY5WYfaGZ+W+SWG/dXA8rq
+# TsSbl0zwiyTBCktdpCoa7trpsv/mQGlknTtMIxgkDKhI9kvm/drm/bcaq6Y8LXaS
+# mzMad9jT+9YSOw99qjU78nK2N7ecgCCI5gnZUaBRsuzseb2l5cVZ1C+Xoc2Tqm4k
+# DkcmrzRPPqGxLziweWY2o8b2D/hpBv5aA8MAOfCHL86Jvxh2cER54o6kYqAziv/w
+# jBp9N/YlqIvOeupQ7MfxbRdj0BOTp7vI5hpu6wTOLFwteiCGPWBkWTWcsn1LneFK
+# MQsdn+E51w==
 # SIG # End signature block
