@@ -749,7 +749,7 @@ def build_tables(source, output, contract, identity, evidence, now=None):
         ad_user_links[key(r['ObjectGUID'])]=(user,status)
         manager_dn=get(r,'manager'); manager=ad_object_by_dn(manager_dn) if manager_dn else None
         ad_user_rows.append({'TenantADUserKey':native_key(tenant,'ad-user',r['ObjectGUID']),
-            **{field:get(r,field) for field in ('ObjectGUID','ObjectSID','DomainName','DistinguishedName','SamAccountName','UserPrincipalName','DisplayName','Department','Title','Country')},
+            **{field:get(r,field) for field in ('ObjectGUID','ObjectSID','DomainName','DistinguishedName','SamAccountName','UserPrincipalName','DisplayName','Department','Title','Country','AccountType')},
             'Enabled':boolean(get(r,'Enabled')),'ManagerDistinguishedName':manager_dn,'ManagerADObjectKey':ad_object_key(manager),
             'TenantUserKey':user['TenantUserKey'] if user else '', 'CloudMatchStatus':status,**dates(r),'SourceCollectedDateTime':acquired('ad_users')})
         if status=='Ambiguous native SID':

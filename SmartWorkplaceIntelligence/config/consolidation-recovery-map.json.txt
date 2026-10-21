@@ -191,6 +191,13 @@
           "target": "SourceCollectedDateTime"
         }
       ],
+      "capturedOnlyColumns": [
+        {
+          "source": "AccountType",
+          "reader": "ReadPreparedADAccountClassification",
+          "reason": "All raw classifications retained for a separately materialized same-batch facet; current AD User Evidence schema stays unchanged"
+        }
+      ],
       "uniqueKey": [
         "TenantADUserKey"
       ],

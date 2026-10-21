@@ -77,6 +77,15 @@ class NativeEvidenceTests(unittest.TestCase):
             if table['name'] in identity_outputs:
                 continue
             name = table['name'] + '.csv'
+            if table['name']=='ADUserSource':
+                # AccountType is captured by a separate reader; all legacy cells
+                # and native keys must remain identical to the same-input oracle.
+                expected=list(baseline.rows(self.fixture.output / name))
+                actual=self.output_rows('ADUserSource')
+                self.assertEqual(len(expected),len(actual),name)
+                self.assertEqual(expected,[{field:row[field] for field in old}
+                    for old,row in zip(expected,actual)],name)
+                continue
             self.assertEqual(baseline.sha(self.fixture.output / name), sources.sha(self.output / name), name)
         for name in ('FactDataQuality','EntityFinding','FactRelationshipOverview'):
             with (self.fixture.output/(name+'.csv')).open(encoding='utf-8-sig',newline='') as stream:
@@ -286,6 +295,34 @@ class NativeEvidenceTests(unittest.TestCase):
             self.assertEqual(self.output_rows(table)[0]['LastModifiedDateTime'], '2026-10-05T09:08:07')
         self.assertEqual(self.output_rows('FactAutopilotDevice')[0]['LastContactedDateTime'], '2026-10-14T09:00:00')
 
+    def test_ad_account_classification_is_carried_without_reclassification(self):
+        self.fixture.seed_ad()
+        self.fixture.inputs['ad_users'][0]['AccountType']='Service Account'
+        self.fixture.write_inputs()
+        unified.build(self.fixture.source,self.output,self.audit())
+        self.assertEqual(self.output_rows('ADUserSource')[0]['AccountType'],'Service Account')
+
+    def test_absent_ad_account_classification_stays_unknown(self):
+        self.fixture.seed_ad()
+        for row in self.fixture.inputs['ad_users']:row.pop('AccountType',None)
+        self.fixture.write_inputs()
+        unified.build(self.fixture.source,self.output,self.audit())
+        self.assertTrue(all(row['AccountType']=='' for row in self.output_rows('ADUserSource')))
+
+    def test_all_account_types_and_disabled_accounts_are_retained(self):
+        self.fixture.seed_ad()
+        template=self.fixture.inputs['ad_users'][0]
+        types=['Named Account','Ext Account','Generic Account','Admin Account','System Account',
+            'Resource Account','Service Account','Unclassified Account','Future Custom Type']
+        self.fixture.inputs['ad_users']=[dict(template,ObjectGUID='ad-type-'+str(i),
+            ObjectSID='S-1-5-21-1-2-3-'+str(500+i),Enabled='false',AccountType=value)
+            for i,value in enumerate(types)]
+        self.fixture.write_inputs()
+        unified.build(self.fixture.source,self.output,self.audit())
+        actual=self.output_rows('ADUserSource')
+        self.assertCountEqual([row['AccountType'] for row in actual],types)
+        self.assertTrue(all(row['Enabled']=='false' for row in actual))
+
     def test_type_failure_precedes_collaboration_and_leaves_sources_unchanged(self):
         self.fixture.inputs['skus'][0]['TenantConsumedUnits'] = '1.5'
         self.fixture.write_inputs()
@@ -341,7 +378,13 @@ class NativeEvidenceTests(unittest.TestCase):
         self.assertEqual(len(mapping['pages']), 13)
         for table in contract['tables']:
             mapped = next(t for t in mapping['tables'] if t['sourceTable'] == table['name'])
-            self.assertEqual(table['columns'], [c['source'] for c in mapped['columns']])
+            captured=[c['source'] for c in mapped.get('capturedOnlyColumns',[])]
+            self.assertEqual(len(captured),len(set(captured)))
+            self.assertTrue(set(captured).issubset(set(table['columns'])))
+            self.assertEqual([name for name in table['columns'] if name not in captured],
+                [c['source'] for c in mapped['columns']])
+            for column in mapped.get('capturedOnlyColumns',[]):
+                self.assertTrue(column['reader']);self.assertTrue(column['reason'])
             self.assertTrue(mapped['test'])
 
 

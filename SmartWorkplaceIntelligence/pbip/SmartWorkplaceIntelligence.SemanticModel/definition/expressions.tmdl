@@ -525,3 +525,35 @@ expression CreatePreparedReaders =
 		in
 		    [BatchId=BatchId, Finish=Finish, GetExchangeOnPremInfrastructure=GetExchangeOnPremInfrastructure, GetPreparedEvidenceFile=GetPreparedEvidenceFile, GetPreparedBatchManifest=GetPreparedBatchManifest, GetLicenseReportQualification=GetLicenseReportQualification, LicenseReportFileUsable=LicenseReportFileUsable, GetLicenseReportSnapshot=GetLicenseReportSnapshot, GetLicenseReportCsv=GetLicenseReportCsv, ReadMigrationCsv=ReadMigrationCsv, CreateMailboxMigrationReader=CreateMailboxMigrationReader, ReadMailboxMigrationCsv=ReadMailboxMigrationCsv, ReadMigrationWeeklyHistory=ReadMigrationWeeklyHistory, GetSharePointOnPremCsv=GetSharePointOnPremCsv, GetSharePointMigrationEvidence=GetSharePointMigrationEvidence]
 	lineageTag: 26f34f0c-24ee-421f-94a6-123ea48fb2ec
+
+/// Every governed AD account type, including disabled/non-human accounts. Historical missing classification remains unknown. Prepared without materializing a new imported facet.
+expression ReadPreparedADAccountClassification =
+		() as table =>
+		let
+		    Readers = CreatePreparedReaders(),
+		    Source = Readers[ReadMailboxMigrationCsv](Readers[GetPreparedEvidenceFile]("ADUserSource.csv"),
+		        {"TenantKey", "ObjectGUID", "TenantADUserKey"}, {"AccountType"}),
+		    TenantChecked = if List.AllTrue(List.Transform(Source[TenantKey], each _ = PreparedExpectedTenantKey))
+		        then Source else error "AD account classification tenant mismatch",
+		    Keyed = Table.TransformColumns(TenantChecked,
+		        {{"ObjectGUID", each if _ = null then "" else Text.Lower(Text.Trim(_)), type text},
+		         {"TenantADUserKey", each if _ = null then "" else Text.Trim(_), type text}}),
+		    Objects = List.Buffer(Keyed[ObjectGUID]),
+		    AccountKeys = List.Buffer(Keyed[TenantADUserKey]),
+		    Checked = if not List.Contains(Objects, "") and not List.Contains(AccountKeys, "") and
+		        List.Count(Objects) = List.Count(List.Distinct(Objects)) and
+		        List.Count(AccountKeys) = List.Count(List.Distinct(AccountKeys))
+		        then Keyed else error "Missing or duplicate native AD account classification identity",
+		    Projected = Table.RenameColumns(Table.SelectColumns(Checked,
+		        {"ObjectGUID", "TenantADUserKey", "AccountType"}, MissingField.UseNull),
+		        {{"ObjectGUID", "Object GUID"}, {"TenantADUserKey", "AD Account Key"}, {"AccountType", "Account Type"}}),
+		    Normalized = Table.TransformColumns(Projected,
+		        {{"Account Type", each if _ = null or Text.Trim(_) = "" then "Not captured" else Text.Trim(_), type text}}),
+		    Service = Table.AddColumn(Normalized, "Service Classification", each
+		        if [Account Type] = "Not captured" then "Not captured"
+		        else if List.Contains({"service", "service account"}, Text.Lower([Account Type])) then "Service"
+		        else if List.Contains({"named account", "ext account", "generic account", "admin account", "system account", "resource account"},
+		            Text.Lower([Account Type])) then "Other classified account"
+		        else "Unknown classification", type text)
+		in
+		    Readers[Finish](Service)
