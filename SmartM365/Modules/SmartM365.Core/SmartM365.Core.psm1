@@ -4569,6 +4569,59 @@ function Get-SmartM365GraphRetryAfterSeconds {
 
 <#
 .SYNOPSIS
+Wait before the next retry: the server's Retry-After when it sent one (delta seconds or HTTP date, never
+shortened), else an exponential backoff BaseSeconds*2^(Attempt-1) capped at MaximumSeconds with equal jitter
+(between half and all of it) so retries do not land in step. Returns the delay and where it came from.
+Exported for collectors; JitterSample (0..1) makes the jitter deterministic for offline tests.
+#>
+function Get-SmartM365RetryDelay {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][ValidateRange(1, 1000)][int]$Attempt,
+        [AllowNull()]$ErrorRecord,
+        [ValidateRange(1, 3600)][int]$BaseSeconds = 5,
+        [ValidateRange(1, 3600)][int]$MaximumSeconds = 300,
+        [AllowNull()][Nullable[double]]$JitterSample
+    )
+
+    $retryAfter = $null
+    if ($null -ne $ErrorRecord) {
+        $exception = $ErrorRecord.Exception
+        $headers = @()
+        try { if ($exception.Response -and $exception.Response.Headers) { $headers += , $exception.Response.Headers } } catch { Write-Verbose $_.Exception.Message }
+        try { if ($exception.PSObject.Properties['ResponseHeaders'] -and $exception.ResponseHeaders) { $headers += , $exception.ResponseHeaders } } catch { Write-Verbose $_.Exception.Message }
+        foreach ($set in $headers) {
+            try {
+                if ($set -is [System.Net.Http.Headers.HttpResponseHeaders] -and $set.RetryAfter) {
+                    if ($set.RetryAfter.Delta) { $retryAfter = $set.RetryAfter.Delta.TotalSeconds }
+                    elseif ($set.RetryAfter.Date) { $retryAfter = ($set.RetryAfter.Date - [DateTimeOffset]::UtcNow).TotalSeconds }
+                }
+                elseif ($set -is [System.Collections.IDictionary] -and $set.Contains('Retry-After')) { $retryAfter = @($set['Retry-After'])[0] }
+            }
+            catch { Write-Verbose $_.Exception.Message }
+            if ($null -ne $retryAfter) { break }
+        }
+        if ($null -eq $retryAfter) { try { $retryAfter = $exception.Data['Retry-After'] } catch { Write-Verbose $_.Exception.Message } }
+    }
+    if ($null -ne $retryAfter -and $retryAfter -isnot [double]) {
+        $raw = [string]$retryAfter
+        $seconds = 0
+        $date = [DateTimeOffset]::MinValue
+        if ([int]::TryParse($raw, [ref]$seconds)) { $retryAfter = [double]$seconds }
+        elseif ([DateTimeOffset]::TryParse($raw, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::AssumeUniversal, [ref]$date)) { $retryAfter = ($date - [DateTimeOffset]::UtcNow).TotalSeconds }
+        else { $retryAfter = $null }
+    }
+    if ($null -ne $retryAfter) {
+        return [pscustomobject]@{ Seconds = [int][math]::Min([math]::Max(1, [math]::Ceiling([double]$retryAfter)), $MaximumSeconds); Source = 'Retry-After' }
+    }
+
+    $ceiling = [math]::Min([double]$MaximumSeconds, $BaseSeconds * [math]::Pow(2, [math]::Min($Attempt - 1, 20)))
+    $sample = if ($null -ne $JitterSample) { [math]::Min(1.0, [math]::Max(0.0, [double]$JitterSample)) } else { Get-Random -Minimum 0.0 -Maximum 1.0 }
+    return [pscustomobject]@{ Seconds = [int][math]::Max(1, [math]::Ceiling($ceiling / 2 + $sample * $ceiling / 2)); Source = 'Backoff' }
+}
+
+<#
+.SYNOPSIS
 True for transient Graph errors: 429/5xx, throttling, timeouts and connection resets.
 #>
 function Test-SmartM365GraphTransientError {
@@ -4687,8 +4740,10 @@ function Invoke-SmartM365ExportFileDownload {
                 if ($statusCode) { $failure.Data['StatusCode'] = $statusCode }
                 throw $failure
             }
-            $delay = if ($notReady) { 5 * $attempt } else { Get-SmartM365GraphRetryAfterSeconds -ErrorRecord $_ -DefaultSeconds (10 * $attempt) -MaximumSeconds 120 }
-            WriteLog -Message ("{0} attempt {1}/{2} failed. Status={3}; Error={4}; retrying in {5}s: {6}" -f $Operation, $attempt, $MaxAttempts, $statusText, $_.Exception.Message, $delay, $safeUrl) -Level 'WARNING'
+            # Storage throttling ("Operations per second is over the account limit") rarely sends Retry-After.
+            $wait = if ($notReady) { [pscustomobject]@{ Seconds = 5 * $attempt; Source = 'NotReady' } } else { Get-SmartM365RetryDelay -Attempt $attempt -ErrorRecord $_ -BaseSeconds 10 -MaximumSeconds 120 }
+            $delay = $wait.Seconds
+            WriteLog -Message ("{0} attempt {1}/{2} failed. Status={3}; Error={4}; retrying in {5}s ({6}): {7}" -f $Operation, $attempt, $MaxAttempts, $statusText, $_.Exception.Message, $delay, $wait.Source, $safeUrl) -Level 'WARNING'
             Wait-SmartM365NetworkRetry -Seconds $delay -Operation $Operation
         }
     }
@@ -6683,7 +6738,7 @@ Export-ModuleMember -Function `
     ExportAndCopyCsv, ExportAndCopyCsvFromConvert, Save-SmartM365WeeklyInventoryHistory, Add-SmartM365WeeklyHistory, `
     NewRemoteScheduledTaskAndWait, `
     Invoke-SmartM365Preflight, Initialize-SmartM365ImportExcel, Connect-SmartM365CloudSession, Disconnect-SmartM365CloudSession, `
-    Get-SmartM365GraphErrorStatusCode, Test-SmartM365GraphTransientError, Get-SmartM365GraphRetryAfterSeconds, Test-SmartM365GraphRetryableError, Invoke-SmartM365ExportFileDownload
+    Get-SmartM365GraphErrorStatusCode, Test-SmartM365GraphTransientError, Get-SmartM365GraphRetryAfterSeconds, Get-SmartM365RetryDelay, Test-SmartM365GraphRetryableError, Invoke-SmartM365ExportFileDownload
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor

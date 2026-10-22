@@ -2,14 +2,57 @@
 .SYNOPSIS
 Runs the offline contract test for Intune endpoint-security health normalization.
 .VERSION
-1.0.0
+1.0.1
+.NOTES
+Also checks, with recorded stand-ins for the export and the log, that each failed report is logged with its
+cause (ERROR when required) and that the export settings of the .local.json are validated.
 #>
 [CmdletBinding()]param()
 $ErrorActionPreference='Stop'
-$path=Join-Path (Split-Path $PSScriptRoot -Parent) 'SmartInventory\M365Inventory\IntuneInventory\Security\SmartM365-Intune-EndpointSecurityHealth-Inventory.ps1'
+$root=Split-Path $PSScriptRoot -Parent
+$path=Join-Path $root 'SmartInventory\M365Inventory\IntuneInventory\Security\SmartM365-Intune-EndpointSecurityHealth-Inventory.ps1'
 $output=& $path -SelfTest
 if([string]$output-notmatch'PASS'){throw 'Endpoint-security collector offline test failed.'}
 Write-Output $output
+
+Import-Module (Join-Path $root 'Modules\SmartM365.Core\SmartM365.Core.psd1') -MinimumVersion '1.0.103' -Force -Global -WarningAction SilentlyContinue
+Import-Module (Join-Path $root 'SmartInventory\Common\SmartM365.EvidenceCollector.Common.psd1') -MinimumVersion '1.0.13' -Force -Global
+$ast=[Management.Automation.Language.Parser]::ParseFile($path,[ref]$null,[ref]$null)
+$functions=foreach($name in 'Get-EndpointSecurityExportSetting','Invoke-EndpointSecurityReportSet'){$node=$ast.Find({param($n)$n -is [Management.Automation.Language.FunctionDefinitionAst]-and $n.Name-eq $name},$true);if(-not $node){throw "$name is missing in the collector."};$node.Extent.Text}
+$prelude=@'
+Set-Variable -Name ScriptVersion -Value 'test'
+$script:Logs=[Collections.Generic.List[string]]::new()
+function Write-SmartM365EvidenceLog{param($Message,$Level='INFO')$script:Logs.Add("$Level $Message")}
+function Invoke-SmartM365EvidenceExportReport{
+    param($ReportName,$ApiVersion,$TimeoutSeconds,$MaxItems,$CreateRetryBudgetSeconds,$ProgressLogSeconds,$StallSeconds)
+    $script:Options=$PSBoundParameters
+    if($ReportName-eq'FirewallStatus'){$failure=[IO.IOException]::new('Intune export job creation (FirewallStatus) failed after 9 attempt(s) over 1065s (HTTP 503). Last error: ServiceUnavailable');$failure.Data['StatusCode']=503;throw $failure}
+    if($ReportName-eq'FirewallUnhealthyStatus'){throw "Intune export job job-9 for FirewallUnhealthyStatus timed out after 1200s (limit 1200s); last status 'inProgress'."}
+    [pscustomobject]@{DeviceId='d1'}
+}
+'@
+$module=New-Module -ScriptBlock ([scriptblock]::Create($prelude+"`n"+($functions-join"`n")))
+try{
+    $result=& $module {
+        $definitions=@([pscustomobject]@{Name='DefenderAgents';Required=$true},[pscustomobject]@{Name='FirewallStatus';Required=$true},[pscustomobject]@{Name='FirewallUnhealthyStatus';Required=$false})
+        $set=Invoke-EndpointSecurityReportSet -Definitions $definitions -ExportOptions @{ApiVersion='v1.0';TimeoutSeconds=1200;MaxItems=0;CreateRetryBudgetSeconds=1080;ProgressLogSeconds=90;StallSeconds=600} -RunId r -CollectedAtUtc c
+        [pscustomobject]@{Set=$set;Logs=$script:Logs.ToArray();Options=$script:Options}
+    }
+    if(($result.Set.MissingRequired-join'|')-ne'FirewallStatus (HTTP503)'){throw "Missing required reports are not named: $($result.Set.MissingRequired-join'|')"}
+    if(@($result.Logs|Where-Object{$_-like'ERROR Required endpoint-security report FirewallStatus failed (HTTP503): Intune export job creation (FirewallStatus) failed after 9 attempt(s) over 1065s*'}).Count-ne 1){throw "The required report failure is not logged as ERROR with its cause: $($result.Logs-join' | ')"}
+    if(@($result.Logs|Where-Object{$_-like"WARNING Optional endpoint-security report FirewallUnhealthyStatus failed (ExportFailed): Intune export job job-9 *"}).Count-ne 1){throw 'The optional report failure is not logged as WARNING with its job id.'}
+    $failed=@($result.Set.Quality|Where-Object Status -eq 'Failed')
+    if($failed.Count-ne 2-or @($result.Set.Quality).Count-ne 3-or $result.Set.Raw.DefenderAgents.Count-ne 1){throw 'DataQuality rows or collected rows are wrong.'}
+    if($result.Options.CreateRetryBudgetSeconds-ne 1080-or $result.Options.StallSeconds-ne 600-or $result.Options.ProgressLogSeconds-ne 90){throw 'Export options are not passed to the export.'}
+    $setting=& $module {
+        $config=[pscustomobject]@{ExportCreateRetryBudgetSeconds='1200';ExportStallSeconds='abc';ExportProgressLogSeconds=''}
+        $bad=$null;try{Get-EndpointSecurityExportSetting $config 'ExportStallSeconds' 600 0 7200|Out-Null}catch{$bad=$_.Exception.Message}
+        $range=$null;try{Get-EndpointSecurityExportSetting ([pscustomobject]@{ExportCreateRetryBudgetSeconds=10}) 'ExportCreateRetryBudgetSeconds' 1080 60 7200|Out-Null}catch{$range=$_.Exception.Message}
+        [pscustomobject]@{Set=(Get-EndpointSecurityExportSetting $config 'ExportCreateRetryBudgetSeconds' 1080 60 7200);Empty=(Get-EndpointSecurityExportSetting $config 'ExportProgressLogSeconds' 90 0 3600);Missing=(Get-EndpointSecurityExportSetting $null 'ExportStallSeconds' 600 0 7200);Bad=$bad;Range=$range}
+    }
+    if($setting.Set-ne 1200-or $setting.Empty-ne 90-or $setting.Missing-ne 600-or $setting.Bad-notmatch"ExportStallSeconds must be an integer"-or $setting.Range-notmatch'between 60 and 7200'){throw 'Export settings from the .local.json are not read or validated.'}
+}finally{Remove-Module $module -Force}
+Write-Output 'PASS: Endpoint security report failures logged with their cause; export settings validated'
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor

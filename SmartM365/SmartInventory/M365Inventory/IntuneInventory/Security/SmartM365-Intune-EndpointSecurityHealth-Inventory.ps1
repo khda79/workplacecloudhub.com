@@ -3,7 +3,7 @@
 .SYNOPSIS
 Collects Intune Defender agent and firewall health reports through exportJobs.
 .VERSION
-1.0.3
+1.0.4
 .REQUIREMENTS
 Microsoft Graph application or delegated permission DeviceManagementManagedDevices.ReadWrite.All.
 #>
@@ -21,7 +21,7 @@ if(-not $smartM365LifecycleRoot){throw 'SmartM365 lifecycle support is missing; 
 $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -RequireReturn
 try {
 Set-StrictMode -Version Latest
-$ErrorActionPreference='Stop';$ScriptVersion='1.0.3';$script:Runtime=$null;$script:CompletionStatus='Success';$script:CompletionError=$null
+$ErrorActionPreference='Stop';$ScriptVersion='1.0.4';$script:Runtime=$null;$script:CompletionStatus='Success';$script:CompletionError=$null
 
 function ConvertTo-EndpointSecurityRow{
     param([Parameter(Mandatory)]$Row,[Parameter(Mandatory)][string]$ReportName,[string]$RunId,[string]$CollectedAtUtc,[bool]$IsPartialInventory=$false)
@@ -32,23 +32,56 @@ function ConvertTo-EndpointSecurityRow{
     return [pscustomobject]$result
 }
 
-if($SelfTest){Import-Module (Join-Path $PSScriptRoot '..\..\..\Common\SmartM365.EvidenceCollector.Common.psd1') -MinimumVersion '1.0.11' -Force;$test=ConvertTo-EndpointSecurityRow ([pscustomobject]@{DeviceId='d';RealTimeProtectionEnabled=$true}) DefenderAgents r n;if($test.DeviceId-ne'd'-or $test.RealTimeProtectionEnabled-ne$true){throw 'Endpoint security self-test failed.'};'PASS: Endpoint security offline contract';$smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; return}
+function Get-EndpointSecurityExportSetting{
+    param([AllowNull()]$Config,[Parameter(Mandatory)][string]$Name,[Parameter(Mandatory)][int]$Default,[int]$Minimum=0,[int]$Maximum=86400)
+    $raw=Get-SmartM365EvidenceProperty $Config @($Name) $null
+    if($null-eq $raw-or[string]::IsNullOrWhiteSpace([string]$raw)){return $Default}
+    $value=0
+    if(-not[int]::TryParse([string]$raw,[ref]$value)-or $value-lt $Minimum-or $value-gt $Maximum){throw "$Name must be an integer number of seconds between $Minimum and $Maximum; found '$raw'."}
+    return $value
+}
+
+function Invoke-EndpointSecurityReportSet{
+    param([Parameter(Mandatory)][object[]]$Definitions,[Parameter(Mandatory)][hashtable]$ExportOptions,[string]$RunId,[string]$CollectedAtUtc)
+    $rawByReport=@{};$quality=[System.Collections.Generic.List[object]]::new();$missingRequired=[System.Collections.Generic.List[string]]::new()
+    foreach($definition in $Definitions){
+        try{$rawByReport[$definition.Name]=@(Invoke-SmartM365EvidenceExportReport -ReportName $definition.Name @ExportOptions);$quality.Add([pscustomobject][ordered]@{RunId=$RunId;CollectedAtUtc=$CollectedAtUtc;SourceScriptVersion=$ScriptVersion;ReportName=$definition.Name;Status='Collected';RowCount=$rawByReport[$definition.Name].Count;Required=$definition.Required;RequiredPermission='DeviceManagementManagedDevices.ReadWrite.All';ErrorCode='';ErrorMessage=''})}
+        catch{
+            if($_.Exception -is [Management.Automation.PipelineStoppedException] -or $_.Exception -is [OperationCanceledException]){throw}
+            $status=Get-SmartM365EvidenceStatusCode $_;$errorCode=if($status){"HTTP$status"}else{'ExportFailed'}
+            $quality.Add([pscustomobject][ordered]@{RunId=$RunId;CollectedAtUtc=$CollectedAtUtc;SourceScriptVersion=$ScriptVersion;ReportName=$definition.Name;Status='Failed';RowCount=0;Required=$definition.Required;RequiredPermission='DeviceManagementManagedDevices.ReadWrite.All';ErrorCode=$errorCode;ErrorMessage=$_.Exception.Message})
+            # The cause (attempts, job id, last status) is in the message; DataQuality alone left the log silent.
+            if($definition.Required){$missingRequired.Add("$($definition.Name) ($errorCode)");Write-SmartM365EvidenceLog "Required endpoint-security report $($definition.Name) failed ($errorCode): $($_.Exception.Message)" 'ERROR'}
+            else{Write-SmartM365EvidenceLog "Optional endpoint-security report $($definition.Name) failed ($errorCode): $($_.Exception.Message)" 'WARNING'}
+        }
+    }
+    return [pscustomobject]@{Raw=$rawByReport;Quality=$quality;MissingRequired=$missingRequired}
+}
+
+if($SelfTest){Import-Module (Join-Path $PSScriptRoot '..\..\..\Common\SmartM365.EvidenceCollector.Common.psd1') -MinimumVersion '1.0.13' -Force;$test=ConvertTo-EndpointSecurityRow ([pscustomobject]@{DeviceId='d';RealTimeProtectionEnabled=$true}) DefenderAgents r n;if($test.DeviceId-ne'd'-or $test.RealTimeProtectionEnabled-ne$true){throw 'Endpoint security self-test failed.'};'PASS: Endpoint security offline contract';$smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; return}
 try{
     $tenantContextPath=Join-Path (Split-Path (Split-Path (Split-Path (Split-Path $PSScriptRoot -Parent) -Parent) -Parent) -Parent) 'Config\SmartM365-TenantContext.ps1';. $tenantContextPath
     $effectiveConfig=Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot
-    Import-Module (Join-Path $PSScriptRoot '..\..\..\Common\SmartM365.EvidenceCollector.Common.psd1') -MinimumVersion '1.0.11' -Force
+    Import-Module (Join-Path $PSScriptRoot '..\..\..\Common\SmartM365.EvidenceCollector.Common.psd1') -MinimumVersion '1.0.13' -Force
     $script:Runtime=Initialize-SmartM365EvidenceRuntime -ScriptPath $PSCommandPath -EffectiveConfig $effectiveConfig -DefaultOutputRelativePath 'Intune\EndpointSecurity' -OutputPath $OutputPath -LatestCsvFolderPath $LatestCsvFolderPath -ValidateOnly:$ValidateOnly -EnableConfiguredExternalActions:$EnableConfiguredExternalActions
     Start-SmartM365SourceReceipt -ScriptPath $PSCommandPath -SourceRootPath $script:Runtime.LatestCsvFolderPath -ReadOnly:($ValidateOnly -or $SelfTest)
     Connect-SmartM365EvidenceGraph $script:Runtime @('DeviceManagementManagedDevices.ReadWrite.All') -InteractiveAuth:$InteractiveAuth
     $reportDefinitions=@([pscustomobject]@{Name='DefenderAgents';Required=$true},[pscustomobject]@{Name='FirewallStatus';Required=$true},[pscustomobject]@{Name='FirewallUnhealthyStatus';Required=$false})
-    $rawByReport=@{};$quality=[System.Collections.Generic.List[object]]::new();$requiredFailure=$false
-    foreach($definition in $reportDefinitions){
-        try{$rawByReport[$definition.Name]=@(Invoke-SmartM365EvidenceExportReport -ReportName $definition.Name -ApiVersion v1.0 -TimeoutSeconds $ExportTimeoutSeconds -MaxItems $MaxItems);$quality.Add([pscustomobject][ordered]@{RunId=$script:Runtime.RunId;CollectedAtUtc=$script:Runtime.CollectedAtUtc;SourceScriptVersion=$ScriptVersion;ReportName=$definition.Name;Status='Collected';RowCount=$rawByReport[$definition.Name].Count;Required=$definition.Required;RequiredPermission='DeviceManagementManagedDevices.ReadWrite.All';ErrorCode='';ErrorMessage=''})}
-        catch{$status=Get-SmartM365EvidenceStatusCode $_;$quality.Add([pscustomobject][ordered]@{RunId=$script:Runtime.RunId;CollectedAtUtc=$script:Runtime.CollectedAtUtc;SourceScriptVersion=$ScriptVersion;ReportName=$definition.Name;Status='Failed';RowCount=0;Required=$definition.Required;RequiredPermission='DeviceManagementManagedDevices.ReadWrite.All';ErrorCode=if($status){"HTTP$status"}else{'ExportFailed'};ErrorMessage=$_.Exception.Message});if($definition.Required){$requiredFailure=$true}}
+    # The exportJobs creation meets HTTP 503 windows of 10-15 minutes early in the morning: it is retried for
+    # ExportCreateRetryBudgetSeconds (backoff with jitter, Retry-After honoured, Graph SDK retry off).
+    $exportOptions=@{
+        ApiVersion='v1.0';TimeoutSeconds=$ExportTimeoutSeconds;MaxItems=$MaxItems
+        CreateRetryBudgetSeconds=Get-EndpointSecurityExportSetting $script:Runtime.Config 'ExportCreateRetryBudgetSeconds' 1080 60 7200
+        ProgressLogSeconds=Get-EndpointSecurityExportSetting $script:Runtime.Config 'ExportProgressLogSeconds' 90 0 3600
     }
+    $stallSeconds=Get-EndpointSecurityExportSetting $script:Runtime.Config 'ExportStallSeconds' 600 0 7200
+    $exportOptions.StallSeconds=if($stallSeconds-lt $ExportTimeoutSeconds){$stallSeconds}else{0}
+    $reportSet=Invoke-EndpointSecurityReportSet -Definitions $reportDefinitions -ExportOptions $exportOptions -RunId $script:Runtime.RunId -CollectedAtUtc $script:Runtime.CollectedAtUtc
+    $rawByReport=$reportSet.Raw;$quality=$reportSet.Quality;$missingRequired=$reportSet.MissingRequired
+    $requiredFailure=$missingRequired.Count-gt 0
     if($ValidateOnly){$quality|Format-Table ReportName,Status,RowCount,Required;if($requiredFailure){throw 'One or more required endpoint-security reports failed validation.'};$smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; return}
     Export-SmartM365EvidenceDataset $script:Runtime 'Intune_EndpointSecurity_DataQuality' @($quality) @('RunId','CollectedAtUtc','SourceScriptVersion','ReportName','Status','RowCount','Required','RequiredPermission','ErrorCode','ErrorMessage') -NoWeeklyHistory|Out-Null
-    if($requiredFailure){throw 'Required DefenderAgents or FirewallStatus evidence was unavailable; canonical business CSV files were not replaced.'}
+    if($requiredFailure){throw "Required endpoint-security report(s) unavailable: $($missingRequired -join ', '); canonical business CSV files were not replaced."}
     $isPartial=@($quality|Where-Object Status -eq 'Failed').Count-gt 0
     $defender=@($rawByReport.DefenderAgents|ForEach-Object{ConvertTo-EndpointSecurityRow $_ DefenderAgents $script:Runtime.RunId $script:Runtime.CollectedAtUtc $isPartial})
     $firewall=@($rawByReport.FirewallStatus|ForEach-Object{ConvertTo-EndpointSecurityRow $_ FirewallStatus $script:Runtime.RunId $script:Runtime.CollectedAtUtc $isPartial})

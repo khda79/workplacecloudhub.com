@@ -2,12 +2,12 @@
 .SYNOPSIS
 Runs offline contract tests for the three new Microsoft 365 security evidence collectors.
 .VERSION
-1.0.3
+1.0.4
 #>
 [CmdletBinding()]param()
 $ErrorActionPreference='Stop'
 # Collector functions call exported Core helpers (Graph error classification, export download), as in production.
-Import-Module (Join-Path (Split-Path $PSScriptRoot -Parent) 'Modules/SmartM365.Core/SmartM365.Core.psd1') -MinimumVersion '1.0.99' -Force -Global -WarningAction SilentlyContinue
+Import-Module (Join-Path (Split-Path $PSScriptRoot -Parent) 'Modules/SmartM365.Core/SmartM365.Core.psd1') -MinimumVersion '1.0.103' -Force -Global -WarningAction SilentlyContinue
 $scripts=@(
     'SmartInventory\M365Inventory\Security\SecureScore\SmartM365-SecureScore-Inventory.ps1',
     'SmartInventory\M365Inventory\Security\AuthenticationMethods\SmartM365-AuthenticationMethodsRegistration-Inventory.ps1',
@@ -60,7 +60,7 @@ if($script:unavailableRetry-ne 2-or -not $unavailableResult.ok){throw 'Graph sym
 $retryHeaderSeconds=& (Get-Module SmartM365.EvidenceCollector.Common) {
     $exception=[System.Exception]::new('HTTP 503')
     $exception | Add-Member -NotePropertyName ResponseHeaders -NotePropertyValue @{'Retry-After'='17'}
-    try{throw $exception}catch{Get-SmartM365EvidenceRetryAfterSeconds $_}
+    try{throw $exception}catch{(Get-SmartM365RetryDelay -Attempt 1 -ErrorRecord $_).Seconds}
 }
 if($retryHeaderSeconds-ne 17){throw 'Graph Retry-After header parsing failed.'}
 $script:terminalAttempts=0
@@ -70,7 +70,7 @@ try{
         throw [System.Exception]::new($symbolicUnavailableMessage)
     } | Out-Null
     throw 'Expected terminal ServiceUnavailable failure.'
-}catch{if($_.Exception.Message-ne $symbolicUnavailableMessage){throw}}
+}catch{if($_.Exception.Message-notmatch'failed after 2 attempt\(s\) .*\(HTTP 503\)\. Last error: '-or $_.Exception.InnerException.Message-ne $symbolicUnavailableMessage){throw}}
 if($script:terminalAttempts-ne 2){throw 'Graph ServiceUnavailable retries were not bounded.'}
 $accessDenied=$false
 try{Invoke-SmartM365EvidenceGraphRequest -Uri 'https://example.invalid/denied' -NoSleep -Invoker {throw [System.Exception]::new('HTTP 403 forbidden')}|Out-Null}catch{$accessDenied=$true}

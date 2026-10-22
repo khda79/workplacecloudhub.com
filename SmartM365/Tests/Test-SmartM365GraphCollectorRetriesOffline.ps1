@@ -5,7 +5,7 @@ Offline checks of the collector Graph retries and of the Intune export download:
 408/429/5xx, timeouts and connection resets are retried, and a pre-signed export URL is downloaded
 without an Authorization header, its real error logged without the URL signature.
 .VERSION
-1.0.1
+1.0.2
 .NOTES
 Collector functions are loaded from the AST with recorded stand-ins for Graph and storage. No tenant,
 Graph, storage, mail or synchronized data access.
@@ -18,9 +18,9 @@ param()
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
-$core = Import-Module (Join-Path $root 'Modules/SmartM365.Core/SmartM365.Core.psd1') -MinimumVersion '1.0.99' -Force -PassThru -Global
+$core = Import-Module (Join-Path $root 'Modules/SmartM365.Core/SmartM365.Core.psd1') -MinimumVersion '1.0.103' -Force -PassThru -Global
 # Endpoint Analytics and Autopatch import Core with -Prefix Core: their functions call the prefixed names.
-Import-Module (Join-Path $root 'Modules/SmartM365.Core/SmartM365.Core.psd1') -MinimumVersion '1.0.99' -Prefix Core -Global -WarningAction SilentlyContinue
+Import-Module (Join-Path $root 'Modules/SmartM365.Core/SmartM365.Core.psd1') -MinimumVersion '1.0.103' -Prefix Core -Global -WarningAction SilentlyContinue
 $script:checks = 0
 function Check { param([bool]$Condition, [string]$Message) if (-not $Condition) { throw $Message }; $script:checks++ }
 function New-HttpFailure([int]$Status, [string]$RetryAfter) {
@@ -104,13 +104,15 @@ try {
     Check (-not $r.Saved -and @($r.Calls).Count -eq 4 -and $r.Error -match 'failed after 4 attempt\(s\)\. Status=403' -and $r.Error -notmatch 'SECRETSIGNATURE') "A persistent 403 is not reported clearly: $($r.Error)"
     # Transient storage errors and timeouts are retried with progressive waits; Retry-After is honoured.
     $r = Invoke-Download @((New-HttpFailure 503 '7'), (New-Timeout), 'ok')
-    Check ($r.Saved -and $r.Sleeps -eq '7,20' -and @($r.Calls | Where-Object { -not $_.TimeoutSec }).Count -eq 0) "Transient download errors were not retried within a time limit: $($r.Sleeps)"
+    # Second wait: exponential backoff 10*2^1 with equal jitter, so 10 to 20 seconds.
+    $waits = @($r.Sleeps -split ',' | ForEach-Object { [int]$_ })
+    Check ($r.Saved -and $waits.Count -eq 2 -and $waits[0] -eq 7 -and $waits[1] -ge 10 -and $waits[1] -le 20 -and @($r.Calls | Where-Object { -not $_.TimeoutSec }).Count -eq 0) "Transient download errors were not retried within a time limit: $($r.Sleeps)"
     # A 401 is not a lag: immediate failure.
     $r = Invoke-Download @((New-HttpFailure 401))
     Check (-not $r.Saved -and @($r.Calls).Count -eq 1 -and $r.Error -match 'Status=401') 'A 401 on the export download was retried.'
 
     # ---- EvidenceCollector (ManagedApps, Configurations, EnrollmentFailures...) ----
-    $evidence = Import-Module (Join-Path $root 'SmartInventory/Common/SmartM365.EvidenceCollector.Common.psd1') -MinimumVersion '1.0.12' -Force -PassThru
+    $evidence = Import-Module (Join-Path $root 'SmartInventory/Common/SmartM365.EvidenceCollector.Common.psd1') -MinimumVersion '1.0.13' -Force -PassThru
     $invoke = { param($answers) & $evidence { param($answers) $script:n = 0; $script:q = [Collections.Generic.Queue[object]]::new(); foreach ($a in $answers) { $script:q.Enqueue($a) }
         $result = [pscustomobject]@{ Value = $null; Error = ''; Calls = 0 }
         try { $result.Value = Invoke-SmartM365EvidenceGraphRequest -Uri 'https://graph.microsoft.com/v1.0/x' -MaxRetryCount 4 -NoSleep -Invoker { $script:n++; $a = $script:q.Dequeue(); if ($a -is [Exception]) { throw $a }; $a } } catch { $result.Error = $_.Exception.Message }

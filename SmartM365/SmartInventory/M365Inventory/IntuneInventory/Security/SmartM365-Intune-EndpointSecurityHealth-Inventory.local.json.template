@@ -7,6 +7,9 @@
   "Thumbprint": "__USE_GLOBAL__",
   "EnableTeamsNotifications": "__USE_GLOBAL__",
   "EnableSharePointUpload": "__USE_GLOBAL__",
-  "ScriptCsvLogFolderPath": "{{DataAllRootPath}}\\Intune\\EndpointSecurity"
+  "ScriptCsvLogFolderPath": "{{DataAllRootPath}}\\Intune\\EndpointSecurity",
+  "ExportCreateRetryBudgetSeconds": 1080,
+  "ExportProgressLogSeconds": 90,
+  "ExportStallSeconds": 600
 }
 

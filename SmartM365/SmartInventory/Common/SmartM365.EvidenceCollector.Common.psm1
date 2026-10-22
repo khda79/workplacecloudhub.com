@@ -139,34 +139,35 @@ function Get-SmartM365EvidenceStatusCode {
     return 0
 }
 
-function Get-SmartM365EvidenceRetryAfterSeconds {
-    param([Parameter(Mandatory)]$ErrorRecord)
-    $exception = $ErrorRecord.Exception
-    $response = Get-SmartM365EvidenceProperty $exception @('Response') $null
-    $headerSets = @(
-        (Get-SmartM365EvidenceProperty $exception @('ResponseHeaders') $null),
-        (Get-SmartM365EvidenceProperty $response @('Headers') $null)
-    )
-    foreach ($headers in $headerSets) {
-        if ($null -eq $headers) { continue }
-        $retryAfter = Get-SmartM365EvidenceProperty $headers @('Retry-After','RetryAfter') $null
-        if ($null -eq $retryAfter) { continue }
-        $delta = Get-SmartM365EvidenceProperty $retryAfter @('Delta') $null
-        if ($null -ne $delta) { return [Math]::Max(0,[int][Math]::Ceiling($delta.TotalSeconds)) }
-        $date = Get-SmartM365EvidenceProperty $retryAfter @('Date') $null
-        if ($null -ne $date) { return [Math]::Max(0,[int][Math]::Ceiling(($date - [DateTimeOffset]::UtcNow).TotalSeconds)) }
-        $raw = [string]@($retryAfter)[0]
-        $seconds = 0
-        if ([int]::TryParse($raw,[ref]$seconds)) { return [Math]::Max(0,$seconds) }
-        $retryDate = [DateTimeOffset]::MinValue
-        if ([DateTimeOffset]::TryParse($raw,[ref]$retryDate)) { return [Math]::Max(0,[int][Math]::Ceiling(($retryDate - [DateTimeOffset]::UtcNow).TotalSeconds)) }
-    }
-    return 0
+# Clock seam: offline tests replace it to drive retry budgets and export deadlines without waiting.
+function Get-SmartM365EvidenceUtcNow { [datetime]::UtcNow }
+
+# The Graph SDK retries 429/503/504 by itself (MaxRetry 3) before Invoke-MgGraphRequest throws: stacked under
+# this module's retries that made up to 4 requests per attempt and hid Retry-After ("Too many retries
+# performed"). Budgeted export calls run with the SDK retry off so that this module is the only retry level,
+# and the previous value is restored afterwards for the Get-Mg* cmdlets of the same process.
+# Set-MgRequestContext drops the cached SDK HttpClient, so the value applies from the next request.
+function Disable-SmartM365EvidenceSdkRetry {
+    if (-not (Get-Command Set-MgRequestContext -ErrorAction SilentlyContinue) -or -not (Get-Command Get-MgRequestContext -ErrorAction SilentlyContinue)) { return $null }
+    $previous = [int](Get-MgRequestContext).MaxRetry
+    Set-MgRequestContext -MaxRetry 0 | Out-Null
+    return $previous
+}
+
+function Restore-SmartM365EvidenceSdkRetry {
+    param([AllowNull()]$Previous)
+    if ($null -ne $Previous) { Set-MgRequestContext -MaxRetry ([int]$Previous) | Out-Null }
 }
 
 function Invoke-SmartM365EvidenceGraphRequest {
-    param([ValidateSet('GET','POST')][string]$Method='GET',[Parameter(Mandatory)][string]$Uri,[AllowNull()][string]$Body,[int]$MaxRetryCount=6,[scriptblock]$Invoker,[switch]$NoSleep)
-    for ($attempt=1; $attempt -le $MaxRetryCount; $attempt++) {
+    # MaxRetryCount bounds the attempts; a RetryBudgetSeconds above 0 bounds the elapsed time instead.
+    param([ValidateSet('GET','POST')][string]$Method='GET',[Parameter(Mandatory)][string]$Uri,[AllowNull()][string]$Body,[int]$MaxRetryCount=6,[ValidateRange(0,86400)][int]$RetryBudgetSeconds=0,[string]$Operation='',[scriptblock]$Invoker,[switch]$NoSleep)
+    if ([string]::IsNullOrWhiteSpace($Operation)) {
+        $path = try { ([uri]$Uri).AbsolutePath } catch { '<invalid uri>' }
+        $Operation = "Graph $Method $path"
+    }
+    $started = Get-SmartM365EvidenceUtcNow
+    for ($attempt=1; ; $attempt++) {
         try {
             if ($Invoker) { return & $Invoker $Method $Uri $Body }
             $parameters = @{Method=$Method;Uri=$Uri;OutputType='PSObject';ErrorAction='Stop'}
@@ -177,12 +178,21 @@ function Invoke-SmartM365EvidenceGraphRequest {
             $status = Get-SmartM365EvidenceStatusCode $_
             # 401/403 never retried; 408/409/429/5xx, timeouts and connection resets retried.
             $retryable = $status -notin @(401,403) -and ($status -in @(408,409,429,500,502,503,504) -or ($status -eq 0 -and (Test-SmartM365GraphTransientError -ErrorRecord $_ -StatusCode $null)))
-            if (-not $retryable -or $attempt -eq $MaxRetryCount) { throw }
-            $backoffSeconds = [Math]::Min(120,[int](5*[Math]::Pow(2,$attempt-1)))
-            $retryAfterSeconds = Get-SmartM365EvidenceRetryAfterSeconds $_
-            $delaySeconds = if ($retryAfterSeconds -gt 0) { [Math]::Min(300,[Math]::Max($backoffSeconds,$retryAfterSeconds)) } else { $backoffSeconds }
-            if (-not $Invoker) { Write-SmartM365EvidenceLog "Graph request returned HTTP $status; retry $($attempt+1)/$MaxRetryCount after $delaySeconds seconds." }
-            if (-not $NoSleep) { Start-Sleep -Seconds $delaySeconds }
+            if (-not $retryable) { throw }
+            $statusText = if ($status) { "HTTP $status" } else { 'a transient error' }
+            $elapsed = [int][Math]::Floor(((Get-SmartM365EvidenceUtcNow) - $started).TotalSeconds)
+            $wait = Get-SmartM365RetryDelay -Attempt $attempt -ErrorRecord $_ -BaseSeconds 5 -MaximumSeconds 300
+            $exhausted = if ($RetryBudgetSeconds -gt 0) { $elapsed + $wait.Seconds -gt $RetryBudgetSeconds } else { $attempt -ge $MaxRetryCount }
+            if ($exhausted) {
+                $failure = [System.IO.IOException]::new(("{0} failed after {1} attempt(s) over {2}s ({3}). Last error: {4}" -f $Operation,$attempt,$elapsed,$statusText,$_.Exception.Message), $_.Exception)
+                if ($status) { $failure.Data['StatusCode'] = $status }
+                $failure.Data['Attempts'] = $attempt
+                throw $failure
+            }
+            $limit = if ($RetryBudgetSeconds -gt 0) { "budget ${RetryBudgetSeconds}s" } else { "attempt limit $MaxRetryCount" }
+            # INFO as before: a retry that recovers must not turn a successful run into CompletedWithWarnings.
+            if (-not $Invoker) { Write-SmartM365EvidenceLog ("{0} returned {1} on attempt {2}; retrying in {3}s ({4}; elapsed {5}s, {6})." -f $Operation,$statusText,$attempt,$wait.Seconds,$wait.Source,$elapsed,$limit) }
+            if (-not $NoSleep) { Start-Sleep -Seconds $wait.Seconds }
         }
     }
 }
@@ -214,7 +224,11 @@ function Invoke-SmartM365EvidenceExportReport {
         [ValidateSet('v1.0','beta')][string]$ApiVersion='v1.0',
         [int]$TimeoutSeconds=600,
         [int]$PollSeconds=5,
-        [int]$MaxItems=0
+        [int]$MaxItems=0,
+        [ValidateRange(0,86400)][int]$CreateRetryBudgetSeconds=0,
+        [ValidateRange(0,86400)][int]$ProgressLogSeconds=90,
+        # A job still notStarted/inProgress after this many seconds is abandoned and created again, once; 0 = never.
+        [ValidateRange(0,86400)][int]$StallSeconds=0
     )
     $base = 'https://graph.microsoft.com'
     $uri = "$base/$ApiVersion/deviceManagement/reports/exportJobs"
@@ -222,26 +236,57 @@ function Invoke-SmartM365EvidenceExportReport {
     if (-not [string]::IsNullOrWhiteSpace($Filter)) { $requestBody.filter=$Filter }
     if (@($Select).Count -gt 0) { $requestBody.select=@($Select) }
     $body = $requestBody | ConvertTo-Json -Depth 8 -Compress
-    $job = Invoke-SmartM365EvidenceGraphRequest -Method POST -Uri $uri -Body $body
-    $jobId = [string](Get-SmartM365EvidenceProperty $job @('id'))
-    if ([string]::IsNullOrWhiteSpace($jobId)) { throw "No export job id returned for $ReportName." }
-    $deadline = [datetime]::UtcNow.AddSeconds($TimeoutSeconds)
-    do {
-        $job = Invoke-SmartM365EvidenceGraphRequest -Uri "$uri/$([uri]::EscapeDataString($jobId))"
-        $status = [string](Get-SmartM365EvidenceProperty $job @('status'))
-        if ($status -ieq 'completed') { break }
-        if ($status -ieq 'failed') { throw "Intune export job failed for $ReportName." }
-        Start-Sleep -Seconds $PollSeconds
-    } while ([datetime]::UtcNow -lt $deadline)
-    if ($status -ine 'completed') { throw "Intune export job timed out for $ReportName." }
-    $downloadUrl = [string](Get-SmartM365EvidenceProperty $job @('url'))
-    # The download URL can lag the completed status by a few seconds.
-    for ($urlPoll = 1; [string]::IsNullOrWhiteSpace($downloadUrl) -and $urlPoll -le 3; $urlPoll++) {
-        Write-SmartM365EvidenceLog "Completed export job for $ReportName has no URL yet; polling again ($urlPoll/3)." 'WARNING'
-        Start-Sleep -Seconds $PollSeconds
-        $job = Invoke-SmartM365EvidenceGraphRequest -Uri "$uri/$([uri]::EscapeDataString($jobId))"
+    # A CreateRetryBudgetSeconds above 0 makes this module the only retry level (SDK retry off) and gives
+    # the job creation that much time; status polls then get up to 300 seconds each.
+    $budgeted = $CreateRetryBudgetSeconds -gt 0
+    $createRetry = if ($budgeted) { @{RetryBudgetSeconds=$CreateRetryBudgetSeconds} } else { @{} }
+    $pollRetry = if ($budgeted) { @{RetryBudgetSeconds=[Math]::Min(300,$CreateRetryBudgetSeconds)} } else { @{} }
+    $sdkRetry = if ($budgeted) { Disable-SmartM365EvidenceSdkRetry } else { $null }
+    try {
+        $deadline = $null
+        $recreated = $false
+        :job while ($true) {
+            $job = Invoke-SmartM365EvidenceGraphRequest -Method POST -Uri $uri -Body $body -Operation "Intune export job creation ($ReportName)" @createRetry
+            $jobId = [string](Get-SmartM365EvidenceProperty $job @('id'))
+            if ([string]::IsNullOrWhiteSpace($jobId)) { throw "No export job id returned for $ReportName." }
+            $jobStarted = Get-SmartM365EvidenceUtcNow
+            if ($null -eq $deadline) { $reportStarted = $jobStarted; $deadline = $jobStarted.AddSeconds($TimeoutSeconds) }
+            Write-SmartM365EvidenceLog "Intune export job $jobId created for $ReportName."
+            $nextProgress = $jobStarted.AddSeconds($ProgressLogSeconds)
+            while ($true) {
+                $job = Invoke-SmartM365EvidenceGraphRequest -Uri "$uri/$([uri]::EscapeDataString($jobId))" -Operation "Intune export job status ($ReportName)" @pollRetry
+                $status = [string](Get-SmartM365EvidenceProperty $job @('status'))
+                if ($status -ieq 'completed') { break job }
+                if ($status -ieq 'failed') { throw "Intune export job $jobId failed for $ReportName." }
+                $now = Get-SmartM365EvidenceUtcNow
+                $jobElapsed = [int][Math]::Floor(($now - $jobStarted).TotalSeconds)
+                $totalElapsed = [int][Math]::Floor(($now - $reportStarted).TotalSeconds)
+                if ($ProgressLogSeconds -gt 0 -and $now -ge $nextProgress) {
+                    Write-SmartM365EvidenceLog "Intune export job $jobId for $ReportName is '$status' after ${jobElapsed}s (report elapsed ${totalElapsed}s of ${TimeoutSeconds}s)."
+                    $nextProgress = $now.AddSeconds($ProgressLogSeconds)
+                }
+                if ($now -ge $deadline) {
+                    $note = if ($recreated) { ' The job had already been created again once.' } else { '' }
+                    throw "Intune export job $jobId for $ReportName timed out after ${totalElapsed}s (limit ${TimeoutSeconds}s); last status '$status'.$note"
+                }
+                if ($StallSeconds -gt 0 -and -not $recreated -and $jobElapsed -ge $StallSeconds -and ($status -in @('notStarted','inProgress') -or [string]::IsNullOrWhiteSpace($status))) {
+                    Write-SmartM365EvidenceLog "Intune export job $jobId for $ReportName is still '$status' after ${jobElapsed}s; abandoning it and creating the job again (once)." 'WARNING'
+                    $recreated = $true
+                    continue job
+                }
+                Start-Sleep -Seconds $PollSeconds
+            }
+        }
         $downloadUrl = [string](Get-SmartM365EvidenceProperty $job @('url'))
+        # The download URL can lag the completed status by a few seconds.
+        for ($urlPoll = 1; [string]::IsNullOrWhiteSpace($downloadUrl) -and $urlPoll -le 3; $urlPoll++) {
+            Write-SmartM365EvidenceLog "Completed export job for $ReportName has no URL yet; polling again ($urlPoll/3)." 'WARNING'
+            Start-Sleep -Seconds $PollSeconds
+            $job = Invoke-SmartM365EvidenceGraphRequest -Uri "$uri/$([uri]::EscapeDataString($jobId))" -Operation "Intune export job status ($ReportName)" @pollRetry
+            $downloadUrl = [string](Get-SmartM365EvidenceProperty $job @('url'))
+        }
     }
+    finally { if ($null -ne $sdkRetry) { Restore-SmartM365EvidenceSdkRetry $sdkRetry } }
     if ([string]::IsNullOrWhiteSpace($downloadUrl)) { throw "Completed export job returned no URL for $ReportName." }
     $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) "SmartM365-Evidence-$([guid]::NewGuid().Guid)"
     try {
