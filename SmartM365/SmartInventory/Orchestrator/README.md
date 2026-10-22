@@ -1,6 +1,6 @@
 # SmartM365 Inventory Orchestrator
 
-`SmartM365-Inventory-Orchestrator.ps1` (v1.5.53) is a PowerShell 7 resident scheduler that runs the SmartInventory scripts (ActiveDirectoryInventory, ExchangeInventory, M365Inventory, IntuneInventory, ...) unattended.
+`SmartM365-Inventory-Orchestrator.ps1` (v1.5.55) is a PowerShell 7 resident scheduler that runs the SmartInventory scripts (ActiveDirectoryInventory, ExchangeInventory, M365Inventory, IntuneInventory, ...) unattended.
 
 ## Demo mode
 
@@ -442,7 +442,7 @@ For an explicit user-scoped install:
 
 - One resident instance per tenant, bounded lifetime (`MaxLifetimeHours`, default 24), exit code 0 on recycle.
 - 60-second tick: reload the manifest if it changed on disk, supervise running children, compute due occurrences, launch jobs, send the optional daily summary, rewrite the heartbeat, save state.
-- Every job runs in its own detached child process (`-NoProfile -ExecutionPolicy Bypass`), which also isolates module/assembly conflicts between scripts (Graph SDK vs MSAL). Before launch, optional Authenticode validation can audit or enforce signatures on the job script and SmartM365 modules. The engine is `pwsh` by default; jobs with `PowerShellEdition = "WindowsPowerShell"` run in `powershell.exe` 5.1 instead (required by the Exchange on-premises scripts).
+- Every job runs in its own detached child process (`-NoProfile -ExecutionPolicy Bypass`), which also isolates module/assembly conflicts between scripts (Graph SDK vs MSAL). Before launch, optional Authenticode validation can audit or enforce signatures on the job script and SmartM365 modules. The engine is `pwsh` by default; jobs with `PowerShellEdition = "WindowsPowerShell"` run in `powershell.exe` 5.1 instead (required by the Exchange on-premises scripts). Since v1.5.55 the 5.1 child first repairs the `PSModulePath` it inherits from the PowerShell 7 orchestrator: Windows PowerShell modules (`$PSHOME\Modules`) come first and the `PowerShell\Modules`, `PowerShell\7*\Modules` and `Documents\PowerShell\Modules` folders are removed (other entries, such as `Documents\WindowsPowerShell\Modules` and `Program Files\WindowsPowerShell\Modules`, are kept). Otherwise the PowerShell 7 build of `Microsoft.PowerShell.Security` is found first and `Get-Acl` or `Get-AuthenticodeSignature` fail in 5.1. The prefix is visible in the job log (`Child command`); the orchestrator process and `pwsh` jobs keep their environment. Offline test: `Tests/Test-SmartM365OrchestratorWindowsPowerShellModulePathOffline.ps1`.
 
 ### Distributed assignment, capabilities and election
 
