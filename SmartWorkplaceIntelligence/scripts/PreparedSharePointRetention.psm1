@@ -2,7 +2,7 @@
 .SYNOPSIS
     Qualified, coupled server/SharePoint batch retention. Preview is the default.
 .VERSION
-    1.3.0
+    1.4.0
 #>
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -289,18 +289,36 @@ function Get-RetentionSnapshot([string]$OutputRoot,$Transport,[string]$Scratch,[
     }
     [pscustomobject]@{Verification=$Verification;Target=$target;LocalPointer=$localPointer;LocalPointerSHA256=$localHash;RemotePointer=$cloudPointer.Value;RemotePointerSHA256=$cloudPointer.SHA256;Batches=$batches.ToArray();ArchivedLinks=$archives.ToArray()}
 }
-function Get-RetentionMinimumBatches($Snapshot,$Validation) {
+function Get-RetentionIntegerSetting($Settings,[string]$Name,[int]$Default,[int]$Minimum,[int]$Maximum,[int[]]$Allowed=@()) {
+    $value=Get-RetentionValue $Settings $Name $null
+    if($null -eq $value){return $Default}
+    if(($value -isnot [int] -and $value -isnot [long]) -or (($value -lt $Minimum -or $value -gt $Maximum) -and $value -notin $Allowed)){
+        throw "PreparedRetention.$Name must be an integer in $Minimum..$Maximum$(if($Allowed.Count){' or '+($Allowed -join ', ')})."
+    }
+    [int]$value
+}
+function Get-RetentionPolicy($Settings) {
+    # Optional keys with code defaults: adding them to the template would rewrite the private configuration.
+    $sharePoint=Get-RetentionIntegerSetting $Settings 'SharePointKeepBatches' 2 2 50
+    $server=Get-RetentionIntegerSetting $Settings 'ServerKeepBatches' 0 2 100000 @(0)
+    if($server -ne 0 -and $server -lt $sharePoint){throw 'PreparedRetention.ServerKeepBatches must be 0 (keep the full server history) or at least SharePointKeepBatches.'}
+    $removals=Get-RetentionIntegerSetting $Settings 'MaxSharePointRemovalsPerRun' 1 1 50
+    [pscustomobject]@{SharePointKeepBatches=$sharePoint;ServerKeepBatches=$server;MaxSharePointRemovalsPerRun=$removals}
+}
+function Get-RetentionMinimumBatches($Snapshot,$Validation,$Policy) {
     foreach($storage in 'Local','SharePoint'){
+        # A full server history still verifies its newest copies before every SharePoint removal.
+        $keep=if($storage -ceq 'SharePoint' -or $Policy.ServerKeepBatches -eq 0){$Policy.SharePointKeepBatches}else{$Policy.ServerKeepBatches}
         # IDs carry the validated UTC creation timestamp; file modification times are irrelevant.
         $qualified=@($Snapshot.Batches | Where-Object {$_.Storage -ceq $storage -and $Validation[$storage+'|'+$_.BatchId].Valid} |
             Sort-Object @{Expression={$_.BatchId.Substring(0,19)};Descending=$true},BatchId)
         $ids=@()
         if($qualified.Count){
-            $boundary=$qualified[[Math]::Min(1,$qualified.Count-1)].BatchId.Substring(0,19)
-            # Keep every tie at the second timestamp instead of arbitrarily dropping a valid copy.
+            $boundary=$qualified[[Math]::Min($keep-1,$qualified.Count-1)].BatchId.Substring(0,19)
+            # Keep every tie at the boundary timestamp instead of arbitrarily dropping a valid copy.
             $ids=@($qualified | Where-Object {[string]::CompareOrdinal($_.BatchId.Substring(0,19),$boundary) -ge 0} | ForEach-Object BatchId)
         }
-        [pscustomobject]@{Storage=$storage;BatchIds=$ids}
+        [pscustomobject]@{Storage=$storage;Keep=$keep;BatchIds=$ids}
     }
 }
 function New-RetentionPlan($Snapshot,$Registry,[string]$RegistryHash,[string]$ConfigurationHash,[string]$OutputRoot,$Settings,[string]$TenantKey) {
@@ -314,11 +332,17 @@ function New-RetentionPlan($Snapshot,$Registry,[string]$RegistryHash,[string]$Co
     catch {$blocked.Add($_.Exception.Message)}
     try {Assert-RetentionTarget $Snapshot.Target $Settings.Target;Assert-RetentionQualification $Settings $Snapshot.Target $RegistryHash $OutputRoot}
     catch {$blocked.Add($_.Exception.Message)}
-    $rows=[Collections.Generic.List[object]]::new();$valid=@{}
+    try {$policy=Get-RetentionPolicy $Settings}
+    catch {$blocked.Add($_.Exception.Message);$policy=[pscustomobject]@{SharePointKeepBatches=2;ServerKeepBatches=0;MaxSharePointRemovalsPerRun=1}}
+    $rows=[Collections.Generic.List[object]]::new();$valid=@{};$localProtected=@{}
     foreach($b in @($Snapshot.Batches)){$valid[$b.Storage+'|'+$b.BatchId]=Test-RetentionBatch $b $TenantKey}
-    $minimum=@(Get-RetentionMinimumBatches $Snapshot $valid)
+    $minimum=@(Get-RetentionMinimumBatches $Snapshot $valid $policy)
     foreach($store in $minimum){
-        foreach($id in $store.BatchIds){Protect $id ("Newest valid $($store.Storage) batches; minimum two; $($Snapshot.Verification)")}
+        foreach($id in $store.BatchIds){
+            $reason="Newest valid $($store.Storage) batches; keep $($store.Keep); $($Snapshot.Verification)"
+            # A SharePoint selection protects both copies; a longer server history protects only the server copy.
+            if($store.Storage -ceq 'SharePoint'){Protect $id $reason}elseif(-not $localProtected.ContainsKey($id)){$localProtected[$id]=$reason}
+        }
         if($store.BatchIds.Count -lt 2){$blocked.Add("Fewer than two complete validated $($store.Storage) batches; retention minimum cannot be established.")}
     }
     foreach($storage in 'Local','SharePoint'){
@@ -340,6 +364,8 @@ function New-RetentionPlan($Snapshot,$Registry,[string]$RegistryHash,[string]$Co
         foreach($b in @($byId.Values | Sort-Object BatchId)){
             $check=$valid[$storage+'|'+$b.BatchId];$state='Blocked';$reason=$check.Reason
             if($protected.ContainsKey($b.BatchId)){$state='Protected';$reason=$protected[$b.BatchId].ToArray() -join '; '}
+            elseif($storage -ceq 'Local' -and $localProtected.ContainsKey($b.BatchId)){$state='Protected';$reason=$localProtected[$b.BatchId]}
+            elseif($storage -ceq 'Local' -and $policy.ServerKeepBatches -eq 0){$state='Retained';$reason='Server share keeps its full batch history (ServerKeepBatches=0).'}
             elseif($check.Valid -and $chain.Contains($b.BatchId)){$state=if($Snapshot.Verification -ceq 'Metadata'){'Candidate'}else{'Eligible'}}
             elseif($check.Valid){$reason='No verified published-chain membership.'}
             $logicalBytes=0L;foreach($file in $b.Files){$logicalBytes+=[long]$file.Bytes}
@@ -357,7 +383,15 @@ function New-RetentionPlan($Snapshot,$Registry,[string]$RegistryHash,[string]$Co
             if($protected.ContainsKey($group.Name)){$blocked.Add("Protected batch copies disagree: $($group.Name)")}
         }
     }
-    [pscustomobject]@{SchemaVersion=3;Verification=$Snapshot.Verification;ApplySupported=($Snapshot.Verification -ceq 'Full');PolicyVersion=$script:RetentionPolicyVersion;PlanId=[guid]::NewGuid().ToString('N');CreatedUtc=[datetime]::UtcNow.ToString('O');TenantKey=$TenantKey;OutputRoot=$OutputRoot;RegistrySHA256=$RegistryHash;ConfigurationSHA256=$ConfigurationHash;ModuleSHA256=$script:RetentionModuleSHA256;SnapshotSHA256=(Get-RetentionObjectHash (Get-RetentionSnapshotEvidence $Snapshot));Target=$Snapshot.Target;LocalPointer=$Snapshot.LocalPointer;RemotePointer=$Snapshot.RemotePointer;ProtectedBatchIds=@($protected.Keys | Sort-Object);MinimumRetainedBatches=$minimum;BlockedReasons=$blocked.ToArray();Rows=$rows.ToArray()}
+    # At most the configured number of SharePoint folders per publication, oldest first.
+    $cloudActions=@($rows.ToArray() | Where-Object {$_.Storage -ceq 'SharePoint' -and $_.State -cin @('Eligible','Candidate')} | Sort-Object BatchId)
+    foreach($row in @($cloudActions | Select-Object -Skip $policy.MaxSharePointRemovalsPerRun)){
+        $row.State='Deferred';$row.Reason="Per-run SharePoint removal limit ($($policy.MaxSharePointRemovalsPerRun)) reached; a later publication retries it."
+        foreach($localRow in @($rows.ToArray() | Where-Object {$_.Storage -ceq 'Local' -and $_.BatchId -ceq $row.BatchId -and $_.State -cin @('Eligible','Candidate')})){
+            $localRow.State='Deferred';$localRow.Reason='Server copy waits for its deferred SharePoint retirement.'
+        }
+    }
+    [pscustomobject]@{SchemaVersion=3;RetentionPolicy=$policy;Verification=$Snapshot.Verification;ApplySupported=($Snapshot.Verification -ceq 'Full');PolicyVersion=$script:RetentionPolicyVersion;PlanId=[guid]::NewGuid().ToString('N');CreatedUtc=[datetime]::UtcNow.ToString('O');TenantKey=$TenantKey;OutputRoot=$OutputRoot;RegistrySHA256=$RegistryHash;ConfigurationSHA256=$ConfigurationHash;ModuleSHA256=$script:RetentionModuleSHA256;SnapshotSHA256=(Get-RetentionObjectHash (Get-RetentionSnapshotEvidence $Snapshot));Target=$Snapshot.Target;LocalPointer=$Snapshot.LocalPointer;RemotePointer=$Snapshot.RemotePointer;ProtectedBatchIds=@($protected.Keys | Sort-Object);MinimumRetainedBatches=$minimum;BlockedReasons=$blocked.ToArray();Rows=$rows.ToArray()}
 }
 function Assert-RetentionPlan($Plan,$Fresh,[int]$MaxAgeHours) {
     foreach($candidate in $Plan,$Fresh){if($candidate.SchemaVersion -ne 3 -or $candidate.Verification -cne 'Full' -or $candidate.ApplySupported -isnot [bool] -or -not $candidate.ApplySupported){throw 'Application requires a current Full verification plan; metadata previews cannot authorize removal.'}}
@@ -386,9 +420,15 @@ function Save-RetentionReceipts($Row,[string]$OutputRoot,$Transport,[string]$Scr
         if((& $Transport.Archive $path $relative) -ne $true){throw 'Remote receipt archive/read-back failed.'}
     }
 }
-function Test-RetentionPriorRemoteConfirmation($Row,[string]$WorkRoot,[string]$RegistryHash,[string]$ConfigurationHash) {
-    $history=Get-RetentionChild $WorkRoot 'retention'
-    foreach($dir in Get-ChildItem -LiteralPath $history -Directory -Force | Sort-Object Name){
+function Get-RetentionJournalFolder([string[]]$JournalRoots) {
+    # The shared root is authoritative; the legacy per-account work root is still read so old incidents keep blocking.
+    foreach($root in @($JournalRoots | Select-Object -Unique)){
+        $history=Get-RetentionChild $root 'retention'
+        if(Test-Path -LiteralPath $history){Get-ChildItem -LiteralPath $history -Directory -Force | Sort-Object Name}
+    }
+}
+function Test-RetentionPriorRemoteConfirmation($Row,[string[]]$JournalRoots,[string]$RegistryHash,[string]$ConfigurationHash) {
+    foreach($dir in @(Get-RetentionJournalFolder $JournalRoots)){
         $path=Get-RetentionChild $dir.FullName 'journal.json.txt'
         if(-not (Test-Path -LiteralPath $path)){continue}
         try {
@@ -404,13 +444,12 @@ function Test-RetentionPriorRemoteConfirmation($Row,[string]$WorkRoot,[string]$R
     }
     $false
 }
-function Get-RetentionUnresolvedIncidents([string]$WorkRoot) {
-    $history=Get-RetentionChild $WorkRoot 'retention'
-    foreach($dir in Get-ChildItem -LiteralPath $history -Directory -Force){
+function Get-RetentionUnresolvedIncidents([string[]]$JournalRoots) {
+    foreach($dir in @(Get-RetentionJournalFolder $JournalRoots)){
         $path=Get-RetentionChild $dir.FullName 'journal.json.txt'
         if(-not(Test-Path -LiteralPath $path)){continue}
         $prior=Get-Content -LiteralPath $path -Raw | ConvertFrom-Json -Depth 70
-        if($prior.SchemaVersion -ne 1){throw 'Unknown retention journal schema requires reconciliation.'}
+        if($prior.SchemaVersion -ne 1){throw "Unknown retention journal schema requires reconciliation: $path"}
         foreach($entry in @($prior.Events)){
             if($entry.State -cin @('Uncertain','RemovalRequested')){[string]$entry.BatchId}
         }
@@ -452,7 +491,8 @@ function Assert-RetentionMinimumBeforeRemoval($Row,$Snapshot,$Minimum,$Transport
     foreach($storage in 'Local','SharePoint'){
         $sets=@($Minimum | Where-Object Storage -CEQ $storage)
         if($sets.Count -ne 1 -or @($sets[0].BatchIds | Select-Object -Unique).Count -lt 2){throw "Retention minimum missing for $storage."}
-        if($Row.BatchId -cin $sets[0].BatchIds){throw 'A newest retained batch cannot be retired.'}
+        # SharePoint selections bind both copies; a server-only selection binds only the server copy.
+        if($Row.BatchId -cin $sets[0].BatchIds -and ($storage -ceq 'SharePoint' -or $Row.Storage -ceq $storage)){throw "A newest retained $storage batch cannot be retired: $($Row.BatchId)."}
         foreach($id in $sets[0].BatchIds){
             $copies=@($Snapshot.Batches | Where-Object {$_.Storage -ceq $storage -and $_.BatchId -ceq $id})
             if($copies.Count -ne 1){throw "Retention minimum copy is ambiguous or absent: $storage/$id"}
@@ -462,6 +502,59 @@ function Assert-RetentionMinimumBeforeRemoval($Row,$Snapshot,$Minimum,$Transport
             catch {throw "Retention minimum changed or unavailable: $storage/$id. $($_.Exception.Message)"}
         }
     }
+}
+function Assert-RetentionOutsideData([string]$Path,[string]$Data,[string]$Label) {
+    if($Path -eq $Data -or $Path.StartsWith($Data+'\',[StringComparison]::OrdinalIgnoreCase) -or $Data.StartsWith($Path+'\',[StringComparison]::OrdinalIgnoreCase)){throw "$Label must be outside DATA and its ancestors."}
+}
+function Resolve-RetentionJournalRoot($Settings,[string]$Data,[string]$WorkRoot,[bool]$Apply) {
+    $configured=[string](Get-RetentionValue $Settings 'JournalRootPath' '')
+    if([string]::IsNullOrWhiteSpace($configured)){
+        if($Apply){throw 'PreparedRetention.JournalRootPath is required for Apply and Auto: set an absolute shared folder outside DATA so every server and account writes and reads the same retention journals.'}
+        return $WorkRoot
+    }
+    if(-not [IO.Path]::IsPathFullyQualified($configured)){throw "PreparedRetention.JournalRootPath must be an absolute path: '$configured'."}
+    $path=[IO.Path]::GetFullPath($configured).TrimEnd('\','/')
+    Assert-RetentionOutsideData $path $Data 'PreparedRetention.JournalRootPath'
+    Assert-RetentionPath $path
+    New-Item -ItemType Directory -Path $path -Force | Out-Null
+    Assert-RetentionPath $path
+    $path
+}
+function Get-RetentionRemovalObservation($Row,$Target,$Transport) {
+    # Read-only observation after an unconfirmed DELETE; any read failure keeps the outcome unknown.
+    try {
+        if((& $Transport.IsAbsent $Row.Id) -eq $true){return 'Absent'}
+        $items=@(Get-RetentionRemoteChildren $Transport $Target.BatchesId | Where-Object Id -CEQ $Row.Id)
+        if($items.Count -eq 1 -and $items[0].Name -ceq $Row.BatchId -and $items[0].ETag -ceq $Row.ETag){return 'Unchanged'}
+    } catch {Write-Verbose "Removal outcome observation failed: $($_.Exception.Message)"}
+    'Unknown'
+}
+function Invoke-RetentionSharePointRemoval($Row,$JournalEvent,$Transport,$Target,$Request) {
+    $result=& $Transport.Recycle $Request
+    $outcome=[string](Get-RetentionValue $result 'Outcome' '')
+    $JournalEvent.HttpStatus=Get-RetentionValue $result 'HttpStatus'
+    $detail=[string](Get-RetentionValue $result 'Error' '')
+    if($outcome -ceq 'Recycled'){
+        if((& $Transport.IsAbsent $Row.Id) -ne $true){throw "SharePoint batch $($Row.BatchId): Graph returned HTTP 204 but the folder is still visible; outcome uncertain. Check DATA-POWERBI/batches and the site recycle bin, then reconcile this journal."}
+        $JournalEvent.Outcome='Recycled';$JournalEvent.State='Recycled';return
+    }
+    $observed=Get-RetentionRemovalObservation $Row $Target $Transport
+    $what=switch($outcome){
+        'NotFound' {'Graph returned HTTP 404'}
+        'PreconditionFailed' {'Graph returned HTTP 412: the folder eTag changed after review'}
+        default {if($detail){$detail}else{"unexpected transport outcome '$outcome'"}}
+    }
+    if($observed -ceq 'Absent'){
+        $JournalEvent.Outcome=if($outcome -ceq 'NotFound'){'AlreadyAbsent'}else{'AbsentAfterError'}
+        if($JournalEvent.Outcome -ceq 'AbsentAfterError'){Write-Warning "SharePoint batch $($Row.BatchId) is absent after an unconfirmed removal ($what); recorded as recycled."}
+        $JournalEvent.State='Recycled';return
+    }
+    # A folder still listed with its reviewed eTag was not removed, unless the request may still be in flight.
+    if($observed -ceq 'Unchanged' -and (Get-RetentionValue $result 'MayHaveReachedService' $true) -ne $true){
+        $JournalEvent.Outcome='NotRemoved';$JournalEvent.State='NotRemoved'
+        throw "SharePoint batch $($Row.BatchId) was not removed ($what). The folder is still present with its reviewed eTag; nothing was deleted and a later publication plans it again."
+    }
+    throw "SharePoint batch $($Row.BatchId) removal outcome is uncertain ($what; folder observation: $observed). Check DATA-POWERBI/batches and the site recycle bin, then reconcile this journal before Auto continues."
 }
 function Invoke-PreparedBatchRetention {
     [CmdletBinding()]
@@ -475,9 +568,9 @@ function Invoke-PreparedBatchRetention {
     if((Split-Path $root -Leaf) -cne 'DATA-POWERBI'){throw 'Retention requires the exact server DATA-POWERBI root.'}
     $work=[IO.Path]::GetFullPath($WorkRoot).TrimEnd('\','/');Assert-RetentionPath $work
     $data=Split-Path $root -Parent
-    if($work -eq $data -or $work.StartsWith($data+'\',[StringComparison]::OrdinalIgnoreCase) -or $data.StartsWith($work+'\',[StringComparison]::OrdinalIgnoreCase)){throw 'Retention work must be outside DATA and its ancestors.'}
+    Assert-RetentionOutsideData $work $data 'Retention work'
     New-Item -ItemType Directory -Path $work -Force | Out-Null
-    $lock=$null;$config=$null;$registry=$null;$planLock=$null;$run=$null;$journal=$null;$journalPath=$null
+    $lock=$null;$config=$null;$registry=$null;$planLock=$null;$run=$null;$journal=$null;$journalPath=$null;$scratch=$null
     try {
         $lock=[IO.File]::Open((Join-Path $root '.publication.lock'),'OpenOrCreate','ReadWrite','None')
         Assert-RetentionLock $lock
@@ -495,17 +588,23 @@ function Invoke-PreparedBatchRetention {
             if((Get-RetentionValue $approved 'SchemaVersion') -ne 3 -or (Get-RetentionValue $approved 'Verification') -cne 'Full' -or
                (Get-RetentionValue $approved 'ApplySupported') -isnot [bool] -or -not $approved.ApplySupported){throw 'Application requires a Full verification plan; metadata previews cannot authorize removal.'}
         }
-        $run=Get-RetentionChild $work ('retention/'+[guid]::NewGuid().ToString('N'))
+        # Plans and journals live under the shared journal root; read-back temporaries stay in local work.
+        $journalRoot=Resolve-RetentionJournalRoot $settings $data $work $apply
+        $journalRoots=@($journalRoot,$work)
+        $runId=[guid]::NewGuid().ToString('N')
+        $run=Get-RetentionChild $journalRoot ('retention/'+$runId)
         New-Item -ItemType Directory -Path $run -Force | Out-Null
+        $scratch=Get-RetentionChild $work ('retention-scratch/'+$runId)
+        New-Item -ItemType Directory -Path $scratch -Force | Out-Null
         $journalPath=Join-Path $run 'journal.json.txt'
-        $journal=[ordered]@{SchemaVersion=1;Status='Planning';StartedUtc=[datetime]::UtcNow.ToString('O');PlanPath='';PlanSHA256='';Events=[Collections.Generic.List[object]]::new();Error=$null}
+        $journal=[ordered]@{SchemaVersion=1;Status='Planning';StartedUtc=[datetime]::UtcNow.ToString('O');Machine=[Environment]::MachineName;ModuleSHA256=$script:RetentionModuleSHA256;PlanPath='';PlanSHA256='';Events=[Collections.Generic.List[object]]::new();Error=$null}
         Write-RetentionDocument $journalPath $journal
         # A missing registry is never synthesized from the neutral template.
         try {$registry=Read-RetentionLockedDocument $ConsumersPath;$registryValue=$registry.Value;$registryHash=$registry.SHA256}
         catch {$registryValue=[pscustomobject]@{};$registryHash='MissingOrInvalid'}
-        $snapshot=Get-RetentionSnapshot $root $Transport $run $TenantKey -Verification $effectiveVerification
+        $snapshot=Get-RetentionSnapshot $root $Transport $scratch $TenantKey -Verification $effectiveVerification
         $fresh=New-RetentionPlan $snapshot $registryValue $registryHash $config.SHA256 $root $settings $TenantKey
-        foreach($incident in @(Get-RetentionUnresolvedIncidents $work)){
+        foreach($incident in @(Get-RetentionUnresolvedIncidents $journalRoots)){
             foreach($row in @($fresh.Rows | Where-Object {$_.BatchId -ceq $incident -and $_.State -cin @('Eligible','Candidate')})){
                 $row.State='Blocked';$row.Reason='Unresolved prior removal intent/outcome; operator reconciliation required.'
             }
@@ -526,7 +625,7 @@ function Invoke-PreparedBatchRetention {
         $journal.Status='Applying';Write-RetentionDocument $journalPath $journal
         # Fresh state was read under the common lock. Recheck cloud target/access/pointers before each action.
         foreach($row in @($plan.Rows | Where-Object State -CEQ 'Eligible' | Sort-Object @{Expression={if($_.Storage -ceq 'SharePoint'){0}else{1}}},BatchId)){
-            $event=[ordered]@{Storage=$row.Storage;BatchId=$row.BatchId;Id=$row.Id;State='Checking';Utc=[datetime]::UtcNow.ToString('O');Error=$null}
+            $event=[ordered]@{Storage=$row.Storage;BatchId=$row.BatchId;Id=$row.Id;State='Checking';Utc=[datetime]::UtcNow.ToString('O');RequestUri=$null;HttpStatus=$null;Outcome=$null;Error=$null}
             $journal.Events.Add($event);Write-RetentionDocument $journalPath $journal
             $technicalHandles=[Collections.Generic.List[IO.FileStream]]::new()
             try {
@@ -535,7 +634,7 @@ function Invoke-PreparedBatchRetention {
                 Assert-RetentionQualification $settings $liveTarget $registryHash $root
                 if((Get-FileHash -LiteralPath (Join-Path $root 'current.json.txt')).Hash -cne $snapshot.LocalPointerSHA256){throw 'Local pointer changed during application.'}
                 $pointerItems=@(Get-RetentionRemoteChildren $Transport $liveTarget.RootId | Where-Object Name -CEQ 'current.json.txt')
-                if($pointerItems.Count -ne 1 -or (Read-RetentionRemoteFile $Transport $pointerItems[0] $run).SHA256 -cne $snapshot.RemotePointerSHA256){throw 'Remote pointer changed during application.'}
+                if($pointerItems.Count -ne 1 -or (Read-RetentionRemoteFile $Transport $pointerItems[0] $scratch).SHA256 -cne $snapshot.RemotePointerSHA256){throw 'Remote pointer changed during application.'}
                 if($row.BatchId -cin @($plan.ProtectedBatchIds)){throw 'Protected batch cannot be retired.'}
                 # Also guard local sidecars before cloud retirement, retaining handles through removal.
                 foreach($localRow in @($plan.Rows | Where-Object {$_.Storage -ceq 'Local' -and $_.BatchId -ceq $row.BatchId})){
@@ -549,7 +648,7 @@ function Invoke-PreparedBatchRetention {
                     $remoteRow=@($plan.Rows | Where-Object { $_.Storage -ceq 'SharePoint' -and $_.BatchId -ceq $row.BatchId })
                     $confirmed=@($journal.Events | Where-Object {$_.Storage -ceq 'SharePoint' -and $_.BatchId -ceq $row.BatchId -and $_.State -ceq 'Recycled'})
                     $priorConfirmed=$false
-                    if($remoteRow.Count -eq 0){$priorConfirmed=Test-RetentionPriorRemoteConfirmation $row $work $registryHash $config.SHA256}
+                    if($remoteRow.Count -eq 0){$priorConfirmed=Test-RetentionPriorRemoteConfirmation $row $journalRoots $registryHash $config.SHA256}
                     if(-not ($remoteRow.Count -eq 1 -and $confirmed.Count -eq 1) -and -not $priorConfirmed){throw 'Local retirement requires a fingerprint-matched confirmed remote retirement journal.'}
                     $path=Get-RetentionChild $root ('batches/'+$row.BatchId)
                     if($path -cne $row.Id){throw 'Local batch identity changed.'}
@@ -567,21 +666,28 @@ function Invoke-PreparedBatchRetention {
                     foreach($file in $actual){
                         $expected=@($row.Files | Where-Object Name -CEQ $file.Name)
                         if($file.Kind -cne 'File' -or $expected.Count -ne 1 -or $file.Id -cne $expected[0].Id -or $file.ETag -cne $expected[0].ETag -or
-                           (Read-RetentionRemoteFile $Transport $file $run).SHA256 -cne $expected[0].SHA256){throw 'Remote payload changed before retirement.'}
+                           (Read-RetentionRemoteFile $Transport $file $scratch).SHA256 -cne $expected[0].SHA256){throw 'Remote payload changed before retirement.'}
                     }
                 }
-                Save-RetentionReceipts $row $root $Transport $run
+                Save-RetentionReceipts $row $root $Transport $scratch
                 $event.State='Archived';Write-RetentionDocument $journalPath $journal
-                Assert-RetentionBeforeRemoval $row $snapshot $settings $Transport $registryHash $root $run
+                Assert-RetentionBeforeRemoval $row $snapshot $settings $Transport $registryHash $root $scratch
                 # Recheck all retained payloads on BOTH stores, including during partial-run recovery.
-                Assert-RetentionMinimumBeforeRemoval $row $snapshot $fresh.MinimumRetainedBatches $Transport $root $run
+                Assert-RetentionMinimumBeforeRemoval $row $snapshot $fresh.MinimumRetainedBatches $Transport $root $scratch
                 Assert-RetentionLock $lock
+                $removalRequest=$null
+                if($row.Storage -ceq 'SharePoint'){
+                    # Build and validate the exact request before recording intent: a refused URI is Blocked, never Uncertain.
+                    $prepare=Get-RetentionValue $Transport 'PrepareRecycle'
+                    if($prepare -isnot [scriptblock]){throw 'Retention transport lacks PrepareRecycle; SharePoint removal refused before any request.'}
+                    $removalRequest=& $prepare $row.Id $row.ETag
+                    if($null -eq $removalRequest -or [string]::IsNullOrWhiteSpace([string]$removalRequest.Uri)){throw "SharePoint batch $($row.BatchId): the transport returned no validated removal URI."}
+                    $event.RequestUri=[string]$removalRequest.Uri
+                }
                 # Persist intent BEFORE the irreversible request; uncertain results are never blindly replayed.
                 $event.State='RemovalRequested';Write-RetentionDocument $journalPath $journal
                 if($row.Storage -ceq 'SharePoint'){
-                    if((& $Transport.Recycle $row.Id $row.ETag) -cne 'Recycled'){throw 'Remote recycle was not confirmed.'}
-                    if((& $Transport.IsAbsent $row.Id) -ne $true){throw 'Remote recycle absence was not confirmed.'}
-                    $event.State='Recycled'
+                    Invoke-RetentionSharePointRemoval $row $event $Transport $liveTarget $removalRequest
                 } else {
                     # All paths were resolved and verified against the approved inventory above.
                     Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction Stop
@@ -590,7 +696,7 @@ function Invoke-PreparedBatchRetention {
                 Write-RetentionDocument $journalPath $journal
             } catch {
                 $event.Error=$_.Exception.Message
-                $event.State=if($event.State -ceq 'RemovalRequested'){'Uncertain'}else{'Blocked'}
+                $event.State=switch -CaseSensitive ($event.State){'RemovalRequested' {'Uncertain'};'NotRemoved' {'NotRemoved'};default {'Blocked'}}
                 Write-RetentionDocument $journalPath $journal
                 throw
             } finally {foreach($handle in $technicalHandles){$handle.Dispose()}}
@@ -602,9 +708,44 @@ function Invoke-PreparedBatchRetention {
         throw
     } finally {
         if($planLock){$planLock.Stream.Dispose()};if($registry){$registry.Stream.Dispose()};if($config){$config.Stream.Dispose()};if($lock){$lock.Dispose()}
+        # Only this run's own read-back folder is removed; journals and plans are kept.
+        if($scratch -and (Test-Path -LiteralPath $scratch)){Assert-RetentionPath $scratch;Remove-Item -LiteralPath $scratch -Recurse -Force -ErrorAction SilentlyContinue}
     }
 }
 
+function Assert-RetentionGraphDeleteSupport {
+    $command=Get-Command Invoke-MgGraphRequest -ErrorAction SilentlyContinue
+    if(-not $command){throw 'Invoke-MgGraphRequest is unavailable; SharePoint batch removal refused before any request.'}
+    foreach($name in 'Method','Uri','Headers','OutputType','SkipHttpErrorCheck','StatusCodeVariable'){
+        if(-not $command.Parameters.ContainsKey($name)){
+            $source=if($command.Version){"$($command.Source) $($command.Version)"}else{[string]$command.Source}
+            throw "Invoke-MgGraphRequest ($source) lacks -$name; update Microsoft.Graph.Authentication. SharePoint batch removal refused before any request."
+        }
+    }
+}
+function Invoke-RetentionGraphDelete([string]$Uri,[string]$ETag) {
+    Assert-RetentionGraphDeleteSupport
+    # Never Set-MgRequestContext here: SDK 2.30 then rebuilds its client from a session environment that an
+    # earlier absolute-URI request left without an authority, and the certificate credential fails with Invalid URI.
+    # The status comes from -StatusCodeVariable, never from a disposable HttpResponseMessage.
+    $deleteStatus=$null
+    try {
+        $null=Invoke-MgGraphRequest -Method DELETE -Uri $Uri -Headers @{'If-Match'=$ETag} -OutputType PSObject -SkipHttpErrorCheck -StatusCodeVariable 'deleteStatus' -ErrorAction Stop
+    } catch {
+        $types=[Collections.Generic.List[string]]::new();$exception=$_.Exception
+        for($depth=0;$depth -lt 8 -and $exception;$depth++){$types.Add($exception.GetType().FullName);$exception=$exception.InnerException}
+        # Connection, timeout and cancellation failures may follow an accepted request; their outcome stays uncertain.
+        $inFlight=@($types | Where-Object {$_ -in @('System.Net.Http.HttpRequestException','System.Threading.Tasks.TaskCanceledException','System.OperationCanceledException','System.TimeoutException','System.IO.IOException','System.Net.Sockets.SocketException','System.Net.WebException')}).Count -gt 0
+        $code=if($null -ne $deleteStatus){[int]$deleteStatus}else{$null}
+        return [pscustomobject]@{Outcome='RequestFailed';HttpStatus=$code;MayHaveReachedService=$inFlight;Error=('Graph DELETE failed with {0}: {1}' -f ($types -join ' <- '),$_.Exception.Message)}
+    }
+    if($null -eq $deleteStatus){return [pscustomobject]@{Outcome='HttpError';HttpStatus=$null;MayHaveReachedService=$true;Error='Graph DELETE completed without a status code.'}}
+    $code=[int]$deleteStatus
+    $outcome=switch($code){204 {'Recycled'};404 {'NotFound'};412 {'PreconditionFailed'};default {'HttpError'}}
+    # A refusal (4xx, or 503 throttling) changed nothing; other 2xx (202 = asynchronous) and 5xx may have acted.
+    $mayHaveActed=$outcome -ceq 'HttpError' -and -not (($code -ge 400 -and $code -le 499) -or $code -eq 503)
+    [pscustomobject]@{Outcome=$outcome;HttpStatus=$code;MayHaveReachedService=$mayHaveActed;Error=$(if($outcome -ceq 'HttpError'){"Graph DELETE returned HTTP $code; only 204 confirms removal."}else{$null})}
+}
 function New-PreparedRetentionGraphTransport {
     [CmdletBinding()]
     param([Parameter(Mandatory)]$Connection,[Parameter(Mandatory)][string]$CloudRoot,
@@ -615,6 +756,8 @@ function New-PreparedRetentionGraphTransport {
     $objectHash=${function:Get-RetentionObjectHash}
     $assertPath=${function:Assert-RetentionPath}
     $httpStatus=${function:Get-RetentionHttpStatus}
+    $assertDeleteSupport=${function:Assert-RetentionGraphDeleteSupport}
+    $graphDelete=${function:Invoke-RetentionGraphDelete}
     # Reuse the public app-only connector. No private Core functions or cached tenant identity.
     if(-not (Connect-SmartM365GraphAppOnly -AppId $Connection.AppId -TenantId $Connection.TenantId -Thumbprint $Connection.Thumbprint -Purpose 'Prepared batch retention')){throw 'Retention Graph connection failed.'}
     $context=Get-MgContext
@@ -625,20 +768,11 @@ function New-PreparedRetentionGraphTransport {
         $ctx=Get-MgContext
         if($ctx.TenantId -ine $Connection.TenantId -or $ctx.ClientId -ine $Connection.AppId -or $ctx.AuthType -cne 'AppOnly'){throw 'Graph context changed during retention.'}
         if(-not $Uri.StartsWith('https://graph.microsoft.com/v1.0/',[StringComparison]::Ordinal)){throw 'Unexpected Graph endpoint or pagination link.'}
+        # The only mutation is the validated recycle request below.
+        if($Method -cne 'GET'){throw "Retention reads use GET only; $Method refused."}
         $arguments=@{Method=$Method;Uri=$Uri;OutputType='PSObject';ErrorAction='Stop'}
         if($Headers){$arguments.Headers=$Headers}
-        if($Method -ceq 'DELETE'){
-            # Disable SDK retries too, then restore the request context used by other callers.
-            $priorRetry=(Get-MgRequestContext).MaxRetry
-            $response=$null
-            try {
-                Set-MgRequestContext -MaxRetry 0 | Out-Null
-                if((Get-MgRequestContext).MaxRetry -ne 0){throw 'Cannot disable Graph mutation retries.'}
-                $arguments.OutputType='HttpResponseMessage'
-                $response=Invoke-MgGraphRequest @arguments
-                if($null -eq $response -or [int]$response.StatusCode -ne 204){throw 'Recycle requires an explicit HTTP 204 response.'}
-            } finally {if($response){$response.Dispose()};Set-MgRequestContext -MaxRetry $priorRetry | Out-Null}
-        } else {Invoke-MgGraphRequest @arguments}
+        Invoke-MgGraphRequest @arguments
     }.GetNewClosure()
     $pages={param([string]$Uri)
         $seen=[Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
@@ -703,16 +837,30 @@ function New-PreparedRetentionGraphTransport {
             (Get-Item -LiteralPath $LocalPath).Length -eq (Get-Item -LiteralPath $temp).Length -and (Get-FileHash -LiteralPath $LocalPath).Hash -ceq (Get-FileHash -LiteralPath $temp).Hash
         } finally {if(Test-Path -LiteralPath $temp){& $assertPath $temp;[IO.File]::Delete($temp)}}
     }.GetNewClosure()
-    $recycle={param([string]$Id,[string]$ETag)
-        if([string]::IsNullOrWhiteSpace($ETag)){throw 'Recycle requires the reviewed folder eTag.'}
-        $null=& $request 'DELETE' ($driveBase+'/items/'+[uri]::EscapeDataString($Id)) @{'If-Match'=$ETag}
-        'Recycled'
+    $prepareRecycle={param([string]$Id,[string]$ETag)
+        # Runs before RemovalRequested is journaled: any refusal here means no request was attempted.
+        & $assertDeleteSupport
+        if($Id -cnotmatch '^[A-Za-z0-9!._-]{1,400}$'){throw "Recycle refused before any request: SharePoint item ID '$Id' is empty or contains unexpected characters."}
+        if([string]::IsNullOrWhiteSpace($ETag) -or $ETag.Length -gt 512 -or $ETag -match '[\r\n]'){throw "Recycle refused before any request: the reviewed folder eTag of item '$Id' is missing or malformed."}
+        $text=$driveBase+'/items/'+[uri]::EscapeDataString($Id)
+        $parsed=$null
+        if(-not [uri]::TryCreate($text,[UriKind]::Absolute,[ref]$parsed) -or $parsed.Scheme -cne 'https' -or $parsed.Host -cne 'graph.microsoft.com' -or
+           $parsed.Query -or $parsed.Fragment -or $parsed.AbsolutePath -cnotmatch '^/v1\.0/drives/[^/]+/items/[^/]+$'){throw "Recycle refused before any request: invalid Graph item URI '$text'."}
+        [pscustomobject]@{Id=$Id;ETag=$ETag;Uri=$text}
+    }.GetNewClosure()
+    $recycle={param($Request)
+        if($null -eq $Request -or [string]$Request.Uri -cne ($driveBase+'/items/'+[uri]::EscapeDataString([string]$Request.Id)) -or [string]::IsNullOrWhiteSpace([string]$Request.ETag)){
+            throw 'Recycle requires the validated request prepared before RemovalRequested.'
+        }
+        $ctx=Get-MgContext
+        if($ctx.TenantId -ine $Connection.TenantId -or $ctx.ClientId -ine $Connection.AppId -or $ctx.AuthType -cne 'AppOnly'){throw 'Graph context changed before recycle; no request was sent.'}
+        & $graphDelete ([string]$Request.Uri) ([string]$Request.ETag)
     }.GetNewClosure()
     $absent={param([string]$Id)
         try {$null=& $request 'GET' ($driveBase+'/items/'+[uri]::EscapeDataString($Id)) $null;return $false}
         catch {if((& $httpStatus $_) -eq 404){return $true};throw}
     }.GetNewClosure()
-    @{Describe=$describe;List=$list;Download=$download;Archive=$archive;Recycle=$recycle;IsAbsent=$absent}
+    @{Describe=$describe;List=$list;Download=$download;Archive=$archive;PrepareRecycle=$prepareRecycle;Recycle=$recycle;IsAbsent=$absent}
 }
 
 Export-ModuleMember -Function Invoke-PreparedBatchRetention,New-PreparedRetentionGraphTransport

@@ -263,6 +263,13 @@ configuration and registry deployment are operator actions, separate from Git.
 | `PlanMaxAgeHours` | 24 by default; accepted range 1..168 hours. This expires plans, never protections. |
 | `Target` | Exact `TenantId`, `ClientId`, `SiteId`, `DriveId`, `RootId`, `BatchesId`, library-relative `RootPath` ending in `DATA-POWERBI`. No customer defaults. |
 | `Qualification` | Initially `Unqualified`. Requires the evidence below; a boolean alone cannot authorize retirement. |
+| `JournalRootPath` | Optional key, not templated. Required for Apply and Auto: an absolute shared folder outside `DATA` and its ancestors (for example a sibling of `DATA` on the server share). Plans and journals are written under `<JournalRootPath>/retention/<run-id>/`. Without it, Preview falls back to the local work root. |
+| `SharePointKeepBatches` | Optional, code default 2 (current and previous validated batch), range 2..50. |
+| `ServerKeepBatches` | Optional, code default 0 = keep the full server history; otherwise 2..100000 and at least `SharePointKeepBatches`. |
+| `MaxSharePointRemovalsPerRun` | Optional, code default 1 (at most one SharePoint batch folder per publication), range 1..50. |
+
+The last four keys are deliberately absent from the template (see the fingerprint note below): add them to the
+private configuration only when a value other than the code default is needed, then requalify.
 
 Copy the neutral consumer template from
 `SmartWorkplaceIntelligence/config/templates/PreparedBatchConsumers.json.template`
@@ -342,15 +349,23 @@ a code default (documented, not templated) while retention runs in Auto.
 
 After qualification, set `Mode=Auto` privately. Each successful publication then
 creates and fingerprints a fresh plan, verifies it under the common lock and
-applies its eligible actions without manual per-plan approval. Current/previous
-from both pointers, all consumers, and a minimum of the two newest complete valid
-batches on EACH store form one additive protection set. A batch selected by either
-store is protected on both; an absent SharePoint predecessor therefore cannot
-leave only the current cloud copy protected. The minimum uses the validated UTC
-timestamp in the batch ID, never file modification times. All ties at the second
-timestamp are retained. Incomplete, failed, schema-only or corrupt batches do not
-displace valid copies. Fewer than two valid copies on either store blocks all
-application. The plan exposes `MinimumRetainedBatches` per store.
+applies its eligible actions without manual per-plan approval. SharePoint keeps
+immutable batch folders and switches its root pointer; batches are never
+overwritten in place. Current/previous from both pointers, all consumers, and the
+`SharePointKeepBatches` newest complete valid SharePoint batches (default 2) are
+protected on BOTH stores; an absent SharePoint predecessor therefore cannot leave
+only the current cloud copy protected. Consumer pins can keep additional
+SharePoint folders. The server share keeps the long history: with the default
+`ServerKeepBatches=0` every server batch is reported `Retained` and never removed;
+with a positive value the newest `ServerKeepBatches` valid server batches are
+protected on the server only. At most `MaxSharePointRemovalsPerRun` SharePoint
+folders (default 1, oldest first) are retired per run; further candidates are
+`Deferred` to the next publication, together with their server copy. The
+selection uses the validated UTC timestamp in the batch ID, never file modification
+times. All ties at the boundary timestamp are retained. Incomplete, failed,
+schema-only or corrupt batches do not displace valid copies. Fewer than two valid
+copies on either store blocks all application. The plan exposes `RetentionPolicy`
+and `MinimumRetainedBatches` per store.
 
 Metadata Preview selects this minimum provisionally from receipts, file sets and
 sizes, without downloading payloads or claiming SHA256 verification. Apply/Auto
@@ -386,12 +401,49 @@ lock remains held during either inventory so its two pointers are coordinated.
 Installing or testing code never activates Auto. A module change invalidates its
 existing qualification fingerprint; qualify the deployed implementation again.
 
+Every change to `PreparedSharePointRetention.psm1` changes `ModuleSHA256`. Until
+the operator reruns the private qualification procedure against the deployed file,
+every run is blocked with `Registry or loaded retention implementation requires
+qualification`. Before returning to Auto after such a change: deploy (share Pull),
+keep `Mode=Preview`, set `JournalRootPath`, rerun the qualification procedure to
+record the new `ModuleSHA256`, review a Full Preview plan, perform one manual
+`-Mode Apply` of that plan and check its journal, and only then set `Mode=Auto`.
+
 Before each removal, the three receipts are archived under `retired/<batch-id>`
 on the server and SharePoint with byte/hash verification and remote read-back.
 Different existing receipts cause an error. Cloud removal uses Graph v1.0
 `DELETE /drives/{drive-id}/items/{item-id}` with `If-Match`; Microsoft documents
 this API as a recycle-bin operation, not permanent deletion. No purge endpoint,
-bypass-lock header or automatic restore operation is used. See
+bypass-lock header or automatic restore operation is used.
+
+The exact request is built and validated before `RemovalRequested` is journaled:
+item ID characters, folder eTag, absolute `https://graph.microsoft.com/v1.0/drives/{id}/items/{id}`
+URI without query or fragment, and the installed `Invoke-MgGraphRequest` must expose
+`-SkipHttpErrorCheck` and `-StatusCodeVariable`. A refusal is `Blocked`, with no
+request sent. The DELETE uses `-OutputType PSObject -SkipHttpErrorCheck
+-StatusCodeVariable`; it never reads an `HttpResponseMessage` and never calls
+`Set-MgRequestContext`. Outcomes, recorded with `RequestUri`, `HttpStatus` and
+`Outcome` in the journal event:
+
+| Result | Journal state |
+| --- | --- |
+| HTTP 204 and the folder is absent | `Recycled` |
+| HTTP 404 and the folder is absent | `Recycled`, `Outcome=AlreadyAbsent` |
+| HTTP 412 (eTag changed), other 4xx/503 refusal, or pre-send failure, with the folder still listed under its reviewed eTag | `NotRemoved`: nothing was deleted; a later publication plans it again |
+| Folder absent after an unconfirmed result | `Recycled`, `Outcome=AbsentAfterError`, with a warning |
+| HTTP 204 while the folder is still visible, other 2xx/5xx, timeout/connection failure, or unreadable state | `Uncertain`: operator reconciliation required |
+
+Incident 2026-10-22: the first Auto run failed with `Invoke-MgGraphRequest: Invalid URI`
+during the DELETE, before any request reached SharePoint (folder intact, journal
+`Uncertain`). Cause, read in the Microsoft.Graph.Authentication 2.30.0 source and
+reproduced offline with 2.30.0 by `Test-PreparedRetentionGraphTransport.ps1` (not
+re-run on the server itself): an absolute-URI request leaves the SDK session
+environment without an authority endpoint; the former `Set-MgRequestContext -MaxRetry 0`
+before the DELETE discarded the cached HTTP client, and rebuilding the certificate
+credential then raised `UriFormatException`. Both `Set-MgRequestContext` and
+`HttpResponseMessage` were removed from this path; the explicit outcome handling
+above applies whatever the cause. Other scripts that change the request context
+after a first Graph request in the same process can meet the same SDK behavior. See
 [Graph driveItem deletion](https://learn.microsoft.com/en-us/graph/api/driveitem-delete?view=graph-rest-1.0)
 and [folder eTag limitations](https://learn.microsoft.com/en-us/graph/api/resources/driveitem?view=graph-rest-1.0).
 Keep the existing `Sites.Selected` site write grant; permission/read-back failures
@@ -417,11 +469,29 @@ archive; remove them from the active `retention/` history only after that explic
 reconciliation, never merely to unblock Auto. Do not reuse an old plan after a partial application. Receipts, plans and
 journals have no automatic purge in this change; monitor their storage.
 
+Journals and plans are written under `JournalRootPath`, shared by every server and
+account that runs retention for the same DATA root; each journal records its writer
+`Machine`. Unresolved `Uncertain`/`RemovalRequested` events under that root AND under
+the local work root (`PreparedWorkRootPath`, or the account's temporary folder) block
+their batch. Read-back temporaries stay in a per-run folder of the local work root,
+removed at the end of the run. When moving to a shared root, keep or archive the
+earlier per-account journals; they are not migrated automatically.
+
 Run synthetic tests only against a dedicated scratch directory:
 `Test-PreparedSharePointRetention.ps1 -TestRoot <scratch>`.
 The suite uses file-backed fake SharePoint and synthetic tenants, including
 Preview, automatic/manual application, protections across stores, archived links,
-stale plans, unsafe targets, lock contention, archive errors and partial recovery.
+stale plans, unsafe targets, lock contention, archive errors and partial recovery,
+plus the retention counts, per-run limit, journal root and every DELETE outcome.
+`Test-PreparedRetentionGraphTransport.ps1` (PowerShell 7, no parameter) calls the
+installed `Invoke-MgGraphRequest` with the module's exact DELETE shape against a
+localhost listener and a synthetic token: 204/404/412/429/500 classification,
+`If-Match`, an invalid URI reported as a pre-send failure, and a refused connection
+kept uncertain. It prints `NOT RUN` (exit 3) without the SDK. Use
+`-GraphAuthenticationVersion 2.30.0` (or the server's version) to select an installed
+SDK; with 2.30.0 it also replays the incident: the former `Set-MgRequestContext`
+path fails with `Invalid URI` before sending, the current path sends the DELETE.
+Run it on the server too, since its SDK version can differ from a workstation's.
 Also run existing transfer, endpoint/unified transfer, metadata, configuration,
 capture/retention, publication and lifecycle-cleanup suites. Offline checks do not
 qualify server SMB coordination, SharePoint permissions/recovery or OneDrive

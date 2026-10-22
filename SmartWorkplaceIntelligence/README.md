@@ -44,7 +44,13 @@ activation of `Auto`, after server qualification, applies each newly generated
 and revalidated plan without a daily approval or another scheduled task.
 
 Both stores protect the current batch, its predecessor, and every batch in the
-qualified private consumer registry. An old protected batch does not stop the
+qualified private consumer registry. SharePoint keeps immutable batch folders
+behind its pointer: by default only the current and previous validated batches
+(plus consumer pins), retiring at most one folder per publication. The server
+share keeps its full history by default (`ServerKeepBatches=0`). Apply and Auto
+require a shared `JournalRootPath` for plans and journals. Every SharePoint
+removal is validated before its intent is journaled, and its HTTP outcome is
+recorded explicitly (`Recycled`, `NotRemoved` or `Uncertain`). An old protected batch does not stop the
 remaining chain traversal. Missing/incomplete historical metadata, unexpected
 content and unproven publication-chain membership remain blocked. There is no
 age-only policy, automatic expiry of consumer protections or PBIP discovery.

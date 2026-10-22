@@ -2,7 +2,7 @@
 .SYNOPSIS
     Synthetic retention regression tests. File-backed fake SharePoint; no tenant or network.
 .VERSION
-    1.3.0
+    1.4.0
 #>
 [CmdletBinding()]
 param([Parameter(Mandatory)][string]$TestRoot,[switch]$AdapterOnly)
@@ -43,8 +43,9 @@ function Fixture {
         @{ConsumerId='Other consumer';BatchId=$ids[0];Reason='Synthetic oldest pin';ReviewedUtc='2026-01-01T00:00:00Z'})})
     $target=[ordered]@{TenantId='synthetic-tenant';ClientId='synthetic-app';SiteId='synthetic-site';DriveId='synthetic-drive';RootId='root';BatchesId='batches';RootPath='Example/DATA/DATA-POWERBI';AccessEvidenceSHA256=('A'*64)}
     $q=[ordered]@{Status='Qualified';PolicyVersion='PreparedBatchRetention/v1';ReviewedBy='Synthetic operator';ReviewedUtc='2026-01-01T00:00:00Z';Coordination='SharedServerPublicationLock';ServerOutputRoot=$output;RegistrySHA256=(Get-FileHash $registry).Hash;ModuleSHA256=(Get-FileHash $modulePath).Hash;AccessEvidenceSHA256=('A'*64);WriterExclusionEvidence='Synthetic isolated file-backed transport, no other writers';ExclusiveCloudWritersConfirmed=$true;RecoverabilityConfirmed=$true}
-    Json $config @{PreparedRetention=@{Mode='Preview';PlanMaxAgeHours=24;Target=$target;Qualification=$q}}
-    $state=@{Remote=$remote;Target=$target;Events=[Collections.Generic.List[string]]::new();FailArchive=$false;FailArchiveAt=0;Archives=0;FailDownload=$false;FailPayloadDownload=$false;PayloadDownloads=0;ReceiptDownloads=0;FailRecycleAt=0;Recycles=0;Uncertain=$false;ChangeAfterArchive=$false;ChangePayloadAfterArchive=$false;Linked=$false;WrongParent=$false;Recycled=@{};Hook=$null;ArchiveHook=$null}
+    # Legacy-equivalent policy keeps older coverage; dedicated cases below exercise the code defaults.
+    Json $config @{PreparedRetention=@{Mode='Preview';PlanMaxAgeHours=24;JournalRootPath=$work;ServerKeepBatches=2;MaxSharePointRemovalsPerRun=10;Target=$target;Qualification=$q}}
+    $state=@{Remote=$remote;Target=$target;Events=[Collections.Generic.List[string]]::new();FailArchive=$false;FailArchiveAt=0;Archives=0;FailDownload=$false;FailPayloadDownload=$false;PayloadDownloads=0;ReceiptDownloads=0;FailRecycleAt=0;Recycles=0;Uncertain=$false;ChangeAfterArchive=$false;ChangePayloadAfterArchive=$false;Linked=$false;WrongParent=$false;Recycled=@{};Hook=$null;ArchiveHook=$null;Prepares=0;PrepareFailure=$null;RecycleResult=$null;RemoveOnResult=$false}
     $describe={if($state.Hook){& $state.Hook};[pscustomobject]$state.Target}.GetNewClosure()
     $list={param($parent)
         $folder=if($parent -eq 'root'){$state.Remote}else{Join-Path $state.Remote $parent}
@@ -72,19 +73,36 @@ function Fixture {
         if($state.ChangePayloadAfterArchive){Add-Content (Join-Path $state.Remote ('batches/'+$ids[1]+'/Example.csv')) 'changed'}
         (Get-FileHash $path).Hash -eq (Get-FileHash $destination).Hash
     }.GetNewClosure()
-    $recycle={param($id,$etag)
+    $prepare={param($id,$etag)
+        $state.Prepares++
+        if($state.PrepareFailure){throw $state.PrepareFailure}
+        [pscustomobject]@{Id=$id;ETag=$etag;Uri=('https://graph.microsoft.com/v1.0/drives/synthetic-drive/items/'+[uri]::EscapeDataString($id))}
+    }.GetNewClosure()
+    $recycle={param($request)
+        $id=$request.Id
         $state.Recycles++;$state.Events.Add('Recycle:'+$id)
         if($state.FailRecycleAt -and $state.Recycles -eq $state.FailRecycleAt){throw 'Synthetic recycle failure'}
         if($state.Uncertain){throw 'Synthetic timeout after request'}
+        $result=[pscustomobject]@{Outcome='Recycled';HttpStatus=204;MayHaveReachedService=$false;Error=$null}
+        if($state.RecycleResult){$result=[pscustomobject]$state.RecycleResult;if(-not $state.RemoveOnResult){return $result}}
         $source=Join-Path $state.Remote $id;$destination=Join-Path $root ('recycle/'+[IO.Path]::GetFileName($source))
         New-Item -ItemType Directory -Path (Split-Path $destination -Parent) -Force | Out-Null
         Move-Item -LiteralPath $source -Destination $destination
         $state.Recycled[$id]=$true
-        'Recycled'
+        $result
     }.GetNewClosure()
     $absent={param($id) -not(Test-Path -LiteralPath (Join-Path $state.Remote $id))}.GetNewClosure()
-    [pscustomobject]@{Root=$root;Output=$output;Remote=$remote;Work=$work;Config=$config;Registry=$registry;Ids=$ids;State=$state;Args=@{OutputRoot=$output;TenantKey='synthetic';ConfigurationPath=$config;ConsumersPath=$registry;WorkRoot=$work;Verification='Full';Transport=@{Describe=$describe;List=$list;Download=$download;Archive=$archive;Recycle=$recycle;IsAbsent=$absent}}}
+    [pscustomobject]@{Root=$root;Output=$output;Remote=$remote;Work=$work;Config=$config;Registry=$registry;Ids=$ids;State=$state;Args=@{OutputRoot=$output;TenantKey='synthetic';ConfigurationPath=$config;ConsumersPath=$registry;WorkRoot=$work;Verification='Full';Transport=@{Describe=$describe;List=$list;Download=$download;Archive=$archive;PrepareRecycle=$prepare;Recycle=$recycle;IsAbsent=$absent}}}
 }
+function SetPolicy($f,[hashtable]$Values){
+    $c=Get-Content $f.Config -Raw | ConvertFrom-Json -Depth 70
+    foreach($key in $Values.Keys){
+        $c.PreparedRetention.PSObject.Properties.Remove($key)
+        if($null -ne $Values[$key]){$c.PreparedRetention | Add-Member $key $Values[$key]}
+    }
+    Json $f.Config $c
+}
+function LastJournal([string]$Root){@(Get-ChildItem (Join-Path $Root 'retention') -Recurse -Filter journal.json.txt | Sort-Object LastWriteTimeUtc)[-1].FullName | ForEach-Object {Get-Content $_ -Raw | ConvertFrom-Json -Depth 70}}
 function SetAuto($f){$c=Get-Content $f.Config -Raw | ConvertFrom-Json -Depth 70;$c.PreparedRetention.Mode='Auto';Json $f.Config $c}
 function Requalify($f){$c=Get-Content $f.Config -Raw | ConvertFrom-Json -Depth 70;$c.PreparedRetention.Qualification.RegistrySHA256=(Get-FileHash $f.Registry).Hash;Json $f.Config $c}
 function AdvanceFixture($f,[int]$Day){
@@ -505,6 +523,80 @@ try {
     $r=Invoke-PreparedBatchRetention @a
     Check ($r.Status -ceq 'Blocked' -and $f.State.Recycles -eq 0) 'An older loaded implementation was allowed under a different disk qualification'
 } finally {& $module {param($hash) $script:RetentionModuleSHA256=$hash} $loadedHash}
+# Code defaults: SharePoint keeps current+previous, the server keeps its full history, one SharePoint removal per publication.
+$f=Fixture;SetAuto $f;SetPolicy $f @{ServerKeepBatches=$null;MaxSharePointRemovalsPerRun=$null};$a=$f.Args
+$r=Invoke-PreparedBatchRetention @a -Mode Configured
+Check ($r.Status -ceq 'Completed' -and $f.State.Recycles -eq 1 -and $f.State.Events -ccontains ('Recycle:batches/'+$f.Ids[1])) 'Default policy did not remove exactly the oldest eligible SharePoint batch'
+Check ($r.Plan.RetentionPolicy.SharePointKeepBatches -eq 2 -and $r.Plan.RetentionPolicy.ServerKeepBatches -eq 0 -and $r.Plan.RetentionPolicy.MaxSharePointRemovalsPerRun -eq 1) 'Plan does not expose the default policy'
+Check (@($r.Plan.Rows|Where-Object {$_.Storage -ceq 'SharePoint' -and $_.BatchId -ceq $f.Ids[3] -and $_.State -ceq 'Deferred'}).Count -eq 1) 'Second SharePoint candidate was not deferred'
+Check (@($r.Plan.Rows|Where-Object {$_.Storage -ceq 'Local' -and $_.State -cin @('Eligible','Candidate','Deferred')}).Count -eq 0) 'Full server history produced a local action'
+Check (@($r.Plan.Rows|Where-Object {$_.Storage -ceq 'Local' -and $_.State -ceq 'Retained'}).Count -eq 2) 'Unprotected server batches were not reported as retained history'
+Check (@(Get-ChildItem (Join-Path $f.Output 'batches') -Directory).Count -eq 6) 'Default policy removed a server batch'
+$r=Invoke-PreparedBatchRetention @a -Mode Configured
+Check ($f.State.Recycles -eq 2 -and -not (Test-Path (Join-Path $f.Remote ('batches/'+$f.Ids[3])))) 'Deferred SharePoint batch was not retired by the next publication'
+$r=Invoke-PreparedBatchRetention @a -Mode Configured
+Check ($r.Status -ceq 'Completed' -and $f.State.Recycles -eq 2 -and @(Get-ChildItem (Join-Path $f.Remote 'batches') -Directory).Count -eq 4) 'SharePoint did not settle on current, previous and consumer pins'
+Check (@(Get-ChildItem (Join-Path $f.Output 'batches') -Directory).Count -eq 6) 'Server history changed under the default policy'
+# A longer server history protects only server copies.
+$f=Fixture;SetAuto $f;SetPolicy $f @{ServerKeepBatches=4};$a=$f.Args
+$r=Invoke-PreparedBatchRetention @a -Mode Configured
+Check ($r.Status -ceq 'Completed' -and $f.State.Recycles -eq 2) 'Server history count changed SharePoint retirement'
+Check (-not (Test-Path (Join-Path $f.Output ('batches/'+$f.Ids[1]))) -and (Test-Path (Join-Path $f.Output ('batches/'+$f.Ids[3])))) 'Server keep count was not applied to the server copies only'
+Check (@($r.Plan.MinimumRetainedBatches|Where-Object Storage -CEQ 'Local')[0].BatchIds.Count -eq 4) 'Server minimum does not follow ServerKeepBatches'
+foreach($case in @(@{ServerKeepBatches=1},@{ServerKeepBatches='4'},@{SharePointKeepBatches=1},@{MaxSharePointRemovalsPerRun=0},@{SharePointKeepBatches=3;ServerKeepBatches=2})){
+    $f=Fixture;SetPolicy $f $case;$a=$f.Args
+    $r=Invoke-PreparedBatchRetention @a
+    Check ($r.Status -ceq 'Blocked' -and @($r.Plan.BlockedReasons|Where-Object {$_ -match 'PreparedRetention\.'}).Count -eq 1) "Invalid retention policy was not blocked: $(($case.Keys|ForEach-Object {$_+'='+$case[$_]}) -join ',')"
+}
+# Journals: required shared root for Auto/Apply, outside DATA, absolute; legacy work journals still block.
+foreach($case in 'Missing','InsideData','Relative'){
+    $f=Fixture;SetAuto $f;$a=$f.Args
+    $value=switch($case){Missing {$null};InsideData {Join-Path $f.Root 'DATA/journals'};Relative {'journals'}}
+    SetPolicy $f @{JournalRootPath=$value}
+    Reject {Invoke-PreparedBatchRetention @a -Mode Configured} 'JournalRootPath (is required|must be outside DATA|must be an absolute)'
+    Check ($f.State.Recycles -eq 0 -and $f.State.Archives -eq 0) "$case journal root reached removal"
+}
+$f=Fixture;$shared=Join-Path $f.Root 'shared-journals';SetAuto $f;SetPolicy $f @{JournalRootPath=$shared};$a=$f.Args
+$legacy=Join-Path $f.Work ('retention/'+[guid]::NewGuid().ToString('N'));New-Item -ItemType Directory $legacy|Out-Null
+Json (Join-Path $legacy 'journal.json.txt') @{SchemaVersion=1;Status='PartialOrBlocked';Events=@(@{Storage='SharePoint';BatchId=$f.Ids[1];State='Uncertain'})}
+$r=Invoke-PreparedBatchRetention @a -Mode Configured
+Check ($r.JournalPath.StartsWith($shared+'\',[StringComparison]::OrdinalIgnoreCase) -and $r.PlanPath.StartsWith($shared+'\',[StringComparison]::OrdinalIgnoreCase)) 'Plan/journal were not written under the shared journal root'
+Check (@($r.Plan.Rows|Where-Object {$_.BatchId -ceq $f.Ids[1] -and $_.Reason -match 'Unresolved prior'}).Count -eq 2) 'Legacy work-root incident no longer blocks its batch'
+Check (-not (Test-Path (Join-Path $f.Work 'retention-scratch/*'))) 'Run read-back folder was left behind'
+Check ((Get-Content $r.JournalPath -Raw|ConvertFrom-Json).Machine -ceq [Environment]::MachineName) 'Shared journal lacks its writer machine'
+# Regression for the 2026-10-22 incident: a pre-send Invalid URI failure leaves the folder intact and is NotRemoved, not Uncertain.
+$f=Fixture;SetAuto $f;$a=$f.Args
+$f.State.RecycleResult=@{Outcome='RequestFailed';HttpStatus=$null;MayHaveReachedService=$false;Error='Graph DELETE failed with System.UriFormatException: Invalid URI: The format of the URI could not be determined.'}
+Reject {Invoke-PreparedBatchRetention @a -Mode Configured} 'was not removed \(Graph DELETE failed with System\.UriFormatException'
+$journal=LastJournal $f.Work;$journalEvent=@($journal.Events)[-1]
+Check ($journalEvent.State -ceq 'NotRemoved' -and $journalEvent.Outcome -ceq 'NotRemoved' -and $journalEvent.RequestUri -match '/items/' -and $journal.Status -ceq 'PartialOrBlocked') 'Invalid URI failure was not journaled as NotRemoved with its validated URI'
+Check ((Test-Path (Join-Path $f.Remote ('batches/'+$f.Ids[1]))) -and @(Get-ChildItem (Join-Path $f.Output 'batches') -Directory).Count -eq 6) 'Invalid URI failure changed data'
+$f.State.RecycleResult=$null
+$r=Invoke-PreparedBatchRetention @a -Mode Configured
+Check ($r.Status -ceq 'Completed' -and -not (Test-Path (Join-Path $f.Remote ('batches/'+$f.Ids[1])))) 'A confirmed NotRemoved outcome wrongly required incident reconciliation'
+# URI/ID validation happens before RemovalRequested; a refusal never reaches the DELETE.
+$f=Fixture;SetAuto $f;$a=$f.Args;$f.State.PrepareFailure='Recycle refused before any request: invalid Graph item URI'
+Reject {Invoke-PreparedBatchRetention @a -Mode Configured} 'refused before any request'
+$journalEvent=@((LastJournal $f.Work).Events)[-1]
+Check ($f.State.Recycles -eq 0 -and $journalEvent.State -ceq 'Blocked' -and $null -eq $journalEvent.RequestUri) 'Refused removal URI was journaled as an intent or sent'
+# Explicit HTTP outcomes.
+$outcomes=@(
+    @{Name='404Absent';Result=@{Outcome='NotFound';HttpStatus=404;MayHaveReachedService=$false;Error=$null};Remove=$true;State='Recycled';Outcome='AlreadyAbsent';Pattern=$null},
+    @{Name='404Present';Result=@{Outcome='NotFound';HttpStatus=404;MayHaveReachedService=$false;Error=$null};Remove=$false;State='NotRemoved';Outcome='NotRemoved';Pattern='HTTP 404'},
+    @{Name='412';Result=@{Outcome='PreconditionFailed';HttpStatus=412;MayHaveReachedService=$false;Error=$null};Remove=$false;State='NotRemoved';Outcome='NotRemoved';Pattern='HTTP 412'},
+    @{Name='500Present';Result=@{Outcome='HttpError';HttpStatus=500;MayHaveReachedService=$true;Error='Graph DELETE returned HTTP 500; only 204 confirms removal.'};Remove=$false;State='Uncertain';Outcome=$null;Pattern='outcome is uncertain'},
+    @{Name='TimeoutAbsent';Result=@{Outcome='RequestFailed';HttpStatus=$null;MayHaveReachedService=$true;Error='timeout'};Remove=$true;State='Recycled';Outcome='AbsentAfterError';Pattern=$null},
+    @{Name='204Present';Result=@{Outcome='Recycled';HttpStatus=204;MayHaveReachedService=$false;Error=$null};Remove=$false;State='Uncertain';Outcome=$null;Pattern='HTTP 204 but the folder is still visible'}
+)
+foreach($case in $outcomes){
+    $f=Fixture;SetAuto $f;SetPolicy $f @{MaxSharePointRemovalsPerRun=1};$a=$f.Args
+    $f.State.RecycleResult=$case.Result;$f.State.RemoveOnResult=$case.Remove
+    if($case.Pattern){Reject {Invoke-PreparedBatchRetention @a -Mode Configured} $case.Pattern}else{$r=Invoke-PreparedBatchRetention @a -Mode Configured -WarningAction SilentlyContinue;Check ($r.Status -ceq 'Completed') "$($case.Name) did not complete"}
+    $journalEvent=@((LastJournal $f.Work).Events | Where-Object Storage -CEQ 'SharePoint')[0]
+    Check ($journalEvent.State -ceq $case.State -and $journalEvent.Outcome -ceq $case.Outcome -and $journalEvent.HttpStatus -eq $case.Result.HttpStatus) "$($case.Name) journaled $($journalEvent.State)/$($journalEvent.Outcome) instead of $($case.State)/$($case.Outcome)"
+    $incidents=@(& $module {param($roots) Get-RetentionUnresolvedIncidents $roots} @($f.Work))
+    Check (($incidents.Count -gt 0) -eq ($case.State -ceq 'Uncertain')) "$($case.Name) incident classification is wrong"
+}
 # Exercise the shared template merge function without tenant initialization or runtime files.
 $tenantPath=Join-Path $PSScriptRoot '../../SmartM365/Config/SmartM365-TenantContext.ps1'
 $tokens=$null;$errors=$null;$tenantAst=[Management.Automation.Language.Parser]::ParseFile($tenantPath,[ref]$tokens,[ref]$errors)
@@ -518,17 +610,20 @@ Check ($syntheticConfig.PreparedRetention.Mode -ceq 'Auto' -and $syntheticConfig
 }
 
 # Exercise the real Graph adapter with a local SDK stub. No Graph module or network call.
-$global:RetentionGraphStub=@{Events=[Collections.Generic.List[object]]::new();Tenant='synthetic-tenant';Retry=3;DeleteStatus=204;Pagination='Normal';EmptyPermissions=$false}
+# The real cmdlet call shape is exercised separately by Test-PreparedRetentionGraphTransport.ps1.
+$global:RetentionGraphStub=@{Events=[Collections.Generic.List[object]]::new();Tenant='synthetic-tenant';ContextChanges=0;DeleteStatus=204;DeleteThrow=$null;Pagination='Normal';EmptyPermissions=$false}
 function global:Connect-SmartM365GraphAppOnly {param($AppId,$TenantId,$Thumbprint,$Purpose) $true}
 function global:Get-MgContext {[pscustomobject]@{TenantId=$global:RetentionGraphStub.Tenant;ClientId='synthetic-app';AuthType='AppOnly'}}
-function global:Get-MgRequestContext {[pscustomobject]@{MaxRetry=$global:RetentionGraphStub.Retry}}
-function global:Set-MgRequestContext {param($MaxRetry) $global:RetentionGraphStub.Retry=$MaxRetry}
+function global:Set-MgRequestContext {param($MaxRetry) $global:RetentionGraphStub.ContextChanges++}
 function global:Invoke-MgGraphRequest {
     [CmdletBinding()]
-    param($Method,$Uri,$OutputType,$Headers,$OutputFilePath,$StatusCodeVariable)
-    $global:RetentionGraphStub.Events.Add(@{Method=$Method;Uri=[string]$Uri;Headers=$Headers;Retry=$global:RetentionGraphStub.Retry})
+    param($Method,$Uri,$OutputType,$Headers,$OutputFilePath,[switch]$SkipHttpErrorCheck,$StatusCodeVariable)
+    $global:RetentionGraphStub.Events.Add(@{Method=$Method;Uri=[string]$Uri;Headers=$Headers;OutputType=$OutputType;SkipHttpErrorCheck=[bool]$SkipHttpErrorCheck;StatusCodeVariable=$StatusCodeVariable})
     if($Method -ceq 'DELETE'){
-        return [Net.Http.HttpResponseMessage]::new([Net.HttpStatusCode]$global:RetentionGraphStub.DeleteStatus)
+        if($global:RetentionGraphStub.DeleteThrow){throw $global:RetentionGraphStub.DeleteThrow}
+        # Like the cmdlet, set the variable in the caller's (module) session state.
+        if($StatusCodeVariable){$PSCmdlet.SessionState.PSVariable.Set($StatusCodeVariable,$global:RetentionGraphStub.DeleteStatus)}
+        return
     }
     if($OutputFilePath){[IO.File]::WriteAllText($OutputFilePath,'synthetic bytes');return}
     switch -Regex ([string]$Uri){
@@ -540,9 +635,9 @@ function global:Invoke-MgGraphRequest {
             if($global:RetentionGraphStub.Pagination -ceq 'Cycle'){return [pscustomobject]@{value=@();'@odata.nextLink'=[string]$Uri}}
             return [pscustomobject]@{value=@([pscustomobject]@{id='batch-id';name='20261001T000000000Z-00000001';folder=@{};parentReference=@{id='batches';driveId='drive'};size=0;eTag='folder-etag'})}
         }
-        '/drives$' {return [pscustomobject]@{value=@([pscustomobject]@{id='drive';name='Documents'})}}
-        ':/batches$' {return [pscustomobject]@{id='batches';folder=[pscustomobject]@{childCount=1};parentReference=@{id='root';driveId='drive'}}}
-        '/root:/' {return [pscustomobject]@{id='root';folder=[pscustomobject]@{childCount=2};parentReference=@{id='drive-root';driveId='drive'}}}
+        '/drives$' {return [pscustomobject]@{value=@([pscustomobject]@{id='b!drive';name='Documents'})}}
+        ':/batches$' {return [pscustomobject]@{id='batches';folder=[pscustomobject]@{childCount=1};parentReference=@{id='root';driveId='b!drive'}}}
+        '/root:/' {return [pscustomobject]@{id='root';folder=[pscustomobject]@{childCount=2};parentReference=@{id='drive-root';driveId='b!drive'}}}
         '/sites/' {return [pscustomobject]@{id='site'}}
         default {throw [Net.Http.HttpRequestException]::new('Synthetic missing item',$null,[Net.HttpStatusCode]::NotFound)}
     }
@@ -553,20 +648,49 @@ try {
     $target=& $transport.Describe
     Check ($target.RootId -ceq 'root' -and $target.BatchesId -ceq 'batches' -and $target.AccessEvidenceSHA256 -match '^[A-F0-9]{64}$') 'Graph target/access resolution failed'
     $items=@(& $transport.List 'batches');Check ($items.Count -eq 1 -and $items[0].ParentId -ceq 'batches') 'Graph item adapter failed'
-    $null=& $transport.Recycle 'batch-id' 'folder-etag'
+    $prepared=& $transport.PrepareRecycle 'batch-id' '"{6A5B},3"'
+    Check ($prepared.Uri -ceq 'https://graph.microsoft.com/v1.0/drives/b%21drive/items/batch-id') 'Validated recycle URI is not the exact item URI'
+    $result=& $transport.Recycle $prepared
     $request=$global:RetentionGraphStub.Events[-1]
-    Check ($request.Method -ceq 'DELETE' -and $request.Headers['If-Match'] -ceq 'folder-etag' -and $request.Retry -eq 0) 'Graph recycle lost conditional request/retry guard'
-    Check ($global:RetentionGraphStub.Retry -eq 3) 'SDK retry setting was not restored'
+    Check ($result.Outcome -ceq 'Recycled' -and $result.HttpStatus -eq 204 -and $request.Method -ceq 'DELETE' -and $request.Uri -ceq $prepared.Uri -and $request.Headers['If-Match'] -ceq '"{6A5B},3"') 'Graph recycle lost its validated conditional request'
+    Check ($request.OutputType -ceq 'PSObject' -and $request.SkipHttpErrorCheck -and $request.StatusCodeVariable) 'DELETE does not use -SkipHttpErrorCheck/-StatusCodeVariable'
+    Check ($global:RetentionGraphStub.ContextChanges -eq 0) 'DELETE changed the SDK request context (SDK 2.30 Invalid URI trigger)'
+    foreach($status in @(@{Code=404;Outcome='NotFound';Reached=$false},@{Code=412;Outcome='PreconditionFailed';Reached=$false},@{Code=429;Outcome='HttpError';Reached=$false},@{Code=503;Outcome='HttpError';Reached=$false},@{Code=500;Outcome='HttpError';Reached=$true},@{Code=202;Outcome='HttpError';Reached=$true})){
+        $global:RetentionGraphStub.DeleteStatus=$status.Code
+        $result=& $transport.Recycle $prepared
+        Check ($result.Outcome -ceq $status.Outcome -and $result.HttpStatus -eq $status.Code -and $result.MayHaveReachedService -eq $status.Reached) "HTTP $($status.Code) was not classified explicitly"
+    }
+    $global:RetentionGraphStub.DeleteThrow=[UriFormatException]::new('Invalid URI: The format of the URI could not be determined.')
+    $result=& $transport.Recycle $prepared
+    Check ($result.Outcome -ceq 'RequestFailed' -and -not $result.MayHaveReachedService -and $result.Error -match 'System\.UriFormatException: Invalid URI') 'Pre-send Invalid URI failure was not reported explicitly as not sent'
+    $global:RetentionGraphStub.DeleteThrow=[Threading.Tasks.TaskCanceledException]::new('Synthetic timeout')
+    $result=& $transport.Recycle $prepared
+    Check ($result.Outcome -ceq 'RequestFailed' -and $result.MayHaveReachedService) 'Timeout was not kept uncertain'
+    $global:RetentionGraphStub.DeleteThrow=$null;$global:RetentionGraphStub.DeleteStatus=204
+    foreach($id in '','a/b','x%2Fy','id with space','..','id?x=1'){Reject {& $transport.PrepareRecycle $id 'etag'} 'refused before any request'}
+    foreach($etag in '',"a`r`nb",('e'*513)){Reject {& $transport.PrepareRecycle 'batch-id' $etag} 'eTag .* missing or malformed'}
+    $deletes=@($global:RetentionGraphStub.Events | Where-Object Method -CEQ 'DELETE').Count
+    Reject {& $transport.Recycle ([pscustomobject]@{Id='batch-id';ETag='etag';Uri='https://graph.microsoft.com/v1.0/drives/other/items/batch-id'})} 'validated request'
+    Check (@($global:RetentionGraphStub.Events | Where-Object Method -CEQ 'DELETE').Count -eq $deletes) 'An unvalidated recycle request reached Graph'
     Check (& $transport.IsAbsent 'missing') 'Graph 404 adapter failed'
-    $global:RetentionGraphStub.DeleteStatus=200
-    Reject {& $transport.Recycle 'batch-id' 'folder-etag'} 'HTTP 204'
-    Check ($global:RetentionGraphStub.Retry -eq 3) 'SDK retry restoration failed after error'
     $global:RetentionGraphStub.EmptyPermissions=$true;$emptyTarget=& $transport.Describe
     Check ($emptyTarget.AccessEvidenceSHA256 -match '^[A-F0-9]{64}$' -and $emptyTarget.AccessEvidenceSHA256 -cne $target.AccessEvidenceSHA256) 'A valid empty permissions listing must remain reviewable and fingerprinted'
     $global:RetentionGraphStub.Pagination='Cycle';Reject {& $transport.List 'batches'} 'Cyclic Graph pagination'
     $global:RetentionGraphStub.Tenant='foreign';Reject {& $transport.List 'batches'} 'context changed'
+    Reject {& $transport.Recycle $prepared} 'context changed before recycle'
+    $global:RetentionGraphStub.Tenant='synthetic-tenant'
+    # A cmdlet without -SkipHttpErrorCheck fails before any DELETE, with an explicit message.
+    $deletes=@($global:RetentionGraphStub.Events | Where-Object Method -CEQ 'DELETE').Count
+    function global:Invoke-MgGraphRequest {[CmdletBinding()] param($Method,$Uri,$OutputType,$Headers,$StatusCodeVariable) $global:RetentionGraphStub.Events.Add(@{Method=$Method})}
+    Reject {& $transport.PrepareRecycle 'batch-id' 'etag'} 'lacks -SkipHttpErrorCheck'
+    Check (@($global:RetentionGraphStub.Events | Where-Object Method -CEQ 'DELETE').Count -eq $deletes) 'Missing SDK parameter reached DELETE'
+    # Static guard: the module never changes the SDK request context nor reads a raw HttpResponseMessage.
+    $astTokens=$null;$astErrors=$null;$ast=[Management.Automation.Language.Parser]::ParseFile($modulePath,[ref]$astTokens,[ref]$astErrors)
+    $commands=@($ast.FindAll({param($node) $node -is [Management.Automation.Language.CommandAst]},$true) | ForEach-Object {$_.GetCommandName()})
+    $strings=@($ast.FindAll({param($node) $node -is [Management.Automation.Language.StringConstantExpressionAst]},$true) | ForEach-Object Value)
+    Check ($commands -notcontains 'Set-MgRequestContext' -and $strings -notcontains 'HttpResponseMessage') 'Module still calls Set-MgRequestContext or requests HttpResponseMessage'
 } finally {
-    foreach($name in 'Connect-SmartM365GraphAppOnly','Get-MgContext','Get-MgRequestContext','Set-MgRequestContext','Invoke-MgGraphRequest'){Remove-Item ('Function:global:'+$name)}
+    foreach($name in 'Connect-SmartM365GraphAppOnly','Get-MgContext','Set-MgRequestContext','Invoke-MgGraphRequest'){if(Test-Path ('Function:global:'+$name)){Remove-Item ('Function:global:'+$name)}}
     Remove-Variable RetentionGraphStub -Scope Global
 }
 Write-Host "PASS: $script:checks synthetic retention checks. No tenant, network, production data or runtime configuration accessed. Fixtures: $base"
