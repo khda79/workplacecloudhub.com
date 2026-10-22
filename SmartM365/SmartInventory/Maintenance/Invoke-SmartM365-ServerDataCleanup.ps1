@@ -21,7 +21,7 @@ lock in its folder is held. The JSON transport keeps its staging and previous
 copies on failure; nothing resumes them, so they only age out here.
 
 .VERSION
-1.2.0
+1.2.1
 
 .EXAMPLE
 ./Invoke-SmartM365-ServerDataCleanup.ps1 -Tenant prod -DataRootPath '<server DATA root>'
@@ -99,6 +99,21 @@ function Get-Hash {
 function Get-IsoWeek {
     param([datetime]$Date)
     return '{0}-W{1:00}' -f [Globalization.ISOWeek]::GetYear($Date), [Globalization.ISOWeek]::GetWeekOfYear($Date)
+}
+
+function Get-UtcTick {
+    # ConvertFrom-Json turns an ISO 'o' string into a [datetime] before 7.5 offers -DateKind;
+    # both forms compare as UTC ticks. Anything unreadable returns -1 and never matches.
+    param([object]$Value)
+    if ($Value -is [datetime]) {
+        if ($Value.Kind -eq [DateTimeKind]::Unspecified) { return [datetime]::SpecifyKind($Value, [DateTimeKind]::Utc).Ticks }
+        return $Value.ToUniversalTime().Ticks
+    }
+    if ($Value -is [DateTimeOffset]) { return $Value.UtcTicks }
+    $parsed = [DateTimeOffset]::MinValue
+    if ($Value -is [string] -and [DateTimeOffset]::TryParse($Value, [Globalization.CultureInfo]::InvariantCulture,
+        [Globalization.DateTimeStyles]::AssumeUniversal, [ref]$parsed)) { return $parsed.UtcTicks }
+    return [int64]-1
 }
 
 function Get-DirectoryState {
@@ -628,7 +643,8 @@ if ($Execute) {
                     if (Test-Path $manifestPath) {
                         $existing = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
                         if ($existing.Week -ne $expected.Week -or $existing.SHA256 -ne $expected.SHA256 -or
-                            $existing.SourceLastWriteTimeUtc -ne $expected.SourceLastWriteTimeUtc) { throw 'Discovered Apps summary manifest mismatch.' }
+                            -not $existing.PSObject.Properties['SourceLastWriteTimeUtc'] -or
+                            (Get-UtcTick $existing.SourceLastWriteTimeUtc) -ne $action.Evidence.SourceTime.ToUniversalTime().Ticks) { throw 'Discovered Apps summary manifest mismatch.' }
                     } else {
                         $expected | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $manifestPath -Encoding utf8 -NoNewline
                     }
