@@ -2,10 +2,10 @@
 <#
 .SYNOPSIS
 Offline checks of the retry backoff shared by the Intune export collectors: exponential waits with jitter that
-honour Retry-After, a time budget for the exportJobs creation with the Graph SDK retry turned off, progress
-lines while a job waits, a stalled job created again once, and explicit final errors.
+honour Retry-After, a time budget for the exportJobs creation that never changes the Graph SDK request context
+(turned off at connection only), progress lines while a job waits, a stalled job created again once, and explicit final errors.
 .VERSION
-1.0.0
+1.0.1
 .NOTES
 Graph, the SDK request context, storage, the clock and the waits are recorded stand-ins inside the modules.
 No tenant, Graph, storage, mail or synchronized data access.
@@ -19,7 +19,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
 $core = Import-Module (Join-Path $root 'Modules/SmartM365.Core/SmartM365.Core.psd1') -MinimumVersion '1.0.103' -Force -PassThru -Global
-$evidence = Import-Module (Join-Path $root 'SmartInventory/Common/SmartM365.EvidenceCollector.Common.psd1') -MinimumVersion '1.0.13' -Force -PassThru
+$evidence = Import-Module (Join-Path $root 'SmartInventory/Common/SmartM365.EvidenceCollector.Common.psd1') -MinimumVersion '1.0.14' -Force -PassThru
 $script:checks = 0
 function Check { param([bool]$Condition, [string]$Message) if (-not $Condition) { throw $Message }; $script:checks++ }
 function New-HttpFailure([int]$Status, [string]$RetryAfter) {
@@ -90,9 +90,9 @@ try {
             $OutFile
         }
         function script:Reset-Fake {
-            param([object[]]$Post, $PostDefault, [hashtable]$JobStates)
+            param([object[]]$Post, $PostDefault, [hashtable]$JobStates, [int]$SdkMaxRetry = 3)
             $script:Sleeps.Clear(); $script:Logs.Clear(); $script:Requests.Clear(); $script:Post.Clear(); foreach ($p in @($Post | Where-Object { $null -ne $_ })) { $script:Post.Enqueue($p) }
-            $script:PostDefault = $PostDefault; $script:JobStates = if ($JobStates) { $JobStates } else { @{} }; $script:Sdk.MaxRetry = 3; $script:Sdk.History.Clear()
+            $script:PostDefault = $PostDefault; $script:JobStates = if ($JobStates) { $JobStates } else { @{} }; $script:Sdk.MaxRetry = $SdkMaxRetry; $script:Sdk.History.Clear()
         }
         function script:Get-Fake { [pscustomobject]@{ Sleeps = $script:Sleeps.ToArray(); Logs = $script:Logs.ToArray(); Requests = $script:Requests.ToArray(); SdkMaxRetry = $script:Sdk.MaxRetry; SdkHistory = ($script:Sdk.History -join ',') } }
     }
@@ -125,10 +125,11 @@ try {
     Check ([int]$match.Groups[1].Value -eq $r.Fake.Requests.Count -and [int]$match.Groups[1].Value -ge 6 -and [int]$match.Groups[2].Value -le 600 -and ($r.Fake.Sleeps | Measure-Object -Sum).Sum -le 600) "The budget is not respected: $($r.Error.Exception.Message); waits $($r.Fake.Sleeps -join ',')"
     Check ((Get-SmartM365EvidenceStatusCode $r.Error) -eq 503 -and $r.Error.Exception.Data['Attempts'] -eq $r.Fake.Requests.Count) 'The final error lost its HTTP status or attempt count.'
 
-    # Budgeted export: SDK retry off during the calls and restored; a stuck job logs progress, then times out.
+    # Budgeted export after a -DisableSdkRetry connection: the request context is never changed (SDK 2.30 rebuilds
+    # its client from an emptied environment and app-only auth fails with Invalid URI); a stuck job logs progress.
     $r = & $evidence {
         param($failure)
-        Reset-Fake -Post @($failure, [pscustomobject]@{ id = 'job-1' }) -JobStates @{ 'job-1' = [pscustomobject]@{ status = 'inProgress' } }
+        Reset-Fake -Post @($failure, [pscustomobject]@{ id = 'job-1' }) -JobStates @{ 'job-1' = [pscustomobject]@{ status = 'inProgress' } } -SdkMaxRetry 0
         $result = [pscustomobject]@{ Error = $null; Fake = $null }
         try { Invoke-SmartM365EvidenceExportReport -ReportName 'DefenderAgents' -TimeoutSeconds 300 -PollSeconds 30 -CreateRetryBudgetSeconds 1080 -ProgressLogSeconds 90 | Out-Null }
         catch { $result.Error = $_ }
@@ -138,7 +139,8 @@ try {
     Check ($null -ne $r.Error -and $r.Error.Exception.Message -match "^Intune export job job-1 for DefenderAgents timed out after \d+s \(limit 300s\); last status 'inProgress'\.$") "A stuck job does not time out with its report, id and status: $($r.Error)"
     $progress = @($r.Fake.Logs | Where-Object { $_ -match "^INFO Intune export job job-1 for DefenderAgents is 'inProgress' after \d+s \(report elapsed \d+s of 300s\)\." })
     Check ($progress.Count -ge 3) "Progress was not logged regularly while the job waited: $($r.Fake.Logs -join ' | ')"
-    Check (@($r.Fake.Requests | Where-Object SdkMaxRetry -ne 0).Count -eq 0 -and $r.Fake.SdkMaxRetry -eq 3 -and $r.Fake.SdkHistory -eq '0,3') "The SDK retry was not off during the export or not restored: $($r.Fake.SdkHistory)"
+    Check (@($r.Fake.Requests | Where-Object SdkMaxRetry -ne 0).Count -eq 0 -and $r.Fake.SdkHistory -eq '') "The export changed the SDK request context: $($r.Fake.SdkHistory)"
+    Check (@($r.Fake.Logs | Where-Object { $_ -match 'Graph SDK retry on' }).Count -eq 0) 'An export with the SDK retry already off warned about it.'
     Check ($r.Fake.Sleeps[0] -eq 2) 'The creation 503 Retry-After was not honoured inside the export.'
 
     # A job still inProgress past StallSeconds is abandoned and created again once; the new job completes.
@@ -162,6 +164,14 @@ try {
         $result
     }
     Check (@($r.Fake.Requests | Where-Object Method -eq 'POST').Count -eq 2 -and $r.Error.Exception.Message -match "^Intune export job job-2 for DefenderAgents timed out after \d+s \(limit 900s\); last status 'notStarted'\. The job had already been created again once\.$") "A second stall was recreated or not reported: $($r.Error)"
+
+    # A budgeted export on a connection without -DisableSdkRetry warns once and still leaves the context alone.
+    $r = & $evidence {
+        Reset-Fake -Post @([pscustomobject]@{ id = 'job-1' }) -JobStates @{ 'job-1' = [pscustomobject]@{ status = 'completed'; url = 'https://intunestorage.example.invalid/r.zip?sig=S' } }
+        $rows = @(Invoke-SmartM365EvidenceExportReport -ReportName 'FirewallStatus' -PollSeconds 1 -CreateRetryBudgetSeconds 1080)
+        [pscustomobject]@{ Rows = $rows; Fake = Get-Fake }
+    }
+    Check ($r.Rows.Count -eq 1 -and $r.Fake.SdkHistory -eq '' -and @($r.Fake.Logs | Where-Object { $_ -match '^WARNING Intune export job creation \(FirewallStatus\) runs with the Graph SDK retry on \(MaxRetry 3\)' }).Count -eq 1) "A budgeted export with the SDK retry on did not warn once or changed the context: $($r.Fake.SdkHistory)"
 
     # Without a creation budget the previous behaviour stays: SDK retry untouched, attempt-limited retries.
     $r = & $evidence {

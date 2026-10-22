@@ -3,7 +3,7 @@
 .SYNOPSIS
 Collects Intune Defender agent and firewall health reports through exportJobs.
 .VERSION
-1.0.4
+1.0.5
 .REQUIREMENTS
 Microsoft Graph application or delegated permission DeviceManagementManagedDevices.ReadWrite.All.
 #>
@@ -21,7 +21,7 @@ if(-not $smartM365LifecycleRoot){throw 'SmartM365 lifecycle support is missing; 
 $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -RequireReturn
 try {
 Set-StrictMode -Version Latest
-$ErrorActionPreference='Stop';$ScriptVersion='1.0.4';$script:Runtime=$null;$script:CompletionStatus='Success';$script:CompletionError=$null
+$ErrorActionPreference='Stop';$ScriptVersion='1.0.5';$script:Runtime=$null;$script:CompletionStatus='Success';$script:CompletionError=$null
 
 function ConvertTo-EndpointSecurityRow{
     param([Parameter(Mandatory)]$Row,[Parameter(Mandatory)][string]$ReportName,[string]$RunId,[string]$CollectedAtUtc,[bool]$IsPartialInventory=$false)
@@ -58,17 +58,18 @@ function Invoke-EndpointSecurityReportSet{
     return [pscustomobject]@{Raw=$rawByReport;Quality=$quality;MissingRequired=$missingRequired}
 }
 
-if($SelfTest){Import-Module (Join-Path $PSScriptRoot '..\..\..\Common\SmartM365.EvidenceCollector.Common.psd1') -MinimumVersion '1.0.13' -Force;$test=ConvertTo-EndpointSecurityRow ([pscustomobject]@{DeviceId='d';RealTimeProtectionEnabled=$true}) DefenderAgents r n;if($test.DeviceId-ne'd'-or $test.RealTimeProtectionEnabled-ne$true){throw 'Endpoint security self-test failed.'};'PASS: Endpoint security offline contract';$smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; return}
+if($SelfTest){Import-Module (Join-Path $PSScriptRoot '..\..\..\Common\SmartM365.EvidenceCollector.Common.psd1') -MinimumVersion '1.0.14' -Force;$test=ConvertTo-EndpointSecurityRow ([pscustomobject]@{DeviceId='d';RealTimeProtectionEnabled=$true}) DefenderAgents r n;if($test.DeviceId-ne'd'-or $test.RealTimeProtectionEnabled-ne$true){throw 'Endpoint security self-test failed.'};'PASS: Endpoint security offline contract';$smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; return}
 try{
     $tenantContextPath=Join-Path (Split-Path (Split-Path (Split-Path (Split-Path $PSScriptRoot -Parent) -Parent) -Parent) -Parent) 'Config\SmartM365-TenantContext.ps1';. $tenantContextPath
     $effectiveConfig=Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot
-    Import-Module (Join-Path $PSScriptRoot '..\..\..\Common\SmartM365.EvidenceCollector.Common.psd1') -MinimumVersion '1.0.13' -Force
+    Import-Module (Join-Path $PSScriptRoot '..\..\..\Common\SmartM365.EvidenceCollector.Common.psd1') -MinimumVersion '1.0.14' -Force
     $script:Runtime=Initialize-SmartM365EvidenceRuntime -ScriptPath $PSCommandPath -EffectiveConfig $effectiveConfig -DefaultOutputRelativePath 'Intune\EndpointSecurity' -OutputPath $OutputPath -LatestCsvFolderPath $LatestCsvFolderPath -ValidateOnly:$ValidateOnly -EnableConfiguredExternalActions:$EnableConfiguredExternalActions
     Start-SmartM365SourceReceipt -ScriptPath $PSCommandPath -SourceRootPath $script:Runtime.LatestCsvFolderPath -ReadOnly:($ValidateOnly -or $SelfTest)
-    Connect-SmartM365EvidenceGraph $script:Runtime @('DeviceManagementManagedDevices.ReadWrite.All') -InteractiveAuth:$InteractiveAuth
+    Connect-SmartM365EvidenceGraph $script:Runtime @('DeviceManagementManagedDevices.ReadWrite.All') -InteractiveAuth:$InteractiveAuth -DisableSdkRetry
     $reportDefinitions=@([pscustomobject]@{Name='DefenderAgents';Required=$true},[pscustomobject]@{Name='FirewallStatus';Required=$true},[pscustomobject]@{Name='FirewallUnhealthyStatus';Required=$false})
     # The exportJobs creation meets HTTP 503 windows of 10-15 minutes early in the morning: it is retried for
-    # ExportCreateRetryBudgetSeconds (backoff with jitter, Retry-After honoured, Graph SDK retry off).
+    # ExportCreateRetryBudgetSeconds (backoff with jitter, Retry-After honoured). The Graph SDK retry is turned off
+    # once at connection (-DisableSdkRetry), never per request: see Connect-SmartM365EvidenceGraph.
     $exportOptions=@{
         ApiVersion='v1.0';TimeoutSeconds=$ExportTimeoutSeconds;MaxItems=$MaxItems
         CreateRetryBudgetSeconds=Get-EndpointSecurityExportSetting $script:Runtime.Config 'ExportCreateRetryBudgetSeconds' 1080 60 7200

@@ -2,7 +2,7 @@
 .SYNOPSIS
 Runs the offline contract test for Intune endpoint-security health normalization.
 .VERSION
-1.0.1
+1.0.2
 .NOTES
 Also checks, with recorded stand-ins for the export and the log, that each failed report is logged with its
 cause (ERROR when required) and that the export settings of the .local.json are validated.
@@ -16,7 +16,7 @@ if([string]$output-notmatch'PASS'){throw 'Endpoint-security collector offline te
 Write-Output $output
 
 Import-Module (Join-Path $root 'Modules\SmartM365.Core\SmartM365.Core.psd1') -MinimumVersion '1.0.103' -Force -Global -WarningAction SilentlyContinue
-Import-Module (Join-Path $root 'SmartInventory\Common\SmartM365.EvidenceCollector.Common.psd1') -MinimumVersion '1.0.13' -Force -Global
+Import-Module (Join-Path $root 'SmartInventory\Common\SmartM365.EvidenceCollector.Common.psd1') -MinimumVersion '1.0.14' -Force -Global
 $ast=[Management.Automation.Language.Parser]::ParseFile($path,[ref]$null,[ref]$null)
 $functions=foreach($name in 'Get-EndpointSecurityExportSetting','Invoke-EndpointSecurityReportSet'){$node=$ast.Find({param($n)$n -is [Management.Automation.Language.FunctionDefinitionAst]-and $n.Name-eq $name},$true);if(-not $node){throw "$name is missing in the collector."};$node.Extent.Text}
 $prelude=@'
