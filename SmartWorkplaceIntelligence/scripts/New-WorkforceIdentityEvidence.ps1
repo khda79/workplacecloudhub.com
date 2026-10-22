@@ -1,4 +1,4 @@
-﻿# Version 1.3.0
+﻿# Version 1.4.0
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
@@ -29,7 +29,11 @@ param(
     [string]$AccountClassificationConfigPath = (Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) 'SmartM365\SmartInventory\Config\AccountClassification.local.json'),
 
     # Optional reference clock for reproducible offline preparation; defaults to the current time.
-    [Nullable[datetimeoffset]]$AsOfUtc
+    [Nullable[datetimeoffset]]$AsOfUtc,
+
+    # Hours after the last successful acquisition before the kept Office activation report is warned about.
+    [ValidateRange(1, 8760)]
+    [int]$OfficeActivationWarningAgeHours = 72
 )
 
 Set-StrictMode -Version Latest
@@ -91,6 +95,22 @@ function Get-RequiredCsv {
         throw "Required source CSV was not found: $path"
     }
     return $path
+}
+
+function Get-OfficeActivationFreshnessWarning {
+    param(
+        [datetime]$AcquiredUtc,
+        [Nullable[datetime]]$LatestReportDate,
+        [datetimeoffset]$ReferenceUtc,
+        [int]$WarningAgeHours
+    )
+
+    # The producer leaves this optional report unchanged when Graph returns it empty, so its
+    # write time is the last successful acquisition. Warn only: the report stays usable.
+    $ageHours = ($ReferenceUtc.UtcDateTime - $AcquiredUtc).TotalHours
+    if ($ageHours -le $WarningAgeHours) { return $null }
+    $reportDate = if ($null -ne $LatestReportDate) { $LatestReportDate.ToString('yyyy-MM-dd', [Globalization.CultureInfo]::InvariantCulture) } else { 'unknown' }
+    return [string]::Format([Globalization.CultureInfo]::InvariantCulture, "Office activation report is aging: M365_Apps_Activations.csv was last acquired {0:yyyy-MM-ddTHH:mm:ssZ} ({1:F0} hours ago; warning after {2} hours); latest Report Refresh Date={3}. 'Office Desktop Activation State (30D)' is computed against that older report date.", $AcquiredUtc, $ageHours, $WarningAgeHours, $reportDate)
 }
 
 function Get-NormalizedKey {
@@ -635,6 +655,12 @@ foreach ($row in $officeActivationRows) {
         $officeActivationByUpn[$activationUpn] = [pscustomobject]@{ ReportDate = $reportDate; LastActivationDate = Convert-ToDateTimeOrNull (Get-PropertyValue $row 'Last Activated Date'); PcCount = [int](Get-PropertyValue $row 'Windows') + [int](Get-PropertyValue $row 'Mac') }
     }
 }
+$latestOfficeActivationReportDate = $null
+foreach ($activation in $officeActivationByUpn.Values) {
+    if ($null -eq $latestOfficeActivationReportDate -or $activation.ReportDate -gt $latestOfficeActivationReportDate) { $latestOfficeActivationReportDate = $activation.ReportDate }
+}
+$officeActivationWarning = Get-OfficeActivationFreshnessWarning -AcquiredUtc (Get-Item -LiteralPath $officeActivationsPath).LastWriteTimeUtc -LatestReportDate $latestOfficeActivationReportDate -ReferenceUtc $referenceUtc -WarningAgeHours $OfficeActivationWarningAgeHours
+if ($officeActivationWarning) { Write-Warning $officeActivationWarning }
 Write-WorkforceDiagnostic 'Load persona classification'
 $personaCountryCodes = @{ France = 'FR'; Germany = 'DE'; Spain = 'ES'; Belgium = 'BE'; Poland = 'PL'; Switzerland = 'CH'; Portugal = 'PT'; Italy = 'IT'; Austria = 'AT'; Ireland = 'IE'; Luxembourg = 'LU'; Netherlands = 'NL' }
 $personaCache = @{}

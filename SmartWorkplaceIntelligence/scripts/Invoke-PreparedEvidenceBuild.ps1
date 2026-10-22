@@ -1,4 +1,4 @@
-# Version 1.5.0: unified SPO migration planning follows native source qualification.
+# Version 1.6.0: Office activation acquisition-age warning threshold passed to Workforce and Data Trust.
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)][string]$DataRoot,
@@ -31,6 +31,8 @@ param(
     [string]$DailyTrendsQualificationPath,
     [double]$DailyTrendsPartialThresholdPercent = 1,
     [int]$DailyTrendsPersistentAbsenceObservations = 7,
+    # Hours after the last successful acquisition before the kept Office activation report is warned about.
+    [ValidateRange(1,8760)][int]$OfficeActivationWarningAgeHours = 72,
     # Optional reference clock passed to every generator; omitted means each generator uses the current time.
     [Nullable[datetimeoffset]]$AsOfUtc,
     # 1 runs the generators one after another with live output; higher values run independent
@@ -93,6 +95,7 @@ $wf = @('-DataRoot',$DataRoot,'-UserOutputPath',(OutPath 'UserInventoryEvidence'
 if ($Only -eq 'All') { $wf+=@('-SystemEvidencePath',(OutPath 'DeviceSystemEvidence')) }
 if ($AccountClassificationConfigPath) { $wf += @('-AccountClassificationConfigPath',$AccountClassificationConfigPath) }
 if ($SkipWorkforceHistory) { $wf += '-SkipHistory' }
+$wf+=@('-OfficeActivationWarningAgeHours',[string]$OfficeActivationWarningAgeHours)
 $wf+=$clockArgs
 if ($ReuseStagedWorkforce) {
     foreach ($name in @('UserInventoryEvidence','IdentityReconciliationEvidence','WorkforceOperationalSignals')) {
@@ -141,7 +144,7 @@ Add-Task 'IntuneOperations' 'IntuneOperations' 'New-IntuneOperationalEvidence.ps
 $trustArgs=@('-DataRoot',$DataRoot,'-OutputPath',(OutPath 'DataTrustEvidence'))
 if($Only -eq 'All'){$trustArgs+=@('-IntuneOperationalAuditPath',(Join-Path $OutputRoot 'IntuneOperationalAudit.json.txt'))}
 if($MailboxMigrationExceptionsEnabled){$trustArgs+=@('-MailboxMigrationExceptionsAuditPath',(Join-Path $OutputRoot 'MailboxMigrationExceptionsAudit.json.txt'))}
-$trustArgs+=$clockDateArgs+$clockUtcArgs
+$trustArgs+=@('-OfficeActivationWarningAgeHours',[string]$OfficeActivationWarningAgeHours)+$clockDateArgs+$clockUtcArgs
 Add-Task 'Trust' 'Trust' 'New-DataTrustEvidence.ps1' $trustArgs -DependsOn 'IntuneOperations','MailboxExceptions'
 Add-Task 'Executive' 'Executive' 'New-ExecutiveTrendEvidence.ps1' @('-DataRoot',$DataRoot,'-OutputPath',(OutPath 'ExecutiveKPITrends'))
 

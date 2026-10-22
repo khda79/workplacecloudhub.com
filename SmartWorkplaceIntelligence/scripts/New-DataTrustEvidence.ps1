@@ -1,3 +1,4 @@
+# Version 1.1.0: Microsoft 365 Apps activations source with an acquisition-age warning.
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
@@ -10,7 +11,10 @@ param(
 
     [datetime]$AsOfUtc = [datetime]::UtcNow,
     [string]$IntuneOperationalAuditPath,
-    [string]$MailboxMigrationExceptionsAuditPath
+    [string]$MailboxMigrationExceptionsAuditPath,
+    # Hours after the last successful acquisition before the Office activation report is reported Aging.
+    [ValidateRange(1, 8760)]
+    [int]$OfficeActivationWarningAgeHours = 72
 )
 
 Set-StrictMode -Version Latest
@@ -24,7 +28,8 @@ function New-SourceDefinition {
         [string]$FileName,
         [string[]]$ExpectedColumns,
         [string[]]$SnapshotColumns = @(),
-        [bool]$EmptyAllowed = $false
+        [bool]$EmptyAllowed = $false,
+        [int]$AcquisitionWarningAgeHours = 0
     )
 
     [pscustomobject]@{
@@ -34,6 +39,7 @@ function New-SourceDefinition {
         ExpectedColumns = $ExpectedColumns
         SnapshotColumns = $SnapshotColumns
         EmptyAllowed = $EmptyAllowed
+        AcquisitionWarningAgeHours = $AcquisitionWarningAgeHours
     }
 }
 
@@ -60,6 +66,7 @@ $sources = @(
     New-SourceDefinition 'Endpoint' 'Entra hardware-ID conflicts' 'M365_Entra_Devices_HardwareIdConflicts.csv' @('HardwareId', 'DeviceCount') @() $true
     New-SourceDefinition 'Endpoint' 'Entra device removal candidates' 'M365_Entra_Devices_RemovalCandidates.csv' @('HardwareId', 'CandidateObjectId') @() $true
     New-SourceDefinition 'Applications' 'Intune discovered applications' 'Intune_DiscoveredApps_Summary.csv' @('AppName', 'AppVersion')
+    New-SourceDefinition 'Applications' 'Microsoft 365 Apps activations' 'M365_Apps_Activations.csv' @('User Principal Name', 'Product Type', 'Last Activated Date', 'Report Refresh Date') @('Report Refresh Date') $false $OfficeActivationWarningAgeHours
     New-SourceDefinition 'Collaboration' 'Teams inventory' 'M365_Teams_Teams.csv' @('TeamId', 'RunDateUtc') @('RunDateUtc')
     New-SourceDefinition 'Collaboration' 'Teams user activity' 'M365_Teams_UserActivity.csv' @('User Principal Name', 'Report Refresh Date') @('Report Refresh Date')
     New-SourceDefinition 'Content' 'SharePoint site inventory' 'M365_SPO_Sites.csv' @('SiteUrl', 'RunDateUtc') @('RunDateUtc')
@@ -147,6 +154,16 @@ foreach ($source in $sources) {
         }
         'Refresh required' { 'Refresh the source before using it for current operational decisions.' }
         default { 'Maintain the current collection and schema contract.' }
+    }
+
+    if ($source.AcquisitionWarningAgeHours -gt 0 -and $fileExists -and -not $readError) {
+        # A report the producer kept unchanged retains the write time of its last successful acquisition.
+        $acquiredUtc = (Get-Item -LiteralPath $path).LastWriteTimeUtc
+        $snapshotBasis += [string]::Format([Globalization.CultureInfo]::InvariantCulture, '; last acquisition {0:yyyy-MM-ddTHH:mm:ssZ}, Aging after {1} hours', $acquiredUtc, $source.AcquisitionWarningAgeHours)
+        if (($AsOfUtc - $acquiredUtc).TotalHours -gt $source.AcquisitionWarningAgeHours -and $freshnessState -eq 'Fresh') {
+            $freshnessState = 'Aging'
+            if ($decisionReadiness -eq 'Ready') { $recommendedAction = 'Check the source producer: recent runs kept the previous export, so dependent states use its older report date.' }
+        }
     }
 
     if ($source.FileName -eq 'AD_HealthCheck.csv') {

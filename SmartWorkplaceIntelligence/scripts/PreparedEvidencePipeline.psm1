@@ -1,5 +1,5 @@
 # Offline, single-tenant preparation and versioned local publication. No tenant APIs.
-# Version: 1.2.1
+# Version: 1.2.2
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $script:ProductRoot = Split-Path -Parent $PSScriptRoot
@@ -774,6 +774,7 @@ function Invoke-PreparedEvidencePipeline {
         [ValidateRange(1,3650)][int]$SharePointMigrationReviewMaxAgeDays=7,
         [string]$SharePointMigrationReportingTimeZoneId='UTC',
         [Nullable[double]]$DeviceSystemMaxObservationAgeHours, [string]$DeviceSystemOffsetlessGraphTimeZoneId,
+        [ValidateRange(1,8760)][int]$OfficeActivationWarningAgeHours=72,
         [ValidateRange(1,8)][int]$MaxParallelGenerators=1)
     # Read only the two non-secret preparation settings from the effective tenant profile.
     if ($null -eq $DeviceSystemMaxObservationAgeHours -and $null -ne $AdCountryConfiguration) {
@@ -901,6 +902,7 @@ function Invoke-PreparedEvidencePipeline {
         Write-PreparedJson $effectiveContractPath $baseContract
         if ($null -ne $DeviceSystemMaxObservationAgeHours) {$systemPolicyArgs+=@('-DeviceSystemMaxObservationAgeHours',$DeviceSystemMaxObservationAgeHours)}
         if ($DeviceSystemOffsetlessGraphTimeZoneId) {$systemPolicyArgs+=@('-DeviceSystemOffsetlessGraphTimeZoneId',$DeviceSystemOffsetlessGraphTimeZoneId)}
+        $systemPolicyArgs+=@('-OfficeActivationWarningAgeHours',$OfficeActivationWarningAgeHours)
         $null = Test-PreparedClassificationCapture -Path $rules -Stage 'BeforeBuild' -ExpectedSHA256 $classificationCapture.Captured.SHA256 -ExpectedBytes $classificationCapture.Captured.Bytes
         $systemPolicyArgs+=@('-AccountClassificationExpectedSHA256',$classificationCapture.Captured.SHA256,'-AccountClassificationExpectedBytes',[string]$classificationCapture.Captured.Bytes)
         # Generators render warnings as plain text: relayed lines and the retained log never carry ANSI
@@ -919,6 +921,7 @@ function Invoke-PreparedEvidencePipeline {
         $provenance.WindowsMigration = (Get-Content -LiteralPath (Join-Path $staging 'WindowsMigrationAudit.json.txt') -Raw | ConvertFrom-Json)
         $provenance.IntuneOperations=@{ContractSHA256=(Get-FileHash -LiteralPath (Join-Path $script:ProductRoot 'config/intune-operational-contract.json.txt')).Hash;SourcePolicySHA256=(Get-FileHash -LiteralPath $intuneSourcePolicyPath).Hash;Audit=(Get-Content -LiteralPath (Join-Path $staging 'IntuneOperationalAudit.json.txt') -Raw | ConvertFrom-Json)}
         $provenance.AdCountryRulesSHA256=(Get-FileHash -LiteralPath $countryRulesPath).Hash
+        $provenance.OfficeActivationFreshness=@{WarningAgeHours=$OfficeActivationWarningAgeHours;Basis='DATA-LAST write time = last successful acquisition';Effect='Prepare log warning and Data Trust Aging only; never blocks publication.'}
         $provenance.DeviceSystemPolicy=@{MaxObservationAgeHours=$DeviceSystemMaxObservationAgeHours;OffsetlessGraphTimeZoneId=$DeviceSystemOffsetlessGraphTimeZoneId;HardwareFreshness='Platform timestamp is context only; not hardware collection time.'}
         $provenance.WorkforceActivity=@{DefinitionVersion='AD-M365-Console-v1';CurrentSources=@('Active Directory','Microsoft 365','Qualified local console');ConsoleIdentity='Exact unique tenant-scoped AD SID and unique AD-to-Entra link';ConsoleScope='Last observed local interactive user per device; partial coverage; RDP excluded';HistoricalSources=@('Active Directory','Microsoft 365');CurrentConsoleInjectedIntoHistory=$false}
         if ($endpointPolicy.Enabled) {$provenance.EndpointProtectionPolicy=@{PolicyVersion=$endpointPolicy.PolicyVersion;SHA256=(Get-FileHash -LiteralPath $endpointPolicyPath).Hash;Qualification='Antivirus and EDR evaluated separately; unknown is not healthy.'}}

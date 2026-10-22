@@ -2,7 +2,7 @@
 .SYNOPSIS
     Prepare a validated, versioned SmartWorkplaceIntelligence batch after raw collectors.
 .VERSION
-    0.4.5
+    0.4.6
 .NOTES
     PowerShell 7. SharePoint mapping reads use the tenant configuration unless Offline.
     Deployment must include the sibling SmartWorkplaceIntelligence/scripts, config and reference folders.
@@ -319,6 +319,10 @@ try {
     $preparedParallel=ConfigValue 'PreparedMaxParallelGenerators'
     $preparedParallel=if($null -eq $preparedParallel -or [string]$preparedParallel -eq ''){3}else{[int]$preparedParallel}
     if($preparedParallel -lt 1 -or $preparedParallel -gt 8){throw 'PreparedMaxParallelGenerators must be between 1 and 8.'}
+    # A kept Office activation report older than this (hours since its last acquisition) is warned about, never blocked.
+    $officeActivationWarning=ConfigValue 'PreparedOfficeActivationWarningAgeHours'
+    $officeActivationWarning=if($null -eq $officeActivationWarning -or [string]$officeActivationWarning -eq ''){72}else{[int]$officeActivationWarning}
+    if($officeActivationWarning -lt 1 -or $officeActivationWarning -gt 8760){throw 'PreparedOfficeActivationWarningAgeHours must be between 1 and 8760.'}
     $params = @{
         DataRoot=$data;OutputRoot=$output;WorkRoot=$work;TenantKey=$effective.TenantKey
         AccountClassificationConfigPath=$accountClassificationPath
@@ -331,6 +335,7 @@ try {
         MappingRoot=$mappingRoot
         PythonCommand=$preparedPython
         MaxParallelGenerators=$preparedParallel
+        OfficeActivationWarningAgeHours=$officeActivationWarning
         MailboxMigrationExceptionsEnabled=[bool](ConfigValue 'PreparedMailboxMigrationExceptionsEnabled')
         SharePointMigrationEnabled=[bool](ConfigValue 'PreparedSharePointMigrationEnabled')
         SharePointMigrationWorkbookFileName=[string](ConfigValue 'PreparedSharePointMigrationWorkbookFileName')
