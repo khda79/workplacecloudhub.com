@@ -6,11 +6,17 @@ Audits a complete SmartM365 tenant DATA root and retires verified redundant file
 Preview is read-only. Execute removes only verified legacy Windows 11 readiness
 archives, old Discovered Apps detail weeks after preserving their summaries,
 byte-identical old M365 Usage run folders, linked obsolete prepared batches after
-retaining their receipts, and timestamped CSV copies qualified by weekly
-manifests. Every other file is inventoried for review. The script is standalone.
+retaining their receipts, timestamped CSV copies qualified by weekly manifests,
+and orphan atomic-write temporaries left by interrupted writers. Every other
+file is inventoried for review. The script is standalone.
+
+Orphan temporaries are removed only when the name exactly matches a known
+writer pattern, the file is older than the minimum age, and no JSON transport
+lock in its folder is held. The JSON transport keeps its staging and previous
+copies on failure; nothing resumes them, so they only age out here.
 
 .VERSION
-1.0.1
+1.1.0
 
 .EXAMPLE
 ./Invoke-SmartM365-ServerDataCleanup.ps1 -Tenant prod -DataRootPath '<server DATA root>'
@@ -23,6 +29,9 @@ param(
     [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$DataRootPath,
     [string]$ReportDirectory = '',
     [string]$EffectiveJobsPath = '',
+    # A JSON transport .previous copy can be the only prior version: it gets a longer age.
+    [ValidateRange(1, 3650)][int]$OrphanTemporaryMinimumAgeDays = 7,
+    [ValidateRange(1, 3650)][int]$OrphanPreviousMinimumAgeDays = 30,
     [switch]$Execute
 )
 
@@ -166,6 +175,86 @@ function Get-TimestampedCsvDecisions {
             FullName = $file.FullName; LastWriteTimeUtc = $file.LastWriteTimeUtc
         }
     }
+}
+
+# Exact names written by the Core, JsonTransport, CmdbReceipt, DailyCaptureRetention and the
+# Windows PowerShell 5.1 module. Legacy forms predate the short ~sm names (JsonTransport 1.0.8).
+# The legacy <name>.<guid><extension> CSV form is ambiguous and stays a review item.
+$orphanTemporaryPatterns = @(
+    [pscustomobject]@{ Name = 'Short'; Regex = '^~sm[0-9a-f]{12}\.(?<Kind>pending|previous|tmp|partial|download|csv)$' }
+    [pscustomobject]@{ Name = 'LegacyTenantKey'; Regex = '^.+\.tenantkey\.[0-9a-f]{32}\.(?<Kind>tmp)$' }
+    [pscustomobject]@{ Name = 'LegacySibling'; Regex = '^.+\.[0-9a-f]{32}\.(?<Kind>pending|previous|tmp|partial|download)$' }
+    [pscustomobject]@{ Name = 'LegacyWriteProbe'; Regex = '^\.smartm365-write-test-[0-9a-f]{32}\.(?<Kind>tmp)$' }
+    [pscustomobject]@{ Name = 'LegacyPreflightProbe'; Regex = '^\.smartm365-preflight-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(?<Kind>tmp)$' }
+)
+
+function Open-FolderTransportLockSet {
+    # A temporary name does not carry its target, so every JSON transport lock of the
+    # folder is held: no transport writer of that folder can run while they are open.
+    param([Parameter(Mandatory)][string]$Folder)
+    $handles = [Collections.Generic.List[IO.FileStream]]::new()
+    try {
+        foreach ($lock in @(Get-ChildItem -LiteralPath $Folder -File -Force -Filter '*.transport.lock' |
+            Where-Object { $_.Name.EndsWith('.transport.lock', [StringComparison]::OrdinalIgnoreCase) })) {
+            if ($lock.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw "Linked transport lock: $($lock.FullName)" }
+            $handles.Add([IO.File]::Open($lock.FullName, [IO.FileMode]::Open, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None))
+        }
+    } catch {
+        foreach ($handle in $handles) { $handle.Dispose() }
+        throw
+    }
+    return ,$handles
+}
+
+function Get-OrphanTemporaryDecision {
+    $now = [datetime]::UtcNow
+    $lockStates = @{}
+    foreach ($file in @(Get-ChildItem -LiteralPath $root -File -Recurse -Force)) {
+        # Weekly upload markers are publication state, never a temporary.
+        if ($file.Name -ieq 'upload.pending') { continue }
+        $pattern = ''
+        $kind = ''
+        foreach ($candidate in $orphanTemporaryPatterns) {
+            $match = [regex]::Match($file.Name, $candidate.Regex, [Text.RegularExpressions.RegexOptions]::IgnoreCase)
+            if ($match.Success) { $pattern = $candidate.Name; $kind = $match.Groups['Kind'].Value.ToLowerInvariant(); break }
+        }
+        if (-not $pattern) { continue }
+        # A copied file keeps an old write time; its creation time still shows recent activity.
+        $lastActivity = if ($file.CreationTimeUtc -gt $file.LastWriteTimeUtc) { $file.CreationTimeUtc } else { $file.LastWriteTimeUtc }
+        $ageDays = ($now - $lastActivity).TotalDays
+        $minimumDays = if ($kind -eq 'previous') { $OrphanPreviousMinimumAgeDays } else { $OrphanTemporaryMinimumAgeDays }
+        $reason = ''
+        if ($ageDays -lt $minimumDays) { $reason = 'Recent' }
+        if (-not $reason) {
+            try {
+                $null = Assert-OwnedPath $file.FullName
+                if ($file.Attributes -band [IO.FileAttributes]::ReparsePoint) { $reason = 'ReparseOrOutsideRoot' }
+            } catch { $reason = 'ReparseOrOutsideRoot' }
+        }
+        if (-not $reason) {
+            if (-not $lockStates.ContainsKey($file.DirectoryName)) {
+                $state = ''
+                try { foreach ($handle in (Open-FolderTransportLockSet $file.DirectoryName)) { $handle.Dispose() } }
+                catch [IO.IOException] { $state = 'TransportLockHeld' }
+                catch { $state = 'TransportLockUnavailable' }
+                $lockStates[$file.DirectoryName] = $state
+            }
+            $reason = $lockStates[$file.DirectoryName]
+        }
+        [pscustomobject]@{
+            Action = if ($reason) { 'Keep' } else { 'Remove' }
+            Reason = $reason; Result = ''; Pattern = $pattern; Kind = $kind
+            Folder = [IO.Path]::GetRelativePath($root, $file.DirectoryName)
+            Name = $file.Name; SizeBytes = $file.Length; MinimumAgeDays = $minimumDays
+            AgeDays = [Math]::Round($ageDays, 1); FullName = $file.FullName
+            LastWriteTimeUtc = $file.LastWriteTimeUtc
+        }
+    }
+}
+
+function Write-CleanupLog {
+    param([string]$Message)
+    Write-Information ('[{0}] {1}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $Message) -InformationAction Continue
 }
 
 $actions = [Collections.Generic.List[object]]::new()
@@ -372,6 +461,15 @@ $timestampedCandidates = [Collections.Generic.HashSet[string]]::new([StringCompa
 foreach ($decision in @($timestampedDecisions | Where-Object Action -eq 'Remove')) {
     [void]$timestampedCandidates.Add($decision.FullName)
 }
+$orphanReport = Join-Path $reportRoot 'orphan-temporaries.csv'
+$orphanDecisions = @(Get-OrphanTemporaryDecision)
+$orphanDecisions | Select-Object Action,Reason,Result,Pattern,Kind,Folder,Name,SizeBytes,AgeDays,MinimumAgeDays |
+    Export-Csv -LiteralPath $orphanReport -NoTypeInformation -Encoding utf8
+$orphanByPath = [Collections.Generic.Dictionary[string,object]]::new([StringComparer]::OrdinalIgnoreCase)
+foreach ($decision in $orphanDecisions) { $orphanByPath[$decision.FullName] = $decision }
+Write-CleanupLog ('Orphan temporaries: {0} matched, {1} eligible (minimum age {2} days, {3} days for .previous).' -f
+    $orphanDecisions.Count, @($orphanDecisions | Where-Object Action -eq 'Remove').Count,
+    $OrphanTemporaryMinimumAgeDays, $OrphanPreviousMinimumAgeDays)
 $plannedFolders = @($actions | Where-Object { $_.Category -in 'DiscoveredAppsWeek','DuplicateUsageRun','LinkedPreparedBatch','EmptyReadinessArchive' })
 $plannedFileReasons = [Collections.Generic.Dictionary[string,string]]::new([StringComparer]::OrdinalIgnoreCase)
 foreach ($item in @($actions | Where-Object { $_.Category -in 'ReadinessArchive','RetiredCmdbLock' })) {
@@ -383,6 +481,11 @@ $inventory = foreach ($file in $allFiles) {
     $reason = 'No deletion rule proved this file redundant.'
     if ($plannedFileReasons.ContainsKey($file.FullName)) { $action = 'PlannedRemoval'; $reason = $plannedFileReasons[$file.FullName] }
     elseif ($timestampedCandidates.Contains($file.FullName)) { $action = 'PlannedRemoval'; $reason = 'Timestamped CSV qualified by weekly manifest and current DATA-LAST copy.' }
+    elseif ($orphanByPath.ContainsKey($file.FullName)) {
+        $orphan = $orphanByPath[$file.FullName]
+        if ($orphan.Action -eq 'Remove') { $action = 'PlannedRemoval'; $reason = 'Orphan atomic-write temporary past its minimum age; no transport lock held.' }
+        else { $action = 'Keep'; $reason = 'Orphan atomic-write temporary kept: ' + $orphan.Reason }
+    }
     foreach ($folder in $plannedFolders) {
         if ($file.FullName.StartsWith(($folder.Path + [IO.Path]::DirectorySeparatorChar), [StringComparison]::OrdinalIgnoreCase)) {
             $action = 'PlannedRemoval'; $reason = $folder.Reason; break
@@ -550,19 +653,55 @@ if ($Execute) {
     }
     $timestampedDecisions | Select-Object Action,Reason,Result,Folder,Name,Week,SizeBytes |
         Export-Csv -LiteralPath $timestampedReport -NoTypeInformation -Encoding utf8
+
+    # Requalify from disk, then delete while every transport lock of the folder is held.
+    $orphanRechecked = [Collections.Generic.Dictionary[string,object]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($decision in @(Get-OrphanTemporaryDecision)) { $orphanRechecked[$decision.FullName] = $decision }
+    foreach ($decision in @($orphanDecisions | Where-Object Action -eq 'Remove')) {
+        $relativePath = Join-Path $decision.Folder $decision.Name
+        try {
+            if (-not (Test-Path -LiteralPath $decision.FullName)) { $decision.Result = 'AlreadyAbsent'; continue }
+            if (-not $orphanRechecked.ContainsKey($decision.FullName)) { throw 'Orphan temporary no longer matches a known pattern.' }
+            $current = $orphanRechecked[$decision.FullName]
+            if ($current.Action -ne 'Remove') { $decision.Result = 'Skipped: ' + $current.Reason }
+            elseif ($current.SizeBytes -ne $decision.SizeBytes -or
+                $current.LastWriteTimeUtc -ne $decision.LastWriteTimeUtc) { $decision.Result = 'Skipped: changed after preview' }
+            else {
+                $path = Assert-OwnedPath $decision.FullName
+                $handles = $null
+                try { $handles = Open-FolderTransportLockSet (Split-Path -Path $path -Parent) }
+                catch [IO.IOException] { $decision.Result = 'Skipped: TransportLockHeld' }
+                if ($null -ne $handles) {
+                    try { Remove-Item -LiteralPath $path -Force -ErrorAction Stop }
+                    finally { foreach ($handle in $handles) { $handle.Dispose() } }
+                    $decision.Result = 'Removed'
+                    Write-CleanupLog ('Removed orphan temporary {0} ({1} bytes, {2}, {3} days old).' -f $relativePath, $decision.SizeBytes, $decision.Pattern, $decision.AgeDays)
+                }
+            }
+            if ($decision.Result -like 'Skipped:*') { Write-CleanupLog ('Orphan temporary kept {0}: {1}' -f $relativePath, $decision.Result) }
+        } catch {
+            $decision.Result = 'Failed: ' + $_.Exception.Message
+            Write-CleanupLog ('Orphan temporary removal failed for {0}: {1}' -f $relativePath, $_.Exception.Message)
+        }
+    }
+    $orphanDecisions | Select-Object Action,Reason,Result,Pattern,Kind,Folder,Name,SizeBytes,AgeDays,MinimumAgeDays |
+        Export-Csv -LiteralPath $orphanReport -NoTypeInformation -Encoding utf8
 }
 
 $result = [pscustomobject]@{
     DataRootPath = $root
     Mode = if ($Execute) { 'Execute' } else { 'Preview' }
     InventoryFiles = $allFiles.Count
-    PlannedActions = $actions.Count + $timestampedCandidates.Count
-    RemovedActions = @($actions | Where-Object Status -eq 'Removed').Count + @($timestampedDecisions | Where-Object Result -eq 'Removed').Count
-    FailedActions = @($actions | Where-Object Status -like 'Failed:*').Count + @($timestampedDecisions | Where-Object Result -like 'Failed:*').Count
+    PlannedActions = $actions.Count + $timestampedCandidates.Count + @($orphanDecisions | Where-Object Action -eq 'Remove').Count
+    RemovedActions = @($actions | Where-Object Status -eq 'Removed').Count + @($timestampedDecisions | Where-Object Result -eq 'Removed').Count +
+        @($orphanDecisions | Where-Object Result -eq 'Removed').Count
+    FailedActions = @($actions | Where-Object Status -like 'Failed:*').Count + @($timestampedDecisions | Where-Object Result -like 'Failed:*').Count +
+        @($orphanDecisions | Where-Object Result -like 'Failed:*').Count
+    SkippedOrphanTemporaries = @($orphanDecisions | Where-Object Result -like 'Skipped:*').Count
     ReportDirectory = $reportRoot
 }
 $result
-if ($result.FailedActions -gt 0) { throw 'One or more verified cleanup actions failed; inspect verified-actions.csv and timestamped-csv.csv.' }
+if ($result.FailedActions -gt 0) { throw 'One or more verified cleanup actions failed; inspect verified-actions.csv, timestamped-csv.csv and orphan-temporaries.csv.' }
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor

@@ -14,7 +14,7 @@ Les destinations qualifiées se configurent maintenant dans `Config/SmartM365-Js
 - `.json.txt` prioritaire ; repli uniquement en son absence. Nouveau fichier invalide, inaccessible, répertoire à sa place ou doublon divergent : erreur explicite, sans reprise silencieuse de l'ancien.
 - Persistants : déplacement des octets sans re-sérialisation, validation du propriétaire, SHA-256, verrou commun aux deux noms, journal durable et reprise. Doublons identiques retirés sous contrôle du propriétaire ; divergents conservés et bloquants.
 - Régénérés : publication atomique du nouveau fichier avant traitement de l'ancien. Reçu avec les deux empreintes pour reprendre une interruption après publication. Une nouvelle collecte peut produire un nouveau contenu ; la migration seule ne le recalcule jamais.
-- Écritures atomiques avec empreinte attendue ; preuves `.pending`, `.previous`, `.lock`, `.log` préservées en cas d'échec. Leur extension n'est pas `.json`.
+- Écritures atomiques avec empreinte attendue ; preuves `.pending`, `.previous`, `.lock`, `.log` préservées en cas d'échec. Leur extension n'est pas `.json`. Aucun écrivain ne reprend `~sm*.pending`/`.previous` : `Invoke-SmartM365-ServerDataCleanup` 1.1.0 les retire de la racine DATA après 7 jours (30 pour `.previous`), sur motif exact et seulement si aucun `*.transport.lock` du dossier n'est tenu.
 - Des noms anciens restent dans le code pour la compatibilité et dans les contenus historiques pour préserver leurs octets. Les lecteurs résolvent les deux noms.
 - Un verrou local n'est pas un verrou distribué OneDrive. Les chemins liés/reparse sont refusés : d'éventuels placeholders doivent être qualifiés sans contourner ce garde-fou.
 
