@@ -51,6 +51,62 @@
                       "Entity": "Native Source Health"
                     }
                   },
+                  "Property": "Native OK source feeds"
+                }
+              },
+              "queryRef": "Native Source Health.Native OK source feeds",
+              "nativeQueryRef": "Native OK source feeds"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Source Health"
+                    }
+                  },
+                  "Property": "Native Warning source feeds"
+                }
+              },
+              "queryRef": "Native Source Health.Native Warning source feeds",
+              "nativeQueryRef": "Native Warning source feeds"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Source Health"
+                    }
+                  },
+                  "Property": "Native Failed source feeds"
+                }
+              },
+              "queryRef": "Native Source Health.Native Failed source feeds",
+              "nativeQueryRef": "Native Failed source feeds"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Source Health"
+                    }
+                  },
+                  "Property": "Native Unknown-status source feeds"
+                }
+              },
+              "queryRef": "Native Source Health.Native Unknown-status source feeds",
+              "nativeQueryRef": "Native Unknown-status source feeds"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Source Health"
+                    }
+                  },
                   "Property": "Native Missing source feeds"
                 }
               },

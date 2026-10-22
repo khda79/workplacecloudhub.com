@@ -267,6 +267,15 @@ class NativeEvidenceTests(unittest.TestCase):
         self.fixture.write_inputs()
         self.compare()
 
+    def test_source_health_statuses_are_mapped_to_collected_states(self):
+        from test_native_source_health import mapping
+        self.fixture.inputs['license_paths'].append({'UserId':'missing-user','SkuId':'s1','AssignedByGroupId':'g1','AssignmentState':'Error'})
+        self.fixture.write_inputs()
+        unified.build(self.fixture.source,self.output,self.audit())
+        statuses={r['Status'] for r in self.output_rows('SourceHealth')}
+        self.assertEqual(statuses,{'Success','SuccessWithWarnings'})
+        self.assertEqual({mapping()[s] for s in statuses},{'OK','Warning'})
+
     def test_endpoint_score_sentinels_are_not_zero(self):
         self.fixture.inputs['analytics'][0]['EndpointAnalyticsScore'] = '-1'
         self.fixture.write_inputs()

@@ -159,6 +159,17 @@ expression NativeEvidenceTypes =
 		    Converted
 	lineageTag: 5fef8535-2f69-4d1c-866a-d915494c40a3
 
+/// Native SourceHealth status mapped to a health state. Exhaustive generator vocabulary; any other value stays Unknown, never OK.
+expression NativeSourceHealthState =
+		// Exact, case-sensitive match: SourceHealth.csv writes Success or SuccessWithWarnings; Failed/Cancelled are run outcomes.
+		// Receipt-level Completed/CompletedWithWarnings are not SourceHealth values and are deliberately Unknown.
+		(Status as nullable text) as text =>
+		let
+		    States = [Success = "OK", SuccessWithWarnings = "Warning", Failed = "Failed", Cancelled = "Failed"]
+		in
+		    if Status = null or Status = "" then "Unknown" else Record.FieldOrDefault(States, Status, "Unknown")
+	lineageTag: fd169cb9-e9b2-48d3-af57-ae1e6b8035e0
+
 /// Expected private reporting tenant. Replace with deployment identity before any refresh; never infer identity from the downloaded pointer.
 expression PreparedExpectedTenantKey = "" meta [IsParameterQuery=true, Type="Text", IsParameterQueryRequired=true]
 	lineageTag: fd94c8fb-7f6c-48b7-ac89-42afd49db4fe
