@@ -23,7 +23,7 @@
     - Sends an email notification in case of a global error (SendEmailHtmlReport)
 
 .VERSION
-1.65
+1.66
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; ActiveDirectory RSAT/Windows Server module; ImportExcel for the diagnostic mail workbook.
@@ -113,6 +113,24 @@ $tenantContextPath = & {
 }
 . $tenantContextPath
 $script:SmartM365GlobalConfig = Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot
+
+function ConvertTo-InventoryIsoDate {
+    param([AllowNull()][object]$Value)
+    # Round-trip preserves DateTime.Kind/DateTimeOffset.Offset. Unspecified stays offsetless.
+    if ($null -eq $Value) { return '' }
+    if ($Value -is [datetime] -or $Value -is [datetimeoffset]) {
+        return $Value.ToString('o', [Globalization.CultureInfo]::InvariantCulture)
+    }
+    # Do not guess a culture or timezone for string-valued/deserialized evidence.
+    return ''
+}
+
+function ConvertFrom-AdFileTimeIso {
+    param([AllowNull()][object]$Value)
+    if ($null -eq $Value -or $Value -eq 0) { return '' }
+    # FILETIME has a defined UTC epoch; no host timezone is needed.
+    return [datetime]::FromFileTimeUtc([long]$Value).ToString('o', [Globalization.CultureInfo]::InvariantCulture)
+}
 
 function Get-ScriptLocalConfig {
     [CmdletBinding()]
@@ -781,7 +799,7 @@ try {
 # ==========================================================
 # Initialization via SmartM365.Core
 # ==========================================================
-$ScriptVersion = "1.65"
+$ScriptVersion = "1.66"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $script:ExitCode = 0
 $globalError = $null
@@ -1148,8 +1166,8 @@ try {
     function Get-SmartM365AdNativeColumns {
         param([ValidateSet('Users','Computers','Groups','DirectoryObjects','OUs','Contacts')][string]$Kind)
         switch ($Kind) {
-            'Users' { @('DomainName','ObjectType','SamAccountName','sAMAccountType','Name','DistinguishedName','UserPrincipalName','primaryGroupID','Enabled','manager','LastLogonTimestamp','LastLogonDate','DisplayName','GivenName','Surname','Description','Department','Title','Company','Office','TelephoneNumber','MobilePhone','EmailAddress','StreetAddress','City','PostalCode','Country','CountryName','WhenCreated','WhenChanged','AccountExpirationDate','PasswordLastSetDate','badPwdCount','BadPasswordDate','LogonCount','userAccountControl','IsNormalAccount','IsScriptAccount','IsPasswordNeverExpires','IsTrustedForDelegation','MemberOfGroups','ProxyAddresses','CanonicalName','ObjectGUID','TargetAddress','msExchRemoteRecipientType','msExchRecipientTypeDetails','ObjectSID','ObjectSIDHistory','extensionAttribute1','extensionAttribute2','extensionAttribute3','extensionAttribute4','extensionAttribute5','extensionAttribute6','extensionAttribute7','extensionAttribute8','extensionAttribute9','extensionAttribute10','extensionAttribute11','extensionAttribute12','extensionAttribute13','extensionAttribute14','extensionAttribute15','MustChangePasswordAtNextLogon','DomainNameShort','DomainAndSam','ImmutableId_AD') }
-'Computers' { @('DomainName','ObjectType','SamAccountName','Name','DistinguishedName','Enabled','DNSHostName','OperatingSystem','operatingSystemHotfix','operatingSystemServicePack','operatingSystemVersion','LastLogonDate','Description','IPv4Address','WhenCreated','WhenChanged','pwdLastSetDate','CanonicalName','MemberOfDNs','PrimaryGroupName','ObjectGUID','SID','SIDHistory','extensionAttribute1','extensionAttribute2','extensionAttribute3','extensionAttribute4','extensionAttribute5','extensionAttribute6','extensionAttribute7','extensionAttribute8','extensionAttribute9','extensionAttribute10','extensionAttribute11','extensionAttribute12','extensionAttribute13','extensionAttribute14','extensionAttribute15','DomainNameShort','DomainAndSam','ImmutableId_AD','IsMemberOfConfiguredGroup01','IsMemberOfConfiguredGroup02','IsMemberOfConfiguredGroup03','IsMemberOfConfiguredGroup04','IsMemberOfConfiguredGroup05','IsMemberOfConfiguredGroup06','IsMemberOfConfiguredGroup07','IsMemberOfConfiguredGroup08','IsMemberOfConfiguredGroup09','IsMemberOfConfiguredGroup10','MatchedConfiguredGroups') }
+            'Users' { @('DomainName','ObjectType','SamAccountName','sAMAccountType','Name','DistinguishedName','UserPrincipalName','primaryGroupID','Enabled','manager','LastLogonTimestamp','LastLogonDate','DisplayName','GivenName','Surname','Description','Department','Title','Company','Office','TelephoneNumber','MobilePhone','EmailAddress','StreetAddress','City','PostalCode','Country','CountryName','WhenCreated','WhenChanged','AccountExpirationDate','PasswordLastSetDate','badPwdCount','BadPasswordDate','LogonCount','userAccountControl','IsNormalAccount','IsScriptAccount','IsPasswordNeverExpires','IsTrustedForDelegation','MemberOfGroups','ProxyAddresses','CanonicalName','ObjectGUID','TargetAddress','msExchRemoteRecipientType','msExchRecipientTypeDetails','ObjectSID','ObjectSIDHistory','extensionAttribute1','extensionAttribute2','extensionAttribute3','extensionAttribute4','extensionAttribute5','extensionAttribute6','extensionAttribute7','extensionAttribute8','extensionAttribute9','extensionAttribute10','extensionAttribute11','extensionAttribute12','extensionAttribute13','extensionAttribute14','extensionAttribute15','MustChangePasswordAtNextLogon','DomainNameShort','DomainAndSam','ImmutableId_AD','WhenCreatedIso8601','WhenChangedIso8601','AccountExpirationDateIso8601','LastLogonDateIso8601','PasswordLastSetDateIso8601','BadPasswordDateIso8601','PasswordExpired') }
+'Computers' { @('DomainName','ObjectType','SamAccountName','Name','DistinguishedName','Enabled','DNSHostName','OperatingSystem','operatingSystemHotfix','operatingSystemServicePack','operatingSystemVersion','LastLogonDate','Description','IPv4Address','WhenCreated','WhenChanged','pwdLastSetDate','CanonicalName','MemberOfDNs','PrimaryGroupName','ObjectGUID','SID','SIDHistory','extensionAttribute1','extensionAttribute2','extensionAttribute3','extensionAttribute4','extensionAttribute5','extensionAttribute6','extensionAttribute7','extensionAttribute8','extensionAttribute9','extensionAttribute10','extensionAttribute11','extensionAttribute12','extensionAttribute13','extensionAttribute14','extensionAttribute15','DomainNameShort','DomainAndSam','ImmutableId_AD','IsMemberOfConfiguredGroup01','IsMemberOfConfiguredGroup02','IsMemberOfConfiguredGroup03','IsMemberOfConfiguredGroup04','IsMemberOfConfiguredGroup05','IsMemberOfConfiguredGroup06','IsMemberOfConfiguredGroup07','IsMemberOfConfiguredGroup08','IsMemberOfConfiguredGroup09','IsMemberOfConfiguredGroup10','MatchedConfiguredGroups','WhenCreatedIso8601','WhenChangedIso8601','LastLogonDateIso8601','pwdLastSetDateIso8601','LastLogonTimestamp') }
             'Groups' { @('DomainName','CanonicalName','CN','Created','createTimeStamp','Deleted','Description','DisplayName','DistinguishedName','GroupCategory','GroupScope','GroupType','HomePage','LastKnownParent','mail','ManagedBy','MemberOf','Members','MembersJson','Modified','modifyTimeStamp','Name','ObjectCategory','ObjectClass','ObjectGUID','objectSid','ProtectedFromAccidentalDeletion','SamAccountName','SIDHistory','whenChanged','whenCreated') }
             'DirectoryObjects' { @('DomainName','ObjectClass','DistinguishedName','ObjectGUID','ObjectSID','PrimaryGroupID') }
             'OUs' { @('DomainName','ObjectType','Name','DistinguishedName','ObjectGUID','whenCreated','whenChanged','Description','managedBy') }
@@ -3060,6 +3078,11 @@ $($rows -join "`n")
                         $computerRow[("IsMemberOfConfiguredGroup{0:D2}" -f ($configuredGroupIndex + 1))] = [bool]$configuredGroupFlags[$configuredGroupIndex]
                     }
                     $computerRow['MatchedConfiguredGroups'] = ($configuredGroupMatches -join ';')
+                    $computerRow['WhenCreatedIso8601'] = ConvertTo-InventoryIsoDate $computer.WhenCreated
+                    $computerRow['WhenChangedIso8601'] = ConvertTo-InventoryIsoDate $computer.WhenChanged
+                    $computerRow['LastLogonDateIso8601'] = ConvertFrom-AdFileTimeIso $computer.LastLogonTimestamp
+                    $computerRow['pwdLastSetDateIso8601'] = ConvertFrom-AdFileTimeIso $computer.pwdLastSet
+                    $computerRow['LastLogonTimestamp'] = $computer.LastLogonTimestamp
                     [PSCustomObject]$computerRow
                 } |
                 Add-SmartM365TenantKey | Export-Csv $outputCsvFilePath -NoTypeInformation -Encoding UTF8
@@ -3088,7 +3111,7 @@ $($rows -join "`n")
 
             [int]$DomainIncludedUsersNoUpn = 0
             # UPN is optional; GUID and SID retain identity for every AD user.
-            Get-ADUser -LDAPFilter "(&(objectCategory=person)(objectClass=user))" -Server $currentDomainName -ResultSetSize $null -Properties SamAccountName, sAMAccountType, Name, DistinguishedName, UserPrincipalName, Enabled, manager, LastLogonTimestamp, DisplayName, GivenName, Surname, Description, Department, Title, Company, Office, TelephoneNumber, MobilePhone, EmailAddress, StreetAddress, City, PostalCode, Country, WhenCreated, WhenChanged, AccountExpirationDate, pwdLastSet, badPwdCount, badPasswordTime, LogonCount, userAccountControl, msDS-ManagedPassword, ProxyAddresses, MemberOf, primaryGroupID, CanonicalName, ObjectGUID, targetAddress, msExchRemoteRecipientType, msExchRecipientTypeDetails, ObjectSID, SIDHistory, extensionAttribute1, extensionAttribute2, extensionAttribute3, extensionAttribute4, extensionAttribute5, extensionAttribute6, extensionAttribute7, extensionAttribute8, extensionAttribute9, extensionAttribute10, extensionAttribute11, extensionAttribute12, extensionAttribute13, extensionAttribute14, extensionAttribute15 |
+            Get-ADUser -LDAPFilter "(&(objectCategory=person)(objectClass=user))" -Server $currentDomainName -ResultSetSize $null -Properties SamAccountName, sAMAccountType, Name, DistinguishedName, UserPrincipalName, Enabled, manager, LastLogonTimestamp, DisplayName, GivenName, Surname, Description, Department, Title, Company, Office, TelephoneNumber, MobilePhone, EmailAddress, StreetAddress, City, PostalCode, Country, WhenCreated, WhenChanged, AccountExpirationDate, PasswordExpired, pwdLastSet, badPwdCount, badPasswordTime, LogonCount, userAccountControl, msDS-ManagedPassword, ProxyAddresses, MemberOf, primaryGroupID, CanonicalName, ObjectGUID, targetAddress, msExchRemoteRecipientType, msExchRecipientTypeDetails, ObjectSID, SIDHistory, extensionAttribute1, extensionAttribute2, extensionAttribute3, extensionAttribute4, extensionAttribute5, extensionAttribute6, extensionAttribute7, extensionAttribute8, extensionAttribute9, extensionAttribute10, extensionAttribute11, extensionAttribute12, extensionAttribute13, extensionAttribute14, extensionAttribute15 |
                 Select-Object `
                     @{Name = 'DomainName';           Expression = { $currentDomainName }},
                     @{Name = 'ObjectType';           Expression = { $CurrentObjectType }},
@@ -3192,7 +3215,14 @@ $($rows -join "`n")
                     @{Name = 'MustChangePasswordAtNextLogon'; Expression = { ($_.pwdLastSet -eq 0) -and (-not (Test-UserAccountControlFlag -UserAccountControlValue $_.userAccountControl -FlagToCheck 65536)) }},
                     @{Name = 'DomainNameShort';         Expression = { Get-DomainNameShort -DomainName $currentDomainName }},
                     @{Name = 'DomainAndSam';            Expression = { Get-NormalizedDomainAndSam -DomainNameShort (Get-DomainNameShort -DomainName $currentDomainName) -SamAccountName $_.SamAccountName }},
-                    @{Name = 'ImmutableId_AD';          Expression = { Convert-GuidToImmutableId -ObjectGuid ([string]$_.ObjectGUID) }} |
+                    @{Name = 'ImmutableId_AD';          Expression = { Convert-GuidToImmutableId -ObjectGuid ([string]$_.ObjectGUID) }},
+                    @{Name = 'WhenCreatedIso8601'; Expression = { ConvertTo-InventoryIsoDate $_.WhenCreated }},
+                    @{Name = 'WhenChangedIso8601'; Expression = { ConvertTo-InventoryIsoDate $_.WhenChanged }},
+                    @{Name = 'AccountExpirationDateIso8601'; Expression = { ConvertTo-InventoryIsoDate $_.AccountExpirationDate }},
+                    @{Name = 'LastLogonDateIso8601'; Expression = { ConvertFrom-AdFileTimeIso $_.LastLogonTimestamp }},
+                    @{Name = 'PasswordLastSetDateIso8601'; Expression = { ConvertFrom-AdFileTimeIso $_.pwdLastSet }},
+                    @{Name = 'BadPasswordDateIso8601'; Expression = { ConvertFrom-AdFileTimeIso $_.badPasswordTime }},
+                    PasswordExpired |
                 ForEach-Object {
                     [void]($userCount++)
                     if ([string]::IsNullOrWhiteSpace([string]$_.UserPrincipalName)) { $DomainIncludedUsersNoUpn++ }
@@ -4200,12 +4230,11 @@ finally {
 }
 if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 
-
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCApZkHn2kfZdj1c
-# YsZGD5y7TFq+KtcIMYFS5ZZcZ3dLkaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC2Ou/YGF7evU4R
+# uxCGsP1wceb8iyt831OMNDTlJPeCFqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -4338,31 +4367,31 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIBxNF106xfDZ9Y5HRRtqqZB7Mk6k9CJFqHkP9kp6bO1mMA0GCSqG
-# SIb3DQEBAQUABIIBgHmeFLggmt4aS9JFHhpV35TYg2MivftIxKCJqRW38qXfESUZ
-# 8lXYY8PT2KwgyAQ/gJ29uPGueHdoKqUZomeexJoW8FxN4EKr5CrcTo4jds5ADsuL
-# VCwuC6wSnD6EMCmOZ4Xhoo5wYjN/7WNg0BAgbNCFZuWwlyLUV12pDuHE+cHAbTw9
-# uJhUssuS/W9arDuQD0vXoxGSQ5xo5k3jkIpluYTD5lj/isaWCAzmdqEWR8H1T0Oi
-# 6IvVFl3AyyXu5Cnv8EXFjhBploPyR08tYFStPfeh536ojxOB4x2b+PbnXwEh57bd
-# 4K1725idjxONU6COpgOMOISwIObusKzZTc+jo64+/y1ty1OR4bq8sFB1iNI4p7It
-# Cc6yLn1Ygumuy/D3nP43y1YJ0WQc2+FuaHc0wtb+fcf9z64hFxPcZbW6I/KRN/CV
-# tMS/Gwx0VGWr+FWtc8UAxJ0emyzj+GYKGbBgfdcodqBN4Ai3aG67Q5ikQxxtrSaE
-# 0F94iTWvdwThhmBcsaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIFvForteJeuxNvqWHRAY+8odgvYeBzuBB5e1vJXR59o1MA0GCSqG
+# SIb3DQEBAQUABIIBgCaPTbBdZitajk9EPpTqVIhp7vEEPor4JpUWKtXUaypUotV3
+# 0qvMTeAib0xYYcVRUh+FKAq+CsRBEvKDHk63/uXB/9U1KNO4bAKigE1LCDlqdCFa
+# zUyj8YuMArno0mSoKnI0pzokK17CD0EF5VbYIzXOz3YT8zD6ucpUpSG+jhJcFZIQ
+# e+je1BvyGhG0kcLZVh5h7AxUYO3z2Fvs9M0znt+kLJqzVy3rKyPKCig+hc7Fucjh
+# pW1wUeTnBscCU0UXNFK+glE/Zk7CtxUois9HRWFnxzt/7dVWkaCWRQ33GGXaDxyU
+# TfDxHBtrZgsQ5AKrjV2edJtZLrAjoD2AmXN5xWsXygjeN0mEb6oPadINC1rJfCQy
+# nt7yk2oHyPAdd4PJpR4T9cKv5UWbpieGdBniuHYLJeh+I41SAgxUc5MO9uCDLlx8
+# 9OZPVzIqGqXfowPzrBboDON232fIGlEIwmZcJYziZycmf1/MoNZaMSweSP0duOCK
+# jSIGhOaBlvQOcg/RjaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjAxNDI2
-# NDRaMC8GCSqGSIb3DQEJBDEiBCByZOoBBIMBXVsWBHm+ROMllXL6KmQqkBb4D4RX
-# qG/l5zANBgkqhkiG9w0BAQEFAASCAgCrwoYmcOW7AT1LUE7tYILN8qveXxt4QVBi
-# wV+lYBaYERixMHc4A+TZoHLkzgB/4qIsDWYOF1pHjboaIL7wmG3NLhYCXjcC7ACv
-# nl8ezWfFayvAY0IOzGn4OUPVOV2X8P8ElK80NPNgxEIcX00S2jUYaj1V69/vITsW
-# /KWbMfsWB0wnddfpowGObtc7PwyVOYjX8tbHQT7WBjs7rE06sy9K59MyaWZF9RvF
-# sYFYL7Hk0s90mrY6Xkma5v3gzwvvbZ/gy/e0BN6YL25xxlQv+AqOXGdu+nKiaDEM
-# H2WgpTJFrGa+vY3GJB6NlJg+x+uyjwfbrguM1qrMYSisj+QYzSPR3q2OJM9WvPEJ
-# AP4T1DK2sMO755s7eSdY10aYDJfw/Jo4TloyVpVhH4RiEQrDJILt1hTf0ov1rZLH
-# 36bXeXmF0ZmI3AlLXTBzNq3uQ4kek9cSbL1IIxo0TyfuHmNQGT0U81L+We0FNt03
-# dmh1Rk8eTcscVZ+mlVzQC0bFEOkD098krkCA9Ux+fM4294bwYiR59GycCkgosuBy
-# tLZbnkiDQcE8scBHA4N2jlybcmF5m9BTbHKfWDRm7rRhJUi41x7AyGOLsvMVUyAH
-# JyBzhHqJaZZ41V6azNRcBIHjU1AXcy+WzYMXvgxiUg22LCv4anDufUvHpP4u/RYx
-# KnSTs3n4HQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjIyMTI2
+# MjZaMC8GCSqGSIb3DQEJBDEiBCBnKvmjltsQbkOcdjb4qpoN6wl9nxhBB/Ip4r/4
+# oZypMzANBgkqhkiG9w0BAQEFAASCAgA4TF6CVZiYCKHnZv1MUAVAYxSMb6/5o8My
+# fCOnDRkWFX/02ean04GKJZoQtzxrlT6OD/QWMRexq7FDJzKPQWFjxpRBqkq+SYU4
+# wvWcBTEu9epkWWTZENDrDJeCd9EOtvfnuoth3Y4L9OoYhb59g4PR/55hUIR0SFGa
+# DM4hSHnoOnWJtmH+mPR/zvWsgGcwFgmJZ7yJuqs7a5uAXX3+BnfyS8bTjH82KpzK
+# f8UNi6i++Uj8sosqNke9VjvHRqGub0S7x2gGHRcf+DWq/RnzL9aIYlRs2NjYAMtV
+# MGaSDs2ItJJa/BRb0UTf7Cv9KQUZaHSUUk8BUxmuI8TzZJoaOH4q0OKFqgQzmIQe
+# RUB+JhzodRm/IdIY6bw0CbcgqkvtyD3gO+lWJEiiHS7aC+7JuDyFJESDui7i6AsH
+# 6JUyTpej7LAnkU7iDelCtUu3VCW0QYs23aTEvqi4oED0GG9ly6wEv+oqTSIyEOKE
+# EIbhC8Mj60hZZiHK+oJKOJd1ynL9b34RmbgLNDjddZ3ODsDy2xsOO0nzeQe/Ty5O
+# gr1ov/ZjWG5/m4uMiz4WB57/Ah6S6ntGsC3Ry1rCyBCVZSgUJ6lAEuGNwtwy/6ys
+# afX+UvauIgO5QYWd92LZl8KjUNzG4ozESG6jv+fq/c7vNStht1Wuah7bmplPbtji
+# JxDSXyFaHw==
 # SIG # End signature block

@@ -77,14 +77,14 @@ class NativeEvidenceTests(unittest.TestCase):
             if table['name'] in identity_outputs:
                 continue
             name = table['name'] + '.csv'
-            if table['name']=='ADUserSource':
-                # AccountType is captured by a separate reader; all legacy cells
-                # and native keys must remain identical to the same-input oracle.
-                expected=list(baseline.rows(self.fixture.output / name))
-                actual=self.output_rows('ADUserSource')
-                self.assertEqual(len(expected),len(actual),name)
-                self.assertEqual(expected,[{field:row[field] for field in old}
-                    for old,row in zip(expected,actual)],name)
+            if table['name'] in {'ADUserSource','ADComputerSource','DimUser','DimDevice'}:
+                # Lifecycle attributes are additive. Every pre-existing cell,
+                # including immutable keys, must still equal the legacy oracle.
+                expected = list(baseline.rows(self.fixture.output / name))
+                actual = self.output_rows(table['name'])
+                self.assertEqual(len(expected), len(actual), name)
+                self.assertEqual(expected, [{field:row[field] for field in old}
+                                            for old,row in zip(expected,actual)], name)
                 continue
             self.assertEqual(baseline.sha(self.fixture.output / name), sources.sha(self.output / name), name)
         for name in ('FactDataQuality','EntityFinding','FactRelationshipOverview'):
@@ -172,6 +172,166 @@ class NativeEvidenceTests(unittest.TestCase):
 
     def test_same_capture_all_native_columns(self):
         self.compare()
+
+    def test_explicit_ad_password_expiry_retains_true_and_false(self):
+        self.fixture.seed_ad()
+        self.fixture.inputs['ad_users'][0]['PasswordExpired'] = 'True'
+        self.fixture.inputs['ad_computers'][0]['PasswordExpired'] = 'False'
+        self.fixture.write_inputs()
+        unified.build(self.fixture.source,self.output,self.audit())
+        user = self.output_rows('ADUserSource')[0]
+        computer = self.output_rows('ADComputerSource')[0]
+        self.assertEqual((user['PasswordExpired'], user['PasswordExpiryStatus']), ('true','Observed'))
+        self.assertEqual((computer['PasswordExpired'], computer['PasswordExpiryStatus']), ('false','Observed'))
+
+    def test_missing_password_expiry_is_not_inferred_from_other_flags(self):
+        self.fixture.seed_ad()
+        for name in ('ad_users','ad_computers'):
+            self.fixture.inputs[name][0].update(PasswordNeverExpires='False',
+                PasswordMustChangeNextLogon='True', PasswordLastSet='2020-01-01T00:00:00Z')
+        self.fixture.write_inputs()
+        unified.build(self.fixture.source,self.output,self.audit())
+        for name in ('ADUserSource','ADComputerSource'):
+            row = self.output_rows(name)[0]
+            self.assertEqual((row['PasswordExpired'], row['PasswordExpiryStatus']), ('','Not collected'))
+
+    def test_blank_password_expiry_is_unknown_and_invalid_boolean_is_rejected(self):
+        self.fixture.seed_ad()
+        self.fixture.inputs['ad_users'][0]['PasswordExpired'] = ''
+        self.fixture.write_inputs()
+        unified.build(self.fixture.source,self.output,self.audit())
+        row = self.output_rows('ADUserSource')[0]
+        self.assertEqual((row['PasswordExpired'], row['PasswordExpiryStatus']), ('','Not provided'))
+        self.fixture.inputs['ad_users'][0]['PasswordExpired'] = 'yes'
+        self.fixture.write_inputs()
+        output = self.fixture.root / 'invalid-expiry-staging'
+        output.mkdir()
+        with self.assertRaisesRegex(ValueError,'Invalid boolean evidence'):
+            unified.build(self.fixture.source,output,self.audit())
+        self.assertFalse((output / 'current.json.txt').exists())
+
+    def test_ad_modification_raw_retained_without_naive_utc_inference(self):
+        self.fixture.seed_ad()
+        self.fixture.inputs['ad_users'][0]['WhenChanged'] = '2026-01-14T15:00:00'
+        self.fixture.inputs['ad_computers'][0]['WhenChanged'] = '2026-01-14T15:00:00+02:00'
+        self.fixture.write_inputs()
+        unified.build(self.fixture.source,self.output,self.audit())
+        user = self.output_rows('ADUserSource')[0]
+        computer = self.output_rows('ADComputerSource')[0]
+        self.assertEqual(user['ModificationRaw'], '2026-01-14T15:00:00')
+        self.assertEqual(user['ModificationUtcDateTime'], '')
+        self.assertEqual(user['ModificationStatus'], 'Timezone not established')
+        self.assertEqual(computer['ModificationRaw'], '2026-01-14T15:00:00+02:00')
+        self.assertEqual(computer['ModificationUtcDateTime'], '2026-01-14T13:00:00+00:00')
+        self.assertEqual(computer['ModificationStatus'], 'UTC qualified')
+
+    def test_entra_lifecycle_uses_only_explicit_object_dates(self):
+        self.fixture.inputs['users'][0]['lastModifiedDateTime'] = '2026-01-13T15:00:00Z'
+        self.fixture.inputs['entra_devices'][0].update(createdDateTime='2020-01-01T10:00:00Z',
+            ModifiedDateTime='2026-01-13T17:00:00+02:00')
+        self.fixture.write_inputs()
+        unified.build(self.fixture.source,self.output,self.audit())
+        user = self.output_rows('DimUser')[0]
+        device = next(row for row in self.output_rows('DimDevice') if row['SourceDeviceId'] == 'ed1')
+        self.assertEqual(user['ModificationRaw'], '2026-01-13T15:00:00Z')
+        self.assertEqual(user['ModificationUtcDateTime'], '2026-01-13T15:00:00+00:00')
+        self.assertEqual(device['CreationRaw'], '2020-01-01T10:00:00Z')
+        self.assertEqual(device['CreationUtcDateTime'], '2020-01-01T10:00:00+00:00')
+        self.assertEqual(device['ModificationUtcDateTime'], '2026-01-13T15:00:00+00:00')
+
+    def test_roundtrip_companions_reach_lifecycle_and_activity_without_replacing_raw(self):
+        self.fixture.seed_ad()
+        self.fixture.inputs['users'][0].update({
+            'When created':'05/10/2020 09:08:07',
+            'When createdIso8601':'2020-10-05T09:08:07.1234567+02:00',
+            'LastSignInDateTime':'14/01/2026 15:00:00',
+            'LastSignInDateTimeIso8601':'2026-01-14T15:00:00+02:00'})
+        for name in ('ad_users','ad_computers'):
+            self.fixture.inputs[name][0].update(
+                WhenCreated='05/10/2020 09:08:07', WhenCreatedIso8601='2020-10-05T09:08:07Z',
+                WhenChanged='14/01/2026 15:00:00', WhenChangedIso8601='2026-01-14T15:00:00+02:00')
+        self.fixture.inputs['ad_users'][0]['PasswordExpired'] = 'false'
+        self.fixture.inputs['ad_computers'][0]['LastLogonTimestamp'] = '134127828000000000'
+        self.fixture.inputs['autopilot'] = [{'Autopilot ID':'ap1',
+            'Last contacted':'14/01/2026 15:00:00',
+            'Last contactedIso8601':'2026-01-14T15:00:00+02:00'}]
+        self.fixture.inputs['policies'] = [dict(PolicyId='p'+str(i), PolicyFamily=family,
+            CreatedDateTime='05/10/2020 09:08:07', LastModifiedDateTime='14/01/2026 15:00:00',
+            CreatedDateTimeIso8601='2020-10-05T09:08:07+02:00',
+            LastModifiedDateTimeIso8601='2026-01-14T15:00:00Z',
+            NativeEvidenceJson='{}', AssignmentCollectionStatus='Collected') for i, family in enumerate(
+            ('SettingsCatalog', 'DeviceConfiguration', 'DeviceCompliance', 'WindowsFeatureUpdate', 'WindowsQualityUpdate'))]
+        self.fixture.write_inputs()
+        unified.build(self.fixture.source,self.output,self.audit())
+        user = self.output_rows('DimUser')[0]
+        self.assertEqual(user['CreationRaw'], '05/10/2020 09:08:07')
+        self.assertEqual(user['CreationUtcDateTime'], '2020-10-05T07:08:07.123456+00:00')
+        self.assertEqual(user['LastSignInDateTime'], '2026-01-14T15:00:00+02:00')
+        for name in ('ADUserSource','ADComputerSource'):
+            row = self.output_rows(name)[0]
+            self.assertEqual(row['CreationUtcDateTime'], '2020-10-05T09:08:07+00:00')
+            self.assertEqual(row['ModificationRaw'], '14/01/2026 15:00:00')
+            self.assertEqual(row['ModificationUtcDateTime'], '2026-01-14T13:00:00+00:00')
+            self.assertEqual(row['ModificationStatus'], 'UTC qualified')
+        self.assertEqual(self.output_rows('ADUserSource')[0]['PasswordExpiryStatus'], 'Observed')
+        self.assertEqual(self.output_rows('ADUserSource')[0]['PasswordExpired'], 'false')
+        self.assertTrue(self.output_rows('ADComputerSource')[0]['LastLogonUtcDateTime'])
+        self.assertEqual(self.output_rows('FactAutopilotDevice')[0]['LastContactedDateTime'],
+                         '2026-01-14T15:00:00+02:00')
+        for table in ('DimIntuneConfigurationPolicy','DimWindowsUpdatePolicy'):
+            for policy in self.output_rows(table):
+                self.assertEqual(policy['CreatedDateTime'], '2020-10-05T09:08:07+02:00')
+                self.assertEqual(policy['LastModifiedDateTime'], '2026-01-14T15:00:00Z')
+
+    def test_lifecycle_companion_failures_do_not_fall_back_to_qualified_legacy_dates(self):
+        from workplace_native_tables import lifecycle_date, qualified
+        for raw, status in [('2026-01-14T15:00:00','Timezone not established'),
+                            ('14/01/2026 15:00:00','Timezone not established'),
+                            ('31/02/2026 15:00:00','Invalid date format'),
+                            ('0001-01-01T00:00:00','Sentinel / unknown')]:
+            with self.subTest(raw=raw):
+                result = lifecycle_date({'WhenChanged':'2026-01-14T15:00:00Z',
+                                         'WhenChangedIso8601':raw}, 'Modification', 'WhenChanged')
+                self.assertEqual(result['ModificationRaw'], '2026-01-14T15:00:00Z')
+                self.assertEqual(result['ModificationUtcDateTime'], '')
+                self.assertEqual(result['ModificationStatus'], status)
+        self.assertEqual(qualified(''), ('','Not provided'))
+        self.assertEqual(qualified('01/01/1601 00:00:00'), ('','Sentinel / unknown'))
+        # Acquisition parsing must remain strict even though business dates accept legacy text.
+        for value in ('2026-01-14T15:00:00','14/01/2026 15:00:00'):
+            with self.assertRaises(ValueError):
+                sources.utc(value)
+
+    def test_entra_missing_lifecycle_does_not_substitute_sync_enrollment_or_password_dates(self):
+        self.fixture.inputs['users'][0]['LastPasswordChangeDateTime'] = '2026-01-13T15:00:00Z'
+        self.fixture.inputs['entra_devices'][0].update(RegistrationDateTime='2020-01-01T10:00:00Z',
+            ApproximateLastSignInDateTime='2026-01-13T15:00:00Z')
+        self.fixture.write_inputs()
+        unified.build(self.fixture.source,self.output,self.audit())
+        user = self.output_rows('DimUser')[0]
+        self.assertEqual((user['ModificationRaw'],user['ModificationUtcDateTime'],user['ModificationStatus']), ('','','Not provided'))
+        for device in self.output_rows('DimDevice'):
+            for prefix in ('Creation','Modification'):
+                self.assertEqual((device[prefix+'Raw'],device[prefix+'UtcDateTime'],device[prefix+'Status']), ('','','Not provided'))
+
+    def test_lifecycle_changes_keep_native_keys_and_source_files_unchanged(self):
+        self.fixture.seed_ad()
+        self.fixture.write_inputs()
+        unified.build(self.fixture.source,self.output,self.audit())
+        keys = {'ADUserSource':'TenantADUserKey','ADComputerSource':'TenantADComputerKey',
+                'DimUser':'TenantUserKey','DimDevice':'TenantDeviceKey'}
+        previous = {name:[row[field] for row in self.output_rows(name)] for name,field in keys.items()}
+        for name in ('ad_users','ad_computers'):
+            self.fixture.inputs[name][0].update(WhenChanged='2026-01-13T15:00:00Z',PasswordExpired='true')
+        self.fixture.inputs['users'][0]['lastModifiedDateTime'] = '2026-01-13T15:00:00Z'
+        self.fixture.inputs['entra_devices'][0]['CreatedDateTime'] = '2020-01-01T00:00:00Z'
+        self.fixture.write_inputs()
+        before = {path.name:sources.sha(path) for path in self.fixture.source.iterdir() if path.is_file()}
+        self.output = self.fixture.root / 'changed-lifecycle-staging'
+        self.output.mkdir()
+        unified.build(self.fixture.source,self.output,self.audit())
+        self.assertEqual(previous,{name:[row[field] for row in self.output_rows(name)] for name,field in keys.items()})
+        self.assertEqual(before,{path.name:sources.sha(path) for path in self.fixture.source.iterdir() if path.is_file()})
 
     def test_teams_channels_sites_preserve_direct_links(self):
         self.fixture.inputs['teams']=[dict(TeamId='t1',TeamDisplayName='Synthetic team',

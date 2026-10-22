@@ -43,7 +43,7 @@ def boolean(value):
 
 def typed_source(row, field, table, output_field=None, kind='dateTime'):
     try:
-        return source_datetime(get(row, field)) if kind == 'dateTime' else count64(get(row, field))
+        return source_datetime(date_evidence(row, field)) if kind == 'dateTime' else count64(get(row, field))
     except (ValueError, OverflowError) as error:
         raise ValueError(f'{table}.csv column {output_field or field}, rule {kind}: invalid source value') from error
 
@@ -69,16 +69,42 @@ def endpoint_score(value):
     return result
 
 
+def date_evidence(row, field):
+    """Prefer an additive round-trip value; never reinterpret the legacy column's zone."""
+    return get(row, field + 'Iso8601') or get(row, field)
+
+
 def qualified(value):
     if not value:
         return '', 'Not provided'
     try:
-        date = utc(value)
-        if date.year < 1900:
+        normalized = source_datetime(value)
+        if not normalized:
             return '', 'Sentinel / unknown'
-        return date.isoformat(), 'UTC qualified'
+        date = dt.datetime.fromisoformat(normalized.replace('Z', '+00:00'))
+        if date.tzinfo is None:
+            return '', 'Timezone not established'
+        return utc(normalized).isoformat(), 'UTC qualified'
     except ValueError:
-        return '', 'Format or timezone not established'
+        return '', 'Invalid date format'
+
+
+def lifecycle_date(row, prefix, *fields):
+    """Preserve an explicit source property; never substitute activity dates."""
+    field = next((field for field in fields if date_evidence(row, field)), fields[0])
+    raw = get(row, field)
+    value, status = qualified(date_evidence(row, field))
+    return {prefix + 'Raw':raw, prefix + 'UtcDateTime':value,
+            prefix + 'Status':status}
+
+
+def password_expiry(row):
+    """AD PasswordExpired is an observation, not a password-age inference."""
+    supplied = any(field.casefold() == 'passwordexpired' for field in row)
+    raw = get(row, 'PasswordExpired')
+    value = boolean(raw)
+    return {'PasswordExpired':value,
+            'PasswordExpiryStatus':'Observed' if value else 'Not provided' if supplied else 'Not collected'}
 
 
 def filetime(value):
@@ -212,7 +238,6 @@ def build_tables(source, output, contract, identity, evidence, now=None):
     users, users_by_native = [], {}
     for row in read('users'):
         sid = get(row,'Object Id')
-        created, creation_status = qualified(get(row,'When created'))
         location = get(row,'Usage location').upper()
         country = location if re.fullmatch('[A-Z]{2}',location) else ''
         enabled = boolean(get(row,'AccountEnabled'))
@@ -227,7 +252,8 @@ def build_tables(source, output, contract, identity, evidence, now=None):
                 **sign_in,
                 'ActivityState':activity_state(sign_in['LastSuccessfulSignInDateTime'] or sign_in['LastSignInDateTime'], acquired('users'), enabled),
                 'AccountStatusLabel':'Enabled' if enabled=='true' else 'Disabled' if enabled=='false' else 'Unknown',
-                'CreationRaw':get(row,'When created'),'CreationUtcDateTime':created,'CreationStatus':creation_status,
+                **lifecycle_date(row, 'Creation', 'When created'),
+                **lifecycle_date(row, 'Modification', 'lastModifiedDateTime', 'ModifiedDateTime'),
                 'SourceCollectedDateTime':acquired('users'),'ManagerStatus':'Not collected',
                 'UserActivityStatus':'Separate workload evidence','UserSelection':get(row,'Display name')+' | '+sid}
         users.append(item); users_by_native[key(sid)] = item
@@ -330,6 +356,8 @@ def build_tables(source, output, contract, identity, evidence, now=None):
                 'CountryLabel':primary['CountryLabel'] if primary else UNKNOWN,
                 'CountryStatus':'Primary user usage location' if primary else 'No resolved primary user',
                 'SyncRaw':sync_raw,'SyncUtcDateTime':sync,'SyncStatus':sync_status,
+                **lifecycle_date(ed or {}, 'Creation', 'createdDateTime'),
+                **lifecycle_date(ed or {}, 'Modification', 'lastModifiedDateTime', 'ModifiedDateTime'),
                 'SourceCollectedDateTime':acquired('managed' if md else 'entra_devices')}
         item['DeviceSelection'] = item['DeviceName']+' | '+corr
         devices[corr] = item
@@ -739,9 +767,9 @@ def build_tables(source, output, contract, identity, evidence, now=None):
     emit('FactADIntuneCoverage',coverage)
     def dates(row):
         last,status=filetime(get(row,'LastLogonTimestamp'))
-        created,creation_status=qualified(get(row,'WhenCreated'))
         return {'LastLogonTimestampRaw':get(row,'LastLogonTimestamp'),'LastLogonUtcDateTime':last,'LastLogonStatus':status,
-                'CreationRaw':get(row,'WhenCreated'),'CreationUtcDateTime':created,'CreationStatus':creation_status}
+                **lifecycle_date(row, 'Creation', 'WhenCreated'),
+                **lifecycle_date(row, 'Modification', 'WhenChanged'), **password_expiry(row)}
     ad_user_rows=[]
     for r in ad_users:
         cloud,status=cloud_match(r,ad_user_sids,cloud_user_sids)

@@ -15,7 +15,7 @@ Generates Exchange hybrid identity issue tables for PowerBI from SmartInventory 
   and their DATA-LAST SharePoint copies follow the promotion (SmartM365.Core 1.0.95).
 
 .VERSION
-1.25
+1.27
 #>
 #requires -Version 7.0
 [CmdletBinding()]
@@ -57,7 +57,7 @@ if ($MaxItems -gt 0) {
 }
 $ErrorActionPreference='Stop'
 $ScriptName='SmartM365-Exchange-HybridIdentity-Issues-Inventory'
-$ScriptVersion="1.25"
+$ScriptVersion="1.27"
 $RunStamp=Get-Date -Format 'yyyyMMdd-HHmmss'
 $RunStartedAt=Get-Date
 $script:WarningCount=0
@@ -78,7 +78,7 @@ function K($v){ (T $v).ToLowerInvariant() }
 function B($v){ (K $v) -in @('true','1','yes','y','enabled') }
 function CB($c,$n,[bool]$d){ $v=Cfg $c $n $d; if($v -is [bool]){return $v}; if($null -eq $v){return $d}; $s=K $v; if(!$s){return $d}; $s -in @('true','1','yes','y','enabled') }
 function Dbl($v){ $s=(T $v)-replace ',','.'; $o=0.0; if([double]::TryParse($s,[Globalization.NumberStyles]::Any,[Globalization.CultureInfo]::InvariantCulture,[ref]$o)){$o}else{0.0} }
-function Dt($v){ $s=T $v; if(!$s){return $null}; foreach($c in @([Globalization.CultureInfo]::InvariantCulture,[Globalization.CultureInfo]::GetCultureInfo('fr-FR'),[Globalization.CultureInfo]::GetCultureInfo('en-US'))){$d=[datetime]::MinValue; if([datetime]::TryParse($s,$c,[Globalization.DateTimeStyles]::AssumeLocal,[ref]$d)){return $d}}; $null }
+. (Join-Path $PSScriptRoot '../../Common/SmartM365.IdentityDateEvidence.ps1')
 function AddMap($map,$key,$val){ $k=K $key; if($k -and !$map.ContainsKey($k)){$map[$k]=$val} }
 function Csv($name,[switch]$Req){ $p=Join-Path $DataLastFolder $name; if(!(Test-Path $p)){ if($Req){throw "Required CSV not found: $p"}; Warn "Optional CSV not found: $p"; return @()}; $r=@(Import-Csv $p); Log "Loaded $name : $($r.Count) row(s)"; $r }
 function AddIssue($list,[int]$num,[string]$guid,[string]$issue,[string]$cat,[string]$action){
@@ -291,6 +291,8 @@ try{
   $roomMailboxTypes=[Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase); @('RoomMailbox','RemoteRoomMailbox')|ForEach-Object{[void]$roomMailboxTypes.Add($_)}
   $nonPersonalAccountTypes=[Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase); @('Service Account','Admin Account','System Account','Generic Account')|ForEach-Object{[void]$nonPersonalAccountTypes.Add($_)}
   $allowedTargetDomains=[Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase); $configuredTargetDomains|ForEach-Object{[void]$allowedTargetDomains.Add($_)}
+  $remoteScopeByGuid = New-IdentityRemoteScopeIndex $remote
+  $activityScopeExclusions = 0
   $issues=[Collections.Generic.List[object]]::new()
   foreach($u in $ad){
     $guid=T(P $u ObjectGUID); $upn=T(P $u UserPrincipalName); $uk=K $upn; $immutableId=T(P $u ImmutableId_AD); $domainAndSam=T(P $u DomainAndSam); $enabled=B(P $u Enabled); $primary=T(P $u EmailAddress,PrimarySmtpAddress,PrimarySMTPaddress); if(!$primary){foreach($addr in SplitAddr(P $u ProxyAddresses)){if($addr -match '@'){$primary=$addr; break}}}; $target=T(P $u TargetAddress); $proxyText=T(P $u ProxyAddresses)
@@ -304,7 +306,10 @@ try{
     $localSizeMb=Dbl(P $lm 'TotalItemSize-In-MB'); $exoSizeMb=[math]::Max((Dbl(P $em TotalItemSizeGB))*1024.0,(Dbl(P $st TotalItemSizeGB))*1024.0); $sizeMb=[math]::Max($localSizeMb,$exoSizeMb); $size=$sizeMb/1024.0
     $arc=[math]::Max((Dbl(P $lm 'ArchiveTotalItemSize-In-MB')/1024.0),(Dbl(P $ar Archive_TotalItemSizeGB)))
     $pc=[int]((Dbl(P $lm FullAccessCount))+(Dbl(P $lm SendAsCount))+(SplitAddr(P $pm FullAccess)).Count+(SplitAddr(P $pm SendAs)).Count)
-    $ll=Dt(P $u LastLogonDate); foreach($candidateDate in @((Dt(P $lm LastLogonTime)),(Dt(P $st LastLogonTime,LastUserActionTime)))){if($candidateDate -and (!$ll -or $candidateDate -gt $ll)){$ll=$candidateDate}}
+    $activityEvidence = @(Get-IdentityMailboxActivitySet $u $lm $em $st $remoteScopeByGuid[([string]$u.ObjectGUID).Trim().ToLowerInvariant()])
+    $activity180 = Merge-IdentityActivity $activityEvidence 180
+    $activityScopeExclusions += $activity180.ExcludedCount
+
     $itemCount=[math]::Max((Dbl(P $lm ItemCount,TotalItemCount)),(Dbl(P $st ItemCount,TotalItemCount)))
     $baseScope=$isMailbox -and $hasSmtp
     if($baseScope){
@@ -319,7 +324,7 @@ try{
       $exchangePlanValue=ExchangePlanStatus $m365UserId; if($exchangePlanValue -eq 'Not Exchange Plan Enabled' -and $hasAllowedLicense -and $userMailboxTypes.Contains($recipientType)){AddIssue $issues 12 $guid 'No Exchange Plan enabled' '1.Critical' 'Enable Exchange Plan only for user migrated'}
       if($arc -gt 80 -and $recipientType -eq 'UserMailbox'){AddIssue $issues 13 $guid 'Archive size > 80 GB' '2.High' 'Review archive mailbox size'}
       if($pc -gt 10){AddIssue $issues 14 $guid 'Too many mailbox permissions' '3.Medium' 'Review mailbox delegation and permissions'}
-      if(!$ll -or ((Get-Date).Date-$ll.Date).Days -gt 180){AddIssue $issues 15 $guid 'Mailbox inactive > 6 months' '4.Low' 'Review mailbox usage and consider decommissioning'}
+      if($activity180.Old -eq $true){AddIssue $issues 15 $guid 'Mailbox inactive > 6 months' '4.Low' 'Review mailbox usage and consider decommissioning'}
       foreach($a in @((SplitAddr $proxyText)+@($primary))){ if($dupSmtpSet.Contains($a)){AddIssue $issues 16 $guid 'Conflicting proxy address' '1.Critical' 'Resolve proxy address conflicts'; break} }
       $sharedAccessCount=[int][math]::Max((Dbl(P $u SendAsMailboxCount)), $pc); if($sharedAccessCount -gt 5){AddIssue $issues 17 $guid 'Excessive shared access' '3.Medium' 'Review shared access model'}
       if(!(T(P $u DisplayName))){AddIssue $issues 18 $guid 'Missing DisplayName' '4.Low' 'Complete user metadata'}
@@ -345,7 +350,7 @@ try{
       $sam=T(P $u SamAccountName); if($sam -and $dupSamSet.Contains($sam)){AddIssue $issues 41 $guid 'Duplicate SamAccountName across domains' '4.Low' 'Resolve SAM conflict to avoid GPO and profile collisions'}
       if((@($userLicenses) -join ';') -match 'Microsoft 365 E3|ENTERPRISEPACK|SPE_E3' -and (@($userLicenses) -join ';') -match 'Microsoft 365 F1|Microsoft 365 F3|SPE_F1|SPE_F3|M365_F1|M365_F3|O365_F1|O365_F3'){AddIssue $issues 47 $guid 'Conflicting M365 licenses (E3 + F3/F1)' '2.High' 'Review license assignment and keep only one SKU per user'}
       $displayName=K(P $u DisplayName); if($displayName -and $dupDisplaySet.Contains($displayName)){AddIssue $issues 48 $guid 'Duplicate DisplayName across accounts' '4.Low' 'Disambiguate DisplayNames for GAL clarity and migration tooling'}
-      if($userMailboxTypes.Contains($recipientType) -and !$ll -and $size -eq 0){AddIssue $issues 50 $guid 'Ghost mailbox (no logon, zero size)' '4.Low' 'Verify mailbox existence and consider decommissioning'}
+      # Missing or unqualified logon evidence does not establish a ghost mailbox.
       $proxyLower=$proxyText.ToLowerInvariant(); $addrLower=$primary.ToLowerInvariant().Trim(); if($targetRecipientTypes.Contains($recipientType) -and $proxyLower -and $addrLower -and ([regex]::Matches($proxyLower,[regex]::Escape($addrLower)).Count -gt 1)){AddIssue $issues 51 $guid 'Duplicate address in ProxyAddresses (case conflict)' '2.High' 'Remove duplicate proxy entries keeping only one instance per address'}
       if($sharedMailboxTypes.Contains($recipientType)){ $noSendAs=((SplitAddr(P $lm SendAs)).Count+(SplitAddr(P $pm SendAs)).Count) -eq 0; $noFullAccess=((SplitAddr(P $lm FullAccess)).Count+(SplitAddr(P $pm FullAccess)).Count) -eq 0; if($noSendAs -and $noFullAccess){AddIssue $issues 53 $guid 'Shared mailbox with no active delegation' '3.Medium' 'Assign at least one FullAccess or SendAs delegate or decommission'}}
       $accountType=T(P $u AccountType); if(!$enabled -and $hasAllowedLicense -and $accountType -ne 'Shared Mailbox' -and $userMailboxTypes.Contains($recipientType)){AddIssue $issues 55 $guid 'Disabled account with active M365 license' '2.High' 'Review license assignment: disabled accounts should not retain paid M365 licenses'}
@@ -364,6 +369,7 @@ try{
   $files += PublishWeeklyHistory -files $files
   $script:GeneratedFileCount=@($files).Count
   if($global:csvGeneratedPaths){ foreach($f in @($files)){ if($f){ [void]$global:csvGeneratedPaths.Add([string]$f) } } }
+  Log "Activity conclusion scope: applicable directory/mailbox logon signals only; local logon exclusions from unique native remote recipient identity: $activityScopeExclusions"
   Log "Generated Exchange hybrid identity issues: $($issues.Count) row(s)"
   if($global:EnableSharePointUpload){foreach($f in $files){try{Invoke-SmartM365SharePointCsvUpload -LocalFilePath $f|Out-Null; Log "SharePoint upload completed: $f"}catch{Warn "SharePoint upload failed for $f : $($_.Exception.Message)"}}}
   Log "$ScriptName completed successfully."
@@ -406,12 +412,11 @@ finally {
 }
 if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 
-
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA1WwgDH5XFkZfj
-# vcUaM9KZsId4HkNOUzTPuF6/uUp6+aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCYrIWNwc1CTXVN
+# rvdswnDKEXpYDWyWKi/NL8nOMC4tjqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -544,31 +549,31 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIP7WxVaVbg7imE9jvos9ZUcEKmJbYpQJK1u2KlNBZ0j8MA0GCSqG
-# SIb3DQEBAQUABIIBgCs3PutpBfiII1uszTfFiTjn7t6AUtR0pWf5zDm6HI2T77NB
-# BivRMyqZwDE7hBtQryFQTq7y/ZWWhVOm1y4KXsivrHGobIpoWhy8VLAc0NSwT5KR
-# 9AvveS935qH+oRQydIMxsZEe0/lTImRpeMA0qlB83f8iNsdUXv9sAF1HIoB2vfBi
-# sKeqUYyqGa5+P9Iyakgre6Gck1DDt/q6rrmwfCLpu6HMRUQu9M0jViDD5JgjDJT1
-# 717s5ekmAQsQ/l6JG16Gr0oJiCd31o7WLmOzD7Qo5YK6rqXPWaRprYfrTSkq79+L
-# CR5SSppY0jJ04jBJ30OsSoq92Alo0KAoPmeJquGQ+fKf/4myVHePO0c1xD77Nny/
-# QKtdyCZZlQElHe95Rdl192xOE3RxrtTp3XHtkbqkcjOe8xhEt6IzVK0IRkCO2wGF
-# vBNhh2yJKVSO7aVuVmBjWECEkWHD1ZVfIvwFR2a1ymq90I2EuXTY/c93hS9SJz/n
-# 2nM5utkYUqnAkgngN6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIAJjciSFOuLVplgKercnWE8oenV+KMC0PcjOYf/rbrrHMA0GCSqG
+# SIb3DQEBAQUABIIBgB+/u2Nqkv/c1458Lm7XzeOw1TEvwM/me9u5G0vbpVINQPfO
+# GIDGHInS5vZ1ym68WXNv30HaQCjZcyv4V1hThx3g4N+9LXGPqBxlsSOnCQpH00bM
+# Mnri0E0NRXNuOuaKDt8ekqYIMlE2R+z6OjsJfUCNOog6JRIhXORddKH09wNmVxHY
+# cz07NFVMnQwwoJfQ7ZZ395tPSN0ZNX/YZqEmovyKt7C+KouwwHBpcy6Enf6LnwNF
+# TZF7R5Ank6Y+UKuwTTescCmsDczfHFkNGZ16ZjsdVJUevpwZWdKTa/DIpSIE5Ryg
+# c608p68ah1FCn5LJ2m9Kes7vc7gq7QXEXmxEbO7TPN9/CJjYM6C5T/LG/GlALM9Z
+# kFEBLbfsQTmxLY5lmo8ZCPYeegZEamNs1Y5k7oEQE9epef2SORlM/DTVALQ98WZU
+# 9r3y4u6KFNMN5KwckW5ReO7vlP46xwGzFPBzRTPrvMYVKT4lxJO+PSI0qAfe7xpO
+# aMjdzX3j4uD1Cxd73aGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjEwNjUx
-# MDRaMC8GCSqGSIb3DQEJBDEiBCDEGrgb7pvwktayK1boHLvj/SbyunFlFtjpN68r
-# S43XQTANBgkqhkiG9w0BAQEFAASCAgBIWEPR2pLhZuWy8yDytmX84x70P9y02lLs
-# UpklPArTksTJNy4vIyVQe5/Mv4PHivzFfVYU3b29Ohm4CeqcY9cenEywW3L9uhzV
-# f72tpYFQpGVIdnT91TQvWN5jctS08SVvL+qW6p9Nvz/jPPmZ/nRRTGx/e4NXYsxN
-# ZaHV1NKvhvP5hYTQE9Klq723fOzV91fHiEpSanh2cfYWqokhjjiKlwoN0rAResmj
-# jd61cOgSyr8MnExxzbqWYdpg7OEGph7HZ8v7jaIQL9meddgg7AV1MaDxOdszoNPF
-# adfKntcRUkB31o8ul0alLAL2LTpRlljsSQq3YWbFkbL3gwMUadPSGBfsG9YhhaTJ
-# D9nOt6YvEhu87N6Xowc1g3k2ZG9d9Hkt5hA9CWPMFZ4JAE21B1UmV0ro0fHkvnwB
-# FWGIML75cfoSMJs/8VzyJ6Fb5NcC19/FED2oD6era+L5sYSZT6WTb5YfYPRBfrH0
-# QRKh9or79A9Ga0JIqY9fRKcwYVVOFi2uZ+UeUXesqVFoY1DJxtqjZSIinnuHNLeY
-# g8qWmUM0vMSICjJWl+7+B88sWis6VpQsQ765G0rA/ZtFjjn3KQX6kD12jAJn9Jid
-# 09fWJ0UVoIKEeSG/5ucumX2bOVArIAWXAvdiyKFxgq3l2TgAZI4zNBJ6hd17ipIa
-# wHyDj97zRw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjIyMTI2
+# MjdaMC8GCSqGSIb3DQEJBDEiBCC2h+TaeM1359xkPKdqMhitXXinoZfYg3btXC8P
+# ElBwHzANBgkqhkiG9w0BAQEFAASCAgCHJRlm8bcKtreV3kaOD7gNPz0i5GenC36B
+# 1ZlIk+kIJHvYLCk6GHp+x7FmA1LSu5PVyEsoq9tXHv6VjolfKc5G370UzAQY1aSW
+# msCzP8bqjZWbxh3jNMx9gE2jO2MJp2m9gaDREbsqkLqJhWBYzQaQsjg0xgUwQlAN
+# KuNxgH3bUFDPIbfdxpXo8RrKeFMY/qoN4DDdmMCyQMs2V6qQ6uFYD0UaHF8OvrjI
+# SWTAGtXdyu1ywgTvrib0jL0JvUsYwKUPkZaEaAxSmu2sO5D1KD3Ko0of2A2PGqqR
+# YyhMtNZcQJCpjVIw/0ubTstcy4cMp4naGxONLsBlinCMLvS3fZTcTBXsG42a7Qap
+# eUqGYPhK9CesmElw3nXmN9m4jxbAhXxOcl7h1K1hdLQke1bbEExtkDfGT/TTZo/1
+# ZiSmWt/PK1K9G1Di48noEco/RwVAfOM/4Dz5SgBUOf+HqnQvUAC6AedC4FshWMxn
+# vUpUD2s8EnZ3aO+6/DeAlcIq1Q7PU+H01Tjgy/Ydb3MOnfFUgWHlNy8c3xb6d5pu
+# M97391JYKMDI6ktbL6fHFsUeX4xsA6kmQXgc7SztBFk3p2gpjXP0Rv6FU2yr8xAS
+# +aOenAgs498S4Xedy/OXANhiUyOPCfZTxmgLYX9vmcxV9+moZ/cNddVWCLtV3TSn
+# uDaKtir1jg==
 # SIG # End signature block

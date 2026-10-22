@@ -2,8 +2,10 @@
 .SYNOPSIS
     Builds enriched Active Directory user CSV columns required by the SmartWorkplace Power BI model.
 .VERSION
-1.13
+1.15
 #>
+
+. (Join-Path $PSScriptRoot '../Common/SmartM365.IdentityDateEvidence.ps1')
 
 function Invoke-SmartM365AdUsersEnrichedCsv {
     [CmdletBinding()]
@@ -144,19 +146,6 @@ function Invoke-SmartM365AdUsersEnrichedCsv {
         return 'Review required'
     }
 
-    function Get-SmartM365LatestDateText {
-        param([string[]]$Values)
-        $latest = $null
-        foreach ($value in $Values) {
-            if ([string]::IsNullOrWhiteSpace($value)) { continue }
-            $date = [datetime]::MinValue
-            if ([datetime]::TryParse($value, [System.Globalization.CultureInfo]::CurrentCulture, [System.Globalization.DateTimeStyles]::AssumeLocal, [ref]$date) -or [datetime]::TryParse($value, [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::AssumeLocal, [ref]$date)) {
-                if ($null -eq $latest -or $date.ToUniversalTime() -gt $latest) { $latest = $date.ToUniversalTime() }
-            }
-        }
-        if ($null -eq $latest) { return '' }
-        return $latest.ToString('yyyy-MM-ddTHH:mm:ssZ', [System.Globalization.CultureInfo]::InvariantCulture)
-    }
 
     if (-not (Test-Path -LiteralPath $OutputFolder)) {
         New-Item -Path $OutputFolder -ItemType Directory -Force -ErrorAction Stop | Out-Null
@@ -180,17 +169,6 @@ function Invoke-SmartM365AdUsersEnrichedCsv {
         return $Mail.Substring($pos + 1).ToLowerInvariant()
     }
 
-    function Get-DateCategory {
-        param([string]$Value, [int]$LimitDays)
-        if ([string]::IsNullOrWhiteSpace($Value)) { return 'Unknown / Never logged in' }
-        $date = [datetime]::MinValue
-        if (-not [datetime]::TryParse($Value, [System.Globalization.CultureInfo]::CurrentCulture, [System.Globalization.DateTimeStyles]::AssumeLocal, [ref]$date) -and
-            -not [datetime]::TryParse($Value, [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::AssumeLocal, [ref]$date)) {
-            return 'Unknown / Never logged in'
-        }
-        if ($date.ToUniversalTime().Date -lt ([datetime]::UtcNow.Date.AddDays(-1 * $LimitDays))) { return ("Older than {0} days" -f $LimitDays) }
-        return ("Within last {0} days" -f $LimitDays)
-    }
     function Get-NumberInvariant {
         param([object]$Value)
         $text = ([string]$Value).Trim()
@@ -483,6 +461,7 @@ function Invoke-SmartM365AdUsersEnrichedCsv {
         'IsProtectedByMicrosoft365Backup'
     )
 
+    $calculatedColumns += @('ActivityEvidenceCoverage','ActivityEvidenceStatus','ADActivityDateStatus','EntraActivityDateStatus','ExchangeActivityEvidenceCoverage','MailboxCreationDateStatus','ActivityScopeExclusions','ActivityConclusionScope')
     WriteLog -Message ("AD users enrichment loading source CSV: {0}" -f $CombinedUsersCsv)
     $users = @(Import-Csv -LiteralPath $CombinedUsersCsv -Encoding UTF8)
     $localMailboxes = Import-SourceCsv @('Exchange_OnPrem_Mailboxes_AllDomains.csv')
@@ -502,6 +481,7 @@ function Invoke-SmartM365AdUsersEnrichedCsv {
         throw ("Configured site attribute is not present in AD user evidence: {0}" -f $siteClassification.SiteAttribute)
     }
 
+    $remoteScopeByGuid = New-IdentityRemoteScopeIndex $remoteMailboxes
     $localByDomainSam = @{}; $localBySmtp = @{}
     foreach ($row in $localMailboxes) { Add-SmartM365MapValue $localByDomainSam (Get-Key (Get-Value $row @('DomainAndSam'))) $row; Add-SmartM365MapValue $localBySmtp (Get-Key (Get-Value $row @('PrimarySMTPaddress','PrimarySmtpAddress'))) $row }
     $remoteByDomainSam = @{}; $remoteBySmtp = @{}
@@ -640,33 +620,40 @@ function Invoke-SmartM365AdUsersEnrichedCsv {
         $licenseGroupNorm = $licenseGroup.Trim().ToUpperInvariant()
         $allowedAccountType = @('NAMED ACCOUNT','GENERIC ACCOUNT','UNCLASSIFIED ACCOUNT','EXT ACCOUNT') -contains $accountType.ToUpperInvariant()
         $m365LicenseType = if ($licenseGroupNorm.Contains('MICROSOFT 365 E3')) { 'M365E3' } elseif ($licenseGroupNorm.Contains('MICROSOFT 365 F3')) { 'M365F3' } elseif (-not $allowedAccountType) { 'None' } else { Get-SmartM365BasePersona -JobFamily $jobFamilyCombined -LicenseGroup $licenseGroup }
+        $adActivity = Read-IdentityDate $user 'LastLogonDate' 'LastLogonTimestamp'
+        $entraActivity = Read-IdentityDate $m365User 'LastSignInDateTime'
+        $entraNonInteractive = Read-IdentityDate $m365User 'LastNonInteractiveSignInDateTime'
+        $entraSuccessful = Read-IdentityDate $m365User 'LastSuccessfulSignInDateTime'
+        $mailboxActivitySet = @(Get-IdentityMailboxActivitySet $user $localMailbox $exoMailbox $exoStat $remoteScopeByGuid[([string]$user.ObjectGUID).Trim().ToLowerInvariant()])
+        $exchangeActivity = @($mailboxActivitySet | Select-Object -Skip 1)
+        $exchange90 = Merge-IdentityActivity $exchangeActivity 90
+        $exchange180 = Merge-IdentityActivity $exchangeActivity 180
+        $combinedActivity = @($adActivity, $entraSuccessful) + $exchangeActivity
+        $combined90 = Merge-IdentityActivity $combinedActivity 90
         $lastLogonEntra = Get-Value $m365User @('LastSignInDateTime')
         $lastLogonEntraNonInteractive = Get-Value $m365User @('LastNonInteractiveSignInDateTime')
-        $exchangeLastLogonDateTime = Get-SmartM365LatestDateText -Values @(
-            (Get-Value $localMailbox @('LastLogonTime')),
-            (Get-Value $exoMailbox @('LastLogonTime','LastUserActionTime')),
-            (Get-Value $exoStat @('LastLogonTime','LastUserActionTime'))
-        )
-        $exchangeLastLogonUtc = if ([string]::IsNullOrWhiteSpace($exchangeLastLogonDateTime)) { $null } else { [datetime]::ParseExact($exchangeLastLogonDateTime, 'yyyy-MM-ddTHH:mm:ssZ', [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::AssumeUniversal -bor [System.Globalization.DateTimeStyles]::AdjustToUniversal) }
-        $remoteMailboxCreatedRaw = Get-Value $remoteMailbox @('WhenMailboxCreated')
-        if ([string]::IsNullOrWhiteSpace($remoteMailboxCreatedRaw)) { $remoteMailboxCreatedRaw = Get-Value $remoteMailbox @('WhenCreated') }
-        $remoteMailboxCreatedDateTime = Get-SmartM365LatestDateText -Values @($remoteMailboxCreatedRaw)
-        $remoteMailboxCreatedUtc = if ([string]::IsNullOrWhiteSpace($remoteMailboxCreatedDateTime)) { $null } else { [datetime]::ParseExact($remoteMailboxCreatedDateTime, 'yyyy-MM-ddTHH:mm:ssZ', [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::AssumeUniversal -bor [System.Globalization.DateTimeStyles]::AdjustToUniversal) }
-        $onPremMailboxCreatedRaw = Get-Value $localMailbox @('WhenMailboxCreated')
-        if ([string]::IsNullOrWhiteSpace($onPremMailboxCreatedRaw)) { $onPremMailboxCreatedRaw = Get-Value $localMailbox @('WhenCreated') }
-        $onPremMailboxCreatedDateTime = Get-SmartM365LatestDateText -Values @($onPremMailboxCreatedRaw)
-        $exchangeOnlineMailboxCreatedDateTime = Get-SmartM365LatestDateText -Values @((Get-Value $exoMailbox @('WhenMailboxCreated')))
-        $out['ExchangeLastLogonDateTime'] = $exchangeLastLogonDateTime
-        $out['ExchangeLastLogonDate'] = if ($null -ne $exchangeLastLogonUtc) { $exchangeLastLogonUtc.ToString('yyyy-MM-dd', [System.Globalization.CultureInfo]::InvariantCulture) } else { '' }
-        $out['ExchangeLastLogonCategory'] = if ($null -eq $exchangeLastLogonUtc) { 'Unknown / Never logged in' } elseif ($exchangeLastLogonUtc.Date -lt $exchangeLastLogon90DayCutoff) { 'Older than 90 days' } else { 'Within last 90 days' }
-        $out['IsExchangeLastLogonOlderThan90Days'] = if ($null -ne $exchangeLastLogonUtc) { [string]($exchangeLastLogonUtc.Date -lt $exchangeLastLogon90DayCutoff) } else { '' }
-        $out['IsExchangeLastLogonOlderThan180Days'] = if ($null -ne $exchangeLastLogonUtc) { [string]($exchangeLastLogonUtc.Date -lt $exchangeLastLogon180DayCutoff) } else { '' }
-        $out['RemoteMailboxCreatedDateTime'] = $remoteMailboxCreatedDateTime
-        $out['DaysSinceRemoteMailboxCreated'] = if ($null -ne $remoteMailboxCreatedUtc) { ($currentUtcDate - $remoteMailboxCreatedUtc.Date).Days.ToString([System.Globalization.CultureInfo]::InvariantCulture) } else { '' }
-        $out['OnPremMailboxCreatedDateTime'] = $onPremMailboxCreatedDateTime
-        $out['ExchangeOnlineMailboxCreatedDateTime'] = $exchangeOnlineMailboxCreatedDateTime
-        $out['ExchangeOnlineMailboxCreatedDate'] = if ([string]::IsNullOrWhiteSpace($exchangeOnlineMailboxCreatedDateTime)) { '' } else { $exchangeOnlineMailboxCreatedDateTime.Substring(0, 10) }
-        $lastLogonMergeAdExchEntra = Get-SmartM365LatestDateText -Values @([string]$user.LastLogonDate, $out['ExchangeLastLogonDateTime'], $lastLogonEntra, $lastLogonEntraNonInteractive)
+        $out['ExchangeLastLogonDateTime'] = if ($exchange90.Utc) { $exchange90.Utc.ToString('o') } else { '' }
+        $out['ExchangeLastLogonDate'] = if ($exchange90.Utc) { $exchange90.Utc.ToString('yyyy-MM-dd') } else { '' }
+        $out['ExchangeLastLogonCategory'] = Format-IdentityActivityCategory $exchange90 90
+        $out['IsExchangeLastLogonOlderThan90Days'] = if ($null -eq $exchange90.Old) { '' } else { [string]$exchange90.Old }
+        $out['IsExchangeLastLogonOlderThan180Days'] = if ($null -eq $exchange180.Old) { '' } else { [string]$exchange180.Old }
+        $remoteCreated = Read-IdentityDate $remoteMailbox 'WhenMailboxCreated'
+        $localCreated = Read-IdentityDate $localMailbox 'WhenMailboxCreated'
+        $exoCreated = Read-IdentityDate $exoMailbox 'WhenMailboxCreated'
+        $out['RemoteMailboxCreatedDateTime'] = if ($remoteCreated.Utc) { $remoteCreated.Utc.ToString('o') } else { '' }
+        $out['DaysSinceRemoteMailboxCreated'] = if ($remoteCreated.Utc) { ($currentUtcDate - $remoteCreated.Utc.UtcDateTime.Date).Days.ToString() } else { '' }
+        $out['OnPremMailboxCreatedDateTime'] = if ($localCreated.Utc) { $localCreated.Utc.ToString('o') } else { '' }
+        $out['ExchangeOnlineMailboxCreatedDateTime'] = if ($exoCreated.Utc) { $exoCreated.Utc.ToString('o') } else { '' }
+        $out['ExchangeOnlineMailboxCreatedDate'] = if ($exoCreated.Utc) { $exoCreated.Utc.ToString('yyyy-MM-dd') } else { '' }
+        $lastLogonMergeAdExchEntra = if ($combined90.Utc) { $combined90.Utc.ToString('o') } else { '' }
+        $out['ActivityEvidenceCoverage'] = $combined90.Coverage
+        $out['ActivityEvidenceStatus'] = $combined90.Status
+        $out['ADActivityDateStatus'] = $adActivity.Status
+        $out['EntraActivityDateStatus'] = $entraSuccessful.Status
+        $out['ExchangeActivityEvidenceCoverage'] = $exchange90.Coverage
+        $out['ActivityScopeExclusions'] = $combined90.Exclusions
+        $out['ActivityConclusionScope'] = $combined90.ConclusionScope
+        $out['MailboxCreationDateStatus'] = $remoteCreated.Status + ';' + $localCreated.Status + ';' + $exoCreated.Status
         $out['AdOrganizationalUnitPath'] = Get-OuPathFromDistinguishedName -DistinguishedName $distinguishedName
         $out['AdOrganizationalUnitCategory'] = if ($distinguishedNameUpper.Contains('OU=DISABLED_OBJECTS')) { 'DISABLED OBJECTS' } elseif ($distinguishedNameUpper.Contains('OU=ORGANIZATION')) { 'ORGANIZATION' } elseif ($distinguishedNameUpper.Contains('OU=ADMIN')) { 'ADMIN' } elseif ($distinguishedNameUpper.Contains('OU=FAX')) { 'FAX' } else { 'OTHER' }
         $out['EntitySiteType'] = $typeEtablissement
@@ -699,13 +686,13 @@ function Invoke-SmartM365AdUsersEnrichedCsv {
         $out['IsE3PersonaMissingE3License'] = if ($hasMailbox -and $target1Persona -eq 'M365E3' -and @('UserMailbox','RemoteUserMailbox') -contains $recipientType -and -not $hasRemoteMailbox -and @('Microsoft 365 F3','No License (Unlicensed)') -contains $licenseGroup) { '1' } else { '0' }
         $out['EntraLastSignInDateTime'] = $lastLogonEntra
         $out['EntraLastNonInteractiveSignInDateTime'] = $lastLogonEntraNonInteractive
-        $out['EntraLastSignInCategory'] = Get-DateCategory -Value $lastLogonEntra -LimitDays 90
+        $out['EntraLastSignInCategory'] = Format-IdentityActivityCategory (Merge-IdentityActivity @($entraActivity) 90) 90
         $out['ResolvedLastActivityDateTime'] = $lastLogonMergeAdExchEntra
         $out['HasNoEntraLastSignIn'] = [string][string]::IsNullOrWhiteSpace($lastLogonEntra)
         $out['HasNoEntraNonInteractiveLastSignIn'] = [string][string]::IsNullOrWhiteSpace($lastLogonEntraNonInteractive)
-        $out['HasNoExchangeLastLogon'] = [string][string]::IsNullOrWhiteSpace([string]$out['ExchangeLastLogonDateTime'])
+        $out['HasNoExchangeLastLogon'] = $(if (@($exchangeActivity | Where-Object { $_.Status -ne 'Absent' }).Count -eq 0) { 'True' } elseif ($exchange90.Utc) { 'False' } else { '' })
         $out['OnPremMailboxPermissionCountNotInM365'] = '0'
-        $out['ActivityCategory'] = Get-DateCategory -Value $lastLogonMergeAdExchEntra -LimitDays 90
+        $out['ActivityCategory'] = Format-IdentityActivityCategory $combined90 90
         $out['IsJobTitleValid'] = [string](-not [string]::IsNullOrWhiteSpace($jobTitleNormalized))
         $out['JobFamily'] = $jobFamilyCombined
         $out['JobFamilyRelaxed'] = $jobFamilyCombined2
@@ -821,11 +808,11 @@ function Invoke-SmartM365AdUsersEnrichedCsv {
         $out['ExchangeMigrationCompleteAfterDateTime'] = Get-Value $migrationRow @('CompleteAfterUser','CompleteAfter')
         $out['ExchangeMigrationCompleteAfterUtcDateTime'] = Get-Value $migrationRow @('CompleteAfterUTCUser','CompleteAfterUTC')
         $out['IsProtectedByMicrosoft365Backup'] = if ($backupCoverage.Count -gt 0) { [string]($null -ne $backupRow) } else { '' }
-        $out['AdLastLogonCategory'] = Get-DateCategory -Value ([string]$user.LastLogonDate) -LimitDays 90
-        $out['ResolvedLastLogonStatus'] = if ($hasLastLogon) { 'Known' } else { 'Unknown' }
-        $out['HasNoResolvedLastLogon'] = [string](-not $hasLastLogon)
-        $out['ResolvedLastLogonDateTime'] = if ($hasLastLogon) { [string]$user.LastLogonDate } else { '' }
-        $out['IsEnabledWithNoResolvedLastLogon'] = [string]($isEnabled -and [string]::IsNullOrWhiteSpace([string]$out['ResolvedLastLogonDateTime']))
+        $out['AdLastLogonCategory'] = Format-IdentityActivityCategory (Merge-IdentityActivity @($adActivity) 90) 90
+        $out['ResolvedLastLogonStatus'] = $adActivity.Status
+        $out['HasNoResolvedLastLogon'] = if ($adActivity.Status -eq 'Absent') { 'True' } elseif ($adActivity.Utc) { 'False' } else { '' }
+        $out['ResolvedLastLogonDateTime'] = if ($adActivity.Utc) { $adActivity.Utc.ToString('o') } else { '' }
+        $out['IsEnabledWithNoResolvedLastLogon'] = if ($adActivity.Status -eq 'Absent') { [string]$isEnabled } elseif ($adActivity.Utc) { 'False' } else { '' }
 
         [void]$enrichedRows.Add([pscustomobject]$out)
     }
@@ -852,8 +839,8 @@ function Invoke-SmartM365AdUsersEnrichedCsv {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCWMayLaxv6ru+q
-# HMtTNiNlZIKh2COBdHJvj0e5cGWl16CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCFwlaqzoaaA1Lo
+# qam5AknI9Up5Kh7twWzQgKhgSaMBjKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -986,31 +973,31 @@ function Invoke-SmartM365AdUsersEnrichedCsv {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIOBClrUzjIj1YJhIbkRETGPUY3SXpE74zmURGRDpv+14MA0GCSqG
-# SIb3DQEBAQUABIIBgFvqsGLgHKdBY8P3iU9o1bHKX2jMBf7jT2iPOBgNIvpPZXyU
-# MnpAYd4lSWsjV96t7XVGqFn+9PCuoa28Yf8mEuYgjhN0+IPrVU5qalQZTv/4775v
-# RT7q7Q35RaiU+DzwNQkyOu3xbRtBbhjdn+BSyJJeod6Jvo61oLc6QmOtUqdzqbia
-# 26hEbpt9k6lz2tVM7kcmChnpqIAsHpRGNQZyL+Ig9v0YhgA0uGGiQQOay7GMMqVv
-# DC6KvbpoxzBGRmAoHjAgPupCCSRN9rTkj2VX5NdjttC0WG9hd/pV9v5tNosXfcWG
-# 1BqZk5QpQV006Xkx9CBM19Ykc0XkpcZbTexOJ5EvUE3u5+cpy3tFCI0bGuGfGS1F
-# Mj5uRCiy09kUBULp7qItz99P81rR38PcHYF1CePhmRmSKPb2YS1KN05geZj4O3a0
-# dKVa6t9mAHf6wqkyEo2QEfFqBYnkS45tVXmNmtWNpGmMC60rV4wSX6sF8Opv6ndq
-# vQjh7mW5MTMx/Jc+MqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIEYakx6OvZqc0J2aHye809wJR3tQDH9S3WB712VqKgrUMA0GCSqG
+# SIb3DQEBAQUABIIBgK6D6eFZSDaaNRQD+1SiYD0jMtoabT7sqFjYG+iBODMucgQS
+# fX2HtTlsMR4ZZMAIRTjxaJny7lziLtWJ/Qsmv8foLwE1u0VFUBfxDawlyVNXlesf
+# l3lPDDL8tF1cIAWMJdLws7vXMoKMJDUpzMV2g40aUPKP/604+wQ09cOm0LjZJKHm
+# 4q6DpzWVy/Qms95rFUxZ82RT+CQSIY46aNYHSCFYdUN9zcCctPosaZ6ozQkS0Zt4
+# ILF8aaJvF6SGKSWsYHVPQpSngEN7FUwQjsARlZAx3pndY2pWYNkKSS/Gi/dma4yB
+# RMupUaN//NhVBmMc/HtLIRiHLTKvcnkvckW/0EOLq6cFX6FnCcUIEFuoHk6i2kK2
+# g2a2XUmRIZtagB7D6HQ7n7rj0PotGcnwP0fuwM4d1hB1yoZv1/MhIIXpYC3+CgR5
+# nQ2Si0cFV70KLZcnVwncDviXrsVC5ogZnni7/rF8f2FjNVPmVAR251pl2sahj6oV
+# 9umgyWJPzKyQeJ7lXaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTAxOTUx
-# MjlaMC8GCSqGSIb3DQEJBDEiBCDgpqt/oeUQrqYEA0hiDIGfzfvuKABNPLnHZ8kD
-# HbEf9jANBgkqhkiG9w0BAQEFAASCAgAm7a5Z5vTA20fY7r3+yEPNFeXlbuXdLT03
-# nJOGfp+y8BD+HLlIGR8lDWB46iY8H/cHEif+Pznx3vhLyy2mZwpJBIBOJxvioNZy
-# eU0fk30URnjzU5sqDkVEnqeCUCJ33gA9qwII6AZX+s5WAz7RfX+sSELq8ki3HFWy
-# 4m1uX2KwogNQqcCqf0PTTKUTS/U9JHDUhfbJ2AKVNYv3Dgs6hQ0wdv/nlj2qF/Xp
-# d/7/6WgDA3juSIU1J+Gw6JSCkwUSXAdXEncAkqgeOzdGzu42sfHunQxZlxaW0NVH
-# kEsrlXvEdrvlEmYIjKWMehN5EA7G8rFk7UTbYUB8RqUAnVmbfn5H6Ugx4SJqOruQ
-# wEb/Qz+l9vU98NKis9pQD1E034TCOiaa4vFuymOcB8imLlAtDGOkPtEu0KsFtQ5y
-# Kb9svaU83Ivs9uAUxa0AHs5fWeuOjF4L0nMMlQ5IjiQRbJbJX5mcZ+vuBZrSCeCD
-# Yrr3KjGjVMQR/TypHAEoKgZ6f3Xf+9MiDYQZWp7vBcqFvMnwhg09M00lk7x0kCs7
-# nd3HB8bq/+//nYzzrre+BiAU0EDD5+yMxlD0OaAWjEIvC0P304g+d/QztBeqty9R
-# azNIeCjDMmKefZUavrbq2V1r2Sau6ZwdXf6vRlqOM/2DDv5LhkD6+vbm2wuHhqPe
-# ZJOO98HHbg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjIyMTI2
+# MjZaMC8GCSqGSIb3DQEJBDEiBCAqlrgaxQDmQkfgeARly8/FzEnmIgedq1N2hdlN
+# PoqvsTANBgkqhkiG9w0BAQEFAASCAgC10i5hKcoBad85hIgXgHQbfkS1rc82fvF+
+# Dq6DN1S8rDsSXGeiar9L65o6yaYoFbTVgc4JNIseEklWswi4F27koNHZ7MtrErwu
+# AM3NL+9b/4DTcPnH/rkKyy3bDX9VIDqrTuoKDU3NkBbmeSYJ12pdVtj+heYGukeb
+# KgIQ37qofhkiL1bF+FszIw4MwS+lO79qJ97IsRtb8QW0tdcLkb1UZLTEGDvsiDFz
+# 1q2h93rrUb1GJXmVbc16Av+rbxNn5YhuqTStGDcWrkhc8nBtyQ3AIWuZ3dQ5cayY
+# 7Xr/dF77K0NNaaZMW23EQLH8wNCSTKOg2gV76oETLXwNcK0g/1lNlvOP/EMH0r8w
+# sKQb0MhrGfhCAkEqFifQKhCGumw6OiCMwxJ2d0M+6QueqI9+1BvPcWpXGr/MDVsP
+# emtZo6LY6U/Z3lgC+g85EGpoEACwyHKhWWIZJnXB0gdvdSup/oIXuxjzi4G+Zq9f
+# IsrxKq/knTC2zWdjIP36qJjS3OPW7IbvJhjP90bCZRrwQ056E1MbmKDJ8Yn5Zs12
+# Em0NlhGCFH+EVv/n+Ivm2YeGM8R8tMO7bnGANHTxa7zTPVlfRgjNlMVFEP8wAIZi
+# ++qK52gXtteUmbDTcSu1K45yl0f08wftQ2mQn+o08qW4kpAowG1TuejT995W8L/z
+# I60r83Cc2w==
 # SIG # End signature block

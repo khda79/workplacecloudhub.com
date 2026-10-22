@@ -17,7 +17,7 @@
     Parameters allow customization of output paths, permission inclusion, and overwrite behavior.
 
 .VERSION
-1.66
+1.67
 .REQUIREMENTS
     Windows PowerShell 5.1 on an Exchange 2016/on-premises management host.
     Modules/snap-ins: SmartM365 WindowsPowerShell5 compatibility module; Exchange Management snap-in; ActiveDirectory module when AD permission export is enabled.
@@ -110,6 +110,7 @@ $tenantContextPath = & {
 . $tenantContextPath
 Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot | Out-Null
 
+. (Join-Path $PSScriptRoot '../../../Common/SmartM365.IdentityDateEvidence.ps1')
 function Get-ScriptLocalConfig {
     [CmdletBinding()]
     param()
@@ -267,7 +268,7 @@ $global:SharePointTargetFolderPath = Get-ScriptLocalConfigValue -Config $ScriptL
 $script:SharePointUploadDisabledForRun = -not $global:EnableSharePointUpload
 $script:SharePointUploadDisableLogged = $false
 #region Module Import and Initialization
-$ScriptVersion = "1.66"
+$ScriptVersion = "1.67"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $EnableWeeklyHistory = [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'EnableWeeklyHistory' -DefaultValue $true)
 $WeeklyHistoryFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'WeeklyHistoryFolderPath' -DefaultValue ''
@@ -655,7 +656,7 @@ function Get-SmartM365LocalMailboxColumns {
       'ModerationEnabled','AcceptMessagesOnlyFrom','AcceptMessagesOnlyFromDLMembers','RejectMessagesFrom',
       'RejectMessagesFromDLMembers','RequireSenderAuthenticationEnabled','Database','ServerName',
       'UseDatabaseQuotaDefaults','ArchiveName','ArchiveStatus','ArchiveState','ArchiveQuota','ForwardingAddress',
-      'ForwardingSmtpAddress','DeliverToMailboxAndForward','Department','Office','Manager','WhenMailboxCreated',
+      'ForwardingSmtpAddress','DeliverToMailboxAndForward','Department','Office','Manager','WhenMailboxCreated','WhenMailboxCreatedIso8601','LastLogonTimeIso8601',
       'WhenChanged','WhenCreated','MailboxLocations','Identity','ObjectCategory','GrantSendOnBehalfTo',
       'ProhibitSendReceiveQuota-In-MB','LastLogonTime','TotalItemSize-In-MB','ItemCount','DeletedItemCount',
       'TotalDeletedItemSize-In-MB','ArchiveTotalItemSize-In-MB','ArchiveItemCount','LargeItemCount-Over-35MB',
@@ -941,6 +942,7 @@ function ConvertTo-SmartM365ExchangeRemoteMailboxRecord {
         WhenCreated                  = $Mailbox.WhenCreated
         WhenChanged                  = $Mailbox.WhenChanged
         MailboxRelease               = $Mailbox.MailboxRelease
+        WhenMailboxCreatedIso8601 = ConvertTo-IdentityNativeIso $Mailbox.WhenMailboxCreated
         WhenMailboxCreated           = $Mailbox.WhenMailboxCreated
         AccountDisabled              = $Mailbox.AccountDisabled
         ExchangeUserAccountControl   = $Mailbox.ExchangeUserAccountControl
@@ -1043,7 +1045,7 @@ function Get-SmartM365RemoteMailboxColumns {
     @('DomainName','Name','DisplayName','Alias','PrimarySmtpAddress','WindowsEmailAddress',
       'UserPrincipalName','SamAccountName','RecipientType','RecipientTypeDetails','RemoteRoutingAddress',
       'RemoteRecipientType','OnPremisesOrganizationalUnit','DistinguishedName','ObjectCategory',
-      'WhenCreated','WhenChanged','MailboxRelease','WhenMailboxCreated','AccountDisabled',
+      'WhenCreated','WhenChanged','MailboxRelease','WhenMailboxCreated','WhenMailboxCreatedIso8601','LastLogonTimeIso8601','AccountDisabled',
       'ExchangeUserAccountControl','ArchiveState','ArchiveQuota','ArchiveWarningQuota',
       'DeliverToMailboxAndForward','ForwardingAddress','IsValid','MailboxMoveTargetMDB',
       'MailboxMoveSourceMDB','MailboxMoveFlags','MailboxMoveRemoteHostName','MailboxMoveBatchName',
@@ -2419,6 +2421,8 @@ try { # Main try block for script execution and interruption handling
                     $userObj | Add-Member NoteProperty -Name "Department" -Value $Mbx.Department
                     $userObj | Add-Member NoteProperty -Name "Office" -Value $Mbx.Office
                     $userObj | Add-Member NoteProperty -Name "Manager" -Value $(if($null -ne $Mbx.Manager){$Mbx.Manager.ToString()}else{""})
+                    $userObj | Add-Member NoteProperty -Name 'WhenMailboxCreatedIso8601' -Value (ConvertTo-IdentityNativeIso $Mbx.WhenMailboxCreated)
+                    $userObj | Add-Member NoteProperty -Name 'LastLogonTimeIso8601' -Value ''
                     $userObj | Add-Member NoteProperty -Name "WhenMailboxCreated" -Value $Mbx.WhenMailboxCreated
                     $userObj | Add-Member NoteProperty -Name "WhenChanged" -Value $Mbx.WhenChanged
                     $userObj | Add-Member NoteProperty -Name "WhenCreated" -Value $Mbx.WhenCreated
@@ -2460,6 +2464,7 @@ try { # Main try block for script execution and interruption handling
                         $Stats = Get-MailboxStatistics -Identity $Mbx.DistinguishedName -WarningAction SilentlyContinue -ErrorAction Stop
                         if ($Stats) {
                             $userObj."LastLogonTime" = $Stats.LastLogonTime
+                            $userObj.'LastLogonTimeIso8601' = ConvertTo-IdentityNativeIso $Stats.LastLogonTime
 							$userObj."TotalItemSize-In-MB" = $(if($null -ne $Stats.TotalItemSize -and $Stats.TotalItemSize.IsUnlimited -eq $false) {$Stats.TotalItemSize.Value.ToMB()} elseif($null -ne $Stats.TotalItemSize -and $Stats.TotalItemSize.IsUnlimited -eq $true) {$Stats.TotalItemSize.Value.ToMB()} else {"N/A"})
                             $userObj."ItemCount" = $Stats.ItemCount
                             $userObj."DeletedItemCount" = $Stats.DeletedItemCount
@@ -3767,8 +3772,8 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAGoTiYv11uSj4m
-# AUpaNV82NfUy7T1GvAaUEKpD+FD2tKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCASaX/9lSWV7u/U
+# cwMizKJKT39JfC+eKGg0eTtKYMWdo6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -3901,31 +3906,31 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIDEEAEu9NCuGUJba5xvHmQWDUccx/Zard9/PDiiHe73kMA0GCSqG
-# SIb3DQEBAQUABIIBgByqhqx0XWnaECJJLHLJCEQBXQ5qzKnnHKh/cc4veTH6xGJW
-# TbCc3zyae5YpLV7y3MatBuAx8SKCH0OcyYjmM1gXFLADzCpzUs5nzw9QofBqIoVl
-# OvOk1fSIsEVgRZcZSPY4TfxYiTnGSILS6U13yYBAQlJLKj7UiWpr2+uiPUn7wdV3
-# 5qZ5CuIiMoD2Y05ygJUZOKt4Jc+POWFl1IfXwtkyqpOjXywn0dADaG8m6qwi28eC
-# /aYOVMgCxHS/OobdLa28Ab4c7QtIM9PTweTF/SeGJ2KTLwwzmK7jw9aMmZl9ZcXO
-# lfZN02RVID8scGpnrmGIH3NRc/gHFBm/ayKAGJ9HD74IneL7O9OWXpmla0WKDHhW
-# b8w0SjwDc3CGZ6gs69oKIsG18qsvFouTb3R0Ckgw9NtxOJ0ePVy378ty45jQvCQI
-# ECWygu/fBTGZ3oK1mO9kq5i/bgHtTnvM+Y2tgsuaJZVcYAr22ZhNJPXCfr/qm717
-# 98NMm5cFxDI1tze7T6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIK93t3+L8jzcKTBcnpUki9rhutllbczvoGZAGMxFbhD0MA0GCSqG
+# SIb3DQEBAQUABIIBgAc4qQsVfgKompPuTNOLVsDW7ln2r9I7jy+ehtKKOlsHL9RO
+# 03ZZd/wtLDcHjuqzf1r5lHHxpHQICC/nlXDNQNzX/1E62q2skXpNWnq2ky9MJJT4
+# D5dL1AULJAUzp+7ySB8T+POjaBPvnaoGQvgsw1dRXaN4BAzXyxFe9ZLKtAcsBmh4
+# Hu0r+ey7DtSdfXRFzGTR6j/Z3+pbFW3Xams7Tqe6+Ey7HcuRvibae/J57SCcgQ8b
+# AgEfxMIUfi+qqCBXUgketG3UkFchUIEOiUKDwOyfmCFrp8ccJlQsXKgV4k7SVSiC
+# o+j1j04VfP4TSkHaYN9axmablrpIru+b0IuzIKtvdsnJYDNsVXKJ2S4x6kJ//vJk
+# wkw6KbvQf8c3Pj6IZivP7jNqXvAjfbtyAx9EffuVy5x5u5rH/oBHwMIa9ZhrrYSS
+# 1/Id6gCnLZ3bWuT0+IY9ml0jFpzpfw3CWjfVJ74KCXdHsGKCnxlPyMsLPtnh+YRQ
+# MnEssuRRPjPKFC6WV6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTYxMzM0
-# MDhaMC8GCSqGSIb3DQEJBDEiBCAgIpw0+i75AWMbg85o7qs1mPhOxBz/Dk5ODFPR
-# NEU5hTANBgkqhkiG9w0BAQEFAASCAgCKK401pIwFgoE23qSyE7CbaE8GCaHUzLQ1
-# y1hFDYRuJNX3Balo4ZgKSE+MfUZez8Tg0qozCetqiPgxSWDvI6oGR3vq68MRZmns
-# 4qwIWLn85OXBDGa/lsvJI/56a3Ic6243O6VjcuYP2FFamZkluH3myNJpcbl/ZfG+
-# 6ykz0uwIh44M/DnEvGtaQn/mXWPXkTKp+O3i80LoM5PVWcmwXYgiLP2KDNoUYEXP
-# psa80rZ7Wg/5StCBoho4n8+I7NoYYVz59rFmHhYpU+R5EWzPAFtQHlnndITFenHo
-# VGhqXhH7zfk6FIGRMehf0kGoKzoj8S24yjWTib0/cxesamravYJZgAwK+ktcCM+6
-# 8rovANaQYZOBV92n6zcc327WAHw3Z/qZdpAIPmitK9O8A9m2Zio1gRKu94PbDWV8
-# VNDFV9PXirtq6fYQaYadQAmzqipXTlQVfTWN9yUu4Whtp2UAqv0vhCNIq5G/8lRI
-# HZbnp/1Q6oDNBFDX3jTVUUzwtE21e1Xjapf1pTSOGsYFCNdqXhZI/ppcDxRDWPy1
-# 4Y7M6YmvEex79O1ancz7CE6u6NVoHY080adC8et5SI3xS/bHTvd1qouoZ5mawKEo
-# 4bbUWkPUCF3e6nfyDaS2nWT7hdmdi5IylUSMMlJfEkAT+bw9b+nLHyuIMmru8RES
-# FfTLMlwVIA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjIyMTI2
+# MjdaMC8GCSqGSIb3DQEJBDEiBCBIoZoLvk6lG0h6V0bIcfHRLwuqM7AX7tddzgyn
+# IpBeNjANBgkqhkiG9w0BAQEFAASCAgAV61nnXMompev4eO4Itmis+wUnR8aQsl5u
+# ao6UDs7+H1cbuUZODmhRqHIJ2Je0/dNjSZvubBvWMblPPVklZiAzOIFbSBHDVUVc
+# YK7JOGrC5iB1jE5lyYXk1Y5juBUJE3DTiPcPpq5jw9ZRYP6imtcBdH9R/vSBVVs4
+# sXXgIq2o5aeX+oRAlT84DXTReMbAhtn7irvQdR3vMt9Pt/ScE/rGIizRLa3WkH0G
+# gVW62mnSj9/JEuJHYkfe4uks1NPxJyybP7fIbI9rO0y751xwQrv+5eogDd4NvZxB
+# q3FpcEzg3ouaiZjoCXz/bmx994amUBClZPM2+XecKDXoMqpBS/dq2ayKwlRSGZ/e
+# bZJgb6egM+uy30nBf4twgX/yGc4G1OOa4EVkWr/OHcaxgIEsVXAxqMPVROEbxztK
+# c3yAJ+yB9keoRdK86SqepGPHVhutUZUB2efVb/v58wu5wGmy6JTKTQg19v2kS16A
+# KC7HHHBrfFASlUeWEIuOk/1ztA17m/BUoCfSzBaG/OYCV7RAQrMQhMEiJ2bId0ej
+# KzHL8/dyuL348ydQJLjgluBy/FQNIs0mOKgvVn+sJYG4FrAaRN1kujSc/JXzDDwJ
+# vQAqLmRUzrO2rDCyFN8fW/EDUW/AHNFf94q7vEFwolIhdkEtqp49A9nHH85dIwPU
+# jN9DgxztpA==
 # SIG # End signature block

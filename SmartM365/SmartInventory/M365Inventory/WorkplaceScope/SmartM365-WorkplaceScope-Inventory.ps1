@@ -3,7 +3,7 @@
 .SYNOPSIS
 Collect native Entra direct membership and Intune policy/assignment evidence.
 .VERSION
-1.0.11
+1.0.12
 .NOTES
 Candidate collector. Not automatically scheduled until production qualification.
 Graph beta membership avoids the documented v1.0 service-principal omission.
@@ -13,6 +13,17 @@ Hidden groups require Member.Read.Hidden; missing access is fatal, not empty.
 param([string]$Tenant='test', [switch]$InteractiveAuth, [switch]$ValidateOnly,
     [switch]$EnableConfiguredExternalActions, [string]$OutputPath, [string]$LatestCsvFolderPath,
     [ValidateRange(0,10000000)][int]$MaxItems=0)
+function ConvertTo-InventoryIsoDate {
+    param([AllowNull()][object]$Value)
+    # Round-trip preserves DateTime.Kind/DateTimeOffset.Offset. Unspecified stays offsetless.
+    if ($null -eq $Value) { return '' }
+    if ($Value -is [datetime] -or $Value -is [datetimeoffset]) {
+        return $Value.ToString('o', [Globalization.CultureInfo]::InvariantCulture)
+    }
+    # Do not guess a culture or timezone for string-valued/deserialized evidence.
+    return ''
+}
+
 # Local lifecycle only; no collection or publication is performed by this guard.
 $smartM365LifecycleRoot=$PSScriptRoot
 while ($smartM365LifecycleRoot -and -not (Test-Path -LiteralPath (Join-Path $smartM365LifecycleRoot 'Modules/SmartM365.Core/SmartM365-InventoryLifecycle.ps1') -PathType Leaf)) {
@@ -211,7 +222,11 @@ try {
             $uri = 'https://graph.microsoft.com/beta/deviceManagement/'+$family.Path+'/'+[uri]::EscapeDataString($id)+'/assignments'
             $targets = @(Get-WorkplaceGraphCollection -Uri $uri -Invoker { param($address) Invoke-SmartM365EvidenceGraphRequest -Uri $address })
             $collected = [datetime]::UtcNow.ToString('o')
-            $policies.Add((ConvertTo-WorkplacePolicyEvidence $policy $family.Name $script:Runtime.RunId $collected))
+            $policyEvidence = ConvertTo-WorkplacePolicyEvidence $policy $family.Name $script:Runtime.RunId $collected
+            foreach ($dateField in @('CreatedDateTime','LastModifiedDateTime')) {
+                $policyEvidence | Add-Member -NotePropertyName ($dateField + 'Iso8601') -NotePropertyValue (ConvertTo-InventoryIsoDate $policyEvidence.$dateField)
+            }
+            $policies.Add($policyEvidence)
             $seenAssignments = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
             foreach ($assignment in $targets) {
                 $target = Get-WorkplaceSourceValue $assignment @('target') $null
@@ -233,7 +248,7 @@ try {
     $exports = @(
         @{Name='M365_EntraGroupMemberships_All';Rows=$memberships.ToArray();Columns=@('GroupId','MemberId','MemberType','MembershipKind','CollectionStatus','RunId','CollectedAtUtc')},
         @{Name='M365_EntraGroupMembershipScope';Rows=$groupScope.ToArray();Columns=@('GroupId','Visibility','MemberCount','MemberCollectionStatus','RunId','CollectedAtUtc','DisplayName','MailEnabled','SecurityEnabled','GroupTypes','OnPremisesSecurityIdentifier','GroupCollectedAtUtc')},
-        @{Name='Intune_Policies_All';Rows=$policies.ToArray();Columns=@('PolicyId','PolicyFamily','DisplayName','Description','Platforms','Technologies','FeatureUpdateVersion','CreatedDateTime','LastModifiedDateTime','NativeEvidenceJson','AssignmentCollectionStatus','RunId','CollectedAtUtc')},
+        @{Name='Intune_Policies_All';Rows=$policies.ToArray();Columns=@('PolicyId','PolicyFamily','DisplayName','Description','Platforms','Technologies','FeatureUpdateVersion','CreatedDateTime','LastModifiedDateTime','NativeEvidenceJson','AssignmentCollectionStatus','RunId','CollectedAtUtc','CreatedDateTimeIso8601','LastModifiedDateTimeIso8601')},
         @{Name='Intune_PolicyAssignments_All';Rows=$assignments.ToArray();Columns=@('PolicyFamily','PolicyId','AssignmentId','TargetType','GroupId','AssignmentFilterId','AssignmentFilterType','NativeTargetJson','RunId','CollectedAtUtc')}
     )
     # Memberships were validated while collected and are exported first: Publish-SmartM365Csv applies the full rule
@@ -272,12 +287,11 @@ try {
 }
 if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 
-
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAtd43k9bMHKRxy
-# UT+rgT6aruEbnYx050CylCj7xvm8K6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB57Gzr7y/mySIx
+# 8YQRBxzwIHsB1HqJa0fQHpFsDu1OJaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -410,31 +424,31 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIOD1w+Xqh22A0GmJUHWLhS0tiFo0RX+wPbqOEqB0VWSVMA0GCSqG
-# SIb3DQEBAQUABIIBgJkNYzLeVLMyPWkLAjMj/ttIXenY4rXTv5TjnCVDN7b+w/yd
-# UQexv3/okgMyELoTA+EEC3UQbZuQl/pS/2ITQjSQD4IbhoI6AJqbGwGW9kyGdffu
-# xXKuB0Ft0vPk2Lx5INjcxCx1TZGIOeTe8tDAFfS4U5Ay3C96v5pwoKTfxKKkPisf
-# 5E3xWuwQ20Jgs1prLGDwGaxNvP/WIoWbZIL8ruRPT8yGg3+S18FPbvZXchpz8snA
-# PRjMem7JiTVRk6EcEvpaEwuPMa4TUDt7VfjkXCsQEFHAao77Czerram1WWxAZGqF
-# 3xQC4FmiV4GnDTAlu4qkAiziDYBKVuGcycR+cjnUHZgY24S8qvn5OCDliYlu2wKy
-# GH6XGTJpgC8k6QSWErkSUQCpQoFXN3vTzkJqB+wDWWYUwF+IFF7MZQdJL3Plg+Um
-# GsryF1tFVfNtQ69iRILQ+2xj/B+ZQIyQRXH/hEsb5xBiJ0jj+HYrysxAGwUwYcv9
-# OImdejUp1HMROoyRQ6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIGzpJtdkGxwqJb/ehgTId7N96n61YUDXvdHaGuk4NTEmMA0GCSqG
+# SIb3DQEBAQUABIIBgBu/+HSiAi/Unzo3YtHMNZZFOCbN4WDxIUk1evKCKLNp0O0f
+# AQ+t5IwAEt6VSyWkNfP0IcakT6rU618HeCvmdACpPtjyN5jpqItl1dL3l9g6ljR/
+# PSkOotn5URwCZIcLEXU7k0nsS68ObGpLFd6nFyScK80oPovEcvC5aQblzDr0LO1W
+# 1F+csqR9f6mb/vXHOlw63lH4yYguVRzuWvqt5rrsqqrONPj5YwjHnkzphmkVO3On
+# 67vy3Vn0AOR1hHvmMy5assLbunE9AheyNQF7mbVEohrmzyZQu3Zk+ZOeA1LdK5S1
+# A2Vjy9N439Bl+RtrbeeICjYuT/ccox+7d6rJiKVWidzGccfbTi4u+z1e4YgqHc4K
+# 1TC3C4UYqqBK0QGBeFcVemBPUxtBA7FLvrrPwKlko79Rk6JKsfzZFGom7fKYy/GV
+# 1ClnsNo9iQ4QJZzcPnltBSbFLpC3JbsCLDZUubEIoG4vo+3M0S0aBkpK+o6e8x2v
+# 743gp2V3hMU1G4VBxKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTkyMjMz
-# NDlaMC8GCSqGSIb3DQEJBDEiBCCwPGfahNoAP8rzuLGkk8VdUuZ8aLIBiDHkSX0D
-# 7QET4TANBgkqhkiG9w0BAQEFAASCAgAWpK7Pp6m5G3AFVEtoE1o19hdSN76BRCMQ
-# PCh8bXehfshQ5ktvcJolH6J9rilI6Qil6SlNbeTbUfyUAn2Q3uhGobuo4dZ/h8+t
-# dZyZAWZxX6GezKIrnlpOJ8JwHdgI3Y1kt1RWckM6ZaA1ZbLRmuRSuvVHX6mWjaCu
-# ZUns3EzxUoSBn3dkOfWdPuyPE/+MUS4/3a5NK92I81JAzWapjaD0U7LFwYbPB13r
-# 8WppLcCf1gn+3xL6k6j4gR1eHYtVhpCiwDPVrI0acymvOYKTbarUsx38LjTK6bLg
-# 7eXwBMsho9b5lqiUzfRZUd0ixLgGU8bb/54Hs19Dwy16qNGRLy3Pc/kyVloZ8T6G
-# +Hfq+SlKTYq7hrAwhlSfYkZ23BeJf6LxL57VTBSZcwL7HsPR+aFA8rEcXrjbJMKY
-# bDKI2OP79OL+P7GcS16iPYT8J6WgIBn5xIr52EJMJ1fUqJuUqUUYXP2GokIJO/Vm
-# 66OohqKR0GbkZk7UUKhxDXhK0X/6/6BTED0UUlpOFBAVwKPzh3QsEcVbVebBZRU5
-# /rtBusniq+ZZIYWBTAZfmqZzdDXfzHT8DFCi6DWTpFkXEKHKgKfIm/3xOyMPaRo3
-# UN1m/jQl2Rs40SB1DlyQzQTZzc/fct3sLieFTYPAA11YY+Tzx75qws9SGGEnlEMl
-# W0KHr1aGRg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjIyMTI2
+# MjhaMC8GCSqGSIb3DQEJBDEiBCDYS3MbVVvb+vnvAur5UVh0fG8/LyEymWCueIes
+# KF+JNDANBgkqhkiG9w0BAQEFAASCAgCrSgx6CoyxD8sr6YqTwu9gS1/I68iYQs/d
+# 96ntxcYOPGpw94xHtf7e3O86Ufho3kEp24jAwZtQ9sR+z/ErzEicy9TBnElgllWU
+# knP98UtbLkg8Tb7yyyvHii5VbJHWecOc8A4MJYzpdbxk2YAXurL2Cj8KsRXfFjm7
+# 0OPt26S+c0gWXgdLUav9PO4yWERvqfAwAd390t9eufy+wxDs4kJ9SNaoQKy0iZ8G
+# NLLIgWVE15CnGQ5PkiztU4WmB1MgalCtf8UvIiiU7+ucyE10R7jtNhJFouGzHTU9
+# nCfT++RdRm2aYCuVArPsmYL9obEyQFbFtEofWKhd5t/VbTZJbkb+qcDK+pc2q4Jz
+# MBF9338kvP6EBzWrVd63qNXNXr2W96ZUco3j/38n+VuprLOk2IxqJqQUMzNy8Q3U
+# kvmXMbqSv9k4LnNTdlTqLsvbCRoIpYR+2JSMKBjvUWDxjnzXsAGadsgktlSKHioL
+# 6kqw8wKxDwteAngSwFusm2d1Ts5G9JlUSObJE8VEQuMMJhz66hxt8yzW1QcQQ9ee
+# AEdSZ9343uGFw2a5ONa0bk9o1HppIa6+zgIhmcH+B1kpOwVrzRiZu5CJRY1v2vVc
+# cCUyRzTiBoFJPne+ui/xtzOgeHOUvMM2D5XhDGl7ZoQlunrNzgKZB/Gm7sioTChB
+# q/FhfWJTAA==
 # SIG # End signature block

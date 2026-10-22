@@ -26,7 +26,7 @@
         expensive at scale ~9800 mailboxes). Without -IncludeLastUserActionTime, the column is intentionally empty
         even when -IncludeStats is active.
 .VERSION
-1.26
+1.27
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; ExchangeOnlineManagement; Microsoft.Graph.Authentication when Graph enrichment is used. SmartM365 mail/SharePoint upload uses Graph REST direct from SmartM365.Core.
@@ -124,6 +124,7 @@ $MaximumFunctionCount = 32768
 # ==========================================================
 # App-only authentication parameters (same app as other scripts)
 # ==========================================================
+. (Join-Path $PSScriptRoot '../../Common/SmartM365.IdentityDateEvidence.ps1')
 function Get-ScriptLocalConfig {
     [CmdletBinding()]
     param()
@@ -406,7 +407,7 @@ function Publish-MailboxInventoryDiagnosticCsv {
     }
 }
 #region Init
-$ScriptVersion = "1.26"
+$ScriptVersion = "1.27"
 $script:StatsCompletenessDiagnosticPath = $null
 $script:StatsCompletenessIssueRows = @()
 $StatsCompletenessFailMinRows = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'StatsCompletenessFailMinRows' -DefaultValue 50)
@@ -1274,11 +1275,14 @@ function Convert-ToMBInteger {
                     TotalItemSizeGB               = [string]$row.TotalItemSizeGB
                     ItemCount                     = [string]$row.ItemCount
                     LastLogonTime                 = [string]$row.LastLogonTime
+                    LastLogonTimeIso8601 = if ($row.PSObject.Properties['LastLogonTimeIso8601']) { [string]$row.'LastLogonTimeIso8601' } else { '' }
                     LastUserActionTime            = [string]$row.LastUserActionTime
+                    LastUserActionTimeIso8601 = if ($row.PSObject.Properties['LastUserActionTimeIso8601']) { [string]$row.'LastUserActionTimeIso8601' } else { '' }
 
                     Archive_TotalItemSizeGB       = [string]$row.Archive_TotalItemSizeGB
                     Archive_ItemCount             = [string]$row.Archive_ItemCount
                     Archive_LastLogonTime         = [string]$row.Archive_LastLogonTime
+                    Archive_LastLogonTimeIso8601 = if ($row.PSObject.Properties['Archive_LastLogonTimeIso8601']) { [string]$row.'Archive_LastLogonTimeIso8601' } else { '' }
                 }
                 $count++
             }
@@ -1833,7 +1837,7 @@ return @{
             if (-not $PermissionsOnly) { $swStats = [System.Diagnostics.Stopwatch]::StartNew() }
 
             # -------- Archive (minimal CSV) --------
-            $archiveSizeGB = ""; $archiveCount = ""; $archiveLlt = ""
+            $archiveLogonIso = ''; $archiveSizeGB = ""; $archiveCount = ""; $archiveLlt = ""
             $hasArchive = ($mb.PSObject.Properties.Name -contains 'ArchiveStatus' -and $mb.ArchiveStatus -and $mb.ArchiveStatus.ToString() -ne 'None')
             if ($PermissionsOnly) {
                 # PermissionsOnly: stats are intentionally blank
@@ -1850,6 +1854,7 @@ return @{
                 if ($snapStat) {
                     $archiveSizeGB = [string]$snapStat.Archive_TotalItemSizeGB
                     $archiveCount  = [string]$snapStat.Archive_ItemCount
+                    $archiveLogonIso = [string]$snapStat.Archive_LastLogonTimeIso8601
                     $archiveLlt    = [string]$snapStat.Archive_LastLogonTime
                 }
             }
@@ -1877,11 +1882,11 @@ return @{
 
                     if ($exoArch.PSObject.Properties.Name -contains 'ItemCount' -and $exoArch.ItemCount -ne $null) { $archiveCount = $exoArch.ItemCount }
                     if ($exoArch.PSObject.Properties.Name -contains 'LastLogonTime' -and $exoArch.LastLogonTime) {
-                        $archiveLlt = (Get-Date $exoArch.LastLogonTime -Format "yyyy-MM-dd HH:mm:ss")
+                        $archiveLlt = (Get-Date $exoArch.LastLogonTime -Format "yyyy-MM-dd HH:mm:ss"); $archiveLogonIso = ConvertTo-IdentityNativeIso $exoArch.LastLogonTime
                     } else {
                         try {
                             $legacyArch = Get-MailboxStatistics -Identity $mb.UserPrincipalName -Archive -ErrorAction SilentlyContinue 2>$null
-                            if ($legacyArch -and $legacyArch.LastLogonTime) { $archiveLlt = (Get-Date $legacyArch.LastLogonTime -Format "yyyy-MM-dd HH:mm:ss") }
+                            if ($legacyArch -and $legacyArch.LastLogonTime) { $archiveLlt = (Get-Date $legacyArch.LastLogonTime -Format "yyyy-MM-dd HH:mm:ss"); $archiveLogonIso = ConvertTo-IdentityNativeIso $legacyArch.LastLogonTime }
                             if ([string]::IsNullOrWhiteSpace($archiveCount) -and $legacyArch -and $legacyArch.PSObject.Properties.Name -contains 'ItemCount') { $archiveCount = $legacyArch.ItemCount }
                             if ([string]::IsNullOrWhiteSpace($archiveSizeGB) -and $legacyArch -and $legacyArch.PSObject.Properties.Name -contains 'TotalItemSize') { $archiveSizeGB = Convert-QuotaToGB $legacyArch.TotalItemSize }
 
@@ -1902,6 +1907,7 @@ return @{
                 Archive_TotalItemSizeGB        = $archiveSizeGB
                 Archive_ItemCount              = $archiveCount
                 Archive_LastLogonTime          = $archiveLlt
+                Archive_LastLogonTimeIso8601 = $archiveLogonIso
                 ImmutableId                    = if ($mb.ExternalDirectoryObjectId) {
                                                      try { [Convert]::ToBase64String(([GUID]$mb.ExternalDirectoryObjectId).ToByteArray()) } catch { "" }
                                                  } else { "" }
@@ -1911,7 +1917,7 @@ return @{
             $exoPri = $null
             $legacyPri = $null
 
-            $lastAction  = ""
+            $lastActionIso = ''; $lastLogonIso = ''; $lastAction  = ""
             $totalSizeGB = ""
             $itemCount   = ""
             $lastLogon   = ""
@@ -1929,9 +1935,11 @@ return @{
                 } catch { }
 
                 if ($snapStat) {
+                    $lastActionIso = [string]$snapStat.LastUserActionTimeIso8601
                     $lastAction  = [string]$snapStat.LastUserActionTime
                     $totalSizeGB = [string]$snapStat.TotalItemSizeGB
                     $itemCount   = [string]$snapStat.ItemCount
+                    $lastLogonIso = [string]$snapStat.LastLogonTimeIso8601
                     $lastLogon   = [string]$snapStat.LastLogonTime
                 }
             }
@@ -1949,7 +1957,7 @@ return @{
                                 }
 
                                 if ($IncludeLastUserActionTime -and $exoPri.PSObject.Properties.Name -contains 'LastUserActionTime' -and $exoPri.LastUserActionTime) {
-                                    $lastAction = (Get-Date $exoPri.LastUserActionTime -Format "yyyy-MM-dd HH:mm:ss")
+                                    $lastAction = (Get-Date $exoPri.LastUserActionTime -Format "yyyy-MM-dd HH:mm:ss"); $lastActionIso = ConvertTo-IdentityNativeIso $exoPri.LastUserActionTime
                                 } else {
                                     $lastAction = ""
                                 }
@@ -1976,12 +1984,12 @@ return @{
                                 if ($exoPri.PSObject.Properties.Name -contains 'ItemCount' -and $exoPri.ItemCount -ne $null) { $itemCount = $exoPri.ItemCount }
 
                                 if ($exoPri.PSObject.Properties.Name -contains 'LastLogonTime' -and $exoPri.LastLogonTime) {
-                                    $lastLogon = (Get-Date $exoPri.LastLogonTime -Format "yyyy-MM-dd HH:mm:ss")
+                                    $lastLogon = (Get-Date $exoPri.LastLogonTime -Format "yyyy-MM-dd HH:mm:ss"); $lastLogonIso = ConvertTo-IdentityNativeIso $exoPri.LastLogonTime
                                 } else {
                                     try {
                                         $legacyPri = Get-MailboxStatistics -Identity $mb.UserPrincipalName -ErrorAction SilentlyContinue 2>$null
                                         if ($legacyPri -and $legacyPri.PSObject.Properties.Name -contains 'LastLogonTime' -and $legacyPri.LastLogonTime) {
-                                            $lastLogon = (Get-Date $legacyPri.LastLogonTime -Format "yyyy-MM-dd HH:mm:ss")
+                                            $lastLogon = (Get-Date $legacyPri.LastLogonTime -Format "yyyy-MM-dd HH:mm:ss"); $lastLogonIso = ConvertTo-IdentityNativeIso $legacyPri.LastLogonTime
                                         }
                                         if ([string]::IsNullOrWhiteSpace($itemCount) -and $legacyPri -and $legacyPri.PSObject.Properties.Name -contains 'ItemCount') {
                                             $itemCount = $legacyPri.ItemCount
@@ -1999,7 +2007,7 @@ return @{
                                         if ($legacyPri.PSObject.Properties.Name -contains 'TotalItemSize') { $totalSizeGB = Convert-QuotaToGB $legacyPri.TotalItemSize }
                                         if ($legacyPri.PSObject.Properties.Name -contains 'ItemCount') { $itemCount = $legacyPri.ItemCount }
                                         if ($legacyPri.PSObject.Properties.Name -contains 'LastLogonTime' -and $legacyPri.LastLogonTime) {
-                                            $lastLogon = (Get-Date $legacyPri.LastLogonTime -Format "yyyy-MM-dd HH:mm:ss")
+                                            $lastLogon = (Get-Date $legacyPri.LastLogonTime -Format "yyyy-MM-dd HH:mm:ss"); $lastLogonIso = ConvertTo-IdentityNativeIso $legacyPri.LastLogonTime
                                         }
                                     }
                                 } catch {}
@@ -2019,10 +2027,13 @@ return @{
                     TotalItemSizeGB                 = $totalSizeGB
                     ItemCount                       = $itemCount
                     LastLogonTime                   = $lastLogon
+                    LastLogonTimeIso8601 = $lastLogonIso
                     LastUserActionTime              = $lastAction
+                    LastUserActionTimeIso8601 = $lastActionIso
                     Archive_TotalItemSizeGB         = $archiveSizeGB
                     Archive_ItemCount               = $archiveCount
                     Archive_LastLogonTime           = $archiveLlt
+                    Archive_LastLogonTimeIso8601 = $archiveLogonIso
                 }
             }
 
@@ -2260,6 +2271,7 @@ return @{
                 ProhibitSendQuotaGB        = Convert-QuotaToGB $mb.ProhibitSendQuota
                 ProhibitSendReceiveQuotaGB = Convert-QuotaToGB $mb.ProhibitSendReceiveQuota
 
+                WhenMailboxCreatedIso8601 = ConvertTo-IdentityNativeIso $mb.WhenMailboxCreated
                 WhenMailboxCreated     = $mb.WhenMailboxCreated
                 LastExchangeChangedTime= if ($mb.PSObject.Properties.Name -contains 'LastExchangeChangedTime') { $mb.LastExchangeChangedTime } else { "" }
                 Languages              = if ($mb.Languages) {
@@ -2268,9 +2280,11 @@ return @{
                                              $region.Language.Name
                                          } else { "" }
                 LastUserActionTime     = $lastAction
+                LastUserActionTimeIso8601 = $lastActionIso
                 TotalItemSizeGB        = $totalSizeGB
                 ItemCount              = $itemCount
                 LastLogonTime          = $lastLogon
+                LastLogonTimeIso8601 = $lastLogonIso
 
                 SendAs                 = $sendAsStr
                 FullAccess             = $fullAccessStr
@@ -2362,12 +2376,14 @@ return @{
             NativeIdentityStatus = if ($mailboxRow.MailboxGuid -or $mailboxRow.ExternalDirectoryObjectId) { 'Observed' } else { 'Unavailable' }
         } -Force
     }
+    $columnOrderDefault += @('WhenMailboxCreatedIso8601','LastLogonTimeIso8601','LastUserActionTimeIso8601')
+    $columnOrderArchive += @('Archive_LastLogonTimeIso8601')
     $exportData = $resultsDetailed | Select-Object -Property $columnOrderDefault
     $exportDataArchive = $resultsArchiveOnly | Select-Object -Property $columnOrderArchive
     $columnOrderStats = @(
         'Identity','UserPrincipalName','PrimarySmtpAddress','StatsSource',
         'TotalItemSizeGB','ItemCount','LastLogonTime','LastUserActionTime',
-        'Archive_TotalItemSizeGB','Archive_ItemCount','Archive_LastLogonTime'
+        'Archive_TotalItemSizeGB','Archive_ItemCount','Archive_LastLogonTime','LastLogonTimeIso8601','LastUserActionTimeIso8601','Archive_LastLogonTimeIso8601'
     )
     $exportDataStats = @()
     if ($UseLiveStats) {
@@ -2630,8 +2646,8 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBmUTYnxKypxJuG
-# SkvHeuPK7eR101A6eE+Wd9aWkB+98aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCpQsjnYoErXirC
+# dvnQOOg0DkQqSM4M1ImdYm9IYnJyR6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -2764,31 +2780,31 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIGLh6SN4fnukxSkLFor1R4wnI3EHL0bv8q86CxFM29stMA0GCSqG
-# SIb3DQEBAQUABIIBgCT9mIivJcEu0OiFvm5ETrZEPSo4N8lfnZTjeQoG6Sx4bGyv
-# o7bo/yXMbbds18tqChIie/p4hzrSBbyAw9WYzkTXku7N/vVjMkTv0dVXaMSjA1Gm
-# 4zO/7qmyMk4hXRg1iN+r4MiWHmUrK0C83p1uEpUIx6O/o9Sfs2nDX93IqnefmG/C
-# G1tYv5Fy5v5hjyj8A4eBu7G5Df7N26AoQSqzk3NKHyKBKhgp58IYhDdcWiz+LOLd
-# T6eWL+pCrJ7DJW4EokMgmaHesVHMbG54QRQG7uiAS2t5UlJkpAqJd0XFmaK7N/e6
-# +2Oy7G8cY9V5I5nXJdFeqw4Mba1pCtCcH5kTrEj9/pJhKmxaMmPeeBWXgM0AbotA
-# wlJxe43XMCrFLiDKInPNZVtg/PUxTCPelSQZfxnz2NYtJNCk/ATF9Wr8pSYvhFq3
-# B6mzPc+MVwzGyI4yUMtXS0fpuIVibRo/SxCUfiofIrrJZP12EuXUCNV8eaQQ5Qbc
-# Sa8yS5XqtZBc0z2q2qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIN+U01KCLIpkOgxPgkWtWriTpMWE1zvlK2jWI+tLH3h/MA0GCSqG
+# SIb3DQEBAQUABIIBgKmYu+exNK7hg3/3bcb4BFb9WrBeRxp1/2gcSjU31os4J9pb
+# X2eFZMhIbbK01oidhSgdwBYZc7/0GcY4oZyrT8/UmVaumaweS6jVwQvtABmbcr+I
+# m0+e4TuRwE/bXV1r2HZaE4+u4+h0nyCVUVI2OmZVCY7iRIBNolmHh8RqRI1/Ia2b
+# xJCVEkL9ljxmvzRAgfB3cReWAjfadHLJEscp5q6Jl254ghBTQJi9CqrQLhvZ/E1J
+# 4wrWy0LSp+x3ZG2AnsPS/6WzR7Srlf//NvwxcvFp76NXEr3f49CZtksJ99qfEw29
+# Gu3PhQ8ij+w2qBt7jgFoDgtmzePBsTsarNCwuOCzZwr6dMPM5aNvjOAAu7wnVI4d
+# F4XaZvgdm73Dkrfc65gTGIKyqNKpBpj4Z78y+sx4d6bD6IwopmsSRkf9hfPMro10
+# bTducM+Nj2DDwm+5ky3/1jKe5VVKVqjkFxyEnhh2V7fPj/LNixaN5t0pC+2D0BRF
+# TXvAXJY3+SFxXc9ICqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjAxMzI0
-# NDZaMC8GCSqGSIb3DQEJBDEiBCDkh+/FAr3N+mJuU97emaOGTH2FuoOERKbbzE9V
-# PxeNPTANBgkqhkiG9w0BAQEFAASCAgBDRgIKqqid4Urf8Y63Szt5xiDYxgCriptb
-# rIicVhEvaWQ8PNFS9lWqLD9Rpk+hKqNkcd5EJ5KAwWPDrClvE1iVcEdE8WhXHXTj
-# OZ8bwL+lxBUXvKyN2sI7lK2rnC0ZMaoDwD5WJQDYKsO1GPk7y6KSo/CR5kx658dh
-# w9urF9nFf3EBNx9eLIvcKF5U1m7xyLBMN4AERnZcS3RvAnDR7rKS2zQr/BDMkkx5
-# Ra5KjJ7HMbfcJjgfrIgiAR1D6zB/S4pTMxxS3Edi7lNMY28CQM2PukBz3Dd3rw4C
-# 0L2qHHyVoXnqkrykXvvmlXyorLA0riuJrzWxb0FwJVn5YhH+0JJVDu42MXmXgaoM
-# TCMqnssZc96mbbXRK1HWlVtS5w/haw5V4EhYsWD7HmGTas9IuKH7l6l9dMTrU1Ej
-# hwFV6jU6O5atSBChuKEUyP3M5lYpfupf5WvVeC3zyBB9FAVnhlqBx6cUfu1KELGe
-# nS6EN7ydFmETJp76aNd2b3NpKoCTW6QI5jWW9w6ndxyWrXQkxN+eNFBxruzQVzeB
-# Gge1r+5aD99VcXoIGJ7htKXFz6Ldej/UBMGf2dhrkMOoxCOIuz6PeRhAd3xX72XK
-# 6BaRJ2Gmj1OUSuBYkzapDocu+BiauiLjPG6+VJE5qk53Tc7h2A1zJBaUC+1i5mML
-# t0Pgn/Zy7A==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjIyMTI2
+# MjdaMC8GCSqGSIb3DQEJBDEiBCCSjRnrRmeWoswjGCrLoFyG+UO7j0hMu1H+A/BY
+# 3eyf+TANBgkqhkiG9w0BAQEFAASCAgBhZ2J2Nb9Ddt48avLFcCzHKgwZtk/HuiIJ
+# VFSHmm5LVWqGI4IywdSASoyLsDgRwbx3Sn3WNydVHzJKjlwHtkSqYIwl+Ajug/sr
+# tEISG1XEo5JKrFRLuKXk3xnnx94XRHJuJcezXlBwWxtcsxf3mCZQynGHj/V0TIpa
+# n3rq1ReaX41FVgE7j7H/WTJoM7zxdaG1YWZIxsnPHLjMbYJ6o6yqa3JuxWHGJx5g
+# +JNP+8QBmoQc5pPH0uymcew0kazkvh23TD/AsKZMg/XHdgw5jses+qDaZmmaBggb
+# ThFBZPajbnXf/bxQdQox8GRp8AAr2xJOXC7Sxc9g7MigaIW3rZONFhulj6IxCfyX
+# aBkHYR27lPkG5pLBv6tOLnem2FHATlz5YG17yTsREbzibDbHyZIMunEd427TTp9f
+# VA97Ni5no63HZHIHCG7xfDodiSkNK5MEy+BFz2bjSoet1gDhksJtcP2mmrPLOwFE
+# BPThQUW5K0LwZcFImfNKDsPj5zsH/QYpfhOqpTon0lweSU/rGL9Hz42tvsUlVHbA
+# 7CJa10PPcDP+CkKFxBDed66j3b0btstjW2+h/l72+I0olJBR4VfxzSNvcaBp/w5G
+# gKF2XqFc4v6HUOL9MAMDdcml4GIo3V32gkBpMRomOe8tml0Xc45/4tOq/pPea0lc
+# bTk7J7CCXg==
 # SIG # End signature block

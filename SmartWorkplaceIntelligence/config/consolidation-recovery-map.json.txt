@@ -187,6 +187,26 @@
           "target": "CreationStatus"
         },
         {
+          "source": "ModificationRaw",
+          "target": "ModificationRaw"
+        },
+        {
+          "source": "ModificationUtcDateTime",
+          "target": "ModificationUtcDateTime"
+        },
+        {
+          "source": "ModificationStatus",
+          "target": "ModificationStatus"
+        },
+        {
+          "source": "PasswordExpired",
+          "target": "PasswordExpired"
+        },
+        {
+          "source": "PasswordExpiryStatus",
+          "target": "PasswordExpiryStatus"
+        },
+        {
           "source": "SourceCollectedDateTime",
           "target": "SourceCollectedDateTime"
         }
@@ -297,6 +317,26 @@
         {
           "source": "CreationStatus",
           "target": "CreationStatus"
+        },
+        {
+          "source": "ModificationRaw",
+          "target": "ModificationRaw"
+        },
+        {
+          "source": "ModificationUtcDateTime",
+          "target": "ModificationUtcDateTime"
+        },
+        {
+          "source": "ModificationStatus",
+          "target": "ModificationStatus"
+        },
+        {
+          "source": "PasswordExpired",
+          "target": "PasswordExpired"
+        },
+        {
+          "source": "PasswordExpiryStatus",
+          "target": "PasswordExpiryStatus"
         },
         {
           "source": "SourceCollectedDateTime",
@@ -1082,6 +1122,30 @@
           "target": "SyncStatus"
         },
         {
+          "source": "CreationRaw",
+          "target": "CreationRaw"
+        },
+        {
+          "source": "CreationUtcDateTime",
+          "target": "CreationUtcDateTime"
+        },
+        {
+          "source": "CreationStatus",
+          "target": "CreationStatus"
+        },
+        {
+          "source": "ModificationRaw",
+          "target": "ModificationRaw"
+        },
+        {
+          "source": "ModificationUtcDateTime",
+          "target": "ModificationUtcDateTime"
+        },
+        {
+          "source": "ModificationStatus",
+          "target": "ModificationStatus"
+        },
+        {
           "source": "SourceCollectedDateTime",
           "target": "SourceCollectedDateTime"
         }
@@ -1729,6 +1793,18 @@
         {
           "source": "CreationStatus",
           "target": "CreationStatus"
+        },
+        {
+          "source": "ModificationRaw",
+          "target": "ModificationRaw"
+        },
+        {
+          "source": "ModificationUtcDateTime",
+          "target": "ModificationUtcDateTime"
+        },
+        {
+          "source": "ModificationStatus",
+          "target": "ModificationStatus"
         },
         {
           "source": "SourceCollectedDateTime",

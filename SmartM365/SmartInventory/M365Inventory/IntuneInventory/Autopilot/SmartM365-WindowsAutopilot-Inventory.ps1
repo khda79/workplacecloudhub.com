@@ -23,7 +23,7 @@ Uses interactive authentication instead of app-only certificate authentication.
     Minimum Graph application permissions: DeviceManagementServiceConfig.Read.All; Device.Read.All.
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
-    Version : 1.14
+    Version : 1.15
     Author: https://github.com/khda79/workplacecloudhub.com
 Requires: SmartM365.Core module (logging, init, CSV, cleanup, cloud connectivity)
 Scopes: DeviceManagementServiceConfig.Read.All
@@ -93,6 +93,17 @@ $MaximumFunctionCount = 32768
 # ==========================================================
 # App-only authentication parameters (same app as other scripts)
 # ==========================================================
+function ConvertTo-InventoryIsoDate {
+    param([AllowNull()][object]$Value)
+    # Round-trip preserves DateTime.Kind/DateTimeOffset.Offset. Unspecified stays offsetless.
+    if ($null -eq $Value) { return '' }
+    if ($Value -is [datetime] -or $Value -is [datetimeoffset]) {
+        return $Value.ToString('o', [Globalization.CultureInfo]::InvariantCulture)
+    }
+    # Do not guess a culture or timezone for string-valued/deserialized evidence.
+    return ''
+}
+
 function Get-ScriptLocalConfig {
     [CmdletBinding()]
     param()
@@ -382,7 +393,9 @@ function Get-InventoryColumns {
         "Entra ObjectId",
         "Entra DeviceId",
         "Entra DisplayName",
-        "Entra ApproximateLastSignInDateTime"
+        "Entra ApproximateLastSignInDateTime",
+        "Last contactedIso8601",
+        "Entra ApproximateLastSignInDateTimeIso8601"
     )
 }
 
@@ -408,7 +421,7 @@ function Select-AutopilotIdentityRows {
 # ==========================================================
 # Initialization via SmartM365.Core
 # ==========================================================
-$ScriptVersion = "1.14"
+$ScriptVersion = "1.15"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'AutopilotDevicesCsvLogFolderPath' -DefaultValue $OutputPath
 try {
@@ -552,6 +565,8 @@ try {
             "Entra DeviceId"                      = if ($entraInfo) { $entraInfo.DeviceId } else { $null }
             "Entra DisplayName"                   = if ($entraInfo) { $entraInfo.DisplayName } else { $null }
             "Entra ApproximateLastSignInDateTime" = if ($entraInfo) { $entraInfo.ApproximateLastSignInDateTime } else { $null }
+            "Last contactedIso8601" = ConvertTo-InventoryIsoDate (Get-SafeProperty $_ 'LastContactedDateTime')
+            "Entra ApproximateLastSignInDateTimeIso8601" = if ($entraInfo) { ConvertTo-InventoryIsoDate $entraInfo.ApproximateLastSignInDateTime } else { '' }
         }
     }
 
@@ -684,8 +699,8 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCs8UymAGt7aG/+
-# vK+R7HZJzIpuicMFipaft9ZFRBF5bqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB1FfSQs0huuNbV
+# AQz/PrfNwnzjqz01KUIQWimxNnAPWKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -818,31 +833,31 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEII6DLYo+ztIS/28dGOahCrDZw638zx8eKztYQd6RDXtEMA0GCSqG
-# SIb3DQEBAQUABIIBgHZTtniFSiyBxOUsebrTi8xzUY7k+JEySITc18wzfYJbwy6W
-# DRx8mCHQBKl9mpZmd1qZsrxe8HSssDeB6VxQtJsbtfr13kgO4rsrOKA8PfBleSRs
-# IyKiOQbtxmIf62hXFfpDQuK1ht0zpBB00NurhlHxCcpvE08j9l0ZRSGMgYU7JWOz
-# G5nKHhNIwp5Fonkp/Xd2EnYd/aBSoA0cfQt3XjcCOq/57koVtr7BNaefGDlYcNGm
-# PuvNi8SVgTf+ufVKLPjtIqmlr6P8twZTAiFIzS6JSnS9uzx/t1sOfKbcl4trQZum
-# L9qRPqLgBVKM4Y7fuvJaPKsrWtAXEmVxoWbVM52OIGXYe5r6gfiwoXB/1OYeJDX4
-# 1js4nd6X+nRdGTaOcfpiKO4YBQy/RnKJcYKleObhR7JxGf/LYuNZPJDidxrZHD5V
-# QWt9D7cLpcfKnwcC6ONK6F6TmbMpWtXkPE6EvXO71hDcgfyvsidXwFbmV4WgKTXm
-# g+KY2xzDNYB1kheNT6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIOWm5ydeTU1a7yX7nNtCpRr6leIY65lQh3DJXkxj5KJjMA0GCSqG
+# SIb3DQEBAQUABIIBgJvkXJSyf2MSkopCP9Kc9IAii3E/hU+aqRgYocb2PB+zvSOR
+# MFy/NEQbkiJXobuImh8+cbKMj4a66r+WV3L/XX/m+iO8YqjqVvO+g8zQjNcSVjzm
+# fDGVZMWPJpoz4qWLNGkP/VskqJ4P6shUR09Q+duNxyU6cThhM1RfRKHbU/2sLOwR
+# DhD9tw99vgfZsh8ZU/2Xp2bhzPmPVm0bBUiFsl1srNqJ35iBtlhJ8buwLuEuRuu8
+# hpyz0839jDuQnYfcDw4l0ITouLBBz6me7WglXKN72NQl7IoJ4mDpUieZ/s8h+D0u
+# CNWauSzGsjBSvahDyUsvIEkxThRM5Kes7/3NkbfRPHY9wtM87ULnU2tDmYsAvguz
+# c1614AEgkdwiPRJBvjFlB7xxjMR8ac3YQsKZP536b2jS2pXR/W5OFEnR3eHqH2dH
+# vr0n8HAElmqmpVgcJY8ncg9R4g++uadxhWzaI1wUDOc9GKdM0jWPxVO7dbEkUUcy
+# ubrYzEk0lspu8vVPvKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTQxNTMw
-# MjRaMC8GCSqGSIb3DQEJBDEiBCB3mW5PuuaRUv7H1tFQqFT5H4Ybi57pRuiIGCfa
-# +vphiDANBgkqhkiG9w0BAQEFAASCAgCwchWSEDVPrbdXRRbCM3sZNkSOFwTbExjr
-# UljGPSVdU9nRiZzG+vug0/yVQaS1K4atCpY7cBtf6Cg9yiXYbXejDE+WnsqrDeD+
-# BBh5m7q7z1YrkFPr6setl6AF7JzUwXB47jnCi9L1gz/y43GUzVsss3DPDCD/9UKh
-# rDs1SvorVE40uX21fmNsgHjuOemWPOUkPXd/4JNmWJJXj1wcZM9fKaeIt6gltpq4
-# lOJImQkE0SsIRG1at8UTXD8HZNMkomIgMgw0kIzDXfX6U2PaW+4ANV+401MvITH1
-# y0Gzro+l/RNk6z0u/LWydNhJQKjdCEAt30NJ3mGILbUTbMwPxDBD01iG0oZtfHbG
-# 8rTuVqaG9aM2qXw44O0u5XGIekrQ0K/UnADG2pskSSw9fmWRw3BRMfVgrunQj/Ar
-# bWUUrpW8cmf9dxegiIZ2ZLUOdgvMkOCZNFh+MwniEGHExKXDzB8A/7iCH7ognJQp
-# xZSSdbXGPGEZyXwT6JsKeMHEZf0cTrnrmUEGs1vD4TTFBSxhUh+pIfBTYlnCVXKR
-# n2QF17AT9r6xUdCU9Q6QdCTfl5IeryxdIM6GKQJjMcsIGz/6DsHNpqwKTy8ObSah
-# WNg2cikbfSzgo02Kz409z3wv/6vCaQut8lBxhgjek/1Yji+TeHTWkGnwIxnS+azM
-# letzt2/TJg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjIyMTI2
+# MjdaMC8GCSqGSIb3DQEJBDEiBCAeIDk5G0KKIy/CfZ7h5VTFf6g//mF7sDsbGZ85
+# AQZlwTANBgkqhkiG9w0BAQEFAASCAgB2IqTnZ4vfhJiGPd6O8PxEeQHSzu9QYLMY
+# LpZjK/unm4XdSTkUGGnIEHk4r7EhA0/CKaAGgsYW/wELTqr+hYmnhVtssr5hRMQt
+# exEAlIyobaUCZVpGb9p+OejQUv2343Amhy5q5QnZ1IO8umsm5a57onmc1PbzBwQh
+# AHaZ5jO/pb7f0asEixFA+HPFg4yZdp/ThoFKdquJOxvHFAI4fzU21kE100bxKoSu
+# rGIvKI1DyHzGbbliYXablZix27CYFZ+RxD3KDT2VlNdMvJ3/EvdjFqRBkWxV0aPU
+# EM80HWSNBwGuf4XO7uSZ139DVfLw9ydMT3RlGlOYo9pEoIVremNqTDGUInsIcOu2
+# Gz+jmoNceI9AA8wvGp8KBBitKbJnrGViEB4XEXhzOr2hWvg4FpRIYilqOcqp+4Xl
+# pZLFSEOsyckInP47Xe9U9En5cruf8N67fFrreBTLb8LSQMeDEq85A8d+xHUxn6mc
+# GNn+tsAGg+Mya/z04Za5/LwC5EkuOwRwhC7rZiZDyRiNdoeoQiCU+S3I5lftaWpg
+# FHfpmHrbJFb7Vq711pkFhqUEpUnXbQbRf1/XUoHRFX9Xz85sryo7C68ASTBPJ4Bw
+# FAc2jnnbTOKzQ1o6LWq7LFTn3V415EUQ5wymLGWEK3QpSNZKPsaJYZ21TjFRKiyf
+# sBtBRxAcHg==
 # SIG # End signature block

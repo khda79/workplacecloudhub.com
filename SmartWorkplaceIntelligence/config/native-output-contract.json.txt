@@ -392,6 +392,26 @@
           "type": "string"
         },
         {
+          "name": "ModificationRaw",
+          "type": "string"
+        },
+        {
+          "name": "ModificationUtcDateTime",
+          "type": "dateTime"
+        },
+        {
+          "name": "ModificationStatus",
+          "type": "string"
+        },
+        {
+          "name": "PasswordExpired",
+          "type": "boolean"
+        },
+        {
+          "name": "PasswordExpiryStatus",
+          "type": "string"
+        },
+        {
           "name": "SourceCollectedDateTime",
           "type": "dateTime"
         }
@@ -493,6 +513,26 @@
         },
         {
           "name": "CreationStatus",
+          "type": "string"
+        },
+        {
+          "name": "ModificationRaw",
+          "type": "string"
+        },
+        {
+          "name": "ModificationUtcDateTime",
+          "type": "dateTime"
+        },
+        {
+          "name": "ModificationStatus",
+          "type": "string"
+        },
+        {
+          "name": "PasswordExpired",
+          "type": "boolean"
+        },
+        {
+          "name": "PasswordExpiryStatus",
           "type": "string"
         },
         {
@@ -1277,6 +1317,30 @@
           "type": "string"
         },
         {
+          "name": "CreationRaw",
+          "type": "string"
+        },
+        {
+          "name": "CreationUtcDateTime",
+          "type": "dateTime"
+        },
+        {
+          "name": "CreationStatus",
+          "type": "string"
+        },
+        {
+          "name": "ModificationRaw",
+          "type": "string"
+        },
+        {
+          "name": "ModificationUtcDateTime",
+          "type": "dateTime"
+        },
+        {
+          "name": "ModificationStatus",
+          "type": "string"
+        },
+        {
           "name": "SourceCollectedDateTime",
           "type": "dateTime"
         }
@@ -1914,6 +1978,18 @@
         },
         {
           "name": "CreationStatus",
+          "type": "string"
+        },
+        {
+          "name": "ModificationRaw",
+          "type": "string"
+        },
+        {
+          "name": "ModificationUtcDateTime",
+          "type": "dateTime"
+        },
+        {
+          "name": "ModificationStatus",
           "type": "string"
         },
         {

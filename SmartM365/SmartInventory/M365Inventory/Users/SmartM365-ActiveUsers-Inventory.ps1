@@ -18,14 +18,14 @@
     Uses interactive authentication instead of app-only certificate authentication.
 
 .VERSION
-1.16
+1.17
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Users.
     Minimum Graph application permissions: User.Read.All; AuditLog.Read.All; Directory.Read.All.
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
-    Version : 1.15
+    Version : 1.17
     Author: https://github.com/khda79/workplacecloudhub.com
     Requires: PowerShell 7+, Microsoft.Graph PowerShell SDK, SmartM365.Core.psd1
     Minimum application permissions: User.Read.All, Directory.Read.All, AuditLog.Read.All
@@ -97,6 +97,17 @@ $MaximumFunctionCount = 32768
 # ==========================================================
 # App-only authentication parameters (same app as other scripts)
 # ==========================================================
+function ConvertTo-InventoryIsoDate {
+    param([AllowNull()][object]$Value)
+    # Round-trip preserves DateTime.Kind/DateTimeOffset.Offset. Unspecified stays offsetless.
+    if ($null -eq $Value) { return '' }
+    if ($Value -is [datetime] -or $Value -is [datetimeoffset]) {
+        return $Value.ToString('o', [Globalization.CultureInfo]::InvariantCulture)
+    }
+    # Do not guess a culture or timezone for string-valued/deserialized evidence.
+    return ''
+}
+
 function Get-ScriptLocalConfig {
     [CmdletBinding()]
     param()
@@ -382,7 +393,7 @@ $csvPathLatest            = ""
 
 try {
     #region Initialization
-$ScriptVersion = "1.16"
+$ScriptVersion = "1.17"
     $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
     $currentOperation = "Resolve output path"
     $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ActiveUsersCsvLogFolderPath' -DefaultValue $OutputPath
@@ -631,6 +642,13 @@ $ScriptVersion = "1.16"
             "LastNonInteractiveSignInDateTime"  = $_.SignInActivity.LastNonInteractiveSignInDateTime
             "LastSuccessfulSignInDateTime"      = $_.SignInActivity.LastSuccessfulSignInDateTime
             "CollectedAtUtc"                    = $usersCollectedAtUtc
+            "When createdIso8601" = ConvertTo-InventoryIsoDate $_.CreatedDateTime
+            "Soft deletion time stampIso8601" = ConvertTo-InventoryIsoDate $_.DeletedDateTime
+            "Last dirsync timeIso8601" = ConvertTo-InventoryIsoDate $_.OnPremisesLastSyncDateTime
+            "Last password change time stampIso8601" = ConvertTo-InventoryIsoDate $_.LastPasswordChangeDateTime
+            "LastSignInDateTimeIso8601" = ConvertTo-InventoryIsoDate $_.SignInActivity.LastSignInDateTime
+            "LastNonInteractiveSignInDateTimeIso8601" = ConvertTo-InventoryIsoDate $_.SignInActivity.LastNonInteractiveSignInDateTime
+            "LastSuccessfulSignInDateTimeIso8601" = ConvertTo-InventoryIsoDate $_.SignInActivity.LastSuccessfulSignInDateTime
         }
 
         # Clean string values
@@ -665,7 +683,8 @@ $ScriptVersion = "1.16"
                 'Password never expires','Last password change time stamp','Mobile Phone','Phone number','Postal code',
                 'Preferred language','Street address','Fax','Proxy addresses','OnPremisesImmutableId','OnPremisesSecurityIdentifier',
                 'OnPremisesSyncEnabled','AccountEnabled','UserType','LastSignInDateTime','LastNonInteractiveSignInDateTime',
-                'LastSuccessfulSignInDateTime','CollectedAtUtc')
+                'LastSuccessfulSignInDateTime','CollectedAtUtc',
+                'When createdIso8601','Soft deletion time stampIso8601','Last dirsync timeIso8601','Last password change time stampIso8601','LastSignInDateTimeIso8601','LastNonInteractiveSignInDateTimeIso8601','LastSuccessfulSignInDateTimeIso8601')
         $global:csvFilePath1 = $publication.TimestampedPath
         $global:csvFilePath2 = Join-Path $OutputPath "$runBaseFileName.csv"
         Copy-SmartM365FileAtomically -SourcePath $publication.TimestampedPath -DestinationPath $global:csvFilePath2
@@ -852,8 +871,8 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBRDxhFw93c3Gi8
-# SU5g+PUjXX510SuiuJ0Uh7Unt6SBE6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD/V1vhHMs2TQKh
+# hBGWgZLO6QAV+csrdGU22JEUyZt4m6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -986,31 +1005,31 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIAHnYZjbI+R/Gi31enYo+yM8nFLYC1uxVnsuY0Gy6I2xMA0GCSqG
-# SIb3DQEBAQUABIIBgEnp1vSe+YyQ4YQoLF6nlckJabz3IfL2tyHXlHZDrPFho/wI
-# Sp+DcaLgFCboWbUxyjsASmFktOhKyvH5QB1Fls5HGEL9bE/0EPYrXWMyKjySlH0A
-# qmnYgvMoJxTKYfSS9D9ThxSdqtORGbBpx0ysZjhppnDhDzFJN4Nhjeub0T3hQm9Z
-# J6wK4tJ/hXQMYgZLltPXy2Rkg1ClI7XwKzP1P+w+aT412xj4Od6Z4ht2bN26HOL9
-# sNP2gjsXCEE5tuX2hgxETV7K0uYoEAXfHQzcIsgBldNgsAEivKmaR2CCR0Z0iUPP
-# 1AQSMoV1fnnfzgyfdGKPfWRgYecXAIgpV/c8RY3qcuJnvw+sP2DFfKs59tZpQpkt
-# zzO4HMrWRo2HkI7vF3hkcNoyqt8mZ4nDimgmyJAm+KH4wtbi1h7f199uMuB0Pizm
-# XgrAcgwDdDHcSUv/kK9lnj5HVc2+4z8WwCYqXVBVDo3OdBgDuoasvvRT27w+Kt/4
-# NRZb2RCLlLvA/U8JjKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIK1mpK6ZDqNO070UnY/p7UGzXnYkBFvqQPhjgx+tnTs4MA0GCSqG
+# SIb3DQEBAQUABIIBgDCGlZTIUpJL8VyXNj79fALy8Dy8+8VA3oYzQWIVugzHSGrd
+# yIXp+cS+Xm4N3vFHBtkqEkE8+/sxM97PDTavzpW+S0+TXtKGZichzF2v4XVoDMgf
+# gM9F0YjspKUxi5lNXLdtMBCXP4hxznCC6eG9CZqysqaboxw+N7F4kMp9FqtqXY3m
+# cRrxp9PpzBiYh9cHt2jLnKjIZYFsDKO2FeQjKp0D0TbQ48kPgw3jnuvrZ2TMkT02
+# NsZvanMA1jQ0NGGzEAoxr0Y1hfQFVt+ZxNQsBS3En/9SpgqtrD5ku7iuD9bdtZa0
+# 4FrV85MUZcvsvkpYWoY37d9xChSyxaECr7HGEp2uAm7U+lKZv4KKNTX3X9sfRpbE
+# S2nMuLRDUNT2prkf3E9Veah1k+PKL8IQuf2DyEpz9I4+l34QcZQSdZpm5AacWSJz
+# 4nwxSnfRVKlGjT9wZuFj+fwP6of2RKqidxmn1Un7F0ygW8Wfp7Hifo643fzY7K2E
+# 1QX6JfL/6Dz8BNbzKKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjEwOTIz
-# MTRaMC8GCSqGSIb3DQEJBDEiBCBt9sUAnxDEtV+zEkP8MX5nG+a/zOLPd6lu8FXQ
-# bNP+cTANBgkqhkiG9w0BAQEFAASCAgCUXjPURU3SCVtMvifrxwBPPlar3yYE1vd1
-# 5WhKbhpYS0EgK8Cegp9MY4seag/ugYJR/i8gTuoiNhmoagk1ixK+C1fQUTGLVWZ/
-# 1Z5VcpwbgwmBj/+hdiievenU/B8Q3Y2BGxd5Sz3TWx+BDSy2R0TP3ndrAU/35W8P
-# gWC5najdCfphVORetsAogyyW7Ew0kIiC6FqmvDVNoSDJEnwN8x2h0SM+ecJsqOaq
-# VRZ/yHYvutYkcoRBsOYi3XogazMPAzMXtqT6mzZDomCN75caxg7CZx7oZtK6BNP6
-# 29X3y9wHwPdWgTq218jKD8lilrxKKFRNriaQVnfq9vfL8KrGT7S0vdlvqvvXpT5h
-# jqy25pIabN0Le/vWIqNTcbio2rWeNxZsLMyWI7a4k9w3+8hBCgExCKdSx8XWQErS
-# CVwXftYkuZ0+8Fz3B8nh3ai9rhCan6mNgLUzSaOuBURHDOYoz9gr8BPB5YARtr36
-# UjK+kenOcsB/TRoraIlle9E1kvZ/7C/z2MROoO3ZzMH1pmtAcUtTdR0NzQNPCC8K
-# Anjr2ANjWjI/TGfvVv2lZJ7J25HViBvCYrhs8XayJnbg+mjC1q6UuU/E1bYtcuKw
-# TjNSWk181ZBEs2/57VxU9BJi7kZst9QhIhWsnxODm4QvEmDrZ4HLZGdi+mHnLjzn
-# 7wbh1XWP4A==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjIyMTI2
+# MjhaMC8GCSqGSIb3DQEJBDEiBCBiWcqqAp3Asq8NcoEyprukjbSLBBqSHJOEyZde
+# B3bZcTANBgkqhkiG9w0BAQEFAASCAgCUlyf/zaoqCKIVRUODVoCgB2hxBZjL8bVZ
+# OWZoQmKmgT0hmB/3RWnwCrDPlkT4QnrCy03pS6AZIiUlMt0tKubNA6TbN1iO7qiz
+# hPuO2kB+M9+PmH/uhE04Ld/G7RopYyRLzas2KxCYltzwp9amOpysUq8O0esfOZ/W
+# 7LAVmO6Ms1lWbjcCSJNrda3O62nb8ievKwzpM1ynYGF8H7L00RZGUGwvzPtb9dbj
+# 4rSzsWfhTotk0LdYp2z4w5Qvw8UCVX0jvG9l1HajkiTIkjvo4o0unu6ChCicbii5
+# uJy3sB8y2ECutJj/OfLE8oT8enUu0C2mvpaKKy1FLjYgCIIk1WcpYoRSnT8IziMr
+# bqkI4czGGjpz1ZnKiuVVoelxqC/YoQU++3SUfpvH2h01XP5k/vJFssTG3ytHkNke
+# s4jnCfpBxtbPKRSlN3o7fPRCMB2Kp2qIXsZwde8EhlYd+gwOyU23Yj9+TUcT7DPr
+# PlkmQaaOcNUhflCRLHs5pgWnhl/dCXoCojqXwGG4j3JYbG/33CbnHlbSFAGPIVbN
+# u244cp7km62DX0RaAa4YF2iEJXwjIDUgu8FeJ1JNst9uEg0uBnvSJwyewdduqqC+
+# vSD9iPOiMRIG3XE2nUoELTmOTRgXMQeXvG5T0U50LfSwL8SQWKsvL6TiU+mMkMKP
+# n7BLMeXkSg==
 # SIG # End signature block

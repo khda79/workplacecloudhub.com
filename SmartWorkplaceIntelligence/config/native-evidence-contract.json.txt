@@ -53,6 +53,11 @@
         "CreationRaw",
         "CreationUtcDateTime",
         "CreationStatus",
+        "ModificationRaw",
+        "ModificationUtcDateTime",
+        "ModificationStatus",
+        "PasswordExpired",
+        "PasswordExpiryStatus",
         "AccountType",
         "SourceCollectedDateTime"
       ],
@@ -86,6 +91,11 @@
         "CreationRaw",
         "CreationUtcDateTime",
         "CreationStatus",
+        "ModificationRaw",
+        "ModificationUtcDateTime",
+        "ModificationStatus",
+        "PasswordExpired",
+        "PasswordExpiryStatus",
         "SourceCollectedDateTime"
       ],
       "key": [
@@ -340,6 +350,12 @@
         "SyncRaw",
         "SyncUtcDateTime",
         "SyncStatus",
+        "CreationRaw",
+        "CreationUtcDateTime",
+        "CreationStatus",
+        "ModificationRaw",
+        "ModificationUtcDateTime",
+        "ModificationStatus",
         "SourceCollectedDateTime"
       ],
       "key": [
@@ -554,6 +570,9 @@
         "CreationRaw",
         "CreationUtcDateTime",
         "CreationStatus",
+        "ModificationRaw",
+        "ModificationUtcDateTime",
+        "ModificationStatus",
         "SourceCollectedDateTime",
         "ManagerStatus",
         "UserActivityStatus"
