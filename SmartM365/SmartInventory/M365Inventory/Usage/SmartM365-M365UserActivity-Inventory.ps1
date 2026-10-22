@@ -6,9 +6,13 @@ Exports Microsoft 365 user and workload usage details from Microsoft Graph repor
 Downloads selected Microsoft 365 usage reports, normalizes the active user detail
 report, and publishes stable CSV files into the tenant DATA-LAST folder for
 SmartFinOps and downstream inventory analysis.
+A report returned empty by Graph is retried (EmptyReportAttempts,
+EmptyReportRetryDelaySeconds). If it stays empty, the run fails for the active
+user detail report; for any other report the previous DATA-LAST CSV is kept,
+left out of the source receipt, and the run completes with warnings.
 
 .VERSION
-1.31
+1.32
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication; Microsoft.Graph.Reports.
@@ -47,7 +51,7 @@ if ($PSBoundParameters.ContainsKey('MaxItems') -and $MaxItems -gt 0) {
 }
 
 $ErrorActionPreference = 'Stop'
-$ScriptVersion = "1.31"
+$ScriptVersion = "1.32"
 $TaskName = "SmartM365-M365UserActivity-Inventory v$ScriptVersion"
 $runId = Get-Date -Format 'yyyyMMdd_HHmmss'
 
@@ -217,6 +221,8 @@ function Get-M365UsageReportDefinition {
             Endpoint = 'getOffice365ActiveUserDetail'
             BaseFileName = 'M365_Users_Activity'
             SupportsPeriod = $true
+            # Source of the receipt's required CSV: an empty report stays fatal.
+            Required = $true
             Normalize = 'ActiveUserDetail'
             Description = 'Microsoft 365 active user detail by workload.'
         }
@@ -422,7 +428,9 @@ function Invoke-M365UsageReportDownload {
 
 function Assert-M365UsageReportRefreshDate {
     [CmdletBinding()]
-    param([Parameter(Mandatory)][string]$RawPath,[Parameter(Mandatory)][string]$ReportName,[int]$WarningAgeDays)
+    param([Parameter(Mandatory)][string]$RawPath,[Parameter(Mandatory)][string]$ReportName,[int]$WarningAgeDays,
+        # Return $null instead of failing when the report has a header but no row.
+        [switch]$AllowEmpty)
 
     if ($WarningAgeDays -lt 1) { throw 'ReportRefreshWarningAgeDays must be a positive integer.' }
     $value = $null
@@ -433,7 +441,10 @@ function Assert-M365UsageReportRefreshDate {
         elseif ($observed -cne $value) { throw "Graph report contains mixed Report Refresh Date values: $ReportName ($value, $observed)." }
         $rows++
     }
-    if ($rows -eq 0) { throw "Graph report is empty: $ReportName." }
+    if ($rows -eq 0) {
+        if ($AllowEmpty) { return $null }
+        throw "Graph report is empty: $ReportName."
+    }
     $date = [datetime]::MinValue
     if (-not [datetime]::TryParseExact($value,'yyyy-MM-dd',[Globalization.CultureInfo]::InvariantCulture,[Globalization.DateTimeStyles]::None,[ref]$date)) {
         throw "Graph report has an invalid Report Refresh Date: $ReportName ($value)."
@@ -449,6 +460,53 @@ function Assert-M365UsageReportRefreshDate {
         WriteLog ("Graph report refresh date accepted: {0}={1}; age={2} days." -f $ReportName,$value,$age) 'INFO'
     }
     return $date.Date
+}
+
+function Invoke-M365UsageReportAcquisition {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)]$ReportDefinition,[Parameter(Mandatory)][string]$RawPath,[int]$WarningAgeDays,
+        [ValidateRange(1,10)][int]$Attempts = 3,[ValidateRange(0,900)][int]$RetryDelaySeconds = 120)
+
+    # Graph can serve a header-only report while it regenerates; only that case is retried.
+    for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
+        Invoke-M365UsageReportDownload -ReportDefinition $ReportDefinition -RawPath $RawPath
+        $refreshDate = Assert-M365UsageReportRefreshDate -RawPath $RawPath -ReportName $ReportDefinition.Name -WarningAgeDays $WarningAgeDays -AllowEmpty
+        if ($null -ne $refreshDate) { return $refreshDate }
+        if ($attempt -lt $Attempts) {
+            WriteLog ("Graph report is empty: {0}; attempt {1}/{2}. Retrying in {3} seconds." -f $ReportDefinition.Name,$attempt,$Attempts,$RetryDelaySeconds) 'WARNING'
+            Remove-Item -LiteralPath $RawPath -Force -ErrorAction SilentlyContinue
+            Start-Sleep -Seconds $RetryDelaySeconds
+        }
+    }
+    return $null
+}
+
+function Resolve-M365UsageEmptyReportFallback {
+    [CmdletBinding()]
+    [OutputType([string])]
+    param([Parameter(Mandatory)]$ReportDefinition,[Parameter(Mandatory)][string]$LatestFolderPath,[int]$Attempts)
+
+    if ($ReportDefinition.PSObject.Properties['Required'] -and $ReportDefinition.Required) {
+        throw "Graph report is empty: $($ReportDefinition.Name) after $Attempts attempt(s)."
+    }
+    # The previous DATA-LAST CSV is left untouched and stays out of this run's receipt.
+    $fileName = "$($ReportDefinition.BaseFileName).csv"
+    $previousPath = Join-Path -Path $LatestFolderPath -ChildPath $fileName
+    $previousDate = 'none'
+    if (Test-Path -LiteralPath $previousPath -PathType Leaf) {
+        try {
+            $row = Import-Csv -LiteralPath $previousPath | Select-Object -First 1
+            $previousDate = if ($row -and $row.PSObject.Properties['Report Refresh Date']) { [string]$row.'Report Refresh Date' }
+                            elseif ($row -and $row.PSObject.Properties['ReportRefreshDate']) { [string]$row.ReportRefreshDate }
+                            else { 'unknown' }
+        }
+        catch { $previousDate = 'unreadable' }
+        WriteLog ("Graph report is still empty after {0} attempt(s): {1}. Previous {2} kept unchanged (Report Refresh Date={3}); it is not part of this run's receipt." -f $Attempts,$ReportDefinition.Name,$fileName,$previousDate) 'WARNING'
+    }
+    else {
+        WriteLog ("Graph report is still empty after {0} attempt(s): {1}. No previous {2} exists; nothing is published for this report." -f $Attempts,$ReportDefinition.Name,$fileName) 'WARNING'
+    }
+    return "$($ReportDefinition.Name)=$previousDate"
 }
 
 function Test-M365UsageWeeklySnapshotDate {
@@ -680,14 +738,22 @@ try {
 
     $reportRefreshWarningAgeDays = [int](Get-SmartM365ConfigValue -Name 'ReportRefreshWarningAgeDays' -DefaultValue (Get-SmartM365ConfigValue -Name 'MaxReportRefreshAgeDays' -DefaultValue 3))
     if ($reportRefreshWarningAgeDays -lt 1) { throw 'ReportRefreshWarningAgeDays must be a positive integer.' }
+    $emptyReportAttempts = [int](Get-SmartM365ConfigValue -Name 'EmptyReportAttempts' -DefaultValue 3)
+    $emptyReportRetryDelaySeconds = [int](Get-SmartM365ConfigValue -Name 'EmptyReportRetryDelaySeconds' -DefaultValue 120)
+    if ($emptyReportAttempts -lt 1 -or $emptyReportAttempts -gt 10) { throw 'EmptyReportAttempts must be between 1 and 10.' }
+    if ($emptyReportRetryDelaySeconds -lt 0 -or $emptyReportRetryDelaySeconds -gt 900) { throw 'EmptyReportRetryDelaySeconds must be between 0 and 900.' }
     $downloadedReports = New-Object System.Collections.Generic.List[object]
+    $carriedOverReports = New-Object System.Collections.Generic.List[string]
     foreach ($reportDefinition in $selectedReports) {
         $requestedPeriod = if ($reportDefinition.PSObject.Properties['PeriodOverride']) { [string]$reportDefinition.PeriodOverride } else { $Period }
         $rawPath = Join-Path -Path $runOutputRoot -ChildPath ("{0}_Raw_{1}_{2}.csv" -f $reportDefinition.BaseFileName,$requestedPeriod,$runId)
         $effectivePeriod = if ($reportDefinition.SupportsPeriod) { $requestedPeriod } else { 'not applicable' }
         WriteLog ("Downloading {0}. Period={1}" -f $reportDefinition.Name,$effectivePeriod) 'INFO'
-        Invoke-M365UsageReportDownload -ReportDefinition $reportDefinition -RawPath $rawPath
-        $refreshDate = Assert-M365UsageReportRefreshDate -RawPath $rawPath -ReportName $reportDefinition.Name -WarningAgeDays $reportRefreshWarningAgeDays
+        $refreshDate = Invoke-M365UsageReportAcquisition -ReportDefinition $reportDefinition -RawPath $rawPath -WarningAgeDays $reportRefreshWarningAgeDays -Attempts $emptyReportAttempts -RetryDelaySeconds $emptyReportRetryDelaySeconds
+        if ($null -eq $refreshDate) {
+            $carriedOverReports.Add((Resolve-M365UsageEmptyReportFallback -ReportDefinition $reportDefinition -LatestFolderPath $LatestCsvFolderPath -Attempts $emptyReportAttempts)) | Out-Null
+            continue
+        }
         $downloadedReports.Add([pscustomobject]@{Definition=$reportDefinition;RawPath=$rawPath;RefreshDate=$refreshDate;FileName="$($reportDefinition.BaseFileName).csv"}) | Out-Null
     }
     $weeklyHistoryFileNames = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
@@ -712,9 +778,10 @@ try {
     Publish-M365UsageWeeklyHistory -ReportResults $weeklyHistoryResults
 
     $summaryParts = @($reportResults | ForEach-Object { "{0}={1}" -f $_.ReportName, $_.Rows })
-    $summary = "Tenant=$Tenant; Period=$Period; Published=$($summaryParts -join '; '); HistorySkippedUnchanged=$($unchangedHistoryReports -join '; '); LatestFolder=$LatestCsvFolderPath"
-    WriteLog ("Microsoft 365 usage reports inventory completed. {0}" -f $summary) $(if ($unchangedHistoryReports.Count -gt 0) { 'WARNING' } else { 'SUCCESS' })
-    Send-SmartM365TeamsNotification -Level SUCCESS -Channel Infos -Title 'SmartM365 M365 usage reports inventory completed' -Message $summary -ResultSummary $summary -Facts @{
+    $summary = "Tenant=$Tenant; Period=$Period; Published=$($summaryParts -join '; '); EmptyKeptPrevious=$($carriedOverReports -join '; '); HistorySkippedUnchanged=$($unchangedHistoryReports -join '; '); LatestFolder=$LatestCsvFolderPath"
+    $completionLevel = if ($unchangedHistoryReports.Count -gt 0 -or $carriedOverReports.Count -gt 0) { 'WARNING' } else { 'SUCCESS' }
+    WriteLog ("Microsoft 365 usage reports inventory completed. {0}" -f $summary) $completionLevel
+    Send-SmartM365TeamsNotification -Level $completionLevel -Channel Infos -Title 'SmartM365 M365 usage reports inventory completed' -Message $summary -ResultSummary $summary -Facts @{
         Tenant = $Tenant
         Period = $Period
         Reports = ($selectedReports.Name -join ',')
@@ -722,7 +789,10 @@ try {
         RunId = $runId
     } | Out-Null
     Stop-SmartM365UsageTranscript
-    Set-SmartM365CmdbSourceScope -CompleteScope ($MaxItems -eq 0 -and @($selectedReports | Where-Object Name -eq 'Office365ActiveUserDetail').Count -eq 1) -Scope 'CMDB:activity' -Qualifications @("M365 usage report period=$Period; acquisition time is not the workload report refresh date.")
+    Set-SmartM365CmdbSourceScope -CompleteScope ($MaxItems -eq 0 -and @($selectedReports | Where-Object Name -eq 'Office365ActiveUserDetail').Count -eq 1) -Scope 'CMDB:activity' -Qualifications @(
+        "M365 usage report period=$Period; acquisition time is not the workload report refresh date."
+        if ($carriedOverReports.Count -gt 0) { "Empty Graph report(s) after $emptyReportAttempts attempt(s); previous DATA-LAST CSV kept unchanged and not receipted (report=previous refresh date): $($carriedOverReports -join '; ')." }
+    )
     Complete-SmartM365ExecutionContext -Status Auto
     $runFinalized = $true
 }
