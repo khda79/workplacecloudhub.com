@@ -5,10 +5,15 @@ Audits a complete SmartM365 tenant DATA root and retires verified redundant file
 .DESCRIPTION
 Preview is read-only. Execute removes only verified legacy Windows 11 readiness
 archives, old Discovered Apps detail weeks after preserving their summaries,
-byte-identical old M365 Usage run folders, linked obsolete prepared batches after
-retaining their receipts, timestamped CSV copies qualified by weekly manifests,
-and orphan atomic-write temporaries left by interrupted writers. Every other
-file is inventoried for review. The script is standalone.
+byte-identical old M365 Usage run folders, timestamped CSV copies qualified by
+weekly manifests, orphan atomic-write temporaries left by interrupted writers
+and, only when enabled, linked obsolete prepared batches after retaining their
+receipts. Every other file is inventoried for review. The script is standalone.
+
+The server share keeps the prepared-batch history by default: linked batches
+older than current and previous are inventoried as kept. -RetireLinkedPreparedBatches
+retires them, beyond -RetainedLinkedPreparedBatchCount further batches and only
+once older than -LinkedPreparedBatchMinimumAgeDays (age from the batch id).
 
 Orphan temporaries are removed only when the name exactly matches a known
 writer pattern, the file is older than the minimum age, and no JSON transport
@@ -16,11 +21,12 @@ lock in its folder is held. The JSON transport keeps its staging and previous
 copies on failure; nothing resumes them, so they only age out here.
 
 .VERSION
-1.1.0
+1.2.0
 
 .EXAMPLE
 ./Invoke-SmartM365-ServerDataCleanup.ps1 -Tenant prod -DataRootPath '<server DATA root>'
 ./Invoke-SmartM365-ServerDataCleanup.ps1 -Tenant prod -DataRootPath '<server DATA root>' -Execute
+./Invoke-SmartM365-ServerDataCleanup.ps1 -Tenant prod -DataRootPath '<server DATA root>' -RetireLinkedPreparedBatches -RetainedLinkedPreparedBatchCount 10 -LinkedPreparedBatchMinimumAgeDays 90
 #>
 #requires -Version 7.2
 [CmdletBinding()]
@@ -32,6 +38,10 @@ param(
     # A JSON transport .previous copy can be the only prior version: it gets a longer age.
     [ValidateRange(1, 3650)][int]$OrphanTemporaryMinimumAgeDays = 7,
     [ValidateRange(1, 3650)][int]$OrphanPreviousMinimumAgeDays = 30,
+    # The share keeps the prepared-batch history unless retirement is enabled explicitly.
+    [switch]$RetireLinkedPreparedBatches,
+    [ValidateRange(0, 100000)][int]$RetainedLinkedPreparedBatchCount = 0,
+    [ValidateRange(0, 36500)][int]$LinkedPreparedBatchMinimumAgeDays = 0,
     [switch]$Execute
 )
 
@@ -405,6 +415,8 @@ if ((Test-Path -LiteralPath $cmdbLock -PathType Leaf) -and
 $prepared = Join-Path $root 'DATA-POWERBI'
 $pointerPath = Join-Path $prepared 'current.json.txt'
 $pointerHash = ''
+$keptLinkedBatches = [Collections.Generic.List[object]]::new()
+$linkedBatchPosition = 0
 if (Test-Path -LiteralPath $pointerPath -PathType Leaf) {
     $pointerHash = Get-Hash $pointerPath
     $pointer = Get-Content -LiteralPath $pointerPath -Raw | ConvertFrom-Json
@@ -438,7 +450,28 @@ if (Test-Path -LiteralPath $pointerPath -PathType Leaf) {
                     $dirs = @(Get-ChildItem -LiteralPath $folder -Directory -Recurse -Force)
                     if (@($files | Where-Object { $_.Attributes -band [IO.FileAttributes]::ReparsePoint }).Count -or
                         @($dirs | Where-Object { $_.Attributes -band [IO.FileAttributes]::ReparsePoint }).Count) { break }
-                    Add-Action 'LinkedPreparedBatch' $folder ([int64](($files | Measure-Object Length -Sum).Sum)) 'Older linked batch; current and previous stay; three audit receipts will be preserved.' @{
+                    $linkedBatchPosition++
+                    $batchBytes = [int64](($files | Measure-Object Length -Sum).Sum)
+                    $batchTime = [datetime]::MinValue
+                    $hasBatchTime = [datetime]::TryParseExact($candidateId.Substring(0, 19), 'yyyyMMddTHHmmssfffZ',
+                        [Globalization.CultureInfo]::InvariantCulture,
+                        [Globalization.DateTimeStyles]::AdjustToUniversal -bor [Globalization.DateTimeStyles]::AssumeUniversal, [ref]$batchTime)
+                    $keepReason = ''
+                    if (-not $RetireLinkedPreparedBatches) { $keepReason = 'share retains prepared-batch history (retirement not enabled)' }
+                    elseif ($linkedBatchPosition -le $RetainedLinkedPreparedBatchCount) { $keepReason = "within the $RetainedLinkedPreparedBatchCount retained older batches" }
+                    elseif ($LinkedPreparedBatchMinimumAgeDays -gt 0 -and
+                        (-not $hasBatchTime -or ([datetime]::UtcNow - $batchTime).TotalDays -lt $LinkedPreparedBatchMinimumAgeDays)) {
+                        $keepReason = "younger than $LinkedPreparedBatchMinimumAgeDays days"
+                    }
+                    if ($keepReason) {
+                        $keptLinkedBatches.Add([pscustomobject]@{
+                            Path = (Assert-OwnedPath $folder); Bytes = $batchBytes
+                            Reason = 'Linked prepared batch kept: ' + $keepReason + '.'
+                        })
+                        $candidateId = [string]$receipt.PreviousBatchId
+                        continue
+                    }
+                    Add-Action 'LinkedPreparedBatch' $folder $batchBytes 'Older linked batch; current and previous stay; three audit receipts will be preserved.' @{
                         Id = $candidateId; ReceiptHash = (Get-Hash $receiptPath)
                         ManifestHash = (Get-Hash $manifestPath); ValidationHash = (Get-Hash $validationPath)
                         DirectoryState = (Get-DirectoryState $folder)
@@ -449,6 +482,12 @@ if (Test-Path -LiteralPath $pointerPath -PathType Leaf) {
         }
     }
 }
+$keptLinkedBytes = [int64]0
+foreach ($kept in $keptLinkedBatches) { $keptLinkedBytes += $kept.Bytes }
+Write-CleanupLog ('Linked prepared batches beyond current and previous: {0} found, {1} planned for retirement, {2} kept ({3:N3} GiB); retirement {4}.' -f
+    $linkedBatchPosition, @($actions | Where-Object Category -eq 'LinkedPreparedBatch').Count, $keptLinkedBatches.Count,
+    ($keptLinkedBytes / 1GB),
+    $(if ($RetireLinkedPreparedBatches) { "enabled (retain $RetainedLinkedPreparedBatchCount, minimum age $LinkedPreparedBatchMinimumAgeDays days)" } else { 'not enabled' }))
 
 # Inventory every file in the tenant root, including items outside the known
 # cleanup categories. Paths, not file age alone, drive deletion decisions.
@@ -489,6 +528,13 @@ $inventory = foreach ($file in $allFiles) {
     foreach ($folder in $plannedFolders) {
         if ($file.FullName.StartsWith(($folder.Path + [IO.Path]::DirectorySeparatorChar), [StringComparison]::OrdinalIgnoreCase)) {
             $action = 'PlannedRemoval'; $reason = $folder.Reason; break
+        }
+    }
+    if ($action -eq 'Review') {
+        foreach ($kept in $keptLinkedBatches) {
+            if ($file.FullName.StartsWith(($kept.Path + [IO.Path]::DirectorySeparatorChar), [StringComparison]::OrdinalIgnoreCase)) {
+                $action = 'Keep'; $reason = $kept.Reason; break
+            }
         }
     }
     if ($action -eq 'Review') {
