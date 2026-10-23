@@ -88,6 +88,16 @@ calling PowerShell script automatically; helper-based integrations can pass
 `Get-SmartM365EffectiveGlobalConfig`. Each profile has its own mail file and
 each load starts from that profile's common settings.
 
+Technical error notifications use only the effective `ErrorMailTo`, with no
+`Cc` or `Bcc`, including when a caller supplies report recipients explicitly.
+This applies to Graph, SMTP and the SMTP fallback after a Graph failure. Missing
+`ErrorMailTo` blocks the error notification rather than sending it to `To`.
+Existing local/profile/global inheritance still applies to `ErrorMailTo`;
+maintenance mode retains its tenant-global recipient restriction. Normal reports
+and health findings keep their report recipients and copies. Custom integrations
+must pass `-MailPurpose Error` for technical errors and `-MailPurpose Report`
+for reports; routing does not guess purpose from a subject or message priority.
+
 Generated data is written under tenant-isolated output roots by default:
 
 ```text

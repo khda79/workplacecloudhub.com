@@ -31,7 +31,7 @@
     Generates and publishes the report without sending the report email.
 
 .VERSION
-1.0.8
+1.0.9
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -69,7 +69,7 @@ try {
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$script:ScriptVersion = '1.0.8'
+$script:ScriptVersion = '1.0.9'
 $script:ScriptBaseName = [System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
 $script:TaskName = "$script:ScriptBaseName v$script:ScriptVersion"
 $script:CurrentOperation = 'Initialize'
@@ -116,7 +116,7 @@ else {
 }
 
 $coreModulePath = Join-Path -Path $script:SmartM365Root -ChildPath 'Modules\SmartM365.Core\SmartM365.Core.psd1'
-Import-Module -Name $coreModulePath -MinimumVersion '1.0.87' -Force -ErrorAction Stop
+Import-Module -Name $coreModulePath -MinimumVersion '1.0.104' -Force -ErrorAction Stop
 
 $script:LocalConfigPath = Join-Path -Path $PSScriptRoot -ChildPath "$script:ScriptBaseName.local.json"; $script:LocalConfigPath = Resolve-SmartM365JsonConfigurationPath -Path $script:LocalConfigPath
 $script:LocalTemplatePath = (Get-SmartM365JsonTemplateName -Path $script:LocalConfigPath)
@@ -917,7 +917,7 @@ catch {
             if ($global:LogTextFile -and (Test-Path -LiteralPath $global:LogTextFile)) {
                 $errorAttachments = @($global:LogTextFile)
             }
-            Send-SmartM365Mail `
+            Send-SmartM365Mail -MailPurpose Error `
                 -To $global:ErrorMailTo `
                 -Subject $errorSubject `
                 -BodyHtml $errorBody `
@@ -970,11 +970,12 @@ finally {
 if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 
 
+
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCAB2dtWmaRTPwo
-# qJW41Owt752IYGYpfStDYQsO4UQicqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDrTHWI5yml53cc
+# bk+vTluQ7lLr9yGgdHU9SAMlgWBFGqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1107,31 +1108,31 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEICiSXf6WeFqeAD/mPyBhsJQN8o/M5/aPpgi1es/uZ9A+MA0GCSqG
-# SIb3DQEBAQUABIIBgH2ZqU8siJzpJs0ZlZ6MqMofH/w4KqE5TPCOec+nhDonoDN6
-# Yh8JTTGYP8PG9sQIz7FOvfTF/sctQkEoxjFp0nXQCM/w80lHaxiseM7UBB+K8UHa
-# vF+2tHBMH/4x7GOcdjkiSFHa/66R0AdzZr3bkYI1kslBPopgKB7lwv8U3Brdhsfa
-# lgtfClacI5q0/4K4qUANoNFz/UybXWjzy2bma6ppkfe6r7bAWj9yH51t4zZpXyAJ
-# OYY+9LvNOCaDSrKOi0CNj/ggB8/h6BkcQX/2eut5CaX7hiBGHgpMeCfeKRcoayPq
-# wi8sXbCmDPl3n3lGwMs5F4rJ1ltke4dnr5nVo5TdU7Zns23GSevzvX+Yg15awkKn
-# fzB7xqtCDk7XTcM614qoQQnppnkdA48hnVOv/FPVmGxjAZGpxEwRo6s/SDBcYCV0
-# LzX0ir5kR9t+EjUwWsHgB1V8EC4ERfT9PQzRLu6Qwg4PIPXouwXaKtrPDYMAYuFM
-# Dv1o9zIqa0L1cyrHWaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIGPyXTYCQyZtJ/FOxfBfepUG5R7BDGl0BnWYG+YAkY9LMA0GCSqG
+# SIb3DQEBAQUABIIBgHT8VHxCEcEkBEj3+klHfqNUU8BfFpJFY3WxNDObAsQr/f3x
+# R1VKf++i/BBgjYsBT65Gx8tGp8JJA4Br7eQAX+K0EQ8Ue7158iTYcXtiA41fXprZ
+# M0i0oCgt6IXkHYtIRE1K5PgeNU+vNKQA8iE8Qcue/FPlc2SaG4sSNAB2YvDGf0l8
+# LBbmvCD/UTCBpq8AQ0ZoHFwaJ2suCx/zQOggd4e7stmV0eWjtWwN0vZTMOkBi5cM
+# FZopDBcPl4Np4X5UFkZYXxrjSZTTVOzJdsw312pm0SQBQCBAkpHzADBiHna6LKFt
+# dvG6AaOThfjVUCYQf3IE6ImlqyibkmG/J3gEoJzoOYmvqVW+pTBV77fYKg9ArIER
+# 9b0ArHfz0ia1D2xZb9ni4r9J27t+46yCylfq663Xc6mkDOIIBvzXAfZzi99lJMhD
+# U9mU0zvn/JzW8iJWrRGJtTMIKj4UrXNsQ0f73/7h9JQM1+D6mEezu2puHLzFCBwx
+# JO0EE+HKMVgoblML0qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTQxNTMw
-# MjJaMC8GCSqGSIb3DQEJBDEiBCB0faIFg1MzCWXmKzTm239QepHuJlngI4Ee8vHm
-# c8sHJzANBgkqhkiG9w0BAQEFAASCAgA17nXLDbCIdDxqE/EFLeY8pTFEmClodN/N
-# a9aaM2w9VDzgmJmDwgvD0CtWhFoMSF5suISmD1aJCzOQcDnUHetx7xpCD+V6Z0rn
-# xjBUILXV6XVGC/dedNHg6qemLVaTWaKJC3gsA6EC2iUdU1PQ/zxj8fXX1db1FW36
-# vxUUEoykd0y1uBec9dbfAHxC+9F4iXPymjOVz4JUBXfhRocop4aC40cUMtMELJFq
-# +8JMHze9wP4rJAKLOxCIsJ9r5OH6HFXlLKw0KzATLKbqGpP6eSkSUY6VKCxUg6vR
-# bpmM2/gntItn99bSqTCABuhJyDMbKrH1zafqxFwFQCBf2tfnvjuhUJkjS8wZ4gsV
-# H2pxxCJlVKBkTYYw+CaMQXXlCMgqWr1VrLux6nbt8Aym+ulxm3jhlFDEIj/mdtOh
-# Jmt16+rW3FUvRT1Zn3GS8UJ/k6CLcolc33QVP1LaFb390oTSsPfvIwEOa/UjxCf9
-# DQc04Z7GGASJJ4QbfeMldJyHFYGkclyDYhUZePOTmCniIHvahrP2Kk9ZYBpIEgym
-# uPokpke6V52qSrVGe7hpatPyhUUre2OPrmm5C/IjPRNgltNfl3Bw3XYYD/D+qsLG
-# 5xgkqyoyWidhjjomXgIv/foXc5Vli9wJITJZ8eQcvr9fjGoTN3aLWkM/6BUfRsMu
-# p9vAOOA9Lg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjMwMjE5
+# MDVaMC8GCSqGSIb3DQEJBDEiBCC6RC/vWsZh8FC1Q1j6gqNfM6tmFJ8/PQkPinSt
+# 4zPgTTANBgkqhkiG9w0BAQEFAASCAgBkZuoiBQBlx7YPZuThY4qZIN7lk+6Od4wp
+# +vxQAH0GALAisFsnU4XVKAAOu7uY/Nb4FwK4jIy0o4BIGcT2neKVth4YP/sb97Ga
+# qQjszBg9p6RvCHgvS0L7iqMheNH9d+FtneHQfoQs1U0jVt9QixWMCT+71hfy4qxT
+# Q/NuHHLXjYFxDLVv9PmXmbNSTs8fvfOyhcBUOGcO1C2moB3vOq0L/NOKxCT9SKsi
+# EnEl7NcYPs4UfOeEEezY08ywLGQHc3giNPWuSRMUd9v1+1Q8Yw5eLIczt7I96pSz
+# 8RoYjqP0L0dL/XnUVb2XeSJisWjlBEbRuiyqjpiNq7Y+XTnhFTCn2uxS+vK0apSP
+# N77OVpvLrRl8CxcY8IPW8rn1iY74Un3ItKp3rlWHXAlyh+BK2W1U6GKRcC8y5NO8
+# yyw5Ff5Xwa6x+fmQ1/RB2G7uaYSXgw0NMNlXzx3EEjhfCmG0VrlTmsp4dqVjDn0v
+# eqGLMKS499YY2VJiy0RMeBsI5Or/9HGhhL30dXOnBHn8pwIxXRWWlEaF2T8CBejU
+# Dy88Rc9LCdtPxW/CJUO1OoUjxIOpKQ0xVNtL/u05dJz8a0FSC08pnIEfcRQ8VtwA
+# OuoW7mS4EFs7xOlrIUs0Fun0i3laLYGCipUujnODzq/dgoZr0JK66/YYDUk+usfl
+# sHrNwkiD1A==
 # SIG # End signature block

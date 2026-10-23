@@ -4,7 +4,7 @@
 Synthetic maintenance mail admission and transition tests. Production entrypoints,
 authentication and mail transports are never executed. Run in PS7 and PS5.1.
 .VERSION
-1.0.1
+1.0.2
 #>
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidGlobalVars','',Justification='Tests emulate the existing Core global runtime context and restore it afterwards.')]
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter','',Justification='Transport and branding mock signatures match production helpers without performing external actions.')]
@@ -40,7 +40,7 @@ try {
     $paths=Get-SmartM365OrchestratorMaintenancePaths $shared
     foreach($edition in @('SmartM365.Core.psm1','Compatibility/WindowsPowerShell5/SmartM365-WindowsPowerShell5.psm1')) {
         $source=Join-Path $core $edition
-        $names=@('Send-SmartM365GraphMail','SendEmailHtmlReport','ConvertToRecipientArray','ConvertTo-SmartM365GraphRecipient','ConvertTo-SmartM365GraphFileAttachment')
+        $names=@('Send-SmartM365GraphMail','SendEmailHtmlReport','ConvertToRecipientArray','ConvertTo-SmartM365GraphRecipient','ConvertTo-SmartM365GraphFileAttachment','Get-ModuleLocalConfigValue')
         if($edition -eq 'SmartM365.Core.psm1'){$names+='Send-SmartM365Mail'}
         $definitions=@(Get-Definitions $source $names)+@(Get-Content (Join-Path $core 'SmartM365-MailMaintenance.ps1'))
         $runtime=New-Module -ScriptBlock ([scriptblock]::Create($definitions -join "`n"));$runtimes+=$runtime
@@ -54,7 +54,6 @@ try {
             function script:Resolve-SmartM365ConfigValue {param($Value) $Value}
             function script:Get-SmartM365CallerLocalConfig {$script:Caller}
             function script:Get-ModuleLocalConfig {$script:Caller}
-            function script:Get-ModuleLocalConfigValue {param($Config,$Name,$DefaultValue) if($Config.PSObject.Properties[$Name]){$Config.$Name}else{$DefaultValue}}
             function script:WriteLog {param($Message,$Level)}
             function script:Test-SmartM365InterruptedRun {$false}
             function script:Format-SmartM365MailSubject {param($Subject) $Subject}
@@ -78,6 +77,42 @@ try {
         Assert-Case ($normal.Graph.message.toRecipients[0].emailAddress.address -eq 'local-report@example.invalid') 'Inactive Graph changed To.'
         Assert-Case ($normal.Graph.message.ccRecipients[0].emailAddress.address -eq 'local-cc@example.invalid') 'Inactive Graph changed Cc.'
         Assert-Case ($normal.Smtp.To[0] -eq 'local-report@example.invalid' -and $normal.Smtp.Cc[0] -eq 'local-cc@example.invalid') 'Inactive SMTP changed recipients.'
+        # Error routing applies outside maintenance as well, even with explicit report recipients.
+        foreach($mode in @('SMTP','Graph','Both')) {
+            & $runtime {param($Mode) $script:FailGraph=($Mode -eq 'Both');Send-TestReport $Mode Error;$script:FailGraph=$false} $mode
+            $mail=& $runtime {param($Mode) if($Mode -eq 'Graph'){$script:Graph[-1]}else{$script:Smtp[-1]}} $mode
+            if($mode -eq 'Graph') {
+                Assert-Case ($mail.message.toRecipients[0].emailAddress.address -eq 'local-error@example.invalid' -and @($mail.message.toRecipients).Count -eq 1) 'Inactive error Graph used report To.'
+                Assert-Case (-not $mail.message.PSObject.Properties['ccRecipients']) 'Inactive error Graph leaked Cc.'
+            } else {
+                Assert-Case ($mail.To[0] -eq 'local-error@example.invalid' -and @($mail.To).Count -eq 1) "Inactive error $mode used report To."
+                Assert-Case (@($mail.Cc|Where-Object {$_}).Count -eq 0) "Inactive error $mode leaked Cc."
+            }
+        }
+        & $runtime {Send-TestGraph Error}
+        Assert-Case ((& $runtime {$script:Graph[-1].message.toRecipients[0].emailAddress.address}) -eq 'local-error@example.invalid') 'Direct Graph error ignored local ErrorMailTo.'
+        $global:ScriptFailed=$true
+        & $runtime {Send-TestGraph Auto}
+        Assert-Case ((& $runtime {$script:Graph[-1].message.toRecipients[0].emailAddress.address}) -eq 'local-error@example.invalid') 'Legacy failure outside maintenance used report To.'
+        $global:ScriptFailed=$false
+        foreach($marker in @('__USE_GLOBAL__','USE_GLOBAL','', ' ', $null)) {
+            & $runtime {param($Marker) $script:Caller.ErrorMailTo=$Marker;Send-TestGraph Error} $marker
+            Assert-Case ((& $runtime {$script:Graph[-1].message.toRecipients[0].emailAddress.address}) -eq 'global-error@example.invalid') 'Local ErrorMailTo marker did not inherit the tenant ErrorMailTo.'
+        }
+        $beforeErrorRefusal=& $runtime {@($script:Graph).Count+@($script:Smtp).Count}
+        & $runtime {$script:Caller.ErrorMailTo='';$script:Cfg.ErrorMailTo=''}
+        Assert-Throws {& $runtime {Send-TestReport Graph Error}}
+        Assert-Throws {& $runtime {Send-TestReport SMTP Error}}
+        Assert-Throws {& $runtime {Send-TestReport Both Error}}
+        Assert-Case ((& $runtime {@($script:Graph).Count+@($script:Smtp).Count}) -eq $beforeErrorRefusal) 'Missing ErrorMailTo fell back to report recipients.'
+        & $runtime {$script:Caller.ErrorMailTo='local-error@example.invalid';$script:Cfg.ErrorMailTo='global-error@example.invalid'}
+        $params=@{To=@('report@example.invalid');Cc=@('cc@example.invalid');Bcc=@('hidden@example.invalid')}
+        & $runtime {param($P) Set-SmartM365SmtpMaintenanceRecipient $P Error} $params
+        Assert-Case ($params.To[0] -eq 'local-error@example.invalid' -and -not $params.ContainsKey('Cc') -and -not $params.ContainsKey('Bcc')) 'Inactive SMTP error retained visible or blind copies.'
+        if($edition -eq 'SmartM365.Core.psm1') {
+            & $runtime {Send-SmartM365Mail -From 'sender@example.invalid' -To 'report@example.invalid' -Cc 'copy@example.invalid' -Subject 'Synthetic' -BodyHtml '<p>Test</p>' -SendMailMode Graph -MailPurpose Error}
+            Assert-Case ((& $runtime {$script:Graph[-1].message.toRecipients[0].emailAddress.address}) -eq 'local-error@example.invalid') 'Core wrapper error outside maintenance ignored ErrorMailTo.'
+        }
         $active=$zero.PSObject.Copy();$active.Enabled=$true;$active.Revision=1
         $active.ChangedAtUtc=[datetime]::UtcNow.ToString('o');$active.ChangedBy='synthetic';$active.ChangedFromServer='SERVER-A';$active.Reason='Synthetic policy test'
         Write-Fixture $paths.State $active
@@ -223,11 +258,12 @@ finally {
     if(Test-Path -LiteralPath $resolved){Remove-Item -LiteralPath $resolved -Recurse -Force}
 }
 
+
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAUVyq4JqPadLXv
-# c1hYoym+AzeOjbdfjB843P0rnF0Rd6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCZa52ZYUkTZddk
+# Qnl9+rzV1Axuiq0O1rglKxTfxhF986CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -360,31 +396,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIOY1xrU70Br5Jui7yejuGy9Eu8eh0P07lNgq7bqKiBTxMA0GCSqG
-# SIb3DQEBAQUABIIBgJKPWxqlQml7nXUxCESF/pSahK6KuDq5oetbr2hkqs/bhDt7
-# 0fypA3DFMKr96MmRuPIyWgSK0rj5jUjtiOyqx17QgKUX8Griq15zcQvChc41uhiz
-# 8MfJFyp+PG/5sPH008o6IGfh/4N1QrDkRkApyByxXK/46xQ/2BwGksBOmVvaAI51
-# CzlwN6S32omFprJZDplxn/oABFhtABy3ooMVn14GVhfYJiDMTH5czabOrV8re8Cy
-# anC8aWb1oODYFZsXGKqfgL14fA8mDboDDCdYoalqifKQmCyK2iTrix7hNyU2vOD+
-# SAYIRGQf1teC18cBGo75LdN6Tt3plya9Urz/1qbX+MRaD7PzKpAtVR4E8IyV5Ln5
-# 6xr39NkC/yFGCh1N4Tnx0BEsJUxfGJ32WHfUcMiq7yQ8vHiaxOoG67tSbd8aMMYb
-# qjoCvsnUa3FWA1PXLM1VoPhODALLgkVTHUyIDmtHx1Hv8YawOT1vHa4ENvHtr/a2
-# sWLZ3AX2wHz7dOcBzaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIGu8gUaBEn4aqpo6t1TG9RmLULjraGWwTxOGGQMydfR8MA0GCSqG
+# SIb3DQEBAQUABIIBgKGe5xuGvCnQ53ehc9o3PCNFgsZXWWxYZS7M5mJYL3J8BAMO
+# tfFRCYJrcAIF0kdMSeXvAhObnfyATG3yXkWox1PGJ0v3jLSWj/78U8LA38F5aUj+
+# FiHG/h6BkQzUS0WbZ5cUTFz11JuesQFZv9eRubOzsrJ1AumMUPayT2fAG4hEOtmC
+# Fx49Z2e7skrJdirtDEh5TTQ90o95YCnMCu3mxxBKBDYKoWOFB8zQpgirvKiQiqjY
+# fhbazewbMzi3V5kbm17lSCCY6wJnqv06tHpDmmPFeIlsBTq8jCXKm9w0oiG1/jSD
+# KQbnYzxNxb2nZ6kozAewsFsz1uWmrw2aN3FJzhj2luBoIpRsVUo1MUuWWd2FFzQk
+# e0XLcJMBGcgb7uwCuab0jhEkOnGBWPl9E5A2jFK1Uk0BJJBsaHTqB+d2W6OzyEl8
+# rp3QXSSaYiEr8pElirlXX3oe8sYkCON8EhurhRn7bFW5JboNSS1kA+4KCKUGbtCr
+# 6oA4evGt24ormBfgCaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTkxNTI2
-# MDVaMC8GCSqGSIb3DQEJBDEiBCDbgPCejBqTvANlC2ZYuFARPoxqGjuPSWAHWVGv
-# M+M87zANBgkqhkiG9w0BAQEFAASCAgA0Nu/3oZXcHPGTUvOWi4LV6ULC7UOMHhav
-# 1YupSZf9p5wjiA+lieJ6X4uewdBAhB3is6kFRkyMUhBdusXIdXFsIoiNLm/luw8X
-# A34fUdbr+x9FubgsCEyge/nPl8GkBe/8O/SE726MOLf5Nv4DxNO0tRlwtJ6CNKw1
-# d3kRYh9pn5pv+/5koDEa59TbUxYQMAS9fMwR5zbxzHkKu+aZldDjnaQKAud7hMQB
-# 7QGkMKIacNYFa89FC00aEUCTG5KG3JaPGzUbk3Xg8u+9b4Ov0P3uBloLqB+0V89y
-# SENcKcrusSmu6lhULtYbLYJvbnXdKwKyLrGy/ZJUvJ72xzs3LfgNi6QOtdWp5qgW
-# mbam9iWQuAtBpTX0J/FZVplcnzmgUegpCq2LHwDe7t2Tx7DeychMPjQwga52Tkzq
-# A3ZJ2x7o/9NIpPqsalGGjVKOYyEpTwTzYbnaTQUQxowEglK2gL2leSUzrYSgdYl1
-# RAWHpY56kL5mk829TJRrKmvDpawHP/TGmJuaRhoMRb8vL0GRKC5PZvZqHWOo8Qlx
-# g+g0yOtm5G5bsZfyRgJHkVHPynmk5OxInPQ3fkbRm2wvNCj2bcKH723nOzIzI0E9
-# mAeoYowVsNe3ruorZWmQsMct/sxKR7UmYB2kprDIGVuduvat7mTRbq9cl33kdXW0
-# //ORob/inA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjMwMjE5
+# MDdaMC8GCSqGSIb3DQEJBDEiBCDxhuRhJe1dN4vQFaE/RJ+KVodr4oFszhCVqau6
+# m2LP3zANBgkqhkiG9w0BAQEFAASCAgAg3igRuroDLA5uQE5Gy+TFpMbNtcFNTnCx
+# +B5dXUBzcduvh0Odqa6TPhwlYz0E1HKCNPrYXeRAVzwkeZZm9Bn6X4IDKgQ6Y/o0
+# GxZ7X63ktYf7PRc1xxFXiULe0F8woq/pD3vK8h0RNUROykakR02RHdYcEedUzF/i
+# wILKsYKducUgux/Ws26BRpug1yv8xmRlp7AQA4RZ4aHUgehFMAp7rvUIzQ/e4kjt
+# 0nEubUYnbLFw/H8ex8bB6CHPOBT9IrvHevqfSS8n6rFacPUzEr8fcAsPcp24Qtbp
+# NRl3xLCPN7Copg5AI4gu9TgmBoLbX6L83bVoU56EFQYFIBx2SvMp7bywCXOMnme6
+# Y3HSopdFtCo/1w8YmVoZRH4CYKyhFnzrx90JP/KMfeQYQuQiHOL0ZOufPqZBw2Xi
+# toZq7UHxsHHx6qAf2aZVRiyVq4rCNbxVd3jwh4z9MnZ8iXiebie8ozAs7YfT+Eo1
+# gwVlbaft0xM723n0W/uHFaBdj55QWeCA7poCvmycbOA80oBNipYttxRbcIgkG5Vh
+# N1X+vcSL/U3jI7C++9UJTrORPabNFYWEv9Qy3AdCdbrEyYGDJFFbbtprMSDowLF7
+# JyX2ykuCm1J+KnqhssYE8+kaIvtDQl2VSKfC7O5FkKXsv53t9emOKdQ1s0jeu3F7
+# 4q9qC7DlwQ==
 # SIG # End signature block
