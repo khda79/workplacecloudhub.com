@@ -17,7 +17,7 @@
     Parameters allow customization of output paths, permission inclusion, and overwrite behavior.
 
 .VERSION
-1.67
+1.68
 .REQUIREMENTS
     Windows PowerShell 5.1 on an Exchange 2016/on-premises management host.
     Modules/snap-ins: SmartM365 WindowsPowerShell5 compatibility module; Exchange Management snap-in; ActiveDirectory module when AD permission export is enabled.
@@ -25,7 +25,7 @@
     Optional switches: -IncludeADPermission and -OnlyADPermission require read access to AD mailbox permission ACLs.
     Conditional: Mail.Send is required only when Graph mail is used; Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
-Version: 1.66
+Version: 1.68
     Author: https://github.com/khda79/workplacecloudhub.com
     Requirements: Exchange 2016 Management Tools, Active Directory module
     Minimum permissions: Windows PowerShell 5.1, Exchange 2016 Management snap-in, ActiveDirectory module, Exchange read RBAC for mailbox/remote mailbox/statistics/permissions, and AD read access.
@@ -268,7 +268,7 @@ $global:SharePointTargetFolderPath = Get-ScriptLocalConfigValue -Config $ScriptL
 $script:SharePointUploadDisabledForRun = -not $global:EnableSharePointUpload
 $script:SharePointUploadDisableLogged = $false
 #region Module Import and Initialization
-$ScriptVersion = "1.67"
+$ScriptVersion = "1.68"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $EnableWeeklyHistory = [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'EnableWeeklyHistory' -DefaultValue $true)
 $WeeklyHistoryFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'WeeklyHistoryFolderPath' -DefaultValue ''
@@ -656,7 +656,7 @@ function Get-SmartM365LocalMailboxColumns {
       'ModerationEnabled','AcceptMessagesOnlyFrom','AcceptMessagesOnlyFromDLMembers','RejectMessagesFrom',
       'RejectMessagesFromDLMembers','RequireSenderAuthenticationEnabled','Database','ServerName',
       'UseDatabaseQuotaDefaults','ArchiveName','ArchiveStatus','ArchiveState','ArchiveQuota','ForwardingAddress',
-      'ForwardingSmtpAddress','DeliverToMailboxAndForward','Department','Office','Manager','WhenMailboxCreated','WhenMailboxCreatedIso8601','LastLogonTimeIso8601',
+      'ForwardingSmtpAddress','DeliverToMailboxAndForward','Department','Office','Manager','WhenMailboxCreatedIso8601','LastLogonTimeIso8601','WhenMailboxCreated',
       'WhenChanged','WhenCreated','MailboxLocations','Identity','ObjectCategory','GrantSendOnBehalfTo',
       'ProhibitSendReceiveQuota-In-MB','LastLogonTime','TotalItemSize-In-MB','ItemCount','DeletedItemCount',
       'TotalDeletedItemSize-In-MB','ArchiveTotalItemSize-In-MB','ArchiveItemCount','LargeItemCount-Over-35MB',
