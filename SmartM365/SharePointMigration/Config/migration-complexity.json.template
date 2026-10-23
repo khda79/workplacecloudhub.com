@@ -1,33 +1,219 @@
 {
   "SchemaVersion": 1,
-  "Description": "Migration complexity scoring. Points per criterion: 0 below OnePointFrom, 1 up to TwoPointsAbove, 2 up to ThreePointsAbove, 3 above. Score = SUM(points x weight) / (3 x SUM(evaluated weights)) x 100. Deleted entries are restored from the template: set \"Enabled\": false on a criterion or floor rule to disable it.",
+  "ScoringRevision": 2,
+  "Description": "Source complexity: 13 weighted criteria, total default weight 100. MAX groups avoid double counting. Automatic per-scan assessments distinguish collection from qualification; functional effort is estimated. Missing or unqualified evidence is N/A, with known risks retained and coverage displayed.",
   "Settings": {
     "LargeFileGiB": 2,
     "PathLimit": 400,
     "SegmentLimit": 255,
-    "BrokenInheritanceScopes": [ "Item" ]
+    "BrokenInheritanceScopes": [
+      "Item"
+    ],
+    "HeavyVersionsFrom": 100
   },
   "Criteria": [
-    { "Id": "FileCount", "Axis": "Volume", "Name": "Number of files", "Unit": "files", "Weight": 15, "OnePointFrom": 10000, "TwoPointsAbove": 50000, "ThreePointsAbove": 250000 },
-    { "Id": "TotalSizeGiB", "Axis": "Volume", "Name": "Total size", "Unit": "GiB", "Weight": 15, "OnePointFrom": 10, "TwoPointsAbove": 100, "ThreePointsAbove": 500 },
-    { "Id": "SubsiteCount", "Axis": "Volume", "Name": "Number of subsites", "Unit": "sites", "Weight": 5, "OnePointFrom": 2, "TwoPointsAbove": 5, "ThreePointsAbove": 25 },
-    { "Id": "LibraryCount", "Axis": "Volume", "Name": "Number of libraries", "Unit": "libraries", "Weight": 5, "OnePointFrom": 4, "TwoPointsAbove": 10, "ThreePointsAbove": 30 },
-    { "Id": "AverageVersions", "Axis": "History", "Name": "Average versions per file", "Unit": "versions", "Weight": 10, "OnePointFrom": 3, "TwoPointsAbove": 10, "ThreePointsAbove": 50 },
-    { "Id": "PathLimitFiles", "Axis": "Paths", "Name": "Files over path limits", "Unit": "files", "Weight": 10, "OnePointFrom": 1, "TwoPointsAbove": 10, "ThreePointsAbove": 100 },
-    { "Id": "LargeFiles", "Axis": "Risky files", "Name": "Large files", "Unit": "files", "Weight": 5, "OnePointFrom": 1, "TwoPointsAbove": 5, "ThreePointsAbove": 50 },
-    { "Id": "RiskyFiles", "Axis": "Risky files", "Name": "Checked-out, blocked or excluded files", "Unit": "files", "Weight": 5, "OnePointFrom": 1, "TwoPointsAbove": 20, "ThreePointsAbove": 200 },
-    { "Id": "BrokenInheritance", "Axis": "Permissions", "Name": "Objects with broken inheritance", "Unit": "objects", "Weight": 15, "OnePointFrom": 10, "TwoPointsAbove": 100, "ThreePointsAbove": 1000 },
-    { "Id": "DirectUsers", "Axis": "Permissions", "Name": "Users assigned directly", "Unit": "users", "Weight": 10, "OnePointFrom": 10, "TwoPointsAbove": 50, "ThreePointsAbove": 300 },
-    { "Id": "InactiveAccounts", "Axis": "Permissions", "Name": "Disabled or unresolved accounts", "Unit": "accounts", "Weight": 5, "OnePointFrom": 1, "TwoPointsAbove": 10, "ThreePointsAbove": 50 }
+    {
+      "Id": "FileCount",
+      "Axis": "Volume",
+      "Name": "File volume and library concentration",
+      "Unit": "files",
+      "Weight": 15,
+      "OnePointFrom": 10000,
+      "TwoPointsAbove": 50000,
+      "ThreePointsAbove": 250000,
+      "MetricName": "Total files",
+      "Alternatives": [
+        {
+          "Id": "LibraryConcentration",
+          "Name": "Maximum files per library",
+          "Unit": "files",
+          "OnePointFrom": 20000,
+          "TwoPointsAbove": 50000,
+          "ThreePointsAbove": 100000
+        }
+      ]
+    },
+    {
+      "Id": "TotalSizeGiB",
+      "Axis": "Volume",
+      "Name": "Total size",
+      "Unit": "GiB",
+      "Weight": 10,
+      "OnePointFrom": 10,
+      "TwoPointsAbove": 100,
+      "ThreePointsAbove": 500
+    },
+    {
+      "Id": "SubsiteCount",
+      "Axis": "Volume",
+      "Name": "Number of subsites",
+      "Unit": "sites",
+      "Weight": 5,
+      "OnePointFrom": 2,
+      "TwoPointsAbove": 5,
+      "ThreePointsAbove": 25
+    },
+    {
+      "Id": "LibraryCount",
+      "Axis": "Volume",
+      "Name": "Number of libraries",
+      "Unit": "libraries",
+      "Weight": 5,
+      "OnePointFrom": 4,
+      "TwoPointsAbove": 10,
+      "ThreePointsAbove": 30
+    },
+    {
+      "Id": "AverageVersions",
+      "Axis": "History",
+      "Name": "Version history and concentration",
+      "Unit": "versions",
+      "Weight": 10,
+      "OnePointFrom": 3,
+      "TwoPointsAbove": 10,
+      "ThreePointsAbove": 50,
+      "MetricName": "Average historical versions per file",
+      "Alternatives": [
+        {
+          "Id": "VersionConcentration",
+          "Name": "Files with at least 100 historical versions",
+          "Unit": "%",
+          "OnePointFrom": 0,
+          "TwoPointsAbove": 1,
+          "ThreePointsAbove": 5,
+          "ZeroIsZero": true,
+          "BandLabels": [
+            "0%",
+            "> 0 to 1%",
+            "> 1 to 5%",
+            "> 5%"
+          ]
+        }
+      ]
+    },
+    {
+      "Id": "PathLimitFiles",
+      "Axis": "Paths",
+      "Name": "Files over path limits",
+      "Unit": "files",
+      "Weight": 10,
+      "OnePointFrom": 1,
+      "TwoPointsAbove": 10,
+      "ThreePointsAbove": 100
+    },
+    {
+      "Id": "LargeFiles",
+      "Axis": "Risky files",
+      "Name": "Large files",
+      "Unit": "files",
+      "Weight": 5,
+      "OnePointFrom": 1,
+      "TwoPointsAbove": 5,
+      "ThreePointsAbove": 50
+    },
+    {
+      "Id": "RiskyFiles",
+      "Axis": "Risky files",
+      "Name": "Checked-out, blocked or excluded files",
+      "Unit": "files",
+      "Weight": 5,
+      "OnePointFrom": 1,
+      "TwoPointsAbove": 20,
+      "ThreePointsAbove": 200
+    },
+    {
+      "Id": "BrokenInheritance",
+      "Axis": "Permissions",
+      "Name": "Objects with broken inheritance",
+      "Unit": "objects",
+      "Weight": 10,
+      "OnePointFrom": 10,
+      "TwoPointsAbove": 100,
+      "ThreePointsAbove": 1000
+    },
+    {
+      "Id": "DirectUsers",
+      "Axis": "Permissions",
+      "Name": "Users assigned directly",
+      "Unit": "users",
+      "Weight": 5,
+      "OnePointFrom": 10,
+      "TwoPointsAbove": 50,
+      "ThreePointsAbove": 300
+    },
+    {
+      "Id": "InactiveAccounts",
+      "Axis": "Permissions",
+      "Name": "Disabled or unresolved accounts",
+      "Unit": "accounts",
+      "Weight": 5,
+      "OnePointFrom": 1,
+      "TwoPointsAbove": 10,
+      "ThreePointsAbove": 50
+    },
+    {
+      "Id": "CustomPermissionLevels",
+      "Axis": "Permissions",
+      "Name": "Used custom permission levels",
+      "Unit": "definitions",
+      "Weight": 5,
+      "OnePointFrom": 1,
+      "TwoPointsAbove": 2,
+      "ThreePointsAbove": 5
+    },
+    {
+      "Id": "FunctionalComplexity",
+      "Axis": "Functional",
+      "Name": "Workflows, forms and customizations",
+      "Unit": "effort level",
+      "Weight": 10,
+      "OnePointFrom": 1,
+      "TwoPointsAbove": 1,
+      "ThreePointsAbove": 2,
+      "BandLabels": [
+        "None requiring adaptation",
+        "Configuration or republishing",
+        "Logic, form or dependency adaptation",
+        "Rebuild or replacement"
+      ]
+    }
   ],
   "Levels": [
-    { "Name": "Low", "MinScore": 0, "Color": "#087F5B", "Background": "#ECFAF4" },
-    { "Name": "Moderate", "MinScore": 25, "Color": "#005A9E", "Background": "#E6F4FF" },
-    { "Name": "High", "MinScore": 50, "Color": "#9A6700", "Background": "#FFF8E8" },
-    { "Name": "Very high", "MinScore": 75, "Color": "#B42335", "Background": "#FFF0F2" }
+    {
+      "Name": "Low",
+      "MinScore": 0,
+      "Color": "#087F5B",
+      "Background": "#ECFAF4"
+    },
+    {
+      "Name": "Moderate",
+      "MinScore": 25,
+      "Color": "#005A9E",
+      "Background": "#E6F4FF"
+    },
+    {
+      "Name": "High",
+      "MinScore": 50,
+      "Color": "#9A6700",
+      "Background": "#FFF8E8"
+    },
+    {
+      "Name": "Very high",
+      "MinScore": 75,
+      "Color": "#B42335",
+      "Background": "#FFF0F2"
+    }
   ],
   "FloorRules": [
-    { "CriterionId": "PathLimitFiles", "MinPoints": 3, "MinimumLevel": "High" },
-    { "CriterionId": "BrokenInheritance", "MinPoints": 3, "MinimumLevel": "High" }
+    {
+      "CriterionId": "PathLimitFiles",
+      "MinPoints": 3,
+      "MinimumLevel": "High"
+    },
+    {
+      "CriterionId": "BrokenInheritance",
+      "MinPoints": 3,
+      "MinimumLevel": "High"
+    }
   ]
 }

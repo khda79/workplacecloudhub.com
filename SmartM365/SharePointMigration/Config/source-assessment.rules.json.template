@@ -1,0 +1,192 @@
+{
+  "SchemaVersion": 1,
+  "RuleVersion": "1.0.0",
+  "TargetPlatform": "SPO",
+  "Description": "Read-only source assessment for migration to SharePoint Online. Effort is a technical estimate, not business acceptance. Unmatched components remain unqualified. No sampling or document-binary download.",
+  "FunctionalRules": {
+    "Workflow2010": {
+      "Effort": 3,
+      "Reason": "Classic workflow platform requires replacement in SharePoint Online."
+    },
+    "Workflow2013": {
+      "Effort": 3,
+      "Reason": "SharePoint 2013 workflows are retired in SharePoint Online; replace the dependency."
+    },
+    "InfoPath": {
+      "Effort": 3,
+      "Reason": "InfoPath Forms Services requires replacement in SharePoint Online."
+    },
+    "ServerCode": {
+      "Effort": 3,
+      "Reason": "Server-side custom code is not supported in SharePoint Online."
+    },
+    "ClientScript": {
+      "Effort": 2,
+      "Reason": "Custom client script requires adaptation and dependency checks."
+    },
+    "StandardListView": {
+      "Effort": 0,
+      "Reason": "Standard list-view Web Part detected; any customized page or unknown dependency is assessed separately."
+    },
+    "ClientSideComponent": {
+      "Effort": 1,
+      "Reason": "Client-side component requires deployment/configuration review."
+    }
+  },
+  "WebPartTypes": {
+    "Microsoft.SharePoint.WebPartPages.ListViewWebPart": "StandardListView",
+    "Microsoft.SharePoint.WebPartPages.XsltListViewWebPart": "StandardListView",
+    "Microsoft.SharePoint.WebPartPages.ListFormWebPart": "StandardListView",
+    "Microsoft.SharePoint.WebPartPages.ContentEditorWebPart": "ClientScript",
+    "Microsoft.SharePoint.WebPartPages.ScriptEditorWebPart": "ClientScript"
+  },
+  "StandardRoleMasks": {},
+  "StandardRoleBaseline": "Documented SharePoint Server core default role permissions; bits resolved using the installed SPBasePermissions enum. StandardRoleMasks preserves reviewed per-type overrides. Non-core untyped levels are assessed as custom.",
+  "StandardFieldTypes": [
+    "Invalid",
+    "Integer",
+    "Text",
+    "Note",
+    "DateTime",
+    "Counter",
+    "Choice",
+    "Lookup",
+    "Boolean",
+    "Number",
+    "Currency",
+    "URL",
+    "Computed",
+    "Threading",
+    "Guid",
+    "MultiChoice",
+    "GridChoice",
+    "Calculated",
+    "File",
+    "Attachments",
+    "User",
+    "Recurrence",
+    "CrossProjectLink",
+    "ModStat",
+    "Error",
+    "ContentTypeId",
+    "PageSeparator",
+    "ThreadIndex",
+    "WorkflowStatus",
+    "AllDayEvent",
+    "WorkflowEventType",
+    "Geolocation",
+    "OutcomeChoice",
+    "TaxonomyFieldType",
+    "TaxonomyFieldTypeMulti",
+    "PublishingHtml",
+    "PublishingImage",
+    "PublishingPageLayout",
+    "SummaryLinks",
+    "MediaFieldType",
+    "HTML"
+  ],
+  "Sources": [
+    "https://support.microsoft.com/en-us/sharepoint/platform/sharepoint-2013-workflow-retirement",
+    "https://techcommunity.microsoft.com/blog/spblog/support-update-for-infopath-forms-services-in-microsoft-365/3858190",
+    "https://learn.microsoft.com/en-us/sharepointmigration/migration-assessment-scan-full-trust-component-results",
+    "https://learn.microsoft.com/en-us/sharepoint/sites/user-permissions-and-permission-levels"
+  ],
+  "StandardRolePermissions": {
+    "Guest": [
+      "ViewFormPages",
+      "BrowseUserInfo",
+      "UseRemoteAPIs",
+      "UseClientIntegration",
+      "Open"
+    ],
+    "Reader": [
+      "ViewFormPages",
+      "BrowseUserInfo",
+      "UseRemoteAPIs",
+      "UseClientIntegration",
+      "Open",
+      "ViewListItems",
+      "OpenItems",
+      "ViewVersions",
+      "CreateAlerts",
+      "CreateSSCSite",
+      "ViewPages"
+    ],
+    "Contributor": [
+      "ViewFormPages",
+      "BrowseUserInfo",
+      "UseRemoteAPIs",
+      "UseClientIntegration",
+      "Open",
+      "ViewListItems",
+      "OpenItems",
+      "ViewVersions",
+      "CreateAlerts",
+      "CreateSSCSite",
+      "ViewPages",
+      "AddListItems",
+      "EditListItems",
+      "DeleteListItems",
+      "DeleteVersions",
+      "BrowseDirectories",
+      "EditMyUserInfo",
+      "ManagePersonalViews",
+      "AddDelPrivateWebParts",
+      "UpdatePersonalWebParts"
+    ],
+    "Editor": [
+      "ViewFormPages",
+      "BrowseUserInfo",
+      "UseRemoteAPIs",
+      "UseClientIntegration",
+      "Open",
+      "ViewListItems",
+      "OpenItems",
+      "ViewVersions",
+      "CreateAlerts",
+      "CreateSSCSite",
+      "ViewPages",
+      "AddListItems",
+      "EditListItems",
+      "DeleteListItems",
+      "DeleteVersions",
+      "BrowseDirectories",
+      "EditMyUserInfo",
+      "ManagePersonalViews",
+      "AddDelPrivateWebParts",
+      "UpdatePersonalWebParts",
+      "ManageLists"
+    ],
+    "WebDesigner": [
+      "ViewFormPages",
+      "BrowseUserInfo",
+      "UseRemoteAPIs",
+      "UseClientIntegration",
+      "Open",
+      "ViewListItems",
+      "OpenItems",
+      "ViewVersions",
+      "CreateAlerts",
+      "CreateSSCSite",
+      "ViewPages",
+      "AddListItems",
+      "EditListItems",
+      "DeleteListItems",
+      "DeleteVersions",
+      "BrowseDirectories",
+      "EditMyUserInfo",
+      "ManagePersonalViews",
+      "AddDelPrivateWebParts",
+      "UpdatePersonalWebParts",
+      "ManageLists",
+      "AddAndCustomizePages",
+      "ApplyTheme",
+      "ApplyStyleSheets",
+      "CancelCheckout",
+      "ApproveItems"
+    ],
+    "Administrator": [
+      "FullMask"
+    ]
+  }
+}
