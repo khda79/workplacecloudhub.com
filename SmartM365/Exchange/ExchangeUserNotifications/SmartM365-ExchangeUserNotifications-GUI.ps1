@@ -9,7 +9,7 @@ builds the PowerShell command line, launches the selected campaign, and streams
 output back to the operator.
 
 .VERSION
-1.0.6
+1.1.0
 #>
 [CmdletBinding()]
 param(
@@ -30,7 +30,7 @@ if ($ValidateOnly) { throw 'For offline GUI validation, specify -Demo -ValidateO
 
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
-Import-Module (Join-Path $PSScriptRoot '../../Modules/SmartM365.Core/SmartM365.JsonTransport.psd1') -Global -ErrorAction Stop
+Import-Module (Join-Path $PSScriptRoot '../../Modules/SmartM365.Core/SmartM365.JsonTransport.psd1') -MinimumVersion '1.0.8' -Global -ErrorAction Stop
 trap {
     $message = $_.Exception.Message
     try {
@@ -1088,6 +1088,10 @@ function Show-RunState {
     $script:TeamsUserMessageCheck.IsEnabled = ((-not $Running) -and $script:TeamsUserMessageAvailable)
     $script:DryRunRadio.IsEnabled = -not $Running
     $script:LiveRadio.IsEnabled = -not $Running
+    if (Get-Command Show-MigrationWorkerState -ErrorAction SilentlyContinue) {
+        $script:MigrationCampaignRunning=$Running
+        Show-MigrationWorkerState
+    }
     $script:Window.Cursor = if ($Running) { [System.Windows.Input.Cursors]::Wait } else { [System.Windows.Input.Cursors]::Arrow }
 }
 
@@ -1095,6 +1099,10 @@ function Get-RunMode {
     if ($script:LiveRadio.IsChecked) { return 'Live' }
     return 'DryRun'
 }
+
+Import-Module (Join-Path $script:GuiScriptRoot 'SmartM365.ExchangeMigrationSelection.psm1') -Force
+Import-Module (Join-Path $script:GuiScriptRoot 'SmartM365.Communications.psm1') -Force -DisableNameChecking
+. (Join-Path $script:GuiScriptRoot 'SmartM365.ExchangeMigrationSelection.Gui.ps1')
 
 function Get-CommandArgument {
     $campaign = Get-SelectedCampaign
@@ -1110,7 +1118,12 @@ function Get-CommandArgument {
         $commandArgs.Add('-Tenant')
         $commandArgs.Add($tenantProfile)
     }
+    $usingMigrationSelection = Test-MigrationSelectionSource
     $pathValue = $script:RecipientPathBox.Text.Trim()
+    if ($usingMigrationSelection) {
+        $commandArgs.Add('-MigrationBatchSelection')
+        $pathValue = if ($script:MigrationSelectionPath) { $script:MigrationSelectionPath } else { '<review EXO recipients first>' }
+    }
     if ($campaign.SupportsFromList) {
         $commandArgs.Add('-FromList')
         if (-not [string]::IsNullOrWhiteSpace($pathValue)) {
@@ -1130,8 +1143,8 @@ function Get-CommandArgument {
         $commandArgs.Add($forceLanguage)
     }
 
-    if ($campaign.SupportsEffectiveDate -and $script:EffectiveDatePicker -and $script:EffectiveDatePicker.SelectedDate.HasValue) {
-        $effectiveDate = $script:EffectiveDatePicker.SelectedDate.Value.ToString('yyyy-MM-dd')
+    if (-not $usingMigrationSelection -and $campaign.SupportsEffectiveDate -and $script:EffectiveDatePicker -and $null -ne $script:EffectiveDatePicker.SelectedDate) {
+        $effectiveDate = ([datetime]$script:EffectiveDatePicker.SelectedDate).ToString('yyyy-MM-dd')
         if (-not [string]::IsNullOrWhiteSpace($effectiveDate)) {
             $commandArgs.Add('-ForceEffectiveDate')
             $commandArgs.Add($effectiveDate)
@@ -1396,6 +1409,7 @@ function Show-CampaignView {
 
     Show-CommandPreview
     Show-Status -Text 'Ready' -Color '#0078D4'
+    Show-MigrationSelectionSource
 }
 
 function Show-ValidationResult {
@@ -1549,6 +1563,9 @@ function Update-CurrentRunOutput {
 
 function Invoke-CampaignRun {
     if ($script:CurrentProcess) { return }
+    if (Get-Command Prepare-MigrationSelectionRun -ErrorAction SilentlyContinue) {
+        if (-not (Prepare-MigrationSelectionRun)) { return }
+    }
     $campaign = Get-SelectedCampaign
     Show-Status -Text 'Checking templates' -Color '#0078D4'
     if (-not (Show-ValidationResult -Campaign $campaign -TemplatesOnly)) {
@@ -1811,6 +1828,14 @@ $xaml = @'
                                 </StackPanel>
                             </StackPanel>
 
+                            <StackPanel x:Name="MigrationRecipientSourcePanel" Margin="0,0,0,12">
+                                <TextBlock Text="Recipient source" FontWeight="SemiBold" Margin="0,0,0,5"/>
+                                <ComboBox x:Name="MigrationRecipientSourceCombo" SelectedIndex="0">
+                                    <ComboBoxItem Content="CSV / folder"/>
+                                    <ComboBoxItem Content="Migration batches EXO"/>
+                                </ComboBox>
+                                <TextBlock Text="Choose EXO to review scheduled batches and their recipients." TextWrapping="Wrap" FontSize="11" Margin="0,4,0,0"/>
+                            </StackPanel>
                             <StackPanel x:Name="SourceModePanel" Visibility="Collapsed" Margin="0,0,0,10">
                                 <TextBlock Text="Recipient source" FontWeight="SemiBold" Margin="0,0,0,6"/>
                                 <StackPanel Orientation="Horizontal">
@@ -1880,6 +1905,58 @@ $xaml = @'
             <TabItem x:Name="ExchangeArchiveCampaignTab" Header="Exchange Archive" Tag="1"/>
 
             <TabItem x:Name="ExchangeSizeReductionCampaignTab" Header="Size Reduction" Tag="2"/>
+
+            <TabItem x:Name="ExoMigrationTab" Header="EXO migration batches">
+                <Border Background="White" CornerRadius="8" Padding="16" Margin="0,14,0,0" BorderBrush="#DDE7F0" BorderThickness="1">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                    <Grid MinHeight="520">
+                        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="190"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                        <WrapPanel>
+                            <Button x:Name="ExoConnectButton" Content="Connect to EXO" Margin="0,0,8,6"/>
+                            <Button x:Name="ExoRefreshButton" Content="Refresh batches" Margin="0,0,8,6" IsEnabled="False"/>
+                            <Button x:Name="ExoLoadButton" Content="Load recipients" Margin="0,0,8,6" IsEnabled="False"/>
+                            <Button x:Name="ExoCancelButton" Content="Disconnect / cancel" Margin="0,0,12,6" IsEnabled="False"/>
+                            <CheckBox x:Name="ExoShowCompletedCheck" Content="Show completed batches" VerticalAlignment="Center" Margin="0,0,12,6"/>
+                            <TextBlock Text="Display time zone" VerticalAlignment="Center" Margin="0,0,6,6"/>
+                            <ComboBox x:Name="ExoTimeZoneCombo" Width="230" Margin="0,0,0,6"/>
+                        </WrapPanel>
+                        <TextBlock x:Name="ExoConnectionText" Grid.Row="1" Text="Disconnected. Interactive sign-in is started only by Connect to EXO." TextWrapping="Wrap" Margin="0,2,0,10" Foreground="#005A9E"/>
+                        <DataGrid x:Name="ExoBatchesGrid" Grid.Row="2" AutoGenerateColumns="False" CanUserAddRows="False" CanUserDeleteRows="False" HeadersVisibility="Column" FontSize="12">
+                            <DataGrid.Columns>
+                                <DataGridCheckBoxColumn Header="Select" Binding="{Binding Selected}" Width="55"/>
+                                <DataGridTextColumn Header="Batch" Binding="{Binding Identity}" IsReadOnly="True" Width="*"/>
+                                <DataGridTextColumn Header="Status" Binding="{Binding Status}" IsReadOnly="True" Width="120"/>
+                                <DataGridTextColumn Header="Type" Binding="{Binding MigrationType}" IsReadOnly="True" Width="140"/>
+                                <DataGridTextColumn Header="Mailboxes" Binding="{Binding TotalCount}" IsReadOnly="True" Width="85"/>
+                                <DataGridTextColumn Header="StartAfter (sync)" Binding="{Binding StartAfter}" IsReadOnly="True" Width="170"/>
+                                <DataGridTextColumn Header="CompleteAfterUTC (earliest completion)" Binding="{Binding CompleteAfterUTC}" IsReadOnly="True" Width="260"/>
+                            </DataGrid.Columns>
+                        </DataGrid>
+                        <WrapPanel Grid.Row="3" Margin="0,12,0,10">
+                            <TextBlock Text="Explicit notification date" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                            <DatePicker x:Name="ExoOverrideDate" Width="145" Language="en-US" Margin="0,0,8,0"/>
+                            <Button x:Name="ExoApplyDateButton" Content="Apply date to selected recipients" IsEnabled="False" Margin="0,0,12,0"/>
+                            <Button x:Name="ExoUseSelectionButton" Content="Review selection / prepare CSV" Style="{StaticResource PrimaryButton}" IsEnabled="False"/>
+                        </WrapPanel>
+                        <DataGrid x:Name="ExoRecipientsGrid" Grid.Row="4" AutoGenerateColumns="False" CanUserAddRows="False" CanUserDeleteRows="False" HeadersVisibility="Column" FontSize="12" MinHeight="140">
+                            <DataGrid.Columns>
+                                <DataGridCheckBoxColumn Header="Select" Binding="{Binding Selected}" Width="50"/>
+                                <DataGridTextColumn Header="Email" Binding="{Binding EmailAddress}" IsReadOnly="True" Width="210"/>
+                                <DataGridTextColumn Header="Batch(es)" Binding="{Binding BatchIds}" IsReadOnly="True" Width="150"/>
+                                <DataGridTextColumn Header="Status" Binding="{Binding MigrationStatus}" IsReadOnly="True" Width="100"/>
+                                <DataGridTextColumn Header="Mail date" Binding="{Binding EffectiveDate}" IsReadOnly="True" Width="95"/>
+                                <DataGridCheckBoxColumn Header="Date confirmed" Binding="{Binding DateConfirmed}" Width="100"/>
+                                <DataGridTextColumn Header="Date source" Binding="{Binding DateSource}" IsReadOnly="True" Width="170"/>
+                                <DataGridTextColumn Header="Scheduled time / zone" Binding="{Binding ScheduledLocal}" IsReadOnly="True" Width="240"/>
+                                <DataGridTextColumn Header="Review / exclusion" Binding="{Binding Exclusion}" IsReadOnly="True" Width="200"/>
+                                <DataGridTextColumn Header="Schedule detail" Binding="{Binding ScheduleReason}" IsReadOnly="True" Width="300"/>
+                            </DataGrid.Columns>
+                        </DataGrid>
+                        <TextBlock Grid.Row="5" Text="Read-only EXO access. Select recipients, confirm their dates, then return to Exchange Migration for Dry Run or Live. No message is sent by preparing the CSV. Completed migrations are excluded; already notified recipients require Force send. Unknown dates are never replaced by today." TextWrapping="Wrap" Foreground="#5F6B7A" FontSize="12" Margin="0,10,0,0"/>
+                    </Grid>
+                    </ScrollViewer>
+                </Border>
+            </TabItem>
 
             <TabItem Header="Configuration">
                 <Border Margin="0,14,0,0" Background="{StaticResource CardBrush}" BorderBrush="{StaticResource BorderBrushSoft}" BorderThickness="1" CornerRadius="8" Padding="18">
@@ -2016,6 +2093,7 @@ $reader = [System.Xml.XmlNodeReader]::new([xml]$xaml)
 $script:Window = [Windows.Markup.XamlReader]::Load($reader)
 
 $controlNames = @(
+    'MigrationRecipientSourcePanel','MigrationRecipientSourceCombo','ExoMigrationTab','ExoConnectButton','ExoRefreshButton','ExoLoadButton','ExoCancelButton','ExoShowCompletedCheck','ExoTimeZoneCombo','ExoConnectionText','ExoBatchesGrid','ExoRecipientsGrid','ExoOverrideDate','ExoApplyDateButton','ExoUseSelectionButton',
     'HeaderLogoLink','HeaderLogoImage','HeaderLogoFallback','StatusDot','StatusText','RunButton','MainTabs',
     'ExchangeMigrationCampaignTab','ExchangeArchiveCampaignTab','ExchangeSizeReductionCampaignTab','RunCampaignContent',
     'TenantProfileCombo','CampaignBadgeText','CampaignTitleText','CampaignDescriptionText','DryRunRadio','LiveRadio',
@@ -2072,11 +2150,39 @@ if (-not [string]::IsNullOrWhiteSpace($headerLogoPath)) {
 
 $script:UiReady = $true
 
-$script:TenantProfileCombo.Add_SelectionChanged({ Show-CommandPreview; Show-RecipientEstimate })
+$script:TenantProfileCombo.Add_SelectionChanged({ Stop-MigrationSelectionWorker; Show-CommandPreview; Show-RecipientEstimate })
+foreach ($zone in [TimeZoneInfo]::GetSystemTimeZones()) { [void]$script:ExoTimeZoneCombo.Items.Add($zone.Id) }
+$script:ExoTimeZoneCombo.SelectedItem='Romance Standard Time'
+$script:ExoTimeZoneCombo.Add_SelectionChanged({ Clear-MigrationSelection })
+$script:MigrationRecipientSourceCombo.Add_SelectionChanged({
+    if ($script:UiReady) {
+        $script:MigrationSelectionPath=''
+        Show-MigrationSelectionSource
+        if (Test-MigrationSelectionSource) { $script:MainTabs.SelectedItem=$script:ExoMigrationTab }
+    }
+})
+function Invoke-MigrationSelectionUiAction {
+    param([scriptblock]$Action)
+    try { & $Action } catch { Add-OutputLine $_.Exception.Message; $script:ExoConnectionText.Text=$_.Exception.Message; Show-MigrationWorkerState }
+}
+$script:ExoConnectButton.Add_Click({ Invoke-MigrationSelectionUiAction {Start-MigrationSelectionWorker} })
+$script:ExoRefreshButton.Add_Click({ Invoke-MigrationSelectionUiAction {Send-MigrationWorkerRequest 'Batches'} })
+$script:ExoLoadButton.Add_Click({ Invoke-MigrationSelectionUiAction {Send-MigrationWorkerRequest 'Recipients'} })
+$script:ExoCancelButton.Add_Click({ Stop-MigrationSelectionWorker })
+$script:ExoShowCompletedCheck.Add_Checked({ Show-MigrationBatchList })
+$script:ExoShowCompletedCheck.Add_Unchecked({ Show-MigrationBatchList })
+$script:ExoBatchesGrid.Add_CellEditEnding({ Clear-MigrationSelection })
+$script:ExoRecipientsGrid.Add_CellEditEnding({ $script:MigrationSelectionPath='' })
+$script:ExoApplyDateButton.Add_Click({ Invoke-MigrationSelectionUiAction {Set-MigrationRecipientDate} })
+$script:ExoUseSelectionButton.Add_Click({ Invoke-MigrationSelectionUiAction {Save-MigrationRecipientSelection} })
 $script:MainTabs.Add_SelectionChanged({
     param($sender, $eventArgs)
     if ($eventArgs.OriginalSource -ne $script:MainTabs) { return }
     $selectedTab = $script:MainTabs.SelectedItem
+    if ($selectedTab -eq $script:ExoMigrationTab) {
+        $script:MigrationRecipientSourceCombo.SelectedIndex=1
+        return
+    }
     if ($selectedTab -is [System.Windows.Controls.TabItem] -and $selectedTab.Tag -ne $null) {
         $campaignIndex = 0
         if ([int]::TryParse([string]$selectedTab.Tag, [ref]$campaignIndex)) {
@@ -2135,6 +2241,7 @@ $script:Window.Add_Closing({
         Invoke-CurrentRunStop
     }
     Stop-CurrentRunMonitor
+    Stop-MigrationSelectionWorker
 })
 $script:Window.Add_ContentRendered({
     if ($script:GuiSplash) { Hide-SmartM365GuiSplash -Splash $script:GuiSplash }
@@ -2152,8 +2259,8 @@ else { Close-LoadingWindow }
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB+jlDZSSgMQIKT
-# w2xJd8Y01oQp0dq+oMsQIPROZ0+ErKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBWLFyjbs/aTkg3
+# TmeYiMzlF1c7f7U6cplZHRlp9XMQvqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -2286,31 +2393,31 @@ else { Close-LoadingWindow }
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIF7n76Liivt87io+1ntGXnlVALuGgLW4eIrspq3y4Iw3MA0GCSqG
-# SIb3DQEBAQUABIIBgK1OIuDDjeSXYmMS6P1JmexMvoSz/Q+1KjScwAS41pgPF15O
-# tgmtHKQOUVD90+MIrNNhGK+/3mZtaISsMvHtR8VBB7xxG1tilAnbNa54WXlSRiJ3
-# LUCA4GRQYRDiaw2RNijWED2YbvJ4x/hVQzhlXMebi6S3jTDNctlGAGDgC/UVzdF8
-# emoi4IeyuV/2okDOeoUEnBtM1BhVpMwESKNnrqlhZ4WPxRfzjzCdy5KcBqEatzMw
-# olBvGDkeZAQPXiIBsT8LDYVNvadgjdHMzabb++YUf/u0ycCLJp0/A0YAC3XErQLH
-# /kW/z3vHb+V0IiBZ8CMO7C3iJWWRdPmCIz7k6q7iTzS547WP2RJQ8Ljx4UN5G3wM
-# x4rygwz2l9L9DDHjTFVxxDfCIgg+6PRfK3gWuA+xT2vo0CbadHTExtid9Lr7XSw4
-# DEjQuNV8AhuReoMCTPMMKXE4eGirNMo1WQubab45bJ1iG6uXZ8fgYZUHzo4XCpsN
-# iAYozIScGS2PXZIPX6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIL4qN0z8Wr5X0BpKryclI1EfiTH4FZeUesNCxP2vjW0+MA0GCSqG
+# SIb3DQEBAQUABIIBgKnal9L9JtHY6fJrVxVn80YYikDzfRWzlVUtDejN6PVqLVLZ
+# 2sqy0fK2KBxuq2Ohd4w3g2cuOz01VJOoNUFggpbvxMhS+rx2XwZrO5EunJZEFUN8
+# U9cjGM7N2jhEc4WDtMIPByKgC0zsiweTBSkpfqPhXy0S6ZqcFyveFVwTI4vZeZpW
+# 2pawF9VoogeYtsnZpW3+va6vVpsVXitOtp08mGjYlg1CULJZYhnQ2eKSEqPr1l28
+# S6q8T+ocIrdQHRj6iVaCNdmaF64VbhCrFPcKWsnLjKV0yLcd5CLrxa9Cw0WzQThn
+# BYCFL++voaawLMrulQ9uz4Q3qLUA+kZDSvlncOzEBtRpvfK56QsNZwLrnnNrbs+I
+# AcO5CYt4yQztSwtYca3bcRdT6iVqzLJtYGlJ1EKR5t9mMCCk410cHXpJhILE4rvV
+# CEd4ff5ue7P2Ka4qFgprEcNujZkLWsClgOeA+LPnc9PdrPlM8gfYWaCBvYwEHGTZ
+# +HbW9Lj2Mh05j25sA6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjMxODUw
-# MDhaMC8GCSqGSIb3DQEJBDEiBCAP8D7cKlJ823lQTuv0KqKyeoGFmwB7I5e/9KVF
-# zOHM1zANBgkqhkiG9w0BAQEFAASCAgAXi1dR+brnXD+k1o8HZSgwFwEuRK6rDM0U
-# gWiQV+He3cRmsSHArmCp4E7b6eMyYGLr8CrspDkgqStEsIEiiPfECZxtRJdGBio/
-# Tk7sdQYSiQzORHIBwunSV0xWxH0Glo3sWAR9HKHuNT5DCaxQD9Pck88A+RtPab4k
-# pqOex8O0sOpVr+4INMXU63q6UefG0WbqBBqrMyUep/qznHrXYJ6NIs487d6YyEG4
-# iQ3oc9+u95c3TdKca8RNpCcRwft5BGtK0yZxb6F81GOceeGYSay7rEXFlw+QlYYR
-# ZHRsUiItU6Y7RqKvbMKW6VWOrKKkef7aQ3IeuudFi/2LtxNluB241yTyMg+tnatl
-# lz+12HNQg0grleyw9JbTVMPZRaPRcjXVE+ocnHKTw/V4w/PVNJ52PHjkR2HuM3Q/
-# QpHE7x/554xxOlYngza1d2gNIQCg9l1HEcl5DWZNE8BWK+egnF73rVfo4gnPpi5V
-# uiUo5dk6XxWlcodXff2Uu1WSlm4ZCe+Mv6G7lCGPfFQA/3B7kxe1uf69ZEYI1cDT
-# PBm/UsuIU4V1pma1vx0/wkucnz+mAkWxkOFL9pVGnxLH2rLhDW1vRqKX7Ln4naMI
-# MApkhRc9pLhzME+JYg3zFFqRFaaTQXW1KQ5COlZGEsdlbpj3Gt3Fh4zIJ/DXKn36
-# kT9Wnk8nnA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjMxNzUz
+# NTFaMC8GCSqGSIb3DQEJBDEiBCCpJNrASNwQk52IZJ+SEXwweVSNZtumz1SMgyWo
+# Q6iG0DANBgkqhkiG9w0BAQEFAASCAgCR6ZzX6fz6ysOxvMZTexkDoAYln+yB7DmQ
+# Hk8CapLsecSXUkf7PtbpEFVR3yZVWTQF4FEbiZ2B80Q2D2148jone7FsEE7KI2h6
+# 6yCn/07ELT1z2VrqrjB1jC0ERc6wKusIKOhfd+p9SqcT98bgoHsRHRnzSv/Dvebf
+# qSpsPGrktvpwp/tOgME22nw6QT31X4NvBuWshLIT6Fu5A1j3j6eMgq/E2LGzUo63
+# CniGhHGFArjlVgE8ThKXJ56fAp3zUWau5lv/h9rI/Jrb0QkjX468spUHK6a5MqsC
+# gTuRuARg3Tl+VxnARkPhMbZ7h7j/FmlBbE/Qv8krm/eD95zbdWjnMsdbMs2mYiXT
+# ZUTl5lDp+5/EA3wCowHhVHM30DvovF1YE1HIEpQpnDRS2FbnsauIjt1HULWRmPEM
+# eilS+X/sQiBkH3JPdEBXW4CZHaYH6MrVnCJ/TDMLw3EsZPEGiq8jcpsomT93mUxe
+# WNll6QAp6zXfVc9+UDzkyVA3JZdfwbWQZ2Mb0gmPo+E8kqhAH//q+oFKJMZzpXoc
+# 2ofkddheP5jDbo28Ytw8xl4a+L2y2EGUWGk6SqagOkevgMyokFFlo8xMIAfiLcF7
+# EuXGY3uAAGrzbaPjGxK8aujAuKZmBNPrTxEizbUqO4O7T1UjaU8NirfR5jLzQchb
+# hQXktcD2Kw==
 # SIG # End signature block

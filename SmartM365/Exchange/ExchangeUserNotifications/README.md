@@ -28,6 +28,66 @@ The module is intentionally local to this area and should not be promoted to `Sm
 
 Use `Start-SmartM365-ExchangeUserNotifications-GUI.cmd` to launch it with PowerShell 7.
 
+The GUI opens maximized, retaining the Windows title bar and restore controls.
+
+### Migration recipients from Exchange Online (GUI 1.1.0)
+
+In **Exchange Migration**, choose **Migration batches EXO**, or open the
+**EXO migration batches** tab. **Connect to EXO** starts delegated interactive
+authentication in a dedicated PowerShell 7 worker. Nothing connects on GUI
+startup. The worker verifies the selected profile's `TenantId` GUID and connected
+account before reading migration data; an ambiguous or mismatched session fails.
+It requires ExchangeOnlineManagement 3.7.2 or newer and EXO RBAC access to
+`Get-MigrationBatch`, `Get-MigrationUser` and `Get-MigrationUserStatistics`.
+No additional write role or migration modification is required. Mail/Teams
+authentication remains separate from this read-only EXO session.
+
+Select one or more active mailbox batches and click **Load recipients**. Completed
+batches are hidden by default and can be displayed for inspection. Completed
+users, outbound batches and non-mailbox migration types are not eligible for this
+campaign. The table displays membership, migration status, per-user notification
+date, schedule provenance and prior notification exclusions. Duplicate addresses
+are merged while retaining their batch identities; conflicting dates require an
+operator decision. Failed/stopped users are not selected automatically.
+
+`StartAfter` is synchronization start, not a mailbox cutover date. `CompleteAfter`
+is the earliest scheduled completion, not guaranteed completion. A verified
+individual schedule takes precedence over the batch. UTC values are converted
+using the display time zone selected in the GUI (default: Romance Standard Time).
+An unknown zone, missing schedule or unverified individual override requires an
+explicit confirmation/date. **Apply date to selected recipients** changes only
+the notification date; it never changes the migration schedule. A global
+**Force effective date** is not passed for this source, preserving different dates
+across batches. Already notified recipients require the existing **Force send**
+option; completed migrations remain excluded.
+
+**Review selection / prepare CSV** writes only selected recipients under the
+campaign's tenant-specific `RunOutputPath/Selections`. The CSV records tenant,
+batch identities, status, UTC/local schedule, date source and timestamps. Review
+the selection, return to **Exchange Migration**, then use **Dry Run** before
+**Live**. Each run regenerates the selected CSV and checks registry eligibility.
+Changing tenant, time zone or batch selection invalidates recipients. Read errors
+discard the previous audience; a snapshot older than 15 minutes must be reloaded.
+
+The campaign receives `-MigrationBatchSelection` with this reviewed CSV. It
+validates every row's date, source, tenant/profile and freshness before processing,
+then uses the reviewed membership instead of opening another EXO mailbox-check
+session. Standard CSV/folder campaigns keep their existing behavior. Selection
+files contain mailbox addresses and must remain private; no file is committed.
+
+Offline validation (no EXO connection or message transport):
+
+```powershell
+pwsh -NoProfile -STA -File SmartM365/Tests/Test-SmartM365ExchangeMigrationSelectionOffline.ps1
+pwsh -NoProfile -STA -File SmartM365/Tests/Test-SmartM365GuiDemoApplicationsOffline.ps1 -Application Notifications
+```
+
+The fictional demo includes EXO batches, multiple dates, unverified schedules,
+date conflicts and completed/already notified recipients. Live tenant RBAC,
+authentication and returned EXO scheduling properties still require operator
+qualification. If individual scheduling properties are not exposed, the GUI
+requires a human decision instead of certifying the batch date for every user.
+
 Individual campaign `.cmd` launchers are intentionally not shipped; use the common GUI launcher so pre-run template/config checks are applied consistently.
 
 ## Configuration

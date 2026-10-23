@@ -59,7 +59,7 @@ Runs the configured migration campaign in dry-run mode using the recipients path
 Sends the migration notification to a pilot CSV and forces the French template/subject.
 
 .VERSION
-1.5
+1.6
 #>
 [CmdletBinding()]
 param(
@@ -72,6 +72,7 @@ param(
     [string]$MailSendMode = '',
     [string]$ExchangeManagementMode = '',
     [string]$TeamsUserMessageMode = '',
+    [switch]$MigrationBatchSelection,
     [switch]$ForceSend,
     [switch]$NoSummaryEmail,
     [switch]$WhatIf
@@ -145,6 +146,8 @@ $effectiveConfig = Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath 
 
 $coreModulePath = Find-UpwardFile -FileName 'Modules\SmartM365.Core\SmartM365.Core.psd1'
 Import-Module $coreModulePath -MinimumVersion '1.0.24' -Force -ErrorAction Stop
+
+Import-Module (Join-Path (Split-Path $PSScriptRoot -Parent) 'SmartM365.ExchangeMigrationSelection.psm1') -Force
 
 $commModulePath = Join-Path -Path (Split-Path -Path $PSScriptRoot -Parent) -ChildPath 'SmartM365.Communications.psm1'
 Import-Module $commModulePath -Force -DisableNameChecking
@@ -254,6 +257,17 @@ $configuredExchangeManagementMode = [string](Get-SmartM365CommunicationConfigVal
 if ([string]::IsNullOrWhiteSpace($ExchangeManagementMode)) { $exchangeManagementMode = $configuredExchangeManagementMode } else { $exchangeManagementMode = $ExchangeManagementMode }
 $requireExchangeManagement = [bool](Get-SmartM365CommunicationConfigValue -Config $config -Name 'RequireExchangeManagement' -DefaultValue ([bool](Get-SmartM365CommunicationConfigValue -Config $config -Name 'RequireExchange2016SnapIn' -DefaultValue $true)))
 $enableExchange2016Fallback = [bool](Get-SmartM365CommunicationConfigValue -Config $config -Name 'EnableExchange2016Fallback' -DefaultValue ([bool](Get-SmartM365CommunicationConfigValue -Config $config -Name 'EnableExchange2016SnapIn' -DefaultValue $true)))
+if ($MigrationBatchSelection) {
+    if ($effectiveDateOverride) { throw 'Migration selection keeps per-recipient dates; a global ForceEffectiveDate is not allowed' }
+    $selectionFiles = @(Get-RecipientFiles -Path $RecipientsPath)
+    if ($selectionFiles.Count -ne 1 -or -not (Test-Path -LiteralPath $RecipientsPath -PathType Leaf)) { throw 'Migration selection requires one reviewed CSV file' }
+    $migrationSelectionRows = @(Import-SmartM365CommunicationCsv -Path $RecipientsPath)
+    Assert-ExoMigrationSelectionCsv -Rows $migrationSelectionRows -TenantId $global:TenantId -TenantKey $Tenant
+    $exchangeManagementMode = 'Disabled'
+    $enableExchangeMailboxStateCheck = $false
+    $requireExchangeManagement = $false
+}
+
 $exchangeManagementState = Initialize-SmartM365CommunicationExchangeManagement `
     -Mode $exchangeManagementMode `
     -Required $requireExchangeManagement `
@@ -294,7 +308,7 @@ try {
     $registry = Load-SmartM365CommunicationSentRegistry -Path $sentRegistryPath
     foreach ($file in (Get-RecipientFiles -Path $RecipientsPath)) {
         $counters.Files++
-        $rows = @(Import-SmartM365CommunicationCsv -Path $file.FullName -RequiredColumns @())
+        $rows = if ($MigrationBatchSelection) { $migrationSelectionRows } else { @(Import-SmartM365CommunicationCsv -Path $file.FullName -RequiredColumns @()) }
         foreach ($row in $rows) {
             $counters.Rows++
             $email = Get-SmartM365CommunicationSmtpAddress -Row $row
@@ -457,8 +471,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCKJzEbdgsJJPJP
-# Ai8zkl/QncDqjNGJ1rJKf/Pe1xVb86CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCG38vOf3JriH59
+# QNj1/SsYN+vWIbJC7vWq44Ri/Xj6a6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -591,31 +605,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIHEdc7ppvQbfidqyxlI1RSxQGfKOF0sgDr25EVmfoX7JMA0GCSqG
-# SIb3DQEBAQUABIIBgDHwVWaVNQtylG21Q05Uo5nDbSt/+8kRxV7fpbSQBOXoPyQy
-# S9RaoGsNjSgkQEEL0mnV+icQMOYNtPpNzjkKCB3UufBTw7J8uxUHTg57o4QO5LhA
-# fo/WbkChJb22RNUa5f0+zJNeUBTJyZngPUq2DD4HZ21lnP9wSXTukwkyp1xK3P1/
-# qCFaMtfTgpTVjD8vQgz/CyDUiMwVt71+Q0KM5k91OksTCAebGZubEisxHKbNMPHH
-# Jey1GxqO2fRoIRsgcFd27ZajoLE6UfMQPCY8dbTnENeZTW00nswvnGTkoYCfghvX
-# mmKrzZCzzh7DQJuTHBO/x7BqOas14yRicRKwe9SG7UEkHgTAA//LeWseud7L1wK7
-# GL5XgfR46sbnbyairo0OQxZspEb6B8twAGQzmIGaR7+a+f1ksYsXWTL2Ixj+044v
-# VuNV+vMNdL2RF5ovoQ/+TV2XP9zT8oJD0Ss3Yo8ytSR4MsD9qi/w6JgGy5tENtBs
-# 4wtRf/4aRVwnOQS9d6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEICwxO7fYkBd7XZyHNZ7Bv8OAV+alQTfw88quP/qMjd+pMA0GCSqG
+# SIb3DQEBAQUABIIBgJhwrHbW4i/Cb5X3nAYiKH3KkrENNu04Q9/DRX48UD7sKzSO
+# GT84N7nbtki9m8a33PtM5LX9yg2moe4WINmSCyNlu0LQDkp86rFdpGGFaqqnRWFG
+# 2CRDZnNWS1dB5q+c7IZsSUPzCKLdl3CDaRlt0ywNy+Yu1/oHNCJ8XotadqFGvUk2
+# U08YTdsA5cfwd6vrrDL4S3vE4yWZUEZX8rmc01MklkUiStZkOZ+PNzr1IxMI51p2
+# St7n8JYBpJML6qj+tCbnNd2oaCGw5csYHUcIGI20CCJ057brdsX3CKtG3/AZHW4r
+# 2Dki6LpYb5oaNyyoMomLJ/+uPhGmUTDGKjdCCwOCgtR8ujOyuhl+wSgmOGF2wCcp
+# te3HbAypF8UWVNBatRTk0k53nP89BzUWdiFvEXhDYkKpHsrz7Zqyw7R/r9ZLK/ab
+# OTbfTQAKugOMgvtkGPBSR83bVMg8u1pQExtbFhZ2TaEgxcf06yx+UyHxd4SFMR/4
+# yW7z31F25oWDCw8W7KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjMxNzE0
-# MzJaMC8GCSqGSIb3DQEJBDEiBCBmqpcPwSsM9kn5YNGuk45qT7XkNm+pq5hubnRp
-# uBVHMjANBgkqhkiG9w0BAQEFAASCAgAdNkIKJTzNnkI5trsqsFYdKyao+L6hfP3w
-# MLP97VUYHlaBBIdfLKkd++IkCYyWZJ/xlTYAihx3QxLrKSd7uDbJhu3p1VCYETSI
-# saky0Kg2vUt81/hqqFYwYhcjYPsB87fP99m2NzQM2di8ZLxTIaTpcT03TNiSPoB0
-# WACJyA+v1aocIN/4qvTXd7r3+rPUvKtWz4o6Sku4HMolCfoCwUTsE/A9Q9NppuXG
-# NFS+XXImjmbwaDVZR2Ol9VuUpHtAfR5+1V7xAWJUg0RLVsWugzdOkVLc4Pi03zoP
-# 89LjHr7DQZsKQK6vyEuTcqz6tzMlF6ThELSFoZ+wlbdGh+R9xWi+J/3TwwF2z+7y
-# tzlDgxb9yGAgSUoeB+n8zqQ7AkR/RUQZu4sfoXQRqrpQbcYNm1v82u0VG5eVxlYz
-# 2pHInCoBz/53ezSa5kiwAW90LGVwS2IhMrudF0pq3uM38dJxPA+jniVgHIC0I6r0
-# /7LMAK1/+Ploe961+6ZhUKwss3sfhPfup+RNdUtYT/AZ4YZRAjyR4kMmMzNAl5x7
-# akFvSOXGGKbh5nUhB+0c5LLB5Aw/Du3n4YwCGyxaQzcTlxU+Rq8/Zi/XsGQdEqyy
-# MC9rG37LHO2h2kSew9Fm6LgFeEl7LLcZ4zo7j/j53giShHRQb1cVix2PLFebZO6A
-# M9+nvs2jfw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjMxNzUz
+# NTRaMC8GCSqGSIb3DQEJBDEiBCDXtrxAVV/U/GrZ26p0iFscRAm9F4YOE56BgQHo
+# mQYgYzANBgkqhkiG9w0BAQEFAASCAgACc0WipbgGqEjw9PhzpdqH1yJnbA7Se7SB
+# 5hHlaH3o2pwf49wXv9b0B76/x5mdDIQkeG6sTA9ea1fRqmW8Xu+Fg22w/eVH250N
+# HJNEcuTlUcT9sS8pNWMUajTvY72ro3tlDC0TUTn3hLX9h3M9V1J1MSQddepXHDdZ
+# xXLmctdvhLQTnJN/fPoHB9Cc5IFey9hwmhHJw+Ti1F1QL6/Z35Io3j9E4cjD7Ars
+# aTSHiDiEkyOLV3Cm+Mfo/gFN4VZMbBsTJRtbIFfMs/iqaso0EoIsXpp8/5TBUrvD
+# Dp1D5UIK+ZWhG8oj5M6cmhjqQ7OCNtFhH1Hgeyzey8SrB0GyzmOtpw5t33wtmLKo
+# +qTlogo781blV7Nrf4C46Mw3oXZQ6AFmI0ooczSEnhO5Swt/hPtCkj9lFIdIgcPN
+# YcYWbuvihkoh55ruhkjxgqFgIFDNzAPK5YazaEMavAJKKPjMR0uqc1j8/gbyl+0C
+# BhzWCDE90C7Bucae1niBhht38/MuoK78uGtgTVMicSEv0qwYuptLwlm8yR5DPlfZ
+# Bh2aAf+U+9S5zc6cF3tVceKPYOeSJp75A6ebAPs8uXqTC9psIL3Ghyhxc1RRbr9x
+# 6RO0mD4NqZaY5yGXMuWbtT6GX9zPmnuISat4cbVLfXW9mwCEKXiiNcurylgqvMeM
+# 5SAEBSM6AA==
 # SIG # End signature block

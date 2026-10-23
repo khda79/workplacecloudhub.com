@@ -3,7 +3,7 @@
 .SYNOPSIS
 All three campaigns and shipped language templates, with fictional recipients.
 .VERSION
-1.0.1
+1.1.0
 #>
 function script:Get-NotificationsDemoHtml {
     param($Template)
@@ -12,7 +12,7 @@ function script:Get-NotificationsDemoHtml {
     $html=[IO.File]::ReadAllText($path)
     $logoPath=Join-Path $s.AssetRoot 'WorkplaceCloudHub-lockup-WPF.png'
     $logo=if(Test-Path -LiteralPath $logoPath){'<img alt="WorkplaceCloudHub" style="max-height:64px" src="data:image/png;base64,'+[Convert]::ToBase64String([IO.File]::ReadAllBytes($logoPath))+'">'}else{'WorkplaceCloudHub'}
-    $tokens=@{Date='2026-10-18';LogoImgTag=$logo;FooterLogoImgTag=$logo;FreeTextBlockStyle='display:block;';FreeTextBlockTextHtml='DEMO - Fictional Contoso campaign. No email will be sent.';Hotline='demo.helpdesk@contoso.example';MailboxQuotaGB='100';MailboxSizeGB='24';MailboxUsageText='24 GB / 100 GB (sample)';NewWebmailUrl='https://mail.contoso.example';OldWebmailUrl='https://legacy-mail.contoso.example';WebmailUrl='https://mail.contoso.example';TermsPortalBlockStyle='display:block;';TermsPortalUrl='https://terms.contoso.example'}
+    $tokens=@{Date='2026-11-04';LogoImgTag=$logo;FooterLogoImgTag=$logo;FreeTextBlockStyle='display:block;';FreeTextBlockTextHtml='DEMO - Fictional Contoso campaign. No email will be sent.';Hotline='demo.helpdesk@contoso.example';MailboxQuotaGB='100';MailboxSizeGB='24';MailboxUsageText='24 GB / 100 GB (sample)';NewWebmailUrl='https://mail.contoso.example';OldWebmailUrl='https://legacy-mail.contoso.example';WebmailUrl='https://mail.contoso.example';TermsPortalBlockStyle='display:block;';TermsPortalUrl='https://terms.contoso.example'}
     foreach($match in [regex]::Matches($html,'\{\{(?<Name>[^}]+)\}\}')){
         $name=$match.Groups['Name'].Value
         if(-not $tokens.ContainsKey($name)){throw ('Unknown shipped email token in demo: '+$name)}
@@ -60,7 +60,7 @@ function script:Initialize-SmartM365DemoProfile {
     $c.RecipientPathBox.Text='Demo/Contoso-Recipients.csv';$c.RecipientCountText.Text='12 fictional recipients'
     $c.RecipientPathLabel.Text='Recipients CSV';$c.RecipientPathStatusText.Text='DEMO - Sample recipient list ready';$c.RecipientPathHelpText.Text='Browse actions choose generated examples; no operational list is read.'
     $c.ScriptPathText.Text='Shipped campaign script (not executed in demo)';$c.LocalConfigPathText.Text='In-memory Contoso demo configuration';$c.TemplateConfigPathText.Text='Shipped neutral templates only'
-    $c.EffectiveDatePicker.SelectedDate=[datetime]'2026-10-18';$c.DryRunRadio.IsChecked=$true
+    $c.EffectiveDatePicker.SelectedDate=[datetime]'2026-11-04';$c.DryRunRadio.IsChecked=$true
     $c.TeamsUserMessageCheck.IsEnabled=$true
     $rows=[Collections.Generic.List[object]]::new()
     function Add-DemoConfigRows {param($Object,[string]$Prefix='')
@@ -77,17 +77,51 @@ function script:Initialize-SmartM365DemoProfile {
         Add-DemoConfigRows (Get-Content -LiteralPath (Join-Path $s.AppRoot $relative) -Raw|ConvertFrom-Json) $relative
     }
     $c.ConfigParameterList.ItemsSource=$rows.ToArray()
+    Initialize-NotificationsExoDemo
     if (-not $s.ValidateOnly) { $s.Window.WindowState='Maximized' }
     Update-NotificationsDemoTemplates
 }
+function script:Initialize-NotificationsExoDemo {
+    $s=$script:SmartM365Demo; $c=$s.Controls
+    Set-SmartM365DemoCombo ExoTimeZoneCombo @('Romance Standard Time','UTC')
+    $c.MigrationRecipientSourceCombo.SelectedIndex=0
+    $c.ExoConnectionText.Text='DEMO - Fictional EXO session. Connect and refresh are simulated; no authentication is possible.'
+    $c.ExoOverrideDate.SelectedDate=[datetime]'2026-11-04'
+    $s.Data.ExoBatches=@(
+        [pscustomobject]@{Selected=$true;Identity='DEMO-Paris-Nov04';Status='Synced';MigrationType='ExchangeRemoteMove';TotalCount=6;StartAfter='2026-11-01 00:00';CompleteAfterUTC='2026-11-04T21:00:00Z'},
+        [pscustomobject]@{Selected=$true;Identity='DEMO-Lyon-Nov05';Status='Syncing';MigrationType='ExchangeRemoteMove';TotalCount=6;StartAfter='2026-11-02 00:00';CompleteAfterUTC='2026-11-05T21:00:00Z'},
+        [pscustomobject]@{Selected=$false;Identity='DEMO-Completed';Status='Completed';MigrationType='ExchangeRemoteMove';TotalCount=4;StartAfter='2026-10-01';CompleteAfterUTC='2026-10-02T21:00:00Z'}
+    )
+    $s.Data.ExoRows=@(for($i=1;$i -le 12;$i++){
+        $day=if($i -le 6){'04'}else{'05'}
+        [pscustomobject]@{Selected=$true;EmailAddress=('user{0:00}@contoso.example' -f $i);BatchIds=$(if($i -le 6){'DEMO-Paris-Nov04'}else{'DEMO-Lyon-Nov05'});MigrationStatus='Synced';EffectiveDate=('2026-11-'+$day);DateConfirmed=$true;DateSource='Batch CompleteAfter';ScheduledLocal=('2026-11-'+$day+' 22:00 [Romance Standard Time]');ScheduledUtc=('2026-11-'+$day+'T21:00:00Z');Exclusion='';ScheduleReason='DEMO - Scheduled earliest completion; actual completion may be later'}
+    })
+    if ($s.Scenario -eq 'Issues') {
+        $s.Data.ExoRows[0].Selected=$false;$s.Data.ExoRows[0].EffectiveDate='';$s.Data.ExoRows[0].ScheduledLocal='';$s.Data.ExoRows[0].ScheduledUtc='';$s.Data.ExoRows[0].DateSource='Unavailable';$s.Data.ExoRows[0].DateConfirmed=$false;$s.Data.ExoRows[0].ScheduleReason='DEMO - Missing completion schedule: choose an explicit date'
+        $s.Data.ExoRows[1].Selected=$false;$s.Data.ExoRows[1].DateConfirmed=$false;$s.Data.ExoRows[1].DateSource='Batch proposal (individual override unverified)'
+        $s.Data.ExoRows[2].Selected=$false;$s.Data.ExoRows[2].Exclusion='Already notified (Force send required)'
+        $s.Data.ExoRows[3].Selected=$false;$s.Data.ExoRows[3].DateConfirmed=$false;$s.Data.ExoRows[3].ScheduleReason='DEMO - Conflicting dates across batches'
+    }
+    if ($s.Scenario -eq 'Completed') {foreach($row in $s.Data.ExoRows){$row.Selected=$false;$row.MigrationStatus='Completed';$row.Exclusion='Migration completed'}}
+    $c.ExoBatchesGrid.ItemsSource=@($s.Data.ExoBatches | Where-Object {$c.ExoShowCompletedCheck.IsChecked -or $_.Status -ne 'Completed'})
+    $c.ExoRecipientsGrid.ItemsSource=$s.Data.ExoRows
+    foreach($name in @('ExoRefreshButton','ExoLoadButton','ExoCancelButton','ExoApplyDateButton','ExoUseSelectionButton')){$c[$name].IsEnabled=$true}
+}
 function script:Connect-SmartM365DemoProfileEvents {
     $s=$script:SmartM365Demo;$c=$s.Controls
+    $c.MigrationRecipientSourceCombo.Add_SelectionChanged({
+        $s=$script:SmartM365Demo
+        if($s.Controls.MigrationRecipientSourceCombo.SelectedIndex -eq 1){$s.Controls.MainTabs.SelectedItem=$s.Controls.ExoMigrationTab}
+    })
+    $c.ExoShowCompletedCheck.Add_Checked({$script:SmartM365Demo.Controls.ExoBatchesGrid.ItemsSource=$script:SmartM365Demo.Data.ExoBatches})
+    $c.ExoShowCompletedCheck.Add_Unchecked({$script:SmartM365Demo.Controls.ExoBatchesGrid.ItemsSource=@($script:SmartM365Demo.Data.ExoBatches|Where-Object Status -NE 'Completed')})
     $c.TemplateCampaignCombo.Add_SelectionChanged({Update-NotificationsDemoTemplates})
     $c.TemplateList.Add_SelectionChanged({Update-NotificationsDemoPreview})
     $s.Window.Add_ContentRendered({Update-NotificationsDemoPreview})
     $c.MainTabs.Add_SelectionChanged({
         $s=$script:SmartM365Demo;$c=$s.Controls;$selected=$c.MainTabs.SelectedItem
         $campaign=if($selected -eq $c.ExchangeMigrationCampaignTab){'ExchangeMigration'}elseif($selected -eq $c.ExchangeArchiveCampaignTab){'ExchangeArchive'}elseif($selected -eq $c.ExchangeSizeReductionCampaignTab){'ExchangeMigrationMailboxSizeReduction'}else{''}
+        if($selected -eq $c.ExoMigrationTab){$c.MigrationRecipientSourceCombo.SelectedIndex=1;return}
         if(-not $campaign){return}
         if($selected.Content -ne $c.RunCampaignContent){$parent=$c.RunCampaignContent.Parent;if($parent -is [Windows.Controls.ContentControl]){$parent.Content=$null};$selected.Content=$c.RunCampaignContent}
         $s.Data.Campaign=$campaign;$c.CampaignTitleText.Text=$selected.Header+' - Contoso demo';$c.CampaignBadgeText.Text=$campaign+' | DEMO'
@@ -103,6 +137,15 @@ function script:Invoke-SmartM365DemoProfileAction {
     param([string]$Name)
     $s=$script:SmartM365Demo;$c=$s.Controls
     switch($Name){
+        'ExoConnectButton' {$c.ExoConnectionText.Text='DEMO - Connected as demo.operator@contoso.example | Fictional Contoso tenant | No real connection';return $true}
+        'ExoRefreshButton' {$c.ExoBatchesGrid.ItemsSource=@($s.Data.ExoBatches|Where-Object {$c.ExoShowCompletedCheck.IsChecked -or $_.Status -ne 'Completed'});return $true}
+        'ExoLoadButton' {$c.ExoRecipientsGrid.ItemsSource=$s.Data.ExoRows;$c.ExoConnectionText.Text='DEMO - 12 unique recipients loaded; review each date and exclusion';return $true}
+        'ExoCancelButton' {$c.ExoRecipientsGrid.ItemsSource=@();$c.ExoConnectionText.Text='DEMO - Disconnected; no authentication or delivery occurred';return $true}
+        'ExoApplyDateButton' {
+            if($null -ne $c.ExoOverrideDate.SelectedDate){foreach($row in $s.Data.ExoRows|Where-Object Selected){$row.EffectiveDate=([datetime]$c.ExoOverrideDate.SelectedDate).ToString('yyyy-MM-dd');$row.DateSource='Operator override';$row.DateConfirmed=$true;$row.ScheduledLocal='';$row.ScheduledUtc=''}}
+            $c.ExoRecipientsGrid.Items.Refresh();return $true
+        }
+        'ExoUseSelectionButton' {$paths=@(Export-SmartM365DemoProfileOutputs);$c.ExoConnectionText.Text='DEMO - Fictional CSV prepared. No email or Teams message was sent.';return $true}
         'RunButton' {
             $paths=@(Export-SmartM365DemoProfileOutputs)
             Write-SmartM365DemoActivity ($s.Data.Campaign+': 12 fictional recipients processed; 12 simulated messages; zero emails or Teams messages sent.')
@@ -124,14 +167,21 @@ function script:Export-SmartM365DemoProfileOutputs {
     }
     $summary=Save-SmartM365DemoHtml -Name 'Campaign-Summary-DEMO.html' -Title 'Contoso campaign summary email preview' -Body '<p>To: demo.helpdesk@contoso.example</p><table><tr><th>Campaign</th><th>Recipients</th><th>Simulated success</th><th>Messages actually sent</th></tr><tr><td>Exchange migration</td><td>12</td><td>12</td><td>0</td></tr><tr><td>Exchange archive</td><td>12</td><td>12</td><td>0</td></tr><tr><td>Mailbox size reduction</td><td>12</td><td>12</td><td>0</td></tr></table>'
     [void]$paths.Add($summary);$s.Reports.EmailPreviews=$paths.ToArray()
+    $csv=Get-SmartM365DemoOutputPath 'DEMO-MigrationSelection.csv'
+    $s.Data.ExoRows|Where-Object Selected|Select-Object EmailAddress,BatchIds,MigrationStatus,EffectiveDate,DateSource,ScheduledUtc|Export-Csv -LiteralPath $csv -NoTypeInformation -Encoding utf8
+    [void]$paths.Add($csv)
+    $body='<p>DEMO - Fictional EXO batches and selected migration recipients. No tenant connection or messages.</p><table><tr><th>Email</th><th>Batch</th><th>Mail date</th><th>Schedule source</th><th>Review</th></tr>'
+    foreach($row in $s.Data.ExoRows){$body+='<tr><td>'+[Net.WebUtility]::HtmlEncode($row.EmailAddress)+'</td><td>'+[Net.WebUtility]::HtmlEncode($row.BatchIds)+'</td><td>'+[Net.WebUtility]::HtmlEncode($row.EffectiveDate)+'</td><td>'+[Net.WebUtility]::HtmlEncode($row.DateSource)+'</td><td>'+[Net.WebUtility]::HtmlEncode($row.Exclusion)+'</td></tr>'}
+    $body+='</table>'
+    [void]$paths.Add((Save-SmartM365DemoHtml -Name 'DEMO-MigrationSelection.html' -Title 'Contoso EXO migration selection - DEMO' -Body $body))
     return $paths.ToArray()
 }
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA38pvQ8HjmJXlo
-# FjfvOvMeYrj/jo1I/Xht/Fuf84K4maCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDKGKQzQQExmSJs
+# 04ks5jIGgJsPMYQwDS97WPq78Z2fn6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -264,31 +314,31 @@ function script:Export-SmartM365DemoProfileOutputs {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEILut0CceDPVeb58ZuZ//IQlgx6fn1n/qRgpfMwiHG93CMA0GCSqG
-# SIb3DQEBAQUABIIBgBJmqio2EWYoL8adnCRBo6w9agFRHM/i/SBgUjEsLalQk04j
-# kr+jJLIJdT7iH/iI1YtPDH2oO0mjpjQWKLzXrcrXTiDGiChGSNOliva13DWrdg2P
-# Isu3sDMlpL+xfDnDvirNt/cRkqSLwyIPSHvZZ9umECp5nuJ70Ab2oe+faJIx+2L7
-# /PqasGRS8p2xGtPNMSDebVZLbNDF+SZNqTqHbIb0isGpgiNOFTIvExDUrZS9YDIh
-# rD+Uk7egpIVoL/nfipjhg9ROuj9Ej2GakObaHdvQCk5e3M5EcZ3oxbnvNmvSo76+
-# eaTERXolLiTT/oi/6r5BPUZPYxQVt+VdKwWa2XP667AZ6vFLEzcoY38Gp6qGpamt
-# aPi6j4O8gMlPyasiUvkRakpP8Z+3IbEz+KEZhYkbZYuj4bGDfCeqADBwh5BA6fxs
-# ZrzlkegJVRS+ccDPS09AcFVEvCIVyOJd3PYHLuCv0vJzlEtjHaEyBlYNjwpDkXUO
-# PASPL7sijWPAWNMWAKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIM3YJR+y8G2PpKdmw23bHG1Ssfb5rAGE9onBvRS/Xj4XMA0GCSqG
+# SIb3DQEBAQUABIIBgBHAjdiM+Fi3XyFbHdZsncisSIaJLYRW/d87aL3VNAQQI+T/
+# Wk/bHvhWiaYhkTWcc2Yhxft0k81T3meMZB737NueMs21y9M8x7F6uYwBii4EnEqh
+# h9jDGLZDTfcgJ9wR/1DKBDT1vRckilCtgrDwexPbA9qlmQ+xKORc8cmeDa4SeTtP
+# xY+MysyDTROac+ejnWbQmabz4RsFSJ5HGKKiidO/YC4miahNZd5HsI/kzHz1Txyl
+# 5GJYYemvWQis5xsRaDeCgxc+FnRvyXYHamUIgLrarWDYj/9zxj6BzRasxoZXcA0L
+# DaPhZqRjGQ8Ds1rCZqwbP+RB+CwbDHqaK4PncYI3w7ZZdWHCNbOd7xTXelB7TFJd
+# BN0ZNygfITKqay6f6t553+VQEa6+V6cOPgJ381FsW/kQ/gokVc7hCpo5RJ2KY/8w
+# rJm0t1k2ZrUwgMV59uKWpWwI4/daGLgj8mQsQ3R2wln/vGJjiiXdOWf2RMUnBCmc
+# TwxQK8u51FP1+FaTcqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjMxODUw
-# MDlaMC8GCSqGSIb3DQEJBDEiBCDTp9qiQJ+dD6tFyz2tfrn3lkkoanvj3LbdhLtl
-# GHVQKDANBgkqhkiG9w0BAQEFAASCAgBl9NGaFZ4AtxGQjrsvXqGOZsQVfCTRayXn
-# IEZ631VAWIiZtGO+IJCo+nseXC6pR6yJhjlfBWOXBH94+VI/kczxtLUst5R7XGsf
-# qIWP62m6fCnC1/gvrvQTPsoimDeAXQ/BeebfJst3040Q/pKjnUL0TPVm18E+ERmN
-# gLjTIQ+JnJQMzqAe0pEebgSCLfekyE809ldOA+NiWi5IlNttJlXPVsqza+3o308S
-# nhQZ8Jc5lbYqIMjta8zGMXDMWcj5vNR3+jcc7PmlFLw3CJH1BhR/dlD6XnBaCn1J
-# GiX1fUWhlRCEmDX3TjE+rKvvL3xKf5Mw0TSj7XP8FovdAu/DucaNwLkD2IoJu+5a
-# yOLVS8wmyZyRd3yaHM0JWKhCbZK/vxmIWHVqAaRiuldQZYXcPQ7CWJcCdNbzcWL2
-# iDYv4grPgiz/7X6xpzYLvU5P0XVa6SDXqSPkwO6/Lh45BrNdyk4rEcsbV1yM06Yt
-# BoBTv2m0n2/fHf/JvxsAaOe5cOuVnbxJF2sZmRyF726Rzdn2IYv5gvUNXogmjHaX
-# O/asSZcP3XZp3gXGy1nIoGOnWd4x4wBkuiVK8fxxk5ZPBoBm7GmAO79pZC/spSJo
-# 0hnc+TEP2Xzl73EyL0uF4EtpCFp+CkX0SO4FhFRJMcLXXLVVD1kFOhc4G2O8GuFT
-# 4WgZMUh48A==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjMxNzUz
+# NTNaMC8GCSqGSIb3DQEJBDEiBCBIEvM0IYMSlep4MoXSpWrCDZu/OV/7z+dfz1V+
+# H6lYYDANBgkqhkiG9w0BAQEFAASCAgB+GMXxFWWxlLL7+vUly0ditwSsZC6Eg5QW
+# +Kjdr1AMxEhtGRnEFXY1ZIA854ml9bEEUdWlOMdoNar30MqTvmTgfRoiKHQdWCtj
+# ZK0VlggAqCzBtTGy6Y++EccDyrRXOaktJULU444LEEyU/eozXcPV1e2xt+PL4Fzu
+# pO4SMASwIL9KOr/EEpNDT2up3U9T5F5CRTXjRe7g0XQ84L8sSxqhbW/SU9W7UH6O
+# 51KmMUeYrf6r+CKk6pHubvuGtJ0pjYx4xefz5fw38+0lb8J473lgqik17uytqyGN
+# XQ2/RiXO5tfTuRZqrymJcWFyxITZFcXkkImNwaii0/69OnuUiLeLGYdYkumaE+6e
+# bRkcrJq8/f2P0P4bDxFNwpOOT1OzOu1KcbKbwjutVvbG1hL14hs7GcKVO5AACxOB
+# Lvtyr8ZxtsVPDWSX/hPavkdaOFS9gTUPriI06FLUqhLOX7c3ST7B1g6+QPHQacN5
+# 5whoy3s2PPxj7akyc2650dlE7DpX/u0GNHHYvsqu8jlONBpmIwb0BWjEiX4LLNup
+# wYp1R2yUF3Xqf6JZMBG3XJ4jRH2FgNHg1DTyidTlZzRIuH4AWyL45CbXNnXzYmZq
+# f9oU5dcYW4LtG9oJwZ0hB/VdsC9ty5yvieQGXI4aTTWIAbbuOMMLu+Di9daG8hF+
+# KwF39oco6w==
 # SIG # End signature block
