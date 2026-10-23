@@ -331,8 +331,8 @@ Launch the safe test wrapper:
 ```
 
 
-## Unpublished local candidate 0.1.1
+## Unpublished local candidate 0.1.2
 
-The source package is now 0.1.1 (GUI 1.2). This candidate has not been published; the existing published download links above remain the release history. Its complete runtime includes `Start-SmartM365-DeviceRebootManager-Demo.cmd` and its demo profile. Run the demo launcher from the root of the extracted standalone release, or the installed application directory. Demo mode uses fictional data and does not require tenant access. `DemoAssets` remains local, ignored by Git and excluded from packages.
+The source package is now 0.1.2 (GUI 1.2). This candidate has not been published; the existing published download links above remain the release history. Its complete runtime includes `Start-SmartM365-DeviceRebootManager-Demo.cmd` and its demo profile. Run the demo launcher from the root of the extracted standalone release, or the installed application directory. Demo mode uses fictional data and does not require tenant access. `DemoAssets` remains local, ignored by Git and excluded from packages.
 
-Planned artifact names, subject to explicit publication approval: `SmartM365-DeviceRebootManager-0.1.1.zip`, `SmartM365-DeviceRebootManager-0.1.1.intunewin`, `SmartM365-DeviceRebootManager-0.1.1.sha256`; planned tag path `releases/tag/device-reboot-manager-v0.1.1`.
+Planned artifact names, subject to explicit publication approval: `SmartM365-DeviceRebootManager-0.1.2.zip`, `SmartM365-DeviceRebootManager-0.1.2.intunewin`, `SmartM365-DeviceRebootManager-0.1.2.sha256`; planned tag path `releases/tag/device-reboot-manager-v0.1.2`.

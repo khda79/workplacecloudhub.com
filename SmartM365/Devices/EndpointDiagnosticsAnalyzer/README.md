@@ -267,6 +267,6 @@ Business actions are simulated. Demo startup bypasses operational configuration,
 Keep the application folder, its original report/template sources, local branding assets, `SmartM365.GuiDemo.ps1`, `SmartM365.GuiDemo.Reports.ps1` and the local `*-Demo.ps1` profile together when copying the application. `-Demo -ValidateOnly` builds the WPF demo without displaying windows or opening files. Run `SmartM365/Tests/Test-SmartM365GuiDemoApplicationsOffline.ps1` in an STA process for offline interaction and export checks.
 
 
-## Unpublished local candidate 0.3.1
+## Unpublished local candidate 0.3.2
 
-The source package is now 0.3.1 (GUI 0.3.2). This candidate has not been published; the existing published download links above remain the release history. Its complete runtime includes `Start-SmartM365-EndpointDiagnosticsAnalyzer-Demo.cmd` and its demo profile plus the two local report helpers. Run the demo launcher from the root of the extracted standalone release, or the installed application directory. Demo mode uses fictional data and does not require tenant access. `DemoAssets` remains local, ignored by Git and excluded from packages.
+The source package is now 0.3.2 (GUI 0.3.2). This candidate has not been published; the existing published download links above remain the release history. Its complete runtime includes `Start-SmartM365-EndpointDiagnosticsAnalyzer-Demo.cmd` and its demo profile plus the two local report helpers. Run the demo launcher from the root of the extracted standalone release, or the installed application directory. Demo mode uses fictional data and does not require tenant access. `DemoAssets` remains local, ignored by Git and excluded from packages.
