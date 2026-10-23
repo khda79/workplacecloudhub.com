@@ -3,7 +3,7 @@
 .SYNOPSIS
 Validates or packages the complete application runtime, including offline demo dependencies.
 .VERSION
-1.0.2
+1.0.3
 #>
 
 [CmdletBinding()]
@@ -43,7 +43,7 @@ try {
         -OutputRoot (Join-Path $stagingRoot 'Gallery') `
         -Force `
         -SkipAuthenticodeValidation:$SkipAuthenticodeValidation
-    $moduleDestination = Join-Path $galleryBundlePath 'SmartM365.EndpointDiagnosticsAnalyzer\0.3.2'
+    $moduleDestination = Join-Path $galleryBundlePath 'SmartM365.EndpointDiagnosticsAnalyzer\1.0.0'
     New-Item -ItemType Directory -Path (Split-Path -Parent $moduleDestination) -Force | Out-Null
     Copy-Item -LiteralPath $galleryBuild.PackagePath -Destination $moduleDestination -Recurse -Force
 
@@ -72,10 +72,10 @@ try {
     $prereleaseArgument = if ($releaseChannel -eq 'Preview') { ' -AllowPrereleasePublication' } else { '' }
     $commands = @"
 PowerShell Gallery preview (no publication):
-.\SmartM365-Publish-EndpointDiagnosticsAnalyzerGalleryPackage.ps1 -PackagePath ..\GalleryPackage\SmartM365.EndpointDiagnosticsAnalyzer\0.3.2
+.\SmartM365-Publish-EndpointDiagnosticsAnalyzerGalleryPackage.ps1 -PackagePath ..\GalleryPackage\SmartM365.EndpointDiagnosticsAnalyzer\1.0.0
 
 PowerShell Gallery publication (explicit execution):
-.\SmartM365-Publish-EndpointDiagnosticsAnalyzerGalleryPackage.ps1 -PackagePath ..\GalleryPackage\SmartM365.EndpointDiagnosticsAnalyzer\0.3.2$prereleaseArgument -Execute
+.\SmartM365-Publish-EndpointDiagnosticsAnalyzerGalleryPackage.ps1 -PackagePath ..\GalleryPackage\SmartM365.EndpointDiagnosticsAnalyzer\1.0.0$prereleaseArgument -Execute
 
 Intune preview (no Graph connection):
 .\SmartM365-EndpointDiagnosticsAnalyzer-PublishIntune.ps1 -IntuneWinPath .\$intuneFileName -CreatePilotGroup -AssignPilotGroup
@@ -113,8 +113,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB98zokc3950f0F
-# opvQhuV27U+9sH6vJlI5arN/oM37s6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB6QmJEcPPXXPJ5
+# yOj7TKAcoEIbGVWLMPefrt0Mqjnzw6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -247,31 +247,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIA4I8xVNIrYD6UpmXb/2J3aTUzgLiWLOqIen/jKB0Kg/MA0GCSqG
-# SIb3DQEBAQUABIIBgCXmiw9fXM05+5MCq/IO09w0QvFsdYOWfmWNG14i9JJNYCzm
-# Mm7m2pWex/So5UMskzmqbWO+wQick5zefFN7VzSmhQw90SCv6L2Egb+bimkuLQHI
-# 2vrwJw/MQtrhGwbHI2LYcwRIPcs0X568Y4M/sz0Zxz86kYgQO9SdpVK1pPbNoOEi
-# cy42shGExkVRJocgzeEiarxVQXSYEcpmy/H/pcTADKETFHc8Cml+AXIGVEclJjtl
-# MEFbaRBPTmXQpb07BL32BPh2MnMT8R0V2sTI1gXRQz6XaYJnMtdu2dD4LTPhYRNC
-# V8ljiiQsAJmoe1SxpKlpqT4unJETk+/H5lokcsXBG5FAq9biQpeWNBFiXsOp2CTj
-# mSoIcgerhwg+sezBAqz4hlzx2wXaswcStYYcRc18SMbHDsQA/7/qK93RoyP1LCIS
-# khSzv9cunOsXZ6/0Pah/uqo9jXOKuw0G89oDG8beMcvKUBvnIBvGpq6sqRD4hKRl
-# JRv1k4XQBALs3XJAZqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIK8t1mUm2sr3V4dZM+4DU+G6Y+Bp+jIcSQ2SfE4EVh+AMA0GCSqG
+# SIb3DQEBAQUABIIBgHF/oW24km5iEUfNbaGVrJDqiD77OVsZtQjzCFKqipaJbeDG
+# uAPYt488WN4MteqKx9C2kKChdMFGsIUYQV+GzwgKM5j+pc0Ulqu9T9aKkoiavE1g
+# xfXq2g3vvlOC6n+P6++JCnCSeZUqIJpPUKGyB0LvRSXPG8LaMuv/rYQjnM6PMbJb
+# q18+STKw6jWrU6fYDm0wPi6pT2eCKmyikfRFPFo2B9o8zqL3p2fFmdZNgi51Jfoh
+# 8kC8Or2Y7YwAjjVXKYqGt1whxNsBYxwdDAT1iFtcPyIuItyuhstUd3iEQT8I3z5S
+# Gcyw/dkwMpryFOz/C1xgxANMGhakujCysZ+OTF8DumrG4bA+yCtfhOgEbu8YoOb/
+# ttqh34WlUQ1g8q8BuklXmTyP+uwSYc6ehKrZTk12cxMyYEwTNjCDhT0QHqvk+xxt
+# 3AmQnNLdeUPbWZd+deRnG3n8xmRF1vMcQ7qiyWOPtzb5aH88n6bE4ddzG0bVeblm
+# msqiToC5h5ZBNGXN/6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjMxNzM2
-# NTFaMC8GCSqGSIb3DQEJBDEiBCCpmZZPWObEeZSuNl1KdGXrnt/ufbr+VhTc1tN8
-# od0IvTANBgkqhkiG9w0BAQEFAASCAgAv/KNAwX2D0RbBM3hyFjUrKusN0txzx2uT
-# y3jH8/c2Mb3NGwrcaCXk48BiMaVgQItLwlclKcbBK8tYSjxB3WEVo8iVaL6tVJiw
-# eUuAX6Ef2ttWs4lrXXVZCybEnAEhzZHx8+vZ8l/jl9s2XEE/QWAG7r9V5seEngK+
-# 9Rj6XkJrrRswZgWUWV7bpkrWf4EaIzauwHh7TNVa3MOocNEOlXuBTn/Da5RoRWvN
-# cun7cIHr+azqcAcXrwBWk2V9iF4v3hUwyNxexwOZEr+ojq9IyElnrSiuzFzhl/JW
-# H+/3hp18eBEqlMdRa2U4bz5/50VoPfoZBsks7KQCvkBu6p/OWS2mVtAo+J5wFDhi
-# ZMdDSZ8uPv5vtqKrNB1kU1KouAY7TMxZsIgIktob+dhweMsFsGDgT8BkHhdOMomr
-# BE/HV3/tHB+BEzYpTLhWb2VdSrUdY4wnKNMxMzovbXO/sEmK/9juXsJ5ai3rZw6e
-# lC/lOn//HYrzV7NNfBiOhNwd+enEj1HCXrIfrp3f86qc8qh+pALiZeAeVUsovgvT
-# 5QOZoxo10xM4CpQRx0OAbbE9mYrU8iGPCIpIcao0TWJmoHQ1nWdN2Te96gP1VNwm
-# aC2KVuhz9/nuExy4E3V6hOXEoky8spHLxiMToOfYLR5Ij5ZHuLLuAWGxMswSVr4r
-# sz3mrYhC+g==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjMxODAy
+# MTJaMC8GCSqGSIb3DQEJBDEiBCDp0TycY/Ed7Hm8WcBVpDrjrQ+JyMKPRC3ZzzHm
+# YXPrFjANBgkqhkiG9w0BAQEFAASCAgAsJSpJrfsU9gFGdHi6fdWVOzUWfVeXZg7Y
+# 6BBov+4rkATJ3lHNCdImXSc+S7voiyApTFWpRbwxMDby5qANjYaqeCu/IUfJFmKX
+# cZ1Ce5bJBehx4r0Xm756s3ue5kqaScVV0SwidHhUZvg4/84bnulG9YQ3bFoB9hRT
+# 46B56wyk8PxKM9i+m1SSgVwgKXFmoPnGkcImGmFF9l8MW6GtZyMeyvE5slN7BRuP
+# GI78xBpJXwL3rHc6J2tRdGHyGgK/VJBgdikefGbSJJd/J6TCIgy6qcTyO3lnFK7p
+# qMbQ6Ba9XwJzG/RSorsKgPCxFDhm2W7IvOJY4Bir4tmu4zumsyjWQmXm4+iFQb5Q
+# B6kJ+Z6h8cGP3Zy93K1AlEUG4vTL6YIqJQMqL/1Fn1X0SkydzC5peKlwpH3TR7Kg
+# i0dKW/vQgczFbej7YahSBpjRfHoFksdqWT43QlmUDbLiXsDGnGFrlcc+xNX0R9PP
+# GqLF/FsyJ5p8pT/D9+pQoaPPH5nKq3odJc07eCBKidow76nd/a9e40BeuszQgJoI
+# LBZur4ZzysKMwDgBQ2TccZ0io8Po7Vj975KJnQuHRIcNHsJ/txcWwLxj7+o8FgYB
+# HCdGolfL5mF8oexmChaCppEl/w/0iRnB6pVnYMKI2qZpI7JBFYssKs+2BjBltjfP
+# 4ScWi9zZNg==
 # SIG # End signature block

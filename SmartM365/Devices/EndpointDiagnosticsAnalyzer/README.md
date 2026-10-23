@@ -1,5 +1,14 @@
 # Smart Endpoint Diagnostics Analyzer
 
+## Current distribution 1.0.0
+
+Download the [1.0.0 release](https://github.com/khda79/workplacecloudhub.com/releases/tag/endpoint-diagnostics-analyzer-v1.0.0). Distribution and module versions are **1.0.0**; the existing GUI component remains **0.3.2**. This version transition preserves the reviewed operational behavior and prior releases.
+
+Assets: `SmartM365-EndpointDiagnosticsAnalyzer-v1.0.0.zip`, `SmartM365-EndpointDiagnosticsAnalyzer-1.0.0.intunewin`, `SmartM365-EndpointDiagnosticsAnalyzer-v1.0.0.sha256`, and `SmartM365-EndpointDiagnosticsAnalyzer-v1.0.0-DemoAssets.zip`. Launch the included demo from the root of the extracted standalone release. The separate DemoAssets archive contains fictional captures and exports, with no tenant or device operations. PowerShell Gallery service publication remains separate.
+
+Earlier download references below are retained as release history.
+
+
 PowerShell/WPF endpoint diagnostics analyzer for Microsoft Intune and Windows endpoint troubleshooting.
 
 ## Release status
@@ -267,6 +276,6 @@ Business actions are simulated. Demo startup bypasses operational configuration,
 Keep the application folder, its original report/template sources, local branding assets, `SmartM365.GuiDemo.ps1`, `SmartM365.GuiDemo.Reports.ps1` and the local `*-Demo.ps1` profile together when copying the application. `-Demo -ValidateOnly` builds the WPF demo without displaying windows or opening files. Run `SmartM365/Tests/Test-SmartM365GuiDemoApplicationsOffline.ps1` in an STA process for offline interaction and export checks.
 
 
-## Unpublished local candidate 0.3.2
+## Distribution version transition
 
-The source package is now 0.3.2 (GUI 0.3.2). This candidate has not been published; the existing published download links above remain the release history. Its complete runtime includes `Start-SmartM365-EndpointDiagnosticsAnalyzer-Demo.cmd` and its demo profile plus the two local report helpers. Run the demo launcher from the root of the extracted standalone release, or the installed application directory. Demo mode uses fictional data and does not require tenant access. `DemoAssets` remains local, ignored by Git and excluded from packages.
+The 1.0.0 package preserves GUI component 0.3.2 and includes the complete signed demo runtime. Old releases remain available. Local DemoAssets stay Git-ignored; reviewed demo archives are separate GitHub release assets.

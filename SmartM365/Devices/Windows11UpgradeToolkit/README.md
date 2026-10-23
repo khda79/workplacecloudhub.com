@@ -4,7 +4,13 @@ PowerShell LOT/PsExec toolkit to diagnose Windows 10 devices that should migrate
 
 The toolkit is optimized for batch operations. It keeps `Scripts\SmartM365-Invoke-Windows11UpgradeRepair.ps1` autonomous so the same single PowerShell file can be copied to devices through PsExec/LOT folders or reused by another deployment mechanism without requiring SmartM365 modules on the target computer.
 
-## Download
+## Current distribution 1.0.0
+
+Download the [1.0.0 release](https://github.com/khda79/workplacecloudhub.com/releases/tag/windows11-upgrade-toolkit-v1.0.0): `SmartM365-Windows11UpgradeToolkit-1.0.0.zip`, its `.sha256` file and `SmartM365-Windows11UpgradeToolkit-1.0.0-DemoAssets.zip`.
+
+Distribution version **1.0.0** is recorded in `SmartM365-Windows11UpgradeToolkit.version.json.txt`. Component histories are preserved: GUI 0.1.55, endpoint 0.1.59, LOT orchestrator 0.1.72, worker 0.1.31 and automatic LOT 1.3.2. This package includes the guarded user-session checks and shutdown failure handling. The separate demo archive contains only fictional captures and exports. No Windows setup media, PsExec or operational inventories are shipped.
+
+## Historical distribution 0.1.72
 
 Download the standalone operator package from the
 [SmartM365 Windows 11 Upgrade Toolkit v0.1.72 release](https://github.com/khda79/workplacecloudhub.com/releases/tag/windows11-upgrade-toolkit-v0.1.72).

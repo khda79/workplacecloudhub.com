@@ -1,5 +1,5 @@
 {
   "SchemaVersion": 1,
   "ProductName": "SmartM365 Device Reboot Manager",
-  "PackageVersion": "0.1.2"
+  "PackageVersion": "1.0.0"
 }

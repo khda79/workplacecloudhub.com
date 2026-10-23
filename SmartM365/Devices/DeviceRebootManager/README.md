@@ -1,5 +1,14 @@
 # Smart Device Reboot Manager
 
+## Current distribution 1.0.0
+
+Download the [1.0.0 release](https://github.com/khda79/workplacecloudhub.com/releases/tag/device-reboot-manager-v1.0.0). Distribution and module versions are **1.0.0**; the existing GUI component remains **1.2**. This version transition preserves the reviewed operational behavior and prior releases.
+
+Assets: `SmartM365-DeviceRebootManager-1.0.0.zip`, `SmartM365-DeviceRebootManager-1.0.0.intunewin`, `SmartM365-DeviceRebootManager-1.0.0.sha256`, and `SmartM365-DeviceRebootManager-1.0.0-DemoAssets.zip`. Launch the included demo from the root of the extracted standalone release. The separate DemoAssets archive contains fictional captures and exports, with no tenant or device operations. PowerShell Gallery service publication remains separate.
+
+Earlier download references below are retained as release history.
+
+
 Local WPF user notification app for SmartM365 device restart governance.
 
 ## Download
@@ -331,8 +340,6 @@ Launch the safe test wrapper:
 ```
 
 
-## Unpublished local candidate 0.1.2
+## Distribution version transition
 
-The source package is now 0.1.2 (GUI 1.2). This candidate has not been published; the existing published download links above remain the release history. Its complete runtime includes `Start-SmartM365-DeviceRebootManager-Demo.cmd` and its demo profile. Run the demo launcher from the root of the extracted standalone release, or the installed application directory. Demo mode uses fictional data and does not require tenant access. `DemoAssets` remains local, ignored by Git and excluded from packages.
-
-Planned artifact names, subject to explicit publication approval: `SmartM365-DeviceRebootManager-0.1.2.zip`, `SmartM365-DeviceRebootManager-0.1.2.intunewin`, `SmartM365-DeviceRebootManager-0.1.2.sha256`; planned tag path `releases/tag/device-reboot-manager-v0.1.2`.
+The 1.0.0 package preserves GUI component 1.2 and includes the complete signed demo runtime. Old releases remain available. Local DemoAssets stay Git-ignored; reviewed demo archives are separate GitHub release assets.
