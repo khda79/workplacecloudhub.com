@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Smart SharePoint Migration dashboard GUI.
 
@@ -15,7 +15,7 @@
     the directory containing this GUI when launched from the shared toolkit.
 
 .VERSION
-    1.0.77
+    1.0.78
 #>
 
 #Requires -Version 7.4
@@ -38,7 +38,7 @@ if ($Demo) {
 }
 
 $script:AppName    = 'Smart SharePoint Migration'
-$script:AppVersion = '1.0.77'
+$script:AppVersion = '1.0.78'
 $script:ScriptRoot = $PSScriptRoot
 $script:FarmToolkitRoot = if ($FarmToolkitRoot) { $FarmToolkitRoot } else { $PSScriptRoot }
 $script:SummaryLastGoodRows = @{}
@@ -56,6 +56,7 @@ Add-Type -AssemblyName PresentationFramework
 Add-Type -AssemblyName PresentationCore
 Add-Type -AssemblyName WindowsBase
 
+. (Join-Path $script:ScriptRoot 'SmartM365-SharePointMigration-Loading.ps1')
 . (Join-Path $script:ScriptRoot 'SmartM365.GuiSplash.ps1')
 . (Join-Path $script:ScriptRoot 'SmartM365-SharePointMigration-NewWizard.ps1')
 . (Join-Path $script:ScriptRoot 'Scripts\Launchers\Generic\SmartM365-SharePointMigration-GuiActivity.ps1')
@@ -1854,6 +1855,18 @@ function New-FarmDiagnosticsWindow {
     <Border Grid.Row="4" Background="#F5F8FB" BorderBrush="#DDE7F0" BorderThickness="0,1,0,0" Padding="18,5">
       <TextBlock x:Name="lblAppVersion" HorizontalAlignment="Right" FontSize="10" Foreground="#5F6B7A"/>
     </Border>
+    <Border x:Name="panelGuiLoading" Grid.RowSpan="5" Panel.ZIndex="1000"
+            Background="#990F172A" Visibility="Collapsed" Focusable="True"
+            KeyboardNavigation.TabNavigation="Cycle">
+      <Border Background="White" CornerRadius="12" Padding="32,26"
+              Width="440" HorizontalAlignment="Center" VerticalAlignment="Center">
+        <StackPanel>
+          <TextBlock Text="Chargement en cours…" FontSize="23" FontWeight="SemiBold" Foreground="#12344F"/>
+          <TextBlock x:Name="lblGuiLoadingDetail" Margin="0,12,0,18" FontSize="14" TextWrapping="Wrap" Foreground="#475569"/>
+          <ProgressBar IsIndeterminate="True" Height="5" Foreground="#0078D4"/>
+        </StackPanel>
+      </Border>
+    </Border>
   </Grid>
 </Window>
 '@
@@ -3602,14 +3615,27 @@ function Load-Migrations {
 # Events
 # ---------------------------------------------------------------------------
 
-$tabSummary.Add_Click({     Switch-Tab 'Summary'; Refresh-PortfolioSummary })
-$tabArchivedOverview.Add_Click({ Switch-Tab 'ArchivedOverview'; Refresh-ArchivedOverview })
-$tabFiles.Add_Click({       Switch-Tab 'Files' })
-$tabOperations.Add_Click({  Switch-Tab 'Operations' })
-$tabDiagnostics.Add_Click({ Switch-Tab 'Diagnostics'; Refresh-DiagnosticInventoryMetrics; Refresh-DiagnosticCrossCheck })
-$tabBatches.Add_Click({ Switch-Tab 'Batches'; Refresh-SmartM365BatchGui -Force })
-$tabLogs.Add_Click({        Switch-Tab 'Logs' })
-$tabConfig.Add_Click({      Switch-Tab 'Config' })
+function Open-GuiTab {
+    param([ValidateSet('Summary','ArchivedOverview','Files','Operations','Diagnostics','Batches','Logs','Config')][string]$Name)
+    Invoke-SmartM365SharePointLoading -Window $script:Window -Message ("Ouverture de l'onglet : " + $Name) -Action {
+        Switch-Tab $Name
+        switch ($Name) {
+            'Summary' { Refresh-PortfolioSummary }
+            'ArchivedOverview' { Refresh-ArchivedOverview }
+            'Diagnostics' { Refresh-DiagnosticInventoryMetrics; Refresh-DiagnosticCrossCheck }
+            'Batches' { Refresh-SmartM365BatchGui -Force }
+        }
+    }
+}
+
+$tabSummary.Add_Click({ Open-GuiTab 'Summary' })
+$tabArchivedOverview.Add_Click({ Open-GuiTab 'ArchivedOverview' })
+$tabFiles.Add_Click({ Open-GuiTab 'Files' })
+$tabOperations.Add_Click({ Open-GuiTab 'Operations' })
+$tabDiagnostics.Add_Click({ Open-GuiTab 'Diagnostics' })
+$tabBatches.Add_Click({ Open-GuiTab 'Batches' })
+$tabLogs.Add_Click({ Open-GuiTab 'Logs' })
+$tabConfig.Add_Click({ Open-GuiTab 'Config' })
 
 $gridSummary.Add_SelectionChanged({
     if ($script:SummaryLoading -or -not $gridSummary.SelectedItem) { return }
@@ -3639,7 +3665,9 @@ $cmbMigration.Add_SelectionChanged({
         $previousMigration = $script:CurrentMigration
         $previousStatus = $script:CurrentStatus
         try {
-            Set-CurrentMigration -Migration $requestedMigration
+            Invoke-SmartM365SharePointLoading -Window $script:Window -Message ("Chargement de la migration : " + $requestedMigration.Name) -Action {
+                Set-CurrentMigration -Migration $requestedMigration
+            }
         }
         catch {
             $selectionError = $_
@@ -4700,7 +4728,7 @@ if (Get-Command -Name Start-SmartM365GuiUpdateCheck -ErrorAction SilentlyContinu
 $script:AutoRefreshTimer = [System.Windows.Threading.DispatcherTimer]::new()
 $script:AutoRefreshTimer.Interval = [TimeSpan]::FromSeconds(30)
 $script:AutoRefreshTimer.Add_Tick({
-    if ($chkAutoRefresh.IsChecked -and -not $script:WizardOpen) { Refresh-GuiState }
+    if ($chkAutoRefresh.IsChecked -and -not $script:WizardOpen -and (ctrl 'panelGuiLoading').Visibility -ne 'Visible') { Refresh-GuiState }
 })
 $chkAutoRefresh.Add_Checked({ if ($script:AutoRefreshTimer) { $script:AutoRefreshTimer.Start() } })
 $chkAutoRefresh.Add_Unchecked({ if ($script:AutoRefreshTimer) { $script:AutoRefreshTimer.Stop() } })
@@ -4836,8 +4864,8 @@ finally {
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDq7cejF1+c+VIL
-# ItVuKj/rKtqyXrZYu+dzhOlcr1ACrKCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDSwzOTZ5oNkK83
+# EwTXNVx332mKcmb9mtdYzitb3jw+pqCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -4867,14 +4895,14 @@ finally {
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCAQljNawkAYxjlOyftQwRRc
-# II0WjIWtFpraMUBqVIQu7zANBgkqhkiG9w0BAQEFAASCAYCsT5HcJTSlFxIHfbbS
-# esACU3QdZFOVM365d709A/wHchs3xdyXNRpvw8hsm9Zvu1loWtcZQWPG0Z/XYci8
-# KczjG2MAuJTOz77sRLka0FscbQKS0BWxpJUDHpcpAm8lVIY3YtGrY9HOxxje5yCY
-# siRxAJfKPU3eSlEJ2E06eIYj0T+f1d6+sJ6wwSTiif96LrMOKUdm2VSYTp2lad75
-# wTpmlmZwvLg4/2nq/8SvIm5P//ZDdDyTkcYI0mmY8qp0s4RsjgMQGSdtrExMLwSa
-# 26Kyk6sKnv8noZHQZWzUutC2fsJd6NKEA4JUyBKeTYQW21fddSbBICxaAe1CrIIW
-# 9iawZegb3fgASliKtiRyGYdbS9+luihp36souJLG4AHMWy1IcPZtG2IwsbEUpfCQ
-# NoXkpqtlc95G0qliLRBOrvzWQdV20GXxQDGGOTmacrVGf0jQIKlUFUsPZTbQt38n
-# ffh9yUjq/bdjWeA4Gt/yPj26LgDYiC6OfNEL/jGI7+/YtWE=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCCkMrS6+0J6Lz45sN4A/RVs
+# 5VflQjF2NZj3Qobc6+4mKDANBgkqhkiG9w0BAQEFAASCAYCIrliIOZfHVBFW4vay
+# OQHJnT6l/2XShm1NZixXH2oI5QjKSmcueI4Q35V8Kl/iWZFCuu3Afw6fFAu8FqdJ
+# JXaJCXwTVDVWZofKl9/luf9KRZpt5iHZUqelrNd9asQNHqi6QjQOnToiQYVR2o5g
+# XFn7AQtP+nSbkC6AJwJFpO9IQAhSalS4XJkXb2LtgX2ZQVrGpoSAWaG5P/ImckQI
+# h6CA2enrDVT8kV4xlQs+WY80M203ma45QMCO145Nbo0+ZC6xDasbsvc2xU41PqD/
+# cqOdltvKjb8vKQFJyY3tAbhY6BFiRv9qb9pAoMNuPhqwElSod/Y0C/pMD2xwq8yw
+# I72BmMkecuXsJ2VB7wcU9cbtnooK5Vc7CGMFPc8H0SFNgyTRfjm0++PYG+VD0KlW
+# /i/yZwRuZRUDjAUNQ2huj4Jk5DEN7wMVHVsnikzx3Mst7mxH/uocg7g7vIVaN4ws
+# TrI6iF1lSbn0ZqmrIiJewI9XpAO5mY5Zu2XQ0cwmCW0MBtQ=
 # SIG # End signature block

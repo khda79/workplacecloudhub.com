@@ -1,21 +1,24 @@
-#Requires -Version 7.4
+﻿#Requires -Version 7.4
 <#
 .SYNOPSIS
 Fictional migration portfolio, all dashboard panels, batch UI, wizard and reports.
 .VERSION
-1.0.2
+1.0.3
 #>
 function script:Switch-SharePointDemoPanel {
     param([string]$Name)
     $s=$script:SmartM365Demo;$c=$s.Controls
+    Invoke-SmartM365SharePointLoading -Window $s.Window -Message ("Ouverture de l'onglet : " + $Name) -Action {
     foreach($panel in @('panelSummary','panelArchivedOverview','panelWorkflows','panelDiagnostics','panelBatches','panelOperations','panelLogs','panelConfig')){$c[$panel].Visibility='Collapsed'}
     $target=@{tabSummary='panelSummary';tabArchivedOverview='panelArchivedOverview';tabFiles='panelWorkflows';tabDiagnostics='panelDiagnostics';tabBatches='panelBatches';tabOperations='panelOperations';tabLogs='panelLogs';tabConfig='panelConfig'}[$Name]
     if($target){$c[$target].Visibility='Visible'}
     foreach($tab in @('tabSummary','tabArchivedOverview','tabFiles','tabDiagnostics','tabBatches','tabOperations','tabLogs','tabConfig')){$c[$tab].IsChecked=$tab -eq $Name}
     $s.Data.SelectedPanel=$Name
+    }
 }
 function script:Initialize-SmartM365DemoProfile {
     $s=$script:SmartM365Demo;$c=$s.Controls
+    . (Join-Path $s.AppRoot 'SmartM365-SharePointMigration-Loading.ps1')
     $presentationSource=Join-Path $s.AppRoot 'SmartM365-SharePointMigration-Summary.ps1'
     . ([scriptblock]::Create((Get-SmartM365DemoFunctionText $presentationSource @('Get-SmartM365PortfolioGapVisual','Get-SmartM365PortfolioRateVisual','Get-SmartM365ComplexityVisual')) -join [Environment]::NewLine))
     if(-not $s.Data.ContainsKey('Migrations')){$s.Data.Migrations=@('Contoso-HR','Contoso-Finance','Contoso-Intranet')}
@@ -96,7 +99,13 @@ function script:Initialize-SmartM365DemoProfile {
 function script:Connect-SmartM365DemoProfileEvents {
     $s=$script:SmartM365Demo;$c=$s.Controls
     foreach($name in @('tabSummary','tabArchivedOverview','tabFiles','tabDiagnostics','tabBatches','tabOperations','tabLogs','tabConfig')){[void]$s.ViewNames.Add($name)}
-    $c.cmbMigration.Add_SelectionChanged({$s=$script:SmartM365Demo;$s.Controls.lblWorkflowMigration.Text=[string]$s.Controls.cmbMigration.SelectedItem;$s.Controls.lblDiagMigration.Text=[string]$s.Controls.cmbMigration.SelectedItem})
+    $c.cmbMigration.Add_SelectionChanged({
+        $s=$script:SmartM365Demo
+        Invoke-SmartM365SharePointLoading -Window $s.Window -Message ('Chargement de la migration : '+[string]$s.Controls.cmbMigration.SelectedItem) -Action {
+            $s.Controls.lblWorkflowMigration.Text=[string]$s.Controls.cmbMigration.SelectedItem
+            $s.Controls.lblDiagMigration.Text=[string]$s.Controls.cmbMigration.SelectedItem
+        }
+    })
     $c.listOps.AddHandler([Windows.Controls.Button]::ClickEvent,[Windows.RoutedEventHandler]{param($hostControl,$eventArgs)Write-SmartM365DemoActivity ('Operation simulated: '+[string]$eventArgs.OriginalSource.Tag)},$true)
     $c.batchAll.Add_Click({$c=$script:SmartM365Demo.Controls;$c.batchNames.Visibility=if($c.batchAll.IsChecked){'Collapsed'}else{'Visible'}})
     foreach($pair in @(@('txtDiagFilter','gridDiagPatterns'),@('txtDiagRowFilter','gridDiagRows'))){$c[$pair[0]].Tag=$pair[1];$c[$pair[0]].Add_TextChanged({param($box)$s=$script:SmartM365Demo;$s.Controls[[string]$box.Tag].ItemsSource=@($s.Rows[[string]$box.Tag]|Where-Object {($_.PSObject.Properties.Value -join ' ') -like ('*'+$box.Text+'*')})})}
@@ -198,8 +207,8 @@ function script:Export-SmartM365DemoProfileOutputs {
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAgYo85rZ1I2HR+
-# nNOYMnfifAeeHa5sW4rUPtwYEVcpQ6CCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDWkj1Ss45b9CUz
+# x59SP0V/X3RWy3lfHUlr9zRuoqXnqKCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -229,14 +238,14 @@ function script:Export-SmartM365DemoProfileOutputs {
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCCtJC+pD0NilNPvZ/6KhVSP
-# WyN2eotBmgVnjqyynBJ4yzANBgkqhkiG9w0BAQEFAASCAYB0VuwalyOF2G8N7zF4
-# 16U/wSm55xkpcdJuSACLMHsVh1N/ku6vlqV0NISOM5d7W1xJIDxkxZET11oGCe87
-# d9Km5qojvz5Wv/U9HeyYUYhFaJIknFt7Q/NdYaAaKzhLe+j3FK9gfh1wRdcYXvRR
-# 5ioruvrxeuVz2eqqHiyNd6Ti2dSWHKHQBnqWlFQLJW/iYeS9Vt+fUZQxLhEIpHzD
-# nW4yqaIDc7/Eq3MwL3JX6SV2RYq2tfkQpCjPB4OL5vo58ez35jiVtFRkWtn2Krwx
-# 8W6WS7lTwHd42SJ9IgrxSGQTVrb5I6LAPVWe/OLBTjrVqFqUcxfdCj5tjbT1MrLx
-# aPA1J9tfjC3qEaQ4DG+nisJ5YQhDq/weh9tro94KSwBHN5Dn5fPXVpAIgwICALvV
-# 9r2pCpS91QHTJwl8ezfgS/dwTjx5znSq4QVQXhtGqzTVUxTRHewupXMqT0jpyK9n
-# v+z6LAIEggOwjhLxrL6XpkbX6h0rMxOwpWcloJlDe5Sc5FA=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCDhTCR+4Q1ZA1R53a0nr7uu
+# 7C/S6KiO+4Bm4sEEFnqUozANBgkqhkiG9w0BAQEFAASCAYAeqiwl9J//cfNDUOM+
+# F/z/RnsCypNAirrr6lgldI2jglt8xTECXyGuV/Q8H+OfNQE6/WTiRR1jkyVBZ/sA
+# fLbCnPOUGtTNlIKGUunglb+40hkOaf0Cw3X/RwQLPoYiwqsxjTtSdSucZCfWZAQe
+# zL1w4I/tYaT/NTEifaB+QCBLWGNpLGTd/BcmOZQE69iX9B/QcUFbTI6RcPTnhEPy
+# bWeEQ55JR4PS+zhV3UANfKVGqRBPfVmjvQJrRbMBhuSy6ycxRX2WopJxRVv1RC9T
+# ncuncCzvh1QpKEJ1xoTGK+7hc7hZVpdgRJZB3seFMzOY0JR2aWFUOd5ecst7G19T
+# K+XjM2lET7TrXYMBYByYWMbCLtHWS9DV4vqlCndR++YdSyeobuY+wpWiKzyUOJRO
+# RxvzufaO6MZeS7apExoBnQjv9/LEIwp9ge/UbCTReB/r41dT+aDHf8VVuAHkmtGU
+# iOU8zHHDM7l3bJVWoFWBGdR4fo9+nYj/hcuDsP/a1s40tmc=
 # SIG # End signature block
