@@ -26,6 +26,7 @@
   "WeeklyHistoryFolderPath": "{{DataAllRootPath}}\\Exchange\\OnPrem\\ServersAndStorage\\WeeklyHistory",
   "WeeklyHistoryRetentionWeeks": 52,
   "ExchangeConnectionMode": "LocalFirst",
+  "CertificateTimeoutSecondsPerServer": 120,
   "ExcludedServers": [],
   "HealthCheckerTimeoutMinutesPerServer": 30,
   "HealthCheckerTotalBudgetMinutes": 1320,

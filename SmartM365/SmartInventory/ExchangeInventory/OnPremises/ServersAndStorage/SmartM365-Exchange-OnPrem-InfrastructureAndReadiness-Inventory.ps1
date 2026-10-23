@@ -26,7 +26,7 @@
     New-CimSession is used over DCOM only, to start the Health Checker scheduled task.
 
 .VERSION
-1.8.7
+1.8.8
 .REQUIREMENTS
     Windows PowerShell 5.1 on an Exchange 2016/on-premises management host.
     Modules/snap-ins: SmartM365 WindowsPowerShell5 compatibility module; Exchange Management snap-in;
@@ -38,7 +38,7 @@
     and the Health Checker scheduled task must be installed there.
 .NOTES
     Script Name : SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory.ps1
-    Version     : 1.8.7
+    Version     : 1.8.8
     Requirements:
       - Windows PowerShell 5.1 with Exchange 2016 Management Tools
       - Exchange 2016 read RBAC for Get-ExchangeServer, Get-MailboxDatabase,
@@ -49,6 +49,10 @@
       - PowerShell 5.1 or later
 
 .CHANGELOG
+    1.8.8
+      - Bound certificate collection by a total per-server budget, default 120 seconds.
+      - Isolate blocked native/RPC reads while preserving LocalFirst and diagnostics.
+
     1.8.7
       - Read native certificates first; retry only failed targets through one lazy remote session.
       - Retain native metadata and expose RemoteRetry provenance without adding CSV columns.
@@ -264,7 +268,7 @@ $tenantContextPath = & {
 . $tenantContextPath
 
 $ScriptName = "SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory"
-$ScriptVersion = "1.8.7"
+$ScriptVersion = "1.8.8"
 $RunId = (Get-Date).ToString("yyyyMMdd-HHmmss")
 # Vendored Microsoft CSS-Exchange Health Checker (see ThirdParty\CSS-Exchange\HealthChecker\PROVENANCE.md).
 $HealthCheckerRelativePath = 'ThirdParty\CSS-Exchange\HealthChecker\HealthChecker.ps1'
@@ -300,6 +304,7 @@ function Merge-SmartM365ScriptLocalConfig {
 Merge-SmartM365ScriptLocalConfig -ConfigPath (Join-Path -Path $PSScriptRoot -ChildPath "$ScriptName.local.json")
 . (Join-Path $smartM365LifecycleRoot 'Modules/SmartM365.Core/SmartM365-ExchangeOnPremSession.ps1')
 $script:ExchangeCertificateContext = $null
+$script:InfrastructureCertificateWorkerPath = Join-Path $PSScriptRoot 'SmartM365-Exchange-OnPrem-CertificateWorker.ps1'
 
 function Resolve-SmartM365ConfigTokenValue {
     param(
@@ -2287,41 +2292,6 @@ function Invoke-ExchangeReadinessCollector {
     }
 }
 
-function Initialize-SmartM365InfrastructureCertificateConnection {
-    [CmdletBinding()]
-    param([ValidateSet('Remote','LocalSnapin')][string]$Mode)
-
-    if ($Mode -eq 'LocalSnapin') { return }
-    if ($null -eq $script:ExchangeCertificateContext) {
-        try {
-            $script:ExchangeCertificateContext = Start-SmartM365ExchangeOnPremSession -RequiredCommands @('Get-ExchangeCertificate')
-            Write-Log ('ExchangeConnectionMode=Remote; certificate state=Ready; endpoint={0}; one dedicated session.' -f $script:ExchangeCertificateContext.Endpoint)
-        }
-        catch {
-            Write-Log ('ExchangeConnectionMode=Remote; certificate state=Failed; no fallback. {0}' -f $_.Exception.Message) -Level 'ERROR'
-            throw
-        }
-    }
-}
-
-function Get-SmartM365InfrastructureCertificates {
-    [CmdletBinding()]
-    param([Parameter(Mandatory)][string]$Server, [ValidateSet('Remote','LocalSnapin')][string]$Mode)
-
-    if ($Mode -eq 'LocalSnapin') {
-        Get-ExchangeCertificate -Server $Server -ErrorAction Stop
-        return
-    }
-    if ($null -eq $script:ExchangeCertificateContext -or $script:ExchangeCertificateContext.Session.State -ne 'Opened') {
-        throw 'Exchange certificate remote session is unavailable; no LocalSnapin fallback.'
-    }
-    $command = Get-Command Get-ExchangeCertificate -ErrorAction Stop
-    if ($command.CommandType -ne 'Function' -or $command.ModuleName -ne $script:ExchangeCertificateContext.Module.Name) {
-        throw 'Exchange certificate proxy ownership check failed; no LocalSnapin fallback.'
-    }
-    & $command -Server $Server -ErrorAction Stop
-}
-
 function Add-SmartM365InfrastructureCertificateProperties {
     [CmdletBinding()]
     param(
@@ -2372,67 +2342,15 @@ function Add-SmartM365InfrastructureCertificateProperties {
     }
 }
 
-function Invoke-SmartM365InfrastructureCertificatesLocalFirst {
+function Stop-SmartM365InfrastructureCertificateWorker {
     [CmdletBinding()]
-    param(
-        [Parameter(Mandatory)][AllowEmptyCollection()][System.Collections.Generic.List[object]]$Rows,
-        [string[]]$ExchangeServerNames = @()
-    )
-
-    $nativeCommand = $null
-    $remoteUnavailable = $null
-    $certificateServers = @($ExchangeServerNames | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } | Sort-Object -Unique)
-    if ($certificateServers.Count -eq 0) { $certificateServers = @($env:COMPUTERNAME) }
-    foreach ($serverName in $certificateServers) {
-        $readMode = 'LocalSnapin'
-        try {
-            # Bind the native cmdlet explicitly: an imported proxy must never replace later local reads.
-            if ($null -eq $nativeCommand) {
-                $nativeCommand = Get-Command -Name 'Microsoft.Exchange.Management.PowerShell.SnapIn\Get-ExchangeCertificate' -CommandType Cmdlet -ErrorAction Stop
-            }
-            $items = @(& $nativeCommand -Server $serverName -ErrorAction Stop)
-            Write-Log ('Certificate collection source=LocalSnapin; server={0}' -f $serverName)
-        }
-        catch {
-            if ($_.Exception -is [Management.Automation.PipelineStoppedException] -or $_.Exception -is [OperationCanceledException]) { throw }
-            $localFailure = $_.Exception.Message
-            Write-Log ('Local certificate read failed for {0}; RemoteRetry requested. Local: {1}' -f $serverName, $localFailure) -Level 'WARN'
-            Add-ExchangeReadinessRow -Rows $Rows -Category 'ExchangeCertificate' -ObjectName $serverName -Setting 'CollectionPath' -Value 'RemoteRetry' -MigrationFocus 'Remote retry after a failed native certificate read; inspect collection diagnostics.' -Importance 'Review'
-            try {
-                if ($remoteUnavailable) { throw $remoteUnavailable }
-                try {
-                    Initialize-SmartM365InfrastructureCertificateConnection -Mode Remote
-                }
-                catch {
-                    if ($_.Exception -is [Management.Automation.PipelineStoppedException] -or $_.Exception -is [OperationCanceledException]) { throw }
-                    $remoteUnavailable = 'Remote certificate session unavailable; no further session attempt. ' + $_.Exception.Message
-                    throw
-                }
-                $items = @(Get-SmartM365InfrastructureCertificates -Server $serverName -Mode Remote)
-                $readMode = 'Remote'
-                Write-Log ('Certificate collection source=RemoteRetry; server={0}' -f $serverName)
-            }
-            catch {
-                if ($_.Exception -is [Management.Automation.PipelineStoppedException] -or $_.Exception -is [OperationCanceledException]) { throw }
-                $remoteFailure = $_.Exception.Message
-                if ($null -ne $script:ExchangeCertificateContext) {
-                    $owned = Get-Command Get-ExchangeCertificate -ErrorAction SilentlyContinue
-                    if ($script:ExchangeCertificateContext.Session.State -ne 'Opened' -or $null -eq $owned -or $owned.CommandType -ne 'Function' -or $owned.ModuleName -ne $script:ExchangeCertificateContext.Module.Name) {
-                        $remoteUnavailable = 'Remote certificate session or proxy unavailable; no further session attempt. ' + $remoteFailure
-                    }
-                }
-                $failureMessage = 'Local: {0}; Remote: {1}' -f $localFailure, $remoteFailure
-                Write-Log ('Exchange certificate collection failed for {0}: {1}' -f $serverName, $failureMessage) -Level 'WARN'
-                Add-ExchangeReadinessRow -Rows $Rows -Category 'ExchangeCertificate' -ObjectName $serverName -Setting 'Collection' -Value 'Failed' -MigrationFocus 'Review certificate collection failure for this server before readiness sign-off.' -Importance 'Warning' -CollectionStatus 'ERROR' -ErrorMessage $failureMessage
-                continue
-            }
-        }
-        foreach ($item in @($items | Sort-Object NotAfter)) {
-            $objectName = '{0}:{1}' -f $serverName, $item.Thumbprint
-            Add-ExchangeReadinessRow -Rows $Rows -Category 'ExchangeCertificate' -ObjectName $objectName -Setting 'Server' -Value $serverName -MigrationFocus 'Certificate coverage and expiration are critical for HTTPS, SMTP TLS, hybrid, and Exchange SE namespace readiness.' -Importance 'Review'
-            Add-SmartM365InfrastructureCertificateProperties -Rows $Rows -InputObject $item -ObjectName $objectName -Mode $readMode
-        }
-        Write-Log ('Finished Exchange certificates from {0}. Certificates: {1}; source={2}' -f $serverName, $items.Count, $readMode)
+    param([AllowNull()][object]$State, [switch]$Force)
+    if ($null -eq $State) { return }
+    try { Stop-SmartM365CertificateWorker -State $State -Force:$Force }
+    catch {
+        if ($_.Exception -is [Management.Automation.PipelineStoppedException] -or $_.Exception -is [OperationCanceledException]) { throw }
+        Write-Log ('Certificate worker cleanup failed; infrastructure collection continues: {0}' -f $_.Exception.Message) -Level 'ERROR'
+        Write-Log 'Certificate worker cleanup was incomplete; review the owned process diagnostic.' -Level 'WARN'
     }
 }
 
@@ -2445,66 +2363,128 @@ function Invoke-SmartM365InfrastructureCertificateInventory {
 
     $mode = [string](Get-SmartM365EffectiveConfigValue -Name 'ExchangeConnectionMode' -DefaultValue 'LocalFirst')
     if ($mode -notin @('LocalFirst','Remote','LocalSnapin')) { throw 'ExchangeConnectionMode must be LocalFirst, Remote or LocalSnapin.' }
-    $timer = [Diagnostics.Stopwatch]::StartNew()
-    $sessionFailure = $null
+    $rawBudget = Get-SmartM365EffectiveConfigValue -Name 'CertificateTimeoutSecondsPerServer' -DefaultValue 120
+    $budget = 0
+    if (-not [int]::TryParse([string]$rawBudget,[ref]$budget) -or $budget -lt 1 -or $budget -gt 3600) {
+        throw 'CertificateTimeoutSecondsPerServer must be an integer from 1 to 3600.'
+    }
+    $servers = @($ExchangeServerNames | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } | Sort-Object -Unique)
+    if ($servers.Count -eq 0) { $servers = @($env:COMPUTERNAME) }
+    $remoteState = $null
+    $remoteUnavailable = $null
+    $phaseTimer = [Diagnostics.Stopwatch]::StartNew()
     try {
-        if ($mode -eq 'LocalFirst') {
-            Invoke-SmartM365InfrastructureCertificatesLocalFirst -Rows $Rows -ExchangeServerNames $ExchangeServerNames
-            return
-        }
         try {
-            Initialize-SmartM365InfrastructureCertificateConnection -Mode $mode
+            if (-not (Test-Path -LiteralPath $script:InfrastructureCertificateWorkerPath -PathType Leaf)) { throw 'Certificate worker is missing from the local runtime cache.' }
+            if (-not (Get-Command Start-SmartM365CertificateWorker -ErrorAction SilentlyContinue)) { . $script:InfrastructureCertificateWorkerPath }
         }
         catch {
             if ($_.Exception -is [Management.Automation.PipelineStoppedException] -or $_.Exception -is [OperationCanceledException]) { throw }
-            $sessionFailure = 'Remote certificate session unavailable; no LocalSnapin fallback. ' + $_.Exception.Message
-            Write-Log ('Certificate phase unavailable; infrastructure collection will continue. {0}' -f $sessionFailure) -Level 'WARN'
+            $message = 'Certificate worker unavailable; no collection attempted. ' + $_.Exception.Message
+            Write-Log $message -Level 'ERROR'
+            Write-Log 'Certificate phase unavailable; infrastructure collection continues.' -Level 'WARN'
+            foreach ($serverName in $servers) {
+                Add-ExchangeReadinessRow -Rows $Rows -Category 'ExchangeCertificate' -ObjectName $serverName -Setting 'Collection' -Value 'Failed' -MigrationFocus 'Restore the certificate worker runtime dependency before readiness sign-off.' -Importance 'Warning' -CollectionStatus 'ERROR' -ErrorMessage $message
+            }
+            return
         }
-        Invoke-ExchangeReadinessCollector -Rows $Rows -CollectorName 'ExchangeCertificate' -ScriptBlock {
-            $certificateServers = @($ExchangeServerNames | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } | Sort-Object -Unique)
-            if ($certificateServers.Count -eq 0) { $certificateServers = @($env:COMPUTERNAME) }
-            foreach ($serverName in $certificateServers) {
-                if ($sessionFailure) {
-                    Add-ExchangeReadinessRow -Rows $Rows -Category 'ExchangeCertificate' -ObjectName $serverName -Setting 'Collection' -Value 'Failed' -MigrationFocus 'Review certificate collection failure for this server before namespace, TLS, hybrid, or SE readiness sign-off.' -Importance 'Warning' -CollectionStatus 'ERROR' -ErrorMessage $sessionFailure
-                    continue
-                }
-                Write-Log ('Collecting Exchange certificates from {0}' -f $serverName)
-                try {
-                    $serverCertificateCount = 0
-                    foreach ($item in @(Get-SmartM365InfrastructureCertificates -Server $serverName -Mode $mode | Sort-Object NotAfter)) {
-                        $serverCertificateCount++
-                        $objectName = '{0}:{1}' -f $serverName, $item.Thumbprint
-                        Add-ExchangeReadinessRow -Rows $Rows -Category 'ExchangeCertificate' -ObjectName $objectName -Setting 'Server' -Value $serverName -MigrationFocus 'Certificate coverage and expiration are critical for HTTPS, SMTP TLS, hybrid, and Exchange SE namespace readiness.' -Importance 'Review'
-                        Add-SmartM365InfrastructureCertificateProperties -Rows $Rows -InputObject $item -ObjectName $objectName -Mode $mode
+        foreach ($serverName in $servers) {
+            $serverTimer = [Diagnostics.Stopwatch]::StartNew()
+            $localFailure = $null
+            $remoteFailure = $null
+            $result = $null
+            $readMode = 'LocalSnapin'
+            try {
+                if ($mode -ne 'Remote') {
+                    $nativeState = $null
+                    $nativeResult = $null
+                    try {
+                        $nativeState = Start-SmartM365CertificateWorker -Mode Native -Root $smartM365LifecycleRoot -WorkerPath $script:InfrastructureCertificateWorkerPath
+                        $localLimit = if ($mode -eq 'LocalFirst') { $budget / 2.0 } else { [double]$budget }
+                        $nativeResult = Invoke-SmartM365CertificateWorkerRead -State $nativeState -Server $serverName -TimeoutSeconds ($localLimit - $serverTimer.Elapsed.TotalSeconds)
                     }
-                    Write-Log ('Finished Exchange certificates from {0}. Certificates: {1}' -f $serverName, $serverCertificateCount)
+                    catch {
+                        if ($_.Exception -is [Management.Automation.PipelineStoppedException] -or $_.Exception -is [OperationCanceledException]) { throw }
+                        $nativeResult = [pscustomobject]@{Status='Failed';Items=@();Stage='Start';Message=$_.Exception.Message}
+                    }
+                    finally {
+                        Stop-SmartM365InfrastructureCertificateWorker -State $nativeState -Force:($null -eq $nativeResult -or $nativeResult.Status -eq 'Timeout')
+                    }
+                    if ($nativeResult.Status -eq 'Success') {
+                        $result = $nativeResult
+                        Write-Log ('Certificate collection source=LocalSnapin; server={0}' -f $serverName)
+                    }
+                    else {
+                        $localFailure = '{0}; stage={1}; {2}' -f $nativeResult.Status,$nativeResult.Stage,$nativeResult.Message
+                        Write-Log ('Local certificate read failed for {0}: {1}' -f $serverName,$localFailure) -Level 'WARN'
+                    }
                 }
-                catch {
-                    if ($_.Exception -is [Management.Automation.PipelineStoppedException] -or $_.Exception -is [OperationCanceledException]) { throw }
-                    $failureMessage = $_.Exception.Message
-                    if ($mode -eq 'Remote') {
-                        $owned = Get-Command Get-ExchangeCertificate -ErrorAction SilentlyContinue
-                        if ($script:ExchangeCertificateContext.Session.State -ne 'Opened' -or $null -eq $owned -or $owned.CommandType -ne 'Function' -or $owned.ModuleName -ne $script:ExchangeCertificateContext.Module.Name) {
-                            $sessionFailure = 'Remote certificate session unavailable; no LocalSnapin fallback. ' + $failureMessage
-                            $failureMessage = $sessionFailure
-                            Write-Log 'ExchangeConnectionMode=Remote; certificate state=Failed; no fallback' -Level 'ERROR'
+                if ($null -eq $result -and $mode -ne 'LocalSnapin') {
+                    $remaining = $budget - $serverTimer.Elapsed.TotalSeconds
+                    if ($remoteUnavailable) { $remoteFailure = 'Remote unavailable for the rest of this run; ' + $remoteUnavailable }
+                    elseif ($remaining -le 0) { $remoteFailure = 'Timeout; total server budget exhausted before remote retry.' }
+                    else {
+                        if ($mode -eq 'LocalFirst') {
+                            Add-ExchangeReadinessRow -Rows $Rows -Category 'ExchangeCertificate' -ObjectName $serverName -Setting 'CollectionPath' -Value 'RemoteRetry' -MigrationFocus 'Remote retry after native failure or timeout.' -Importance 'Review'
+                        }
+                        try {
+                            if ($null -eq $remoteState) {
+                                $remoteState = Start-SmartM365CertificateWorker -Mode Remote -Root $smartM365LifecycleRoot -WorkerPath $script:InfrastructureCertificateWorkerPath
+                            }
+                            $remoteResult = Invoke-SmartM365CertificateWorkerRead -State $remoteState -Server $serverName -TimeoutSeconds ($budget - $serverTimer.Elapsed.TotalSeconds)
+                        }
+                        catch {
+                            if ($_.Exception -is [Management.Automation.PipelineStoppedException] -or $_.Exception -is [OperationCanceledException]) { throw }
+                            $remoteResult = [pscustomobject]@{Status='Failed';Items=@();Stage='Start';Message=$_.Exception.Message;FatalSession=$true;SessionReady=$false}
+                        }
+                        if ($remoteResult.SessionReady -and -not $remoteState.ReadyLogged) {
+                            $remoteState.ReadyLogged = $true
+                            Write-Log 'ExchangeConnectionMode=Remote; certificate state=Ready; one dedicated lazy worker session.'
+                        }
+                        if ($remoteResult.Status -eq 'Success') {
+                            $result = $remoteResult
+                            $readMode = 'Remote'
+                            Write-Log ('Certificate collection source={0}; server={1}' -f $(if ($mode -eq 'LocalFirst') {'RemoteRetry'} else {'Remote'}),$serverName)
+                        }
+                        else {
+                            $remoteFailure = '{0}; stage={1}; {2}' -f $remoteResult.Status,$remoteResult.Stage,$remoteResult.Message
+                            if ($remoteResult.FatalSession) {
+                                $remoteUnavailable = $remoteFailure
+                                $level = if ($remoteResult.Stage -in @('Initialize','Start') -or $mode -eq 'Remote') {'ERROR'} else {'WARN'}
+                                Write-Log ('ExchangeConnectionMode=Remote; certificate state=Failed; no fallback/reconnect; {0}' -f $remoteFailure) -Level $level
+                                Stop-SmartM365InfrastructureCertificateWorker -State $remoteState -Force:($remoteResult.Status -eq 'Timeout' -or $remoteResult.Stage -eq 'Transport')
+                                $remoteState = $null
+                            }
                         }
                     }
-                    Write-Log ('Exchange certificate collection failed for {0}: {1}' -f $serverName, $failureMessage) -Level 'WARN'
-                    Add-ExchangeReadinessRow -Rows $Rows -Category 'ExchangeCertificate' -ObjectName $serverName -Setting 'Collection' -Value 'Failed' -MigrationFocus 'Review certificate collection failure for this server before namespace, TLS, hybrid, or SE readiness sign-off.' -Importance 'Warning' -CollectionStatus 'ERROR' -ErrorMessage $failureMessage
                 }
+                if ($null -ne $result) {
+                    foreach ($item in @($result.Items)) {
+                        $objectName = '{0}:{1}' -f $serverName,$item.Thumbprint
+                        Add-ExchangeReadinessRow -Rows $Rows -Category 'ExchangeCertificate' -ObjectName $objectName -Setting 'Server' -Value $serverName -MigrationFocus 'Certificate coverage and expiration readiness.' -Importance 'Review'
+                        Add-SmartM365InfrastructureCertificateProperties -Rows $Rows -InputObject $item -ObjectName $objectName -Mode $readMode
+                    }
+                    Write-Log ('Finished Exchange certificates from {0}. Certificates: {1}; source={2}' -f $serverName,@($result.Items).Count,$readMode)
+                }
+                else {
+                    $failure = @()
+                    if ($localFailure) { $failure += 'Local: ' + $localFailure }
+                    if ($remoteFailure) { $failure += 'Remote: ' + $remoteFailure }
+                    $message = 'Budget={0}s; elapsed={1:F3}s; {2}' -f $budget,$serverTimer.Elapsed.TotalSeconds,($failure -join '; ')
+                    Write-Log ('Exchange certificate collection failed for {0}: {1}' -f $serverName,$message) -Level 'WARN'
+                    Add-ExchangeReadinessRow -Rows $Rows -Category 'ExchangeCertificate' -ObjectName $serverName -Setting 'Collection' -Value 'Failed' -MigrationFocus 'Review certificate collection failure/timeout before readiness sign-off.' -Importance 'Warning' -CollectionStatus 'ERROR' -ErrorMessage $message
+                }
+            }
+            finally {
+                $serverTimer.Stop()
+                Write-Log ('Certificate server={0}; mode={1}; budget seconds={2}; duration seconds={3:F3}' -f $serverName,$mode,$budget,$serverTimer.Elapsed.TotalSeconds)
             }
         }
     }
     finally {
-        $timer.Stop()
-        try { Write-Log ('Certificate collection mode={0}; duration seconds={1:F3}; closing owned session.' -f $mode, $timer.Elapsed.TotalSeconds) }
-        finally {
-            if ($null -ne $script:ExchangeCertificateContext) {
-                Stop-SmartM365ExchangeOnPremSession -State $script:ExchangeCertificateContext
-                $script:ExchangeCertificateContext = $null
-            }
-        }
+        $phaseTimer.Stop()
+        try { Write-Log ('Certificate collection mode={0}; duration seconds={1:F3}; closing owned worker/session.' -f $mode,$phaseTimer.Elapsed.TotalSeconds) }
+        finally { Stop-SmartM365InfrastructureCertificateWorker -State $remoteState }
     }
 }
 
@@ -3569,8 +3549,8 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDGAaJcW0rfAPu4
-# 0mwBEMp3A2DH42gdPowk5RLytrSL+aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD4rdipba3RjTRu
+# OnxUt5DaWW+onEMmqMthsNl/rXAXWaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -3703,31 +3683,31 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIHalUmDdYbToZ5qG11PCoFR76vseup651QazHnKg6rcZMA0GCSqG
-# SIb3DQEBAQUABIIBgJKyU0G7Qidt6GAFO3jpgEHsDxtxXG8Q5J5EUAejMNVInEDK
-# ibrRZ4OtPB5PgyI38nlN2ybee4eM84pft7xrjPIVD+lTpiCVEEntZABGMd3G7yGE
-# F/X8aoxLN+/RM8m2pFs0njYizMJaDKL1C4ueHHyRXiKPirIT8B6y0dnI4w2/ztiU
-# XA3eRnVkSXi0TeWZnT6BWSwwaZk444OPAT9MpeRvqJRWOZOur5jDcCeAOTNW/RPa
-# GiinPZkeBrA1CjOjwFSeOQz/3Njb1lCeWkua/qoMA/YWpltRvAwLFjelYC4id4xL
-# lhueJA6/fASSwJOX16fZKuknuLribfSvUZW4cxVl1UGRNBQ9rDUKWzCkusTCARWI
-# noW8oHLOvU3gw/YMEEpbMhve+Qgpje0UjGKVm/0CtarphxAZ2o0wuOoSJvmWyJIq
-# tBI+djOfF0GKbbrc+3oUMzj6SdabC4cfteoe2PvQvbP8KZfv0fl4fy7sYIBIG5Ta
-# 0TqZ/Q5R1SA/b1ryI6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIKM5hL5gKULWpZvJXtllDt3zBuUkbR7amSv3EomAasH/MA0GCSqG
+# SIb3DQEBAQUABIIBgHo3fA/Wumxyf+Txsjyo4uBUSYGkDbjd1SqxikTFFEvKTmP0
+# wf/E97f57PWGzTPu0Az6ZKJJcXbkCFjlGghOGuclSsaXcdV+ZxCJ+CX4d7zhf+71
+# YiXi23a0MSaTEUzZSnC/TvsmXGNPZ3S1BbhlyPGyBshf5dn4y+8L+YqAIN84X8u6
+# 2Xgq/PmFtEMmYbrdoQUC/0rgRA4dJ+AwNaAn7yVHv6LwkaWvhf8vH4sNrU8eVPP0
+# XOCFL/C11fZyZFpZs5zDjbZX8SAt73VZY1aiCWurZJ/7bUpFzJ4vyISzhn/8b9co
+# Lhyy4fu746YyxvcE8Uxvgdyt6L074JHztvQXgD15QV8TLdxjGBlcOcUj9Ctp0yzQ
+# Bi5IoNa9TV17rJqExwNXHS8ACrOVcQbQq8QGhNlQOkm//W7qE9QJpn5JDMM89sWl
+# 3XBuJRCL1dexOPy0p0qUmP0+C+oZZTvNcN1kREtOaNjPdSXqtXeZfb9pYE5kC/2G
+# /fisyrySa21S41V7V6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjMyMTA1
-# MDVaMC8GCSqGSIb3DQEJBDEiBCBGgkRS8TQNPbcuaVmJOFX6KAoIJpeWlBIQC/u4
-# o7DwlzANBgkqhkiG9w0BAQEFAASCAgBd8+Huc8W3C+R2iRLgiQkcOjNTJ3mSpl3f
-# ZlZV2OpCVO0dV01rNaBhuGu3Dh4KSP2YW9+LNOuzoVIHBQKYdfcdu+xNM8NziK0T
-# MkQ/mCyfjMcBp4JDFcvhe7Molj9zeVN7ejMEcQKkCfENGAxnr2eFxbHF0dR5dNkA
-# NqU+wqC2IANByRyn12v7QBpubWUENhHy6RJ8yUkkz+HxUg70n4as8ThZxKbVDP7z
-# sKM9ccWAoU3XPF5nAejBrOB6uJ1H4J8oMG8LjELEiKzi0Oe+7nVL8z4L75bd/p0U
-# Zughq9zzKpY7yOZcZlD0kRoYSp6qEH3d0IWkveWrDjRklcw2GQ7Z/lcZ1RYywqDq
-# tgi1Y1cFbFuhUuyF6Byd10s4XGcqnuNRtJsT1i+chZC+A57LJH/6HSd3eHt97ILF
-# 4Mw6nZTbZhfp4vb/KCB67h6NPAaR28brmt9Jsh1J+339Q/LGJHwkodauLTgACqD1
-# ymjpZPxyIU2M0eW2RHasQpykAzCIMhFUGnuM81RPdDcpxx1IgbXYmm/RZ0lTZngq
-# bm1k0pgilHNx5pkZ4leMVeYTMp3QuNcofUDSGvbTJ7tNfmceUjwkcNKJ8kNHXlj3
-# JUIn0oxC/wX8nARQLeBGtuYgu+YfVh+P3L7dpjEqcNT/lcjZ6QpM6jUp3yc3ZzRX
-# ypVNf66ljQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjMyMzE2
+# MDhaMC8GCSqGSIb3DQEJBDEiBCCwBPbuP2sXepkay5gKMTmxIKJpY2k/LqiElX/q
+# +iAHjjANBgkqhkiG9w0BAQEFAASCAgCAuiF5K3aMiW/4LcHctSVpTYTtwPK3fRf8
+# BF+jG4I/pWCUk7j5OeNoLR75QJm0CLOc9lX/oOvuqBQ0+hcYl6Q51lo26wwW2zob
+# FowQH4sGCo7zahrsUW+HrcuTbXQjb7duLVoc66h2Frq/fys1UPVRWZDAASaaYm/a
+# QeCe0Hr219vHyqHH4IGI9CPGowqy3y7iA8o4HASnIjTp3CYwLXw/ZH2MPcc5qZtY
+# +NLFUe1e2gSAih4fo4Zf7YvvIiVZgo/whY58NAeP6KP7zW/Rh0B0GMBjQX1D37U/
+# L23lrxz8J9g1ZGml9037NVSsb+MTHOtwcMwfYBOMCmb8Wiz3PS8X4lFqaQV2+mkU
+# KWPFh2zLB/A3KuiffNt5BsuTFTqLKB0uoDXPvi7cvynZuWiqnfHn54Lhf//87gRL
+# ihiqRMHf8k4A6+lJqZ8Ihuf08NgWP4SkIf4BJkuT8ni8qLhRVgReiO+P0suunvYA
+# nHZM9K6WHhuPqMgMUDOBcKKxJOArovuNJWJ6E1xC4AuAQa0nhQSbcXApG9BbLOp+
+# S/7Y7ftjArmt4OFV2RsfMPWt1HFoopRtaszzZez96wLeHfquXDgrzoC5HxRPxw54
+# XxEh0GFmTnE6qkPNiCPgD0gZFPLLE8aPpwTxoeEqEl1dUhIQg+9VVinnT1ObB6C3
+# JKywh5diIg==
 # SIG # End signature block

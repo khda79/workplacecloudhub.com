@@ -1,276 +1,312 @@
 ﻿#Requires -Version 5.1
-<# .SYNOPSIS Offline infrastructure certificate session and wire-property tests. .VERSION 1.0.1 #>
+<# .SYNOPSIS Offline certificate budgets, workers, projections and infrastructure continuation. .VERSION 1.1.0 #>
 [CmdletBinding()]
 param()
 Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
 $smartRoot=Split-Path $PSScriptRoot -Parent
 $collector=Join-Path $smartRoot 'SmartInventory/ExchangeInventory/OnPremises/ServersAndStorage/SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory.ps1'
-. (Join-Path $smartRoot 'Modules/SmartM365.Core/SmartM365-ExchangeOnPremSession.ps1')
-$tokens=$null;$parseErrors=$null
-$ast=[Management.Automation.Language.Parser]::ParseFile($collector,[ref]$tokens,[ref]$parseErrors)
+$worker=Join-Path (Split-Path $collector) 'SmartM365-Exchange-OnPrem-CertificateWorker.ps1'
+. $worker
+$tokens=$null;$errors=$null
+$ast=[Management.Automation.Language.Parser]::ParseFile($collector,[ref]$tokens,[ref]$errors)
 $checks=0
 function Check([bool]$Condition,[string]$Message){if(-not $Condition){throw $Message};$script:checks++}
-Check ($parseErrors.Count -eq 0) 'Collector parser failed'
-foreach($name in @('Write-Log','Get-ExchangeReadinessInventory','ConvertTo-ReadinessText','Get-ObjectPropertyValue','Add-ExchangeReadinessRow','Add-ExchangeReadinessProperties',
-    'Invoke-SmartM365InfrastructureCertificatesLocalFirst','Invoke-ExchangeReadinessCollector','Initialize-SmartM365InfrastructureCertificateConnection','Get-SmartM365InfrastructureCertificates',
-    'Add-SmartM365InfrastructureCertificateProperties','Invoke-SmartM365InfrastructureCertificateInventory')) {
+Check ($errors.Count -eq 0) 'Collector parser failed'
+foreach($name in @('Write-Log','Get-ExchangeReadinessInventory','ConvertTo-ReadinessText','Get-ObjectPropertyValue','Add-ExchangeReadinessRow','Add-ExchangeReadinessProperties','Invoke-ExchangeReadinessCollector','Stop-SmartM365InfrastructureCertificateWorker','Add-SmartM365InfrastructureCertificateProperties','Invoke-SmartM365InfrastructureCertificateInventory')){
     $node=$ast.Find({param($n)$n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name},$true)
-    Check ($null -ne $node) ('Missing production function: '+$name)
+    Check ($null -ne $node) ('Missing production function '+$name)
     . ([scriptblock]::Create($node.Extent.Text))
 }
-function Wire($Value){[Management.Automation.PSSerializer]::Deserialize([Management.Automation.PSSerializer]::Serialize($Value,10))}
-$script:collectorWriteLog=(Get-Command Write-Log).ScriptBlock
-function Write-Log {param($Message,$Level='INFO') $script:messages.Add(($Level+': '+$Message)); & $script:collectorWriteLog -Message $Message -Level $Level}
-function Get-SmartM365EffectiveConfigValue {param($Name,$DefaultValue) if($Name -eq 'ExchangeConnectionMode'){if($null -eq $script:mode){$DefaultValue}else{$script:mode}}else{$DefaultValue}}
-function Get-Command {
-    [CmdletBinding()]param([string]$Name,[string[]]$CommandType)
-    if($Name -eq 'Microsoft.Exchange.Management.PowerShell.SnapIn\Get-ExchangeCertificate'){
-        Check ($CommandType -contains 'Cmdlet') 'LocalFirst did not bind the native snap-in cmdlet'
-        return Microsoft.PowerShell.Core\Get-Command Get-SyntheticNativeCertificate
-    }
-    Microsoft.PowerShell.Core\Get-Command @PSBoundParameters
-}
-function Get-SyntheticNativeCertificate {
-    [CmdletBinding()]param([string]$Server)
-    $script:nativeCalls++
-    $script:fixture.NativeTargets.Add($Server)
-    if($script:fixture.Scenario -eq 'LocalCancel'){throw [OperationCanceledException]::new('Synthetic local cancellation')}
-    if(($script:fixture.Scenario -in @('RetryOne','RetryRemoteDenied','ConnectFailure','ImportDenied','RemoteCancel','RetryBroken')) -and $Server -eq 'SYNTHETIC-EX01'){
-        throw 'Synthetic native access denied'
-    }
-    if($script:fixture.Scenario -eq 'RetryMany' -and $Server -ne 'SYNTHETIC-EX03'){throw 'Synthetic native access denied'}
-    if($script:fixture.Scenario -eq 'RetryUnavailable' -and $Server -ne 'SYNTHETIC-EX03'){throw 'Synthetic native access denied'}
-    $script:fixture.NativeItems
-}
-function New-PSSession {
-    [CmdletBinding()]param($ConfigurationName,$ConnectionUri,$Authentication)
-    $script:created++
-    Check ($ConfigurationName -eq 'Microsoft.Exchange' -and $Authentication -eq 'Kerberos') 'Wrong Exchange endpoint/authentication'
-    if($script:fixture.Scenario -in @('ConnectFailure','RetryUnavailable')){throw 'Synthetic connection failure'}
-    $script:fixture.Session=[pscustomobject]@{State='Opened';Id=42}
-    $script:fixture.Session
-}
-function Import-PSSession {
-    [CmdletBinding()]param($Session,[string[]]$CommandName,[switch]$AllowClobber,[switch]$DisableNameChecking)
-    Check ($CommandName.Count -eq 1 -and $CommandName[0] -eq 'Get-ExchangeCertificate') 'Remote import exceeded certificate scope'
-    if($script:fixture.Scenario -eq 'ImportDenied'){throw 'Synthetic certificate import denied'}
-    if($script:fixture.Scenario -eq 'MissingRequired'){return New-Module -Name ('SyntheticMissing'+[guid]::NewGuid().ToString('N')) -ScriptBlock {function Get-SyntheticMissing {}}}
-    $module=New-Module -Name ('SyntheticCertificates'+[guid]::NewGuid().ToString('N')) -ArgumentList $script:fixture -ScriptBlock {
-        param($Fixture)
-        $script:Fixture=$Fixture
-        function Get-ExchangeCertificate {
-            [CmdletBinding()]param([string]$Server)
-            $script:Fixture.Calls.Add($Server)
-            if($script:Fixture.Scenario -eq 'RemoteCancel'){throw [OperationCanceledException]::new('Synthetic remote cancellation')}
-            if($script:Fixture.Scenario -eq 'RetryBroken'){$script:Fixture.Session.State='Broken';throw 'Synthetic retry session broken'}
-            if($script:Fixture.Scenario -eq 'RetryRemoteDenied'){throw 'Synthetic remote target denied'}
-            if($script:Fixture.Scenario -eq 'BreakAfterFirst' -and $Server -eq 'SYNTHETIC-EX02'){$script:Fixture.Session.State='Broken';throw 'Synthetic remote session broken after one target'}
-            if($script:Fixture.Scenario -eq 'BrokenSession'){$script:Fixture.Session.State='Broken';throw 'Synthetic remote session broken'}
-            if($script:Fixture.Scenario -eq 'TargetDenied' -and $Server -eq 'SYNTHETIC-EX01'){throw 'Synthetic target access is denied'}
-            if($script:Fixture.Scenario -eq 'Empty'){return}
-            if($script:Fixture.Scenario -eq 'ShadowProxy'){Set-Item -Path Function:global:Get-ExchangeCertificate -Value $script:Fixture.NativeScriptBlock}
-            $script:Fixture.Items
-        }
-    }
-    $script:fixture.ModuleName=$module.Name
-    $module
-}
-function Remove-PSSession {[CmdletBinding()]param($Session) Check ($Session.Id -eq 42) 'Removed unrelated session';$script:removed++}
-function Reset-Fixture([string]$Scenario='Complete',[string]$Mode='Remote') {
-    $script:mode=$Mode;$script:created=0;$script:removed=0;$script:nativeCalls=0
-    $script:ServersAndStorageWarningCount=0;$script:ServersAndStorageErrorCount=0
-    $script:ExchangeCertificateContext=$null;$script:messages=New-Object 'System.Collections.Generic.List[string]'
-    $item=[pscustomobject]@{Thumbprint=('1'*40);Subject='CN=mail.example.test';CertificateDomains=@('mail.example.test');Services='IIS, SMTP';NotBefore=[datetime]'2026-01-01T00:00:00Z';NotAfter=[datetime]'2027-01-01T00:00:00Z';IsSelfSigned=$false;Status='Valid'}
-    if($Scenario -eq 'MissingMetadata') {
-        $item=[pscustomobject]@{Thumbprint=('2'*40);Subject='CN=mail.example.test';DnsNameList=@([pscustomobject]@{Unicode='mail.example.test'},[pscustomobject]@{Unicode='autodiscover.example.test'});NotBefore='01/02/2026 12:00:00';NotAfter='01/02/2027 12:00:00'}
-    }
-    $nativeItem=$item
-    if($Mode -eq 'LocalFirst' -or $null -eq $Mode){$item=[pscustomobject]@{Thumbprint=('2'*40);Subject='CN=mail.example.test';DnsNameList=@('mail.example.test');NotBefore='raw-date';NotAfter='raw-date'}}
-    $script:fixture=[pscustomobject]@{NativeItems=@($nativeItem);NativeTargets=(New-Object 'System.Collections.Generic.List[string]');Scenario=$Scenario;Session=$null;ModuleName='';Items=@((Wire $item));Calls=(New-Object 'System.Collections.Generic.List[string]');NativeScriptBlock=(Get-Command Get-ExchangeCertificate).ScriptBlock}
-}
-$savedCertificate=Get-Command Get-ExchangeCertificate -CommandType Function -ErrorAction SilentlyContinue
-$savedServer=Get-Command Get-ExchangeServer -CommandType Function -ErrorAction SilentlyContinue
-function global:Get-ExchangeCertificate {[CmdletBinding()]param($Server) $script:nativeCalls++;$script:fixture.Items}
-function global:Get-ExchangeServer {'SyntheticNativeExchangeServer'}
-$fixtureRoot=Join-Path ([IO.Path]::GetTempPath()) ('InfrastructureCertificates-'+[guid]::NewGuid().ToString('N'))
+$realLogger=(Get-Command Write-Log).ScriptBlock
+function Write-Log {param($Message,$Level='INFO') $script:messages.Add($Level+': '+$Message);& $realLogger -Message $Message -Level $Level}
+$script:InfrastructureCertificateWorkerPath=$worker
+$smartM365LifecycleRoot=$smartRoot
+$fixtureRoot=Join-Path ([IO.Path]::GetTempPath()) ('CertificateBudget-'+[guid]::NewGuid().ToString('N'))
 $null=New-Item -ItemType Directory -Path $fixtureRoot
 $LogFile=Join-Path $fixtureRoot 'synthetic.log'
-try {
-    foreach($mode in @('Remote','LocalSnapin')) {
-        Reset-Fixture -Mode $mode
-        $rows=New-Object 'System.Collections.Generic.List[object]'
-        Invoke-SmartM365InfrastructureCertificateInventory -Rows $rows -ExchangeServerNames @('SYNTHETIC-EX01','SYNTHETIC-EX02')
-        Check ($rows.Count -eq 16) ('Existing certificate schema changed in '+$mode)
-        Check (@($rows | Where-Object CollectionStatus -ne 'OK').Count -eq 0) 'Known native/wire properties were not preserved'
-        Check (@($rows | Where-Object {$_.Setting -eq 'IsSelfSigned' -and $_.Value -eq 'False'}).Count -eq 2) 'False became unknown'
-        Check ((Get-ExchangeServer) -eq 'SyntheticNativeExchangeServer') 'Non-certificate Exchange command changed'
-        Check ($null -eq $script:ExchangeCertificateContext) 'Context retained after certificate phase'
-        if($mode -eq 'Remote') {
-            Check ($script:created -eq 1 -and $script:removed -eq 1 -and $script:nativeCalls -eq 0) 'Remote session count or fallback incorrect'
-            Check ($script:fixture.Calls.Count -eq 2 -and -not(Get-Module $script:fixture.ModuleName)) 'Remote server calls or cleanup incorrect'
-        }
-        else {Check ($script:created -eq 0 -and $script:nativeCalls -eq 2) 'LocalSnapin behavior changed'}
-        Check (($script:messages -join '|') -match 'duration seconds=') 'Certificate duration missing'
+$realStart=(Get-Command Start-SmartM365CertificateWorker).ScriptBlock
+$realRead=(Get-Command Invoke-SmartM365CertificateWorkerRead).ScriptBlock
+$realStop=(Get-Command Stop-SmartM365CertificateWorker).ScriptBlock
+$hostExe=Join-Path $PSHOME $(if($PSVersionTable.PSEdition -eq 'Desktop'){'powershell.exe'}else{'pwsh.exe'})
+function Reset-Fixture([string]$Case='Complete',[string]$Mode='LocalFirst',[object]$Budget=120){
+    $script:case=$Case;$script:mode=$Mode;$script:budget=$Budget
+    $script:messages=New-Object 'System.Collections.Generic.List[string]'
+    $script:ServersAndStorageWarningCount=0;$script:ServersAndStorageErrorCount=0
+    $script:starts=New-Object 'System.Collections.Generic.List[object]'
+    $script:reads=New-Object 'System.Collections.Generic.List[object]'
+    $script:states=New-Object 'System.Collections.Generic.List[object]'
+}
+function Get-SmartM365EffectiveConfigValue {
+    param($Name,$DefaultValue)
+    if($Name -eq 'ExchangeConnectionMode'){if($null -eq $script:mode){$DefaultValue}else{$script:mode}}
+    elseif($Name -eq 'CertificateTimeoutSecondsPerServer'){if($null -eq $script:budget){$DefaultValue}else{$script:budget}}
+    else{$DefaultValue}
+}
+function New-SyntheticCertificate {
+    [pscustomobject]@{Thumbprint=('1'*40);Subject='CN=mail.example.test';Services='IIS, SMTP';Status='Valid';IsSelfSigned=$false;CertificateDomains=@('mail.example.test');NotBefore=[datetime]'2026-01-01';NotAfter=[datetime]'2027-01-01'}
+}
+try{
+    Reset-Fixture
+    # Compare native snapshot values with the actual pre-IPC renderer, including enum/zero/false/null/arrays/dates.
+    foreach($value in @('IIS, SMTP',[IO.FileAttributes]'ReadOnly, Hidden',0,$false,$null,@(),@('a','b'),[datetime]'2027-01-02')){
+        $c=New-SyntheticCertificate;$c.Services=$value
+        $snapshot=ConvertTo-SmartM365CertificateSnapshot -Certificate $c -Mode Native
+        $wire=[Management.Automation.PSSerializer]::Deserialize([Management.Automation.PSSerializer]::Serialize($snapshot))
+        Check ((ConvertTo-ReadinessText $value) -ceq (ConvertTo-ReadinessText $wire.Services)) 'Native value changed during snapshot/IPC'
     }
-    Reset-Fixture 'MissingMetadata'
+    $enum=New-SyntheticCertificate
+    $enum.Services=[IO.FileAttributes]'ReadOnly, Hidden'
+    $enumSnapshot=ConvertTo-SmartM365CertificateSnapshot -Certificate $enum -Mode Remote
+    $enumWire=$enumSnapshot|ConvertTo-Json -Depth 8|ConvertFrom-Json
+    Check ($enumWire.Services -ceq [string]$enum.Services) 'Remote enum turned into numeric JSON instead of its known text'
+    $missing=[pscustomobject]@{Thumbprint=('2'*40);Subject='CN=mail.example.test';DnsNameList=@([pscustomobject]@{Unicode='mail.example.test'});NotBefore='raw-date';NotAfter='raw-date'}
+    $snapshot=ConvertTo-SmartM365CertificateSnapshot -Certificate $missing -Mode Remote
     $rows=New-Object 'System.Collections.Generic.List[object]'
-    Invoke-SmartM365InfrastructureCertificateInventory -Rows $rows -ExchangeServerNames @('SYNTHETIC-EX01')
-    Check (@($rows|Where-Object {$_.Value -eq 'Unknown' -and $_.CollectionStatus -eq 'WARNING'}).Count -eq 3) 'Missing Services/Status/IsSelfSigned must be Unknown'
-    Check (@($rows|Where-Object {$_.Setting -eq 'CertificateDomains' -and $_.Value -eq 'mail.example.test; autodiscover.example.test'}).Count -eq 1) 'Wire DNS names were lost or invented'
-    Check (@($rows|Where-Object {$_.Setting -eq 'NotAfter' -and $_.Value -eq '01/02/2027 12:00:00'}).Count -eq 1) 'Display date text was interpreted instead of preserved'
-    Check (($script:messages -join '|') -match 'metadata unavailable') 'Remote property loss was not logged'
-
-    Reset-Fixture 'Complete'
-    $item=Wire ([pscustomobject]@{Subject='CN=synthetic';CertificateDomains=@();Services=0;IsSelfSigned=$false;NotBefore='Unknown';NotAfter='Unknown';Status='Unknown'})
+    Add-SmartM365InfrastructureCertificateProperties -Rows $rows -InputObject $snapshot -ObjectName synthetic -Mode Remote
+    Check (@($rows|Where-Object Value -eq Unknown).Count -eq 3) 'Remote missing metadata became known'
+    Check (@($rows|Where-Object {$_.Setting -eq 'CertificateDomains' -and $_.Value -eq 'mail.example.test'}).Count -eq 1) 'Remote DNS fallback lost'
+    Check (@($rows|Where-Object {$_.Setting -eq 'NotAfter' -and $_.Value -eq 'raw-date'}).Count -eq 1) 'Remote date reinterpreted'
+    $known=[pscustomobject]@{Thumbprint=('3'*40);Subject='s';CertificateDomains=@();Services=0;IsSelfSigned=$false;Status='Valid';NotBefore='x';NotAfter='x'}
+    $snapshot=ConvertTo-SmartM365CertificateSnapshot -Certificate $known -Mode Remote
     $rows=New-Object 'System.Collections.Generic.List[object]'
-    Add-SmartM365InfrastructureCertificateProperties -Rows $rows -InputObject $item -ObjectName 'synthetic' -Mode Remote
-    Check (@($rows|Where-Object {$_.Setting -eq 'Services' -and $_.Value -eq '0' -and $_.CollectionStatus -eq 'OK'}).Count -eq 1) 'Known zero became missing'
-    Check (@($rows|Where-Object {$_.Setting -eq 'CertificateDomains' -and $_.Value -eq '(none)'}).Count -eq 1) 'Known empty domain list became an error'
+    Add-SmartM365InfrastructureCertificateProperties -Rows $rows -InputObject $snapshot -ObjectName synthetic -Mode Remote
+    Check (@($rows|Where-Object {$_.Setting -eq 'Services' -and $_.Value -eq '0'}).Count -eq 1) 'Remote zero lost'
+    Check (@($rows|Where-Object {$_.Setting -eq 'IsSelfSigned' -and $_.Value -eq 'False'}).Count -eq 1) 'Remote false lost'
+    Check (@($rows|Where-Object {$_.Setting -eq 'CertificateDomains' -and $_.Value -eq '(none)'}).Count -eq 1) 'Remote empty list lost'
 
-    $fallback=Wire ([pscustomobject]@{Subject='CN=synthetic';CertificateDomains=@('mail.example.test');ServicesStringForm='None';IsSelfSigned=$true;NotBefore='2026-01-01T00:00:00Z';NotAfter='2027-01-01T00:00:00Z';Status='Valid'})
-    $rows=New-Object 'System.Collections.Generic.List[object]'
-    Add-SmartM365InfrastructureCertificateProperties -Rows $rows -InputObject $fallback -ObjectName 'synthetic' -Mode Remote
-    Check (@($rows|Where-Object {$_.Setting -eq 'Services' -and $_.Value -eq 'None' -and $_.CollectionStatus -eq 'OK'}).Count -eq 1) 'Explicit ServicesStringForm was lost'
-    Check (@($rows|Where-Object {$_.Setting -eq 'IsSelfSigned' -and $_.Value -eq 'True'}).Count -eq 1) 'True self-signed flag was lost'
-
-    foreach($scenario in @('Empty','TargetDenied','BrokenSession','BreakAfterFirst','ShadowProxy','ConnectFailure','ImportDenied','MissingRequired')) {
-        Reset-Fixture $scenario
-        $rows=New-Object 'System.Collections.Generic.List[object]';$caught=$null;$continued=$false
+    # Real child processes run only synthetic Exchange primitives, using the production worker loop.
+    $wrapper=Join-Path $fixtureRoot 'synthetic-worker.ps1'
+    $quotedWorker=$worker.Replace("'","''")
+    $wrapperCode=@(
+        'param([switch]$RunWorker,[string]$WorkerMode,[string]$WorkerRoot)',
+        '$savedMode=$WorkerMode;$savedRoot=$WorkerRoot',
+        ('. ''{0}''' -f $quotedWorker),
+        'function Add-PSSnapin {param($Name)}',
+        'function Get-SyntheticNative { [CmdletBinding()]param($Server) if($Server -like ''*HANG*''){Start-Sleep -Seconds 30}; if($Server -like ''*DENY*''){throw ''Synthetic native denied''}; [pscustomobject]@{Thumbprint=(''1''*40);Subject=''CN=synthetic'';Services=''IIS, SMTP'';Status=''Valid'';IsSelfSigned=$false;CertificateDomains=@(''mail.example.test'');NotAfter=''raw-date'';NotBefore=''raw-date''} }',
+        'function Get-Command { [CmdletBinding()]param($Name,$CommandType) if($Name -eq ''Microsoft.Exchange.Management.PowerShell.SnapIn\Get-ExchangeCertificate''){return Microsoft.PowerShell.Core\Get-Command Get-SyntheticNative}; Microsoft.PowerShell.Core\Get-Command @PSBoundParameters }',
+        'Invoke-SmartM365CertificateChildLoop -Mode $savedMode -Root $savedRoot'
+    ) -join [Environment]::NewLine
+    [IO.File]::WriteAllText($wrapper,$wrapperCode,[Text.UTF8Encoding]::new($true))
+    $core=Join-Path $fixtureRoot 'Modules/SmartM365.Core'
+    $null=New-Item -ItemType Directory -Path $core -Force
+    $coreCode=@(
+        'function Start-SmartM365ExchangeOnPremSession { param($RequiredCommands)',
+        ' $case=Get-Content (Join-Path $Root ''scenario.txt'') -Raw',
+        ' Add-Content (Join-Path $Root ''sessions.txt'') ''start''',
+        ' if($case -eq ''InitHang''){Start-Sleep -Seconds 30}; if($case -eq ''ImportHang''){Start-Sleep -Seconds 30}; if($case -eq ''InitDenied''){throw ''Synthetic import denied''}',
+        ' $module=New-Module -Name SyntheticCertificates -ScriptBlock { function Get-ExchangeCertificate { [CmdletBinding()]param($Server) if($Server -like ''*HANG*''){Start-Sleep -Seconds 30};if($Server -like ''*DENY*''){throw ''Synthetic remote denied''};[pscustomobject]@{Thumbprint=(''2''*40);Subject=''CN=synthetic'';DnsNameList=@(''mail.example.test'');NotAfter=''raw-date'';NotBefore=''raw-date''} } }',
+        ' Import-Module $module -Global -Force',
+        ' [pscustomobject]@{Session=[pscustomobject]@{State=''Opened''};Module=$module}',
+        '}',
+        'function Stop-SmartM365ExchangeOnPremSession {param($State) Add-Content (Join-Path $Root ''closed.txt'') ''closed'';Remove-Module $State.Module -Force}'
+    ) -join [Environment]::NewLine
+    [IO.File]::WriteAllText((Join-Path $core 'SmartM365-ExchangeOnPremSession.ps1'),$coreCode,[Text.UTF8Encoding]::new($true))
+    Set-Content (Join-Path $fixtureRoot 'scenario.txt') 'Complete' -NoNewline
+    $state=$null
+    try{
+        $state=Start-SmartM365CertificateWorker -Mode Native -Root $fixtureRoot -WorkerPath $wrapper -PowerShellPath $hostExe
+        $childId=$state.Process.Id
+        $reply=Invoke-SmartM365CertificateWorkerRead $state SYNTHETIC-OK 10
+        Check ($reply.Status -eq 'Success' -and @($reply.Items).Count -eq 1 -and $reply.Items[0].Services -eq 'IIS, SMTP') 'Real native worker lost metadata'
+    }finally{Stop-SmartM365CertificateWorker $state}
+    Check ($null -eq (Get-Process -Id $childId -ErrorAction SilentlyContinue)) 'Native worker orphaned'
+    $state=$null
+    try{
+        $state=Start-SmartM365CertificateWorker -Mode Remote -Root $fixtureRoot -WorkerPath $wrapper -PowerShellPath $hostExe
+        $childId=$state.Process.Id
+        foreach($server in @('SYNTHETIC-OK1','SYNTHETIC-OK2')){
+            $reply=Invoke-SmartM365CertificateWorkerRead $state $server 10
+            Check ($reply.Status -eq 'Success' -and $reply.SessionReady) 'Real remote worker failed'
+            Check ($null -eq $reply.Items[0].PSObject.Properties['Services']) 'Worker invented remote Services'
+        }
+        Check (@(Get-Content (Join-Path $fixtureRoot 'sessions.txt')).Count -eq 1) 'Real worker opened more than one session'
+    }finally{Stop-SmartM365CertificateWorker $state}
+    Check ((Test-Path (Join-Path $fixtureRoot 'closed.txt')) -and $null -eq (Get-Process -Id $childId -ErrorAction SilentlyContinue)) 'Remote finally/session/process cleanup failed'
+    foreach($case in @('NativeHang','RemoteHang','InitHang','ImportHang')){
+        Set-Content (Join-Path $fixtureRoot 'scenario.txt') $case -NoNewline
+        $state=$null;$watch=[Diagnostics.Stopwatch]::StartNew()
         try{
-            Invoke-SmartM365InfrastructureCertificateInventory -Rows $rows -ExchangeServerNames @('SYNTHETIC-EX01','SYNTHETIC-EX02','SYNTHETIC-EX03')
-            $continued=$true
-        }catch{$caught=$_}
-        Check ($null -eq $caught -and $continued) ('Certificate failure stopped infrastructure: '+$scenario)
-        Check ($script:nativeCalls -eq 0 -and $null -eq $script:ExchangeCertificateContext) 'Failure used fallback or leaked context'
-        Check ($script:created -eq 1 -and $script:removed -eq [int]($scenario -ne 'ConnectFailure')) ('Failure leaked owned session: '+$scenario)
-        $failed=@($rows | Where-Object {$_.Category -eq 'ExchangeCertificate' -and $_.Setting -eq 'Collection' -and $_.Value -eq 'Failed' -and $_.CollectionStatus -eq 'ERROR'})
-        if($scenario -eq 'Empty'){Check ($rows.Count -eq 0 -and ($script:messages -join '|') -match 'Certificates: 0') 'Known empty result was not distinguished';continue}
-        $expectedFailed=if($scenario -eq 'TargetDenied'){@('SYNTHETIC-EX01')}elseif($scenario -in @('ShadowProxy','BreakAfterFirst')){@('SYNTHETIC-EX02','SYNTHETIC-EX03')}else{@('SYNTHETIC-EX01','SYNTHETIC-EX02','SYNTHETIC-EX03')}
-        Check (($failed.ObjectName -join ',') -eq ($expectedFailed -join ',')) ('Failed diagnostics missing/duplicated or successful target invalidated: '+$scenario)
-        Check (($script:messages -join '|') -notmatch 'Certificates: 0') 'Failed targets became a known zero'
-        if($scenario -eq 'TargetDenied') {Check ($rows.Count -eq 17 -and $script:fixture.Calls.Count -eq 3) 'Target-specific failure prevented other targets';continue}
-        Check (@($failed | Where-Object {$_.ErrorMessage -notmatch 'Remote certificate session unavailable; no LocalSnapin fallback'}).Count -eq 0) 'Session failure diagnostic omitted no-fallback reason'
-        Check ($script:ServersAndStorageErrorCount -eq 1 -and $script:ServersAndStorageWarningCount -gt 0) 'Session failure was not counted by real collector logging'
-        Check (($script:messages -join '|') -match 'ERROR: ExchangeConnectionMode=Remote; certificate state=Failed; no fallback') 'Missing explicit session ERROR'
-        if($scenario -in @('BrokenSession','ShadowProxy')){Check ($script:fixture.Calls.Count -eq 1) 'Unavailable session/proxy continued target calls'}
-        if($scenario -eq 'BreakAfterFirst'){Check ($script:fixture.Calls.Count -eq 2 -and $rows.Count -eq 10) 'Successful certificate rows were lost or unread target called'}
-        if($scenario -in @('ConnectFailure','ImportDenied','MissingRequired')){Check ($script:fixture.Calls.Count -eq 0) 'Startup failure still called certificates'}
+            $state=Start-SmartM365CertificateWorker -Mode $(if($case -eq 'NativeHang'){'Native'}else{'Remote'}) -Root $fixtureRoot -WorkerPath $wrapper -PowerShellPath $hostExe
+            $childId=$state.Process.Id
+            $reply=Invoke-SmartM365CertificateWorkerRead $state $(if($case -like '*Hang' -and $case -notin @('InitHang','ImportHang')){'SYNTHETIC-HANG'}else{'SYNTHETIC-OK'}) 1
+            Check ($reply.Status -eq 'Timeout' -and @($reply.Items).Count -eq 0) ('Hung worker returned success/partial data: '+$case)
+        }finally{Stop-SmartM365CertificateWorker $state -Force;$watch.Stop()}
+        Check ($watch.Elapsed.TotalSeconds -lt 6 -and $null -eq (Get-Process -Id $childId -ErrorAction SilentlyContinue)) ('Hung worker not bounded/cleaned: '+$case)
     }
-    Reset-Fixture -Mode Invalid
-    $caught=$null;try{Invoke-SmartM365InfrastructureCertificateInventory -Rows (New-Object 'System.Collections.Generic.List[object]')}catch{$caught=$_}
-    Check ($null -ne $caught -and $script:created -eq 0) 'Invalid mode accepted'
+    foreach($payload in @('malformed','{"RequestId":"wrong","Status":"Success","Items":[]}')){
+        $bad=Join-Path $fixtureRoot 'bad-worker.ps1'
+        $badCode='[Console]::Out.WriteLine('''+$payload.Replace("'","''")+''');Start-Sleep -Seconds 30'
+        [IO.File]::WriteAllText($bad,$badCode,[Text.UTF8Encoding]::new($true))
+        $state=$null
+        try{
+            $state=Start-SmartM365CertificateWorker -Mode Native -Root $fixtureRoot -WorkerPath $bad -PowerShellPath $hostExe
+            $reply=Invoke-SmartM365CertificateWorkerRead $state SYNTHETIC-OK 5
+            Check ($reply.Status -eq 'Failed' -and @($reply.Items).Count -eq 0) 'Malformed/truncated response promoted to success'
+        }finally{Stop-SmartM365CertificateWorker $state -Force}
+    }
 
-    # LocalFirst preserves native metadata and retries only failed targets, with one lazy session.
-    foreach($scenario in @('Complete','RetryOne','RetryMany','RetryRemoteDenied','ConnectFailure','ImportDenied','RetryUnavailable','RetryBroken','LocalCancel','RemoteCancel')) {
-        Reset-Fixture $scenario LocalFirst
-        $rows=New-Object 'System.Collections.Generic.List[object]';$caught=$null;$continued=$false
-        try{Invoke-SmartM365InfrastructureCertificateInventory -Rows $rows -ExchangeServerNames @('SYNTHETIC-EX01','SYNTHETIC-EX02','SYNTHETIC-EX03');$continued=$true}catch{$caught=$_}
-        $cancelled=$scenario -in @('LocalCancel','RemoteCancel')
-        Check ($continued -eq (-not $cancelled)) ('LocalFirst continuation/cancellation incorrect: '+$scenario)
-        if($cancelled){
-            Check ($null -ne $caught -and $caught.Exception -is [OperationCanceledException]) 'Cancellation was converted into a certificate failure'
-            Check (@($rows|Where-Object Setting -eq Collection).Count -eq 0) 'Cancellation produced Failed/ERROR'
-            Check ($script:fixture.NativeTargets.Count -eq 1) 'Cancellation continued to later servers'
-            Check ($script:created -eq [int]($scenario -eq 'RemoteCancel') -and $script:removed -eq $script:created) 'Cancellation leaked/opened a session'
-            continue
-        }
-        Check ($null -eq $caught -and $script:nativeCalls -eq 3) ('LocalFirst skipped local reads after importing proxy: '+$scenario)
-        Check (($script:fixture.NativeTargets -join ',') -eq 'SYNTHETIC-EX01,SYNTHETIC-EX02,SYNTHETIC-EX03') 'Native per-target order changed'
-        $expectedRetries=if($scenario -eq 'Complete'){0}elseif($scenario -in @('RetryMany','RetryUnavailable')){2}else{1}
-        $paths=@($rows|Where-Object {$_.Setting -eq 'CollectionPath' -and $_.Value -eq 'RemoteRetry'})
-        Check ($paths.Count -eq $expectedRetries) 'RemoteRetry provenance missing or native success retried'
-        Check ($script:created -eq [int]($expectedRetries -gt 0)) 'Session was not lazy or was opened more than once'
-        Check ($script:removed -eq [int]($expectedRetries -gt 0 -and $scenario -notin @('ConnectFailure','RetryUnavailable'))) 'Session cleanup incorrect'
-        Check ($null -eq $script:ExchangeCertificateContext) 'LocalFirst retained context'
-        $failed=@($rows|Where-Object {$_.Setting -eq 'Collection' -and $_.Value -eq 'Failed' -and $_.CollectionStatus -eq 'ERROR'})
-        $expectedFailures=if($scenario -eq 'RetryUnavailable'){2}elseif($scenario -in @('RetryRemoteDenied','ConnectFailure','ImportDenied','RetryBroken')){1}else{0}
-        Check ($failed.Count -eq $expectedFailures) ('LocalFirst failure diagnostics incorrect: '+$scenario)
-        Check (@($failed|Where-Object {$_.ErrorMessage -notmatch 'Local: Synthetic native access denied; Remote: .+'}).Count -eq 0) 'Combined local/remote error lost'
-        $knownNative=@($rows|Where-Object {$_.Setting -eq 'Services' -and $_.Value -eq 'IIS, SMTP'})
-        Check ($knownNative.Count -eq (3-$expectedRetries)) 'Native metadata lost after proxy import'
-        $expectedRemote=if($scenario -eq 'RetryMany'){2}elseif($scenario -eq 'RetryOne'){1}else{0}
-        Check (@($rows|Where-Object {$_.Setting -eq 'Services' -and $_.Value -eq 'Unknown'}).Count -eq $expectedRemote) 'Remote metadata rendering changed or native metadata became Unknown'
-        Check ($script:fixture.Calls.Count -eq $(if($scenario -in @('ConnectFailure','RetryUnavailable','ImportDenied')){0}else{$expectedRetries})) 'Unexpected remote calls'
+    Reset-Fixture Complete LocalFirst 6
+    Set-Content (Join-Path $fixtureRoot 'scenario.txt') 'Complete' -NoNewline
+    $script:realWorkerStarts=New-Object 'System.Collections.Generic.List[object]'
+    function Start-SmartM365CertificateWorker {
+        param($Mode,$Root,$WorkerPath)
+        $s=& $realStart -Mode $Mode -Root $fixtureRoot -WorkerPath $wrapper -PowerShellPath $hostExe
+        $script:realWorkerStarts.Add([pscustomobject]@{Mode=$Mode;Id=$s.Process.Id})
+        $s
     }
-    Reset-Fixture Complete
-    $script:mode=$null
+    $watch=[Diagnostics.Stopwatch]::StartNew()
     $rows=New-Object 'System.Collections.Generic.List[object]'
-    Invoke-SmartM365InfrastructureCertificateInventory -Rows $rows -ExchangeServerNames @('SYNTHETIC-EX01')
-    Check ($script:nativeCalls -eq 1 -and $script:created -eq 0) 'Missing config key did not default to LocalFirst'
-    $template=Get-Content -LiteralPath ([IO.Path]::ChangeExtension($collector,'local.json.template')) -Raw|ConvertFrom-Json
-    Check ($template.ExchangeConnectionMode -eq 'LocalFirst') 'Template default differs from code'
+    Invoke-SmartM365InfrastructureCertificateInventory -Rows $rows -ExchangeServerNames @('SYNTHETIC-1-HANG','SYNTHETIC-2-HANG','SYNTHETIC-3-OK')
+    $watch.Stop()
+    Check ($watch.Elapsed.TotalSeconds -lt 15) 'Combined native/remote budget doubled, cleanup unbounded, or next budget not independent'
+    Check (@($script:realWorkerStarts|Where-Object Mode -eq Remote).Count -eq 1) 'Remote worker recreated after real timeout'
+    Check (@($rows|Where-Object {$_.Setting -eq 'Collection' -and $_.CollectionStatus -eq 'ERROR'}).Count -eq 2) 'Real timeout failed diagnostics missing'
+    Check (@($rows|Where-Object {$_.ObjectName -like 'SYNTHETIC-3-OK:*' -and $_.Setting -eq 'Services' -and $_.Value -eq 'IIS, SMTP'}).Count -eq 1) 'Real next native target lost metadata'
+    Check (@($rows|Where-Object {$_.Setting -eq 'Collection' -and $_.ErrorMessage -match 'Local: Timeout.*; Remote: Timeout'}).Count -eq 1) 'Real combined timeout messages missing'
+    foreach($s in $script:realWorkerStarts){Check ($null -eq (Get-Process -Id $s.Id -ErrorAction SilentlyContinue)) 'Real phase orphaned a child'}
 
-    # Exercise the actual readiness call/export and publishing tail with offline I/O stubs.
-    $source=Get-Content -LiteralPath $collector -Raw
-    $script:productionReadinessCollector=(Get-Command Invoke-ExchangeReadinessCollector).ScriptBlock
+    # The production dispatcher now uses deterministic transport stubs for its complete mode/error matrix.
+    function Start-SmartM365CertificateWorker {
+        param($Mode,$Root,$WorkerPath)
+        $s=[pscustomobject]@{Mode=$Mode;Closed=$false;ReadyLogged=$false}
+        $script:starts.Add($s);$script:states.Add($s);$s
+    }
+    function Stop-SmartM365CertificateWorker {param($State,[switch]$Force) if($null -ne $State){$State.Closed=$true}}
+    function Invoke-SmartM365CertificateWorkerRead {
+        param($State,$Server,$TimeoutSeconds)
+        $script:reads.Add([pscustomobject]@{Mode=$State.Mode;Server=$Server;Limit=$TimeoutSeconds})
+        if($script:case -eq 'LocalCancel' -and $State.Mode -eq 'Native'){throw [OperationCanceledException]::new('Synthetic cancellation')}
+        if($script:case -eq 'RemoteCancel' -and $State.Mode -eq 'Remote'){throw [OperationCanceledException]::new('Synthetic cancellation')}
+        $r=[pscustomobject]@{Status='Success';Items=@((New-SyntheticCertificate));Stage='Read';Message='';FatalSession=$false;SessionReady=($State.Mode -eq 'Remote')}
+        if($script:case -eq 'Empty'){$r.Items=@()}
+        if($State.Mode -eq 'Native' -and $script:case -ne 'Complete' -and $script:case -ne 'Empty' -and ($Server -ne 'SYNTHETIC-EX03')){
+            $r.Status='Failed';$r.Items=@();$r.Message='Synthetic native denied'
+            if($script:case -in @('NativeTimeout','BothTimeout')){$r.Status='Timeout';$r.Stage='Transport';$r.Message='Synthetic native timeout'}
+        }
+        if($State.Mode -eq 'Remote'){
+            if($script:case -ne 'Empty'){$r.Items=@([pscustomobject]@{Thumbprint=('2'*40);Subject='s';DnsNameList=@('mail.example.test');NotBefore='raw-date';NotAfter='raw-date'})}
+            if($script:case -in @('RemoteDenied','InitDenied','BothTimeout','RemoteTimeout')){
+                $r.Items=@();$r.Status='Failed';$r.Message='Synthetic remote denied'
+                if($script:case -eq 'InitDenied'){$r.Stage='Initialize';$r.FatalSession=$true;$r.SessionReady=$false}
+                if($script:case -in @('BothTimeout','RemoteTimeout')){$r.Status='Timeout';$r.Stage='Transport';$r.FatalSession=$true;$r.Message='Synthetic remote timeout';$r.SessionReady=$false}
+            }
+        }
+        $r
+    }
+    foreach($mode in @('LocalFirst','LocalSnapin','Remote')){
+        foreach($case in @('Complete','Empty','Retry','RemoteDenied','InitDenied','NativeTimeout','BothTimeout','RemoteTimeout','LocalCancel','RemoteCancel')){
+            Reset-Fixture $case $mode
+            $rows=New-Object 'System.Collections.Generic.List[object]';$caught=$null
+            try{Invoke-SmartM365InfrastructureCertificateInventory -Rows $rows -ExchangeServerNames @('SYNTHETIC-EX01','SYNTHETIC-EX02','SYNTHETIC-EX03')}catch{$caught=$_}
+            $cancel=($case -eq 'LocalCancel' -and $mode -ne 'Remote') -or ($case -eq 'RemoteCancel' -and $mode -ne 'LocalSnapin')
+            Check (($null -ne $caught) -eq $cancel) ('Wrong cancellation/continuation: '+$mode+'/'+$case)
+            Check (@($script:states|Where-Object {-not $_.Closed}).Count -eq 0) 'Dispatcher leaked worker on success/error/cancellation'
+            Check (@($script:starts|Where-Object Mode -eq Remote).Count -le 1) 'Dispatcher recreated remote session'
+            if($cancel){Check (@($rows|Where-Object Setting -eq Collection).Count -eq 0) 'Cancellation converted to Failed';continue}
+            if($mode -eq 'LocalFirst' -and $case -in @('Complete','Empty')){Check (@($script:starts|Where-Object Mode -eq Remote).Count -eq 0) 'Native success opened remote session'}
+            if($mode -eq 'LocalSnapin'){Check (@($script:reads|Where-Object Mode -eq Remote).Count -eq 0) 'LocalSnapin used Remote'}
+            if($mode -eq 'Remote'){Check (@($script:reads|Where-Object Mode -eq Native).Count -eq 0) 'Remote used native fallback'}
+            if($case -in @('BothTimeout','RemoteTimeout','InitDenied') -and $mode -ne 'LocalSnapin'){
+                Check (@($script:reads|Where-Object Mode -eq Remote).Count -eq 1) 'Unavailable remote session still used'
+                Check (@($rows|Where-Object {$_.Setting -eq 'Collection' -and $_.Value -eq 'Failed' -and $_.CollectionStatus -eq 'ERROR'}).Count -ge 1) 'Timeout diagnostics lost'
+                if($mode -eq 'LocalFirst'){Check (@($rows|Where-Object {$_.ObjectName -like 'SYNTHETIC-EX03:*' -and $_.Setting -eq 'Services' -and $_.Value -eq 'IIS, SMTP'}).Count -eq 1) 'Native reads after remote loss failed'}
+            }
+            if($mode -eq 'LocalFirst' -and $case -in @('RemoteDenied','BothTimeout')){
+                Check (@($rows|Where-Object {$_.Setting -eq 'Collection' -and $_.ErrorMessage -match 'Local: .*; Remote: '}).Count -eq 2) 'Combined local/remote diagnostic missing'
+            }
+            foreach($read in $script:reads){
+                $max=if($mode -eq 'LocalFirst' -and $read.Mode -eq 'Native'){60}else{120}
+                Check ($read.Limit -gt 0 -and $read.Limit -le $max) 'Per-server budget was doubled or not reset'
+            }
+            if($case -eq 'Empty'){Check ($rows.Count -eq 0) 'Known empty inventory became failure'}
+        }
+    }
+    foreach($bad in @(0,-1,3601,'abc',1.5)){
+        Reset-Fixture Complete LocalFirst $bad;$caught=$null
+        try{Invoke-SmartM365InfrastructureCertificateInventory -Rows (New-Object 'System.Collections.Generic.List[object]')}catch{$caught=$_}
+        Check ($null -ne $caught -and $script:starts.Count -eq 0) 'Invalid budget accepted'
+    }
+    Reset-Fixture Complete Invalid;$caught=$null
+    try{Invoke-SmartM365InfrastructureCertificateInventory -Rows (New-Object 'System.Collections.Generic.List[object]')}catch{$caught=$_}
+    Check ($null -ne $caught -and $script:starts.Count -eq 0) 'Invalid mode accepted'
+    Reset-Fixture Complete
+    $script:mode=$null;$script:budget=$null
+    Invoke-SmartM365InfrastructureCertificateInventory -Rows (New-Object 'System.Collections.Generic.List[object]') -ExchangeServerNames @('SYNTHETIC-EX01')
+    Check ($script:reads[0].Limit -le 60 -and $script:starts[0].Mode -eq 'Native') 'Default LocalFirst/120 budget lost'
+    $template=Get-Content ([IO.Path]::ChangeExtension($collector,'local.json.template')) -Raw|ConvertFrom-Json
+    Check ($template.CertificateTimeoutSecondsPerServer -eq 120 -and $template.ExchangeConnectionMode -eq 'LocalFirst') 'Template defaults mismatch'
+
+    Reset-Fixture
+    $script:InfrastructureCertificateWorkerPath=Join-Path $fixtureRoot 'missing-worker.ps1'
+    $rows=New-Object 'System.Collections.Generic.List[object]'
+    Invoke-SmartM365InfrastructureCertificateInventory -Rows $rows -ExchangeServerNames @('SYNTHETIC-EX01','SYNTHETIC-EX02')
+    Check ($rows.Count -eq 2 -and @($rows|Where-Object CollectionStatus -eq ERROR).Count -eq 2 -and $script:starts.Count -eq 0) 'Missing cached worker blocked infrastructure or became known zero'
+    $script:InfrastructureCertificateWorkerPath=$worker
+    $launcher=Join-Path $smartRoot 'SmartInventory/Launchers/OnPremises/Start-SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory.cmd'
+    Check ((Get-Content $launcher -Raw) -match 'robocopy "%SCRIPT_DIR%" "%LOCAL_SCRIPT_DIR%" /MIR') 'Worker not covered by launcher cache copy'
+
+    # Cleanup failure stays explicit but cannot abort unrelated infrastructure phases.
+    $fakeStop=(Get-Command Stop-SmartM365CertificateWorker).ScriptBlock
+    function Stop-SmartM365CertificateWorker {param($State,[switch]$Force) if($null -ne $State){$State.Closed=$true;throw 'Synthetic cleanup failure'}}
+    Reset-Fixture Retry
+    $rows=New-Object 'System.Collections.Generic.List[object]'
+    Invoke-SmartM365InfrastructureCertificateInventory -Rows $rows -ExchangeServerNames @('SYNTHETIC-EX01','SYNTHETIC-EX03')
+    Check ($rows.Count -gt 0 -and $script:ServersAndStorageErrorCount -gt 0 -and ($script:messages -join '|') -match 'cleanup failed') 'Cleanup failure stopped infrastructure or was silent'
+    Set-Item Function:Stop-SmartM365CertificateWorker $fakeStop
+
+    # Run the actual readiness call/export and publishing tail, with I/O and external services stubbed.
+    $source=Get-Content $collector -Raw
+    $originalReadinessCollector=(Get-Command Invoke-ExchangeReadinessCollector).ScriptBlock
     function Invoke-ExchangeReadinessCollector {
         param($Rows,$CollectorName,$ScriptBlock)
-        if($CollectorName -eq 'ExchangeCertificate'){& $script:productionReadinessCollector -Rows $Rows -CollectorName $CollectorName -ScriptBlock $ScriptBlock}
-        elseif($CollectorName -eq 'HybridConfiguration'){
-            $script:events.Add('PostCertificateReadiness')
-            Add-ExchangeReadinessRow -Rows $Rows -Category 'SyntheticOtherPhase' -ObjectName 'synthetic' -Setting 'Collection' -Value 'Preserved' -MigrationFocus 'Offline continuation marker.'
-        }
+        if($CollectorName -eq 'HybridConfiguration'){$script:events.Add('PostCertificateReadiness');Add-ExchangeReadinessRow -Rows $Rows -Category SyntheticOther -ObjectName synthetic -Setting Collection -Value Preserved -MigrationFocus synthetic}
     }
-    function Export-ServersAndStorageCsv {param($Data,$Path) $Data | Export-Csv -LiteralPath $Path -Delimiter ';' -NoTypeInformation; $script:events.Add(('CSV:'+([IO.Path]::GetFileName($Path))))}
-    function New-HtmlExecutiveSummary {param($Summary,$PerServerSummary,$ReadinessInventory,$HealthCheckerSummary,$HealthCheckerFindings,$Path) Set-Content -LiteralPath $Path -Value '<html>synthetic</html>'; $script:events.Add('HTML')}
+    function Export-ServersAndStorageCsv {param($Data,$Path) $Data|Export-Csv $Path -Delimiter ';' -NoTypeInformation;$script:events.Add('CSV:'+([IO.Path]::GetFileName($Path)))}
+    function New-HtmlExecutiveSummary {param($Summary,$PerServerSummary,$ReadinessInventory,$HealthCheckerSummary,$HealthCheckerFindings,$Path) Set-Content $Path '<html>synthetic</html>';$script:events.Add('HTML')}
     function Invoke-ServersAndStorageSharePointUpload {param($LocalFilePath) $script:events.Add('SharePoint')}
-    function Save-ServersAndStorageWeeklyHistory {$script:events.Add('WeeklyHistory')}
-    function Remove-CoreSmartM365TimestampedDirectoriesOlderThan {param($RootPath,$RetentionDays,$ExcludeDirectories,$LogFile) $script:events.Add('Retention')}
+    function Save-ServersAndStorageWeeklyHistory {}
+    function Remove-CoreSmartM365TimestampedDirectoriesOlderThan {param($RootPath,$RetentionDays,$ExcludeDirectories,$LogFile)}
     function Send-ServersAndStorageHtmlReport {param($HtmlReportPath,$Subject,$Attachments,$Summary,$PerServerSummary,$ReadinessInventory) $script:events.Add('Mail')}
-    $readinessStart=$source.IndexOf('    $exchangeReadinessInventory = @(Get-ExchangeReadinessInventory')
-    $readinessEnd=$source.IndexOf('    $logicalDiskRows =', $readinessStart)
-    $publishStart=$source.LastIndexOf('    $summaryPath = Join-Path $OutputFolder')
-    $publishEnd=$source.IndexOf('    $completionStatus = if', $publishStart)
-    Check ($readinessStart -gt 0 -and $readinessEnd -gt $readinessStart -and $publishEnd -gt $publishStart) 'Publication boundaries changed'
-    $readinessCode=[scriptblock]::Create($source.Substring($readinessStart,$readinessEnd-$readinessStart))
-    $publishCode=[scriptblock]::Create($source.Substring($publishStart,$publishEnd-$publishStart))
+    $a=$source.IndexOf('    $exchangeReadinessInventory = @(Get-ExchangeReadinessInventory')
+    $b=$source.IndexOf('    $logicalDiskRows =',$a)
+    $c=$source.LastIndexOf('    $summaryPath = Join-Path $OutputFolder')
+    $d=$source.IndexOf('    $completionStatus = if',$c)
+    Check ($a -gt 0 -and $b -gt $a -and $d -gt $c) 'Publication boundaries changed'
+    $readinessCode=[scriptblock]::Create($source.Substring($a,$b-$a))
+    $publishCode=[scriptblock]::Create($source.Substring($c,$d-$c))
     $statusNode=@($ast.FindAll({param($n)$n -is [Management.Automation.Language.AssignmentStatementAst] -and $n.Left.Extent.Text -eq '$completionStatus' -and $n.Extent.Text -match 'ServersAndStorageWarningCount'},$true))[-1]
-    $statusCode=[scriptblock]::Create($statusNode.Extent.Text)
-    foreach($case in @(
-        @{Scenario='ConnectFailure';Mode='Remote'},@{Scenario='ImportDenied';Mode='Remote'},@{Scenario='BrokenSession';Mode='Remote'},@{Scenario='BreakAfterFirst';Mode='Remote'},@{Scenario='ShadowProxy';Mode='Remote'},
-        @{Scenario='RetryRemoteDenied';Mode='LocalFirst'},@{Scenario='ConnectFailure';Mode='LocalFirst'},@{Scenario='RetryUnavailable';Mode='LocalFirst'}
-    )) {
-        $scenario=$case.Scenario
-        Reset-Fixture $scenario $case.Mode
+    foreach($case in @('InitDenied','BothTimeout','RemoteTimeout','RemoteDenied')){
+        Reset-Fixture $case
         $script:events=New-Object 'System.Collections.Generic.List[string]'
         $exchangeServers=@([pscustomobject]@{Name='SYNTHETIC-EX01'},[pscustomobject]@{Name='SYNTHETIC-EX02'},[pscustomobject]@{Name='SYNTHETIC-EX03'})
         $OutputFolder=$fixtureRoot;$OutputRoot=$fixtureRoot;$RunId='synthetic';$summary=[pscustomobject]@{OtherInventory='Preserved'};$perServerSummary=@();$perServerSummaryPath='synthetic.csv';$healthCheckerSummary=@();$healthCheckerFindings=@()
         . $readinessCode
         . $publishCode
-        . $statusCode
-        Check ($completionStatus -eq 'CompletedWithWarnings' -and $script:ServersAndStorageErrorCount -eq [int]($scenario -ne 'RetryRemoteDenied')) 'Existing completion selector or target-only warning accounting changed'
-        foreach($event in @('PostCertificateReadiness','CSV:Exchange_OnPrem_MigrationReadiness_Config.csv','CSV:Exchange_OnPrem_Servers_Inventory_Summary.csv','HTML','SharePoint','Mail')){Check ($script:events.Contains($event)) ('Infrastructure output phase not reached: '+$scenario+' / '+$event)}
-        $exported=@(Import-Csv -LiteralPath $exchangeReadinessPath -Delimiter ';')
-        Check (@($exported|Where-Object {$_.Category -eq 'ExchangeCertificate' -and $_.CollectionStatus -eq 'ERROR'}).Count -eq $(if($case.Mode -eq 'LocalFirst'){if($scenario -eq 'RetryUnavailable'){2}else{1}}elseif($scenario -in @('BreakAfterFirst','ShadowProxy')){2}else{3})) 'Failed targets did not survive readiness CSV export'
-        Check ($script:nativeCalls -eq $(if($case.Mode -eq 'LocalFirst'){3}else{0}) -and $script:removed -eq [int]($scenario -notin @('ConnectFailure','RetryUnavailable'))) 'Continuation leaked resources or changed native calls'
+        . ([scriptblock]::Create($statusNode.Extent.Text))
+        Check ($completionStatus -eq 'CompletedWithWarnings') 'Timeout reported silent success'
+        foreach($event in @('PostCertificateReadiness','CSV:Exchange_OnPrem_MigrationReadiness_Config.csv','CSV:Exchange_OnPrem_Servers_Inventory_Summary.csv','HTML','SharePoint','Mail')){Check ($script:events.Contains($event)) ('Output phase not reached: '+$event)}
+        $exported=@(Import-Csv $exchangeReadinessPath -Delimiter ';')
+        Check (@($exported|Where-Object {$_.Setting -eq 'Collection' -and $_.CollectionStatus -eq 'ERROR'}).Count -eq 2) 'Failed target rows lost during export'
     }
-    # Execute the unchanged completion exit branch in a child host; it must return 3.
     $exitNode=@($ast.FindAll({param($n)$n -is [Management.Automation.Language.IfStatementAst] -and $n.Extent.Text -match '^if \(\$completionStatus -eq ''CompletedWithWarnings''\).*ExitCode=\(3\)'},$true))[-1]
     $probe=Join-Path $fixtureRoot 'completion-probe.ps1'
-    $probeCode='$script:ServersAndStorageWarningCount=1; $script:ServersAndStorageErrorCount=1; $smartM365RunGuard=[pscustomobject]@{ReachedTerminal=$false;ExplicitExit=$false;ExitCode=0};'+[Environment]::NewLine+$statusNode.Extent.Text+[Environment]::NewLine+$exitNode.Extent.Text
-    [IO.File]::WriteAllText($probe,$probeCode,[Text.UTF8Encoding]::new($true))
-    $hostExe=Join-Path $PSHOME $(if($PSVersionTable.PSEdition -eq 'Desktop'){'powershell.exe'}else{'pwsh.exe'})
+    $code='$script:ServersAndStorageWarningCount=1;$smartM365RunGuard=[pscustomobject]@{ReachedTerminal=$false;ExplicitExit=$false;ExitCode=0};'+[Environment]::NewLine+$statusNode.Extent.Text+[Environment]::NewLine+$exitNode.Extent.Text
+    [IO.File]::WriteAllText($probe,$code,[Text.UTF8Encoding]::new($true))
     & $hostExe -NoProfile -ExecutionPolicy Bypass -File $probe
-    Check ($LASTEXITCODE -eq 3) 'Existing completion exit code changed'
-
-    Check ($source -notmatch '\bInvoke-Command\s+-') 'Server-side scriptblock introduced'
-    Check ($source -match 'Test-ExchangeShell\s+Invoke-CoreSmartM365Preflight[^\r\n]+-RequireExchangeOnPrem') 'Existing Exchange loading/preflight path changed'
-    $inventory=$ast.Find({param($n)$n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Get-ExchangeReadinessInventory'},$true)
-    Check ([regex]::Matches($inventory.Extent.Text,'Invoke-SmartM365InfrastructureCertificateInventory -Rows').Count -eq 1) 'Certificate phase not called exactly once'
+    Check ($LASTEXITCODE -eq 3) 'Warning completion exit changed'
+    Check ($source -notmatch '\bInvoke-Command\s+-') 'Remote scriptblock introduced'
+    Check ($source -match 'Test-ExchangeShell\s+Invoke-CoreSmartM365Preflight[^\r\n]+-RequireExchangeOnPrem') 'Existing loading/preflight changed'
 }
-finally {
-    if($null -ne $script:ExchangeCertificateContext){Stop-SmartM365ExchangeOnPremSession $script:ExchangeCertificateContext}
-    if($savedCertificate){Set-Item Function:global:Get-ExchangeCertificate $savedCertificate.ScriptBlock}else{Remove-Item Function:global:Get-ExchangeCertificate -ErrorAction SilentlyContinue}
-    if($savedServer){Set-Item Function:global:Get-ExchangeServer $savedServer.ScriptBlock}else{Remove-Item Function:global:Get-ExchangeServer -ErrorAction SilentlyContinue}
-    if([IO.Path]::GetFullPath($fixtureRoot).StartsWith([IO.Path]::GetFullPath([IO.Path]::GetTempPath()),[StringComparison]::OrdinalIgnoreCase)){Remove-Item -LiteralPath $fixtureRoot -Recurse -Force}
+finally{
+    if([IO.Path]::GetFullPath($fixtureRoot).StartsWith([IO.Path]::GetFullPath([IO.Path]::GetTempPath()),[StringComparison]::OrdinalIgnoreCase)){Remove-Item $fixtureRoot -Recurse -Force}
 }
-Write-Host ("PASS: {0} infrastructure certificate checks; {1}; no Exchange connection or collector." -f $checks,$PSVersionTable.PSVersion)
+Write-Host ('PASS: {0} certificate budget/worker checks; {1}; no Exchange connection or collector.' -f $checks,$PSVersionTable.PSVersion)
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA8npZB/mtaUoB0
-# xK4EJqGPyiCOG2A0TqFGsjzWSXcT4aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAnt2uBc1KTBoDa
+# 8693gdHB9kNswisNR6HjBD9dtRWnAKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -403,31 +439,31 @@ Write-Host ("PASS: {0} infrastructure certificate checks; {1}; no Exchange conne
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIJCw+9560JjiVj9wXrXdR/Poa4EQ6AB4kTjb6X21hyg3MA0GCSqG
-# SIb3DQEBAQUABIIBgGScjyIxq5pFaieue6RRw++EvzC9HXUw0ME2N2qgTOvm526L
-# +rs2j0WxiJCoeuSIz6MYK2CyRO7WlPvdAsXcWLhqGgAO+ZbhQmO51osCuM7jb1C0
-# xyeKiXu70WsdVn2EXSGp01e8ECdEJsU4kL9DrsevuOukFchWIO14MFaJycFPuQbm
-# SwVgiz7ugCnHmxfprunI4BHlXtBfq4wg2qs130XCxuZp6VsYCj2bb0OpwVNmZ2tB
-# byBGfUeRk/MeQPPyuzGm1BpUHQExL7sFkkX0+hB1IH/fnwAZTdF9eNT5HVSXAz5Q
-# dh6HfGRUsmN5+2sNQhGICCguRVmBzcDxbZIkWvJ0PrgJY3FtWnPNkSljqsLFnhBC
-# sHrnDELVTMO+7YIGKthXUbKMFiWTpTLS0CadO++MOdNd4kseIzNE0uBqkQn8DhRk
-# OPvof/gT5QOTFrL1Nnw8wac4aE4nMXBZooxGLtWteY2m7Q9NGr181wmN/LLLbxsZ
-# xP1fhGtgns2Wrc6Je6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEICxvtCcOFosxKkaTiIYwVylgdHlIfn6MSHT4CGHF3W++MA0GCSqG
+# SIb3DQEBAQUABIIBgFanFIhnmW+OA6AF+yeKUddQVvlcgSRfcgEX/88rCESppA33
+# JcfsgOdNokfExjprR/4yErqIniIAp/zMaqE7GtCs40BYiqSXUbjCw5H1fvBu/1KA
+# 1Yo4JtecBATkYtukON1L6u7mToRPAh79NEd28JBla1fPIrlARAzr7n0ioqbShauk
+# VjEb8iKSazPbRNWI2hKcnKOaCclOH88W1SsyAIwHWbDA9RHkhDQJcac4uZKlBCPg
+# VHNjZx9/BIjd7/XnYYYfbOTrjzeYzMDuxnQdEqG2BYWKN25rjJsM22we33SZOsL3
+# twNkh46vfRw7ihHIpon3xq8IR1c2IIXTaIgIsG5+O+K/rYMMKWx5DtPRhNpQM61L
+# HKubaoPQD5ZODH595DdevUbGdfBd4uLMMOfz0LyfAVuymvBj8DT9nig7y5rwmi4d
+# 4/zdT8Q+jRBEjc6aWT5/5aK7DEYZgcAn6qEdty33WyHJhzuM3KThQuHqXlSoWdgW
+# 95Botz0UWmETjK2TdaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjMyMTA1
-# MDVaMC8GCSqGSIb3DQEJBDEiBCDbNzyqzB7eeS4Gli2baVoNJzqXX+f6MG8tFfaO
-# mGRWWTANBgkqhkiG9w0BAQEFAASCAgBQbblu7VdnUzBTunChZtxHYOyrqLVgXQ60
-# 1zYhl8YLEMTWC/J8YCMnqSzcH5X/FDZpv5fSENUoRuaJjjWDRlkWQxjdAWN8sclX
-# pDKk/X1BH/XNAtKSU1LLgP9ziy9DzBEB6bU5CNv5RXxGR3SBkFgZyfG2vK6hQtA2
-# IbRcmn8ct6ab2KoJJFElSsNVAKjh+VM3/Tvxd1aIyIwXFwNxGj01LLUzylw14jWA
-# nyf0I827bhBAowx5JoMxx7qJnSf8wcew948ynHS/QukFVHUW+Mx9eO5u+R3g64a9
-# PfgewRJPk8R5QLSUz1jsZOKTjuwsY6NR/AGiZfn5XAgYXIkusisSQI26yITnoMGy
-# +SuHMLVlG9s987CQc+fjqlGGRMbnrjYePogrSASypuZe5YCvIiTC5AqExhpvK4zJ
-# LRpTaFfu/PjIM3FIR7adsxDXzWs/tFqklnDDlklGMcQdx/Zd08ao9LkNrrcM96GD
-# JYzFn0HkITE+ccUTdJYgNJFcAR9Ydxs5KrgerVi/LrtcBtBe72gMZXYeuEBd32J1
-# 2rTfC5ynOIgAIQFNVgL2JHNMi13uhF8q13DbzPYZ7+m09Rqp1Qb9q7JGjygZuC8U
-# mFDFFE2xHwsT9s/SIE5X1L5CnHVmUaNhU6ykb7nZLADmimN32HtwUWsT0m4/supC
-# yqnPK123Hw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjMyMzE2
+# MDhaMC8GCSqGSIb3DQEJBDEiBCAUW/f5YwOhxbOKDXaG4XV7lz0fHwrcXqZy+Bl/
+# wbDqqDANBgkqhkiG9w0BAQEFAASCAgB8ohi9Kk+ECsMBwJL/ElLl9Y5arBFD5XTh
+# 3xYlbSMdVNZyDYuZVWePNo+soOpzxH0qlhaDDSRSfjFAuvzNrv7wwjuN+GknzKJ6
+# ok9byCO24agdDLjnJC6v9BLX+ESw+ImJK3vdUirKkrlnEI/7xSqzhdktrqTCkCtt
+# 4n4S6HV1r9CHzScEKuDw2Wf8hjjlFxTuV32m75tSngtgAYEVcBjl5ZF3iARKvRPH
+# ZPDeM8NYbesyIDGf2glWbuJ7mzKSZ8J0leLTK24eaXHAYnAs0Paknt027S8th1lH
+# KN4jC1rqtKaohA5Re/9YI71i6lTuxaSnVEA25Cvx3tvMBwIuQAzizgaUgl3+Q0u+
+# ej4zRUGei1GVzT/7jd3W7ixQc1CQi8doiMlP4hsHBZ2ZllsoMIIx8O3RN6i2Gwh+
+# +JA5BUH91ei8dB0hOZo54mwhmZm5mEP4WsXXt5uitAzWSTRGtG7nZo4ZHtfYqawI
+# iWoP0uQ0vP/aEOcOyK9rOOKwzuQ6c/sRg3Ol/lt9OBPIMNRhzHshuwrcZJbZr+S5
+# /aMuz4/b1I7DTFOs2h8FkbfjP1Jq5gmfQMbkgEvCDOXIfYwu2lMSZokK5DoqONHe
+# mmGgEaWoF6d0vtpYQixtWwRX7mo0qe024eryqNZ6FbS5desgRS3mfirENL8q+X3L
+# n55Uxvii7A==
 # SIG # End signature block
