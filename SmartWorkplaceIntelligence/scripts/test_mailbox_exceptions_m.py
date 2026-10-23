@@ -1,4 +1,5 @@
 """Execute the actual optional snapshot M queries on synthetic manifest/CSV data."""
+import base64
 import csv
 import io
 import json
@@ -21,11 +22,28 @@ def m_text(s):
     return '"' + s.replace('#', '#(#)').replace('"', '""').replace('\n', '#(lf)').replace('\r', '#(cr)') + '"'
 
 
+def model_expression(name):
+    source = (MODEL.parent / 'expressions.tmdl').read_text(encoding='utf-8-sig')
+    match = re.search(r'^expression ' + re.escape(name) + r' =([^\n]*(?:\n(?!\tlineageTag:|expression |///).*)*)', source, re.M)
+    if not match:
+        raise AssertionError('Missing expression: ' + name)
+    body = re.split(r'\n\t(?:lineageTag:|annotation |queryGroup:)', match[1])[0]
+    return textwrap.dedent(body.strip('\r\n')).strip()
+
+
+def binary(value):
+    if not isinstance(value, bytes):
+        value = json.dumps(value).encode('utf-8')
+    return 'Binary.FromText(' + m_text(base64.b64encode(value).decode('ascii')) + ', BinaryEncoding.Base64)'
+
+
 class SnapshotMTests(unittest.TestCase):
     @unittest.skipUnless(PQTEST, 'Set PQTEST_PATH for actual Power Query tests')
     def test_optional_tables_and_fail_closed_guards(self):
         cases = []
         names = ['MailboxMigrationExceptions.csv', 'MailboxMigrationExceptionSummary.csv']
+        factory = model_expression('CreatePreparedReaders')
+        native_types = model_expression('NativeEvidenceTypes')
         for table, columns in [('Mailbox Migration Exceptions', subject.DECISION_COLUMNS),
                                ('Mailbox Migration Exception Summary', subject.SUMMARY_COLUMNS)]:
             source = (MODEL / (table + '.tmdl')).read_text(encoding='utf-8-sig')
@@ -39,9 +57,18 @@ class SnapshotMTests(unittest.TestCase):
                 writer = csv.DictWriter(output, columns if case != 'wrong header' else columns[:-1]);writer.writeheader()
                 if case in ('one row', 'foreign tenant'): writer.writerow(row)
                 payload = output.getvalue().encode('utf-8')
-                files = '{}' if case in ('old batch', 'declared missing') else '{' + ','.join('[File='+m_text(n)+']' for n in names[:1 if case == 'partial pair' else 2]) + '}'
-                provenance = '[]' if case == 'old batch' else '[MailboxMigrationExceptions=[]]'
-                prefix = 'let PreparedExpectedTenantKey="test", GetPreparedBatchManifest=()=>[Files='+files+',Provenance='+provenance+'], GetPreparedEvidenceFile=(n)=>#binary({' + ','.join(map(str,payload)) + '}), Result=(' + expression + ')'
+                present = [] if case in ('old batch', 'declared missing') else names[:1 if case == 'partial pair' else 2]
+                pointer = {'SchemaVersion': 1, 'BatchId': 'batch-test', 'TenantKey': 'test'}
+                manifest = dict(pointer, Files=[{'File': n, 'Bytes': len(payload)} for n in present],
+                                Provenance={} if case == 'old batch' else {'MailboxMigrationExceptions': {}})
+                folder_rows = [('batch.json.txt', binary(manifest))] + [(n, binary(payload)) for n in present]
+                folder = '(segments as list, phase as text) as table => if List.IsEmpty(segments) then '
+                folder += '#table({"Name","Content"}, {{"current.json.txt",' + binary(pointer) + '}}) else '
+                folder += '#table({"Name","Content"}, {' + ','.join('{' + m_text(n) + ',' + content + '}' for n, content in folder_rows) + '})'
+                # Only folder I/O is fictional; execute the shipped factory and table queries.
+                prefix = ('let PreparedExpectedTenantKey="test", PreparedBatchId="Latest", '
+                          'PreparedReadFolder=' + folder + ', NativeEvidenceTypes=' + native_types + ', '
+                          'CreatePreparedReaders=' + factory + ', Result=(' + expression + ')')
                 error = case in ('foreign tenant', 'wrong header', 'partial pair', 'declared missing')
                 check = '(try Table.RowCount(Result))[HasError]' if error else 'Table.RowCount(Result)='+('1' if case=='one row' else '0')
                 # Force every column/type conversion, not just lazy row enumeration.
@@ -57,6 +84,7 @@ class SnapshotMTests(unittest.TestCase):
         for row in result['Output']:
             with self.subTest(case=row['Name']):self.assertTrue(row['Passed'],row['Detail'])
         self.assertEqual(result['RowCount'],14)
+        print('Executed 14 mailbox exception scenarios through the actual reader factory and M engine.')
 
 
 if __name__ == '__main__':
