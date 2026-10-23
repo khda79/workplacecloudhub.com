@@ -1,0 +1,38 @@
+{
+  "SchemaVersion": 1,
+  "Description": "Legacy manual fallback only. Source scans generate per-CSV automatic assessment sidecars. This file is never overwritten. Copy beside migration.config.psd1 as source-complexity-assessment.json.txt only when manual evidence is needed and no automatic sidecar exists. Bind complete sections to source CSV SHA256.",
+  "Inputs": {
+    "FileInventorySha256": "",
+    "PermissionInventorySha256": ""
+  },
+  "FunctionalComponents": {
+    "Complete": false,
+    "ReviewedAtUtc": "",
+    "Evidence": "",
+    "Items": [],
+    "ItemExample": {
+      "Id": "component-unique-id",
+      "Category": "Workflow",
+      "Effort": 2,
+      "Evidence": "Source assessment reference"
+    },
+    "EffortLevels": {
+      "0": "No adaptation",
+      "1": "Configuration or republishing",
+      "2": "Logic, form or dependency adaptation",
+      "3": "Rebuild or replacement"
+    }
+  },
+  "CustomPermissions": {
+    "Complete": false,
+    "ReviewedAtUtc": "",
+    "Evidence": "",
+    "Items": [],
+    "ItemExample": {
+      "IsBuiltIn": false,
+      "IsUsed": true,
+      "EffectivePermissions": "12345",
+      "Evidence": "Source role definition and assignment reference"
+    }
+  }
+}

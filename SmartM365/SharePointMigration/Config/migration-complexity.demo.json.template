@@ -1,0 +1,881 @@
+{
+  "Score": 35,
+  "Level": "Moderate",
+  "LevelColor": "#005A9E",
+  "LevelBackground": "#E6F4FF",
+  "ScoreLevel": "Moderate",
+  "FloorApplied": [],
+  "EvaluatedWeight": 100.0,
+  "CoveragePercent": 100.0,
+  "TotalWeight": 100,
+  "TopDrivers": [
+    "FunctionalComplexity",
+    "AverageVersions",
+    "BrokenInheritance"
+  ],
+  "Criteria": [
+    {
+      "Id": "FileCount",
+      "Axis": "Volume",
+      "Name": "File volume and library concentration",
+      "Unit": "files",
+      "Weight": 15,
+      "Bands": [
+        "< 10,000",
+        "10,000 - 50,000",
+        "> 50,000 - 250,000",
+        "> 250,000"
+      ],
+      "Evaluated": true,
+      "Value": 1200,
+      "ValueDisplay": "1,200 / 800",
+      "Points": 0,
+      "WeightedPoints": 0,
+      "MaxWeightedPoints": 45,
+      "Band": "0 pt (MAX of component bands)",
+      "Detail": "MAX (no additive points): Total files = 1200, 0/3 (DEMO - 1,200 fictional source files); Maximum files per library = 800, 0/3 (DEMO - largest source library)",
+      "Components": [
+        {
+          "Id": "FileCount",
+          "Name": "Total files",
+          "Value": 1200,
+          "Bands": [
+            "< 10,000",
+            "10,000 - 50,000",
+            "> 50,000 - 250,000",
+            "> 250,000"
+          ],
+          "Points": 0,
+          "Detail": "DEMO - 1,200 fictional source files"
+        },
+        {
+          "Id": "LibraryConcentration",
+          "Name": "Maximum files per library",
+          "Value": 800,
+          "Bands": [
+            "< 20,000",
+            "20,000 - 50,000",
+            "> 50,000 - 100,000",
+            "> 100,000"
+          ],
+          "Points": 0,
+          "Detail": "DEMO - largest source library"
+        }
+      ]
+    },
+    {
+      "Id": "TotalSizeGiB",
+      "Axis": "Volume",
+      "Name": "Total size",
+      "Unit": "GiB",
+      "Weight": 10,
+      "Bands": [
+        "< 10",
+        "10 - 100",
+        "> 100 - 500",
+        "> 500"
+      ],
+      "Evaluated": true,
+      "Value": 4.8,
+      "ValueDisplay": "4.80 GiB",
+      "Points": 0,
+      "WeightedPoints": 0,
+      "MaxWeightedPoints": 30,
+      "Band": "0 pt (< 10)",
+      "Detail": "DEMO - current versions",
+      "Components": []
+    },
+    {
+      "Id": "SubsiteCount",
+      "Axis": "Volume",
+      "Name": "Number of subsites",
+      "Unit": "sites",
+      "Weight": 5,
+      "Bands": [
+        "< 2",
+        "2 - 5",
+        "> 5 - 25",
+        "> 25"
+      ],
+      "Evaluated": true,
+      "Value": 2,
+      "ValueDisplay": "2 sites",
+      "Points": 1,
+      "WeightedPoints": 5,
+      "MaxWeightedPoints": 15,
+      "Band": "1 pt (2 - 5)",
+      "Detail": "DEMO - source webs",
+      "Components": []
+    },
+    {
+      "Id": "LibraryCount",
+      "Axis": "Volume",
+      "Name": "Number of libraries",
+      "Unit": "libraries",
+      "Weight": 5,
+      "Bands": [
+        "< 4",
+        "4 - 10",
+        "> 10 - 30",
+        "> 30"
+      ],
+      "Evaluated": true,
+      "Value": 4,
+      "ValueDisplay": "4 libraries",
+      "Points": 1,
+      "WeightedPoints": 5,
+      "MaxWeightedPoints": 15,
+      "Band": "1 pt (4 - 10)",
+      "Detail": "DEMO - source libraries",
+      "Components": []
+    },
+    {
+      "Id": "AverageVersions",
+      "Axis": "History",
+      "Name": "Version history and concentration",
+      "Unit": "versions",
+      "Weight": 10,
+      "Bands": [
+        "< 3",
+        "3 - 10",
+        "> 10 - 50",
+        "> 50"
+      ],
+      "Evaluated": true,
+      "Value": 4,
+      "ValueDisplay": "4 / 2",
+      "Points": 2,
+      "WeightedPoints": 20,
+      "MaxWeightedPoints": 30,
+      "Band": "2 pt (MAX of component bands)",
+      "Detail": "MAX (no additive points): Average historical versions per file = 4, 1/3 (DEMO - average historical versions); Files with at least 100 historical versions = 2, 2/3 (DEMO - 24 of 1,200 files have >=100 versions; maximum 120)",
+      "Components": [
+        {
+          "Id": "AverageVersions",
+          "Name": "Average historical versions per file",
+          "Value": 4,
+          "Bands": [
+            "< 3",
+            "3 - 10",
+            "> 10 - 50",
+            "> 50"
+          ],
+          "Points": 1,
+          "Detail": "DEMO - average historical versions"
+        },
+        {
+          "Id": "VersionConcentration",
+          "Name": "Files with at least 100 historical versions",
+          "Value": 2,
+          "Bands": [
+            "0%",
+            "> 0 to 1%",
+            "> 1 to 5%",
+            "> 5%"
+          ],
+          "Points": 2,
+          "Detail": "DEMO - 24 of 1,200 files have >=100 versions; maximum 120"
+        }
+      ]
+    },
+    {
+      "Id": "PathLimitFiles",
+      "Axis": "Paths",
+      "Name": "Files over path limits",
+      "Unit": "files",
+      "Weight": 10,
+      "Bands": [
+        "< 1",
+        "1 - 10",
+        "> 10 - 100",
+        "> 100"
+      ],
+      "Evaluated": true,
+      "Value": 0,
+      "ValueDisplay": "0 files",
+      "Points": 0,
+      "WeightedPoints": 0,
+      "MaxWeightedPoints": 30,
+      "Band": "0 pt (< 1)",
+      "Detail": "DEMO - fictional source evidence",
+      "Components": []
+    },
+    {
+      "Id": "LargeFiles",
+      "Axis": "Risky files",
+      "Name": "Large files",
+      "Unit": "files",
+      "Weight": 5,
+      "Bands": [
+        "< 1",
+        "1 - 5",
+        "> 5 - 50",
+        "> 50"
+      ],
+      "Evaluated": true,
+      "Value": 0,
+      "ValueDisplay": "0 files",
+      "Points": 0,
+      "WeightedPoints": 0,
+      "MaxWeightedPoints": 15,
+      "Band": "0 pt (< 1)",
+      "Detail": "DEMO - fictional source evidence",
+      "Components": []
+    },
+    {
+      "Id": "RiskyFiles",
+      "Axis": "Risky files",
+      "Name": "Checked-out, blocked or excluded files",
+      "Unit": "files",
+      "Weight": 5,
+      "Bands": [
+        "< 1",
+        "1 - 20",
+        "> 20 - 200",
+        "> 200"
+      ],
+      "Evaluated": true,
+      "Value": 0,
+      "ValueDisplay": "0 files",
+      "Points": 0,
+      "WeightedPoints": 0,
+      "MaxWeightedPoints": 15,
+      "Band": "0 pt (< 1)",
+      "Detail": "DEMO - fictional source evidence",
+      "Components": []
+    },
+    {
+      "Id": "BrokenInheritance",
+      "Axis": "Permissions",
+      "Name": "Objects with broken inheritance",
+      "Unit": "objects",
+      "Weight": 10,
+      "Bands": [
+        "< 10",
+        "10 - 100",
+        "> 100 - 1,000",
+        "> 1,000"
+      ],
+      "Evaluated": true,
+      "Value": 250,
+      "ValueDisplay": "250 objects",
+      "Points": 2,
+      "WeightedPoints": 20,
+      "MaxWeightedPoints": 30,
+      "Band": "2 pt (> 100 - 1,000)",
+      "Detail": "DEMO - unique source Item scopes",
+      "Components": []
+    },
+    {
+      "Id": "DirectUsers",
+      "Axis": "Permissions",
+      "Name": "Users assigned directly",
+      "Unit": "users",
+      "Weight": 5,
+      "Bands": [
+        "< 10",
+        "10 - 50",
+        "> 50 - 300",
+        "> 300"
+      ],
+      "Evaluated": true,
+      "Value": 60,
+      "ValueDisplay": "60 users",
+      "Points": 2,
+      "WeightedPoints": 10,
+      "MaxWeightedPoints": 15,
+      "Band": "2 pt (> 50 - 300)",
+      "Detail": "DEMO - distinct direct users",
+      "Components": []
+    },
+    {
+      "Id": "InactiveAccounts",
+      "Axis": "Permissions",
+      "Name": "Disabled or unresolved accounts",
+      "Unit": "accounts",
+      "Weight": 5,
+      "Bands": [
+        "< 1",
+        "1 - 10",
+        "> 10 - 50",
+        "> 50"
+      ],
+      "Evaluated": true,
+      "Value": 4,
+      "ValueDisplay": "4 accounts",
+      "Points": 1,
+      "WeightedPoints": 5,
+      "MaxWeightedPoints": 15,
+      "Band": "1 pt (1 - 10)",
+      "Detail": "DEMO - fictional Entra cache",
+      "Components": []
+    },
+    {
+      "Id": "CustomPermissionLevels",
+      "Axis": "Permissions",
+      "Name": "Used custom permission levels",
+      "Unit": "definitions",
+      "Weight": 5,
+      "Bands": [
+        "< 1",
+        "1 - 2",
+        "> 2 - 5",
+        "> 5"
+      ],
+      "Evaluated": true,
+      "Value": 3,
+      "ValueDisplay": "3 definitions",
+      "Points": 2,
+      "WeightedPoints": 10,
+      "MaxWeightedPoints": 15,
+      "Band": "2 pt (> 2 - 5)",
+      "Detail": "DEMO - Automatic collection complete; qualification complete. Used definitions include modified standard roles; equivalent masks count once.",
+      "Components": [],
+      "Assessment": {
+        "Source": "Automatic",
+        "Valid": true,
+        "Estimated": false,
+        "CollectionComplete": true,
+        "QualificationComplete": true,
+        "UnqualifiedCount": 0,
+        "KnownRisks": [],
+        "Errors": [],
+        "Detectors": [],
+        "RulesSha256": "DEMO - fictional scan provenance",
+        "DetailFile": "AssessmentDetails-Contoso-DEMO.csv"
+      }
+    },
+    {
+      "Id": "FunctionalComplexity",
+      "Axis": "Functional",
+      "Name": "Workflows, forms and customizations",
+      "Unit": "effort level",
+      "Weight": 10,
+      "Bands": [
+        "None requiring adaptation",
+        "Configuration or republishing",
+        "Logic, form or dependency adaptation",
+        "Rebuild or replacement"
+      ],
+      "Evaluated": true,
+      "Value": 3,
+      "ValueDisplay": "3 effort level",
+      "Points": 3,
+      "WeightedPoints": 30,
+      "MaxWeightedPoints": 30,
+      "Band": "3 pt (Rebuild or replacement) - estimated",
+      "Detail": "DEMO - Automatic collection complete; qualification complete. Functional effort is an automatic technical estimate.",
+      "Components": [],
+      "Assessment": {
+        "Source": "Automatic",
+        "Valid": true,
+        "Estimated": true,
+        "CollectionComplete": true,
+        "QualificationComplete": true,
+        "UnqualifiedCount": 0,
+        "KnownRisks": [
+          {
+            "Id": "contoso-workflow",
+            "Technology": "Workflow2013",
+            "Effort": 3,
+            "Evidence": "DEMO - fictional workflow association",
+            "Reason": "Replacement in SPO"
+          }
+        ],
+        "Errors": [],
+        "Detectors": [],
+        "RulesSha256": "DEMO - fictional scan provenance",
+        "DetailFile": "AssessmentDetails-Contoso-DEMO.csv"
+      }
+    }
+  ],
+  "Mode": "DEMO",
+  "Fictional": true,
+  "Status": "Complete",
+  "MissingInputs": [],
+  "ToolVersion": "1.2.0",
+  "FunctionalEstimate": true,
+  "AssessmentEvidence": {
+    "CustomPermissionLevels": {
+      "Source": "Automatic",
+      "Valid": true,
+      "Estimated": false,
+      "CollectionComplete": true,
+      "QualificationComplete": true,
+      "UnqualifiedCount": 0,
+      "KnownRisks": [],
+      "Errors": [],
+      "Detectors": [],
+      "RulesSha256": "DEMO - fictional scan provenance",
+      "DetailFile": "AssessmentDetails-Contoso-DEMO.csv"
+    },
+    "FunctionalComplexity": {
+      "Source": "Automatic",
+      "Valid": true,
+      "Estimated": true,
+      "CollectionComplete": true,
+      "QualificationComplete": true,
+      "UnqualifiedCount": 0,
+      "KnownRisks": [
+        {
+          "Id": "contoso-workflow",
+          "Technology": "Workflow2013",
+          "Effort": 3,
+          "Evidence": "DEMO - fictional workflow association",
+          "Reason": "Replacement in SPO"
+        }
+      ],
+      "Errors": [],
+      "Detectors": [],
+      "RulesSha256": "DEMO - fictional scan provenance",
+      "DetailFile": "AssessmentDetails-Contoso-DEMO.csv"
+    }
+  },
+  "PartialResult": {
+    "Score": 25,
+    "Level": "Moderate",
+    "LevelColor": "#005A9E",
+    "LevelBackground": "#E6F4FF",
+    "ScoreLevel": "Moderate",
+    "FloorApplied": [],
+    "EvaluatedWeight": 85.0,
+    "CoveragePercent": 85.0,
+    "TotalWeight": 100,
+    "TopDrivers": [
+      "AverageVersions",
+      "BrokenInheritance",
+      "DirectUsers"
+    ],
+    "Criteria": [
+      {
+        "Id": "FileCount",
+        "Axis": "Volume",
+        "Name": "File volume and library concentration",
+        "Unit": "files",
+        "Weight": 15,
+        "Bands": [
+          "< 10,000",
+          "10,000 - 50,000",
+          "> 50,000 - 250,000",
+          "> 250,000"
+        ],
+        "Evaluated": true,
+        "Value": 1200,
+        "ValueDisplay": "1,200 / 800",
+        "Points": 0,
+        "WeightedPoints": 0,
+        "MaxWeightedPoints": 45,
+        "Band": "0 pt (MAX of component bands)",
+        "Detail": "MAX (no additive points): Total files = 1200, 0/3 (DEMO - 1,200 fictional source files); Maximum files per library = 800, 0/3 (DEMO - largest source library)",
+        "Components": [
+          {
+            "Id": "FileCount",
+            "Name": "Total files",
+            "Value": 1200,
+            "Bands": [
+              "< 10,000",
+              "10,000 - 50,000",
+              "> 50,000 - 250,000",
+              "> 250,000"
+            ],
+            "Points": 0,
+            "Detail": "DEMO - 1,200 fictional source files"
+          },
+          {
+            "Id": "LibraryConcentration",
+            "Name": "Maximum files per library",
+            "Value": 800,
+            "Bands": [
+              "< 20,000",
+              "20,000 - 50,000",
+              "> 50,000 - 100,000",
+              "> 100,000"
+            ],
+            "Points": 0,
+            "Detail": "DEMO - largest source library"
+          }
+        ]
+      },
+      {
+        "Id": "TotalSizeGiB",
+        "Axis": "Volume",
+        "Name": "Total size",
+        "Unit": "GiB",
+        "Weight": 10,
+        "Bands": [
+          "< 10",
+          "10 - 100",
+          "> 100 - 500",
+          "> 500"
+        ],
+        "Evaluated": true,
+        "Value": 4.8,
+        "ValueDisplay": "4.80 GiB",
+        "Points": 0,
+        "WeightedPoints": 0,
+        "MaxWeightedPoints": 30,
+        "Band": "0 pt (< 10)",
+        "Detail": "DEMO - current versions",
+        "Components": []
+      },
+      {
+        "Id": "SubsiteCount",
+        "Axis": "Volume",
+        "Name": "Number of subsites",
+        "Unit": "sites",
+        "Weight": 5,
+        "Bands": [
+          "< 2",
+          "2 - 5",
+          "> 5 - 25",
+          "> 25"
+        ],
+        "Evaluated": true,
+        "Value": 2,
+        "ValueDisplay": "2 sites",
+        "Points": 1,
+        "WeightedPoints": 5,
+        "MaxWeightedPoints": 15,
+        "Band": "1 pt (2 - 5)",
+        "Detail": "DEMO - source webs",
+        "Components": []
+      },
+      {
+        "Id": "LibraryCount",
+        "Axis": "Volume",
+        "Name": "Number of libraries",
+        "Unit": "libraries",
+        "Weight": 5,
+        "Bands": [
+          "< 4",
+          "4 - 10",
+          "> 10 - 30",
+          "> 30"
+        ],
+        "Evaluated": true,
+        "Value": 4,
+        "ValueDisplay": "4 libraries",
+        "Points": 1,
+        "WeightedPoints": 5,
+        "MaxWeightedPoints": 15,
+        "Band": "1 pt (4 - 10)",
+        "Detail": "DEMO - source libraries",
+        "Components": []
+      },
+      {
+        "Id": "AverageVersions",
+        "Axis": "History",
+        "Name": "Version history and concentration",
+        "Unit": "versions",
+        "Weight": 10,
+        "Bands": [
+          "< 3",
+          "3 - 10",
+          "> 10 - 50",
+          "> 50"
+        ],
+        "Evaluated": true,
+        "Value": 4,
+        "ValueDisplay": "4 / 2",
+        "Points": 2,
+        "WeightedPoints": 20,
+        "MaxWeightedPoints": 30,
+        "Band": "2 pt (MAX of component bands)",
+        "Detail": "MAX (no additive points): Average historical versions per file = 4, 1/3 (DEMO - average historical versions); Files with at least 100 historical versions = 2, 2/3 (DEMO - 24 of 1,200 files have >=100 versions; maximum 120)",
+        "Components": [
+          {
+            "Id": "AverageVersions",
+            "Name": "Average historical versions per file",
+            "Value": 4,
+            "Bands": [
+              "< 3",
+              "3 - 10",
+              "> 10 - 50",
+              "> 50"
+            ],
+            "Points": 1,
+            "Detail": "DEMO - average historical versions"
+          },
+          {
+            "Id": "VersionConcentration",
+            "Name": "Files with at least 100 historical versions",
+            "Value": 2,
+            "Bands": [
+              "0%",
+              "> 0 to 1%",
+              "> 1 to 5%",
+              "> 5%"
+            ],
+            "Points": 2,
+            "Detail": "DEMO - 24 of 1,200 files have >=100 versions; maximum 120"
+          }
+        ]
+      },
+      {
+        "Id": "PathLimitFiles",
+        "Axis": "Paths",
+        "Name": "Files over path limits",
+        "Unit": "files",
+        "Weight": 10,
+        "Bands": [
+          "< 1",
+          "1 - 10",
+          "> 10 - 100",
+          "> 100"
+        ],
+        "Evaluated": true,
+        "Value": 0,
+        "ValueDisplay": "0 files",
+        "Points": 0,
+        "WeightedPoints": 0,
+        "MaxWeightedPoints": 30,
+        "Band": "0 pt (< 1)",
+        "Detail": "DEMO - fictional source evidence",
+        "Components": []
+      },
+      {
+        "Id": "LargeFiles",
+        "Axis": "Risky files",
+        "Name": "Large files",
+        "Unit": "files",
+        "Weight": 5,
+        "Bands": [
+          "< 1",
+          "1 - 5",
+          "> 5 - 50",
+          "> 50"
+        ],
+        "Evaluated": true,
+        "Value": 0,
+        "ValueDisplay": "0 files",
+        "Points": 0,
+        "WeightedPoints": 0,
+        "MaxWeightedPoints": 15,
+        "Band": "0 pt (< 1)",
+        "Detail": "DEMO - fictional source evidence",
+        "Components": []
+      },
+      {
+        "Id": "RiskyFiles",
+        "Axis": "Risky files",
+        "Name": "Checked-out, blocked or excluded files",
+        "Unit": "files",
+        "Weight": 5,
+        "Bands": [
+          "< 1",
+          "1 - 20",
+          "> 20 - 200",
+          "> 200"
+        ],
+        "Evaluated": true,
+        "Value": 0,
+        "ValueDisplay": "0 files",
+        "Points": 0,
+        "WeightedPoints": 0,
+        "MaxWeightedPoints": 15,
+        "Band": "0 pt (< 1)",
+        "Detail": "DEMO - fictional source evidence",
+        "Components": []
+      },
+      {
+        "Id": "BrokenInheritance",
+        "Axis": "Permissions",
+        "Name": "Objects with broken inheritance",
+        "Unit": "objects",
+        "Weight": 10,
+        "Bands": [
+          "< 10",
+          "10 - 100",
+          "> 100 - 1,000",
+          "> 1,000"
+        ],
+        "Evaluated": true,
+        "Value": 250,
+        "ValueDisplay": "250 objects",
+        "Points": 2,
+        "WeightedPoints": 20,
+        "MaxWeightedPoints": 30,
+        "Band": "2 pt (> 100 - 1,000)",
+        "Detail": "DEMO - unique source Item scopes",
+        "Components": []
+      },
+      {
+        "Id": "DirectUsers",
+        "Axis": "Permissions",
+        "Name": "Users assigned directly",
+        "Unit": "users",
+        "Weight": 5,
+        "Bands": [
+          "< 10",
+          "10 - 50",
+          "> 50 - 300",
+          "> 300"
+        ],
+        "Evaluated": true,
+        "Value": 60,
+        "ValueDisplay": "60 users",
+        "Points": 2,
+        "WeightedPoints": 10,
+        "MaxWeightedPoints": 15,
+        "Band": "2 pt (> 50 - 300)",
+        "Detail": "DEMO - distinct direct users",
+        "Components": []
+      },
+      {
+        "Id": "InactiveAccounts",
+        "Axis": "Permissions",
+        "Name": "Disabled or unresolved accounts",
+        "Unit": "accounts",
+        "Weight": 5,
+        "Bands": [
+          "< 1",
+          "1 - 10",
+          "> 10 - 50",
+          "> 50"
+        ],
+        "Evaluated": true,
+        "Value": 4,
+        "ValueDisplay": "4 accounts",
+        "Points": 1,
+        "WeightedPoints": 5,
+        "MaxWeightedPoints": 15,
+        "Band": "1 pt (1 - 10)",
+        "Detail": "DEMO - fictional Entra cache",
+        "Components": []
+      },
+      {
+        "Id": "CustomPermissionLevels",
+        "Axis": "Permissions",
+        "Name": "Used custom permission levels",
+        "Unit": "definitions",
+        "Weight": 5,
+        "Bands": [
+          "< 1",
+          "1 - 2",
+          "> 2 - 5",
+          "> 5"
+        ],
+        "Evaluated": false,
+        "Value": null,
+        "ValueDisplay": "Not evaluated",
+        "Points": null,
+        "WeightedPoints": null,
+        "MaxWeightedPoints": 15,
+        "Band": "Not evaluated",
+        "Detail": "DEMO - Automatic collection partial; qualification complete. Used definitions include modified standard roles; equivalent masks count once.",
+        "Components": [],
+        "Assessment": {
+          "Source": "Automatic",
+          "Valid": true,
+          "Estimated": false,
+          "CollectionComplete": false,
+          "QualificationComplete": true,
+          "UnqualifiedCount": 0,
+          "KnownRisks": [],
+          "Errors": [
+            {
+              "Detector": "FilteredPermissionScope",
+              "Message": "DEMO - hidden or item scopes excluded"
+            }
+          ],
+          "Detectors": [],
+          "RulesSha256": "DEMO - fictional scan provenance",
+          "DetailFile": "AssessmentDetails-Contoso-DEMO.csv"
+        }
+      },
+      {
+        "Id": "FunctionalComplexity",
+        "Axis": "Functional",
+        "Name": "Workflows, forms and customizations",
+        "Unit": "effort level",
+        "Weight": 10,
+        "Bands": [
+          "None requiring adaptation",
+          "Configuration or republishing",
+          "Logic, form or dependency adaptation",
+          "Rebuild or replacement"
+        ],
+        "Evaluated": false,
+        "Value": null,
+        "ValueDisplay": "Not evaluated",
+        "Points": null,
+        "WeightedPoints": null,
+        "MaxWeightedPoints": 30,
+        "Band": "Not evaluated",
+        "Detail": "DEMO - Automatic collection complete; qualification partial. Known workflow replacement risk; one custom form remains unqualified.",
+        "Components": [],
+        "Assessment": {
+          "Source": "Automatic",
+          "Valid": true,
+          "Estimated": true,
+          "CollectionComplete": true,
+          "QualificationComplete": false,
+          "UnqualifiedCount": 1,
+          "KnownRisks": [
+            {
+              "Id": "contoso-workflow",
+              "Technology": "Workflow2013",
+              "Effort": 3,
+              "Evidence": "DEMO - fictional workflow association",
+              "Reason": "Replacement in SPO"
+            }
+          ],
+          "Errors": [],
+          "Detectors": [],
+          "RulesSha256": "DEMO - fictional scan provenance",
+          "DetailFile": "AssessmentDetails-Contoso-DEMO.csv"
+        }
+      }
+    ],
+    "Mode": "DEMO",
+    "Fictional": true,
+    "Status": "Partial",
+    "MissingInputs": [
+      "Custom permission definitions",
+      "Functional source assessment"
+    ],
+    "ToolVersion": "1.2.0",
+    "FunctionalEstimate": false,
+    "AssessmentEvidence": {
+      "CustomPermissionLevels": {
+        "Source": "Automatic",
+        "Valid": true,
+        "Estimated": false,
+        "CollectionComplete": false,
+        "QualificationComplete": true,
+        "UnqualifiedCount": 0,
+        "KnownRisks": [],
+        "Errors": [
+          {
+            "Detector": "FilteredPermissionScope",
+            "Message": "DEMO - hidden or item scopes excluded"
+          }
+        ],
+        "Detectors": [],
+        "RulesSha256": "DEMO - fictional scan provenance",
+        "DetailFile": "AssessmentDetails-Contoso-DEMO.csv"
+      },
+      "FunctionalComplexity": {
+        "Source": "Automatic",
+        "Valid": true,
+        "Estimated": true,
+        "CollectionComplete": true,
+        "QualificationComplete": false,
+        "UnqualifiedCount": 1,
+        "KnownRisks": [
+          {
+            "Id": "contoso-workflow",
+            "Technology": "Workflow2013",
+            "Effort": 3,
+            "Evidence": "DEMO - fictional workflow association",
+            "Reason": "Replacement in SPO"
+          }
+        ],
+        "Errors": [],
+        "Detectors": [],
+        "RulesSha256": "DEMO - fictional scan provenance",
+        "DetailFile": "AssessmentDetails-Contoso-DEMO.csv"
+      }
+    }
+  }
+}

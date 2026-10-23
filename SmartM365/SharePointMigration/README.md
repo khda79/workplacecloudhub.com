@@ -143,16 +143,92 @@ The Complexity column (Overview and ArchivedOverview) and the Complexity card in
 the Files & Permissions header show a `Low`, `Moderate`, `High` or `Very high`
 level with a 0-100 score. It describes the source estate only, from the latest
 completed source file and permission scans, and is independent from the
-comparison rates. `Scripts/Compare/migration_complexity.py` scores 11 criteria
+comparison rates. `Scripts/Compare/migration_complexity.py` scores 13 criteria
 from 0 to 3 points:
 
 | Axis | Criterion | Weight |
 |---|---|---|
-| Volume | Files, total size (GiB), subsites, libraries | 15, 15, 5, 5 |
-| History | Average `VersionsCount` per file | 10 |
+| Volume | MAX(total-file points, library-concentration points), total size (GiB), subsites, libraries | 15, 10, 5, 5 |
+| History | MAX(average `VersionsCount` points, version-concentration points) | 10 |
 | Paths | Files whose projected destination path exceeds 400 characters or a segment exceeds 255 | 10 |
 | Risky files | Files over 2 GiB; checked-out, blocked or excluded files | 5, 5 |
-| Permissions | Objects with broken inheritance, users assigned directly, disabled or unresolved Entra accounts | 15, 10, 5 |
+| Permissions | Objects with broken inheritance, users assigned directly, disabled or unresolved Entra accounts, used custom permission definitions | 10, 5, 5, 5 |
+| Functional | Maximum remediation effort across workflows, forms and customizations | 10 |
+
+Each MAX group counts its weight once. Library concentration is the maximum source
+files in one library: `< 20,000`, `20,000-50,000`, `> 50,000-100,000`, `> 100,000`
+score 0, 1, 2, 3. Version concentration is the percentage of files with at least
+100 historical versions: `0%`, `> 0-1%`, `> 1-5%`, `> 5%` score 0, 1, 2, 3.
+These are planning thresholds, not SharePoint platform limits.
+
+Custom permission definitions score 0 for none, 1 for 1-2, 2 for 3-5, 3 above 5.
+Only used nonstandard definitions count; equivalent effective permission masks
+count once regardless of names, sites or repeated assignments. Functional effort
+scores 0 for no adaptation, 1 for configuration/republishing, 2 for logic, form or
+dependency adaptation, 3 for rebuild/replacement. Take the maximum effort across
+unique components; dependencies do not add points.
+
+Source SharePoint Server scans now generate automatic evidence next to each
+completed source CSV: `<source.csv>.assessment.json.txt` and its detailed
+`AssessmentDetails-<source-base-name>.csv`. Detail files never match the inventory
+selection pattern. The file scan assesses workflow associations/subscriptions,
+InfoPath libraries/templates, explicit content-type form overrides, page/Web Part
+metadata, custom actions, event receivers, activated feature references and field
+types. It includes hidden and non-document lists in each selected web. It also
+inspects custom JSLink rendering on standard Web Parts and fields; the built-in
+`clienttemplates.js` renderer is excluded. XslLink and inline XSL overrides remain
+unqualified until their compatibility is reviewed. Site-collection event receivers
+are collected once per site collection, independently of web customizations.
+An unreadable list leaves collection partial while subsequent lists are still
+assessed, preserving their known risks. Malformed automatic JSON structures
+invalidate only the affected criterion; other criteria continue to calculate.
+The scan does
+not download document binaries or run workflows. Server APIs that cannot be read
+are reported as partial, never interpreted as absence.
+
+The permission scan records role IDs, names, effective masks, modified standard
+roles, usage and definition provenance while reading existing role assignments.
+Standard masks use documented core default-role permission profiles, resolved
+through the installed `SPBasePermissions` enum, with optional reviewed overrides
+in `StandardRoleMasks`. Untyped non-core levels are assessed as custom. Missing
+baselines leave classification unqualified. Filters excluding item permissions,
+hidden/system lists or non-document lists leave mapping-wide permission coverage
+partial; the scan does not silently broaden those inventory options.
+
+Automatic functional scores are **technical estimates**. Rules live in
+`Config/source-assessment.rules.json.txt`, self-healed from the matching template
+without replacing local overrides. Rule changes apply to the next source scan;
+each sidecar records its rules hash. Workflow 2010/2013, InfoPath and identified
+custom server code default to replacement (3); identified client scripts default
+to adaptation (2). Standard list views/forms default to 0, client-side component
+configuration to 1. Unmatched forms/pages/features/fields/Web Parts remain
+unqualified; a page extension alone is never proof of complexity or compatibility.
+
+Collection and qualification are tracked separately. A criterion scores only
+with complete collection and qualification; otherwise it stays N/A. Known
+replacement/adaptation risks remain in the result and GUI tooltip even when the
+criterion is N/A. The calculator verifies both the source CSV SHA256 and the
+detailed evidence CSV SHA256. The GUI invalidates cached results when sidecars or
+detail files change. The generic launcher and farm source batch use the same
+assessment helper, and batch local copies include its rules files.
+
+Existing manual assessments remain available as a legacy fallback when no
+automatic sidecar exists for that criterion. Partial or invalid automatic
+evidence never falls back to an older manual score. To create a manual fallback, copy
+`Config/source-complexity-assessment.json.template` beside `migration.config.psd1`
+as `source-complexity-assessment.json.txt`. Populate each section's `Items`, UTC
+review date and evidence reference; mark `Complete` true only for a complete
+assessment of the migration source scope. Bind functional assessment to the source
+file CSV SHA256 and custom permissions to the source permission CSV SHA256 in
+`Inputs`. Missing, incomplete or mismatched sections stay N/A, not zero. A complete
+empty list establishes zero. `ItemExample` illustrates the schema and is never
+scored. Functional categories are `Workflow`, `Form`, `Customization`; `Effort` is
+an integer 0-3. Permission items use explicit `IsBuiltIn` and `IsUsed` booleans
+and `EffectivePermissions` as an unsigned decimal 64-bit permission mask.
+The calculator reads local evidence only and performs no inventory or connection.
+Assessment failures do not invalidate a successfully completed primary inventory;
+the primary CSV/comparison schemas are unchanged. No live server/tenant behavior
+is qualified by the offline tests.
 
 `Score = SUM(points x weight) / (3 x SUM(evaluated weights)) x 100`. Levels
 start at 0, 25, 50 and 75. A floor rule raises the level to at least `High`
@@ -161,7 +237,9 @@ permission scan or an Entra users cache, the affected criteria show `N/A`, are
 excluded from the denominator and the result is marked `partial`. The Entra
 cache is the migration's `Comparison.EntraUsersCachePath`, otherwise the newest
 `_Local/EntraUsersCache/*.csv` created by permission comparisons; the score
-never connects to Entra.
+never connects to Entra. The GUI displays coverage as evaluated weight divided
+by total enabled weight. Missing library/version metrics also leave their MAX
+group unevaluated. A partial score must be read alongside its coverage.
 
 Thresholds, weights, levels and floor rules live in
 `Config/migration-complexity.json.txt`. The GUI creates it from the committed
@@ -175,7 +253,7 @@ Source scans calculate it: the generic launcher after each `ScanSourceFiles` or
 after all phases, from a verified local copy of the Python scripts. This step is
 informative: a failure is logged as a warning and never fails the scan. The GUI
 calculates complexity only when no stored result matches the latest source
-scans, mapping file, Entra cache and settings (for example after an older scan,
+scans, mapping file, Entra cache, source assessment and settings (for example after an older scan,
 a changed setting, or an Entra cache only available on the GUI workstation). It
 then keeps the previous level marked `Updating` and recalculates it in a
 background job; failures stay visible in the tooltip and the activity log.

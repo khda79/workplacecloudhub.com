@@ -3,7 +3,7 @@
 .SYNOPSIS
 Fictional migration portfolio, all dashboard panels, batch UI, wizard and reports.
 .VERSION
-1.0.0
+1.0.2
 #>
 function script:Switch-SharePointDemoPanel {
     param([string]$Name)
@@ -22,6 +22,9 @@ function script:Initialize-SmartM365DemoProfile {
     Set-SmartM365DemoCombo cmbMigration $s.Data.Migrations
     Set-SmartM365DemoCombo cmbAuthMode @('Interactive (simulated)','Device login (simulated)','Certificate (simulated)')
     $s.Data.SourceUrl='https://sharepoint.contoso.example/hr';$s.Data.TargetUrl='https://contoso.sharepoint.example/sites/hr'
+    $complexity = Get-Content -LiteralPath (Join-Path $s.AppRoot 'Config/migration-complexity.demo.json.template') -Raw | ConvertFrom-Json
+    if ($s.Scenario -eq 'Issues') { $complexity = $complexity.PartialResult }
+    $s.Data.Complexity = $complexity
     $c.lblSourceType.Text='SP2019';$c.lblTargetType.Text='SPO';$c.lblSourceUrl.Text=$s.Data.SourceUrl;$c.lblTargetUrl.Text=$s.Data.TargetUrl
     $portfolio=@(for($i=0;$i -lt $s.Data.Migrations.Count;$i++){
         $fields=@('Name','Migration','MigrationName','Source','Destination','SourceScan','SourcePermissionScan','SourceInventoryDisplay','TargetScan','TargetPermissionScan','TargetInventoryDisplay','FilesComparison','PermissionsComparison','FilesStatus','PermissionsStatus','Complexity','ComplexityDisplay','ComplexityLabel','ComplexityScore','ComplexityTooltip','SourceTooltip','TargetTooltip','SourceScansTooltip','TargetScansTooltip','SourceFileScanIsToday','SourcePermissionScanIsToday','TargetFileScanIsToday','TargetPermissionScanIsToday')
@@ -33,6 +36,14 @@ function script:Initialize-SmartM365DemoProfile {
         $row.TargetInventoryDisplay=('{0:N0} files | 35 folders | 4.7 GB' -f ([Math]::Round(1200*$fileRate/100)+8))
         $extra=@{ScanGapText='0.02';ScanGapTooltip='DEMO - Source/target evidence gap: 20 minutes';ScanGapVisual=(Get-SmartM365PortfolioGapVisual 0.02);Status='Review';StatusTooltip='DEMO - Fictional differences';ComplexityText='35 / 100';ComplexityCaption='Medium';ComplexityVisual=(Get-SmartM365ComplexityVisual -Color '#9A6700' -Background '#FFF8E8');ComparisonVisual=(Get-SmartM365PortfolioRateVisual -Rate $fileRate -Caption '09:30 (demo)');PermissionComparisonVisual=(Get-SmartM365PortfolioRateVisual -Rate $permissionRate -Caption '09:30 (demo)');GlobalComparisonVisual=(Get-SmartM365PortfolioRateVisual -Rate (($fileRate+$permissionRate)/2) -Caption 'Equal weighting');ComparisonTooltip='DEMO - Source keys matched against target';PermissionComparisonTooltip='DEMO - Source permission keys matched';GlobalComparisonTooltip='DEMO - Mean of files and permissions';SourceInventoryTooltip='DEMO - 1,200 files, 35 folders, 4.8 GB';TargetInventoryTooltip='DEMO - 1,188 files, 35 folders, 4.7 GB'}
         foreach($key in $extra.Keys){$row|Add-Member -NotePropertyName $key -NotePropertyValue $extra[$key] -Force}
+        $row.ComplexityText = '{0} / 100' -f $complexity.Score
+        $row.ComplexityCaption = $complexity.Level
+        $row.ComplexityScore = $complexity.Score
+        $row.Complexity = $complexity.Level; $row.ComplexityLabel = $complexity.Level
+        $row.ComplexityDisplay = '{0} - {1}/100' -f $complexity.Level,$complexity.Score
+        $row.ComplexityCaption += ' - auto'
+        $row.ComplexityTooltip = 'DEMO - Automatic source assessment; {0}% coverage. Collection and qualification are separate. Workflow replacement risk remains visible even when qualification is partial.' -f $complexity.CoveragePercent
+        $row.ComplexityVisual = Get-SmartM365ComplexityVisual -Color $complexity.LevelColor -Background $complexity.LevelBackground
         $row
     })
     Set-SmartM365DemoGrid gridSummary $portfolio
@@ -40,8 +51,13 @@ function script:Initialize-SmartM365DemoProfile {
     foreach($pair in @(@('lblPortfolioMigrations',[string]$portfolio.Count),@('lblPortfolioFilesCompared',[string]$portfolio.Count),@('lblPortfolioPermissionsCompared',[string]$portfolio.Count),@('lblPortfolioActions','24'),@('lblPortfolioRefreshErrors','0'),@('lblArchivedMigrations','1'),@('lblArchivedFilesCompared','1'),@('lblArchivedPermissionsCompared','1'),@('lblArchivedGlobalCompared','1'),@('lblArchivedRefreshErrors','0'))){$c[$pair[0]].Text=$pair[1]}
     $c.lblSummaryStatus.Text='DEMO - All migration rows are fictional';$c.lblArchivedStatus.Text='DEMO - Archived sample retained for presentation'
     $c.lblWorkflowMigration.Text='Contoso-HR';$c.lblWorkflowSourceUrl.Text=$s.Data.SourceUrl;$c.lblWorkflowTargetUrl.Text=$s.Data.TargetUrl
-    $c.lblWorkflowComplexity.Text='Medium - 35/100';$c.lblWorkflowComplexityCaption.Text='DEMO - Synthetic source complexity';$c.lblWorkflowComplexitySummary.Text='Sample volume, versions, inheritance and identity criteria. No source was scanned.'
-    Set-SmartM365DemoGrid gridWorkflowComplexity @([pscustomobject]@{Axis='Volume';Criterion='File volume';Value='1,200';Band='Low';Points=5;Weighted=10;Detail='Synthetic file inventory';Thresholds='Fictional score bands'},[pscustomobject]@{Axis='Permissions';Criterion='Broken inheritance';Value='25';Band='Medium';Points=10;Weighted=25;Detail='Synthetic permission inventory';Thresholds='Fictional score bands'})
+    $c.lblWorkflowComplexity.Text = '{0} - {1}/100' -f $complexity.Level, $complexity.Score
+    $c.lblWorkflowComplexityCaption.Text='DEMO - automatic estimate; {0}% coverage; {1}' -f $complexity.CoveragePercent, $complexity.Status
+    $c.lblWorkflowComplexitySummary.Text='13 criteria; automatic source evidence. Collection and qualification tracked separately; effort is estimated.'
+    $complexityRows = @($complexity.Criteria | ForEach-Object {
+        [pscustomobject]@{Axis=$_.Axis;Criterion=$_.Name;Value=$_.ValueDisplay;Band=$_.Band;Points=$(if($_.Evaluated){'{0} / 3' -f $_.Points}else{'N/A'});Weighted=$(if($_.Evaluated){'{0} / {1}' -f $_.WeightedPoints,$_.MaxWeightedPoints}else{'N/A'});Detail=('DEMO - '+$_.Detail);Thresholds=($_.Bands -join '; ')}
+    })
+    Set-SmartM365DemoGrid gridWorkflowComplexity $complexityRows
     foreach($name in @('lblScanSrcAge','lblScanTgtAge','lblScanSrcPermAge','lblScanTgtPermAge','lblHistoryAge','lblPermHistoryAge','lblCmpFilesAge','lblCmpPermsAge')){$c[$name].Text='2026-10-18 09:30 (demo)'}
     foreach($name in @('cmbScanSrcFile','cmbScanTgtFile','cmbScanSrcPermFile','cmbScanTgtPermFile','cmbHistoryOldFile','cmbHistoryNewFile','cmbPermHistoryOldFile','cmbPermHistoryNewFile')){Set-SmartM365DemoCombo $name @([pscustomobject]@{Display='Contoso-HR-Inventory-20261018-DEMO.csv'},[pscustomobject]@{Display='Contoso-HR-Inventory-20261011-DEMO.csv'})}
     $c.lblCmpFilesDir.Text='Demo/Comparisons/Files';$c.lblCmpPermsDir.Text='Demo/Comparisons/Permissions'
@@ -133,6 +149,9 @@ function script:Save-SharePointDemoReport {
     # Reuse the shipped report renderer's HTML shell and CSS. Do not load branding config.
     $source=[IO.File]::ReadAllText((Join-Path $s.AppRoot 'Scripts/Compare/report_html.py'))
     $css=[regex]::Match($source,'(?s)REPORT_CSS = """(?<CSS>.*?)"""').Groups['CSS'].Value
+    if ($Kind -eq 'Source complexity') {
+        $css += ' table{table-layout:fixed;width:100%} th:nth-child(1){width:22%} th:nth-child(2){width:10%} th:nth-child(3){width:7%} th:nth-child(4){width:8%} th:nth-child(5){width:53%} td{overflow-wrap:anywhere}'
+    }
     $shell=[regex]::Match($source.Substring($source.IndexOf('def render_report(')),"(?s)return f'''(?<HTML>.*?)'''").Groups['HTML'].Value
     if(-not $css -or -not $shell){throw 'The shipped SharePoint report presentation could not be loaded.'}
     $cards=foreach($key in $Metrics.Keys){'<div class="metric"><div class="metric-label">'+[Net.WebUtility]::HtmlEncode($key)+'</div><div class="metric-value">'+[Net.WebUtility]::HtmlEncode([string]$Metrics[$key])+'</div></div>'}
@@ -150,6 +169,7 @@ function script:Export-SmartM365DemoProfileOutputs {
     $files=@([pscustomobject]@{Library='Documents';Source=1200;Target=1188;Matched=1180;Missing=20;Extra=8;ChangedVersion=5;TargetOlder=3;Success='98.33%'})
     $permissions=@([pscustomobject]@{Scope='Documents';SourcePermissions=500;TargetPermissions=495;Matched=490;Missing=10;Extra=5;Success='98.0%'})
     $definitions=@(
+        @('Complexity','Complexity-DEMO.html','Contoso-HR source migration complexity','Source complexity',@{Level=$s.Data.Complexity.Level;Score=$s.Data.Complexity.Score;Coverage=('{0}%' -f $s.Data.Complexity.CoveragePercent);Criteria=13},@($s.Rows.gridWorkflowComplexity|Select-Object Criterion,Value,Points,Weighted,Detail)),
         @('Files','Files-Comparison-DEMO.html','Contoso-HR file comparison','File comparison',@{Matched=1180;Missing=20;Extra=8;'Changed version'=5;'Target older'=3;'Success rate'='98.33%'},$files),
         @('Permissions','Permissions-Comparison-DEMO.html','Contoso-HR permissions comparison','Permission comparison',@{Matched=490;Missing=10;Extra=5;'Success rate'='98.0%'},$permissions),
         @('FileHistory','File-History-DEMO.html','Contoso-HR file scan history','File history',@{Previous=1150;Current=1200;Added=60;Removed=10;Changed=25},$files),
@@ -176,10 +196,10 @@ function script:Export-SmartM365DemoProfileOutputs {
 }
 
 # SIG # Begin signature block
-# MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
+# MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC3O+2Th0qHjnbK
-# 79+3EEaQQAHxOyypzhnFNuHblLMFd6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAgYo85rZ1I2HR+
+# nNOYMnfifAeeHa5sW4rUPtwYEVcpQ6CCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -204,139 +224,19 @@ function script:Export-SmartM365DemoProfileOutputs {
 # PI5wrVTjV/pR7IrtSIfq8UladlrSZJyyDn3NV2ATvIZ6wNxbTmPFcE0uMg/EYzwd
 # Tek+CgXL3TxUKeldJM4YDWPimNBRhOPXzBDiOQIj6WNswt/KM1oDLnA00CNtciPN
 # dn+dXlneMvTEUah9wyt8o8tkLpoBw+KN+Bq/K0O1qPtS7umi70l45pPiej+mwbwq
-# ztcaoVD7a8ggHP1Vdp/rnafM4GtyCAE6b7U9Yzgvp1/a1kh7XffmqVhRRjCCBY0w
-# ggR1oAMCAQICEA6bGI750C3n79tQ4ghAGFowDQYJKoZIhvcNAQEMBQAwZTELMAkG
-# A1UEBhMCVVMxFTATBgNVBAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRp
-# Z2ljZXJ0LmNvbTEkMCIGA1UEAxMbRGlnaUNlcnQgQXNzdXJlZCBJRCBSb290IENB
-# MB4XDTIyMDgwMTAwMDAwMFoXDTMxMTEwOTIzNTk1OVowYjELMAkGA1UEBhMCVVMx
-# FTATBgNVBAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRpZ2ljZXJ0LmNv
-# bTEhMB8GA1UEAxMYRGlnaUNlcnQgVHJ1c3RlZCBSb290IEc0MIICIjANBgkqhkiG
-# 9w0BAQEFAAOCAg8AMIICCgKCAgEAv+aQc2jeu+RdSjwwIjBpM+zCpyUuySE98orY
-# WcLhKac9WKt2ms2uexuEDcQwH/MbpDgW61bGl20dq7J58soR0uRf1gU8Ug9SH8ae
-# FaV+vp+pVxZZVXKvaJNwwrK6dZlqczKU0RBEEC7fgvMHhOZ0O21x4i0MG+4g1ckg
-# HWMpLc7sXk7Ik/ghYZs06wXGXuxbGrzryc/NrDRAX7F6Zu53yEioZldXn1RYjgwr
-# t0+nMNlW7sp7XeOtyU9e5TXnMcvak17cjo+A2raRmECQecN4x7axxLVqGDgDEI3Y
-# 1DekLgV9iPWCPhCRcKtVgkEy19sEcypukQF8IUzUvK4bA3VdeGbZOjFEmjNAvwjX
-# WkmkwuapoGfdpCe8oU85tRFYF/ckXEaPZPfBaYh2mHY9WV1CdoeJl2l6SPDgohIb
-# Zpp0yt5LHucOY67m1O+SkjqePdwA5EUlibaaRBkrfsCUtNJhbesz2cXfSwQAzH0c
-# lcOP9yGyshG3u3/y1YxwLEFgqrFjGESVGnZifvaAsPvoZKYz0YkH4b235kOkGLim
-# dwHhD5QMIR2yVCkliWzlDlJRR3S+Jqy2QXXeeqxfjT/JvNNBERJb5RBQ6zHFynIW
-# IgnffEx1P2PsIV/EIFFrb7GrhotPwtZFX50g/KEexcCPorF+CiaZ9eRpL5gdLfXZ
-# qbId5RsCAwEAAaOCATowggE2MA8GA1UdEwEB/wQFMAMBAf8wHQYDVR0OBBYEFOzX
-# 44LScV1kTN8uZz/nupiuHA9PMB8GA1UdIwQYMBaAFEXroq/0ksuCMS1Ri6enIZ3z
-# bcgPMA4GA1UdDwEB/wQEAwIBhjB5BggrBgEFBQcBAQRtMGswJAYIKwYBBQUHMAGG
-# GGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBDBggrBgEFBQcwAoY3aHR0cDovL2Nh
-# Y2VydHMuZGlnaWNlcnQuY29tL0RpZ2lDZXJ0QXNzdXJlZElEUm9vdENBLmNydDBF
-# BgNVHR8EPjA8MDqgOKA2hjRodHRwOi8vY3JsMy5kaWdpY2VydC5jb20vRGlnaUNl
-# cnRBc3N1cmVkSURSb290Q0EuY3JsMBEGA1UdIAQKMAgwBgYEVR0gADANBgkqhkiG
-# 9w0BAQwFAAOCAQEAcKC/Q1xV5zhfoKN0Gz22Ftf3v1cHvZqsoYcs7IVeqRq7IviH
-# GmlUIu2kiHdtvRoU9BNKei8ttzjv9P+Aufih9/Jy3iS8UgPITtAq3votVs/59Pes
-# MHqai7Je1M/RQ0SbQyHrlnKhSLSZy51PpwYDE3cnRNTnf+hZqPC/Lwum6fI0POz3
-# A8eHqNJMQBk1RmppVLC4oVaO7KTVPeix3P0c2PR3WlxUjG/voVA9/HYJaISfb8rb
-# II01YBwCA8sgsKxYoA5AY8WYIsGyWfVVa88nq2x2zm8jLfR+cWojayL/ErhULSd+
-# 2DrZ8LaHlv1b0VysGMNNn3O3AamfV6peKOK5lDCCBrQwggScoAMCAQICEA3HrFcF
-# /yGZLkBDIgw6SYYwDQYJKoZIhvcNAQELBQAwYjELMAkGA1UEBhMCVVMxFTATBgNV
-# BAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRpZ2ljZXJ0LmNvbTEhMB8G
-# A1UEAxMYRGlnaUNlcnQgVHJ1c3RlZCBSb290IEc0MB4XDTI1MDUwNzAwMDAwMFoX
-# DTM4MDExNDIzNTk1OVowaTELMAkGA1UEBhMCVVMxFzAVBgNVBAoTDkRpZ2lDZXJ0
-# LCBJbmMuMUEwPwYDVQQDEzhEaWdpQ2VydCBUcnVzdGVkIEc0IFRpbWVTdGFtcGlu
-# ZyBSU0E0MDk2IFNIQTI1NiAyMDI1IENBMTCCAiIwDQYJKoZIhvcNAQEBBQADggIP
-# ADCCAgoCggIBALR4MdMKmEFyvjxGwBysddujRmh0tFEXnU2tjQ2UtZmWgyxU7UNq
-# EY81FzJsQqr5G7A6c+Gh/qm8Xi4aPCOo2N8S9SLrC6Kbltqn7SWCWgzbNfiR+2fk
-# HUiljNOqnIVD/gG3SYDEAd4dg2dDGpeZGKe+42DFUF0mR/vtLa4+gKPsYfwEu7EE
-# bkC9+0F2w4QJLVSTEG8yAR2CQWIM1iI5PHg62IVwxKSpO0XaF9DPfNBKS7Zazch8
-# NF5vp7eaZ2CVNxpqumzTCNSOxm+SAWSuIr21Qomb+zzQWKhxKTVVgtmUPAW35xUU
-# FREmDrMxSNlr/NsJyUXzdtFUUt4aS4CEeIY8y9IaaGBpPNXKFifinT7zL2gdFpBP
-# 9qh8SdLnEut/GcalNeJQ55IuwnKCgs+nrpuQNfVmUB5KlCX3ZA4x5HHKS+rqBvKW
-# xdCyQEEGcbLe1b8Aw4wJkhU1JrPsFfxW1gaou30yZ46t4Y9F20HHfIY4/6vHespY
-# MQmUiote8ladjS/nJ0+k6MvqzfpzPDOy5y6gqztiT96Fv/9bH7mQyogxG9QEPHrP
-# V6/7umw052AkyiLA6tQbZl1KhBtTasySkuJDpsZGKdlsjg4u70EwgWbVRSX1Wd4+
-# zoFpp4Ra+MlKM2baoD6x0VR4RjSpWM8o5a6D8bpfm4CLKczsG7ZrIGNTAgMBAAGj
-# ggFdMIIBWTASBgNVHRMBAf8ECDAGAQH/AgEAMB0GA1UdDgQWBBTvb1NK6eQGfHrK
-# 4pBW9i/USezLTjAfBgNVHSMEGDAWgBTs1+OC0nFdZEzfLmc/57qYrhwPTzAOBgNV
-# HQ8BAf8EBAMCAYYwEwYDVR0lBAwwCgYIKwYBBQUHAwgwdwYIKwYBBQUHAQEEazBp
-# MCQGCCsGAQUFBzABhhhodHRwOi8vb2NzcC5kaWdpY2VydC5jb20wQQYIKwYBBQUH
-# MAKGNWh0dHA6Ly9jYWNlcnRzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRS
-# b290RzQuY3J0MEMGA1UdHwQ8MDowOKA2oDSGMmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0
-# LmNvbS9EaWdpQ2VydFRydXN0ZWRSb290RzQuY3JsMCAGA1UdIAQZMBcwCAYGZ4EM
-# AQQCMAsGCWCGSAGG/WwHATANBgkqhkiG9w0BAQsFAAOCAgEAF877FoAc/gc9EXZx
-# ML2+C8i1NKZ/zdCHxYgaMH9Pw5tcBnPw6O6FTGNpoV2V4wzSUGvI9NAzaoQk97fr
-# PBtIj+ZLzdp+yXdhOP4hCFATuNT+ReOPK0mCefSG+tXqGpYZ3essBS3q8nL2UwM+
-# NMvEuBd/2vmdYxDCvwzJv2sRUoKEfJ+nN57mQfQXwcAEGCvRR2qKtntujB71WPYA
-# gwPyWLKu6RnaID/B0ba2H3LUiwDRAXx1Neq9ydOal95CHfmTnM4I+ZI2rVQfjXQA
-# 1WSjjf4J2a7jLzWGNqNX+DF0SQzHU0pTi4dBwp9nEC8EAqoxW6q17r0z0noDjs6+
-# BFo+z7bKSBwZXTRNivYuve3L2oiKNqetRHdqfMTCW/NmKLJ9M+MtucVGyOxiDf06
-# VXxyKkOirv6o02OoXN4bFzK0vlNMsvhlqgF2puE6FndlENSmE+9JGYxOGLS/D284
-# NHNboDGcmWXfwXRy4kbu4QFhOm0xJuF2EZAOk5eCkhSxZON3rGlHqhpB/8MluDez
-# ooIs8CVnrpHMiD2wL40mm53+/j7tFaxYKIqL0Q4ssd8xHZnIn/7GELH3IdvG2XlM
-# 9q7WP/UwgOkw/HQtyRN62JK4S1C8uw3PdBunvAZapsiI5YKdvlarEvf8EA+8hcpS
-# M9LHJmyrxaFtoza2zNaQ9k+5t1wwggbtMIIE1aADAgECAhAIT9wzT35FTtvDD4/5
-# khg1MA0GCSqGSIb3DQEBCwUAMGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdp
-# Q2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3Rh
-# bXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTEwHhcNMjYwODA1MDAwMDAwWhcN
-# MzcxMTA0MjM1OTU5WjBjMQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQs
-# IEluYy4xOzA5BgNVBAMTMkRpZ2lDZXJ0IFNIQTI1NiBSU0E0MDk2IFRpbWVzdGFt
-# cCBSZXNwb25kZXIgMjAyNiAxMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKC
-# AgEAtnum8sn+zUr41JtMZbP9OMYw+HwJDpG5xkIu/lqcfNYmMX81YmsUiHLbh9yk
-# peWBGKTLhYBrAN9Tdg/QEzG32XcObmgIblnr0CoQ3WSAeDZ6nH6X6VkFyYkJw3QB
-# JREwvm4UhLzSxmwPA7cFKRTEOMsmEEj6qJk/dqLEAL+oQYuOwE2UuiX1Vnul8YRe
-# IyWd4kgLn9gq6LNXM0UplkR6jL/QHxmb6fMoGBJYbnaUI7XD6cKDpekK2SVMld4i
-# DbzeHDtOaaxldH5IxuNusQ69nd8/ZXEiB5Hbxj3RlK13cX1W4DlFXKdv/CEhM8Cj
-# 1vvlmvhNroyPdRGbbpBlgyf8Wdu5N6ByhFwURn0U6ozlPoxN22v+fviUhP+6DR54
-# 7OZnpBMWDfei1f5sVGwiiW/KQTWOK97g+4RJpPzPNV4VYMAwO2jM2Aty2QYPVmOQ
-# TJm0msuXnJrSbl2gf9JylpkJlWXqk1Q4LJsxz+TELoQCZIljbgvTJgoPU2R12ydv
-# 8i1UqL/adelA0y7U9Pmmtbze9Xx3rtajC5SzQd1jgfwAwsa90v9YcSPdmeoyoBBA
-# /27cCL237l5DTYYPDLQ4ON3OLTGWnvRb6jDrf/T75gMRfUzSLCBQfBusm9+mSWRl
-# C/Df6S/e9Q8i13CuhzOT2Jx+V/nlbXM4QoBwlUAhelwwJT0CAwEAAaOCAZUwggGR
-# MAwGA1UdEwEB/wQCMAAwHQYDVR0OBBYEFBTJY4owLtRK+26U8+bjQH717M3iMB8G
-# A1UdIwQYMBaAFO9vU0rp5AZ8esrikFb2L9RJ7MtOMA4GA1UdDwEB/wQEAwIHgDAW
-# BgNVHSUBAf8EDDAKBggrBgEFBQcDCDCBlQYIKwYBBQUHAQEEgYgwgYUwJAYIKwYB
-# BQUHMAGGGGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBdBggrBgEFBQcwAoZRaHR0
-# cDovL2NhY2VydHMuZGlnaWNlcnQuY29tL0RpZ2lDZXJ0VHJ1c3RlZEc0VGltZVN0
-# YW1waW5nUlNBNDA5NlNIQTI1NjIwMjVDQTEuY3J0MF8GA1UdHwRYMFYwVKBSoFCG
-# Tmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRHNFRpbWVT
-# dGFtcGluZ1JTQTQwOTZTSEEyNTYyMDI1Q0ExLmNybDAgBgNVHSAEGTAXMAgGBmeB
-# DAEEAjALBglghkgBhv1sBwEwDQYJKoZIhvcNAQELBQADggIBAI3FOmEenVIK35ms
-# CYB+fShAsWvSYvLBItoNdAgQ2jIqrGsVsluXMJU/+mRebBc52s6lbKAvOVPXaizm
-# KkMLLflEEKDZQx4CkS2t8aHPjkXha3hYZ010htFa3dhNgmalH5vuWvh3tTCf4frT
-# S7gPtGc4Z/xaPhQ2AB1mR8eEe/WbH0RWHvVIl6VwQ3+g5FKNfN2N/DWJkf13w2H+
-# 2GfqEfbd35Ww8CvoYBjLNIDTadcPWdgsjsiOaK/7EsKJgLjUNIVgvcaFOLLQ/Glr
-# A+0ZHJoFUbOr5SJN8zykPspXIXlpDJY/gqFUZRROeab9GVgmhbdOJcD/63RhxPah
-# FUGbckRONqMe6DYAv6/mOG0pWd3cPStsdcS7buj5DyniwRY8yooMH6ptx5vpP/pZ
-# zBPBeZD2U4IsthyxB5Jaa8qrOkB5z160TXiM5ADMspZ0TfD9MJoq0tFpFPssKRFh
-# WeEDYPvcUuN7U7lvcdHl4ezQ3NT/7Ffs1sR1yh/LRbdZ3B3Vc6q2WmD8mDC0p9kz
-# l2o73iVtS946IkEj7FkRsZGww1teYxERROC745xrtjvcw9ZyyUjHZWGRIpJeMNsP
-# quCDf0fkyHtB+J4AiNZqCQk23rxh+KbpyMTNVKItJ5l92Svl20U9NbqMBOVYl1h5
-# 4NEYLJq1/xHWFKPNK903zJZA9P2DMYIFvjCCBboCAQEwYjBOMR4wHAYDVQQDDBV3
-# b3JrcGxhY2VjbG91ZGh1Yi5jb20xLDAqBgkqhkiG9w0BCQEWHWNvbnRhY3RAd29y
-# a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
-# AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
-# CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEICRB1wZpWswYJDFt+WJie4Uk/+TZzubY6kYn82oGD7jwMA0GCSqG
-# SIb3DQEBAQUABIIBgERmeBgeoJOJZT3njXWKXNTOp71FatEtVgBCj5J+rEl9O38B
-# lY4z4aeIvSwl5F1/lma0rbUwI8wWWQZBQ6of63IrpB7UJVketV+uP4yIkWEpshII
-# MqfRSwbtyuN1Qtu8ngHu+ZJZhq4fqNu9fGAyjlDjqfd8Y3iKEikxmfcyCwmI0slC
-# IBd4lW1uVq+ZbDVj4Nuw1HlLf8Pm5Ggh2t41RgqmyZ9/XtzeDkmfKGybw3EObohF
-# Xltn+hX+HozZRVFaQHCEsxMBxrs+dsFhHeV30oEabDRXlZFQdBtZdZ/oYCZzt3TB
-# OAVKM+yR3RrcO3xA8w0w7wt3DGo/8arXEeepxNjYgyUFm9lftmpfR7FVT8cClrhJ
-# r7rur1B0mfB0Hsu+E4CDhlcrtyi64hIxBvDvrr4DL5D41xjLFRzB7e5FP9SEcTak
-# W3ygQ+IoEl5+axT/s+iP/iRNyWepHLoM7mwUiO/4c2sPXDiRRItzs9AejOkVJPSv
-# HNhIAfkVioNH5vjZaKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
-# CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
-# RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
-# MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTgwMDQ2
-# MzlaMC8GCSqGSIb3DQEJBDEiBCB7yeyLq8ZmnE9rQdHdWrSbvHJdVG7Q7YnPE5zO
-# XkVuBzANBgkqhkiG9w0BAQEFAASCAgC2XjlHhq1YoINAfirLxFFJacPcUVnm6IZg
-# LJxfGgGlX56nU1MipgrEV77DKwXa75c1NQjIQNjFCf/WrTe4BLn2yxlg7A8KK2HW
-# y8CET1tCjekyfcZ9AHAQgDaqaL4ifR8oTl87+H4IGdomcszvoArzaQNUlgty0YOW
-# yUOgYIBgo5+uaC5zWJI83hjjRST7Ovwqt6y6ge8wxJB6dq08GIg3kY21U9965J/n
-# J3I1eM20bfvMlmbwLT5+VDMiiHqAMxrL2/B3VYnn2HlblBT6luXjOc3Buad8Ld/6
-# OoheasiP43cyJcjPDOHCr5nIt3Zv7IHOoGQwfMEitwp1ZR88mrmgbScjZSPoLdE1
-# 090cb/yUlI4zdDW4O06jJAFTADFgWgt3ZdvASX0QiWSrOJx555MawheUg6ZYZdVs
-# rg2AfrwCp1Wwd2eschltsBt/3eNyXnG+EKCfafoZVkxQFtv9GcmN4QbJpW3lrOEA
-# AwVPpVDWe5XrRwXadE4zqemKSMEfOzTZw+5x3Ib/MSBWS3FL2ZIZYGeJpPNyGozb
-# z2pFQF7d7E6jT2UtDJwtNy3KHSyr9npJAdhKdLowc9CRAB7EnRnSMqVMB+xxytJ1
-# 16GStDDfB9NT1iCxTNioGwGWle7j8nZkZ1su8jR3k4RpVqtvLdMsprXq4dwwwS32
-# 6hnTbk2DLQ==
+# ztcaoVD7a8ggHP1Vdp/rnafM4GtyCAE6b7U9Yzgvp1/a1kh7XffmqVhRRjGCApQw
+# ggKQAgEBMGIwTjEeMBwGA1UEAwwVd29ya3BsYWNlY2xvdWRodWIuY29tMSwwKgYJ
+# KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
+# 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
+# gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCCtJC+pD0NilNPvZ/6KhVSP
+# WyN2eotBmgVnjqyynBJ4yzANBgkqhkiG9w0BAQEFAASCAYB0VuwalyOF2G8N7zF4
+# 16U/wSm55xkpcdJuSACLMHsVh1N/ku6vlqV0NISOM5d7W1xJIDxkxZET11oGCe87
+# d9Km5qojvz5Wv/U9HeyYUYhFaJIknFt7Q/NdYaAaKzhLe+j3FK9gfh1wRdcYXvRR
+# 5ioruvrxeuVz2eqqHiyNd6Ti2dSWHKHQBnqWlFQLJW/iYeS9Vt+fUZQxLhEIpHzD
+# nW4yqaIDc7/Eq3MwL3JX6SV2RYq2tfkQpCjPB4OL5vo58ez35jiVtFRkWtn2Krwx
+# 8W6WS7lTwHd42SJ9IgrxSGQTVrb5I6LAPVWe/OLBTjrVqFqUcxfdCj5tjbT1MrLx
+# aPA1J9tfjC3qEaQ4DG+nisJ5YQhDq/weh9tro94KSwBHN5Dn5fPXVpAIgwICALvV
+# 9r2pCpS91QHTJwl8ezfgS/dwTjx5znSq4QVQXhtGqzTVUxTRHewupXMqT0jpyK9n
+# v+z6LAIEggOwjhLxrL6XpkbX6h0rMxOwpWcloJlDe5Sc5FA=
 # SIG # End signature block
