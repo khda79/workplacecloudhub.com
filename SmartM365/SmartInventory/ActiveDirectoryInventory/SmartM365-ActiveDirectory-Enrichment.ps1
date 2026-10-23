@@ -2,7 +2,7 @@
 .SYNOPSIS
     Builds enriched Active Directory computer CSV columns required by the SmartWorkplace Power BI model.
 .VERSION
-1.11
+1.12
 #>
 
 . (Join-Path $PSScriptRoot '../Common/SmartM365.IdentityDateEvidence.ps1')
@@ -21,7 +21,7 @@ function Invoke-SmartM365AdComputersEnrichedCsv {
         [string]$AccountClassificationConfigPath = (Join-Path (Split-Path -Parent $PSScriptRoot) 'Config\AccountClassification.local.json')
     )
 
-    $enrichmentVersion = '1.11'
+    $enrichmentVersion = '1.12'
     $enrichmentTimer = [System.Diagnostics.Stopwatch]::StartNew()
     WriteLog -Message ("AD computers enrichment {0} started" -f $enrichmentVersion)
     if (-not (Test-Path -LiteralPath $CombinedComputersCsv)) {
@@ -745,6 +745,71 @@ function Build($AdVersion, $IntuneVersion) {
             }
         }
 
+        $entraExists = $null -ne $entra
+        $entraByNameCount = MapCount $entraByNameAll $computerName
+        $entraByGuidCount = MapCount $entraByDeviceIdAll $objectGuid
+        $entraNameList = ''
+        if ($entraByDeviceIdAll.ContainsKey($objectGuid)) { $entraNameValues = New-Object System.Collections.Generic.List[string]; foreach ($entraMatch in $entraByDeviceIdAll[$objectGuid]) { $display = V $entraMatch @('DisplayName'); if ($display) { [void]$entraNameValues.Add($display) } }; $entraNameList = ($entraNameValues -join ';') }
+        $correlation = if (-not $entraExists) { 'Not found in Entra' } elseif ($registration) { 'Found (correlated, registered)' } else { 'Found (correlated, missing registration date)' }
+
+        $canonical = V $row @('CanonicalName','DistinguishedName')
+        $lastOu = ''
+        if ($canonical) { $parts = @($canonical -split '[,/]' | Where-Object { $_ }); if ($parts.Count -ge 2) { $lastOu = $parts[$parts.Count - 2] } }
+        $isDisabledOu = if ($canonical -match '(?i)disabled|desactive|disabled objects') { 'True' } else { 'False' }
+        $model = V $intune @('Model')
+        $manufacturer = V $intune @('Manufacturer')
+        $isVirtual = if (("{0} {1}" -f $manufacturer, $model) -match '(?i)vmware|virtualbox|hyper-v|qemu|kvm|virtual machine') { 'True' } else { 'False' }
+
+        $distinguishedName = V $row @('DistinguishedName')
+        $buildNumber = GetBuildNumber (V $row @('operatingSystemVersion','OperatingSystemVersion')) $osVersionM365
+        $operatingSystemMajorCurrent = GetOsMajor (V $row @('OperatingSystem'))
+        $isLtscOs = (([string](V $row @('OperatingSystem'))).Trim().ToLowerInvariant() -match 'ltsc|ltsb')
+        $isLtscBuildFallback = ($operatingSystemMajorCurrent -eq 'Windows 10' -and $null -ne $buildNumber -and @(10240,14393,17763,19044) -contains [int]$buildNumber)
+        $isWindows10Ltsc = $isLtscOs -or $isLtscBuildFallback
+        $osMinToUpdateW11 = ($operatingSystemMajorCurrent -eq 'Windows 11') -or ($operatingSystemMajorCurrent -eq 'Windows 10' -and $null -ne $buildNumber -and [int]$buildNumber -ge 19041)
+        $orgUnit = GetOrganizationalUnitCode $row
+        $domainAndOu = if ((V $row @('DomainNameShort')) -and $orgUnit) { ('{0}-{1}' -f (V $row @('DomainNameShort')), $orgUnit) } else { '' }
+        $site = Get-SmartM365WorkplaceSite -SiteClassification $siteClassification -SiteCode $orgUnit
+        $labelFromEntity = if ($null -ne $site) { $site.Name } else { 'NOTFOUND' }
+        $typeEtablissement = if ($null -ne $site) { $site.Type } else { 'NOTFOUND' }
+        $typeEntity = if ($null -ne $site) { $site.IntegrationStatus } else { '' }
+        if (-not $typeEntity) { $typeEntity = GetTypeEntityFallback (V $row @('DomainNameShort')) $distinguishedName }
+        $subnet = GetSubnet (V $row @('IPv4Address'))
+        $isInOrganizationOu = [string]($distinguishedName.ToUpperInvariant().Contains('OU=ORGANIZATION'))
+        $typeEtablissementUpper = $typeEtablissement.Trim().ToUpperInvariant()
+        $inHeadquartersOu = $false
+        $distinguishedNameUpper = $distinguishedName.ToUpperInvariant()
+        foreach ($fragment in $headquartersOuFragments) { if ($distinguishedNameUpper.Contains($fragment)) { $inHeadquartersOu = $true; break } }
+        $isTargetOuHq = [string](($typeEtablissementUpper -eq 'HQ') -or $inHeadquartersOu)
+        $isNotTargetOuHq = [string](($typeEtablissementUpper -ne 'HQ') -and ((B $isTargetOuHq) -eq 'False') -and ($distinguishedName -notmatch 'OU=DISABLED_OBJECTS'))
+        $serverAdEntra = GetMap $serverAdEntraByName $computerName
+        $serverAdDeviceId = GK (V $serverAdEntra @('DeviceId'))
+        $hasDifferentDeviceId = if (-not $serverAdDeviceId) { 'Not found in Entra' } elseif ($serverAdDeviceId -ne $objectGuid) { 'Different GUID' } else { 'Match' }
+
+        $primaryUserSam = if ($primaryUserRow) { V $primaryUserRow @('SamAccountName') } else { '' }
+        $lastLoggedUserFromM365 = $primaryUserSam
+        $lastLoggedUserFromSentinel = ''
+        $lastLoggedUser = if (-not (IsUnknownUser $lastLoggedUserFromM365)) { (K $lastLoggedUserFromM365) } elseif (-not (IsUnknownUser $lastLoggedUserFromSentinel)) { (K $lastLoggedUserFromSentinel) } else { '' }
+        $samUserRow = GetMap $usersBySam $lastLoggedUser
+        $lastLoggedUserDomain = ''
+        if ($lastLoggedUser) {
+            if ($primaryUserRow) { $lastLoggedUserDomain = NormalizeDomainSam (V $primaryUserRow @('DomainAndSam')) }
+            if (-not $lastLoggedUserDomain -and $samUserRow) { $lastLoggedUserDomain = NormalizeDomainSam (V $samUserRow @('DomainAndSam')) }
+            if (-not $lastLoggedUserDomain) { $lastLoggedUserDomain = NormalizeDomainSam ('{0}\{1}' -f (V $row @('DomainNameShort')), $lastLoggedUser) }
+        }
+        $lastUserRow = GetMap $usersByDomainAndSam $lastLoggedUserDomain
+        if (-not $lastUserRow) { $lastUserRow = $primaryUserRow }
+        $lastUserUpnKey = K (V $lastUserRow @('UserPrincipalName','EmailAddress'))
+        $lastUserMailbox = GetMap $mailboxByUpn $lastUserUpnKey
+        $lastUserMailboxSize = if ($lastUserUpnKey -and $mailboxSizeByUpn.ContainsKey($lastUserUpnKey)) { [string]$mailboxSizeByUpn[$lastUserUpnKey] } else { '' }
+        $lastUserLicenseGroups = if ($lastUserUpnKey -and $licenseGroupByUpn.ContainsKey($lastUserUpnKey)) { (($licenseGroupByUpn[$lastUserUpnKey] | Select-Object -Unique) -join ';') } else { '?' }
+        $lastUserPrimarySmtp = V $lastUserRow @('EmailAddress','UserPrincipalName')
+        $lastUserOuPath = V $lastUserRow @('CanonicalName','DistinguishedName')
+        $lastUserLastOu = GetLastOuName $lastUserOuPath
+
+        $ueMap = @{ '0'='UPGRADED'; '2'='NOT CAPABLE'; '3'='CAPABLE' }
+        $win11GlobalResultOld = if ($isWin11) { 'UPGRADED' } elseif ($ueMap.ContainsKey(([string]$upgradeRaw).Trim())) { $ueMap[([string]$upgradeRaw).Trim()] } else { 'UNKNOWN' }
+        $issueScore = if ($issueScoreByGuid.ContainsKey($objectGuid)) { [string]$issueScoreByGuid[$objectGuid] } else { '' }
         $shortOsValue = if ($isWin11) { 'Windows 11' } elseif ($isWin10) { 'Windows 10' } else { V $row @('OperatingSystem') }
         $w11EligibilityValue = if ($isWin11) { 'Upgraded' } else { $upgradeLabel }
         $lastSignInMergedValue = $lastActive
