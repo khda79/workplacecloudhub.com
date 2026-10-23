@@ -149,6 +149,7 @@ SmartM365/SharePointMigration/Tools/Python/**
 !/SmartThinClient/**/*.ps1
 !/SmartThinClient/**/*.cmd
 !/SmartThinClient/**/*.md
+/SmartThinClient/TEST-PLAN-WINDOWS11.md
 !/SmartThinClient/**/*.json.template
 !/SmartThinClient/**/*.config.template.json
 !/SmartThinClient/Assets/WorkplaceCloudHub.ico
