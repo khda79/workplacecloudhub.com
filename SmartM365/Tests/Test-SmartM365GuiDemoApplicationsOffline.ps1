@@ -3,7 +3,7 @@
 .SYNOPSIS
 Offline interaction, view coverage and export checks for the nine demo applications.
 .VERSION
-1.0.2
+1.0.3
 .NOTES
 Run one application per STA process. No operational handler is loaded.
 #>
@@ -49,9 +49,23 @@ foreach($command in @('Import-Module','Install-Module','Connect-MgGraph','Connec
     Set-Item -Path ('Function:'+ $command) -Value {throw 'An operational command was reached by an offline demo.'}
 }
 function Save-DemoPreview {
-    param($State,[string]$Name)
+    param($State,[string]$Name,$SelectedTab)
     if(-not $PreviewFolder){return}
     [void][IO.Directory]::CreateDirectory($PreviewFolder)
+    if($Application -eq 'Remediation' -and $SelectedTab){
+        $node=$SelectedTab
+        while($null -ne $node){
+            if($node -is [Windows.Controls.TabItem]){
+                $owner=[Windows.Controls.ItemsControl]::ItemsControlFromItemContainer($node)
+                if($owner -is [Windows.Controls.TabControl]){$owner.SelectedItem=$node}
+            }
+            $node=[Windows.LogicalTreeHelper]::GetParent($node)
+        }
+    }
+    if($Application -eq 'Remediation'){
+        $script:remediationPreviewIndex++
+        $Name=('{0:000}-{1}' -f $script:remediationPreviewIndex,$Name)
+    }
     $window=$State.Window
     $visual=$window.Content
     $visual.Measure([Windows.Size]::new($window.Width,$window.Height))
@@ -71,6 +85,7 @@ function Save-DemoPreview {
     $stream=[IO.File]::Create((Join-Path $PreviewFolder ($Application+'-'+$safe+'.png')))
     try{$encoder.Save($stream)}finally{$stream.Dispose()}
 }
+$script:remediationPreviewIndex=0
 try{
     $s=. $demoEntryPath -Demo -ValidateOnly
     if($Application -in @('Analyzer','Windows11')){Assert-Demo ($s.Controls.ProductVersionText.Text -eq 'v1.0.0') 'Visible product version is not 1.0.0.'}
@@ -96,7 +111,7 @@ try{
                 if($tab -isnot [Windows.Controls.TabItem]){continue}
                 $control.SelectedItem=$tab
                 Assert-Demo ($control.SelectedItem -eq $tab) ('Tab unavailable: '+$tab.Header)
-                Save-DemoPreview $s ([string]$tab.Header)
+                Save-DemoPreview $s ([string]$tab.Header) $tab
             }
     }
     if($Application -eq 'SharePoint'){
@@ -130,7 +145,14 @@ try{
     }
     if($Application -in @('HybridJoin','Windows11')){Assert-Demo ($s.Controls.LotModeCombo.Items.Count -eq 4) 'An original LOT launch mode is missing.'}
     if($Application -eq 'Windows11'){Assert-Demo ($s.Controls.SetupLanguageCombo.Items.Count -eq 11) 'Setup language choices are incomplete.'}
-    if($Application -eq 'Remediation'){Assert-Demo ($s.Data.Packages.Count -eq 22) 'The shipped package categories are incomplete.'}
+    if($Application -eq 'Remediation'){
+        Assert-Demo ($s.Data.Packages.Count -eq 30) 'The shipped package categories are incomplete.'
+        foreach($name in @('Windows LAPS Health','Windows Time Sync','Defender Signature Freshness','Network Certificate Expiry','BITS Stale Jobs','Print Spooler Health','Pending Reboot Age','Pending Reboot Age - Device Reboot Manager')){
+            Assert-Demo (@($s.Data.Packages | Where-Object DisplayName -EQ $name).Count -eq 1) ('Missing or duplicate package: '+$name)
+        }
+        Assert-Demo (@($s.Data.Packages | Where-Object DetectionOnly).Count -eq 1) 'Detection-only fixture classification is incorrect.'
+        Assert-Demo (@($s.Data.Packages | Where-Object DetectionOnly)[0].DisplayName -like '*Compatibility*') 'Detection-only fixture must be the compatibility indicators package.'
+    }
     # Raise the real WPF events: this checks routing as well as profile actions.
     foreach($name in @($s.Controls.Keys|Sort-Object)){
         $control=$s.Controls[$name]
@@ -193,12 +215,11 @@ try{
     exit 1
 }
 
-
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCxXapLc1Uz56QJ
-# xb7mw3xWDKmvEBGYwvHxYE+Lp/tgfqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBqu12L78URcOYo
+# zkgUDs8riYTkz74ZN6b1SgfSWU9mhKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -331,31 +352,31 @@ try{
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIHxZ+Qx2JmXMfiZSRTmMpo/XwGRTrFTddSmFJJ5pGAZKMA0GCSqG
-# SIb3DQEBAQUABIIBgKsZbQMzBExeMCcw1o5UWKMaI5r3eRp93S6qRMbHf5CNMgmM
-# iCRWn/q624EFH/9C4p7KzNLLULUUv4RtqUQ0Q/c2jXtcT25oRajF5TmdBKQtoRZI
-# PtnDizfxBomCZDyS6PCQoK+9H9lZzsYY+6/bJAT3qHWFkaYm3h9KtleDCR8kTTVs
-# tLL2BKG6qLt3sfp8lKLZjvcKxmdWht29NvWWuAuO7jbfw7BRhwwHEm9x9u02BHN3
-# juxyQS/leTffiClX66wI2QlmoDBf28IsAX2yY8P8vOVUesOxYX2wV+MDbEV8LyqR
-# xqa6vpYQ3FEJP0wJjP6GARaKuxSoNgENHFB8x2g735AGLSPu2CkcIEk+nZ3rn/PO
-# VUxw7zWpHFy2WP95VOFAhor3svVfMVorFIQR9W7f2UElCEGPokCJDM1Ige5TNsaf
-# fhFu6Y+Aa+dl8ZmliiUbcXYjj8pAP9ebptWTqRSr8Yf1HJ6ZK/MVwsWIpt5QAZHN
-# ijkkAKeOX9RsOflNCqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEINdhk+nHPx9dT8qM2tHspxERvnicd1ryPplgYMUM6p4wMA0GCSqG
+# SIb3DQEBAQUABIIBgJNnNedTd9xq+qa2EY6FEVmX+xdgj9xUNuP5deC/ik/V+TEp
+# 30zqXe4J9TqghU+BsrS8voVLxwOE0JplvcJmgyVv9L8mn91sgRFC6NOIMmL8u2SZ
+# CIyX/9IC+LNz0vRvH99o4BFmXTTU66gv0jGiRSn54/wRrVXE95qzVc6xzAB1bMZg
+# t/c/QHTUMi7MqB9Obg5c/+b3wqG8o22E7JMGc36FpsJgnF5NGDZXHBHAkmkGaqR6
+# vG1FaKn0SDeoXwkVEEfCjtO076di/wlGWhanEpSw+KJ8GSm3H1WQ6h2qNSXBF9a6
+# yVlhv05daxh3xQjlsDMr8uZunOufxDNN+rlgtWn5yCV5AMD/Cj4IhcIDnUvqY+cb
+# JH6JsOQif+C2EFUHUWIiiukkVPRE4Y21zgvtSHVxYsIcQH2OSqixfjxRYZsi9rai
+# qrg+qnmgTiflm76hWk7iX2r+VoubyygUANZY9DYIANJY7qhnfhYsRHifRC5YKzFB
+# V/X+pRsxvTIUPHTW/qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjMxODIy
-# MzFaMC8GCSqGSIb3DQEJBDEiBCADBj3GknmVyRlCp5e/mruKFq7Ka0OyjYGGjM6G
-# 2mCW+jANBgkqhkiG9w0BAQEFAASCAgBGJuMpNEeR8Z2IHtumXoctICu3etX7URKi
-# 199+SoUBRdVEV6lZr4P7Ifvz/OZq6f0IMM8C1k42B9vjoXE9rtfEgFpIVqjfN5Dy
-# aAJvGhqSr4JI2qDmrHOvGgVFZP1CSqo6o7Nyf8nOoKN/ZemRoD9hJBMPl7VorxxT
-# 9sinNGnERdPGwrjcpKtpOstgSJoqpt+jb+P/du9JKMKbK3A7WjAOU2XaKWkYP94D
-# 6Kgqkse3xW62T+FdWgD1hoTDl2ydqilhWVITVIzOhFNumVaZB9LrX9ROuLhZOkqc
-# lJJljX3vkHNIpC4aG98MmHGcGiE9tNQRewj8f4NURut3GVbJZySP8NmuzYKKlzd6
-# YcSrKIjWu36TQooRlhyHfor0bRCvfN3wAmSPJeGkxB9Xi5gf2cTgZDQy0/twHfWp
-# q7xi3e9KBe/JUnZ6Du38y0ml/vH74FusVUS4DMJJGVJyBirsuDHXy9ECLB5G/f32
-# kiBbcs2UuE9FZTSsqrQqZ3I3YG31EEprPWjJvlTsmsTEcdYABKHV2+OYIsu2zlMX
-# YDiKCBcWIx+RtuTehE4LeNtsxwEZtz/5nNCEFPNzfDeOYTyp3acUNy+vtTYSGD4s
-# iWE4UbhURk53Dkq0qRXXmOggUpOhR9My8aiSINrJ2zZZ9I+YhlyHs07Ls+XNxB7I
-# zO8I3U8GJA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjMxOTEy
+# MTBaMC8GCSqGSIb3DQEJBDEiBCBJn/Xb0k3OzHcwoTMN9OYS2REdyTQxRcY4Vg7O
+# p58joTANBgkqhkiG9w0BAQEFAASCAgAHkg3FgDGmllt+aurfj23XtaRabruH6pIM
+# wRG2zb9cXegt42q3HtWNMMNjRwSJm9hRLkXHQBiwCjjryg3zqkfpja0V6nkyh1e7
+# IMX7t7/o4X9fDuofmgxu3AiTJEG8TemhEJ+VsxnWaX1MHfV0ZsHk4xKImTx5rELA
+# SjUwJ87W24bvML5bcNArp+ZlKCklkaMSL09385dNf/UCXsal50wlK+pRFJk89LzD
+# o70iikpXN/MvxMFuymknnR0HKA+5SdjzU0B3ug6eWwM4c/i7nMEJRerQ0vqWOzIp
+# B+T3zTy+ck9iG+TnXMqOYytbVvfQ92RoUwAfNvzhrh/JoyamwNTAogdRHCWb3Ami
+# uh5gIQYxxEiX3AEi2u3GRyBrOnlLMWG50N9LqSuWo7VDp1qtIQpknKow29AsG90v
+# 3lGLOSOKVp77vT2LcOuZCz/oTvkAUKJk7FlVcY6O1CI+9HtPP7iSZnlYmoj53p33
+# iJuBGxG7hi5CCz23xv/v39vNSj/YkE7khX1GM9liOitvjxA3Nbc0ejaDg9XdavhN
+# LkCOBLtA6mTbwowr1YbqoUrleF1HhnVS4dBH7WK5AyBhSwRPkUj1nMzKPomc8ffT
+# Azp/LIxVREtdD7I79O/Xq5GnxN8alW1LH+df7my0xmbPvMZ1ZaUuH30JtliNxYEF
+# RqVUX9LmrQ==
 # SIG # End signature block

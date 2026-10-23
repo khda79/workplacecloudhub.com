@@ -2,22 +2,22 @@
 
 PowerShell 7/WPF operator interface and source-controlled package workspace for Microsoft Intune Remediations.
 
-The GUI reports version `1.1`. It browses local packages and Intune `deviceHealthScripts`, compares script content, runs PSScriptAnalyzer, publishes or updates packages, exports scripts and reports, and provides guarded reset and delete workflows.
+The GUI reports version `1.4`. It browses local packages and Intune `deviceHealthScripts`, compares script content, runs PSScriptAnalyzer, publishes or updates packages, exports scripts and reports, and provides guarded reset and delete workflows.
 
 ## Distribution Status
 
-Smart Intune Remediation Manager GUI version `1.1` is published as a standalone GitHub Release and remains available as repository source. It is not published as a PowerShell Gallery package and does not include an installer or automatic updater.
+Smart Intune Remediation Manager GUI version `1.4` is published as a standalone GitHub Release and remains available as repository source. It is not published as a PowerShell Gallery package and does not include an installer or automatic updater.
 
-- Release: [Smart Intune Remediation Manager v1.1](https://github.com/khda79/workplacecloudhub.com/releases/tag/smart-intune-remediation-manager-v1.1)
-- Standalone ZIP: [SmartM365-IntuneRemediationManager-1.1.zip](https://github.com/khda79/workplacecloudhub.com/releases/download/smart-intune-remediation-manager-v1.1/SmartM365-IntuneRemediationManager-1.1.zip)
-- Published checksum: [SmartM365-IntuneRemediationManager-1.1.sha256](https://github.com/khda79/workplacecloudhub.com/releases/download/smart-intune-remediation-manager-v1.1/SmartM365-IntuneRemediationManager-1.1.sha256)
-- Release manifest: [SmartM365-IntuneRemediationManager-1.1.release.json](https://github.com/khda79/workplacecloudhub.com/releases/download/smart-intune-remediation-manager-v1.1/SmartM365-IntuneRemediationManager-1.1.release.json)
-- Release notes: [SmartM365-IntuneRemediationManager-1.1-RELEASE-NOTES.md](https://github.com/khda79/workplacecloudhub.com/releases/download/smart-intune-remediation-manager-v1.1/SmartM365-IntuneRemediationManager-1.1-RELEASE-NOTES.md)
+- Release: [Smart Intune Remediation Manager v1.4](https://github.com/khda79/workplacecloudhub.com/releases/tag/smart-intune-remediation-manager-v1.4)
+- Standalone ZIP: [SmartM365-IntuneRemediationManager-1.4.zip](https://github.com/khda79/workplacecloudhub.com/releases/download/smart-intune-remediation-manager-v1.4/SmartM365-IntuneRemediationManager-1.4.zip)
+- Published checksum: [SmartM365-IntuneRemediationManager-1.4.sha256](https://github.com/khda79/workplacecloudhub.com/releases/download/smart-intune-remediation-manager-v1.4/SmartM365-IntuneRemediationManager-1.4.sha256)
+- Release manifest: [SmartM365-IntuneRemediationManager-1.4.manifest.json.txt](https://github.com/khda79/workplacecloudhub.com/releases/download/smart-intune-remediation-manager-v1.4/SmartM365-IntuneRemediationManager-1.4.manifest.json.txt)
+- Release notes: [SmartM365-IntuneRemediationManager-1.4-RELEASE-NOTES.md](https://github.com/khda79/workplacecloudhub.com/releases/download/smart-intune-remediation-manager-v1.4/SmartM365-IntuneRemediationManager-1.4-RELEASE-NOTES.md)
 - Source and documentation: [SmartM365/Intune/Remediation](https://github.com/khda79/workplacecloudhub.com/tree/main/SmartM365/Intune/Remediation)
 - Product page: [Smart Intune Remediation Manager](https://workplacecloudhub.com/tools/smart-intune-remediation-manager/)
 - Updates: download a newer GitHub Release when available or review repository changes and use a fresh clone or `git pull`; there is no in-app update check.
 
-The release packages source commit [`565af4d20710ccbb904c354033a77654b7a86088`](https://github.com/khda79/workplacecloudhub.com/commit/565af4d20710ccbb904c354033a77654b7a86088). Use the published `.sha256` asset as the authoritative ZIP checksum and compare it with the downloaded archive before extraction, then verify the Authenticode status and expected signer of the PowerShell scripts before use.
+The release packages the source identified by its Git tag and published manifest. Use the published `.sha256` asset as the authoritative ZIP checksum and compare it with the downloaded archive before extraction, then verify the Authenticode status and expected signer of the PowerShell scripts before use.
 
 ## Requirements And Launch
 
@@ -112,3 +112,7 @@ Launch `Start-SmartM365-IntuneRemediation-Demo.cmd` for screenshots and presenta
 Business actions are simulated. Demo startup bypasses operational configuration, authentication, collection, remote commands and mail delivery. Edits remain in memory. **Export demo outputs** generates only synthetic files under a unique `%TEMP%\SmartM365-Demo\` session folder. HTML-capable tools retain their report views; notification campaigns preview every shipped language template with fictional tokens. No real tenant or device evidence is required.
 
 Keep the application folder, its original report/template sources, local branding assets, `SmartM365.GuiDemo.ps1`, `SmartM365.GuiDemo.Reports.ps1` and the local `*-Demo.ps1` profile together when copying the application. `-Demo -ValidateOnly` builds the WPF demo without displaying windows or opening files. Run `SmartM365/Tests/Test-SmartM365GuiDemoApplicationsOffline.ps1` in an STA process for offline interaction and export checks.
+
+## Release 1.4
+
+Includes 30 remediation packages, the four reviewed corrections, and eight additional guarded packages documented in [Packages/README.md](Packages/README.md). The synthetic demo now shows all 30 packages, including both Pending Reboot Age variants. Offline validation covers the package behavior and demo controls; it does not qualify a tenant deployment or endpoint repair.

@@ -96,3 +96,7 @@ pwsh -NoProfile -STA -ExecutionPolicy Bypass -File SmartM365/Tests/Test-SmartM36
 ```
 
 These checks use temporary files, harmless child processes or mocked operational boundaries. They do not qualify a real tenant, endpoint repair, campaign delivery or deployment. Demo assets remain local in `DemoAssets/`, ignored by Git, and must be refreshed after GUI changes. Live deployment requires separate qualification.
+
+## Release 1.4 (2026-10-23)
+
+GUI 1.4 ships the corrected package library and eight additional guarded remediation packages. Demo profile 1.1.0 contains 30 fictional local/cloud packages, including Pending Reboot Age and its Device Reboot Manager variant. Its single detection-only entry is the Windows 11 compatibility indicators package. Demo exports use synthetic Contoso data dated 2026-10-23.

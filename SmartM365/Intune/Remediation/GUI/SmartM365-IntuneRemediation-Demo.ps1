@@ -3,13 +3,13 @@
 .SYNOPSIS
 Fictional local/cloud packages, editors, execution results and safe lifecycle actions.
 .VERSION
-1.0.0
+1.1.0
 #>
 function script:Initialize-SmartM365DemoProfile {
     $s=$script:SmartM365Demo;$c=$s.Controls
-    $names=@('DeliveryOptimization ContentEngine Health','Disk Space Cleanup','IntuneManagementExtension Health','MDM Enrollment Repair','BitLocker OSDrive Protection','Upgrade Diagnostics','Upgrade Staging Health','Recovery Check','Time Zone','WinHTTP Proxy Configuration','Repair Windows Update and DISM','Force Allow OS Upgrade','GroupPolicy Stale','WindowsUpdateLog Errors','WUfB Identity Drift','UWP Store AppRepository WU Health','Windows Update Reset','Windows Update Service and Scan Health','Windows Update Policy Blockers','Windows Update Cache Health','Reset Windows Hello','W11 Upgrade Compatibility Indicators (detection only)')
+    $names=@('DeliveryOptimization ContentEngine Health','Disk Space Cleanup','IntuneManagementExtension Health','MDM Enrollment Repair','BitLocker OSDrive Protection','Upgrade Diagnostics','Upgrade Staging Health','Recovery Check','Time Zone','WinHTTP Proxy Configuration','Repair Windows Update and DISM','Force Allow OS Upgrade','GroupPolicy Stale','WindowsUpdateLog Errors','WUfB Identity Drift','UWP Store AppRepository WU Health','Windows Update Reset','Windows Update Service and Scan Health','Windows Update Policy Blockers','Windows Update Cache Health','Reset Windows Hello','W11 Upgrade Compatibility Indicators (detection only)','Windows LAPS Health','Windows Time Sync','Defender Signature Freshness','Network Certificate Expiry','BITS Stale Jobs','Print Spooler Health','Pending Reboot Age','Pending Reboot Age - Device Reboot Manager')
     $rows=@(for($i=0;$i -lt $names.Count;$i++){
-        [pscustomobject]@{Id=('00000000-0000-4000-8000-'+($i+1).ToString('000000000000'));DisplayName=$names[$i];Folder=('Demo/Packages/'+($names[$i] -replace ' ','-'));IntuneStatus=$(if($i%3 -eq 0){'Update available (demo)'}else{'In sync (demo)'});DetectionOnly=($i -eq 13);PSScriptAnalyzerStatus='Passed (sample)';PortalStatus='Active (demo)';NoIssueDetectedDeviceCount=(30+$i);IssueDetectedDeviceCount=5;IssueRemediatedDeviceCount=4;IssueReoccurredDeviceCount=1;IssueRemediatedCumulativeDeviceCount=12}
+        [pscustomobject]@{Id=('00000000-0000-4000-8000-'+($i+1).ToString('000000000000'));DisplayName=$names[$i];Folder=('Demo/Packages/'+($names[$i] -replace ' ','-'));IntuneStatus=$(if($i%3 -eq 0){'Update available (demo)'}else{'In sync (demo)'});DetectionOnly=($names[$i] -like '*(detection only)*');PSScriptAnalyzerStatus='Passed (sample)';PortalStatus='Active (demo)';NoIssueDetectedDeviceCount=(30+$i);IssueDetectedDeviceCount=5;IssueRemediatedDeviceCount=4;IssueReoccurredDeviceCount=1;IssueRemediatedCumulativeDeviceCount=12}
     })
     $s.Data.Packages=$rows;$s.Data.CloudPackages=@($rows|ForEach-Object {$_.PSObject.Copy()})
     Set-SmartM365DemoGrid LocalGrid $rows
@@ -21,8 +21,8 @@ function script:Initialize-SmartM365DemoProfile {
     foreach($name in @('LocalDetectionEditor','CloudDetectionEditor')){$c[$name].Text=$s.Data.Detection}
     foreach($name in @('LocalRemediationEditor','CloudRemediationEditor')){$c[$name].Text=$s.Data.Remediation}
     $c.PackageDetails.Text="DEMO - Local package`r`nAssignments: Contoso Pilot Devices (fictional)`r`nSchedule: Daily 09:00`r`nAll scripts and saves remain in the demo session."
-    $c.CloudDetails.Text="DEMO - Intune cloud package`r`nAuthentication: not used`r`nAssignments: Contoso Pilot Devices`r`nLast execution: 2026-10-18 09:30 (synthetic)"
-    $c.LogTextBox.Text='[2026-10-18 09:30:00] DEMO - Local and cloud package fixtures loaded; no package files or Graph data were read.'
+    $c.CloudDetails.Text="DEMO - Intune cloud package`r`nAuthentication: not used`r`nAssignments: Contoso Pilot Devices`r`nLast execution: 2026-10-23 09:30 (synthetic)"
+    $c.LogTextBox.Text='[2026-10-23 09:30:00] DEMO - Local and cloud package fixtures loaded; no package files or Graph data were read.'
     $c.BusyOverlay.Visibility='Collapsed'
 }
 function script:Connect-SmartM365DemoProfileEvents {
@@ -57,7 +57,7 @@ function script:Invoke-SmartM365DemoProfileAction {
 }
 function script:Export-SmartM365DemoProfileOutputs {
     $path=Get-SmartM365DemoOutputPath 'IntuneRemediation-Execution-DEMO.csv'
-    @(1..12|ForEach-Object {[pscustomobject]@{Device=('CTSO-LAP-{0:0000}' -f $_);User=('user{0:00}@contoso.example' -f $_);Detection='Issue detected (sample)';Remediation='Remediated (sample)';LastRun='2026-10-18 09:30';Mode='DEMO'}})|Export-Csv -LiteralPath $path -NoTypeInformation -Encoding utf8
+    @(1..12|ForEach-Object {[pscustomobject]@{Device=('CTSO-LAP-{0:0000}' -f $_);User=('user{0:00}@contoso.example' -f $_);Detection='Issue detected (sample)';Remediation='Remediated (sample)';LastRun='2026-10-23 09:30';Mode='DEMO'}})|Export-Csv -LiteralPath $path -NoTypeInformation -Encoding utf8
     $script:SmartM365Demo.Reports.Execution=$path
     return @($path)
 }
@@ -65,8 +65,8 @@ function script:Export-SmartM365DemoProfileOutputs {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCoJELw9ABfcfNZ
-# 0jm5gqKMkH5W05UM67z7KlGqystdSqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC3Sw/9BPdQBDmR
+# 0AWJE33VOqPcFd5GrukmLx11XRAJBqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -199,31 +199,31 @@ function script:Export-SmartM365DemoProfileOutputs {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEINMRH0eSw6jUHMoH8tBRY/Z5OJyDDmytAA7i3PkzyWniMA0GCSqG
-# SIb3DQEBAQUABIIBgDv+Vgoh+9PE67BSANI8nEoGS6+fx9EEvVpn7V1nrt7839Eg
-# rgvoqt/DZnGxDDpnR9CB0TRggRJw+Mcf6ztnkH4XMUUoGfTyVCBn2J9ZTnkY8q/x
-# ckjIk9lcTT4vZha5IrN7V1YIChd5U35AMXyPKy4QJxFb87h1bZ+9UkqhtbkyxZhL
-# q/zQxTY9pmY8By7gBUg+K/KvzuhKt2iAw5oGJpQH1rrumBS0vCpRAqMktOi7ain6
-# MWYFKJ0taPWIZEHF0idieQJ/uEC0LvUUqRu/StW2m+ajxcADxQoHi1shIPNOPfoV
-# lDqe46JFSSgavumZaneLf9gYd2shMgSiR0GXJQXr8yYq9qxeIah67MfrvZoR0njQ
-# EUkTs5zMu6ot+xD0oFOYgKIyA/8gh/r3bVVD52ZTDir4SMkUr8SDV6GQzt5r925T
-# ormmSn9bP81+Ujnus91aGwQjhxuFWdUY5eivZecFyFJGZXsPaO2j8yJRSfSM4/WK
-# o2u5lpXVuYLOp+8aIKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIB+f0QM3tSHLNm4j91kMvj03+dSAnNeXu72JDX96cBD5MA0GCSqG
+# SIb3DQEBAQUABIIBgCB/NzFVjHHNafvk60Tyfaa38ydOBqZ20FAbmvIzLCxcslCW
+# dM7SjIlmfeFZzyiK39O/dRckuXsB4RIEuP7T0bo0lp7EABAjkwys8N+ucTIhg/Df
+# lZGHW8ibr4072WkNsf2CHkL6WfTKZK40qdVM52YF79Tq8uHYzkJUlBnGN7wUACTA
+# YFeUAcQEpVs6x7cKRmNBuyWS7cMbVxgvPd/lAPGdBPNguJLpciIUVDWIIO1+NQIq
+# 7THUOZqmdtuR+xsTdNBuYcrUpQw0bU6GYma5qDVq/sozPRzCJZLCZjyOyC1lDUXF
+# JccSkx6AovjArkJ9EVKLeTdzdEYRBkFu0pjfaP5hOegM3XqjsntEuLwIWIpxfGZR
+# A+wpFlgGMmbii8kmME/+Hkrw67g99Aoof+RnCiLsjAExsLO4I/MeXFLyxP6Hinv+
+# CCiax0hpEfForXBZAsInqgNsqUsE5uQPOsI7snmn5wMkVVWIraAtL7gFdtzqYZYC
+# 5KbiTuF2IHzQWgcG36GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTgwMDQ2
-# MzZaMC8GCSqGSIb3DQEJBDEiBCCHXa4EyzCrQ18KgH8YdKPHPThaQtGSrtcLkkPr
-# TPAewTANBgkqhkiG9w0BAQEFAASCAgBVP6HnTuCElUq07KE1FZwnFJbSov/DSAc4
-# AZ7vQcBoHu9KRtiFhOImRN2IA6WUJf+add5Km9H7elEfe3PyvV+jH8y4lLzfBcX6
-# 09hONXniNLMpk34bGa8ktlu9aD0gF4pWxhMBR8pfXAt35dKOJNfO3h8+WZ0rfU4l
-# JqJr98ZSdrE8QJPD7rJEoKcL/mBV0CgrELGq4ChX110y+LF7OLqzbpadG8/eOEZ2
-# UPuUab2jW3tuAGKgd54lv2WgHRs+J3SpktCzHG4fyHkyIMZDzQcwnxJdDznnJ5AZ
-# UZK+jffweEn/v85lFlFW5Ma1z612nRnI8DcB7us8VGdzXEHJK5U/rYlXIssSZMeE
-# qJKHDXqY6Tb7CrUZFTPsVrkf+GSpAXHfBavl0geyt/UyoS13sEdnhQZAgR41hyjJ
-# VhdDR/unBJDza6aLiSrvFAEsU5Ap/vjc1URLBZckUZWTdF0bkOE4KWw1XWr00Xqg
-# RNscxAOzFncUuykzvqkPuPLtiAb0jmZ3v6OU6EAS1v93elti3+PAEJursDZ6moDm
-# aPyS+GNuCuKRcqqZ8RE8Np0sTaqliawY+/AYVRGnuRaKlUeHcCPgO+7NPTT7XOP+
-# prXNHaKr9cc3w93WRwFj544Zm+pTil9LMxJvS0UkeMP/ebq+eRFJ45vw4LLHlomw
-# V2XG/1gSrA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjMxOTEy
+# MTBaMC8GCSqGSIb3DQEJBDEiBCBKUr3uGkhNH3AhgyyYDTEYKz3tyDIjFGxo8cQ2
+# 0K3kGzANBgkqhkiG9w0BAQEFAASCAgBatu5kc0Ti06/sVfpHwSLdyvq+MqGKWWQ9
+# AdsjUnwh04L7U6HnRhOzFoZCGRkrNtgkN0nizuo66C9dZymV9Dj9aG1y3JgovglV
+# jxQPg3C8QZChIssZNfvKonEjdpy50R834YiSReZlimuI6wRx5l4O+sUW382wNnFo
+# IqAwWdAAivV7ahs+K0gydSwHBWxYgty+uKRvxy78v/9umFcgacTYPleb1/MerDs9
+# 9dRxHGmO/NSri8SK9q8fZHun65B7B/J61SHgr3Cnpt+2j+wOiZvnGKU66kaxQPaJ
+# 5Q0jkCszZ5rEr7orAOxewyz6S2kGXCQZIO/HMyHRkzplG3wSjYFSIQVuArCqRI0I
+# qunVKCisSgp3oJPmU4DpI2bKowvU1xWaTDfhkI8rMnkUi5ThdnG9FzyvW13zxZa7
+# tUTgaNUQ0sKrnSSu89+5KFdkdO58EqtafQOfP06LXx/qcaR0YIKDUwjghrtMOsWl
+# YMjyjwWY3HzdpxFz4MMQo7m/bTv0MiWjH3jr9HFXQJArx4hiMhRtjGRUwSDnEfdm
+# xesY2pKxOah23N0c4UIvGpSqbFyQPdTChaWp3r1EwVCgv0lUDNEPKzFfyNXmcXQW
+# 9FSsnL0S7aqiC5dTBxhELDTmabKytombJ6MKhQHkD2o56/f4zF6/6S3J7Mz6Q+AC
+# qhiuAvgg0A==
 # SIG # End signature block
