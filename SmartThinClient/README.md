@@ -49,7 +49,7 @@ Audit, Preview and ValidateOnly do not change Windows shell, policies or startup
 .\SmartThinClient-Shell.ps1 -ValidateOnly
 ```
 
-Hybrid offers Citrix, AVD and WebOnly; closing the choice window cancels startup. With `HybridSelectionAtStartup: false`, it uses `HybridDefaultProvider` (or the legacy `WebShellPreferredProvider` override).
+Hybrid offers Citrix, AVD and WebOnly; closing the choice window cancels startup. With `HybridSelectionAtStartup: false`, it uses `HybridDefaultProvider`. This key takes precedence over the legacy `WebShellPreferredProvider` fallback. Hybrid resolves each provider's URL from its own local profile over the main/Hybrid configuration; blank or inherited profile values retain the global URL. Audit uses the same URL resolution as the launcher.
 
 The GUI provides audit/preview and output access; Apply/Restore buttons explain the guarded CLI workflow. CMD Apply/Restore wrappers accept additional arguments; without a confirmation argument they remain blocked by default.
 
@@ -68,6 +68,7 @@ Main values override built-in defaults; non-empty profile values override the ma
 - `BrowserKioskMode`: passes browser kiosk arguments when using external web launch. Validate the chosen browser; this is not Windows Assigned Access.
 - `WebShellAllowExternalBrowser`, `WebShellAllowPowerControls`, `WebShellAllowLimitedSettings`, `WebShellAllowedSettingsPages`: optional UI controls. Their defaults expose sign-out/restart/shutdown and selected Windows settings; turn them off for a restricted review.
 - `AllowApply`, `AllowRestore`: both false by default. `RequireConfirmationPhrase` defaults true.
+- `WriteCsvEvidence`: true by default. False keeps JSON evidence and logs but skips CSV creation, replacement and removal, including an existing CSV at the same path.
 
 `LogRetentionCount`, `RollbackRetentionCount`, `PreferredWorkspaceUrl`, `DefaultLanguage`, `ForceLanguage`, and profile metadata such as `LaunchMode`, `AllowedProviders`, `ExpectedExecutableNames` are not enforced as operational controls in this implementation. Logs/rollback/LaunchOnly files need operator-managed retention. The GUI is English.
 
@@ -75,7 +76,7 @@ Main values override built-in defaults; non-empty profile values override the ma
 
 `AutoLaunchMode: RunKey` writes **HKLM** `SOFTWARE\Microsoft\Windows\CurrentVersion\Run\SmartThinClientShell`, affecting sign-in for all users. `AutoLaunchMode: None` writes no auto-launch value; it does not remove a previous installation. `TargetUserName` does not scope this machine Run key or machine policies. Use an administrator-controlled persistent output directory and verify read access for the target user; do not point a machine startup command at a directory writable by untrusted users.
 
-`EnableShellLimitations: true` with Basic writes machine Explorer policies NoRun, NoControlPanel and NoViewContextMenu. Strict also writes DisableCMD. None writes no restrictions. These are machine registry writes with policy/OS-dependent effects, not a per-user lockdown guarantee; no live effect was tested. Group Policy/MDM may override them. The tool does not change autologon, Winlogon Shell/Userinit, or install/enable Windows features.
+`EnableShellLimitations: true` with Basic writes machine Explorer policies NoRun, NoControlPanel and NoViewContextMenu. Strict additionally writes `DisableCMD` under `HKEY_USERS/<TargetUserSid>/Software/Policies/Microsoft/Windows/System`. Strict requires an existing local target user whose registry hive is loaded; it refuses Apply before configuration writes otherwise. It does not load offline hives or create a new dedicated user for Strict. None writes no restrictions. The Explorer settings remain machine-wide, while the CMD restriction targets the selected user's hive. Policy/OS-dependent effects remain untested live; Group Policy/MDM may override them. The tool does not change autologon, Winlogon Shell/Userinit, or install/enable Windows features.
 
 Assigned Access and Shell Launcher cannot be requested together. Both require an existing enabled local non-administrator user and the relevant local APIs. Kiosk preflight rejects missing prerequisites before applying the Run key or policies. Assigned Access requires a supplied `AssignedAccessAppUserModelId` and no existing Assigned Access configuration. Shell Launcher requires its feature already enabled, no custom shell for the target SID, and a persistent embedded web shell; its Windows edition/licensing and portal suitability still require a lab review. Existing kiosk configurations are deliberately not overwritten because this tool does not capture their complete prior state.
 
@@ -90,6 +91,8 @@ For Launcher mode, optional DedicatedUser creation requires `CreateDedicatedLoca
 Restore accepts schema 2 rollback files from the same computer and original OutputRoot. Legacy files require manual review: they included unrelated Winlogon values and lacked launcher history. Only registry values selected for the Apply operation are captured. Restore clears newly configured Assigned Access or removes the newly configured custom shell, restores/removes the launcher as recorded, and retains evidence and any created account. It does not reset all Windows settings to factory defaults. Apply is not transactional; on partial failure use the recorded rollback. Repeated Apply operations create successive snapshots: review their order and restore newest first. Review concurrent policy changes before restoring an older snapshot.
 
 ## Local files and evidence
+
+A user-scoped CMD rollback snapshot must match the recorded target SID and its hive must be loaded before any registry restoration. Older schema 2 machine-scoped CMD snapshots remain supported.
 
 Default output: `C:\ProgramData\SmartThinClient\Shell`; if unwritable, fallback is `%LOCALAPPDATA%\SmartThinClient\Shell`, then `%TEMP%\SmartThinClient\Shell`. Audit/Preview emit JSON and optionally CSV under `Output/`, timestamped logs under `Logs/`; Apply saves JSON under `Rollback/` before changes. Evidence contains computer/user names and paths; rollback and generated scripts also contain local configuration/URLs. Treat them as sensitive operational data, not anonymized support bundles.
 

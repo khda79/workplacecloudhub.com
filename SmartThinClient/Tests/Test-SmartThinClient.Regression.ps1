@@ -1,4 +1,5 @@
 ﻿param([string]$SourcePath = (Join-Path (Split-Path $PSScriptRoot -Parent) 'SmartThinClient-Shell.ps1'))
+# Version: 1.1.0
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2
 $tokens = $null; $errors = $null
@@ -8,10 +9,14 @@ if ($errors.Count) { throw ($errors | Out-String) }
 foreach ($fn in $ast.EndBlock.Statements | Where-Object { $_ -is [Management.Automation.Language.FunctionDefinitionAst] }) {
     . ([scriptblock]::Create($fn.Extent.Text))
 }
-$script:ScriptRoot = Split-Path $SourcePath -Parent
+$sourceRoot = Split-Path $SourcePath -Parent
 $script:LogPath = $null; $script:CliMode = $false
 $testRoot = Join-Path ([IO.Path]::GetTempPath()) ('ThinClient-tests-' + [guid]::NewGuid())
 New-Item -ItemType Directory $testRoot | Out-Null
+$script:ScriptRoot = Join-Path $testRoot 'Source'
+New-Item -ItemType Directory (Join-Path $script:ScriptRoot 'Profiles') -Force | Out-Null
+Copy-Item -Path (Join-Path $sourceRoot 'Profiles\*.json.template') -Destination (Join-Path $script:ScriptRoot 'Profiles')
+Copy-Item -LiteralPath (Join-Path $sourceRoot 'SmartThinClient-Shell.config.template.json') -Destination $script:ScriptRoot
 $script:OutputRoot = $testRoot
 $script:AppName = 'Smart ThinClient Shell'; $script:RunId = 'synthetic'
 $script:RollbackRoot = $testRoot
@@ -25,6 +30,8 @@ function Check($Name, [scriptblock]$Body) {
 function Assert($Condition, $Message) { if (-not $Condition) { throw $Message } }
 function Reject([scriptblock]$Body) { $caught = $false; try { & $Body } catch { $caught = $true }; Assert $caught 'Expected rejection' }
 # Every system-write primitive used below is replaced; unanticipated mutations fail.
+function Start-Process { throw 'Unexpected process launch' }
+function Add-Type { throw 'Unexpected UI or native code load' }
 function Set-StringRegistryValue { throw 'Unexpected registry write' }
 function Set-DwordRegistryValue { throw 'Unexpected registry write' }
 function Restore-RegistryValue { throw 'Unexpected registry restore' }
@@ -32,7 +39,7 @@ function New-LocalUser { throw 'Unexpected user creation' }
 function Set-AssignedAccess { throw 'Unexpected kiosk write' }
 function Clear-AssignedAccess { throw 'Synthetic restore failure' }
 function Invoke-CimMethod { throw 'Unexpected CIM call' }
-function Export-Evidence { param($Evidence) }
+function Export-Evidence { param($Evidence,$Config) }
 function Test-IsAdministrator { return $true }
 function Get-RegistryValueSnapshot { param($Path,$Name) [pscustomobject]@{Path=$Path;Name=$Name;ValueExists=$false;ValueKind='';Value=$null} }
 $audit = [pscustomobject]@{EffectiveProfile='Citrix';CitrixWorkspacePath=$PSHOME;AvdClassicClientPath='';BrowserPath='';TargetUserName='TEST-USER';TargetUserSid='S-1-5-21-1-2-3-1001'}
@@ -160,14 +167,183 @@ Check 'Apply saves rollback before account mutation and respects None' {
     Assert ($result.Status -eq 'Applied') 'Missing Applied result'
     Assert (($script:sequence -join ',') -eq 'save,account,save') 'Account attempted before rollback'
 }
+Check 'Hybrid loads provider profile URLs and routes all three choices' {
+    $paths = @()
+    try {
+        foreach ($provider in @('Citrix','AVD','WebOnly')) {
+            $path = Join-Path $script:ScriptRoot ('Profiles\{0}.profile.json' -f $provider)
+            $paths += $path
+            $key = @{Citrix='CitrixWebUrl';AVD='AvdWebUrl';WebOnly='WebOnlyUrl'}[$provider]
+            @{ $key = ('https://{0}.example.invalid' -f $provider.ToLowerInvariant()) } | ConvertTo-Json | Set-Content -LiteralPath $path
+        }
+        $config = Merge-ProfileConfig -Config ([ordered]@{UseWebShell=$false;HybridSelectionAtStartup=$false}) -EffectiveProfile Hybrid
+        $urls = Get-WorkspaceWebUrls -Config $config -EffectiveProfile Hybrid
+        foreach ($provider in @('Citrix','AVD','WebOnly')) {
+            $expected = 'https://{0}.example.invalid' -f $provider.ToLowerInvariant()
+            Assert ($urls[$provider] -eq $expected) "Audit URL missing for $provider"
+            $config.HybridDefaultProvider = $provider
+            $launcher = New-LauncherScript -Config $config -EffectiveProfile Hybrid -Audit $audit
+            $openedUrls = New-Object 'System.Collections.Generic.List[string]'
+            function Start-Process { param($FilePath,$ArgumentList) $openedUrls.Add($FilePath) }
+            & $launcher
+            Assert ($openedUrls.Count -eq 1 -and $openedUrls[0] -eq $expected) "Hybrid routed $provider to the wrong URL"
+        }
+    }
+    finally { foreach ($path in $paths) { Remove-Item -LiteralPath $path -Force } }
+}
+Check 'Hybrid retains global URLs when profile values inherit' {
+    $urls = Get-WorkspaceWebUrls -Config ([ordered]@{CitrixWebUrl='https://global.example.invalid';AvdWebUrl='https://avd.example.invalid';WebOnlyUrl='https://web.example.invalid'}) -EffectiveProfile Hybrid
+    Assert ($urls.Citrix -eq 'https://global.example.invalid' -and $urls.AVD -eq 'https://avd.example.invalid' -and $urls.WebOnly -eq 'https://web.example.invalid') 'Global URLs lost'
+}
+Check 'Hybrid resolves legacy provider URL aliases' {
+    function Get-ProfileConfig {
+        param($ProfileName)
+        switch ($ProfileName) {
+            Citrix { [pscustomobject]@{StoreUrl='https://store.example.invalid'} }
+            AVD { [pscustomobject]@{FeedUrl='https://feed.example.invalid'} }
+            WebOnly { [pscustomobject]@{FallbackWebUrl='https://fallback.example.invalid'} }
+        }
+    }
+    $urls = Get-WorkspaceWebUrls -Config ([ordered]@{}) -EffectiveProfile Hybrid
+    Assert ($urls.Citrix -eq 'https://store.example.invalid' -and $urls.AVD -eq 'https://feed.example.invalid' -and $urls.WebOnly -eq 'https://fallback.example.invalid') 'Legacy aliases lost'
+}
+Check 'Modern Hybrid default wins over legacy Citrix preference' {
+    $launcher = New-LauncherScript -Config ([ordered]@{UseWebShell=$false;HybridSelectionAtStartup=$false;HybridDefaultProvider='AVD';WebShellPreferredProvider='Citrix';AvdWebUrl='https://avd.example.invalid'}) -EffectiveProfile Hybrid -Audit $audit
+    $openedUrls = New-Object 'System.Collections.Generic.List[string]'
+    function Start-Process { param($FilePath,$ArgumentList) $openedUrls.Add($FilePath) }
+    & $launcher
+    Assert ($openedUrls.Count -eq 1 -and $openedUrls[0] -eq 'https://avd.example.invalid') 'Legacy preference overrode modern default'
+}
+Check 'Resolve config accepts legacy default only when modern key is absent' {
+    $ConfigPath = Join-Path $testRoot 'legacy-config.json'
+    '{"WebShellPreferredProvider":"AVD"}' | Set-Content -LiteralPath $ConfigPath
+    $script:OutputRootOverride = ''; $TargetUserMode = 'Auto'; $TargetUserName = ''
+    $config = Resolve-Config
+    Assert ($config.HybridDefaultProvider -eq 'AVD') 'Legacy-only runtime lost preference'
+    '{"WebShellPreferredProvider":"Citrix","HybridDefaultProvider":"WebOnly"}' | Set-Content -LiteralPath $ConfigPath
+    $config = Resolve-Config
+    Assert ($config.HybridDefaultProvider -eq 'WebOnly') 'Modern runtime default lost precedence'
+}
+Check 'External web readiness accepts configured portals without native clients' {
+    $result = [pscustomobject]@{PreferredAccessMode='Web';UseWebShell=$false;BrowserInstalled=$true;CitrixWebUrlConfigured=$true;AvdWebUrlConfigured=$true}
+    $statuses = @(Get-ThinClientCliStatuses -Result $result)
+    Assert (@($statuses | Where-Object {$_.Name -in @('Citrix Web','AVD Web') -and $_.State -eq 'READY'}).Count -eq 2) 'External web readiness rejected'
+}
+Check 'External web without browser is not ready' {
+    $result = [pscustomobject]@{PreferredAccessMode='Web';UseWebShell=$false;BrowserInstalled=$false;CitrixWebUrlConfigured=$true;AvdWebUrlConfigured=$true}
+    $statuses = @(Get-ThinClientCliStatuses -Result $result)
+    Assert (@($statuses | Where-Object {$_.Name -in @('Citrix Web','AVD Web','Citrix','AVD') -and $_.State -eq 'READY'}).Count -eq 0) 'Missing browser marked ready'
+}
+Check 'Strict preflight rejects unloaded target hive before apply writes' {
+    function Invoke-ThinClientAudit { param($Config,$RequestedProfile,$RequestedAction) $audit }
+    function Get-TargetUserState { param($Config) [pscustomobject]@{Mode='ExistingUser';LocalUserExists=$true;Sid=$audit.TargetUserSid} }
+    function Test-Path { param($LiteralPath) $false }
+    function Save-RollbackState { throw 'Unexpected rollback write' }
+    $ConfirmApply = 'APPLY SMARTTHINCLIENT'
+    $caught = ''
+    try { Invoke-ThinClientApply -Config ([ordered]@{AllowApply=$true;EnableShellLimitations=$true;ShellRestrictionLevel='Strict'}) } catch { $caught = $_.Exception.Message }
+    Assert ($caught -like '*target user registry hive*loaded*') 'Apply did not stop at hive preflight'
+}
+Check 'Strict preflight rejects new dedicated user before creation' {
+    $DedicatedUserPassword = New-Object Security.SecureString
+    $caught = ''
+    try { Assert-ApplyPreflight -Config ([ordered]@{CreateDedicatedLocalUser=$true;EnableShellLimitations=$true;ShellRestrictionLevel='Strict'}) -Audit $audit -TargetUser ([pscustomobject]@{Mode='DedicatedUser';LocalUserExists=$false;Sid=''}) } catch { $caught = $_.Exception.Message }
+    Assert ($caught -like '*existing local target user*') 'New user accepted for Strict'
+}
+Check 'Strict captures and writes CMD policy only in target hive' {
+    function Test-Path { param($LiteralPath) if ($LiteralPath -like 'Registry::*') { return $true }; Microsoft.PowerShell.Management\Test-Path -LiteralPath $LiteralPath }
+    $config = [ordered]@{AutoLaunchMode='None';EnableShellLimitations=$true;ShellRestrictionLevel='Strict'}
+    $target = [pscustomobject]@{Mode='ExistingUser';LocalUserExists=$true;Sid=$audit.TargetUserSid}
+    Assert-ApplyPreflight -Config $config -Audit $audit -TargetUser $target
+    $state = New-RollbackState -Config $config -Audit $audit -EffectiveProfile Citrix
+    $cmd = @($state.Registry | Where-Object {$_.Name -eq 'DisableCMD'})
+    $expected = 'Registry::HKEY_USERS\S-1-5-21-1-2-3-1001\Software\Policies\Microsoft\Windows\System'
+    Assert ($cmd.Count -eq 1 -and $cmd[0].Path -eq $expected) 'Wrong CMD snapshot hive'
+    $script:cmdPath = ''
+    function Set-DwordRegistryValue { param($Path,$Name,$Value) if ($Name -eq 'DisableCMD') { $script:cmdPath = $Path } }
+    Apply-ShellLimitations -Config $config -Audit $audit
+    Assert ($script:cmdPath -eq $expected) 'Wrong CMD write hive'
+    Assert-RollbackState -State ([pscustomobject]$state)
+}
+Check 'Restore rejects a snapshot for another user SID' {
+    $state = New-RollbackState -Config ([ordered]@{AutoLaunchMode='None'}) -Audit $audit -EffectiveProfile Citrix
+    $state.Registry = @([pscustomobject]@{Path='Registry::HKEY_USERS\S-1-5-21-1-2-3-9999\Software\Policies\Microsoft\Windows\System';Name='DisableCMD';ValueExists=$false;ValueKind='';Value=$null})
+    Reject { Assert-RollbackState -State ([pscustomobject]$state) }
+}
+Check 'Restore refuses unloaded user hive before any registry restore' {
+    $state = New-RollbackState -Config ([ordered]@{AutoLaunchMode='RunKey'}) -Audit $audit -EffectiveProfile Citrix
+    $state.Registry += [pscustomobject]@{Path=(Get-TargetUserSystemPolicyPath -Sid $audit.TargetUserSid);Name='DisableCMD';ValueExists=$false;ValueKind='';Value=$null}
+    $RollbackPath = Join-Path $testRoot 'unloaded-hive.json'
+    [pscustomobject]$state | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $RollbackPath
+    function Test-Path { param($LiteralPath) if ($LiteralPath -like 'Registry::*') { return $false }; Microsoft.PowerShell.Management\Test-Path -LiteralPath $LiteralPath }
+    $ConfirmRestore = 'RESTORE WINDOWS SHELL'
+    $caught = ''
+    try { Invoke-ThinClientRestore -Config ([ordered]@{AllowRestore=$true}) } catch { $caught = $_.Exception.Message }
+    Assert ($caught -like '*original target user registry hive*loaded*') 'Restore reached registry writes before checking hive'
+}
+Check 'Existing schema 2 machine CMD snapshot remains restorable' {
+    $state = New-RollbackState -Config ([ordered]@{AutoLaunchMode='None'}) -Audit $audit -EffectiveProfile Citrix
+    $state.Registry = @([pscustomobject]@{Path='HKLM:\SOFTWARE\Policies\Microsoft\Windows\System';Name='DisableCMD';ValueExists=$false;ValueKind='';Value=$null})
+    Assert-RollbackState -State ([pscustomobject]$state)
+}
+Check 'CSV false preserves JSON and does not create or alter CSV' {
+    $fn = $ast.EndBlock.Statements | Where-Object { $_ -is [Management.Automation.Language.FunctionDefinitionAst] -and $_.Name -eq 'Export-Evidence' }
+    . ([scriptblock]::Create($fn.Extent.Text))
+    $script:EvidenceJsonPath = Join-Path $testRoot 'csv-disabled.json'
+    $script:EvidenceCsvPath = Join-Path $testRoot 'csv-disabled.csv'
+    $evidence = [pscustomobject]@{Status='Synthetic'}
+    Export-Evidence -Evidence $evidence -Config ([ordered]@{WriteCsvEvidence=$false})
+    Assert ((Test-Path -LiteralPath $script:EvidenceJsonPath) -and -not (Test-Path -LiteralPath $script:EvidenceCsvPath)) 'CSV false ignored'
+    Set-Content -LiteralPath $script:EvidenceCsvPath -Value 'Existing evidence'
+    $hash = (Get-FileHash -LiteralPath $script:EvidenceCsvPath).Hash
+    Export-Evidence -Evidence $evidence -Config ([ordered]@{WriteCsvEvidence=$false})
+    Assert ((Get-FileHash -LiteralPath $script:EvidenceCsvPath).Hash -eq $hash) 'Disabled CSV was altered'
+}
+Check 'CSV remains enabled by default and with explicit true' {
+    $fn = $ast.EndBlock.Statements | Where-Object { $_ -is [Management.Automation.Language.FunctionDefinitionAst] -and $_.Name -eq 'Export-Evidence' }
+    . ([scriptblock]::Create($fn.Extent.Text))
+    foreach ($config in @([ordered]@{}, [ordered]@{WriteCsvEvidence=$true})) {
+        Export-Evidence -Evidence ([pscustomobject]@{Status='Synthetic'}) -Config $config
+        Assert ((Import-Csv -LiteralPath $script:EvidenceCsvPath).Status -eq 'Synthetic') 'CSV default/true failed'
+    }
+}
+Check 'CSV boolean rejects a string false' { Reject { Assert-ConfigValues -Config ([ordered]@{WriteCsvEvidence='false'}) } }
+Check 'Loaded target hive restoration uses only its recorded CMD snapshot' {
+    $state = New-RollbackState -Config ([ordered]@{AutoLaunchMode='None'}) -Audit $audit -EffectiveProfile Citrix
+    $expected = Get-TargetUserSystemPolicyPath -Sid $audit.TargetUserSid
+    $state.Registry = @([pscustomobject]@{Path=$expected;Name='DisableCMD';ValueExists=$true;ValueKind='DWord';Value=2})
+    $RollbackPath = Join-Path $testRoot 'loaded-hive.json'
+    [pscustomobject]$state | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $RollbackPath
+    function Test-Path { param($LiteralPath) if ($LiteralPath -like 'Registry::*') { return $true }; Microsoft.PowerShell.Management\Test-Path -LiteralPath $LiteralPath }
+    $restoredSnapshots = New-Object 'System.Collections.Generic.List[object]'
+    function Restore-RegistryValue { param($Snapshot) $restoredSnapshots.Add($Snapshot) }
+    $ConfirmRestore = 'RESTORE WINDOWS SHELL'
+    $result = Invoke-ThinClientRestore -Config ([ordered]@{AllowRestore=$true})
+    Assert ($result.Status -eq 'Restored' -and $restoredSnapshots.Count -eq 1 -and $restoredSnapshots[0].Path -eq $expected -and $restoredSnapshots[0].Value -eq 2) 'Target CMD state not restored'
+}
+Check 'Audit uses Hybrid profile URLs and honors CSV false through the export call' {
+    $fn = $ast.EndBlock.Statements | Where-Object { $_ -is [Management.Automation.Language.FunctionDefinitionAst] -and $_.Name -eq 'Export-Evidence' }
+    . ([scriptblock]::Create($fn.Extent.Text))
+    function Get-CitrixWorkspaceSignal { param($Config) [pscustomobject]@{Installed=$false;Path=''} }
+    function Get-AvdClientSignal { param($Config) [pscustomobject]@{Installed=$false;ClassicClientPath='';WindowsAppPackage='';WindowsAppVersion=''} }
+    function Get-BrowserSignal { param($Config) [pscustomobject]@{Installed=$true;Path='synthetic-browser'} }
+    function Get-KioskCapability { [pscustomobject]@{EditionId='Synthetic';AssignedAccessCmdletAvailable=$false;ShellLauncherClassAvailable=$false;SupportsProgressiveLockdown=$false} }
+    function Get-TargetUserState { param($Config) [pscustomobject]@{Mode='ExistingUser';UserName='SYNTHETIC';LocalUserExists=$true;Enabled=$true;Sid=$audit.TargetUserSid} }
+    function Get-CimInstance { param($ClassName) [pscustomobject]@{Caption='Synthetic OS';Version='0.0';BuildNumber='0'} }
+    function Get-ProfileConfig { param($ProfileName) if ($ProfileName -eq 'Citrix') { [pscustomobject]@{CitrixWebUrl='https://citrix.example.invalid'} } }
+    $script:EvidenceJsonPath = Join-Path $testRoot 'audit-no-csv.json'
+    $script:EvidenceCsvPath = Join-Path $testRoot 'audit-no-csv.csv'
+    $result = Invoke-ThinClientAudit -Config ([ordered]@{WriteCsvEvidence=$false;UseWebShell=$false}) -RequestedProfile Hybrid -RequestedAction Preview
+    Assert ($result.CitrixWebUrlConfigured -and (Test-Path -LiteralPath $script:EvidenceJsonPath) -and -not (Test-Path -LiteralPath $script:EvidenceCsvPath)) 'Audit/export ignored effective configuration'
+}
 Write-Host "RESULT passed=$script:passed failed=$script:failed"
 if ($script:failed) { exit 1 }
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAJ+baajRLjAzuD
-# ktVlljx17I702jRGCtx5Lwqj1IPB+KCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAHfK2BDwzwDPte
+# VjpyNPq4/ffEbxrA4dihWoakb4J6iqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -300,31 +476,31 @@ if ($script:failed) { exit 1 }
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIL9iyONJNd+YT5ivfbR02RSkXx3b4SochwYfqQqPhI+tMA0GCSqG
-# SIb3DQEBAQUABIIBgH1S+H+aTWxoF4hoDXzZlaBhqdAUTM6tYy04ERNb7IT6e6o2
-# luPDtGVHsKpNUQ5jGftbbqVbpWI03Iuo469QKCtBOYLEEAqOJuU6HK/VcMAXNHCE
-# 3iSfShpaDWh5OH/grrXVBcGxQAn5hX6pVQ0Sfg5TosxMp0Kd1bJpV/3VVoUMiTya
-# OyvFLnJNDqaHMKqo6WB4npmKlIER3QeF08oJpKrZEwYsHcJ0jvq1vhRbCZjT6w7o
-# VDAZCZs1xKdAg7HMOeXlrNJrE4nPWaFRuPi7M7LXnl7WebKBWJDLgQLg1LVP3+we
-# E3ml4Xp3RvFiEJXwz3Oh1V9WMwRoAaXxr/+cwSlRjOe5T3BS7sRD+RnT887eCOYj
-# ftvTKhG6WW96lZ/II9tZpCiJ3ZRHYk8BfnG91TvOeWgkJtIwwS8Ct/fLglnsjr+z
-# MyksZ7oRoducyumg/g3nVCb1hEnlDsaY4rISRCm28o+xV0z7IepSKRrnPL2IuR6I
-# qq1mfeIp6qCsD72fl6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIOT+aZMlBsgRS5rb3XQOHh9GQ3ysdjJB2Cpr/vLb3p4mMA0GCSqG
+# SIb3DQEBAQUABIIBgK2BOU1gg3dMjq+V4Ns763tjIOFUAzrFfenjUFHxOh0J/Q2z
+# tcxDOjaiPf/KwH/70DHQnTFoBAnOgejDnhAdo5gbl8OaJM+3Ss+GM9RiuAejr0Ci
+# emIgxUIyaSk0qrEkInpswT0s6Ejddx4RYhrIWtT/BQFKgVj5IF/jR9kXg4zme65m
+# zKfrzFZqPUhrxszYnyF3kpJCGBQ6CgI5ERTRe+KPO3ghqi90/Zzhi9dVhFlV+V1I
+# 9xiOsdLIG9XPvN6fTJfJhcXfenflOwsefcFfxGy/oVI4JZafoqyPNkR/OPG/T0S6
+# G1VC92W0RrxSF60pzgRZKos8lOiG8/osgnXsiRVW4+Rt2tHxS95/7Qawn87S6Jpg
+# aH7NF0vTUfgxfBxm4QkTTcCeWX7KKzu/wRQiFs1RK5IXIulhWC7Z9zFOpl8kQwwY
+# z0Edu44TvfF4E1793GWP+DJJwSxNyqi/eIWrFKRkaMH1nqMeGonivydb3vGFmbBQ
+# 9lJUN4TZ7tMtTEpyfqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MDkwNjM5
-# MjFaMC8GCSqGSIb3DQEJBDEiBCA2xIT3jWNVjYKkpQ7q1wGng4KC0nBEb8xykicc
-# r6gREDANBgkqhkiG9w0BAQEFAASCAgCDCksy5xEfHhqDSonpfJY5NQgrh/hh2m5b
-# GRDRZy/xY9L0/Zoue0rZhrdXOA1+iUeHk8bjyQQvQuNSdp1nzNW0lvjeXtMNnC5X
-# S8em3f79Nc6btyXrof16uf9zjPfgMBsonYGfZmER5xmv4bQngh554tjUKBJwrHjb
-# JPalYShoU0GKtXYODPBb8wMVMmU/0oFOqr4SV+p4Hd1MydSec0Nd+bI/F8+7FX4Z
-# CqyNm9c87OUx/RwOpojhtgGHW5SIjSbeLepOtfjbeR8u1x/PJv869r1s2qUNuX99
-# CnLybk64R5yBQKg59CbWKJJSvgP1ZFbSbr8K/Ib4SLFkjvBSodEVFDB1U1yaOT6n
-# MWBig8Fqa8gVwe8fjIgznSJ0+VtWBnVchFYjPpJ1IS7ajoBuKYBmoSxOhXcwSsLl
-# LFZ18SpRoIz82l4b6L3UGC9hcOjs6kCg160rv/7/B2n/RheelH0W9v5DNOUGllWe
-# Wii/cAvsbiAUO+3h1ETIXT4zyAF2x9bBOMu9SzXUhd310CyDYfbsTUEsPtQJ7p72
-# iGZjoLaF57aJy/rfxX2bvM0/saFxTuxBtPTEdipUy089V1umu+yKOw1IQ8Puzj8b
-# 7SOnfUXu/n/dZpCpix9cURxpeQ+1tCHkvL5mqKMYT2VhngCcy4/1PV8nNd95kVZG
-# 1YfKVbh+DQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjMxODE2
+# NTdaMC8GCSqGSIb3DQEJBDEiBCBCgYr+BSrRUNlTdktxBOm+w6iDpgHgw/nX6yye
+# G3fzgjANBgkqhkiG9w0BAQEFAASCAgAy+5Td1gOlK2sXQkA7Y89Jz2dMlcOzfKiO
+# qJQQn4IU2jzW/XQnNZM/wvYOOOd3c4IzAuajMwa2pzH3RvjIOEXN/zka0d3Y8aP1
+# HXZHhyB3anQcOGrvuf4bsg8Dv6KC8rJ3uuUajN4IGLpCzn0r1ADI+EPiQXFufVrC
+# HCTt6JSmL/UbpEQTAZeDo+b+WcgKxU+waDaT8ZpNmqAsl1RlV3gRlpVN5pMV6Sat
+# esKnRYldmVxrpNQegTHg/5jOXgDCvS/v5aPKlCNdolYvfFuME8rkR3z5MyKoUmaf
+# iys+9MXthG8VpJrQEzbIDtUELAhMmuZvlvLHsjS2rHqxAnoprf128oIozyIdis2Z
+# EY20+2MZ1me0OJ0xDKfLXXcEYr+I6ldt45xM/R6V6YKtAiqdO9X64ED+wgau/Ktr
+# 4yd8HsMJ6hXo6vRgnGgnb9Ow6BTpOF+32nTl73HiZUoxP96ThjXIh+KZiN/Yy+xA
+# S3L/vJka3eEDvFAtkgnyMWRQHt3uTEB6Ui1LJAPgsaEd82bm2apo471GrVVD6uBt
+# srq6rN09WQA5hg72UcFL+v8IhlBGfa8uoWBc2SAtMd6XJuXYS0YsiHQ1st6Kxqid
+# IniskJuqP/VXCx99yP12fSiMWCqjSu8LrasLWEGTcSPmhmXdV0vE7Zx97wcdLJm1
+# Zc2kKjbVCA==
 # SIG # End signature block

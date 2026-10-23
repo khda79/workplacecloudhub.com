@@ -1,4 +1,15 @@
-# Smart ThinClient candidate validation — 2026-09-09
+# Smart ThinClient validation
+
+## Local corrections - 2026-10-23
+
+The current source corrects target-user CMD policy scope, Hybrid provider profile URLs, modern default-provider precedence, external web readiness and the CSV evidence switch. Script/test header version: 1.1.0. Validation is offline only; no live Apply/Restore or registry/account/kiosk operation was performed. Git publication is limited to the main script, regression harness, README and this validation record.
+
+- The offline regression harness uses a private temporary source/configuration fixture seeded only from templates. It does not read or modify the operator's runtime profiles. Function declarations are loaded through the AST; registry/account/CIM writes, process launches and UI loading are intercepted.
+- 43 scenarios pass under Windows PowerShell 5.1 and PowerShell 7. The 18 additional scenarios exercise provider profile URLs/global inheritance/legacy aliases, actual generated Hybrid routing with intercepted process launches, default-provider precedence, external web readiness, Strict hive prerequisites, target-SID rollback validation, loaded/unloaded hive restoration, schema 2 machine-snapshot compatibility, JSON preservation and optional CSV output, including the audit/export integration.
+- Strict uses the existing target user's loaded registry hive. Missing hives are refused before Apply configuration writes or Restore registry writes. The tool does not load offline hives. Old schema 2 HKLM CMD snapshots remain supported.
+- The main script and regression harness receive renewed SHA-256 Authenticode signatures with timestamps, verified on the Windows CRLF checkout before commit. Live Citrix/AVD authentication, logon, policy enforcement and kiosk behavior remain unvalidated.
+
+## Historical candidate validation - 2026-09-09
 
 Status: locally prepared for source review. No Smart ThinClient commit, push, release, Gallery/Intune package or OVH publication has been performed for this candidate. Public distribution remains the repository source folder.
 

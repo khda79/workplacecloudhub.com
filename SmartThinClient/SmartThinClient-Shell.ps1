@@ -7,6 +7,8 @@ Smart ThinClient Shell prepares a Windows endpoint for Citrix, Azure Virtual Des
 web-only, or hybrid workspace access. Audit and Preview are read-only. Apply and
 Restore are guarded by administrator checks, configuration gates, confirmation
 phrases, rollback files, logs, and JSON/CSV evidence.
+.NOTES
+Version: 1.1.0
 #>
 
 [CmdletBinding()]
@@ -318,6 +320,9 @@ function Resolve-Config {
             foreach ($property in $sourceConfig.PSObject.Properties) {
                 $config[$property.Name] = $property.Value
             }
+            if (-not $sourceConfig.PSObject.Properties['HybridDefaultProvider'] -and $sourceConfig.PSObject.Properties['WebShellPreferredProvider'] -and $sourceConfig.WebShellPreferredProvider -in @('Citrix','AVD','WebOnly')) {
+                $config['HybridDefaultProvider'] = $sourceConfig.WebShellPreferredProvider
+            }
         }
     }
 
@@ -604,6 +609,26 @@ function New-DedicatedUserIfNeeded {
     return $true
 }
 
+function Get-WorkspaceWebUrls {
+    param($Config, [string]$EffectiveProfile)
+    $urls = [ordered]@{}
+    $keys = @{
+        Citrix = @('CitrixWebUrl','WorkspaceUrl','StoreUrl')
+        AVD = @('AvdWebUrl','FeedUrl')
+        WebOnly = @('WebOnlyUrl','WebShellHomeUrl','FallbackWebUrl')
+    }
+    foreach ($provider in @('Citrix','AVD','WebOnly')) {
+        $providerConfig = $Config
+        if ($EffectiveProfile -eq 'Hybrid') { $providerConfig = Merge-ProfileConfig -Config $Config -EffectiveProfile $provider }
+        $urls[$provider] = ''
+        foreach ($key in $keys[$provider]) {
+            $value = [string](Get-ConfigValue -Config $providerConfig -Name $key -Default '')
+            if (-not [string]::IsNullOrWhiteSpace($value)) { $urls[$provider] = $value; break }
+        }
+    }
+    return $urls
+}
+
 function Invoke-ThinClientAudit {
     param(
         [Parameter(Mandatory = $true)]$Config,
@@ -620,6 +645,7 @@ function Invoke-ThinClientAudit {
     $browser = Get-BrowserSignal -Config $Config
     $kiosk = Get-KioskCapability
     $targetUser = Get-TargetUserState -Config $Config
+    $webUrls = Get-WorkspaceWebUrls -Config $Config -EffectiveProfile $effectiveProfile
     $os = Get-CimInstance -ClassName Win32_OperatingSystem
 
     $result = [ordered]@{
@@ -649,12 +675,12 @@ function Invoke-ThinClientAudit {
         WindowsAppVersion = $avd.WindowsAppVersion
         PreferredAccessMode = [string](Get-ConfigValue -Config $Config -Name 'PreferredAccessMode' -Default 'Web')
         UseWebShell = [bool](Get-ConfigValue -Config $Config -Name 'UseWebShell' -Default $true)
-        CitrixWebUrlConfigured = -not [string]::IsNullOrWhiteSpace([string](Get-ConfigValue -Config $Config -Name 'CitrixWebUrl' -Default ''))
-        AvdWebUrlConfigured = -not [string]::IsNullOrWhiteSpace([string](Get-ConfigValue -Config $Config -Name 'AvdWebUrl' -Default ''))
+        CitrixWebUrlConfigured = -not [string]::IsNullOrWhiteSpace($webUrls.Citrix)
+        AvdWebUrlConfigured = -not [string]::IsNullOrWhiteSpace($webUrls.AVD)
         WindowsAppLaunchUriConfigured = -not [string]::IsNullOrWhiteSpace([string](Get-ConfigValue -Config $Config -Name 'WindowsAppLaunchUri' -Default ''))
         BrowserInstalled = $browser.Installed
         BrowserPath = $browser.Path
-        WebOnlyUrlConfigured = -not [string]::IsNullOrWhiteSpace([string](Get-ConfigValue -Config $Config -Name 'WebOnlyUrl' -Default ''))
+        WebOnlyUrlConfigured = -not [string]::IsNullOrWhiteSpace($webUrls.WebOnly)
         AssignedAccessCmdletAvailable = $kiosk.AssignedAccessCmdletAvailable
         ShellLauncherClassAvailable = $kiosk.ShellLauncherClassAvailable
         SupportsProgressiveLockdown = $kiosk.SupportsProgressiveLockdown
@@ -668,15 +694,16 @@ function Invoke-ThinClientAudit {
     }
 
     $audit = [pscustomobject]$result
-    Export-Evidence -Evidence $audit
+    Export-Evidence -Evidence $audit -Config $Config
     Write-SmartThinClientLog -Message ("Audit completed. Json={0}" -f $script:EvidenceJsonPath)
     return $audit
 }
 
 function Export-Evidence {
-    param([Parameter(Mandatory = $true)]$Evidence)
+    param([Parameter(Mandatory = $true)]$Evidence, $Config = ([ordered]@{}))
 
     $Evidence | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $script:EvidenceJsonPath -Encoding UTF8
+    if (-not (Get-ConfigValue -Config $Config -Name 'WriteCsvEvidence' -Default $true)) { return }
     if (Test-Path -LiteralPath $script:EvidenceCsvPath) { Remove-Item -LiteralPath $script:EvidenceCsvPath -Force }
     $Evidence | Export-Csv -LiteralPath $script:EvidenceCsvPath -NoTypeInformation -Encoding UTF8
 }
@@ -771,16 +798,15 @@ function Get-ThinClientCliStatuses {
     $statuses = New-Object System.Collections.Generic.List[object]
 
     $preferredAccessMode = [string](Get-ResultValue -Result $Result -Name 'PreferredAccessMode' -Default 'Web')
-    $useWebShell = ConvertTo-ResultBoolean (Get-ResultValue -Result $Result -Name 'UseWebShell' -Default $true)
     $browserInstalled = ConvertTo-ResultBoolean (Get-ResultValue -Result $Result -Name 'BrowserInstalled' -Default $false)
 
     $citrixInstalled = ConvertTo-ResultBoolean (Get-ResultValue -Result $Result -Name 'CitrixWorkspaceInstalled' -Default $false)
     $citrixWebConfigured = ConvertTo-ResultBoolean (Get-ResultValue -Result $Result -Name 'CitrixWebUrlConfigured' -Default $false)
     $citrixPath = [string](Get-ResultValue -Result $Result -Name 'CitrixWorkspacePath' -Default '')
-    if ($preferredAccessMode -eq 'Web' -and $useWebShell -and $browserInstalled -and $citrixWebConfigured) {
-        $statuses.Add((New-CliStatus -Name 'Citrix Web' -State 'READY' -Detail 'Citrix web portal is configured for the integrated thin-client shell.' -Color Green))
+    if ($preferredAccessMode -eq 'Web' -and $browserInstalled -and $citrixWebConfigured) {
+        $statuses.Add((New-CliStatus -Name 'Citrix Web' -State 'READY' -Detail 'Citrix web portal and browser are configured.' -Color Green))
     }
-    elseif ($preferredAccessMode -eq 'Web' -and $useWebShell -and $citrixWebConfigured) {
+    elseif ($preferredAccessMode -eq 'Web' -and $citrixWebConfigured) {
         $statuses.Add((New-CliStatus -Name 'Citrix Web' -State 'PARTIAL' -Detail 'Citrix web portal is configured, but no supported browser was detected.' -Color Yellow))
     }
     elseif ($citrixInstalled) {
@@ -794,10 +820,10 @@ function Get-ThinClientCliStatuses {
     $avdWebConfigured = ConvertTo-ResultBoolean (Get-ResultValue -Result $Result -Name 'AvdWebUrlConfigured' -Default $false)
     $avdPath = [string](Get-ResultValue -Result $Result -Name 'AvdClassicClientPath' -Default '')
     $windowsAppPackage = Get-ResultValue -Result $Result -Name 'WindowsAppPackage' -Default ''
-    if ($preferredAccessMode -eq 'Web' -and $useWebShell -and $browserInstalled -and $avdWebConfigured) {
-        $statuses.Add((New-CliStatus -Name 'AVD Web' -State 'READY' -Detail 'AVD web portal is configured for the integrated thin-client shell.' -Color Green))
+    if ($preferredAccessMode -eq 'Web' -and $browserInstalled -and $avdWebConfigured) {
+        $statuses.Add((New-CliStatus -Name 'AVD Web' -State 'READY' -Detail 'AVD web portal and browser are configured.' -Color Green))
     }
-    elseif ($preferredAccessMode -eq 'Web' -and $useWebShell -and $avdWebConfigured) {
+    elseif ($preferredAccessMode -eq 'Web' -and $avdWebConfigured) {
         $statuses.Add((New-CliStatus -Name 'AVD Web' -State 'PARTIAL' -Detail 'AVD web portal is configured, but no supported browser was detected.' -Color Yellow))
     }
     elseif ($avdInstalled) {
@@ -974,14 +1000,10 @@ function New-LauncherScript {
     $citrixPath = [string]$Audit.CitrixWorkspacePath
     $avdPath = [string]$Audit.AvdClassicClientPath
     $browserPath = [string]$Audit.BrowserPath
-    $citrixWebUrl = [string](Get-ConfigValue -Config $Config -Name 'CitrixWebUrl' -Default '')
-    if ([string]::IsNullOrWhiteSpace($citrixWebUrl)) { $citrixWebUrl = [string](Get-ConfigValue -Config $Config -Name 'WorkspaceUrl' -Default '') }
-    if ([string]::IsNullOrWhiteSpace($citrixWebUrl)) { $citrixWebUrl = [string](Get-ConfigValue -Config $Config -Name 'StoreUrl' -Default '') }
-    $avdWebUrl = [string](Get-ConfigValue -Config $Config -Name 'AvdWebUrl' -Default '')
-    if ([string]::IsNullOrWhiteSpace($avdWebUrl)) { $avdWebUrl = [string](Get-ConfigValue -Config $Config -Name 'FeedUrl' -Default '') }
-    $webUrl = [string](Get-ConfigValue -Config $Config -Name 'WebOnlyUrl' -Default '')
-    if ([string]::IsNullOrWhiteSpace($webUrl)) { $webUrl = [string](Get-ConfigValue -Config $Config -Name 'WebShellHomeUrl' -Default '') }
-    if ([string]::IsNullOrWhiteSpace($webUrl)) { $webUrl = [string](Get-ConfigValue -Config $Config -Name 'FallbackWebUrl' -Default '') }
+    $webUrls = Get-WorkspaceWebUrls -Config $Config -EffectiveProfile $EffectiveProfile
+    $citrixWebUrl = $webUrls.Citrix
+    $avdWebUrl = $webUrls.AVD
+    $webUrl = $webUrls.WebOnly
     $windowsAppUri = [string](Get-ConfigValue -Config $Config -Name 'WindowsAppLaunchUri' -Default '')
     $browserKiosk = [bool](Get-ConfigValue -Config $Config -Name 'BrowserKioskMode' -Default $false)
     $useWebShell = [bool](Get-ConfigValue -Config $Config -Name 'UseWebShell' -Default $true)
@@ -991,9 +1013,10 @@ function New-LauncherScript {
     $allowExternalBrowser = [bool](Get-ConfigValue -Config $Config -Name 'WebShellAllowExternalBrowser' -Default $true)
     $allowPowerControls = [bool](Get-ConfigValue -Config $Config -Name 'WebShellAllowPowerControls' -Default $true)
     $allowLimitedSettings = [bool](Get-ConfigValue -Config $Config -Name 'WebShellAllowLimitedSettings' -Default $true)
-    $hybridDefault = [string](Get-ConfigValue -Config $Config -Name 'HybridDefaultProvider' -Default 'Citrix')
+    $hybridDefault = [string](Get-ConfigValue -Config $Config -Name 'HybridDefaultProvider' -Default '')
     $webShellPreferredProvider = [string](Get-ConfigValue -Config $Config -Name 'WebShellPreferredProvider' -Default '')
-    if ($webShellPreferredProvider -in @('Citrix', 'AVD', 'WebOnly')) { $hybridDefault = $webShellPreferredProvider }
+    if ($hybridDefault -notin @('Citrix', 'AVD', 'WebOnly')) { $hybridDefault = $webShellPreferredProvider }
+    if ($hybridDefault -notin @('Citrix', 'AVD', 'WebOnly')) { $hybridDefault = 'Citrix' }
     $hybridSelection = [bool](Get-ConfigValue -Config $Config -Name 'HybridSelectionAtStartup' -Default $true)
     $settingsPages = @(Get-ConfigValue -Config $Config -Name 'WebShellAllowedSettingsPages' -Default @('ms-settings:network-status', 'ms-settings:display', 'ms-settings:sound', 'ms-settings:dateandtime')) |
         ForEach-Object { [string]$_ } |
@@ -1309,6 +1332,12 @@ else {
     return $launcherPath
 }
 
+function Get-TargetUserSystemPolicyPath {
+    param([Parameter(Mandatory = $true)][string]$Sid)
+    $parsedSid = New-Object Security.Principal.SecurityIdentifier($Sid)
+    return ('Registry::HKEY_USERS\{0}\Software\Policies\Microsoft\Windows\System' -f $parsedSid.Value)
+}
+
 function New-RollbackState {
     param(
         [Parameter(Mandatory = $true)]$Config,
@@ -1318,7 +1347,6 @@ function New-RollbackState {
 
     $runKey = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run'
     $explorerPolicy = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer'
-    $systemPolicy = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\System'
     $snapshots = @(
         if ((Get-ConfigValue -Config $Config -Name 'AutoLaunchMode' -Default 'RunKey') -eq 'RunKey') {
             Get-RegistryValueSnapshot -Path $runKey -Name 'SmartThinClientShell'
@@ -1328,7 +1356,7 @@ function New-RollbackState {
             Get-RegistryValueSnapshot -Path $explorerPolicy -Name 'NoRun'
             Get-RegistryValueSnapshot -Path $explorerPolicy -Name 'NoControlPanel'
             Get-RegistryValueSnapshot -Path $explorerPolicy -Name 'NoViewContextMenu'
-            if ($level -eq 'Strict') { Get-RegistryValueSnapshot -Path $systemPolicy -Name 'DisableCMD' }
+            if ($level -eq 'Strict') { Get-RegistryValueSnapshot -Path (Get-TargetUserSystemPolicyPath -Sid $Audit.TargetUserSid) -Name 'DisableCMD' }
         }
     )
     $launcherPath = Join-Path $script:OutputRoot 'Launcher\SmartThinClient-LaunchWorkspace.ps1'
@@ -1373,7 +1401,7 @@ function Assert-ConfigValues {
     foreach ($key in $choices.Keys) {
         if ($Config.Contains($key) -and $Config[$key] -notin $choices[$key]) { throw "Invalid configuration value for $key." }
     }
-    foreach ($key in @('AllowApply','AllowRestore','RequireConfirmationPhrase','CreateDedicatedLocalUser','UseWebShell','BrowserKioskMode','EnableShellLimitations','EnableAssignedAccess','EnableShellLauncher','HybridSelectionAtStartup','WebShellShowProviderButtons','WebShellAllowExternalBrowser','WebShellAllowPowerControls','WebShellAllowLimitedSettings')) {
+    foreach ($key in @('AllowApply','AllowRestore','RequireConfirmationPhrase','CreateDedicatedLocalUser','UseWebShell','BrowserKioskMode','EnableShellLimitations','EnableAssignedAccess','EnableShellLauncher','HybridSelectionAtStartup','WebShellShowProviderButtons','WebShellAllowExternalBrowser','WebShellAllowPowerControls','WebShellAllowLimitedSettings','WriteCsvEvidence')) {
         if ($Config.Contains($key) -and $Config[$key] -isnot [bool]) { throw "$key must be a JSON boolean, not a string." }
     }
 }
@@ -1396,6 +1424,11 @@ function Assert-ApplyPreflight {
     if ($TargetUser.Mode -eq 'DedicatedUser' -and -not $TargetUser.LocalUserExists) {
         if (-not (Get-ConfigValue -Config $Config -Name 'CreateDedicatedLocalUser' -Default $false) -or $null -eq $DedicatedUserPassword) { throw 'Dedicated user creation requires CreateDedicatedLocalUser and DedicatedUserPassword.' }
         if (-not (Get-Command New-LocalUser -ErrorAction SilentlyContinue)) { throw 'New-LocalUser is unavailable.' }
+    }
+    if ((Get-ConfigValue -Config $Config -Name 'EnableShellLimitations' -Default $false) -and (Get-ConfigValue -Config $Config -Name 'ShellRestrictionLevel' -Default 'None') -eq 'Strict') {
+        if (-not $TargetUser.LocalUserExists -or -not $TargetUser.Sid) { throw 'Strict restrictions require an existing local target user with a SID.' }
+        [void](Get-TargetUserSystemPolicyPath -Sid $TargetUser.Sid)
+        if (-not (Test-Path -LiteralPath ('Registry::HKEY_USERS\{0}' -f $TargetUser.Sid))) { throw 'Strict restrictions require the target user registry hive to be loaded. Sign in that user before applying.' }
     }
     if ($assigned -or $shell) {
         if (-not $TargetUser.LocalUserExists -or -not $TargetUser.Enabled -or -not $TargetUser.Sid) { throw 'Kiosk modes require an existing enabled local user; prepare and verify that user separately.' }
@@ -1435,9 +1468,13 @@ function Assert-RollbackState {
         'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer' = @('NoRun','NoControlPanel','NoViewContextMenu')
         'HKLM:\SOFTWARE\Policies\Microsoft\Windows\System' = @('DisableCMD')
     }
+    if ($State.TargetUserSid) {
+        $allowed[(Get-TargetUserSystemPolicyPath -Sid $State.TargetUserSid)] = @('DisableCMD')
+    }
     foreach ($snapshot in @($State.Registry)) {
         if (-not $allowed.ContainsKey([string]$snapshot.Path) -or $snapshot.Name -notin $allowed[[string]$snapshot.Path]) { throw 'Rollback contains an unrelated registry value.' }
         if ($snapshot.ValueExists -isnot [bool] -or ($snapshot.ValueExists -and $snapshot.ValueKind -notin @('String','ExpandString','Binary','DWord','MultiString','QWord','None'))) { throw 'Invalid registry snapshot.' }
+        if ([string]$snapshot.Path -like 'Registry::HKEY_USERS\*' -and -not (Test-Path -LiteralPath ('Registry::HKEY_USERS\{0}' -f $State.TargetUserSid))) { throw 'Restore requires the original target user registry hive to be loaded.' }
     }
     Assert-ConfigValues -Config (Convert-ObjectToHashtable -InputObject $State.Config)
 }
@@ -1474,7 +1511,7 @@ function Apply-AutoLaunch {
 }
 
 function Apply-ShellLimitations {
-    param([Parameter(Mandatory = $true)]$Config)
+    param([Parameter(Mandatory = $true)]$Config, $Audit)
 
     if (-not [bool](Get-ConfigValue -Config $Config -Name 'EnableShellLimitations' -Default $false)) {
         Write-SmartThinClientLog -Message 'Shell limitations disabled by configuration.'
@@ -1485,7 +1522,6 @@ function Apply-ShellLimitations {
     if ($level -eq 'None') { return }
     if ($level -notin @('Basic', 'Strict')) { throw 'Invalid ShellRestrictionLevel.' }
     $explorerPolicy = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer'
-    $systemPolicy = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\System'
 
     Set-DwordRegistryValue -Path $explorerPolicy -Name 'NoRun' -Value 1
     Set-DwordRegistryValue -Path $explorerPolicy -Name 'NoControlPanel' -Value 1
@@ -1493,7 +1529,7 @@ function Apply-ShellLimitations {
         Set-DwordRegistryValue -Path $explorerPolicy -Name 'NoViewContextMenu' -Value 1
     }
     if ($level -eq 'Strict') {
-        Set-DwordRegistryValue -Path $systemPolicy -Name 'DisableCMD' -Value 1
+        Set-DwordRegistryValue -Path (Get-TargetUserSystemPolicyPath -Sid $Audit.TargetUserSid) -Name 'DisableCMD' -Value 1
     }
     Write-SmartThinClientLog -Message "Applied shell limitations. Level=$level"
 }
@@ -1558,7 +1594,7 @@ function Invoke-ThinClientApply {
     $launcherCommand = Get-LauncherCommandLine
 
     Apply-AutoLaunch -Config $Config -CommandLine $launcherCommand
-    Apply-ShellLimitations -Config $Config
+    Apply-ShellLimitations -Config $Config -Audit $audit
     Apply-AssignedAccess -Config $Config -Audit $audit
     Apply-ShellLauncher -Config $Config -Audit $audit -LauncherCommand $launcherCommand
 
@@ -1577,7 +1613,7 @@ function Invoke-ThinClientApply {
         EvidenceJsonPath = $script:EvidenceJsonPath
         EvidenceCsvPath = $script:EvidenceCsvPath
     })
-    Export-Evidence -Evidence $result
+    Export-Evidence -Evidence $result -Config $Config
     return $result
 }
 
@@ -1614,7 +1650,7 @@ function Invoke-ThinClientLaunchOnly {
         EvidenceJsonPath = $script:EvidenceJsonPath
         EvidenceCsvPath = $script:EvidenceCsvPath
     })
-    Export-Evidence -Evidence $result
+    Export-Evidence -Evidence $result -Config $Config
     Write-SmartThinClientLog -Message "Launch-only thin client opened. Launcher=$launcherPath"
     return $result
 }
@@ -1670,7 +1706,7 @@ function Invoke-ThinClientRestore {
         EvidenceJsonPath = $script:EvidenceJsonPath
         EvidenceCsvPath = $script:EvidenceCsvPath
     })
-    Export-Evidence -Evidence $result
+    Export-Evidence -Evidence $result -Config $Config
     Write-SmartThinClientLog -Message "Restore completed from rollback: $path"
     return $result
 }
@@ -1869,8 +1905,8 @@ catch {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAWPe5TztqOj3hv
-# Iz0ydg+st7fiUslvJCnYkNhusnuUzaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBCpb62PYL8eyu3
+# Gpx3xApCGLBxEbW8S6Fsp9fNeVwGkaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -2003,31 +2039,31 @@ catch {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIP1f6z0LT0E5AI/PvARRZP3/bmM0Qyg0WwmkF0yqWWLBMA0GCSqG
-# SIb3DQEBAQUABIIBgI5NnlWkkjyOF1gJFGJSFIQ6et2m71lDhkmo6iI7hX9JqI8q
-# cCkjD186PrNayC8Fwbfw3RTUwM+3WgURdkozE88DsG1j+pJwYdPFR+QSg3XEaEgG
-# TFcyO1jUMhPU9mQAAjGLmax0l6zUl3DI5f7dIGvy0MGi2c0XGEvUHFSXwLbYQw6y
-# 29gbSjzxPjw6NieNkompNQKH2PLkftyFF+wMHx5zsqju8tS6591mAjtWUvO7Evyq
-# QdbZKJrsCpDuClyw9xdDBo3XrDuOVlMiTBLNWqx9ZIz9wAdtxIbO0ryo/HEX4BM3
-# +IYnRQTdXqSxuxcmK1SR+D8RPMDb49pVOBPJ+tTrisysThmQqphaOX9meVaHFjdT
-# pnvaRNTUlQtm6kX4HFa0KC1L4WBhOAqJLJ7BiCpmmtj52nPEB+ob5nvvL6oiEBCA
-# x3PMegVS94lQ0wcQc4nl4wvYemq8LI4gE6yRPcbPRnWEXmFnipoJhRP76PzwV2a0
-# jh1+Y/gFbCkMrfT6xKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIJqZmawKiiOsM6fsBwhD01nXcl0L/9qEFBkb+Pl+TtN0MA0GCSqG
+# SIb3DQEBAQUABIIBgGwg1QQkQMrgn8PPbh5t0ckYsWH4FkTCWnP5fyuEUMOVjF18
+# ahj8TMgvm2Ou6tSm1TFAdkEjL6nF+Eb4LEYpbdnQcddbAHKOzomSNT80HdCB3u6r
+# O3eFtlPFZFMPo6IL0xFYapzkSJ5QRGlCkRhJ8Ll9nijgqWSJDPbFr+Mp0m5oDil+
+# +StTm3MY9jK3LNlnC/NsXxzjMCkVibIM8AYYr6Woxuvdh/HNd8LIsZ7laofH47xc
+# oHi2O715xKny+KgEH6gtl646PvBV+HG/VDrqHqbt02gZ+YNRgH2L0MalW6NuHOU2
+# 3rRLJS8TcoWVW4jWt2s2KnkV5B4V9TTqbyuK50MqV8XE6+mkn8FMBq5AHHzsgXMf
+# +Rz6yEBL+sgs0ppmAD4A/1iUQNNT5Y0jOkmi421VowiXxr1nO9jVY0HiX12X4riv
+# 6xhHaAtCxs6TPCGVcoF7GsPdXpv5WZhWlyCb75iWDcJOv+UqQ0cyLIt8PxOyWzqf
+# SKcm6OuR8uU1++Ae6qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MDkwNjM5
-# MjFaMC8GCSqGSIb3DQEJBDEiBCCaSLJM3C8EUObNgF+E7n/OjoOsJt3qzTOhfFUy
-# xrhLnTANBgkqhkiG9w0BAQEFAASCAgAFdqq7vnZYY54agchGRn/0fGSsPKd2iW+N
-# I9ACA8W7t4AvObCSmWG6jVtBFbBLEuLmn1PlH7KMIWLRvorAgu42PpIAb9mZXdgq
-# T75mWBV8b9AlGnmYZJ2g3UlijAMGXBrQTQ4HuQmI9CFgxGX2qS0ZEztWp/tCQ5t4
-# HRygnAhnrdvyXtKsXEkFVyBxhsITJDxqsc3Rs/vQehJSW7q75xUbe8hwnkCNMhM0
-# KWCslmtz+wEZUk/Wm3X4IXqlWZjFp+UU/7kgXdqXaQg+AAMEUIgmhBbbxlAw6rp3
-# njf5JyamAmK2a7qh/kbhLvtp+i9Mxbzj3ea+uplNqTNd5IP7kPoysAHpnLijhO5f
-# PwALyxGk1ySTKLFu36xbNgcqZs1VvBVrcDPLjIclDXgg2rrsS1CwiogTj4laXwfW
-# kvTQNbJBiOd4fivk3R25jrDolOhwuPRgqyaLQ3c5rsIYwxJhe2wHClYe4IezJojW
-# FxVpfjYj0bljjZZb7QiV8siqP8ZmmdBQ2Jsnh1GJqbdkickTU4fKyFwj8CIV/WkN
-# nhSjY/PFncVPD9RZ9CURH48kPVylIvGJ2VBInU3yeVJ+uMv0EFM1yGuRZENsZAJj
-# yGy4AY3wEl+JyWYoxsTVzFwNfnr2+88t844+i5+BNxj5Izm4R/TGepW6xbkF4LqE
-# vWRpDRbbjg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjMxODE2
+# NTZaMC8GCSqGSIb3DQEJBDEiBCA43eruL/D8ol1Jat3uGlM22bWDsndDGj/IY7Hq
+# pzp8zzANBgkqhkiG9w0BAQEFAASCAgA8vPqpu1yCsEKB7CFvCLAd6flEMJJ5Qn1F
+# ArHeuhA7M4yWEYr3GHHDQSQ3uti7Kw2B+5FcmijH90q+pBrVtXoB/TIZqP/5dIEn
+# 6lHs3HUJ97LpuHlNo3Fcbo/5SSlc7A3ao8s4aE9EsJwZLzD1Lwa4k4+GXsWCGnHI
+# yYGEx58MtXIwxL8oKkreDAUEdSo6DaC3FxWDqOoTNwqYir/rpLYiKc5S+17pdAvD
+# BSQOoiD6cb2FUu/eXbtC3a9I6VTAOlTPDMhKKAwoLc3MQApxprBviqOUYFvhBJHN
+# HK3P53ns+V7lfOUpVDHR5CPYhhCKQIqNIsnCPo2fTYb3rwAeFmvx1aEJquaKmrZk
+# DQxXDgLMqo3P7tRNQGxTgPYa+Xtaq3JRxb8QXaBFpZioah8uWmlDi9kcinSWRYRJ
+# G+UctkwPhw3BZNa5sxSRzTAWzPbu+w4EIXInzO+VRfInsUOBBfFhWZc7iSvCxRF5
+# EhZA550iyKPeYAtnSms4N4cbZIpVH9JvqzEtK1i1FT7bb0zFKkHDmlAFUYipoewI
+# XJxLtRTg28PcqPI6v8hoRT9cMC9X9+YENwaDchzQgh/o5FkoHdUu2ESCM+Xwy6Gv
+# f8cwij1SiZEaSLjWZ8HT31FjeWCigBAqFoP9HEazfA1i1utAt2FYL8vu+qrOLTIJ
+# zl0dSQ9XYA==
 # SIG # End signature block
