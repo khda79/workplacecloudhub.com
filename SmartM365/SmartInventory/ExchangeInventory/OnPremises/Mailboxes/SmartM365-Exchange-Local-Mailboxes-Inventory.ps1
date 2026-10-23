@@ -17,18 +17,18 @@
     Parameters allow customization of output paths, permission inclusion, and overwrite behavior.
 
 .VERSION
-1.69
+1.70
 .REQUIREMENTS
     Windows PowerShell 5.1 on an Exchange 2016/on-premises management host.
-    Modules/snap-ins: SmartM365 WindowsPowerShell5 compatibility module; Exchange Management snap-in; ActiveDirectory module when AD permission export is enabled.
+    Modules: SmartM365 WindowsPowerShell5 compatibility module; Exchange remote PowerShell (default) or local snap-in (rollback); ActiveDirectory when AD permission export is enabled.
     Minimum permissions: Exchange on-premises recipient read access for mailbox/remote mailbox data; AD read access for recipient and optional AD permission data.
     Optional switches: -IncludeADPermission and -OnlyADPermission require read access to AD mailbox permission ACLs.
     Conditional: Mail.Send is required only when Graph mail is used; Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
-Version: 1.69
+Version: 1.70
     Author: https://github.com/khda79/workplacecloudhub.com
     Requirements: Exchange 2016 Management Tools, Active Directory module
-    Minimum permissions: Windows PowerShell 5.1, Exchange 2016 Management snap-in, ActiveDirectory module, Exchange read RBAC for mailbox/remote mailbox/statistics/permissions, and AD read access.
+    Minimum permissions: Windows PowerShell 5.1, Exchange read RBAC for mailbox/remote mailbox/statistics/permissions, and AD read access. Remote uses the current Windows identity with Kerberos.
 #>
 
 [CmdletBinding()]
@@ -79,6 +79,7 @@ while ($smartM365LifecycleRoot -and -not (Test-Path -LiteralPath (Join-Path $sma
 if(-not $smartM365LifecycleRoot){throw 'SmartM365 lifecycle support is missing; update the complete runtime.'}
 . (Join-Path $smartM365LifecycleRoot 'Modules/SmartM365.Core/SmartM365-InventoryLifecycle.ps1')
 $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -RequireReturn
+$script:ExchangeOnPremContext = $null
 try {
 if ($PSBoundParameters.ContainsKey('MaxItems') -and $MaxItems -gt 0) {
     $global:SmartM365MaxItems = [int]$MaxItems
@@ -111,6 +112,9 @@ $tenantContextPath = & {
 Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot | Out-Null
 
 . (Join-Path $PSScriptRoot '../../../Common/SmartM365.IdentityDateEvidence.ps1')
+$exchangeSessionHelperPath = Join-Path $smartM365LifecycleRoot 'Modules/SmartM365.Core/SmartM365-ExchangeOnPremSession.ps1'
+if (-not (Test-Path -LiteralPath $exchangeSessionHelperPath -PathType Leaf)) { throw 'Exchange session support is missing; update the complete runtime cache.' }
+. $exchangeSessionHelperPath
 function Get-ScriptLocalConfig {
     [CmdletBinding()]
     param()
@@ -254,6 +258,10 @@ function Get-ScriptLocalConfigValue {
 }
 
 $ScriptLocalConfig = Get-ScriptLocalConfig
+$script:ExchangeConnectionMode = [string](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ExchangeConnectionMode' -DefaultValue 'Remote')
+if ($script:ExchangeConnectionMode -notin @('Remote','LocalSnapin')) {
+    throw 'ExchangeConnectionMode must be Remote or LocalSnapin.'
+}
 
 
 
@@ -268,7 +276,7 @@ $global:SharePointTargetFolderPath = Get-ScriptLocalConfigValue -Config $ScriptL
 $script:SharePointUploadDisabledForRun = -not $global:EnableSharePointUpload
 $script:SharePointUploadDisableLogged = $false
 #region Module Import and Initialization
-$ScriptVersion = "1.69"
+$ScriptVersion = "1.70"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $EnableWeeklyHistory = [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'EnableWeeklyHistory' -DefaultValue $true)
 $WeeklyHistoryFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'WeeklyHistoryFolderPath' -DefaultValue ''
@@ -313,6 +321,25 @@ function Ensure-SmartM365ExchangeScriptScope {
         [string[]]$RequiredCommands = @("Get-Mailbox", "Set-ADServerSettings"),
         [switch]$ViewEntireForest
     )
+
+    if ($script:ExchangeConnectionMode -eq 'Remote') {
+        if ($null -eq $script:ExchangeOnPremContext) {
+            $remoteCommands = @('Get-Mailbox','Get-MailboxDatabase','Get-MailboxPermission','Get-MailboxStatistics','Get-MobileDevice','Get-ADPermission','Get-ExchangeServer','Get-ADServerSettings','Set-ADServerSettings')
+            if ($IncludeRemoteMailboxes) { $remoteCommands += 'Get-RemoteMailbox' }
+            if ($CollectLargeItemStatistics) { $remoteCommands += 'Search-Mailbox' }
+            try {
+                $script:ExchangeOnPremContext = Start-SmartM365ExchangeOnPremSession -RequiredCommands $remoteCommands
+                if ($ViewEntireForest) { Set-ADServerSettings -ViewEntireForest $true -ErrorAction Stop | Out-Null }
+                $null = Get-ExchangeServer -ErrorAction Stop | Select-Object -First 1
+                WriteLog -Message ('ExchangeConnectionMode=Remote; state=Ready; endpoint={0}; one dedicated session; forest scope enabled={1}.' -f $script:ExchangeOnPremContext.Endpoint, [bool]$ViewEntireForest)
+            }
+            catch {
+                WriteLog -Message ('ExchangeConnectionMode=Remote; state=Failed; no fallback. {0}' -f $_.Exception.Message) -Level 'ERROR'
+                throw
+            }
+        }
+        return $true
+    }
 
     $snapinName = "Microsoft.Exchange.Management.PowerShell.SnapIn"
 
@@ -942,7 +969,7 @@ function ConvertTo-SmartM365ExchangeRemoteMailboxRecord {
         WhenCreated                  = $Mailbox.WhenCreated
         WhenChanged                  = $Mailbox.WhenChanged
         MailboxRelease               = $Mailbox.MailboxRelease
-        WhenMailboxCreatedIso8601 = ConvertTo-IdentityNativeIso $Mailbox.WhenMailboxCreated
+        WhenMailboxCreatedIso8601 = $(if ($script:ExchangeConnectionMode -eq 'Remote') { ConvertTo-SmartM365ExchangeDateIso $Mailbox.WhenMailboxCreated } else { ConvertTo-IdentityNativeIso $Mailbox.WhenMailboxCreated })
         WhenMailboxCreated           = $Mailbox.WhenMailboxCreated
         AccountDisabled              = $Mailbox.AccountDisabled
         ExchangeUserAccountControl   = $Mailbox.ExchangeUserAccountControl
@@ -969,11 +996,14 @@ function ConvertTo-SmartM365ExchangeRemoteMailboxRecord {
         $record.SendAsUsers = $delegation.SendAsUsers
     }
 
-    $record.ExchangeGuid = if ($Mailbox.ExchangeGuid) { $Mailbox.ExchangeGuid.ToString() } else { '' }
+    $record.ExchangeGuid = if ($script:ExchangeConnectionMode -eq 'Remote') { ConvertTo-SmartM365ExchangeGuid $Mailbox.ExchangeGuid } elseif ($Mailbox.ExchangeGuid) { $Mailbox.ExchangeGuid.ToString() } else { '' }
     $immutableIdValue = ''
-    if ($Mailbox.Guid) { try { $immutableIdValue = [System.Convert]::ToBase64String($Mailbox.Guid.ToByteArray()) } catch { $immutableIdValue = '' } }
+    if ($Mailbox.Guid) {
+        if ($script:ExchangeConnectionMode -eq 'Remote') { $immutableIdValue = ConvertTo-SmartM365ExchangeGuid -Value $Mailbox.Guid -Base64 }
+        else { try { $immutableIdValue = [System.Convert]::ToBase64String($Mailbox.Guid.ToByteArray()) } catch { $immutableIdValue = '' } }
+    }
     $record.ImmutableId = $immutableIdValue
-    $record.ObjectGuid = if ($Mailbox.Guid) { $Mailbox.Guid.ToString() } else { '' }
+    $record.ObjectGuid = if ($script:ExchangeConnectionMode -eq 'Remote') { ConvertTo-SmartM365ExchangeGuid $Mailbox.Guid } elseif ($Mailbox.Guid) { $Mailbox.Guid.ToString() } else { '' }
     $record.CollectedAtUtc = [datetime]::UtcNow.ToString('o')
     $record.NativeIdentityStatus = if ($record.ObjectGuid -or $record.ExchangeGuid) { 'Observed' } else { 'Unavailable' }
     return [pscustomobject]$record
@@ -1956,7 +1986,7 @@ if ($DryRun) {
 
             $exchangeCmdletAvailable = [bool](Get-Command Get-Mailbox -ErrorAction SilentlyContinue)
             Write-Host "Exchange Get-Mailbox available: $exchangeCmdletAvailable"
-            if (-not $exchangeCmdletAvailable) { throw 'Get-Mailbox is not available after Exchange snap-in load.' }
+            if (-not $exchangeCmdletAvailable) { throw 'Get-Mailbox is not available after Exchange connection initialization.' }
         }
     }
     catch {
@@ -2006,7 +2036,7 @@ $scriptScopeExchangeCommands = @(
     "Get-ADPermission"
 )
 if ($IncludeRemoteMailboxes) { $scriptScopeExchangeCommands += "Get-RemoteMailbox" }
-if (-not (Get-Command -Name Get-Mailbox -ErrorAction SilentlyContinue)) {
+if ($script:ExchangeConnectionMode -ne 'Remote' -and -not (Get-Command -Name Get-Mailbox -ErrorAction SilentlyContinue)) {
     WriteLog -Message "Exchange cmdlets are loaded in module scope; loading Exchange snap-in in script scope for mailbox processing."
     try {
         Add-PSSnapin Microsoft.Exchange.Management.PowerShell.SnapIn -ErrorAction SilentlyContinue
@@ -2070,7 +2100,7 @@ if ($OnlyADPermission -or $IncludeADPermission) {
     $preflightOutputPaths += $OutputPathOnlyADPermission
 }
 
-Invoke-SmartM365Preflight -ScriptName $TaskName -OutputPaths $preflightOutputPaths -RequireExchangeOnPrem -RequireActiveDirectoryRead | Out-Null
+Invoke-SmartM365Preflight -ScriptName $TaskName -OutputPaths $preflightOutputPaths -RequireExchangeOnPrem:($script:ExchangeConnectionMode -ne 'Remote') -RequireActiveDirectoryRead | Out-Null
 
 # Refined parameter logic for permissions
 if ($OnlyADPermission) {
@@ -2422,7 +2452,7 @@ try { # Main try block for script execution and interruption handling
                     $userObj | Add-Member NoteProperty -Name "Department" -Value $Mbx.Department
                     $userObj | Add-Member NoteProperty -Name "Office" -Value $Mbx.Office
                     $userObj | Add-Member NoteProperty -Name "Manager" -Value $(if($null -ne $Mbx.Manager){$Mbx.Manager.ToString()}else{""})
-                    $userObj | Add-Member NoteProperty -Name 'WhenMailboxCreatedIso8601' -Value (ConvertTo-IdentityNativeIso $Mbx.WhenMailboxCreated)
+                    $userObj | Add-Member NoteProperty -Name 'WhenMailboxCreatedIso8601' -Value $(if ($script:ExchangeConnectionMode -eq 'Remote') { ConvertTo-SmartM365ExchangeDateIso $Mbx.WhenMailboxCreated } else { ConvertTo-IdentityNativeIso $Mbx.WhenMailboxCreated })
                     $userObj | Add-Member NoteProperty -Name 'LastLogonTimeIso8601' -Value ''
                     $userObj | Add-Member NoteProperty -Name "WhenMailboxCreated" -Value $Mbx.WhenMailboxCreated
                     $userObj | Add-Member NoteProperty -Name "WhenChanged" -Value $Mbx.WhenChanged
@@ -2434,7 +2464,11 @@ try { # Main try block for script execution and interruption handling
 
                     $ProhibitSendReceiveQuota = "N/A"
                     try {
-                        if (($Mbx.UseDatabaseQuotaDefaults -eq $true)) {
+                        if ($script:ExchangeConnectionMode -eq 'Remote') {
+                            $quotaValue = $Mbx.ProhibitSendReceiveQuota
+                            if ($Mbx.UseDatabaseQuotaDefaults -eq $true) { $quotaValue = (Get-MailboxDatabase -Identity ([string]$Mbx.Database) -ErrorAction Stop).ProhibitSendReceiveQuota }
+                            $ProhibitSendReceiveQuota = ConvertTo-SmartM365ExchangeSizeMB $quotaValue
+                        } elseif (($Mbx.UseDatabaseQuotaDefaults -eq $true)) {
                             $db = Get-MailboxDatabase $Mbx.Database -ErrorAction Stop
                             if ($db.ProhibitSendReceiveQuota.IsUnlimited) { $ProhibitSendReceiveQuota = "Unlimited" }
                             else { $ProhibitSendReceiveQuota = $db.ProhibitSendReceiveQuota.Value.ToMB() }
@@ -2465,11 +2499,16 @@ try { # Main try block for script execution and interruption handling
                         $Stats = Get-MailboxStatistics -Identity $Mbx.DistinguishedName -WarningAction SilentlyContinue -ErrorAction Stop
                         if ($Stats) {
                             $userObj."LastLogonTime" = $Stats.LastLogonTime
-                            $userObj.'LastLogonTimeIso8601' = ConvertTo-IdentityNativeIso $Stats.LastLogonTime
+                            $userObj.'LastLogonTimeIso8601' = $(if ($script:ExchangeConnectionMode -eq 'Remote') { ConvertTo-SmartM365ExchangeDateIso $Stats.LastLogonTime } else { ConvertTo-IdentityNativeIso $Stats.LastLogonTime })
+							if ($script:ExchangeConnectionMode -eq 'Remote') {
+                                $userObj.'TotalItemSize-In-MB' = ConvertTo-SmartM365ExchangeSizeMB $Stats.TotalItemSize
+                                $userObj.'TotalDeletedItemSize-In-MB' = ConvertTo-SmartM365ExchangeSizeMB $Stats.TotalDeletedItemSize
+                            } else {
 							$userObj."TotalItemSize-In-MB" = $(if($null -ne $Stats.TotalItemSize -and $Stats.TotalItemSize.IsUnlimited -eq $false) {$Stats.TotalItemSize.Value.ToMB()} elseif($null -ne $Stats.TotalItemSize -and $Stats.TotalItemSize.IsUnlimited -eq $true) {$Stats.TotalItemSize.Value.ToMB()} else {"N/A"})
+                                $userObj."TotalDeletedItemSize-In-MB" = $(if($null -ne $Stats.TotalDeletedItemSize -and $Stats.TotalDeletedItemSize.IsUnlimited -eq $false) {$Stats.TotalDeletedItemSize.Value.ToMB()} elseif($null -ne $Stats.TotalDeletedItemSize -and $Stats.TotalDeletedItemSize.IsUnlimited -eq $true) {$Stats.TotalDeletedItemSize.Value.ToMB()} else {"N/A"})
+                            }
                             $userObj."ItemCount" = $Stats.ItemCount
                             $userObj."DeletedItemCount" = $Stats.DeletedItemCount
-                            $userObj."TotalDeletedItemSize-In-MB" = $(if($null -ne $Stats.TotalDeletedItemSize -and $Stats.TotalDeletedItemSize.IsUnlimited -eq $false) {$Stats.TotalDeletedItemSize.Value.ToMB()} elseif($null -ne $Stats.TotalDeletedItemSize -and $Stats.TotalDeletedItemSize.IsUnlimited -eq $true) {$Stats.TotalDeletedItemSize.Value.ToMB()} else {"N/A"})
                         }
                     }
                     catch {
@@ -2490,11 +2529,11 @@ try { # Main try block for script execution and interruption handling
 
                     $ArchiveTotalItemSizeMB = "N/A"
                     $ArchiveTotalItemCount = "N/A"
-                    if ($Mbx.ArchiveGuid -ne [System.Guid]::Empty) {
+                    if (($script:ExchangeConnectionMode -eq 'Remote' -and (ConvertTo-SmartM365ExchangeGuid $Mbx.ArchiveGuid)) -or ($script:ExchangeConnectionMode -ne 'Remote' -and $Mbx.ArchiveGuid -ne [System.Guid]::Empty)) {
                         try {
                             $MbxArchiveStats = Get-MailboxStatistics -Identity $Mbx.DistinguishedName -Archive -WarningAction SilentlyContinue -ErrorAction Stop
                             if ($MbxArchiveStats) {
-                                $ArchiveTotalItemSizeMB = $(if($null -ne $MbxArchiveStats.TotalItemSize -and $MbxArchiveStats.TotalItemSize.IsUnlimited -eq $false) {$MbxArchiveStats.TotalItemSize.Value.ToMB()} elseif ($null -ne $MbxArchiveStats.TotalItemSize -and $MbxArchiveStats.TotalItemSize.IsUnlimited -eq $true) {"Unlimited"} else {"N/A"})
+                                $ArchiveTotalItemSizeMB = $(if ($script:ExchangeConnectionMode -eq 'Remote') { ConvertTo-SmartM365ExchangeSizeMB $MbxArchiveStats.TotalItemSize } else { if($null -ne $MbxArchiveStats.TotalItemSize -and $MbxArchiveStats.TotalItemSize.IsUnlimited -eq $false) {$MbxArchiveStats.TotalItemSize.Value.ToMB()} elseif ($null -ne $MbxArchiveStats.TotalItemSize -and $MbxArchiveStats.TotalItemSize.IsUnlimited -eq $true) {"Unlimited"} else {"N/A"} })
                                 $ArchiveTotalItemCount = $MbxArchiveStats.ItemCount
                             }
                         }
@@ -2575,6 +2614,8 @@ try { # Main try block for script execution and interruption handling
                             foreach ($permEntry in $fullPermsRaw) {
                                 $UserIDString = if ($null -ne $permEntry.User) {$permEntry.User.ToString()} else {"<UnknownUserSID: $($permEntry.User.SecurityIdentifier.Value)>"}
                                 $UserSID = $permEntry.User.SecurityIdentifier.Value
+                                # Remoting may expose User as text, without the AD identity methods/properties.
+                                if ($script:ExchangeConnectionMode -eq 'Remote' -and [string]::IsNullOrWhiteSpace([string]$UserSID)) { $UserSID = $UserIDString }
                                 $adObject = $null
                                 $resolvedBy = "N/A"
                                 $formattedADObjectIdentity = $UserIDString # Default if not resolved
@@ -3763,7 +3804,17 @@ Write-Host -ForegroundColor Yellow $interruptionMessageRedundant
     if ($_.Exception -isnot [Management.Automation.PipelineStoppedException] -and $_.Exception -isnot [OperationCanceledException]) { $smartM365RunGuard.ErrorRecord=$_ }
     throw
 } finally {
-    Complete-SmartM365InventoryRun -State $smartM365RunGuard
+    try {
+        if ($null -ne $script:ExchangeOnPremContext) {
+            WriteLog -Message ('ExchangeConnectionMode=Remote; collection duration seconds={0:F3}; closing owned session.' -f $script:ExchangeOnPremContext.Timer.Elapsed.TotalSeconds)
+        }
+    }
+    finally {
+        try {
+            if ($null -ne $script:ExchangeOnPremContext) { Stop-SmartM365ExchangeOnPremSession -State $script:ExchangeOnPremContext }
+        }
+        finally { Complete-SmartM365InventoryRun -State $smartM365RunGuard }
+    }
     if($smartM365RunGuard.ExitCode -eq 130){exit 130}
 }
 if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
@@ -3774,8 +3825,8 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDT1pUu8HXhzx89
-# g/Dsi6esQK7Tts5Fea6uMRpOGFO5nKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAczRe3oklG3Lla
+# DOxxEz/D82MJAAORTqdtbSv9ADDI36CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -3908,31 +3959,31 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEILUK+K9nNSzB+Ny9i24B3WeTrzIaSP06YTnxPkXD2wkGMA0GCSqG
-# SIb3DQEBAQUABIIBgKm35AF8OXgu142yaxZxaqlUl5jlhudQKfeMhFgM05p2Gods
-# 8i+qQDOBgncRnmz7nOpPTYzdMt76ymtrmDSGDMkrhNs8OqsG6uo4iGcfrvkCgXk8
-# IjBqhxobQmcOIo0FJkGXnNrY80ZkwrIxsoACyE///pKnXZpqFitGbdWy8DuWvJF2
-# aRPsx8UxgI1H+wKt5Zk8SKpPDm1F0W/tTcznUOeTRIMRS1F1Mc5/2bgJA6DeQ/dM
-# pcIPI5gQ4cwhV1UdsJ0yudMHaVsG38F/wihWn/+/23BjzIBPJDvh7O2fIsDU6SwV
-# 8+4zTXZ3KPfPUUcOnWgnhFyVDm1xGSAh50mmIfZP9sDyslr41+xdvFwnDrE/IZAa
-# fsJqVuPRGm0/siOFkIcfzgFardqd6nT+SL8GfiS5cW2y43AO36ylzzbCZprPLpks
-# r6iQA7PrS95RoE9un0GkMv1RKW/0hYe7oCYgJfAfn+cfIRBqeqT65bxdvrMHELrM
-# TDsms5F8xasWolIEp6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIDJjokRhpW6E3UwqXD0TtHXt3ZGRJJv7hnLR4N5ddQlEMA0GCSqG
+# SIb3DQEBAQUABIIBgBpUrJKEwAx6uhgeyBh1NBCqGao2BgOtyfaXQko1HVtNr/+w
+# fbsf2zaKGpdjWnvNt+jqIictHIQkLFoXHimVgVn1iSiU+lgVfR+gYwH/cTAKEC9C
+# R/+kuc7nx6/M2t1XZGIG5wNmiZc6GeWIw2UgCcNNiW3hMIzMDNIM4ppv5dhjL1v/
+# bd4cgvctqrtqDyfg9tAPGjQoyMh+zozFr8/nRmaXbTz79mfA7wt102JlUy5Dn2tQ
+# p4uTcCk0wbLOCk1r7qGft+ofTF8bO56ZrSLMfG4H+6SQUtib12wMMQAje/VJDvok
+# kr9i4/GJ/0IWDF9QdJPiytKLUIVkIhhyQdxg0PvuBVlh4SyBKUN/lVfaFJB4R6OH
+# OOLW03dOp+6BZluoTiG0KkSP9zFL6pgK6NITfUJ0nOp4Z2ekHcBS5LPf1IMZTlcT
+# /qYS4tNCRNJRcorpbKaZSlJkMQ+GP/wlx1hAxiq6O2IWww2BRn/vFr3OVF2RDdGW
+# 8BIHO4lshzHPMwJxLqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjMwMjE5
-# MDVaMC8GCSqGSIb3DQEJBDEiBCDoFqG/IrIrI4WBmnPM3ybtBpK25M5FvDDg6h3Z
-# XW/t/TANBgkqhkiG9w0BAQEFAASCAgAjHXQBaOMu3h9IPpTs8A+ZBlOHoiBERsTR
-# kIWweqifIXpa3hgzIQeP0yhpY+IeoyCg5z8GiE0zkQAnX8juPUwafS/7wqW0C6NZ
-# yD9MhgFRVBuGkvvJ/9c83W4RQXGnpChsO/y/2oP2/8sJZz27daMRArFInGAZwPVt
-# jGf+DFpX6qTtn8Z7QqmWkJ68IROqpNX5dUR3pbqr5//p7uxjgEP8t4CASBuxRjjA
-# PWUuTUQycM7UmG/sJz1gr8fSE4nLHspD28y+On8jdcbcWTt+dpj38whAxoU6cIxS
-# LQ0P0Nvr6IDzq4O69uiQmO2gx1UASEEcKa03S01BTwthpqYQRUUonz7IpMkaLkND
-# NcBDtJ6CZZvip4VtYIijyjSkSQADs2kBCE+z0UYBUn77UEfKBxle9weQvDDgceCn
-# UF2uT5u8OkR4AJZSpjxTmaGscgNhY3kQpgfKBxpglsVtYB4VUzMVMm7fxVXpBVRM
-# XX2EyQPpuS1oz+DlotiDgyf0JgRZ96x4kzZKxy6FeYJmda6eqg++ve6I8IMc0znP
-# l8eF1Buadwyu4rRZO/mZNdskY5CYOBgVn5OjMdgsQzbk6RmPZ/e3dx5mBoSgRITc
-# c2BRhjFzO4LH3vq30YP8AAE8j1mwLnQXmAxnezz03JXa4BDxySE+bBG4mBnxq+vg
-# qjY6CoiVoA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjMxMTQ3
+# MDBaMC8GCSqGSIb3DQEJBDEiBCAlL8A8NA4/qPb5alHb2l5jPqYWiyKGMfHIKys0
+# Xc04bDANBgkqhkiG9w0BAQEFAASCAgAipTEJ1pgIEHhekbub4Z9VdISSj2WBnoQ/
+# bv4CAehlkdJhapa3n4oNh1CrNcHIURM4v8gegYJlx4i49rx7ypMDJKchlbWHTfBE
+# ltTqNeEQyK/VL0Zq9X1+LrX4NkyXHBDYu7i0c7996soXB9+3sT1X3/Z038u7wTP5
+# JAcx4oBmt51PKnLuOwsGfbZQoj9vxky8DJM6bpVpVooyAe7NY/IyiRSPAK4BL1ky
+# VCR4mcBF+fz+aMHWKJErkBkiUh5e+yZhZdYRBa48UDJEQvwJJqUUvnxeC3YzjS8O
+# mhTi6Z0gJLkdoSTPBZfOIQxafSlZW2JIs3ZXOc5FTqFEk+fiaB4rAT5PyHZMDTNU
+# SEXeN5sIiPVt3MwF+9P8GyKsfHYaKhbaa1fHJYkB0pYhP20DMi3lXvzaLZJtL1DC
+# RMQMdawkJ/qwVRLM9Mn7HS9hMcuESxuLGl9k/mwirR2/AXMWRa+vUEb4PuaRo0CW
+# Ku+kTjzZxEKp/wQN1vRmEEMy4g0V4ABMP6sb+7/kzEvO23xc0h1kSOH79tSp7V2g
+# aXH7r9djlFOwGWe7BoHBbe9PrJwkUTTicoz1JdWn1Aodv+74CjPPdv9iPjzciyst
+# 5QMUj4UR9k0IxRb6/z19TONpcozgoBcwgvHwVVQlIBVk31GLT2se31kSL7PU+OxR
+# K4DKA5sHLA==
 # SIG # End signature block
