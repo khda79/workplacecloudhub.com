@@ -43,6 +43,96 @@ SmartM365-*-Diagnostic.ps1
 - `SetupDiag-Upgrade/Upgrade-Diagnostics/`: consolidates SetupDiag-required and upgrade-blocking issue scenarios.
 - `Standalone/WindowsUpdateLog/`, `Standalone/Repair-DISM/`, `Standalone/Upgrade-Actions/`, `Standalone/Network-Diagnostics/`, `Standalone/WindowsPolicy/`, and `Standalone/Device-Recovery/`: keep one-off actions and manual diagnostics outside recurring remediations.
 
+## Additional Endpoint Packages
+
+Each scenario below contains a standalone detection/remediation pair. Run as
+SYSTEM in **64-bit Windows PowerShell 5.1**. No SmartM365 module, tenant profile,
+download or companion configuration is required. The Device Reboot Manager
+variant intentionally integrates with a separately installed application.
+
+| Folder / package | Default detection | Default remediation |
+| --- | --- | --- |
+| `Security-LAPS/Windows-LAPS-Health` | Windows LAPS backup policy enabled, latest local processing failed or last success older than 24 hours | Invoke LAPS policy processing; wait up to 30 seconds for a new success/failure event |
+| `System-Time/Windows-Time-Sync` | Time service stopped or three measurements against the current source exceed 120 seconds | Start the enabled service if needed, request resynchronization and measure again |
+| `Security-Defender/Defender-Signature-Freshness` | Defender in Normal mode with signatures older than 48 hours | Update from configured sources, then verify freshness |
+| `Certificates/Network-Certificate-Expiry` | Machine personal-store client-authentication certificates with a private key expire within 14 days | Notify interactive sessions; no certificate removal |
+| `BITS/BITS-Stale-Jobs` | Current execution account has Error/TransientError jobs unchanged for 24 hours | Retry those jobs asynchronously and inspect their new state |
+| `Printing/Print-Spooler-Health` | Enabled spooler stopped or Error/Blocked print jobs older than two hours | Restart/start the service, then verify; retain jobs by default |
+| `Reboot/Pending-Reboot-Age` | CBS or Windows Update pending-reboot signals observed for at least 72 hours | Display a 120-second session message; never restart automatically |
+| `Reboot/Pending-Reboot-Age-DeviceRebootManager` | Same observation rule as the standard variant | Start the installed, signed Device Reboot Manager limited interactive task |
+
+`Deferred` means applicability or action could not be established, **not** healthy.
+Detection returns `1` only for actionable findings and `2` for technical errors;
+`0` also covers not-applicable, observation and deferred states. Read the status
+and reason in Intune output rather than equating every zero with verified health.
+Remediation returns `1` for unresolved/technical failures. A requested asynchronous
+action, notification or task start is distinguished from a verified repair.
+
+### Operational boundaries
+
+- LAPS reads policy and event IDs only; it never retrieves passwords or requests
+  forced rotation. Event 10004 confirms local policy processing, not independent
+  verification of password escrow in AD/Entra. CSP policy takes precedence over GPO.
+- Time synchronization preserves configured peers and startup settings. Disabled
+  service or unmeasurable/unreachable source is deferred. Native output localization
+  is not used to choose a replacement NTP server.
+- Defender passive modes and intentionally disabled protection are not overridden.
+  A failed update or stale post-check is not reported as success.
+- Certificate inspection covers **machine client-authentication certificates**;
+  it does not prove which one a particular Wi-Fi/VPN profile uses. No certificate
+  subjects, private keys or thumbprints are exported. Optional
+  `-RequestAutoEnrollment` runs `certutil -pulse` only for domain members with
+  auto-enrollment enabled. It requests policy processing; it does not claim renewal
+  or implement Intune SCEP/PKCS renewal. Default behavior is notification.
+- BITS examines only the current account (SYSTEM when deployed as recommended),
+  without enumerating other users. Suspended, active and recent jobs are excluded.
+  Cancellation is available only with an explicit `-CancelJobIds` GUID allowlist;
+  ordinary scheduled remediation retries without deleting jobs.
+- Print purge requires manual `-AllowPurge`; it rechecks each matching job ID and
+  printer before removal. It never deletes the spool directory or all queue jobs.
+  Disabled spoolers stay disabled. Printer/document/user names are not logged.
+
+### Pending-reboot observation and Device Reboot Manager
+
+Deploy **one** reboot variant per device. Both variants recheck the pending signals
+before acting, record `FirstObservedUtc` alongside the boot time and reset the
+observation when the signals clear, a different boot is observed, or no previous
+reason remains. Age is a lower bound from sampled observations, not the original
+Windows request time and not device uptime. The first run starts observation even
+on a device that has been up for weeks. File-rename queues alone are excluded.
+
+Observations live under
+`%ProgramData%\SmartM365\IntuneRemediation\Output\<package>\observation.json`.
+Corrupt or future-dated state produces an error, never an immediate reminder.
+The default reminder cooldown is 24 hours; reminders do not clear the finding.
+No interactive recipient means notification is deferred.
+
+The Smart variant requires the standard deployment's task
+`\SmartM365\Device Reboot Manager`, a valid signature on the installed GUI and
+the expected PowerShell action. It rejects elevated or modified task actions.
+It does not install the app, create a task, change the app configuration, or launch
+a GUI in SYSTEM session 0. The app keeps its own uptime thresholds, cooldown,
+postpone and restart policy: a task start does **not** guarantee a visible window
+if those conditions are not met. Match the app policy to the intended reminder
+cadence before rollout. The standard variant remains a notification-only option.
+
+Both reminder variants emit `RebootVerified=False`; only a subsequent observation
+can confirm that pending reboot signals cleared.
+
+### Offline validation and sources
+
+Run `SmartM365/Tests/Test-SmartM365IntuneAdditionalPackagesOffline.ps1` under
+Windows PowerShell 5.1 and PowerShell 7. Tests execute the standalone sources with
+synthetic OS interfaces and block unmocked operational commands. Their evidence
+does not qualify real tenant, endpoint, printer or interactive-session behavior.
+
+API references: [Windows LAPS processing](https://learn.microsoft.com/en-us/powershell/module/laps/invoke-lapspolicyprocessing),
+[Windows Time tools](https://learn.microsoft.com/en-us/windows-server/networking/windows-time-service/windows-time-service-tools-and-settings),
+[Defender signature updates](https://learn.microsoft.com/en-us/powershell/module/defender/update-mpsignature),
+[BITS asynchronous retry](https://learn.microsoft.com/en-us/powershell/module/bitstransfer/resume-bitstransfer),
+[targeted print-job removal](https://learn.microsoft.com/en-us/powershell/module/printmanagement/remove-printjob),
+[session messages](https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/msg).
+
 ## Validation Before Publishing
 
 `WindowsHello/Reset-WindowsHello` reports unavailable AD connectivity as `Deferred`
