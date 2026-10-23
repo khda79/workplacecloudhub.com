@@ -3,9 +3,9 @@
   "name": "b1ac840017ddab061ad9",
   "position": {
     "x": 32,
-    "y": 336,
+    "y": 616,
     "z": 110,
-    "height": 656,
+    "height": 376,
     "width": 1856,
     "tabOrder": 672
   },
@@ -255,7 +255,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "12D"
+                  "Value": "11D"
                 }
               }
             },
@@ -277,7 +277,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Geography · selected evidence'"
+                  "Value": "'Geography \u00b7 selected evidence'"
                 }
               }
             }
@@ -297,7 +297,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Endpoint experience by country · observed scores and coverage'"
+                  "Value": "'Endpoint experience by country \u00b7 observed scores and coverage'"
                 }
               }
             },

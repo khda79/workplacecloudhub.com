@@ -42,6 +42,21 @@
               },
               "queryRef": "Mailbox Evidence.Observed Exchange Online Adoption (%)",
               "nativeQueryRef": "Exchange Online Adoption"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Evidence"
+                    }
+                  },
+                  "Property": "On-premises Mailboxes"
+                }
+              },
+              "queryRef": "Mailbox Evidence.On-premises Mailboxes",
+              "nativeQueryRef": "On-prem remaining mailboxes",
+              "displayName": "On-prem remaining mailboxes"
             }
           ]
         }
@@ -61,7 +76,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "21D"
+                  "Value": "20D"
                 }
               }
             },
@@ -116,7 +131,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "10D"
+                  "Value": "11D"
                 }
               }
             },

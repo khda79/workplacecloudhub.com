@@ -61,14 +61,14 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Native selection · License SKU'"
+                  "Value": "'Native selection \u00b7 License SKU'"
                 }
               }
             },
             "textSize": {
               "expr": {
                 "Literal": {
-                  "Value": "10D"
+                  "Value": "11D"
                 }
               }
             },
@@ -96,6 +96,22 @@
                 }
               }
             }
+          }
+        }
+      ],
+      "items": [
+        {
+          "properties": {
+            "textSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
+            }
+          },
+          "selector": {
+            "id": "default"
           }
         }
       ]

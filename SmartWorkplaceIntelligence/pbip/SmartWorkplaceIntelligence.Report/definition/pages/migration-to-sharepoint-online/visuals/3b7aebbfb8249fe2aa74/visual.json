@@ -1,18 +1,17 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "3b7aebbfb8249fe2aa74",
   "position": {
     "x": 0,
     "y": 0,
+    "z": 0,
+    "height": 1280,
     "width": 1920,
-    "height": 1080,
-    "z": 1,
     "tabOrder": 1
   },
   "visualGroup": {
     "displayName": "Deadlines",
     "groupMode": "ScaleMode"
   },
-  "isHidden": false,
   "parentGroupName": "b2deaadb9550a5b30275"
 }

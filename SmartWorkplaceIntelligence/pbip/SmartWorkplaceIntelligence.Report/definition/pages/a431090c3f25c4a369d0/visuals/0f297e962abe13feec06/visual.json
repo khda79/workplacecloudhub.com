@@ -3,9 +3,9 @@
   "name": "0f297e962abe13feec06",
   "position": {
     "x": 32,
-    "y": 536,
+    "y": 584,
     "width": 1856,
-    "height": 288,
+    "height": 264,
     "z": 12000,
     "tabOrder": 544
   },
@@ -28,6 +28,66 @@
               },
               "queryRef": "Native Device Evidence.DeviceSelection",
               "nativeQueryRef": "DeviceSelection"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Device Evidence"
+                    }
+                  },
+                  "Property": "CreationRaw"
+                }
+              },
+              "queryRef": "Native Device Evidence.CreationRaw",
+              "nativeQueryRef": "Entra Created (source)",
+              "displayName": "Entra Created (source)"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Device Evidence"
+                    }
+                  },
+                  "Property": "CreationStatus"
+                }
+              },
+              "queryRef": "Native Device Evidence.CreationStatus",
+              "nativeQueryRef": "Entra Creation Qualification",
+              "displayName": "Entra Creation Qualification"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Device Evidence"
+                    }
+                  },
+                  "Property": "ModificationRaw"
+                }
+              },
+              "queryRef": "Native Device Evidence.ModificationRaw",
+              "nativeQueryRef": "Entra Modified (source)",
+              "displayName": "Entra Modified (source)"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Device Evidence"
+                    }
+                  },
+                  "Property": "ModificationStatus"
+                }
+              },
+              "queryRef": "Native Device Evidence.ModificationStatus",
+              "nativeQueryRef": "Entra Modification Qualification",
+              "displayName": "Entra Modification Qualification"
             },
             {
               "field": {
@@ -532,6 +592,36 @@
               },
               "queryRef": "Native Device Evidence.TenantId",
               "nativeQueryRef": "TenantId"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Device Evidence"
+                    }
+                  },
+                  "Property": "CreationUtcDateTime"
+                }
+              },
+              "queryRef": "Native Device Evidence.CreationUtcDateTime",
+              "nativeQueryRef": "CreationUtcDateTime",
+              "displayName": "CreationUtcDateTime"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Device Evidence"
+                    }
+                  },
+                  "Property": "ModificationUtcDateTime"
+                }
+              },
+              "queryRef": "Native Device Evidence.ModificationUtcDateTime",
+              "nativeQueryRef": "ModificationUtcDateTime",
+              "displayName": "ModificationUtcDateTime"
             }
           ]
         }
@@ -544,7 +634,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "14D"
+                  "Value": "11D"
                 }
               }
             },
@@ -600,7 +690,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "14D"
+                  "Value": "11D"
                 }
               }
             },
@@ -670,6 +760,64 @@
             }
           }
         }
+      ],
+      "columnWidth": [
+        {
+          "properties": {
+            "value": {
+              "expr": {
+                "Literal": {
+                  "Value": "200D"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Native Device Evidence.CreationRaw"
+          }
+        },
+        {
+          "properties": {
+            "value": {
+              "expr": {
+                "Literal": {
+                  "Value": "280D"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Native Device Evidence.CreationStatus"
+          }
+        },
+        {
+          "properties": {
+            "value": {
+              "expr": {
+                "Literal": {
+                  "Value": "200D"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Native Device Evidence.ModificationRaw"
+          }
+        },
+        {
+          "properties": {
+            "value": {
+              "expr": {
+                "Literal": {
+                  "Value": "280D"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Native Device Evidence.ModificationStatus"
+          }
+        }
       ]
     },
     "visualContainerObjects": {
@@ -679,7 +827,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Native devices · complete governed fields'"
+                  "Value": "'Native devices \u00b7 complete governed fields'"
                 }
               }
             }
@@ -699,7 +847,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Native devices · complete governed fields'"
+                  "Value": "'Native devices \u00b7 complete governed fields'"
                 }
               }
             },
@@ -870,7 +1018,7 @@
                 "Entity": "Native Device Evidence"
               }
             },
-            "Property": "Native Context Rows · Native Device Evidence"
+            "Property": "Native Context Rows \u00b7 Native Device Evidence"
           }
         },
         "type": "Advanced",
@@ -895,7 +1043,7 @@
                           "Source": "c"
                         }
                       },
-                      "Property": "Native Context Rows · Native Device Evidence"
+                      "Property": "Native Context Rows \u00b7 Native Device Evidence"
                     }
                   },
                   "Right": {

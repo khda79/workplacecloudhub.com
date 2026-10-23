@@ -3,9 +3,9 @@
   "name": "3ae4cf4e15446e0936ae",
   "position": {
     "x": 32,
-    "y": 536,
+    "y": 566.8,
     "width": 1856,
-    "height": 456,
+    "height": 427.2,
     "z": 12000,
     "tabOrder": 544
   },
@@ -222,7 +222,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "14D"
+                  "Value": "11D"
                 }
               }
             },
@@ -278,7 +278,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "14D"
+                  "Value": "11D"
                 }
               }
             },
@@ -357,7 +357,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Entra members · complete governed fields'"
+                  "Value": "'Entra members \u00b7 complete governed fields'"
                 }
               }
             }
@@ -377,7 +377,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Entra members · complete governed fields'"
+                  "Value": "'Entra members \u00b7 complete governed fields'"
                 }
               }
             },
@@ -548,7 +548,7 @@
                 "Entity": "Entra Membership Evidence"
               }
             },
-            "Property": "Native Context Rows · Entra Membership Evidence"
+            "Property": "Native Context Rows \u00b7 Entra Membership Evidence"
           }
         },
         "type": "Advanced",
@@ -573,7 +573,7 @@
                           "Source": "c"
                         }
                       },
-                      "Property": "Native Context Rows · Entra Membership Evidence"
+                      "Property": "Native Context Rows \u00b7 Entra Membership Evidence"
                     }
                   },
                   "Right": {

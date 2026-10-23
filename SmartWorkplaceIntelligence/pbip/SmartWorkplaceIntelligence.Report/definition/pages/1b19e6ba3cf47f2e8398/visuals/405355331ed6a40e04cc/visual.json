@@ -3,9 +3,9 @@
   "name": "405355331ed6a40e04cc",
   "position": {
     "x": 32,
-    "y": 488,
+    "y": 433.9,
     "width": 1856,
-    "height": 336,
+    "height": 314.8,
     "z": 12000,
     "tabOrder": 544
   },
@@ -236,7 +236,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "14D"
+                  "Value": "11D"
                 }
               }
             },
@@ -292,7 +292,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "14D"
+                  "Value": "11D"
                 }
               }
             },
@@ -371,7 +371,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Hybrid Coverage · complete governed fields'"
+                  "Value": "'Hybrid Coverage \u00b7 complete governed fields'"
                 }
               }
             }
@@ -391,7 +391,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Hybrid Coverage · complete governed fields'"
+                  "Value": "'Hybrid Coverage \u00b7 complete governed fields'"
                 }
               }
             },
@@ -562,7 +562,7 @@
                 "Entity": "Native Hybrid Coverage"
               }
             },
-            "Property": "Native Context Rows · Native Hybrid Coverage"
+            "Property": "Native Context Rows \u00b7 Native Hybrid Coverage"
           }
         },
         "type": "Advanced",
@@ -587,7 +587,7 @@
                           "Source": "c"
                         }
                       },
-                      "Property": "Native Context Rows · Native Hybrid Coverage"
+                      "Property": "Native Context Rows \u00b7 Native Hybrid Coverage"
                     }
                   },
                   "Right": {

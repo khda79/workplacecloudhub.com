@@ -1,12 +1,12 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "c6ea7313255bac2ccd92",
   "position": {
-    "x": 32,
-    "y": 24,
-    "width": 880,
-    "height": 42,
-    "z": 10,
+    "x": 96,
+    "y": 16,
+    "z": 5000,
+    "height": 48,
+    "width": 1080,
     "tabOrder": 10
   },
   "visual": {
@@ -21,12 +21,14 @@
                   {
                     "value": "Migration to SharePoint Online",
                     "textStyle": {
-                      "fontFamily": "Segoe UI",
-                      "fontSize": "24pt",
-                      "color": "#183153"
+                      "fontFamily": "Segoe UI Semibold",
+                      "fontSize": "24px",
+                      "color": "#172B4D",
+                      "fontWeight": "bold"
                     }
                   }
-                ]
+                ],
+                "horizontalTextAlignment": "left"
               }
             ]
           }
@@ -101,6 +103,32 @@
               "expr": {
                 "Literal": {
                   "Value": "'Migration to SharePoint Online'"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "border": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "visualHeader": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
                 }
               }
             }

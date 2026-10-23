@@ -5,7 +5,7 @@
     "x": 1420,
     "y": 578,
     "z": 126,
-    "height": 62,
+    "height": 130,
     "width": 222,
     "tabOrder": 126
   },
@@ -93,7 +93,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "18D"
+                  "Value": "20D"
                 }
               }
             },
@@ -148,7 +148,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "8D"
+                  "Value": "11D"
                 }
               }
             },

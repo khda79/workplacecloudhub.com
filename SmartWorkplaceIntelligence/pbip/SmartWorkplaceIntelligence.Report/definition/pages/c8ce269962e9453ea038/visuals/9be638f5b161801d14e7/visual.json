@@ -3,7 +3,7 @@
   "name": "9be638f5b161801d14e7",
   "position": {
     "x": 32,
-    "y": 392,
+    "y": 432,
     "width": 600,
     "height": 80,
     "z": 12000,
@@ -61,14 +61,14 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Native selection · AD Intune Coverage'"
+                  "Value": "'Native selection \u00b7 AD Intune Coverage'"
                 }
               }
             },
             "textSize": {
               "expr": {
                 "Literal": {
-                  "Value": "10D"
+                  "Value": "11D"
                 }
               }
             },
@@ -82,6 +82,13 @@
                   }
                 }
               }
+            },
+            "fontFamily": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Segoe UI'"
+                }
+              }
             }
           }
         }
@@ -93,6 +100,26 @@
               "expr": {
                 "Literal": {
                   "Value": "true"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "items": [
+        {
+          "properties": {
+            "textSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
+            },
+            "fontFamily": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Segoe UI'"
                 }
               }
             }

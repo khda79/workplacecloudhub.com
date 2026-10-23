@@ -4,7 +4,7 @@
   "position": {
     "x": 96,
     "y": 16,
-    "width": 1000,
+    "width": 1080,
     "height": 64,
     "z": 100,
     "tabOrder": 49
@@ -19,10 +19,10 @@
               {
                 "textRuns": [
                   {
-                    "value": "Which security controls have evidence-backed gaps?",
+                    "value": "Security Posture",
                     "textStyle": {
                       "fontFamily": "Segoe UI",
-                      "fontSize": "20pt",
+                      "fontSize": "24px",
                       "color": "#183153"
                     }
                   }

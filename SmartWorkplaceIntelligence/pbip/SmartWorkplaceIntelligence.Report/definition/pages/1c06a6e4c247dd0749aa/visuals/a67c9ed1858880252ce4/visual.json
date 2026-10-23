@@ -3,9 +3,9 @@
   "name": "a67c9ed1858880252ce4",
   "position": {
     "x": 32,
-    "y": 312,
+    "y": 269.0,
     "width": 1856,
-    "height": 24,
+    "height": 22,
     "z": 12000,
     "tabOrder": 145
   },
@@ -19,7 +19,7 @@
               {
                 "textRuns": [
                   {
-                    "value": "Selected view: Native · Verified Domain",
+                    "value": "Selected view: Native \u00b7 Verified Domain",
                     "textStyle": {
                       "fontFamily": "Segoe UI",
                       "fontSize": "14px",

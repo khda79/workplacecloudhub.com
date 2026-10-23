@@ -3,7 +3,7 @@
   "name": "54f0a4203b2b90d4d5ba",
   "position": {
     "x": 32,
-    "y": 440,
+    "y": 480,
     "width": 1856,
     "height": 80,
     "z": 12000,
@@ -61,14 +61,14 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Native selection · User-device links'"
+                  "Value": "'Native selection \u00b7 User-device links'"
                 }
               }
             },
             "textSize": {
               "expr": {
                 "Literal": {
-                  "Value": "10D"
+                  "Value": "11D"
                 }
               }
             },
@@ -96,6 +96,22 @@
                 }
               }
             }
+          }
+        }
+      ],
+      "items": [
+        {
+          "properties": {
+            "textSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
+            }
+          },
+          "selector": {
+            "id": "default"
           }
         }
       ]

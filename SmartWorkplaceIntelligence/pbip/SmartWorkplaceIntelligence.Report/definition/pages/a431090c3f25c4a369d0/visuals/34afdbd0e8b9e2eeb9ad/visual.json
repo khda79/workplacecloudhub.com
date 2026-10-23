@@ -3,7 +3,7 @@
   "name": "34afdbd0e8b9e2eeb9ad",
   "position": {
     "x": 32,
-    "y": 312,
+    "y": 360,
     "width": 1856,
     "height": 24,
     "z": 12000,
@@ -19,7 +19,7 @@
               {
                 "textRuns": [
                   {
-                    "value": "Selected view: Native · Autopilot",
+                    "value": "Selected view: Native \u00b7 Autopilot",
                     "textStyle": {
                       "fontFamily": "Segoe UI",
                       "fontSize": "14px",

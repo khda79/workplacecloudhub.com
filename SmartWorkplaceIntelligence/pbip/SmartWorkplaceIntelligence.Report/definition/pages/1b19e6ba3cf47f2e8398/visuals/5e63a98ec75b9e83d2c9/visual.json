@@ -3,7 +3,7 @@
   "name": "5e63a98ec75b9e83d2c9",
   "position": {
     "x": 32,
-    "y": 392,
+    "y": 344,
     "width": 600,
     "height": 80,
     "z": 12000,
@@ -61,14 +61,14 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Native selection · Mailbox Hosting'"
+                  "Value": "'Native selection \u00b7 Mailbox Hosting'"
                 }
               }
             },
             "textSize": {
               "expr": {
                 "Literal": {
-                  "Value": "10D"
+                  "Value": "11D"
                 }
               }
             },
@@ -93,6 +93,19 @@
               "expr": {
                 "Literal": {
                   "Value": "true"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "items": [
+        {
+          "properties": {
+            "textSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
                 }
               }
             }

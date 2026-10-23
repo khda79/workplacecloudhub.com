@@ -3,9 +3,9 @@
   "name": "97237f763e831ad410ab",
   "position": {
     "x": 972,
-    "y": 512,
+    "y": 565.9,
     "width": 916,
-    "height": 208,
+    "height": 142,
     "z": 106,
     "tabOrder": 682
   },
@@ -48,7 +48,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "28D"
+                  "Value": "20D"
                 }
               }
             },
@@ -103,7 +103,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "14D"
+                  "Value": "11D"
                 }
               }
             },
@@ -400,7 +400,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Microsoft Defender AV · reported checks only'"
+                  "Value": "'Microsoft Defender AV \u00b7 reported checks only'"
                 }
               }
             },

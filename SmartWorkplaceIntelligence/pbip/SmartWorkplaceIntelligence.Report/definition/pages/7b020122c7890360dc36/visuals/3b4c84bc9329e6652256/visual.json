@@ -2,12 +2,12 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.13.0/schema.json",
   "name": "3b4c84bc9329e6652256",
   "position": {
-    "x": 1448,
-    "y": 24,
-    "z": 104,
+    "x": 1552,
+    "y": 8,
+    "width": 336,
     "height": 80,
-    "width": 200,
-    "tabOrder": 64
+    "z": 25000,
+    "tabOrder": 11
   },
   "visual": {
     "visualType": "slicer",
@@ -20,15 +20,14 @@
                 "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Windows Migration Evidence"
+                      "Entity": "Daily Domain"
                     }
                   },
-                  "Property": "AD Domain"
+                  "Property": "Domain"
                 }
               },
-              "queryRef": "Windows Migration Evidence.AD Domain",
+              "queryRef": "Daily Domain.Domain",
               "nativeQueryRef": "AD Domain",
-              "active": true,
               "displayName": "AD Domain"
             }
           ]
@@ -62,14 +61,14 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'AD domain'"
+                  "Value": "'AD Domain'"
                 }
               }
             },
             "textSize": {
               "expr": {
                 "Literal": {
-                  "Value": "11D"
+                  "Value": "10D"
                 }
               }
             },
@@ -78,22 +77,9 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#183153'"
+                      "Value": "'#1F2937'"
                     }
                   }
-                }
-              }
-            }
-          }
-        }
-      ],
-      "general": [
-        {
-          "properties": {
-            "selfFilterEnabled": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
                 }
               }
             }
@@ -102,6 +88,19 @@
       ]
     },
     "visualContainerObjects": {
+      "general": [
+        {
+          "properties": {
+            "altText": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Filter workforce and devices by country.'"
+                }
+              }
+            }
+          }
+        }
+      ],
       "title": [
         {
           "properties": {
@@ -109,31 +108,6 @@
               "expr": {
                 "Literal": {
                   "Value": "false"
-                }
-              }
-            },
-            "text": {
-              "expr": {
-                "Literal": {
-                  "Value": "''"
-                }
-              }
-            },
-            "fontSize": {
-              "expr": {
-                "Literal": {
-                  "Value": "12D"
-                }
-              }
-            },
-            "fontColor": {
-              "solid": {
-                "color": {
-                  "expr": {
-                    "Literal": {
-                      "Value": "'#183153'"
-                    }
-                  }
                 }
               }
             }
@@ -186,16 +160,9 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#CCDCEC'"
+                      "Value": "'#CBD8E5'"
                     }
                   }
-                }
-              }
-            },
-            "radius": {
-              "expr": {
-                "Literal": {
-                  "Value": "8D"
                 }
               }
             },
@@ -203,6 +170,13 @@
               "expr": {
                 "Literal": {
                   "Value": "1D"
+                }
+              }
+            },
+            "radius": {
+              "expr": {
+                "Literal": {
+                  "Value": "12D"
                 }
               }
             }
@@ -242,51 +216,25 @@
             "left": {
               "expr": {
                 "Literal": {
-                  "Value": "8D"
+                  "Value": "10D"
                 }
               }
             },
             "right": {
               "expr": {
                 "Literal": {
-                  "Value": "8D"
-                }
-              }
-            }
-          }
-        }
-      ],
-      "general": [
-        {
-          "properties": {
-            "altText": {
-              "expr": {
-                "Literal": {
-                  "Value": "'Evidence and active scope'"
+                  "Value": "10D"
                 }
               }
             }
           }
         }
       ]
+    },
+    "syncGroup": {
+      "groupName": "SharedADDomain",
+      "fieldChanges": true,
+      "filterChanges": true
     }
-  },
-  "filterConfig": {
-    "filters": [
-      {
-        "name": "5d1811460a7ddaa8885e",
-        "field": {
-          "Column": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "Windows Migration Evidence"
-              }
-            },
-            "Property": "AD Domain"
-          }
-        },
-        "type": "Categorical"
-      }
-    ]
   }
 }

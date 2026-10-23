@@ -3,9 +3,9 @@
   "name": "25238872f957ed9b3143",
   "position": {
     "x": 32,
-    "y": 536,
+    "y": 566.8,
     "width": 1856,
-    "height": 256,
+    "height": 239.8,
     "z": 13000,
     "tabOrder": 13000
   },
@@ -124,7 +124,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "14D"
+                  "Value": "11D"
                 }
               }
             },
@@ -180,7 +180,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "14D"
+                  "Value": "11D"
                 }
               }
             },
@@ -259,7 +259,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Acquisition proof · receipt rows are not prepared-table totals'"
+                  "Value": "'Acquisition proof \u00b7 receipt rows are not prepared-table totals'"
                 }
               }
             }
@@ -279,7 +279,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Acquisition proof · receipt rows are not prepared-table totals'"
+                  "Value": "'Acquisition proof \u00b7 receipt rows are not prepared-table totals'"
                 }
               }
             },

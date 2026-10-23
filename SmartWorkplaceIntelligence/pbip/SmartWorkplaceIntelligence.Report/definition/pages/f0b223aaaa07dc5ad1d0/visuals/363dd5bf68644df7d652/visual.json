@@ -1,12 +1,12 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "363dd5bf68644df7d652",
   "position": {
     "x": 96,
     "y": 64,
     "z": 101,
-    "width": 1024,
     "height": 32,
+    "width": 1080,
     "tabOrder": 101
   },
   "visual": {
@@ -19,15 +19,14 @@
               {
                 "textRuns": [
                   {
-                    "value": "Executive cockpit · BETA 1.0.0-beta.1 · private source-backed executive evidence · observed histories where available",
+                    "value": "Workforce, devices, licensing and service health | Observed evidence and trends",
                     "textStyle": {
                       "fontFamily": "Segoe UI",
-                      "fontSize": "13px",
-                      "color": "#52606D"
+                      "fontSize": "14px",
+                      "color": "#52606d"
                     }
                   }
-                ],
-                "horizontalTextAlignment": "left"
+                ]
               }
             ]
           }

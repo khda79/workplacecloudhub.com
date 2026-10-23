@@ -3,9 +3,9 @@
   "name": "94d53fd53d19324f3396",
   "position": {
     "x": 976,
-    "y": 512,
+    "y": 544.3,
     "width": 912,
-    "height": 212,
+    "height": 198.6,
     "z": 11000,
     "tabOrder": 1488
   },
@@ -116,7 +116,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "14D"
+                  "Value": "11D"
                 }
               }
             },
@@ -172,7 +172,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "14D"
+                  "Value": "11D"
                 }
               }
             },
@@ -267,7 +267,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Geography · selected evidence'"
+                  "Value": "'Geography \u00b7 selected evidence'"
                 }
               }
             }
@@ -287,7 +287,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Collected assignments · tenant scope'"
+                  "Value": "'Collected assignments \u00b7 tenant scope'"
                 }
               }
             },

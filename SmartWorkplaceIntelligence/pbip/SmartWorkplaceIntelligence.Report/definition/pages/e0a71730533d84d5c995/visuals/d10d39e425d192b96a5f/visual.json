@@ -3,9 +3,9 @@
   "name": "d10d39e425d192b96a5f",
   "position": {
     "x": 32,
-    "y": 608,
+    "y": 673.3,
     "width": 1208,
-    "height": 280,
+    "height": 214.7,
     "z": 23,
     "tabOrder": 1216
   },
@@ -291,6 +291,13 @@
                   "Value": "false"
                 }
               }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
             }
           }
         }
@@ -303,7 +310,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'License family capacity · complete selected families'"
+                  "Value": "'License family capacity \u00b7 complete selected families'"
                 }
               }
             }
@@ -323,7 +330,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'License family capacity · complete selected families'"
+                  "Value": "'License family capacity \u00b7 complete selected families'"
                 }
               }
             },

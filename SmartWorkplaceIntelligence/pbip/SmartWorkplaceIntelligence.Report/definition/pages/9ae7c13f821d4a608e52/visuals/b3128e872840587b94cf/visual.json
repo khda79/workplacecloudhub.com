@@ -3,9 +3,9 @@
   "name": "b3128e872840587b94cf",
   "position": {
     "x": 32,
-    "y": 687,
+    "y": 632,
     "width": 1856,
-    "height": 305,
+    "height": 360,
     "z": 180,
     "tabOrder": 1317
   },
@@ -46,8 +46,8 @@
                 }
               },
               "queryRef": "User Inventory Evidence.M365 Assignments Without Observed Use (30D)",
-              "nativeQueryRef": "No use · review",
-              "displayName": "No use · review"
+              "nativeQueryRef": "No use \u00b7 review",
+              "displayName": "No use \u00b7 review"
             },
             {
               "field": {
@@ -208,7 +208,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "10D"
+                  "Value": "11D"
                 }
               }
             }
@@ -237,6 +237,13 @@
                       "Value": "'#F3F7FA'"
                     }
                   }
+                }
+              }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
                 }
               }
             }
@@ -287,6 +294,13 @@
                       "Value": "'#1F2937'"
                     }
                   }
+                }
+              }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
                 }
               }
             }

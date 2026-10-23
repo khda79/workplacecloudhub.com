@@ -3,9 +3,9 @@
   "name": "5c6d28a3ef982c69ab2d",
   "position": {
     "x": 32,
-    "y": 772,
+    "y": 787.9,
     "width": 1856,
-    "height": 184,
+    "height": 172.4,
     "z": 11000,
     "tabOrder": 804
   },
@@ -131,7 +131,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "14D"
+                  "Value": "11D"
                 }
               }
             },
@@ -187,7 +187,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "14D"
+                  "Value": "11D"
                 }
               }
             },
@@ -282,7 +282,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Geography · selected evidence'"
+                  "Value": "'Geography \u00b7 selected evidence'"
                 }
               }
             }
@@ -302,7 +302,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Collected assignments · includes exclusions, not effective required-install targeting'"
+                  "Value": "'Collected assignments \u00b7 includes exclusions, not effective required-install targeting'"
                 }
               }
             },

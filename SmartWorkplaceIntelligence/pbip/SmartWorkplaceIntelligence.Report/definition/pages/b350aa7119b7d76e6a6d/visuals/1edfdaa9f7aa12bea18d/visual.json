@@ -124,7 +124,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "14D"
+                  "Value": "11D"
                 }
               }
             },
@@ -180,7 +180,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "14D"
+                  "Value": "11D"
                 }
               }
             },
@@ -259,7 +259,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Observed sites · link coverage is not usage or adoption'"
+                  "Value": "'Observed sites \u00b7 link coverage is not usage or adoption'"
                 }
               }
             }
@@ -279,7 +279,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Observed sites · link coverage is not usage or adoption'"
+                  "Value": "'Observed sites \u00b7 link coverage is not usage or adoption'"
                 }
               }
             },

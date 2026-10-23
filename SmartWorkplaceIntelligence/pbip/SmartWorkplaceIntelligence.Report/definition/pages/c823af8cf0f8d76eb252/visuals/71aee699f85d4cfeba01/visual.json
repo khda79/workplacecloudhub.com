@@ -3,9 +3,9 @@
   "name": "71aee699f85d4cfeba01",
   "position": {
     "x": 32,
-    "y": 336,
+    "y": 408.4,
     "width": 1856,
-    "height": 656,
+    "height": 586.9,
     "z": 122,
     "tabOrder": 672
   },
@@ -183,7 +183,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "12D"
+                  "Value": "11D"
                 }
               }
             },
@@ -232,7 +232,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "12D"
+                  "Value": "11D"
                 }
               }
             },
@@ -299,6 +299,13 @@
                   "Value": "false"
                 }
               }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
             }
           }
         }
@@ -311,7 +318,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Evidence context · selected evidence'"
+                  "Value": "'Evidence context \u00b7 selected evidence'"
                 }
               }
             }
@@ -331,7 +338,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Evidence context · selected evidence'"
+                  "Value": "'Evidence context \u00b7 selected evidence'"
                 }
               }
             },

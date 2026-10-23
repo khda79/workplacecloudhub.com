@@ -2,12 +2,12 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.13.0/schema.json",
   "name": "58febcaa1ee83748504a",
   "position": {
-    "x": 1536,
+    "x": 1216,
     "y": 8,
-    "z": 102,
+    "width": 320,
     "height": 80,
-    "width": 352,
-    "tabOrder": 102
+    "z": 25000,
+    "tabOrder": 10
   },
   "visual": {
     "visualType": "slicer",
@@ -28,7 +28,7 @@
               },
               "queryRef": "Country Selection.Country",
               "nativeQueryRef": "Country",
-              "active": true
+              "displayName": "Country"
             }
           ]
         }
@@ -84,11 +84,6 @@
               }
             }
           }
-        }
-      ],
-      "general": [
-        {
-          "properties": {}
         }
       ]
     },
@@ -235,24 +230,11 @@
           }
         }
       ]
+    },
+    "syncGroup": {
+      "groupName": "SharedCountry",
+      "fieldChanges": true,
+      "filterChanges": true
     }
-  },
-  "filterConfig": {
-    "filters": [
-      {
-        "name": "Filterb81e4fee9854ae325828fe25",
-        "field": {
-          "Column": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "Country Selection"
-              }
-            },
-            "Property": "Country"
-          }
-        },
-        "type": "Categorical"
-      }
-    ]
   }
 }

@@ -338,6 +338,13 @@
                   "Value": "false"
                 }
               }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
             }
           }
         }
@@ -350,7 +357,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Recovery by suite · complete selected families'"
+                  "Value": "'Recovery by suite \u00b7 complete selected families'"
                 }
               }
             }
@@ -370,7 +377,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Recovery by suite · complete selected families'"
+                  "Value": "'Recovery by suite \u00b7 complete selected families'"
                 }
               }
             },

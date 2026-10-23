@@ -4,7 +4,7 @@
   "position": {
     "x": 96,
     "y": 76,
-    "width": 800,
+    "width": 1080,
     "height": 48,
     "z": 119,
     "tabOrder": 153
@@ -19,10 +19,10 @@
               {
                 "textRuns": [
                   {
-                    "value": "Local Exchange migration · size, archive, permissions and identity dependencies",
+                    "value": "Local Exchange migration \u00b7 size, archive, permissions and identity dependencies",
                     "textStyle": {
                       "fontFamily": "Segoe UI",
-                      "fontSize": "11pt",
+                      "fontSize": "14px",
                       "color": "#183153"
                     }
                   }

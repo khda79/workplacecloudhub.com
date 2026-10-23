@@ -4,7 +4,7 @@
   "position": {
     "x": 96,
     "y": 88,
-    "width": 1792,
+    "width": 1080,
     "height": 32,
     "z": 201,
     "tabOrder": 202
@@ -19,10 +19,10 @@
               {
                 "textRuns": [
                   {
-                    "value": "Operational Overview · private source-backed evidence · global scope · observed 90-day trends where available",
+                    "value": "Operational Overview \u00b7 private source-backed evidence \u00b7 global scope \u00b7 observed 90-day trends where available",
                     "textStyle": {
                       "fontFamily": "Segoe UI",
-                      "fontSize": "11pt",
+                      "fontSize": "14px",
                       "color": "#52606D",
                       "fontWeight": "normal"
                     }
@@ -42,7 +42,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Operational Overview · private source-backed evidence · global scope · observed 90-day trends where available'"
+                  "Value": "'Operational Overview \u00b7 private source-backed evidence \u00b7 global scope \u00b7 observed 90-day trends where available'"
                 }
               }
             }

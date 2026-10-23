@@ -3,7 +3,7 @@
   "name": "899ed7a392e7d48d3386",
   "position": {
     "x": 1412,
-    "y": 712,
+    "y": 672,
     "z": 114,
     "width": 320,
     "height": 18,
@@ -19,7 +19,7 @@
               {
                 "textRuns": [
                   {
-                    "value": "Windows 11 Adoption · observed history when available",
+                    "value": "Windows 11 Adoption \u00b7 observed history when available",
                     "textStyle": {
                       "fontFamily": "Segoe UI",
                       "fontSize": "10px",

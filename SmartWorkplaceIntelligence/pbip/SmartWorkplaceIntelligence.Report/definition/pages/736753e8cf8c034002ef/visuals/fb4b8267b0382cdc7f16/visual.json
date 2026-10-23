@@ -27,8 +27,8 @@
                 }
               },
               "queryRef": "Mailbox Migration Inventory.Large Mailboxes For Review",
-              "nativeQueryRef": "At least 45 GB · target quota review",
-              "displayName": "At least 45 GB · target quota review"
+              "nativeQueryRef": "At least 45 GB \u00b7 target quota review",
+              "displayName": "At least 45 GB \u00b7 target quota review"
             },
             {
               "field": {
@@ -63,7 +63,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "28D"
+                  "Value": "20D"
                 }
               }
             },

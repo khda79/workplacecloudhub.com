@@ -216,6 +216,13 @@
                   "Value": "false"
                 }
               }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
             }
           }
         }
@@ -228,7 +235,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Tenant-wide AD coverage · section 07 Members'"
+                  "Value": "'Tenant-wide AD coverage \u00b7 section 07 Members'"
                 }
               }
             }
@@ -248,7 +255,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Tenant-wide AD coverage · section 07 Members'"
+                  "Value": "'Tenant-wide AD coverage \u00b7 section 07 Members'"
                 }
               }
             },

@@ -3,9 +3,9 @@
   "name": "d6c36d23d5a45468b3fd",
   "position": {
     "x": 32,
-    "y": 312,
+    "y": 357.0,
     "width": 1856,
-    "height": 24,
+    "height": 22.5,
     "z": 12000,
     "tabOrder": 145
   },
@@ -19,7 +19,7 @@
               {
                 "textRuns": [
                   {
-                    "value": "Selected view: Native · AD groups",
+                    "value": "Selected view: Native \u00b7 AD groups",
                     "textStyle": {
                       "fontFamily": "Segoe UI",
                       "fontSize": "14px",

@@ -3,9 +3,9 @@
   "name": "93e855a8bca89eefc6da",
   "position": {
     "x": 32,
-    "y": 600,
+    "y": 644.6,
     "z": 130,
-    "height": 392,
+    "height": 350.7,
     "width": 1856,
     "tabOrder": 700
   },
@@ -265,7 +265,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "12D"
+                  "Value": "11D"
                 }
               }
             },
@@ -314,7 +314,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "12D"
+                  "Value": "11D"
                 }
               }
             },
@@ -381,6 +381,13 @@
                   "Value": "false"
                 }
               }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
             }
           }
         }
@@ -413,7 +420,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Device System · reported protections; observation freshness must be qualified'"
+                  "Value": "'Device System \u00b7 reported protections; observation freshness must be qualified'"
                 }
               }
             },

@@ -1,6 +1,6 @@
 {
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/bookmark/2.1.0/schema.json",
-  "displayName": "Mailbox migration",
+  "displayName": "Mailboxes",
   "name": "43c8933b8732cd98740b",
   "options": {
     "applyOnlyToTargetVisuals": true,
@@ -8,7 +8,8 @@
       "890248bf5fea920d9dfc",
       "86b338ccf32bc5b85f2f",
       "6a395e2d27c705d81a9e",
-      "03f5bee42350372600c6"
+      "03f5bee42350372600c6",
+      "b31ef1e5d0711b066c90"
     ],
     "suppressActiveSection": true,
     "suppressData": true
@@ -30,6 +31,9 @@
             "isHidden": false
           },
           "03f5bee42350372600c6": {
+            "isHidden": true
+          },
+          "b31ef1e5d0711b066c90": {
             "isHidden": true
           }
         }

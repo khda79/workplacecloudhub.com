@@ -1,5 +1,5 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "fdb15a422357d5010529",
   "position": {
     "x": 32,
@@ -11,6 +11,159 @@
   },
   "visual": {
     "visualType": "lineChart",
+    "query": {
+      "queryState": {
+        "Category": {
+          "projections": [
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Daily Axis"
+                    }
+                  },
+                  "Property": "Axis Date"
+                }
+              },
+              "queryRef": "Daily Axis.Axis Date",
+              "nativeQueryRef": "Axis Date",
+              "active": true
+            }
+          ],
+          "showAll": true
+        },
+        "Tooltips": {
+          "projections": [
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Daily Axis"
+                    }
+                  },
+                  "Property": "Axis Windows All AD Accounts Total"
+                }
+              },
+              "queryRef": "Daily Axis.Axis Windows All AD Accounts Total",
+              "nativeQueryRef": "All AD computer accounts",
+              "displayName": "All AD computer accounts"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Daily Directory Trends"
+                    }
+                  },
+                  "Property": "Windows 11 Overtakes Windows 10 All AD Accounts Day"
+                }
+              },
+              "queryRef": "Daily Directory Trends.Windows 11 Overtakes Windows 10 All AD Accounts Day",
+              "nativeQueryRef": "Windows 11 crossover",
+              "displayName": "Windows 11 crossover"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Daily Axis"
+                    }
+                  },
+                  "Property": "Axis Windows All AD Accounts Reading Day"
+                }
+              },
+              "queryRef": "Daily Axis.Axis Windows All AD Accounts Reading Day",
+              "nativeQueryRef": "Axis Windows All AD Accounts Reading Day",
+              "displayName": "Axis Windows All AD Accounts Reading Day"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Daily Axis"
+                    }
+                  },
+                  "Property": "Axis Windows All AD Accounts Quality Tooltip"
+                }
+              },
+              "queryRef": "Daily Axis.Axis Windows All AD Accounts Quality Tooltip",
+              "nativeQueryRef": "Axis Windows All AD Accounts Quality Tooltip",
+              "displayName": "Axis Windows All AD Accounts Quality Tooltip"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Daily Directory Trends"
+                    }
+                  },
+                  "Property": "All AD Computer Accounts Scope Tooltip"
+                }
+              },
+              "queryRef": "Daily Directory Trends.All AD Computer Accounts Scope Tooltip",
+              "nativeQueryRef": "Population scope"
+            }
+          ]
+        },
+        "Y": {
+          "projections": [
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Daily Axis"
+                    }
+                  },
+                  "Property": "Axis Windows 10 All AD Accounts Chart"
+                }
+              },
+              "queryRef": "Daily Axis.Axis Windows 10 All AD Accounts Chart",
+              "nativeQueryRef": "Windows 10 AD computer accounts",
+              "displayName": "Windows 10 AD computer accounts"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Daily Axis"
+                    }
+                  },
+                  "Property": "Axis Windows 11 All AD Accounts Chart"
+                }
+              },
+              "queryRef": "Daily Axis.Axis Windows 11 All AD Accounts Chart",
+              "nativeQueryRef": "Windows 11 AD computer accounts",
+              "displayName": "Windows 11 AD computer accounts"
+            }
+          ]
+        }
+      },
+      "sortDefinition": {
+        "sort": [
+          {
+            "field": {
+              "Column": {
+                "Expression": {
+                  "SourceRef": {
+                    "Entity": "Daily Axis"
+                  }
+                },
+                "Property": "Axis Date"
+              }
+            },
+            "direction": "Ascending"
+          }
+        ]
+      }
+    },
     "objects": {
       "categoryAxis": [
         {
@@ -119,7 +272,7 @@
             "titleText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Enabled AD computer accounts (count or share)'"
+                  "Value": "'AD computer accounts (count or share)'"
                 }
               }
             },
@@ -182,9 +335,6 @@
       ],
       "dataPoint": [
         {
-          "selector": {
-            "metadata": "Daily Axis.Axis Windows 10 Chart"
-          },
           "properties": {
             "fill": {
               "solid": {
@@ -197,12 +347,12 @@
                 }
               }
             }
+          },
+          "selector": {
+            "metadata": "Daily Axis.Axis Windows 10 All AD Accounts Chart"
           }
         },
         {
-          "selector": {
-            "metadata": "Daily Axis.Axis Windows 11 Chart"
-          },
           "properties": {
             "fill": {
               "solid": {
@@ -215,6 +365,9 @@
                 }
               }
             }
+          },
+          "selector": {
+            "metadata": "Daily Axis.Axis Windows 11 All AD Accounts Chart"
           }
         }
       ],
@@ -235,159 +388,6 @@
         }
       ]
     },
-    "drillFilterOtherVisuals": true,
-    "query": {
-      "queryState": {
-        "Category": {
-          "projections": [
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Daily Axis"
-                    }
-                  },
-                  "Property": "Axis Date"
-                }
-              },
-              "queryRef": "Daily Axis.Axis Date",
-              "nativeQueryRef": "Axis Date"
-            }
-          ],
-          "showAll": true
-        },
-        "Y": {
-          "projections": [
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Daily Axis"
-                    }
-                  },
-                  "Property": "Axis Windows 10 Chart"
-                }
-              },
-              "queryRef": "Daily Axis.Axis Windows 10 Chart",
-              "nativeQueryRef": "Windows 10",
-              "displayName": "Windows 10"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Daily Axis"
-                    }
-                  },
-                  "Property": "Axis Windows 11 Chart"
-                }
-              },
-              "queryRef": "Daily Axis.Axis Windows 11 Chart",
-              "nativeQueryRef": "Windows 11",
-              "displayName": "Windows 11"
-            }
-          ]
-        },
-        "Tooltips": {
-          "projections": [
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Daily Directory Trends"
-                    }
-                  },
-                  "Property": "Enabled AD Computer Accounts Daily"
-                }
-              },
-              "queryRef": "Daily Directory Trends.Enabled AD Computer Accounts Daily",
-              "nativeQueryRef": "Enabled AD computer accounts",
-              "displayName": "Enabled AD computer accounts"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Daily Directory Trends"
-                    }
-                  },
-                  "Property": "Windows 11 Overtakes Windows 10 Day"
-                }
-              },
-              "queryRef": "Daily Directory Trends.Windows 11 Overtakes Windows 10 Day",
-              "nativeQueryRef": "Windows 11 crossover",
-              "displayName": "Windows 11 crossover"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Daily Axis"
-                    }
-                  },
-                  "Property": "Axis AD Computers Reading Day"
-                }
-              },
-              "queryRef": "Daily Axis.Axis AD Computers Reading Day",
-              "nativeQueryRef": "Axis AD Computers Reading Day",
-              "displayName": "Axis AD Computers Reading Day"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Daily Axis"
-                    }
-                  },
-                  "Property": "Axis AD Computers Quality Tooltip"
-                }
-              },
-              "queryRef": "Daily Axis.Axis AD Computers Quality Tooltip",
-              "nativeQueryRef": "Axis AD Computers Quality Tooltip",
-              "displayName": "Axis AD Computers Quality Tooltip"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Daily Directory Trends"
-                    }
-                  },
-                  "Property": "AD Computer Accounts Scope Tooltip"
-                }
-              },
-              "queryRef": "Daily Directory Trends.AD Computer Accounts Scope Tooltip",
-              "nativeQueryRef": "Population scope"
-            }
-          ]
-        }
-      },
-      "sortDefinition": {
-        "sort": [
-          {
-            "field": {
-              "Column": {
-                "Expression": {
-                  "SourceRef": {
-                    "Entity": "Daily Axis"
-                  }
-                },
-                "Property": "Axis Date"
-              }
-            },
-            "direction": "Ascending"
-          }
-        ]
-      }
-    },
     "visualContainerObjects": {
       "title": [
         {
@@ -402,7 +402,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Windows 10 / Windows 11 - enabled AD computer accounts'"
+                  "Value": "'Windows 10 / Windows 11 - AD computer accounts'"
                 }
               }
             },
@@ -549,7 +549,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Windows 10 and Windows 11 enabled computer account daily trends'"
+                  "Value": "'Windows 10 and Windows 11 AD computer accounts; enabled and disabled; qualified daily or weekly readings'"
                 }
               }
             },
@@ -622,7 +622,8 @@
           }
         }
       ]
-    }
+    },
+    "drillFilterOtherVisuals": true
   },
   "filterConfig": {
     "filters": [

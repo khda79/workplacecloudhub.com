@@ -3,9 +3,9 @@
   "name": "248733f2d0fbd6441a63",
   "position": {
     "x": 1352,
-    "y": 112,
+    "y": 208.0,
     "width": 248,
-    "height": 96,
+    "height": 107.4,
     "z": 129,
     "tabOrder": 129
   },
@@ -41,7 +41,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "22D"
+                  "Value": "20D"
                 }
               }
             },
@@ -502,37 +502,7 @@
             "show": {
               "expr": {
                 "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "text": {
-              "expr": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "License Report Qualification"
-                    }
-                  },
-                  "Property": "License Qualification Label"
-                }
-              }
-            },
-            "fontSize": {
-              "expr": {
-                "Literal": {
-                  "Value": "10D"
-                }
-              }
-            },
-            "fontColor": {
-              "solid": {
-                "color": {
-                  "expr": {
-                    "Literal": {
-                      "Value": "'#52606D'"
-                    }
-                  }
+                  "Value": "false"
                 }
               }
             }

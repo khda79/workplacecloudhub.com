@@ -4,7 +4,7 @@
   "position": {
     "x": 96,
     "y": 24,
-    "width": 1088,
+    "width": 1080,
     "height": 48,
     "z": 100,
     "tabOrder": 49
@@ -19,10 +19,10 @@
               {
                 "textRuns": [
                   {
-                    "value": "Which controls and sources support, weaken, or block a decision?",
+                    "value": "Control & Evidence Explorer",
                     "textStyle": {
                       "fontFamily": "Segoe UI Semibold",
-                      "fontSize": "26px",
+                      "fontSize": "24px",
                       "color": "#172B4D",
                       "fontWeight": "bold"
                     }

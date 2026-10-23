@@ -3,7 +3,7 @@
   "name": "8284ca6eeddad6298566",
   "position": {
     "x": 32,
-    "y": 488,
+    "y": 448,
     "width": 1856,
     "height": 336,
     "z": 12000,
@@ -236,7 +236,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "14D"
+                  "Value": "11D"
                 }
               }
             },
@@ -292,7 +292,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "14D"
+                  "Value": "11D"
                 }
               }
             },
@@ -371,7 +371,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Endpoint Score · complete governed fields'"
+                  "Value": "'Endpoint Score \u00b7 complete governed fields'"
                 }
               }
             }
@@ -391,7 +391,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Endpoint Score · complete governed fields'"
+                  "Value": "'Endpoint Score \u00b7 complete governed fields'"
                 }
               }
             },
@@ -562,7 +562,7 @@
                 "Entity": "Native Endpoint Score Evidence"
               }
             },
-            "Property": "Native Context Rows · Native Endpoint Score Evidence"
+            "Property": "Native Context Rows \u00b7 Native Endpoint Score Evidence"
           }
         },
         "type": "Advanced",
@@ -587,7 +587,7 @@
                           "Source": "c"
                         }
                       },
-                      "Property": "Native Context Rows · Native Endpoint Score Evidence"
+                      "Property": "Native Context Rows \u00b7 Native Endpoint Score Evidence"
                     }
                   },
                   "Right": {

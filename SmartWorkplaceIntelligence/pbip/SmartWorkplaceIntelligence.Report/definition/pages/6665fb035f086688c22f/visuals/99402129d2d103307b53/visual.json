@@ -3,9 +3,9 @@
   "name": "99402129d2d103307b53",
   "position": {
     "x": 32,
-    "y": 816,
+    "y": 829.1,
     "z": 130,
-    "height": 176,
+    "height": 164.9,
     "width": 1856,
     "tabOrder": 700
   },
@@ -340,7 +340,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Device System traceability · missingness, time basis and conflicting observations'"
+                  "Value": "'Device System traceability \u00b7 missingness, time basis and conflicting observations'"
                 }
               }
             },

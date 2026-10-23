@@ -3,9 +3,9 @@
   "name": "bdee5101ad961c4dfa9c",
   "position": {
     "x": 32,
-    "y": 336,
+    "y": 291.5,
     "width": 912,
-    "height": 296,
+    "height": 277.3,
     "z": 116,
     "tabOrder": 677
   },
@@ -300,7 +300,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Exchange Online adoption (%) · weekly history'"
+                  "Value": "'Exchange Online adoption (%) \u00b7 weekly history'"
                 }
               }
             },

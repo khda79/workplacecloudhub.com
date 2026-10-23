@@ -1,12 +1,12 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "6e59bdc9164fdea2d38a",
   "position": {
     "x": 96,
     "y": 16,
-    "width": 1344,
-    "height": 64,
     "z": 100,
+    "height": 64,
+    "width": 864,
     "tabOrder": 49
   },
   "visual": {
@@ -19,16 +19,15 @@
               {
                 "textRuns": [
                   {
-                    "value": "Where are collaboration adoption and governance gaps?",
+                    "value": "Collaboration Adoption",
                     "textStyle": {
+                      "fontWeight": "bold",
                       "fontFamily": "Segoe UI Semibold",
-                      "fontSize": "20px",
-                      "color": "#172B4D",
-                      "fontWeight": "bold"
+                      "fontSize": "24px",
+                      "color": "#172b4d"
                     }
                   }
-                ],
-                "horizontalTextAlignment": "left"
+                ]
               }
             ]
           }

@@ -6,7 +6,7 @@
     "y": 16,
     "z": 100,
     "height": 64,
-    "width": 1088,
+    "width": 1080,
     "tabOrder": 49
   },
   "visual": {
@@ -19,11 +19,11 @@
               {
                 "textRuns": [
                   {
-                    "value": "Which workforce and identity records need attention?",
+                    "value": "Workforce & Identity",
                     "textStyle": {
                       "fontWeight": "bold",
                       "fontFamily": "Segoe UI Semibold",
-                      "fontSize": "20px",
+                      "fontSize": "24px",
                       "color": "#172b4d"
                     }
                   }

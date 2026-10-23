@@ -3,9 +3,9 @@
   "name": "ea1bf9caf7573e53354d",
   "position": {
     "x": 600,
-    "y": 600,
+    "y": 587.4,
     "z": 161,
-    "height": 330,
+    "height": 400.8,
     "width": 1264,
     "tabOrder": 161
   },
@@ -165,7 +165,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "10D"
+                  "Value": "11D"
                 }
               }
             },
@@ -236,7 +236,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "9D"
+                  "Value": "11D"
                 }
               }
             }
@@ -250,6 +250,13 @@
               "expr": {
                 "Literal": {
                   "Value": "false"
+                }
+              }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
                 }
               }
             }

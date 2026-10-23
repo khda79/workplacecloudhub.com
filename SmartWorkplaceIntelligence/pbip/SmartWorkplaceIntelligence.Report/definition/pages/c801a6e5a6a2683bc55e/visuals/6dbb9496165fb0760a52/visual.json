@@ -5,7 +5,7 @@
     "x": 96,
     "y": 16,
     "z": 100,
-    "width": 1024,
+    "width": 1080,
     "height": 64,
     "tabOrder": 100
   },
@@ -19,10 +19,10 @@
               {
                 "textRuns": [
                   {
-                    "value": "Which evidence-backed risk and incident signals require action now?",
+                    "value": "Risk & Incident Signals",
                     "textStyle": {
                       "fontFamily": "Segoe UI Semibold",
-                      "fontSize": "20px",
+                      "fontSize": "24px",
                       "color": "#172B4D",
                       "fontWeight": "bold"
                     }

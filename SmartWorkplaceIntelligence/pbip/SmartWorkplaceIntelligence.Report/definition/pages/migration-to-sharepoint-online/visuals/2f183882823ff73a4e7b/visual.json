@@ -1,15 +1,14 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "2f183882823ff73a4e7b",
   "position": {
-    "x": 1256,
-    "y": 360,
-    "width": 632,
-    "height": 304,
-    "z": 38,
+    "x": 1288,
+    "y": 508.6,
+    "z": 4000,
+    "height": 300.0,
+    "width": 576,
     "tabOrder": 38
   },
-  "parentGroupName": "7f7ae1df82dd67fc332f",
   "visual": {
     "visualType": "barChart",
     "query": {
@@ -29,26 +28,8 @@
               },
               "queryRef": "SharePoint On-prem Web Applications.Web Application",
               "nativeQueryRef": "Web Application",
+              "active": true,
               "displayName": "Web Application"
-            }
-          ]
-        },
-        "Y": {
-          "projections": [
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "SPO Migration Web"
-                    }
-                  },
-                  "Property": "SPO Observed Webs"
-                }
-              },
-              "queryRef": "SPO Migration Web.SPO Observed Webs",
-              "nativeQueryRef": "Observed Webs",
-              "displayName": "Observed Webs"
             }
           ]
         },
@@ -132,6 +113,25 @@
               "queryRef": "SPO Migration Web.SPO On-prem Coverage Context",
               "nativeQueryRef": "On-prem Coverage Context",
               "displayName": "On-prem Coverage Context"
+            }
+          ]
+        },
+        "Y": {
+          "projections": [
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "SPO Migration Web"
+                    }
+                  },
+                  "Property": "SPO Observed Webs"
+                }
+              },
+              "queryRef": "SPO Migration Web.SPO Observed Webs",
+              "nativeQueryRef": "Observed Webs",
+              "displayName": "Observed Webs"
             }
           ]
         }
@@ -245,7 +245,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "14D"
+                  "Value": "12D"
                 }
               }
             },
@@ -254,9 +254,16 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#183153'"
+                      "Value": "'#1F2937'"
                     }
                   }
+                }
+              }
+            },
+            "bold": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
                 }
               }
             }
@@ -309,16 +316,9 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#CCDCEC'"
+                      "Value": "'#CBD8E5'"
                     }
                   }
-                }
-              }
-            },
-            "radius": {
-              "expr": {
-                "Literal": {
-                  "Value": "8D"
                 }
               }
             },
@@ -326,6 +326,13 @@
               "expr": {
                 "Literal": {
                   "Value": "1D"
+                }
+              }
+            },
+            "radius": {
+              "expr": {
+                "Literal": {
+                  "Value": "12D"
                 }
               }
             }
@@ -352,14 +359,14 @@
             "left": {
               "expr": {
                 "Literal": {
-                  "Value": "8D"
+                  "Value": "10D"
                 }
               }
             },
             "right": {
               "expr": {
                 "Literal": {
-                  "Value": "8D"
+                  "Value": "10D"
                 }
               }
             }
@@ -372,7 +379,7 @@
             "show": {
               "expr": {
                 "Literal": {
-                  "Value": "true"
+                  "Value": "false"
                 }
               }
             }
@@ -394,5 +401,6 @@
       ]
     },
     "drillFilterOtherVisuals": true
-  }
+  },
+  "parentGroupName": "7f7ae1df82dd67fc332f"
 }

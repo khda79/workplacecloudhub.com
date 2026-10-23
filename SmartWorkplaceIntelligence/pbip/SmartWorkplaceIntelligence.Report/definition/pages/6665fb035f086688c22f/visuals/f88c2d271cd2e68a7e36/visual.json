@@ -3,9 +3,9 @@
   "name": "f88c2d271cd2e68a7e36",
   "position": {
     "x": 32,
-    "y": 488,
+    "y": 521.9,
     "width": 1856,
-    "height": 336,
+    "height": 314.8,
     "z": 12000,
     "tabOrder": 544
   },
@@ -264,7 +264,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "14D"
+                  "Value": "11D"
                 }
               }
             },
@@ -320,7 +320,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "14D"
+                  "Value": "11D"
                 }
               }
             },
@@ -399,7 +399,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Quality Finding · complete governed fields'"
+                  "Value": "'Quality Finding \u00b7 complete governed fields'"
                 }
               }
             }
@@ -419,7 +419,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Quality Finding · complete governed fields'"
+                  "Value": "'Quality Finding \u00b7 complete governed fields'"
                 }
               }
             },
@@ -590,7 +590,7 @@
                 "Entity": "Native Quality Finding"
               }
             },
-            "Property": "Native Context Rows · Native Quality Finding"
+            "Property": "Native Context Rows \u00b7 Native Quality Finding"
           }
         },
         "type": "Advanced",
@@ -615,7 +615,7 @@
                           "Source": "c"
                         }
                       },
-                      "Property": "Native Context Rows · Native Quality Finding"
+                      "Property": "Native Context Rows \u00b7 Native Quality Finding"
                     }
                   },
                   "Right": {

@@ -3,179 +3,201 @@
   "name": "5ecd1c84d01537574033",
   "position": {
     "x": 32,
-    "y": 488,
+    "y": 394,
     "z": 112,
-    "height": 504,
+    "height": 600,
     "width": 1856,
     "tabOrder": 684
   },
   "visual": {
-    "visualType": "pivotTable",
+    "visualType": "tableEx",
     "query": {
       "queryState": {
-        "Rows": {
-          "projections": [
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Enterprise Operational Signals"
-                    }
-                  },
-                  "Property": "Domain"
-                }
-              },
-              "queryRef": "Enterprise Operational Signals.Domain",
-              "nativeQueryRef": "Domain",
-              "active": true
-            },
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Enterprise Operational Signals"
-                    }
-                  },
-                  "Property": "Severity Label"
-                }
-              },
-              "queryRef": "Enterprise Operational Signals.Severity Label",
-              "nativeQueryRef": "Severity",
-              "active": true
-            },
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Enterprise Operational Signals"
-                    }
-                  },
-                  "Property": "Signal"
-                }
-              },
-              "queryRef": "Enterprise Operational Signals.Signal",
-              "nativeQueryRef": "Signal",
-              "active": true
-            },
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Enterprise Operational Signals"
-                    }
-                  },
-                  "Property": "Risk Category"
-                }
-              },
-              "queryRef": "Enterprise Operational Signals.Risk Category",
-              "nativeQueryRef": "Risk Category",
-              "active": true
-            },
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Enterprise Operational Signals"
-                    }
-                  },
-                  "Property": "Evidence Status"
-                }
-              },
-              "queryRef": "Enterprise Operational Signals.Evidence Status",
-              "nativeQueryRef": "Evidence Status",
-              "active": true
-            },
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Enterprise Operational Signals"
-                    }
-                  },
-                  "Property": "Recommended Action"
-                }
-              },
-              "queryRef": "Enterprise Operational Signals.Recommended Action",
-              "nativeQueryRef": "Recommended Action",
-              "active": true
-            }
-          ]
-        },
         "Values": {
           "projections": [
             {
               "field": {
-                "Measure": {
+                "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Enterprise Operational Signals"
+                      "Entity": "Mailbox Evidence"
                     }
                   },
-                  "Property": "Affected Signal Observations"
+                  "Property": "Display Name"
                 }
               },
-              "queryRef": "Enterprise Operational Signals.Affected Signal Observations",
-              "nativeQueryRef": "Affected"
+              "queryRef": "Mailbox Evidence.Display Name",
+              "nativeQueryRef": "Display Name"
             },
             {
               "field": {
-                "Measure": {
+                "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Enterprise Operational Signals"
+                      "Entity": "Mailbox Evidence"
                     }
                   },
-                  "Property": "Enterprise Signal Covered"
+                  "Property": "Primary SMTP Address"
                 }
               },
-              "queryRef": "Enterprise Operational Signals.Enterprise Signal Covered",
-              "nativeQueryRef": "Covered"
+              "queryRef": "Mailbox Evidence.Primary SMTP Address",
+              "nativeQueryRef": "Primary SMTP Address"
             },
             {
               "field": {
-                "Measure": {
+                "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Enterprise Operational Signals"
+                      "Entity": "Mailbox Evidence"
                     }
                   },
-                  "Property": "Enterprise Signal Affected (%)"
+                  "Property": "Country"
                 }
               },
-              "queryRef": "Enterprise Operational Signals.Enterprise Signal Affected (%)",
-              "nativeQueryRef": "Affected (%)"
+              "queryRef": "Mailbox Evidence.Country",
+              "nativeQueryRef": "Country"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Evidence"
+                    }
+                  },
+                  "Property": "Hosting Location"
+                }
+              },
+              "queryRef": "Mailbox Evidence.Hosting Location",
+              "nativeQueryRef": "Hosting Location"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Evidence"
+                    }
+                  },
+                  "Property": "Exchange Version"
+                }
+              },
+              "queryRef": "Mailbox Evidence.Exchange Version",
+              "nativeQueryRef": "Exchange Version"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Evidence"
+                    }
+                  },
+                  "Property": "Mailbox Type"
+                }
+              },
+              "queryRef": "Mailbox Evidence.Mailbox Type",
+              "nativeQueryRef": "Mailbox Type"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Evidence"
+                    }
+                  },
+                  "Property": "Operational State"
+                }
+              },
+              "queryRef": "Mailbox Evidence.Operational State",
+              "nativeQueryRef": "Operational State"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Evidence"
+                    }
+                  },
+                  "Property": "Mailbox Size GB"
+                }
+              },
+              "queryRef": "Mailbox Evidence.Mailbox Size GB",
+              "nativeQueryRef": "Mailbox Size GB"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Evidence"
+                    }
+                  },
+                  "Property": "Archive State"
+                }
+              },
+              "queryRef": "Mailbox Evidence.Archive State",
+              "nativeQueryRef": "Archive State"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Evidence"
+                    }
+                  },
+                  "Property": "Delegation Count"
+                }
+              },
+              "queryRef": "Mailbox Evidence.Delegation Count",
+              "nativeQueryRef": "Delegation Count"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Evidence"
+                    }
+                  },
+                  "Property": "Forwarding State"
+                }
+              },
+              "queryRef": "Mailbox Evidence.Forwarding State",
+              "nativeQueryRef": "Forwarding State"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Evidence"
+                    }
+                  },
+                  "Property": "Mailbox Key"
+                }
+              },
+              "queryRef": "Mailbox Evidence.Mailbox Key",
+              "nativeQueryRef": "Mailbox Key"
             }
           ]
         }
-      },
-      "sortDefinition": {
-        "sort": [
-          {
-            "field": {
-              "Column": {
-                "Expression": {
-                  "SourceRef": {
-                    "Entity": "Enterprise Operational Signals"
-                  }
-                },
-                "Property": "Signal"
-              }
-            },
-            "direction": "Ascending"
-          }
-        ]
       }
     },
     "objects": {
       "columnHeaders": [
         {
           "properties": {
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
+            },
             "autoSizeColumnWidth": {
               "expr": {
                 "Literal": {
@@ -187,49 +209,6 @@
               "expr": {
                 "Literal": {
                   "Value": "'growToFit'"
-                }
-              }
-            },
-            "fontSize": {
-              "expr": {
-                "Literal": {
-                  "Value": "11D"
-                }
-              }
-            },
-            "bold": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "wordWrap": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "fontColor": {
-              "solid": {
-                "color": {
-                  "expr": {
-                    "Literal": {
-                      "Value": "'#FFFFFF'"
-                    }
-                  }
-                }
-              }
-            },
-            "backColor": {
-              "solid": {
-                "color": {
-                  "expr": {
-                    "Literal": {
-                      "Value": "'#215E9E'"
-                    }
-                  }
                 }
               }
             }
@@ -252,180 +231,6 @@
                   "Value": "false"
                 }
               }
-            },
-            "fontColorPrimary": {
-              "solid": {
-                "color": {
-                  "expr": {
-                    "Literal": {
-                      "Value": "'#183153'"
-                    }
-                  }
-                }
-              }
-            },
-            "fontColorSecondary": {
-              "solid": {
-                "color": {
-                  "expr": {
-                    "Literal": {
-                      "Value": "'#183153'"
-                    }
-                  }
-                }
-              }
-            },
-            "backColorPrimary": {
-              "solid": {
-                "color": {
-                  "expr": {
-                    "Literal": {
-                      "Value": "'#FFFFFF'"
-                    }
-                  }
-                }
-              }
-            },
-            "backColorSecondary": {
-              "solid": {
-                "color": {
-                  "expr": {
-                    "Literal": {
-                      "Value": "'#F0F5FA'"
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-      ],
-      "rowHeaders": [
-        {
-          "properties": {
-            "stepped": {
-              "expr": {
-                "Literal": {
-                  "Value": "false"
-                }
-              }
-            },
-            "fontSize": {
-              "expr": {
-                "Literal": {
-                  "Value": "12D"
-                }
-              }
-            },
-            "wordWrap": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "unfrozen": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "repeatRowHeaders": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            }
-          }
-        }
-      ],
-      "general": [
-        {
-          "properties": {
-            "layout": {
-              "expr": {
-                "Literal": {
-                  "Value": "'Tabular'"
-                }
-              }
-            }
-          }
-        }
-      ],
-      "subTotals": [
-        {
-          "properties": {
-            "rowSubtotals": {
-              "expr": {
-                "Literal": {
-                  "Value": "false"
-                }
-              }
-            },
-            "columnSubtotals": {
-              "expr": {
-                "Literal": {
-                  "Value": "false"
-                }
-              }
-            },
-            "perRowLevel": {
-              "expr": {
-                "Literal": {
-                  "Value": "false"
-                }
-              }
-            },
-            "perColumnLevel": {
-              "expr": {
-                "Literal": {
-                  "Value": "false"
-                }
-              }
-            }
-          }
-        },
-        {
-          "selector": {
-            "id": "Row"
-          },
-          "properties": {
-            "rowSubtotals": {
-              "expr": {
-                "Literal": {
-                  "Value": "false"
-                }
-              }
-            },
-            "perRowLevel": {
-              "expr": {
-                "Literal": {
-                  "Value": "false"
-                }
-              }
-            }
-          }
-        },
-        {
-          "selector": {
-            "id": "Column"
-          },
-          "properties": {
-            "columnSubtotals": {
-              "expr": {
-                "Literal": {
-                  "Value": "false"
-                }
-              }
-            },
-            "perColumnLevel": {
-              "expr": {
-                "Literal": {
-                  "Value": "false"
-                }
-              }
             }
           }
         }
@@ -438,7 +243,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Mailbox inventory · selected evidence'"
+                  "Value": "'Mailbox inventory \u00b7 selected evidence'"
                 }
               }
             }
@@ -458,7 +263,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Mailbox inventory · selected evidence'"
+                  "Value": "'Mailbox inventory - observed hosting and operational state'"
                 }
               }
             },
@@ -615,91 +420,5 @@
     },
     "drillFilterOtherVisuals": true
   },
-  "parentGroupName": "daaf5c483406b36ac30c",
-  "filterConfig": {
-    "filters": [
-      {
-        "name": "88951a22b53daf69e205",
-        "field": {
-          "Column": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "Enterprise Operational Signals"
-              }
-            },
-            "Property": "Signal"
-          }
-        },
-        "type": "Categorical",
-        "filter": {
-          "Version": 2,
-          "From": [
-            {
-              "Name": "f",
-              "Entity": "Enterprise Operational Signals",
-              "Type": 0
-            }
-          ],
-          "Where": [
-            {
-              "Condition": {
-                "In": {
-                  "Expressions": [
-                    {
-                      "Column": {
-                        "Expression": {
-                          "SourceRef": {
-                            "Source": "f"
-                          }
-                        },
-                        "Property": "Signal"
-                      }
-                    }
-                  ],
-                  "Values": [
-                    [
-                      {
-                        "Literal": {
-                          "Value": "'Large mailboxes without archive'"
-                        }
-                      }
-                    ],
-                    [
-                      {
-                        "Literal": {
-                          "Value": "'Mailboxes with extensive delegation'"
-                        }
-                      }
-                    ],
-                    [
-                      {
-                        "Literal": {
-                          "Value": "'Mailboxes inactive for more than 180 days'"
-                        }
-                      }
-                    ],
-                    [
-                      {
-                        "Literal": {
-                          "Value": "'Mailboxes with forwarding configured'"
-                        }
-                      }
-                    ],
-                    [
-                      {
-                        "Literal": {
-                          "Value": "'On-premises mailboxes'"
-                        }
-                      }
-                    ]
-                  ]
-                }
-              }
-            }
-          ]
-        },
-        "howCreated": "User"
-      }
-    ]
-  }
+  "parentGroupName": "daaf5c483406b36ac30c"
 }

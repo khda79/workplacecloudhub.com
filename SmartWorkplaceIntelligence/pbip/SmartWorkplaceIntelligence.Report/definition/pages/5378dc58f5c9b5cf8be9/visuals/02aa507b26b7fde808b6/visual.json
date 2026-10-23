@@ -3,7 +3,7 @@
   "name": "02aa507b26b7fde808b6",
   "position": {
     "x": 1412,
-    "y": 712,
+    "y": 656.2,
     "z": 114,
     "width": 320,
     "height": 18,
@@ -19,7 +19,7 @@
               {
                 "textRuns": [
                   {
-                    "value": "Dominant Version Coverage · observed history when available",
+                    "value": "Dominant Version Coverage \u00b7 observed history when available",
                     "textStyle": {
                       "fontFamily": "Segoe UI",
                       "fontSize": "10px",

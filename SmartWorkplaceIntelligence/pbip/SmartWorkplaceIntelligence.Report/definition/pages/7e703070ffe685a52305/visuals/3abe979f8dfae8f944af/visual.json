@@ -3,9 +3,9 @@
   "name": "3abe979f8dfae8f944af",
   "position": {
     "x": 32,
-    "y": 664,
+    "y": 497,
     "z": 112,
-    "height": 304,
+    "height": 497,
     "width": 1856,
     "tabOrder": 1340
   },
@@ -283,7 +283,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "12D"
+                  "Value": "11D"
                 }
               }
             },
@@ -354,6 +354,13 @@
                   "Value": "false"
                 }
               }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
             }
           }
         },
@@ -373,6 +380,13 @@
               "expr": {
                 "Literal": {
                   "Value": "false"
+                }
+              }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
                 }
               }
             }
@@ -396,6 +410,13 @@
                   "Value": "false"
                 }
               }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
             }
           }
         }
@@ -408,7 +429,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Evidence and workload gaps · selected evidence'"
+                  "Value": "'Evidence and workload gaps \u00b7 selected evidence'"
                 }
               }
             }
@@ -428,7 +449,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Evidence and workload gaps · selected evidence'"
+                  "Value": "'Evidence and workload gaps \u00b7 selected evidence'"
                 }
               }
             },

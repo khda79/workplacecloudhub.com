@@ -274,34 +274,6 @@
                       "Entity": "Mailbox Migration Inventory"
                     }
                   },
-                  "Property": "Mailbox GUID"
-                }
-              },
-              "queryRef": "Mailbox Migration Inventory.Mailbox GUID",
-              "nativeQueryRef": "Mailbox GUID"
-            },
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Mailbox Migration Inventory"
-                    }
-                  },
-                  "Property": "Object GUID"
-                }
-              },
-              "queryRef": "Mailbox Migration Inventory.Object GUID",
-              "nativeQueryRef": "Object GUID"
-            },
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Mailbox Migration Inventory"
-                    }
-                  },
                   "Property": "Display Name"
                 }
               },
@@ -615,6 +587,34 @@
               },
               "queryRef": "Mailbox Migration Inventory.Evidence Date",
               "nativeQueryRef": "Evidence Date"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Migration Inventory"
+                    }
+                  },
+                  "Property": "Mailbox GUID"
+                }
+              },
+              "queryRef": "Mailbox Migration Inventory.Mailbox GUID",
+              "nativeQueryRef": "Mailbox GUID"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Migration Inventory"
+                    }
+                  },
+                  "Property": "Object GUID"
+                }
+              },
+              "queryRef": "Mailbox Migration Inventory.Object GUID",
+              "nativeQueryRef": "Object GUID"
             }
           ]
         }
@@ -634,7 +634,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Full local mailbox inventory · all source-backed migration fields'"
+                  "Value": "'Full local mailbox inventory \u00b7 all source-backed migration fields'"
                 }
               }
             },
@@ -781,7 +781,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Full local mailbox inventory · all source-backed migration fields'"
+                  "Value": "'Full local mailbox inventory \u00b7 all source-backed migration fields'"
                 }
               }
             }

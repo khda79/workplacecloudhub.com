@@ -1,5 +1,5 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.13.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "173fa314feb49a6262f8",
   "position": {
     "x": 0,
@@ -12,6 +12,5 @@
   "visualGroup": {
     "displayName": "License assignments",
     "groupMode": "ScaleMode"
-  },
-  "isHidden": true
+  }
 }

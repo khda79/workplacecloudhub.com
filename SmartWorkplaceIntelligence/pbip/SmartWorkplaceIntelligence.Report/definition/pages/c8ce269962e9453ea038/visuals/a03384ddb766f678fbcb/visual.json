@@ -3,9 +3,9 @@
   "name": "a03384ddb766f678fbcb",
   "position": {
     "x": 32,
-    "y": 512,
+    "y": 544.3,
     "width": 1856,
-    "height": 440,
+    "height": 412.2,
     "z": 11000,
     "tabOrder": 544
   },
@@ -161,7 +161,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "14D"
+                  "Value": "11D"
                 }
               }
             },
@@ -217,7 +217,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "14D"
+                  "Value": "11D"
                 }
               }
             },
@@ -312,7 +312,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Geography · selected evidence'"
+                  "Value": "'Geography \u00b7 selected evidence'"
                 }
               }
             }
@@ -332,7 +332,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Reported enrollment failures · events, not distinct physical devices'"
+                  "Value": "'Reported enrollment failures \u00b7 events, not distinct physical devices'"
                 }
               }
             },

@@ -3,9 +3,9 @@
   "name": "db5d45b9966207e12b09",
   "position": {
     "x": 32,
-    "y": 536,
+    "y": 566.8,
     "width": 1856,
-    "height": 456,
+    "height": 427.2,
     "z": 12000,
     "tabOrder": 544
   },
@@ -107,20 +107,6 @@
                       "Entity": "AD Membership Evidence"
                     }
                   },
-                  "Property": "GroupObjectGUID"
-                }
-              },
-              "queryRef": "AD Membership Evidence.GroupObjectGUID",
-              "nativeQueryRef": "GroupObjectGUID"
-            },
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "AD Membership Evidence"
-                    }
-                  },
                   "Property": "GroupSID"
                 }
               },
@@ -140,20 +126,6 @@
               },
               "queryRef": "AD Membership Evidence.MemberDistinguishedName",
               "nativeQueryRef": "MemberDistinguishedName"
-            },
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "AD Membership Evidence"
-                    }
-                  },
-                  "Property": "MemberObjectGUID"
-                }
-              },
-              "queryRef": "AD Membership Evidence.MemberObjectGUID",
-              "nativeQueryRef": "MemberObjectGUID"
             },
             {
               "field": {
@@ -294,6 +266,34 @@
               },
               "queryRef": "AD Membership Evidence.TenantId",
               "nativeQueryRef": "TenantId"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "AD Membership Evidence"
+                    }
+                  },
+                  "Property": "GroupObjectGUID"
+                }
+              },
+              "queryRef": "AD Membership Evidence.GroupObjectGUID",
+              "nativeQueryRef": "GroupObjectGUID"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "AD Membership Evidence"
+                    }
+                  },
+                  "Property": "MemberObjectGUID"
+                }
+              },
+              "queryRef": "AD Membership Evidence.MemberObjectGUID",
+              "nativeQueryRef": "MemberObjectGUID"
             }
           ]
         }
@@ -306,7 +306,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "14D"
+                  "Value": "11D"
                 }
               }
             },
@@ -362,7 +362,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "14D"
+                  "Value": "11D"
                 }
               }
             },
@@ -441,7 +441,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'AD members · complete governed fields'"
+                  "Value": "'AD members \u00b7 complete governed fields'"
                 }
               }
             }
@@ -461,7 +461,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'AD members · complete governed fields'"
+                  "Value": "'AD members \u00b7 complete governed fields'"
                 }
               }
             },
@@ -632,7 +632,7 @@
                 "Entity": "AD Membership Evidence"
               }
             },
-            "Property": "Native Context Rows · AD Membership Evidence"
+            "Property": "Native Context Rows \u00b7 AD Membership Evidence"
           }
         },
         "type": "Advanced",
@@ -657,7 +657,7 @@
                           "Source": "c"
                         }
                       },
-                      "Property": "Native Context Rows · AD Membership Evidence"
+                      "Property": "Native Context Rows \u00b7 AD Membership Evidence"
                     }
                   },
                   "Right": {

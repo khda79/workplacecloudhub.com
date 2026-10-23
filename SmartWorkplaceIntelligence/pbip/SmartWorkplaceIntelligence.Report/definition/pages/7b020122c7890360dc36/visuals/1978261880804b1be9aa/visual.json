@@ -3,9 +3,9 @@
   "name": "1978261880804b1be9aa",
   "position": {
     "x": 32,
-    "y": 336,
+    "y": 379.5,
     "width": 1856,
-    "height": 616,
+    "height": 577.1,
     "z": 110,
     "tabOrder": 672
   },
@@ -498,7 +498,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Windows 10 migration queue · managed inventory'"
+                  "Value": "'Windows 10 migration queue \u00b7 managed inventory'"
                 }
               }
             }

@@ -3,9 +3,9 @@
   "name": "cfe6961d4427c778080a",
   "position": {
     "x": 32,
-    "y": 336,
+    "y": 291.5,
     "width": 1856,
-    "height": 656,
+    "height": 702.5,
     "z": 111,
     "tabOrder": 677
   },
@@ -15,20 +15,6 @@
       "queryState": {
         "Values": {
           "projections": [
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Mailbox Evidence"
-                    }
-                  },
-                  "Property": "Mailbox Key"
-                }
-              },
-              "queryRef": "Mailbox Evidence.Mailbox Key",
-              "nativeQueryRef": "Mailbox"
-            },
             {
               "field": {
                 "Column": {
@@ -238,6 +224,20 @@
               },
               "queryRef": "Mailbox Evidence.Risk Signal",
               "nativeQueryRef": "Risk Signal"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Evidence"
+                    }
+                  },
+                  "Property": "Mailbox Key"
+                }
+              },
+              "queryRef": "Mailbox Evidence.Mailbox Key",
+              "nativeQueryRef": "Mailbox"
             }
           ]
         }
@@ -378,6 +378,13 @@
               "expr": {
                 "Literal": {
                   "Value": "false"
+                }
+              }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
                 }
               }
             }

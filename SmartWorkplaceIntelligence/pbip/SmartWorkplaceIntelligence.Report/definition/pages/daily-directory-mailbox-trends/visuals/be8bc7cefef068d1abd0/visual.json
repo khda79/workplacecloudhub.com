@@ -1,12 +1,12 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.13.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "be8bc7cefef068d1abd0",
   "position": {
     "x": 32,
     "y": 432,
-    "width": 1856,
-    "height": 232,
     "z": 12,
+    "height": 232,
+    "width": 1856,
     "tabOrder": 12
   },
   "visual": {
@@ -27,7 +27,8 @@
                 }
               },
               "queryRef": "Daily Domain.Domain",
-              "nativeQueryRef": "Domain"
+              "nativeQueryRef": "Domain",
+              "active": true
             }
           ]
         },
@@ -101,12 +102,12 @@
                       "Entity": "Daily Directory Trends"
                     }
                   },
-                  "Property": "Windows 10 Remaining Value Text"
+                  "Property": "Windows 10 All AD Accounts Value Text"
                 }
               },
-              "queryRef": "Daily Directory Trends.Windows 10 Remaining Value Text",
-              "nativeQueryRef": "Windows 10 Remaining Value Text",
-              "displayName": "Windows 10"
+              "queryRef": "Daily Directory Trends.Windows 10 All AD Accounts Value Text",
+              "nativeQueryRef": "Windows 10 AD accounts",
+              "displayName": "Windows 10 AD accounts"
             },
             {
               "field": {
@@ -116,12 +117,12 @@
                       "Entity": "Daily Directory Trends"
                     }
                   },
-                  "Property": "Windows 10 Remaining Change Text"
+                  "Property": "Windows 10 All AD Accounts Change Text"
                 }
               },
-              "queryRef": "Daily Directory Trends.Windows 10 Remaining Change Text",
-              "nativeQueryRef": "Windows 10 Remaining Change Text",
-              "displayName": "Win10 change"
+              "queryRef": "Daily Directory Trends.Windows 10 All AD Accounts Change Text",
+              "nativeQueryRef": "Win10 AD account change",
+              "displayName": "Win10 AD account change"
             },
             {
               "field": {
@@ -131,12 +132,12 @@
                       "Entity": "Daily Directory Trends"
                     }
                   },
-                  "Property": "Windows 11 Share Value Text"
+                  "Property": "Windows 11 All AD Accounts Share Value Text"
                 }
               },
-              "queryRef": "Daily Directory Trends.Windows 11 Share Value Text",
-              "nativeQueryRef": "Windows 11 Share Value Text",
-              "displayName": "Windows 11 %"
+              "queryRef": "Daily Directory Trends.Windows 11 All AD Accounts Share Value Text",
+              "nativeQueryRef": "Windows 11 AD share",
+              "displayName": "Windows 11 AD share"
             },
             {
               "field": {
@@ -146,12 +147,12 @@
                       "Entity": "Daily Directory Trends"
                     }
                   },
-                  "Property": "Windows 11 Share Change Text"
+                  "Property": "Windows 11 All AD Accounts Share Change Text"
                 }
               },
-              "queryRef": "Daily Directory Trends.Windows 11 Share Change Text",
-              "nativeQueryRef": "Windows 11 Share Change Text",
-              "displayName": "Win11 change (pp)"
+              "queryRef": "Daily Directory Trends.Windows 11 All AD Accounts Share Change Text",
+              "nativeQueryRef": "Win11 AD share change (pp)",
+              "displayName": "Win11 AD share change (pp)"
             },
             {
               "field": {
@@ -258,7 +259,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "12D"
+                  "Value": "11D"
                 }
               }
             },
@@ -285,7 +286,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "12D"
+                  "Value": "11D"
                 }
               }
             },
@@ -299,14 +300,14 @@
             "autoSizeColumnWidth": {
               "expr": {
                 "Literal": {
-                  "Value": "false"
+                  "Value": "true"
                 }
               }
             },
             "columnAdjustment": {
               "expr": {
                 "Literal": {
-                  "Value": "'fixedWidth'"
+                  "Value": "'fitToContent'"
                 }
               }
             },
@@ -326,7 +327,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "12D"
+                  "Value": "11D"
                 }
               }
             },
@@ -350,7 +351,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "12D"
+                  "Value": "11D"
                 }
               }
             },
@@ -468,7 +469,7 @@
             }
           },
           "selector": {
-            "metadata": "Daily Directory Trends.Windows 10 Remaining Value Text"
+            "metadata": "Daily Directory Trends.Windows 10 All AD Accounts Value Text"
           }
         },
         {
@@ -482,7 +483,7 @@
             }
           },
           "selector": {
-            "metadata": "Daily Directory Trends.Windows 10 Remaining Change Text"
+            "metadata": "Daily Directory Trends.Windows 10 All AD Accounts Change Text"
           }
         },
         {
@@ -496,7 +497,7 @@
             }
           },
           "selector": {
-            "metadata": "Daily Directory Trends.Windows 11 Share Value Text"
+            "metadata": "Daily Directory Trends.Windows 11 All AD Accounts Share Value Text"
           }
         },
         {
@@ -510,7 +511,7 @@
             }
           },
           "selector": {
-            "metadata": "Daily Directory Trends.Windows 11 Share Change Text"
+            "metadata": "Daily Directory Trends.Windows 11 All AD Accounts Share Change Text"
           }
         },
         {
@@ -708,7 +709,7 @@
             }
           },
           "selector": {
-            "metadata": "Daily Directory Trends.Windows 10 Remaining Value Text"
+            "metadata": "Daily Directory Trends.Windows 10 All AD Accounts Value Text"
           }
         },
         {
@@ -736,7 +737,7 @@
             }
           },
           "selector": {
-            "metadata": "Daily Directory Trends.Windows 10 Remaining Change Text"
+            "metadata": "Daily Directory Trends.Windows 10 All AD Accounts Change Text"
           }
         },
         {
@@ -764,7 +765,7 @@
             }
           },
           "selector": {
-            "metadata": "Daily Directory Trends.Windows 11 Share Value Text"
+            "metadata": "Daily Directory Trends.Windows 11 All AD Accounts Share Value Text"
           }
         },
         {
@@ -792,7 +793,7 @@
             }
           },
           "selector": {
-            "metadata": "Daily Directory Trends.Windows 11 Share Change Text"
+            "metadata": "Daily Directory Trends.Windows 11 All AD Accounts Share Change Text"
           }
         },
         {

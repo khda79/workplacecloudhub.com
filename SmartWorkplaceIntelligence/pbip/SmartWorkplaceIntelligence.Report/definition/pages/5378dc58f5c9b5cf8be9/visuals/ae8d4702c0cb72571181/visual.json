@@ -3,9 +3,9 @@
   "name": "ae8d4702c0cb72571181",
   "position": {
     "x": 32,
-    "y": 488,
+    "y": 464,
     "width": 1856,
-    "height": 336,
+    "height": 384,
     "z": 12000,
     "tabOrder": 544
   },
@@ -110,7 +110,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "14D"
+                  "Value": "11D"
                 }
               }
             },
@@ -166,7 +166,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "14D"
+                  "Value": "11D"
                 }
               }
             },
@@ -245,7 +245,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Application Ranking · complete governed fields'"
+                  "Value": "'Application Ranking \u00b7 complete governed fields'"
                 }
               }
             }
@@ -265,7 +265,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Application Ranking · complete governed fields'"
+                  "Value": "'Application Ranking \u00b7 complete governed fields'"
                 }
               }
             },
@@ -436,7 +436,7 @@
                 "Entity": "Native Application Ranking"
               }
             },
-            "Property": "Native Context Rows · Native Application Ranking"
+            "Property": "Native Context Rows \u00b7 Native Application Ranking"
           }
         },
         "type": "Advanced",
@@ -461,7 +461,7 @@
                           "Source": "c"
                         }
                       },
-                      "Property": "Native Context Rows · Native Application Ranking"
+                      "Property": "Native Context Rows \u00b7 Native Application Ranking"
                     }
                   },
                   "Right": {

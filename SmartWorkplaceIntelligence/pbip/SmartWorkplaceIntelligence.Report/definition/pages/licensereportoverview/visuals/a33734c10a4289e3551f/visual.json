@@ -4,7 +4,7 @@
   "position": {
     "x": 96,
     "y": 16,
-    "width": 1100,
+    "width": 864,
     "height": 48,
     "z": 28,
     "tabOrder": 28
@@ -22,7 +22,7 @@
                     "value": "License Recovery & Evidence",
                     "textStyle": {
                       "fontFamily": "Segoe UI Semibold",
-                      "fontSize": "26px",
+                      "fontSize": "24px",
                       "color": "#172B4D",
                       "fontWeight": "bold"
                     }

@@ -3,9 +3,9 @@
   "name": "2e2711095ed21aa35a5c",
   "position": {
     "x": 32,
-    "y": 512,
+    "y": 544.3,
     "z": 11000,
-    "height": 240,
+    "height": 224.8,
     "width": 1856,
     "tabOrder": 544
   },
@@ -277,6 +277,13 @@
                   "Value": "false"
                 }
               }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
             }
           }
         },
@@ -295,6 +302,13 @@
                   "Value": "false"
                 }
               }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
             }
           },
           "selector": {
@@ -308,7 +322,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "14D"
+                  "Value": "11D"
                 }
               }
             },
@@ -364,7 +378,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "14D"
+                  "Value": "11D"
                 }
               }
             },
@@ -441,7 +455,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "14D"
+                  "Value": "11D"
                 }
               }
             },
@@ -486,7 +500,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Geography · selected evidence'"
+                  "Value": "'Geography \u00b7 selected evidence'"
                 }
               }
             }
@@ -506,7 +520,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Managed catalog · reported deployment observations'"
+                  "Value": "'Managed catalog \u00b7 reported deployment observations'"
                 }
               }
             },

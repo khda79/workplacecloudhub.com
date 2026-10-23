@@ -3,9 +3,9 @@
   "name": "0f687d30c423216754fd",
   "position": {
     "x": 32,
-    "y": 544,
+    "y": 594.5,
     "z": 110,
-    "height": 464,
+    "height": 415.2,
     "width": 1856,
     "tabOrder": 110
   },
@@ -274,6 +274,13 @@
                   "Value": "false"
                 }
               }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
             }
           }
         }
@@ -371,7 +378,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Risk signals and recommended actions · priority order'"
+                  "Value": "'Risk signals and recommended actions \u00b7 priority order'"
                 }
               }
             },

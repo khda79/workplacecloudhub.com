@@ -4,8 +4,8 @@
   "position": {
     "x": 32,
     "y": 128,
-    "width": 1856,
-    "height": 120,
+    "width": 1200,
+    "height": 80,
     "z": 114,
     "tabOrder": 261
   },
@@ -57,8 +57,8 @@
                 }
               },
               "queryRef": "Application Inventory Evidence.Application Install Observations",
-              "nativeQueryRef": "Install Observations",
-              "displayName": "Install Observations"
+              "nativeQueryRef": "Application install observations",
+              "displayName": "Install observations"
             }
           ]
         }
@@ -78,7 +78,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "28D"
+                  "Value": "20D"
                 }
               }
             },
@@ -246,6 +246,27 @@
               "expr": {
                 "Literal": {
                   "Value": "0D"
+                }
+              }
+            },
+            "rowCount": {
+              "expr": {
+                "Literal": {
+                  "Value": "1L"
+                }
+              }
+            },
+            "columnCount": {
+              "expr": {
+                "Literal": {
+                  "Value": "3L"
+                }
+              }
+            },
+            "autoGrid": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
                 }
               }
             }
@@ -478,14 +499,14 @@
             "top": {
               "expr": {
                 "Literal": {
-                  "Value": "8D"
+                  "Value": "0D"
                 }
               }
             },
             "bottom": {
               "expr": {
                 "Literal": {
-                  "Value": "8D"
+                  "Value": "0D"
                 }
               }
             },

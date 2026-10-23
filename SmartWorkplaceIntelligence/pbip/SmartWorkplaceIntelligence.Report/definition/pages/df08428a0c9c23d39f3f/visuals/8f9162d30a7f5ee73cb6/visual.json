@@ -5,7 +5,7 @@
     "x": 96,
     "y": 16,
     "z": 100,
-    "width": 720,
+    "width": 1080,
     "height": 48,
     "tabOrder": 100
   },
@@ -22,7 +22,7 @@
                     "value": "On-prem Content & Storage",
                     "textStyle": {
                       "fontFamily": "Segoe UI Semibold",
-                      "fontSize": "26px",
+                      "fontSize": "24px",
                       "color": "#172B4D",
                       "fontWeight": "bold"
                     }

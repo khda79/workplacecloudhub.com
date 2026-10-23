@@ -4,8 +4,8 @@
   "position": {
     "x": 32,
     "y": 128,
-    "width": 1856,
-    "height": 120,
+    "width": 1200,
+    "height": 80,
     "z": 114,
     "tabOrder": 261
   },
@@ -28,7 +28,7 @@
               },
               "queryRef": "Mailbox Evidence.Observed Exchange Online Adoption (%)",
               "nativeQueryRef": "Exchange Online Adoption",
-              "displayName": "Exchange Online Adoption"
+              "displayName": "Exchange Online (%)"
             },
             {
               "field": {
@@ -38,12 +38,27 @@
                       "Entity": "Mailbox Evidence"
                     }
                   },
-                  "Property": "On-premises Mailboxes"
+                  "Property": "On-premises Mailboxes (2016)"
                 }
               },
-              "queryRef": "Mailbox Evidence.On-premises Mailboxes",
-              "nativeQueryRef": "On-premises Mailboxes",
-              "displayName": "On-premises Mailboxes"
+              "queryRef": "Mailbox Evidence.On-premises Mailboxes (2016)",
+              "nativeQueryRef": "On-premises Mailboxes (2016)",
+              "displayName": "Exchange 2016 mailboxes"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Evidence"
+                    }
+                  },
+                  "Property": "On-premises Mailboxes (2019/SE)"
+                }
+              },
+              "queryRef": "Mailbox Evidence.On-premises Mailboxes (2019/SE)",
+              "nativeQueryRef": "On-premises Mailboxes (2019/SE)",
+              "displayName": "Exchange 2019/SE mailboxes"
             },
             {
               "field": {
@@ -58,7 +73,7 @@
               },
               "queryRef": "Mailbox Evidence.Large Mailboxes Without Archive",
               "nativeQueryRef": "Mailboxes >=45 GB Without Archive",
-              "displayName": "Mailboxes >=45 GB Without Archive"
+              "displayName": "Large without archive"
             },
             {
               "field": {
@@ -73,7 +88,7 @@
               },
               "queryRef": "Mailbox Evidence.Mailboxes With Extensive Delegation",
               "nativeQueryRef": "Extensive Delegation",
-              "displayName": "Extensive Delegation"
+              "displayName": "Extensive delegation"
             }
           ]
         }
@@ -93,7 +108,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "28D"
+                  "Value": "20D"
                 }
               }
             },
@@ -261,6 +276,27 @@
               "expr": {
                 "Literal": {
                   "Value": "0D"
+                }
+              }
+            },
+            "rowCount": {
+              "expr": {
+                "Literal": {
+                  "Value": "1L"
+                }
+              }
+            },
+            "columnCount": {
+              "expr": {
+                "Literal": {
+                  "Value": "5L"
+                }
+              }
+            },
+            "autoGrid": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
                 }
               }
             }

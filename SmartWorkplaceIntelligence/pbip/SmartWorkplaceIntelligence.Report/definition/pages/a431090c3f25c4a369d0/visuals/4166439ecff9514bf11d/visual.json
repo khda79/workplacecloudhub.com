@@ -2,10 +2,10 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
   "name": "4166439ecff9514bf11d",
   "position": {
-    "x": 704,
-    "y": 104,
-    "width": 1184,
-    "height": 24,
+    "x": 96,
+    "y": 106,
+    "width": 1080,
+    "height": 22,
     "z": 130,
     "tabOrder": 701
   },
@@ -22,7 +22,7 @@
                     "value": "AV selection filters device detail tables; headline KPIs retain inventory scope.",
                     "textStyle": {
                       "fontFamily": "Segoe UI",
-                      "fontSize": "12px",
+                      "fontSize": "14px",
                       "color": "#172B4D"
                     }
                   }

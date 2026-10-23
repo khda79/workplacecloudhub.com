@@ -3,7 +3,7 @@
   "name": "75ef9f2547dfbca44b4e",
   "position": {
     "x": 968,
-    "y": 336,
+    "y": 296,
     "width": 912,
     "height": 296,
     "z": 115,
@@ -328,7 +328,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Endpoint Analytics score · recorded snapshots'"
+                  "Value": "'Endpoint Analytics score \u00b7 recorded snapshots'"
                 }
               }
             },

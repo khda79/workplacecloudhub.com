@@ -3,9 +3,9 @@
   "name": "08d9080afc9f176e393d",
   "position": {
     "x": 32,
-    "y": 336,
+    "y": 291.5,
     "width": 1856,
-    "height": 656,
+    "height": 702.5,
     "z": 111,
     "tabOrder": 677
   },
@@ -15,20 +15,6 @@
       "queryState": {
         "Values": {
           "projections": [
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Mailbox Evidence"
-                    }
-                  },
-                  "Property": "Mailbox Key"
-                }
-              },
-              "queryRef": "Mailbox Evidence.Mailbox Key",
-              "nativeQueryRef": "Mailbox"
-            },
             {
               "field": {
                 "Column": {
@@ -280,6 +266,20 @@
               },
               "queryRef": "Mailbox Evidence.Recommended Action",
               "nativeQueryRef": "Recommended Action"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Evidence"
+                    }
+                  },
+                  "Property": "Mailbox Key"
+                }
+              },
+              "queryRef": "Mailbox Evidence.Mailbox Key",
+              "nativeQueryRef": "Mailbox"
             }
           ]
         }
@@ -422,6 +422,13 @@
                   "Value": "false"
                 }
               }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
             }
           }
         }
@@ -434,7 +441,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Estate context · selected evidence'"
+                  "Value": "'Estate context \u00b7 selected evidence'"
                 }
               }
             }
@@ -454,7 +461,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Estate context · selected evidence'"
+                  "Value": "'Estate context \u00b7 selected evidence'"
                 }
               }
             },

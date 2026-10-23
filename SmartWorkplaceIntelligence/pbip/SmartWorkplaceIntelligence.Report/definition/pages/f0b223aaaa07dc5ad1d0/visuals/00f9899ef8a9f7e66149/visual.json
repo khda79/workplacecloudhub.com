@@ -41,8 +41,8 @@
                 }
               },
               "queryRef": "Windows Migration Evidence.Remaining Observed Windows 10",
-              "nativeQueryRef": "Windows 10 remaining · Intune + AD",
-              "displayName": "Windows 10 remaining · Intune + AD"
+              "nativeQueryRef": "Windows 10 remaining \u00b7 Intune + AD",
+              "displayName": "Windows 10 remaining \u00b7 Intune + AD"
             },
             {
               "field": {
@@ -90,7 +90,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "22D"
+                  "Value": "20D"
                 }
               }
             },
@@ -145,7 +145,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "10D"
+                  "Value": "11D"
                 }
               }
             },

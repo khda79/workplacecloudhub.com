@@ -3,9 +3,9 @@
   "name": "bcbe3916207958d30bfa",
   "position": {
     "x": 968,
-    "y": 336,
+    "y": 379.5,
     "width": 920,
-    "height": 304,
+    "height": 284.8,
     "z": 115,
     "tabOrder": 684
   },
@@ -314,7 +314,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Active workforce · recorded history'"
+                  "Value": "'Active workforce \u00b7 recorded history'"
                 }
               }
             },

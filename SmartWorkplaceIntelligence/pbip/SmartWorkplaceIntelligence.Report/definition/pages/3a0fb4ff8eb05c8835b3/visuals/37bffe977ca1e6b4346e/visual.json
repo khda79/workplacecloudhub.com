@@ -3,9 +3,9 @@
   "name": "37bffe977ca1e6b4346e",
   "position": {
     "x": 32,
-    "y": 536,
+    "y": 566.8,
     "width": 1856,
-    "height": 456,
+    "height": 427.2,
     "z": 12000,
     "tabOrder": 544
   },
@@ -28,20 +28,6 @@
               },
               "queryRef": "AD Object Evidence.TenantADObjectKey",
               "nativeQueryRef": "TenantADObjectKey"
-            },
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "AD Object Evidence"
-                    }
-                  },
-                  "Property": "ObjectGUID"
-                }
-              },
-              "queryRef": "AD Object Evidence.ObjectGUID",
-              "nativeQueryRef": "ObjectGUID"
             },
             {
               "field": {
@@ -182,6 +168,20 @@
               },
               "queryRef": "AD Object Evidence.TenantId",
               "nativeQueryRef": "TenantId"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "AD Object Evidence"
+                    }
+                  },
+                  "Property": "ObjectGUID"
+                }
+              },
+              "queryRef": "AD Object Evidence.ObjectGUID",
+              "nativeQueryRef": "ObjectGUID"
             }
           ]
         }
@@ -194,7 +194,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "14D"
+                  "Value": "11D"
                 }
               }
             },
@@ -250,7 +250,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "14D"
+                  "Value": "11D"
                 }
               }
             },
@@ -329,7 +329,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'AD objects · complete governed fields'"
+                  "Value": "'AD objects \u00b7 complete governed fields'"
                 }
               }
             }
@@ -349,7 +349,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'AD objects · complete governed fields'"
+                  "Value": "'AD objects \u00b7 complete governed fields'"
                 }
               }
             },
@@ -520,7 +520,7 @@
                 "Entity": "AD Object Evidence"
               }
             },
-            "Property": "Native Context Rows · AD Object Evidence"
+            "Property": "Native Context Rows \u00b7 AD Object Evidence"
           }
         },
         "type": "Advanced",
@@ -545,7 +545,7 @@
                           "Source": "c"
                         }
                       },
-                      "Property": "Native Context Rows · AD Object Evidence"
+                      "Property": "Native Context Rows \u00b7 AD Object Evidence"
                     }
                   },
                   "Right": {

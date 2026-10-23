@@ -3,9 +3,9 @@
   "name": "a21d3562d6b9f8e7123e",
   "position": {
     "x": 32,
-    "y": 664,
+    "y": 686.7,
     "width": 1856,
-    "height": 128,
+    "height": 119.9,
     "z": 130,
     "tabOrder": 700
   },
@@ -112,7 +112,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "22D"
+                  "Value": "20D"
                 }
               }
             },
@@ -167,7 +167,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "12D"
+                  "Value": "11D"
                 }
               }
             },
@@ -457,7 +457,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Device System quality · source observations, not current-health conclusions'"
+                  "Value": "'Device System quality \u00b7 source observations, not current-health conclusions'"
                 }
               }
             },

@@ -3,9 +3,9 @@
   "name": "c21e68df3a7586741ec0",
   "position": {
     "x": 32,
-    "y": 336,
+    "y": 616,
     "width": 1856,
-    "height": 656,
+    "height": 376,
     "z": 110,
     "tabOrder": 672
   },
@@ -226,6 +226,13 @@
                   "Value": "false"
                 }
               }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
             }
           }
         }
@@ -238,7 +245,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Blockers · selected evidence'"
+                  "Value": "'Blockers \u00b7 selected evidence'"
                 }
               }
             }
@@ -258,7 +265,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Blockers · selected evidence'"
+                  "Value": "'Blockers \u00b7 selected evidence'"
                 }
               }
             },

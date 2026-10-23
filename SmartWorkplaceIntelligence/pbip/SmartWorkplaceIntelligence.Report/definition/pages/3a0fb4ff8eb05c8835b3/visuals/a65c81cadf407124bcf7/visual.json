@@ -3,9 +3,9 @@
   "name": "a65c81cadf407124bcf7",
   "position": {
     "x": 32,
-    "y": 336,
+    "y": 379.5,
     "width": 1856,
-    "height": 656,
+    "height": 614.6,
     "z": 110,
     "tabOrder": 677
   },
@@ -168,6 +168,156 @@
               },
               "queryRef": "User Inventory Evidence.Attention Priority",
               "nativeQueryRef": "Attention Priority"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "User Inventory Evidence"
+                    }
+                  },
+                  "Property": "AD Password Expired"
+                }
+              },
+              "queryRef": "User Inventory Evidence.AD Password Expired",
+              "nativeQueryRef": "AD Password Expired",
+              "displayName": "AD Password Expired"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "User Inventory Evidence"
+                    }
+                  },
+                  "Property": "AD Password Expiry Status"
+                }
+              },
+              "queryRef": "User Inventory Evidence.AD Password Expiry Status",
+              "nativeQueryRef": "AD Password Expiry Status",
+              "displayName": "AD Password Expiry Status"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "User Inventory Evidence"
+                    }
+                  },
+                  "Property": "AD Created (source)"
+                }
+              },
+              "queryRef": "User Inventory Evidence.AD Created (source)",
+              "nativeQueryRef": "AD Created (source)",
+              "displayName": "AD Created (source)"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "User Inventory Evidence"
+                    }
+                  },
+                  "Property": "AD Creation Qualification"
+                }
+              },
+              "queryRef": "User Inventory Evidence.AD Creation Qualification",
+              "nativeQueryRef": "AD Creation Qualification",
+              "displayName": "AD Creation Qualification"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "User Inventory Evidence"
+                    }
+                  },
+                  "Property": "Entra Created (source)"
+                }
+              },
+              "queryRef": "User Inventory Evidence.Entra Created (source)",
+              "nativeQueryRef": "Entra Created (source)",
+              "displayName": "Entra Created (source)"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "User Inventory Evidence"
+                    }
+                  },
+                  "Property": "Entra Creation Qualification"
+                }
+              },
+              "queryRef": "User Inventory Evidence.Entra Creation Qualification",
+              "nativeQueryRef": "Entra Creation Qualification",
+              "displayName": "Entra Creation Qualification"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "User Inventory Evidence"
+                    }
+                  },
+                  "Property": "AD Modified (source)"
+                }
+              },
+              "queryRef": "User Inventory Evidence.AD Modified (source)",
+              "nativeQueryRef": "AD Modified (source)",
+              "displayName": "AD Modified (source)"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "User Inventory Evidence"
+                    }
+                  },
+                  "Property": "AD Modification Qualification"
+                }
+              },
+              "queryRef": "User Inventory Evidence.AD Modification Qualification",
+              "nativeQueryRef": "AD Modification Qualification",
+              "displayName": "AD Modification Qualification"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "User Inventory Evidence"
+                    }
+                  },
+                  "Property": "Entra Modified (source)"
+                }
+              },
+              "queryRef": "User Inventory Evidence.Entra Modified (source)",
+              "nativeQueryRef": "Entra Modified (source)",
+              "displayName": "Entra Modified (source)"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "User Inventory Evidence"
+                    }
+                  },
+                  "Property": "Entra Modification Qualification"
+                }
+              },
+              "queryRef": "User Inventory Evidence.Entra Modification Qualification",
+              "nativeQueryRef": "Entra Modification Qualification",
+              "displayName": "Entra Modification Qualification"
             }
           ]
         }
@@ -310,7 +460,156 @@
                   "Value": "false"
                 }
               }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
             }
+          }
+        }
+      ],
+      "columnWidth": [
+        {
+          "properties": {
+            "value": {
+              "expr": {
+                "Literal": {
+                  "Value": "185D"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "User Inventory Evidence.AD Password Expired"
+          }
+        },
+        {
+          "properties": {
+            "value": {
+              "expr": {
+                "Literal": {
+                  "Value": "185D"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "User Inventory Evidence.AD Password Expiry Status"
+          }
+        },
+        {
+          "properties": {
+            "value": {
+              "expr": {
+                "Literal": {
+                  "Value": "200D"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "User Inventory Evidence.AD Created (source)"
+          }
+        },
+        {
+          "properties": {
+            "value": {
+              "expr": {
+                "Literal": {
+                  "Value": "280D"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "User Inventory Evidence.AD Creation Qualification"
+          }
+        },
+        {
+          "properties": {
+            "value": {
+              "expr": {
+                "Literal": {
+                  "Value": "200D"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "User Inventory Evidence.Entra Created (source)"
+          }
+        },
+        {
+          "properties": {
+            "value": {
+              "expr": {
+                "Literal": {
+                  "Value": "280D"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "User Inventory Evidence.Entra Creation Qualification"
+          }
+        },
+        {
+          "properties": {
+            "value": {
+              "expr": {
+                "Literal": {
+                  "Value": "200D"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "User Inventory Evidence.AD Modified (source)"
+          }
+        },
+        {
+          "properties": {
+            "value": {
+              "expr": {
+                "Literal": {
+                  "Value": "280D"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "User Inventory Evidence.AD Modification Qualification"
+          }
+        },
+        {
+          "properties": {
+            "value": {
+              "expr": {
+                "Literal": {
+                  "Value": "200D"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "User Inventory Evidence.Entra Modified (source)"
+          }
+        },
+        {
+          "properties": {
+            "value": {
+              "expr": {
+                "Literal": {
+                  "Value": "280D"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "User Inventory Evidence.Entra Modification Qualification"
           }
         }
       ]

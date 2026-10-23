@@ -3,9 +3,9 @@
   "name": "5af76a21489ac8a01a43",
   "position": {
     "x": 32,
-    "y": 336,
+    "y": 679.2,
     "width": 1856,
-    "height": 656,
+    "height": 314.8,
     "z": 120,
     "tabOrder": 677
   },
@@ -20,110 +20,87 @@
                 "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Device Operational Signals"
+                      "Entity": "Device Inventory Evidence"
                     }
                   },
-                  "Property": "Severity Label"
+                  "Property": "Country Name"
                 }
               },
-              "queryRef": "Device Operational Signals.Severity Label",
-              "nativeQueryRef": "Severity"
-            },
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Device Operational Signals"
-                    }
-                  },
-                  "Property": "Signal"
-                }
-              },
-              "queryRef": "Device Operational Signals.Signal",
-              "nativeQueryRef": "Signal"
+              "queryRef": "Device Inventory Evidence.Country Name",
+              "nativeQueryRef": "Country Name",
+              "active": true
             },
             {
               "field": {
                 "Measure": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Device Operational Signals"
+                      "Entity": "Device Inventory Evidence"
                     }
                   },
-                  "Property": "Affected"
+                  "Property": "Managed Devices"
                 }
               },
-              "queryRef": "Device Operational Signals.Affected",
-              "nativeQueryRef": "Affected"
+              "queryRef": "Device Inventory Evidence.Managed Devices",
+              "nativeQueryRef": "Managed Devices"
             },
             {
               "field": {
                 "Measure": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Device Operational Signals"
+                      "Entity": "Device Inventory Evidence"
                     }
                   },
-                  "Property": "Covered"
+                  "Property": "Noncompliant Devices"
                 }
               },
-              "queryRef": "Device Operational Signals.Covered",
-              "nativeQueryRef": "Covered"
+              "queryRef": "Device Inventory Evidence.Noncompliant Devices",
+              "nativeQueryRef": "Noncompliant Devices"
             },
             {
               "field": {
                 "Measure": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Device Operational Signals"
+                      "Entity": "Device Inventory Evidence"
                     }
                   },
-                  "Property": "Affected (%)"
+                  "Property": "Device Compliance Rate"
                 }
               },
-              "queryRef": "Device Operational Signals.Affected (%)",
-              "nativeQueryRef": "Affected (%)"
+              "queryRef": "Device Inventory Evidence.Device Compliance Rate",
+              "nativeQueryRef": "Device Compliance Rate"
             },
             {
               "field": {
-                "Column": {
+                "Measure": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Device Operational Signals"
+                      "Entity": "Device Inventory Evidence"
                     }
                   },
-                  "Property": "Recommended Action"
+                  "Property": "AD to Intune Match Rate"
                 }
               },
-              "queryRef": "Device Operational Signals.Recommended Action",
-              "nativeQueryRef": "Recommended Action"
+              "queryRef": "Device Inventory Evidence.AD to Intune Match Rate",
+              "nativeQueryRef": "AD to Intune Match Rate"
             }
           ]
         }
-      },
-      "sortDefinition": {
-        "sort": [
-          {
-            "field": {
-              "Column": {
-                "Expression": {
-                  "SourceRef": {
-                    "Entity": "Device Operational Signals"
-                  }
-                },
-                "Property": "Signal"
-              }
-            },
-            "direction": "Ascending"
-          }
-        ]
       }
     },
     "objects": {
       "columnHeaders": [
         {
           "properties": {
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
+            },
             "autoSizeColumnWidth": {
               "expr": {
                 "Literal": {
@@ -135,49 +112,6 @@
               "expr": {
                 "Literal": {
                   "Value": "'growToFit'"
-                }
-              }
-            },
-            "fontSize": {
-              "expr": {
-                "Literal": {
-                  "Value": "11D"
-                }
-              }
-            },
-            "bold": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "wordWrap": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "fontColor": {
-              "solid": {
-                "color": {
-                  "expr": {
-                    "Literal": {
-                      "Value": "'#FFFFFF'"
-                    }
-                  }
-                }
-              }
-            },
-            "backColor": {
-              "solid": {
-                "color": {
-                  "expr": {
-                    "Literal": {
-                      "Value": "'#215E9E'"
-                    }
-                  }
                 }
               }
             }
@@ -257,6 +191,13 @@
                   "Value": "false"
                 }
               }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
             }
           }
         }
@@ -269,7 +210,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Geography · selected evidence'"
+                  "Value": "'Managed devices and compliance by primary-user country'"
                 }
               }
             }
@@ -289,7 +230,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Geography · selected evidence'"
+                  "Value": "'Managed devices and compliance by primary-user country'"
                 }
               }
             },
@@ -445,106 +386,6 @@
       ]
     },
     "drillFilterOtherVisuals": true
-  },
-  "filterConfig": {
-    "filters": [
-      {
-        "name": "d9ed2957862d97074de3",
-        "field": {
-          "Column": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "Device Operational Signals"
-              }
-            },
-            "Property": "Signal"
-          }
-        },
-        "type": "Categorical",
-        "filter": {
-          "Version": 2,
-          "From": [
-            {
-              "Name": "f",
-              "Entity": "Device Operational Signals",
-              "Type": 0
-            }
-          ],
-          "Where": [
-            {
-              "Condition": {
-                "In": {
-                  "Expressions": [
-                    {
-                      "Column": {
-                        "Expression": {
-                          "SourceRef": {
-                            "Source": "f"
-                          }
-                        },
-                        "Property": "Signal"
-                      }
-                    }
-                  ],
-                  "Values": [
-                    [
-                      {
-                        "Literal": {
-                          "Value": "'Noncompliant devices'"
-                        }
-                      }
-                    ],
-                    [
-                      {
-                        "Literal": {
-                          "Value": "'Devices low on disk space'"
-                        }
-                      }
-                    ],
-                    [
-                      {
-                        "Literal": {
-                          "Value": "'Devices approaching low disk threshold'"
-                        }
-                      }
-                    ],
-                    [
-                      {
-                        "Literal": {
-                          "Value": "'Devices not synced with Intune for more than 30 days'"
-                        }
-                      }
-                    ],
-                    [
-                      {
-                        "Literal": {
-                          "Value": "'Secure Boot disabled'"
-                        }
-                      }
-                    ],
-                    [
-                      {
-                        "Literal": {
-                          "Value": "'Device removal candidates'"
-                        }
-                      }
-                    ],
-                    [
-                      {
-                        "Literal": {
-                          "Value": "'AD-to-Intune unmatched devices'"
-                        }
-                      }
-                    ]
-                  ]
-                }
-              }
-            }
-          ]
-        },
-        "howCreated": "User"
-      }
-    ]
   },
   "parentGroupName": "b0b0ebdc53fa0b467e8f"
 }

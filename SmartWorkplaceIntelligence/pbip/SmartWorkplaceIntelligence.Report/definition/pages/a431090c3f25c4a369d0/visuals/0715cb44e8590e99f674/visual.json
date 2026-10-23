@@ -3,9 +3,9 @@
   "name": "0715cb44e8590e99f674",
   "position": {
     "x": 976,
-    "y": 336,
-    "width": 912,
-    "height": 304,
+    "y": 384,
+    "width": 448,
+    "height": 152,
     "z": 109,
     "tabOrder": 684
   },
@@ -102,7 +102,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "10D"
+                  "Value": "11D"
                 }
               }
             }
@@ -131,6 +131,13 @@
                       "Value": "'#F3F7FA'"
                     }
                   }
+                }
+              }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
                 }
               }
             }
@@ -183,6 +190,13 @@
                   }
                 }
               }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
             }
           }
         }
@@ -195,7 +209,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Device Explorer diagnostic context'"
+                  "Value": "'Device context'"
                 }
               }
             }
@@ -215,7 +229,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Device Explorer diagnostic context'"
+                  "Value": "'Device context'"
                 }
               }
             },

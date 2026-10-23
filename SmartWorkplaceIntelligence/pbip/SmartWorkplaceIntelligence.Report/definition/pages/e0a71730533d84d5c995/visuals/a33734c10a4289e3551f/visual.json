@@ -4,7 +4,7 @@
   "position": {
     "x": 96,
     "y": 16,
-    "width": 880,
+    "width": 1080,
     "height": 48,
     "z": 11,
     "tabOrder": 11
@@ -22,7 +22,7 @@
                     "value": "License Overview",
                     "textStyle": {
                       "fontFamily": "Segoe UI Semibold",
-                      "fontSize": "26px",
+                      "fontSize": "24px",
                       "color": "#172B4D",
                       "fontWeight": "bold"
                     }

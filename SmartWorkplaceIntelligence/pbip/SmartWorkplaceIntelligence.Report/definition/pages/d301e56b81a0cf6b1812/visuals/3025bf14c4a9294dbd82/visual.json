@@ -1,39 +1,14 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json",
-  "name": "3025bf14c4a9294dbd82",
   "position": {
-    "x": 1376,
-    "y": 24,
-    "width": 240,
+    "x": 1216,
+    "y": 8,
+    "width": 320,
     "height": 80,
-    "z": 102,
-    "tabOrder": 62
+    "z": 25000,
+    "tabOrder": 10
   },
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.13.0/schema.json",
   "visual": {
-    "visualType": "slicer",
-    "query": {
-      "queryState": {
-        "Values": {
-          "projections": [
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Device Inventory Evidence"
-                    }
-                  },
-                  "Property": "Country Name"
-                }
-              },
-              "queryRef": "Device Inventory Evidence.Country Name",
-              "nativeQueryRef": "Country",
-              "active": true
-            }
-          ]
-        }
-      }
-    },
     "objects": {
       "data": [
         {
@@ -68,7 +43,7 @@
             "textSize": {
               "expr": {
                 "Literal": {
-                  "Value": "10D"
+                  "Value": "11D"
                 }
               }
             },
@@ -82,17 +57,31 @@
                   }
                 }
               }
+            },
+            "fontFamily": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Segoe UI'"
+                }
+              }
             }
           }
         }
       ],
-      "general": [
+      "items": [
         {
           "properties": {
-            "selfFilterEnabled": {
+            "textSize": {
               "expr": {
                 "Literal": {
-                  "Value": "true"
+                  "Value": "11D"
+                }
+              }
+            },
+            "fontFamily": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Segoe UI'"
                 }
               }
             }
@@ -107,7 +96,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Evidence and active scope'"
+                  "Value": "'Filter workforce and devices by country.'"
                 }
               }
             }
@@ -121,31 +110,6 @@
               "expr": {
                 "Literal": {
                   "Value": "false"
-                }
-              }
-            },
-            "text": {
-              "expr": {
-                "Literal": {
-                  "Value": "''"
-                }
-              }
-            },
-            "fontSize": {
-              "expr": {
-                "Literal": {
-                  "Value": "12D"
-                }
-              }
-            },
-            "fontColor": {
-              "solid": {
-                "color": {
-                  "expr": {
-                    "Literal": {
-                      "Value": "'#183153'"
-                    }
-                  }
                 }
               }
             }
@@ -198,16 +162,9 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#CCDCEC'"
+                      "Value": "'#CBD8E5'"
                     }
                   }
-                }
-              }
-            },
-            "radius": {
-              "expr": {
-                "Literal": {
-                  "Value": "8D"
                 }
               }
             },
@@ -215,6 +172,13 @@
               "expr": {
                 "Literal": {
                   "Value": "1D"
+                }
+              }
+            },
+            "radius": {
+              "expr": {
+                "Literal": {
+                  "Value": "12D"
                 }
               }
             }
@@ -268,6 +232,36 @@
           }
         }
       ]
+    },
+    "visualType": "slicer",
+    "query": {
+      "queryState": {
+        "Values": {
+          "projections": [
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Country Selection"
+                    }
+                  },
+                  "Property": "Country"
+                }
+              },
+              "queryRef": "Country Selection.Country",
+              "nativeQueryRef": "Country",
+              "displayName": "Country"
+            }
+          ]
+        }
+      }
+    },
+    "syncGroup": {
+      "groupName": "SharedCountry",
+      "fieldChanges": true,
+      "filterChanges": true
     }
-  }
+  },
+  "name": "3025bf14c4a9294dbd82"
 }

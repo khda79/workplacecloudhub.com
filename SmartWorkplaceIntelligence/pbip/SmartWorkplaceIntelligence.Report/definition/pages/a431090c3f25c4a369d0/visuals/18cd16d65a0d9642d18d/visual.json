@@ -3,7 +3,7 @@
   "name": "18cd16d65a0d9642d18d",
   "position": {
     "x": 32,
-    "y": 312,
+    "y": 360,
     "width": 1856,
     "height": 24,
     "z": 12000,
@@ -19,7 +19,7 @@
               {
                 "textRuns": [
                   {
-                    "value": "Selected view: Native · Device sources",
+                    "value": "Selected view: Native \u00b7 Device sources",
                     "textStyle": {
                       "fontFamily": "Segoe UI",
                       "fontSize": "14px",

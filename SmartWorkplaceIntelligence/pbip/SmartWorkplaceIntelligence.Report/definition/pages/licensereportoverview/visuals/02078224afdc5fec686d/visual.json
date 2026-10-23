@@ -110,7 +110,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "14D"
+                  "Value": "11D"
                 }
               }
             },
@@ -166,7 +166,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "14D"
+                  "Value": "11D"
                 }
               }
             },
@@ -245,7 +245,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Native metrics · qualified source population, not workforce totals'"
+                  "Value": "'Native metrics \u00b7 qualified source population, not workforce totals'"
                 }
               }
             }
@@ -265,7 +265,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Native metrics · qualified source population, not workforce totals'"
+                  "Value": "'Native metrics \u00b7 qualified source population, not workforce totals'"
                 }
               }
             },

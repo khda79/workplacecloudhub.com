@@ -3,10 +3,10 @@
   "name": "b03c892146ea3a8c9829",
   "position": {
     "x": 1304,
-    "y": 112,
+    "y": 208.0,
     "z": 142,
     "width": 584,
-    "height": 128,
+    "height": 114.5,
     "tabOrder": 142
   },
   "visual": {
@@ -102,7 +102,7 @@
             "showBlankAs": {
               "expr": {
                 "Literal": {
-                  "Value": "'—'"
+                  "Value": "'\u2014'"
                 }
               }
             }
@@ -125,7 +125,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "12D"
+                  "Value": "11D"
                 }
               }
             },

@@ -1,5 +1,5 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "c629b5a37c9bee42b737",
   "position": {
     "x": 32,
@@ -11,6 +11,149 @@
   },
   "visual": {
     "visualType": "lineChart",
+    "query": {
+      "queryState": {
+        "Category": {
+          "projections": [
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Daily Axis"
+                    }
+                  },
+                  "Property": "Axis Date"
+                }
+              },
+              "queryRef": "Daily Axis.Axis Date",
+              "nativeQueryRef": "Axis Date",
+              "active": true
+            }
+          ],
+          "showAll": true
+        },
+        "Tooltips": {
+          "projections": [
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Daily Mailbox Trends"
+                    }
+                  },
+                  "Property": "Local Mailbox Size GB Daily"
+                }
+              },
+              "queryRef": "Daily Mailbox Trends.Local Mailbox Size GB Daily",
+              "nativeQueryRef": "Local mailbox size (GB)",
+              "displayName": "Local mailbox size (GB)"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Daily Axis"
+                    }
+                  },
+                  "Property": "Axis Mailbox Reading Day"
+                }
+              },
+              "queryRef": "Daily Axis.Axis Mailbox Reading Day",
+              "nativeQueryRef": "Axis Mailbox Reading Day",
+              "displayName": "Axis Mailbox Reading Day"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Daily Axis"
+                    }
+                  },
+                  "Property": "Axis Mailbox Quality Tooltip"
+                }
+              },
+              "queryRef": "Daily Axis.Axis Mailbox Quality Tooltip",
+              "nativeQueryRef": "Axis Mailbox Quality Tooltip",
+              "displayName": "Axis Mailbox Quality Tooltip"
+            }
+          ]
+        },
+        "Y": {
+          "projections": [
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Daily Axis"
+                    }
+                  },
+                  "Property": "Axis On-premises Mailboxes"
+                }
+              },
+              "queryRef": "Daily Axis.Axis On-premises Mailboxes",
+              "nativeQueryRef": "On-premises",
+              "displayName": "On-premises"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Daily Axis"
+                    }
+                  },
+                  "Property": "Axis Exchange Online Remote"
+                }
+              },
+              "queryRef": "Daily Axis.Axis Exchange Online Remote",
+              "nativeQueryRef": "Exchange Online (remote)",
+              "displayName": "Exchange Online (remote)"
+            }
+          ]
+        },
+        "Y2": {
+          "projections": [
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Daily Axis"
+                    }
+                  },
+                  "Property": "Axis Exchange Online Share"
+                }
+              },
+              "queryRef": "Daily Axis.Axis Exchange Online Share",
+              "nativeQueryRef": "% in Exchange Online",
+              "displayName": "% in Exchange Online"
+            }
+          ]
+        }
+      },
+      "sortDefinition": {
+        "sort": [
+          {
+            "field": {
+              "Column": {
+                "Expression": {
+                  "SourceRef": {
+                    "Entity": "Daily Axis"
+                  }
+                },
+                "Property": "Axis Date"
+              }
+            },
+            "direction": "Ascending"
+          }
+        ]
+      }
+    },
     "objects": {
       "categoryAxis": [
         {
@@ -168,9 +311,6 @@
       ],
       "dataPoint": [
         {
-          "selector": {
-            "metadata": "Daily Axis.Axis On-premises Mailboxes"
-          },
           "properties": {
             "fill": {
               "solid": {
@@ -183,12 +323,12 @@
                 }
               }
             }
+          },
+          "selector": {
+            "metadata": "Daily Axis.Axis On-premises Mailboxes"
           }
         },
         {
-          "selector": {
-            "metadata": "Daily Axis.Axis Exchange Online Remote"
-          },
           "properties": {
             "fill": {
               "solid": {
@@ -201,12 +341,12 @@
                 }
               }
             }
+          },
+          "selector": {
+            "metadata": "Daily Axis.Axis Exchange Online Remote"
           }
         },
         {
-          "selector": {
-            "metadata": "Daily Axis.Axis Exchange Online Share"
-          },
           "properties": {
             "fill": {
               "solid": {
@@ -219,6 +359,9 @@
                 }
               }
             }
+          },
+          "selector": {
+            "metadata": "Daily Axis.Axis Exchange Online Share"
           }
         }
       ],
@@ -280,149 +423,6 @@
         }
       ]
     },
-    "drillFilterOtherVisuals": true,
-    "query": {
-      "queryState": {
-        "Category": {
-          "projections": [
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Daily Axis"
-                    }
-                  },
-                  "Property": "Axis Date"
-                }
-              },
-              "queryRef": "Daily Axis.Axis Date",
-              "nativeQueryRef": "Axis Date"
-            }
-          ],
-          "showAll": true
-        },
-        "Y": {
-          "projections": [
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Daily Axis"
-                    }
-                  },
-                  "Property": "Axis On-premises Mailboxes"
-                }
-              },
-              "queryRef": "Daily Axis.Axis On-premises Mailboxes",
-              "nativeQueryRef": "On-premises",
-              "displayName": "On-premises"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Daily Axis"
-                    }
-                  },
-                  "Property": "Axis Exchange Online Remote"
-                }
-              },
-              "queryRef": "Daily Axis.Axis Exchange Online Remote",
-              "nativeQueryRef": "Exchange Online (remote)",
-              "displayName": "Exchange Online (remote)"
-            }
-          ]
-        },
-        "Y2": {
-          "projections": [
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Daily Axis"
-                    }
-                  },
-                  "Property": "Axis Exchange Online Share"
-                }
-              },
-              "queryRef": "Daily Axis.Axis Exchange Online Share",
-              "nativeQueryRef": "% in Exchange Online",
-              "displayName": "% in Exchange Online"
-            }
-          ]
-        },
-        "Tooltips": {
-          "projections": [
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Daily Mailbox Trends"
-                    }
-                  },
-                  "Property": "Local Mailbox Size GB Daily"
-                }
-              },
-              "queryRef": "Daily Mailbox Trends.Local Mailbox Size GB Daily",
-              "nativeQueryRef": "Local mailbox size (GB)",
-              "displayName": "Local mailbox size (GB)"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Daily Axis"
-                    }
-                  },
-                  "Property": "Axis Mailbox Reading Day"
-                }
-              },
-              "queryRef": "Daily Axis.Axis Mailbox Reading Day",
-              "nativeQueryRef": "Axis Mailbox Reading Day",
-              "displayName": "Axis Mailbox Reading Day"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Daily Axis"
-                    }
-                  },
-                  "Property": "Axis Mailbox Quality Tooltip"
-                }
-              },
-              "queryRef": "Daily Axis.Axis Mailbox Quality Tooltip",
-              "nativeQueryRef": "Axis Mailbox Quality Tooltip",
-              "displayName": "Axis Mailbox Quality Tooltip"
-            }
-          ]
-        }
-      },
-      "sortDefinition": {
-        "sort": [
-          {
-            "field": {
-              "Column": {
-                "Expression": {
-                  "SourceRef": {
-                    "Entity": "Daily Axis"
-                  }
-                },
-                "Property": "Axis Date"
-              }
-            },
-            "direction": "Ascending"
-          }
-        ]
-      }
-    },
     "visualContainerObjects": {
       "title": [
         {
@@ -437,7 +437,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Mailbox migration · on-premises and Exchange Online'"
+                  "Value": "'Mailboxes - on-premises and Exchange Online'"
                 }
               }
             },
@@ -637,7 +637,8 @@
           }
         }
       ]
-    }
+    },
+    "drillFilterOtherVisuals": true
   },
   "filterConfig": {
     "filters": [

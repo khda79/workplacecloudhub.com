@@ -1,5 +1,5 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.13.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "059be073a33b8aaec6de",
   "position": {
     "x": 0,
@@ -12,5 +12,6 @@
   "visualGroup": {
     "displayName": "Content detail",
     "groupMode": "ScaleMode"
-  }
+  },
+  "isHidden": true
 }

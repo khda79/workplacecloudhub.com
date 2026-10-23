@@ -3,10 +3,10 @@
   "name": "b6930250059a16161dad",
   "position": {
     "x": 1357,
-    "y": 816,
+    "y": 829.1,
     "z": 113,
     "width": 322,
-    "height": 24,
+    "height": 22.5,
     "tabOrder": 113
   },
   "visual": {
@@ -19,7 +19,7 @@
               {
                 "textRuns": [
                   {
-                    "value": "Selected-scope activity · last 30 days",
+                    "value": "Selected-scope activity \u00b7 last 30 days",
                     "textStyle": {
                       "fontFamily": "Segoe UI Semibold",
                       "fontSize": "13px",

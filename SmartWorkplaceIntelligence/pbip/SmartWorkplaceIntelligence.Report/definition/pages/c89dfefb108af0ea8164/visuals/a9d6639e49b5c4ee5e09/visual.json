@@ -3,9 +3,9 @@
   "name": "a9d6639e49b5c4ee5e09",
   "position": {
     "x": 96,
-    "y": 88,
-    "width": 640,
-    "height": 32,
+    "y": 80,
+    "width": 1080,
+    "height": 48,
     "z": 101,
     "tabOrder": 145
   },
@@ -19,10 +19,10 @@
               {
                 "textRuns": [
                   {
-                    "value": "Cloud Content & Storage · BETA 1.0.0-beta.1 · current private SharePoint inventory · OneDrive usage freshness shown · SharePoint weekly history",
+                    "value": "Cloud Content & Storage | current private SharePoint inventory \u00b7 OneDrive usage freshness shown \u00b7 SharePoint weekly history",
                     "textStyle": {
                       "fontFamily": "Segoe UI",
-                      "fontSize": "13px",
+                      "fontSize": "14px",
                       "color": "#52606D"
                     }
                   }
@@ -55,13 +55,6 @@
               "expr": {
                 "Literal": {
                   "Value": "false"
-                }
-              }
-            },
-            "radius": {
-              "expr": {
-                "Literal": {
-                  "Value": "0D"
                 }
               }
             }

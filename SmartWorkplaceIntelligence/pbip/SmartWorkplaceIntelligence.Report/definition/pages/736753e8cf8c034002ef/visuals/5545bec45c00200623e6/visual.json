@@ -2,9 +2,9 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json",
   "name": "5545bec45c00200623e6",
   "position": {
-    "x": 776,
+    "x": 1296,
     "y": 336,
-    "width": 1112,
+    "width": 592,
     "height": 360,
     "z": 121,
     "tabOrder": 680
@@ -267,7 +267,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Local mailbox stock · 90 days · PROVISIONAL weekly buckets'"
+                  "Value": "'Local mailbox stock \u00b7 90 days \u00b7 PROVISIONAL weekly buckets'"
                 }
               }
             },
@@ -414,7 +414,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Local mailbox stock · 90 days · PROVISIONAL weekly buckets'"
+                  "Value": "'Local mailbox stock \u00b7 90 days \u00b7 PROVISIONAL weekly buckets'"
                 }
               }
             }

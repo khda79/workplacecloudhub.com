@@ -3,7 +3,7 @@
   "name": "37f66a987cc1329cae79",
   "position": {
     "x": 1250,
-    "y": 712,
+    "y": 626.9,
     "z": 115,
     "width": 429,
     "height": 18,
@@ -19,7 +19,7 @@
               {
                 "textRuns": [
                   {
-                    "value": "Active Object Rate · observed history when available",
+                    "value": "Active Object Rate \u00b7 observed history when available",
                     "textStyle": {
                       "fontFamily": "Segoe UI",
                       "fontSize": "10px",

@@ -108,7 +108,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "27D"
+                  "Value": "20D"
                 }
               }
             },
@@ -170,7 +170,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "12D"
+                  "Value": "11D"
                 }
               }
             },

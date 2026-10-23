@@ -3,9 +3,9 @@
   "name": "77ce8402fc8d7097f7a9",
   "position": {
     "x": 976,
-    "y": 664,
+    "y": 686.7,
     "width": 912,
-    "height": 328,
+    "height": 307.3,
     "z": 124,
     "tabOrder": 1340
   },
@@ -20,47 +20,15 @@
                 "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Date"
+                      "Entity": "Windows Lifecycle Trend Evidence"
                     }
                   },
-                  "Property": "Date"
+                  "Property": "Snapshot Date"
                 }
               },
-              "queryRef": "Date.Date",
-              "nativeQueryRef": "Date",
+              "queryRef": "Windows Lifecycle Trend Evidence.Snapshot Date",
+              "nativeQueryRef": "Snapshot Date",
               "active": true
-            }
-          ]
-        },
-        "Tooltips": {
-          "projections": [
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Executive KPI Trends"
-                    }
-                  },
-                  "Property": "# Devices Monthly Delta"
-                }
-              },
-              "queryRef": "Executive KPI Trends.# Devices Monthly Delta",
-              "nativeQueryRef": "# Devices Monthly Delta"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Executive KPI Trends"
-                    }
-                  },
-                  "Property": "Executive Trend Evidence Status"
-                }
-              },
-              "queryRef": "Executive KPI Trends.Executive Trend Evidence Status",
-              "nativeQueryRef": "Executive Trend Evidence Status"
             }
           ]
         },
@@ -71,14 +39,14 @@
                 "Measure": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Executive KPI Trends"
+                      "Entity": "Windows Lifecycle Trend Evidence"
                     }
                   },
-                  "Property": "# Devices Trend"
+                  "Property": "Trend Managed Devices"
                 }
               },
-              "queryRef": "Executive KPI Trends.# Devices Trend",
-              "nativeQueryRef": "# Devices Trend"
+              "queryRef": "Windows Lifecycle Trend Evidence.Trend Managed Devices",
+              "nativeQueryRef": "Trend Managed Devices"
             }
           ]
         }
@@ -90,10 +58,10 @@
               "Column": {
                 "Expression": {
                   "SourceRef": {
-                    "Entity": "Date"
+                    "Entity": "Windows Lifecycle Trend Evidence"
                   }
                 },
-                "Property": "Date"
+                "Property": "Snapshot Date"
               }
             },
             "direction": "Ascending"
@@ -280,7 +248,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'lineChart'"
+                  "Value": "'Managed devices - observed inventory history'"
                 }
               }
             }
@@ -300,7 +268,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Managed devices · recorded history'"
+                  "Value": "'Managed devices - observed inventory history'"
                 }
               }
             },

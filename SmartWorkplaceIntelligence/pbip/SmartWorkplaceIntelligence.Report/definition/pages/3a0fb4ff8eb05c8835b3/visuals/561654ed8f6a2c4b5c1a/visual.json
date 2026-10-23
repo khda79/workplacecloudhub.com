@@ -3,7 +3,7 @@
   "name": "561654ed8f6a2c4b5c1a",
   "position": {
     "x": 32,
-    "y": 440,
+    "y": 480,
     "width": 1856,
     "height": 80,
     "z": 12000,
@@ -29,6 +29,21 @@
               "queryRef": "AD User Evidence.DisplayName",
               "nativeQueryRef": "DisplayName",
               "active": true
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "AD User Evidence"
+                    }
+                  },
+                  "Property": "ModificationUtcDateTime"
+                }
+              },
+              "queryRef": "AD User Evidence.ModificationUtcDateTime",
+              "nativeQueryRef": "ModificationUtcDateTime",
+              "displayName": "ModificationUtcDateTime"
             }
           ]
         }
@@ -61,14 +76,14 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Native selection · AD users'"
+                  "Value": "'Native selection \u00b7 AD users'"
                 }
               }
             },
             "textSize": {
               "expr": {
                 "Literal": {
-                  "Value": "10D"
+                  "Value": "11D"
                 }
               }
             },
@@ -96,6 +111,22 @@
                 }
               }
             }
+          }
+        }
+      ],
+      "items": [
+        {
+          "properties": {
+            "textSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
+            }
+          },
+          "selector": {
+            "id": "default"
           }
         }
       ]

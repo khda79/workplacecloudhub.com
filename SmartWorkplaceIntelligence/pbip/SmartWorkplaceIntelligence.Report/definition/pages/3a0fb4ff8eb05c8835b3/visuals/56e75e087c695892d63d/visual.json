@@ -3,9 +3,9 @@
   "name": "56e75e087c695892d63d",
   "position": {
     "x": 32,
-    "y": 536,
+    "y": 566.8,
     "width": 1856,
-    "height": 456,
+    "height": 427.2,
     "z": 12000,
     "tabOrder": 544
   },
@@ -42,20 +42,6 @@
               },
               "queryRef": "AD Group Evidence.TenantADGroupKey",
               "nativeQueryRef": "TenantADGroupKey"
-            },
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "AD Group Evidence"
-                    }
-                  },
-                  "Property": "ObjectGUID"
-                }
-              },
-              "queryRef": "AD Group Evidence.ObjectGUID",
-              "nativeQueryRef": "ObjectGUID"
             },
             {
               "field": {
@@ -266,6 +252,20 @@
               },
               "queryRef": "AD Group Evidence.TenantId",
               "nativeQueryRef": "TenantId"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "AD Group Evidence"
+                    }
+                  },
+                  "Property": "ObjectGUID"
+                }
+              },
+              "queryRef": "AD Group Evidence.ObjectGUID",
+              "nativeQueryRef": "ObjectGUID"
             }
           ]
         }
@@ -278,7 +278,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "14D"
+                  "Value": "11D"
                 }
               }
             },
@@ -334,7 +334,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "14D"
+                  "Value": "11D"
                 }
               }
             },
@@ -413,7 +413,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'AD groups · complete governed fields'"
+                  "Value": "'AD groups \u00b7 complete governed fields'"
                 }
               }
             }
@@ -433,7 +433,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'AD groups · complete governed fields'"
+                  "Value": "'AD groups \u00b7 complete governed fields'"
                 }
               }
             },
@@ -604,7 +604,7 @@
                 "Entity": "AD Group Evidence"
               }
             },
-            "Property": "Native Context Rows · AD Group Evidence"
+            "Property": "Native Context Rows \u00b7 AD Group Evidence"
           }
         },
         "type": "Advanced",
@@ -629,7 +629,7 @@
                           "Source": "c"
                         }
                       },
-                      "Property": "Native Context Rows · AD Group Evidence"
+                      "Property": "Native Context Rows \u00b7 AD Group Evidence"
                     }
                   },
                   "Right": {

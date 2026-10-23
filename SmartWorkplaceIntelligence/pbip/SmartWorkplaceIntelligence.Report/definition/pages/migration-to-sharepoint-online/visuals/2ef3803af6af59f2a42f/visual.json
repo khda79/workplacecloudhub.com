@@ -1,15 +1,14 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "2ef3803af6af59f2a42f",
   "position": {
-    "x": 32,
-    "y": 408,
+    "x": 56,
+    "y": 551.6,
+    "z": 0,
+    "height": 257.0,
     "width": 1200,
-    "height": 256,
-    "z": 33,
     "tabOrder": 33
   },
-  "parentGroupName": "7550e0fb27d1e79d9d99",
   "visual": {
     "visualType": "lineChart",
     "query": {
@@ -29,41 +28,8 @@
               },
               "queryRef": "SPO Migration Snapshot Date.Date",
               "nativeQueryRef": "Date",
+              "active": true,
               "displayName": "Date"
-            }
-          ]
-        },
-        "Y": {
-          "projections": [
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "SPO Migration History"
-                    }
-                  },
-                  "Property": "SPO Historical Reported Done"
-                }
-              },
-              "queryRef": "SPO Migration History.SPO Historical Reported Done",
-              "nativeQueryRef": "Historical Reported Done",
-              "displayName": "Historical Reported Done"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "SPO Migration History"
-                    }
-                  },
-                  "Property": "SPO Historical Validated Done"
-                }
-              },
-              "queryRef": "SPO Migration History.SPO Historical Validated Done",
-              "nativeQueryRef": "Historical Validated Done",
-              "displayName": "Historical Validated Done"
             }
           ]
         },
@@ -113,6 +79,40 @@
               "queryRef": "SPO Migration History.SPO Historical Removed Operations",
               "nativeQueryRef": "Historical Removed Operations",
               "displayName": "Historical Removed Operations"
+            }
+          ]
+        },
+        "Y": {
+          "projections": [
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "SPO Migration History"
+                    }
+                  },
+                  "Property": "SPO Historical Reported Done"
+                }
+              },
+              "queryRef": "SPO Migration History.SPO Historical Reported Done",
+              "nativeQueryRef": "Historical Reported Done",
+              "displayName": "Historical Reported Done"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "SPO Migration History"
+                    }
+                  },
+                  "Property": "SPO Historical Validated Done"
+                }
+              },
+              "queryRef": "SPO Migration History.SPO Historical Validated Done",
+              "nativeQueryRef": "Historical Validated Done",
+              "displayName": "Historical Validated Done"
             }
           ]
         }
@@ -196,9 +196,6 @@
       ],
       "dataPoint": [
         {
-          "selector": {
-            "metadata": "SPO Migration History.SPO Historical Reported Done"
-          },
           "properties": {
             "fill": {
               "solid": {
@@ -211,12 +208,12 @@
                 }
               }
             }
+          },
+          "selector": {
+            "metadata": "SPO Migration History.SPO Historical Reported Done"
           }
         },
         {
-          "selector": {
-            "metadata": "SPO Migration History.SPO Historical Validated Done"
-          },
           "properties": {
             "fill": {
               "solid": {
@@ -229,6 +226,9 @@
                 }
               }
             }
+          },
+          "selector": {
+            "metadata": "SPO Migration History.SPO Historical Validated Done"
           }
         }
       ],
@@ -288,7 +288,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "14D"
+                  "Value": "12D"
                 }
               }
             },
@@ -297,9 +297,16 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#183153'"
+                      "Value": "'#1F2937'"
                     }
                   }
+                }
+              }
+            },
+            "bold": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
                 }
               }
             }
@@ -352,16 +359,9 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#CCDCEC'"
+                      "Value": "'#CBD8E5'"
                     }
                   }
-                }
-              }
-            },
-            "radius": {
-              "expr": {
-                "Literal": {
-                  "Value": "8D"
                 }
               }
             },
@@ -369,6 +369,13 @@
               "expr": {
                 "Literal": {
                   "Value": "1D"
+                }
+              }
+            },
+            "radius": {
+              "expr": {
+                "Literal": {
+                  "Value": "12D"
                 }
               }
             }
@@ -395,14 +402,14 @@
             "left": {
               "expr": {
                 "Literal": {
-                  "Value": "8D"
+                  "Value": "10D"
                 }
               }
             },
             "right": {
               "expr": {
                 "Literal": {
-                  "Value": "8D"
+                  "Value": "10D"
                 }
               }
             }
@@ -415,7 +422,7 @@
             "show": {
               "expr": {
                 "Literal": {
-                  "Value": "true"
+                  "Value": "false"
                 }
               }
             }
@@ -437,5 +444,7 @@
       ]
     },
     "drillFilterOtherVisuals": true
-  }
+  },
+  "parentGroupName": "b2deaadb9550a5b30275",
+  "isHidden": true
 }

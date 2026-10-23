@@ -3,9 +3,9 @@
   "name": "a33407434b78f72b829c",
   "position": {
     "x": 32,
-    "y": 608,
+    "y": 673.3,
     "width": 1856,
-    "height": 384,
+    "height": 343.6,
     "z": 25,
     "tabOrder": 1216
   },
@@ -247,7 +247,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "12D"
+                  "Value": "11D"
                 }
               }
             },
@@ -314,6 +314,13 @@
                   "Value": "false"
                 }
               }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
             }
           }
         }
@@ -326,7 +333,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Tenant-wide optimization signals · not product-filtered'"
+                  "Value": "'Tenant-wide optimization signals \u00b7 not product-filtered'"
                 }
               }
             }
@@ -346,7 +353,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Tenant-wide optimization signals · not product-filtered'"
+                  "Value": "'Tenant-wide optimization signals \u00b7 not product-filtered'"
                 }
               }
             },

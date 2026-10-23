@@ -3,7 +3,7 @@
   "name": "192526fca9eb7f83ed92",
   "position": {
     "x": 1357,
-    "y": 712,
+    "y": 643.7,
     "z": 115,
     "width": 322,
     "height": 18,
@@ -19,7 +19,7 @@
               {
                 "textRuns": [
                   {
-                    "value": "Exchange Online Adoption · observed history when available",
+                    "value": "Exchange Online Adoption \u00b7 observed history when available",
                     "textStyle": {
                       "fontFamily": "Segoe UI",
                       "fontSize": "10px",

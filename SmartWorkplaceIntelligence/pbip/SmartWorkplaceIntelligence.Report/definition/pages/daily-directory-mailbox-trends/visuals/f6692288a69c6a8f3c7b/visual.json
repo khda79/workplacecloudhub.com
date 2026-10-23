@@ -4,7 +4,7 @@
   "position": {
     "x": 88,
     "y": 78,
-    "width": 1800,
+    "width": 1080,
     "height": 30,
     "z": 3,
     "tabOrder": 3
@@ -22,7 +22,7 @@
                     "value": "All AD user account types; distinct from the Executive workforce population.",
                     "textStyle": {
                       "fontFamily": "Segoe UI",
-                      "fontSize": "12pt",
+                      "fontSize": "14px",
                       "color": "#526781"
                     }
                   }

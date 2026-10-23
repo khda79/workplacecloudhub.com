@@ -3,9 +3,9 @@
   "name": "096a75e9447c9d630c13",
   "position": {
     "x": 32,
-    "y": 336,
+    "y": 379.5,
     "width": 912,
-    "height": 152,
+    "height": 128,
     "z": 119,
     "tabOrder": 677
   },
@@ -61,7 +61,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "28D"
+                  "Value": "20D"
                 }
               }
             },
@@ -116,7 +116,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "14D"
+                  "Value": "11D"
                 }
               }
             },
@@ -289,6 +289,27 @@
                   "Value": "0L"
                 }
               }
+            },
+            "rowCount": {
+              "expr": {
+                "Literal": {
+                  "Value": "1L"
+                }
+              }
+            },
+            "columnCount": {
+              "expr": {
+                "Literal": {
+                  "Value": "2L"
+                }
+              }
+            },
+            "autoGrid": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
             }
           },
           "selector": {
@@ -385,7 +406,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Secure Boot Healthy (%) · Code Integrity Healthy (%)'"
+                  "Value": "'Secure Boot Healthy (%) \u00b7 Code Integrity Healthy (%)'"
                 }
               }
             },
@@ -505,14 +526,14 @@
             "top": {
               "expr": {
                 "Literal": {
-                  "Value": "8D"
+                  "Value": "0D"
                 }
               }
             },
             "bottom": {
               "expr": {
                 "Literal": {
-                  "Value": "8D"
+                  "Value": "0D"
                 }
               }
             },

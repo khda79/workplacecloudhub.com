@@ -3,7 +3,7 @@
   "name": "bf0b5997a29aa9381aad",
   "position": {
     "x": 32,
-    "y": 440,
+    "y": 480,
     "width": 1856,
     "height": 80,
     "z": 12000,
@@ -61,14 +61,14 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Native selection · AD groups'"
+                  "Value": "'Native selection \u00b7 AD groups'"
                 }
               }
             },
             "textSize": {
               "expr": {
                 "Literal": {
-                  "Value": "10D"
+                  "Value": "11D"
                 }
               }
             },
@@ -96,6 +96,22 @@
                 }
               }
             }
+          }
+        }
+      ],
+      "items": [
+        {
+          "properties": {
+            "textSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
+            }
+          },
+          "selector": {
+            "id": "default"
           }
         }
       ]

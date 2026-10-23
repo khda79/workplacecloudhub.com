@@ -4,7 +4,7 @@
   "position": {
     "x": 96,
     "y": 88,
-    "width": 760,
+    "width": 1080,
     "height": 32,
     "z": 101,
     "tabOrder": 145
@@ -19,10 +19,10 @@
               {
                 "textRuns": [
                   {
-                    "value": "Windows Lifecycle · BETA 1.0.0-beta.1 · current private source-backed evidence",
+                    "value": "Windows Lifecycle | current private source-backed evidence",
                     "textStyle": {
                       "fontFamily": "Segoe UI",
-                      "fontSize": "13px",
+                      "fontSize": "14px",
                       "color": "#52606D"
                     }
                   }

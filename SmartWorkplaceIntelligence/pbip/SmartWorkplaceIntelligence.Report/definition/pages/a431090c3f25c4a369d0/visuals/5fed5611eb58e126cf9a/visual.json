@@ -3,7 +3,7 @@
   "name": "5fed5611eb58e126cf9a",
   "position": {
     "x": 32,
-    "y": 312,
+    "y": 360,
     "width": 1856,
     "height": 24,
     "z": 12000,
@@ -19,7 +19,7 @@
               {
                 "textRuns": [
                   {
-                    "value": "Selected view: Native · Managed identities",
+                    "value": "Selected view: Native \u00b7 Managed identities",
                     "textStyle": {
                       "fontFamily": "Segoe UI",
                       "fontSize": "14px",

@@ -1,12 +1,12 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.13.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "52a6128d35b42640ef20",
   "position": {
     "x": 32,
     "y": 680,
-    "width": 1856,
-    "height": 136,
     "z": 40,
+    "height": 136,
+    "width": 1856,
     "tabOrder": 40
   },
   "visual": {
@@ -27,7 +27,8 @@
                 }
               },
               "queryRef": "Daily Domain.Domain",
-              "nativeQueryRef": "Domain"
+              "nativeQueryRef": "Domain",
+              "active": true
             }
           ]
         },
@@ -123,7 +124,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "12D"
+                  "Value": "11D"
                 }
               }
             },
@@ -150,7 +151,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "12D"
+                  "Value": "11D"
                 }
               }
             },
@@ -164,14 +165,14 @@
             "autoSizeColumnWidth": {
               "expr": {
                 "Literal": {
-                  "Value": "false"
+                  "Value": "true"
                 }
               }
             },
             "columnAdjustment": {
               "expr": {
                 "Literal": {
-                  "Value": "'fixedWidth'"
+                  "Value": "'fitToContent'"
                 }
               }
             },
@@ -191,7 +192,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "12D"
+                  "Value": "11D"
                 }
               }
             },
@@ -215,7 +216,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "12D"
+                  "Value": "11D"
                 }
               }
             },

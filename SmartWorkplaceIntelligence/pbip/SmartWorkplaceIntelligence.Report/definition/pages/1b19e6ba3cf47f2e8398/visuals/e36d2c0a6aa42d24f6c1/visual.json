@@ -1,12 +1,12 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "e36d2c0a6aa42d24f6c1",
   "position": {
     "x": 32,
-    "y": 312,
-    "width": 1856,
-    "height": 24,
+    "y": 269,
     "z": 119,
+    "height": 22.5,
+    "width": 1856,
     "tabOrder": 629
   },
   "visual": {
@@ -21,10 +21,10 @@
                   {
                     "value": "Selected view: Archive and capacity",
                     "textStyle": {
+                      "fontWeight": "bold",
                       "fontFamily": "Segoe UI",
                       "fontSize": "12pt",
-                      "color": "#215E9E",
-                      "fontWeight": "bold"
+                      "color": "#215e9e"
                     }
                   }
                 ]

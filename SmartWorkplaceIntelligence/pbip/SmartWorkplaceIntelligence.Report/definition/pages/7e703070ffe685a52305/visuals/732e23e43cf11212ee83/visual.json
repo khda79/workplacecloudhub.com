@@ -3,9 +3,9 @@
   "name": "732e23e43cf11212ee83",
   "position": {
     "x": 32,
-    "y": 336,
+    "y": 291.5,
     "width": 1856,
-    "height": 656,
+    "height": 702.5,
     "z": 112,
     "tabOrder": 677
   },
@@ -271,6 +271,13 @@
                   "Value": "false"
                 }
               }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
             }
           }
         }
@@ -283,7 +290,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Full inventory · selected evidence'"
+                  "Value": "'Full inventory \u00b7 selected evidence'"
                 }
               }
             }
@@ -303,7 +310,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Full inventory · selected evidence'"
+                  "Value": "'Full inventory \u00b7 selected evidence'"
                 }
               }
             },

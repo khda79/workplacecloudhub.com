@@ -4,7 +4,7 @@
   "position": {
     "x": 96,
     "y": 24,
-    "width": 1792,
+    "width": 1080,
     "height": 56,
     "z": 200,
     "tabOrder": 201
@@ -19,10 +19,10 @@
               {
                 "textRuns": [
                   {
-                    "value": "Which workplace domains need operational attention?",
+                    "value": "Operational Overview",
                     "textStyle": {
                       "fontFamily": "Segoe UI",
-                      "fontSize": "20pt",
+                      "fontSize": "24px",
                       "color": "#172b4d",
                       "fontWeight": "bold"
                     }

@@ -3,7 +3,7 @@
   "name": "677a03a28580e0ac4ee9",
   "position": {
     "x": 32,
-    "y": 400,
+    "y": 368,
     "z": 111,
     "height": 592,
     "width": 1856,
@@ -281,7 +281,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "12D"
+                  "Value": "11D"
                 }
               }
             },
@@ -352,6 +352,13 @@
                   "Value": "false"
                 }
               }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
             }
           }
         },
@@ -371,6 +378,13 @@
               "expr": {
                 "Literal": {
                   "Value": "false"
+                }
+              }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
                 }
               }
             }
@@ -394,6 +408,13 @@
                   "Value": "false"
                 }
               }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
             }
           }
         }
@@ -406,7 +427,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Classification evidence · selected evidence'"
+                  "Value": "'Classification evidence \u00b7 selected evidence'"
                 }
               }
             }
@@ -426,7 +447,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Classification evidence · selected evidence'"
+                  "Value": "'Classification evidence \u00b7 selected evidence'"
                 }
               }
             },

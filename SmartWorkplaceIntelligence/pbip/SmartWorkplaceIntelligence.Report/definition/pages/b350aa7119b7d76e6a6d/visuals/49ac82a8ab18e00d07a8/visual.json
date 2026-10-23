@@ -266,7 +266,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "12D"
+                  "Value": "11D"
                 }
               }
             },
@@ -337,6 +337,13 @@
                   "Value": "false"
                 }
               }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
             }
           }
         },
@@ -356,6 +363,13 @@
               "expr": {
                 "Literal": {
                   "Value": "false"
+                }
+              }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
                 }
               }
             }
@@ -379,6 +393,13 @@
                   "Value": "false"
                 }
               }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
             }
           }
         }
@@ -391,7 +412,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Usage evidence · selected evidence'"
+                  "Value": "'Usage evidence \u00b7 selected evidence'"
                 }
               }
             }
@@ -411,7 +432,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Usage evidence · selected evidence'"
+                  "Value": "'Usage evidence \u00b7 selected evidence'"
                 }
               }
             },

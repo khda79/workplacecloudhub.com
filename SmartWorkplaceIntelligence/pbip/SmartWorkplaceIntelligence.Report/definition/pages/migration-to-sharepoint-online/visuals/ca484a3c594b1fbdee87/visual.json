@@ -1,15 +1,14 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "ca484a3c594b1fbdee87",
   "position": {
-    "x": 32,
-    "y": 696,
-    "width": 1856,
-    "height": 352,
-    "z": 40,
+    "x": 56,
+    "y": 868,
+    "z": 6000,
+    "height": 320,
+    "width": 1808,
     "tabOrder": 40
   },
-  "parentGroupName": "7f7ae1df82dd67fc332f",
   "visual": {
     "visualType": "tableEx",
     "query": {
@@ -198,7 +197,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "12D"
+                  "Value": "11D"
                 }
               }
             },
@@ -240,7 +239,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "14D"
+                  "Value": "11D"
                 }
               }
             },
@@ -307,6 +306,13 @@
                   "Value": "false"
                 }
               }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
             }
           }
         }
@@ -326,14 +332,14 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Source / target evidence — approvals, observation and next action'"
+                  "Value": "'Source / target evidence \u2014 approvals, observation and next action'"
                 }
               }
             },
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "14D"
+                  "Value": "12D"
                 }
               }
             },
@@ -342,9 +348,16 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#183153'"
+                      "Value": "'#1F2937'"
                     }
                   }
+                }
+              }
+            },
+            "bold": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
                 }
               }
             }
@@ -397,16 +410,9 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#CCDCEC'"
+                      "Value": "'#CBD8E5'"
                     }
                   }
-                }
-              }
-            },
-            "radius": {
-              "expr": {
-                "Literal": {
-                  "Value": "8D"
                 }
               }
             },
@@ -414,6 +420,13 @@
               "expr": {
                 "Literal": {
                   "Value": "1D"
+                }
+              }
+            },
+            "radius": {
+              "expr": {
+                "Literal": {
+                  "Value": "12D"
                 }
               }
             }
@@ -440,14 +453,14 @@
             "left": {
               "expr": {
                 "Literal": {
-                  "Value": "8D"
+                  "Value": "10D"
                 }
               }
             },
             "right": {
               "expr": {
                 "Literal": {
-                  "Value": "8D"
+                  "Value": "10D"
                 }
               }
             }
@@ -460,7 +473,7 @@
             "show": {
               "expr": {
                 "Literal": {
-                  "Value": "true"
+                  "Value": "false"
                 }
               }
             }
@@ -473,7 +486,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Source / target evidence — approvals, observation and next action'"
+                  "Value": "'Source / target evidence \u2014 approvals, observation and next action'"
                 }
               }
             }
@@ -496,6 +509,7 @@
     },
     "drillFilterOtherVisuals": true
   },
+  "parentGroupName": "7f7ae1df82dd67fc332f",
   "filterConfig": {
     "filters": [
       {

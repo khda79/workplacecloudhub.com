@@ -3,9 +3,9 @@
   "name": "445daee32dbb7c7b07fe",
   "position": {
     "x": 32,
-    "y": 664,
+    "y": 624,
     "z": 130,
-    "height": 328,
+    "height": 368,
     "width": 1856,
     "tabOrder": 700
   },
@@ -276,6 +276,13 @@
                   "Value": "false"
                 }
               }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
             }
           }
         }
@@ -308,7 +315,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Windows readiness review · reported Secure Boot, firmware and restart observations'"
+                  "Value": "'Windows readiness review \u00b7 reported Secure Boot, firmware and restart observations'"
                 }
               }
             },

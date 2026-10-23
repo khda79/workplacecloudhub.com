@@ -3,9 +3,9 @@
   "name": "cdad406802de4cb5a758",
   "position": {
     "x": 32,
-    "y": 704,
+    "y": 656,
     "z": 181,
-    "height": 288,
+    "height": 336,
     "width": 1856,
     "tabOrder": 678
   },
@@ -271,6 +271,78 @@
             }
           }
         }
+      ],
+      "columnFormatting": [
+        {
+          "selector": {
+            "metadata": "User Inventory Evidence.Job Title"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "User Inventory Evidence.Enabled Workforce Accounts"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        }
       ]
     },
     "visualContainerObjects": {
@@ -280,7 +352,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Job titles requiring review · enabled accounts by classification status. Account populations are disjoint; a job title may occur in both tables.'"
+                  "Value": "'Job titles requiring review \u00b7 enabled accounts by classification status. Account populations are disjoint; a job title may occur in both tables.'"
                 }
               }
             }
@@ -300,7 +372,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Job titles requiring review · enabled accounts by classification status'"
+                  "Value": "'Job titles requiring review \u00b7 enabled accounts by classification status'"
                 }
               }
             },

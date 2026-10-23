@@ -2,10 +2,10 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
   "name": "65d547ab4cf8435d9c1a",
   "position": {
-    "x": 296,
-    "y": 112,
-    "width": 248,
-    "height": 96,
+    "x": 248,
+    "y": 208.0,
+    "width": 296,
+    "height": 107.4,
     "z": 121,
     "tabOrder": 121
   },
@@ -41,7 +41,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "22D"
+                  "Value": "20D"
                 }
               }
             },
@@ -502,37 +502,7 @@
             "show": {
               "expr": {
                 "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "text": {
-              "expr": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "License Report Qualification"
-                    }
-                  },
-                  "Property": "License Qualification Label"
-                }
-              }
-            },
-            "fontSize": {
-              "expr": {
-                "Literal": {
-                  "Value": "10D"
-                }
-              }
-            },
-            "fontColor": {
-              "solid": {
-                "color": {
-                  "expr": {
-                    "Literal": {
-                      "Value": "'#52606D'"
-                    }
-                  }
+                  "Value": "false"
                 }
               }
             }

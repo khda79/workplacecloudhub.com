@@ -1,15 +1,14 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "fc08a8dcc7176859dd02",
   "position": {
-    "x": 664,
-    "y": 208,
-    "width": 592,
-    "height": 128,
-    "z": 18,
+    "x": 516,
+    "y": 322.5,
+    "z": 1000,
+    "height": 114.5,
+    "width": 428,
     "tabOrder": 18
   },
-  "parentGroupName": "f5fc2692f3f5f70933fa",
   "visual": {
     "visualType": "cardVisual",
     "query": {
@@ -24,12 +23,12 @@
                       "Entity": "SPO Migration Plan"
                     }
                   },
-                  "Property": "SPO Validated Progress"
+                  "Property": "SPO Overdue"
                 }
               },
-              "queryRef": "SPO Migration Plan.SPO Validated Progress",
-              "nativeQueryRef": "Validated Progress",
-              "displayName": "Validated Progress"
+              "queryRef": "SPO Migration Plan.SPO Overdue",
+              "nativeQueryRef": "Overdue migrations",
+              "displayName": "Overdue migrations"
             }
           ]
         }
@@ -38,14 +37,11 @@
     "objects": {
       "value": [
         {
-          "selector": {
-            "id": "default"
-          },
           "properties": {
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "24D"
+                  "Value": "20D"
                 }
               }
             },
@@ -54,7 +50,7 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#107C10'"
+                      "Value": "'#1F3B5D'"
                     }
                   }
                 }
@@ -81,14 +77,14 @@
                 }
               }
             }
+          },
+          "selector": {
+            "id": "default"
           }
         }
       ],
       "label": [
         {
-          "selector": {
-            "id": "default"
-          },
           "properties": {
             "show": {
               "expr": {
@@ -96,15 +92,22 @@
                   "Value": "false"
                 }
               }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
             }
+          },
+          "selector": {
+            "id": "default"
           }
         }
       ],
       "outline": [
         {
-          "selector": {
-            "id": "default"
-          },
           "properties": {
             "show": {
               "expr": {
@@ -113,40 +116,129 @@
                 }
               }
             }
+          },
+          "selector": {
+            "id": "default"
           }
         }
       ],
       "fillCustom": [
         {
-          "selector": {
-            "id": "default"
-          },
           "properties": {
             "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            }
+          },
+          "selector": {
+            "id": "default"
+          }
+        }
+      ],
+      "padding": [
+        {
+          "properties": {
+            "paddingIndividual": {
               "expr": {
                 "Literal": {
                   "Value": "true"
                 }
               }
             },
-            "fillColor": {
-              "solid": {
-                "color": {
-                  "expr": {
-                    "Literal": {
-                      "Value": "'#E7F2E7'"
-                    }
-                  }
+            "topMargin": {
+              "expr": {
+                "Literal": {
+                  "Value": "0L"
                 }
               }
             },
-            "transparency": {
+            "bottomMargin": {
+              "expr": {
+                "Literal": {
+                  "Value": "0L"
+                }
+              }
+            },
+            "leftMargin": {
+              "expr": {
+                "Literal": {
+                  "Value": "8L"
+                }
+              }
+            },
+            "rightMargin": {
+              "expr": {
+                "Literal": {
+                  "Value": "8L"
+                }
+              }
+            }
+          },
+          "selector": {
+            "id": "default"
+          }
+        }
+      ],
+      "layout": [
+        {
+          "properties": {
+            "topOuterMargin": {
+              "expr": {
+                "Literal": {
+                  "Value": "0L"
+                }
+              }
+            },
+            "bottomOuterMargin": {
+              "expr": {
+                "Literal": {
+                  "Value": "0L"
+                }
+              }
+            },
+            "leftOuterMargin": {
+              "expr": {
+                "Literal": {
+                  "Value": "0L"
+                }
+              }
+            },
+            "rightOuterMargin": {
+              "expr": {
+                "Literal": {
+                  "Value": "0L"
+                }
+              }
+            },
+            "paddingUniform": {
+              "expr": {
+                "Literal": {
+                  "Value": "0L"
+                }
+              }
+            }
+          },
+          "selector": {
+            "id": "default"
+          }
+        }
+      ],
+      "spacing": [
+        {
+          "properties": {
+            "verticalSpacing": {
               "expr": {
                 "Literal": {
                   "Value": "0D"
                 }
               }
             }
+          },
+          "selector": {
+            "id": "default"
           }
         }
       ]
@@ -165,14 +257,14 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Validated migration completion'"
+                  "Value": "'Overdue migrations'"
                 }
               }
             },
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "14D"
+                  "Value": "12D"
                 }
               }
             },
@@ -181,9 +273,16 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#183153'"
+                      "Value": "'#1F2937'"
                     }
                   }
+                }
+              }
+            },
+            "bold": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
                 }
               }
             }
@@ -205,7 +304,7 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#E7F2E7'"
+                      "Value": "'#FFFFFF'"
                     }
                   }
                 }
@@ -236,16 +335,9 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#CCDCEC'"
+                      "Value": "'#CBD8E5'"
                     }
                   }
-                }
-              }
-            },
-            "radius": {
-              "expr": {
-                "Literal": {
-                  "Value": "8D"
                 }
               }
             },
@@ -253,6 +345,13 @@
               "expr": {
                 "Literal": {
                   "Value": "1D"
+                }
+              }
+            },
+            "radius": {
+              "expr": {
+                "Literal": {
+                  "Value": "12D"
                 }
               }
             }
@@ -265,28 +364,28 @@
             "top": {
               "expr": {
                 "Literal": {
-                  "Value": "8D"
+                  "Value": "4D"
                 }
               }
             },
             "bottom": {
               "expr": {
                 "Literal": {
-                  "Value": "8D"
+                  "Value": "4D"
                 }
               }
             },
             "left": {
               "expr": {
                 "Literal": {
-                  "Value": "8D"
+                  "Value": "4D"
                 }
               }
             },
             "right": {
               "expr": {
                 "Literal": {
-                  "Value": "8D"
+                  "Value": "4D"
                 }
               }
             }
@@ -299,7 +398,7 @@
             "show": {
               "expr": {
                 "Literal": {
-                  "Value": "true"
+                  "Value": "false"
                 }
               }
             }
@@ -312,7 +411,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Validated migration completion'"
+                  "Value": "'MIGRATE operations still to execute with a planned date before the batch reference date. DONE, CANCELLED, NOTINPLAN and missing dates are excluded.'"
                 }
               }
             }
@@ -321,5 +420,6 @@
       ]
     },
     "drillFilterOtherVisuals": true
-  }
+  },
+  "parentGroupName": "f5fc2692f3f5f70933fa"
 }

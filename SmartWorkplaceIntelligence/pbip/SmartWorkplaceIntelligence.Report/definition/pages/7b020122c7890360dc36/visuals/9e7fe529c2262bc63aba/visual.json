@@ -3,9 +3,9 @@
   "name": "9e7fe529c2262bc63aba",
   "position": {
     "x": 776,
-    "y": 336,
+    "y": 379.5,
     "width": 1112,
-    "height": 360,
+    "height": 337.3,
     "z": 121,
     "tabOrder": 680
   },
@@ -447,7 +447,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Windows 10 / Windows 11 · 90 days · weekly stock'"
+                  "Value": "'Windows 10 / Windows 11 \u00b7 90 days \u00b7 weekly stock'"
                 }
               }
             }

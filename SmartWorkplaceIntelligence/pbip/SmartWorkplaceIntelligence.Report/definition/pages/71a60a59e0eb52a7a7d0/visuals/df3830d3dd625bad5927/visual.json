@@ -3,9 +3,9 @@
   "name": "df3830d3dd625bad5927",
   "position": {
     "x": 32,
-    "y": 336,
+    "y": 291.5,
     "width": 1856,
-    "height": 656,
+    "height": 702.5,
     "z": 112,
     "tabOrder": 677
   },
@@ -299,6 +299,13 @@
                   "Value": "false"
                 }
               }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
             }
           }
         }
@@ -311,7 +318,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Types and geography · selected evidence'"
+                  "Value": "'Types and geography \u00b7 selected evidence'"
                 }
               }
             }
@@ -331,7 +338,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Types and geography · selected evidence'"
+                  "Value": "'Types and geography \u00b7 selected evidence'"
                 }
               }
             },

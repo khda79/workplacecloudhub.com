@@ -3,9 +3,9 @@
   "name": "3f45e2369a4af7273b68",
   "position": {
     "x": 32,
-    "y": 960,
+    "y": 964.0,
     "width": 1856,
-    "height": 40,
+    "height": 37.5,
     "z": 119,
     "tabOrder": 1920
   },
@@ -19,7 +19,7 @@
               {
                 "textRuns": [
                   {
-                    "value": "Country filters the current union only; AD-only country is Unknown. Historical country / AD-only history are unavailable. The historical curve remains Intune-only; stock changes are not verified migrations.",
+                    "value": "Country: Intune primary-user evidence; AD-only configured domain/prefix attribution. Missing attribution stays Unknown. History remains Intune-only; stock changes are not verified migrations.",
                     "textStyle": {
                       "fontFamily": "Segoe UI",
                       "fontSize": "11pt",

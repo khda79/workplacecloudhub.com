@@ -3,9 +3,9 @@
   "name": "db32a9e98cac0126c253",
   "position": {
     "x": 32,
-    "y": 512,
+    "y": 544.3,
     "width": 912,
-    "height": 152,
+    "height": 128,
     "z": 117,
     "tabOrder": 684
   },
@@ -61,7 +61,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "28D"
+                  "Value": "20D"
                 }
               }
             },
@@ -116,7 +116,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "14D"
+                  "Value": "11D"
                 }
               }
             },
@@ -289,6 +289,27 @@
                   "Value": "0L"
                 }
               }
+            },
+            "rowCount": {
+              "expr": {
+                "Literal": {
+                  "Value": "1L"
+                }
+              }
+            },
+            "columnCount": {
+              "expr": {
+                "Literal": {
+                  "Value": "2L"
+                }
+              }
+            },
+            "autoGrid": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
             }
           },
           "selector": {
@@ -385,7 +406,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Device Compliance Healthy (%) · Disk Encryption Healthy (%)'"
+                  "Value": "'Device Compliance Healthy (%) \u00b7 Disk Encryption Healthy (%)'"
                 }
               }
             },
@@ -505,14 +526,14 @@
             "top": {
               "expr": {
                 "Literal": {
-                  "Value": "8D"
+                  "Value": "0D"
                 }
               }
             },
             "bottom": {
               "expr": {
                 "Literal": {
-                  "Value": "8D"
+                  "Value": "0D"
                 }
               }
             },

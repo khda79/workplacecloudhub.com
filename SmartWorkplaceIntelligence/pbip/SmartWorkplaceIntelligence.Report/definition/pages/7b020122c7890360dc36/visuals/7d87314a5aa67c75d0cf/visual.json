@@ -3,9 +3,9 @@
   "name": "7d87314a5aa67c75d0cf",
   "position": {
     "x": 32,
-    "y": 704,
+    "y": 724.2,
     "z": 110,
-    "height": 248,
+    "height": 232.3,
     "width": 1856,
     "tabOrder": 1408
   },
@@ -489,7 +489,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Managed Windows 10 details · compare AD domain and primary-user country'"
+                  "Value": "'Managed Windows 10 details \u00b7 compare AD domain and primary-user country'"
                 }
               }
             }

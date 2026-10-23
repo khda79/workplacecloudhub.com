@@ -3,10 +3,10 @@
   "name": "75b7730e59e8ac214708",
   "position": {
     "x": 32,
-    "y": 352,
+    "y": 437.1,
     "z": 18,
-    "height": 112,
-    "width": 280,
+    "height": 114.5,
+    "width": 160,
     "tabOrder": 18
   },
   "visual": {
@@ -27,8 +27,8 @@
                 }
               },
               "queryRef": "License Report Summary.License Selected Awaiting Capacity Label",
-              "nativeQueryRef": "Awaiting Capacity · distinct users",
-              "displayName": "Awaiting Capacity · distinct users"
+              "nativeQueryRef": "Awaiting Capacity \u00b7 distinct users",
+              "displayName": "Awaiting Capacity \u00b7 distinct users"
             }
           ]
         }
@@ -41,7 +41,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "28D"
+                  "Value": "20D"
                 }
               }
             },
@@ -56,6 +56,22 @@
               "expr": {
                 "Literal": {
                   "Value": "1D"
+                }
+              }
+            },
+            "fontColor": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Measure": {
+                      "Expression": {
+                        "SourceRef": {
+                          "Entity": "License Report Summary"
+                        }
+                      },
+                      "Property": "License Selected Awaiting Capacity Color"
+                    }
+                  }
                 }
               }
             }
@@ -78,7 +94,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "12D"
+                  "Value": "11D"
                 }
               }
             }
@@ -264,7 +280,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Awaiting Capacity · distinct selected users'"
+                  "Value": "'Awaiting Capacity \u00b7 distinct selected users'"
                 }
               }
             }
@@ -451,37 +467,7 @@
             "show": {
               "expr": {
                 "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "text": {
-              "expr": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "License Report Qualification"
-                    }
-                  },
-                  "Property": "License Qualification Label"
-                }
-              }
-            },
-            "fontSize": {
-              "expr": {
-                "Literal": {
-                  "Value": "10D"
-                }
-              }
-            },
-            "fontColor": {
-              "solid": {
-                "color": {
-                  "expr": {
-                    "Literal": {
-                      "Value": "'#52606D'"
-                    }
-                  }
+                  "Value": "false"
                 }
               }
             }

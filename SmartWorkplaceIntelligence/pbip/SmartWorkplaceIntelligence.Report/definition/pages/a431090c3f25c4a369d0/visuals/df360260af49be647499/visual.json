@@ -3,9 +3,9 @@
   "name": "df360260af49be647499",
   "position": {
     "x": 32,
-    "y": 536,
+    "y": 584,
     "width": 1856,
-    "height": 288,
+    "height": 264,
     "z": 12000,
     "tabOrder": 544
   },
@@ -37,11 +37,12 @@
                       "Entity": "AD Computer Evidence"
                     }
                   },
-                  "Property": "TenantADComputerKey"
+                  "Property": "Password Expired (display)"
                 }
               },
-              "queryRef": "AD Computer Evidence.TenantADComputerKey",
-              "nativeQueryRef": "TenantADComputerKey"
+              "queryRef": "AD Computer Evidence.Password Expired (display)",
+              "nativeQueryRef": "AD Password Expired",
+              "displayName": "AD Password Expired"
             },
             {
               "field": {
@@ -51,11 +52,56 @@
                       "Entity": "AD Computer Evidence"
                     }
                   },
-                  "Property": "ObjectGUID"
+                  "Property": "PasswordExpiryStatus"
                 }
               },
-              "queryRef": "AD Computer Evidence.ObjectGUID",
-              "nativeQueryRef": "ObjectGUID"
+              "queryRef": "AD Computer Evidence.PasswordExpiryStatus",
+              "nativeQueryRef": "AD Password Expiry Status",
+              "displayName": "AD Password Expiry Status"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "AD Computer Evidence"
+                    }
+                  },
+                  "Property": "ModificationRaw"
+                }
+              },
+              "queryRef": "AD Computer Evidence.ModificationRaw",
+              "nativeQueryRef": "AD Modified (source)",
+              "displayName": "AD Modified (source)"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "AD Computer Evidence"
+                    }
+                  },
+                  "Property": "ModificationStatus"
+                }
+              },
+              "queryRef": "AD Computer Evidence.ModificationStatus",
+              "nativeQueryRef": "AD Modification Qualification",
+              "displayName": "AD Modification Qualification"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "AD Computer Evidence"
+                    }
+                  },
+                  "Property": "TenantADComputerKey"
+                }
+              },
+              "queryRef": "AD Computer Evidence.TenantADComputerKey",
+              "nativeQueryRef": "TenantADComputerKey"
             },
             {
               "field": {
@@ -237,7 +283,8 @@
                 }
               },
               "queryRef": "AD Computer Evidence.CreationRaw",
-              "nativeQueryRef": "CreationRaw"
+              "nativeQueryRef": "AD Created (source)",
+              "displayName": "AD Created (source)"
             },
             {
               "field": {
@@ -265,7 +312,8 @@
                 }
               },
               "queryRef": "AD Computer Evidence.CreationStatus",
-              "nativeQueryRef": "CreationStatus"
+              "nativeQueryRef": "AD Creation Qualification",
+              "displayName": "AD Creation Qualification"
             },
             {
               "field": {
@@ -336,6 +384,20 @@
               },
               "queryRef": "AD Computer Evidence.TenantId",
               "nativeQueryRef": "TenantId"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "AD Computer Evidence"
+                    }
+                  },
+                  "Property": "ObjectGUID"
+                }
+              },
+              "queryRef": "AD Computer Evidence.ObjectGUID",
+              "nativeQueryRef": "ObjectGUID"
             }
           ]
         }
@@ -348,7 +410,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "14D"
+                  "Value": "11D"
                 }
               }
             },
@@ -404,7 +466,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "14D"
+                  "Value": "11D"
                 }
               }
             },
@@ -474,6 +536,64 @@
             }
           }
         }
+      ],
+      "columnWidth": [
+        {
+          "properties": {
+            "value": {
+              "expr": {
+                "Literal": {
+                  "Value": "185D"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "AD Computer Evidence.Password Expired (display)"
+          }
+        },
+        {
+          "properties": {
+            "value": {
+              "expr": {
+                "Literal": {
+                  "Value": "185D"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "AD Computer Evidence.PasswordExpiryStatus"
+          }
+        },
+        {
+          "properties": {
+            "value": {
+              "expr": {
+                "Literal": {
+                  "Value": "200D"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "AD Computer Evidence.ModificationRaw"
+          }
+        },
+        {
+          "properties": {
+            "value": {
+              "expr": {
+                "Literal": {
+                  "Value": "280D"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "AD Computer Evidence.ModificationStatus"
+          }
+        }
       ]
     },
     "visualContainerObjects": {
@@ -483,7 +603,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'AD computers · complete governed fields'"
+                  "Value": "'AD computers \u00b7 complete governed fields'"
                 }
               }
             }
@@ -503,7 +623,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'AD computers · complete governed fields'"
+                  "Value": "'AD computers \u00b7 complete governed fields'"
                 }
               }
             },
@@ -674,7 +794,7 @@
                 "Entity": "AD Computer Evidence"
               }
             },
-            "Property": "Native Context Rows · AD Computer Evidence"
+            "Property": "Native Context Rows \u00b7 AD Computer Evidence"
           }
         },
         "type": "Advanced",
@@ -699,7 +819,7 @@
                           "Source": "c"
                         }
                       },
-                      "Property": "Native Context Rows · AD Computer Evidence"
+                      "Property": "Native Context Rows \u00b7 AD Computer Evidence"
                     }
                   },
                   "Right": {

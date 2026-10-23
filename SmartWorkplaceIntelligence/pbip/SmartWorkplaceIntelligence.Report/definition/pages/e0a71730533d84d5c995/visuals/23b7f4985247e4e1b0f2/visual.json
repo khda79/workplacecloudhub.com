@@ -3,9 +3,9 @@
   "name": "23b7f4985247e4e1b0f2",
   "position": {
     "x": 972,
-    "y": 352,
-    "width": 280,
-    "height": 112,
+    "y": 437.1,
+    "width": 160,
+    "height": 114.5,
     "z": 20,
     "tabOrder": 20
   },
@@ -27,8 +27,8 @@
                 }
               },
               "queryRef": "License Report Summary.License Selected Licensing Errors Label",
-              "nativeQueryRef": "Licensing Errors · distinct users",
-              "displayName": "Licensing Errors · distinct users"
+              "nativeQueryRef": "Licensing Errors \u00b7 distinct users",
+              "displayName": "Licensing Errors \u00b7 distinct users"
             }
           ]
         }
@@ -41,7 +41,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "28D"
+                  "Value": "20D"
                 }
               }
             },
@@ -56,6 +56,22 @@
               "expr": {
                 "Literal": {
                   "Value": "1D"
+                }
+              }
+            },
+            "fontColor": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Measure": {
+                      "Expression": {
+                        "SourceRef": {
+                          "Entity": "License Report Summary"
+                        }
+                      },
+                      "Property": "License Selected Licensing Errors Color"
+                    }
+                  }
                 }
               }
             }
@@ -78,7 +94,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "12D"
+                  "Value": "11D"
                 }
               }
             }
@@ -264,7 +280,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Licensing Errors · distinct selected users'"
+                  "Value": "'Licensing Errors \u00b7 distinct selected users'"
                 }
               }
             }
@@ -451,37 +467,7 @@
             "show": {
               "expr": {
                 "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "text": {
-              "expr": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "License Report Qualification"
-                    }
-                  },
-                  "Property": "License Qualification Label"
-                }
-              }
-            },
-            "fontSize": {
-              "expr": {
-                "Literal": {
-                  "Value": "10D"
-                }
-              }
-            },
-            "fontColor": {
-              "solid": {
-                "color": {
-                  "expr": {
-                    "Literal": {
-                      "Value": "'#52606D'"
-                    }
-                  }
+                  "Value": "false"
                 }
               }
             }

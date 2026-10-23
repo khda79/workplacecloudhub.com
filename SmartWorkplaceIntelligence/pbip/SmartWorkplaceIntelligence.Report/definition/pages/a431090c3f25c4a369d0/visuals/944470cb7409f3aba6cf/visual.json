@@ -3,9 +3,9 @@
   "name": "944470cb7409f3aba6cf",
   "position": {
     "x": 32,
-    "y": 512,
+    "y": 480,
     "width": 1856,
-    "height": 440,
+    "height": 480,
     "z": 11000,
     "tabOrder": 544
   },
@@ -176,7 +176,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "14D"
+                  "Value": "11D"
                 }
               }
             },
@@ -232,7 +232,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "14D"
+                  "Value": "11D"
                 }
               }
             },
@@ -357,7 +357,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Geography · selected evidence'"
+                  "Value": "'Geography \u00b7 selected evidence'"
                 }
               }
             }
@@ -377,7 +377,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Selected device · reported policy states'"
+                  "Value": "'Selected device \u00b7 reported policy states'"
                 }
               }
             },

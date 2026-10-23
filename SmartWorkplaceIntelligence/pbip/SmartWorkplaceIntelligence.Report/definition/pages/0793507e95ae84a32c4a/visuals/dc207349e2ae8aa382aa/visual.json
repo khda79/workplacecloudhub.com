@@ -1,12 +1,12 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "dc207349e2ae8aa382aa",
   "position": {
     "x": 32,
-    "y": 312,
-    "width": 1856,
-    "height": 24,
+    "y": 272,
     "z": 119,
+    "height": 24,
+    "width": 1856,
     "tabOrder": 624
   },
   "visual": {
@@ -21,10 +21,10 @@
                   {
                     "value": "Selected view: Blockers",
                     "textStyle": {
+                      "fontWeight": "bold",
                       "fontFamily": "Segoe UI",
                       "fontSize": "12pt",
-                      "color": "#215E9E",
-                      "fontWeight": "bold"
+                      "color": "#215e9e"
                     }
                   }
                 ]

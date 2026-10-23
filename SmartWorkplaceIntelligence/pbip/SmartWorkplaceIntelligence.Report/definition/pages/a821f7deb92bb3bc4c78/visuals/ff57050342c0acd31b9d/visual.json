@@ -3,9 +3,9 @@
   "name": "ff57050342c0acd31b9d",
   "position": {
     "x": 32,
-    "y": 336,
+    "y": 379.5,
     "width": 1856,
-    "height": 656,
+    "height": 614.6,
     "z": 111,
     "tabOrder": 677
   },
@@ -282,6 +282,13 @@
                   "Value": "false"
                 }
               }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
             }
           }
         }
@@ -294,7 +301,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Publisher context · selected evidence'"
+                  "Value": "'Publisher context \u00b7 selected evidence'"
                 }
               }
             }
@@ -314,7 +321,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Publisher context · selected evidence'"
+                  "Value": "'Publisher context \u00b7 selected evidence'"
                 }
               }
             },

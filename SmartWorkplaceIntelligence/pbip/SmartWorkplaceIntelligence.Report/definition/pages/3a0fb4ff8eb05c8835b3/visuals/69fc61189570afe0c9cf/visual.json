@@ -3,9 +3,9 @@
   "name": "69fc61189570afe0c9cf",
   "position": {
     "x": 32,
-    "y": 664,
+    "y": 686.7,
     "width": 1856,
-    "height": 328,
+    "height": 307.3,
     "z": 111,
     "tabOrder": 1340
   },
@@ -268,6 +268,13 @@
                   "Value": "false"
                 }
               }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
             }
           }
         }
@@ -280,7 +287,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Risk signals · selected evidence'"
+                  "Value": "'Risk signals \u00b7 selected evidence'"
                 }
               }
             }
@@ -300,7 +307,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Risk signals · selected evidence'"
+                  "Value": "'Risk signals \u00b7 selected evidence'"
                 }
               }
             },

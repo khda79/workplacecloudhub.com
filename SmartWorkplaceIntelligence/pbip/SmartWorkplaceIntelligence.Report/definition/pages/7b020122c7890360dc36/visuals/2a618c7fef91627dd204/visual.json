@@ -3,9 +3,9 @@
   "name": "2a618c7fef91627dd204",
   "position": {
     "x": 32,
-    "y": 720,
+    "y": 739.2,
     "width": 1856,
-    "height": 232,
+    "height": 217.3,
     "z": 110,
     "tabOrder": 1440
   },
@@ -261,7 +261,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Historical provenance · earlier ISO week buckets are not collection timestamps'"
+                  "Value": "'Historical provenance \u00b7 earlier ISO week buckets are not collection timestamps'"
                 }
               }
             },
@@ -408,7 +408,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Historical provenance · earlier ISO week buckets are not collection timestamps'"
+                  "Value": "'Historical provenance \u00b7 earlier ISO week buckets are not collection timestamps'"
                 }
               }
             }

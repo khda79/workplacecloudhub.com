@@ -3,9 +3,9 @@
   "name": "79f76f6d0a0976f4bd23",
   "position": {
     "x": 32,
-    "y": 512,
+    "y": 480,
     "width": 1856,
-    "height": 440,
+    "height": 480,
     "z": 11000,
     "tabOrder": 544
   },
@@ -221,7 +221,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "14D"
+                  "Value": "11D"
                 }
               }
             },
@@ -277,7 +277,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "14D"
+                  "Value": "11D"
                 }
               }
             },
@@ -402,7 +402,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Geography · selected evidence'"
+                  "Value": "'Geography \u00b7 selected evidence'"
                 }
               }
             }
@@ -422,7 +422,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Selected device · reported managed-app deployment'"
+                  "Value": "'Selected device \u00b7 reported managed-app deployment'"
                 }
               }
             },

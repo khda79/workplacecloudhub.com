@@ -3,9 +3,9 @@
   "name": "511ab08f300e26d195a6",
   "position": {
     "x": 32,
-    "y": 312,
+    "y": 357.0,
     "width": 1856,
-    "height": 24,
+    "height": 22.5,
     "z": 12000,
     "tabOrder": 145
   },
@@ -19,7 +19,7 @@
               {
                 "textRuns": [
                   {
-                    "value": "Selected view: Native · Discovered Application",
+                    "value": "Selected view: Native \u00b7 Discovered Application",
                     "textStyle": {
                       "fontFamily": "Segoe UI",
                       "fontSize": "14px",

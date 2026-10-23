@@ -3,9 +3,9 @@
   "name": "0cdf2e4b3e1189fc607a",
   "position": {
     "x": 32,
-    "y": 368,
+    "y": 389.4,
     "width": 1856,
-    "height": 624,
+    "height": 286.3,
     "z": 112,
     "tabOrder": 677
   },
@@ -20,98 +20,84 @@
                 "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Content Storage Operational Signals"
+                      "Entity": "Content Storage Evidence"
                     }
                   },
-                  "Property": "Severity Label"
+                  "Property": "Service"
                 }
               },
-              "queryRef": "Content Storage Operational Signals.Severity Label",
-              "nativeQueryRef": "Severity"
+              "queryRef": "Content Storage Evidence.Service",
+              "nativeQueryRef": "Service"
             },
             {
               "field": {
                 "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Content Storage Operational Signals"
+                      "Entity": "Content Storage Evidence"
                     }
                   },
-                  "Property": "Signal"
+                  "Property": "Snapshot Date"
                 }
               },
-              "queryRef": "Content Storage Operational Signals.Signal",
-              "nativeQueryRef": "Signal"
+              "queryRef": "Content Storage Evidence.Snapshot Date",
+              "nativeQueryRef": "Snapshot Date"
             },
             {
               "field": {
                 "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Content Storage Operational Signals"
+                      "Entity": "Content Storage Evidence"
                     }
                   },
-                  "Property": "Risk Category"
+                  "Property": "Evidence Age Days"
                 }
               },
-              "queryRef": "Content Storage Operational Signals.Risk Category",
-              "nativeQueryRef": "Risk Category"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Content Storage Operational Signals"
-                    }
-                  },
-                  "Property": "Affected Content"
-                }
-              },
-              "queryRef": "Content Storage Operational Signals.Affected Content",
-              "nativeQueryRef": "Affected Content"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Content Storage Operational Signals"
-                    }
-                  },
-                  "Property": "Covered Content"
-                }
-              },
-              "queryRef": "Content Storage Operational Signals.Covered Content",
-              "nativeQueryRef": "Covered Content"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Content Storage Operational Signals"
-                    }
-                  },
-                  "Property": "Affected Content (%)"
-                }
-              },
-              "queryRef": "Content Storage Operational Signals.Affected Content (%)",
-              "nativeQueryRef": "Affected Content (%)"
+              "queryRef": "Content Storage Evidence.Evidence Age Days",
+              "nativeQueryRef": "Evidence Age Days"
             },
             {
               "field": {
                 "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Content Storage Operational Signals"
+                      "Entity": "Content Storage Evidence"
                     }
                   },
-                  "Property": "Recommended Action"
+                  "Property": "Freshness State"
                 }
               },
-              "queryRef": "Content Storage Operational Signals.Recommended Action",
-              "nativeQueryRef": "Recommended Action"
+              "queryRef": "Content Storage Evidence.Freshness State",
+              "nativeQueryRef": "Freshness State"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Content Storage Evidence"
+                    }
+                  },
+                  "Property": "Evidence Status"
+                }
+              },
+              "queryRef": "Content Storage Evidence.Evidence Status",
+              "nativeQueryRef": "Evidence Status"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Content Storage Evidence"
+                    }
+                  },
+                  "Property": "Content Containers"
+                }
+              },
+              "queryRef": "Content Storage Evidence.Content Containers",
+              "nativeQueryRef": "Content Containers"
             }
           ]
         }
@@ -121,6 +107,13 @@
       "columnHeaders": [
         {
           "properties": {
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
+            },
             "autoSizeColumnWidth": {
               "expr": {
                 "Literal": {
@@ -132,49 +125,6 @@
               "expr": {
                 "Literal": {
                   "Value": "'growToFit'"
-                }
-              }
-            },
-            "fontSize": {
-              "expr": {
-                "Literal": {
-                  "Value": "11D"
-                }
-              }
-            },
-            "bold": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "wordWrap": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "fontColor": {
-              "solid": {
-                "color": {
-                  "expr": {
-                    "Literal": {
-                      "Value": "'#FFFFFF'"
-                    }
-                  }
-                }
-              }
-            },
-            "backColor": {
-              "solid": {
-                "color": {
-                  "expr": {
-                    "Literal": {
-                      "Value": "'#215E9E'"
-                    }
-                  }
                 }
               }
             }
@@ -197,63 +147,6 @@
                   "Value": "false"
                 }
               }
-            },
-            "fontColorPrimary": {
-              "solid": {
-                "color": {
-                  "expr": {
-                    "Literal": {
-                      "Value": "'#183153'"
-                    }
-                  }
-                }
-              }
-            },
-            "fontColorSecondary": {
-              "solid": {
-                "color": {
-                  "expr": {
-                    "Literal": {
-                      "Value": "'#183153'"
-                    }
-                  }
-                }
-              }
-            },
-            "backColorPrimary": {
-              "solid": {
-                "color": {
-                  "expr": {
-                    "Literal": {
-                      "Value": "'#FFFFFF'"
-                    }
-                  }
-                }
-              }
-            },
-            "backColorSecondary": {
-              "solid": {
-                "color": {
-                  "expr": {
-                    "Literal": {
-                      "Value": "'#F0F5FA'"
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-      ],
-      "total": [
-        {
-          "properties": {
-            "totals": {
-              "expr": {
-                "Literal": {
-                  "Value": "false"
-                }
-              }
             }
           }
         }
@@ -266,7 +159,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Source context · selected evidence'"
+                  "Value": "'Source context \u00b7 selected evidence'"
                 }
               }
             }
@@ -286,7 +179,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Source context · selected evidence'"
+                  "Value": "'Source context - snapshots, freshness and coverage'"
                 }
               }
             },

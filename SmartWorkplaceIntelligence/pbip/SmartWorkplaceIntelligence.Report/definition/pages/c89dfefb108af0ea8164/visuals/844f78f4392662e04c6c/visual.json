@@ -3,9 +3,9 @@
   "name": "844f78f4392662e04c6c",
   "position": {
     "x": 32,
-    "y": 368,
+    "y": 389.4,
     "width": 1856,
-    "height": 624,
+    "height": 603.7,
     "z": 112,
     "tabOrder": 677
   },
@@ -20,97 +20,181 @@
                 "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Content Storage Operational Signals"
+                      "Entity": "Content Storage Evidence"
                     }
                   },
-                  "Property": "Severity Label"
+                  "Property": "Content Object Name"
                 }
               },
-              "queryRef": "Content Storage Operational Signals.Severity Label",
-              "nativeQueryRef": "Severity"
+              "queryRef": "Content Storage Evidence.Content Object Name",
+              "nativeQueryRef": "Content Object Name"
             },
             {
               "field": {
                 "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Content Storage Operational Signals"
+                      "Entity": "Content Storage Evidence"
                     }
                   },
-                  "Property": "Signal"
+                  "Property": "Service"
                 }
               },
-              "queryRef": "Content Storage Operational Signals.Signal",
-              "nativeQueryRef": "Signal"
+              "queryRef": "Content Storage Evidence.Service",
+              "nativeQueryRef": "Service"
             },
             {
               "field": {
                 "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Content Storage Operational Signals"
+                      "Entity": "Content Storage Evidence"
                     }
                   },
-                  "Property": "Risk Category"
+                  "Property": "Object Type"
                 }
               },
-              "queryRef": "Content Storage Operational Signals.Risk Category",
-              "nativeQueryRef": "Risk Category"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Content Storage Operational Signals"
-                    }
-                  },
-                  "Property": "Affected Content"
-                }
-              },
-              "queryRef": "Content Storage Operational Signals.Affected Content",
-              "nativeQueryRef": "Affected Content"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Content Storage Operational Signals"
-                    }
-                  },
-                  "Property": "Covered Content"
-                }
-              },
-              "queryRef": "Content Storage Operational Signals.Covered Content",
-              "nativeQueryRef": "Covered Content"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Content Storage Operational Signals"
-                    }
-                  },
-                  "Property": "Affected Content (%)"
-                }
-              },
-              "queryRef": "Content Storage Operational Signals.Affected Content (%)",
-              "nativeQueryRef": "Affected Content (%)"
+              "queryRef": "Content Storage Evidence.Object Type",
+              "nativeQueryRef": "Object Type"
             },
             {
               "field": {
                 "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Content Storage Operational Signals"
+                      "Entity": "Content Storage Evidence"
+                    }
+                  },
+                  "Property": "Owner"
+                }
+              },
+              "queryRef": "Content Storage Evidence.Owner",
+              "nativeQueryRef": "Owner"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Content Storage Evidence"
+                    }
+                  },
+                  "Property": "Owner State"
+                }
+              },
+              "queryRef": "Content Storage Evidence.Owner State",
+              "nativeQueryRef": "Owner State"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Content Storage Evidence"
+                    }
+                  },
+                  "Property": "Activity State"
+                }
+              },
+              "queryRef": "Content Storage Evidence.Activity State",
+              "nativeQueryRef": "Activity State"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Content Storage Evidence"
+                    }
+                  },
+                  "Property": "Last Activity Date"
+                }
+              },
+              "queryRef": "Content Storage Evidence.Last Activity Date",
+              "nativeQueryRef": "Last Activity Date"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Content Storage Evidence"
+                    }
+                  },
+                  "Property": "Storage Used GB"
+                }
+              },
+              "queryRef": "Content Storage Evidence.Storage Used GB",
+              "nativeQueryRef": "Storage Used GB"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Content Storage Evidence"
+                    }
+                  },
+                  "Property": "Storage Allocated GB"
+                }
+              },
+              "queryRef": "Content Storage Evidence.Storage Allocated GB",
+              "nativeQueryRef": "Storage Allocated GB"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Content Storage Evidence"
+                    }
+                  },
+                  "Property": "Storage Utilization (%)"
+                }
+              },
+              "queryRef": "Content Storage Evidence.Storage Utilization (%)",
+              "nativeQueryRef": "Storage Utilization (%)"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Content Storage Evidence"
+                    }
+                  },
+                  "Property": "File Count"
+                }
+              },
+              "queryRef": "Content Storage Evidence.File Count",
+              "nativeQueryRef": "File Count"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Content Storage Evidence"
+                    }
+                  },
+                  "Property": "Risk Signal"
+                }
+              },
+              "queryRef": "Content Storage Evidence.Risk Signal",
+              "nativeQueryRef": "Risk Signal"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Content Storage Evidence"
                     }
                   },
                   "Property": "Recommended Action"
                 }
               },
-              "queryRef": "Content Storage Operational Signals.Recommended Action",
+              "queryRef": "Content Storage Evidence.Recommended Action",
               "nativeQueryRef": "Recommended Action"
             }
           ]
@@ -121,6 +205,13 @@
       "columnHeaders": [
         {
           "properties": {
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
+            },
             "autoSizeColumnWidth": {
               "expr": {
                 "Literal": {
@@ -132,49 +223,6 @@
               "expr": {
                 "Literal": {
                   "Value": "'growToFit'"
-                }
-              }
-            },
-            "fontSize": {
-              "expr": {
-                "Literal": {
-                  "Value": "11D"
-                }
-              }
-            },
-            "bold": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "wordWrap": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "fontColor": {
-              "solid": {
-                "color": {
-                  "expr": {
-                    "Literal": {
-                      "Value": "'#FFFFFF'"
-                    }
-                  }
-                }
-              }
-            },
-            "backColor": {
-              "solid": {
-                "color": {
-                  "expr": {
-                    "Literal": {
-                      "Value": "'#215E9E'"
-                    }
-                  }
                 }
               }
             }
@@ -197,63 +245,6 @@
                   "Value": "false"
                 }
               }
-            },
-            "fontColorPrimary": {
-              "solid": {
-                "color": {
-                  "expr": {
-                    "Literal": {
-                      "Value": "'#183153'"
-                    }
-                  }
-                }
-              }
-            },
-            "fontColorSecondary": {
-              "solid": {
-                "color": {
-                  "expr": {
-                    "Literal": {
-                      "Value": "'#183153'"
-                    }
-                  }
-                }
-              }
-            },
-            "backColorPrimary": {
-              "solid": {
-                "color": {
-                  "expr": {
-                    "Literal": {
-                      "Value": "'#FFFFFF'"
-                    }
-                  }
-                }
-              }
-            },
-            "backColorSecondary": {
-              "solid": {
-                "color": {
-                  "expr": {
-                    "Literal": {
-                      "Value": "'#F0F5FA'"
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-      ],
-      "total": [
-        {
-          "properties": {
-            "totals": {
-              "expr": {
-                "Literal": {
-                  "Value": "false"
-                }
-              }
             }
           }
         }
@@ -266,7 +257,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Full inventory · selected evidence'"
+                  "Value": "'Full inventory \u00b7 selected evidence'"
                 }
               }
             }
@@ -286,7 +277,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Full inventory · selected evidence'"
+                  "Value": "'Full inventory - current sites and OneDrive accounts'"
                 }
               }
             },

@@ -3,9 +3,9 @@
   "name": "17786cd58cd983e32354",
   "position": {
     "x": 32,
-    "y": 488,
+    "y": 521.9,
     "width": 1856,
-    "height": 504,
+    "height": 472.2,
     "z": 12000,
     "tabOrder": 544
   },
@@ -236,7 +236,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "14D"
+                  "Value": "11D"
                 }
               }
             },
@@ -292,7 +292,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "14D"
+                  "Value": "11D"
                 }
               }
             },
@@ -371,7 +371,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'AD Domain · complete governed fields'"
+                  "Value": "'AD Domain \u00b7 complete governed fields'"
                 }
               }
             }
@@ -391,7 +391,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'AD Domain · complete governed fields'"
+                  "Value": "'AD Domain \u00b7 complete governed fields'"
                 }
               }
             },
@@ -562,7 +562,7 @@
                 "Entity": "AD Domain Evidence"
               }
             },
-            "Property": "Native Context Rows · AD Domain Evidence"
+            "Property": "Native Context Rows \u00b7 AD Domain Evidence"
           }
         },
         "type": "Advanced",
@@ -587,7 +587,7 @@
                           "Source": "c"
                         }
                       },
-                      "Property": "Native Context Rows · AD Domain Evidence"
+                      "Property": "Native Context Rows \u00b7 AD Domain Evidence"
                     }
                   },
                   "Right": {

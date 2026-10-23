@@ -3,7 +3,7 @@
   "name": "9c6448cac26669b75c11",
   "position": {
     "x": 32,
-    "y": 440,
+    "y": 480,
     "width": 1856,
     "height": 80,
     "z": 12000,
@@ -29,6 +29,21 @@
               "queryRef": "Native User Evidence.UserSelection",
               "nativeQueryRef": "UserSelection",
               "active": true
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native User Evidence"
+                    }
+                  },
+                  "Property": "ModificationUtcDateTime"
+                }
+              },
+              "queryRef": "Native User Evidence.ModificationUtcDateTime",
+              "nativeQueryRef": "ModificationUtcDateTime",
+              "displayName": "ModificationUtcDateTime"
             }
           ]
         }
@@ -61,14 +76,14 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Native selection · Entra users'"
+                  "Value": "'Native selection \u00b7 Entra users'"
                 }
               }
             },
             "textSize": {
               "expr": {
                 "Literal": {
-                  "Value": "10D"
+                  "Value": "11D"
                 }
               }
             },
@@ -96,6 +111,22 @@
                 }
               }
             }
+          }
+        }
+      ],
+      "items": [
+        {
+          "properties": {
+            "textSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
+            }
+          },
+          "selector": {
+            "id": "default"
           }
         }
       ]

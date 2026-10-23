@@ -3,10 +3,10 @@
   "name": "f35ce5a7d8041a345e7b",
   "position": {
     "x": 960,
-    "y": 472,
+    "y": 448,
     "z": 141,
     "width": 928,
-    "height": 446,
+    "height": 544,
     "tabOrder": 141
   },
   "visual": {
@@ -118,7 +118,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "10D"
+                  "Value": "11D"
                 }
               }
             }
@@ -182,7 +182,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "9D"
+                  "Value": "11D"
                 }
               }
             }
@@ -196,6 +196,13 @@
               "expr": {
                 "Literal": {
                   "Value": "false"
+                }
+              }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
                 }
               }
             }

@@ -4,8 +4,8 @@
   "position": {
     "x": 32,
     "y": 128,
-    "width": 1856,
-    "height": 120,
+    "width": 1200,
+    "height": 80,
     "z": 114,
     "tabOrder": 256
   },
@@ -27,8 +27,8 @@
                 }
               },
               "queryRef": "Device Inventory Evidence.Current Endpoint Analytics Score",
-              "nativeQueryRef": "Endpoint Analytics Score",
-              "displayName": "Endpoint Analytics Score"
+              "nativeQueryRef": "Endpoint Analytics score",
+              "displayName": "Endpoint Analytics score"
             },
             {
               "field": {
@@ -42,8 +42,8 @@
                 }
               },
               "queryRef": "Device Inventory Evidence.Endpoint Analytics Below 50 Devices",
-              "nativeQueryRef": "Endpoint Analytics Below 50 Devices",
-              "displayName": "Endpoint Analytics Below 50 Devices"
+              "nativeQueryRef": "Devices with score below 50",
+              "displayName": "Devices with score below 50"
             },
             {
               "field": {
@@ -57,8 +57,8 @@
                 }
               },
               "queryRef": "Device Inventory Evidence.Devices with Stop Errors",
-              "nativeQueryRef": "Devices with Stop Errors",
-              "displayName": "Devices with Stop Errors"
+              "nativeQueryRef": "Devices with stop errors",
+              "displayName": "Devices with stop errors"
             },
             {
               "field": {
@@ -72,8 +72,8 @@
                 }
               },
               "queryRef": "Device Inventory Evidence.Current Startup Score",
-              "nativeQueryRef": "Startup Score",
-              "displayName": "Startup Score"
+              "nativeQueryRef": "Startup score",
+              "displayName": "Startup score"
             }
           ]
         }
@@ -93,7 +93,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "28D"
+                  "Value": "20D"
                 }
               }
             },
@@ -261,6 +261,27 @@
               "expr": {
                 "Literal": {
                   "Value": "0D"
+                }
+              }
+            },
+            "rowCount": {
+              "expr": {
+                "Literal": {
+                  "Value": "1L"
+                }
+              }
+            },
+            "columnCount": {
+              "expr": {
+                "Literal": {
+                  "Value": "4L"
+                }
+              }
+            },
+            "autoGrid": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
                 }
               }
             }
@@ -493,14 +514,14 @@
             "top": {
               "expr": {
                 "Literal": {
-                  "Value": "8D"
+                  "Value": "0D"
                 }
               }
             },
             "bottom": {
               "expr": {
                 "Literal": {
-                  "Value": "8D"
+                  "Value": "0D"
                 }
               }
             },

@@ -3,7 +3,7 @@
   "name": "266868e69f767ef67e33",
   "position": {
     "x": 1412,
-    "y": 712,
+    "y": 672,
     "z": 114,
     "width": 320,
     "height": 18,
@@ -19,7 +19,7 @@
               {
                 "textRuns": [
                   {
-                    "value": "Endpoint Analytics Score · observed history when available",
+                    "value": "Endpoint Analytics Score \u00b7 observed history when available",
                     "textStyle": {
                       "fontFamily": "Segoe UI",
                       "fontSize": "10px",

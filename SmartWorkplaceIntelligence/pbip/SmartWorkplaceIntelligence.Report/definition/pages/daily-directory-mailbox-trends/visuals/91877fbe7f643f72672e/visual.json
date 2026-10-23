@@ -4,7 +4,7 @@
   "position": {
     "x": 88,
     "y": 78,
-    "width": 1800,
+    "width": 1080,
     "height": 30,
     "z": 3,
     "tabOrder": 3
@@ -19,10 +19,10 @@
               {
                 "textRuns": [
                   {
-                    "value": "Enabled AD computer accounts; distinct from managed Intune devices.",
+                    "value": "All operating systems in the denominator | Windows 10 and 11 include enabled + disabled AD computer accounts",
                     "textStyle": {
                       "fontFamily": "Segoe UI",
-                      "fontSize": "12pt",
+                      "fontSize": "14px",
                       "color": "#526781"
                     }
                   }
@@ -194,7 +194,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Daily prepared evidence, enabled computer accounts, no interpolation'"
+                  "Value": "'Windows 10 and Windows 11 include enabled and disabled AD computer accounts; shares use all operating systems in the denominator; no interpolation'"
                 }
               }
             }

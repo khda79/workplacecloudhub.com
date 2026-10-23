@@ -1,15 +1,14 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "d9c404217cfda43a6837",
   "position": {
-    "x": 32,
-    "y": 696,
-    "width": 1856,
-    "height": 352,
-    "z": 31,
+    "x": 56,
+    "y": 868,
+    "z": 5000,
+    "height": 320,
+    "width": 1808,
     "tabOrder": 31
   },
-  "parentGroupName": "f5fc2692f3f5f70933fa",
   "visual": {
     "visualType": "tableEx",
     "query": {
@@ -168,7 +167,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "12D"
+                  "Value": "11D"
                 }
               }
             },
@@ -210,7 +209,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "14D"
+                  "Value": "11D"
                 }
               }
             },
@@ -277,6 +276,13 @@
                   "Value": "false"
                 }
               }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
             }
           }
         }
@@ -296,14 +302,14 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Operations and next action — source URL or shared-folder path'"
+                  "Value": "'Operations and next action \u2014 source URL or shared-folder path'"
                 }
               }
             },
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "14D"
+                  "Value": "12D"
                 }
               }
             },
@@ -312,9 +318,16 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#183153'"
+                      "Value": "'#1F2937'"
                     }
                   }
+                }
+              }
+            },
+            "bold": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
                 }
               }
             }
@@ -367,16 +380,9 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#CCDCEC'"
+                      "Value": "'#CBD8E5'"
                     }
                   }
-                }
-              }
-            },
-            "radius": {
-              "expr": {
-                "Literal": {
-                  "Value": "8D"
                 }
               }
             },
@@ -384,6 +390,13 @@
               "expr": {
                 "Literal": {
                   "Value": "1D"
+                }
+              }
+            },
+            "radius": {
+              "expr": {
+                "Literal": {
+                  "Value": "12D"
                 }
               }
             }
@@ -410,14 +423,14 @@
             "left": {
               "expr": {
                 "Literal": {
-                  "Value": "8D"
+                  "Value": "10D"
                 }
               }
             },
             "right": {
               "expr": {
                 "Literal": {
-                  "Value": "8D"
+                  "Value": "10D"
                 }
               }
             }
@@ -430,7 +443,7 @@
             "show": {
               "expr": {
                 "Literal": {
-                  "Value": "true"
+                  "Value": "false"
                 }
               }
             }
@@ -443,7 +456,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Operations and next action — source URL or shared-folder path'"
+                  "Value": "'Operations and next action \u2014 source URL or shared-folder path'"
                 }
               }
             }
@@ -466,6 +479,7 @@
     },
     "drillFilterOtherVisuals": true
   },
+  "parentGroupName": "f5fc2692f3f5f70933fa",
   "filterConfig": {
     "filters": [
       {

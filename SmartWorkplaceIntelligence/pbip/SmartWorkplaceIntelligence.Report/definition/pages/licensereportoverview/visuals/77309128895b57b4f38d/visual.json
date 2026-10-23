@@ -72,8 +72,38 @@
                 }
               },
               "queryRef": "License Report Summary.License Selected E3 Review Label",
-              "nativeQueryRef": "E3 → F3 manual review",
-              "displayName": "E3 → F3 manual review"
+              "nativeQueryRef": "E3 \u2192 F3 manual review",
+              "displayName": "E3 \u2192 F3 manual review"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "License Report Summary"
+                    }
+                  },
+                  "Property": "License Selected Awaiting Capacity Label"
+                }
+              },
+              "queryRef": "License Report Summary.License Selected Awaiting Capacity Label",
+              "nativeQueryRef": "Awaiting license capacity",
+              "displayName": "Awaiting license capacity"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "License Report Summary"
+                    }
+                  },
+                  "Property": "License Selected Licensing Errors Label"
+                }
+              },
+              "queryRef": "License Report Summary.License Selected Licensing Errors Label",
+              "nativeQueryRef": "Other assignment errors",
+              "displayName": "Other assignment errors"
             }
           ]
         }
@@ -86,14 +116,14 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "22D"
+                  "Value": "20D"
                 }
               }
             },
             "textWrap": {
               "expr": {
                 "Literal": {
-                  "Value": "false"
+                  "Value": "true"
                 }
               }
             },
@@ -123,7 +153,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "12D"
+                  "Value": "11D"
                 }
               }
             }
@@ -278,6 +308,20 @@
                   "Value": "0L"
                 }
               }
+            },
+            "rowCount": {
+              "expr": {
+                "Literal": {
+                  "Value": "1L"
+                }
+              }
+            },
+            "columnCount": {
+              "expr": {
+                "Literal": {
+                  "Value": "6L"
+                }
+              }
             }
           },
           "selector": {
@@ -354,7 +398,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Recovery assignments by suite · F1/F3 can overlap; Unknown is unqualified evidence'"
+                  "Value": "'Recovery assignments by suite \u00b7 F1/F3 can overlap; Unknown is unqualified evidence'"
                 }
               }
             }
@@ -374,7 +418,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Recovery assignments by suite · F1/F3 can overlap; Unknown is unqualified evidence'"
+                  "Value": "'Recovery assignments by suite \u00b7 F1/F3 can overlap; Unknown is unqualified evidence'"
                 }
               }
             },

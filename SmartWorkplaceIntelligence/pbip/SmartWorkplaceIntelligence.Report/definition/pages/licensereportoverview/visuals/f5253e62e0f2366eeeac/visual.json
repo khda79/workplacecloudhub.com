@@ -368,6 +368,13 @@
                   "Value": "false"
                 }
               }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
             }
           }
         },
@@ -389,6 +396,13 @@
                   "Value": "false"
                 }
               }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
             }
           }
         },
@@ -408,6 +422,13 @@
               "expr": {
                 "Literal": {
                   "Value": "false"
+                }
+              }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
                 }
               }
             }
@@ -435,7 +456,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Tenant-wide evidence gaps · Unknown means unqualified'"
+                  "Value": "'Tenant-wide evidence gaps \u00b7 Unknown means unqualified'"
                 }
               }
             }
@@ -455,7 +476,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Tenant-wide evidence gaps · Unknown means unqualified'"
+                  "Value": "'Tenant-wide evidence gaps \u00b7 Unknown means unqualified'"
                 }
               }
             },

@@ -1,12 +1,12 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "4b788803037d3f6283ac",
   "position": {
     "x": 32,
     "y": 312,
-    "width": 1856,
-    "height": 24,
     "z": 119,
+    "height": 24,
+    "width": 1856,
     "tabOrder": 624
   },
   "visual": {
@@ -21,10 +21,10 @@
                   {
                     "value": "Selected view: Usage evidence",
                     "textStyle": {
+                      "fontWeight": "bold",
                       "fontFamily": "Segoe UI",
                       "fontSize": "12pt",
-                      "color": "#215E9E",
-                      "fontWeight": "bold"
+                      "color": "#215e9e"
                     }
                   }
                 ]

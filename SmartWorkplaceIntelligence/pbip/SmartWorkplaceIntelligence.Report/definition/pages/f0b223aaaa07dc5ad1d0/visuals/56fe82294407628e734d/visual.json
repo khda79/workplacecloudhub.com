@@ -6,7 +6,7 @@
     "y": 16,
     "z": 100,
     "height": 48,
-    "width": 1024,
+    "width": 1080,
     "tabOrder": 100
   },
   "visual": {
@@ -19,11 +19,11 @@
               {
                 "textRuns": [
                   {
-                    "value": "Digital Workplace health, adoption and protection at a glance",
+                    "value": "Digital Workplace overview",
                     "textStyle": {
                       "fontWeight": "bold",
                       "fontFamily": "Segoe UI Semibold",
-                      "fontSize": "26px",
+                      "fontSize": "24px",
                       "color": "#172b4d"
                     }
                   }

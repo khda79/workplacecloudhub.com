@@ -3,9 +3,9 @@
   "name": "fa9e8cb085139be69b0c",
   "position": {
     "x": 968,
-    "y": 688,
+    "y": 584,
     "width": 920,
-    "height": 304,
+    "height": 408,
     "z": 10001,
     "tabOrder": 1400
   },
@@ -345,7 +345,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Observed snapshots · 2026-07-08 to 2026-10-05'"
+                  "Value": "'Observed snapshots \u00b7 2026-07-08 to 2026-10-05'"
                 }
               }
             },

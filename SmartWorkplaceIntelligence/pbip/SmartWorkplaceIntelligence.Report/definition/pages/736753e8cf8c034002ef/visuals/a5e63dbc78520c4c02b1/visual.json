@@ -4,7 +4,7 @@
   "position": {
     "x": 32,
     "y": 128,
-    "width": 1856,
+    "width": 1200,
     "height": 120,
     "z": 114,
     "tabOrder": 256
@@ -15,6 +15,34 @@
       "queryState": {
         "Data": {
           "projections": [
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Migration Inventory"
+                    }
+                  },
+                  "Property": "Local Mailboxes (2016)"
+                }
+              },
+              "queryRef": "Mailbox Migration Inventory.Local Mailboxes (2016)",
+              "nativeQueryRef": "Local Mailboxes (2016)"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Migration Inventory"
+                    }
+                  },
+                  "Property": "Local Mailboxes (2019/SE)"
+                }
+              },
+              "queryRef": "Mailbox Migration Inventory.Local Mailboxes (2019/SE)",
+              "nativeQueryRef": "Local Mailboxes (2019/SE)"
+            },
             {
               "field": {
                 "Measure": {
@@ -93,7 +121,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "28D"
+                  "Value": "20D"
                 }
               }
             },

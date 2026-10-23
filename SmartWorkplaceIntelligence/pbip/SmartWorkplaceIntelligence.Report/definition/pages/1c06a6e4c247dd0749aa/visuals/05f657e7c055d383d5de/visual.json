@@ -3,9 +3,9 @@
   "name": "05f657e7c055d383d5de",
   "position": {
     "x": 32,
-    "y": 488,
+    "y": 426.5,
     "width": 1856,
-    "height": 336,
+    "height": 300.6,
     "z": 12000,
     "tabOrder": 544
   },
@@ -278,7 +278,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "14D"
+                  "Value": "11D"
                 }
               }
             },
@@ -334,7 +334,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "14D"
+                  "Value": "11D"
                 }
               }
             },
@@ -413,7 +413,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Team · complete governed fields'"
+                  "Value": "'Team \u00b7 complete governed fields'"
                 }
               }
             }
@@ -433,7 +433,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Team · complete governed fields'"
+                  "Value": "'Team \u00b7 complete governed fields'"
                 }
               }
             },
@@ -604,7 +604,7 @@
                 "Entity": "Native Team"
               }
             },
-            "Property": "Native Context Rows · Native Team"
+            "Property": "Native Context Rows \u00b7 Native Team"
           }
         },
         "type": "Advanced",
@@ -629,7 +629,7 @@
                           "Source": "c"
                         }
                       },
-                      "Property": "Native Context Rows · Native Team"
+                      "Property": "Native Context Rows \u00b7 Native Team"
                     }
                   },
                   "Right": {

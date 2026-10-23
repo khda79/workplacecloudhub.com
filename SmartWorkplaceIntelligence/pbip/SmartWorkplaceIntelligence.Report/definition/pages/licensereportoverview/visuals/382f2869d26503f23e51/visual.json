@@ -166,7 +166,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "14D"
+                  "Value": "11D"
                 }
               }
             },
@@ -222,7 +222,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "14D"
+                  "Value": "11D"
                 }
               }
             },
@@ -301,7 +301,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'License SKU · complete governed fields'"
+                  "Value": "'License SKU \u00b7 complete governed fields'"
                 }
               }
             }
@@ -321,7 +321,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'License SKU · complete governed fields'"
+                  "Value": "'License SKU \u00b7 complete governed fields'"
                 }
               }
             },
@@ -492,7 +492,7 @@
                 "Entity": "Native License SKU"
               }
             },
-            "Property": "Native Context Rows · Native License SKU"
+            "Property": "Native Context Rows \u00b7 Native License SKU"
           }
         },
         "type": "Advanced",
@@ -517,7 +517,7 @@
                           "Source": "c"
                         }
                       },
-                      "Property": "Native Context Rows · Native License SKU"
+                      "Property": "Native Context Rows \u00b7 Native License SKU"
                     }
                   },
                   "Right": {

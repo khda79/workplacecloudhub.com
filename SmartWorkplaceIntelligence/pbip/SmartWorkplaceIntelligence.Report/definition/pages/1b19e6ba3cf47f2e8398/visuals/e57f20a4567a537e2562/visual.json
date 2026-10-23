@@ -3,9 +3,9 @@
   "name": "e57f20a4567a537e2562",
   "position": {
     "x": 32,
-    "y": 336,
+    "y": 291.5,
     "z": 111,
-    "height": 368,
+    "height": 344.8,
     "width": 1856,
     "tabOrder": 684
   },
@@ -28,20 +28,6 @@
               },
               "queryRef": "Mailbox Evidence.Display Name",
               "nativeQueryRef": "Display Name"
-            },
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Mailbox Evidence"
-                    }
-                  },
-                  "Property": "Mailbox Key"
-                }
-              },
-              "queryRef": "Mailbox Evidence.Mailbox Key",
-              "nativeQueryRef": "Mailbox"
             },
             {
               "field": {
@@ -126,6 +112,20 @@
               },
               "queryRef": "Mailbox Evidence.Archive State",
               "nativeQueryRef": "Archive State"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Evidence"
+                    }
+                  },
+                  "Property": "Mailbox Key"
+                }
+              },
+              "queryRef": "Mailbox Evidence.Mailbox Key",
+              "nativeQueryRef": "Mailbox"
             }
           ]
         }
@@ -268,6 +268,13 @@
                   "Value": "false"
                 }
               }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
             }
           }
         }
@@ -280,7 +287,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Evidence and actions · selected evidence'"
+                  "Value": "'Evidence and actions \u00b7 selected evidence'"
                 }
               }
             }
@@ -300,7 +307,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Evidence and actions · selected evidence'"
+                  "Value": "'Evidence and actions \u00b7 selected evidence'"
                 }
               }
             },

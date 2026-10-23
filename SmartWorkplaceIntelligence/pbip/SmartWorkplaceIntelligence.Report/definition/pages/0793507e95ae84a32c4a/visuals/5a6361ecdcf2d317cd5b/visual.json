@@ -4,8 +4,8 @@
   "position": {
     "x": 32,
     "y": 128,
-    "width": 1856,
-    "height": 120,
+    "width": 1200,
+    "height": 80,
     "z": 114,
     "tabOrder": 256
   },
@@ -42,8 +42,8 @@
                 }
               },
               "queryRef": "Device Inventory Evidence.Windows 10 Devices Not Capable",
-              "nativeQueryRef": "Windows 10 Devices Not Capable",
-              "displayName": "Windows 10 Devices Not Capable"
+              "nativeQueryRef": "Windows 10 not capable",
+              "displayName": "Windows 10 not capable"
             },
             {
               "field": {
@@ -57,8 +57,8 @@
                 }
               },
               "queryRef": "Device Inventory Evidence.Older Windows 11 Release Devices",
-              "nativeQueryRef": "Older Windows 11 Release Devices",
-              "displayName": "Older Windows 11 Release Devices"
+              "nativeQueryRef": "Older Windows 11 releases",
+              "displayName": "Older Windows 11 releases"
             },
             {
               "field": {
@@ -72,8 +72,8 @@
                 }
               },
               "queryRef": "Device Directory Summary.Windows 10 Eligibility Undetermined",
-              "nativeQueryRef": "Win10 undetermined (Intune + AD)",
-              "displayName": "Win10 undetermined (Intune + AD)"
+              "nativeQueryRef": "Windows 10 eligibility unknown",
+              "displayName": "Windows 10 eligibility unknown"
             }
           ]
         }
@@ -93,7 +93,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "28D"
+                  "Value": "20D"
                 }
               }
             },
@@ -261,6 +261,27 @@
               "expr": {
                 "Literal": {
                   "Value": "0D"
+                }
+              }
+            },
+            "rowCount": {
+              "expr": {
+                "Literal": {
+                  "Value": "1L"
+                }
+              }
+            },
+            "columnCount": {
+              "expr": {
+                "Literal": {
+                  "Value": "4L"
+                }
+              }
+            },
+            "autoGrid": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
                 }
               }
             }
@@ -493,14 +514,14 @@
             "top": {
               "expr": {
                 "Literal": {
-                  "Value": "8D"
+                  "Value": "0D"
                 }
               }
             },
             "bottom": {
               "expr": {
                 "Literal": {
-                  "Value": "8D"
+                  "Value": "0D"
                 }
               }
             },

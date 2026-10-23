@@ -86,7 +86,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "24D"
+                  "Value": "20D"
                 }
               }
             },
@@ -123,7 +123,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "12D"
+                  "Value": "11D"
                 }
               }
             }
@@ -354,7 +354,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Selected published M365 suite KPIs · partial families excluded'"
+                  "Value": "'Selected published M365 suite KPIs \u00b7 partial families excluded'"
                 }
               }
             }
@@ -374,7 +374,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Selected published M365 suite KPIs · partial families excluded'"
+                  "Value": "'Selected published M365 suite KPIs \u00b7 partial families excluded'"
                 }
               }
             },

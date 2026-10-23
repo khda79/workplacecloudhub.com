@@ -1,12 +1,12 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "e559a94848dbb9309fa5",
   "position": {
-    "x": 944,
-    "y": 24,
-    "width": 224,
+    "x": 32.0,
+    "y": 120,
+    "z": 7000,
     "height": 80,
-    "z": 12,
+    "width": 452.0,
     "tabOrder": 12
   },
   "visual": {
@@ -28,6 +28,7 @@
               },
               "queryRef": "SPO Migration Source Type.Source Type",
               "nativeQueryRef": "Source Type",
+              "active": true,
               "displayName": "Source Type"
             }
           ]
@@ -68,7 +69,7 @@
             "textSize": {
               "expr": {
                 "Literal": {
-                  "Value": "12D"
+                  "Value": "10D"
                 }
               }
             },
@@ -77,7 +78,7 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#183153'"
+                      "Value": "'#1F2937'"
                     }
                   }
                 }
@@ -268,7 +269,7 @@
             "show": {
               "expr": {
                 "Literal": {
-                  "Value": "true"
+                  "Value": "false"
                 }
               }
             }
@@ -290,5 +291,23 @@
       ]
     },
     "drillFilterOtherVisuals": true
+  },
+  "filterConfig": {
+    "filters": [
+      {
+        "name": "300aa23a37b486741a84",
+        "field": {
+          "Column": {
+            "Expression": {
+              "SourceRef": {
+                "Entity": "SPO Migration Source Type"
+              }
+            },
+            "Property": "Source Type"
+          }
+        },
+        "type": "Categorical"
+      }
+    ]
   }
 }

@@ -3,9 +3,9 @@
   "name": "1fbe95906101774b7054",
   "position": {
     "x": 32,
-    "y": 336,
+    "y": 304.0,
     "z": 111,
-    "height": 656,
+    "height": 690.1,
     "width": 1856,
     "tabOrder": 672
   },
@@ -266,7 +266,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "12D"
+                  "Value": "11D"
                 }
               }
             },
@@ -337,6 +337,13 @@
                   "Value": "false"
                 }
               }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
             }
           }
         },
@@ -356,6 +363,13 @@
               "expr": {
                 "Literal": {
                   "Value": "false"
+                }
+              }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
                 }
               }
             }
@@ -379,6 +393,13 @@
                   "Value": "false"
                 }
               }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
             }
           }
         }
@@ -391,7 +412,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Application inventory · selected evidence'"
+                  "Value": "'Application inventory \u00b7 selected evidence'"
                 }
               }
             }
@@ -411,7 +432,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Application inventory · selected evidence'"
+                  "Value": "'Application inventory \u00b7 selected evidence'"
                 }
               }
             },

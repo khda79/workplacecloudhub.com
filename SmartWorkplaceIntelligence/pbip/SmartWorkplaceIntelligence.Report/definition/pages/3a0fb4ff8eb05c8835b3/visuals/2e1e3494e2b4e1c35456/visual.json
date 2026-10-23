@@ -3,10 +3,10 @@
   "name": "2e1e3494e2b4e1c35456",
   "position": {
     "x": 1357,
-    "y": 840,
+    "y": 851.6,
     "z": 114,
     "width": 322,
-    "height": 18,
+    "height": 18.0,
     "tabOrder": 114
   },
   "visual": {
@@ -19,7 +19,7 @@
               {
                 "textRuns": [
                   {
-                    "value": "Active users · observed history when available",
+                    "value": "Active users \u00b7 observed history when available",
                     "textStyle": {
                       "fontFamily": "Segoe UI",
                       "fontSize": "10px",

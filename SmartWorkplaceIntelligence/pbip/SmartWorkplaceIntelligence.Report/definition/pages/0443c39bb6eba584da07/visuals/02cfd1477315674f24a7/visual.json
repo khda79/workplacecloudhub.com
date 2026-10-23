@@ -3,7 +3,7 @@
   "name": "02cfd1477315674f24a7",
   "position": {
     "x": 1412,
-    "y": 688,
+    "y": 648,
     "z": 119,
     "width": 320,
     "height": 24,
@@ -19,7 +19,7 @@
               {
                 "textRuns": [
                   {
-                    "value": "Active workforce trend · last 30 days",
+                    "value": "Active workforce trend \u00b7 last 30 days",
                     "textStyle": {
                       "fontFamily": "Segoe UI Semibold",
                       "fontSize": "13px",

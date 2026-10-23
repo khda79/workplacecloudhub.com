@@ -3,10 +3,10 @@
   "name": "5219c12a0e266bf4f52f",
   "position": {
     "x": 976,
-    "y": 268,
+    "y": 248,
     "z": 116,
     "width": 440,
-    "height": 118,
+    "height": 96,
     "tabOrder": 116
   },
   "visual": {
@@ -47,14 +47,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "36D"
-                }
-              }
-            },
-            "bold": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
+                  "Value": "20D"
                 }
               }
             },
@@ -63,7 +56,7 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#166534'"
+                      "Value": "'#005A9E'"
                     }
                   }
                 }
@@ -102,7 +95,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "8D"
+                  "Value": "11D"
                 }
               }
             },
@@ -111,7 +104,7 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#52606D'"
+                      "Value": "'#334E68'"
                     }
                   }
                 }
@@ -146,41 +139,38 @@
           }
         }
       ],
-      "padding": [
+      "accentBar": [
         {
           "properties": {
-            "paddingIndividual": {
+            "show": {
               "expr": {
                 "Literal": {
                   "Value": "true"
                 }
               }
             },
-            "topMargin": {
+            "position": {
               "expr": {
                 "Literal": {
-                  "Value": "0L"
+                  "Value": "'Left'"
                 }
               }
             },
-            "bottomMargin": {
+            "width": {
               "expr": {
                 "Literal": {
-                  "Value": "0L"
+                  "Value": "4D"
                 }
               }
             },
-            "leftMargin": {
-              "expr": {
-                "Literal": {
-                  "Value": "8L"
-                }
-              }
-            },
-            "rightMargin": {
-              "expr": {
-                "Literal": {
-                  "Value": "8L"
+            "color": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#215E9E'"
+                    }
+                  }
                 }
               }
             }
@@ -196,48 +186,32 @@
             "topOuterMargin": {
               "expr": {
                 "Literal": {
-                  "Value": "0L"
+                  "Value": "0D"
                 }
               }
             },
             "bottomOuterMargin": {
               "expr": {
                 "Literal": {
-                  "Value": "0L"
+                  "Value": "0D"
                 }
               }
             },
             "leftOuterMargin": {
               "expr": {
                 "Literal": {
-                  "Value": "0L"
+                  "Value": "0D"
                 }
               }
             },
             "rightOuterMargin": {
               "expr": {
                 "Literal": {
-                  "Value": "0L"
+                  "Value": "0D"
                 }
               }
             },
             "paddingUniform": {
-              "expr": {
-                "Literal": {
-                  "Value": "0L"
-                }
-              }
-            }
-          },
-          "selector": {
-            "id": "default"
-          }
-        }
-      ],
-      "spacing": [
-        {
-          "properties": {
-            "verticalSpacing": {
               "expr": {
                 "Literal": {
                   "Value": "0D"
@@ -247,6 +221,88 @@
           },
           "selector": {
             "id": "default"
+          }
+        }
+      ],
+      "padding": [
+        {
+          "properties": {
+            "paddingIndividual": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "topMargin": {
+              "expr": {
+                "Literal": {
+                  "Value": "0D"
+                }
+              }
+            },
+            "bottomMargin": {
+              "expr": {
+                "Literal": {
+                  "Value": "0D"
+                }
+              }
+            },
+            "leftMargin": {
+              "expr": {
+                "Literal": {
+                  "Value": "12D"
+                }
+              }
+            },
+            "rightMargin": {
+              "expr": {
+                "Literal": {
+                  "Value": "8D"
+                }
+              }
+            }
+          },
+          "selector": {
+            "id": "default"
+          }
+        }
+      ],
+      "cardCalloutArea": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "paddingUniform": {
+              "expr": {
+                "Literal": {
+                  "Value": "0D"
+                }
+              }
+            },
+            "backgroundFillColor": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#F3F7FB'"
+                    }
+                  }
+                }
+              }
+            },
+            "backgroundTransparency": {
+              "expr": {
+                "Literal": {
+                  "Value": "0D"
+                }
+              }
+            }
           }
         }
       ]

@@ -3,9 +3,9 @@
   "name": "33633cdd38edbf26a309",
   "position": {
     "x": 32,
-    "y": 397,
+    "y": 656,
     "width": 1856,
-    "height": 595,
+    "height": 336,
     "z": 180,
     "tabOrder": 677
   },
@@ -208,7 +208,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "10D"
+                  "Value": "11D"
                 }
               }
             }
@@ -237,6 +237,13 @@
                       "Value": "'#F3F7FA'"
                     }
                   }
+                }
+              }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
                 }
               }
             }
@@ -289,6 +296,13 @@
                   }
                 }
               }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
             }
           }
         }
@@ -301,7 +315,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Service use · selected evidence'"
+                  "Value": "'Service use \u00b7 selected evidence'"
                 }
               }
             }
@@ -321,7 +335,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Service use · selected evidence'"
+                  "Value": "'Service use \u00b7 selected evidence'"
                 }
               }
             },

@@ -23,12 +23,12 @@
                       "Entity": "Daily Directory Trends"
                     }
                   },
-                  "Property": "Windows 10 Remaining Card"
+                  "Property": "Windows 10 All AD Accounts Card"
                 }
               },
-              "queryRef": "Daily Directory Trends.Windows 10 Remaining Card",
-              "nativeQueryRef": "Windows 10 enabled AD computer accounts",
-              "displayName": "Windows 10 enabled AD computer accounts"
+              "queryRef": "Daily Directory Trends.Windows 10 All AD Accounts Card",
+              "nativeQueryRef": "Windows 10 AD computer accounts",
+              "displayName": "Windows 10 AD computer accounts"
             }
           ]
         },
@@ -42,10 +42,10 @@
                       "Entity": "Daily Directory Trends"
                     }
                   },
-                  "Property": "AD Computer Accounts Scope Tooltip"
+                  "Property": "All AD Computer Accounts Scope Tooltip"
                 }
               },
-              "queryRef": "Daily Directory Trends.AD Computer Accounts Scope Tooltip",
+              "queryRef": "Daily Directory Trends.All AD Computer Accounts Scope Tooltip",
               "nativeQueryRef": "Population scope"
             }
           ]
@@ -59,7 +59,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Windows 10 enabled computer accounts remaining'"
+                  "Value": "'Windows 10 AD computer accounts, enabled and disabled, at the latest complete common Windows reading and change over the selected period'"
                 }
               }
             }
@@ -79,7 +79,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Windows 10 enabled AD computer accounts'"
+                  "Value": "'Windows 10 AD computer accounts'"
                 }
               }
             },
@@ -261,6 +261,13 @@
                   "Value": "false"
                 }
               }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
             }
           }
         }
@@ -274,7 +281,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "30D"
+                  "Value": "20D"
                 }
               }
             },

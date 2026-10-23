@@ -1,5 +1,5 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.13.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "9b19c8692d08d5e85eb7",
   "position": {
     "x": 0,
@@ -10,7 +10,8 @@
     "tabOrder": 1
   },
   "visualGroup": {
-    "displayName": "Native · Link summary",
+    "displayName": "Native \u00b7 Link summary",
     "groupMode": "ScaleMode"
-  }
+  },
+  "isHidden": true
 }

@@ -338,6 +338,13 @@
                   "Value": "false"
                 }
               }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
             }
           }
         }
@@ -350,7 +357,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'E3 → F3 manual review · published candidates'"
+                  "Value": "'E3 \u2192 F3 manual review \u00b7 published candidates'"
                 }
               }
             }
@@ -370,7 +377,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'E3 → F3 manual review · published candidates'"
+                  "Value": "'E3 \u2192 F3 manual review \u00b7 published candidates'"
                 }
               }
             },

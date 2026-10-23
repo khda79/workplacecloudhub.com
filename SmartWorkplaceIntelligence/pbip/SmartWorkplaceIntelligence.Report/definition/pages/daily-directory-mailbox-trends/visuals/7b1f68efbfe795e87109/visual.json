@@ -4,7 +4,7 @@
   "position": {
     "x": 88,
     "y": 24,
-    "width": 1800,
+    "width": 1080,
     "height": 48,
     "z": 2,
     "tabOrder": 2
@@ -22,7 +22,7 @@
                     "value": "Directory & Mailbox Daily Trends",
                     "textStyle": {
                       "fontFamily": "Segoe UI",
-                      "fontSize": "26pt",
+                      "fontSize": "24px",
                       "color": "#183153"
                     }
                   }

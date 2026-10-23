@@ -3,9 +3,9 @@
   "name": "f87ac3a8e6eb2fb23a50",
   "position": {
     "x": 32,
-    "y": 560,
+    "y": 589.3,
     "width": 1856,
-    "height": 392,
+    "height": 367.2,
     "z": 110,
     "tabOrder": 928
   },
@@ -276,7 +276,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Risk evidence · multiple reasons may apply'"
+                  "Value": "'Risk evidence \u00b7 multiple reasons may apply'"
                 }
               }
             },
@@ -423,7 +423,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Risk evidence · multiple reasons may apply'"
+                  "Value": "'Risk evidence \u00b7 multiple reasons may apply'"
                 }
               }
             }

@@ -5,7 +5,7 @@
     "x": 96,
     "y": 66,
     "z": 101,
-    "width": 1792,
+    "width": 1080,
     "height": 28,
     "tabOrder": 101
   },
@@ -22,7 +22,7 @@
                     "value": "Infrastructure CSVs describe the farm, web applications, databases, services and authentication. Content collection qualification is separate.",
                     "textStyle": {
                       "fontFamily": "Segoe UI",
-                      "fontSize": "15px",
+                      "fontSize": "14px",
                       "color": "#52606D"
                     }
                   }

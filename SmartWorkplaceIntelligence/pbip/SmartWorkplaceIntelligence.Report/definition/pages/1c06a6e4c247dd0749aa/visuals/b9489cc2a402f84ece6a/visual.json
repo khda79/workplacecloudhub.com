@@ -3,9 +3,9 @@
   "name": "b9489cc2a402f84ece6a",
   "position": {
     "x": 616,
-    "y": 728,
+    "y": 641.3,
     "width": 1272,
-    "height": 264,
+    "height": 352.7,
     "z": 116,
     "tabOrder": 1340
   },
@@ -286,7 +286,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Active collaboration objects (%) · weekly history'"
+                  "Value": "'Active collaboration objects (%) \u00b7 weekly history'"
                 }
               }
             },

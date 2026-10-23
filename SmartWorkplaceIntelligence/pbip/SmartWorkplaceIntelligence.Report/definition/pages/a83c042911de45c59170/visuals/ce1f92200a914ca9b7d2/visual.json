@@ -5,7 +5,7 @@
     "x": 96,
     "y": 16,
     "z": 100,
-    "width": 1792,
+    "width": 1080,
     "height": 48,
     "tabOrder": 100
   },
@@ -19,10 +19,10 @@
               {
                 "textRuns": [
                   {
-                    "value": "How is the on-prem SharePoint platform configured?",
+                    "value": "On-prem Platform & Services",
                     "textStyle": {
                       "fontFamily": "Segoe UI Semibold",
-                      "fontSize": "25px",
+                      "fontSize": "24px",
                       "color": "#172B4D",
                       "fontWeight": "bold"
                     }

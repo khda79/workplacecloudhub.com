@@ -3,9 +3,9 @@
   "name": "eppendinggaps20261012",
   "position": {
     "x": 648,
-    "y": 128,
+    "y": 222.3,
     "width": 616,
-    "height": 120,
+    "height": 107.4,
     "z": 120,
     "tabOrder": 648
   },
@@ -28,7 +28,7 @@
               },
               "queryRef": "Endpoint Protection Evidence.Endpoint Protection Gap Display",
               "nativeQueryRef": "Endpoint Protection Gap Display",
-              "displayName": "Protection gaps — confirmed devices"
+              "displayName": "Protection gaps \u2014 confirmed devices"
             }
           ]
         },
@@ -67,7 +67,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "28D"
+                  "Value": "20D"
                 }
               }
             },
@@ -122,7 +122,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "14D"
+                  "Value": "11D"
                 }
               }
             },
@@ -147,7 +147,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Protection gaps — confirmed devices'"
+                  "Value": "'Protection gaps \u2014 confirmed devices'"
                 }
               }
             }
@@ -522,7 +522,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Protection gaps — confirmed devices: not assessed. Policy availability and qualified AV / EDR health are separate; absence of health evidence is not zero. Not zero.'"
+                  "Value": "'Protection gaps \u2014 confirmed devices: not assessed. Policy availability and qualified AV / EDR health are separate; absence of health evidence is not zero. Not zero.'"
                 }
               }
             }

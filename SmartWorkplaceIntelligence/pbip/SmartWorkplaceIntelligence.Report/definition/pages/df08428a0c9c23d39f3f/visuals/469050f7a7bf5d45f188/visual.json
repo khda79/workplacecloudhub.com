@@ -5,7 +5,7 @@
     "x": 96,
     "y": 66,
     "z": 101,
-    "width": 720,
+    "width": 1080,
     "height": 50,
     "tabOrder": 101
   },
@@ -22,7 +22,7 @@
                     "value": "SharePoint on-premises  |  Personal sites excluded; site-level storage only, no qualified farm total",
                     "textStyle": {
                       "fontFamily": "Segoe UI",
-                      "fontSize": "15px",
+                      "fontSize": "14px",
                       "color": "#52606D"
                     }
                   }

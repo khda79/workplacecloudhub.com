@@ -3,9 +3,9 @@
   "name": "6ec95fc7aa67852d643f",
   "position": {
     "x": 32,
-    "y": 400,
+    "y": 368,
     "z": 180,
-    "height": 280,
+    "height": 264,
     "width": 1856,
     "tabOrder": 677
   },
@@ -271,6 +271,78 @@
             }
           }
         }
+      ],
+      "columnFormatting": [
+        {
+          "selector": {
+            "metadata": "User Inventory Evidence.Job Title"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "User Inventory Evidence.Enabled Workforce Accounts"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        }
       ]
     },
     "visualContainerObjects": {
@@ -280,7 +352,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Classified job titles · enabled accounts by persona. Account populations are disjoint; a job title may occur in both tables.'"
+                  "Value": "'Classified job titles \u00b7 enabled accounts by persona. Account populations are disjoint; a job title may occur in both tables.'"
                 }
               }
             }
@@ -300,7 +372,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Classified job titles · enabled accounts by persona'"
+                  "Value": "'Classified job titles \u00b7 enabled accounts by persona'"
                 }
               }
             },

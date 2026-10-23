@@ -3,9 +3,9 @@
   "name": "9ab1f95a1288f56f2c62",
   "position": {
     "x": 32,
-    "y": 336,
+    "y": 679.2,
     "width": 1856,
-    "height": 656,
+    "height": 314.8,
     "z": 120,
     "tabOrder": 677
   },
@@ -20,110 +20,104 @@
                 "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Device Operational Signals"
+                      "Entity": "Device Inventory Evidence"
                     }
                   },
-                  "Property": "Severity Label"
+                  "Property": "Manufacturer"
                 }
               },
-              "queryRef": "Device Operational Signals.Severity Label",
-              "nativeQueryRef": "Severity"
+              "queryRef": "Device Inventory Evidence.Manufacturer",
+              "nativeQueryRef": "Manufacturer",
+              "active": true
             },
             {
               "field": {
                 "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Device Operational Signals"
+                      "Entity": "Device Inventory Evidence"
                     }
                   },
-                  "Property": "Signal"
+                  "Property": "Model"
                 }
               },
-              "queryRef": "Device Operational Signals.Signal",
-              "nativeQueryRef": "Signal"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Device Operational Signals"
-                    }
-                  },
-                  "Property": "Affected"
-                }
-              },
-              "queryRef": "Device Operational Signals.Affected",
-              "nativeQueryRef": "Affected"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Device Operational Signals"
-                    }
-                  },
-                  "Property": "Covered"
-                }
-              },
-              "queryRef": "Device Operational Signals.Covered",
-              "nativeQueryRef": "Covered"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Device Operational Signals"
-                    }
-                  },
-                  "Property": "Affected (%)"
-                }
-              },
-              "queryRef": "Device Operational Signals.Affected (%)",
-              "nativeQueryRef": "Affected (%)"
+              "queryRef": "Device Inventory Evidence.Model",
+              "nativeQueryRef": "Model",
+              "active": true
             },
             {
               "field": {
                 "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Device Operational Signals"
+                      "Entity": "Device Inventory Evidence"
                     }
                   },
-                  "Property": "Recommended Action"
+                  "Property": "Operating System Family"
                 }
               },
-              "queryRef": "Device Operational Signals.Recommended Action",
-              "nativeQueryRef": "Recommended Action"
+              "queryRef": "Device Inventory Evidence.Operating System Family",
+              "nativeQueryRef": "Operating System Family",
+              "active": true
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Device Inventory Evidence"
+                    }
+                  },
+                  "Property": "Windows Release"
+                }
+              },
+              "queryRef": "Device Inventory Evidence.Windows Release",
+              "nativeQueryRef": "Windows Release",
+              "active": true
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Device Inventory Evidence"
+                    }
+                  },
+                  "Property": "Managed Devices"
+                }
+              },
+              "queryRef": "Device Inventory Evidence.Managed Devices",
+              "nativeQueryRef": "Managed Devices"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Device Inventory Evidence"
+                    }
+                  },
+                  "Property": "Device Compliance Rate"
+                }
+              },
+              "queryRef": "Device Inventory Evidence.Device Compliance Rate",
+              "nativeQueryRef": "Device Compliance Rate"
             }
           ]
         }
-      },
-      "sortDefinition": {
-        "sort": [
-          {
-            "field": {
-              "Column": {
-                "Expression": {
-                  "SourceRef": {
-                    "Entity": "Device Operational Signals"
-                  }
-                },
-                "Property": "Signal"
-              }
-            },
-            "direction": "Ascending"
-          }
-        ]
       }
     },
     "objects": {
       "columnHeaders": [
         {
           "properties": {
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
+            },
             "autoSizeColumnWidth": {
               "expr": {
                 "Literal": {
@@ -135,49 +129,6 @@
               "expr": {
                 "Literal": {
                   "Value": "'growToFit'"
-                }
-              }
-            },
-            "fontSize": {
-              "expr": {
-                "Literal": {
-                  "Value": "11D"
-                }
-              }
-            },
-            "bold": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "wordWrap": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "fontColor": {
-              "solid": {
-                "color": {
-                  "expr": {
-                    "Literal": {
-                      "Value": "'#FFFFFF'"
-                    }
-                  }
-                }
-              }
-            },
-            "backColor": {
-              "solid": {
-                "color": {
-                  "expr": {
-                    "Literal": {
-                      "Value": "'#215E9E'"
-                    }
-                  }
                 }
               }
             }
@@ -257,6 +208,13 @@
                   "Value": "false"
                 }
               }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
             }
           }
         }
@@ -269,7 +227,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Manufacturers and releases · selected evidence'"
+                  "Value": "'Managed inventory by manufacturer, model and operating system'"
                 }
               }
             }
@@ -289,7 +247,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Manufacturers and releases · selected evidence'"
+                  "Value": "'Managed inventory by manufacturer, model and operating system'"
                 }
               }
             },
@@ -445,106 +403,6 @@
       ]
     },
     "drillFilterOtherVisuals": true
-  },
-  "filterConfig": {
-    "filters": [
-      {
-        "name": "fe32bf6699fff17eda40",
-        "field": {
-          "Column": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "Device Operational Signals"
-              }
-            },
-            "Property": "Signal"
-          }
-        },
-        "type": "Categorical",
-        "filter": {
-          "Version": 2,
-          "From": [
-            {
-              "Name": "f",
-              "Entity": "Device Operational Signals",
-              "Type": 0
-            }
-          ],
-          "Where": [
-            {
-              "Condition": {
-                "In": {
-                  "Expressions": [
-                    {
-                      "Column": {
-                        "Expression": {
-                          "SourceRef": {
-                            "Source": "f"
-                          }
-                        },
-                        "Property": "Signal"
-                      }
-                    }
-                  ],
-                  "Values": [
-                    [
-                      {
-                        "Literal": {
-                          "Value": "'Noncompliant devices'"
-                        }
-                      }
-                    ],
-                    [
-                      {
-                        "Literal": {
-                          "Value": "'Devices low on disk space'"
-                        }
-                      }
-                    ],
-                    [
-                      {
-                        "Literal": {
-                          "Value": "'Devices approaching low disk threshold'"
-                        }
-                      }
-                    ],
-                    [
-                      {
-                        "Literal": {
-                          "Value": "'Devices not synced with Intune for more than 30 days'"
-                        }
-                      }
-                    ],
-                    [
-                      {
-                        "Literal": {
-                          "Value": "'Secure Boot disabled'"
-                        }
-                      }
-                    ],
-                    [
-                      {
-                        "Literal": {
-                          "Value": "'Device removal candidates'"
-                        }
-                      }
-                    ],
-                    [
-                      {
-                        "Literal": {
-                          "Value": "'AD-to-Intune unmatched devices'"
-                        }
-                      }
-                    ]
-                  ]
-                }
-              }
-            }
-          ]
-        },
-        "howCreated": "User"
-      }
-    ]
   },
   "parentGroupName": "6c76b3c17fa0a5b5af97"
 }

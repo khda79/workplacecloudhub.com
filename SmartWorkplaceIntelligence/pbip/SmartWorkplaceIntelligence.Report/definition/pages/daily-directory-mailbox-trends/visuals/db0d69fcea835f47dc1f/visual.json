@@ -23,12 +23,12 @@
                       "Entity": "Daily Directory Trends"
                     }
                   },
-                  "Property": "Directory Quality Text"
+                  "Property": "Windows All AD Accounts Quality Text"
                 }
               },
-              "queryRef": "Daily Directory Trends.Directory Quality Text",
-              "nativeQueryRef": "Directory quality",
-              "displayName": "Directory quality"
+              "queryRef": "Daily Directory Trends.Windows All AD Accounts Quality Text",
+              "nativeQueryRef": "Population and qualification",
+              "displayName": "Population and qualification"
             }
           ]
         },
@@ -73,7 +73,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Directory quality, core and fully measured dates'"
+                  "Value": "'Qualification and last complete common reading for all AD computer accounts and Windows 10 and Windows 11 enabled and disabled counts; missing readings remain gaps'"
                 }
               }
             }
@@ -93,14 +93,14 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Directory quality - last qualified / fully measured'"
+                  "Value": "'Windows AD accounts - complete reading'"
                 }
               }
             },
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "13D"
+                  "Value": "10D"
                 }
               }
             },
@@ -245,7 +245,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "13D"
+                  "Value": "10D"
                 }
               }
             },
@@ -276,6 +276,13 @@
               "expr": {
                 "Literal": {
                   "Value": "false"
+                }
+              }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
                 }
               }
             }

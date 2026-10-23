@@ -3,9 +3,9 @@
   "name": "e2cc757a074680d7021a",
   "position": {
     "x": 32,
-    "y": 536,
+    "y": 428.7,
     "width": 1856,
-    "height": 416,
+    "height": 531.6,
     "z": 13000,
     "tabOrder": 13000
   },
@@ -166,7 +166,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "14D"
+                  "Value": "11D"
                 }
               }
             },
@@ -222,7 +222,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "14D"
+                  "Value": "11D"
                 }
               }
             },
@@ -301,7 +301,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Direct observed Team / channel / site links · no effective-access inference'"
+                  "Value": "'Direct observed Team / channel / site links \u00b7 no effective-access inference'"
                 }
               }
             }
@@ -321,7 +321,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Direct observed Team / channel / site links · no effective-access inference'"
+                  "Value": "'Direct observed Team / channel / site links \u00b7 no effective-access inference'"
                 }
               }
             },

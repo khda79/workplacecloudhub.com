@@ -3,28 +3,33 @@
   "name": "8b7de51565202c517aff",
   "displayName": "Deadlines",
   "options": {
-    "applyOnlyToTargetVisuals": true,
+    "applyOnlyToTargetVisuals": false,
     "targetVisualNames": [
-      "3b7aebbfb8249fe2aa74",
-      "7550e0fb27d1e79d9d99"
+      "3da1f56d55390e9ee5f5",
+      "2ef3803af6af59f2a42f"
     ],
     "suppressActiveSection": true,
-    "suppressData": true
+    "suppressData": true,
+    "suppressDisplay": false
   },
   "explorationState": {
     "version": "1.0",
     "activeSection": "migration-to-sharepoint-online",
     "sections": {
       "migration-to-sharepoint-online": {
-        "visualContainers": {},
-        "visualContainerGroups": {
-          "3b7aebbfb8249fe2aa74": {
-            "isHidden": false
+        "visualContainers": {
+          "3da1f56d55390e9ee5f5": {
+            "singleVisual": {}
           },
-          "7550e0fb27d1e79d9d99": {
-            "isHidden": true
+          "2ef3803af6af59f2a42f": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
           }
-        }
+        },
+        "visualContainerGroups": {}
       }
     }
   }

@@ -55,7 +55,23 @@
                 }
               },
               "queryRef": "Mailbox Evidence.Total Mailbox Storage (TB)",
-              "nativeQueryRef": "Mailbox storage (TB)"
+              "nativeQueryRef": "Total Exchange Storage (TB)",
+              "displayName": "Total Exchange Storage (TB)"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Content Storage Evidence"
+                    }
+                  },
+                  "Property": "Total SharePoint Storage (TB)"
+                }
+              },
+              "queryRef": "Content Storage Evidence.Total SharePoint Storage (TB)",
+              "nativeQueryRef": "Total SharePoint Storage (TB)",
+              "displayName": "Total SharePoint Storage (TB)"
             }
           ]
         },
@@ -93,7 +109,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "15D"
+                  "Value": "20D"
                 }
               }
             },
@@ -155,7 +171,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "10D"
+                  "Value": "11D"
                 }
               }
             },

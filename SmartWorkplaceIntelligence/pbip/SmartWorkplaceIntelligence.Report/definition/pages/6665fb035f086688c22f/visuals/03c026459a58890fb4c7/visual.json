@@ -3,9 +3,9 @@
   "name": "03c026459a58890fb4c7",
   "position": {
     "x": 32,
-    "y": 488,
+    "y": 521.9,
     "width": 1856,
-    "height": 336,
+    "height": 314.8,
     "z": 12000,
     "tabOrder": 544
   },
@@ -222,7 +222,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "14D"
+                  "Value": "11D"
                 }
               }
             },
@@ -278,7 +278,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "14D"
+                  "Value": "11D"
                 }
               }
             },
@@ -357,7 +357,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Source Health · complete governed fields'"
+                  "Value": "'Source Health \u00b7 complete governed fields'"
                 }
               }
             }
@@ -377,7 +377,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Source Health · complete governed fields'"
+                  "Value": "'Source Health \u00b7 complete governed fields'"
                 }
               }
             },
@@ -548,7 +548,7 @@
                 "Entity": "Native Source Health"
               }
             },
-            "Property": "Native Context Rows · Native Source Health"
+            "Property": "Native Context Rows \u00b7 Native Source Health"
           }
         },
         "type": "Advanced",
@@ -573,7 +573,7 @@
                           "Source": "c"
                         }
                       },
-                      "Property": "Native Context Rows · Native Source Health"
+                      "Property": "Native Context Rows \u00b7 Native Source Health"
                     }
                   },
                   "Right": {

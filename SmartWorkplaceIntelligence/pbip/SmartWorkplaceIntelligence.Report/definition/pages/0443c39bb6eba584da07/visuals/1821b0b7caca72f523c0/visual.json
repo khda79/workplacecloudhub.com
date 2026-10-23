@@ -3,9 +3,9 @@
   "name": "1821b0b7caca72f523c0",
   "position": {
     "x": 32,
-    "y": 664,
+    "y": 472,
     "z": 117,
-    "height": 304,
+    "height": 520,
     "width": 1856,
     "tabOrder": 1328
   },
@@ -281,7 +281,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "12D"
+                  "Value": "11D"
                 }
               }
             },
@@ -352,6 +352,13 @@
                   "Value": "false"
                 }
               }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
             }
           }
         },
@@ -368,6 +375,13 @@
               "expr": {
                 "Literal": {
                   "Value": "false"
+                }
+              }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
                 }
               }
             }
@@ -391,6 +405,13 @@
                   "Value": "false"
                 }
               }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
             }
           },
           "selector": {
@@ -406,7 +427,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Account inventory · selected evidence'"
+                  "Value": "'Account inventory \u00b7 selected evidence'"
                 }
               }
             }
@@ -426,7 +447,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Account inventory · selected evidence'"
+                  "Value": "'Account inventory \u00b7 selected evidence'"
                 }
               }
             },

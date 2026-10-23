@@ -1,5 +1,5 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.13.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "48f16eb4cb5568fcfd08",
   "position": {
     "x": 0,
@@ -12,5 +12,6 @@
   "visualGroup": {
     "displayName": "Managed apps",
     "groupMode": "ScaleMode"
-  }
+  },
+  "isHidden": true
 }

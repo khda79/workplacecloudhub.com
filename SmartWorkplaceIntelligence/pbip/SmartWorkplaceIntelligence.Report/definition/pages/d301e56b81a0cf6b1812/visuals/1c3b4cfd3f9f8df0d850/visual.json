@@ -3,9 +3,9 @@
   "name": "1c3b4cfd3f9f8df0d850",
   "position": {
     "x": 32,
-    "y": 336,
+    "y": 296,
     "z": 110,
-    "height": 656,
+    "height": 696,
     "width": 1856,
     "tabOrder": 672
   },
@@ -586,7 +586,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "12D"
+                  "Value": "11D"
                 }
               }
             },
@@ -630,6 +630,13 @@
                   "Value": "false"
                 }
               }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
             }
           }
         },
@@ -646,6 +653,13 @@
               "expr": {
                 "Literal": {
                   "Value": "false"
+                }
+              }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
                 }
               }
             }
@@ -669,6 +683,13 @@
                   "Value": "false"
                 }
               }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
             }
           },
           "selector": {
@@ -684,7 +705,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Evidence · selected evidence'"
+                  "Value": "'Evidence \u00b7 selected evidence'"
                 }
               }
             }
@@ -704,7 +725,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Endpoint evidence · existing performance, last boot and reported restart requirement'"
+                  "Value": "'Endpoint evidence \u00b7 existing performance, last boot and reported restart requirement'"
                 }
               }
             },

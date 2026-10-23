@@ -1,15 +1,14 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "358d7e1d35336754a838",
   "position": {
-    "x": 32,
-    "y": 696,
-    "width": 1856,
-    "height": 352,
-    "z": 36,
+    "x": 56,
+    "y": 868,
+    "z": 7000,
+    "height": 320,
+    "width": 1808,
     "tabOrder": 36
   },
-  "parentGroupName": "b2deaadb9550a5b30275",
   "visual": {
     "visualType": "tableEx",
     "query": {
@@ -183,7 +182,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "12D"
+                  "Value": "11D"
                 }
               }
             },
@@ -225,7 +224,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "14D"
+                  "Value": "11D"
                 }
               }
             },
@@ -292,6 +291,13 @@
                   "Value": "false"
                 }
               }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
             }
           }
         }
@@ -311,14 +317,14 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Schedule and ownership — variance against the latest known planned date'"
+                  "Value": "'Schedule and ownership \u2014 variance against the latest known planned date'"
                 }
               }
             },
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "14D"
+                  "Value": "12D"
                 }
               }
             },
@@ -327,9 +333,16 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#183153'"
+                      "Value": "'#1F2937'"
                     }
                   }
+                }
+              }
+            },
+            "bold": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
                 }
               }
             }
@@ -382,16 +395,9 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#CCDCEC'"
+                      "Value": "'#CBD8E5'"
                     }
                   }
-                }
-              }
-            },
-            "radius": {
-              "expr": {
-                "Literal": {
-                  "Value": "8D"
                 }
               }
             },
@@ -399,6 +405,13 @@
               "expr": {
                 "Literal": {
                   "Value": "1D"
+                }
+              }
+            },
+            "radius": {
+              "expr": {
+                "Literal": {
+                  "Value": "12D"
                 }
               }
             }
@@ -425,14 +438,14 @@
             "left": {
               "expr": {
                 "Literal": {
-                  "Value": "8D"
+                  "Value": "10D"
                 }
               }
             },
             "right": {
               "expr": {
                 "Literal": {
-                  "Value": "8D"
+                  "Value": "10D"
                 }
               }
             }
@@ -445,7 +458,7 @@
             "show": {
               "expr": {
                 "Literal": {
-                  "Value": "true"
+                  "Value": "false"
                 }
               }
             }
@@ -458,7 +471,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Schedule and ownership — variance against the latest known planned date'"
+                  "Value": "'Schedule and ownership \u2014 variance against the latest known planned date'"
                 }
               }
             }
@@ -481,6 +494,7 @@
     },
     "drillFilterOtherVisuals": true
   },
+  "parentGroupName": "b2deaadb9550a5b30275",
   "filterConfig": {
     "filters": [
       {

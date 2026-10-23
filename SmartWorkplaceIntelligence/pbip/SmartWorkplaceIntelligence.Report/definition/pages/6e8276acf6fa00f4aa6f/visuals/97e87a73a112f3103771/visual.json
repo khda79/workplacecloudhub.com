@@ -3,9 +3,9 @@
   "name": "97e87a73a112f3103771",
   "position": {
     "x": 32,
-    "y": 696,
+    "y": 716.7,
     "width": 1856,
-    "height": 260,
+    "height": 243.6,
     "z": 11000,
     "tabOrder": 728
   },
@@ -176,7 +176,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "14D"
+                  "Value": "11D"
                 }
               }
             },
@@ -232,7 +232,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "14D"
+                  "Value": "11D"
                 }
               }
             },
@@ -327,7 +327,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Geography · selected evidence'"
+                  "Value": "'Geography \u00b7 selected evidence'"
                 }
               }
             }
@@ -347,7 +347,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Endpoint evaluations · Unknown is not protected or unprotected'"
+                  "Value": "'Endpoint evaluations \u00b7 Unknown is not protected or unprotected'"
                 }
               }
             },

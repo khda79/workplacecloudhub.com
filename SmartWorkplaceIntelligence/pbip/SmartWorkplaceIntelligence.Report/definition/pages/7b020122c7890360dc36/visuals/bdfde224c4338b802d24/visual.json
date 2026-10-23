@@ -3,9 +3,9 @@
   "name": "bdfde224c4338b802d24",
   "position": {
     "x": 32,
-    "y": 336,
+    "y": 379.5,
     "width": 1856,
-    "height": 104,
+    "height": 97.4,
     "z": 114,
     "tabOrder": 672
   },
@@ -93,7 +93,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "28D"
+                  "Value": "20D"
                 }
               }
             },

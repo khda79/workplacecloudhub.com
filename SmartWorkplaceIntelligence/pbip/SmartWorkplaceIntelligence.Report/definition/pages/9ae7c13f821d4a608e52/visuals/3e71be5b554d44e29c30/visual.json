@@ -1,5 +1,5 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.13.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "3e71be5b554d44e29c30",
   "position": {
     "x": 0,
@@ -12,5 +12,6 @@
   "visualGroup": {
     "displayName": "Evidence context",
     "groupMode": "ScaleMode"
-  }
+  },
+  "isHidden": true
 }

@@ -3,7 +3,7 @@
   "name": "22193a1b482a6a85ed76",
   "position": {
     "x": 968,
-    "y": 336,
+    "y": 296,
     "width": 912,
     "height": 296,
     "z": 115,
@@ -300,7 +300,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Windows 11 adoption (%) · recorded snapshots'"
+                  "Value": "'Windows 11 adoption (%) \u00b7 recorded snapshots'"
                 }
               }
             },

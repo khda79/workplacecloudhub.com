@@ -4,7 +4,7 @@
   "position": {
     "x": 96,
     "y": 64,
-    "width": 880,
+    "width": 1080,
     "height": 48,
     "z": 12,
     "tabOrder": 12
@@ -19,10 +19,10 @@
               {
                 "textRuns": [
                   {
-                    "value": "Priority license families · assignment, capacity and published evidence · BETA 1.0.0-beta.1",
+                    "value": "Priority license families \u00b7 assignment, capacity and published evidence",
                     "textStyle": {
                       "fontFamily": "Segoe UI",
-                      "fontSize": "13px",
+                      "fontSize": "14px",
                       "color": "#52606D"
                     }
                   }

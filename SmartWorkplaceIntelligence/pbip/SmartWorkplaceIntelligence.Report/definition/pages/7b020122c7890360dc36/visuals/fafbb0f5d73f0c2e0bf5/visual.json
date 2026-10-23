@@ -3,9 +3,9 @@
   "name": "fafbb0f5d73f0c2e0bf5",
   "position": {
     "x": 32,
-    "y": 336,
+    "y": 379.5,
     "width": 1856,
-    "height": 440,
+    "height": 512,
     "z": 110,
     "tabOrder": 672
   },
@@ -430,7 +430,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'AD Windows 10 records without Intune ID · observed, not a qualified unmanaged-device total'"
+                  "Value": "'AD Windows 10 records without Intune ID \u00b7 observed, not a qualified unmanaged-device total'"
                 }
               }
             }

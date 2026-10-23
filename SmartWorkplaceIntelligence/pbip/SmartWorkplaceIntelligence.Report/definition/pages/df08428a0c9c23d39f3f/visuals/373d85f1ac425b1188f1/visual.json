@@ -2,11 +2,11 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
   "name": "373d85f1ac425b1188f1",
   "position": {
-    "x": 56,
-    "y": 184,
+    "x": 32,
+    "y": 415.6,
     "z": 142,
-    "width": 1808,
-    "height": 30,
+    "width": 1856,
+    "height": 26.0,
     "tabOrder": 142
   },
   "visual": {
@@ -19,7 +19,7 @@
               {
                 "textRuns": [
                   {
-                    "value": "229 retained site rows in the current snapshot. Content coverage remains Partial; observed storage is not a farm total.",
+                    "value": "Observed site-level storage only. Content coverage is partial; this is not a qualified farm total.",
                     "textStyle": {
                       "fontFamily": "Segoe UI",
                       "fontSize": "15px",

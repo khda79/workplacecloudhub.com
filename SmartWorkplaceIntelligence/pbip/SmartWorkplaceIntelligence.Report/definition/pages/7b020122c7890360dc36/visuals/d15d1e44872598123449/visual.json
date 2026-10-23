@@ -4,7 +4,7 @@
   "position": {
     "x": 96,
     "y": 76,
-    "width": 680,
+    "width": 1080,
     "height": 48,
     "z": 119,
     "tabOrder": 153
@@ -22,7 +22,7 @@
                     "value": "Intune + enabled AD Windows 10 without a current Intune match; policy state is not migration readiness",
                     "textStyle": {
                       "fontFamily": "Segoe UI",
-                      "fontSize": "11pt",
+                      "fontSize": "14px",
                       "color": "#183153"
                     }
                   }

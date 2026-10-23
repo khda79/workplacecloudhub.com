@@ -2,10 +2,10 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json",
   "name": "633c3219a42f06a680a6",
   "position": {
-    "x": 976,
-    "y": 664,
-    "width": 912,
-    "height": 328,
+    "x": 1440,
+    "y": 384,
+    "width": 448,
+    "height": 152,
     "z": 112,
     "tabOrder": 1340
   },
@@ -102,7 +102,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "10D"
+                  "Value": "11D"
                 }
               }
             }
@@ -131,6 +131,13 @@
                       "Value": "'#F3F7FA'"
                     }
                   }
+                }
+              }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
                 }
               }
             }
@@ -183,6 +190,13 @@
                   }
                 }
               }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
             }
           }
         }
@@ -195,7 +209,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Device attention context'"
+                  "Value": "'Disk space context'"
                 }
               }
             }
@@ -215,7 +229,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Device attention context'"
+                  "Value": "'Disk space context'"
                 }
               }
             },

@@ -3,9 +3,9 @@
   "name": "13002f6c53edf8bcf805",
   "position": {
     "x": 32,
-    "y": 744,
+    "y": 773.5,
     "width": 916,
-    "height": 248,
+    "height": 221.9,
     "z": 130,
     "tabOrder": 700
   },
@@ -28,7 +28,7 @@
               },
               "queryRef": "Endpoint Protection Evidence.Endpoint Protection AV Registered Devices",
               "nativeQueryRef": "Endpoint Protection AV Registered Devices",
-              "displayName": "AV registered · current"
+              "displayName": "AV registered \u00b7 current"
             },
             {
               "field": {
@@ -43,7 +43,7 @@
               },
               "queryRef": "Endpoint Protection Evidence.Endpoint Protection AV Not Registered Devices",
               "nativeQueryRef": "Endpoint Protection AV Not Registered Devices",
-              "displayName": "AV not registered · current"
+              "displayName": "AV not registered \u00b7 current"
             },
             {
               "field": {
@@ -142,7 +142,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "24D"
+                  "Value": "20D"
                 }
               }
             },
@@ -197,7 +197,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "14D"
+                  "Value": "11D"
                 }
               }
             },

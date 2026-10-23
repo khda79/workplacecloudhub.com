@@ -3,9 +3,9 @@
   "name": "e6ffc010f4a5061f2379",
   "position": {
     "x": 32,
-    "y": 848,
+    "y": 859.1,
     "width": 1856,
-    "height": 144,
+    "height": 134.9,
     "z": 12000,
     "tabOrder": 544
   },
@@ -110,7 +110,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "14D"
+                  "Value": "11D"
                 }
               }
             },
@@ -166,7 +166,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "14D"
+                  "Value": "11D"
                 }
               }
             },
@@ -245,7 +245,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Native metrics · qualified source population, not workforce totals'"
+                  "Value": "'Native metrics \u00b7 qualified source population, not workforce totals'"
                 }
               }
             }
@@ -265,7 +265,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Native metrics · qualified source population, not workforce totals'"
+                  "Value": "'Native metrics \u00b7 qualified source population, not workforce totals'"
                 }
               }
             },

@@ -23,12 +23,12 @@
                       "Entity": "Daily Directory Trends"
                     }
                   },
-                  "Property": "Windows 11 Share Card"
+                  "Property": "Windows 11 All AD Accounts Share and Count Change Card"
                 }
               },
-              "queryRef": "Daily Directory Trends.Windows 11 Share Card",
-              "nativeQueryRef": "Windows 11 share",
-              "displayName": "Windows 11 share"
+              "queryRef": "Daily Directory Trends.Windows 11 All AD Accounts Share and Count Change Card",
+              "nativeQueryRef": "Windows 11 share | change in AD accounts",
+              "displayName": "Windows 11 share | change in AD accounts"
             }
           ]
         },
@@ -42,10 +42,10 @@
                       "Entity": "Daily Directory Trends"
                     }
                   },
-                  "Property": "AD Computer Accounts Scope Tooltip"
+                  "Property": "All AD Computer Accounts Scope Tooltip"
                 }
               },
-              "queryRef": "Daily Directory Trends.AD Computer Accounts Scope Tooltip",
+              "queryRef": "Daily Directory Trends.All AD Computer Accounts Scope Tooltip",
               "nativeQueryRef": "Population scope"
             }
           ]
@@ -59,7 +59,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Windows 11 share and percentage point change'"
+                  "Value": "'Windows 11 AD computer accounts, enabled and disabled, as a share of all AD computer accounts across all operating systems; absolute count change over the selected period'"
                 }
               }
             }
@@ -79,7 +79,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Windows 11 share'"
+                  "Value": "'Windows 11 AD computer accounts share'"
                 }
               }
             },
@@ -248,7 +248,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "30D"
+                  "Value": "20D"
                 }
               }
             },
@@ -283,6 +283,13 @@
               "expr": {
                 "Literal": {
                   "Value": "false"
+                }
+              }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
                 }
               }
             }

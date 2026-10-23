@@ -10,7 +10,7 @@
     "tabOrder": 2
   },
   "visualGroup": {
-    "displayName": "Windows AD accounts",
+    "displayName": "Computer accounts",
     "groupMode": "ScaleMode"
   },
   "isHidden": true

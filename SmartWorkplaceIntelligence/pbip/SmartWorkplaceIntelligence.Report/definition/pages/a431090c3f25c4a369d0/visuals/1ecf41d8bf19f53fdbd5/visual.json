@@ -3,9 +3,9 @@
   "name": "1ecf41d8bf19f53fdbd5",
   "position": {
     "x": 32,
-    "y": 336,
+    "y": 384,
     "z": 111,
-    "height": 656,
+    "height": 608,
     "width": 1856,
     "tabOrder": 677
   },
@@ -166,6 +166,156 @@
               "queryRef": "Device Inventory Evidence.Stop Error Count",
               "nativeQueryRef": "Stop Error Count",
               "active": true
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Device Inventory Evidence"
+                    }
+                  },
+                  "Property": "AD Password Expired"
+                }
+              },
+              "queryRef": "Device Inventory Evidence.AD Password Expired",
+              "nativeQueryRef": "AD Password Expired",
+              "displayName": "AD Password Expired"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Device Inventory Evidence"
+                    }
+                  },
+                  "Property": "AD Password Expiry Status"
+                }
+              },
+              "queryRef": "Device Inventory Evidence.AD Password Expiry Status",
+              "nativeQueryRef": "AD Password Expiry Status",
+              "displayName": "AD Password Expiry Status"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Device Inventory Evidence"
+                    }
+                  },
+                  "Property": "AD Created (source)"
+                }
+              },
+              "queryRef": "Device Inventory Evidence.AD Created (source)",
+              "nativeQueryRef": "AD Created (source)",
+              "displayName": "AD Created (source)"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Device Inventory Evidence"
+                    }
+                  },
+                  "Property": "AD Creation Qualification"
+                }
+              },
+              "queryRef": "Device Inventory Evidence.AD Creation Qualification",
+              "nativeQueryRef": "AD Creation Qualification",
+              "displayName": "AD Creation Qualification"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Device Inventory Evidence"
+                    }
+                  },
+                  "Property": "Entra Created (source)"
+                }
+              },
+              "queryRef": "Device Inventory Evidence.Entra Created (source)",
+              "nativeQueryRef": "Entra Created (source)",
+              "displayName": "Entra Created (source)"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Device Inventory Evidence"
+                    }
+                  },
+                  "Property": "Entra Creation Qualification"
+                }
+              },
+              "queryRef": "Device Inventory Evidence.Entra Creation Qualification",
+              "nativeQueryRef": "Entra Creation Qualification",
+              "displayName": "Entra Creation Qualification"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Device Inventory Evidence"
+                    }
+                  },
+                  "Property": "AD Modified (source)"
+                }
+              },
+              "queryRef": "Device Inventory Evidence.AD Modified (source)",
+              "nativeQueryRef": "AD Modified (source)",
+              "displayName": "AD Modified (source)"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Device Inventory Evidence"
+                    }
+                  },
+                  "Property": "AD Modification Qualification"
+                }
+              },
+              "queryRef": "Device Inventory Evidence.AD Modification Qualification",
+              "nativeQueryRef": "AD Modification Qualification",
+              "displayName": "AD Modification Qualification"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Device Inventory Evidence"
+                    }
+                  },
+                  "Property": "Entra Modified (source)"
+                }
+              },
+              "queryRef": "Device Inventory Evidence.Entra Modified (source)",
+              "nativeQueryRef": "Entra Modified (source)",
+              "displayName": "Entra Modified (source)"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Device Inventory Evidence"
+                    }
+                  },
+                  "Property": "Entra Modification Qualification"
+                }
+              },
+              "queryRef": "Device Inventory Evidence.Entra Modification Qualification",
+              "nativeQueryRef": "Entra Modification Qualification",
+              "displayName": "Entra Modification Qualification"
             },
             {
               "field": {
@@ -680,7 +830,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "12D"
+                  "Value": "11D"
                 }
               }
             },
@@ -724,6 +874,13 @@
                   "Value": "false"
                 }
               }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
             }
           }
         },
@@ -740,6 +897,13 @@
               "expr": {
                 "Literal": {
                   "Value": "false"
+                }
+              }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
                 }
               }
             }
@@ -763,6 +927,13 @@
                   "Value": "false"
                 }
               }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
             }
           },
           "selector": {
@@ -778,7 +949,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Attention · selected evidence'"
+                  "Value": "'Attention \u00b7 selected evidence'"
                 }
               }
             }
@@ -798,7 +969,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Attention · reported states and evidence limitations; not a current-health verdict'"
+                  "Value": "'Attention \u00b7 reported states and evidence limitations; not a current-health verdict'"
                 }
               }
             },

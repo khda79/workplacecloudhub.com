@@ -3,9 +3,9 @@
   "name": "c7f1ac77fa75f7634a67",
   "position": {
     "x": 32,
-    "y": 488,
+    "y": 521.9,
     "width": 1856,
-    "height": 504,
+    "height": 472.2,
     "z": 12000,
     "tabOrder": 544
   },
@@ -124,7 +124,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "14D"
+                  "Value": "11D"
                 }
               }
             },
@@ -180,7 +180,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "14D"
+                  "Value": "11D"
                 }
               }
             },
@@ -259,7 +259,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Tenant · complete governed fields'"
+                  "Value": "'Tenant \u00b7 complete governed fields'"
                 }
               }
             }
@@ -279,7 +279,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Tenant · complete governed fields'"
+                  "Value": "'Tenant \u00b7 complete governed fields'"
                 }
               }
             },
@@ -450,7 +450,7 @@
                 "Entity": "Tenant Evidence"
               }
             },
-            "Property": "Native Context Rows · Tenant Evidence"
+            "Property": "Native Context Rows \u00b7 Tenant Evidence"
           }
         },
         "type": "Advanced",
@@ -475,7 +475,7 @@
                           "Source": "c"
                         }
                       },
-                      "Property": "Native Context Rows · Tenant Evidence"
+                      "Property": "Native Context Rows \u00b7 Tenant Evidence"
                     }
                   },
                   "Right": {

@@ -4,7 +4,7 @@
   "position": {
     "x": 96,
     "y": 16,
-    "width": 1088,
+    "width": 864,
     "height": 64,
     "z": 100,
     "tabOrder": 49
@@ -19,10 +19,10 @@
               {
                 "textRuns": [
                   {
-                    "value": "Which applications create the most footprint or version fragmentation?",
+                    "value": "Applications & Standardization",
                     "textStyle": {
                       "fontFamily": "Segoe UI Semibold",
-                      "fontSize": "20px",
+                      "fontSize": "24px",
                       "color": "#172B4D",
                       "fontWeight": "bold"
                     }

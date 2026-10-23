@@ -3,9 +3,9 @@
   "name": "7506bd1c00b74d2a375e",
   "position": {
     "x": 32,
-    "y": 552,
+    "y": 581.8,
     "width": 1856,
-    "height": 400,
+    "height": 374.7,
     "z": 110,
     "tabOrder": 1104
   },
@@ -490,7 +490,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Feature-update policy observations · unique tenant / policy / Intune device ID'"
+                  "Value": "'Feature-update policy observations \u00b7 unique tenant / policy / Intune device ID'"
                 }
               }
             }

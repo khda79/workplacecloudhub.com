@@ -4,7 +4,7 @@
   "position": {
     "x": 96,
     "y": 16,
-    "width": 1088,
+    "width": 1080,
     "height": 64,
     "z": 100,
     "tabOrder": 49
@@ -19,10 +19,10 @@
               {
                 "textRuns": [
                   {
-                    "value": "How exposed is the Windows estate to readiness and support risk?",
+                    "value": "Windows Lifecycle",
                     "textStyle": {
                       "fontFamily": "Segoe UI Semibold",
-                      "fontSize": "20px",
+                      "fontSize": "24px",
                       "color": "#172B4D",
                       "fontWeight": "bold"
                     }

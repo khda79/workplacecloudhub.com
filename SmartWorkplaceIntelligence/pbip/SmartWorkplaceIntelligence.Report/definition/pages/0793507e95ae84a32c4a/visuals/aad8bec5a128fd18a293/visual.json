@@ -3,9 +3,9 @@
   "name": "aad8bec5a128fd18a293",
   "position": {
     "x": 32,
-    "y": 336,
+    "y": 616,
     "z": 110,
-    "height": 656,
+    "height": 376,
     "width": 1856,
     "tabOrder": 672
   },
@@ -255,7 +255,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "12D"
+                  "Value": "11D"
                 }
               }
             },
@@ -277,7 +277,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Geography · selected evidence'"
+                  "Value": "'Geography \u00b7 selected evidence'"
                 }
               }
             }
@@ -297,7 +297,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Windows by country · current Intune scope; AD-only excluded'"
+                  "Value": "'Windows by country \u00b7 current Intune scope; AD-only excluded'"
                 }
               }
             },

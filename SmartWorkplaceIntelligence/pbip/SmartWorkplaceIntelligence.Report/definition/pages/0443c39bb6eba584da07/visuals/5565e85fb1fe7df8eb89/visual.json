@@ -3,7 +3,7 @@
   "name": "5565e85fb1fe7df8eb89",
   "position": {
     "x": 968,
-    "y": 336,
+    "y": 296,
     "width": 912,
     "height": 296,
     "z": 121,
@@ -314,7 +314,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Active workforce · recorded snapshots'"
+                  "Value": "'Active workforce \u00b7 recorded snapshots'"
                 }
               }
             },

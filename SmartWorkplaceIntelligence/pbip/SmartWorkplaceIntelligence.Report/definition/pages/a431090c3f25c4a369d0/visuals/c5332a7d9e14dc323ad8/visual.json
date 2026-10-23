@@ -3,7 +3,7 @@
   "name": "c5332a7d9e14dc323ad8",
   "position": {
     "x": 32,
-    "y": 440,
+    "y": 488,
     "width": 600,
     "height": 80,
     "z": 12000,
@@ -29,6 +29,21 @@
               "queryRef": "AD Computer Evidence.Name",
               "nativeQueryRef": "Name",
               "active": true
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "AD Computer Evidence"
+                    }
+                  },
+                  "Property": "ModificationUtcDateTime"
+                }
+              },
+              "queryRef": "AD Computer Evidence.ModificationUtcDateTime",
+              "nativeQueryRef": "ModificationUtcDateTime",
+              "displayName": "ModificationUtcDateTime"
             }
           ]
         }
@@ -61,14 +76,14 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Native selection · AD computers'"
+                  "Value": "'Native selection \u00b7 AD computers'"
                 }
               }
             },
             "textSize": {
               "expr": {
                 "Literal": {
-                  "Value": "10D"
+                  "Value": "11D"
                 }
               }
             },
@@ -82,6 +97,13 @@
                   }
                 }
               }
+            },
+            "fontFamily": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Segoe UI'"
+                }
+              }
             }
           }
         }
@@ -93,6 +115,26 @@
               "expr": {
                 "Literal": {
                   "Value": "true"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "items": [
+        {
+          "properties": {
+            "textSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
+            },
+            "fontFamily": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Segoe UI'"
                 }
               }
             }

@@ -59,6 +59,51 @@
               "queryRef": "Collaboration Adoption Evidence.Collaboration Orphaned Objects",
               "nativeQueryRef": "Orphaned Objects",
               "displayName": "Orphaned Objects"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Collaboration Adoption Evidence"
+                    }
+                  },
+                  "Property": "Collaboration Services"
+                }
+              },
+              "queryRef": "Collaboration Adoption Evidence.Collaboration Services",
+              "nativeQueryRef": "Observed services",
+              "displayName": "Observed services"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Collaboration Adoption Evidence"
+                    }
+                  },
+                  "Property": "Collaboration Service Objects"
+                }
+              },
+              "queryRef": "Collaboration Adoption Evidence.Collaboration Service Objects",
+              "nativeQueryRef": "Service objects",
+              "displayName": "Service objects"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Collaboration Adoption Evidence"
+                    }
+                  },
+                  "Property": "Collaboration Inactive Objects"
+                }
+              },
+              "queryRef": "Collaboration Adoption Evidence.Collaboration Inactive Objects",
+              "nativeQueryRef": "Inactive service objects",
+              "displayName": "Inactive service objects"
             }
           ]
         }
@@ -78,7 +123,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "28D"
+                  "Value": "20D"
                 }
               }
             },
@@ -246,6 +291,20 @@
               "expr": {
                 "Literal": {
                   "Value": "0D"
+                }
+              }
+            },
+            "rowCount": {
+              "expr": {
+                "Literal": {
+                  "Value": "1L"
+                }
+              }
+            },
+            "columnCount": {
+              "expr": {
+                "Literal": {
+                  "Value": "6L"
                 }
               }
             }

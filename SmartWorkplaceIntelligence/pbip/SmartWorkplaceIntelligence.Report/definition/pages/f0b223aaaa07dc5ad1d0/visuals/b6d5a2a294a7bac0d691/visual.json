@@ -3,11 +3,11 @@
   "name": "b6d5a2a294a7bac0d691",
   "position": {
     "x": 1420,
-    "y": 266,
-    "z": 116,
-    "width": 456,
-    "height": 62,
-    "tabOrder": 116
+    "y": 237,
+    "width": 222,
+    "height": 78,
+    "z": 1000,
+    "tabOrder": 1000
   },
   "visual": {
     "visualType": "cardVisual",
@@ -20,30 +20,15 @@
                 "Measure": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "License Report Summary"
+                      "Entity": "Report Metadata"
                     }
                   },
-                  "Property": "License Selected F1 F3 Recovery Label"
+                  "Property": "Executive F1 F3 Recovery"
                 }
               },
-              "queryRef": "License Report Summary.License Selected F1 F3 Recovery Label",
-              "nativeQueryRef": "F1 + F3 recovery assignments",
-              "displayName": "F1 + F3 recovery assignments"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "License Report Summary"
-                    }
-                  },
-                  "Property": "License Selected E3 Recovery Label"
-                }
-              },
-              "queryRef": "License Report Summary.License Selected E3 Recovery Label",
-              "nativeQueryRef": "E3 recovery candidates",
-              "displayName": "E3 recovery candidates"
+              "queryRef": "Report Metadata.Executive F1 F3 Recovery",
+              "nativeQueryRef": "F1 + F3 recovery",
+              "displayName": "F1 + F3 recovery"
             }
           ]
         }
@@ -63,7 +48,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "12D"
+                  "Value": "20D"
                 }
               }
             },
@@ -118,7 +103,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "9D"
+                  "Value": "11D"
                 }
               }
             },
@@ -381,38 +366,6 @@
               "expr": {
                 "Literal": {
                   "Value": "false"
-                }
-              }
-            },
-            "text": {
-              "expr": {
-                "Literal": {
-                  "Value": "'E3 to F3 review candidates'"
-                }
-              }
-            },
-            "fontSize": {
-              "expr": {
-                "Literal": {
-                  "Value": "9D"
-                }
-              }
-            },
-            "fontColor": {
-              "solid": {
-                "color": {
-                  "expr": {
-                    "Literal": {
-                      "Value": "'#1F2937'"
-                    }
-                  }
-                }
-              }
-            },
-            "bold": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
                 }
               }
             }

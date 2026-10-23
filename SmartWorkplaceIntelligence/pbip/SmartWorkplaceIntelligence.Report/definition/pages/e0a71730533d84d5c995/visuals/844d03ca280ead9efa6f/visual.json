@@ -3,9 +3,9 @@
   "name": "844d03ca280ead9efa6f",
   "position": {
     "x": 1264,
-    "y": 608,
+    "y": 673.3,
     "width": 624,
-    "height": 384,
+    "height": 343.6,
     "z": 24,
     "tabOrder": 1229
   },
@@ -213,7 +213,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Assigned license units by product · excluding free and trial products'"
+                  "Value": "'Assigned license units by product \u00b7 excluding free and trial products'"
                 }
               }
             }
@@ -233,7 +233,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Assigned license units by product · excluding free and trial products'"
+                  "Value": "'Assigned license units by product \u00b7 excluding free and trial products'"
                 }
               }
             },

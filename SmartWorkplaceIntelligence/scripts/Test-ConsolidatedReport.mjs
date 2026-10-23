@@ -13,8 +13,8 @@ const tables=new Map(metadata.tables.map(t=>[t.name,t]));
 let checks=0;
 function check(test,message){assert(test,message);checks++;}
 check(order.pageOrder.length===30,'Expected 30 pages with reconciliation inside Exchange migration');
-check(!order.pageOrder.includes('exchange-reconciliation'),'Reconciliation must remain a migration view, not a separate page');
 check(new Set(order.pageOrder).size===30,'Duplicate page registration');
+check(!order.pageOrder.includes('exchange-reconciliation'),'Reconciliation must remain a migration view, not a separate page');
 check(order.pageOrder.indexOf('on-prem-messaging')===order.pageOrder.indexOf('71a60a59e0eb52a7a7d0')+1,'On-prem Messaging must follow Messaging & Hybrid');
 check(order.pageOrder.includes('migration-to-sharepoint-online'),'SharePoint migration page preserved');
 const pages=order.pageOrder.map(p=>read(path.join(def,'pages',p,'page.json')));
@@ -45,7 +45,11 @@ for(const facet of facets){
  check(!!page,`Missing destination page ${facet.page}`);
  const pageVisuals=all.filter(x=>x.file.startsWith(path.join(def,'pages',page.name,'visuals')+path.sep)).map(x=>x.value);
  const projections=pageVisuals.flatMap(v=>v.visual?.query?.queryState?.Values?.projections||[]).filter(p=>p.field?.Column?.Expression?.SourceRef?.Entity===facet.table).map(p=>p.field.Column.Property);
- for(const col of facet.columns)check(projections.includes(col),`Missing native field ${facet.table}.${col}`);
+ for(const col of facet.columns){
+  const displayed=col==='PasswordExpired'?'Password Expired (display)':col;
+  check(projections.includes(displayed),`Missing native field ${facet.table}.${displayed}`);
+  if(col==='PasswordExpired')check(!projections.includes(col),'Unqualified Boolean password expiry must not be displayed directly');
+ }
 }
 const bookmarks=all.filter(x=>x.file.endsWith('.bookmark.json')).map(x=>x.value);
 for(const page of pages.filter(p=>['User Explorer','Data Trust'].includes(p.displayName))){

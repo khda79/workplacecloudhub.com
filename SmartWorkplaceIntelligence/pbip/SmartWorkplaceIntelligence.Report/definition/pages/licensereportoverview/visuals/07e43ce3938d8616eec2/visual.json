@@ -308,6 +308,13 @@
                   "Value": "false"
                 }
               }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
             }
           }
         }
@@ -320,7 +327,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Recovery candidate detail · internal table scroll'"
+                  "Value": "'Recovery candidate detail \u00b7 internal table scroll'"
                 }
               }
             }
@@ -340,7 +347,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Recovery candidate detail · internal table scroll'"
+                  "Value": "'Recovery candidate detail \u00b7 internal table scroll'"
                 }
               }
             },

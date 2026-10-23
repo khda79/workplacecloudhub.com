@@ -3,9 +3,9 @@
   "name": "a937e3f9860814dd1b19",
   "position": {
     "x": 656,
-    "y": 512,
+    "y": 394,
     "width": 600,
-    "height": 480,
+    "height": 600,
     "z": 10001,
     "tabOrder": 1400
   },
@@ -280,7 +280,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'EXO adoption (%) · trend - last 90 days. Observed history only; 2026-07-08 to 2026-10-05.'"
+                  "Value": "'EXO adoption (%) \u00b7 trend - last 90 days. Observed history only; 2026-07-08 to 2026-10-05.'"
                 }
               }
             }
@@ -300,7 +300,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'EXO adoption (%) · trend - last 90 days'"
+                  "Value": "'EXO adoption (%) \u00b7 trend - last 90 days'"
                 }
               }
             },
@@ -345,7 +345,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Observed snapshots · 2026-07-08 to 2026-10-05'"
+                  "Value": "'Observed snapshots \u00b7 2026-07-08 to 2026-10-05'"
                 }
               }
             },

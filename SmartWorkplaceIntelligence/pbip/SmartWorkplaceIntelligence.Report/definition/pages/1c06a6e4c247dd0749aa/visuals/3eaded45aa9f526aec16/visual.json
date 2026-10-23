@@ -3,9 +3,9 @@
   "name": "3eaded45aa9f526aec16",
   "position": {
     "x": 32,
-    "y": 312,
+    "y": 269.0,
     "width": 1856,
-    "height": 24,
+    "height": 22,
     "z": 12000,
     "tabOrder": 145
   },
@@ -19,7 +19,7 @@
               {
                 "textRuns": [
                   {
-                    "value": "Selected view: Native · SharePoint Site",
+                    "value": "Selected view: Native \u00b7 SharePoint Site",
                     "textStyle": {
                       "fontFamily": "Segoe UI",
                       "fontSize": "14px",

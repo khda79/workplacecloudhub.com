@@ -3,9 +3,9 @@
   "name": "be8a319aaa36105f62d5",
   "position": {
     "x": 32,
-    "y": 912,
+    "y": 902.3,
     "width": 1208,
-    "height": 80,
+    "height": 114.5,
     "z": 17,
     "tabOrder": 1824
   },
@@ -105,7 +105,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "16D"
+                  "Value": "20D"
                 }
               }
             },
@@ -142,7 +142,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "10D"
+                  "Value": "11D"
                 }
               }
             }
@@ -373,7 +373,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Selected SKU totals · units, not distinct users'"
+                  "Value": "'Selected SKU totals \u00b7 units, not distinct users'"
                 }
               }
             }
@@ -393,7 +393,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Selected SKU totals · units, not distinct users'"
+                  "Value": "'Selected SKU totals \u00b7 units, not distinct users'"
                 }
               }
             },

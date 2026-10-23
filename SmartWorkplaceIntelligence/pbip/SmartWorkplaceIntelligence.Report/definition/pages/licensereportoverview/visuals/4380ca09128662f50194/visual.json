@@ -222,7 +222,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "14D"
+                  "Value": "11D"
                 }
               }
             },
@@ -278,7 +278,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "14D"
+                  "Value": "11D"
                 }
               }
             },
@@ -357,7 +357,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'User License · complete governed fields'"
+                  "Value": "'User License \u00b7 complete governed fields'"
                 }
               }
             }
@@ -377,7 +377,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'User License · complete governed fields'"
+                  "Value": "'User License \u00b7 complete governed fields'"
                 }
               }
             },
@@ -548,7 +548,7 @@
                 "Entity": "Native User License"
               }
             },
-            "Property": "Native Context Rows · Native User License"
+            "Property": "Native Context Rows \u00b7 Native User License"
           }
         },
         "type": "Advanced",
@@ -573,7 +573,7 @@
                           "Source": "c"
                         }
                       },
-                      "Property": "Native Context Rows · Native User License"
+                      "Property": "Native Context Rows \u00b7 Native User License"
                     }
                   },
                   "Right": {

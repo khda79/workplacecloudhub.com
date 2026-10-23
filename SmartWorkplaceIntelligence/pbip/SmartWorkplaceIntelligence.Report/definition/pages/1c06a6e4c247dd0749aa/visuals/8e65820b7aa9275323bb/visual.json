@@ -3,9 +3,9 @@
   "name": "8e65820b7aa9275323bb",
   "position": {
     "x": 32,
-    "y": 336,
+    "y": 290.5,
     "width": 1856,
-    "height": 656,
+    "height": 703.5,
     "z": 111,
     "tabOrder": 677
   },
@@ -226,6 +226,13 @@
                   "Value": "false"
                 }
               }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
             }
           }
         }
@@ -238,7 +245,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'External access · selected evidence'"
+                  "Value": "'External access \u00b7 selected evidence'"
                 }
               }
             }
@@ -258,7 +265,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'External access · selected evidence'"
+                  "Value": "'External access \u00b7 selected evidence'"
                 }
               }
             },

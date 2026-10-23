@@ -3,7 +3,7 @@
   "name": "14d030ac28baa41794e2",
   "position": {
     "x": 32,
-    "y": 312,
+    "y": 360,
     "width": 1856,
     "height": 24,
     "z": 12000,
@@ -19,7 +19,7 @@
               {
                 "textRuns": [
                   {
-                    "value": "Selected view: Native · Hardware coverage",
+                    "value": "Selected view: Native \u00b7 Hardware coverage",
                     "textStyle": {
                       "fontFamily": "Segoe UI",
                       "fontSize": "14px",

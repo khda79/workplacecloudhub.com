@@ -3,9 +3,9 @@
   "name": "c209847468fb57299b3b",
   "position": {
     "x": 32,
-    "y": 336,
+    "y": 304.0,
     "width": 1856,
-    "height": 656,
+    "height": 690.1,
     "z": 110,
     "tabOrder": 672
   },
@@ -252,6 +252,13 @@
               "expr": {
                 "Literal": {
                   "Value": "false"
+                }
+              }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
                 }
               }
             }

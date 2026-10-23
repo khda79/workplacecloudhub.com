@@ -3,7 +3,7 @@
   "name": "521a0ef7c32945cc1c17",
   "position": {
     "x": 1312,
-    "y": 16,
+    "y": 112,
     "width": 280,
     "height": 80,
     "z": 104,
@@ -68,7 +68,7 @@
             "textSize": {
               "expr": {
                 "Literal": {
-                  "Value": "10D"
+                  "Value": "11D"
                 }
               }
             },
@@ -96,6 +96,22 @@
                 }
               }
             }
+          }
+        }
+      ],
+      "items": [
+        {
+          "properties": {
+            "textSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
+            }
+          },
+          "selector": {
+            "id": "default"
           }
         }
       ]

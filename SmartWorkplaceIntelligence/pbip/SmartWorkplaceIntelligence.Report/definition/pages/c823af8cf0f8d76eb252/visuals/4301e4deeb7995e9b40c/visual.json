@@ -3,9 +3,9 @@
   "name": "4301e4deeb7995e9b40c",
   "position": {
     "x": 972,
-    "y": 744,
+    "y": 773.5,
     "z": 122,
-    "height": 248,
+    "height": 221.9,
     "width": 916,
     "tabOrder": 1338
   },
@@ -114,7 +114,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "12D"
+                  "Value": "11D"
                 }
               }
             },
@@ -163,7 +163,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "12D"
+                  "Value": "11D"
                 }
               }
             },
@@ -228,6 +228,13 @@
               "expr": {
                 "Literal": {
                   "Value": "false"
+                }
+              }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
                 }
               }
             }
@@ -350,7 +357,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Attention · reported observations'"
+                  "Value": "'Attention \u00b7 reported observations'"
                 }
               }
             },

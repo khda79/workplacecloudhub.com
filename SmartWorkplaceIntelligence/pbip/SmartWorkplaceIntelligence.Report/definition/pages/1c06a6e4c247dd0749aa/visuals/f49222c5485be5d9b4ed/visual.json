@@ -3,7 +3,7 @@
   "name": "f49222c5485be5d9b4ed",
   "position": {
     "x": 32,
-    "y": 392,
+    "y": 340.6,
     "width": 600,
     "height": 80,
     "z": 12000,
@@ -61,14 +61,14 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Native selection · Team'"
+                  "Value": "'Native selection \u00b7 Team'"
                 }
               }
             },
             "textSize": {
               "expr": {
                 "Literal": {
-                  "Value": "10D"
+                  "Value": "11D"
                 }
               }
             },
@@ -93,6 +93,19 @@
               "expr": {
                 "Literal": {
                   "Value": "true"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "items": [
+        {
+          "properties": {
+            "textSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
                 }
               }
             }

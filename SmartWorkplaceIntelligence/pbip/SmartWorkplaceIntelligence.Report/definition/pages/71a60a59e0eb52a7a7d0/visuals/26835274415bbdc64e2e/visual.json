@@ -1,39 +1,14 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json",
-  "name": "26835274415bbdc64e2e",
   "position": {
-    "x": 784,
-    "y": 16,
-    "width": 264,
+    "x": 1216,
+    "y": 8,
+    "width": 320,
     "height": 80,
-    "z": 102,
-    "tabOrder": 256
+    "z": 25000,
+    "tabOrder": 10
   },
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.13.0/schema.json",
   "visual": {
-    "visualType": "slicer",
-    "query": {
-      "queryState": {
-        "Values": {
-          "projections": [
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Mailbox Evidence"
-                    }
-                  },
-                  "Property": "Country"
-                }
-              },
-              "queryRef": "Mailbox Evidence.Country",
-              "nativeQueryRef": "Country",
-              "active": true
-            }
-          ]
-        }
-      }
-    },
     "objects": {
       "data": [
         {
@@ -68,7 +43,7 @@
             "textSize": {
               "expr": {
                 "Literal": {
-                  "Value": "10D"
+                  "Value": "11D"
                 }
               }
             },
@@ -86,13 +61,13 @@
           }
         }
       ],
-      "general": [
+      "items": [
         {
           "properties": {
-            "selfFilterEnabled": {
+            "textSize": {
               "expr": {
                 "Literal": {
-                  "Value": "true"
+                  "Value": "11D"
                 }
               }
             }
@@ -107,7 +82,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Evidence and active scope'"
+                  "Value": "'Filter workforce and devices by country.'"
                 }
               }
             }
@@ -121,31 +96,6 @@
               "expr": {
                 "Literal": {
                   "Value": "false"
-                }
-              }
-            },
-            "text": {
-              "expr": {
-                "Literal": {
-                  "Value": "''"
-                }
-              }
-            },
-            "fontSize": {
-              "expr": {
-                "Literal": {
-                  "Value": "12D"
-                }
-              }
-            },
-            "fontColor": {
-              "solid": {
-                "color": {
-                  "expr": {
-                    "Literal": {
-                      "Value": "'#183153'"
-                    }
-                  }
                 }
               }
             }
@@ -268,6 +218,36 @@
           }
         }
       ]
+    },
+    "visualType": "slicer",
+    "query": {
+      "queryState": {
+        "Values": {
+          "projections": [
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Country Selection"
+                    }
+                  },
+                  "Property": "Country"
+                }
+              },
+              "queryRef": "Country Selection.Country",
+              "nativeQueryRef": "Country",
+              "displayName": "Country"
+            }
+          ]
+        }
+      }
+    },
+    "syncGroup": {
+      "groupName": "SharedCountry",
+      "fieldChanges": true,
+      "filterChanges": true
     }
-  }
+  },
+  "name": "26835274415bbdc64e2e"
 }

@@ -3,9 +3,9 @@
   "name": "776e034b507e60eb21b3",
   "position": {
     "x": 32,
-    "y": 336,
+    "y": 379.5,
     "width": 1856,
-    "height": 104,
+    "height": 97.4,
     "z": 114,
     "tabOrder": 672
   },
@@ -27,8 +27,8 @@
                 }
               },
               "queryRef": "Windows Migration Evidence.Windows 10 Disk Review",
-              "nativeQueryRef": "Disk below 20 GB · planning review",
-              "displayName": "Disk below 20 GB · planning review"
+              "nativeQueryRef": "Disk below 20 GB \u00b7 planning review",
+              "displayName": "Disk below 20 GB \u00b7 planning review"
             },
             {
               "field": {
@@ -42,8 +42,8 @@
                 }
               },
               "queryRef": "Windows Migration Evidence.Windows 10 Legacy Build Review",
-              "nativeQueryRef": "Legacy build · update-path review",
-              "displayName": "Legacy build · update-path review"
+              "nativeQueryRef": "Legacy build \u00b7 update-path review",
+              "displayName": "Legacy build \u00b7 update-path review"
             },
             {
               "field": {
@@ -78,7 +78,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "28D"
+                  "Value": "20D"
                 }
               }
             },

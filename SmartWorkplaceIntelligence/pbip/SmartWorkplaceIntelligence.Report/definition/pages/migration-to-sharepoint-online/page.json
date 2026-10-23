@@ -2,8 +2,8 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/page/2.1.0/schema.json",
   "name": "migration-to-sharepoint-online",
   "displayName": "Migration to SharePoint Online",
-  "displayOption": "FitToPage",
-  "height": 1080,
+  "displayOption": "FitToWidth",
+  "height": 1280,
   "width": 1920,
   "objects": {
     "background": [

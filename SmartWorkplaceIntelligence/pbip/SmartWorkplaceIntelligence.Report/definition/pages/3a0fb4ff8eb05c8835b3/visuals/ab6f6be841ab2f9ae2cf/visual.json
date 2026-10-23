@@ -4,7 +4,7 @@
   "position": {
     "x": 96,
     "y": 16,
-    "width": 664,
+    "width": 1080,
     "height": 64,
     "z": 100,
     "tabOrder": 49
@@ -19,10 +19,10 @@
               {
                 "textRuns": [
                   {
-                    "value": "Which user evidence explains identity, activity, license, and risk state?",
+                    "value": "User Explorer",
                     "textStyle": {
                       "fontFamily": "Segoe UI Semibold",
-                      "fontSize": "20px",
+                      "fontSize": "24px",
                       "color": "#172B4D",
                       "fontWeight": "bold"
                     }

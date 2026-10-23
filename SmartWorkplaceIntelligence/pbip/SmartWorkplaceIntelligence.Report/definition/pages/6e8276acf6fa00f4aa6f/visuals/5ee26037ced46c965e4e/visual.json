@@ -3,9 +3,9 @@
   "name": "5ee26037ced46c965e4e",
   "position": {
     "x": 32,
-    "y": 472,
+    "y": 506.9,
     "width": 1856,
-    "height": 208,
+    "height": 194.9,
     "z": 11000,
     "tabOrder": 544
   },
@@ -116,7 +116,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "14D"
+                  "Value": "11D"
                 }
               }
             },
@@ -172,7 +172,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "14D"
+                  "Value": "11D"
                 }
               }
             },
@@ -267,7 +267,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Geography · selected evidence'"
+                  "Value": "'Geography \u00b7 selected evidence'"
                 }
               }
             }
@@ -287,7 +287,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Source readiness and qualification · tenant scope'"
+                  "Value": "'Source readiness and qualification \u00b7 tenant scope'"
                 }
               }
             },

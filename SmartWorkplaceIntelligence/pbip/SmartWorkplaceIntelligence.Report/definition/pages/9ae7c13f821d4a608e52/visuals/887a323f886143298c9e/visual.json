@@ -3,9 +3,9 @@
   "name": "887a323f886143298c9e",
   "position": {
     "x": 32,
-    "y": 568,
+    "y": 536,
     "width": 912,
-    "height": 424,
+    "height": 456,
     "z": 181,
     "tabOrder": 1333
   },
@@ -208,7 +208,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "10D"
+                  "Value": "11D"
                 }
               }
             }
@@ -237,6 +237,13 @@
                       "Value": "'#F3F7FA'"
                     }
                   }
+                }
+              }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
                 }
               }
             }
@@ -289,6 +296,13 @@
                   }
                 }
               }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
             }
           }
         }
@@ -301,7 +315,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Service use by persona · last 30 days'"
+                  "Value": "'Service use by persona \u00b7 last 30 days'"
                 }
               }
             }
@@ -321,7 +335,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Service use by persona · last 30 days'"
+                  "Value": "'Service use by persona \u00b7 last 30 days'"
                 }
               }
             },

@@ -3,9 +3,9 @@
   "name": "78f4384d1a5a3db92f07",
   "position": {
     "x": 32,
-    "y": 816,
+    "y": 829.1,
     "width": 1856,
-    "height": 136,
+    "height": 127.4,
     "z": 13000,
     "tabOrder": 13000
   },
@@ -110,7 +110,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "14D"
+                  "Value": "11D"
                 }
               }
             },
@@ -166,7 +166,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "14D"
+                  "Value": "11D"
                 }
               }
             },
@@ -245,7 +245,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Tenant capacity · missing is not zero; no site quota substitution'"
+                  "Value": "'Tenant capacity \u00b7 missing is not zero; no site quota substitution'"
                 }
               }
             }
@@ -265,7 +265,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Tenant capacity · missing is not zero; no site quota substitution'"
+                  "Value": "'Tenant capacity \u00b7 missing is not zero; no site quota substitution'"
                 }
               }
             },

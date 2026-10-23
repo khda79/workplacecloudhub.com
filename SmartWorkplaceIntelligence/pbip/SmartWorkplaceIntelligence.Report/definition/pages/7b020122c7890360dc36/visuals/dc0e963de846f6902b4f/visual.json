@@ -3,9 +3,9 @@
   "name": "dc0e963de846f6902b4f",
   "position": {
     "x": 32,
-    "y": 720,
+    "y": 739.2,
     "z": 110,
-    "height": 232,
+    "height": 217.3,
     "width": 1856,
     "tabOrder": 1440
   },
@@ -454,7 +454,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Current country breakdown · historical curve is tenant-wide'"
+                  "Value": "'Current country breakdown \u00b7 historical curve is tenant-wide'"
                 }
               }
             }

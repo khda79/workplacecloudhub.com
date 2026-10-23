@@ -3,9 +3,9 @@
   "name": "3e56b696f69614c4d5f9",
   "position": {
     "x": 32,
-    "y": 488,
+    "y": 426.5,
     "width": 1856,
-    "height": 336,
+    "height": 300.6,
     "z": 12000,
     "tabOrder": 544
   },
@@ -250,7 +250,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "14D"
+                  "Value": "11D"
                 }
               }
             },
@@ -306,7 +306,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "14D"
+                  "Value": "11D"
                 }
               }
             },
@@ -385,7 +385,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'SharePoint Site · complete governed fields'"
+                  "Value": "'SharePoint Site \u00b7 complete governed fields'"
                 }
               }
             }
@@ -405,7 +405,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'SharePoint Site · complete governed fields'"
+                  "Value": "'SharePoint Site \u00b7 complete governed fields'"
                 }
               }
             },
@@ -576,7 +576,7 @@
                 "Entity": "Native SharePoint Site"
               }
             },
-            "Property": "Native Context Rows · Native SharePoint Site"
+            "Property": "Native Context Rows \u00b7 Native SharePoint Site"
           }
         },
         "type": "Advanced",
@@ -601,7 +601,7 @@
                           "Source": "c"
                         }
                       },
-                      "Property": "Native Context Rows · Native SharePoint Site"
+                      "Property": "Native Context Rows \u00b7 Native SharePoint Site"
                     }
                   },
                   "Right": {

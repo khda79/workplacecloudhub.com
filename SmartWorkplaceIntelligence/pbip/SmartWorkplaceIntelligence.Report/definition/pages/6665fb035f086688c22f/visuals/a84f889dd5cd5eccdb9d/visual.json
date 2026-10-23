@@ -3,9 +3,9 @@
   "name": "a84f889dd5cd5eccdb9d",
   "position": {
     "x": 32,
-    "y": 336,
+    "y": 379.5,
     "width": 1856,
-    "height": 656,
+    "height": 614.6,
     "z": 112,
     "tabOrder": 677
   },
@@ -271,6 +271,13 @@
                   "Value": "false"
                 }
               }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
             }
           }
         }
@@ -283,7 +290,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Reconciliation · selected evidence'"
+                  "Value": "'Reconciliation \u00b7 selected evidence'"
                 }
               }
             }
@@ -303,7 +310,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Reconciliation · selected evidence'"
+                  "Value": "'Reconciliation \u00b7 selected evidence'"
                 }
               }
             },

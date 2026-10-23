@@ -1,17 +1,16 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "890248bf5fea920d9dfc",
   "position": {
     "x": 0,
     "y": 0,
-    "width": 1920,
-    "height": 1080,
     "z": 1,
+    "height": 1080,
+    "width": 1920,
     "tabOrder": 1
   },
   "visualGroup": {
-    "displayName": "AD user accounts",
+    "displayName": "User accounts",
     "groupMode": "ScaleMode"
-  },
-  "isHidden": false
+  }
 }

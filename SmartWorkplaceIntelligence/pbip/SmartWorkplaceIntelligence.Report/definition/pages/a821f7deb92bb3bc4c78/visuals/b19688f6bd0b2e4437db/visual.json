@@ -3,9 +3,9 @@
   "name": "b19688f6bd0b2e4437db",
   "position": {
     "x": 32,
-    "y": 336,
+    "y": 679.2,
     "width": 1856,
-    "height": 656,
+    "height": 314.8,
     "z": 111,
     "tabOrder": 677
   },
@@ -27,7 +27,8 @@
                 }
               },
               "queryRef": "Application Inventory Evidence.Application Name",
-              "nativeQueryRef": "Application"
+              "nativeQueryRef": "Application Name",
+              "active": true
             },
             {
               "field": {
@@ -41,7 +42,8 @@
                 }
               },
               "queryRef": "Application Inventory Evidence.Application Version",
-              "nativeQueryRef": "Version"
+              "nativeQueryRef": "Application Version",
+              "active": true
             },
             {
               "field": {
@@ -55,7 +57,8 @@
                 }
               },
               "queryRef": "Application Inventory Evidence.Publisher",
-              "nativeQueryRef": "Publisher"
+              "nativeQueryRef": "Publisher",
+              "active": true
             },
             {
               "field": {
@@ -69,77 +72,36 @@
                 }
               },
               "queryRef": "Application Inventory Evidence.Platform",
-              "nativeQueryRef": "Platform"
+              "nativeQueryRef": "Platform",
+              "active": true
             },
             {
               "field": {
-                "Column": {
+                "Measure": {
                   "Expression": {
                     "SourceRef": {
                       "Entity": "Application Inventory Evidence"
                     }
                   },
-                  "Property": "Device Count"
+                  "Property": "Application Install Observations"
                 }
               },
-              "queryRef": "Application Inventory Evidence.Device Count",
-              "nativeQueryRef": "Devices"
+              "queryRef": "Application Inventory Evidence.Application Install Observations",
+              "nativeQueryRef": "Application Install Observations"
             },
             {
               "field": {
-                "Column": {
+                "Measure": {
                   "Expression": {
                     "SourceRef": {
                       "Entity": "Application Inventory Evidence"
                     }
                   },
-                  "Property": "Product Version Count"
+                  "Property": "Application Install Share (%)"
                 }
               },
-              "queryRef": "Application Inventory Evidence.Product Version Count",
-              "nativeQueryRef": "Product Versions"
-            },
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Application Inventory Evidence"
-                    }
-                  },
-                  "Property": "Dominant Version Share (%)"
-                }
-              },
-              "queryRef": "Application Inventory Evidence.Dominant Version Share (%)",
-              "nativeQueryRef": "Dominant Share"
-            },
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Application Inventory Evidence"
-                    }
-                  },
-                  "Property": "Version Footprint State"
-                }
-              },
-              "queryRef": "Application Inventory Evidence.Version Footprint State",
-              "nativeQueryRef": "Footprint State"
-            },
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Application Inventory Evidence"
-                    }
-                  },
-                  "Property": "Risk Priority"
-                }
-              },
-              "queryRef": "Application Inventory Evidence.Risk Priority",
-              "nativeQueryRef": "Risk Priority"
+              "queryRef": "Application Inventory Evidence.Application Install Share (%)",
+              "nativeQueryRef": "Application Install Share (%)"
             }
           ]
         }
@@ -149,6 +111,13 @@
       "columnHeaders": [
         {
           "properties": {
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
+            },
             "autoSizeColumnWidth": {
               "expr": {
                 "Literal": {
@@ -160,49 +129,6 @@
               "expr": {
                 "Literal": {
                   "Value": "'growToFit'"
-                }
-              }
-            },
-            "fontSize": {
-              "expr": {
-                "Literal": {
-                  "Value": "11D"
-                }
-              }
-            },
-            "bold": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "wordWrap": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "fontColor": {
-              "solid": {
-                "color": {
-                  "expr": {
-                    "Literal": {
-                      "Value": "'#FFFFFF'"
-                    }
-                  }
-                }
-              }
-            },
-            "backColor": {
-              "solid": {
-                "color": {
-                  "expr": {
-                    "Literal": {
-                      "Value": "'#215E9E'"
-                    }
-                  }
                 }
               }
             }
@@ -282,6 +208,13 @@
                   "Value": "false"
                 }
               }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
             }
           }
         }
@@ -294,7 +227,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Installed footprint · selected evidence'"
+                  "Value": "'Installed footprint by product and version - observations, not distinct devices'"
                 }
               }
             }
@@ -314,7 +247,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Installed footprint · selected evidence'"
+                  "Value": "'Installed footprint by product and version - observations, not distinct devices'"
                 }
               }
             },

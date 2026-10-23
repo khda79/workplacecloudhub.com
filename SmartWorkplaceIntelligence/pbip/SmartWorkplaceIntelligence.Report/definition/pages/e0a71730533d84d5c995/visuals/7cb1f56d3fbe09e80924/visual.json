@@ -3,9 +3,9 @@
   "name": "7cb1f56d3fbe09e80924",
   "position": {
     "x": 32,
-    "y": 608,
+    "y": 673.3,
     "width": 1856,
-    "height": 384,
+    "height": 343.6,
     "z": 23,
     "tabOrder": 1216
   },
@@ -406,6 +406,13 @@
                   "Value": "false"
                 }
               }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
             }
           }
         }
@@ -418,7 +425,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Full license capacity evidence · preserved columns'"
+                  "Value": "'Full license capacity evidence \u00b7 preserved columns'"
                 }
               }
             }
@@ -438,7 +445,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Full license capacity evidence · preserved columns'"
+                  "Value": "'Full license capacity evidence \u00b7 preserved columns'"
                 }
               }
             },

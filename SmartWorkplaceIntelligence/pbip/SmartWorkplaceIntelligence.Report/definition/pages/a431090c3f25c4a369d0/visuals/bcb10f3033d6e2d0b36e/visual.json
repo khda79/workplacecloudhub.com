@@ -3,9 +3,9 @@
   "name": "bcb10f3033d6e2d0b36e",
   "position": {
     "x": 32,
-    "y": 536,
+    "y": 584,
     "width": 1856,
-    "height": 456,
+    "height": 408,
     "z": 12000,
     "tabOrder": 544
   },
@@ -124,7 +124,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "14D"
+                  "Value": "11D"
                 }
               }
             },
@@ -180,7 +180,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "14D"
+                  "Value": "11D"
                 }
               }
             },
@@ -259,7 +259,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Managed identities · complete governed fields'"
+                  "Value": "'Managed identities \u00b7 complete governed fields'"
                 }
               }
             }
@@ -279,7 +279,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Managed identities · complete governed fields'"
+                  "Value": "'Managed identities \u00b7 complete governed fields'"
                 }
               }
             },
@@ -450,7 +450,7 @@
                 "Entity": "Native Managed Device Evidence"
               }
             },
-            "Property": "Native Context Rows · Native Managed Device Evidence"
+            "Property": "Native Context Rows \u00b7 Native Managed Device Evidence"
           }
         },
         "type": "Advanced",
@@ -475,7 +475,7 @@
                           "Source": "c"
                         }
                       },
-                      "Property": "Native Context Rows · Native Managed Device Evidence"
+                      "Property": "Native Context Rows \u00b7 Native Managed Device Evidence"
                     }
                   },
                   "Right": {

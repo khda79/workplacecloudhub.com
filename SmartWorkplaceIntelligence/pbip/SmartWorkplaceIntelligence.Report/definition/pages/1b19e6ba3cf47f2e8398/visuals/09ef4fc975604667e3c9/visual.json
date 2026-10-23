@@ -3,9 +3,9 @@
   "name": "09ef4fc975604667e3c9",
   "position": {
     "x": 32,
-    "y": 488,
+    "y": 433.9,
     "width": 1856,
-    "height": 336,
+    "height": 314.8,
     "z": 12000,
     "tabOrder": 544
   },
@@ -28,20 +28,6 @@
               },
               "queryRef": "Native Mailbox Hosting.CountryLabel",
               "nativeQueryRef": "CountryLabel"
-            },
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Native Mailbox Hosting"
-                    }
-                  },
-                  "Property": "MailboxHostingKey"
-                }
-              },
-              "queryRef": "Native Mailbox Hosting.MailboxHostingKey",
-              "nativeQueryRef": "MailboxHostingKey"
             },
             {
               "field": {
@@ -98,6 +84,20 @@
               },
               "queryRef": "Native Mailbox Hosting.MailboxTypeGroup",
               "nativeQueryRef": "MailboxTypeGroup"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Mailbox Hosting"
+                    }
+                  },
+                  "Property": "MailboxHostingKey"
+                }
+              },
+              "queryRef": "Native Mailbox Hosting.MailboxHostingKey",
+              "nativeQueryRef": "MailboxHostingKey"
             },
             {
               "field": {
@@ -166,7 +166,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "14D"
+                  "Value": "11D"
                 }
               }
             },
@@ -222,7 +222,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "14D"
+                  "Value": "11D"
                 }
               }
             },
@@ -301,7 +301,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Mailbox Hosting · complete governed fields'"
+                  "Value": "'Mailbox Hosting \u00b7 complete governed fields'"
                 }
               }
             }
@@ -321,7 +321,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Mailbox Hosting · complete governed fields'"
+                  "Value": "'Mailbox Hosting \u00b7 complete governed fields'"
                 }
               }
             },
@@ -492,7 +492,7 @@
                 "Entity": "Native Mailbox Hosting"
               }
             },
-            "Property": "Native Context Rows · Native Mailbox Hosting"
+            "Property": "Native Context Rows \u00b7 Native Mailbox Hosting"
           }
         },
         "type": "Advanced",
@@ -517,7 +517,7 @@
                           "Source": "c"
                         }
                       },
-                      "Property": "Native Context Rows · Native Mailbox Hosting"
+                      "Property": "Native Context Rows \u00b7 Native Mailbox Hosting"
                     }
                   },
                   "Right": {

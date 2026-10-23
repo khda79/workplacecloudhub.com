@@ -327,6 +327,13 @@
                   "Value": "false"
                 }
               }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
             }
           }
         }
@@ -339,7 +346,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Published family snapshot · supporting recovery context'"
+                  "Value": "'Published family snapshot \u00b7 supporting recovery context'"
                 }
               }
             }
@@ -359,7 +366,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Published family snapshot · supporting recovery context'"
+                  "Value": "'Published family snapshot \u00b7 supporting recovery context'"
                 }
               }
             },

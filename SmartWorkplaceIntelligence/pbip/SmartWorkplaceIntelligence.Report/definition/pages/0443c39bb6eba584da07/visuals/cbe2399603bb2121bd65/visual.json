@@ -3,9 +3,9 @@
   "name": "cbe2399603bb2121bd65",
   "position": {
     "x": 972,
-    "y": 336,
+    "y": 296,
     "width": 916,
-    "height": 224,
+    "height": 152,
     "z": 106,
     "tabOrder": 682
   },
@@ -89,7 +89,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "26D"
+                  "Value": "20D"
                 }
               }
             },
@@ -144,7 +144,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "12D"
+                  "Value": "11D"
                 }
               }
             },

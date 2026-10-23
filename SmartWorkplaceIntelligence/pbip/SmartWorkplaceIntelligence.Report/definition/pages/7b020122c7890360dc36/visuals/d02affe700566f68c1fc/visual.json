@@ -3,9 +3,9 @@
   "name": "d02affe700566f68c1fc",
   "position": {
     "x": 32,
-    "y": 336,
+    "y": 379.5,
     "width": 720,
-    "height": 360,
+    "height": 337.3,
     "z": 109,
     "tabOrder": 672
   },
@@ -237,7 +237,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Windows 10 by primary-user country - AD-only country is Unknown'"
+                  "Value": "'Windows 10 by attributed country - current union'"
                 }
               }
             },
@@ -384,7 +384,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Windows 10 by country · primary-user proxy'"
+                  "Value": "'Windows 10 by country \u00b7 primary-user proxy'"
                 }
               }
             }

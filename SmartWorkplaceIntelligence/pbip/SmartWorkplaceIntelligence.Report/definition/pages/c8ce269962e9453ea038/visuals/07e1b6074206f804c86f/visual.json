@@ -3,9 +3,9 @@
   "name": "07e1b6074206f804c86f",
   "position": {
     "x": 32,
-    "y": 512,
+    "y": 544.3,
     "z": 11000,
-    "height": 212,
+    "height": 198.6,
     "width": 912,
     "tabOrder": 544
   },
@@ -93,7 +93,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "14D"
+                  "Value": "11D"
                 }
               }
             },
@@ -149,7 +149,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "14D"
+                  "Value": "11D"
                 }
               }
             },
@@ -226,7 +226,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "14D"
+                  "Value": "11D"
                 }
               }
             }
@@ -257,7 +257,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Geography · selected evidence'"
+                  "Value": "'Geography \u00b7 selected evidence'"
                 }
               }
             }

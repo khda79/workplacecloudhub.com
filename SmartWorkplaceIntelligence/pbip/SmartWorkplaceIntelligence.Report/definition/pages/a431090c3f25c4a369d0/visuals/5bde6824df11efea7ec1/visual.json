@@ -3,7 +3,7 @@
   "name": "5bde6824df11efea7ec1",
   "position": {
     "x": 32,
-    "y": 312,
+    "y": 360,
     "width": 1856,
     "height": 24,
     "z": 12000,
@@ -19,7 +19,7 @@
               {
                 "textRuns": [
                   {
-                    "value": "Selected view: Native · AD computers",
+                    "value": "Selected view: Native \u00b7 AD computers",
                     "textStyle": {
                       "fontFamily": "Segoe UI",
                       "fontSize": "14px",

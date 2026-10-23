@@ -3,9 +3,9 @@
   "name": "adeb3f0ca6e25fd45aa2",
   "position": {
     "x": 32,
-    "y": 336,
+    "y": 379.5,
     "width": 1856,
-    "height": 656,
+    "height": 614.6,
     "z": 111,
     "tabOrder": 672
   },
@@ -299,6 +299,13 @@
                   "Value": "false"
                 }
               }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
             }
           }
         }
@@ -311,7 +318,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Qualification · selected evidence'"
+                  "Value": "'Qualification \u00b7 selected evidence'"
                 }
               }
             }
@@ -331,7 +338,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Qualification · selected evidence'"
+                  "Value": "'Qualification \u00b7 selected evidence'"
                 }
               }
             },

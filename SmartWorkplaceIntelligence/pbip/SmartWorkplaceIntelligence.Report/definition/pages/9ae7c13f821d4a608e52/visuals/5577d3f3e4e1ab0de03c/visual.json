@@ -1,39 +1,14 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json",
-  "name": "5577d3f3e4e1ab0de03c",
   "position": {
-    "x": 1608,
-    "y": 16,
-    "width": 280,
+    "x": 1216,
+    "y": 8,
+    "width": 320,
     "height": 80,
-    "z": 104,
-    "tabOrder": 672
+    "z": 25000,
+    "tabOrder": 10
   },
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.13.0/schema.json",
   "visual": {
-    "visualType": "slicer",
-    "query": {
-      "queryState": {
-        "Values": {
-          "projections": [
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "User Inventory Evidence"
-                    }
-                  },
-                  "Property": "Country"
-                }
-              },
-              "queryRef": "User Inventory Evidence.Country",
-              "nativeQueryRef": "Country",
-              "active": true
-            }
-          ]
-        }
-      }
-    },
     "objects": {
       "data": [
         {
@@ -68,7 +43,7 @@
             "textSize": {
               "expr": {
                 "Literal": {
-                  "Value": "10D"
+                  "Value": "11D"
                 }
               }
             },
@@ -86,16 +61,19 @@
           }
         }
       ],
-      "general": [
+      "items": [
         {
           "properties": {
-            "selfFilterEnabled": {
+            "textSize": {
               "expr": {
                 "Literal": {
-                  "Value": "true"
+                  "Value": "11D"
                 }
               }
             }
+          },
+          "selector": {
+            "id": "default"
           }
         }
       ]
@@ -107,7 +85,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Evidence and active scope'"
+                  "Value": "'Filter workforce and devices by country.'"
                 }
               }
             }
@@ -121,31 +99,6 @@
               "expr": {
                 "Literal": {
                   "Value": "false"
-                }
-              }
-            },
-            "text": {
-              "expr": {
-                "Literal": {
-                  "Value": "''"
-                }
-              }
-            },
-            "fontSize": {
-              "expr": {
-                "Literal": {
-                  "Value": "12D"
-                }
-              }
-            },
-            "fontColor": {
-              "solid": {
-                "color": {
-                  "expr": {
-                    "Literal": {
-                      "Value": "'#183153'"
-                    }
-                  }
                 }
               }
             }
@@ -198,16 +151,9 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#CCDCEC'"
+                      "Value": "'#CBD8E5'"
                     }
                   }
-                }
-              }
-            },
-            "radius": {
-              "expr": {
-                "Literal": {
-                  "Value": "8D"
                 }
               }
             },
@@ -215,6 +161,13 @@
               "expr": {
                 "Literal": {
                   "Value": "1D"
+                }
+              }
+            },
+            "radius": {
+              "expr": {
+                "Literal": {
+                  "Value": "12D"
                 }
               }
             }
@@ -268,6 +221,36 @@
           }
         }
       ]
+    },
+    "visualType": "slicer",
+    "query": {
+      "queryState": {
+        "Values": {
+          "projections": [
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Country Selection"
+                    }
+                  },
+                  "Property": "Country"
+                }
+              },
+              "queryRef": "Country Selection.Country",
+              "nativeQueryRef": "Country",
+              "displayName": "Country"
+            }
+          ]
+        }
+      }
+    },
+    "syncGroup": {
+      "groupName": "SharedCountry",
+      "fieldChanges": true,
+      "filterChanges": true
     }
-  }
+  },
+  "name": "5577d3f3e4e1ab0de03c"
 }

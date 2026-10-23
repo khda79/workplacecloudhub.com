@@ -23,11 +23,12 @@
                       "Entity": "All Devices Evidence"
                     }
                   },
-                  "Property": "All Devices"
+                  "Property": "All Enabled Devices"
                 }
               },
-              "queryRef": "All Devices Evidence.All Devices",
-              "nativeQueryRef": "All devices"
+              "queryRef": "All Devices Evidence.All Enabled Devices",
+              "nativeQueryRef": "All Enabled Devices",
+              "displayName": "All enabled devices"
             },
             {
               "field": {
@@ -107,7 +108,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "21D"
+                  "Value": "20D"
                 }
               }
             },
@@ -162,7 +163,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "10D"
+                  "Value": "11D"
                 }
               }
             },
@@ -444,7 +445,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Devices & Endpoint: All devices counts deduplicated AD computer and Intune management identities, including servers and AD-only records, not verified physical machines. Managed Devices, Enabled AD PCs Managed by Intune and Endpoint Analytics Score retain their existing scopes.'"
+                  "Value": "'Only confirmed enabled identities. Unknown and contradictory states are excluded; inspect the evidence tables for their scope.'"
                 }
               }
             }
@@ -571,7 +572,14 @@
             "show": {
               "expr": {
                 "Literal": {
-                  "Value": "false"
+                  "Value": "true"
+                }
+              }
+            },
+            "showTooltipButton": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
                 }
               }
             }
@@ -606,6 +614,19 @@
               "expr": {
                 "Literal": {
                   "Value": "4D"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "visualHeaderTooltip": [
+        {
+          "properties": {
+            "text": {
+              "expr": {
+                "Literal": {
+                  "Value": "'All enabled devices counts confirmed enabled identities only. Unknown states and conflicting enabled/disabled observations are excluded. This is an account-state count, not proof of physical activity.'"
                 }
               }
             }

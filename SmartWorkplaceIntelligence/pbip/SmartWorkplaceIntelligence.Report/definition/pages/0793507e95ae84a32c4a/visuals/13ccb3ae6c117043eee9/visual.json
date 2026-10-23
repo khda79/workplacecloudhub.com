@@ -1,12 +1,13 @@
 {
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
   "name": "13ccb3ae6c117043eee9",
+  "parentGroupName": "314d4a5e7a09dd6543a2",
   "position": {
     "x": 32,
-    "y": 336,
-    "width": 1856,
-    "height": 656,
+    "y": 616,
     "z": 110,
+    "height": 376,
+    "width": 1856,
     "tabOrder": 672
   },
   "visual": {
@@ -23,11 +24,12 @@
                       "Entity": "Device Inventory Evidence"
                     }
                   },
-                  "Property": "Device Name"
+                  "Property": "Windows Generation"
                 }
               },
-              "queryRef": "Device Inventory Evidence.Device Name",
-              "nativeQueryRef": "Device"
+              "queryRef": "Device Inventory Evidence.Windows Generation",
+              "nativeQueryRef": "Windows Generation",
+              "active": true
             },
             {
               "field": {
@@ -41,7 +43,8 @@
                 }
               },
               "queryRef": "Device Inventory Evidence.Windows Release",
-              "nativeQueryRef": "Windows Release"
+              "nativeQueryRef": "Windows Release",
+              "active": true
             },
             {
               "field": {
@@ -51,39 +54,54 @@
                       "Entity": "Device Inventory Evidence"
                     }
                   },
-                  "Property": "Windows 11 Upgrade Eligibility"
+                  "Property": "Operating System Version"
                 }
               },
-              "queryRef": "Device Inventory Evidence.Windows 11 Upgrade Eligibility",
-              "nativeQueryRef": "Eligibility"
+              "queryRef": "Device Inventory Evidence.Operating System Version",
+              "nativeQueryRef": "Operating System Version",
+              "active": true
             },
             {
               "field": {
-                "Column": {
+                "Measure": {
                   "Expression": {
                     "SourceRef": {
                       "Entity": "Device Inventory Evidence"
                     }
                   },
-                  "Property": "Windows 11 Blocking Reasons"
+                  "Property": "Managed Devices"
                 }
               },
-              "queryRef": "Device Inventory Evidence.Windows 11 Blocking Reasons",
-              "nativeQueryRef": "Blockers"
+              "queryRef": "Device Inventory Evidence.Managed Devices",
+              "nativeQueryRef": "Managed Devices"
             },
             {
               "field": {
-                "Column": {
+                "Measure": {
                   "Expression": {
                     "SourceRef": {
                       "Entity": "Device Inventory Evidence"
                     }
                   },
-                  "Property": "Secure Boot State"
+                  "Property": "Windows 10 Devices Remaining"
                 }
               },
-              "queryRef": "Device Inventory Evidence.Secure Boot State",
-              "nativeQueryRef": "Secure Boot State"
+              "queryRef": "Device Inventory Evidence.Windows 10 Devices Remaining",
+              "nativeQueryRef": "Windows 10 Devices Remaining"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Device Inventory Evidence"
+                    }
+                  },
+                  "Property": "Older Windows 11 Release Devices"
+                }
+              },
+              "queryRef": "Device Inventory Evidence.Older Windows 11 Release Devices",
+              "nativeQueryRef": "Older Windows 11 Release Devices"
             }
           ]
         }
@@ -93,6 +111,13 @@
       "columnHeaders": [
         {
           "properties": {
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
+            },
             "autoSizeColumnWidth": {
               "expr": {
                 "Literal": {
@@ -104,49 +129,6 @@
               "expr": {
                 "Literal": {
                   "Value": "'growToFit'"
-                }
-              }
-            },
-            "fontSize": {
-              "expr": {
-                "Literal": {
-                  "Value": "11D"
-                }
-              }
-            },
-            "bold": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "wordWrap": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "fontColor": {
-              "solid": {
-                "color": {
-                  "expr": {
-                    "Literal": {
-                      "Value": "'#FFFFFF'"
-                    }
-                  }
-                }
-              }
-            },
-            "backColor": {
-              "solid": {
-                "color": {
-                  "expr": {
-                    "Literal": {
-                      "Value": "'#215E9E'"
-                    }
-                  }
                 }
               }
             }
@@ -226,6 +208,13 @@
                   "Value": "false"
                 }
               }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
             }
           }
         }
@@ -238,7 +227,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Versions · selected evidence'"
+                  "Value": "'Operating system versions - current managed inventory'"
                 }
               }
             }
@@ -258,7 +247,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Versions · selected evidence'"
+                  "Value": "'Operating system versions - current managed inventory'"
                 }
               }
             },
@@ -414,6 +403,5 @@
       ]
     },
     "drillFilterOtherVisuals": true
-  },
-  "parentGroupName": "314d4a5e7a09dd6543a2"
+  }
 }

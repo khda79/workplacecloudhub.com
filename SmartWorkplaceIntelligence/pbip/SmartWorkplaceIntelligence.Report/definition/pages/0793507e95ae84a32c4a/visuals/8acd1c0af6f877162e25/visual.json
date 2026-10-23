@@ -3,7 +3,7 @@
   "name": "8acd1c0af6f877162e25",
   "position": {
     "x": 32,
-    "y": 312,
+    "y": 272,
     "width": 1856,
     "height": 24,
     "z": 12000,
@@ -19,7 +19,7 @@
               {
                 "textRuns": [
                   {
-                    "value": "Selected view: Native · Update Policy",
+                    "value": "Selected view: Native \u00b7 Update Policy",
                     "textStyle": {
                       "fontFamily": "Segoe UI",
                       "fontSize": "14px",

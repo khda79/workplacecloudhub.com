@@ -3,9 +3,9 @@
   "name": "12cd9d8cd31ca0de1a1b",
   "position": {
     "x": 88,
-    "y": 1032,
-    "width": 1800,
-    "height": 28,
+    "y": 1042,
+    "width": 420,
+    "height": 26,
     "z": 12,
     "tabOrder": 12
   },
@@ -19,10 +19,10 @@
               {
                 "textRuns": [
                   {
-                    "value": "Qualified prepared evidence | No interpolation | Hover quality cards and chart points for reading dates and coverage.",
+                    "value": "Qualified evidence | No interpolation",
                     "textStyle": {
                       "fontFamily": "Segoe UI",
-                      "fontSize": "11pt",
+                      "fontSize": "10pt",
                       "color": "#526781"
                     }
                   }

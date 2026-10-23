@@ -23,12 +23,12 @@
                       "Entity": "Daily Directory Trends"
                     }
                   },
-                  "Property": "Windows 11 Overtakes Windows 10 Day"
+                  "Property": "Windows 11 Overtakes Windows 10 All AD Accounts Day"
                 }
               },
-              "queryRef": "Daily Directory Trends.Windows 11 Overtakes Windows 10 Day",
-              "nativeQueryRef": "Windows 11 crossover",
-              "displayName": "Windows 11 crossover"
+              "queryRef": "Daily Directory Trends.Windows 11 Overtakes Windows 10 All AD Accounts Day",
+              "nativeQueryRef": "First Windows 11 > Windows 10 day",
+              "displayName": "First Windows 11 > Windows 10 day"
             }
           ]
         }
@@ -41,7 +41,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'First day Windows 11 enabled computer accounts exceeded Windows 10'"
+                  "Value": "'First qualified day Windows 11 AD computer accounts exceeded Windows 10; both counts include enabled and disabled accounts'"
                 }
               }
             }
@@ -61,7 +61,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'First Windows 11 > Windows 10 day'"
+                  "Value": "'First observed day: Windows 11 > Windows 10'"
                 }
               }
             },
@@ -213,7 +213,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "30D"
+                  "Value": "20D"
                 }
               }
             },
@@ -248,6 +248,13 @@
               "expr": {
                 "Literal": {
                   "Value": "false"
+                }
+              }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
                 }
               }
             }

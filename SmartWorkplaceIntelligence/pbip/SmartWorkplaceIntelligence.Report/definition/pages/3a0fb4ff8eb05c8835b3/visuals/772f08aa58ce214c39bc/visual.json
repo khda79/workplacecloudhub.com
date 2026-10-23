@@ -3,9 +3,9 @@
   "name": "772f08aa58ce214c39bc",
   "position": {
     "x": 32,
-    "y": 336,
+    "y": 379.5,
     "width": 1856,
-    "height": 656,
+    "height": 614.6,
     "z": 110,
     "tabOrder": 677
   },
@@ -226,6 +226,13 @@
                   "Value": "false"
                 }
               }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
             }
           }
         }
@@ -238,7 +245,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Activity · selected evidence'"
+                  "Value": "'Activity \u00b7 selected evidence'"
                 }
               }
             }
@@ -258,7 +265,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Activity · selected evidence'"
+                  "Value": "'Activity \u00b7 selected evidence'"
                 }
               }
             },

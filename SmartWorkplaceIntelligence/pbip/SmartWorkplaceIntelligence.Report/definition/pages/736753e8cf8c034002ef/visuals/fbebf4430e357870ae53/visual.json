@@ -4,7 +4,7 @@
   "position": {
     "x": 96,
     "y": 24,
-    "width": 820,
+    "width": 1080,
     "height": 48,
     "z": 119,
     "tabOrder": 49
@@ -19,10 +19,10 @@
               {
                 "textRuns": [
                   {
-                    "value": "On-Prem Mailboxes Remaining",
+                    "value": "Migration to Exchange Online/SE",
                     "textStyle": {
                       "fontFamily": "Segoe UI",
-                      "fontSize": "24pt",
+                      "fontSize": "24px",
                       "color": "#183153"
                     }
                   }

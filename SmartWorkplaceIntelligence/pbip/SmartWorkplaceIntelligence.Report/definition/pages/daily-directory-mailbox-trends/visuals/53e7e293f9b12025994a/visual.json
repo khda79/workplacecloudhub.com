@@ -1,5 +1,5 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "53e7e293f9b12025994a",
   "position": {
     "x": 32,
@@ -11,6 +11,144 @@
   },
   "visual": {
     "visualType": "lineChart",
+    "query": {
+      "queryState": {
+        "Category": {
+          "projections": [
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Daily Axis"
+                    }
+                  },
+                  "Property": "Axis Date"
+                }
+              },
+              "queryRef": "Daily Axis.Axis Date",
+              "nativeQueryRef": "Axis Date",
+              "active": true
+            }
+          ],
+          "showAll": true
+        },
+        "Tooltips": {
+          "projections": [
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Daily Directory Trends"
+                    }
+                  },
+                  "Property": "Inactive 90 Days Users Daily"
+                }
+              },
+              "queryRef": "Daily Directory Trends.Inactive 90 Days Users Daily",
+              "nativeQueryRef": "Inactive 90 days",
+              "displayName": "Inactive 90 days"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Daily Axis"
+                    }
+                  },
+                  "Property": "Axis AD Users Reading Day"
+                }
+              },
+              "queryRef": "Daily Axis.Axis AD Users Reading Day",
+              "nativeQueryRef": "Axis AD Users Reading Day",
+              "displayName": "Axis AD Users Reading Day"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Daily Axis"
+                    }
+                  },
+                  "Property": "Axis AD Users Quality Tooltip"
+                }
+              },
+              "queryRef": "Daily Axis.Axis AD Users Quality Tooltip",
+              "nativeQueryRef": "Axis AD Users Quality Tooltip",
+              "displayName": "Axis AD Users Quality Tooltip"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Daily Directory Trends"
+                    }
+                  },
+                  "Property": "AD User Accounts Scope Tooltip"
+                }
+              },
+              "queryRef": "Daily Directory Trends.AD User Accounts Scope Tooltip",
+              "nativeQueryRef": "Population scope"
+            }
+          ]
+        },
+        "Y": {
+          "projections": [
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Daily Axis"
+                    }
+                  },
+                  "Property": "Axis Enabled Users"
+                }
+              },
+              "queryRef": "Daily Axis.Axis Enabled Users",
+              "nativeQueryRef": "Enabled AD user accounts (all types)",
+              "displayName": "Enabled AD user accounts (all types)"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Daily Axis"
+                    }
+                  },
+                  "Property": "Axis Disabled Users"
+                }
+              },
+              "queryRef": "Daily Axis.Axis Disabled Users",
+              "nativeQueryRef": "Disabled AD user accounts (all types)",
+              "displayName": "Disabled AD user accounts (all types)"
+            }
+          ]
+        }
+      },
+      "sortDefinition": {
+        "sort": [
+          {
+            "field": {
+              "Column": {
+                "Expression": {
+                  "SourceRef": {
+                    "Entity": "Daily Axis"
+                  }
+                },
+                "Property": "Axis Date"
+              }
+            },
+            "direction": "Ascending"
+          }
+        ]
+      }
+    },
     "objects": {
       "categoryAxis": [
         {
@@ -182,9 +320,6 @@
       ],
       "dataPoint": [
         {
-          "selector": {
-            "metadata": "Daily Axis.Axis Enabled Users"
-          },
           "properties": {
             "fill": {
               "solid": {
@@ -197,12 +332,12 @@
                 }
               }
             }
+          },
+          "selector": {
+            "metadata": "Daily Axis.Axis Enabled Users"
           }
         },
         {
-          "selector": {
-            "metadata": "Daily Axis.Axis Disabled Users"
-          },
           "properties": {
             "fill": {
               "solid": {
@@ -215,6 +350,9 @@
                 }
               }
             }
+          },
+          "selector": {
+            "metadata": "Daily Axis.Axis Disabled Users"
           }
         }
       ],
@@ -235,144 +373,6 @@
         }
       ]
     },
-    "drillFilterOtherVisuals": true,
-    "query": {
-      "queryState": {
-        "Category": {
-          "projections": [
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Daily Axis"
-                    }
-                  },
-                  "Property": "Axis Date"
-                }
-              },
-              "queryRef": "Daily Axis.Axis Date",
-              "nativeQueryRef": "Axis Date"
-            }
-          ],
-          "showAll": true
-        },
-        "Y": {
-          "projections": [
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Daily Axis"
-                    }
-                  },
-                  "Property": "Axis Enabled Users"
-                }
-              },
-              "queryRef": "Daily Axis.Axis Enabled Users",
-              "nativeQueryRef": "Enabled AD user accounts (all types)",
-              "displayName": "Enabled AD user accounts (all types)"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Daily Axis"
-                    }
-                  },
-                  "Property": "Axis Disabled Users"
-                }
-              },
-              "queryRef": "Daily Axis.Axis Disabled Users",
-              "nativeQueryRef": "Disabled AD user accounts (all types)",
-              "displayName": "Disabled AD user accounts (all types)"
-            }
-          ]
-        },
-        "Tooltips": {
-          "projections": [
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Daily Directory Trends"
-                    }
-                  },
-                  "Property": "Inactive 90 Days Users Daily"
-                }
-              },
-              "queryRef": "Daily Directory Trends.Inactive 90 Days Users Daily",
-              "nativeQueryRef": "Inactive 90 days",
-              "displayName": "Inactive 90 days"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Daily Axis"
-                    }
-                  },
-                  "Property": "Axis AD Users Reading Day"
-                }
-              },
-              "queryRef": "Daily Axis.Axis AD Users Reading Day",
-              "nativeQueryRef": "Axis AD Users Reading Day",
-              "displayName": "Axis AD Users Reading Day"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Daily Axis"
-                    }
-                  },
-                  "Property": "Axis AD Users Quality Tooltip"
-                }
-              },
-              "queryRef": "Daily Axis.Axis AD Users Quality Tooltip",
-              "nativeQueryRef": "Axis AD Users Quality Tooltip",
-              "displayName": "Axis AD Users Quality Tooltip"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Daily Directory Trends"
-                    }
-                  },
-                  "Property": "AD User Accounts Scope Tooltip"
-                }
-              },
-              "queryRef": "Daily Directory Trends.AD User Accounts Scope Tooltip",
-              "nativeQueryRef": "Population scope"
-            }
-          ]
-        }
-      },
-      "sortDefinition": {
-        "sort": [
-          {
-            "field": {
-              "Column": {
-                "Expression": {
-                  "SourceRef": {
-                    "Entity": "Daily Axis"
-                  }
-                },
-                "Property": "Axis Date"
-              }
-            },
-            "direction": "Ascending"
-          }
-        ]
-      }
-    },
     "visualContainerObjects": {
       "title": [
         {
@@ -387,7 +387,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'AD user accounts (all types) - enabled and disabled'"
+                  "Value": "'User accounts (all types) - enabled and disabled'"
                 }
               }
             },
@@ -607,7 +607,8 @@
           }
         }
       ]
-    }
+    },
+    "drillFilterOtherVisuals": true
   },
   "filterConfig": {
     "filters": [

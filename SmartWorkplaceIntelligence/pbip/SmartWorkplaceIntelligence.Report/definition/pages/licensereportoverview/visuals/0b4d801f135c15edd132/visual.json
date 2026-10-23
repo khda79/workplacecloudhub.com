@@ -323,6 +323,13 @@
                   "Value": "false"
                 }
               }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
             }
           }
         }
@@ -335,7 +342,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Assignment issue detail · complete selected suites'"
+                  "Value": "'Assignment issue detail \u00b7 complete selected suites'"
                 }
               }
             }
@@ -355,7 +362,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Assignment issue detail · complete selected suites'"
+                  "Value": "'Assignment issue detail \u00b7 complete selected suites'"
                 }
               }
             },

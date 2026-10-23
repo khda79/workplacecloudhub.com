@@ -3,9 +3,9 @@
   "name": "db1ec2ff0312f8f7eeae",
   "position": {
     "x": 32,
-    "y": 216,
-    "width": 248,
-    "height": 72,
+    "y": 322.5,
+    "width": 200,
+    "height": 80,
     "z": 120,
     "tabOrder": 120
   },
@@ -90,7 +90,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "12D"
+                  "Value": "20D"
                 }
               }
             },
@@ -111,7 +111,7 @@
             "showBlankAs": {
               "expr": {
                 "Literal": {
-                  "Value": "'—'"
+                  "Value": "'\u2014'"
                 }
               }
             },
@@ -136,7 +136,7 @@
             "customFormatString": {
               "expr": {
                 "Literal": {
-                  "Value": "'#,0'"
+                  "Value": "'0'"
                 }
               }
             }
@@ -173,7 +173,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "9D"
+                  "Value": "11D"
                 }
               }
             },
@@ -278,14 +278,14 @@
             "leftMargin": {
               "expr": {
                 "Literal": {
-                  "Value": "4L"
+                  "Value": "0L"
                 }
               }
             },
             "rightMargin": {
               "expr": {
                 "Literal": {
-                  "Value": "4L"
+                  "Value": "0L"
                 }
               }
             }
@@ -360,6 +360,27 @@
                   "Value": "3L"
                 }
               }
+            },
+            "columnPadding": {
+              "expr": {
+                "Literal": {
+                  "Value": "0L"
+                }
+              }
+            },
+            "rowPadding": {
+              "expr": {
+                "Literal": {
+                  "Value": "0L"
+                }
+              }
+            },
+            "cellPadding": {
+              "expr": {
+                "Literal": {
+                  "Value": "0L"
+                }
+              }
             }
           },
           "selector": {
@@ -429,7 +450,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Microsoft 365 F1 · assigned, enabled and available license units'"
+                  "Value": "'Microsoft 365 F1 \u00b7 assigned, enabled and available license units'"
                 }
               }
             }
@@ -449,7 +470,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Microsoft 365 F1 · assigned, enabled and available license units'"
+                  "Value": "'Microsoft 365 F1 \u00b7 assigned, enabled and available license units'"
                 }
               }
             },
@@ -569,28 +590,28 @@
             "top": {
               "expr": {
                 "Literal": {
-                  "Value": "4D"
+                  "Value": "0D"
                 }
               }
             },
             "bottom": {
               "expr": {
                 "Literal": {
-                  "Value": "4D"
+                  "Value": "0D"
                 }
               }
             },
             "left": {
               "expr": {
                 "Literal": {
-                  "Value": "4D"
+                  "Value": "0D"
                 }
               }
             },
             "right": {
               "expr": {
                 "Literal": {
-                  "Value": "4D"
+                  "Value": "0D"
                 }
               }
             }
@@ -603,37 +624,7 @@
             "show": {
               "expr": {
                 "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "text": {
-              "expr": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "License Report Qualification"
-                    }
-                  },
-                  "Property": "License Qualification Label"
-                }
-              }
-            },
-            "fontSize": {
-              "expr": {
-                "Literal": {
-                  "Value": "10D"
-                }
-              }
-            },
-            "fontColor": {
-              "solid": {
-                "color": {
-                  "expr": {
-                    "Literal": {
-                      "Value": "'#52606D'"
-                    }
-                  }
+                  "Value": "false"
                 }
               }
             }

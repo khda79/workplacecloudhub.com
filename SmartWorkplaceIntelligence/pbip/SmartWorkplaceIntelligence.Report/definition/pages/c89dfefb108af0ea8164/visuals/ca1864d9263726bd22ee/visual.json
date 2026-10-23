@@ -3,9 +3,9 @@
   "name": "ca1864d9263726bd22ee",
   "position": {
     "x": 32,
-    "y": 376,
+    "y": 420,
     "width": 1856,
-    "height": 136,
+    "height": 108,
     "z": 13000,
     "tabOrder": 13000
   },
@@ -108,7 +108,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "26D"
+                  "Value": "20D"
                 }
               }
             },
@@ -156,7 +156,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "12D"
+                  "Value": "11D"
                 }
               }
             },

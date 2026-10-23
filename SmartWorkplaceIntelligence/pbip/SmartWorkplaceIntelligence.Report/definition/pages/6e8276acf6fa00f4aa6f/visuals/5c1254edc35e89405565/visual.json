@@ -3,9 +3,9 @@
   "name": "5c1254edc35e89405565",
   "position": {
     "x": 32,
-    "y": 704,
+    "y": 724.2,
     "width": 1856,
-    "height": 248,
+    "height": 232.3,
     "z": 11000,
     "tabOrder": 736
   },
@@ -116,7 +116,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "14D"
+                  "Value": "11D"
                 }
               }
             },
@@ -172,7 +172,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "14D"
+                  "Value": "11D"
                 }
               }
             },
@@ -251,7 +251,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Geography · selected evidence'"
+                  "Value": "'Geography \u00b7 selected evidence'"
                 }
               }
             }
@@ -271,7 +271,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Receipt and file provenance · raw collector rows, not prepared-table totals'"
+                  "Value": "'Receipt and file provenance \u00b7 raw collector rows, not prepared-table totals'"
                 }
               }
             },

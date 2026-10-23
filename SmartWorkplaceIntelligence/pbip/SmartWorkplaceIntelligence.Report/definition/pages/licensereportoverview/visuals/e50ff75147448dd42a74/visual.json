@@ -263,6 +263,13 @@
                   "Value": "false"
                 }
               }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
             }
           }
         }
@@ -275,7 +282,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'E3 → F3 eligibility summary · complete selected E3 family'"
+                  "Value": "'E3 \u2192 F3 eligibility summary \u00b7 complete selected E3 family'"
                 }
               }
             }
@@ -295,7 +302,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'E3 → F3 eligibility summary · complete selected E3 family'"
+                  "Value": "'E3 \u2192 F3 eligibility summary \u00b7 complete selected E3 family'"
                 }
               }
             },
