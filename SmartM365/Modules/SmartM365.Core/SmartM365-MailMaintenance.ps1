@@ -2,7 +2,7 @@
 .SYNOPSIS
 Shared mail admission policy, dot-sourced by both Core editions. No I/O on load.
 .VERSION
-1.0.0
+1.0.1
 #>
 function Get-SmartM365MaintenanceMailRoot {
     param([Parameter(Mandatory)]$Config)
@@ -77,9 +77,6 @@ function Resolve-SmartM365MaintenanceMailRecipientRoute {
         [ValidateSet('Auto','Report','Error','Maintenance')][string]$MailPurpose='Auto')
     $config = Get-SmartM365EffectiveModuleGlobalConfig
     $state = Get-SmartM365MaintenanceMailState -SharedDataFolderPath (Get-SmartM365MaintenanceMailRoot $config)
-    if (-not $state.Enabled -and $MailPurpose -ne 'Maintenance') {
-        return [pscustomobject]@{To=$To;Cc=$Cc;MailPurpose=$MailPurpose;Restricted=$false}
-    }
     if ($MailPurpose -eq 'Auto') {
         $MailPurpose = 'Report'
         # Preserve explicit ErrorMailTo intent, never guess from subject or priority.
@@ -91,6 +88,19 @@ function Resolve-SmartM365MaintenanceMailRecipientRoute {
         # Existing collectors explicitly mark terminal failure before their legacy mail call.
         $failure = Get-Variable ScriptFailed -Scope Global -ErrorAction SilentlyContinue
         if ($failure -and $failure.Value -is [bool] -and $failure.Value) { $MailPurpose = 'Error' }
+    }
+    if (-not $state.Enabled -and $MailPurpose -ne 'Maintenance') {
+        if ($MailPurpose -eq 'Error') {
+            $moduleConfig = Get-ModuleLocalConfig
+            $callerConfig = Get-SmartM365CallerLocalConfig
+            $recipient = [string](Get-ModuleLocalConfigValue -Config $moduleConfig -Name ErrorMailTo -DefaultValue '')
+            $recipient = [string](Get-ModuleLocalConfigValue -Config $callerConfig -Name ErrorMailTo -DefaultValue $recipient)
+            if ([string]::IsNullOrWhiteSpace($recipient) -or $recipient.Trim() -in @('__USE_GLOBAL__','USE_GLOBAL') -or $recipient -match '\{\{') {
+                throw 'ErrorMailTo is not configured; error mail was not sent.'
+            }
+            return [pscustomobject]@{To=$recipient;Cc='';MailPurpose='Error';Restricted=$true}
+        }
+        return [pscustomobject]@{To=$To;Cc=$Cc;MailPurpose=$MailPurpose;Restricted=$false}
     }
     $key = if ($MailPurpose -eq 'Error') {'ErrorMailTo'} else {'To'}
     $property = $config.PSObject.Properties[$key]
@@ -112,11 +122,12 @@ function Set-SmartM365SmtpMaintenanceRecipient {
     elseif ($route.Cc) { $MailParameters.Cc = @(ConvertToRecipientArray $route.Cc) }
 }
 
+
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAMtKehO0xuBFlN
-# 5ofm9CCvus2PkJKsxKKuAmoOZACKU6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCCTCYnNVqTNpQ6
+# KV4nNpELvYrXtKkatDhlibhSnDgrfaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -249,31 +260,31 @@ function Set-SmartM365SmtpMaintenanceRecipient {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIBKh9B5tapOnqGoD0F7UzvtYUPpW2z8KHM9trRXlWBr9MA0GCSqG
-# SIb3DQEBAQUABIIBgJxNyWhr+wHURpCyovGyQPJfqtElwzLy4XhzfRkJs9TDlfnw
-# CyUPmLnLaGb0jrxZG5iSHT7i0geRUFfL6HTValC7eREb98gnRbp6RQBJcs+sh+wM
-# fOKMloVN6gTqQAvaIP7X6JXgPchPG4rjFtBrVP0q/6x3g9myChWv14jzZpB57EI8
-# 3viGwctipUmes/T0zihMhwpItSdN3PLYy4WGK/Vbzk8yRe/CIu6yfTh4LRO54CTH
-# jjVEF4f0dspj6PjFEczIsawHArlvtaF8f+ircUPFD3Mr/PHhQbYupIexSEEW/DOt
-# FWhdBn3VacWGc+a4ofgTDH3hiXWP/lz+OqId6S1VERin6d82IXIvFjFmmpNjEVFn
-# fPwc4PY99miusucLB9/FyakQ1PNgpuaMetM8/2T1hf429+o0S4Yr9uq/bYTeltCY
-# nX8CPJ6Ak625TAWPbJC0jspAbuqyCCWE/T0P6uQsiP63SOjc1yo0bQ2i8e9Uv7Xr
-# Fkhn7JhAeS0AMMsOYKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIDXoeeXaGORxULJKGFHYFBLDwENDy9lBAbRDAQ6+eP6xMA0GCSqG
+# SIb3DQEBAQUABIIBgHWzjcxi0wzDBnf8xGuPzEbp7nq62xhMmEFlzh8K9q7hLpo7
+# wUPrHr4sFstX7do4nXIEoHDNwaW/SrkEuZxxHdjjQatn0A2kx2rF/XrYB/klipbH
+# RfFgLpwhDVeyYrasjEjZXWCRobVBw6VD+NnBNJBeuS77yPPqKRBJgILG++GtfaVj
+# W1WX46bkxdsO0ih/9ZjscqB5UTMWpDAdoGBtv+wFUrLzSxxk6pn61g+A3oTFvA9Z
+# w94pKGmVZqUTedVofZsObEgaZAnQYKKgGXE4lNgXlKAOHMVpbZa07DfIH/4AROc8
+# 6EW4j1xo/5hJvaSjoOTLmDPlQcKrmRYOZWV7Eb8TIUF0q3EPV5GimoiaeHcx741l
+# 1CF0swamIytMZOLBeSwfrcp4n6ro9L8dAfVeHXVMq/lcEMrMp62dalmrcifQa1ow
+# r6w7eQC3+8BOvbfhlHo7s/Xr+o0VVqk2Nof3u3KEqlejIZbVhRDPy66qh0ZdceXL
+# RsYKnp1g+2+LzFAKd6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDQxODM3
-# NDVaMC8GCSqGSIb3DQEJBDEiBCAr+CEkyLZaSrOe/JmJlCfTF5l84RqgahqQiVIW
-# GSdZZTANBgkqhkiG9w0BAQEFAASCAgBRsC4qTmid/NG5eRfMVUM1wtlPGUE54KRe
-# dbjRpSWdtuFEkwCGA5WRi67G5Pxjk6Hnulx/LfELfokoeHL1edlQWs3g/gNWYfaV
-# GMulYSPSHuw4YKj/9eGL4TKJd3oKN1xjpZlvKTYpvaaBETbQd+QxPql8K+4TZQIE
-# r9VVS+XDorG9J0USNGyQcOjcPKuHyzMY6MPQgcu0QWL5EAxqjVyz1XENKhFq5i1V
-# HjjsIt4pGrqPXrPXnJCxcKzSUZgHg3vUG4PG+sIyqt9+oXHk3qSJTQGY/rtHNpJN
-# vHyKI73iswXBc9B9cKPk84o/VJ1rNTZc2iFVZO5thbHx3ERPfADGae6MuKs/ov0J
-# 8nC5PWyWJ93U+vN8RqTEgJF3R5gD5k8MGj5z4jQlYF7Dmo73vO35vINx+u2bPa5c
-# YppZ8zPaQisOU7dqXlJAWHX9zNXbF8BRKc6N07DaoaOdYAlzu3uk4fc4gKFL3opp
-# KPYEZLaL5i7uIdwOqQ0Getx9Bzf44sj1oHchkG2+cM+UlcGhXZlydaLKQPfNcTTA
-# PNMRM4wPqQRk18jFzq5MQ4Kc5dXtdELI5saM/yljbzyMAPpMgs0aYRfgFoHDLZXT
-# rJVy4zh2LE56vgLLXuhG9M/OWhmcd0YF9p/4CaNJJz4wmMPw4Ujvbic31UoQb2np
-# 4bCw16pUtQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjMwMjE5
+# MDZaMC8GCSqGSIb3DQEJBDEiBCDtuWJuu+qahlSsGoX2LngppD869qM1eBSLtej9
+# 5mhczDANBgkqhkiG9w0BAQEFAASCAgBLkiunhMehl6T9kjZ4okqlinVBFRVHzLPv
+# drP9Gesrce/MSyCtSmbsnUvKNPf4cjmnrcPS09+iQmKD5BKuwRE/c2cjO1sOGiC+
+# a66pB1miJ3YMXDPRsj/zJ/2S2NqT9BOOV4iIQJVQx+w+wQdpK5BdgWOTsjvq+Ifr
+# mghzyuuKRgXVMpLHEncLixnF5XW6vh52BFJu8qkhra8ei+2ik5CrAVWTuinSPbZq
+# 07lOQHWNhdd6wpcZn28ros6K8MNfpPpy54FXnUcKX6yH4O/sjPczNshqp23x7NQv
+# 7o055T2q8tdlQs/y5WIpjRnKsNj19dViyp99j9YrsccGI8OOehzHIWjYC7XHuPHj
+# 0QtcecX7BmGBDQ4UIO5lPI07gQT/Y430dgsqhMIJVynslLREiL+972f/G5oDR0Eq
+# DoLQWkTHfUDlyQhUnE00KQCYcD1gn/B8ozhqO/ts+ShJfhaCo4Wbcb4UCbwEyo2B
+# ae7CbnckDVehAyDUzlNdqJZnP+qNNvU/fy1gqsJ/9+WRIqJzCNXAZ5XFkrhPUVRR
+# 72mStR30Sdv55mRi0fgM6Cql9fVIG3V95fZZr14EV+njxXOVMD5RVNkBxB6jYarr
+# +GE+BGB/MY6JgRZ1Jc5H+6yEXRTxe2eqB0IaLu8qKDGRW5Cy8BY3ENYuBu9ZhCyK
+# qYyoqTN+WA==
 # SIG # End signature block

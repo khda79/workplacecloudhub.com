@@ -18,7 +18,7 @@
   as optional files M365_Licenses_ReportSkuCandidates.csv and M365_Licenses_ReportSkuCapacity.csv with the report snapshot identity;
   ReportSkuCapacity names the report product family of each SKU (ReportProduct) so consumers never re-implement the SKU rules.
 .VERSION
- 1.58
+ 1.59
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication; Microsoft.Graph.Identity.DirectoryManagement; Microsoft.Graph.Users; Microsoft.Graph.Groups; ImportExcel for the report attachment.
@@ -263,7 +263,7 @@ $OrgDomain = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'OrgDom
 # ==========================================================
 $modulePath = & { $d = $PSScriptRoot; while ($d) { $p = Join-Path $d 'Modules\SmartM365.Core\SmartM365.Core.psd1'; if (Test-Path -LiteralPath $p) { return $p }; $parent = Split-Path -Path $d -Parent; if ($parent -eq $d) { break }; $d = $parent }; throw 'SmartM365.Core module not found.' }
 try {
-    Import-Module -Name $modulePath -MinimumVersion '1.0.98' -ErrorAction Stop
+    Import-Module -Name $modulePath -MinimumVersion '1.0.104' -ErrorAction Stop
 } catch {
     Write-Host "Failed to import SmartM365.Core module from '$modulePath' : $_" -ForegroundColor Red
     exit 1
@@ -4035,7 +4035,7 @@ function Publish-LicensesWeeklyHistory {
 # ==========================================================
 # Main
 # ==========================================================
-$ScriptVersion = "1.58"
+$ScriptVersion = "1.59"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LicensesCsvLogFolderPath' -DefaultValue $OutputPath
 $LatestCsvFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ''
@@ -4757,7 +4757,7 @@ $($global:logTextFile)
       $attachments = @($global:logTextFile)
     }
 
-    Send-SmartM365Mail -Subject $title -BodyHtml $bodyHtml -Attachments $attachments -SendMailMode Graph -HighPriority
+    Send-SmartM365Mail -Subject $title -BodyHtml $bodyHtml -Attachments $attachments -SendMailMode Graph -HighPriority -MailPurpose Error
   } catch {
     WriteLog -Message ("Failed to send global error notification email: {0}" -f $_) "ERROR"
   }
@@ -4803,11 +4803,12 @@ finally {
   }
 }
 
+
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBN+ssiupTBRM/X
-# eyyMjKE5IxP3wylPlyPPdB5i2UxmTaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBBpW9T1qd/W0GC
+# EG03py/8JHY3JxGemKsY8KcHWBedt6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -4940,31 +4941,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIDdglY1eo7/kl75BQcUxirjZwSNywtYTC/QouXklsDD2MA0GCSqG
-# SIb3DQEBAQUABIIBgCbvhFgsT2FdkaM40Fqo2hijU5sfnpXv26gTOavGttpixYCo
-# B1h1SzciSQPwiYlfZT4A+GgDjZZg0yGWIAAlPTotV5q4USQH9GR41NXWIcQ6aM2w
-# 2Yj7zXJU3fvQee44OnDhYjSVSbjLX9hy480XGH3lubmG3UiL3bVAHevAud4KGROg
-# AWhp0NFev+C7mrwC8gQwvOcjA7exQLpShz4XuuiK7IqFzQC/3Ps8uLvu1tVRk+Nn
-# Dxzws8+8qGd1IAC070N3G4C8P/DQzcn+6wByqzlo0ferwoUBFfKZcUb5QVAaowOm
-# CwllMnm5WjNY/c6OrefJOjl/++GcR8GSS8MReNUVEXGILl/LQo32RIS9R33Nn4iT
-# v9DXpKAUKntwBesfuXgJxltCMUWmTltoPUYCx4qZSbBRVMrvhjgrof9U+/Op4jO+
-# 0SmxoFyHrHIgnNu4Ca5H9j0qKoxahyVQb6N4+X/vgNc1HjBmwRJefIWZADOl7ylt
-# UM36nLxq96pSmwTuOqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEILLiYzNGMhcWQ//odQfkciJrj+O3eHLBQ78xkb0YbxMtMA0GCSqG
+# SIb3DQEBAQUABIIBgEqqRzT0AftApfNAUkRue+pSA0lmhhPpxgamR3RojQ4HYpOm
+# 33xvLn7ITitWiBWlWXd9drh7NTPKZCnzM5l4KzCCpHryWGU0ivJacbt0ku9Ix9Qw
+# kHajSzEeobeEHGph3nSJkrIuseX2OC6ppzn2FFJbdcSNZIwZWm+T0UdOWviopSX8
+# fnR82zsKD8beFXmOBTaQvwPeZ+oQ0MzkCNO0+wJ/JYjt/eZlWYnso5tHzuVeC0Na
+# XjRrNdGDXpYdTwrDRV/3DsNr73MTWeK71d5a7raMAoLtMCt20T8STUGyX1npeOjV
+# VP/GtNOOAiKlSR7Tf4vVDp87x+lpApcYf5iNwaPxaF8hy2fwPR0WBqFZCQynQc2G
+# aWl8qcjUoajxb62yWEzjSnoIoLzEX3sB2aWbA7rU/EHT8QwcDAbAK1PVlByU1lxC
+# EbN1yJ2i8yEh4Z7kRmt1lSiJVmpjE9qFhee6XpP+OOLWJ/zb5TUkR2gQczCuL3AN
+# dpXSZR3lMyXXeUe2HaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjExNDQ5
-# MjlaMC8GCSqGSIb3DQEJBDEiBCDelpSjDhIcstq8vCgT+CckUB6x0XSFxlhS3JkM
-# uCpFezANBgkqhkiG9w0BAQEFAASCAgCFB1drLNPKnXlfRsbE4zBrBEDe7FBidd3P
-# z0XIuM8xsmYSKo2Ei43V01J0D8fouo4fbIX3/ffGIiEyanX4UAM40185KregSf5x
-# nsuw/tYjsvrZ7Bgopk616wYphFbvHUfl0kfTnJW7Frf+5EOKuy+vrIlsCuglwJZ7
-# IrrY2t4bTUXdDORRPtabkD0AdL3XOTznHTrp90SjhMRWhP0E7qKY3QmEPOJ+QY3i
-# 5zX4f8iVaTpEns9Y+LLfMgy8xcZqaD8O6cUGKRtN+AIQ/8hJPKRVZ131ZrSQxEiH
-# 6dRkMFQEh61Ici2CeXIl2tCDNxhf5+8gueWvkL4SexYR9TBaVyEHPXx58RY923TS
-# RMBAndCqboJsR9J12AP4XxP1QeytNkD0SZ5puO551nZsYk1u74EwkqAn7R79+qdF
-# TmA2yRREuua03f3YO8GIjJsGPC/6zs0BrUIvesV0sMR0/LBxkJWaibzAZUfFd54b
-# ZXyb6DjVZ+uyX0/AI11BLq2Wgzg1D73EhfoWDpcfo+rg07Ef0eH8svvS44FTKRVj
-# YyebstixUIjekUszq6eDJCEcGogjOq5e4F8KnKidCHbeE9y945kh1MsaKT7btX1r
-# ZXvzp7bp/uf4noZz4VHLItv6Qp0wBJ1mxwa0ovnVS8ynK3Eb+15dZfy3OmnLnHFx
-# z3cpXGH3VA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjMwMjE5
+# MDNaMC8GCSqGSIb3DQEJBDEiBCBfj10DXDQsIi+OpB+9nni3mxHvtV06joom+wEQ
+# k9PGLzANBgkqhkiG9w0BAQEFAASCAgBJ0M3z4hDi8QqN46bblLdNkDkCAE8xziFZ
+# ic81FX/ltnY/XSZs3ETmUSqFruZKdI5uJsnlWjN0u9th8FNMiubwwO6lYrgvj4yF
+# KaCOllheQhfFGU5BL3Z610r1TjxoxTgVG82yNzifpPGNJLe9ykfmrUpi39ZzYmaq
+# v5Biz2JBCjyUo27iVrQswcrNpkk9FPJDbE0zmEHzBltYl7uoMJHHrfZYaukBKCWA
+# QGUvrmd7ZpJm5/iiR/lkGUROGdWEwTIPT6oTEpwA/AU/MW3v9MyALAz+uQQ1i/kl
+# JcfQizca+HILwzgPOVr2zLL/OpjrdhG8CttLqN6161B8v8+oJmJ+jVa8kIL+Numb
+# 6+R7lXHtNzZgn98cln7Esho3ZSQvHfZUuK/e9kQINOmcDKCs/2Rl+9nS/KvUtAOe
+# /envEPEuP0Fu0I0e+V03p9+lBbO47o2CHrWKmHJ6xmAhlcaIchOcJsugsYrUm2XB
+# ECVTrYZ9No+OvB+qAq5FWwxYI5yE0ZuY1+D6gT8Q2EJ9SCiUBJl5sNqVZSQ/M5/a
+# WEcUksd5/8WQAtx5mbJKz6TVbs8cyJqnsXY4AG5bxLUGSvGk0IkptjX5MCktit4/
+# tl4++sP5N8U7qPJicgSYVKu5Sj9MjrTFftU8Hb8aGCwNSYinJCOaltjrzYI6epjp
+# y2XMxKphaA==
 # SIG # End signature block

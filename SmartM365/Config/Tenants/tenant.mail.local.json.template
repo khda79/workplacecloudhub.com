@@ -1,0 +1,232 @@
+{
+  "Scripts": {
+    "SmartM365-ActiveDirectory-HealthCheck": {
+      "From": "__USE_GLOBAL__",
+      "Cc": "__USE_GLOBAL__"
+    },
+    "SmartM365-ActiveDirectory-Inventory": {
+      "From": "__USE_GLOBAL__",
+      "Cc": "__USE_GLOBAL__"
+    },
+    "SmartM365-ActiveUsers-Inventory": {
+      "From": "__USE_GLOBAL__",
+      "Cc": "__USE_GLOBAL__"
+    },
+    "SmartM365-AuthenticationMethodsRegistration-Inventory": {
+      "From": "__USE_GLOBAL__",
+      "Cc": "__USE_GLOBAL__"
+    },
+    "SmartM365-AzureADConnect-SyncHealth-Inventory": {
+      "From": "__USE_GLOBAL__",
+      "Cc": "__USE_GLOBAL__"
+    },
+    "SmartM365-Check-ProxyAddresses-Exchange": {
+      "From": "__USE_GLOBAL__",
+      "Cc": "__USE_GLOBAL__"
+    },
+    "SmartM365-ConditionalAccess-Inventory": {
+      "From": "__USE_GLOBAL__",
+      "Cc": "__USE_GLOBAL__"
+    },
+    "SmartM365-CopilotUsage-Inventory": {
+      "From": "__USE_GLOBAL__",
+      "Cc": "__USE_GLOBAL__"
+    },
+    "SmartM365-Create-DeviceSystemRemediation": {
+      "From": "__USE_GLOBAL__",
+      "Cc": "__USE_GLOBAL__"
+    },
+    "SmartM365-Device-System-Inventory": {
+      "From": "__USE_GLOBAL__",
+      "Cc": "__USE_GLOBAL__"
+    },
+    "SmartM365-Devices-BIOS-Inventory": {
+      "From": "__USE_GLOBAL__",
+      "Cc": "__USE_GLOBAL__"
+    },
+    "SmartM365-Devices-Compliance-Inventory": {
+      "From": "__USE_GLOBAL__",
+      "Cc": "__USE_GLOBAL__"
+    },
+    "SmartM365-Devices-Inventory": {
+      "From": "__USE_GLOBAL__",
+      "Cc": "__USE_GLOBAL__"
+    },
+    "SmartM365-Devices-UpgradeEligibility": {
+      "From": "__USE_GLOBAL__",
+      "Cc": "__USE_GLOBAL__"
+    },
+    "SmartM365-EndpointAnalytics-Inventory": {
+      "From": "__USE_GLOBAL__",
+      "Cc": "__USE_GLOBAL__"
+    },
+    "SmartM365-EntraDevices-Inventory": {
+      "From": "__USE_GLOBAL__",
+      "Cc": "__USE_GLOBAL__"
+    },
+    "SmartM365-Exchange-Hybrid-FreeBusy-Inventory": {
+      "From": "__USE_GLOBAL__",
+      "Cc": "__USE_GLOBAL__"
+    },
+    "SmartM365-Exchange-HybridIdentity-Issues-Inventory": {
+      "From": "__USE_GLOBAL__",
+      "Cc": "__USE_GLOBAL__"
+    },
+    "SmartM365-Exchange-Local-Mailboxes-Inventory": {
+      "From": "__USE_GLOBAL__",
+      "Cc": "__USE_GLOBAL__"
+    },
+    "SmartM365-Exchange-MailboxCalendarPermissions-Inventory": {
+      "From": "__USE_GLOBAL__",
+      "Cc": "__USE_GLOBAL__"
+    },
+    "SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory": {
+      "From": "__USE_GLOBAL__",
+      "Cc": "__USE_GLOBAL__"
+    },
+    "SmartM365-EXO-AcceptedDomains-Inventory": {
+      "From": "__USE_GLOBAL__",
+      "Cc": "__USE_GLOBAL__"
+    },
+    "SmartM365-EXO-Mailboxes-CalPerm_Inventory": {
+      "From": "__USE_GLOBAL__",
+      "Cc": "__USE_GLOBAL__"
+    },
+    "SmartM365-EXO-Mailboxes-Inventory": {
+      "From": "__USE_GLOBAL__",
+      "Cc": "__USE_GLOBAL__"
+    },
+    "SmartM365-EXO-MigJob-Inventory": {
+      "From": "__USE_GLOBAL__",
+      "Cc": "__USE_GLOBAL__"
+    },
+    "SmartM365-EXO-QuarantineMessages-Report": {
+      "From": "__USE_GLOBAL__",
+      "Cc": "__USE_GLOBAL__"
+    },
+    "SmartM365-Intune-DiscoveredApps-Inventory": {
+      "From": "__USE_GLOBAL__",
+      "Cc": "__USE_GLOBAL__"
+    },
+    "SmartM365-Intune-EndpointSecurityHealth-Inventory": {
+      "From": "__USE_GLOBAL__",
+      "Cc": "__USE_GLOBAL__"
+    },
+    "SmartM365-Intune-ExportRemediationScripts": {
+      "From": "__USE_GLOBAL__",
+      "Cc": "__USE_GLOBAL__"
+    },
+    "SmartM365-Intune-RBAC-GroupMembers": {
+      "From": "__USE_GLOBAL__",
+      "Cc": "__USE_GLOBAL__"
+    },
+    "SmartM365-Intune-Windows11-Readiness-Issues-Inventory": {
+      "From": "__USE_GLOBAL__",
+      "Cc": "__USE_GLOBAL__"
+    },
+    "SmartM365-Intune-WindowsAutopatch-Alerts-Inventory": {
+      "From": "__USE_GLOBAL__",
+      "Cc": "__USE_GLOBAL__"
+    },
+    "SmartM365-IntuneConfigurations-Inventory": {
+      "From": "__USE_GLOBAL__",
+      "Cc": "__USE_GLOBAL__"
+    },
+    "SmartM365-IntuneEnrollmentFailures-Inventory": {
+      "From": "__USE_GLOBAL__",
+      "Cc": "__USE_GLOBAL__"
+    },
+    "SmartM365-IntuneManagedApps-Inventory": {
+      "From": "__USE_GLOBAL__",
+      "Cc": "__USE_GLOBAL__"
+    },
+    "SmartM365-Inventory-Orchestrator": {
+      "From": "__USE_GLOBAL__",
+      "Cc": "__USE_GLOBAL__"
+    },
+    "SmartM365-Inventory-Orchestrator-GUI": {
+      "From": "__USE_GLOBAL__",
+      "Cc": "__USE_GLOBAL__"
+    },
+    "SmartM365-Inventory-Pipeline": {
+      "From": "__USE_GLOBAL__",
+      "Cc": "__USE_GLOBAL__"
+    },
+    "SmartM365-Licences-Inventory": {
+      "From": "__USE_GLOBAL__",
+      "Cc": "__USE_GLOBAL__"
+    },
+    "SmartM365-LicensePricing-Inventory": {
+      "From": "__USE_GLOBAL__",
+      "Cc": "__USE_GLOBAL__"
+    },
+    "SmartM365-M365-BackupPolicyScope-Inventory": {
+      "From": "__USE_GLOBAL__",
+      "Cc": "__USE_GLOBAL__"
+    },
+    "SmartM365-M365-BackupProtectedMailboxes-Inventory": {
+      "From": "__USE_GLOBAL__",
+      "Cc": "__USE_GLOBAL__"
+    },
+    "SmartM365-M365-BackupProtectedSitesAndDrives-Inventory": {
+      "From": "__USE_GLOBAL__",
+      "Cc": "__USE_GLOBAL__"
+    },
+    "SmartM365-M365UserActivity-Inventory": {
+      "From": "__USE_GLOBAL__",
+      "Cc": "__USE_GLOBAL__"
+    },
+    "SmartM365-Mailboxes-AllSources-PermissionsByUserReport": {
+      "From": "__USE_GLOBAL__",
+      "Cc": "__USE_GLOBAL__"
+    },
+    "SmartM365-PowerBIFabricActivity-Inventory": {
+      "From": "__USE_GLOBAL__",
+      "Cc": "__USE_GLOBAL__"
+    },
+    "SmartM365-SecureScore-Inventory": {
+      "From": "__USE_GLOBAL__",
+      "Cc": "__USE_GLOBAL__"
+    },
+    "SmartM365-SharePoint-OnPrem-Content-Inventory": {
+      "From": "__USE_GLOBAL__",
+      "Cc": "__USE_GLOBAL__"
+    },
+    "SmartM365-SharePoint-OnPrem-Infrastructure-Inventory": {
+      "From": "__USE_GLOBAL__",
+      "Cc": "__USE_GLOBAL__"
+    },
+    "SmartM365-SPO-Inventory": {
+      "From": "__USE_GLOBAL__",
+      "Cc": "__USE_GLOBAL__"
+    },
+    "SmartM365-Teams-Inventory": {
+      "From": "__USE_GLOBAL__",
+      "Cc": "__USE_GLOBAL__"
+    },
+    "SmartM365-TeamsPhonePstnUsage-Inventory": {
+      "From": "__USE_GLOBAL__",
+      "Cc": "__USE_GLOBAL__"
+    },
+    "SmartM365-VerifiedDomains-Inventory": {
+      "From": "__USE_GLOBAL__",
+      "Cc": "__USE_GLOBAL__"
+    },
+    "SmartM365-WindowsAutopilot-Inventory": {
+      "From": "__USE_GLOBAL__",
+      "Cc": "__USE_GLOBAL__"
+    },
+    "SmartM365-WinUpdate_Status_From_Intune": {
+      "From": "__USE_GLOBAL__",
+      "Cc": "__USE_GLOBAL__"
+    },
+    "SmartM365-WorkplaceEvidence-Prepare": {
+      "From": "__USE_GLOBAL__",
+      "Cc": "__USE_GLOBAL__"
+    },
+    "SmartM365-WorkplaceScope-Inventory": {
+      "From": "__USE_GLOBAL__",
+      "Cc": "__USE_GLOBAL__"
+    }
+  }
+}

@@ -2,7 +2,7 @@
 .SYNOPSIS
     Builds enriched Active Directory computer CSV columns required by the SmartWorkplace Power BI model.
 .VERSION
-1.11
+1.12
 #>
 
 . (Join-Path $PSScriptRoot '../Common/SmartM365.IdentityDateEvidence.ps1')
@@ -21,7 +21,7 @@ function Invoke-SmartM365AdComputersEnrichedCsv {
         [string]$AccountClassificationConfigPath = (Join-Path (Split-Path -Parent $PSScriptRoot) 'Config\AccountClassification.local.json')
     )
 
-    $enrichmentVersion = '1.11'
+    $enrichmentVersion = '1.12'
     $enrichmentTimer = [System.Diagnostics.Stopwatch]::StartNew()
     WriteLog -Message ("AD computers enrichment {0} started" -f $enrichmentVersion)
     if (-not (Test-Path -LiteralPath $CombinedComputersCsv)) {
@@ -745,6 +745,71 @@ function Build($AdVersion, $IntuneVersion) {
             }
         }
 
+        $entraExists = $null -ne $entra
+        $entraByNameCount = MapCount $entraByNameAll $computerName
+        $entraByGuidCount = MapCount $entraByDeviceIdAll $objectGuid
+        $entraNameList = ''
+        if ($entraByDeviceIdAll.ContainsKey($objectGuid)) { $entraNameValues = New-Object System.Collections.Generic.List[string]; foreach ($entraMatch in $entraByDeviceIdAll[$objectGuid]) { $display = V $entraMatch @('DisplayName'); if ($display) { [void]$entraNameValues.Add($display) } }; $entraNameList = ($entraNameValues -join ';') }
+        $correlation = if (-not $entraExists) { 'Not found in Entra' } elseif ($registration) { 'Found (correlated, registered)' } else { 'Found (correlated, missing registration date)' }
+
+        $canonical = V $row @('CanonicalName','DistinguishedName')
+        $lastOu = ''
+        if ($canonical) { $parts = @($canonical -split '[,/]' | Where-Object { $_ }); if ($parts.Count -ge 2) { $lastOu = $parts[$parts.Count - 2] } }
+        $isDisabledOu = if ($canonical -match '(?i)disabled|desactive|disabled objects') { 'True' } else { 'False' }
+        $model = V $intune @('Model')
+        $manufacturer = V $intune @('Manufacturer')
+        $isVirtual = if (("{0} {1}" -f $manufacturer, $model) -match '(?i)vmware|virtualbox|hyper-v|qemu|kvm|virtual machine') { 'True' } else { 'False' }
+
+        $distinguishedName = V $row @('DistinguishedName')
+        $buildNumber = GetBuildNumber (V $row @('operatingSystemVersion','OperatingSystemVersion')) $osVersionM365
+        $operatingSystemMajorCurrent = GetOsMajor (V $row @('OperatingSystem'))
+        $isLtscOs = (([string](V $row @('OperatingSystem'))).Trim().ToLowerInvariant() -match 'ltsc|ltsb')
+        $isLtscBuildFallback = ($operatingSystemMajorCurrent -eq 'Windows 10' -and $null -ne $buildNumber -and @(10240,14393,17763,19044) -contains [int]$buildNumber)
+        $isWindows10Ltsc = $isLtscOs -or $isLtscBuildFallback
+        $osMinToUpdateW11 = ($operatingSystemMajorCurrent -eq 'Windows 11') -or ($operatingSystemMajorCurrent -eq 'Windows 10' -and $null -ne $buildNumber -and [int]$buildNumber -ge 19041)
+        $orgUnit = GetOrganizationalUnitCode $row
+        $domainAndOu = if ((V $row @('DomainNameShort')) -and $orgUnit) { ('{0}-{1}' -f (V $row @('DomainNameShort')), $orgUnit) } else { '' }
+        $site = Get-SmartM365WorkplaceSite -SiteClassification $siteClassification -SiteCode $orgUnit
+        $labelFromEntity = if ($null -ne $site) { $site.Name } else { 'NOTFOUND' }
+        $typeEtablissement = if ($null -ne $site) { $site.Type } else { 'NOTFOUND' }
+        $typeEntity = if ($null -ne $site) { $site.IntegrationStatus } else { '' }
+        if (-not $typeEntity) { $typeEntity = GetTypeEntityFallback (V $row @('DomainNameShort')) $distinguishedName }
+        $subnet = GetSubnet (V $row @('IPv4Address'))
+        $isInOrganizationOu = [string]($distinguishedName.ToUpperInvariant().Contains('OU=ORGANIZATION'))
+        $typeEtablissementUpper = $typeEtablissement.Trim().ToUpperInvariant()
+        $inHeadquartersOu = $false
+        $distinguishedNameUpper = $distinguishedName.ToUpperInvariant()
+        foreach ($fragment in $headquartersOuFragments) { if ($distinguishedNameUpper.Contains($fragment)) { $inHeadquartersOu = $true; break } }
+        $isTargetOuHq = [string](($typeEtablissementUpper -eq 'HQ') -or $inHeadquartersOu)
+        $isNotTargetOuHq = [string](($typeEtablissementUpper -ne 'HQ') -and ((B $isTargetOuHq) -eq 'False') -and ($distinguishedName -notmatch 'OU=DISABLED_OBJECTS'))
+        $serverAdEntra = GetMap $serverAdEntraByName $computerName
+        $serverAdDeviceId = GK (V $serverAdEntra @('DeviceId'))
+        $hasDifferentDeviceId = if (-not $serverAdDeviceId) { 'Not found in Entra' } elseif ($serverAdDeviceId -ne $objectGuid) { 'Different GUID' } else { 'Match' }
+
+        $primaryUserSam = if ($primaryUserRow) { V $primaryUserRow @('SamAccountName') } else { '' }
+        $lastLoggedUserFromM365 = $primaryUserSam
+        $lastLoggedUserFromSentinel = ''
+        $lastLoggedUser = if (-not (IsUnknownUser $lastLoggedUserFromM365)) { (K $lastLoggedUserFromM365) } elseif (-not (IsUnknownUser $lastLoggedUserFromSentinel)) { (K $lastLoggedUserFromSentinel) } else { '' }
+        $samUserRow = GetMap $usersBySam $lastLoggedUser
+        $lastLoggedUserDomain = ''
+        if ($lastLoggedUser) {
+            if ($primaryUserRow) { $lastLoggedUserDomain = NormalizeDomainSam (V $primaryUserRow @('DomainAndSam')) }
+            if (-not $lastLoggedUserDomain -and $samUserRow) { $lastLoggedUserDomain = NormalizeDomainSam (V $samUserRow @('DomainAndSam')) }
+            if (-not $lastLoggedUserDomain) { $lastLoggedUserDomain = NormalizeDomainSam ('{0}\{1}' -f (V $row @('DomainNameShort')), $lastLoggedUser) }
+        }
+        $lastUserRow = GetMap $usersByDomainAndSam $lastLoggedUserDomain
+        if (-not $lastUserRow) { $lastUserRow = $primaryUserRow }
+        $lastUserUpnKey = K (V $lastUserRow @('UserPrincipalName','EmailAddress'))
+        $lastUserMailbox = GetMap $mailboxByUpn $lastUserUpnKey
+        $lastUserMailboxSize = if ($lastUserUpnKey -and $mailboxSizeByUpn.ContainsKey($lastUserUpnKey)) { [string]$mailboxSizeByUpn[$lastUserUpnKey] } else { '' }
+        $lastUserLicenseGroups = if ($lastUserUpnKey -and $licenseGroupByUpn.ContainsKey($lastUserUpnKey)) { (($licenseGroupByUpn[$lastUserUpnKey] | Select-Object -Unique) -join ';') } else { '?' }
+        $lastUserPrimarySmtp = V $lastUserRow @('EmailAddress','UserPrincipalName')
+        $lastUserOuPath = V $lastUserRow @('CanonicalName','DistinguishedName')
+        $lastUserLastOu = GetLastOuName $lastUserOuPath
+
+        $ueMap = @{ '0'='UPGRADED'; '2'='NOT CAPABLE'; '3'='CAPABLE' }
+        $win11GlobalResultOld = if ($isWin11) { 'UPGRADED' } elseif ($ueMap.ContainsKey(([string]$upgradeRaw).Trim())) { $ueMap[([string]$upgradeRaw).Trim()] } else { 'UNKNOWN' }
+        $issueScore = if ($issueScoreByGuid.ContainsKey($objectGuid)) { [string]$issueScoreByGuid[$objectGuid] } else { '' }
         $shortOsValue = if ($isWin11) { 'Windows 11' } elseif ($isWin10) { 'Windows 10' } else { V $row @('OperatingSystem') }
         $w11EligibilityValue = if ($isWin11) { 'Upgraded' } else { $upgradeLabel }
         $lastSignInMergedValue = $lastActive
@@ -906,8 +971,8 @@ function Build($AdVersion, $IntuneVersion) {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCkR9PvTKQ1Vjxz
-# K+IW+tU+AX2RUtzRq//AeRMGR8GW26CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCAeqDD+4ZazkhI
+# MCZmMYZxoakNKD/5Ht+m+tQelH/XqKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1040,31 +1105,31 @@ function Build($AdVersion, $IntuneVersion) {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIEcuAXCuj75Hr/9DxOZ9TMTEZXhCxkLvLB2G0bSU7BPBMA0GCSqG
-# SIb3DQEBAQUABIIBgHsj5RrYXDJEW40KDzgbWn2SKa4np4tH+jhlTanG46A77lkc
-# LEPWQTiQxSJRQZ/C7Pj8uqY5OLVKkKaZLht6Gnq7+fKpGkYb4uPXRBLrqjZWjg4s
-# ceiB9vbW3CvzTUt/1BXFJp3YjDbcAP7lc6fHEz1xHnaAQR2xNRMnbNBJMm6tb/I1
-# bW8r3Jb/27oZaP52Kr0Sy6XcsnKibskVbozJKIIGyPSFonGyUI2DFpLAy0JTOF2f
-# TKIwFM8XTCJWFg9MQEwKBHz/9xBihmuJ6GbhJ3FqMwf+9mIUoMFW1rd2rWkemhwy
-# uVim3osbfJXp9u4ycpJmB2oqSAB0qGj7ZtXg0dSZiWbQLhZQocw5k5yPs1GQeRiA
-# d7s67Q8LauieAXWaVHs/yShnDzA0LgUeeGrTAIcLadRV1JuJZ/4sRnAT3RsKsrWO
-# tjcgS2UgM1dtcLtuk5R8yVMgBRR+e8rLo5HQPuiNk+v2vqb2odqhhKo7l17jHgZc
-# bBhb0eh84SXeoJKXdqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIBgEbhk1Hq6/NUQWEgrBbRddjywPsVxfhyLuesgO3RDcMA0GCSqG
+# SIb3DQEBAQUABIIBgI5g9w27oefrBcWlXw+DoFkZFrwtV3UZ+nLHHDtQaeWYABYV
+# 2TjScvHbBRKAf4hpYDpmDh6+CBMAvN4MaaEsX4PL+fLaoOk7zOnlL0up7ZGbYjx4
+# jw4mDw+RsxO8d3Lj+82j4fswwFl2GtsHKrlKEl/Yc60xjVk9p2sDQ+2aWm1BRlI1
+# d4a7oegSiuY8v/Zbo9+JAb1gkJKC960Ffdlv7P8t8Xf1t/qgnIeD+jHKpoI1KqcF
+# b8Nw5W2JuIfjJ1/toP4X7SHzAvrAynKInVFO9q7rlt7+npvTJbRWfVZJ20Rf4T6p
+# TIIpZWqSrEmQku3x2fw8frB+CbJSHvk/VXliLsVI7gJRtskIUMicgHMG8kgqyzi7
+# wluI0ZMctYrrspOX7d5IWxScsiEXXtREirIwLkdK/IrO0ucRiaMmNpzBgONYshxk
+# TW52ZvdRLbtqhGPYnNC/NDd6x4q10vH5upjCqOxcA6gmHWs8g6N4qBa6BKHJAcLv
+# 35hJyBY2nS4B4pRjDKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjIyMTI2
-# MjVaMC8GCSqGSIb3DQEJBDEiBCAsW1xk2LIFBxPYz+uSKorCzNEeEX4sE2iSrVWd
-# pIzkxzANBgkqhkiG9w0BAQEFAASCAgADsM6/YcrwoXelxrU2cFOyAD7DqnXVHhit
-# xoQAeMgSpPf/pKLAbVy+Azc/JXjjoEuQNnzrRcd5bYloH+l6vBK8yTlpliGI1/8z
-# YCHGV4bA0RNt5HGrXPwiJ4ii8CiNfHSrkQY6mrHaqz+Yx7zYsBw9enSrrkYZw7/B
-# Soj/G9IjYYKHeUtf9reJC8MBK8ZtP7Bm3yeOJNtHNPDvEKGNUQwFeSqK71upZPpg
-# e1wP2egYsu7gGzb9eGvarwkGzn2pGDT4gj7G7SwUP6+x7R4LxVhacF/ex2y6Y5e4
-# 7WT6ykB6TQmFkWyndtNgDltbXMk0UX3O8DcpW5cVEehSJLkCBJ/RJDPb13v6n6yk
-# 3SNOfo8Z5FMBKAynwgbA+4Sg9Ulzf3HgjEl6bFT45ldj8hxwqXJjoaw964DAhQwM
-# TRvRg/g5SwBq8NeGn8oSQo0AnuevVT2aIukXL/OALSQOR34nUDNjsfzMLcUBgcAj
-# Y539K7W3si0EgVXxPZHPGN2OekEJ/07RbSq3xCO+5oUm/vnXaFgSrEiXZweqVakY
-# 9fsXckIk7wBGZv/NZLD5QpEKenzDj3Al33KIhw/SnQVXKHteup6SczjKUAlAR4SJ
-# qf2ZjcpHllBbvhcVub0bmaKPd7UgeKEcIaTKfnJEWg/SF5P4g/5lurb0lRGU7KF0
-# egz/mASwAw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjMwMDIw
+# MzlaMC8GCSqGSIb3DQEJBDEiBCAyxGmsX7f8nIJH1So2aANkzywIqTxCtkMiHPsT
+# 9Q4EZTANBgkqhkiG9w0BAQEFAASCAgBzEsKOAukLod4w0qivhjkOsVd7KW5xas5C
+# Fk0/GM9TQtsQ4CymKYY70NX/cWPHhN6zcvbl/WGF/u7+Kn5fhraklVxsB7hL4eTG
+# WEz1Zx3x95IbFpqrDZMXd5qJfSXpXa09+nU/dJC0FfRnj8eEUT+pDoRSTTkguY9H
+# KjpYZAUFIp8H3uLftT+Cp1hCFioCT7x+rPbPsVKPQHemxpDM1t5HChwC7lxosBRg
+# r8bF5VnWk/wX3ETLz9gxv2wba/p2DQWSZK5obJGb5K3WmF03OySwh8TFdcWHSvDZ
+# DxPV8LHuxLere+TOnd3R1rKyzjhFqEU6Ynz4c0Nu24TKqHmh4hiZMCtPCq886c7s
+# ZqbKQJNj37cgVjzo2U/4wEiAm6/5153LmFYoxueoV0CQKqIR1Qlo6S1ame/wXhkY
+# FpFkxAk3p50i7WzvGuRHo1d4ZA/f/toZCUKGnzBtvnUf+aobACXemTg2ZxY6aDiH
+# na4V9feG4rjba4VtP2qRHR9Wj6pgEMBk3Fpb38681HmHBSy25pBrgHZOA5RDwu2X
+# 3vO9hPKKUhfbprkPSJNwTtUAMOhYOuxT+QIvys6UBbV2Nk91b7uS+aNcyLcTcifT
+# YrLAQjd31uJVI3Bf3+cYlDbEThe8q7VX/5uVBaQf5sAf0VtrnI/b30cDo+rHi0N4
+# OD7hhfTl/Q==
 # SIG # End signature block

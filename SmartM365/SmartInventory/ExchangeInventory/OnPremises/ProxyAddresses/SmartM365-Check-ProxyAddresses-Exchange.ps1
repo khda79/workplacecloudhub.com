@@ -62,7 +62,7 @@
     - Maintains logs and cleans up old files automatically.
 
 .VERSION
-1.32
+1.34
 .AUTHOR
     https://github.com/khda79/workplacecloudhub.com
     Minimum permissions: Windows PowerShell 5.1, Exchange 2016 Management snap-in, ActiveDirectory module, Exchange recipient read access, and AD read access.
@@ -458,6 +458,49 @@ function New-UniqueSuggestedSmtpAddress {
     return ''
 }
 
+function Assert-ProxyAddressesGraphPrerequisite {
+    [CmdletBinding()]
+    param(
+        [bool]$EnableSharePointUpload,
+        [AllowEmptyString()][string]$SendMailMode,
+        [AllowEmptyString()][string]$SmtpServer
+    )
+
+    $effectiveMailMode = ([string]$SendMailMode).Trim()
+    if (-not $effectiveMailMode) {
+        $effectiveMailMode = if ([string]::IsNullOrWhiteSpace($SmtpServer)) { 'Graph' } else { 'SMTP' }
+    }
+    if (-not $EnableSharePointUpload -and $effectiveMailMode -notin @('Graph','Both')) {
+        WriteLog -Message 'Graph Authentication prerequisite skipped: SharePoint upload disabled and mail uses SMTP.'
+        return
+    }
+
+    $moduleName = 'Microsoft.Graph.Authentication'
+    $runtime = '{0} {1}' -f $PSVersionTable.PSEdition, $PSVersionTable.PSVersion
+    WriteLog -Message ("Checking {0} prerequisite; PowerShell={1}; SharePointUpload={2}; MailMode={3}." -f $moduleName, $runtime, $EnableSharePointUpload, $effectiveMailMode)
+    try {
+        $loaded = Get-Module -Name $moduleName | Sort-Object Version -Descending | Select-Object -First 1
+        if ($null -eq $loaded) {
+            $available = Get-Module -ListAvailable -Name $moduleName -ErrorAction Stop | Sort-Object Version -Descending | Select-Object -First 1
+            if ($null -eq $available) {
+                # Pin the missing-module bootstrap to the PS5.1-compatible release; never upgrade an available module.
+                $installVersion = '2.41.2'
+                WriteLog -Message ("{0} is absent; installing version {1} from PSGallery with Scope=CurrentUser for {2}." -f $moduleName, $installVersion, [Environment]::UserName)
+                Install-Module -Name $moduleName -RequiredVersion $installVersion -Repository PSGallery -Scope CurrentUser -Force -AllowClobber -ErrorAction Stop
+                $available = Get-Module -ListAvailable -Name $moduleName -ErrorAction Stop | Sort-Object Version -Descending | Select-Object -First 1
+                if ($null -eq $available) { throw 'Installation completed but Graph Authentication is still not discoverable in this process PSModulePath.' }
+            }
+            Import-Module -Name $available.Path -Global -ErrorAction Stop
+            $loaded = Get-Module -Name $moduleName | Sort-Object Version -Descending | Select-Object -First 1
+        }
+        if ($null -eq $loaded) { throw 'Import completed without a loaded Graph Authentication module.' }
+        WriteLog -Message ("Graph Authentication prerequisite OK; PowerShell={0}; Version={1}; Path={2}." -f $runtime, $loaded.Version, $loaded.Path)
+    }
+    catch {
+        throw ("Graph Authentication prerequisite failed under PowerShell {0}: {1} An available module is reused; installation is attempted only when absent, with Scope=CurrentUser. No Graph connection was attempted. PSModulePath={2}" -f $runtime, $_.Exception.Message, $env:PSModulePath)
+    }
+}
+
 function Test-SmtpAddressSuffix {
     [CmdletBinding()]
     [OutputType([bool])]
@@ -509,7 +552,7 @@ $ErrorActionPreference = 'Stop'
     }
 
     #region Module Import and Initialization
-$ScriptVersion = "1.32"
+$ScriptVersion = "1.34"
     $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
     $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ProxyAddressesCsvLogFolderPath' -DefaultValue $OutputPath
     $LatestCsvFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ''
@@ -580,6 +623,8 @@ $ScriptVersion = "1.32"
     Write-Host "Summary CSV : $outSummary"
     Write-Host "Added CSV   : $outAdded"
     Write-Host "Excel       : $outWorkbook"
+
+    Assert-ProxyAddressesGraphPrerequisite -EnableSharePointUpload $global:EnableSharePointUpload -SendMailMode $SendMailMode -SmtpServer $SmtpServer
 
     # -------------------------------
     # Exchange PSSnapin availability
@@ -1399,8 +1444,8 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCV+JSdGXlS9j9X
-# M8uFVCCPSDCZN6koFmQLwO7z6fRu0aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCxjT2LpoiQtGfe
+# /ousndeg5PHEhG5oMGyfj4e8ddobGKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1533,31 +1578,31 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIHMAJfUdO3x5pIAN/KORxMaipf6ZK0q/SXYT8h8PUqIlMA0GCSqG
-# SIb3DQEBAQUABIIBgGKXiIKTgi6UEMIT/7dqSLSFlZFrqq/zTuPabKUCRFWdgkji
-# 4gfPHOtbFyD2Qe/uuJHOGJKK54wwXL7k9MuWqY2rRtVFjz3z77uOAKd0w8pJMwps
-# L20MJmcEOOWVPhrYEdWoflBm86xb+lktXg+wAbI8ae2knyvsZdfZx422FsAuatF2
-# KscIlwTmwoTBim9JsnngjbVk3ow/6XSFpsUdK2zAFBrSJJd/fLJAHNHveDMXuLS6
-# Z09UoA1fBskJ7iW5scniUUhGIkrPc4zKIrkbyG/4o8nsrSUa46Ea5XdfK1qXi1G8
-# 6yej3QjDSiCxyluNtxriq0Q2P42lK/b9Oq92ledsJluupDzI8LjmriYGSfoGu64s
-# NBI1zECSKVafoQR7PSaVKB/73DXQLW2kfbyCDJdnpdKjZ8QFCqomNfub7TBFnb27
-# deyYRMDSdC0CMbYDQzEfAYXqDG8Qt02aNGkb8N2e9hGwBAjZKYQZ8sMFRJUQCXfx
-# BkDl1YjPgeP+BDrHH6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIOSJy/AD2q2J+6IVJwUPvGCrW/coGsrbKCf9Ia1LzBJ5MA0GCSqG
+# SIb3DQEBAQUABIIBgK9357iEMVWDElxv2AMicv1TIfk+pDIWX3QqcaNrE5PNpYA2
+# 0hWvCV2AZAiip6G4HciYefyL2vXonGBoXrwfe4jR9fIklJUqhKRmj04tfhS8FLIg
+# jNnJ33lQ6K57XG4Ug2jq8Q/yBSSRqfxZ81NUrWa3ZtveDIXrh6q7xGI6WTC/jFdN
+# /fRZzbnC/0QElbHPEprCiMTOD58ow6/5Dbosa4K/jEzX6V+BsQHFtmF/+DZEbFIg
+# 4BcRA+pkgkYcMOgsFSgI2EPMOpYy5xUvA30cp6PVH+tmj6Je0FUcVVcr5ICMTctR
+# wdvutFw5Pb+1yFhKaZu1rv0c1rjDkBTp9WRBQDgVL6N9MfAyy7OTr7Du6cDhlg9c
+# d4EiO3NFqcefXvISLvloveW8lyG9p77Eqxmh5veU+LmosczioIs9y5JyW7ZMg92m
+# kCz4oeic39yGNVHMBSqVdNmURC4Evaw+qNhP8C1IaIDWho0MbTMcttyag73CMh+q
+# yQvtCLNH4tXl+Yb3SqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjExNDA2
-# MDBaMC8GCSqGSIb3DQEJBDEiBCD4+ReAgCF0dQn9y2HLSQYSKHIP3Pjv9+MBe02V
-# IItbFDANBgkqhkiG9w0BAQEFAASCAgCcJNPOs+GCKYTdn1XfNEKLMDyxj/admLtc
-# uVtYjQACrYzRlG+BR5j0URYOqXb2MHKZW4v/PNrzHtlLYG0SHw7RLI3TlKym/HBJ
-# 7k+kQ62+WZaQljWtyhQk9R5HM9BhKcwxLALMs+BpaTGPEqwC1jeNpCyvAvdsu6pz
-# 0pH4Kt9dEGp0oTSPLkbano8tkkPBG3fGnl4jJg13nm6ATrHSZI36g9MpzYmZuR/G
-# /PThkIx26banvMXgACq9vSAtqrUISBgP5nGxIeNUHhXpKGU6Bi0x/MCWnMQjH2IA
-# Mn/4sXJX1b+rf8VEWxhgl1T7RQwm+xbZs6vC4igDqtQYpipVoVAp65PmiAFtspTf
-# IpzIgOOv6DukiN1FXiG56sCheGNbJmT52EKTCLBYfwJR2aqI0QUdfqfTVjy+x2Fl
-# nvtzWGDymZA1RExV4IaQ/ZUE+b8aCqZLULOXbbB/XEPPbI0+IEXgI3U79s9hqHEf
-# RfVn+T9N0RRFRfbv087yVd+lgZ3uAoP4/9xf3GwJEmiRn91T1xZKn2YmDDfp+hSf
-# eZZTUvjinp0wCLrYUX6jx/qDq+y/dRzizXhwNHqPu8LN5QNgCJU3gaemtX3/l8U2
-# IHvY/E0yIMLV9BaYNwyj6X421hhrAZpUltkHvBae5NvNRLSeLWSpfhiyAlv7i58M
-# 9wgssE5/Iw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjMwMTE1
+# NTRaMC8GCSqGSIb3DQEJBDEiBCA8Vkf7Njqu/EP9FvYQeVIvlGun2c+e1CcmTE/t
+# 6kj2AzANBgkqhkiG9w0BAQEFAASCAgCAOCTtUiFxKuRKbJ0dQxz69bDjRCE5DUoL
+# a46vHl8gmrBskYOcVIeECRBYREGvo22lEk/+eoXmISSEv2dR3EZ5+/ElIuCA9iCs
+# qPuFCCo9Eou8HlBwt+SiqNTtoWGUR0FVESfWskHmXwN81KB8Q7Z//XCUeq4iNSrO
+# RTVqjt2orpnT9S1DxFImzo8GSv3wtPZ2VBbFT9NSeaIUms41R8s2kT4l7jE+Y535
+# 3PhDFgWmhMmLNVHjeB1yYO/nDxkcN/Wj9G2VDfjQIN6QCD+5JAFLAKR64fCApgGd
+# S0D5EjxX8gxwWtS3hHEW44XjZqN+K4Q1p6nnWORTX9OyfQJ3lrAnvploMqsy6BhY
+# Lb89jMBSU9hr1JG+o5V9YIWlnBAewEgyX1jYZq6qVkfmyHpjZWbZodHNHhae2NQz
+# 0alsZ9T8ew3ms3tbsciOA10GdljBx2Bs8icAgEh2A3S0eDYsKMx6r1sJrBU8Ht1f
+# 3dqv9RulUdm2BAEoXPVgsoe6kxoUhHEhqLSDogKFpxHstb9q7NG6o84f8QYzMBB1
+# 1nsaOAUmwIWCHaQQTufLMUGIQNN7HBN7BGbQlL2W84QAJ6Zvfw+MEryfPec/btPR
+# nf5jyTV14omrjzURwVzTSn4LroALzVkixct62RckmHpDkBK9Es6Tgk43gJqunmQZ
+# ZX8k25qRrA==
 # SIG # End signature block

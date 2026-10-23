@@ -16,7 +16,7 @@ Forces a (re)connection to Microsoft Graph (disconnects any existing session fir
 .PARAMETER InteractiveAuth
 Uses interactive authentication instead of app-only certificate authentication.
 .VERSION
-1.14
+1.15
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication.
@@ -266,7 +266,7 @@ $OrgDomain = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'OrgDom
 # ==========================================================
 $modulePath = & { $d = $PSScriptRoot; while ($d) { $p = Join-Path $d 'Modules\SmartM365.Core\SmartM365.Core.psd1'; if (Test-Path -LiteralPath $p) { return $p }; $parent = Split-Path -Path $d -Parent; if ($parent -eq $d) { break }; $d = $parent }; throw 'SmartM365.Core module not found.' }
 try {
-    Import-Module -Name $modulePath -MinimumVersion '1.0.87' -ErrorAction Stop
+    Import-Module -Name $modulePath -MinimumVersion '1.0.104' -ErrorAction Stop
 } catch {
     Write-Host "Failed to import SmartM365.Core module from '$modulePath' : $_" -ForegroundColor Red
     $smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; $smartM365RunGuard.ExitCode=(1); exit $smartM365RunGuard.ExitCode
@@ -646,7 +646,7 @@ $($global:LogTextFile)
             $attachments = @($global:LogTextFile)
         }
 
-        SendEmailHtmlReport -BodyHtml $bodyHtml -Subject $title -Attachments $attachments -VerboseLog
+        SendEmailHtmlReport -BodyHtml $bodyHtml -Subject $title -Attachments $attachments -VerboseLog -MailPurpose Error
     }
     catch {
         WriteLog -Message ("Failed to send error notification email: {0}" -f $_) "ERROR"
@@ -696,11 +696,12 @@ finally {
 }
 if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 
+
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB1FfSQs0huuNbV
-# AQz/PrfNwnzjqz01KUIQWimxNnAPWKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCBhrfOrILqv+w4
+# fspTqMnqmk0lf7XERlMje9LTAnO2fKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -833,31 +834,31 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIOWm5ydeTU1a7yX7nNtCpRr6leIY65lQh3DJXkxj5KJjMA0GCSqG
-# SIb3DQEBAQUABIIBgJvkXJSyf2MSkopCP9Kc9IAii3E/hU+aqRgYocb2PB+zvSOR
-# MFy/NEQbkiJXobuImh8+cbKMj4a66r+WV3L/XX/m+iO8YqjqVvO+g8zQjNcSVjzm
-# fDGVZMWPJpoz4qWLNGkP/VskqJ4P6shUR09Q+duNxyU6cThhM1RfRKHbU/2sLOwR
-# DhD9tw99vgfZsh8ZU/2Xp2bhzPmPVm0bBUiFsl1srNqJ35iBtlhJ8buwLuEuRuu8
-# hpyz0839jDuQnYfcDw4l0ITouLBBz6me7WglXKN72NQl7IoJ4mDpUieZ/s8h+D0u
-# CNWauSzGsjBSvahDyUsvIEkxThRM5Kes7/3NkbfRPHY9wtM87ULnU2tDmYsAvguz
-# c1614AEgkdwiPRJBvjFlB7xxjMR8ac3YQsKZP536b2jS2pXR/W5OFEnR3eHqH2dH
-# vr0n8HAElmqmpVgcJY8ncg9R4g++uadxhWzaI1wUDOc9GKdM0jWPxVO7dbEkUUcy
-# ubrYzEk0lspu8vVPvKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIEjAdJ7uz43dzaxgImEvGbmpTBI+bW7jv7aRVVQP9qDPMA0GCSqG
+# SIb3DQEBAQUABIIBgBMoueVozxD8ue96SYjgYY1otULuza/vTnpUVzLB58tX2ZtX
+# 7BbbHE/MyNLwlhxLTxwJvpfjyXiXiiQghB2/lZRUx5uigtKzvnf5968yDuQd/9tP
+# UPnBPdhVZeHW9Q7ut0U+tX/8dc8V3QSl1DR/xXpJrD864tnsHj3gh1wpoWCud1KS
+# ODhtKZ6SO9ePckUz5efOcuAQZR4GMwSDUvPwLFJufLrJBYz5Kep0P82xeMfAmYwx
+# XLfwWtPJE8hz5cvTV/0yA52JfkeJHUhPjZiX2w2/xGG0lAgLmbiPcyNG+xKs0YkE
+# W9RxO2RkXneQQK1KenkNloAz7If33v0HXCMZG7Wm7ivmFoG8XgUaDLOBxfQ25Sz3
+# zvURc8COxIn4HTX+PRKidiloR0B0J+zuY+VEZ9QkDIlaK2aoMLJRd+uWGauA/dAn
+# iHzWgPT9SgQdk1V3lz/+STEsd3nDW2CNrVjHD83AMqTt1cQQ0iIvhazA0fiLaHym
+# J2j+y0Jlonq0LqygrKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjIyMTI2
-# MjdaMC8GCSqGSIb3DQEJBDEiBCAeIDk5G0KKIy/CfZ7h5VTFf6g//mF7sDsbGZ85
-# AQZlwTANBgkqhkiG9w0BAQEFAASCAgB2IqTnZ4vfhJiGPd6O8PxEeQHSzu9QYLMY
-# LpZjK/unm4XdSTkUGGnIEHk4r7EhA0/CKaAGgsYW/wELTqr+hYmnhVtssr5hRMQt
-# exEAlIyobaUCZVpGb9p+OejQUv2343Amhy5q5QnZ1IO8umsm5a57onmc1PbzBwQh
-# AHaZ5jO/pb7f0asEixFA+HPFg4yZdp/ThoFKdquJOxvHFAI4fzU21kE100bxKoSu
-# rGIvKI1DyHzGbbliYXablZix27CYFZ+RxD3KDT2VlNdMvJ3/EvdjFqRBkWxV0aPU
-# EM80HWSNBwGuf4XO7uSZ139DVfLw9ydMT3RlGlOYo9pEoIVremNqTDGUInsIcOu2
-# Gz+jmoNceI9AA8wvGp8KBBitKbJnrGViEB4XEXhzOr2hWvg4FpRIYilqOcqp+4Xl
-# pZLFSEOsyckInP47Xe9U9En5cruf8N67fFrreBTLb8LSQMeDEq85A8d+xHUxn6mc
-# GNn+tsAGg+Mya/z04Za5/LwC5EkuOwRwhC7rZiZDyRiNdoeoQiCU+S3I5lftaWpg
-# FHfpmHrbJFb7Vq711pkFhqUEpUnXbQbRf1/XUoHRFX9Xz85sryo7C68ASTBPJ4Bw
-# FAc2jnnbTOKzQ1o6LWq7LFTn3V415EUQ5wymLGWEK3QpSNZKPsaJYZ21TjFRKiyf
-# sBtBRxAcHg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjMwMjE5
+# MDNaMC8GCSqGSIb3DQEJBDEiBCA3cGVsutlOFkt41Si5AExZM/LK5X24PBUTMx6B
+# kvhYtTANBgkqhkiG9w0BAQEFAASCAgAviG4NXrZcWDaiKneS35HCzGGuG2TP7Hib
+# a6I3taI/4FdvYkkPF3uazSoRNk6r0pUarIaorhCn5+mMvTJi+LZRGwD/AiStEFF/
+# dpTvgkD2pephI/g17RGWjy8xp0ag6i3qoMUlP+zRoVE95bwhfjm8kiAPJgPeaZcU
+# R7WarDkV2Euf7hTlCCS8hrHlqlceo7SlBFnpua5D4t8m2X8ks0RX5zub7LZswk7K
+# 3NJyiOz+nPukHYwRNx99gs8j3JEDjFXZqOrZC4sN8L4rLWqFNlIZog6ndQxNz6gb
+# PqXi2R0iwQpzkPa18Gp340hitE0L3+IlLL9AXnZS9wVtyX4wfvXsh1VkLPsybCP4
+# Ef1f2pvKmyf7fFozT9kOhbU727pMEMOHavLpzW0rWfoYryqHh580DqfprJQ18jxO
+# Rjb7kyzLr7trkh8nTg/kRwoFpOJcSEg8pqmwKltyLYHmS5/jpwD5CxL1sLRuAQkR
+# karhxoaXtmL+KGJI2j2YQclqORz3PiWSYv1l2hcsFr940w1Zb94xvYLXCgjhqEXq
+# DMIiWjMX9oLeWkTAqPR0qBhyVKzvOv8QJT/kJckFF3kNS4W/0XantPf55YeKpACf
+# 4p0R56lKjiaQZeJ/mo44vzeZrI1rLRWo11p06OTBsAzuiRHOWB6M7Eful7clZnwW
+# 7nlFN9vrwA==
 # SIG # End signature block

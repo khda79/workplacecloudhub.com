@@ -23,7 +23,7 @@
     - Sends an email notification in case of a global error (SendEmailHtmlReport)
 
 .VERSION
-1.66
+1.67
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; ActiveDirectory RSAT/Windows Server module; ImportExcel for the diagnostic mail workbook.
@@ -586,7 +586,8 @@ function Send-SmartM365AdInventoryEmailHtmlReport {
         [Parameter(Mandatory = $true)][string]$BodyHtml,
         [string]$To = '',
         [string[]]$Attachments,
-        [bool]$ShowLinks = $true
+        [bool]$ShowLinks = $true,
+        [ValidateSet('Report','Error')][string]$MailPurpose = 'Report'
     )
 
     $effectiveSendMailMode = Get-SmartM365AdInventorySendMailMode -Config $ScriptLocalConfig
@@ -594,6 +595,7 @@ function Send-SmartM365AdInventoryEmailHtmlReport {
         Subject      = $Subject
         BodyHtml     = $BodyHtml
         SendMailMode = $effectiveSendMailMode
+        MailPurpose  = $MailPurpose
     }
     if (-not [string]::IsNullOrWhiteSpace($To)) {
         $mailParams['To'] = $To
@@ -790,7 +792,7 @@ if ($PSVersionTable.PSVersion.Major -lt 7) {
 # ==========================================================
 $modulePath = & { $d = $PSScriptRoot; while ($d) { $p = Join-Path $d 'Modules\SmartM365.Core\SmartM365.Core.psd1'; if (Test-Path -LiteralPath $p) { return $p }; $parent = Split-Path -Path $d -Parent; if ($parent -eq $d) { break }; $d = $parent }; throw 'SmartM365.Core module not found.' }
 try {
-    Import-Module -Name $modulePath -MinimumVersion '1.0.93' -ErrorAction Stop
+    Import-Module -Name $modulePath -MinimumVersion '1.0.104' -ErrorAction Stop
 } catch {
     Write-Host ("Failed to import SmartM365.Core module from '{0}' : {1}" -f $modulePath, $_) -ForegroundColor Red
     $smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; $smartM365RunGuard.ExitCode=(1); exit $smartM365RunGuard.ExitCode
@@ -799,7 +801,7 @@ try {
 # ==========================================================
 # Initialization via SmartM365.Core
 # ==========================================================
-$ScriptVersion = "1.66"
+$ScriptVersion = "1.67"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $script:ExitCode = 0
 $globalError = $null
@@ -3965,7 +3967,7 @@ $($rows -join "`n")
                         [pscustomobject]@{ Label = 'Date'; Value = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss zzz') }
                     ) `
                     -BodyHtml $duplicateAnalysisErrorHtml
-                Send-SmartM365AdInventoryEmailHtmlReport -Subject $emailSubject -BodyHtml $emailBody
+                Send-SmartM365AdInventoryEmailHtmlReport -Subject $emailSubject -BodyHtml $emailBody -MailPurpose Error
                 if ($isDuplicateNotificationError) {
                     WriteLog -Message "Duplicate identity notification error email sent."
                 }
@@ -4137,7 +4139,7 @@ catch {
                 [pscustomobject]@{ Label = 'Date'; Value = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss zzz') }
             ) `
             -BodyHtml $globalErrorHtml
-        Send-SmartM365AdInventoryEmailHtmlReport -Subject $emailSubject -BodyHtml $emailBody
+        Send-SmartM365AdInventoryEmailHtmlReport -Subject $emailSubject -BodyHtml $emailBody -MailPurpose Error
         WriteLog -Message "Global error email notification sent."
     }
     catch {
@@ -4230,11 +4232,12 @@ finally {
 }
 if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 
+
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC2Ou/YGF7evU4R
-# uxCGsP1wceb8iyt831OMNDTlJPeCFqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC1UDgFWvN+v6KL
+# HEpnmhEooIAYyhXMLTfiM3lHkI2lzKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -4367,31 +4370,31 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIFvForteJeuxNvqWHRAY+8odgvYeBzuBB5e1vJXR59o1MA0GCSqG
-# SIb3DQEBAQUABIIBgCaPTbBdZitajk9EPpTqVIhp7vEEPor4JpUWKtXUaypUotV3
-# 0qvMTeAib0xYYcVRUh+FKAq+CsRBEvKDHk63/uXB/9U1KNO4bAKigE1LCDlqdCFa
-# zUyj8YuMArno0mSoKnI0pzokK17CD0EF5VbYIzXOz3YT8zD6ucpUpSG+jhJcFZIQ
-# e+je1BvyGhG0kcLZVh5h7AxUYO3z2Fvs9M0znt+kLJqzVy3rKyPKCig+hc7Fucjh
-# pW1wUeTnBscCU0UXNFK+glE/Zk7CtxUois9HRWFnxzt/7dVWkaCWRQ33GGXaDxyU
-# TfDxHBtrZgsQ5AKrjV2edJtZLrAjoD2AmXN5xWsXygjeN0mEb6oPadINC1rJfCQy
-# nt7yk2oHyPAdd4PJpR4T9cKv5UWbpieGdBniuHYLJeh+I41SAgxUc5MO9uCDLlx8
-# 9OZPVzIqGqXfowPzrBboDON232fIGlEIwmZcJYziZycmf1/MoNZaMSweSP0duOCK
-# jSIGhOaBlvQOcg/RjaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIFS07XG65uej49H/JMLn7BstAEvPJG6AB3V8kl5JvAcKMA0GCSqG
+# SIb3DQEBAQUABIIBgFaUXuli377VySz8ZJQsqOAvYAK7k0pSg7+C+6tIHiIzBmKW
+# 1p5RiZb40uUjU25CHYLTEI4C+0sHfOigMRAJFdHW02CmyzyAsCkhQT6SzVjYDS+P
+# erLCYDUi8NL5wf8ptqH4ql2gnsdCWGwg4NUkzYyxa+UCvJkJ32MVOTSORJj/O/A0
+# iaExKtrt6OrF9qApa/siK6B2Dou3E8GgkM7p+tBd+rGr3QKAM2TaFQWVEQYq8xOy
+# IiSItlE2dlY6sEjNkC/kIMbBBlbG6eq1agyFNgYdKhtq40bttHZj3g+LLZZb/guc
+# bdqEiaUvCUwAmOgms+8eJM2/ySA1kfQ5zkhFzKbP58EGqF75N0bp+vKKV8D/pyP0
+# WSDYqrj8/KWc/+tgQ8icBoAu8ndcvmRpxOkEua1/cL8n82Oy3QXQsCz3po0eO62b
+# mJCPJQWkAtM7v8/mmJO5BbBD0SXcoaEpWD8jEoGVUKpgrI4ru5ytq6Ys31lNxuqH
+# qi065BZJuWCUmHoZFaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjIyMTI2
-# MjZaMC8GCSqGSIb3DQEJBDEiBCBnKvmjltsQbkOcdjb4qpoN6wl9nxhBB/Ip4r/4
-# oZypMzANBgkqhkiG9w0BAQEFAASCAgA4TF6CVZiYCKHnZv1MUAVAYxSMb6/5o8My
-# fCOnDRkWFX/02ean04GKJZoQtzxrlT6OD/QWMRexq7FDJzKPQWFjxpRBqkq+SYU4
-# wvWcBTEu9epkWWTZENDrDJeCd9EOtvfnuoth3Y4L9OoYhb59g4PR/55hUIR0SFGa
-# DM4hSHnoOnWJtmH+mPR/zvWsgGcwFgmJZ7yJuqs7a5uAXX3+BnfyS8bTjH82KpzK
-# f8UNi6i++Uj8sosqNke9VjvHRqGub0S7x2gGHRcf+DWq/RnzL9aIYlRs2NjYAMtV
-# MGaSDs2ItJJa/BRb0UTf7Cv9KQUZaHSUUk8BUxmuI8TzZJoaOH4q0OKFqgQzmIQe
-# RUB+JhzodRm/IdIY6bw0CbcgqkvtyD3gO+lWJEiiHS7aC+7JuDyFJESDui7i6AsH
-# 6JUyTpej7LAnkU7iDelCtUu3VCW0QYs23aTEvqi4oED0GG9ly6wEv+oqTSIyEOKE
-# EIbhC8Mj60hZZiHK+oJKOJd1ynL9b34RmbgLNDjddZ3ODsDy2xsOO0nzeQe/Ty5O
-# gr1ov/ZjWG5/m4uMiz4WB57/Ah6S6ntGsC3Ry1rCyBCVZSgUJ6lAEuGNwtwy/6ys
-# afX+UvauIgO5QYWd92LZl8KjUNzG4ozESG6jv+fq/c7vNStht1Wuah7bmplPbtji
-# JxDSXyFaHw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjMwMjE5
+# MDVaMC8GCSqGSIb3DQEJBDEiBCAgHBJMDnzKR1qxx2Yojx6RC4QAeEMtmUBKNnUU
+# FPhGCTANBgkqhkiG9w0BAQEFAASCAgBCs/P7w+fh/cebDVttGB5wFroVvrmnEa14
+# w/EUboRFeRu++/4NITYs5u8kZMjn5h7639c4x6b6+XoHrC1YjjZIOubU3wt3wpft
+# NF8AMCzXxAv3GOr8T/kNnyNMIyk5OxCTPft5LLmVfKrxz5P7hH5XlvwDQcDdosfR
+# RhrqZwwGGRT4g0WelFHdDZ5Tdyo+GKutA5V6EwvHUNErO62XO922xow7PuTDKCM/
+# dLz8gUu4mOcxIwNkDTmeFQZ3DRVKDdyMXId3BaEpa3KMGVu8DnFANnrew4+Kf+De
+# PdraT3JWiuXlpAPL/dW+jUHfjEBLABWS21Q9dqmzucjZYDWog03zYESPkAAxtMOa
+# syyOxgPUAKKXnHhwqEPe08RxARIt6n6zIG0XbMCs6M6FYWcOcrOx3Syzz7dXg3Jp
+# GPGy4mBLBvlHJtqbxchsUU3dVVssXXubNOAINuv0Ug3DsG2paLpSD52q2ae1qB69
+# XIQtNBLdvAq/hwKGSosbe38QPwJqgppFJHE6WyAlKWAFYzhEhlUrgeHy3zxGyg8K
+# lxBV6YrgCnYbdt84RKe25BoNkjGtg0SydRTR+e7QUb/68g+hHqZTzgBo+PFxdP4r
+# DMDegJXVrA7686co6PhCymxiuAgY3D3Sh8EXpl+1Hs8yS2vgKKnQSE2DEoD7hlSt
+# KUUpr2s8VQ==
 # SIG # End signature block

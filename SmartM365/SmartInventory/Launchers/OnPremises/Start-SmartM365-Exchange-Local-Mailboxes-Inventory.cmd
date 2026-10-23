@@ -101,7 +101,25 @@ if %ROBOCOPY_EXIT% GEQ 8 (
     exit /b 1
 )
 
-"%POWERSHELL5%" -NoProfile -ExecutionPolicy Bypass -Command "Get-ChildItem -LiteralPath '%LOCAL_SCRIPT_DIR%','%LOCAL_SMARTM365_ROOT%\Config','%LOCAL_SMARTM365_ROOT%\Modules\SmartM365.Core' -Include *.ps1,*.psm1,*.psd1 -File -Recurse -ErrorAction SilentlyContinue | Unblock-File -ErrorAction SilentlyContinue" >nul 2>&1
+rem BEGIN Mailboxes identity helper cache
+set "IDENTITY_HELPER=SmartM365.IdentityDateEvidence.ps1"
+set "LOCAL_COMMON_DIR=%LOCAL_SMARTM365_ROOT%\SmartInventory\Common"
+if not exist "%SMARTM365_ROOT%\SmartInventory\Common\%IDENTITY_HELPER%" (
+    "%POWERSHELL5%" -NoProfile -Command "Write-Host ('{0:yyyy-MM-dd HH:mm:ss} [ERROR] Identity helper source missing: {1}\SmartInventory\Common\{2}; destination: {3}; cache log: {4}' -f (Get-Date),$env:SMARTM365_ROOT,$env:IDENTITY_HELPER,$env:LOCAL_COMMON_DIR,$env:CACHE_LOG)"
+    exit /b 1
+)
+robocopy "%SMARTM365_ROOT%\SmartInventory\Common" "%LOCAL_COMMON_DIR%" "%IDENTITY_HELPER%" /R:1 /W:1 /NFL /NDL /NJH /NJS /NP /LOG+:"%CACHE_LOG%"
+set "ROBOCOPY_EXIT=%ERRORLEVEL%"
+if %ROBOCOPY_EXIT% GEQ 8 (
+    "%POWERSHELL5%" -NoProfile -Command "Write-Host ('{0:yyyy-MM-dd HH:mm:ss} [ERROR] Identity helper copy failed: {1}\SmartInventory\Common\{2}; destination: {3}; robocopy exit: {4}; cache log: {5}' -f (Get-Date),$env:SMARTM365_ROOT,$env:IDENTITY_HELPER,$env:LOCAL_COMMON_DIR,$env:ROBOCOPY_EXIT,$env:CACHE_LOG)"
+    exit /b 1
+)
+if not exist "%LOCAL_COMMON_DIR%\%IDENTITY_HELPER%" (
+    "%POWERSHELL5%" -NoProfile -Command "Write-Host ('{0:yyyy-MM-dd HH:mm:ss} [ERROR] Identity helper absent after copy: {1}\{2}; source: {3}\SmartInventory\Common; cache log: {4}' -f (Get-Date),$env:LOCAL_COMMON_DIR,$env:IDENTITY_HELPER,$env:SMARTM365_ROOT,$env:CACHE_LOG)"
+    exit /b 1
+)
+rem END Mailboxes identity helper cache
+"%POWERSHELL5%" -NoProfile -ExecutionPolicy Bypass -Command "Get-ChildItem -LiteralPath '%LOCAL_SCRIPT_DIR%','%LOCAL_COMMON_DIR%','%LOCAL_SMARTM365_ROOT%\Config','%LOCAL_SMARTM365_ROOT%\Modules\SmartM365.Core' -Include *.ps1,*.psm1,*.psd1 -File -Recurse -ErrorAction SilentlyContinue | Unblock-File -ErrorAction SilentlyContinue" >nul 2>&1
 "%POWERSHELL5%" -NoProfile -ExecutionPolicy Bypass -File "%LOCAL_SCRIPT_DIR%\SmartM365-Exchange-Local-Mailboxes-Inventory.ps1" -Tenant "%SMARTM365_LAUNCHER_TENANT%" %*
 set "EXIT_CODE=%ERRORLEVEL%"
 exit /b %EXIT_CODE%

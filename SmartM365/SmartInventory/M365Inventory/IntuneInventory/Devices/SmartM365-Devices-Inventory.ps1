@@ -18,7 +18,7 @@ Forces a (re)connection to Microsoft Graph (disconnects any existing session fir
 .PARAMETER InteractiveAuth
 Uses interactive authentication instead of app-only certificate authentication.
 .VERSION
-1.19
+1.20
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication.
@@ -246,7 +246,7 @@ $OrgDomain = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'OrgDom
 # ==========================================================
 $modulePath = & { $d = $PSScriptRoot; while ($d) { $p = Join-Path $d 'Modules\SmartM365.Core\SmartM365.Core.psd1'; if (Test-Path -LiteralPath $p) { return $p }; $parent = Split-Path -Path $d -Parent; if ($parent -eq $d) { break }; $d = $parent }; throw 'SmartM365.Core module not found.' }
 try {
-    Import-Module -Name $modulePath -MinimumVersion '1.0.95' -ErrorAction Stop
+    Import-Module -Name $modulePath -MinimumVersion '1.0.104' -ErrorAction Stop
 } catch {
     Write-Host "Failed to import SmartM365.Core module from '$modulePath' : $_" -ForegroundColor Red
     exit 1
@@ -402,7 +402,7 @@ function Get-InventoryColumns {
 # ==========================================================
 # Initialization via SmartM365.Core
 # ==========================================================
-$ScriptVersion = "1.19"
+$ScriptVersion = "1.20"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'DeviceUsersCsvLogFolderPath' -DefaultValue $OutputPath
 $LatestCsvFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ''
@@ -701,7 +701,7 @@ $($global:LogTextFile)
             $attachments = @($global:LogTextFile)
         }
 
-        SendEmailHtmlReport -BodyHtml $bodyHtml -Subject $title -Attachments $attachments -VerboseLog
+        SendEmailHtmlReport -BodyHtml $bodyHtml -Subject $title -Attachments $attachments -VerboseLog -MailPurpose Error
     }
     catch {
         WriteLog -Message ("Failed to send error notification email: {0}" -f $_) "ERROR"
@@ -764,11 +764,12 @@ finally {
     if ($script:ExitCode -ne 0) { exit $script:ExitCode }
 }
 
+
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBx8TEeD1wtGGiy
-# 23M0nRJwt9PFbKvEk67wmckexZUMDaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAOpc3LtfnNiebo
+# 2+GIPTQMj0oa2BbemnrJd4oKIPAbjKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -901,31 +902,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIAQwwX6WM7MAgUSwS/l+p323E1h/YcAMBLLEVx5+OHVCMA0GCSqG
-# SIb3DQEBAQUABIIBgE2dwi9lETK/PTPX00i87DvV0jKbt3DzQaGtn0AK9G1mJ6Ea
-# Ll5dJPw5QPcn9K4LzuMtD+VT9Fqd6I1yzPLMPfHmmYgrYDmIOaEjYppaknnurTBh
-# e3k//vvNJrpfCZoeYn+5vpXP043/EiOBmqFLm5O9vv/IRayiMLtXDghdFrvVS8NP
-# HI3gWoJCmqNHuLxgm7Nujm01OOEK4woKnLCE7r4nLuaheFFBmXjy1vwW5TSnM2WP
-# hF/h6aGcf6KZZghKiHonPxoRYwdO3/SgWTC4y7HxSXibwb1IfP4llmPxxujh5Fa2
-# LvhEtGZrn3h4oY9mxwpzuBwve52dr4/69rygGgee3kxRvFVzYr/ZFVSSi21y/TDw
-# uO8sFobZWdiHw07hMq0sUOR/1IuzflyKDWkDa3HMZr65TWr4r0OXOLqQJ/Pa+R3g
-# +9TfPayi/iU8+f24ap3pyB5FOqi5VjL0KY+GC7ZcO+8mg+Up+fDkjeOuxM0Q37A8
-# UkCCrQ6UQFdX3+kxjqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIPxmA5shCGwvMF82pUTwzGwxV2+qYJZl1f+5gVUdJlR6MA0GCSqG
+# SIb3DQEBAQUABIIBgG9bNVr5nKG0PqUlFikS1tX8kjA1+Y3RDPz4KsXhAIJdjFVl
+# b5FkL2wrsKW+UdoH+fC1khELM28hGk3jmVBkBVilSZRDvtIP8gBXIdf3qgE+50k6
+# SDfjJWpX9cARKK8tM/f5k5bG8vWbphmrGoGeZVkpU5U7EOPRWf7eYcJdmsVfrYhS
+# XXDLI9/aG9P3hZSV/hBbcN70wfNITOTbYjZMxaXJg3QaIcXw1ZAvg4VtqQLD9V52
+# E+r4nKrgWGv9SZrOkLjt5KaQKjrN/cLrnO0XUtK5E3FUQcpjjNKnQlJbJkxU+IjN
+# TVEvoQ3osYFVesWSyy92mxQEZ4yHc/AgiR2D58u7L+BKu9LVtNp+oruUIeDRtsYC
+# LKnZvW+jha0YvOFym9uojIeYAn2bBjdYf1HMow5IVpq528web+t4DV6wE5QQXDjh
+# G5iOyXV1PQv9FCv/qdARxFtdTNVjexB39/OFQkav4HQmFAv0Tv9hyALV3kG0ug3q
+# JHZUQyd4OCA4I2/656GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjEwOTIz
-# MTNaMC8GCSqGSIb3DQEJBDEiBCC+pCw9rCTXY3KSh/MSPdTcNT1kZ9v6YfWyVD3M
-# pJ3M2jANBgkqhkiG9w0BAQEFAASCAgAnnhD/i/BCK7xqZa7hJHkL4UvVW3A1bl9M
-# KUgV5tUMLKwM/BZTg5EYU3GbP4H0odgimv+oJlzRJqUHrnp1Qjcd1XKkfy6NwMZO
-# 1akA46wNuxzrQF69teawk6v9b8Cw3kOv0eoBiaf3D1rqIWi3XUrQw5eXNSf0GwtR
-# rHH49rSVLwXILCUBZ7+2mfalprYLFrRth7HkrpdWubFJ5WRSwDt4rFF9KsBmMvYA
-# T9nCtdXk2+7Z9XyMCLui8uCWqUtlUjveMeydghiqVK+63+ooNZV3Whud9XHqy9Ot
-# il26xKUAWEdHbRKi8Q+CZK8nYczfzHu4EdZww/eyGmSxFDTRvqdXitvWkTj3vrCr
-# +lEuKNy0N3t55HtIiwgam5wECs49SyoHu8vA/L2s064l7xbWBagV1uNLR5qz5m4y
-# f4CDfqdhSZ+ExSRW65lKAgIr0zOmOwPJ/6EP3m6BVke9OX4wIgEry1J5KWiVd9wD
-# na3rX3TEGgUCMDDxY47n+4MkxUbJoFObIk8SzUTqehG6IiSCdeovX+CgM/Xou6VT
-# CkOZPOpIMpSfMDF4JLbMuzlwFOoxgd57CCmuyDviL+E3utG+Me+blQcBQ0gqTpy2
-# fyE3i475+b1vzQ1ppMh5ojETFiTIyN3I1HY5+rHbG01RQ6BNRM9bsmxXLyUdwo4K
-# xOML37pYiw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjMwMjE5
+# MDRaMC8GCSqGSIb3DQEJBDEiBCDyIvffq/8qEEpV8I8jkEKTeDgJMAK0Xs6Y77k1
+# aIsllTANBgkqhkiG9w0BAQEFAASCAgBJwYKHgvBJffSMQ5OLLNaKOLULBoiUbm2v
+# ucxRJs1iiePjxP/w6ISaB2nSiYDDWP5KJTlGXS10gdQBhY23qX39E3JzEI79SBEc
+# dSIsvvEbzGHMmpOE8+0oPMoBor8wmsJrh8S2ROOMjuLzLQY4Xhmsyjqju0lwmuai
+# vQrJ9rXgHOCNaskFMBFnoHcZKy3hIPvSa0P+Lr1hbPOiefzPFYZL31B0SUfC+CeT
+# 9Zf60PgiqSprfpScXZkSQGJ8FkQIoCAJ5GJyrUzLW/iQQglmAssW9Ixo7YDfyiYH
+# uRK4SMqUwikDNSutWO3rayrXNnIOCUdhuni/OrwEltaiGWs2DhOzOTXGEvcL2fnm
+# QCpVetGYHr1oN80O4zPp/jsZGQBDpEfRwutQDI3i49FEH/nRZ9vqhBYyE/sODxyr
+# XYJrdX6Gz0YutuMF/jl10KYq8wbVF6mzeJ6xmmN4OjfglN1UmA6HrZOrvZEbvZUy
+# 4KVmORnK5PssFjzB8fpdr78s2HZrm7xfeRiJ3BKvEte26xWl1nobJ35yJAh5z7e8
+# iEWN75SqhhUOWZvQYWBeJyxjDQOgJbBAz237LFYUVyarKQamYtjHDV5Vgk/PNxUV
+# UT3ynMwFMSRTJGpvtcM6umpLa2KNOsYC6yBJoJwcYN/YRqSGK4r6OHL0kbz9Df5O
+# jUvif6HwBA==
 # SIG # End signature block

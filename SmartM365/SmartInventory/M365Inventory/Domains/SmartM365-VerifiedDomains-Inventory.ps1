@@ -19,7 +19,7 @@
 .PARAMETER OutputFileName
     Base CSV file name (default: M365_Entra_VerifiedDomains.csv)
 .VERSION
-1.14
+1.15
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication; Microsoft.Graph.Identity.DirectoryManagement.
@@ -262,7 +262,7 @@ $MaximumFunctionCount = 32768
 # ==========================================================
 $modulePath = & { $d = $PSScriptRoot; while ($d) { $p = Join-Path $d 'Modules\SmartM365.Core\SmartM365.Core.psd1'; if (Test-Path -LiteralPath $p) { return $p }; $parent = Split-Path -Path $d -Parent; if ($parent -eq $d) { break }; $d = $parent }; throw 'SmartM365.Core module not found.' }
 try {
-    Import-Module -Name $modulePath -MinimumVersion '1.0.87' -ErrorAction Stop
+    Import-Module -Name $modulePath -MinimumVersion '1.0.104' -ErrorAction Stop
 } catch {
     Write-Host "Failed to import SmartM365.Core module from '$modulePath' : $_" -ForegroundColor Red
     $smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; $smartM365RunGuard.ExitCode=(1); exit $smartM365RunGuard.ExitCode
@@ -411,7 +411,7 @@ function Send-VerifiedDomainsTeamsAlert {
 }
 
 #region Init
-$ScriptVersion = "1.14"
+$ScriptVersion = "1.15"
 $TaskNameCore  = "Azure AD verified domains inventory"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $currentOperation = 'InitializeScriptEnvironment'
@@ -602,7 +602,7 @@ $($global:LogTextFile)
             $attachments = @($global:LogTextFile)
         }
 
-        SendEmailHtmlReport -Subject $title -BodyHtml $bodyHtml -Attachments $attachments
+        SendEmailHtmlReport -Subject $title -BodyHtml $bodyHtml -Attachments $attachments -MailPurpose Error
     } catch {
         WriteLog -Message ("Failed to send global error email: {0}" -f $_.Exception.Message) "ERROR"
     }
@@ -623,11 +623,12 @@ $($global:LogTextFile)
 }
 if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 
+
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAtYZBZyHMApMhZ
-# y04eUUJunfqrMNCwWFmqsrUXWVDqSaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAvfuiX07DWg3NU
+# +j588lPbO+7oGkteJ0ULRfW2HtgY1KCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -760,31 +761,31 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIBYiQ5xMMfNQts5r4WwSY0ZUrzrQC0IKKU9t9ldNzVg3MA0GCSqG
-# SIb3DQEBAQUABIIBgLBtTswk4wUGf9HhZ2zVyODeUHTwKDsTlDT6wGAKkWYXFGek
-# PWjtT2CH+hFQIbk70QAiN/lYb1J+u2SItE0rwQc6O5v8EKjxdTFASQYXj6d0H2z6
-# UfbRm+Deoqx2XkP/uVHOsH8NXQUVKxaRUtQzbz03o8HLl9SscYSYmrPyfRhMJ5M8
-# 4mprBjqk8nQknZ1yyKMXW2phS2GdZeWq7clZ9RV0dWE5F7R3x+RxqYH9aXnJU9Gd
-# Pu2VjFo3Ky+Xvbu1MKj97lVscgMOoTyRoRtY6n0Y9B1tuCHfhbIfLIyp1rlgI4Ug
-# /9A0vJHPksDtjLi3uwLHRvM7pV2pEGBm1p5DMv6AY1QRKgdWbrAvOaSZ1ESYCPKq
-# iodwnXa4+71r+2cNNZTkJB88GjhB2vN+ZRni3T1yUwlcVJbOjMtRC5WatEuaZ8SJ
-# 4tJ3HX+5tkBbMhBbQFUzYlJidabPBgKLfTb+pGz66mscNt5W00m/E45ZDJgjLVYF
-# TjfkfikaVxIzJnQZc6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIINZlXZCyESxPCMrB94u5Ew58fbFlAhfp9GLbQFECQ/aMA0GCSqG
+# SIb3DQEBAQUABIIBgBwgJyLqheyKiyb4yn0SwBLvC8RkqofU9jdJ0f/J4bmjsDEZ
+# ocQu3BLKIq58E4uwYJ/AJ/HSkpRqEC57EFlw0Z2tlkUWDMRSkcf0LFGIIk6eevmz
+# vu0eJFcXX2O+nguRsbok3XeJ2UILbbyUkspvJD7muuaFmV6F+FWOk9bMLZQwG8Vt
+# IFSVMJcfQh48cQ+r3mGZ8UpTjzbGWABiEb1WrsBjEhOvhemMYa6HkrFC8e4bFPUy
+# G8ZgeboyRHd3wWbZu6AjLXkgzAp6Q70wlYNRm9e4Im6ShTIX/xNaaSxP8maQ9s0E
+# RLlqdPyTbw4hchWsYjoom1wS2HGMp6BXEGUGgcD09pQolrJti82JIF1YzMkyHcS0
+# n7NwWxDFl6OxCsY+8obVABy3DSwabmOk4fWDUH/rGJcgJxS8WvHQ9SWpofOFXzNq
+# h0D6FuSGb2yEYLNpHLFWT66isaJAvCNux652IdYe+9ZNMzT1U5JpxbElwHSeY6RN
+# xhp7sV7i/1UnjAes7aGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTQxNTMw
-# MjNaMC8GCSqGSIb3DQEJBDEiBCBcTGGDJa5oV/mpYfQtmtixkphCxuljeOcioV2K
-# NLZVwzANBgkqhkiG9w0BAQEFAASCAgCLkAlfvXs7sqECE6Mqw5g3mSlLeynRAM9n
-# E2bahknGB+gMHX5/+sIlWZsvd2EvB9Fu2+I7fJEOrG1hcyjVmKW7P7xBzkBOMfR5
-# wtnmizHgu5mUiNNgkhSr1d3LMj4d8MLIbSPHEA5Ccv40GYz7Pr4I8fvZ6Mi+I7W3
-# MxpjKEqToNFSutzYBaPHqnORhYMEYY1O7fe0Ju1J6PUCrx0oEr2ketmlsW22gPyb
-# pjHAkxCAU2p0OCnYR46UDCD51DXYMyWXe3ReTL3QbSphc+k2JbhOt884ut3HPZum
-# wWUwr99SWe+IpTHvYKjx8fgBk+XSl335cZGqlSK+0jP8bCJD46PvTQ7oZtFwsHrd
-# kJDjvq22QC4aB6MQPpJpVpUeMgYeLDLb9hHTN7z5inwmzOAhE1DvsmvduLbmsB9P
-# JGZDpMER59C9rGFug0L+j7fNou+oji90QGdCYMTTqI0AqE19lQ98aQr03ywNqk5h
-# YpY81MyQVd0Idy0KHKrERE4JAgVEFXuB1VpeJucD7bjc7V6BrpLpiQzAW5J3MHbO
-# Zk/wMywzDQIg04iG6xUdfPp0jTx+UGMZgYyEZ8CVeHhJ61dAMlUmVeWayTBcN3C0
-# vN+ArtGWd03pBacojY3hC8oMrp9nDk+R4WN7z0b2Vmx0wO7PnB+mpgIKdi1UxBFZ
-# QTQssGDs2A==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjMwMjE5
+# MDNaMC8GCSqGSIb3DQEJBDEiBCBZAvPEhqGPuT2mSSmhlo4xRZDlG7tBzbiL0DAJ
+# Ugv16TANBgkqhkiG9w0BAQEFAASCAgCHhK01s8oVwuSJsUnihIAxE9Af5hKJzfs7
+# oVp2MSsOERb1X1W3nOUVspq3GYx2T92k2ToNb0qqDCla4WZYafCurpOvK4oQ6qQs
+# uZKlFTy+HQ6amE7m2Zu0sthgqm+3oIJ6Dk36bsXaY3YoyrVk10uaE6eBh27yA+s8
+# a0UDHI+B3sBDzyysR0lqkoXsSobqtMHnPE+RoCvuFG0tbq4ay0J5tyZL4RFpfyMK
+# Pu6JzdayY+G0zCh9MOLfE9pvgof7x8tH+PN48JjSU4wgDebXboH5sQA2/o5x2Z8F
+# dY4VeDTCqKa07pM8xcHJjzVF11BZHIUntJJ4qQMNSy+X9pLh4DH4ZRahW1Po0K0Q
+# zYhRBVGei/gyTXCh3Im3V/ICRniFPADD693TRZhTPbYBK9N+Jk2MdAVSROaTQU7A
+# 0CxjQI388hKSNaBZjbAJ6KMdIisc692iO8jsfymNntPn3VsK7mmCT2eDuUn8wBTM
+# aI5xnwpywvOpM/AJunExSuGX3pQlMG3fXhTKn2ul/HE8T4YkiTsQKnMz9rR56uIp
+# rwO+SdPOFT0W7QU0s8PNIXKPmHY/75orIaHEIawClYoExvNaHWCNbJHygUb19BeM
+# gDDcu7ZpZR0lSIqoqsOay2nAYnTn+IDAOYdugjmw2RAEp03LAPsJsiXc5BlixxlM
+# vv5bYHEjPQ==
 # SIG # End signature block

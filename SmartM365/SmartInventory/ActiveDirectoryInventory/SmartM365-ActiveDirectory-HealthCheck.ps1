@@ -2,7 +2,7 @@
 .SYNOPSIS
     Active Directory forest health check for PowerShell 7 and RSAT ActiveDirectory.
 .VERSION
-1.0.32
+1.0.33
 .DESCRIPTION
     Discovers every domain with Get-ADForest, audits domain controllers and domain health,
     exports a flat Power BI-ready CSV, and sends an HTML summary email on warnings or critical alerts.
@@ -87,7 +87,7 @@ $Rows = [System.Collections.ArrayList]::new()
 $DomainFacts = [System.Collections.ArrayList]::new()
 $script:PrivilegedUserPasswordNeverExpiresCache = @{}
 $ScriptBaseName = [IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
-$ScriptVersion = "1.0.32"
+$ScriptVersion = "1.0.33"
 $TaskName = "$ScriptBaseName v$ScriptVersion"
 $TenantContextPath = & {
     $d = $PSScriptRoot
@@ -111,7 +111,7 @@ else {
     $TenantContextDirectory
 }
 $CoreModulePath = Join-Path $SmartM365ProjectRoot 'Modules\SmartM365.Core\SmartM365.Core.psd1'
-Import-Module -Name $CoreModulePath -MinimumVersion '1.0.87' -Force -ErrorAction Stop
+Import-Module -Name $CoreModulePath -MinimumVersion '1.0.104' -Force -ErrorAction Stop
 $LocalConfigPath = Join-Path $PSScriptRoot ("$ScriptBaseName.local.json"); $LocalConfigPath = Resolve-SmartM365JsonConfigurationPath -Path $LocalConfigPath
 $LegacyLocalConfigPath = Join-Path $PSScriptRoot 'AD-HealthCheck.local.json'; $LegacyLocalConfigPath = Resolve-SmartM365JsonConfigurationPath -Path $LegacyLocalConfigPath
 $LocalTemplatePath = (Get-SmartM365JsonTemplateName -Path $LocalConfigPath)
@@ -366,8 +366,8 @@ function Get-DfsrBacklog([string]$Src,[string]$Dst){
     }
     return [pscustomobject]@{Count=$null;Reason="DfsrdiagOutputUnrecognized: $excerpt"}
 }
-function Send-ReportMail([string]$Subject,[string]$Body){
-    $mailParams = @{ Subject = $Subject; BodyHtml = $Body; VerboseLog = $true }
+function Send-ReportMail([string]$Subject,[string]$Body,[ValidateSet('Report','Error')][string]$MailPurpose='Report'){
+    $mailParams = @{ Subject = $Subject; BodyHtml = $Body; VerboseLog = $true; MailPurpose = $MailPurpose }
     if (-not [string]::IsNullOrWhiteSpace($SmtpServer)) { $mailParams.SmtpServer = $SmtpServer }
     if (-not [string]::IsNullOrWhiteSpace($SendMailMode)) { $mailParams.SendMailMode = $SendMailMode }
     if (-not [string]::IsNullOrWhiteSpace($From)) { $mailParams.From = $From }
@@ -567,7 +567,7 @@ try{
     Add-Row '' '' '' Script UnhandledError Critical 0 Failed 'Script completes' $runErrorDetail 0
     if(-not (Test-Path -LiteralPath $OutputFolder)){New-Item -Path $OutputFolder -ItemType Directory -Force|Out-Null}
     $csv=Join-Path $OutputFolder ("AD_HealthCheck_FAILED_{0}.csv" -f (Get-Date).ToUniversalTime().ToString('yyyyMMdd_HHmmss',[Globalization.CultureInfo]::InvariantCulture));$failedRows=Get-RowSnapshot;Write-SmartM365CsvAtomically -Data $failedRows -Path $csv -Encoding utf8BOM
-    try{$html=ConvertTo-ReportHtml -r $failedRows -status 'Critical' -started $RunStarted -ended (Get-Date) -csv $csv;Send-ReportMail "SMART365 - [CRITICAL] Active Directory Health Check failed - $RunDateUtc" $html}catch{Write-Warning $_.Exception.Message}
+    try{$html=ConvertTo-ReportHtml -r $failedRows -status 'Critical' -started $RunStarted -ended (Get-Date) -csv $csv;Send-ReportMail "SMART365 - [CRITICAL] Active Directory Health Check failed - $RunDateUtc" $html -MailPurpose Error}catch{Write-Warning $_.Exception.Message}
     try { Stop-SmartM365RunTranscript | Out-Null } catch { $null = $_ }
     $global:csvGeneratedPaths = @($csv)
     Write-Error $runErrorDetail
@@ -584,11 +584,12 @@ try{
 }
 if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 
+
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCh6gPOMVmdkNcs
-# rsl0pTxYrTNcY1RRPKrAX7IC0zcu8aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBENh+SyTIQsSoL
+# sGpdTStsUjRFAMY/hezyAB7OM9+6Y6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -721,31 +722,31 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIDnYFGprmVCcBvXzc+xZTctQvdYu4DBEeBocTkfB+uUQMA0GCSqG
-# SIb3DQEBAQUABIIBgIbRAc/F94jecdxmA009zAjEzSeTo9b6ltwywFrAs/o9j5OP
-# nn9Q2XZK+aWePcMj/mkVCGipsaCp6TRi4awJ8ajh3jGWw605Wxgsg+WugH1Fd1Co
-# T9VQVlGaOCBZBqZ1Ii/SwgvOFbAk8OtLVYOM2Hzc2Bl2U9kF6H4a0Jb6E1j0R+px
-# kkA8EAZYS4eBRQsMc+jGXzgdJjzw7tYByFT8E0DmnuNC/wOK43ibyuHHY4m3amAQ
-# tkvF5wJYe7aAvO6CP+v7KjEGQ5BWW1oTXLb54zydk0vZfuXw129Uqb+r59J61wPL
-# gXnD9OMx7WcIiqSK7SqNWn9wSjk6W05/0W/XpUgHN2P4D8M7I1qRIDY/nKEjcnzZ
-# VunuCEc/bYc2NpCtzhrdMgGNXdaXyYWYWSbxMt+Sixu4/4ZO8LJpeOxmn5+vxxi7
-# W8YAx/EXMANZLymkVrCUljw3MoqCzF6oXsXvXOKj6Dfju3x0WzdPJaWI+MQmXu2A
-# JvYn38RRTAvCKclQiKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIM3+8l0CGl9DLs8RVu0TD3MZS4MQndZNDRS4SeN0s5xHMA0GCSqG
+# SIb3DQEBAQUABIIBgCvyRZ4mfcsg1PBOdpUHuSvnVY/YMdPzQhlax6V/S/fC6hCS
+# RWe1scSSSHwfN0h7vndeh+UPrmFrFt1x2bY/0/18+m5U0EYbC3Uc/aQ5AtvE0jse
+# kc3iXN4xOqPZ7mLLnnNm3d6/10jgoUQ/9cNcdCe7pdN4yV0AneMs4gPM5PaP2mq4
+# go/tqLV1TJKTiFSwsfwxLhOsuVORpT06ZxOuv384FVq6YjXzjc4DNp0CfqeEEU9L
+# Cr/XS39CrrWVBFPbhZeRwICRjOmAKmXseKrCbMU7Ta/6TXt3D4MeZIyh8Z2zy5dx
+# ufuAkG3iutpZ0phDGRBmtWqQOne3blZJmZhNlK83Ta9rB5NLcvvkNZlQBRaWNNQu
+# QnjAoisK5UFUvS8ffG06OMj2denE1d465pmKj2MFI9d9PeLhGURGaeTu2tz1OBbS
+# +locQMPi7Hu6pY5toHtNHOKfxpKSOJI2Glfruus2Dyx2/idKjSF/6HL1PlWsIaBo
+# q6zPE4TsXHVGT4qJbKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTQxNTMw
-# MTRaMC8GCSqGSIb3DQEJBDEiBCCVDH+Jmi1GaOSCaXEQ/uuLNaJwTwujuytPfgyg
-# 5k3/gDANBgkqhkiG9w0BAQEFAASCAgCxlOV0EKkJO3rRMkFqwhXjVSeQY/Ik4O5b
-# tKpQuTzW+TblgrhroLSu6g9ARVmgppTyLO8UeguJ0jA1C4wNoUaIzvT+3wFAnrya
-# jJtfnlB7tyGhYiD77oQlb7Ywn/f9L20T6nnpq2PRkYpt6+HsnjcGOgif9ht7SfHM
-# z6M5hH27ouH9AfUXaQr8vyhohCpBZ66ZTAxy84vTNPFN1glBkjTkggNxFVHHlk/u
-# iXx76+AHubp0eD+A2hAccZX9CQ9yFv7G+GjvB2UTsSMsX59TvjOZDQ4j0U7hlWNi
-# U+TndMNxoFz0Y30Kd4RunMqKcABWZwveY+yUS6CHBn6SDcYJPuF8IymnMhUozNEH
-# unmH3Nu8hLYyumNRH9tcfECJCBz22/hUm7P2+vQqyp1T69Dk1An4f6vOtHPrwGUb
-# PlkjaPyRbX6dc8Gy6PolwD1ciyXdcygauhwFsMm1G+yMBo1O3YJJh+2oPOZB/LHq
-# X4FG7tznRzCd3raNEXeDLwsj35BuhpbmOuX/IMrftVg73b41jbju/1SLjYZcvaAs
-# 2RL5t7aDZQnShhqALqN2PbyW/DsWLIs/SaqtcersWl082aSpbAnHIEipXUBt0sn8
-# VvsUQSQHs96T0oGk46pxkswS+walKpJTDp+fT3OFAMmNdp8hPYCO9IkrerBBjxtg
-# 1ATzfA9CEA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjMwMjE5
+# MDVaMC8GCSqGSIb3DQEJBDEiBCBgUmvoi6Sftb1dgpBiYJMlpVC+VMNs5ZNc72CJ
+# 2gGHHjANBgkqhkiG9w0BAQEFAASCAgAc3TW2E1WtEWiZJSZpEqBsBPSEkQv6+4aa
+# msXw0hPY9fqUQVUGkp3vovnpIhrvKxlLzLHEsdYdggKTtY7bhPmI+yczEtqeSlA9
+# tYUL0PYh9QaaXeazFmk+ryfArihziXOkvZ6dTscp5ZKOVaP0QtTExsXSdgN+YppR
+# c14tkIt/rd5YC+M6F0rVx+WqBFIUNgwX0xxDpXvT/hggdchqCI3IVDWGJTzZneKB
+# +qioCMfxXHiPEWnUXwTdmd/JDXTykeluUDiNVKpwZ+VZ5JMaaa02isdwmaYgDlMO
+# DLez/lCASjfLrOhTf1p4FHi9g0VaYmX0uDw6b3UVa+HdgOH9VC454dUDwFhHmM5K
+# 0V6ysPMH///elGsu651wV+HVefICLw68SPmAiGTCW8RP+AaT1PwLrsJuZFYTMnCS
+# gROB83hdKRav+Xcb6DK9AqI7WKStV+DnTmqcmHbqitlEbwigSpMy+izSgn8rr3If
+# QWGwhodj2oJQWfPcK609jYHA8vz5gEd6oxYVUT2m3gjYpSOCcBLW7iYp48YqDP5y
+# WxfSVMFQ+8ISfruQ8xDDNq0uNCApkYyFw1O+9ehOpLgs8WDfxw6kF2SZl5sNIw1e
+# VzmikdzQRAY4GwXEpRuejBvW67hdCsKPhGpALwTwlIJLKt9RvYxkPkXVAmDL1fIA
+# J7WInkMyEg==
 # SIG # End signature block
