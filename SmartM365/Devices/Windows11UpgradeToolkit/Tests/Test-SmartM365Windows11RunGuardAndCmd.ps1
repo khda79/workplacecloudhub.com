@@ -3,7 +3,7 @@
 Validates scoped endpoint run-guard retries and generated GUI CMD launchers.
 
 .VERSION
-1.7.10
+1.7.11
 #>
 
 #requires -Version 5.1
@@ -49,7 +49,7 @@ $intuneRunner = Join-Path $toolkitRoot 'IntuneWin32\Source\Run-IntuneUpgrade.ps1
 $intuneDetection = Join-Path $toolkitRoot 'IntuneWin32\Source\Detect-Template.ps1'
 $setupMediaIntegrityHelper = Join-Path $toolkitRoot 'IntuneWin32\Source\SmartM365-SetupMediaIntegrity.ps1'
 $endpointText = Get-Content -LiteralPath $endpoint -Raw
-Assert-True -Condition $endpointText.Contains("`$script:ScriptVersion = '0.1.58'") -Message 'endpoint version is incremented for final OS log evidence'
+Assert-True -Condition $endpointText.Contains("`$script:ScriptVersion = '0.1.59'") -Message 'endpoint version includes guarded reboot failure handling'
 Assert-True -Condition $endpointText.Contains('Final Status={0}; ComputerName={1}; LocalIPv4={2}; NextAction={3}; ExitCode={4}; OSCaption={5}; OSVersion={6}; OSBuild={7}') -Message 'final log includes OS caption, version, and build even on early exits'
 Assert-True -Condition $endpointText.Contains('$result.OSCaption,$result.OSVersion,$result.OSBuild') -Message 'final OS log reuses the already collected final result fields'
 
@@ -604,8 +604,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAHmCZ3a1SxnsbK
-# q5RwJcCuT79NmZJ8zeDb+EjavBmb7qCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC3h/DKNQn+n2kH
+# ZCE8NDA1JR5YY/RZ6dDeK3kd4HK0q6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -738,31 +738,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIKFHdbEydsYvwbypKFN3dCCpm7d2V4xYr2aFjlNj9lqcMA0GCSqG
-# SIb3DQEBAQUABIIBgBxvjXJRjeUnmbkkUuCEJvm9Q403rdQA0tzrLFpqK/6edJla
-# siM+N1CjFOk9t/OLPrPPhY17NQgKMMBVj7SJ7NObO0IDlE1+MaFD0kRQiTVh71lO
-# NHU9h12PGBZxdj7UZQWgUBbue2TyQkkP+rl4FHlNk5J6OwYqxGjf/W9bwAJKtfRG
-# BMwW1ia0KjyGW/sYJ6biFZYHMpsO133W1czoUstjGSHFChzWKchpJncDzXXMsln9
-# m4ABy4zrhRP/m+mnep8RjDkVJPQND2bnj0hxr9/cJFK4i25aNZmD6RvtTa6i74KB
-# m+1C5d+yUElYUZzFWJVFxvKAZJpUp1PRerqjIXcYsUlB70PZK1Rjzhz7Zzg9KnmK
-# J2yMwjfyT0Tb5FMks7wvFgyXj50K6JxNIN9ceiTm6lcfT4bowJckv4yKVc/vM0tF
-# 61oHW7MGMX5kmj1e0lYpLcSmIoV1uQTeEsUBITzwxaa/zeAwsT+MiX1gmAXEfi2I
-# 2/8IDQRtjOiwvajPsaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIKaSGAt82Nc8tuACJmcmQrHYicgo5AzwdjEwRswF7+CuMA0GCSqG
+# SIb3DQEBAQUABIIBgEhb5XfXmXfSpLMVYxjwCqkNJSO059x3Elc6elZ7IuhL2Vrk
+# iMYiAWJhivU1xoOYiO4viPgCaUDazmmGc4U1jIzXU33vtB5HK1XBuOYRhGd09G9R
+# cPkHmUKDG8GyRtvS1Aq1N65ir32yoUtutS+0r8kIWJbTpkN3Lm7xE5X+yfit6A8Q
+# LdV9H16gYufOkrfayF2jJAG0gcC0IqueMe8BKCeZXZwxl7XzRgU7bvZU0aZwN3rA
+# 2U488CKfy9XS6cUIsdQsNkYnRb9duOozTOPh9Tks8S/tfyw1nxptzHOiwDfxNBua
+# xlXKDgaJfyMYUmwSt308kk6/OPrognekXFzoflNBCDhCXIzG4XJW9J4pv01ziu9J
+# 1c27dhAdB96ggCMPy88Z4uyjE9bn1DYMFb0CYVcSbDkQOUOZV0pjiZaeWaf+ofI9
+# ge3/1FJ09dDdcMh3iaxt4xxktKrzT8onbUHDN4BN3PsAPeaDE1m11/GjZNdYiPYh
+# dwrVF7cwjlBQDV370KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MDcxMTUz
-# MTZaMC8GCSqGSIb3DQEJBDEiBCD6oYmXPEC7BA0NM2FIf/G1wmUoMzVFz5YI8RUx
-# VIfBbjANBgkqhkiG9w0BAQEFAASCAgA9QPMfCK3ZjkF+jy5SCU4PDcTh+LK6OQ6l
-# k3N0593seLFPxSjCSoDrjsVevBsI7Q699tiyQvxCjlhMxNi1Jc45C5yOAMmhXPlk
-# 31M4v3sArbgLVUMw2JhLCysljisLxkxZNDF9em2jLgoe2Cv0EoPYV0pC+pbQv1uJ
-# iKl/edSC2zl1umH9z6Y4OCEX0WyE7t6oJu/sfAzAh3Kt2p818VtEne4a8GCTcNw/
-# XnVuHcmIlqr7U/tmWNt9BdNXiEgOwRSJJwKmR3BDbADthMCu9XtiE+s+Gjhab74M
-# RD2j0Am7LgXNf4qsfOvH+UDikxw5bc2iLyGHT0M8dNwRtm6zK95K+fLIAXdmdoBG
-# +2ve/mKuP/FD3eciS81/iyJjetRpT5njluuNQ4M+3lpUbKK/dm8YQFdCZuqT4Lxf
-# NDJY/bXp0u4SggPdvT3+c5VDvlx939n9ic7eRMhJ8lkDvP0fD80wI5FmTrkg1v7a
-# Ter8ZvSfBFwZTnsst9KmXyzTt5sYWG6asRYZhsKf8/JJdfc/OApJPsllfZJ7wzGU
-# mQDJmX335IIoXg2u6Wz8oaKAy4kvgfdxQAj9IrMM+JRiDDNYHrEcGoJW/wBzlwS6
-# 8ihDgqhF2hhe3pBsHjRMysBcKIPXpCgV7KmtbEA/airNeo09uzrDvMqUrWaDiQNV
-# Z6mPHAWOug==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjMxNzI3
+# NTlaMC8GCSqGSIb3DQEJBDEiBCAVwtR7AXFDRMqhbfwVr34uudm9Mv3H507tyR0v
+# +gEwtTANBgkqhkiG9w0BAQEFAASCAgAEuaYd9Recq+kijpaQ8dvUTB+AGwtKWS/R
+# DisgiOE6n9tgPeaTqXsafGJk2zPTR9cB4QUr/h0LN+ok/l6uCwPKM88NHqzvDeX1
+# wcGUofMwltNYHA841tO5ltYmEFi48S9bcKQ68I+oZ14RBgs9wcT3wGhlnkLl2lUU
+# ow1+uDws1kHIld8FU0nQnzgKsg92OQaLs+ma+CJuSiR8hYPgqWzWFwP51NL6/tIR
+# nnphu9cY1d3YEsyoJuEEPM9LMdqGaBHMDRbPyHmnhwcROu7wWZQNcS6bJlnmlSz7
+# F7Q6Yzwt0eluw+YoYhsQsDqYC0lBviAeBVhsL7xictkKlEEgQhcsR4zTH+FZJzuq
+# 3oseUYiMrhPjA41+H+R0Ju2zlFT8s7tTnybLGJABop+lDKDezhH3GT9KjzuY0lYl
+# AY7xUSEQ4CDRLLtAyK7gtNMjsRQDCs+3nuLhXyzw66YJfgPweGCMIHOGGkO5Cd9I
+# X+cxjy04P5bHoO2d1Erb6MsFtQISuzWroI2kCb7ePI3WFlXZocf+6+BI8/wzewMi
+# /JCHELw7gfJ/nF0jp0pt0qaAmQIsTl3AQAFtycOQliGEpm4PiciQBKIOJuwRhLZG
+# 6ltCNK+FD3OndlG3ywNukriJOIvxFMRc0hqwPYTUpyMXMbJiaQdm6wkMmBZF4/tl
+# ZmGxDouMcQ==
 # SIG # End signature block
