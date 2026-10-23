@@ -3,7 +3,7 @@
 .SYNOPSIS
 Validate the single daily inventory cycle and weekly exceptions offline.
 .VERSION
-1.2.5
+1.2.6
 .NOTES
 Reads the repository template and an optional additional local manifest.
 No tenant initialization, collectors, scheduling, authentication or publication.
@@ -57,7 +57,7 @@ $daily = @{
         'M365-SecureScore-Inventory' = '02:00'
         'M365-AuthenticationMethodsRegistration-Inventory' = '02:10'
         'M365-ConditionalAccess-Inventory' = '02:20'
-        'Intune-EndpointSecurityHealth-Inventory' = '02:30'
+        'Intune-EndpointSecurityHealth-Inventory' = '04:00'
         'M365-LicensePricing-Inventory' = '05:30'
         'SmartFinOps-Workplace-Valuation' = '05:45'
         'SmartFinOps-Workplace-Report' = '05:45'
