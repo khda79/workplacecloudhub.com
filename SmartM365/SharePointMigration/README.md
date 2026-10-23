@@ -185,6 +185,16 @@ invalidate only the affected criterion; other criteria continue to calculate.
 The scan does
 not download document binaries or run workflows. Server APIs that cannot be read
 are reported as partial, never interpreted as absence.
+Null event-receiver collections are handled as empty; malformed non-null receivers
+still leave collection partial. Built-in userdisp.aspx application forms are
+recognized without treating /_layouts as a content database file; other application
+forms remain unqualified. Standard-role masks resolve only the role types actually
+used, with ApplyThemeAndBorder and compatibility for older ApplyTheme profiles.
+Target permission paging and batch reads use each CSOM object's owning Context,
+rather than the mutable context exposed by the current PnP connection. Missing or
+contradictory owner contexts never silently establish permission inheritance.
+Regression coverage: Tests/Test-SmartM365SourceAssessmentOffline.ps1 and
+Tests/Test-SmartM365CsomContextOffline.ps1 use fictional server/client objects only.
 
 The permission scan records role IDs, names, effective masks, modified standard
 roles, usage and definition provenance while reading existing role assignments.
