@@ -11,7 +11,7 @@
     local logging.
 
 .VERSION
-    1.2
+    1.0.0
 #>
 
 [CmdletBinding(SupportsShouldProcess = $true)]
@@ -805,7 +805,7 @@ function Get-EffectiveWindowTitle {
         return [string]$script:Effective.WindowTitle
     }
 
-    $baseTitle = [string]$script:Strings.WindowTitle
+    $baseTitle = ('{0} v1.0.0' -f $script:Strings.WindowTitle)
     if (-not [string]::IsNullOrWhiteSpace([string]$script:DetectedCompanyName)) {
         return ('{0} - {1}' -f $script:DetectedCompanyName, $baseTitle)
     }
@@ -938,7 +938,7 @@ function New-RebootManagerWindow {
     [xml]$xaml = @"
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Smart Device Reboot Manager"
+        Title="Smart Device Reboot Manager v1.0.0"
         Width="800"
         Height="600"
         MinWidth="760"
@@ -1047,6 +1047,7 @@ function New-RebootManagerWindow {
                         <TextBlock x:Name="StatusPillText" Foreground="#005A9E" FontWeight="SemiBold" FontSize="12"/>
                     </Border>
                     <TextBlock x:Name="TitleText" Margin="0,12,0,0" FontSize="28" FontWeight="SemiBold" Foreground="{StaticResource InkBrush}" TextWrapping="Wrap"/>
+                    <TextBlock x:Name="ProductVersionText" Text="v1.0.0" Foreground="{StaticResource MutedBrush}" Margin="0,4,0,0"/>
                     <TextBlock x:Name="SummaryText" Margin="0,8,0,0" FontSize="14" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"/>
                 </StackPanel>
                 <Border Grid.Column="1" Width="116" Height="116" CornerRadius="58" Background="#EAF6FF" Margin="18,0,0,0">
@@ -1152,7 +1153,7 @@ function New-RebootManagerWindow {
     $window = [Windows.Markup.XamlReader]::Load($reader)
 
     foreach ($name in @(
-        'StatusPill','StatusPillText','TitleText','SummaryText','DaysBadgeText','DaysUnitText',
+        'ProductVersionText','StatusPill','StatusPillText','TitleText','SummaryText','DaysBadgeText','DaysUnitText',
         'UptimeLabel','UptimeValue','ThresholdLabel','ThresholdValue','MaximumLabel','MaximumValue',
         'LastBootLabel','LastBootValue','CountdownText','CountdownProgress','NextActionText',
         'DeviceIdentityText','ActivityTitleText','ActivityText','LanguageLabelText',
@@ -1409,11 +1410,12 @@ if ($script:GuiSplash) {
 Write-AppLog -Message $script:Strings.ClosedGui
 [Environment]::Exit(0)
 
+
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAvB1EYXFQvZmfS
-# mh2p6uVlmrqK7Or9S6jAf42v97iYfKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCChadRaWjDWrO0B
+# 4V6/9iuEVfhCyAzfQHZ/qSU7FB/nmaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1546,31 +1548,31 @@ Write-AppLog -Message $script:Strings.ClosedGui
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIFAAD+CjZHcpMQdZ71POI+nHtq/YtJmQ6a2t6wMYTEGpMA0GCSqG
-# SIb3DQEBAQUABIIBgC1MxiYxo6VEf/OPxsS9rOlmPo45dXyNVJmFUBIJpXtlF6N2
-# yM5GqMiTYASoxVCHS+0OXE5A35WfV3qE5URUzsm5d+GZK426Yh2D+EAG/Vp41bH+
-# yfASIF/7JXkKPqaPDwZtq85rzOfEXxaoL4mSO47fPkIsJH3BDMQ1bSYwj7nbB3zz
-# OXXd2EkHzcbN7/Fo0k5/1lPWiS4NFFG+pfRJ1p3w5KnrtGZeiYpzw55Y8jzsDaSf
-# EtbZ00KogG5XlE1IAzSudJkgc/Ob3s4a6oMzARzNE+nLguH+rpSGRgKWOQCaXeR6
-# IKvCwj+EgYM5waoWRrJPXfs7yH5UNnuP+MFoPeBALHgAM3X3oU+od/WW8Ft+5nGv
-# dM5W8b1Y1EWqzrmqiPmvb6JtBctRNyR2KNMGZu415zc8aMlOn5q/MDFIGHOHcNhz
-# GCZmqUiHzS1G9L0aCNV1J8OsjJSte9Nx1aeReezWZNvj3X1D6kqh4iJd3NZu2qVZ
-# CvLa2D4oqtgFnpUUsqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIIQPIJYyt/Hu2zPBp/t0KLwafcXN8OqjOww8z5ui+G9fMA0GCSqG
+# SIb3DQEBAQUABIIBgAM6UEsvUpN9UZ1OexpWTgz+he8yIZhEZaTT/FZkGH+QVdtk
+# FcYIAOiA8BPCiSo/JHXJ4MEq3Tsc7jTK5lSPxAV3Um+CU5IlvjU18+BlBe+VEZkh
+# urtgSDzAcltPp0BNCQOGKgnvfsqPu3pi6PySFwNGTAwstY/hyBeja2SmN5g8VE+/
+# upCnvBnUX+jHVGCnURCyxHVisCH2O6a27rU3Ms3Y/St8/FD3oyhJw08A0H2Pi33u
+# MiRGgcBwvvzE5fECapPS9a8x70IBBMEtYQypzhIN3G2H4LgZhVeqi1If+mPDwKBi
+# 19BOuT+dLr/W2x8lNNGnUyDghruMlVuIg+MJPJ2sKP7dFG6fmWDaDP0Wrk9UNed8
+# GLWl0LseH/ll3Z3ZA8XFWM46fwk+ruS9wSnuTynaTfaZ4NUHPndGFEQyGWO5Xmwl
+# YwbKIJBVSTXKcC1Hd3vClhAuwn/a+0gc9I0rWsSeaz8aC+LDmTZEPU5igNCHrIlA
+# o6QOkMNZuL2kVuMpraGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTgwMjQw
-# MDBaMC8GCSqGSIb3DQEJBDEiBCAD0J/WWEAX3ntYmmnVVaQVs+NOvonZGxo5VUpu
-# FRVDezANBgkqhkiG9w0BAQEFAASCAgBajrWPw4bU5yEKLHcH4CsvFP4/VQFv+4VW
-# sAqyBR/YrL1YiuUFH1S7w3gaeKUmtxs90ne9nHdI3lp3VhUGzNf7FxihzetlnZZ0
-# fUT+YFPDeNWnJAbNLVAE/fABeQ4Cvnav1GPOtVeY7ycEDA83u7ZedfVFpJdZHZtZ
-# AS1xNaYzDv2UsddG97sFm2jTjbqBkrVcS4xwx0xyQKD398zUOY8icLQNswJu1MkK
-# fAXOJ7ZDoAZBbDUn/KgskMatIlzpRK28Rmss2Kqj0fyHvjtHn0/Imj2047UuvIXH
-# +zqrfmNaKr9Bi/mtlxSrckD4ikXT6AL4xa0Sy0vI2/lR1huwCt5RBupd+HzmSmym
-# eJSSii8bMZVNkgag1f9PTquZGgr+3ukf7hBoUbrk5RtTgD4Y0ZqxaDQ9v+sHegRK
-# +/UFLFA31WP/ojTca2m9P9hHbxyvqM/LOSD+iJZvZRHXLKLIbh6rK53FHbBLqU1/
-# dUB3cDDjiNQ+a+wLg4dya1/HI/XQ0UYrK11V3RFcvdc5xcLUhEI85x7wV52ZWg0c
-# ODUnakZk1BOOT0w/Zzq4icceG5lvqWMSyik/4SFoJ9Sz6AXnbzxAnJtSY5UCyGmt
-# UeShx9TBxmp/N8N9muBjXUWEF9zeuxOeieF1d7gLloH7vq8zSDlx5Qi28l9Z3+/4
-# KIrytNlZzA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjMxODIy
+# MjlaMC8GCSqGSIb3DQEJBDEiBCCt+YfAWRwD+eYCzWADBvwbOQpg5IAp5tq9rIs5
+# 2vl/HTANBgkqhkiG9w0BAQEFAASCAgAFz1/BuCWsI8O+XuTUoVplEZWO5CIA2UcD
+# DcKwzdLIj4d7HSG6sn2bn70ngmiS9td9BygacKd9dWdQX2cohJT7o9u6k3uWzQ4B
+# cAEM/8abwhWAPGHzE+KdIyIGWMW7VzfoLvT7qbj8Qbs3woNQkkhHJloJ+O7a5oPW
+# doaElY5M+weYk6QaoAJE5FxRugymKyTHZk0U8yIbpMGH99slPXRNa0GPuyecbnvB
+# xzEBEnLDWnkgC4LuBYQH6TqlHXpGs8dlEOt/OG9WcerrlI5WEb7JPHcodCvvgs0t
+# JLy7cDFIIrMQM6FGBC3FkezWE75DEUTSyNSrwJ1PJMwgmMqIawQi+LDmqP4FvrWN
+# B4vbX4pff2jPfos2VZEJ7dWTZ/hkLt5mlbuzTbypWDzVfztfyyarUv0qDLvNdjok
+# IYUqfTVYSZCpPWg+spEsJEjef2YQBuCMJ/bm0Srp7FHckWiWmi/X5YoJuXyl6XEr
+# ePJoKk5GMOJucoSrMI/W/WjsU914t9ODISETFSozBNw/Y6Y53IL94p7IKxfpml4g
+# PHiQjs6Lkh7sLk9vLusKRDGVBwar1IWX+jQMvSg2bmpdVoLcavRHFi36Hz+3ykji
+# bTRfxI0QjVU9ONxb4A7/cfjJh20OTVe5Mwj/3NDhxl7XvjGhBwWuvqlXcIemUw2w
+# hMKA1TbpTA==
 # SIG # End signature block

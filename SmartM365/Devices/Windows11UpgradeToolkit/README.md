@@ -6,9 +6,14 @@ The toolkit is optimized for batch operations. It keeps `Scripts\SmartM365-Invok
 
 ## Current distribution 1.0.0
 
-Download the [1.0.0 release](https://github.com/khda79/workplacecloudhub.com/releases/tag/windows11-upgrade-toolkit-v1.0.0): `SmartM365-Windows11UpgradeToolkit-1.0.0.zip`, its `.sha256` file and `SmartM365-Windows11UpgradeToolkit-1.0.0-DemoAssets.zip`.
+The current **build 2** aligns the interface and report branding on **1.0.0**. Download assets whose filenames contain `1.0.0-build.2`; original build assets and release tags remain available. The release notes identify the exact build source commit.
 
-Distribution version **1.0.0** is recorded in `SmartM365-Windows11UpgradeToolkit.version.json.txt`. Component histories are preserved: GUI 0.1.55, endpoint 0.1.59, LOT orchestrator 0.1.72, worker 0.1.31 and automatic LOT 1.3.2. This package includes the guarded user-session checks and shutdown failure handling. The separate demo archive contains only fictional captures and exports. No Windows setup media, PsExec or operational inventories are shipped.
+Download the [1.0.0 release](https://github.com/khda79/workplacecloudhub.com/releases/tag/windows11-upgrade-toolkit-v1.0.0): `SmartM365-Windows11UpgradeToolkit-1.0.0-build.2.zip`, its `.sha256` file and `SmartM365-Windows11UpgradeToolkit-1.0.0-build.2-DemoAssets.zip`.
+
+Distribution version **1.0.0** is recorded in `SmartM365-Windows11UpgradeToolkit.version.json.txt`. Current component versions: GUI 1.0.0, endpoint 0.1.59, LOT orchestrator 1.0.0, worker 0.1.31 and automatic LOT 1.3.2. This package includes the guarded user-session checks and shutdown failure handling. The separate demo archive contains only fictional captures and exports. No Windows setup media, PsExec or operational inventories are shipped.
+
+
+Original build retained: `SmartM365-Windows11UpgradeToolkit-1.0.0.zip`, `SmartM365-Windows11UpgradeToolkit-1.0.0.sha256`.
 
 ## Historical distribution 0.1.72
 

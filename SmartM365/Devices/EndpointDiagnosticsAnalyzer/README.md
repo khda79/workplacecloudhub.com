@@ -2,9 +2,14 @@
 
 ## Current distribution 1.0.0
 
-Download the [1.0.0 release](https://github.com/khda79/workplacecloudhub.com/releases/tag/endpoint-diagnostics-analyzer-v1.0.0). Distribution and module versions are **1.0.0**; the existing GUI component remains **0.3.2**. This version transition preserves the reviewed operational behavior and prior releases.
+The current **build 2** aligns the interface and report branding on **1.0.0**. Download assets whose filenames contain `1.0.0-build.2`; original build assets and release tags remain available. The release notes identify the exact build source commit.
 
-Assets: `SmartM365-EndpointDiagnosticsAnalyzer-v1.0.0.zip`, `SmartM365-EndpointDiagnosticsAnalyzer-1.0.0.intunewin`, `SmartM365-EndpointDiagnosticsAnalyzer-v1.0.0.sha256`, and `SmartM365-EndpointDiagnosticsAnalyzer-v1.0.0-DemoAssets.zip`. Launch the included demo from the root of the extracted standalone release. The separate DemoAssets archive contains fictional captures and exports, with no tenant or device operations. PowerShell Gallery service publication remains separate.
+Download the [1.0.0 release](https://github.com/khda79/workplacecloudhub.com/releases/tag/endpoint-diagnostics-analyzer-v1.0.0). Distribution and module versions are **1.0.0**; the GUI and visible product version are **1.0.0**. This version transition preserves the reviewed operational behavior and prior releases.
+
+Assets: `SmartM365-EndpointDiagnosticsAnalyzer-v1.0.0-build.2.zip`, `SmartM365-EndpointDiagnosticsAnalyzer-1.0.0-build.2.intunewin`, `SmartM365-EndpointDiagnosticsAnalyzer-v1.0.0-build.2.sha256`, and `SmartM365-EndpointDiagnosticsAnalyzer-v1.0.0-build.2-DemoAssets.zip`. Launch the included demo from the root of the extracted standalone release. The separate DemoAssets archive contains fictional captures and exports, with no tenant or device operations. PowerShell Gallery service publication remains separate.
+
+
+Original build retained: `SmartM365-EndpointDiagnosticsAnalyzer-v1.0.0.zip`, `SmartM365-EndpointDiagnosticsAnalyzer-v1.0.0.sha256`.
 
 Earlier download references below are retained as release history.
 
@@ -278,4 +283,4 @@ Keep the application folder, its original report/template sources, local brandin
 
 ## Distribution version transition
 
-The 1.0.0 package preserves GUI component 0.3.2 and includes the complete signed demo runtime. Old releases remain available. Local DemoAssets stay Git-ignored; reviewed demo archives are separate GitHub release assets.
+The 1.0.0 package uses GUI component 1.0.0 and includes the complete signed demo runtime. Old releases remain available. Local DemoAssets stay Git-ignored; reviewed demo archives are separate GitHub release assets.

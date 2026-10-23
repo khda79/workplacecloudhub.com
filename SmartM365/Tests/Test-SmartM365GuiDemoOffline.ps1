@@ -3,7 +3,7 @@
 .SYNOPSIS
 Exercises the two pilot demos with WPF events and forbidden operational commands.
 .VERSION
-1.0.0
+1.0.1
 .NOTES
 Run RebootManager on PS5.1 or PS7; Orchestrator requires PS7.
 #>
@@ -81,6 +81,8 @@ $before=Get-DemoProtectedHashes $protected
 try {
     if($Application -eq 'RebootManager'){
         $result=. (Join-Path $rebootFolder 'SmartM365-DeviceRebootManager-GUI.ps1') -Demo -ValidateOnly -ConfigPath 'Z:\DO-NOT-READ\private.json' -ResetRunState
+        Assert-Demo ($script:Ui.ProductVersionText.Text -eq 'v1.0.0') 'Reboot product version is not 1.0.0.'
+        Assert-Demo ($script:Window.Title -like '*1.0.0*') 'Reboot title version is not 1.0.0.'
         Assert-Demo ($script:Window.Title -like '*DEMO*') 'Reboot demo identification missing.'
         Assert-Demo ($script:Ui.DeviceIdentityText.Text -like 'CTSO-LAP-*') 'Real device identity leaked.'
         Assert-Demo ($script:Ui.DeviceIdentityText.Text -like '*192.0.2.42*') 'Sample IP missing.'
@@ -213,11 +215,12 @@ try {
     exit 1
 }
 
+
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCjwbsYt0ufhRta
-# RWoyo5/wgWAOEs1o2Ujjlknln9FuGqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBWV44cw0cLk+Z+
+# /Bc+kvp7aTaxZkcLLO4q8ptZqI0SkKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -350,31 +353,31 @@ try {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIHREaZIAUSs+fI51+39ZZJxyRxxb9oiY5SGQi1AAIcr4MA0GCSqG
-# SIb3DQEBAQUABIIBgAPnvl2AuJBjUGMl29JLJuzEzMw/7x8YTQiVNMeFUVzrhupP
-# t8gjWABMhUYPMhOjDCG/pUN+pdy/PjhsyvYuOKz5nY4CYxA+umHJHs2rpCtg87+U
-# koff8XcUQHaR4y/PLHmrHFolF8AWiOn5vKYLMnzZ3FM3erUHEf3gxOrm/gbZcJgV
-# 5cRKZBLFfJI5XKk7iPXNOjRyFLs/V7oVU7HfKOI0ajl6pbrKfaKf7vuQdXSGTqTu
-# JsbBJYWnGLMKskgIpu7t9d4BAr/1mrRM132cOIPzZWXsNaKISGDYjW8+vNmD2gLi
-# 2pvF+asLipt5h2BcgMIMEEAUgLx2+lyX0eNmP9z7g6aK0YsJWk29AQyRi1F7WAYS
-# 1YZAXihM6b68Sr54Xzb/Pa7Ny7r70E+Tvzs0ZO0QVvVj7mqBZbegdMaWATDa3Whf
-# iJ4Vz0FJTO7zZ8WT67l9F/LWlDRMmuMF9tq8yK9Du/ntio+IzdpQNn5YGNmX7dYf
-# KC56VXqCgHe5D9QFp6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIF8rCjpEA0OvbkmeJwjbpKx1RSii3XeVnBjPd+L0NxZBMA0GCSqG
+# SIb3DQEBAQUABIIBgBRD4GMyzQZXj5ROjf96XKuZpUPMJHBsxp2i7P+hy3vh9hwd
+# Lib6a+TWWLqUFGhRvnMHva4wFsh8GIbFnWYTXrQFGcFpmtH+T7w3lpqkNDpYmmfJ
+# DhCkjljupp64SFE/eAY2RCckyWHWZ/JbibfV+WRJzpejhPKP8osQ12MOQatPTkhf
+# VDskKUIOc32VhGeqoce6ViS9NuMOeX8L0z/1D7j6LAVLhfdw62L9a7W6fbx0fEGN
+# 2MWckesTLgpaN+R2NA4uVJ4tBkfJH2UAtkdZXt3CNF0Z7XIkRPXvQ2/3dq5nsdaV
+# dswuDgabaGYpKwJlcvYYzc34YBSfvlREhacq0621oNXi09IhUIGfQ3DTRQIfHx/7
+# 0bomzCFhv06fDvs2SP5yEDYUANDCxeujZ2l1nJgKqSKX2pTUrr2gHzgFlxsuhsed
+# FO97/HNURBU/FaDjTWJnrAQzmZzJcEzBftSXWbSrXr18F5/k+UVdiNWS8IMp74Cr
+# k81LYPgkOv1FbQsWMaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTgwMDQ2
-# MzhaMC8GCSqGSIb3DQEJBDEiBCDTSRdSu9aaiBKc2q6+BZuchkhQ0gaelumNQTlR
-# Fj3AhDANBgkqhkiG9w0BAQEFAASCAgBcTqnMxPm8E5ASmnG1LfZlv7NWsvb2CNmF
-# 2bYArOSZ5n2NnQl55CwqUZ0ckJtkHMnKM+qEfxRYVKYzZovCWuqVAmX1cDJUdgaG
-# 1aCJlfj0eDVGVXUJjo60CnVTTkyX8AsnNZw66YCbul0xJKzm5Hr/fnEfn3g0RiQR
-# /n/Zy7ayFRGS6jKOsopK7XoSAD75zcZpfbkJmw+2GkQX1Vf+YmNeyMJWP0B3Iht9
-# q39w5TTL4KI/C6Ow02hO8F34mxE90RRFxMCFCDtxIOb6HpBzFXBKgsizIwmEf75O
-# xpF4fubzHpcuJ73ZipmBHLQBvDYJoVheCYsbKpLHj16aUgy/hn2hFFCqWqmHG6cT
-# s+yfVwIQdixjvx1CdALPUibBIM97BT39+HiPoKQBJsoIFClCwRy1uC/vzc8MvgEK
-# P+yHuSX23wZnp/QcMPlEAqJ/00z9NngoGLTyZLDD+zCo/8bqd6o9zImARCcpLgh4
-# FWYZlzTa0Or/3MxqTNG0StuUoizScM+ExpoWV5C5D2TiqnNKj9JXLxr1vvfXWpBx
-# 8HOHkmsS4MdeATnxTd1mca44ObNXsgMhL/w5O2po1HI6yplgqmRFZHEotiPBu5XQ
-# 3Ya40hnF8nWCMtO1C29axfXjZfO+P/1pU/SQ6KMGcTUefPEwWXEhPAvgbVyMNbH7
-# O7Ok6PIAYg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjMxODIy
+# MzFaMC8GCSqGSIb3DQEJBDEiBCDeKI0eVRw6WWqVbhr4CNIpMTo0xgnwuPg00soY
+# DCy9bDANBgkqhkiG9w0BAQEFAASCAgC1a3vceBGfq0n0A7yyseK1jN6NTDMO+dRg
+# hjD9P0CC4Y5YcU2XFBPfdWNLJvZ08T2Qm++o/5KpCNYSLlMxbVLiAVV0x55zc+J4
+# aFJByViwn3edQrrDkBw4diQqIZbBvWgB/Bu0oul6p/8s9YJ/KHqJuLhNuSi6WVtf
+# MTdCdSbUqrTleTBHqTwNqTAcbTyT8afcSvd/xo5OoPzZg98Y0gkBBXz97QG8zrrf
+# XqgV53Vt9PZH5N262SxLnHEhdjH6IueQ6IIIORyNacf6zQwXxf7FfiIUJaQkwzK1
+# vWdyL1gI+V4EbuWck+zidhX/xqqEBhrbiBXjWV3cqJS/WZ/LvHrPIv9D8NesZXVT
+# j9/3ft05W4UQsLkqf1vFTfpGPZEd12bnU47dtj76pCK/Si3CKmlH1a8p78a7otvj
+# O2eBR7TzEXupFOvdIzbKe592D6HFatFM/9BGoFM0e6aUSni1EcP3T1pshvwNOD+b
+# CXvAkr2yNBZmYvJSvnrBTFf0CIkP7ZiWY5y96OHQw6OjZ8KOKEznsPhyZD3nVsGU
+# FiwIXTLLy1rPwlUMsW0yi0uo+B5+vYdQq2hZWrzmMKw+dovDc+kMIigsNsqy/89w
+# EbXdNQyboU1rBg46pb7Z0+q5754N/nl/8A5GCuxMYaHNoFxbcIEwCFnusYTFoblL
+# /5ISwcNo5g==
 # SIG # End signature block

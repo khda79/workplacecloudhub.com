@@ -2,9 +2,14 @@
 
 ## Current distribution 1.0.0
 
-Download the [1.0.0 release](https://github.com/khda79/workplacecloudhub.com/releases/tag/device-reboot-manager-v1.0.0). Distribution and module versions are **1.0.0**; the existing GUI component remains **1.2**. This version transition preserves the reviewed operational behavior and prior releases.
+The current **build 2** aligns the interface and report branding on **1.0.0**. Download assets whose filenames contain `1.0.0-build.2`; original build assets and release tags remain available. The release notes identify the exact build source commit.
 
-Assets: `SmartM365-DeviceRebootManager-1.0.0.zip`, `SmartM365-DeviceRebootManager-1.0.0.intunewin`, `SmartM365-DeviceRebootManager-1.0.0.sha256`, and `SmartM365-DeviceRebootManager-1.0.0-DemoAssets.zip`. Launch the included demo from the root of the extracted standalone release. The separate DemoAssets archive contains fictional captures and exports, with no tenant or device operations. PowerShell Gallery service publication remains separate.
+Download the [1.0.0 release](https://github.com/khda79/workplacecloudhub.com/releases/tag/device-reboot-manager-v1.0.0). Distribution and module versions are **1.0.0**; the GUI and visible product version are **1.0.0**. This version transition preserves the reviewed operational behavior and prior releases.
+
+Assets: `SmartM365-DeviceRebootManager-1.0.0-build.2.zip`, `SmartM365-DeviceRebootManager-1.0.0-build.2.intunewin`, `SmartM365-DeviceRebootManager-1.0.0-build.2.sha256`, and `SmartM365-DeviceRebootManager-1.0.0-build.2-DemoAssets.zip`. Launch the included demo from the root of the extracted standalone release. The separate DemoAssets archive contains fictional captures and exports, with no tenant or device operations. PowerShell Gallery service publication remains separate.
+
+
+Original build retained: `SmartM365-DeviceRebootManager-1.0.0.zip`, `SmartM365-DeviceRebootManager-1.0.0.sha256`, `SmartM365-DeviceRebootManager-1.0.0.intunewin`.
 
 Earlier download references below are retained as release history.
 
@@ -342,4 +347,4 @@ Launch the safe test wrapper:
 
 ## Distribution version transition
 
-The 1.0.0 package preserves GUI component 1.2 and includes the complete signed demo runtime. Old releases remain available. Local DemoAssets stay Git-ignored; reviewed demo archives are separate GitHub release assets.
+The 1.0.0 package uses GUI component 1.0.0 and includes the complete signed demo runtime. Old releases remain available. Local DemoAssets stay Git-ignored; reviewed demo archives are separate GitHub release assets.

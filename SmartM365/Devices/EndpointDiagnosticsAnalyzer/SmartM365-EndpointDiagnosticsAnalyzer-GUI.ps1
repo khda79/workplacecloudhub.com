@@ -3,7 +3,7 @@
     Smart Endpoint Diagnostics Analyzer.
 
 .VERSION
-    0.3.2
+    1.0.0
 
 .DESCRIPTION
     PowerShell/WPF analyzer for Microsoft Intune device diagnostics ZIP files
@@ -133,7 +133,7 @@ Start-SedaElevatedSelf -Parameters $PSBoundParameters
 if ($AIApiKeyProtectedPath) { $AIApiKey = Get-SedaElevationApiKey $AIApiKeyProtectedPath }
 
 $script:AppName = 'Smart Endpoint Diagnostics Analyzer'
-$script:AppVersion = '0.3.2'
+$script:AppVersion = '1.0.0'
 $script:BasePath = Split-Path -Parent $MyInvocation.MyCommand.Path
 $script:LogoPath = Join-Path $script:BasePath 'WorkplaceCloudHub.ico'
 $script:WorkplaceLogoPath = Join-Path $script:BasePath 'WorkplaceCloudHub-lockup-WPF.png'
@@ -3770,13 +3770,13 @@ details{margin:8px 0}summary{cursor:pointer;font-weight:600;color:#1a6bb5}
 <html>
 <head>
 <meta charset="utf-8">
-<title>$(ConvertTo-SedaHtmlEncoded $script:AppName) - $(ConvertTo-SedaHtmlEncoded $Analysis.ZipInfo.ZipName)</title>
+<title>$(ConvertTo-SedaHtmlEncoded $script:AppName) v1.0.0 - $(ConvertTo-SedaHtmlEncoded $Analysis.ZipInfo.ZipName)</title>
 <style>$css</style>
 </head>
 <body>
 <p class="alert">Summary report, not a full evidence export. Tables below show at most 1,000 IME/WU/MDM/event rows and 500 certificate rows; the timeline shows the most recent 300 entries. Event tables focus on errors and warnings. Full source files remain in the original ZIP; model records remain available in the application and CLI CLIXML export. Missing evidence is not a healthy result.</p>
 <header>
-<h1>$(ConvertTo-SedaHtmlEncoded $script:AppName)</h1>
+<h1>$(ConvertTo-SedaHtmlEncoded $script:AppName) v1.0.0</h1>
 <p>Source: <strong>$(ConvertTo-SedaHtmlEncoded $Analysis.ZipInfo.ZipName)</strong> | Generated: $(Get-Date -Format 'yyyy-MM-dd HH:mm')</p>
 </header>
 <main>
@@ -4739,7 +4739,7 @@ function Start-SedaGui {
         </Grid>
         <StackPanel Grid.Column="1" HorizontalAlignment="Right" VerticalAlignment="Top">
           <Border Background="#143657" BorderBrush="#24577F" BorderThickness="1" Padding="12,6" CornerRadius="0" HorizontalAlignment="Right">
-            <TextBlock Text="v$script:AppVersion" Foreground="#D9F6FF" FontWeight="SemiBold"/>
+            <TextBlock x:Name="ProductVersionText" Text="v1.0.0" Foreground="#D9F6FF" FontWeight="SemiBold"/>
           </Border>
           <Border Background="#143657" BorderBrush="#24577F" BorderThickness="1" Padding="12,10" CornerRadius="0" Margin="0,10,0,0" MinWidth="300">
             <StackPanel>
@@ -6373,11 +6373,12 @@ if ($Cli) {
 
 Write-SedaLog -Level INFO -Message 'Starting GUI.'
 Start-SedaGui
+
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCO/BrRbdyLdEMW
-# F13W/FPJnONvUYNt2lb+ri67MUWO1KCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBk9S/IAa2fhsbm
+# iNKwr4qlH/THul/3hBO7CdGDbVMB7KCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -6510,31 +6511,31 @@ Start-SedaGui
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIDbztqmZ35TsElD5TzLBiIAKn8ntGPPpBFqlim4uRhqlMA0GCSqG
-# SIb3DQEBAQUABIIBgBW3iKe1YefIBJhVRfe7n6R7wFjp4mk68tjGS10j4dp40PDk
-# HC2RKwPPCx1k/kv2vCBT6qYTdP00/emZ/dKbV3ClTkSR0pzL2KAW7dI6IRYTNBHR
-# 3faPTHC1AmLlFGOLxjyq1/9JEp4FpQDdn9sWQD/p7ajFM3MpRAHB6CQvGSJwWHh9
-# UAMMtj4vFGpEMSvmkPpkIGTO1Yy5cY4CN1s+/N7e88VTfvz2RoQGSmU2nh+S389r
-# 3O8RHCQyh2Z6GRI99hU5W2wZlRUQg6gBXhtHnV6okf+j4Mlg5V8yaOP4UtkG7ylB
-# d0Wa9X7z7epO2qskImxuv41Ia9PLx1k26Qy3TyixDpjfBlgL21yJX94/+RCTebFh
-# SB/t03msLCYiLn/wleotZNKsmynR7s5bVunLgFNXz2EwSZINdFlD3z4+U/Cd1nhY
-# nAAGdie1e9USOE+bbg7CCBHO2UKB3WT9Op1Vp5r0rW2nfis9BOw+g2rOl35bsAsH
-# nsyIFJz1zSUlZ4WZKKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIDl0QQN862KFkK5v1IC1oAO5k2WsNvrs4Ig+JPWu+k66MA0GCSqG
+# SIb3DQEBAQUABIIBgCPnP9Q/w8+uNycGEOsOiar2euBwCc+N8LYdeJ6d2Yr0OR7N
+# mB5eMnfJtysqHM4RTnm+XR3wah1d12s2x8SUEV2hAzBpu0GtDo7cW1V5ukX3Nghl
+# W6d7HX1rNfztcMx8kNUZkRZexHf3PsuLMHa/HnmEaPz3SKtgcobQ9R+khtFm88yP
+# Ph9DKQ0JBtrhp7c/kDA15FgJnFapQiiRQm4SOr4IbWyid1kSqgWZk5BEopEisNM9
+# CsvhXf+0csa3tIl+hrKjtjvAL7o8iTiq8ei3ez6dhgth+/7rowoDPg0LJPFoc4dx
+# nLXZRANnbgzeRhDi6CXN9EiqgOewGWK/HbOpeNzbTPojPcdocGl7ffSNX27uAGhP
+# I16N/BNiOukRmacu1BjQ3KBaWQqyHfnsXuThs9+2m0z9snkjMt7BKMG6WPo+2edV
+# YxFfpECPqgmbG3Owi+bTCAafkv6vAXq9N5sOMn0jk5fUYLkCGxqHHFI4PZdmsutP
+# KbhJgioU/7k6pBAMj6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTgwMjQw
-# MDlaMC8GCSqGSIb3DQEJBDEiBCDPSLO43g70u6ypqotybJ9aaqJl/PAY7bV7W+g9
-# 2tjmwDANBgkqhkiG9w0BAQEFAASCAgBCiXjrY5EZJfjMVdcIvsTJ96xcU/dBA4zN
-# 3RdmhE2pYRiheXHZo4ioq21Qkd9Q4Kc7yhmg1d1Rv2+yNKY0XZp5AUbVbFtLFssg
-# Vw5XbXdqTvMmEwrtjxq+YxXbr86M/rqeWeLf72c1Ndw8p5dszXcso1UIW7mHSLnD
-# uHu4/9+EQPRsaS3SWJspbGmQLccV797buYi1aU2xDjz+ZV1PA2l9dQ3Uy8TqOikv
-# MyrEby7aL19jJO6hyqokOg9vb0VrW8eqUKkTvc5sOzWuxn2X67UB6QLO1fNMELFW
-# iKTdEvlgQOQ3O3AJkVM+/akLIjNLfWZe0CryqsuDlrWAXtMIbxs6Y14aPBwbD5He
-# KWlUtw5u3Udejt1vf1xPi9BVTx01RtK3cBn9NTrFxBjvaiahxQvpMWlIT0cjfrFT
-# Wqevdakw6rWQWuYjOpzQHge97NSRRcX2o86S5s/SHHEmAYDVcFCmxYZBhgi8mOau
-# NvSeVUymkIY/NmmSjs9UFBYoWFPl3Q9XKnR62b2bNvvGxYk24WymIJd3vbtK1lEc
-# JZU0SQoYFZmmpor1hGTJUR1xvwYpHR8hLoo0tp7L2hEpezG47m/8bY/PaQEEODqG
-# zSXaV1HaAqKNoGq1DKKemOcOboi2otJ+zdpKtgRtfgNLuPp2xoSc8boM2rhG9UMh
-# LbFOgBa52w==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjMxODIy
+# MzBaMC8GCSqGSIb3DQEJBDEiBCBuLMCFdFp5gSNKsSQQ9eUczO6X2sxNGIYT5QYJ
+# JTh9ZzANBgkqhkiG9w0BAQEFAASCAgA+xKrJsp9UEspKYsIap7w0e+snNulAstEq
+# AzZeFeSZuRwk17PFRXmipJlALiCxg9sWoxC6Tj+WqiZesfy6nSWX3NehnhZGAFiy
+# Sp3LgAo28Iy1vF4C531utls5oWsWqz/k1ZexAZGF46imDp4QMDfEiE33e2I06bJt
+# 0N2J/+2M9Vcw6b283GvzKsly3mSUTQljCRH7ziy9RPP355voEO18Y/CSo9Ccj4KO
+# 40kJvDWz+ifI372sjqOrq9vvoK52WtblL8Qhs6snWaVCdSKuidwF/jVdpx7qHCMe
+# 4zPkQ0fZ0+RRn0Qpzie7X8RklOx5FnzN8tYgYO67MRLl0V9Tb3ZN7XU8xgbGVo8P
+# zE4tGbwLI7PC37ShCI50roYt3ifnqzqC7xu2PVCeMfYi5xQcefcl8z88A9rLVIvM
+# y+oOUXdiDNk/sx67fKuTUSIUOhd31xjQgrgsbUkZWdU3ih2o5Z5jUYyMxisnC11W
+# 4s29UJBRcrRCly1T3Ms0Y/W9UyWNSsmr7t3Acnu2NARz2jRxN4ZNgN902JgMT7Zl
+# 4LPMixVb0FpfAPwN+ksdGIpEeYwk7eye6uJ0fnpkaKSYUSLPy5zNlOfm346pcr0z
+# eZYSzBoDdJd6PQRL8fxio9K+JlhhLDr9DRTPbWJIWUbn8Bjm82aYy8wPuLjbqOME
+# H3fZVCerCA==
 # SIG # End signature block

@@ -3,7 +3,7 @@
 .SYNOPSIS
 Offline interaction, view coverage and export checks for the nine demo applications.
 .VERSION
-1.0.1
+1.0.2
 .NOTES
 Run one application per STA process. No operational handler is loaded.
 #>
@@ -73,6 +73,7 @@ function Save-DemoPreview {
 }
 try{
     $s=. $demoEntryPath -Demo -ValidateOnly
+    if($Application -in @('Analyzer','Windows11')){Assert-Demo ($s.Controls.ProductVersionText.Text -eq 'v1.0.0') 'Visible product version is not 1.0.0.'}
     Assert-Demo ($s.Mode -eq 'Demo') 'Demo startup did not return its state.'
     Assert-Demo ($s.Window.Title -like '*DEMO*') 'Window is not visibly marked as demo.'
     $markup=Get-SmartM365DemoMarkup $demoEntryPath
@@ -146,6 +147,8 @@ try{
         Assert-Demo ($path.StartsWith($s.OutputRoot+[IO.Path]::DirectorySeparatorChar,[StringComparison]::OrdinalIgnoreCase)) ('Export escaped its demo directory: '+$path)
         if($path -like '*.html'){
             $html=[IO.File]::ReadAllText($path)
+            if($Application -eq 'Analyzer'){Assert-Demo ($html -match '<h1>[^<]* v1[.]0[.]0</h1>') 'Analyzer report version is not 1.0.0.'}
+            if($Application -eq 'Windows11'){Assert-Demo ($html -match 'Windows 11 Upgrade Toolkit v1[.]0[.]0</div>') 'Windows 11 report version is not 1.0.0.'}
             Assert-Demo ($html -match 'DEMO' -and $html -match '<html|<!doctype') ('Invalid or unmarked HTML: '+$path)
             Assert-Demo ($html -notmatch [regex]::Escape($env:USERPROFILE)) ('HTML contains a real Windows profile: '+$path)
             foreach($identity in @($env:USERNAME,$env:COMPUTERNAME)){
@@ -190,11 +193,12 @@ try{
     exit 1
 }
 
+
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCdpQdU6fFOVt01
-# 67sI3ZSuEM6flv73jvL2trPP+0pJIaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCxXapLc1Uz56QJ
+# xb7mw3xWDKmvEBGYwvHxYE+Lp/tgfqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -327,31 +331,31 @@ try{
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEINJ8Uqm9Zaqa+t52lqKwSz4ijxAkGvbGD3hYsCVTpo4HMA0GCSqG
-# SIb3DQEBAQUABIIBgACX1LlhzwygYbLnQKrluQo2rZAygIqG/E2bswm4RBG0PU4r
-# vMUvZsKzzBpSuEcQ97AY2lePavjqW51h5HwAYbmQ++i3MVUDbOhwlcdfQ5DSxkze
-# KTyS1iqoatbLFRpjuh6+ASGumHZhZllO2WWHoeco15WON28rckWhSNt+LJAYW8mc
-# CBcs95Rnw4NcsnSJ3eGSmI4SIucCKX2bsGXXVJOFmjFvZaHV3WxZp7vaGbydQJdW
-# KNJ9DTBWvoitiT5uyotZRa0Rg9e6+3jlvqPxHgacqX2gBiS424VaYMuLZA046Owf
-# MojK8EEsb1zE68bDnnqoBuj4arMGurdPyCzNOUA/vgfnDPl32esEdtSOmSP3n5En
-# Fg3xVoBi2V06RQYgPtRkPoQkUcq6MlF1RBsaZzMWlO/clCBk+uVFUt87YJlBN6ie
-# 7dM1Qb1bsg15fr4Rqba32ncVqCZrEIfrr86B/NLcmRFYpTwt5Gtn+cwE0kSBHzsK
-# gu6n7VjkcwGUZAhf4qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIHxZ+Qx2JmXMfiZSRTmMpo/XwGRTrFTddSmFJJ5pGAZKMA0GCSqG
+# SIb3DQEBAQUABIIBgKsZbQMzBExeMCcw1o5UWKMaI5r3eRp93S6qRMbHf5CNMgmM
+# iCRWn/q624EFH/9C4p7KzNLLULUUv4RtqUQ0Q/c2jXtcT25oRajF5TmdBKQtoRZI
+# PtnDizfxBomCZDyS6PCQoK+9H9lZzsYY+6/bJAT3qHWFkaYm3h9KtleDCR8kTTVs
+# tLL2BKG6qLt3sfp8lKLZjvcKxmdWht29NvWWuAuO7jbfw7BRhwwHEm9x9u02BHN3
+# juxyQS/leTffiClX66wI2QlmoDBf28IsAX2yY8P8vOVUesOxYX2wV+MDbEV8LyqR
+# xqa6vpYQ3FEJP0wJjP6GARaKuxSoNgENHFB8x2g735AGLSPu2CkcIEk+nZ3rn/PO
+# VUxw7zWpHFy2WP95VOFAhor3svVfMVorFIQR9W7f2UElCEGPokCJDM1Ige5TNsaf
+# fhFu6Y+Aa+dl8ZmliiUbcXYjj8pAP9ebptWTqRSr8Yf1HJ6ZK/MVwsWIpt5QAZHN
+# ijkkAKeOX9RsOflNCqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTgxMjQ5
-# MzhaMC8GCSqGSIb3DQEJBDEiBCDArWPu4unH1BtDG4ZOU6QJhHEOUMb4ltIHvi18
-# WfuDRzANBgkqhkiG9w0BAQEFAASCAgA4wrH2CN+KLnT2j1RzFXvLsIW6RUhhVn0l
-# +QL51YBLzss9qY7jol9bgtTx9U/cMENMMkheEtIRi1lJTlY5bmgwLU97owzMJSaj
-# i6974hFjnm/Aw2+2aNR7n1u19sow+G3M6Rm/4xEh0GHzMq5L0sBrjdf+em3MB91d
-# LAeaz76/X8WQYar+JaWEGSoCAlSa4gkPtO9kcBxTbgaRt2EyTsyU9pGEtJinxLuw
-# vey+deizD1jVBwHozMVzPj68rk8RRFDmux+BRE+eU+Sa7SpLYhOcMaNJlECv0SRN
-# UArwWbJ10g0E5T2ZKqq2BsnwVTtHfjGJ+ngMu6dHNtP40en8GZDxkwwni1KOYg3p
-# dFZoQm55Z3csprQzraGehStvBpHjOxwzybb3f588Gz9LgxOfinQWK48VA0NPdyJu
-# locrHs+4kk6mOC6aaMjPP4QXne1cHNlCJLXCqbd8QG1ELx3KP0g6Hvtw6qo/jVtr
-# LcTCUdW/vRLlEE26jrAUsv+FvXVwa5k3DpN6peR4fwxUPg5KR6wIg3UEr9gAPUxE
-# /nqBNhIDRBs925BDE0wY0ORyzQH9ybTpfSWv34X1dmNQKp4FGn8psBM4VvyzCHjn
-# NACKgOnaguaCLEeelw/lMNigordPAOba75HN/iUCW+UeXmUmseko41o0kZJ05DiP
-# XwMX18ladw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjMxODIy
+# MzFaMC8GCSqGSIb3DQEJBDEiBCADBj3GknmVyRlCp5e/mruKFq7Ka0OyjYGGjM6G
+# 2mCW+jANBgkqhkiG9w0BAQEFAASCAgBGJuMpNEeR8Z2IHtumXoctICu3etX7URKi
+# 199+SoUBRdVEV6lZr4P7Ifvz/OZq6f0IMM8C1k42B9vjoXE9rtfEgFpIVqjfN5Dy
+# aAJvGhqSr4JI2qDmrHOvGgVFZP1CSqo6o7Nyf8nOoKN/ZemRoD9hJBMPl7VorxxT
+# 9sinNGnERdPGwrjcpKtpOstgSJoqpt+jb+P/du9JKMKbK3A7WjAOU2XaKWkYP94D
+# 6Kgqkse3xW62T+FdWgD1hoTDl2ydqilhWVITVIzOhFNumVaZB9LrX9ROuLhZOkqc
+# lJJljX3vkHNIpC4aG98MmHGcGiE9tNQRewj8f4NURut3GVbJZySP8NmuzYKKlzd6
+# YcSrKIjWu36TQooRlhyHfor0bRCvfN3wAmSPJeGkxB9Xi5gf2cTgZDQy0/twHfWp
+# q7xi3e9KBe/JUnZ6Du38y0ml/vH74FusVUS4DMJJGVJyBirsuDHXy9ECLB5G/f32
+# kiBbcs2UuE9FZTSsqrQqZ3I3YG31EEprPWjJvlTsmsTEcdYABKHV2+OYIsu2zlMX
+# YDiKCBcWIx+RtuTehE4LeNtsxwEZtz/5nNCEFPNzfDeOYTyp3acUNy+vtTYSGD4s
+# iWE4UbhURk53Dkq0qRXXmOggUpOhR9My8aiSINrJ2zZZ9I+YhlyHs07Ls+XNxB7I
+# zO8I3U8GJA==
 # SIG # End signature block

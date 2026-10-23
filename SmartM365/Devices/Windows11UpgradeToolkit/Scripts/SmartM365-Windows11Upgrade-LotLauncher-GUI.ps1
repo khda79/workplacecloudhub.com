@@ -3,7 +3,7 @@
 Starts the Windows 11 Upgrade LOT launcher GUI.
 
 .VERSION
-0.1.55
+1.0.0
 #>
 param(
     [switch]$ValidateOnly,
@@ -1013,7 +1013,7 @@ if (Test-Path -LiteralPath $updateCheckModulePath -PathType Leaf) {
 $xaml = @'
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="SmartM365 Windows 11 Upgrade LOT Launcher"
+        Title="SmartM365 Windows 11 Upgrade LOT Launcher v1.0.0"
         Width="1180" Height="810" MinWidth="1060" MinHeight="720"
         WindowStartupLocation="CenterScreen"
         Background="#F5F8FB" FontFamily="Segoe UI" FontSize="12"
@@ -1110,6 +1110,7 @@ $xaml = @'
                     <Border Background="#E7F3FF" BorderBrush="#B5DCFF" BorderThickness="1" CornerRadius="8" Padding="10,3" HorizontalAlignment="Left" Margin="0,0,0,14">
                         <TextBlock Text="SMARTM365 DEVICES" Foreground="#005A9E" FontWeight="SemiBold"/>
                     </Border>
+                    <TextBlock x:Name="ProductVersionText" Text="v1.0.0" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,4"/>
                     <TextBlock Text="Windows 11 Upgrade LOT Launcher" Foreground="{StaticResource TextBrush}" FontSize="28" FontWeight="SemiBold"/>
                     <TextBlock Text="Prepare and launch guarded Windows 11 upgrade campaigns by LOT or single device." Foreground="{StaticResource MutedBrush}" Margin="0,6,0,0"/>
                 </StackPanel>
@@ -3197,11 +3198,12 @@ try {
 
 [void]$window.ShowDialog()
 
+
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA8ndbtrjGX9Ha/
-# QBEGhH2/dRxJ3ehR9PLxtLkW/BLiPaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDPvqZxmrH5Q47C
+# h5Nid/3Eeg0mWZTp2f0i1Tp1GJMhn6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -3334,31 +3336,31 @@ try {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIIXln4/JlM2u26iozoluURvLE99Hcz5ACb9zrbvF6As0MA0GCSqG
-# SIb3DQEBAQUABIIBgAbmwsIPwopA+52VOXJwrGd5Zg3iFCHObFrEoOqh68gdRaJ8
-# NY5u9ekR7c/yhxTy2DxVPzdYN4k0XfuCcJeaYDdQbIyBQoZ0NUevyfITZ+1t0Byi
-# xsyJva63MZnSNJUxsgjYMbvnJFdUnhrhUvaRcEsunmg+z4TNo5p6s6CCrAOB5XVq
-# T7bZBwzKRRYHp6I0woOa9CN3gsO4vDsCvZZU78jpMNKhjZ22hBzLT5J0JIrob1wM
-# zuxqpkGlX9+0OiHUtOqIhgRL2gUXZgrOkxLiUkX2O0haIRibe8KIPRQP9XFvH0bs
-# FNgudVcxKtXlyBSRplQh3u9bWLm67MBZ8y96h7EpZI+LyyAariOX0mO94PRJy70k
-# PG6bfw7J9BGq0tYST7iWicFUx9BPaL8BeT0eCgekHhOjUaNwbU66wa0cHtEU5/NT
-# EHD3Y3mp5a0T3OC30+gkpvr9RKI10pZZLyHJv9XBaaOFsR23XUQn5YA9qKDmD9eK
-# zwRCNBAUaGaVY78ZwqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIGokO0EuhOspTfhle8WeeTOXBUmWsqMfZV8/aKZUPg8zMA0GCSqG
+# SIb3DQEBAQUABIIBgKAFLVthWGr/eWwF/h8r+7hkSVXhEE9nhQtSBdlG1ygyxHeo
+# /UvABBGIoVreU9U2wbX7pWvnZ30xz/cYhF5IhJcrJ//g1dy7exUBMfFURuVvZpll
+# 5MSr7pEUa3RMiW12cOirDnf8Y8g28r7k/wpMdaAl4FjqdphWbxuyPjK9ilQy90jX
+# oM4fZ7MeQfBjwqw7pHu7gabP2cfHK3EgjtMD8fp5E0I3ssiSJSi0Qlu3DAJ+n9vP
+# IGEFDPvFCDsrotJcm2gvReO/gxOwWhrDL2SrlUQeM/0+nHVvh8HXi25yGn7yWhsd
+# LzB3D9MIIm9/hDcK67x98PQw8WlNCQNeOvAap+LuaEMz7G3/dYQpmKhXSgdm7zl6
+# SthuSbXV0VyWj9xsGacHkveMPZjI/LBkZ4SOAOaIyXSSWkslgSR+MHZUdDKmzpIm
+# w/cogEJkE99ZZzD5tKWMAUvWHnn6PanCgdI6dHhmAid/ImLiXLsTWkggY6AcCBiw
+# CCV/q0pWuKs5VJZhXKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTgwMjQw
-# MTNaMC8GCSqGSIb3DQEJBDEiBCAv6wAUaC8VZSa5pCrqadWilpgivqO7QneZO+IJ
-# SUrkOjANBgkqhkiG9w0BAQEFAASCAgBlY9dlbteZekY/L8i7IK4fluskF3WQYAbA
-# WmX4xcR+l4FpohZ2cHc+/bJxCanAh21g0jhHU8aIvSrrz9pBdvqxTCAIlYxRn3L0
-# r4tPImuqbIpyVlGcbkYpdbatYh2/9QkikWqIa5Ul7RsMgvPZI3nC1D89DCfk4gtX
-# w03m8i7Z7xmjCwvKjLp9PlUtGabaTguqr1iKptsXSgbqifv21xk3IrbVlOZSobqy
-# /3zDy6n5Eczw1rgpF7B2Hizke9cAWQn4x/6Ehi4yXsg/6r8DtrFXUjR2raFSrrSD
-# A4344eJHSINyNl7o1MpPjsvHWLPNGZMYtm4yKtyejIlXh49Ie2CLD5+o35t5QAb1
-# mtbiMqk3Q49GPT8VsIsPQLW1dKg+XNtYEpA+Paf/PQDWkqt2ETknLCrPqLXSwthK
-# IYdVFG0mT1BYNn1gZaAffAMa0CT535jZkyM9mNLxub0GAfDV37LrhC/Hy8DuW+0L
-# wRO3HBdwYDXJwEchB/jRSsr3KJN16X3kBaxMCIgHx7ESjItQJXhC7UR3ZkYJ7Fol
-# 25AsBL6G4do9ECdJ2tGICxUTSmsJar00YlUvGB5+yvCXiYc6jqqZsXFjG7VNIFGG
-# d9xfKD43fo+mw71eFCiBW5M1Tq0NT9rYqArrJzebaFNyZkvzGNK4hqO0Fe0NWCWd
-# FUk0ilhUqA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjMxODIy
+# MzBaMC8GCSqGSIb3DQEJBDEiBCBRV5/JudB5o4SwayLRYLV9sEt95+elzZyFcPMx
+# frYRDzANBgkqhkiG9w0BAQEFAASCAgBrEXrL3x8Pbq0NU8/WREnS78Jju5yc3M97
+# JhqLOPYJAA7ruiCjvCiIAOetf5Rn5O+YiuuxbQbdL8bkSXDFyTd3JYDU0rn35+ID
+# 3YMQGW2de2Rj7hm/NL0o0VP15drbxRpWgMQvMDBN4I3CkFMgvaJBSw8v2L30zioj
+# /6Fni9rqrGJ+7hmHAwLCs+T7BeS0yemUSAat/TB31tfM+tFgNxZSCFdgucwpU2ZR
+# 56e/q28QIqQhn3DxAp4RUEPLLQr6pamy4FKq3XCiIjpfShGexu/ZoPl9AhKrmbH1
+# 5+DyMgzqSdvubHQgLw7Q0UwjEcGe3vrVK0SGeS3cXUHYxd356hOC7RZZ4xEW4B6T
+# 5y0IkT/Wzq06Liy+btZ16C3kuik/sefr/PN8T53WDvL5DtoSYjWnVRXO9j0ErWT0
+# jEgf2FH0iQ0PQWDN2L/DYZh+sJhahivcQf5OCAhzQigHYX7qYh0zYmKBFm8iqmS5
+# ypS9WbF0HjezsowzSk4et4i0ONr/RiNsKP/TWyfdzExfsL6ip3CPAUIiUfAhttlC
+# RFd4PuHCcIuSGbgFtV4SNjEAxI2nj11vhWbq0TqzlDnsi1E6YRQe0FZh+bWHSacp
+# aLUgUkJXoS8iyUj+HR//NeykFxrrEac0Q1J3+OoD9Lag0tcECL/ERTfM3vzeIQRB
+# zhONwna/HA==
 # SIG # End signature block
