@@ -39,9 +39,9 @@ PARAMETERS
   -RiskTopN                  : Number of action-required devices shown in email (default: 10)
 
 VERSION
-  1.53
+  1.54
 .VERSION
-1.53
+1.54
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
     Minimum application permissions: DeviceManagementConfiguration.Read.All, DeviceManagementManagedDevices.Read.All
@@ -106,7 +106,7 @@ if ([string]::IsNullOrWhiteSpace($CsvTenantKey)) { throw 'The effective tenant c
 # ==========================================================
 # Version
 # ==========================================================
-$ScriptVersion = "1.53"
+$ScriptVersion = "1.54"
 
 # ==========================================================
 # App-only authentication parameters
@@ -433,7 +433,7 @@ function Import-SmartM365CorePreflight {
     while ($searchRoot) {
         $modulePath = Join-Path -Path $searchRoot -ChildPath 'Modules\SmartM365.Core\SmartM365.Core.psd1'
         if (Test-Path -LiteralPath $modulePath) {
-            Import-Module -Name $modulePath -MinimumVersion '1.0.87' -Prefix Core -ErrorAction Stop
+            Import-Module -Name $modulePath -MinimumVersion '1.0.103' -Prefix Core -ErrorAction Stop
             return
         }
 
@@ -798,12 +798,7 @@ function Try-GetGraphErrorMessage {
 function Get-GraphHttpStatusCode {
     param([Parameter(Mandatory=$true)]$ErrorRecord)
 
-    try {
-        if ($ErrorRecord.Exception.Response -and $ErrorRecord.Exception.Response.StatusCode) {
-            return [int]$ErrorRecord.Exception.Response.StatusCode
-        }
-    } catch { }
-    return $null
+    return Get-CoreSmartM365GraphErrorStatusCode -ErrorRecord $ErrorRecord
 }
 
 function Get-GraphRetryDelaySeconds {
@@ -812,33 +807,17 @@ function Get-GraphRetryDelaySeconds {
         [Parameter(Mandatory=$true)][int]$Attempt
     )
 
-    $serverDelaySeconds = 0
-    try {
-        $retryAfter = $ErrorRecord.Exception.Response.Headers.RetryAfter
-        if ($retryAfter) {
-            if ($retryAfter.Delta) {
-                $serverDelaySeconds = [math]::Max(1, [int][math]::Ceiling($retryAfter.Delta.TotalSeconds))
-            }
-            elseif ($retryAfter.Date) {
-                $seconds = [int][math]::Ceiling(($retryAfter.Date.UtcDateTime - [datetime]::UtcNow).TotalSeconds)
-                if ($seconds -gt 0) { $serverDelaySeconds = $seconds }
-            }
-        }
-    } catch { }
-
-    # Retry-After can be only a few seconds while the report endpoint remains
-    # throttled. Apply an exponential local floor and still honor a longer
-    # server-requested delay.
-    $exponentialFloor = [math]::Min(300, 15 * [math]::Pow(2, [math]::Max(0, $Attempt - 1)))
-    $localDelaySeconds = [int][math]::Min(300, $exponentialFloor + (Get-Random -Minimum 1 -Maximum 6))
-    return [int][math]::Max($serverDelaySeconds, $localDelaySeconds)
+    # Core supplies Retry-After parsing and jitter. Keep the existing polling
+    # floor (15/30/60/120/240/300s); equal jitter must not shorten it.
+    $wait = Get-CoreSmartM365RetryDelay -Attempt $Attempt -ErrorRecord $ErrorRecord -BaseSeconds 30 -MaximumSeconds 300
+    $pollingFloor = [math]::Min(300, 15 * [math]::Pow(2, [math]::Min(20, [math]::Max(0, $Attempt - 1))))
+    return [int][math]::Max($pollingFloor, $wait.Seconds)
 }
 
 function Test-GraphTransientError {
     param([Parameter(Mandatory=$true)]$ErrorRecord)
 
-    $statusCode = Get-GraphHttpStatusCode -ErrorRecord $ErrorRecord
-    return ($statusCode -eq 429 -or ($statusCode -ge 500 -and $statusCode -le 599))
+    return (Test-CoreSmartM365GraphRetryableError -ErrorRecord $ErrorRecord).Retry
 }
 
 function Invoke-GraphRestMethodWithRetry {
@@ -1052,29 +1031,11 @@ function Download-ExportZip {
     param(
         [Parameter(Mandatory=$true)][string]$DownloadUrl,
         [Parameter(Mandatory=$true)][string]$DestinationZipPath,
-        [Parameter()][int]$MaxAttempts = 4
+        [Parameter()][int]$MaxAttempts = 6
     )
 
-    # The export url is a pre-signed (SAS) blob url: it must be downloaded
-    # without the Graph bearer token, which blob storage rejects with 403.
-    # Right after the job completes the blob can briefly be unavailable, so
-    # retry with a short backoff and keep the real storage error in the log.
     Write-Log "Downloading export ZIP..." "INFO" "DATA"
-    for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
-        if (Test-Path $DestinationZipPath) { Remove-Item -Path $DestinationZipPath -Force -ErrorAction SilentlyContinue }
-        try {
-            Invoke-WebRequest -Uri $DownloadUrl -OutFile $DestinationZipPath -UseBasicParsing
-            break
-        }
-        catch {
-            $statusCode = Get-GraphHttpStatusCode -ErrorRecord $_
-            if ($attempt -ge $MaxAttempts) { throw "Export ZIP download failed after $MaxAttempts attempt(s). Status=$statusCode; Error=$($_.Exception.Message)" }
-            $delay = 5 * [int][math]::Pow(2, $attempt - 1)
-            Write-Log "Export ZIP download failed. Status=$statusCode; attempt $attempt/$MaxAttempts; waiting ${delay}s. Error=$($_.Exception.Message)" "WARN" "DATA"
-            Start-Sleep -Seconds $delay
-        }
-    }
-    if (-not (Test-Path $DestinationZipPath)) { throw "ZIP download failed: $DestinationZipPath not found." }
+    Invoke-CoreSmartM365ExportFileDownload -Url $DownloadUrl -OutFile $DestinationZipPath -MaxAttempts $MaxAttempts -Operation 'Windows Update export ZIP download' | Out-Null
 }
 
 function Extract-FirstCsvFromZip {
