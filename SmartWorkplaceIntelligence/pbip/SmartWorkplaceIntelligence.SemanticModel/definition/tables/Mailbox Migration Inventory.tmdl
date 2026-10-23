@@ -48,6 +48,18 @@ table 'Mailbox Migration Inventory'
 		displayFolder: Migration planning
 		lineageTag: 384327fe-d9be-4426-9578-43b375f003d7
 
+	/// All local inventory records explicitly attributed to Exchange Server 2016. This population is distinct from unified mailbox evidence.
+	measure 'Local Mailboxes (2016)' = CALCULATE([Local Mailbox Inventory Records], KEEPFILTERS('Mailbox Migration Inventory'[Exchange Version] = "Exchange Server 2016"))
+		formatString: #,0
+		displayFolder: Report refinement
+		lineageTag: e5c5e74a-bbac-495e-8b39-53cab23b5c99
+
+	/// All local inventory records explicitly attributed to Exchange Server 2019 or SE. Unknown versions are excluded.
+	measure 'Local Mailboxes (2019/SE)' = CALCULATE([Local Mailbox Inventory Records], KEEPFILTERS('Mailbox Migration Inventory'[Exchange Version] IN {"Exchange Server 2019", "Exchange Server SE"}))
+		formatString: #,0
+		displayFolder: Report refinement
+		lineageTag: 792e0720-c066-4e3e-a1f1-bb5bdc745d69
+
 	/// Mailbox GUID from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
 	column 'Mailbox GUID'
 		dataType: string

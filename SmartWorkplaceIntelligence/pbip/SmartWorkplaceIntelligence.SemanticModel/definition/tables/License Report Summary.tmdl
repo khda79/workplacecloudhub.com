@@ -493,6 +493,38 @@ table 'License Report Summary'
 		displayFolder: Licensing | Overview display
 		lineageTag: 191eeb9c-9e0c-4960-9805-fa9760bf7160
 
+	/// Alert value is red only when the qualified distinct-user count is positive.
+	measure 'License Report Awaiting Capacity Color' = VAR _value = [License Report Awaiting Capacity] RETURN IF(NOT ISBLANK(_value) && _value > 0, "#B91C1C", "#183153")
+		formatString: @
+		displayFolder: Presentation
+		lineageTag: fdc3a98f-e15a-4a51-ae6e-91d83f1f9200
+
+	/// Same complete-family selection and qualification as the selected label. Blank or unselected remains neutral.
+	measure 'License Selected Awaiting Capacity Color' =
+			VAR _allowed = FILTER(ALL('License Report Summary'[Product]), CALCULATE([License Report Inventory Selection Included]) = 1)
+			VAR _scope = FILTER(_allowed, 'License Report Summary'[Product] IN {"Microsoft 365 F1", "Microsoft 365 F3", "Microsoft 365 E3", "Microsoft 365 E5"})
+			VAR _value = IF(COUNTROWS(_scope) > 0, CALCULATE([License Report Awaiting Capacity], KEEPFILTERS(_scope)))
+			RETURN IF(NOT ISBLANK(_value) && _value > 0, "#B91C1C", "#183153")
+		formatString: @
+		displayFolder: Presentation
+		lineageTag: b30095dd-59f4-4bf5-8be3-3c21acd11a2c
+
+	/// Alert value is red only when the qualified distinct-user count is positive.
+	measure 'License Report Licensing Errors Color' = VAR _value = [License Report Licensing Errors] RETURN IF(NOT ISBLANK(_value) && _value > 0, "#B91C1C", "#183153")
+		formatString: @
+		displayFolder: Presentation
+		lineageTag: c304713d-fb4a-4048-97e8-8ba506c23900
+
+	/// Same complete-family selection and qualification as the selected label. Blank or unselected remains neutral.
+	measure 'License Selected Licensing Errors Color' =
+			VAR _allowed = FILTER(ALL('License Report Summary'[Product]), CALCULATE([License Report Inventory Selection Included]) = 1)
+			VAR _scope = FILTER(_allowed, 'License Report Summary'[Product] IN {"Microsoft 365 F1", "Microsoft 365 F3", "Microsoft 365 E3", "Microsoft 365 E5"})
+			VAR _value = IF(COUNTROWS(_scope) > 0, CALCULATE([License Report Licensing Errors], KEEPFILTERS(_scope)))
+			RETURN IF(NOT ISBLANK(_value) && _value > 0, "#B91C1C", "#183153")
+		formatString: @
+		displayFolder: Presentation
+		lineageTag: 0fe8e556-34f7-427f-b011-dcef9b30d505
+
 	column 'Snapshot ID'
 		dataType: string
 		lineageTag: 39db6443-fe08-4820-8bd9-842d4d0ae30a

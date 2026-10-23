@@ -358,7 +358,8 @@ class WorkbookTests(unittest.TestCase):
             self.assertEqual(table.get('ref'), 'A7:I8')
             self.assertEqual([c.get('name') for c in table.findall('.//{*}tableColumn')], subject.HEADERS[:-1])
             text = ''.join(z.read(n).decode() for n in z.namelist() if n.endswith('.xml'))
-            self.assertNotIn('Source Reference', text)
+            # The Guide may explain the removed column; the input table must not contain it.
+            self.assertNotIn('Source Reference', z.read('xl/worksheets/sheet1.xml').decode())
             self.assertIsNone(re.search(r'[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+', text))
             self.assertNotIn('SourceData', text)
 

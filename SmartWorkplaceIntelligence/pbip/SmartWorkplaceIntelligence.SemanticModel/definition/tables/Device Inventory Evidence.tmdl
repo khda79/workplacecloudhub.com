@@ -763,6 +763,269 @@ table 'Device Inventory Evidence'
 		summarizeBy: none
 		sourceColumn: Loaded Batch ID
 
+	/// Observed AD creation value copied as source text through one exact native identity and one loaded batch. Culture and timezone are not inferred; consult the qualification column.
+	column 'AD Created (source)' =
+			VAR _batch = 'Device Inventory Evidence'[Loaded Batch ID]
+			VAR _sourceId = TRIM ( 'Device Inventory Evidence'[Device Source ID] )
+			VAR _managedRows = FILTER ( 'Native Managed Device Evidence', 'Native Managed Device Evidence'[ManagedDeviceId] == _sourceId && 'Native Managed Device Evidence'[Loaded Batch ID] == _batch )
+			VAR _managedCount = COUNTROWS ( _managedRows )
+			VAR _managedKey = MAXX ( _managedRows, 'Native Managed Device Evidence'[TenantDeviceKey] )
+			VAR _nativeRows = FILTER ( 'Native Device Evidence', 'Native Device Evidence'[TenantDeviceKey] == _managedKey && 'Native Device Evidence'[Loaded Batch ID] == _batch )
+			VAR _nativeCount = COUNTROWS ( _nativeRows )
+			VAR _nativeKey = MAXX ( _nativeRows, 'Native Device Evidence'[TenantDeviceKey] )
+			VAR _adRows = FILTER ( 'AD Computer Evidence', 'AD Computer Evidence'[TenantDeviceKey] == _nativeKey && 'AD Computer Evidence'[Loaded Batch ID] == _batch && 'AD Computer Evidence'[CloudMatchStatus] == "Unique native SID" )
+			VAR _adCount = COUNTROWS ( _adRows )
+			RETURN
+			    IF ( NOT ISBLANK ( _batch ) && _sourceId <> "" && _managedCount = 1 && NOT ISBLANK ( _managedKey ) && _nativeCount = 1 && NOT ISBLANK ( _nativeKey ) && _adCount = 1, MAXX ( _adRows, 'AD Computer Evidence'[CreationRaw] ), BLANK () )
+		dataType: string
+		displayFolder: Account lifecycle
+		lineageTag: c12dd166-f980-4aeb-9cb9-bf1dd6ac6641
+		summarizeBy: none
+
+	/// Source date qualification and identity coverage; unqualified source text is never relabeled as UTC.
+	column 'AD Creation Qualification' =
+			VAR _batch = 'Device Inventory Evidence'[Loaded Batch ID]
+			VAR _sourceId = TRIM ( 'Device Inventory Evidence'[Device Source ID] )
+			VAR _managedRows = FILTER ( 'Native Managed Device Evidence', 'Native Managed Device Evidence'[ManagedDeviceId] == _sourceId && 'Native Managed Device Evidence'[Loaded Batch ID] == _batch )
+			VAR _managedCount = COUNTROWS ( _managedRows )
+			VAR _managedKey = MAXX ( _managedRows, 'Native Managed Device Evidence'[TenantDeviceKey] )
+			VAR _nativeRows = FILTER ( 'Native Device Evidence', 'Native Device Evidence'[TenantDeviceKey] == _managedKey && 'Native Device Evidence'[Loaded Batch ID] == _batch )
+			VAR _nativeCount = COUNTROWS ( _nativeRows )
+			VAR _nativeKey = MAXX ( _nativeRows, 'Native Device Evidence'[TenantDeviceKey] )
+			VAR _adRows = FILTER ( 'AD Computer Evidence', 'AD Computer Evidence'[TenantDeviceKey] == _nativeKey && 'AD Computer Evidence'[Loaded Batch ID] == _batch && 'AD Computer Evidence'[CloudMatchStatus] == "Unique native SID" )
+			VAR _adCount = COUNTROWS ( _adRows )
+			RETURN
+			    IF ( NOT ISBLANK ( _batch ) && _sourceId <> "" && _managedCount = 1 && NOT ISBLANK ( _managedKey ) && _nativeCount = 1 && NOT ISBLANK ( _nativeKey ) && _adCount = 1, COALESCE ( MAXX ( _adRows, 'AD Computer Evidence'[CreationStatus] ), "Not collected" ), "Identity unresolved or ambiguous" )
+		dataType: string
+		displayFolder: Account lifecycle
+		lineageTag: 2b492b72-4b7c-4177-87f9-c7b111a29704
+		summarizeBy: none
+
+	/// UTC date only when the source explicitly qualifies timezone and format, with one native identity in the same loaded batch. No earliest-date fallback.
+	column 'AD Created UTC' =
+			VAR _batch = 'Device Inventory Evidence'[Loaded Batch ID]
+			VAR _sourceId = TRIM ( 'Device Inventory Evidence'[Device Source ID] )
+			VAR _managedRows = FILTER ( 'Native Managed Device Evidence', 'Native Managed Device Evidence'[ManagedDeviceId] == _sourceId && 'Native Managed Device Evidence'[Loaded Batch ID] == _batch )
+			VAR _managedCount = COUNTROWS ( _managedRows )
+			VAR _managedKey = MAXX ( _managedRows, 'Native Managed Device Evidence'[TenantDeviceKey] )
+			VAR _nativeRows = FILTER ( 'Native Device Evidence', 'Native Device Evidence'[TenantDeviceKey] == _managedKey && 'Native Device Evidence'[Loaded Batch ID] == _batch )
+			VAR _nativeCount = COUNTROWS ( _nativeRows )
+			VAR _nativeKey = MAXX ( _nativeRows, 'Native Device Evidence'[TenantDeviceKey] )
+			VAR _adRows = FILTER ( 'AD Computer Evidence', 'AD Computer Evidence'[TenantDeviceKey] == _nativeKey && 'AD Computer Evidence'[Loaded Batch ID] == _batch && 'AD Computer Evidence'[CloudMatchStatus] == "Unique native SID" )
+			VAR _adCount = COUNTROWS ( _adRows )
+			RETURN
+			    IF ( NOT ISBLANK ( _batch ) && _sourceId <> "" && _managedCount = 1 && NOT ISBLANK ( _managedKey ) && _nativeCount = 1 && NOT ISBLANK ( _nativeKey ) && _adCount = 1 && MAXX ( _adRows, 'AD Computer Evidence'[CreationStatus] ) == "UTC qualified", MAXX ( _adRows, 'AD Computer Evidence'[CreationUtcDateTime] ), BLANK () )
+		dataType: dateTime
+		isHidden
+		formatString: yyyy-MM-dd HH:mm:ss
+		displayFolder: Account lifecycle
+		lineageTag: 531185dc-4da1-41ae-b9b5-d586b6f2ea2b
+		summarizeBy: none
+
+	/// Observed AD modification value copied as source text through one exact native identity and one loaded batch. Culture and timezone are not inferred; consult the qualification column.
+	column 'AD Modified (source)' =
+			VAR _batch = 'Device Inventory Evidence'[Loaded Batch ID]
+			VAR _sourceId = TRIM ( 'Device Inventory Evidence'[Device Source ID] )
+			VAR _managedRows = FILTER ( 'Native Managed Device Evidence', 'Native Managed Device Evidence'[ManagedDeviceId] == _sourceId && 'Native Managed Device Evidence'[Loaded Batch ID] == _batch )
+			VAR _managedCount = COUNTROWS ( _managedRows )
+			VAR _managedKey = MAXX ( _managedRows, 'Native Managed Device Evidence'[TenantDeviceKey] )
+			VAR _nativeRows = FILTER ( 'Native Device Evidence', 'Native Device Evidence'[TenantDeviceKey] == _managedKey && 'Native Device Evidence'[Loaded Batch ID] == _batch )
+			VAR _nativeCount = COUNTROWS ( _nativeRows )
+			VAR _nativeKey = MAXX ( _nativeRows, 'Native Device Evidence'[TenantDeviceKey] )
+			VAR _adRows = FILTER ( 'AD Computer Evidence', 'AD Computer Evidence'[TenantDeviceKey] == _nativeKey && 'AD Computer Evidence'[Loaded Batch ID] == _batch && 'AD Computer Evidence'[CloudMatchStatus] == "Unique native SID" )
+			VAR _adCount = COUNTROWS ( _adRows )
+			RETURN
+			    IF ( NOT ISBLANK ( _batch ) && _sourceId <> "" && _managedCount = 1 && NOT ISBLANK ( _managedKey ) && _nativeCount = 1 && NOT ISBLANK ( _nativeKey ) && _adCount = 1, MAXX ( _adRows, 'AD Computer Evidence'[ModificationRaw] ), BLANK () )
+		dataType: string
+		displayFolder: Account lifecycle
+		lineageTag: 3f9c9495-8239-49a5-b58a-9b0b2b5234b9
+		summarizeBy: none
+
+	/// Source date qualification and identity coverage; unqualified source text is never relabeled as UTC.
+	column 'AD Modification Qualification' =
+			VAR _batch = 'Device Inventory Evidence'[Loaded Batch ID]
+			VAR _sourceId = TRIM ( 'Device Inventory Evidence'[Device Source ID] )
+			VAR _managedRows = FILTER ( 'Native Managed Device Evidence', 'Native Managed Device Evidence'[ManagedDeviceId] == _sourceId && 'Native Managed Device Evidence'[Loaded Batch ID] == _batch )
+			VAR _managedCount = COUNTROWS ( _managedRows )
+			VAR _managedKey = MAXX ( _managedRows, 'Native Managed Device Evidence'[TenantDeviceKey] )
+			VAR _nativeRows = FILTER ( 'Native Device Evidence', 'Native Device Evidence'[TenantDeviceKey] == _managedKey && 'Native Device Evidence'[Loaded Batch ID] == _batch )
+			VAR _nativeCount = COUNTROWS ( _nativeRows )
+			VAR _nativeKey = MAXX ( _nativeRows, 'Native Device Evidence'[TenantDeviceKey] )
+			VAR _adRows = FILTER ( 'AD Computer Evidence', 'AD Computer Evidence'[TenantDeviceKey] == _nativeKey && 'AD Computer Evidence'[Loaded Batch ID] == _batch && 'AD Computer Evidence'[CloudMatchStatus] == "Unique native SID" )
+			VAR _adCount = COUNTROWS ( _adRows )
+			RETURN
+			    IF ( NOT ISBLANK ( _batch ) && _sourceId <> "" && _managedCount = 1 && NOT ISBLANK ( _managedKey ) && _nativeCount = 1 && NOT ISBLANK ( _nativeKey ) && _adCount = 1, COALESCE ( MAXX ( _adRows, 'AD Computer Evidence'[ModificationStatus] ), "Not collected" ), "Identity unresolved or ambiguous" )
+		dataType: string
+		displayFolder: Account lifecycle
+		lineageTag: 66e31fec-1845-4c00-8535-f74a61fb9b17
+		summarizeBy: none
+
+	/// UTC date only when the source explicitly qualifies timezone and format, with one native identity in the same loaded batch. No earliest-date fallback.
+	column 'AD Modified UTC' =
+			VAR _batch = 'Device Inventory Evidence'[Loaded Batch ID]
+			VAR _sourceId = TRIM ( 'Device Inventory Evidence'[Device Source ID] )
+			VAR _managedRows = FILTER ( 'Native Managed Device Evidence', 'Native Managed Device Evidence'[ManagedDeviceId] == _sourceId && 'Native Managed Device Evidence'[Loaded Batch ID] == _batch )
+			VAR _managedCount = COUNTROWS ( _managedRows )
+			VAR _managedKey = MAXX ( _managedRows, 'Native Managed Device Evidence'[TenantDeviceKey] )
+			VAR _nativeRows = FILTER ( 'Native Device Evidence', 'Native Device Evidence'[TenantDeviceKey] == _managedKey && 'Native Device Evidence'[Loaded Batch ID] == _batch )
+			VAR _nativeCount = COUNTROWS ( _nativeRows )
+			VAR _nativeKey = MAXX ( _nativeRows, 'Native Device Evidence'[TenantDeviceKey] )
+			VAR _adRows = FILTER ( 'AD Computer Evidence', 'AD Computer Evidence'[TenantDeviceKey] == _nativeKey && 'AD Computer Evidence'[Loaded Batch ID] == _batch && 'AD Computer Evidence'[CloudMatchStatus] == "Unique native SID" )
+			VAR _adCount = COUNTROWS ( _adRows )
+			RETURN
+			    IF ( NOT ISBLANK ( _batch ) && _sourceId <> "" && _managedCount = 1 && NOT ISBLANK ( _managedKey ) && _nativeCount = 1 && NOT ISBLANK ( _nativeKey ) && _adCount = 1 && MAXX ( _adRows, 'AD Computer Evidence'[ModificationStatus] ) == "UTC qualified", MAXX ( _adRows, 'AD Computer Evidence'[ModificationUtcDateTime] ), BLANK () )
+		dataType: dateTime
+		isHidden
+		formatString: yyyy-MM-dd HH:mm:ss
+		displayFolder: Account lifecycle
+		lineageTag: ad76ead5-7a62-4688-98eb-a011f6619087
+		summarizeBy: none
+
+	/// Observed Entra creation value copied as source text through one exact native identity and one loaded batch. Culture and timezone are not inferred; consult the qualification column.
+	column 'Entra Created (source)' =
+			VAR _batch = 'Device Inventory Evidence'[Loaded Batch ID]
+			VAR _sourceId = TRIM ( 'Device Inventory Evidence'[Device Source ID] )
+			VAR _managedRows = FILTER ( 'Native Managed Device Evidence', 'Native Managed Device Evidence'[ManagedDeviceId] == _sourceId && 'Native Managed Device Evidence'[Loaded Batch ID] == _batch )
+			VAR _managedCount = COUNTROWS ( _managedRows )
+			VAR _managedKey = MAXX ( _managedRows, 'Native Managed Device Evidence'[TenantDeviceKey] )
+			VAR _nativeRows = FILTER ( 'Native Device Evidence', 'Native Device Evidence'[TenantDeviceKey] == _managedKey && 'Native Device Evidence'[Loaded Batch ID] == _batch )
+			VAR _nativeCount = COUNTROWS ( _nativeRows )
+			VAR _nativeKey = MAXX ( _nativeRows, 'Native Device Evidence'[TenantDeviceKey] )
+			RETURN
+			    IF ( NOT ISBLANK ( _batch ) && _sourceId <> "" && _managedCount = 1 && NOT ISBLANK ( _managedKey ) && _nativeCount = 1, MAXX ( _nativeRows, 'Native Device Evidence'[CreationRaw] ), BLANK () )
+		dataType: string
+		displayFolder: Account lifecycle
+		lineageTag: cc1ce2f5-f1ac-4911-9964-b34969c66fad
+		summarizeBy: none
+
+	/// Source date qualification and identity coverage; unqualified source text is never relabeled as UTC.
+	column 'Entra Creation Qualification' =
+			VAR _batch = 'Device Inventory Evidence'[Loaded Batch ID]
+			VAR _sourceId = TRIM ( 'Device Inventory Evidence'[Device Source ID] )
+			VAR _managedRows = FILTER ( 'Native Managed Device Evidence', 'Native Managed Device Evidence'[ManagedDeviceId] == _sourceId && 'Native Managed Device Evidence'[Loaded Batch ID] == _batch )
+			VAR _managedCount = COUNTROWS ( _managedRows )
+			VAR _managedKey = MAXX ( _managedRows, 'Native Managed Device Evidence'[TenantDeviceKey] )
+			VAR _nativeRows = FILTER ( 'Native Device Evidence', 'Native Device Evidence'[TenantDeviceKey] == _managedKey && 'Native Device Evidence'[Loaded Batch ID] == _batch )
+			VAR _nativeCount = COUNTROWS ( _nativeRows )
+			VAR _nativeKey = MAXX ( _nativeRows, 'Native Device Evidence'[TenantDeviceKey] )
+			RETURN
+			    IF ( NOT ISBLANK ( _batch ) && _sourceId <> "" && _managedCount = 1 && NOT ISBLANK ( _managedKey ) && _nativeCount = 1, COALESCE ( MAXX ( _nativeRows, 'Native Device Evidence'[CreationStatus] ), "Not collected" ), "Identity unresolved or ambiguous" )
+		dataType: string
+		displayFolder: Account lifecycle
+		lineageTag: 1d368164-f76f-4bbc-912a-ecd90a540a18
+		summarizeBy: none
+
+	/// UTC date only when the source explicitly qualifies timezone and format, with one native identity in the same loaded batch. No earliest-date fallback.
+	column 'Entra Created UTC' =
+			VAR _batch = 'Device Inventory Evidence'[Loaded Batch ID]
+			VAR _sourceId = TRIM ( 'Device Inventory Evidence'[Device Source ID] )
+			VAR _managedRows = FILTER ( 'Native Managed Device Evidence', 'Native Managed Device Evidence'[ManagedDeviceId] == _sourceId && 'Native Managed Device Evidence'[Loaded Batch ID] == _batch )
+			VAR _managedCount = COUNTROWS ( _managedRows )
+			VAR _managedKey = MAXX ( _managedRows, 'Native Managed Device Evidence'[TenantDeviceKey] )
+			VAR _nativeRows = FILTER ( 'Native Device Evidence', 'Native Device Evidence'[TenantDeviceKey] == _managedKey && 'Native Device Evidence'[Loaded Batch ID] == _batch )
+			VAR _nativeCount = COUNTROWS ( _nativeRows )
+			VAR _nativeKey = MAXX ( _nativeRows, 'Native Device Evidence'[TenantDeviceKey] )
+			RETURN
+			    IF ( NOT ISBLANK ( _batch ) && _sourceId <> "" && _managedCount = 1 && NOT ISBLANK ( _managedKey ) && _nativeCount = 1 && MAXX ( _nativeRows, 'Native Device Evidence'[CreationStatus] ) == "UTC qualified", MAXX ( _nativeRows, 'Native Device Evidence'[CreationUtcDateTime] ), BLANK () )
+		dataType: dateTime
+		isHidden
+		formatString: yyyy-MM-dd HH:mm:ss
+		displayFolder: Account lifecycle
+		lineageTag: cb98c90e-a550-40cb-9d7b-867cc1348c24
+		summarizeBy: none
+
+	/// Observed Entra modification value copied as source text through one exact native identity and one loaded batch. Culture and timezone are not inferred; consult the qualification column.
+	column 'Entra Modified (source)' =
+			VAR _batch = 'Device Inventory Evidence'[Loaded Batch ID]
+			VAR _sourceId = TRIM ( 'Device Inventory Evidence'[Device Source ID] )
+			VAR _managedRows = FILTER ( 'Native Managed Device Evidence', 'Native Managed Device Evidence'[ManagedDeviceId] == _sourceId && 'Native Managed Device Evidence'[Loaded Batch ID] == _batch )
+			VAR _managedCount = COUNTROWS ( _managedRows )
+			VAR _managedKey = MAXX ( _managedRows, 'Native Managed Device Evidence'[TenantDeviceKey] )
+			VAR _nativeRows = FILTER ( 'Native Device Evidence', 'Native Device Evidence'[TenantDeviceKey] == _managedKey && 'Native Device Evidence'[Loaded Batch ID] == _batch )
+			VAR _nativeCount = COUNTROWS ( _nativeRows )
+			VAR _nativeKey = MAXX ( _nativeRows, 'Native Device Evidence'[TenantDeviceKey] )
+			RETURN
+			    IF ( NOT ISBLANK ( _batch ) && _sourceId <> "" && _managedCount = 1 && NOT ISBLANK ( _managedKey ) && _nativeCount = 1, MAXX ( _nativeRows, 'Native Device Evidence'[ModificationRaw] ), BLANK () )
+		dataType: string
+		displayFolder: Account lifecycle
+		lineageTag: afab8725-c686-4955-8793-273b51afe61e
+		summarizeBy: none
+
+	/// Source date qualification and identity coverage; unqualified source text is never relabeled as UTC.
+	column 'Entra Modification Qualification' =
+			VAR _batch = 'Device Inventory Evidence'[Loaded Batch ID]
+			VAR _sourceId = TRIM ( 'Device Inventory Evidence'[Device Source ID] )
+			VAR _managedRows = FILTER ( 'Native Managed Device Evidence', 'Native Managed Device Evidence'[ManagedDeviceId] == _sourceId && 'Native Managed Device Evidence'[Loaded Batch ID] == _batch )
+			VAR _managedCount = COUNTROWS ( _managedRows )
+			VAR _managedKey = MAXX ( _managedRows, 'Native Managed Device Evidence'[TenantDeviceKey] )
+			VAR _nativeRows = FILTER ( 'Native Device Evidence', 'Native Device Evidence'[TenantDeviceKey] == _managedKey && 'Native Device Evidence'[Loaded Batch ID] == _batch )
+			VAR _nativeCount = COUNTROWS ( _nativeRows )
+			VAR _nativeKey = MAXX ( _nativeRows, 'Native Device Evidence'[TenantDeviceKey] )
+			RETURN
+			    IF ( NOT ISBLANK ( _batch ) && _sourceId <> "" && _managedCount = 1 && NOT ISBLANK ( _managedKey ) && _nativeCount = 1, COALESCE ( MAXX ( _nativeRows, 'Native Device Evidence'[ModificationStatus] ), "Not collected" ), "Identity unresolved or ambiguous" )
+		dataType: string
+		displayFolder: Account lifecycle
+		lineageTag: 11399f6e-edb6-44fe-9e6f-08490878af45
+		summarizeBy: none
+
+	/// UTC date only when the source explicitly qualifies timezone and format, with one native identity in the same loaded batch. No earliest-date fallback.
+	column 'Entra Modified UTC' =
+			VAR _batch = 'Device Inventory Evidence'[Loaded Batch ID]
+			VAR _sourceId = TRIM ( 'Device Inventory Evidence'[Device Source ID] )
+			VAR _managedRows = FILTER ( 'Native Managed Device Evidence', 'Native Managed Device Evidence'[ManagedDeviceId] == _sourceId && 'Native Managed Device Evidence'[Loaded Batch ID] == _batch )
+			VAR _managedCount = COUNTROWS ( _managedRows )
+			VAR _managedKey = MAXX ( _managedRows, 'Native Managed Device Evidence'[TenantDeviceKey] )
+			VAR _nativeRows = FILTER ( 'Native Device Evidence', 'Native Device Evidence'[TenantDeviceKey] == _managedKey && 'Native Device Evidence'[Loaded Batch ID] == _batch )
+			VAR _nativeCount = COUNTROWS ( _nativeRows )
+			VAR _nativeKey = MAXX ( _nativeRows, 'Native Device Evidence'[TenantDeviceKey] )
+			RETURN
+			    IF ( NOT ISBLANK ( _batch ) && _sourceId <> "" && _managedCount = 1 && NOT ISBLANK ( _managedKey ) && _nativeCount = 1 && MAXX ( _nativeRows, 'Native Device Evidence'[ModificationStatus] ) == "UTC qualified", MAXX ( _nativeRows, 'Native Device Evidence'[ModificationUtcDateTime] ), BLANK () )
+		dataType: dateTime
+		isHidden
+		formatString: yyyy-MM-dd HH:mm:ss
+		displayFolder: Account lifecycle
+		lineageTag: fd50dc1a-08fe-4b9b-9142-7c47276f9ae0
+		summarizeBy: none
+
+	/// Display true/false only when the source explicitly marks PasswordExpiryStatus Observed. Unknown remains Unknown; nullable Boolean storage is never used as proof of false.
+	column 'AD Password Expired' =
+			VAR _batch = 'Device Inventory Evidence'[Loaded Batch ID]
+			VAR _sourceId = TRIM ( 'Device Inventory Evidence'[Device Source ID] )
+			VAR _managedRows = FILTER ( 'Native Managed Device Evidence', 'Native Managed Device Evidence'[ManagedDeviceId] == _sourceId && 'Native Managed Device Evidence'[Loaded Batch ID] == _batch )
+			VAR _managedCount = COUNTROWS ( _managedRows )
+			VAR _managedKey = MAXX ( _managedRows, 'Native Managed Device Evidence'[TenantDeviceKey] )
+			VAR _nativeRows = FILTER ( 'Native Device Evidence', 'Native Device Evidence'[TenantDeviceKey] == _managedKey && 'Native Device Evidence'[Loaded Batch ID] == _batch )
+			VAR _nativeCount = COUNTROWS ( _nativeRows )
+			VAR _nativeKey = MAXX ( _nativeRows, 'Native Device Evidence'[TenantDeviceKey] )
+			VAR _adRows = FILTER ( 'AD Computer Evidence', 'AD Computer Evidence'[TenantDeviceKey] == _nativeKey && 'AD Computer Evidence'[Loaded Batch ID] == _batch && 'AD Computer Evidence'[CloudMatchStatus] == "Unique native SID" )
+			VAR _adCount = COUNTROWS ( _adRows )
+			VAR _status = MAXX ( _adRows, 'AD Computer Evidence'[PasswordExpiryStatus] )
+			VAR _observed = MAXX ( _adRows, IF ( 'AD Computer Evidence'[PasswordExpired], 1, 0 ) )
+			RETURN IF ( _nativeCount=1 && _sourceId<>"" && NOT ISBLANK(_nativeKey) && _managedCount=1 && NOT ISBLANK(_managedKey) && _status = "Observed" && COUNTROWS(_adRows)=1 && NOT ISBLANK(_batch), IF(_observed=1,"true","false"),"Unknown")
+		dataType: string
+		displayFolder: Account lifecycle
+		lineageTag: d69f29fc-05c0-48dd-9b98-bf1301d4dbeb
+		summarizeBy: none
+
+	/// Observed/Not collected from the explicit PasswordExpired field, or identity resolution limitation.
+	column 'AD Password Expiry Status' =
+			VAR _batch = 'Device Inventory Evidence'[Loaded Batch ID]
+			VAR _sourceId = TRIM ( 'Device Inventory Evidence'[Device Source ID] )
+			VAR _managedRows = FILTER ( 'Native Managed Device Evidence', 'Native Managed Device Evidence'[ManagedDeviceId] == _sourceId && 'Native Managed Device Evidence'[Loaded Batch ID] == _batch )
+			VAR _managedCount = COUNTROWS ( _managedRows )
+			VAR _managedKey = MAXX ( _managedRows, 'Native Managed Device Evidence'[TenantDeviceKey] )
+			VAR _nativeRows = FILTER ( 'Native Device Evidence', 'Native Device Evidence'[TenantDeviceKey] == _managedKey && 'Native Device Evidence'[Loaded Batch ID] == _batch )
+			VAR _nativeCount = COUNTROWS ( _nativeRows )
+			VAR _nativeKey = MAXX ( _nativeRows, 'Native Device Evidence'[TenantDeviceKey] )
+			VAR _adRows = FILTER ( 'AD Computer Evidence', 'AD Computer Evidence'[TenantDeviceKey] == _nativeKey && 'AD Computer Evidence'[Loaded Batch ID] == _batch && 'AD Computer Evidence'[CloudMatchStatus] == "Unique native SID" )
+			VAR _adCount = COUNTROWS ( _adRows )
+			RETURN
+			    IF ( NOT ISBLANK ( _batch ) && _sourceId <> "" && _managedCount = 1 && NOT ISBLANK ( _managedKey ) && _nativeCount = 1 && NOT ISBLANK ( _nativeKey ) && _adCount = 1, COALESCE ( MAXX ( _adRows, 'AD Computer Evidence'[PasswordExpiryStatus] ), "Not collected" ), "Identity unresolved or ambiguous" )
+		dataType: string
+		displayFolder: Account lifecycle
+		lineageTag: e3f30f15-0382-4ee5-905e-716f06139e74
+		summarizeBy: none
+
 	/// Imports the pre-consolidated private device evidence cache to avoid repeated multi-source joins in Power Query.
 	partition 'Device Inventory Evidence Import' = m
 		mode: import

@@ -753,6 +753,227 @@ table 'User Inventory Evidence'
 		summarizeBy: none
 		sourceColumn: Loaded Batch ID
 
+	/// Observed AD creation value copied as source text through one exact native identity and one loaded batch. Culture and timezone are not inferred; consult the qualification column.
+	column 'AD Created (source)' =
+			VAR _batch = 'User Inventory Evidence'[Loaded Batch ID]
+			VAR _sourceId = TRIM ( 'User Inventory Evidence'[User Source ID] )
+			VAR _nativeRows = FILTER ( 'Native User Evidence', 'Native User Evidence'[SourceUserId] == _sourceId && 'Native User Evidence'[Loaded Batch ID] == _batch )
+			VAR _nativeCount = COUNTROWS ( _nativeRows )
+			VAR _nativeKey = MAXX ( _nativeRows, 'Native User Evidence'[TenantUserKey] )
+			VAR _adRows = FILTER ( 'AD User Evidence', 'AD User Evidence'[TenantUserKey] == _nativeKey && 'AD User Evidence'[Loaded Batch ID] == _batch && 'AD User Evidence'[CloudMatchStatus] == "Unique native SID" )
+			VAR _adCount = COUNTROWS ( _adRows )
+			RETURN
+			    IF ( NOT ISBLANK ( _batch ) && _sourceId <> "" && _nativeCount = 1 && NOT ISBLANK ( _nativeKey ) && _adCount = 1, MAXX ( _adRows, 'AD User Evidence'[CreationRaw] ), BLANK () )
+		dataType: string
+		displayFolder: Account lifecycle
+		lineageTag: d4b42864-ce2c-4f50-896d-ad9f591dc1e5
+		summarizeBy: none
+
+	/// Source date qualification and identity coverage; unqualified source text is never relabeled as UTC.
+	column 'AD Creation Qualification' =
+			VAR _batch = 'User Inventory Evidence'[Loaded Batch ID]
+			VAR _sourceId = TRIM ( 'User Inventory Evidence'[User Source ID] )
+			VAR _nativeRows = FILTER ( 'Native User Evidence', 'Native User Evidence'[SourceUserId] == _sourceId && 'Native User Evidence'[Loaded Batch ID] == _batch )
+			VAR _nativeCount = COUNTROWS ( _nativeRows )
+			VAR _nativeKey = MAXX ( _nativeRows, 'Native User Evidence'[TenantUserKey] )
+			VAR _adRows = FILTER ( 'AD User Evidence', 'AD User Evidence'[TenantUserKey] == _nativeKey && 'AD User Evidence'[Loaded Batch ID] == _batch && 'AD User Evidence'[CloudMatchStatus] == "Unique native SID" )
+			VAR _adCount = COUNTROWS ( _adRows )
+			RETURN
+			    IF ( NOT ISBLANK ( _batch ) && _sourceId <> "" && _nativeCount = 1 && NOT ISBLANK ( _nativeKey ) && _adCount = 1, COALESCE ( MAXX ( _adRows, 'AD User Evidence'[CreationStatus] ), "Not collected" ), "Identity unresolved or ambiguous" )
+		dataType: string
+		displayFolder: Account lifecycle
+		lineageTag: 708ed795-2fa2-434e-acb6-6839405353ef
+		summarizeBy: none
+
+	/// UTC date only when the source explicitly qualifies timezone and format, with one native identity in the same loaded batch. No earliest-date fallback.
+	column 'AD Created UTC' =
+			VAR _batch = 'User Inventory Evidence'[Loaded Batch ID]
+			VAR _sourceId = TRIM ( 'User Inventory Evidence'[User Source ID] )
+			VAR _nativeRows = FILTER ( 'Native User Evidence', 'Native User Evidence'[SourceUserId] == _sourceId && 'Native User Evidence'[Loaded Batch ID] == _batch )
+			VAR _nativeCount = COUNTROWS ( _nativeRows )
+			VAR _nativeKey = MAXX ( _nativeRows, 'Native User Evidence'[TenantUserKey] )
+			VAR _adRows = FILTER ( 'AD User Evidence', 'AD User Evidence'[TenantUserKey] == _nativeKey && 'AD User Evidence'[Loaded Batch ID] == _batch && 'AD User Evidence'[CloudMatchStatus] == "Unique native SID" )
+			VAR _adCount = COUNTROWS ( _adRows )
+			RETURN
+			    IF ( NOT ISBLANK ( _batch ) && _sourceId <> "" && _nativeCount = 1 && NOT ISBLANK ( _nativeKey ) && _adCount = 1 && MAXX ( _adRows, 'AD User Evidence'[CreationStatus] ) == "UTC qualified", MAXX ( _adRows, 'AD User Evidence'[CreationUtcDateTime] ), BLANK () )
+		dataType: dateTime
+		isHidden
+		formatString: yyyy-MM-dd HH:mm:ss
+		displayFolder: Account lifecycle
+		lineageTag: dcc8750f-7496-44c6-bb24-bcfb13bc9f7b
+		summarizeBy: none
+
+	/// Observed AD modification value copied as source text through one exact native identity and one loaded batch. Culture and timezone are not inferred; consult the qualification column.
+	column 'AD Modified (source)' =
+			VAR _batch = 'User Inventory Evidence'[Loaded Batch ID]
+			VAR _sourceId = TRIM ( 'User Inventory Evidence'[User Source ID] )
+			VAR _nativeRows = FILTER ( 'Native User Evidence', 'Native User Evidence'[SourceUserId] == _sourceId && 'Native User Evidence'[Loaded Batch ID] == _batch )
+			VAR _nativeCount = COUNTROWS ( _nativeRows )
+			VAR _nativeKey = MAXX ( _nativeRows, 'Native User Evidence'[TenantUserKey] )
+			VAR _adRows = FILTER ( 'AD User Evidence', 'AD User Evidence'[TenantUserKey] == _nativeKey && 'AD User Evidence'[Loaded Batch ID] == _batch && 'AD User Evidence'[CloudMatchStatus] == "Unique native SID" )
+			VAR _adCount = COUNTROWS ( _adRows )
+			RETURN
+			    IF ( NOT ISBLANK ( _batch ) && _sourceId <> "" && _nativeCount = 1 && NOT ISBLANK ( _nativeKey ) && _adCount = 1, MAXX ( _adRows, 'AD User Evidence'[ModificationRaw] ), BLANK () )
+		dataType: string
+		displayFolder: Account lifecycle
+		lineageTag: ec81c949-ca41-408c-b6d3-7d1673c289ea
+		summarizeBy: none
+
+	/// Source date qualification and identity coverage; unqualified source text is never relabeled as UTC.
+	column 'AD Modification Qualification' =
+			VAR _batch = 'User Inventory Evidence'[Loaded Batch ID]
+			VAR _sourceId = TRIM ( 'User Inventory Evidence'[User Source ID] )
+			VAR _nativeRows = FILTER ( 'Native User Evidence', 'Native User Evidence'[SourceUserId] == _sourceId && 'Native User Evidence'[Loaded Batch ID] == _batch )
+			VAR _nativeCount = COUNTROWS ( _nativeRows )
+			VAR _nativeKey = MAXX ( _nativeRows, 'Native User Evidence'[TenantUserKey] )
+			VAR _adRows = FILTER ( 'AD User Evidence', 'AD User Evidence'[TenantUserKey] == _nativeKey && 'AD User Evidence'[Loaded Batch ID] == _batch && 'AD User Evidence'[CloudMatchStatus] == "Unique native SID" )
+			VAR _adCount = COUNTROWS ( _adRows )
+			RETURN
+			    IF ( NOT ISBLANK ( _batch ) && _sourceId <> "" && _nativeCount = 1 && NOT ISBLANK ( _nativeKey ) && _adCount = 1, COALESCE ( MAXX ( _adRows, 'AD User Evidence'[ModificationStatus] ), "Not collected" ), "Identity unresolved or ambiguous" )
+		dataType: string
+		displayFolder: Account lifecycle
+		lineageTag: d9a328a0-3bbb-4d1b-89ef-01266e9e200f
+		summarizeBy: none
+
+	/// UTC date only when the source explicitly qualifies timezone and format, with one native identity in the same loaded batch. No earliest-date fallback.
+	column 'AD Modified UTC' =
+			VAR _batch = 'User Inventory Evidence'[Loaded Batch ID]
+			VAR _sourceId = TRIM ( 'User Inventory Evidence'[User Source ID] )
+			VAR _nativeRows = FILTER ( 'Native User Evidence', 'Native User Evidence'[SourceUserId] == _sourceId && 'Native User Evidence'[Loaded Batch ID] == _batch )
+			VAR _nativeCount = COUNTROWS ( _nativeRows )
+			VAR _nativeKey = MAXX ( _nativeRows, 'Native User Evidence'[TenantUserKey] )
+			VAR _adRows = FILTER ( 'AD User Evidence', 'AD User Evidence'[TenantUserKey] == _nativeKey && 'AD User Evidence'[Loaded Batch ID] == _batch && 'AD User Evidence'[CloudMatchStatus] == "Unique native SID" )
+			VAR _adCount = COUNTROWS ( _adRows )
+			RETURN
+			    IF ( NOT ISBLANK ( _batch ) && _sourceId <> "" && _nativeCount = 1 && NOT ISBLANK ( _nativeKey ) && _adCount = 1 && MAXX ( _adRows, 'AD User Evidence'[ModificationStatus] ) == "UTC qualified", MAXX ( _adRows, 'AD User Evidence'[ModificationUtcDateTime] ), BLANK () )
+		dataType: dateTime
+		isHidden
+		formatString: yyyy-MM-dd HH:mm:ss
+		displayFolder: Account lifecycle
+		lineageTag: f946891b-fb76-4f9a-9732-b47ccaa820b6
+		summarizeBy: none
+
+	/// Observed Entra creation value copied as source text through one exact native identity and one loaded batch. Culture and timezone are not inferred; consult the qualification column.
+	column 'Entra Created (source)' =
+			VAR _batch = 'User Inventory Evidence'[Loaded Batch ID]
+			VAR _sourceId = TRIM ( 'User Inventory Evidence'[User Source ID] )
+			VAR _nativeRows = FILTER ( 'Native User Evidence', 'Native User Evidence'[SourceUserId] == _sourceId && 'Native User Evidence'[Loaded Batch ID] == _batch )
+			VAR _nativeCount = COUNTROWS ( _nativeRows )
+			VAR _nativeKey = MAXX ( _nativeRows, 'Native User Evidence'[TenantUserKey] )
+			RETURN
+			    IF ( NOT ISBLANK ( _batch ) && _sourceId <> "" && _nativeCount = 1, MAXX ( _nativeRows, 'Native User Evidence'[CreationRaw] ), BLANK () )
+		dataType: string
+		displayFolder: Account lifecycle
+		lineageTag: cebea15a-ca50-4047-b8af-efe7df0f012a
+		summarizeBy: none
+
+	/// Source date qualification and identity coverage; unqualified source text is never relabeled as UTC.
+	column 'Entra Creation Qualification' =
+			VAR _batch = 'User Inventory Evidence'[Loaded Batch ID]
+			VAR _sourceId = TRIM ( 'User Inventory Evidence'[User Source ID] )
+			VAR _nativeRows = FILTER ( 'Native User Evidence', 'Native User Evidence'[SourceUserId] == _sourceId && 'Native User Evidence'[Loaded Batch ID] == _batch )
+			VAR _nativeCount = COUNTROWS ( _nativeRows )
+			VAR _nativeKey = MAXX ( _nativeRows, 'Native User Evidence'[TenantUserKey] )
+			RETURN
+			    IF ( NOT ISBLANK ( _batch ) && _sourceId <> "" && _nativeCount = 1, COALESCE ( MAXX ( _nativeRows, 'Native User Evidence'[CreationStatus] ), "Not collected" ), "Identity unresolved or ambiguous" )
+		dataType: string
+		displayFolder: Account lifecycle
+		lineageTag: 51e3c665-022a-449c-b7fa-0d8056b893cf
+		summarizeBy: none
+
+	/// UTC date only when the source explicitly qualifies timezone and format, with one native identity in the same loaded batch. No earliest-date fallback.
+	column 'Entra Created UTC' =
+			VAR _batch = 'User Inventory Evidence'[Loaded Batch ID]
+			VAR _sourceId = TRIM ( 'User Inventory Evidence'[User Source ID] )
+			VAR _nativeRows = FILTER ( 'Native User Evidence', 'Native User Evidence'[SourceUserId] == _sourceId && 'Native User Evidence'[Loaded Batch ID] == _batch )
+			VAR _nativeCount = COUNTROWS ( _nativeRows )
+			VAR _nativeKey = MAXX ( _nativeRows, 'Native User Evidence'[TenantUserKey] )
+			RETURN
+			    IF ( NOT ISBLANK ( _batch ) && _sourceId <> "" && _nativeCount = 1 && MAXX ( _nativeRows, 'Native User Evidence'[CreationStatus] ) == "UTC qualified", MAXX ( _nativeRows, 'Native User Evidence'[CreationUtcDateTime] ), BLANK () )
+		dataType: dateTime
+		isHidden
+		formatString: yyyy-MM-dd HH:mm:ss
+		displayFolder: Account lifecycle
+		lineageTag: 7fe1a70c-522e-4ff2-b518-5f1af5684064
+		summarizeBy: none
+
+	/// Observed Entra modification value copied as source text through one exact native identity and one loaded batch. Culture and timezone are not inferred; consult the qualification column.
+	column 'Entra Modified (source)' =
+			VAR _batch = 'User Inventory Evidence'[Loaded Batch ID]
+			VAR _sourceId = TRIM ( 'User Inventory Evidence'[User Source ID] )
+			VAR _nativeRows = FILTER ( 'Native User Evidence', 'Native User Evidence'[SourceUserId] == _sourceId && 'Native User Evidence'[Loaded Batch ID] == _batch )
+			VAR _nativeCount = COUNTROWS ( _nativeRows )
+			VAR _nativeKey = MAXX ( _nativeRows, 'Native User Evidence'[TenantUserKey] )
+			RETURN
+			    IF ( NOT ISBLANK ( _batch ) && _sourceId <> "" && _nativeCount = 1, MAXX ( _nativeRows, 'Native User Evidence'[ModificationRaw] ), BLANK () )
+		dataType: string
+		displayFolder: Account lifecycle
+		lineageTag: 8e7647d0-6432-4495-acf6-c738ab91ba85
+		summarizeBy: none
+
+	/// Source date qualification and identity coverage; unqualified source text is never relabeled as UTC.
+	column 'Entra Modification Qualification' =
+			VAR _batch = 'User Inventory Evidence'[Loaded Batch ID]
+			VAR _sourceId = TRIM ( 'User Inventory Evidence'[User Source ID] )
+			VAR _nativeRows = FILTER ( 'Native User Evidence', 'Native User Evidence'[SourceUserId] == _sourceId && 'Native User Evidence'[Loaded Batch ID] == _batch )
+			VAR _nativeCount = COUNTROWS ( _nativeRows )
+			VAR _nativeKey = MAXX ( _nativeRows, 'Native User Evidence'[TenantUserKey] )
+			RETURN
+			    IF ( NOT ISBLANK ( _batch ) && _sourceId <> "" && _nativeCount = 1, COALESCE ( MAXX ( _nativeRows, 'Native User Evidence'[ModificationStatus] ), "Not collected" ), "Identity unresolved or ambiguous" )
+		dataType: string
+		displayFolder: Account lifecycle
+		lineageTag: 9a7e4140-0103-48c9-ac24-34d4a70dc958
+		summarizeBy: none
+
+	/// UTC date only when the source explicitly qualifies timezone and format, with one native identity in the same loaded batch. No earliest-date fallback.
+	column 'Entra Modified UTC' =
+			VAR _batch = 'User Inventory Evidence'[Loaded Batch ID]
+			VAR _sourceId = TRIM ( 'User Inventory Evidence'[User Source ID] )
+			VAR _nativeRows = FILTER ( 'Native User Evidence', 'Native User Evidence'[SourceUserId] == _sourceId && 'Native User Evidence'[Loaded Batch ID] == _batch )
+			VAR _nativeCount = COUNTROWS ( _nativeRows )
+			VAR _nativeKey = MAXX ( _nativeRows, 'Native User Evidence'[TenantUserKey] )
+			RETURN
+			    IF ( NOT ISBLANK ( _batch ) && _sourceId <> "" && _nativeCount = 1 && MAXX ( _nativeRows, 'Native User Evidence'[ModificationStatus] ) == "UTC qualified", MAXX ( _nativeRows, 'Native User Evidence'[ModificationUtcDateTime] ), BLANK () )
+		dataType: dateTime
+		isHidden
+		formatString: yyyy-MM-dd HH:mm:ss
+		displayFolder: Account lifecycle
+		lineageTag: 493ab4a9-b302-4dec-82be-83d8e2284ada
+		summarizeBy: none
+
+	/// Display true/false only when the source explicitly marks PasswordExpiryStatus Observed. Unknown remains Unknown; nullable Boolean storage is never used as proof of false.
+	column 'AD Password Expired' =
+			VAR _batch = 'User Inventory Evidence'[Loaded Batch ID]
+			VAR _sourceId = TRIM ( 'User Inventory Evidence'[User Source ID] )
+			VAR _nativeRows = FILTER ( 'Native User Evidence', 'Native User Evidence'[SourceUserId] == _sourceId && 'Native User Evidence'[Loaded Batch ID] == _batch )
+			VAR _nativeCount = COUNTROWS ( _nativeRows )
+			VAR _nativeKey = MAXX ( _nativeRows, 'Native User Evidence'[TenantUserKey] )
+			VAR _adRows = FILTER ( 'AD User Evidence', 'AD User Evidence'[TenantUserKey] == _nativeKey && 'AD User Evidence'[Loaded Batch ID] == _batch && 'AD User Evidence'[CloudMatchStatus] == "Unique native SID" )
+			VAR _adCount = COUNTROWS ( _adRows )
+			VAR _status = MAXX ( _adRows, 'AD User Evidence'[PasswordExpiryStatus] )
+			VAR _observed = MAXX ( _adRows, IF ( 'AD User Evidence'[PasswordExpired], 1, 0 ) )
+			RETURN IF ( _nativeCount=1 && _sourceId<>"" && NOT ISBLANK(_nativeKey) && _status = "Observed" && COUNTROWS(_adRows)=1 && NOT ISBLANK(_batch), IF(_observed=1,"true","false"),"Unknown")
+		dataType: string
+		displayFolder: Account lifecycle
+		lineageTag: 74553116-da14-46d6-a019-8ad9f2b754d6
+		summarizeBy: none
+
+	/// Observed/Not collected from the explicit PasswordExpired field, or identity resolution limitation.
+	column 'AD Password Expiry Status' =
+			VAR _batch = 'User Inventory Evidence'[Loaded Batch ID]
+			VAR _sourceId = TRIM ( 'User Inventory Evidence'[User Source ID] )
+			VAR _nativeRows = FILTER ( 'Native User Evidence', 'Native User Evidence'[SourceUserId] == _sourceId && 'Native User Evidence'[Loaded Batch ID] == _batch )
+			VAR _nativeCount = COUNTROWS ( _nativeRows )
+			VAR _nativeKey = MAXX ( _nativeRows, 'Native User Evidence'[TenantUserKey] )
+			VAR _adRows = FILTER ( 'AD User Evidence', 'AD User Evidence'[TenantUserKey] == _nativeKey && 'AD User Evidence'[Loaded Batch ID] == _batch && 'AD User Evidence'[CloudMatchStatus] == "Unique native SID" )
+			VAR _adCount = COUNTROWS ( _adRows )
+			RETURN
+			    IF ( NOT ISBLANK ( _batch ) && _sourceId <> "" && _nativeCount = 1 && NOT ISBLANK ( _nativeKey ) && _adCount = 1, COALESCE ( MAXX ( _adRows, 'AD User Evidence'[PasswordExpiryStatus] ), "Not collected" ), "Identity unresolved or ambiguous" )
+		dataType: string
+		displayFolder: Account lifecycle
+		lineageTag: 40fdc2f6-b298-4e6a-918e-d427c427b326
+		summarizeBy: none
+
 	partition 'User Inventory Evidence Import' = m
 		mode: import
 		source =

@@ -69,7 +69,7 @@ table 'Report Metadata'
 			RETURN
 			IF(COUNTROWS(_ids) > 1, "Mixed batches | Majority: " & _majority & " | Other tables: " & FORMAT(_other,"0"),
 			   IF(COUNTROWS(_ids) = 1, "Loaded batch: " & _majority, "Loaded batch: Not observed"))
-			& " | Empty tables (batch unobservable): " & FORMAT(_empty,"0")
+			& " | Empty tables (batch unobservable): " & FORMAT(COALESCE(_empty,0),"0")
 			& IF(_missing > 0, " | Missing provenance: " & FORMAT(_missing,"0"), "")
 		lineageTag: da192672-ca2e-42ed-aec6-10f2888f8c89
 
@@ -111,6 +111,38 @@ table 'Report Metadata'
 		isHidden
 		displayFolder: Dataset freshness
 		lineageTag: 095e9fc6-a57d-4e30-b653-fbb371a79bc0
+
+	/// Compact executive display only. Full unknown-evidence qualification remains on license detail pages and original measure.
+	measure 'Executive F1 F3 Recovery' =
+			VAR _label = [License Selected F1 F3 Recovery Label]
+			VAR _at = SEARCH(" (Unknown:",_label,1,0)
+			RETURN IF(_label = "Unknown", BLANK(), IF(_at > 0,LEFT(_label,_at-1),_label))
+		displayFolder: Executive display
+		lineageTag: 6130580c-7bfd-4675-8c61-dc6e14031758
+
+	/// Compact executive display only. Full unknown-evidence qualification remains on license detail pages and original measure.
+	measure 'Executive E3 Recovery' =
+			VAR _label = [License Selected E3 Recovery Label]
+			VAR _at = SEARCH(" (Unknown:",_label,1,0)
+			RETURN IF(_label = "Unknown", BLANK(), IF(_at > 0,LEFT(_label,_at-1),_label))
+		displayFolder: Executive display
+		lineageTag: 6063328c-5824-4aec-963e-f3b94b76f387
+
+	/// Compact executive display only. Full unknown-evidence qualification remains on license detail pages and original measure.
+	measure 'Executive E5 Recovery' =
+			VAR _label = [License Selected E5 Recovery Label]
+			VAR _at = SEARCH(" (Unknown:",_label,1,0)
+			RETURN IF(_label = "Unknown", BLANK(), IF(_at > 0,LEFT(_label,_at-1),_label))
+		displayFolder: Executive display
+		lineageTag: 599cce71-aa1e-428f-aeff-2ca3cdbc9904
+
+	/// Compact executive display only. Full unknown-evidence qualification remains on license detail pages and original measure.
+	measure 'Executive E3 to F3 Recovery' =
+			VAR _label = [License Selected E3 Review Label]
+			VAR _at = SEARCH(" (Unknown:",_label,1,0)
+			RETURN IF(_label = "Unknown", BLANK(), IF(_at > 0,LEFT(_label,_at-1),_label))
+		displayFolder: Executive display
+		lineageTag: b0308df4-2fe7-453f-9f56-2392c1abcda8
 
 	/// Red only when selected batch UTC age exceeds 26 hours. Missing or mixed provenance is amber here; the separate Mixed batches alert is unchanged.
 	measure 'Dataset Batch Timestamp UTC' =

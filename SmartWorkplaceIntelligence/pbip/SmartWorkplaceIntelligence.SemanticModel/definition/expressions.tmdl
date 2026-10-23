@@ -91,7 +91,7 @@ expression GetSharePointOnPremCsv = (FileName as text, RequiredColumns as list, 
 /// Strict native evidence types, preserving missing values and explicit time qualifications.
 expression NativeEvidenceTypes =
 		// Candidate strict typed projection; pass the complete existing/new column map.
-		// No missing-field suppression, locale inference, or blank-to-zero conversion.
+		// Only approved, explicitly optional historical additions accept absent columns. No locale inference or blank-to-zero conversion.
 		(Rows as table, Types as list) as table =>
 		let
 		    // Wall-clock support is opt-in per source column, never inferred globally.
@@ -146,7 +146,19 @@ expression NativeEvidenceTypes =
 		                else if SourceWallClock then WallClock()
 		                else error "Date evidence requires an explicit timezone."
 		        else error "Unsupported candidate type.",
-		    Converted = Table.TransformColumns(Rows, List.Transform(Types, (Definition) =>
+		    // Only explicitly opted-in, approved lifecycle additions may be absent from older batches.
+		    // A missing historical observation remains null, never false, zero, or the batch date.
+		    LifecycleKinds = [CreationRaw="String", CreationUtcDateTime="DateTime", CreationStatus="String",
+		        ModificationRaw="String", ModificationUtcDateTime="DateTime", ModificationStatus="String",
+		        PasswordExpired="Boolean", PasswordExpiryStatus="String"],
+		    HistoricalDefinitions = List.Select(Types, each Record.FieldOrDefault(_, "allowHistoricalMissing", false)),
+		    HistoricalChecked = if List.AllTrue(List.Transform(HistoricalDefinitions, each
+		        Record.FieldOrDefault(LifecycleKinds, [name], null) = [dataType])) then HistoricalDefinitions
+		        else error "Unsupported historical native evidence column.",
+		    CompatibleRows = List.Accumulate(HistoricalChecked, Rows, (State, Definition) =>
+		        if Table.HasColumns(State, {Definition[name]}) then State
+		        else Table.AddColumn(State, Definition[name], each null)),
+		    Converted = Table.TransformColumns(CompatibleRows, List.Transform(Types, (Definition) =>
 		        {Definition[name], (Value) => Parse(Value, Definition[dataType],
 		            Record.FieldOrDefault(Definition, "allowSourceWallClock", false),
 		            Record.FieldOrDefault(Definition, "allowEmptyAutopilotContact", false)),
@@ -187,9 +199,15 @@ expression PreparedReadFolder =
 		        else if PreparedSourceMode = "SharePoint" and List.IsEmpty(segments) then
 		            let
 		                // A fresh HTTP read is required: connector navigation can reuse cached content.
-		                Library = Json.Document(Web.Contents(SharePointSiteUrl, [
-		                    RelativePath="_api/web/lists/GetByTitle('" & Uri.EscapeDataString(Text.Replace(SharePointLibraryName, "'", "''")) & "')/RootFolder",
-		                    Query=[#"$select"="ServerRelativeUrl"], Headers=[Accept="application/json;odata=nometadata"], IsRetry=true])),
+		                LibrariesResponse = Json.Document(Web.Contents(SharePointSiteUrl, [
+		                    RelativePath="_api/web/lists",
+		                    Query=[#"$select"="Title,RootFolder/Name,RootFolder/ServerRelativeUrl", #"$expand"="RootFolder", #"$filter"="BaseType eq 1"],
+		                    Headers=[Accept="application/json;odata=nometadata"], IsRetry=true])),
+		                Libraries = if Record.HasFields(LibrariesResponse, "odata.nextLink") or Record.HasFields(LibrariesResponse, "@odata.nextLink") then
+		                    error Error.Record("Prepared evidence", "Library discovery is incomplete", null) else LibrariesResponse[value],
+		                Matches = List.Select(Libraries, each [Title] = SharePointLibraryName or [RootFolder][Name] = SharePointLibraryName),
+		                Library = if List.Count(Matches) = 1 then Matches{0}[RootFolder] else
+		                    error Error.Record("Prepared evidence", "Missing or ambiguous document library", SharePointLibraryName),
 		                RootPath = Library[ServerRelativeUrl] & "/" & Text.Trim(SharePointDataFolder & "/" & PreparedSharePointFolder, "/"),
 		                Fetch = (name as text) as nullable binary =>
 		                    let

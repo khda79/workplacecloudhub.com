@@ -222,6 +222,49 @@ table 'AD User Evidence'
 		summarizeBy: none
 		sourceColumn: Loaded Batch ID
 
+	/// Explicit native source observation. Historical missing fields are null, never false or a substituted timestamp.
+	column ModificationRaw
+		dataType: string
+		lineageTag: f14a4622-9364-4475-b112-86b451bbfa4b
+		summarizeBy: none
+		sourceColumn: ModificationRaw
+
+	/// Explicit native source observation. Historical missing fields are null, never false or a substituted timestamp.
+	column ModificationUtcDateTime
+		dataType: dateTime
+		isHidden
+		lineageTag: d8c1d27f-40e3-4967-82eb-6bc5cef33d8c
+		summarizeBy: none
+		sourceColumn: ModificationUtcDateTime
+
+	/// Explicit native source observation. Historical missing fields are null, never false or a substituted timestamp.
+	column ModificationStatus
+		dataType: string
+		lineageTag: 6359ea99-91f3-489d-bc22-470e8e5cfb71
+		summarizeBy: none
+		sourceColumn: ModificationStatus
+
+	/// Explicit native source observation. Historical missing fields are null, never false or a substituted timestamp.
+	column PasswordExpired
+		dataType: boolean
+		isHidden
+		lineageTag: 94b9d47e-5aaa-4501-b72d-1b319e1bf376
+		summarizeBy: none
+		sourceColumn: PasswordExpired
+
+	/// Explicit native source observation. Historical missing fields are null, never false or a substituted timestamp.
+	column PasswordExpiryStatus
+		dataType: string
+		lineageTag: c8733cf6-4310-465f-a522-1bb7fc31b544
+		summarizeBy: none
+		sourceColumn: PasswordExpiryStatus
+
+	/// Observed Boolean display with an explicit Unknown state. Technical Boolean alone must not be interpreted without source observation status.
+	column 'Password Expired (display)' = IF('AD User Evidence'[PasswordExpiryStatus]="Observed",IF('AD User Evidence'[PasswordExpired],"true","false"),"Unknown")
+		dataType: string
+		lineageTag: 677e85a5-8af4-4861-b81f-bd6778946459
+		summarizeBy: none
+
 	partition 'AD User Evidence' = m
 		mode: import
 		source =
@@ -239,6 +282,6 @@ table 'AD User Evidence'
 				    ReadMigrationWeeklyHistory = Readers[ReadMigrationWeeklyHistory],
 				    GetSharePointOnPremCsv = Readers[GetSharePointOnPremCsv],
 				    GetSharePointMigrationEvidence = Readers[GetSharePointMigrationEvidence],
-				    BusinessRows = (NativeEvidenceTypes(Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("ADUserSource.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]), {[name="TenantKey", dataType="String"], [name="OrganizationKey", dataType="String"], [name="EnvironmentKey", dataType="String"], [name="TenantId", dataType="String"], [name="TenantADUserKey", dataType="String"], [name="ObjectGUID", dataType="String"], [name="ObjectSID", dataType="String"], [name="DomainName", dataType="String"], [name="DistinguishedName", dataType="String"], [name="SamAccountName", dataType="String"], [name="UserPrincipalName", dataType="String"], [name="DisplayName", dataType="String"], [name="Enabled", dataType="Boolean"], [name="Department", dataType="String"], [name="Title", dataType="String"], [name="Country", dataType="String"], [name="ManagerDistinguishedName", dataType="String"], [name="ManagerADObjectKey", dataType="String"], [name="TenantUserKey", dataType="String"], [name="CloudMatchStatus", dataType="String"], [name="LastLogonTimestampRaw", dataType="String"], [name="LastLogonUtcDateTime", dataType="DateTime"], [name="LastLogonStatus", dataType="String"], [name="CreationRaw", dataType="String"], [name="CreationUtcDateTime", dataType="DateTime"], [name="CreationStatus", dataType="String"], [name="SourceCollectedDateTime", dataType="DateTime"]}))
+				    BusinessRows = (NativeEvidenceTypes(Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("ADUserSource.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]), {[name="TenantKey", dataType="String"], [name="OrganizationKey", dataType="String"], [name="EnvironmentKey", dataType="String"], [name="TenantId", dataType="String"], [name="TenantADUserKey", dataType="String"], [name="ObjectGUID", dataType="String"], [name="ObjectSID", dataType="String"], [name="DomainName", dataType="String"], [name="DistinguishedName", dataType="String"], [name="SamAccountName", dataType="String"], [name="UserPrincipalName", dataType="String"], [name="DisplayName", dataType="String"], [name="Enabled", dataType="Boolean"], [name="Department", dataType="String"], [name="Title", dataType="String"], [name="Country", dataType="String"], [name="ManagerDistinguishedName", dataType="String"], [name="ManagerADObjectKey", dataType="String"], [name="TenantUserKey", dataType="String"], [name="CloudMatchStatus", dataType="String"], [name="LastLogonTimestampRaw", dataType="String"], [name="LastLogonUtcDateTime", dataType="DateTime"], [name="LastLogonStatus", dataType="String"], [name="CreationRaw", dataType="String"], [name="CreationUtcDateTime", dataType="DateTime"], [name="CreationStatus", dataType="String"], [name="SourceCollectedDateTime", dataType="DateTime"], [name="ModificationRaw", dataType="String", allowHistoricalMissing=true], [name="ModificationUtcDateTime", dataType="DateTime", allowHistoricalMissing=true], [name="ModificationStatus", dataType="String", allowHistoricalMissing=true], [name="PasswordExpired", dataType="Boolean", allowHistoricalMissing=true], [name="PasswordExpiryStatus", dataType="String", allowHistoricalMissing=true]}))
 				in
 				    Readers[Finish](BusinessRows)

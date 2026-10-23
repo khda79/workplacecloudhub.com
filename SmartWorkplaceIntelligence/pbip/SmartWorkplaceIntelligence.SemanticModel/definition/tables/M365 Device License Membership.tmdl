@@ -1,0 +1,31 @@
+/// Device-to-suite bridge from a unique exact observed primary-user UPN in the same imported batch. Unmatched or ambiguous users remain Unknown. This describes the primary user, not a device license.
+table 'M365 Device License Membership'
+	isHidden
+	lineageTag: f60c0e31-b9a5-4879-8ba3-131cb767d5f3
+
+	column 'Device Source ID'
+		dataType: string
+		isHidden
+		lineageTag: d6a76230-2a0b-423d-8f40-3902a86aa78d
+		summarizeBy: none
+		sourceColumn: [Device Source ID]
+
+	column 'License Product'
+		dataType: string
+		isHidden
+		lineageTag: 0f959f48-e580-45ee-b957-672e791b72d6
+		summarizeBy: none
+		sourceColumn: [License Product]
+
+	partition 'M365 Device License Membership' = calculated
+		mode: import
+		source =
+				VAR _userBatches = DISTINCT('User Inventory Evidence'[Loaded Batch ID])
+				VAR _deviceBatches = DISTINCT('Device Inventory Evidence'[Loaded Batch ID])
+				VAR _sameBatch = COUNTROWS(_userBatches)=1 && COUNTROWS(_deviceBatches)=1 && MAXX(_userBatches,'User Inventory Evidence'[Loaded Batch ID])=MAXX(_deviceBatches,'Device Inventory Evidence'[Loaded Batch ID])
+				VAR _devices = SELECTCOLUMNS(ADDCOLUMNS(ALLNOBLANKROW('Device Inventory Evidence'), "Matched User ID", LOOKUPVALUE('User Inventory Evidence'[User Source ID], 'User Inventory Evidence'[User Principal Name], 'Device Inventory Evidence'[Primary User UPN], BLANK())), "Device Source ID", 'Device Inventory Evidence'[Device Source ID] & "", "UID", [Matched User ID] & "")
+				VAR _members = SELECTCOLUMNS('M365 User License Membership', "UID", 'M365 User License Membership'[User Source ID] & "", "License Product", 'M365 User License Membership'[License Product] & "")
+				VAR _joined = NATURALINNERJOIN(_devices, _members)
+				VAR _matched = SELECTCOLUMNS(FILTER(_joined, _sameBatch && [UID]<>""), "Device Source ID", [Device Source ID], "License Product", [License Product])
+				VAR _missing = EXCEPT(SELECTCOLUMNS(_devices,"Device Source ID",[Device Source ID]),SELECTCOLUMNS(_matched,"Device Source ID",[Device Source ID]))
+				RETURN DISTINCT(UNION(_matched,ADDCOLUMNS(_missing,"License Product","Unknown")))

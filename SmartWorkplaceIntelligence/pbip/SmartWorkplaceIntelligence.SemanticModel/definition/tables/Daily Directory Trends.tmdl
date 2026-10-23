@@ -248,6 +248,131 @@ table 'Daily Directory Trends'
 		displayFolder: Daily trends presentation
 		lineageTag: 0519ac96-ab53-490d-a256-c9a93cc08673
 
+	/// Latest qualified Windows 11 share with absolute change in enabled Windows 11 AD computer accounts over the selected qualified period. It is not a count of completed migrations.
+	measure 'Windows 11 Share and Count Change Card' =
+			VAR _dates = FILTER(ALLSELECTED('Date'[Date]), NOT ISBLANK([Windows 11 Share Daily]) && NOT ISBLANK([Windows 11 Enabled Daily]))
+			VAR _first = MINX(_dates, 'Date'[Date])
+			VAR _last = MAXX(_dates, 'Date'[Date])
+			VAR _a = CALCULATE([Windows 11 Enabled Daily], 'Date'[Date] = _first)
+			VAR _b = CALCULATE([Windows 11 Enabled Daily], 'Date'[Date] = _last)
+			VAR _share = CALCULATE([Windows 11 Share Daily], 'Date'[Date] = _last)
+			RETURN IF(ISBLANK(_b) || ISBLANK(_share), "Not measured", FORMAT(_share, "0.0%") & " | " & FORMAT(_b - _a, "+#,0;-#,0;0") & " accounts")
+		formatString: @
+		displayFolder: Daily Trends
+		lineageTag: 2283647a-01f4-4ea8-9650-ece0f286f362
+
+	/// Qualified immutable-batch daily evidence. Enabled and disabled states are included; missing observations are not zero.
+	measure 'All AD Computer Accounts Scope Tooltip' = "All Active Directory computer accounts, all operating systems, enabled and disabled. This is an account inventory, not the Intune managed-device population. Windows shares use all AD computer accounts as their denominator."
+		formatString: @
+		displayFolder: Daily Trends\All account states
+
+	/// Qualified immutable-batch daily evidence. Enabled and disabled states are included; missing observations are not zero.
+	measure 'Windows 10 All AD Accounts Daily' = VAR _enabled = [Windows 10 Enabled Daily] VAR _disabled = [Windows 10 Disabled Daily] RETURN IF(ISBLANK(_enabled) || ISBLANK(_disabled), BLANK(), _enabled + _disabled)
+		formatString: #,0
+		displayFolder: Daily Trends\All account states
+
+	/// Qualified immutable-batch daily evidence. Enabled and disabled states are included; missing observations are not zero.
+	measure 'Windows 10 All AD Accounts Share Daily' = VAR _windows = [Windows 10 All AD Accounts Daily] VAR _total = [Total AD Computers Daily] RETURN IF(ISBLANK(_windows) || ISBLANK(_total), BLANK(), DIVIDE(_windows, _total))
+		formatString: 0.0%
+		displayFolder: Daily Trends\All account states
+
+	/// Qualified immutable-batch daily evidence. Enabled and disabled states are included; missing observations are not zero.
+	measure 'Windows 10 All AD Accounts Chart Daily' = IF(SELECTEDVALUE('Daily View'[View], "Count") = "Share", [Windows 10 All AD Accounts Share Daily], [Windows 10 All AD Accounts Daily])
+		displayFolder: Daily Trends\All account states
+
+		formatStringDefinition = IF(SELECTEDVALUE('Daily View'[View], "Count") = "Share", "0.0%", "#,0")
+
+	/// Qualified immutable-batch daily evidence. Enabled and disabled states are included; missing observations are not zero.
+	measure 'Windows 11 All AD Accounts Daily' = VAR _enabled = [Windows 11 Enabled Daily] VAR _disabled = [Windows 11 Disabled Daily] RETURN IF(ISBLANK(_enabled) || ISBLANK(_disabled), BLANK(), _enabled + _disabled)
+		formatString: #,0
+		displayFolder: Daily Trends\All account states
+
+	/// Qualified immutable-batch daily evidence. Enabled and disabled states are included; missing observations are not zero.
+	measure 'Windows 11 All AD Accounts Share Daily' = VAR _windows = [Windows 11 All AD Accounts Daily] VAR _total = [Total AD Computers Daily] RETURN IF(ISBLANK(_windows) || ISBLANK(_total), BLANK(), DIVIDE(_windows, _total))
+		formatString: 0.0%
+		displayFolder: Daily Trends\All account states
+
+	/// Qualified immutable-batch daily evidence. Enabled and disabled states are included; missing observations are not zero.
+	measure 'Windows 11 All AD Accounts Chart Daily' = IF(SELECTEDVALUE('Daily View'[View], "Count") = "Share", [Windows 11 All AD Accounts Share Daily], [Windows 11 All AD Accounts Daily])
+		displayFolder: Daily Trends\All account states
+
+		formatStringDefinition = IF(SELECTEDVALUE('Daily View'[View], "Count") = "Share", "0.0%", "#,0")
+
+	/// Qualified immutable-batch daily evidence. Enabled and disabled states are included; missing observations are not zero.
+	measure 'Total AD Computer Accounts Card' = VAR _dates = FILTER(ALLSELECTED('Date'[Date]), NOT ISBLANK([Total AD Computers Daily]) && NOT ISBLANK([Enabled AD Computer Accounts Daily]) && NOT ISBLANK([Disabled AD Computer Accounts Daily])) VAR _first = MINX(_dates, 'Date'[Date]) VAR _last = MAXX(_dates, 'Date'[Date]) VAR _a = CALCULATE([Total AD Computers Daily], 'Date'[Date] = _first) VAR _b = CALCULATE([Total AD Computers Daily], 'Date'[Date] = _last) RETURN IF(ISBLANK(_b), "Not measured", FORMAT(_b, "#,0") & " | " & FORMAT(_b-_a, "+#,0;-#,0;0"))
+		formatString: @
+		displayFolder: Daily Trends\All account states
+
+	/// Qualified immutable-batch daily evidence. Enabled and disabled states are included; missing observations are not zero.
+	measure 'Enabled AD Computer Accounts Card' = VAR _dates = FILTER(ALLSELECTED('Date'[Date]), NOT ISBLANK([Total AD Computers Daily]) && NOT ISBLANK([Enabled AD Computer Accounts Daily]) && NOT ISBLANK([Disabled AD Computer Accounts Daily])) VAR _first = MINX(_dates, 'Date'[Date]) VAR _last = MAXX(_dates, 'Date'[Date]) VAR _a = CALCULATE([Enabled AD Computer Accounts Daily], 'Date'[Date] = _first) VAR _b = CALCULATE([Enabled AD Computer Accounts Daily], 'Date'[Date] = _last) RETURN IF(ISBLANK(_b), "Not measured", FORMAT(_b, "#,0") & " | " & FORMAT(_b-_a, "+#,0;-#,0;0"))
+		formatString: @
+		displayFolder: Daily Trends\All account states
+
+	/// Qualified immutable-batch daily evidence. Enabled and disabled states are included; missing observations are not zero.
+	measure 'Disabled AD Computer Accounts Card' = VAR _dates = FILTER(ALLSELECTED('Date'[Date]), NOT ISBLANK([Total AD Computers Daily]) && NOT ISBLANK([Enabled AD Computer Accounts Daily]) && NOT ISBLANK([Disabled AD Computer Accounts Daily])) VAR _first = MINX(_dates, 'Date'[Date]) VAR _last = MAXX(_dates, 'Date'[Date]) VAR _a = CALCULATE([Disabled AD Computer Accounts Daily], 'Date'[Date] = _first) VAR _b = CALCULATE([Disabled AD Computer Accounts Daily], 'Date'[Date] = _last) RETURN IF(ISBLANK(_b), "Not measured", FORMAT(_b, "#,0") & " | " & FORMAT(_b-_a, "+#,0;-#,0;0"))
+		formatString: @
+		displayFolder: Daily Trends\All account states
+
+	/// Qualified immutable-batch daily evidence. Enabled and disabled states are included; missing observations are not zero.
+	measure 'Windows 10 All AD Accounts Card' = VAR _dates = FILTER(ALLSELECTED('Date'[Date]), NOT ISBLANK([Total AD Computers Daily]) && NOT ISBLANK([Windows 10 All AD Accounts Daily]) && NOT ISBLANK([Windows 11 All AD Accounts Daily])) VAR _first = MINX(_dates, 'Date'[Date]) VAR _last = MAXX(_dates, 'Date'[Date]) VAR _a = CALCULATE([Windows 10 All AD Accounts Daily], 'Date'[Date] = _first) VAR _b = CALCULATE([Windows 10 All AD Accounts Daily], 'Date'[Date] = _last) RETURN IF(ISBLANK(_b), "Not measured", FORMAT(_b, "#,0") & " | " & FORMAT(_b-_a, "+#,0;-#,0;0"))
+		formatString: @
+		displayFolder: Daily Trends\All account states
+
+	/// Qualified immutable-batch daily evidence. Enabled and disabled states are included; missing observations are not zero.
+	measure 'Windows 10 All AD Accounts Value Text' = VAR _text = [Windows 10 All AD Accounts Card] VAR _separator = SEARCH("|", _text, 1, 0) RETURN IF(_separator = 0, _text, TRIM(LEFT(_text, _separator - 1)))
+		formatString: @
+		displayFolder: Daily Trends\All account states
+
+	/// Qualified immutable-batch daily evidence. Enabled and disabled states are included; missing observations are not zero.
+	measure 'Windows 10 All AD Accounts Change Text' = VAR _text = [Windows 10 All AD Accounts Card] VAR _separator = SEARCH("|", _text, 1, 0) RETURN IF(_separator = 0, BLANK(), TRIM(MID(_text, _separator + 1, LEN(_text))))
+		formatString: @
+		displayFolder: Daily Trends\All account states
+
+	/// Qualified immutable-batch daily evidence. Enabled and disabled states are included; missing observations are not zero.
+	measure 'Windows 11 All AD Accounts Share Card' = VAR _dates = FILTER(ALLSELECTED('Date'[Date]), NOT ISBLANK([Total AD Computers Daily]) && NOT ISBLANK([Windows 10 All AD Accounts Daily]) && NOT ISBLANK([Windows 11 All AD Accounts Daily])) VAR _first = MINX(_dates, 'Date'[Date]) VAR _last = MAXX(_dates, 'Date'[Date]) VAR _a = CALCULATE([Windows 11 All AD Accounts Share Daily], 'Date'[Date] = _first) VAR _b = CALCULATE([Windows 11 All AD Accounts Share Daily], 'Date'[Date] = _last) RETURN IF(ISBLANK(_b), "Not measured", FORMAT(_b, "0.0%") & " | " & FORMAT((_b-_a)*100, "+0.0;-0.0;0.0") & " pp")
+		formatString: @
+		displayFolder: Daily Trends\All account states
+
+	/// Qualified immutable-batch daily evidence. Enabled and disabled states are included; missing observations are not zero.
+	measure 'Windows 11 All AD Accounts Share Value Text' = VAR _text = [Windows 11 All AD Accounts Share Card] VAR _separator = SEARCH("|", _text, 1, 0) RETURN IF(_separator = 0, _text, TRIM(LEFT(_text, _separator - 1)))
+		formatString: @
+		displayFolder: Daily Trends\All account states
+
+	/// Qualified immutable-batch daily evidence. Enabled and disabled states are included; missing observations are not zero.
+	measure 'Windows 11 All AD Accounts Share Change Text' = VAR _text = [Windows 11 All AD Accounts Share Card] VAR _separator = SEARCH("|", _text, 1, 0) RETURN IF(_separator = 0, BLANK(), TRIM(MID(_text, _separator + 1, LEN(_text))))
+		formatString: @
+		displayFolder: Daily Trends\All account states
+
+	/// Qualified immutable-batch daily evidence. Enabled and disabled states are included; missing observations are not zero.
+	measure 'Windows 11 All AD Accounts Share and Count Change Card' = VAR _dates = FILTER(ALLSELECTED('Date'[Date]), NOT ISBLANK([Total AD Computers Daily]) && NOT ISBLANK([Windows 10 All AD Accounts Daily]) && NOT ISBLANK([Windows 11 All AD Accounts Daily])) VAR _first = MINX(_dates, 'Date'[Date]) VAR _last = MAXX(_dates, 'Date'[Date]) VAR _a = CALCULATE([Windows 11 All AD Accounts Daily], 'Date'[Date] = _first) VAR _b = CALCULATE([Windows 11 All AD Accounts Daily], 'Date'[Date] = _last) VAR _share = CALCULATE([Windows 11 All AD Accounts Share Daily], 'Date'[Date] = _last) RETURN IF(ISBLANK(_b) || ISBLANK(_share), "Not measured", FORMAT(_share, "0.0%") & " | " & FORMAT(_b-_a, "+#,0;-#,0;0") & " accounts")
+		formatString: @
+		displayFolder: Daily Trends\All account states
+
+	/// Qualified immutable-batch daily evidence. Enabled and disabled states are included; missing observations are not zero.
+	measure 'Windows 11 Overtakes Windows 10 All AD Accounts Day' = MINX(FILTER(ALL('Date'[Date]), VAR _w11 = CALCULATE([Windows 11 All AD Accounts Daily], REMOVEFILTERS('Daily Period')) VAR _w10 = CALCULATE([Windows 10 All AD Accounts Daily], REMOVEFILTERS('Daily Period')) RETURN NOT ISBLANK(_w11) && NOT ISBLANK(_w10) && _w11 > _w10), 'Date'[Date])
+		formatString: yyyy-MM-dd
+		displayFolder: Daily Trends\All account states
+
+	/// Qualified immutable-batch daily evidence. Enabled and disabled states are included; missing observations are not zero.
+	measure 'Last Qualified All AD Computer Accounts Day' = MAXX(FILTER(ALLSELECTED('Date'[Date]), NOT ISBLANK([Total AD Computers Daily]) && NOT ISBLANK([Enabled AD Computer Accounts Daily]) && NOT ISBLANK([Disabled AD Computer Accounts Daily])), 'Date'[Date])
+		formatString: yyyy-MM-dd
+		displayFolder: Daily Trends\All account states
+
+	/// Qualified immutable-batch daily evidence. Enabled and disabled states are included; missing observations are not zero.
+	measure 'Last Qualified Windows All AD Accounts Day' = MAXX(FILTER(ALLSELECTED('Date'[Date]), NOT ISBLANK([Total AD Computers Daily]) && NOT ISBLANK([Windows 10 All AD Accounts Daily]) && NOT ISBLANK([Windows 11 All AD Accounts Daily])), 'Date'[Date])
+		formatString: yyyy-MM-dd
+		displayFolder: Daily Trends\All account states
+
+	/// Qualified immutable-batch daily evidence. Enabled and disabled states are included; missing observations are not zero.
+	measure 'All AD Computer Accounts Quality Text' = VAR _day = [Last Qualified All AD Computer Accounts Day] RETURN "All OS; enabled + disabled. Last complete reading: " & IF(ISBLANK(_day), "Not measured", FORMAT(_day, "dd MMM yyyy")) & ". Missing or partial observations remain gaps."
+		formatString: @
+		displayFolder: Daily Trends\All account states
+
+	/// Qualified immutable-batch daily evidence. Enabled and disabled states are included; missing observations are not zero.
+	measure 'Windows All AD Accounts Quality Text' = VAR _day = [Last Qualified Windows All AD Accounts Day] RETURN "Windows 10 and Windows 11 include enabled + disabled AD accounts. Last common complete reading: " & IF(ISBLANK(_day), "Not measured", FORMAT(_day, "dd MMM yyyy")) & ". Shares use all AD computer accounts."
+		formatString: @
+		displayFolder: Daily Trends\All account states
+
 	column TenantKey
 		dataType: string
 		isHidden

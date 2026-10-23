@@ -147,7 +147,7 @@ class PreparedLatestMTests(unittest.TestCase):
                 'PreparedSharePointFolder = "DATA-POWERBI"',
                 'Web.Contents = (base as text, options as record) as binary => '
                 'if base <> SharePointSiteUrl or options[IsRetry] <> true then error "Cached or dynamic source" '
-                'else if Text.EndsWith(options[RelativePath], "/RootFolder") then Json.FromValue([ServerRelativeUrl="/Documents"]) '
+                'else if options[RelativePath] = "_api/web/lists" then Json.FromValue([value={[Title="Documents", RootFolder=[Name="Shared Documents", ServerRelativeUrl="/Shared Documents"]]}]) '
                 'else if ' + ('true' if absent else 'false') + ' and Text.Contains(options[RelativePath], "current.json.txt") '
                 'then Value.ReplaceMetadata(Text.ToBinary(""), [Response.Status=404]) '
                 'else Text.ToBinary("pointer")',
@@ -158,6 +158,30 @@ class PreparedLatestMTests(unittest.TestCase):
             self.evaluate(bindings, '[OK = Root{0}[Name] = ' + m_text(expected) + ' and Text.FromBinary(Root{0}[Content]) = "pointer"]')
         bindings[5] = 'Web.Contents = (base as text, options as record) as binary => error "HTTP 403"'
         self.evaluate(bindings, '[OK = (try Root{0}[Content])[HasError]]')
+
+    def test_library_navigation_name_can_differ_from_rest_title(self):
+        adapters = [expression("PreparedReadFolder"),
+                    (DEFINITION.parents[2] / "powerquery/PreparedReadFolder.SharePoint.pq").read_text()]
+        for adapter in adapters:
+            for count in (0, 1, 2):
+                for paged in (False, True):
+                    with self.subTest(adapter="service" if "PreparedSourceMode" not in adapter else "checkout", count=count, paged=paged):
+                        bindings = [
+                            'PreparedSourceMode = "SharePoint"',
+                            'SharePointSiteUrl = "https://example.invalid"',
+                            'SharePointLibraryName = "Shared Documents"',
+                            'SharePointDataFolder = "DATA"',
+                            'PreparedSharePointFolder = "DATA-POWERBI"',
+                            'Web.Contents = (base as text, options as record) as binary => '
+                            'if options[RelativePath] = "_api/web/lists" then Json.FromValue('
+                            '[value=List.Repeat({[Title="Renamed Library", RootFolder=[Name="Shared Documents", ServerRelativeUrl="/Shared Documents"]]}, '
+                            + str(count) + ')' + (', #"odata.nextLink"="not-followed"' if paged else '') + ']) '
+                            'else if Text.Contains(options[RelativePath], "Shared%20Documents") then Text.ToBinary("pointer") else error "Wrong folder"',
+                            'PreparedReadFolder = ' + adapter,
+                            'Attempt = try Text.FromBinary(PreparedReadFolder({}){0}[Content])',
+                        ]
+                        result = '[OK = not Attempt[HasError] and Attempt[Value] = "pointer"]' if count == 1 and not paged else '[OK = Attempt[HasError]]'
+                        self.evaluate(bindings, result)
 
     def test_two_query_results_expose_mixture_and_empty_table_limit(self):
         bindings = fixture()
@@ -173,9 +197,36 @@ class PreparedLatestMTests(unittest.TestCase):
             and Table.RowCount(Empty) = 0 and List.Contains(Table.ColumnNames(Empty), "Loaded Batch ID")]''')
 
 
+def has_current_batch_provenance(table, source, expressions):
+    """Conservative static contract for the returned partition, not a dead Finish call."""
+    source = re.sub(r'\n\tannotation PBI_ResultType = Table\s*$', '', source)
+    if table == 'Exchange On-prem Infrastructure':
+        if not re.search(r'source = let Readers = CreatePreparedReaders\(\) in Readers\[GetExchangeOnPremInfrastructure\]\(\)\s*$', source):
+            return False
+        match = re.search(r'GetExchangeOnPremInfrastructure = \(\) as table =>(.*?)GetExchangeHybridFreeBusy =', expressions, re.S)
+        if not match:
+            return False
+        body = match[1]
+        # Both placeholder and observed rows must carry the selected batch, with stability checking.
+        placeholder, observed = body.split('ReadSource =', 1)
+        return all(token in body for token in [
+            '#"Loaded Batch ID"=text',
+            'Result = Table.Buffer(Table.FromRecords(List.Combine(List.Transform(Sources, ReadSource)), Schema, MissingField.Error))',
+            'if ForcedRows >= 0 and CheckStable("verify-infrastructure") then Result else error'
+        ]) and '#"Loaded Batch ID"=BatchId' in placeholder and '#"Loaded Batch ID"=BatchId' in observed
+    expected = {
+        'Exchange Mailbox Databases': r'if Forced >= 0 then Readers\[Finish\]\(Buffered\) else error "Database observations unavailable"',
+        'Exchange Mailbox Server Reference': r'Readers\[Finish\]\(Display\)',
+        'Exchange Health Checker Findings': r'if Forced >= 0 then Readers\[Finish\]\(BusinessRows\) else error "Health Checker findings unavailable"',
+        'Exchange Health Checker Servers': r'if Forced >= 0 then Readers\[Finish\]\(BusinessRows\) else error "Health Checker server observations unavailable"',
+    }.get(table, r'Readers\[Finish\]\(BusinessRows\)')
+    return bool(re.search(r'\bin\s+' + expected + r'\s*$', source))
+
+
 class PreparedLatestModelTests(unittest.TestCase):
     def test_provenance_is_hidden_not_a_business_key_or_linguistic_field(self):
         monitored = []
+        expressions = (DEFINITION / "expressions.tmdl").read_text(encoding="utf-8-sig")
         for path in (DEFINITION / "tables").glob("*.tmdl"):
             source = path.read_text(encoding="utf-8-sig")
             if "Readers = CreatePreparedReaders()" not in source:
@@ -187,7 +238,7 @@ class PreparedLatestModelTests(unittest.TestCase):
             self.assertIn("dataType: string", column[1])
             self.assertIn("summarizeBy: none", column[1])
             self.assertNotRegex(column[1], r"\n\t\t(?:isKey|isUnique)(?:\s|$)")
-            self.assertIn("Readers[Finish](BusinessRows)", source)
+            self.assertTrue(has_current_batch_provenance(path.stem, source, expressions), path.name)
         self.assertGreater(len(monitored), 100)
         audit = (DEFINITION / "tables/Loaded Batch Audit.tmdl").read_text(encoding="utf-8-sig")
         rows = re.findall(r'ROW\("Table Name", "([^"]+)"', audit)
@@ -195,6 +246,26 @@ class PreparedLatestModelTests(unittest.TestCase):
         self.assertNotIn("Loaded Batch ID", (DEFINITION / "relationships.tmdl").read_text(encoding="utf-8-sig"))
         for path in (DEFINITION / "cultures").glob("*.tmdl"):
             self.assertNotIn("Loaded Batch", path.read_text(encoding="utf-8-sig"))
+
+    def test_provenance_contract_rejects_unstamped_returns(self):
+        expressions = (DEFINITION / "expressions.tmdl").read_text(encoding="utf-8-sig")
+        for name, call, replacement in [
+            ('AD Computer Evidence', 'Readers[Finish](BusinessRows)', 'BusinessRows'),
+            ('Exchange Health Checker Findings', 'Readers[Finish](BusinessRows)', 'BusinessRows'),
+            ('Exchange Health Checker Servers', 'Readers[Finish](BusinessRows)', 'BusinessRows'),
+            ('Exchange Mailbox Databases', 'Readers[Finish](Buffered)', 'Buffered'),
+            ('Exchange Mailbox Server Reference', 'Readers[Finish](Display)', 'Display'),
+            ('Exchange On-prem Infrastructure', 'Readers[GetExchangeOnPremInfrastructure]()', 'Readers[GetOtherReader]()'),
+        ]:
+            source = (DEFINITION / ('tables/' + name + '.tmdl')).read_text(encoding='utf-8-sig')
+            with self.subTest(table=name):
+                self.assertTrue(has_current_batch_provenance(name, source, expressions))
+                self.assertFalse(has_current_batch_provenance(name, source.replace(call, replacement), expressions))
+        source = (DEFINITION / 'tables/Exchange On-prem Infrastructure.tmdl').read_text(encoding='utf-8-sig')
+        for token in ['#"Loaded Batch ID"=BatchId', 'CheckStable("verify-infrastructure")']:
+            with self.subTest(missing=token):
+                self.assertFalse(has_current_batch_provenance('Exchange On-prem Infrastructure', source, expressions.replace(token, 'null')))
+        self.assertFalse(has_current_batch_provenance('Example', 'let Unused = Readers[Finish](BusinessRows) in BusinessRows', expressions))
 
     def test_service_adapter_has_no_local_transport_and_keeps_fresh_reads(self):
         adapter = (DEFINITION.parents[2] / "powerquery/PreparedReadFolder.SharePoint.pq").read_text()

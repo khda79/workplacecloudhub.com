@@ -464,3 +464,61 @@ relationship SpoMigration22
 	isActive: false
 	fromColumn: 'SPO Migration Plan'.'Validation Date'
 	toColumn: Date.Date
+
+relationship report_scope_Mailbox_Evidence_Country
+	fromColumn: 'Mailbox Evidence'.Country
+	toColumn: 'Country Selection'.'Source Country'
+
+relationship report_scope_Mailbox_Migration_Inventory_Country
+	fromColumn: 'Mailbox Migration Inventory'.Country
+	toColumn: 'Country Selection'.'Source Country'
+
+relationship report_scope_Windows_Migration_Evidence_Country
+	fromColumn: 'Windows Migration Evidence'.Country
+	toColumn: 'Country Selection'.'Source Country'
+
+relationship report_scope_AD_User_Evidence_DomainName
+	fromColumn: 'AD User Evidence'.DomainName
+	toColumn: 'Daily Domain'.Domain
+
+relationship report_scope_AD_Computer_Evidence_DomainName
+	fromColumn: 'AD Computer Evidence'.DomainName
+	toColumn: 'Daily Domain'.Domain
+
+relationship report_scope_AD_Object_Evidence_DomainName
+	fromColumn: 'AD Object Evidence'.DomainName
+	toColumn: 'Daily Domain'.Domain
+
+relationship report_scope_Windows_Migration_Evidence_AD_Domain
+	fromColumn: 'Windows Migration Evidence'.'AD Domain'
+	toColumn: 'Daily Domain'.Domain
+
+relationship report_scope_Windows_Migration_AD_Observations_Source_Domain
+	fromColumn: 'Windows Migration AD Observations'.'Source Domain'
+	toColumn: 'Daily Domain'.Domain
+
+relationship report_scope_Mailbox_Migration_Inventory_Source_Domain
+	fromColumn: 'Mailbox Migration Inventory'.'Source Domain'
+	toColumn: 'Daily Domain'.Domain
+
+relationship m365_license_user_membership
+	crossFilteringBehavior: bothDirections
+	fromColumn: 'M365 User License Membership'.'User Source ID'
+	toColumn: 'User Inventory Evidence'.'User Source ID'
+
+relationship m365_license_user_selection
+	fromColumn: 'M365 User License Membership'.'License Product'
+	toColumn: 'M365 License Selection'.'License Product'
+
+relationship m365_license_device_membership
+	crossFilteringBehavior: bothDirections
+	fromColumn: 'M365 Device License Membership'.'Device Source ID'
+	toColumn: 'Device Inventory Evidence'.'Device Source ID'
+
+relationship m365_license_device_selection
+	fromColumn: 'M365 Device License Membership'.'License Product'
+	toColumn: 'M365 License Selection'.'License Product'
+
+relationship 9ffdd70a-a7cd-4620-879e-3d9a84d108cf
+	fromColumn: 'Exchange Mailbox Reconciliation'.Country
+	toColumn: 'Country Selection'.'Source Country'

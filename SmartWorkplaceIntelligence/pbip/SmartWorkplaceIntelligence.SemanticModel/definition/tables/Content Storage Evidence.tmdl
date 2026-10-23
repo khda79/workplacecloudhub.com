@@ -122,6 +122,12 @@ table 'Content Storage Evidence'
 		displayFolder: Report footer
 		lineageTag: fb50120b-f2e0-4753-8244-7af6626cf189
 
+	/// SharePoint storage only, in TB; inherits current content filters.
+	measure 'Total SharePoint Storage (TB)' = CALCULATE([Content Storage Used (TB)], KEEPFILTERS('Content Storage Evidence'[Service] = "SharePoint"))
+		formatString: #,0.0
+		displayFolder: Report presentation
+		lineageTag: 1b880101-72a4-47f9-b2c7-477a96a9bc8a
+
 	column 'Content Object Key'
 		dataType: string
 		isHidden

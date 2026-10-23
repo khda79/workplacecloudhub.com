@@ -916,6 +916,15 @@ table 'Device System Evidence'
 		summarizeBy: none
 		sourceColumn: Loaded Batch ID
 
+	/// Year of the qualified BIOS date from the imported LocalSystem observation. Missing or erroneous dates stay Unknown. BIOS date is not device purchase age or a security-health assessment.
+	column 'BIOS Year' =
+			VAR _raw = TRIM('Device System Evidence'[BIOS Date])
+			VAR _year = IFERROR(VALUE(LEFT(_raw, 4)), BLANK())
+			RETURN IF('Device System Evidence'[BIOS Date Quality] = "Observed date; not a health verdict" && LEN(_raw) = 10 && MID(_raw, 5, 1) = "-" && MID(_raw, 8, 1) = "-" && NOT ISBLANK(_year), FORMAT(_year, "0000"), "Unknown")
+		dataType: string
+		lineageTag: 7c635046-5205-4aee-a2da-40c1b2c2d7d9
+		summarizeBy: none
+
 	partition 'Device System Evidence' = m
 		mode: import
 		source =

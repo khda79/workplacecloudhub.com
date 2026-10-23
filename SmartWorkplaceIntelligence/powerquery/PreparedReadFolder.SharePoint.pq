@@ -3,9 +3,15 @@
         if List.IsEmpty(segments) then
             let
                 // A fresh HTTP read is required: connector navigation can reuse cached content.
-                Library = Json.Document(Web.Contents(SharePointSiteUrl, [
-                    RelativePath="_api/web/lists/GetByTitle('" & Uri.EscapeDataString(Text.Replace(SharePointLibraryName, "'", "''")) & "')/RootFolder",
-                    Query=[#"$select"="ServerRelativeUrl"], Headers=[Accept="application/json;odata=nometadata"], IsRetry=true])),
+                LibrariesResponse = Json.Document(Web.Contents(SharePointSiteUrl, [
+                    RelativePath="_api/web/lists",
+                    Query=[#"$select"="Title,RootFolder/Name,RootFolder/ServerRelativeUrl", #"$expand"="RootFolder", #"$filter"="BaseType eq 1"],
+                    Headers=[Accept="application/json;odata=nometadata"], IsRetry=true])),
+                Libraries = if Record.HasFields(LibrariesResponse, "odata.nextLink") or Record.HasFields(LibrariesResponse, "@odata.nextLink") then
+                    error Error.Record("Prepared evidence", "Library discovery is incomplete", null) else LibrariesResponse[value],
+                Matches = List.Select(Libraries, each [Title] = SharePointLibraryName or [RootFolder][Name] = SharePointLibraryName),
+                Library = if List.Count(Matches) = 1 then Matches{0}[RootFolder] else
+                    error Error.Record("Prepared evidence", "Missing or ambiguous document library", SharePointLibraryName),
                 RootPath = Library[ServerRelativeUrl] & "/" & Text.Trim(SharePointDataFolder & "/" & PreparedSharePointFolder, "/"),
                 Fetch = (name as text) as nullable binary =>
                     let

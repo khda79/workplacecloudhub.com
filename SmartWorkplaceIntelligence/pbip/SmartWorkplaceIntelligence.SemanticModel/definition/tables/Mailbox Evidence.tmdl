@@ -83,6 +83,48 @@ table 'Mailbox Evidence'
 		displayFolder: Report footer
 		lineageTag: 9bd8ee66-c08b-443f-a653-ad1fff91aeeb
 
+	/// Observed on-premises mailbox records explicitly attributed to Exchange Server 2016; unknown versions are not assigned.
+	measure 'On-premises Mailboxes (2016)' = CALCULATE([On-premises Mailboxes], KEEPFILTERS('Mailbox Evidence'[Exchange Version] = "Exchange Server 2016"))
+		formatString: #,0
+		displayFolder: Report refinement
+		lineageTag: aac584cd-cd18-4c07-a0d2-80c0cc16467f
+
+	/// Observed on-premises mailbox records explicitly attributed to Exchange Server 2019 or SE; unknown versions are not assigned.
+	measure 'On-premises Mailboxes (2019/SE)' = CALCULATE([On-premises Mailboxes], KEEPFILTERS('Mailbox Evidence'[Exchange Version] IN {"Exchange Server 2019", "Exchange Server SE"}))
+		formatString: #,0
+		displayFolder: Report refinement
+		lineageTag: edf44b64-0f1a-45ee-9b45-61177f7d0872
+
+	/// Count of current mailbox records in the mutually exclusive primary-mailbox size band Below 2 GB. Archives are excluded. Missing size has a separate band.
+	measure 'Mailbox size - Below 2 GB' = CALCULATE([Mailboxes], KEEPFILTERS('Mailbox Evidence'[Mailbox Size GB] < 2), KEEPFILTERS(NOT ISBLANK('Mailbox Evidence'[Mailbox Size GB])))
+		formatString: #,0
+		displayFolder: Report refinement
+		lineageTag: e84b6db1-1e3c-47de-87a5-c68e6435b0d4
+
+	/// Count of current mailbox records in the mutually exclusive primary-mailbox size band 2 to below 50 GB. Archives are excluded. Missing size has a separate band.
+	measure 'Mailbox size - 2 to below 50 GB' = CALCULATE([Mailboxes], KEEPFILTERS('Mailbox Evidence'[Mailbox Size GB] >= 2), KEEPFILTERS('Mailbox Evidence'[Mailbox Size GB] < 50))
+		formatString: #,0
+		displayFolder: Report refinement
+		lineageTag: f917483c-dabd-4ba1-935f-e95b448f34c7
+
+	/// Count of current mailbox records in the mutually exclusive primary-mailbox size band 50 to 100 GB. Archives are excluded. Missing size has a separate band.
+	measure 'Mailbox size - 50 to 100 GB' = CALCULATE([Mailboxes], KEEPFILTERS('Mailbox Evidence'[Mailbox Size GB] >= 50), KEEPFILTERS('Mailbox Evidence'[Mailbox Size GB] <= 100))
+		formatString: #,0
+		displayFolder: Report refinement
+		lineageTag: a47a9f2c-60ef-4e7e-b99d-08eb497978ef
+
+	/// Count of current mailbox records in the mutually exclusive primary-mailbox size band Above 100 GB. Archives are excluded. Missing size has a separate band.
+	measure 'Mailbox size - Above 100 GB' = CALCULATE([Mailboxes], KEEPFILTERS('Mailbox Evidence'[Mailbox Size GB] > 100))
+		formatString: #,0
+		displayFolder: Report refinement
+		lineageTag: 30a62192-e215-4da2-99d2-552e0863ef08
+
+	/// Count of current mailbox records in the mutually exclusive primary-mailbox size band Size not observed. Archives are excluded. Missing size has a separate band.
+	measure 'Mailbox size - Size not observed' = CALCULATE([Mailboxes], KEEPFILTERS(ISBLANK('Mailbox Evidence'[Mailbox Size GB])))
+		formatString: #,0
+		displayFolder: Report refinement
+		lineageTag: d3606efb-5bc7-49bd-930a-cfd383b018a9
+
 	column 'Mailbox Key'
 		dataType: string
 		lineageTag: 5e78b588-aea8-45c0-a90e-c7eb193f0059

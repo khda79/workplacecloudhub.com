@@ -331,6 +331,28 @@ table 'Native User Evidence'
 		summarizeBy: none
 		sourceColumn: Loaded Batch ID
 
+	/// Explicit native source observation. Historical missing fields are null, never false or a substituted timestamp.
+	column ModificationRaw
+		dataType: string
+		lineageTag: 465bd01a-597a-4d5f-9376-4e19752f7494
+		summarizeBy: none
+		sourceColumn: ModificationRaw
+
+	/// Explicit native source observation. Historical missing fields are null, never false or a substituted timestamp.
+	column ModificationUtcDateTime
+		dataType: dateTime
+		isHidden
+		lineageTag: 39ce33c8-5901-4428-874b-9dd5013deb39
+		summarizeBy: none
+		sourceColumn: ModificationUtcDateTime
+
+	/// Explicit native source observation. Historical missing fields are null, never false or a substituted timestamp.
+	column ModificationStatus
+		dataType: string
+		lineageTag: ee599ee0-4bba-4207-a9fe-709484dec609
+		summarizeBy: none
+		sourceColumn: ModificationStatus
+
 	partition 'Native User Evidence' = m
 		mode: import
 		source =
@@ -348,6 +370,6 @@ table 'Native User Evidence'
 				    ReadMigrationWeeklyHistory = Readers[ReadMigrationWeeklyHistory],
 				    GetSharePointOnPremCsv = Readers[GetSharePointOnPremCsv],
 				    GetSharePointMigrationEvidence = Readers[GetSharePointMigrationEvidence],
-				    BusinessRows = (NativeEvidenceTypes(Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("DimUser.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]), {[name="TenantKey", dataType="String"], [name="OrganizationKey", dataType="String"], [name="EnvironmentKey", dataType="String"], [name="TenantId", dataType="String"], [name="TenantUserKey", dataType="String"], [name="CmdbUserId", dataType="String"], [name="UserPrincipalName", dataType="String"], [name="DisplayName", dataType="String"], [name="AccountEnabled", dataType="Boolean"], [name="UserType", dataType="String"], [name="Department", dataType="String"], [name="JobTitle", dataType="String"], [name="CountryCode", dataType="String"], [name="CountryLabel", dataType="String"], [name="CountryStatus", dataType="String"], [name="LastSignInDateTime", dataType="DateTime", allowSourceWallClock=true], [name="LastNonInteractiveSignInDateTime", dataType="DateTime", allowSourceWallClock=true], [name="LastSuccessfulSignInDateTime", dataType="DateTime", allowSourceWallClock=true], [name="ActivityState", dataType="String"], [name="ConfidenceScore", dataType="Double"], [name="AccountStatusLabel", dataType="String"], [name="DisplayNameLabel", dataType="String"], [name="UserPrincipalNameLabel", dataType="String"], [name="DepartmentLabel", dataType="String"], [name="UserTypeLabel", dataType="String"], [name="UserSelection", dataType="String"], [name="SourceUserId", dataType="String"], [name="CreationRaw", dataType="String"], [name="CreationUtcDateTime", dataType="DateTime"], [name="CreationStatus", dataType="String"], [name="SourceCollectedDateTime", dataType="DateTime"], [name="ManagerStatus", dataType="String"], [name="UserActivityStatus", dataType="String"]}))
+				    BusinessRows = (NativeEvidenceTypes(Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("DimUser.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]), {[name="TenantKey", dataType="String"], [name="OrganizationKey", dataType="String"], [name="EnvironmentKey", dataType="String"], [name="TenantId", dataType="String"], [name="TenantUserKey", dataType="String"], [name="CmdbUserId", dataType="String"], [name="UserPrincipalName", dataType="String"], [name="DisplayName", dataType="String"], [name="AccountEnabled", dataType="Boolean"], [name="UserType", dataType="String"], [name="Department", dataType="String"], [name="JobTitle", dataType="String"], [name="CountryCode", dataType="String"], [name="CountryLabel", dataType="String"], [name="CountryStatus", dataType="String"], [name="LastSignInDateTime", dataType="DateTime", allowSourceWallClock=true], [name="LastNonInteractiveSignInDateTime", dataType="DateTime", allowSourceWallClock=true], [name="LastSuccessfulSignInDateTime", dataType="DateTime", allowSourceWallClock=true], [name="ActivityState", dataType="String"], [name="ConfidenceScore", dataType="Double"], [name="AccountStatusLabel", dataType="String"], [name="DisplayNameLabel", dataType="String"], [name="UserPrincipalNameLabel", dataType="String"], [name="DepartmentLabel", dataType="String"], [name="UserTypeLabel", dataType="String"], [name="UserSelection", dataType="String"], [name="SourceUserId", dataType="String"], [name="CreationRaw", dataType="String"], [name="CreationUtcDateTime", dataType="DateTime"], [name="CreationStatus", dataType="String"], [name="SourceCollectedDateTime", dataType="DateTime"], [name="ManagerStatus", dataType="String"], [name="UserActivityStatus", dataType="String"], [name="ModificationRaw", dataType="String", allowHistoricalMissing=true], [name="ModificationUtcDateTime", dataType="DateTime", allowHistoricalMissing=true], [name="ModificationStatus", dataType="String", allowHistoricalMissing=true]}))
 				in
 				    Readers[Finish](BusinessRows)

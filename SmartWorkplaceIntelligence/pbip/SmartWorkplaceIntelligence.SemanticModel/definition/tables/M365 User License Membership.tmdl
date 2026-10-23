@@ -1,0 +1,27 @@
+/// User-to-suite bridge over the existing governed workforce flags. Multiple suite assignments are preserved; unknown is distinct from no observed F3/E3/E5.
+table 'M365 User License Membership'
+	isHidden
+	lineageTag: 58094652-933b-40ee-9c32-c914bd15940c
+
+	column 'User Source ID'
+		dataType: string
+		isHidden
+		lineageTag: 29a05a88-61db-4f3c-9f45-8f77cc1124d3
+		summarizeBy: none
+		sourceColumn: [User Source ID]
+
+	column 'License Product'
+		dataType: string
+		isHidden
+		lineageTag: 1500e32d-f186-480c-8796-b80f77747c26
+		summarizeBy: none
+		sourceColumn: [License Product]
+
+	partition 'M365 User License Membership' = calculated
+		mode: import
+		source =
+				DISTINCT(UNION(SELECTCOLUMNS(FILTER(ALLNOBLANKROW('User Inventory Evidence'), 'User Inventory Evidence'[Has Microsoft 365 F3] = "Yes"), "User Source ID", 'User Inventory Evidence'[User Source ID], "License Product", "Microsoft 365 F3"),
+				SELECTCOLUMNS(FILTER(ALLNOBLANKROW('User Inventory Evidence'), 'User Inventory Evidence'[Has Microsoft 365 E3] = "Yes"), "User Source ID", 'User Inventory Evidence'[User Source ID], "License Product", "Microsoft 365 E3"),
+				SELECTCOLUMNS(FILTER(ALLNOBLANKROW('User Inventory Evidence'), 'User Inventory Evidence'[Has Microsoft 365 E5] = "Yes"), "User Source ID", 'User Inventory Evidence'[User Source ID], "License Product", "Microsoft 365 E5"),
+				SELECTCOLUMNS(FILTER(ALLNOBLANKROW('User Inventory Evidence'), ('User Inventory Evidence'[Has Microsoft 365 F3] <> "Yes" && 'User Inventory Evidence'[Has Microsoft 365 E3] <> "Yes" && 'User Inventory Evidence'[Has Microsoft 365 E5] <> "Yes") && ('User Inventory Evidence'[Has Microsoft 365 F3] = "No" && 'User Inventory Evidence'[Has Microsoft 365 E3] = "No" && 'User Inventory Evidence'[Has Microsoft 365 E5] = "No")), "User Source ID", 'User Inventory Evidence'[User Source ID], "License Product", "No F3/E3/E5 observed"),
+				SELECTCOLUMNS(FILTER(ALLNOBLANKROW('User Inventory Evidence'), ('User Inventory Evidence'[Has Microsoft 365 F3] <> "Yes" && 'User Inventory Evidence'[Has Microsoft 365 E3] <> "Yes" && 'User Inventory Evidence'[Has Microsoft 365 E5] <> "Yes") && NOT('User Inventory Evidence'[Has Microsoft 365 F3] = "No" && 'User Inventory Evidence'[Has Microsoft 365 E3] = "No" && 'User Inventory Evidence'[Has Microsoft 365 E5] = "No")), "User Source ID", 'User Inventory Evidence'[User Source ID], "License Product", "Unknown")))

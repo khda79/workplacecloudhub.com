@@ -3,6 +3,7 @@
 Set PQTEST_PATH to Microsoft.PowerQuery.SdkTools/tools/PQTest.exe, then run
 python -B -m unittest test_native_evidence_m -v from this directory.
 NATIVE_EVIDENCE_EXPRESSIONS optionally selects another expressions.tmdl.
+NATIVE_EVIDENCE_FACTORY_PATH optionally selects a staged MCP-exported M function.
 No Desktop connection, production source, refresh, or publication is used.
 """
 import csv
@@ -32,6 +33,9 @@ def m_text(value):
 
 
 def native_expression():
+    staged = os.environ.get('NATIVE_EVIDENCE_FACTORY_PATH')
+    if staged:
+        return Path(staged).read_text(encoding='utf-8-sig')
     match = re.search(
         r'^expression NativeEvidenceTypes =\r?\n(.*?)(?=^\tlineageTag:)',
         EXPRESSIONS.read_text(encoding='utf-8-sig'), re.M | re.S)
@@ -140,6 +144,67 @@ def synthetic_cases():
               '[Delimiter=",",Encoding=65001,QuoteStyle=QuoteStyle.Csv])), '
               'Projected=NativeEvidenceTypes(Rows, {' + definitions + '}) '
               'in List.AllTrue({' + ','.join(assertions) + '})')
+
+    lifecycle = [('ModificationRaw', 'String'), ('ModificationUtcDateTime', 'DateTime'),
+                 ('ModificationStatus', 'String')]
+    password = [('PasswordExpired', 'Boolean'), ('PasswordExpiryStatus', 'String')]
+    creation = [('CreationRaw', 'String'), ('CreationUtcDateTime', 'DateTime'), ('CreationStatus', 'String')]
+    for table, additions in (
+        ('AD User Evidence', lifecycle + password),
+        ('AD Computer Evidence', lifecycle + password),
+        ('Native User Evidence', lifecycle),
+        ('Native Device Evidence', creation + lifecycle),
+    ):
+        definitions = ','.join('[name=' + m_text(name) + ',dataType=' + m_text(kind) +
+                               ',allowHistoricalMissing=true]' for name, kind in additions)
+        assertions = ' and '.join('Projected{0}[' + name + '] = null' for name, _ in additions)
+        check('old batch nullable additions: ' + table,
+              'let Projected=NativeEvidenceTypes(#table({"Existing"},{{"preserved"}}), '
+              '{[name="Existing",dataType="String"],' + definitions + '}) '
+              'in Projected{0}[Existing] = "preserved" and ' + assertions)
+        future_values = ['"2024-06-18T09:08:07Z"' if kind == 'DateTime' else
+                         '"false"' if kind == 'Boolean' else '"observed raw/status"'
+                         for _, kind in additions]
+        future_checks = ' and '.join('Projected{0}[' + name + '] = ' +
+                                     ('#datetime(2024,6,18,9,8,7)' if kind == 'DateTime' else
+                                      'false' if kind == 'Boolean' else '"observed raw/status"')
+                                     for name, kind in additions)
+        check('future batch strict additions: ' + table,
+              'let Projected=NativeEvidenceTypes(#table({"Existing",' +
+              ','.join(m_text(name) for name, _ in additions) + '},{{"preserved",' +
+              ','.join(future_values) + '}}), {[name="Existing",dataType="String"],' + definitions + '}) '
+              'in Projected{0}[Existing] = "preserved" and ' + future_checks)
+
+    check('nullable PasswordExpired type and strict values', '''let
+        Projected=NativeEvidenceTypes(#table({"PasswordExpired"},
+            {{true},{false},{null},{""},{"true"},{"false"},{"TRUE"},{"False"}}),
+            {[name="PasswordExpired",dataType="Boolean",allowHistoricalMissing=true]})
+        in Projected[PasswordExpired] = {true,false,null,null,true,false,true,false} and
+            Type.Is(Type.TableColumn(Value.Type(Projected), "PasswordExpired"), type nullable logical)''')
+    check('empty legacy rows gain nullable schema without fabricated rows', '''let
+        Projected=NativeEvidenceTypes(#table({"Existing"},{}),
+            {[name="Existing",dataType="String"],
+             [name="PasswordExpired",dataType="Boolean",allowHistoricalMissing=true],
+             [name="ModificationUtcDateTime",dataType="DateTime",allowHistoricalMissing=true]})
+        in Table.RowCount(Projected) = 0 and Table.HasColumns(Projected, {"PasswordExpired","ModificationUtcDateTime"}) and
+            Type.Is(Type.TableColumn(Value.Type(Projected), "PasswordExpired"), type nullable logical)''')
+    for bad in ('yes', '0', 'true ', 'unknown'):
+        check('malformed lifecycle Boolean: ' + bad,
+              '(try NativeEvidenceTypes(#table({"PasswordExpired"},{{' + m_text(bad) + '}}), '
+              '{[name="PasswordExpired",dataType="Boolean",allowHistoricalMissing=true]}){0}[PasswordExpired])[HasError]')
+    check('new lifecycle dates keep strict UTC conversion', '''let
+        Projected=NativeEvidenceTypes(#table({"ModificationUtcDateTime"},{{"2024-06-18T09:08:07+02:00"}}),
+            {[name="ModificationUtcDateTime",dataType="DateTime",allowHistoricalMissing=true]})
+        in Projected{0}[ModificationUtcDateTime] = #datetime(2024,6,18,7,8,7)''')
+    check('new lifecycle malformed date stays error', '''(try NativeEvidenceTypes(
+        #table({"ModificationUtcDateTime"},{{"not a date"}}),
+        {[name="ModificationUtcDateTime",dataType="DateTime",allowHistoricalMissing=true]}){0}[ModificationUtcDateTime])[HasError]''')
+    check('lifecycle optional flag is required for absent columns', '''(try NativeEvidenceTypes(
+        #table({"Existing"},{{"x"}}), {[name="PasswordExpired",dataType="Boolean"]}){0}[PasswordExpired])[HasError]''')
+    check('non-lifecycle columns cannot suppress missing-field errors', '''(try NativeEvidenceTypes(
+        #table({"Existing"},{{"x"}}), {[name="Other",dataType="String",allowHistoricalMissing=true]}){0}[Other])[HasError]''')
+    check('historical Boolean kind cannot be weakened to text', '''(try NativeEvidenceTypes(
+        #table({"Existing"},{{"x"}}), {[name="PasswordExpired",dataType="String",allowHistoricalMissing=true]}){0}[PasswordExpired])[HasError]''')
     return cases
 
 

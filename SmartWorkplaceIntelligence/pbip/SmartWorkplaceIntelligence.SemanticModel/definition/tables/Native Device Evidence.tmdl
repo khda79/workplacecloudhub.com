@@ -448,6 +448,50 @@ table 'Native Device Evidence'
 		summarizeBy: none
 		sourceColumn: Loaded Batch ID
 
+	/// Explicit native source observation. Historical missing fields are null, never false or a substituted timestamp.
+	column CreationRaw
+		dataType: string
+		lineageTag: ffc2ca50-193b-49b2-8d3e-0b09e2be950e
+		summarizeBy: none
+		sourceColumn: CreationRaw
+
+	/// Explicit native source observation. Historical missing fields are null, never false or a substituted timestamp.
+	column CreationUtcDateTime
+		dataType: dateTime
+		isHidden
+		lineageTag: 4afb8357-dc83-4c68-afc9-801380823aa4
+		summarizeBy: none
+		sourceColumn: CreationUtcDateTime
+
+	/// Explicit native source observation. Historical missing fields are null, never false or a substituted timestamp.
+	column CreationStatus
+		dataType: string
+		lineageTag: 3e99bff4-e0a6-4999-954b-e0a4a9baf1ec
+		summarizeBy: none
+		sourceColumn: CreationStatus
+
+	/// Explicit native source observation. Historical missing fields are null, never false or a substituted timestamp.
+	column ModificationRaw
+		dataType: string
+		lineageTag: 0bb8d24f-dda1-448c-ac67-613b0f0633ea
+		summarizeBy: none
+		sourceColumn: ModificationRaw
+
+	/// Explicit native source observation. Historical missing fields are null, never false or a substituted timestamp.
+	column ModificationUtcDateTime
+		dataType: dateTime
+		isHidden
+		lineageTag: bc7ea6c5-1ca7-4c2f-9698-7ac959e15e3d
+		summarizeBy: none
+		sourceColumn: ModificationUtcDateTime
+
+	/// Explicit native source observation. Historical missing fields are null, never false or a substituted timestamp.
+	column ModificationStatus
+		dataType: string
+		lineageTag: e5600ece-894b-4263-97dc-b3b55dce0602
+		summarizeBy: none
+		sourceColumn: ModificationStatus
+
 	partition 'Native Device Evidence' = m
 		mode: import
 		source =
@@ -465,6 +509,6 @@ table 'Native Device Evidence'
 				    ReadMigrationWeeklyHistory = Readers[ReadMigrationWeeklyHistory],
 				    GetSharePointOnPremCsv = Readers[GetSharePointOnPremCsv],
 				    GetSharePointMigrationEvidence = Readers[GetSharePointMigrationEvidence],
-				    BusinessRows = (NativeEvidenceTypes(Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("DimDevice.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]), {[name="TenantKey", dataType="String"], [name="OrganizationKey", dataType="String"], [name="EnvironmentKey", dataType="String"], [name="TenantId", dataType="String"], [name="TenantDeviceKey", dataType="String"], [name="CmdbDeviceId", dataType="String"], [name="DeviceName", dataType="String"], [name="OperatingSystem", dataType="String"], [name="OperatingSystemVersion", dataType="String"], [name="Ownership", dataType="String"], [name="ComplianceState", dataType="String"], [name="EncryptionState", dataType="String"], [name="ManagementState", dataType="String"], [name="ConfidenceScore", dataType="Double"], [name="DeviceNameLabel", dataType="String"], [name="OperatingSystemLabel", dataType="String"], [name="OperatingSystemVersionLabel", dataType="String"], [name="OwnershipLabel", dataType="String"], [name="ComplianceStateLabel", dataType="String"], [name="EncryptionStateLabel", dataType="String"], [name="ManagementStateLabel", dataType="String"], [name="DeviceSelection", dataType="String"], [name="SourceDeviceId", dataType="String"], [name="SourceSystems", dataType="String"], [name="AssociatedAccount", dataType="String"], [name="AssociationStatus", dataType="String"], [name="CountryCode", dataType="String"], [name="CountryLabel", dataType="String"], [name="CountryStatus", dataType="String"], [name="PrimaryUserSourceId", dataType="String"], [name="SyncRaw", dataType="String"], [name="SyncUtcDateTime", dataType="DateTime"], [name="SyncStatus", dataType="String"], [name="SourceCollectedDateTime", dataType="DateTime"]}))
+				    BusinessRows = (NativeEvidenceTypes(Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("DimDevice.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]), {[name="TenantKey", dataType="String"], [name="OrganizationKey", dataType="String"], [name="EnvironmentKey", dataType="String"], [name="TenantId", dataType="String"], [name="TenantDeviceKey", dataType="String"], [name="CmdbDeviceId", dataType="String"], [name="DeviceName", dataType="String"], [name="OperatingSystem", dataType="String"], [name="OperatingSystemVersion", dataType="String"], [name="Ownership", dataType="String"], [name="ComplianceState", dataType="String"], [name="EncryptionState", dataType="String"], [name="ManagementState", dataType="String"], [name="ConfidenceScore", dataType="Double"], [name="DeviceNameLabel", dataType="String"], [name="OperatingSystemLabel", dataType="String"], [name="OperatingSystemVersionLabel", dataType="String"], [name="OwnershipLabel", dataType="String"], [name="ComplianceStateLabel", dataType="String"], [name="EncryptionStateLabel", dataType="String"], [name="ManagementStateLabel", dataType="String"], [name="DeviceSelection", dataType="String"], [name="SourceDeviceId", dataType="String"], [name="SourceSystems", dataType="String"], [name="AssociatedAccount", dataType="String"], [name="AssociationStatus", dataType="String"], [name="CountryCode", dataType="String"], [name="CountryLabel", dataType="String"], [name="CountryStatus", dataType="String"], [name="PrimaryUserSourceId", dataType="String"], [name="SyncRaw", dataType="String"], [name="SyncUtcDateTime", dataType="DateTime"], [name="SyncStatus", dataType="String"], [name="SourceCollectedDateTime", dataType="DateTime"], [name="CreationRaw", dataType="String", allowHistoricalMissing=true], [name="CreationUtcDateTime", dataType="DateTime", allowHistoricalMissing=true], [name="CreationStatus", dataType="String", allowHistoricalMissing=true], [name="ModificationRaw", dataType="String", allowHistoricalMissing=true], [name="ModificationUtcDateTime", dataType="DateTime", allowHistoricalMissing=true], [name="ModificationStatus", dataType="String", allowHistoricalMissing=true]}))
 				in
 				    Readers[Finish](BusinessRows)

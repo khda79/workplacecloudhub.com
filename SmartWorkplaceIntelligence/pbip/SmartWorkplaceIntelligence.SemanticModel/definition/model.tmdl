@@ -196,4 +196,8 @@ ref table 'Exchange Hybrid Free Busy Findings'
 ref table 'Exchange Mailbox Server Reference'
 ref table 'Exchange Mailbox Reconciliation'
 
+ref table 'M365 License Selection'
+ref table 'M365 User License Membership'
+ref table 'M365 Device License Membership'
+
 ref cultureInfo en-US

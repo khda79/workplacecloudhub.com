@@ -139,7 +139,8 @@ def source_bindings(files, mode):
         'File.Contents=(path as text)=>Table.SelectRows(SyntheticFiles,each [Path]=path){0}[Content]',
         'SharePoint.Contents=(url as text, options as record)=>' + folder(tree),
         'Web.Contents=(url as text, options as record)=>'
-        'if Text.EndsWith(options[RelativePath],"/RootFolder") then Json.FromValue([ServerRelativeUrl="/Documents"]) '
+        'if options[RelativePath]="_api/web/lists" then Json.FromValue([value={[Title="Documents",RootFolder=[Name="Documents",ServerRelativeUrl="/Documents"]]}]) '
+        'else if Text.EndsWith(options[RelativePath],"/RootFolder") then Json.FromValue([ServerRelativeUrl="/Documents"]) '
         'else let name=if Text.Contains(options[RelativePath],"current.json.txt") then "current.json.txt" else "current.json", '
         'found=Table.SelectRows(SyntheticFiles,each [Path]="C:\\synthetic\\" & name) '
         'in if Table.RowCount(found)=1 then found{0}[Content] else Value.ReplaceMetadata(Text.ToBinary(""),[Response.Status=404])',
