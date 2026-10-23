@@ -21,15 +21,15 @@
     Bounds the Exchange MAPI connectivity preflight for each mailbox database. Set to 0 to disable it.
 
 .VERSION
-1.10
+1.11
 .REQUIREMENTS
     Windows PowerShell 5.1 on an Exchange 2016 management host.
-    Modules/snap-ins: SmartM365 WindowsPowerShell5 compatibility module; Exchange Management snap-in.
+    Modules: SmartM365 WindowsPowerShell5 compatibility module; Exchange remote session by default.
     Minimum permissions: Exchange on-premises recipient and mailbox-folder permission read access.
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled; Mail.Send is required only when Graph mail is enabled.
 
 .NOTES
-    Version : 1.10
+    Version : 1.11
     Author: https://github.com/khda79/workplacecloudhub.com
     Environment : Exchange 2016 On-Premises
 #>
@@ -54,6 +54,7 @@ while ($smartM365LifecycleRoot -and -not (Test-Path -LiteralPath (Join-Path $sma
 if(-not $smartM365LifecycleRoot){throw 'SmartM365 lifecycle support is missing; update the complete runtime.'}
 . (Join-Path $smartM365LifecycleRoot 'Modules/SmartM365.Core/SmartM365-InventoryLifecycle.ps1')
 $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -RequireReturn
+$script:ExchangeOnPremContext = $null
 try {
 if ($PSBoundParameters.ContainsKey('MaxItems') -and $MaxItems -gt 0) {
     $global:SmartM365MaxItems = [int]$MaxItems
@@ -119,7 +120,8 @@ function Get-ScriptLocalConfig {
     }
 
     try {
-        return Get-Content -LiteralPath $configPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        $config = Get-Content -LiteralPath $configPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        return (Sync-SmartM365JsonConfigWithTemplate -Config $config -Path $configPath)
     }
     catch {
         throw ("Failed to read local configuration '{0}': {1}" -f $configPath, $_.Exception.Message)
@@ -234,6 +236,11 @@ function Get-ScriptLocalConfigValue {
 }
 
 $ScriptLocalConfig = Get-ScriptLocalConfig
+$script:ExchangeConnectionMode = [string](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ExchangeConnectionMode' -DefaultValue 'Remote')
+if ($script:ExchangeConnectionMode -notin @('Remote','LocalSnapin')) {
+    throw 'ExchangeConnectionMode must be Remote or LocalSnapin.'
+}
+. (Join-Path $smartM365LifecycleRoot 'Modules/SmartM365.Core/SmartM365-ExchangeOnPremSession.ps1')
 if (-not $PSBoundParameters.ContainsKey('BackendPreflightTimeoutSeconds')) {
     $BackendPreflightTimeoutSeconds = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'BackendPreflightTimeoutSeconds' -DefaultValue 30)
     if ($BackendPreflightTimeoutSeconds -lt 0 -or $BackendPreflightTimeoutSeconds -gt 300) {
@@ -263,7 +270,7 @@ function Join-ModulePath {
     throw "SmartM365 WindowsPowerShell5 compatibility module file not found: $FileName"
 }
 
-$ScriptVersion = '1.10'
+$ScriptVersion = '1.11'
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LocalCalendarPermissionsCsvLogFolderPath' -DefaultValue $OutputPath
 $TaskName = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 
@@ -308,8 +315,29 @@ function Invoke-Quiet {
         $ProgressPreference    = $oldProgress
     }
 }
-$snapinName = 'Microsoft.Exchange.Management.PowerShell.SnapIn'
-try {
+function Initialize-SmartM365CalendarExchangeConnection {
+    [CmdletBinding()]
+    param([ValidateSet('Remote','LocalSnapin')][string]$Mode)
+
+    if ($Mode -eq 'Remote') {
+        try {
+            if ($null -eq $script:ExchangeOnPremContext) {
+                $script:ExchangeOnPremContext = Start-SmartM365ExchangeOnPremSession -RequiredCommands @(
+                    'Set-ADServerSettings','Get-Mailbox','Get-MailboxFolderStatistics',
+                    'Get-MailboxFolderPermission','Test-MAPIConnectivity'
+                )
+                Set-ADServerSettings -ViewEntireForest $true -ErrorAction Stop
+                WriteLog -Message ('ExchangeConnectionMode=Remote; state=Ready; endpoint={0}; one dedicated session; forest scope enabled.' -f $script:ExchangeOnPremContext.Endpoint)
+            }
+        }
+        catch {
+            WriteLog -Message ('ExchangeConnectionMode=Remote; state=Failed; no fallback. {0}' -f $_.Exception.Message) -Level 'ERROR'
+            throw
+        }
+        return
+    }
+
+    $snapinName = 'Microsoft.Exchange.Management.PowerShell.SnapIn'
     if (-not (Get-PSSnapin $snapinName -Registered -ErrorAction SilentlyContinue)) {
         throw "Exchange Management PSSnapin '$snapinName' is not registered on this server."
     }
@@ -321,22 +349,18 @@ try {
         WriteLog -Message 'Exchange On-Prem PSSnapin detected.'
     }
     Set-ADServerSettings -ViewEntireForest $true -ErrorAction Stop
-    WriteLog -Message 'Set-ADServerSettings -ViewEntireForest True applied.'
-}
-catch {
-    WriteLog -Message ("Unable to initialize Exchange Management Shell: {0}" -f $_.Exception.Message) 'ERROR'
-    Stop-SmartM365RunTranscript | Out-Null
-    try { if ($global:logTranscriptFile) { Update-SmartM365TimestampedTranscript -Path $global:logTranscriptFile } } catch {}
-    Complete-SmartM365ExecutionContext -Status Auto
-    $smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; $smartM365RunGuard.ExitCode=(1); exit $smartM365RunGuard.ExitCode
+    WriteLog -Message 'ExchangeConnectionMode=LocalSnapin; Set-ADServerSettings -ViewEntireForest True applied.'
 }
 
-Invoke-SmartM365Preflight -ScriptName $TaskName -OutputPaths @($OutputPath) -RequireExchangeOnPrem | Out-Null
+Initialize-SmartM365CalendarExchangeConnection -Mode $script:ExchangeConnectionMode
+Invoke-SmartM365Preflight -ScriptName $TaskName -OutputPaths @($OutputPath) -RequireExchangeOnPrem:($script:ExchangeConnectionMode -ne 'Remote') | Out-Null
 $results = New-Object 'System.Collections.Generic.List[object]'
 $errors = New-Object 'System.Collections.Generic.List[object]'
 $script:UnavailableCalendarBackends = @{}
 $script:CalendarBackendPreflightResults = @{}
 $processed = 0
+$qualifiedCalendars = 0
+$collectionTimer = [Diagnostics.Stopwatch]::StartNew()
 
 try {
     $recipientTypes = @('UserMailbox','SharedMailbox','RoomMailbox','EquipmentMailbox')
@@ -352,6 +376,7 @@ catch {
     $smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; $smartM365RunGuard.ExitCode=(1); exit $smartM365RunGuard.ExitCode
 }
 
+$mailboxes = @($mailboxes)
 $total = $mailboxes.Count
 WriteLog -Message "Total mailboxes found: $total"
 if ($TopMailboxes -gt 0 -and $total -gt $TopMailboxes) {
@@ -370,7 +395,8 @@ if ($total -eq 0) {
 function Get-SmartM365CalendarFailureCategory {
     param([AllowEmptyString()][string]$Message)
 
-    if ($Message -match '(?i)information store.*(is not available|inaccessible|unavailable)|cannot open mailbox.*microsoft system attendant') { return 'BackendUnavailable' }
+    if ($Message -match '(?i)MapiExceptionNoAccess|MapiAccessDenied|0x80070005|-2147024891|access (is )?denied|permission denied|unauthorized|not authorized') { return 'AccessDenied' }
+    if ($Message -match '(?i)information store.*(is not available|not available|inaccessible|unavailable)|cannot open mailbox.*microsoft system attendant') { return 'BackendUnavailable' }
     if ($Message -match '(?i)couldn''t find.*as a recipient|could not find.*recipient') { return 'RecipientNotFound' }
     if ($Message -match '(?i)doesn''t represent a unique recipient|isn''t unique|ambiguous') { return 'RecipientAmbiguous' }
     return 'CalendarFolderStatisticsFailure'
@@ -446,10 +472,9 @@ function Test-SmartM365CalendarBackendPreflight {
     catch {
         $message = [string]$_.Exception.Message
         $category = Get-SmartM365CalendarFailureCategory -Message $message
-        $isConnectivityFailure = $category -eq 'BackendUnavailable' -or $message -match '(?i)(MAPI|RPC|information store|mailbox database).*(timed out|timeout|not available|unavailable|inaccessible|failed)'
+        $isConnectivityFailure = $category -ne 'AccessDenied' -and ($category -eq 'BackendUnavailable' -or $message -match '(?i)(MAPI|RPC|information store|mailbox database).*(timed out|timeout|not available|unavailable|inaccessible)')
         if ($isConnectivityFailure) {
             foreach ($cacheKey in @(
-                if (-not [string]::IsNullOrWhiteSpace($mailboxServer)) { 'server:' + $mailboxServer.Trim().ToLowerInvariant() }
                 if (-not [string]::IsNullOrWhiteSpace($mailboxDatabase)) { 'database:' + $mailboxDatabase.Trim().ToLowerInvariant() }
             )) {
                 $script:UnavailableCalendarBackends[$cacheKey] = $message
@@ -475,13 +500,16 @@ function Test-SmartM365CalendarBackendPreflight {
         if ([string]::IsNullOrWhiteSpace($failureMessage)) {
             $failureMessage = "MAPI connectivity preflight returned result '$([string]$failedProbe[0].Result)'."
         }
-        foreach ($cacheKey in @(
-            if (-not [string]::IsNullOrWhiteSpace($mailboxServer)) { 'server:' + $mailboxServer.Trim().ToLowerInvariant() }
-            if (-not [string]::IsNullOrWhiteSpace($mailboxDatabase)) { 'database:' + $mailboxDatabase.Trim().ToLowerInvariant() }
-        )) {
-            $script:UnavailableCalendarBackends[$cacheKey] = $failureMessage
+        $category = Get-SmartM365CalendarFailureCategory -Message $failureMessage
+        if ($category -eq 'BackendUnavailable') {
+            if (-not [string]::IsNullOrWhiteSpace($mailboxDatabase)) {
+                $script:UnavailableCalendarBackends['database:' + $mailboxDatabase.Trim().ToLowerInvariant()] = $failureMessage
+            }
+            throw (New-SmartM365CalendarLookupException -Message $failureMessage -Category 'BackendUnavailable' -Attempts 0 -DurationSeconds $stopwatch.Elapsed.TotalSeconds -Backend $mailboxServer -Database $mailboxDatabase)
         }
-        throw (New-SmartM365CalendarLookupException -Message $failureMessage -Category 'BackendUnavailable' -Attempts 0 -DurationSeconds $stopwatch.Elapsed.TotalSeconds -Backend $mailboxServer -Database $mailboxDatabase)
+        $script:CalendarBackendPreflightResults[$backendKey] = $category
+        WriteLog -Message ("MAPI connectivity preflight category={0} for database '{1}'; continuing with targeted calendar reads: {2}" -f $category, $mailboxDatabase, $failureMessage) -Level 'WARNING'
+        return $true
     }
 
     if ($probeRows.Count -eq 0) {
@@ -555,11 +583,10 @@ function Get-CalendarFoldersSafe {
     $mailboxServer = [string]$Mbx.ServerName
     $mailboxDatabase = [string]$Mbx.Database
     $backendCacheKeys = @()
-    if (-not [string]::IsNullOrWhiteSpace($mailboxServer)) { $backendCacheKeys += 'server:' + $mailboxServer.Trim().ToLowerInvariant() }
     if (-not [string]::IsNullOrWhiteSpace($mailboxDatabase)) { $backendCacheKeys += 'database:' + $mailboxDatabase.Trim().ToLowerInvariant() }
     $cachedBackendKey = @($backendCacheKeys | Where-Object { $script:UnavailableCalendarBackends.ContainsKey($_) } | Select-Object -First 1)
     if ($cachedBackendKey.Count -gt 0) {
-        $cachedMessage = "Calendar statistics skipped because backend '$mailboxServer' or database '$mailboxDatabase' was already marked unavailable during this run."
+        $cachedMessage = "Calendar statistics skipped because database '$mailboxDatabase' was already marked unavailable during this run: $($script:UnavailableCalendarBackends[$cachedBackendKey[0]])"
         $cachedException = New-SmartM365CalendarLookupException -Message $cachedMessage -Category 'BackendPreviouslyUnavailable' -Attempts 0 -DurationSeconds $stopwatch.Elapsed.TotalSeconds -Backend $mailboxServer -Database $mailboxDatabase
         throw $cachedException
     }
@@ -585,16 +612,12 @@ function Get-CalendarFoldersSafe {
             $lastCategory = Get-SmartM365CalendarFailureCategory -Message $_.Exception.Message
             $lastBackend = Get-SmartM365CalendarBackendName -Message $_.Exception.Message -Mailbox $Mbx
             if ($lastCategory -eq 'BackendUnavailable') {
-                foreach ($backendName in @($lastBackend, $mailboxServer)) {
-                    if (-not [string]::IsNullOrWhiteSpace($backendName)) {
-                        $script:UnavailableCalendarBackends['server:' + $backendName.Trim().ToLowerInvariant()] = [string]$_.Exception.Message
-                    }
-                }
                 if (-not [string]::IsNullOrWhiteSpace($mailboxDatabase)) {
                     $script:UnavailableCalendarBackends['database:' + $mailboxDatabase.Trim().ToLowerInvariant()] = [string]$_.Exception.Message
                 }
                 break
             }
+            if ($lastCategory -eq 'AccessDenied') { break }
         }
     }
 
@@ -608,7 +631,7 @@ function Get-CalendarFoldersSafe {
     if (-not $folders) { return @() }
     if (-not $PrimaryOnly) { return $folders | Where-Object { $_.FolderType -eq 'Calendar' } }
     $rootCalendars = $folders | Where-Object { $_.FolderType -eq 'Calendar' -and $_.FolderPath -match '^/[^/]+$' }
-    if ($rootCalendars) { return ,($rootCalendars | Sort-Object ItemsInFolder -Descending | Select-Object -First 1) }
+    if ($rootCalendars) { return ,($rootCalendars | Sort-Object @{Expression = { $itemCount = 0L; if ([long]::TryParse([string]$_.ItemsInFolder, [ref]$itemCount)) { $itemCount } else { [long]::MinValue } }} -Descending | Select-Object -First 1) }
     $anyCalendar = $folders | Where-Object { $_.FolderType -eq 'Calendar' } | Select-Object -First 1
     if ($anyCalendar) { return ,$anyCalendar }
     return @()
@@ -620,6 +643,7 @@ function Try-GetFolderPermission {
         [Parameter(Mandatory)][string]$PrimarySmtpForLog,
         [Parameter(Mandatory)][AllowEmptyString()][string]$UpnForLog
     )
+    $lastPermissionError = $null
     foreach ($mbId in $MailboxIds) {
         foreach ($fname in $FolderNames) {
             $identity = ("{0}:\{1}" -f $mbId, $fname)
@@ -639,7 +663,8 @@ function Try-GetFolderPermission {
                     Identity    = $identity
                 }
             } catch {
-                # Try next combination
+                $lastPermissionError = $_
+                # Try the next identity or localized folder name.
             }
         }
     }
@@ -647,6 +672,7 @@ function Try-GetFolderPermission {
         Ok          = $false
         Permissions = @()
         Identity    = $null
+        ErrorRecord = $lastPermissionError
     }
 }
 
@@ -705,6 +731,14 @@ function Add-NoPermissionRow {
     }
 }
 
+function Assert-SmartM365CalendarQualification {
+    [CmdletBinding()]
+    param([int]$ExpectedMailboxes, [int]$QualifiedCalendars)
+    if ($ExpectedMailboxes -gt 0 -and $QualifiedCalendars -eq 0) {
+        throw 'Calendar inventory failed: expected mailboxes but no qualified calendar. Diagnostic CSV is preserved; canonical permissions were not replaced; retention is deferred.'
+    }
+}
+
 function Add-CalendarResultRows {
     [CmdletBinding()]
     param([AllowNull()][object[]]$Rows)
@@ -742,6 +776,7 @@ foreach ($mbx in $mailboxes) {
 
             $permissionResult = Try-GetFolderPermission -MailboxIds $mailboxIds -FolderNames $folderNames -PrimarySmtpForLog $primarySMTP -UpnForLog $upn
             if ($permissionResult.Ok) {
+                $qualifiedCalendars++
                 $permissions = @($permissionResult.Permissions)
                 $usedIdentity = [string]$permissionResult.Identity
                 $calendarFolder = [string]$folderNames[0]
@@ -757,11 +792,13 @@ foreach ($mbx in $mailboxes) {
                 }
             }
             else {
-                WriteLog -Message "No calendar folder found for $primarySMTP" "WARNING"
+                $errorRow = New-SmartM365CalendarErrorRecord -Index ($errors.Count + 1) -Mailbox $primarySMTP -UPN $upn -Operation 'Get-MailboxFolderPermission' -ErrorRecord $permissionResult.ErrorRecord -Backend ([string]$mbx.ServerName) -Database ([string]$mbx.Database)
+                [void]$errors.Add($errorRow)
+                WriteLog -Message ("Calendar permission lookup failed for {0}: {1}" -f $primarySMTP, $errorRow.Message) -Level 'WARNING'
             }
         } else {
             # Full mode
-            $calendarFolders = Get-CalendarFoldersSafe -Mbx $mbx -PrimaryOnly:$false
+            $calendarFolders = @(Get-CalendarFoldersSafe -Mbx $mbx -PrimaryOnly:$false)
             $fTotal = $calendarFolders.Count
             $fIndex = 0
 
@@ -772,7 +809,7 @@ foreach ($mbx in $mailboxes) {
                 try {
                     $permMailboxId = $mbx.Identity
                     $permIdentity  = ("{0}:\{1}" -f $permMailboxId, $folderPath)
-                    $permissions = Invoke-Quiet {
+                    $permissions = @(Invoke-Quiet {
                         Get-MailboxFolderPermission -Identity $permIdentity -ErrorAction Stop
                     } |
                         Where-Object { $_.User -notin @("Default","Anonymous") } |
@@ -780,7 +817,8 @@ foreach ($mbx in $mailboxes) {
                                       @{Name = "UPN";            Expression = { $upn }},
                                       @{Name = "CalendarFolder"; Expression = { $folderPath }},
                                       @{Name = "User";           Expression = { $_.User }},
-                                      @{Name = "AccessRights";   Expression = { ($_.AccessRights -join ",") }}
+                                      @{Name = "AccessRights";   Expression = { ($_.AccessRights -join ",") }})
+                    $qualifiedCalendars++
                     if ($permissions -and $permissions.Count -gt 0) {
                         Add-CalendarResultRows -Rows $permissions
                     } elseif ($EmitNoPermRow) {
@@ -788,7 +826,7 @@ foreach ($mbx in $mailboxes) {
                     }
                 } catch {
                     $errMsg = "Permission error for $primarySMTP ($folderPath) : $($_.Exception.Message)"
-                    $errorRow = New-SmartM365CalendarErrorRecord -Index ($errors.Count + 1) -Mailbox $primarySMTP -UPN $upn -Operation 'Get-MailboxFolderPermission' -ErrorRecord $_ -Category 'CalendarPermissionLookupFailure' -Message $_.Exception.Message
+                    $errorRow = New-SmartM365CalendarErrorRecord -Index ($errors.Count + 1) -Mailbox $primarySMTP -UPN $upn -Operation 'Get-MailboxFolderPermission' -ErrorRecord $_ -Message $_.Exception.Message
                     WriteLog -Message $errMsg "WARNING"
                     [void]$errors.Add($errorRow)
                 }
@@ -802,6 +840,11 @@ foreach ($mbx in $mailboxes) {
     }
 }
 Write-Progress -Id 0 -Activity $overallActivity -Completed
+$collectionTimer.Stop()
+WriteLog -Message ('Calendar collection duration seconds={0:F3}; expected mailboxes={1}; processed={2}; qualified calendars={3}; rows={4}; errors={5}.' -f $collectionTimer.Elapsed.TotalSeconds, $total, $processed, $qualifiedCalendars, $results.Count, $errors.Count)
+if ($total -gt 0 -and $qualifiedCalendars -eq 0 -and $errors.Count -eq 0) {
+    [void]$errors.Add((New-SmartM365CalendarErrorRecord -Index 1 -Mailbox '(run)' -Operation 'QualifyCalendars' -Category 'NoQualifiedCalendar' -Message 'Expected mailboxes were enumerated but no calendar permission query succeeded.'))
+}
 
 # ------------------------- Export & Cleanup -------------------------
 $BaseFileName = "Exchange_OnPrem_MailboxCalendarPermissions_AllDomains"
@@ -814,7 +857,7 @@ if ($results.Count -gt 0) {
     if ($missingColumns.Count -gt 0) {
         throw ("Calendar permissions export schema is incomplete. Missing column(s): {0}" -f ($missingColumns -join ', '))
     }
-    $exportRows = @($results | Select-Object $requiredColumns)
+    $exportRows = @($results.ToArray() | Select-Object $requiredColumns)
     ExportAndCopyCsv -BaseFileName $BaseFileName `
         -OutputPath $OutputPath `
         -GlobalPath (Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue '') `
@@ -826,6 +869,29 @@ if ($results.Count -gt 0) {
     if (-not [string]::IsNullOrWhiteSpace([string]$global:csvFilePath3)) {
         [void]$weeklyHistorySourcePaths.Add([string]$global:csvFilePath3)
     }
+} elseif ($qualifiedCalendars -gt 0) {
+    # A successful ACL read with only Default/Anonymous is a known empty result.
+    $runBase = Add-SmartM365MaxItemsSuffixToBaseName -BaseFileName $BaseFileName
+    $global:csvFilePath1 = Join-Path $OutputPath ("{0}_{1}.csv" -f $runBase, (Get-Date -Format 'yyyyMMdd_HHmmss'))
+    $global:csvFilePath2 = Join-Path $OutputPath "$runBase.csv"
+    $global:csvFilePath3 = Join-Path (Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue '') "$runBase.csv"
+    $savedCalendarRule = $global:SmartM365CsvValidationRules[$BaseFileName]
+    $emptyCalendarRule = $savedCalendarRule.Clone()
+    $emptyCalendarRule.AllowEmptyDataset = $true
+    $emptyCalendarRule.ExpectedRowCount = 0
+    try {
+        # This override is restricted to proven empty ACLs and restored immediately.
+        $global:SmartM365CsvValidationRules[$BaseFileName] = $emptyCalendarRule
+        Write-SmartM365CsvAtomically -Data @() -Columns @('Mailbox','UPN','CalendarFolder','User','AccessRights') -Path $global:csvFilePath1 -Encoding UTF8
+    }
+    finally { $global:SmartM365CsvValidationRules[$BaseFileName] = $savedCalendarRule }
+    Copy-SmartM365FileAtomically -SourcePath $global:csvFilePath1 -DestinationPath $global:csvFilePath2
+    Copy-SmartM365FileAtomically -SourcePath $global:csvFilePath2 -DestinationPath $global:csvFilePath3
+    if (-not $global:csvGeneratedPaths) { $global:csvGeneratedPaths = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase) }
+    foreach ($csvPath in @($global:csvFilePath1,$global:csvFilePath2,$global:csvFilePath3)) { [void]$global:csvGeneratedPaths.Add($csvPath) }
+    Invoke-SmartM365SharePointCsvUpload -LocalFilePath $global:csvFilePath3
+    [void]$weeklyHistorySourcePaths.Add($global:csvFilePath3)
+    WriteLog -Message 'Qualified calendar ACL reads produced zero explicit permissions; published the empty schema.'
 } else {
     WriteLog -Message "No data to export (no calendars found or all skipped). Export step skipped." "INFO"
     Write-Host "No data to export. Skipping."
@@ -839,20 +905,26 @@ if ($errors.Count -gt 0) {
         Add-Content -Path $logTextFile -Value ("[{0}] {1} | {2} | attempts={3} | duration={4}s | backend={5} | {6}" -f $_.Category, $_.Mailbox, $_.Operation, $_.Attempts, $_.DurationSeconds, $_.Backend, $_.Message)
     }
 
-    $errorRows = @($errors | Select-Object Index,Mailbox,UPN,Category,Operation,Attempts,DurationSeconds,Backend,Database,Message)
+    $errorRows = @($errors.ToArray() | Select-Object Index,Mailbox,UPN,Category,Operation,Attempts,DurationSeconds,Backend,Database,Message)
 
-    ExportAndCopyCsv -BaseFileName $errorBaseFileName `
-        -OutputPath $OutputPath `
-        -GlobalPath $errorLatestCsvFolderPath `
-        -Data $errorRows `
-        -Encoding "UTF8" `
-        -NoTypeInformation `
-        -SkipWeeklyHistory
+    $savedDiagnosticRetention = $global:RetentionMaxCSV
+    try {
+        if ($qualifiedCalendars -eq 0) { $global:RetentionMaxCSV = 0 }
+        ExportAndCopyCsv -BaseFileName $errorBaseFileName `
+            -OutputPath $OutputPath `
+            -GlobalPath $errorLatestCsvFolderPath `
+            -Data $errorRows `
+            -NoMaxItemsRowLimit `
+            -Encoding "UTF8" `
+            -NoTypeInformation `
+            -SkipWeeklyHistory
+    }
+    finally { $global:RetentionMaxCSV = $savedDiagnosticRetention }
     if (-not [string]::IsNullOrWhiteSpace([string]$global:csvFilePath3)) {
         [void]$weeklyHistorySourcePaths.Add([string]$global:csvFilePath3)
     }
 
-    WriteLog -Message ("Calendar permissions completed with {0} mailbox-level error(s). CSV export was produced and final status is CompletedWithWarnings." -f $errors.Count) "INFO"
+    WriteLog -Message ("Calendar permissions completed with {0} mailbox-level error(s). Diagnostic CSV was produced; qualified calendars={1}." -f $errors.Count, $qualifiedCalendars) "INFO"
 }
 else {
     $errorRunBaseFileName = Add-SmartM365MaxItemsSuffixToBaseName -BaseFileName $errorBaseFileName
@@ -882,6 +954,7 @@ else {
     Remove-SmartM365SharePointFile -LocalFilePath $sharePointStaleErrorPath | Out-Null
 }
 
+Assert-SmartM365CalendarQualification -ExpectedMailboxes $total -QualifiedCalendars $qualifiedCalendars
 Publish-SmartM365CalendarWeeklyHistory -SourceCsvPaths $weeklyHistorySourcePaths.ToArray() -Config $ScriptLocalConfig -FallbackRootPath $OutputPath
 
 Write-Host "`n=== SUMMARY ===" -ForegroundColor Cyan
@@ -908,7 +981,17 @@ Complete-SmartM365ExecutionContext -Status $finalStatus
     if ($_.Exception -isnot [Management.Automation.PipelineStoppedException] -and $_.Exception -isnot [OperationCanceledException]) { $smartM365RunGuard.ErrorRecord=$_ }
     throw
 } finally {
-    Complete-SmartM365InventoryRun -State $smartM365RunGuard
+    try {
+        if ($null -ne $script:ExchangeOnPremContext) {
+            WriteLog -Message ('ExchangeConnectionMode=Remote; session duration seconds={0:F3}; closing owned session.' -f $script:ExchangeOnPremContext.Timer.Elapsed.TotalSeconds)
+        }
+    }
+    finally {
+        try {
+            if ($null -ne $script:ExchangeOnPremContext) { Stop-SmartM365ExchangeOnPremSession -State $script:ExchangeOnPremContext }
+        }
+        finally { Complete-SmartM365InventoryRun -State $smartM365RunGuard }
+    }
     if($smartM365RunGuard.ExitCode -eq 130){exit 130}
 }
 if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
@@ -917,8 +1000,8 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD2EdtnNQ/hrSvh
-# v4n92viftQwVfShKw9z20dSffQyDMKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCgIXKMBBBaNlvB
+# Xwz4dJv7Ad5YmEvi0xA02lhT1OX/AqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1051,31 +1134,31 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIJweTmynIT8Mtlqub6bsP4PmVGet7s5xvAGVg8/S/z55MA0GCSqG
-# SIb3DQEBAQUABIIBgDNBE5VqNmFOqahbpRafCL6FJyCNSIRHoEIiyPAxRb42iNSR
-# 8pg9i+Vw4kGErq4GZPRUjAvdon9dQvIJXa1Zo7XmB8S9D5xhw9IY2lL+rApTJwFZ
-# 0awyW8tk4T6ZwcniHgHO0p/OknJg6RT0KAIP+maUVJG+ZZV2LB+Vo7PYsC5PMLi6
-# cMqycippZWvHEJTuwIqs5Zmg2BYbt7aU33cQZ1yTJQcMwg3WKv3EJ2pEAMG7sKdL
-# R8HEx/qQjaVaM9fMkHVLv7jgjlnSLY0kDzv4TJdVW+LgGeZ82kwcZ2BN+gz/KGHb
-# YOTN8LXbdthP0r1Fdc+C7qBQzNvv5B8cgm2Eq5JLQ+oJOsOj9IEICnuZkurIETku
-# GwJc4AF/7mkDZrB0k2aXgEUuy2gUwkpTjZSIKxqYMiBXYZx00lUpyZhNAqF744n/
-# svWhjNUU9uIqxQDasa+O2YL3va3xmmhzX9vxweUIal8ZPSoo6p50Sljsl4ayyTrV
-# 2M09xgEso2yUub8076GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIG/oTr5rJASMLu9Y2/8vYxJVLLKKmjo9q54oqScZgLuXMA0GCSqG
+# SIb3DQEBAQUABIIBgK6dNiBnu2X4cvDAP9VbhBmtOxYS8+oiESUpZiD0RoXVm1wB
+# w/G6GgwRlfPbOAWUbYpeDSwMFjUjgFvqZvp7Cwn9EzUk9dg7TwXgptOT6dLNECsr
+# PAiGMQW6fnO7PP38KAcV6HORdQezwAwN/ak3USsuP2oXAtYRtakNckjt+c9hiBkC
+# yYkjMCBseNBH0qlWt/evGVR28BiowWI+oicnzFHhK1TZiFKrocvp+XPlM3zfZUoE
+# KfMzZh2EZTNLi6bmnRzAsDGke4Ijo96v27I0JuKegIa3PAiwrsDzS5x8T1DBN5jp
+# 1f2hqAwbfBJIl/KcMwC0cJuNTgp1lI90EujsKSwVbhI2tXTqedLZtB2dp1fq3Wno
+# i3OOF4YqFxlsvauGp6bW1mR2sRziSk1VLLZzh3jZRAlTpErBwpkO0UpDzXvJzDNk
+# 1Tm9rvucF2YJMOEvz57lmD5tGNQ4aFQWlxBYnc7Vz0lD350UznFOfk5sr1kbVpXI
+# Xu58bQFmc8hBGtOF8KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTQxNTMw
-# MjBaMC8GCSqGSIb3DQEJBDEiBCBK1QveG2IrybtPFxZyg6gTJgH7hrOy4xuh114F
-# oXLWdjANBgkqhkiG9w0BAQEFAASCAgBJf/4GPgWHNyHXGMyhOA0Di9tR8TWTuY3s
-# 034h6zdcOkStv+O1SK9c1PVi8NmiFioyeUjUpXJS682eSm8oyOUVBtQogUfCE5M5
-# ezKDc2sF6sjbjnsSMYw7LFfp1IXvQpCaxePHAW+kRzDcRh1MQ1luNquSiNRcI9Jx
-# waTeHzeCvGd+7IL1xY3YlW5CdZMD+GqLklBwvmIwkqY1224M/sEW2isv/sIns1DC
-# B0KrYYHer5az+H5tm6XGsMHphfSMdO3dLuPjnbPtebzDseYCHRuDKZpO0pgWkQOI
-# ueeUAtpRPIX0UsZQHH/fLVH+PWkdY8Rz5VFVbVvNvPyT8seWXpcwRZ6LOqmrhuWw
-# Pg3kNlnzTC1lHP5MHt27FOAemcGSTYebOBW25AdhSOt9LtAzT+ntt0KxC8ZAqMaC
-# NCDzXQ0vNpJij215E6aHh+Rs8e6TDjdYYT6yb/7tJcqNBwmOV4XKPDaV6/ej5BCq
-# 93RvBUhsy8IcMX/slGaFvGFL2iyxIzuF4PFqoCb7Q9IazZtTxKKD3+yPyf3LR2eJ
-# 3di29yyC8P40OCR/ZCaHfw1R+8g9WH0V3nMX4JksO4h+3yFUwUypgSo/49WNVNTN
-# kfbJ5p0W7nKmwLggHMpvZb6etPSMn5ffv08WAk8kHjaUwt3yPwqLkD7DcVcWjOER
-# ECsHx45dJw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjMxNzQ0
+# MzBaMC8GCSqGSIb3DQEJBDEiBCAQcZl4PxB0rLsvtlrJhBoWcCxN+W8z7sQorj3Q
+# cJqyhDANBgkqhkiG9w0BAQEFAASCAgC19o3ZDBs04xhw7uxgcLJamQzol6tV4ePt
+# OU5r1mQ8UGVufVccP8+J+UQ9CIZdbQc/dVJ60sNkHRMlkQ4aPlzNt8YeH5SuyIqL
+# IloU5RO+oZBH/R/ean25u1mtgL2yzBgyIBrXBFOaouNr9+rOx0ls96vR1I8e2uJ7
+# jjqp3U+Uqv00wHe19t537+pir9+ph7ORPOuyodGgD4ke8cI7Ztqd47cLFB565Shp
+# eC8TjAYThu20z/tUutGZKjoJ5tlmeuPu8ESz8NgAqnaFC4gq9rWLIWmADxobJe3m
+# yBiQmWjhCC11jttVyqcBDrx6ovGLcSkqWYyLDiZdUTqvaAm0IacW+51HhLZ8HO9s
+# W/pDZ4T+q895y04mvY/wi7d41OT0E1KKBv0hAahOqtIpjou8izAR/4O7mavRZNS6
+# dNRO2e5QlCGJEOlYIfcc8PsAMMIxuXdR6i3t0hoNk+x9HsXp6r6d+eRI4i5HDnwv
+# vqJs1oElh3Wg6d8f9wMXvqBpRF8zx8JBxavgMnCwpxBjz6T4q5A3azmY6Gvpp7PR
+# Z+N32TnHQ0DO6uvE5Hc5D51afJ/XEf2bEmODf8DXcxQOi6LzR9PK+PY2qQYyOaE6
+# RJGDZ2yLZ93zyH5/89PGPStcLB1KlUw0RqMzesrRX8N9C97RbEHgpIqZo9s2aOyX
+# xR74UXcYRQ==
 # SIG # End signature block
