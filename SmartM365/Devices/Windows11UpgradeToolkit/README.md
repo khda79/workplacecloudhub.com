@@ -4,26 +4,21 @@ PowerShell LOT/PsExec toolkit to diagnose Windows 10 devices that should migrate
 
 The toolkit is optimized for batch operations. It keeps `Scripts\SmartM365-Invoke-Windows11UpgradeRepair.ps1` autonomous so the same single PowerShell file can be copied to devices through PsExec/LOT folders or reused by another deployment mechanism without requiring SmartM365 modules on the target computer.
 
-## Current distribution 1.0.0
+## Current distribution 1.0.0 — build 2
 
-The current **build 2** aligns the interface and report branding on **1.0.0**. Download assets whose filenames contain `1.0.0-build.2`; original build assets and release tags remain available. The release notes identify the exact build source commit.
+The package and GUI product version are **1.0.0**. **Build 2** aligns the visible interface and report versions. The [1.0.0 release](https://github.com/khda79/workplacecloudhub.com/releases/tag/windows11-upgrade-toolkit-v1.0.0) contains only the current build 2 assets; superseded releases and original build assets have been removed.
 
-Download the [1.0.0 release](https://github.com/khda79/workplacecloudhub.com/releases/tag/windows11-upgrade-toolkit-v1.0.0): `SmartM365-Windows11UpgradeToolkit-1.0.0-build.2.zip`, its `.sha256` file and `SmartM365-Windows11UpgradeToolkit-1.0.0-build.2-DemoAssets.zip`.
+| Download | File |
+| --- | --- |
+| Standalone ZIP | [SmartM365-Windows11UpgradeToolkit-1.0.0-build.2.zip](https://github.com/khda79/workplacecloudhub.com/releases/download/windows11-upgrade-toolkit-v1.0.0/SmartM365-Windows11UpgradeToolkit-1.0.0-build.2.zip) |
+| SHA-256 checksums | [SmartM365-Windows11UpgradeToolkit-1.0.0-build.2.sha256](https://github.com/khda79/workplacecloudhub.com/releases/download/windows11-upgrade-toolkit-v1.0.0/SmartM365-Windows11UpgradeToolkit-1.0.0-build.2.sha256) |
+| DemoAssets | [SmartM365-Windows11UpgradeToolkit-1.0.0-build.2-DemoAssets.zip](https://github.com/khda79/workplacecloudhub.com/releases/download/windows11-upgrade-toolkit-v1.0.0/SmartM365-Windows11UpgradeToolkit-1.0.0-build.2-DemoAssets.zip) |
+| Release notes | [SmartM365-Windows11UpgradeToolkit-1.0.0-build.2-RELEASE-NOTES.md](https://github.com/khda79/workplacecloudhub.com/releases/download/windows11-upgrade-toolkit-v1.0.0/SmartM365-Windows11UpgradeToolkit-1.0.0-build.2-RELEASE-NOTES.md) |
+| Release manifest | [SmartM365-Windows11UpgradeToolkit-1.0.0-build.2.manifest.json.txt](https://github.com/khda79/workplacecloudhub.com/releases/download/windows11-upgrade-toolkit-v1.0.0/SmartM365-Windows11UpgradeToolkit-1.0.0-build.2.manifest.json.txt) |
 
-Distribution version **1.0.0** is recorded in `SmartM365-Windows11UpgradeToolkit.version.json.txt`. Current component versions: GUI 1.0.0, endpoint 0.1.59, LOT orchestrator 1.0.0, worker 0.1.31 and automatic LOT 1.3.2. This package includes the guarded user-session checks and shutdown failure handling. The separate demo archive contains only fictional captures and exports. No Windows setup media, PsExec or operational inventories are shipped.
+Launch `Start-SmartM365-Windows11Upgrade-Demo.cmd` from the root of the extracted standalone release. The separate DemoAssets archive contains the current fictional GUI captures, applicable HTML reports, synthetic exports and website/presentation variants. It performs no tenant or device operation.
 
-
-Original build retained: `SmartM365-Windows11UpgradeToolkit-1.0.0.zip`, `SmartM365-Windows11UpgradeToolkit-1.0.0.sha256`.
-
-## Historical distribution 0.1.72
-
-Download the standalone operator package from the
-[SmartM365 Windows 11 Upgrade Toolkit v0.1.72 release](https://github.com/khda79/workplacecloudhub.com/releases/tag/windows11-upgrade-toolkit-v0.1.72).
-
-The GitHub release provides:
-
-- [SmartM365-Windows11UpgradeToolkit-0.1.72.zip](https://github.com/khda79/workplacecloudhub.com/releases/download/windows11-upgrade-toolkit-v0.1.72/SmartM365-Windows11UpgradeToolkit-0.1.72.zip): signed toolkit source and safe templates;
-- [SmartM365-Windows11UpgradeToolkit-0.1.72.sha256](https://github.com/khda79/workplacecloudhub.com/releases/download/windows11-upgrade-toolkit-v0.1.72/SmartM365-Windows11UpgradeToolkit-0.1.72.sha256): SHA-256 checksum for the ZIP.
+The signed runtime source is identified by the [build 2 source tag](https://github.com/khda79/workplacecloudhub.com/tree/windows11-upgrade-toolkit-v1.0.0-build.2/SmartM365/Devices/Windows11UpgradeToolkit). GitHub publication does not publish a version to the PowerShell Gallery service.
 
 The public package does not contain Windows setup media, `.intunewin` packages, PsExec,
 operational LOTs, inventories, assignments, logs, reports, tenant identifiers, device names,
@@ -31,7 +26,7 @@ account details, or local configuration. Obtain PsExec separately from Microsoft
 and supply properly licensed Windows setup media through an operator-controlled source when
 setup-based upgrades are required.
 
-The package includes endpoint `0.1.58`, LOT orchestrator `0.1.72`, worker `0.1.31`, GUI `0.1.53`,
+The package includes endpoint `0.1.59`, LOT orchestrator `1.0.0`, worker `0.1.31`, GUI `1.0.0`,
 and automatic LOT engine `1.3.2`. PowerShell scripts are Authenticode-signed by
 `workplacecloudhub.com`. The toolkit is distributed under the GNU General Public License v3.0.
 
@@ -41,14 +36,14 @@ The release notes and the `.sha256` asset publish the checksum of the final ZIP.
 After downloading both assets into the same folder, verify the archive before extraction:
 
 ```powershell
-$zip = '.\SmartM365-Windows11UpgradeToolkit-0.1.72.zip'
-$published = ((Get-Content -LiteralPath '.\SmartM365-Windows11UpgradeToolkit-0.1.72.sha256' -Raw).Trim() -split '\s+')[0]
+$zip = '.\SmartM365-Windows11UpgradeToolkit-1.0.0-build.2.zip'
+$published = ((Get-Content -LiteralPath '.\SmartM365-Windows11UpgradeToolkit-1.0.0-build.2.sha256' -Raw).Trim() -split '\s+')[0]
 $actual = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash
 if ($published -notmatch '^[0-9A-Fa-f]{64}$' -or $actual -ne $published) { throw 'ZIP SHA-256 mismatch. Stop and review the release assets.' }
 Expand-Archive -LiteralPath $zip -DestinationPath '.\Windows11Toolkit-verified'
 ```
 
-Use a new destination folder. Open the extracted `SmartM365-Windows11UpgradeToolkit-0.1.72`
+Use a new destination folder. Open the extracted `SmartM365-Windows11UpgradeToolkit-1.0.0-build.2`
 folder and keep its directory structure intact. This is a portable operator source package;
 there is no MSI/EXE installer for the launcher. Verify the PowerShell signatures locally:
 
@@ -68,8 +63,7 @@ certificate trust configuration. A matching ZIP hash does not establish publishe
   separately. Put `PsExec.exe` in `Scripts\` or make it available through `PATH` for the LOT wrappers.
   Remote execution requires an operator account with administrative access to the targets.
 - Review `Windows11UpgradeToolkit.config.template` and the LOT templates. Keep operational
-  configuration, inventories, LOTs and reports local. The template `Computers.txt` contains
-  example names `PC-001` and `PC-002`; replace them with the reviewed target list before use.
+  configuration, inventories, LOTs and reports local. The packaged template `Computers.txt` is empty; populate it with the reviewed target list before use.
   AD inventory requires the ActiveDirectory
   module and directory read access; Intune inventory uses delegated Graph sign-in as described below.
 - For setup-based LOT runs, provide extracted, licensed Windows media that the target SYSTEM
@@ -80,16 +74,7 @@ certificate trust configuration. A matching ZIP hash does not establish publishe
 
 ### Stable release and manual updates
 
-Release `0.1.72` is associated with the immutable
-[Windows11 toolkit source tag](https://github.com/khda79/workplacecloudhub.com/tree/windows11-upgrade-toolkit-v0.1.72/SmartM365/Devices/Windows11UpgradeToolkit).
-The component versions above describe that ZIP. The README and scripts on `main` can advance
-independently; a newer source version is not automatically a published operator package.
-
-Compared with release `0.1.71`, this package includes the final Windows-version log evidence
-in endpoint `0.1.58` and orchestrator `0.1.72`, the captured inventory context for automatic
-creation, and a GUI `0.1.53` fix that selects the newly created LOT before saving launcher
-options. A failed creation keeps the previous selection. Creating a LOT still does not launch
-it. The automatic LOT engine header now agrees with its existing runtime version `1.3.2`.
+Release **1.0.0 build 2** uses the immutable [build 2 source tag](https://github.com/khda79/workplacecloudhub.com/tree/windows11-upgrade-toolkit-v1.0.0-build.2/SmartM365/Devices/Windows11UpgradeToolkit). The component versions above describe that ZIP. Source files on `main` can advance independently; use the published checksums and build manifest to identify the downloaded package.
 
 The GUI update check only compares source versions on `main` and offers to open GitHub.
 It does not download, install, or replace toolkit files and does not track stable releases.

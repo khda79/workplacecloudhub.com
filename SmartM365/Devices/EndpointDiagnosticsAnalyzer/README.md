@@ -1,26 +1,29 @@
 # Smart Endpoint Diagnostics Analyzer
 
-## Current distribution 1.0.0
+## Current distribution 1.0.0 — build 2
 
-The current **build 2** aligns the interface and report branding on **1.0.0**. Download assets whose filenames contain `1.0.0-build.2`; original build assets and release tags remain available. The release notes identify the exact build source commit.
+The package and GUI product version are **1.0.0**. **Build 2** aligns the visible interface and report versions. The [1.0.0 release](https://github.com/khda79/workplacecloudhub.com/releases/tag/endpoint-diagnostics-analyzer-v1.0.0) contains only the current build 2 assets; superseded releases and original build assets have been removed.
 
-Download the [1.0.0 release](https://github.com/khda79/workplacecloudhub.com/releases/tag/endpoint-diagnostics-analyzer-v1.0.0). Distribution and module versions are **1.0.0**; the GUI and visible product version are **1.0.0**. This version transition preserves the reviewed operational behavior and prior releases.
+| Download | File |
+| --- | --- |
+| Standalone ZIP | [SmartM365-EndpointDiagnosticsAnalyzer-v1.0.0-build.2.zip](https://github.com/khda79/workplacecloudhub.com/releases/download/endpoint-diagnostics-analyzer-v1.0.0/SmartM365-EndpointDiagnosticsAnalyzer-v1.0.0-build.2.zip) |
+| Intune Win32 package | [SmartM365-EndpointDiagnosticsAnalyzer-1.0.0-build.2.intunewin](https://github.com/khda79/workplacecloudhub.com/releases/download/endpoint-diagnostics-analyzer-v1.0.0/SmartM365-EndpointDiagnosticsAnalyzer-1.0.0-build.2.intunewin) |
+| SHA-256 checksums | [SmartM365-EndpointDiagnosticsAnalyzer-v1.0.0-build.2.sha256](https://github.com/khda79/workplacecloudhub.com/releases/download/endpoint-diagnostics-analyzer-v1.0.0/SmartM365-EndpointDiagnosticsAnalyzer-v1.0.0-build.2.sha256) |
+| DemoAssets | [SmartM365-EndpointDiagnosticsAnalyzer-v1.0.0-build.2-DemoAssets.zip](https://github.com/khda79/workplacecloudhub.com/releases/download/endpoint-diagnostics-analyzer-v1.0.0/SmartM365-EndpointDiagnosticsAnalyzer-v1.0.0-build.2-DemoAssets.zip) |
+| Release notes | [SmartM365-EndpointDiagnosticsAnalyzer-v1.0.0-build.2-RELEASE-NOTES.md](https://github.com/khda79/workplacecloudhub.com/releases/download/endpoint-diagnostics-analyzer-v1.0.0/SmartM365-EndpointDiagnosticsAnalyzer-v1.0.0-build.2-RELEASE-NOTES.md) |
+| Release manifest | [SmartM365-EndpointDiagnosticsAnalyzer-v1.0.0-build.2.manifest.json.txt](https://github.com/khda79/workplacecloudhub.com/releases/download/endpoint-diagnostics-analyzer-v1.0.0/SmartM365-EndpointDiagnosticsAnalyzer-v1.0.0-build.2.manifest.json.txt) |
 
-Assets: `SmartM365-EndpointDiagnosticsAnalyzer-v1.0.0-build.2.zip`, `SmartM365-EndpointDiagnosticsAnalyzer-1.0.0-build.2.intunewin`, `SmartM365-EndpointDiagnosticsAnalyzer-v1.0.0-build.2.sha256`, and `SmartM365-EndpointDiagnosticsAnalyzer-v1.0.0-build.2-DemoAssets.zip`. Launch the included demo from the root of the extracted standalone release. The separate DemoAssets archive contains fictional captures and exports, with no tenant or device operations. PowerShell Gallery service publication remains separate.
+Launch `GalleryPackage/SmartM365.EndpointDiagnosticsAnalyzer/1.0.0/Runtime/Start-SmartM365-EndpointDiagnosticsAnalyzer-Demo.cmd` from the root of the extracted standalone release. The separate DemoAssets archive contains the current fictional GUI captures, applicable HTML reports, synthetic exports and website/presentation variants. It performs no tenant or device operation.
 
-
-Original build retained: `SmartM365-EndpointDiagnosticsAnalyzer-v1.0.0.zip`, `SmartM365-EndpointDiagnosticsAnalyzer-v1.0.0.sha256`.
-
-Earlier download references below are retained as release history.
-
+The signed runtime source is identified by the [build 2 source tag](https://github.com/khda79/workplacecloudhub.com/tree/endpoint-diagnostics-analyzer-v1.0.0-build.2/SmartM365/Devices/EndpointDiagnosticsAnalyzer). GitHub publication does not publish a version to the PowerShell Gallery service.
 
 PowerShell/WPF endpoint diagnostics analyzer for Microsoft Intune and Windows endpoint troubleshooting.
 
 ## Release status
 
-**0.3.0 stable is published** on [GitHub Releases](https://github.com/khda79/workplacecloudhub.com/releases/tag/endpoint-diagnostics-analyzer-v0.3.0) and [PowerShell Gallery](https://www.powershellgallery.com/packages/SmartM365.EndpointDiagnosticsAnalyzer/0.3.0) as of September 4, 2026. It promotes preview18 without changing the diagnostic algorithms and supports managed installation through PowerShell Gallery or Microsoft Intune. The downloadable bundle includes administrator packaging files; their presence does not deploy anything to Intune.
+**1.0.0 build 2 is the current GitHub distribution**, linked above. It includes the signed module and administrator packaging files; their presence does not deploy anything to Intune.
 
-Validation boundary: the published release reports real local-device and Intune-ZIP workflows verified on Windows 10, including collection coverage, complete EVTX counts and finalization. The user reported successfully completing a subsequent interactive test of stable 0.3.0 on Windows 11 on September 7, 2026. Stable is the selected release channel, not a claim that every diagnostic rule has been certified on every supported device.
+Historical validation boundary: the published release reports real local-device and Intune-ZIP workflows verified on Windows 10, including collection coverage, complete EVTX counts and finalization. The user reported successfully completing a subsequent interactive test of stable 0.3.0 on Windows 11 on September 7, 2026. Stable is the selected release channel, not a claim that every diagnostic rule has been certified on every supported device.
 
 Preview18 corrects collection completeness and finalization reporting:
 
@@ -100,7 +103,7 @@ Preview13 keeps the responsive preview9 architecture and corrects parser and sco
 - The former Compliance view is explicitly a local configuration assessment; user SSO controls collected under SYSTEM are marked `NOT_EVALUATED`.
 - Localized driver and certificate output, Windows Update logs, `results.xml`, dynamic EVTX channels and Windows 11 applicability are parsed more conservatively.
 
-The current public bundle is [Endpoint Diagnostics Analyzer v0.3.0](https://github.com/khda79/workplacecloudhub.com/releases/tag/endpoint-diagnostics-analyzer-v0.3.0); installation instructions are below.
+The current public bundle is **1.0.0 build 2**; use the download links above and the installation instructions below.
 
 All PowerShell release files must be Authenticode-signed by `workplacecloudhub.com` before publication.
 
@@ -138,50 +141,27 @@ Default locations:
 
 Uninstallation preserves per-user configuration and logs unless `-RemoveUserData` is explicitly supplied.
 
-## PowerShell Gallery
+## PowerShell Gallery channel
 
-The published [SmartM365.EndpointDiagnosticsAnalyzer 0.3.0 package](https://www.powershellgallery.com/packages/SmartM365.EndpointDiagnosticsAnalyzer/0.3.0) can be installed for the current user with PSResourceGet:
+The downloadable build 2 bundle includes module version **1.0.0**. GitHub release publication does not publish that version to the Gallery service. To install this exact build, use the standalone ZIP linked above and import its bundled module as shown below. Gallery service updates remain a separate administrator-controlled channel. Intune-owned installations must be updated through Intune.
 
-```powershell
-Install-PSResource -Name SmartM365.EndpointDiagnosticsAnalyzer -Version 0.3.0 -Repository PSGallery -Scope CurrentUser
-Import-Module SmartM365.EndpointDiagnosticsAnalyzer -RequiredVersion 0.3.0
-Install-SmartM365EndpointDiagnosticsAnalyzer
-```
+Automatic updates are disabled and no scheduled update task is created.
 
-PowerShellGet equivalent:
+## Verify and install the build 2 bundle
+
+Download the **Standalone ZIP** and **SHA-256 checksums** from the table above into the same folder. The first checksum row is the application ZIP; the remaining rows cover the DemoAssets and IntuneWin packages.
 
 ```powershell
-Install-Module -Name SmartM365.EndpointDiagnosticsAnalyzer -RequiredVersion 0.3.0 -Repository PSGallery -Scope CurrentUser
-Import-Module SmartM365.EndpointDiagnosticsAnalyzer -RequiredVersion 0.3.0
-Install-SmartM365EndpointDiagnosticsAnalyzer
+$zip = '.\SmartM365-EndpointDiagnosticsAnalyzer-v1.0.0-build.2.zip'
+$published = ((Get-Content -LiteralPath '.\SmartM365-EndpointDiagnosticsAnalyzer-v1.0.0-build.2.sha256' -TotalCount 1) -split '\s+')[0]
+$actual = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash
+if ($published -notmatch '^[0-9A-Fa-f]{64}$' -or $actual -ne $published) { throw 'ZIP SHA-256 mismatch.' }
 ```
 
-Open **SmartM365 > Smart Endpoint Diagnostics Analyzer** from the Windows Start menu after installation.
-
-For a Gallery installation, updating the module and installed runtime is an explicit action:
+Extract the complete archive, open PowerShell in the extracted `SmartM365-EndpointDiagnosticsAnalyzer-v1.0.0-build.2` directory, then install the bundled module runtime:
 
 ```powershell
-Update-SmartM365EndpointDiagnosticsAnalyzer
-```
-
-Automatic updates are disabled and no scheduled update task is created. The update command excludes prereleases by default and refuses Intune-owned installations; update those through Intune. To install exactly 0.3.0, use the version-pinned installation commands above.
-
-## Downloadable 0.3.0 bundle
-
-- [GitHub release and release notes](https://github.com/khda79/workplacecloudhub.com/releases/tag/endpoint-diagnostics-analyzer-v0.3.0)
-- [Download the ZIP](https://github.com/khda79/workplacecloudhub.com/releases/download/endpoint-diagnostics-analyzer-v0.3.0/SmartM365-EndpointDiagnosticsAnalyzer-v0.3.0.zip)
-- [Download the SHA-256 file](https://github.com/khda79/workplacecloudhub.com/releases/download/endpoint-diagnostics-analyzer-v0.3.0/SmartM365-EndpointDiagnosticsAnalyzer-v0.3.0.sha256)
-
-Before extracting, compare `Get-FileHash -Algorithm SHA256` for the downloaded ZIP with the published checksum:
-
-```text
-C45783CEBF8FF651D6AAC06907AFE071E0563726B3A45DBC9B3AE052E18340B7
-```
-
-Extract the complete archive, open PowerShell in the extracted directory, then install the bundled module runtime:
-
-```powershell
-Import-Module .\GalleryPackage\SmartM365.EndpointDiagnosticsAnalyzer\0.3.0\SmartM365.EndpointDiagnosticsAnalyzer.psd1
+Import-Module .\GalleryPackage\SmartM365.EndpointDiagnosticsAnalyzer\1.0.0\SmartM365.EndpointDiagnosticsAnalyzer.psd1
 Install-SmartM365EndpointDiagnosticsAnalyzer
 ```
 
@@ -262,7 +242,7 @@ Create one checksum-protected handoff containing the Gallery package and the Int
 .\PowerShellGallery\SmartM365-New-EndpointDiagnosticsAnalyzerPreviewBundle.ps1 -Force
 ```
 
-The default bundle path is `C:\tmp\SmartM365-EndpointDiagnosticsAnalyzer-Stable-0.3.0`. The builder keeps its historical `PreviewBundle` filename for compatibility and selects `Stable` or `Preview` from the version manifest. Creation performs no Gallery publication, Graph connection or tenant change.
+The default bundle path is `C:\tmp\SmartM365-EndpointDiagnosticsAnalyzer-Stable-1.0.0`. The builder keeps its historical `PreviewBundle` filename for compatibility and selects `Stable` or `Preview` from the version manifest. Creation performs no Gallery publication, Graph connection or tenant change.
 
 ## Local validation
 
@@ -283,4 +263,4 @@ Keep the application folder, its original report/template sources, local brandin
 
 ## Distribution version transition
 
-The 1.0.0 package uses GUI component 1.0.0 and includes the complete signed demo runtime. Old releases remain available. Local DemoAssets stay Git-ignored; reviewed demo archives are separate GitHub release assets.
+The 1.0.0 package uses GUI component 1.0.0 and includes the complete signed demo runtime. Only the current build 2 release assets remain published. Git history and source tags preserve earlier source revisions. Local DemoAssets stay Git-ignored; reviewed demo archives are separate GitHub release assets.
