@@ -22,15 +22,15 @@
     This version does not use:
     - Get-CimInstance
     - Invoke-Command
-    Certificate reads alone use one Exchange /PowerShell/ session by default.
+    Certificate reads use the native snap-in first, then one lazy Exchange /PowerShell/ session for retries.
     New-CimSession is used over DCOM only, to start the Health Checker scheduled task.
 
 .VERSION
-1.8.6
+1.8.7
 .REQUIREMENTS
     Windows PowerShell 5.1 on an Exchange 2016/on-premises management host.
     Modules/snap-ins: SmartM365 WindowsPowerShell5 compatibility module; Exchange Management snap-in;
-    certificate reads use the shared Exchange remote session helper by default.
+    certificate retries use the shared Exchange remote session helper.
     Minimum permissions: Exchange on-premises read access for Get-ExchangeServer and virtual directory/readiness cmdlets; WMI/DCOM read access to target servers for compute, disk and storage inventory.
     Conditional: Mail.Send is required only when Graph mail is used; Sites.Selected write is required only when SharePoint upload is enabled.
     Conditional: -IncludeHealthChecker requires an elevated session (local administrator) on the Exchange server;
@@ -38,7 +38,7 @@
     and the Health Checker scheduled task must be installed there.
 .NOTES
     Script Name : SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory.ps1
-    Version     : 1.8.6
+    Version     : 1.8.7
     Requirements:
       - Windows PowerShell 5.1 with Exchange 2016 Management Tools
       - Exchange 2016 read RBAC for Get-ExchangeServer, Get-MailboxDatabase,
@@ -49,6 +49,10 @@
       - PowerShell 5.1 or later
 
 .CHANGELOG
+    1.8.7
+      - Read native certificates first; retry only failed targets through one lazy remote session.
+      - Retain native metadata and expose RemoteRetry provenance without adding CSV columns.
+
     1.8.6
       - Read certificates through one constrained Exchange session; retain LocalSnapin rollback.
       - Preserve unavailable remote metadata as Unknown with a diagnostic, never a known zero.
@@ -260,7 +264,7 @@ $tenantContextPath = & {
 . $tenantContextPath
 
 $ScriptName = "SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory"
-$ScriptVersion = "1.8.6"
+$ScriptVersion = "1.8.7"
 $RunId = (Get-Date).ToString("yyyyMMdd-HHmmss")
 # Vendored Microsoft CSS-Exchange Health Checker (see ThirdParty\CSS-Exchange\HealthChecker\PROVENANCE.md).
 $HealthCheckerRelativePath = 'ThirdParty\CSS-Exchange\HealthChecker\HealthChecker.ps1'
@@ -2368,6 +2372,70 @@ function Add-SmartM365InfrastructureCertificateProperties {
     }
 }
 
+function Invoke-SmartM365InfrastructureCertificatesLocalFirst {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][System.Collections.Generic.List[object]]$Rows,
+        [string[]]$ExchangeServerNames = @()
+    )
+
+    $nativeCommand = $null
+    $remoteUnavailable = $null
+    $certificateServers = @($ExchangeServerNames | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } | Sort-Object -Unique)
+    if ($certificateServers.Count -eq 0) { $certificateServers = @($env:COMPUTERNAME) }
+    foreach ($serverName in $certificateServers) {
+        $readMode = 'LocalSnapin'
+        try {
+            # Bind the native cmdlet explicitly: an imported proxy must never replace later local reads.
+            if ($null -eq $nativeCommand) {
+                $nativeCommand = Get-Command -Name 'Microsoft.Exchange.Management.PowerShell.SnapIn\Get-ExchangeCertificate' -CommandType Cmdlet -ErrorAction Stop
+            }
+            $items = @(& $nativeCommand -Server $serverName -ErrorAction Stop)
+            Write-Log ('Certificate collection source=LocalSnapin; server={0}' -f $serverName)
+        }
+        catch {
+            if ($_.Exception -is [Management.Automation.PipelineStoppedException] -or $_.Exception -is [OperationCanceledException]) { throw }
+            $localFailure = $_.Exception.Message
+            Write-Log ('Local certificate read failed for {0}; RemoteRetry requested. Local: {1}' -f $serverName, $localFailure) -Level 'WARN'
+            Add-ExchangeReadinessRow -Rows $Rows -Category 'ExchangeCertificate' -ObjectName $serverName -Setting 'CollectionPath' -Value 'RemoteRetry' -MigrationFocus 'Remote retry after a failed native certificate read; inspect collection diagnostics.' -Importance 'Review'
+            try {
+                if ($remoteUnavailable) { throw $remoteUnavailable }
+                try {
+                    Initialize-SmartM365InfrastructureCertificateConnection -Mode Remote
+                }
+                catch {
+                    if ($_.Exception -is [Management.Automation.PipelineStoppedException] -or $_.Exception -is [OperationCanceledException]) { throw }
+                    $remoteUnavailable = 'Remote certificate session unavailable; no further session attempt. ' + $_.Exception.Message
+                    throw
+                }
+                $items = @(Get-SmartM365InfrastructureCertificates -Server $serverName -Mode Remote)
+                $readMode = 'Remote'
+                Write-Log ('Certificate collection source=RemoteRetry; server={0}' -f $serverName)
+            }
+            catch {
+                if ($_.Exception -is [Management.Automation.PipelineStoppedException] -or $_.Exception -is [OperationCanceledException]) { throw }
+                $remoteFailure = $_.Exception.Message
+                if ($null -ne $script:ExchangeCertificateContext) {
+                    $owned = Get-Command Get-ExchangeCertificate -ErrorAction SilentlyContinue
+                    if ($script:ExchangeCertificateContext.Session.State -ne 'Opened' -or $null -eq $owned -or $owned.CommandType -ne 'Function' -or $owned.ModuleName -ne $script:ExchangeCertificateContext.Module.Name) {
+                        $remoteUnavailable = 'Remote certificate session or proxy unavailable; no further session attempt. ' + $remoteFailure
+                    }
+                }
+                $failureMessage = 'Local: {0}; Remote: {1}' -f $localFailure, $remoteFailure
+                Write-Log ('Exchange certificate collection failed for {0}: {1}' -f $serverName, $failureMessage) -Level 'WARN'
+                Add-ExchangeReadinessRow -Rows $Rows -Category 'ExchangeCertificate' -ObjectName $serverName -Setting 'Collection' -Value 'Failed' -MigrationFocus 'Review certificate collection failure for this server before readiness sign-off.' -Importance 'Warning' -CollectionStatus 'ERROR' -ErrorMessage $failureMessage
+                continue
+            }
+        }
+        foreach ($item in @($items | Sort-Object NotAfter)) {
+            $objectName = '{0}:{1}' -f $serverName, $item.Thumbprint
+            Add-ExchangeReadinessRow -Rows $Rows -Category 'ExchangeCertificate' -ObjectName $objectName -Setting 'Server' -Value $serverName -MigrationFocus 'Certificate coverage and expiration are critical for HTTPS, SMTP TLS, hybrid, and Exchange SE namespace readiness.' -Importance 'Review'
+            Add-SmartM365InfrastructureCertificateProperties -Rows $Rows -InputObject $item -ObjectName $objectName -Mode $readMode
+        }
+        Write-Log ('Finished Exchange certificates from {0}. Certificates: {1}; source={2}' -f $serverName, $items.Count, $readMode)
+    }
+}
+
 function Invoke-SmartM365InfrastructureCertificateInventory {
     [CmdletBinding()]
     param(
@@ -2375,11 +2443,15 @@ function Invoke-SmartM365InfrastructureCertificateInventory {
         [string[]]$ExchangeServerNames = @()
     )
 
-    $mode = [string](Get-SmartM365EffectiveConfigValue -Name 'ExchangeConnectionMode' -DefaultValue 'Remote')
-    if ($mode -notin @('Remote','LocalSnapin')) { throw 'ExchangeConnectionMode must be Remote or LocalSnapin.' }
+    $mode = [string](Get-SmartM365EffectiveConfigValue -Name 'ExchangeConnectionMode' -DefaultValue 'LocalFirst')
+    if ($mode -notin @('LocalFirst','Remote','LocalSnapin')) { throw 'ExchangeConnectionMode must be LocalFirst, Remote or LocalSnapin.' }
     $timer = [Diagnostics.Stopwatch]::StartNew()
     $sessionFailure = $null
     try {
+        if ($mode -eq 'LocalFirst') {
+            Invoke-SmartM365InfrastructureCertificatesLocalFirst -Rows $Rows -ExchangeServerNames $ExchangeServerNames
+            return
+        }
         try {
             Initialize-SmartM365InfrastructureCertificateConnection -Mode $mode
         }
@@ -3497,8 +3569,8 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCZFnwzUukxk/wS
-# 6PKVtTKGacSazmpwRkiMatEGrbFgyqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDGAaJcW0rfAPu4
+# 0mwBEMp3A2DH42gdPowk5RLytrSL+aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -3631,31 +3703,31 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIGVIk8i0KC552TRJLrHbl53VsYoEt+6g42aP7o+KDqoCMA0GCSqG
-# SIb3DQEBAQUABIIBgD8BcGJ5/82/5Ve9drYiCBfYGPF7U6kI3yVtbIfvaunKAO7M
-# eAQ/Sdk39YEoDkWsIdENZlT71iSNHabTcypNejBvl7lErVHlWuCDqygnX4Osnhv2
-# sXnEw4lxX5qEwONvkAr5VDxbp7b9Mh1S5P1JfqIymPGrC/pabUSKudTsFgExPTIH
-# d3aoFBzjybNl0fk3du5bPf7djtn3tJDyba9VmYbu5h0H3wm2kGbyflJhOJo/be/K
-# WrErEU17F5qsx0pUf1DnJTOG+1DrnZK8ZoUThJs6JQhD1ZCvBNIgPwriGDEuUH/Z
-# S1//dXwiUA4ddwvEhAz7ew2af/NMbXGte16M5OJz90vKlDqE+b77X7O+l4evX9VT
-# s4C4nJWnkk00x3DklT2lfO7Aq3j67uOpH9FodYeMkWIkJyXTywlpZub71PWrylB/
-# q2tJ845vaiIRkJIy+K7y42rrUazXfsuVr2H5MTDMd3spgZv2POM0EVXExKOa/Bfh
-# fYqWkA++WabEpjk0y6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIHalUmDdYbToZ5qG11PCoFR76vseup651QazHnKg6rcZMA0GCSqG
+# SIb3DQEBAQUABIIBgJKyU0G7Qidt6GAFO3jpgEHsDxtxXG8Q5J5EUAejMNVInEDK
+# ibrRZ4OtPB5PgyI38nlN2ybee4eM84pft7xrjPIVD+lTpiCVEEntZABGMd3G7yGE
+# F/X8aoxLN+/RM8m2pFs0njYizMJaDKL1C4ueHHyRXiKPirIT8B6y0dnI4w2/ztiU
+# XA3eRnVkSXi0TeWZnT6BWSwwaZk444OPAT9MpeRvqJRWOZOur5jDcCeAOTNW/RPa
+# GiinPZkeBrA1CjOjwFSeOQz/3Njb1lCeWkua/qoMA/YWpltRvAwLFjelYC4id4xL
+# lhueJA6/fASSwJOX16fZKuknuLribfSvUZW4cxVl1UGRNBQ9rDUKWzCkusTCARWI
+# noW8oHLOvU3gw/YMEEpbMhve+Qgpje0UjGKVm/0CtarphxAZ2o0wuOoSJvmWyJIq
+# tBI+djOfF0GKbbrc+3oUMzj6SdabC4cfteoe2PvQvbP8KZfv0fl4fy7sYIBIG5Ta
+# 0TqZ/Q5R1SA/b1ryI6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjMxOTI1
-# MzNaMC8GCSqGSIb3DQEJBDEiBCCk5tqJCMpfLqHe611Eg+fTIVTLE2XObhcY0KfV
-# vRzcpzANBgkqhkiG9w0BAQEFAASCAgAQUq0Cq9HVKTFpAwsX+EOH6QAijh9RnCwd
-# lEd2XtbPOzdOPYQpEKwAd10BuPyzsKakV6PsgPc6qT8/6xo1QRYtmESV2fuyjvvh
-# kH4p8AkdjpCsSXw8NnCkjs+On1IRmrCRaBhvWHvqQjt4zyoIa6+mQv9WXPzTqJSm
-# fMJkdUQBB7pTh5xSKBFf9+Bt6YzJU/mmRECXH/isXUv43JrEj2/sUdWAutHAYjbL
-# xVVBTaiLdNHSS8J95HTZ+/sXPdz+WpaHD/X8baeGxjcagiyfn5pjv4kqwayUB9Jq
-# bjmJkzPToq6tnf4NbgTtZVu2nvHkBPKBNUE17oQuo34xVm2ewymVgNgcMdchXNVE
-# ndo9PreBjwNicWS6aeTwCIQo4dP7vofrZSS/zTmLTM3R0tlexraKV3bR54oeBYsE
-# yNUYJV7w52/yVIqiY//qODXEL4UlnWkjwDrCRXm9JdYWvHjl/J1qzLTUw4hor0SU
-# 55W6uNMxjYDwPbCvJSnvud5Pz8DfLacXwzrEmWRsomQTRwPcJZA5ycRGTsq49A46
-# 0d5L+wooH0CE+9IgfnFTKR0KsMfm5dFzEvJ459TYw2GsmF5LI6kML1eJcgxu2QOc
-# 5qHRf+ldngAw980PzIlFj1olf9tm6iM1hNbHFwWDrBG8hcPBJOfl4DX929pinKjL
-# bB7Xfa0rVg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjMyMTA1
+# MDVaMC8GCSqGSIb3DQEJBDEiBCBGgkRS8TQNPbcuaVmJOFX6KAoIJpeWlBIQC/u4
+# o7DwlzANBgkqhkiG9w0BAQEFAASCAgBd8+Huc8W3C+R2iRLgiQkcOjNTJ3mSpl3f
+# ZlZV2OpCVO0dV01rNaBhuGu3Dh4KSP2YW9+LNOuzoVIHBQKYdfcdu+xNM8NziK0T
+# MkQ/mCyfjMcBp4JDFcvhe7Molj9zeVN7ejMEcQKkCfENGAxnr2eFxbHF0dR5dNkA
+# NqU+wqC2IANByRyn12v7QBpubWUENhHy6RJ8yUkkz+HxUg70n4as8ThZxKbVDP7z
+# sKM9ccWAoU3XPF5nAejBrOB6uJ1H4J8oMG8LjELEiKzi0Oe+7nVL8z4L75bd/p0U
+# Zughq9zzKpY7yOZcZlD0kRoYSp6qEH3d0IWkveWrDjRklcw2GQ7Z/lcZ1RYywqDq
+# tgi1Y1cFbFuhUuyF6Byd10s4XGcqnuNRtJsT1i+chZC+A57LJH/6HSd3eHt97ILF
+# 4Mw6nZTbZhfp4vb/KCB67h6NPAaR28brmt9Jsh1J+339Q/LGJHwkodauLTgACqD1
+# ymjpZPxyIU2M0eW2RHasQpykAzCIMhFUGnuM81RPdDcpxx1IgbXYmm/RZ0lTZngq
+# bm1k0pgilHNx5pkZ4leMVeYTMp3QuNcofUDSGvbTJ7tNfmceUjwkcNKJ8kNHXlj3
+# JUIn0oxC/wX8nARQLeBGtuYgu+YfVh+P3L7dpjEqcNT/lcjZ6QpM6jUp3yc3ZzRX
+# ypVNf66ljQ==
 # SIG # End signature block
