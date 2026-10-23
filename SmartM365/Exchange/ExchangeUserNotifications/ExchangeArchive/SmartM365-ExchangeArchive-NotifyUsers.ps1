@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
 Notifies users whose primary mailbox is approaching the configured limit that Online Archive will be enabled.
 
@@ -59,7 +59,7 @@ Runs the configured archive campaign in dry-run mode using the recipients path a
 Sends the archive notification to a pilot CSV even when rows are below the configured mailbox-size threshold.
 
 .VERSION
-1.4
+1.5
 #>
 [CmdletBinding()]
 param(
@@ -296,9 +296,14 @@ $columns = @('Timestamp','RunId','Campaign','BatchFile','Email','LanguageTag','S
 $counters = @{ Files = 0; Rows = 0; Sent = 0; DryRun = 0; Failed = 0; Skipped = 0; AlreadySent = 0; MailboxNotFound = 0; RemoteMailbox = 0; MailboxUsageUnavailable = 0; MailboxUsageBelowThreshold = 0; TeamsSent = 0; TeamsFailed = 0; TeamsDryRun = 0 }
 $processedItems = New-Object System.Collections.ArrayList
 $seen = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
-$registry = Load-SmartM365CommunicationSentRegistry -Path $sentRegistryPath
+$registryLock = $null
+$registryCheckpointPending = $false
 
 try {
+    if ($preventResend -and -not $WhatIf) {
+        $registryLock = Enter-SmartM365CommunicationSentRegistryLock -Path $sentRegistryPath
+    }
+    $registry = Load-SmartM365CommunicationSentRegistry -Path $sentRegistryPath
     foreach ($file in (Get-RecipientFiles -Path $RecipientsPath)) {
         $counters.Files++
         $rows = @(Import-SmartM365CommunicationCsv -Path $file.FullName -RequiredColumns @())
@@ -409,6 +414,15 @@ try {
                 Assert-SmartM365CommunicationNoUnresolvedToken -Html $html
 
                 $result = Send-SmartM365CommunicationMail -MailSendMode $mailSendMode -SmtpServer $smtpServer -SmtpPort $smtpPort -From $from -To $email -Bcc $bccAll -Subject $subject -BodyHtml $html -AppId $global:AppId -TenantId $global:TenantId -Thumbprint $global:Thumbprint -SmtpUseIntegratedAuth $smtpUseIntegratedAuth -SmtpEnableSsl $smtpEnableSsl -LogoPath $logoPath -LogoContentId $logoContentId -LogoMediaType $logoMediaType -RetryCount $smtpRetryCount -RetryDelaySeconds $smtpRetryDelaySeconds -WhatIf:$WhatIf
+                if (-not $WhatIf -and $result.Sent) {
+                    $counters.Sent++
+                    if ($preventResend) {
+                        $registryCheckpointPending = $true
+                        Register-SmartM365CommunicationSentItem -Registry $registry -Email $email
+                        Save-SmartM365CommunicationSentRegistry -Registry $registry -Path $sentRegistryPath
+                        $registryCheckpointPending = $false
+                    }
+                }
                 $teamsStatus = 'Disabled'
                 $teamsError = ''
                 try {
@@ -428,13 +442,13 @@ try {
                 }
                 if (-not $WhatIf -and $intraEmailDelayMilliseconds -gt 0) { Start-Sleep -Milliseconds $intraEmailDelayMilliseconds }
                 if ($WhatIf) { $counters.DryRun++ }
-                elseif ($result.Sent) { $counters.Sent++; if ($preventResend) { Register-SmartM365CommunicationSentItem -Registry $registry -Email $email } }
-                else { $counters.Skipped++ }
+                elseif (-not $result.Sent) { $counters.Skipped++ }
                 $status = if ($WhatIf) { 'DryRun' } elseif ($result.Sent) { 'Success' } else { $result.Mode }
                 [void]$processedItems.Add([pscustomobject]@{ Email = $email; LanguageTag = $language; Status = $status })
                 Add-SmartM365CommunicationLogRow -Path $logPath -Columns $columns -Row ([pscustomobject]@{ Timestamp = Get-Date; RunId = $runId; Campaign = $campaignName; BatchFile = $file.Name; Email = $email; LanguageTag = $language; Scope = 'Domain'; MailboxTotalGb = $totalGb; MailboxUsagePercent = $usagePercent; Subject = $subject; Status = $status; TeamsStatus = $teamsStatus; TeamsError = $teamsError; SkipReason = ''; ErrorMessage = $result.Mode; RecipientTypeDetails = $recipientTypeDetails; ExchangeSource = $exchangeSource })
             }
             catch {
+                if ($registryCheckpointPending) { throw }
                 $counters.Failed++
                 [void]$processedItems.Add([pscustomobject]@{ Email = $email; LanguageTag = $language; Status = 'Failed' })
                 Add-SmartM365CommunicationLogRow -Path $logPath -Columns $columns -Row ([pscustomobject]@{ Timestamp = Get-Date; RunId = $runId; Campaign = $campaignName; BatchFile = $file.Name; Email = $email; LanguageTag = $language; Scope = 'Domain'; MailboxTotalGb = $totalGb; MailboxUsagePercent = $usagePercent; Subject = $subject; Status = 'Failed'; SkipReason = ''; ErrorMessage = $_.Exception.Message; RecipientTypeDetails = $recipientTypeDetails; ExchangeSource = $exchangeSource })
@@ -442,14 +456,17 @@ try {
         }
     }
 
-    if ($preventResend -and -not $WhatIf) { Save-SmartM365CommunicationSentRegistry -Registry $registry -Path $sentRegistryPath }
-
     $summary = "Files=$($counters.Files); Rows=$($counters.Rows); Sent=$($counters.Sent); DryRun=$($counters.DryRun); Failed=$($counters.Failed); Skipped=$($counters.Skipped); AlreadySent=$($counters.AlreadySent); MailboxNotFound=$($counters.MailboxNotFound); RemoteMailbox=$($counters.RemoteMailbox); MailboxUsageUnavailable=$($counters.MailboxUsageUnavailable); MailboxUsageBelowThreshold=$($counters.MailboxUsageBelowThreshold); TeamsSent=$($counters.TeamsSent); TeamsDryRun=$($counters.TeamsDryRun); TeamsFailed=$($counters.TeamsFailed)."
     if (-not $WhatIf -and -not $NoSummaryEmail -and -not [string]::IsNullOrWhiteSpace($summaryTo)) {
         $summaryHtml = New-SmartM365CommunicationSummaryHtml -Title $summaryTitle -Facts @{
             RunId = $runId; Tenant = $Tenant; Mode = $(if ($WhatIf) { 'DryRun' } else { 'Live' }); Summary = $summary; LogPath = $logPath; SentRegistryPath = $sentRegistryPath; ExchangeManagement = ("{0}:{1}" -f $exchangeManagementState.Source, $exchangeManagementState.Status)
         } -Items @($processedItems)
         Send-SmartM365CommunicationMail -MailSendMode $mailSendMode -SmtpServer $smtpServer -SmtpPort $smtpPort -From $from -To $summaryTo -Bcc $summaryBcc -Subject $summarySubject -BodyHtml $summaryHtml -AppId $global:AppId -TenantId $global:TenantId -Thumbprint $global:Thumbprint -SmtpUseIntegratedAuth $smtpUseIntegratedAuth -SmtpEnableSsl $smtpEnableSsl -RetryCount $smtpRetryCount -RetryDelaySeconds $smtpRetryDelaySeconds | Out-Null
+    }
+
+    if ($counters.Failed -gt 0 -or $counters.TeamsFailed -gt 0) {
+        Write-Host $summary
+        throw ("Campaign completed with delivery failures. {0}" -f $summary)
     }
 
     if (-not $WhatIf) {
@@ -465,11 +482,15 @@ catch {
     throw
 }
 
+finally {
+    if ($null -ne $registryLock) { $registryLock.Dispose() }
+}
+
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBApmab3h7DyHsf
-# sEDxTbSZJMFttUNisy7nSDNHzH+aJaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDhs280Sh8H65MF
+# rHDDsG6jmtze3C8380Ek4ZzSVC1vL6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -560,25 +581,25 @@ catch {
 # NHNboDGcmWXfwXRy4kbu4QFhOm0xJuF2EZAOk5eCkhSxZON3rGlHqhpB/8MluDez
 # ooIs8CVnrpHMiD2wL40mm53+/j7tFaxYKIqL0Q4ssd8xHZnIn/7GELH3IdvG2XlM
 # 9q7WP/UwgOkw/HQtyRN62JK4S1C8uw3PdBunvAZapsiI5YKdvlarEvf8EA+8hcpS
-# M9LHJmyrxaFtoza2zNaQ9k+5t1wwggbtMIIE1aADAgECAhAKgO8YS43xBYLRxHan
-# lXRoMA0GCSqGSIb3DQEBCwUAMGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdp
+# M9LHJmyrxaFtoza2zNaQ9k+5t1wwggbtMIIE1aADAgECAhAIT9wzT35FTtvDD4/5
+# khg1MA0GCSqGSIb3DQEBCwUAMGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdp
 # Q2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3Rh
-# bXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTEwHhcNMjUwNjA0MDAwMDAwWhcN
-# MzYwOTAzMjM1OTU5WjBjMQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQs
+# bXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTEwHhcNMjYwODA1MDAwMDAwWhcN
+# MzcxMTA0MjM1OTU5WjBjMQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQs
 # IEluYy4xOzA5BgNVBAMTMkRpZ2lDZXJ0IFNIQTI1NiBSU0E0MDk2IFRpbWVzdGFt
-# cCBSZXNwb25kZXIgMjAyNSAxMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKC
-# AgEA0EasLRLGntDqrmBWsytXum9R/4ZwCgHfyjfMGUIwYzKomd8U1nH7C8Dr0cVM
-# F3BsfAFI54um8+dnxk36+jx0Tb+k+87H9WPxNyFPJIDZHhAqlUPt281mHrBbZHqR
-# K71Em3/hCGC5KyyneqiZ7syvFXJ9A72wzHpkBaMUNg7MOLxI6E9RaUueHTQKWXym
-# OtRwJXcrcTTPPT2V1D/+cFllESviH8YjoPFvZSjKs3SKO1QNUdFd2adw44wDcKgH
-# +JRJE5Qg0NP3yiSyi5MxgU6cehGHr7zou1znOM8odbkqoK+lJ25LCHBSai25CFyD
-# 23DZgPfDrJJJK77epTwMP6eKA0kWa3osAe8fcpK40uhktzUd/Yk0xUvhDU6lvJuk
-# x7jphx40DQt82yepyekl4i0r8OEps/FNO4ahfvAk12hE5FVs9HVVWcO5J4dVmVzi
-# x4A77p3awLbr89A90/nWGjXMGn7FQhmSlIUDy9Z2hSgctaepZTd0ILIUbWuhKuAe
-# NIeWrzHKYueMJtItnj2Q+aTyLLKLM0MheP/9w6CtjuuVHJOVoIJ/DtpJRE7Ce7vM
-# RHoRon4CWIvuiNN1Lk9Y+xZ66lazs2kKFSTnnkrT3pXWETTJkhd76CIDBbTRofOs
-# NyEhzZtCGmnQigpFHti58CSmvEyJcAlDVcKacJ+A9/z7eacCAwEAAaOCAZUwggGR
-# MAwGA1UdEwEB/wQCMAAwHQYDVR0OBBYEFOQ7/PIx7f391/ORcWMZUEPPYYzoMB8G
+# cCBSZXNwb25kZXIgMjAyNiAxMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKC
+# AgEAtnum8sn+zUr41JtMZbP9OMYw+HwJDpG5xkIu/lqcfNYmMX81YmsUiHLbh9yk
+# peWBGKTLhYBrAN9Tdg/QEzG32XcObmgIblnr0CoQ3WSAeDZ6nH6X6VkFyYkJw3QB
+# JREwvm4UhLzSxmwPA7cFKRTEOMsmEEj6qJk/dqLEAL+oQYuOwE2UuiX1Vnul8YRe
+# IyWd4kgLn9gq6LNXM0UplkR6jL/QHxmb6fMoGBJYbnaUI7XD6cKDpekK2SVMld4i
+# DbzeHDtOaaxldH5IxuNusQ69nd8/ZXEiB5Hbxj3RlK13cX1W4DlFXKdv/CEhM8Cj
+# 1vvlmvhNroyPdRGbbpBlgyf8Wdu5N6ByhFwURn0U6ozlPoxN22v+fviUhP+6DR54
+# 7OZnpBMWDfei1f5sVGwiiW/KQTWOK97g+4RJpPzPNV4VYMAwO2jM2Aty2QYPVmOQ
+# TJm0msuXnJrSbl2gf9JylpkJlWXqk1Q4LJsxz+TELoQCZIljbgvTJgoPU2R12ydv
+# 8i1UqL/adelA0y7U9Pmmtbze9Xx3rtajC5SzQd1jgfwAwsa90v9YcSPdmeoyoBBA
+# /27cCL237l5DTYYPDLQ4ON3OLTGWnvRb6jDrf/T75gMRfUzSLCBQfBusm9+mSWRl
+# C/Df6S/e9Q8i13CuhzOT2Jx+V/nlbXM4QoBwlUAhelwwJT0CAwEAAaOCAZUwggGR
+# MAwGA1UdEwEB/wQCMAAwHQYDVR0OBBYEFBTJY4owLtRK+26U8+bjQH717M3iMB8G
 # A1UdIwQYMBaAFO9vU0rp5AZ8esrikFb2L9RJ7MtOMA4GA1UdDwEB/wQEAwIHgDAW
 # BgNVHSUBAf8EDDAKBggrBgEFBQcDCDCBlQYIKwYBBQUHAQEEgYgwgYUwJAYIKwYB
 # BQUHMAGGGGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBdBggrBgEFBQcwAoZRaHR0
@@ -586,47 +607,47 @@ catch {
 # YW1waW5nUlNBNDA5NlNIQTI1NjIwMjVDQTEuY3J0MF8GA1UdHwRYMFYwVKBSoFCG
 # Tmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRHNFRpbWVT
 # dGFtcGluZ1JTQTQwOTZTSEEyNTYyMDI1Q0ExLmNybDAgBgNVHSAEGTAXMAgGBmeB
-# DAEEAjALBglghkgBhv1sBwEwDQYJKoZIhvcNAQELBQADggIBAGUqrfEcJwS5rmBB
-# 7NEIRJ5jQHIh+OT2Ik/bNYulCrVvhREafBYF0RkP2AGr181o2YWPoSHz9iZEN/FP
-# sLSTwVQWo2H62yGBvg7ouCODwrx6ULj6hYKqdT8wv2UV+Kbz/3ImZlJ7YXwBD9R0
-# oU62PtgxOao872bOySCILdBghQ/ZLcdC8cbUUO75ZSpbh1oipOhcUT8lD8QAGB9l
-# ctZTTOJM3pHfKBAEcxQFoHlt2s9sXoxFizTeHihsQyfFg5fxUFEp7W42fNBVN4ue
-# LaceRf9Cq9ec1v5iQMWTFQa0xNqItH3CPFTG7aEQJmmrJTV3Qhtfparz+BW60OiM
-# EgV5GWoBy4RVPRwqxv7Mk0Sy4QHs7v9y69NBqycz0BZwhB9WOfOu/CIJnzkQTwtS
-# SpGGhLdjnQ4eBpjtP+XB3pQCtv4E5UCSDag6+iX8MmB10nfldPF9SVD7weCC3yXZ
-# i/uuhqdwkgVxuiMFzGVFwYbQsiGnoa9F5AaAyBjFBtXVLcKtapnMG3VH3EmAp/js
-# J3FVF3+d1SVDTmjFjLbNFZUWMXuZyvgLfgyPehwJVxwC+UpX2MSey2ueIu9THFVk
-# T+um1vshETaWyQo8gmBto/m3acaP9QsuLj3FNwFlTxq25+T4QwX9xa6ILs84ZPvm
-# povq90K8eWyG2N01c4IhSOxqt81nMYIFvjCCBboCAQEwYjBOMR4wHAYDVQQDDBV3
+# DAEEAjALBglghkgBhv1sBwEwDQYJKoZIhvcNAQELBQADggIBAI3FOmEenVIK35ms
+# CYB+fShAsWvSYvLBItoNdAgQ2jIqrGsVsluXMJU/+mRebBc52s6lbKAvOVPXaizm
+# KkMLLflEEKDZQx4CkS2t8aHPjkXha3hYZ010htFa3dhNgmalH5vuWvh3tTCf4frT
+# S7gPtGc4Z/xaPhQ2AB1mR8eEe/WbH0RWHvVIl6VwQ3+g5FKNfN2N/DWJkf13w2H+
+# 2GfqEfbd35Ww8CvoYBjLNIDTadcPWdgsjsiOaK/7EsKJgLjUNIVgvcaFOLLQ/Glr
+# A+0ZHJoFUbOr5SJN8zykPspXIXlpDJY/gqFUZRROeab9GVgmhbdOJcD/63RhxPah
+# FUGbckRONqMe6DYAv6/mOG0pWd3cPStsdcS7buj5DyniwRY8yooMH6ptx5vpP/pZ
+# zBPBeZD2U4IsthyxB5Jaa8qrOkB5z160TXiM5ADMspZ0TfD9MJoq0tFpFPssKRFh
+# WeEDYPvcUuN7U7lvcdHl4ezQ3NT/7Ffs1sR1yh/LRbdZ3B3Vc6q2WmD8mDC0p9kz
+# l2o73iVtS946IkEj7FkRsZGww1teYxERROC745xrtjvcw9ZyyUjHZWGRIpJeMNsP
+# quCDf0fkyHtB+J4AiNZqCQk23rxh+KbpyMTNVKItJ5l92Svl20U9NbqMBOVYl1h5
+# 4NEYLJq1/xHWFKPNK903zJZA9P2DMYIFvjCCBboCAQEwYjBOMR4wHAYDVQQDDBV3
 # b3JrcGxhY2VjbG91ZGh1Yi5jb20xLDAqBgkqhkiG9w0BCQEWHWNvbnRhY3RAd29y
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIL2kTYJtW+tKzovh2Zlgs7arMX2lk3BFfsnFnbY9TOSsMA0GCSqG
-# SIb3DQEBAQUABIIBgH3Pd0tT5RtCbEn2wQi2yb82Vj+TsYBBbWbzW8tVC0LPngbQ
-# oL1xcV0vLdoQ76t6wwCaZVA88+YwdwU7nFJxA1e/z+2jIOe0RD/euyC0+RC74XEt
-# GDib903lSwNnstLlFW8lv2/nfo5BmXGF6K8m3idNQHf178U79+HTe7L5f3sIhvPn
-# PHlYAuOu2vMtc5d2oYbTUg0rNHnXXzNKFGk/Efcz9DGS8l5zeGs01oQ95yIqf8J9
-# EwPm+V2Mm6D0GiQbmVKB9qXVYtHiR8WtE5TUBqKmz8sTeQ0GGC7fpTpVtpVlCseb
-# hOk6/8oA9ybcgrdCYDMl/Qs4XCk2kbxQqm6Uf/PwC19Hb5Vi2jVGUqxmOKrtn4RC
-# QQTSG9zUWUIbCiUAOCvc8i3nJstPkfUBdQDpMV5NQ4fXWJ75a5Obt2FfOM7oj6KJ
-# 87abjd43uhyg+3ivG7039euFAsO/uLtNTBdeGuddcXzIt2cR4G52PyyYxU88xNd7
-# BktgBVslfF4IBzYXhqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIAMdpEc22Sfnz3jcE3IAoplQBR2/MENJ5BKbLug03bdhMA0GCSqG
+# SIb3DQEBAQUABIIBgBXK3R1Fj782navDLn4H28vttqWhrqUpniWwDIRuq5Fleihm
+# 3NuiWz+0r+2VwhomlVDaN9+AY2gzcN1++OfXLJIrbthTGta2OPA/j4M6PNT5fJwc
+# iHe2xeINrtQtO189fGaJJ+lS+dplriJN4lyN/z+8ZNErFYSOhBs36XzoOz1Zwq/G
+# R87xoGaiq5iu83nR/0onnyupkdJAS054oiCdIxjBVdKK8kJf1G6WUoGbXSoAOqhp
+# ZiwqxO1TuJu9wymncj7cDReuMtVg9U/KkPi368Y5oWJjhm2hl6TQYVClOpsvdhpE
+# 4jPIGPzaqQsh23XyEEAtQMoteZNY+H8AJwt/Qesh9xYJSsg5vcCpnmXBNS5tn6DT
+# GD/WeheLnQ8Uj/n2oszp4QItf8ry7GqutDHw1qnL6YYCKKMQfQn8ILO0EYEjqPab
+# K97Cyw2QvtyBEsOAwbLXnTx3nyfUjy+BXkFfBENC9uuNKX2w81Z3P4cXvyIh+RLI
+# ceJOyFSMVA4bI0qnxaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
-# MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTcyMjMy
-# MTlaMC8GCSqGSIb3DQEJBDEiBCAgw4kkmP8mridX/NxPC+WVCHTYPSsdQrk8c5qV
-# 6f2ycjANBgkqhkiG9w0BAQEFAASCAgCiVUiMwT5yCJcJYC0ZSLFX8OtmIvscqfAb
-# RsazSoglWQ9and58ogoqhebd43FTwSzIM7PzoqSxy/owUEmdN8DFGklYS0UKcn2H
-# +qEIRRLLpdLTqGhNLXmvz0kA1UJB0pRk9nT9MYRESk9WOGaRJgJaYr+Kal5MXOmE
-# hOrDNpNLZd81lzSXriEj2vUGg0HVeAHfFxxxHmxbmHEP96G7rSvDpIl4NLMDR+wJ
-# Jk4OGKlgJpwU0cxlAvjfHIjkz3ANz9egunhPFqlcD7LMal+Nczuy2y6OiCFVQf7+
-# N/IJH2SeBYTX0/7Hj68I2GKgVdCMmxCnJaL3ddWZegwybA3QWntYIdWXY8htb40B
-# 9gjFt8D54p0ilH8Kt6yvQD+W7fFAlDSKH2bIy3oFbKul0SRONLhMFsaCbMz8BzZg
-# ZfheK9x0qHAGzhfYfSDPwGM+NHSAqQMqV+YXJBHdZmdNb2NLxukWFRh336GHqUay
-# kl+9oh1j5X/ah6g67IRE1LYyn9kh2V241k8HTuIuO77NYcvX51DBcRiYFssPkaz/
-# auSbFp/lvIxpAeKJAaGbu2lp8+IcUz0S71RtUuT4yilB0Ui+50pCjhDwWN5HRmqi
-# tjPKq+XOznALr24z69F/JGsoQKz/AwjnCjTSkXcEwZSlW+iY8979iBoAk/RM8HYV
-# ljCyNAxcrg==
+# MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjMxNzE0
+# MzNaMC8GCSqGSIb3DQEJBDEiBCC9envgZJB11vTRZRH+QRpOWLeJkz0YBMWguf+O
+# Uh5MfDANBgkqhkiG9w0BAQEFAASCAgBH35helePWfS5kMdq+e0XEFeARRmaLUvmZ
+# O6lgmXPtKO4PyE+MSaWIkcjnZNRLRBjz7G5zUAuojyRu+ENhwZDswJYTkn9J5QIy
+# O/heETj97/r4MQVsDIo7tjkCKCDZbig8ScHYfl3eX7KoblLsTx0nMx9TKJCmOXAc
+# OikAwVselKa4CcJb0kGlEY5/ps8gxu5ki3yXNLE31hriT9x9QEcznZo5ofSdxAx/
+# uCwkja/mijJE5XSmIQZFPiwIW+J7Rc0H7FUKSF96cDRcEMsTJOTjzsFClhig2/XB
+# ftrBCxRuv4uRL1JwqtM/j4OTfYBXXg5T5CypFK0lvGi49rAp28K5Ggrd2xvembXi
+# 3BoodO1g0CLzEPJX8S/JPrgXrOAwAZ2UOj1loMHVvm5+sZ6NN1zAoYcJUIkhZOq4
+# lH/Wbw4yCjIy2VSyycrhTXhtN+Cw1oW3l0r7p+nTwfpRjOdO7PONTLPRm0bO2YC8
+# 5umd5xl+43UojpSjL07EXeaGjuC4FEiKp/PlkRaGT57ozz3w4RMpEbhUgobq4POF
+# IyXIh3KTpamazQFeB93uA+0NhwpTgdmxQyJNIa7LwWcweJtAdHOlVLYRufgeNjno
+# Cl8tPpjFCzXswBYbWmetaBUikoO9HG+tiM5nu3CPj+VpN3IQL2dE1F0KH40T2xxE
+# RCCnH3u3Pw==
 # SIG # End signature block

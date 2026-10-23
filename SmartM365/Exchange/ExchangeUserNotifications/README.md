@@ -93,6 +93,35 @@ SmartM365/Data/Tenants/<TenantKey>/LOG-ALL/Exchange/ExchangeUserNotifications/<C
 
 Each campaign writes a timestamped run log CSV and a local sent registry CSV.
 
+With `PreventResendAcrossRuns` enabled, live runs take an exclusive lock on the
+campaign registry before reading it. A second run using the same registry is
+refused. Each confirmed email is flushed to disk and atomically recorded before
+optional Teams messaging. If the checkpoint cannot be saved, the campaign stops
+before sending to another recipient. The adjacent `.lock` file remains on disk;
+its presence alone does not indicate an active run. The operating system releases
+the lock when the process exits, including forced termination.
+
+Email or user-facing Teams delivery failures produce an error notification and a
+terminating error (nonzero process exit), after recipient processing and summary
+generation. Successful emails stay recorded even if their Teams message fails.
+Deliberately skipped recipients and successful dry runs remain normal completions.
+Mail transport acknowledgement and the disk checkpoint are separate operations;
+an interruption between them still requires checking the delivery log before a
+replay.
+
+For size reduction, both the license CSV and its live Graph fallback apply
+`TargetSkuPartNumbers` before choosing a quota from `MailboxQuotaBySkuPartNumber`.
+
+Offline regression command from the repository root:
+
+```powershell
+pwsh -NoProfile -File SmartM365/Tests/Test-SmartM365ExchangeCampaignReliabilityOffline.ps1
+```
+
+The same suite supports Windows PowerShell 5.1. It uses fictional recipients,
+mocked mail/Graph/Teams boundaries and temporary files, including a child process
+terminated after a checkpoint. It does not send messages or authenticate.
+
 ## Offline demo mode
 
 Launch `Start-SmartM365-ExchangeUserNotifications-Demo.cmd` for screenshots and presentations. The original WPF screens, tabs and options remain available with fictional Contoso data and visibly marked simulated results. Use the Scene selector (`Overview`, `Issues`, `Completed`), or pass `-DemoScenario Issues`. `-DemoView` selects a named tab where available; `-DemoWindowWidth` and `-DemoWindowHeight` control the capture size.

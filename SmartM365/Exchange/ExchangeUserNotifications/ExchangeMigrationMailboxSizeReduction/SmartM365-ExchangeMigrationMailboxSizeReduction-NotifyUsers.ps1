@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
 Notifies selected Exchange mailbox users that they must reduce mailbox size before migration.
 
@@ -69,7 +69,7 @@ Builds candidates from the license inventory CSV and performs a dry run using th
 Performs a dry run for a manually supplied pilot recipient list.
 
 .VERSION
-1.5
+1.6
 #>
 [CmdletBinding(DefaultParameterSetName = 'Inventory')]
 param(
@@ -300,7 +300,8 @@ function Get-GraphUserBySmtpAddress {
 function Get-LiveLicenseQuotaInfoForGraphUser {
     param(
         [Parameter(Mandatory)]$User,
-        [hashtable]$QuotaBySku
+        [hashtable]$QuotaBySku,
+        [Parameter(Mandatory)][System.Collections.Generic.HashSet[string]]$AllowedSkus
     )
 
     if ($null -eq $User -or -not $User.Id) { return $null }
@@ -308,7 +309,7 @@ function Get-LiveLicenseQuotaInfoForGraphUser {
     $best = $null
     foreach ($detail in $licenseDetails) {
         $sku = ([string]$detail.SkuPartNumber).Trim().ToUpperInvariant()
-        if ([string]::IsNullOrWhiteSpace($sku) -or -not $QuotaBySku.ContainsKey($sku)) { continue }
+        if ([string]::IsNullOrWhiteSpace($sku) -or -not $AllowedSkus.Contains($sku) -or -not $QuotaBySku.ContainsKey($sku)) { continue }
         $quota = $QuotaBySku[$sku]
         if ($null -eq $best -or [double]$quota.ThresholdMB -gt [double]$best.ThresholdMB) {
             $smtp = Get-PrimarySmtpAddressFromGraphUser -User $User
@@ -332,12 +333,13 @@ function Get-LiveLicenseQuotaInfoForGraphUser {
 function Resolve-LiveLicenseQuotaInfo {
     param(
         [Parameter(Mandatory)][string]$SmtpAddress,
-        [hashtable]$QuotaBySku
+        [hashtable]$QuotaBySku,
+        [Parameter(Mandatory)][System.Collections.Generic.HashSet[string]]$AllowedSkus
     )
 
     $user = Get-GraphUserBySmtpAddress -SmtpAddress $SmtpAddress
     if (-not $user) { return $null }
-    return Get-LiveLicenseQuotaInfoForGraphUser -User $user -QuotaBySku $QuotaBySku
+    return Get-LiveLicenseQuotaInfoForGraphUser -User $user -QuotaBySku $QuotaBySku -AllowedSkus $AllowedSkus
 }
 
 function Find-ConfiguredCsv {
@@ -596,9 +598,14 @@ if ($requireExchangeManagement -and $exchangeManagementState.Enabled -and -not $
 $columns = @('Timestamp','RunId','Campaign','Email','LanguageTag','MailboxSizeGB','MailboxType','MailboxSource','TargetSkuPartNumber','Subject','Status','TeamsStatus','TeamsError','SkipReason','ErrorMessage','RecipientTypeDetails','ExchangeSource')
 $counters = @{ Candidates = 0; Sent = 0; DryRun = 0; Failed = 0; Skipped = 0; MailboxNotFound = 0; RemoteMailbox = 0; MailboxUsageUnavailable = 0; MailboxUsageBelowThreshold = 0; TeamsSent = 0; TeamsFailed = 0; TeamsDryRun = 0 }
 $processedItems = New-Object System.Collections.ArrayList
-$registry = Load-SmartM365CommunicationSentRegistry -Path $sentRegistryPath
+$registryLock = $null
+$registryCheckpointPending = $false
 
 try {
+    if ($preventResend -and -not $WhatIf) {
+        $registryLock = Enter-SmartM365CommunicationSentRegistryLock -Path $sentRegistryPath
+    }
+    $registry = Load-SmartM365CommunicationSentRegistry -Path $sentRegistryPath
     $exoPath = Find-ConfiguredCsv -Folder $latestFolder -PrimaryName ([string](Get-SmartM365CommunicationConfigValue -Config $config -Name 'ExoMailboxCsvName' -DefaultValue 'Exchange_EXO_Mailboxes_AllDomains_Stats.csv')) -FallbackNames (Get-SmartM365CommunicationConfigValue -Config $config -Name 'ExoMailboxCsvFallbackNames' -DefaultValue @()) -ConfiguredPath ([string](Get-SmartM365CommunicationConfigValue -Config $config -Name 'ExoMailboxCsvPath' -DefaultValue '')) -Required:$false
     $onPremPath = Find-ConfiguredCsv -Folder $latestFolder -PrimaryName ([string](Get-SmartM365CommunicationConfigValue -Config $config -Name 'OnPremMailboxCsvName' -DefaultValue 'Exchange_OnPrem_Mailboxes_AllDomains.csv')) -FallbackNames (Get-SmartM365CommunicationConfigValue -Config $config -Name 'OnPremMailboxCsvFallbackNames' -DefaultValue @()) -ConfiguredPath ([string](Get-SmartM365CommunicationConfigValue -Config $config -Name 'OnPremMailboxCsvPath' -DefaultValue '')) -Required:$false
     $exoRows = if ([string]::IsNullOrWhiteSpace($exoPath)) { @() } else { @(Import-SmartM365CommunicationCsv -Path $exoPath) }
@@ -662,7 +669,7 @@ try {
             foreach ($smtpRaw in $smtpList) {
                 $smtp = ([string]$smtpRaw).Trim().ToLowerInvariant()
                 if ([string]::IsNullOrWhiteSpace($smtp) -or $licenseMap.ContainsKey($smtp)) { continue }
-                $quotaInfo = Resolve-LiveLicenseQuotaInfo -SmtpAddress $smtp -QuotaBySku $mailboxQuotaBySku
+                $quotaInfo = Resolve-LiveLicenseQuotaInfo -SmtpAddress $smtp -QuotaBySku $mailboxQuotaBySku -AllowedSkus $targetSkuSet
                 if ($quotaInfo) { $licenseMap[$smtp] = $quotaInfo }
             }
         }
@@ -673,7 +680,7 @@ try {
             foreach ($user in $graphUsers) {
                 $smtp = (Get-PrimarySmtpAddressFromGraphUser -User $user).Trim().ToLowerInvariant()
                 if ([string]::IsNullOrWhiteSpace($smtp)) { continue }
-                $quotaInfo = Get-LiveLicenseQuotaInfoForGraphUser -User $user -QuotaBySku $mailboxQuotaBySku
+                $quotaInfo = Get-LiveLicenseQuotaInfoForGraphUser -User $user -QuotaBySku $mailboxQuotaBySku -AllowedSkus $targetSkuSet
                 if ($quotaInfo) {
                     $licenseMap[$smtp] = $quotaInfo
                     [void]$licensedSmtpList.Add($smtp)
@@ -796,6 +803,15 @@ try {
             Assert-SmartM365CommunicationNoUnresolvedToken -Html $html
 
             $result = Send-SmartM365CommunicationMail -MailSendMode $mailSendMode -SmtpServer $smtpServer -SmtpPort $smtpPort -From $from -To $email -Bcc $bccAll -Subject $subject -BodyHtml $html -AppId $global:AppId -TenantId $global:TenantId -Thumbprint $global:Thumbprint -SmtpUseIntegratedAuth $smtpUseIntegratedAuth -SmtpEnableSsl $smtpEnableSsl -LogoPath $logoPath -LogoContentId $logoContentId -LogoMediaType $logoMediaType -RetryCount $smtpRetryCount -RetryDelaySeconds $smtpRetryDelaySeconds -WhatIf:$WhatIf
+            if (-not $WhatIf -and $result.Sent) {
+                $counters.Sent++
+                if ($preventResend) {
+                    $registryCheckpointPending = $true
+                    Register-SmartM365CommunicationSentItem -Registry $registry -Email $email
+                    Save-SmartM365CommunicationSentRegistry -Registry $registry -Path $sentRegistryPath
+                    $registryCheckpointPending = $false
+                }
+            }
             $teamsStatus = 'Disabled'
             $teamsError = ''
             try {
@@ -815,13 +831,13 @@ try {
             }
             if (-not $WhatIf -and $intraEmailDelayMilliseconds -gt 0) { Start-Sleep -Milliseconds $intraEmailDelayMilliseconds }
             if ($WhatIf) { $counters.DryRun++ }
-            elseif ($result.Sent) { $counters.Sent++; if ($preventResend) { Register-SmartM365CommunicationSentItem -Registry $registry -Email $email } }
-            else { $counters.Skipped++ }
+            elseif (-not $result.Sent) { $counters.Skipped++ }
             $status = if ($WhatIf) { 'DryRun' } elseif ($result.Sent) { 'Success' } else { $result.Mode }
             [void]$processedItems.Add([pscustomobject]@{ Email = $email; LanguageTag = $language; Status = $status })
             Add-SmartM365CommunicationLogRow -Path $logPath -Columns $columns -Row ([pscustomobject]@{ Timestamp = Get-Date; RunId = $runId; Campaign = $campaignName; Email = $email; LanguageTag = $language; MailboxSizeGB = $sizeLabel; MailboxType = $candidate.MailboxType; MailboxSource = $candidate.MailboxSource; TargetSkuPartNumber = $candidateTargetSku; Subject = $subject; Status = $status; TeamsStatus = $teamsStatus; TeamsError = $teamsError; SkipReason = ''; ErrorMessage = $result.Mode; RecipientTypeDetails = $recipientTypeDetails; ExchangeSource = $exchangeSource })
         }
         catch {
+            if ($registryCheckpointPending) { throw }
             $counters.Failed++
             [void]$processedItems.Add([pscustomobject]@{ Email = $email; LanguageTag = $language; Status = 'Failed' })
             Add-SmartM365CommunicationLogRow -Path $logPath -Columns $columns -Row ([pscustomobject]@{ Timestamp = Get-Date; RunId = $runId; Campaign = $campaignName; Email = $email; LanguageTag = $language; MailboxSizeGB = $sizeLabel; MailboxType = $candidate.MailboxType; MailboxSource = $candidate.MailboxSource; TargetSkuPartNumber = $candidateTargetSku; Subject = $subject; Status = 'Failed'; SkipReason = ''; ErrorMessage = $_.Exception.Message; RecipientTypeDetails = $recipientTypeDetails; ExchangeSource = $exchangeSource })
@@ -840,14 +856,17 @@ try {
         }
     }
 
-    if ($preventResend -and -not $WhatIf) { Save-SmartM365CommunicationSentRegistry -Registry $registry -Path $sentRegistryPath }
-
     $summary = "Candidates=$($counters.Candidates); Sent=$($counters.Sent); DryRun=$($counters.DryRun); Failed=$($counters.Failed); Skipped=$($counters.Skipped); MailboxNotFound=$($counters.MailboxNotFound); RemoteMailbox=$($counters.RemoteMailbox); MailboxUsageUnavailable=$($counters.MailboxUsageUnavailable); MailboxUsageBelowThreshold=$($counters.MailboxUsageBelowThreshold); TeamsSent=$($counters.TeamsSent); TeamsDryRun=$($counters.TeamsDryRun); TeamsFailed=$($counters.TeamsFailed)."
     if (-not $WhatIf -and -not $NoSummaryEmail -and -not [string]::IsNullOrWhiteSpace($summaryTo)) {
         $summaryHtml = New-SmartM365CommunicationSummaryHtml -Title $summaryTitle -Facts @{
             RunId = $runId; Tenant = $Tenant; Mode = $(if ($WhatIf) { 'DryRun' } else { $(if ($FromList) { 'FromList' } else { 'Inventory' }) }); Summary = $summary; LogPath = $logPath; SentRegistryPath = $sentRegistryPath; ExchangeManagement = ("{0}:{1}" -f $exchangeManagementState.Source, $exchangeManagementState.Status)
         } -Items @($processedItems)
         Send-SmartM365CommunicationMail -MailSendMode $mailSendMode -SmtpServer $smtpServer -SmtpPort $smtpPort -From $from -To $summaryTo -Bcc $summaryBcc -Subject $summarySubject -BodyHtml $summaryHtml -AppId $global:AppId -TenantId $global:TenantId -Thumbprint $global:Thumbprint -SmtpUseIntegratedAuth $smtpUseIntegratedAuth -SmtpEnableSsl $smtpEnableSsl -RetryCount $smtpRetryCount -RetryDelaySeconds $smtpRetryDelaySeconds | Out-Null
+    }
+
+    if ($counters.Failed -gt 0 -or $counters.TeamsFailed -gt 0) {
+        Write-Host $summary
+        throw ("Campaign completed with delivery failures. {0}" -f $summary)
     }
 
     if (-not $WhatIf) {
@@ -863,11 +882,15 @@ catch {
     throw
 }
 
+finally {
+    if ($null -ne $registryLock) { $registryLock.Dispose() }
+}
+
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA82V/fsCzhPBRn
-# zr1NGVwkqBo0Un7XFTDkX/bZxflnYqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD2v5M/U75Qflz2
+# vHB4kuVEJZBROSBnS/0D1H3LLdg3iaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -958,25 +981,25 @@ catch {
 # NHNboDGcmWXfwXRy4kbu4QFhOm0xJuF2EZAOk5eCkhSxZON3rGlHqhpB/8MluDez
 # ooIs8CVnrpHMiD2wL40mm53+/j7tFaxYKIqL0Q4ssd8xHZnIn/7GELH3IdvG2XlM
 # 9q7WP/UwgOkw/HQtyRN62JK4S1C8uw3PdBunvAZapsiI5YKdvlarEvf8EA+8hcpS
-# M9LHJmyrxaFtoza2zNaQ9k+5t1wwggbtMIIE1aADAgECAhAKgO8YS43xBYLRxHan
-# lXRoMA0GCSqGSIb3DQEBCwUAMGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdp
+# M9LHJmyrxaFtoza2zNaQ9k+5t1wwggbtMIIE1aADAgECAhAIT9wzT35FTtvDD4/5
+# khg1MA0GCSqGSIb3DQEBCwUAMGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdp
 # Q2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3Rh
-# bXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTEwHhcNMjUwNjA0MDAwMDAwWhcN
-# MzYwOTAzMjM1OTU5WjBjMQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQs
+# bXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTEwHhcNMjYwODA1MDAwMDAwWhcN
+# MzcxMTA0MjM1OTU5WjBjMQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQs
 # IEluYy4xOzA5BgNVBAMTMkRpZ2lDZXJ0IFNIQTI1NiBSU0E0MDk2IFRpbWVzdGFt
-# cCBSZXNwb25kZXIgMjAyNSAxMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKC
-# AgEA0EasLRLGntDqrmBWsytXum9R/4ZwCgHfyjfMGUIwYzKomd8U1nH7C8Dr0cVM
-# F3BsfAFI54um8+dnxk36+jx0Tb+k+87H9WPxNyFPJIDZHhAqlUPt281mHrBbZHqR
-# K71Em3/hCGC5KyyneqiZ7syvFXJ9A72wzHpkBaMUNg7MOLxI6E9RaUueHTQKWXym
-# OtRwJXcrcTTPPT2V1D/+cFllESviH8YjoPFvZSjKs3SKO1QNUdFd2adw44wDcKgH
-# +JRJE5Qg0NP3yiSyi5MxgU6cehGHr7zou1znOM8odbkqoK+lJ25LCHBSai25CFyD
-# 23DZgPfDrJJJK77epTwMP6eKA0kWa3osAe8fcpK40uhktzUd/Yk0xUvhDU6lvJuk
-# x7jphx40DQt82yepyekl4i0r8OEps/FNO4ahfvAk12hE5FVs9HVVWcO5J4dVmVzi
-# x4A77p3awLbr89A90/nWGjXMGn7FQhmSlIUDy9Z2hSgctaepZTd0ILIUbWuhKuAe
-# NIeWrzHKYueMJtItnj2Q+aTyLLKLM0MheP/9w6CtjuuVHJOVoIJ/DtpJRE7Ce7vM
-# RHoRon4CWIvuiNN1Lk9Y+xZ66lazs2kKFSTnnkrT3pXWETTJkhd76CIDBbTRofOs
-# NyEhzZtCGmnQigpFHti58CSmvEyJcAlDVcKacJ+A9/z7eacCAwEAAaOCAZUwggGR
-# MAwGA1UdEwEB/wQCMAAwHQYDVR0OBBYEFOQ7/PIx7f391/ORcWMZUEPPYYzoMB8G
+# cCBSZXNwb25kZXIgMjAyNiAxMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKC
+# AgEAtnum8sn+zUr41JtMZbP9OMYw+HwJDpG5xkIu/lqcfNYmMX81YmsUiHLbh9yk
+# peWBGKTLhYBrAN9Tdg/QEzG32XcObmgIblnr0CoQ3WSAeDZ6nH6X6VkFyYkJw3QB
+# JREwvm4UhLzSxmwPA7cFKRTEOMsmEEj6qJk/dqLEAL+oQYuOwE2UuiX1Vnul8YRe
+# IyWd4kgLn9gq6LNXM0UplkR6jL/QHxmb6fMoGBJYbnaUI7XD6cKDpekK2SVMld4i
+# DbzeHDtOaaxldH5IxuNusQ69nd8/ZXEiB5Hbxj3RlK13cX1W4DlFXKdv/CEhM8Cj
+# 1vvlmvhNroyPdRGbbpBlgyf8Wdu5N6ByhFwURn0U6ozlPoxN22v+fviUhP+6DR54
+# 7OZnpBMWDfei1f5sVGwiiW/KQTWOK97g+4RJpPzPNV4VYMAwO2jM2Aty2QYPVmOQ
+# TJm0msuXnJrSbl2gf9JylpkJlWXqk1Q4LJsxz+TELoQCZIljbgvTJgoPU2R12ydv
+# 8i1UqL/adelA0y7U9Pmmtbze9Xx3rtajC5SzQd1jgfwAwsa90v9YcSPdmeoyoBBA
+# /27cCL237l5DTYYPDLQ4ON3OLTGWnvRb6jDrf/T75gMRfUzSLCBQfBusm9+mSWRl
+# C/Df6S/e9Q8i13CuhzOT2Jx+V/nlbXM4QoBwlUAhelwwJT0CAwEAAaOCAZUwggGR
+# MAwGA1UdEwEB/wQCMAAwHQYDVR0OBBYEFBTJY4owLtRK+26U8+bjQH717M3iMB8G
 # A1UdIwQYMBaAFO9vU0rp5AZ8esrikFb2L9RJ7MtOMA4GA1UdDwEB/wQEAwIHgDAW
 # BgNVHSUBAf8EDDAKBggrBgEFBQcDCDCBlQYIKwYBBQUHAQEEgYgwgYUwJAYIKwYB
 # BQUHMAGGGGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBdBggrBgEFBQcwAoZRaHR0
@@ -984,47 +1007,47 @@ catch {
 # YW1waW5nUlNBNDA5NlNIQTI1NjIwMjVDQTEuY3J0MF8GA1UdHwRYMFYwVKBSoFCG
 # Tmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRHNFRpbWVT
 # dGFtcGluZ1JTQTQwOTZTSEEyNTYyMDI1Q0ExLmNybDAgBgNVHSAEGTAXMAgGBmeB
-# DAEEAjALBglghkgBhv1sBwEwDQYJKoZIhvcNAQELBQADggIBAGUqrfEcJwS5rmBB
-# 7NEIRJ5jQHIh+OT2Ik/bNYulCrVvhREafBYF0RkP2AGr181o2YWPoSHz9iZEN/FP
-# sLSTwVQWo2H62yGBvg7ouCODwrx6ULj6hYKqdT8wv2UV+Kbz/3ImZlJ7YXwBD9R0
-# oU62PtgxOao872bOySCILdBghQ/ZLcdC8cbUUO75ZSpbh1oipOhcUT8lD8QAGB9l
-# ctZTTOJM3pHfKBAEcxQFoHlt2s9sXoxFizTeHihsQyfFg5fxUFEp7W42fNBVN4ue
-# LaceRf9Cq9ec1v5iQMWTFQa0xNqItH3CPFTG7aEQJmmrJTV3Qhtfparz+BW60OiM
-# EgV5GWoBy4RVPRwqxv7Mk0Sy4QHs7v9y69NBqycz0BZwhB9WOfOu/CIJnzkQTwtS
-# SpGGhLdjnQ4eBpjtP+XB3pQCtv4E5UCSDag6+iX8MmB10nfldPF9SVD7weCC3yXZ
-# i/uuhqdwkgVxuiMFzGVFwYbQsiGnoa9F5AaAyBjFBtXVLcKtapnMG3VH3EmAp/js
-# J3FVF3+d1SVDTmjFjLbNFZUWMXuZyvgLfgyPehwJVxwC+UpX2MSey2ueIu9THFVk
-# T+um1vshETaWyQo8gmBto/m3acaP9QsuLj3FNwFlTxq25+T4QwX9xa6ILs84ZPvm
-# povq90K8eWyG2N01c4IhSOxqt81nMYIFvjCCBboCAQEwYjBOMR4wHAYDVQQDDBV3
+# DAEEAjALBglghkgBhv1sBwEwDQYJKoZIhvcNAQELBQADggIBAI3FOmEenVIK35ms
+# CYB+fShAsWvSYvLBItoNdAgQ2jIqrGsVsluXMJU/+mRebBc52s6lbKAvOVPXaizm
+# KkMLLflEEKDZQx4CkS2t8aHPjkXha3hYZ010htFa3dhNgmalH5vuWvh3tTCf4frT
+# S7gPtGc4Z/xaPhQ2AB1mR8eEe/WbH0RWHvVIl6VwQ3+g5FKNfN2N/DWJkf13w2H+
+# 2GfqEfbd35Ww8CvoYBjLNIDTadcPWdgsjsiOaK/7EsKJgLjUNIVgvcaFOLLQ/Glr
+# A+0ZHJoFUbOr5SJN8zykPspXIXlpDJY/gqFUZRROeab9GVgmhbdOJcD/63RhxPah
+# FUGbckRONqMe6DYAv6/mOG0pWd3cPStsdcS7buj5DyniwRY8yooMH6ptx5vpP/pZ
+# zBPBeZD2U4IsthyxB5Jaa8qrOkB5z160TXiM5ADMspZ0TfD9MJoq0tFpFPssKRFh
+# WeEDYPvcUuN7U7lvcdHl4ezQ3NT/7Ffs1sR1yh/LRbdZ3B3Vc6q2WmD8mDC0p9kz
+# l2o73iVtS946IkEj7FkRsZGww1teYxERROC745xrtjvcw9ZyyUjHZWGRIpJeMNsP
+# quCDf0fkyHtB+J4AiNZqCQk23rxh+KbpyMTNVKItJ5l92Svl20U9NbqMBOVYl1h5
+# 4NEYLJq1/xHWFKPNK903zJZA9P2DMYIFvjCCBboCAQEwYjBOMR4wHAYDVQQDDBV3
 # b3JrcGxhY2VjbG91ZGh1Yi5jb20xLDAqBgkqhkiG9w0BCQEWHWNvbnRhY3RAd29y
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIASzDpw/33MzFdRqUODXXO+XtPdMLu8D6cNONm2ctkZmMA0GCSqG
-# SIb3DQEBAQUABIIBgBcVKCLBEEY8aql+InBsMqrnAd/5LXniafzgy2TlDrptiaVd
-# LiR+z/9Rs7oNFFBqH6LmyFF4fbJ361hUClW5BvNB40Ofgs3QeT5vG6zMTUv4n5Du
-# cqHi7AgjuBVh8v7XrkXqPAyi5sQmtf8s4Y02HhwXFKF4d+/BDEVrzKBWW1fR5cF9
-# qQCXrfm8h9uG8KBIjjAg0hCXEOpTCB1CFwedADuXGrljcJN2iYQVhrYVLFifadHY
-# jlyVTkfIUViRbViN2sqmCSxYNhEkReJPesxE0PHtUiTWnapiRB1jR1M2OUVEkbWj
-# zQjgYxNm3xhYqtN5xP5MLQ6K5GZiay5mA1WgMRMvyBmmAA6azs7I9oKuBWAj8zHH
-# z2aIKxtdajLO4tIM09LJt/rcILLNu5m0T1zNW5I4+31eW0vxpecAFpXTpIJhlWh6
-# YxPFhhMyhJys5NqHJq80AEVb/DYG1AVERaOKffkBaxUgJMMp/GFzirjP7LgJhoHU
-# TBSJ2J8cZ5/0GwSgMKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIKeH/9KT8iT+xu1+k6/J5wOmFEeH5zamh/vXLQnVcRu+MA0GCSqG
+# SIb3DQEBAQUABIIBgBjwO1w5OyNY0m/Dl0nAa5pvR5/+xJYrAn3jgfgPOQRjJbaB
+# jnftFpB3xL6tqH1UsW9p/QWW0qHa3t7rRUxAxAwGMCcAee1uM4hLXwbEIrfW/Xrw
+# UlpTrKHwtOKujBoDwM+mOS/1usULUOkcTCB/bnbjQptnLIezCXiCRzs58ZhHhquF
+# oHQhg8xfi8PlDjiVR5D/P3QTOTEbq10b+YdEtQUP/wz/HUsP+8ENhekBAVicKjzY
+# UjLOmS3WsqAzx9s7xUFxsuM05jD38inE+2TOtF3PceUcSipsyCMO2Jtnm2o9ecRL
+# 31xEooOuLBviLWBVhYaYTNTGRzoeWTNMpsDZARN0Rw038VoE0ETNY+TCkaaI2r5S
+# dj0bvxX3/ETfPwbqQjisgSj259ustTMQVX0epwygk9I/hxlGiM2bU8UyyIuJCuJm
+# t7BxLj6IACGKuw0nMvhK6SYadN5iCvGSG9RT91u8JVRuO9L7C45tvuIxWhawB6tM
+# CxKViDdpCLAr13AnxKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
-# MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTcyMjMy
-# MjBaMC8GCSqGSIb3DQEJBDEiBCBotC4lUXkQDd7Ue6Up0g0LHvyj2Vfg0roW51kd
-# eUYukzANBgkqhkiG9w0BAQEFAASCAgBiQdgjZQX0QC9TPX2LlZw1aX8YevKcruF8
-# EmHsBm9QfoqWIlF5SUbH9XUvhNX90TNZMBxGEmKdVL50Wdu5PmiA5oRtBSfEW+IQ
-# Vu7GlN7kMIY9BwAD4i+gkc88PQPJ6NqIXakl1pJLdsj9z4p0r38qIuP2JVX4RjP6
-# BFlqEF3ONviUnu980XbZsNcoZWyQEEsivzMB3QtzzkKNKLsnHKFkamY6hViReAPL
-# CK4hoib3kEnX7UTwex4+DLWZRvj/2SNOYoDn8vIkxvP8PEyAnqhsTTaRETfNtEDv
-# 2oKfZciHW0tejdohIfLyIVHGEEpkWIu+P+L1smvL2iRzWw8OrJZVHETwj56cqVTk
-# fwhQEgNJW8v/qNop1Jb4z6RTf3aZvoM/rPMQ1s7cTbluIW/Ccpq2gx69IPEIs/Xq
-# 5Z0UciRTh+HEGrh/+JvcdJvGRq34BWUli5CCouwdrhkpBKmklFDHXyHOqAOqYo/r
-# AmioFnNsL68N47xlL4X7sVBX4s4elxm12rrHEcjW1j5CdG9cqECzyBpv4Q/5gJfH
-# 8yCwWkUZkXmXTcFEci34Iu5+rAqip7YlKqqbB9nf1IX0dmDMF3Wf9mnWXJljy92O
-# Wg+0f4U7xuZVSC+3E5h/eDueW0c8u/MM9f8BnA6MfC4HzMk/ZYBFBJBb5gGhEntL
-# iMhO5EHmdw==
+# MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjMxNzE0
+# MzRaMC8GCSqGSIb3DQEJBDEiBCCCwcoEQfzSnAX9+l/lW4e70dfT8eFaVU8TAC2A
+# YCJMRjANBgkqhkiG9w0BAQEFAASCAgCUn2aTKrSnWGuVB5ZVZGDEL6IDuBG/c4Gz
+# YTWTAXkeD32LyeMhxQaPpHrlqHLzRAAJ0PcR5LwwkBn/rJyAjsq/p8o+PufW4pGW
+# M27VAe82dsM9DndFxg8gIhv2jTMnMn0TOs75P3SYoD0CWu9Oz6nRO0iaA0Vw41lx
+# cX6AsTli3LTbZzM7GNj58RnbVSfr2M3ERwBb4gnqnhViYysQZkisyPxl06YBTpGv
+# JRaRPtMgxNy2uzC5eKGARz3BcUhk9cQQ1LmGiDC1Ih6tAm7CZevKOXH0hUtMDfOV
+# nWbCzT3TtUDr5ToByIAuXVA6+D8behAtYUMQoRzYP6VwgOUXeFX2oYnbEf3ktxA2
+# tcOn34riOldiEZWrNSiHh/OWY7uZCL87NlNWQY9ZMRzdjlGokvGtJIQ7Pz9204Ok
+# VR0TJflawJnPii8OVhG0OiHgGSYNrgWwjn/8pmnY3Zwg1HSnOWeWQsB2GWXRmPBf
+# u/Bb/ZSSw6tZPzaegtuEU+JsA7STBPdA0XFi6K/6yQRuaQ9n+irppC/mVtHcMOA7
+# F5DIIPMYdlz/m8u5KPZBQjXWLEkVvDA7G9MtoVXPHI4pHm4yAMYJJAUtUjEm8f4j
+# 0zBkG5FfMXoKgtfDwrjIbW7LWertMvuHzci4DnYQR55VRXUJqFlBIsYkeUUZER1U
+# x3cK4Q8yXA==
 # SIG # End signature block
