@@ -40,7 +40,9 @@ follow its BatchId or fail because a newer batch was published.
 
 SharePoint root-pointer reads use `Web.Contents` with the site parameter as
 the base, `RelativePath`, and `IsRetry=true`, to bypass the HTTP response
-cache. Library resolution uses its configured title. HTTP 404 alone permits
+cache. Library discovery matches the configured navigation name against the REST title
+or root-folder name and requires exactly one match. Incomplete discovery fails
+closed; navigation names are not assumed to be REST titles. HTTP 404 alone permits
 the legacy pointer filename. Immutable batch navigation remains on
 `SharePoint.Contents`. A Service connection for the Web source at the same
 site may therefore need organizational-account credentials as well as the
