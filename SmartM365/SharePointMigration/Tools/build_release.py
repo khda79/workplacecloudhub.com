@@ -1,5 +1,5 @@
 """Build a local, source-only release candidate from an explicit Git file list."""
-__version__ = "1.0.4"
+__version__ = "1.0.5"
 import argparse
 import hashlib
 import json
@@ -10,7 +10,7 @@ import zipfile
 PROJECT = Path(__file__).resolve().parents[1]
 REPO = PROJECT.parents[1]
 PREFIX = 'SmartM365/SharePointMigration/'
-VERSION = '1.0.64'
+VERSION = '1.0.78'
 ROOT_FILES = ['LICENSE', 'NOTICE', 'Install-WorkplaceCloudHub-CodeSigningCertificate.cmd',
               'Install-WorkplaceCloudHub-CodeSigningCertificate.ps1',
               'Certificates/workplacecloudhub.com-CodeSigning-D70ECB7B00377EBFB76B304C08DFC6620584E114.cer']

@@ -11,8 +11,16 @@ date is older than the source, so a copied file that is not at the latest source
 version is visible in the comparison workbook.
 
 The toolkit validates and reconciles evidence; it does not copy or migrate content.
-Release **1.0.64** includes dashboard **1.0.64** and generic launcher **1.0.28**.
-See [release notes](RELEASE-NOTES-1.0.64.md) for the changes and validation boundary.
+Release **1.0.78** includes dashboard **1.0.78** and generic launcher **1.0.33**.
+See [release notes](RELEASE-NOTES-1.0.78.md) for the changes and validation boundary.
+
+## Dashboard loading feedback
+
+Dashboard 1.0.78 displays a loading shield before opening a migration or switching
+between tabs, with the selected migration or tab as context. The shield clears
+on success or error. Reads remain synchronous. Copy the complete application
+folder when updating: `SmartM365-SharePointMigration-Loading.ps1` is required
+beside the dashboard.
 
 ## Working source reliability updates
 
@@ -76,8 +84,8 @@ Existing unprefixed comparison folders remain readable by exports and reports.
 
 ## Install, Start, and Update
 
-Version **1.0.64** is distributed through the
-[GitHub release](https://github.com/khda79/workplacecloudhub.com/releases/tag/sharepoint-migration-toolkit-v1.0.64)
+Version **1.0.78** is distributed through the
+[GitHub release](https://github.com/khda79/workplacecloudhub.com/releases/tag/sharepoint-migration-toolkit-v1.0.78)
 and the [existing source folder](https://github.com/khda79/workplacecloudhub.com/tree/main/SmartM365/SharePointMigration).
 Download the release ZIP together with its `.sha256` and `.manifest.json` assets.
 Verify the ZIP with `Get-FileHash -Algorithm SHA256` before extracting it, then open
