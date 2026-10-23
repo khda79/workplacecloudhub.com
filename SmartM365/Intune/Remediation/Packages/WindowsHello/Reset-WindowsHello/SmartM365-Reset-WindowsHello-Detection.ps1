@@ -1,16 +1,16 @@
 ﻿
 <#
 .SYNOPSIS
-    Version: 1.0
-    Intune detection script for Windows Hello for Business with multilingual AD connectivity check.
+    Version: 1.1
+    Intune detection script for Windows Hello for Business with an AD connectivity check that never authorizes a key reset.
 .DESCRIPTION
     This script:
     - Detects if Windows Hello is configured (NGC folder or registry keys).
     - Checks Hybrid Join status using dsregcmd.
-    - Dynamically checks AD connectivity (supports English and French outputs).
+    - Checks AD connectivity using the joined domain and the native exit code.
+    - Reports unavailable AD as Deferred; connectivity alone does not prove corrupt Hello keys.
     Exit codes:
-      0 = Healthy or not applicable.
-      1 = Windows Hello configured but AD unreachable, or technical error.
+      0 = Healthy, not applicable, or deferred (no automatic key reset).
 .NOTES
     Run as SYSTEM via Intune.
 #>
@@ -24,13 +24,13 @@ function Write-DetectionResult {
 }
 
 # Check NGC folder
-$ngcPath = "C:\\Windows\\ServiceProfiles\\LocalService\\AppData\\Local\\Microsoft\\NGC"
-$ngcConfigured = ((Test-Path -LiteralPath $ngcPath) -and ((Get-ChildItem -LiteralPath $ngcPath -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1).Count -gt 0))
+$ngcPath = "C:\Windows\ServiceProfiles\LocalService\AppData\Local\Microsoft\NGC"
+$ngcConfigured = ((Test-Path -LiteralPath $ngcPath) -and (@(Get-ChildItem -LiteralPath $ngcPath -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1).Count -gt 0))
 
 # Check registry for PIN presence
 $pinConfigured = $false
 try {
-    $regPath = "HKLM:\\SOFTWARE\\Microsoft\\PassportForWork\\"  # Windows Hello for Business key
+    $regPath = "HKLM:\SOFTWARE\Microsoft\PassportForWork\"  # Windows Hello for Business key
     $keys = Get-ChildItem -Path $regPath -ErrorAction SilentlyContinue
     if ($keys) {
         $pinConfigured = $true
@@ -46,13 +46,15 @@ $dsreg = dsregcmd /status | Out-String
 $domainJoined = $dsreg -match "DomainJoined.*YES"
 $azureJoined = $dsreg -match "AzureAdJoined.*YES"
 
-# Dynamically check AD connectivity (supports FR and EN output)
+# A missing domain controller is a connectivity issue, not evidence of damaged keys.
 $adReachable = $false
 try {
-    $nltestResult = nltest /dsgetdc: | Out-String
-    if ($nltestResult -match "DC:" -or $nltestResult -match "Domain Name" -or 
-        $nltestResult -match "Nom du domaine" -or $nltestResult -match "Contrôleur de domaine") {
-        $adReachable = $true
+    if ($domainJoined) {
+        $computerSystem = Get-CimInstance -ClassName Win32_ComputerSystem -ErrorAction Stop
+        if ($computerSystem.PartOfDomain -and -not [string]::IsNullOrWhiteSpace($computerSystem.Domain)) {
+            nltest "/dsgetdc:$($computerSystem.Domain)" | Out-Null
+            $adReachable = ($LASTEXITCODE -eq 0)
+        }
     }
 } catch {
     $adReachable = $false
@@ -73,14 +75,14 @@ if ($adReachable) {
     exit 0
 }
 
-Write-DetectionResult "Status=RemediationRequired Reason=WindowsHelloConfiguredButADUnreachable DomainJoined=$domainJoined AzureAdJoined=$azureJoined"
-exit 1
+Write-DetectionResult "Status=Deferred Reason=ADUnavailableNoKeyReset DomainJoined=$domainJoined AzureAdJoined=$azureJoined"
+exit 0
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB13KAY29Iljxa9
-# jBqyeNhS9UphoKiKo+2fzD39GNlbEKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB7RWZF648htUjH
+# 2K7LGHU4D94Rw9Hkoi65JIA7lx4nwaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -171,25 +173,25 @@ exit 1
 # NHNboDGcmWXfwXRy4kbu4QFhOm0xJuF2EZAOk5eCkhSxZON3rGlHqhpB/8MluDez
 # ooIs8CVnrpHMiD2wL40mm53+/j7tFaxYKIqL0Q4ssd8xHZnIn/7GELH3IdvG2XlM
 # 9q7WP/UwgOkw/HQtyRN62JK4S1C8uw3PdBunvAZapsiI5YKdvlarEvf8EA+8hcpS
-# M9LHJmyrxaFtoza2zNaQ9k+5t1wwggbtMIIE1aADAgECAhAKgO8YS43xBYLRxHan
-# lXRoMA0GCSqGSIb3DQEBCwUAMGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdp
+# M9LHJmyrxaFtoza2zNaQ9k+5t1wwggbtMIIE1aADAgECAhAIT9wzT35FTtvDD4/5
+# khg1MA0GCSqGSIb3DQEBCwUAMGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdp
 # Q2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3Rh
-# bXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTEwHhcNMjUwNjA0MDAwMDAwWhcN
-# MzYwOTAzMjM1OTU5WjBjMQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQs
+# bXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTEwHhcNMjYwODA1MDAwMDAwWhcN
+# MzcxMTA0MjM1OTU5WjBjMQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQs
 # IEluYy4xOzA5BgNVBAMTMkRpZ2lDZXJ0IFNIQTI1NiBSU0E0MDk2IFRpbWVzdGFt
-# cCBSZXNwb25kZXIgMjAyNSAxMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKC
-# AgEA0EasLRLGntDqrmBWsytXum9R/4ZwCgHfyjfMGUIwYzKomd8U1nH7C8Dr0cVM
-# F3BsfAFI54um8+dnxk36+jx0Tb+k+87H9WPxNyFPJIDZHhAqlUPt281mHrBbZHqR
-# K71Em3/hCGC5KyyneqiZ7syvFXJ9A72wzHpkBaMUNg7MOLxI6E9RaUueHTQKWXym
-# OtRwJXcrcTTPPT2V1D/+cFllESviH8YjoPFvZSjKs3SKO1QNUdFd2adw44wDcKgH
-# +JRJE5Qg0NP3yiSyi5MxgU6cehGHr7zou1znOM8odbkqoK+lJ25LCHBSai25CFyD
-# 23DZgPfDrJJJK77epTwMP6eKA0kWa3osAe8fcpK40uhktzUd/Yk0xUvhDU6lvJuk
-# x7jphx40DQt82yepyekl4i0r8OEps/FNO4ahfvAk12hE5FVs9HVVWcO5J4dVmVzi
-# x4A77p3awLbr89A90/nWGjXMGn7FQhmSlIUDy9Z2hSgctaepZTd0ILIUbWuhKuAe
-# NIeWrzHKYueMJtItnj2Q+aTyLLKLM0MheP/9w6CtjuuVHJOVoIJ/DtpJRE7Ce7vM
-# RHoRon4CWIvuiNN1Lk9Y+xZ66lazs2kKFSTnnkrT3pXWETTJkhd76CIDBbTRofOs
-# NyEhzZtCGmnQigpFHti58CSmvEyJcAlDVcKacJ+A9/z7eacCAwEAAaOCAZUwggGR
-# MAwGA1UdEwEB/wQCMAAwHQYDVR0OBBYEFOQ7/PIx7f391/ORcWMZUEPPYYzoMB8G
+# cCBSZXNwb25kZXIgMjAyNiAxMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKC
+# AgEAtnum8sn+zUr41JtMZbP9OMYw+HwJDpG5xkIu/lqcfNYmMX81YmsUiHLbh9yk
+# peWBGKTLhYBrAN9Tdg/QEzG32XcObmgIblnr0CoQ3WSAeDZ6nH6X6VkFyYkJw3QB
+# JREwvm4UhLzSxmwPA7cFKRTEOMsmEEj6qJk/dqLEAL+oQYuOwE2UuiX1Vnul8YRe
+# IyWd4kgLn9gq6LNXM0UplkR6jL/QHxmb6fMoGBJYbnaUI7XD6cKDpekK2SVMld4i
+# DbzeHDtOaaxldH5IxuNusQ69nd8/ZXEiB5Hbxj3RlK13cX1W4DlFXKdv/CEhM8Cj
+# 1vvlmvhNroyPdRGbbpBlgyf8Wdu5N6ByhFwURn0U6ozlPoxN22v+fviUhP+6DR54
+# 7OZnpBMWDfei1f5sVGwiiW/KQTWOK97g+4RJpPzPNV4VYMAwO2jM2Aty2QYPVmOQ
+# TJm0msuXnJrSbl2gf9JylpkJlWXqk1Q4LJsxz+TELoQCZIljbgvTJgoPU2R12ydv
+# 8i1UqL/adelA0y7U9Pmmtbze9Xx3rtajC5SzQd1jgfwAwsa90v9YcSPdmeoyoBBA
+# /27cCL237l5DTYYPDLQ4ON3OLTGWnvRb6jDrf/T75gMRfUzSLCBQfBusm9+mSWRl
+# C/Df6S/e9Q8i13CuhzOT2Jx+V/nlbXM4QoBwlUAhelwwJT0CAwEAAaOCAZUwggGR
+# MAwGA1UdEwEB/wQCMAAwHQYDVR0OBBYEFBTJY4owLtRK+26U8+bjQH717M3iMB8G
 # A1UdIwQYMBaAFO9vU0rp5AZ8esrikFb2L9RJ7MtOMA4GA1UdDwEB/wQEAwIHgDAW
 # BgNVHSUBAf8EDDAKBggrBgEFBQcDCDCBlQYIKwYBBQUHAQEEgYgwgYUwJAYIKwYB
 # BQUHMAGGGGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBdBggrBgEFBQcwAoZRaHR0
@@ -197,47 +199,47 @@ exit 1
 # YW1waW5nUlNBNDA5NlNIQTI1NjIwMjVDQTEuY3J0MF8GA1UdHwRYMFYwVKBSoFCG
 # Tmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRHNFRpbWVT
 # dGFtcGluZ1JTQTQwOTZTSEEyNTYyMDI1Q0ExLmNybDAgBgNVHSAEGTAXMAgGBmeB
-# DAEEAjALBglghkgBhv1sBwEwDQYJKoZIhvcNAQELBQADggIBAGUqrfEcJwS5rmBB
-# 7NEIRJ5jQHIh+OT2Ik/bNYulCrVvhREafBYF0RkP2AGr181o2YWPoSHz9iZEN/FP
-# sLSTwVQWo2H62yGBvg7ouCODwrx6ULj6hYKqdT8wv2UV+Kbz/3ImZlJ7YXwBD9R0
-# oU62PtgxOao872bOySCILdBghQ/ZLcdC8cbUUO75ZSpbh1oipOhcUT8lD8QAGB9l
-# ctZTTOJM3pHfKBAEcxQFoHlt2s9sXoxFizTeHihsQyfFg5fxUFEp7W42fNBVN4ue
-# LaceRf9Cq9ec1v5iQMWTFQa0xNqItH3CPFTG7aEQJmmrJTV3Qhtfparz+BW60OiM
-# EgV5GWoBy4RVPRwqxv7Mk0Sy4QHs7v9y69NBqycz0BZwhB9WOfOu/CIJnzkQTwtS
-# SpGGhLdjnQ4eBpjtP+XB3pQCtv4E5UCSDag6+iX8MmB10nfldPF9SVD7weCC3yXZ
-# i/uuhqdwkgVxuiMFzGVFwYbQsiGnoa9F5AaAyBjFBtXVLcKtapnMG3VH3EmAp/js
-# J3FVF3+d1SVDTmjFjLbNFZUWMXuZyvgLfgyPehwJVxwC+UpX2MSey2ueIu9THFVk
-# T+um1vshETaWyQo8gmBto/m3acaP9QsuLj3FNwFlTxq25+T4QwX9xa6ILs84ZPvm
-# povq90K8eWyG2N01c4IhSOxqt81nMYIFvjCCBboCAQEwYjBOMR4wHAYDVQQDDBV3
+# DAEEAjALBglghkgBhv1sBwEwDQYJKoZIhvcNAQELBQADggIBAI3FOmEenVIK35ms
+# CYB+fShAsWvSYvLBItoNdAgQ2jIqrGsVsluXMJU/+mRebBc52s6lbKAvOVPXaizm
+# KkMLLflEEKDZQx4CkS2t8aHPjkXha3hYZ010htFa3dhNgmalH5vuWvh3tTCf4frT
+# S7gPtGc4Z/xaPhQ2AB1mR8eEe/WbH0RWHvVIl6VwQ3+g5FKNfN2N/DWJkf13w2H+
+# 2GfqEfbd35Ww8CvoYBjLNIDTadcPWdgsjsiOaK/7EsKJgLjUNIVgvcaFOLLQ/Glr
+# A+0ZHJoFUbOr5SJN8zykPspXIXlpDJY/gqFUZRROeab9GVgmhbdOJcD/63RhxPah
+# FUGbckRONqMe6DYAv6/mOG0pWd3cPStsdcS7buj5DyniwRY8yooMH6ptx5vpP/pZ
+# zBPBeZD2U4IsthyxB5Jaa8qrOkB5z160TXiM5ADMspZ0TfD9MJoq0tFpFPssKRFh
+# WeEDYPvcUuN7U7lvcdHl4ezQ3NT/7Ffs1sR1yh/LRbdZ3B3Vc6q2WmD8mDC0p9kz
+# l2o73iVtS946IkEj7FkRsZGww1teYxERROC745xrtjvcw9ZyyUjHZWGRIpJeMNsP
+# quCDf0fkyHtB+J4AiNZqCQk23rxh+KbpyMTNVKItJ5l92Svl20U9NbqMBOVYl1h5
+# 4NEYLJq1/xHWFKPNK903zJZA9P2DMYIFvjCCBboCAQEwYjBOMR4wHAYDVQQDDBV3
 # b3JrcGxhY2VjbG91ZGh1Yi5jb20xLDAqBgkqhkiG9w0BCQEWHWNvbnRhY3RAd29y
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEICxkMXCiY1fuXGxajA5zik9uNl8i7dRPSAEsqbmERSM6MA0GCSqG
-# SIb3DQEBAQUABIIBgAWQBhHnVJSBPgI5vxodRE51nlRHKGUYwsRaWxlFSZTJbZ3e
-# e7GdZdcGWyFTfB5ioybDto61A5BVqVDAKHOcGyB+fqpQl+aN/XwNXHPjqJ3tn9u4
-# GtYm0ur8PPiWu8R/A7CfZ7tBDUOQRPOgE0sE7ajiIx07tJ3LIH1V62rd2BoYLQrd
-# ggCDDiK1QFmrZ3zsckhgXXzZMdkvbt8fFNbY+iKcg9LiGY4M+m1GeeuGKqmAuaVi
-# nXDq151P3r8dKLlQ7EnNk14pufwNLBIDF/ERXpbNHlUWWNYorUwhOJ8C1KjyTHjI
-# /9mPoGaZ5511hFkeRiz0TH8jvsgHzQGukM/gw34OIsHp89qeLw8TjKUR11PDzP0/
-# /fjmuNXUmgBT6l8Fww15T3n2Xlp7/0deOuZVwqUnfbtZqqZYHiy1XOLIMBBKGUiq
-# au/Y5LRZBqpNq1WM00ZbE3n9acamIwrDt3nfJ9qRFHsP067KVoW3dcDK+ZvBpFmc
-# 6h+EUCKJyr3yU9sqGqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIFp+IM16tTvRMGk1Ifre1TcDtMHk5dhWb9Ib0uoZC8opMA0GCSqG
+# SIb3DQEBAQUABIIBgFTeeoi4hcyODSw1j3pjKTL0fUgUp80olOkmHyeDlegf3ths
+# 7B4OtzPmzoOyqAKSkmP+GCW9LxU6xu9g6NS+c1pIQcXqC1zCEUnlVBN5yS4H9gQl
+# Yzz93PRD4bkO1tnjJMu3Uwz1RXSyIz4KgwINdgwbx6Xtskml7ZVEKg7JEOXbI2PO
+# Oc/0gKykzNb+ONoIxQcAdQO6EyHSstzlgDAyyv9dSr6j2s0WEt/1Dqh/nyv33fAG
+# JJW2Wb4ctnN2fbJ0jnkGSyyeASSge82Krhv8zzFRSlR1JVHw+G/IrriTlv3yT/Im
+# rEpNBMzzY4l+raTIUZefkOljsRI8jPxs6r2s+JgeF/OGr2r7e/7FhmkQFOpUIy+k
+# NGrHbD2aDpwOGXPP8KTw27JK7TXfGHDApOlGitULQqB3BB/kzfejsFVK5ki2aYOS
+# e2qSSjpPfbHf+auNr7n1P/ObZTufPeJJI+JULibtuQkaMEo9CIMLvJG4qaChBt41
+# 9ZvzD4iyqwaBuj9BWaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
-# MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTMwODUw
-# MDBaMC8GCSqGSIb3DQEJBDEiBCAZsNTCHVqCP6Ll6x3tRJ6q7s3lnsHCCLHwfu2h
-# +3X6EzANBgkqhkiG9w0BAQEFAASCAgArpwqu84/OfUXAHIcY4CUiYRuGWas+tVXa
-# 6+C6oJSoB060cy1FQM7jsFqQY06kOqsOz5fPsHX60Ly6C+L6JYAEPJcbW7F5NJtj
-# l+0YORjYQ7jPmaT8AaMX5FGRrGz6kD98hYPpKmLU/E/A5e2qxY+70lT6rEpNSSnh
-# KUQu5I/6jPkE58zU+ses8FVOtjgyG9kg/tEnXik0Gnd11FSOTMyF538mgNsx8Erx
-# oQJEISNTdIaT3J8vRQyPTKLh/X+Ma3NOGzip/QQl0TMKm25diVcqEDijW11C+jp9
-# F/MT1FM9isjnx9YSyd2tUAiyK/A+EctuEuNwHCTIpm4DjWhtFMBBtxiHb5meGTXS
-# gh1sgAl4dIWAq97YM48pbC6nemILFfiH8emg9buTYTxhmtKUCnVVYgUcqaudyHLJ
-# Vk6GMf+TzOyZHp/NRYfRVONSnY5Zq8Qcnwam+JQzgUXRecTANUyQf3grgVSXGcBx
-# Kppt1Za4oghfrzBqJyq9LhzPwK4w4vQ+wSee+Nb+sr5EZzVugxODry88cidvx6CZ
-# xCManr+jgL9L+CQumGuV+9VgJKoAWTTY85aqqMJ4sQqGSK4kGqAsNgF43BSvYTo5
-# 3c3fcZ+AajYY5425N8ADt2pbLVDqMhI7dT/8PhWcaENEYvxjMWePzQCx8W5DzUV6
-# aGcZqxlrQA==
+# MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjMxNzEw
+# NDhaMC8GCSqGSIb3DQEJBDEiBCDwWGjv64pq0JoQTm94sZCagmr0xpalKjSgATFD
+# Ujs3FDANBgkqhkiG9w0BAQEFAASCAgBRrBXS98BolbZVIDmtcjzoPKszFahx1Ivy
+# ZJx68lJ+8Vp4fD8UyWxeI/zTrMCGdLOH1rffI+sYaqiLwjCxvCLPZ72wtz4a9Sr6
+# v2qdRhW9LaoOaZTDTJhxdumro+UzSDnwRVTB8oRooARXLg/jq1ejF/4MpqMTTCoU
+# SVvuLrtPBNc5ktsKZbhgGUp93xtEhxJb1kcxbn4keiSJYHZ2/H+9trF9F8a2CGOv
+# HFPGjU/MQRhDT5HD7TYhinDKKe573eEBt14vtFNKUwyDD2K3wtxGx7YT6MdnpBMd
+# Nv2xsMxyyUR4IIz61NF9tDUe4BLqy7eAfbEXnM5yYSOBVo78AoIHqLvTxYazh3W3
+# zeXOP05P6rd4/wAK68DaYBJ9gduE+Kmp4Zu+uHXx+uvV4BYIy1MkFhURTPt4ac92
+# AcFFg0frrGV+0y46hBuA8XC1TT14FQFK64BCeGwZlMKbzuJn0QGidBmE4FfF11X1
+# mt5L8VlrTyOOU0jzDSRRuzoySSOpy/6R6eAZPVOt4TeuX0GRKmXpEE92kyjqQjBc
+# qR469HNsRY+015WwvZcGf2RJba+sZaMN4NMrBonxVhpn4kQB4QCeEcWNhJNEBM6a
+# KX+1DjQyTQTnS/wDmcydRFiRW2ai1v0+HbgEapJqxEUvny/5HMx7esShgUF9HvHP
+# RuLA2OHFSg==
 # SIG # End signature block

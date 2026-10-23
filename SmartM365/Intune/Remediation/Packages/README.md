@@ -45,6 +45,24 @@ SmartM365-*-Diagnostic.ps1
 
 ## Validation Before Publishing
 
+`WindowsHello/Reset-WindowsHello` reports unavailable AD connectivity as `Deferred`
+and does not trigger a key reset. Connectivity alone does not establish key corruption.
+The remediation script requires `-AllowWindowsHelloReset` for an operator-approved
+manual reset after diagnosis; its default invocation changes no keys or services.
+
+`IntuneManagementExtension-Health` reads the native IME logs under
+`%ProgramData%\Microsoft\IntuneManagementExtension\Logs`. SmartM365-generated logs
+remain under `%ProgramData%\SmartM365\IntuneRemediation\Logs`.
+
+The Time-Zone pair uses `SmartM365-Time-Zone-Detection.ps1` and
+`SmartM365-Time-Zone-Remediation.ps1` so the manager associates them unambiguously.
+
+Offline regressions (PowerShell 5.1 or 7, from the repository root):
+
+```powershell
+pwsh -NoProfile -File SmartM365/Tests/Test-SmartM365IntuneRemediationReviewOffline.ps1
+```
+
 Before publishing a package to Intune:
 
 - review detection and remediation scripts together;
