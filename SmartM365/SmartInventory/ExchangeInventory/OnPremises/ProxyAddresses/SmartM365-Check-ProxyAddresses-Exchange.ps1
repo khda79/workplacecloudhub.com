@@ -62,7 +62,7 @@
     - Maintains logs and cleans up old files automatically.
 
 .VERSION
-1.32
+1.33
 .AUTHOR
     https://github.com/khda79/workplacecloudhub.com
     Minimum permissions: Windows PowerShell 5.1, Exchange 2016 Management snap-in, ActiveDirectory module, Exchange recipient read access, and AD read access.
@@ -458,6 +458,39 @@ function New-UniqueSuggestedSmtpAddress {
     return ''
 }
 
+function Assert-ProxyAddressesGraphPrerequisite {
+    [CmdletBinding()]
+    param(
+        [bool]$EnableSharePointUpload,
+        [AllowEmptyString()][string]$SendMailMode,
+        [AllowEmptyString()][string]$SmtpServer
+    )
+
+    $effectiveMailMode = ([string]$SendMailMode).Trim()
+    if (-not $effectiveMailMode) {
+        $effectiveMailMode = if ([string]::IsNullOrWhiteSpace($SmtpServer)) { 'Graph' } else { 'SMTP' }
+    }
+    if (-not $EnableSharePointUpload -and $effectiveMailMode -notin @('Graph','Both')) {
+        WriteLog -Message 'Graph Authentication prerequisite skipped: SharePoint upload disabled and mail uses SMTP.'
+        return
+    }
+
+    $moduleName = 'Microsoft.Graph.Authentication'
+    $runtime = '{0} {1}' -f $PSVersionTable.PSEdition, $PSVersionTable.PSVersion
+    WriteLog -Message ("Checking {0} prerequisite; PowerShell={1}; SharePointUpload={2}; MailMode={3}." -f $moduleName, $runtime, $EnableSharePointUpload, $effectiveMailMode)
+    try {
+        $available = Get-Module -ListAvailable -Name $moduleName | Sort-Object Version -Descending | Select-Object -First 1
+        if ($null -eq $available) { throw 'No module manifest was found in this process PSModulePath.' }
+        Import-Module -Name $available.Path -Global -ErrorAction Stop
+        $loaded = Get-Module -Name $moduleName | Sort-Object Version -Descending | Select-Object -First 1
+        if ($null -eq $loaded) { throw 'Import completed without a loaded Graph Authentication module.' }
+        WriteLog -Message ("Graph Authentication prerequisite OK; PowerShell={0}; Version={1}; Path={2}." -f $runtime, $loaded.Version, $loaded.Path)
+    }
+    catch {
+        throw ("Graph Authentication prerequisite failed under PowerShell {0}: {1} Verify Microsoft.Graph.Authentication in Windows PowerShell 5.1 for the job account (AllUsers installation if needed). No module installation or Graph connection was attempted. PSModulePath={2}" -f $runtime, $_.Exception.Message, $env:PSModulePath)
+    }
+}
+
 function Test-SmtpAddressSuffix {
     [CmdletBinding()]
     [OutputType([bool])]
@@ -509,7 +542,7 @@ $ErrorActionPreference = 'Stop'
     }
 
     #region Module Import and Initialization
-$ScriptVersion = "1.32"
+$ScriptVersion = "1.33"
     $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
     $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ProxyAddressesCsvLogFolderPath' -DefaultValue $OutputPath
     $LatestCsvFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ''
@@ -580,6 +613,8 @@ $ScriptVersion = "1.32"
     Write-Host "Summary CSV : $outSummary"
     Write-Host "Added CSV   : $outAdded"
     Write-Host "Excel       : $outWorkbook"
+
+    Assert-ProxyAddressesGraphPrerequisite -EnableSharePointUpload $global:EnableSharePointUpload -SendMailMode $SendMailMode -SmtpServer $SmtpServer
 
     # -------------------------------
     # Exchange PSSnapin availability
