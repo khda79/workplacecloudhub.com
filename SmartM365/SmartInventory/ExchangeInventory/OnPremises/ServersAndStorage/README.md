@@ -4,7 +4,7 @@ Exchange 2016 on-premises infrastructure and migration readiness inventory for s
 
 ## Scripts
 
-- `SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory.ps1`: inventories Exchange 2016 infrastructure through Exchange Management Shell plus WMI/DCOM only, then renders a full HTML readiness report. It does not use WinRM, PowerShell remoting or `Get-CimInstance`; `New-CimSession` is used over DCOM only, to start the Health Checker scheduled task.
+- `SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory.ps1`: inventories Exchange 2016 infrastructure through Exchange Management Shell plus WMI/DCOM only, then renders a full HTML readiness report. Compute/storage inventory and Health Checker task triggering keep their existing WMI/DCOM paths. Only certificate reads use a constrained Exchange `/PowerShell/` session by default; `Get-CimInstance` and remote scriptblocks are not introduced. `New-CimSession` is still DCOM-only for Health Checker task triggering.
 - `Install-SmartM365-Exchange-HealthCheckerScheduledTask.ps1`: installs, updates or removes the Health Checker scheduled task on the other Exchange servers (launcher: `Launchers/OnPremises/Start-SmartM365-Exchange-HealthChecker-ScheduledTask-Installer.cmd`).
 - `SmartM365-Exchange-OnPrem-HealthChecker-LocalRunner.ps1`: deployed to each of those servers; runs Health Checker for the local server only.
 - Version 1.6.1 routes each timestamped/current CSV pair through the shared
@@ -22,6 +22,31 @@ By default, output is written under:
 Use `-OutputRoot` to override the root folder for a specific run.
 
 Set `ExcludedServers` in the script's local JSON to an array of server names that the collection host must not contact. The committed template uses an empty array. Configured names are skipped for per-server inventory and certificate collection; the HTML report and email list them in the per-server table with status `Excluded` and no measured values. The global summary CSV records both the discovered and collected server counts and the configured exclusions.
+
+## Certificate connection mode (1.8.6)
+
+The per-script local JSON key `ExchangeConnectionMode` defaults to `Remote`. Existing configurations receive the missing key from the template without replacing local values. The key affects certificate reads only: Exchange snap-in loading, all other Exchange cmdlets, WMI/DCOM, Health Checker, its runner and installer are unchanged.
+
+- `Remote`: the shared lot A helper imports only `Get-ExchangeCertificate` into one owned Microsoft.Exchange/Kerberos session at the local management host FQDN (`http://<host>/PowerShell/`). The original `-Server` target is preserved for every read. The session is opened at the certificate phase, used sequentially for all included targets and closed immediately afterwards, including on failure. It is not kept idle while Health Checker runs. Collection duration is logged.
+- Session startup/import failure logs `ExchangeConnectionMode=Remote; certificate state=Failed; no fallback` at ERROR level and emits one `ExchangeCertificate / Collection=Failed / CollectionStatus=ERROR` row for each included target. The infrastructure run continues. If the session or proxy is lost during collection, certificate calls stop and the failed target plus all unread targets receive the same explicit failure diagnostic; already collected certificate rows remain. No native certificate fallback or automatic reconnect occurs. Other readiness phases, CSV/HTML exports, summary, SharePoint uploads and mail continue. A target-specific read failure still permits other targets to be read. No failure is represented as zero certificates.
+- `LocalSnapin`: rollback through the existing native `Get-ExchangeCertificate -Server` path and existing property rendering. Change the key in the script-local **source** configuration copied by the launcher; cache-only edits disappear on the next launch.
+
+Certificate session failures increment the existing error counter and log a warning, so the existing completion path produces `CompletedWithWarnings` with exit code **3**, after outputs and mail. The banner and execution summary retain the nonzero error count. The source-receipt helper does not qualify a run whose error count is nonzero: its run receipt is Failed/unqualified even though the inventory files were produced. This receipt contract is unchanged.
+
+The endpoint is NoLanguage: it receives cmdlet calls and parameters only. Sorting, property projection and diagnostics run on the client. Native read permissions remain necessary for the unchanged collectors; the account must also have effective RBAC access to `Get-ExchangeCertificate -Server`. No rights are changed by this mode.
+
+Remoting may return only X509 certificate properties. Subject, thumbprint and available dates are retained; raw date strings are preserved without inferring a timezone or interpreting a culture-dependent display date. `DnsNameList` supplies the existing `CertificateDomains` field when the Exchange property is absent. Available `ServicesStringForm` can supply `Services`. Missing `Services`, `Status` or `IsSelfSigned` are **Unknown**, with `CollectionStatus=WARNING` and a diagnostic, never inferred from subject, issuer or expiration alone. This is a material limit: remote access success does not prove service bindings or Exchange certificate validity. A known false, zero or empty collection remains distinct from a missing property. No CSV columns are changed.
+
+Offline checks, without collecting Exchange data:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File SmartM365/Tests/Test-SmartM365ExchangeCertificatesOffline.ps1
+pwsh.exe -NoProfile -File SmartM365/Tests/Test-SmartM365ExchangeCertificatesOffline.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File SmartM365/Tests/Test-SmartM365ExchangeHealthCheckerOffline.ps1
+pwsh.exe -NoProfile -File SmartM365/Tests/Test-SmartM365ExchangeHealthCheckerOffline.ps1
+```
+
+After operator deployment, launch infrastructure directly under the service account. Check version 1.8.6, one certificate session, the formerly failing target's certificate count, explicit Unknown metadata diagnostics, unchanged WMI/DCOM/HealthChecker results, publication and cleanup. Offline tests prove neither server access nor completeness. Report-only regeneration opens no Exchange session.
 
 ## Exchange Health Checker (`-IncludeHealthChecker`)
 

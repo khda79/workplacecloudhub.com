@@ -25,6 +25,7 @@
   "EnableWeeklyHistory": true,
   "WeeklyHistoryFolderPath": "{{DataAllRootPath}}\\Exchange\\OnPrem\\ServersAndStorage\\WeeklyHistory",
   "WeeklyHistoryRetentionWeeks": 52,
+  "ExchangeConnectionMode": "Remote",
   "ExcludedServers": [],
   "HealthCheckerTimeoutMinutesPerServer": 30,
   "HealthCheckerTotalBudgetMinutes": 1320,
