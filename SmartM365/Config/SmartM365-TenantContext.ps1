@@ -7,7 +7,7 @@ Loads SmartM365 global and tenant configuration context.
 Merges global and tenant local JSON configuration, resolves workspace paths, and exposes the effective tenant context used by SmartM365 scripts.
 
 .VERSION
-1.0.12
+1.0.13
 #>
 function Write-SmartM365StartupBanner {
     [CmdletBinding()]
@@ -194,7 +194,10 @@ function Get-SmartM365JsonTemplatePath {
     param([Parameter(Mandatory)][string]$Path)
 
     $Path = (Get-SmartM365JsonNames $Path).Legacy
-    $legacyTemplate = if ($Path -like '*Config\Tenants\*.local.json') {
+    $legacyTemplate = if ($Path -like '*Config\Tenants\*.mail.local.json') {
+        Join-Path -Path (Split-Path -Path $Path -Parent) -ChildPath 'tenant.mail.local.json.template'
+    }
+    elseif ($Path -like '*Config\Tenants\*.local.json') {
         Join-Path -Path (Split-Path -Path $Path -Parent) -ChildPath 'tenant.local.json.template'
     }
     elseif ($Path -like '*.local.json') { '{0}.template' -f $Path }
@@ -376,15 +379,79 @@ function Test-SmartM365WritableDirectory {
     }
 }
 
+function Resolve-SmartM365MailScriptName {
+    [CmdletBinding()]
+    [OutputType([string])]
+    param([string]$ScriptName = '')
+
+    if (-not [string]::IsNullOrWhiteSpace($ScriptName)) {
+        $name = [IO.Path]::GetFileName($ScriptName.Trim())
+        if ($name -like '*.ps1') { return [IO.Path]::GetFileNameWithoutExtension($name) }
+        return $name
+    }
+    # Use the current caller, never a global script-name variable left by a previous run.
+    foreach ($frame in @(Get-PSCallStack)) {
+        if ($frame.ScriptName -and $frame.ScriptName -ne $PSCommandPath -and
+            [IO.Path]::GetExtension($frame.ScriptName) -ieq '.ps1') {
+            return [IO.Path]::GetFileNameWithoutExtension($frame.ScriptName)
+        }
+    }
+    return ''
+}
+
+function Merge-SmartM365ScriptMailConfig {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][System.Collections.IDictionary]$Config,
+        [Parameter(Mandatory)][string]$RootPath,
+        [Parameter(Mandatory)][string]$ProfileKey,
+        [string]$ScriptName = ''
+    )
+
+    $mailPath = Join-Path $RootPath ("Config\Tenants\{0}.mail.local.json" -f $ProfileKey)
+    $mailPath = Resolve-SmartM365JsonConfigurationPath -Path $mailPath
+    # This optional file must not be created implicitly when it is absent.
+    if (-not (Test-Path -LiteralPath $mailPath)) { return }
+    $mailConfig = Read-SmartM365JsonConfig -Path $mailPath
+    if (-not $mailConfig.Contains('Scripts') -or
+        ($mailConfig['Scripts'] -isnot [System.Collections.IDictionary] -and $mailConfig['Scripts'] -isnot [pscustomobject])) {
+        throw "Mail configuration '$mailPath' requires a Scripts object."
+    }
+    $entries = $mailConfig['Scripts']
+    if ($entries -is [pscustomobject]) { $entries = ConvertTo-SmartM365Hashtable -InputObject $entries }
+    foreach ($name in @($entries.Keys)) {
+        $entry = $entries[$name]
+        if ($entry -isnot [System.Collections.IDictionary] -and $entry -isnot [pscustomobject]) {
+            throw "Mail configuration '$mailPath': Scripts.$name must be an object."
+        }
+        if ($entry -is [pscustomobject]) { $entry = ConvertTo-SmartM365Hashtable -InputObject $entry }
+        $entries[$name] = $entry
+        foreach ($field in @('From', 'Cc')) {
+            if ($entry.Contains($field) -and $null -ne $entry[$field] -and $entry[$field] -isnot [string]) {
+                throw "Mail configuration '$mailPath': Scripts.$name.$field must be a string or null."
+            }
+        }
+    }
+    if ([string]::IsNullOrWhiteSpace($ScriptName) -or -not $entries.Contains($ScriptName)) { return }
+    $scriptMail = $entries[$ScriptName]
+    foreach ($field in @('From', 'Cc')) {
+        if (-not $scriptMail.Contains($field) -or $null -eq $scriptMail[$field]) { continue }
+        $value = ([string]$scriptMail[$field]).Trim()
+        if ($value -and $value -notin @('__USE_GLOBAL__', 'USE_GLOBAL')) { $Config[$field] = $value }
+    }
+}
+
 function Get-SmartM365EffectiveGlobalConfig {
     [CmdletBinding()]
     param(
         [string]$StartPath,
-        [Alias('TenantKey')][string]$ProfileKey = 'test'
+        [Alias('TenantKey')][string]$ProfileKey = 'test',
+        [string]$ScriptName = ''
     )
 
     if ([string]::IsNullOrWhiteSpace($ProfileKey)) { $ProfileKey = 'test' }
     $ProfileKey = $ProfileKey.Trim().ToLowerInvariant()
+    $ScriptName = Resolve-SmartM365MailScriptName -ScriptName $ScriptName
 
     $rootPath = Find-SmartM365Root -StartPath $StartPath
     $scriptStartPath = if ([string]::IsNullOrWhiteSpace($StartPath)) { $rootPath } else { $StartPath }
@@ -426,12 +493,15 @@ function Get-SmartM365EffectiveGlobalConfig {
 
     foreach ($key in $tenantConfig.Keys) {
         $tenantValue = $tenantConfig[$key]
+        if ($key -in @('From', 'Cc') -and $null -eq $tenantValue) { continue }
         if ($tenantValue -is [string]) {
             $tenantText = $tenantValue.Trim()
             if ([string]::IsNullOrWhiteSpace($tenantText) -or $tenantText -in @('__USE_GLOBAL__', 'USE_GLOBAL')) { continue }
         }
         $globalConfig[$key] = $tenantValue
     }
+
+    Merge-SmartM365ScriptMailConfig -Config $globalConfig -RootPath $rootPath -ProfileKey $ProfileKey -ScriptName $ScriptName
 
     $globalConfig['ProfileKey'] = $ProfileKey
     $globalConfig['OrganizationKey'] = $organizationKey
@@ -480,14 +550,15 @@ function Initialize-SmartM365TenantContext {
     [CmdletBinding()]
     param(
         [string]$Tenant = 'test',
-        [string]$StartPath
+        [string]$StartPath,
+        [string]$ScriptName = ''
     )
 
     Write-SmartM365StartupBanner
 
     if ([string]::IsNullOrWhiteSpace($Tenant)) { $Tenant = 'test' }
     $profileKey = $Tenant.Trim().ToLowerInvariant()
-    $effectiveConfig = Get-SmartM365EffectiveGlobalConfig -StartPath $StartPath -ProfileKey $profileKey
+    $effectiveConfig = Get-SmartM365EffectiveGlobalConfig -StartPath $StartPath -ProfileKey $profileKey -ScriptName $ScriptName
 
     $global:SmartM365Tenant = $profileKey
     $global:SmartM365ProfileKey = [string]$effectiveConfig.ProfileKey
@@ -521,11 +592,12 @@ function Initialize-SmartM365TenantContext {
     return $effectiveConfig
 }
 
+
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAlwKN7FeHvXSsB
-# +bXcbloJLKLGw4T4d+W33XJIRVAGsaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD/2yUgQc1ZDwJj
+# WLyHVgMwogW+gZ9IR61v8LqcJgrkZqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -658,31 +730,31 @@ function Initialize-SmartM365TenantContext {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIOuq+OoGa2AbYKvYprLHityxPLw3CrIXdYWCJCNo+mX9MA0GCSqG
-# SIb3DQEBAQUABIIBgKR4efzkF/OIA0m2xZNieNcjOAk4k1AIJL3285mnk7mHoLpD
-# 3wC6cKcuNmxa1fC1qC5p5U6bR2xOcD8SQiKkg6Z0PkWhzx/568XXxrq7OsKw4J8O
-# hpOPpJRUKc3VzwCjax+OK7So36kRdflhMYOX5JdZP/0ppeSeTLKhUNUqKCdKvVC6
-# EOmUpv+jSA8CYN9agM8J2yKHjT1khJUWPBRsUCTM/QneyvL0ROrjxYc4/3Dusv0e
-# 97/vzMXKbAmcpJFX7S5D9PsBTbsDLHli+S2lSB/sMSk2NQ5LywC+qmrzVrDgFoGA
-# q+gEs2lyQNyEogZMNn1AUfW4bdsLlLLZDEAhz8V0GIVdHpjM3GfHKtaY/YTQ5XoD
-# iWjVyNQNkrNMldXM1BbA1iPn3e8EFiiSFwOEkA/L9+XtpluopiOtQ1n6tV0W1UyA
-# +dUp5FjEeDQuQTub3yWvca9Sr49su4NuXUOJeUjQ9AFCMQTNNfebo4SwUmZ/nOqg
-# mjHyumiSOgeWI/045aGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIJdeorie6k4K3TuJQ1d4kKpxFboesYov0dH8DKl10+p5MA0GCSqG
+# SIb3DQEBAQUABIIBgCIhKyQQIeoHELoDf8B9H2+H1WT4EGZieMghZDG5Ae08vIHe
+# irNkNNvLRNzi9/7kw8VItg7kkiiBota1UHoGYTm+0Cz1w8Z+REGl96fkbv4J2fo7
+# 4vJpK9zJ93C0RfNRjThnxKAtCufZlVt0WNn2X3p9ZQEClH+F6rmu4y+TKB81CzR2
+# obcpFQRxI5ACR8/M6DMRbgguLUzc7bbzQ0nPmfCE8pCeS1p/hmFQtFRS23H8IBGo
+# dxXEpyKZ8H2HJb2VUQDQHsGVa628wdyKxVdNO4Ms2eaPENV0+ar/Eg7BHsB1GgDP
+# Glc1OtuQt5pkes5fTM2B5IkOZeVkAe2227HcbodohrHWZfGplfwGliRxL6zNkps/
+# 5cJkZX/lZPQNso5LYkoUiUitz9DImE9gw4Qr6X8FFasAsMgLI1DueyyK96s4873t
+# jO75VmtKfxvwJhIwwt7XNUGuWQ7L+LjhkQrtKBvFvWei/fFdi0KYZLPNOJhUO6zI
+# k5HDcTFhsiRKzJCqSaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjEyMDMy
-# NDRaMC8GCSqGSIb3DQEJBDEiBCBoHJ6UO3VDKCkb5qepvA8iUU5HYNn+NvT69KYS
-# 7ncnEzANBgkqhkiG9w0BAQEFAASCAgBxRvN0g99T2NqSat9kZEbGi4IosPWiQwp1
-# /xOIY4sx/BXR0Ol4/oA5WwIe1UvAcYVSr0GYq1F2f3+Jw16g10+FS2Yiyf87jUri
-# iQgAiC1PSZcMatQqNdl3pUHkoQxlEF31WSlwjF7raYKvApP6bkprScfvrvw86eF1
-# ynM5Gb5eRmsYv0bUwXYtHnxfWn44gSndoIBQjfwPmZ+XdNpnpuG13AMCvHUj+KNM
-# 7jgKnBxLux8Eqcw12DJKPUMxymdPdNLWinjqfQFIdAKgpvG+xi1YO6AEuccjkbk5
-# U3f9KyNJ6X68wJDtFTdA3TuxjEGncl7cTT+Pwv24p4tVJ1fAKeFKbqc193CfoFB5
-# sBM/F0JaEU23mwszdUD8JO6lD4BAD1nVUEkqy9tmzcohR7Ug5Dhmtn0/a38xyWRL
-# VWk6Ktr8E0xzx6AzcAhigIF9+fn7NXHvsQEE+l5JhQ0WgwKrKPIFf+E8D5odo/UG
-# zfDMNcL0wZ/zMuCrRUhDwMok982BCofvg0UU3JpeB9+1IWbMpsMoJtpD3xOHX+8U
-# AcH1mm8ZwBug0EzMMkPEcZQZDxeQIBzP/DvkxYPk6G/FyLM2qOkx2CnwrZBg1uai
-# gkzPPcs+k25ghi6FseEFYzFa8nFR7TG6S1jL2ARZtZK4xZOHiAygl3iRtIW/bZBd
-# VDokbPEmCA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjIyMzAz
+# MzRaMC8GCSqGSIb3DQEJBDEiBCDWaATyrliRZc5UfSR8G1siaBJ0/S6V+3iVQr0J
+# DFnTTzANBgkqhkiG9w0BAQEFAASCAgBXD6KPdU1R+lWXYsvpQwGSZ3tOrWllm0cr
+# zrgpq8c/Bfwor2p1hsk0an54ZjxmBeUyyWg9Wx3hQvCUDXkQpEsi3smdLOsyAUK2
+# SfWiwUrM8421hHnLG5DDypServ+8P/RDbJdgld0M60O/5LH/VU36jCTsi+H0zQNt
+# MnTDJPKcZvU58oOiE48bHCZ9IOCrYOd70TpmhzixvTzD0uGoCylA4j7iP08ZxoM1
+# uNGT+zorq/XcA+HyvMaiYYUClUbDXEQ1mJt405xS3C89fsGdoLF5yZkn3SoSDZBz
+# wKYisCmWe+5wXNI8mhMsJ8yzFsZ6dN3QSsIAvtdwNL5zyxs6ViHQzvAmDEd6gvLL
+# dJQkGG+xsZ6d7siPKLwJ7VcFKY7kGFx3/ufcj/s7HksXk3sHd7gDZHsfb+pw3PqE
+# nromu9cSP5EuhEWeheLjXRFzbGzkxoQcS6hxGV9R7sA+N8EkDzoL7IZbsEsBnhKr
+# 9QLXI0L2E2VgfacA8TZdhESUHpn/51jILu4Iy8xb7+lt9JyQ9eUacQguBKLqAgNM
+# ghauURsToEZ44LHIGcK3FK7YwJz1bjqnm23Vg88W/A59IMYoiGnYZ7qGIcDCRaCE
+# V8ux0ZqsuzHFnVuwkxUSW8npI7W5HiFR0l0e+6LGY9tMJC3aEo+f2EIUQkDmpwlJ
+# EBbqUgg5dg==
 # SIG # End signature block

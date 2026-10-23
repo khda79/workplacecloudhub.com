@@ -51,6 +51,43 @@ Config\SmartM365.global.local.json.template
 Config\Tenants\tenant.local.json.template
 ```
 
+### Per-script mail sender and copies
+
+Use the optional `Config/Tenants/<profile>.mail.local.json.txt` file to manage
+script mail settings centrally, for example `prod.mail.local.json.txt`:
+
+```json
+{
+  "Scripts": {
+    "SmartM365-ActiveDirectory-HealthCheck": {
+      "From": "ad-health@example.com",
+      "Cc": "ad-team@example.com"
+    }
+  }
+}
+```
+
+Copy `Config/Tenants/tenant.mail.local.json.template` to the desired profile's
+mail file to start with the SmartInventory script catalog. Runtime mail files
+remain private and Git-ignored. The tenant loader adds missing template keys
+to an existing file without replacing local settings. An absent mail file is
+optional and is not created automatically; a present but invalid file stops
+configuration loading with an explicit error.
+
+`From` and `Cc` resolve independently: explicit script-local JSON value, then
+the script entry in the profile's mail file, then the profile's common value,
+then the workstation global value. Empty/whitespace strings, `null`, missing
+keys, `__USE_GLOBAL__` and `USE_GLOBAL` inherit from the next level. An empty
+`Cc` therefore does not disable a common copy recipient. Existing command-line
+overrides keep their priority. Only `From` and `Cc` are read from a script mail
+entry; recipients, transport and other settings keep their existing behavior.
+
+Script keys are filenames without `.ps1`. The tenant context identifies the
+calling PowerShell script automatically; helper-based integrations can pass
+`-ScriptName` explicitly to `Initialize-SmartM365TenantContext` or
+`Get-SmartM365EffectiveGlobalConfig`. Each profile has its own mail file and
+each load starts from that profile's common settings.
+
 Generated data is written under tenant-isolated output roots by default:
 
 ```text
