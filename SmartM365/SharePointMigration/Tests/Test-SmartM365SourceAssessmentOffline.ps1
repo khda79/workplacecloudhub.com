@@ -2,7 +2,7 @@
 .SYNOPSIS
     Exercise automatic assessment with fictional in-memory SharePoint objects only.
 .VERSION
-    1.0.1
+    1.0.2
 #>
 [CmdletBinding()]
 param([string]$OutputDirectory)
@@ -35,9 +35,8 @@ function New-FakeWeb {
 }
 try {
     $ctx=New-SPSAAssessment File $rulesDir
-    $permissionNames=@($ctx.Rules.StandardRolePermissions.PSObject.Properties.Value|ForEach-Object {$_}|Sort-Object -Unique|Where-Object {$_ -ne 'FullMask'})
-    $members=@(for($i=0;$i -lt $permissionNames.Count;$i++){'{0} = 1UL << {1}' -f $permissionNames[$i],$i})
-    Add-Type ('namespace Microsoft.SharePoint { [System.Flags] public enum SPBasePermissions : ulong { '+($members -join ', ')+', FullMask=ulong.MaxValue } }')
+    # Independent server enum fixture: never generate accepted names from the config under test.
+    Add-Type 'namespace Microsoft.SharePoint { [System.Flags] public enum SPBasePermissions : ulong { ViewListItems=1, AddListItems=2, EditListItems=4, DeleteListItems=8, ApproveItems=16, OpenItems=32, ViewVersions=64, DeleteVersions=128, CancelCheckout=256, ManagePersonalViews=512, ManageLists=2048, ViewFormPages=4096, Open=65536, ViewPages=131072, AddAndCustomizePages=262144, ApplyThemeAndBorder=524288, ApplyStyleSheets=1048576, CreateSSCSite=4194304, BrowseDirectories=67108864, BrowseUserInfo=134217728, AddDelPrivateWebParts=268435456, UpdatePersonalWebParts=536870912, UseClientIntegration=68719476736, UseRemoteAPIs=137438953472, CreateAlerts=549755813888, EditMyUserInfo=1099511627776, FullMask=9223372036854775807 } }'
     $baseline=& $baselineReader $ctx
     Check ($baseline.Keys.Count -eq 6) 'Documented core default-role profiles must resolve using installed enum bits.'
     Check (([uint64]$baseline.Contributor -band [uint64]$baseline.Reader) -eq [uint64]$baseline.Reader) 'Contributor must include the Reader baseline.'
@@ -111,6 +110,7 @@ try {
     $roles=Get-Content ($pcsv+'.assessment.json.txt') -Raw|ConvertFrom-Json
     Check ($roles.CustomPermissions.Complete) 'Fully covered permission assessment should be complete.'
     $permission.StandardMasks=@{}
+    function Get-SPSAStandardRoleMasks {param($Context) throw 'DEMO baseline unavailable'}
     $permission.Items=@{}
     Add-SPSARoleBindings $permission $bindings '/sites/demo/Docs'
     Complete-SPSAAssessment $permission $pcsv
@@ -185,6 +185,50 @@ try {
     Check (-not $continued.FunctionalComponents.CollectionComplete) 'Bad list must leave collection partial.'
     Check (@($continued.FunctionalComponents.Items|Where-Object Technology -eq Workflow2010).Count -eq 1) 'A later list workflow must survive an earlier list failure.'
     Check (@($continued.FunctionalComponents.Errors|Where-Object { $_.Detector -eq 'ListAssessment' -and $_.Scope -like '*list-index:1' }).Count -eq 1) 'Bad list must retain individual error provenance.'
+    # Live-shaped empty receiver collections must not produce an Assembly error.
+    $nullReceivers=New-SPSAAssessment File $rulesDir
+    $list=New-FakeList
+    $list.ContentTypes=@([pscustomobject]@{Id='ct';DocumentTemplateUrl='';NewFormUrl='';EditFormUrl='';DisplayFormUrl='';EventReceivers=$null})
+    Add-SPSAWeb $nullReceivers (New-FakeWeb @($list))
+    Check ($nullReceivers.Errors.Count -eq 0) 'A null content-type EventReceivers collection must mean no registered receivers.'
+    $receiverContext=New-SPSAAssessment File $rulesDir
+    Read-SPSAEventReceivers $receiverContext ([pscustomobject]@{EventReceivers=@($null,[pscustomobject]@{Id='receiver';Assembly='Contoso.Custom'})}) '/demo'
+    Check ($receiverContext.Items.Count -eq 1) 'A null receiver must not hide the subsequent real receiver.'
+    $failed=$false
+    try { Read-SPSAEventReceivers $receiverContext ([pscustomobject]@{EventReceivers=@([pscustomobject]@{Id='bad'})}) '/bad' } catch { $failed=$true }
+    Check $failed 'A non-null malformed receiver must still fail qualification.'
+    $formContext=New-SPSAAssessment File $rulesDir
+    $formWeb=New-FakeWeb
+    $formWeb|Add-Member -MemberType NoteProperty -Name Reads -Value ([Collections.Generic.List[string]]::new())
+    $formWeb|Add-Member -MemberType ScriptMethod -Name GetFile -Value {param($url) $this.Reads.Add($url); [pscustomobject]@{ServerRelativeUrl=$url;CustomizedPageStatus='Uncustomized'}}
+    $list=New-FakeList
+    $list.Forms=@([pscustomobject]@{ServerRelativeUrl='/_layouts/15/userdisp.aspx?ID=1'},[pscustomobject]@{ServerRelativeUrl='/_layouts/ContosoForm.aspx'},[pscustomobject]@{ServerRelativeUrl='/Lists/Docs/NewForm.aspx'})
+    Add-SPSAWeb $formContext (New-FakeWeb)
+    Read-SPSAList $formContext $formWeb $list
+    Check ($formWeb.Reads.Count -eq 1 -and $formWeb.Reads[0] -eq '/Lists/Docs/NewForm.aspx') 'Application pages must not be passed to SPWeb.GetFile; content forms must still be read.'
+    Check (@($formContext.Detectors|Where-Object Detector -eq StandardApplicationForm).Count -eq 1) 'Standard userdisp.aspx must have explicit detector provenance.'
+    Check (@($formContext.Items.Values|Where-Object { $_.Technology -eq 'ApplicationForm' -and $_.Classification -eq 'Unqualified' }).Count -eq 1) 'An unknown layouts application form must remain unqualified.'
+    # Legacy spelling remains compatible; unused bad profiles do not poison used roles.
+    $profileContext=New-SPSAAssessment Permission $rulesDir
+    $baseline=& $baselineReader $profileContext
+    Check ($baseline.WebDesigner -eq '1856438737919') ('Design baseline mismatch: '+$baseline.WebDesigner)
+    $profileContext.Rules.StandardRolePermissions.WebDesigner=@($profileContext.Rules.StandardRolePermissions.WebDesigner|ForEach-Object {if($_ -eq 'ApplyThemeAndBorder'){'ApplyTheme'}else{$_}})
+    $legacy=& $baselineReader $profileContext -RoleType WebDesigner
+    Check ($legacy.WebDesigner -eq $baseline.WebDesigner) 'Existing runtime ApplyTheme spelling must retain its effective mask.'
+    $profileContext.Rules.StandardRolePermissions.WebDesigner=@('InvalidPermission')
+    Set-Item Function:Get-SPSAStandardRoleMasks $baselineReader
+    $role=@([pscustomobject]@{RoleDefinitionBindings=@([pscustomobject]@{Id=1;Type='Reader';BasePermissions=[uint64]$baseline.Reader;Name='Read'})})
+    Add-SPSARoleBindings $profileContext $role '/demo'
+    Check (@($profileContext.Items.Values|Where-Object IsBuiltIn).Count -eq 1 -and $profileContext.Errors.Count -eq 0) 'An unused invalid Design profile must not invalidate a used Reader definition.'
+    $role[0].RoleDefinitionBindings=@([pscustomobject]@{Id=2;Type='WebDesigner';BasePermissions=7;Name='Design'})
+    Add-SPSARoleBindings $profileContext $role '/demo'
+    Check (@($profileContext.Items.Values|Where-Object Classification -eq Unqualified).Count -eq 1) 'A used invalid profile must remain unqualified without losing valid Reader evidence.'
+    function Get-SPSAWorkflowSubscriptions {param($Web) throw 'DEMO service unconfigured or unavailable'}
+    $workflowContext=New-SPSAAssessment File $rulesDir
+    Add-SPSAWeb $workflowContext (New-FakeWeb)
+    Complete-SPSAAssessment $workflowContext $csv
+    $workflowResult=Get-Content ($csv+'.assessment.json.txt') -Raw|ConvertFrom-Json
+    Check (-not $workflowResult.FunctionalComponents.CollectionComplete) 'Unavailable Workflow 2013 service must not become proven absence.'
     Complete-SPSAAssessment $ctx $csv
     if($OutputDirectory){
         [void](New-Item -ItemType Directory -Path $OutputDirectory -Force)
@@ -208,8 +252,8 @@ try {
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAE/b6wBbcPHoMq
-# bOJGgxm7w8tLEv47iqDwR8kVGdDBqaCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDlnPiLW3b6lOe+
+# Ytty0UXzWdQ++VigOJwzkW1boHvfTaCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -239,14 +283,14 @@ try {
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCDX05Q/m3wU2KhlBX2A66Mq
-# 0PIE0hbCFTCcZOEF4KuuazANBgkqhkiG9w0BAQEFAASCAYCtdlKr/Zg3iQvCqVZn
-# 61qUJKmy0sndO/pnHnWBF4jpQVZnuNS4KmL0I0mW/acR9Xhfki6RzF9dBCcus2g0
-# 0rOWImw/72qr0Qiy2xPKf+ghPOvH69xAWqcyt9O3vHnjL9mSrSToodhgx3J8fyS/
-# TzstaSh2rKzNHQ/MMOMhaupdD8BOP3HDiEN9hvHRl4Kq24ta//Cvw6B64PE3LSqX
-# N67Kei2/x/DELFYb7iz6R1WPE8T2IsywIt2/+eMhduJntuPD+Tc61lsHRNngQQpa
-# 3hl4nGUBnvP2mK02LD+Zv0ibW5CubfHtzYkO3KSkIxl5YH239mMfkwmtxPNL1Utx
-# chlotjV7pNgBgjWG+PvREoB5ioc1VPK57p9Xahf+qi+nIU6P8DTEQ9j8Cqm9+I1S
-# lqi5tFJgcXgpSdv8JPueG+xKe46dOyZ4P5Y3R53e90PD8g4bOrfz6xafJXo1+Z1d
-# Quu3HMdclgGEMZYYOMB4Pd7PHLYWx7rtSOHyvx1ej3jkl2g=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCAejZZ8sgmJ7TUfy53xxGQn
+# V+rsUeuuFagTD0kw86vv6DANBgkqhkiG9w0BAQEFAASCAYAvmwuzaNlSkOgUOTwP
+# 5botjC3fwcHW7anFjGkkeMUsS7wmd7grJlVChFOdaOsF+iAxueYTvNDK7tjfv33A
+# F23XWJpscr/nS3MoEhkVNO7PtQl9YqHAq99/jVUPPJIOcw/ac8Bq/HsaByGtS8JZ
+# hhyQA2p2ST0ocp1evxI++GhTfQ4VH706I4l7IZABAt3fStr8OYOwD1zdqCXHDC+9
+# UEHPsZikifNhwTo0euxyuaALromFRlob6tLPygqOaxz/LF285g+soVJXCIatvjWL
+# qWao6n9hQbea48R4QM77pdqvCU8Uwzi8pfkXIwQj22bv2qKOdDh5GGGnqfYztvVt
+# /byYaHIbfG7VkB2yHz8XsUpFlSrVOP0jhG/LDaybg6jG094K1F4Kw4UDSObq/5TS
+# 63nAXGDwitx/66ZGTI6Ekj3YlwY7cEnEsCE/adCn8VYC/Y8yjh1o7rTqxZub+Gml
+# nC/o3HVVgIxY0hPax4AifYdyu+qmpRJEpH0szwyHjKalpxs=
 # SIG # End signature block

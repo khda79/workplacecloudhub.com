@@ -2,7 +2,7 @@
 .SYNOPSIS
     Read-only source assessment helpers. Loaded by source inventories; no collection at import.
 .VERSION
-    1.0.1
+    1.0.2
 #>
 
 function Get-SPSAProperty {
@@ -94,7 +94,10 @@ function Get-SPSAWorkflowSubscriptions {
 
 function Read-SPSAEventReceivers {
     param($Context, $Owner, [string]$Scope)
-    foreach ($receiver in @(Get-SPSAProperty $Owner 'EventReceivers')) {
+    # A present but null collection represents no registered receivers.
+    # Do not turn null into a one-element array and then read its Assembly.
+    foreach ($receiver in (Get-SPSAProperty $Owner 'EventReceivers')) {
+        if ($null -eq $receiver) { continue }
         $assembly=[string](Get-SPSAProperty $receiver 'Assembly')
         if ($assembly -and $assembly -notmatch '^(Microsoft\.SharePoint|Microsoft\.Office)\b') {
             Add-SPSAComponent $Context ($Scope+':'+$receiver.Id) 'Customization' 'ServerCode' ("Event receiver: {0}; assembly: {1}" -f $Scope,$assembly)
@@ -198,6 +201,22 @@ function Get-SPSAPageWebParts {
     } finally { if ($manager -is [IDisposable]) { $manager.Dispose() } }
 }
 
+function Read-SPSAFormPage {
+    param($Context, $Web, [string]$Url)
+    if ([string]::IsNullOrWhiteSpace($Url)) { throw 'Form URL is unavailable.' }
+    if ($Url -match '(?i)(?:^|/)_layouts/(?:[0-9]+/)?userdisp\.aspx(?:[?#]|$)') {
+        # Built-in application page: it is served from the layouts directory,
+        # not from the content database through SPWeb.GetFile.
+        $Context.Detectors.Add([pscustomobject]@{Detector='StandardApplicationForm';Scope=$Url;Status='Complete';Evidence='Built-in SharePoint userdisp.aspx application form'})
+        return
+    }
+    if ($Url -match '(?i)(?:^|/)_layouts/') {
+        Add-SPSAComponent $Context $Url 'Form' 'ApplicationForm' "Application form requires qualification: $Url"
+        return
+    }
+    Read-SPSAPage $Context $Web ($Web.GetFile($Url))
+}
+
 function Read-SPSAList {
     param($Context, $Web, $List)
     $scope=[string](Get-SPSAProperty (Get-SPSAProperty $List 'RootFolder') 'ServerRelativeUrl')
@@ -232,7 +251,9 @@ function Read-SPSAList {
         if ([string](Get-SPSAProperty $List 'BaseType') -eq 'DocumentLibrary') {
             foreach($item in @(Get-SPSAPageItems $List)){ Read-SPSAPage $Context $Web $item.File }
         }
-        foreach($form in @(Get-SPSAProperty $List 'Forms')) { Read-SPSAPage $Context $Web ($Web.GetFile($form.ServerRelativeUrl)) }
+        foreach($form in (Get-SPSAProperty $List 'Forms')) {
+            Invoke-SPSADetector $Context 'ListFormPage' $scope { Read-SPSAFormPage $Context $Web ([string]$form.ServerRelativeUrl) }
+        }
     }
 }
 
@@ -284,14 +305,15 @@ function Add-SPSAWeb {
 }
 
 function Get-SPSAStandardRoleMasks {
-    param($Context)
+    param($Context, [string]$RoleType)
     $masks=@{}
     foreach($p in $Context.Rules.StandardRoleMasks.PSObject.Properties){$masks[$p.Name]=[string]$p.Value}
     # Profiles mirror documented SharePoint Server default rights. Resolve enum bits
     # using the installed server assembly, never using a possibly modified web role.
     foreach($profile in $Context.Rules.StandardRolePermissions.PSObject.Properties) {
-        if($masks.ContainsKey($profile.Name)){continue}
-        $permissions=@($profile.Value) -join ', '
+        if($masks.ContainsKey($profile.Name) -or ($RoleType -and $profile.Name -ne $RoleType)){continue}
+        # Backward-compatible spelling for runtime profiles created by 1.0.0.
+        $permissions=@($profile.Value | ForEach-Object {if($_ -ceq 'ApplyTheme'){'ApplyThemeAndBorder'}else{$_}}) -join ', '
         $masks[$profile.Name]=([uint64][Microsoft.SharePoint.SPBasePermissions]([Enum]::Parse([Microsoft.SharePoint.SPBasePermissions],$permissions))).ToString([Globalization.CultureInfo]::InvariantCulture)
     }
     if(-not $masks.Count){throw 'No trusted standard-role baseline is configured.'}
@@ -311,11 +333,15 @@ function Add-SPSARoleBindings {
                 if($Context.Items.ContainsKey($key)){$Context.Items[$key].Occurrences++;continue}
                 $builtIn=$false;$classification='Detected'
                 if($type -ne 'None' -and $type -ne '0'){
-                    if($null -eq $Context.StandardMasks){
-                        try{$Context.StandardMasks=Get-SPSAStandardRoleMasks $Context}
-                        catch{$Context.StandardMasks=@{};Add-SPSAError $Context 'StandardRoleBaseline' $Scope $_.Exception.Message $false}
+                    if($null -eq $Context.StandardMasks){$Context.StandardMasks=@{}}
+                    if(-not $Context.StandardMasks.ContainsKey($type)){
+                        try{
+                            $resolved=Get-SPSAStandardRoleMasks $Context -RoleType $type
+                            $Context.StandardMasks[$type]=if($resolved.ContainsKey($type)){$resolved[$type]}else{$null}
+                        }
+                        catch{$Context.StandardMasks[$type]=$null;Add-SPSAError $Context 'StandardRoleBaseline' $Scope ($type+': '+$_.Exception.Message) $false}
                     }
-                    if($Context.StandardMasks.ContainsKey($type)){$builtIn=($Context.StandardMasks[$type] -eq $mask)}
+                    if($Context.StandardMasks.ContainsKey($type) -and $null -ne $Context.StandardMasks[$type]){$builtIn=($Context.StandardMasks[$type] -eq $mask)}
                     else{$classification='Unqualified';Add-SPSAError $Context 'RoleClassification' $Scope "No trusted baseline for role type $type" $false}
                 }
                 if(-not $Context.Items.ContainsKey($key)){$Context.Items[$key]=[pscustomobject]@{Id=$key;WebUrl=$WebUrl;RoleId=$roleId;Name=[string](Get-SPSAProperty $role 'Name');Occurrences=1;IsBuiltIn=$builtIn;IsUsed=$true;EffectivePermissions=$mask;RoleType=$type;Classification=$classification;Rule='Documented standard role type and effective rights';Evidence="Used role definition at $Scope; role ID $roleId"}}
@@ -341,7 +367,7 @@ function Complete-SPSAAssessment {
         }
         $key=if($Context.Kind -eq 'File'){'FunctionalComponents'}else{'CustomPermissions'}
         $hashKey=if($Context.Kind -eq 'File'){'FileInventorySha256'}else{'PermissionInventorySha256'}
-        $result=[ordered]@{SchemaVersion=1;ProducerVersion='1.0.1';TargetPlatform=[string]$Context.Rules.TargetPlatform;GeneratedAtUtc=[datetime]::UtcNow.ToString('o');RulesSha256=$Context.RulesSha256;Inputs=@{} }
+        $result=[ordered]@{SchemaVersion=1;ProducerVersion='1.0.2';TargetPlatform=[string]$Context.Rules.TargetPlatform;GeneratedAtUtc=[datetime]::UtcNow.ToString('o');RulesSha256=$Context.RulesSha256;Inputs=@{} }
         $result.Inputs[$hashKey]=(Get-FileHash -LiteralPath $CsvPath -Algorithm SHA256).Hash
         $result[$key]=$section
         $sidecar=$CsvPath+'.assessment.json.txt'
@@ -358,8 +384,8 @@ function Complete-SPSAAssessment {
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAMYbUgmar6xiHl
-# hUY0x77NwMrWBkLsPov2H7Kf6V4Bw6CCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDPJ10CDYr3VbXC
+# TxCtX5iZ3BVcVfjCj8N27hRGbMJOlqCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -389,14 +415,14 @@ function Complete-SPSAAssessment {
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCDr2zTWfkZ3FNUutQJ5ptc9
-# EiSeuXLv9AVcj+5n1CLBaTANBgkqhkiG9w0BAQEFAASCAYAyDQUhebd0sDQNt72k
-# 8DP98Mp1Z6z2BrGTJ9xQeXyXuFFqoDEbTY2KDWn8yriO2DHfbqteVxTd5noFiEtr
-# Kx8QLHWC1AT9AtwEw9LQ3fKyA0brKZdPfNqTEUWTEMP9JZj7h3iJT23DXg1+QssN
-# Bbue7swDCYjnY4BePgSVk9+8vrMiXTUYpkN6s23nV4EWNckEB7kvJ8NcRtI0gozl
-# uVuMSVVAz2nltNZeradiNRqLmwpKpEWvGgWSysmAv+tdb4wzE93lfecJuXiOrwBV
-# ejJtg8OzFYXBshdWYBy6exZhziSNFcDxNp0Qm1q1bpRkHhgJ8RmWAsKa70syzxuU
-# x5BGpL5W223W5dbt+Z01QAx0fXa8KR1O7jvzOT03DVderS5E6827Y71yDqkkvD2+
-# c/XjxNekjS8pmw8yvEb44LKvSE6Qjr4VyUmWPaLubgV0E00XcIbJ7HxBUXAjJCHl
-# DqtqN8uZB2ydtdUjLVl5VcFXXy2hSrdIWKxe6/sZ9Bqk/QQ=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCBCYIBP0PKCkSgyPiLuzz6x
+# dxDsgmj+OHRAp+arbxCw2TANBgkqhkiG9w0BAQEFAASCAYB129Cr6rP8ZCawg6tP
+# EMf+JoX9kt9mEBth1H+xIDylIPEoJIt/oegINc+qn8J2S16H74Z2nxhu/HD5Gjyv
+# 7plh536bUdFz0ZswXaJK67ZYwSA6GxJF08j+uvIM76aFU4m3ywKAtPOZLYNvVorv
+# QHqHLE5HvcYHtxYvyFjcP/+006/XxYfS5cJotdQMnlDx8PYttFtqxnQWWA/lRCkc
+# 25fZsL8rTvYgIVPKU8lr0QOZceB5cu+GVmZCyATKHOy57olAFi5PIV54vKZaKiEO
+# oExqDV4YJKeumz1KHVy1PC7aasis5lukMsJRryrNy2XvLQo/hfltrBt/AsobgKUT
+# j27SMc6xLdM0mu19hWawy62Z9uIgERzDM02Uci997ZWQjNHstzRgX4iqD+wzgYDV
+# 9k1uoqpu+Wlx4bREp8Ztp9ODet38m55Zy4ngy8uuvSOfPsU8Gm1sbNzd0inUwYzZ
+# IcdeClOXe7vZpkXr9pnJm4B5p61jazmBwmczBEeXDoJf+6g=
 # SIG # End signature block

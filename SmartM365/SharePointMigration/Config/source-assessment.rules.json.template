@@ -1,6 +1,6 @@
 {
   "SchemaVersion": 1,
-  "RuleVersion": "1.0.0",
+  "RuleVersion": "1.0.1",
   "TargetPlatform": "SPO",
   "Description": "Read-only source assessment for migration to SharePoint Online. Effort is a technical estimate, not business acceptance. Unmatched components remain unqualified. No sampling or document-binary download.",
   "FunctionalRules": {
@@ -180,7 +180,7 @@
       "UpdatePersonalWebParts",
       "ManageLists",
       "AddAndCustomizePages",
-      "ApplyTheme",
+      "ApplyThemeAndBorder",
       "ApplyStyleSheets",
       "CancelCheckout",
       "ApproveItems"
