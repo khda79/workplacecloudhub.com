@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
 Offline tests of the Health Checker integration of the Exchange on-premises infrastructure collector.
 
@@ -29,7 +29,7 @@ Checker is never executed: process runs use a synthetic stand-in script. Covers:
 - installer preflight: local administrator membership (direct, through groups, unknown);
 - module path: a Windows PowerShell child started with the PowerShell 7 module path still loads
   Microsoft.PowerShell.Security (Get-Acl, Get-AuthenticodeSignature) in the collector, installer and runner;
-- option disabled: no Health Checker call outside -IncludeHealthChecker and no report section.
+- activation config/defaults, explicit false/true switch precedence and disabled report section.
 
 .VERSION
 1.8.0
@@ -49,7 +49,7 @@ $nonMicrosoftSignedPath = Join-Path $repositoryRoot 'Sign-WorkplaceCloudHubRepos
 $tokens = $null; $parseErrors = $null
 $ast = [Management.Automation.Language.Parser]::ParseFile($collectorPath, [ref]$tokens, [ref]$parseErrors)
 if ($parseErrors.Count) { throw "Collector parse failed: $parseErrors" }
-$functionNames = @('Ensure-Directory', 'Format-HtmlValue', 'Get-HealthCheckerCsvColumn', 'Get-HealthCheckerMaskingRule', 'Get-HealthCheckerSetting',
+$functionNames = @('Ensure-Directory', 'Format-HtmlValue', 'Get-HealthCheckerCsvColumn', 'Get-HealthCheckerMaskingRule', 'Get-HealthCheckerSetting', 'Resolve-SmartM365InfrastructureHealthCheckerEnabled',
     'Test-HealthCheckerScriptIntegrity', 'Test-HealthCheckerElevation', 'Invoke-HealthCheckerProcess', 'ConvertTo-HealthCheckerSafeValue',
     'Get-HealthCheckerLineValue', 'ConvertTo-HealthCheckerResultLine', 'ConvertFrom-HealthCheckerResultLine', 'ConvertFrom-HealthCheckerXml', 'Read-HealthCheckerResultJson', 'ConvertTo-HealthCheckerSummaryRow', 'Remove-HealthCheckerPreviousWorkFolder',
     'Get-HealthCheckerServerComputerName', 'Test-HealthCheckerServerExcluded', 'ConvertTo-HealthCheckerAdminSharePath', 'ConvertTo-HealthCheckerRemoteMessage', 'ConvertTo-HealthCheckerUtcTime',
@@ -465,6 +465,50 @@ Copy-Item -LiteralPath $env:SMARTM365_FAKE_HC_FIXTURE -Destination (Join-Path $O
     $allExcluded = & $module $invoke $servers $vendoredPath $runnerSource $constants.HealthCheckerExpectedSha256 $constants.HealthCheckerVersion $excludeSettings
     Assert-HealthChecker (@(& $module { $script:ProcessCalls }).Count -eq 0 -and @(& $module { $script:RemoteStarts }).Count -eq 0 -and @($allExcluded.Summary | Where-Object { $_.RunStatus -eq 'NotRun' }).Count -eq 2 -and ((& $module { $script:LogLines }) -join "`n") -notmatch '\[WARN\]') 'The collector server itself can be excluded by short name.'
 
+    $collectorText = Get-Content -LiteralPath $collectorPath -Raw
+    # Exercise the actual switch binder and production resolution statement.
+    $activationNode = $ast.Find({
+        param($n)
+        $n -is [Management.Automation.Language.AssignmentStatementAst] -and
+        $n.Left.Extent.Text -eq '$IncludeHealthChecker' -and
+        $n.Right.Extent.Text -like 'Resolve-SmartM365InfrastructureHealthCheckerEnabled*'
+    }, $true)
+    Assert-HealthChecker ($null -ne $activationNode) 'Activation is resolved in the entry workflow.'
+    $activationProbe = [scriptblock]::Create(
+        'param([switch]$IncludeHealthChecker) ' + $activationNode.Extent.Text +
+        '; [pscustomobject]@{ Enabled=[bool]$IncludeHealthChecker; Scope=@{IncludeHealthChecker=$IncludeHealthChecker} }'
+    )
+    foreach ($configured in @('Missing', $true, $false)) {
+        foreach ($explicit in @('Missing', $true, $false)) {
+            $result = & $module {
+                param($cfg, $arg, $probe)
+                $script:Config = @{}
+                if ($cfg -is [bool]) { $script:Config['IncludeHealthChecker'] = $cfg }
+                $arguments = @{}
+                if ($arg -is [bool]) { $arguments['IncludeHealthChecker'] = $arg }
+                & $probe @arguments
+            } $configured $explicit $activationProbe
+            $expected = if ($explicit -is [bool]) { $explicit } elseif ($configured -is [bool]) { $configured } else { $true }
+            Assert-HealthChecker ($result.Enabled -eq $expected) "Activation config=$configured parameter=$explicit."
+            Assert-HealthChecker ([bool]$result.Scope.IncludeHealthChecker -eq $expected) 'Receipt scope records effective activation.'
+        }
+    }
+    foreach ($bad in @('false', 'true', 0, 1, @())) {
+        $rejected = $false
+        try {
+            & $module { param($v, $probe) $script:Config = @{IncludeHealthChecker=$v}; & $probe } $bad $activationProbe
+        } catch { $rejected = $_.Exception.Message -match 'must be a JSON boolean' }
+        Assert-HealthChecker $rejected 'Non-boolean configuration is rejected.'
+    }
+    $template = Get-Content -LiteralPath ($collectorPath -replace '\.ps1$', '.local.json.template') -Raw | ConvertFrom-Json
+    Assert-HealthChecker ($template.IncludeHealthChecker -is [bool] -and $template.IncludeHealthChecker) 'Template enables Health Checker.'
+    $tenMinutes = & $module { $script:Config=@{HealthCheckerTimeoutMinutesPerServer=10}; (Get-HealthCheckerSetting).TimeoutMinutesPerServer }
+    Assert-HealthChecker ($tenMinutes -eq 10) 'Explicit 10-minute timeout is preserved.'
+    $receiptCall = $ast.Find({ param($n) $n -is [Management.Automation.Language.CommandAst] -and $n.GetCommandName() -eq 'Start-CoreSmartM365SourceReceipt' }, $true)
+    Assert-HealthChecker ($activationNode.Extent.StartOffset -lt $receiptCall.Extent.StartOffset) 'Activation resolves before receipt scope.'
+    Assert-HealthChecker ($collectorText.IndexOf('Invoke-ServersAndStorageHtmlReportRegeneration -RunFolder') -lt $activationNode.Extent.StartOffset) 'Report regeneration precedes activation and returns without collection.'
+    & $module { $script:Config=@{} }
+
     # 6. Report section and disabled option.
     $sectionSummary = @($summaryRow, $notRunRow)
     $section = & $module { param($s, $f) ConvertTo-ServersAndStorageHealthCheckerSectionHtml -HealthCheckerSummary $s -HealthCheckerFindings $f } $sectionSummary $findings
@@ -494,7 +538,7 @@ Copy-Item -LiteralPath $env:SMARTM365_FAKE_HC_FIXTURE -Destination (Join-Path $O
         if ($ancestor -is [Management.Automation.Language.IfStatementAst] -and $ancestor.Clauses[0].Item1.Extent.Text -eq '$IncludeHealthChecker') { $guarded = $true }
         $ancestor = $ancestor.Parent
     }
-    Assert-HealthChecker $guarded 'Health Checker only runs under -IncludeHealthChecker.'
+    Assert-HealthChecker $guarded 'Health Checker runs only when the resolved IncludeHealthChecker value is true.'
     Assert-HealthChecker ($collectorText -match '\[switch\]\$IncludeHealthChecker' -and $collectorText -match 'IncludeHealthChecker=\$IncludeHealthChecker') 'The switch exists and is recorded in the receipt scope.'
     Assert-HealthChecker ($collectorText -notmatch 'HealthChecker\.ps1[^\r\n]*-ScriptUpdateOnly') 'The collector never asks Health Checker to update itself.'
     $receiptContract = [IO.File]::ReadAllText((Join-Path $SourceRoot 'Modules/SmartM365.Core/SmartM365-SourceReceipts.json.txt'))
@@ -929,8 +973,8 @@ Write-Output ("PASS: {0} Health Checker checks; PowerShell {1}." -f $script:Chec
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDfudq8sFHlXBBq
-# /oSLDbQXizYLKJrUOi28RofkDXl4h6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAYxrpvVAn3LXwN
+# dAwhPumOjxo4KLHRnMcZ6AgP6NNdEKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1063,31 +1107,31 @@ Write-Output ("PASS: {0} Health Checker checks; PowerShell {1}." -f $script:Chec
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIGwbAMMbWjiUthH+r+fLvKHeMJV3T9M1uomVGqp0Nc1UMA0GCSqG
-# SIb3DQEBAQUABIIBgKGDjeLGZffZIPqJGaSnFnkzho9XxMo+2whNM+P0mP5Ga12K
-# p0AFEmz2OFV/gHB+w+FV2mZC1g7006QxaFt8A7Y0NN7mSdIMM6XhUdceYQQin8Tb
-# MumK5egPLN6kY1bRCt5mPjkalNLv+yl1jx1XH5RQmad5SFihuH1mbBE2rtzCfn6+
-# fYMUUPYMFwu/arxcb9xFAv/q/JjHuJZ3WT55La70oITFD18x27WjB4LIjEFFZC+K
-# Bb67dB3f4C3TvezwpNaKWszYlRbfwLKDgvFjsao1pBPibHUTUWYFKaMUJ0TtS5md
-# c0VVdytcpSGDf0uqxpkD3utFynVlstld7Ag3H9rAkQ7r3ndm9AbTWODguqJOdoOB
-# TlvQU2DwXg5QzprXWbrayEbsUibly6d0c244j74K/95pWMIuiONoXc6N7IHDULTi
-# d7aCmIy4Dg9IU/pu7J3y0gHZjTGJ4WQ/4lasDYNQluUV9rR9xTDXCXkt3vWgfj8H
-# azjMz6V5Ux7WlUAdPqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIC1gLjE3JAye8T60W8sQJ2625mitc/0n7ZPcgxvI1953MA0GCSqG
+# SIb3DQEBAQUABIIBgKpzf2LLD6IKGFmzWVZwQzvlPUfhCsjK07CpXm+fUd2m/M+K
+# JEb+gdJcDqW1VEhVTUvvttAyd6Eyv8KQ9MNZPFe3DR1iM8J2hW/yhwXPBkL+87Ix
+# uCWSzFkAXstZ4k7YDXHNcbmWMaAnD4jNyCetz703ljeVI0CFXQpISHwOhnfzvPNI
+# zaBX33EpRI624h4LV8687R/S+HWzfJ8FEIkBpIIdA3ysdZQgR2fu5qG2BD8XsbYM
+# 9XrHjiQNnzu2LOOB7IZ+oVQwNVl/96u1rXuvEhFTGNVZk1kUrx9uK7Nk+hzBYNYM
+# laLyDU8RnkncJaa+sm2Dpm3rhu7z7Gfs2pevTSgnQ0zAD/jSa5KICdCogfY5euXa
+# n0zLbZzm3E3py+HQp/rQTcsaFbjFTWarK439dJzs3JdLnG3cWMEmDBV7qbw2d9Zi
+# G+inW4EXRti/R2KhDgPvf4Vrn28NYgGngp1SHfX5Fvi6b+rAQ/AcEryl671n9RUP
+# N6htIcgD6hAzVZAbYaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjIwNzQx
-# MDZaMC8GCSqGSIb3DQEJBDEiBCCtRtmzGxsujMbxb7CgwQKjS9HECJrUXKwn9uLu
-# rbKzgzANBgkqhkiG9w0BAQEFAASCAgBWOkFj0fvJQBcZQNR4PgQEssXHURCYxUz/
-# 3Zuat4ybXZhCip39uaFkOvhdaNAXfUFB5KyMlI+Wl84qgvXUxVpUhS9OnlKhG3vg
-# 73FZtb7RAXO7n/h3o0dX3WyXIb/sZ+5bCqN9SgQ0OqAMqLZbaB2YICEClo4viIGs
-# blCo99l3y7RbZaxrEsWvbke1Oh1I6i7RG69ohEGqfxOFD8nM2HuAhsDv4eGa46/U
-# 0KXAoxsZMXp5EJ/DKdpv1KPxkdlYCOLvF9yI83qxWXdI+XBcGkwcT4p6A1W6Ijl5
-# DaRQW0A1SaCR9T4C1arUwNSxNSxtUCwHQCldIA/j7fz4PK/wv1aLB2elHr958+BN
-# p7bvuDjD1X9wWQVmhsCBbxDJznQIzjUduSIWmMojbxtwiBt9qVXFofGSPA2U1A5o
-# t0LFk04fAmJyabNtIR0/WT8vN71MAg9RG9cfB8ZgCO9+dGCHqAIZ1bmBFClf/LVm
-# aofFKjeyNPwIP6z8cGCTVqZMnNCfGrQIBI/bbl2HZbxqzUpW5CvPq30EvehfxsKN
-# eHfaeqGgC9Q1mvlE9agP0xlyMhsGQXg0rte6Z0sq4dxZSXoZrdnsPUXCpPHHgneX
-# h5yG1RRFPwCbx8CrP9MoOtaMOmYuZoWmgDe5VfuWPF+kLWab2YMVZEwn0byONOuO
-# FUPK8CugWw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjQxMzM3
+# MzZaMC8GCSqGSIb3DQEJBDEiBCDKp+CAqVTYVZmo4TOhsdB/pAqnSLE4R0eT8O24
+# ij1nLjANBgkqhkiG9w0BAQEFAASCAgCpqcOlOhhbmzYkZ3zMkdf43ei2wanGtn8X
+# /P4NPhSM84ybXQI4QRJ/b/IxPh82SWdkYE1hekluJ+KysoWmwn8BNUUJ1RhjoIIO
+# yreEso+2IR+IXAin+mZD4ZqadzA+dh5Fm2+tT1vA/y5aJUafdsykQUZEQNE8HuqA
+# Xt5eorRhiTDpYd21iP0DJAIksi7qm2Y2OAZgDkGsstlWr8pxM8f56kHwezKgCcHN
+# fLgOU+EsXeQ1j3vJ45YJrApNEObHQSdJoC3qUvwiq9jEWvNSJv8f8k17lUKC39V9
+# GtXTBydTjoDQdBbz6MFMt6yh99ezZlarTz7V7+78ckgUiDE7wKsEDOKbf8o0U/hQ
+# dMQye0TS8a6s89ERFxait7DSM9SBb73/PxZXeG0OcWQwiBeEJ/wMczbZvamGxelL
+# /griHfKpXKz0a2JJJTZFVdq3YjAyO+ooj2/s55O0Tb17rPI6C1mjwE32gKGJTwmq
+# bKVTflq3AdR9tgOP8+BpiJuFQlqBn6QAaOLW+pMe9v1n/BUY31huWbkcg5tdeGWU
+# sc26BG8vWKFgNZiafpYQAlaPrxUV2OBgPiybTOSSSjVkliS7dM49uglfaesv76wh
+# Z1hm8wlgZW/ficLYDIngRWJ7XvXy9OvB8PGS7eIeiJYLdy2OIwEi65TUHinh6Uo5
+# XEc9mJTS3w==
 # SIG # End signature block

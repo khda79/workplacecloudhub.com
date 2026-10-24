@@ -28,6 +28,7 @@
   "ExchangeConnectionMode": "LocalFirst",
   "CertificateTimeoutSecondsPerServer": 120,
   "ExcludedServers": [],
+  "IncludeHealthChecker": true,
   "HealthCheckerTimeoutMinutesPerServer": 30,
   "HealthCheckerTotalBudgetMinutes": 1320,
   "HealthCheckerMaxResultAgeHours": 26,

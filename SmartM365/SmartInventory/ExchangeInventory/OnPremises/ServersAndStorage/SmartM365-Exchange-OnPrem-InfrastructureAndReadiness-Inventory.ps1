@@ -10,7 +10,7 @@
     - Disk drives from Win32_DiskDrive
     - Optional Exchange mailbox database paths
     - Optional Exchange service health
-    - Optional Microsoft CSS-Exchange Health Checker findings and per-server summary
+    - Microsoft CSS-Exchange Health Checker findings and per-server summary (enabled by default)
       (vendored, SHA256 and Microsoft signature verified before every run). The collector server runs
       it locally; every other server runs it locally through its own scheduled task, started on
       demand over CIM/DCOM (see Install-SmartM365-Exchange-HealthCheckerScheduledTask.ps1)
@@ -26,7 +26,7 @@
     New-CimSession is used over DCOM only, to start the Health Checker scheduled task.
 
 .VERSION
-1.8.8
+1.8.9
 .REQUIREMENTS
     Windows PowerShell 5.1 on an Exchange 2016/on-premises management host.
     Modules/snap-ins: SmartM365 WindowsPowerShell5 compatibility module; Exchange Management snap-in;
@@ -38,7 +38,7 @@
     and the Health Checker scheduled task must be installed there.
 .NOTES
     Script Name : SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory.ps1
-    Version     : 1.8.8
+    Version     : 1.8.9
     Requirements:
       - Windows PowerShell 5.1 with Exchange 2016 Management Tools
       - Exchange 2016 read RBAC for Get-ExchangeServer, Get-MailboxDatabase,
@@ -49,6 +49,9 @@
       - PowerShell 5.1 or later
 
 .CHANGELOG
+    1.8.9
+      - Enable Health Checker from configuration by default; explicit switch takes priority.
+
     1.8.8
       - Bound certificate collection by a total per-server budget, default 120 seconds.
       - Isolate blocked native/RPC reads while preserving LocalFirst and diagnostics.
@@ -268,7 +271,7 @@ $tenantContextPath = & {
 . $tenantContextPath
 
 $ScriptName = "SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory"
-$ScriptVersion = "1.8.8"
+$ScriptVersion = "1.8.9"
 $RunId = (Get-Date).ToString("yyyyMMdd-HHmmss")
 # Vendored Microsoft CSS-Exchange Health Checker (see ThirdParty\CSS-Exchange\HealthChecker\PROVENANCE.md).
 $HealthCheckerRelativePath = 'ThirdParty\CSS-Exchange\HealthChecker\HealthChecker.ps1'
@@ -456,6 +459,23 @@ function Get-SmartM365EffectiveConfigValue {
     }
 
     return $DefaultValue
+}
+
+function Resolve-SmartM365InfrastructureHealthCheckerEnabled {
+    param(
+        [Parameter(Mandatory)]
+        [System.Collections.IDictionary]$BoundParameters
+    )
+
+    # Explicit false takes priority over the configured/default activation.
+    if ($BoundParameters.Keys -contains 'IncludeHealthChecker') {
+        return [bool]$BoundParameters['IncludeHealthChecker']
+    }
+    $configured = Get-SmartM365EffectiveConfigValue -Name 'IncludeHealthChecker' -DefaultValue $true
+    if ($configured -isnot [bool]) {
+        throw 'IncludeHealthChecker must be a JSON boolean (true or false).'
+    }
+    return $configured
 }
 
 function Get-ConfiguredExcludedServers {
@@ -3235,6 +3255,8 @@ try {
         if ($completionStatus -eq 'CompletedWithWarnings') { $smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; $smartM365RunGuard.ExitCode=(3); exit $smartM365RunGuard.ExitCode }
         $smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; return
     }
+    $IncludeHealthChecker = Resolve-SmartM365InfrastructureHealthCheckerEnabled -BoundParameters $PSBoundParameters
+    Write-Log ("IncludeHealthChecker={0}; source={1}" -f [bool]$IncludeHealthChecker, $(if ($PSBoundParameters.ContainsKey('IncludeHealthChecker')) { 'Parameter' } else { 'Configuration/default' }))
     Write-Log "Collection method: WMI/DCOM only"
 
     $configuredExcludedServers = @(Get-ConfiguredExcludedServers)
@@ -3549,8 +3571,8 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD4rdipba3RjTRu
-# OnxUt5DaWW+onEMmqMthsNl/rXAXWaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBuCXQYenkfGq18
+# w2Mw3L1k+A6/3w5V95gQcg0qpiyLgKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -3683,31 +3705,31 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIKM5hL5gKULWpZvJXtllDt3zBuUkbR7amSv3EomAasH/MA0GCSqG
-# SIb3DQEBAQUABIIBgHo3fA/Wumxyf+Txsjyo4uBUSYGkDbjd1SqxikTFFEvKTmP0
-# wf/E97f57PWGzTPu0Az6ZKJJcXbkCFjlGghOGuclSsaXcdV+ZxCJ+CX4d7zhf+71
-# YiXi23a0MSaTEUzZSnC/TvsmXGNPZ3S1BbhlyPGyBshf5dn4y+8L+YqAIN84X8u6
-# 2Xgq/PmFtEMmYbrdoQUC/0rgRA4dJ+AwNaAn7yVHv6LwkaWvhf8vH4sNrU8eVPP0
-# XOCFL/C11fZyZFpZs5zDjbZX8SAt73VZY1aiCWurZJ/7bUpFzJ4vyISzhn/8b9co
-# Lhyy4fu746YyxvcE8Uxvgdyt6L074JHztvQXgD15QV8TLdxjGBlcOcUj9Ctp0yzQ
-# Bi5IoNa9TV17rJqExwNXHS8ACrOVcQbQq8QGhNlQOkm//W7qE9QJpn5JDMM89sWl
-# 3XBuJRCL1dexOPy0p0qUmP0+C+oZZTvNcN1kREtOaNjPdSXqtXeZfb9pYE5kC/2G
-# /fisyrySa21S41V7V6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEILTUFuJ+fgllm3fx+e5+eo1dF95eVFkJ8lktpp2CxrgdMA0GCSqG
+# SIb3DQEBAQUABIIBgGh92vjNp3OmpigTA9CtTbQuN3mMRWjWUsA5Bu0v5LIvRNZA
+# m1yVl6YrATGA9sENRLVBiAjiLUKWpvyLvrUzgZ3l+qT6mBuDx1TI3gxewSyPN6NJ
+# AcEFzoajJ0gymoAi+siuz9gYRnkmB7rtIlYQ36mDKIISzjdMeNV2D4rm9Ak8rQPn
+# QpvxqyvmuVeK1pTHTnVwH78nG35BvLbHz0aJwLo6s5W8s8ANt2c2x1BtYDeVyQR0
+# FJWNsBwhmGsE25eS69py58s9xRKom2Ego4k4gnMrxmsNh4nOx2Fngm71YtsT2v08
+# S5nvGFYSVCta7GAdEC+fnnEqBE5LT/r1Aenc7O7wg9aM46M7CbodxB1lQBYkrclO
+# mtK+vM2C7S80Uoh0jdTvaA3o6Por8hTjBmHWEfvnBRLrKEVMIVWziJjM6V+NZoDO
+# r7NxXU7mQciPMauXzcGN3/oHibRp8fFLaNfMB3jGy+QfyMgxLdS3gwcHWuudxaz/
+# QHlO3byqHV20cIEaBqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjMyMzE2
-# MDhaMC8GCSqGSIb3DQEJBDEiBCCwBPbuP2sXepkay5gKMTmxIKJpY2k/LqiElX/q
-# +iAHjjANBgkqhkiG9w0BAQEFAASCAgCAuiF5K3aMiW/4LcHctSVpTYTtwPK3fRf8
-# BF+jG4I/pWCUk7j5OeNoLR75QJm0CLOc9lX/oOvuqBQ0+hcYl6Q51lo26wwW2zob
-# FowQH4sGCo7zahrsUW+HrcuTbXQjb7duLVoc66h2Frq/fys1UPVRWZDAASaaYm/a
-# QeCe0Hr219vHyqHH4IGI9CPGowqy3y7iA8o4HASnIjTp3CYwLXw/ZH2MPcc5qZtY
-# +NLFUe1e2gSAih4fo4Zf7YvvIiVZgo/whY58NAeP6KP7zW/Rh0B0GMBjQX1D37U/
-# L23lrxz8J9g1ZGml9037NVSsb+MTHOtwcMwfYBOMCmb8Wiz3PS8X4lFqaQV2+mkU
-# KWPFh2zLB/A3KuiffNt5BsuTFTqLKB0uoDXPvi7cvynZuWiqnfHn54Lhf//87gRL
-# ihiqRMHf8k4A6+lJqZ8Ihuf08NgWP4SkIf4BJkuT8ni8qLhRVgReiO+P0suunvYA
-# nHZM9K6WHhuPqMgMUDOBcKKxJOArovuNJWJ6E1xC4AuAQa0nhQSbcXApG9BbLOp+
-# S/7Y7ftjArmt4OFV2RsfMPWt1HFoopRtaszzZez96wLeHfquXDgrzoC5HxRPxw54
-# XxEh0GFmTnE6qkPNiCPgD0gZFPLLE8aPpwTxoeEqEl1dUhIQg+9VVinnT1ObB6C3
-# JKywh5diIg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjQxMzM3
+# MDZaMC8GCSqGSIb3DQEJBDEiBCBXw0Wq+PHOAlY5gMGqrI7FEIjVjmAlmiJcHU7u
+# FUi/7DANBgkqhkiG9w0BAQEFAASCAgBVfWeblhA7LiMRaiAgvVVBGpIb25cXzhkE
+# Nsr/snHAS94Y5yk8AGjr+5i7GS2QvFZzmBZXg46agyqxSlW39uupBiih3+ImibqJ
+# CET9UpogLF+ZHL/JrEZ0vYTCjC6EhMMH4EB9OHbCaiIaEuyR099Q87FVL8gJlWSj
+# B1GFcs+4SQpY9ga3tGpwzovIi24t542OryToJFMMUrfaF2+XZQfYeF8SUYGVwv9M
+# el8vyRyvJU0QM6jDA7JUvixNNKQ/Iu85+MTgzBWRRWBVyUSoTdpPaHJKm5Jrbgbh
+# e3p/HIL312YjRICfcFEfWJHnbDP4pp0t/US0CLR2tsL0o2jA7PWo4MYvfGGz1dVP
+# 8s3DMAYp4ax/OrZtPKoIR6G4SmOEgy3Ko3a8V7XPj4jc14aXLXYcxn1/K3RwRDpW
+# 91ddZofDlWKAdilVEZcmhPHjxdO7iUKJQEZPVxyl3Ab2NRGu2cvtiAGq4QI3lnbC
+# pFQwL1bLjoQbMWrFPXiW47pENL/i0qVrBDiHDD4GR9JH8nYUE82rtArcg6jn+FQi
+# C3FlB3fzrkcvl2lhNvmjyc6GEoHJJFoKP4k1xjwTANdqKy1iSLqYRoIDuDD8r0ud
+# dRA4cDdUFrwHQ80ccKuYNOVKgvpMB3ekLT+pOS5uH2XklTWoOkyIQKZ5uQkuVsKF
+# GjzUYFssKw==
 # SIG # End signature block

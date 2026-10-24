@@ -59,6 +59,26 @@ pwsh.exe -NoProfile -File SmartM365/Tests/Test-SmartM365ExchangeHealthCheckerOff
 
 After operator deployment, launch infrastructure directly under the service account. Check version 1.8.8, per-target 120-second total budget plus bounded cleanup, native metadata on successful targets, at most one lazy certificate session, RemoteRetry only for native failures, the formerly failing target's certificate count, explicit Unknown metadata diagnostics limited to retries, unchanged WMI/DCOM/HealthChecker results, publication and cleanup. Offline tests prove neither server access nor completeness. Report-only regeneration opens no Exchange session.
 
+## Health Checker enabled by default (1.8.9)
+
+The script-local JSON key `IncludeHealthChecker` defaults to `true`, including when absent from an older configuration. Existing template synchronization adds missing keys without replacing local values. Set the JSON boolean to `false` to disable ordinary runs. An explicit switch takes priority: `-IncludeHealthChecker` enables it with config false; `-IncludeHealthChecker:$false` disables it with config true. Text such as `"false"` is rejected. The effective choice and its source are logged before the receipt records scope.
+
+Health Checker requires the existing elevated account and installed remote tasks. Enabling it runs the local child and triggers existing remote tasks; task definitions, runners, rights and launcher are unchanged. HTML-only regeneration reads existing results without starting Health Checker.
+
+`HealthCheckerTimeoutMinutesPerServer` remains independent of activation. Existing local values (including 10 minutes) are preserved; the template default remains 30. Check `Per-server limit: 10 min` in the log. This limits the local child and the collector's wait; remote runners retain their own timeout and may continue after the collector stops waiting. Completing before the deadline does not exercise timeout enforcement.
+
+Direct launcher from PowerShell:
+
+```powershell
+& '<source-root>\SmartInventory\Launchers\OnPremises\Start-SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory.cmd'
+# Explicit opt-out when invoking the cached script from Windows PowerShell 5.1:
+& '<cached-script-folder>\SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory.ps1' -Tenant prod -IncludeHealthChecker:$false
+```
+
+The unchanged CMD uses Windows PowerShell 5.1 with -File, which cannot pass an explicit false switch. For that launcher, disable through the local JSON; the explicit false syntax above applies to a PowerShell script invocation.
+
+Offline tests cover absent/true/false config, explicit switch precedence, invalid booleans, receipt/phase gating and report-only behavior in Windows PowerShell 5.1 and PowerShell 7.
+
 ## Exchange Health Checker (`-IncludeHealthChecker`)
 
 Microsoft's [CSS-Exchange Health Checker](https://microsoft.github.io/CSS-Exchange/Diagnostics/HealthChecker/)
