@@ -414,8 +414,11 @@
       "Group": "Exchange",
       "DependsOn": [
         "AD-Inventory",
-        "M365-ActiveUsers-Inventory"
+        "M365-ActiveUsers-Inventory",
+        "EXO-Mailboxes-Inventory-Fast"
       ],
+      "DependencyMode": "LatestOccurrence",
+      "DependencyWaitTimeoutMinutes": 1080,
       "AllowedServers": [],
       "TimeoutMinutes": 2160,
       "MaxRetries": 1,
@@ -424,10 +427,10 @@
       "Schedule": {
         "Type": "Weekly",
         "Times": [
-          "20:00"
+          "06:00"
         ],
         "DaysOfWeek": [
-          "Friday"
+          "Saturday"
         ],
         "MissedRunPolicy": "RunOnce"
       },

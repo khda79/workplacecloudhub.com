@@ -3,7 +3,7 @@
 .SYNOPSIS
 Validate the single daily inventory cycle and weekly exceptions offline.
 .VERSION
-1.2.6
+1.2.7
 .NOTES
 Reads the repository template and an optional additional local manifest.
 No tenant initialization, collectors, scheduling, authentication or publication.
@@ -70,7 +70,7 @@ $daily = @{
         'EXO-MigrationJobs-Inventory' = '06:00,12:00,18:00'
 }
 $weekly = @{
-        'EXO-Mailboxes-Inventory' = 'Friday|20:00'
+        'EXO-Mailboxes-Inventory' = 'Saturday|06:00'
         'EXO-Mailboxes-CalendarPermissions' = 'Tuesday,Thursday|20:00'
         'Exchange2016-Mailboxes-CalendarPermissions' = 'Monday,Wednesday,Friday|04:00'
         'Intune-DiscoveredApps-Inventory' = 'Saturday|20:00'
@@ -101,6 +101,8 @@ $disabledNames = @('M365-BackupProtectedMailboxes-Inventory',
 # LatestOccurrence chain: Name = dependencies | DependencyWaitTimeoutMinutes.
 $chain = @{
         'EXO-Mailboxes-Inventory-Fast' = 'AD-Inventory,M365-ActiveUsers-Inventory|1080'
+        # The weekly full run starts only after the same Saturday's Fast, so Fast never queues behind it.
+        'EXO-Mailboxes-Inventory' = 'AD-Inventory,M365-ActiveUsers-Inventory,EXO-Mailboxes-Inventory-Fast|1080'
         'EXO-Mailboxes-Permissions' = 'EXO-Mailboxes-Inventory-Fast|1380'
         'M365-Licences-Inventory' = 'EXO-Mailboxes-Inventory-Fast|1380'
         'SmartFinOps-Workplace-Valuation' = 'M365-Licences-Inventory,M365-LicensePricing-Inventory,AD-Inventory,M365-ActiveUsers-Inventory|1080'

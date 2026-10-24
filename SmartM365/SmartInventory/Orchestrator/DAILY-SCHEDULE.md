@@ -83,7 +83,7 @@ do not trigger full identity/device/license recollection.
 
 | Job | Occurrences |
 | --- | --- |
-| EXO-Mailboxes-Inventory | Friday 20:00 |
+| EXO-Mailboxes-Inventory | Saturday 06:00, after the same Saturday's Fast |
 | EXO-Mailboxes-CalendarPermissions | Tuesday, Thursday 20:00 |
 | Exchange2016-Mailboxes-CalendarPermissions | Monday, Wednesday, Friday 04:00 |
 | Intune-DiscoveredApps-Inventory | Saturday 20:00 |
@@ -94,8 +94,13 @@ The unified Workplace job depends on that daily acquisition rather than the week
 job. Fast can reuse the last statistics snapshot, whose own age is unchanged.
 Weekly statistics are therefore not suitable for a requirement of fresh live
 statistics every 48 hours. Permission-only output cannot substitute for mailbox
-acquisition. Full and Fast retain the shared `EXOMailboxes` concurrency key;
-a still-running full inventory can delay a daily Fast occurrence.
+acquisition. Full and Fast retain the shared `EXOMailboxes` concurrency key. The full run
+depends on the same Saturday's Fast (`LatestOccurrence`, 1080-minute wait), so it
+never takes the key before that Fast. With sequential statistics it ran 18 to 21 hours,
+ending on Sunday between about 00:00 and 03:00, usually before AD releases the Sunday
+Fast; since EXO mailbox inventory 1.29 the statistics are collected by parallel workers
+(`StatsParallelThrottle`, default 4) and the run is expected to end on Saturday. A longer
+full run can still delay the Sunday Fast until it ends.
 
 The four existing disabled jobs remain disabled: BackupProtectedMailboxes,
 BackupPolicyScope, BackupProtectedSitesAndDrives and PowerBIFabricActivity.
@@ -116,15 +121,14 @@ The mailbox chain uses `LatestOccurrence`. EXO Fast, permissions and licences ar
 due at 00:15 and start as soon as their dependencies of the same night succeed
 (Fast after AD and active users; permissions and licences after Fast). Fast waits
 up to 1080 minutes for its dependencies; permissions and licences wait up to 1380
-minutes because on Saturday they start only after the Friday full EXO run has
-released the `EXOMailboxes` key, as late as 22:46 in the observed history.
+minutes because a late Fast (AD retry, or a full EXO run overrunning into Sunday)
+delays them.
 Hybrid-identity analysis is due at 01:00 with a 1380-minute wait: it only runs on the same night's AD, Fast, permissions,
 licences, domains and Exchange 2016 outputs, and no longer reuses an older
 permissions export when permissions finish late. A job that uses
 `LatestOccurrence` must not be scheduled earlier than any of its dependencies,
-otherwise the previous day's dependency occurrence would satisfy it. On Saturday
-the chain waits behind the Friday full EXO run (`EXOMailboxes` key) and finishes
-in the evening.
+otherwise the previous day's dependency occurrence would satisfy it. The weekly
+full EXO run follows this rule: it is due at 06:00, after the Fast it depends on.
 
 Workplace depends on every enabled job that produces a CSV it reads, including the
 device local-system, migration-job and the three Intune configuration, managed-app and
