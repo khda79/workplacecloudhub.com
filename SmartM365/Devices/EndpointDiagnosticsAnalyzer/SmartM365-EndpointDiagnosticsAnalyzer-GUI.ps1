@@ -1054,12 +1054,13 @@ function Get-SedaFirewallIssues {
     foreach ($profile in $profiles.Keys) {
         $settings = $profiles[$profile]
         $state = [string]($settings.State, $settings.Etat, $settings.'État' | Where-Object { $_ } | Select-Object -First 1)
-        $inbound = [string]($settings.'Inbound connections', $settings.'Strategie de pare-feu', $settings.'Stratégie de pare-feu' | Where-Object { $_ } | Select-Object -First 1)
-        $stateUpper = $state.ToUpperInvariant()
+        $inbound = [string]($settings.'Inbound connections', $settings.'Firewall Policy', $settings.FirewallPolicy, $settings.'Strategie de pare-feu', $settings.'Stratégie de pare-feu' | Where-Object { $_ } | Select-Object -First 1)
+        # Windows PowerShell 5.1 can retain null from an empty pipeline; normalize at use.
+        $stateUpper = ([string]$state).ToUpperInvariant()
         if ($stateUpper.Contains('OFF') -or $stateUpper.Contains('INACTIF') -or $stateUpper.Contains('DESACTIV')) {
             $issues += New-SedaObject @{ Severity = 'ERROR'; Category = 'Firewall'; Title = "Firewall disabled - $profile profile"; Detail = "Profile $profile`: State=$state"; Recommendation = 'Enable Windows Firewall for this profile.'; Source = 'netsh advfirewall' }
         }
-        $inboundUpper = $inbound.ToUpperInvariant().Replace(' ', '')
+        $inboundUpper = ([string]$inbound).ToUpperInvariant().Replace(' ', '')
         if ($inboundUpper.Contains('ALLOWINBOUND') -or $inboundUpper -eq 'ALLOW' -or $inboundUpper.Contains('AUTORISERENTRANT')) {
             $issues += New-SedaObject @{ Severity = 'WARNING'; Category = 'Firewall'; Title = "Inbound connections allowed - $profile"; Detail = "Profile $profile`: Inbound=$inbound"; Recommendation = 'Verify whether this firewall posture is intentional.'; Source = 'netsh advfirewall' }
         }
@@ -6377,8 +6378,8 @@ Start-SedaGui
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBk9S/IAa2fhsbm
-# iNKwr4qlH/THul/3hBO7CdGDbVMB7KCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCUCF9HmzI1soON
+# PQYHf/K3UEliIFx1kl5gZgnsolt2HaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -6511,31 +6512,31 @@ Start-SedaGui
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIDl0QQN862KFkK5v1IC1oAO5k2WsNvrs4Ig+JPWu+k66MA0GCSqG
-# SIb3DQEBAQUABIIBgCPnP9Q/w8+uNycGEOsOiar2euBwCc+N8LYdeJ6d2Yr0OR7N
-# mB5eMnfJtysqHM4RTnm+XR3wah1d12s2x8SUEV2hAzBpu0GtDo7cW1V5ukX3Nghl
-# W6d7HX1rNfztcMx8kNUZkRZexHf3PsuLMHa/HnmEaPz3SKtgcobQ9R+khtFm88yP
-# Ph9DKQ0JBtrhp7c/kDA15FgJnFapQiiRQm4SOr4IbWyid1kSqgWZk5BEopEisNM9
-# CsvhXf+0csa3tIl+hrKjtjvAL7o8iTiq8ei3ez6dhgth+/7rowoDPg0LJPFoc4dx
-# nLXZRANnbgzeRhDi6CXN9EiqgOewGWK/HbOpeNzbTPojPcdocGl7ffSNX27uAGhP
-# I16N/BNiOukRmacu1BjQ3KBaWQqyHfnsXuThs9+2m0z9snkjMt7BKMG6WPo+2edV
-# YxFfpECPqgmbG3Owi+bTCAafkv6vAXq9N5sOMn0jk5fUYLkCGxqHHFI4PZdmsutP
-# KbhJgioU/7k6pBAMj6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIBj8ySvO57lMLyrKIjJNFsEg6G4HAvytg+7VaGWSQNJLMA0GCSqG
+# SIb3DQEBAQUABIIBgGjo/Z7r1RDcZ0a/Oh+h/t3Pm4c9s8g5gtKtPke6xk1E26Za
+# I9xlO3xCqSJhTKzSSMY0DXCT2JY0v74622nu/KoDbN2JbXMiOvNAXugQ9GaNaKMo
+# laPQ0h1EKKDlvwb378Y3DfXAsgK8piPPWPyxpdEh7EjVMCf6sxHp/+PNwg5D/EuS
+# YuDYa5fdeycsVUCIJ7D+6BD5qEFnYT7JWhQLT3gJHvSA+QWv3JWFflUfYkqskt0k
+# 80ATkPxwdu2CdfO0oi9B2eioq7RcqbTzt9nq7cGNeBfnbjYsujmxft663tKLL2Rv
+# s4k3vn6I/C1cchJCrcFOxZKKaaQCxL7UqvcMql/rrVSItC/eabuVeelxqnnfih6U
+# Tu+t1XgIxPhumY0jLInP+OxAzqwUT9RFmsgbC03X9yNgUjG+hj7M7t/SfZ6vIZtc
+# UTCR7+H7f6ZcR032l4ZDm25DoFowu9H2fDJWeralrbbCL4BBdwRueIglsxxC2Fr/
+# +7vWIBSYHk6t6ydX5aGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjMxODIy
-# MzBaMC8GCSqGSIb3DQEJBDEiBCBuLMCFdFp5gSNKsSQQ9eUczO6X2sxNGIYT5QYJ
-# JTh9ZzANBgkqhkiG9w0BAQEFAASCAgA+xKrJsp9UEspKYsIap7w0e+snNulAstEq
-# AzZeFeSZuRwk17PFRXmipJlALiCxg9sWoxC6Tj+WqiZesfy6nSWX3NehnhZGAFiy
-# Sp3LgAo28Iy1vF4C531utls5oWsWqz/k1ZexAZGF46imDp4QMDfEiE33e2I06bJt
-# 0N2J/+2M9Vcw6b283GvzKsly3mSUTQljCRH7ziy9RPP355voEO18Y/CSo9Ccj4KO
-# 40kJvDWz+ifI372sjqOrq9vvoK52WtblL8Qhs6snWaVCdSKuidwF/jVdpx7qHCMe
-# 4zPkQ0fZ0+RRn0Qpzie7X8RklOx5FnzN8tYgYO67MRLl0V9Tb3ZN7XU8xgbGVo8P
-# zE4tGbwLI7PC37ShCI50roYt3ifnqzqC7xu2PVCeMfYi5xQcefcl8z88A9rLVIvM
-# y+oOUXdiDNk/sx67fKuTUSIUOhd31xjQgrgsbUkZWdU3ih2o5Z5jUYyMxisnC11W
-# 4s29UJBRcrRCly1T3Ms0Y/W9UyWNSsmr7t3Acnu2NARz2jRxN4ZNgN902JgMT7Zl
-# 4LPMixVb0FpfAPwN+ksdGIpEeYwk7eye6uJ0fnpkaKSYUSLPy5zNlOfm346pcr0z
-# eZYSzBoDdJd6PQRL8fxio9K+JlhhLDr9DRTPbWJIWUbn8Bjm82aYy8wPuLjbqOME
-# H3fZVCerCA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjQwMTE2
+# NTNaMC8GCSqGSIb3DQEJBDEiBCAj1Goq6wFFs3Fe0o0HBh+1y3BqalyGr8tkpWTG
+# ieR/azANBgkqhkiG9w0BAQEFAASCAgBRRYJL0qG6mmHoV5GiQmukeZmzwcXYpt3T
+# UVkJEQBF2JbQZKz0lQIaWZaelofWf3M6DTNB3jSssLLwDdlZR4kEQJKho769ToEQ
+# J66laTxlm8MZXplhDiJduUFHKCwQJuGJsHPufHV2PiYYn0rmLo+1pMHXkDu5naba
+# P5PeQeHmvHtD3aiRXf9yjkXPXNi/D/ljAEcXkj1wby+bhebrDOrmBC6j6YfliOhn
+# jdRWEpUoSG5Gko+PU5izzlvDdmcIXJyCAi5YK8qgKLa6FqaHSD4A2S3KNTHNDCw5
+# 7X+C2CGk0nl4wCBEDvnIeU2F4ewFwf4p4VdrMBXa0F1UpocHSnHpgky7faiAlDgQ
+# y5lAEvzIfTkpv3GN1Kn3zL4RFA0pejH5qmYnai3mfxkDYLfkRRwnhZnOkhn/OAlD
+# ejqjiN29F27ukIADln/ckNDgPH5jBwQUvy7Ar0OyTu/w+B2GZ/nnQDgDsKswr6lc
+# U8zD6f8LhXbHzXvcsbuY72H+ROhRR4gbKiTel/Uiw1G1ab6BoDADjWrCG+SWrVwh
+# MBJ0TGjkulJEJ+C5G3mwAzA7w/3s1EBlE0NmwEQ8ALhkdndynJRKMFr94oIlCUhk
+# D3IdQH9aCoYfL0mJ1DpmitU1nw1stsAuivaYj0kajJy9V6ej5M/zR9NVHhBXS5bk
+# SUEEHSno2A==
 # SIG # End signature block
