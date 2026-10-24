@@ -26,7 +26,7 @@
     New-CimSession is used over DCOM only, to start the Health Checker scheduled task.
 
 .VERSION
-1.8.10
+1.8.11
 .REQUIREMENTS
     Windows PowerShell 5.1 on an Exchange 2016/on-premises management host.
     Modules/snap-ins: SmartM365 WindowsPowerShell5 compatibility module; Exchange Management snap-in;
@@ -38,7 +38,7 @@
     and the Health Checker scheduled task must be installed there.
 .NOTES
     Script Name : SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory.ps1
-    Version     : 1.8.10
+    Version     : 1.8.11
     Requirements:
       - Windows PowerShell 5.1 with Exchange 2016 Management Tools
       - Exchange 2016 read RBAC for Get-ExchangeServer, Get-MailboxDatabase,
@@ -49,6 +49,12 @@
       - PowerShell 5.1 or later
 
 .CHANGELOG
+    1.8.11
+      - Builds the summary mail with the shared SmartM365 template (760px frame, KPI cards, short tables):
+        per-server, collection issues (certificate Failed/RemoteRetry/Unknown, Health Checker not completed),
+        Health Checker status, certificates expiring within 60 days, and an in-frame Files section.
+      - The full HTML report is unchanged, still uploaded and kept in history, and linked from the mail.
+
     1.8.10
       - Count failed certificate targets as errors while retaining non-blocking completion.
 
@@ -274,7 +280,7 @@ $tenantContextPath = & {
 . $tenantContextPath
 
 $ScriptName = "SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory"
-$ScriptVersion = "1.8.10"
+$ScriptVersion = "1.8.11"
 $RunId = (Get-Date).ToString("yyyyMMdd-HHmmss")
 # Vendored Microsoft CSS-Exchange Health Checker (see ThirdParty\CSS-Exchange\HealthChecker\PROVENANCE.md).
 $HealthCheckerRelativePath = 'ThirdParty\CSS-Exchange\HealthChecker\HealthChecker.ps1'
@@ -617,6 +623,344 @@ function New-ServersAndStorageSharePointLinksSectionHtml {
 "@
 }
 
+function ConvertTo-ServersAndStorageMailNumber {
+    param([AllowNull()]$Value)
+
+    if ($null -eq $Value) { return $null }
+    if ($Value -is [int] -or $Value -is [long] -or $Value -is [double] -or $Value -is [decimal]) { return [double]$Value }
+    $text = ([string]$Value).Trim()
+    if (-not $text) { return $null }
+    $number = 0.0
+    # Regenerated runs read numbers back from CSV text.
+    foreach ($culture in @([Globalization.CultureInfo]::InvariantCulture, [Globalization.CultureInfo]::CurrentCulture)) {
+        if ([double]::TryParse($text, [Globalization.NumberStyles]::Float, $culture, [ref]$number)) { return $number }
+    }
+    return $null
+}
+
+function Format-ServersAndStorageMailNumber {
+    param([AllowNull()]$Value, [int]$Decimals = 0, [string]$Unit)
+
+    $number = ConvertTo-ServersAndStorageMailNumber -Value $Value
+    if ($null -eq $number) { return 'N/A' }
+    $text = $number.ToString(('N{0}' -f $Decimals), [Globalization.CultureInfo]::InvariantCulture)
+    if ($Unit) { return "$text $Unit" }
+    return $text
+}
+
+function Limit-ServersAndStorageMailText {
+    param([AllowNull()]$Value, [int]$MaxLength = 140)
+
+    $text = (([string]$Value) -replace '\s+', ' ').Trim()
+    if ($text.Length -le $MaxLength) { return $text }
+    return $text.Substring(0, $MaxLength - 3) + '...'
+}
+
+function ConvertTo-ServersAndStorageMailDate {
+    param([AllowNull()]$Value)
+
+    if ($Value -is [datetime]) { return $Value }
+    $text = ([string]$Value).Trim()
+    if (-not $text -or $text -eq 'Unknown') { return $null }
+    $date = [datetime]::MinValue
+    # [string] of a DateTime is invariant; values read on the server may follow its culture.
+    foreach ($culture in @([Globalization.CultureInfo]::InvariantCulture, [Globalization.CultureInfo]::CurrentCulture)) {
+        if ([datetime]::TryParse($text, $culture, [Globalization.DateTimeStyles]::None, [ref]$date)) { return $date }
+    }
+    return $null
+}
+
+function New-ServersAndStorageMailTableHtml {
+    param(
+        [Parameter(Mandatory)][string[]]$Headers,
+        [Parameter(Mandatory)][object[]]$Rows,
+        [Parameter(Mandatory)][int[]]$ColumnWidths,
+        [int[]]$NoWrapColumns = @(),
+        [switch]$BreakAll
+    )
+
+    # Shared Core table, made fixed-layout with explicit column widths so long values wrap inside the 760px frame.
+    $html = [string](New-CoreSmartM365EmailTableHtml -Headers $Headers -Rows $Rows -NoWrapColumns $NoWrapColumns)
+    $html = $html.Replace('<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;', '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;table-layout:fixed;')
+    $headerMarker = '<th align="left" style="'
+    $parts = $html.Split([string[]]@($headerMarker), [StringSplitOptions]::None)
+    $builder = New-Object System.Text.StringBuilder
+    [void]$builder.Append($parts[0])
+    for ($index = 1; $index -lt $parts.Count; $index++) {
+        $width = if ($index -le $ColumnWidths.Count) { $ColumnWidths[$index - 1] } else { 0 }
+        if ($width -gt 0) { [void]$builder.Append(('<th align="left" width="{0}%" style="width:{0}%;' -f $width)) }
+        else { [void]$builder.Append($headerMarker) }
+        [void]$builder.Append($parts[$index])
+    }
+    $breakStyle = if ($BreakAll) { 'word-break:break-all;' } else { 'word-break:break-word;' }
+    return $builder.ToString().Replace('word-break:break-word;', $breakStyle + 'overflow-wrap:anywhere;')
+}
+
+function New-ServersAndStorageMailNoteHtml {
+    param([Parameter(Mandatory)][string]$Text)
+
+    return '<div style="font-size:12px;line-height:18px;color:#475569;margin-top:8px;">{0}</div>' -f (ConvertTo-ServersAndStorageEmailHtmlText -Value $Text)
+}
+
+function Get-ServersAndStorageMailFile {
+    param([string[]]$Paths = @())
+
+    $uploads = @()
+    $uploadsVariable = Get-Variable -Name ServersAndStorageSharePointUploads -Scope Script -ErrorAction SilentlyContinue
+    if ($uploadsVariable -and $uploadsVariable.Value) { $uploads = @($uploadsVariable.Value) }
+
+    $seen = @{}
+    foreach ($path in @($Paths | Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and (Test-Path -LiteralPath $_ -PathType Leaf) })) {
+        $item = Get-Item -LiteralPath $path
+        $key = $item.FullName.ToLowerInvariant()
+        if ($seen.ContainsKey($key)) { continue }
+        $seen[$key] = $true
+        $record = @($uploads | Where-Object {
+            $localPath = Get-ObjectPropertyValue -InputObject $_ -Name 'LocalFilePath'
+            $localPath -and [string]::Equals([IO.Path]::GetFullPath([string]$localPath), $item.FullName, [StringComparison]::OrdinalIgnoreCase)
+        } | Select-Object -Last 1)
+        [pscustomobject]@{
+            Name           = $item.Name
+            Path           = $item.FullName
+            SizeKB         = [Math]::Round(($item.Length / 1KB), 1)
+            WebUrl         = $(if ($record.Count -gt 0) { [string](Get-ObjectPropertyValue -InputObject $record[0] -Name 'WebUrl') } else { '' })
+            SharePointPath = $(if ($record.Count -gt 0) { [string](Get-ObjectPropertyValue -InputObject $record[0] -Name 'SharePointPath') } else { '' })
+        }
+    }
+}
+
+function New-ServersAndStorageMailBodyHtml {
+    param(
+        [Parameter(Mandatory)][object]$Summary,
+        [AllowNull()][object[]]$PerServerSummary = @(),
+        [AllowNull()][object[]]$ReadinessInventory = @(),
+        [AllowNull()][object[]]$HealthCheckerSummary = @(),
+        [AllowNull()][object[]]$HealthCheckerFindings = @(),
+        [AllowNull()][object[]]$Files = @(),
+        [string]$Tenant,
+        [int]$WarningCount = 0,
+        [int]$ErrorCount = 0,
+        [AllowNull()]$CertificateBudgetSeconds = 120,
+        [int]$CertificateExpiryDays = 60,
+        [datetime]$ReferenceDate = (Get-Date)
+    )
+
+    $servers = @($PerServerSummary | Where-Object { $null -ne $_ } | Sort-Object ExchangeServerName)
+    $readinessRows = @($ReadinessInventory | Where-Object { $null -ne $_ })
+    $hcRows = @($HealthCheckerSummary | Where-Object { $null -ne $_ })
+    $hcFindings = @($HealthCheckerFindings | Where-Object { $null -ne $_ })
+    $toInt = { param($Value) $number = ConvertTo-ServersAndStorageMailNumber -Value $Value; if ($null -eq $number) { 0 } else { [int]$number } }
+    $summaryValue = { param($Name) Get-ObjectPropertyValue -InputObject $Summary -Name $Name }
+
+    $excludedServerNames = @(([string](& $summaryValue 'ExcludedServers') -split ';') | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+
+    # Health Checker: an empty summary means it was not part of this run (switch or configuration).
+    $hcIncluded = $hcRows.Count -gt 0
+    $hcExcludedRows = @($hcRows | Where-Object { [string]$_.RunStatus -eq 'NotRun' -and [string]$_.RunMessage -match 'excluded by configuration' })
+    $hcScopedRows = @($hcRows | Where-Object { $hcExcludedRows -notcontains $_ })
+    $hcCompletedRows = @($hcScopedRows | Where-Object { [string]$_.RunStatus -eq 'Completed' })
+    $hcNotCompletedRows = @($hcScopedRows | Where-Object { [string]$_.RunStatus -ne 'Completed' })
+    $hcVulnerabilities = 0; $hcWarnings = 0
+    foreach ($row in $hcCompletedRows) { $hcVulnerabilities += & $toInt $row.VulnerabilityCount; $hcWarnings += & $toInt $row.WarningCount }
+    $hcCriticalFindings = @($hcFindings | Where-Object { [string]$_.Status -eq 'Error' }).Count
+
+    # Certificates: rows of category ExchangeCertificate written by the certificate phase (LocalFirst/RemoteRetry).
+    $certificateRows = @($readinessRows | Where-Object { [string]$_.Category -eq 'ExchangeCertificate' })
+    $certificateItemGroups = @($certificateRows | Where-Object { [string]$_.ObjectName -match ':' } | Group-Object ObjectName)
+    $certificateFailures = @($certificateRows | Where-Object { [string]$_.Setting -eq 'Collection' -and [string]$_.Value -eq 'Failed' })
+    $certificateRetries = @($certificateRows | Where-Object { [string]$_.Setting -eq 'CollectionPath' -and [string]$_.Value -eq 'RemoteRetry' })
+    $certificateUnknownRows = @($certificateRows | Where-Object { [string]$_.Value -eq 'Unknown' -and [string]$_.CollectionStatus -eq 'WARNING' })
+    $certificates = @(foreach ($group in $certificateItemGroups) {
+        $values = @{}
+        foreach ($row in $group.Group) { if (-not $values.ContainsKey([string]$row.Setting)) { $values[[string]$row.Setting] = $row.Value } }
+        $serverName = if ($values['Server']) { [string]$values['Server'] } else { ([string]$group.Name -split ':')[0] }
+        $notAfter = ConvertTo-ServersAndStorageMailDate -Value $values['NotAfter']
+        [pscustomobject]@{
+            Server   = $serverName
+            Subject  = [string]$values['Subject']
+            Services = [string]$values['Services']
+            NotAfter = $notAfter
+            DaysLeft = $(if ($null -ne $notAfter) { [int][Math]::Ceiling(($notAfter - $ReferenceDate).TotalDays) } else { $null })
+            Expired  = ($null -ne $notAfter -and $notAfter -lt $ReferenceDate)
+        }
+    })
+    $expiringCertificates = @($certificates | Where-Object { $null -ne $_.DaysLeft -and $_.DaysLeft -le $CertificateExpiryDays } | Sort-Object DaysLeft, Server)
+    $undatedCertificates = @($certificates | Where-Object { $null -eq $_.DaysLeft })
+
+    $infrastructureErrors = (& $toInt (& $summaryValue 'ComputeCollectionErrors')) + (& $toInt (& $summaryValue 'DiskDriveCollectionErrors')) + (& $toInt (& $summaryValue 'LogicalDiskCollectionErrors'))
+    $readinessErrorRows = @($readinessRows | Where-Object { $_.CollectionStatus -eq 'ERROR' -or $_.Importance -eq 'Error' })
+    $readinessWarningRows = @($readinessRows | Where-Object { $_.CollectionStatus -eq 'WARNING' -or $_.Importance -eq 'Warning' })
+    $lowSpaceWarnings = & $toInt (& $summaryValue 'LowSpaceWarnings')
+
+    $severity = 'Success'
+    if ($ErrorCount -gt 0 -or $infrastructureErrors -gt 0 -or $readinessErrorRows.Count -gt 0) { $severity = 'Error' }
+    elseif ($WarningCount -gt 0 -or $readinessWarningRows.Count -gt 0 -or $lowSpaceWarnings -gt 0 -or $hcNotCompletedRows.Count -gt 0 -or $hcVulnerabilities -gt 0) { $severity = 'Warning' }
+    $statusBadge = switch ($severity) { 'Error' { 'Completed with errors'; break } 'Warning' { 'Completed with warnings'; break } default { 'Completed' } }
+
+    $okCard = @{ Background = '#f0fdf4'; Border = '#bbf7d0'; Accent = '#166534' }
+    $warnCard = @{ Background = '#fff7ed'; Border = '#fed7aa'; Accent = '#9a3412' }
+    $errorCard = @{ Background = '#fef2f2'; Border = '#fecaca'; Accent = '#b91c1c' }
+    $newCard = {
+        param($Label, $Value, $Detail, $Colors)
+        [pscustomobject]@{ Label = $Label; Value = $Value; Detail = $Detail; Background = $Colors.Background; Border = $Colors.Border; Accent = $Colors.Accent; Span = 1; FontSize = 24 }
+    }
+    $neutral = @{ Background = '#f8fafc'; Border = '#dbe3ef'; Accent = '#0f172a' }
+    $blue = @{ Background = '#eff6ff'; Border = '#bfdbfe'; Accent = '#1d4ed8' }
+    $indigo = @{ Background = '#eef2ff'; Border = '#c7d2fe'; Accent = '#4338ca' }
+
+    $virtualMachines = @($servers | Where-Object { [string]$_.IsVirtualMachine -eq 'True' }).Count
+    $serversWithCompute = @($servers | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_.IsVirtualMachine) }).Count
+    $hcCard = if (-not $hcIncluded) {
+        & $newCard 'Health Checker' 'Not run' 'disabled for this run' $neutral
+    } else {
+        $colors = if ($hcNotCompletedRows.Count -gt 0 -or $hcVulnerabilities -gt 0) { $warnCard } else { $okCard }
+        & $newCard 'Health Checker' ('{0}/{1}' -f $hcCompletedRows.Count, $hcScopedRows.Count) ('{0} vulnerabilities, {1} errors' -f $hcVulnerabilities, $hcCriticalFindings) $colors
+    }
+    $certificateCard = if ($certificateRows.Count -eq 0) {
+        & $newCard 'Certificates' 'N/A' 'no certificate data' $neutral
+    } else {
+        $colors = if ($certificateFailures.Count -gt 0) { $errorCard } elseif ($expiringCertificates.Count -gt 0 -or $certificateUnknownRows.Count -gt 0) { $warnCard } else { $okCard }
+        & $newCard 'Certificates' $certificates.Count ('{0} expiring, {1} failed' -f $expiringCertificates.Count, $certificateFailures.Count) $colors
+    }
+    $cards = @(
+        & $newCard 'Servers' (Format-ServersAndStorageMailNumber (& $summaryValue 'ExchangeServersCount')) ('{0} excluded' -f $excludedServerNames.Count) $neutral
+        & $newCard 'Virtual machines' $virtualMachines ('of {0} with compute data' -f $serversWithCompute) $blue
+        & $newCard 'vCPU' (Format-ServersAndStorageMailNumber (& $summaryValue 'TotalLogicalProcessorCount')) ('{0} physical cores' -f (Format-ServersAndStorageMailNumber (& $summaryValue 'TotalPhysicalCoreCount'))) $blue
+        & $newCard 'RAM' (Format-ServersAndStorageMailNumber (& $summaryValue 'TotalMemoryGB') -Unit 'GB') 'total memory' $blue
+        & $newCard 'Disks' (Format-ServersAndStorageMailNumber (& $summaryValue 'TotalDiskDriveCount')) 'physical disk drives' $indigo
+        & $newCard 'Provisioned storage' (Format-ServersAndStorageMailNumber (& $summaryValue 'TotalDiskDriveSizeTB') -Decimals 2 -Unit 'TB') ('{0} used' -f (Format-ServersAndStorageMailNumber (& $summaryValue 'TotalLogicalDiskUsedTB') -Decimals 2 -Unit 'TB')) $indigo
+        $hcCard
+        $certificateCard
+    )
+    $sections = New-Object System.Collections.Generic.List[object]
+    $sections.Add([pscustomobject]@{ Title = 'Key figures'; Html = (New-CoreSmartM365EmailKpiGridHtml -Cards $cards -RowSizes @(4, 4)) })
+
+    # Per-server summary.
+    $serverRows = New-Object System.Collections.Generic.List[object]
+    foreach ($server in $servers) {
+        $name = [string]$server.ExchangeServerName
+        $failedParts = @()
+        if ([string]$server.ComputeCollectionStatus -eq 'ERROR') { $failedParts += 'compute' }
+        if ([string]$server.DiskDriveCollectionStatus -eq 'ERROR') { $failedParts += 'disks' }
+        if ([string]$server.LogicalDiskCollectionStatus -eq 'ERROR') { $failedParts += 'volumes' }
+        $collection = if ($failedParts.Count -gt 0) { 'ERROR: ' + ($failedParts -join ', ') } elseif ((& $toInt $server.LowSpaceLogicalDiskCount) -gt 0) { 'Low space' } else { 'OK' }
+        $hcRow = @($hcRows | Where-Object { [string]$_.ServerName -eq $name } | Select-Object -First 1)
+        $hcText = if (-not $hcIncluded) { 'Not run' }
+            elseif ($hcRow.Count -eq 0) { 'No result' }
+            elseif ([string]$hcRow[0].RunStatus -eq 'Completed') { '{0} vuln, {1} err' -f (& $toInt $hcRow[0].VulnerabilityCount), (& $toInt $hcRow[0].ErrorCount) }
+            else { [string]$hcRow[0].RunStatus }
+        $certificateText = if ($certificateRows.Count -eq 0) { 'N/A' }
+            elseif (@($certificateFailures | Where-Object { [string]$_.ObjectName -eq $name }).Count -gt 0) { 'Failed' }
+            else {
+                $text = [string]@($certificates | Where-Object { $_.Server -eq $name }).Count
+                if (@($certificateRetries | Where-Object { [string]$_.ObjectName -eq $name }).Count -gt 0) { $text += ' (RemoteRetry)' }
+                $text
+            }
+        $serverRows.Add(@($name, (Format-ServersAndStorageMailNumber $server.LogicalProcessorCount), (Format-ServersAndStorageMailNumber $server.MemoryGB), ('{0} / {1} GB' -f (Format-ServersAndStorageMailNumber $server.DiskDriveCount), (Format-ServersAndStorageMailNumber $server.DiskDriveTotalSizeGB)), $collection, $hcText, $certificateText))
+    }
+    foreach ($name in $excludedServerNames) { $serverRows.Add(@($name, 'N/A', 'N/A', 'N/A', 'Excluded', 'Excluded', 'Excluded')) }
+    $maxServerRows = 25
+    if ($serverRows.Count -gt 0) {
+        $serverHtml = New-ServersAndStorageMailTableHtml -Headers @('Server', 'vCPU', 'RAM GB', 'Disks / size', 'Collection', 'Health Checker', 'Certificates') -Rows @($serverRows | Select-Object -First $maxServerRows) -ColumnWidths @(22, 8, 10, 16, 14, 15, 15) -NoWrapColumns @(1, 2)
+        if ($serverRows.Count -gt $maxServerRows) { $serverHtml += New-ServersAndStorageMailNoteHtml -Text ('Showing {0} of {1} servers; all servers are in the full report.' -f $maxServerRows, $serverRows.Count) }
+    } else {
+        $serverHtml = New-ServersAndStorageMailNoteHtml -Text 'No per-server data is available for this run.'
+    }
+    $sections.Add([pscustomobject]@{ Title = 'Per-server summary'; Html = $serverHtml })
+
+    # Collection issues: errors first, then warnings and partial reads.
+    $issues = New-Object System.Collections.Generic.List[object]
+    foreach ($server in $servers) {
+        $name = [string]$server.ExchangeServerName
+        foreach ($pair in @(@('ComputeCollectionStatus', 'Compute', 'CPU/RAM inventory failed or returned no data.'), @('DiskDriveCollectionStatus', 'Disk drives', 'Physical disk inventory failed or returned errors.'), @('LogicalDiskCollectionStatus', 'Logical disks', 'Logical disk inventory failed or returned errors.'))) {
+            if ([string](Get-ObjectPropertyValue -InputObject $server -Name $pair[0]) -eq 'ERROR') { $issues.Add([pscustomobject]@{ Rank = 0; Values = @('Infrastructure', $name, $pair[1], $pair[2]) }) }
+        }
+        $lowSpace = & $toInt $server.LowSpaceLogicalDiskCount
+        if ($lowSpace -gt 0) { $issues.Add([pscustomobject]@{ Rank = 2; Values = @('Capacity', $name, 'Low disk space', ('{0} logical disk(s) below the free-space threshold.' -f $lowSpace)) }) }
+    }
+    foreach ($row in $certificateFailures) {
+        $issues.Add([pscustomobject]@{ Rank = 0; Values = @('Certificates', [string]$row.ObjectName, 'Collection failed', (Limit-ServersAndStorageMailText -Value $row.ErrorMessage -MaxLength 180)) })
+    }
+    foreach ($row in $certificateRetries) {
+        $retryServer = [string]$row.ObjectName
+        $retryText = if (@($certificates | Where-Object { $_.Server -eq $retryServer }).Count -gt 0) { 'Native read failed or timed out; certificates were read through the remote session.' } else { 'Native read failed or timed out; remote retry attempted.' }
+        $issues.Add([pscustomobject]@{ Rank = 3; Values = @('Certificates', $retryServer, 'RemoteRetry', $retryText) })
+    }
+    foreach ($group in @($certificateUnknownRows | Group-Object { ([string]$_.ObjectName -split ':')[0] } | Sort-Object Name)) {
+        $settings = @($group.Group | ForEach-Object { [string]$_.Setting } | Sort-Object -Unique) -join ', '
+        $certificateCount = @($group.Group | ForEach-Object { [string]$_.ObjectName } | Sort-Object -Unique).Count
+        $issues.Add([pscustomobject]@{ Rank = 2; Values = @('Certificates', $group.Name, 'Unknown metadata', ('{0} certificate(s): {1} unavailable; no value inferred.' -f $certificateCount, $settings)) })
+    }
+    foreach ($row in @($readinessRows | Where-Object { [string]$_.Category -eq 'CollectorError' })) {
+        $issues.Add([pscustomobject]@{ Rank = 1; Values = @('Readiness', [string]$row.ObjectName, 'Collector failed', (Limit-ServersAndStorageMailText -Value $row.ErrorMessage -MaxLength 180)) })
+    }
+    foreach ($row in $hcNotCompletedRows) {
+        $issues.Add([pscustomobject]@{ Rank = 1; Values = @('Health Checker', [string]$row.ServerName, [string]$row.RunStatus, (Limit-ServersAndStorageMailText -Value $row.RunMessage -MaxLength 180)) })
+    }
+    $maxIssueRows = 15
+    $sortedIssues = @($issues | Sort-Object Rank, @{ Expression = { $_.Values[0] } }, @{ Expression = { $_.Values[1] } })
+    $issueNote = 'Readiness: {0} error(s), {1} warning(s) in total; every row is in the full report and Exchange_OnPrem_MigrationReadiness_Config.csv.' -f $readinessErrorRows.Count, $readinessWarningRows.Count
+    if ($sortedIssues.Count -gt 0) {
+        $issueHtml = New-ServersAndStorageMailTableHtml -Headers @('Area', 'Object', 'Issue', 'Details') -Rows @($sortedIssues | Select-Object -First $maxIssueRows | ForEach-Object { , $_.Values }) -ColumnWidths @(15, 22, 17, 46) -BreakAll
+        if ($sortedIssues.Count -gt $maxIssueRows) { $issueNote = ('Showing {0} of {1} issues. ' -f $maxIssueRows, $sortedIssues.Count) + $issueNote }
+        $issueHtml += New-ServersAndStorageMailNoteHtml -Text $issueNote
+    } else {
+        $issueHtml = New-ServersAndStorageMailNoteHtml -Text ('No collection failure was detected. ' + $issueNote)
+    }
+    $sections.Add([pscustomobject]@{ Title = 'Collection issues'; Html = $issueHtml })
+
+    # Health Checker status, explicit when it did not run.
+    $hcHtml = if (-not $hcIncluded) {
+        New-ServersAndStorageMailNoteHtml -Text 'Health Checker was not run in this run (disabled by parameter or configuration). No Health Checker state is reported.'
+    } else {
+        $hcVersion = @($hcRows | ForEach-Object { [string]$_.HealthCheckerVersion } | Where-Object { $_ } | Select-Object -Unique) -join ', '
+        $text = 'Health Checker {0} completed on {1} of {2} server(s). Vulnerabilities: {3}; critical findings (Status=Error): {4}; warnings: {5}.' -f $hcVersion, $hcCompletedRows.Count, $hcScopedRows.Count, $hcVulnerabilities, $hcCriticalFindings, $hcWarnings
+        if ($hcNotCompletedRows.Count -gt 0) { $text += ' Not completed: {0} server(s); their state is not measured.' -f $hcNotCompletedRows.Count }
+        if ($hcExcludedRows.Count -gt 0) { $text += ' Excluded by configuration: {0} server(s).' -f $hcExcludedRows.Count }
+        New-ServersAndStorageMailNoteHtml -Text $text
+    }
+    $sections.Add([pscustomobject]@{ Title = 'Health Checker'; Html = $hcHtml })
+
+    # Certificates expiring soon, when certificate data exists.
+    if ($certificateRows.Count -gt 0) {
+        $certificateText = '{0} certificate(s) read; {1} expiring within {2} days or expired; {3} server(s) failed; {4} RemoteRetry; per-server budget {5} s.' -f $certificates.Count, $expiringCertificates.Count, $CertificateExpiryDays, $certificateFailures.Count, $certificateRetries.Count, (Format-ServersAndStorageMailNumber $CertificateBudgetSeconds)
+        if ($undatedCertificates.Count -gt 0) { $certificateText += ' Expiry date unavailable: {0}.' -f $undatedCertificates.Count }
+        $certificateHtml = ''
+        if ($expiringCertificates.Count -gt 0) {
+            $maxCertificateRows = 10
+            $certificateTableRows = @($expiringCertificates | Select-Object -First $maxCertificateRows | ForEach-Object {
+                , @($_.Server, (Limit-ServersAndStorageMailText -Value $_.Subject -MaxLength 90), $_.NotAfter.ToString('yyyy-MM-dd'), $(if ($_.Expired) { 'Expired' } else { [string]$_.DaysLeft }), (Limit-ServersAndStorageMailText -Value $_.Services -MaxLength 40))
+            })
+            $certificateHtml = New-ServersAndStorageMailTableHtml -Headers @('Server', 'Subject', 'Expires', 'Days', 'Services') -Rows $certificateTableRows -ColumnWidths @(18, 40, 15, 10, 17) -NoWrapColumns @(2, 3) -BreakAll
+            if ($expiringCertificates.Count -gt $maxCertificateRows) { $certificateText += ' Showing {0} of {1}.' -f $maxCertificateRows, $expiringCertificates.Count }
+        }
+        $sections.Add([pscustomobject]@{ Title = 'Certificates'; Html = ($certificateHtml + (New-ServersAndStorageMailNoteHtml -Text $certificateText)) })
+    }
+
+    # Files: the full HTML report and CSV files, linked to SharePoint when uploaded.
+    $fileRows = foreach ($file in @($Files | Where-Object { $null -ne $_ })) {
+        $locationText = if ($file.SharePointPath) { [string]$file.SharePointPath } else { [string]$file.Path }
+        $locationHtml = New-ServersAndStorageEmailLinkHtml -Text $locationText -Url ([string]$file.WebUrl)
+        "<tr><td width=`"30%`" style=`"width:30%;border-bottom:1px solid #eef2f7;padding:9px 10px;font-size:12px;font-weight:700;color:#334155;word-break:break-all;`">$(ConvertTo-ServersAndStorageEmailHtmlText -Value $file.Name)</td><td width=`"56%`" style=`"width:56%;border-bottom:1px solid #eef2f7;padding:9px 10px;font-family:Consolas,'Courier New',monospace;font-size:11px;color:#334155;word-break:break-all;`">$locationHtml</td><td width=`"14%`" align=`"right`" style=`"width:14%;border-bottom:1px solid #eef2f7;padding:9px 10px;font-size:12px;color:#334155;white-space:nowrap;`">$(ConvertTo-ServersAndStorageEmailHtmlText -Value ('{0} KB' -f $file.SizeKB))</td></tr>"
+    }
+    $filesHtml = if (@($fileRows).Count -gt 0) {
+        "<table role=`"presentation`" width=`"100%`" cellpadding=`"0`" cellspacing=`"0`" style=`"width:100%;table-layout:fixed;border-collapse:collapse;border:1px solid #d9e2ec;font-size:12px;`">$($fileRows -join "`r`n")</table>"
+    } else { New-ServersAndStorageMailNoteHtml -Text 'No output file is available.' }
+    $sections.Add([pscustomobject]@{ Title = 'Files'; Html = $filesHtml })
+
+    $runId = [string](& $summaryValue 'RunId')
+    $executionDate = [string](& $summaryValue 'ExecutionDate')
+    return New-CoreSmartM365EmailBody `
+        -Title 'Infrastructure and readiness summary' `
+        -Category 'SmartM365 Exchange OnPrem' `
+        -Severity $severity `
+        -StatusBadge $statusBadge `
+        -Tenant $Tenant `
+        -Message ('Exchange on-premises infrastructure and readiness inventory, run {0} ({1}). The complete HTML report is unchanged and linked in Files.' -f $runId, $executionDate) `
+        -Sections $sections.ToArray() `
+        -Footer 'This automated message was generated by SmartM365 from Exchange on-premises infrastructure and readiness inventory data.'
+}
+
 function Send-ServersAndStorageHtmlReport {
     param(
         [Parameter(Mandatory)]
@@ -635,7 +979,13 @@ function Send-ServersAndStorageHtmlReport {
         [array]$PerServerSummary,
 
         [Parameter(Mandatory)]
-        [array]$ReadinessInventory
+        [array]$ReadinessInventory,
+
+        [AllowNull()]
+        [object[]]$HealthCheckerSummary = @(),
+
+        [AllowNull()]
+        [object[]]$HealthCheckerFindings = @()
     )
 
     if (-not (Test-Path -LiteralPath $HtmlReportPath -PathType Leaf)) {
@@ -653,19 +1003,29 @@ function Send-ServersAndStorageHtmlReport {
     $smtpServer = [string](Get-SmartM365EffectiveConfigValue -Name 'SmtpServer' -DefaultValue '')
     $sendMailMode = [string](Get-SmartM365EffectiveConfigValue -Name 'SendMailMode' -DefaultValue '')
     $cc = [string](Get-SmartM365EffectiveConfigValue -Name 'Cc' -DefaultValue '')
-    $existingAttachments = @($Attachments | Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and (Test-Path -LiteralPath $_ -PathType Leaf) })
 
-    $reportHtml = Get-Content -LiteralPath $HtmlReportPath -Raw -ErrorAction Stop
-    if ($reportHtml -notmatch 'SmartM365EmailTemplate:v1') {
-        $reportHtml = "<!-- SmartM365EmailTemplate:v1 -->`r`n$reportHtml"
-    }
+    # The full report stays a file (uploaded and kept in history); the mail links it in its own Files section,
+    # inside the 760px frame, instead of using the report as body or letting Core append files outside the frame.
+    $files = @(Get-ServersAndStorageMailFile -Paths (@($HtmlReportPath) + @($Attachments)))
+    $counterValue = { param($Name) $variable = Get-Variable -Name $Name -Scope Script -ErrorAction SilentlyContinue; if ($variable) { [int]$variable.Value } else { 0 } }
+    $tenantVariable = Get-Variable -Name Tenant -Scope Script -ErrorAction SilentlyContinue
+    $bodyHtml = New-ServersAndStorageMailBodyHtml `
+        -Summary $Summary `
+        -PerServerSummary @($PerServerSummary) `
+        -ReadinessInventory @($ReadinessInventory) `
+        -HealthCheckerSummary @($HealthCheckerSummary) `
+        -HealthCheckerFindings @($HealthCheckerFindings) `
+        -Files $files `
+        -Tenant $(if ($tenantVariable) { [string]$tenantVariable.Value } else { '' }) `
+        -WarningCount (& $counterValue 'ServersAndStorageWarningCount') `
+        -ErrorCount (& $counterValue 'ServersAndStorageErrorCount') `
+        -CertificateBudgetSeconds (Get-SmartM365EffectiveConfigValue -Name 'CertificateTimeoutSecondsPerServer' -DefaultValue 120)
 
     $mailParams = @{
-        From        = $from
-        To          = $to
-        Subject     = $Subject
-        BodyHtml    = $reportHtml
-        Attachments = $existingAttachments
+        From     = $from
+        To       = $to
+        Subject  = $Subject
+        BodyHtml = $bodyHtml
     }
     if (-not [string]::IsNullOrWhiteSpace($smtpServer)) { $mailParams['SmtpServer'] = $smtpServer }
     if (-not [string]::IsNullOrWhiteSpace($sendMailMode)) { $mailParams['SendMailMode'] = $sendMailMode }
@@ -3227,10 +3587,12 @@ function Invoke-ServersAndStorageHtmlReportRegeneration {
         Send-ServersAndStorageHtmlReport `
             -HtmlReportPath $htmlSummaryPath `
             -Subject $mailSubject `
-            -Attachments @($summaryPath, $perServerSummaryPath, $exchangeReadinessPath) `
+            -Attachments @($summaryPath, $perServerSummaryPath, $exchangeReadinessPath, $healthCheckerSummaryPath, $healthCheckerFindingsPath) `
             -Summary $summary `
             -PerServerSummary @($perServerSummary) `
-            -ReadinessInventory @($exchangeReadinessInventory)
+            -ReadinessInventory @($exchangeReadinessInventory) `
+            -HealthCheckerSummary @($healthCheckerSummary) `
+            -HealthCheckerFindings @($healthCheckerFindings)
         Write-Log "Regenerated HTML executive summary email sent."
     }
     else {
@@ -3522,13 +3884,17 @@ try {
     Remove-CoreSmartM365TimestampedDirectoriesOlderThan -RootPath $OutputRoot -RetentionDays 7 -ExcludeDirectories @($OutputFolder) -LogFile $LogFile
 
     $mailSubject = "SmartM365 Exchange OnPrem Servers and Storage inventory - $RunId"
+    # Health Checker CSV files exist in this run folder only when it ran; missing files are not listed.
+    $mailFiles = @($summaryPath, $perServerSummaryPath, $exchangeReadinessPath, (Join-Path $OutputFolder "Exchange_OnPrem_HealthChecker_Summary.csv"), (Join-Path $OutputFolder "Exchange_OnPrem_HealthChecker_Findings.csv"))
     Send-ServersAndStorageHtmlReport `
         -HtmlReportPath $htmlSummaryPath `
         -Subject $mailSubject `
-        -Attachments @($summaryPath, $perServerSummaryPath, $exchangeReadinessPath) `
+        -Attachments $mailFiles `
         -Summary $summary `
         -PerServerSummary @($perServerSummary) `
-        -ReadinessInventory @($exchangeReadinessInventory)
+        -ReadinessInventory @($exchangeReadinessInventory) `
+        -HealthCheckerSummary @($healthCheckerSummary) `
+        -HealthCheckerFindings @($healthCheckerFindings)
     Write-Log "HTML executive summary email sent."
 
     Write-Log "Completed successfully."
@@ -3571,11 +3937,12 @@ finally {
 }
 if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 
+
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD/uC18MpyJkiCx
-# 2UWpk/IWAjM9odqVvLSZaKVshvIo/aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA6DJMBRpLGChE4
+# x2zqW6ZwPL9qXo27Op8faZVFIkf6uqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -3708,31 +4075,31 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIPkX8e56jPQUObHGSp6NpQeHf39s32Az4lEr0ZavWEgbMA0GCSqG
-# SIb3DQEBAQUABIIBgECGqPBMOYa7u9Uaght1BmtlmvLjJazK+Jwi6aT2VvFifYtI
-# GQft3nsZQw/W/6L0AGIJ0gz6m6FH6/rq5Lk8B1jgsTZVoANOmCGKNIdV9v6GJ9ON
-# yoJgz5BLWMiKT/8YAr2YsiiWLwxe6ihF7THOIr7USBtNB3V5Hvhc7gFLCZMXQgWp
-# fN3RdFAB2qHr0YRaTJoiKH6F67bT6XxcDeqtAmJ6xclTU3+mvZNKekKQ55WywveN
-# C+Y/zjbnbaqwybkmTdO8gUqKXT3myhJ9DozA19IU3uM5JKOccVAI6Mu+crQkLH5i
-# 8VA/K5uU6v/VxVieGR7bx6b8DVrs6Q2IaN2dK0IcuPi6g2VXGDiEeoIny0/IVX7i
-# jBmd2xFTtxuwUduthZuTW5HMQKyP8UdBRYYyJb0075pfOQ9ftWfFwEFvr05mV6RB
-# E6PWrYLQvxD1PKwC5EUxy3APN97huHM6yhzvQiGwPsS2tjMKafZwIzA/3nobqEWn
-# mf3rYHKEOE5K4yE91aGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIKDw1X8PFoul7/xYokn0xoC/DGFpBKwehMhVOzq59G3SMA0GCSqG
+# SIb3DQEBAQUABIIBgFK3eABx+nWYrdO8iDPv65alasuA1croJQF1LEjBsZKjMH2p
+# vD9UINzSba0rzM6eiLf00us/bG3DlZfsY9pIY9Ed8fvH/NGPus6Fs3A+H2Y9ApBS
+# daOh6f7GWR/HHwZqpxX8+ow4manrDnSEfV0sDqzumEx9F6GmWUPkIH+ZN6WRRxTZ
+# hG6f/86dlgCpSQV4C4WZrBc4raRZSk41wYZz/Fzn0XwRJPoh8yro9HsYa7UNCrr7
+# Tm4r1W7eVM9Q2DSOBidpToDUe+6yoFBbPq7fL1TS292HUgpMADwajYwdQfIT7UJK
+# knpYrjuXR4P3tlaEz4ytkoN85nnDxt+NIWmC1LhHcaUR+TCNv0URrpm5n/hgoa51
+# TSelqM4svzfVXfTFR8I3v3pyDHlhiuiHPBa9zMQRtT53CJkGq9UBgcbu/dw2c7zc
+# gSflOZWc2YtGG2/Ev5q90O3XwzpdaNgontEeACSVr5OwPtBC8DKomDVnsHo5Cff3
+# 8/wOa9sW+6o2369E6KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjQxNDIy
-# NTBaMC8GCSqGSIb3DQEJBDEiBCBdW5BIvfK8Xe+r7GcNtFpg56JXTYJ7cYdhKc1R
-# FsaW8jANBgkqhkiG9w0BAQEFAASCAgAfhIPC1E+04hFawkiJsWpddUSZP1eW84M3
-# bgQEcRC8gSUyY5NSFJF68aBrgoeUhA7mkzHTjv7p203/yPR+GjHMhaZrskG/fqJS
-# Sp/GLJrncrHTbLEvCPvSv2ueImtvsVMvDxzMfPEAmC1OzuPOQioiJL9UWQ3pWvUK
-# 92PZjYoIeKFP7An9RRaiUm3af9DnVZldQAH8e4gcpia3KwYUmk18Z1RW8qWJDiWZ
-# /LIqKtmYkVBshpyXwWIMi4mVqnQWzSCqb/hvrdHeMu5KmA/A33DoKZtslykrfVOk
-# vOJYu+PvWkmuhJ+vRyb/Tc/WmjmS7e+izcxwOSGLhlVoGHJpuTAHRbItPAKG17Qk
-# GoZCeIGJJSXIgdIS/qnOS6RY8R3XgPe0aEAJcHZSME94VtKng/OG5h3lRTP5+pZW
-# F383Xxmt8EXI5V1PqKTqc+pzCNGKXxVbLalfUbveP/8Lofek+wDvdxMK5VnD4ioD
-# 6s2qOgRo7Rly9lNJtzXmWlciuJl/BHju/OiiVonQwfpZlC8LpshIa7TGQDKqNU70
-# cuic2B3Y8Ehab+293qgXKpjf+iguVoSsEc8Nke4jrNAHnZ7gd9i00r3p7XxBoXl2
-# Y5vPQfNgndCy9F/Apg/43tbEOI36fwg7g8wzvE3xVVQvwwof5xhI8FL8xezM75dJ
-# dPR1l+zBUg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjQxOTU4
+# NDdaMC8GCSqGSIb3DQEJBDEiBCCabm3IEaZAh/DMcwZTQiVbX2gTocH3Nd8ySyzV
+# fJ52jDANBgkqhkiG9w0BAQEFAASCAgAlXKiUb9/NWOB2vUqkP8CIw/r4WnSSPmWt
+# gLJDbpu+dK8jN/nVznXxmkumyYe4ExH+coQf9Dh7+IllMmVNUG88PK4jOiln6nkD
+# TL6Qhw0Q2DEmL3HUk7f4dQDwrLdwtNh+6m7o4F89FgapUcWMHdp64KUkomZ71e71
+# vCu28Jljw8wQofFAFyDDRwOiIBhM4L7Oey6vAU0g1OS3ttIawNdnaG0NsvRnnLPf
+# 9y2OnWLhTBubHiHjV1qLVybH4xj2nJsL+6ilCuNcBRmJHmNDoG2TviBbg5sVmsPi
+# FLEzFvRcffLGg2bAYPWjra/dQ3DS3AtazvFoFFjC7Rz9VD0153Qh+ZbHY4tQsULF
+# PujDTKB4JYW7+/n5QjNm+uw7wUuiNTTykO3MtbMWh4E/oNoQEk++M0TaMOHu6GyG
+# zu9XbZ7q+W0MPqPdZsMG7ImPPvaMvYA/LgDEDWN9iLO7CwhfP1GJLTcwLRmW5jni
+# jb7jNUu9GMSVkdl2eDW9XsP9ecxtg948a66HRzSz9U6XlWjmAUwnCophLWvfG9kr
+# oqmODrQ4ik48e/55S6t/gzrCTTJKV/KATb+wQaffCS2mWE90HiSayu/0DdftyZmT
+# cGnwEEAoTMSBzVuAukDQ5XvMoa6DV3G4u7KBmQoNj0Va913+uX3KbpiCEzgQ1su0
+# PWBPbNmdaQ==
 # SIG # End signature block

@@ -2,7 +2,7 @@
 .SYNOPSIS
 Synthetic database email tests; extracts functions without running the collector.
 .VERSION
-1.0.0
+1.0.1
 #>
 [CmdletBinding()]
 param([string]$SourceRoot)
@@ -15,12 +15,22 @@ $tokens = $null; $parseErrors = $null
 $ast = [Management.Automation.Language.Parser]::ParseFile($collectorPath, [ref]$tokens, [ref]$parseErrors)
 if ($parseErrors.Count) { throw "Collector parse failed: $parseErrors" }
 $functionNames = @('Format-HtmlValue', 'ConvertTo-ServersAndStorageDatabaseSectionHtml', 'New-HtmlExecutiveSummary',
-    'Import-ServersAndStorageExistingCsv', 'Invoke-ServersAndStorageHtmlReportRegeneration', 'Send-ServersAndStorageHtmlReport')
+    'Import-ServersAndStorageExistingCsv', 'Invoke-ServersAndStorageHtmlReportRegeneration', 'Send-ServersAndStorageHtmlReport',
+    'Get-ObjectPropertyValue', 'ConvertTo-ServersAndStorageEmailHtmlText', 'New-ServersAndStorageEmailLinkHtml',
+    'ConvertTo-ServersAndStorageMailNumber', 'Format-ServersAndStorageMailNumber', 'Limit-ServersAndStorageMailText',
+    'ConvertTo-ServersAndStorageMailDate', 'New-ServersAndStorageMailTableHtml', 'New-ServersAndStorageMailNoteHtml',
+    'Get-ServersAndStorageMailFile', 'New-ServersAndStorageMailBodyHtml')
 $definitions = foreach ($name in $functionNames) {
     $node = $ast.Find({ param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name }, $true)
     if ($null -eq $node) { throw "Missing function: $name" }
     $node.Extent.Text
 }
+# Shared mail template functions, exposed under the -Prefix Core names used by the collector.
+$coreAst = [Management.Automation.Language.Parser]::ParseFile((Join-Path $SourceRoot 'Modules/SmartM365.Core/SmartM365.Core.psm1'), [ref]$null, [ref]$null)
+$definitions = @($definitions) + @(foreach ($name in @('ConvertTo-SmartM365EmailHtmlText', 'New-SmartM365EmailKpiGridHtml', 'New-SmartM365EmailTableHtml', 'New-SmartM365EmailBody')) {
+    $coreAst.Find({ param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name }, $true).Extent.Text
+    'Set-Alias -Name {0} -Value {1}' -f ($name -replace '-SmartM365', '-CoreSmartM365'), $name
+})
 # Never import the runtime Core module or load tenant configuration. All external
 # operations reachable from regeneration/mail are replaced inside this module.
 $module = New-Module -ScriptBlock ([scriptblock]::Create(($definitions -join "`n")))
@@ -132,7 +142,10 @@ try {
     $report = Get-Content -LiteralPath (Join-Path $testRoot 'Exchange_OnPrem_InfrastructureAndReadiness_Report.html') -Raw
     $mail = & $module { $script:CapturedMail }
     Assert-DatabaseMail ($report.Contains($html)) 'Database summary missing from the regenerated full report.'
-    Assert-DatabaseMail ($mail.Body.Contains($html) -and $mail.Attachments.Count -eq 3) 'Email did not retain database section and CSV attachments.'
+    Assert-DatabaseMail ($mail.Body.Contains('SmartM365EmailTemplate:v1') -and -not $mail.Body.Contains($html) -and $null -eq $mail.Attachments) 'Email is not the shared summary template.'
+    foreach ($fileName in @('Exchange_OnPrem_InfrastructureAndReadiness_Report.html', 'Exchange_OnPrem_Servers_Inventory_Summary.csv', 'Exchange_OnPrem_Infrastructure_PerServerSummary.csv', 'Exchange_OnPrem_MigrationReadiness_Config.csv')) {
+        Assert-DatabaseMail ($mail.Body.Contains($fileName)) "Email Files section does not link $fileName."
+    }
     Assert-DatabaseMail ($report.Contains('Excluded</td>') -and $report.Contains('Per-server infrastructure summary') -and $report.Contains('Exchange readiness configuration')) 'Existing report sections regressed.'
     Assert-Counters $report 4 1 1 2
     Write-Host "PASS: $script:Checks synthetic Exchange database mail checks (PowerShell $($PSVersionTable.PSVersion)). No collector or real mail executed."
@@ -148,8 +161,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCH3nIsxZGrkThm
-# CtYJ05EuPSiW4PzXupM7J2RQLQoLHqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAJfKEcGI0gZoHX
+# TrEK1pXcKPhVguU0L0vKKMl3CPDq6aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -282,31 +295,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIFmyCWz53t5gl10XYkzanWM93HnnWMLUS9Rr0D2O4j9QMA0GCSqG
-# SIb3DQEBAQUABIIBgCVBw4Fc+g58yDTpZEmQnFLI6kgS7+WRT10v0Yc04C+Sbbr2
-# hditNNbCzc8OJuO8xT+3RX6fT49BGQM4h2/qBKz/DE+cIVMduaQbowICVEimy5ZH
-# phf5lrn2nA/YK5qFJI7L79RVihkMMQKIZN5s6d2BdQxfV/28XskVznbp+q2TBBIV
-# rQD3kn/imvtAt6aezBDv8U7t/x2kGCaZUME09Jd2CZV6NHLzwAr4KRsMYO2Gy2iM
-# y1hFTIX5XnpGf0qSlpmkY6ijLkUsTEDQMVcB+lUgSk/dNO8AJPB8jZdADhbvtt97
-# qdyca3k3lqs4xLnzjhh9OaqgZddCzV/Zds2RfSPHZCTDuvH7uvXGJhRtZq7Jv6LX
-# QTllIvXUCpxNNS4/tjANOSzM3xjKUFM17c6U6TnSsUJZdwrSSP5UxxZpg98ZhMkH
-# HLqrr9Xla0j6jfA1J9bnkFqCyAfhJN7HIU1QZp/g26GBPqqwOpJGOBT8vl5Pl8gj
-# AiUtDa/PZnVVA/L+MqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIIka78F+mIe22S4rmfJyq+fxG1G0FW4KeJlBQ0qkl598MA0GCSqG
+# SIb3DQEBAQUABIIBgC703K3CegczQod3mQf9Bni5wzJW2yl/e6rqpnyqXoTsk5b7
+# +rERZRBGrw72ou4TiBfvZKjqe7ijvCbIXyhh17MDQeDOqKC5feW3F9FDVow3kWfW
+# sI+bvJbtMPCTHLsJJGQ+iDr8rWZFiRAOMWb9suxFlE3cxnYkYepWthonBxKNN/1F
+# CPp4cqNiOuvKp51VSZNVSAFjk1FPpsQhCDTwfIfCjX4J1aO3MGSKJQhvQCm1mNqs
+# bJEqDR098VJWTAXj4yYwfKHIQ4XLhGF+r8wtaL/jV5l0dcEFXbQiFwL6V5L4qAbv
+# 7RR3Qnv+NRAuccclQkpQwycQMptOSZshY7JsKvqc1BfyVUWQUBY+7gcSIsmH1YfM
+# xEm+fA2t9Ah6lPBoQ1gaR/cPJkJRtedvh+3w669pbXhKnDRGlP1Ezl2mSJHsUzU2
+# 1Q8hgJAQAFQg307kaYYuMHCMfpBy70/GRZlSq2XKSB6FKCxDmJcDyui2wPPwBe2b
+# fTfuxHoBX7UaYeMZdKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjEwODMz
-# MzdaMC8GCSqGSIb3DQEJBDEiBCBR0ZlUiyhSYhQXlDXZbqFJFrTeaRdLxrWI58Fn
-# h8QGLzANBgkqhkiG9w0BAQEFAASCAgCRM7Gv8WS798kzHG+6E5OWLs/icA3a5ZIt
-# 2zUM2nzcopU/4wTSgR92ZKD+p+bzjdH2UYzAyAkcyTfk6m2C20AxjYXgd0ACWKOD
-# w1aBqqzgtaVJQCtAxXHz1cPBS6V0DfOVToTUaE1N7HdL+jGk1acFRaar1eDcfw2S
-# thAB6oUTO9lCIaGd1hk2xbQv7AxvtF1ZtbAomL7ds0geBVROSgYJefb3NaxxmaEh
-# mE3qZ7lmTrB5dgvayG2NsdpOrwO/TBh6F3kIvUb+FPK/up/xbieC6HJbDJpRFBwC
-# nFZ+mClpX22Gkj+odpuDVnfR61Yk+adQnzxY6zQKSD/aFIBkgq9XB/AS1erL9W6f
-# G2vv0GG39qU25S5rkQDhggVJ0oLf1Qf76ropJ13pw5H6Fv7LbFzy6DTcjC8pzy6V
-# 7iiCNIls5ywLDKKbC6qR1RAfRBnvqDHa1Og02R7OvUoSqZXfDSkuiPrvI6ZrDut3
-# 1u0FpW/2KmZ2Ik91XRlCHmLprlZriZiNQXXOLNWjo789WdFXNBx++p7gJ8HoQIyl
-# f2HCF/ViA9Tmi/Sy1chsUR0gyRNKZBXl4NbXN3+i82WcYOgblz7aB1Hl6nrXiHVh
-# 6tT3THUF6CGgrwLpoTssWRpCXRIX9IiKA9TQ0pp6FLgDZCwFZIZaB/zPtsZioOnU
-# cqU82hWLsg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjQxMzU5
+# MzdaMC8GCSqGSIb3DQEJBDEiBCDLxTXTU3H4K6MBv9gMdZA0P3eXs5rnYUxO8r0X
+# C0i7DTANBgkqhkiG9w0BAQEFAASCAgArpR4otWvaBWlTwS45xA5o2ITqur5YHsZC
+# M9O1/ygpRpuNBrjgxus+0uOZtsLQXIkzrMc8l/TKSEpwjShr11ATJAwu8d9W3X3M
+# 9RCl1rlpVRD8zi+Mq3DfX9JSq+rwakjI3d1qNspnScweRsgqrAuC0ySDRZK/OfbQ
+# bu+mYkOFfmjj/B6+2JTP7q5vbHemJsk5vBh9oWlw50jY23FsGP2b0MOfXFXqbHDn
+# VnIy+3pmKtT7a8WB6DR+9AyUjrEWiOgF0F7w0dWOy/wpEtP2c18yggPrhftsP+uK
+# CY0CrJIpUp0SqCUDzOwbDP4lLz6vVeO6V9QFEdSLI8UShMZr+hzYYOMqJBQWxy3S
+# bDbiZvcwqy+NSQVOtv5yIOX0Kb22EXlw1sWcI/yQluOOMOaD40DBxR6K7GcEcFSS
+# +cgl5AKuzueVAbtqJ9M3fbiagVxK/MsIvIlNVY0bdCnPQYME33Mr4uM5yLhPCNwm
+# eknBNc6XAD3oFkOLjRdloWM2XyOXYxattKJ9YS+KczEhmJZv5lMckdgvN+DGJk4K
+# lxh2IVRTibGbzbnQuczv1LqudzIHURvg+abydAYwbRNDfReCTdeqP8ynH8DaobgH
+# Pd40UIQPtVpFBX36cXiN4s6Rxqj4SrKcNx/sEAB7qrhJ18YCkteR65AUsF7Ux7An
+# lDm5IekHJA==
 # SIG # End signature block
