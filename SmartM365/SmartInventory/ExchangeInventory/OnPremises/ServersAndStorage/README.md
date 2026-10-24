@@ -34,7 +34,7 @@ The per-script local JSON key `ExchangeConnectionMode` defaults to `LocalFirst`.
 
 Session startup/import failures increment the existing error counter and log a warning, so the existing completion path produces `CompletedWithWarnings` with exit code **3**, after outputs and mail. The banner and execution summary retain the nonzero error count. The source-receipt helper does not qualify a run whose error count is nonzero: its run receipt is Failed/unqualified even though the inventory files were produced. This receipt contract is unchanged.
 
-A target-specific read failure remains WARN-only in the general log counter, with an ERROR row and a nonzero `ExchangeReadinessErrors` in the business summary; the general error count can therefore remain zero. Changing this accounting would also change source-receipt qualification and is deliberately outside 1.8.8. A missing config key uses LocalFirst in both code and template; an explicit Remote or LocalSnapin value is preserved.
+Since 1.8.10, a failed certificate target is logged at ERROR and increments the general error counter, matching its `CollectionStatus=ERROR` row. The run continues through other targets, exports, HTML and mail, ending `CompletedWithWarnings` (exit 3). A nonzero error count leaves the run receipt Failed/unqualified and does not promote a new successful current proof. This prevents incomplete collection from qualifying as a fresh complete source. Expected native failure followed by a successful remote retry remains WARN-only; missing remote metadata remains Unknown/WARNING. A missing config key uses LocalFirst in both code and template; an explicit Remote or LocalSnapin value is preserved.
 
 CertificateTimeoutSecondsPerServer defaults to **120**, an integer from 1 to 3600. The budget resets for each included server and includes child startup, snap-in loading, session opening/import, reading and worker projection. In LocalFirst the native attempt receives at most half the total (60 seconds by default); a failure or timeout permits a remote retry using only the remaining total budget. Remote and LocalSnapin use the entire budget for their single path. There is no second full budget for a retry and no unlimited/zero setting. Missing configuration keys are synchronized from the template; explicit local values remain intact.
 
@@ -227,3 +227,16 @@ Offline validation (synthetic fixtures only, no collector, authentication or mai
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File SmartM365/Tests/Test-SmartM365ExchangeDatabaseMailOffline.ps1
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File SmartM365/Tests/Test-SmartM365ExchangeHealthCheckerOffline.ps1
 ```
+
+
+## Combined A/B/C acceptance
+
+Run one offline acceptance command from the repository root:
+
+```powershell
+pwsh.exe -NoProfile -ExecutionPolicy Bypass -File SmartM365/Tests/Test-SmartM365ExchangeClosureOffline.ps1
+```
+
+The command runs synthetic suites on Windows PowerShell 5.1 and PowerShell 7, keeps per-suite logs and a results.json, and exits nonzero if any applicable suite fails. The existing receipt-reader suite requires PS7 and is run there only. It covers receipt alignment and rejection guards, lifecycle cleanup, deterministic mailbox HTML, modes and serialized objects, calendar backend, bounded certificates, Health Checker, cache copies and weekly publication. It never launches a collector or contacts Exchange.
+
+After publication and source deployment, one operator acceptance block may launch Mailboxes WithADPermissions, Calendars and Infrastructure directly in sequence, without the orchestrator. Inventory-only and OnlyADPermission-only branches remain covered offline; distinct production executions of those modes would collect additional data and are not implied by this offline test. Expect qualification failures to remain explicit when source data is incomplete or a certificate server times out. No server repair, task/runner change or rights change is included.

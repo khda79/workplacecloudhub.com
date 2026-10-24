@@ -26,7 +26,7 @@
     New-CimSession is used over DCOM only, to start the Health Checker scheduled task.
 
 .VERSION
-1.8.9
+1.8.10
 .REQUIREMENTS
     Windows PowerShell 5.1 on an Exchange 2016/on-premises management host.
     Modules/snap-ins: SmartM365 WindowsPowerShell5 compatibility module; Exchange Management snap-in;
@@ -38,7 +38,7 @@
     and the Health Checker scheduled task must be installed there.
 .NOTES
     Script Name : SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory.ps1
-    Version     : 1.8.9
+    Version     : 1.8.10
     Requirements:
       - Windows PowerShell 5.1 with Exchange 2016 Management Tools
       - Exchange 2016 read RBAC for Get-ExchangeServer, Get-MailboxDatabase,
@@ -49,6 +49,9 @@
       - PowerShell 5.1 or later
 
 .CHANGELOG
+    1.8.10
+      - Count failed certificate targets as errors while retaining non-blocking completion.
+
     1.8.9
       - Enable Health Checker from configuration by default; explicit switch takes priority.
 
@@ -271,7 +274,7 @@ $tenantContextPath = & {
 . $tenantContextPath
 
 $ScriptName = "SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory"
-$ScriptVersion = "1.8.9"
+$ScriptVersion = "1.8.10"
 $RunId = (Get-Date).ToString("yyyyMMdd-HHmmss")
 # Vendored Microsoft CSS-Exchange Health Checker (see ThirdParty\CSS-Exchange\HealthChecker\PROVENANCE.md).
 $HealthCheckerRelativePath = 'ThirdParty\CSS-Exchange\HealthChecker\HealthChecker.ps1'
@@ -2491,7 +2494,7 @@ function Invoke-SmartM365InfrastructureCertificateInventory {
                     if ($localFailure) { $failure += 'Local: ' + $localFailure }
                     if ($remoteFailure) { $failure += 'Remote: ' + $remoteFailure }
                     $message = 'Budget={0}s; elapsed={1:F3}s; {2}' -f $budget,$serverTimer.Elapsed.TotalSeconds,($failure -join '; ')
-                    Write-Log ('Exchange certificate collection failed for {0}: {1}' -f $serverName,$message) -Level 'WARN'
+                    Write-Log ('Exchange certificate collection failed for {0}: {1}' -f $serverName,$message) -Level 'ERROR'
                     Add-ExchangeReadinessRow -Rows $Rows -Category 'ExchangeCertificate' -ObjectName $serverName -Setting 'Collection' -Value 'Failed' -MigrationFocus 'Review certificate collection failure/timeout before readiness sign-off.' -Importance 'Warning' -CollectionStatus 'ERROR' -ErrorMessage $message
                 }
             }
@@ -3249,7 +3252,7 @@ try {
         Write-Log "Mode: HTML report regeneration from existing DATA-ALL CSV files. Exchange collection is skipped."
         Invoke-ServersAndStorageHtmlReportRegeneration -RunFolder $OutputFolder -SendMail:$SendRegeneratedReportMail
         Write-Log "Completed regenerated report workflow."
-        $completionStatus = if ($script:ServersAndStorageWarningCount -gt 0) { 'CompletedWithWarnings' } else { 'Success' }
+        $completionStatus = if ($script:ServersAndStorageWarningCount -gt 0 -or $script:ServersAndStorageErrorCount -gt 0) { 'CompletedWithWarnings' } else { 'Success' }
         $script:CompletionStatus = $completionStatus
         Complete-ServersAndStorageRun -Status $completionStatus -Started $StartTime -ErrorMessage $null
         if ($completionStatus -eq 'CompletedWithWarnings') { $smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; $smartM365RunGuard.ExitCode=(3); exit $smartM365RunGuard.ExitCode }
@@ -3529,7 +3532,7 @@ try {
     Write-Log "HTML executive summary email sent."
 
     Write-Log "Completed successfully."
-    $completionStatus = if ($script:ServersAndStorageWarningCount -gt 0) { 'CompletedWithWarnings' } else { 'Success' }
+    $completionStatus = if ($script:ServersAndStorageWarningCount -gt 0 -or $script:ServersAndStorageErrorCount -gt 0) { 'CompletedWithWarnings' } else { 'Success' }
     $script:CompletionStatus = $completionStatus
     Complete-ServersAndStorageRun -Status $completionStatus -Started $StartTime -ErrorMessage $null
     if ($completionStatus -eq 'CompletedWithWarnings') { $smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; $smartM365RunGuard.ExitCode=(3); exit $smartM365RunGuard.ExitCode }
@@ -3571,8 +3574,8 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBuCXQYenkfGq18
-# w2Mw3L1k+A6/3w5V95gQcg0qpiyLgKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD/uC18MpyJkiCx
+# 2UWpk/IWAjM9odqVvLSZaKVshvIo/aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -3705,31 +3708,31 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEILTUFuJ+fgllm3fx+e5+eo1dF95eVFkJ8lktpp2CxrgdMA0GCSqG
-# SIb3DQEBAQUABIIBgGh92vjNp3OmpigTA9CtTbQuN3mMRWjWUsA5Bu0v5LIvRNZA
-# m1yVl6YrATGA9sENRLVBiAjiLUKWpvyLvrUzgZ3l+qT6mBuDx1TI3gxewSyPN6NJ
-# AcEFzoajJ0gymoAi+siuz9gYRnkmB7rtIlYQ36mDKIISzjdMeNV2D4rm9Ak8rQPn
-# QpvxqyvmuVeK1pTHTnVwH78nG35BvLbHz0aJwLo6s5W8s8ANt2c2x1BtYDeVyQR0
-# FJWNsBwhmGsE25eS69py58s9xRKom2Ego4k4gnMrxmsNh4nOx2Fngm71YtsT2v08
-# S5nvGFYSVCta7GAdEC+fnnEqBE5LT/r1Aenc7O7wg9aM46M7CbodxB1lQBYkrclO
-# mtK+vM2C7S80Uoh0jdTvaA3o6Por8hTjBmHWEfvnBRLrKEVMIVWziJjM6V+NZoDO
-# r7NxXU7mQciPMauXzcGN3/oHibRp8fFLaNfMB3jGy+QfyMgxLdS3gwcHWuudxaz/
-# QHlO3byqHV20cIEaBqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIPkX8e56jPQUObHGSp6NpQeHf39s32Az4lEr0ZavWEgbMA0GCSqG
+# SIb3DQEBAQUABIIBgECGqPBMOYa7u9Uaght1BmtlmvLjJazK+Jwi6aT2VvFifYtI
+# GQft3nsZQw/W/6L0AGIJ0gz6m6FH6/rq5Lk8B1jgsTZVoANOmCGKNIdV9v6GJ9ON
+# yoJgz5BLWMiKT/8YAr2YsiiWLwxe6ihF7THOIr7USBtNB3V5Hvhc7gFLCZMXQgWp
+# fN3RdFAB2qHr0YRaTJoiKH6F67bT6XxcDeqtAmJ6xclTU3+mvZNKekKQ55WywveN
+# C+Y/zjbnbaqwybkmTdO8gUqKXT3myhJ9DozA19IU3uM5JKOccVAI6Mu+crQkLH5i
+# 8VA/K5uU6v/VxVieGR7bx6b8DVrs6Q2IaN2dK0IcuPi6g2VXGDiEeoIny0/IVX7i
+# jBmd2xFTtxuwUduthZuTW5HMQKyP8UdBRYYyJb0075pfOQ9ftWfFwEFvr05mV6RB
+# E6PWrYLQvxD1PKwC5EUxy3APN97huHM6yhzvQiGwPsS2tjMKafZwIzA/3nobqEWn
+# mf3rYHKEOE5K4yE91aGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjQxMzM3
-# MDZaMC8GCSqGSIb3DQEJBDEiBCBXw0Wq+PHOAlY5gMGqrI7FEIjVjmAlmiJcHU7u
-# FUi/7DANBgkqhkiG9w0BAQEFAASCAgBVfWeblhA7LiMRaiAgvVVBGpIb25cXzhkE
-# Nsr/snHAS94Y5yk8AGjr+5i7GS2QvFZzmBZXg46agyqxSlW39uupBiih3+ImibqJ
-# CET9UpogLF+ZHL/JrEZ0vYTCjC6EhMMH4EB9OHbCaiIaEuyR099Q87FVL8gJlWSj
-# B1GFcs+4SQpY9ga3tGpwzovIi24t542OryToJFMMUrfaF2+XZQfYeF8SUYGVwv9M
-# el8vyRyvJU0QM6jDA7JUvixNNKQ/Iu85+MTgzBWRRWBVyUSoTdpPaHJKm5Jrbgbh
-# e3p/HIL312YjRICfcFEfWJHnbDP4pp0t/US0CLR2tsL0o2jA7PWo4MYvfGGz1dVP
-# 8s3DMAYp4ax/OrZtPKoIR6G4SmOEgy3Ko3a8V7XPj4jc14aXLXYcxn1/K3RwRDpW
-# 91ddZofDlWKAdilVEZcmhPHjxdO7iUKJQEZPVxyl3Ab2NRGu2cvtiAGq4QI3lnbC
-# pFQwL1bLjoQbMWrFPXiW47pENL/i0qVrBDiHDD4GR9JH8nYUE82rtArcg6jn+FQi
-# C3FlB3fzrkcvl2lhNvmjyc6GEoHJJFoKP4k1xjwTANdqKy1iSLqYRoIDuDD8r0ud
-# dRA4cDdUFrwHQ80ccKuYNOVKgvpMB3ekLT+pOS5uH2XklTWoOkyIQKZ5uQkuVsKF
-# GjzUYFssKw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjQxNDIy
+# NTBaMC8GCSqGSIb3DQEJBDEiBCBdW5BIvfK8Xe+r7GcNtFpg56JXTYJ7cYdhKc1R
+# FsaW8jANBgkqhkiG9w0BAQEFAASCAgAfhIPC1E+04hFawkiJsWpddUSZP1eW84M3
+# bgQEcRC8gSUyY5NSFJF68aBrgoeUhA7mkzHTjv7p203/yPR+GjHMhaZrskG/fqJS
+# Sp/GLJrncrHTbLEvCPvSv2ueImtvsVMvDxzMfPEAmC1OzuPOQioiJL9UWQ3pWvUK
+# 92PZjYoIeKFP7An9RRaiUm3af9DnVZldQAH8e4gcpia3KwYUmk18Z1RW8qWJDiWZ
+# /LIqKtmYkVBshpyXwWIMi4mVqnQWzSCqb/hvrdHeMu5KmA/A33DoKZtslykrfVOk
+# vOJYu+PvWkmuhJ+vRyb/Tc/WmjmS7e+izcxwOSGLhlVoGHJpuTAHRbItPAKG17Qk
+# GoZCeIGJJSXIgdIS/qnOS6RY8R3XgPe0aEAJcHZSME94VtKng/OG5h3lRTP5+pZW
+# F383Xxmt8EXI5V1PqKTqc+pzCNGKXxVbLalfUbveP/8Lofek+wDvdxMK5VnD4ioD
+# 6s2qOgRo7Rly9lNJtzXmWlciuJl/BHju/OiiVonQwfpZlC8LpshIa7TGQDKqNU70
+# cuic2B3Y8Ehab+293qgXKpjf+iguVoSsEc8Nke4jrNAHnZ7gd9i00r3p7XxBoXl2
+# Y5vPQfNgndCy9F/Apg/43tbEOI36fwg7g8wzvE3xVVQvwwof5xhI8FL8xezM75dJ
+# dPR1l+zBUg==
 # SIG # End signature block

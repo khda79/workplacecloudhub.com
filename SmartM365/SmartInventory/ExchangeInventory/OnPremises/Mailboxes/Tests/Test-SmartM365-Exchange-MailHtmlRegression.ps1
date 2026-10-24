@@ -1,5 +1,9 @@
 [CmdletBinding()]
 param([switch]$RecordBaseline, [string]$ExchangeSourcePath, [string]$ProxyRenderPath)
+# Freeze fixture formatting, not the production renderer's locale.
+$savedCulture = [Threading.Thread]::CurrentThread.CurrentCulture
+try {
+[Threading.Thread]::CurrentThread.CurrentCulture = [Globalization.CultureInfo]::InvariantCulture
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
@@ -34,10 +38,19 @@ $rows = @(
     [pscustomobject]@{ DomainName='b.example'; TotalMailboxCount=6; TotalLocalMailboxCount=2; TotalRemoteMailboxCount=4; EnabledAccounts=5; DisabledAccounts=1; TotalLocalMailboxSizeGB=7.25 }
 )
 $rendered = New-SmartM365ExchangeLocalMailboxReportEmailBody -ReportRows $rows -DailyStatsCsv 'daily.csv' -SummaryCsv 'summary.csv' -Title 'Fixture' -ShowMailLinks:$false
+# Semantic checks keep a baseline refresh from accepting wrong totals or unsafe HTML.
+$plain = ($rendered -replace '<[^>]+>', ' ') -replace '\s+', ' '
+$plain = [Net.WebUtility]::HtmlDecode($plain)
+foreach ($expected in @('Domains 2', 'Total mailboxes 10', 'Local mailboxes 3', 'Remote mailboxes 7', 'Enabled accounts 8', 'Disabled accounts 2', '19.75 GB', 'daily.csv', 'summary.csv')) {
+    if ($plain -notlike ('*' + $expected + '*')) { throw "Missing mailbox report evidence: $expected" }
+}
+$unsafeRows = @([pscustomobject]@{DomainName='<script>alert(1)</script>';TotalMailboxCount=0;TotalLocalMailboxCount=0;TotalRemoteMailboxCount=0;EnabledAccounts=0;DisabledAccounts=0;TotalLocalMailboxSizeGB=0})
+$escaped = New-SmartM365ExchangeLocalMailboxReportEmailBody -ReportRows $unsafeRows -DailyStatsCsv 'daily.csv' -SummaryCsv 'summary.csv' -Title 'Fixture' -ShowMailLinks:$false
+if ($escaped -match '<script>alert' -or $escaped -notmatch '&lt;script&gt;') { throw 'Domain name HTML escaping failed.' }
 $bytes = [Text.Encoding]::UTF8.GetBytes($rendered)
 $hasher = [Security.Cryptography.SHA256]::Create()
 try { $hash = ([BitConverter]::ToString($hasher.ComputeHash($bytes))).Replace('-', '') } finally { $hasher.Dispose() }
-$baseline = '45D1DD21E94DA7A30F3033DB49A30EF2BC34E6536CD4CFDDA8DFC56DF82CA06D'
+$baseline = '4B1F6548006A16A684F21CAD8BF7A9F1D83CD543B5DF853CCF8695517CCF8EF0'
 if ($RecordBaseline) { Write-Output "EXCHANGE_HTML_BASELINE=$hash"; return }
 if ($hash -ne $baseline) { throw "Exchange HTML changed: expected $baseline, got $hash" }
 Write-Output "PASS: Exchange HTML unchanged ($hash)."
@@ -95,11 +108,13 @@ Assert-ProxyMail ($proxyRendered -match 'width:760px;max-width:760px') 'the 760p
 if ($ProxyRenderPath) { [IO.File]::WriteAllText([IO.Path]::GetFullPath($ProxyRenderPath), $proxyRendered, (New-Object Text.UTF8Encoding($false))); Write-Output "Proxy mail render written to $ProxyRenderPath" }
 Write-Output "PASS: $proxyChecks ProxyAddresses mail layout checks (synthetic data)."
 
+} finally { [Threading.Thread]::CurrentThread.CurrentCulture = $savedCulture }
+
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCIEPxaW26s/USH
-# 0FY113UD2a0bkh2kFi4FRZ2S8ADEKaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCZ6Nnwwu699+wC
+# gdbJ78sSn+BuWtTnQJaNt/F2bBDZXaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -232,31 +247,31 @@ Write-Output "PASS: $proxyChecks ProxyAddresses mail layout checks (synthetic da
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIBT9N4+MIbBNAlV+DmNJVZ9tRLoOEagcscfid98/8sa1MA0GCSqG
-# SIb3DQEBAQUABIIBgKTsuhS+B8Cq1atOBfWeWr9WdQSoSphheXGVlGKYtH/MIGGq
-# btWd61dHvlpPh2clNWO2sR9HPQZmFPdwcudNBatPy0a8Dx2dZxMzYHkaNt173/sx
-# mJBYJDyzwKpXWoLsnTvnwungxEWP8nqMgyL3MZR81RH/KTKFflpn+dHg9gda8VKR
-# zkwJ2ARb82rhzenjx9Ekuj4n2/SOYc4SYWhGoUMDlP0DY95TXVRgqza+Tir79HlG
-# nMaszzrR2GM0m9mmV6QRmctdpPSUiujwE2DLShlwtJvGmkN24652pLu4ZmUYNEno
-# 0D5PZukTOfuLvSOxGm43VOy7jeH6l6ShCJKK9xoFabpwPZPY9rwS6WkGwXO6nwA1
-# JSi3hbIiTS7v57X+XlvToC3+xNeO0T8AtdjQ7ZeUPSU2yAKX2Za1vSb7TJYz1W5l
-# y9kl7MyKgsddGZUNeWTDlisrfoS7VP3di73h8GqvZ4OJfA3aXUJH+5K3xplX0lJ4
-# ZRtdEWFoWEBH7iSZY6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIJrMS8DKn8/o2DBOoEAo0PfWEaTPHaE3sWEJZD7Ce5KoMA0GCSqG
+# SIb3DQEBAQUABIIBgK0efXQ2Hn06z5s/s+XyZ1Sg8FFugim2vWrLm0uCBCr/JaWX
+# CGxk7bm7pUbNzvLCBrHWPXnos2OWIgHYollRLo7XkTPGa4sWnJA8xeZi6+0zTH5/
+# GMaSje9rTwTOdvr9kGx+KyORaQilvWs9ZocveMyGCVwFVPCI2eoDD8jMoxr/iGH8
+# 9MrseQ+6d0UEQWcbiVilt9guqtdcsijfNuxyuEN48tNW3wLmKutAu9sHIZYtG3Tb
+# k+UKbVDVZTEpDz80loBlBEnUrs6e5ttONaOylz+wGWlF2ml9zwJJDn7jgoGRhmMM
+# bwaqqx0HFq8d+Z9Stzjoq7GJE1WIRN9vGukLcKunj4OTBuPOtGK0yFuuMgQUTYjX
+# dMUNX/OFq/9BMR8m+Sw1rlroy7+iCA7G10+F/X6BHqeVPvIIfjYVDCjwGdHpcGye
+# QyusHHw9x9uTJ0d9i2Smo8qVnpD0Ch8P891J/91lcKUIE1aX4qpd/U9U616FE+gi
+# cNo9rLkTVWGA1FLx96GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjQxMzUw
-# MTVaMC8GCSqGSIb3DQEJBDEiBCDHsrFr0ItmfOWuISNEpJBkKxNkKE/XpIfyY7pz
-# TfQDATANBgkqhkiG9w0BAQEFAASCAgBtMIgSlS7xe/dWaHVhrTNsB2BgcPGH1GAA
-# EjGLGxUuFw2DjTDXIaO89iVWN/I5UtZ2sMjDa/9JPD2J3QQA3hC5HAQldHrQdd7C
-# KAPXzZH7FtP0FSn6tKegj858P66CRIMhYSLwv6kdx8qpERj48P/bhBpjxXk0ag/i
-# ffebE/2fIracsQ03yYLgw0a6oU6viXZSBagOrpVJPsC6pIX8Kwdra+jhZRMwrwQV
-# 9QAc/cuJPEqykfaef7J19xFvcAR3WLP0RDDQe/Lz73BYxbr8/goowVyu/bgEIfNj
-# UC6n4H2JfOMKSTfGVDwlzIK0x9vz5OWf4d0wImee71sw1NCkg+LtExGnYlq1ktVF
-# 8t3ghhG3yDjuHxky4iELhRGdxKgoV32jFqWFiwXwMOzYeKHFuSlELPF16YF1raVk
-# dQMUbO6NgVX5Op72F936RbT6vtrSJSyRPR41Bj5Kuk86wsibwJ6BwCXsHdKHN0w8
-# EKIJi9NpVIovy3jWSENNGUJvRoKn0O7KRk+GYqBUvrmF5+b/reS/lFfm/ENSgQNx
-# FAdVXtjCYZx4HjSMtwipHmOwsyLC66KHi1mP6lzouv40xstHBSyw7v3LrD1qdGHu
-# OURm4O1szajD6Ysa9tXRYly3qb+L1Ta6ryecVmb+jSnXVhgjSESwzHspblV2Mhr8
-# Plg20brICw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjQxNDIy
+# NTBaMC8GCSqGSIb3DQEJBDEiBCAsa68+M1o6tBUW++LBhgxXPy6C9g2sAP7J2PxO
+# hOFdiDANBgkqhkiG9w0BAQEFAASCAgBMNGzeIlQJdd3URLgMhjj3ikEn9wBbAe6h
+# PcMTo1n9w9h5mPsuHUGgpPciLKOzd3TK0UT6l39Utcmb7O0YT6UneB7LIY7VItpw
+# 4oDIYf0YfpulRYI3wJKzJCRTxFEimta7E0hlQqrbDeB1ML38qUoequAR4v0dbAnb
+# usjtYdIPPUWznd3QMA3t33NaQeIvNzT85ecuWqOpf+i+cacYvmSMdow+b/OZMeS7
+# jq+JG7FngfS5JY0qXEcC0UuqUSidwTU5LpQvW0vjvhG95VbcqtOM92DMq0YHZIds
+# IKq17TMkh05k/M9/QlC9UYjJrv+ui9pdY8mfPHPXo5Cn6hsVrPjXaFAL8vlEI334
+# iIr5MQHsZmpsGymXEPkJrK0TWdwtkUGOuMGWR3MvV6DZ5hBXSFDFTLRaL6NwyD03
+# PEp829YJ7jX8e8wpRLxkF0LSmUUT+ty53BIXlQYOpfzDZv0V5cFC2O9ieuWVGoJJ
+# +ALTFarwkNSElVA8p37kSCivp0qS8//JkrgA71H5Q8mGJN9390apEy4/S/vRnixa
+# TQVc+/rWI8GAeZpUSl7JiNUvPnKuOyGo1dLqTvU35IUwDLrg5du+0Tt5207Q82V/
+# DlAwjaYgkZKivqSJsIQ0QGoMNETf8i8JwIi7DCqqgMvmYXGUzAPJNvRiVBy1lZ4K
+# ErAhRxpYBQ==
 # SIG # End signature block

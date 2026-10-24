@@ -59,8 +59,11 @@ try {
     $fixture=New-SyntheticProducer
     Start-SyntheticReceipt $fixture
     $running=Get-Content ($fixture.Receipt -replace '\.current\.json\.txt$','.run.json.txt') -Raw | ConvertFrom-Json
+    Assert-ReceiptTest (-not $running.ConsumerScopeQualified) 'Collecting must remain unqualified.'
     Assert-ReceiptTest ($running.Status -eq 'Collecting' -and -not(Test-Path $fixture.Receipt)) 'Start must not fabricate completion evidence.'
     $receipt=Complete-SyntheticReceipt $fixture
+    $run=Get-Content ($fixture.Receipt -replace '\.current\.json\.txt$','.run.json.txt') -Raw | ConvertFrom-Json
+    Assert-ReceiptTest ($receipt.ConsumerScopeQualified -and $run.ConsumerScopeQualified -and $run.RunId -eq $receipt.RunId) 'Qualified current/run receipts disagree.'
     Assert-ReceiptTest ($receipt.Status -eq 'Completed' -and -not $receipt.IsPartialInventory) 'Complete producer rejected.'
     Assert-ReceiptTest ($receipt.Files[0].Rows -eq 1) 'Logical multiline CSV row count is wrong.'
     Assert-ReceiptTest ($receipt.Files[0].SHA256 -eq (Get-FileHash $fixture.File -Algorithm SHA256).Hash) 'Exact native hash missing.'
@@ -83,6 +86,16 @@ try {
     Start-SyntheticReceipt $fixture
     $receipt=Complete-SyntheticReceipt $fixture -Errors 1
     Assert-ReceiptTest ($receipt.Status -eq 'Failed') 'Error count was ignored.'
+    $run=Get-Content ($fixture.Receipt -replace '\.current\.json\.txt$','.run.json.txt') -Raw | ConvertFrom-Json
+    Assert-ReceiptTest (-not $run.ConsumerScopeQualified) 'Failed run retained consumer qualification.'
+    $refused=New-SyntheticProducer 'refused-current-proof'
+    Start-SyntheticReceipt $refused
+    $null=New-Item -ItemType Directory -Path $refused.Receipt
+    $currentRejected=$false
+    try { $null=Complete-SyntheticReceipt $refused } catch { $currentRejected=$true }
+    $refusedRun=Get-Content ($refused.Receipt -replace '\.current\.json\.txt$','.run.json.txt') -Raw | ConvertFrom-Json
+    Assert-ReceiptTest ($currentRejected -and -not $refusedRun.ConsumerScopeQualified) 'A failed current-proof write qualified the run.'
+
     $global:csvGeneratedPaths.Clear()
     Start-SyntheticReceipt $fixture
     $receipt=Complete-SyntheticReceipt $fixture
@@ -207,8 +220,8 @@ try {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCArpXbn/D7hUWx
-# DHDeDDJz5yxSuSD18lB5IMRSNX/OiKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBZt1zd+JoyqeXn
+# AwJebUb14dfpa0af/evvJg64/nJL5aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -341,31 +354,31 @@ try {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIHoFDNKGyBq+pCkbdjwdufLHd5ucMZ6Q5dIs5+m76vLJMA0GCSqG
-# SIb3DQEBAQUABIIBgD+c+Fg2PXnzLu0cseQuHmuYdA9dME5TsxdGhE1OKjLzevd4
-# v5juv6zrWMUxJ1BPN4gUycp72i9jIQBDhHLecYMWzFRH50GiD1T/DwUMMOxjLVh9
-# CNl8ruraOhMTtDx4WZGFfRGzfIc5DlbfA4P7UhvzT8JoiseSJT2CvV/vm+qke+C1
-# vWUPuNBF2awo0D0zlFZJNDyw6ryerEZyl1l9/SPlPnLMJe7bL/NtVW/ZlN44NEsS
-# WwER6k2K4nza6QmPtKReGZWcGoeo7xc6wMOPW7VRkGqrUB5XtecmFbN8xA5zp95W
-# 0ch5qoCOK6WVhL2PHyG/qTm4AwjVgjTLSdmlgmUjwCh5gqP2oukz2QqYIO+bVaKv
-# Vyju2Pw3OOAuLlyfFrvXTanQQa11nxKC2sEjQiARi0dE4Z2EN/PEpN7eom9JcuIr
-# PtuEptCZVbVkmzIrr43YZkHhDOHSoy01/ujZ8Kts2jSnsF8D+3LJY8gPwTDiaBvF
-# 8lEKmyS4mWP5KBvUcaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEILEoAsjHBwcu7uPxIHzIFYInGLcghouMEclzd6Cz/if1MA0GCSqG
+# SIb3DQEBAQUABIIBgLCsdjyVWHeUOsdnCY0m2IxxvHgoqZSiHHa9LFP5g9JbscFa
+# K0z/QLI7uWca5L5CN64uVYgFf+lGRzGqpWypxHLy99nVn16IrRvUBvNIl7K8dz5n
+# B2fK/UrLuFpAtEJtSw4RdF3usV0W6rVEUnSG2T3ab3iOiTcAmSaOtJTzvbYBGnuC
+# 3g8xvjRrJquM6IT0E2AVvM2yUnu3r2+z2p2ZId0arspQiNIoryWv8gcxqbnMohwJ
+# qGojyq03vzLl0amu64byOEf1h3fvxmLl9t5Mz9qp+KrMGQdkZy2CAR8xdYE7Ime4
+# erz4ZtbLcgqFt1je6LTQpjNdBAusZXTTlkLNmHOTe1AL25YTvMPdH0G3a/2GLdtT
+# z39VjyQ9d7GgfkvrhSw8h7/5uPEzTrpggpCSJ3miTXY6hytUiIzodBlcWSqUSPDt
+# KI9Ts9EDbRxziu9FvykpBwJp8Y2vpZFSn2b1iMcujWnYImw9C6toWPCCtkFzn/mL
+# OdOyiTDZodaPZW46paGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTQxNTMw
-# NDJaMC8GCSqGSIb3DQEJBDEiBCAGC6bfTikiLjpmaM0212b6uEINdYFT8L73NiSv
-# yca2XjANBgkqhkiG9w0BAQEFAASCAgChXG40xZW8n5cM7rB077+Q6Ime+SCI3wyX
-# PDVTH7d5BmjxqNqFHVaa7ThXF5+H7V/zPCvU0uuE/RWdss0LCxpwV46BKCUHlLxx
-# I26gJs4Db9TTLDK1lvP84q/o61AkH07/PT1ZPqpOLoP7Eqk+TJE/6ASv8gbAM1D4
-# XqfO+u0Qw/jj2O0tmYNnj0UEabATEeJH238kLSPiH8sOIaUfBqF+luZqGGrpQMRL
-# IldizMDtKXZjmdp513xRGr5nEroWcDocdto2Focbw/lfibLo4BqY0X2PzG7xqBRO
-# Lu7kH4rzrg7CH/Z68JjUx31rM99rqfs0BUvbUNWoIN5WUJ7Mm2m0IR1VqHKLkGGb
-# e2On23bFD3WQAiwUUf+nx4aKhpB9x/DWjqzlSSO2QYBG0Cv7hxXgSLYBP/mBhrpP
-# Ga2HhzZRsRiANjF1zwxI41B/y5nMC69Xc8aKAqsAfbFwLnr483mQOohB/0raAj78
-# l3HboYPDH81eTk3d4VyQm+msaSmeUdqLUKGXi4rHzEnuViD+cdcE+WAvG5oINNIZ
-# 22RfZ0GFdg/07B4kzUvt1vJCDtJ9wFGvwNYHQMiQrl28UJtJcbr96C7YxF40YeOP
-# n5Dh9LbWNmdZ+lYfcGeoRfz5Fdww2DRCRsxsnV4lYBN7Wlmb8zRkv7B0XDKDXZpt
-# 5n2Ar1XczQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjQxNDIy
+# NTBaMC8GCSqGSIb3DQEJBDEiBCCl0s8gBhlh8wkhW9p8xBrUHkVjFqFYiOuOJuJ7
+# 8Y4G1jANBgkqhkiG9w0BAQEFAASCAgAEg56AWuOh+JNe3Ee7r9RjPalenD5QYbcM
+# iamqSRoybB7QVyYQCoR5up7w8fZxrG8ySfbbGm5iGZvfTpZsQWaAOR80wOMZD2vE
+# JV74Xth2KnpBIrWabdUTZxIexhzGYbzdYhLKxcsPCGjgn0SuiBr6iv5RJJd1WZ2M
+# 2vLIOBYM7OQHjicSrLkZVitFCTAWnMiYI+3ZvBUV9HIqe72CPgMMCILGvivCU5/W
+# RW7FPn1iEMUc0tK/EXp+zD/F8KBSGnMHGwAwop1Di47Ah0C+zMp79USCw1qF/27A
+# 39A+SkMDW+Dlx81cJUjW1qXodHt+zhmezX7mhmFplCE6171+Rj0ORUjTTi0S4WKF
+# 7pctVfz1olEVU2rR/XZEUoefa+io3c0Q0UHI7PlvpEAn3BSRMEl+lAY924j2Bfxr
+# hFyOlyONq8wTbh9ba6dlZ9IZLeeVlP7udij/HR5Od7nqf6LTtOKndohVYaFwBVEs
+# /hm0k+o2QX5HGKSuwpydWrwN8spv5otrAiTvUDi2ePej3QG81xkJbVE8EYu9iwH3
+# 0uVvqfS4x0YJD1z8YMtGvIdcFZw5w2mAdzBo7L/1ReWfb89sHTeJJDKsBgQzSg8g
+# /0O+JM5IfHbNPgvXvUkmyWomHBsxzd4tYTmZ6YwYv0k7/JcD3DF7oZN1Zqkgm/9R
+# JtjUDBgsXg==
 # SIG # End signature block

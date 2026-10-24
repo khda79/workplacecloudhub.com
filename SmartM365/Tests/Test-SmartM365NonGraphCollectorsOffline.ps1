@@ -2,7 +2,7 @@
 .SYNOPSIS
 Synthetic regression tests for non-Graph SmartInventory CSV publication paths.
 .VERSION
-1.0.15
+1.0.16
 #>
 [CmdletBinding()]
 param(
@@ -539,8 +539,8 @@ try {
         $mailbox=Get-Content -LiteralPath (Join-Path $SourceRoot 'SmartInventory/ExchangeInventory/OnPremises/Mailboxes/SmartM365-Exchange-Local-Mailboxes-Inventory.ps1') -Raw
         $winUpdate=Get-Content -LiteralPath (Join-Path $SourceRoot 'SmartInventory/M365Inventory/IntuneInventory/WindowsUpdate/SmartM365-WinUpdate_Status_From_Intune.ps1') -Raw
         $adHealth=Get-Content -LiteralPath (Join-Path $SourceRoot 'SmartInventory/ActiveDirectoryInventory/SmartM365-ActiveDirectory-HealthCheck.ps1') -Raw
-        $exchangeCompletionLine = '$completionStatus = if ($script:ServersAndStorageWarningCount -gt 0) { ''CompletedWithWarnings'' } else { ''Success'' }'
-        Assert-Offline ([regex]::Matches($exchange,[regex]::Escape($exchangeCompletionLine)).Count -eq 2) 'Exchange completion does not propagate collector warnings.'
+        $exchangeCompletionLine = '$completionStatus = if ($script:ServersAndStorageWarningCount -gt 0 -or $script:ServersAndStorageErrorCount -gt 0) { ''CompletedWithWarnings'' } else { ''Success'' }'
+        Assert-Offline ([regex]::Matches($exchange,[regex]::Escape($exchangeCompletionLine)).Count -eq 2) 'Exchange completion does not propagate collector warnings/errors.'
         Assert-Offline ($exchange -match '\$reportedWarningCount\s*=\s+\$exchangeReadinessWarningRows\.Count\s*\+\s*\$lowSpaceRows\.Count') 'Exchange readiness and capacity warnings are not included in completion reporting.'
         $warningExitPattern = [regex]::Escape('$script:CompletionStatus = $completionStatus') + '[\s\S]{0,320}' + '(?:exit 3|\$smartM365RunGuard\.ExitCode=\(3\);\s*exit \$smartM365RunGuard\.ExitCode)'
         Assert-Offline ([regex]::Matches($exchange,$warningExitPattern).Count -eq 2) 'Exchange warnings do not return the orchestrator warning exit code.'
@@ -577,8 +577,8 @@ if($failed){exit 1}
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDKYXZ3LuxzWtr/
-# dgh8Xe9+FQ/o0ML4/ew8jWWJNHKEEaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD7qqDMXexKx3F3
+# KmTMR6T46RLJGfA0La1CvOuzr4XrF6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -711,31 +711,31 @@ if($failed){exit 1}
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIPTqxgEOm2fVsA7clgZv0HRqgzdzlUsPs4FesNoTtoFJMA0GCSqG
-# SIb3DQEBAQUABIIBgGtZOTc+u9EeWuB2d1kgrrBcZnbRq/DXDuCRPrdUp2MJlWQC
-# rJ4svdiDuWfEF9hon39sL9RaWTfPHvkCHE+UsVzZ61vLW4MwhPdyA6j0No4R6l35
-# 9gsw2RsFIkfz/6Igthu9KmkK/YcJrUVSSJHXNbIzCLwzmYzsjl/9NWeVbyeZ7olL
-# 3CPs/EuwpdgN+f1KWAmBzOA6XFColkGVANbobVsmIC1ebVXIZemWCnnTo9z6zIeG
-# TCmc9mD6Uj4L8fbmSs/UwMx7Z3vVgXTsS99dXIP6Y7eXxA+MZQHgvDaO1toXEeY+
-# 6UUswhArxoka6goO0LhLqKtvaOYd58kQ/1nqUVSx+29cF9kKjFR9GP103sP2tBpd
-# wINQkGrV6MLdkI9mFisdxXIjzEzs3l7uBsicQnO5xLANtDzHwFwiK653AlJAwJUe
-# tOeT+BGjYeCcMZu963klXMAKdz17qHuSngiZhStmcGDt1o0Shg2R6iofEXT38ys/
-# zvO9T0/vXg69KFvEQqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIGj5HmcM2ADvCOtTWKP6g2R85UcVU4PLE8QVXSsMMTF5MA0GCSqG
+# SIb3DQEBAQUABIIBgJ7GEZW/YpSdUMDxQaolx4MKCrRxj4v41pv9S8lpQ1vy41t5
+# Xo0hBmA1Qq3P+LRoHsVlgvjIm4Ox02vP6UJMB7I9ZvqVxJxdrsKs3T7evJevPBqb
+# dV8ZNnJN497cQe5Ar/WnxrkmqptqB7Zq86sFSJGqonRxqrk1Foo9u+Edvnb8ew2d
+# rSK2Y62YBtPoQ7SL/Y2xgh6LJt84mrpCIvOqNGQw0WV/wVneb7pXfVq+UhOmxgmQ
+# 2TBMUwXNSzk2+ZfdSTCQmM728/R5xxRBltmF8eaMFCGegWCiLSM8p1RR5cbIYEsq
+# sc5iUwGM03WlLfuBIXq05AxuaG20pqoEYWQxy2/Dg2BRYPC5q7p6FNM+Y5nmpXCp
+# dgPZlNiUJ5rO8QSdzjEtLCCTxJbXLze9MCoanNRRUU+brl1t8ChCqzzkdJrWCc0w
+# UDI4zmUjiao1XH5ZnG8Z/ufo/KW5JN13sOn2QtsK6jjw0JWb/ZFqAirVjC93Cxos
+# Jy/Va1aslc322p2R6aGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjEwODMz
-# MzZaMC8GCSqGSIb3DQEJBDEiBCDDOoEbMHfRYFhV3Uu0fziFFScHCcwPAnwOlCXc
-# FO9cgjANBgkqhkiG9w0BAQEFAASCAgA7LBoU5VZHvm+FKK4HXpJq8mqr2tOZwB8W
-# YxbF43sWDUUb25+3wU0P2N66L+mbAS+KtvgV5Nenx+/Ah25PmtZdqvR6pFh9Vm6d
-# G+eLKYBJ0tvVsRnYih+5c4dUin6+3eTbD4bES8zEEtFIm3oujNbyCT2+sRh9KSY2
-# NBeZf21FlwvMxay3vf2JK+X72wL566PXfCh3SmZPxLIjXX/rrdC1fvT3INccqZa/
-# Cvos+gvhNWpdjdnmm0fOz8+mn9koXIQmPfgy2QYAw8/JZKIFHH1fR8ctZcLmbvFy
-# SxehtKTgeZNaIHZnQ6IjDxpky08a0Fw+G7t5xMxE9T1/TIjum00Ni/75qCdzonCE
-# e+svJom/FaYvPAV25EMJ0GcOidptZzUev6bI2UKDw/FikMxV4n+w15LEbja74cKz
-# oa85TSBMrZZhXDEY7RLyNOzQOmpLQsWv/3SQpH3b+7Vq98fH2L9MXMPeavP2HHbX
-# 4syL9bPONhQajPspXLsqPXZ5QIfSjfa3/j+dB/y4nKUUWY+8jduZNSyaze5WCsbE
-# 3dIJvplrM2+s/vpxiuyjwQUIr8aQDpx9lZxGE31Zq5y3746Ofjd7BgIu1AAWWcV5
-# BuayKD23lCsIVQSQztQrDtph+e/7Er5IxpqDuhGghzJCSS4Aau6LWQMbTvVvD5tj
-# J9HF6ts5/Q==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjQxNDIy
+# NTJaMC8GCSqGSIb3DQEJBDEiBCCuxy1b53KWwbs2V4MlhM+jjyJo0ehRa/GaKaeE
+# L4JP3DANBgkqhkiG9w0BAQEFAASCAgCgIxUlH1NVt+9Twse2Pqqfk9DrzXE7kbik
+# zscrbouZwX8qJG7gYW1YzcCIAkiC9XG8Cz8D0kvk0uW8pibFRCyncd+v9L6o4Ica
+# 1IXv/3xilWMJBALf2YDvXKck1fLJMN5SfDAYoGplKrZ9R2TVbrF20af+NQRJypXM
+# 0+wMPODBeCvWTLGCFmOMRC9jXtYoq7bIbJY+GL6z9nasMUc7yUFWv6Jswzbl/1hP
+# I4L2no3WXumNZ0NpA+PXSBsKFxslMy6+9lRz2zAArCjl7ue+zSfb2r2jLHB6tiNt
+# xoyVoVrVyWPsWs4crhkQ42TlHnOYQeiviX7/Vfdtn6WkOHimmUeWMIq4DpLTVfvT
+# K9F/KeMiTOfK62JFnxbVxtGf+BkSiixMz5HBi6zYdrO9c7MlY4HxX6zxl/ybP8Xa
+# YdklbAChibgNCwfBRa1KWtt7WbWmHd/804KGcfAiyuSPFI0/OwYKju3VIFTLP4Ny
+# vjmvCEeFzeiuvg43tPJkcZYrZoMvIbAqnsGM8w7715447kV07wUlzn44qnWkSfsU
+# x3y6XZ0j13mW2D6Xml9maPFxz90KpgLr2L/tni9FoGK4ikBX/xOcb3+NZZL1a+7d
+# I6fMuq63ZkGZfeYU3Dj7ZrSIzchdUZOuats++cDRJQUyMMzeUkcX2UJmfZ8cGNFU
+# A6RbxclrCA==
 # SIG # End signature block

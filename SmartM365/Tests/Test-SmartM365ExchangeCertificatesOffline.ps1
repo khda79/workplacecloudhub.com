@@ -1,5 +1,5 @@
 ﻿#Requires -Version 5.1
-<# .SYNOPSIS Offline certificate budgets, workers, projections and infrastructure continuation. .VERSION 1.1.0 #>
+<# .SYNOPSIS Offline certificate budgets, workers, projections and infrastructure continuation. .VERSION 1.1.1 #>
 [CmdletBinding()]
 param()
 Set-StrictMode -Version Latest
@@ -204,6 +204,13 @@ try{
             Check (@($script:states|Where-Object {-not $_.Closed}).Count -eq 0) 'Dispatcher leaked worker on success/error/cancellation'
             Check (@($script:starts|Where-Object Mode -eq Remote).Count -le 1) 'Dispatcher recreated remote session'
             if($cancel){Check (@($rows|Where-Object Setting -eq Collection).Count -eq 0) 'Cancellation converted to Failed';continue}
+            $failedTargets=@($rows|Where-Object {$_.Setting -eq 'Collection' -and $_.Value -eq 'Failed' -and $_.CollectionStatus -eq 'ERROR'})
+            if($failedTargets.Count){
+                Check ($script:ServersAndStorageErrorCount -ge 1) 'Failed certificate targets must increment the general error counter.'
+            } else {
+                Check ($script:ServersAndStorageErrorCount -eq 0) 'Successful certificate targets were counted as errors.'
+            }
+
             if($mode -eq 'LocalFirst' -and $case -in @('Complete','Empty')){Check (@($script:starts|Where-Object Mode -eq Remote).Count -eq 0) 'Native success opened remote session'}
             if($mode -eq 'LocalSnapin'){Check (@($script:reads|Where-Object Mode -eq Remote).Count -eq 0) 'LocalSnapin used Remote'}
             if($mode -eq 'Remote'){Check (@($script:reads|Where-Object Mode -eq Native).Count -eq 0) 'Remote used native fallback'}
@@ -302,11 +309,12 @@ finally{
     if([IO.Path]::GetFullPath($fixtureRoot).StartsWith([IO.Path]::GetFullPath([IO.Path]::GetTempPath()),[StringComparison]::OrdinalIgnoreCase)){Remove-Item $fixtureRoot -Recurse -Force}
 }
 Write-Host ('PASS: {0} certificate budget/worker checks; {1}; no Exchange connection or collector.' -f $checks,$PSVersionTable.PSVersion)
+
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAnt2uBc1KTBoDa
-# 8693gdHB9kNswisNR6HjBD9dtRWnAKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAJQG8+55ZFgLj4
+# 7BcwuhQVDAKwWEjg6EW8raca3XZeZaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -439,31 +447,31 @@ Write-Host ('PASS: {0} certificate budget/worker checks; {1}; no Exchange connec
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEICxvtCcOFosxKkaTiIYwVylgdHlIfn6MSHT4CGHF3W++MA0GCSqG
-# SIb3DQEBAQUABIIBgFanFIhnmW+OA6AF+yeKUddQVvlcgSRfcgEX/88rCESppA33
-# JcfsgOdNokfExjprR/4yErqIniIAp/zMaqE7GtCs40BYiqSXUbjCw5H1fvBu/1KA
-# 1Yo4JtecBATkYtukON1L6u7mToRPAh79NEd28JBla1fPIrlARAzr7n0ioqbShauk
-# VjEb8iKSazPbRNWI2hKcnKOaCclOH88W1SsyAIwHWbDA9RHkhDQJcac4uZKlBCPg
-# VHNjZx9/BIjd7/XnYYYfbOTrjzeYzMDuxnQdEqG2BYWKN25rjJsM22we33SZOsL3
-# twNkh46vfRw7ihHIpon3xq8IR1c2IIXTaIgIsG5+O+K/rYMMKWx5DtPRhNpQM61L
-# HKubaoPQD5ZODH595DdevUbGdfBd4uLMMOfz0LyfAVuymvBj8DT9nig7y5rwmi4d
-# 4/zdT8Q+jRBEjc6aWT5/5aK7DEYZgcAn6qEdty33WyHJhzuM3KThQuHqXlSoWdgW
-# 95Botz0UWmETjK2TdaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIOEm9RJys//ZSTPUoxTP3Zzk7EKldgsxJUYbGh4k5q5hMA0GCSqG
+# SIb3DQEBAQUABIIBgAfvMe0gXIqpDWRlR7bM6Vf2r1hywa4vci1u93Jw7YTppfgl
+# yccCOdQB/0CdN/q7Vp4w5e90u/V+rnZrYb0XUxdJusNxyNLyingtZ7H6Yb1bGHKl
+# aLZTfy4WOwqKIM5+Xsug/O/v7rRPn+zZqMTPCvWjfbU0wqsCsg/blmgT5ACodIw6
+# bhQLEDd3htuM4RU9ABXSIDhH+rO0DosQyWoMo1Jf0qhfRoXh3+duvoz7tdAccAAu
+# FWa3/awdKPA60Vgc1V8iBiGcSfYyl4rBWasfg4W85jcWfGGdR64FBgyVjFCd5SUx
+# xS0IjbFRS8SdEr6JItIAWbkDWIq17xsOw/OBaVSzNkMijHPuyPzKds6QhGwRfe3h
+# iySsh4W9AmTO+n+Opz/MjJdjJzEf7sq5c4ZzFhxfE+38/15nu8FNj+8n18SAw/DV
+# UGxReXK/Hv2UAN0Qru6TigDCxpIkHdd7XmZYVfZZ1z2PDq1je8Ikn2fT4SwtxmRZ
+# ZLweGaqONKQGWaFLU6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjMyMzE2
-# MDhaMC8GCSqGSIb3DQEJBDEiBCAUW/f5YwOhxbOKDXaG4XV7lz0fHwrcXqZy+Bl/
-# wbDqqDANBgkqhkiG9w0BAQEFAASCAgB8ohi9Kk+ECsMBwJL/ElLl9Y5arBFD5XTh
-# 3xYlbSMdVNZyDYuZVWePNo+soOpzxH0qlhaDDSRSfjFAuvzNrv7wwjuN+GknzKJ6
-# ok9byCO24agdDLjnJC6v9BLX+ESw+ImJK3vdUirKkrlnEI/7xSqzhdktrqTCkCtt
-# 4n4S6HV1r9CHzScEKuDw2Wf8hjjlFxTuV32m75tSngtgAYEVcBjl5ZF3iARKvRPH
-# ZPDeM8NYbesyIDGf2glWbuJ7mzKSZ8J0leLTK24eaXHAYnAs0Paknt027S8th1lH
-# KN4jC1rqtKaohA5Re/9YI71i6lTuxaSnVEA25Cvx3tvMBwIuQAzizgaUgl3+Q0u+
-# ej4zRUGei1GVzT/7jd3W7ixQc1CQi8doiMlP4hsHBZ2ZllsoMIIx8O3RN6i2Gwh+
-# +JA5BUH91ei8dB0hOZo54mwhmZm5mEP4WsXXt5uitAzWSTRGtG7nZo4ZHtfYqawI
-# iWoP0uQ0vP/aEOcOyK9rOOKwzuQ6c/sRg3Ol/lt9OBPIMNRhzHshuwrcZJbZr+S5
-# /aMuz4/b1I7DTFOs2h8FkbfjP1Jq5gmfQMbkgEvCDOXIfYwu2lMSZokK5DoqONHe
-# mmGgEaWoF6d0vtpYQixtWwRX7mo0qe024eryqNZ6FbS5desgRS3mfirENL8q+X3L
-# n55Uxvii7A==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjQxNDIy
+# NTFaMC8GCSqGSIb3DQEJBDEiBCAgRrhHy/oGmU7a7MzW5hJsEfxkjZiz397D8ZlU
+# E3tX4DANBgkqhkiG9w0BAQEFAASCAgA8GY1oEL9Zfd3TofS/H/glvBHKGQ47/52H
+# vavk3Ex/c8IYzuNRLxQAABofLrFQMVYxJL+Rx1VsLFYoZnd1fdauG4CFywDj1k2+
+# z6Ax4bip1DmTkgFjniuc7tOJJzOCl4ENmRxboSEGDrW+i+I9d/jioHbvG60BBh6F
+# mZpsXBxTrEL1CBsJtq9EpYydTpl/YGPZ2GozWdH/hm6uLBArCfsLTSblaYgYei5Y
+# cineT3wHEboAMptNDovQJstqKwXeLa4CrvNr7KALQLDAQLiKPZvwfCmD3EhpM5Qy
+# A/7aUzJekJ4ExBtkzGn0HXqIlessYclnPEB/4tltJkPAt9Z9OVnxOVRcP5yElDTa
+# ePUXCotrBT8kguL03N2T96NhVzuuqoUtZyDzMehmE6C0c5h/IxThRiOUBYq9UG4D
+# il6gBZwJ91RsShkHwR4J8ZhWzbPQekCCLVUhiY/IDG/1fdIBsE5bxawiasnz3r9w
+# 0lF/PPAmXOy3Ed6MpdC0RXkkLF8ty8Izui+OcFQKikluzbecpHu2R3ProJZeaFQX
+# 6sCEmXsFvmNCCf0KBhC9G4374oN1pPuw5kPKAFrWjqxXEUR1IJyzAXp6e+tNui2C
+# csUg831oGH2eFMUkMgPFdVuR22khX2Mp/Mh7VpT5i2ye/XlSALmODEGIaaVRIQ7V
+# SacGOHG9ug==
 # SIG # End signature block

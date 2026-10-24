@@ -3,7 +3,7 @@
 .SYNOPSIS
 Synthetic shared source-receipt qualification. No tenant, API, mail or synchronized data access.
 .VERSION
-1.0.5
+1.0.6
 #>
 [CmdletBinding()]
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidGlobalVars','',Justification='Synthetic Core globals are saved and restored in finally.')]
@@ -89,6 +89,8 @@ try {
         Check ($receipt.Status -eq 'Completed' -and $receipt.Files.Count -eq $definition.Files.Count+1) 'A current published CSV was omitted.'
         Check ($receipt.ScopeQualification -eq 'ConfiguredOutputsOnly' -and $null -eq $receipt.IsPartialInventory -and -not $receipt.FullInventoryQualified -and -not $receipt.ConsumerScopeQualified) 'Configured success was misrepresented as complete tenant inventory.'
         Check ($receipt.ScopeParameters.PrimaryOnly -eq $true) 'Effective scope evidence lost.'
+        $completedRun=Get-Content ($fixture.Receipt -replace '\.current\.json\.txt$','.run.json.txt') -Raw | ConvertFrom-Json
+        Check (-not $completedRun.ConsumerScopeQualified -and $completedRun.RunId -eq $receipt.RunId) 'ConfiguredOutputsOnly must remain unqualified in both receipts.'
         foreach($record in $receipt.Files){
             Check ($record.Rows -eq 1 -and $record.Delimiter -eq $delimiter -and $record.RunId -eq $receipt.RunId -and $record.SHA256 -eq (Get-FileHash (Join-Path $fixture.Folder $record.File)).Hash) 'Logical rows, delimiter, hash or lineage differ.'
         }
@@ -270,8 +272,8 @@ try {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBhMHHIPvqtGU6H
-# rUOMETstItJXdbbvCCQ6RKOglruOvaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCsVWvZFNdDprSX
+# /Of57EWzQhVGJuPzsi758mYyFFlNx6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -404,31 +406,31 @@ try {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIKZxZP+RJuAkEHAZdMPs4m4HNS58kXAXsJ43Obm41hkKMA0GCSqG
-# SIb3DQEBAQUABIIBgGIBawdnvNQAIIhG2+IxKQHa4AHOOQGwb8UX0mW7eA0Zs48C
-# uVgY4zrsaQ4aKDpIXD8UU1gpU0b/GVX9ZV4kNSwg98HTe3UCM/ZMudlmMD4MsyVL
-# sryNfG7D3VWV5wxICpFW6Gp5+mhsYNZEL9f0S3SBa3ge7bRWCV0YD+WylDZuCBII
-# XamT2gQzOq3HhTLIjiuCxC+uL/E9PAIWpGWMbEyPJM85MSxDuNSy82K2QL6IgRB2
-# SLdpeg3FiNleQ24YhRIUMog9/D+eGshtQnR3X1VntupnFuDlZwS1YpkUMfmuOimu
-# vNmy2ZUB11mJjx4CY/cSNkAXYvxwqvLa8I1QRHq+TZ4msISg8NHcGpzKt27faIJs
-# ebyGux+7PngOGpBE/xlDqZPNWNf/hNI6F8LXTpfm09lUhSjiS2CcC7CU1DxFrRIA
-# keZb/QUUxQopDoi4MYjfeMHpL+o7RByeAXwTStngc/NWrzpNSsoKbPAMRTa4Q87J
-# i/xkEmdNByBRiX/dzaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIHI980HB/AMdrdAIsDdw17OxIfHGCgelpAft5PWwAMaWMA0GCSqG
+# SIb3DQEBAQUABIIBgKgcG+So5bNgqVjzan7flxYjdHBHv+4CuOLNqG1nZ11QU+Ux
+# 2Di3pk+ew789FlhZW6j3WyUMKhovZIRuI5lisGq4Bjg1fHKpnNZx3WX1z+3X+uix
+# 66w6wESTt3l8UqLONvVzoJMgSaKgiZRbnF/E0yTtJwLrU0YJrgWyN0pFbK4DP+B8
+# f5rjdz9KjNTkbX60hijoWQBWkXmm7vsDrmRIXcoI6w26tDtK+quaNiBh2FXYsrKH
+# hafScniiAph7VgwcZn4H3zgzxQNd3SnR3+EmyBIRUxMei/zo9T4kkBj7CV8A2n0s
+# g/rF/9pdxu75nH5+v9a5cKl53n8/4EBCWZBeHcGpEZDzqvSzIuiV7ybi5OvU18QG
+# CyrdWlvvLsNiqhAzSRPRW72NIPf19ysVwylLNaHFve/+eXzcYyclfw2Ob5/3DkEW
+# +KRJgPnZ9yamfraat9TUzDzBjIGzLRBihtlsyWP3LfINOjhFP0ZD69ntluZWaGVg
+# 74rSLXIBwLDBsAN23aGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjExOTQ1
-# MDdaMC8GCSqGSIb3DQEJBDEiBCBHkYJCns8hapcA4BTqosecMgsPevt+EFnAaFOv
-# 3ugUpjANBgkqhkiG9w0BAQEFAASCAgAZQqePAwdjentA5dqW01Idd+Qbd9sY6YJs
-# f5ehZYy+/AHMt+hrzqudt/oibVsV+7yTTqBRbbvmfJjDP68D1jHFxZfV23BjVEiK
-# 4HlTnu5auH8vnrdXC6HGkOMKK/V45Fq31gmmwIM4c/mHs4Z30E5RpBdTMit6tZj2
-# kWKF3PrCYaHf7vxZmcv/ZWdeC+eyIR/L3gY3Q3UqHYkgt0uqsphm044GkrWja/Gg
-# gpq7mu1rCYIq9Nb9eS3sXjTPPRsGdk8bPqcfqrO65a/D8KPe/ZZJSt5dXDWR+IhU
-# ZfYFyBUY8oZmflgRfzX3LSyTGUHo+MK4bpSmILWVSI5jDUYQZQOV12/x8CkKbE1J
-# jSWTb+IiGCzZo7NwC22HwZUp0LkzUWe0JqzNuMoOrIqNWJtwrkr6reptNEqktQic
-# KSv3vyM79md36tfvC9evi2Lis71IBKDkwz8evRfcJuhxuZOB/+8khS3DhYd5E/QF
-# 1B9xuwhFrxPuCpRsVA1BKBYX4/wDbOKoYlJwwdMJ5Do+UVspRtFGuOY8CWKklafS
-# qgxEwGfsCnWlf4j5m/gP/xJ/E/rWe/s7jGPpl3PFHqhciESeKL/dKrBXjkrvGjpq
-# j+NpSs4p8i5v9PVroHtyd/hAA9psdxAOkFtzkrSgt8lakCZ5DT4Gv9MqrYJt3o6g
-# tgzzkywftg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjQxNDIy
+# NTFaMC8GCSqGSIb3DQEJBDEiBCDza4ZMKgyj2rfl6vaJ65TEvWDgXzwUzujdioAw
+# 71/TRjANBgkqhkiG9w0BAQEFAASCAgCgpQromGR0bBFejSS5J0tDmaxGQPCJhnct
+# ZXokwbsrC49awkYnWActbEPA3QiKL0NbZc3pgSRUtuO72cEf7WksUWYiVp291Qz3
+# 8Ejuc2NZS2IoiEvC/TAHXvtqRM/J4G5DgwQxeCKBnWJh1FsTTOKEsAlCWpINVajW
+# kHD4vpBxoQ2FhbiWhbvQ6Z+7hCPI9iFHL9bMLZljSmuyxzJwVz5y5n9uS2ISDpx/
+# nO6vHi5KkalrCWCOwhrelPuESoMx5Tlc+Cv42ArmaxAVEy5XiT+bJHXqns5T8IFr
+# cjnwih6k23zCmce6m4Nsl8LWymPY3quc1/WMt6Sd/BmqxtfJK84dlwcda+wjtYHO
+# GoVJRkLv3zTMVF2HfTwOLq8z/AVepBj2u+HYvDOAlwOgLErw0s5DTp7C6YWS4xa6
+# Me0GFi+/qCLTDe8DZLEUDS6oY+VSLfGZI5qdgqzyDo6NuVprMHw6Ov4RWu+l8efx
+# 16HWKjmjNrO58+t/wC9m2TIfxqy7IrpwiLwiYJVQ4oGsT1wtWIJ5a1yqb635XqCw
+# SoCInNag8y9DzLLrgzcZUCsb1ySN+rML0r4SsWtXjRM0Et8n1eNYg6VRDFbeop5w
+# z23vqwtRA8t02dAQaLMSqt+CjBnj4Hpjz2fWXXMGUZhCc/oD3d4Hr2m8hpcwFnUx
+# 7DA8Su2IKA==
 # SIG # End signature block

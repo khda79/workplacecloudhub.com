@@ -75,3 +75,11 @@ SharePoint upload is inherited from the tenant/global configuration by default. 
 ```
 
 or set it explicitly to `true` for that script.
+
+## Receipt consistency and offline acceptance
+
+The shared receipt helper now copies the qualified current proof's ConsumerScopeQualified value into the terminal run document only after the current proof was successfully written. Collecting, Publishing, Failed, incomplete scopes and ConfiguredOutputsOnly remain false. RunId, tenant identity, required files, hashes and publication fences are unchanged; a retained older current proof is never upgraded by a failed new run.
+
+The HTML regression fixture fixes its numeric culture and restores it afterwards, checks totals and HTML escaping, and compares a deterministic snapshot of the existing renderer. Production HTML is unchanged.
+
+Run Test-SmartM365ExchangeClosureOffline.ps1 under SmartM365/Tests for the combined offline A/B/C acceptance. No collector or server command is launched by that test.
