@@ -101,7 +101,7 @@ detailed tables for the last 24 hours and 7 days, then exits without acquiring t
 lock or launching inventory jobs.
 
 .VERSION
-1.5.55
+1.5.56
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -114,7 +114,7 @@ lock or launching inventory jobs.
     inside its own child process.
 
 .NOTES
-    Version : 1.5.55
+    Version : 1.5.56
     Author: https://github.com/khda79/workplacecloudhub.com
     Exit codes: 0 = normal end (recycle, DryRun, Once, summary sent), 1 = fatal error or summary send failure,
     2 = configuration or manifest error at startup, 3 = another live instance holds the lock,
@@ -151,7 +151,7 @@ $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -Requi
 try {
 $ErrorActionPreference = 'Stop'
 
-$ScriptVersion = "1.5.55"
+$ScriptVersion = "1.5.56"
 $ScriptName = 'SmartM365-Inventory-Orchestrator'
 $global:SmartM365ScriptFileName = [System.IO.Path]::GetFileName($PSCommandPath)
 $global:SmartM365ScriptVersion = $ScriptVersion
@@ -5659,6 +5659,42 @@ function Invoke-MissedRunCatchUp {
     }
 }
 
+function Test-OrchestratorLocalConcurrencyBlocked {
+    # Cross-job overlap guard. Jobs sharing a ConcurrencyKey are serialized,
+    # including jobs launched earlier in the same scheduler tick. A scheduled wait is
+    # logged once per occurrence because dependencies are not evaluated meanwhile.
+    param(
+        [Parameter(Mandatory = $true)]$Job,
+        [Parameter(Mandatory = $true)][datetime]$Occurrence,
+        [string[]]$LaunchedThisTick = @(),
+        [switch]$IsForced,
+        [Parameter(Mandatory = $true)][datetime]$Now
+    )
+
+    $name = [string]$Job.Name
+    $blockingConcurrencyJobs = @(
+        foreach ($runningName in $script:RunningJobs.Keys) {
+            if ($runningName -eq $name -or -not $script:Manifest.JobsByName.ContainsKey($runningName)) { continue }
+            $runningJob = $script:Manifest.JobsByName[$runningName]
+            if ($runningJob.ConcurrencyKey -eq $Job.ConcurrencyKey) { $runningName }
+        }
+        foreach ($launchedName in $LaunchedThisTick) {
+            if ($launchedName -eq $name -or -not $script:Manifest.JobsByName.ContainsKey($launchedName)) { continue }
+            $launchedJob = $script:Manifest.JobsByName[$launchedName]
+            if ($launchedJob.ConcurrencyKey -eq $Job.ConcurrencyKey) { $launchedName }
+        }
+    ) | Sort-Object -Unique
+    if ($blockingConcurrencyJobs.Count -eq 0) { return $false }
+
+    if ($IsForced) {
+        Write-OrchestratorRuntimeUpdateWarning -Key ("concurrency:{0}:{1}" -f $name, ($blockingConcurrencyJobs -join ',')) -Message ("Job {0}: forced launch deferred because ConcurrencyKey '{1}' is already held by {2}." -f $name, $Job.ConcurrencyKey, ($blockingConcurrencyJobs -join ', ')) -Now $Now
+    }
+    else {
+        Write-OrchestratorRuntimeUpdateWarning -Level INFO -Key ("concurrency-local:{0}:{1}" -f $name, $Occurrence.ToUniversalTime().ToString('o')) -Message ("Job {0}: occurrence {1} waits because ConcurrencyKey '{2}' is held by {3} on this server; its dependencies are evaluated once the key is released." -f $name, $Occurrence.ToString('yyyy-MM-dd HH:mm'), $Job.ConcurrencyKey, ($blockingConcurrencyJobs -join ', ')) -Now $Now
+    }
+    return $true
+}
+
 function Invoke-LaunchPhase {
     param([Parameter(Mandatory = $true)][datetime]$Now)
 
@@ -5772,26 +5808,7 @@ function Invoke-LaunchPhase {
             }
         }
 
-        # Cross-job overlap guard. Jobs sharing a ConcurrencyKey are serialized,
-        # including jobs launched earlier in the same scheduler tick.
-        $blockingConcurrencyJobs = @(
-            foreach ($runningName in $script:RunningJobs.Keys) {
-                if ($runningName -eq $name -or -not $script:Manifest.JobsByName.ContainsKey($runningName)) { continue }
-                $runningJob = $script:Manifest.JobsByName[$runningName]
-                if ($runningJob.ConcurrencyKey -eq $job.ConcurrencyKey) { $runningName }
-            }
-            foreach ($launchedName in $launchedThisTick) {
-                if ($launchedName -eq $name -or -not $script:Manifest.JobsByName.ContainsKey($launchedName)) { continue }
-                $launchedJob = $script:Manifest.JobsByName[$launchedName]
-                if ($launchedJob.ConcurrencyKey -eq $job.ConcurrencyKey) { $launchedName }
-            }
-        ) | Sort-Object -Unique
-        if ($blockingConcurrencyJobs.Count -gt 0) {
-            if ($isForced) {
-                Write-OrchestratorRuntimeUpdateWarning -Key ("concurrency:{0}:{1}" -f $name, ($blockingConcurrencyJobs -join ',')) -Message ("Job {0}: forced launch deferred because ConcurrencyKey '{1}' is already held by {2}." -f $name, $job.ConcurrencyKey, ($blockingConcurrencyJobs -join ', ')) -Now $Now
-            }
-            continue
-        }
+        if (Test-OrchestratorLocalConcurrencyBlocked -Job $job -Occurrence $occurrence -LaunchedThisTick $launchedThisTick.ToArray() -IsForced:$isForced -Now $Now) { continue }
 
         # Pipeline dependencies are shared across servers and must be evaluated from
         # the batch status files rather than from this server's scheduled-run state.

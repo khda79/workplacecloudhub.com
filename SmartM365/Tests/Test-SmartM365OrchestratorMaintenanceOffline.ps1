@@ -3,7 +3,7 @@
 .SYNOPSIS
 Offline maintenance, scheduler admission and GUI contract tests using synthetic shared data.
 .VERSION
-1.0.4
+1.0.5
 #>
 [CmdletBinding()]
 param([string]$Tenant = 'test')
@@ -85,7 +85,7 @@ try {
     Assert-Case ($audit.Count -eq 4 -and @($audit | Where-Object Outcome -eq Published).Count -eq 2) 'Transitions were not audited.'
     Assert-Case ((Get-FileHash (Join-Path $root 'Config/Orchestrator-Cluster.json.txt')).Hash -eq $clusterHash) 'Maintenance modified cluster configuration.'
     # Real runtime functions, isolated state and no process/tenant connections.
-    $definitions=Load-Functions (Join-Path $orchFolder 'SmartM365-Inventory-Orchestrator.ps1') @('Update-OrchestratorMaintenance','ConvertTo-StateTime','ConvertFrom-StateTime','Get-JobState','Get-LatestPastOccurrence','Get-JobOccurrencesInWindow','Get-DueOccurrence','Get-MaintenanceCatchUpOccurrence','Complete-MaintenanceCatchUpOccurrence','Invoke-LaunchPhase','Get-OrchestratorPendingJobSnapshot')
+    $definitions=Load-Functions (Join-Path $orchFolder 'SmartM365-Inventory-Orchestrator.ps1') @('Update-OrchestratorMaintenance','ConvertTo-StateTime','ConvertFrom-StateTime','Get-JobState','Get-LatestPastOccurrence','Get-JobOccurrencesInWindow','Get-DueOccurrence','Get-MaintenanceCatchUpOccurrence','Complete-MaintenanceCatchUpOccurrence','Invoke-LaunchPhase','Test-OrchestratorLocalConcurrencyBlocked','Get-OrchestratorPendingJobSnapshot')
     $runtime=New-Module -ScriptBlock ([scriptblock]::Create($definitions -join "`n"))
     $runtimeResult=& $runtime {
         param($Root,$Cutoff)
@@ -98,7 +98,7 @@ try {
         $script:Saved=0;$script:Starts=0;$script:ForcedPending=@();$script:PipelinePending=@{};$script:PipelineBatchJobNames=@{}
         function script:Write-OrchestratorLog { param($Message,$Level) }
         function script:Invoke-SmartM365OrchestratorMaintenanceNotification { param($SharedDataFolderPath,$Now,$SendAction,[switch]$Initialize) [pscustomobject]@{Status='Completed';Sent=0} }
-        function script:Write-OrchestratorRuntimeUpdateWarning { param($Key,$Message,$Now) }
+        function script:Write-OrchestratorRuntimeUpdateWarning { param($Key,$Message,$Now,$Level) }
         function script:Save-OrchestratorState { $script:Saved++ }
         function script:Test-JobSelected {param($JobName) $true}
         function script:Test-JobAllowedOnServer {param($Job,[switch]$AllowManual) $true}

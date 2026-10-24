@@ -1,6 +1,6 @@
 # SmartM365 Inventory Orchestrator
 
-`SmartM365-Inventory-Orchestrator.ps1` (v1.5.55) is a PowerShell 7 resident scheduler that runs the SmartInventory scripts (ActiveDirectoryInventory, ExchangeInventory, M365Inventory, IntuneInventory, ...) unattended.
+`SmartM365-Inventory-Orchestrator.ps1` (v1.5.56) is a PowerShell 7 resident scheduler that runs the SmartInventory scripts (ActiveDirectoryInventory, ExchangeInventory, M365Inventory, IntuneInventory, ...) unattended.
 
 ## Demo mode
 
@@ -502,7 +502,7 @@ Before launching an elected occurrence, the owner must create its shared claim w
 ### Concurrency, queueing, dependencies, overlap
 
 - Global `MaxConcurrency` (default 2 in code, 6 in the production local configuration), optionally overridden for the current host through `MaxConcurrencyByServer`. Jobs due beyond the limit stay queued (their occurrence remains due, never lost), are published as `BlockedByServerConcurrency`, and start as soon as a slot frees. Re-adopted jobs count toward the limit. The committed template leaves this map empty; the three-server example above (`SRV01=6`, `SRV02=9`, `EXCH01=6`) shows the expected shape, and the real map must be set in the local runtime configuration of all three servers.
-- `ConcurrencyKey` is enforced through an atomic lease in shared storage. Jobs sharing the key cannot run simultaneously anywhere in the cluster. A waiting occurrence is published as `BlockedByConcurrencyKey`; the lease follows detached/re-adopted jobs, is atomically aligned with the active timeout deadline after every recycle, and is released when the run ends, including before a retry delay.
+- `ConcurrencyKey` is enforced through an atomic lease in shared storage. Jobs sharing the key cannot run simultaneously anywhere in the cluster. A waiting occurrence is published as `BlockedByConcurrencyKey`; the lease follows detached/re-adopted jobs, is atomically aligned with the active timeout deadline after every recycle, and is released when the run ends, including before a retry delay. On the server that already runs a job with the same key, the local guard defers the occurrence before its dependencies are evaluated; since v1.5.56 this wait is logged once per occurrence at INFO (`Job <name>: occurrence <time> waits because ConcurrencyKey '<key>' is held by <job> on this server ...`), while a forced request keeps its existing warning. Offline test: `Tests/Test-SmartM365OrchestratorConcurrencyWaitLogOffline.ps1`.
 - `DependsOn`: jobs due at the same occurrence run chained in topological order (the manifest is rejected at load time on a cycle). A dependent waits while a parent is running, due, or pending a retry. If a parent with `ContinueOnError=false` finally fails, dependents due at the same occurrence are marked `BlockedDependencyFailed`. If a dependency wait exceeds `DependencyWaitTimeoutMinutes`, the occurrence is marked `BlockedDependencyTimeout`.
 - Overlap guards:
   - Resident lock: acquisition and stale recovery use an exclusive guard handle; uncertainty refuses acquisition with exit code 3. See the re-adoption and resident lock safety section.

@@ -3,7 +3,7 @@
 .SYNOPSIS
 Offline cancellation tests. Synthetic temporary shared state; no collectors or tenant calls.
 .VERSION
-1.0.2
+1.0.3
 #>
 [CmdletBinding()]
 param()
@@ -155,7 +155,7 @@ try {
     $tokens = $null; $parseErrors = $null
     $ast = [Management.Automation.Language.Parser]::ParseFile((Join-Path $folder 'SmartM365-Inventory-Orchestrator.ps1'), [ref]$tokens, [ref]$parseErrors)
     if ($parseErrors.Count) { throw 'Resident parser errors.' }
-    $definitions = foreach ($name in @('Invoke-LaunchPhase', 'Complete-JobRun', 'ConvertFrom-StateTime', 'ConvertTo-StateTime')) {
+    $definitions = foreach ($name in @('Invoke-LaunchPhase', 'Test-OrchestratorLocalConcurrencyBlocked', 'Complete-JobRun', 'ConvertFrom-StateTime', 'ConvertTo-StateTime')) {
         $node = $ast.Find({ param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name }, $true)
         if ($null -eq $node) { throw "Missing resident function: $name" }
         $node.Extent.Text
@@ -179,7 +179,7 @@ try {
             function script:Test-JobAllowedOnServer { param($Job,[switch]$AllowManual) $true }
             function script:Save-OrchestratorState {}
             function script:Write-OrchestratorLog { param($Message,$Level) }
-            function script:Write-OrchestratorRuntimeUpdateWarning { param($Key,$Message,$Now) }
+            function script:Write-OrchestratorRuntimeUpdateWarning { param($Key,$Message,$Now,$Level) }
             function script:Clear-DependencyWaitLog { param($JobName) }
             function script:Enter-SmartM365OrchestratorMaintenanceGate { param($SharedDataFolderPath) [IO.MemoryStream]::new() }
             function script:Get-SmartM365OrchestratorMaintenanceState { param($SharedDataFolderPath) $script:MaintenanceControl }

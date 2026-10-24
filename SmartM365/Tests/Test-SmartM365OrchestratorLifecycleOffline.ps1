@@ -2,7 +2,7 @@
 .SYNOPSIS
 Synthetic lifecycle regression tests; no orchestrator entry point is executed.
 .VERSION
-1.0.5
+1.0.6
 #>
 [CmdletBinding()]
 param([string]$SourceRoot, [string]$ResultPath)
@@ -15,7 +15,7 @@ $ast = [Management.Automation.Language.Parser]::ParseFile($source, [ref]$tokens,
 if ($parseErrors.Count) { throw 'Orchestrator source failed parsing.' }
 $names = @('Update-RunningJobs','Restore-RunningJobs','Sync-RunningJobConcurrencyLease',
     'Get-RunningJobTimeoutWindow','Complete-JobRun','Get-JobState','ConvertTo-StateTime',
-    'ConvertFrom-StateTime','Invoke-LaunchPhase','Get-CompletedJobResult')
+    'ConvertFrom-StateTime','Invoke-LaunchPhase','Test-OrchestratorLocalConcurrencyBlocked','Get-CompletedJobResult')
 $definitions = foreach ($name in $names) {
     $node = $ast.Find({param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name}, $true)
     if (-not $node) { throw "Missing function: $name" }
@@ -50,7 +50,7 @@ $results = New-Object 'System.Collections.Generic.List[object]'
         $script:MaintenanceControl = [pscustomobject]@{Enabled=$false}
     }
     function script:Write-OrchestratorLog { param($Message,$Level) }
-    function script:Write-OrchestratorRuntimeUpdateWarning { param($Key,$Message,$Now) }
+    function script:Write-OrchestratorRuntimeUpdateWarning { param($Key,$Message,$Now,$Level) }
     function script:Save-OrchestratorState {
         $script:Events.Add('save')
         $script:SavedState = [Management.Automation.PSSerializer]::Serialize($script:State)
