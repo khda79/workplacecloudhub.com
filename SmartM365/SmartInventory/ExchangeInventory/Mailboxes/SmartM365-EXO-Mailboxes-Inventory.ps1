@@ -21,12 +21,14 @@
       - AssignedLicenses no longer fetched (column kept empty)
       - Graph HTTP code logging and NOC-style error summary
       - -PermissionsOnly (with -IncludePerm) accelerates by collecting permissions only; other columns are left empty (NOT "N/A")
+      - Live stats (-IncludeStats) are prefetched by persistent parallel EXO workers (StatsParallelThrottle,
+        default 4 from local config; 1 = former sequential collection); rows keep their order and values
       - LastUserActionTime: populated from Stats snapshot when available. In live stats mode (-IncludeStats),
         requires ALSO passing -IncludeLastUserActionTime (triggers an extra Get-EXOMailboxStatistics call per mailbox,
         expensive at scale ~9800 mailboxes). Without -IncludeLastUserActionTime, the column is intentionally empty
         even when -IncludeStats is active.
 .VERSION
-1.28
+1.29
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; ExchangeOnlineManagement; Microsoft.Graph.Authentication when Graph enrichment is used. SmartM365 mail/SharePoint upload uses Graph REST direct from SmartM365.Core.
@@ -66,6 +68,8 @@ param(
     [int]$MaxRunMinutes = 2880,
     # Number of parallel threads for permission collection in -PermissionsOnly mode (1 = sequential)
     [ValidateRange(1,20)][int]$ParallelThrottle = 10,
+    # Parallel workers for live mailbox statistics (-IncludeStats); 0 = local config StatsParallelThrottle (default 4), 1 = sequential
+    [ValidateRange(0,20)][int]$StatsParallelThrottle = 0,
     [int]$MaxItems = 0
 )
 # Local lifecycle only; no collection or publication is performed by this guard.
@@ -407,12 +411,14 @@ function Publish-MailboxInventoryDiagnosticCsv {
     }
 }
 #region Init
-$ScriptVersion = "1.28"
+$ScriptVersion = "1.29"
 $script:StatsCompletenessDiagnosticPath = $null
 $script:StatsCompletenessIssueRows = @()
 $StatsCompletenessFailMinRows = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'StatsCompletenessFailMinRows' -DefaultValue 50)
 $StatsCompletenessFailPercent = [double](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'StatsCompletenessFailPercent' -DefaultValue 0.5)
 $PermissionWorkerConnectRetries = [math]::Min(10, [math]::Max(1, [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'PermissionWorkerConnectRetries' -DefaultValue 3)))
+$StatsParallelThrottleEffective = if ($StatsParallelThrottle -gt 0) { $StatsParallelThrottle } else { [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'StatsParallelThrottle' -DefaultValue 4) }
+$StatsParallelThrottleEffective = [math]::Min(20, [math]::Max(1, $StatsParallelThrottleEffective))
 $IsMaxItemsRun = ($MaxItems -gt 0)
 $IsBoundedMailboxRun = ($IsMaxItemsRun -or $Top100)
 $CsvSuffix = if ($IsMaxItemsRun) { "_MAXITEMS-$MaxItems" } elseif ($Top100) { "_top100" } else { "" }
@@ -1210,6 +1216,264 @@ function Convert-ToMBInteger {
         }
     }
 
+    # ====== Live stats values (archive + primary) for one mailbox ======
+    # Same calls and conversions as the former inline loop code; used by the sequential loop and by the
+    # parallel prefetch workers, so both paths produce identical values for identical API responses.
+    function Get-MailboxLiveStatsRecord {
+        param(
+            [Parameter(Mandatory)]$Mailbox,
+            [switch]$IncludeLastUserActionTime,
+            [string]$DebugUPN
+        )
+        $mb = $Mailbox
+        $archiveLogonIso = ''; $archiveSizeGB = ""; $archiveCount = ""; $archiveLlt = ""
+        $lastActionIso = ''; $lastLogonIso = ''; $lastAction = ""
+        $totalSizeGB = ""; $itemCount = ""; $lastLogon = ""
+        $debugText = ''
+
+        $hasArchive = ($mb.PSObject.Properties.Name -contains 'ArchiveStatus' -and $mb.ArchiveStatus -and $mb.ArchiveStatus.ToString() -ne 'None')
+        if ($hasArchive) {
+            $exoArch = Get-ExoStatsExact -Identity $mb.UserPrincipalName -Archive -IncludeLastUserActionTime:$IncludeLastUserActionTime.IsPresent
+            if ($exoArch) {
+                try {
+                    if ($exoArch.PSObject.Properties.Name -contains 'TotalItemSize' -and $exoArch.TotalItemSize) {
+                        if ($exoArch.TotalItemSize.PSObject.Properties.Name -contains 'Value' -and $exoArch.TotalItemSize.Value -and ($exoArch.TotalItemSize.Value.PSObject.Methods.Name -contains 'ToBytes')) {
+                            $archiveSizeGB = [math]::Round(([double]$exoArch.TotalItemSize.Value.ToBytes())/1GB, 2)
+                        } elseif ($exoArch.TotalItemSize.PSObject.Methods.Name -contains 'ToBytes') {
+                            $archiveSizeGB = [math]::Round(($exoArch.TotalItemSize.ToBytes())/1GB, 2)
+                        } else {
+                            $archiveSizeGB = Convert-QuotaToGB $exoArch.TotalItemSize
+                        }
+                    }
+                    elseif ($exoArch.PSObject.Properties.Name -contains 'TotalItemSizeInBytes' -and $exoArch.TotalItemSizeInBytes) {
+                        $archiveSizeGB = [math]::Round(($exoArch.TotalItemSizeInBytes)/1GB, 2)
+                    }
+                } catch {
+                    if ($exoArch.PSObject.Properties.Name -contains 'TotalItemSize') { $archiveSizeGB = Convert-QuotaToGB $exoArch.TotalItemSize }
+                }
+
+                if ($exoArch.PSObject.Properties.Name -contains 'ItemCount' -and $exoArch.ItemCount -ne $null) { $archiveCount = $exoArch.ItemCount }
+                if ($exoArch.PSObject.Properties.Name -contains 'LastLogonTime' -and $exoArch.LastLogonTime) {
+                    $archiveLlt = (Get-Date $exoArch.LastLogonTime -Format "yyyy-MM-dd HH:mm:ss"); $archiveLogonIso = ConvertTo-IdentityNativeIso $exoArch.LastLogonTime
+                } else {
+                    try {
+                        $legacyArch = Get-MailboxStatistics -Identity $mb.UserPrincipalName -Archive -ErrorAction SilentlyContinue 2>$null
+                        if ($legacyArch -and $legacyArch.LastLogonTime) { $archiveLlt = (Get-Date $legacyArch.LastLogonTime -Format "yyyy-MM-dd HH:mm:ss"); $archiveLogonIso = ConvertTo-IdentityNativeIso $legacyArch.LastLogonTime }
+                        if ([string]::IsNullOrWhiteSpace($archiveCount) -and $legacyArch -and $legacyArch.PSObject.Properties.Name -contains 'ItemCount') { $archiveCount = $legacyArch.ItemCount }
+                        if ([string]::IsNullOrWhiteSpace($archiveSizeGB) -and $legacyArch -and $legacyArch.PSObject.Properties.Name -contains 'TotalItemSize') { $archiveSizeGB = Convert-QuotaToGB $legacyArch.TotalItemSize }
+                    } catch {}
+                }
+            }
+        }
+
+        $exoPri = Get-ExoStatsExact -Identity $mb.UserPrincipalName -IncludeLastUserActionTime:$IncludeLastUserActionTime.IsPresent
+        $legacyPri = $null
+        if ($exoPri) {
+            if ($DebugUPN -and $mb.UserPrincipalName -ieq $DebugUPN) {
+                $debugText = ("DEBUG EXO: UPN={0} | LUA={1} | LLT={2} | SizeRaw={3} | HasBytes={4}" -f $mb.UserPrincipalName, $exoPri.LastUserActionTime, $exoPri.LastLogonTime, $exoPri.TotalItemSize, ($exoPri.PSObject.Properties.Name -contains 'TotalItemSizeInBytes'))
+            }
+
+            if ($IncludeLastUserActionTime -and $exoPri.PSObject.Properties.Name -contains 'LastUserActionTime' -and $exoPri.LastUserActionTime) {
+                $lastAction = (Get-Date $exoPri.LastUserActionTime -Format "yyyy-MM-dd HH:mm:ss"); $lastActionIso = ConvertTo-IdentityNativeIso $exoPri.LastUserActionTime
+            } else {
+                $lastAction = ""
+            }
+
+            try {
+                if ($exoPri.PSObject.Properties.Name -contains 'TotalItemSize' -and $exoPri.TotalItemSize) {
+                    if ($exoPri.TotalItemSize.PSObject.Properties.Name -contains 'Value' -and $exoPri.TotalItemSize.Value -and ($exoPri.TotalItemSize.Value.PSObject.Methods.Name -contains 'ToBytes')) {
+                        $totalSizeGB = [math]::Round(([double]$exoPri.TotalItemSize.Value.ToBytes())/1GB, 2)
+                    }
+                    elseif ($exoPri.TotalItemSize.PSObject.Methods.Name -contains 'ToBytes') {
+                        $totalSizeGB = [math]::Round(([double]$exoPri.TotalItemSize.ToBytes())/1GB, 2)
+                    }
+                    else {
+                        $totalSizeGB = Convert-QuotaToGB $exoPri.TotalItemSize
+                    }
+                }
+                elseif ($exoPri.PSObject.Properties.Name -contains 'TotalItemSizeInBytes' -and $exoPri.TotalItemSizeInBytes) {
+                    $totalSizeGB = [math]::Round(([double]$exoPri.TotalItemSizeInBytes)/1GB, 2)
+                }
+            } catch {
+                if ($exoPri.PSObject.Properties.Name -contains 'TotalItemSize') { $totalSizeGB = Convert-QuotaToGB $exoPri.TotalItemSize }
+            }
+
+            if ($exoPri.PSObject.Properties.Name -contains 'ItemCount' -and $exoPri.ItemCount -ne $null) { $itemCount = $exoPri.ItemCount }
+
+            if ($exoPri.PSObject.Properties.Name -contains 'LastLogonTime' -and $exoPri.LastLogonTime) {
+                $lastLogon = (Get-Date $exoPri.LastLogonTime -Format "yyyy-MM-dd HH:mm:ss"); $lastLogonIso = ConvertTo-IdentityNativeIso $exoPri.LastLogonTime
+            } else {
+                try {
+                    $legacyPri = Get-MailboxStatistics -Identity $mb.UserPrincipalName -ErrorAction SilentlyContinue 2>$null
+                    if ($legacyPri -and $legacyPri.PSObject.Properties.Name -contains 'LastLogonTime' -and $legacyPri.LastLogonTime) {
+                        $lastLogon = (Get-Date $legacyPri.LastLogonTime -Format "yyyy-MM-dd HH:mm:ss"); $lastLogonIso = ConvertTo-IdentityNativeIso $legacyPri.LastLogonTime
+                    }
+                    if ([string]::IsNullOrWhiteSpace($itemCount) -and $legacyPri -and $legacyPri.PSObject.Properties.Name -contains 'ItemCount') {
+                        $itemCount = $legacyPri.ItemCount
+                    }
+                    if ([string]::IsNullOrWhiteSpace($totalSizeGB) -and $legacyPri -and $legacyPri.PSObject.Properties.Name -contains 'TotalItemSize') {
+                        $totalSizeGB = Convert-QuotaToGB $legacyPri.TotalItemSize
+                    }
+                } catch {}
+            }
+        }
+        else {
+            try {
+                $legacyPri = Get-MailboxStatistics -Identity $mb.UserPrincipalName -ErrorAction SilentlyContinue 2>$null
+                if ($legacyPri) {
+                    if ($legacyPri.PSObject.Properties.Name -contains 'TotalItemSize') { $totalSizeGB = Convert-QuotaToGB $legacyPri.TotalItemSize }
+                    if ($legacyPri.PSObject.Properties.Name -contains 'ItemCount') { $itemCount = $legacyPri.ItemCount }
+                    if ($legacyPri.PSObject.Properties.Name -contains 'LastLogonTime' -and $legacyPri.LastLogonTime) {
+                        $lastLogon = (Get-Date $legacyPri.LastLogonTime -Format "yyyy-MM-dd HH:mm:ss"); $lastLogonIso = ConvertTo-IdentityNativeIso $legacyPri.LastLogonTime
+                    }
+                }
+            } catch {}
+        }
+
+        [PSCustomObject]@{
+            ArchiveSizeGB = $archiveSizeGB
+            ArchiveCount = $archiveCount
+            ArchiveLastLogon = $archiveLlt
+            ArchiveLastLogonIso = $archiveLogonIso
+            TotalSizeGB = $totalSizeGB
+            ItemCount = $itemCount
+            LastLogon = $lastLogon
+            LastLogonIso = $lastLogonIso
+            LastAction = $lastAction
+            LastActionIso = $lastActionIso
+            DebugText = $debugText
+        }
+    }
+
+    # ====== Parallel live stats prefetch ======
+    # Persistent workers (same model as -PermissionsOnly): one EXO session per worker for its whole
+    # chunk. Only complete values are returned; a mailbox whose worker failed to connect, whose call
+    # threw, whose values stayed empty after the retries, or that was not reached before the deadline
+    # is absent from the result and is collected by the sequential loop exactly as before.
+    # Workers never disconnect: a worker disconnect clears sibling EXO connections.
+    function Invoke-MailboxStatsParallelPrefetch {
+        param(
+            [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Mailboxes,
+            [Parameter(Mandatory)][ValidateRange(2,20)][int]$ThrottleLimit,
+            [Parameter(Mandatory)][string]$WorkerDefinitions,
+            [Parameter(Mandatory)][string]$ConnectScript,
+            [object[]]$ConnectArguments = @(),
+            [ValidateRange(1,10)][int]$ConnectRetries = 3,
+            [switch]$IncludeLastUserActionTime,
+            [string]$DebugUPN,
+            [ValidateRange(0,5)][int]$EmptyResultRetries = 2,
+            [ValidateRange(0,300)][int]$RetryDelaySeconds = 30,
+            [datetime]$DeadlineUtc = [datetime]::MaxValue,
+            [int]$ProgressInterval = 500,
+            [scriptblock]$OnProgress,
+            [scriptblock]$OnWorkerFailure
+        )
+
+        $results = [System.Collections.Generic.Dictionary[int,object]]::new()
+        $summary = [PSCustomObject]@{
+            Results = $results
+            WorkerCount = 0
+            Dispatched = $Mailboxes.Count
+            Prefetched = 0
+            Retried = 0
+            EmptyAfterRetries = 0
+            Failed = 0
+            ConnectFailedWorkers = 0
+            DeadlineSkipped = 0
+            Seconds = 0.0
+        }
+        if ($Mailboxes.Count -eq 0) { return $summary }
+
+        $workerCount = [math]::Min($ThrottleLimit, $Mailboxes.Count)
+        $chunkSize = [int][math]::Ceiling($Mailboxes.Count / [double]$workerCount)
+        $workItems = for ($workerIndex = 0; $workerIndex -lt $workerCount; $workerIndex++) {
+            $startIndex = $workerIndex * $chunkSize
+            if ($startIndex -ge $Mailboxes.Count) { break }
+            $endIndex = [math]::Min($startIndex + $chunkSize - 1, $Mailboxes.Count - 1)
+            [PSCustomObject]@{ WorkerId = $workerIndex + 1; Items = @($Mailboxes[$startIndex..$endIndex]) }
+        }
+        $summary.WorkerCount = @($workItems).Count
+
+        $p_Definitions = $WorkerDefinitions
+        $p_Connect = $ConnectScript
+        $p_ConnectArguments = $ConnectArguments
+        $p_ConnectRetries = $ConnectRetries
+        $p_IncludeLuat = $IncludeLastUserActionTime.IsPresent
+        $p_DebugUPN = $DebugUPN
+        $p_EmptyRetries = $EmptyResultRetries
+        $p_RetryDelay = $RetryDelaySeconds
+        $p_Deadline = $DeadlineUtc
+
+        $sw = [System.Diagnostics.Stopwatch]::StartNew()
+        $received = 0
+        $workItems | ForEach-Object -ThrottleLimit $summary.WorkerCount -Parallel {
+            $workItem = $_
+            $connectRetries = $using:p_ConnectRetries
+            $connectArguments = @($using:p_ConnectArguments)
+            $includeLuat = [bool]$using:p_IncludeLuat
+            $debugUpn = $using:p_DebugUPN
+            $emptyRetries = $using:p_EmptyRetries
+            $retryDelay = $using:p_RetryDelay
+            $deadline = $using:p_Deadline
+            . ([scriptblock]::Create($using:p_Definitions))
+            $connectBlock = [scriptblock]::Create($using:p_Connect)
+            $connected = $false
+            $connectionError = ''
+            for ($attempt = 1; $attempt -le $connectRetries -and -not $connected; $attempt++) {
+                try { & $connectBlock @connectArguments; $connected = $true }
+                catch {
+                    $connectionError = $_.Exception.Message
+                    if ($attempt -lt $connectRetries) { Start-Sleep -Seconds ([math]::Min(30, 5 * $attempt)) }
+                }
+            }
+            [PSCustomObject]@{ Kind = 'Worker'; WorkerId = $workItem.WorkerId; Connected = $connected; Error = $connectionError; Count = @($workItem.Items).Count }
+            if (-not $connected) { return }
+
+            foreach ($item in $workItem.Items) {
+                if ([datetime]::UtcNow -ge $deadline) {
+                    [PSCustomObject]@{ Kind = 'Deadline'; WorkerId = $workItem.WorkerId; Index = $item.Index }
+                    continue
+                }
+                $values = $null; $failure = ''; $attempts = 0
+                for ($try = 0; $try -le $emptyRetries; $try++) {
+                    $attempts++
+                    try {
+                        $values = Get-MailboxLiveStatsRecord -Mailbox $item.Mailbox -IncludeLastUserActionTime:$includeLuat -DebugUPN $debugUpn
+                        $failure = ''
+                    }
+                    catch { $values = $null; $failure = $_.Exception.Message }
+                    $isEmpty = ($null -eq $values) -or ([string]::IsNullOrWhiteSpace([string]$values.TotalSizeGB) -and [string]::IsNullOrWhiteSpace([string]$values.ItemCount))
+                    if (-not $isEmpty -or $failure) { break }
+                    # Empty values usually mean a silently throttled call: back off, then retry.
+                    if ($try -lt $emptyRetries -and $retryDelay -gt 0) { Start-Sleep -Seconds ([math]::Min(120, $retryDelay * ($try + 1))) }
+                }
+                [PSCustomObject]@{ Kind = 'Mailbox'; WorkerId = $workItem.WorkerId; Index = $item.Index; Values = $values; Attempts = $attempts; Failure = $failure; IsEmpty = $isEmpty }
+            }
+        } | ForEach-Object {
+            $record = $_
+            switch ($record.Kind) {
+                'Worker' {
+                    if (-not $record.Connected) {
+                        $summary.ConnectFailedWorkers++
+                        if ($OnWorkerFailure) { & $OnWorkerFailure $record.WorkerId $record.Error }
+                    }
+                }
+                'Deadline' { $summary.DeadlineSkipped++ }
+                'Mailbox' {
+                    $received++
+                    if ($record.Attempts -gt 1) { $summary.Retried++ }
+                    if ($record.Failure) { $summary.Failed++ }
+                    elseif ($record.IsEmpty) { $summary.EmptyAfterRetries++ }
+                    else { $results[[int]$record.Index] = $record.Values; $summary.Prefetched++ }
+                    if ($OnProgress -and $ProgressInterval -gt 0 -and ($received % $ProgressInterval) -eq 0) { & $OnProgress $received $Mailboxes.Count $sw.Elapsed }
+                }
+            }
+        }
+        $sw.Stop()
+        $summary.Seconds = $sw.Elapsed.TotalSeconds
+        return $summary
+    }
+
     # ====== Permissions snapshot (UPN) ======
     function Load-PermissionsSnapshot {
         param([string]$ScriptCsvLogFolderPath)
@@ -1696,7 +1960,57 @@ return @{
     # -----------------------------------------------------------------------
     # Sequential loop (all modes except PermissionsOnly+Parallel)
     # -----------------------------------------------------------------------
-    try { foreach ($mb in $mailboxes) {
+    $prefetchedStats = $null
+    try {
+    # Live stats prefetch: persistent parallel workers fill the archive and primary stats before the
+    # sequential loop, which builds every row in the original order. StatsParallelThrottle=1 keeps the
+    # former fully sequential collection.
+    if ($UseLiveStats -and $StatsParallelThrottleEffective -gt 1 -and (-not $InteractiveAuth) -and $mailboxes.Count -gt 0) {
+        $statsPrefetchItems = [System.Collections.Generic.List[object]]::new()
+        $statsIndex = -1
+        foreach ($statsMailbox in $mailboxes) {
+            $statsIndex++
+            $statsRtd = if ($statsMailbox.PSObject.Properties.Name -contains 'RecipientTypeDetails' -and $statsMailbox.RecipientTypeDetails) { $statsMailbox.RecipientTypeDetails.ToString() } else { "" }
+            if ($systemTypesFinal -contains $statsRtd) { continue }
+            $statsPrefetchItems.Add([PSCustomObject]@{ Index = $statsIndex; Mailbox = $statsMailbox })
+        }
+        $statsWorkerDefinitions = (@('Convert-QuotaToGB','ConvertTo-IdentityNativeIso','Get-ExoStatsExact','Get-MailboxLiveStatsRecord') | ForEach-Object {
+            "function $_ {`n" + (Get-Command -Name $_ -CommandType Function).ScriptBlock.ToString() + "`n}"
+        }) -join "`n"
+        $statsWorkerConnect = @'
+param($AppId, $Thumbprint, $Organization)
+Import-Module ExchangeOnlineManagement -ErrorAction Stop
+Connect-ExchangeOnline -AppId $AppId -CertificateThumbprint $Thumbprint -Organization $Organization -ShowBanner:$false -ErrorAction Stop | Out-Null
+'@
+        $statsDeadlineUtc = if ($MaxRunMinutes -gt 0) { [datetime]::UtcNow.AddMinutes($MaxRunMinutes - $swRunTotal.Elapsed.TotalMinutes) } else { [datetime]::MaxValue }
+        WriteLog ("Live stats prefetch started: {0} mailbox(es) dispatched to StatsParallelThrottle={1} persistent worker(s), connect retries={2}." -f $statsPrefetchItems.Count, $StatsParallelThrottleEffective, $PermissionWorkerConnectRetries) "INFO"
+        try {
+            $statsPrefetch = Invoke-MailboxStatsParallelPrefetch -Mailboxes $statsPrefetchItems.ToArray() -ThrottleLimit $StatsParallelThrottleEffective `
+                -WorkerDefinitions $statsWorkerDefinitions -ConnectScript $statsWorkerConnect -ConnectArguments @($AppId, $Thumb, $OrgDomain) `
+                -ConnectRetries $PermissionWorkerConnectRetries -IncludeLastUserActionTime:$IncludeLastUserActionTime.IsPresent -DebugUPN $DebugUPN `
+                -DeadlineUtc $statsDeadlineUtc -ProgressInterval $ProgressInterval `
+                -OnProgress { param($done, $all, $elapsed) WriteLog ("[Progress] Live stats prefetch {0}/{1} mailboxes | Elapsed: {2} min" -f $done, $all, [Math]::Round($elapsed.TotalMinutes, 1)) "INFO" } `
+                -OnWorkerFailure { param($workerId, $message) WriteLog ("Live stats worker {0} could not connect to Exchange Online: {1}. Its mailboxes are collected sequentially." -f $workerId, $message) "WARNING" }
+            $prefetchedStats = $statsPrefetch.Results
+            Add-PerfSeconds -Key "Loop_Stats_Seconds" -Seconds $statsPrefetch.Seconds
+            $statsThroughput = if ($statsPrefetch.Seconds -gt 0) { [Math]::Round($statsPrefetch.Prefetched / ($statsPrefetch.Seconds / 60), 1) } else { 0 }
+            $statsFallback = $statsPrefetch.Dispatched - $statsPrefetch.Prefetched
+            $statsLevel = if ($statsPrefetch.Failed -gt 0 -or $statsPrefetch.ConnectFailedWorkers -gt 0) { "WARNING" } else { "INFO" }
+            WriteLog ("Live stats prefetch completed: workers={0}, dispatched={1}, prefetched={2}, retried={3}, emptyAfterRetries={4}, failed={5}, workerConnectFailures={6}, deadlineSkipped={7}, seconds={8}, throughput={9} mailboxes/min; {10} mailbox(es) left to the sequential loop." -f $statsPrefetch.WorkerCount, $statsPrefetch.Dispatched, $statsPrefetch.Prefetched, $statsPrefetch.Retried, $statsPrefetch.EmptyAfterRetries, $statsPrefetch.Failed, $statsPrefetch.ConnectFailedWorkers, $statsPrefetch.DeadlineSkipped, [Math]::Round($statsPrefetch.Seconds, 0), $statsThroughput, $statsFallback) $statsLevel
+        }
+        catch [System.Management.Automation.PipelineStoppedException] { throw }
+        catch {
+            $prefetchedStats = $null
+            WriteLog ("Live stats prefetch failed: {0}. Falling back to sequential live stats collection." -f $_.Exception.Message) "WARNING"
+        }
+        # Worker sessions stay open until this reconnect: refresh the main session before the loop.
+        try { Invoke-EXOProactiveReconnect } catch { WriteLog ("EXO reconnect after live stats prefetch failed: {0}" -f $_.Exception.Message) "WARNING" }
+    }
+    elseif ($UseLiveStats) {
+        $statsSequentialReason = if ($InteractiveAuth) { ', interactive authentication' } else { '' }
+        WriteLog ("Live stats collection is sequential (StatsParallelThrottle={0}{1})." -f $StatsParallelThrottleEffective, $statsSequentialReason) "INFO"
+    }
+    foreach ($mb in $mailboxes) {
         $swMailbox = [System.Diagnostics.Stopwatch]::StartNew()
         $counter++
         if ($counter % 50 -eq 0 -or $IsBoundedMailboxRun) {
@@ -1859,41 +2173,14 @@ return @{
                 }
             }
             else {
-                if ($hasArchive) {
-                $exoArch = Get-ExoStatsExact -Identity $mb.UserPrincipalName -Archive -IncludeLastUserActionTime:$IncludeLastUserActionTime.IsPresent
-                if ($exoArch) {
-                    try {
-                        if ($exoArch.PSObject.Properties.Name -contains 'TotalItemSize' -and $exoArch.TotalItemSize) {
-                            if ($exoArch.TotalItemSize.PSObject.Properties.Name -contains 'Value' -and $exoArch.TotalItemSize.Value -and ($exoArch.TotalItemSize.Value.PSObject.Methods.Name -contains 'ToBytes')) {
-                                $archiveSizeGB = [math]::Round(([double]$exoArch.TotalItemSize.Value.ToBytes())/1GB, 2)
-                            } elseif ($exoArch.TotalItemSize.PSObject.Methods.Name -contains 'ToBytes') {
-                                $archiveSizeGB = [math]::Round(($exoArch.TotalItemSize.ToBytes())/1GB, 2)
-                            } else {
-                                $archiveSizeGB = Convert-QuotaToGB $exoArch.TotalItemSize
-                            }
-                        }
-                        elseif ($exoArch.PSObject.Properties.Name -contains 'TotalItemSizeInBytes' -and $exoArch.TotalItemSizeInBytes) {
-                            $archiveSizeGB = [math]::Round(($exoArch.TotalItemSizeInBytes)/1GB, 2)
-                        }
-                    } catch {
-                        if ($exoArch.PSObject.Properties.Name -contains 'TotalItemSize') { $archiveSizeGB = Convert-QuotaToGB $exoArch.TotalItemSize }
-                    }
-
-
-                    if ($exoArch.PSObject.Properties.Name -contains 'ItemCount' -and $exoArch.ItemCount -ne $null) { $archiveCount = $exoArch.ItemCount }
-                    if ($exoArch.PSObject.Properties.Name -contains 'LastLogonTime' -and $exoArch.LastLogonTime) {
-                        $archiveLlt = (Get-Date $exoArch.LastLogonTime -Format "yyyy-MM-dd HH:mm:ss"); $archiveLogonIso = ConvertTo-IdentityNativeIso $exoArch.LastLogonTime
-                    } else {
-                        try {
-                            $legacyArch = Get-MailboxStatistics -Identity $mb.UserPrincipalName -Archive -ErrorAction SilentlyContinue 2>$null
-                            if ($legacyArch -and $legacyArch.LastLogonTime) { $archiveLlt = (Get-Date $legacyArch.LastLogonTime -Format "yyyy-MM-dd HH:mm:ss"); $archiveLogonIso = ConvertTo-IdentityNativeIso $legacyArch.LastLogonTime }
-                            if ([string]::IsNullOrWhiteSpace($archiveCount) -and $legacyArch -and $legacyArch.PSObject.Properties.Name -contains 'ItemCount') { $archiveCount = $legacyArch.ItemCount }
-                            if ([string]::IsNullOrWhiteSpace($archiveSizeGB) -and $legacyArch -and $legacyArch.PSObject.Properties.Name -contains 'TotalItemSize') { $archiveSizeGB = Convert-QuotaToGB $legacyArch.TotalItemSize }
-
-                        } catch {}
-                    }
-                }
-            }
+                $liveStats = $null
+                if ($null -ne $prefetchedStats -and $prefetchedStats.ContainsKey($counter - 1)) { $liveStats = $prefetchedStats[$counter - 1] }
+                if ($null -eq $liveStats) { $liveStats = Get-MailboxLiveStatsRecord -Mailbox $mb -IncludeLastUserActionTime:$IncludeLastUserActionTime.IsPresent -DebugUPN $DebugUPN }
+                if ($liveStats.DebugText) { WriteLog -Message $liveStats.DebugText }
+                $archiveSizeGB = $liveStats.ArchiveSizeGB
+                $archiveCount = $liveStats.ArchiveCount
+                $archiveLlt = $liveStats.ArchiveLastLogon
+                $archiveLogonIso = $liveStats.ArchiveLastLogonIso
             }
             $ouArch=$null
             $swOU2 = [System.Diagnostics.Stopwatch]::StartNew()
@@ -1944,76 +2231,12 @@ return @{
                 }
             }
             else {
-                            $exoPri = Get-ExoStatsExact -Identity $mb.UserPrincipalName -IncludeLastUserActionTime:$IncludeLastUserActionTime.IsPresent
-                            $legacyPri = $null
-                            $lastAction  = ""
-                            $totalSizeGB = ""
-                            $itemCount   = ""
-                            $lastLogon   = ""
-
-                            if ($exoPri) {
-                                if ($DebugUPN -and $mb.UserPrincipalName -ieq $DebugUPN) {
-                                    WriteLog -Message ("DEBUG EXO: UPN={0} | LUA={1} | LLT={2} | SizeRaw={3} | HasBytes={4}" -f $mb.UserPrincipalName, $exoPri.LastUserActionTime, $exoPri.LastLogonTime, $exoPri.TotalItemSize, ($exoPri.PSObject.Properties.Name -contains 'TotalItemSizeInBytes'))
-                                }
-
-                                if ($IncludeLastUserActionTime -and $exoPri.PSObject.Properties.Name -contains 'LastUserActionTime' -and $exoPri.LastUserActionTime) {
-                                    $lastAction = (Get-Date $exoPri.LastUserActionTime -Format "yyyy-MM-dd HH:mm:ss"); $lastActionIso = ConvertTo-IdentityNativeIso $exoPri.LastUserActionTime
-                                } else {
-                                    $lastAction = ""
-                                }
-
-                                try {
-                                    if ($exoPri.PSObject.Properties.Name -contains 'TotalItemSize' -and $exoPri.TotalItemSize) {
-                                        if ($exoPri.TotalItemSize.PSObject.Properties.Name -contains 'Value' -and $exoPri.TotalItemSize.Value -and ($exoPri.TotalItemSize.Value.PSObject.Methods.Name -contains 'ToBytes')) {
-                                            $totalSizeGB = [math]::Round(([double]$exoPri.TotalItemSize.Value.ToBytes())/1GB, 2)
-                                        }
-                                        elseif ($exoPri.TotalItemSize.PSObject.Methods.Name -contains 'ToBytes') {
-                                            $totalSizeGB = [math]::Round(([double]$exoPri.TotalItemSize.ToBytes())/1GB, 2)
-                                        }
-                                        else {
-                                            $totalSizeGB = Convert-QuotaToGB $exoPri.TotalItemSize
-                                        }
-                                    }
-                                    elseif ($exoPri.PSObject.Properties.Name -contains 'TotalItemSizeInBytes' -and $exoPri.TotalItemSizeInBytes) {
-                                        $totalSizeGB = [math]::Round(([double]$exoPri.TotalItemSizeInBytes)/1GB, 2)
-                                    }
-                                } catch {
-                                    if ($exoPri.PSObject.Properties.Name -contains 'TotalItemSize') { $totalSizeGB = Convert-QuotaToGB $exoPri.TotalItemSize }
-                                }
-
-                                if ($exoPri.PSObject.Properties.Name -contains 'ItemCount' -and $exoPri.ItemCount -ne $null) { $itemCount = $exoPri.ItemCount }
-
-                                if ($exoPri.PSObject.Properties.Name -contains 'LastLogonTime' -and $exoPri.LastLogonTime) {
-                                    $lastLogon = (Get-Date $exoPri.LastLogonTime -Format "yyyy-MM-dd HH:mm:ss"); $lastLogonIso = ConvertTo-IdentityNativeIso $exoPri.LastLogonTime
-                                } else {
-                                    try {
-                                        $legacyPri = Get-MailboxStatistics -Identity $mb.UserPrincipalName -ErrorAction SilentlyContinue 2>$null
-                                        if ($legacyPri -and $legacyPri.PSObject.Properties.Name -contains 'LastLogonTime' -and $legacyPri.LastLogonTime) {
-                                            $lastLogon = (Get-Date $legacyPri.LastLogonTime -Format "yyyy-MM-dd HH:mm:ss"); $lastLogonIso = ConvertTo-IdentityNativeIso $legacyPri.LastLogonTime
-                                        }
-                                        if ([string]::IsNullOrWhiteSpace($itemCount) -and $legacyPri -and $legacyPri.PSObject.Properties.Name -contains 'ItemCount') {
-                                            $itemCount = $legacyPri.ItemCount
-                                        }
-                                        if ([string]::IsNullOrWhiteSpace($totalSizeGB) -and $legacyPri -and $legacyPri.PSObject.Properties.Name -contains 'TotalItemSize') {
-                                            $totalSizeGB = Convert-QuotaToGB $legacyPri.TotalItemSize
-                                        }
-                                    } catch {}
-                                }
-                            }
-                            else {
-                                try {
-                                    $legacyPri = Get-MailboxStatistics -Identity $mb.UserPrincipalName -ErrorAction SilentlyContinue 2>$null
-                                    if ($legacyPri) {
-                                        if ($legacyPri.PSObject.Properties.Name -contains 'TotalItemSize') { $totalSizeGB = Convert-QuotaToGB $legacyPri.TotalItemSize }
-                                        if ($legacyPri.PSObject.Properties.Name -contains 'ItemCount') { $itemCount = $legacyPri.ItemCount }
-                                        if ($legacyPri.PSObject.Properties.Name -contains 'LastLogonTime' -and $legacyPri.LastLogonTime) {
-                                            $lastLogon = (Get-Date $legacyPri.LastLogonTime -Format "yyyy-MM-dd HH:mm:ss"); $lastLogonIso = ConvertTo-IdentityNativeIso $legacyPri.LastLogonTime
-                                        }
-                                    }
-                                } catch {}
-                            }
-
-            
+                $lastAction = $liveStats.LastAction
+                $lastActionIso = $liveStats.LastActionIso
+                $totalSizeGB = $liveStats.TotalSizeGB
+                $itemCount = $liveStats.ItemCount
+                $lastLogon = $liveStats.LastLogon
+                $lastLogonIso = $liveStats.LastLogonIso
             }
             if ($swStats) { $swStats.Stop(); Add-PerfSeconds -Key "Loop_Stats_Seconds" -Seconds $swStats.Elapsed.TotalSeconds }
 

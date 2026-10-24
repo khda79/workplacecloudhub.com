@@ -28,5 +28,6 @@
   "WeeklyHistoryFolderPath": "{{DataAllRootPath}}\\Exchange\\EXO\\Mailboxes\\WeeklyHistory",
   "WeeklyHistoryRetentionWeeks": 52,
   "StatsCompletenessFailMinRows": 50,
-  "StatsCompletenessFailPercent": 0.5
+  "StatsCompletenessFailPercent": 0.5,
+  "StatsParallelThrottle": 4
 }
